@@ -2,6 +2,16 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.244 — 2026-10-09
+
+### Added
+- An agent can open a real desktop browser beside its chat and drive it with the window tools when the agent browser can't reach a site.
+- A desktop app window can be pinned to an exact pixel size, even from launch — it draws on every client, scales to the pane, and clicks land on the real pixels.
+- An agent picks how it drives its desktop browser — by accessibility tree or by pixels — at launch or later; one without a tree gets a pinned 1920×1080 picture.
+
+### Fixed
+- A database in a folder mounted from a paired machine no longer fails with a disk error or reads half-updated when that machine writes to it mid-check.
+
 ## 2.369.243 — 2026-10-09
 
 ### Changed

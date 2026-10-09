@@ -70,6 +70,7 @@
  */
 
 const { capsOf } = require('./backend-caps.js'); // PURE → PURE: caps.terminalOnly (a plain shell has no agent to reach)
+const { defaultPinFor } = require('./desktop-pin.js'); // PURE → PURE: E2b's pixels-only default pin (lane e2c)
 const LEVELS = Object.freeze(['hidden', 'exposed']);
 const RANK = Object.freeze({ hidden: 0, exposed: 1 });
 const PRINCIPAL_KINDS = Object.freeze(['session', 'group', 'everyone']);
@@ -79,6 +80,26 @@ const EVERYONE_ID = '*';
 const GRANT_ORIGINS = Object.freeze(['user', 'request', 'self-open']);
 const MODES = Object.freeze(['auto', 'tree', 'pixels']);
 const RESOLVED_MODES = Object.freeze(['tree', 'pixels']);
+/**
+ * lane e2c (design-agent-browser-v2 §E2.3, B-830d ③): THE LAUNCH MODE — the AGENT decides how it drives the desktop
+ * browser it opens (owner 2026-10-02: never a human pin). `browserKind` = the registry row's family, `a11y` = whether
+ * an accessibility tree is obtainable for it here (the family's switch is measured — src/desktop-browser-app.js
+ * A11Y_MEASURED_KINDS — and this machine's AT-SPI bus answers), `asked` = `--mode` (null = auto). → `{ ok, mode, pin,
+ * why }`: with a tree ⇒ as asked (auto = the attach probe decides, `resolveMode`); without one ⇒ `pixels`, whatever was
+ * asked. Pixels carries E2b's default pin (`defaultPinFor('pixels')`; an explicit `--size` wins at the caller). An
+ * unknown mode ⇒ `bad_mode`. The CLI prints `why` verbatim.
+ */
+function launchModeVerdict({ browserKind = null, a11y = false, asked = null } = {}) {
+  const want = asked === undefined || asked === null || asked === '' ? 'auto' : String(asked);
+  if (!MODES.includes(want)) return { ok: false, code: 'bad_mode', mode: null, pin: null, why: `--mode is one of ${MODES.join(' | ')} (got ${JSON.stringify(want.slice(0, 40))})` };
+  const kind = browserKind ? String(browserKind) : 'this browser';
+  const pin = defaultPinFor('pixels');
+  const pixels = `pinned to ${pin.w}x${pin.h} unless --size: read it with screenshot, act with click --at x,y / type / key / scroll`;
+  if (!a11y) return { ok: true, mode: 'pixels', pin, why: `${kind} has no accessibility tree here${want === 'pixels' ? '' : ` (${want} was asked)`} — pixel mode, ${pixels}` };
+  if (want === 'pixels') return { ok: true, mode: 'pixels', pin, why: `pixel mode as asked, ${pixels}` };
+  if (want === 'tree') return { ok: true, mode: 'tree', pin: null, why: `tree mode as asked — ${kind} runs with its accessibility switch: read it with snapshot, act on its @refs` };
+  return { ok: true, mode: 'auto', pin: null, why: `auto — ${kind} runs with its accessibility switch; attach probes it and picks tree or pixels` };
+}
 /** Every code this model (and the lane-E routes / engine on its behalf) answers with — CLOSED. */
 const REFUSALS = Object.freeze(['not_exposed', 'mode_pixels', 'window_not_visible', 'outside_window', 'bad_principal', 'bad_mode', 'wake_paced', 'share_local_only', 'no_conversation', 'not_live', 'agent_forbidden',
   'fork_pending',   // lane channel-withdraw verify r6: "ask <agent> to take control" on a fork that still carries its parent's conversation id — ask again in a moment
@@ -271,7 +292,7 @@ function verbGate({ mode = 'auto', resolved = null, resolvedWhy = null, verb, ha
  * come and go); the image extends to the right/bottom of every member (a member left of / above the main
  * window is clipped there). `visible` = the main window's own mapped state (null = unknown).
  */
-function pixelPlan(windows) {
+function pixelPlan(windows, { pin = null } = {}) {
   const rows = (Array.isArray(windows) ? windows : []).filter((w) => w && Number.isFinite(Number(w.x)) && Number.isFinite(Number(w.y)) && Number(w.w) > 1 && Number(w.h) > 1 && (w.cls || w.instance || w.title || w.name));
   if (!rows.length) return { ok: false, main: null, origin: null, w: 0, h: 0, members: [], visible: false, why: 'the app has no window on its display yet' };
   const area = (w) => Number(w.w) * Number(w.h);
@@ -282,6 +303,9 @@ function pixelPlan(windows) {
   const members = (mapped.length ? mapped : [main]).filter((w) => Number(w.x) + Number(w.w) > ox && Number(w.y) + Number(w.h) > oy);
   let right = ox + Number(main.w), bottom = oy + Number(main.h);
   for (const w of members) { right = Math.max(right, Number(w.x) + Number(w.w)); bottom = Math.max(bottom, Number(w.y) + Number(w.h)); }
+  // lane e2b r3 (§E2.2 "pixel coordinates = the pin"): a PINNED window's image is the pin's box at the main's origin — an app's other
+  // top-level that outgrows it (measured: the agent's Chrome keeps one at its first 2033×2284) never widens what the agent is shown
+  if (pin && pin.w > 0 && pin.h > 0) { right = Math.min(right, ox + Number(pin.w)); bottom = Math.min(bottom, oy + Number(pin.h)); }
   return { ok: true, main: { id: main.id, x: ox, y: oy, w: Number(main.w), h: Number(main.h), mapped: main.mapped === undefined ? null : main.mapped }, origin: { x: ox, y: oy }, w: right - ox, h: bottom - oy,
     members: members.map((w) => ({ id: w.id, x: Number(w.x), y: Number(w.y), w: Number(w.w), h: Number(w.h) })), visible: main.mapped === undefined ? null : main.mapped, why: null };
 }
@@ -476,7 +500,7 @@ module.exports = {
   LEVELS, RANK, PRINCIPAL_KINDS, EVERYONE_ID, GRANT_ORIGINS, MODES, RESOLVED_MODES, REFUSALS, refuse, PIXELS_SENTENCE, NOT_EXPOSED_SENTENCE, REACH_UNREADABLE_SENTENCE, NOTE_MAX, CONTAINER_ROLES, TREE_VERBS,
   sessionKeyOf, callerKeys, normPrincipal, principalKey,
   emptyRecord, normRecord, grant, revoke, setMode, openerGrant, reachFor, isExposed,
-  usableNodes, resolveMode, REASON_MAX, verbGate,
+  usableNodes, resolveMode, REASON_MAX, verbGate, launchModeVerdict,
   pixelPlan, visibilityVerdict, mapPoint,
   requestText, viewOf, shareSummary, pickerModel, proposalOf, setProposal, launchShare, launchSummary, principalsNow, rememberedCount, normShare,
   REACHED_STATES, reachedState, launchCounts,

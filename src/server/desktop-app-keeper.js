@@ -393,6 +393,12 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
     ingestOne(ro.hostId, r.app);
     return remoteGet(id) || r.app;
   }
+  /** lane e2b (§E2.2): the window's pinned pixel size — the machine's record writer (a paired machine's through its `pin` op). */
+  function setPin(id, pin) {
+    const ro = store.apps[id] ? null : remoteOf(id);
+    if (!ro) return machine.setPin(id, pin);
+    return acc().call(ro.hostId, 'pin', { id, pin }).then((r) => { ingestOne(ro.hostId, r.app); return remoteGet(id) || r.app; });
+  }
   function keepAlive(id) {
     const ro = store.apps[id] ? null : remoteOf(id);
     if (!ro) return machine.keepAlive(id);
@@ -699,7 +705,7 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
   function localOnly(k) { return Object.assign({}, k, { get: (id) => machine.get(id), listApps: () => machine.listApps() }); }
   loadRemote();
 
-  const keeper = { launch, relaunch, startDeferred: machine.startDeferred, stop, reshapeStore: machine.reshapeStore, keepAlive, noteInput, noteDesktopSize, setWatchProbe: machine.setWatchProbe, fitApp: machine.fitApp, get, list, listApps, liveRecords, streamTarget, x11EnvFor: machine.x11EnvFor, windows, xpraWww: machine.xpraWww, xpraWwwFor, instancePrefs: machine.instancePrefs, facts: machine.facts, registry: machine.registry, adoptAll, adoptRemote, syncHost, start, shutdown, tick, sessionPids: machine.sessionPids,
+  const keeper = { launch, relaunch, startDeferred: machine.startDeferred, stop, reshapeStore: machine.reshapeStore, setPin, keepAlive, noteInput, noteDesktopSize, setWatchProbe: machine.setWatchProbe, fitApp: machine.fitApp, get, list, listApps, liveRecords, streamTarget, x11EnvFor: machine.x11EnvFor, windows, xpraWww: machine.xpraWww, xpraWwwFor, instancePrefs: machine.instancePrefs, facts: machine.facts, registry: machine.registry, adoptAll, adoptRemote, syncHost, start, shutdown, tick, sessionPids: machine.sessionPids,
     viewerJoined, viewerLeft, takeoverViewer, activeViewer, viewersView, onViewers, refreshAppTitle, viewerGraceMs, carrySeat, relaunchSeatMs, // P8-2 x5 + A r1
     machine, // lane C1: device #0's machine keeper — src/server/desktop-access.js runs its local rung against THIS object (never a second keeper on the same store)
     storeFile: machine.storeFile, logRoot: machine.logRoot, STORE_FILE: DS.STORE_FILE, LOG_DIR: DS.LOG_DIR, SESSION_ENV: DS.SESSION_ENV, _store: machine._store,

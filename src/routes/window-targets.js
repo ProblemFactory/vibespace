@@ -17,6 +17,8 @@
  *                                                  a shared desktop-app BROWSER attaches like any app (D4; T6's attach refusal retired) —
  *                                                  the answer names the share's MODE (D7: auto resolves here — tree | pixels + why)
  *   POST /api/agent/window/detach    {handle}
+ *   POST /api/agent/window/stop      {handle}      lane e2a r3: the OPENER stops its own desktop browser (`--backend desktop-app`);
+ *                                                  any other window ⇒ 403 not_your_browser (the user stops it from Desktop apps)
  *   POST /api/agent/window/snapshot  {handle, budget?, text?}
  *   POST /api/agent/window/act       {handle, verb: click|type|key|scroll, ref?, at?, text?, replace?, chord?, action?, button?, direction?, by?}
  *                                                  (lane E verify r2: an injection the user's takeover / a revoke cut short answers
@@ -65,6 +67,7 @@ const STATUS = {
   // takeover C3 (T6) → lane E (D4): `open` of a desktop-app BROWSER row (or url / keepProfile) stays the user's act;
   // a browser the USER shares is a target like any app
   browser_is_human: 403,
+  not_your_browser: 403, // lane e2a r3: `stop` is the opener's, on its own desktop browser only
   // lane E (src/window-reach.js REFUSALS): reach, the share mode, the pixel road, the user's share routes
   not_exposed: 403, agent_forbidden: 403, mode_pixels: 409, window_not_visible: 409, wake_paced: 409, no_conversation: 409, fork_pending: 409, not_live: 404,
   reach_unreadable: 503, // lane E verify r2 (L4): the Task Group store could not be read — try again (the lease is kept)
@@ -103,6 +106,30 @@ router.get('/api/agent/window/targets', async (req, res) => {
   const engine = engineOr503(res); if (!engine) return;
   const f = agentFacts(req, res, engine); if (!f) return;
   try { res.json(await engine.list(f)); } catch (e) { fail(res, e); }
+});
+// lane e2a r3 (verify r1 #0's door): the OPENER stops its own desktop browser (only a record its `--backend desktop-app` opened)
+router.post('/api/agent/window/stop', async (req, res) => {
+  if (refuseHost(req, res)) return;
+  const engine = engineOr503(res); if (!engine) return;
+  const f = agentFacts(req, res, engine); if (!f) return;
+  const h = handleOf(req, res); if (!h) return;
+  try { res.json(await engine.stopOwn(h, f)); } catch (e) { fail(res, e); }
+});
+// lane e2b (§E2.2): the OPENER pins its own desktop browser's pixel size (`vibespace-window size <handle> WxH | auto`)
+router.post('/api/agent/window/size', async (req, res) => {
+  if (refuseHost(req, res)) return;
+  const engine = engineOr503(res); if (!engine) return;
+  const f = agentFacts(req, res, engine); if (!f) return;
+  const h = handleOf(req, res); if (!h) return;
+  try { res.json(await engine.setSize(h, req.body ? req.body.size : undefined, f)); } catch (e) { fail(res, e); }
+});
+// lane e2c (§E2.3): the OPENER switches its own desktop browser's interaction mode (`vibespace-window mode <handle> tree|pixels|auto`)
+router.post('/api/agent/window/mode', async (req, res) => {
+  if (refuseHost(req, res)) return;
+  const engine = engineOr503(res); if (!engine) return;
+  const f = agentFacts(req, res, engine); if (!f) return;
+  const h = handleOf(req, res); if (!h) return;
+  try { res.json(await engine.setLaunchMode(h, req.body ? req.body.mode : undefined, f)); } catch (e) { fail(res, e); }
 });
 router.post('/api/agent/window/open', async (req, res) => {
   if (refuseHost(req, res)) return;

@@ -57,6 +57,8 @@ function validateBrowserUrl(value) {
   let u;
   try { u = new URL(s); } catch { return bad(`${JSON.stringify(s.slice(0, 80))} is not a URL`); }
   if (u.protocol !== 'http:' && u.protocol !== 'https:') return bad(`${u.protocol} is not allowed`);
+  // lane e2a r3 (verify r1 #8): a user name / password in the URL would ride the browser's argv (readable in /proc) and the record
+  if (u.username || u.password) return { ok: false, url: null, code: 'bad-url', error: 'Open URL carries a user name or password — credentials never ride a command line: open the site and log in inside the page' };
   if (!u.hostname) return bad('no host');
   return { ok: true, url: u.href, code: null, error: null };
 }
@@ -162,6 +164,9 @@ const BROWSER_A11Y_FLAG = '--force-renderer-accessibility';
 const BROWSER_A11Y_ENV = Object.freeze({ GNOME_ACCESSIBILITY: '1' });
 /** Chrome ≥ 154 registers on the AT-SPI bus only with an accessibility env beside the flag (measured, see browserArgv). */
 const CHROMIUM_A11Y_ENV = Object.freeze({ ACCESSIBILITY_ENABLED: '1' });
+/** lane e2c (§E2.3): the families whose accessibility switch is MEASURED here (chromium, above). Firefox's env switch is
+ *  unmeasured (the box's firefox is a snap), so its desktop browser is pixels-only (window-reach launchModeVerdict). */
+const A11Y_MEASURED_KINDS = Object.freeze(['chromium']);
 /** Firefox has no --no-first-run: its profile's user.js IS the switch (written by the keeper before the launch). */
 function firefoxUserJs() {
   return [
@@ -172,5 +177,5 @@ function firefoxUserJs() {
 }
 
 module.exports = {
-  BROWSER_KINDS, BROWSER_BINS, isForbiddenBrowserArg, browserRowFor, URL_MAX, validateBrowserUrl, within, REAL_BROWSER_ROOTS, profileDirVerdict, browserArgv, CHROMIUM_FRAME_MARKER, chromiumFramePrefs, BROWSER_A11Y_FLAG, BROWSER_A11Y_ENV, CHROMIUM_A11Y_ENV, firefoxUserJs,
+  BROWSER_KINDS, A11Y_MEASURED_KINDS, BROWSER_BINS, isForbiddenBrowserArg, browserRowFor, URL_MAX, validateBrowserUrl, within, REAL_BROWSER_ROOTS, profileDirVerdict, browserArgv, CHROMIUM_FRAME_MARKER, chromiumFramePrefs, BROWSER_A11Y_FLAG, BROWSER_A11Y_ENV, CHROMIUM_A11Y_ENV, firefoxUserJs,
 };

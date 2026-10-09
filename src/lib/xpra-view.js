@@ -79,6 +79,7 @@ import { dragEndVerdict } from './drag-end.js'; // the hand-over's hold ends as 
 import { showToast } from './utils.js';
 import { createPictureShell, streamUrl, copyViaSelection } from './picture-shell.js';
 import { createXpraClient, defaultDecode } from './xpra-client.js';
+import { fitForPin } from '../desktop-pin.js'; // lane e2b (§E2.2): a pinned window's picture — contain-fit, upscaling allowed
 import { minPaneCss, pixelRatioOf, backingSize, fixedSizeOf, sizeHintsOf } from './xpra-proto.js';
 
 export { streamUrl, copyViaSelection };
@@ -173,6 +174,7 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
   let viewOnly = false;
   let mode = 'active'; // x5: 'active' | 'watch' | 'blocked'
   let stageScale = 1;
+  let pinNow = null; // lane e2b (§E2.2): the record's pin ({w, h} device px) — the X window's size; the picture always rescales
   let stageOffset = { x: 0, y: 0 };
   let minSize = null; // the smallest pane (CSS px) — minPaneCss(the main's constraints, the ratio)
   let constraints = null; // the main window's size constraints (device px), as the client last named them
@@ -211,7 +213,10 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
     let s = 1, ox = 0, oy = 0;
     if (mode !== 'blocked' && client) {
       let bw = 0, bh = 0;
-      if (mode === 'watch') {
+      // lane e2b (§E2.2): a PINNED window — the whole stage scaled to the pane, CENTRED, upscaling allowed (a pin always rescales)
+      const pf = pinNow ? fitForPin({ w: pinNow.w / drawRatio, h: pinNow.h / drawRatio }, paneSize()) : null;
+      if (pf) { s = pf.scale; ox = pf.x; oy = pf.y; }
+      else if (mode === 'watch') {
         for (const w of client.windows.values()) if (w.kind !== 'popup') { bw = Math.max(bw, (w.x + w.w) / drawRatio); bh = Math.max(bh, (w.y + w.h) / drawRatio); }
       } else if (minSize && !(fixedCss && fixedFollows())) { // a FIXED window the window adopts is never scaled (lane app-fit-fixed)
         const main = client.mainWid ? client.windows.get(client.mainWid) : null;
@@ -233,7 +238,7 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
     if (ox || oy) parts.push(`translate(${+ox.toFixed(4)}px, ${+oy.toFixed(4)}px)`);
     if (s !== 1) parts.push(`scale(${s})`);
     stage.style.transform = parts.join(' ');
-    const scaled = mode === 'active' && s < 1 && !!minSize;
+    const scaled = mode === 'active' && s < 1 && !!minSize && !pinNow; // a pin's scale is the chip's ("(pinned)"), never this badge
     fitBadge.style.display = scaled ? '' : 'none';
     if (scaled) fitBadge.textContent = t('Scaled to fit — the app needs at least {w}×{h}', { w: minSize.w, h: minSize.h });
   };
@@ -556,6 +561,7 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
     drawRatio = ratio(); drawK = pictureK();
     constraints = null; minSize = null;
     client = createXpraClient({
+      pin: pinNow, // lane e2b: the X window fits the pin from the hello on
       url: typeof url === 'function' ? url() : url,
       workerUrl: typeof workerUrl === 'function' ? workerUrl() : workerUrl,
       screen: s, ratio: () => drawRatio, cover: () => drawK !== 1, dpi: typeof dpi === 'function' ? dpi() : dpi, Worker: WorkerCtor, decode, now, log,
@@ -764,5 +770,13 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
   const closeFront = () => (client ? client.closeFront() : false);
   /** seamless: the display is told what our window did (maximized / iconified) — the client's setMainState. */
   const setAppState = (st) => (client ? client.setMainState(st) : false);
-  return { container, bar, mount, pane, stage, ime, status, chip, fitBadge, resnap, connect, disconnect, setStatus: statusFromOutside, starting: () => waitWords(L.starting), addControl, focus, dispose, setViewOnly, setMode, windows, closeApp, closeFront, setAppState, rootToClient, attachSatellite, satellites: () => [...sats.keys()], fixedSize: () => (fixedCss ? { ...fixedCss } : null), setFloatingChip: shell.setFloatingChip, get wmHeld() { return !!mainPtr.wmHold; }, get mode() { return mode; }, get stageScale() { return stageScale; }, get ratio() { return drawRatio; }, get pictureScale() { return drawK; }, get minSize() { return minSize ? { ...minSize } : null; }, get stageOffset() { return { ...stageOffset }; }, get client() { return client; }, get state() { return shell.state; }, get wanted() { return shell.wanted; }, get chipText() { return shell.copiedText; }, get hintShown() { return shell.hintShown; }, get copyHint() { return shell.copyHint; }, get pasteOpen() { return shell.pasteOpen; } };
+  /** lane e2b (§E2.2): the record's pin (or null) — the client re-fits the X window in place, the stage rescales now. */
+  const setPin = (p) => {
+    const n = p && p.w > 0 && p.h > 0 ? { w: p.w, h: p.h } : null;
+    if ((n && pinNow && n.w === pinNow.w && n.h === pinNow.h) || (!n && !pinNow)) return;
+    pinNow = n;
+    if (client) client.setPin(n);
+    fitStage();
+  };
+  return { container, bar, mount, pane, stage, ime, status, chip, fitBadge, resnap, setPin, get pin() { return pinNow ? { ...pinNow } : null; }, connect, disconnect, setStatus: statusFromOutside, starting: () => waitWords(L.starting), addControl, focus, dispose, setViewOnly, setMode, windows, closeApp, closeFront, setAppState, rootToClient, attachSatellite, satellites: () => [...sats.keys()], fixedSize: () => (fixedCss ? { ...fixedCss } : null), setFloatingChip: shell.setFloatingChip, get wmHeld() { return !!mainPtr.wmHold; }, get mode() { return mode; }, get stageScale() { return stageScale; }, get ratio() { return drawRatio; }, get pictureScale() { return drawK; }, get minSize() { return minSize ? { ...minSize } : null; }, get stageOffset() { return { ...stageOffset }; }, get client() { return client; }, get state() { return shell.state; }, get wanted() { return shell.wanted; }, get chipText() { return shell.copiedText; }, get hintShown() { return shell.hintShown; }, get copyHint() { return shell.copyHint; }, get pasteOpen() { return shell.pasteOpen; } };
 }

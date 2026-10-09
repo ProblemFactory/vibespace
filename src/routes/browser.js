@@ -115,6 +115,12 @@ const router = express.Router();
 
 let ctx = null;
 function setup(deps) { ctx = deps; }
+// lane e2a (design-agent-browser-v2 §E2): the window-targets engine — the desktop-app rung's ONE owner of window leases,
+// the opener grant and the launch (src/server/window-live-wiring.js hands it once both exist)
+let windowEngine = null;
+function setWindowEngine(e) { windowEngine = e || null; }
+/** lane e2a: a status for the desktop-app door's refusals (the PURE verdict's codes + the launch's). */
+const DESKTOP_APP_STATUS = Object.freeze({ desktop_app_cap: 409, bad_mode: 400, desktop_app_lacks: 400, not_yet: 400, backend_conflict: 400, desktop_app_only: 400, provider_unknown: 400, provider_local_only: 400, 'bad-url': 400, 'bad-request': 400, not_live: 409, cap: 409, 'browser-absent': 409, 'no-backend': 409, 'backend-not-wired': 409, no_window_engine: 503 });
 
 const LOCAL = new Set(['', 'local']);
 function hostOf(req) { const h = (req.method === 'GET' ? req.query.host : req.body?.host); return h == null ? '' : String(h); }
@@ -1537,6 +1543,9 @@ router.post('/api/agent/browser/resolve', async (req, res) => {
   const B = require('../browser-profiles.js');
   // B-f7ab: a key minted by THIS call (the session had none) is said in the answer — the CLI prints one note line
   const send = (o) => res.json(f.minted ? { ...o, minted: f.minted } : o);
+  // lane e2a (§E2.1 Driving): a handle naming THIS conversation's desktop-app browser — no CDP is that rung's definition
+  { const da = windowEngine && req.body?.handle ? windowEngine.agentBrowserFor(String(req.body.handle), f.browserKey) : null;
+    if (da) return res.status(409).json({ error: `${da.handle} is your desktop-app browser: it has no CDP, so browser page verbs do not run there — drive it with \`vibespace-window snapshot ${da.handle}\`, then \`vibespace-window click / type / key / screenshot ${da.handle} …\``, code: 'no_cdp_on_this_backend', handle: da.handle, remedy: `vibespace-window snapshot ${da.handle}` }); }
   // lane browser-recipes: a page verb refused while this conversation has NO browser yet (its first command) names the
   // recipe too — the refusal answer carries it (`recipe`, beside `minted`); the CLI prints it under the refusal
   try { const st0 = k.statusFor(f.browserKey); if (!st0.ephemeral && !(st0.leases || []).length) res.locals.recipe = f.remote ? require('../browser-recipes.js').FIRST_VERB_NEXT_REMOTE : require('../browser-recipes.js').FIRST_VERB_NEXT; } catch { /* no pointer */ } // verify r1 F1: a remote conversation's pointer
@@ -2045,6 +2054,11 @@ router.post('/api/agent/browser/new', (req, res) => {
     if (f.remote) { const rr = B.remoteSessionRefusal({ label: String(req.body?.label || '') }); return res.status(STATUS[rr.code] || 409).json({ error: rr.error, code: rr.code, remedy: rr.remedy }); }
     // lane browser-admin 2a: nothing an agent sends chooses a Chrome build (the user's choice — Change build…)
     if (req.body && req.body.browser != null) return res.status(403).json({ error: BUILD_IS_USERS, code: 'browser_choice_user_only' });
+    // lane e2a (§E2.1, D1; r3 #4: BEFORE the adopt block — `--adopt` never pre-empts the door): `--backend desktop-app` is the ONE door to a real desktop browser of the agent's own — not a
+    // profile: the window-targets engine launches it, grants the opener and leases it as a WINDOW TARGET (no CDP)
+    const dv = B.desktopAppNewVerdict(req.body || {});
+    if (!dv.ok) return res.status(DESKTOP_APP_STATUS[dv.code] || 400).json({ error: dv.error, code: dv.code });
+    if (dv.door === 'desktop-app') return openDesktopAppBrowser(req, res, dv);
     // `--adopt <dir>`: REGISTER a directory that already exists, in place (the
     // remedy the path refusal names — a path becomes a HANDLE here, never on a
     // command); refused with the reason when it is not a directory
@@ -2073,6 +2087,17 @@ router.post('/api/agent/browser/new', (req, res) => {
     res.json({ profile: view(k.createProfile(req.body || {}, { owner: { kind: 'instance', id: null }, createdBy: f.browserKey, by: 'agent' })) });
   } catch (e) { fail(res, e); }
 });
+/** lane e2a: the desktop-app door's launch — the engine's facts from the SAME session token the belt admitted. */
+async function openDesktopAppBrowser(req, res, dv) {
+  if (!windowEngine) return res.status(503).json({ error: 'the desktop-app rung is not available in this process (no window-targets engine)', code: 'no_window_engine' });
+  const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  const wf = windowEngine.factsForToken(token);
+  if (!wf) return res.status(401).json({ error: 'unknown session token', code: 'unauthorized' });
+  try {
+    const r = await windowEngine.openAgentBrowser(dv, wf);
+    res.json({ desktopApp: { handle: r.handle, label: r.app.label || dv.label, state: r.app.state || null, url: dv.url, keepProfile: dv.keepProfile, origin: r.origin, pin: r.app.pin || null }, lease: r.lease, mode: r.mode || null, modeWhy: r.modeWhy || null, next: r.next });
+  } catch (e) { res.status(DESKTOP_APP_STATUS[e && e.code] || 500).json({ error: String((e && e.message) || e), code: (e && e.code) || null, ...(e && e.remedy ? { remedy: e.remedy } : {}) }); }
+}
 router.post('/api/agent/browser/detach', (req, res) => {
   const k = keeperOr503(res); if (!k) return;
   const f = agentFacts(req, res); if (!f) return;
@@ -2217,4 +2242,4 @@ router.post('/api/agent/browser/site-hint', (req, res) => {
   try { res.json({ hint: k.addSiteHint({ host: req.body?.site || req.body?.url, tier: req.body?.tier, backend: req.body?.backend, why: req.body?.why, by: 'agent' }) }); } catch (e) { fail(res, e); }
 });
 
-module.exports = { router, setup, unpinProfile, pinGuardFor, healDanglingPins, pinHoldersOf, releaseProfile, convertPinnedDirs, keyForPickedSession, sessionFacts, pinAnswer, STATUS }; // + "Who can use it": the ONE resolver of a picked live session (the trace routes' PATCH calls it) // lane S2: the delete's refuse-or-warn + the one unpin (+ the boot heal); owner ruling A: Delete…'s release; the boot conversion of pre-ruling pins
+module.exports = { router, setup, setWindowEngine, unpinProfile, pinGuardFor, healDanglingPins, pinHoldersOf, releaseProfile, convertPinnedDirs, keyForPickedSession, sessionFacts, pinAnswer, STATUS }; // + "Who can use it": the ONE resolver of a picked live session (the trace routes' PATCH calls it) // lane S2: the delete's refuse-or-warn + the one unpin (+ the boot heal); owner ruling A: Delete…'s release; the boot conversion of pre-ruling pins

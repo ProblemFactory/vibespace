@@ -152,7 +152,7 @@
 // share.js); a "Shared with N · <mode>" chip (its tooltip names who) appears once anybody is shared, and a click on it
 // opens the same dialog. The chip follows the `window-reach-updated` broadcast; an app on a PAIRED machine is not an
 // agent target (lane C) and offers neither row.
-import { t } from './i18n.js';
+import { t, resolveLang } from './i18n.js';
 import { escHtml, fetchJson, showConfirmDialog, showContextMenu, showToast, uiScale } from './utils.js';
 import { windowMinForPane } from './window-min-size.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
@@ -162,8 +162,9 @@ import { windowLiveMode, windowModeBadge, leaseTransition, newViewerId } from '.
 import { paneState } from '../desktop-viewers.js';
 import { exitCloseVerdict, outerCloseVerdict, OUTER_CLOSE_AGAIN_MS, scaleKnobs, scaleMenuModel, renderOf, relaunchPaneCss, relaunchVerdict } from '../desktop-fit.js';
 import { memoryText } from '../runaway-guard.js';
-import { launchDpr, launchUiScale, explicitScaleLabel, stopDesktopApp, confirmDiscard } from './desktop-app-launcher.js';
+import { launchDpr, launchUiScale, explicitScaleLabel, stopDesktopApp, confirmDiscard, agentBrowserText } from './desktop-app-launcher.js';
 import { startCenterVerdict } from '../office-open.js'; // B-04da ⑤ (PURE)
+import { PIN_CHOICES, pinOf, pinChipText } from '../desktop-pin.js'; // lane e2b (§E2.2): the pinned pixel size (PURE)
 import { UI_ICONS } from './icons.js';
 import { registerMenuItem } from './contributions.js';
 import { createBarFold } from './bar-fold.js'; // lane I: the strip folds into ⋯ by priority — never wraps, never overlaps
@@ -329,6 +330,9 @@ export function exitToastText(rec, name) {
   if (!rec || !rec.stoppedBy) return t('{app} exited', { app });
   if (rec.stoppedBy === 'user') return t('{app} stopped', { app });
   if (rec.stoppedBy === 'idle') return t('{app} stopped after {n} min without input', { app, n: Math.max(1, Math.round((Number(rec.idleTimeoutMs) || 0) / 60000)) });
+  // lane e2a r3 (verify r1 #12): the agent's own desktop browser ends with the conversation that opened it / by its own stop
+  if (rec.stoppedBy === 'opener-ended' || rec.stoppedBy === 'opener-gone') return t('{app} closed with the conversation that opened it', { app });
+  if (rec.stoppedBy === 'opener-stopped') return t('{app} was closed by the agent that opened it', { app });
   return rec.lastError ? t('{app} stopped: {why}', { app, why: rec.lastError }) : t('{app} stopped', { app });
 }
 
@@ -364,7 +368,7 @@ function announceMainView(id, entry) {
 }
 const mainWindowOf = (app, id) => [...app.wm.windows.values()].find((w) => w._desktopAppId === id && !w._desktopSatelliteWid) || null;
 
-export function openDesktopApp(app, id, { syncId, wid = 0, title = '' } = {}) {
+export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain } = {}) {
   if (typeof id !== 'string' || !id) return null;
   if (Number.isInteger(wid) && wid > 0) return openSatelliteWindow(app, id, wid, { syncId, title }); // S2: a satellite (a replay / another client)
   for (const [winId, win] of app.wm.windows) {
@@ -373,7 +377,7 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '' } = {}) {
   app._hideWelcome();
   const winInfo = app.wm.createWindow({
     title: t('Desktop app'), type: 'desktop-app', syncId, width: 900, height: 620,
-    openSpec: { action: 'openDesktopApp', id },
+    openSpec: { action: 'openDesktopApp', id }, ...(intoChain ? { intoChain } : {}), // lane e2a: the agent's browser beside its chat (app.linkPlacement)
   });
   winInfo._desktopAppId = id;
   // round 3 A2: unseen until the first record answers — a dead record (a layout replay) closes it before it ever paints
@@ -423,8 +427,13 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '' } = {}) {
   const phoneMq = typeof matchMedia === 'function' ? matchMedia('(max-width: 768px)') : null;
   const frameKey = () => frameKeyOf(rec);
   const frameChoice = () => frameChoiceOf(appPrefs('desktopAppFrame'), frameKey());
+  /** int243: the record's state only moves launching → ready → ended (a relaunch is a NEW id): an answer that says `launching`
+   *  for the same start while this window already holds it past that is OLD (an HTTP answer and the ws broadcast race). */
+  const staleLaunching = (r) => !!(r && rec && r.state === 'launching' && rec.state !== 'launching' && r.startedAt === rec.startedAt);
   const readyGate = async () => {
-    if (!rec) { const r = await fetchJson(`/api/desktop/apps/${encodeURIComponent(id)}`); if (r && !r.error) rec = r; }
+    // int243 (the E2 chrome race): a record that says `launching` is re-read here — a STALE one (an answer that lost the race
+    // to the ready broadcast) must never park the view's retry loop on "Starting application…" with no picture
+    if (!rec || rec.state === 'launching') { const r = await fetchJson(`/api/desktop/apps/${encodeURIComponent(id)}`); if (r && !r.error && !staleLaunching(r)) rec = r; }
     if (!rec) return { ok: false, error: t('This desktop app no longer exists') };
     if (rec.state === 'launching') return { ok: false, error: t('Starting application…') };
     if (rec.state !== 'ready') return { ok: false, error: endedText(rec) };
@@ -581,6 +590,9 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '' } = {}) {
   const backendChip = document.createElement('span'); backendChip.className = 'desktop-app-chip desktop-app-chip-backend'; backendChip.style.display = 'none';
   const hostChip = document.createElement('span'); hostChip.className = 'desktop-app-chip desktop-app-chip-host'; // lane C2: which machine the app runs on (a paired one only)
   const scaleChip = document.createElement('span'); scaleChip.className = 'desktop-app-chip desktop-app-chip-scale'; // HiDPI: the app's scale, fixed at launch; lane D: a CONTROL (role=button) whenever the window can relaunch
+  // lane e2b (design-agent-browser-v2 §E2.2): "1920×1080 (pinned)" — the X window is that size, the picture scales to the pane; a CONTROL (the Pin size… rows)
+  const pinChip = document.createElement('span'); pinChip.className = 'desktop-app-chip desktop-app-chip-pin is-control'; pinChip.setAttribute('role', 'button'); pinChip.tabIndex = 0; pinChip.setAttribute('aria-haspopup', 'menu');
+  pinChip.title = t('Pinned: the app draws at exactly this many pixels and the picture scales to the window — click to change it');
   const fitChip = document.createElement('span'); fitChip.className = 'desktop-app-chip desktop-app-chip-fit'; // P8-2 x4: names a display that cannot follow the window
   fitChip.title = t('This rung’s display cannot resize: the app is fitted to the fixed framebuffer and scaled in the browser. With TigerVNC (Xvnc) the display follows the window.');
   const liveChip = document.createElement('span'); liveChip.className = 'desktop-app-chip desktop-app-chip-live';
@@ -602,13 +614,13 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '' } = {}) {
   moreBtn.innerHTML = UI_ICONS.more; moreBtn.title = t('More'); moreBtn.setAttribute('aria-label', t('More'));
   // lane E: "Shared with N · <mode>" — a click opens the share dialog (a button: it does something)
   const shareChip = document.createElement('button'); shareChip.type = 'button'; shareChip.className = 'desktop-app-chip desktop-app-chip-share'; shareChip.style.display = 'none';
-  const controls = [originChip, agentChip, modeBadge, takeBtn, handBtn, shareChip, hostChip, backendChip, scaleChip, fitChip, liveChip, idleChip, keepBtn, stopBtn, moreBtn];
+  const controls = [originChip, agentChip, modeBadge, takeBtn, handBtn, shareChip, hostChip, backendChip, scaleChip, pinChip, fitChip, liveChip, idleChip, keepBtn, stopBtn, moreBtn];
   // lane I: THE STRIP'S FOLD PRIORITIES (src/lib/live-bar-layout.js; the live view's rule): the picture shell's own items
   // (status — the ONE flexible item —, Paste, Reconnect, the copy chip + hint) and the mode badge + Take over / Hand
   // back never fold (0); the holder chip and, lane E, the share chip 2 (who may see this window — its words also ride the ⋯ as a fact); the origin marker and the fact chips 3 (the machine chip of a paired-machine app, 2.369.178, is one); Keep running / Stop 4 (both are
   // rows of this ⋯ menu already). Equal priorities fold right-to-left.
-  const DESK_BAR_PRIORITY = new Map([[agentChip, 2], [shareChip, 2], [originChip, 3], [hostChip, 3], [backendChip, 3], [scaleChip, 3], [fitChip, 3], [liveChip, 3], [idleChip, 3], [keepBtn, 4], [stopBtn, 4]]);
-  const DESK_BAR_KEY = new Map([[originChip, 'origin'], [agentChip, 'agent'], [modeBadge, 'badge'], [takeBtn, 'take'], [handBtn, 'handback'], [shareChip, 'share'], [hostChip, 'host'], [backendChip, 'backend'], [scaleChip, 'scale'], [fitChip, 'fit'], [liveChip, 'live'], [idleChip, 'idle'], [keepBtn, 'keep'], [stopBtn, 'stop']]);
+  const DESK_BAR_PRIORITY = new Map([[agentChip, 2], [shareChip, 2], [originChip, 3], [hostChip, 3], [backendChip, 3], [scaleChip, 3], [pinChip, 3], [fitChip, 3], [liveChip, 3], [idleChip, 3], [keepBtn, 4], [stopBtn, 4]]);
+  const DESK_BAR_KEY = new Map([[originChip, 'origin'], [agentChip, 'agent'], [modeBadge, 'badge'], [takeBtn, 'take'], [handBtn, 'handback'], [shareChip, 'share'], [hostChip, 'host'], [backendChip, 'backend'], [scaleChip, 'scale'], [pinChip, 'pin'], [fitChip, 'fit'], [liveChip, 'live'], [idleChip, 'idle'], [keepBtn, 'keep'], [stopBtn, 'stop']]);
   let barFold = null;
   // the badge's words come from the PURE tables; t() needs the literal keys below to be extractable
   void [t('Agent is driving'), t('You are driving — agent asked to pause'), t('Another viewer is driving — agent asked to pause'), t('You are driving'), t('Another viewer is driving')];
@@ -624,7 +636,9 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '' } = {}) {
     agentChip.textContent = m.orphaned ? t('Agent gone: {name}', { name: who }) : t('Agent: {name}', { name: who });
     agentChip.title = m.orphaned ? t('The session that held this window is no longer live — the lease is free for the next agent') : t('The agent session holding this window (one holder per window)');
     modeBadge.textContent = t(shortModeBadge(m)); // lane I: the short words on the strip, the full sentence in the tooltip
-    modeBadge.title = t(windowModeBadge(m));
+    // lane e2c: the reach record's mode (the agent's `--mode` / `vibespace-window mode`, or auto's resolution) in the tooltip
+    const how = reachView ? (reachView.mode !== 'auto' ? reachView.mode : (reachView.resolved && reachView.resolved.mode) || null) : null;
+    modeBadge.title = t(windowModeBadge({ ...m, how }));
     modeBadge.classList.toggle('takeover', m.mode === 'takeover' && m.mine);
     modeBadge.classList.toggle('other', m.mode === 'takeover' && !m.mine);
     takeBtn.classList.toggle('active', m.mine);
@@ -662,6 +676,8 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '' } = {}) {
     const named = front && front.title && seatState() !== 'blocked' ? `${label} · ${front.title}` : label; // design 016 S1c: "微信 · 朋友圈" while an app's second window is in front (the taskbar follows setTitle)
     app.wm.setTitle(winInfo.id, hostTitleText(lease ? t('{label} — agent window', { label: named }) : named, rec));
     const hc = hostChipText(rec); hostChip.textContent = hc; hostChip.style.display = hc ? '' : 'none';
+    // lane e2a r3 (verify r1 #11): the AGENT's own browser says so (and whose) — every other window keeps its words
+    const ab = agentBrowserText(rec); originChip.textContent = ab || t('VibeSpace-started window'); originChip.classList.toggle('desktop-app-chip-agent-browser', !!ab);
     hostChip.classList.toggle('is-offline', rec.state === 'unknown-host-offline');
     hostChip.title = rec.state === 'unknown-host-offline' ? t('The machine this app runs on is not answering — the app may still be running there; the window reconnects when it returns') + (rec.hostError ? ` (${rec.hostError})` : '') : '';
     blockedTitle.textContent = label; // x5: the overlay names the app (textContent — the title is peer-controlled)
@@ -673,6 +689,9 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '' } = {}) {
     winInfo._desktopAppCaps = rec.caps || null; // the window-menu rows read the cells (Scale ▸ / Show window frame ▸)
     barFold?.schedule(); // lane I: bar-fold.js decides the ⋯ — shown for xpra (Show window frame ▸ / Scale ▸), for a shareable app on EVERY rung (lane E: Share with agent… / Ask an agent…) and while anything is folded
     const ft = fitChipText(rec); fitChip.textContent = ft; fitChip.style.display = ft ? '' : 'none';
+    // lane e2b: the record's pin — the chip, and the view re-fits IN PLACE (every showing client hears the broadcast; no re-create)
+    const pt = pinChipText(rec.pin, resolveLang()); pinChip.textContent = pt; pinChip.style.display = pt ? '' : 'none';
+    view?.setPin?.(pinOf(rec.pin));
     liveChip.textContent = liveChipText(rec); liveChip.style.display = 'none'; // design 009 §B2: said by the ⋯'s about line
     liveChip.title = rec.live && rec.live.over ? String(rec.live.over) : ''; // the keeper's report (never a stop) — the sentence names the metric
     const it = idleChipText(rec); idleChip.textContent = it; idleChip.style.display = it ? '' : 'none';
@@ -784,6 +803,21 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '' } = {}) {
     scaleChip.title = scaleChipTitle(rec, why);
     winInfo._desktopScaleChip = { control, why, text, title: scaleChip.title }; // the raw handle the suites read
   }
+  // ── lane e2b (design-agent-browser-v2 §E2.2): Pin size… 1920×1080 / 1280×720 / Auto — the USER pins any window ──
+  const pinTo = async (size) => {
+    const r = await fetchJson(`/api/desktop/apps/${encodeURIComponent(id)}/pin`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ size }) });
+    if (!r || r.error) { showToast(r?.error || t('Could not change the pinned size'), { type: 'error' }); return; }
+    applyRecord(r);
+  };
+  const pinItems = () => {
+    const cur = pinOf(rec && rec.pin);
+    const rows = PIN_CHOICES.map((p) => ({ label: (cur && cur.w === p.w && cur.h === p.h ? '✓ ' : '\u2003') + `${p.w}×${p.h}`, action: () => { pinTo(`${p.w}x${p.h}`); } }));
+    return [...rows, { label: (cur ? '\u2003' : '✓ ') + t('Auto — fit the window'), action: () => { pinTo('auto'); } }];
+  };
+  winInfo._desktopPinItems = pinItems; // the raw handle the suites read
+  const openPinMenu = (e) => { e?.stopPropagation?.(); const r = pinChip.getBoundingClientRect(); showContextMenu(r.left, r.bottom + 2, pinItems()); };
+  pinChip.addEventListener('click', openPinMenu, { signal: lsig });
+  pinChip.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') { e.preventDefault(); openPinMenu(e); } }, { signal: lsig });
   moreBtn.onclick = (e) => {
     e.stopPropagation();
     const r = moreBtn.getBoundingClientRect();
@@ -796,6 +830,7 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '' } = {}) {
     if (items.length) items.push({ separator: true });
     if (cap(rec, 'seamless')) items.push({ label: t('Show window frame'), children: frameItems() });
     if (cap(rec, 'scales')) items.push({ label: t('Scale'), children: scaleItems() });
+    if (cap(rec, 'scales')) items.push({ label: t('Pin size…'), children: pinItems() }); // lane e2b: the xpra per-window rung (the client fits the pin)
     items.push(...shareItems()); // lane E: Share with agent… / Ask an agent to take control… (a local app, every rung)
     if (canKeep()) items.push({ label: t('Keep running'), action: () => keepBtn.onclick() });
     if (canStop()) items.push({ label: t('Stop app'), action: () => stopApp() });
@@ -895,6 +930,7 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '' } = {}) {
     const names = rowsAll.map((r) => (r.principal.kind === 'everyone' ? t('All agents') : r.principal.name || r.principal.id));
     shareChip.title = names.length ? t('Shared with {names} — click to change', { names: names.join(', ') }) : '';
     winInfo._desktopReach = reachView; // the raw handle the heavy suite reads
+    renderLease(); // lane e2c: the badge's tooltip names the mode the broadcast just carried
   }
   const shareItems = () => (shareable() ? [
     { label: t('Share with agent…'), action: () => openShareDialog(app, id, { label: titleText() }) },
@@ -1049,6 +1085,7 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '' } = {}) {
   fetchJson(`/api/desktop/apps/${encodeURIComponent(id)}`).then((r) => {
     if (closed) return;
     if (r && r.code === 'not-found') { forgotten(); return; } // a replay of a record the keeper forgot: no window
+    if (r && !r.error && staleLaunching(r)) { refetchReach(); return; } // int243: the ready broadcast answered first (applyRecord connected) — this older answer never undoes it
     if (r && !r.error) { if (followReplacement(r) || decideExit(r)) return; reveal(); rec = r; ensureView(streamKindOf(r)); render(); refetchReach(); } // a dead record replayed: closed before it ever painted; a replaced one follows its successor
     else { reveal(); ensureView(STATUS_KIND).setStatus(r?.error ? `${t('Desktop app unavailable')}: ${r.error}` : t('Desktop app unavailable'), { error: true, reconnect: false }); return; }
     if (rec.state === 'launching') {

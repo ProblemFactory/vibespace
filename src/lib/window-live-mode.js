@@ -27,9 +27,10 @@ export function windowLiveMode({ lease = null, viewerTag = null } = {}) {
 
 /** The badge's words (the browser live view's exact three, so the two panes
  *  read the same); the caller wraps them in t(). */
-export function windowModeBadge({ leased = false, mode = 'watch', mine = false } = {}) {
+export function windowModeBadge({ leased = false, mode = 'watch', mine = false, how = null } = {}) {
   if (!leased) return null;
-  if (mode !== 'takeover') return 'Agent is driving';
+  // lane e2c (§E2.3): HOW the agent drives a desktop window (its share mode, or what auto resolved to) — the tooltip says it
+  if (mode !== 'takeover') return how === 'tree' ? 'Agent is driving — by its accessibility tree' : how === 'pixels' ? 'Agent is driving — by pixels' : 'Agent is driving';
   return mine ? 'You are driving — agent asked to pause' : 'Another viewer is driving — agent asked to pause';
 }
 

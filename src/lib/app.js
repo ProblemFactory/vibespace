@@ -36,6 +36,7 @@ import { updateTaskbar as updateTaskbarFn } from './taskbar.js';
 import { openBrowser as openBrowserFn } from './browser-window.js';
 import { openDesktop as openDesktopFn } from './desktop-window.js';
 import { openDesktopApp as openDesktopAppFn } from './desktop-app-window.js';
+import { agentBrowserPlacement } from './desktop-app-placement.js';
 import { installDesktopAppLauncher } from './desktop-app-launcher.js';
 import { installOpenWith } from './open-with.js'; // §7.9: app.openWithDesktopApp (the ONE door) + the file-changed relay
 import { openBrowserLive as openBrowserLiveFn, openBrowserLiveBeside as openBrowserLiveBesideFn, installBrowserLive } from './browser-live-window.js'; // agent browser P2 (§4.4): the live view window; P7 (§4.6): auto-bind
@@ -448,6 +449,20 @@ class App {
         changed = true;
       }
       if (changed) { try { this.sidebar?._render?.(); } catch {} }
+    });
+    // lane e2a (design-agent-browser-v2 §E2.1 Placement, D3): the agent's own desktop-app browser opens BESIDE its chat —
+    // only on the client SHOWING that chat (PURE agentBrowserPlacement), through lane F's split door; elsewhere nothing
+    this.ws.onGlobal((msg) => {
+      if (msg.type !== 'desktop-app-opened') return;
+      const chats = [...(this.sessions?.entries?.() || [])].map(([winId, v]) => { const w = this.wm.windows.get(winId); return { winId, sessionId: v?.sessionId, minimized: !w || !!w.isMinimized, hidden: !w || !!w._hiddenByDesktop }; });
+      const p = agentBrowserPlacement({ msg, chats, phone: !!this.isMobile, visible: document.visibilityState !== 'hidden' });
+      if (p.act === 'beside') this.openDesktopApp(msg.appId, { intoChain: this.linkPlacement(p.fromWin) });
+      else if (p.act === 'own') this.openDesktopApp(msg.appId);
+    });
+    // lane e2a r3 (verify r1 #3/#10): its conversation ended while the user drives / views it — it waits, and says so once here
+    this.ws.onGlobal((msg) => {
+      if (msg.type !== 'desktop-app-ending' || !msg.appId) return;
+      if ([...this.wm.windows.values()].some((w) => w._desktopAppId === msg.appId)) showToast(t('The conversation that opened this browser ended — it closes when you leave'), { duration: 10000 });
     });
     this.ws.onGlobal((msg) => {
       if (msg.type === 'editor-open' && msg.filePath && msg.signalPath) {

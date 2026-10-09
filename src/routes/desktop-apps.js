@@ -139,6 +139,7 @@ const { capsOf, scaleChoiceVerdict, relaunchLeaseVerdict, TIGHTVNC, machineDeskt
 const { INSTALL_WHATS, DEFAULT_INSTALL, installRow } = require('../installs'); // THE INSTALLABLES — the routes ask the row (lane dc-apps-rows)
 /** design 014 D1: the whole-desktop refusals' statuses (by name, like every code below). */
 const D014_STATUS = Object.freeze({ human_only: 403, no_vnc: 409, not_desktop_machine: 409, not_windows: 409, no_admin: 409, run_failed: 409, empty: 400, too_long: 400, multi_line: 400, hidden_chars: 400 });
+const { pinVerdict } = require('../desktop-pin'); // lane e2b (§E2.2): the window menu's Pin size… (the user pins any window)
 const { openWithVerdict, installSpecFor, FONTS_ID } = require('../office-open'); // §7.9: the ONE open-with verdict
 const router = express.Router();
 
@@ -362,6 +363,14 @@ router.post('/api/desktop/apps/:id/stop', async (req, res) => {
 router.post('/api/desktop/apps/:id/keep-alive', async (req, res) => {
   if (!ID_RE.test(req.params.id)) return res.status(400).json({ error: 'bad id', code: 'bad-request' });
   try { res.json(await ctx.keeper.keepAlive(req.params.id)); } catch (e) { fail(res, e); } // a paired machine's answers through the op (async)
+});
+// lane e2b (design-agent-browser-v2 §E2.2): the window menu's "Pin size… 1920×1080 / 1280×720 / Auto" — {size: 'WxH' | 'auto'};
+// the USER pins any window (the agent's door is POST /api/agent/window/size, the opener only); saved + broadcast by the keeper
+router.post('/api/desktop/apps/:id/pin', async (req, res) => {
+  if (!ID_RE.test(req.params.id)) return res.status(400).json({ error: 'bad id', code: 'bad-request' });
+  const v = pinVerdict({ record: ctx.keeper.get(req.params.id), who: 'user', size: req.body ? req.body.size : undefined });
+  if (!v.ok) return fail(res, { code: v.code, message: v.error });
+  try { res.json(await ctx.keeper.setPin(req.params.id, v.pin)); } catch (e) { fail(res, e); }
 });
 
 router.post('/api/desktop/apps/:id/relaunch', async (req, res) => {

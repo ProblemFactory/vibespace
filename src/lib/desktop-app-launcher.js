@@ -88,6 +88,9 @@ import { mountLaunchShareRow, launchKeyOf } from './window-share.js';
 import { showMachineDesktopDialog } from './machine-desktop.js'; // design 014 D1: a Windows / macOS machine's whole desktop
 import { OFFICE_MODULES, installSpecFor, FONTS_ID } from '../office-open.js'; // §7.9: the LibreOffice table (PURE)
 import { appPlanBlock, appSummaryBlock, appRefusalText, appDialogTitle, appGoLabel, appPlanNote, appDoneText, renderAppsSection, openDebInstall, openAppSearch, openAgentHelp, appsBannerModel } from './app-install-dialog.js'; // Layer 0 apps: THE install dialog shows an app's plan too
+const AGENT_BROWSER_ORIGIN = 'agent-browser'; // src/server/window-targets-engine.js AGENT_BROWSER_ORIGIN
+/** lane e2a r3 (verify r1 #11): a record the agent launched through its own door — the chip / the running row words. */
+export function agentBrowserText(rec) { return rec && rec.origin === AGENT_BROWSER_ORIGIN ? t('Agent browser ({name})', { name: (rec.by && rec.by.name) || t('an agent') }) : ''; }
 
 export const COMMAND_ID = 'desktopApps.open';
 const RECENTS_KEY = 'desktopAppRecents';
@@ -736,7 +739,8 @@ export async function showLaunchDialog(app, opts = {}) {
     runEl.innerHTML = '';
     for (const a of live) {
       const row = document.createElement('div'); row.className = 'desktop-launch-run-row';
-      row.innerHTML = `<span class="desktop-app-row-label">${escHtml(a.label || a.exec)}${a.hostLabel && a.hostId !== 'local' ? `<span class="desktop-launch-host-chip">${escHtml(t('on {machine}', { machine: a.hostLabel }))}</span>` : ''}</span><span class="desktop-app-row-state">${escHtml(a.state === 'ready' ? t('running') : a.state === 'unknown-host-offline' ? t('machine not answering') : t('starting'))}</span>`;
+      const ab = agentBrowserText(a); // lane e2a r3 (#11): the agent's own browser is marked in the running list
+      row.innerHTML = `<span class="desktop-app-row-label">${escHtml(a.label || a.exec)}${ab ? `<span class="desktop-launch-host-chip">${escHtml(ab)}</span>` : ''}${a.hostLabel && a.hostId !== 'local' ? `<span class="desktop-launch-host-chip">${escHtml(t('on {machine}', { machine: a.hostLabel }))}</span>` : ''}</span><span class="desktop-app-row-state">${escHtml(a.state === 'ready' ? t('running') : a.state === 'unknown-host-offline' ? t('machine not answering') : t('starting'))}</span>`;
       const open = document.createElement('button'); open.className = 'file-tool-btn'; open.style.cssText = 'width:auto;padding:0 8px;font-size:10px'; open.textContent = t('Open');
       open.onclick = () => { close(); app.openDesktopApp(a.id); };
       const stop = document.createElement('button'); stop.className = 'file-tool-btn desktop-app-stop'; stop.style.cssText = 'width:auto;padding:0 8px;font-size:10px'; stop.textContent = t('Stop');

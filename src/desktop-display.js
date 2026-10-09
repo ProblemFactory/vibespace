@@ -1107,6 +1107,17 @@ async function displaySize({ hostId = null, display, authFile, env = process.env
   if (!m) return { ok: false, w: 0, h: 0, why: 'xdpyinfo printed no dimensions line' };
   return { ok: true, w: +m[1], h: +m[2], why: null };
 }
+/** lane e2b (design-agent-browser-v2 §E2.2): THE NO-XPRA RUNG's act — a keeper-fitted display's root set to a PINNED window's
+ *  size, `xrandr --fb WxH`. Never on the xpra rung (r3, measured: xpra's configure_best_screen_size re-applies its clients'
+ *  desktop sizes over an outside xrandr; there the stream bridge asks xpra for the pin).
+ *  `{ ok, why }`; never throws. */
+async function setDisplaySize({ hostId = null, display, authFile, env = process.env, bins = null, w, h } = {}) {
+  assertLocal(hostId, 'setDisplaySize');
+  const bin = (bins && bins.xrandr) || binOnPath('xrandr', { env });
+  if (!bin) return { ok: false, why: 'xrandr not on PATH' };
+  const r = await run(bin, ['--fb', `${Number(w)}x${Number(h)}`], { env: x11Env(env, { display, authFile }), timeout: 5000 });
+  return r.err ? { ok: false, why: `xrandr --fb ${w}x${h} failed: ${String(r.err.message || r.err).slice(0, 200)}` } : { ok: true, why: null };
+}
 /**
  * Apply a fit plan (src/desktop-apps.js `appFitPlan`) to a display. On bare X
  * ONE `xdotool` invocation chains `windowmove --sync … windowsize --sync …`
@@ -1133,6 +1144,7 @@ async function applyWindowPlan({ hostId = null, display, authFile, env = process
   const args = [];
   if (plan.resize && !viaWm) args.push('windowmove', '--sync', String(plan.resize.id), '0', '0', 'windowsize', '--sync', String(plan.resize.id), String(plan.resize.w), String(plan.resize.h));
   for (const m of plan.moves || []) args.push('windowmove', '--sync', String(m.id), String(m.x), String(m.y));
+  for (const c of plan.clamps || []) args.push('windowsize', '--sync', String(c.id), String(c.w), String(c.h)); // lane e2b r3: a pinned window's oversized other top-levels, clamped into the pin
   if (!args.length && !viaWm) return { ok: true, why: null, ms: 0, acts: 0, via: null };
   const xenv = x11Env(env, { display, authFile });
   const t0 = Date.now();
@@ -1145,7 +1157,7 @@ async function applyWindowPlan({ hostId = null, display, authFile, env = process
   if (args.length) {
     const r = await run(b.xdotool, args, { env: xenv, timeout: 5000 });
     if (r.err) return { ok: false, why: `xdotool failed: ${r.err.message}`, ms: Date.now() - t0, acts, via: viaWm ? 'wm' : 'xdotool' };
-    acts += (plan.resize && !viaWm ? 1 : 0) + (plan.moves || []).length;
+    acts += (plan.resize && !viaWm ? 1 : 0) + (plan.moves || []).length + (plan.clamps || []).length;
   }
   return { ok: true, why: null, ms: Date.now() - t0, acts, via: viaWm ? 'wm' : 'xdotool' };
 }
@@ -1303,7 +1315,7 @@ module.exports = {
   XPRA_ARGS, XPRA_GEOMETRY_MAX, XPRA_BIND_REFUSALS, startXpra, xpraWwwDir, seamlessWindows,
   pidAlive, procStart, sameProcess, procSample,
   sessionMembers, refreshSessions, sessionCensus, environHas, sessionSample, sessionSampleSync, markerCensus, environCensus,
-  parseWininfoTree, windowTree, viewableWindows, enumerateWindows, displaySize, applyWindowPlan, xpraVersion, installFacts, installState,
+  parseWininfoTree, windowTree, viewableWindows, enumerateWindows, displaySize, setDisplaySize, applyWindowPlan, xpraVersion, installFacts, installState,
   UTF8_LOCALE, utf8Env, utf8LocaleEnv,
   VNC_NATIVE, RFB_VIEWER_TYPES, RFB_VERSIONS, rfbAuthOf, rfbGreeting, // design 014 D1
 };

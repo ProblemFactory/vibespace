@@ -497,6 +497,21 @@
 - REGEX CONTROL BY A CLOCK RATIO WENT RED (rel241 mirror, channel-filter ②; B-b683 peer-parsers 5/5 red under load): two clocks' ratio is noise. FIX = a catastrophic pattern blows a child deadline (2^40 steps); a bounded row finishes under one. 不变量 = a backtracking claim is a deadline, not a ratio
 - A TOAST TOOK THE TAPS MEANT FOR THE APP UNDER IT (B-a42d, the 3 s clipboard toast on a 320 px phone): the whole toast was a hit target while only ✕ and its actions have handlers. FIX = the body passes the pointer through, buttons keep it. 不变量 = a notice is never an input surface beyond its buttons
 - A BLOCKED MOUNT PATH WAS HONOURED BY ONE READER (B-afc4, after the two-strike liveness rule): every other server-side reader could hang inside a dead FUSE for two sweeps. FIX = ONE door every user-path reader asks before the read, a grep census. 不变量 = a blocked path is answered, never read
+- A REFRESH JUDGED A TORN PASS (B-0c75, test-pull-refresh §12 red under load): a tick stats x.db/-wal/-shm one await apart; a commit or checkpoint between them refreshed a -shm past its -wal cap / a -wal without its db. FIX = a moved family gets a second look, -wal last. 不变量 = one family, one look
+- A SECOND DESKTOP-APP WINDOW SHOWED BUT NEVER DREW (int243 2026-10-09, 4/6): the bridge sent the pin right behind the viewer's hello; xpra 6.5.4 drops a link whose packet beats its threaded hello answer (1005, each retry). FIX = only the hello until xpra answers. 不变量 = a shown window has a canvas
+- A LATE 'LAUNCHING' ANSWER PARKED A DESKTOP-APP WINDOW (int243 2026-10-09): its record GET landed after the ready broadcast and set it back; the gate re-read only a missing record. FIX = an older launching answer is dropped. 不变量 = a read never moves a record back past a newer broadcast
+
+## A SECOND DESKTOP-APP WINDOW SHOWED BUT NEVER DREW (lane e2-canvas, int243 2026-10-09 — test-desktop-app-rung-chrome 4/6 at 1 and 2 lanes after f1e317418)
+
+**Symptom.** The agent's second desktop browser (`--mode pixels`, pinned 1920×1080 from launch) was placed and shown on both clients with no canvas; both views said "Connection lost: 'No Status Received' (1005)" with a Reconnect button, the server had no viewer, so every X window stayed unmapped and `vibespace-window screenshot` answered window_not_visible.
+
+**Cause (measured).** xpra 6.5.4 answers a hello on a thread (server/core.py `_process_hello` → `verify_auth` → `GLib.idle_add(hello_oked)`, which creates the connection's source). A packet read from a connection with no source yet is invalid (server/base.py `handle_invalid_packet` ⇒ `proto.close()`, no disconnect packet). Lane e2b's r3 bridge asks xpra for a pinned window's size with its own `desktop_size` packet right behind the viewer's hello, so whenever that packet beat the hello's threaded answer, xpra closed the viewer's upstream; the relay closed the browser socket bare (1005). Every reconnect raced the same way, and the view's bounded ladder (1+2+4+8+15 s) ran out. H was pinned while its viewers were already connected, so only a window pinned from launch hit it.
+
+**Fix.** src/server/stream-relay-xpra.js `bridgeXpra`: until xpra says its first word on a connection, it hears the hello and nothing else; the rest (the pin ask first) waits in `owed`, in order, and goes up on that first word (the server sends its hello only after the source exists).
+
+**Invariant.** A window that is shown has a canvas: a connection xpra has not answered carries its hello and nothing else.
+
+**Gates:** test-desktop-pin ⑦ (a fake xpra with 6.5.4's rule behind the real bridge) + CONTROL (e) (the gate removed ⇒ early desktop_size, close 1005), test-desktop-app-rung-chrome (the second browser's xpra log names no invalid packet; 6/6 at 1 and 2 lanes).
 
 ## THE HEALTH SWEEP TORE A CLOUD MOUNT DOWN ON ONE SLOW LISTING (lane mount-liveness, 2.369.242 — owner 2026-10-09 "我的 OneDrive 怎么一直在断？")
 

@@ -132,6 +132,8 @@ const T = require('../browser-takeover');
 const DESK = require('../window-desktop');
 const M = require('../desktop-apps'); // takeover r2: browserLaunchVerdict (which launches are web browsers)
 const R = require('../window-reach'); // lane E: reach + the share mode + the pixel road (PURE)
+const PIN = require('../desktop-pin'); // lane e2b (§E2.2): who may pin a window's pixel size (PURE)
+const DBA = require('../desktop-browser-app'); // lane e2c (§E2.3): which browser families' accessibility switch is measured
 // verify r6 (lane channel-withdraw, 2026-09-27): THE ONE PREDICATE behind "which key does this live session answer to" —
 // a pending fork carries its PARENT's conversation id, so R.sessionKeyOf spelled the PARENT's key for it: a window
 // shared with the fork was granted to the parent (it answered to `claude:<parent>`), and the fork lost the grant the
@@ -153,6 +155,13 @@ const ORIGIN = 'vibespace';
 const LEASE_DROP_GRACE_MS = 60 * 1000;
 const TICK_MS = 15 * 1000;
 const namedError = (code, msg, extra = {}) => { const e = new Error(msg); e.code = code; Object.assign(e, extra); return e; };
+/** lane e2a (§E2): the record ORIGIN of the agent's own desktop-app browser (the ladder's lowest rung) — the ONE
+ *  exception to `browser_is_human`, set only by openAgentBrowser (never by a request body). */
+const AGENT_BROWSER_ORIGIN = 'agent-browser';
+/** lane e2a r3 (verify r1 #5/#9): live desktop browsers ONE conversation may hold (the machine cap stays the keeper's). */
+const AGENT_BROWSER_CAP = 2;
+/** A lease's origin: the user's own desktop, the agent's desktop-app browser, else a VibeSpace window. */
+const leaseOriginOf = (o) => (o === 'desktop' || o === AGENT_BROWSER_ORIGIN ? o : 'vibespace');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /** Lane E (D7): how long an `auto` attach keeps probing a YOUNG app for its tree (the calculator's tree appears
  *  0.5–1 s after ready, Chrome's page ~0.9 s — measured), what counts as young, and the per-probe node budget. */
@@ -207,9 +216,11 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     loaded = true;
     try {
       const j = JSON.parse(fs.readFileSync(leaseFile, 'utf8'));
+      // lane e2a r4 (verify r2 #2): an agent browser's pending end (its opener gone / its own stop waiting on the user) survives a restart
+      for (const [h, p] of Object.entries((j && j.agentEnds) || {})) if (p && Number.isFinite(Number(p.at))) openerLost.set(String(h), { at: Number(p.at), told: !!p.told, why: p.why === 'opener-stopped' ? 'opener-stopped' : 'opener-ended', restored: true });
       for (const l of Object.values((j && j.leases) || {})) {
         if (!l || typeof l !== 'object' || !l.handle || !l.sessionId) continue;
-        leases.set(String(l.handle), { handle: String(l.handle), sessionId: String(l.sessionId), browserKey: l.browserKey || null, since: Number(l.since) || 0, origin: l.origin === 'desktop' ? 'desktop' : ORIGIN, refs: null, snapshotAt: null, carrierLostAt: null });
+        leases.set(String(l.handle), { handle: String(l.handle), sessionId: String(l.sessionId), browserKey: l.browserKey || null, since: Number(l.since) || 0, origin: leaseOriginOf(l.origin), refs: null, snapshotAt: null, carrierLostAt: null, mode: null });
       }
     } catch (e) { if (e && e.code !== 'ENOENT') log.warn?.(`[window] ${LEASE_FILE} unreadable — starting with no leases: ${e.message}`); }
   }
@@ -218,7 +229,8 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
       fs.mkdirSync(dataDir, { recursive: true });
       const out = {};
       for (const [h, l] of leases) out[h] = { handle: h, sessionId: l.sessionId, browserKey: l.browserKey || null, since: l.since, origin: l.origin || ORIGIN };
-      writeJsonAtomic(leaseFile, { v: 1, savedAt: now(), leases: out });
+      const agentEnds = {}; for (const [h, p] of openerLost) agentEnds[h] = { at: p.at, told: !!p.told, why: p.why || 'opener-ended' };
+      writeJsonAtomic(leaseFile, { v: 1, savedAt: now(), leases: out, ...(openerLost.size ? { agentEnds } : {}) });
     } catch (e) { log.warn?.(`[window] ${LEASE_FILE} not written: ${e.message}`); }
   }
   function publish() { if (!broadcast) return; try { broadcast({ type: 'window-leases-updated', leases: allViews() }); } catch (e) { log.warn?.(`[window] broadcast failed: ${e.message}`); } }
@@ -378,7 +390,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   /** Lane E: the app's windows → the pixel plan (null when the keeper cannot say — a keeper without `windows`). */
   async function planFor(rec) {
     if (rec.origin === 'desktop' || typeof keeper.windows !== 'function') return null;
-    try { const r = await keeper.windows(rec.id); return r && r.ok ? R.pixelPlan(r.windows) : null; } catch { return null; }
+    try { const r = await keeper.windows(rec.id); return r && r.ok ? R.pixelPlan(r.windows, { pin: PIN.pinOf(rec.pin) }) : null; } catch { return null; } // lane e2b: a pinned window's image = the pin
   }
   const streamOf = (rec) => (rec && (rec.stream || M.streamKindOf(rec))) || null; // a FACT the reach view reports, never a branch
   const capsOf = (rec) => M.capsOf(rec); // the rung's capability cells (the view's, else the row's)
@@ -428,7 +440,10 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     const v = DESK.consentVerdict({ enabled: desktopEnabled() });
     if (!v.ok) { enforceConsent(); throw namedError(v.code, v.why, { setting: DESK.SETTING_KEY }); }
   }
-  const notFoundMsg = (handle) => (DESK.isDesktopHandle(handle) ? `no window ${JSON.stringify(String(handle))} is on your desktop's accessibility bus as last listed — \`vibespace-window list\` first (rows are read at list time)` : `no VibeSpace-launched window ${JSON.stringify(String(handle))} is live — \`vibespace-window list\``);
+  // lane e2a r4 (verify r2 #6): a relaunched window's old handle points at its successor
+  const relaunchedNote = (handle) => { const nx = DESK.isDesktopHandle(handle) ? null : successorOf(handle); return nx && liveRecord(nx) ? ` — ${handle} was relaunched as ${nx}: use that handle` : ''; };
+  const notFoundMsg = (handle) => relaunchedNoteWrap(handle, DESK.isDesktopHandle(handle) ? `no window ${JSON.stringify(String(handle))} is on your desktop's accessibility bus as last listed — \`vibespace-window list\` first (rows are read at list time)` : `no VibeSpace-launched window ${JSON.stringify(String(handle))} is live — \`vibespace-window list\``);
+  function relaunchedNoteWrap(handle, msg) { return msg + relaunchedNote(handle); }
   function leaseView(l) {
     if (!l) return null;
     const st = inputStateFor(l.handle);
@@ -524,7 +539,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   const execBase = (x) => (typeof x === 'string' && x ? x.split('/').pop() : '');
   const appExe = (rec) => { const pid = rec && rec.pids && Number(rec.pids.app); if (!Number.isInteger(pid) || pid <= 0) return null; try { return procExe(pid) || null; } catch { return null; } };
   function isHumanBrowser(rec) {
-    if (!rec || rec.origin === 'desktop') return false;
+    if (!rec || rec.origin === 'desktop' || rec.origin === AGENT_BROWSER_ORIGIN) return false; // lane e2a: the agent's own rung
     if (isBrowserRow(rec)) return true;
     const id = rec.appId != null ? String(rec.appId) : '';
     const rows = registryRowsNow().filter(isBrowserRow);
@@ -596,7 +611,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   }
 
   // ── open / attach / detach ──
-  function newLease(rec, facts) { return { handle: rec.id, sessionId: facts.sessionId, browserKey: facts.browserKey, since: now(), origin: rec.origin === 'desktop' ? 'desktop' : ORIGIN, refs: null, snapshotAt: null, carrierLostAt: null }; }
+  function newLease(rec, facts) { return { handle: rec.id, sessionId: facts.sessionId, browserKey: facts.browserKey, since: now(), origin: leaseOriginOf(rec.origin) /* E2b's pin is the RECORD's fact (the keeper's setPin), never the lease's */, mode: null /* E2c (interaction mode) — reserved, never set here */, refs: null, snapshotAt: null, carrierLostAt: null }; }
   async function open(body, facts) {
     load();
     // AN EXEC IS A HUMAN'S (design-desktop-apps §5, design §5.1.1's `open <app>`): the
@@ -609,10 +624,10 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     // window with no CDP judge, no action trace, no egress proxy, no takeover — an agent that drove it through the
     // tree would bypass every rule of the agent browser. Refused BY NAME, and so are the browser row's options
     // (`url` / `keepProfile`) — never silently dropped (2026-09-23, the verifier's finding).
-    if ((b.url !== undefined && b.url !== null && b.url !== '') || b.keepProfile !== undefined) throw namedError('browser_is_human', `${b.url !== undefined && b.url !== null && b.url !== '' ? 'url' : 'keepProfile'} belongs to a desktop-app BROWSER, and the user starts their own browser (they can share it with you — then \`vibespace-window list\` shows it) — for your own web work use the agent browser: \`vibespace-browser\` (\`vibespace-docs browser\`)`, { apps: registryApps() });
+    if ((b.url !== undefined && b.url !== null && b.url !== '') || b.keepProfile !== undefined) throw namedError('browser_is_human', `${b.url !== undefined && b.url !== null && b.url !== '' ? 'url' : 'keepProfile'} belongs to a desktop-app BROWSER, and the user starts their own browser (they can share it with you — then \`vibespace-window list\` shows it) — for your own web work use the agent browser: \`vibespace-browser\` (\`vibespace-docs browser\`) — or, when the agent browser cannot reach a site, a real desktop browser of your OWN beside your chat: \`vibespace-browser new <label> --backend desktop-app [--url <https://…>]\` (no CDP: you drive it with these window verbs)`, { apps: registryApps() });
     const appId = b.appId || b.app || undefined;
     const bRow = appId !== undefined ? registryRowsNow().find((r) => r && r.id === String(appId) && isBrowserRow(r)) : null;
-    if (bRow) throw namedError('browser_is_human', `${bRow.label || bRow.id} is a desktop-app browser — the user starts their own browser and can share it with you (then \`vibespace-window list\` shows it); for your own web work use the agent browser, \`vibespace-browser\` (\`vibespace-docs browser\`)`, { apps: registryApps() });
+    if (bRow) throw namedError('browser_is_human', `${bRow.label || bRow.id} is a desktop-app browser — the user starts their own browser and can share it with you (then \`vibespace-window list\` shows it); for your own web work use the agent browser, \`vibespace-browser\` (\`vibespace-docs browser\`) — or, when the agent browser cannot reach a site, a real desktop browser of your OWN beside your chat: \`vibespace-browser new <label> --backend desktop-app [--url <https://…>]\` (no CDP: you drive it with these window verbs)`, { apps: registryApps() });
     const rec = await keeper.launch({ appId, label: b.label || b.title || undefined });
     // lane E (D1's one exception): a window an agent opened itself is exposed to that agent's own session
     const s0 = sessionsMap().get(facts.sessionId) || facts.session || {};
@@ -624,6 +639,134 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     audit({ sessionId: facts.sessionId, browserKey: facts.browserKey, handle: rec.id, verb: 'open', by: 'keeper', ok: true, exec: rec.exec, reach: 'self-open' });
     commit();
     return { handle: rec.id, app: rec, lease: leaseView(l), attached: true, mode: modeInfo(rec.id), next: `vibespace-window snapshot ${rec.id}` };
+  }
+  /** LANE E2a (docs/design-agent-browser-v2 §E2, B-830d; owner 2026-09-25 + 2026-10-02): THE AGENT'S OWN DESKTOP-APP
+   *  BROWSER — the browser ladder's lowest rung, entered ONLY through `vibespace-browser new <label> --backend desktop-app`
+   *  (src/routes/browser.js, behind the agent belt; `/api/agent/window/open` cannot reach it — its body never carries an
+   *  origin). The registry's browser row (chromium family first, then firefox — src/desktop-browser-app.js BROWSER_KINDS)
+   *  is launched by the desktop-app keeper on the xpra per-window rung (argv / a11y env / a per-session profile dir as a
+   *  human's launch — ONE launcher) with the record's `origin: 'agent-browser'` + `by: {sessionId}`; the launched
+   *  Chrome's pid + starttime are the keeper's part identity (src/desktop-serve.js onPart). The opener gets
+   *  `openerGrant` (D1's one exception) and the window-target LEASE (one window, one holder); the server broadcasts
+   *  `desktop-app-opened {sessionId, appId, origin}` — the client SHOWING that chat opens it beside it (D3).
+   *  `v` = src/browser-profiles.js desktopAppNewVerdict's answer (label, url, keepProfile). */
+  async function openAgentBrowser(v, facts) {
+    load();
+    if (!v || v.door !== 'desktop-app') throw namedError('bad-request', 'openAgentBrowser takes the desktop-app door verdict');
+    // the families in BROWSER_KINDS order (the chromium family first: its a11y switch is measured — §E2.1), an available row first
+    const order = Object.keys(M.BROWSER_KINDS || {});
+    const rank = (r) => { const i = order.indexOf(r.browser); return i < 0 ? order.length : i; };
+    const rows = registryRowsNow().filter(isBrowserRow).sort((a, b) => rank(a) - rank(b));
+    const row = rows.find((r) => r.available !== false) || rows[0];
+    if (!row) throw namedError('browser-absent', 'no browser row in the desktop-app registry on this machine (chromium / firefox)');
+    // lane e2c (§E2.3): THE LAUNCH MODE — the agent's `--mode` against THIS row's accessibility (PURE launchModeVerdict): a
+    // family whose switch is unmeasured here is pixels-only and gets E2b's default pin unless `--size` was given (a machine
+    // whose AT-SPI bus does not answer is judged at attach: auto's probe resolves pixels and says why)
+    const mv = R.launchModeVerdict({ browserKind: row.browser, a11y: (DBA.A11Y_MEASURED_KINDS || []).includes(row.browser), asked: v.mode || null });
+    if (!mv.ok) throw namedError(mv.code, mv.why);
+    const pin = (Object.prototype.hasOwnProperty.call(v, 'size') ? v.size : v.pin) || mv.pin || null;
+    // lane e2a r3 (verify r1 #5/#9): a per-conversation ceiling (the machine's cap is shared with the user's own apps)
+    // r4 (verify r2 #5): a record being relaunched (replacedBy set) is not counted — its successor is; (#1/#7) the ceiling is
+    // RESERVED before the keeper's await (an in-flight count per conversation), so concurrent `new` calls cannot pass it together
+    const mine = agentBrowsers().filter((r) => r.by && r.by.sessionId === facts.sessionId && !r.replacedBy);
+    const pending = launching.get(facts.sessionId) || 0;
+    if (mine.length + pending >= AGENT_BROWSER_CAP) throw namedError('desktop_app_cap', `this conversation already has ${mine.length + pending} desktop browsers open${pending ? ` or starting` : ''} (${mine.map((r) => r.id).join(', ') || 'starting'}) — at most ${AGENT_BROWSER_CAP} per conversation: reuse one (\`vibespace-window snapshot <handle>\`) or stop one (\`vibespace-window stop <handle>\`)`, { handles: mine.map((r) => r.id) });
+    launching.set(facts.sessionId, pending + 1);
+    let rec;
+    try { rec = await keeper.launch({ appId: row.id, ...(v.url ? { url: v.url } : {}), ...(v.keepProfile ? { keepProfile: true } : {}) }, { origin: AGENT_BROWSER_ORIGIN, by: { sessionId: facts.sessionId, name: facts.name || null }, label: v.label, ...(pin ? { pin } : {}) }); }
+    finally { const n = (launching.get(facts.sessionId) || 1) - 1; if (n > 0) launching.set(facts.sessionId, n); else launching.delete(facts.sessionId); }
+    // A2 (reach re-asked after every await): the opener ended while the browser started ⇒ nobody may hold it — stopped
+    // (ours: launched just now under the keeper's part identity), refused by name, never an orphan window with no holder
+    if (!sessionLive(facts.sessionId)) {
+      try { await keeper.stop(rec.id, { why: 'opener-gone' }); } catch (e) { log.warn?.(`[window] ${rec.id}: stop after the opener left failed — ${e && e.message}`); }
+      throw namedError('not_live', 'this conversation ended while its desktop browser started — it was stopped');
+    }
+    const s0 = sessionsMap().get(facts.sessionId) || facts.session || {};
+    const g = R.openerGrant(reachRecord(rec.id), { key: keyOf(s0, facts.sessionId), name: facts.name || '', at: now() });
+    // lane e2c: the launch mode lands in the reach record's `mode` (R.MODES) — ONE commit with the opener's grant
+    let rr0 = g.ok ? g.record : reachRecord(rec.id);
+    if (rr0.mode !== mv.mode) rr0 = R.setMode(rr0, mv.mode).record;
+    if (g.ok || rr0.mode !== reachRecord(rec.id).mode) { reach.set(rec.id, rr0); commitReach(); }
+    const l = newLease({ ...rec, origin: AGENT_BROWSER_ORIGIN }, facts);
+    l.modeSeen = reachRecord(rec.id).mode;
+    leases.set(rec.id, l);
+    audit({ sessionId: facts.sessionId, browserKey: facts.browserKey, handle: rec.id, origin: AGENT_BROWSER_ORIGIN, verb: 'open', by: 'keeper', ok: true, exec: rec.exec, reach: 'self-open', backend: 'desktop-app', mode: mv.mode });
+    commit();
+    try { broadcast?.({ type: 'desktop-app-opened', sessionId: facts.sessionId, appId: rec.id, origin: AGENT_BROWSER_ORIGIN }); } catch (e) { log.warn?.(`[window] desktop-app-opened not broadcast — ${e && e.message}`); }
+    return { handle: rec.id, app: rec, lease: leaseView(l), attached: true, origin: AGENT_BROWSER_ORIGIN, mode: modeInfo(rec.id), modeWhy: mv.why, next: mv.mode === 'pixels' ? `vibespace-window screenshot ${rec.id}` : `vibespace-window snapshot ${rec.id}` };
+  }
+  /** lane e2a: the live agent-browser window `handle` names when THIS browser key holds its lease (else null) — what the
+   *  browser route asks before a CDP verb (`no_cdp_on_this_backend`); another conversation's window is never confirmed. */
+  /** lane e2a r3 (verify r1 #0's door): the OPENER stops its own desktop browser — `vibespace-window stop <handle>`; only
+   *  an agent-browser record whose `by` is this conversation (anything else is the user's to stop, from Desktop apps). */
+  /** lane e2b (design-agent-browser-v2 §E2.2): `vibespace-window size <handle> WxH | auto` — the OPENER pins (or `auto`
+   *  unpins) its own desktop browser's pixel size (src/desktop-pin.js pinVerdict: anyone else `not_your_window`; the user
+   *  pins any window from its menu). The record's fact, written by the keeper's one record writer (setPin: saved +
+   *  broadcast — the showing clients re-fit in place). */
+  async function setSize(handle, size, facts) {
+    load();
+    const rec = liveRecord(handle);
+    if (!rec) throw namedError('not-found', notFoundMsg(handle));
+    const v = PIN.pinVerdict({ facts, record: rec, who: 'agent', size });
+    if (!v.ok) throw namedError(v.code, v.error);
+    const after = await keeper.setPin(rec.id, v.pin);
+    audit({ sessionId: facts.sessionId, browserKey: facts.browserKey, handle: rec.id, origin: AGENT_BROWSER_ORIGIN, verb: 'size', by: 'opener', ok: true, pin: v.pin });
+    return { handle: rec.id, pin: PIN.pinOf(after && after.pin) };
+  }
+  /** lane e2c (design-agent-browser-v2 §E2.3): `vibespace-window mode <handle> tree | pixels | auto` — the OPENER switches its
+   *  own desktop browser's interaction mode mid-way (the reach record's `mode`, broadcast like the user's own switch). Any
+   *  other window is `not_your_window`: a window the user shared stays the user's to set (its menu). A browser with no
+   *  accessibility tree stays pixels (PURE launchModeVerdict says why); `auto` re-runs the probe now. E2b's pin untouched. */
+  async function setLaunchMode(handle, mode, facts) {
+    load();
+    const rec = liveRecord(handle);
+    if (!rec) throw namedError('not-found', notFoundMsg(handle));
+    if (rec.origin !== AGENT_BROWSER_ORIGIN) throw namedError('not_your_window', `${rec.id} is a window the user shared — its mode is the user's to set from the window's menu; you read it as shared`);
+    if (!rec.by || rec.by.sessionId !== facts.sessionId) throw namedError('not_your_window', `${rec.id} is a desktop browser another conversation opened — only its opener sets its mode`);
+    const row = registryRowsNow().find((r) => r && String(r.id) === String(rec.appId)) || null;
+    const v = R.launchModeVerdict({ browserKind: row ? row.browser : null, a11y: !!(row && (DBA.A11Y_MEASURED_KINDS || []).includes(row.browser)), asked: mode });
+    if (!v.ok) throw namedError(v.code, v.why);
+    const r = R.setMode(reachRecord(rec.id), v.mode);
+    reach.set(rec.id, r.record);
+    resolutions.delete(rec.id);
+    const l = leases.get(rec.id);
+    if (l && l.sessionId === facts.sessionId) l.modeSeen = v.mode; // the opener's own switch is no user's `mode-changed`
+    commitReach();
+    const res = v.mode === 'auto' ? await ensureResolved(rec, { fresh: true }) : null; // setResolution broadcasts its answer
+    audit({ sessionId: facts.sessionId, browserKey: facts.browserKey, handle: rec.id, origin: AGENT_BROWSER_ORIGIN, verb: 'mode', by: 'opener', ok: true, mode: v.mode, changed: r.changed, ...(res ? { resolved: res.mode } : {}) });
+    return { handle: rec.id, mode: modeInfo(rec.id), why: res ? res.why : v.why, changed: r.changed };
+  }
+  async function stopOwn(handle, facts) {
+    load();
+    const rec = liveRecord(handle);
+    if (!rec) throw namedError('not-found', notFoundMsg(handle));
+    if (rec.origin !== AGENT_BROWSER_ORIGIN || !rec.by || rec.by.sessionId !== facts.sessionId) throw namedError('not_your_browser', `${rec.id} is not a desktop browser this conversation opened — only its opener stops it with this verb; the user stops any window from Desktop apps`);
+    // r4 (verify r2 #0/#8): never closed under the user's hands — while they drive it or a viewer has it open the stop WAITS like
+    // the opener-ended one (the lease kept, told once, closed by the tick after the handback / at most one grace)
+    const busy = userBusy(rec.id);
+    if (busy) {
+      if (!openerLost.has(rec.id) || openerLost.get(rec.id).why !== 'opener-stopped') openerLost.set(rec.id, { at: now(), told: true, why: 'opener-stopped' });
+      audit({ sessionId: facts.sessionId, browserKey: facts.browserKey, handle: rec.id, origin: AGENT_BROWSER_ORIGIN, verb: 'stop', by: 'opener', ok: false, why: `kept: ${busy} — it closes when they leave` });
+      try { broadcast?.({ type: 'desktop-app-ending', appId: rec.id, why: 'opener-stopped' }); } catch { /* the audit row stands */ }
+      commit(); ensureTimer();
+      return { handle: rec.id, stopped: false, deferred: true, note: `${busy}: it closes when they leave (at most ${Math.round(LEASE_DROP_GRACE_MS / 1000)} s) — nothing to do` };
+    }
+    if (leases.has(rec.id)) dropLease(rec.id, 'stopped by its opener');
+    openerLost.delete(rec.id);
+    const v = await keeper.stop(rec.id, { why: 'opener-stopped' });
+    // r4 (#3): the answer is the keeper's own view of the profile, never a promise
+    const after = (v && typeof v === 'object' ? v : null) || keeper.get(rec.id) || {};
+    const profile = after.keepProfile ? 'kept (--keep-profile)' : after.profileRemovedAt ? 'removed with it' : after.profileError ? `NOT removed: ${after.profileError}` : after.profileKept ? `kept (${after.profileKeptWhy || 'the keeper kept it'})` : 'removal pending (the keeper removes it once the browser has exited)';
+    audit({ sessionId: facts.sessionId, browserKey: facts.browserKey, handle: rec.id, origin: AGENT_BROWSER_ORIGIN, verb: 'stop', by: 'opener', ok: true, profile });
+    commit();
+    return { handle: rec.id, stopped: true, profile };
+  }
+  function agentBrowserFor(handle, browserKey) {
+    load();
+    const l = handle ? leases.get(String(handle)) : null;
+    if (!l || l.origin !== AGENT_BROWSER_ORIGIN || !browserKey || l.browserKey !== browserKey) return null;
+    const rec = liveAny(String(handle));
+    return rec ? { handle: rec.id } : null;
   }
   function attach(handle, facts) {
     load();
@@ -716,10 +859,63 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     dropLease(h, 'detached by the holder');
     audit({ sessionId: facts.sessionId, browserKey: facts.browserKey, handle: h, origin, verb: 'detach', by: 'lease', ok: true });
     commit();
-    return { handle: h, detached: true, appRunning: !!(rec && ['launching', 'ready'].includes(rec.state)), note: 'the app keeps running (the keeper\'s idle timeout / the user stop it)' };
+    // r4 (verify r2 #10): the agent's OWN desktop browser says what is true of it
+    const ownBrowser = !!(rec && rec.origin === AGENT_BROWSER_ORIGIN && rec.by && rec.by.sessionId === facts.sessionId);
+    return { handle: h, detached: true, appRunning: !!(rec && ['launching', 'ready'].includes(rec.state)), note: ownBrowser ? `your desktop browser keeps running until your conversation ends (or \`vibespace-window stop ${h}\`); re-attach with \`vibespace-window attach ${h}\`` : 'the app keeps running (the keeper\'s idle timeout / the user stop it)' };
   }
   /** Drop every lease a session held (the kill path). */
-  function dropSession(sessionId) { load(); let n = 0; for (const [h, l] of [...leases]) if (l.sessionId === sessionId) { dropLease(h, `session ${sessionId} ended`); n++; } if (n) commit(); return n; }
+  // ── lane e2a r3 (verify r1 #0 #1 #3 #10 + the coordinator's rulings): D6 is keyed on the RECORD — its opener
+  // (`rec.by.sessionId`), never on whoever holds a lease: a detached browser still ends with its conversation, a
+  // non-opener holder's end only drops its own lease. While the USER drives it (a takeover) or a viewer has it open the
+  // stop WAITS (said once: an audit row + `desktop-app-ending` to the clients) — at most `busyMs` more, then it closes.
+  const openerLost = new Map(); // handle → { at, told }
+  let viewerCount = null;
+  const launching = new Map(); // sessionId → desktop browsers it is starting right now (r4 #1/#7: the cap's reservation)
+  function setViewerCount(fn) { viewerCount = typeof fn === 'function' ? fn : null; }
+  const agentBrowsers = () => { try { return (keeper.listApps() || []).filter((r) => r && r.origin === AGENT_BROWSER_ORIGIN && liveRecord(r.id)); } catch { return []; } };
+  function userBusy(h) {
+    const st = inputs.get(h);
+    if (st && st.input === 'user') return 'the user is driving it';
+    let n = 0; try { n = viewerCount ? Number(viewerCount(h)) || 0 : 0; } catch { n = 0; }
+    return n > 0 ? 'a viewer has it open' : null;
+  }
+  let bootAt = null; // r4 (#2): when this engine booted (a pending end waits one grace from it)
+  function stopAgentBrowser(rec, why, sessionId) {
+    openerLost.delete(rec.id); commit();
+    Promise.resolve().then(() => keeper.stop(rec.id, { why })).catch((e) => log.warn?.(`[window] ${rec.id}: the agent's desktop browser was not stopped — ${e && e.message}`));
+    audit({ sessionId, handle: rec.id, origin: AGENT_BROWSER_ORIGIN, verb: 'stop', by: 'keeper', ok: true, why });
+  }
+  /** The opener-ended sweep (reconcile: openers no longer live, after `graceMs`; dropSession: `endedId`, at once). */
+  function endAgentBrowsers({ graceMs = 0, busyMs = LEASE_DROP_GRACE_MS, endedId = null } = {}) {
+    const t = now(); const ended = [];
+    for (const rec of agentBrowsers()) {
+      const opener = rec.by && rec.by.sessionId;
+      if (!opener) continue;
+      const pend = openerLost.get(rec.id);
+      const own = !!(pend && pend.why === 'opener-stopped'); // r4 (#0/#8): its opener's own stop, waiting on the user
+      if (!own && (endedId ? opener !== endedId : sessionLive(opener))) { if (!endedId && pend) { openerLost.delete(rec.id); commit(); } continue; }
+      if (!pend) { openerLost.set(rec.id, { at: t, told: false, why: 'opener-ended' }); commit(); }
+      const st = openerLost.get(rec.id);
+      const waited = t - st.at;
+      if (!own && graceMs > 0 && waited < graceMs) continue;
+      // r4 (#2): after a restart nobody's viewer has re-joined yet — a pending end waits one grace from the boot, whatever its age
+      if (st.restored && bootAt != null && t - bootAt < LEASE_DROP_GRACE_MS) continue;
+      const busy = userBusy(rec.id);
+      if (busy && waited < (own ? 0 : Math.max(0, graceMs)) + busyMs) {
+        if (!st.told) {
+          st.told = true; commit();
+          audit({ sessionId: opener, handle: rec.id, origin: AGENT_BROWSER_ORIGIN, verb: 'stop', by: 'keeper', ok: false, why: `kept: ${busy} (${own ? 'its opener stopped it' : 'the conversation that opened it ended'})` });
+          try { broadcast?.({ type: 'desktop-app-ending', appId: rec.id, why: st.why || 'opener-ended' }); } catch { /* the audit row stands */ }
+        }
+        continue;
+      }
+      if (leases.has(rec.id) && own) dropLease(rec.id, 'stopped by its opener');
+      stopAgentBrowser(rec, st.why || 'opener-ended', opener); ended.push(rec.id);
+    }
+    return ended;
+  }
+  function dropSession(sessionId) { load(); let n = 0; for (const [h, l] of [...leases]) if (l.sessionId === sessionId) { dropLease(h, `session ${sessionId} ended`); n++; } endAgentBrowsers({ endedId: sessionId }); // r4 (verify r2 #4): the kill path ends its desktop browsers too (busy ⇒ the same bounded wait, finished by the tick)
+    if (n) commit(); return n; }
 
   /**
    * Leases against the world: a window that is gone loses its lease at once;
@@ -732,12 +928,24 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     const t = now();
     const dropped = [], stamped = [];
     for (const [h, l] of [...leases]) {
-      if (!liveAny(h)) { dropLease(h, 'the window is gone (no live record)'); dropped.push({ handle: h, why: 'window gone' }); continue; }
+      if (!liveAny(h)) {
+        // lane e2a r3 (verify r1 #2/#6): a Scale ▸ relaunch's successor carries the agent's rung (desktop-serve relaunch) —
+        // its lease follows `replacedBy` the way the reach does. r4 (verify r2 #6): reachable only for an ORPHANED lease — the
+        // relaunch route refuses while a lease exists, so today the opener detaches first and re-attaches to the successor
+        const next = l.origin === AGENT_BROWSER_ORIGIN ? successorOf(h) : null;
+        const nrec = next ? liveRecord(next) : null;
+        if (nrec && nrec.origin === AGENT_BROWSER_ORIGIN && !leases.has(next)) { leases.delete(h); leases.set(next, { ...l, handle: next }); audit({ sessionId: l.sessionId, handle: next, origin: AGENT_BROWSER_ORIGIN, verb: 'lease-carried', by: 'keeper', ok: true, from: h }); dropped.push({ handle: h, why: 'carried', to: next }); continue; }
+        dropLease(h, 'the window is gone (no live record)'); dropped.push({ handle: h, why: 'window gone' }); continue;
+      }
       if (sessionLive(l.sessionId)) { if (l.carrierLostAt) l.carrierLostAt = null; continue; }
+      // lane e2a r3 (#3/#10): the USER driving the agent's own browser keeps its lease (no handback under their hands) while
+      // its end waits — at most one grace more (endAgentBrowsers below says so once, then closes it)
+      if (l.origin === AGENT_BROWSER_ORIGIN && (inputs.get(h) || {}).input === 'user') { if (!l.carrierLostAt) l.carrierLostAt = t; if (t - l.carrierLostAt < Math.max(0, graceMs) + LEASE_DROP_GRACE_MS) continue; }
       if (!(graceMs > 0) || (l.carrierLostAt && t - l.carrierLostAt >= graceMs)) { dropLease(h, `no live session carries it (${l.sessionId})`); dropped.push({ handle: h, why: 'holder gone' }); continue; }
       if (!l.carrierLostAt) { l.carrierLostAt = t; stamped.push(h); }
     }
     if (dropped.length) commit();
+    const ended = endAgentBrowsers({ graceMs }); // lane e2a r3: D6 on the RECORD's opener
     // lane E: a share lives as long as its window — carried to a relaunch's successor first, then pruned
     loadReach();
     let pruned = 0;
@@ -748,7 +956,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
       reach.delete(h); resolutions.delete(h); pruned++;
     }
     if (pruned) commitReach();
-    return { dropped, stamped, pruned };
+    return { dropped, stamped, pruned, ended };
   }
 
   // ── §4.3 / §6.6: the input side — takeover, handback, idle, the bridge policy ──
@@ -856,7 +1064,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   function tick() { enforceConsent(); const r = reconcile({ graceMs: LEASE_DROP_GRACE_MS }); const idle = sweepIdleTakeovers(now()); if (!leases.size && !inputs.size && !reach.size && timer) { clearInterval(timer); timer = null; } return { ...r, idle }; }
   function ensureTimer() { if (!timer) { timer = setInterval(() => { try { tick(); } catch (e) { log.warn?.(`[window] tick failed: ${e && e.message}`); } }, TICK_MS); timer.unref?.(); } }
   /** The boot path (after restoreSessions, so the live-session set is final): load, drop what nobody carries or nothing serves, start the tick. */
-  function boot() { load(); loadReach(); enforceConsent(); const r = reconcile({ graceMs: 0 }); if (leases.size || reach.size) ensureTimer(); return { leases: leases.size, dropped: r.dropped.length, shared: reach.size, pruned: r.pruned || 0 }; }
+  function boot() { load(); loadReach(); enforceConsent(); bootAt = now(); const r = reconcile({ graceMs: 0 }); if (openerLost.size) ensureTimer(); if (leases.size || reach.size) ensureTimer(); return { leases: leases.size, dropped: r.dropped.length, shared: reach.size, pruned: r.pruned || 0 }; }
   function shutdown() { if (timer) clearInterval(timer); timer = null; }
   /** What the session card / status route may publish for ONE session: 'user' while somebody drives a window it holds, 'agent' when it holds one, null when none. */
   function inputSummaryFor(sessionId) {
@@ -908,6 +1116,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   async function act(handle, facts, body = {}) {
     const verb = String(body.verb || '');
     const { rec, lease } = requireLease(handle, facts, verb || 'act');
+    if (rec.origin === AGENT_BROWSER_ORIGIN) { try { keeper.noteInput?.(rec.id); } catch { /* the idle clock only */ } } // lane e2a r3 (#7): an agent driving its own browser is not idle
     const base = env();
     const who = { sessionId: facts.sessionId, browserKey: facts.browserKey, handle: rec.id, origin: rec.origin || ORIGIN };
     // P10 (§6.6): on the user's own desktop the two INJECTION verbs are refused
@@ -1298,7 +1507,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   /** Is this handle a window THIS engine addresses (a paired machine's app is not — lane C)? */
   const addressable = (handle) => !!liveRecord(handle);
 
-  return { factsForToken, list, open, attach, attachWithMode, isHumanBrowser, detach, dropSession, reconcile, boot, tick, shutdown, snapshot, act, screenshot, watch,
+  return { factsForToken, list, open, openAgentBrowser, agentBrowserFor, stopOwn, setSize, setLaunchMode, setViewerCount, attach, attachWithMode, isHumanBrowser, detach, dropSession, reconcile, boot, tick, shutdown, snapshot, act, screenshot, watch,
     // lane E: reach + the share mode (the user's side)
     reachOf, reachViews, grantReach, revokeReach, setShareMode, shareAtLaunch, endHold, addressable, modeInfo, reachFile, resolvePrincipal,
     takeover, handback, noteUserInput, inputPolicy, leaseInput, viewerLeft, sweepIdleTakeovers, onInput, setViewerProbe, inputStateFor, inputSummaryFor, takeoverIdleMs, leaseOf,
@@ -1307,4 +1516,4 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     desktopEnabled, enforceConsent, dropDesktopLeases, liveDesktop: (h) => liveDesktop(h, { trustPid: leases.has(String(h || '')) }), desktopLeases: () => allViews().filter((v) => v.origin === 'desktop'), DESKTOP_SETTING: DESK.SETTING_KEY };
 }
 
-module.exports = { create, AUDIT_FILE, SHOT_DIR, LEASE_FILE, REACH_FILE, LEASE_DROP_GRACE_MS, TICK_MS, ORIGIN, MODE_PROBE_MS };
+module.exports = { create, AGENT_BROWSER_ORIGIN, AGENT_BROWSER_CAP, AUDIT_FILE, SHOT_DIR, LEASE_FILE, REACH_FILE, LEASE_DROP_GRACE_MS, TICK_MS, ORIGIN, MODE_PROBE_MS };

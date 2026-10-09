@@ -522,5 +522,20 @@ console.log('§10 A PENDING FORK\'S KEY IS ITS PLACEHOLDER, NEVER ITS PARENT\'S 
   for (const r0 of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 8 })) ok(r0.pass, '§10 tree: ' + r0.name, r0.pass ? undefined : r0.detail);
 }
 
+// ── lane e2c (design q-022 §E2.3): THE LAUNCH MODE lands in the record's closed mode set (the engine legs: test-desktop-app-rung ⑩) ──
+console.log('lane e2c: launchModeVerdict beside the mode set');
+{
+  const PIN = require('../src/desktop-pin.js');
+  const seen = [];
+  for (const a11y of [true, false]) for (const asked of [null, 'auto', 'tree', 'pixels']) {
+    const v = R.launchModeVerdict({ browserKind: 'chromium', a11y, asked });
+    const rec = R.setMode(R.emptyRecord('da-1'), v.mode);
+    seen.push({ a11y, asked, mode: v.mode, ok: v.ok && R.MODES.includes(v.mode) && rec.ok && rec.record.mode === v.mode && (v.mode === 'pixels' ? JSON.stringify(v.pin) === JSON.stringify(PIN.defaultPinFor('pixels')) : v.pin === null) });
+  }
+  ok(seen.every((x) => x.ok), 'every verdict is a mode of the closed set (written by setMode as is); pixels carries defaultPinFor(\'pixels\'), the rest no pin', seen.filter((x) => !x.ok));
+  const bad = R.launchModeVerdict({ browserKind: 'chromium', a11y: true, asked: 'sideways' });
+  ok(!bad.ok && bad.code === 'bad_mode' && R.REFUSALS.includes(bad.code), 'a mode outside the set ⇒ bad_mode (one of REFUSALS)', bad);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

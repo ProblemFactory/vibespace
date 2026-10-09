@@ -61,6 +61,7 @@ function install({ app, auth, vnc, keeper, DESKTOP_SINGLETON_ID, dataDir, env, a
     upstreamWhy: sources.some((s) => s.upstreamWhy) ? (id) => src(id).upstreamWhy?.(id) ?? null : null, // design 014 D1: "<machine> went offline"
     forwardPort: access ? (hostId, port) => access.forwardPort(hostId, port) : null, // lane C2: a paired machine's picture port, forwarded (src/server/desktop-access.js)
     inputPolicy: (id, viewerId) => (own(id) ? { relay: true } : engine.inputPolicy(id, viewerId)), // the singleton desktop is the user's own — never gated
+    pinned: (id) => (!own(id) && keeper.get(id) && keeper.get(id).pin) || null, // lane e2b: the record's pin {w,h} — the keeper owns that window's geometry; r3: the xpra bridge asks xpra for it
     onViewerLeft: (id, viewerId) => { if (!own(id)) engine.viewerLeft(id, viewerId); },
     viewerSeats: { // x5: the singleton desktop is the user's own and never governed ('free')
       join: (id, { viewerId, pane, prev, ua }) => { if (governed(id)) keeper.viewerJoined(id, { viewerId, pane, prev, label: DV.viewerLabel(ua) }); },
@@ -73,9 +74,11 @@ function install({ app, auth, vnc, keeper, DESKTOP_SINGLETON_ID, dataDir, env, a
   streamRef = stream;
   keeper.onViewers?.((id) => stream.refresh(id)); // x5: join / leave / Resume here / the session ended ⇒ every socket of that window re-applied
   engine.setViewerProbe((id, viewerId) => stream.viewerAlive(id, viewerId));
+  engine.setViewerCount?.((id) => stream.connections(id)); // lane e2a r3: an agent browser's end waits while a viewer has it open
   keeper.setWatchProbe?.((id) => stream.connections(id) > 0); // the fit belt checks a WATCHED session every tick (a window that appears without input), an unwatched one on the slow belt
   { const { router, setup } = require('../routes/desktop-apps'); setup({ keeper, vnc, windowEngine: engine, stream, access, windowRequest }); app.use(router); }
   { const wt = require('../routes/window-targets'); wt.setup({ engine }); app.use(wt.router); }
+  require('../routes/browser').setWindowEngine(engine); // lane e2a (§E2): `vibespace-browser new --backend desktop-app` launches through the engine
   let announced = false;
   if (browserHandback && typeof browserHandback.installWindow === 'function') { try { announced = browserHandback.installWindow(engine); } catch (e) { log.warn?.(`[window] handback announcer not attached — ${e && e.message}`); } }
   return {

@@ -1660,7 +1660,7 @@ console.log('§14 r6 — a REFUSED viewer never ends the session (round 2 of the
     // spelling xpra 6.5.3 has no server-side switch for (the recipe's XPRA_CLIENT_CAN_SHUTDOWN=0 covers shutdown-server alone —
     // test-desktop-display §5 (f)), so the bridge is its only gate and the control ends the session.
     const srcS = fs.readFileSync(path.join(repo, 'src/server/stream-relay-xpra.js'), 'utf8');
-    const from = '      if (life || (!allowInput && !(type !== null && XPRA_WATCH_TYPES.has(type)))) dropped++; else keep.push(u);';
+    const from = '      if (life || pin || (!allowInput && !(type !== null && XPRA_WATCH_TYPES.has(type)))) dropped++; else keep.push(u);'; // int243: lane e2b's pin fence joined the decision
     ok(srcS.split(from).length === 2, 'the bridge\'s allowlist decision is spelled once (the control patches exactly it)');
     const mfile = relayMutant('xpra', srcS.replace(from, '      if (input && !allowInput) dropped++; else keep.push(u); // pre-fix (r5)'), 'xstream14');
     const bc = await bridgeOn(require(mfile));

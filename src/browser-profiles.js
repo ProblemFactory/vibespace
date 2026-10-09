@@ -59,6 +59,9 @@
 // takeover r3: the ONE config rule (the sibling PURE verb table the shipped CLI
 // carries — a remote CLI composes a command's config by the same words)
 const VERBS = require('./browser-verbs.js');
+const DBA = require('./desktop-browser-app.js'); // lane e2a: the launch dialog's own url verdict (PURE, imports nothing)
+const { MODES: REACH_MODES } = require('./window-reach.js'); // lane e2c: `--mode`'s closed set (PURE)
+const { parsePin, defaultPinFor } = require('./desktop-pin.js'); // lane e2b: `--size WxH` — the pinned pixel size's parse + bounds (PURE, imports nothing)
 // verify r5 F3 (lane peer-census): a profile LABEL is another conversation's words once an agent names one
 // (`vibespace-browser new <label>` — every conversation of the owner's may use it, the user pins it to another), so the
 // ONE label cleaner is THE belt (src/peer-text.js): bound, hidden characters folded, the frame rule after the cut
@@ -1091,16 +1094,67 @@ function capabilityRefusal(provider, capability) {
     case 'start': return row.starts ? null : lacks(row.leaseKind === 'window-target' ? 'a window target is a window already open on the user\'s desktop — nothing is started' : 'the browser is somebody else\'s — nothing is started, only reached');
     case 'stop': return row.starts ? null : lacks('nothing was started, so nothing is stopped — only the tunnel is closed');
     case 'headed': return row.headed === false ? lacks('it has no window of ours to show') : null;
-    case 'switch': return row.canSwitchTo === 'no' ? lacks(id === 'cdp' ? 'it is somebody else\'s browser, so "switch to cdp" is really a second profile (§7.4)' : 'its state is the user\'s own browser profile, not a directory we own (§7.6 rule 3) — escalating to tier 3 does not re-point this profile; the user turns on the real-desktop switch and the agent opens a WINDOW TARGET (vibespace-window list / attach)') : null;
+    case 'switch': return row.canSwitchTo === 'no' ? lacks(row.leaseKind === 'window-target' && row.starts ? `it is a desktop browser an agent opens as a WINDOW (no CDP, no domain fence, no egress proxy) — no profile, fenced or not, switches into it; ${DESKTOP_APP_DOOR}` : id === 'cdp' ? 'it is somebody else\'s browser, so "switch to cdp" is really a second profile (§7.4)' : 'its state is the user\'s own browser profile, not a directory we own (§7.6 rule 3) — escalating to tier 3 does not re-point this profile; the user turns on the real-desktop switch and the agent opens a WINDOW TARGET (vibespace-window list / attach)') : null;
     case 'sweep': return row.ownsDir ? null : lacks('it owns no directory of ours (§7.1: swept ⇔ ownsDir)');
     case 'remote': return row.remote ? null : lacks('it has no remote transport');
     // P10 — the three things the tier-3 row cannot do, each refused by name (§7.6, §9's test-browser-tier3 row)
     case 'cdp': return row.cdp === false ? lacks('it has no CDP — a window on the user\'s desktop is addressed through vibespace-window (the accessibility tree and its own pixmap); there is no url to hand out, so `use --print` / `cdp-url` have nothing to print') : null;
     case 'allowed-domains': return row.allowedDomains === false ? lacks('a domain fence (--allowed-domains) is a CDP-side rule on a browser we launch; a window on the user\'s desktop has no such control — the site is whatever the user opened') : null;
     case 'pin-tab': return row.pinTab === false ? lacks('--pin-tab pins a CDP target id; a window target is leased by its handle (vibespace-window attach) and has no target id') : null;
-    case 'live-view': return row.leaseKind === 'window-target' ? lacks('VibeSpace draws no live pane for the user\'s own desktop in this version — the user is looking at it; a native Wayland window would need the ScreenCast portal\'s consent click + a PipeWire consumer (not wired)') : null;
+    case 'live-view': return row.leaseKind === 'window-target' && !row.starts ? lacks('VibeSpace draws no live pane for the user\'s own desktop in this version — the user is looking at it; a native Wayland window would need the ScreenCast portal\'s consent click + a PipeWire consumer (not wired)') : null;
     default: return { code: 'bad-request', capability, error: `unknown capability ${JSON.stringify(capability)}` };
   }
+}
+// ── lane e2a (docs/design-agent-browser-v2 §E2, B-830d): THE DESKTOP-APP RUNG's ONE door ──
+const DESKTOP_APP_DOOR = '`vibespace-browser new <label> --backend desktop-app [--url <https://…>] [--keep-profile] [--size WxH] [--mode auto|tree|pixels]` opens a real desktop browser beside your chat — no CDP: drive it with `vibespace-window snapshot / click / type / key / screenshot <handle>` (`vibespace-docs browser` §0)';
+/** E2c reserves its flag BY NAME (never silently taken) — the lane that builds it (E2b's `--size` is built: lane e2b). */
+const DESKTOP_APP_LACKS = Object.freeze([['proxy', '--proxy'], ['sharing', '--sharing'], ['cdpPort', '--cdp-port'], ['notes', '--notes'], ['adoptDir', '--adopt']]);
+/** A flag reserved BY NAME for the lane that builds it (`not_yet`) — empty since lane e2c built `--mode` (e2b: `--size`). */
+const NOT_YET_FLAGS = Object.freeze({});
+/** `vibespace-browser new <label> [--backend <id> | --provider <id>] [--url <u>] [--keep-profile] [--size] [--mode]` —
+ *  PURE. `backend` (the door's word) and `provider` (the older flag) name ONE row. The desktop-app row is not a profile:
+ *  → `{ok, door:'desktop-app', label, url, keepProfile, pin}`; every other row → `{ok, door:'profile'}` (createProfile judges
+ *  the rest, as before). Refused by name: two different rows (`backend_conflict`), an unknown row (`provider_unknown`),
+ *  `--mode` outside auto | tree | pixels (`bad_mode` — lane e2c), `--url` / `--keep-profile` / `--size` / `--mode` on
+ *  another row (`desktop_app_only`), a size out
+ *  of bounds (src/desktop-pin.js parsePin — lane e2b: `--size WxH` pins the window's pixel size, `auto` = unpinned), a
+ *  `host` (`provider_local_only` — v1 is this machine), a url that is not the web (`localSchemeOf`, then the launch
+ *  dialog's own http(s) verdict, src/desktop-browser-app.js validateBrowserUrl). */
+function desktopAppNewVerdict(src = {}) {
+  const s = src && typeof src === 'object' ? src : {};
+  const given = (v) => v !== undefined && v !== null && v !== '' && v !== false;
+  for (const k of Object.keys(NOT_YET_FLAGS)) if (given(s[k])) return { ok: false, code: 'not_yet', error: `--${k} is not built yet — lane ${NOT_YET_FLAGS[k]} adds it; launch without it` };
+  const backend = given(s.backend) ? String(s.backend) : null;
+  const provider = given(s.provider) ? String(s.provider) : null;
+  if (backend && provider && backend !== provider) return { ok: false, code: 'backend_conflict', error: `--backend ${backend} and --provider ${provider} name two different rows — give one` };
+  const id = backend || provider;
+  const row = id ? providerRow(id) : null;
+  if (id && !row) return { ok: false, code: 'provider_unknown', error: `unknown backend "${id}" — one of ${providerIds().join(', ')}` };
+  if (!(row && row.leaseKind === 'window-target' && row.starts)) {
+    const extra = given(s.url) ? '--url' : given(s.keepProfile) ? '--keep-profile' : given(s.size) ? '--size' : given(s.mode) ? '--mode' : null;
+    return extra ? { ok: false, code: 'desktop_app_only', error: `${extra} belongs to --backend desktop-app (a desktop browser opened beside your chat); a profile opens a page with \`vibespace-browser open <url>\`` } : { ok: true, door: 'profile' };
+  }
+  if (given(s.host) && s.host !== 'local') return { ok: false, code: 'provider_local_only', error: `"${id}" runs on this machine only in this version — no --host` };
+  // r3 (verify r1 #4): the profile family's flags are refused BY NAME on this rung, never silently dropped
+  for (const [k, f] of DESKTOP_APP_LACKS) if (given(s[k])) return { ok: false, code: 'desktop_app_lacks', error: `${f} does not apply to --backend desktop-app: this rung has no egress policy, no CDP and no profile of ours to share or adopt — a real Chrome with its own throwaway profile` };
+  // lane e2c (§E2.3): `--mode auto | tree | pixels` — the agent's own choice (the engine judges it against the row's tree)
+  if (given(s.mode) && !REACH_MODES.includes(String(s.mode))) return { ok: false, code: 'bad_mode', error: `--mode is one of ${REACH_MODES.join(' | ')}` };
+  const label = cleanLabel(s.label);
+  if (!label) return { ok: false, code: 'bad-request', error: 'a label is required: `vibespace-browser new <label> --backend desktop-app`' };
+  let url = null;
+  if (given(s.url)) {
+    const loc = VERBS.localSchemeOf(String(s.url));
+    if (loc) return { ok: false, code: 'bad-url', error: `--url ${loc.scheme}: is not the web — the desktop browser opens http:// or https:// only` };
+    const v = DBA.validateBrowserUrl(String(s.url));
+    if (!v.ok) return { ok: false, code: v.code, error: v.error };
+    url = v.url;
+  }
+  const pp = given(s.size) ? parsePin(String(s.size)) : { ok: true, pin: null }; // lane e2b (§E2.2): the pinned pixel size
+  if (!pp.ok) return { ok: false, code: pp.code, error: `--size: ${pp.error}` };
+  // an explicit --size wins; else the MODE's default (lane e2c: the engine re-judges `mode` against the row it picks —
+  // a browser with no accessibility tree is pixels-only and pinned unless `size` was given)
+  const mode = given(s.mode) ? String(s.mode) : null;
+  return { ok: true, door: 'desktop-app', label, url, keepProfile: s.keepProfile === true, mode, size: pp.pin || null, pin: pp.pin || defaultPinFor(mode) };
 }
 /** Every row with its cells + the local verdict + (with a host) the verdict
  *  for that machine — what `GET /api/browser/providers` and the digest carry. */
@@ -1205,6 +1259,8 @@ function validateProfileInput(input = {}, { existing = [], control = null, media
   // user's own desktop creates no record and re-points none (a record would
   // have no dir, no seed, nothing the ladder or the sweep could act on, and
   // its lease is the window-target kind keyed on a HANDLE, not a browserKey)
+  // lane e2a (§E2.1): the agent's own desktop-app browser is not a profile either — its door launches a window
+  if (row.leaseKind === 'window-target' && row.starts) return { ok: false, code: 'desktop_app_not_a_profile', error: `"${provider}" is not a profile: ${DESKTOP_APP_DOOR}` };
   if (row.leaseKind === 'window-target') return { ok: false, code: 'tier3_is_a_window_target', error: `"${provider}" is not a profile: a window on your own desktop is addressed as a WINDOW TARGET (vibespace-window list / attach) once the real-desktop switch is on — no browser profile is created or re-pointed for tier 3 (§7.6 rule 3)` };
   // `cdp`: the browser is somebody else's — its loopback CDP port (on `host`,
   // or on this machine) is the whole configuration; nothing is started.
@@ -3260,6 +3316,7 @@ function floorNotice(v) {
 }
 
 module.exports = {
+  desktopAppNewVerdict, DESKTOP_APP_DOOR, NOT_YET_FLAGS, // lane e2a (§E2): the desktop-app rung's door
   sessionNameFor, mintBrowserKey, isBrowserKey, BROWSER_KEY_RE,
   browserKeyFor, LATE_KEY_WHYS, lateKeyVerdict, lateKeyRefusal, lateDefaultPin, isPinWitness, isEmptyPinWitness, witnessCap, // B-f7ab: the late key (first use); r2: the witnessed default (a PREFERENCE — the list admits)
   VARIANTS, REJECTED_VARIANTS, ISOLATED_VARIANTS, isolatedVariant, variantLadder, fencedRungReason, configNamesProfile,

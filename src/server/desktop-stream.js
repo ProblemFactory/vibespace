@@ -255,6 +255,8 @@ function prevOf(url) {
  *   onInput       — (id) => void  (throttled here; RELAYED input only)
  *   onDesktopSize — (id, w, h, viewerId) => void  (P8-2 x4: every SetDesktopSize a client sends, unthrottled — the keeper debounces)
  *   inputPolicy   — (id, viewerId) => { relay, code, why }  (P9b; absent = relay everything)
+ *   pinned        — (id) => the record's pin {w,h} | null (lane e2b: the keeper owns a pinned window's geometry — the xpra relay drops every
+ *                   viewer's and, r3, asks xpra for the pin's desktop size itself on each viewer connection)
  *   onViewerLeft  — (id, viewerId) => void  (P9b; the holder's socket closed)
  *   viewerSeats   — P8-2 x5 (absent ⇒ every socket relayed as before, the policy above alone):
  *                   { join(id, {viewerId, pane, prev, ua}), leave(id, viewerId), state(id, viewerId) → 'active'|'blocked'|'watch'|'free' }
@@ -264,7 +266,7 @@ function prevOf(url) {
  *                   answering anything but 'free'), never elected, never blocked. `refresh(id)` re-applies it.
  *   log
  */
-function create({ auth, resolveTarget, forwardPort = null, onInput = () => { }, onDesktopSize = null, inputPolicy = null, onViewerLeft = null, viewerSeats = null, upstreamWhy = null, log = console, now = Date.now, pingMs = PING_MS, netemEnabled = false, WebSocketClient = WebSocket } = {}) {
+function create({ auth, resolveTarget, forwardPort = null, onInput = () => { }, onDesktopSize = null, inputPolicy = null, pinned = null, onViewerLeft = null, viewerSeats = null, upstreamWhy = null, log = console, now = Date.now, pingMs = PING_MS, netemEnabled = false, WebSocketClient = WebSocket } = {}) {
   if (!auth || typeof auth.requestAuthed !== 'function') throw new Error('desktop-stream: auth.requestAuthed is required');
   if (typeof resolveTarget !== 'function') throw new Error('desktop-stream: resolveTarget is required');
   const wss = new WebSocketServer({ noServer: true, maxPayload: WS_MAX_MESSAGE_BYTES });
@@ -366,7 +368,7 @@ function create({ auth, resolveTarget, forwardPort = null, onInput = () => { }, 
   // rv-desktop-apps F-B4 (lane dc-seams-desktop, 2026-10-05): the RELAY of each stream kind is its own module, ONE
   // line in src/server/stream-relays.js. It gets what this ONE bridge owns (the seats, the stats, the named closes, the
   // keepalive, the oversize close, the input policy) and pumps its protocol's bytes; the bridge spells no kind.
-  const BRIDGE = { BLOCKED_CLOSE, BLOCKED_REASON, ENDED_CLOSE, INPUT_REPORT_MS, KA, WS_HIGH_WATER, WS_LOW_WATER, WebSocketClient, closeCodeOf, closeOversize, closed, inputPolicy, lastClose, leaveOnCut, log, netemQueue, now, onDesktopSize, onInput, onViewerLeft, open, opened, pingMs, refresh, resolveTargetSafe, seatState, stats, takeSeat, upstreamWhy, viewers, wsOversize };
+  const BRIDGE = { BLOCKED_CLOSE, BLOCKED_REASON, ENDED_CLOSE, INPUT_REPORT_MS, KA, WS_HIGH_WATER, WS_LOW_WATER, WebSocketClient, closeCodeOf, closeOversize, closed, inputPolicy, pinned, lastClose, leaveOnCut, log, netemQueue, now, onDesktopSize, onInput, onViewerLeft, open, opened, pingMs, refresh, resolveTargetSafe, seatState, stats, takeSeat, upstreamWhy, viewers, wsOversize };
   const bridges = Object.fromEntries(Object.entries(STREAM_RELAYS).map(([kind, r]) => [kind, r.bridgeOf(BRIDGE)]));
 
   /**

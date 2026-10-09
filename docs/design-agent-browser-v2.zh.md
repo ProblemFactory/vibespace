@@ -2762,6 +2762,101 @@ key，根本没有重定向** —— 本 track 上表里的每一行都是纯 ke
    检测到了拦截"；403/429 那条 `hint` 同理，`hint:'may-need-cloak'` 变成 `hint:{tier:2|3, why}`，
    措辞上仍然必须和一次检测区分得开（与 §4.3.1 那条"我们自己发的生产者必须有名字"同族）。
 
+### E2 — agent 自己启动的「桌面应用浏览器」档（后端阶梯的最底层；B-830d；设计台 2026-10-09）
+
+> 本节是给 docs/design-agent-browser-v2.zh.md 的新增章节（英文孪生见 E2-section.md）。生产库对设计台只读，由车道或主开发粘入；行号读自 2.369.240（db223fb01）。
+
+**Owner 的三条定案（2026-09-25T21:00:29Z，原话）**：「我理解浏览器桌面应用 agent 其实是可以启动的，不过其实是通过浏览器工具 + 最底层 backend 来实现的，默认是和当前窗口并排启动。另外其实也可以加入一下 pin 一个窗口的绝对像素 size，这样就把内外窗口解绑了，永远通过 rescale 来展示内部窗口，这个模式可以方便 agent 以像素模式操作。agent 启动浏览器的时候也可以选择哪个模式，如果是不支持 accessibility 的浏览器，只能用像素模式启动，那就默认用 pinned size（1080p by default）」；2026-10-02T23:12:01Z：「按照原计划，不要 B-b6f1 了。agent 自己决定启动的时候的交互模式和中途可以切换。」
+
+**要解开的矛盾**：design-desktop-apps.md §7.7 写「桌面应用浏览器是人的浏览器」，`window-targets-engine.open()` 对浏览器行按名拒绝 `browser_is_human`（src/server/window-targets-engine.js:607–615；路由 src/routes/window-targets.js:14、:67）。那条拒绝保护的是 agent 浏览器的四条规则（CDP 判定、动作痕迹、出网代理、接管）。E2 不是撤掉它，而是**换一扇门**：agent 从浏览器工具的后端阶梯启动这一档，启动即带上租约、可达记录、模式与痕迹；`vibespace-window open chromium` 照旧拒绝，只是拒绝语指向新门。
+
+#### E2.1 契约
+
+| 项 | 规定 | 依据 |
+|---|---|---|
+| 后端行 | 新文件 `src/browser-backends/desktop-app.js`（一行注册进 `src/browser-backends/index.js`，排在 `local-window` 之前）：`{ id: 'desktop-app', tier: 3, wired: true, label, keyScope: 'none', canSwitchTo: 'no', ownsDir: true, leaseKind: 'window-target', remote: null（v1 只在本机；配对机器日后经 desktop-serve）, starts: true, headed: true, binary: 注册表浏览器行的 exec, cdp: false, allowedDomains: false, pinTab: false, consent: null }` | 阶梯 = `BROWSER_BACKENDS` 的顺序（src/browser-backends/index.js:11–16）；`local-window` 的行是先例（tier 3、`leaseKind: 'window-target'`，src/browser-backends/local-window.js:16） |
+| 启动门 | `vibespace-browser new <label> --backend desktop-app [--url <https…>] [--mode auto\|tree\|pixels] [--size WxH\|auto] [--keep-profile]`；keeper 经 `desktop-app-keeper.launch` 起注册表的浏览器行（chromium → firefox 的 `execs` 顺序，src/desktop-browser-app.js:38）于 xpra 每窗档，带 a11y 开关与环境（:106–118、:161），profile 目录 `data/desktop-apps/<id>/profile`（:84）。记录带 `origin: 'agent-browser'`、`by: {sessionId}` | §7.7 的 Argv / Profile dir 行原样复用 |
+| 可达 | 启动即 `openerGrant`（D1 的唯一例外：开窗者自己的会话，src/window-reach.js openerGrant）；用户可从窗口菜单扩大 / 收回；一窗一持有者 | lane E 的 D1–D6 |
+| 驱动 | 租约是 window-target：之后一律 `vibespace-window snapshot / click / type / key / screenshot <handle>`；`vibespace-browser open / snapshot / eval / screenshot` 对这一档答 `no_cdp_on_this_backend` 并点名窗口动词（和 local-window 同一条路） | 没有 CDP 是这一档的定义，不是缺陷 |
+| 痕迹 | window-targets 的审计行（verb、by: tree \| pixels、handle、origin）就是这一档的动作痕迹；聊天里的窗口芯片照常 | 引擎 `audit()` 已有 |
+| 出网 | **没有出网代理，也没有 CDP 判定**：行里 `allowedDomains: false`、`canSwitchTo: 'no'`，带域名围栏的 profile 不能切进来（切换器按行拒绝）；手册与 `vibespace-browser backend` 的话写明「这一档走真 Chrome，没有出网策略」 | §7.2 的围栏只在 CDP 档 |
+| 接管 | 人随时可以在那扇窗里直接操作（xpra 每窗档本来就是人的画面）；lane E 的持有者 / `takenAt` 规则照用；人在操作时 agent 的输入按名拒绝 | 引擎 :477–482 |
+| 并排 | 启动成功后服务器广播 `desktop-app-opened {id, by: sessionId}`；**正显示着该会话聊天窗的那个客户端**用 `intoChain: linkPlacement(chatWinId)` 把桌面应用窗开在旁边（lane F 的分栏；src/lib/app.js:2024–2034）；没有客户端显示该聊天 ⇒ 不开窗，启动器的运行列表与聊天的窗口芯片能看到；手机 ⇒ 自己一窗（R6） | 多客户端法则：每个客户端都收广播，只有「在屏上」的那个开 |
+| 可见性 | xpra 每窗档没有查看者时主窗未映射，像素动作会丢（src/window-reach.js visibilityVerdict:293–298）：并排规则保证启动时有查看者；用户关掉窗后 agent 的像素动作答 `window_not_visible` 并指 `vibespace-window watch` | 现有判定，照用 |
+| 空闲 | 桌面应用 keeper 的空闲规则（DA3）照用；v1 不做无头保活查看者 | 不要过度设计 |
+| profile | 会话结束按 §7.7 异步删除，`--keep-profile` 才保留；永远不是 agent 浏览器的 `data/browser-*` | §7.7 |
+
+#### E2.2 钉住像素尺寸（E2b）
+
+- 记录上的事实 `pin: {w, h} | null`（设备像素）。有 pin 时 xpra 客户端把**主窗**按 pin 而不是窗格去 fit（`fitGeometry({paneW: pin.w, paneH: pin.h})`，src/lib/xpra-client.js:256 那一处），窗格则把整个 stage 缩放到自己的大小——这正是今天 Watch 模式和「应用最小尺寸大于窗格」已有的 contain-fit（src/lib/xpra-view.js:36–56），只是**允许放大**（今天「never upscaled」；pin 的意思就是永远 rescale）。外窗仍可自由拉伸，不走 `setFixedSize`（那是 app-fit-fixed 给「应用自己固定了尺寸」的，src/lib/desktop-app-window.js:513–519）。
+- 像素坐标 = pin：xpra 每窗档上 X 窗本身就是 pin 大小，`vibespace-window screenshot` 的图就是 pin×pin，`mapPoint` 不改（src/window-reach.js:300–306）。
+- 谁能设：启动参数 `--size`；中途 `vibespace-window size <handle> 1920x1080 | auto`（开窗者对自己的窗；用户对任何窗）；窗口菜单「钉住尺寸… 1920×1080 / 1280×720 / 自动」。窗口芯片写「1920×1080（钉住）」。
+- 默认：树模式不钉；像素模式（含只能像素的浏览器）默认钉 1920×1080。
+
+#### E2.3 交互模式（E2c）
+
+- 启动参数 `--mode auto | tree | pixels` 写进可达记录的 `mode`（src/window-reach.js:80–81 的闭集已有）；中途 `vibespace-window mode <handle> tree | pixels | auto`（新动词：开窗者对自己的窗；用户共享的窗仍由用户定）。
+- PURE `launchModeVerdict({browserKind, a11y, asked})`：chromium 家族带 a11y 开关 ⇒ 按 asked（默认 auto，探针定树或像素）；没有无障碍的浏览器（firefox 的 snap 在本机未测、或 a11y 环境不可得）⇒ `pixels`，并在没给 `--size` 时套 E2b 的默认 pin；答案里写原因（`why`），CLI 原样打印。
+- `auto` 的探针与 `verbGate` 照 lane E（src/window-reach.js:232–253）。
+
+#### E2.4 交给 owner 的 D 决定（默认已填）
+
+| # | 决定 | 默认 |
+|---|---|---|
+| D1 | agent 只能经 `vibespace-browser new --backend desktop-app` 这一扇门启动桌面浏览器；`vibespace-window open chromium` 继续拒绝，拒绝语指向新门 | 是 |
+| D2 | 这一档没有出网代理、没有 CDP 判定；行与手册写明；带域名围栏的 profile 不能切进来 | 接受 |
+| D3 | 并排只开在正显示该会话聊天窗的客户端上；别处不开；手机自己一窗 | 是 |
+| D4 | 树模式默认不钉，像素模式默认钉 1920×1080；钉住的窗格允许放大显示 | 是 |
+| D5 | 开窗者可以中途改自己窗的模式与尺寸；用户共享来的窗仍归用户 | 是 |
+| D6 | profile 跟会话走、默认删，`--keep-profile` 才留；永远不碰 agent 浏览器的 profile | 是 |
+| D7 | 不做无头保活查看者：用户关窗后像素动作按名拒绝并指 `watch` | 是 |
+
+#### E2.5 触及的文件
+
+src/browser-backends/desktop-app.js（新）· src/browser-backends/index.js · src/browser-profiles.js（`new` 的参数校验：backend、mode、size、url；PROVIDERS 派生）· src/server/browser-keeper.js（这一档的 launch：调 desktop-app-keeper、opener grant、window-target 租约）· src/server/window-targets-engine.js（`open` 对 `origin: 'agent-browser'` 放行，其余仍 `browser_is_human`；`size` / `mode` 动词；记录的 `pin`）· src/routes/window-targets.js、src/routes/browser*.js · src/window-reach.js（`setMode` 的开窗者权限；`launchModeVerdict`）· src/desktop-fit.js（`pinOf` / `fitForPin`）· src/desktop-serve.js（记录事实 `pin`）· src/lib/xpra-client.js、src/lib/xpra-view.js（按 pin fit、stage 可放大、徽章）· src/lib/desktop-app-window.js（菜单「钉住尺寸…」、芯片）· src/lib/app.js（`desktop-app-opened` → 并排开窗）· data/bin/vibespace-browser、data/bin/vibespace-window · docs/agent/browser-manual.md、window 手册 · docs/design-desktop-apps.md §7.7（关系改写一句：「人的浏览器，除非 agent 经浏览器工具的 desktop-app 档启动」）· i18n zh/ja/en。
+
+#### E2.6 车道拆分
+
+| 车道 | 内容 | 门禁 | 规模 |
+|---|---|---|---|
+| **E2a 档 + 并排** | 后端行、`new --backend desktop-app [--url] [--keep-profile]`、keeper 的 launch、opener grant、window-target 租约、`open` 的放行与指向语、`no_cdp_on_this_backend`、广播 + 客户端并排、手册、§7.7 改写 | test-browser-profiles（行的格子；`canSwitchTo: no`）· test-browser-cli（新参数与话）· test-window-targets / test-window-reach（经这一档可开，对照：`vibespace-window open chromium` 仍 `browser_is_human`）· test-browser-backend（切进这一档被拒）· 重型 test-desktop-xpra-window §8 扩：agent 路径起真 Chrome，带 a11y 环境的 snapshot 读到页面，窗口在显示该聊天的客户端上并排出现、另一客户端不开；用户关窗后像素动作 `window_not_visible` | ~600 行，≤ 250K |
+| **E2b 钉住尺寸** | 记录 `pin`、xpra 客户端按 pin fit、stage 可放大、`--size` / `size` 动词 / 菜单、芯片 | test-xpra-client（钉住后窗格 resize 不改 fit；解钉重 fit）· test-desktop-fit（PURE）· test-window-targets（动词权限）· 重型：真 xterm 钉 1600×900 放进 700 px 窗格，X 窗 1600×900、画面缩放，`vibespace-window click --at 1500,800` 落点由 `xdotool getmouselocation` 证实 | ~450 行 |
+| **E2c 模式** | `--mode`、`mode` 动词、`launchModeVerdict`、只能像素 ⇒ 默认 pin | test-window-reach（判定表）· test-browser-cli · 重型：`--mode pixels` 起的 Chrome 得 pin 1920×1080，截图正是该尺寸 | ~250 行 |
+
+顺序：E2a → E2b ∥ E2c（E2c 的「默认 pin」一行等 E2b）。验证：E2a 权限类（可达、租约、痕迹）≤ 2 轮；E2b/E2c 各 1 轮。
+
+**实际落地（车道 e2a，2026-10-09，基于 4135dd64e —— 2.369.244）：**
+- 行：`src/browser-backends/desktop-app.js`，E2.1 的各格，登记在 `local-window` **之前**；`createProfile` 以 `desktop_app_not_a_profile` 拒绝它（点名那扇门）；切换进它由行拒绝（`canSwitchTo: 'no'`，有无域名围栏都一样），措辞点名那扇门。
+- 门：`vibespace-browser new <label> --backend desktop-app [--url] [--keep-profile]` → `POST /api/agent/browser/new`（在 agent belt 之后、远程会话拒绝之后）；PURE `desktopAppNewVerdict`（src/browser-profiles.js）：`--size` / `--mode` 以 `not_yet` 拒绝并点名 E2b / E2c（任何 backend 都拒，绝不静默接受），url 先过 `localSchemeOf` 再过启动对话框的 `validateBrowserUrl`，别的行带 `--url` / `--keep-profile` 为 `desktop_app_only`，`--host` 为 `provider_local_only`。
+- 启动——与 E2.5 的**一处偏离**：放在 window-targets 引擎（`openAgentBrowser`），不在 browser-keeper.js。引擎是窗口目标租约与 `openerGrant` 的**唯一**主人，且本就持有 desktop-app keeper；浏览器 keeper 只管 CDP 租约。注册表行按 `BROWSER_KINDS` 顺序选（chromium 系优先）；keeper 的启动只从引擎的 opts 盖上 `origin: 'agent-browser'` + `by: {sessionId}`（src/desktop-serve.js——启动 body 与设备 op 从不带它）；Chrome 的 pid + starttime 就是 keeper 现有的部件身份（无新的 kill 点）。A2：启动的 await 之后开启者已不在 ⇒ 停掉该窗口，答 `not_live`（无租约、无广播）。
+- 驱动：租约带 `origin: 'agent-browser'`（持久化、可恢复），预留 `pin: null`（E2b）与 `mode: null`（E2c）；`vibespace-browser --profile <handle> <verb>` 答 `no_cdp_on_this_backend` 并给出窗口配方（resolve 路由问 `agentBrowserFor(handle, 调用者自己的 key)`——绝不证实别的对话的窗口）；`vibespace-window open chromium` / `--url` 仍是 `browser_is_human`，措辞点名新门；此 origin 的 `isHumanBrowser` 为 false。
+- 摆放：`desktop-app-opened {sessionId, appId, origin}`；PURE `src/lib/desktop-app-placement.js`（正在显示 ⇒ 并排，手机 ⇒ 自己一个窗口，否则什么都不开）；app.js → `openDesktopApp(id, {intoChain: linkPlacement(chatWin)})`。关闭后的可见性沿用现有 `window_not_visible` 判定（无新代码）。
+- 文字：browser-recipes 的 `DESKTOP_APP_POINTER` 并入 `RECIPE_POINTER`（status + 首个动词）；工具介绍不变（字节预算）。
+- D6（r2 → r3，verify r1 #0/#1）：以**记录**的开启者（`rec.by.sessionId`）为键，绝不以租约为键——引擎的 `endAgentBrowsers` 遍历 `keeper.listApps()`（reconcile 在 60 s 宽限后；`dropSession` 立即）：已 detach 的浏览器照样随它的对话结束，非开启者的持有者结束只丢掉它自己的租约。开启者自己的门：`vibespace-window stop <handle>`（`stopOwn`；其他人 ⇒ `not_your_browser`）。
+- r3（#3/#10）：**用户**正在操作（接管——保留它的租约，不在其手下 handback）或有查看者打开着时，停止最多再等一个宽限，并只说一次（一条审计 + `desktop-app-ending` ⇒ 显示它的客户端提示"你离开后它会关闭"）。
+- r3（#2/#6）：Scale ▸ 重启把 origin + 开启者 + 标签带给继任记录（desktop-serve `relaunch` 的 lopts）；引擎沿 `replacedBy` 带走租约（同 reach）。
+- r3（#5/#9）：每个对话最多 `AGENT_BROWSER_CAP` = 2 个活着的桌面浏览器（`desktop_app_cap`，点名句柄与 stop 动词）；整机上限仍归 keeper。
+- r3（#7）：`profileRetireVerdict` 在 agent 浏览器的**每种**结束时都删除其配置，除非 `--keep-profile`；对它的窗口动词计入 `keeper.noteInput`（任务中的 agent 不会被闲置停掉）。
+- r3（#8/#4）：带用户名/密码的 url 按名拒绝（门**与**人用对话框的 `validateBrowserUrl`）；`--proxy / --sharing / --cdp-port / --notes / --adopt` 以 `desktop_app_lacks` 拒绝，门的判定在 adopt 块之前。
+- r3（#11/#12）：记录带 agent 的标签与开启者的名字；窗口的标签与启动器的运行行显示"Agent 浏览器（<名字>）"；结束原因是句子（`rec.lastError`、退出提示："已随打开它的对话一起关闭"）。
+- r4（verify r2，wf_c05649f2：r1 的 13 项中 9 项确认关闭，11 项后续）：`dropSession` 自己结束 agent 浏览器（`endAgentBrowsers({endedId})`，同样的有界等待）；上限不计正在重启（`replacedBy`）的记录，并在 keeper 的 await **之前**预留（每个对话的进行中计数）；用户接管 / 有查看者时 `vibespace-window stop` 像开启者结束那样**等待**（只说一次，≤ 一个宽限）；待结束状态与租约一起持久化（`agentEnds`），重启后的引擎在结束恢复的项之前等一个宽限（查看者尚未重连）；`stopOwn` 按 keeper 自己的配置视图作答；重启过的窗口的旧句柄指向继任者；detach 告诉 agent 它自己的浏览器会运行到对话结束。更正：引擎沿 `replacedBy` 带走租约只适用于**孤儿**租约——有租约时重启路由会拒绝，所以门的路径是 detach → 重启 → 重新 attach（授权随之而来）。
+- 不在本车道：Scale ▸ 重启的继任记录不带 origin 与租约；E2b（`pin`）与 E2c（`mode`）是后续车道。
+- 门禁：scripts/test-desktop-app-rung.mjs（fast）——行/门表、真引擎配假 keeper、CLI 配桩服务器、摆放表、3 个补丁副本对照；scripts/test-desktop-app-rung-chrome.mjs（heavy，r2）——桩 agent 用发布的 CLI 在 scratch 服务器（私有 HOME + runtime 目录 + 自己的 dbus-run-session）上经门启动**真实**的 chromium 系浏览器（xpra 级）：API 里的租约与授权、窗口 snapshot 读到页面、`get url` ⇒ `no_cdp_on_this_backend`、`open chromium` ⇒ `browser_is_human`、1400×900 客户端上聊天旁的分屏对与 390 px 手机上的独立窗口（PNG）、会话结束时的 D6。
+
+**实际落地（车道 e2b，2026-10-09，在 e2a 的 c70c5caf6 之上一个提交 —— 2.369.244）：**
+- PURE `src/desktop-pin.js`（不 import 任何东西 —— 唯一的家）：`parsePin('WxH' | 'auto')`（320–7680 × 240–4320，越界按名拒绝 `size_out_of_bounds` / `bad-size`）、`pinVerdict({facts, record, who, size})`（用户可钉任何窗口；agent 只能钉 `by` 是自己对话的记录，否则 `not_your_window`）、`fitForPin(pin, pane)`（contain、居中、允许放大）、`pinChipText(pin, lang)`（"1920×1080 (pinned)" / 钉住 / 固定）、`defaultPinFor(mode)`（pixels ⇒ 1920×1080，其余 null —— 给 E2c 调；门在没有 `--size` 时已经回落到它，E2c 只需让 `--mode` 不再 `not_yet`）。
+- 这个事实在桌面应用的**记录**上（`rec.pin`），不在租约上（e2a 在租约上预留的 `pin: null` 已删）：desktop-serve 的 `setPin(id, pin)` 是唯一写入者（设置/删除后 `commit()` = 存盘 + `desktop-apps-updated`）；launch 盖 `opts.pin`；Scale ▸ 重启带着它；配对机器上的窗口走新的 `pin` op（hub keeper 的 `setPin`）。
+- 谁来设：门 `vibespace-browser new … --backend desktop-app --size WxH`（`not_yet` 去掉；`--size` 用在 profile 行 ⇒ `desktop_app_only`）；`vibespace-window size <handle> WxH | auto` → `POST /api/agent/window/size` → 引擎 `setSize`（只有 opener，审计 `verb: 'size'`）；窗口的芯片 / ⋯ 菜单「钉住尺寸… 1920×1080 / 1280×720 / 自动」→ `POST /api/desktop/apps/:id/pin`（who: 'user'，任何窗口；菜单行在 xpra 档，`cap(rec, 'scales')`）。
+- xpra 客户端在 X 一侧说 pin（`fitTarget()`：hello 的桌面尺寸、display 包、主窗口的 fit、对话框的位置）—— 钉住时窗格 resize 什么都不变；`setPin()` 就地重新 fit（先 display 再 configure-window）。视图用 `fitForPin` 缩放 stage（钉住时不出最小尺寸徽章）；窗口把每条记录的 pin 交给视图（`view.setPin`）—— 从不 `setFixedSize`；`mapPoint` 不变。
+- r2（实测缺口后的裁定 —— agent 持有租约时所有 viewer 都是 Watch，relay 切掉 Watch 的几何，pin 到不了 X）：钉住窗口的几何归 **keeper**，从不归 viewer —— `fitApplies` 在每一档都接受 pin，`fitApp` 先把根窗口设为 pin（`setDisplaySize` = `xrandr --fb WxH`，src/desktop-display.js）再把主窗口规划到它；`setPin` 立即 fit，launch 的 ready / 重启的 adopt / 皮带都走同一道门；钉住期间 xpra relay **丢弃**每个 viewer 的 display-configure / configure-window（Watch 与 active 都丢，留存的不回放 —— `strip({pinned})`，由 keeper 记录接成 `pinned(id)`）；`auto` 恢复 x5 的唯一所有者规则。Watch viewer 永远不携带几何。
+- 门禁：scripts/test-desktop-pin.mjs（fast，新）—— PURE 表、门、真引擎配假 keeper（opener / 别的对话 / 用户的窗口 / auto / 重启）、接缝、CLI、3 个补丁副本对照；test-xpra-client（钉住的客户端：hello = pin、fit = pin、窗格 resize 被忽略、重钉与取消重新 fit）；test-desktop-app-rung 的 `--size` 腿从 `not_yet` 改为 pin；heavy：真 xterm 钉 1600×900 放进 700 px 窗格 + test-desktop-app-rung-chrome（钉住的 agent Chrome 截图 = pin）。
+
+**实际落地（车道 e2c，2026-10-09，在 e2b 的 def1f2e03 之上一个提交 —— 2.369.244）：**
+- PURE `launchModeVerdict({browserKind, a11y, asked})` 住在 src/window-reach.js 的 `MODES` 旁边（→ `{ok, mode, pin, why}`）；`a11y` = 该家族的无障碍开关已实测（src/desktop-browser-app.js `A11Y_MEASURED_KINDS`：chromium）。Firefox（未实测）只能像素，没给 `--size` 就用 `defaultPinFor('pixels')`。
+- 门接受 `--mode auto|tree|pixels`（集合外 `bad_mode`，profile 行上 `desktop_app_only`）；openAgentBrowser 按它选中的那一行判定，带 pin 启动，把 `mode` 和 opener 授权一起写进 reach 记录（一次广播），并回答 `modeWhy`。
+- `vibespace-window mode <handle> tree|pixels|auto` = 引擎 `setLaunchMode` + `POST /api/agent/window/mode`：只有 opener（否则 `not_your_window`；用户分享的窗口点名它的菜单）；`auto` 立刻重新探测；pin 不动。live 徽标的提示说出模式。
+- 偏离：启动时不探测 AT-SPI 总线（fast 套件的引擎会调用真 helper）；总线不通在 attach 时判定（auto ⇒ 像素，不钉）。
+- 门禁：test-desktop-app-rung ⑩（30 格表、门、引擎、动词、3 个对照）、test-window-reach、heavy test-desktop-app-rung-chrome。
 ## 8. 从共享默认 profile 迁移
 
 什么都不删，那 98 GB 一个字节都不搬。

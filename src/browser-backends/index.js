@@ -12,6 +12,7 @@ const BROWSER_BACKENDS = Object.freeze([
   require('./chromium.js'),
   require('./cloak.js'),
   require('./cdp.js'),
+  require('./desktop-app.js'), // lane e2a (§E2): the agent's own desktop-app browser — the lowest rung that STARTS a process
   require('./local-window.js'),
 ]);
 

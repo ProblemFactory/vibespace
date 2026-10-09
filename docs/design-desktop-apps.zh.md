@@ -239,7 +239,7 @@ Gate：test-xpra-client §6b（向下取整对 10 个比例 × 200..1400 每个�
 **Lane D (a)（2026-09-25）— 小数缩放，重新审视。** 上面"1.5× 在 GTK 里只放大文字"的规则，正是 owner 用缩放 ▸ 从 2× 重启到 1.5× 后出现大量白边的根源（控件减半、窗口不变，GNOME 计算器被夹住的内容列四周露出它自己的背景）。现在小数是**真正的**缩放：按 GDK_SCALE ⌈s⌉ 绘制、以 s ÷ ⌈s⌉ 显示（1.5 = 2 × 0.75）——按设计是**重新采样**的画面（比整数缩放略柔和）；整数缩放保持本节的 1:1 画面，浏览器行保留 dpi 规则（Chrome 按 Xft.dpi 整体缩放）。窗口在重启后保持应用的逻辑尺寸，应用最小尺寸大于 pane 时 fit 保持 pane 的形状，主窗口在第一次 fit 之前先被报出。细节、数字与 gate：docs/design-desktop-apps-seamless.zh.md §3.4 "Lane D (a)"。
 ### 7.7 B-bfe6 — 浏览器作为桌面应用（2.369.166；owner 2026-09-23 "应用里面也可以加入一下浏览器"；本机：google-chrome（deb）+ snap firefox 156.0-1，xpra 6.5.3）
 
-**关系先说清。** 桌面应用里的浏览器是**人**的浏览器：一行注册表（§5——exec 绝不来自 agent），和其他应用一样走 xpra 逐窗口级，带一个由应用会话**自己拥有**的配置目录。它**不是** Agent 浏览器（design-agent-browser-v2 §3：配置在 `data/browser-*` 下，由浏览器配置 keeper 经 CDP 驱动——桌面应用浏览器没有 CDP 端口、没有任何自动化 flag），也绝不打开用户真正的配置。启动器用一句话说明，写在"Browsers"分区里，也写在每张浏览器卡片的 tooltip 里：*This is your own browser window (an app); the Agent browser is separate.*（中文：这是你自己的浏览器窗口（一个应用）；Agent 浏览器（浏览器配置）是另一回事。）
+**关系先说清。** 桌面应用里的浏览器是**人**的浏览器——除非它经浏览器工具的 desktop-app 档启动（design-agent-browser-v2 §E2，车道 e2a：`vibespace-browser new <label> --backend desktop-app`；记录带 `origin: 'agent-browser'`，开启者持有它的窗口目标租约与授权，经窗口工具驱动、没有 CDP——其他启动仍是人的，`vibespace-window open <浏览器行>` 仍是 `browser_is_human`）。人启动的注册表浏览器行：一行注册表（§5——exec 绝不来自 agent），和其他应用一样走 xpra 逐窗口级，带一个由应用会话**自己拥有**的配置目录。它**不是** Agent 浏览器（design-agent-browser-v2 §3：配置在 `data/browser-*` 下，由浏览器配置 keeper 经 CDP 驱动——桌面应用浏览器没有 CDP 端口、没有任何自动化 flag），也绝不打开用户真正的配置。启动器用一句话说明，写在"Browsers"分区里，也写在每张浏览器卡片的 tooltip 里：*This is your own browser window (an app); the Agent browser is separate.*（中文：这是你自己的浏览器窗口（一个应用）；Agent 浏览器（浏览器配置）是另一回事。）
 
 | 部分 | 位置 | 内容 |
 |---|---|---|

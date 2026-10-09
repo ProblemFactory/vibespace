@@ -309,10 +309,14 @@ function capVerdict(live, limits = LIMITS) {
  * `{ remove: boolean, why }` — `why` names the rule for the record/log.
  */
 const PERSON_ENDINGS = Object.freeze(['user', 'relaunch']);
+/** lane e2a (design-agent-browser-v2 §E2, D6; r3 verify r1 #7): a record an AGENT launched through its own door — its profile
+ *  is that agent's throwaway, removed on EVERY ending (idle, its conversation's end, its own stop…) unless --keep-profile. */
+const AGENT_BROWSER_ORIGIN = 'agent-browser';
 function profileRetireVerdict(rec) {
   if (!rec || !rec.profileDir) return { remove: false, why: 'no profile' };
   if (rec.keepProfile) return { remove: false, why: 'the user chose "keep profile"' };
   if (isLiveState(rec.state)) return { remove: false, why: 'the session is live' };
+  if (rec.origin === AGENT_BROWSER_ORIGIN) return { remove: true, why: `the agent's own throwaway profile (${rec.stoppedBy || rec.state})` };
   if (!(rec.pids && rec.pids.app)) return { remove: true, why: 'no app ever ran in it' };
   if (rec.stoppedBy) {
     if (PERSON_ENDINGS.includes(rec.stoppedBy)) return { remove: true, why: `stopped (${rec.stoppedBy})` };

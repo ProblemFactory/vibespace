@@ -1230,8 +1230,8 @@ try {
       ['src/lib/xpra-view.js', '    let bw = backingSize(win.w, r), bh = backingSize(win.h, r);', '    let bw = win.w, bh = win.h;'],
       ['src/lib/xpra-view.js', '    const g = gridNudge(ox, oy); ox += g.x; oy += g.y;', '    const g = { x: 0, y: 0 };'],
       ['src/lib/xpra-view.js', '  const FIT_SLACK_CSS = 1;', '  const FIT_SLACK_CSS = 0;'],
-      ['src/lib/xpra-view.js', "      if (mode === 'watch') {\n        for (const w of client.windows.values())", "      if (true) {\n        for (const w of client.windows.values())"],
-      ['src/lib/xpra-client.js', '    return { width: Math.max(pane.width, g ? g.x + g.w : 0), height: Math.max(pane.height, g ? g.y + g.h : 0) };', '    return { width: pane.width, height: pane.height };'],
+      ['src/lib/xpra-view.js', "      else if (mode === 'watch') {\n        for (const w of client.windows.values())", "      else if (true) {\n        for (const w of client.windows.values())"], // int243: lane e2b's pin fit went first (a pinned stage), the watch branch is its else
+      ['src/lib/xpra-client.js', '    return { width: Math.max(ft.paneW, g ? g.x + g.w : 0), height: Math.max(ft.paneH, g ? g.y + g.h : 0) };', '    return { width: ft.paneW, height: ft.paneH };'], // int243: lane e2b's fitTarget (the pin's size when pinned, else the pane) respelled the lever
       ['src/lib/window.js', '  _ownMinOf(win) { return minOf(win, this._workspaceBox()); }', '  _ownMinOf(win) { return minOf(win); }'],
       ['src/desktop-serve.js', "      if (own && M.capsOf(rec, backends).crispText) {\n        const xd = await display.waitForXftDpi(", "      if (false) {\n        const xd = await display.waitForXftDpi("],
       ['src/desktop-fit.js', '  if (eff < Math.SQRT2) return eff;', '  return Math.min(2, Math.max(1, Math.round(normalizeDpr(dpr) * 2) / 2)); // r1 CONTROL (round 3 A3 respelled the auto rule: the lever is its first line)'],

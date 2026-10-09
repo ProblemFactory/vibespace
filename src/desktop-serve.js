@@ -216,6 +216,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const M = require('./desktop-apps');
+const { parsePin, pinOf } = require('./desktop-pin'); // lane e2b (§E2.2): the record's fact `pin` (PURE)
 const O = require('./office-open'); // §7.9: the LibreOffice rows as a machine serves them, the open-with verdict, the argv
 const LIMITS = require('./keeper-limits');
 const displayFacts = require('./desktop-display');
@@ -285,7 +286,11 @@ const namedError = (code, msg) => { const e = new Error(msg); e.code = code; ret
 /** The closed op set — a caller cannot invent one (an unknown op on an old
  *  daemon HANGS: src/agentd/client.js asks only a daemon whose hello-ack names
  *  `desktop-serve`; an unknown op here is refused by name). */
-const DESKTOP_SERVE_OPS = Object.freeze(['facts', 'launch', 'stop', 'status', 'list', 'windows', 'fit', 'keep-alive', 'relaunch', ...AS.APP_OPS]);
+/** lane e2a (design-agent-browser-v2 §E2): the record origin of a browser an agent launched through its own door. */
+const AGENT_BROWSER_ORIGIN = 'agent-browser';
+/** lane e2a r3 (verify r1 #12): what an agent browser's ending says (rec.lastError — the exit toast words its own). */
+const AGENT_BROWSER_ENDING_WORDS = Object.freeze({ 'opener-ended': 'closed with the conversation that opened it', 'opener-gone': 'closed: the conversation that opened it ended while it started', 'opener-stopped': 'closed by the agent that opened it' });
+const DESKTOP_SERVE_OPS = Object.freeze(['facts', 'launch', 'stop', 'status', 'list', 'windows', 'fit', 'keep-alive', 'pin', 'relaunch', ...AS.APP_OPS]);
 /** The hub settings a machine's decisions read (the op carries them as `settings`; in-process they are the hub's own reader). */
 const SETTING_KEYS = Object.freeze(['desktop.backendPrefs', 'desktop.appScale', 'desktop.idleTimeoutMin']);
 const settingsReader = (obj) => (key) => (obj && typeof obj === 'object' && SETTING_KEYS.includes(key) ? obj[key] : undefined);
@@ -646,6 +651,15 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     const rec = M.newRecord({ id, label: doc ? doc.label : row.label, exec: execPath, args: browser ? browser.argv : office ? office.argv : (row.args || []), cwd, env: browser && Object.keys(browser.env).length ? { ...(row.env || {}), ...browser.env } : row.env, source: v.launch.source, backend: resolved.backend, via: resolved.via, fallbackWhy: resolved.fallbackWhy, idleTimeoutMs: idleTimeoutMin(serverSetting) * 60000, now: now(), scale: knobs.scale, dpi: knobs.dpi, gdkScale: rungScales ? knobs.gdkScale : null, pictureScale: rungScales ? knobs.pictureScale : null, scaleOrigin: rungScales ? pick.origin : null, scaleFrom: rungScales ? pick.from : null });
     if (v.launch.source === 'registry') rec.appId = row.id;
     if (browser) { rec.browser = browser.kind; rec.profileDir = browser.profileDir; rec.keepProfile = browser.keepProfile; rec.url = browser.url; rec.confinement = browser.confinement; }
+    // lane e2a (design-agent-browser-v2 §E2): a browser an AGENT launched through `vibespace-browser new --backend desktop-app`
+    // (the window-targets engine's openAgentBrowser — the only caller passing it) carries its origin + opener; every other
+    // launch (the dialog, `vibespace-window open`, an op) has none, so `browser_is_human` keeps judging it
+    if (browser && opts.origin === AGENT_BROWSER_ORIGIN) {
+      rec.origin = AGENT_BROWSER_ORIGIN;
+      rec.by = opts.by && opts.by.sessionId ? { sessionId: String(opts.by.sessionId), ...(opts.by.name ? { name: String(opts.by.name).slice(0, 120) } : {}) } : null;
+      if (typeof opts.label === 'string' && opts.label.trim()) rec.label = opts.label.trim().slice(0, 120); // r3 (#11): the agent's own label (the door cleaned it)
+    }
+    if (pinOf(opts.pin)) rec.pin = pinOf(opts.pin); // lane e2b (§E2.2): the pinned pixel size — the door's `--size`, or a relaunch carrying it
     if (office) { rec.office = office.module; rec.profileDir = office.profileDir; } // §7.9
     if (doc) { rec.file = doc.file; rec.fileMtimeAtLaunch = doc.mtime; } // §7.9: the after-edit fact's baseline
     rec.recipe = resolved.recipe;
@@ -682,7 +696,9 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     if (!rv.ok) throw namedError(rv.code, rv.error);
     const why = M.relaunchVerdict(rec, backends) || (stopping.has(id) || rec.replacedBy ? { code: 'not-ready', error: `${rec.label || id} is already stopping` } : null);
     if (why) throw namedError(why.code, why.error);
-    const lopts = { scaleChoice: rv.choice, replacing: id };
+    // lane e2a r3 (verify r1 #2/#6): the agent's own browser stays the agent's through a Scale ▸ relaunch — its origin, opener
+    // and label ride to the successor (keepProfile + url already ride the body); the engine carries the lease along replacedBy
+    const lopts = { scaleChoice: rv.choice, replacing: id, ...(rec.origin === AGENT_BROWSER_ORIGIN ? { origin: rec.origin, by: rec.by, label: rec.label } : {}), ...(pinOf(rec.pin) ? { pin: rec.pin } : {}) }; // lane e2b: the pin rides the relaunch
     if (settings) lopts.settings = settings;
     // §7.9: a LibreOffice session relaunches the same way — its document is LOCKED by the running instance
     // (.~lock.<name>#: a successor started beside it would open "Document in use"), and its profile goes with it
@@ -1146,7 +1162,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
       if (force) rec.stopForced = true; // B-04da ④: the person confirmed losing unsaved edits
       if (why === 'idle') rec.lastError = `stopped after ${Math.round(rec.idleTimeoutMs / 60000)} min without input (idle timeout)`;
       else if (why === 'relaunch') rec.lastError = `relaunched as ${rec.replacedBy || 'a new session'} at another scale`;
-      else if (why !== 'user') rec.lastError = why;
+      else if (why !== 'user') rec.lastError = AGENT_BROWSER_ENDING_WORDS[why] || why; // r3 (#12): the agent rung's endings in words
       if (!clean) rec.lastError = `${rec.lastError ? rec.lastError + '; ' : ''}a process survived SIGKILL — check ${LOG_DIR}/${id}/app.log`;
       // 2.369.176: a browser relaunch CARRIES the profile — every part is verified gone (the browser's lock is released),
       // so the dir is moved onto the successor's own path (its empty scaffold removed first); a failed move is said by
@@ -1205,7 +1221,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
   function clearFit(id) { const f = fits.get(id); if (f) { clearTimeout(f.timer); fits.delete(id); } }
   /** Does the keeper fit this record's app at all (a live, ready, OWN rfb
    *  display whose rung's `fit` column says the keeper does it)? */
-  function fitApplies(rec) { return !!rec && rec.state === 'ready' && !stopping.has(rec.id) && M.keeperFits(M.fitPolicyOf(rec, backends)); }
+  function fitApplies(rec) { return !!rec && rec.state === 'ready' && !stopping.has(rec.id) && (M.keeperFits(M.fitPolicyOf(rec, backends)) || !!pinOf(rec.pin)); } // lane e2b r2: a PINNED window's geometry owner is the keeper on every rung
   /** The bridge's report: a client asked the display to be w×h. The server
    *  may or may not take it (Xvnc does, x11vnc cannot) — the fit reads the
    *  truth; the ask is only the trigger, debounced. */
@@ -1251,9 +1267,21 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
       if (belt) f.beltAt = t;
       let changed = false;
       // the framebuffer changes only when a client asked (Xvnc follows SetDesktopSize) — read it then, on a non-belt run, or on the slow belt
-      if (!rec.fb || f.sizeAsked || !belt || slow) {
-        const size = await display.displaySize({ hostId, display: rec.display, authFile: xenv.XAUTHORITY, env: xenv, bins: hf.bins });
+      // lane e2b r2 (the ruling): a PINNED window — the keeper sets the ROOT to the pin first (xrandr), whoever views or leases it;
+      // the relay drops every viewer's display/geometry packets meanwhile, so the plan below fits the main window to the pin
+      const pin = pinOf(rec.pin);
+      // r3 (the ruling): on the per-window rung the desktop size is XPRA's — never fought with xrandr; the stream bridge asks
+      // xpra for the pin on every viewer connection, and the keeper only plans the main window to the pin (below)
+      const xpraRoot = !!pin && !M.keeperFits(M.fitPolicyOf(rec, backends));
+      if (!rec.fb || f.sizeAsked || !belt || slow || (pin && !xpraRoot && (rec.fb.w !== pin.w || rec.fb.h !== pin.h))) {
+        let size = await display.displaySize({ hostId, display: rec.display, authFile: xenv.XAUTHORITY, env: xenv, bins: hf.bins });
         if (!size.ok) return refuse(rec, f, size.why);
+        if (pin && !xpraRoot && (size.w !== pin.w || size.h !== pin.h)) { // a keeper-fitted (no-xpra) rung: the keeper's own act on the root
+          const rs = await display.setDisplaySize({ hostId, display: rec.display, authFile: xenv.XAUTHORITY, env: xenv, bins: hf.bins, w: pin.w, h: pin.h });
+          if (!rs.ok) return refuse(rec, f, rs.why);
+          size = await display.displaySize({ hostId, display: rec.display, authFile: xenv.XAUTHORITY, env: xenv, bins: hf.bins });
+          if (!size.ok) return refuse(rec, f, size.why);
+        }
         f.sizeAsked = false;
         if (!rec.fb || rec.fb.w !== size.w || rec.fb.h !== size.h) { rec.fb = { w: size.w, h: size.h, at: t }; changed = true; }
       }
@@ -1262,8 +1290,21 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
       // an UNCHANGED tree over an unchanged framebuffer after a settled read: nothing moved — no visibility read, no plan
       if (belt && !changed && f.tree === tree.text && f.settledRuns > 0) { f.settledRuns++; return { ok: true, settled: true, wid: rec.fit && rec.fit.wid, unchanged: true }; }
       const visible = await display.viewableWindows({ hostId, display: rec.display, authFile: xenv.XAUTHORITY, env: xenv, bins: hf.bins });
-      const windows = tree.rows.map((r) => ({ ...r, mapped: visible ? visible.has(r.id) : null }));
-      const plan = M.appFitPlan(windows, rec.fb, { applied: rec.fit && rec.fit.ok ? rec.fit : null });
+      // r3: with NO viewer xpra leaves an app's windows UNMAPPED (measured, the LibreOffice in-process repro) — a pinned window
+      // on the xpra rung is fitted mapped or not, so the pin holds for a boot / a restore before anybody looks
+      const windows = tree.rows.map((r) => ({ ...r, mapped: xpraRoot ? null : visible ? visible.has(r.id) : null }));
+      const target = xpraRoot ? { w: pin.w, h: pin.h } : rec.fb; // r3: a pinned window's plan maximises its main window to the PIN
+      const plan0 = M.appFitPlan(windows, target, { applied: rec.fit && rec.fit.ok ? rec.fit : null });
+      // r3 (measured: the agent's Chrome keeps a SECOND named top-level at its first size, 2033×2284, which the plan only moved
+      // to 0,0 — the screenshot's bounding box stayed that size): a pinned window's other top-levels larger than the pin are
+      // clamped INTO it, so every pixel the agent is shown is the pin's
+      const clamps = xpraRoot && plan0.main ? windows.filter((w) => w.id !== plan0.main.id && (w.depth == null || w.depth === 1) && w.w > 1 && w.h > 1 && (w.w > target.w || w.h > target.h)).map((w) => ({ id: w.id, w: Math.min(w.w, target.w), h: Math.min(w.h, target.h) })) : [];
+      // MEASURED (r3, xwininfo -tree): xpra REPARENTS an app's window into its own `Xpra-CorralWindow-<client>` top-level — the plan's
+      // main is that corral, and resizing it left the Chrome client inside at its first size; the client is sized to the pin too
+      const corral = xpraRoot && plan0.main ? /^Xpra-CorralWindow-(0x[0-9a-f]+)$/i.exec(String(plan0.main.name || '')) : null;
+      const client = corral ? tree.rows.find((r) => r.id === parseInt(corral[1], 16)) : null;
+      if (client && (client.w !== target.w || client.h !== target.h)) clamps.push({ id: client.id, w: target.w, h: target.h });
+      const plan = clamps.length ? { ...plan0, clamps, settled: false } : plan0;
       if (!plan.main) {
         f.tree = null; f.settledRuns = 0;
         // no window yet: keep asking while the first-window budget lasts, then the tick's belt
@@ -1280,8 +1321,8 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
       const act = await display.applyWindowPlan({ hostId, display: rec.display, authFile: xenv.XAUTHORITY, env: xenv, bins: hf.bins, plan });
       if (!act.ok) return refuse(rec, f, act.why, changed);
       f.refusedAt = 0;
-      rec.fit = { ok: true, wid: plan.main.id, w: rec.fb.w, h: rec.fb.h, moved: plan.moves.length, at: t, why, ms: act.ms, via: act.via || null };
-      log.log?.(`[desktop] ${id}: fitted ${rec.label}'s window 0x${plan.main.id.toString(16)} ${plan.main.w}x${plan.main.h}+${plan.main.x}+${plan.main.y} → ${rec.fb.w}x${rec.fb.h}+0+0 (${why}, ${act.ms} ms${act.via === 'wm' ? ', maximised by the window manager' : ''}${plan.moves.length ? `, ${plan.moves.length} other window(s) nudged inside` : ''})`);
+      rec.fit = { ok: true, wid: plan.main.id, w: target.w, h: target.h, moved: plan.moves.length, at: t, why, ms: act.ms, via: act.via || null };
+      log.log?.(`[desktop] ${id}: fitted ${rec.label}'s window 0x${plan.main.id.toString(16)} ${plan.main.w}x${plan.main.h}+${plan.main.x}+${plan.main.y} → ${target.w}x${target.h}+0+0 (${why}, ${act.ms} ms${act.via === 'wm' ? ', maximised by the window manager' : ''}${plan.moves.length ? `, ${plan.moves.length} other window(s) nudged inside` : ''})`);
       commit();
       return { ok: true, settled: false, wid: plan.main.id };
     })().finally(() => { f.inflight = null; });
@@ -1497,12 +1538,27 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
   /** MIGRATIONS ONLY (src/server/migrations.js, 2026-09-runaway-parks-void): reshape the IN-MEMORY store and commit
    *  (atomic save + broadcast) — a file edit beside a loaded keeper is overwritten by its next save. */
   function reshapeStore(fn) { const r = fn(store); commit(); return r; }
+  /** lane e2b (design-agent-browser-v2 §E2.2): the record's fact `pin` ({w, h} device px | null = fit the pane) — set
+   *  and cleared HERE only, saved + broadcast (commit): the showing clients re-fit in place, a restart restores it, a
+   *  relaunch carries it. Who may and the bounds are the caller's verdict (src/desktop-pin.js). */
+  function setPin(id, pin) {
+    const rec = store.apps[id];
+    if (!rec) throw namedError('not-found', `no desktop app ${id} on this machine`);
+    const p = pinOf(pin);
+    if (p) rec.pin = p; else delete rec.pin;
+    commit();
+    // r2 (the ruling): the KEEPER fits X to the pin at once (and at a launch's ready, a restart's adopt, every belt — fitApplies);
+    // auto hands the geometry back to the active viewer (today's one-owner rule) — the keeper's fit stops unless its rung fits anyway
+    if (p && fitApplies(rec)) scheduleFit(id, `pinned ${p.w}x${p.h}`, 0);
+    else if (!p && !M.keeperFits(M.fitPolicyOf(rec, backends))) clearFit(id);
+    return get(id);
+  }
   /** The latest resource sample of a record (the `status` op; a device's hub judges it). */
   function latestSample(id) { const s = samples.get(id); return s ? { at: s.at, pids: s.pids, sample: s.sample } : null; }
   const isStopping = (id) => stopping.has(id);
 
   load();
-  return { launch, relaunch, startDeferred, stop, reshapeStore, keepAlive, noteInput, noteDesktopSize, setWatchProbe, fitApp, get, list, listApps, liveRecords, streamTarget, x11EnvFor, windows, xpraWww, instancePrefs, facts, installFacts, installState, registry, adoptAll, start, shutdown, tick, sessionPids, apps,
+  return { launch, relaunch, startDeferred, stop, reshapeStore, setPin, keepAlive, noteInput, noteDesktopSize, setWatchProbe, fitApp, get, list, listApps, liveRecords, streamTarget, x11EnvFor, windows, xpraWww, instancePrefs, facts, installFacts, installState, registry, adoptAll, start, shutdown, tick, sessionPids, apps,
     machineView, commit, markDirty, latestSample, isStopping, backends,
     storeFile, logRoot, STORE_FILE, LOG_DIR, SESSION_ENV, _store: () => store };
 }
@@ -1565,6 +1621,7 @@ async function runDesktopServeOp(ds, action, params = {}) {
     if (op === 'status') return { ok: true, app: ds.get(id), sample: ds.latestSample(id) };
     if (op === 'stop') return { ok: true, app: await ds.stop(id, { why: STOP_WHYS.includes(p.why) ? p.why : 'user', force: p.force === true }) }; // B-04da ④: `force` = the person confirmed the loss
     if (op === 'keep-alive') return { ok: true, app: ds.keepAlive(id) };
+    if (op === 'pin') { const v = parsePin(p.pin); return v.ok ? { ok: true, app: ds.setPin(id, v.pin) } : bad(v.error); } // lane e2b: a paired machine's window pinned by the hub's verdict
     if (op === 'windows') {
       const r = await ds.windows(id);
       return r && r.ok ? { ok: true, windows: r.windows } : { ok: false, code: 'no_windows', error: (r && r.why) || 'the window census failed', windows: [] };

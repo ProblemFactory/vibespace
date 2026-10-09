@@ -111,7 +111,7 @@ function heldRefresher({ mountpoint, statRemote, invalidate, procRoot = '/proc',
   async function tick() {
     if (stopped) { tickTimer = null; return; }
     const stale = [];
-    let asked = 0, answered = 0, changed = 0; const cand = [];
+    let asked = 0, answered = 0, changed = 0; const cand = new Map(); // abs → moved
     for (const [abs, h] of [...held]) {
       if (asked && !answered && silent >= HELD_QUIET_PASSES) break; // slow mode: one probe per pass
       const still = [];
@@ -127,8 +127,24 @@ function heldRefresher({ mountpoint, statRemote, invalidate, procRoot = '/proc',
       const moved = h.seen !== null && key !== h.seen;
       if (h.seen === null) h.cap = st.size; // rclone caps a held fd at the size its file had at open
       h.size = st.size;
-      if (moved || h.again) cand.push([abs, moved]);
+      if (moved || h.again) cand.set(abs, moved);
       h.again = moved; h.seen = key;
+    }
+    // One pass stats a SQLite family (x.db, -wal, -shm) file by file: a commit or a checkpoint on the device
+    // between two of those stats tears the pass (a -shm seen moved beside the -wal's size from before that commit;
+    // a -wal truncated beside a db from before its checkpoint). A family with a moved file gets a second look,
+    // -wal last, so it is judged on a -wal no older than what moved and refreshed as one
+    for (const base of new Set([...cand].filter(([, m]) => m).map(([abs]) => abs.replace(/-(wal|shm)$/, '')))) {
+      if (!held.has(base + '-wal') && !held.has(base + '-shm')) continue; // a plain file: no family
+      for (const abs of [base, base + '-shm', base + '-wal']) {
+        const h = held.get(abs);
+        if (!h || h.seen === null || stopped) continue;
+        const st = await statRemote(abs);
+        if (!st) continue;
+        const key = `${st.size}|${st.mtime}`;
+        h.size = st.size;
+        if (key !== h.seen) { cand.set(abs, true); h.again = true; h.seen = key; }
+      }
     }
     // A SQLite -wal that outgrew what the open connection's handle can read:
     // refreshing its -shm points the reader at frames it cannot read (disk I/O

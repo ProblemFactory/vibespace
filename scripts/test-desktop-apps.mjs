@@ -486,7 +486,7 @@ console.log('§8 the xpra client stream, classified (P8-2) — the sieve, the ne
   // NEGATIVE CONTROL: the r5 strip (a denylist of input — every non-input packet relayed) on the same bytes relays the lifecycle packets
   {
     const srcS = read('src/server/stream-relay-xpra.js'); // F-B4: the xpra relay's own file
-    const from = "      if (life || (!allowInput && !(type !== null && XPRA_WATCH_TYPES.has(type)))) dropped++; else keep.push(u);";
+    const from = "      if (life || pin || (!allowInput && !(type !== null && XPRA_WATCH_TYPES.has(type)))) dropped++; else keep.push(u);"; // lane e2b r2: `pin` = the pin fence
     ok(srcS.split(from).length === 2, 'the allowlist decision is spelled once in the bridge (the control patches exactly it)');
     const file = MUTD.write('src/server/stream-relay-xpra.js', srcS.replace(from, '      if (input && !allowInput) dropped++; else keep.push(u); // pre-fix (r5): a denylist of input'), 'xstream');
     try {

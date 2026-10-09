@@ -69,13 +69,40 @@ start the user's browser yourself: `vibespace-window open` of a browser row (or
 with `url` / `keepProfile`) is refused `browser_is_human` — the user starts
 their own browser and can share it with you.
 
+**Your OWN desktop browser** (when the agent browser cannot reach a site) has
+ONE door, the browser tool's: `vibespace-browser new <label> --backend
+desktop-app [--url <https://…>] [--keep-profile]`. It answers a handle that you
+already hold (the lease) and that is shared with you (the opener's grant) —
+drive it here with `snapshot` / `click` / `type` / `key` / `screenshot`. It
+opens beside your chat on the client showing it; once the user closes that
+window a pixel verb answers `window_not_visible` — `watch` says how to get it
+back. No CDP, no egress policy (`vibespace-docs browser` §0 (g)). At most 2 per
+conversation; `vibespace-window stop <handle>` stops one (only the opener may),
+and they all end with your conversation (the user may keep one open a little
+longer while they use it).
+`vibespace-window size <handle> 1920x1080` PINS your desktop browser's pixel
+size (320–7680 × 240–4320; `--size WxH` at `new` does it at launch): the X
+window IS that size, so `screenshot` is that many pixels and `click --at x,y`
+speaks them, while the picture scales to whatever pane the user has (up or
+down) — whoever is viewing, even while you hold it. `size <handle> auto` unpins
+(it fits the pane again). Only the opener
+pins its own browser; the user pins any window from its menu (Pin size…).
+
+`vibespace-window mode <handle> tree|pixels|auto` switches how YOU drive the
+desktop browser you opened (`--mode` at `new` does it at launch): tree =
+`snapshot` + @refs, pixels = `screenshot` + `click --at x,y`, auto = probed
+again now and at attach. It answers the mode and why. Only the opener sets it;
+a window the user shared keeps the user's mode (`not_your_window`). A browser
+without accessibility stays pixels and says why.
+
 **Many windows, many agents.** One holder per window (the lease), but any
 number of windows can be held by different agents at the same time — each app
 runs on its own private display, so what you do in yours never reaches another.
 
 ## Tree or pixels — how the user shared the window
 
-Every share has a **mode**, chosen by the user (you never switch it):
+Every share has a **mode**, chosen by the user (you never switch it — except on
+the desktop browser YOU opened, see `mode` above):
 
 | Mode | How you read it | How you act | Refused |
 |---|---|---|---|

@@ -148,6 +148,27 @@ try {
   check('back within that size (a TRUNCATE checkpoint) the family refreshes', winv.length > w0 && winv[w0].length === 3, JSON.stringify(winv.slice(w0)));
   rW.stop();
 
+  console.log('§12b a pass stats a family file by file: a commit or a checkpoint landing between two of its stats is looked at again before it is judged (B-0c75)');
+  // The fake device lands the change right after a chosen answer — the torn pass §12 met only under load, at a fixed point
+  const mpT = path.join(tmp, 'mnt-t'); const tdb = path.join(mpT, 't.db');
+  const tst = new Map([[tdb, { size: 4096, mtime: 'a' }], [tdb + '-wal', { size: 0, mtime: 'a' }], [tdb + '-shm', { size: 32768, mtime: 'a' }]]);
+  [tdb, tdb + '-wal', tdb + '-shm'].forEach((f, i) => hold(510, 3 + i, f));
+  const tinv = [], tlook = []; let tear = null; // [after(abs), the device change]
+  const rT = heldRefresher({ mountpoint: mpT, procRoot: proc, tickMs: 20, scanGapMs: 50, scanDelayMs: 5,
+    statRemote: async (abs) => { const v = tst.get(abs) || null; tlook.push(path.basename(abs)); if (tear && tear[0](abs)) { tear[1](); tear = null; tlook.push('TEAR'); } return v; },
+    invalidate: async (p) => { tinv.push([...p].map((f) => path.basename(f)).sort()); } });
+  rT.sawRead();
+  await until(() => tinv.length >= 1 && tlook.length >= 6);
+  const first = tlook[0], t0 = tinv.length; // a pass looks at the held files in one fixed order
+  tear = [(a) => a.endsWith('-wal'), () => { tst.set(tdb + '-wal', { size: 8272, mtime: 'b' }); tst.set(tdb + '-shm', { size: 32768, mtime: 'b' }); }];
+  await until(() => !tear && tlook.length - tlook.lastIndexOf('TEAR') > 9);
+  check('a commit landing right after the -wal is answered leaves the family alone (its -wal is looked at again)', tinv.length === t0, JSON.stringify({ inv: tinv.slice(t0), looks: tlook.slice(tlook.lastIndexOf('TEAR') - 3, tlook.lastIndexOf('TEAR') + 7) }));
+  const t1 = tinv.length;
+  tear = [(a) => path.basename(a) === first, () => { tst.set(tdb + '-wal', { size: 0, mtime: 'c' }); tst.set(tdb, { size: 4096, mtime: 'c' }); tst.set(tdb + '-shm', { size: 32768, mtime: 'c' }); }];
+  await until(() => !tear && tinv.length > t1);
+  check('a checkpoint landing right after the first answer of a pass refreshes the family as one', tinv.length > t1 && tinv[t1].length === 3, JSON.stringify({ inv: tinv.slice(t1), looks: tlook.slice(tlook.lastIndexOf('TEAR') - 1, tlook.lastIndexOf('TEAR') + 7) }));
+  rT.stop();
+
   console.log('§13 wiring: rclone exiting stops the refresher; no sync fs call on the mountpoint (verify r1)');
   const src = fs.readFileSync(new URL('../src/device-mount.js', import.meta.url), 'utf8');
   check('rclone exiting stops the refresher and says so', /rc\.on\('exit'[\s\S]{0,200}refresher\.stop\(\)[\s\S]{0,40}log\(/.test(src));

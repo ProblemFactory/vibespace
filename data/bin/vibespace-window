@@ -47,7 +47,17 @@ const USAGE = `vibespace-window — act on a native window through its accessibi
                                                  (tree | pixels, and why); plus, behind the user's switch, their own desktop — marked
   vibespace-window open <app-id> [--title <t>]   start a REGISTRY app on a private display ('list' prints the ids); attaches you. An arbitrary
                                                  executable is the user's act (their Desktop apps dialog), never yours: --exec is refused exec_is_human
+                                                 A desktop-app BROWSER row is the user's (browser_is_human): your own desktop browser
+                                                 is \`vibespace-browser new <label> --backend desktop-app\` — then snapshot / click / type here
   vibespace-window attach <handle>               take the lease on a window (one holder per window) — prints the share's mode and why
+  vibespace-window size <handle> <WxH|auto>      pin YOUR desktop browser's pixel size (320–7680 × 240–4320): the X window IS
+                                                 that size — screenshot and click --at speak its pixels, the picture scales
+                                                 to the pane; auto = fit the pane again (the user pins any window: its menu)
+  vibespace-window mode <handle> <tree|pixels|auto>  how YOU drive your desktop browser: tree = snapshot + @refs, pixels =
+                                                 screenshot + click --at x,y, auto = attach probes its tree (a window the
+                                                 user shared is the user's to set; a browser with no tree stays pixels)
+  vibespace-window stop <handle>                 stop YOUR desktop browser (opened by \`vibespace-browser new … --backend desktop-app\`;
+                                                 it also ends with your conversation) — any other window is the user's to stop
   vibespace-window snapshot <handle> [--budget N] [--no-text] [--json]
                                                  THE accessibility tree: @ref role "name" [actions] (x,y wxh) states — refs are per snapshot
   vibespace-window screenshot <handle> [--out <file.png>]
@@ -102,7 +112,7 @@ function printRefusal(r, status) {
   else if (r.code === 'no_live_view') console.error('  the user is looking at this window on their own desktop; there is no live pane to point them at — describe what you need in your reply instead');
   else if (r.code === 'capture_needs_portal' || r.code === 'capture_unavailable') console.error('  pixels of this window cannot be read here (the refusal says why); `snapshot` still reads its tree');
   else if (r.code === 'desktop_window_gone') console.error('  the application exited — `vibespace-window list` again');
-  else if (r.code === 'browser_is_human') console.error('  the user starts their own browser and can share it with you (then `vibespace-window list` shows it) — for your own web work use YOUR browser: `vibespace-browser` (`vibespace-docs browser`)');
+  else if (r.code === 'browser_is_human') console.error('  the user starts their own browser and can share it with you (then `vibespace-window list` shows it) — for your own web work use YOUR browser: `vibespace-browser` (`vibespace-docs browser`); when it cannot reach a site, a real desktop browser of your own opens beside your chat through ONE door: `vibespace-browser new <label> --backend desktop-app [--url <https://…>]` (then drive it with these verbs)');
   else if (r.code === 'not_exposed') console.error('  the user has not shared this window with you — ask them (they can share it from the window\'s ⋯ menu); do not look for another road to it');
   else if (r.code === 'mode_pixels') console.error('  the user shared this window in pixel mode — read it with screenshot, act with click --at x,y / type / key / scroll');
   else if (r.code === 'window_not_visible') console.error('  nobody has this window open, so it has no pixels — ask the user to open it (`vibespace-window watch <handle>` says where), or use the tree');
@@ -265,6 +275,27 @@ function printNode(n) {
     const r = await call('POST', '/api/agent/window/attach', { handle: h });
     const mline = r.mode ? `\nmode: ${r.mode.mode === 'auto' ? `auto → ${r.mode.resolved || '?'}` : r.mode.mode} — ${r.mode.why}${(r.mode.resolved || r.mode.mode) === 'pixels' ? ' (read with screenshot; act with click --at x,y / type / key / scroll)' : ''}` : '';
     console.log(json ? JSON.stringify(r, null, 2) : `${r.resumed ? 'already held' : r.orphanedFrom ? 'attached (the previous holder\'s session is gone)' : 'attached'}: ${r.app.label} (${r.handle}) on ${r.app.display}.${r.lease && r.lease.input === 'user' ? ' The USER is driving it right now — wait for the handback.' : ''} Next: ${r.next}${mline}${r.browserNote ? '\n' + r.browserNote : ''}${r.note ? '\n' + r.note : ''}`);
+    return;
+  }
+  if (verb === 'size') { // lane e2b (§E2.2): pin the pixel size of YOUR desktop browser (`auto` unpins) — the opener only
+    const h = args[1], size = args[2];
+    if (!h || h.startsWith('--') || !size || size.startsWith('--')) usageOf('vibespace-window size <handle> <WxH|auto>');
+    const r = await call('POST', '/api/agent/window/size', { handle: h, size });
+    console.log(json ? JSON.stringify(r, null, 2) : r.pin ? `pinned ${r.handle} to ${r.pin.w}×${r.pin.h}: screenshot and click --at speak those pixels; the picture scales to the pane` : `unpinned ${r.handle}: it fits the pane again`);
+    return;
+  }
+  if (verb === 'mode') { // lane e2c (§E2.3): switch YOUR desktop browser's interaction mode — tree | pixels | auto (the opener only)
+    const h = args[1], m = args[2];
+    if (!h || h.startsWith('--') || !m || m.startsWith('--')) usageOf('vibespace-window mode <handle> <tree|pixels|auto>');
+    const r = await call('POST', '/api/agent/window/mode', { handle: h, mode: m });
+    console.log(json ? JSON.stringify(r, null, 2) : `mode of ${r.handle}: ${r.mode.mode === 'auto' ? `auto → ${r.mode.resolved || '?'}` : r.mode.mode} — ${r.why}`);
+    return;
+  }
+  if (verb === 'stop') { // lane e2a r3: the opener stops its own desktop browser (`vibespace-browser new … --backend desktop-app`)
+    const h = args[1];
+    if (!h || h.startsWith('--')) usageOf('vibespace-window stop <handle>');
+    const r = await call('POST', '/api/agent/window/stop', { handle: h });
+    console.log(r.deferred ? `not yet: ${r.note}` : `stopped ${r.handle} — its profile: ${r.profile}`);
     return;
   }
   if (verb === 'detach') {

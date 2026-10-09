@@ -105,7 +105,8 @@ for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); proc
 console.log('— ① the provider rows, their refusals, the egress record, the cdp pair, the cloakserve plan');
 {
   const ids = B.providerIds();
-  ok(ids.includes('chromium') && ids.includes('cloak') && ids.includes('cdp') && ids.includes('local-window') && ids.includes('cloud:browserbase') && ids.length === 4 + B.CLOUD_PROVIDERS.length, `every §7.1 row exists (${ids.join(', ')})`);
+  ok(ids.includes('chromium') && ids.includes('cloak') && ids.includes('cdp') && ids.includes('desktop-app') && ids.includes('local-window') && ids.includes('cloud:browserbase') && ids.length === 5 + B.CLOUD_PROVIDERS.length, // lane e2a: + desktop-app (§E2)
+     `every §7.1 row exists (${ids.join(', ')})`);
   const cells = ['tier', 'wired', 'label', 'keyScope', 'canSwitchTo', 'ownsDir', 'leaseKind', 'remote', 'starts', 'headed', 'binary'];
   ok(ids.every((id) => cells.every((c) => c in B.providerRow(id))), 'every row carries every capability cell (a row, not an if chain)');
   const cdp = B.providerRow('cdp'), lw = B.providerRow('local-window'), cloak = B.providerRow('cloak'), chromium = B.providerRow('chromium'), cloud = B.providerRow('cloud:kernel');

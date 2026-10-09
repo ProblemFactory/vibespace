@@ -155,6 +155,10 @@ YOURS:
                                                   a named profile EVERY conversation of the user's can use (logins
                                                   survive; one browser — a second conversation joins it in its own
                                                   tab); --sharing instance = each conversation sees only its own tabs
+  vibespace-browser new <label> --backend desktop-app [--url <https://…>] [--keep-profile] [--size WxH] [--mode auto|tree|pixels]
+                                                  when the agent browser cannot reach a site: a REAL desktop browser of
+                                                  your own, opened beside your chat — no CDP, no egress policy, its own
+                                                  throwaway profile; you drive it with vibespace-window's verbs
   vibespace-browser use <label|id> [--alias <h>]  attach to it; your page verbs then run there, in a window of your
                                                   own (other conversations work in theirs at the same time)
   vibespace-browser restart [<profile>]           relaunch a browser that has STOPPED ANSWERING (refused browser_unresponsive):
@@ -1135,8 +1139,19 @@ async function runOursPage(cls, { r, head, profileId, wantsJson }) {
 
   if (verb === 'new') {
     const label = args[1];
-    if (!label || label.startsWith('--')) { console.error('usage: vibespace-browser new <label> [--proxy <url>] [--notes <text>] [--adopt <dir>] [--provider <id>] [--host <machine>] [--cdp-port <n>] [--sharing owner|instance]'); process.exit(2); }
-    const r = await call('POST', '/api/agent/browser/new', { label, proxy: flag('--proxy'), notes: flag('--notes'), adoptDir: flag('--adopt'), provider: flag('--provider'), host: flag('--host'), cdpPort: flag('--cdp-port'), sharing: flag('--sharing') });
+    if (!label || label.startsWith('--')) { console.error('usage: vibespace-browser new <label> [--proxy <url>] [--notes <text>] [--adopt <dir>] [--provider <id>] [--host <machine>] [--cdp-port <n>] [--sharing owner|instance]\n       vibespace-browser new <label> --backend desktop-app [--url <https://…>] [--keep-profile] [--size WxH] [--mode auto|tree|pixels]'); process.exit(2); }
+    // lane e2a (§E2.1): `--backend desktop-app` = a real desktop browser of this conversation's own, beside its chat (a
+    // WINDOW TARGET — no CDP); `--size WxH` pins its pixel size (lane e2b, the server judges it); `--mode auto|tree|pixels` = how it is driven (lane e2c)
+    const r = await call('POST', '/api/agent/browser/new', { label, proxy: flag('--proxy'), notes: flag('--notes'), adoptDir: flag('--adopt'), provider: flag('--provider'), host: flag('--host'), cdpPort: flag('--cdp-port'), sharing: flag('--sharing'),
+      backend: flag('--backend'), url: flag('--url'), keepProfile: has('--keep-profile') || undefined, size: flag('--size'), mode: flag('--mode') });
+    if (r.desktopApp) {
+      const d = r.desktopApp;
+      console.log(`opened ${d.label} as your desktop browser — handle ${d.handle}${d.url ? ' at ' + d.url : ''} (${d.state || 'launching'}); it opens beside your chat on the screen showing it${d.pin ? ` — pinned ${d.pin.w}×${d.pin.h} (\`vibespace-window size ${d.handle} auto\` unpins)` : ''}`);
+      if (r.mode) console.log(`mode: ${r.mode.mode} — ${r.modeWhy || r.mode.why}`); // lane e2c: the launch verdict's why, verbatim
+      console.log(`no CDP on this backend: drive it with \`vibespace-window snapshot ${d.handle}\`, then \`vibespace-window click / type / key / screenshot ${d.handle} …\` — \`vibespace-browser\` page verbs answer no_cdp_on_this_backend there`);
+      console.log(`a real Chrome with no egress policy and its own throwaway profile${d.keepProfile ? ' (kept: --keep-profile)' : ' (deleted when the window\'s session ends)'}; the user can act in it at any time`);
+      return;
+    }
     const where = r.profile.dir ? `at ${r.profile.dir}` : (r.profile.provider === 'cdp' ? `reaching an existing browser over CDP (${r.profile.host ? r.profile.host + ':' : '127.0.0.1:'}${r.profile.cdpPort}; nothing is started)` : `on ${r.profile.host} (its directory is that machine's)`);
     console.log(`${r.adopted ? (r.created ? 'adopted' : 'already registered') : 'created'} ${r.profile.label} (${r.profile.id}) ${where} — every conversation of the user's can use it (one browser; each conversation in its own tab)${r.profile.mediated ? '; separate tabs (each conversation confined to its own through a mediated CDP url)' : ''}. \`vibespace-browser use ${r.profile.id}\` to attach.`);
     return;

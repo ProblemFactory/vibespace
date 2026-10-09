@@ -85,6 +85,38 @@ const XPRA_FLAGS_ENCODER = 0x1 | 0x4 | 0x10; // rencode | yaml | rencodeplus; 0 
  *  — or null when it cannot be read from these bytes. rencode(plus): list =
  *  192+n (n < 64) or CHR_LIST 59, a fixed string = 128+len then bytes, a long
  *  string = ascii length ':' bytes; bencode: 'l' then '<len>:<bytes>'. */
+/** lane e2b r3 (the ruling: the desktop size of the per-window rung is XPRA's — apply a pin THROUGH it): a minimal
+ *  rencodeplus WRITER for the one packet the bridge sends on the keeper's behalf (lists, strings, ints, dicts — the
+ *  codes python-rencode / xpra-html5's rencode.js use: fixed int 0..43, INT1/2/4 = 62/63/64, fixed str 128+n, fixed
+ *  list 192+n, fixed dict 102+n, else CHR_LIST 59 / CHR_DICT 60 … CHR_TERM 127) and the 8-byte header (P, flags 0x10). */
+function rencodePlus(v) {
+  const out = [];
+  const put = (x) => {
+    if (Array.isArray(x)) { if (x.length < 64) out.push(Buffer.from([192 + x.length])); else out.push(Buffer.from([59])); for (const e of x) put(e); if (x.length >= 64) out.push(Buffer.from([127])); return; }
+    if (typeof x === 'string') { const b = Buffer.from(x, 'utf8'); out.push(b.length < 64 ? Buffer.from([128 + b.length]) : Buffer.from(`${b.length}:`, 'latin1')); out.push(b); return; }
+    if (typeof x === 'number' && Number.isInteger(x)) {
+      if (x >= 0 && x < 44) { out.push(Buffer.from([x])); return; }
+      if (x >= -128 && x < 128) { const b = Buffer.alloc(2); b[0] = 62; b.writeInt8(x, 1); out.push(b); return; }
+      if (x >= -32768 && x < 32768) { const b = Buffer.alloc(3); b[0] = 63; b.writeInt16BE(x, 1); out.push(b); return; }
+      const b = Buffer.alloc(5); b[0] = 64; b.writeInt32BE(x, 1); out.push(b); return;
+    }
+    if (x && typeof x === 'object') { const ks = Object.keys(x); out.push(Buffer.from([ks.length < 25 ? 102 + ks.length : 60])); for (const k of ks) { put(k); put(x[k]); } if (ks.length >= 25) out.push(Buffer.from([127])); return; }
+    throw new Error(`rencodePlus: cannot write ${typeof x}`);
+  };
+  put(v);
+  const payload = Buffer.concat(out), h = Buffer.alloc(XPRA_HEADER);
+  h[0] = 0x50; h[1] = 0x10; h.writeUInt32BE(payload.length, 4);
+  return Buffer.concat([h, payload]);
+}
+/** THE PIN's desktop size, as the packet an active viewer sends (src/lib/xpra-proto.js displayPacket's FULL legacy form —
+ *  the root AND the work-area rows): every viewer connection of a pinned window carries it, so xpra's own
+ *  configure_best_screen_size (the max of its clients' desktop sizes — MEASURED: that is what resized the root back to a
+ *  viewer's 390×769 after an outside xrandr) lands on the pin. */
+function pinDesktopPacket(pin, dpi = 96) {
+  const w = Math.max(1, Math.floor(pin.w)), h = Math.max(1, Math.floor(pin.h)), d = Math.round(dpi);
+  const wmm = Math.round(25.4 * w / d), hmm = Math.round(25.4 * h / d);
+  return rencodePlus(['desktop_size', w, h, [['VibeSpace', w, h, wmm, hmm, [['Canvas', 0, 0, w, h, wmm, hmm]], 0, 0, w, h]], 0, [], w, h, d, d, 0, {}]);
+}
 function xpraPacketType(payload) {
   if (!payload || payload.length < 2) return null;
   const b0 = payload[0];
@@ -194,29 +226,34 @@ function xpraInputSieve({ maxPacket = XPRA_MAX_PACKET_BYTES } = {}) {
   }
   function feed(chunk) { let got = 0; walk(chunk, (u, input) => { if (input) got++; }); return got; }
   /** `hold` (x5): a BLOCKED viewer — nothing is relayed at all; its hello and the held kinds are kept for `release()`. */
-  function strip(chunk, allowInput = true, { hold = false } = {}) {
-    let inputs = 0, dropped = 0, lifecycle = 0;
+  function strip(chunk, allowInput = true, { hold = false, pinned = false } = {}) {
+    let inputs = 0, dropped = 0, lifecycle = 0, pinCut = 0;
     const keep = [];
     if (hold) allowInput = false;
+    // lane e2b r2 (THE PIN FENCE): while the window is PINNED its geometry is the KEEPER's — every viewer's display-size and
+    // configure-window packets are dropped (Watch AND active) and nothing held replays; unpinned = the x5 one-owner rule
+    if (pinned) { st.heldDisplay = null; st.heldGeometry = null; }
     walk(chunk, (u, input, type) => {
       if (input) inputs++;
       const life = type !== null && XPRA_LIFECYCLE_TYPES.has(type);
       if (life) lifecycle++;
-      if (life || (!allowInput && !(type !== null && XPRA_WATCH_TYPES.has(type)))) dropped++; else keep.push(u);
+      const pin = pinned && type !== null && (XPRA_DISPLAY_TYPES.has(type) || XPRA_GEOMETRY_TYPES.has(type));
+      if (pin) pinCut++;
+      if (life || pin || (!allowInput && !(type !== null && XPRA_WATCH_TYPES.has(type)))) dropped++; else keep.push(u);
       // x5: a BLOCKED viewer relays NOTHING — what the allowlist kept comes back out; its hello is held for the moment it becomes active
       if (hold && keep[keep.length - 1] === u) { keep.pop(); if (type === 'hello' && u.length <= XPRA_HELLO_HOLD_BYTES) st.heldHello = Buffer.from(u); else dropped++; }
       // THE KEYMAP + DISPLAY-SIZE FENCES' other half: a refused viewer's keymap / display size is cut above and HELD
       // here (the last one of each) for its takeover
-      if (!allowInput && type !== null) for (const h of XPRA_HELD_KINDS) if (h.types.has(type)) st[h.key] = u.length <= h.cap ? Buffer.from(u) : null;
+      if (!allowInput && type !== null && !pin) for (const h of XPRA_HELD_KINDS) if (h.types.has(type)) st[h.key] = u.length <= h.cap ? Buffer.from(u) : null;
     });
     const replayedKinds = [];
-    if (hold) return { inputs, dropped, lifecycle, replayed: 0, replayedKinds, oversize: st.oversize, relay: null };
+    if (hold) return { inputs, dropped, lifecycle, pinCut, replayed: 0, replayedKinds, oversize: st.oversize, relay: null };
     if (allowInput && !st.oversize) {
       const held = [];
       for (const h of XPRA_HELD_KINDS) if (st[h.key]) { held.push(st[h.key]); replayedKinds.push(h.words); st[h.key] = null; }
       keep.unshift(...held);
     }
-    return { inputs, dropped, lifecycle, replayed: replayedKinds.length, replayedKinds, oversize: st.oversize, relay: keep.length ? (keep.length === 1 ? keep[0] : Buffer.concat(keep)) : null };
+    return { inputs, dropped, lifecycle, pinCut, replayed: replayedKinds.length, replayedKinds, oversize: st.oversize, relay: keep.length ? (keep.length === 1 ? keep[0] : Buffer.concat(keep)) : null };
   }
   /** x5: what a blocked viewer said, in replay order — its hello, then the held kinds — as ONE buffer (null = nothing), cleared. */
   function release() {
@@ -232,6 +269,7 @@ function xpraInputSieve({ maxPacket = XPRA_MAX_PACKET_BYTES } = {}) {
 
 /** The bridge of this kind over the ONE bridge's shared state (`ctx` — see src/server/desktop-stream.js create()). */
 function bridgeOf(ctx) {
+  const { pinned = null, onDesktopSize = null } = ctx; // lane e2b: (id) => the record's pin (the keeper owns its geometry); r3: a pinned root's move re-fits
   const { BLOCKED_CLOSE, BLOCKED_REASON, ENDED_CLOSE, INPUT_REPORT_MS, KA, WS_HIGH_WATER, WS_LOW_WATER, WebSocketClient, closeCodeOf, closeOversize, closed, inputPolicy, lastClose, leaveOnCut, log, netemQueue, now, onInput, onViewerLeft, open, opened, pingMs, refresh, resolveTargetSafe, seatState, stats, takeSeat, viewers, wsOversize } = ctx;
   /**
    * xpra over WebSocket ↔ the xpra server's own WebSocket (P8-2). Binary both
@@ -267,10 +305,29 @@ function bridgeOf(ctx) {
     };
     const sendDown = (d) => { if (ws.readyState !== 1) return; ws.send(d); if (upstream && ws.bufferedAmount > WS_HIGH_WATER && !upstream.isPaused) { upstream.pause(); const t = setInterval(() => { if (ws.readyState !== 1) { clearInterval(t); return; } if (ws.bufferedAmount < WS_LOW_WATER) { clearInterval(t); try { upstream.resume(); } catch { /* closed */ } } }, 50); } };
     const sieve = xpraInputSieve();
+    // lane e2b r2: is this window PINNED now (the keeper's record) — then no viewer carries display size / window geometry
+    const pinOfNow = () => { try { const p = pinned && pinned(id); return p && p.w > 0 && p.h > 0 ? p : null; } catch { return null; } };
+    const pinnedNow = () => !!pinOfNow();
+    // r3: the bridge ASKS xpra for the pin on the keeper's behalf — after this viewer's hello, again when the pin changes,
+    // after a reconnect (a new socket = a new bridge) and whenever xpra answers another desktop_size; never a viewer's packet
+    let pinSent = null;
+    const assertPin = (why) => {
+      const p = pinOfNow(); const key = p ? `${p.w}x${p.h}` : null;
+      if (!p || !upstream || (key === pinSent && why !== 'xpra answered')) return;
+      pinSent = key; relayUp(pinDesktopPacket(p));
+      log.log?.(`[desktop-stream] ${id}: pinned ${key} — asked xpra for it on this viewer's connection (${why})${viewerId ? `, viewer ${viewerId}` : ''}`);
+    };
+    // lane e2-canvas (int243 2026-10-09, THE SECOND E2 CHROME PATH): xpra 6.5.4 answers a hello on a thread (verify_auth →
+    // GLib.idle_add(hello_oked) — the connection's source exists only then), and ANY other packet it reads before that comes from
+    // a connection with no source ⇒ handle_invalid_packet ⇒ proto.close(), no disconnect packet (the viewer: 1005, and every
+    // reconnect raced the same way). So until xpra says its FIRST word on this connection it hears the hello and nothing else:
+    // the rest — the bridge's own pin ask first — waits in `owed`, in order, and goes up on that first word.
+    let helloUp = false, answered = false;
+    const owed = [];
     const pendingUp = [];
     const flushUp = () => { while (pendingUp.length && upstream && upstream.readyState === 1) { try { upstream.send(pendingUp.shift()); } catch { /* closing */ } } };
     const sendUp = (m) => { if (!upstream) return; if (upstream.readyState === 1) { try { upstream.send(m); } catch { /* closing */ } } else if (upstream.readyState === 0) pendingUp.push(m); };
-    const relayUp = (out) => { stats.relayed++; if (q) q.up.send(out.length, () => sendUp(out)); else sendUp(out); };
+    const relayUp = (out) => { if (!answered) { if (helloUp) { owed.push(out); return; } helloUp = true; } stats.relayed++; if (q) q.up.send(out.length, () => sendUp(out)); else sendUp(out); };
     const openUpstream = (why) => {
       if (upstream || cutDone || ws.readyState !== 1) return;
       upstream = new WebSocketClient(`ws://127.0.0.1:${port}/`, ['binary'], { perMessageDeflate: false, maxPayload: 64 * 1024 * 1024 });
@@ -278,11 +335,13 @@ function bridgeOf(ctx) {
       upstream.on('message', (d, isBinary) => {
         const buf = isBinary ? d : Buffer.from(String(d));
         down += buf.length;
+        if (!answered) { answered = true; for (const m of owed.splice(0)) relayUp(m); } // e2-canvas: xpra answered the hello — what waited goes up now
         // the xpra side SAYS why it hangs up (a `disconnect` packet precedes its close) — the close line carries it.
         // Two shapes, both measured on 6.5.3: a proper packet (header + list) once the client's encoding is known, and a
         // BARE TEXT line `disconnect <reason>` (no header at all) for a client whose hello it could not decode.
         if (buf.length >= XPRA_HEADER + 2 && buf[0] === 0x50 && buf[2] === 0 && buf[3] === 0) { const words = xpraStrings(buf.subarray(XPRA_HEADER)); if (words[0] === 'disconnect') closedBy = closedBy || `the xpra server disconnected: ${words.slice(1).join(' / ') || 'no reason given'}`; }
         else if (buf.length >= 11 && buf.length <= 512 && buf.subarray(0, 11).toString('latin1') === 'disconnect ') closedBy = closedBy || `the xpra server disconnected: ${buf.toString('utf8', 11).replace(/[\r\n\0]+/g, ' ').trim().slice(0, 200)}`;
+        if (pinSent && buf.length >= XPRA_HEADER + 2 && buf.length < 4096 && buf[2] === 0 && xpraPacketType(buf.subarray(XPRA_HEADER)) === 'desktop_size') { assertPin('xpra answered'); const p = pinOfNow(); if (p) { try { onDesktopSize?.(id, p.w, p.h, viewerId); } catch { /* the keeper's belt still runs */ } } } // r3: xpra moved the root — ask again; the keeper re-fits the main window (an app may re-grow itself)
         if (q) q.down.send(buf.length, () => sendDown(buf)); else sendDown(buf);
       });
       upstream.on('open', flushUp);
@@ -290,7 +349,7 @@ function bridgeOf(ctx) {
       upstream.on('error', (e) => { if (cutDone) return; closedBy = closedBy || `xpra socket error ${(e && e.code) || (e && e.message) || ''}`.trim(); try { ws.close(); } catch { /* already closed */ } });
       // x5: what this socket said while it was blocked — its hello first — reaches xpra before anything newer
       const held = sieve.release();
-      if (held.relay) { relayUp(held.relay); log.log?.(`[desktop-stream] ${id}: ${viewerId ? `viewer ${viewerId}` : 'a viewer'} is active now — the ${held.kinds.join(' and the ')} it sent while blocked ${held.kinds.length > 1 ? 'reach' : 'reaches'} xpra first`); }
+      if (held.relay) { relayUp(held.relay); assertPin('after the held hello'); log.log?.(`[desktop-stream] ${id}: ${viewerId ? `viewer ${viewerId}` : 'a viewer'} is active now — the ${held.kinds.join(' and the ')} it sent while blocked ${held.kinds.length > 1 ? 'reach' : 'reaches'} xpra first`); }
     };
     /** x5: this socket became blocked while connected — its upstream closes and the socket closes 4001 (see `seats`). */
     const cut = (why) => {
@@ -302,7 +361,7 @@ function bridgeOf(ctx) {
       leaveOnCut(seatRef);
     };
     /** watch → active with the upstream open: the keymap / display size / geometry held while refused go out NOW (the app re-fits to this pane). */
-    const replayHeld = () => { const r = sieve.strip(Buffer.alloc(0), true); if (r.relay) { relayUp(r.relay); log.log?.(`[desktop-stream] ${id}: ${viewerId ? `viewer ${viewerId}` : 'a viewer'} is active — the ${r.replayedKinds.join(' and the ')} it sent while refused ${r.replayed > 1 ? 'reach' : 'reaches'} xpra now`); } };
+    const replayHeld = () => { const r = sieve.strip(Buffer.alloc(0), true, { pinned: pinnedNow() }); if (r.relay) { relayUp(r.relay); log.log?.(`[desktop-stream] ${id}: ${viewerId ? `viewer ${viewerId}` : 'a viewer'} is active — the ${r.replayedKinds.join(' and the ')} it sent while refused ${r.replayed > 1 ? 'reach' : 'reaches'} xpra now`); } };
     conn.reconcile = (why) => {
       if (ws.readyState !== 1 || cutDone) return;
       if (resolveTargetSafe(id) === null) { closedBy = closedBy || 'the app session ended'; try { ws.close(ENDED_CLOSE, 'the app session ended'); } catch { /* closing */ } return; }
@@ -321,7 +380,7 @@ function bridgeOf(ctx) {
       if (s === 'blocked' || !upstream) {
         // x5 — A BLOCKED VIEWER REACHES NOTHING: its hello and the held kinds are KEPT for the moment it becomes active,
         // everything else is dropped (counted); lifecycle packets are cut from everybody as always
-        const r = sieve.strip(buf, false, { hold: true });
+        const r = sieve.strip(buf, false, { hold: true, pinned: pinnedNow() });
         if (r.dropped) { dropped += r.dropped; stats.dropped += r.dropped; stats.blocked += r.dropped; lastRefusal = 'blocked'; }
         if (r.lifecycle) stats.lifecycle += r.lifecycle;
         if (r.oversize && !oversized) { oversized = true; closedBy = closedBy || closeOversize(ws, id, viewerId, r.oversize, 'xpra'); }
@@ -337,12 +396,13 @@ function bridgeOf(ctx) {
       // every control packet are cut out (round 2: a relayed `shutdown-server` from a Watch viewer ended the session).
       // Its keymap, display-size and (x5) configure-window packets are cut and the last of each HELD for its takeover
       // (r7 / r8 / x5: shared state). shutdown-server / exit-server are cut from EVERY viewer: the server's lifecycle is the keeper's.
-      const r = sieve.strip(buf, allow);
+      const r = sieve.strip(buf, allow, { pinned: pinnedNow() });
       if (r.dropped) { dropped += r.dropped; stats.dropped += r.dropped; }
       if (r.oversize && !oversized) { oversized = true; closedBy = closedBy || closeOversize(ws, id, viewerId, r.oversize, 'xpra'); }
       if (r.replayed) log.log?.(`[desktop-stream] ${id}: ${viewerId ? `viewer ${viewerId}` : 'a viewer'} may type now — the ${r.replayedKinds.join(' and the ')} it sent while refused ${r.replayed > 1 ? 'reach' : 'reaches'} xpra first`);
       if (r.lifecycle) { stats.lifecycle += r.lifecycle; if (allow) lastRefusal = 'server lifecycle'; log.warn?.(`[desktop-stream] ${id}: ${r.lifecycle} server-lifecycle packet(s) (shutdown-server / exit-server) from ${viewerId ? `viewer ${viewerId}` : 'a viewer'} dropped — the keeper owns the xpra server's lifecycle`); }
       if (r.relay) relayUp(r.relay);
+      if (r.relay || pinSent) assertPin(pinSent ? 'the pin changed' : 'after the hello');
       if (!r.inputs || !allow) return; // a refused input is nobody at the keyboard
       const t = now();
       if (t - lastInputReport >= INPUT_REPORT_MS) { lastInputReport = t; try { onInput(id, viewerId); } catch { /* keeper is optional here */ } }
@@ -353,4 +413,4 @@ function bridgeOf(ctx) {
   return (a) => bridgeXpra(a.ws, a.id, a.port, a.viewerId, a.netem, a.req);
 }
 
-module.exports = { STREAM_KIND: 'xpra', serverName: 'xpra server', maxMessageBytes: XPRA_MAX_PACKET_BYTES, netem: true, bridgeOf, XPRA_MAX_PACKET_BYTES, XPRA_INPUT_TYPES, XPRA_WATCH_TYPES, XPRA_KEYMAP_TYPES, XPRA_KEYMAP_HOLD_BYTES, XPRA_DISPLAY_TYPES, XPRA_DISPLAY_HOLD_BYTES, XPRA_GEOMETRY_TYPES, XPRA_GEOMETRY_HOLD_BYTES, XPRA_HELLO_HOLD_BYTES, XPRA_HELD_KINDS, XPRA_LIFECYCLE_TYPES, XPRA_HEADER, XPRA_FLAGS_ENCODER, xpraPacketType, xpraStrings, xpraInputSieve };
+module.exports = { rencodePlus, pinDesktopPacket, STREAM_KIND: 'xpra', serverName: 'xpra server', maxMessageBytes: XPRA_MAX_PACKET_BYTES, netem: true, bridgeOf, XPRA_MAX_PACKET_BYTES, XPRA_INPUT_TYPES, XPRA_WATCH_TYPES, XPRA_KEYMAP_TYPES, XPRA_KEYMAP_HOLD_BYTES, XPRA_DISPLAY_TYPES, XPRA_DISPLAY_HOLD_BYTES, XPRA_GEOMETRY_TYPES, XPRA_GEOMETRY_HOLD_BYTES, XPRA_HELLO_HOLD_BYTES, XPRA_HELD_KINDS, XPRA_LIFECYCLE_TYPES, XPRA_HEADER, XPRA_FLAGS_ENCODER, xpraPacketType, xpraStrings, xpraInputSieve };

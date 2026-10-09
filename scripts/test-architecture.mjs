@@ -234,6 +234,9 @@ const PURE = new Set(['src/mount-argv.js' /* lane mount-argv-dir-cache: THE rclo
   'src/keeper-limits.js', 'src/desktop-apps.js', 'src/install-slot.js' /* lane dc-apps-rows: the machine's ONE package slot — imports nothing */, 'src/installs.js' /* lane dc-apps-rows: THE INSTALLABLES — one row each, imports only PURE owners */, ...fs.readdirSync(path.join(REPO, 'src/app-kinds')).map((f) => `src/app-kinds/${f}`) /* lane dc-app-kinds: an app KIND is its own file + one index line — each imports nothing but its siblings */,
   // rv-desktop-apps F-S1 (lane dc-seams-desktop): its families, each its own PURE file
   'src/desktop-backends.js', 'src/desktop-fit.js', 'src/desktop-browser-app.js', 'src/machine-desktop-model.js',
+  // lane e2b (design-agent-browser-v2 §E2.2): the PINNED PIXEL SIZE — parse + bounds, who may pin, the picture's fit (upscale
+  // allowed), the chip's words, E2c's default — imports nothing; the door, the keeper, the engine and the window share it
+  'src/desktop-pin.js',
   // OPEN WITH LIBREOFFICE (docs/design-desktop-apps §7.9, the owner's ruling 2026-09-27 ②): the office table, the
   // open-with verdict (the file rule, THE MACHINE RULE, the app), the argv and the closed install set — imports
   // nothing; the machine keeper, the routes, the machine facts, the daemon bundle and the browser bundle share it

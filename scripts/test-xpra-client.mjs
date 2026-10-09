@@ -1009,8 +1009,8 @@ console.log('§6b HiDPI r2 — the verifier\'s findings: fractional ratios stay 
   };
   const ROUND = ['  const round = cover ? (v) => Math.ceil(v - 1e-6) : (v) => Math.floor(v + 1e-6);', '  const round = (v) => Math.round(v); // pre-fix (r1): to the nearest'];
   const NO_SLACK = ['  const FIT_SLACK_CSS = 1;', '  const FIT_SLACK_CSS = 0;'];
-  const PANE_DISPLAY = ['    return { width: Math.max(pane.width, g ? g.x + g.w : 0), height: Math.max(pane.height, g ? g.y + g.h : 0) };', '    return { width: pane.width, height: pane.height };'];
-  const ALL_WINDOWS = ["      if (mode === 'watch') {\n        for (const w of client.windows.values())", "      if (true) {\n        for (const w of client.windows.values())"];
+  const PANE_DISPLAY = ['    return { width: Math.max(ft.paneW, g ? g.x + g.w : 0), height: Math.max(ft.paneH, g ? g.y + g.h : 0) };', '    return { width: ft.paneW, height: ft.paneH };'];
+  const ALL_WINDOWS = ["      else if (mode === 'watch') {\n        for (const w of client.windows.values())", "      else if (true) {\n        for (const w of client.windows.values())"];
 
   // ── F1 (major): a fractional ratio — the device pane never overflows the pane ⇒ the stage stays identity, the picture 1:1 ──
   let worst = null;
@@ -1728,6 +1728,29 @@ console.log('§late — a worker message delivered after close() is ignored (the
   const Cpre = await import(pathToFileURL(MUTXC.write('src/lib/xpra-client.js', pre, 'late-prefix')).href);
   const control = await run(Cpre);
   ok(!!control.threw && /postMessage/.test(String(control.threw && control.threw.message)), `NEGATIVE CONTROL: the pre-fix handler throws on the late message (${control.threw ? control.threw.message : 'no throw'})`);
+}
+
+// lane e2b (design-agent-browser-v2 §E2.2): a PINNED window — the X side (hello, display, fit) speaks the pin, never the pane
+{
+  FakeWorker.instances.length = 0;
+  const client = C.createXpraClient({ url: 'ws://x/pin', workerUrl: '/w', screen: { width: 700, height: 500 }, pin: { w: 1600, h: 900 }, Worker: FakeWorker, decode: async () => ({ close() {} }), log: null });
+  client.connect();
+  const wk = await until(() => FakeWorker.instances[0]);
+  const hello = await until(() => wk.sent('hello')[0]);
+  ok(same(hello[1].display.desktop_size, [1600, 900]), 'e2b: pinned 1600×900 in a 700×500 pane — the hello asks the PIN as the desktop size');
+  wk.feed(['hello', { version: '6.5.3', 'packet-types': ['display-configure'] }]);
+  wk.feed(['new-window', 1, 0, 0, 640, 400, { title: 'xterm', 'window-type': ['NORMAL'] }]);
+  ok(same(wk.sent('map-window')[0].slice(1, 6), [1, 0, 0, 1600, 900]) && same(client.pin, { w: 1600, h: 900 }), 'e2b: the main window is fitted to the PIN (1600×900 at 0,0), not to the 700×500 pane');
+  wk.posted.length = 0;
+  client.resize(900, 300);
+  ok(wk.sent('configure-window').length === 0 && wk.sent('display-configure').length === 0 && client.windows.get(1).w === 1600 && client.windows.get(1).h === 900, 'e2b: a pane resize does NOT change a pinned fit (no display-configure, no configure-window)');
+  client.setPin({ w: 1280, h: 720 });
+  const lastDisp = wk.sent('display-configure').slice(-1)[0], lastCfg = wk.sent('configure-window').slice(-1)[0];
+  ok(!!lastDisp && same(lastDisp[1]['desktop-size'], [1280, 720]) && !!lastCfg && same(lastCfg.slice(1, 6), [1, 0, 0, 1280, 720]), 'e2b: re-pinned 1280×720 ⇒ the display, then the main re-fitted IN PLACE (no re-create)', { lastDisp, lastCfg });
+  client.setPin(null);
+  const unCfg = wk.sent('configure-window').slice(-1)[0];
+  ok(client.pin === null && same(unCfg.slice(1, 6), [1, 0, 0, 900, 300]) && same(wk.sent('display-configure').slice(-1)[0][1]['desktop-size'], [900, 300]), 'e2b: unpinned (auto) ⇒ re-fit to the pane (900×300)', unCfg);
+  client.close();
 }
 
 for (const r of copiesCensus(MUTXC.files, MUTXC.dir, repo, { minCopies: 10 })) ok(r.pass, 'tree: ' + r.name + (r.pass ? '' : ' — ' + r.detail));
