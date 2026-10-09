@@ -2786,7 +2786,7 @@ console.log('§62 every path where the user names a window goes through wm.revea
     'src/lib/taskbar.js': [3, 'activateWindow (every taskbar button), the grouped chooser\'s row, the window list\'s row'],
     'src/lib/window.js': [3, 'the overlap switcher\'s row + the door\'s own second pass after a desktop switch (inc-muv3qfo7-96tm: resolved / refused)'],
     'src/lib/app.js': [5, 'goToWinId (go-to / Switch window / inbox / live view), flashWindow here + on another desktop, moveSessionWindow, _focusOpenInChain'],
-    'src/lib/session-lifecycle.js': [2, '_focusExistingSession (sidebar card, palette, For-you / explorer / chat links, resume-already-open) + the tmux view'],
+    'src/lib/session-lifecycle.js': [3, '_focusExistingSession (sidebar card, palette, For-you / explorer / chat links, resume-already-open) + the tmux view + _focusPendingAttach (B-0cc8: a second click while the attach is in flight raises its window)'],
     'src/lib/chat-view.js': [2, 'the two sub-agent viewer dedupes'],
     'src/lib/workflow-detail.js': [2, 'the workflow window + its agent-log dedupe'],
     'src/lib/design-window.js': [1, 'the Design window\'s one-per-(host, dir) re-open (a replay passes { replay })'],

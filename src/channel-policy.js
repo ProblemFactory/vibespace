@@ -645,6 +645,14 @@ function attachVerdict(row, list, { hasText = true, channel = 'this channel', wh
 }
 /** lane channel-send-files: a send's PARTS as the adapter answered them (Lark: the text + one message per file; Slack:
  *  one chain per file) — bounded, the fields the receipt reads; null when the send was one message. PURE. */
+/** lane channel-reply-real (verify r3): EVERY vendor id a sent proposal landed — the first piece's plus each landed
+ *  part's (Lark's text + one message per file): a 引用 of the attachment message is a reply to what the agent sent. PURE. */
+function sentIdsOf(result) {
+  const r = result && typeof result === 'object' ? result : {};
+  const out = [];
+  for (const v of [r.vendorMessageId, ...(Array.isArray(r.parts) ? r.parts.filter((x) => x && x.ok === true).map((x) => x.vendorMessageId) : [])]) if (v !== null && v !== undefined && String(v) !== '' && !out.includes(String(v))) out.push(String(v));
+  return out;
+}
 function sendParts(v) {
   if (!Array.isArray(v) || !v.length) return null;
   return v.slice(0, 12).filter((x) => x && typeof x === 'object').map((x) => ({ part: x.part === 'text' ? 'text' : 'attachment', ...(x.name ? { name: String(x.name).slice(0, 200) } : {}), ok: x.ok === true, ...(x.vendorMessageId ? { vendorMessageId: String(x.vendorMessageId).slice(0, 200) } : {}), ...(x.ok === true ? {} : { code: String(x.code || 'vendor-error').slice(0, 40), ...(x.why ? { why: String(x.why).slice(0, 300) } : {}), ...(x.lost ? { lost: true } : {}), ...(Array.isArray(x.requiredScopes) && x.requiredScopes.length ? { requiredScopes: x.requiredScopes.slice(0, 8).map(String) } : {}) }) }));
@@ -1406,6 +1414,7 @@ function renderReceiptBlock(receipt, { adapterLabel = null, title = null, text =
 }
 
 module.exports = {
+  sentIdsOf,   // lane channel-reply-real
   OUTBOX_STATES, TRANSITIONS, TERMINAL_STATES, POLICY_MODES, DECISION_REASONS, RECEIPT_STATUSES, PROPOSAL_TTL_MS, TEXT_MAX_BYTES, HONESTY_LINE_DEFAULT, IDEMPOTENCY_MODES,
   WITHDRAWABLE_STATES, WITHDRAWN_DEFAULT_REASON, withdrawVerdict, withdrawWhy, withdrawReason,
   RECEIPT_DIFF_MAX, RECEIPT_BLOCK_MAX_BYTES, RECEIPT_GUIDANCE, receiptDiff, receiptFeedback, receiptFateOf, receiptFateText, RECEIPT_DELIVERIES, receiptDeliveryVerdict, utf8Bytes,

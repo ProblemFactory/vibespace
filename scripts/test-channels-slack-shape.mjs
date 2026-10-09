@@ -181,6 +181,16 @@ const byTs = new Map(page.records.map((r) => [r.vendorId, r]));
   const root = byTs.get(ts(2));
   ok(root.threadKey === ts(2) && root.replyTo === null && root.raw.reply_count === 2, 'a root with replies carries its own thread key (the walk is owed)');
   ok(byTs.get(ts(1)).blocks[0].k === 'sys', 'channel_join is a system line');
+  { // lane lark-system-records: a join is the VENDOR's notice — kind system, no author (never the joiner's message), no place
+    const j = byTs.get(ts(1));
+    ok(j.kind === 'system' && j.systemKind === 'join' && j.author.isSystem === true && !j.author.id && !j.author.name && !j.replyTo && !j.threadKey && j.text.length > 0, "channel_join is kind system: the joiner is in Slack's words, never the record's author", JSON.stringify({ kind: j.kind, systemKind: j.systemKind, author: j.author, text: j.text }));
+    const sub = (subtype, extra = {}) => slack.toRecord('slack-a', 'C0SYS', { type: 'message', subtype, ts: '1700000500.000100', user: 'U0ADA', text: '<@U0ADA> did a thing', ...extra }, { users: new Map([['U0ADA', 'Ada']]) });
+    const want = { channel_leave: 'leave', group_join: 'join', bot_add: 'join', bot_remove: 'leave', channel_topic: 'other', channel_purpose: 'other', channel_name: 'rename' };
+    const bad = Object.entries(want).filter(([st, k]) => { const r = sub(st); return r.kind !== 'system' || r.systemKind !== k || r.author.id; }).map(([st]) => st);
+    ok(!bad.length, 'every vendor-notice subtype (leave / group_join / bot_add / bot_remove / topic / purpose / name) is kind system with its kind', bad.join(','));
+    const kept = ['pinned_item', 'me_message', 'thread_broadcast', 'bot_message'].filter((st) => sub(st, st === 'bot_message' ? { bot_id: 'B0X' } : {}).kind !== undefined);
+    ok(!kept.length, "a person's action (a pin, /me, a broadcast) and a bot's message stay messages", kept.join(','));
+  }
   for (const r of page.records) { const v = REC.validateBlocks(r.blocks || []); if (!v.ok) ok(false, `record ${r.vendorId}: its tree validates`, v.error); }
   ok(page.records.every((r) => REC.validateBlocks(r.blocks || []).ok), 'every record\'s tree validates against the closed schema');
   const th = await H.a.threadHistory('C0GENERAL', ts(2), { limit: 50 });

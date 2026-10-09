@@ -6014,10 +6014,9 @@ export default {
   "This thread was loaded a moment ago — try again in {s} s": "这个话题刚刚加载过 — {s} 秒后再试",
   "These reactions were checked a moment ago": "这些表情回应刚刚检查过",
   "replies to or quotes a message of mine": "回复或引用了我的消息",
-  "is a reply to a message this agent sent": "回复了这个 agent 之前发送的消息",
+  "is a quote, a reply in a thread, or a reply in the mail thread of a message this agent sent": "引用了这个 agent 发送的消息，或在它的话题或邮件往来里回复",
   "Set this on a group to cover each of its agents for their own sends — a reply notifies only the agent whose message it answers.": "设在组上即对组内每个 agent 各自生效——一条回复只通知它所回复的那条消息的发送者。",
   "a reply to a message this agent sent": "回复了这个 agent 之前发送的消息",
-  "the next message after yours in a direct chat": "私聊中你发出消息后的下一条消息",
   "quotes your message of {when}": "引用了你 {when} 发的消息",
   "replies in the thread of your message of {when}": "在你 {when} 发的消息的话题里回复",
   "in the thread of your mail \"{subject}\"": "回复了你的邮件「{subject}」",
@@ -7973,4 +7972,25 @@ export default {
   "not measured — its folder is on a paired machine": "未测量 — 它的文件夹在配对的机器上",
   "not measured — VibeSpace keeps no folder for it": "未测量 — VibeSpace 没有为它保留文件夹",
   "Over the profile disk budget — said in For you; Delete… in its menu frees it": "超出 profile 磁盘预算 — 已在「待你处理」中说明；用它菜单里的 删除… 可释放空间",
+  "This window": "本窗口", // lane browser-tabs-by-window
+  "Your window": "你的窗口", // lane browser-tabs-by-window
+  "{name}’s window": "{name} 的窗口", // lane browser-tabs-by-window
+  "Another conversation’s window": "其他对话的窗口", // lane browser-tabs-by-window
+  "The agent’s window": "agent 的窗口", // lane browser-tabs-by-window
+  "Elsewhere in this browser": "这个浏览器的其他地方", // lane browser-tabs-by-window
+  "+{n} blank": "+{n} 个空白页", // lane browser-tabs-by-window
+  "{n} blank tab(s) beside its pages — nothing on them": "页面旁边有 {n} 个空白标签页——上面什么也没有", // lane browser-tabs-by-window
+  "{n} · +{b} blank": "{n} · +{b} 个空白页", // lane browser-tabs-by-window
+  "A message was recalled": "有一条消息被撤回", // lane lark-system-records
+  "Someone joined the chat": "有人加入了会话", // lane lark-system-records
+  "Someone left the chat": "有人离开了会话", // lane lark-system-records
+  "The chat was renamed": "会话已改名", // lane lark-system-records
+  "A notice from the chat": "会话通知", // lane lark-system-records
+  "(no sender)": "（无发送者）", // lane lark-system-records
+  "Published by this conversation": "本会话发布的", // lane pages-chip-groups
+  "Shown here": "在这里展示过的", // lane pages-chip-groups
+  "from {name}": "来自 {name}", // lane pages-chip-groups
+  "from another conversation": "来自另一个会话", // lane pages-chip-groups
+  "no longer published": "已不再发布", // lane pages-chip-groups
+  "{a} from this conversation · {b} shown here — click to open one or request a design": "本会话的 {a} 个设计和页面 · 在这里展示过的 {b} 个 — 点击打开一个，或请求新设计", // lane pages-chip-groups
 };

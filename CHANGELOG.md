@@ -2,6 +2,19 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.240 — 2026-10-08
+
+### Added
+- The Pages chip also lists pages shown in this conversation, in their own group.
+
+### Changed
+- The agent browser's tab list shows which window each tab is in, and folds each window's empty blank tab into a count.
+
+### Fixed
+- An agent is told of a reply to its message only for a real reply — a quote, a thread reply or a mail-thread reply — never for the next message in a chat.
+- A chat's own notices — a recalled message, someone joining — show as a quiet line and never count as a message.
+- Double-clicking a conversation in the sidebar opens it once.
+
 ## 2.369.239 — 2026-10-08
 
 ### Added

@@ -1349,16 +1349,16 @@ function create(engineCtx) {
   const SENT_BY_MAX = 200;
   async function noteSentBy(p) {
     const d = p && p.draftedBy;
-    const vid = p && p.result && p.result.vendorMessageId;
-    if (!d || d.kind !== 'agent' || !d.id || !vid || !p.convId || p.kind === 'reaction') return;
+    const ids = P.sentIdsOf(p && p.result);   // lane channel-reply-real: every landed part's id (a quote of a file part)
+    if (!d || d.kind !== 'agent' || !d.id || !ids.length || !p.convId || p.kind === 'reaction') return;
     const pk = `agent:${d.id}`;
     try {
       await store.index.update(() => {
         const en = store.index.entry(p.adapterId, p.convId, { create: false });
         if (!en) return;
         const sb = en.sentBy && typeof en.sentBy === 'object' ? { ...en.sentBy } : {};
-        const list = (Array.isArray(sb[pk]) ? sb[pk] : []).filter((x) => x !== String(vid));
-        list.push(String(vid));
+        const list = (Array.isArray(sb[pk]) ? sb[pk] : []).filter((x) => !ids.includes(x));
+        list.push(...ids);
         sb[pk] = list.slice(-SENT_BY_MAX);
         const keys = Object.keys(sb);
         if (keys.length > 64) for (const k of keys.slice(0, keys.length - 64)) delete sb[k];

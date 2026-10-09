@@ -254,6 +254,9 @@ function factsOfMessage(m, appName) {
   return v.ok ? v.facts : [];
 }
 
+/** lane lark-system-records: the subtypes that are the vendor's NOTICE about the channel, each to its closed kind (src/channel-record.js
+ *  SYSTEM_KINDS). Every other subtype (a pin, a huddle, a tombstone) stays the message of whoever did it. */
+const SYSTEM_SUBTYPES = Object.freeze({ channel_join: 'join', group_join: 'join', bot_add: 'join', channel_leave: 'leave', group_leave: 'leave', bot_remove: 'leave', channel_name: 'rename', channel_topic: 'other', channel_purpose: 'other' });
 /** ONE Slack message → ONE ChannelRecord. `ctx` = {users: Map id→name, channels: Map id→name, selfId, selfTeam,
  *  botName(id)}. The id is the conversation + `ts` (D25: `ts` repeats across channels, never inside one). */
 function toRecord(adapterId, convId, m, ctx = {}) {
@@ -266,6 +269,10 @@ function toRecord(adapterId, convId, m, ctx = {}) {
   const threadTs = TS_RE.test(String(m.thread_ts || '')) ? String(m.thread_ts) : null;
   const isReply = !!(threadTs && threadTs !== m.ts);
   const facts = factsOfMessage(m, botName || (m.bot_profile && m.bot_profile.name) || '');
+  // lane lark-system-records: a join / leave / topic / app-added notice is the VENDOR's (src/channel-record.js kind system) — never the
+  // joiner's message: no author, no place, no facts; the words stay Slack's own ("Ada has joined the channel")
+  const sysKind = typeof m.subtype === 'string' && Object.prototype.hasOwnProperty.call(SYSTEM_SUBTYPES, m.subtype) ? SYSTEM_SUBTYPES[m.subtype] : null;
+  if (sysKind) return makeRecord({ adapterId, convId, vendorId: String(m.ts || ''), at: tsMs(m.ts), kind: 'system', systemKind: sysKind, author: {}, text: parts.text, mentions: parts.mentions, attachments: [], blocks: parts.blocks, raw: { subtype: m.subtype.slice(0, 40), channel: String(convId).slice(0, 40) } });
   return makeRecord({
     adapterId, convId,
     vendorId: String(m.ts || ''),

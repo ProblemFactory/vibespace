@@ -6660,8 +6660,69 @@ console.log('\n㉕ lane channel-self-unread: the account\'s OWN message is read 
   ok(pcut !== src && pc.preview.matched === 2 && pc.preview.who.includes('Owner'), 'CONTROL (int229): a preview without the skip lists the owner\'s own line (2 matches)', JSON.stringify(pc.preview));
 }
 
+console.log('\n㉖ lane lark-system-records: a vendor SYSTEM notice is never unread, never the preview, never an author (owner\'s DM 2026-10-08)');
+{
+  const Rc = require(path.join(REPO, 'src/channel-record.js'));
+  const base = Date.now() - 3600e3;
+  const ADA = { id: 'ou_ada', name: 'Ada' };
+  const driveSys = async (ENGINE, name) => {
+    const recs = [];
+    const toRec = (m) => (m.sys ? Rc.makeRecord({ adapterId: 'sys-poll', convId: 'c', vendorId: m.vendorId, at: m.at, kind: 'system', systemKind: 'recall', author: {}, text: m.text }) : fake.toRecord('sys-poll', 'c', m));
+    const mod = {
+      kind: 'sys-poll', caps: { ...fake.fakePoll.caps },
+      create(record, deps) {
+        const impl = fake.fakePoll.create(record, deps);
+        impl.listConversations = async () => ({ conversations: [{ id: 'c', vendorId: 'c', title: 'Ada', kind: 'dm', participants: 'Ada', lastAt: Math.max(base, ...recs.filter((m) => !m.sys).map((m) => m.at)) }], cursor: null, complete: true });
+        impl.history = async (convId, { anchor = null, limit = 50 } = {}) => {
+          const all = recs.map(toRec);
+          let idx = 0; if (anchor) { const at = all.findIndex((r) => r.vendorId === anchor); idx = at >= 0 ? at + 1 : 0; }
+          const found = !anchor || idx > 0; const page = all.slice(idx).slice(0, limit); const drained = page.length === all.slice(idx).length;
+          return { records: page, anchor: page.length ? page[page.length - 1].vendorId : anchor, reachedAnchor: found && drained, complete: found && drained };
+        };
+        return impl;
+      },
+    };
+    const dataDir = path.join(ROOT, name);
+    fs.mkdirSync(path.join(dataDir, 'channels'), { recursive: true });
+    fs.writeFileSync(path.join(dataDir, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: [{ id: 'sys-poll', kind: 'sys-poll', label: 'sys', enabled: true, linkedAt: base - 60e3, auth: { tokenEnc: null, expiresAt: null, scopes: [] }, lastPass: null, consecutiveFailures: 0, push: { enabled: false }, scan: null }] }));
+    const registry = CH.createChannelRegistry(); registry.register(mod);
+    const eng = ENGINE.create({ dataDir, registry, env: {}, broadcast: () => {} });
+    engines.push(eng);
+    const en = () => eng.store.index.snapshot().conversations['sys-poll/c'];
+    const out = {};
+    recs.push({ vendorId: 'a1', at: base + 60e3, author: ADA, text: 'can you look at the deploy' });
+    recs.push({ vendorId: 'n1', at: base + 2 * 60e3, sys: true, text: '' });
+    await eng.pass('sys-poll', { force: true });
+    const e1 = en();
+    out.first = { unread: e1.unread, lastAt: e1.lastAt, lastText: e1.lastText, authors: (e1.authors || []).map((a) => a.id || '(empty)') };
+    recs.push({ vendorId: 'n2', at: base + 3 * 60e3, sys: true, text: 'Ada recalled a message' });
+    await eng.pass('sys-poll', { force: true });
+    const e2 = en();
+    out.second = { unread: e2.unread, lastAt: e2.lastAt, lastText: e2.lastText, readAt: e2.readAt };
+    await eng.markRead('sys-poll', 'c', base + 1.5 * 60e3);
+    out.marked = en().unread;
+    // the owner's STORED shape (before `kind` existed): served as a notice at read, no migration
+    eng.store.appendRecords('sys-poll', 'c', [{ id: 'sys-poll:c:old', convId: 'c', adapterId: 'sys-poll', vendorId: 'old', at: base + 4 * 60e3, author: { id: '', name: '', isSelf: false, isBot: false }, text: ' ', mentions: [], attachments: [], replyTo: null, threadKey: null, raw: { msg_type: 'system', chat_id: 'c', sender_type: null, updated: null } }]);
+    const tail = eng.store.readTail('sys-poll', 'c', { limit: 10 });
+    out.read = tail.map((r) => `${r.vendorId}:${r.kind || 'msg'}`).join(',');
+    eng.stop();
+    return out;
+  };
+  const r = await driveSys(ENG, 'sys-notice');
+  ok(r.first.unread === 1 && r.first.lastAt === base + 60e3 && r.first.lastText === 'can you look at the deploy' && !r.first.authors.includes('(empty)'), "a notice after Ada's message: unread 1 (never 2), the row's last line + instant stay Ada's, the authors never gain the empty author", JSON.stringify(r.first));
+  ok(r.second.unread === 1 && r.second.lastAt === base + 60e3 && r.second.lastText === 'can you look at the deploy', 'a WORDED notice later: still 1 unread, the preview the newest MESSAGE (a direct chat never "somebody wrote" by a notice)', JSON.stringify(r.second));
+  ok(r.marked === 0, "markRead's re-derivation from the log never counts a notice (read before n1: 0, not 2)", String(r.marked));
+  ok(r.read === 'a1:msg,n1:system,n2:system,old:system', "the read path serves the owner's stored shape (empty author, msg_type system) as kind system", r.read);
+  // CONTROL: the unread re-derivation without the system rule counts the notices
+  const src = engineSource(REPO);
+  const cut = src.replace('(r) => !FO.selfRead(r, self) && !FO.systemRead(r));', '(r) => !FO.selfRead(r, self));');
+  const cp = patchPath('src/server', 'channels-engine-sys'); writeCopy(cp, cut);
+  const c = await driveSys(require(cp), 'sys-notice-ctl');
+  ok(cut !== src && c.marked === 2, 'CONTROL: a re-derivation without the system rule counts both notices after the read line (2) — RED', JSON.stringify(c.marked));
+}
+
 console.log('\ntree: the patched copies never touch the tree');
-for (const r of copiesCensus(MUTE.files, MUTE.dir, REPO, { minCopies: 29 })) ok(r.pass, 'tree: ' + r.name, r.pass ? undefined : r.detail);
+for (const r of copiesCensus(MUTE.files, MUTE.dir, REPO, { minCopies: 30 })) ok(r.pass, 'tree: ' + r.name, r.pass ? undefined : r.detail);
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

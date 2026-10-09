@@ -212,6 +212,17 @@ else await (async () => {
       const id1 = tA1 ? String(tA1.targetId).toUpperCase() : '';
       const ownersOk = await waitFor(() => box.some((m) => m.type === 'tab-owners' && m.owners && m.owners[id1] === 'agent'), 8000);
       ok(ownersOk, '③c the live view of conversation 1 lists its tabs (its first one is its agent\'s)');
+      // lane browser-tabs-by-window (the owner, 2026-10-08 — two agents read as one window): the record says WHICH WINDOW each
+      // tab is in (the keeper's Browser.getWindowForTarget, on this real Chrome) and the holders' windows in the view's words —
+      // grouped by the PURE tabGroups: this view's window first, conversation 2's window next and named, no window number
+      const byWin = await waitFor(() => box.some((m) => m.type === 'tab-owners' && m.windows && m.windows[id1] === winA && Array.isArray(m.leases) && m.leases.some((l) => l.word === 'other' && l.windowId === winB)), 8000);
+      const rec8 = [...box].reverse().find((m) => m.type === 'tab-owners') || {}, tabs8 = ([...box].reverse().find((m) => m.type === 'tabs') || {}).tabs || [];
+      const TBS8 = require('../src/browser-tabs.js');
+      const g8 = TBS8.tabGroups({ tabs: tabs8.map((x) => ({ ...x, windowId: (rec8.windows || {})[String(x.targetId).toUpperCase()] })), leases: (rec8.leases || []).map((l) => ({ windowId: l.windowId, holder: { word: l.word, name: l.name || 'conversation 2' } })) });
+      const idB = tWB ? String(tWB.targetId).toUpperCase() : '';
+      const words8 = g8.groups.map((g) => `${g.label} ${g.tip} ${g.blankText}`).join(' | ');
+      ok(byWin && g8.grouped && g8.groups[0].kind === 'own' && g8.groups[0].targetIds.includes(id1) && g8.groups.some((g) => g.kind === 'holder' && (g.targetIds.includes(idB) || g.blanks.includes(idB))) && (rec8.leases || []).some((l) => l.word === 'agent' && l.windowId === winA) && !/\d{6,}/.test(words8),
+        `③c BY WINDOW on the real binary: conversation 1's view is told every tab's window — its own first ("${g8.groups[0] && g8.groups[0].label}"), conversation 2's window next and named; ${tabs8.filter((x) => TBS8.BLANK_URL_RE.test(String(x.url || ''))).length} blank tab(s) in the browser, ${g8.blanks} folded`, JSON.stringify({ groups: g8.groups, leases: rec8.leases, windows: rec8.windows, winA, winB }).slice(0, 1200));
       lv.send(JSON.stringify({ type: 'watch-tab', targetId: id1 }));
       const watched = await waitFor(() => frames.some((f) => f.metadata && f.metadata.watched === id1), 6000);
       const g2 = await run(s1, ['get', 'title']);

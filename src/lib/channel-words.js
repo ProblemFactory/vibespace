@@ -460,9 +460,8 @@ export function wakeWhyText(why) {
     case 'quoted your message': return t('quoted your message');
     case 'a reply to a message of yours': return t('a reply to a message of yours');
     case 'in a thread you are in': return t('in a thread you are in');
-    // lane reply-to-sent: the rule's four shapes (src/channel-filter.js SENT_WHYS — {when} / {subject} filled by the matcher)
+    // lane reply-to-sent: the rule's three shapes (src/channel-filter.js SENT_WHYS — {when} / {subject} filled by the matcher)
     case 'a reply to a message this agent sent': return t('a reply to a message this agent sent');
-    case 'the next message after yours in a direct chat': return t('the next message after yours in a direct chat');
     default: {
       const s = String(why || '');
       let m = /^quotes your message of (.+)$/.exec(s);

@@ -655,6 +655,17 @@ export function installSessionLifecycle(App, ctx = {}) {
     return false;
   },
 
+  /** B-0cc8 (lane pages-chip-groups): the window an attach of `serverId` is still waiting in — this socket sent that
+   *  attach < 15 s ago (ws `_attachInFlight`, cleared at its `attached` / `error`) and the window it made is still open ⇒
+   *  raise it and send NOTHING. A double-click on a sidebar row used to send two attach frames (two windows, two answers). */
+  _focusPendingAttach(serverId) {
+    const w = this._attachWins && this._attachWins.get(serverId);
+    const sent = this.ws && this.ws._attachInFlight && this.ws._attachInFlight.get(serverId);
+    if (!w || !sent || Date.now() - sent >= 15000 || !this.wm.windows.has(w.id)) { if (w) this._attachWins.delete(serverId); return false; }
+    this.wm.revealWindow(w.id);
+    return true;
+  },
+
   _closeSidebarOnMobile() {
     if (window.innerWidth <= 768 && this.sidebar.isOpen) this.sidebar.toggle(false);
   },
@@ -678,6 +689,7 @@ export function installSessionLifecycle(App, ctx = {}) {
     this._closeSidebarOnMobile();
     // If we already have a window for this session, show it (a replay / restore — `syncId` or `machine` — only raises it)
     if (this._focusExistingSession(serverId, { replay: !!(syncId || machine) })) return null;
+    if (this._focusPendingAttach(serverId)) return null; // B-0cc8: the attach in flight IS the answer — no second frame
 
     this._hideWelcome();
     const isChat = mode === 'chat';
@@ -704,6 +716,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       openSpec,
       titleMeta: this._buildTitleMeta(openSpec),
     });
+    (this._attachWins || (this._attachWins = new Map())).set(serverId, winInfo); // B-0cc8: the window this attach waits in
 
     const hostName = this._hostLabel(openSpec.hostId);
     const pending = this._windowPending(winInfo, hostName

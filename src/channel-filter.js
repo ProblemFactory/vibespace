@@ -74,7 +74,7 @@
  * survives a restart. This module owns the first and knows nothing of the
  * other two.
  */
-const { inertFrames } = require('./channel-record.js');
+const { inertFrames, isSystemRecord } = require('./channel-record.js');   // + isSystemRecord: lane lark-system-records
 const { toAgentText, cutText, foldHidden } = require('./peer-text.js');   // lane peer-census: THE belt (bound → fold → the frame rule per line / piece) every agent-facing line takes
 
 /** The CLOSED rule set. A kind outside it is refused by `validateFilter`. */
@@ -96,11 +96,12 @@ const PLACE_RULE_KINDS = Object.freeze(['reply-to-mine', 'in-thread-with-me', 'r
 /** lane reply-to-sent (owner 2026-10-07: "通知功能好像缺少'回复了这个 agent 之前发送的消息'的 trigger"): `reply-to-sent` fires
  *  when a record ANSWERS a message THIS principal sent from here — judged by PLACE across every shape the channel has
  *  (`sentHit`): a quote / reply naming a sent id; a topic or Slack-thread reply under a sent parent / root; a record in a
- *  MAIL thread (`ctx.convKind === 'thread'`) newer than a sent mail; and in a DIRECT chat (`dm` — no reply marker) the
- *  peer's message within REPLY_WINDOW_MS after this principal's newest send. It reads `ctx.sentByMe` ONLY (a Map
+ *  MAIL thread (`ctx.convKind === 'thread'`) newer than a sent mail. Lane channel-reply-real (owner 2026-10-08, B-a871:
+ *  「我说的回复你的消息是指真的"回复"，也就是lark里的引用/讨论串功能。其它源同理。」): EVERY shape is the vendor's own
+ *  quote / reply / thread marker — never a clock (a direct chat's "any message within 24 h" clause is gone: two unrelated
+ *  peer messages woke an agent, billed). The adapter census: scripts/test-channel-filter.mjs ⑯. It reads `ctx.sentByMe` ONLY (a Map
  *  vendorId → {at, words, subject} the engine builds from the outbox's sent proposals of this drafter, the last
  *  SENT_WINDOW_MS / SENT_MAX ids) — never the owner's own messages (`ctx.ownerMine`, which `reply-to-mine` reads). */
-const REPLY_WINDOW_MS = 24 * 3600e3;
 const SENT_WINDOW_MS = 30 * 24 * 3600e3;
 const SENT_MAX = 500;
 /** lane reply-to-sent (owner revision 21:50Z: "对组设置这个权限就等于对每个 agent 单独处理"): a GROUP row carrying the rule is
@@ -468,7 +469,7 @@ const WHY_SENT = 'a reply to a message this agent sent';
 const PLACE_WHYS = Object.freeze([WHY_REPLY, WHY_THREAD, WHY_QUOTED]);
 /** lane reply-to-sent: the `reply-to-sent` whys — ONE per shape, a fixed template the client words (channel-words
  *  wakeWhyText): {when} = the answered message's clock (UTC), {subject} = the sent mail's subject. */
-const SENT_WHYS = Object.freeze({ quote: 'quotes your message of {when}', thread: 'replies in the thread of your message of {when}', mail: 'in the thread of your mail "{subject}"', dm: 'the next message after yours in a direct chat' });
+const SENT_WHYS = Object.freeze({ quote: 'quotes your message of {when}', thread: 'replies in the thread of your message of {when}', mail: 'in the thread of your mail "{subject}"' });
 const clockOf = (at) => { const d = new Date(Number(at)); return Number.isFinite(d.getTime()) ? `${d.toISOString().slice(11, 16)} UTC` : '?'; };
 /** The ids a `reply-to-mine` / `in-thread-with-me` rule calls mine: the owner's (`ownerMine`), what this principal sent
  *  (`sentByMe` + the index ledger `sentIds`), and a caller's legacy `mine`. */
@@ -484,6 +485,7 @@ function mineOf(ctx) {
  */
 function sentHit(record, ctx) {
   const rec = record || {};
+  if (isSystemRecord(rec)) return null;   // lane lark-system-records: a notice answers nothing
   const sent = ctx && ctx.sentByMe instanceof Map ? ctx.sentByMe : null;
   if (!sent || !sent.size) return null;
   const self = str(rec.vendorId);
@@ -493,11 +495,19 @@ function sentHit(record, ctx) {
   const kind = String(c.kind || 'plain');
   const topical = !!c.topic && /^topic-/.test(kind);   // the topic gate (placeHit's, read here for the sent ids)
   const fill = (tpl, s) => tpl.replace('{when}', clockOf(s.at)).replace('{subject}', str(s.subject || s.words).slice(0, 60));
-  // (a) a QUOTE / reply naming one of mine (a quote inside a topic, a topic head that quotes)
+  // (b′) a channel with NO quote at all (`ctx.threadOnly` — `threadOnlyCaps`: Slack): every reply sits under its thread's
+  // root (thread_ts), so a record naming a sent root IS a thread reply
+  if (ctx.threadOnly) {
+    const s = of(rec.root) || of(rec.threadKey) || of(rec.replyTo);
+    if (s) return { why: fill(SENT_WHYS.thread, s), sent: s };
+  }
+  // (a) a QUOTE / reply naming one of mine (a quote inside a topic, a topic head that quotes) — parent-exact
   const q = kind !== 'topic-reply' ? (of(c.quotes) || (!topical ? of(rec.replyTo) : null)) : null;
   if (q) return { why: fill(SENT_WHYS.quote, q), sent: q };
-  // (b) a topic reply / (d) a Slack thread reply — under a sent parent or root
-  if (topical || rec.root || rec.threadKey) {
+  // (b) a TOPIC reply (the classifier's topic-* — Lark 讨论串, an indexed Slack thread) under a sent parent or root. A
+  // quote CHAIN's root_id / threadKey is NEVER read: C quoting B (B quoted my A) answers B, not A (owner ruling
+  // 2026-10-08 18:00Z, B-a871)
+  if (topical) {
     const s = of(rec.replyTo) || of(rec.root) || of(rec.threadKey);
     if (s) return { why: fill(SENT_WHYS.thread, s), sent: s };
   }
@@ -506,11 +516,17 @@ function sentHit(record, ctx) {
   let newest = null;
   for (const s of sent.values()) if (s && Number.isFinite(Number(s.at)) && Number(s.at) < at && (!newest || Number(s.at) > Number(newest.at))) newest = s;
   if (!newest) return null;
-  // (c) a MAIL thread IS the conversation: a record newer than a mail this principal sent in it
+  // (c) a MAIL thread IS the conversation (Gmail's own threading — `kind: 'thread'` only for a mail thread): a record
+  // newer than a mail this principal sent in it. A chat without a marker is NEVER a reply (owner 2026-10-08, B-a871)
   if (ctx.convKind === 'thread') return { why: fill(SENT_WHYS.mail, newest), sent: newest };
-  // (e) a DIRECT chat has no reply marker: the peer's message within the window after this principal's newest send
-  if (ctx.convKind === 'dm' && at - Number(newest.at) <= REPLY_WINDOW_MS) return { why: SENT_WHYS.dm, sent: newest };
   return null;
+}
+/** lane channel-reply-real (owner ruling 2026-10-08 18:00Z): a channel whose replies are ALL thread replies — it reads
+ *  vendor threads and declares no 'quote' placement (Slack: thread_ts) — so a record's root / threadKey there IS a thread
+ *  marker. Everywhere else (Lark: root_id also roots a QUOTE CHAIN) only the classifier's topic says "thread". */
+function threadOnlyCaps(caps) {
+  const t = caps && typeof caps === 'object' ? caps.threads : null;
+  return !!(t && t.read === 'vendor' && Array.isArray(t.placements) && t.placements.length > 0 && !t.placements.includes('quote'));
 }
 /**
  * THE PLACE RULES' ONE DECISION (owner decision A, 2026-09-28): the `why` string ONE place rule fires with for ONE
@@ -518,6 +534,7 @@ function sentHit(record, ctx) {
  */
 function placeHit(rule, record, ctx) {
   const rec = record || {};
+  if (isSystemRecord(rec)) return null;   // lane lark-system-records
   if (rule && rule.kind === 'reply-to-sent') { const s = sentHit(rec, ctx); return s ? s.why : null; }
   const mine = ctx ? mineOf(ctx) : null;
   if (!mine || !mine.size || !ctx || typeof ctx.kindOf !== 'function') return null;
@@ -551,6 +568,7 @@ function placeHit(rule, record, ctx) {
  *  takes the same signature so a new kind never grows a second one. */
 function ruleHits(rule, record, ctx) {
   const rec = record || {};
+  if (isSystemRecord(rec)) return false;   // lane lark-system-records
   const author = rec.author || {};
   const text = lower(rec.text);
   switch (rule.kind) {
@@ -602,6 +620,9 @@ function ruleHits(rule, record, ctx) {
  * null/invalid never hits: fail closed, a wake is money.
  */
 function matchRecord(filter, record, ctx = {}) {
+  // lane lark-system-records (owner's DM 2026-10-08): a vendor SYSTEM notice (a recall, a join — src/channel-record.js) is nobody's
+  // message: no rule of any kind matches it, so no wake, no stash, no For-you
+  if (isSystemRecord(record)) return { hit: false, why: [] };
   const f = filter && typeof filter === 'object' && Array.isArray(filter.rules) ? filter : null;
   if (!f || !f.rules.length) return { hit: false, why: [] };
   const match = MATCH_MODES.includes(f.match) ? f.match : 'any';
@@ -643,7 +664,7 @@ function estimate(filter, records, { days = 7, now = Date.now(), capHit = false,
   for (const r of list) {
     const at = Number(r.at);
     if (oldest === null || at < oldest) oldest = at;
-    if (!filter || matchRecord(filter, r, ctx).hit) matched++;
+    if (!isSystemRecord(r) && (!filter || matchRecord(filter, r, ctx).hit)) matched++;   // lane lark-system-records: a notice is never counted
   }
   const total = list.length;
   // Honest span: a corpus younger than the window rates over what it covers.
@@ -1391,7 +1412,7 @@ function renderWakeBlock({ adapterLabel = 'channel', title = '', convId = '', hi
   // lane reply-to-sent: a hit that ANSWERS a message this agent sent says which one first
   const lineOf = (h, max) => {
     const r = h.record;
-    const who = safeInline((r.author && (r.author.display || r.author.name || r.author.id)) || 'unknown', 80);
+    const who = safeInline((r.author && (r.author.display || r.author.name || r.author.id)) || '(no sender)', 80);   // lane lark-system-records: never "unknown"
     const re = h.sent && typeof h.sent === 'object' ? `Reply to your message (${h.sent.at ? stamp(h.sent.at) : 'earlier'}, "${safeInline(h.sent.words || '', 60)}"): ` : '';
     return `${re}from ${who} at ${stamp(r.at)}\n${safeLine(r.text, max)}`;
   };
@@ -1457,7 +1478,7 @@ function renderScopeDigestBlock({ adapterLabel = 'channel', scopeLabel = '', gro
     const recs = g.hits.slice(-perConversation);
     const more = g.hits.length - recs.length + (Number(g.elided) || 0);
     const sec = [`#### ${safeInline(g.title || g.convId, 120)} — ${safeInline(g.convId, 200)}`]
-      .concat(recs.map((h) => `from ${safeInline((h.record.author && (h.record.author.display || h.record.author.name || h.record.author.id)) || 'unknown', 80)} at ${stamp(h.record.at)}\n${safeLine(h.record.text, maxChars)}`));
+      .concat(recs.map((h) => `from ${safeInline((h.record.author && (h.record.author.display || h.record.author.name || h.record.author.id)) || '(no sender)', 80)} at ${stamp(h.record.at)}\n${safeLine(h.record.text, maxChars)}`));
     if (more > 0) sec.push(`(${more} more in this conversation)`);
     const next = out + '\n' + sec.join('\n');
     const rest = list.length - shown - 1 + (Number(elidedConversations) || 0);
@@ -1487,7 +1508,7 @@ function whyText(why) {
 }
 
 module.exports = {
-  RULE_KINDS, PLACE_RULE_KINDS, REPLY_WINDOW_MS, SENT_WINDOW_MS, SENT_MAX, SENT_WHYS, WHY_SENT, sentHit, hasSentRule, splitFilter, MATCH_MODES, PRINCIPAL_KINDS, ASSIGN_MODES, NOTIFY_MODES, AUTHORITIES,
+  RULE_KINDS, PLACE_RULE_KINDS, SENT_WINDOW_MS, SENT_MAX, SENT_WHYS, WHY_SENT, sentHit, threadOnlyCaps, hasSentRule, splitFilter, MATCH_MODES, PRINCIPAL_KINDS, ASSIGN_MODES, NOTIFY_MODES, AUTHORITIES,
   DEFAULT_DIGEST_MINUTES, MIN_DIGEST_MINUTES, MAX_DIGEST_MINUTES, DEFAULT_DAILY_WAKE_CAP, MAX_DAILY_WAKE_CAP,
   BLOCK_MAX_RECORDS, BLOCK_MAX_CHARS, BLOCK_MAX_BYTES,
   validateRule, validateFilter, filterProblemText, MAX_RULES, ruleWhy, placeHit, PLACE_WHYS, matchRecord, estimate,

@@ -1168,6 +1168,8 @@ class ChatView {
         // bar's design chip is the live list; the agent's reply carries the link
         this._statusBar?.notePagePublished?.(msg.page);
         showToast(t('Page published: {name}', { name: msg.page?.name || '' }));
+      } else if (msg.type === 'artifacts-changed' && msg.sessionId === sessionId) {
+        this._refreshArtifacts(); // lane pages-chip-groups: a page shown here was born / re-resolved (published, gone) — the chips re-read the ONE feed
       } else if (msg.type === 'designs-updated') {
         // the hub's registry changed (a design registered / opened / retitled — lane design-window): a live window
         // re-reads its own list (coalesced: one broadcast per write, many windows)
@@ -3976,7 +3978,7 @@ class ChatView {
   _openArtifact(b) {
     if (b && b.kind === 'service') { const o = serviceOpenSpec(b); if (this.app.openBrowser) this.app.openBrowser(o.url, { proxy: o.proxy }); else window.open(serviceHref(b), '_blank', 'noopener'); return; } // lane artifacts-services: the Web view, never a new tab by default; -url: proxy mode for a proxied row
     if (!b || !b.path) return;
-    if (b.kind === 'page' && b.url && b.state === 'published') { const u = new URL(b.url, location.origin).href; if (this.app.openBrowser) this.app.openBrowser(u); else window.open(u, '_blank'); return; }
+    if (b.kind === 'page' && b.url && (b.state === 'published' || b.presented)) { const u = new URL(b.url, location.origin).href; if (this.app.openBrowser) this.app.openBrowser(u); else window.open(u, '_blank'); return; }
     if (b.kind === 'design') { this.app.openDesign({ host: b.host || '', dir: b.path, sessionId: this.sessionId }); return; }
     this.app.openFile(b.path, b.name || b.path.split('/').pop(), { host: b.host || undefined, from: this.winInfo?.id || null });
   }

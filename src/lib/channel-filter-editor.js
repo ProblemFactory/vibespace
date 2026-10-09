@@ -57,9 +57,10 @@ const RULE_LABELS = () => ({
   // under both — said on the row, so the rule reads as what it does
   'reply-to-mine': t('replies to or quotes a message of mine'),
   'in-thread-with-me': t('is in a thread I am in, or quotes a message of mine'),
-  // lane reply-to-sent (owner 2026-10-07): a quote, a topic / thread reply, a mail-thread reply or a direct chat's next
-  // message answering what THIS agent sent; on a group or All agents each member is judged for its own sends
-  'reply-to-sent': t('is a reply to a message this agent sent'),
+  // lane reply-to-sent (owner 2026-10-07): a quote, a topic / thread reply or a mail-thread reply answering what THIS
+  // agent sent — the vendor's own marker, never a clock (lane channel-reply-real, owner 2026-10-08, B-a871); on a group
+  // or All agents each member is judged for its own sends
+  'reply-to-sent': t('is a quote, a reply in a thread, or a reply in the mail thread of a message this agent sent'),
 });
 
 

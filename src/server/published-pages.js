@@ -246,6 +246,8 @@ function create({ dataDir, requestAuthed = () => true, publicUrl = () => null, l
   const list = ({ sessionId, conversationId, req } = {}) => store.pages
     .filter((p) => (!sessionId && !conversationId) || (sessionId && p.sessionId === sessionId) || (conversationId && p.conversationId === conversationId))
     .map((p) => pub(p, req));
+  // lane pages-chip-groups: one id's fate for the artifact registry's presented rows — {page} live, {gone} unpublished (B-f694), null never here
+  const byId = (id, req) => { const rec = store.pages.find((p) => p.id === id); if (rec) return { page: pub(rec, req) }; return store.gone.some((g) => g && g.id === id) ? { gone: true } : null; };
   // by LOCAL path = srcKey 'local:<abs>' — a remote host's page for the same absolute path is a different page (review-caught: identical home layouts across hosts)
   const bySrcPath = (p, req) => { const key = 'local:' + path.resolve(String(p || '')); const rec = store.pages.find((r) => r.srcKey === key); return rec ? pub(rec, req) : null; };
 
@@ -470,7 +472,7 @@ self.addEventListener('fetch', (e) => {
     });
   }
 
-  return { publish, publishContent, setFlags, remove, list, bySrcPath, serve, serveRaw, urlFor, originOf, registerRoutes, STORAGE_SHIM, injectShim };
+  return { publish, publishContent, setFlags, remove, list, byId, bySrcPath, serve, serveRaw, urlFor, originOf, registerRoutes, STORAGE_SHIM, injectShim };
 }
 
 module.exports = { create, injectShim, COMPAT_PRELUDE, STORAGE_SHIM, CSP }; // CSP: the design preview's header too (lane design-ask)

@@ -160,7 +160,7 @@ const fs = require('fs');
 const path = require('path');
 const { timedSync } = require('./timed-sync.js'); // PURE: the store-write clock (design 011 lane 1, store-timing)
 const crypto = require('crypto');
-const { sideKey, validateSide } = require('./channel-record.js');
+const { sideKey, validateSide, isSystemRecord, asSystemRecord } = require('./channel-record.js');   // + the system pair: lane lark-system-records
 // lane lark-threads (A1): THE PLACE PATCH's PURE rules (widen-only, the fold, the compaction) — imports only channel-record
 const Thr = require('./channel-thread.js');
 const { compactSide } = require('./channel-reactions.js');
@@ -844,7 +844,8 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     for (const r of fresh) rememberVendorId(set, r.vendorId);
     { const bp = basePlaces.get(`${adapterId}/${convId}`); if (bp) for (const r of fresh) notePlace(bp, r); }
     let lastAt = null, lastText = null;
-    for (const r of fresh) if (Number.isFinite(r.at) && (lastAt === null || r.at > lastAt)) { lastAt = r.at; lastText = typeof r.text === 'string' ? r.text : null; }
+    // lane lark-system-records: a vendor notice never moves the row's last line / instant (the preview is the newest MESSAGE)
+    for (const r of fresh) if (!isSystemRecord(r) && Number.isFinite(r.at) && (lastAt === null || r.at > lastAt)) { lastAt = r.at; lastText = typeof r.text === 'string' ? r.text : null; }
     // `freshAt`: each appended record's instant (P1 push — the exclusivity
     // measurement judges only records stamped after the lane began carrying
     // content, so a first ingest's backlog is never a "miss").
@@ -1249,6 +1250,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   /** A page of records as their patches make them (a new object only where a patch widens one). */
   function patched(adapterId, convId, recs) {
     if (!recs.length) return recs;
+    recs = recs.map(asSystemRecord);   // lane lark-system-records: a notice stored before `kind` existed, re-judged at read (no migration)
     const m = placesOf(adapterId, convId);
     if (!m.size) return recs;
     return recs.map((r) => (r && r.vendorId && m.has(String(r.vendorId)) ? Thr.applyPlace(r, m.get(String(r.vendorId))) : r));

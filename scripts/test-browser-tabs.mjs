@@ -198,6 +198,36 @@ function pureLegs(TT, tag = '') {
   const many = Array.from({ length: 30 }, (_, i) => ({ kind: 'tab-close', title: 't' + i, url: 'https://x.example/' + i }));
   const kept = many.reduce((a, x) => TT.noteUserActIn(a, x), []);
   leg(kept.length === 16 && kept[0].title === 't14' && /closed 16 of your tabs .*and 10 more/.test(TT.userActsSentence(kept)), 'the cycle keeps 16 acts (the newest), the sentence names 6 and counts the rest');
+  // lane browser-tabs-by-window (the owner, 2026-10-08): THE TABS BY WINDOW — the owner's instance as the fixture (profile
+  // hanabi-work: this conversation's window 896114259, 企业助手's window 896114295, each with its blank anchor)
+  {
+    const WA = 896114259, WB = 896114295, A = T(41), B = T(42), C = T(43), D = T(44);
+    const tabs = [{ targetId: A, url: 'https://enterprise.example/', active: true, windowId: WA }, { targetId: B, url: 'https://read.example/r', windowId: WB }, { targetId: C, url: 'about:blank', windowId: WA }, { targetId: D, url: 'about:blank', windowId: WB }];
+    const leases = [{ windowId: WA, holder: { word: 'agent' } }, { windowId: WB, holder: { word: 'other', name: '企业助手' } }];
+    const g = TT.tabGroups({ tabs, leases });
+    leg(g.grouped && g.groups.map((x) => x.kind).join() === 'own,holder' && g.groups[0].label === 'This window' && g.groups[1].label === '企业助手’s window' && JSON.stringify(g.order) === JSON.stringify([A, B]), 'BY WINDOW: this window first, then 企业助手’s window by name (the owner\'s two leases)', g);
+    leg(JSON.stringify(g.groups.map((x) => x.blanks)) === JSON.stringify([[C], [D]]) && g.blanks === 2 && g.groups[0].blankText === '+1 blank' && TT.tabsCountText(g) === '2 · +2 blank', 'BY WINDOW anchors: each window\'s blank folds into its own head ("+1 blank"); the pane count "2 · +2 blank"', g);
+    // the holders' order (the user first, then the conversations by age) — never re-sorted; unknown + unclaimed last
+    const g2 = TT.tabGroups({ tabs: [{ targetId: T(51), url: 'https://x.example/', windowId: 7 }, { targetId: T(52), url: 'https://y.example/', windowId: 9 }, { targetId: T(53), url: 'https://z.example/', windowId: 8 }, { targetId: T(54), url: 'https://q.example/', windowId: null }, { targetId: T(55), url: 'https://w.example/', windowId: 11 }, { targetId: T(56), url: 'https://me.example/', active: true, windowId: 5 }],
+      leases: [{ windowId: 9, holder: { word: 'you' } }, { windowId: 5, holder: { word: 'agent' } }, { windowId: 8, holder: { word: 'other', name: 'Zed' } }, { windowId: 7, holder: { word: 'other' } }] });
+    leg(g2.groups.map((x) => x.label).join('|') === 'This window|Your window|Zed’s window|Another conversation’s window|Elsewhere in this browser' && JSON.stringify(g2.groups[4].targetIds) === JSON.stringify([T(54), T(55)]), 'BY WINDOW order: own, then each holder in the holders\' order (yours, Zed’s, an unnamed one), an unread or unclaimed window last', g2.groups);
+    // a lease without a window id names no group: its tabs are Elsewhere, never guessed from their owner
+    const g3 = TT.tabGroups({ tabs: [{ targetId: A, url: 'https://a.example/', active: true, windowId: WA }, { targetId: B, url: 'https://b.example/', windowId: WB }], leases: [{ windowId: WA, holder: { word: 'agent' } }, { windowId: null, holder: { word: 'other', name: 'Yan' } }] });
+    leg(g3.groups.map((x) => x.kind).join() === 'own,elsewhere' && !JSON.stringify(g3).includes('Yan'), 'BY WINDOW never guessed: a lease without a window id names no group — its tab is "Elsewhere in this browser"', g3);
+    // the anchor rule's edges: alone ⇒ kept; all blank ⇒ the first kept; the tab on show never folded (never "here"); unread window ⇒ kept
+    const g4 = TT.tabGroups({ tabs: [{ targetId: T(61), url: 'about:blank', windowId: 3 }, { targetId: T(62), url: 'about:blank', windowId: 4 }, { targetId: T(63), url: 'about:blank', windowId: 4 }, { targetId: T(64), url: 'about:blank', active: true, windowId: 6 }, { targetId: T(65), url: 'https://p.example/', windowId: 6 }, { targetId: T(66), url: 'about:blank', windowId: null }, { targetId: T(67), url: 'https://u.example/', windowId: null }], leases: [{ windowId: 6, holder: { word: 'agent' } }] });
+    leg(JSON.stringify(g4.order.slice().sort()) === JSON.stringify([T(61), T(62), T(64), T(65), T(66), T(67)].sort()) && g4.blanks === 1 && g4.groups.some((x) => x.blanks.includes(T(63))), 'BY WINDOW anchors kept: a window\'s only tab, the first of an all-blank window, the blank on show, a blank whose window is unread', g4);
+    const m4 = TT.tabRowModel({ tabs: [{ targetId: T(71), url: 'about:blank', active: true }, { targetId: T(72), url: 'https://p.example/' }, { targetId: T(73), url: 'about:blank' }], owners: { [T(71)]: 'agent', [T(72)]: 'agent', [T(73)]: 'agent' }, windows: { [T(71)]: 6, [T(72)]: 6, [T(73)]: 6 }, leases: [{ windowId: 6, holder: { word: 'agent' } }] });
+    leg(m4.rows.length === 2 && m4.rows.find((x) => x.targetId === T(71)).here && !m4.rows.some((x) => x.targetId === T(73)) && m4.blanks === 1 && m4.counts.agent === 3, 'BY WINDOW the row: the blank on show stays "the agent is here", a spare blank of its window folds (never counted out of the last-tab rule)', m4);
+    // the row model draws in GROUP order (own window first even when the browser lists it last), each row knows its group
+    const m5 = TT.tabRowModel({ tabs: [{ targetId: B, title: 'Read', url: 'https://read.example/r' }, { targetId: A, title: 'Ent', url: 'https://enterprise.example/', active: true }], owners: { [A]: 'agent', [B]: 'other' }, names: { [B]: '企业助手' }, windows: { [A]: WA, [B]: WB }, leases });
+    leg(m5.grouped && m5.rows.map((x) => x.targetId).join() === [A, B].join() && m5.rows[0].group === m5.groups[0].key && m5.rows[1].group === m5.groups[1].key && m5.rows[1].mark === '企业助手', 'BY WINDOW the row model: this window\'s chip first, then 企业助手’s (its mark names it), each row knows its group', m5.rows);
+    // an old record (no windows, no leases) = the flat row as before
+    const m6 = TT.tabRowModel({ tabs: [{ targetId: B, url: 'https://read.example/r' }, { targetId: A, url: 'https://e.example/', active: true }], owners: { [A]: 'agent', [B]: 'agent' } });
+    leg(!m6.grouped && m6.rows.map((x) => x.targetId).join() === [B, A].join() && m6.blanks === 0, 'BY WINDOW absent: a record without windows keeps the browser\'s order, one group, nothing folded', m6);
+    const words = [g, g2, g3, g4, m5].flatMap((x) => x.groups).map((x) => `${x.label} ${x.tip} ${x.blankText}`).join(' | ');
+    leg(!/\d{6,}/.test(words) && /This window/.test(words), 'BY WINDOW ids never in words: no digit run of 6+ in any head, tip or count (Chrome\'s window ids are 9 digits)', words);
+  }
   return legs;
 }
 for (const l of pureLegs(TB)) ok(l.c, l.n, l.extra);
@@ -238,6 +268,11 @@ for (const l of pureLegs(TB)) ok(l.c, l.n, l.extra);
   ok(Array.isArray(c6) && c6.some((n) => /F8/.test(n)), 'CONTROL F8: a mark that never names the holder ("Another conversation’s", the 2.369.202 words) — red', c6);
   const c7 = redOf("    .filter((x) => x.active || wordOf(x) !== 'orphan' || !BLANK_URL_RE.test(str(x.url).trim()));\n", "    .filter(Boolean);\n", 'blank-orphans');
   ok(Array.isArray(c7) && c7.some((n) => /F8/.test(n)), 'CONTROL F8: a row that draws a blank tab nobody holds ("about:blank · Nobody’s") — red', c7);
+  // lane browser-tabs-by-window: a copy that FLATTENS the groups, a copy that prints the window id — each red
+  const c8 = redOf("  for (const x of list) (at.get(x.win) || groups[groups.length - 1]).members.push(x);\n", "  for (const x of list) groups[groups.length - 1].members.push(x);\n", 'flat-tabs');
+  ok(Array.isArray(c8) && c8.some((n) => /BY WINDOW: this window first/.test(n)), 'CONTROL: a copy that lists the browser\'s tabs flat (the owner\'s "two agents in one window") — the BY WINDOW legs go red', c8);
+  const c9 = redOf("heads.push({ kind: 'holder', win: l.win, label: windowLabelText('holder', l, tIn) });", "heads.push({ kind: 'holder', win: l.win, label: windowLabelText('holder', l, tIn) + ' #' + l.win });", 'window-id-words');
+  ok(Array.isArray(c9) && c9.some((n) => /ids never in words/.test(n)), 'CONTROL: a copy that prints Chrome\'s window id in a head — the ids-never-in-words leg goes red', c9);
 }
 
 // ═══ the fake agent-browser: ONE shared Chrome per namespace (the measured 0.38.1 shapes) ═══════════════════════
@@ -605,6 +640,9 @@ console.log('— ④ the words: every new key in zh + ja');
   for (const o of TB.OWNER_WORDS) { TB.ownerMarkText(o, { human: false }, t); TB.ownerMarkText(o, { human: true }, t); TB.ownerTipText(o, { human: false }, t); TB.ownerTipText(o, { human: true }, t); }
   for (const c of TB.TAB_REFUSALS) { TB.tabRefusalText(c, {}, t); TB.tabRefusalText(c, { yours: true }, t); TB.tabRefusalText(c, { orphan: true }, t); }
   TB.tabRowModel({ tabs: [{ targetId: T(1), title: 'a' }, { targetId: T(2), title: 'b' }], owners: { [T(1)]: 'agent', [T(2)]: 'agent' }, driving: true }, t);
+  // lane browser-tabs-by-window: every head word, the blank count, the pane count
+  TB.tabGroups({ tabs: [{ targetId: T(1), url: 'https://a.example/', active: true, windowId: 1 }, { targetId: T(2), url: 'about:blank', windowId: 1 }, { targetId: T(3), url: 'https://b.example/', windowId: 2 }, { targetId: T(4), url: 'https://c.example/', windowId: 3 }, { targetId: T(5), url: 'https://d.example/', windowId: 4 }, { targetId: T(6), url: 'https://e.example/', windowId: null }], leases: [{ windowId: 1, holder: { word: 'agent' } }, { windowId: 2, holder: { word: 'you' } }, { windowId: 3, holder: { word: 'other', name: 'N' } }, { windowId: 4, holder: { word: 'other' } }] }, t);
+  TB.windowLabelText('holder', { word: 'agent' }, t); TB.tabsCountText({ order: [1], blanks: 1 }, t);
   const lit = (s) => JSON.stringify(s).replace(/\\u([0-9a-f]{4})/g, (m, h) => String.fromCharCode(parseInt(h, 16)));
   const has = (dict, k) => dict.includes(lit(k) + ':') || dict.includes(`'${k.replace(/'/g, "\\'")}':`);
   const uniq = [...new Set(keys)];

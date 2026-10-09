@@ -305,5 +305,74 @@ await MR8.rebuildHistory(s10, 's8', SLAB_RECS);
 ok(s10._normalizer.messages.some((m) => m.noticeKind === 'artifact' && keyOfCard(m) === pgOldKey), 'CONTROL: the store rows placed without the range check draw the page published before the slab (the ⑩ "no card" assert sees it)');
 N.setArtifactServiceSource(REG.servicesOf);
 
+console.log('⑪ a page ANOTHER conversation published, shown here by its /p/<id> link, is a presented page row (lane pages-chip-groups, B-aa28)');
+{
+  const HOOK = require(path.join(REPO, 'src/harnesses/artifacts-of.js'));
+  const PID = (c) => 'pg' + String(c).repeat(10).slice(0, 10); // the store's id shape: 'pg' + 10 of [a-z0-9]
+  const ppSrc = (await import('node:fs')).readFileSync(path.join(REPO, 'src/server/published-pages.js'), 'utf8');
+  ok(/const mintId = \(\) => 'pg' \+ Array\.from\(\{ length: 10 \}, \(\) => 'abcdefghijklmnopqrstuvwxyz0123456789'\[/.test(ppSrc) && AF.PAGE_LINK.source.includes('pg[a-z0-9]{10}'), 'the witness reads the pages store\'s OWN id shape (published-pages mintId: pg + 10 of [a-z0-9])');
+  const sayAt = (text, s) => ({ type: 'assistant', uuid: 'p' + s, timestamp: T(s), cwd: CWD, sessionId: 'c-pa', message: { id: 'msg_p' + s, role: 'assistant', model: 'claude-opus-5-5', content: [{ type: 'text', text }] } });
+  const userAt = (content, s) => ({ type: 'user', uuid: 'u' + s, timestamp: T(s), cwd: CWD, sessionId: 'c-pa', message: { role: 'user', content } });
+  const links = AF.pageLinksIn(`a /p/${PID('a')} b (/p/${PID('b')}) https://vs.example.com:3456/p/${PID('c')}/ /home/u/p/${PID('d')} x/p/${PID('e')} /p/${PID('f')}0 /p/${PID('a')}`);
+  ok(JSON.stringify(links) === JSON.stringify([{ id: PID('a'), origin: '' }, { id: PID('b'), origin: '' }, { id: PID('c'), origin: 'https://vs.example.com:3456' }]), 'pageLinksIn: a relative /p/<id>, a markdown link, an absolute URL (its origin kept); a file path, a word-joined path, a longer id and a repeat are not links', links);
+  const OTHER = { id: PID('o'), name: 'house tour', path: '/p/' + PID('o'), public: true, updatedAt: 5, sessionId: 'sB', conversationId: 'c-pb' };
+  const MINE = { id: PID('m'), name: 'my page', path: '/p/' + PID('m'), public: false, updatedAt: 6, sessionId: 'sA', conversationId: 'c-pa' };
+  const MINE_CID = { id: PID('n'), name: 'mine before a resume', path: '/p/' + PID('n'), updatedAt: 7, sessionId: 'sOld', conversationId: 'c-pa' };
+  const GONE = PID('g');
+  const PSTORE = { pages: [OTHER, MINE, MINE_CID], gone: [GONE] };
+  const pagesStore = { list: () => [], byId: (id) => { const p = PSTORE.pages.find((x) => x.id === id); return p ? { page: p } : (PSTORE.gone.includes(id) ? { gone: true } : null); } };
+  const sA = { backend: 'claude', sockName: 'sA', claudeSessionId: 'c-pa', cwd: CWD, host: '', name: 'Writer', _artifacts: {} };
+  const sB = { backend: 'claude', sockName: 'sB', claudeSessionId: 'c-pb', cwd: CWD, host: '', name: 'Publisher', _artifacts: {} };
+  const told = [];
+  REG.configure({ activeSessions: () => new Map([['sA', sA], ['sB', sB]]), pages: () => pagesStore, designs: () => null, sessionMeta: null, instanceUrl: { url: () => 'https://vs.example.com:3456' }, toSession: (s, sid, m) => told.push({ sid, ...m }), log: { log() {}, warn() {} } });
+  const recs = [
+    sayAt(`Here is the tour: /p/${OTHER.id}`, 20),
+    userAt([{ type: 'tool_result', tool_use_id: 'x', content: `Published /p/${PID('t')}` }], 21), // a tool result is not a text record
+    userAt(`and mine: https://vs.example.com:3456/p/${MINE.id} plus /p/${MINE_CID.id}`, 22),
+    sayAt(`gone: /p/${GONE} unknown: /p/${PID('u')} foreign: https://elsewhere.example/p/${PID('w')} foreign-but-ours: http://10.0.0.5:3456/p/${OTHER.id}`, 23),
+  ];
+  ok(HOOK.claude(recs[1]).length === 0 && HOOK.claude(recs[0]).length === 1 && HOOK.claude(recs[0])[0].op === 'present', 'the claude hook: a text block witnesses, a tool_result never does');
+  ok(HOOK.codex({ type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: `/p/${OTHER.id}` }] } })[0]?.page === OTHER.id
+    && HOOK.acp({ method: 'session/update', params: { update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: `see /p/${OTHER.id}` } } } })[0]?.page === OTHER.id, 'codex (a message item) and ACP (a message chunk) witness through their own hooks');
+  for (const r of recs) REG.observe(sA, r);
+  const keyO = AF.keyOf('', '/p/' + OTHER.id);
+  ok(sA._artifacts[keyO]?.presented === true && sA._artifacts[keyO].kind === 'page' && !sA._artifacts[AF.keyOf('', '/p/' + PID('t'))], 'live: the reply\'s link is a presented page row keyed by the page id; the tool result\'s link is none', sA._artifacts[keyO]);
+  ok(told.filter((m) => m.type === 'artifacts-changed' && m.sid === 'sA').length >= 1, 'a presented birth tells the conversation\'s clients (artifacts-changed → they re-read the one feed)');
+  const items = REG.listFor('sA').items, byPage = Object.fromEntries(items.filter((b) => b.presented).map((b) => [b.page, b]));
+  ok(byPage[OTHER.id]?.name === 'house tour' && byPage[OTHER.id].publisher === 'Publisher' && byPage[OTHER.id].public === true && byPage[OTHER.id].state === 'published' && byPage[OTHER.id].url === '/p/' + OTHER.id && !byPage[OTHER.id].gone, 'listFor resolves it NOW: the page\'s name, public, the publisher conversation\'s live name', byPage[OTHER.id]);
+  ok(!byPage[MINE.id] && !byPage[MINE_CID.id], 'this conversation\'s own page (by session id, and by conversation id after a resume) is never a presented row');
+  ok(byPage[GONE]?.gone === true && byPage[PID('u')]?.gone === true && byPage[GONE].state === 'unpublished', 'an unpublished page (410) and an id never published here stay as rows marked gone');
+  ok(!byPage[PID('w')], 'another instance\'s URL to an id unknown here is no witness (dropped)');
+  ok(items.filter((b) => b.presented).length === 3, 'the shown-here rows: the tour, the gone one, the unknown one', Object.keys(byPage));
+  ok(!(sA._normalizer && sA._normalizer.messages || []).some((m) => m.noticeKind === 'artifact' && m.content?.[0]?.presented) && !AF.cardWorthy(sA._artifacts[keyO]), 'a presented row never draws a chat card (the message carries the link)');
+  ok(AF.rowFor(sA._artifacts, '/p/' + OTHER.id) === null, 'a page only SHOWN here cannot be handed over (rowFor)');
+  told.length = 0;
+  REG.notePage({ ...OTHER, removed: true }, { removed: true });
+  PSTORE.pages = PSTORE.pages.filter((p) => p.id !== OTHER.id); PSTORE.gone.push(OTHER.id);
+  ok(told.some((m) => m.type === 'artifacts-changed' && m.sid === 'sA') && REG.listFor('sA').items.find((b) => b.page === OTHER.id)?.gone === true, 'the publisher unpublishes later ⇒ the showing conversation hears artifacts-changed and its row reads gone');
+  // the cap: 55 distinct links ⇒ the newest 50 kept
+  const sC = { backend: 'claude', sockName: 'sC', cwd: CWD, host: '', _artifacts: {} };
+  for (let i = 0; i < 55; i++) REG.observe(sC, sayAt(`/p/pg${String(i).padStart(10, '0')}`, 30 + i));
+  const kept = Object.values(sC._artifacts).filter((r) => r.presented).map((r) => r.page);
+  ok(kept.length === AF.MAX_PRESENTED && AF.MAX_PRESENTED === 50 && !kept.includes('pg0000000000') && kept.includes('pg0000000054'), `the cap: ≤ ${AF.MAX_PRESENTED} presented rows per conversation, the newest-mentioned kept`, kept.length);
+  // the rebuild path: the same rows from the transcript
+  const sR = { backend: 'claude', sockName: 'sR', claudeSessionId: 'c-pr', cwd: CWD, host: '', _artifacts: {}, _normalizer: null };
+  await N.rebuildHistory(sR, 'sR', [sayAt(`replayed /p/${PID('r')}`, 40)]);
+  ok(sR._artifacts[AF.keyOf('', '/p/' + PID('r'))]?.presented === true, 'rebuild: the transcript\'s link re-derives the presented row (the registry\'s second path)');
+  // controls
+  const asrc = (await import('node:fs')).readFileSync(path.join(REPO, 'src/artifacts.js'), 'utf8');
+  const cw = " && !row.presented); // lane pages-chip-groups";
+  const MW = asrc.includes(cw) ? M.load('src/artifacts.js', asrc.replace(cw, '); // control'), 'cardpresented') : null;
+  ok(MW && MW.cardWorthy(MW.fold({}, MW.presentOp({ id: OTHER.id }))[keyO]), 'CONTROL: without the presented guard a shown link draws a second chat card (the card assert sees it)');
+  const ownDrop = '    if (page && own(page)) continue;\n';
+  const MO = asrc.includes(ownDrop) ? M.load('src/artifacts.js', asrc.replace(ownDrop, '\n'), 'owndrop') : null;
+  ok(MO && MO.resolvePresented(MO.fold({}, MO.presentOp({ id: MINE.id })), { pageOf: () => ({ page: MINE }), own: () => true })[AF.keyOf('', '/p/' + MINE.id)], 'CONTROL: without the own drop this conversation\'s page shows twice (own + shown here — the own assert sees it)');
+  const capLine = 'evictOver(next, key).concat(row.presented ? evictPresented(next, key) : [])';
+  const MP = asrc.includes(capLine) ? M.load('src/artifacts.js', asrc.replace(capLine, 'evictOver(next, key)'), 'nocap') : null;
+  let capRows = {};
+  if (MP) for (let i = 0; i < 55; i++) capRows = MP.fold(capRows, { ...MP.presentOp({ id: `pg${String(i).padStart(10, '0')}` }), at: i + 1 });
+  ok(MP && Object.keys(capRows).length === 55, 'CONTROL: without the cap 55 links keep 55 rows (the cap assert sees it)');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -486,6 +486,8 @@
 - A PID RECORDED HOURS AGO WAS KILLED AS IF IT WERE STILL OURS (B-1cc6, lane pid-identity-census) — 不变量 = a pid is never an identity; every signal to a recorded pid proves starttime (+ bootId), an unprovable one is reported, never killed
 - THE PID CENSUS READ THE OWNER'S rclone BINARY (Update exit 1 at .237): §85 fs-walked data/bin and grepped a gitignored 63 MB ELF. FIX = the scope is the tracked list. 不变量 = a census walks the tracked tree, never an instance's data dir
 - A DOCUMENT WINDOW WASTED HALF ITS WIDTH AND CLIPPED ITS TABLE (lane doc-window-width-export) — 不变量 = a document fills the window it is given unless the person chose a reading width; a table scrolls, never clipped; a document leaves as the file, as HTML or as a print
+- A 'REPLY TO WHAT THE AGENT SENT' WAS ANY DM MESSAGE WITHIN 24 H (B-a871): clause (e) was a clock under a 'next message' label; 2 unrelated peer messages woke the agent (billed). FIX = clause cut; a census per adapter. 不变量 = a reply is the vendor's own quote / reply / thread marker, never a clock
+- A LARK SYSTEM NOTICE WAS A PEER MESSAGE FROM 'unknown' (B-ef03): a recall notice with no sender became a record every rule could match. FIX = kind system, no rule, no unread, a dim line. 不变量 = a message from nobody is the vendor's notice, never a peer's
 
 ## A DOCUMENT WINDOW WASTED HALF ITS WIDTH AND CLIPPED ITS TABLE (lane doc-window-width-export, 2.369.239 — owner 2026-10-08)
 
@@ -511,7 +513,7 @@
 
 **Symptom.** The owner: "通知功能好像缺少'回复了这个 agent 之前发送的消息'的 trigger". An agent sent userW a Lark message through the Outbox; userW quoted it (or just answered in the p2p chat), a customer answered an agent's mail in its Gmail thread — and no rule could wake the agent that sent it. `reply-to-mine` fired only for a message IN A TOPIC under one of "mine" (owner decision A, 2026-09-28), and "mine" mixed the owner's messages with the agent's.
 
-**Invariant.** What an agent sent is its own thread of concern: a reply to it, in ANY shape the channel has — a quote, a topic or Slack-thread reply, a later message in the mail thread, the peer's next message in a direct chat (no reply marker: within 24 h of the newest send) — reaches the sender, and only the sender: `reply-to-sent` reads `ctx.sentByMe` (the outbox's sent proposals of THIS drafter, 30 days / 500), never `ownerMine`; set on a group (or All agents) it is judged PER MEMBER — member A's item hears replies to A's sends, with A's own ledger and stash, never the group's round-robin. The hit's line names the answered message ("Reply to your message (<when>, <first words>): …"), so the agent knows which of its messages was answered.
+**Invariant.** What an agent sent is its own thread of concern: a reply to it, in ANY shape the channel has — a quote, a topic or Slack-thread reply, a later message in the mail thread (the direct-chat clause — any peer message within 24 h of the newest send — was DELETED 2026-10-08, B-a871: a reply is the vendor's own marker, never a clock) — reaches the sender, and only the sender: `reply-to-sent` reads `ctx.sentByMe` (the outbox's sent proposals of THIS drafter, 30 days / 500), never `ownerMine`; set on a group (or All agents) it is judged PER MEMBER — member A's item hears replies to A's sends, with A's own ledger and stash, never the group's round-robin. The hit's line names the answered message ("Reply to your message (<when>, <first words>): …"), so the agent knows which of its messages was answered.
 
 **Gate.** test-channel-filter ⑮ (+ 3 controls), test-channel-agent-watch ⑨ (+ control).
 
@@ -5267,3 +5269,13 @@ userW's pod: one conversation's hidden-window browser drew Mercury's payments da
 **Invariant:** a cursor the vendor gives us is persisted; a restart resumes, it never re-asks what it already knows — and the cursor never reaches disk ahead of the rows it listed.
 
 **Gates:** test-channels-aggregate ㉓ (restart ⇒ 0 pages; CONTROL in-memory base ⇒ 100; cut at page 40 ⇒ 60; refused ⇒ 1 + 100, one line), test-channels-engine (OWED BEFORE CURSOR crash leg = the flush order), test-channel-drain (verdict table), test-channel-adapter-contract (listing cursor contract).
+
+## A LARK SYSTEM NOTICE WAS A PEER MESSAGE FROM 'unknown' (lane lark-system-records, B-ef03 — the owner's DM, 2026-10-08)
+
+**Symptom.** A Lark direct chat received `{msg_type: system, sender_type: null}` at 20:02:51Z (a recall notice). lark.js turned every `system` item into plain text and stored it as a PEER record with an empty author and the text ' '; the watch rules matched it and an agent was woken with a message "from unknown".
+
+**Fix.** The record says what it is: `kind: 'system'`, a closed `systemKind`, the one empty author `{isSystem: true}` (src/channel-record.js; makeRecord refuses an author id or a place on one). Lark (`msg_type: system` or no sender) and Slack (join / leave / topic / purpose / name / bot add-remove) produce it; old stored records are re-judged at read. Every reader gates on the record: no filter rule, no `all` watcher, no unread, never the row's preview or instant, a dim centred line in the window, `[system] <words>` for the agent; an empty author on a message prints "(no sender)".
+
+**Invariant.** A message from nobody is the vendor's notice about the chat, never a peer's message: it is never matched, counted, previewed or delivered as one, and no surface ever prints "unknown" as an author.
+
+**Gates:** test-channel-record, test-channels-lark-shape, test-channels-slack-shape, test-channel-filter ⑱ (+ control), test-channels-focus, test-channels-engine ㉖ (+ control), test-channel-window-render (heavy), test-peer-text-census.

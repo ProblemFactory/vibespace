@@ -1020,7 +1020,16 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
         names[id] = { sessionId: w.sessionId ? String(w.sessionId) : null, name: nm ? String(nm).slice(0, 120) : null, ...(w.job ? { job: String(w.job) } : {}) };
       }
       if (r.settling && (relay.titleTries || 0) < TITLE_RETRIES) { relay.titleTries = (relay.titleTries || 0) + 1; const tm = setTimeout(() => { if (relays.get(relay.key) === relay) scheduleOwners(relay, 0); }, TITLE_RETRY_MS); if (tm.unref) tm.unref(); } // a page still loading names itself by its address: ask again (bounded)
-      const text = JSON.stringify({ type: 'tab-owners', owners, titles, names, mediated: !!r.mediated, adoptable: !!r.adoptable });
+      // lane browser-tabs-by-window: which window each listed tab is in (null = unread) + the holders' windows (named like the
+      // names above) — the row and the Tabs pane group by them
+      const windows = {};
+      for (const [id, w] of Object.entries(r.windows || {})) if (listed.has(id)) windows[id] = WIN.windowIdOf(w); // the ONE reader: null is not window 0
+      const leases = (Array.isArray(r.leases) ? r.leases : []).slice(0, 64).filter((l) => l && typeof l === 'object' && WIN.windowIdOf(l.windowId) != null).map((l) => {
+        const s0 = l.sessionId ? activeSessions.get?.(String(l.sessionId)) : null;
+        const nm = l.name || (s0 ? (s0.name || s0.webuiName || '') : '');
+        return { windowId: WIN.windowIdOf(l.windowId), word: String(l.word || 'other'), sessionId: l.sessionId ? String(l.sessionId) : null, name: nm ? String(nm).slice(0, 120) : null };
+      });
+      const text = JSON.stringify({ type: 'tab-owners', owners, titles, names, windows, leases, mediated: !!r.mediated, adoptable: !!r.adoptable });
       if (text === relay.lastOwners) return;
       relay.lastOwners = text;
       for (const v of relay.viewers.values()) send(v.ws, text);

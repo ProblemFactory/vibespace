@@ -333,11 +333,18 @@ async function replyLeg(ENGM, name, principal) {
   const s2 = await step(mkR('w-2', 'vm-a1', 2000));
   const s3 = await step(mkR('w-3', 'vm-b1', 3000));
   const s4 = await step(mkR('w-4', 'om_owner_own', 4000));
-  return { set: !!set.ok, s1, s2, s3, s4, billed: delivered.length, text: (stashed[0] || {}).text || '' };
+  // lane channel-reply-real (owner 2026-10-08, B-a871): the conversation as a DIRECT chat — the peer's plain message
+  // seconds after both sends (no quote, no thread) reaches NOBODY; a quote of A's message there still reaches A
+  await eng.store.index.update((ix) => { if (ix.conversations[KEY]) ix.conversations[KEY].kind = 'dm'; });
+  const dmKind = (eng.store.index.peek(KEY) || {}).kind;
+  const s5 = await step({ ...mkR('w-5', null, 5000), replyTo: null, root: null, threadKey: null });
+  const s6 = await step({ ...mkR('w-6', 'vm-a1', 6000), root: null, threadKey: null });
+  return { set: !!set.ok, s1, s2, s3, s4, s5, s6, dmKind, billed: delivered.length, text: (stashed[0] || {}).text || '' };
 }
 for (const [label, pr] of [['a GROUP of A + B', GRP], ['ALL AGENTS', { kind: 'everyone', id: '*' }]]) {
   const r = await replyLeg(ENG, `e9-${pr.kind}`, pr);
   ok(r.set && r.s1 === 'agent-1' && r.s2 === 'agent-1,agent-1' && r.s3 === 'agent-1,agent-1,agent-2' && r.s4 === r.s3 && r.billed === 0, `${label}: two replies to A's message reach A only, a reply to B's reaches B only, a reply to anything else nobody (next-turn: nothing billed)`, JSON.stringify(r));
+  ok(r.dmKind === 'dm' && r.s5 === r.s4 && r.s6 === r.s4 + ',agent-1', `${label}: in a DIRECT chat the peer's plain message 5 s after both sends reaches nobody (no marker, no reply — B-a871); a quote of A's message there reaches A`, JSON.stringify({ dmKind: r.dmKind, s4: r.s4, s5: r.s5, s6: r.s6 }));
   if (pr.kind === 'group') ok(/\nReply to your message \([^)]*, "Worker asks: can you send the deck\?"\): from Rowan at /.test(r.text) && /matched: replies in the thread of your message of \d\d:\d\d UTC|matched: quotes your message of \d\d:\d\d UTC/.test(r.text), 'the hand-over (the stash): the line begins "Reply to your message (<when>, <first words>)" and the why names the member\'s own message', r.text.split('\n').slice(0, 4).join(' | '));
 }
 {

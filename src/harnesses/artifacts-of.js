@@ -1,15 +1,21 @@
 'use strict';
-// THE HARNESS HOOK `artifactsOf(record) → [{path, op: 'write'|'edit', bytes, id}] | []` (lane artifacts-model;
+// THE HARNESS HOOK `artifactsOf(record) → [{path, op: 'write'|'edit', bytes, id} | a `present` op] | []` (lane artifacts-model;
 // src/artifacts.js is the reducer it feeds). Each descriptor in src/harnesses/ declares ONE of these readers (or `null`
 // = never produces: a plain shell); every caller asks the descriptor, never an id. PURE: a record in, ops out — the
 // live stdout consumer, the rebuild's replay and a dead session's history read feed the SAME records here. `id` = the
 // call that made the change (a record seen twice — parse + device feed, an ACP tool_call + its update — moves a row once).
 const bytesOf = (s) => (typeof s === 'string' ? Buffer.byteLength(s) : null);
+// lane pages-chip-groups: a page link in a TEXT block (never a tool call / result) witnesses a page shown here —
+// src/artifacts.js pageLinksIn / presentOp turn the text into `present` ops (the registry resolves them at read)
+const { pageLinksIn, presentOp } = require('../artifacts.js');
+const presentOps = (texts) => { const out = []; for (const s of texts) for (const l of pageLinksIn(s)) { const o = presentOp(l); if (o) out.push(o); } return out; };
+const textBlocks = (content, types) => (typeof content === 'string' ? [content] : Array.isArray(content) ? content.filter((b) => b && types.includes(b.type) && typeof b.text === 'string').map((b) => b.text) : []);
 
 /** claude: the assistant record's tool_use blocks — Write births, Edit / MultiEdit / NotebookEdit bump. */
 const CLAUDE_OPS = { Write: 'write', Edit: 'edit', MultiEdit: 'edit', NotebookEdit: 'edit' };
 function claude(record) {
   const r = record || {};
+  if (r.type === 'user' && r.message) return presentOps(textBlocks(r.message.content, ['text'])); // the user's / a peer's message
   if (r.type !== 'assistant' || !Array.isArray(r.message && r.message.content)) return [];
   const out = [];
   for (const b of r.message.content) {
@@ -19,7 +25,7 @@ function claude(record) {
     if (typeof path !== 'string' || !path) continue;
     out.push({ path, op: CLAUDE_OPS[b.name], bytes: b.name === 'Write' ? bytesOf(inp.content) : null, id: b.id || null });
   }
-  return out;
+  return out.concat(presentOps(textBlocks(r.message.content, ['text'])));
 }
 
 /** codex: apply_patch — the custom_tool_call envelope ("*** Add File: / *** Update File:") or the live function_call's
@@ -28,6 +34,7 @@ const PATCH_LINE = /^\*\*\* (Add|Update) File: (.+)$/gm;
 const CHANGE_OP = { add: 'write', update: 'edit' };
 function codex(record) {
   const p = record && record.type === 'response_item' && record.payload;
+  if (p && p.type === 'message') return presentOps(textBlocks(p.content, ['output_text', 'input_text'])); // a reply / the user's message
   if (!p || p.name !== 'apply_patch' || (p.type !== 'custom_tool_call' && p.type !== 'function_call')) return [];
   const id = p.call_id || p.id || null;
   const out = [];
@@ -52,6 +59,7 @@ function acp(record) {
     return [{ path: r.params.path, op: 'write', bytes: bytesOf(r.params.content), id: r.id != null ? 'fs:' + r.id : null }];
   }
   const u = r.kind === 'update' ? r.update : (r.params && r.params.update) || null;
+  if (u && (u.sessionUpdate === 'agent_message_chunk' || u.sessionUpdate === 'user_message_chunk')) return presentOps(textBlocks([u.content], ['text'])); // per chunk: a link split across two chunks is not seen
   if (!u || (u.sessionUpdate !== 'tool_call' && u.sessionUpdate !== 'tool_call_update') || !Array.isArray(u.content)) return [];
   const out = [];
   for (const c of u.content) {

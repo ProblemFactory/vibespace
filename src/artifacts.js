@@ -38,7 +38,7 @@ const { FILE_TYPES } = require('./file-type-table.js');
 const KINDS = Object.freeze(['doc', 'service', 'page', 'design', 'media', 'upload', 'code', 'other']);
 const VIEW_ORDER = Object.freeze(['doc', 'service', 'page', 'design', 'media', 'upload', 'other']); // lane artifacts-services: what a conversation RUNS reads first after its docs
 const OPS = Object.freeze(['write', 'edit']);
-const REG_OPS = Object.freeze(['publish', 'unpublish', 'open', 'upload', 'handover']); // a store's fact: births / names a row, never counts (lane artifacts-handover: + a helper conversation's hand-over)
+const REG_OPS = Object.freeze(['publish', 'unpublish', 'open', 'upload', 'handover', 'present']); // a store's fact: births / names a row, never counts (lane artifacts-handover: + a helper conversation's hand-over; lane pages-chip-groups: + a page link witnessed in the text)
 const KIND_RANK = Object.freeze({ design: 3, page: 2, upload: 1 }); // a registry's kind over an extension's (and design › page › upload)
 const outranks = (a, b) => (KIND_RANK[a] || 0) > (KIND_RANK[b] || 0);
 const BY = Object.freeze(['agent', 'user']);
@@ -107,7 +107,7 @@ function apply(rows, op) {
   if (prev && o.id && prev.lastId === o.id) return { rows: cur, row: prev, born: false, evicted: [], skipped: 'seen' };
   const row = prev ? { ...prev } : { key, host, path, name: baseName(path), kind: isKind(o.kind) ? o.kind : kindOf(path, o.op), firstAt: at, lastAt: at, by, writes: 0, edits: 0, lastOp: o.op, bytes: null, lastId: null };
   if (prev && isKind(o.kind) && o.kind !== 'code' && row.kind !== o.kind && !outranks(row.kind, o.kind)) row.kind = o.kind; // a registry's kind (page / design / upload) names it better than an extension
-  if (REG_OPS.includes(o.op)) { if (o.url !== undefined) row.url = o.url ? String(o.url) : null; if (o.state) row.state = String(o.state); if (o.name) row.name = String(o.name).slice(0, 200); }
+  if (REG_OPS.includes(o.op)) { if (o.url !== undefined) row.url = o.url ? String(o.url) : null; if (o.state) row.state = String(o.state); if (o.name) row.name = String(o.name).slice(0, 200); if (o.op === 'present' && !prev) { row.presented = true; row.page = String(o.page || ''); row.origin = String(o.origin || ''); } }
   else if (o.op === 'write' && by === 'agent') row.writes += 1; else row.edits += 1;
   const via = viaOf(o.via);
   if (via && (!prev || !row.via)) row.via = via; // lane artifacts-handover: WHO made it for this conversation (a subagent / a helper conversation) — the birth's
@@ -116,7 +116,7 @@ function apply(rows, op) {
   if (Number.isFinite(o.bytes)) row.bytes = o.bytes;
   row.lastId = o.id ? String(o.id) : null;
   const next = { ...cur, [key]: row };
-  const evicted = prev ? [] : evictOver(next, key);
+  const evicted = prev ? [] : evictOver(next, key).concat(row.presented ? evictPresented(next, key) : []);
   return { rows: next, row, born: !prev, evicted, skipped: null };
 }
 const fold = (rows, op) => apply(rows, op).rows;
@@ -127,6 +127,14 @@ function evictOver(rows, keep) {
   const victims = keys.filter((k) => k !== keep).map((k) => rows[k])
     .sort((a, b) => ((a.kind === 'code' ? 0 : 1) - (b.kind === 'code' ? 0 : 1)) || ((a.lastAt || 0) - (b.lastAt || 0)))
     .slice(0, keys.length - MAX_ROWS).map((r) => r.key);
+  for (const k of victims) delete rows[k];
+  return victims;
+}
+/** Past MAX_PRESENTED presented page rows: the oldest-mentioned go (never the row just born). Mutates `rows`. */
+function evictPresented(rows, keep) {
+  const all = Object.values(rows).filter((r) => r && r.presented);
+  if (all.length <= MAX_PRESENTED) return [];
+  const victims = all.filter((r) => r.key !== keep).sort((a, b) => (a.lastAt || 0) - (b.lastAt || 0)).slice(0, all.length - MAX_PRESENTED).map((r) => r.key);
   for (const k of victims) delete rows[k];
   return victims;
 }
@@ -150,6 +158,7 @@ function merge(a, b) {
       lastAt: Math.max(p.lastAt || 0, r.lastAt || 0), by: later.by, lastOp: later.lastOp, bytes: later.bytes ?? p.bytes ?? null, lastId: later.lastId ?? null };
   }
   evictOver(out, null);
+  evictPresented(out, null);
   return out;
 }
 /** THE CHIP'S ORDER: deliverables by kind (VIEW_ORDER), newest change first in each; code behind a count. */
@@ -161,7 +170,7 @@ function view(rows) {
   return { items, code, count: items.length, codeCount: code.length, total: all.length, full: all.length >= MAX_ROWS };
 }
 /** Does a row get a chat CARD? Every deliverable does; code (CLAUDE.md, a .py) stays in the chip's fold only. */
-const cardWorthy = (row) => !!(row && row.kind !== 'code');
+const cardWorthy = (row) => !!(row && row.kind !== 'code' && !row.presented); // lane pages-chip-groups: a page link shown here is the message's own — no second card
 /** The card's block (structure, never markup): what the normalizer sends and the client draws. */
 function cardBlock(row) {
   if (!row || !row.key) return null;
@@ -169,6 +178,7 @@ function cardBlock(row) {
     by: row.by, writes: row.writes || 0, edits: row.edits || 0, lastOp: row.lastOp, firstAt: row.firstAt || 0, lastAt: row.lastAt || 0,
     ...(row.url ? { url: row.url } : {}), ...(row.state ? { state: row.state } : {}),
     ...(row.via ? { via: row.via } : {}), ...(row.handedTo && row.handedTo.length ? { handedTo: row.handedTo } : {}),
+    ...(row.presented ? { presented: true, page: row.page, public: !!row.public, publisher: row.publisher || '', ...(row.gone ? { gone: true } : {}) } : {}),
     ...(row.kind === 'service' ? { jobId: row.jobId, port: row.port, since: row.since || 0, stoppedAt: row.stoppedAt || 0,
       via: row.via, localUrl: row.localUrl, forwardId: row.forwardId || null, ...(row.target ? { target: row.target } : {}), ...(row.publishedBy ? { publishedBy: row.publishedBy } : {}) } : {}) };
 }
@@ -252,6 +262,57 @@ function storeRows({ pages = [], designs = [] } = {}) {
   let rows = {};
   for (const op of [...(pages || []).map((p) => pageOp(p)), ...(designs || []).map(designOp)]) if (op) rows = fold(rows, op);
   return rows;
+}
+// ── THE PRESENTED PAGES (lane pages-chip-groups, owner 2026-10-08 "可以，不过要分组"; B-aa28) — a page ANOTHER conversation
+// published whose /p/<id> link appears in THIS conversation's text (an assistant reply, the user's message, a peer's):
+// OBSERVED, never declared — the link in the text is the witness (the harness hook reads text blocks only, never a tool
+// result). A `present` op births a `page` row keyed by the page id (`:/p/<id>`, no machine) with `presented: true`; the
+// registry resolves it against the pages store at EVERY read (`resolvePresented`: name / public / the publisher's live
+// name; unpublished or unknown ⇒ `gone`) — the stored row never carries the resolution. A page this conversation
+// published itself is never a presented row (the Pages chip's own group has it); another instance's URL is no witness.
+// Bounded: the store's id shape (published-pages.js mintId: 'pg' + 10 of [a-z0-9]) over text only, ≤ MAX_PRESENTED rows
+// per conversation (the newest-mentioned kept). Never a chat card (`cardWorthy`), never handed over (`rowFor`).
+const MAX_PRESENTED = 50;
+const PAGE_LINK = /(?<![\w.\/-])(https?:\/\/(?:\[[0-9a-fA-F:.]+\]|[A-Za-z0-9.-]+)(?::\d{1,5})?)?\/p\/(pg[a-z0-9]{10})(?![A-Za-z0-9_-])/g;
+/** The page links in one text: [{id, origin}] — `origin` '' for a relative /p/<id>, else the URL's scheme://host[:port]. */
+function pageLinksIn(text) {
+  const s = typeof text === 'string' ? text : '';
+  if (!s.includes('/p/pg')) return [];
+  const out = [], seen = new Set();
+  for (const m of s.matchAll(PAGE_LINK)) {
+    const origin = (m[1] || '').toLowerCase(), k = origin + ' ' + m[2];
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push({ id: m[2], origin });
+    if (out.length >= MAX_PRESENTED) break;
+  }
+  return out;
+}
+/** One witnessed link → the reducer's op: a `page` row on the page id (no machine — a /p/ link names this server). */
+function presentOp(link) {
+  if (!link || !link.id) return null;
+  return { op: 'present', kind: 'page', host: '', path: '/p/' + link.id, page: link.id, origin: String(link.origin || ''), url: String(link.origin || '') + '/p/' + link.id };
+}
+/** THE READ (the registry's list, every time): each presented row against the pages store. `pageOf(id)` → {page} (live) |
+ *  {gone: true} (unpublished — B-f694's 410) | null (never published here); `own(page)` = this conversation published it;
+ *  `base` = this instance's origin; `nameOf(page)` = the publisher conversation's live name. Own page ⇒ dropped (the own
+ *  group has it); another origin's link to an id unknown here ⇒ dropped (not this server's page). A NEW rows object. */
+function resolvePresented(rows, { pageOf = () => null, own = () => false, base = '', nameOf = () => '' } = {}) {
+  const out = {};
+  const b = String(base || '').replace(/\/+$/, '').toLowerCase();
+  for (const [k, r] of Object.entries(rows || {})) {
+    if (!r || !r.presented) { out[k] = r; continue; }
+    let hit = null;
+    try { hit = pageOf(r.page) || null; } catch { hit = null; }
+    const page = hit && hit.page;
+    if (page && own(page)) continue;
+    if (!hit && r.origin && r.origin !== b) continue;
+    let by = '';
+    if (page) { try { by = String(nameOf(page) || ''); } catch { by = ''; } }
+    out[k] = page ? { ...r, name: String(page.name || r.page).slice(0, 200), state: 'published', url: String(page.path || '/p/' + r.page), public: !!page.public, publisher: by.slice(0, 120), gone: false }
+      : { ...r, name: r.page, state: 'unpublished', url: '/p/' + r.page, public: false, publisher: '', gone: true };
+  }
+  return out;
 }
 // ── THE SERVICES (lane artifacts-services, owner 2026-10-06 "这个对话发布的最新页面也没有出现在下面") — a site or
 // service a conversation RUNS: a Background Work job its conversation OWNS (the jobs engine's lineage: the owner
@@ -354,7 +415,7 @@ function markHanded(rows, key, to) {
 function rowFor(rows, arg, host = '') {
   const a = String(arg || '').trim();
   if (!a) return null;
-  if (/^\/p\/[\w-]+\/?$/.test(a)) return Object.values(rows || {}).find((r) => r && r.url && r.url.replace(/\/+$/, '') === a.replace(/\/+$/, '')) || null;
+  if (/^\/p\/[\w-]+\/?$/.test(a)) return Object.values(rows || {}).find((r) => r && !r.presented && r.url && r.url.replace(/\/+$/, '') === a.replace(/\/+$/, '')) || null; // a page only SHOWN here is not this conversation's to hand over
   return (rows || {})[keyOf(host, a.replace(/\/+$/, '') || a)] || null;
 }
 const kindWord = (kind, lang = 'en') => (KIND_WORDS[kind] || KIND_WORDS.other)[lang] || (KIND_WORDS[kind] || KIND_WORDS.other).en;
@@ -362,5 +423,6 @@ const kindWord = (kind, lang = 'en') => (KIND_WORDS[kind] || KIND_WORDS.other)[l
 module.exports = { KINDS, VIEW_ORDER, OPS, REG_OPS, KIND_RANK, BY, MAX_ROWS, CATEGORY_KIND, KIND_WORDS, kindOf, absPath, keyOf, apply, fold, merge, view,
   cardWorthy, cardBlock, cardPlacement, timeSlot, cardFacts, autoOpenVerdict, ownerOfIn, editNoteText, lineDelta, kindWord, baseName,
   pageOp, designOp, uploadOp, storeRows,
+  MAX_PRESENTED, PAGE_LINK, pageLinksIn, presentOp, resolvePresented,
   SERVICE_KEEP_MS, jobOwnerCid, forwardFor, serviceLink, serviceRow, serviceRows,
   VIA_KINDS, MAX_HANDOVER, viaOf, handoverOp, markHanded, rowFor };

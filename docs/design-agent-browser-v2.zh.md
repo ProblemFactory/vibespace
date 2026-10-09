@@ -1091,6 +1091,9 @@ gate 的对象相反。
 - **门禁。** test-browser-tabs（fast：PURE 表 + 3 个补丁副本对照；真 keeper + 路由配一个保留一个共享 Chrome 标签页的假 0.38.1：外来的关闭在任何执行之前被拒——命令日志就是间谍——，一个没有判定的 keeper 副本关掉了 B 的页面；真桥：tab-owners、tab-ack、锚点）；test-browser-verbs（CLI 路由）；test-live-strip（`tabRowFold`）；test-browser-resume-ui ⑥（heavy，chrome：真点击的切换 / ✕、邻居、最后一个、交还、全部关闭、zh / ja 360 px）；test-browser-human-ui (b2)（heavy，**真 0.38.1**：agent 只列出自己的、关不掉他的、`tab_gone` 按名字说）。
 - **留待以后。** 中介租约上的切换 / 关闭（M8：给 (method, targetId) 绑定的 credit）；`click --new-tab` / `window new` 开出的、没有 opener 的标签页在 agent 下一条 `tab` 命令时才作为它会话的当前标签页被认领；另一台机器上的具名 profile 仍是 passthrough。
 
+
+> **as-built：lane browser-tabs-by-window（2026-10-08，owner："好做吧"，rel239）。** 实况视图的标签行和"标签页"窗格按**窗口**分组：本窗口在前，然后是其他持有者的窗口（用对话的名字：「企业助手 的窗口」，从不出现窗口号或会话 id），窗口未知或无人持有的标签页最后（"这个浏览器的其他地方"）。窗口来自 keeper 对每个标签页的 `Browser.getWindowForTarget`（按浏览器运行 + 标签页缓存），持有者的窗口来自租约的 `windowId`。每个窗口创建时多出的空白页折叠进组头（"+1 个空白页"），按钮计数为"标签页 (2 · +2 个空白页)"；窗口唯一的标签页、正在显示的标签页从不折叠。窗格改为按 key 原地更新。
+
 ### 3.10 每个持有者一个窗口（lane browser-windows，owner 2026-10-01："多agent可以同时用同一个profile，只是每个agent开的是个独立窗口吗？为啥现在只允许一个agent/人类同时在操作一个profile？"）
 
 **事故（U0，userW 的 pod，2026-10-01）。** ① D-payments 18:20–18:35：userW 在 Majordomo 的实时视图里接管了 jarvis-work，D-payments 的每条命令都被拒绝，直到交还 —— 接管是**整个浏览器**的，另外 §3.2 第 5 条的 90 s "一次一个驾驶者" 把十个 Jarvis 对话在一个 profile 上排成队。② inc-muqdohf0-hkjc 20:02：D-payments 的标签页在共享窗口里落到了**另一个标签页后面**（sess-31 关掉标签页后 Chrome 激活了邻居），实时视图是一张冻住的画面，他点标签芯片是一个无声的 no-op，日志里没有一行。

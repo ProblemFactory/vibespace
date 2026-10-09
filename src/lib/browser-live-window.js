@@ -131,7 +131,7 @@ import { registerWindowType, svgIcon16 } from './window-types.js';
 import { registerMenuItem } from './contributions.js';
 import { ownerDots, livePlacement } from './chain-layout.js'; // P7 (§4.6): the per-SESSION owner colour, never the group's; MULTIVIEW D5: where a new live view goes
 import { stripOrder, stripFold, capChip, shortLabel, stoppableRows, rowStateWords, tabRowFold } from './live-strip-layout.js'; // MULTIVIEW §2 A1 / D4: the strip's order, fold and own/cap chip (PURE); lane browser-resume C: the tab row's fold
-import { tabRowModel, tabRefusalText } from '../browser-tabs.js';
+import { tabRowModel, tabRefusalText, tabGroups, tabsCountText } from '../browser-tabs.js';
 import { tabClickVerdict, watchLineWords, foldMenuRows, watchRefusalWords } from '../browser-windows.js'; // lane browser-windows (U3/U0b): what a chip click does — bring forward / switch (driving) · watch / follow (watching) // lane browser-resume C (§3.9, ruling 3): whose tab it is and what this viewer may do to it (PURE)
 import { avatarOf } from './channel-avatar.js'; // lane browser-resume C (D3): a tab's badge = the host's initial on a stable hue (no network — never a favicon fetch)
 import { UI_ICONS } from './icons.js';
@@ -375,7 +375,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
     // offered), the note dialog open (the keys stay out of the page), the last hand-back from here
     resumeOffer: false, resuming: false, resumedHere: false, noteOpen: false, handedBack: false,
     // lane browser-resume C: the bridge's `tab-owners` (targetId → agent|you|other|orphan), the tab row's model + fold, the acts in flight
-    tabOwners: {}, tabTitles: {}, tabNames: {}, tabMediated: false, tabAdoptable: false, tabRow: null, tabFolded: [], tabRid: 0, tabActs: new Map(), tabError: null, quitAsked: null,
+    tabOwners: {}, tabTitles: {}, tabNames: {}, tabWindows: {}, tabLeases: [], tabMediated: false, tabAdoptable: false, tabRow: null, tabFolded: [], tabRid: 0, tabActs: new Map(), tabError: null, quitAsked: null,
     // lane browser-windows: the tab THIS viewer watches instead of the agent's ({targetId, mode, pending}) and the bridge's
     // "the tab on show paints nothing" verdict ({targetId, since}) — both said on the watch line
     watch: null, bg: null,
@@ -1066,21 +1066,62 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
   }
   const renderViewers = () => { viewersEl.textContent = t('{n} viewer(s)', { n: st.viewers || 1 }); viewersEl.title = t('Windows watching this browser right now (on every client)'); };
   const renderUrl = () => { urlEl.textContent = st.url || ''; urlEl.title = st.url || ''; openBtn.disabled = !st.url; if (H && document.activeElement !== addrInput && addrInput.value !== (st.url || '')) addrInput.value = st.url && st.url !== 'about:blank' ? st.url : ''; };
+  // lane browser-tabs-by-window (the owner, 2026-10-08): the holders' windows in this client's words (the sidebar's name
+  // first, as the tab row's names) — the row and the pane group by the SAME facts
+  const tabLeasesNow = () => (st.tabLeases || []).map((l) => ({ windowId: l.windowId, holder: { word: l.word, name: (l.sessionId ? nameOfSession(String(l.sessionId)) : '') || l.name || '' } }));
+  const tabWinOf = (x) => { const w = st.tabWindows[String((x && x.targetId) || '').toUpperCase()]; return w == null ? null : w; };
+  /** THE TABS PANE — grouped by window (this window first, then each holder's by name, then the rest), a window's spare
+   *  blank folded into its head as a count. KEYED (the R4 rule): one node per tab / head, patched in place, moved only when
+   *  out of place — a broadcast never rebuilds the row under the pointer. */
   const renderTabs = () => {
-    tabsBtn.textContent = `${t('Tabs')} (${st.tabs.length})`;
-    tabsPane.innerHTML = '';
-    for (const tab of st.tabs) {
-      const d = document.createElement('div');
-      d.className = 'browser-live-tab' + (tab.active ? ' active' : '');
-      const title = document.createElement('div'); title.className = 'browser-live-tab-title'; title.textContent = String(tab.title || tab.url || tab.tabId || '');
-      const url = document.createElement('div'); url.className = 'browser-live-tab-url'; url.textContent = String(tab.url || '');
-      d.title = String(tab.url || '');
-      d.append(title, url);
-      // BROWSE YOURSELF (B-6ae8): on his own window a tab is clickable — his session switches to it (a login popup, a link he
-      // opened in a new tab: measured on 0.38.1, his pinned session lists it at once and `tab <target>` follows it)
-      if (H && !tab.active && (tab.targetId || tab.tabId)) { d.classList.add('clickable'); d.tabIndex = 0; d.onclick = () => humanNav({ tab: tab.targetId || tab.tabId }); d.onkeydown = (e) => { if (e.key === 'Enter') d.onclick(); }; }
-      tabsPane.appendChild(d);
+    const g = tabGroups({ tabs: st.tabs.map((x) => ({ targetId: x.targetId, url: x.url, active: x.active, windowId: tabWinOf(x) })), leases: tabLeasesNow(), human: !!H }, t);
+    const byId = new Map(st.tabs.filter((x) => x && x.targetId).map((x) => [String(x.targetId).toUpperCase(), x]));
+    const placed = new Set(g.groups.flatMap((gr) => [...gr.targetIds, ...gr.blanks]));
+    const rest = st.tabs.filter((x) => !(x && x.targetId && placed.has(String(x.targetId).toUpperCase()))); // a row with no CDP id: listed last, as before
+    const label = `${t('Tabs')} (${tabsCountText({ order: [...g.order, ...rest], blanks: g.blanks }, t)})`;
+    if (tabsBtn.textContent !== label) tabsBtn.textContent = label;
+    const have = new Map([...tabsPane.children].map((el) => [el.dataset.key, el]));
+    const keep = new Set();
+    let prev = null;
+    const place = (el) => { keep.add(el.dataset.key); const w0 = prev ? prev.nextSibling : tabsPane.firstChild; if (w0 !== el) tabsPane.insertBefore(el, w0); prev = el; };
+    const rowOf = (tab, key, inGroup) => {
+      let d = have.get(key);
+      if (!d) {
+        d = document.createElement('div'); d.dataset.key = key;
+        const ti = document.createElement('div'); ti.className = 'browser-live-tab-title';
+        const u = document.createElement('div'); u.className = 'browser-live-tab-url';
+        d.append(ti, u);
+        // BROWSE YOURSELF (B-6ae8): on his own window a tab is clickable — his session switches to it (a login popup, a link he
+        // opened in a new tab: measured on 0.38.1, his pinned session lists it at once and `tab <target>` follows it)
+        d.onclick = () => { const x = d._tab; if (H && x && !x.active && (x.targetId || x.tabId)) humanNav({ tab: x.targetId || x.tabId }); };
+        d.onkeydown = (e) => { if (e.key === 'Enter' && d.tabIndex === 0) d.onclick(); };
+      }
+      d._tab = tab;
+      d.className = 'browser-live-tab' + (tab.active ? ' active' : '') + (inGroup ? ' in-group' : '');
+      const title = String(tab.title || tab.url || tab.tabId || ''), url = String(tab.url || '');
+      const ti = d.firstChild, u = d.lastChild;
+      if (ti.textContent !== title) ti.textContent = title;
+      if (u.textContent !== url) u.textContent = url;
+      if (d.title !== url) d.title = url;
+      const click = !!(H && !tab.active && (tab.targetId || tab.tabId));
+      d.classList.toggle('clickable', click);
+      if (click) d.tabIndex = 0; else d.removeAttribute('tabindex');
+      return d;
+    };
+    for (const gr of g.groups) {
+      if (g.grouped) {
+        let hd = have.get('g:' + gr.key);
+        if (!hd) { hd = document.createElement('div'); hd.className = 'browser-live-tabgroup'; hd.dataset.key = 'g:' + gr.key; }
+        const txt = gr.label + (gr.blankText ? ' · ' + gr.blankText : '');
+        if (hd.textContent !== txt) hd.textContent = txt;
+        if (hd.title !== gr.tip) hd.title = gr.tip;
+        hd.dataset.kind = gr.kind;
+        place(hd);
+      }
+      for (const id of gr.targetIds) place(rowOf(byId.get(id), 't:' + id, g.grouped));
     }
+    rest.forEach((x, i) => place(rowOf(x, 'n:' + (x.tabId || i), false)));
+    for (const [k, el] of have) if (!keep.has(k)) el.remove();
   };
   // ── lane browser-resume C (§3.9, the owner's ruling 3): THE TAB ROW ──
   /** Is the browser on show stoppable from this view (the row's "Close all…")? His window: his Quit; a conversation's view:
@@ -1101,7 +1142,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
   function renderTabRow() {
     if (st.closed) return;
     const driving = st.mode === 'takeover' && st.mine;
-    const m = tabRowModel({ tabs: st.tabs, owners: st.tabOwners, viewer: { human: !!H }, driving, mediated: st.tabMediated, adoptable: st.tabAdoptable, titles: st.tabTitles, names: tabNamesNow() }, t);
+    const m = tabRowModel({ tabs: st.tabs, owners: st.tabOwners, viewer: { human: !!H }, driving, mediated: st.tabMediated, adoptable: st.tabAdoptable, titles: st.tabTitles, windows: st.tabWindows, leases: tabLeasesNow(), names: tabNamesNow() }, t);
     st.tabRow = m;
     const show = m.rows.length > 0 && !st.stopped && !st.hollow && !st.sessionEnded;
     const want = show ? '' : 'none';
@@ -1110,10 +1151,25 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
     if (!H) { const base = t('Take over the controls — the agent pauses until you hand back'); const tip = m.anyAgent && !driving && !st.tabMediated ? base + '\n' + t('Take over to switch or close the agent’s tabs') : base; if (takeBtn.title !== tip) takeBtn.title = tip; }
     if (!show) return;
     // KEYED: one chip per target id, patched in place (a broadcast never rebuilds the chip under the pointer)
-    const have = new Map([...tabRowList.children].map((el) => [el.dataset.target, el]));
+    const have = new Map([...tabRowList.children].map((el) => [el.dataset.target || 'g:' + el.dataset.group, el]));
     const keep = new Set();
     let prev = null;
+    let lastGroup = m.rows.length ? m.rows[0].group : null;
     for (const r of m.rows) {
+      // lane browser-tabs-by-window: a thin divider chip names the NEXT window's holder (this window's chips stay first)
+      if (m.grouped && r.group !== lastGroup) {
+        lastGroup = r.group;
+        const gr = m.groups.find((x) => x.key === r.group) || {};
+        let dv = have.get('g:' + r.group);
+        if (!dv) { dv = document.createElement('div'); dv.className = 'browser-live-tabrow-divider'; dv.dataset.group = r.group; }
+        const txt = String(gr.label || '') + (gr.blankText ? ' · ' + gr.blankText : '');
+        if (dv.textContent !== txt) dv.textContent = txt;
+        if (dv.title !== (gr.tip || '')) dv.title = gr.tip || '';
+        keep.add('g:' + r.group);
+        const w1 = prev ? prev.nextSibling : tabRowList.firstChild;
+        if (w1 !== dv) tabRowList.insertBefore(dv, w1);
+        prev = dv;
+      }
       keep.add(r.targetId);
       let el = have.get(r.targetId);
       if (!el) {
@@ -1169,12 +1225,14 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
     tabRaf = requestAnimationFrame(() => {
       tabRaf = 0;
       if (st.closed || tabRow.style.display === 'none' || !st.tabRow) return;
-      const chips = [...tabRowList.children];
-      for (const c of chips) c.style.display = '';
+      const chips = [...tabRowList.children].filter((c) => c.dataset.target), dividers = [...tabRowList.children].filter((c) => !c.dataset.target);
+      for (const c of [...chips, ...dividers]) c.style.display = '';
       const widths = {}; for (const c of chips) widths[c.dataset.target] = c.offsetWidth + 3;
-      const f = tabRowFold({ rows: st.tabRow.rows, widths, avail: tabRow.clientWidth - 12, endPx: tabRowQuit.style.display === 'none' ? 0 : tabRowQuit.offsetWidth + 6, morePx: 44, watchedRef: st.watch ? st.watch.targetId : null }); // live-watch-polish G3: the watched chip never folds
+      const divPx = dividers.reduce((a, c) => a + c.offsetWidth + 3, 0); // lane browser-tabs-by-window: the window dividers take their room first
+      const f = tabRowFold({ rows: st.tabRow.rows, widths, avail: tabRow.clientWidth - 12 - divPx, endPx: tabRowQuit.style.display === 'none' ? 0 : tabRowQuit.offsetWidth + 6, morePx: 44, watchedRef: st.watch ? st.watch.targetId : null }); // live-watch-polish G3: the watched chip never folds
       st.tabFolded = f.folded;
       for (const c of chips) c.style.display = f.folded.includes(c.dataset.target) ? 'none' : '';
+      for (const d of dividers) d.style.display = st.tabRow.rows.some((r) => r.group === d.dataset.group && !f.folded.includes(r.targetId)) ? '' : 'none';
       tabRowMore.style.display = f.folded.length ? '' : 'none';
       tabRowMore.textContent = '▾+' + f.folded.length;
       tabRowMore.title = t('{n} more tab(s) of this browser', { n: f.folded.length });
@@ -1928,8 +1986,8 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
         break;
       // lane browser-resume C (§3.9, ruling 3): whose each tab is (the keeper's answer, replayed to a late viewer) and one act's answer
       case 'tab-owners':
-        st.tabOwners = m.owners && typeof m.owners === 'object' ? { ...m.owners } : {}; st.tabTitles = m.titles && typeof m.titles === 'object' ? { ...m.titles } : {}; st.tabNames = m.names && typeof m.names === 'object' ? { ...m.names } : {}; st.tabMediated = !!m.mediated; st.tabAdoptable = !!m.adoptable; // accept-fixes-strip F7/F8: the pages' own titles + the holders' names
-        renderTabRow();
+        st.tabOwners = m.owners && typeof m.owners === 'object' ? { ...m.owners } : {}; st.tabTitles = m.titles && typeof m.titles === 'object' ? { ...m.titles } : {}; st.tabNames = m.names && typeof m.names === 'object' ? { ...m.names } : {}; st.tabWindows = m.windows && typeof m.windows === 'object' ? { ...m.windows } : {}; st.tabLeases = Array.isArray(m.leases) ? m.leases.slice(0, 64) : []; st.tabMediated = !!m.mediated; st.tabAdoptable = !!m.adoptable; // accept-fixes-strip F7/F8: the pages' own titles + the holders' names
+        renderTabs(); renderTabRow(); // lane browser-tabs-by-window: the pane groups by the same windows
         break;
       case 'tab-ack': onTabAck(m); break;
       case 'url': { const u = String(m.url || ''); if (u && st.url && u !== st.url && st.frames > 0) { st.navAt = Date.now(); st.refreshSent = false; } st.url = u; renderUrl(); if (st.error && st.connected && !st.stopped && !st.hollow) { st.error = null; setStatus('', { hide: true }); } break; } // lane S4: a navigation starts the picture clock; lane S2: a navigation clears a stale error too
@@ -1964,7 +2022,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
     st.profileRef = profileRef || '';
     st.error = null; st.target = null; // the next hello names the pane (MULTIVIEW: a strip tab may name a helper's browser or EPHEMERAL_REF)
     if (st.stopped || st.hollow) { st.stopped = false; st.stoppedHow = null; st.hollow = false; renderMode(); } // a new pane has no last frame to grey
-    st.frames = 0; st.url = ''; st.tabs = []; st.tabOwners = {}; st.tabTitles = {}; st.tabNames = {}; st.tabActs.clear(); st.console = []; st.running = false; st.reconnects = 0;
+    st.frames = 0; st.url = ''; st.tabs = []; st.tabOwners = {}; st.tabTitles = {}; st.tabNames = {}; st.tabWindows = {}; st.tabLeases = []; st.tabActs.clear(); st.console = []; st.running = false; st.reconnects = 0;
     st.fit = null; st.fitSent = null; st.navAt = 0; st.lastFrameAt = 0; st.openAt = 0; st.picture = 'ok'; st.pictureStale = false; root.classList.remove('picture-stale'); renderFit(); setZoom(ZOOM_NONE); // lane S4: a new pane has its own size and picture
     img.removeAttribute('src');
     timeline.clear(); renderTraceBtn(); // the next hello names the pane and re-seeds

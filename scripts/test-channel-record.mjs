@@ -29,7 +29,7 @@ const base = { adapterId: 'a', convId: 'c', vendorId: 'v1', at: 1700000000000, t
   const r = R.makeRecord(base);
   ok(JSON.stringify(Object.keys(r)) === JSON.stringify(R.RECORD_FIELDS), 'the record carries exactly the declared fields, in order', JSON.stringify(Object.keys(r)));
   const rb = R.makeRecord({ ...base, blocks: [{ k: 'p', runs: [{ k: 't', text: 'hello' }] }] });
-  ok(JSON.stringify(Object.keys(rb)) === JSON.stringify([...R.RECORD_FIELDS, 'blocks']) && R.OPTIONAL_FIELDS.join() === 'blocks,root,facts', 'a record WITH a render tree carries the declared fields, then the optional `blocks` (§25) — nothing else; the optional set is exactly blocks + root (R4) + facts (lane message-facts, B-f066)', JSON.stringify(Object.keys(rb)));
+  ok(JSON.stringify(Object.keys(rb)) === JSON.stringify([...R.RECORD_FIELDS, 'blocks']) && R.OPTIONAL_FIELDS.join() === 'blocks,root,facts,kind,systemKind', 'a record WITH a render tree carries the declared fields, then the optional `blocks` (§25) — nothing else; the optional set is exactly blocks + root (R4) + facts (lane message-facts, B-f066) + kind / systemKind (lane lark-system-records)', JSON.stringify(Object.keys(rb)));
   const rr = R.makeRecord({ ...base, blocks: [{ k: 'p', runs: [{ k: 't', text: 'hello' }] }], replyTo: 'p1', threadKey: 't1', root: 'r1' });
   ok(JSON.stringify(Object.keys(rr)) === JSON.stringify([...R.RECORD_FIELDS, 'blocks', 'root']) && rr.root === 'r1', 'a record with a tree AND a root carries both optionals in their declared order (the stored-line census: 3 184 stored records keep their 12 fields)', JSON.stringify(Object.keys(rr)));
   ok(r.id === 'a:c:v1' && r.replyTo === null && r.threadKey === null, 'a missing id is derived from (adapter, conv, vendor); absent optionals are NULL, not undefined');
@@ -605,6 +605,28 @@ const base = { adapterId: 'a', convId: 'c', vendorId: 'v1', at: 1700000000000, t
   const R2 = require(MK.write('src/channel-record.js', src.replace(KIND, '...(m && m.kind ? { kind: m.kind } : {})'), 'mkind'));
   const r2 = R2.makeRecord({ adapterId: 'a', convId: 'c', vendorId: 'v', at: 1, text: 'x', mentions: [{ id: 'U2', name: 'B', kind: 'admin' }] });
   ok(r2.mentions[0].kind === 'admin', 'design 012 NEGATIVE CONTROL: a copy without the closed set stores a peer-chosen kind');
+}
+
+// ── lane lark-system-records (owner's DM 2026-10-08): a VENDOR SYSTEM NOTICE (a Lark recall with no sender) is a record
+// that SAYS so — kind system, an author with no id / name (isSystem, never self, never a bot), a closed systemKind; the
+// schema refuses an author id or a reply marker on one; a record stored before (the owner's shape) is re-judged at read.
+{
+  const base = { adapterId: 'lark-a', convId: 'oc_s', vendorId: 'om_s1', at: 1791489771000, text: '  ' };
+  const s1 = R.makeRecord({ ...base, kind: 'system', systemKind: 'recall', author: { name: 'Mallory', isSelf: true, isBot: true, alt: { nickname: 'x' }, external: true } });
+  ok(s1.kind === 'system' && s1.systemKind === 'recall' && JSON.stringify(s1.author) === JSON.stringify({ id: '', name: '', isSelf: false, isBot: false, isSystem: true }) && s1.text === '', 'a system record: kind system, the ONE author shape (no id, no name, never self / bot), a blank text emptied (never " ")', JSON.stringify(s1));
+  ok(R.makeRecord({ ...base, kind: 'system', systemKind: 'party', author: {} }).systemKind === 'other' && R.SYSTEM_KINDS.join() === 'recall,join,leave,rename,other', 'systemKind is CLOSED: a word outside the set is `other`');
+  const throwsOf = (x) => { try { R.makeRecord(x); return ''; } catch (e) { return String(e.message); } };
+  ok(/names no author/.test(throwsOf({ ...base, kind: 'system', author: { id: 'ou_x' } })), 'REFUSED: a system record carrying an author id');
+  ok(['replyTo', 'threadKey'].every((k) => /no reply marker/.test(throwsOf({ ...base, kind: 'system', author: {}, [k]: 'om_p' }))), 'REFUSED: a system record carrying a reply marker (replyTo / threadKey)');
+  ok(/kind must be one of system/.test(throwsOf({ ...base, kind: 'reaction', author: { id: 'ou_x' } })), 'REFUSED: an undeclared record kind');
+  const msg = R.makeRecord({ ...base, author: { id: 'ou_x', name: 'X' }, text: 'hi' });
+  ok(!('kind' in msg) && !('systemKind' in msg) && !R.isSystemRecord(msg) && R.isSystemRecord(s1), 'a message carries NO kind (byte-identical to every record stored before)');
+  // the owner's stored record (secrets stripped) — re-judged AT READ, no migration
+  const owner = { id: 'lark-a:oc_x:om_o', convId: 'oc_x', adapterId: 'lark-a', vendorId: 'om_o', at: 1791489771000, author: { id: '', name: '', isSelf: false, isBot: false }, text: ' ', mentions: [], attachments: [], replyTo: null, threadKey: null, raw: { msg_type: 'system', chat_id: 'oc_x', sender_type: null, updated: null, tenant_key: '' }, blocks: [] };
+  const v = R.asSystemRecord(owner);
+  ok(v !== owner && v.kind === 'system' && v.systemKind === 'other' && v.author.isSystem === true && v.text === '' && owner.kind === undefined, "the owner's stored notice is SERVED as kind system (a copy; the stored line untouched)", JSON.stringify(v));
+  const peerEmpty = { ...owner, raw: { msg_type: 'text' } };
+  ok(R.asSystemRecord(peerEmpty) === peerEmpty && R.asSystemRecord(msg) === msg && R.asSystemRecord(s1) === s1, 'every other record comes back as ITSELF (an empty author on a text message stays a message — "(no sender)")');
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

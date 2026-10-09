@@ -284,6 +284,15 @@ function refusedChip(a, url, code, answer, ctx) {
   return c;
 }
 
+/** lane lark-system-records: an EMPTY vendor notice in the device's words, by its closed kind (src/channel-record.js SYSTEM_KINDS). */
+function systemWords(kind) {
+  if (kind === 'recall') return t('A message was recalled');
+  if (kind === 'join') return t('Someone joined the chat');
+  if (kind === 'leave') return t('Someone left the chat');
+  if (kind === 'rename') return t('The chat was renamed');
+  return t('A notice from the chat');
+}
+
 /** A SYSTEM LINE (a vendor's "X added Y to the group"): a record whose whole
  *  tree is `sys` blocks of the `system` kind. It is drawn as a centred dim line
  *  with its time — no avatar, no author head (the author did not SAY it) — and
@@ -291,6 +300,7 @@ function refusedChip(a, url, code, answer, ctx) {
 function isSysRow(rec) {
   if (!rec) return false;
   if (rec.sys === true) return true;
+  if (rec.kind === 'system') return true;   // lane lark-system-records: a vendor notice (src/channel-record.js)
   const blocks = blocksOfRecord(rec);
   return Array.isArray(blocks) && blocks.length > 0 && blocks.every((b) => b && b.k === 'sys' && b.what === 'system');
 }
@@ -331,7 +341,7 @@ function renderRecord(rec, { cont = false, base = null, folds = null, mail = nul
   row.dataset.vid = rec.vendorId || '';
   const full = fullStamp(rec.at);
   if (sys) {
-    const body = renderBlocks(blocksOfRecord(rec), { t, folds, foldKey: rec.vendorId || rec.id || '', fallbackText: rec.text || '' });
+    const body = renderBlocks(rec.kind === 'system' ? [{ k: 'sys', what: 'system', text: rec.text || systemWords(rec.systemKind) }] : blocksOfRecord(rec), { t, folds, foldKey: rec.vendorId || rec.id || '', fallbackText: rec.text || '' });
     row.appendChild(body);
     const when = el('span', 'chanmsg-at', stamp(rec.at));
     when.title = full;
@@ -344,7 +354,7 @@ function renderRecord(rec, { cont = false, base = null, folds = null, mail = nul
     // lane lark-threads (B3–B5): the head is the author as the owner reads them (`display`: the owner's own name › the
     // vendor's way), the vendor name the title; a click offers "Set a name…" (the VibeSpace 备注)
     const au = rec.author || {};
-    const who = el('b', 'chanmsg-who', au.display || au.name || au.id || t('unknown'));
+    const who = el('b', 'chanmsg-who', au.display || au.name || au.id || t('(no sender)'));
     who.dataset.authorId = au.id || '';
     who.dataset.vendorDisplay = au.vendorDisplay || au.name || au.id || '';
     who._author = au;
@@ -1545,7 +1555,7 @@ function openGroupWindow(app, winInfo, groupId, { bar, list, foot }) {
     row.dataset.at = String(rec.at || 0);
     row.dataset.author = authorKey(rec);
     row.dataset.vid = rec.vendorId || '';
-    const who = self ? t('You') : nameOf(rec.author && rec.author.id) || (rec.author && rec.author.name) || t('unknown');
+    const who = self ? t('You') : nameOf(rec.author && rec.author.id) || (rec.author && rec.author.name) || t('(no sender)');
     if (!cont) {
       // THE LOOK (channel-polish): the same author circle the channel window draws (the owner in the accent)
       row.appendChild(avatar({ name: who, key: authorKey(rec), self }, null, 'chanmsg-av'));

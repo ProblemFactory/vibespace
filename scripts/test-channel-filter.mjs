@@ -702,7 +702,7 @@ console.log('⑬ owner decision A: a topic wakes, a quote chain does not, a quot
   const ED = fs.readFileSync(path.join(REPO, 'src/lib/channel-filter-editor.js'), 'utf-8'), WD = fs.readFileSync(path.join(REPO, 'src/lib/channel-words.js'), 'utf-8');
   ok(ED.includes(`'reply-to-mine': t('${LABEL_R}')`) && ED.includes(`'in-thread-with-me': t('${LABEL_T}')`) && ED.includes("lw.whys.map((w) => wakeWhyText(w))") && /case 'quoted your message': return t\('quoted your message'\);/.test(WD), 'WIRING: the Notify dialog labels the two rules with the quote clause and words the last wake\'s reasons (wakeWhyText)');
   const ENG = engineSource(REPO);
-  ok(/const kindOf = \(r\) => \(ix \? Thr\.placeKindOf\(r, ix\)/.test(ENG) && /return \{ ownerMine: placeBase\.owner, sentIds, sentByMe, convKind: placeBase\.convKind, threadOf: placeBase\.threadOf, kindOf: placeBase\.kindOf \};/.test(ENG) && /if \(!th \|\| th\.kind !== 'vendor'\) return \[\];/.test(ENG), 'WIRING: the engine hands the rules THE classifier (Thr.placeKindOf over its index) and a threadOf that answers for a topic only');
+  ok(/const kindOf = \(r\) => \(ix \? Thr\.placeKindOf\(r, ix\)/.test(ENG) && /return \{ ownerMine: placeBase\.owner, sentIds, sentByMe, convKind: placeBase\.convKind, threadOnly: placeBase\.threadOnly, threadOf: placeBase\.threadOf, kindOf: placeBase\.kindOf \};/.test(ENG) && /if \(!th \|\| th\.kind !== 'vendor'\) return \[\];/.test(ENG), 'WIRING: the engine hands the rules THE classifier (Thr.placeKindOf over its index) and a threadOf that answers for a topic only');
   // CONTROLS (scripts/mutant-copy.mjs): (a) the PRE-DECISION rules — reply-to-mine = replyTo OR root, in-thread-with-me
   // = any thread the index keys (the engine's old threadOf: a chain included) ⇒ the chain rows wake: red
   const { mutantCopies, copiesCensus } = await import('./mutant-copy.mjs');
@@ -846,13 +846,17 @@ console.log('⑮ reply-to-sent: a reply to a message THIS agent sent, in every s
   const R = { kind: 'reply-to-sent' };
   const rec = (vendorId, at, more = {}) => ({ vendorId, at, text: 'ok', author: { id: 'u_rowan', name: 'Rowan' }, ...more });
   const hitOf = (F0, r, ctx) => F0.matchRecord({ match: 'any', rules: [R] }, r, ctx);
-  // Rowan's p2p Lark chat: A sent at T
-  const dm5 = hitOf(F, rec('om_p1', T + 5 * 60e3), ctxOf(A, 'dm'));
-  ok(dm5.hit && dm5.why[0] === 'the next message after yours in a direct chat' && dm5.sent && dm5.sent.at === T && dm5.sent.words === 'Can you send the deck?', 'DM: the peer\'s plain message 5 min after A\'s send ⇒ a hit for A, the why names the shape and the answered message rides `sent`', J2(dm5));
+  // Rowan's p2p Lark chat: A sent at T. Lane channel-reply-real (owner 2026-10-08, B-a871): a reply is the vendor's own
+  // quote / reply / thread marker — the peer's plain messages after A's send are NOT replies, however soon (the incident:
+  // two unrelated messages 6 h and 7.5 h later woke the agent, billed)
+  const dmLegs = (F0) => [1e3, 3600e3, 23 * 3600e3, 6 * 3600e3 + 19 * 60e3].map((dt) => hitOf(F0, rec('om_p' + dt, T + dt), ctxOf(A, 'dm')).hit);
+  ok(dmLegs(F).every((h) => !h), 'DM: the peer\'s plain message 1 s / 1 h / 23 h / 6 h 19 min after A\'s send ⇒ NO hit (no marker, no reply — never a clock)', J2(dmLegs(F)));
   ok(!hitOf(F, rec('om_p1', T + 5 * 60e3), ctxOf(new Map(), 'dm')).hit, 'DM: agent B, who never sent here (its own empty sentByMe), is not hit');
-  ok(!hitOf(F, rec('om_p2', T + 2 * 86400e3), ctxOf(A, 'dm')).hit && F.REPLY_WINDOW_MS === 24 * 3600e3, 'DM: a peer message 2 days later is no reply (REPLY_WINDOW_MS = 24 h)');
+  ok(F.REPLY_WINDOW_MS === undefined && J2(Object.keys(F.SENT_WHYS)) === J2(['quote', 'thread', 'mail']), 'the window and the DM why are gone: SENT_WHYS = quote, thread, mail', J2(Object.keys(F.SENT_WHYS)));
   const q = hitOf(F, rec('om_q', T + 60e3, { replyTo: 'om_a1' }), ctxOf(A, 'dm'));
-  ok(q.hit && q.why[0] === `quotes your message of ${clock(T)}`, 'a QUOTE of A\'s message ⇒ the quote why with its clock', J2(q.why));
+  ok(q.hit && q.why[0] === `quotes your message of ${clock(T)}` && q.sent && q.sent.at === T && q.sent.words === 'Can you send the deck?', 'DM: a QUOTE of A\'s message (Lark 引用) ⇒ the quote why with its clock; the answered message rides `sent`', J2(q));
+  const q2 = hitOf(F, rec('om_q2', T + 9 * 3600e3, { replyTo: 'om_a1' }), ctxOf(A, 'dm', { kindOf: () => ({ kind: 'quote', topic: null, quotes: 'om_a1' }) }));
+  ok(q2.hit && /^quotes your message of /.test(q2.why[0]), 'DM: a quote 9 h later is still a reply — the marker decides, never the clock');
   ok(!hitOf(F, rec('om_qo', T + 60e3, { replyTo: 'om_o1' }), ctxOf(A, 'group')).hit && F.matchRecord({ rules: [{ kind: 'reply-to-mine' }] }, rec('om_qo', T + 60e3, { replyTo: 'om_o1' }), ctxOf(A, 'group')).hit, 'the OWNER\'s own message quoted ⇒ reply-to-sent silent (ownerMine is never a send), reply-to-mine still fires');
   // a Gmail thread: the conversation IS the thread
   const g1 = hitOf(F, rec('m_r1', T + 3600e3), ctxOf(A, 'thread'));
@@ -861,20 +865,31 @@ console.log('⑮ reply-to-sent: a reply to a message THIS agent sent, in every s
   // a Lark topic (today's reply-to-mine shape): both kinds fire, each named once
   const both = F.matchRecord({ match: 'any', rules: [{ kind: 'reply-to-mine' }, R] }, rec('om_tr', T + 60e3, { replyTo: 'om_a1', root: 'om_a1', threadKey: 'om_a1' }), ctxOf(A, 'group'));
   ok(both.hit && both.why.length === 2 && both.why[0] === 'a reply to a message of yours' && both.why[1] === `replies in the thread of your message of ${clock(T)}`, 'topic: a reply under A\'s topic root ⇒ reply-to-mine AND reply-to-sent, one why each', J2(both.why));
-  const sl = hitOf(F, rec('171.2', T + 60e3, { threadKey: 'om_a1', root: 'om_a1' }), ctxOf(A, 'group', { kindOf: () => ({ kind: 'plain' }) }));
-  ok(sl.hit && /^replies in the thread of your message of /.test(sl.why[0]), 'Slack: a thread reply under A\'s root ⇒ hit (no classifier needed)');
+  const sl = hitOf(F, rec('171.2', T + 60e3, { replyTo: 'om_a1', threadKey: 'om_a1', root: 'om_a1' }), ctxOf(A, 'group', { threadOnly: true, kindOf: () => ({ kind: 'quote', topic: null, quotes: 'om_a1' }) }));
+  ok(sl.hit && /^replies in the thread of your message of /.test(sl.why[0]), 'Slack (threadOnly): a thread reply under A\'s root (its parent not indexed: the classifier says quote) ⇒ the THREAD why', J2(sl.why));
+  const sl2 = hitOf(F, rec('171.3', T + 60e3, { threadKey: 'om_a1' }), ctxOf(A, 'dm', { threadOnly: true, kindOf: () => ({ kind: 'plain' }) }));
+  ok(sl2.hit && /^replies in the thread of your message of /.test(sl2.why[0]), 'Slack (threadOnly): a thread reply carrying only `threadKey` (thread_ts) = A\'s ts, in a DM ⇒ hit');
+  ok(F.threadOnlyCaps({ threads: { read: 'vendor', placements: ['chat', 'thread', 'thread+chat'] } }) && !F.threadOnlyCaps({ threads: { read: 'vendor', placements: ['chat', 'quote', 'thread'] } }) && !F.threadOnlyCaps({ threads: { read: 'none', placements: ['chat', 'quote'] } }) && !F.threadOnlyCaps({ threads: { read: 'vendor', placements: [] } }) && !F.threadOnlyCaps(null), 'threadOnlyCaps: vendor threads + no quote placement (Slack) only — Lark (quote), Gmail (no threads), a read-only channel, none ⇒ false');
+  // THE QUOTE CHAIN (owner ruling 2026-10-08 18:00Z): A mine ← B quotes A ← C quotes B (Lark: C carries root_id = A)
+  const CH = { om_b: { kind: 'quote', topic: null, quotes: 'om_a1' }, om_c: { kind: 'quote', topic: null, quotes: 'om_b' } };
+  const chainCtx = (k) => ctxOf(A, k, { kindOf: (r) => CH[r.vendorId] || { kind: 'plain', topic: null, quotes: null } });
+  const chainB = rec('om_b', T + 60e3, { replyTo: 'om_a1', root: 'om_a1', threadKey: 'om_a1' });
+  const chainC = rec('om_c', T + 120e3, { replyTo: 'om_b', root: 'om_a1', threadKey: 'om_a1' });
+  const chainLegs = (F0) => ['group', 'dm'].map((k) => [hitOf(F0, chainB, chainCtx(k)), hitOf(F0, chainC, chainCtx(k))]);
+  ok(chainLegs(F).every(([b, c]) => b.hit && /^quotes your message of /.test(b.why[0]) && !c.hit), 'the QUOTE CHAIN (group + DM): B quoting A ⇒ hit (quote); C quoting B (root_id = A) ⇒ NO hit — it answers B, not A', J2(chainLegs(F).map(([b, c]) => [b.hit, c.hit])));
+  ok(['group', 'dm', null].every((k) => !hitOf(F, rec('om_late', T + 60e3), ctxOf(A, k)).hit) && hitOf(F, rec('om_late', T + 60e3), ctxOf(A, 'thread')).hit, 'a newer record WITHOUT a marker hits only in a mail thread (kind `thread`) — never in a chat (group / dm / unknown)');
   ok(!hitOf(F, rec('om_a1', T + 60e3, { replyTo: 'om_a1' }), ctxOf(A, 'dm')).hit, 'the sent message itself (its echo in the log) is never a reply to it');
   ok(!hitOf(F, rec('om_p1', T + 5 * 60e3), { convKind: 'dm', mine: new Set(['om_a1']) }).hit, 'the legacy `ctx.mine` is NOT read by reply-to-sent (sentByMe only)');
   // the hand-over line
-  const blk = F.renderWakeBlock({ adapterLabel: 'Lark', title: 'Rowan', convId: 'oc_1', hits: [{ record: rec('om_p1', T + 5 * 60e3), why: dm5.why, sent: dm5.sent }] });
+  const blk = F.renderWakeBlock({ adapterLabel: 'Lark', title: 'Rowan', convId: 'oc_1', hits: [{ record: rec('om_q', T + 60e3, { replyTo: 'om_a1' }), why: q.why, sent: q.sent }] });
   ok(/\nReply to your message \([^)]*, "Can you send the deck\?"\): from Rowan at /.test(blk), 'the hand-over: the hit\'s line BEGINS "Reply to your message (<when>, <first words>): …"', blk.split('\n').slice(0, 4).join(' | '));
   ok(F.validateRule(R).ok && F.ruleWhy(R) === 'a reply to a message this agent sent' && F.PLACE_RULE_KINDS.includes('reply-to-sent'), 'the kind validates bare, is a PLACE rule, words its rule why');
   // the words, zh / ja
   const WORDS = fs.readFileSync(path.join(REPO, 'src/lib/channel-words.js'), 'utf-8');
-  const keys = ['is a reply to a message this agent sent', 'a reply to a message this agent sent', 'the next message after yours in a direct chat', 'quotes your message of {when}', 'replies in the thread of your message of {when}', 'in the thread of your mail "{subject}"', 'Set this on a group to cover each of its agents for their own sends — a reply notifies only the agent whose message it answers.'];
+  const keys = ['is a quote, a reply in a thread, or a reply in the mail thread of a message this agent sent', 'a reply to a message this agent sent', 'quotes your message of {when}', 'replies in the thread of your message of {when}', 'in the thread of your mail "{subject}"', 'Set this on a group to cover each of its agents for their own sends — a reply notifies only the agent whose message it answers.'];
   const tables = ['i18n-zh.js', 'i18n-ja.js'].map((n) => fs.readFileSync(path.join(REPO, 'src/lib', n), 'utf-8'));
   const missing = keys.filter((k) => !tables.every((tb) => tb.includes(JSON.stringify(k) + ':')));
-  ok(!missing.length, 'zh + ja carry every word of the kind (label, note, the four shape whys)', J2(missing));
+  ok(!missing.length, 'zh + ja carry every word of the kind (label, note, the three shape whys)', J2(missing));
   ok(Object.values(F.SENT_WHYS).every((w) => WORDS.includes(w.replace(/\{\w+\}/, '').split('{')[0].replace(/"$/, '').slice(0, 20))), 'channel-words wakeWhyText reads every shape template');
   // a GROUP row is judged PER MEMBER (the fan-out): A and B each their own item, C (not a member) none
   const gw = { principal: { kind: 'group', id: 'g1', name: 'Work' }, mode: 'filtered', filterId: 'f1', notify: 'wake' };
@@ -891,16 +906,175 @@ console.log('⑮ reply-to-sent: a reply to a message THIS agent sent, in every s
   const { mutantCopies } = await import('./mutant-copy.mjs');
   const M = mutantCopies('chan-filter-rts', REPO);
   const FSRC = fs.readFileSync(path.join(REPO, 'src/channel-filter.js'), 'utf-8');
-  const C1 = "  if (ctx.convKind === 'dm' && at - Number(newest.at) <= REPLY_WINDOW_MS) return { why: SENT_WHYS.dm, sent: newest };";
+  const C1 = "  if (ctx.convKind === 'thread') return { why: fill(SENT_WHYS.mail, newest), sent: newest };";
   const C2 = "  const sent = ctx && ctx.sentByMe instanceof Map ? ctx.sentByMe : null;";
   const C3 = "    if (perMember(item.watcher)) {";
-  ok([C1, C2, C3].every((c) => FSRC.split(c).length === 2), 'control setup: the DM clause, the sentByMe read and the per-member fan-out are each one line');
-  const F1 = M.load('src/channel-filter.js', FSRC.replace(C1, ''), 'dm-ignored');
-  ok(!hitOf(F1, rec('om_p1', T + 5 * 60e3), ctxOf(A, 'dm')).hit, 'CONTROL ①: a copy that ignores a direct chat\'s next message misses Rowan\'s answer — the DM leg goes RED');
+  const C4 = "  const q = kind !== 'topic-reply' ? (of(c.quotes) || (!topical ? of(rec.replyTo) : null)) : null;";
+  const C5 = "  if (topical) {";
+  ok([C1, C2, C3, C4, C5].every((c) => FSRC.split(c).length === 2), 'control setup: the mail clause, the sentByMe read, the per-member fan-out, the quote clause and the topic gate are each one line');
+  const F5 = M.load('src/channel-filter.js', FSRC.replace(C5, '  if (topical || rec.root || rec.threadKey) {'), 'chain-root');
+  ok(chainLegs(F5).some(([, c]) => c.hit), 'CONTROL ⑤: a copy whose thread clause reads a quote chain\'s root_id / threadKey hits C — the chain leg goes RED', J2(chainLegs(F5).map(([b, c]) => [b.hit, c.hit])));
+  // lane channel-reply-real: clause (e) RESTORED (the 2.369.232 line, verbatim) ⇒ the DM legs above go red
+  const F1 = M.load('src/channel-filter.js', FSRC.replace(C1, C1 + "\n  if (ctx.convKind === 'dm' && at - Number(newest.at) <= 24 * 3600e3) return { why: 'the next message after yours in a direct chat', sent: newest };"), 'dm-clause-back');
+  ok(dmLegs(F1).filter(Boolean).length === 4, 'CONTROL ①: a copy with the direct-chat clause restored hits all four plain DM messages — the DM leg goes RED', J2(dmLegs(F1)));
+  const F4 = M.load('src/channel-filter.js', FSRC.replace(C4, "  const q = kind !== 'topic-reply' ? ([...sent.values()].filter((s) => Number(s.at) < Number(rec.at)).pop() || null) : null;"), 'quote-by-clock');
+  ok(dmLegs(F4).some(Boolean), 'CONTROL ④: a copy whose quote clause reads `rec.at` (the clock) instead of the quoted id calls a plain DM message a quote — the DM leg goes RED', J2(dmLegs(F4)));
   const F2 = M.load('src/channel-filter.js', FSRC.replace(C2, "  const sent = new Map([...(ctx && ctx.sentByMe instanceof Map ? ctx.sentByMe : []), ...[...((ctx && ctx.ownerMine) || [])].map((v) => [v, { at: 0, words: '' }])]);"), 'owner-as-sent');
   ok(hitOf(F2, rec('om_qo', T + 60e3, { replyTo: 'om_o1' }), ctxOf(A, 'group')).hit, 'CONTROL ②: a copy counting the owner\'s messages as the agent\'s sends hits the owner\'s quote — the ownerMine leg goes RED');
   const F3 = M.load('src/channel-filter.js', FSRC.replace(C3, '    if (false) {'), 'group-round-robin');
   ok(J2(fo(F3, fOnly).watchers.map((x) => F3.principalKey(x.watcher.principal))) === J2(['group:g1']), 'CONTROL ③: a copy without the per-member fan-out hands the group ONE round-robin item — the member legs go RED');
+}
+
+console.log('⑯ THE CENSUS (lane channel-reply-real, B-a871): every reply-to-sent clause is anchored on a vendor marker an adapter writes');
+{
+  const src = (p) => fs.readFileSync(path.join(REPO, p), 'utf-8');
+  // adapter × clause: (a) a quote / reply naming a sent id (`replyTo` → the classifier's `quotes`), (b) a topic / thread reply
+  // under a sent root (`root` / `threadKey`), (c) a newer record in a conversation of kind `thread` (a MAIL thread)
+  const CENSUS = [
+    ['lark', 'a', 'replyTo ← parent_id (引用 / reply)', 'src/channels/lark.js', 'replyTo: item.parent_id ? String(item.parent_id) : null,'],
+    ['lark', 'b', 'root ← root_id — topic root only (a quote chain\'s root_id is never read: `if (topical)`)', 'src/channels/lark.js', 'root: item.root_id ? String(item.root_id) : null,'],
+    ['lark', 'b', 'threadKey ← thread_id — read for a topic only (a chain\'s threadKey = root_id)', 'src/channels/lark.js', 'threadKey: item.thread_id ? String(item.thread_id) : (item.root_id ? String(item.root_id) : null),'],
+    ['lark', 'c', 'none — a chat is dm / group', 'src/channels/lark.js', "kind: c.chat_mode === 'p2p' ? 'dm' : 'group',"],
+    ['slack', 'a', 'no quote of its own (no quote placement ⇒ ctx.threadOnly ⇒ judged as (b)) — replyTo = thread_ts', 'src/channels/slack.js', 'replyTo: isReply ? threadTs : null,'],
+    ['slack', 'b', 'root ← thread_ts', 'src/channels/slack.js', 'root: isReply ? threadTs : null,'],
+    ['slack', 'b', 'threadKey ← thread_ts', 'src/channels/slack.js', 'threadKey: threadTs || (Number(m.reply_count) > 0 ? String(m.ts) : null),'],
+    ['slack', 'c', 'none — a chat is dm / group', 'src/channels/slack.js', "kind: 'dm', app, participants: '',"],
+    ['gmail', 'a', 'none — In-Reply-To names a header, not a vendor id', 'src/channels/gmail.js', 'replyTo: null,          // In-Reply-To names a Message-ID header, not a vendor id; the thread is the link'],
+    ['gmail', 'b', 'threadKey ← threadId', 'src/channels/gmail.js', 'threadKey: String(m.threadId || convId),'],
+    ['gmail', 'c', 'kind thread = the mail thread (Gmail\'s own threading)', 'src/channels/gmail.js', "kind: 'thread',"],
+    ['agents', 'a/b/c', 'none — no records at all (history() empty): the rule never fires there', 'src/channels/agents.js', 'async history() { return { records: [], anchor: null, reachedAnchor: true, complete: true }; },'],
+    ['fake', 'a/b', 'replyTo / threadKey / root ← the seeded world', 'src/channels/fake.js', 'replyTo: synthetic ? null : (m.replyTo || null), threadKey: synthetic ? null : (m.threadKey || null), root: synthetic ? null : (m.root || null),'],
+    ['fake', 'c', 'none — a chat is dm / group', 'src/channels/fake.js', "kind: c.meta.kind === 'dm' ? 'dm' : 'group'"],
+  ];
+  const missing = CENSUS.filter(([, , , file, needle]) => !src(file).includes(needle)).map((r) => r.slice(0, 2).join(' ') + ': ' + r[4].slice(0, 60));
+  ok(!missing.length && CENSUS.length === 14, `the census: ${CENSUS.length} rows (adapter × clause), every writer line pinned in its adapter`, J2(missing));
+  // threadOnly (Slack's thread_ts read without a topic) comes from the DECLARED placements: Slack has no quote, Lark has
+  ok(src('src/channels/slack.js').includes("placements: Object.freeze(['chat', 'thread', 'thread+chat']), rootReply: 'thread'") && src('src/channels/lark.js').includes("placements: Object.freeze(['chat', 'quote', 'thread']), rootReply: 'quote'") && src('src/server/channels-engine.js').includes('threadOnly: F.threadOnlyCaps(registry.capsOf(rec.kind))'), 'threadOnly = the adapter\'s declared placements (Slack: no quote ⇒ thread_ts is the thread; Lark: quote ⇒ root_id may be a chain), handed over by the engine');
+  const adapters = fs.readdirSync(path.join(REPO, 'src/channels')).filter((n) => /\.js$/.test(n) && !/^(index|registry-list)\.js$/.test(n) && !/^slack-/.test(n));
+  ok(J2(adapters.sort()) === J2([...new Set(CENSUS.map((r) => r[0] + '.js'))].sort()), 'every adapter module has its census rows (a new adapter must say how it marks a reply)', J2(adapters));
+  // (c) is a MAIL thread only: no adapter but gmail writes a conversation of kind `thread`; the record model knows dm / group / thread
+  const threadKind = adapters.filter((n) => /\bkind: 'thread',/.test(src('src/channels/' + n)));
+  ok(J2(threadKind) === J2(['gmail.js']) && src('src/channels/gmail.js').split("kind: 'thread',").length === 2 && src('src/channel-record.js').includes("kind: ['dm', 'group', 'thread'].includes(c.kind) ? c.kind : 'group',"), 'convKind `thread` = a Gmail thread only (one writer); a chat is never `thread`', J2(threadKind));
+  // sentHit's body: three returns, each a vendor-marker shape; no clock window, no `dm` branch
+  const FS = src('src/channel-filter.js');
+  const body = FS.slice(FS.indexOf('function sentHit(record, ctx) {'), FS.indexOf('function placeHit(rule, record, ctx) {'));
+  ok((body.match(/return \{ why: fill\(SENT_WHYS\.(quote|thread|mail), /g) || []).length === 4 && !/'dm'|REPLY_WINDOW|3600e3|Date\.now|topical \|\| rec\.root/.test(body) && !/REPLY_WINDOW_MS/.test(FS), 'sentHit: only the three marker shapes (quote, thread ×2: threadOnly / topic, mail) — no direct-chat branch, no window, no chain root');
+  // THE WORDS CENSUS: no word of this rule says "next message" or "24 h" (src/lib + docs/agent, en / zh / ja)
+  const BAD = /next message|\b24 ?h\b|24 hours|下一条|24 小时|次のメッセージ|24 時間/;
+  const lib = fs.readdirSync(path.join(REPO, 'src/lib')).filter((n) => /\.js$/.test(n)).map((n) => ['src/lib/' + n, src('src/lib/' + n)]);
+  const agentDocs = fs.readdirSync(path.join(REPO, 'docs/agent')).filter((n) => /\.md$/.test(n)).map((n) => ['docs/agent/' + n, src('docs/agent/' + n)]);
+  const RULE = /reply-to-sent|this agent sent|YOU sent|your message of \{when\}|your mail "\{subject\}"|direct chat/;
+  const hits = [];
+  for (const [file, text] of [...lib, ...agentDocs]) {
+    const L = text.split('\n');
+    L.forEach((line, i) => { if (RULE.test(line) && BAD.test(L.slice(i, i + 4).join(' '))) hits.push(`${file}:${i + 1}`); });
+  }
+  const gone = ['the next message after yours in a direct chat', '私聊中你发出消息后的下一条消息', 'ダイレクトチャットであなたの送信後に届いた次のメッセージ'].filter((w) => lib.some(([, t0]) => t0.includes(w)));
+  ok(!hits.length && !gone.length && lib.length > 50 && agentDocs.length > 0, `the words census: ${lib.length} src/lib files + ${agentDocs.length} docs/agent files — no word of reply-to-sent says "next message" / "24 h" (en / zh / ja), the DM why is gone everywhere`, J2({ hits, gone }));
+}
+
+console.log('⑰ verify r3 (lane channel-reply-real): the alias self witness, Slack threadOnly negatives, file parts, the chain through THE index');
+{
+  const T = NOW - 3 * 3600e3;
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const M = mutantCopies('chan-filter-r3', REPO);
+  const req = createRequire(import.meta.url);
+  const FO = req(path.join(REPO, 'src/channel-focus.js'));
+  const Thr = req(path.join(REPO, 'src/channel-thread.js'));
+  const P = req(path.join(REPO, 'src/channel-policy.js'));
+  const R = { kind: 'reply-to-sent' };
+  const A = new Map([['m_a1', { at: T, words: 'Invoice attached', subject: 'Invoice 42' }]]);
+  const judged = (F0, r, ctx) => !FO.selfRead(r, null) && F0.matchRecord({ match: 'any', rules: [R] }, r, ctx).hit;   // the engine's order: selfRead first
+  // (1) Gmail: the owner's reply from a send-as ALIAS (SENT-labelled, From ≠ the account) is the owner's — never a reply hit
+  const GSRC = fs.readFileSync(path.join(REPO, 'src/channels/gmail.js'), 'utf-8');
+  const mail = (G, id, from, labelIds) => G.toRecord('gmail', 'thr1', { id, threadId: 'thr1', internalDate: String(T + 3600e3), labelIds, payload: { mimeType: 'text/plain', headers: [{ name: 'From', value: from }, { name: 'Subject', value: 'Re: Invoice 42' }], body: { data: Buffer.from('ok').toString('base64') } } }, { selfEmail: 'owner@corp.io' });
+  const gLegs = (G) => {
+    const ctx = { sentByMe: A, convKind: 'thread', kindOf: () => ({ kind: 'plain', topic: null, quotes: null }) };
+    return { alias: judged(F, mail(G, 'm_alias', 'Owner <owner@alias.io>', ['SENT']), ctx), customer: judged(F, mail(G, 'm_cust', 'Cy <cy@client.io>', ['INBOX', 'UNREAD']), ctx), self: judged(F, mail(G, 'm_self', 'Owner <owner@corp.io>', ['SENT']), ctx), spoof: judged(F, mail(G, 'm_spoof', 'Owner <owner@corp.io>', ['INBOX']), ctx) };
+  };
+  const G = req(path.join(REPO, 'src/channels/gmail.js'));
+  const g = gLegs(G);
+  ok(!g.alias && !g.self && g.customer && g.spoof, 'Gmail: the owner\'s alias reply (SENT, From owner@alias.io) and own reply ⇒ NO hit (self); the customer\'s reply ⇒ hit; an INBOX mail claiming the owner\'s From is not the owner\'s ⇒ judged', J2(g));
+  const GC = "isSelf: sentLabel(m) === true || (!!selfEmail && from.id === String(selfEmail).toLowerCase() && sentLabel(m) !== false), isBot: false },";
+  ok(GSRC.split(GC).length === 2, 'control setup: the gmail self witness is one line');
+  const G1 = M.load('src/channels/gmail.js', GSRC.replace(GC, 'isSelf: !!selfEmail && from.id === String(selfEmail).toLowerCase(), isBot: false },'), 'no-sent-witness');
+  ok(gLegs(G1).alias === true, 'CONTROL ⑥: a gmail copy without the SENT witness calls the alias reply a peer\'s answer — the alias leg goes RED');
+  // (2) Slack threadOnly NEGATIVES: a plain message (no root / threadKey / replyTo) 1 h after a send ⇒ never a reply
+  const S = new Map([['171.1', { at: T, words: 'deploy?', subject: '' }]]);
+  const plainCtx = (k) => ({ sentByMe: S, convKind: k, threadOnly: true, kindOf: () => ({ kind: 'plain', topic: null, quotes: null }) });
+  const slackNeg = (F0) => ['dm', 'group'].map((k) => F0.matchRecord({ match: 'any', rules: [R] }, { vendorId: '172.9', at: T + 3600e3, text: 'lunch?', author: { id: 'U2', name: 'Rowan' } }, plainCtx(k)).hit);
+  ok(slackNeg(F).every((h) => !h), 'Slack (threadOnly), dm + group: a plain message 1 h after the send ⇒ NO hit (no thread_ts, no reply)', J2(slackNeg(F)));
+  const FSRC = fs.readFileSync(path.join(REPO, 'src/channel-filter.js'), 'utf-8');
+  const SC = '    const s = of(rec.root) || of(rec.threadKey) || of(rec.replyTo);';
+  ok(FSRC.split(SC).length === 2, 'control setup: the threadOnly read is one line');
+  const F7 = M.load('src/channel-filter.js', FSRC.replace(SC, '    const s = of(rec.root) || of(rec.threadKey) || of(rec.replyTo) || [...sent.values()].find((x) => Number(x.at) < Number(rec.at)) || null;'), 'slack-clock');
+  ok(slackNeg(F7).every(Boolean), 'CONTROL ⑦: a copy with a clock clause under the threadOnly branch hits both plain messages — the Slack negative goes RED');
+  // (3) a send in PARTS (Lark text + a file message): a 引用 of part 2 is a reply to what the agent sent
+  const res = { vendorMessageId: 'om_t1', parts: [{ part: 'text', ok: true, vendorMessageId: 'om_t1' }, { part: 'attachment', name: 'q3.pdf', ok: true, vendorMessageId: 'om_f2' }, { part: 'attachment', name: 'big.zip', ok: false, code: 'too-large' }] };
+  ok(J2(P.sentIdsOf(res)) === J2(['om_t1', 'om_f2']) && J2(P.sentIdsOf({ vendorMessageId: 'x' })) === J2(['x']) && J2(P.sentIdsOf(null)) === '[]', 'sentIdsOf: the first id + every LANDED part (a refused part has no id)', J2(P.sentIdsOf(res)));
+  const parts = new Map(P.sentIdsOf(res).map((v) => [v, { at: T, words: 'Q3 numbers', subject: '' }]));
+  const qp = F.matchRecord({ match: 'any', rules: [R] }, { vendorId: 'om_q9', at: T + 60e3, replyTo: 'om_f2', author: { id: 'ou_r', name: 'Rowan' } }, { sentByMe: parts, convKind: 'dm', kindOf: () => ({ kind: 'quote', topic: null, quotes: 'om_f2' }) });
+  ok(qp.hit && /^quotes your message of /.test(qp.why[0]), 'a 2-part send: a quote of PART 2 (the file message) ⇒ hit');
+  const ENGS = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8'), OUTS = fs.readFileSync(path.join(REPO, 'src/server/channels-outbound.js'), 'utf-8');
+  ok(ENGS.includes('for (const v of P.sentIdsOf(p.result)) m.set(v, { at: Number(p.result.at || p.at),') && OUTS.includes('const ids = P.sentIdsOf(p && p.result);') && OUTS.includes('list.push(...ids);'), 'WIRING: the engine\'s sentByMe AND the index ledger (noteSentBy) key every landed part');
+  // (4) the chain through THE index + classifier over Lark-shaped records (threadKey = root_id): A mine ← B quotes A ← C quotes B
+  const lark = (vendorId, dt, more = {}) => ({ adapterId: 'lark', convId: 'oc_1', vendorId, at: T + dt, text: vendorId, author: { id: 'ou_x', name: 'X', isSelf: false }, replyTo: null, root: null, threadKey: null, ...more });
+  const recs = [lark('om_a1', 0), lark('om_b', 60e3, { replyTo: 'om_a1', root: 'om_a1', threadKey: 'om_a1' }), lark('om_c', 120e3, { replyTo: 'om_b', root: 'om_a1', threadKey: 'om_a1' }),
+    lark('om_a2', 1000, { threadKey: 'omt_7' }), lark('om_tr', 180e3, { replyTo: 'om_a2', root: 'om_a2', threadKey: 'omt_7' })];
+  const ix = Thr.threadIndex(recs, { convId: 'oc_1' });
+  const real = { sentByMe: new Map([['om_a1', { at: T, words: 'A', subject: '' }], ['om_a2', { at: T + 1000, words: 'A2', subject: '' }]]), convKind: 'group', threadOnly: false, kindOf: (r) => Thr.placeKindOf(r, ix) };
+  const by = (id) => F.matchRecord({ match: 'any', rules: [R] }, recs.find((r) => r.vendorId === id), real);
+  const b = by('om_b'), c = by('om_c'), tr = by('om_tr');
+  ok(Thr.placeKindOf(recs[2], ix).kind === 'quote' && Thr.placeKindOf(recs[4], ix).kind === 'topic-reply' && b.hit && /^quotes your message of /.test(b.why[0]) && !c.hit && tr.hit && /^replies in the thread of your message of /.test(tr.why[0]),
+    'THE REAL INDEX: B quoting A ⇒ hit (quote); C quoting B (root_id = A, threadKey = A) ⇒ NO hit; a 讨论串 reply under A2 (thread_id) ⇒ hit (thread)', J2({ b: b.why, c: c.hit, tr: tr.why, kc: Thr.placeKindOf(recs[2], ix).kind }));
+}
+
+console.log('⑱ lane lark-system-records (B-ef03): a vendor system notice is nobody\'s message — no rule kind hits it');
+// ── ⑱ lane lark-system-records (owner's DM 2026-10-08: a Lark recall notice with no sender reached an agent "from unknown"):
+// a vendor SYSTEM notice is nobody's message — RULE_KINDS × a system record ⇒ NO hit for every kind (each rule built so it
+// hits the PEER twin carrying the same words, mention, file, place), sentHit / placeHit null, the estimate never counts it,
+// and the engine's 'all' watcher skips it (pinned). Control: a copy without the guards lets the notice match ⇒ red. ──────
+{
+  const T = NOW - 60e3;
+  const base = { adapterId: 'lark-a', convId: 'oc_s', at: T, text: 'Ada recalled a message', mentions: [{ id: 'ou_me', name: 'Me' }], attachments: [{ id: 'f1', name: 'a.png', bytes: 1, mime: 'image/png' }] };
+  const sys = makeRecord({ ...base, vendorId: 'om_sys', kind: 'system', systemKind: 'recall', author: {} });
+  const peer = makeRecord({ ...base, vendorId: 'om_peer', author: { id: 'ou_ada', name: 'Ada' }, replyTo: 'om_mine', threadKey: 'omt_t', root: 'om_mine' });
+  const RULE_FOR = {
+    mention: { kind: 'mention', value: 'ou_me' }, keyword: { kind: 'keyword', value: 'recalled' }, regex: { kind: 'regex', value: 'recall(ed)?' },
+    'sender-in-group': { kind: 'sender-in-group', members: ['ou_ada', ''] }, 'from-address': { kind: 'from-address', value: 'ada' },
+    subject: { kind: 'subject', value: 'recalled' }, 'has-attachment': { kind: 'has-attachment' }, 'not-contains': { kind: 'not-contains', value: 'zzz-never' },
+    'time-window': { kind: 'time-window', from: '00:00', to: '23:59', tzOffsetMinutes: 0 },
+    'reply-to-mine': { kind: 'reply-to-mine' }, 'in-thread-with-me': { kind: 'in-thread-with-me' }, 'reply-to-sent': { kind: 'reply-to-sent' },
+  };
+  const ctx = { mine: new Set(['om_mine']), sentByMe: new Map([['om_mine', { at: T - 60e3, words: 'hi' }]]), ownerMine: new Set(), convKind: 'thread',
+    kindOf: () => ({ kind: 'topic-reply', topic: 'omt_t', quotes: 'om_mine' }), threadOf: () => ['om_mine'], subjectOf: () => 'recalled' };
+  ok(sys.kind === 'system' && sys.author.isSystem === true && !sys.author.id, 'setup: the notice is a system record (no author id)');
+  const missing = F.RULE_KINDS.filter((k) => !RULE_FOR[k]);
+  ok(!missing.length, `the census covers EVERY rule kind (${F.RULE_KINDS.length})`, missing.join(','));
+  const sysHits = [], peerMiss = [];
+  for (const k of F.RULE_KINDS) {
+    const f = { rules: [RULE_FOR[k]] };
+    if (F.matchRecord(f, sys, ctx).hit) sysHits.push(k);
+    if (!F.matchRecord(f, peer, ctx).hit && !F.PLACE_RULE_KINDS.includes(k)) peerMiss.push(k);
+  }
+  ok(!sysHits.length, 'RULE_KINDS × a system record: NO kind hits it (no wake, no stash, no For-you)', sysHits.join(','));
+  ok(!peerMiss.length, 'non-vacuous: every word / sender / file / time rule hits the PEER twin with the same words', peerMiss.join(','));
+  ok(F.matchRecord({ match: 'every', rules: F.RULE_KINDS.filter((k) => !F.PLACE_RULE_KINDS.includes(k) && k !== 'sender-in-group' && k !== 'from-address').map((k) => RULE_FOR[k]) }, sys, ctx).hit === false, "match 'every' over the word rules: no hit either");
+  ok(F.sentHit(sys, ctx) === null && F.PLACE_RULE_KINDS.every((k) => F.placeHit(RULE_FOR[k], sys, ctx) === null), 'sentHit / placeHit answer null for a notice before anything else');
+  const est = F.estimate(null, [sys, peer], { days: 7, now: NOW });
+  ok(est && est.matched === 1 && est.total === 2, 'the estimate of "every message" counts the peer message, never the notice', J2(est));
+  const ENG = engineSource(REPO);
+  ok(/if \(FO\.selfRead\(r, selfId\)\) continue;\n\s*if \(FO\.systemRead\(r\)\) continue;[^\n]*\n\s*if \(w\.mode === 'all'\)/.test(ENG), "the engine's watch loop skips a notice BEFORE an 'all' watcher takes every record");
+  // CONTROL: the copy without the guards (matchRecord's + ruleHits') ⇒ the notice matches (red)
+  const { mutantCopies, copiesCensus } = await import('./mutant-copy.mjs');
+  const M = mutantCopies('chan-filter-sys', REPO);
+  const FSRC = fs.readFileSync(path.join(REPO, 'src/channel-filter.js'), 'utf-8');
+  const G1 = "  if (isSystemRecord(record)) return { hit: false, why: [] };\n", G2 = "  if (isSystemRecord(rec)) return false;   // lane lark-system-records\n";
+  ok(FSRC.split(G1).length === 2 && FSRC.split(G2).length === 2, 'control setup: each guard is one line');
+  const FX = M.load('src/channel-filter.js', FSRC.replace(G1, '').replace(G2, ''), 'no-system-guard');
+  const xHits = F.RULE_KINDS.filter((k) => FX.matchRecord({ rules: [RULE_FOR[k]] }, sys, ctx).hit);
+  ok(xHits.includes('keyword') && xHits.includes('not-contains') && xHits.includes('time-window'), 'CONTROL: a copy without the system guard lets the notice match (keyword / not-contains / time-window) — the census goes RED', xHits.join(','));
+  for (const x of copiesCensus(M.files, M.dir, REPO, { minCopies: 1 })) ok(x.pass, 'tree: ' + x.name, x.detail);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

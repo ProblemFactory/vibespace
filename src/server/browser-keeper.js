@@ -3202,6 +3202,48 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
    * `other` / `orphan`, and `adoptable` when no conversation leases the browser (the orphan rule). `activeTarget` = the
    * relay's session's tab (the `tabs` record's active — the viewed lease's). → {ok, all?, owners?, mediated, adoptable}
    */
+  // lane browser-tabs-by-window (the owner, 2026-10-08): WHICH WINDOW each tab is in, for the live view's tab row and Tabs
+  // pane — Browser.getWindowForTarget per page (the reader openOwnTab verifies with), KEPT per browser run + target (CDP has
+  // no move: a tab's window is its window for life on the headless / hidden-window browsers this serves); an unread one is
+  // null (never 0), not kept, asked again at the next read; ≤ TAB_WINDOW_READS new reads per record (a browser of thousands
+  // of tabs costs a bounded number of sockets per `tabs` record, the rest answer null until a later read)
+  const TAB_WINDOW_READS = 24, TAB_WINDOW_KEEP = 4096;
+  const tabWindowKept = new Map(); // `${cdpUrl}|${instance}|${TARGETID}` → windowId
+  async function tabWindowsOf(rec, targets) {
+    const pre = `${rec.cdpUrl}|${WIN.instanceOf(rec) || ''}|`;
+    const ids = TBS.pageTargets(targets).map((x) => x.targetId);
+    const live = new Set(ids);
+    for (const k of tabWindowKept.keys()) if (k.startsWith(pre) && !live.has(k.slice(pre.length))) tabWindowKept.delete(k);
+    const out = {};
+    let reads = 0;
+    for (const id of ids) {
+      const k = pre + id;
+      if (tabWindowKept.has(k)) { out[id] = tabWindowKept.get(k); continue; }
+      out[id] = null;
+      if (reads++ >= TAB_WINDOW_READS) continue;
+      let w = null;
+      try { w = WIN.windowIdOf(await (typeof windowOfFn === 'function' ? windowOfFn(rec.cdpUrl, id) : require('./browser-viewport.js').windowOf(rec.cdpUrl, id))); } catch { w = null; }
+      out[id] = w;
+      if (w != null) { tabWindowKept.set(k, w); if (tabWindowKept.size > TAB_WINDOW_KEEP) tabWindowKept.delete(tabWindowKept.keys().next().value); }
+    }
+    return out;
+  }
+  /** The holders' windows in the VIEW's words, in the holders' order (tabHoldersOf's): his window = the one his own tab was
+   *  made in; a lease's = its stamped `windowId` while it is of THIS browser run (`windowIn`) — a lease without one names no
+   *  window (its tabs are "elsewhere", never guessed). → [{windowId, word, sessionId?, job?, name?}] */
+  function holderWindowsOf(p, rec, windows, bk, h) {
+    const out = [];
+    const inst = WIN.instanceOf(rec);
+    const hw = h && h.ownTab ? windows[String(h.ownTab).toUpperCase()] : null;
+    if (hw != null) out.push({ windowId: hw, word: TBS.ownerWord(h.key, { me: bk, humanKey: h.key }) });
+    for (const l of reg.leases.filter((x) => x.profileId === p.id).sort((a, b) => (Number(a.since) || 0) - (Number(b.since) || 0))) {
+      const w = WIN.hasOwnWindow(l, inst) ? WIN.windowIdOf(l.windowId) : null;
+      if (w == null) continue;
+      const word = TBS.ownerWord(l.browserKey, { me: bk, humanKey: h ? h.key : null });
+      out.push({ windowId: w, word, ...(word === 'other' ? whoseOf(p.id, l.browserKey) || {} : {}) });
+    }
+    return out;
+  }
   async function tabOwnersFor(target, { activeTarget = null } = {}) {
     ensureLoaded();
     if (!target || !target.kind) return { ok: false };
@@ -3228,7 +3270,8 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const words = {};
     const whose = {};
     for (const [id, k] of owners) { words[id] = TBS.ownerWord(k, { me: bk, humanKey: h ? h.key : null }); if (words[id] === 'other') { const w = whoseOf(p.id, k); if (w) whose[id] = w; } }
-    return { ok: true, owners: words, whose, mediated: false, adoptable: target.kind === 'human' && !reg.leases.some((l) => l.profileId === p.id), ...titled(targets) };
+    const windows = await tabWindowsOf(rec, targets); // lane browser-tabs-by-window: every tab's window + the holders' windows
+    return { ok: true, owners: words, whose, windows, leases: holderWindowsOf(p, rec, windows, bk, h), mediated: false, adoptable: target.kind === 'human' && !reg.leases.some((l) => l.profileId === p.id), ...titled(targets) };
   }
   /** accept-fixes-strip F8: WHO holds another holder's tab — `{sessionId}` (the view names the conversation as its sidebar
    *  does) or `{job, name}` (a Background Work job's handle: its job's name, read live). null = not known. */

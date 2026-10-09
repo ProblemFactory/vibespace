@@ -265,8 +265,10 @@ The user gives you two DIFFERENT things, in this order:
     `--from address[,address]` · `--subject "words"` ·
     `--sender-in-group id[,id]` · `--has-attachment` · `--not-contains w[,w]` ·
     `--time-window HH:MM-HH:MM [--tz-offset ±minutes]` · `--reply-to-mine` ·
-    `--in-thread-with-me` · `--reply-to-sent` (a reply to a message YOU sent;
-    refused as `not-on-this-version` where the server lacks it).
+    `--in-thread-with-me` · `--reply-to-sent` (a quote of a message YOU sent,
+    a reply in its thread, or a reply in its mail thread — the vendor's own
+    reply marker, never "any message after yours"; refused as
+    `not-on-this-version` where the server lacks it).
   - the whole row as JSON: `--spec '{"notify":"digest","digestMinutes":60,
     "filter":{"match":"every","rules":[{"kind":"regex","value":"^deploy"},
     {"kind":"has-attachment"}]},"dailyWakeCap":10}'` or `--spec @row.json`

@@ -309,6 +309,8 @@ function picturePng(w = 200, h = 120) {
       LK('om_k4', NOW - 26 * MIN, 'ou_ada', 'system', { template: '{from_user} added {to_chatters} to the group', from_user: 'Ada Example', to_chatters: ['Brook'] }),
       LK('om_k5', NOW - 25 * MIN, 'ou_ada', 'text', { text: 'after the system line' }),
       LK('om_k6', NOW - 24 * MIN, 'ou_me', 'text', { text: 'my own words' }),
+      LK('om_ks1', NOW - 23 * MIN, '', 'system', {}),   // lane lark-system-records: the owner's shape — a notice with no words, no sender
+      LK('om_ks2', NOW - 22 * MIN, '', 'text', { text: 'a vendor bug: no sender' }),   // …and a MESSAGE with no author (not a notice)
     ]);
   }
   store.index.flush && store.index.flush();
@@ -1111,6 +1113,8 @@ console.log('⑪ the look: an avatar per run, the hover time in the gutter, the 
       hover: hov ? { text: hov.textContent, title: hov.title, op: getComputedStyle(hov).opacity, r: R(hov) } : null, k2body: R(k2.querySelector('.chanmsg-body')),
       k3: av(row('om_k3')),
       k4: { sys: row('om_k4').classList.contains('chanmsg-sysrow'), av: av(row('om_k4')), head: !!row('om_k4').querySelector('.chanmsg-head'), text: row('om_k4').textContent },
+      ks1: (() => { const r7 = row('om_ks1'); return r7 ? { sys: r7.classList.contains('chanmsg-sysrow'), av: av(r7), head: !!r7.querySelector('.chanmsg-head'), who: !!r7.querySelector('.chanmsg-who'), text: r7.textContent, center: getComputedStyle(r7).justifyContent, small: getComputedStyle(r7.querySelector('.chanblk-sys') || r7).fontSize } : null; })(),
+      ks2: (() => { const w8 = row('om_ks2') && row('om_ks2').querySelector('.chanmsg-who'); return w8 ? w8.textContent : null; })(),
       k5: av(row('om_k5')), k5cont: row('om_k5').classList.contains('chanmsg-cont'),
       k6: av(row('om_k6')),
     };
@@ -1123,6 +1127,9 @@ console.log('⑪ the look: an avatar per run, the hover time in the gutter, the 
   ok(K.hover && /^\d\d:\d\d$/.test(K.hover.text) && K.hover.title && K.hover.op === '0' && clear(K.hover.r, K.k2body), 'the continuation\'s own time sits in the avatar\'s GUTTER (never over its text), hidden at rest, with the full instant as its title', J([K.hover, K.k2body]));
   ok(K.k3 && K.k3.text === 'B' && K.k3.hue !== null && !K.k3.self, 'another author opens a new run with its own circle ("Brook" → B)', J(K.k3));
   ok(K.k4.sys && !K.k4.av && !K.k4.head && /Ada Example added Brook to the group/.test(K.k4.text), 'a SYSTEM line is centred with no avatar and no author head (nobody said it)', J(K.k4));
+  // lane lark-system-records (owner's DM 2026-10-08): the owner's empty notice is ONE dim centred line in the kind's own words
+  ok(K.ks1 && K.ks1.sys && !K.ks1.av && !K.ks1.head && !K.ks1.who && /会话通知/.test(K.ks1.text) && !/未知/.test(K.ks1.text) && K.ks1.center === 'center' && K.ks1.small === '11px', "a vendor NOTICE with no words (the owner's record): one dim centred line in the kind's words (zh), no avatar, no author, never 未知", J(K.ks1));
+  ok(K.ks2 === '（无发送者）', 'a MESSAGE that names no author (a vendor bug, not a notice) is "（无发送者）" — never "未知"', J(K.ks2));
   ok(K.k5 && K.k5.text === 'AE' && K.k5.hue === K.k1.hue && !K.k5cont, 'the system line BREAKS the run: Ada\'s next message has its own avatar again — the same initials, the same hue', J([K.k5, K.k5cont]));
   ok(K.k6 && K.k6.self && K.k6.hue === null && K.k6.text === 'MA', 'the self author ("Member A") wears the ACCENT circle (no hue)', J(K.k6));
   // hover: the time shows

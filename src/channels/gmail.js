@@ -509,7 +509,9 @@ function toRecord(adapterId, convId, m, { selfEmail = null, onBody = null, threa
     adapterId, convId,
     vendorId: String(m.id || ''),
     at: Number(m.internalDate) || 0,
-    author: { id: from.id, name: from.name, isSelf: !!selfEmail && from.id === String(selfEmail).toLowerCase(), isBot: false },
+    // lane channel-reply-real (verify r3): the SENT label is the self witness — the owner's reply from a send-as ALIAS
+    // (From ≠ the account address) is still the owner's, never a peer's answer (FO.selfRead skips it before any rule)
+    author: { id: from.id, name: from.name, isSelf: sentLabel(m) === true || (!!selfEmail && from.id === String(selfEmail).toLowerCase() && sentLabel(m) !== false), isBot: false },
     text,
     mentions: [],
     attachments: parts.attachments,

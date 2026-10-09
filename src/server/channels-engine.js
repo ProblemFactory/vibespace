@@ -1889,7 +1889,7 @@ function create(deps = {}) {
         countFresh(rec, convId, en, fresh);   // lane channel-self-unread: the owner's own message is read by construction
         en.authors = mergeAuthors(en.authors, fresh);
         en.authors = Av.stampSelf(en.authors, selfIdOf(rec));   // lane channels-list-polish: the account's id, at index time
-        const newest = fresh.reduce((m, x) => (Number(x.at) > m ? Number(x.at) : m), 0);
+        const newest = fresh.reduce((m, x) => (Number(x.at) > m && !FO.systemRead(x) ? Number(x.at) : m), 0);   // lane lark-system-records: a notice never moves the row
         if (newest && (!en.lastAt || newest > en.lastAt)) en.lastAt = newest;
       }
     });
@@ -2562,7 +2562,7 @@ function create(deps = {}) {
    *  without the owner's own (FO.selfRead: read by construction). */
   function unreadSince(adapterId, convId, sinceAt) {
     const self = selfIdOf({ id: adapterId });
-    return store.countSince(adapterId, convId, sinceAt, (r) => !FO.selfRead(r, self));
+    return store.countSince(adapterId, convId, sinceAt, (r) => !FO.selfRead(r, self) && !FO.systemRead(r));   // lane lark-system-records: a notice is read by construction
   }
   /** int229 (channel-self-unread × notify-rules-r2): "is this stored record the account's OWN message" as the watch asks it
    *  (FO.selfRead over the resolved id) — for the families: the Notify… preview never offers a match that never wakes. */
@@ -2570,7 +2570,20 @@ function create(deps = {}) {
   /** lane channel-self-unread (userW inc-muxekkry-clfb): a batch into the row's count, at EVERY append site —
    *  FO.readAdvance: the owner's newest message moves `readAt` to its instant and the row is re-derived past it
    *  (older unread before it are read now); otherwise the batch's OTHER records past `readAt` add. */
+  /** lane lark-system-records: a record that names NO author and is not a system notice is a vendor bug — the window and the hand-over
+   *  print "(no sender)" (never "unknown"); logged once per conversation per hour (bounded, never per record). */
+  const noSenderAt = new Map();
+  function noteNoSender(rec, convId, fresh) {
+    const n = (fresh || []).filter((r) => r && !FO.systemRead(r) && !(r.author && (r.author.id || r.author.name))).length;
+    if (!n) return;
+    const key = `${rec.id}/${convId}`, t = now();
+    if (t - (noSenderAt.get(key) || 0) < 3600e3) return;
+    noSenderAt.delete(key); noSenderAt.set(key, t);
+    while (noSenderAt.size > 512) noSenderAt.delete(noSenderAt.keys().next().value);
+    log.warn(`[channels] ${key}: ${n} record(s) name no sender and are not a system notice — shown as (no sender)`);
+  }
   function countFresh(rec, convId, en, fresh) {
+    noteNoSender(rec, convId, fresh);   // lane lark-system-records
     const ra = FO.readAdvance(en.readAt, fresh, selfIdOf(rec));
     if (ra.moved) { en.readAt = ra.readAt; en.unread = unreadSince(rec.id, convId, ra.readAt); }
     else en.unread = (Number(en.unread) || 0) + ra.unread;
@@ -5091,7 +5104,7 @@ function create(deps = {}) {
         countFresh(rec, convId, en, landed.fresh);   // lane channel-self-unread
         en.authors = mergeAuthors(en.authors, landed.fresh);
         en.authors = Av.stampSelf(en.authors, selfIdOf(rec));   // lane channels-list-polish: the account's id, at index time
-        const newest = landed.fresh.reduce((m, r) => (Number(r.at) > m ? Number(r.at) : m), 0);
+        const newest = landed.fresh.reduce((m, r) => (Number(r.at) > m && !FO.systemRead(r) ? Number(r.at) : m), 0);   // lane lark-system-records
         if (newest && (!en.lastAt || newest > en.lastAt)) en.lastAt = newest;
       }
     });
@@ -6405,11 +6418,11 @@ function create(deps = {}) {
         props.sort((a, b) => Number(a.result.at || a.at) - Number(b.result.at || b.at));
         for (const p of props) {
           const m = sentOut.get(String(p.draftedBy.id)) || new Map();
-          m.set(String(p.result.vendorMessageId), { at: Number(p.result.at || p.at), words: String(p.text || '').replace(/\s+/g, ' ').trim().slice(0, 80), subject: String((p.compose && p.compose.subject) || p.title || '').slice(0, 120) });
+          for (const v of P.sentIdsOf(p.result)) m.set(v, { at: Number(p.result.at || p.at), words: String(p.text || '').replace(/\s+/g, ' ').trim().slice(0, 80), subject: String((p.compose && p.compose.subject) || p.title || '').slice(0, 120) });
           if (m.size > F.SENT_MAX) m.delete(m.keys().next().value);
           sentOut.set(String(p.draftedBy.id), m);
         }
-        placeBase = { owner, threadOf, kindOf, sentBy: en.sentBy && typeof en.sentBy === 'object' ? en.sentBy : {}, sentOut, convKind: en.kind || null };
+        placeBase = { owner, threadOf, kindOf, sentBy: en.sentBy && typeof en.sentBy === 'object' ? en.sentBy : {}, sentOut, convKind: en.kind || null, threadOnly: F.threadOnlyCaps(registry.capsOf(rec.kind)) };   // lane channel-reply-real: Slack-style thread_ts roots
       }
       const cids = !principal ? [] : principal.kind === 'agent' ? [String(principal.id)] : F.fanTargetOf(principal) ? [F.fanTargetOf(principal)] : principal.kind === 'everyone' ? [] : Object.keys(placeBase.sentBy).filter((k) => k.startsWith('agent:')).map((k) => k.slice(6)).filter((cid) => groupsOfSession(cid).includes(String(principal.id)));
       // lane reply-to-sent: `ctx.mine` split — the OWNER's (`ownerMine`) and THIS principal's sends (`sentByMe` from the
@@ -6417,7 +6430,7 @@ function create(deps = {}) {
       const sentIds = new Set();
       const sentByMe = new Map();
       for (const cid of cids) { for (const v of placeBase.sentBy[`agent:${cid}`] || []) sentIds.add(String(v)); for (const [v, s] of placeBase.sentOut.get(cid) || []) sentByMe.set(v, s); }
-      return { ownerMine: placeBase.owner, sentIds, sentByMe, convKind: placeBase.convKind, threadOf: placeBase.threadOf, kindOf: placeBase.kindOf };
+      return { ownerMine: placeBase.owner, sentIds, sentByMe, convKind: placeBase.convKind, threadOnly: placeBase.threadOnly, threadOf: placeBase.threadOf, kindOf: placeBase.kindOf };
     };
     // R4 verify r5: ONE BAD RECORD (or a throw preparing one watcher) MUST NOT
     // DROP THE REST OF THIS CONVERSATION'S BATCH. onFresh is tracked per
@@ -6444,6 +6457,7 @@ function create(deps = {}) {
             // lane channel-self-unread (B-c91b: 'inc-' matched the owner's OWN Outbox replies to userW): the owner's
             // own message is never a hit — no keyword / regex / place rule, no @ in it, no 'all' watcher (FO.selfRead)
             if (FO.selfRead(r, selfId)) continue;
+            if (FO.systemRead(r)) continue;   // lane lark-system-records: a vendor notice (a recall, a join) is nobody's message — not even an 'all' watcher's
             if (w.mode === 'all') { hits.push({ record: r, why: [] }); continue; }
             const m = F.matchRecord(filter, r, mctx);
             if (m.hit) hits.push({ record: r, why: m.why, ...(m.sent ? { sent: m.sent } : {}) });

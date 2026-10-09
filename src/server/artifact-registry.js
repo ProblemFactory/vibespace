@@ -27,6 +27,10 @@
  *   · noteForwards(msg)      — the PortForwardManager's `port-forwards-updated` broadcast (server.js): a service row's
  *     LINK reads the port's forward record (published ⇒ its public URL, else this instance's /proxy/ — lane
  *     artifacts-services-url), so a publish / unpublish patches the live service cards in place
+ *   · presented pages (lane pages-chip-groups) — a /p/<id> link in a TEXT record (the hook's `present` ops, live AND
+ *     rebuild) is a `page` row with `presented: true`; `listFor` resolves it against the pages store at every read
+ *     (AF.resolvePresented), a birth or a page's later publish / unpublish tells the conversation's clients
+ *     (`artifacts-changed` → they re-read GET /api/artifacts — the one feed)
  *   At every rebuild the pages + designs rows come back from THEIR stores (`storeRowsOf`, normalizers' store-rows seam);
  *   the uploads live in the persisted rows (the composer's attachment record IS this registry).
  * THE CONTRACT TOWARD doc-window (spelled in src/artifacts.js's header + kb-file-structure):
@@ -36,7 +40,7 @@ const AF = require('../artifacts.js');
 const { toAgentText: agentText } = require('../peer-text.js');
 const DOC_EDIT_FROM = 'Doc edit'; // the stash's `doc-edit` source (lane doc-window): drained as "the user edited a document:" + the re-read hint
 
-let deps = { activeSessions: () => new Map(), deliver: null, sessionMeta: null, pages: () => null, designs: () => null, jobs: () => null, ports: () => null, instanceUrl: null, log: console };
+let deps = { activeSessions: () => new Map(), deliver: null, sessionMeta: null, pages: () => null, designs: () => null, jobs: () => null, ports: () => null, instanceUrl: null, toSession: null, log: console };
 /** server.js's ONE line: the live sessions, the delivery ladder (stashFor), the session-meta store and the two stores
  *  a rebuild reads its pages / designs rows from. */
 function configure(d = {}) {
@@ -77,6 +81,7 @@ function noteOp(session, op) {
     try { normalizers().feedArtifactCard(session, block); } catch (e) { deps.log.warn?.(`[artifacts] card not fed: ${e.message}`); }
   }
   persistSoon(session);
+  if (r.row.presented) { if (r.born) tellChanged(session); return r; } // lane pages-chip-groups: a page shown here — no file to index
   require('./search-index.js').noteArtifact({ sessionId: session.sockName || null, host: r.row.host || session.host || '', path: r.row.path }); // lane global-search: every new / edited row's file is (re)indexed
   return r;
 }
@@ -174,8 +179,10 @@ function handover({ from = {}, to = [], items = [], reach = null, at = Date.now(
 }
 
 // ── THE REGISTRIES (lane artifacts-registries) ──
-/** A published page's notification (onPublished: publish / re-publish / flags / unpublish) → its conversation's row. */
+/** A published page's notification (onPublished: publish / re-publish / flags / unpublish) → its conversation's row; every
+ *  OTHER conversation that shows its link hears `artifacts-changed` (its presented row re-resolves: a new name, gone). */
 function notePage(page, extra = {}) {
+  if (page && page.id) for (const [, s] of sessions()) if (s && s._artifacts && s._artifacts[AF.keyOf('', '/p/' + page.id)]) tellChanged(s);
   const session = page && page.sessionId ? sessions().get(page.sessionId) : null;
   const op = session ? AF.pageOp(page, { removed: !!(extra && extra.removed) }) : null;
   return op ? noteOp(session, op) : null;
@@ -279,10 +286,24 @@ function touch({ sessionId, host, path, summary } = {}) {
   return { ok: true, noted: noteEdit({ sessionId, host, path, summary }), row: r.row };
 }
 
+/** lane pages-chip-groups: the conversation's clients re-read the list (the chat view's GET /api/artifacts) — no payload. */
+function tellChanged(session) {
+  if (!session || !session.sockName || typeof deps.toSession !== 'function') return;
+  try { deps.toSession(session, session.sockName, { type: 'artifacts-changed', sessionId: session.sockName }); } catch (e) { deps.log.warn?.(`[artifacts] artifacts-changed not sent: ${e.message}`); }
+}
+/** The presented page rows of `s`, resolved against the pages store NOW (AF.resolvePresented): this conversation's own
+ *  page (its session id or conversation id) drops out; the publisher's name = its live session's. */
+function presentedResolved(s, sessionId, rows) {
+  const store = (() => { try { return deps.pages && deps.pages(); } catch { return null; } })();
+  const cid = conversationOf(s);
+  const live = [...sessions()];
+  const nameOf = (p) => { const hit = (p.sessionId && sessions().get(p.sessionId)) || (p.conversationId && (live.find(([, x]) => x && conversationOf(x) === p.conversationId) || [])[1]); return (hit && hit.name) || ''; };
+  return AF.resolvePresented(rows, { pageOf: (id) => (store && typeof store.byId === 'function' ? store.byId(id) : null), own: (p) => (p.sessionId && p.sessionId === sessionId) || (!!cid && p.conversationId === cid), base: instanceBase(), nameOf });
+}
 /** The Artifacts chip's list (the chat status bar asks on attach and after each card op): `view(rows)` as blocks. */
 function listFor(sessionId) {
   const s = sessions().get(String(sessionId || ''));
-  const v = AF.view({ ...((s && s._artifacts) || {}), ...(s ? servicesOf(s) : {}) }); // + the derived service rows
+  const v = AF.view({ ...(s ? presentedResolved(s, String(sessionId), s._artifacts || {}) : {}), ...(s ? servicesOf(s) : {}) }); // + the derived service rows; the presented pages resolved (lane pages-chip-groups)
   return { ok: true, items: v.items.map(AF.cardBlock), code: v.code.map(AF.cardBlock), count: v.count, codeCount: v.codeCount, full: v.full };
 }
 function mount(app) { app.get('/api/artifacts', (req, res) => res.json(listFor(req.query && req.query.sessionId))); return api; }

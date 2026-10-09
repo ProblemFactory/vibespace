@@ -280,7 +280,7 @@ function chipTitleTail(title, url) {
  * `orphan` — nothing is drawn on it); `viewer` = {human}; `driving`; `mediated`; `adoptable` (his window: the orphans
  * are his to take). → {rows:[…], counts, anyAgent}
  */
-function tabRowModel({ tabs = [], owners = {}, viewer = {}, driving = false, mediated = false, adoptable = false, titles = {}, names = {} } = {}, tIn) {
+function tabRowModel({ tabs = [], owners = {}, viewer = {}, driving = false, mediated = false, adoptable = false, titles = {}, names = {}, windows = {}, leases = [], me = null } = {}, tIn) {
   const t = tOf(tIn);
   const human = !!(viewer && viewer.human);
   const ow = isObj(owners) ? owners : {};
@@ -313,7 +313,85 @@ function tabRowModel({ tabs = [], owners = {}, viewer = {}, driving = false, med
       switchTip: sw.ok && !sw.noop ? t('Switch to this tab') : '', closeTip: cl.ok ? t('Close tab') : '',
     };
   });
-  return { rows, counts, anyAgent: counts.agent > 0 };
+  // lane browser-tabs-by-window: the chips BY WINDOW — this view's window first, then each other holder's, then the rest;
+  // a window's spare blank folds into its group (the pane's head says the count), never the chip on show
+  const wn = isObj(windows) ? windows : {};
+  const g = tabGroups({ tabs: list.map((x) => ({ targetId: x.targetId, url: x.url, active: x.active, windowId: wn[idKey(x.targetId)] })), leases, me, human }, tIn);
+  const byId = new Map(rows.map((r) => [r.targetId, r]));
+  const groupOf = new Map(); for (const gr of g.groups) for (const id of gr.targetIds) groupOf.set(id, gr.key);
+  return { rows: g.order.map((id) => ({ ...byId.get(id), group: groupOf.get(id) })), counts, anyAgent: counts.agent > 0, groups: g.groups, grouped: g.grouped, blanks: g.blanks };
+}
+
+// ── lane browser-tabs-by-window (the owner, 2026-10-08 "好做吧"): THE TABS BY WINDOW ─────────────────────────────────
+// MEASURED on the owner's instance (read-only, keeper journal 17:53:16Z): profile hanabi-work carried TWO leases, each in a
+// window of its own (lane browser-windows: one window per holder) — and the live view's Tabs pane listed the WHOLE browser
+// flat ("Tabs (4)": Enterprise, Read, about:blank, about:blank), the row put the other conversation's chip beside the
+// agent's, so the owner read two agents in one window. The windows were right; the LIST did not say which window a tab is in.
+/** A blank tab: about:blank / the new-tab page / no address (F8's BLANK_URL_RE) — nothing on it to watch. */
+function isBlankTab(x) { return BLANK_URL_RE.test(str(x && x.url).trim()); }
+/** Chrome's window id as a number; unread = null, never 0 (browser-windows' windowIdOf — this module imports only the belt). */
+function windowIdIn(v) { if (v == null || v === '') return null; const n = Number(v); return Number.isFinite(n) ? n : null; }
+/** A group's head, in the VIEW's words — the holder by name, NEVER a window number (Chrome's ids are 9 digits). */
+function windowLabelText(kind, { word = 'other', name = '' } = {}, tIn) {
+  const t = tOf(tIn);
+  if (kind === 'own') return t('This window');
+  if (kind === 'elsewhere') return t('Elsewhere in this browser');
+  if (word === 'you') return t('Your window');
+  if (word === 'agent') return t('The agent’s window');
+  const n = nameOfHolder(name);
+  return n ? t('{name}’s window', { name: n }) : t('Another conversation’s window');
+}
+/**
+ * WHICH WINDOW EACH TAB IS IN — the groups the tab row and the Tabs pane draw, in a FIXED order: THIS view's window first
+ * (the window of the lease the view shows — his own window on his browsing view; no lease window ⇒ `me`, else the window of
+ * the tab on show), then each OTHER holder's window in the holders' order (the user first, then the conversations by age),
+ * named by its holder (`holder` = {word, name}: OWNER_WORDS from this view + the conversation's live name — never a window
+ * number, never a session id), then every tab whose window is unread or held by nobody ("Elsewhere in this browser"). A
+ * tab's window is the keeper's Browser.getWindowForTarget answer (`windowId`, null = unread) — never guessed from its owner:
+ * a lease without a window id names no group, its tabs land Elsewhere.
+ * THE ANCHOR — a window's spare blank (the about:blank a session's daemon opens at its first command beside the window's
+ * real tab; nothing records which one) — FOLDS into its group as a count: a blank tab, not the one on show, in a KNOWN
+ * window that keeps another tab drawn. Never folded: a window's only tab (all blank ⇒ the first stays), the tab on show (so
+ * a folded tab is never "the agent is here"), a blank whose window is unread. PURE.
+ *   tabs = [{targetId, url, active, windowId}] in the browser's order · leases = [{windowId, holder:{word, name}}] in the
+ *   holders' order · me = this view's window when no lease says it · human = the view is his own browsing window
+ * → {grouped, groups:[{key, kind:'own'|'holder'|'elsewhere', label, tip, blankText, targetIds, blanks}], order, blanks}
+ */
+function tabGroups({ tabs = [], leases = [], me = null, human = false } = {}, tIn) {
+  const t = tOf(tIn);
+  const list = (Array.isArray(tabs) ? tabs : []).filter((x) => isObj(x) && isTargetId(x.targetId)).map((x) => ({ id: idKey(x.targetId), win: windowIdIn(x.windowId), blank: isBlankTab(x), active: !!x.active }));
+  const ls = (Array.isArray(leases) ? leases : []).filter((l) => isObj(l) && windowIdIn(l.windowId) != null)
+    .map((l) => { const h = isObj(l.holder) ? l.holder : {}; return { win: windowIdIn(l.windowId), word: OWNER_WORDS.includes(str(h.word)) ? str(h.word) : 'other', name: str(h.name) }; });
+  const shown = list.find((x) => x.active);
+  const mine = ls.find((l) => l.word === (human ? 'you' : 'agent'));
+  const own = mine ? mine.win : windowIdIn(me) != null ? windowIdIn(me) : shown ? shown.win : null;
+  const heads = [];
+  if (own != null) heads.push({ kind: 'own', win: own, label: windowLabelText('own', {}, tIn) });
+  for (const l of ls) if (!heads.some((h) => h.win === l.win)) heads.push({ kind: 'holder', win: l.win, label: windowLabelText('holder', l, tIn) });
+  const groups = [...heads, { kind: 'elsewhere', win: null, label: windowLabelText('elsewhere', {}, tIn) }].map((h) => ({ ...h, key: h.win == null ? 'elsewhere' : 'w' + h.win, members: [] }));
+  const at = new Map(groups.filter((g) => g.win != null).map((g) => [g.win, g]));
+  for (const x of list) (at.get(x.win) || groups[groups.length - 1]).members.push(x);
+  // the anchor rule, per window (Elsewhere may hold several)
+  const perWin = new Map();
+  for (const x of list) if (x.win != null) { const a = perWin.get(x.win); if (a) a.push(x); else perWin.set(x.win, [x]); }
+  const folded = new Set();
+  for (const xs of perWin.values()) {
+    const spare = xs.filter((x) => x.blank && !x.active);
+    for (const x of spare.length === xs.length ? spare.slice(1) : spare) folded.add(x.id);
+  }
+  const out = groups.filter((g) => g.members.length).map((g) => {
+    const blanks = g.members.filter((x) => folded.has(x.id)).map((x) => x.id);
+    const blankText = blanks.length ? t('+{n} blank', { n: blanks.length }) : '';
+    return { key: g.key, kind: g.kind, label: g.label, blankText, tip: blanks.length ? `${g.label} — ${t('{n} blank tab(s) beside its pages — nothing on them', { n: blanks.length })}` : g.label,
+      targetIds: g.members.filter((x) => !folded.has(x.id)).map((x) => x.id), blanks };
+  });
+  return { grouped: out.length > 1, groups: out, order: out.flatMap((g) => g.targetIds), blanks: folded.size };
+}
+/** The Tabs pane's count: the tabs drawn, the folded blanks beside them — "2 · +2 blank" / "4". */
+function tabsCountText({ order = [], blanks = 0 } = {}, tIn) {
+  const t = tOf(tIn);
+  const n = Array.isArray(order) ? order.length : 0, b = Number(blanks) || 0;
+  return b > 0 ? t('{n} · +{b} blank', { n, b }) : String(n);
 }
 
 // ── THE WORDS (en; the client passes its t() — every key has zh + ja rows) ─────────────────────────────────────────
@@ -444,4 +522,5 @@ module.exports = {
   userTabVerdict, hostOf, chipTitle, chipTitleTail, tabRowModel,
   isUrlTitle, pageTitleOf, titlesOf, pageRows, nameOfHolder, BLANK_URL_RE, // accept-fixes-strip F7 (the page's own title) + F8 (whose, by name)
   ownerMarkText, ownerTipText, tabRefusalText, userActsSentence, noteUserActIn, agentTabLines,
+  tabGroups, tabsCountText, windowLabelText, isBlankTab, // lane browser-tabs-by-window: the tabs by window, a window's spare blank folded
 };

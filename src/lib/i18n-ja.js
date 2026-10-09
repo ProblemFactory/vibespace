@@ -6013,10 +6013,9 @@ export default {
   "This thread was loaded a moment ago — try again in {s} s": "このスレッドは少し前に読み込まれました — {s} 秒後にもう一度お試しください",
   "These reactions were checked a moment ago": "これらのリアクションは少し前に確認済みです",
   "replies to or quotes a message of mine": "自分のメッセージへの返信・引用",
-  "is a reply to a message this agent sent": "この agent が送ったメッセージへの返信",
+  "is a quote, a reply in a thread, or a reply in the mail thread of a message this agent sent": "この agent が送ったメッセージの引用、そのスレッドでの返信、またはそのメールスレッドでの返信",
   "Set this on a group to cover each of its agents for their own sends — a reply notifies only the agent whose message it answers.": "グループに設定すると、所属する各 agent が自分の送信分についてそれぞれ対象になります。返信は、返信先のメッセージを送った agent だけに通知されます。",
   "a reply to a message this agent sent": "この agent が送ったメッセージへの返信",
-  "the next message after yours in a direct chat": "ダイレクトチャットであなたの送信後に届いた次のメッセージ",
   "quotes your message of {when}": "あなたの {when} のメッセージを引用",
   "replies in the thread of your message of {when}": "あなたの {when} のメッセージのスレッドで返信",
   "in the thread of your mail \"{subject}\"": "あなたのメール「{subject}」のスレッド内",
@@ -7972,4 +7971,25 @@ export default {
   "not measured — its folder is on a paired machine": "未計測 — フォルダーはペアリングしたマシン上にあります",
   "not measured — VibeSpace keeps no folder for it": "未計測 — VibeSpace はこのフォルダーを保持していません",
   "Over the profile disk budget — said in For you; Delete… in its menu frees it": "プロファイルのディスク予算を超えています — 「あなた宛て」でお知らせ済み。メニューの 削除… で空き容量を戻せます",
+  "This window": "このウィンドウ", // lane browser-tabs-by-window
+  "Your window": "あなたのウィンドウ", // lane browser-tabs-by-window
+  "{name}’s window": "{name} のウィンドウ", // lane browser-tabs-by-window
+  "Another conversation’s window": "別の会話のウィンドウ", // lane browser-tabs-by-window
+  "The agent’s window": "agent のウィンドウ", // lane browser-tabs-by-window
+  "Elsewhere in this browser": "このブラウザのほかの場所", // lane browser-tabs-by-window
+  "+{n} blank": "+{n} 空白", // lane browser-tabs-by-window
+  "{n} blank tab(s) beside its pages — nothing on them": "ページの横に空白タブが {n} 個——何も表示されていません", // lane browser-tabs-by-window
+  "{n} · +{b} blank": "{n} · +{b} 空白", // lane browser-tabs-by-window
+  "A message was recalled": "メッセージが取り消されました", // lane lark-system-records
+  "Someone joined the chat": "誰かがチャットに参加しました", // lane lark-system-records
+  "Someone left the chat": "誰かがチャットから退出しました", // lane lark-system-records
+  "The chat was renamed": "チャット名が変更されました", // lane lark-system-records
+  "A notice from the chat": "チャットからのお知らせ", // lane lark-system-records
+  "(no sender)": "（送信者なし）", // lane lark-system-records
+  "Published by this conversation": "この会話が公開したもの", // lane pages-chip-groups
+  "Shown here": "ここで表示されたもの", // lane pages-chip-groups
+  "from {name}": "{name} から", // lane pages-chip-groups
+  "from another conversation": "別の会話から", // lane pages-chip-groups
+  "no longer published": "公開終了", // lane pages-chip-groups
+  "{a} from this conversation · {b} shown here — click to open one or request a design": "この会話のデザインとページ {a} 件 · ここで表示された {b} 件 — クリックして開くか、新しいデザインを依頼", // lane pages-chip-groups
 };

@@ -1462,6 +1462,9 @@ console.log('— ③ censuses: no card for him (+ control), the holder readers, 
     // lane browser-profile-clone (the 2.369.239 integration): "Copy logins from" refuses a source a CONVERSATION leases (source_leased
     // names it — a browser is never taken from an agent); his row is the user asking for the copy (its Stop is the panel's, his own act)
     cloneHolders: 1,
+    // lane browser-tabs-by-window (the 2.369.240 integration): the tab groups' holder windows — a CONVERSATION lease's stamped
+    // `windowId` while it is of this browser run (`windowIn`); his window is read off his own tab (`h.ownTab`) before this loop
+    holderWindowsOf: 1,
   };
   // holder: "who holds this browser / is it used" — through holdersOn (the conversations' leases + his row)
   const HOLDER = { list: 1, holdersOn: 1 };

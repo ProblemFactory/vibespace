@@ -151,6 +151,11 @@ const FIXTURE = [
   const rb = Fo.readAdvance(100, [peer(150), unresolved]);
   ok(rb.readAt === 100 && rb.unread === 2 && !rb.moved, 'readAdvance: no self record ⇒ the line stays and every record past it counts (as before)', JSON.stringify(rb));
   ok(Fo.readAdvance(500, [own]).moved === false && Fo.readAdvance(500, [own]).unread === 0, 'readAdvance: a self record older than the line moves nothing and adds 0');
+  // lane lark-system-records: a vendor SYSTEM notice (a recall, a join) is read by construction — adds 0, never moves the line
+  const sysN = { at: 400, kind: 'system', systemKind: 'recall', author: { id: '', name: '', isSelf: false, isBot: false, isSystem: true } };
+  ok(Fo.systemRead(sysN) && !Fo.systemRead(peer(1)) && !Fo.systemRead(own) && !Fo.systemRead(null), 'systemRead: kind system only');
+  const rs = Fo.readAdvance(100, [peer(150), sysN]);
+  ok(rs.readAt === 100 && rs.unread === 1 && !rs.moved, 'readAdvance: a system notice adds 0 and never moves the read line', JSON.stringify(rs));
   // THE PRIORITY: a row that holds EVERY fact, then each dropped in turn
   const all = { outbox: { awaiting: 1, unknown: 1 }, assignment: principal('Alpha'), lastAt: NOW, touch: { read: { name: 'Gamma', at: NOW - H, upTo: NOW - 2 * H }, pending: 2, selfAt: NOW - H } };
   const steps = [];

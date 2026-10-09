@@ -796,7 +796,37 @@ function factsOfItem(item, { appName = '' } = {}) {
 /** ONE vendor item → ONE ChannelRecord. `names` maps open_id → display name
  *  (chat members, cached) and app_id → application name (D3); `selfId` is
  *  the authorizing user's open_id. */
+/** lane lark-system-records: Lark's SYSTEM message content (documented shape) is `{template, <name>: [...]}` — the template's
+ *  `{name}` placeholders name ARRAYS of the content (`from_user`, `to_chatters`, … display names) — filled by the blocks
+ *  rung's own bounded `larkSystemSentence`, read as words (`markupPlainLine`: a name's markup gone); a placeholder the
+ *  content does not fill is dropped (never a brace left), whitespace folded, '' when nothing is left (the client words
+ *  the kind — never ' '). */
+function systemWordsOf(c) {
+  return Blocks.markupPlainLine(Blocks.larkSystemSentence(c, '')).replace(/\{[A-Za-z_]{0,40}\}/g, '').replace(/[{}]/g, '').replace(/\s+/g, ' ').trim();
+}
+/** The notice's KIND off the vendor's TEMPLATE words (never the filled names): src/channel-record.js SYSTEM_KINDS. */
+const SYSTEM_KIND_WORDS = [['recall', /recall|撤回/i], ['rename', /rename|changed the (?:group|chat) name|群名称|改名/i], ['leave', /\bleft\b|\bleave|removed|退出|移出|移除/i], ['join', /join|invite|added|加入|邀请/i]];
+function systemKindOf(c) {
+  const tpl = String((c && (c.template || c.text)) || '').slice(0, 4096);
+  for (const [k, re] of SYSTEM_KIND_WORDS) if (re.test(tpl)) return k;
+  return 'other';
+}
+/** A SYSTEM message (`msg_type: system`) or one that names no sender at all (`sender_type` null, no id) is the vendor
+ *  talking about the chat — kind system: no author, no place, no facts, its words filled (src/channel-record.js). */
+function isSystemItem(item) { const s = item && item.sender; return !!item && (item.msg_type === 'system' || !s || (!s.id && !s.sender_type)); }
+function systemRecordOf(adapterId, convId, item, names) {
+  const c = parseContent(item.body && item.body.content) || {};
+  const text = systemWordsOf(c);
+  return makeRecord({
+    adapterId, convId, vendorId: String(item.message_id || ''), at: Number(item.create_time) || 0,
+    kind: 'system', systemKind: systemKindOf(c), author: {}, text,
+    blocks: Blocks.larkToBlocks(item, [], { names, text }),   // the rung's one `sys` line (the window draws the record's words)
+    raw: { msg_type: item.msg_type || null, chat_id: item.chat_id || null, sender_type: null, updated: item.updated || null },
+  }, { resolveMentions: false });
+}
+
 function toRecord(adapterId, convId, item, { names = new Map(), selfId = null, selfTenant = null } = {}) {
+  if (isSystemItem(item)) return systemRecordOf(adapterId, convId, item, names);   // lane lark-system-records: nobody's message
   const sender = item.sender || {};
   const sid = String(sender.id || '');
   const text = textOf(item);

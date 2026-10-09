@@ -108,7 +108,7 @@ const RECORD_FIELDS = ['id', 'convId', 'adapterId', 'vendorId', 'at', 'author', 
  *  record's thread / reply chain when the vendor names one and it is not this
  *  record). A record stored before either field existed carries neither, and
  *  every reader treats absence as "not said". */
-const OPTIONAL_FIELDS = ['blocks', 'root', 'facts'];   // + `facts` (lane message-facts, B-f066)
+const OPTIONAL_FIELDS = ['blocks', 'root', 'facts', 'kind', 'systemKind'];   // + `facts` (lane message-facts, B-f066); + `kind` / `systemKind` (lane lark-system-records)
 
 /** Bounds. A vendor body is peer-controlled and is synced to every client. */
 const MAX_TEXT = 64 * 1024;
@@ -117,6 +117,15 @@ const MAX_MENTIONS = 256;
  *  `@everyone`) or a GROUP (a user group) — stored with its own id, which never equals a person's, so a broadcast or
  *  a group never reads as "mentions me". CLOSED. */
 const MENTION_KINDS = Object.freeze(['person', 'broadcast', 'group']);
+/** lane lark-system-records (owner's DM 2026-10-08: a Lark recall notice with no sender reached an agent "from unknown"):
+ *  a VENDOR SYSTEM NOTICE — Lark `msg_type: system` (a recall, a join, a rename), Slack's `channel_join` & co. — is the
+ *  vendor talking ABOUT the chat, never a message from anybody. Such a record says so: `kind: 'system'`, an author with
+ *  no id and no name (`isSystem: true` — never self, never a bot), `systemKind` one of SYSTEM_KINDS (CLOSED; the client
+ *  words an empty notice by it), `text` the vendor's own words ('' when it gave none — never a blank). No rule matches it
+ *  (src/channel-filter.js), it is never unread (src/channel-focus.js `systemRead`), the window draws one dim line. A
+ *  record without `kind` is a message (every record stored before). */
+const RECORD_KINDS = Object.freeze(['system']);
+const SYSTEM_KINDS = Object.freeze(['recall', 'join', 'leave', 'rename', 'other']);
 const MAX_ATTACHMENTS = 64;
 const MAX_RAW_BYTES = 8 * 1024;
 
@@ -587,6 +596,12 @@ function makeRecord(input, opts = {}) {
   // sender's organization is not the account's); the vendor `name` stays the name (src/channel-authors.js N3)
   if (a.alt && typeof a.alt === 'object') { const x = {}; for (const k of ['enName', 'nickname', 'jobTitle', 'department']) { const v = peerName(a.alt[k], 200); if (v) x[k] = v; } if (Object.keys(x).length) author.alt = x; }
   if (a.external === true) author.external = true;
+  // lane lark-system-records: a SYSTEM notice has nobody behind it — an author id is a contradiction (refused), the rest of
+  // the author is cleared to the one system shape
+  const system = r.kind === 'system';
+  if (r.kind !== undefined && r.kind !== null && !system) throw new Error(`channel-record: kind must be one of ${RECORD_KINDS.join('|')} or absent`);
+  if (system && author.id) throw new Error('channel-record: a system record names no author (the vendor said it, nobody wrote it)');
+  if (system) { delete author.alt; delete author.external; author.name = ''; author.isSelf = false; author.isBot = false; author.isSystem = true; }
 
   const mentions = (Array.isArray(r.mentions) ? r.mentions : []).slice(0, MAX_MENTIONS)
     .map((m) => ({ id: peerText(m && m.id, 256), name: peerName(m && m.name, 200) || '', ...(m && MENTION_KINDS.includes(m.kind) && m.kind !== 'person' ? { kind: m.kind } : {}) }));
@@ -632,6 +647,8 @@ function makeRecord(input, opts = {}) {
   const threadKey = str(r.threadKey, 512) || null;
   let root = str(r.root, 512) || null;
   if (root === vendorId || (!threadKey && !replyTo)) root = null;
+  if (system && (replyTo || threadKey || root)) throw new Error('channel-record: a system record has no reply marker (it answers nothing and sits in no thread)');
+  if (system) text = text.replace(/\s+/g, ' ').trim();   // never a blank: '' = the client words the kind
   const out = {
     id: str(r.id, 256) || `${adapterId}:${convId}:${vendorId}`,
     convId, adapterId, vendorId, at,
@@ -653,7 +670,24 @@ function makeRecord(input, opts = {}) {
     const v = validateFacts(r.facts);
     if (v.ok && v.facts.length) out.facts = v.facts;
   }
+  if (system) { out.kind = 'system'; out.systemKind = SYSTEM_KINDS.includes(r.systemKind) ? r.systemKind : 'other'; }
   return out;
+}
+
+/** lane lark-system-records: is this record a vendor SYSTEM notice (nobody's message)? */
+const isSystemRecord = (r) => !!r && typeof r === 'object' && r.kind === 'system';
+/** THE READ-SIDE RE-JUDGE (no migration): a record STORED before `kind` existed in the system shape — an author with
+ *  neither id nor name and the vendor's own word for it in `raw` (Lark `msg_type: 'system'`) — is served as the system
+ *  notice it was (systemKind `other`, a blank text emptied). Every other record comes back as ITSELF (the same object). */
+function asSystemRecord(r) {
+  if (!r || typeof r !== 'object' || r.kind !== undefined) return r;
+  const a = r.author;
+  if (!a || typeof a !== 'object' || a.id || a.name || !r.raw || typeof r.raw !== 'object' || r.raw.msg_type !== 'system') return r;
+  const words = typeof r.text === 'string' ? r.text.replace(/\s+/g, ' ').trim() : '';
+  const author = { id: '' };
+  author.name = '';   // the one system author (makeRecord's shape), built field by field like makeRecord's
+  Object.assign(author, { isSelf: false, isBot: false, isSystem: true });
+  return { ...r, author, text: words, kind: 'system', systemKind: 'other' };
 }
 
 // ── REACTIONS + SIDE RECORDS (lane channel-threads, 2026-09-28) ─────────────
@@ -878,6 +912,7 @@ function makeConversation(input) {
 }
 
 module.exports = {
+  RECORD_KINDS, SYSTEM_KINDS, isSystemRecord, asSystemRecord,   // lane lark-system-records
   RECORD_FIELDS, OPTIONAL_FIELDS, MAX_TEXT, MAX_RAW_BYTES, FRAME_TAG_RE, FRAME_TAGS, MENTION_KINDS,
   BLOCK_KINDS, RUN_KINDS, ATTACHMENT_ROLES, SYS_WHATS, BLOCK_LIMITS, LINK_SCHEMES,
   makeRecord, makeConversation, resolveMentions, inertFrames, inertFrameLine, inertOpeners, peerText, peerName, carriesFrame, recordKey, isSynthetic,

@@ -5652,6 +5652,7 @@ label.chan-cap-row { cursor: default; }
    a ▾+N fold; the row's end "Close all…" (the browser's Stop / Quit, confirmed by name). Theme vars only. */
 .browser-live-tabrow { display: flex; align-items: center; gap: 4px; padding: 3px 6px; flex-shrink: 0; overflow: hidden; border-bottom: 1px solid var(--border); background: var(--bg-toolbar); min-height: 28px; box-sizing: border-box; }
 .browser-live-tabrow-list { display: flex; gap: 3px; flex: 1 1 auto; min-width: 0; overflow: hidden; }
+.browser-live-tabrow-divider { flex: none; align-self: center; max-width: 160px; padding: 0 6px; margin-left: 3px; border-left: 1px solid var(--border); font-size: 10px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .browser-live-tabchip { --av-size: 16px; --av-surface: var(--bg-toolbar); display: inline-flex; align-items: center; gap: 5px; max-width: 240px; padding: 2px 4px 2px 5px; font-size: 11px; color: var(--text-secondary); border: 1px solid transparent; border-radius: var(--radius-sm); white-space: nowrap; flex: none; user-select: none; }
 .browser-live-tabchip.switchable { cursor: pointer; }
 .browser-live-tabchip.switchable:hover { background: var(--hover-overlay); }
@@ -5739,6 +5740,9 @@ label.chan-cap-row { cursor: default; }
 .browser-live-side { width: 260px; max-width: 45%; flex-shrink: 0; border-left: 1px solid var(--border); overflow: auto; background: var(--bg-secondary); font-size: 11px; }
 .browser-live-tab { padding: 5px 8px; border-bottom: 1px solid var(--border); }
 .browser-live-tab.active { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+/* lane browser-tabs-by-window: the Tabs pane's window heads + indented rows; the row's divider chip between windows */
+.browser-live-tabgroup { padding: 6px 8px 3px; font-size: 10px; font-weight: 600; color: var(--text-dim); border-bottom: 1px solid var(--border); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.browser-live-tab.in-group { padding-left: 18px; }
 .browser-live-tab-title { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .browser-live-tab-url { color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono, monospace); font-size: 10px; }
 .browser-live-console-line { padding: 2px 8px; font-family: var(--font-mono, monospace); font-size: 10px; color: var(--text-secondary); white-space: pre-wrap; overflow-wrap: anywhere; border-bottom: 1px solid var(--border); }

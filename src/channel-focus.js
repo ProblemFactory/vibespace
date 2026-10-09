@@ -77,12 +77,15 @@ function selfRead(r, selfId = null) {
 /** The read line after a batch `recs`: `{ readAt, unread, moved }` — `readAt` = the newest self record's instant when
  *  it is past `readAt`; `unread` = the batch's OTHER records past that line; `moved` = the line advanced (the caller
  *  re-derives the row's whole count past it — older unread records before it are read now). */
+/** B-ef03 (vendor system notices, 2026-10-08): a vendor SYSTEM notice (`kind: 'system'` — a recall, a join; src/channel-record.js) is READ BY CONSTRUCTION
+ *  too — it adds 0, never moves the read line, is never news and never a watch hit (nobody wrote it). */
+function systemRead(r) { return !!r && typeof r === 'object' && r.kind === 'system'; }
 function readAdvance(readAt, recs, selfId = null) {
   const list = Array.isArray(recs) ? recs : [];
   let line = num(readAt);
   for (const r of list) if (selfRead(r, selfId) && num(r && r.at) > line) line = num(r.at);
   let unread = 0;
-  for (const r of list) if (r && !selfRead(r, selfId) && num(r.at) > line) unread++;
+  for (const r of list) if (r && !selfRead(r, selfId) && !systemRead(r) && num(r.at) > line) unread++;
   return { readAt: line, unread, moved: line > num(readAt) };
 }
 const within = (at, now, win) => { const a = num(at); return a > 0 && now - a < win; };
@@ -383,5 +386,5 @@ module.exports = {
   FOCUS_WINDOW_MS, HELD_WINDOW_MS, TAG_ORDER, heldPending, heldOf, statusTag, focusRows, filterRows, firstScreen,
   ATTENTION_MAX, HEAD_ROWS, PAGE_ROWS, PAGE_MAX, QUERY_MAX, candidateOf, pageOrder, pageCursor, afterCursor, selectPage, queryOf, textMatches,
   isInternal, needsOwner, internalBlock,
-  selfRead, readAdvance,
+  selfRead, readAdvance, systemRead,   // + systemRead: B-ef03
 };

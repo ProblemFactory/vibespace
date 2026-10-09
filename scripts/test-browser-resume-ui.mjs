@@ -461,6 +461,42 @@ else await (async () => {
         await new Promise((r) => cdpSrv.close(() => r()));
       }
     }
+    // ⑧ lane browser-tabs-by-window (the owner, 2026-10-08 — two agents read as one window): THE TABS BY WINDOW, zh. The
+    //    owner's scene (profile hanabi-work: this conversation's window, 企业助手's window, each with its blank anchor) fed
+    //    through the live view's OWN socket handler in the shapes the real bridge sends (`tabs` + `tab-owners` with
+    //    `windows` / `leases` — test-browser-share ③c proves those facts on the real binary): the row = this window's chip
+    //    first, a divider naming 企业助手's window, its chip; the pane = two heads (本窗口 / 企业助手 的窗口, each "+1 个空白页"),
+    //    indented rows, "标签页 (2 · +2 个空白页)"; no window number in any word. PNGs where VIBESPACE_TABS_PNG_DIR names a dir.
+    console.log('— ⑧ zh: the tabs BY WINDOW — this window first, 企业助手 的窗口 next, the blank anchors folded');
+    {
+      const A = 'A'.repeat(32), B = 'B'.repeat(32), C = 'C'.repeat(32), D = 'D'.repeat(32), WA = 896114259, WB = 896114295;
+      const tabs = [{ tabId: 't1', targetId: A, title: 'Enterprise | Find a supplier', url: 'https://enterprise.example/find', active: true }, { tabId: 't2', targetId: B, title: 'Read - Meeting Report', url: 'https://read.example/meeting-report' }, { tabId: 't3', targetId: C, title: 'about:blank', url: 'about:blank' }, { tabId: 't4', targetId: D, title: 'about:blank', url: 'about:blank' }];
+      const rec = { type: 'tab-owners', owners: { [A]: 'agent', [B]: 'other', [C]: 'orphan', [D]: 'orphan' }, titles: {}, names: { [B]: { sessionId: null, name: '企业助手' } }, windows: { [A]: WA, [B]: WB, [C]: WA, [D]: WB }, leases: [{ windowId: WA, word: 'agent', sessionId: null, name: null }, { windowId: WB, word: 'other', sessionId: null, name: '企业助手' }], mediated: false, adoptable: false };
+      await ev('const w = live(); const el = w.element; el.style.width = "900px"; el.style.height = "620px"; window.dispatchEvent(new Event("resize")); return true;');
+      const feed = `const w = L().ws(); w.onmessage({ data: ${S(S({ type: 'tabs', tabs }))} }); w.onmessage({ data: ${S(S(rec))} });`;
+      const read = `const root = L().el(); const pane = root.querySelector('.browser-live-tabs'); const btn = root.querySelector('.browser-live-side-btn[data-pane="tabs"]'); if (pane.style.display === 'none') btn.click();
+        await new Promise((r) => setTimeout(r, 400));
+        const kids = [...root.querySelectorAll('.browser-live-tabrow-list > *')].filter((e) => e.style.display !== 'none').map((e) => e.dataset.target ? 'chip:' + e.dataset.target.slice(0, 1) : 'div:' + e.textContent);
+        const pk = [...pane.children].map((e) => e.classList.contains('browser-live-tabgroup') ? 'head:' + e.textContent : 'tab:' + String(e.dataset.key || '').slice(2, 3) + (e.classList.contains('in-group') ? '>' : ''));
+        const words = [...root.querySelectorAll('.browser-live-tabrow-divider, .browser-live-tabgroup')].map((e) => e.textContent + ' ' + e.title).join(' | ') + ' | ' + btn.textContent;
+        return { kids, pk, btn: btn.textContent, words, row: rect(root.querySelector('.browser-live-tabrow')), pane: rect(pane) };`;
+      const g8 = await ev(feed + read);
+      ok(S(g8.kids) === S(['chip:A', 'div:企业助手 的窗口', 'chip:B']), '⑧ zh ROW: this window\'s chip first, a divider naming 企业助手\'s window, then its chip (the blank anchors are no chips)', S(g8));
+      ok(S(g8.pk) === S(['head:本窗口 · +1 个空白页', 'tab:A>', 'head:企业助手 的窗口 · +1 个空白页', 'tab:B>']) && g8.btn === '标签页 (2 · +2 个空白页)', '⑧ zh PANE: 本窗口 then 企业助手 的窗口, each head folding its blank ("+1 个空白页"), the rows indented; the count says "标签页 (2 · +2 个空白页)"', S(g8));
+      ok(!/\d{6,}/.test(g8.words), '⑧ no window number in any word of the row or the pane', g8.words);
+      // KEYED (R4): a second identical record patches in place — the pane's first node is the same node
+      const k8 = await ev('const pane = L().el().querySelector(".browser-live-tabs"); const a = pane.firstChild, b = pane.children[1]; ' + feed + ' await new Promise((r) => setTimeout(r, 200)); return pane.firstChild === a && pane.children[1] === b;');
+      ok(k8 === true, '⑧ the pane is KEYED: the same record again moves no node (never an innerHTML rebuild under the pointer)');
+      const dir = process.env.VIBESPACE_TABS_PNG_DIR;
+      if (dir) {
+        await ev(feed + 'return true;'); await sleep(300);
+        const g9 = await ev(read);
+        for (const [name, r] of [['after-row-zh.png', g9.row], ['after-pane-zh.png', { left: g9.pane.left, top: g9.pane.top, width: g9.pane.width, height: Math.min(g9.pane.height, 260) }]]) {
+          const shot = await send('Page.captureScreenshot', { format: 'png', clip: { x: r.left, y: r.top, width: Math.max(1, r.width), height: Math.max(1, r.height), scale: 1 } });
+          if (shot.result?.data) { fs.writeFileSync(path.join(dir, name), Buffer.from(shot.result.data, 'base64')); console.log(`    PNG ${path.join(dir, name)}`); }
+        }
+      }
+    }
     await send('Runtime.evaluate', { expression: `localStorage.removeItem('vibespace.lang'); true` });
   } finally {
     try { cdp?.close?.(); } catch { }

@@ -94,6 +94,9 @@
 .chat-design-page-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-design-page button { padding: 1px 8px; font-size: 11px; }
 .chat-design-pages.hidden { display: none; }
+.chat-design-group-head { font-size: 11px; color: var(--text-dim); margin-top: 2px; } /* lane pages-chip-groups: one head per group */
+.chat-design-page-who { flex: 0 1 auto; min-width: 0; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--text-dim); }
+.chat-design-gone .chat-design-page-name { opacity: 0.6; text-decoration: line-through; }
 /* lane design-window: this session's designs, above the pages (Open = the Design window · Publish…) */
 .chat-design-designs { display: flex; flex-direction: column; gap: 4px; border-top: 1px solid var(--border); padding-top: 6px; max-height: 180px; overflow: auto; }
 .chat-design-designs.hidden { display: none; }

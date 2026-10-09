@@ -3,6 +3,7 @@ import { escHtml, showInputDialog, showConfirmDialog, uiScale, showToast, fetchJ
 import { renderArtifactList } from './artifact-card.js'; // lane artifacts-model: the Artifacts chip's list
 import { UI_ICONS } from './icons.js';
 import { systemSelect } from './design-home.js'; // lane design-systems-home: the design chip's "Design system" select
+import { pagesChipGroups, pageOfDesign } from './pages-chip-model.js'; // PURE (lane pages-chip-groups): the Pages chip's two groups
 import { BACKEND_META, getBackendMeta, backendFeatureCaps, autoResumeCapsFor, effortDisplay, effortLabel, effortOptions, noteModelCatalog, responseStyleLabel, responseStyleCaps, styleAppliesLive, initHealthLabel, uiRow, billingRow } from './agent-meta.js';
 import { t } from './i18n.js';
 import { shortWorkflowName } from '../workflow-name.js';
@@ -184,6 +185,7 @@ export class ChatStatusBar {
   setArtifacts(v) {
     this._artifacts = v && v.ok && ((v.count || 0) + (v.codeCount || 0)) > 0 ? v : null;
     this.render();
+    this._refillDesignList(); // lane pages-chip-groups: the presented pages ride this feed — an open Pages popover follows
     const open = this._artifacts && (this._popupContainer || this._element?.parentElement)?.querySelector?.('.chat-artifacts-panel'); // lane artifacts-list-scale: an open list follows, patched in place
     if (open && open._afList) open._afList.update(this._artifacts);
   }
@@ -491,13 +493,34 @@ export class ChatStatusBar {
     this.render();
     this._refillDesignList();
   }
+  /** lane pages-chip-groups: the chip's model — own pages, the pages shown here (the artifact feed's presented rows), designs. */
+  _pagesChip() {
+    const presented = ((this._artifacts && this._artifacts.items) || []).filter((b) => b && b.kind === 'page' && b.presented);
+    return pagesChipGroups({ own: this._pages, presented, designs: this._designs, t });
+  }
   _refillDesignList() {
     const list = this._designListEl;
     if (list && list.isConnected) {
-      list.replaceChildren();
-      const shown = this._pages.filter((p) => !this._designs.some((d) => this._pageOfDesign(d) === p)); // F2: a design's page is on ITS row
-      for (const p of shown.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))) list.appendChild(this._designPageRow(p));
-      list.classList.toggle('hidden', !shown.length);
+      // lane pages-chip-groups: two groups, each under its head line (own, then shown here); KEYED — a row whose words did
+      // not change keeps its element, a changed one is replaced in place, never a whole repaint while the popover is open
+      const want = [];
+      for (const g of this._pagesChip().groups) {
+        if (!g.rows.length) continue;
+        want.push({ key: 'head:' + g.key, sig: g.label, make: () => { const h = document.createElement('div'); h.className = 'chat-design-group-head'; h.textContent = g.label; return h; } });
+        for (const r of g.rows) want.push({ key: r.key, sig: r.sig, make: () => (r.group === 'own' ? this._designPageRow(r.page) : this._shownPageRow(r)) });
+      }
+      const have = new Map();
+      for (const el of [...(list.children || [])]) if (el._pcKey) have.set(el._pcKey, el); else el.remove();
+      let at = list.firstChild || null;
+      for (const w of want) {
+        let el = have.get(w.key);
+        if (el && el._pcSig !== w.sig) { if (el === at) at = at.nextSibling; el.remove(); el = null; }
+        if (!el) { el = w.make(); el._pcKey = w.key; el._pcSig = w.sig; }
+        have.delete(w.key);
+        if (el !== at) list.insertBefore(el, at); else at = at.nextSibling;
+      }
+      for (const el of have.values()) el.remove();
+      list.classList.toggle('hidden', !want.length);
     }
     const dl = this._designsEl;
     if (dl && dl.isConnected) {
@@ -791,8 +814,8 @@ export class ChatStatusBar {
     // discoverable way to ask for a design drafted by the agent and HOSTED
     // by this VibeSpace; the count = pages published from this session
     if (this._onDesignRequest) {
-      const n = this._designs.length + this._pages.filter((p) => !this._designs.some((d) => this._pageOfDesign(d) === p)).length; // F2: a published design is ONE
-      const dTitle = n ? t('{n} design(s) and page(s) from this session — click to open one or request a design', { n }) : t('Request a design canvas — drafted by the agent, hosted by this VibeSpace, shareable by link');
+      const pc = this._pagesChip(); // F2: a published design is ONE; lane pages-chip-groups: + the pages shown here
+      const n = pc.chipCount, dTitle = pc.tip;
       chip('design', `chat-status-design chat-status-clickable${n ? '' : ' chat-status-design-empty'}`, dTitle, `${UI_ICONS.design}${n ? ` ${n}` : ''}`);
     }
 
@@ -1123,9 +1146,29 @@ export class ChatStatusBar {
   }
   /** The published page of one design (its srcKey `<host|local>:<dir>`, or the id GET /api/designs named) — from the
    *  live pages list only (an unpublished page leaves it at once). */
-  _pageOfDesign(d) {
-    const key = `${d.host || 'local'}:${d.dir}`, id = d.page && d.page.id;
-    return this._pages.find((p) => p && (p.srcKey === key || (id && p.id === id))) || null;
+  _pageOfDesign(d) { return pageOfDesign(d, this._pages); }
+  /** lane pages-chip-groups: a page shown here (another conversation's): its name · whose / "no longer published" · Open · Copy link. */
+  _shownPageRow(r) {
+    const row = document.createElement('div');
+    row.className = 'chat-design-page chat-design-shown' + (r.gone ? ' chat-design-gone' : '');
+    const href = absUrl(r.url);
+    const name = document.createElement('span');
+    name.className = 'chat-design-page-name';
+    name.textContent = r.name;
+    name.title = href;
+    const who = document.createElement('span');
+    who.className = 'chat-design-page-who';
+    who.textContent = r.words;
+    const open = document.createElement('button');
+    open.className = 'btn-cancel';
+    open.textContent = t('Open');
+    open.onclick = () => window.open(href, '_blank', 'noopener');
+    const copy = document.createElement('button');
+    copy.className = 'btn-cancel';
+    copy.textContent = t('Copy link');
+    copy.onclick = () => { copyText(href); showToast(t('Link copied')); };
+    row.append(name, who, open, copy);
+    return row;
   }
 
   _designPageRow(p) {

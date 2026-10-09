@@ -335,6 +335,8 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
     console.log(`${r.conversation.key} — ${r.conversation.title}${r.conversation.polledAt ? ` · fetched ${when(r.conversation.polledAt)}` : ''} · ${recs.length} message(s)${th ? ` · thread ${th.key || flag('--thread')} (${th.count || 0} repl${th.count === 1 ? 'y' : 'ies'})` : ''}`);
     if (r.note) console.log(r.note);
     for (const m of recs) {
+      // lane lark-system-records: a vendor notice (a recall, a join) is nobody's message — ONE [system] line with its words
+      if (m.kind === 'system') { console.log(`[${when(m.at)}] [system] ${String(m.text || 'a notice from the chat').replace(/\n/g, ' ')}`); continue; }
       // lane channel-threads (spec §5.1): the PLACE as words (the server's) — a root's thread tag on its line, a
       // reply's "↳ replying to …" under it — and the reactions as counts, never who
       const pl = m.placeText || {};

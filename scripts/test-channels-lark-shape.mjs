@@ -2273,5 +2273,32 @@ console.log('\n⑱ design 010 (B-c9be): the owner\'s full search — the words a
   ok(a.records.some((m) => m.vendorId === tgt.message_id) && a.records.length <= 50 && a.facts.target === true && a.records.every((m) => m.convId === 'oc_ops_room_0001'), 'the found message is among ≤ 50 records of that chat (merged by id, ordered)', JSON.stringify(a.facts));
 }
 
+// ── lane lark-system-records (owner's DM 2026-10-08 20:02:51Z): a Lark SYSTEM message (`msg_type: system`, no sender —
+// a recall, a join) is the vendor's notice: kind system, its template FILLED from the content's arrays, never a brace
+// left, never ' '; a message naming no sender at all is one too. The owner's record (secrets stripped) is the fixture.
+{
+  const item = (id, content, extra = {}) => ({ message_id: id, msg_type: 'system', chat_id: 'oc_dm', create_time: '1791489771000', updated: null, body: { content: JSON.stringify(content) }, ...extra });
+  const owner = lark.toRecord('lark-a', 'oc_dm', { message_id: 'om_owner', msg_type: 'system', chat_id: 'oc_dm', create_time: '1791489771000', updated: null, body: { content: '{"template":" "}' } });
+  ok(owner.kind === 'system' && owner.systemKind === 'other' && owner.text === '' && owner.author.isSystem === true && !owner.author.id && !owner.author.isSelf && !owner.author.isBot, "the owner's record (msg_type system, sender_type null): kind system, text '' (never ' ' — the client words it), no author", JSON.stringify(owner));
+  const cases = [
+    [{ template: '{from_user} recalled a message', from_user: ['Ada'] }, 'recall', 'Ada recalled a message'],
+    [{ template: '{from_user} invited {to_chatters} to this chat', from_user: ['Ada'], to_chatters: ['Brook', 'Cass'] }, 'join', 'Ada invited Brook, Cass to this chat'],
+    [{ template: '{from_user} removed {to_chatters} from the group', from_user: ['Ada'], to_chatters: ['Brook'] }, 'leave', 'Ada removed Brook from the group'],
+    [{ template: '{from_user} changed the group name to {group_name}', from_user: ['Ada'], group_name: 'Ops' }, 'rename', 'Ada changed the group name to Ops'],
+    [{ template: '{from_user} 撤回了一条消息', from_user: ['小明'] }, 'recall', '小明 撤回了一条消息'],
+    [{ template: '{from_user} said {missing} {}', from_user: ['Ada'] }, 'other', 'Ada said'],
+    [{}, 'other', ''],
+  ];
+  const bad = [];
+  cases.forEach(([c, k, words], i) => { const r = lark.toRecord('lark-a', 'oc_dm', item(`om_t${i}`, c)); if (r.kind !== 'system' || r.systemKind !== k || r.text !== words || /[{}]/.test(r.text) || r.text === ' ') bad.push(`${i}: ${JSON.stringify([r.systemKind, r.text])}`); });
+  ok(!bad.length, 'the template fixtures: placeholders FILLED from the content arrays, the kind off the template words, never a brace left, never " "', bad.join(' | '));
+  const nobody = lark.toRecord('lark-a', 'oc_dm', { message_id: 'om_nob', msg_type: 'text', chat_id: 'oc_dm', create_time: '1791489771000', sender: { id: '', id_type: 'open_id', sender_type: null }, body: { content: '{"text":"x"}' } });
+  ok(nobody.kind === 'system' && !nobody.author.id, 'a message that names NO sender (no id, sender_type null) is a notice too — never a peer "unknown"');
+  const placed = lark.toRecord('lark-a', 'oc_dm', item('om_pl', { template: '{from_user} recalled a message', from_user: ['Ada'] }, { parent_id: 'om_p', root_id: 'om_r', thread_id: 'omt_1' }));
+  ok(placed.kind === 'system' && placed.replyTo === null && placed.threadKey === null && !placed.root, 'a notice carries no place (it answers nothing)');
+  const peer = lark.toRecord('lark-a', 'oc_dm', { message_id: 'om_peer', msg_type: 'text', chat_id: 'oc_dm', create_time: '1791489771000', sender: { id: 'ou_ada', id_type: 'open_id', sender_type: 'user' }, body: { content: '{"text":"hi"}' } });
+  ok(peer.kind === undefined && peer.author.id === 'ou_ada', "a person's message is unchanged (no kind)");
+}
+
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
