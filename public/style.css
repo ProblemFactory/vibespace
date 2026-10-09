@@ -4202,6 +4202,18 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
 .sys-bar-label { position: relative; display: block; font-size: 10px; line-height: 14px; text-align: center; color: var(--text); }
 .sys-load { font-size: 11px; color: var(--text-secondary); margin: 2px 0 8px; }
 .sys-load-cpus { color: var(--text-dim); }
+/* lane server-memory-census: the server memory census table (System window) */
+.sys-mem { font-size: 11px; margin: 2px 0 4px; }
+.sys-mem-row { display: grid; grid-template-columns: minmax(7em, 1fr) auto minmax(0, max-content); gap: 6px; padding: 1px 0; color: var(--text-secondary); }
+.sys-mem-mb { text-align: right; color: var(--text); font-variant-numeric: tabular-nums; }
+.sys-mem-sub { color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sys-mem-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sys-mem-fold > summary { list-style: none; cursor: pointer; }
+.sys-mem-fold > summary::-webkit-details-marker { display: none; }
+.sys-mem-fold > summary .sys-mem-name::before { content: '▸ ' / ""; color: var(--text-dim); }
+.sys-mem-fold[open] > summary .sys-mem-name::before { content: '▾ ' / ""; }
+.sys-mem-worker .sys-mem-name { padding-left: 10px; color: var(--text-dim); }
+.sys-mem-rss { border-top: 1px solid var(--border); margin-top: 2px; padding-top: 2px; }
 .sys-chart-box { position: relative; height: 64px; margin: 2px 0 6px; }
 .sys-chart-label { font-size: 10px; color: var(--text-secondary); display: flex; justify-content: space-between; margin-top: 4px; }
 .sys-chart-label b { color: var(--text); font-weight: 600; }

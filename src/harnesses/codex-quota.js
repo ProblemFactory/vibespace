@@ -7,6 +7,9 @@
 //   signalFromStream(record)   → a typed wall/quota signal | null
 //   probe                      → capsOf(id).quotaProbe rung name | null
 //   classifyAuthFailure(info)  → boolean (auth-class failure the pool routes around)
+//   classifyServeFailure(info) → null: codex 0.159.3 has NO lapse sentence (measured with `strings`, 2026-10-08) —
+//     its plan wall is the typed `usage_not_included` ("To use Codex with your ChatGPT plan, upgrade to Plus"),
+//     already an EXHAUSTION enum here (EXHAUSTION_RE), so a codex member keeps today's routing
 // PURE by construction (no I/O — every reading is passed in): the same file
 // may run in the orchestrator, a test, or the device daemon.
 //
@@ -444,6 +447,7 @@ module.exports = {
   signalFromStream,
   probe: capsOf('codex').quotaProbe, // 'rpc-rate-limits': account/rateLimits/read on a LIVE app-server
   classifyAuthFailure,
+  classifyServeFailure: (info = {}) => (classifyAuthFailure(info) ? { kind: 'auth', why: String((info && info.message) || '').slice(0, 120) } : null), // no lapse census (see the header)
   // THE RESET-CREDIT SEMANTICS (src/reset-credit.js, design-reset-credits §1): a
   // consumed credit RE-OPENS the period (account/rateLimitResetCredit/consume) —
   // the pool engine hands this to resetCreditVerdict as `vendor`, never a harness id.

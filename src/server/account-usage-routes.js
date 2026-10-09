@@ -512,7 +512,7 @@ app.post('/api/accounts/pool/:id/gather', (req, res) => {
     const wholeOk = plan ? plan.ok : true;
     // (a pool that restarts to move lands its conversations on the DEFAULT — so it needs the default to move)
     if (plan && !wholeOk && (!hot || !plan.move.length)) {
-      const whyWords = { 'pin-exhausted': 'is out of quota', 'pin-login-dead': 'cannot sign in', 'pin-member-excluded': 'just refused these conversations' }[plan.why] || 'is not usable in the pool right now';
+      const whyWords = { 'pin-exhausted': 'is out of quota', 'pin-login-dead': 'cannot sign in', 'pin-lapsed': 'has an inactive subscription', 'pin-member-excluded': 'just refused these conversations' }[plan.why] || 'is not usable in the pool right now';
       console.log(`[pool] gather ${id}: → ${memberId} refused — ${plan.why} (nothing moved)`);
       return res.status(409).json({ code: 'target_cannot_serve', why: plan.why, until: plan.until || null, member: memberName, error: `${memberName} ${whyWords} — nothing was moved. The pool brings its conversations back to it when it can serve again.` });
     }

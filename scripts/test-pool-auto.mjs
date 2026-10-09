@@ -2182,5 +2182,75 @@ await (async () => {
   fs.rmSync(scr, { recursive: true, force: true });
 })();
 
+// ── A LAPSED SUBSCRIPTION (2026-10-08, lane pool-subscription-lapsed; owner: "UCI Max 订阅到期没续费，系统会自动排除它吗？
+// 续费后不想重新添加"). Production: four conversations + the default were placed ONTO a canceled member whose cached
+// readings looked best. The engine folds the member's persisted `serve` record into the readLogin info; these legs pin
+// the PURE half: never a candidate, never ranked, a conversation on it escapes NOW, named apart from a login.
+{
+  const L = require(path.resolve('src/account-pool-auto.js'));
+  const T0 = 1_791_000_000_000;
+  const lapse = { state: 'lapsed', since: T0, why: 'has disabled Claude subscription access for Claude Code', lastFail: T0 + 5000 };
+  const lapsedOf = (...ids) => (id) => (ids.includes(id) ? { state: 'live', serve: lapse } : { state: 'live' });
+  // the lapsed member B carries the BEST cache (soonest deadline, most left) — exactly the shape that attracted the placements
+  const caches = { a: acct(0.98, 12 * H), b: acct(0.0, 12 * H), c: acct(0.1, 6 * D) };
+  const control = run(caches);
+  const d1 = run(caches, { readLogin: lapsedOf('b') });
+  ck('LAPSED: CONTROL — without the serve record the pool picks B (its stale cache is the best) — the leg below is not vacuous', control?.to === 'b');
+  ck('LAPSED: a lapsed member is NEVER a candidate — the exhausted member escapes to C, not to the lapsed B', d1?.to === 'c' && d1?.reason === 'exhausted');
+  const d2 = run(caches, { readLogin: lapsedOf('b', 'c'), explain: true });
+  ck('LAPSED: every other member lapsed ⇒ its own reason `all-lapsed`, both NAMED in lapsedBlocked (never a silently short list)',
+    d2 && d2.to === null && d2.reason === 'all-lapsed' && JSON.stringify((d2.lapsedBlocked || []).map((m) => m.name)) === '["B","C"]' && d2.lapsedBlocked[0].since === T0 && !d2.loginBlocked);
+  const n2 = poolBlockedNotice(d2, { poolName: '全部', currentName: 'A' });
+  ck('LAPSED: the blocked notice SAYS it — the inactive subscriptions by name + the Re-check way back, never "out of quota" or "re-login"',
+    /no member can take it — the other members' subscriptions are inactive \(B, C\)/.test(n2) && /Re-check it in Manage Agents/.test(n2) && !/out of quota|re-login/i.test(n2));
+  const d2b = run({ a: acct(0.98, 12 * H), b: acct(0.0, 12 * H), c: acct(0.99, 6 * D) }, { readLogin: lapsedOf('b'), explain: true });
+  ck('LAPSED: a quota-emptied list stays a quota sentence and names the lapsed member BESIDE it (no-members + lapsedBlocked)',
+    d2b && d2b.reason === 'no-members' && (d2b.lapsedBlocked || []).length === 1 && /Skipped because their subscription is inactive: B\./.test(poolBlockedNotice(d2b, { poolName: 'P', currentName: 'A' })));
+  // a conversation currently ON the lapsed member
+  const onA = (cA, opts = {}) => run({ a: cA, b: acct(0.6, 3 * D), c: acct(0.5, 6 * D) }, { readLogin: lapsedOf('a'), ...opts });
+  const e1 = onA(acct(0.1, 3 * D));
+  ck('LAPSED: a conversation ON a lapsed member (its cache says 90 % left) ESCAPES now — reason subscription-lapsed, band hard',
+    e1?.to === 'b' && e1?.reason === 'subscription-lapsed' && e1?.band === 'hard');
+  ck('LAPSED: …past the no-data hold (a lapse is a fact, not ignorance) and past the gain floor (its 90 % is no reason to stay)',
+    onA(null)?.reason === 'subscription-lapsed' && onA(acct(0.0, 3 * D))?.to === 'b');
+  ck('LAPSED: CONTROL — the same member WITHOUT the serve record stays put (healthy), so the escape is the record\'s doing', run({ a: acct(0.1, 3 * D), b: acct(0.6, 3 * D) }) === null);
+  ck('LAPSED: a lapse is named apart from a login — a dead login still says login-expired', run({ a: acct(0.1, 3 * D), b: acct(0.6, 3 * D) }, { readLogin: (id) => (id === 'a' ? { state: 'expired' } : { state: 'live' }) })?.reason === 'login-expired');
+  const e3 = decidePoolSwitch({ currentId: 'a', members: members.slice(0, 2), readCache: (id) => ({ a: acct(0.1, 3 * D), b: acct(0.99, 3 * D) })[id] ?? null, nowSec: NOW, readLogin: lapsedOf('a'), explain: true });
+  ck('LAPSED: on it with nowhere to go ⇒ the notice names the CURRENT member\'s inactive subscription (fromLapsed), not a quota bucket',
+    e3 && e3.to === null && e3.fromLapsed && e3.fromLapsed.since === T0 && /A's subscription is inactive — no member can take over\./.test(poolBlockedNotice(e3, { poolName: 'P', currentName: 'A' })));
+  // ranking (the auth-failure eviction's target list) and the manual pin
+  const rk = L.rankPoolMembers({ members, readCache: (id) => caches[id], nowSec: NOW, readLogin: lapsedOf('b') }).map((r) => r.id);
+  ck('LAPSED: rankPoolMembers never ranks a lapsed member (its stale cache would win)', !rk.includes('b') && rk.includes('c') && L.rankPoolMembers({ members, readCache: (id) => caches[id], nowSec: NOW }).map((r) => r.id).includes('b'));
+  const pinOpts = { members, readCache: (id) => ({ a: acct(0.5, 3 * D), b: acct(0.1, 3 * D), c: acct(0.5, 6 * D) })[id], nowSec: NOW };
+  const p1 = L.decidePinnedPlacement({ ...pinOpts, pin: 'b', currentId: 'a', readLogin: lapsedOf('b') });
+  ck('LAPSED: a conversation PINNED to a lapsed member is not moved onto it — pinWhy pin-lapsed, the automatic rules keep it', p1 && p1.to !== 'b' && p1.pinWhy === 'pin-lapsed');
+  const p2 = L.decidePinnedPlacement({ ...pinOpts, pin: 'b', currentId: 'a', readLogin: lapsedOf('a') });
+  ck('LAPSED: a pinned conversation running on a lapsed member returns to its pin as an ESCAPE (band hard, escape subscription-lapsed)', p2 && p2.to === 'b' && p2.reason === 'pin-return' && p2.band === 'hard' && p2.escape === 'subscription-lapsed');
+  // the evidence rule and the episode rule
+  // THE EVIDENCE (verify r1 ②⑦): a reading PRODUCED after the failure — never a write time
+  const pre = { fiveHour: { utilization: 0.4, resetsAt: 1791000 }, sevenDay: { utilization: 0.6, resetsAt: 1791500 }, scopedWeekly: [{ name: 'Fable', utilization: 0.3, resetsAt: 1791500 }] };
+  const FP = L.readingFingerprint(pre), lapseFp = { ...lapse, fp: FP };
+  const moved = L.readingFingerprint({ ...pre, fiveHour: { utilization: 0.01, resetsAt: 1795000 } });
+  ck('LAPSED: readingFingerprint — the numbers only (a re-stamp with a new fetchedAt/source keeps it; a moved bucket changes it; no buckets ⇒ "")',
+    FP && L.readingFingerprint({ ...pre, fetchedAt: 9, source: 'passive' }) === FP && moved !== FP && L.readingFingerprint({ fetchedAt: 5 }) === '' && L.readingFingerprint(null) === '');
+  ck('LAPSED: a statusline RE-STAMP of the pre-lapse numbers after the failure is NOT evidence (verify r1 ②⑦ — the repro)', L.lapseCleared(lapseFp, { at: T0 + 9e6, source: 'passive', fp: FP }) === false);
+  ck('LAPSED: evidence = numbers that MOVED / a rate_limit_event / a verified panel — each only AFTER the last failure',
+    L.lapseCleared(lapseFp, { at: T0 + 9e6, source: 'passive', fp: moved }) === true && L.lapseCleared(lapseFp, { at: T0 + 9e6, source: 'rate-limit-event', fp: FP }) === true
+    && L.lapseCleared(lapseFp, { at: T0 + 9e6, source: 'on-demand', fp: FP, verified: true }) === true
+    && L.lapseCleared(lapseFp, { at: T0 + 5000, source: 'rate-limit-event', fp: moved, verified: true }) === false && L.lapseCleared(lapseFp, { at: NaN, verified: true }) === false && L.lapseCleared(null, { at: T0 + 9e9, verified: true }) === false);
+  ck('LAPSED: no numbers recorded at the failure ⇒ only a rate_limit_event or a verified panel clears it (a first reading is not "moved")',
+    L.lapseCleared({ ...lapse, fp: '' }, { at: T0 + 9e6, source: 'passive', fp: FP }) === false && L.lapseCleared({ ...lapse, fp: '' }, { at: T0 + 9e6, source: 'rate-limit-event', fp: FP }) === true);
+  const s1 = L.serveAfterFailure(null, { why: 'w', now: T0, fp: FP }), s2 = L.serveAfterFailure(s1.serve, { why: 'w2', now: T0 + 3600e3, fp: moved });
+  ck('LAPSED: serveAfterFailure — the first failure opens an EPISODE (since = lastFail = now, fp recorded); a repeat only moves lastFail + fp (since + why kept)',
+    s1.episode === true && s1.serve.since === T0 && s1.serve.lastFail === T0 && s1.serve.fp === FP && s2.episode === false && s2.serve.since === T0 && s2.serve.lastFail === T0 + 3600e3 && s2.serve.why === 'w' && s2.serve.fp === moved);
+  // THE DEFAULT'S FALLBACK (verify r1 ④): removing the default must never park the pool on a lapsed member
+  const fbCaches = { a: acct(0.0, 3 * D), b: acct(0.99, 3 * D), c: acct(0.5, 6 * D) };
+  ck('LAPSED: soonestUsableMember NEVER picks a lapsed member (verify r2 ①): another listed member is picked; every candidate lapsed ⇒ null (the signed-out twin)',
+    L.soonestUsableMember({ members, readCache: (id) => fbCaches[id], nowSec: NOW, readLogin: lapsedOf('a') }) === 'c' && L.soonestUsableMember({ members: members.slice(0, 1), readCache: (id) => fbCaches[id], nowSec: NOW, readLogin: lapsedOf('a') }) === null
+    && L.soonestUsableMember({ members, readCache: (id) => fbCaches[id], nowSec: NOW, readLogin: lapsedOf('a', 'b', 'c') }) === null);
+  ck('LAPSED: CONTROL — without readLogin the same call picks the lapsed member (its cache is the soonest usable)', L.soonestUsableMember({ members, readCache: (id) => fbCaches[id], nowSec: NOW }) === 'a');
+  ck('LAPSED: memberLapsed reads only `serve.state` — a login state can never imply a lapse', L.memberLapsed({ state: 'expired' }) === false && L.memberLapsed({ state: 'live', serve: lapse }) === true && L.memberLapsed(null) === false);
+}
+
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

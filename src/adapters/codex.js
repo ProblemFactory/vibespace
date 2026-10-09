@@ -451,7 +451,7 @@ function _transcriptPoolGet() {
       const { SafeFs } = require('../safe-fs');
       const { runOp } = require('../transcript-worker');
       _transcriptPool = new SafeFs({
-        workerPath: path.join(__dirname, '..', 'transcript-worker.js'),
+        workerPath: path.join(__dirname, '..', 'transcript-worker.js'), name: 'transcript',
         poolSize: 2,
         inlineRun: runOp,
         timeouts: { default: 60000, gapInfo: 120000, lineRange: 60000, userTurns: 120000, boundedParsed: 60000, jsonlTail: 60000, codexThreadMetas: 30000, codexOpenThreads: 15000 },

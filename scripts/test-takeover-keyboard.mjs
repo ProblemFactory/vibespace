@@ -1547,6 +1547,7 @@ const CENSUS = [
   ['sidebar-rail.js', 'input', 'text', 'Ports / System search, a machine name'],
   ['sidebar-rail.js', 'select', 'choice', 'the rail\'s pickers'],
   ['sidebar-rail.js', 'canvas', 'none', 'the System charts'],
+  ['sidebar-rail.js', 'details', 'control', 'the System window\'s Server memory table: the Workers fold (lane server-memory-census; joined at the 2.369.241 integration)'],
   ['sidebar-tasks.js', 'input', 'text+control', 'a reason; checkboxes'],
   ['sidebar-tasks.js', 'select', 'choice', 'the bind picker'],
   ['sidebar-workbench.js', 'select', 'choice', 'the host select'],

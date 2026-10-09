@@ -292,8 +292,10 @@ function runOp(op, payload) {
 // ── Worker message loop (only when actually running as a worker thread) ──
 let parentPort = null;
 try { ({ parentPort } = require('worker_threads')); } catch {}
+const { answerMemory } = require('./worker-memory.js');
 if (parentPort) {
   parentPort.on('message', (msg) => {
+    if (answerMemory(msg, parentPort)) return; // the memory census (src/worker-memory.js)
     const { id, op, payload } = msg || {};
     try {
       const { result, transfer } = runOp(op, payload);

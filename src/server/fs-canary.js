@@ -24,7 +24,7 @@ const STRIKES = 3;
 function createFsCanary({ file, record = () => {}, log = (...a) => console.error(...a), onWedged = () => {}, onProbe = () => {},
   deadlineMs = DEADLINE_MS, slowMs = SLOW_MS, probe = null, now = () => Date.now() } = {}) {
   const pool = probe || new SafeFs({
-    workerPath: path.join(__dirname, 'fs-canary-worker.js'),
+    workerPath: path.join(__dirname, 'fs-canary-worker.js'), name: 'fs-canary',
     inlineRun: require('./fs-canary-worker.js').runOp,
     poolSize: 1,
     timeouts: { probe: deadlineMs * 3 },

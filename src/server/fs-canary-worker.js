@@ -30,7 +30,9 @@ function runOp(op, payload) {
 let parentPort = null;
 try { ({ parentPort } = require('worker_threads')); } catch { }
 if (parentPort) {
+  const { answerMemory } = require('../worker-memory.js');
   parentPort.on('message', (msg) => {
+    if (answerMemory(msg, parentPort)) return; // the memory census (src/worker-memory.js)
     const { id, op, payload } = msg || {};
     Promise.resolve().then(() => runOp(op, payload)).then(
       ({ result }) => parentPort.postMessage({ id, ok: true, result }),

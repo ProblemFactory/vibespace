@@ -245,7 +245,7 @@ class AccountManager {
       accounts: this._state.accounts.map((a) => {
         const type = this._acctType(a);
         const backend = this._acctBackend(a);
-        const base = { id: a.id, name: a.name, type, backend, source: a.source, originHost: a.originHost || null, note: a.note || null, hostLogins: a.hostLogins || null, createdAt: a.createdAt, localOnly: this._localOnlyClaudeSub(a) };
+        const base = { id: a.id, name: a.name, type, backend, source: a.source, originHost: a.originHost || null, note: a.note || null, hostLogins: a.hostLogins || null, createdAt: a.createdAt, localOnly: this._localOnlyClaudeSub(a), ...(a.serve ? { serve: { ...a.serve }, inPools: this.poolsWithMember(a.id).length > 0 } : {}) }; // inPools: a lapse's words differ for an account no pool lists (verify r2 ③)
         // POOLED FIRST, for every backend (2.369.18): the codex branch used to
         // run before this one, so a codex pool listed as a bare ChatGPT login
         // — no `pooled`/`current`/`memberOptions`/`auto` — and every client
@@ -633,6 +633,30 @@ class AccountManager {
    *  answers "where did this key come from?" (real report: a key imported
    *  from a host read as live-shared from it; the note + originHost make the
    *  independent-copy semantics visible). */
+  /** A member's SERVE state (2026-10-08, lane pool-subscription-lapsed): `{state: 'lapsed', since, why, lastFail}`
+   *  when its subscription stopped serving (the harness's closed census — quota.classifyServeFailure), or null.
+   *  ON THE ACCOUNT RECORD, through the one atomic writer (`_save`: tmp + rename) — never a sidecar — so it
+   *  survives a restart; the member's pool membership, note, links and readings are untouched. Cleared only by
+   *  the engine on positive evidence (a reading of the member's own window after `lastFail`). */
+  serveStateOf(id) {
+    const a = this._state.accounts.find((x) => x.id === id);
+    return a && a.serve && typeof a.serve === 'object' ? { ...a.serve } : null;
+  }
+  setServeState(id, serve) {
+    const a = this._state.accounts.find((x) => x.id === id);
+    if (!a) throw new Error('unknown account');
+    if (serve == null) { if (!a.serve) return null; delete a.serve; }
+    else {
+      if (serve.state !== 'lapsed') throw new Error(`unknown serve state: ${serve.state}`);
+      const since = Number(serve.since), lastFail = Number(serve.lastFail);
+      if (!(since > 0) || !(lastFail > 0)) throw new Error('serve.since and serve.lastFail must be instants');
+      a.serve = { state: 'lapsed', since, why: String(serve.why || '').slice(0, 200), lastFail, ...(typeof serve.fp === 'string' && serve.fp ? { fp: serve.fp.slice(0, 400) } : {}), ...(typeof serve.todoId === 'string' && serve.todoId && serve.todoId.length <= 80 ? { todoId: serve.todoId } : {}) };
+    }
+    this._save();
+    this._notify();
+    return a.serve ? { ...a.serve } : null;
+  }
+
   setNote(id, note) {
     const a = this._state.accounts.find((x) => x.id === id);
     if (!a) throw new Error('unknown account');
@@ -1330,7 +1354,8 @@ class AccountManager {
     if (Array.isArray(a.priority) && a.priority.length) { const m = this.poolMembership(id); a.priority = a.priority.filter((x) => m.includes(x)); }
     this._save();
     const cur = this.poolCurrent(id);
-    const list = this.poolMembers(id);
+    // (a LAPSED member is no default either — verify r2 ①, the signed-out twin: every listed member lapsed ⇒ the default stays put)
+    const list = this.poolMembers(id).filter((m) => this.serveStateOf(m.id)?.state !== 'lapsed');
     if (list.length && !list.some((m) => m.id === cur)) {
       let pick = null;
       try { const c = chooseMember ? chooseMember(cur, list) : null; if (list.some((m) => m.id === c)) pick = c; } catch { }
@@ -1405,6 +1430,26 @@ class AccountManager {
         console.warn(`[pool] "${a.name}" target ${was || '(none)'} is signed out — re-pointed to ${this.get(pick)?.name || pick} so the session can start; re-login the dead account in Manage Agents`);
         try { global.__vsEvent?.('pool-target-signed-out', { detail: `${was || 'none'}→${pick}` }); } catch { }
       }
+      // A LAPSED SUBSCRIPTION (verify r2 ①, the dead-login twin): a member whose `serve` record says lapsed is never
+      // the member a conversation STARTS on — the default is re-pointed off it like a signed-out target, and when no
+      // listed, signed-in, active member is left the placement is REFUSED by name (`all_lapsed`), never a first turn
+      // that fails with the vendor's 403.
+      const lapsed = (x) => !!x && this.serveStateOf(x)?.state === 'lapsed';
+      const servable = (x) => liveTarget(x) && !lapsed(x);
+      const activeAlt = () => {
+        const alive = this.poolMembers(id).map((m) => m.id).filter((x) => !lapsed(x));
+        let c = null;
+        try { c = opts.chooseMember?.(id, { forDefault: true }); } catch { }
+        return alive.includes(c) ? c : (alive[0] || null);
+      };
+      if (lapsed(cur)) {
+        const alt = activeAlt();
+        if (!alt) throw Object.assign(new Error(`every member of pool "${a.name}" that is signed in has an inactive subscription — renew one and press Re-check on its row in Manage Agents, or add a member`), { code: 'all_lapsed' });
+        const was = cur;
+        this.setPoolTarget(id, alt);
+        cur = alt;
+        console.warn(`[pool] "${a.name}" target ${this.get(was)?.name || was} has an inactive subscription — re-pointed to ${this.get(alt)?.name || alt} so the session can start`);
+      }
       // No remoteCreds: shipping would copy the symlink's CONTENTS to a fixed
       // remote dir, freezing the pool at spawn time and (on a macOS host)
       // landing in a per-path keychain entry. Pools are local-only for now.
@@ -1420,8 +1465,8 @@ class AccountManager {
         // are this store's authority. A member that is signed out is not a
         // candidate no matter how much quota it shows — same outage, second
         // door (a per-session link pinned to a dead account).
-        if (!liveTarget(member)) {
-          if (member) console.warn(`[pool] chooser picked signed-out member ${member} — falling back to the live target`);
+        if (!servable(member)) {
+          if (member) console.warn(`[pool] chooser picked ${lapsed(member) ? 'lapsed' : 'signed-out'} member ${member} — falling back to the live target`);
           member = null;
         }
         member = member || cur;
@@ -1431,10 +1476,12 @@ class AccountManager {
         // the placement is REFUSED with the removal's own sentence (nothing may bill the removed member).
         const listedNow = this.poolMembership(id);
         if (member && !listedNow.includes(member)) {
-          const alive2 = this.poolMembers(id).map((m) => m.id);
+          const alive2all = this.poolMembers(id).map((m) => m.id);
+          const alive2 = alive2all.filter((x) => !lapsed(x));
           let alt = null;
           try { const c = opts.chooseMember?.(id, { forDefault: true }); if (alive2.includes(c)) alt = c; } catch { }
           alt = alt || alive2[0] || null;
+          if (!alt && alive2all.length) throw Object.assign(new Error(`"${this.get(member)?.name || member}" was removed from pool "${a.name}" and every member left that is signed in has an inactive subscription — renew one and press Re-check on its row in Manage Agents, or add a member`), { code: 'all_lapsed' });
           if (!alt) throw Object.assign(new Error(`"${this.get(member)?.name || member}" was removed from pool "${a.name}" and no other member can take over — sign a member of the pool in, or add one`), { code: 'removed_no_candidate' });
           member = alt;
         }

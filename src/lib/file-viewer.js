@@ -44,7 +44,7 @@ class FileViewer {
 
     // Force hex mode
     if (opts.hex) {
-      const winInfo = app.wm.createWindow({ title: hostPfx + t('Hex: {name}', { name: fileName }), type: 'hex-viewer', syncId: opts.syncId, openSpec, intoChain: opts.intoChain });
+      const winInfo = app.wm.createWindow({ title: hostPfx + t('Hex: {name}', { name: fileName }), type: 'hex-viewer', syncId: opts.syncId, openSpec, intoChain: opts.intoChain, quiet: !!opts.quiet });
       winInfo._filePath = filePath; winInfo._fileName = fileName;
       new HexViewer(winInfo, filePath, fileInfo, host);
       return;
@@ -52,7 +52,7 @@ class FileViewer {
 
     // Binary file without a dedicated viewer → hex viewer
     if (fileInfo.isBinary && !hasDedicatedViewer(ext)) {
-      const winInfo = app.wm.createWindow({ title: hostPfx + t('Hex: {name}', { name: fileName }), type: 'hex-viewer', syncId: opts.syncId, openSpec, intoChain: opts.intoChain });
+      const winInfo = app.wm.createWindow({ title: hostPfx + t('Hex: {name}', { name: fileName }), type: 'hex-viewer', syncId: opts.syncId, openSpec, intoChain: opts.intoChain, quiet: !!opts.quiet });
       winInfo._filePath = filePath; winInfo._fileName = fileName;
       new HexViewer(winInfo, filePath, fileInfo, host);
       return;
@@ -68,7 +68,7 @@ class FileViewer {
 
     // HTML: open in CodeEditor with preview toggle (same as markdown)
     if (viewerType === 'html-editor') {
-      const winInfo = app.wm.createWindow({ title: hostPfx + fileName, type: 'editor', syncId: opts.syncId, openSpec, intoChain: opts.intoChain });
+      const winInfo = app.wm.createWindow({ title: hostPfx + fileName, type: 'editor', syncId: opts.syncId, openSpec, intoChain: opts.intoChain, quiet: !!opts.quiet });
       winInfo._filePath = filePath; winInfo._fileName = fileName;
       new CodeEditor(winInfo, filePath, fileName, app, { host });
       return;
@@ -79,7 +79,7 @@ class FileViewer {
     // close it — a window born INTO a chain (F2) must not flash a tab in and out.
     if (!RENDERED_VIEWERS.has(viewerType)) { app.openEditor(filePath, fileName, opts); return; }
 
-    const winInfo = app.wm.createWindow({ title: hostPfx + fileName, type: 'viewer', syncId: opts.syncId, openSpec, intoChain: opts.intoChain });
+    const winInfo = app.wm.createWindow({ title: hostPfx + fileName, type: 'viewer', syncId: opts.syncId, openSpec, intoChain: opts.intoChain, quiet: !!opts.quiet });
     winInfo._filePath = filePath; winInfo._fileName = fileName;
     const container = document.createElement('div'); container.className = 'file-viewer';
     winInfo.content.appendChild(container);

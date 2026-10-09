@@ -2,6 +2,19 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.241 — 2026-10-08
+
+### Added
+- The System window shows where the server's memory goes — main heap, workers, buffers, native.
+
+### Changed
+- A document the agent writes opens beside the chat without taking your keyboard; the switch is in the Artifacts chip and Settings → Chat.
+
+### Fixed
+- Printing or exporting a document renders it as a document — nothing shown as code boxes, nothing cut off, as many pages as it needs.
+- A pool account whose subscription lapsed is set aside: nothing is placed on it, you are told once, and it rejoins when it answers again (Re-check on renewal).
+- Signing in to Lark no longer asks for a retired upload permission, so file sending works when the app has the current one.
+
 ## 2.369.240 — 2026-10-08
 
 ### Added

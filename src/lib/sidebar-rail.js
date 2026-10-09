@@ -16,6 +16,7 @@ import { registerMenuItem } from './contributions.js';
 import { pluginProvides } from './plugins-ui.js';
 import { registerWindowType } from './window-types.js';
 import { track } from './telemetry-client.js';
+import { censusRows, WORDS as MEMORY_WORDS } from '../memory-census.js'; // PURE: the server memory census's rows (lane server-memory-census)
 import { CLEARED_TEXT } from '../record-clear.js'; // PURE: a cleared service's label / scan tag holds the stored key — worded here
 import { clearedText } from './record-clear-ui.js';
 import { Chart, LineController, LineElement, PointElement, CategoryScale, LinearScale, Tooltip, Filler } from 'chart.js';
@@ -542,6 +543,7 @@ export function installSidebarRail(Sidebar) {
           }
           if (!hostId && d.mem.pct >= 80) parts.push(`<div class="usage-warn">${escHtml(tr('Close to the container limit — the kernel may OOM-kill the whole instance (all sessions die). Stop the top consumers below.'))}</div>`);
         }
+        if (!hostId && d.serverMemory) parts.push(this._serverMemoryHtml(d.serverMemory, fmt)); // lane server-memory-census
         if (d.disk) {
           parts.push(`<div class="usage-section-title">${escHtml(tr('Disk (workspace)'))}</div>`);
           parts.push(bar(d.disk.pct, `${fmt(d.disk.used)} / ${fmt(d.disk.total)} · ${d.disk.pct}%`));
@@ -557,6 +559,8 @@ export function installSidebarRail(Sidebar) {
           parts.push(`<div class="sys-load sys-store-writes">${escHtml(tr('Slowest store writes (last hour): {list}', { list }))}</div>`);
         }
         live.innerHTML = parts.join('');
+        const fold = live.querySelector('.sys-mem-fold');
+        if (fold) fold.ontoggle = () => { this._railMemOpen = fold.open; }; // the Workers fold survives the 5 s refresh
       };
       this._buildProcManager(procsEl, () => this._railSysHost || '');
       const renderHist = () => this._renderRailResourceCharts(hist, this._railSysRange || '24h').catch(() => {});
@@ -594,6 +598,26 @@ export function installSidebarRail(Sidebar) {
       }, 5000);
       const th = setInterval(() => { if (!c.isConnected) { clearInterval(th); return; } if (!this._railSysHost) renderHist(); }, 60000);
       this._panelDispose = () => { clearInterval(t); clearInterval(th); this._destroyRailSysCharts(); };
+    },
+
+    // lane server-memory-census: where THIS server's resident memory goes — the main heap, each worker isolate,
+    // external Buffers, native — sampled every 60 s (src/server/memory-sampler.js → src/memory-census.js). The
+    // per-worker rows sit under the Workers fold. A census: nothing here acts.
+    _serverMemoryHtml(c, fmt) {
+      const v = censusRows(c);
+      if (!v) return '';
+      const row = (label, bytes, sub) => `<span class="sys-mem-name">${escHtml(label)}</span><span class="sys-mem-mb">${escHtml(bytes == null ? '—' : fmt(bytes))}</span><span class="sys-mem-sub">${escHtml(sub || '')}</span>`;
+      const used = (r) => (r.used != null ? tr(MEMORY_WORDS.used, { used: fmt(r.used) }) : '');
+      const out = [`<div class="usage-section-title">${escHtml(tr(MEMORY_WORDS.title))}</div>`, '<div class="sys-mem">'];
+      for (const r of v.rows) {
+        if (r.key !== 'workers') { out.push(`<div class="sys-mem-row sys-mem-${r.key}">${row(tr(r.words), r.bytes, used(r))}</div>`); continue; }
+        const sub = [used(r), r.unknown ? tr(MEMORY_WORDS.unknownCount, { n: r.unknown }) : ''].filter(Boolean).join(' · ');
+        out.push(`<details class="sys-mem-fold"${this._railMemOpen ? ' open' : ''}><summary class="sys-mem-row sys-mem-workers">${row(tr(r.words, { n: r.n }), r.bytes, sub)}</summary>`);
+        for (const w of v.workers) out.push(`<div class="sys-mem-row sys-mem-worker">${row(w.name, w.bytes, w.unknown ? tr(MEMORY_WORDS.unknown) : used(w))}</div>`);
+        out.push('</details>');
+      }
+      out.push('</div>', `<div class="empty-hint empty-hint-inline sys-mem-note">${escHtml(tr(v.note.words, { anon: v.note.anon != null ? fmt(v.note.anon) : '' }))}</div>`);
+      return out.join('');
     },
 
     // ── Process manager (2.354.0, the btop analogue): full table, live CPU%,

@@ -26,6 +26,7 @@ const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const { Worker } = require('worker_threads');
+const { trackWorker } = require('../worker-memory.js');
 const M = require('../usage-index-model.js');
 
 // Why the index is not answering — each one a NAME the comparer counts under.
@@ -71,6 +72,7 @@ function create({ getLedger, homeDir = os.homedir(), workerFile = path.join(__di
   };
 
   function onMessage(m) {
+    if (m && m.ev === 'memory') return; // the memory census's answer (askMemory takes it) — not a heartbeat
     lastHeardAt = performance.now();
     if (m && m.ev === 'state') {
       if (m.state === 'building') setState('building', REASON.BUILDING);
@@ -133,6 +135,7 @@ function create({ getLedger, homeDir = os.homedir(), workerFile = path.join(__di
       worker = new Worker(workerFile, { workerData: { dbDir: dir, ledgerDir: ledger.dir, dataReal: where.real, ctl: ctl.buffer, maxPages },
         ...(heapMb > 0 ? { resourceLimits: { maxOldGenerationSizeMb: heapMb, maxYoungGenerationSizeMb: 16 } } : {}) });
     } catch (e) { worker = null; setState('disabled', REASON.EXITED, { code: e.code }); return api; }
+    trackWorker('usage-index', worker); // the memory census (src/worker-memory.js)
     worker.unref(); // never holds the process open
     worker.on('message', onMessage);
     worker.on('error', (e) => { log.error?.('[usage-index] worker error:', e && e.message); });

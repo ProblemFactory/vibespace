@@ -221,6 +221,18 @@ export function renderArtifactList(box, v, { onOpen = null, close = null, app = 
   const count = span('af-count chat-status-dim');
   ctl.append(gBtn, sBtn, count);
   top.append(search, ctl);
+  // lane artifacts-auto-open-quiet: the switch WHERE the automatic open happens — the same setting as Settings → Chat
+  // (artifacts.autoOpenDocs, live-applied and synced like every setting); re-read on every draw
+  let auto = null;
+  if (app && app.settings) {
+    auto = document.createElement('label'); auto.className = 'af-auto chat-status-dim';
+    const cb = document.createElement('input'); cb.type = 'checkbox'; cb.className = 'af-auto-cb';
+    cb.addEventListener('change', (e) => { e.stopPropagation(); app.settings.set('artifacts.autoOpenDocs', cb.checked); });
+    auto.addEventListener('click', (e) => e.stopPropagation());
+    const word = span('af-auto-word'); word.textContent = t('Open new documents automatically');
+    auto.append(cb, word);
+    top.appendChild(auto);
+  }
   const list = div('af-list'); list.setAttribute('role', 'listbox');
   box.append(top, list);
   const rowEls = new Map(), headEls = new Map();
@@ -269,6 +281,7 @@ export function renderArtifactList(box, v, { onOpen = null, close = null, app = 
     while (cur) { const nx = cur.nextSibling; cur.remove(); cur = nx; }
     const c = countLine(plan.count, t); if (count.textContent !== c) count.textContent = c;
     pickLabel(gBtn, GROUP_WORDS[st.view.group]); pickLabel(sBtn, SORT_WORDS[st.view.sort]);
+    if (auto) { const on = (app.settings.get('artifacts.autoOpenDocs') ?? true) !== false; const cb = auto.firstChild; if (cb.checked !== on) cb.checked = on; }
   }
   gBtn.addEventListener('click', (e) => pickMenu(e, GROUP_WORDS, st.view.group, (g) => { if (GROUPS.includes(g)) { st.view.group = g; save(); draw(); } }));
   sBtn.addEventListener('click', (e) => pickMenu(e, SORT_WORDS, st.view.sort, (s) => { if (SORTS.includes(s)) { st.view.sort = s; save(); draw(); } }));

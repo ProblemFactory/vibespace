@@ -94,9 +94,25 @@ console.log('created', sid);
 await new Promise((r) => setTimeout(r, 1500));
 ws.close(); srv.kill('SIGKILL');
 await new Promise((r) => setTimeout(r, 800));
-srv = boot(); const out2 = await waitReady(srv);
+srv = boot(); let jr2 = ''; srv.stdout.on('data', (d) => { jr2 += d; }); const out2 = await waitReady(srv);
 ok = ok && /Reconnected/.test(out2);
 console.log(ok ? 'RESTORE OK — session reconnected after SIGKILL restart' : 'RESTORE FAILED:\n' + out2);
+// ── lane server-memory-census (B-9428): the restored boot says its memory census ONCE in the journal, and GET /api/sysinfo
+// carries it with every live worker named and answering (a worker script that stopped answering shows `unknown` here).
+{
+  const BOOT = '[memory] boot census: ';
+  let mem = null;
+  for (let i = 0; i < 40 && !(mem && jr2.includes(BOOT)); i++) {
+    try { mem = (await (await fetch(`http://127.0.0.1:${PORT}/api/sysinfo`)).json()).serverMemory || null; } catch { }
+    if (!(mem && jr2.includes(BOOT))) await new Promise((r) => setTimeout(r, 250));
+  }
+  const lines = jr2.split('\n').filter((l) => l.includes(BOOT));
+  const names = (mem?.workers || []).map((w) => w.name + (w.state === 'ok' ? '' : ' (unknown)'));
+  const good = lines.length === 1 && /main heap \d+ MB, \d+ workers \d+ MB, external \d+ MB, native \d+ MB, RSS \d+ MB/.test(lines[0]) && mem && mem.main.heapTotal > 0
+    && mem.workersUnknown === 0 && names.filter((n) => /^safe-fs#\d$/.test(n)).length === 4 && names.includes('fs-canary#0');
+  if (good) console.log(`  ✓ memory census: ONE boot line (${lines[0].trim().slice(0, 160)}); /api/sysinfo serverMemory names ${names.join(', ')}`);
+  else { ok = false; console.error(`  ✗ memory census: expected ONE boot line + every worker answering, got ${lines.length} line(s), workers ${JSON.stringify(names)}, census ${mem ? 'present' : 'absent'}`); }
+}
 
 // ── GET-route battery (2.333.0, after /api/agent-hooks 500'd in production):
 // a factory function used by server.js but never EXPORTED throws a

@@ -743,6 +743,7 @@ const STORAGE = {
   'src/lib/sidebar-state.js|localStorage|\'archivedSessions\'': ['ids', 'archived session ids'],
   'src/lib/sidebar-state.js|localStorage|\'archivedFolders\'': ['ids', 'archived folder keys'],
   'src/lib/design-changes.js|localStorage|storeKey': ['owner', 'lane design-changes: the Design window\'s pending changes per design on this device — the owner\'s own comments and the before / after of the texts they edited and the nudges they made (previews not yet sent), each with the quote of the artboard element it is about; never a store record of the five kinds'],
+  'src/lib/chat-view.js|localStorage|TAUGHT_KEY': ['pref', 'lane artifacts-auto-open-quiet: "1" once the one-time toast about the automatic open was shown on this device (vs-auto-open-taught) — a flag, never a name or a path'],
   'src/lib/artifact-card.js|localStorage|VIEW_KEY': ['pref', 'lane artifacts-list-scale: the Artifacts list\'s view on this device (vs-artifacts-view) — the group / sort choice and the folded group keys (a kind, a helper\'s label, a day); never a row, a name or a path'],
   'src/lib/doc-window-ui.js|localStorage|WIDTH_KEY': ['pref', 'lane doc-window-width-export: the Doc window\'s page width on this device (fit | comfortable — doc-window-model widthChoice)'],
   'src/lib/doc-window-ui.js|localStorage|storeKey': ['owner', 'lane doc-window: the Doc window\'s comments strip per (host, path) on this device — the owner\'s own notes on a markdown file, each with the quote of the text it is about, until Send all; never a store record of the five kinds'],

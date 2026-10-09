@@ -1746,6 +1746,8 @@ conversation — a delivery now would open a billed turn"), 没有一份唤醒; 
 
 **As-built(车道 lark-upload-preflight, 2.369.229 — userW inc-muxsy69b-mjg1):卡片显示什么, 就发出什么。** 实测: 一条带一个 .md 附件的 Lark 回复, 卡片画着附件, 主人批准; 文字送达, 上传被 99991679 拒绝(用户 token 只有 im:message + im:message.send_as_user, 同意页从未申请 im:resource:upload / im:resource); "partly sent" 只进了智能体的回执, Outbox 行写着"已发送"。现在: (1) Lark 同意页申请两个上传 scope(第二个可选组, 紧跟 wide 组), 缺它们的账号行写"重新授权一次即可增加: 发送文件"; channel-caps 新增 `send-attachment` offer(`attachments-not-sendable` + `requiredScopes`)。(2) 预检: 提议时按名字拒绝无法携带的文件(说出 scope 与重新授权一步); 提议与批准之间能力变化 ⇒ 卡片的附件行变成警告, 批准按钮变成"不带文件发送"(警告进入 shown digest, 普通批准被拒, 什么都不发)。(3) 部分送达: 在智能体回执之外, 给主人 ONE 条"待你处理"条目(以提案为键)"已发给 X, 但没有带上文件 Y: 原因"+ 重新授权; Outbox 行与卡片写"部分发出"。
 
+**As-built(车道 lark-upload-scope-split, 2.369.241 — 主人 2026-10-08):同意页只申请 im:resource, 永不申请已弃用的 im:resource:upload。** Lark 官方权限文档(2026-10-08 引用):「im:resource:upload（上传文件V2，高级）— 该权限已不再维护，不可新增申请；你可申请开通权限 im:resource（获取与上传图片或文件资源）」。主人应用的权限目录里没有 V2, 同意页因它落在 20027, 而两者同组时重试会连可用的 V1 一起丢掉。现在上传组 = [im:resource], 重试顺序 = wide → im:resource → 表情回应 → 职务 → 部门 → 读人 → 单聊 → 搜索; 判断已持有的 token 仍用两者之一(只有 V2 的旧 token 照样能传文件)。开通了 V1 的应用第一次同意就通过(wide 组保留); 没有 V1 时账号行写"发送文件已关闭: Lark 拒绝了 im:resource …"。
+
 ## 10. 面板
 
 ### 10.1 注册项(不新增 chrome 原语)

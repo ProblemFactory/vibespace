@@ -22,6 +22,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { parentPort, workerData, isMainThread, threadId } = require('worker_threads');
+const { answerMemory } = require('./worker-memory.js');
 const M = require('./usage-index-model.js');
 
 if (isMainThread) throw new Error('usage-index-worker runs only in a worker thread — the main thread never opens the usage index');
@@ -258,6 +259,7 @@ if (!disabled) {
 }
 
 parentPort.on('message', (msg) => {
+  if (answerMemory(msg, parentPort)) return; // the memory census (src/worker-memory.js)
   const { id, op, payload } = msg || {};
   if (op === 'close') { closeDb(); post({ id, ok: true, result: { closed: true } }); return; }
   if (disabled || !db || closing()) { post({ id, ok: false, error: { message: 'usage index unavailable', reason: disabled ? 'disabled' : 'closing' } }); return; }

@@ -2040,7 +2040,7 @@ class App {
    *  in the source window's own chain ⇒ show THAT tab (on its side in a split)
    *  instead of a second window; a `:line` link moves its editor to the line.
    *  Returns whether it did. Nothing else is deduped (a free window stays free). */
-  _focusOpenInChain(fromId, { path: p, host, line, dir = false } = {}) {
+  _focusOpenInChain(fromId, { path: p, host, line, dir = false, quiet = false } = {}) {
     const src = fromId ? this.wm.windows.get(fromId) : null;
     const ch = src && src._tabChain;
     if (!ch || !p) return false;
@@ -2051,6 +2051,7 @@ class App {
       if ((wHost || '') !== (host || '')) continue;
       const same = dir ? (w.type === 'files' && w._explorerPath === p) : ((w.type === 'viewer' || w.type === 'editor' || w.type === 'hex-viewer' || (w.type === 'doc' && !line)) && w._filePath === p);
       if (!same) continue;
+      if (quiet) return true; // an AUTOMATIC open of a file already there: nothing moves (lane artifacts-auto-open-quiet)
       this.wm.revealWindow(id); // its own tab (the host's too — inc-muiq348r-jwb5's one door), raised
       if (line && typeof w._gotoLine === 'function') { try { w._gotoLine(line); } catch { } }
       return true;
@@ -2219,16 +2220,18 @@ class App {
 
   /** `opts.from` = the window the open came FROM (F2): the same path already in
    *  its chain is shown instead; otherwise the placement is resolved NOW (the
-   *  act) and rides `opts.intoChain` through FileViewer.open's async checks. */
+   *  act) and rides `opts.intoChain` through FileViewer.open's async checks.
+   *  `opts.quiet` (lane artifacts-auto-open-quiet — ONLY the chat's automatic open of a doc the agent wrote): the window
+   *  is created QUIET (createWindow) — never the focus, the caret or the keyboard; a user's own open never passes it. */
   openFile(filePath, fileName, opts = {}) {
     // lane doc-window: a markdown file opens as the Doc window (rendered, editable, commentable); a `:line` link, the hex
     // view and a derived temp file keep the editor's door. `from` (a window id) → the chat session it shows = the owner witness
     if (/\.(md|markdown)$/i.test(fileName || filePath) && !opts.line && !opts.hex && !opts._tempFile && !opts.via) {
-      if (opts.from && this._focusOpenInChain(opts.from, { path: filePath, host: opts.host })) return;
-      return this.openDoc({ host: opts.host || '', path: filePath, from: (opts.from && this.sessions.get(opts.from)?.sessionId) || '', intoChain: opts.from ? this.linkPlacement(opts.from) : opts.intoChain, syncId: opts.syncId });
+      if (opts.from && this._focusOpenInChain(opts.from, { path: filePath, host: opts.host, quiet: !!opts.quiet })) return;
+      return this.openDoc({ host: opts.host || '', path: filePath, from: (opts.from && this.sessions.get(opts.from)?.sessionId) || '', intoChain: opts.from ? this.linkPlacement(opts.from) : opts.intoChain, syncId: opts.syncId, ...(opts.quiet ? { quiet: true } : {}) });
     }
     if (opts.from) {
-      if (this._focusOpenInChain(opts.from, { path: filePath, host: opts.host, line: opts.line })) return;
+      if (this._focusOpenInChain(opts.from, { path: filePath, host: opts.host, line: opts.line, quiet: !!opts.quiet })) return;
       const { from, ...rest } = opts;
       opts = { ...rest, intoChain: this.linkPlacement(from), fromWin: from }; // lane artifacts-model: the editor's save counts on the source chat's deliverable row
     }
@@ -2245,7 +2248,7 @@ class App {
     const hostPfx = (h) => opts.host ? (h(opts.host) || opts.host) + ': ' : '';
     const title = opts._tempFile ? t('View: {name}', { name: fileName }) : hostPfx((id) => this.hostName(id)) + frontTruncate(filePath);
     const openSpec = opts._tempFile ? undefined : { action: 'openEditor', path: filePath, name: fileName, ...(opts.host ? { host: opts.host } : {}) };
-    const winInfo = this.wm.createWindow({ title, type: 'editor', syncId: opts.syncId, openSpec, intoChain: opts.intoChain });
+    const winInfo = this.wm.createWindow({ title, type: 'editor', syncId: opts.syncId, openSpec, intoChain: opts.intoChain, quiet: !!opts.quiet });
     if (opts.host && !opts._tempFile) this._ensureHostNames().then(() => { try { this.wm.setTitle(winInfo.id, this.hostName(opts.host) + ': ' + frontTruncate(filePath)); } catch {} });
     winInfo._filePath = filePath; winInfo._fileName = fileName;
     new CodeEditor(winInfo, filePath, fileName, this, opts);

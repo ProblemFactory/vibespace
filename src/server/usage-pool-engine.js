@@ -222,7 +222,7 @@ function quotaBackendFor(key, session) {
   if (session?.backend) return session.backend;
   return 'claude';
 }
-const { quotaVerdict, THRESH: VERDICT_THRESH } = require('../account-pool-auto.js'); // THE account-usability verdict (2.369.0, owner-designed)
+const { quotaVerdict, THRESH: VERDICT_THRESH, lapseCleared, serveAfterFailure, SERVE_LAPSED, memberLapsed, readingFingerprint } = require('../account-pool-auto.js'); // THE account-usability verdict (2.369.0, owner-designed)
 const { loginUsable, loginBucketLabel, loginAgeText, loginWallPhrase } = require('../login-expiry.js'); // PURE: is this member's LOGIN SESSION still alive (2026-09-07)
 const { UsageEstimator, overlayCache: estOverlayCache, predictCalib, sweepAnchorGroup, CLAUDE_MAX_PRIOR_FULL_USD } = require('../usage-estimator.js');
 const usageAnchors = new UsageAnchors({ dataDir: path.join(rootDir, 'data') });
@@ -527,6 +527,10 @@ function poolReadLogin() {
           };
         }
       } catch { }
+      // A LAPSED SUBSCRIPTION (2026-10-08) rides the SAME reader, for the same reason as the file verdict above:
+      // every gate that asks "can this member serve?" asks it too, and the decision NAMES it (lapsedBlocked /
+      // 'subscription-lapsed') — carried as `serve`, never as a login state
+      try { const sv = memberServeLapsed(id); if (sv) st = { ...(st || { state: 'unknown', refreshExpiresAt: null, accessExpiresAt: null, msLeft: null }), serve: sv }; } catch { }
       memo.set(id, st);
     }
     return memo.get(id);
@@ -620,13 +624,16 @@ function poolChooserForModel(poolId, { model, pin = null, hinted = false } = {})
       const dp = decidePinnedPlacement({ explicit: true, pin, currentId: cur, members: pm, readCache, nowSec: Date.now() / 1000, hot: true, readLogin: poolReadLogin(), membership: poolMembershipOf(poolId), priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(pm), creditsIds: creditsMemberIds(pm) });
       if (dp && dp.reason === 'pin') return pin;
       if (dp && dp.to) return dp.to;
-      return cur;
+      return memberServeLapsed(cur) ? fallbackDefaultTarget(poolId, cur) : cur; // never a LAPSED default (verify r2 ①)
     }
     // (a default that names a member the pool NO LONGER LISTS — a boot before the first stale-link
     // sweep, a narrowing made while nobody else was signed in — is no place to START a conversation:
     // the membership fact reaches this verdict too, verify r1)
     const membership = poolMembershipOf(poolId);
     const staleDefault = !!cur && Array.isArray(membership) && membership.length > 0 && !membership.includes(cur);
+    // a LAPSED default is never where a conversation starts (verify r2 ①): the member usable soonest that is not lapsed,
+    // or null — the store then re-points the default off it, or refuses the placement by name ('all_lapsed')
+    if (!staleDefault && memberServeLapsed(cur)) return fallbackDefaultTarget(poolId, cur);
     if (!fam && !staleDefault) return cur; // no identity → the pool's default target
     // decidePoolSwitch FROM the default target under the projected view: if
     // the default serves this family, stay (fewest distinct billing dirs);
@@ -1070,6 +1077,9 @@ function probeUsageForAccountKey(key, opts = {}) {
   return Promise.resolve(detail(null, { sessionId: null, target: null, identityVerified: false, why: skipped.length ? 'every live session was skipped' : 'no live session bills this account' }));
 }
 app.locals.usageIdentityAccountIds = usageIdentityAccountIds;
+app.locals.memberServeLapsed = memberServeLapsed; // the ⟳ route: a lapsed member skips the token ladder; a verified panel is evidence
+app.locals.reanchorLapsedMember = reanchorLapsedMember; // the panel's renewal rung (verify r1 ③)
+app.locals.noteMemberServeFailure = (id, info) => noteMemberServeFailure(id, info, { source: 'a usage check' }); // the panel probe's failed answer (usage-routes refreshViaCliPanel)
 
 // ── THE ESTABLISHED WINDOW of every account we could file a reading on ──────
 // It is STAMPED AT THE WRITE by the ONE producer whose key and whose credential
@@ -1920,7 +1930,8 @@ function quotaVerdictFor(scope, { model, session = null } = {}) {
     // quota its cache shows — and unlike a quota wall this one does NOT heal
     // on a timer, so it contributes NO blockedUntil: only the user's re-login
     // unblocks it (2026-09-07 login expiry). Judged before the wall override
-    // because it is the more fundamental refusal AND the actionable one.
+    // because it is the more fundamental refusal AND the actionable one. A LAPSED subscription (verify r1 ①, reproduced) is
+    // the same kind of refusal: its cache can look usable, it serves nothing, no timer heals it — never "usable via" it.
     let heldListed = true;
     if (heldId) { try { heldListed = (accounts.poolMembers(scope) || []).some((m) => m.id === heldId); } catch { heldListed = false; } }
     const readLogin = poolReadLogin();
@@ -1929,6 +1940,7 @@ function quotaVerdictFor(scope, { model, session = null } = {}) {
       const v = quotaVerdict(proj(read(m.id)), nowSec);
       const li = readLogin(m.id);
       if (!loginUsable(li)) return { id: m.id, name: m.name || m.id, v: { ...v, usable: false, blockedUntil: 0, reason: `${loginBucketLabel(li)} — re-login needed` } };
+      if (memberLapsed(li)) return { id: m.id, name: m.name || m.id, v: { ...v, usable: false, blockedUntil: 0, reason: 'subscription inactive — it rejoins once it answers again' } }; // verify r1 ①
       if (walled.has(m.id) && v.usable !== false) {
         return { id: m.id, name: m.name || m.id, v: { ...v, usable: false, reason: `rejected this conversation (${v.reason})` } };
       }
@@ -1963,6 +1975,8 @@ function quotaVerdictFor(scope, { model, session = null } = {}) {
       ...ctx,
     };
   }
+  // a subscription bound DIRECTLY whose record says lapsed: the same refusal (verify r1 ①⑤)
+  if (/^sub-/.test(String(scope || '')) && memberServeLapsed(scope)) return { ...quotaVerdict(proj(read(scope)), nowSec), usable: false, blockedUntil: 0, reason: 'subscription inactive — it rejoins once it answers again' };
   return quotaVerdict(proj(read(scope)), nowSec);
 }
 
@@ -5339,6 +5353,7 @@ function onMemberReadingFresh(memberId, why = 'reading', { at = Date.now() } = {
   const out = { member: memberId || null, why, acted: false, reason: null, detail: null, pools: [], fired: [], skipped: [] };
   try {
     if (!memberId || typeof memberId !== 'string') { out.reason = 'no-member'; return out; }
+    try { memberServeLapsed(memberId); } catch { } // a fresh reading of its own window IS the evidence that re-admits a lapsed member — at once
     let snap = null;
     try { snap = JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, memberId.replace(/[^\w.-]/g, '_') + '.json'), 'utf-8')); } catch { }
     if (!snap) { out.reason = 'no-reading'; return out; }
@@ -5652,6 +5667,104 @@ function credsTokenSig(id) {
   // "somebody re-logged in" check is cleared by the pool's own plumbing).
   try { return String(JSON.parse(fs.readFileSync(accounts.subCredsPath(id), 'utf-8'))?.claudeAiOauth?.accessToken || ''); } catch { return ''; }
 }
+// ── A LAPSED SUBSCRIPTION (2026-10-08, lane pool-subscription-lapsed) — the DURABLE sibling of the 10-minute
+// mark below (account-pool-auto's header has the production story). The record lives on the account
+// (accounts.setServeState); memberServeLapsed(id) answers it, or null — and CLEARS it on positive evidence
+// only: a reading of the member's OWN window PRODUCED after the last failure (account-pool-auto lapseCleared:
+// a verified panel answer, a rate_limit_event, or numbers that moved since the failure — verify r1 ②⑦: a
+// statusline re-stamping the CLI's last pre-lapse numbers is a write time, not a reading). Never a clock,
+// never a token refresh.
+function ownReading(id) {
+  let c = null;
+  try { c = JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, String(id).replace(/[^\w.-]/g, '_') + '.json'), 'utf-8')); } catch { c = null; }
+  return { at: Number(c && c.fetchedAt) || 0, source: (c && c.source) || null, fp: readingFingerprint(c) };
+}
+function memberServeLapsed(id, { verified = false } = {}) {
+  let s = null;
+  try { s = typeof accounts.serveStateOf === 'function' ? accounts.serveStateOf(id) : null; } catch { s = null; }
+  if (!s || s.state !== SERVE_LAPSED) return null;
+  const r = ownReading(id);
+  const at = r.at;
+  if (!lapseCleared(s, { ...r, verified: verified === true })) return s;
+  try { accounts.setServeState(id, null); } catch (e) { console.warn(`[pool] serve: could not clear ${id}'s lapse:`, e.message); return s; }
+  const name = accounts.get(id)?.name || id;
+  console.log(`[pool] serve: ${name} (${id}) answered again — a reading of its own window at ${new Date(at).toISOString()}, after the last failure ${new Date(s.lastFail).toISOString()}; it rejoins the pool`);
+  try { global.__vsEvent?.('pool-member-serve-restored', id); } catch { }
+  try { const todos = getUserTodos(); const it = s.todoId && todos && typeof todos.get === 'function' ? todos.get(s.todoId) : null; if (it && it.status === 'open' && typeof todos.setStatus === 'function') todos.setStatus(s.todoId, 'done', 'answered again'); } catch { }
+  return null;
+}
+/** One failure on member `memberId` (a turn's error record, or a probe's answer): the harness's closed
+ *  census decides (quota.classifyServeFailure). 'lapsed' ⇒ the persisted record — a NEW episode is said ONCE
+ *  (one journal line + one For-you item, origin pool); a repeat only moves `lastFail`. Returns the verdict. */
+function noteMemberServeFailure(memberId, info = {}, { source = 'a turn', backend = null, verdict = undefined } = {}) {
+  try {
+    if (!memberId || !accounts.get(memberId)) return null;
+    const v = verdict !== undefined ? verdict : (quotaSourceFor(backend || accounts.get(memberId)?.backend || 'claude').classifyServeFailure?.(info) || null);
+    if (!v || v.kind !== 'lapsed') return v;
+    const now = Date.now();
+    const prev = accounts.serveStateOf(memberId);
+    const { serve, episode } = serveAfterFailure(prev, { why: v.why, now, fp: ownReading(memberId).fp });
+    if (prev && prev.todoId) serve.todoId = prev.todoId;
+    const name = accounts.get(memberId)?.name || memberId;
+    const pooled = (() => { try { return (accounts.poolsWithMember(memberId) || []).length > 0; } catch { return true; } })();
+    if (episode) {
+      console.log(`[pool] serve: ${name} (${memberId}) — subscription inactive («${v.why}», ${source}); ${pooled ? 'the pool skips it' : 'no pool lists it; its conversations fail'} until a reading of its own window arrives`);
+      try { global.__vsEvent?.('pool-member-serve-lapsed', memberId); } catch { }
+      try {
+        const todos = getUserTodos();
+        const sinceText = new Date(serve.since).toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
+        // SAID AS IT IS UNDER THIS INSTANCE'S SETTING (verify r1 ⑧, r2 ②): only accounts.onDemandQuotaRefresh = 'auto-cli'
+        // asks a lapsed member by itself; under the default ('manual') the person's Re-check does; under 'off' even Re-check
+        // is refused (403), so the words name the setting. A subscription NO pool lists (verify r2 ③) gets no pool item at
+        // all — "the pool skips it" would be false; its conversations show the CLI's own error and its roster row says it.
+        const mode = (() => { try { return serverSetting('accounts.onDemandQuotaRefresh') || 'manual'; } catch { return 'manual'; } })();
+        const auto = mode === 'auto-cli';
+        const item = !pooled ? null : todos && typeof todos.add === 'function' ? todos.add('webui:pool-serve', mode === 'off' ? {
+          origin: 'pool', kind: 'notice', urgency: 'normal',
+          text: `${name}'s subscription is no longer active (since ${sinceText}): the pool skips it until it answers again — usage refresh is Off in Settings: turn it on to Re-check, or run a turn on it directly`,
+          detail: `The CLI answered «${v.why}» (${source}). The account stays in its pools with its note and readings; nothing is placed on it until it answers again. On-demand quota refresh is Off in Settings, so nothing can ask it — Re-check is refused while it is Off; turn it on and press Re-check on its row, or run a turn on the account directly after renewing.`,
+          i18n: { text: { key: i18nKey('{account}\'s subscription is no longer active (since {since}): the pool skips it until it answers again — usage refresh is Off in Settings: turn it on to Re-check, or run a turn on it directly'), params: { account: name, since: sinceText } } },
+        } : auto ? {
+          origin: 'pool', kind: 'notice', urgency: 'normal',
+          text: `${name}'s subscription is no longer active (since ${sinceText}): the pool skips it; it rejoins by itself once it answers again (checked about hourly) — Re-check it in Manage Agents`,
+          detail: `The CLI answered «${v.why}» (${source}). The account stays in its pools with its note and readings; nothing is placed on it until it answers again. The background usage check asks it every 30–60 min, so a renewal is noticed within the hour; Re-check on its row asks now.`,
+          i18n: { text: { key: i18nKey('{account}\'s subscription is no longer active (since {since}): the pool skips it; it rejoins by itself once it answers again (checked about hourly) — Re-check it in Manage Agents'), params: { account: name, since: sinceText } } },
+        } : {
+          origin: 'pool', kind: 'notice', urgency: 'normal',
+          text: `${name}'s subscription is no longer active (since ${sinceText}): the pool skips it until it answers again — after renewing, press Re-check on its row in Manage Agents`,
+          detail: `The CLI answered «${v.why}» (${source}). The account stays in its pools with its note and readings; nothing is placed on it until it answers again. Nothing asks it by itself under the current usage-refresh setting — after renewing, Re-check on its row asks the CLI once and brings it back.`,
+          i18n: { text: { key: i18nKey('{account}\'s subscription is no longer active (since {since}): the pool skips it until it answers again — after renewing, press Re-check on its row in Manage Agents'), params: { account: name, since: sinceText } } },
+        }) : null;
+        if (item && item.id) serve.todoId = String(item.id);
+      } catch (e) { console.warn('[pool] serve: could not file the For-you item:', e.message); }
+    }
+    accounts.setServeState(memberId, serve);
+    return { ...v, episode };
+  } catch (e) { console.warn('[pool] serve: could not record the failure:', e.message); return null; }
+}
+/** A RENEWED SUBSCRIPTION'S FIRST ANSWER (verify r1 ③, reproduced): a renewal starts a NEW weekly window, so the panel's
+ *  identity check refuses it on the PRE-LAPSE window witness ('phase differ') and the member stayed lapsed for good. For a
+ *  LAPSED member only, a PHASE-ONLY refusal (its org does not differ) whose window NO other account holds re-anchors the
+ *  account's window witness + guard anchor on the panel's window — journaled once (a re-anchored window agrees from then
+ *  on) — and the caller writes the reading as verified, which is the evidence that re-admits it. → true when re-anchored. */
+function reanchorLapsedMember(key, idv) {
+  try {
+    if (!memberServeLapsed(key) || !idv || !idv.refused || idv.org === 'differ' || idv.phase !== 'differ' || (idv.matched || []).length) return false;
+    const pw = idv.panelWindow || {};
+    const sevenDay = Number(pw.sevenDay) > 0 ? Number(pw.sevenDay) : null;
+    const scoped = {};
+    for (const [n, r] of Object.entries(pw.scoped || {})) if (Number(r) > 0) scoped[String(n).toLowerCase()] = Number(r);
+    if (!sevenDay && !Object.keys(scoped).length) return false;
+    const now = Date.now();
+    const stamp = { sevenDay, fiveHour: null, scoped, at: now, source: 'api', verifiedAt: now, verifiedBy: 'renewal-panel', n: 1, sessionId: null };
+    if (!usageWrite.writeSidecar(USAGE_CACHE_DIR, readingLag.windowSidecarName(key), stamp)) return false;
+    usageWrite.writeSidecar(USAGE_CACHE_DIR, readingLag.apiWindowSidecarName(key), { sevenDay, scoped, at: now, sessionId: null, source: 'renewal-panel', n: 1, ring: [], ringAt: now });
+    _ownWin = null; _ownWinAt = 0;
+    console.log(`[usage] window re-anchored: ${nameOf(key)} was lapsed and its /usage panel answered with a NEW weekly window ${readingLag.windowFingerprint(stamp)} (was ${readingLag.windowFingerprint(idv.apiWindow || { sevenDay: null, fiveHour: null, scoped: {} })}) that no other account holds — a renewal; both window sidecars re-anchored on it`);
+    try { global.__vsEvent?.('usage-window-reanchored-renewal', key); } catch { }
+    return true;
+  } catch (e) { console.warn('[usage] renewal re-anchor failed:', e.message); return false; }
+}
 function memberAuthFailed(id) {
   const m = _memberAuthFail.get(id);
   if (!m) return false;
@@ -5672,7 +5785,8 @@ function memberAuthFailed(id) {
  *    change), so it keeps its 2.335.0 escape: every member marked means the
  *    marks are wrong more likely than the pool is dead — let quota speak. */
 function healthyPoolMembers(poolId) {
-  const usable = (accounts.poolMembers(poolId) || []).filter((m) => { const st = memberLoginState(m.id); return !st || st.usable; });
+  // (a LAPSED subscription is the same kind of fact — a durable state that cannot serve: out, no fallback)
+  const usable = (accounts.poolMembers(poolId) || []).filter((m) => { const st = memberLoginState(m.id); return (!st || st.usable) && !memberServeLapsed(m.id); });
   const ok = usable.filter((m) => !memberAuthFailed(m.id));
   return ok.length ? ok : usable;
 }
@@ -5702,8 +5816,16 @@ function notePoolAuthFailure(session, sid, info = {}) {
   try {
     const poolId = session?._accountId;
     const a = poolId && accounts.get(poolId);
+    // a conversation bound DIRECTLY to the subscription (verify r1 ⑤): no pool to move it in, but the lapse is still
+    // that account's fact — recorded the same way (its pools skip it, the roster and For you say it)
+    if (a && a.type === 'subscription' && !session.host) {
+      const sv = quotaSourceFor(session.backend).classifyServeFailure?.(info) || null;
+      if (sv && sv.kind === 'lapsed') noteMemberServeFailure(poolId, info, { source: `a turn of ${session.name || sid}`, backend: session.backend, verdict: sv });
+      return;
+    }
     if (!a || a.type !== 'pooled' || session.host) return;
-    if (!quotaSourceFor(session.backend).classifyAuthFailure(info)) return; // the session's harness knows its vendor's wording (S4)
+    const serveV = quotaSourceFor(session.backend).classifyServeFailure?.(info) || null; // a LAPSED subscription (the closed census) — durable, below
+    if (!(serveV && serveV.kind === 'lapsed') && !quotaSourceFor(session.backend).classifyAuthFailure(info)) return; // the session's harness knows its vendor's wording (S4)
     const memberId = accounts.poolCurrentFor(poolId, sid);
     if (!memberId) return;
     const now = Date.now();
@@ -5713,6 +5835,10 @@ function notePoolAuthFailure(session, sid, info = {}) {
     const tkey = memberId + ':' + sid;
     if (now - (_authNoteAt.get(tkey) || 0) < 60000) return;
     _authNoteAt.set(tkey, now);
+    // A LAPSE is persisted on the member's record and said ONCE per episode (noteMemberServeFailure) — never
+    // the 10-minute mark (a token refresh cleared that within minutes and the pool walked back onto it), and
+    // never a toast per attempt; the eviction below runs exactly as for any auth failure
+    const lapsed = !!(serveV && serveV.kind === 'lapsed') && !!(noteMemberServeFailure(memberId, info, { source: `a turn of ${session.name || sid}`, backend: session.backend, verdict: serveV }) || {}).kind;
     // WHY it failed, in the words that name the user's actual fix. When the
     // member's refresh token expired we KNOW the cause (the file says so) and
     // the CLI's own message ("OAuth session expired and could not be
@@ -5724,10 +5850,10 @@ function notePoolAuthFailure(session, sid, info = {}) {
     // STATE-branched (round-3 verifier's last low): a wiped ('logged-out') file
     // whose deadline is still ahead must not be narrated as an expiry in the
     // past — the deadline is quoted only once it has really passed.
-    const why = loginDead
+    const why = lapsed ? 'subscription inactive' : loginDead
       ? `${loginWallPhrase(li)}${(typeof li.msLeft === 'number' && li.msLeft <= 0 && li.refreshExpiresAt) ? ` (login session ended ${new Date(li.refreshExpiresAt).toISOString()})` : ''} — re-login needed`
       : info.message ? String(info.message).slice(0, 120) : `HTTP ${info.status}`;
-    if (!memberAuthFailed(memberId)) {
+    if (!lapsed && !memberAuthFailed(memberId)) {
       _memberAuthFail.set(memberId, { at: now, reason: why, tok: credsTokenSig(memberId) });
       try { global.__vsEvent?.('pool-member-auth-failed', { detail: `${memberId}: ${why}` }); } catch { }
     }
@@ -5736,6 +5862,7 @@ function notePoolAuthFailure(session, sid, info = {}) {
     // credentials that cannot authorize a request (2026-09-07)
     const alive = healthyPoolMembers(poolId).filter((m) => m.id !== memberId);
     if (!alive.length) {
+      if (lapsed) { console.log(`[pool] auth-failure ${poolId}/${sid}: ${memberId} lapsed and no other member can take over`); return; } // the episode's For-you item already said it
       serverNotice(`pool-authfail-stuck-${memberId}-${Math.floor(now / 3600000)}`,
         `Pool "${a.name}": account ${memberName} ${loginDead ? why : `is failing authentication (${why})`} and no other member can take over — re-login or replace it in Manage Agents.`, { level: 'warn' });
       return;
@@ -5749,7 +5876,7 @@ function notePoolAuthFailure(session, sid, info = {}) {
     if (defaultMoved) accounts.setPoolTarget(poolId, to, { why: 'auth-failure' });
     _poolSwitchAt.set(poolId + ':' + sid, now); // keep the quota pass's dwell belt consistent with this move
     try { recordUsageAttribution({ claudeSessionId: session.claudeSessionId || session.backendSessionId, accountId: poolId }); } catch { }
-    if (now - (_authNoticeAt.get(memberId) || 0) > 60000) {
+    if (!lapsed && now - (_authNoticeAt.get(memberId) || 0) > 60000) {
       _authNoticeAt.set(memberId, now);
       serverNotice(`pool-authfail-${memberId}-${now}`,
         `Pool "${a.name}": account ${memberName} ${loginDead ? why : `is failing authentication (${why})`} — switched to ${toName}.${a.hot ? '' : ' Restarting the conversation to apply it.'}`, { level: 'warn' });
@@ -5848,6 +5975,7 @@ const PIN_KEYS = {
   'pin-exhausted': i18nKey('Pool "{pool}": conversation "{title}" — {member} is out of quota — running on {target} until it resets (pin kept).'),
   'pin-recovering': i18nKey('Pool "{pool}": conversation "{title}" — {member} has not got enough quota back yet — running on {target} for now (pin kept).'), // verify r2: over its hard bar, not yet settled — never "out of quota"
   'pin-login-dead': i18nKey('Pool "{pool}": conversation "{title}" — {member} cannot sign in — running on {target} until it is signed in again (pin kept).'),
+  'pin-lapsed': i18nKey('Pool "{pool}": conversation "{title}" — {member}\'s subscription is inactive — running on {target} until it answers again (pin kept).'),
   'pin-member-unknown': i18nKey('Pool "{pool}": conversation "{title}" — {member} is not usable in the pool right now — running on {target} (pin kept).'),
   'pin-member-excluded': i18nKey('Pool "{pool}": conversation "{title}" — {member} just refused this conversation — running on {target} for now (pin kept).'),
 };
@@ -6122,7 +6250,7 @@ function fallbackDefaultTarget(poolId, fromId = null) {
     if (!a || a.type !== 'pooled') return null;
     const membership = poolMembershipOf(poolId) || [];
     const members = switchCandidates(poolId).filter((m) => m && m.id !== fromId && membership.includes(m.id));
-    return soonestUsableMember({ members, readCache: poolReadCache(poolId), nowSec: Date.now() / 1000, priority: poolPriorityOf(a), creditsIds: creditsMemberIds(members) });
+    return soonestUsableMember({ members, readCache: poolReadCache(poolId), nowSec: Date.now() / 1000, priority: poolPriorityOf(a), creditsIds: creditsMemberIds(members), readLogin: poolReadLogin() }); // a lapsed member last (verify r1 ④)
   } catch (e) { console.warn('[pool] default fallback failed:', e.message); return null; }
 }
 /** THE ONE ENTRY POINT: members `removedIds` no longer belong to `poolId` — move
@@ -6152,7 +6280,7 @@ function memberRemoved(poolId, removedIds, { why = 'removed-from-pool' } = {}) {
         const fb = fallbackDefaultTarget(poolId, def);
         if (fb) {
           try { accounts.setPoolTarget(poolId, fb, { why }); out.defaultMoved = { from: def, to: fb, fallback: true }; console.log(`[pool] removed-member evict ${poolId}/default: ${def} → ${fb} — no member can take over; new conversations start on the one usable soonest`); } catch (e) { console.warn('[pool] removed-member default re-point failed:', e.message); }
-        } else console.log(`[pool] removed-member evict ${poolId}/default: ${def} stays — no member the pool lists is signed in`);
+        } else console.log(`[pool] removed-member evict ${poolId}/default: ${def} stays — no member the pool lists is signed in and active`);
       }
     }
     // ② every LIVE conversation still billed to a removed member
@@ -6497,7 +6625,7 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
         // proactive scan found no candidate while the member this conversation
         // is already on is healthy. Feeding that to the breaker's "no usable
         // member left" clause is the false claim the storm made.
-        const noWay = ds && (ds.reason === 'all-rejected' || ds.reason === 'no-members' || ds.reason === 'stuck' || ds.reason === 'all-logins-expired');
+        const noWay = ds && (ds.reason === 'all-rejected' || ds.reason === 'no-members' || ds.reason === 'stuck' || ds.reason === 'all-logins-expired' || ds.reason === 'all-lapsed');
         if (noWay) try { getAutoResume()?.noteNoPoolTarget?.(sid, rejected.length, ds.reason); } catch { }
         if (ds && ds.reason === 'all-rejected' && now - (_noTargetLogAt.get(sid) || 0) > 10 * 60e3) {
           _noTargetLogAt.set(sid, now);
@@ -6521,7 +6649,7 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
       // exempt, and so was the move off a hard-dead pin — a pin whose reading wobbled across its bars
       // re-pointed the conversation on EVERY evaluation (12 of 12; automatic and priority: 1 of 12)
       if (ds.reason === 'spare-lane' && now - lastS < SPARE_DWELL_MS) continue; // a move of convenience: an hour after the last move (SPARE_DWELL_MS)
-      if (now - lastS < 180000 && !ds.escape && ds.reason !== 'not-a-member' && ds.reason !== 'login-expired' && !(ds.fromRemaining != null && ds.fromRemaining < POOL_HARD_PCT)) continue; // a removed member is hard death too (2026-09-28); `escape` = a pinned conversation leaving a wall
+      if (now - lastS < 180000 && !ds.escape && ds.reason !== 'not-a-member' && ds.reason !== 'subscription-lapsed' && ds.reason !== 'login-expired' && !(ds.fromRemaining != null && ds.fromRemaining < POOL_HARD_PCT)) continue; // a removed member is hard death too (2026-09-28); `escape` = a pinned conversation leaving a wall
       _poolSwitchAt.set(dwellKey, now);
       try {
         // (a move off a member the pool no longer lists is THE SAME ACT as memberRemoved's — one `why` in the slot ledger, verify r1)
@@ -6618,7 +6746,7 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
       // key must carry an hour bucket or a recurrence is never reported again.
       // …and 'no-better' says nothing here either: the current member is
       // healthy, so there is no state only the user can fix (2026-09-13).
-      if (d.reason === 'stuck' || d.reason === 'no-members' || d.reason === 'no-settleable' || d.reason === 'all-logins-expired') {
+      if (d.reason === 'stuck' || d.reason === 'no-members' || d.reason === 'no-settleable' || d.reason === 'all-lapsed' || d.reason === 'all-logins-expired') {
         // The sentence itself is PURE (poolBlockedNotice in account-pool-auto):
         // it names WHICH buckets are dead ("every member is out of quota" is
         // wrong under the nested model and points at pay/wait-a-week when the
@@ -6651,7 +6779,7 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
       if (busy) { noteWarmHold(poolId, busy, { ...d, reason: 'priority-hold', wouldTo: d.to, wouldToName: d.toName }, now, ' (pool default)', poolId + ':default:prio'); return; }
     }
     const lastSwitch = _poolSwitchAt.get(poolId) || 0;
-    if (now - lastSwitch < 180000 && d.reason !== 'not-a-member' && d.reason !== 'login-expired' && !(d.fromRemaining != null && d.fromRemaining < POOL_HARD_PCT)) return; // dead login = hard death, same exemption (and a removed member, 2026-09-28)
+    if (now - lastSwitch < 180000 && d.reason !== 'not-a-member' && d.reason !== 'subscription-lapsed' && d.reason !== 'login-expired' && !(d.fromRemaining != null && d.fromRemaining < POOL_HARD_PCT)) return; // dead login = hard death, same exemption (and a removed member, 2026-09-28)
     _poolSwitchAt.set(poolId, now);
     _poolAutoLast.set(poolId, now);
     accounts.setPoolTarget(poolId, d.to, { why: d.reason === 'not-a-member' ? 'removed-from-pool' : 'pool-switch' });
@@ -6690,6 +6818,8 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
       ? `Pool "${a.name}" is back on ${d.toName} (priority #${d.priorityRank ?? '?'}) — new conversations start there${hot ? '' : ' (restarting its conversations)'}`
       : d.reason === 'not-a-member'
       ? `Pool "${a.name}" switched to ${d.toName} — ${nameOf(currentId)} was removed from the pool${hot ? '' : ' (restarting its conversations)'}${scraps}`
+      : d.reason === 'subscription-lapsed'
+      ? `Pool "${a.name}" switched to ${d.toName} — ${nameOf(currentId)}'s subscription is inactive; it rejoins by itself once it answers again${hot ? '' : ' (restarting its conversations)'}${scraps}`
       : d.reason === 'login-expired'
       ? `Pool "${a.name}" switched to ${d.toName} — ${nameOf(currentId)}'s ${(() => { try { const l = accounts.loginStateOf(currentId); return l ? loginWallPhrase(l) : 'login session expired'; } catch { return 'login session expired'; } })()}; re-login it in Manage Agents${hot ? '' : ' (restarting its conversations)'}${scraps}`
       : `Pool "${a.name}" auto-switched to ${d.toName}${d.priorityRank ? ` (priority #${d.priorityRank})` : ''} (previous account ${dEarly ? `will be down to ${fromPct}% within ${Math.round(PROJECTION_LEAD_SEC / 60)} min — moved early, ${dEarly}` : `down to ${fromPct}% remaining`})${hot ? '' : ' — restarting its conversations'}${scraps}`);
@@ -6759,6 +6889,7 @@ function maybeStopOnFallback(session, id, from, to) {
     setConversationPin, poolPinOf, // THE CONVERSATION'S PIN (2026-09-28): the ONE writer (behind POST /api/accounts/:poolId/pin) and the reader
     gatherPlan, // "Move every conversation here now", judged per conversation before anything moves (verify r1)
     memberRemoved, decideDefaultTarget, fallbackDefaultTarget, removalTargetFor, sweepNonMemberLinks, holdRemoved, _removedHoldOwed, // THE REMOVED-MEMBER WALL (2026-09-28): the one entry point, the default's decision (updatePool's chooser), the stale-link sweep every pool tick runs first
+    memberServeLapsed, noteMemberServeFailure, // a LAPSED subscription (2026-10-08): the auto-cli loop's pacing + the probe's answer
     onMemberReadingFresh, onMemberLoginSuccess, readingForeignForWake, memberPoolsOf, autoCliReady, lastMemberReadAt, projectionRereadFor, projectionBillingIndex, // THE NEW-MEMBER WAKE (2026-09-08): the one edge every producer of a fresh reading takes, its login half, and the two facts the auto-cli loop asks before it spends a spawn
     _memberWakeAt, _loginReadAt, MEMBER_WAKE_FLOOR_MS, MEMBER_READING_FRESH_MS, LOGIN_READ_FLOOR_MS, // the wake's floors are WALL-CLOCK: a suite winds them back instead of sleeping through them (same seam as _poolAutoLast)
     maybeRepinLockedModel, maybeStopOnFallback, modelsMatch, noteServedModel, noteModelFallback, servedDefinesModel, projectionFamilyFor, rerouteAnnouncedBy, // the two stdout-fed model facts + the fallback predicate + the PROJECTION family + THE REROUTE THIS RECORD ANNOUNCES (2026-09-13: one implementation for the parse AND the device feed; r2: one rule for "which cap can refuse this turn"; r4: the fact is placed BEFORE its readers, at both feeds)

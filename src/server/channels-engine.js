@@ -2053,8 +2053,13 @@ function create(deps = {}) {
     if (!g) return null;
     const held = new Set(((rec.auth && rec.auth.scopes) || []).map(String));
     const refusedBy = new Set(((rec.auth && rec.auth.refusedScopes) || []).map(String));
-    const missing = g.any && g.scopes.some((x) => held.has(x)) ? [] : g.scopes.filter((x) => !held.has(x));
-    return { scopes: g.scopes.slice(), missing, refused: missing.filter((x) => refusedBy.has(x)), console: !!g.console, wanted: true };
+    // lane lark-upload-scope-split: `asked` = the scopes a consent can add (Lark: im:resource — never the deprecated V2);
+    // `missing` / `refused` / `dropped` only ever name those. `dropped` = what the last consent's narrowing lost while
+    // another held scope still carries files (a legacy token holding only V2) — the card says files still send
+    const asked = Array.isArray(g.asked) && g.asked.length ? g.asked : g.scopes;
+    const missing = g.any && g.scopes.some((x) => held.has(x)) ? [] : asked.filter((x) => !held.has(x));
+    const dropped = missing.length ? [] : asked.filter((x) => !held.has(x) && refusedBy.has(x));
+    return { scopes: g.scopes.slice(), missing, refused: missing.filter((x) => refusedBy.has(x)), dropped, console: !!g.console, wanted: true };
   }
   /** THE ONE GRANT LIST (§5.3): every declared grant the sign-in does not hold — the card says ONE line, ONE Re-authorize. */
   function grantsView(rec) {

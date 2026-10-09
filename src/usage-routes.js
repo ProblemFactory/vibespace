@@ -630,7 +630,12 @@ async function refreshViaCliPanel(key) {
       });
     } catch (e) { probeRec.why = 'spawn threw: ' + (e && e.message); resolve(null); }
   });
-  if (!(cliPanel && (cliPanel.fiveHour || cliPanel.sevenDay))) { logProbe(probeRec.exitCode === 0 ? 'no-buckets-parsed' : 'spawn-failed'); return false; }
+  if (!(cliPanel && (cliPanel.fiveHour || cliPanel.sevenDay))) {
+    // A LAPSED SUBSCRIPTION answers this probe with the CLI's lapse sentence (2026-10-08): handed to the engine, whose
+    // harness census decides — a lapse opens the episode or only moves `lastFail`; any other answer changes nothing
+    if (!isGlobal) { try { app.locals.noteMemberServeFailure?.(key, { message: `${probeRec.rawStdout || ''}\n${probeRec.rawStderr || ''}` }); } catch { } }
+    logProbe(probeRec.exitCode === 0 ? 'no-buckets-parsed' : 'spawn-failed'); return false;
+  }
   // THE ROSTER IS ASKED AGAIN AT THE WRITE, NOT ONLY AT THE SPAWN (r3, the
   // auto-merge finding's belt). This function's only roster check happens
   // before a 60-second `execFile`, and a record CAN stop existing inside that
@@ -660,6 +665,11 @@ async function refreshViaCliPanel(key) {
       sameIdentity: (typeof app.locals.usageIdentityAccountIds === 'function') ? app.locals.usageIdentityAccountIds : null,
       windows: (typeof establishedWindows === 'function') ? establishedWindows() : {} });
   } catch (e) { console.warn('[usage] panel identity check failed (writing as asked, unverified):', e.message); idv = { refused: false, verified: false, why: 'identity check failed: ' + e.message, panel: null, expected: expected || null, matched: [] }; }
+  // A RENEWED SUBSCRIPTION (verify r1 ③): a lapsed member's panel refused on its PRE-LAPSE window alone (no other account
+  // holds the panel's window, the org does not differ) re-anchors the window on this answer and is written as verified
+  if (idv && idv.refused && !isGlobal && typeof app.locals.reanchorLapsedMember === 'function' && app.locals.reanchorLapsedMember(key, idv)) {
+    idv = { ...idv, refused: false, verified: true, why: `${acctNameOf(key)} was lapsed and answered with a new weekly window no other account holds — re-anchored (a renewal)` };
+  }
   probeRec.identity = { org: idv.org || null, phase: idv.phase || null, expected: idv.expected, panel: idv.panel, matched: idv.matched, shared: !!idv.shared, movedLikely: !!idv.movedLikely, apiWindow: idv.apiWindow || null };
   probeRec.identityVerified = idv.verified;
   if (idv.refused) {
@@ -801,6 +811,8 @@ async function refreshViaCliPanel(key) {
     _panelVerdict[key] = { at: Date.now(), outcome: wrote.ok ? 'written' : 'write-refused', code: wrote.ok ? null : 'write', identityVerified: !!(wrote.ok && idv && idv.verified), why: wrote.ok ? (idv ? idv.why : null) : (wrote.why || wrote.error || 'refused'), rung: 'panel' };
     if (isGlobal) { _rateLimitCache = merged; writeUsageCache(); }
     else _accountUsage[key] = { ...merged, name: acctMeta.name, email: acctMeta.email };
+    // a VERIFIED panel answer for a lapsed member IS the evidence that re-admits it (verify r1 ②)
+    if (wrote.ok && idv && idv.verified && !isGlobal) { try { app.locals.memberServeLapsed?.(key, { verified: true }); } catch { } }
     try { ingestPassiveUsage(); } catch { }
   } catch (e) {
     if (!wroteOk) { _panelVerdict[key] = { at: Date.now(), outcome: 'write-refused', code: 'write', identityVerified: false, why: 'cache write failed: ' + (e && e.message), rung: 'panel' }; try { logProbe('write-refused', { why: 'cache write failed: ' + (e && e.message) }); } catch { } }
@@ -1033,6 +1045,13 @@ app.post('/api/usage/refresh', async (req, res) => {
   const t0 = Date.now();
   const cliOk = await refreshViaCliPanel(key);
   const pv = panelVerdictFor(key);
+  // A LAPSED SUBSCRIPTION (2026-10-08) is re-admitted only by the panel's own answer: when the panel did not answer,
+  // the token ladder below is NOT tried for it — a reading that is not the CLI serving must never count as the renewal
+  // …and the answer SAYS which (verify r1 ③): the CLI answered but its reading was refused as another account's window, or it did not answer
+  if (!cliOk && !isGlobal && typeof app.locals.memberServeLapsed === 'function' && app.locals.memberServeLapsed(key)) {
+    const refused = !!(pv && pv.outcome === 'write-refused' && pv.code === 'identity' && pv.at >= t0);
+    return res.json({ error: refused ? `answered, but refused as another window — ${pv.why}` : 'not recorded — the subscription still does not answer (the pool keeps skipping it)', rung: 'panel', lapsed: true, refused, identityVerified: false, why: (pv && pv.why) || null, skipped });
+  }
   if (cliOk) { wakePool(key, 'manual refresh (cli-panel)'); return res.json({ success: true, via: 'cli-panel', rung: 'panel', identityVerified: !!(pv && pv.identityVerified), why: (pv && pv.why) || null, skipped }); }
   // AN IDENTITY REFUSAL ENDS THE LADDER (B-855a): the vendor already answered
   // once, for somebody else — a second vendor request on the token ladder

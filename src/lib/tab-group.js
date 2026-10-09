@@ -237,20 +237,21 @@ const tabGroupMethods = {
     for (const id of [...((chain && chain.tabs) || []), ...extra]) { const w = this.windows.get(id); if (w) w._chainAt = t; }
   },
 
-  createTabChain(hostWin, guestWin) {
+  createTabChain(hostWin, guestWin, { show = true } = {}) {
     // `recent` (most recent first) = the default side-by-side partner — LOCAL state: never persisted, never in the sync key
-    const chain = { tabs: [hostWin.id, guestWin.id], active: 1, layout: 'tabs', recent: [guestWin.id, hostWin.id] };
+    // `show: false` (lane artifacts-auto-open-quiet — an automatic open): the HOST stays the shown, active tab; the guest pulses
+    const chain = show ? { tabs: [hostWin.id, guestWin.id], active: 1, layout: 'tabs', recent: [guestWin.id, hostWin.id] } : { tabs: [hostWin.id, guestWin.id], active: 0, layout: 'tabs', recent: [hostWin.id, guestWin.id], _pulseTab: { id: guestWin.id, until: Date.now() + 2400 } };
     hostWin._tabChain = chain;
     guestWin._tabChain = chain;
     this.witnessChain(chain); // this page's act (verify r5 ②)
     // Enforce same desktop: guest inherits host's desktop
     if (hostWin._desktopId) guestWin._desktopId = hostWin._desktopId;
     // Host content hidden, guest content visible (guest = newly dragged in = active)
-    hostWin.content.classList.add('tab-hidden');
+    (show ? hostWin : guestWin).content.classList.add('tab-hidden');
     hostWin.element.appendChild(guestWin.content);
     guestWin.element.style.display = 'none';
     guestWin.gridBounds = hostWin.gridBounds ? { ...hostWin.gridBounds } : null;
-    this.activeWindowId = guestWin.id;
+    if (show) this.activeWindowId = guestWin.id;
     this._normalizeChain(chain);
     this._applyChainLayout(chain);
     this._renderTabBar(chain);
@@ -453,7 +454,7 @@ const tabGroupMethods = {
    *  `unsplitOrder` (the merge's strip order at the drop) is where that Unsplit
    *  puts the tabs back — the slot the window was DROPPED on, the tabs
    *  setting's own result (v2 verify r1 ③) — while nothing else has moved. */
-  bindSplit(anchorWin, guestWin, { side = 'right', announce = false, focus = 'guest', freeRect = null, unsplitAction = false, unsplitOrder = null } = {}) {
+  bindSplit(anchorWin, guestWin, { side = 'right', announce = false, focus = 'guest', freeRect = null, unsplitAction = false, unsplitOrder = null, quiet = false } = {}) {
     if (!anchorWin || !guestWin || anchorWin.id === guestWin.id) return null;
     let snap = null;
     if (announce) {
@@ -469,8 +470,9 @@ const tabGroupMethods = {
     }
     if (guestWin._tabChain && guestWin._tabChain !== anchorWin._tabChain) this._detachFromChain(guestWin._tabChain, guestWin.id);
     let chain = anchorWin._tabChain;
-    if (!chain) { this.createTabChain(anchorWin, guestWin); chain = anchorWin._tabChain; }
-    else if (!chain.tabs.includes(guestWin.id)) this.addToTabChain(chain, guestWin);
+    // `quiet` (createWindow's asked quiet — an automatic open): the guest joins as a quiet, pulsing tab, so the anchor's pane is never hidden on the way to the split
+    if (!chain) { this.createTabChain(anchorWin, guestWin, { show: !quiet }); chain = anchorWin._tabChain; }
+    else if (!chain.tabs.includes(guestWin.id)) this.addToTabChain(chain, guestWin, undefined, { show: !quiet });
     if (!chain) return null;
     this._withdrawMergeToast(chain); // the bridge's offer is taken — by this act, whichever entry made it
     enterSplit(chain, { anchorId: anchorWin.id, guestId: guestWin.id, side });

@@ -10,6 +10,7 @@
 //   · Raw = the existing CodeEditor for the same file, mounted IN this window (`makeRaw`).
 import { showToast, fetchJson, createModalShell, showConfirmDialog, showInputDialog, createPopover, showContextMenu, uiScale, copyText } from './utils.js';
 import { sanitizeHtml } from './safe-html.js';
+import { Marked } from 'marked'; // the house renderer's class (chat's marked) — the Doc window's export / print READS the source with it
 import { t } from './i18n.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { onFileChanged, sameFile, foldPath } from './file-changed.js';
@@ -20,25 +21,25 @@ import { UI_ICONS } from './icons.js';
 let editorLoad = null;
 const loadEditor = () => editorLoad || (editorLoad = import(new URL('/doc-editor.js', location.origin).href).catch((e) => { editorLoad = null; throw e; }));
 
-export function openDoc(app, { host = '', path = '', from = '', syncId, intoChain } = {}) {
+export function openDoc(app, { host = '', path = '', from = '', syncId, intoChain, quiet = false } = {}) { // `quiet`: app.openFile's (an automatic open — never the focus)
   const p = foldPath(path), h = host && host !== 'local' ? String(host) : '';
   if (!p.startsWith('/')) return null;
   for (const w of app.wm.windows.values()) {
     if (w.type !== 'doc' || w._filePath !== p || (w._docHost || '') !== h) continue;
-    app.wm.revealWindow(w.id, { replay: !!syncId });
+    if (!quiet) app.wm.revealWindow(w.id, { replay: !!syncId });
     if (from && !w._openSpec?.from && typeof w._docAdopt === 'function') w._docAdopt(from);
     return w;
   }
   app._hideWelcome?.();
   const name = p.slice(p.lastIndexOf('/') + 1);
   const openSpec = { action: 'openDoc', host: h, path: p, from: from || '' };
-  const winInfo = app.wm.createWindow({ title: (h ? app.hostName(h) + ': ' : '') + name, type: 'doc', syncId, openSpec, intoChain, width: 900, height: 680 });
+  const winInfo = app.wm.createWindow({ title: (h ? app.hostName(h) + ': ' : '') + name, type: 'doc', syncId, openSpec, intoChain, quiet, width: 900, height: 680 });
   winInfo._filePath = p; winInfo._fileName = name; winInfo._docHost = h;
   const root = document.createElement('div'); root.className = 'doc-window'; root.textContent = t('Loading…');
   winInfo.content.appendChild(root);
   const signal = winInfo._listenerCtl.signal;
   const makeRaw = (pane) => { const sub = Object.create(winInfo); sub.content = pane; return new CodeEditor(sub, p, name, app, { host: h }); };
-  const deps = { t, showToast, fetchJson, createModalShell, showConfirmDialog, showInputDialog, createPopover, showContextMenu, uiScale, onFileChanged, sameFile, makeRaw, createBarFold, icons: UI_ICONS, sanitizeHtml, copyText, isPhone: () => !!app.isMobile || window.innerWidth <= 768 };
+  const deps = { t, showToast, fetchJson, createModalShell, showConfirmDialog, showInputDialog, createPopover, showContextMenu, uiScale, onFileChanged, sameFile, makeRaw, createBarFold, icons: UI_ICONS, sanitizeHtml, copyText, Marked, isPhone: () => !!app.isMobile || window.innerWidth <= 768 };
   loadEditor().then((mod) => { if (!signal.aborted) { root.textContent = ''; mod.mountDocWindow({ root, winInfo, host: h, path: p, name, from: from || '', signal, deps }); } },
     () => { root.textContent = t('Could not load the document editor — reload the page'); });
   winInfo.onClose = () => { try { winInfo._docClose?.(); } catch { } app._checkWelcome?.(); };

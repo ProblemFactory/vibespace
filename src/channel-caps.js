@@ -1204,20 +1204,29 @@ function feedCatchUpText(cu, { t = defaultT } = {}) {
  *  `grants` = the engine's `adapterView().grants` ([{what: 'reactions'|'feed', scopes, missing, refused, wanted}]). */
 function grantsText(grants, { t = defaultT, vendor = '' } = {}) {
   const list = Array.isArray(grants) ? grants.filter((g) => g && g.wanted !== false && Array.isArray(g.missing) && g.missing.length) : [];
-  if (!list.length) return { text: '', warn: false };
+  // lane lark-upload-scope-split: a narrowed consent lost the upload scope while another HELD one still carries files
+  // (Lark: a legacy token holding the deprecated V2) — said by name with "still works", never a warning
+  const kept = Array.isArray(grants) ? grants.find((g) => g && g.what === 'files' && g.wanted !== false && Array.isArray(g.missing) && !g.missing.length && Array.isArray(g.dropped) && g.dropped.length) : null;
+  const keptText = kept ? t('{vendor} refused {scopes} — sending files still works', { vendor: vendor || t('The vendor'), scopes: kept.dropped.join(' + ') }) : '';
+  if (!list.length) return { text: keptText, warn: false };
   const refused = [];
   const adds = [];
+  let filesOff = null;
   for (const g of list) {
     const r = (Array.isArray(g.refused) ? g.refused : []).filter((x) => g.missing.includes(x));
-    if (r.length) refused.push(...r);
+    // …and none held: sending files is off, said as such (the asked scope enabled brings it back)
+    if (r.length && g.what === 'files') filesOff = r;
+    else if (r.length) refused.push(...r);
     else adds.push(g.what);
   }
   // lane lark-threads (B1/B5, MEASURED): `people` = reading people's profiles (who left a chat, the nickname, the department)
   const words = { reactions: t('reading reactions'), feed: t('new-message search and single chats'), people: t('reading people\'s profiles'), files: t('sending files') };
   const parts = [];
   if (refused.length) parts.push(refusedScopeText([...new Set(refused)], { t, vendor }));
+  if (filesOff) parts.push(t('Sending files is off: {vendor} refused {scopes} — enable it in the app console and Re-authorize', { vendor: vendor || t('The vendor'), scopes: filesOff.join(' + ') }));
   if (adds.length) parts.push(t('One Re-authorize adds: {what}', { what: adds.map((w) => words[w] || String(w)).join(' · ') }));
-  return { text: parts.join(' · '), warn: refused.length > 0 };
+  if (keptText) parts.push(keptText);
+  return { text: parts.join(' · '), warn: refused.length > 0 || !!filesOff };
 }
 // ── lane channel-names-readable (userW inc-muyrhqtj-ys0z): WHETHER PEOPLE'S NAMES CAN BE READ on an account ─────────
 // The adapter's people warm-up answers `{unreadable: {why, missing}}` (the sign-in holds no profile permission) or

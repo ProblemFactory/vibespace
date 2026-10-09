@@ -97,7 +97,10 @@ function runOp(op, payload = {}) {
 }
 
 if (!isMainThread && parentPort) {
-  parentPort.on('message', ({ id, op, payload }) => {
+  const { answerMemory } = require('./worker-memory.js');
+  parentPort.on('message', (msg) => {
+    if (answerMemory(msg, parentPort)) return; // the memory census (src/worker-memory.js)
+    const { id, op, payload } = msg || {};
     try {
       const { result } = runOp(op, payload);
       parentPort.postMessage({ id, ok: true, result });

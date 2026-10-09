@@ -108,6 +108,7 @@ function lastBoughtInstant(reads) {
 
 /**
  * @param {object} d  deps: serverSetting, accounts, autoCliReady, USAGE_CACHE_DIR,
+ *   memberServeLapsed (optional: a LAPSED subscription keeps the idle cadence, no failure backoff),
  *   usageIdentityGroupsCached, usageEstimator, projectionRereadFor,
  *   projectionBillingIndex (optional: ONE who-bills-where pass per tick, handed
  *   to every projectionRereadFor call of that tick — prod-stall-202),
@@ -127,6 +128,9 @@ function createAutoCliLoop(d) {
       const now = clock();
       if (clampStamps(st, now)) warn('[auto-cli] the clock stepped back — pacing stamps clamped to now');
       const list = [];
+      // idle threshold re-rolls EVERY tick inside the owner's 30–60min band —
+      // a wandering threshold, not a fixed cadence
+      const idleMaxAgeMs = 30 * 60e3 * (1 + rand());
       // who bills where — resolved ONCE per tick, on the first account that asks, and dropped with
       // the tick (prod-stall-202: per account it was accounts × sessions synchronous login-file reads,
       // 6–15 s stalls on production). No await runs before `list` is complete: the index never
@@ -149,7 +153,10 @@ function createAutoCliLoop(d) {
         // never-read accounts (no cache at all) ride the idle rung with fetchedAt 0 —
         // their first auto-cli read IS the bootstrap; failure backoff bounds retries
         const f = fails.get(a.id) || 0;
-        if (f > 0 && now - (attempts.get(a.id) || 0) < 5 * 60e3 * Math.pow(2, Math.min(f, 6))) continue;
+        // A LAPSED SUBSCRIPTION (2026-10-08) stays on this rung at the idle cadence — its failures do NOT
+        // back off to hours: the next read after a renewal is the evidence that re-admits it (memberServeLapsed)
+        const lapsed = !!(d.memberServeLapsed && d.memberServeLapsed(a.id));
+        if (lapsed ? now - (attempts.get(a.id) || 0) < idleMaxAgeMs : (f > 0 && now - (attempts.get(a.id) || 0) < 5 * 60e3 * Math.pow(2, Math.min(f, 6)))) continue;
         let est = null; try { est = raw ? d.usageEstimator.estimateFor(a.id, raw, now) : null; } catch { }
         // B-a5c0: a raw bucket whose window already reset is NO control for the
         // logged drift (it printed a 100-point "drift" old-window-vs-new); the
@@ -160,9 +167,6 @@ function createAutoCliLoop(d) {
         // a crossing before the next scheduled read asks this same rung now — once per BUCKET (projLabel/projResetsAt vs projReads, quota r2)
         list.push({ key: a.id, fetchedAt: raw?.fetchedAt || 0, lastAttemptAt: Math.max(...mem.map((x) => Math.max(attempts.get(x) || 0, d.lastMemberReadAt(x) || 0))), estDriftPct: dr.triggerDrift, activeBurn: dr.moved, drift: dr.drift, rolled: dr.rolled, projCrossInMs: pj ? pj.inMs : null, estBurnPtPerMin: pj ? pj.burnPtPerMin : 0, projLabel: pj ? pj.label : null, projResetsAt: pj ? (pj.resetsAt || 0) : 0, projReads: reads, projReadCrossAt: lastBoughtInstant(reads), pj, mem });
       }
-      // idle threshold re-rolls EVERY tick inside the owner's 30–60min band —
-      // a wandering threshold, not a fixed cadence
-      const idleMaxAgeMs = 30 * 60e3 * (1 + rand());
       const picks = decideCliRefresh(list, now, { maxAgeMs: 45 * 60e3 * jitter, idleMaxAgeMs });
       for (const key of picks) {
         const it = list.find((x) => x.key === key), why = cliRefreshWhy(it && { ...it, lastAttemptAt: 0 }, now, { maxAgeMs: 45 * 60e3 * jitter, idleMaxAgeMs }); // the pick's own reason (the attempt floor already passed)

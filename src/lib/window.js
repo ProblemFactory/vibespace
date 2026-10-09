@@ -82,8 +82,8 @@ class WindowManager {
     app.sidebar.toggle(false);
   }
 
-  createWindow({ title, type, x, y, width, height, syncId, openSpec, titleMeta, intoChain }) {
-    this._mobileYieldSidebar();
+  createWindow({ title, type, x, y, width, height, syncId, openSpec, titleMeta, intoChain, quiet: asked = false }) {
+    if (!asked) this._mobileYieldSidebar(); // a QUIET open (below) changes nothing the user is looking at — the sidebar too
     const id = syncId || ('win-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6));
     this.windowCounter++;
     width = width || 700; height = height || 500;
@@ -153,14 +153,22 @@ class WindowManager {
     this._app?.layoutManager?.onWindowCreated?.(winInfo); // a pending tab chain naming it reconciles (lane split-restore-hidden)
     // MULTIVIEW D5 (a)/(b): `quiet` = a TAB that changes nothing on screen (the two shown panes stay; it pulses) —
     // a live view born beside a chat that is ALREADY in a split lands on its `side` and is never focused
-    const quiet = !!(born && intoChain.quiet && born._tabChain && born._tabChain.layout === 'split');
+    // lane artifacts-auto-open-quiet: `quiet` ASKED by the caller (`asked` — an AUTOMATIC open: the chat's doc birth) =
+    // the focused window, the caret and the keyboard owner stay what they were, whatever the placement: shown beside the
+    // source (no pane the user sees is hidden, not even for a frame: the source's pane stays the chain's active one), a
+    // tab that arrives pulsing (D5 (a)'s mark — on a chain ALREADY split too: showing it would hide the other pane, which
+    // may hold the caret; it lands on the side the source is NOT on), a free window drawn but not focused
+    const quiet = !!(born && (intoChain.quiet || asked) && born._tabChain && born._tabChain.layout === 'split');
+    const side = asked && !intoChain?.quiet ? (born?._tabChain?.split?.pair?.[1] === born?.id ? 'left' : 'right') : intoChain?.side === 'left' ? 'left' : 'right';
+    const prevActive = this.activeWindowId;
     if (born) {
-      if (quiet) this.addToTabChain(born._tabChain, winInfo, { side: intoChain.side === 'left' ? 'left' : 'right' }, { show: false });
-      else if (intoChain.split) this.bindSplit(born, winInfo, { side: intoChain.side || 'right' });
-      else if (born._tabChain) this.addToTabChain(born._tabChain, winInfo, { afterId: born.id }); // a TAB born right after its source (on the source's side in a split)
-      else this.createTabChain(born, winInfo);
+      if (quiet) this.addToTabChain(born._tabChain, winInfo, { side }, { show: false });
+      else if (intoChain.split) this.bindSplit(born, winInfo, { side: intoChain.side || 'right', ...(asked ? { focus: 'anchor', quiet: true } : {}) });
+      else if (born._tabChain) this.addToTabChain(born._tabChain, winInfo, { afterId: born.id }, { show: !asked }); // a TAB born right after its source (on the source's side in a split)
+      else this.createTabChain(born, winInfo, { show: !asked });
     }
-    if (!quiet) this.focusWindow(id);
+    if (asked) { if (this.activeWindowId !== prevActive) { this.activeWindowId = prevActive; this.syncHiddenViews(); } }
+    else if (!quiet) this.focusWindow(id);
     this._notify(); this._scheduleOverlapUpdate(); return winInfo;
   }
 

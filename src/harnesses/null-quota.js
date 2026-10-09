@@ -16,6 +16,7 @@ const NULL_QUOTA = Object.freeze({
   signalFromStream: () => null,
   probe: null,
   classifyAuthFailure: () => false,
+  classifyServeFailure: () => null,
   toLimitSet: ({ identity = null, source = null, fetchedAt = null } = {}) =>
     makeLimitSet({ identity, source, fetchedAt, limits: [] }),
   limitSetFromSnapshot: (_snap, { identity = null, source = null } = {}) =>

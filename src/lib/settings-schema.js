@@ -331,10 +331,11 @@ const SETTINGS_SCHEMA = {
     description: t('Dense document-style layout instead of chat bubbles. Closer to TUI information density.'),
     category: t('Chat'), liveApply: true,
   },
-  // lane artifacts-model: a deliverable doc the agent WRITES opens beside the chat (src/lib/chat-view.js _onArtifactCard)
+  // lane artifacts-model: a deliverable doc the agent WRITES opens beside the chat (src/lib/chat-view.js _onArtifactCard);
+  // lane artifacts-auto-open-quiet: QUIETLY (never the keyboard), not on a phone; the same switch sits in the Artifacts chip
   'artifacts.autoOpenDocs': {
-    type: 'boolean', default: true, label: t('Open new documents beside the chat'),
-    description: t('When the agent writes a NEW document (.md, .txt, .docx, .pdf…) while the chat is on screen, it opens beside the chat. Off = its card in the chat only. An edit never opens it again.'),
+    type: 'boolean', default: true, label: t('Open a new document beside the chat automatically'),
+    description: t('When the agent writes a NEW document (.md, .txt, .docx, .pdf…) while the chat is on screen, it opens beside the chat without taking the keyboard — the caret stays where you were typing. Not on a phone. Off = its card in the chat only. An edit never opens it again. The same switch is in the Artifacts chip.'),
     category: t('Chat'), liveApply: true,
   },
   'chat.roleIndicator': {

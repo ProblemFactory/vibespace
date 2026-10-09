@@ -164,13 +164,22 @@ const WIDE_SCOPES = Object.freeze(['auth:user.id:read', 'im:message:readonly', '
 // lane lark-upload-preflight (userW inc-muxsy69b-mjg1, MEASURED 2026-10-07): uploading a file / picture as the USER
 // answers 99991679 "required one of these privileges under the user identity: [im:resource:upload, im:resource]" when
 // the token holds neither — the consent ASKS for both (an OPTIONAL group: an app that has not enabled them still signs
-// in, and the account then says by name that sending files needs a Re-authorize); EITHER one held carries files
+// in, and the account then says by name that sending files needs a Re-authorize); EITHER one held carries files.
+// lane lark-upload-scope-split: the API-level PAIR judges a HELD token (a legacy token holding only V2 still uploads);
+// the CONSENT asks V1 alone (`UPLOAD_CONSENT_SCOPES`, below)
 const UPLOAD_SCOPES = Object.freeze(['im:resource:upload', 'im:resource']);
-// lane lark-upload-preflight: the upload pair is the SECOND group (right after the wide one) — an app that has not enabled
-// it loses only it on the second press, never the reactions / profiles / search after it
+// lane lark-upload-scope-split (owner 2026-10-08, Lark's own permission doc, quoted): "im:resource:upload（上传文件V2，高级）—
+// 该权限已不再维护，不可新增申请；你可申请开通权限 im:resource（获取与上传图片或文件资源）". V2 is DEPRECATED: no app can add
+// it (the owner's console catalog has no such scope), Lark refuses EVERY consent naming it (20027), and with the pair as
+// one optional group the retry dropped the working V1 too. The consent asks — and every word names — `im:resource` only.
+const UPLOAD_CONSENT_SCOPES = Object.freeze(['im:resource']);
+// lane lark-upload-preflight: the upload scopes come right after the wide group — an app that has not enabled one loses
+// only it, never the reactions / profiles / search after it.
+// lane lark-upload-scope-split: the upload group is `im:resource` ALONE (V2 is deprecated — never asked); the ladder is
+// WIDE → im:resource → reactions → job → department → people → p2p → search (one group per press)
 // lane lark-threads: the profile scopes join the ordered groups AFTER the reactions — the two field scopes (a job title,
 // a department: cosmetic) next, then reading people (it names who left a chat), the feed's two last
-const OPTIONAL_SCOPE_GROUPS = Object.freeze([Object.freeze([...WIDE_SCOPES]), Object.freeze([...UPLOAD_SCOPES]), Object.freeze([REACTIONS_READ_SCOPES[0]]), Object.freeze([JOB_SCOPE]), Object.freeze([DEPT_SCOPE]), Object.freeze([PEOPLE_SCOPE]), Object.freeze([P2P_READ_SCOPE]), Object.freeze([SEARCH_SCOPE])]);
+const OPTIONAL_SCOPE_GROUPS = Object.freeze([Object.freeze([...WIDE_SCOPES]), Object.freeze([...UPLOAD_CONSENT_SCOPES]), Object.freeze([REACTIONS_READ_SCOPES[0]]), Object.freeze([JOB_SCOPE]), Object.freeze([DEPT_SCOPE]), Object.freeze([PEOPLE_SCOPE]), Object.freeze([P2P_READ_SCOPE]), Object.freeze([SEARCH_SCOPE])]);
 /** …flat (every optional scope — what a narrowed consent may have dropped). */
 const OPTIONAL_SCOPES = Object.freeze(OPTIONAL_SCOPE_GROUPS.flat());
 const REACTIONS_WRITE_SCOPES = Object.freeze(['im:message', 'im:message.reactions:write_only']);
@@ -456,7 +465,7 @@ function capsOfScopes(scopes) {
   const add = REACTIONS_WRITE_SCOPES.some((s) => sc.includes(s));
   // lane lark-upload-preflight: a FILE rides the send AND an upload scope — the `send-attachment` offer reads this row
   const upload = UPLOAD_SCOPES.some((s) => sc.includes(s));
-  const files = { send: send.sendAs.length > 0 && upload, why: !send.sendAs.length ? send.why : upload ? null : 'attachments-not-sendable', requiredScopes: upload ? [] : UPLOAD_SCOPES.slice() };
+  const files = { send: send.sendAs.length > 0 && upload, why: !send.sendAs.length ? send.why : upload ? null : 'attachments-not-sendable', requiredScopes: upload ? [] : UPLOAD_CONSENT_SCOPES.slice() };   // what to ENABLE: never the deprecated V2
   return { ...send, reactions: { read, add, why: read && add ? null : 'reactions-scope-not-granted' }, files };
 }
 
@@ -1028,7 +1037,7 @@ function create(record = {}, deps = {}) {
   // verify r1: a wide scope that ALSO reads who reacted (im:message:readonly is in REACTIONS_READ_SCOPES — capsOfScopes) is
   // asked only while the reactions option is 'read': "Add and remove only" stays a consent that cannot read reactions
   const wideScopes = () => WIDE_SCOPES.filter((x) => optionOf(record, 'reactions') === 'read' || !REACTIONS_READ_SCOPES.includes(x));
-  const consentScopes = (without = []) => [...SCOPES, ...UPLOAD_SCOPES, ...(optionOf(record, 'reactions') === 'read' ? [REACTIONS_READ_SCOPES[0]] : []), JOB_SCOPE, DEPT_SCOPE, PEOPLE_SCOPE, ...(optionOf(record, 'search') !== 'off' ? [P2P_READ_SCOPE, SEARCH_SCOPE] : []), ...wideScopes()].filter((x) => !(Array.isArray(without) && without.includes(x)));
+  const consentScopes = (without = []) => [...SCOPES, ...UPLOAD_CONSENT_SCOPES, ...(optionOf(record, 'reactions') === 'read' ? [REACTIONS_READ_SCOPES[0]] : []), JOB_SCOPE, DEPT_SCOPE, PEOPLE_SCOPE, ...(optionOf(record, 'search') !== 'off' ? [P2P_READ_SCOPE, SEARCH_SCOPE] : []), ...wideScopes()].filter((x) => !(Array.isArray(without) && without.includes(x)));
   const sleep = (ms) => new Promise((r) => { const t = setTimeout(r, ms); if (t.unref) t.unref(); });
 
   /** THIS ACCOUNT's credential binding (2026-09-22): `cluster:<k>` / `own`,
@@ -2320,7 +2329,8 @@ const FEED_GRANT = Object.freeze({ scopes: Object.freeze([SEARCH_SCOPE, P2P_READ
  *  external contact, the organization's nickname, the department) — the card's ONE Re-authorize line names it. */
 const PEOPLE_GRANT = Object.freeze({ scopes: Object.freeze([PEOPLE_SCOPE]), console: true });
 /** lane lark-upload-preflight: what unlocks SENDING FILES — ANY one of the upload scopes (the card: "One Re-authorize adds: sending files"). */
-const FILES_GRANT = Object.freeze({ scopes: UPLOAD_SCOPES, console: true, any: true });
+// lane lark-upload-scope-split: `scopes` judge the HELD token (either carries files); `asked` = what a consent can add
+const FILES_GRANT = Object.freeze({ scopes: UPLOAD_SCOPES, asked: UPLOAD_CONSENT_SCOPES, console: true, any: true });
 module.exports = {
   attachmentPlan, LARK_IMAGE_MAX, LARK_FILE_MAX,
   kind: KIND, caps, create, manifest: MANIFEST, api: API_ROW, sendGrant: SEND_GRANT, reactionsGrant: REACTIONS_GRANT, feedGrant: FEED_GRANT, peopleGrant: PEOPLE_GRANT, filesGrant: FILES_GRANT, API_ROW, consent: CONSENT, label: LABEL, integration: INTEGRATION, integrationTest, OPTIONS, UNGATED, RATE_OK,
@@ -2336,7 +2346,7 @@ module.exports = {
   // lane lark-search-poll: the change feed's scopes, the ordered optional groups, what unlocks it, the refusal's scope reader
   SEARCH_SCOPE, P2P_READ_SCOPE, OPTIONAL_SCOPE_GROUPS, FEED_GRANT, requiredScopesOf,
   // lane slack-scopes-lark-reauth: every usable scope, asked once (the first optional group)
-  WIDE_SCOPES, UPLOAD_SCOPES, FILES_GRANT,
+  WIDE_SCOPES, UPLOAD_SCOPES, UPLOAD_CONSENT_SCOPES, FILES_GRANT,
   // lane lark-p2p: THE ONE search-hit reader (the measured shape) + the probe's value-form words
   readSearchHit, valueFormOf,
   // lane lark-threads (A4): the by-id answer's verdict

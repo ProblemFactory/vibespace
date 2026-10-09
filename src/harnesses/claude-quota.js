@@ -6,6 +6,7 @@
 //   signalFromStream(record)   → a typed wall/quota signal | null
 //   probe                      → capsOf(id).quotaProbe rung name | null
 //   classifyAuthFailure(info)  → boolean
+//   classifyServeFailure(info) → {kind: 'lapsed' | 'auth', why} | null   (SERVE_CENSUS below)
 // SHARED tier: pure parsers over what the CLI already emitted — nothing here
 // may ever ORIGINATE a vendor call (§ban-safety; test-vendor-whitelist).
 //
@@ -355,11 +356,32 @@ function limitSetFromEvent(ev, { identity = null, source = 'rate-limit-event', n
 // the pool engine defers such a rejection until the lane is known (laneIsProvisional) — moved here from the
 // engine (rv-harnesses H2), so the engine asks the session's source instead of naming the harness.
 const UNSCOPED_WEEKLY_TYPES = new Set(['seven_day', 'weekly']);
+// THE SERVE CENSUS (2026-10-08, lane pool-subscription-lapsed): the CLOSED list of Anthropic sentences that say a
+// subscription no longer SERVES Claude Code — a durable member state (account-pool-auto serveAfterFailure), not the
+// 10-minute auth mark. Measured with `strings` over the installed CLI 2.1.288 (the facts law), nothing guessed:
+//   • 'Your organization has disabled Claude subscription access for Claude Code · Use an Anthropic API key
+//     instead, or ask your admin to enable access' — the CLI's words (its error kind `oauth_org_not_allowed`) for an
+//     API 401/403 whose message is the second row; the owner's canceled UCI Max answered exactly this (2026-10-08 13:30Z).
+//   • 'OAuth authentication is currently not allowed for this organization' — that API message itself (the CLI's
+//     own test, hEt), which an error record can carry raw.
+// NOT a lapse, deliberately (stay the 10-minute `auth` mark): 'Your account is on hold and can't sign in to Claude
+// Code' (account_on_hold — a hold/appeal, not a plan), 'organization has been disabled', OAuth revoked/expired —
+// an unknown wording is NEVER promoted to a lapse.
+const SERVE_CENSUS = Object.freeze([
+  Object.freeze({ kind: 'lapsed', needle: 'has disabled Claude subscription access for Claude Code', cli: '2.1.288' }),
+  Object.freeze({ kind: 'lapsed', needle: 'OAuth authentication is currently not allowed for this organization', cli: '2.1.288' }),
+]);
+function classifyServeFailure(info = {}) {
+  const msg = String((info && info.message) || '');
+  for (const row of SERVE_CENSUS) if (msg.includes(row.needle)) return { kind: row.kind, why: row.needle };
+  return classifyAuthFailure(info) ? { kind: 'auth', why: msg.slice(0, 120) } : null;
+}
 module.exports = { projectReset, WEEK_SEC, unscopedWeeklyTypes: UNSCOPED_WEEKLY_TYPES,
   normalize,
   signalFromStream,
   probe: capsOf('claude').quotaProbe, // 'cli-usage': the `claude -p /usage` auto-cli rung (usage-routes refreshViaCliPanel)
   classifyAuthFailure,               // account-pool-auto's Anthropic-wording classifier, verbatim
+  classifyServeFailure, SERVE_CENSUS, // a LAPSED subscription (durable) vs a transient auth failure (the 10-min mark)
   // THE RESET-CREDIT SEMANTICS (src/reset-credit.js, design-reset-credits §1): an
   // Anthropic reset REFILLS IN PLACE (the weekly deadline does not move). A fact
   // about the vendor, not a capability — `capsOf('claude').resetCredit` stays

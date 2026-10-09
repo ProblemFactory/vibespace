@@ -1699,6 +1699,8 @@ body.hide-empty-thinking .chat-compact .chat-msg.chat-empty-thinking { display: 
 .af-pick { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; font: inherit; font-size: 11px; color: var(--text); background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; }
 .af-pick:hover, .af-pick:focus-visible { border-color: var(--accent); }
 .af-count { margin-left: auto; font-size: 10px; white-space: nowrap; }
+.af-auto { display: flex; align-items: center; gap: 6px; font-size: 11px; cursor: pointer; user-select: none; } /* lane artifacts-auto-open-quiet: the auto-open switch */
+.af-auto-cb { margin: 0; }
 .chat-artifacts-panel .af-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-bottom: 4px; }
 .chat-artifacts-panel .chat-artifact-head { display: flex; align-items: center; gap: 4px; padding: 8px 10px 3px; font-size: 10px; cursor: pointer; user-select: none; }
 .af-head-word { flex: 1; min-width: 0; }

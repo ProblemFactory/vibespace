@@ -559,9 +559,19 @@ console.log('lane lark-upload-preflight: the send-attachment offer table');
   ];
   for (const [n, c, x, want, why] of T) { const o = C.offers(c, x, 'send-attachment', NOW); ok(o.offered === want && o.why === why, `send-attachment: ${n}`, JSON.stringify(o)); }
   const m = C.offers({ sendAttachments: row }, cc(LK.capsOfScopes(SEND).files), 'send-attachment', NOW);
-  ok(JSON.stringify(m.requiredScopes) === JSON.stringify(['im:resource:upload', 'im:resource']), 'the refusal names the scopes (requiredScopes = the 99991679 pair)', JSON.stringify(m));
+  ok(JSON.stringify(m.requiredScopes) === JSON.stringify(['im:resource']), 'the refusal names the scope to enable (requiredScopes = im:resource — lane lark-upload-scope-split: never the deprecated V2 of the 99991679 pair)', JSON.stringify(m));
   ok(C.OFFER_WHAT.includes('send-attachment') && JSON.stringify(C.convCapsState(cc({ send: false, why: 'attachments-not-sendable', requiredScopes: ['im:resource'] }), NOW).files) === JSON.stringify({ send: false, why: 'attachments-not-sendable', requiredScopes: ['im:resource'] }), 'OFFER_WHAT lists it; the cached state carries the files row');
   ok(C.grantsText([{ what: 'files', missing: ['im:resource:upload', 'im:resource'], refused: [], wanted: true }]).text === 'One Re-authorize adds: sending files', 'the account row: "One Re-authorize adds: sending files"');
+  // lane lark-upload-scope-split: the consent asks im:resource only (V2 is deprecated); a narrowed consent that dropped it
+  // while a HELD legacy V2 still carries files says so (no warning); none held ⇒ files are off, naming im:resource
+  const V2 = 'im:resource:upload', V1 = 'im:resource';
+  const kept = C.grantsText([{ what: 'files', missing: [], refused: [], dropped: [V1], wanted: true }], { vendor: 'Lark' });
+  const both = C.grantsText([{ what: 'files', missing: [V1], refused: [V1], dropped: [], wanted: true }], { vendor: 'Lark' });
+  const mix = C.grantsText([{ what: 'feed', missing: ['search:message'], refused: [], wanted: true }, { what: 'files', missing: [], refused: [], dropped: [V1], wanted: true }], { vendor: 'Lark' });
+  ok(kept.text === 'Lark refused im:resource — sending files still works' && !kept.warn, 'files carried by a held legacy V2, im:resource refused: "Lark refused im:resource — sending files still works", no warning', JSON.stringify(kept));
+  ok(both.text === 'Sending files is off: Lark refused im:resource — enable it in the app console and Re-authorize' && both.warn, 'none held, im:resource refused: sending files is off, by name, a warning', JSON.stringify(both));
+  ok(mix.text === 'One Re-authorize adds: new-message search and single chats · Lark refused im:resource — sending files still works' && C.grantsText([{ what: 'files', missing: [], refused: [], dropped: [V1], wanted: false }]).text === '', 'the kept line follows another grant\'s; an unwanted grant says nothing', JSON.stringify(mix));
+  ok(LK.capsOfScopes([...SEND, V1]).files.send === true && LK.capsOfScopes([...SEND, V2]).files.send === true && LK.capsOfScopes(SEND).files.send === false, 'caps.files.send: V1 alone ⇒ true, V2 alone ⇒ true, neither ⇒ false');
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

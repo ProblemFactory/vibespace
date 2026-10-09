@@ -18,12 +18,14 @@ const i18nKey = (s) => s;
 
 /** A member's state in words: {code, key, params}. `usage` = the member's passive
  *  usage row, judged ONLY through the pool's own quotaVerdict; `loginState` = the roster's
- *  login reader answer. Order: not signed in › login expired › out of quota › usable
- *  (a quota reading about a login that cannot serve is beside the point). */
-export function memberState({ loggedIn = true, loginState = null, usage = null, nowSec = Date.now() / 1000 } = {}) {
+ *  login reader answer; `serve` = the account's serve record (a LAPSED subscription, 2026-10-08).
+ *  Order: not signed in › login expired › subscription inactive › out of quota › usable
+ *  (a quota reading about a member that cannot serve is beside the point). */
+export function memberState({ loggedIn = true, loginState = null, usage = null, serve = null, nowSec = Date.now() / 1000 } = {}) {
   if (!loggedIn) return { code: 'signed-out', key: i18nKey('not signed in'), params: {} };
   const st = loginState && typeof loginState === 'object' ? loginState.state : null;
   if (st === 'expired' || st === 'logged-out') return { code: 'login-expired', key: i18nKey('login expired'), params: {} };
+  if (serve && typeof serve === 'object' && serve.state === 'lapsed') return { code: 'lapsed', key: i18nKey('skipped — subscription inactive'), params: {} };
   let v = null;
   try { v = usage ? quotaVerdict(usage, nowSec, { tier: 'hard' }) : null; } catch { v = null; }
   if (v && v.usable === false) {
@@ -170,6 +172,7 @@ export function gatherWords(r, t, { poolName = '', memberName = '', fmtTime = (m
   if (!r || !r.success) {
     if (r && r.code === 'target_cannot_serve') {
       const why = r.why === 'pin-login-dead' ? t(i18nKey('cannot sign in'))
+        : r.why === 'pin-lapsed' ? t(i18nKey('subscription inactive'))
         : r.why === 'pin-exhausted' ? (r.until ? t(i18nKey('out of quota until {time}'), { time: fmtTime(r.until) }) : t(i18nKey('out of quota')))
         : t(i18nKey('not usable in the pool right now'));
       return { type: 'error', text: t(i18nKey('{member}: {why} — nothing was moved. The pool brings its conversations back to it when it can serve again.'), { member: r.member || memberName, why }) };

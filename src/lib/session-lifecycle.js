@@ -1347,7 +1347,7 @@ export function installSessionLifecycle(App, ctx = {}) {
           const isLive = !!live?.webuiId;
           const pinId = isLive ? (live?.poolPin?.memberId || null) : (this.sidebar?.getSessionConfig?.(cfgKey)?.poolPin?.memberId || null);
           const roster = this._accounts?.accounts || [];
-          const stateOf = (id) => { const x = roster.find((y) => y.id === id) || {}; return memberState({ loggedIn: x.loggedIn !== false, loginState: x.loginState || null, usage: accountUsageStore(this, backend)?.[id] || null, nowSec: Date.now() / 1000 }); };
+          const stateOf = (id) => { const x = roster.find((y) => y.id === id) || {}; return memberState({ serve: x.serve || null, loggedIn: x.loggedIn !== false, loginState: x.loginState || null, usage: accountUsageStore(this, backend)?.[id] || null, nowSec: Date.now() / 1000 }); };
           const model = poolSubmenuModel({ pool: a, auth, pinId, live: isLive, applies: (a.hotSupported !== false && a.hot) ? 'now' : 'restart', stateOf });
           const fmtTime = (ms) => { try { return new Date(ms).toLocaleString(deviceLocale(), { weekday: 'short', hour: 'numeric', minute: '2-digit' }); } catch { return new Date(ms).toISOString(); } };
           const memUsage = (id) => (id ? usageHint(accountUsageStore(this, backend)?.[id] || null, bill.estimates ? (this._usageEstimates?.[id] || null) : null) : '');

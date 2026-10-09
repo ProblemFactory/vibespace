@@ -16,6 +16,10 @@
 //     服务, one click opens the page in the Web view (its frame shows the served text).
 //   ⑧ int232: an open Artifacts window survives a reload at its position — the REAL layout restore (real CDP clicks + a
 //     title-bar drag ⇒ the ordinary autosave; the boot restore replays its openSpec by itself; no hand replay).
+//   lane artifacts-auto-open-quiet: ① is typed INTO the composer — the doc opens beside the chat while the caret stays in
+//     the composer and the next keys land there (the chat stays the active window; one toast "… · Turn off", once per
+//     device; PNG $VS_AUTO_OPEN_PNG); ③ turns the setting off with the Artifacts chip's checkbox row; ⑨ the phone
+//     (390 px): turn 6 Writes docs/PHONE.md ⇒ its card, nothing opens, the screen stays.
 // Run: node scripts/test-artifacts-chrome.mjs   (SKIPs without chrome)
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -35,7 +39,7 @@ const stubDir = scratch('artifacts-chrome-stub');
 fs.mkdirSync(stubDir, { recursive: true });
 const CWD = path.join(fakeHome, 'proj');
 fs.mkdirSync(path.join(CWD, 'docs'), { recursive: true });
-const BRIEF = path.join(CWD, 'docs/BRIEF.md'), NOTES = path.join(CWD, 'docs/NOTES.md');
+const BRIEF = path.join(CWD, 'docs/BRIEF.md'), NOTES = path.join(CWD, 'docs/NOTES.md'), PHONE = path.join(CWD, 'docs/PHONE.md');
 const SITE = path.join(CWD, 'site.html'), LANDING = path.join(CWD, 'designs/landing'), ATT = path.join(CWD, 'attach.pdf'); // lane artifacts-registries
 const LIVE_SID = '5c3a0000-0000-4000-8000-0000000af001';
 let failed = 0, passed = 0;
@@ -56,10 +60,11 @@ const TURNS = [
   [A('msg_c1', [{ type: 'tool_use', id: 'toolu_af3', name: 'Write', input: { file_path: NOTES, content: '# Notes\n' } }]), R('toolu_af3'), A('msg_c2', [{ type: 'text', text: 'Notes written.' }])],
   [A('msg_d1', [{ type: 'tool_use', id: 'toolu_af4', name: 'Write', input: { file_path: SITE, content: '<!doctype html><title>Site</title><h1>Site</h1>' } }]), R('toolu_af4'), A('msg_d2', [{ type: 'text', text: 'Published and designed.' }])],
   [A('msg_e1', [{ type: 'text', text: 'Site served.' }])], // lane artifacts-services: turn 5 = the stub's REAL vibespace-job run (below)
+  [A('msg_f1', [{ type: 'tool_use', id: 'toolu_af6', name: 'Write', input: { file_path: PHONE, content: '# Phone\n' } }]), R('toolu_af6'), A('msg_f2', [{ type: 'text', text: 'Phone notes written.' }])], // lane artifacts-auto-open-quiet ⑨
 ];
 const SERVE = path.join(CWD, 'serve.js'); // a static page on an EPHEMERAL port (bound, then known — never a fixed port)
 fs.writeFileSync(SERVE, "require('http').createServer((q, r) => { r.setHeader('content-type', 'text/html'); r.end('<!doctype html><title>House 3D</title><h1>House 3D viewer</h1>'); }).listen(0, '127.0.0.1');\n");
-const DISK = [[BRIEF, '# Brief\n\nfirst draft\n'], [BRIEF, '# Brief\n\nsecond draft\n'], [NOTES, '# Notes\n'], [SITE, '<!doctype html><title>Site</title><h1>Site</h1>']];
+const DISK = [[BRIEF, '# Brief\n\nfirst draft\n'], [BRIEF, '# Brief\n\nsecond draft\n'], [NOTES, '# Notes\n'], [SITE, '<!doctype html><title>Site</title><h1>Site</h1>'], null, [PHONE, '# Phone\n']];
 const stubPath = path.join(stubDir, 'claude');
 fs.writeFileSync(stubPath, `#!${process.execPath}
 const fs = require('fs');
@@ -178,9 +183,25 @@ try {
   check('the live chat window attaches', await waitFor(`!!document.querySelector('.chat-view .chat-input')`, 20000));
   await sleep(600);
 
-  console.log('① the Write ⇒ one card, the chip, the document opens beside the chat (setting on)');
+  console.log('① the Write ⇒ one card, the chip, the document opens beside the chat (setting on) — QUIETLY, while the owner types');
+  // lane artifacts-auto-open-quiet: the owner is typing in the composer when the doc lands (focus emulation: a headless page is never "focused")
+  await cdp('Emulation.setFocusEmulationEnabled', { enabled: true });
+  const TA = `document.querySelector('.chat-view textarea.chat-input')`;
+  await evalJs(`${TA}.focus(); true`);
+  await cdp('Input.insertText', { text: 'hello ' });
+  const chatWin = await evalJs(`(${VIEW}).winInfo.id`);
   check('turn 1 played', await turn('Write me a brief', /Brief written/));
   await waitFor(`(${CARDS}).length >= 1 && !!document.querySelector('.chat-status-artifacts') && ${wins(BRIEF)} >= 1`, 8000);
+  await waitFor(`[...app.wm.windows.values()].some((w) => w.type === 'doc' && !!w.content.querySelector('.ProseMirror, .doc-window *'))`, 8000); await sleep(600); // the lazy editor mounted
+  const q1 = await evalJs(`(() => { const d = [...app.wm.windows.values()].find((w) => w.type === 'doc'); const ch = d && d._tabChain; return { activeIsComposer: document.activeElement === ${TA}, activeTag: document.activeElement && (document.activeElement.className || document.activeElement.tagName), wmActive: app.wm.activeWindowId, split: !!ch && ch.layout === 'split' && ch.tabs.includes(${JSON.stringify(chatWin)}), docShown: !!d && !d.content.classList.contains('tab-hidden') && d.content.getBoundingClientRect().width > 100, chatShown: !(${VIEW}).winInfo.content.classList.contains('tab-hidden'), toasts: [...document.querySelectorAll('#global-toasts .global-toast')].map((t) => t.textContent), taught: localStorage.getItem('vs-auto-open-taught') }; })()`);
+  check('the doc opened BESIDE the chat (a split of the two, both shown)', q1.split && q1.docShown && q1.chatShown, q1);
+  check('…and took NOTHING: document.activeElement is still the composer, the chat is still the active window', q1.activeIsComposer && q1.wmActive === chatWin, q1);
+  await cdp('Input.insertText', { text: 'world' });
+  const typed = await evalJs(`${TA}.value`);
+  check('the next keys continue INTO the composer ("hello " + "world")', typed === 'hello world', typed);
+  check('ONE toast says it and offers "Turn off"; this device is marked taught (vs-auto-open-taught)', q1.toasts.length === 1 && /A document the agent wrote opened beside the chat/.test(q1.toasts[0]) && /Turn off/.test(q1.toasts[0]) && q1.taught === '1', q1.toasts);
+  if (process.env.VS_AUTO_OPEN_PNG) { const r = await cdp('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(process.env.VS_AUTO_OPEN_PNG, Buffer.from(r.data, 'base64')); }
+  await evalJs(`(() => { const ta = ${TA}; ta.value = ''; ta.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
   const s1 = await state();
   check('ONE card for docs/BRIEF.md', s1.cards.length === 1 && s1.cards[0].name === 'BRIEF.md' && s1.cards[0].key === ':' + BRIEF, s1);
   check('the chip reads "Artifacts · 1"', s1.chip === 'Artifacts · 1', s1.chip);
@@ -198,7 +219,14 @@ try {
   check('an edit never re-opens (still one window for BRIEF.md)', s2.brief === 1, s2);
 
   console.log('③ the setting OFF ⇒ a new document is a card only; one click opens it');
-  await evalJs(`(app.settings.set('artifacts.autoOpenDocs', false), true)`);
+  // lane artifacts-auto-open-quiet: the switch where it happens — the Artifacts chip's popover row, the SAME setting
+  await evalJs(`document.querySelector('.chat-status-artifacts').click(); true`);
+  await waitFor(`!!document.querySelector('.chat-artifacts-panel .af-auto-cb')`, 5000);
+  const cb0 = await evalJs(`(() => { const c = document.querySelector('.chat-artifacts-panel .af-auto-cb'); return { checked: c.checked, words: c.parentElement.textContent }; })()`);
+  check('the chip\'s popover has the row "Open new documents automatically", checked while the setting is on', cb0.checked === true && cb0.words === 'Open new documents automatically', cb0);
+  await evalJs(`document.querySelector('.chat-artifacts-panel .af-auto-cb').click(); true`);
+  check('unticking it turns artifacts.autoOpenDocs off (the synced setting)', await waitFor(`app.settings.get('artifacts.autoOpenDocs') === false`, 3000));
+  await evalJs(`document.body.click(); document.querySelector('.chat-artifacts-panel')?.remove(); true`);
   check('turn 3 played', await turn('Write notes', /Notes written/));
   await waitFor(`(${CARDS}).length >= 2 && /Artifacts · 2/.test(document.querySelector('.chat-status-artifacts')?.textContent || '')`, 8000);
   await sleep(800);
@@ -443,6 +471,18 @@ try {
   const r8 = await afBox();
   check('after a reload the window comes back BY ITSELF (nothing re-opened by hand): ONE Artifacts window for this conversation, its rows drawn, at the position it was dragged to (±2 px) — not where a fresh one opens', back8 && r8.n === 1 && r8.sid === sid && r8.rows > 0 && Math.abs(r8.l - d8.l) <= 2 && Math.abs(r8.t - d8.t) <= 2 && Math.abs(r8.w - d8.w) <= 2 && Math.abs(r8.h - d8.h) <= 2, { d8, r8 });
   await afShot('R-1400-restored');
+
+  console.log('⑨ lane artifacts-auto-open-quiet — the phone (390 px): an automatic open opens nothing (the card + the chip only); the screen stays');
+  await cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+  await cdp('Page.reload', {}); await waitApp(); await sleep(1000);
+  await evalJs(`window.__sid = ${JSON.stringify(sid)}; if (!${VIEW}) app.attachSession(${JSON.stringify(sid)}, 'artifacts', ${JSON.stringify(CWD)}, { mode: 'chat', backend: 'claude' }); true`);
+  await waitFor(`!!(${VIEW}) && (${CARDS}).length >= 2`, 20000);
+  await evalJs(`(app.settings.set('artifacts.autoOpenDocs', true), app.wm.focusWindow((${VIEW}).winInfo.id), true)`); await sleep(400); // the setting back ON after the reload (a set just before a reload can lose its save)
+  const b9 = await evalJs(`({ active: app.wm.activeWindowId, n: app.wm.windows.size, on: app.settings.get('artifacts.autoOpenDocs') })`);
+  check('turn 6 played (Write docs/PHONE.md)', await turn('Write phone notes', /Phone notes written/));
+  await waitFor(`(${CARDS}).some((e) => e.dataset.key === ${JSON.stringify(':' + PHONE)})`, 8000); await sleep(1500);
+  const a9 = await evalJs(`({ active: app.wm.activeWindowId, n: app.wm.windows.size, phone: ${wins(PHONE)} })`);
+  check('the phone: PHONE.md\'s card is drawn, NO window opened for it, the chat stays the screen (setting on)', b9.on === true && a9.phone === 0 && a9.active === b9.active && a9.n === b9.n, { b9, a9 });
   check('no page error', pageErrors.length === 0, pageErrors.slice(0, 3));
 } catch (e) {
   failed++; console.error('✗ threw:', e && e.stack || e);

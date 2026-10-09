@@ -355,7 +355,7 @@ const {
   _vsuPending, usageAnchors, usageEstimator,
   armWorkflowUsageWatcher, darkSources, darkTaintedAccounts, kickPoolEval,
   markLimitBanner, maybePoolAutoSwitch, maybePoolAutoSwitchForPool, notePoolAuthFailure, noteTurnStopped, memberRemoved, decideDefaultTarget, fallbackDefaultTarget, removalTargetFor, setConversationPin, gatherPlan,
-  maybeRepinLockedModel, maybeStopOnFallback, modelsMatch, onMemberReadingFresh, onMemberLoginSuccess, autoCliReady, lastMemberReadAt, projectionRereadFor, projectionBillingIndex, // …+ the new-member wake (2026-09-08) + its LOGIN half, handed to the account routes (2026-09-29: read there since 2026-09-08, never passed — dead until now)
+  maybeRepinLockedModel, maybeStopOnFallback, modelsMatch, onMemberReadingFresh, onMemberLoginSuccess, autoCliReady, memberServeLapsed, lastMemberReadAt, projectionRereadFor, projectionBillingIndex, // …+ the new-member wake (2026-09-08) + its LOGIN half, handed to the account routes (2026-09-29: read there since 2026-09-08, never passed — dead until now)
   apiDerivedWindow, establishedWindows, repairIdentityAnchors, // B-855a: the two identity witnesses handed to setupUsage — the panel probe may only write the account it proves — + c2's STANDING identity repair (boot + POST /api/usage/repair-identity)
   poolChooserForModel, poolReadCache, probeUsageForAccountKey, readRawUsageCache, spendGuard, // the ONE raw usage-cache read (overage lives there — design §1.4) + THE SPEND CEILING (§4.4c): ONE authorizer in front of every turn nobody typed, per credential slot, persisted ⇒ src/server/spend-guard.js
   noteSessionProduced, noteTurnEnd: noteTurnEndEngine, noteWallSignal, noteStreamRecord, recordIsLate, beforeAutoResumeFire, fireIdentityFor, memberLoginState, probeUsageViaSession, recordCodexQuotaSignal, recordRateLimitEvent, resolveUsageKey, noteServedModel, noteModelFallback, servedDefinesModel, rerouteAnnouncedBy, settleTurnLane, // …+ the SERVED-MODEL pair + its FALLBACK PREDICATE (r3-r2: the parse's target-less lock latch asks it, so a classifier substitute never becomes the lock target that defines placement) + the REROUTE THIS RECORD ANNOUNCES (r4: placed BEFORE the served capture at both feeds — the incident's first announcement rides the very record the substitute answered) + the per-turn LANE settle (2026-09-13 r3): both stdout feeds destructure them from the `engine:` literals below, and neither was exported here — the whole round-1 fix was a TypeError in production
@@ -707,7 +707,7 @@ app.get('/api/sysinfo', async (req, res) => {
   try {
     const hostId = String(req.query.host || '');
     if (hostId) return res.json(await remoteSysinfo(hostId));
-    res.json({ ...(await sysinfo.read(path.join(__dirname, 'data'))), storeWrites: storeTiming.enabled() ? storeTiming.slowest() : undefined }); // the System window's "slowest store writes (last hour)" (design 011 lane 1)
+    res.json({ ...(await sysinfo.read(path.join(__dirname, 'data'))), storeWrites: storeTiming.enabled() ? storeTiming.slowest() : undefined, serverMemory: memSampler.latest() || undefined }); // the System window's "slowest store writes (last hour)" (design 011 lane 1)
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // Process manager (2.354.0, btop-like): full table + user-initiated signal.
@@ -915,8 +915,8 @@ process.on('uncaughtException', (e) => {
 });
 process.on('unhandledRejection', (e) => { try { telemetry.record({ kind: 'server-error', name: (e && e.message) || 'unhandledRejection', stack: e && e.stack }); } catch {} console.error('unhandledRejection:', e); });
 
-// Server performance metrics — RSS/heap, event-loop lag, live session count.
-// Every 5 min; names-and-numbers only, same ndjson ledger as everything else.
+const memSampler = require('./src/server/memory-sampler.js').create({ record: (ev) => telemetry.record(ev), log: console }); // lane server-memory-census: main heap + every worker isolate + external + native every 60 s (started at listen: ONE boot census line); GET /api/sysinfo serverMemory
+// Server performance metrics — RSS/heap, event-loop lag, live session count. Every 5 min; names-and-numbers only, same ndjson ledger as everything else.
 {
   let lagProbeAt = Date.now();
   let maxLagMs = 0;
@@ -1483,7 +1483,7 @@ const usage = setupUsage({ app, accounts, hosts, usageHistory, activeSessions, s
 // ── auto-cli quota refresh loop (2.329.0; src/server/auto-cli-loop.js since
 // quota r2 — its pacing state persists in data/auto-cli-state.json). One
 // `claude -p /usage` spawn per 60 s tick at most, burn-aware, never a cadence.
-require('./src/server/auto-cli-loop.js').createAutoCliLoop({ serverSetting, accounts, autoCliReady, USAGE_CACHE_DIR, usageIdentityGroupsCached, usageEstimator, projectionRereadFor, projectionBillingIndex, lastMemberReadAt, usage, onMemberReadingFresh, dataDir: path.join(__dirname, 'data') }).start();
+require('./src/server/auto-cli-loop.js').createAutoCliLoop({ serverSetting, accounts, autoCliReady, memberServeLapsed, USAGE_CACHE_DIR, usageIdentityGroupsCached, usageEstimator, projectionRereadFor, projectionBillingIndex, lastMemberReadAt, usage, onMemberReadingFresh, dataDir: path.join(__dirname, 'data') }).start();
 // Normalizer-level settings reads (chat.hideEmptyHooks) go through the REAL store
 MessageManager.getSetting = (k) => { try { return serverSetting(k); } catch { return undefined; } };
 const { getOAuthToken, usagePollingEnabled, summarizeCodexRateLimit, summarizeCodexRateLimits } = usage;
@@ -1757,7 +1757,7 @@ server.listen(PORT, HOST, () => {
   // no systemd — the entrypoint respawn loop restarts us when update.sh kills
   // this pid; dtach sessions live in the same PID namespace and survive).
   try { fs.writeFileSync(path.join(__dirname, 'data', 'server.pid'), String(process.pid)); } catch {}
-  setTimeout(() => jobsWiring.initAfterListen(), 1500); setTimeout(() => appsWiring.afterListen(), 2500); // Background Work engine: adopt-first, never blocks boot; Layer 0 apps: a rebuilt machine's apps put back (the replay marker hit = nothing)
+  setTimeout(() => jobsWiring.initAfterListen(), 1500); setTimeout(() => appsWiring.afterListen(), 2500); memSampler.start(); // Background Work engine: adopt-first, never blocks boot; Layer 0 apps: a rebuilt machine's apps put back (the replay marker hit = nothing)
   console.log(`  dtach: ${DTACH_CMD}, node: ${NODE_CMD}, env: ${ENV_CMD}, claude: ${CLAUDE_CMD}, codex: ${CODEX_CMD}`);
   if (process.platform === 'linux') console.log(`  X display: ${X_ENV.DISPLAY || '(none)'}${X_ENV.XAUTHORITY ? ' (xauth: ' + X_ENV.XAUTHORITY + ')' : ''} — clipboard image paste ${X_ENV.probed ? 'ready' : 'UNAVAILABLE (no working X display found)'}`);
 

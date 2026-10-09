@@ -33,6 +33,52 @@
 // existed. That is deliberate: a harness that cannot read a login deadline
 // must not have its members quietly demoted.
 const { loginUsable, loginSwitchTarget, loginRank, loginWallPhrase, loginBlockedText } = require('./login-expiry.js');
+// ── A LAPSED SUBSCRIPTION (2026-10-08, owner: "UCI Max 订阅到期没续费，系统会自动排除它吗？续费后不想重新添加").
+// Production: the pool moved four conversations + its default ONTO a member whose subscription had been
+// canceled (its cached readings looked fine — a lapse leaves no reading), the first turn failed with the
+// CLI's "Your organization has disabled Claude subscription access for Claude Code", and the 10-minute
+// in-memory auth mark (cleared early by any token REFRESH) let it attract placements again within minutes.
+// A lapse is a DURABLE member state: the account record carries `serve: {state: 'lapsed', since, why,
+// lastFail}` (accounts.setServeState — the atomic writer; membership, note, links and readings all kept),
+// written only when the harness's CLOSED census of vendor sentences says so (quota.classifyServeFailure).
+// The engine folds it into the readLogin info (`li.serve`), so every gate that already asks "can this
+// member serve?" asks it too — but it is NOT a login: its own reason ('subscription-lapsed'), its own
+// named list (`lapsedBlocked`), its own words. It never heals on a clock or a token refresh: only a
+// reading of the member's OWN window measured after its last failure clears it (lapseCleared).
+const SERVE_LAPSED = 'lapsed';
+function memberLapsed(li) { return !!(li && li.serve && li.serve.state === SERVE_LAPSED); }
+// THE EVIDENCE (verify r1 ②⑦, reproduced): a reading PRODUCED after the last failure, never a WRITE TIME — a
+// statusline render re-stamps the cache's `fetchedAt` with the CLI's LAST (pre-lapse) numbers, and keying on that
+// stamp cleared the lapse and walked the pool back onto it. `reading` = {at, source, fp, verified} of the member's
+// OWN window: `verified` = a panel answer whose identity was verified just now; source 'rate-limit-event' = the API
+// served a request on this window; else only numbers that MOVED since the failure (`fp` ≠ the one recorded at
+// `lastFail`) are new — the same numbers re-stamped are the old reading.
+function lapseCleared(serve, reading) {
+  if (!serve || serve.state !== SERVE_LAPSED || !reading || typeof reading !== 'object') return false;
+  const at = Number(reading.at), last = Number(serve.lastFail) || Number(serve.since) || 0;
+  if (!(Number.isFinite(at) && last > 0 && at > last)) return false;
+  if (reading.verified === true) return true;
+  if (reading.source === 'rate-limit-event') return true;
+  return !!(reading.fp && serve.fp && reading.fp !== serve.fp);
+}
+// The numbers of one cached reading, as a comparable string (what "moved" means above): each bucket's utilization +
+// reset, the model caps by name. Fetch/write stamps and provenance are NOT in it — a re-stamp keeps the fingerprint.
+function readingFingerprint(c) {
+  if (!c || typeof c !== 'object') return '';
+  const b = (x) => (x && typeof x === 'object' ? `${Number(x.utilization)}@${Number(x.resetsAt) || 0}` : '-');
+  const scoped = Array.isArray(c.scopedWeekly) ? c.scopedWeekly.map((s) => `${String((s && s.name) || '').toLowerCase()}=${b(s)}`).sort().join(',') : '';
+  const s = `5h:${b(c.fiveHour)}|7d:${b(c.sevenDay)}|${scoped}`;
+  return s === '5h:-|7d:-|' ? '' : s;
+}
+// One failure answered with the lapse sentence ⇒ the record to persist. `episode` = a NEW lapse (the one
+// the owner is told about); a repeat (a probe answering the same sentence) only moves `lastFail` (+ `fp`, the
+// numbers the cache held at that failure — a later re-stamp of them is not evidence).
+function serveAfterFailure(prev, { why = '', now = Date.now(), fp = '' } = {}) {
+  const w = String(why || '').slice(0, 200);
+  const f = String(fp || '').slice(0, 400);
+  if (prev && prev.state === SERVE_LAPSED) return { serve: { state: SERVE_LAPSED, since: Number(prev.since) || now, why: String(prev.why || w), lastFail: now, fp: f }, episode: false };
+  return { serve: { state: SERVE_LAPSED, since: now, why: w, lastFail: now, fp: f }, episode: true };
+}
 // AN EMPTY WINDOW IS NOT A CONSTRAINT AND NOT A DEADLINE (B-8b12, PURE→PURE).
 // A window that has not started answers `resetsAt = now + windowDuration` on
 // EVERY read — measured on this instance, 144 distinct "reset times" across 149
@@ -324,7 +370,7 @@ function rankPoolMembers({ members, readCache, nowSec, readLogin = null, credits
     // path picks ranked[0]; the daemon's sealed-orders reflex walks it while
     // this server is unreachable, possibly hours later) — so the NEAR window
     // applies here too: never hand anyone a login that is about to die.
-    if (readLogin && !loginSwitchTarget(readLogin(m.id))) continue;
+    if (readLogin && (!loginSwitchTarget(readLogin(m.id)) || memberLapsed(readLogin(m.id)))) continue; // a lapsed subscription is never ranked (its stale cache would win)
     const c = readCache(m.id);
     const r = accountRemaining(c, nowSec);
     const br = bucketRems(c, nowSec);
@@ -445,6 +491,7 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
   const softLine = (b) => (hot ? THRESH[b.kind].hot : THRESH[b.kind].hard);
   const bucketDetail = (brs) => ({
     ...(readLogin && !loginUsable(login(currentId)) ? { fromLogin: loginWallPhrase(login(currentId)) } : {}),
+    ...(readLogin && memberLapsed(login(currentId)) ? { fromLapsed: { since: Number(login(currentId).serve.since) || null } } : {}),
     deadBuckets: brs.filter((b) => b.remaining < THRESH[b.kind].hard).map(pct),
     lowBuckets: brs.filter((b) => b.remaining >= THRESH[b.kind].hard && b.remaining < softLine(b)).map(pct),
     liveBuckets: brs.filter((b) => b.remaining >= softLine(b)).map(pct),
@@ -473,7 +520,10 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
   // because "out of quota" would send the user to wait for a reset when the
   // fix is a 30-second re-login.
   const curLogin = login(currentId);
-  const curLoginDead = !loginUsable(curLogin);
+  // a LAPSED subscription cannot serve either — judged exactly like a dead login (escape now, past the
+  // no-data hold and the gain floor), and named apart from it (reason 'subscription-lapsed')
+  const curLapsed = memberLapsed(curLogin);
+  const curLoginDead = !loginUsable(curLogin) || curLapsed;
   // Per-KIND thresholds (user-designed): what matters is ABSOLUTE headroom —
   // a weekly bucket at 88% still holds ~$200, a 5h bucket at 90% one long
   // turn. exhausted = ANY bucket under its kind's (hot-raised) threshold.
@@ -501,6 +551,7 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
   let excludedN = 0;
   let quotaBlockedN = 0;   // dropped by the QUOTA gate — a different wall, a different sentence
   const loginBlocked = []; // [{id, name, state, msLeft}] — named, never a silently short list
+  const lapsedBlocked = []; // [{id, name, since}] — subscription inactive: never a candidate, named apart from logins
   const reserveBlocked = []; // [{id, name, remaining}] — held back by the reserve floor (D2)
   const overageBlocked = []; // [{id, name}] — billing paid overage (D3c)
   const creditsHeld = [];    // [{id, name}] — usage credits enabled: pay-per-use past 100 % (B-ad05)
@@ -520,6 +571,7 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
     //                 conversation ONTO a login with <30min left just buys a
     //                 second outage, so it is a LAST-RESORT target only.
     const li = login(m.id);
+    if (readLogin && memberLapsed(li)) { lapsedBlocked.push({ id: m.id, name: m.name, since: Number(li.serve.since) || null }); continue; }
     if (readLogin && !loginUsable(li)) { loginBlocked.push({ id: m.id, name: m.name, state: li.state, msLeft: li.msLeft ?? null }); continue; }
     const c = readCache(m.id);
     const r = dockRem(m.id, accountRemaining(c, nowSec));
@@ -554,6 +606,7 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
     ...(reserveBlocked.length ? { reserveBlocked, reserveFloorPct: floor } : {}),
     ...(overageBlocked.length ? { overageBlocked } : {}),
     ...(creditsHeld.length ? { creditsHeld } : {}),
+    ...(lapsedBlocked.length ? { lapsedBlocked } : {}),
   });
   ranked.sort(order);
   nearRanked.sort(order);
@@ -596,7 +649,8 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
     // list: round 1 let ONE login-blocked member outrank any number of
     // quota-dead ones and then sent the user to re-login accounts whose
     // logins were fine (round-2 verifier).
-    let why = excludedN ? 'all-rejected' : (loginBlocked.length && !quotaBlockedN) ? 'all-logins-expired' : 'no-members';
+    const lapsedOnly = lapsedBlocked.length && !quotaBlockedN; // a LAPSED subscription alone emptied the list (its own reason, its own words)
+    let why = excludedN ? 'all-rejected' : (loginBlocked.length && !quotaBlockedN) ? 'all-logins-expired' : lapsedOnly ? 'all-lapsed' : 'no-members';
     // PARKED ON CREDITS (B-ad05): the current member is a credits member, so
     // "no member can serve it" is false — it serves, billed pay-per-use. Say
     // THAT (the engine notices it once per 6 h per (pool, member)) and never
@@ -610,7 +664,7 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
     // serve it), `blockedWhy` keeps the sentence's own reason (all-rejected / all-logins-expired / …).
     if (notMember) {
       const listed = membership == null ? null : (typeof membership.has === 'function' ? membership : new Set(membership));
-      const holdTo = soonestUsableMember({ members: (members || []).filter((m) => m && m.id !== currentId && (!listed || listed.has(m.id))), readCache, nowSec, priority, creditsIds: credits });
+      const holdTo = soonestUsableMember({ members: (members || []).filter((m) => m && m.id !== currentId && (!listed || listed.has(m.id))), readCache, nowSec, priority, creditsIds: credits, readLogin });
       return none('removed-hold', { holdTo, blockedWhy: why, fromRemaining: cur.known ? cur.remaining : null, excluded: excludedN || undefined, loginBlocked: loginBlocked.length ? loginBlocked : undefined, ...barDetail(), ...bucketDetail(curBr) });
     }
     return none(why, { fromRemaining: cur.known ? cur.remaining : null, excluded: excludedN || undefined, loginBlocked: loginBlocked.length ? loginBlocked : undefined, ...(why === 'on-credits' ? { onCredits: { id: currentId }, billing: hardDead } : {}), ...barDetail(), ...bucketDetail(curBr) });
@@ -673,7 +727,7 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
       // reaches this branch).
       // a member the pool no longer LISTS leaves first: membership is the fact the
       // owner changed, whatever its login or quota also say
-      return { to: best.id, toName: best.name, fromRemaining: cur.known ? cur.remaining : null, toRemaining: best.remaining, reason: notMember ? 'not-a-member' : curLoginDead ? 'login-expired' : 'exhausted', band: 'hard', ...scrapsInfo(best), ...placed(best) };
+      return { to: best.id, toName: best.name, fromRemaining: cur.known ? cur.remaining : null, toRemaining: best.remaining, reason: notMember ? 'not-a-member' : curLapsed ? 'subscription-lapsed' : curLoginDead ? 'login-expired' : 'exhausted', band: 'hard', ...scrapsInfo(best), ...placed(best) };
     }
     // soft-exhausted (only a hot-raised threshold tripped): still usable,
     // so only move somewhere that can actually SETTLE
@@ -799,6 +853,7 @@ function decidePinnedPlacement(opts = {}) {
   if (!inMembership) why = 'pin-member-unknown';
   else if (!m) why = readLogin && !loginUsable(li) ? 'pin-login-dead' : 'pin-member-unknown';
   else if (exclude && exclude.includes(pinId)) why = 'pin-member-excluded';
+  else if (readLogin && memberLapsed(li)) why = 'pin-lapsed';
   else if (readLogin && !loginUsable(li)) why = 'pin-login-dead';
   else if (r.known && br.some((b) => b.remaining < THRESH[b.kind].hard)) why = 'pin-exhausted';
   if (!why) {
@@ -821,9 +876,10 @@ function decidePinnedPlacement(opts = {}) {
       // rules here: mid-turn it answered 'pin-hold' and the turn ran into the wall; on a pool
       // without hot switching it was skipped and the conversation sat on the spent member.
       const curGone = !!currentId && membership != null && !(typeof membership.has === 'function' ? membership.has(currentId) : membership.includes(currentId));
+      const curLapsed = !!currentId && !!readLogin && memberLapsed(readLogin(currentId));
       const curLoginDead = !!currentId && !!readLogin && !loginUsable(readLogin(currentId) || { state: 'unknown' });
       const curSpent = !!currentId && fr.known && bucketRems(fc, nowSec).some((b) => Math.max(0, b.remaining - dockCur) < THRESH[b.kind].hard);
-      const escape = curGone ? 'not-a-member' : curLoginDead ? 'login-expired' : curSpent ? 'exhausted' : null;
+      const escape = curGone ? 'not-a-member' : curLapsed ? 'subscription-lapsed' : curLoginDead ? 'login-expired' : curSpent ? 'exhausted' : null;
       if (escape) return { to: pinId, toName: pinnedName, fromRemaining, toRemaining: r.remaining, reason: 'pin-return', band: 'hard', escape, ...base };
       if (warm && warm.inTurn) return { to: null, reason: 'pin-hold', why: 'pin-mid-turn', wouldTo: pinId, wouldToName: pinnedName, ...base };
       return { to: pinId, toName: pinnedName, fromRemaining, toRemaining: r.remaining, reason: 'pin-return', ...base };
@@ -847,12 +903,15 @@ function decidePinnedPlacement(opts = {}) {
  * (pay-per-use past its quota, B-ad05) only after every other. `members` = the caller's candidates
  * (logged-in members the pool lists, the member being left excluded). → id | null
  */
-function soonestUsableMember({ members, readCache, nowSec, priority = null, creditsIds = null } = {}) {
+function soonestUsableMember({ members, readCache, nowSec, priority = null, creditsIds = null, readLogin = null } = {}) {
   const rank = priorityRankOf(priority);
+  // a LAPSED subscription (verify r1 ④, r2 ①) is NEVER a pick — removing the default must never park the pool (and every
+  // NEW conversation) on it; every candidate lapsed ⇒ null, exactly like a pool whose candidates are all signed out
+  const lapsed = (id) => !!(readLogin && memberLapsed(readLogin(id)));
   const credits = creditsIds && (typeof creditsIds.has === 'function' ? creditsIds : new Set(creditsIds));
   const rows = [];
   (members || []).forEach((m, i) => {
-    if (!m || typeof m.id !== 'string') return;
+    if (!m || typeof m.id !== 'string' || lapsed(m.id)) return;
     const v = quotaVerdict(readCache(m.id), nowSec, { tier: 'hard' });
     const at = v.usable === false ? (v.blockedUntil || Infinity) : 0;
     rows.push({ id: m.id, at, credits: !!(credits && credits.has(m.id)), rank: rank ? rank(m.id) : 0, i });
@@ -902,6 +961,10 @@ function poolBlockedNotice(d, { poolName = '', currentName = 'the current member
   // USAGE CREDITS (B-ad05): held back while the current member still has
   // quota — it is the last resort, and it bills pay-per-use once used.
   const creditsNames = (d?.creditsHeld || []).map((m) => m.name || m.id).join(', ');
+  // A LAPSED SUBSCRIPTION (2026-10-08): skipped, said in words — never a silently short list
+  const lapsedNames = (d?.lapsedBlocked || []).map((m) => m.name || m.id).join(', ');
+  const lapsedWall = d?.reason === 'all-lapsed';
+  const lapsedNote = lapsedNames && !lapsedWall ? ` Skipped because their subscription is inactive: ${lapsedNames}.` : '';
   const creditsNote = creditsNames ? ` Held back because they bill pay-per-use past their quota (usage credits): ${creditsNames} — the pool falls back to them only once ${currentName} is fully spent.` : '';
   // A bar is only the WHOLE story when nothing else emptied the list — the
   // same rule 'all-logins-expired' earned in round 2: a quota-emptied list
@@ -932,6 +995,7 @@ function poolBlockedNotice(d, { poolName = '', currentName = 'the current member
   if (d?.notMember) {
     const r0 = d.reason === 'removed-hold' ? d.blockedWhy : d.reason; // the hold keeps the sentence's own reason
     const others = r0 === 'all-logins-expired' ? `every other member needs a re-login — ${loginNames}`
+      : r0 === 'all-lapsed' ? `every other member's subscription is inactive — ${lapsedNames}`
       : r0 === 'all-rejected' ? 'every other member just refused this conversation'
       : `every other member is out of quota${loginNames ? ` or needs a re-login (${loginNames})` : ''}`;
     // (the owner's 全B, 2026-09-28: nothing keeps serving on the removed member — its conversations stop after
@@ -939,6 +1003,7 @@ function poolBlockedNotice(d, { poolName = '', currentName = 'the current member
     return `Pool "${poolName}": ${currentName} is no longer a member of the pool and no member can take over its conversations — ${others}.${heldNote}${payNote}${creditsNote} Its conversations stop after their current turn and wait until a member can serve them — add a member to continue sooner.`;
   }
   const loginWall = d?.reason === 'all-logins-expired'; // the OTHER members
+  const curLapsedWall = !d?.fromLogin && !!d?.fromLapsed; // the CURRENT member's subscription is inactive
   const curLoginWall = !!d?.fromLogin;                  // the CURRENT member
   // Quota facts are about the CURRENT member, so under a login wall they are a
   // side note ("its quota is also spent") and are dropped entirely when its
@@ -946,6 +1011,12 @@ function poolBlockedNotice(d, { poolName = '', currentName = 'the current member
   const alsoQuota = curLoginWall && dead ? ` (its quota is also spent: ${dead})` : '';
   const why = curLoginWall
     ? `${currentName}'s ${d.fromLogin} — no member can take over${alsoQuota}`
+    : curLapsedWall
+    ? `${currentName}'s subscription is inactive — no member can take over`
+    : loginWall
+    ? `no member can take it — ${loginNames}`
+    : lapsedWall
+    ? `no member can take it — the other members' subscriptions are inactive (${lapsedNames})`
     : loginWall
     ? `no member can take it — ${loginNames}`
     : barsOnly
@@ -966,12 +1037,14 @@ function poolBlockedNotice(d, { poolName = '', currentName = 'the current member
   const also = !namedInWhy && loginNames ? ` Also needing a re-login: ${loginNames}.` : '';
   const fix = curLoginWall
     ? ` Re-login ${currentName} in Manage Agents.`
+    : curLapsedWall || lapsedWall
+    ? ' A member whose subscription is inactive rejoins by itself once it answers again — Re-check it in Manage Agents after renewing, or add a member.'
     : loginWall
     ? ' Re-login those accounts in Manage Agents.'
     : barsOnly
     ? ' Adjust them in Settings → Spending, or add a member.'
     : ' Conversations on it will hit a limit until a window resets, you add a member, or you move them off the pool.';
-  return `Pool "${poolName}": ${why}.${alt}${also}${heldNote}${payNote}${creditsNote}${fix}`;
+  return `Pool "${poolName}": ${why}.${alt}${also}${heldNote}${payNote}${lapsedNote}${creditsNote}${fix}`;
 }
 
 /**
@@ -1297,4 +1370,4 @@ function conversationDisplayName(session, customNames, fallbackId = '') {
 
 module.exports = {
   quotaVerdict, conversationDisplayName, priorityOrder, priorityRankOf, decidePinnedPlacement, soonestUsableMember,
-  classifyAuthFailure, decideCliRefresh, cliRefreshWhy, nextScheduledReadMs, projectionBucketBought, projectionReadsAfter, PROJECTION_LEAD_SEC, PROJECTION_MOVE_MS, PROJECTION_WINDOW_MS, PROJECTION_MEMORY_MS, PROJECTION_RECORD_MAX_MS, projectCacheAhead, projectionCrossing, SWITCH_THRESHOLD_PCT, THRESH, RESET_GRACE_SEC, rankPoolMembers, UNKNOWN_REMAINING_PCT, PROACTIVE_MARGIN_SEC, MIN_GAIN_PCT, SPARE_MOVE_MARGIN_PCT, CACHE_TTL_SEC, CACHE_TTL_1M_SEC, cacheTtlSecFor, warmCache, conversationInTurn, bucketRemaining, bucketRems, accountRemaining, weeklyDeadline, spareLaneRemaining, decidePoolSwitch, poolBlockedNotice, poolCreditsNotice };
+  classifyAuthFailure, memberLapsed, lapseCleared, readingFingerprint, serveAfterFailure, SERVE_LAPSED, decideCliRefresh, cliRefreshWhy, nextScheduledReadMs, projectionBucketBought, projectionReadsAfter, PROJECTION_LEAD_SEC, PROJECTION_MOVE_MS, PROJECTION_WINDOW_MS, PROJECTION_MEMORY_MS, PROJECTION_RECORD_MAX_MS, projectCacheAhead, projectionCrossing, SWITCH_THRESHOLD_PCT, THRESH, RESET_GRACE_SEC, rankPoolMembers, UNKNOWN_REMAINING_PCT, PROACTIVE_MARGIN_SEC, MIN_GAIN_PCT, SPARE_MOVE_MARGIN_PCT, CACHE_TTL_SEC, CACHE_TTL_1M_SEC, cacheTtlSecFor, warmCache, conversationInTurn, bucketRemaining, bucketRems, accountRemaining, weeklyDeadline, spareLaneRemaining, decidePoolSwitch, poolBlockedNotice, poolCreditsNotice };

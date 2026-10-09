@@ -20,6 +20,7 @@
 const fs = require('fs');
 const path = require('path');
 const { parentPort, workerData, isMainThread } = require('worker_threads');
+const { answerMemory } = require('./worker-memory.js');
 const M = require('./search-model.js');
 
 if (isMainThread) throw new Error('search-index-worker runs only in a worker thread — the main thread never opens the search index');
@@ -281,6 +282,7 @@ const OPS = { appendMessages, clearConversation, indexConversation, indexArtifac
 // ONE FIFO: an async op (a parse) holds the queue until it is done.
 let chain = Promise.resolve();
 parentPort.on('message', (msg) => {
+  if (answerMemory(msg, parentPort)) return; // the memory census (src/worker-memory.js) — answered at once, never queued behind the FIFO
   const { id, op, payload } = msg || {};
   // close at once, between two statements (this thread runs one thing at a time): an op still queued finds no db and says so
   if (op === 'close') { closeDb(); post({ id, ok: true, result: { closed: true } }); return; }

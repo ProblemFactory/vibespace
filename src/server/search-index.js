@@ -22,6 +22,7 @@ const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const { Worker } = require('worker_threads');
+const { trackWorker } = require('../worker-memory.js');
 const M = require('../search-model.js');
 
 const REASON = Object.freeze({ OFF: 'not-started', STARTING: 'starting', NO_SQLITE: 'no-node-sqlite', LOCKED: 'locked-by-another-server', WRITE_FAILED: 'write-failed',
@@ -60,6 +61,7 @@ function create({ dataDir, homeDir = os.homedir(), workerFile = path.join(__dirn
 
   const setState = (s, r = null, extra = {}) => { st = s; reason = r; code = extra.code || null; };
   const onMessage = (m) => {
+    if (m && m.ev === 'memory') return; // the memory census's answer (askMemory takes it)
     if (m && m.ev === 'state') {
       if (m.state === 'ready') { ready = m; setState('ready'); log.log?.(`[search-index] ready: ${m.rows} messages, ${m.artifacts} files, ${m.bytes} bytes (${dir})${m.rebuilt ? ' — rebuilt: ' + m.rebuilt : ''}`); }
       else if (m.state === 'disabled') { setState('disabled', m.reason, { code: m.code }); log.log?.(`[search-index] off — ${m.reason}${m.code ? ' (' + m.code + ')' : ''}${m.detail ? ': ' + m.detail : ''}`); }
@@ -102,6 +104,7 @@ function create({ dataDir, homeDir = os.homedir(), workerFile = path.join(__dirn
       worker = new Worker(workerFile, { workerData: { dbDir: dir, dataReal, buffersDir, ctl: ctl.buffer }, ...(heapMb > 0 ? { resourceLimits: { maxOldGenerationSizeMb: heapMb, maxYoungGenerationSizeMb: 32 } } : {}) });
     } catch (e) { worker = null; setState('disabled', REASON.EXITED, { code: e.code }); return api; }
     Atomics.store(ctl, 0, 0); Atomics.store(ctl, 1, 0);
+    trackWorker('search-index', worker); // the memory census (src/worker-memory.js)
     worker.unref();
     worker.on('message', onMessage);
     worker.on('error', (e) => { log.error?.('[search-index] worker error:', e && e.message); });

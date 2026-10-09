@@ -25,6 +25,10 @@
 //      §10 (lane doc-window-width-export, 2.369.239): Fit / Comfortable widths at 1872 / 1000 / 390 px, the wide table scrolls,
 //      the ⋯ menu's Download .md / Export HTML / Print / Copy legs, a hostile .md; PNGs after-{fit,comfortable,menu}.png into
 //      $VS_DOC_WIDTH_SHOTS (else $VS_DOC_WINDOW_SHOTS). VS_DOC_WINDOW_ONLY=width runs §10 alone.
+//      §11 (lane doc-print-fidelity, 2.369.241): Print renders the markdown SOURCE — a lane brief
+//      (scripts/fixtures/doc-print/lane-brief.md) and a 40-paragraph document printed through Page.printToPDF: an <h1>,
+//      a 4-item list, no raw block, nothing wider than the A4 page box, no scroll container, ≥ 2 pages, every line's end
+//      in the PDF text; PNG after-print-p1.png (pdftoppm) into $VS_DOC_PRINT_SHOTS. VS_DOC_WINDOW_ONLY=print runs §11 alone.
 // Run: node scripts/test-doc-window.mjs   (SKIPs with evidence when google-chrome is absent; ~1 min)
 import fs from 'node:fs';
 import path from 'node:path';
@@ -535,7 +539,78 @@ try {
   ok(pageErrors.length === 0, '⑳ no page exception through §10', pageErrors.slice(0, 3));
   console.log('    widths:', S({ fit1872: g.fit1872.col, comf1872: g.comf1872.col, fit1000: g.fit1000.col, phone390: g.phone390.col, pane1872: g.fit1872.pane, pane1000: g.fit1000.pane, pane390: g.phone390.pane }));
   }
-  if (ONLY !== 'width') {
+  if (ONLY === '' || ONLY === 'print') {
+  // ── §11 print fidelity (lane doc-print-fidelity, 2.369.241 — owner 2026-10-08 "你这个存为PDF效果很差 需要优化": a lane brief
+  //    printed as monospace boxes cut at the right edge, scrollbars painted, "1 page") — Print / Export render the SOURCE
+  section('§11 Print / Save as PDF renders the markdown: a lane brief prints as a document — a heading, a list, no code box, nothing cut, real pages');
+  const PSHOTS = process.env.VS_DOC_PRINT_SHOTS || SHOTS;
+  await call('Page.addScriptToEvaluateOnNewDocument', { source: `try { localStorage.setItem('vibespace.lang', 'en'); } catch {}` });
+  if (!ok(!!(await boot(1280, 900, false)), '§11 the client re-booted at 1280×900 in en')) throw new Error('no app for §11');
+  const PD = path.join(fs.realpathSync(PROJ), 'print'); fs.mkdirSync(PD, { recursive: true }); fs.mkdirSync(OUT, { recursive: true });
+  const BRIEF = fs.readFileSync(path.join(REPO, 'scripts/fixtures/doc-print/lane-brief.md'), 'utf8');
+  const BP = path.join(PD, 'lane-brief.md'); fs.writeFileSync(BP, BRIEF);
+  const FORTY = '# Forty paragraphs\n\n' + Array.from({ length: 40 }, (_, i) => `Paragraph ${i + 1}: ` + 'the print sheet lets the document flow onto as many pages as it needs, '.repeat(4) + `https://example.com/${'a'.repeat(120)}\n`).join('\n')
+    + '\n```text\n' + Array.from({ length: 90 }, (_, i) => `line ${i + 1} ` + 'x'.repeat(i % 7 === 0 ? 220 : 40)).join('\n') + '\n```\n\n'
+    + '| ' + Array.from({ length: 11 }, (_, i) => 'Column ' + (i + 1)).join(' | ') + ' |\n|' + '---|'.repeat(11) + '\n| ' + Array.from({ length: 11 }, (_, i) => `cell-${i + 1}-` + 'w'.repeat(30)).join(' | ') + ' |\n\nENDOFFORTY\n';
+  const FP = path.join(PD, 'forty.md'); fs.writeFileSync(FP, FORTY);
+  const has = (bin) => { try { execFileSync('sh', ['-c', `command -v ${bin}`], { stdio: 'ignore' }); return true; } catch { return false; } };
+  const squash = (x) => (String(x).match(/[\p{L}\p{N}]+/gu) || []).join(''); // letters + digits only: wrapping and punctuation spacing aside
+  /** A second tab on `url`: steps(send) with its own CDP socket, closed after. */
+  async function tab(url, steps) {
+    const tgt = await call('Target.createTarget', { url });
+    const tws = await until(async () => (await (await fetch(`http://127.0.0.1:${CDP}/json`)).json()).find((t) => t.id === tgt.targetId)?.webSocketDebuggerUrl, 8000);
+    const w2 = new WebSocket(tws, { maxPayload: 256 * 1024 * 1024 }); await new Promise((r, e) => { w2.on('open', r); w2.on('error', e); });
+    let n = 0; const waits = new Map(); w2.on('message', (d) => { const m = JSON.parse(d); if (waits.has(m.id)) { waits.get(m.id)(m); waits.delete(m.id); } });
+    const send = (method, params = {}) => new Promise((r) => { const id = ++n; waits.set(id, r); w2.send(S({ id, method, params })); });
+    try { await sleep(700); return await steps(send); } finally { w2.close(); await call('Target.closeTarget', { targetId: tgt.targetId }); }
+  }
+  /** Open `p` in the Doc window, ⋯ → Print / Save as PDF; the print frame's document printed by Page.printToPDF (A4, its own
+   *  16 mm @page) + a layout census under print media at the page box's width (A4 − 2×16 mm = 673 CSS px). */
+  async function printOf(p, nm) {
+    await ev(`for (const w of [...app.wm.windows.values()]) app.wm.closeWindow(w.id); return true;`); await sleep(300);
+    await ev(`app.openFile(${S(p)}, ${S(nm)}, {}); return true;`);
+    const up = await until(() => ev(`const w = ${DW(p)}; const pm = w && w.content.offsetParent && w.content.querySelector('.doc-page .ProseMirror'); return pm && pm.childElementCount > 1 ? w.id : null;`), 20000, 200);
+    if (!up) return null;
+    const screen = await ev(`const w = ${DW(p)}; const pm = w.content.querySelector('.doc-page .ProseMirror'); return { raw: pm.querySelectorAll('pre.doc-rawblock').length, h1: pm.querySelectorAll('h1').length, ol: pm.querySelectorAll('ol > li').length };`);
+    await click(await rectIn('.doc-more', p)); await sleep(200);
+    const row = await ev(`const it = [...document.querySelectorAll('.context-menu .context-menu-item')].find((x) => x.textContent.trim() === 'Print / Save as PDF'); if (!it) return null; const r = it.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 };`);
+    if (row) await click(row); else return { screen };
+    const html = await until(() => ev(`const f = document.querySelector('iframe.doc-print-frame'); return f && f.dataset.printed === '1' ? f.srcdoc : null;`), 12000);
+    if (!html) return { screen };
+    const file = path.join(OUT, nm.replace(/\.md$/, '.print.html')); fs.writeFileSync(file, html);
+    return tab(pathToFileURL(file).href, async (send) => {
+      const pdf = await send('Page.printToPDF', { printBackground: true, preferCSSPageSize: true, paperWidth: 8.27, paperHeight: 11.69 });
+      const buf = Buffer.from(pdf.result?.data || '', 'base64'), pdfPath = path.join(OUT, nm.replace(/\.md$/, '.pdf')); fs.writeFileSync(pdfPath, buf);
+      const pages = (buf.toString('latin1').match(/\/Type\s*\/Page[^s]/g) || []).length;
+      const text = has('pdftotext') ? execFileSync('pdftotext', ['-layout', pdfPath, '-'], { encoding: 'utf8' }) : null;
+      await send('Emulation.setEmulatedMedia', { media: 'print' });
+      await send('Emulation.setDeviceMetricsOverride', { width: Math.floor((210 - 32) / 25.4 * 96), height: 1000, deviceScaleFactor: 1, mobile: false }); await sleep(300);
+      const r = await send('Runtime.evaluate', { returnByValue: true, expression: `(() => { const W = document.documentElement.clientWidth, over = [], clip = [];
+        for (const e of document.body.querySelectorAll('*')) { const b = e.getBoundingClientRect(); if (b.width && b.right > W + 1) over.push(e.tagName + ' ' + Math.round(b.right)); const cs = getComputedStyle(e); if (/auto|scroll|hidden/.test(cs.overflowX + ' ' + cs.overflowY) && (e.scrollWidth > e.clientWidth + 1 || e.scrollHeight > e.clientHeight + 1)) clip.push(e.tagName + ' ' + cs.overflowX + '/' + cs.overflowY); }
+        const art = document.querySelector('article'), li = [...art.querySelectorAll('ol > li')], h1 = art.querySelector('h1');
+        return { W, docW: document.documentElement.scrollWidth, over: over.slice(0, 5), nOver: over.length, clip: clip.slice(0, 5), raw: document.querySelectorAll('.doc-rawblock').length, first: art.firstElementChild && art.firstElementChild.tagName,
+          h1: h1 ? h1.textContent : '', ol: li.length, liInline: li.filter((x) => x.querySelector('code') && x.querySelector('strong')).length, pre: [...art.querySelectorAll('pre')].map((x) => getComputedStyle(x).whiteSpace + ' ' + getComputedStyle(x).overflowX + ' ' + getComputedStyle(x).breakInside),
+          cols: [...art.querySelectorAll('.tableWrapper')].map((x) => x.dataset.cols || ''), font: getComputedStyle(art).fontSize, height: art.getBoundingClientRect().height }; })()` });
+      return { screen, pages, pdfPath, bytes: buf.length, text, lay: r.result?.result?.value };
+    });
+  }
+  const b = await printOf(BP, 'lane-brief.md');
+  const bl = b && b.lay;
+  console.log('    the brief ON SCREEN (item 4 — unchanged):', S(b && b.screen), '— each raw block holds a bare `/p/<id>`: CommonMark inline raw HTML (an unknown tag), carried as written for editing');
+  ok(!!bl && bl.first === 'H1' && /^Lane pages-chip-groups — the chat's Pages chip/.test(bl.h1) && bl.h1.includes('/p/<id>') && bl.ol === 4 && bl.liInline === 4 && bl.raw === 0, '① the brief PRINTS as a document: the first line an <h1> (its /p/<id> kept as text), the numbered list an <ol> of 4 items with inline code + bold, NO raw block', bl && { first: bl.first, h1: bl.h1.slice(0, 80), ol: bl.ol, liInline: bl.liInline, raw: bl.raw });
+  ok(!!bl && bl.nOver === 0 && bl.docW <= bl.W && bl.clip.length === 0 && bl.pre.every((x) => /^pre-wrap visible auto$/.test(x)) && bl.font === '14.6667px', '② nothing wider than the A4 page box (673 px) under print media, no clipping / scroll container, pre wraps and may break across pages, body 11 pt', bl && { W: bl.W, docW: bl.docW, over: bl.over, clip: bl.clip, pre: bl.pre, font: bl.font });
+  const ends = BRIEF.split('\n').filter((l) => l.trim()).map((l) => (l.match(/[\p{L}\p{N}]+/gu) || []).slice(-3).join(''));
+  const missing = b && b.text != null ? ends.filter((e) => !squash(b.text).includes(e)) : null;
+  ok(!!b && b.pages >= 1 && b.bytes > 10000 && (missing === null || missing.length === 0), `③ the brief's PDF: ${b && b.pages} page(s) — every line's END is in the PDF text (nothing cut at the right edge)${missing === null ? ' [pdftotext absent: text leg skipped]' : ''}`, { pages: b && b.pages, missing });
+  if (PSHOTS && b && has('pdftoppm')) execFileSync('pdftoppm', ['-png', '-r', '90', '-f', '1', '-l', '1', '-singlefile', b.pdfPath, path.join(PSHOTS, 'after-print-p1')]);
+  if (PSHOTS && b && has('pdftoppm')) execFileSync('pdftoppm', ['-png', '-r', '90', '-f', '2', '-l', '2', '-singlefile', b.pdfPath, path.join(PSHOTS, 'after-print-p2')]);
+  ok(!PSHOTS || (has('pdftoppm') && fs.existsSync(path.join(PSHOTS, 'after-print-p1.png')) && fs.statSync(path.join(PSHOTS, 'after-print-p1.png')).size > 10000), `④ the PDF's page 1 rendered for the owner (pdftoppm): ${PSHOTS ? path.join(PSHOTS, 'after-print-p1.png') : '(no shots dir)'}`);
+  const f = await printOf(FP, 'forty.md');
+  const fl = f && f.lay;
+  ok(!!f && f.pages >= 2 && !!fl && fl.nOver === 0 && fl.clip.length === 0 && fl.raw === 0 && S(fl.cols) === S(['xl']) && (f.text == null || (f.text.includes('ENDOFFORTY') && /line 90 x/.test(f.text) && f.text.includes('Paragraph 40:'))), `⑤ 40 paragraphs + a 90-line code block + an 11-column table print on ${f && f.pages} pages (≥ 2): the code block breaks across pages, the table fits the page (type stepped: xl), the last line printed`, f && { pages: f.pages, over: fl && fl.over, clip: fl && fl.clip, cols: fl && fl.cols, height: fl && fl.height });
+  ok(pageErrors.length === 0, '⑥ no page exception through §11', pageErrors.slice(0, 3));
+  }
+  if (ONLY !== 'width' && ONLY !== 'print') {
 
   // ── §9 design 020 (lane doc-editor-ui, 2.369.223): the design desk's audit sample (every block kind) at 1280 / 390 ×
   //    dark / light × zh / en — the PNGs carry the audit's names with `after-` so the owner flips between before and after

@@ -25,6 +25,7 @@
 
 const path = require('path');
 const { Worker } = require('worker_threads');
+const { trackWorker } = require('./worker-memory');
 // Shared op implementation — also used as an in-main last-resort fallback if the
 // whole pool is unavailable (worker construction failing outright).
 const { runOp: _runOpInline } = require('./safe-fs-worker');
@@ -45,6 +46,7 @@ const DEFAULT_TIMEOUTS = {
 class SafeFs {
   constructor(opts = {}) {
     this.workerPath = opts.workerPath || path.join(__dirname, 'safe-fs-worker.js');
+    this.name = opts.name || 'safe-fs'; // the memory census names slot k `<name>#k` (src/worker-memory.js)
     // Inline fallback when the pool is down — defaults to the fs op set; other
     // worker scripts (transcript-worker) pass their own runOp (2.235.0).
     this._inlineRun = opts.inlineRun || _runOpInline;
@@ -80,7 +82,7 @@ class SafeFs {
         this._scheduleBackoff(rec);
         return;
       }
-      rec.worker = w;
+      rec.worker = trackWorker(this.name + '#' + rec.slot, w);
       rec.alive = true;
       w.on('message', (msg) => this._onMessage(rec, msg));
       w.on('error', (e) => this._onWorkerDown(rec, e));
@@ -98,6 +100,7 @@ class SafeFs {
   }
 
   _onMessage(rec, msg) {
+    if (msg && msg.ev === 'memory') return; // the memory census's answer (src/worker-memory.js askMemory takes it)
     rec.backoff = 0; // a worker that answers is healthy — reset the backoff
     const call = rec.inflight.get(msg.id);
     if (!call) return; // already timed out & rejected + worker being replaced

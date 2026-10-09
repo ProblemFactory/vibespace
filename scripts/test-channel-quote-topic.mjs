@@ -310,6 +310,7 @@ const NOT_CHANNELS = Object.freeze({
   'Sub-agent and review threads are listed too.': 'Codex sub-agent / review threads',
   'Each Codex session can pick its ChatGPT login (New Session dialog / card ⚙). Held in isolated logins, switchable per session; threads stay shared.': 'Codex threads',
   'The server is degraded — its main thread is saturated ({lag}ms median lag). Everything will feel slow; sessions are NOT dead.': 'a CPU thread (the event loop)',
+  'Workers ({n})': 'CPU threads (the server\'s worker_threads isolates — the System window\'s Server memory census, lane server-memory-census)',
   'Thread': 'collab-row.js: a Codex thread id (the channels meaning is tc(\'channel\', \'Thread\') = 话题)',
 });
 const AX_KEY_PREFIX = 'On: assistive tools see the messages near where you are reading';   // "浏览器 UI 线程" — a CPU thread

@@ -22,7 +22,7 @@ import { Plugin } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import M from '../doc-model.js';
 import { schema, extensions, loadDoc, saveDoc, sourceLine, docFidelity, safeHref, safeImageSrc } from './doc-markdown.js';
-import { WIDTH_KEY, widthChoice, nextWidth, columnRule, TABLE_CSS, downloadHref, exportName, localImagePath, exportDocument } from './doc-window-model.js';
+import { WIDTH_KEY, widthChoice, nextWidth, columnRule, TABLE_CSS, downloadHref, exportName, localImagePath, exportDocument, readingHtml, colsBand } from './doc-window-model.js';
 
 const POLL_MS = 2000;
 const SHEET_BELOW = 640;   // px of window width: below it the comments strip is a bottom sheet
@@ -179,7 +179,7 @@ export function commentOffer(open) {
 }
 
 export function mountDocWindow({ root, winInfo, host, path, name, from, signal, deps }) {
-  const { t, showToast, fetchJson, createModalShell, showConfirmDialog, showInputDialog, createPopover, showContextMenu, uiScale, onFileChanged, sameFile, makeRaw, isPhone, createBarFold, icons: I, sanitizeHtml, copyText } = deps;
+  const { t, showToast, fetchJson, createModalShell, showConfirmDialog, showInputDialog, createPopover, showContextMenu, uiScale, onFileChanged, sameFile, makeRaw, isPhone, createBarFold, icons: I, sanitizeHtml, copyText, Marked } = deps;
   if (!document.getElementById('doc-window-css')) { const st = mk('style'); st.id = 'doc-window-css'; st.textContent = CSS; document.head.appendChild(st); }
   let widthPref = 'fit'; try { widthPref = widthChoice(localStorage.getItem(WIDTH_KEY)); } catch { } // a DEVICE's choice
   const S = { width: widthPref, source: '', base: 0, mode: 'rich', verdict: null, dirty: false, kept: 0, confirmed: 0, busy: false, view: null, ed: null, loaded: null, raw: null, rawBefore: '', owner: null, from, sending: false, at: '', note: '', stripOpen: false };
@@ -501,10 +501,12 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
     }
     saveAs(downloadHref(host, path), name);
   }
-  /** The rendered fragment through THE one sanitizer, tables wrapped (they scroll), images beside the file inlined as data URLs. */
+  /** THE READING FRAGMENT: the markdown as it stands (sourceNow — unsaved edits included) through the house renderer + THE
+   *  one sanitizer (readingHtml) — never the editor's DOM, so a raw block there is a heading / a list here; tables wrapped
+   *  (they scroll on screen; in print a wide one steps its type down by its columns), images beside the file inlined. */
   async function exportBody() {
-    const d = new DOMParser().parseFromString('<!doctype html><body>' + sanitizeHtml(S.ed.getHTML()) + '</body>', 'text/html'); // an inert document: nothing in it runs
-    for (const tb of d.querySelectorAll('table')) { const w = d.createElement('div'); w.className = 'tableWrapper'; tb.replaceWith(w); w.appendChild(tb); }
+    const d = new DOMParser().parseFromString('<!doctype html><body>' + readingHtml(sourceNow(), { Marked, sanitize: sanitizeHtml }) + '</body>', 'text/html'); // an inert document: nothing in it runs
+    for (const tb of d.querySelectorAll('table')) { const w = d.createElement('div'); w.className = 'tableWrapper'; const band = colsBand(tb.rows[0] ? tb.rows[0].cells.length : 0); if (band) w.dataset.cols = band; tb.replaceWith(w); w.appendChild(tb); }
     for (const img of d.querySelectorAll('img[src]')) {
       const p = localImagePath(img.getAttribute('src'), path); if (!p) continue;
       try {
@@ -540,7 +542,11 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
     dropPrint();
     const f = mk('iframe', 'doc-print-frame'); f.setAttribute('sandbox', 'allow-same-origin allow-modals'); f.setAttribute('aria-hidden', 'true'); f.tabIndex = -1;
     f.style.cssText = 'position:fixed;left:-10000px;top:0;width:794px;height:1123px;border:0';
-    f.addEventListener('load', () => {
+    // print once the frame's fonts and images are decoded (≤ 5 s) — page 2+ is laid out from what is there
+    f.addEventListener('load', async () => {
+      const d = f.contentDocument;
+      try { await Promise.race([Promise.all([d.fonts ? d.fonts.ready : null, ...[...d.images].map((im) => im.decode().catch(() => {}))]), new Promise((r) => { setTimeout(r, 5000); })]); } catch { /* print what is there */ }
+      if (signal.aborted || printFrame !== f) return;
       try { f.contentWindow.focus(); f.contentWindow.print(); f.dataset.printed = '1'; } catch (e) { say(t('Could not print: {why}', { why: e.message })); }
     }, { once: true, signal });
     f.srcdoc = html; document.body.appendChild(f); printFrame = f; printTimer = setTimeout(dropPrint, 120000);

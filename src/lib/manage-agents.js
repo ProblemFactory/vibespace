@@ -122,6 +122,29 @@ export function loginExpiryChipHtml(a, { local = true } = {}) {
  *  rest — provenance, a healthy token, the note LAST — shares ONE ellipsis box
  *  (.acct-extra-soft), so the clip always eats the note first, then provenance;
  *  the note's whole text stays in its title and ⋯ → Account note. */
+/** A LAPSED SUBSCRIPTION's chip (2026-10-08): "subscription inactive since {when} · Re-check" on the member's own
+ *  row. The pool already skips it and keeps its membership; Re-check runs the human-gated ⟳ for this one account
+ *  (POST /api/usage/refresh) — the panel's answer is the evidence that re-admits it. Nothing to re-add. */
+export function serveLapsedChipHtml(a, { mode = 'manual', pooled = true } = {}) {
+  const s = a && a.serve;
+  if (!s || typeof s !== 'object' || s.state !== 'lapsed') return '';
+  const when = loginWhenText(s.since);
+  // said as it is (verify r1 ⑧, r2 ②③): by the account's facts (a pool lists it, or none does) and by the instance's
+  // usage-refresh setting — only 'auto-cli' asks by itself, 'manual' needs the person's Re-check, and under 'off' the
+  // ⟳ route refuses (403), so the chip names the setting and offers NO Re-check verb
+  const why = escHtml(s.why || '');
+  const head = pooled
+    ? t('This account’s subscription no longer serves ({why}). The pool skips it and keeps its membership, note and readings.', { why })
+    : t('This account’s subscription no longer serves ({why}); its conversations fail until it answers again.', { why });
+  const tail = mode === 'off' ? t('Usage refresh is Off in Settings — turn it on to check it, or run a turn on it directly.')
+    : mode === 'auto-cli' ? t('It rejoins by itself once it answers again (checked about hourly). Click to check now.')
+    : t('Nothing asks it by itself under the current usage-refresh setting — after renewing, click to check it now.');
+  const label = `${ROSTER_ICONS.CLOCK}${t('subscription inactive since {when}', { when: escHtml(when) })}`;
+  if (mode === 'off') return ` <span class="acct-blocked-hint acct-serve-chip-off" style="color:var(--red,#e55)" title="${head} ${tail}">${label}</span>`;
+  return ` <span class="acct-blocked-hint acct-serve-chip" role="button" tabindex="0" data-serve-recheck="${escHtml(a.id)}" style="color:var(--red,#e55)"`
+    + ` title="${head} ${tail}">${label} · ${t('Re-check')}</span>`;
+}
+
 export function acctExtrasHtml({ login = '', oat = '', oatWarn = false, prov = '', note = '' } = {}) {
   const hard = login + (oatWarn ? oat : '');
   const soft = prov + (oatWarn ? '' : oat) + note;
@@ -809,7 +832,7 @@ export function installManageAgents(App, ctx = {}) {
       order: Array.isArray(fresh.priority) ? fresh.priority.slice() : [],
     };
     const nowSec = () => Date.now() / 1000;
-    const stateOf = (id) => { const x = subs.find((y) => y.id === id) || {}; return memberState({ loggedIn: !!x.loggedIn, loginState: x.loginState || null, usage: this._accountUsage?.[id] || null, nowSec: nowSec() }); };
+    const stateOf = (id) => { const x = subs.find((y) => y.id === id) || {}; return memberState({ serve: x.serve || null, loggedIn: !!x.loggedIn, loginState: x.loginState || null, usage: this._accountUsage?.[id] || null, nowSec: nowSec() }); };
     const fmtTime = (ms) => { try { return new Date(ms).toLocaleString(deviceLocale(), { weekday: 'short', hour: 'numeric', minute: '2-digit' }); } catch { return new Date(ms).toISOString(); } };
     const draw = () => {
       const rows = priorityRows({ members: subs, checked: st.checked, order: st.order, mode: st.mode, current: fresh.current || null, stateOf });
@@ -2437,7 +2460,8 @@ export function installManageAgents(App, ctx = {}) {
         : '';
       // LOGIN-SESSION expiry (2026-09-07): the chip that makes a dying login
       // visible BEFORE a turn dies on it. Pools show their members' worst.
-      const loginTag = (isSub || a.pooled) ? loginExpiryChipHtml(a, { local: !selectedHost }) : '';
+      // (+ a LAPSED subscription's chip, 2026-10-08 — the same hard slot: a member the pool skips is said beside its login)
+      const loginTag = ((isSub || a.pooled) ? loginExpiryChipHtml(a, { local: !selectedHost }) : '') + (isSub && !selectedHost ? serveLapsedChipHtml(a, { mode: this.settings?.get?.('accounts.onDemandQuotaRefresh') || 'manual', pooled: a.inPools !== false }) : '');
       const extrasTag = acctExtrasHtml({ login: loginTag, oat: oatTag, oatWarn: !!oatTag && a.oatDaysLeft <= 30, prov: provTag, note: noteTag });
       const isPool = !!a.pooled;
       // ONE usage snapshot per row (the cell below and the credits tag read the
@@ -2779,6 +2803,23 @@ export function installManageAgents(App, ctx = {}) {
       // The chip IS the re-login button (no new flow — it runs exactly what
       // the ⋯ menu's "Re-login on this machine…" runs). A pool's chip carries
       // the MEMBER id, so it re-logs in the account that is actually dying.
+      // A LAPSED SUBSCRIPTION's Re-check: the SAME human-gated ⟳ for this one account (no new vendor surface)
+      const serveChip = e.target.closest?.('.acct-serve-chip');
+      if (serveChip) {
+        const target = serveChip.dataset.serveRecheck || id;
+        const name = ((accts.accounts || []).find((x) => x.id === target) || a)?.name || target;
+        const inPools = ((accts.accounts || []).find((x) => x.id === target) || a)?.inPools !== false; // no pool lists it ⇒ no pool words (verify r2 ③)
+        fetchJson('/api/usage/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ account: target }) })
+          .catch(() => null)
+          .then((r) => {
+            if (r && r.success) showToast(inPools ? t('{name} answered — it is back in its pools', { name }) : t('{name} answered — its subscription is active again', { name }));
+            else if (r && r.refused) showToast(inPools ? t('{name} answered, but the reading was refused as another account’s window — the pool keeps skipping it', { name }) : t('{name} answered, but the reading was refused as another account’s window — it stays inactive', { name }), { type: 'error' });
+            else if (r && r.error && !r.lapsed) showToast(String(r.error), { type: 'error' }); // the ROUTE's own refusal (e.g. the refresh is Off in Settings — verify r2 ②), never a vendor's
+            else showToast(inPools ? t('{name} still does not answer — the pool keeps skipping it', { name }) : t('{name} still does not answer — its subscription stays inactive', { name }), { type: 'error' });
+            refresh();
+          });
+        return;
+      }
       const chip = e.target.closest?.('.acct-login-chip');
       if (chip) {
         const target = chip.dataset.relogin || id;

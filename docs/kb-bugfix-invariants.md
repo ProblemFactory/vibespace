@@ -488,6 +488,18 @@
 - A DOCUMENT WINDOW WASTED HALF ITS WIDTH AND CLIPPED ITS TABLE (lane doc-window-width-export) — 不变量 = a document fills the window it is given unless the person chose a reading width; a table scrolls, never clipped; a document leaves as the file, as HTML or as a print
 - A 'REPLY TO WHAT THE AGENT SENT' WAS ANY DM MESSAGE WITHIN 24 H (B-a871): clause (e) was a clock under a 'next message' label; 2 unrelated peer messages woke the agent (billed). FIX = clause cut; a census per adapter. 不变量 = a reply is the vendor's own quote / reply / thread marker, never a clock
 - A LARK SYSTEM NOTICE WAS A PEER MESSAGE FROM 'unknown' (B-ef03): a recall notice with no sender became a record every rule could match. FIX = kind system, no rule, no unread, a dim line. 不变量 = a message from nobody is the vendor's notice, never a peer's
+- THE POOL KEPT ROUTING ONTO A LAPSED SUBSCRIPTION (UCI Max, 2026-10-08): a 10-min in-memory auth mark, cleared by a token refresh ⇒ four conversations placed on it. FIX = a persisted lapsed state, re-admitted by evidence. 不变量 = a member that cannot serve is set aside until it proves it can
+- A LARK CONSENT ASKED A DEPRECATED SCOPE (im:resource:upload, owner 2026-10-08): no app can add it, Lark refused every consent naming it, the retry dropped the working V1 too. FIX = the consent asks im:resource only. 不变量 = never ask a scope the vendor no longer grants
+
+## THE POOL KEPT ROUTING ONTO A LAPSED SUBSCRIPTION (lane pool-subscription-lapsed, 2.369.241 — owner 2026-10-08)
+
+**Symptom.** The owner canceled UCI Max (record note "0248 08 Canceled"; pool "全部", 13 members, nothing excluded). 13:29:29Z the pool moved four conversations + its default ONTO it — its cached readings looked best, and a lapse leaves no reading. 13:30:57Z the first turn failed: "Your organization has disabled Claude subscription access for Claude Code · Use an Anthropic API key instead…". `notePoolAuthFailure` marked and evicted; 21:26Z the same failure fired again on a fresh server.
+
+**Cause.** The only memory of it was the 2.335.0 auth-failure mark: 10 min, in memory (gone at a restart), and cleared whenever the token material changed — a routine access-token refresh. Its stale cache kept ranking it first.
+
+**Fix.** A closed census of the vendor's lapse sentences on the harness descriptor (`quota.classifyServeFailure`); a lapse is persisted ON the account record (`serve`), folded into the reader every placement gate consults, said once per episode, and cleared only by a reading of the member's own window PRODUCED after its last failure — a verified panel, a rate_limit_event, or moved numbers; never a write time (verify r1: a statusline re-stamp of the pre-lapse numbers re-admitted it). The money verdict (`quotaVerdictFor`) and the default's fallback refuse it too; the idle rung asks every 30–60 min only under 'auto-cli', Re-check asks now. An unknown wording stays the 10-minute mark.
+
+**Invariant.** A member that cannot serve is set aside until it proves it can — never re-admitted by a clock or a token refresh; nothing to re-add after renewal. **Gate.** test-pool-serve-lapsed, test-pool-auto (LAPSED:).
 
 ## A DOCUMENT WINDOW WASTED HALF ITS WIDTH AND CLIPPED ITS TABLE (lane doc-window-width-export, 2.369.239 — owner 2026-10-08)
 

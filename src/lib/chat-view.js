@@ -1,5 +1,6 @@
 import { workflowNameFromAck, shortWorkflowName } from '../workflow-name.js';
 import { parseSetModelEcho } from '../model-echo.js'; // the ONE /model echo parser (shared with the server's lock repin)
+import { quietOpenVerdict, teachVerdict, TAUGHT_KEY } from './artifact-auto-open.js'; // lane artifacts-auto-open-quiet: the doc's automatic open is quiet
 import { copyText, escHtml, showToast, showConfirmDialog, collectDroppedFiles, showImageOverlay, fetchJson, showContextMenu, onOutsidePress } from './utils.js';
 import { installChatSeek } from './chat-view-seek.js';
 import { metric, track } from './telemetry-client.js';
@@ -3975,12 +3976,12 @@ class ChatView {
   // ── LANE ARTIFACTS-MODEL: the deliverables (src/artifacts.js rows; the server's registry) ──
   /** Open a deliverable in its kind's viewer BESIDE this chat (`from` — the Cmd+click door). lane artifacts-registries: a
    *  published page opens its /p/ link (an unpublished one its source file), a design the Design window. */
-  _openArtifact(b) {
+  _openArtifact(b, { quiet = false } = {}) {
     if (b && b.kind === 'service') { const o = serviceOpenSpec(b); if (this.app.openBrowser) this.app.openBrowser(o.url, { proxy: o.proxy }); else window.open(serviceHref(b), '_blank', 'noopener'); return; } // lane artifacts-services: the Web view, never a new tab by default; -url: proxy mode for a proxied row
     if (!b || !b.path) return;
     if (b.kind === 'page' && b.url && (b.state === 'published' || b.presented)) { const u = new URL(b.url, location.origin).href; if (this.app.openBrowser) this.app.openBrowser(u); else window.open(u, '_blank'); return; }
     if (b.kind === 'design') { this.app.openDesign({ host: b.host || '', dir: b.path, sessionId: this.sessionId }); return; }
-    this.app.openFile(b.path, b.name || b.path.split('/').pop(), { host: b.host || undefined, from: this.winInfo?.id || null });
+    this.app.openFile(b.path, b.name || b.path.split('/').pop(), { host: b.host || undefined, from: this.winInfo?.id || null, ...(quiet ? { quiet: true } : {}) });
   }
   /** The Artifacts chip: the server's list for the WHOLE conversation (debounced; a burst of edits = one read). */
   _refreshArtifacts() {
@@ -3991,14 +3992,21 @@ class ChatView {
     }, 250);
   }
   /** A card's LIVE birth: the chip re-reads; a doc the agent just WROTE opens beside the chat when the setting is on
-   *  and this chat is on screen (artifacts.autoOpenDocs; the server marks only a doc's write-birth — an edit never re-opens). */
+   *  and this chat is on screen (artifacts.autoOpenDocs; the server marks only a doc's write-birth — an edit never re-opens).
+   *  lane artifacts-auto-open-quiet: that open is QUIET (PURE quietOpenVerdict — never the focus, the caret or the
+   *  keyboard; the phone opens nothing) and the first one on this device says where the switch is, once. */
   _onArtifactCard(msg, live) {
     this._refreshArtifacts();
     const b = msg?.content?.[0];
     if (!live || !b || !b.autoOpen || this._loadingHistory || this._suspended) return;
-    if (!(this.app.settings?.get('artifacts.autoOpenDocs') ?? true)) return;
     if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
-    this._openArtifact(b);
+    const verdict = quietOpenVerdict({ auto: true, phone: !!this.app.isMobile || window.innerWidth <= 768, setting: this.app.settings?.get('artifacts.autoOpenDocs') ?? true });
+    if (verdict !== 'quiet') return;
+    this._openArtifact(b, { quiet: true });
+    let taught = true; try { taught = !!localStorage.getItem(TAUGHT_KEY); } catch { }
+    if (!teachVerdict({ verdict, taught })) return;
+    try { localStorage.setItem(TAUGHT_KEY, '1'); } catch { }
+    showToast(t('A document the agent wrote opened beside the chat'), { duration: 10000, actions: [{ label: t('Turn off'), run: () => this.app.settings?.set('artifacts.autoOpenDocs', false) }] });
   }
 
   _onEditMessage(id, fields) {

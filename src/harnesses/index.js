@@ -52,7 +52,7 @@ function assertQuotaContract(id, quota) {
   for (const fn of ['normalize', 'signalFromStream', 'classifyAuthFailure']) {
     if (typeof quota[fn] !== 'function') throw new Error(`harness '${id}': quota.${fn} must be a function`);
   }
-  for (const fn of ['readLive', 'settleLive']) {
+  for (const fn of ['readLive', 'settleLive', 'classifyServeFailure']) { // classifyServeFailure: a LAPSED subscription's closed census (2026-10-08) — optional, the engine asks with ?.
     if (quota[fn] !== undefined && typeof quota[fn] !== 'function') throw new Error(`harness '${id}': quota.${fn} must be a function when declared`);
   }
   if (!QUOTA_PROBE_RUNGS.includes(quota.probe)) throw new Error(`harness '${id}': quota.probe must be one of ${QUOTA_PROBE_RUNGS.map(String).join('|')} (got ${String(quota.probe)})`);
