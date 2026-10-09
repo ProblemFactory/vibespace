@@ -187,6 +187,11 @@ ok(fake.oauth && fake.lent, '② its declared cells reach the OAuth facts: OAuth
     const lifted = before.filter((b, i) => childDelta(b, after[i]) !== b).length;
     ok(lifted > 0, `③ the child-resolver delta is real: ${lifted} OAuth rows' children now read OAuth-backed (their parent's row)`);
     before = before.map((b, i) => childDelta(b, after[i]));
+    // lane vfs-cache-local: every list row gains ONE cell, `cache` (where its VFS cache lives) — the named delta, dropped
+    // from the tree's answer before comparing (and proven present)
+    const CELL = (x) => JSON.parse(JSON.stringify(x, (k, v) => (v && typeof v === 'object' && !Array.isArray(v) && 'mounted' in v && 'cache' in v) ? (({ cache, ...r }) => r)(v) : v));
+    ok(JSON.stringify(after).includes('"cache":{"dir":'), '③ the cache-cell delta is real: list rows carry cache {dir, network, pendingMove, why}');
+    after.splice(0, after.length, ...after.map(CELL));
     let same = 0; const diffs = [];
     before.forEach((b, i) => { if (JSON.stringify(b) === JSON.stringify(after[i])) same++; else diffs.push(`scenario ${i}: ` + firstDiff(b, after[i])); });
     ok(before.length === after.length && diffs.length === 0, `③ every provider answers the same before and after the move (${same}/${before.length} scenarios: add · list · config · child · edit · rclone env · OAuth/share facts · re-auth client · raw-rclone adoption)`, diffs.join('\n    '));

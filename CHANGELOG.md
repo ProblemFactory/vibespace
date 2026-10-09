@@ -2,6 +2,19 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.246 — 2026-10-09
+
+### Added
+- A file or picture you attach in a channel reply can be opened and looked at before you send it.
+
+### Changed
+- A mounted drive's cache lives on local disk when the workspace is on a network filesystem — faster reconnects, and files waiting to upload are never lost.
+- The server keeps far less in memory: the usage ledger and transcript caches are bounded and read from disk on demand — the same numbers, a smaller server.
+
+### Fixed
+- A document block the editor cannot edit in place is still shown as a document — tables with inline HTML read as tables — with one press to edit its source.
+- The clock on an account whose subscription lapsed is a small icon again, not a column-wide drawing.
+
 ## 2.369.245 — 2026-10-09
 
 ### Added

@@ -33,7 +33,7 @@ for (let i = 0; i < N; i++) {
 }
 fs.writeFileSync(path.join(dataDir, 'usage-history', 'events-2026-08.ndjson'), lines.slice(0, 30000).join('\n') + '\n');
 fs.writeFileSync(path.join(dataDir, 'usage-history', 'events-2026-09.ndjson'), lines.slice(30000).join('\n') + '\n');
-const uh = new UsageHistory({ dataDir, homeDir: dataDir });
+const uh = new UsageHistory({ dataDir, homeDir: dataDir }); uh.ledgerWindowMs = uh.ledgerHotMaxBytes = 1e15; // B-9428: the fixed-date rows stay the resident array these brute-force references walk (the window's own parity: test-cache-bounds §2)
 const all = uh._loadEvents();
 ok(all.length === N, `ledger loads ${all.length} events across two shards`);
 
@@ -98,7 +98,7 @@ const P0 = Date.UTC(2026, 7, 6);
 const priceLines = [];
 for (let i = 0; i < 200; i++) priceLines.push(JSON.stringify({ rid: 'p' + i, ts: P0 + i * 60000, sid: 's1', acct: 'sub-a', model: 'claude-opus-5', cwd: '/w', i: 1000, cw5: 0, cw1: 0, cr: 0, o: 500, tier: 'default' }));
 fs.writeFileSync(path.join(priceDir, 'usage-history', 'events-2026-08.ndjson'), priceLines.join('\n') + '\n');
-const uhP = new UsageHistory({ dataDir: priceDir, homeDir: priceDir });
+const uhP = new UsageHistory({ dataDir: priceDir, homeDir: priceDir }); uhP.ledgerWindowMs = uhP.ledgerHotMaxBytes = 1e15; // B-9428: the fixed-date rows stay the resident array these brute-force references walk (the window's own parity: test-cache-bounds §2)
 const wFrom = P0 - 1, wTo = P0 + 200 * 60000;
 const priceTruth = () => { let t = 0; for (const ev of uhP._loadEvents()) t += uhP._cost(ev); return Math.round(t * 10000) / 10000; };
 const c0 = costBetweenMulti(uhP, ['sub-a'], wFrom, wTo).total;
@@ -119,7 +119,7 @@ const otherDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ledger-other-'));
 fs.mkdirSync(path.join(otherDir, 'usage-history'), { recursive: true });
 fs.writeFileSync(path.join(otherDir, 'usage-history', 'events-2026-08.ndjson'),
   priceLines.map((l) => JSON.stringify({ ...JSON.parse(l), i: 4000 })).join('\n') + '\n');
-const uhO = new UsageHistory({ dataDir: otherDir, homeDir: otherDir });
+const uhO = new UsageHistory({ dataDir: otherDir, homeDir: otherDir }); uhO.ledgerWindowMs = uhO.ledgerHotMaxBytes = 1e15; // B-9428: the fixed-date rows stay the resident array these brute-force references walk (the window's own parity: test-cache-bounds §2)
 const cOther = costBetweenMulti(uhO, ['sub-a'], wFrom, wTo).total;
 let otherTruth = 0; for (const ev of uhO._loadEvents()) otherTruth += uhO._cost(ev);
 ok(Math.abs(cOther - Math.round(otherTruth * 10000) / 10000) < 1e-6 && cOther !== costBetweenMulti(uhP, ['sub-a'], wFrom, wTo).total,

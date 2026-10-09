@@ -1012,6 +1012,61 @@ console.log('— §5 wiring');
   ck('the chip is an SVG icon, never emoji, and never a literal colour', /ROSTER_ICONS\.CLOCK/.test(ma) && /var\(--red/.test(ma) && !/[\u{1F300}-\u{1FAFF}]/u.test(ma.slice(ma.indexOf('loginExpiryChipHtml'), ma.indexOf('loginExpiryChipHtml') + 3000)));
   const css = fs.readFileSync(path.join(REPO, 'public/style.css'), 'utf8');
   ck('the chip SVG is explicitly sized (an unsized inline SVG swallows the row — 2.369.13)', /\.acct-login-chip svg \{[^}]*width: 10px[^}]*height: 10px/.test(css));
+  // THE ROSTER-ICON SIZE CENSUS (lane lapsed-chip-size, 2026-10-09 — the THIRD unsized roster SVG: 2.369.13's
+  // login chip, then the lapsed chip's column-wide clock): every ROSTER_ICONS use site in src/lib/*.js, by the class
+  // of its nearest wrapping element. Each is sized by a `.<class> svg { width` rule OR by the svg's own width/height
+  // (rosterSvg emits them). Every icon token in a file must land on a row — a site the census cannot place is RED.
+  const rosterCensus = (files, cssText) => {
+    const svgOf = (src) => { const m = src.match(/^const rosterSvg = (\([^\n]*);$/m); try { return m ? new Function('return ' + m[1])()('', 1) : ''; } catch { return ''; } };
+    const own = files.map(([, src]) => svgOf(src)).filter(Boolean).every((x) => /\swidth="\d+"/.test(x) && /\sheight="\d+"/.test(x));
+    const ruleFor = (c) => { const m = cssText.match(new RegExp('(?:^|[\\s,}])(\\.' + c + ' svg)\\s*(?:,[^{]*)?\\{[^}]*\\bwidth:\\s*([\\d.]+px)', 'm')); return m ? m[1] + ' ' + m[2] : ''; };
+    const wrapperAt = (lines, j, at) => { // the statement's text up to the token: a `+ \`…` line continues the one above
+      let line = lines[j]; for (let k = j; k > 0 && /^\s*\+ /.test(lines[k]); k--) { line = lines[k - 1] + line; at += lines[k - 1].length; }
+      const stack = []; const re = /<(\/?)([a-z]+)\b([^<>]*)>/g; let m;
+      while ((m = re.exec(line)) && m.index < at) { if (m[1]) stack.pop(); else if (!/\/$/.test(m[3])) stack.push(m); }
+      const w = stack[stack.length - 1]; if (!w) return null;
+      return { tag: w[2], cls: ((w[3].match(/class="([^"]*)"/) || [])[1] || '').split(/\s+/).filter((c) => /^[a-z][\w-]*$/.test(c)) };
+    };
+    const rows = []; let tokens = 0, placed = 0;
+    for (const [rel, src] of files) {
+      const lines = src.split('\n');
+      const names = new Set([...src.matchAll(/const \{([^}]*)\} = ROSTER_ICONS;/g)].flatMap((m) => m[1].split(',').map((x) => x.trim()).filter(Boolean)));
+      const iconRe = new RegExp('ROSTER_ICONS\\.[A-Z_]+' + (names.size ? '|\\b(?:' + [...names].join('|') + ')\\b' : ''), 'g');
+      lines.forEach((line, i) => {
+        if (/^\s+[A-Z_]+: rosterSvg\(|= ROSTER_ICONS;|^\s*\/\/|^\s*\*/.test(line)) return;
+        const hits = line.match(iconRe) || []; tokens += hits.length;
+        for (const ex of line.matchAll(/\$\{([^{}]*)\}/g)) {
+          const icons = ex[1].match(iconRe); if (!icons) continue; placed += icons.length;
+          let sites = [{ line: i + 1, w: wrapperAt(lines, i, ex.index) }];
+          const v = !sites[0].w && line.match(/^\s*const (\w+) = `/);
+          if (v) sites = lines.map((l, j) => [l, j]).slice(i + 1, i + 12).filter(([l]) => l.includes('${' + v[1] + '}'))
+            .map(([l, j]) => ({ line: j + 1, via: v[1], w: wrapperAt(lines, j, l.indexOf('${' + v[1] + '}')) }));
+          for (const st of sites) {
+            const css = st.w ? st.w.cls.map(ruleFor).find(Boolean) || '' : '';
+            rows.push({ at: rel + ':' + st.line, icons: [...new Set(icons.map((x) => x.replace('ROSTER_ICONS.', '')))].join('|'), via: st.via || '',
+              wrapper: st.w ? '<' + st.w.tag + ' class="' + st.w.cls.join(' ') + '">' : '(none)', css, own, sized: !!st.w && (!!css || own) });
+          }
+        }
+      });
+    }
+    return { rows, tokens, placed, own };
+  };
+  const libDir = path.join(REPO, 'src/lib');
+  const libFiles = fs.readdirSync(libDir).filter((f) => f.endsWith('.js')).map((f) => ['src/lib/' + f, fs.readFileSync(path.join(libDir, f), 'utf8')]).filter(([, src]) => src.includes('ROSTER_ICONS'));
+  const rc = rosterCensus(libFiles, css);
+  for (const r of rc.rows) console.log('    ' + r.at + '  ' + r.icons + (r.via ? ' (via ' + r.via + ')' : '') + '  in ' + r.wrapper + '  → ' + (r.css || 'no svg rule') + (r.own ? ' · own 14 px' : '') + (r.sized ? '' : '  ✗ UNSIZED'));
+  const wraps = new Set(rc.rows.flatMap((r) => r.wrapper.match(/class="([^"]*)"/)[1].split(' ')));
+  ck('roster-icon census: rosterSvg carries its OWN width/height (a wrapper nobody styled gets 14 px, never the column)', rc.own);
+  ck('roster-icon census: every ROSTER_ICONS token in src/lib lands on a row (' + rc.placed + '/' + rc.tokens + ' tokens, ' + rc.rows.length + ' rows) and the rows include the login chip and both lapsed-chip wrappers',
+    rc.tokens > 0 && rc.placed === rc.tokens && rc.rows.length >= 12 && ['acct-login-chip', 'acct-serve-chip', 'acct-serve-chip-off', 'acct-type-icon', 'acct-icon'].every((c) => wraps.has(c)));
+  ck('roster-icon census: every use site is sized (a container svg rule or the svg\'s own size)', rc.rows.length > 0 && rc.rows.every((r) => r.sized));
+  ck('roster-icon census: the lapsed chip\'s wrappers carry their own 10 px rule (the login chip\'s size)', rc.rows.filter((r) => /acct-serve-chip/.test(r.wrapper)).every((r) => / 10px$/.test(r.css)));
+  const unsizedSvg = libFiles.map(([rel, src]) => [rel, src.replace(/(const rosterSvg = [^\n]*?)<svg width="14" height="14" /, '$1<svg ')]);
+  const baseCss = css.replace(/\n\.acct-serve-chip[^\n]*/g, '');
+  const rcNoOwn = rosterCensus(unsizedSvg, css), rcBase = rosterCensus(unsizedSvg, baseCss);
+  ck('roster-icon census CONTROL: a rosterSvg WITHOUT width/height reds the own-size check', unsizedSvg.some(([, s2], k) => s2 !== libFiles[k][1]) && rcNoOwn.own === false);
+  ck('roster-icon census CONTROL: the BASE shape (no own size, no serve-chip rule) is RED for exactly the lapsed chip\'s two wrappers (' + rcBase.rows.filter((r) => !r.sized).map((r) => r.at).join(', ') + ')',
+    baseCss !== css && rcBase.rows.filter((r) => !r.sized).length === 2 && rcBase.rows.filter((r) => !r.sized).every((r) => /acct-serve-chip/.test(r.wrapper)));
   const panel = fs.readFileSync(path.join(REPO, 'src/lib/user-todos-panel.js'), 'utf8');
   const inboxModelSrc = fs.readFileSync(path.join(REPO, 'src/lib/user-todos-actions.js'), 'utf8'); // §9 (2026-09-27): jump moved VERBATIM into THE client model the panel calls
   ck("the inbox item's click lands on Manage Agents instead of a dead end", /if \(key === 'accounts'\) \{ close\(\); app\._showAgentsDialog\?\.\(\); return; \}/.test(inboxModelSrc) && /model\.jump\(key, item, \{ close: hidePopup \}\)/.test(panel));
@@ -1447,6 +1502,105 @@ console.log('— §7 the chip at 375x667 (headless chrome)');
       try { sock.close(); } catch { }
     } catch (e) {
       fail++; console.error('  x BROWSER: the 375x667 measurement could not run - ' + e.message);
+    } finally {
+      try { chrome.kill('SIGKILL'); } catch { }
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch { }
+    }
+  }
+}
+
+console.log('— §8 the LAPSED chip at the owner\'s width (1000 px panel, zh, headless chrome; lane lapsed-chip-size 2026-10-09)');
+{
+  // The owner's screenshot: a ~190 px red clock above "订阅自 … 起已失效 · 重新检查". Three real rows (a login-expiring
+  // account, a LAPSED subscription, a pool) drawn by the REAL renderers + style.css; the CONTROL draws the same rows
+  // with the BASE shape (rosterSvg without width/height, no .acct-serve-chip rule) and must see the column-wide clock.
+  // LAPSED_CHIP_SHOTS=<dir> also writes after.png / before.png of the panel. The column gets a definite width:
+  // .acct-list is an inline-size container, so a fit-content parent would size it to 0.
+  const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
+  if (!CHROME) {
+    console.log('  SKIP: no chrome binary on this machine (looked in /usr/bin/google-chrome{,-stable}, /usr/bin/chromium{,-browser})');
+  } else {
+    const { spawn } = await import('node:child_process');
+    const esbuild = require(path.join(REPO, 'node_modules/esbuild'));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-lapsed-'));
+    const stubBuildVersion = { name: 'stub-build-version', setup(b) { b.onResolve({ filter: /build-version\.js$/ }, () => ({ path: 'build-version', namespace: 'stub' })); b.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({ contents: "export const BUILD_VERSION = 'test';", loader: 'js' })); } };
+    const maSrc = fs.readFileSync(path.join(REPO, 'src/lib/manage-agents.js'), 'utf8'), cssSrc = fs.readFileSync(path.join(REPO, 'public/style.css'), 'utf8');
+    const maBase = maSrc.replace(/(const rosterSvg = [^\n]*?)<svg width="14" height="14" /, '$1<svg '), cssBase = cssSrc.replace(/\n\.acct-serve-chip[^\n]*/g, '');
+    const opts = { bundle: true, format: 'iife', globalName: 'MA', platform: 'browser', target: 'es2022', logLevel: 'silent', loader: { '.css': 'text' }, plugins: [stubBuildVersion] };
+    await esbuild.build({ ...opts, entryPoints: [path.join(REPO, 'src/lib/manage-agents.js')], outfile: path.join(dir, 'ma-after.js') });
+    await esbuild.build({ ...opts, stdin: { contents: maBase, resolveDir: path.join(REPO, 'src/lib'), sourcefile: 'manage-agents.js' }, outfile: path.join(dir, 'ma-before.js') });
+    fs.writeFileSync(path.join(dir, 'style-after.css'), cssSrc); fs.writeFileSync(path.join(dir, 'style-before.css'), cssBase);
+    function pageMain() { // runs IN the page
+      const H = 3600e3, NOW = Date.now(), I = MA.ROSTER_ICONS;
+      const row = (a, icon, ident, login) => '<div class="acct-key-row" data-id="' + a.id + '"><span class="acct-type-icon">' + icon + '</span>'
+        + '<span class="acct-key-main"><span class="acct-key-line"><span class="acct-key-name">' + a.name + '</span><span class="acct-key-tail">' + ident + '</span></span>'
+        + MA.acctExtrasHtml({ login }) + '</span><span class="acct-usage-cell"></span>'
+        + '<span class="acct-key-actions"><button class="acct-icon acct-def">' + I.STAR_O + '</button><button class="acct-icon acct-menu">' + I.DOTS + '</button></span></div>';
+      const exp = { id: 's3', name: 'Personal Max', type: 'subscription', loginState: { state: 'expiring', msLeft: 17 * H, refreshExpiresAt: NOW + 17 * H } };
+      const lap = { id: 's6', name: 'UCI Max', type: 'subscription', serve: { state: 'lapsed', since: NOW - 15 * H, why: 'Canceled' } };
+      const pool = { id: 'pool-1', name: '全部', type: 'pooled', pooled: true };
+      document.getElementById('mount').innerHTML = row(pool, I.POOL, '→ UCI Max', '')
+        + row(exp, I.CROWN, 'you@example.com · max', MA.loginExpiryChipHtml(exp))
+        + row(lap, I.CROWN, 'uci@example.com · max', MA.serveLapsedChipHtml(lap, { mode: 'manual', pooled: true }));
+    }
+    for (const k of ['after', 'before']) fs.writeFileSync(path.join(dir, k + '.html'), '<!doctype html><html data-theme="dark"><head><meta charset="utf-8">'
+      + '<meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="./style-' + k + '.css"></head>\n'
+      + '<body><div id="panel" class="ob-backend acct-section acct-roster" style="width:1000px"><div style="flex:1; width:100%"><div id="mount" class="acct-list"></div></div></div>'
+      + '<script src="./ma-' + k + '.js"></script><script>(' + pageMain + ')();<' + '/script></body></html>');
+    const CDP_PORT = await freePort();
+    const chrome = spawn(CHROME, ['--headless=new', '--remote-debugging-port=' + CDP_PORT, '--no-first-run', '--disable-gpu', '--window-size=1100,760', '--user-data-dir=' + path.join(dir, 'chrome'), 'about:blank'], { stdio: 'ignore' });
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    try {
+      const WS = require(path.join(REPO, 'node_modules/ws'));
+      const race = (pr, ms, what) => Promise.race([pr, new Promise((_, rej) => { const t = setTimeout(() => rej(new Error(what + ' timed out after ' + ms + 'ms')), ms); if (t.unref) t.unref(); })]);
+      let target = null;
+      for (let i = 0; i < 60 && !target; i++) { try { const l = await (await fetch('http://127.0.0.1:' + CDP_PORT + '/json')).json(); target = l.find((t) => t.type === 'page'); } catch { await sleep(200); } }
+      if (!target) throw new Error('chrome never came up on the devtools port');
+      const sock = new WS(target.webSocketDebuggerUrl);
+      await race(new Promise((res, rej) => { sock.on('open', res); sock.on('error', rej); }), 15000, 'devtools socket');
+      let seq = 0; const pend = new Map(); const jsErrors = [];
+      sock.on('message', (d) => { const m = JSON.parse(d);
+        if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); return; }
+        if (m.method === 'Runtime.exceptionThrown') jsErrors.push(m.params?.exceptionDetails?.exception?.description || 'exception'); });
+      const cdp = (method, params = {}) => race(new Promise((res, rej) => { const id = ++seq; pend.set(id, (m) => (m.error ? rej(new Error(m.error.message)) : res(m.result))); sock.send(JSON.stringify({ id, method, params })); }), 30000, 'CDP ' + method);
+      const evalJs = async (e) => { const rr = await cdp('Runtime.evaluate', { expression: e, awaitPromise: true, returnByValue: true }); if (rr.exceptionDetails) throw new Error(rr.exceptionDetails.exception?.description || 'threw'); return rr.result.value; };
+      await cdp('Page.enable'); await cdp('Runtime.enable');
+      await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });
+      await cdp('Page.addScriptToEvaluateOnNewDocument', { source: "try { localStorage.setItem('vibespace.lang', 'zh'); } catch {}" });
+      const measure = async (k) => {
+        await cdp('Page.navigate', { url: 'file://' + path.join(dir, k + '.html') });
+        await sleep(1200);
+        await cdp('Emulation.setDeviceMetricsOverride', { width: 1100, height: 760, deviceScaleFactor: 1, mobile: false });
+        await sleep(300);
+        const m = await evalJs(`(() => {
+          const box = (el) => { if (!el) return null; const r = el.getBoundingClientRect(); return { w: r.width, h: r.height, top: r.top, left: r.left, right: r.right, bottom: r.bottom }; };
+          const lap = document.querySelector('[data-id="s6"] .acct-serve-chip'), login = document.querySelector('[data-id="s3"] .acct-login-chip');
+          const tops = new Set(); // the chip's TEXT line boxes (the svg is not a line of text)
+          for (const n of lap ? lap.childNodes : []) if (n.nodeType === 3 && n.textContent.trim()) { const range = document.createRange(); range.selectNodeContents(n); for (const r of range.getClientRects()) if (r.width > 0) tops.add(Math.round(r.top)); }
+          const lines = tops.size;
+          return { lap: box(lap), lapSvg: box(lap?.querySelector('svg')), lapText: lap?.textContent || '', lapLines: lines,
+            loginSvg: box(login?.querySelector('svg')), poolSvg: box(document.querySelector('[data-id="pool-1"] .acct-type-icon svg')),
+            rowsH: [...document.querySelectorAll('.acct-key-row')].map((r) => r.getBoundingClientRect().height), panel: box(document.getElementById('panel')),
+            recheck: lap?.getAttribute('data-serve-recheck') };
+        })()`);
+        if (process.env.LAPSED_CHIP_SHOTS && m.panel) {
+          const shot = await cdp('Page.captureScreenshot', { format: 'png', clip: { x: 0, y: 0, width: 1020, height: Math.ceil(m.panel.bottom) + 12, scale: 1 } });
+          fs.writeFileSync(path.join(process.env.LAPSED_CHIP_SHOTS, k + '.png'), Buffer.from(shot.data, 'base64'));
+        }
+        return m;
+      };
+      const a = await measure('after'), b = await measure('before');
+      const r = (x) => x ? Math.round(x.w) + 'x' + Math.round(x.h) : 'none';
+      ck('BROWSER §8: the rows rendered in zh (' + JSON.stringify(a.lapText.slice(0, 40)) + ') with the Re-check verb kept on the account', /订阅/.test(a.lapText) && a.recheck === 's6');
+      ck('BROWSER §8: the lapsed chip\'s clock is a small icon (' + r(a.lapSvg) + ' ≤ 12x12), not the column', !!a.lapSvg && a.lapSvg.w <= 12 && a.lapSvg.h <= 12 && a.lapSvg.w >= 8);
+      ck('BROWSER §8: its text sits on ONE line beside the clock (' + a.lapLines + ' line, chip ' + r(a.lap) + ')', a.lapLines === 1 && a.lap.h <= 20 && a.lapSvg.top >= a.lap.top - 1 && a.lapSvg.bottom <= a.lap.bottom + 1);
+      ck('BROWSER §8: the login chip is unchanged (10x10: ' + r(a.loginSvg) + ') and the pool row\'s icon keeps 14 px (' + r(a.poolSvg) + ')', r(a.loginSvg) === '10x10' && r(a.poolSvg) === '14x14');
+      ck('BROWSER §8: every row stays row-sized (' + a.rowsH.map((h) => Math.round(h)).join('/') + ' px)', a.rowsH.length === 3 && a.rowsH.every((h) => h > 20 && h < 60));
+      ck('BROWSER §8 CONTROL: the BASE shape draws the owner\'s column-wide clock (' + r(b.lapSvg) + ' > 100 px) and a tall row (' + b.rowsH.map((h) => Math.round(h)).join('/') + ' px)', !!b.lapSvg && b.lapSvg.w > 100 && Math.max(...b.rowsH) > 100);
+      ck('BROWSER §8: no JS error while rendering', jsErrors.length === 0);
+      try { sock.close(); } catch { }
+    } catch (e) {
+      fail++; console.error('  x BROWSER §8: the lapsed-chip measurement could not run - ' + e.message);
     } finally {
       try { chrome.kill('SIGKILL'); } catch { }
       try { fs.rmSync(dir, { recursive: true, force: true }); } catch { }

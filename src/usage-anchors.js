@@ -162,7 +162,7 @@ function costBetweenMulti(usageHistory, accountIds, fromMs, toMs) {
   const want = new Set((accountIds || []).map((a) => a || '__global__'));
   const versioned = typeof usageHistory?._evCountUpTo === 'function' && typeof usageHistory?.pricingToken === 'function';
   const memo = versioned ? _memoFor(usageHistory) : null;
-  const memoKey = versioned ? `${[...want].sort().join(',')}|${fromMs}|${toMs}|${usageHistory._evCountUpTo(toMs || Infinity)}|${usageHistory.pricingToken()}` : null;
+  const memoKey = versioned ? `${[...want].sort().join(',')}|${fromMs}|${toMs}|${usageHistory._evCountUpTo(toMs || Infinity)}|${usageHistory.pricingToken()}|${usageHistory.ledgerGen || 0}` : null; // ledgerGen (B-9428 r4): a rewritten ledger with the same counts never serves the old dollars
   if (memoKey) { const hit = memo.map.get(memoKey); if (hit) return { ...hit, byFamily: { ...hit.byFamily }, byClass: { ...hit.byClass } }; }
   const out = { total: 0, byFamily: { fable: 0, opus: 0, sonnet: 0, haiku: 0, other: 0 }, byClass: { cw: 0, cr: 0, other: 0 }, requests: 0 };
   try {

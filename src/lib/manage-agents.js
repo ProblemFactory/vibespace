@@ -56,7 +56,12 @@ export const rosterSort = (a, b) => acctTypeRank(a) - acctTypeRank(b) || String(
 // Roster row icons (SVG only, never emoji) — shared by both rosters so a
 // pooled account draws the SAME overlapping-circles glyph whatever its
 // backend (a pool is NOT a login: the crown/key misread as one, real report).
-const rosterSvg = (d, sw = 1.4) => `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+// Each glyph carries its OWN size (lane lapsed-chip-size, 2026-10-09: the lapsed
+// chip's clock sat in a wrapper no CSS sized and drew column-wide — the third
+// unsized roster SVG after 2.369.13). A container rule (.acct-login-chip svg
+// 10 px) still wins over the attributes; an unstyled wrapper gets 14 px, never
+// the row. scripts/test-login-expiry.mjs censuses every use site.
+const rosterSvg = (d, sw = 1.4) => `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
 export const ROSTER_ICONS = Object.freeze({
   CROWN: rosterSvg('<path d="M2.5 12.5h11M3 12.5L2 4.5l3.2 2.6L8 3l2.8 4.1L14 4.5l-1 8z"/>'),
   GLOBE: rosterSvg('<circle cx="8" cy="8" r="6"/><path d="M2 8h12M8 2c-2 2-2 10 0 12M8 2c2 2 2 10 0 12"/>'),

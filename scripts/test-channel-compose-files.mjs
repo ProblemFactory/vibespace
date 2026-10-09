@@ -115,5 +115,44 @@ for (const [from, to, what] of ctlPure) {
   ok(Array.isArray(red) && red.length > 0, `control — the agent's bearer ACCEPTED on the owner's send: red (${red === null ? 'the patch site is gone' : red.length ? red[0].slice(0, 120) : 'GREEN — the judge missed it'})`);
 }
 
+console.log('⑤ the chip OPENS before the send — THE ONE attachment door, from the local File (lane compose-chip-open)');
+// owner 2026-10-09 on .245 ("上传上去的文件不能查看预览"): a "baa-0.pdf 245 KB ×" chip had no way to be looked at
+{
+  const u = P.attachmentUrlFor;
+  const pure = [
+    [u('blob:http://h/9f', { inline: true }), 'blob:http://h/9f'], [u('/api/x/attachment/0', { inline: true }), '/api/x/attachment/0?inline=1'],
+    [u('/a?b=1', { inline: true }), '/a?b=1&inline=1'], [u('/a', {}), '/a'], [u('BLOB:x', { inline: true }), 'BLOB:x'],
+  ].filter(([got, want]) => got !== want);
+  ok(pure.length === 0, `PURE attachmentUrlFor: a served picture asks ?inline=1 (& after a query); a blob: URL takes NO query${pure.length ? ` — ${JSON.stringify(pure)}` : ''}`);
+}
+// the census over createComposeFiles: every open goes through openComposePick (→ openAttachment); nothing else opens,
+// navigates or writes markup; every way a pick leaves revokes its URL
+const chipCensus = (src) => {
+  const a = src.indexOf('function createComposeFiles('); const body = a < 0 ? '' : src.slice(a, src.indexOf('\n}\n', a));
+  const bad = [];
+  if (!body.includes('const open = () => openComposePick(app, p);')) bad.push('the chip does not open through openComposePick');
+  if (!body.includes('img.onclick = open;')) bad.push('a picture thumb does not open');
+  if (!body.includes('nm.onclick = open;') || !/nm\.onkeydown = \(e\) => \{ if \(e\.key === 'Enter' \|\| e\.key === ' '\) \{ e\.preventDefault\(\); open\(\); \} \};/.test(body)) bad.push('the name does not open by click / Enter / Space');
+  if (!body.includes("nm.dataset.open = openKind; nm.tabIndex = 0;") || !body.includes("const openKind = attachmentOpenKind(p.name, p.mime);")) bad.push('the name carries no data-open kind / focus');
+  if (!body.includes("if (openKind === 'download') nm.title = t('Nothing to preview — it is sent as it is');")) bad.push('a download-kind name does not say why it is plain');
+  for (const w of ['window.open(', 'location', '.href', 'showImageOverlay(', 'app.openFile(', 'openAttachment(', 'innerHTML', 'FileViewer']) if (body.includes(w)) bad.push(`a second open path: ${w}`);
+  if (!body.includes("const x = btn('', () => { forget(p); picks.splice(picks.indexOf(p), 1); draw(); }, 'chanwin-file-x');")) bad.push('× does not revoke the chip\'s URL');
+  if (!body.includes('destroy: () => { for (const p of picks) forget(p); for (const u of spent.splice(0)) URL.revokeObjectURL(u); },')) bad.push('destroy leaves URLs alive');
+  if (!body.includes('file: f, mime: String(f.type || \'\') }') || !body.includes('if (!p.mime) p.mime = sniffed.mime;')) bad.push('the pick keeps no File / mime');
+  if (!src.includes('    if (liveFiles) { liveFiles.destroy(); liveFiles = null; }\n') || !src.includes("winInfo._listenerCtl?.signal.addEventListener('abort', () => { if (liveFiles) liveFiles.destroy(); liveFiles = null; }, { once: true });") || !src.includes('      liveFiles = cf;\n')) bad.push('the composer is never destroyed at a rebuild / close');
+  return bad;
+};
+const cc = chipCensus(W);
+ok(cc.length === 0, `the chip's thumb + name open through THE ONE door (openComposePick → openAttachment), the name by click / Enter / Space with data-open; × / destroy revoke the URL; a rebuild and the window's close destroy the composer${cc.length ? ` — ${cc.join('; ')}` : ''}`);
+const OB = fs.readFileSync(path.join(REPO, 'src/lib/channel-outbox.js'), 'utf8');
+ok(OB.includes("export function openComposePick(app, p) {\n  if (!p.url && p.file) p.url = URL.createObjectURL(p.file);\n  return p.url ? openAttachment(app, { url: p.url, name: p.name, mime: p.mime }) : 'download';\n}"), 'openComposePick mints the blob URL from the File on demand and hands it to openAttachment (the behaviour is judged in test-channel-outbox)');
+for (const [from, to, what] of [
+  ['const open = () => openComposePick(app, p);', 'const open = () => window.open(p.url || URL.createObjectURL(p.file));', 'a chip that opens through its own window.open'],
+  ["const x = btn('', () => { forget(p); picks.splice(", "const x = btn('', () => { picks.splice(", 'a × that keeps the URL alive'],
+]) {
+  const red = W.includes(from) ? chipCensus(W.replace(from, to)) : null;
+  ok(Array.isArray(red) && red.length > 0, `control — ${what}: the census is red (${red === null ? 'the patch site is gone' : red.length ? red[0] : 'GREEN — the census missed it'})`);
+}
+
 console.log(`\n${fails ? '✗' : '✓'} test-channel-compose-files: ${n - fails}/${n} passed`);
 process.exit(fails ? 1 : 0);

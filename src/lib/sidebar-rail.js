@@ -616,6 +616,11 @@ export function installSidebarRail(Sidebar) {
         for (const w of v.workers) out.push(`<div class="sys-mem-row sys-mem-worker">${row(w.name, w.bytes, w.unknown ? tr(MEMORY_WORDS.unknown) : used(w))}</div>`);
         out.push('</details>');
       }
+      if (v.caches && v.caches.length) { // B-9428: each bounded cache inside the main heap, by name, against its ceiling
+        out.push(`<details class="sys-mem-fold"${this._railMemOpen ? ' open' : ''}><summary class="sys-mem-row sys-mem-caches">${row(tr(MEMORY_WORDS.caches), v.caches.reduce((t, x) => t + (x.kind === 'arraybuffers' ? 0 : x.bytes || 0), 0), '')}</summary>`); // the main heap's share only (ArrayBuffers live in External)
+        for (const x of v.caches) out.push(`<div class="sys-mem-row sys-mem-worker">${row(x.name, x.bytes, `${x.count} ${x.unit}${x.ceiling ? ' · ≤ ' + fmt(x.ceiling) : ''}${x.kind === 'arraybuffers' ? ' · ArrayBuffers' : ''}${x.over ? ' · OVER' : ''}`)}</div>`);
+        out.push('</details>');
+      }
       out.push('</div>', `<div class="empty-hint empty-hint-inline sys-mem-note">${escHtml(tr(v.note.words, { anon: v.note.anon != null ? fmt(v.note.anon) : '' }))}</div>`);
       return out.join('');
     },

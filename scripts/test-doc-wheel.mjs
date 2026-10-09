@@ -5,6 +5,11 @@
 // matter ride as raw blocks), the lines an edit reformats are PRINTED; PURE patchBlocks tables; rawReasons + the WHY
 // words; the licence census of the wheel's packages PRINTED; 3 patched-copy controls (a whole-document rewrite ⇒ untouched
 // lines change; a dropped construct; a reason without a why) each turn the suite's own checks red.
+// Lane doc-raw-blocks (2.369.246 — owner "这个会莫名其妙变成源码的问题还没修复"): THE INLINE-HTML MARK TABLE (8 tags ×
+// paragraph / list item / table cell ⇒ a mark carrying its tag, byte-identical; <br> spellings; attributes / block tags /
+// unmatched / same-tag nested ⇒ raw), fixture 31 (the owner's shape: a table whose cells hold <code>) ⇒ a table, its
+// second table (a cell with a BARE <code> placeholder, the r2 ruling) ⇒ the one raw block;
+// a 4th control: a mark serialized as backticks ⇒ the table goes red.
 // Run: node scripts/test-doc-wheel.mjs
 import fs from 'node:fs'; import path from 'node:path'; import os from 'node:os'; import { fileURLToPath, pathToFileURL } from 'node:url';
 const { Transform } = await import('@tiptap/pm/transform');
@@ -76,10 +81,47 @@ const D = await import(pathToFileURL(path.join(ROOT, 'src/lib/doc-markdown.js'))
 const M = (await import(pathToFileURL(path.join(ROOT, 'src/doc-model.js')).href)).default;
 const R = await measure(D, M, { print: true });
 const verdicts = (R) => [R.untouched + R.refused >= 29, R.dropped.length === 0, R.same === R.n - R.refused];
-ok(R.untouched + R.refused >= 29 && R.refused === 1, `≥ 29/30: one edit keeps every untouched line byte-identical (${R.untouched} + ${R.refused} refused)`);
+ok(R.untouched + R.refused >= 29 && R.refused === 1, `≥ 29/${R.n}: one edit keeps every untouched line byte-identical (${R.untouched} + ${R.refused} refused)`);
 ok(R.dropped.length === 0, 'the dropped-construct list is EMPTY');
 ok(R.same === R.n - R.refused, 'an unedited save writes the source byte-identical');
 ok(R.raw.length >= 2 && R.raw.some((x) => x.startsWith('17')) && R.raw.some((x) => x.startsWith('18')), 'raw HTML (17) and front matter (18) ride as raw blocks (carried as written, read-only)');
+
+// ── THE LOSSLESS INLINE-HTML MARKS (lane doc-raw-blocks, 2.369.246): a paired tag is a mark keeping its spelling ──
+const marksOf = (doc) => { const out = []; doc.descendants((n) => { if (n.type.name === 'rawBlock') out.push('RAW'); if (n.type.name === 'table') out.push('TABLE'); if (n.isText) for (const m of n.marks) out.push(m.type.name + ':' + (m.attrs.tag || '')); if (n.type.name === 'htmlBreak') out.push('br:' + n.attrs.tag); }); return out; };
+/** The mark table's verdicts over a doc-markdown module (empty = every row holds). */
+function markTable(d) {
+  const bad = [];
+  const TAGS = [['code', 'htmlCode'], ['kbd', 'htmlKbd'], ['sub', 'htmlSub'], ['sup', 'htmlSup'], ['b', 'htmlBold'], ['strong', 'htmlBold'], ['i', 'htmlItalic'], ['em', 'htmlItalic'], ['CODE', 'htmlCode']];
+  const CTX = { paragraph: (x) => `Some ${x} here.\n`, 'list item': (x) => `- one ${x} two\n- three\n`, 'table cell': (x) => `| a | b |\n| --- | --- |\n| ${x} | y |\n` };
+  for (const [tag, mark] of TAGS) for (const [ctx, wrap] of Object.entries(CTX)) {
+    const src = wrap(`<${tag}>x_y 2</${tag}>`.replace('x_y', 'x y')), ld = d.loadDoc(src), got = marksOf(ld.doc), rt = d.roundTrip(src), sv = d.saveDoc(src, ld, ld.doc);
+    if (!got.includes(mark + ':' + tag) || got.includes('RAW')) bad.push(`<${tag}> in a ${ctx} ⇒ ${got.join(',')}`);
+    if (rt !== src.replace(/\n$/, '')) bad.push(`<${tag}> in a ${ctx}: round trip ${JSON.stringify(rt)}`);
+    if (!sv.ok || sv.text !== src) bad.push(`<${tag}> in a ${ctx}: an unedited save`);
+  }
+  for (const br of ['<br>', '<br/>', '<br />']) for (const [ctx, wrap] of Object.entries(CTX)) {
+    const src = wrap(`x${br}y`), got = marksOf(d.loadDoc(src).doc), rt = d.roundTrip(src);
+    if (!got.includes('br:' + br) || got.includes('RAW') || rt !== src.replace(/\n$/, '')) bad.push(`${br} in a ${ctx} ⇒ ${got.join(',')} ${JSON.stringify(rt)}`);
+  }
+  for (const [why, src] of [['attributes', 'a <code class="k">x</code> b\n'], ['a block tag', '<details>\n<summary>s</summary>\n</details>\n'], ['a div', 'a <div>x</div> b\n'], ['a span', 'a <span>x</span>\n'],
+    ['unmatched (a placeholder)', 'PR-<code>-nn number\n'], ['an unmatched close', 'a </b> b\n'], ['same-tag nested', '<b>a <b>b</b> c</b>\n'], ['spaced content', 'a <code> x </code>\n'], ['empty', 'a <b></b> b\n'],
+    ['a code span across the close', 'a <code>`x</code>` y\n'], ['emphasis across the close', '*a <b>b* c</b>\n'], ['mixed-case ends', 'a <b>x</B>\n'], ['a cell with an attribute tag', '| a |\n| --- |\n| <sup id="n">1</sup> |\n']])
+    if (!marksOf(d.loadDoc(src).doc).includes('RAW')) bad.push(`${why} is not a raw block`);
+  // nested tags come back in the schema's mark order (`<b><code>` ⇒ `<code><b>`, as `**_x_**` does) — an unedited save keeps
+  // the bytes, and an edit inside keeps the SOURCE order (the line merge splices only the typed span)
+  const nest = 'a <b><code>x</code></b> and [<kbd>k</kbd>](https://e.com)\n', nl = d.loadDoc(nest), ng = marksOf(nl.doc);
+  let at = -1; nl.doc.descendants((n, p) => { if (at < 0 && n.isText && n.text === 'x') at = p + 1; });
+  const ed = d.saveDoc(nest, nl, new Transform(nl.doc).insert(at, nl.doc.type.schema.text('Z', nl.doc.nodeAt(at - 1).marks)).doc);
+  if (!ng.includes('htmlBold:b') || !ng.includes('htmlCode:code') || !ng.includes('link:') || !ng.includes('htmlKbd:kbd') || d.saveDoc(nest, nl, nl.doc).text !== nest || !ed.ok || ed.text !== nest.replace('x</code>', 'xZ</code>')) bad.push('nested tags / a tag in a link: ' + ng.join(',') + ' ' + JSON.stringify(ed));
+  return bad;
+}
+const mt = markTable(D);
+ok(mt.length === 0, 'THE INLINE-HTML MARKS: 8 tags (+ upper case) × paragraph / list item / table cell ⇒ a mark carrying the tag as written, round trip + unedited save byte-identical; <br> <br/> <br /> kept; attributes / block tags / unmatched / same-tag nested / spaced / a code span or emphasis across the close ⇒ a raw block: ' + mt.slice(0, 4).join(' | '));
+{
+  const F31 = fs.readFileSync(path.join(FX, '31-table-inline-html.md'), 'utf8'), g = marksOf(D.loadDoc(F31).doc), bare = F31.split('\n').lastIndexOf('| Mechanism | Rule |') + 1;
+  ok(JSON.stringify(R.raw.filter((x) => x.startsWith('31'))) === JSON.stringify([`31:L${bare}`]) && g.filter((x) => x === 'TABLE').length === 1 && g.filter((x) => x === 'RAW').length === 1 && ['htmlCode:code', 'htmlKbd:kbd', 'htmlSup:sup', 'br:<br>', 'htmlBold:b', 'htmlSub:sub', 'htmlItalic:i', 'htmlItalic:em', 'htmlBold:strong', 'code:', 'bold:'].every((m) => g.includes(m)),
+    'fixture 31 (the owner\'s shape: a GFM table whose cells hold <code> / <kbd> / <sup> / <br> beside backticks and bold) ⇒ a TABLE in the editor; its second table (a cell with a BARE <code> placeholder) stays the ONE raw block (r2: rule 2 unchanged)', [...new Set(g)]);
+}
 
 // ── patchBlocks tables (PURE) ──
 const P = (src, maps, plan) => M.patchBlocks(src, maps, plan).text;
@@ -124,6 +166,7 @@ const mutant = async (label, file, from, to, want) => {
 };
 await mutant('whole-document rewrite', 'src/lib/doc-markdown.js', '  return M.patchBlocks(s, loaded.maps, plan);', '  return { ok: true, text: serializeMd(doc) + "\\n" };', async (d, m) => !verdicts(await measure(d, m))[0]);
 await mutant('a dropped construct', 'src/lib/doc-markdown.js', "if (tok.type !== 'front_matter' && tok.type !== 'html' && !hasHtml(tok)) {", "if (tok.type !== 'front_matter') { if (0) hasHtml(tok);", async (d, m) => !verdicts(await measure(d, m))[1]);
+await mutant('a mark serialized as backticks', 'src/lib/doc-markdown.js', 'return `<${tag}>${h.renderChildren(node)}</${tag}>`;', "return '`' + h.renderChildren(node) + '`';", async (d) => markTable(d).length > 0);
 await mutant('a reason without a why', 'src/doc-model.js', "  crlf: 'it uses Windows", "  crlf_: 'it uses Windows", async (d, m) => !(typeof m.RAW_WHY.crlf === 'string' && m.RAW_WHY.crlf.length > 20));
 
 console.log(`\ntest-doc-wheel: ${pass} passed, ${fail} failed`);

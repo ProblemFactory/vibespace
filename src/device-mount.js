@@ -12,6 +12,7 @@ const path = require('path');
 const http = require('http');
 const { spawn } = require('child_process');
 const { rcloneMountArgs } = require('./mount-argv.js');   // THE mount argv — the hub's builder (lane mount-argv-dir-cache)
+const { deviceCacheVerdict, NETWORK_FS_MAGIC } = require('./vfs-cache-place.js');   // lane vfs-cache-local: the device twin's cache verdict
 
 // B-35e3 (2.369.202): a file rewritten IN PLACE on the device keeps its size
 // (a SQLite DB), and a reader that keeps it open read the old bytes for days.
@@ -272,7 +273,14 @@ async function deviceFolderMount({ device, remotePath, mountpoint, rcloneBin, vf
     RCLONE_CONFIG_VSDEV_URL: `http://127.0.0.1:${bridgePort}`,
     RCLONE_CONFIG_VSDEV_VENDOR: 'other',
   };
-  const args = pullMountArgs(mountpoint, vfsCacheDir);
+  // The cache (lane vfs-cache-local, the STANDING SWEEP law): vfs-cache-mode minimal caches only files open for writing;
+  // no caller passes vfsCacheDir, so rclone's own default ($XDG_CACHE_HOME/rclone, local home) applies. A passed dir on a
+  // network filesystem is SAID, never moved — it may hold a write still uploading.
+  let onNet = false;
+  if (vfsCacheDir) { try { onNet = NETWORK_FS_MAGIC.includes(Number(fs.statfsSync(vfsCacheDir).type) >>> 0); } catch {} }
+  const cv = deviceCacheVerdict({ dir: vfsCacheDir || null, network: onNet });
+  if (cv.why === 'network') log(`device mount: its vfs cache ${cv.dir} sits on a network filesystem — kept there (minimal mode holds only files being written)`);
+  const args = pullMountArgs(mountpoint, cv.dir);
   const rc = spawn(rcloneBin, args, { env, detached: true, stdio: ['ignore', 'ignore', 'pipe'] });
   let stderr = '';
   rc.stderr.on('data', (d) => { stderr += d.toString().slice(0, 2000); });

@@ -8,6 +8,7 @@ import { showContextMenu } from './utils.js';
 import { escHtml, fetchJson, showToast, copyText } from './utils.js';
 import { createBackendIconHtml, getBackendMeta } from './agent-meta.js';
 import { registerWindowType } from './window-types.js';
+import { ledgerNoteEl } from './usage-ledger-note.js'; // B-9428 r4: a partial / as-of answer says so under the totals
 
 // Small vendor logo — accounts and models from BOTH CLIs mix in one dashboard,
 // so every such row/chip carries the backend brand to keep them apart.
@@ -169,6 +170,8 @@ export function openUsageWindow(app, opts = {}) {
       return;
     }
     body.appendChild(renderTiles(d));
+    const ledgerNote = ledgerNoteEl(document, d, t);
+    if (ledgerNote) body.appendChild(ledgerNote);
     if (state.view === 'classic') {
       // The pre-2.96 fixed layout, kept as an escape hatch.
       body.appendChild(renderTrend(d, state));

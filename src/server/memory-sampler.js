@@ -21,7 +21,7 @@ const readSmaps = () => (process.platform === 'linux' ? fsp.readFile('/proc/self
 
 function create({ record = () => {}, log = console, intervalMs = 60000, metricEvery = 5, eventEvery = 10, askTimeoutMs = 2000,
   readMainMemory = readMain, readSmapsText = readSmaps, ask = (o) => askMemory(undefined, o), now = () => Date.now(),
-  timers = { setInterval, clearInterval } } = {}) {
+  timers = { setInterval, clearInterval }, caches = () => [] } = {}) {
   let latest = null, n = 0, busy = null, timer = null, booted = false;
 
   /** One census. A sample still running is joined, never doubled. Never rejects. */
@@ -35,7 +35,8 @@ function create({ record = () => {}, log = console, intervalMs = 60000, metricEv
         Promise.resolve().then(readSmapsText).catch(() => null),
         Promise.resolve().then(() => ask({ timeoutMs: askTimeoutMs })).catch(() => []),
       ]);
-      const c = memoryCensus({ main, workers, smaps: parseSmapsRollup(text), at: now() });
+      let rows = []; try { rows = caches() || []; } catch { } // the bounded caches by name (B-9428)
+      const c = memoryCensus({ main, workers, smaps: parseSmapsRollup(text), at: now(), caches: rows });
       c.tookMs = now() - t0;
       latest = c;
       const k = n++;

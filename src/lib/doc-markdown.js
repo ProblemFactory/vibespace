@@ -5,12 +5,16 @@
 //   · LOAD = BLOCKS: the source is cut into its top-level blocks by the SAME lexer Tiptap parses with (marked: every
 //     token's `raw`, concatenated, is the source), each block parsed on its own (the file's link definitions appended)
 //     ⇒ every editor node knows its block and the block its lines. A block the core would DROP content from (raw HTML,
-//     a construct it cannot carry) becomes a RAW BLOCK — carried as written, shown read-only, edited in Raw.
+//     a construct it cannot carry) becomes a RAW BLOCK — carried as written, READ as a document (the window's node view:
+//     the house renderer + the one sanitizer), its source edited in place from its chip (lane doc-raw-blocks, 2.369.246).
+//   · INLINE HTML (lane doc-raw-blocks): the paired tags a document carries inside a paragraph / a list item / a table cell
+//     (`<code>` `<kbd>` `<sub>` `<sup>` `<b>` `<strong>` `<i>` `<em>`, and `<br>`) are LOSSLESS marks that write their own
+//     spelling back — so such a block is no longer a raw block (HTML_MARKS below).
 //   · SAVE = BLOCK PATCHING (doc-model `patchBlocks`): a block whose nodes are untouched keeps its lines byte-identical;
 //     an edited block is written by a LINE MERGE (each line the person did not change keeps its source text — the
 //     bullet, the `1)`, the `_em_`, the escapes — the changed span spliced in) verified by re-parsing, else by the
 //     serializer; a block that would not read back as the editor shows it refuses the save by its line.
-import { getSchema, Node as TNode } from '@tiptap/core';
+import { getSchema, Node as TNode, Mark as TMark } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
 import { MarkdownManager } from '@tiptap/markdown';
 import { Table, TableRow, TableHeader, TableCell } from '@tiptap/extension-table';
@@ -46,6 +50,57 @@ export const RawBlock = TNode.create({
   renderHTML({ node }) { return ['pre', { 'data-raw-block': '', class: 'doc-rawblock', contenteditable: 'false' }, node.attrs.source]; },
   renderMarkdown: (node) => (node.attrs && node.attrs.source) || '',
 });
+/** THE LOSSLESS INLINE-HTML MARKS (lane doc-raw-blocks, 2.369.246 — owner 2026-10-09 "这个会莫名其妙变成源码的问题还没修复":
+ *  a GFM table whose cells held `<code>` read as a wall of source). CommonMark reads `<code>x</code>` as inline RAW HTML,
+ *  which the core drops, so the whole table rode as a raw block. A PAIR `<tag>…</tag>` of these tags — no attribute, the
+ *  same spelling both ends — is a mark of its own keeping the tag AS WRITTEN (`attrs.tag`) and writing exactly that tag
+ *  back (`<code>x</code>` stays `<code>x</code>`, never backticks; `<strong>` never becomes `**`); `<br>` / `<br/>` /
+ *  `<br />` is a break writing its own spelling. A tag with attributes, a block-level tag (`<details>`, `<div>`), an
+ *  unmatched or a same-tag-nested one stays inline raw HTML ⇒ the block stays a raw block (read rendered by the window). */
+export const HTML_MARKS = Object.freeze({ code: 'htmlCode', kbd: 'htmlKbd', sub: 'htmlSub', sup: 'htmlSup', b: 'htmlBold', strong: 'htmlBold', i: 'htmlItalic', em: 'htmlItalic' });
+const BR_TAG = /^<br\s*\/?>/i, OPEN_TAG = /^<([a-z]+)>/i, INLINE_START = /<(?:br\s*\/?|code|kbd|sub|sup|b|strong|i|em)>/i;
+let scanning = false;
+/** marked's inline tokenizer for those tags (`lex` = the lexer's inlineTokens). At `<tag>` the close is the one MARKED
+ *  reads: the rest of the paragraph lexed with this tokenizer off must show `</tag>` as a TOP-LEVEL token right after the
+ *  content (no code span / link / emphasis runs across it); the content is then lexed as inline markdown (nested tags
+ *  included). Content with a leading / trailing space stays raw (the serializer would move the space outside the tag).
+ *  → { type: <mark name> | 'htmlBreak', raw, tag, tokens } or undefined (marked reads it as raw HTML). */
+export function htmlInlineToken(src, lex) {
+  if (scanning) return undefined;
+  const br = BR_TAG.exec(src);
+  if (br) return { type: 'htmlBreak', raw: br[0], tag: br[0], tokens: [] };
+  const m = OPEN_TAG.exec(src), type = m && HTML_MARKS[m[1].toLowerCase()];
+  if (!type) return undefined;
+  const close = '</' + m[1] + '>', rest = src.slice(m[0].length), at = rest.indexOf(close), inner = at > 0 ? rest.slice(0, at) : '';
+  if (!inner || /^\s|\s$/.test(inner)) return undefined;
+  let top = null; scanning = true;
+  try { top = lex(rest); } catch { top = null; } finally { scanning = false; }
+  let got = '', i = 0;
+  for (; top && i < top.length && got.length < inner.length; i++) got += top[i].raw;
+  if (!top || got !== inner || !top[i] || top[i].type !== 'html' || top[i].raw !== close) return undefined;
+  return { type, raw: m[0] + inner + close, tag: m[1], tokens: lex(inner) };
+}
+const htmlMark = (name, tags) => TMark.create({
+  name,
+  addAttributes: () => ({ tag: { default: tags[0], rendered: false } }),
+  parseHTML: () => [],
+  renderHTML: ({ mark }) => [tags.includes(String(mark.attrs.tag).toLowerCase()) ? String(mark.attrs.tag).toLowerCase() : tags[0], name === 'htmlCode' ? { spellcheck: 'false' } : {}, 0],
+  markdownTokenName: name,
+  parseMarkdown: (token, h) => h.applyMark(name, h.parseInline(token.tokens || []), { tag: token.tag }),
+  renderMarkdown: (node, h) => { const tag = (node.attrs && node.attrs.tag) || tags[0]; return `<${tag}>${h.renderChildren(node)}</${tag}>`; },
+});
+/** `<br>` as written: a break of its own (the markdown hard break keeps Tiptap's); it carries the inline-HTML tokenizer. */
+export const HtmlBreak = TNode.create({
+  name: 'htmlBreak', group: 'inline', inline: true, selectable: false,
+  addAttributes: () => ({ tag: { default: '<br>', rendered: false } }),
+  parseHTML: () => [],
+  renderHTML: () => ['br'],
+  markdownTokenName: 'htmlBreak',
+  markdownTokenizer: { name: 'htmlInline', level: 'inline', start: (src) => { const m = INLINE_START.exec(src); return m ? m.index : -1; }, tokenize: (src, _tokens, h) => htmlInlineToken(src, h.inlineTokens) },
+  parseMarkdown: (token, h) => h.createNode('htmlBreak', { tag: token.tag }),
+  renderMarkdown: (node) => (node.attrs && node.attrs.tag) || '<br>',
+});
+export const HtmlMarks = [htmlMark('htmlCode', ['code']), htmlMark('htmlKbd', ['kbd']), htmlMark('htmlSub', ['sub']), htmlMark('htmlSup', ['sup']), htmlMark('htmlBold', ['b', 'strong']), htmlMark('htmlItalic', ['i', 'em'])];
 const ALIGN = { left: ':---', center: ':---:', right: '---:' };
 /** A GFM table without padding (one row = one line, so an edited cell changes its own row only); `|` escaped in a cell. */
 function compactTable(node, h) {
@@ -66,6 +121,7 @@ export const extensions = [
   // renderHTML carries, so `li[data-type=taskItem]` (the row rule) never matched and each checkbox sat on its own line
   TaskList, TaskItem.configure({ nested: true, HTMLAttributes: { 'data-type': 'taskItem' } }),
   Image.extend({ renderHTML({ HTMLAttributes: a }) { const src = safeImageSrc(a.src); return ['img', { ...(src ? { src } : {}), alt: a.alt || '', title: a.title || null }]; } }),
+  HtmlBreak, ...HtmlMarks,
   RawBlock,
 ];
 export const schema = getSchema(extensions);

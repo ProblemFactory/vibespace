@@ -31,6 +31,7 @@ const ndjson = [
 
 const { added } = uh.ingestRemoteEvents('host-x', 'AIDev', ndjson);
 ok(added === 3, `all three events ingested (${added})`);
+uh.ledgerWindowMs = uh.ledgerHotMaxBytes = 1e15; // B-9428: fixed-date rows read as the resident array (the window's parity: test-cache-bounds §2)
 const evs = uh._loadEvents();
 const list = (evs?.events || evs || []);
 const byMid = Object.fromEntries(list.map((e) => [e.mid, e]));
@@ -46,6 +47,7 @@ ok((await uh.eventForRid('h:host-x:req_1'))?.acct === ACCT, 'the request-id look
 
 // re-attribution on load must not undo it
 const uh2 = new UsageHistory({ dataDir, homeDir: home, resolveAccount: (id) => (id === ACCT ? { type: 'subscription', name: 'Fish Max' } : null) });
+uh2.ledgerWindowMs = uh2.ledgerHotMaxBytes = 1e15; // B-9428: fixed-date rows read as the resident array (the window's parity: test-cache-bounds §2)
 const l2 = uh2._loadEvents();
 const again = (l2?.events || l2 || []).find((e) => e.mid === 'msg_1');
 ok(again?.acct === ACCT, 'a fresh load keeps the resolved account (no re-bucketing to global)');

@@ -1295,6 +1295,13 @@ const SETTINGS_SCHEMA = {
     tier: 'advanced',
     category: t('Session'), liveApply: true,
   },
+  'mounts.vfsCacheRoot': {   // lane vfs-cache-local (B-4997): empty = the PURE rule in src/vfs-cache-place.js decides
+    type: 'string', default: '',
+    label: t('Storage mount cache folder'),
+    description: t('Where the rclone read/write caches of storage mounts live. Empty = VibeSpace decides: a local disk (~/.cache/vibespace/vfs-cache) when the data folder sits on a network filesystem, else the data folder. A cache moves only at a reconnect with nothing waiting to upload — never copied. VIBESPACE_VFS_CACHE_DIR overrides this.'),
+    tier: 'advanced',
+    category: t('Session'), liveApply: true,
+  },
 
   // ── Sidebar ──
   'sidebar.defaultTab': {

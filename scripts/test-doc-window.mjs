@@ -29,6 +29,13 @@
 //      (scripts/fixtures/doc-print/lane-brief.md) and a 40-paragraph document printed through Page.printToPDF: an <h1>,
 //      a 4-item list, no raw block, nothing wider than the A4 page box, no scroll container, ≥ 2 pages, every line's end
 //      in the PDF text; PNG after-print-p1.png (pdftoppm) into $VS_DOC_PRINT_SHOTS. VS_DOC_WINDOW_ONLY=print runs §11 alone.
+//      §12 (lane doc-raw-blocks, 2.369.246 — owner "这个会莫名其妙变成源码的问题还没修复"): at 1400×900 in zh the owner's
+//      shape (scripts/fixtures/doc-wheel/31-…: a GFM table whose cells hold <code>) opens as a TABLE with inline code
+//      chips (no grey block), a cell edit saves that row only; a <details> block reads rendered with its chip, a hostile
+//      <img onerror> never runs, a comment shows its source (the chip says why); arrows step over a raw block; the chip
+//      opens its source IN PLACE, Esc re-renders, Ctrl+S ⇒ only that block's lines change. PNGs <tag>.png (the table) +
+//      <tag>-raw.png + <tag>-raw-edit.png into $VS_DOC_RAW_SHOTS (tag = $VS_DOC_RAW_SHOT_TAG, else after).
+//      VS_DOC_WINDOW_ONLY=raw runs §12 alone.
 // Run: node scripts/test-doc-window.mjs   (SKIPs with evidence when google-chrome is absent; ~1 min)
 import fs from 'node:fs';
 import path from 'node:path';
@@ -571,7 +578,7 @@ try {
     await ev(`app.openFile(${S(p)}, ${S(nm)}, {}); return true;`);
     const up = await until(() => ev(`const w = ${DW(p)}; const pm = w && w.content.offsetParent && w.content.querySelector('.doc-page .ProseMirror'); return pm && pm.childElementCount > 1 ? w.id : null;`), 20000, 200);
     if (!up) return null;
-    const screen = await ev(`const w = ${DW(p)}; const pm = w.content.querySelector('.doc-page .ProseMirror'); return { raw: pm.querySelectorAll('pre.doc-rawblock').length, h1: pm.querySelectorAll('h1').length, ol: pm.querySelectorAll('ol > li').length };`);
+    const screen = await ev(`const w = ${DW(p)}; const pm = w.content.querySelector('.doc-page .ProseMirror'); return { raw: pm.querySelectorAll('.doc-rawblock').length, h1: pm.querySelectorAll('h1').length, ol: pm.querySelectorAll('ol > li').length };`);
     await click(await rectIn('.doc-more', p)); await sleep(200);
     const row = await ev(`const it = [...document.querySelectorAll('.context-menu .context-menu-item')].find((x) => x.textContent.trim() === 'Print / Save as PDF'); if (!it) return null; const r = it.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 };`);
     if (row) await click(row); else return { screen };
@@ -596,7 +603,7 @@ try {
   }
   const b = await printOf(BP, 'lane-brief.md');
   const bl = b && b.lay;
-  console.log('    the brief ON SCREEN (item 4 — unchanged):', S(b && b.screen), '— each raw block holds a bare `/p/<id>`: CommonMark inline raw HTML (an unknown tag), carried as written for editing');
+  console.log('    the brief ON SCREEN:', S(b && b.screen), '— each raw block holds a bare `/p/<id>`: CommonMark inline raw HTML (an unknown tag), carried as written for editing and READ rendered (§12)');
   ok(!!bl && bl.first === 'H1' && /^Lane pages-chip-groups — the chat's Pages chip/.test(bl.h1) && bl.h1.includes('/p/<id>') && bl.ol === 4 && bl.liInline === 4 && bl.raw === 0, '① the brief PRINTS as a document: the first line an <h1> (its /p/<id> kept as text), the numbered list an <ol> of 4 items with inline code + bold, NO raw block', bl && { first: bl.first, h1: bl.h1.slice(0, 80), ol: bl.ol, liInline: bl.liInline, raw: bl.raw });
   ok(!!bl && bl.nOver === 0 && bl.docW <= bl.W && bl.clip.length === 0 && bl.pre.every((x) => /^pre-wrap visible auto$/.test(x)) && bl.font === '14.6667px', '② nothing wider than the A4 page box (673 px) under print media, no clipping / scroll container, pre wraps and may break across pages, body 11 pt', bl && { W: bl.W, docW: bl.docW, over: bl.over, clip: bl.clip, pre: bl.pre, font: bl.font });
   const ends = BRIEF.split('\n').filter((l) => l.trim()).map((l) => (l.match(/[\p{L}\p{N}]+/gu) || []).slice(-3).join(''));
@@ -610,7 +617,87 @@ try {
   ok(!!f && f.pages >= 2 && !!fl && fl.nOver === 0 && fl.clip.length === 0 && fl.raw === 0 && S(fl.cols) === S(['xl']) && (f.text == null || (f.text.includes('ENDOFFORTY') && /line 90 x/.test(f.text) && f.text.includes('Paragraph 40:'))), `⑤ 40 paragraphs + a 90-line code block + an 11-column table print on ${f && f.pages} pages (≥ 2): the code block breaks across pages, the table fits the page (type stepped: xl), the last line printed`, f && { pages: f.pages, over: fl && fl.over, clip: fl && fl.clip, cols: fl && fl.cols, height: fl && fl.height });
   ok(pageErrors.length === 0, '⑥ no page exception through §11', pageErrors.slice(0, 3));
   }
-  if (ONLY !== 'width' && ONLY !== 'print') {
+  if (ONLY === '' || ONLY === 'raw') {
+  // ── §12 raw blocks READ as documents (lane doc-raw-blocks, 2.369.246 — owner 2026-10-09 "这个会莫名其妙变成源码的问题还没修复":
+  //    §2.7 of his design doc, a GFM table whose cells hold <code>, drawn as a grey "Markdown · 以源码编辑" source block)
+  section('§12 a table with inline <code> opens as a TABLE; a <details> block reads rendered, its chip edits its source in place; Save ⇒ only that block changes');
+  const RSHOTS = process.env.VS_DOC_RAW_SHOTS || SHOTS, RTAG = process.env.VS_DOC_RAW_SHOT_TAG || 'after';
+  const rshot = async (n) => { if (!RSHOTS) return null; const r = await call('Page.captureScreenshot', { format: 'png' }); const f = path.join(RSHOTS, n); fs.writeFileSync(f, Buffer.from(r.data, 'base64')); return f; };
+  await call('Page.addScriptToEvaluateOnNewDocument', { source: `try { localStorage.setItem('vibespace.lang', 'zh'); localStorage.removeItem('vs-doc-width'); } catch {}` });
+  if (!ok(!!(await boot(1400, 900, false)), '§12 the client re-booted at 1400×900 in zh (the owner\'s window shape)')) throw new Error('no app for §12');
+  const RD = path.join(fs.realpathSync(PROJ), 'raw'); fs.mkdirSync(RD, { recursive: true });
+  const OWNER = fs.readFileSync(path.join(REPO, 'scripts/fixtures/doc-wheel/31-table-inline-html.md'), 'utf8');
+  const OP = path.join(RD, 'design-shape.md'); fs.writeFileSync(OP, OWNER);
+  const RAWDOC = '# Raw blocks\n\nIntro line.\n\n<details>\n<summary>Why a bag</summary>\n\nTwo equal rows stay two.\n\n</details>\n\n<div><b>Boxed</b> words <img src="x.png" onerror="window.__rawXss = 1"></div>\n\n<!-- reviewer: keep the bag -->\n\nTail paragraph.\n';
+  const RP = path.join(RD, 'raw-blocks.md'); fs.writeFileSync(RP, RAWDOC);
+  async function openMax(p, nm) {
+    await ev(`for (const w of [...app.wm.windows.values()]) app.wm.closeWindow(w.id); return true;`); await sleep(300);
+    await ev(`app.openFile(${S(p)}, ${S(nm)}, {}); return true;`);
+    const up = await until(() => ev(`const w = ${DW(p)}; const pm = w && w.content.offsetParent && w.content.querySelector('.doc-page .ProseMirror'); return pm && pm.childElementCount > 1 ? w.id : null;`), 20000, 200);
+    if (up) { await ev(`app.wm.toggleMaximize(${S(up)}); return true;`); await sleep(700); }
+    return up;
+  }
+  const inR = (p, js) => ev(`const w = ${DW(p)}; const pm = w.content.querySelector('.doc-page .ProseMirror'); const R = (e) => e.getBoundingClientRect(); ${js}`);
+  ok(!!(await openMax(OP, 'design-shape.md')), '① the owner\'s shape (fixture 31) opened in the Doc window, maximized at 1400 px');
+  await inR(OP, `const t = pm.querySelector('table') || pm.querySelector('.doc-rawblock'); if (t) t.scrollIntoView({ block: 'start' }); return true;`); await sleep(400);
+  const own = await inR(OP, `const t = pm.querySelector('table'), step = t && [...t.querySelectorAll('code')].find((x) => x.textContent === 'STEP-nn');
+    return { raw: pm.querySelectorAll('.doc-rawblock').length, rows: t ? t.rows.length : 0, code: t ? [...t.querySelectorAll('code')].map((c) => c.textContent) : [], kbd: t ? t.querySelectorAll('kbd').length : 0, sup: t ? t.querySelectorAll('sup').length : 0, br: t ? t.querySelectorAll('td br').length : 0,
+      chip: step ? getComputedStyle(step).fontFamily + ' | ' + getComputedStyle(step).backgroundColor : null, mono: t && [...t.querySelectorAll('td')].some((td) => /mono/i.test(getComputedStyle(td).fontFamily)),
+      bare: (() => { const b = pm.querySelector('.doc-rawblock'), td = b && [...b.querySelectorAll('td')].find((x) => x.textContent.includes('names its step')); return td ? { rendered: b.dataset.rendered, table: !!b.querySelector('.tableWrapper > table'), code: td.querySelectorAll('code').length, mono: /mono/i.test(getComputedStyle(td).fontFamily), text: td.textContent.slice(0, 60), tail: getComputedStyle(td.lastChild.nodeType === 1 ? td.lastChild : td).fontFamily } : null; })() };`);
+  const ownShot = await rshot(`${RTAG}.png`);
+  ok(own.raw === 1 && own.rows === 4 && ['STEP-nn', 'ledger.review.read', 'replaces = prior id'].every((c) => own.code.includes(c)) && own.kbd === 2 && own.sup === 1 && own.br === 1 && /mono/i.test(own.chip || '') && !own.mono,
+    '② it opens as a TABLE (4 rows) with inline code chips — <code>STEP-nn</code> beside the backticked `replaces = prior id`, <kbd> ×2, <sup>, a <br> in its cell — no grey source block, the cells in the prose font', own);
+  await inR(OP, `pm.querySelector('.doc-rawblock').scrollIntoView({ block: 'center' }); return true;`); await sleep(300);
+  await rshot(`${RTAG}-bare.png`);
+  ok(!!own.bare && own.bare.rendered === '1' && own.bare.table && own.bare.code === 0 && !own.bare.mono && own.bare.text.includes('STEP-<code>-nn until export'), '②b the second table (a cell with a BARE <code> placeholder) stays ONE raw block (rule 2) and READS as a table: STEP-<code>-nn shown as written, no <code> element opened, the cell in the prose font (r2)', own.bare);
+  // ③ a cell is a real cell: the caret at the end of the 'Catalog digest' rule, a typed mark, Ctrl+S ⇒ that row's line only
+  const cellP = await inR(OP, `const c = pm.querySelector('table tr:nth-child(3) td:nth-child(2) p') || pm.querySelector('table tr:nth-child(3) td:nth-child(2)'); c.scrollIntoView({ block: 'center' }); const r = R(c); return { x: r.right - 3, y: r.bottom - 8 };`);
+  await click(cellP); await type('Ⓧ'); await sleep(150); await ctrlS();
+  const saved = await until(() => { const t = fs.readFileSync(OP, 'utf8'); return t.includes('Ⓧ') ? t : null; }, 8000);
+  const oL = OWNER.split('\n'), nL = String(saved || '').split('\n'), diff = oL.map((l, i) => (l === nL[i] ? null : i)).filter((x) => x !== null);
+  ok(!!saved && oL.length === nL.length && diff.length === 1 && nL[diff[0]] === oL[diff[0]].replace(/ \|$/, 'Ⓧ |') && /^\| Catalog digest \|/.test(oL[diff[0]]), '③ typing at the end of a cell + Ctrl+S ⇒ exactly that row\'s line changed (the mark at its end), every other line — the <code> / <kbd> / <br> rows included — byte-identical', { diff, line: diff.length ? nL[diff[0]].slice(-60) : null });
+  fs.writeFileSync(OP, OWNER);
+  // ④ the blocks that stay raw READ rendered; a hostile <img onerror> never runs; a comment shows its source, the chip says why
+  ok(!!(await openMax(RP, 'raw-blocks.md')), '④ a document with a <details> block, an HTML <div> (a hostile <img onerror>) and a comment opened');
+  await sleep(600);
+  const rb = await inR(RP, `return { blocks: [...pm.querySelectorAll('.doc-rawblock')].map((b) => ({ rendered: b.dataset.rendered, head: (b.querySelector('.doc-raw-head') || {}).textContent || '', details: !!b.querySelector('details > summary'), src: (b.querySelector('.doc-raw-src') || {}).textContent || '', ce: b.getAttribute('contenteditable'), onerror: !!b.querySelector('[onerror]'), bold: !!b.querySelector('b'), pre: !!b.querySelector('pre') })), xss: window.__rawXss === 1 };`);
+  const B = rb.blocks;
+  ok(B.length === 4 && B[0].rendered === '1' && B[0].details && B[0].head === 'HTML · 原样保留，点此改源码' && B[0].ce === 'false' && B[2].rendered === '1' && B[2].bold && !B[2].onerror && !rb.xss && !B.some((x) => x.pre),
+    '⑤ the <details> block and the <div> READ rendered (a <details> with its summary, bold words), read-only, the chip "HTML · 原样保留，点此改源码"; the <img onerror> carries no handler and never ran; no block drawn as a source <pre>', rb);
+  ok(B[1].rendered === '0' && B[1].src === '</details>' && B[3].rendered === '0' && B[3].src === '<!-- reviewer: keep the bag -->' && B[3].head === 'HTML · 无法渲染，显示源码 · 点此改源码', '⑥ a block that reads as nothing (the lone </details>, the comment) shows its SOURCE and its chip says it cannot be rendered', [B[1], B[3]]);
+  await rshot(`${RTAG}-raw.png`);
+  // ⑦ arrows step over a raw block as one unit
+  const intro = await inR(RP, `const p = pm.querySelector('p'); const r = R(p); return { x: r.right - 3, y: r.top + r.height / 2 };`);
+  await click(intro);
+  for (const k of ['End', 'ArrowDown']) { await call('Input.dispatchKeyEvent', { type: 'keyDown', key: k, code: k, windowsVirtualKeyCode: k === 'End' ? 35 : 40 }); await call('Input.dispatchKeyEvent', { type: 'keyUp', key: k, code: k, windowsVirtualKeyCode: k === 'End' ? 35 : 40 }); await sleep(120); }
+  const sel1 = await inR(RP, `const s = pm.querySelector('.ProseMirror-selectednode'); return s ? s.className + ' ' + (s.querySelector('summary') || {}).textContent : null;`);
+  await call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'ArrowDown', code: 'ArrowDown', windowsVirtualKeyCode: 40 }); await call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'ArrowDown', code: 'ArrowDown', windowsVirtualKeyCode: 40 }); await sleep(150);
+  const sel2 = await inR(RP, `const a = getSelection().anchorNode; const el = a && (a.nodeType === 1 ? a : a.parentElement); return { node: !!pm.querySelector('.ProseMirror-selectednode'), in: el ? (el.closest('p') || {}).textContent || el.tagName : null };`);
+  ok(/doc-rawblock/.test(sel1 || '') && /Why a bag/.test(sel1 || '') && !sel2.node && sel2.in === 'Two equal rows stay two.', '⑦ ArrowDown from the line above selects the raw block as ONE unit; the next ArrowDown leaves it for the paragraph below', { sel1, sel2 });
+  // ⑧ the chip opens the source IN PLACE; Esc ⇒ re-rendered; Ctrl+S ⇒ only that block's lines change
+  await click(await rectIn('.doc-rawblock .doc-raw-head', RP)); await sleep(300);
+  const ed1 = await inR(RP, `const ta = pm.querySelector('.doc-rawblock textarea.doc-raw-edit'); return ta ? { value: ta.value, focused: document.activeElement === ta, h: Math.round(R(ta).height), mono: /mono/i.test(getComputedStyle(ta).fontFamily), done: (pm.querySelector('.doc-raw-done') || {}).textContent || '' } : null;`);
+  ok(!!ed1 && ed1.value === '<details>\n<summary>Why a bag</summary>' && ed1.focused && ed1.h >= 40 && ed1.mono && ed1.done === '完成', '⑧ a press on the chip opens THIS block\'s source in place (a focused monospace box the block\'s size, Finish (完成) beside it) — not the whole-document Raw', ed1);
+  await inR(RP, `const ta = pm.querySelector('textarea.doc-raw-edit'); ta.select(); return true;`);
+  await type('<details open>\n<summary>Why a bag — edited</summary>'); await sleep(150);
+  await rshot(`${RTAG}-raw-edit.png`);
+  await call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 }); await call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 }); await sleep(300);
+  const ed2 = await inR(RP, `const b = pm.querySelector('.doc-rawblock'); return { ta: !!pm.querySelector('textarea.doc-raw-edit'), open: !!b.querySelector('details[open]'), summary: (b.querySelector('summary') || {}).textContent || '', dirty: (w.content.querySelector('.doc-save-btn') || {}).dataset?.state || '' };`);
+  ok(!ed2.ta && ed2.open && ed2.summary === 'Why a bag — edited' && ed2.dirty === 'dirty', '⑨ Esc writes it back: the block re-renders from its new source (open, the new summary), the document is dirty', ed2);
+  await ctrlS();
+  const want = RAWDOC.replace('<details>\n<summary>Why a bag</summary>', '<details open>\n<summary>Why a bag — edited</summary>');
+  const disk = await until(() => { const t = fs.readFileSync(RP, 'utf8'); return t !== RAWDOC ? t : null; }, 8000);
+  ok(disk === want, '⑩ Ctrl+S ⇒ the file differs in exactly that block\'s two lines; the paragraph, the </details>, the <div>, the comment and the tail byte-identical', disk && disk.slice(0, 160));
+  // ⑩b the chip toggles: a second press while the box is open closes it (it does not reopen)
+  await click(await rectIn('.doc-rawblock .doc-raw-head', RP)); await sleep(250);
+  const tog1 = await inR(RP, `return !!pm.querySelector('textarea.doc-raw-edit');`);
+  await click(await rectIn('.doc-rawblock .doc-raw-head', RP)); await sleep(300);
+  const tog2 = await inR(RP, `return { ta: !!pm.querySelector('textarea.doc-raw-edit'), rendered: (pm.querySelector('.doc-rawblock') || {}).dataset?.rendered, disk: null };`);
+  ok(tog1 && !tog2.ta && tog2.rendered === '1' && fs.readFileSync(RP, 'utf8') === want, '⑩b a second press on the chip closes the open box (no reopen), the block reads rendered again, nothing changed on disk', { tog1, tog2 });
+  ok(!!(await until(() => (pageErrors.length === 0 ? true : null), 300)) || pageErrors.length === 0, '⑪ no page exception through §12', pageErrors.slice(0, 3));
+  if (RSHOTS) ok(!!ownShot && fs.statSync(ownShot).size > 10000, `⑫ PNGs for the owner: ${path.join(RSHOTS, RTAG + '.png')} (+ -raw, -raw-edit)`);
+  }
+  if (ONLY !== 'width' && ONLY !== 'print' && ONLY !== 'raw') {
 
   // ── §9 design 020 (lane doc-editor-ui, 2.369.223): the design desk's audit sample (every block kind) at 1280 / 390 ×
   //    dark / light × zh / en — the PNGs carry the audit's names with `after-` so the owner flips between before and after
@@ -742,9 +829,9 @@ try {
       const gm1 = grips.row ? await menuAt(grips.row) : {}, gm2 = grips.col ? await menuAt(grips.col) : {};
       ok(/在上方插入行/.test(gm1.m || '') && /删除表格/.test(gm1.m || '') && /在左侧插入列/.test(gm2.m || '') && gm1.closed && gm2.closed, '⑤ each grip opens the existing table menu; Esc closes it', { gm1, gm2 });
       // ⑥ CODE: the fence's language on the block's chip; T7: quote, figure caption = the alt, the raw block's head
-      const blk = await inSW(`const pre = pm.querySelector('pre:not(.doc-rawblock)'); const raw = pm.querySelector('pre.doc-rawblock'); const fig = pm.querySelector('figure'); return { lang: getComputedStyle(pre, '::after').content, font: getComputedStyle(pre).fontSize + '/' + (parseFloat(getComputedStyle(pre).lineHeight) / parseFloat(getComputedStyle(pre).fontSize)).toFixed(2), head: raw ? getComputedStyle(raw, '::before').content : null, cap: fig && fig.querySelector('figcaption') ? fig.querySelector('figcaption').textContent : null, q: getComputedStyle(pm.querySelector('blockquote')).borderLeftWidth };`);
+      const blk = await inSW(`const pre = pm.querySelector(':scope > pre'); const raw = pm.querySelector('.doc-rawblock'); const fig = pm.querySelector('figure'); return { lang: getComputedStyle(pre, '::after').content, font: getComputedStyle(pre).fontSize + '/' + (parseFloat(getComputedStyle(pre).lineHeight) / parseFloat(getComputedStyle(pre).fontSize)).toFixed(2), head: raw ? (raw.querySelector('.doc-raw-head') || {}).textContent || null : null, cap: fig && fig.querySelector('figcaption') ? fig.querySelector('figcaption').textContent : null, q: getComputedStyle(pm.querySelector('blockquote')).borderLeftWidth };`);
       ok(blk.lang === '"js"' && blk.font === '13px/1.55', '⑥ the code block wears its fence\'s language chip ("js"), 13 / 1.55 mono', blk);
-      const sp = await inSW(`const pre = pm.querySelector('pre:not(.doc-rawblock)'); const code = pm.querySelector('p code'); const p = code && code.closest('p'); return { pre: pre.spellcheck, code: code ? code.spellcheck : null, prose: p ? p.spellcheck : null };`);
+      const sp = await inSW(`const pre = pm.querySelector(':scope > pre'); const code = pm.querySelector('p code'); const p = code && code.closest('p'); return { pre: pre.spellcheck, code: code ? code.spellcheck : null, prose: p ? p.spellcheck : null };`);
       ok(sp.pre === false && sp.code === false && sp.prose === true, '⑥ the browser spell-checks the prose, not the code: the code block and inline code carry spellcheck=false', sp);
       ok(/HTML/.test(blk.head || '') && blk.cap === '示例图片 sample image' && blk.q === '3px', 'T7: the raw block\'s head says HTML, the image\'s caption is its alt, the quote\'s 3 px rule', blk);
       await inSW(`for (const x of c.querySelectorAll('.doc-cmt-x')) x.click(); return true;`);

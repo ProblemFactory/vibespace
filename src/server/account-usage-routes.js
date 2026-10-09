@@ -194,7 +194,12 @@ app.get('/api/usage-stats', async (req, res) => {
       : null;
     // host = the DEVICE filter ('local' | a host id) — top-level over the view
     const hostFilter = req.query.host ? String(req.query.host) : null;
-    const answer = usageHistory.aggregate({ from, to, backend, accounts, hostFilter, pivots });
+    const ac = new AbortController(); // B-9428 r3: a request that went away leaves the fold queue
+    req.on?.('close', () => { if (!res.writableEnded) ac.abort(); });
+    let answer;
+    try { answer = await usageHistory.aggregateAsync({ from, to, backend, accounts, hostFilter, pivots }, { signal: ac.signal }); } catch (e) {
+      return res.status(e && e.code === 'BUSY' ? 429 : 503).json({ error: 'usage summary failed — ' + ((e && e.message) || e) + (e && /ABORTED|FOLD_TOO_BIG|STUCK/.test(e.code || '') ? '' : '; retry'), code: (e && e.code) || null });
+    }
     // the shadow comparison (design 011 L1), posted in this same synchronous
     // step so the index answers over exactly the appends this answer saw; it
     // settles off the response and feeds nothing

@@ -21,6 +21,10 @@ const crypto = require('crypto');
 const { globalUsageKeyOf } = require('./backend-caps.js'); // PURE: the machine login's ledger key per harness
 const { runUsageWalk } = require('./usage-walker.js');
 const { timedSync } = require('./timed-sync.js'); // PURE: the store-write clock (design 011 lane 1, store-timing)
+const CB = require('./cache-bounds.js'); // PURE: the ledger's hot window + byte ceiling + the cold columns (B-9428)
+const { coldRows, readLineAt, readLineAtSync } = require('./usage-cold-walk.js'); // the ledger rows read where they live, verified (B-9428 r2/r3)
+const { Worker } = require('worker_threads');
+const { trackWorker } = require('./worker-memory.js');
 
 // API-equivalent prices, USD per MILLION tokens. Subscription sessions don't
 // actually cost this — it's shown as a reference ("what this would cost on the
@@ -164,6 +168,16 @@ const SUPERSEDED_DEFAULTS = {
 // behind a ledger scan again (a 200 MB catch-up used to hold the loop for the
 // whole walk).
 const SCAN_BUDGET_BYTES = 1024 * 1024;
+const PROBE_BYTES = 64; // the append-only proof: the last bytes before a shard's old end (B-9428 r3)
+function probeHolds(fp, at, probe) {
+  if (!probe || !probe.length) return true;
+  let fd; try { fd = fs.openSync(fp, 'r'); } catch { return false; }
+  try { const b = Buffer.alloc(probe.length); return fs.readSync(fd, b, 0, b.length, at - probe.length) === b.length && b.equals(probe); } catch { return false; } finally { fs.closeSync(fd); }
+}
+const COLD_WORKER_HEAP_MB = 1536;
+// Fold workers terminated but not exited (blocked in a sync read — the storage is not answering): r4, verify #2.
+// Process-wide: while one is stuck no fold worker starts (they would STACK, +40 MB each, nobody told).
+const STUCK = new Set(); // the cold fold's worker heap cap: one month of cold lines + the accumulator (B-9428 r2)
 // L0 (design 011): how often the walk's writer looks for cursor keys whose
 // transcript is gone — one stat per key (~45 ms for production's 37 024 keys,
 // measured 2026-10-03), so at most hourly, and on the first walk after boot.
@@ -811,8 +825,15 @@ class UsageHistory {
   // once at load time (the ledger can contain a duplicate rid if a crash hit
   // between a shard append and the cursor write). Without this, every Usage
   // window request re-read + re-parsed every shard (~seconds at 100k+ events).
+  // B-9428 (the owner's heap snapshot: this cache was 406 MB of a 1.17 GB heap
+  // — every row ever, parsed): `events` holds the HOT rows only (ts ≥ cutoff,
+  // the window + byte ceiling of cache-bounds.js); an older row lives in
+  // `cold` as the priced columns, and its other fields are streamed from the
+  // shards by (shard, offset) (usage-cold-walk.js). rids/mids = the hot rows' ids; the cold rows' ids live
+  // in the slab's sorted hash indexes (r2: dedup and ledgerKnowsId regardless of ts).
   _loadEvents() {
-    if (!this._evCache) this._evCache = { consumed: new Map(), events: [], rids: new Set(), mids: new Set(), srcWm: new Map(), checkedAt: 0 };
+    if (!this._evCache) this.ledgerGen = (this.ledgerGen || 0) + 1; // a rebuilt cache = a new generation (cost memos keyed on it, r4)
+    if (!this._evCache) this._evCache = { consumed: new Map(), marks: new Map(), events: [], sizes: [], locs: [], hrh: [], hotBytes: 0, rids: new Set(), mids: new Set(), srcWm: new Map(), checkedAt: 0, cold: new CB.ColdSlab(), cutoff: -Infinity, walking: 0, shards: [], shardIx: new Map() };
     const c = this._evCache;
     // inc-mtox23xw (2.369.36): this ran a readdir + a stat per shard on EVERY
     // call — and the estimator calls it once per anchor PAIR (thousands per
@@ -822,14 +843,26 @@ class UsageHistory {
     c.checkedAt = Date.now();
     let files = [];
     try { files = fs.readdirSync(this.dir).filter(f => /^events-\d{4}-\d{2}\.ndjson$/.test(f)).sort(); } catch {}
+    let seen = null, grew = false, cooled = false, added = 0;
+    // r3 (verify #13): a shard the cache read that is GONE ⇒ rebuild (every place in it is stale)
+    if (c.consumed.size) { const have = new Set(files); for (const fn of c.consumed.keys()) if (!have.has(fn)) { this._evCache = null; return this._loadEvents(); } }
     for (const fn of files) {
       const fp = path.join(this.dir, fn);
       let st; try { st = fs.statSync(fp); } catch { continue; }
-      const consumed = c.consumed.get(fn) || 0;
-      if (st.size === consumed) continue;
-      if (st.size < consumed) { // shard shrank (manual edit/rotation) — rebuild from scratch
+      const consumed = c.consumed.get(fn) || 0, mark = c.marks.get(fn);
+      // r3 (verify #10/#11): every (shard, offset) the cache holds is only good while the shard is the SAME
+      // file grown by appends — another inode, a same-size rewrite (mtime moved, size not), or bytes before
+      // the old end that changed (the append-only proof: the old last line's tail still at its old offset)
+      // ⇒ rebuild from scratch. A shrink is a rewrite too (the 2026-09 rule).
+      if (consumed && (st.size < consumed || (mark && (mark.ino !== st.ino || (st.size === consumed && mark.mtimeMs !== st.mtimeMs) || (st.size > consumed && !probeHolds(fp, consumed, mark.probe)))))) {
         this._evCache = null;
         return this._loadEvents();
+      }
+      if (st.size === consumed) continue;
+      if (!seen) { // the first new bytes of this pass: slide the window (hourly, never under a walk), order the id indexes
+        seen = new Set();
+        if (!c.walking && (c.cutoff === -Infinity || Date.now() - this._ledgerWindowMs() > c.cutoff + 3600e3)) this._trimHot();
+        for (const k of Object.keys(c.cold.idx)) c.cold.idx[k].settle();
       }
       let buf;
       const fd = fs.openSync(fp, 'r');
@@ -839,27 +872,182 @@ class UsageHistory {
       } finally { fs.closeSync(fd); }
       const lastNl = buf.lastIndexOf(10); // complete lines only — a concurrent append may be mid-write
       if (lastNl < 0) continue;
-      for (const line of buf.slice(0, lastNl + 1).toString('utf-8').split('\n')) {
-        if (!line) continue;
-        let ev; try { ev = JSON.parse(line); } catch { continue; }
-        if (ev.rid) { if (c.rids.has(ev.rid)) continue; c.rids.add(ev.rid); }
-        if (ev.mid) c.mids.add(ev.mid); // stream-side id space (live-odometer exclusion join)
-        // per-SOURCE watermark (offline-bias defense, 2.297.0): the newest
-        // event timestamp we hold from each machine — 'local' for this one.
-        // Free here (rides the incremental append walk); consumers ask
-        // sourceWatermarks() to detect an ACTIVE source that has gone dark.
-        const src = ev.host || 'local';
-        if ((ev.ts || 0) > (c.srcWm.get(src) || 0)) c.srcWm.set(src, ev.ts);
-        c.events.push(ev);
+      let sh = c.shardIx.get(fn);
+      if (sh === undefined) { sh = c.shards.length; c.shards.push(fn); c.shardIx.set(fn, sh); }
+      for (let at = 0; at <= lastNl;) {
+        const nl = buf.indexOf(10, at);
+        if (nl > at) {
+          const line = buf.toString('utf8', at, nl);
+          let ev = null; try { ev = JSON.parse(line); } catch { }
+          if (ev) { const r = this._take(c, ev, sh, consumed + at, nl - at + 1, seen, CB.idHash(line)); if (r === 1) { grew = true; added++; } else if (r === 2) cooled = true; }
+        }
+        at = nl + 1;
       }
       c.consumed.set(fn, consumed + lastNl + 1);
+      c.marks.set(fn, { ino: st.ino, mtimeMs: st.mtimeMs, probe: Buffer.from(buf.subarray(Math.max(0, lastNl + 1 - PROBE_BYTES), lastNl + 1)) });
+    }
+    if (grew && c.hotBytes > this._ledgerHotMaxBytes()) this._trimHot();
+    // a pass that loaded many cold rows (a boot, a rebuild after a rewrite) orders them NOW, inside the same
+    // long load, not in the next query's walk planning (r3: a 13 M-row settle measured 5 s in a 30-day query)
+    if (cooled && c.cold.n - c.cold.sortedN > Math.max(65536, c.cold.n >> 2)) { c.cold.settle(); for (const k of Object.keys(c.cold.idx)) c.cold.idx[k].settle(); }
+    if (added > 65536) this._sortedEvents(); // …and the hot rows' ts order (a 110 k-row sort measured 130 ms in the next query)
+    if ((cooled || grew) && !c.overWarned && c.cold.bytes() > this._coldMaxBytes()) { // the declared ceiling, said once (verify #2)
+      c.overWarned = true;
+      try { global.__vsEvent?.('usage-cold-over-ceiling', String(Math.round(c.cold.bytes() / CB.MB))); } catch { }
+      console.warn(`[usage] the ledger's cold columns passed their ${Math.round(this._coldMaxBytes() / CB.MB)} MB ceiling (${Math.round(c.cold.bytes() / CB.MB)} MB, ${c.cold.n} rows) — kept: the money readers' numbers never drop a row`);
     }
     return c.events;
+  }
+  /** One parsed line → hot (1), cold (2) or dropped (0, a duplicate rid — the FIRST copy wins, whatever its
+   *  ts; r3 verify #4/#15: a cold hash hit is a candidate, the rid STRING at its place decides). */
+  _take(c, ev, sh, off, size, seen, lineHash = NaN) {
+    if (ev.rid) {
+      if (c.rids.has(ev.rid) || seen.has(ev.rid)) return 0;
+      for (const loc of c.cold.idx.rid.findSorted(CB.idHash(ev.rid))) if (this._rowAt(c, loc)?.rid === ev.rid) return 0;
+      seen.add(ev.rid);
+    }
+    // per-SOURCE watermark (offline-bias defense, 2.297.0): the newest
+    // event timestamp we hold from each machine — 'local' for this one.
+    // Free here (rides the incremental append walk); consumers ask
+    // sourceWatermarks() to detect an ACTIVE source that has gone dark.
+    const src = ev.host || 'local';
+    if ((ev.ts || 0) > (c.srcWm.get(src) || 0)) c.srcWm.set(src, ev.ts);
+    if (ev.ts < c.cutoff && CB.coldable(ev, sh, off)) { c.cold.push(ev, sh, off, lineHash); return 2; }
+    if (ev.rid) c.rids.add(ev.rid);
+    if (ev.mid) c.mids.add(ev.mid); // stream-side id space (live-odometer exclusion join)
+    c.events.push(ev); c.sizes.push(size); c.locs.push(CB.locOf(sh, off)); c.hrh.push(lineHash); c.hotBytes += size; // hrh = the WHOLE line's hash (r4, verify #0)
+    return 1;
+  }
+  /** The row at a place (sync, one ≤ 64 KB read) — only on a hash hit. */
+  _rowAt(c, loc) {
+    const line = readLineAtSync(path.join(this.dir, c.shards[Math.floor(loc / 4294967296)] || ''), loc % 4294967296);
+    try { return line == null ? null : JSON.parse(line); } catch { return null; }
+  }
+  _ledgerWindowMs() { return this.ledgerWindowMs || CB.LEDGER_WINDOW_DAYS * CB.DAY_MS; }
+  _ledgerHotMaxBytes() { return this.ledgerHotMaxBytes || CB.LEDGER_HOT_MAX_BYTES; }
+  _coldMaxBytes() { return this.coldMaxBytes || CB.COLD_COLUMNS_MAX_BYTES; }
+  /** Slide the hot cutoff (the window, the byte ceiling) and move the rows it passed into the cold columns
+   *  in ts order (the load order on equal ts). Never while a walk holds the cutoff it started on. */
+  _trimHot() {
+    const c = this._evCache;
+    if (!c || c.walking) return;
+    const evs = c.events, tss = evs.map((e) => e.ts || 0);
+    const cut = CB.ledgerCutoff({ nowMs: Date.now(), tss, sizes: c.sizes, windowMs: this._ledgerWindowMs(), maxBytes: this._ledgerHotMaxBytes(), prev: c.cutoff });
+    c.cutoff = cut;
+    const go = [];
+    for (let i = 0; i < evs.length; i++) if (tss[i] < cut && !Number.isNaN(c.locs[i]) && CB.coldable(evs[i], Math.floor(c.locs[i] / 4294967296), c.locs[i] % 4294967296)) go.push(i);
+    if (!go.length) return;
+    go.sort((a, b) => (tss[a] - tss[b]) || (a - b));
+    const drop = new Uint8Array(evs.length);
+    for (const i of go) { const ev = evs[i]; c.cold.push(ev, Math.floor(c.locs[i] / 4294967296), c.locs[i] % 4294967296, c.hrh[i]); drop[i] = 1; if (ev.rid) c.rids.delete(ev.rid); if (ev.mid) c.mids.delete(ev.mid); }
+    const ne = [], ns = [], nl = [], nh = [];
+    let hb = 0;
+    for (let i = 0; i < evs.length; i++) if (!drop[i]) { ne.push(evs[i]); ns.push(c.sizes[i]); nl.push(c.locs[i]); nh.push(c.hrh[i]); hb += c.sizes[i]; }
+    c.events = ne; c.sizes = ns; c.locs = nl; c.hrh = nh; c.hotBytes = hb; c.sorted = null;
+  }
+  /** Does the ledger hold this request / message id? (the live odometer's exclusion join): the hot ids,
+   *  then the cold rows' sorted hashes — whatever the caller's ts (r2, verify #14). */
+  ledgerKnowsId(id) {
+    const c = this._evCache;
+    if (!c || !id) return false;
+    if (c.rids.has(id) || c.mids.has(id)) return true;
+    if (!c.cold.n) return false;
+    for (const loc of c.cold.locs('rid', id)) if (this._rowAt(c, loc)?.rid === id) return true; // a hash hit is a candidate (verify #15)
+    for (const loc of c.cold.locs('mid', id)) if (this._rowAt(c, loc)?.mid === id) return true;
+    return false;
+  }
+  /** The bounded caches' census rows, each in its ceiling's unit (verify #4): the window in RAW line bytes
+   *  (its heap cost is more — the parsed objects + the id sets), the cold columns as ArrayBuffers. */
+  cacheCensus() {
+    const c = this._evCache;
+    return [
+      CB.cacheRow('usage ledger window', { bytes: c ? c.hotBytes : 0, count: c ? c.events.length : 0, unit: 'rows', ceiling: this._ledgerHotMaxBytes(), kind: 'heap', basis: 'raw line bytes' }),
+      CB.cacheRow('usage ledger cold columns', { bytes: c ? c.cold.bytes() : 0, count: c ? c.cold.n : 0, unit: 'rows', ceiling: this._coldMaxBytes(), kind: 'arraybuffers', basis: 'typed arrays' }),
+      ...(STUCK.size ? [CB.cacheRow('usage fold workers stuck', { count: STUCK.size, unit: 'workers (storage not answering)' })] : []), // r4, verify #2
+    ];
+  }
+
+  // THE COLD ROWS' FULL FIELDS (B-9428 r2): the slab's ordered positions in [from, to], cut into one group per
+  // UTC month of ts; usage-cold-walk.js reads each row at its (shard, offset) — what the cache loaded, where it
+  // lives, in its ts order.
+  _coldWalk(from, to) {
+    const c = this._evCache, s = c.cold;
+    s.settle();
+    const q0 = from ? s.lowerBound(from) : 0, q1 = to ? s.upperBound(to) : s.n;
+    const groups = [];
+    for (let a = q0; a < q1;) {
+      const d = new Date(s.ts[a]);
+      const b = Math.max(a + 1, Math.min(q1, s.lowerBound(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1))));
+      groups.push({ sh: s.sh.slice(a, b), off: s.off.slice(a, b), ts: s.ts.slice(a, b), rh: s.rh.slice(a, b) }); // what each place must hold (verified)
+      a = b;
+    }
+    return { dir: this.dir, shards: c.shards.slice(), groups };
+  }
+  /** SYNC, every row in [from, to] with all its fields in ts order — the declared on-loop reader (a
+   *  migration, a test; aggregate()). The server's route folds the cold part in a worker (aggregateAsync). */
+  * _allRows(from, to) {
+    this._loadEvents();
+    const c = this._evCache;
+    if (!c.cold.n || (from && from >= c.cutoff)) { yield* this._hotEvents(from, to); return; }
+    yield* this._merged(coldRows(this._coldWalk(from, to)), from, to, this._sortedEvents());
+  }
+  /** The cold rows a lookup's hashes name, ONE line each read at its (shard, offset) (verify #6); the LAST
+   *  match in load order — the old backwards search's answer. */
+  async _coldFind(id, pred) {
+    const c = this._evCache;
+    if (!c || !c.cold.n) return null;
+    let best = null, bestAt = -1;
+    for (const loc of c.cold.candidates(id)) { // O(log n) on the hash index (verify #18), one line each
+      let ev; try { ev = JSON.parse(await readLineAt(path.join(this.dir, c.shards[Math.floor(loc / 4294967296)]), loc % 4294967296)); } catch { continue; }
+      if (ev && pred(ev) && loc > bestAt) { best = ev; bestAt = loc; }
+    }
+    return best;
+  }
+  /** The cold fold in a worker (usage-cold-worker.js): one per walk, terminated after; the main thread never
+   *  parses a cold line for the route. */
+  _foldInWorker(msg) {
+    if (STUCK.size) return Promise.reject(Object.assign(new Error(`the usage ledger is not answering (storage) — ${STUCK.size} fold worker(s) stuck in a read; usage summaries resume when it returns`), { code: 'STUCK' }));
+    return new Promise((resolve, reject) => {
+      let w, settled = false, timer = null, exited = false;
+      const file = this.coldWorkerFile || path.join(__dirname, 'usage-cold-worker.js');
+      const capMb = this.coldWorkerHeapMb || COLD_WORKER_HEAP_MB; // the hard limit never under 64 MB: below ~16 MB V8 dies PROCESS-WIDE deserializing the isolate (measured)
+      // execArgv [] (r3, verify #1/#12): a parent --max-old-space-size would otherwise replace resourceLimits
+      try { w = new Worker(file, { execArgv: [], resourceLimits: { maxOldGenerationSizeMb: Math.max(64, capMb), maxYoungGenerationSizeMb: 32 } }); } catch (e) { reject(e); return; }
+      trackWorker('usage-cold-fold', w); // the memory census (src/worker-memory.js)
+      this._coldWalks = (this._coldWalks || 0) + 1;
+      w.on('exit', () => { exited = true; if (STUCK.delete(w)) console.log(`[usage] a stuck fold worker exited — ${STUCK.size} still stuck${STUCK.size ? '' : '; usage summaries resume'}`); });
+      // ONE worker at a time (r4): the request settles only after terminate() — awaited for its own deadline;
+      // a worker still alive then is STUCK (counted, said once, no new worker until it exits)
+      const end = async (fn, v) => {
+        if (settled) return; settled = true; clearTimeout(timer);
+        const tdl = this.coldTerminateDeadlineMs || CB.COLD_TERMINATE_DEADLINE_MS;
+        await Promise.race([w.terminate().catch(() => { }), new Promise((r) => setTimeout(r, tdl).unref?.())]);
+        if (!exited) { STUCK.add(w); console.warn(`[usage] a fold worker did not exit ${Math.round(tdl / 1000)} s after terminate (blocked in a read — the storage is not answering): ${STUCK.size} stuck; new usage summaries are refused until it exits`); }
+        fn(v);
+      };
+      const deadline = this.coldFoldDeadlineMs || CB.COLD_FOLD_DEADLINE_MS;
+      timer = setTimeout(() => end(reject, Object.assign(new Error(`the fold passed its ${Math.round(deadline / 1000)} s deadline and was stopped`), { code: 'DEADLINE' })), deadline);
+      w.on('message', (m) => {
+        if (m && m.ev === 'memory') return;
+        if (m && m.ev === 'done') end(resolve, m);
+        else if (m && m.ev === 'error') end(reject, Object.assign(new Error(m.error), { code: m.code || 'FOLD' }));
+      });
+      w.on('error', (e) => end(reject, Object.assign(new Error(e && e.code === 'ERR_WORKER_OUT_OF_MEMORY' ? 'the fold worker ran out of memory' : 'the fold worker failed: ' + (e && e.message)), { code: (e && e.code) || 'WORKER' })));
+      w.on('exit', (code) => end(reject, Object.assign(new Error('the fold worker exited (' + code + ')'), { code: 'WORKER' })));
+      w.postMessage({ op: 'fold', id: 1, capMb, rowBudget: this.coldRowBudget || CB.COLD_ROW_BUDGET, ...msg }, [...msg.walk.groups.flatMap((g) => [g.sh.buffer, g.off.buffer, g.ts.buffer, g.rh.buffer]), msg.hot.tss.buffer, msg.hot.locs.buffer, msg.hot.rh.buffer]);
+    });
+  }
+  /** The worker folded with no account / session tables: name what it could not on the answer's rows,
+   *  exactly as _aggRow would have (live?.name || the row's own, live?.tail, !live; the session's meta name). */
+  _fixLabels(ans) {
+    for (const r of ans.groups.account || []) if (r.deleted) { const live = this._resolveAccount(r.key); if (live) { if (live.name) r.name = live.name; r.tail = live.tail || null; r.deleted = false; } }
+    for (const r of ans.groups.pool || []) if (r.deleted) { const p = this._resolveAccount(r.key); if (p) { r.name = p.name || r.key; r.deleted = false; } }
+    for (const r of ans.groups.session || []) { const sm = this._lastMetaMap ? this._lastMetaMap[r.key] : null; r.name = sm?.name || null; }
   }
 
   // Pre-load the event cache (called once at boot so the first Usage window
   // open doesn't pay the full-ledger parse).
-  warm() { try { this._loadEvents(); } catch {} }
+  warm() { try { this._loadEvents(); const c = this._evCache; c.cold.settle(); for (const k of Object.keys(c.cold.idx)) c.cold.idx[k].settle(); } catch {} } // B-9428: the cold columns ordered + right-sized now, not at the first query
 
   /** Per-source (per-machine) newest-event-timestamp map: {local: ts, <hostId>: ts}.
    *  The offline-bias defense reads this to tell "idle" from "dark": a source
@@ -881,6 +1069,8 @@ class UsageHistory {
     await this.scanSettled(); // the walk yields (perf ⑥): answer from the SETTLED ledger
     const evs = this._loadEvents();
     for (let i = evs.length - 1; i >= 0; i--) if (evs[i].rid === rid) return evs[i];
+    const old = await this._coldFind(rid, (ev) => ev.rid === rid); // B-9428: a row older than the window
+    if (old) return old;
     // REMOTE sessions (real report: every reply on a remote conversation
     // showed "not in the ledger yet"): the host harvest namespaces its rids
     // `h:<hostId>:<rid>`, so an exact match on the plain request id can never
@@ -890,7 +1080,7 @@ class UsageHistory {
       const r = evs[i].rid;
       if (typeof r === 'string' && r.startsWith('h:') && r.endsWith(suf)) return evs[i];
     }
-    return null;
+    return this._coldFind(rid, (ev) => typeof ev.rid === 'string' && ev.rid.startsWith('h:') && ev.rid.endsWith(suf));
   }
 
   /** Join by message.id — the id BOTH transports carry (the 2.267.3 rule).
@@ -909,7 +1099,7 @@ class UsageHistory {
       if (ev.mid === mid || ev.rid === mid) return ev;
       if (typeof ev.rid === 'string' && ev.rid.startsWith('h:') && ev.rid.endsWith(suf)) return ev;
     }
-    return null;
+    return this._coldFind(mid, (ev) => ev.mid === mid || ev.rid === mid || (typeof ev.rid === 'string' && ev.rid.startsWith('h:') && ev.rid.endsWith(suf)));
   }
 
   /** Time-sorted view of the cache (rebuilt lazily when the event count
@@ -926,14 +1116,36 @@ class UsageHistory {
     const arr = this._sortedEvents();
     let lo = 0, hi = arr.length;
     while (lo < hi) { const mid = (lo + hi) >> 1; if ((arr[mid].ts || 0) <= t) lo = mid + 1; else hi = mid; }
-    return lo;
+    return lo + this._evCache.cold.countUpTo(t);
   }
   // Yield UNIQUE events in [from,to] (epoch ms) from the in-memory cache.
   // O(log n + k) since 2.369.36 (inc-mtox23xw): the estimator walks this once
   // per anchor pair; a full-ledger scan per pair blocked the loop for 10-59s
   // (captured by Debugger.pause inside _events ← costBetweenMulti ← learnRates).
+  /** Every row in [from, to] with ALL its fields, ts-ordered — the cold ones read at their (shard, offset)
+   *  (SYNC: a migration, a test; the server reads through aggregateAsync). */
+  rows(from, to) { return this._allRows(from, to); }
+  // B-9428: a range that starts before the hot cutoff first yields the COLD rows as light rows carrying only
+  // the priced columns (ts, i/o/cw5/cw1/cr, acct/be/host/atype/model) — every caller of _events reads only
+  // those (test-cache-bounds' census); a reader needing other fields reads the rows (_allRows / the worker).
   * _events(from, to) {
     const arr = this._sortedEvents();
+    const c = this._evCache;
+    if (!c.cold.n || (from && from >= c.cutoff)) { yield* this._hotEvents(from, to, arr); return; }
+    yield* this._merged(c.cold.rows(from, to), from, to, arr);
+  }
+  /** The cold sequence + the hot rows by ts. Every hot row the columns could hold is ≥ the cutoff, so only a
+   *  row they cannot (coldable() false: a scanner never writes one) interleaves. */
+  * _merged(cold, from, to, arr) {
+    const it = this._hotEvents(from, to, arr);
+    let h = it.next();
+    for (const ev of cold) {
+      while (!h.done && (h.value.ts || 0) <= ev.ts) { yield h.value; h = it.next(); }
+      yield ev;
+    }
+    while (!h.done) { yield h.value; h = it.next(); }
+  }
+  * _hotEvents(from, to, arr = this._sortedEvents()) {
     let lo = 0;
     if (from) { let hi = arr.length; while (lo < hi) { const mid = (lo + hi) >> 1; if ((arr[mid].ts || 0) < from) lo = mid + 1; else hi = mid; } }
     for (let i = lo; i < arr.length; i++) {
@@ -963,7 +1175,100 @@ class UsageHistory {
 
   // The one flexible query the UI uses. groupBy is an array of dimension keys;
   // returns { totals, series(byDay), groups: { <dim>: [{key,...}] }, accounts }.
-  aggregate({ from = null, to = null, backend = null, accounts = null, hostFilter = null, pivots = null } = {}) {
+  // B-9428: the full rows of a range older than the hot cutoff are read at their (shard, offset) —
+  // synchronously here (a migration, a test), folded in a worker through aggregateAsync (the route). One
+  // accumulator, so the two answer the same buckets in the same order.
+  aggregate(opts = {}) {
+    for (let tries = 0; ; tries++) {
+      try {
+        const st = this._aggBegin(opts);
+        for (const ev of this._allRows(opts.from, opts.to)) this._aggRow(st, ev);
+        return this._aggEnd(st);
+      } catch (e) { if (!(e && e.code === 'STALE') || tries >= 2) throw e; this._evCache = null; } // a rewritten shard: rebuild, read again
+    }
+  }
+  /** The route's aggregate (r2/r3). A hot-only range folds the in-memory hot rows on the loop in yielding
+   *  slices (no worker, no disk — verify #6). A range reaching the cold rows is SINGLE-FLIGHT per query and
+   *  folds ONE at a time in usage-cold-worker.js: every row read at its place and verified, the answer AS-OF
+   *  the walk's start (what the sync call answered at its instant). Never a fold of the ledger on the loop
+   *  (verify #0/#9): a stale place ⇒ rebuild + re-run IN THE WORKER (≤ 3), then an error; a worker death /
+   *  out-of-memory / the deadline ⇒ an error every waiter gets (verify #1/#2). The queue holds ≤ 4 distinct
+   *  folds (a 5th is refused) and a request that went away leaves it (verify #14). */
+  aggregateAsync(opts = {}, { signal = null } = {}) {
+    this._loadEvents();
+    const c = this._evCache;
+    const hotOnly = !c.cold.n || (opts.from && opts.from >= c.cutoff);
+    const key = JSON.stringify([opts.from || null, opts.to || null, opts.backend || null, opts.accounts ? [...opts.accounts].sort() : null, opts.hostFilter || null, opts.pivots || null]);
+    if (!this._aggFlights) { this._aggFlights = new Map(); this._queued = 0; }
+    const hit = this._aggFlights.get(key);
+    if (hit) { hit.job.waiters++; this._onAbort(signal, hit.job); return hit.p; }
+    const job = { waiters: 1, started: false, cancelled: false };
+    let p;
+    if (hotOnly) { job.started = true; p = this._hotFold(opts); }
+    else {
+      if (this._queued >= (this.coldQueueMax || CB.COLD_QUEUE_MAX)) return Promise.reject(Object.assign(new Error(`${this._queued} usage summaries are already waiting — retry in a moment`), { code: 'BUSY' }));
+      this._queued++;
+      p = (this._walkChain || Promise.resolve()).then(() => {
+        this._queued--; job.started = true;
+        if (job.cancelled) throw Object.assign(new Error('the request went away before its turn'), { code: 'ABORTED' });
+        return this._aggregateWalk(opts, 0);
+      });
+      this._walkChain = p.then(() => { }, () => { }); // the queue's tail — never the answer (p.catch would hold it)
+    }
+    this._aggFlights.set(key, { p, job });
+    this._onAbort(signal, job);
+    const drop = () => { if (this._aggFlights.get(key)?.p === p) this._aggFlights.delete(key); };
+    p.then(drop, drop);
+    return p;
+  }
+  _onAbort(signal, job) {
+    if (!signal) return;
+    const go = () => { job.waiters--; if (job.waiters <= 0 && !job.started) job.cancelled = true; };
+    if (signal.aborted) go(); else signal.addEventListener('abort', go, { once: true });
+  }
+  /** A hot-only range: the in-memory hot rows (a snapshot, as-of now) in slices that yield the loop. */
+  async _hotFold(opts) {
+    const st = this._aggBegin(opts);
+    let k = 0;
+    for (const ev of this._hotEvents(opts.from, opts.to, this._sortedEvents().slice())) {
+      this._aggRow(st, ev);
+      if (++k % 5000 === 0) await new Promise((r) => setImmediate(r));
+    }
+    return this._aggEnd(st);
+  }
+  async _aggregateWalk(opts, tries) {
+    this._loadEvents();
+    const c = this._evCache;
+    if (!c.cold.n || (opts.from && opts.from >= c.cutoff)) return this._hotFold(opts);
+    let res;
+    c.walking++; // no slide while this walk's plan is out (its places stay its own)
+    try {
+      const h0 = c.events.length, tss = new Float64Array(h0), locs = new Float64Array(h0), rh = new Float64Array(h0), objs = {};
+      for (let i = 0; i < h0; i++) { tss[i] = c.events[i].ts || 0; locs[i] = c.locs[i]; rh[i] = c.hrh[i]; if (Number.isNaN(locs[i])) objs[i] = c.events[i]; }
+      const walk = this._coldWalk(opts.from, opts.to);
+      var asOf = Date.now(); // the answer's instant: the plan (r4, verify #6 — the window says "as of" when it lags)
+      const hook = this.walkHook; // test seam: an append / a slide / a rewrite lands mid-walk (every try)
+      if (hook) await hook(tries);
+      res = await this._foldInWorker({ pricing: this._pricing, query: { ...opts }, walk, hot: { tss, locs, rh, objs } });
+    } catch (e) {
+      if (e && e.code === 'STALE') { // a shard was rewritten under the plan: rebuild, re-run in the worker
+        this._evCache = null;
+        if (tries < 1) return this._aggregateWalk(opts, tries + 1); // r4 (verify #4): ONE rebuild per request, never a second loop reload
+        throw Object.assign(new Error('the usage ledger was rewritten during the read twice (' + e.message + ') — retry'), { code: 'STALE' });
+      }
+      throw e;
+    } finally { if (c.walking > 0) c.walking--; }
+    const answer = res.answer;
+    this._fixLabels(answer);
+    answer.asOf = asOf;
+    if (res.missing > 0) { // verify #13: a vanished shard — this answer says so, the cache rebuilds from the directory
+      answer.partial = { missingRows: res.missing, shards: res.missingShards, why: 'a usage ledger shard vanished during the read' };
+      console.warn(`[usage] ${res.missing} ledger rows were missing (${res.missingShards.join(', ')}) — answered without them; the cache rebuilds`);
+      this._evCache = null;
+    }
+    return answer;
+  }
+  _aggBegin({ from = null, to = null, backend = null, accounts = null, hostFilter = null, pivots = null } = {}) {
     // `origin` (2026-09-10) = which KIND of transcript the request came from:
     // 'main' (the conversation itself), 'subagent', 'workflow', or 'unknown'
     // for a row nobody can name any more (the backfill migration's honest
@@ -979,9 +1284,12 @@ class UsageHistory {
     const pivotPairs = (pivots || []).filter((p) => Array.isArray(p) && p.length === 2 && p[0] !== p[1] && p[0] in dims && p[1] in dims);
     const pivotAcc = pivotPairs.map(() => ({}));
     const totals = this._emptyBucket();
-    let firstTs = null, lastTs = null;
-    for (const ev of this._events(from, to)) {
-      if (backend && ev.be !== backend) continue;
+    return { backend, accounts, hostFilter, dims, dimMeta, pivotPairs, pivotAcc, totals, firstTs: null, lastTs: null };
+  }
+  _aggRow(st, ev) {
+    const { backend, accounts, hostFilter, dims, dimMeta, pivotPairs, pivotAcc, totals } = st;
+    {
+      if (backend && ev.be !== backend) return;
       // The two CLIs' machine logins are DIFFERENT identities — separate buckets
       // ('__global__' = claude, '__global_codex__' = codex), else the account
       // dimension/filter conflates them.
@@ -989,13 +1297,13 @@ class UsageHistory {
       // accounts = Set of bucket keys (account ids / globals); the UI can pass
       // several at once (e.g. a named sub + its global when the machine login
       // IS that account) — the whole dashboard then shows one account.
-      if (accounts && !accounts.has(acctKey)) continue;
+      if (accounts && !accounts.has(acctKey)) return;
       // Device dimension (2.128.0): 'local' = this machine, else a host id —
       // a TOP-LEVEL filter over the whole view (hosts are devices, not accounts)
-      if (hostFilter && (ev.host || 'local') !== hostFilter) continue;
+      if (hostFilter && (ev.host || 'local') !== hostFilter) return;
       this._add(totals, ev);
-      if (firstTs == null || ev.ts < firstTs) firstTs = ev.ts;
-      if (lastTs == null || ev.ts > lastTs) lastTs = ev.ts;
+      if (st.firstTs == null || ev.ts < st.firstTs) st.firstTs = ev.ts;
+      if (st.lastTs == null || ev.ts > st.lastTs) st.lastTs = ev.ts;
       const d = new Date(ev.ts);
       const keyOf = {
         day: d.toISOString().slice(0, 10),
@@ -1071,6 +1379,8 @@ class UsageHistory {
         dimMeta.session[ev.sid] = { name: sm?.name || null, be: ev.be || 'claude', project: ev.cwd || null };
       } else if (!dimMeta.session[ev.sid].project && ev.cwd) dimMeta.session[ev.sid].project = ev.cwd;
     }
+  }
+  _aggEnd({ dims, dimMeta, pivotPairs, pivotAcc, totals, firstTs, lastTs }) {
     const groupOut = {};
     // Sequential dims keep AXIS order (day = lexicographic/chronological,
     // hour/weekday = numeric) — cost-sorting them scrambled the hour axis in

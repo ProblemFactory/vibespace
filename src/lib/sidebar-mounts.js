@@ -449,6 +449,19 @@ export function installSidebarMounts(Sidebar) {
         sd.textContent = tr('Files written while it was not mounted were moved to {dest} — nothing was deleted', { dest: m.stranded });
         row.appendChild(sd);
       }
+      // lane vfs-cache-local: the cache's ONE line — only while it sits on a network filesystem (the dir in its title)
+      if (m.cache && m.cache.why) {
+        const cl = document.createElement('div');
+        cl.className = 'mounts-syncline mounts-cacheline';
+        cl.textContent = m.cache.why === 'dirty' ? tr('Cache kept on a network filesystem: {n} items still uploading — it moves to local disk at the next reconnect once they are done', { n: m.cache.items })
+          : m.cache.why === 'unread' ? tr('Cache kept where it is: its state could not be read ({code}) — not moved until it reads clean', { code: m.cache.code || '?' })
+          : m.cache.why === 'override-refused' ? tr('Cache folder setting refused: {dir} is not a writable folder ({code}) — every cache stays where it is until it is fixed or cleared', { dir: m.cache.override || '', code: m.cache.code || '?' })
+          : m.cache.why === 'ephemeral-home' ? tr('Cache on a network filesystem: the home folder is not a persistent disk — set Settings › Storage mount cache folder to a persistent local folder')
+          : m.cache.why === 'at-remount' ? tr('Cache on a network filesystem — it moves to local disk at the next reconnect if nothing is waiting to upload')
+          : tr('Cache on a network filesystem with no local disk to move it to — set Settings › Storage mount cache folder (or VIBESPACE_VFS_CACHE_DIR) to a local folder');
+        cl.title = m.cache.dir;
+        row.appendChild(cl);
+      }
       if (m.error) {
         const err = document.createElement('div');
         err.className = 'mounts-errline';

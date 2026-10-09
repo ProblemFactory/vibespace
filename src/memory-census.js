@@ -41,7 +41,7 @@ function parseSmapsRollup(text) {
 
 /** The census. main = process.memoryUsage() + v8 heap statistics (bytes); workers = [{name, mem|null}] (mem null
  *  ⇒ unknown); smaps = parseSmapsRollup's answer or null. Every number out is bytes; `heap` = resident, heapTotal kept. */
-function memoryCensus({ main = {}, workers = [], smaps = null, at = null } = {}) {
+function memoryCensus({ main = {}, workers = [], smaps = null, at = null, caches = [] } = {}) {
   const m = main || {};
   const rss = num(m.rss);
   const basis = smaps && Number.isFinite(smaps.anonymous) ? 'anon' : 'rss';
@@ -67,6 +67,9 @@ function memoryCensus({ main = {}, workers = [], smaps = null, at = null } = {})
     workerHeap: heap, workerHeapUsed: used,
     external, arrayBuffers: num(m.arrayBuffers) + buffers,
     native: Math.max(0, rest), over: Math.max(0, -rest),
+    // B-9428: the bounded caches inside the main heap, BY NAME (the owner's snapshot needed a heap dump to
+    // find them): [{name, bytes, count, unit, ceiling}] from cache-bounds' cacheRow
+    caches: (Array.isArray(caches) ? caches : []).filter((x) => x && x.name).map((x) => ({ name: String(x.name), bytes: num(x.bytes), count: num(x.count), unit: String(x.unit || ''), ceiling: Number.isFinite(x.ceiling) ? x.ceiling : null, kind: x.kind === 'arraybuffers' ? 'arraybuffers' : 'heap', basis: String(x.basis || 'bytes'), over: !!x.over })),
   };
 }
 
@@ -100,7 +103,16 @@ function censusEvent(c) {
 function bootLine(c) {
   const unknown = c.workersUnknown ? ` (${c.workersUnknown} unknown)` : '';
   const base = c.basis === 'anon' ? ` (anonymous ${mb(c.base)} MB = the parts)` : ' (no smaps: the parts add up to RSS)';
-  return `[memory] boot census: main heap ${mb(c.main.heap)} MB, ${c.workerCount} workers ${mb(c.workerHeap)} MB${unknown}, external ${mb(c.external)} MB, native ${mb(c.native)} MB, RSS ${mb(c.rss)} MB${base}`;
+  return `[memory] boot census: main heap ${mb(c.main.heap)} MB, ${c.workerCount} workers ${mb(c.workerHeap)} MB${unknown}, external ${mb(c.external)} MB, native ${mb(c.native)} MB, RSS ${mb(c.rss)} MB${base}${cachesText(c)}`;
+}
+/** `; in the main heap: usage ledger window 61/96 MB (120345 rows), …; in ArrayBuffers (part of external):
+ *  usage ledger cold columns 95/256 MB (…)` — each bounded cache by name, against its ceiling in ITS unit; a
+ *  cache past its ceiling says OVER. ArrayBuffer stores are never summed into the main heap (verify #4). */
+function cachesText(c) {
+  if (!c.caches || !c.caches.length) return '';
+  const one = (x) => `${x.name} ${mb(x.bytes)}${x.ceiling ? '/' + mb(x.ceiling) : ''} MB (${x.count} ${x.unit}${x.over ? ', OVER' : ''})`;
+  const heap = c.caches.filter((x) => x.kind !== 'arraybuffers'), ab = c.caches.filter((x) => x.kind === 'arraybuffers');
+  return (heap.length ? '; in the main heap: ' + heap.map(one).join(', ') : '') + (ab.length ? '; in ArrayBuffers (part of external): ' + ab.map(one).join(', ') : '');
 }
 
 /** THE System window's rows — English KEYS (the client words them with its own t(); zh/ja live in the client
@@ -117,6 +129,7 @@ const WORDS = {
   unknownCount: '{n} did not answer',
   basisAnon: 'The parts add up to the anonymous memory ({anon}); RSS also counts the program and mapped files.',
   basisRss: 'No smaps here: the parts add up to the RSS.',
+  caches: 'Caches in the main heap',
 };
 function censusRows(c) {
   if (!c || !c.main) return null;
@@ -129,8 +142,9 @@ function censusRows(c) {
       { key: 'rss', words: WORDS.rss, bytes: c.rss },
     ],
     workers: c.workers.map((w) => ({ name: w.name, bytes: w.heap, used: w.heapUsed, unknown: w.state !== 'ok' })),
+    caches: (c.caches || []).map((x) => ({ name: x.name, bytes: x.bytes, count: x.count, unit: x.unit, ceiling: x.ceiling, kind: x.kind, basis: x.basis, over: x.over })),
     note: c.basis === 'anon' ? { words: WORDS.basisAnon, anon: c.base } : { words: WORDS.basisRss },
   };
 }
 
-module.exports = { MB, mb, parseSmapsRollup, memoryCensus, censusMetrics, censusEvent, EVENT_DETAIL_MAX, bootLine, WORDS, censusRows };
+module.exports = { MB, mb, parseSmapsRollup, memoryCensus, censusMetrics, censusEvent, EVENT_DETAIL_MAX, bootLine, cachesText, WORDS, censusRows };

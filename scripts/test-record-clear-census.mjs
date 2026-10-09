@@ -1794,7 +1794,7 @@ const I_RECV = {
   'src/lib/session-lifecycle.js|a': ['account', 'an account'], 'src/lib/session-props.js|s0': ['session', 'the session\'s own name'],
   'src/lib/settings-ui.js|schema': ['setting', 'a setting\'s label'], 'src/lib/sidebar-mounts.js|h': ['host', 'a machine name'], 'src/lib/sidebar-mounts.js|s': ['share', 'a share name'], 'src/lib/sidebar-mounts.js|t': ['mount token', 'a token name'],
   'src/lib/window-share.js|r': ['session', 'an agent\'s name'],
-  'src/mount-providers/cloud.js|cb': ['mount', 'a storage label'], 'src/mounts.js|head': ['mount', 'a head file\'s name'], 'src/oauth-loopback.js|st': ['integration', 'a consent flow\'s label'],
+  'src/mount-providers/cloud.js|cb': ['mount', 'a storage label'], 'src/mounts.js|head': ['mount', 'a head file\'s name'], 'src/mounts.js|p': ['mount', 'a VFS cache placement\'s reason word and dirs (lane vfs-cache-local)'], 'src/oauth-loopback.js|st': ['integration', 'a consent flow\'s label'],
   'src/office-open.js|fv': ['file', 'a viewer verdict\'s label'], 'src/office-open.js|row': ['file', 'an office row\'s label'], 'src/office-open.js|served': ['file', 'a machine\'s refusal reason'], 'src/office-open.js|want': ['file', 'an office row\'s label'],
   'src/opencode-serve.js|info.error': ['harness', 'the serve\'s error name'], 'src/quota-model.js|byHint': ['quota', 'a limit\'s name'], 'src/quota-model.js|c': ['quota', 'a limit\'s name'],
   'src/remote-fs.js|h': ['host', 'a machine name'], 'src/routes/browser-trace.js|p': ['browser profile', 'a profile label'], 'src/routes/browser-trace.js|rs': ['browser profile', 'a recording\'s file name'],

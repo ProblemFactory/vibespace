@@ -35,7 +35,7 @@ fs.writeFileSync(path.join(proj, SID + '-not-a-dir.txt'), 'noise');
 
 const uh = new UsageHistory({ dataDir, homeDir: home });
 await uh.scan({ force: true });
-const events = [...uh._events(0, Date.now() + 1e9)].filter((e) => e.be === 'claude');
+const events = [...uh.rows(0, Date.now() + 1e9)].filter((e) => e.be === 'claude');
 const rids = events.map((e) => e.rid).sort();
 ck('workflow agent requests mined (req_wf1/req_wf2)', rids.includes('req_wf1') && rids.includes('req_wf2'));
 ck('subagent file requests mined (req_agent1)', rids.includes('req_agent1'));
@@ -47,7 +47,7 @@ ck('agent events attribute to the PARENT session id', events.filter((e) => e.rid
 // incremental: appending to a workflow file picks up only the delta
 fs.appendFileSync(path.join(wfDir, 'agent-bbb.jsonl'), rec('req_wf3'));
 uh._lastScan = 0; await uh.scan({ force: true });
-const events2 = [...uh._events(0, Date.now() + 1e9)].filter((e) => e.be === 'claude');
+const events2 = [...uh.rows(0, Date.now() + 1e9)].filter((e) => e.be === 'claude');
 ck('incremental append picked up (cursor per file)', events2.some((e) => e.rid === 'req_wf3') && events2.length === 6);
 
 fs.rmSync(home, { recursive: true, force: true });

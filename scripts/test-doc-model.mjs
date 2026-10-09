@@ -49,7 +49,8 @@ for (const [name, src] of Object.entries(LOSSLESS)) {
 // front matter ride as RAW BLOCKS (carried as written, read-only). Only CRLF and the size cap stay raw reasons.
 const RAW = {
   'a GFM table': ['', '# Prices\n\n| item | cost |\n|------|-----:|\n| a    | 1    |\n'],
-  'raw HTML': ['rawBlock', 'Some <b>bold</b> words.\n'],
+  'raw HTML': ['rawBlock', 'Some <span title="x">bold</span> words.\n'],
+  'paired inline HTML (lane doc-raw-blocks: lossless marks, no raw block)': ['', 'Some <b>bold</b> and <code>x</code> words.\n'],
   'an HTML comment': ['rawBlock', '<!-- note -->\n\ntext\n'],
   'a footnote': ['', 'Claim.[^1]\n\n[^1]: Source.\n'],
   'front matter': ['rawBlock', '---\ntitle: x\n---\n\n# Body\n'],

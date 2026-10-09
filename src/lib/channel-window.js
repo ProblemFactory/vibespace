@@ -66,7 +66,7 @@ import { accountBadges } from './channel-avatar.js';   // B-5fe1: the bar's acco
 import { showAssignFilterDialog, assignmentSummary } from './channel-filter-editor.js';
 // P3: the inline approval cards (the SAME renderer the Outbox window uses —
 // one store, two places, §9.2).
-import { renderInlineProposals, reasonLabel, attachmentOpenKind, openAttachment } from './channel-outbox.js';
+import { renderInlineProposals, reasonLabel, attachmentOpenKind, openAttachment, openComposePick } from './channel-outbox.js';
 // a3 i18n: a route failure is worded by its CODE, never by the engine's sentence.
 import { routeErrorText, attachmentReasonText } from './channel-words.js';
 // R3 (§23): a picture's next step (retry / the named chip) and the text line its placeholder leaves — PURE, shared with the engine
@@ -132,6 +132,10 @@ export function composeFileWhyText(why, limit, { channel = '' } = {}) {
 }
 function createComposeFiles({ app, comp, ta, row, caps, offer, account }) {
   const picks = [];
+  // lane compose-chip-open: the blob URLs of SENT files stay until the composer goes (a viewer opened over one keeps
+  // its Download); a removed chip's URL is revoked at once
+  const spent = [];
+  const forget = (p) => { if (p.url) URL.revokeObjectURL(p.url); p.url = null; };
   const box = el('div', 'chanwin-compose-files');
   box.dataset.channelComposeFiles = '1';
   const input = document.createElement('input');
@@ -152,13 +156,24 @@ function createComposeFiles({ app, comp, ta, row, caps, offer, account }) {
       const p = picks[ch.n];
       const chip = el('div', `chanwin-file-chip chanwin-file-chip-${ch.state}`);
       chip.dataset.channelFileChip = ch.state;
-      if (p.url && ch.state === 'ok') { const img = document.createElement('img'); img.className = 'chanwin-file-thumb'; img.alt = ''; img.src = p.url; chip.appendChild(img); }
+      // lane compose-chip-open: the thumb and the name OPEN the file before it is sent — THE ONE door (openComposePick)
+      const open = () => openComposePick(app, p);
+      const openKind = attachmentOpenKind(p.name, p.mime);
+      if (p.kind === 'image' && p.url && ch.state === 'ok') { const img = document.createElement('img'); img.className = 'chanwin-file-thumb'; img.alt = ''; img.src = p.url; img.title = t('Open {name}', { name: p.name }); img.onclick = open; chip.appendChild(img); }
       else chip.appendChild(fileIcon(p.name, 13));
-      chip.appendChild(el('span', 'chanwin-file-name', p.name));
+      const nm = el('span', 'chanwin-file-name', p.name);
+      if (openKind === 'download') nm.title = t('Nothing to preview — it is sent as it is');
+      else {
+        nm.classList.add('chan-prop-file-open'); nm.dataset.open = openKind; nm.tabIndex = 0; nm.setAttribute('role', 'button');
+        nm.title = t('Open {name}', { name: p.name });
+        nm.onclick = open;
+        nm.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } };
+      }
+      chip.appendChild(nm);
       chip.appendChild(el('span', 'chanwin-file-meta', composeSize(p.bytes)));
       if (ch.state === 'blocked') chip.appendChild(el('span', 'chanwin-file-why chan-warn', t('will NOT be sent')));
       else if (ch.state === 'refused') { const w = el('span', 'chanwin-file-why chan-warn', `${t('not attached')} — ${composeFileWhyText(ch.why, ch.limit, { channel: account.label || account.id })}`); w.dataset.why = ch.why; chip.appendChild(w); }
-      const x = btn('', () => { if (p.url) URL.revokeObjectURL(p.url); picks.splice(picks.indexOf(p), 1); draw(); }, 'chanwin-file-x');
+      const x = btn('', () => { forget(p); picks.splice(picks.indexOf(p), 1); draw(); }, 'chanwin-file-x');
       x.appendChild(icon('close', 10));
       x.title = t('Remove');
       x.setAttribute('aria-label', `${t('Remove')} ${p.name}`);
@@ -183,12 +198,14 @@ function createComposeFiles({ app, comp, ta, row, caps, offer, account }) {
   async function add(files) {
     for (const f of files) {
       if (!f) continue;
-      const p = { name: String(f.name || 'pasted.png'), bytes: Number(f.size) || 0, kind: null, data: null, url: null };
+      const p = { name: String(f.name || 'pasted.png'), bytes: Number(f.size) || 0, kind: null, data: null, url: null, file: f, mime: String(f.type || '') };
       if (p.bytes > 0 && p.bytes <= COMPOSE_READ_MAX) {
         try {
           const u8 = new Uint8Array(await f.arrayBuffer());
           p.bytes = u8.length;
-          p.kind = P.sniffType(u8.subarray(0, 4096)).kind;
+          const sniffed = P.sniffType(u8.subarray(0, 4096));
+          p.kind = sniffed.kind;
+          if (!p.mime) p.mime = sniffed.mime;
           p.data = bytesToBase64(u8);
           if (p.kind === 'image') p.url = URL.createObjectURL(f);
         } catch { p.kind = null; }
@@ -223,7 +240,9 @@ function createComposeFiles({ app, comp, ta, row, caps, offer, account }) {
     /** what the Send carries: the accepted files only (never a blocked or refused one) */
     sending: () => verdict.send.map((n) => ({ name: picks[n].name, data: picks[n].data })),
     shape: () => verdict.shape,
-    clear: () => { for (const p of picks) if (p.url) URL.revokeObjectURL(p.url); picks.length = 0; draw(); },
+    clear: () => { for (const p of picks) if (p.url) spent.push(p.url); picks.length = 0; draw(); },
+    /** the composer goes (a footer rebuild, the window closed): every URL it minted is revoked */
+    destroy: () => { for (const p of picks) forget(p); for (const u of spent.splice(0)) URL.revokeObjectURL(u); },
   };
 }
 /** the receipt of the owner's send with files: what landed, what did NOT and why (the card's parts, worded here) */
@@ -688,6 +707,9 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
    *  disconnect flips the footer to the read-only line; the words the person
    *  typed come back with the composer after the re-authorization. */
   let heldDraft = '';
+  // lane compose-chip-open: the live composer's files — destroyed (its blob URLs revoked) at a rebuild and at close
+  let liveFiles = null;
+  winInfo._listenerCtl?.signal.addEventListener('abort', () => { if (liveFiles) liveFiles.destroy(); liveFiles = null; }, { once: true });
 
   async function renderBar() {
     const r = await fetchJson(`/api/channels/${encodeURIComponent(adapterId)}/${encodeURIComponent(convId)}`);
@@ -784,6 +806,7 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
     const typed = (foot.querySelector('textarea') || {}).value || heldDraft;
     heldDraft = typed;
     foot.dataset.footKey = footKey;
+    if (liveFiles) { liveFiles.destroy(); liveFiles = null; }
     if (cm.mode === 'direct' || cm.mode === 'propose') {
       const direct = cm.mode === 'direct';
       // r3: a send that STARTS A TURN (the adapter declares `sendStartsTurn` —
@@ -800,6 +823,7 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
       // lane owner-composer-attach: the owner's own send carries files where the adapter declares them (never a proposal's)
       const cf = direct && ad0.sendAttachments && c.offers && c.offers.sendAttachment && (c.offers.sendAttachment.offered || c.offers.sendAttachment.why === 'attachments-not-sendable')
         ? createComposeFiles({ app, comp, ta, row, caps: ad0.sendAttachments, offer: c.offers.sendAttachment, account: { id: ad0.id || adapterId, label: ad0.label || null } }) : null;
+      liveFiles = cf;
       // §25 (the owner: the footer was "a long sentence"): ONE SHORT LINE — how
       // this send goes out, by the adapter's declared form (`sendForm`, never
       // its id) — and the policy sentence behind the ⓘ beside it. A send that

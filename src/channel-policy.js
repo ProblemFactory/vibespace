@@ -640,6 +640,14 @@ function sniffType(buf) {
   }
   return { mime: 'application/octet-stream', kind: 'file' };
 }
+/** lane compose-chip-open: the URL an attachment door opens — a served attachment's picture asks `?inline=1`; a
+ *  `blob:` URL (a file still in the owner's reply box, read from the local File) takes NO query: a query on a blob URL
+ *  names no blob (fetch fails). PURE. */
+function attachmentUrlFor(url, { inline = false } = {}) {
+  const u = String(url || '');
+  if (!inline || /^blob:/i.test(u)) return u;
+  return `${u}${u.includes('?') ? '&' : '?'}inline=1`;
+}
 const EXT_TYPES = Object.freeze({ png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', pdf: 'application/pdf', zip: 'application/zip', docx: 'application/zip', xlsx: 'application/zip', pptx: 'application/zip', odt: 'application/zip', gz: 'application/gzip', svg: 'image/svg+xml', html: 'text/html', htm: 'text/html', txt: 'text/plain' });
 /** The card's chip: the name's extension says one type, the bytes another (`{ext, said}`), else null. */
 function nameTypeMismatch(name, mime) {
@@ -1524,5 +1532,5 @@ module.exports = {
   replyAnchorVerdict, anchorView, envelopeVerdict, ENVELOPE_HEADER_MAX, envelopeAddresses, withAddedCc, addressesOf, shownFields, shownDigest, ARM_MS, armVerdict, rearmVerdict,
   hiddenCharsOf, revealSegments,
   // design 005 §2.B (B-fd1f): an agent's attachments — bounds, the name rule, the sniffed type, the adapter's row
-  ATTACH_MAX_COUNT, ATTACH_MAX_TOTAL, ATTACH_NAME_MAX, ATTACH_CODES, INLINE_RASTER, base64Bytes, safeAttachmentName, attachmentsOf, sniffType, nameTypeMismatch, composeFilesVerdict, sendParts, reconciledParts, partsWords, attachVerdict, storedAttachments, attachmentSize, ATTACH_HELD_MAX, attachHeldVerdict,
+  ATTACH_MAX_COUNT, ATTACH_MAX_TOTAL, ATTACH_NAME_MAX, ATTACH_CODES, INLINE_RASTER, attachmentUrlFor, base64Bytes, safeAttachmentName, attachmentsOf, sniffType, nameTypeMismatch, composeFilesVerdict, sendParts, reconciledParts, partsWords, attachVerdict, storedAttachments, attachmentSize, ATTACH_HELD_MAX, attachHeldVerdict,
 };

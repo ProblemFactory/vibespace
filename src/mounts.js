@@ -39,6 +39,24 @@ const { spawn, execFile, execFileSync } = require('child_process');
 const { secretBox, describeJsonError } = require('./secret-box');
 const { parseDriveClients } = require('./preset-layers.js');
 const LIVENESS = require('./mount-liveness.js');   // lane mount-liveness: THE sweep's verdict table (PURE)
+const CACHE_PLACE = require('./vfs-cache-place.js');   // lane vfs-cache-local: where the VFS cache lives + the dirty witnesses (PURE)
+// The vfsMeta walk, run in a CHILD node (never the loop, never the threadpool: 164 788 files over NFS): each file judged
+// by the PURE metaVerdict (PARSED — never a grep for a spelling) → one JSON summary on stdout.
+const CACHE_META_CHILD = `const fs = require('fs'), path = require('path'), { metaVerdict } = require(process.argv[1]);
+const dir = process.argv[2], out = { exists: false, files: 0, dirty: 0, unread: 0 };
+// only a TRUE absence is 'no cache' (ENOENT under a root that exists); any other stat error, a non-dir, or an absent root
+// (a mount not there yet) is UNKNOWN — exists null + the code, judged dirty (verify r1 #0)
+try { const st = fs.statSync(dir); out.exists = st.isDirectory() ? true : null; if (!out.exists) out.error = 'ENOTDIR'; }
+catch (e) {
+  if (e.code !== 'ENOENT') { out.exists = null; out.error = e.code || 'EIO'; }
+  else { try { fs.statSync(path.dirname(path.dirname(dir))); } catch (e2) { out.exists = null; out.error = 'ENOENT-root'; } }
+}
+const walk = (d) => { let es; try { es = fs.readdirSync(d, { withFileTypes: true }); } catch (e) { if (e.code !== 'ENOENT') out.unread++; return; }
+  for (const e of es) { const p = path.join(d, e.name); if (e.isDirectory()) { walk(p); continue; } if (!e.isFile()) continue;
+    out.files++; let t = null; try { t = fs.readFileSync(p, 'utf8'); } catch {} const v = t == null ? 'unread' : metaVerdict(t);
+    if (v === 'dirty') out.dirty++; else if (v === 'unread') out.unread++; } };
+if (out.exists) walk(path.join(dir, 'vfsMeta'));
+process.stdout.write(JSON.stringify(out));`;
 const PROVIDERS = require('./mount-providers/index.js');   // lane dc-mount-providers: a storage provider = its row file + one list line
 /** A record's storage-provider ROW (src/mount-providers/): every per-provider fact and branch is asked of it. A module
  *  function, not a method — suites call the manager's predicates on a bare `this`. */
@@ -611,6 +629,7 @@ class MountManager {
         // yet — the row says what it waits for (cached files, elapsed, ceiling)
         starting: st ? { since: st.since, files: st.files, capped: st.capped, maxMin: Math.round((this._startingT || MountManager.STARTING).ceilingMs / 60e3) } : null,
         stranded: this._stranded?.get(m.id) || null,
+        cache: rowFor(this, m).rclone === false || this._kindOf(m) === 'credential' ? null : this._cacheCell(m),   // lane vfs-cache-local: the row's one cache line
         createdAt: m.createdAt,
       };
     });
@@ -845,10 +864,9 @@ class MountManager {
     setTimeout(() => this._cleanupEmptyMountpoint(mpRemoved), 1500);
     this._errors.delete(id);
     this._reconnects?.delete(id);
-    // async — the cache can be up to vfsCacheMaxSizeGB; a sync rm would hold
-    // the event loop hostage for seconds (the IO-hostage class this module
-    // exists to prevent)
-    try { fs.rm(path.join(this._vfsCacheRoot(), id), { recursive: true, force: true }, () => {}); } catch {}
+    // a CHILD removes the cache (up to vfsCacheMaxSizeGB, 164 788 files over NFS on the owner's box): fs.rm on the
+    // libuv threadpool is the FUSE-threadpool outage class this module exists to prevent (lane vfs-cache-local)
+    for (const dir of new Set([this._cacheDirOf(m), m.cacheOld].filter(Boolean))) this._dropCacheDir(m, dir, { removing: true });
     this._save();
     this._notify();
   }
@@ -1085,9 +1103,6 @@ class MountManager {
     // PERSISTENT per-mount --cache-dir (dirty writes survive a daemon crash), bounded timeouts, the row's directory
     // cache, the s3 proxy-signing flag for an s3 backend, the owner-only rc socket — every version-sensitive flag
     // gated on the installed rclone knowing it.
-    const cacheDir = path.join(this._vfsCacheRoot(), m.id);
-    try { fs.mkdirSync(cacheDir, { recursive: true }); } catch {}
-    const args = this._mountArgv(m, { remote, mp, cacheDir, rcSocket: this._rcSocketReady(m) });
     const isS3 = !!rowFor(this, m).s3Backend?.(m.parentId ? this._connOf(m) : m);
     // One-time signing probe: some proxies (Cloudflare) rewrite the signed
     // Accept-Encoding header → SignatureDoesNotMatch on everything. V2 auth
@@ -1128,11 +1143,16 @@ class MountManager {
     // Belt to unmount()'s suspenders: never STACK a daemon — if a stale one
     // still serves this mountpoint (survived a lazy detach), kill it first,
     // or the new spawn either fails or shadows a daemon that keeps failing.
+    let rcQueue = null; // the outgoing daemon's LIVE dirty witness (rc vfs/queue) — asked before it is killed
     if (this._daemonAlive(mp)) {
+      rcQueue = (await this._rcStats(m)).queue || { error: 'no answer' };
       console.warn(`[mounts] stale daemon still on ${mp} at mount time — killing it`);
       this._killMountDaemon(mp);
       await new Promise((r) => setTimeout(r, 300));
     }
+    // WHERE the cache lives is decided HERE, at a remount, after the outgoing daemon is gone (lane vfs-cache-local)
+    const cacheDir = await this._placeCache(m, rcQueue);
+    const args = this._mountArgv(m, { remote, mp, cacheDir, rcSocket: this._rcSocketReady(m) });
     // detached: mounts survive server restarts (adopted on boot)
     const log = this._openMountLog(m.id);
     const child = spawn(this.rcloneBin(), args, { env, detached: true, stdio: ['ignore', log, log] });
@@ -1164,7 +1184,7 @@ class MountManager {
     const st = { pid, since: Date.now(), files: null, capped: false };
     (this._starting = this._starting || new Map()).set(m.id, st);
     this.blockPath(mp, T.ceilingMs + 60e3); // no writer reaches the bare directory before the mount exists
-    this._countCacheFiles(path.join(this._vfsCacheRoot(), m.id), T.countCap)
+    this._countCacheFiles(this._cacheDirOf(m), T.countCap)
       .then((c) => { st.files = c.n; st.capped = c.capped; this._notify(); }, () => {});
     this._notify();
     const done = this._waitMounted(m, pid)
@@ -1221,7 +1241,11 @@ class MountManager {
   }
 
   async _startSettled(m, mp, r, opts = {}) {
-    if (r === 'mounted') return this._afterMounted(m, mp);
+    if (r === 'mounted') {
+      const ok = await this._afterMounted(m, mp);
+      if (ok && m.cacheOld) this._dropCacheDir(m, m.cacheOld); // the moved-from dir goes only once the new daemon MOUNTED
+      return ok;
+    }
     const id = m.id;
     let tail = '';
     tail = this.tailMountLog(id, 2, { current: true }).join(' ');
@@ -1731,7 +1755,7 @@ class MountManager {
   /** Is `dir` (or its nearest existing ancestor) on a network / FUSE filesystem? statfs magic: NFS, SMB, CIFS, SMB2,
    *  FUSE (bindfs, rclone), Ceph. A unix socket there is refused. */
   static _onNetworkFs(dir) {
-    const NET = new Set([0x6969, 0x517b, 0xff534d42, 0xfe534d42, 0x65735546, 0x00c36400]);
+    const NET = new Set(CACHE_PLACE.NETWORK_FS_MAGIC);
     for (let d = dir; ; d = path.dirname(d)) {
       try { return NET.has(Number(fs.statfsSync(d).type) >>> 0); } catch {}
       if (d === path.dirname(d)) return false;
@@ -1788,6 +1812,127 @@ class MountManager {
 
   _vfsCacheRoot() {
     return process.env.VIBESPACE_VFS_CACHE_DIR || path.join(this.dataDir, 'vfs-cache');
+  }
+
+  // ── WHERE THE VFS CACHE LIVES (lane vfs-cache-local, B-4997) ── the PURE rule is src/vfs-cache-place.js; this only
+  // gathers: statfs of each dir, the vfsMeta walk in a child, the outgoing daemon's rc vfs/queue. A cache MOVES only at a
+  // remount whose outgoing daemon left nothing dirty — never a copy; the old dir is removed by a child after the mount.
+  static CACHE_WITNESS_MS = 10 * 60e3;   // the vfsMeta walk's ceiling (164 788 files over NFS); past it ⇒ dirty (fail closed)
+  static CACHE_RM_MS = 30 * 60e3;        // the old dir's removal child; killed ⇒ retried after the next mount
+  static CACHE_WALK_RETRY_MS = 6 * 3600e3;   // a timed-out vfsMeta walk is retried after this, not at every reconnect
+
+  /** The dir the record's cache uses now: its remembered m.cacheDir, else the legacy `<root>/<id>`. */
+  _cacheDirOf(m) { return m.cacheDir || path.join(this._vfsCacheRoot(), m.id); }
+
+  /** The class of the filesystem under `dir` (or its nearest existing ancestor): 'network' | 'ephemeral' | 'local' —
+   *  statfs once per dir per process (list() runs at every broadcast). */
+  _cacheFs(dir) {
+    const memo = (this._cacheFsMemo = this._cacheFsMemo || new Map());
+    if (!memo.has(dir)) memo.set(dir, CACHE_PLACE.fsClassOf(MountManager._statfsType(dir)));
+    return memo.get(dir);
+  }
+  static _statfsType(dir) {
+    for (let d = dir; ; d = path.dirname(d)) {
+      try { return Number(fs.statfsSync(d).type) >>> 0; } catch {}
+      if (d === path.dirname(d)) return null;
+    }
+  }
+
+  /** The candidate per-mount dir: the owner's override (env, then mounts.vfsCacheRoot) — else the local home root
+   *  ~/.cache/vibespace/vfs-cache (0700). `probe` = create + test the root (only at a remount, never from list()): a root
+   *  that is not a writable dir carries writable:false + its code (an override is then REFUSED, verify r1 #1). */
+  _cacheCandidates(m, { probe = false } = {}) {
+    const ov = process.env.VIBESPACE_VFS_CACHE_DIR || String(this._getSetting('mounts.vfsCacheRoot') || '').trim();
+    const root = ov || path.join(os.homedir(), '.cache', 'vibespace', 'vfs-cache');
+    let writable = true, why = null;
+    if (probe) {
+      try {
+        fs.mkdirSync(root, { recursive: true, mode: 0o700 });
+        if (!fs.statSync(root).isDirectory()) throw Object.assign(new Error('not a directory'), { code: 'ENOTDIR' });
+        fs.accessSync(root, fs.constants.W_OK);
+      } catch (e) { writable = false; why = e.code || 'not writable'; }
+    }
+    return [{ dir: path.join(root, m.id), fs: this._cacheFs(root), writable, override: !!ov, root, why }];
+  }
+
+  _cacheInputs(m, probe) {
+    const recordDir = this._cacheDirOf(m);
+    return { recordDir, recordFs: this._cacheFs(recordDir), dataDirNetwork: this._cacheFs(this.dataDir) === 'network',
+      dataDirDefault: path.join(this.dataDir, 'vfs-cache', m.id), candidates: this._cacheCandidates(m, { probe }) };
+  }
+
+  /** The crash-surviving witness: the vfsMeta walk in a child, bounded → its summary | {timedOut} | null. */
+  _readCacheMeta(dir, timeoutMs = MountManager.CACHE_WITNESS_MS) {
+    return new Promise((resolve) => {
+      execFile(process.execPath, ['-e', CACHE_META_CHILD, require.resolve('./vfs-cache-place.js'), dir], { timeout: timeoutMs, maxBuffer: 64 * 1024 }, (err, out) => {
+        if (err) return resolve(err.killed ? { timedOut: true } : null);
+        try { resolve(JSON.parse(String(out))); } catch { resolve(null); }
+      });
+    });
+  }
+
+  /** At a remount: the PURE rule over the gathered witnesses → the dir the new daemon gets. ONE journal line per decision. */
+  async _placeCache(m, rcQueue = null) {
+    const inp = this._cacheInputs(m, true);
+    let p = CACHE_PLACE.cachePlacement({ ...inp, exists: true });
+    if (p.needWitness) {
+      // the walk is never started while the mount is down (the rel242 liveness verdict), and a walk that ran out its
+      // ceiling is not repeated for CACHE_WALK_RETRY_MS — re-armed at EVERY timeout, cleared by a walk that finished
+      // (verify r1 #2); both stay put, unread (fail closed)
+      const memo = (this._cacheWalkFailed = this._cacheWalkFailed || new Map());
+      const lv = this._liveness?.get(m.id)?.verdict;
+      let meta;
+      if (lv === 'unreachable' || lv === 'wedged' || lv === 'dead') meta = { exists: null, error: 'mount-' + lv };
+      else if (Date.now() - (memo.get(m.id) || 0) < MountManager.CACHE_WALK_RETRY_MS) meta = { timedOut: true };
+      else {
+        meta = await this._readCacheMeta(inp.recordDir);
+        if (meta && meta.timedOut) memo.set(m.id, Date.now()); else if (meta) memo.delete(m.id);
+      }
+      p = CACHE_PLACE.cachePlacement({ ...inp, exists: meta && meta.exists === false ? false : true, witness: CACHE_PLACE.dirtyWitness(meta, rcQueue) });
+    }
+    const prev = this._cachePlace?.get(m.id);
+    (this._cachePlace = this._cachePlace || new Map()).set(m.id, p);
+    if (p.move) {
+      try { fs.mkdirSync(p.dir, { recursive: true, mode: 0o700 }); } catch {}
+      m.cacheDir = p.dir;
+      if (p.from) m.cacheOld = p.from;
+      this._save();
+      console.log(`[mounts] vfs cache ${m.id}: ${p.from ? `moved (clean: nothing left to upload) ${p.from} → ${p.dir} — the old dir is removed by a child once mounted` : `new cache on ${p.dir}`}`);
+      return p.dir;
+    }
+    if (!m.cacheDir) { m.cacheDir = p.dir; this._save(); }   // the record remembers its dir (a later env change never orphans it)
+    const SAY = { 'no-local': 'no writable persistent local disk to move it to', 'ephemeral-home': 'the home folder is not a persistent disk',
+      dirty: `${p.items} items still uploading — moves at the next reconnect once clean`, unread: `its state could not be read (${p.code}) — not moved` };
+    if (p.reason === 'override-refused') {
+      const said = (this._cacheOverrideSaid = this._cacheOverrideSaid || new Set());   // once per boot per override
+      if (!said.has(p.override)) { said.add(p.override); console.warn(`[mounts] vfs cache: the cache folder override ${p.override} is refused (${p.code}) — every cache stays where it is until it is fixed or cleared`); }
+    } else if (SAY[p.reason] && (!prev || prev.reason !== p.reason || prev.items !== p.items || prev.code !== p.code)) {
+      console.log(`[mounts] vfs cache ${m.id}: kept (${SAY[p.reason]}) ${p.dir}`);
+    }
+    if (!p.pendingMove && p.reason !== 'override-refused') { try { fs.mkdirSync(p.dir, { recursive: true }); } catch {} }
+    return p.dir;
+  }
+
+  /** The row's cache cell: {dir, network, fs, pendingMove, why, items, code, override} — why null when nothing needs saying. */
+  _cacheCell(m) {
+    const dir = this._cacheDirOf(m), last = this._cachePlace?.get(m.id);
+    const SAID = new Set(['no-local', 'ephemeral-home', 'override-refused']);
+    if (last && last.dir === dir) {
+      const why = SAID.has(last.reason) ? last.reason : last.pendingMove ? (last.reason === 'unread' ? 'unread' : 'dirty') : null;
+      return { dir, network: last.network, fs: last.fs, pendingMove: !!last.pendingMove, why, items: last.items ?? null, code: last.code ?? null, override: last.override ?? null };
+    }
+    const p = CACHE_PLACE.cachePlacement({ ...this._cacheInputs(m, false), exists: true });
+    return { dir, network: p.network, fs: p.fs, pendingMove: false, why: p.needWitness ? 'at-remount' : SAID.has(p.reason) ? p.reason : null, items: null, code: null, override: null };
+  }
+
+  /** A cache dir removed by a CHILD with a timeout (never fs.rm on the threadpool). Only a dir named after the record;
+   *  never the live one unless the record itself is being removed. */
+  _dropCacheDir(m, dir, { removing = false } = {}) {
+    if (!dir || !path.isAbsolute(dir) || path.basename(dir) !== m.id || (!removing && dir === this._cacheDirOf(m))) return;
+    execFile('rm', ['-rf', '--one-file-system', '--', dir], { timeout: MountManager.CACHE_RM_MS }, (err) => {
+      console.log(`[mounts] vfs cache ${m.id}: ${err ? `old dir not removed (${err.killed ? 'timed out' : String(err.message).split('\n')[0]}) — retried after the next mount` : 'old dir removed by a child'}: ${dir}`);
+      if (!err && m.cacheOld === dir && !removing) { delete m.cacheOld; this._save(); }
+    });
   }
 
   /** Remove a LEFTOVER mountpoint directory — only when it exists, is not a

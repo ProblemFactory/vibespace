@@ -68,18 +68,48 @@ export function placeholderHtml(h) {
   const m = /^<\/?([A-Za-z][A-Za-z0-9-]*)\s*\/?>$/.exec(s);
   return m && !HTML_TAGS.has(m[1].toLowerCase()) ? esc(s) : s;
 }
+const VOID_TAGS = new Set('area base br col embed hr img input link meta param source track wbr'.split(' '));
+/** An UNPAIRED open tag is TEXT (lane doc-raw-blocks r2 — the owner's `PR-<code>-nn` placeholder): an inline open tag of an
+ *  element that needs a close, whose `</name>` is not in the rest of its own inline run (the paragraph, the table cell, the
+ *  item) → the tag as written (to be shown escaped); else null. Void elements and self-closed tags are markup; a name that
+ *  is no element is placeholderHtml's. Marked would open the element there and the rest of the cell read in its type. */
+export function unpairedOpenTag(src) {
+  const s = String(src ?? ''), m = /^<([A-Za-z][A-Za-z0-9-]*)(?:\s[^<>]*)?>/.exec(s);
+  if (!m || /\/>$/.test(m[0])) return null;
+  const name = m[1].toLowerCase();
+  if (VOID_TAGS.has(name) || !HTML_TAGS.has(name)) return null;
+  return new RegExp('</' + name + '\\s*>', 'i').test(s.slice(m[0].length)) ? null : m[0];
+}
+/** The reader's inline rule beside the html hook: it takes an unpaired open tag BEFORE marked's tag rule (which would also
+ *  switch marked's raw-text state on for the rest of the run) and writes it as escaped text. */
+const LITERAL_TAG = { name: 'vsLiteralTag', level: 'inline', start: (src) => src.indexOf('<'), tokenizer(src) { const t = unpairedOpenTag(src); return t ? { type: 'vsLiteralTag', raw: t, text: t } : undefined; }, renderer: (tok) => esc(tok.text) };
 const FRONT = /^(---|\+\+\+)[ \t]*\n([\s\S]*?)\n\1[ \t]*(?:\n|$)/;
 const readers = new WeakMap();
 /** THE READING RENDER (Export HTML / Copy as HTML / Print): the markdown SOURCE (unsaved edits included — the caller's
  *  sourceNow) through `Marked` (the house renderer's class, the main bundle's marked) and `sanitize` (THE one sanitizer)
  *  — never the editor's DOM: a construct the editor carries as a raw block (lossy for EDITING) is still a heading / a
- *  list / inline code for READING. Front matter reads as a plain block. No sanitizer ⇒ throws (fail closed). */
+ *  list / inline code for READING. Front matter reads as a plain block; an unpaired inline open tag reads as its text
+ *  (LITERAL_TAG, r2). No sanitizer ⇒ throws (fail closed). */
 export function readingHtml(src, { Marked, sanitize } = {}) {
   if (typeof sanitize !== 'function' || typeof Marked !== 'function') throw new Error('readingHtml needs Marked + the sanitizer');
   let md = readers.get(Marked);
-  if (!md) { md = new Marked({ gfm: true, renderer: { html(t) { return placeholderHtml(typeof t === 'string' ? t : t && t.text); } } }); readers.set(Marked, md); }
+  if (!md) { md = new Marked({ gfm: true, extensions: [LITERAL_TAG], renderer: { html(t) { return placeholderHtml(typeof t === 'string' ? t : t && t.text); } } }); readers.set(Marked, md); }
   const s = String(src ?? '').replace(/^\uFEFF/, ''), fm = FRONT.exec(s);
   return sanitize(md.parse(fm ? '~~~~\n' + fm[2] + '\n~~~~\n\n' + s.slice(fm[0].length) : s));
+}
+/** THE RAW BLOCK READ AS A DOCUMENT (lane doc-raw-blocks, 2.369.246 — owner 2026-10-09 "这个会莫名其妙变成源码的问题还没修复":
+ *  a table the wheel carried as a raw block showed its SOURCE in the reading view). The window's rawBlock node view draws
+ *  THIS: the block's source through readingHtml (the house renderer + THE one sanitizer — the Print render), read-only,
+ *  its chip the one way into the source. → { kind: 'html' | 'front' | 'markdown' (the chip's word), html, rendered } —
+ *  rendered = false when the block reads as NOTHING (an HTML comment, a lone closing tag) or the renderer threw ⇒ the
+ *  window shows the source, as before, and its chip says so. No sanitizer / no renderer ⇒ throws (fail closed). */
+export function rawReading(src, { Marked, sanitize } = {}) {
+  if (typeof sanitize !== 'function' || typeof Marked !== 'function') throw new Error('rawReading needs Marked + the sanitizer');
+  const s = String(src ?? ''), kind = /^\s*</.test(s) ? 'html' : /^(---|\+\+\+)/.test(s) ? 'front' : 'markdown';
+  let html = '';
+  try { html = String(readingHtml(s, { Marked, sanitize }) || ''); } catch { return { kind, html: '', rendered: false }; }
+  const text = html.replace(/<[^>]*>/g, '').replace(/&nbsp;|&#160;/gi, ' ').trim();
+  return { kind, html, rendered: !!text || /<(?:img|hr|table|input|video|audio)\b/i.test(html) };
 }
 /** A table's PRINT type step by its column count (the wrapper's data-cols): ≤ 4 columns as written, 5–6 = m (90 %),
  *  7–9 = l (80 %), 10+ = xl (70 %) — the cells wrap anyway; the step keeps a wide table's words whole. */

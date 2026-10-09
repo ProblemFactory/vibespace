@@ -436,7 +436,14 @@ function findSessionJsonlPath(claudeSessionId, cwd) {
 // ms metric was only the >200 ms outliers before; the cold/append split is what
 // the pair now shows).
 const _jsonlCache = new Map();
-const JSONL_CACHE_MAX = 30;
+// B-9428 (the owner's heap snapshot: this Map held 328 MB — 30 parsed tails of up to 32 MiB each, bounded
+// only by COUNT): an entry IS the parsed tail its readers return, so the bound is its BYTES (spanEnd −
+// spanStart) — r2 (verify #7): every tail touched in the last 10 min is the WORKING SET and stays; idle tails
+// go oldest-first past a 128 MB floor; the old count is the second ceiling (cache-bounds.js evictIdle).
+const { evictIdle, cacheRow, JSONL_CACHE_MAX_BYTES, JSONL_CACHE_IDLE_MS, JSONL_CACHE_MAX_ENTRIES: JSONL_CACHE_MAX, JSONL_LIVE_MAX_BYTES } = require('./cache-bounds.js');
+const _jsonlBytes = (e) => (e && e.spanEnd != null && e.spanStart != null ? e.spanEnd - e.spanStart : (e && e.size) || 0);
+let _jsonlResident = 0, _jsonlLive = 0, _jsonlLiveEvicted = 0;
+const _jsonlUsed = new WeakMap(); // entry → last touched (ms)
 // A grown file the ASYNC warm folds in inline (on the loop) instead of handing
 // a full re-parse to the worker: the append is the only work, bounded here.
 const WARM_INLINE_APPEND_MAX = 4 * 1024 * 1024;
@@ -444,14 +451,18 @@ const WARM_INLINE_APPEND_MAX = 4 * 1024 * 1024;
 function _jsonlCachePut(id, entry) {
   _jsonlCache.delete(id);
   _jsonlCache.set(id, entry);
-  while (_jsonlCache.size > JSONL_CACHE_MAX) _jsonlCache.delete(_jsonlCache.keys().next().value);
+  _jsonlUsed.set(entry, Date.now());
+  const r = evictIdle(_jsonlCache, { floorBytes: JSONL_CACHE_MAX_BYTES, maxEntries: JSONL_CACHE_MAX, idleMs: JSONL_CACHE_IDLE_MS, liveMaxBytes: JSONL_LIVE_MAX_BYTES, now: Date.now(), sizeOf: _jsonlBytes, usedAt: (e) => _jsonlUsed.get(e) });
+  _jsonlResident = r.bytes; _jsonlLive = r.live; _jsonlLiveEvicted += r.liveEvicted;
 }
+/** The census row (tail bytes ≈ the parsed messages' share of the heap). */
+function jsonlCacheCensus() { return cacheRow('transcript tails', { bytes: _jsonlResident, count: _jsonlCache.size, unit: 'entries', ceiling: JSONL_CACHE_MAX_BYTES, basis: `tail bytes (128 MB floor for idle tails; the live set ≤ ${JSONL_LIVE_MAX_BYTES / 1048576} MB${_jsonlLiveEvicted ? ', ' + _jsonlLiveEvicted + ' live tails evicted past it' : ''})`, live: _jsonlLive }); }
 function _stampJsonlParse(bytes, ms) {
   global.__vsMetric?.('srv-jsonl-parse-bytes', bytes);
   global.__vsMetric?.('srv-jsonl-parse-ms', Math.round(ms * 10) / 10);
 }
 /** Test hook: forget every cached parse (the cold-read control). */
-function jsonlCacheClear() { _jsonlCache.clear(); }
+function jsonlCacheClear() { _jsonlCache.clear(); _jsonlResident = 0; }
 
 // Async warm (2.235.0): populate _jsonlCache OFF the main thread via the
 // transcript worker, so the sync parseSessionJsonl below (many sync callers)
@@ -468,7 +479,7 @@ async function warmSessionJsonlAsync(claudeSessionId, cwd) {
     if (!fp) return false;
     const stat = fs.statSync(fp);
     const cached = _jsonlCache.get(claudeSessionId);
-    if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size && cached.ino === stat.ino) return true; // already warm
+    if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size && cached.ino === stat.ino) { _jsonlCachePut(claudeSessionId, cached); return true; } // already warm (touched: the working set)
     const { readJsonlTail, readJsonlTailAsync } = require('./adapters/codex');
     if (cached && cached.incr && stat.size > cached.size && stat.size - cached.spanEnd <= WARM_INLINE_APPEND_MAX) {
       const t0 = performance.now();
@@ -1399,7 +1410,7 @@ function dedupWebuiSockets(entries) {
 }
 
 module.exports = {
-  warmSessionJsonlAsync, jsonlCacheClear,
+  warmSessionJsonlAsync, jsonlCacheClear, jsonlCacheCensus,
   extractSessionMeta,
   SESSIONS_DIR,
   dedupWebuiSockets,

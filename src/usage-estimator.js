@@ -24,6 +24,7 @@
 const fs = require('fs');
 const path = require('path');
 const { RESET_GRACE_SEC } = require('./quota-model.js');
+const { evictIdle, cacheRow, ESTIMATOR_LINES_MAX_BYTES, ESTIMATOR_LINES_IDLE_MS, ESTIMATOR_LIVE_MAX_BYTES } = require('./cache-bounds.js'); // PURE (B-9428)
 
 // Δu-equivalent weight of the prior pseudo-observation.
 const PRIOR_WEIGHT_DU = 0.15;
@@ -478,7 +479,7 @@ class UsageEstimator {
     this.resolveIdentity = resolveIdentity; // (accountId|null) → {identityKey} | null
     this.priorsFor = priorsFor || (() => CLAUDE_MAX_PRIOR_FULL_USD);
     this.lagS = lagS == null ? 20 : lagS; // ledger-tail extrapolation seconds (0 = off, exact-math tests)
-    this._lineCache = new Map();  // identityKey → {mtimeMs, size, lines}
+    this._lineCache = new Map();  // identityKey → {mtimeMs, size, lines} — LRU by file bytes (B-9428, cache-bounds.js)
     this._rateCache = new Map();  // identityKey → {rates, at}
     this._estMemo = new Map();    // accountId|'__global__' → {at, est}
     // LIVE odometer ring (event-driven estimation, user-designed 2026-08-09
@@ -516,14 +517,16 @@ class UsageEstimator {
   _liveDelta(accountIds, fromMs, nowMs) {
     if (!this._liveRing.length) return null;
     const uh = typeof this._usageHistory === 'function' ? this._usageHistory() : this._usageHistory;
-    const known = uh?._evCache?.rids || null;
+    // B-9428: the ledger answers by id (its hot ids + the cold rows' hashes) — no resident Set of every id ever
+    const knows = typeof uh?.ledgerKnowsId === 'function' ? (id) => uh.ledgerKnowsId(id) : null;
+    const known = knows ? null : uh?._evCache?.rids || null;
     // THE 2.267.3 est-2× root cause: STDOUT stream records carry NO requestId,
     // so ring entries are keyed by msg.id ('msg_…') while ledger events are
     // keyed by requestId ('req_…') — `known.has(rid)` could NEVER exclude a
     // scanned entry, and every request counted TWICE while a conversation was
     // active (user saw est 27% vs ⟳ 9%). The ledger now bakes `mid`
     // (message.id) alongside rid; exclusion checks BOTH id spaces.
-    const knownMids = uh?._evCache?.mids || null;
+    const knownMids = knows ? null : uh?._evCache?.mids || null;
     const want = new Set(accountIds);
     // No age-out: ledger-dedup is the ONLY exit — an age cutoff made
     // un-scanned cost vanish from the estimate after N minutes (a dip
@@ -532,6 +535,7 @@ class UsageEstimator {
     for (const e of this._liveRing) {
       if (e.ts < fromMs || e.ts > nowMs) continue;
       if (!want.has(e.acct)) continue;
+      if (knows && knows(e.rid)) continue;
       if (known && known.has(e.rid)) continue;
       if (knownMids && knownMids.has(e.rid)) continue;
       out.total += e.usd; out.byFamily[e.fam] += e.usd;
@@ -545,15 +549,22 @@ class UsageEstimator {
     const fp = this._file(identityKey);
     let st; try { st = fs.statSync(fp); } catch { return []; }
     const c = this._lineCache.get(identityKey);
-    if (c && c.mtimeMs === st.mtimeMs && c.size === st.size) return c.lines;
+    if (c && c.mtimeMs === st.mtimeMs && c.size === st.size) { this._lineCache.delete(identityKey); this._lineCache.set(identityKey, c); c.usedAt = Date.now(); return c.lines; }
     let lines = [];
     try {
       lines = fs.readFileSync(fp, 'utf-8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
     } catch { }
     lines.sort((a, b) => (a.fetchedAt || 0) - (b.fetchedAt || 0));
-    this._lineCache.set(identityKey, { mtimeMs: st.mtimeMs, size: st.size, lines });
+    this._lineCache.delete(identityKey);
+    this._lineCache.set(identityKey, { mtimeMs: st.mtimeMs, size: st.size, lines, usedAt: Date.now() });
+    // r2 (verify #3/#11): every identity asked for in the last 30 min stays (a sweep reads each one — a byte
+    // LRU under the live set re-parsed every file on the loop every sweep); the floor applies to idle ones
+    const r = evictIdle(this._lineCache, { floorBytes: ESTIMATOR_LINES_MAX_BYTES, maxEntries: 256, idleMs: ESTIMATOR_LINES_IDLE_MS, liveMaxBytes: ESTIMATOR_LIVE_MAX_BYTES, now: Date.now(), sizeOf: (e) => e.size, usedAt: (e) => e.usedAt });
+    this._lineBytes = r.bytes; this._lineLive = r.live; this._lineLiveEvicted = (this._lineLiveEvicted || 0) + r.liveEvicted;
     return lines;
   }
+  /** The census row (anchor-file bytes; the parsed lines cost ~1.6× that, measured on the owner's snapshot). */
+  lineCacheCensus() { return cacheRow('estimator anchor lines', { bytes: this._lineBytes || 0, count: this._lineCache.size, unit: 'identities', ceiling: ESTIMATOR_LINES_MAX_BYTES, basis: `anchor-file bytes (32 MB floor for idle identities; the live set ≤ ${ESTIMATOR_LIVE_MAX_BYTES / 1048576} MB${this._lineLiveEvicted ? ', ' + this._lineLiveEvicted + ' live evicted past it' : ''})`, live: this._lineLive || 0 }); }
   // Every account id this identity has EVER anchored under — ledger events
   // for removed/re-added subs live under their old ids. '__global__' is the
   // ONE reassignable id (a machine /login switch hands it to a DIFFERENT

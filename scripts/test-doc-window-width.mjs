@@ -18,6 +18,15 @@
 //      again (the raw blocks the wheel carries) ⇒ red. The print sheet as text: pre / code / cells wrap, nothing overflow:auto
 //      or fixed-height under print, a wide table steps its type down (colsBand), images bounded, a pre may break; RED CONTROL:
 //      a patched sheet without the pre wrap.
+//   §6 (lane doc-raw-blocks, 2.369.246 — owner "这个会莫名其妙变成源码的问题还没修复": a GFM table whose cells held <code>
+//      read as a grey source block): READING NEVER SHOWS SOURCE — the owner's shape (scripts/fixtures/doc-wheel/31-…)
+//      is a real table in the editor AND in the reading export; a block the wheel still carries as written (a <details>,
+//      front matter, an unmatched tag) is drawn by rawReading (readingHtml: the house renderer + THE sanitizer), a block
+//      that reads as nothing (a comment) shows its source with the chip saying so; the window's node view wears it.
+//      r2 ruling: an UNPAIRED inline open tag (the owner's bare `PR-<code>-nn`) is TEXT in the reading — the fixture's second
+//      table shows `STEP-<code>-nn` as written, no <code> element opened (the editor keeps that table raw: rule 2 unchanged).
+//      RED CONTROLS: the editor's DOM exported (its raw blocks) ⇒ red; a rawReading that skips the sanitizer ⇒ red; the
+//      reader without its unpaired-tag rule ⇒ the cell's tail in code type ⇒ red.
 // Run: node scripts/test-doc-window-width.mjs   (in-process, ~0.06 s; the chrome half = scripts/test-doc-window.mjs §10)
 import fs from 'node:fs';
 import os from 'node:os';
@@ -153,5 +162,64 @@ try {
   const badSheet = sheetVerdicts((await import(pathToFileURL(path.join(TMP5, 'p.mjs')).href)).PRINT_CSS);
   ok(badSheet.includes('pre / code do not wrap'), 'RED CONTROL: a patched sheet without the pre wrap ⇒ red', badSheet);
 } finally { fs.rmSync(TMP5, { recursive: true, force: true }); }
+section('§6 raw blocks READ as documents — the owner\'s table with inline <code> is a table; what stays raw is rendered, never source');
+const OWNER = rd('scripts/fixtures/doc-wheel/31-table-inline-html.md');
+const MIXED = OWNER + '\n<details>\n<summary>Why a bag</summary>\n\nTwo equal rows stay two.\n\n</details>\n\n<!-- reviewer: keep the bag -->\n';
+const SIGN = (h) => '<!--sanitized-->' + h; // a sanitizer stand-in that signs its output (DOMPurify needs a DOM — the chrome half runs the real one)
+/** A READ fragment's verdicts for MIXED (empty = it reads as a document: a table with its inline tags, the <details> rendered). */
+function rawVerdicts(html) {
+  const v = [], h = String(html || '');
+  if (/doc-rawblock|data-raw-block/.test(h)) v.push('a raw block shown as source');
+  if (/\|\s*Mechanism\s*\|/.test(h)) v.push('the table\'s pipes shown as text');
+  const tb = /<table>([^]*?)<\/table>/.exec(h);
+  if (!tb) v.push('no <table>');
+  else if (!/<code[^>]*>STEP-nn<\/code>/.test(tb[1]) || !/<kbd>Ctrl<\/kbd>/.test(tb[1]) || !/<sup>2<\/sup>/.test(tb[1]) || !/<br\s*\/?>See also/.test(tb[1]) || !/<code[^>]*>replaces = prior id<\/code>/.test(tb[1])) v.push('the cells lost their inline tags');
+  if (!/<details>\s*<summary>Why a bag<\/summary>/.test(h)) v.push('the <details> block not rendered');
+  const bare = /<td>A finding names its step ([^]*?)<\/td>/.exec(h);
+  if (!bare || !bare[1].includes('STEP-&lt;code&gt;-nn until export pins the number')) v.push('the bare placeholder is not its literal text');
+  if (!bare || /<code\b/.test(bare[1])) v.push('the bare placeholder opened an element (the cell\'s tail in code type)');
+  return v;
+}
+const readMixed = M.readingHtml(MIXED, { Marked, sanitize: (h) => h });
+ok(rawVerdicts(readMixed).length === 0, 'the reading export of the owner\'s shape + a <details> block: a <table> whose cells keep <code> / <kbd> / <sup> / <br> beside the backticked code, the bare STEP-<code>-nn as its literal text (no element opened), the <details> rendered, no raw block, no pipes as text', rawVerdicts(readMixed));
+const ownerDoc = D.loadDoc(OWNER), kinds = []; ownerDoc.doc.descendants((n) => { kinds.push(n.type.name); });
+const ownerEditor = editorHtml(ownerDoc.doc);
+const rawSrcs = ownerDoc.nodes.filter((n) => n.type.name === 'rawBlock').map((n) => n.attrs.source);
+ok(kinds.includes('table') && rawSrcs.length === 1 && rawSrcs[0].includes('STEP-<code>-nn') && /<table[^>]*>[^]*<code[^>]*>STEP-nn<\/code>[^]*<kbd>Ctrl<\/kbd>[^]*<\/table>/.test(ownerEditor) && (ownerEditor.match(/doc-rawblock/g) || []).length === 1, 'the owner\'s shape in the EDITOR: the paired-tag table is a real table (cells editable), its <code> / <kbd> marks drawn as code / kbd; the ONE raw block is the table whose cell holds the bare placeholder (the raw-block verdict census)', { kinds: [...new Set(kinds)], rawSrcs });
+// RED CONTROL: the editor's DOM exported (rel239's exportBody) — the <details> rides as a raw block there: its source comes back
+const viaEd = rawVerdicts(editorHtml(D.loadDoc(MIXED).doc));
+ok(viaEd.includes('a raw block shown as source') && viaEd.includes('the <details> block not rendered'), 'RED CONTROL: the editor\'s DOM exported instead of the reading render ⇒ red (the <details> block comes back as its source)', viaEd);
+const RR = (src, m = M) => m.rawReading(src, { Marked, sanitize: SIGN });
+const det = RR('<details>\n<summary>Why a bag</summary>'), com = RR('<!-- reviewer: keep the bag -->'), lone = RR('</details>'), fm = RR('---\ntitle: x\n---');
+ok(det.rendered && det.kind === 'html' && det.html.startsWith('<!--sanitized-->') && /<details>\s*<summary>Why a bag<\/summary>/.test(det.html), 'rawReading: a <details> block READS rendered — its HTML is the sanitizer\'s output (signed), kind HTML', det);
+ok(!com.rendered && !lone.rendered && com.kind === 'html', 'rawReading: a block that reads as NOTHING (a comment, a lone </details>) ⇒ not rendered: the window shows its source, the chip says it cannot be rendered', { com, lone });
+ok(fm.rendered && fm.kind === 'front' && /<pre><code>title: x/.test(fm.html), 'rawReading: front matter reads as a plain block (kind front matter)', fm);
+ok((() => { try { M.rawReading('<b>x</b>', { Marked }); return false; } catch { return true; } })() && (() => { try { M.rawReading('<b>x</b>', { sanitize: SIGN }); return false; } catch { return true; } })(), 'rawReading fails CLOSED without the sanitizer (or the renderer)');
+const BARE = '| Mechanism | Rule |\n| --- | --- |\n| Lineage | the PR-<code>-nn label shifts |\n', bareDoc = D.loadDoc(BARE), bareR = RR(BARE);
+ok(bareDoc.nodes.some((n) => n.type.name === 'rawBlock') && bareR.rendered && /<table>/.test(bareR.html) && !/\| Mechanism \|/.test(bareR.html) && bareR.html.includes('the PR-&lt;code&gt;-nn label shifts') && !/<code\b/.test(bareR.html), 'an UNMATCHED tag (a bare <code> placeholder in a cell) stays a raw block — and READS as a table (rule 1) showing PR-<code>-nn as written, no <code> element opened (r2)', { raw: bareDoc.nodes.map((n) => n.type.name), html: bareR.html.slice(0, 200) });
+const UP = [['<code>-nn label', '<code>'], ['<b class="k">x y', '<b class="k">'], ['<code>x</code>', null], ['<CODE>x</code> y', null], ['<code>x</code', '<code>'], ['<br>', null], ['<img src="i.png">', null], ['<em/>', null], ['<id>', null], ['<sha> x </sha>', null], ['x <code>', null]];
+const upBad = UP.filter(([src, want]) => M.unpairedOpenTag(src) !== want).map(([src, want]) => `${src} ⇒ ${M.unpairedOpenTag(src)} (want ${want})`);
+ok(upBad.length === 0, 'unpairedOpenTag (PURE): an open tag whose close is not in the rest of its run ⇒ the tag (text); a paired one (any case), a void / self-closed one, a name that is no element (placeholderHtml\'s) ⇒ null', upBad);
+ok(/const r = rawReading\(cur\.attrs\.source \|\| '', \{ Marked, sanitize: sanitizeHtml \}\);/.test(UI) && /e\.name === 'rawBlock' \? e\.extend\(\{ addNodeView: \(\) => \(\{ node, view, getPos \}\) => rawView\(node, view, getPos\) \}\)/.test(UI) && !/edit in Raw|'data-head'/.test(UI) && /dom\.contentEditable = 'false'/.test(UI),
+  'the window: every raw block is the rawBlock node view drawing rawReading with THE sanitizer, read-only (contenteditable=false); the old source head (data-head "edit in Raw") is gone');
+ok(/head\.textContent = r\.rendered \? t\('\{kind\} · kept as written · edit source', \{ kind \}\) : t\('\{kind\} · cannot be rendered · edit source', \{ kind \}\);/.test(UI) && /head\.addEventListener\('click', \(\) => \(ta \? commit\(\) : open\(\)\), \{ signal \}\);/.test(UI) && /tr\.setNodeMarkup\(pos, null, \{ \.\.\.cur\.attrs, source: v \}\)/.test(UI),
+  'the chip says what it is ("kept as written · edit source" / "cannot be rendered") and is the one way in: a press opens the source in place, the edit lands as the node\'s attrs.source');
+for (const [lang, want] of [['zh', '"{kind} · kept as written · edit source": "{kind} · 原样保留，点此改源码"'], ['ja', '"{kind} · kept as written · edit source": "{kind} · 書かれたまま保持 · ソースを編集"']]) {
+  const Dd = rd(`src/lib/i18n-${lang}.js`);
+  ok(Dd.includes(want) && Dd.includes('"{kind} · cannot be rendered · edit source": ') && Dd.includes('"Source of this block": ') && !Dd.includes('edit in Raw'), `the chip's words are in i18n-${lang}.js (the retired "edit in Raw" key gone)`);
+}
+// RED CONTROL: a rawReading that renders WITHOUT the sanitizer (a patched copy)
+const TMP6 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-docraw-'));
+try {
+  const src6 = fs.readFileSync(MODEL, 'utf8'), mut6 = src6.replace("html = String(readingHtml(s, { Marked, sanitize }) || '');", "html = String(readingHtml(s, { Marked, sanitize: (h) => h }) || '');");
+  fs.writeFileSync(path.join(TMP6, 'r.mjs'), mut6);
+  const m6 = await import(pathToFileURL(path.join(TMP6, 'r.mjs')).href), d6 = RR('<details>\n<summary>Why a bag</summary>', m6);
+  ok(mut6 !== src6 && !d6.html.startsWith('<!--sanitized-->'), 'RED CONTROL: a rawReading that skips the sanitizer ⇒ red (its HTML is not the sanitizer\'s output)', d6.html.slice(0, 60));
+  // RED CONTROL (r2): the reader without its unpaired-tag rule — marked opens a <code> at the placeholder, the cell's tail reads in code type
+  const mut7 = src6.replace("extensions: [LITERAL_TAG], ", '');
+  fs.writeFileSync(path.join(TMP6, 'u.mjs'), mut7);
+  const v7 = rawVerdicts((await import(pathToFileURL(path.join(TMP6, 'u.mjs')).href)).readingHtml(MIXED, { Marked, sanitize: (h) => h }));
+  ok(mut7 !== src6 && v7.includes('the bare placeholder opened an element (the cell\'s tail in code type)'), 'RED CONTROL: the reader without its unpaired-tag rule ⇒ red (a <code> element opened at STEP-<code>-nn, the rest of the cell in code type)', v7);
+} finally { fs.rmSync(TMP6, { recursive: true, force: true }); }
 console.log(`\n[doc-window-width] ${fail ? fail + ' FAILED (' + pass + ' passed)' : 'ALL PASS (' + pass + ')'}`);
 process.exit(fail ? 1 : 0);

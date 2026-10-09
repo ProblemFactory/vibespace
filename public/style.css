@@ -381,6 +381,7 @@ html, body {
 .usage-btn:hover { border-color: var(--accent); color: var(--accent); }
 .usage-body { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 12px; container-type: inline-size; }
 .usage-empty { text-align: center; color: var(--text-dim); padding: 40px; }
+.usage-ledger-note { color: var(--text-secondary); font-size: 12px; margin: -6px 0 12px; } /* B-9428 r4: a partial / as-of answer, said */
 .usage-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(130px, 100%), 1fr)); gap: 8px; margin-bottom: 14px; }
 .usage-tile { background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; }
 .usage-tile.accent { border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); background: color-mix(in srgb, var(--accent) 8%, var(--bg-input)); }
@@ -557,6 +558,14 @@ html, body {
 .acct-login-chip:hover { background: var(--bg-hover, rgba(127,127,127,0.15)); }
 .acct-login-chip:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
 .acct-login-chip svg { width: 10px; height: 10px; flex-shrink: 0; }
+/* The LAPSED-subscription chip (serveLapsedChipHtml) draws the login chip's
+   shape and its 10 px clock: it lives in the same hard slot and reused the
+   same icon in a wrapper nothing sized (owner 2026-10-09, a column-wide clock). */
+.acct-serve-chip, .acct-serve-chip-off { display: inline-flex; align-items: center; gap: 3px; vertical-align: -2px; border-radius: var(--radius-sm); padding: 0 3px; }
+.acct-serve-chip { cursor: pointer; }
+.acct-serve-chip:hover { background: var(--bg-hover, rgba(127,127,127,0.15)); }
+.acct-serve-chip:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+.acct-serve-chip svg, .acct-serve-chip-off svg { width: 10px; height: 10px; flex-shrink: 0; }
 .acct-master-hint { color: var(--text-dim); font-size: 9px; white-space: nowrap; }
 /* When a usage readout is present the actions no longer push right (usage takes
    the auto margin) — give the actions their own small gap. */
@@ -5345,6 +5354,10 @@ a.chanmsg-file:hover .chanmsg-att-dl { color: var(--accent); }
 .chanwin-file-chip-refused .chanwin-file-name, .chanwin-file-chip-blocked .chanwin-file-name { text-decoration: line-through; }
 .chanwin-file-thumb { width: 24px; height: 24px; object-fit: cover; border-radius: 3px; }
 .chanwin-file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; }
+/* lane compose-chip-open: a reply-box file opens before it is sent — the thumb and the name, with the card's link look */
+.chanwin-file-thumb { cursor: pointer; }
+.chanwin-file-name.chan-prop-file-open { color: var(--accent); border-radius: var(--radius-sm); }
+.chanwin-file-name.chan-prop-file-open:hover, .chanwin-file-name.chan-prop-file-open:focus-visible { text-decoration: underline; }
 .chanwin-file-meta { color: var(--text-dim); white-space: nowrap; }
 .chanwin-file-why { font-size: 11px; }
 .chanwin-file-x { min-width: 24px; min-height: 24px; padding: 0; border: none; background: transparent; color: var(--text-dim); cursor: pointer; }

@@ -14,6 +14,8 @@
 //   ⑦ patched-copy controls: the 5 s verdict restored ⇒ red; unblock before mount ⇒ red
 //   ⑧ the log survives a remount (lane mount-argv-dir-cache): a killed daemon's last line is still readable after
 //     the next daemon mounts (the log was reopened 'w' at every spawn)
+//   ⑨ the VFS cache moves across a remount only when clean (lane vfs-cache-local): dirty ⇒ kept; clean ⇒ the local dir,
+//     the old one removed by a child after the mount; a witness-skipping mutant moves a dirty cache (red)
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -155,6 +157,38 @@ try {
   ok(pid1 && pid2 && pid1 !== pid2 && lines.includes(`NOTICE: fake daemon ${pid1}`) && lines.includes(`NOTICE: fake daemon ${pid2}`) && lines.filter((l) => l.startsWith(MountManager.LOG_MARK)).length === 2,
     '⑧ the dead daemon\'s last line is still readable after the remount (one spawn marker each)', `${pid1} ${pid2} ${JSON.stringify(lines)}`);
   ok(gl.tailMountLog('L', 5, { current: true }).join('|') === `NOTICE: fake daemon ${pid2}`, '⑧ the newest daemon\'s own lines (what the start verdict quotes) hold only its words');
+
+  // ── ⑨ the VFS cache moves across a remount ONLY when clean (lane vfs-cache-local, B-4997): a real-shape vfsMeta item
+  // ("Dirty": true WITH Go's space) ⇒ the next daemon restarts on the OLD dir; a clean one ⇒ the daemon gets the local
+  // dir and the old one is removed by a child only AFTER the mount; a mutant that skips the witness ⇒ the dirty cache moves (red)
+  process.env.HOME = path.join(D, 'home-c'); delete process.env.VIBESPACE_VFS_CACHE_DIR;
+  const META = (dirty) => `{\n\t"ModTime": "2026-10-09T04:42:04.4329626-07:00",\n\t"Size": 6,\n\t"Rs": [\n\t\t{\n\t\t\t"Pos": 0,\n\t\t\t"Size": 6\n\t\t}\n\t],\n\t"Fingerprint": "",\n\t"Dirty": ${dirty}\n}\n`;
+  const cacheRun = async (MM, tag, dirty) => {
+    const id = 'C' + tag, g = makeMgr(MM, 'c' + tag, [rec(id, { FAKE_SCAN_S: '1' })]);
+    all.push(g);
+    const dd = path.join(D, 'data-c' + tag);
+    g._cacheFs = (d) => (d === dd || d.startsWith(dd + '/')) ? 'network' : 'local';
+    const old = path.join(g._vfsCacheRoot(), id), metaF = path.join(old, 'vfsMeta', 'VS', 'notes.txt');
+    fs.mkdirSync(path.dirname(metaF), { recursive: true }); fs.writeFileSync(metaF, META(dirty));
+    fs.mkdirSync(path.join(old, 'vfs', 'VS'), { recursive: true }); fs.writeFileSync(path.join(old, 'vfs', 'VS', 'notes.txt'), 'hello\n');
+    const given = []; const argv0 = g._mountArgv.bind(g); g._mountArgv = (m, o) => { given.push(o.cacheDir); return argv0(m, o); };
+    await g.mount(id);
+    const oldWhileStarting = fs.existsSync(old) && !!row(g, id).starting;
+    const mounted = await until(() => row(g, id).mounted, 8000);
+    await until(() => !fs.existsSync(old), dirty ? 1500 : 5000);
+    return { given: given[0], oldWhileStarting, mounted, oldAfter: fs.existsSync(old), local: path.join(D, 'home-c', '.cache', 'vibespace', 'vfs-cache', id), cell: row(g, id).cache };
+  };
+  const cd = await cacheRun(MountManager, 'd', true);
+  ok(cd.mounted && cd.given === path.join(D, 'data-cd', 'vfs-cache', 'Cd') && cd.oldAfter && cd.cell.why === 'dirty' && cd.cell.items === 1, '⑨ a "Dirty": true vfsMeta item ⇒ NO move across the remount: the daemon restarts on the old dir, nothing removed, the row says 1 item still uploading', JSON.stringify(cd));
+  const cc = await cacheRun(MountManager, 'c', false);
+  ok(cc.given === cc.local && cc.oldWhileStarting, '⑨ a clean cache ⇒ the new daemon gets the local dir; the old dir still exists while it starts', JSON.stringify(cc));
+  ok(cc.mounted && !cc.oldAfter && cc.cell.why === null, '⑨ …and the old dir is gone once the new daemon MOUNTED (a child rm), the row says nothing', JSON.stringify(cc));
+  {
+    const MCc = mutantCopies('mount-starting-cache', REPO), msrc = fs.readFileSync(path.join(REPO, 'src/mounts.js'), 'utf8');
+    const from = 'witness: CACHE_PLACE.dirtyWitness(meta, rcQueue) }';
+    const cm = msrc.includes(from) ? await cacheRun(require(MCc.write('src/mounts.js', msrc.replace(from, "witness: { dirty: false, items: 0, why: 'clean' } }"), 'nowitness')).MountManager, 'm', true) : null;
+    ok(cm && cm.given === cm.local && !cm.oldAfter, '⑨ NEGATIVE CONTROL: the witness skipped ⇒ the DIRTY cache moves and its old dir (the un-uploaded write) is deleted (red)', JSON.stringify(cm));
+  }
 
   // ── the row: no Connect while starting, the line says what it waits for ──
   const sb = fs.readFileSync(path.join(REPO, 'src/lib/sidebar-mounts.js'), 'utf8');

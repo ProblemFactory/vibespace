@@ -99,7 +99,7 @@ ok(rowA?.project === REPO_CWD && (agg.groups.session || []).find((r) => r.key ==
   'the session dimension carries name + project so the table needs no second lookup', rowA?.project);
 
 // ── ④ the event rows themselves (what the backfill has to match) ──────────
-const evs = Object.fromEntries([...uh._events(0, Date.now() + 1e9)].map((e) => [e.rid, e]));
+const evs = Object.fromEntries([...uh.rows(0, Date.now() + 1e9)].map((e) => [e.rid, e]));
 ok(evs.req_a_wf1.origin === 'workflow' && evs.req_a_wf1.wf === 'wf_r1' && evs.req_a_wf1.agent === 'agent-w1'
   && evs.req_a_wf1.cwd === REPO_CWD && evs.req_a_wf1.wcwd === TREE_CWD,
   'a ledger row names its workflow run and agent file, and keeps the agent\'s own dir as wcwd');

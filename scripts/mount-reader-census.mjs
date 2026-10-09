@@ -57,7 +57,7 @@ export const ROWS = [
   ['src/machine-mounts.js', 'own-tree', 7, null, DATA],
   ['src/machine-probes.js', 'own-tree', 7, null, CLI],
   ['src/migration-runner.js', 'own-tree', 1, null, DATA],
-  ['src/mounts.js', 'exempt', 20, null, 'the manager itself: /proc, its config, its own mount points only through probe CHILDREN (ls -d) — the sweep that sets the block'],
+  ['src/mounts.js', 'exempt', 26, null, 'the manager itself: /proc, its config, its own mount points only through probe CHILDREN (ls -d) — the sweep that sets the block; lane vfs-cache-local +4: the local cache root probe (accessSync, ~/.cache) + the vfsMeta walk\'s text run in a CHILD node (statSync/readdirSync/readFileSync inside CACHE_META_CHILD); r2 +2: the override root\'s statSync (a non-dir is refused) + the child\'s root stat (an absent root is unknown, not absence)'],
   ['src/opencode-serve.js', 'own-tree', 3, null, CLI],
   ['src/opslog.js', 'exempt', 2, null, '/proc/mounts + the ops log folder'],
   ['src/peer-messaging.js', 'own-tree', 3, null, DATA],
@@ -153,7 +153,8 @@ export const ROWS = [
   ['src/usage-anchors.js', 'own-tree', 1, null, CLI],
   ['src/usage-cache-write.js', 'own-tree', 2, null, CLI],
   ['src/usage-estimator.js', 'own-tree', 3, null, CLI],
-  ['src/usage-history.js', 'own-tree', 16, null, CLI],
+  ['src/usage-history.js', 'own-tree', 17, null, CLI], // r3: +1 = the append-only proof (probeHolds: the old tail at its old offset) // B-9428 r2: the cold rows are read by usage-cold-walk.js (its own row)
+  ['src/usage-cold-walk.js', 'own-tree', 3, null, CLI], // r3: + the sync one-line read (a hash hit's string compare) // B-9428 r2: the ledger's cold rows at their (shard, offset) — the worker's fold, aggregate()/rows(), the popup's one line
   ['src/usage-index-worker.js', 'own-tree', 6, null, CLI],
   ['src/usage-origin-backfill.js', 'own-tree', 10, null, CLI],
   ['src/usage-routes.js', 'own-tree', 24, null, CLI],

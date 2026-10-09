@@ -156,9 +156,16 @@ export function attachmentOpenKind(name, mime) {
 export function openAttachment(app, { url, name, mime }) {
   const kind = attachmentOpenKind(name, mime);
   const a = app || globalThis.app;
-  if (kind === 'overlay') { showImageOverlay(`${url}${url.includes('?') ? '&' : '?'}inline=1`); return kind; }
+  if (kind === 'overlay') { showImageOverlay(P.attachmentUrlFor(url, { inline: true })); return kind; }   // a blob: URL (a reply-box file) takes no ?inline=1
   if (kind === 'viewer' && a && typeof a.openFile === 'function') { a.openFile({ rawUrl: url, fileName: name, mime }); return kind; }
   return 'download';
+}
+/** lane compose-chip-open (owner 2026-10-09 "上传上去的文件不能查看预览"): a file still in the owner's reply box opens
+ *  through THE ONE door from its local File — a blob URL minted on the first open (a picture reuses its thumb's), held
+ *  on the pick (`p.url`) and revoked by the composer with the chip; `p.mime` = the File's type, else the sniffed one. */
+export function openComposePick(app, p) {
+  if (!p.url && p.file) p.url = URL.createObjectURL(p.file);
+  return p.url ? openAttachment(app, { url: p.url, name: p.name, mime: p.mime }) : 'download';
 }
 /** design 005 §2.B: the attachment rows (keyed by the card — a changed record redraws the card). lane
  *  outbox-attachment-preview: a click on the thumb or the name OPENS (openAttachment); the ⤓ beside it downloads. */

@@ -185,6 +185,14 @@ try {
   const logMut = makeMgr(require(MC.write('src/mounts.js', mSrc.replace(OPEN, "const fd = fs.openSync(f, 'w');"), 'w')).MountManager, 'mutw', []);
   say(logMut, 'L', 'daemon 1 last words'); say(logMut, 'L', 'daemon 2 up');
   ok(!/daemon 1 last words/.test(logOf(logMut, 'L')), '⑧ NEGATIVE CONTROL: the log opened \'w\' again ⇒ the dead daemon\'s last words are gone (red)');
+
+  // ⑨ lane vfs-cache-local: the builder takes the RECORD's cacheDir (m.cacheDir, placed at a remount) — the legacy
+  // <root>/<id> only for a record that never moved; the device twin passes a given dir through, none ⇒ rclone's default
+  const cm = makeMgr(MountManager, 'cache', [{ id: 'K', name: 'k', type: 'rclone', rcloneType: 'local', cacheDir: '/home/u/.cache/vibespace/vfs-cache/K' }, { id: 'J', name: 'j', type: 'rclone', rcloneType: 'local' }]);
+  const cdOf = (a) => a[a.indexOf('--cache-dir') + 1];
+  ok(cdOf(argvOf(cm, 'K', { cacheDir: cm._cacheDirOf(cm._get('K')) })) === '/home/u/.cache/vibespace/vfs-cache/K' && cdOf(argvOf(cm, 'J', { cacheDir: cm._cacheDirOf(cm._get('J')) })) === path.join(D, 'data-cache', 'vfs-cache', 'J'),
+    '⑨ --cache-dir = the record\'s own cacheDir; a record that never moved keeps <dataDir>/vfs-cache/<id>');
+  ok(!DM.pullMountArgs('/MP').includes('--cache-dir') && cdOf(DM.pullMountArgs('/MP', '/c/x')) === '/c/x', '⑨ the device twin: no dir ⇒ no --cache-dir (rclone\'s local default); a given dir is passed through');
 } finally {
   fs.rmSync(D, { recursive: true, force: true });
 }

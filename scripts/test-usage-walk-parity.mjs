@@ -22,7 +22,10 @@ import { createRequire } from 'node:module';
 import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
-const { UsageHistory } = require(path.join(REPO, 'src/usage-history.js'));
+const { UsageHistory: LedgerOf } = require(path.join(REPO, 'src/usage-history.js'));
+// B-9428: the walkers' parity reads the fixed-date fixture rows as the resident array — an unbounded window here
+// (the window's own parity against the unbounded cache: test-cache-bounds §2)
+class UsageHistory extends LedgerOf { constructor(o) { super(o); this.ledgerWindowMs = this.ledgerHotMaxBytes = 1e15; } }
 
 let pass = 0, fail = 0;
 const ok = (c, n, why) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (why ? ' — ' + why : '')); } };

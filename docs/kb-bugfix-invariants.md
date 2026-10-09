@@ -503,6 +503,21 @@
 - A LATE REACTION STRIP MOVED THE TEXT UNDER THE READER'S FINGER (B-59ff): a strip drawn ~1 s after a scroll grew a row above by 34 px. FIX = a known strip's box reserved; ONE row ResizeObserver moves scrollTop by a late height above the reader's row. 不变量 = a late height never moves what one reads
 - THE SENDING GUARDS HAD A SETTING AND NO DOOR (owner 2026-10-09): the policy row said the attachment guard still asks, pointing at Settings. FIX = guard rows with a one-click toggle at the policy; full delegation in plain words. 不变量 = every value the owner can change has a door where he meets it
 - THE SETTINGS STORE NOTIFIED A LIVE SET (lane guards-door, caught by the guard rows' redraw): `_notify` walked its listener Set while a listener re-subscribed ⇒ the new one was visited too, forever (the page hangs). FIX = walk `[...listeners]`. 不变量 = a notifier walks a snapshot of its listeners
+- A TABLE WITH INLINE HTML READ AS A WALL OF SOURCE (owner 2026-10-09): what the wheel can't round-trip rode as a raw block SHOWN as source. FIX = a raw block reads via the house renderer (sanitized), its chip opens the source; paired inline tags are lossless marks. 不变量 = reading never shows source
+- VFS CACHE ON THE NETWORK FS UNDER data/ (OneDrive: 164 788 files re-walked over NFS per remount): nothing chose its fs; a naive move deletes un-uploaded writes (Go writes "Dirty": true WITH a space). FIX = PURE placement, parsed witnesses, move only if clean, child rm. 不变量 = moves only if clean
+- THE WHOLE USAGE LEDGER LIVED IN THE HEAP (B-9428, heap snapshot: 406 MB of 1.17 GB; transcript cache 328 MB; estimator lines 46 MB): no cache had a byte bound. FIX = a window + a byte ceiling per cache, the rest read from the shards, the boot census names them. 不变量 = a cache has a ceiling + a name
+- A COLUMN-WIDE CLOCK ON A LAPSED ACCOUNT'S ROW (owner 2026-10-09, the third unsized roster SVG after 2.369.13 and the login chip): the lapsed chip reused ROSTER_ICONS.CLOCK in a wrapper no CSS sized. FIX = a roster icon carries its own size + a use-site census. 不变量 = an inline SVG is never unsized
+- A FILE ATTACHED IN THE OWNER'S REPLY BOX COULD NOT BE LOOKED AT (owner 2026-10-09): the composer chip had only a ×. FIX = the chip opens through THE ONE attachment door from the local File (a blob URL, revoked with the chip). 不变量 = whatever can be sent can be looked at first, through the one door
+
+## A FILE ATTACHED IN THE OWNER'S REPLY BOX COULD NOT BE LOOKED AT (lane compose-chip-open, owner 2026-10-09 on 2.369.245)
+
+**Symptom.** A "baa-0.pdf 245 KB ×" chip in the Channels reply box: no click opened it — "上传上去的文件不能查看预览". The same file on a draft or a sent message opened (rel245, lane outbox-attachment-preview).
+
+**Cause.** `createComposeFiles` (rel245, lane owner-composer-attach) kept only the base64 bytes; a blob URL existed for a picture's thumb only, and nothing on the chip was wired to open.
+
+**Fix.** The pick keeps its File; the thumb and the name open through `openComposePick` → `openAttachment` (THE ONE door) over a blob URL minted on demand. The door learned that a `blob:` URL takes no `?inline=1` (measured in node and Chrome: a query on a blob URL fetches nothing) — PURE `P.attachmentUrlFor`. × revokes; sent URLs stay until the composer goes (a viewer opened over one keeps its Download; measured: the viewer draws from its own blob copy, its Download dies with the pick URL).
+
+**Gates.** test-channel-compose-files ⑤ (PURE rule + the chip census; controls: a chip opening through its own window.open, a × keeping its URL), test-channel-outbox (the door by a blob URL; control: the old overlay suffix), the chrome leg in the lane dir (desk 1400 / phone 390).
 
 ## A SECOND DESKTOP-APP WINDOW SHOWED BUT NEVER DREW (lane e2-canvas, int243 2026-10-09 — test-desktop-app-rung-chrome 4/6 at 1 and 2 lanes after f1e317418)
 

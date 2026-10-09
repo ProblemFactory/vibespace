@@ -915,7 +915,7 @@ process.on('uncaughtException', (e) => {
 });
 process.on('unhandledRejection', (e) => { try { telemetry.record({ kind: 'server-error', name: (e && e.message) || 'unhandledRejection', stack: e && e.stack }); } catch {} console.error('unhandledRejection:', e); });
 
-const memSampler = require('./src/server/memory-sampler.js').create({ record: (ev) => telemetry.record(ev), log: console }); // lane server-memory-census: main heap + every worker isolate + external + native every 60 s (started at listen: ONE boot census line); GET /api/sysinfo serverMemory
+const memSampler = require('./src/server/memory-sampler.js').create({ record: (ev) => telemetry.record(ev), log: console, caches: () => [...usageHistory.cacheCensus(), require('./src/session-store').jsonlCacheCensus(), usageEstimator.lineCacheCensus()] }); // lane server-memory-census: main heap + every worker isolate + external + native every 60 s (started at listen: ONE boot census line); GET /api/sysinfo serverMemory; B-9428: + each bounded cache by name
 // Server performance metrics — RSS/heap, event-loop lag, live session count. Every 5 min; names-and-numbers only, same ndjson ledger as everything else.
 {
   let lagProbeAt = Date.now();

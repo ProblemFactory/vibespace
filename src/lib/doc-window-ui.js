@@ -15,6 +15,9 @@
 //   · WIDTH + LEAVING (lane doc-window-width-export, 2.369.239 — src/lib/doc-window-model.js): the column fills the window
 //     (`fit`, the default) or keeps the 76ch measure (`comfortable`, a device's choice); a wide table scrolls in its wrapper;
 //     the ⋯ at the bar's right end = the folded tools + Download .md / Export HTML / Print / Copy as Markdown / Copy as HTML.
+//   · RAW BLOCKS READ AS A DOCUMENT (lane doc-raw-blocks, 2.369.246 — owner "这个会莫名其妙变成源码的问题还没修复"): a block
+//     the wheel carries as written is drawn through the house renderer + the one sanitizer (rawReading), read-only; its
+//     chip opens its source IN PLACE (rawView below). Reading never shows source.
 //   · SAVE: the serializer's output through the atomic /api/file/write of THIS window's path only, then
 //     POST /api/doc/edited {summary} — the owning chat's free next-turn note.
 import { Editor, Extension } from '@tiptap/core';
@@ -22,7 +25,7 @@ import { Plugin } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import M from '../doc-model.js';
 import { schema, extensions, loadDoc, saveDoc, sourceLine, docFidelity, safeHref, safeImageSrc } from './doc-markdown.js';
-import { WIDTH_KEY, widthChoice, nextWidth, columnRule, TABLE_CSS, downloadHref, exportName, localImagePath, exportDocument, readingHtml, colsBand } from './doc-window-model.js';
+import { WIDTH_KEY, widthChoice, nextWidth, columnRule, TABLE_CSS, downloadHref, exportName, localImagePath, exportDocument, readingHtml, rawReading, colsBand } from './doc-window-model.js';
 
 const POLL_MS = 2000;
 const SHEET_BELOW = 640;   // px of window width: below it the comments strip is a bottom sheet
@@ -105,8 +108,17 @@ ${TABLE_CSS}
 .doc-page .ProseMirror li[data-type="taskItem"] input[type="checkbox"]:checked{background:var(--accent);border-color:var(--accent)}
 .doc-page .ProseMirror li[data-type="taskItem"] input[type="checkbox"]:checked::before{transform:scale(1)}
 .doc-page .ProseMirror li[data-type="taskItem"][data-checked="true"]>div{color:var(--text-secondary);text-decoration:line-through;text-decoration-color:var(--text-dim)}
-.doc-page .ProseMirror pre.doc-rawblock{background:none;border:1px solid var(--border);border-radius:var(--radius);color:var(--text-secondary);font-size:12px;white-space:pre-wrap;cursor:default;padding:0 12px 10px;overflow:hidden}
-.doc-page .ProseMirror pre.doc-rawblock::before{content:attr(data-head);display:block;margin:0 -12px 8px;padding:3px 10px;background:var(--bg-input);border-bottom:1px solid var(--border);font-size:10px;line-height:1.5;color:var(--text-dim)}
+.doc-page .ProseMirror kbd{font:.84em/1 var(--font-mono,'SF Mono','Fira Code',monospace);padding:1px 5px;border:1px solid var(--border);border-bottom-width:2px;border-radius:var(--radius-sm);background:var(--bg-input);white-space:nowrap}
+.doc-page .ProseMirror .doc-rawblock{border:1px dashed var(--border);border-radius:var(--radius);padding:0 14px 12px;white-space:normal;cursor:default}
+.doc-page .ProseMirror .doc-rawblock.ProseMirror-selectednode{outline:2px solid var(--accent-dim);outline-offset:1px}
+.doc-page .ProseMirror .doc-raw-head{display:block;box-sizing:border-box;width:calc(100% + 28px);margin:0 -14px 10px;padding:3px 10px;background:var(--bg-input);border:none;border-bottom:1px solid var(--border);border-radius:var(--radius) var(--radius) 0 0;font:inherit;font-size:10px;line-height:1.5;text-align:left;color:var(--text-dim);cursor:pointer}
+.doc-page .ProseMirror .doc-raw-head:hover,.doc-page .ProseMirror .doc-raw-head:focus-visible{color:var(--text);background:color-mix(in srgb,var(--accent) 12%,var(--bg-input));outline:none}
+.doc-page .ProseMirror .doc-raw-read>*{margin-top:0;margin-bottom:0}
+.doc-page .ProseMirror .doc-raw-read>*+*{margin-top:.75em}
+.doc-page .ProseMirror .doc-raw-src{font:12px/1.55 var(--font-mono,'SF Mono','Fira Code',monospace);color:var(--text-secondary);white-space:pre-wrap;overflow-wrap:anywhere}
+.doc-page .ProseMirror .doc-raw-editor{display:flex;flex-direction:column;align-items:flex-end;gap:6px}
+.doc-page .ProseMirror .doc-raw-edit{display:block;width:100%;box-sizing:border-box;resize:vertical;font:12px/1.55 var(--font-mono,'SF Mono','Fira Code',monospace);white-space:pre;overflow:auto;background:var(--bg-window);color:var(--text);border:1px solid var(--accent-dim);border-radius:var(--radius-sm);padding:8px 10px;outline:none}
+.doc-page .ProseMirror .doc-raw-done{background:var(--accent);color:var(--accent-fg);border:none;border-radius:var(--radius-sm);padding:3px 12px;font:inherit;font-size:12px;cursor:pointer}
 /* the block rhythm last: it outranks the element rules above at equal specificity */
 .doc-page .ProseMirror>*{margin-top:0;margin-bottom:0}
 .doc-page .ProseMirror>*+*{margin-top:.75em}
@@ -151,6 +163,8 @@ const glyph = (svg) => document.importNode(new DOMParser().parseFromString(svg, 
 const mk = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 const q = (host, path) => { const u = new URLSearchParams(); if (host) u.set('host', host); u.set('path', path); return u.toString(); };
 const dirOf = (p) => p.slice(0, p.lastIndexOf('/')) || '/';
+/** A reading fragment's tables in their wrapper (they scroll on screen; in print a wide one steps its type down by its columns). */
+const wrapTables = (d) => { for (const tb of d.querySelectorAll('table')) { const w = d.createElement('div'); w.className = 'tableWrapper'; const band = colsBand(tb.rows[0] ? tb.rows[0].cells.length : 0); if (band) w.dataset.cols = band; tb.replaceWith(w); w.appendChild(tb); } };
 const joinRel = (dir, rel) => { const out = []; for (const seg of (dir + '/' + rel).split('/')) { if (!seg || seg === '.') continue; if (seg === '..') out.pop(); else out.push(seg); } return '/' + out.join('/'); };
 
 /** THE SELECTION AFFORDANCE (userW inc-muxrol54-uv2d, lane doc-comment-dismiss — the Add-comment button outlived its
@@ -316,6 +330,65 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
     fig.appendChild(img); if (node.attrs.alt) fig.appendChild(mk('figcaption', null, node.attrs.alt));
     return { dom: fig, ignoreMutation: () => true };
   };
+  // A RAW BLOCK READS AS A DOCUMENT (lane doc-raw-blocks, 2.369.246 — owner 2026-10-09 "这个会莫名其妙变成源码的问题还没修复":
+  // a table the wheel carried as written showed its SOURCE): the block is drawn through the house renderer + THE one
+  // sanitizer (rawReading = readingHtml, the Print render; tables wrapped, images beside the file resolved), read-only —
+  // an atom: arrows step over it, a click selects it. Its chip is the ONE way into the source: a press opens it IN PLACE
+  // (a textarea the block's size); Esc / Finish / leaving writes attrs.source back (a save changes that block's lines only),
+  // Ctrl+S saves. A block that reads as nothing (a comment, a lone closing tag) shows its source and the chip says so.
+  const rawView = (node, view, getPos) => {
+    const dom = mk('div', 'doc-rawblock'), head = mk('button', 'doc-raw-head'), body = mk('div', 'doc-raw-read');
+    dom.setAttribute('data-raw-block', ''); dom.contentEditable = 'false'; head.type = 'button'; dom.append(head, body);
+    let cur = node, ta = null;
+    const draw = () => {
+      const r = rawReading(cur.attrs.source || '', { Marked, sanitize: sanitizeHtml });
+      const kind = r.kind === 'html' ? 'HTML' : r.kind === 'front' ? t('front matter') : 'Markdown';
+      dom.dataset.rendered = r.rendered ? '1' : '0';
+      head.textContent = r.rendered ? t('{kind} · kept as written · edit source', { kind }) : t('{kind} · cannot be rendered · edit source', { kind });
+      if (!r.rendered) { body.className = 'doc-raw-src'; body.textContent = cur.attrs.source || ''; return; }
+      const d = new DOMParser().parseFromString('<!doctype html><body>' + r.html + '</body>', 'text/html'); // an inert document: nothing in it runs
+      wrapTables(d);
+      for (const img of d.querySelectorAll('img[src]')) { const p = localImagePath(img.getAttribute('src'), path); if (p) img.setAttribute('src', '/api/file/raw?' + q(host, p)); }
+      body.className = 'doc-raw-read'; body.replaceChildren(...[...d.body.childNodes].map((n) => document.adoptNode(n)));
+    };
+    const commit = () => {
+      if (!ta) return;
+      const v = ta.value.replace(/\s+$/, ''), pos = getPos(); ta = null; dom.classList.remove('doc-raw-editing');
+      if (typeof pos !== 'number' || v === (cur.attrs.source || '')) { draw(); return; }
+      const tr = view.state.tr;
+      if (v.trim()) tr.setNodeMarkup(pos, null, { ...cur.attrs, source: v }); else tr.delete(pos, pos + cur.nodeSize); // emptied ⇒ the block goes
+      view.dispatch(tr);
+    };
+    const open = () => {
+      if (ta || !view.editable) return;
+      const h = Math.max(60, Math.round(body.getBoundingClientRect().height));
+      ta = mk('textarea', 'doc-raw-edit'); ta.value = cur.attrs.source || ''; ta.spellcheck = false; ta.setAttribute('aria-label', t('Source of this block'));
+      const done = mk('button', 'doc-raw-done', t('Finish')); done.type = 'button';
+      done.addEventListener('mousedown', (e) => e.preventDefault(), { signal }); // the textarea keeps the focus until the click writes it back
+      done.addEventListener('click', () => commit(), { signal });
+      const fit = () => { ta.style.height = 'auto'; ta.style.height = Math.max(h, ta.scrollHeight + 2) + 'px'; };
+      ta.addEventListener('input', fit, { signal });
+      ta.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); commit(); view.focus(); }
+        else if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 's') { e.preventDefault(); e.stopPropagation(); commit(); save(); }
+      }, { signal });
+      ta.addEventListener('blur', () => { setTimeout(() => { if (ta && document.activeElement !== ta) commit(); }, 0); }, { signal });
+      body.className = 'doc-raw-editor'; body.replaceChildren(ta, done); dom.classList.add('doc-raw-editing');
+      fit(); ta.focus();
+    };
+    head.addEventListener('mousedown', (e) => e.preventDefault(), { signal }); // a press while the box is open must not blur it first (that commit + this click would reopen it)
+    head.addEventListener('click', () => (ta ? commit() : open()), { signal });
+    draw();
+    return {
+      dom,
+      update: (n) => { if (n.type !== cur.type) return false; const same = n.attrs.source === cur.attrs.source; cur = n; if (!ta && !same) draw(); return true; },
+      selectNode: () => dom.classList.add('ProseMirror-selectednode'),
+      deselectNode: () => dom.classList.remove('ProseMirror-selectednode'),
+      stopEvent: (e) => !!(e.target && e.target.closest && e.target.closest('.doc-raw-head, .doc-raw-editor')), // the chip + the source box are ours, not the editor's
+      ignoreMutation: () => true,
+      destroy: () => { ta = null; },
+    };
+  };
   let selTimer = 0;
   // the selection the comment popover is keyed to: null = none (empty, the editor unfocused, Raw). Every update syncs AT
   // ONCE (a collapsed or changed selection drops the popover now); the offer waits for the selection to settle (250 ms)
@@ -325,21 +398,20 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
     view: () => ({ update: (view) => { offer.sync(selNow(view)); clearTimeout(selTimer); selTimer = setTimeout(() => offer.sync(selNow(view), true), 250); } }),
     props: { handleDOMEvents: { blur: () => { clearTimeout(selTimer); offer.dismiss(); return false; } } },
   });
-  // node decorations (UI only — the document is untouched): a code block's fence language → `data-lang` (its chip), a raw
-  // block's kind → `data-head` (its head row); recomputed only when the document changes
-  const rawHead = (src) => t('{kind} · edit in Raw', { kind: /^\s*</.test(src) ? 'HTML' : /^(---|\+\+\+)/.test(src) ? t('front matter') : 'Markdown' });
+  // node decorations (UI only — the document is untouched): a code block's fence language → `data-lang` (its chip) — a raw
+  // block's head is its node view's chip (rawView); recomputed only when the document changes
   const decorate = (doc) => {
     const out = [];
     doc.descendants((n, pos) => {
       if (n.type.name === 'codeBlock' && n.attrs.language) out.push(Decoration.node(pos, pos + n.nodeSize, { 'data-lang': String(n.attrs.language) }));
-      else if (n.type.name === 'rawBlock') out.push(Decoration.node(pos, pos + n.nodeSize, { 'data-head': rawHead(n.attrs.source || '') }));
       return !n.isTextblock;
     });
     return DecorationSet.create(doc, out);
   };
   const decoPlugin = new Plugin({ state: { init: (_c, st) => decorate(st.doc), apply: (tr, old) => (tr.docChanged ? decorate(tr.doc) : old) }, props: { decorations(st) { return this.getState(st); } } });
   const DocUi = Extension.create({ name: 'docUi', addKeyboardShortcuts: () => ({ 'Mod-s': () => { save(); return true; } }), addProseMirrorPlugins: () => [selPlugin, decoPlugin] });
-  const uiExtensions = extensions.map((e) => (e.name === 'image' ? e.extend({ addNodeView: () => ({ node }) => imgView(node) }) : e)).concat(DocUi);
+  const uiExtensions = extensions.map((e) => (e.name === 'image' ? e.extend({ addNodeView: () => ({ node }) => imgView(node) })
+    : e.name === 'rawBlock' ? e.extend({ addNodeView: () => ({ node, view, getPos }) => rawView(node, view, getPos) }) : e)).concat(DocUi);
   const inTable = () => !!(S.ed && S.ed.isActive('table'));
   const PRESSED = [[btnB, 'bold'], [btnI, 'italic'], [btnCode, 'code'], [btnUl, 'bulletList'], [btnOl, 'orderedList'], [btnTask, 'taskList'], [btnLink, 'link']];
   /** The block-style menu (the house context menu: data-popover, Esc closes it): the current one first-checked. */
@@ -506,7 +578,7 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
    *  (they scroll on screen; in print a wide one steps its type down by its columns), images beside the file inlined. */
   async function exportBody() {
     const d = new DOMParser().parseFromString('<!doctype html><body>' + readingHtml(sourceNow(), { Marked, sanitize: sanitizeHtml }) + '</body>', 'text/html'); // an inert document: nothing in it runs
-    for (const tb of d.querySelectorAll('table')) { const w = d.createElement('div'); w.className = 'tableWrapper'; const band = colsBand(tb.rows[0] ? tb.rows[0].cells.length : 0); if (band) w.dataset.cols = band; tb.replaceWith(w); w.appendChild(tb); }
+    wrapTables(d);
     for (const img of d.querySelectorAll('img[src]')) {
       const p = localImagePath(img.getAttribute('src'), path); if (!p) continue;
       try {

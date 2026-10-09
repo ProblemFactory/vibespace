@@ -1992,6 +1992,48 @@ async function ccReachLeg(engine, tag) {
         await esbuild.build({ stdin: { contents: oSrc.replace(ONCLICK, "name.setAttribute('download', '');"), resolveDir: path.join(REPO, 'src/lib'), sourcefile: 'channel-outbox.js', loader: 'js' }, bundle: true, format: 'esm', platform: 'node', target: 'es2022', outfile: mOut, logLevel: 'silent', loader: { '.css': 'empty' }, plugins: [stubBuildVersion] });
         const vm1 = judgeRows(await import(mOut));
         ok(!vm1.viewer, 'outbox-attachment-preview CONTROL: a row that DOWNLOADS on a click ⇒ the viewer leg is RED', JSON.stringify(vm1));
+        // lane compose-chip-open (owner 2026-10-09 "上传上去的文件不能查看预览"): a file still in the owner's reply box opens
+        // through THE SAME door from its local File — a blob: URL minted on the first open, reused after; a picture's
+        // blob URL goes to the overlay WITHOUT ?inline=1 (a query on a blob URL names no blob: fetch fails — measured
+        // here); an archive opens nothing. CONTROL: the door's pre-lane overlay suffix ⇒ the picture leg is RED.
+        const { resolveObjectURL } = await import('node:buffer');
+        const judgePicks = async (M) => {
+          const opened = []; const papp = { openFile(o) { opened.push(o); } };
+          const pdf = { name: 'baa-0.pdf', mime: 'application/pdf', file: new Blob(['%PDF-1.4\n']), url: null };
+          const k1 = M.openComposePick(papp, pdf); const u1 = pdf.url; const k1b = M.openComposePick(papp, pdf);
+          const png = { name: 'pasted.png', mime: 'image/png', file: new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], { type: 'image/png' }), url: null };
+          png.url = URL.createObjectURL(png.file);   // the thumb's URL (minted at the pick)
+          body.childNodes = [];
+          const k2 = M.openComposePick(papp, png);
+          const ov = find(body, 'chat-img-overlay')[0];
+          const src = (ov && ov.children[0] && ov.children[0].src) || '';
+          body.childNodes = [];
+          const fetchOk = async (u) => { try { return (await fetch(u)).ok; } catch { return false; } };
+          const zip = { name: 'logs.zip', mime: 'application/zip', file: new Blob(['PK']), url: null };
+          const k3 = M.openComposePick(papp, zip);
+          const r = {
+            pdf: k1 === 'viewer' && k1b === 'viewer' && /^blob:/.test(u1 || '') && opened.length === 2 && opened.every((o) => o.rawUrl === u1 && o.fileName === 'baa-0.pdf' && o.mime === 'application/pdf') && !!resolveObjectURL(u1),
+            png: k2 === 'overlay' && src === png.url,
+            blobQuery: { plain: await fetchOk(png.url), withQuery: await fetchOk(`${png.url}?inline=1`) },
+            zip: k3 === 'download' && opened.length === 2,
+          };
+          for (const x of [pdf, png, zip]) if (x.url) URL.revokeObjectURL(x.url);
+          r.revoked = !resolveObjectURL(u1);
+          return r;
+        };
+        const realFetch = globalThis.fetch;
+        def('fetch', (saved.fetch && saved.fetch.value) || realFetch);   // Node's own fetch (it resolves blob: URLs)
+        const pk = await judgePicks(CO);
+        ok(pk.pdf, 'compose-chip-open: a reply-box pdf opens THE viewer door by a blob: URL minted from its File (application/pdf, titled by its name); a second open reuses the same URL', JSON.stringify(pk));
+        ok(pk.png && pk.blobQuery.plain && !pk.blobQuery.withQuery, 'compose-chip-open: a reply-box picture opens THE image overlay over its blob URL with NO ?inline=1 (measured: fetch(blob) ok, fetch(blob + ?inline=1) fails)', JSON.stringify(pk));
+        ok(pk.zip && pk.revoked, 'compose-chip-open: an archive opens nothing (download kind); a revoked pick URL resolves to no blob', JSON.stringify(pk));
+        const ODOOR = "showImageOverlay(P.attachmentUrlFor(url, { inline: true }))";
+        ok(oSrc.includes(ODOOR), 'compose-chip-open: the control\'s anchor is present (the overlay asks P.attachmentUrlFor)');
+        const mOut2 = path.join(dir, 'channel-outbox-m2.mjs');
+        await esbuild.build({ stdin: { contents: oSrc.replace(ODOOR, "showImageOverlay(`${url}${url.includes('?') ? '&' : '?'}inline=1`)"), resolveDir: path.join(REPO, 'src/lib'), sourcefile: 'channel-outbox.js', loader: 'js' }, bundle: true, format: 'esm', platform: 'node', target: 'es2022', outfile: mOut2, logLevel: 'silent', loader: { '.css': 'empty' }, plugins: [stubBuildVersion] });
+        const pk2 = await judgePicks(await import(mOut2));
+        ok(!pk2.png, 'compose-chip-open CONTROL: an overlay that suffixes ?inline=1 onto a blob URL ⇒ the picture leg is RED', JSON.stringify(pk2));
+        def('fetch', realFetch);
         // THE VIEWER BY URL: FileViewer.renderInto(…, {rawUrl}) over the REAL module (heavy neighbours stubbed, a stub
         // fetch): markdown through THE sanitizer, CSV into a table, HTML as TEXT, a gone draft says so, an archive never
         // fetches; without rawUrl the path-built /api/file/raw is untouched. CONTROL: HTML drawn as markup ⇒ RED.
