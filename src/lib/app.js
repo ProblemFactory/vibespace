@@ -2239,6 +2239,8 @@ class App {
    *  `opts.quiet` (lane artifacts-auto-open-quiet — ONLY the chat's automatic open of a doc the agent wrote): the window
    *  is created QUIET (createWindow) — never the focus, the caret or the keyboard; a user's own open never passes it. */
   openFile(filePath, fileName, opts = {}) {
+    // lane outbox-attachment-preview: a file served BY URL (`{rawUrl, fileName, title}` — an attachment, no path on any disk)
+    if (filePath && typeof filePath === 'object' && filePath.rawUrl) return FileViewer.openUrl(this, filePath);
     // lane doc-window: a markdown file opens as the Doc window (rendered, editable, commentable); a `:line` link, the hex
     // view and a derived temp file keep the editor's door. `from` (a window id) → the chat session it shows = the owner witness
     if (/\.(md|markdown)$/i.test(fileName || filePath) && !opts.line && !opts.hex && !opts._tempFile && !opts.via) {

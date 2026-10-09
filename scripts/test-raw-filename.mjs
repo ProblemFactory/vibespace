@@ -481,6 +481,19 @@ function census(sources, rows = CENSUS) {
   ok(planted.unclassified.some((u) => /res\.sendFile\(safePath/.test(u)), 'control: a planted nameless route ⇒ the census is RED (an unclassified site)', planted.unclassified);
   globalThis.__census = CENSUS;
 }
+// ⑥b (lane outbox-attachment-preview): the DRAFT's attachment route answers with `res.end(bytes)` — no stream site the
+// census above sees — and the viewer now reads it by URL: its bytes are named by THE builder (inline for a picture's
+// ?inline=1, attachment otherwise, both forms), typed by the STORED record (never the name), nosniff + a sandbox CSP.
+{
+  const src = fs.readFileSync(path.join(REPO, 'src/routes/channels.js'), 'utf8');
+  const at = src.indexOf("router.get('/api/channels/outbox/:id/attachment/:n'");
+  const span = at < 0 ? '' : src.slice(at, src.indexOf('\nrouter.', at + 10));
+  ok(span.includes("contentDisposition(name, inline ? 'inline' : 'attachment')") && span.includes("const name = String(r.meta.name || 'attachment');"), '⑥b GET /api/channels/outbox/:id/attachment/:n names its bytes through contentDisposition (inline ?inline=1 picture / attachment, both forms)', span.slice(0, 120));
+  ok(span.includes("const mime = String(r.meta.mime || '').toLowerCase();") && span.includes("res.setHeader('X-Content-Type-Options', 'nosniff');") && span.includes("res.setHeader('Content-Security-Policy', \"default-src 'none'; sandbox\");"), '⑥b … its type is the STORED record\'s (never sniffed from the name), nosniff, sandbox CSP — peer bytes never run in our origin');
+  const h = CD.contentDisposition('季度 报告.md', 'attachment'), f = formsOf(h);
+  ok(h.startsWith('attachment; ') && f.ascii && f.star === '季度 报告.md', '⑥b … a CJK attachment name reaches a save in both forms', h);
+}
+
 // ── ⑦ THE SPELLING CENSUS ────────────────────────────────────────────────────
 console.log('⑦ the spelling census — every Content-Disposition value is ASCII by construction');
 // A header value carrying a raw file name throws in setHeader the moment the name has a character above

@@ -65,6 +65,8 @@ const SIGNIN_IS_OWNERS = 'a sign-in is the owner\'s — an agent token may not s
  *  read it and a forged landing ends the owner's sign-in with a vendor
  *  refusal). The agent surface is /api/agent/channels/*, never these. */
 const ACCOUNT_IS_OWNERS = 'an account is the owner\'s — an agent token may not change, end or remove one';
+/** lane owner-composer-attach: the owner's own send (words + files, no approval) — an agent drafts through /api/agent/channels/*. */
+const OWN_SEND_IS_OWNERS = 'sending as the owner is the owner\'s — an agent token proposes a reply instead';
 const RULE_PREVIEW_IS_OWNERS = 'a notification rule\'s preview is the owner\'s — an agent token may not run one';
 /** verify r2: a `fromMount` that is present but not a storage mount id (a
  *  number, an object, an array, the empty string) is refused BY NAME — it
@@ -1045,12 +1047,14 @@ router.post('/api/channels/:adapterId/:convId/propose', async (req, res) => {
  *  a conversation that offers send-as-user — out at once as the user, no
  *  policy, no approval card (the IM rule: propose/approve is for AGENT
  *  drafts). Same answer shape as /propose; `409 send-not-available` + `why`
- *  when sending as the user is not offered here. */
+ *  when sending as the user is not offered here. Lane owner-composer-attach: it carries the owner's
+ *  files (`attachments`, the agents' shape) and refuses an agent's bearer first (an agent drafts). */
 router.post('/api/channels/:adapterId/:convId/send', async (req, res) => {
   try {
     forHost(req);
+    if (refuseAgentBearer(req, res, OWN_SEND_IS_OWNERS)) return;
     const b = req.body || {};
-    answer3(res, await engine().propose({ kind: 'user' }, req.params.adapterId, req.params.convId, { text: b.text, replyTo: b.replyTo, attachments: b.attachments, direct: true, ...(b.inThread !== undefined ? { inThread: b.inThread } : {}), ...(b.placement !== undefined ? { placement: b.placement } : {}), ...(b.replyAll !== undefined ? { replyAll: b.replyAll } : {}) }, wakeGuards(b)));
+    answer3(res, await engine().propose({ kind: 'user' }, req.params.adapterId, req.params.convId, { direct: true, text: b.text, replyTo: b.replyTo, attachments: b.attachments, ...(b.inThread !== undefined ? { inThread: b.inThread } : {}), ...(b.placement !== undefined ? { placement: b.placement } : {}), ...(b.replyAll !== undefined ? { replyAll: b.replyAll } : {}) }, wakeGuards(b)));
   } catch (e) { fail(res, e); }
 });
 /** APPROVE (`{text?}` = approve with an edit) — the unconditional convCaps

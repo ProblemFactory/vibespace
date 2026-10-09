@@ -171,11 +171,34 @@ function policyModesOf(caps) {
  *  policy had a route and no door): ONE model for every door that shows or sets a sending policy — the account's
  *  Reach & policy…, the account Edit dialog's select, a conversation's Reach & policy…. `grain` = 'account' |
  *  'conversation'; `policy` = the view at THAT grain (`policyFor`: {mode, source, declared, modes, inherits});
- *  `guards` = the instance settings as the client holds them ({linksReview, attachmentsReview, offHoursTz} — never
- *  fetched here); `t` / `modeText` injected. `value` = the grain's OWN stored mode (null = it inherits); the `null`
+ *  `guards` = the instance settings as the client holds them ({linksReview, attachmentsReview, offHoursTz, offHoursOn,
+ *  offHoursStart, offHoursEnd} — never fetched here); `owner` = the owner's own view (only it gets switches); `t` / `modeText` injected. `value` = the grain's OWN stored mode (null = it inherits); the `null`
  *  choice is "Use the account's" / "The vendor's default" — what `inherits` says it reads. */
 const fillT = (s, p) => (p ? String(s).replace(/\{(\w+)\}/g, (m, k) => (k in p ? String(p[k]) : m)) : String(s));
-function policyRowModel({ grain = 'account', policy = null, guards = null, t = fillT, modeText = (m) => m } = {}) {
+/** THE SENDING GUARDS AS ROWS (lane guards-door, owner 2026-10-09 "带文件是不是要直接允许也要加个开关，防止用户想要完全放权":
+ *  the switches were instance settings and no surface he reads named them). One row per guard, from the SAME `guards`
+ *  the summary line reads: `state` 'ask' | 'allow', `toggleTo` = the ONE instance setting's next value (null = no switch:
+ *  an agent's view, or off-hours without a zone — then `setZone` offers the browser's zone as one click). */
+const GUARD_KEYS = Object.freeze({ attachments: 'channels.guardAttachmentsReview', links: 'channels.guardLinksReview', offHours: 'channels.guardOffHours', offHoursTz: 'channels.offHoursTz' });
+const GUARD_REASONS = Object.freeze(['links', 'attachments', 'off-hours']);
+function guardRowsOf(g, { t = fillT, owner = false, localTz = '' } = {}) {
+  const tz = typeof g.offHoursTz === 'string' ? g.offHoursTz.trim() : '';
+  const sw = (on) => (on ? t('waits for your approval, whatever the policy') : t('follows the policy — under Direct it goes without asking'));
+  const rows = [
+    { id: 'attachments', key: GUARD_KEYS.attachments, label: t('A message with files'), state: g.attachmentsReview !== false ? 'ask' : 'allow' },
+    { id: 'links', key: GUARD_KEYS.links, label: t('A message with a link'), state: g.linksReview !== false ? 'ask' : 'allow' },
+  ].map((r) => ({ ...r, words: sw(r.state === 'ask'), toggleTo: owner ? r.state !== 'ask' : null, setZone: null }));
+  const ohOn = g.offHoursOn !== false;
+  const win = { start: g.offHoursStart || '09:00', end: g.offHoursEnd || '18:00', tz };
+  const zone = typeof localTz === 'string' ? localTz.trim() : '';
+  rows.push({ id: 'offHours', key: GUARD_KEYS.offHours, label: t('Outside working hours'),
+    state: tz && ohOn ? 'ask' : 'allow',
+    words: !tz ? t('off — no working-hours time zone is set, so any hour goes') : ohOn ? t('waits for your approval outside {start}–{end} Mon–Fri ({tz})', win) : t('off — any hour goes ({start}–{end} {tz} is not checked)', win),
+    toggleTo: owner && tz ? !ohOn : null,
+    setZone: owner && !tz && zone ? { key: GUARD_KEYS.offHoursTz, value: zone, label: t('Use my time zone ({tz})', { tz: zone }) } : null });
+  return rows;
+}
+function policyRowModel({ grain = 'account', policy = null, guards = null, t = fillT, modeText = (m) => m, owner = false, localTz = '' } = {}) {
   const pol = policy && typeof policy === 'object' ? policy : { mode: 'review', source: 'default' };
   const order = ['review', 'direct'].filter((m) => POLICY_MODES.includes(m));   // the safer choice first
   const modes = Array.isArray(pol.modes) && pol.modes.length ? order.filter((m) => pol.modes.includes(m)) : order;
@@ -185,8 +208,11 @@ function policyRowModel({ grain = 'account', policy = null, guards = null, t = f
   // the `null` choice reads: with an own value, what removing it reads (`inherits`); without one, what it reads now
   const inh = own ? (pol.inherits && typeof pol.inherits === 'object' ? pol.inherits : null) : { mode, source: pol.source };
   const inhMode = inh && inh.mode === 'direct' ? 'direct' : 'review';
+  const g = guards && typeof guards === 'object' ? guards : {};
+  const guardRows = guardRowsOf(g, { t, owner, localTz });
+  const ans = Object.fromEntries(guardRows.map((r) => [r.id, r.id === 'offHours' ? (r.state === 'ask' ? t('on') : t('off')) : (r.state === 'ask' ? t('ask') : t('allow'))]));
   const WORDS = {
-    direct: t('Direct — agents with send authority send without your approval; the link / attachment / off-hours guards still ask'),
+    direct: t('Direct — agents with send authority send without your approval; files: {attachments} · links: {links} · off-hours: {offHours}', ans),
     review: t('Review — every message waits for your approval'),
   };
   const choices = modes.map((m) => ({ value: m, label: WORDS[m] }));
@@ -197,13 +223,19 @@ function policyRowModel({ grain = 'account', policy = null, guards = null, t = f
         : t('Inherits the vendor\'s default: {mode} — pick one above to change it for this conversation only', { mode: modeText(mode) }))
     : (own ? t('Set on this account: {mode} — every conversation without its own policy reads it', { mode: modeText(mode) })
       : t('Not set on this account — the vendor\'s default applies: {mode}', { mode: modeText(mode) }));
-  const g = guards && typeof guards === 'object' ? guards : {};
+  // the summary line of the rows above (one reading of `guards`, never a second)
+  const R = Object.fromEntries(guardRows.map((r) => [r.id, r]));
   const on = [];
-  if (g.linksReview !== false) on.push(t('a link'));
-  if (g.attachmentsReview !== false) on.push(t('an attachment'));
-  if (typeof g.offHoursTz === 'string' && g.offHoursTz.trim()) on.push(t('off-hours ({tz})', { tz: g.offHoursTz.trim() }));
-  const guardsText = on.length ? t('Guards on top (Settings → Channels): {list} always needs your approval, whatever the policy', { list: on.join(' · ') }) : t('No guard is on (Settings → Channels) — the policy alone decides');
-  return { grain, modes, offersDirect: modes.includes('direct'), value: own && modes.includes(own) ? own : null, own, mode, source: pol.source || 'default', inherits: inh ? { mode: inhMode, source: inh.source || 'default' } : null, choices, words: WORDS[mode], sourceText, guardsText };
+  if (R.links.state === 'ask') on.push(t('a link'));
+  if (R.attachments.state === 'ask') on.push(t('an attachment'));
+  if (R.offHours.state === 'ask') on.push(t('off-hours ({tz})', { tz: String(g.offHoursTz).trim() }));
+  const guardsText = on.length ? t('Guards on top (also in Settings → Channels): {list} always needs your approval, whatever the policy', { list: on.join(' · ') }) : t('No guard is on (also in Settings → Channels) — the policy alone decides');
+  // FULL DELEGATION said in plain words — only when the policy reads direct AND no guard asks
+  const asking = guardRows.filter((r) => r.state === 'ask').map((r) => r.label);
+  const delegationText = mode !== 'direct' ? t('Not full delegation — the policy is Review: every message waits for your approval')
+    : asking.length ? t('Not full delegation — still asks you: {list}', { list: asking.join(' · ') })
+      : t('Full delegation: an agent with send authority sends anything — files, links, at any hour — without asking');
+  return { grain, modes, offersDirect: modes.includes('direct'), value: own && modes.includes(own) ? own : null, own, mode, source: pol.source || 'default', inherits: inh ? { mode: inhMode, source: inh.source || 'default' } : null, choices, words: WORDS[mode], sourceText, guardsText, guardRows, delegationText, fullDelegation: mode === 'direct' && !asking.length };
 }
 /** WHERE A POLICY IS CHANGED (the invariant: a refusal that names a value names where to change it) — the account's
  *  ⋯ → Reach & policy… for an account-grain value, the conversation's row menu for its own. */
@@ -642,6 +674,46 @@ function attachVerdict(row, list, { hasText = true, channel = 'this channel', wh
   if (total > r.maxTotalBytes) return no('attachment-too-large', `${ch} takes at most ${mb(r.maxTotalBytes)} of attachments in one message (these are ${mb(total)})`);
   if (hasText && r.withText === false) return no('attachment-shape', `on ${ch} attachments go without text — send the text as another reply`);
   return { ok: true };
+}
+/** lane owner-composer-attach: THE OWNER'S COMPOSER CHIPS — every file the person picks, drops or pastes is judged HERE,
+ *  BEFORE the send, over the same facts the engine's `attachVerdict` + the account's `send-attachment` offer read: `row` =
+ *  the adapter's `sendAttachments`, `offer` = the conversation's `{offered, why, requiredScopes}`, `files` = `[{name,
+ *  bytes, kind}]` in the order picked (`kind` sniffed from the bytes; null when too large to read). Answers `{chips:
+ *  [{n, state:'ok'|'refused'|'blocked', why, limit?}], send: [n…], blocked: {requiredScopes} | null, shape}` — a file
+ *  this account cannot carry is `blocked` (never LOOKS attached), one past a limit `refused` by name; only `ok` ones ride
+ *  the send. PURE. */
+function composeFilesVerdict(row, offer, files, { hasText = false } = {}) {
+  const list = Array.isArray(files) ? files : [];
+  const o = offer && typeof offer === 'object' ? offer : { offered: false, why: 'unknown' };
+  const blocked = !o.offered && o.why === 'attachments-not-sendable' ? { requiredScopes: (Array.isArray(o.requiredScopes) ? o.requiredScopes : []).slice(0, 8).map(String) } : null;
+  const r = row && typeof row === 'object' ? row : null;
+  const chips = [];
+  const ok = [];
+  let total = 0;
+  for (let n = 0; n < list.length; n++) {
+    const f = list[n] || {};
+    const bytes = Math.max(0, Number(f.bytes) || 0);
+    const refuse = (why, limit = null) => chips.push({ n, state: 'refused', why, ...(limit !== null ? { limit } : {}) });
+    if (blocked) { chips.push({ n, state: 'blocked', why: 'attachments-not-sendable' }); continue; }
+    if (!o.offered || !r) { refuse(o.why && o.why !== 'attachments-not-sendable' ? String(o.why) : 'attachments-not-offered'); continue; }
+    const nm = safeAttachmentName(f.name);
+    if (!nm.ok) { refuse('attachment-name'); continue; }
+    if (bytes < 1) { refuse('attachment-empty'); continue; }
+    const g = r.images !== undefined || r.files !== undefined ? (f.kind === 'image' ? r.images : r.files) : r;
+    if (!g) { refuse('attachments-not-offered'); continue; }
+    if (g !== r && ok.length && ok.some((m) => (m.kind === 'image') !== (f.kind === 'image'))) { refuse('attachment-shape'); continue; }
+    const maxCount = Math.min(ATTACH_MAX_COUNT, Number(g.maxCount) || 0);
+    if (ok.length + 1 > maxCount) { refuse('attachment-count', maxCount); continue; }
+    if (g.maxBytes !== undefined && bytes > Number(g.maxBytes)) { refuse('attachment-too-large', Number(g.maxBytes)); continue; }
+    const cap = Math.min(ATTACH_MAX_TOTAL, g.maxTotalBytes !== undefined ? Number(g.maxTotalBytes) : ATTACH_MAX_TOTAL);
+    if (total + bytes > cap) { refuse('attachment-too-large', cap); continue; }
+    if (f.kind === null || f.kind === undefined) { refuse('attachment-data'); continue; }
+    total += bytes;
+    ok.push({ n, kind: f.kind });
+    chips.push({ n, state: 'ok', why: null });
+  }
+  const g0 = r && ok.length ? (r.images !== undefined || r.files !== undefined ? (ok[0].kind === 'image' ? r.images : r.files) : r) : null;
+  return { chips, send: ok.map((m) => m.n), blocked, shape: !!(g0 && hasText && g0.withText === false) };
 }
 /** lane channel-send-files: a send's PARTS as the adapter answered them (Lark: the text + one message per file; Slack:
  *  one chain per file) — bounded, the fields the receipt reads; null when the send was one message. PURE. */
@@ -1441,7 +1513,7 @@ module.exports = {
   OUTBOX_STATES, TRANSITIONS, TERMINAL_STATES, POLICY_MODES, DECISION_REASONS, RECEIPT_STATUSES, PROPOSAL_TTL_MS, TEXT_MAX_BYTES, HONESTY_LINE_DEFAULT, IDEMPOTENCY_MODES,
   WITHDRAWABLE_STATES, WITHDRAWN_DEFAULT_REASON, withdrawVerdict, withdrawWhy, withdrawReason,
   RECEIPT_DIFF_MAX, RECEIPT_BLOCK_MAX_BYTES, RECEIPT_GUIDANCE, receiptDiff, receiptFeedback, receiptFateOf, receiptFateText, RECEIPT_DELIVERIES, receiptDeliveryVerdict, utf8Bytes,
-  canTransition, isTerminal, policyMode, policyModesOf, policyRowModel, policyWhereText, hasLinks, offHoursVerdict, decideOutbound, validateProposal, validateCompose, COMPOSE_MAX_RECIPIENTS, expiryVerdict, receiptFor, renderReceiptBlock,
+  canTransition, isTerminal, policyMode, policyModesOf, policyRowModel, policyWhereText, GUARD_KEYS, GUARD_REASONS, hasLinks, offHoursVerdict, decideOutbound, validateProposal, validateCompose, COMPOSE_MAX_RECIPIENTS, expiryVerdict, receiptFor, renderReceiptBlock,
   ACCESS_REMOVED_NOTE, withheldReceiptLine,
   REACTION_POLICIES, reactionPolicyOf, REACTION_OPS, validateReaction, reactionQuote, decideReaction,
   PLACEMENTS, THREAD_PLACEMENTS, ROOT_REPLIES, isThreadPlacement, placementsOf, rootReplyOf, placementOf, placementWords, placementVerdict, placementText, placementRefusalText,
@@ -1452,5 +1524,5 @@ module.exports = {
   replyAnchorVerdict, anchorView, envelopeVerdict, ENVELOPE_HEADER_MAX, envelopeAddresses, withAddedCc, addressesOf, shownFields, shownDigest, ARM_MS, armVerdict, rearmVerdict,
   hiddenCharsOf, revealSegments,
   // design 005 §2.B (B-fd1f): an agent's attachments — bounds, the name rule, the sniffed type, the adapter's row
-  ATTACH_MAX_COUNT, ATTACH_MAX_TOTAL, ATTACH_NAME_MAX, ATTACH_CODES, INLINE_RASTER, base64Bytes, safeAttachmentName, attachmentsOf, sniffType, nameTypeMismatch, sendParts, reconciledParts, partsWords, attachVerdict, storedAttachments, attachmentSize, ATTACH_HELD_MAX, attachHeldVerdict,
+  ATTACH_MAX_COUNT, ATTACH_MAX_TOTAL, ATTACH_NAME_MAX, ATTACH_CODES, INLINE_RASTER, base64Bytes, safeAttachmentName, attachmentsOf, sniffType, nameTypeMismatch, composeFilesVerdict, sendParts, reconciledParts, partsWords, attachVerdict, storedAttachments, attachmentSize, ATTACH_HELD_MAX, attachHeldVerdict,
 };

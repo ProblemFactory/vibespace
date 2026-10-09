@@ -45,6 +45,8 @@
 //       element under its centre) opens its SAME actions as a menu (添加表情回应 · 在话题中回复 · 引用 · 复制文本), the
 //       row's geometry identical with the menu open; the desktop draws no …; Add reaction from the menu → the picker → a tap reacts
 //       (the row grows by its strip) → a tap takes it back (the row closes up exactly)
+//   (k) A LATE STRIP NEVER MOVES THE READER'S ROW (B-59ff): a reaction landing on a row above the view after a real scroll —
+//       the first row wholly in view holds ±1 px at 1280 and 390 px; the browser's own anchoring measured as the control
 //   (h) zh + ja at 360 px, DejaVu Sans: the thread chip, the `in thread` tag, the pane bar's words and the pane composer's
 //       line (naive-user ⑥ — it was cut to "…あなたとしてす…"; control: the pre-fix nowrap rule injected cuts it) drawn WHOLE
 //       (the pill rule)
@@ -1060,6 +1062,53 @@ console.log('(f) the reaction trickle under a scroll storm');
   p5.close();
 }
 
+
+// ── (k) A LATE STRIP NEVER MOVES THE READER'S ROW (B-59ff, lane reaction-strip-anchor): a real scroll, then a reaction
+// lands on a row ABOVE the reader's line (another client's add — the broadcast's patch, the trickle's path) ⇒ the first
+// row wholly in view keeps its rect ±1 px, at 1280 px and at 390 px (touch); the browser's own anchoring measured on the
+// r2: a late mail-frame height apply on a row above ⇒ 0 px; CONTROL: an unobserved node grown above ⇒ moves; PNGs before/after
+console.log('(k) a late reaction strip above the view never moves the reader\'s row');
+for (const geo of [{ tag: 'desk', opt: { lang: 'zh' } }, { tag: 'phone', opt: { lang: 'zh', phone: true, width: 390 } }]) {
+  const pk = await newPage(geo.opt);
+  const o = await pk.evaljs(OPEN('fake-poll', 'fake-poll-big', 'k' + geo.tag, { min: 30, maximize: true }));
+  const at = await pk.evaljs(`(() => { const l = ${LIST('k' + geo.tag)}; const r = l.getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; })()`);
+  for (let i = 0; i < 6; i++) { await pk.wheel(at.x, at.y, -300); await sleep(80); }
+  // the trickle's own strips settle first (they are the bug's other half — the leg's reaction must be the one late patch)
+  const SETTLE = `(async () => { const l = ${LIST('k' + geo.tag)}; let last = '', still = 0, waited = 0; while (still < 1500 && waited < 12000) { await new Promise((r) => setTimeout(r, 150)); waited += 150; const now = l.scrollHeight + '/' + l.scrollTop; if (now === last) still += 150; else { still = 0; last = now; } } return { still, waited }; })()`;
+  await pk.evaljs(SETTLE);
+  const PROBE = `(() => { const l = ${LIST('k' + geo.tag)}; const top = l.getBoundingClientRect().top; const rows = [...l.querySelectorAll(':scope > .chanmsg[data-vid]')];
+    const mid = top + l.clientHeight / 2; const reader = rows.find((x) => x.getBoundingClientRect().bottom > mid); const plain = (x) => !x.querySelector('.chanmsg-rx');
+    const above = rows.filter((x) => x.getBoundingClientRect().bottom <= top && plain(x)); const cut = rows.find((x) => { const q = x.getBoundingClientRect(); return q.top < top && q.bottom > top; });
+    const inview = rows.filter((x) => { const q = x.getBoundingClientRect(); return q.top >= top && reader && q.bottom <= reader.getBoundingClientRect().top && plain(x); }); return { inview: inview.map((x) => x.dataset.vid), reader: reader && reader.dataset.vid, readerTop: reader && reader.getBoundingClientRect().top, above: above.slice(-3).map((x) => x.dataset.vid), cut: cut && plain(cut) ? cut.dataset.vid : null, st: l.scrollTop, anchor: getComputedStyle(l).overflowAnchor, reserve: getComputedStyle(l).getPropertyValue('--reaction-strip-h').trim() }; })()`;
+  const b0 = await pk.evaljs(PROBE);
+  ok(b0.reader && b0.above.length >= 2 && b0.inview.length >= 1 && b0.st > 100 && b0.anchor === 'none', `(k ${geo.tag}) a real scroll left the reader mid-room (scrollTop ${Math.round(b0.st)}), plain rows wholly above the view and in view above the reader's row, the list opted out of the browser's anchoring (${b0.anchor}, reserve ${b0.reserve})`, J(b0));
+  await pk.shot(`k-${geo.tag}-before.png`);
+  for (const [where, pick] of [['wholly above the view', (q) => q.above[q.above.length - 1]], ['IN VIEW above the reader (the trickle\'s case)', (q) => q.inview[q.inview.length - 1]]]) {
+  const b = await pk.evaljs(PROBE); const vid = pick(b);
+  const rt = await pk.evaljs(`(async () => { const r = await fetch('/api/channels/fake-poll/fake-poll-big/messages/' + encodeURIComponent(${J(vid)}) + '/reactions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: 'bulb' }) }); const l = ${LIST('k' + geo.tag)}; const row0 = l.querySelector('.chanmsg[data-vid="' + CSS.escape(${J(vid)}) + '"]'); const h0 = row0.offsetHeight; const row = l.querySelector('.chanmsg[data-vid="' + CSS.escape(${J(vid)}) + '"]');
+    for (let i = 0; i < 40 && !row.querySelector('.chanmsg-rx'); i++) await new Promise((res) => setTimeout(res, 100)); await new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res)));
+    const reader = l.querySelector('.chanmsg[data-vid="' + CSS.escape(${J(b.reader)}) + '"]'); const strip = row.querySelector('.chanmsg-rx');
+    return { status: r.status, strip: !!strip, rowGrew: row.offsetHeight - h0, stripH: strip ? strip.offsetHeight + parseFloat(getComputedStyle(strip).marginTop) : 0, readerTop: reader.getBoundingClientRect().top, st: l.scrollTop }; })()`);
+  ok(rt.status === 200 && rt.strip && Math.abs(rt.readerTop - b.readerTop) <= 1 && rt.rowGrew >= 30 && Math.abs(rt.st - b.st - rt.rowGrew) <= 1, `(k ${geo.tag}) THE FIX (${where}): the late strip grew the row by ${rt.rowGrew} px — the reader's row moved ${Math.round((rt.readerTop - b.readerTop) * 10) / 10} px (±1), scrollTop followed by exactly the growth`, J({ b, rt }));
+  await pk.shot(`k-${geo.tag}-after-${where.startsWith('IN') ? 'inview' : 'above'}.png`);
+  }
+  // r2: A LATE MAIL-FRAME HEIGHT (the writer channel-mail-frame's applyHeight does: `frame.style.height = h + 'px'`) on a
+  // row above the reader's line — caught by the row anchor like every other late writer; then THE CONTROL: a node the
+  // census does not observe (not a list row) grown above the reader ⇒ the reader moves by it (unrouted ⇒ moves)
+  const LATE = (mode) => `(async () => { const l = ${LIST('k' + geo.tag)}; const top = l.getBoundingClientRect().top, mid = top + l.clientHeight / 2; const rows = [...l.querySelectorAll(':scope > .chanmsg[data-vid]')];
+    const reader = rows.find((x) => x.getBoundingClientRect().bottom > mid); const host = rows[rows.indexOf(reader) - 1]; const raf = () => new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res)));
+    let f; if (${J(mode)} === 'frame') { const box = document.createElement('div'); box.className = 'chanmail-box'; f = document.createElement('iframe'); f.setAttribute('sandbox', ''); f.style.cssText = 'display:block;border:0;width:100%;height:140px'; box.appendChild(f); host.appendChild(box); }
+    else { f = document.createElement('div'); f.style.cssText = 'height:140px;flex:none'; l.insertBefore(f, host); }
+    await raf(); const y0 = reader.getBoundingClientRect().top, s0 = l.scrollTop; f.style.height = '400px'; await raf();
+    const out = { moved: Math.round((reader.getBoundingClientRect().top - y0) * 10) / 10, scrollDelta: Math.round(l.scrollTop - s0), hostAbove: host.getBoundingClientRect().bottom <= reader.getBoundingClientRect().top };
+    (f.parentElement.className === 'chanmail-box' ? f.parentElement : f).remove(); await raf(); return out; })()`;
+  const mf = await pk.evaljs(LATE('frame'));
+  ok(mf.hostAbove && Math.abs(mf.moved) <= 1 && Math.abs(mf.scrollDelta - 260) <= 1, `(k ${geo.tag}) r2 THE FIX: a late mail-frame height (140 → 400 px) in a row above the reader's line — the reader's row moved ${mf.moved} px (±1), scrollTop followed by 260`, J(mf));
+  const ctl = await pk.evaljs(LATE('plant'));
+  ok(Math.abs(ctl.moved - 260) <= 1, `(k ${geo.tag}) CONTROL: the same growth in a node the row anchor does not observe (a planted unrouted writer) moves the reader's row ${ctl.moved} px`, J(ctl));
+  await pk.shot(`k-${geo.tag}-mailframe.png`);
+  pk.close();
+}
 
 p1.close();
 console.log(`\n(${Math.round((Date.now() - T0) / 1000)} s${SHOTS ? `; screenshots in ${SHOTS}` : ''})`);

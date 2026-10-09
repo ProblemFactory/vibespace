@@ -27,7 +27,8 @@ const kinds = new Set(exts.map((e) => FT.getViewerType(e)).filter(Boolean));
 // the window each kind opens in (file-viewer.js FileViewer.open): RENDERED_VIEWERS → the 'viewer' window; html → the editor
 const WINDOW_OF = { archive: 'viewer', image: 'viewer', video: 'viewer', audio: 'viewer', pdf: 'viewer', eml: 'viewer', csv: 'viewer', xlsx: 'viewer', docx: 'viewer', pptx: 'viewer', 'html-editor': 'editor', '(text)': 'editor', '(binary)': 'hex' };
 
-function openBody(fv) { const a = fv.indexOf('static async open('); return fv.slice(a, fv.indexOf('static async renderInto(', a)); }
+// FileViewer.open alone: it ends at the next door (openUrl — the int244 integration: lane outbox-attachment-preview put it between open and renderInto; judged in ①b) or at renderInto
+function openBody(fv) { const a = fv.indexOf('static async open('); const ends = ['static async openUrl(', 'static async renderInto('].map((s) => fv.indexOf(s, a)).filter((i) => i > a); return fv.slice(a, Math.min(...ends)); }
 function wiring(src) {
   const fv = openBody(src['src/lib/file-viewer.js']);
   const renders = (fv.match(/await FileViewer\.renderInto\(/g) || []).length, seats = (fv.match(/FileViewer\._seatDownload\(container, btnDownload, winInfo\.content\)/g) || []).length;
@@ -63,6 +64,17 @@ const c2 = census({ ...SRC, 'src/lib/file-viewer.js': fvMod.replace(reseat, '   
 ok(c2.some((r) => r.startsWith('docx:')) && c2.some((r) => r.startsWith('image:')), 'control: the viewer without its re-seat after ⟳ (the Download wiped with the old toolbar) ⇒ RED for every viewer kind', c2);
 const c3 = census(SRC, new Set([...kinds, 'epub']));
 ok(c3.length === 1 && c3[0] === 'epub: unlisted', 'control: a registry kind this census does not list ⇒ RED', c3);
+// ①b the URL door (lane outbox-attachment-preview, the int244 integration): FileViewer.openUrl — a viewer window over a file served
+//    BY URL (a draft's / a message's attachment: no path, no host ⇒ no /api/download) — is born with a Download too: an <a download>
+//    whose href IS the URL, seated after its render the way open() seats its own
+function urlWiring(fv) {
+  const a = fv.indexOf('static async openUrl('); if (a < 0) return null;
+  const b = fv.slice(a, fv.indexOf('\n  static ', a + 1));
+  return /app\.wm\.createWindow\(\{[^\n]*type: 'viewer'/.test(b) && /dl\.href = rawUrl; dl\.setAttribute\('download', name\);/.test(b)
+    && /await FileViewer\.renderInto\([^\n]*\{ rawUrl, mime \}\);\n\s*FileViewer\._seatDownload\(container, dl, winInfo\.content\);/.test(b);
+}
+ok(urlWiring(fvMod) === true, '①b the URL door (FileViewer.openUrl) opens a viewer window whose Download is the URL itself, seated after its render');
+ok(urlWiring(fvMod.replace('    FileViewer._seatDownload(container, dl, winInfo.content);\n', '')) === false, 'control: the URL door without its Download seat ⇒ RED');
 
 // ── ② the URL builder (DOM-free) + one spelling ──
 console.log('— ② the URL builder');

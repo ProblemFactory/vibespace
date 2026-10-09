@@ -3,8 +3,9 @@ import { HexViewer } from './hex-viewer.js';
 import { CodeEditor } from './code-editor.js';
 import { formatSize, escHtml, showConfirmDialog, showInputDialog, showToast, uiScale } from './utils.js';
 import { startPointerDrag } from './drag-feed.js'; // THE feed for every drag door (lane-drag-release verify r2 census)
-import { hasDedicatedViewer, getViewerType, getFileIcon } from './file-types.js';
-import { FILE_ICONS } from './icons.js';
+import { hasDedicatedViewer, getViewerType, getFileIcon, urlViewerKind, parseDelimited } from './file-types.js';
+import { FILE_ICONS, UI_ICONS } from './icons.js';
+import { sanitizeHtml } from './safe-html.js';
 import { renderDocxViewer, showDocxRefusal } from './docx-viewer.js';
 import { viewerVerdict, refusalText } from './docx-viewer-model.js';
 import { openWithVerdict } from '../office-open.js'; // §7.9: the viewer's "Open in LibreOffice" — the ONE open-with verdict names the app
@@ -17,6 +18,7 @@ import { wireFileDownload } from './file-download.js'; // lane viewer-download: 
 /** The viewer types renderInto draws itself (its if-chain, one entry each —
  *  scripts/test-window-binding-model.mjs pins the two lists equal); any other
  *  type opens in the code editor. */
+const URL_TEXT_MAX = 2 * 1024 * 1024; // a URL-sourced text preview reads at most 2 MB (the rest: Download)
 export const RENDERED_VIEWERS = new Set(['archive', 'image', 'video', 'audio', 'pdf', 'eml', 'csv', 'xlsx', 'docx', 'pptx']);
 
 class FileViewer {
@@ -111,6 +113,25 @@ class FileViewer {
     }
   }
 
+  /** lane outbox-attachment-preview: a `viewer` window over a file served BY URL (`app.openFile({rawUrl, fileName,
+   *  title})` — a draft's / a message's attachment): titled by the file's name, its Download = the URL itself, replayed
+   *  by URL (a closed draft's URL answers 404 ⇒ the window says its files are gone, never a blank). */
+  static async openUrl(app, { rawUrl, fileName, title = '', mime = '', syncId, quiet = false } = {}) {
+    const name = String(fileName || 'attachment');
+    const openSpec = { action: 'openFile', rawUrl, name, ...(title ? { title } : {}), ...(mime ? { mime } : {}) };
+    const winInfo = app.wm.createWindow({ title: title || name, type: 'viewer', syncId, openSpec, quiet: !!quiet });
+    winInfo._fileName = name; winInfo._rawUrl = rawUrl;
+    const container = document.createElement('div'); container.className = 'file-viewer';
+    winInfo.content.appendChild(container);
+    winInfo.onClose = () => { try { container._viewerCtl?.abort(); } catch {} };
+    const dl = document.createElement('a');
+    dl.className = 'file-tool-btn media-btn file-download-btn'; dl.href = rawUrl; dl.setAttribute('download', name);
+    dl.innerHTML = UI_ICONS.download; dl.title = t('Download'); dl.setAttribute('aria-label', t('Download'));
+    await FileViewer.renderInto(container, '', name, app, '', { rawUrl, mime });
+    FileViewer._seatDownload(container, dl, winInfo.content);
+    return winInfo;
+  }
+
   /** The window's Download into the toolbar its viewer drew (Word: right after "Open in LibreOffice", else before
    *  the page count), or floating beside the ⟳ when the viewer has no toolbar (PDF, video, an error pane). */
   static _seatDownload(container, btn, floatHost) {
@@ -126,7 +147,7 @@ class FileViewer {
    * and the file explorer preview panel. Returns true if rendered, false if
    * no dedicated viewer exists for this file type.
    */
-  static async renderInto(container, filePath, fileName, app = null, host = '') {
+  static async renderInto(container, filePath, fileName, app = null, host = '', opts = {}) {
     // Per-render lifecycle: document-level listeners (image pan, PPTX keyboard
     // nav) and observers register against this signal. Re-rendering into the
     // same container (explorer preview panel) aborts the previous render's
@@ -140,6 +161,7 @@ class FileViewer {
     const rawUrl = `/api/file/raw?path=${encodeURIComponent(filePath)}${hq}${container._bustTs ? '&_r=' + container._bustTs : ''}`;
 
     try {
+      if (opts.rawUrl) return await FileViewer._renderUrl(container, fileName, opts, ctl); // a URL source (an attachment): its own door
       if (viewerType === 'archive') {
         await FileViewer._renderArchive(container, filePath, app, host);
       } else if (viewerType === 'image') {
@@ -248,6 +270,55 @@ class FileViewer {
   // Archive contents viewer: entry list + filter + Extract All. Clicking a file
   // entry extracts just that entry to a temp file and opens it through the
   // normal viewer pipeline (editor / image / pdf / ...).
+  /** lane outbox-attachment-preview: a file served BY URL (peer bytes, no path): fetched ONCE and drawn from its bytes —
+   *  a blob: URL for a picture / media / PDF / Word / slides, text for markdown (through THE one sanitizer), CSV and
+   *  code; HTML / SVG / XML read as TEXT (urlViewerKind), never rendered in our origin. A gone URL (404 / 410) says
+   *  so; a type that needs a real path says "Download". */
+  static async _renderUrl(container, fileName, { rawUrl, mime = '' }, ctl) {
+    const kind = urlViewerKind(fileName, mime);
+    const note = (s) => { const d = document.createElement('div'); d.className = 'empty-hint file-viewer-url-note'; d.textContent = s; container.appendChild(d); return true; };
+    if (kind === 'none') return note(t('No preview for this type here — Download'));
+    const res = await fetch(rawUrl, { signal: ctl.signal });
+    if (res.status === 404 || res.status === 410) return note(/^\/api\/channels\/outbox\//.test(rawUrl) ? t('This draft’s files are gone') : t('This file is no longer kept'));
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const bytes = await res.arrayBuffer();
+    if (ctl.signal.aborted) return true;
+    if (kind === 'text' || kind === 'markdown' || kind === 'csv') {
+      if (new Uint8Array(bytes, 0, Math.min(bytes.byteLength, 8192)).includes(0)) return note(t('No preview for this type here — Download'));
+      const text = new TextDecoder().decode(bytes.byteLength > URL_TEXT_MAX ? bytes.slice(0, URL_TEXT_MAX) : bytes);
+      if (kind === 'markdown') {
+        const body = document.createElement('div'); body.className = 'markdown-preview file-viewer-md';
+        body.innerHTML = sanitizeHtml(marked.parse(text)); // an attachment's markdown is PEER text: THE one sanitizer
+        for (const a of body.querySelectorAll('a[href]')) { a.target = '_blank'; a.rel = 'noopener noreferrer'; }
+        container.appendChild(body);
+      } else if (kind === 'csv') {
+        const wrap = document.createElement('div'); wrap.className = 'sheet-table-wrap';
+        const table = document.createElement('table'); table.className = 'file-viewer-table';
+        const tbody = document.createElement('tbody');
+        parseDelimited(text, /\.tsv$/i.test(fileName) ? '\t' : ',').forEach((row, ri) => {
+          const tr = document.createElement('tr');
+          row.forEach((c) => { const td = document.createElement(ri === 0 ? 'th' : 'td'); td.textContent = c; tr.appendChild(td); });
+          tbody.appendChild(tr);
+        });
+        table.appendChild(tbody); wrap.appendChild(table); container.appendChild(wrap);
+      } else { const pre = document.createElement('pre'); pre.className = 'file-viewer-text'; pre.textContent = text; container.appendChild(pre); }
+      return true;
+    }
+    const type = kind === 'pdf' ? 'application/pdf' : (/^(image|video|audio)\//.test(mime) ? mime : '');
+    const src = URL.createObjectURL(new Blob([bytes], type ? { type } : {}));
+    ctl.signal.addEventListener('abort', () => URL.revokeObjectURL(src), { once: true });
+    if (kind === 'image') FileViewer._renderImage(container, '', '', src);
+    else if (kind === 'video') FileViewer._renderVideo(container, '', '', src);
+    else if (kind === 'audio') FileViewer._renderAudio(container, '', fileName, '', src);
+    else if (kind === 'pdf') FileViewer._renderPdf(container, '', '', src);
+    else if (kind === 'docx') {
+      const verdict = viewerVerdict(fileName.split('.').pop().toLowerCase());
+      if (verdict.kind === 'refuse') showDocxRefusal(container, refusalText(verdict.code, t));
+      else await renderDocxViewer(container, src, { signal: ctl.signal, office: null });
+    } else if (kind === 'pptx') await FileViewer._renderPptx(container, '', src);
+    return true;
+  }
+
   static async _renderArchive(container, filePath, app, host = '') {
     const hq = host ? '&host=' + encodeURIComponent(host) : '';
     const res = await fetch(`/api/archive/list?path=${encodeURIComponent(filePath)}${hq}`);
@@ -335,7 +406,7 @@ class FileViewer {
     container.appendChild(root);
   }
 
-  static _renderImage(container, filePath, host = '') {
+  static _renderImage(container, filePath, host = '', src = '') {
     const hq = host ? '&host=' + encodeURIComponent(host) : '';
     const mediaViewer = document.createElement('div');
     mediaViewer.className = 'media-viewer';
@@ -358,7 +429,7 @@ class FileViewer {
     imgWrap.className = 'media-content';
 
     const img = document.createElement('img');
-    img.src = `/api/file/raw?path=${encodeURIComponent(filePath)}${hq}${container._bustTs ? '&_r=' + container._bustTs : ''}`;
+    img.src = src || `/api/file/raw?path=${encodeURIComponent(filePath)}${hq}${container._bustTs ? '&_r=' + container._bustTs : ''}`;
     img.className = 'media-image';
     img.draggable = false;
 
@@ -407,7 +478,7 @@ class FileViewer {
   }
 
   // ── Video viewer with native controls ──
-  static _renderVideo(container, filePath, host = '') {
+  static _renderVideo(container, filePath, host = '', src = '') {
     const hq = host ? '&host=' + encodeURIComponent(host) : '';
     const mediaViewer = document.createElement('div');
     mediaViewer.className = 'media-viewer';
@@ -416,7 +487,7 @@ class FileViewer {
     videoWrap.className = 'media-content';
 
     const video = document.createElement('video');
-    video.src = `/api/file/raw?path=${encodeURIComponent(filePath)}${hq}${container._bustTs ? '&_r=' + container._bustTs : ''}`;
+    video.src = src || `/api/file/raw?path=${encodeURIComponent(filePath)}${hq}${container._bustTs ? '&_r=' + container._bustTs : ''}`;
     video.controls = true;
     video.className = 'media-video';
     video.preload = 'metadata';
@@ -427,7 +498,7 @@ class FileViewer {
   }
 
   // ── Audio viewer with native controls ──
-  static _renderAudio(container, filePath, fileName, host = '') {
+  static _renderAudio(container, filePath, fileName, host = '', src = '') {
     const hq = host ? '&host=' + encodeURIComponent(host) : '';
     const mediaViewer = document.createElement('div');
     mediaViewer.className = 'media-viewer media-viewer-audio';
@@ -437,7 +508,7 @@ class FileViewer {
     label.textContent = fileName;
 
     const audio = document.createElement('audio');
-    audio.src = `/api/file/raw?path=${encodeURIComponent(filePath)}${hq}${container._bustTs ? '&_r=' + container._bustTs : ''}`;
+    audio.src = src || `/api/file/raw?path=${encodeURIComponent(filePath)}${hq}${container._bustTs ? '&_r=' + container._bustTs : ''}`;
     audio.controls = true;
     audio.className = 'media-audio';
     audio.preload = 'metadata';
@@ -525,13 +596,13 @@ class FileViewer {
     container.appendChild(wrap);
   }
 
-  static _renderPdf(container, filePath, host = '') {
+  static _renderPdf(container, filePath, host = '', src = '') {
     const hq = host ? '&host=' + encodeURIComponent(host) : '';
     const mediaViewer = document.createElement('div');
     mediaViewer.className = 'media-viewer';
 
     const embed = document.createElement('iframe');
-    embed.src = `/api/file/raw?path=${encodeURIComponent(filePath)}${hq}${container._bustTs ? '&_r=' + container._bustTs : ''}`;
+    embed.src = src || `/api/file/raw?path=${encodeURIComponent(filePath)}${hq}${container._bustTs ? '&_r=' + container._bustTs : ''}`;
     embed.className = 'media-pdf';
 
     mediaViewer.appendChild(embed);
@@ -836,7 +907,7 @@ export { FileViewer };
 registerWindowType({
   type: 'viewer', label: 'File viewer',
   icon: svgIcon16('<path d="M4 1h6l4 4v9H4V1z"/><path d="M10 1v4h4"/>'),
-  action: 'openFile', replay: (app, spec, { syncId } = {}) => app.openFile(spec.path, spec.name, { syncId, host: spec.host }),
+  action: 'openFile', replay: (app, spec, { syncId } = {}) => (spec.rawUrl ? app.openFile({ rawUrl: spec.rawUrl, fileName: spec.name, title: spec.title, mime: spec.mime, syncId }) : app.openFile(spec.path, spec.name, { syncId, host: spec.host })),
 });
 registerWindowType({
   type: 'hex-viewer', label: 'Hex viewer',

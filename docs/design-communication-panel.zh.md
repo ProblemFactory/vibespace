@@ -1529,6 +1529,15 @@ decideOutbound({ channelPolicy, guards, proposal, now, tz })
   一个时区; 没配时区时这条护栏是*关着的*而不是靠猜 —— 一个错的时区静默地把所有东西都送去
   review(或者静默地什么都不送), 比一句诚实的"未配置"更糟, 而后者是 panel 会显示的一个设
   置项。
+- **As-built (lane guards-door, 2.369.245 —— owner 2026-10-09「带文件是不是要直接允许也要加个开关，防止用户想要完全放权」):**
+  护栏的门开在读策略的地方。会话 / 账号的「Reach & policy…」与账号 Edit 对话框里, 策略选择下面
+  每条护栏一行(带文件 / 带链接 / 非工作时间): 当前答案 + 一个开关(只给 owner; agent 的视图
+  没有开关), 一点就写那**一个**实例设置(`channels.guardAttachmentsReview` / `guardLinksReview` /
+  新的 `channels.guardOffHours`, 默认全开 —— 默认值没动), 经 settings store 广播, 每个打开的页
+  面跟着重画。非工作时间没配时区时那一行说"关 —— 没设时区"并给"使用我的时区"一键。策略为
+  direct 且没有护栏在问时, 一句大白话: "完全放权: 有发送权限的智能体发什么都不问你"; 否则
+  列出还在问的。审批卡的"需要批准"行在护栏拦下时加一句"(这是护栏 —— 在策略行里改)"。按会话
+  覆盖护栏不在本 lane(另提给 owner)。
 
 ### 9.2 审批面
 
@@ -1747,6 +1756,16 @@ conversation — a delivery now would open a billed turn"), 没有一份唤醒; 
 **As-built(车道 lark-upload-preflight, 2.369.229 — userW inc-muxsy69b-mjg1):卡片显示什么, 就发出什么。** 实测: 一条带一个 .md 附件的 Lark 回复, 卡片画着附件, 主人批准; 文字送达, 上传被 99991679 拒绝(用户 token 只有 im:message + im:message.send_as_user, 同意页从未申请 im:resource:upload / im:resource); "partly sent" 只进了智能体的回执, Outbox 行写着"已发送"。现在: (1) Lark 同意页申请两个上传 scope(第二个可选组, 紧跟 wide 组), 缺它们的账号行写"重新授权一次即可增加: 发送文件"; channel-caps 新增 `send-attachment` offer(`attachments-not-sendable` + `requiredScopes`)。(2) 预检: 提议时按名字拒绝无法携带的文件(说出 scope 与重新授权一步); 提议与批准之间能力变化 ⇒ 卡片的附件行变成警告, 批准按钮变成"不带文件发送"(警告进入 shown digest, 普通批准被拒, 什么都不发)。(3) 部分送达: 在智能体回执之外, 给主人 ONE 条"待你处理"条目(以提案为键)"已发给 X, 但没有带上文件 Y: 原因"+ 重新授权; Outbox 行与卡片写"部分发出"。
 
 **As-built(车道 lark-upload-scope-split, 2.369.241 — 主人 2026-10-08):同意页只申请 im:resource, 永不申请已弃用的 im:resource:upload。** Lark 官方权限文档(2026-10-08 引用):「im:resource:upload（上传文件V2，高级）— 该权限已不再维护，不可新增申请；你可申请开通权限 im:resource（获取与上传图片或文件资源）」。主人应用的权限目录里没有 V2, 同意页因它落在 20027, 而两者同组时重试会连可用的 V1 一起丢掉。现在上传组 = [im:resource], 重试顺序 = wide → im:resource → 表情回应 → 职务 → 部门 → 读人 → 单聊 → 搜索; 判断已持有的 token 仍用两者之一(只有 V2 的旧 token 照样能传文件)。开通了 V1 的应用第一次同意就通过(wide 组保留); 没有 V1 时账号行写"发送文件已关闭: Lark 拒绝了 im:resource …"。
+
+### 9.7 主人自己的回复也能附带文件 (2026-10-09, as-built, lane owner-composer-attach, 2.369.245)
+
+主人原话:「我能操作的那个聊天框不能上传文件」。§22 的直发 (以你的身份、无审批) 现在也带文件 —— 走 §9.6 同一条路:
+
+- **入口**: 输入框底栏的回形针 (系统文件选择器, 手机同样)、拖进输入框、粘贴文件 / 图片。每个文件一个小卡 (名称 · 大小, 图片显示缩略图, ✕ 移除)。只在「以你的身份直发」的输入框出现 —— 代理的提议才走审批, 主人自己的文件不审批自己。
+- **发送前判定**: PURE `composeFilesVerdict` 按适配器的 `sendAttachments` 和账号的 `send-attachment` 能力逐个判定 —— 超出数量 / 大小 / 图片与文件混发, 在该小卡上就说明原因, 绝不等到发送时; 账号授权缺上传 scope (Lark `im:resource`) 时每个小卡写「不会发出」并给出「重新授权」—— 不能带走的文件从不「看起来已附上」(§9.6 预检规则)。
+- **发送**: 只把通过判定的文件以 base64 随 `POST …/send` 发出, 存入同一个 outbox 文件库, 发送时重新校验 sha256, 交给同一个适配器上传路径; 记录保存名称 / 大小 / sha256。
+- **回执**: 「已发出，附 N 个文件」/「部分发出 — b.pdf 未送达：forbidden (需要 im:resource)」—— 输入框上方一行 + toast; 部分发出时与代理路径一样生成一条「给你」事项。
+- **边界**: `/send` 拒绝代理的 bearer (403 agent-forbidden)。正文仍为必填 (只带文件时提示写一句话)。
 
 ## 10. 面板
 

@@ -48,7 +48,7 @@ import { t as tr, deviceLocale } from './i18n.js';
 import { mountsDialog, wireOAuthConnect, reauthDialog, wireStepPaste, api as mountsApi } from './mounts-dialog.js';
 import { routeErrorText, policyModeText } from './channel-words.js';
 import * as P from '../channel-policy.js';
-import { policyGuards } from './channel-reach-editor.js';   // lane account-policy-door: the guards line as the account door reads it
+import { ownerPolicyModel, guardRowsEl } from './channel-reach-editor.js';   // lanes account-policy-door + guards-door: the policy row's model and guard rows
 import { icon, el, btn } from './channel-chrome.js';
 import { accountTitle } from './channel-avatar.js';   // lane channels-badges: the badge's hover title and the card's name are ONE spelling
 // PURE, bundled: the row's `signinName` (the brand of the sign-in page — Gmail signs in with Google)
@@ -529,7 +529,11 @@ export async function showEditAccountDialog(app, a, { kinds = null } = {}) {
   // lane channel-agent-watch W2: may agents see the LIST of this account's conversations (titles only, to ask for one)
   const dir = a.agentDirectory && typeof a.agentDirectory === 'object' ? a.agentDirectory : { groups: true, singles: false };
   // lane account-policy-door: the account's SENDING POLICY — the SAME PURE row as its Reach & policy… (one value, two doors)
-  const pol = a.policy && typeof a.policy === 'object' ? P.policyRowModel({ grain: 'account', policy: a.policy, guards: policyGuards(app), t: tr, modeText: policyModeText }) : null;
+  const pol = a.policy && typeof a.policy === 'object' ? ownerPolicyModel(app, { grain: 'account', policy: a.policy, tr }) : null;
+  // lane guards-door: the guards under the select — the SAME rows as the Reach & policy… row (instance switches: a click applies at once)
+  const guardsNode = pol ? el('div', 'chan-policy-guards-box') : null;
+  const paintGuards = () => { const cur = guardsNode.firstChild; if (cur && cur._guardOff) cur._guardOff(); guardsNode.replaceChildren(guardRowsEl(app, ownerPolicyModel(app, { grain: 'account', policy: a.policy, tr }), { repaint: paintGuards })); };
+  if (guardsNode) paintGuards();
   const fields = [
     { key: 'name', label: tr('Name'), value: cfg.label || a.label || '' },
     ...clientFieldSpecs({ ...spec, presets: cfg.presets || spec.presets }, { value: cur, custom, secretType: 'text',
@@ -543,7 +547,8 @@ export async function showEditAccountDialog(app, a, { kinds = null } = {}) {
     // lane channel-threads (spec §2.6): what an AGENT's reaction does on this account — only where the channel can react
     ...(a.reactions && a.reactions.add ? [{ key: 'reactionPolicy', label: tr('Agent reactions'), type: 'select', value: rxPolicy, options: [['propose', tr('You approve each one')], ['direct', tr('As the channel policy allows')], ['off', tr('Off')]],
       hint: tr('An agent can propose an emoji reaction on a message; it shows in your name. "As the channel policy allows" sends it directly only where the channel sends replies directly and the agent may send.') }] : []),
-    ...(pol ? [{ key: 'policy', label: tr('Sending policy'), type: 'select', value: pol.value || '', options: pol.choices.map((c) => [c.value || '', c.label]), hint: `${pol.sourceText} · ${pol.guardsText}` }] : []),
+    ...(pol ? [{ key: 'policy', label: tr('Sending policy'), type: 'select', value: pol.value || '', options: pol.choices.map((c) => [c.value || '', c.label]), hint: pol.sourceText },
+      { key: 'guards', label: tr('Sending guards — every account, applied at once'), type: 'node', node: guardsNode }] : []),
     { key: 'dirGroups', label: tr('Agents see the list of group chats'), type: 'select', value: dir.groups === false ? 'off' : 'on', options: [['on', tr('Yes (the default)')], ['off', tr('No')]],
       hint: tr('An agent sees the TITLES of group chats it cannot read, so it can ask you for one. Never a message, never a name beyond the title.') },
     { key: 'dirSingles', label: tr('Agents see the list of single chats'), type: 'select', value: dir.singles === true ? 'on' : 'off', options: [['off', tr('No (the default)')], ['on', tr('Yes')]],

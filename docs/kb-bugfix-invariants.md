@@ -500,6 +500,9 @@
 - A REFRESH JUDGED A TORN PASS (B-0c75, test-pull-refresh §12 red under load): a tick stats x.db/-wal/-shm one await apart; a commit or checkpoint between them refreshed a -shm past its -wal cap / a -wal without its db. FIX = a moved family gets a second look, -wal last. 不变量 = one family, one look
 - A SECOND DESKTOP-APP WINDOW SHOWED BUT NEVER DREW (int243 2026-10-09, 4/6): the bridge sent the pin right behind the viewer's hello; xpra 6.5.4 drops a link whose packet beats its threaded hello answer (1005, each retry). FIX = only the hello until xpra answers. 不变量 = a shown window has a canvas
 - A LATE 'LAUNCHING' ANSWER PARKED A DESKTOP-APP WINDOW (int243 2026-10-09): its record GET landed after the ready broadcast and set it back; the gate re-read only a missing record. FIX = an older launching answer is dropped. 不变量 = a read never moves a record back past a newer broadcast
+- A LATE REACTION STRIP MOVED THE TEXT UNDER THE READER'S FINGER (B-59ff): a strip drawn ~1 s after a scroll grew a row above by 34 px. FIX = a known strip's box reserved; ONE row ResizeObserver moves scrollTop by a late height above the reader's row. 不变量 = a late height never moves what one reads
+- THE SENDING GUARDS HAD A SETTING AND NO DOOR (owner 2026-10-09): the policy row said the attachment guard still asks, pointing at Settings. FIX = guard rows with a one-click toggle at the policy; full delegation in plain words. 不变量 = every value the owner can change has a door where he meets it
+- THE SETTINGS STORE NOTIFIED A LIVE SET (lane guards-door, caught by the guard rows' redraw): `_notify` walked its listener Set while a listener re-subscribed ⇒ the new one was visited too, forever (the page hangs). FIX = walk `[...listeners]`. 不变量 = a notifier walks a snapshot of its listeners
 
 ## A SECOND DESKTOP-APP WINDOW SHOWED BUT NEVER DREW (lane e2-canvas, int243 2026-10-09 — test-desktop-app-rung-chrome 4/6 at 1 and 2 lanes after f1e317418)
 

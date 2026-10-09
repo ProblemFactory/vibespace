@@ -3335,6 +3335,8 @@ function create(deps = {}) {
         react: caps.offers(c, effectiveConvCaps(rec, en), 'react', t),
         unreact: caps.offers(c, effectiveConvCaps(rec, en), 'unreact', t),
         readReactions: caps.offers(c, effectiveConvCaps(rec, en), 'read-reactions', t),
+        // lane owner-composer-attach: may the owner's composer carry a file here — the SAME offer the send judges (held scopes first)
+        sendAttachment: filesOfferFor(rec, effectiveConvCaps(rec, en), t),
       },
       // the conversation's thread shape (a topic group opens a thread per message) + the adapter's rows as the window draws them
       // + the PLACEMENTS the channel declares (PURE `placementsOf` — the engine's own verdict reads the same list): the
@@ -3471,6 +3473,8 @@ function create(deps = {}) {
       policyModes: P.policyModesOf(c), retention: c.retention || 'keep', setup: setupView(rec),
       // B-a085: a reply here may go to EVERYONE on the message it answers (mail — the composer's "Reply all")
       replyAll: c.replyEnvelope === true,
+      // lane owner-composer-attach: the adapter's file limits — the composer's chips are judged by them before the send
+      sendAttachments: c.sendAttachments || null,
       sendGrant: sendGrantView(rec),
       // lane channel-threads: what unlocks READING reactions (the scope, the console step) + the trickle's minute
       reactionsGrant: reactionsGrantView(rec),
@@ -7072,7 +7076,7 @@ function create(deps = {}) {
   const {
     honestyLineFor, proposalsFor, stashAbout, stashGate, outboxView, sendStartsTurn, outboxAttachment, filesSweep, propose, proposeReaction, compose,
     approve, reject, onProposal, withdrawProposal, replaceProposal, noteReceiptStash, reconcileReceiptFates, reconcile, sweepSending, sweepReplaces,
-    receipt, expireSweep, pointerSync, learnSentFiles,
+    receipt, expireSweep, pointerSync, learnSentFiles, filesOfferFor,
   } = Object.assign(engineCtx, ChannelsOutbound.create(engineCtx));
   const {
     clientFor, resolverFor, credentialFactsFor, credentialFacts, offeredCredentials, defaultCredentialKey, credentialLabelFor, connectableFor,

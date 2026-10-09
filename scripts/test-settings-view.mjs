@@ -10,6 +10,9 @@
 //      display backend, the Lark row without a Lark account; EVERY row reachable by search with the switch off
 //      and every fact false (a loop, not a sample); the tier census printed
 //   §5 wiring pins (the UI consumes the model; the facts' sources; the light adapters route; the harness `cli`)
+//   §8 THE STORE'S NOTIFIER WALKS A SNAPSHOT (lane guards-door): a listener that unsubscribes itself and subscribes a
+//      fresh one while it runs (a row that redraws) is called ONCE — the real SettingsManager in a child under a 4 s
+//      deadline; CONTROL: a copy walking the live Set never returns (killed at the deadline ⇒ RED)
 //   §6 patched copies of settings-view.js, one per rule, each turns its own judge red (scripts/mutant-copy.mjs)
 //   §7 (B-df40 part 3) the per-VENDOR rows derived from src/channel-settings.js: advanced, `when: {channel}`,
 //      hidden without that vendor's account, the "Per vendor" block + its chip with one; a patched schema copy
@@ -220,6 +223,31 @@ console.log('§7 the per-vendor channel rows (B-df40 part 3), derived from src/c
   const M = mutantCopies('settings-view-channel', REPO);
   const Smut = await import(pathToFileURL(M.write('src/lib/settings-schema.js', ssrc.replace(FROM, ''), 'nowhen', { esm: true })).href);
   ok(!J7.derived(Smut) && Smut.SETTINGS_SCHEMA['channels.budgetLarkPerMin'] && !Smut.SETTINGS_SCHEMA['channels.budgetLarkPerMin'].when, 'NEGATIVE CONTROL — a schema copy whose derived vendor rows lose `tier` + `when` is RED on the derivation judge (green on the real module)');
+  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 1 })) ok(r.pass, r.name, r.detail);
+}
+
+console.log('§8 the store\'s notifier walks a snapshot of its listeners');
+{
+  const { spawnSync } = await import('node:child_process');
+  const drive = (url) => spawnSync(process.execPath, ['--input-type=module', '-e', `
+    globalThis.localStorage = { getItem: () => null, setItem() {} };
+    const { SettingsManager } = await import(${JSON.stringify('%URL%')});
+    const s = new SettingsManager(); let calls = 0;
+    const sub = () => { const f = () => { calls++; s.off('channels.guardAttachmentsReview', f); sub(); }; s.on('channels.guardAttachmentsReview', f); };
+    sub(); s.on('channels.guardAttachmentsReview', () => { calls += 100; });
+    s.set('channels.guardAttachmentsReview', false);
+    if (s._saveTimer) clearTimeout(s._saveTimer);
+    console.log(JSON.stringify({ calls, listeners: s._listeners['channels.guardAttachmentsReview'].size }));`.replace('%URL%', url)], { encoding: 'utf8', timeout: 4000 });
+  const verdict = (r) => { let o = null; try { o = JSON.parse(String(r.stdout).trim().split('\n').pop()); } catch {} return { green: r.status === 0 && !!o && o.calls === 101 && o.listeners === 2, o, signal: r.signal, err: String(r.stderr || '').slice(0, 300) }; };
+  const real = verdict(drive(pathToFileURL(path.join(REPO, 'src/lib/settings.js')).href));
+  ok(real.green, 'a listener that re-subscribes while it runs is called ONCE (the other listener once too), the store returns, 2 listeners stay', JSON.stringify(real));
+  const SNAP = 'for (const cb of [...listeners]) {';
+  const ssrc = read('src/lib/settings.js');
+  ok(ssrc.split(SNAP).length === 2, 'the notifier walks a snapshot, spelled once where the control reverts it');
+  const M = mutantCopies('settings-notify', REPO);
+  const mut = M.write('src/lib/settings.js', ssrc.replace(SNAP, 'for (const cb of listeners) {'), 'liveset', { esm: true });
+  const red = verdict(drive(pathToFileURL(mut).href));
+  ok(!red.green && red.signal === 'SIGTERM', `CONTROL: a copy walking the LIVE Set never returns — killed at the 4 s deadline (${red.signal}) ⇒ RED`, JSON.stringify(red));
   for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 1 })) ok(r.pass, r.name, r.detail);
 }
 

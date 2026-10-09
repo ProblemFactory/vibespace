@@ -250,6 +250,59 @@ const ENG = require(path.join(REPO, 'src/server/channels-engine.js'));
 const rcj = await reconcileJudge(ENG);
 ok(rcj.length === 0, `lark: the text's answer lost ⇒ unknown ⇒ reconciled SENT names the two files NOT landed, nothing uploaded${rcj.length ? ` — ${rcj.join('; ')}` : ''}`);
 
+// ⑨ lane owner-composer-attach: THE OWNER'S OWN SEND carries files (POST …/send = propose({kind:'user'}, …, {direct:true}))
+// through the SAME store + adapter path as an agent's: out at once (no card, the attachment guard is for agents), the
+// record keeps name/size/sha256, a refused upload is "partly sent" + ONE For-you item, a file changed on disk between the
+// store and the send is refused by name (attachment-changed), nothing sent
+async function ownerJudge(ENGm) {
+  const out = [];
+  const fake = require(path.join(REPO, 'src/channels/fake.js'));
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-send-files-own-'));
+  const calls = [];
+  const fetchFn = async (url, init = {}) => {
+    const c = { url: String(url), method: init.method || 'GET', form: init.body instanceof FormData }; calls.push(c);
+    if (c.method === 'GET') return jsonRes(200, { code: 0, data: { items: [], has_more: false } });
+    if (c.form && c.url.includes('/im/v1/files')) return jsonRes(400, LF.answers.scopeRefusal);
+    return c.form ? jsonRes(200, LF.answers.image) : jsonRes(200, LF.answers.message);
+  };
+  const A = lark.create({ id: 'l', options: {} }, { resolveIntegration: () => CRED, fetch: fetchFn, now: () => T0, tokens: tokens({ access_token: 'u-fixture-user-token', expiresAt: T0 + 3600e3, refresh_token: 'r', refreshExpiresAt: T0 + 30 * 86400e3, scopes: ['im:message', 'im:message.send_as_user', 'im:resource'] }) });
+  const mod = { kind: 'lark-own', caps: { ...fake.fakePoll.caps, idempotency: lark.caps.idempotency, sendAttachments: lark.caps.sendAttachments, sendAttachmentsWhy: null, budget: undefined, pace: undefined },
+    create(record, deps) { return Object.assign(Object.create(fake.fakePoll.create(record, { ...deps })), { send: (c, o) => A.send(c, o) }); } };
+  const registry = CH.createChannelRegistry(); registry.register(mod);
+  fs.mkdirSync(path.join(dataDir, 'channels'), { recursive: true });
+  fs.writeFileSync(path.join(dataDir, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: [{ id: 'la', kind: 'lark-own', label: 'la', enabled: true, auth: { tokenEnc: null, expiresAt: null, scopes: [] }, lastPass: null, consecutiveFailures: 0, push: { enabled: false }, options: {} }] }));
+  const todos = [];
+  try {
+    const eng = ENGm.create({ dataDir, registry, env: {}, now: () => T0, broadcast: () => {}, serverSetting: (k) => ({ 'channels.guardAttachmentsReview': true })[k], liveSessions: () => [], userTodos: { add: (key, item) => { todos.push(item); return { id: `t${todos.length}` }; } }, log: { log() {}, warn() {}, error() {} } });
+    await eng.pass('la', { force: true });
+    const conv = Object.keys(eng.store.index.live()).find((k) => k.startsWith('la/')).slice(3);
+    const att = () => files().map((f) => ({ name: f.name, data: f.data.toString('base64') }));
+    const cv = eng.conversationView('la', conv);
+    if (!(cv && cv.offers.sendAttachment && cv.offers.sendAttachment.offered === true)) out.push(`the conversation view does not offer the composer's files (${JSON.stringify(cv && cv.offers.sendAttachment)})`);
+    const pr = await eng.propose({ kind: 'user' }, 'la', conv, { text: 'the report', attachments: att(), direct: true });
+    const q = pr.ok ? eng.store.outbox.snapshot().proposals[pr.proposal.id] : null;
+    if (!q) return [`owner send: ${JSON.stringify(pr).slice(0, 160)}`];
+    if (q.state !== 'sent' || q.policy.mode !== 'direct' || q.draftedBy.kind !== 'user' || (q.history || []).some((h) => h.state === 'awaiting-approval')) out.push(`the owner's send with files was not out at once (${q.state}, ${q.policy && q.policy.mode})`);
+    if (!(q.attachments.length === 2 && q.attachments[0].name === 'a.png' && q.attachments[0].sha256 === require('crypto').createHash('sha256').update(PNG).digest('hex') && q.attachments[1].kind === 'file')) out.push('the record does not keep the files (name, size, sha256)');
+    if (calls.filter((c) => c.form).length !== 2) out.push(`the adapter's upload path was not taken (${calls.filter((c) => c.form).length} uploads)`);
+    if (!/^partly sent — landed: the text, "a\.png" · NOT landed: "b\.pdf" \(forbidden/.test(q.reason || '')) out.push(`the refused upload is not "partly sent" by name (${String(q.reason).slice(0, 120)})`);
+    if (!(todos.length === 1 && /WITHOUT the file b\.pdf/.test(todos[0].text) && todos[0].action && todos[0].action.key === `outbox:${q.id}`)) out.push(`the partial send did not file ONE For-you item (${todos.length})`);
+    // a file rewritten between the store and the send: refused by name, nothing uploaded
+    const up0 = calls.length;
+    const upd = eng.store.outbox.update.bind(eng.store.outbox);
+    let tampered = false;
+    eng.store.outbox.update = async (fn) => { const r = await upd(fn); for (const p of Object.values(eng.store.outbox.snapshot().proposals)) if (!tampered && p.state === 'sending' && p.id !== q.id) { tampered = true; fs.writeFileSync(path.join(eng.store.dir, 'outbox-files', p.id, '0'), Buffer.concat([PNG, Buffer.from('x')])); } return r; };
+    const pr2 = await eng.propose({ kind: 'user' }, 'la', conv, { text: 'again', attachments: att().slice(0, 1), direct: true });
+    eng.store.outbox.update = upd;
+    const q2 = pr2.ok ? eng.store.outbox.snapshot().proposals[pr2.proposal.id] : null;
+    if (!(tampered && q2 && q2.state === 'failed' && /attachment-changed/.test(JSON.stringify(q2.failure || '')) && calls.slice(up0).every((c) => c.method === 'GET'))) out.push(`a changed file was sent or not refused by name (${q2 && q2.state}, tampered ${tampered})`);
+  } finally { fs.rmSync(dataDir, { recursive: true, force: true }); }
+  return out;
+}
+console.log('⑨ the owner\'s own send (POST …/send) carries files through the same path');
+const own = await ownerJudge(ENG);
+ok(own.length === 0, `the owner's send with 2 files: out at once as the owner, the record keeps name/size/sha256, a refused upload "partly sent" + ONE For-you item, a changed file refused attachment-changed${own.length ? ` — ${own.join('; ')}` : ''}`);
+
 console.log('⑦ patched-copy controls');
 const keep = setInterval(() => {}, 1000);   // a send-gap wait inside a copy is an unref'd timer
 const ctl = [
@@ -266,6 +319,8 @@ for (const [f, from, to, judge, mod, what] of ctl) {
   ok(Array.isArray(red) && red.length > 0, `control — ${what}: red (${red === null ? 'the patch site is gone' : red.length ? red[0].slice(0, 120) : 'GREEN — the judge missed it'})`);
 }
 
+{ const red = await mutantEngine("const own = !!(input && input.direct === true) && (!ctx || ctx.kind === 'user');", 'const own = false;', ownerJudge, 'engine-owner-not-direct');
+  ok(Array.isArray(red) && red.length > 0, `control — engine: the owner's send with files held as a proposal: red (${red === null ? 'the patch site is gone' : red.length ? red[0].slice(0, 120) : 'GREEN — the judge missed it'})`); }
 clearInterval(keep);
 console.log(`\n${fails ? '✗' : '✓'} test-channel-send-files: ${n - fails}/${n} passed`);
 process.exit(fails ? 1 : 0);

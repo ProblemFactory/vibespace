@@ -1668,6 +1668,72 @@ ok(race.bars >= 3 && race.barsParsed === race.bars && race.parsed === race.start
     return out;
   })()`);
   ok(!cv.fail && cv.source === 'account' && cv.mode === 'direct' && cv.pick === '' && /^沿用账户：/.test(cv.text) && cv.opts.some((o) => /^沿用账户的设置（/.test(o)), 'POLICY DOOR: the conversation\'s 可见性与策略… says it inherits the account (direct), "沿用账户的设置" chosen', JSON.stringify(cv));
+  // ── lane guards-door (owner 2026-10-09 "带文件是不是要直接允许也要加个开关，防止用户想要完全放权"): the guards drawn where
+  // the policy is read. A switch on page 1 ⇒ page 3's rows follow (the settings broadcast, no reload); "完全放权" ONLY when
+  // nothing asks; under direct a link waits while its guard asks and is SENT without a card once it is switched off (a
+  // fake account declares no files row, so a file is refused before any guard — the file's allow is test-channel-attach-send
+  // + test-account-policy-door ⑥); desktop + 390 px; PNGs (zh) policy-row.png + policy-row-phone.png in $GUARDS_SHOTS.
+  {
+    const GSHOTS = process.env.GUARDS_SHOTS || wt;
+    const until = async (fn, ms = 15000) => { const end = Date.now() + ms; for (;;) { let v; try { v = await fn(); } catch { v = null; } if (v || Date.now() > end) return v; await sleep(150); } };
+    const p3 = await newPage();
+    ok(await p3.load(), 'GUARDS: a second page (zh) loaded the app');
+    const ROWS = `(async () => {
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      for (let i = 0; i < 300 && !document.querySelector('#chan-account-reach-dialog .chan-policy-guard'); i++) await sleep(100);
+      const d = document.getElementById('chan-account-reach-dialog');
+      if (!d) return { fail: 'no account Reach & policy… dialog' };
+      return { rows: [...d.querySelectorAll('.chan-policy-guard')].map((r) => r.dataset.guard + ':' + r.dataset.state).join(' '), switches: d.querySelectorAll('.chan-policy-guard-switch input').length,
+        zone: [...d.querySelectorAll('.chan-policy-guard-zone')].map((b) => b.textContent).join(), deleg: (d.querySelector('.chan-policy-delegation') || {}).textContent || '', full: !!d.querySelector('.chan-policy-full'),
+        words: (d.querySelector('.chan-policy-pick option[value=direct]') || {}).textContent || '' };
+    })()`;
+    const CLICK = (g) => `(() => { const i = document.querySelector('#chan-account-reach-dialog .chan-policy-guard[data-guard=${g}] .chan-policy-guard-switch input'); if (!i) return false; i.click(); return true; })()`;
+    const o1 = await p1.evaljs(MENU('可见性与策略…')), o3 = await p3.evaljs(MENU('可见性与策略…'));
+    const r1 = await p1.evaljs(ROWS), r3 = await p3.evaljs(ROWS);
+    ok(!o1.fail && !o3.fail && r1.rows === 'attachments:ask links:ask offHours:allow' && r3.rows === r1.rows && r1.switches === 2 && /^使用我的时区/.test(r1.zone)
+      && /文件：问你 · 链接：问你 · 非工作时间：关/.test(r1.words) && /^不是完全放权 —— 仍会问你：带文件的消息 · 带链接的消息/.test(r1.deleg) && !r1.full,
+    'GUARDS: both pages draw the guard rows under the policy (files / links ask, off-hours off with "使用我的时区"), the Direct words say the current answers, NOT full delegation', JSON.stringify({ o1, o3, r1, r3 }).slice(0, 900));
+    const propose = async (text) => { const r = await api('POST', '/api/channels/fake-poll/fake-poll-room-1/propose', { text }); const pr = (r.json && r.json.proposal) || {}; return { status: r.status, id: pr.id, state: pr.state, reasons: (pr.policy && pr.policy.reasons) || [], err: r.json && (r.json.error || r.json.code) }; };
+    const held = await propose('guards: see https://example.com/held');
+    ok(held.state === 'awaiting-approval' && held.reasons.join() === 'links', 'GUARDS: under direct a link WAITS while its guard asks (reason: links)', JSON.stringify(held));
+    if (held.id) await api('POST', `/api/channels/outbox/${encodeURIComponent(held.id)}/reject`, {});
+    ok(await p1.evaljs(CLICK('attachments')), 'GUARDS: page 1 clicks the files switch');
+    const f3 = await until(async () => { const r = await p3.evaljs(ROWS); return /^attachments:allow links:ask/.test(r.rows) ? r : null; }, 15000);
+    ok(f3 && /^不是完全放权 —— 仍会问你：带链接的消息$/.test(f3.deleg) && !f3.full && /文件：允许/.test(f3.words), 'GUARDS: page 3\'s rows FOLLOW (files: allow) with no reload; links still ask ⇒ still not full delegation', JSON.stringify(f3 || await p3.evaljs(ROWS)));
+    ok(await p1.evaljs(CLICK('links')), 'GUARDS: page 1 clicks the links switch');
+    const both = await until(async () => { const a = await p1.evaljs(ROWS), b = await p3.evaljs(ROWS); return a.full && b.full ? { a, b } : null; }, 15000);
+    ok(both && both.a.rows === 'attachments:allow links:allow offHours:allow' && /^完全放权：有发送权限的智能体发什么都不问你/.test(both.b.deleg) && both.b.rows === both.a.rows,
+      'GUARDS: nothing asks ⇒ "完全放权" appears on BOTH pages (only now)', JSON.stringify(both || { a: await p1.evaljs(ROWS), b: await p3.evaljs(ROWS) }));
+    const sent = await until(async () => { const x = await propose('guards: see https://example.com/sent'); return x.state ? x : null; }, 10000);
+    const ob = ((await api('GET', '/api/channels/outbox')).json || {});
+    const card = (ob.proposals || ob.items || []).find((q) => q && q.id === (sent && sent.id) && q.state === 'awaiting-approval');
+    ok(sent && (sent.state === 'sent' || sent.state === 'sending') && !sent.reasons.length && !card, 'GUARDS: under direct + links allow the same link is SENT without a card (no reason, nothing awaiting)', JSON.stringify({ sent, card }));
+    // desktop PNG: the dialog with its guard rows
+    const shot = async (pg, file, sel) => {
+      const box = await pg.evaljs(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return null; e.scrollIntoView({ block: 'center' }); const b = e.getBoundingClientRect(); return { x: Math.max(0, b.left), y: Math.max(0, b.top), width: Math.min(innerWidth, b.right) - Math.max(0, b.left), height: Math.min(innerHeight, b.bottom) - Math.max(0, b.top) }; })()`);
+      await sleep(300);
+      const r = await pg.cdp('Page.captureScreenshot', { format: 'png', ...(box && box.width > 0 && box.height > 0 ? { clip: { ...box, scale: 1 } } : {}) });
+      if (r.result && r.result.data) fs.writeFileSync(path.join(GSHOTS, file), Buffer.from(r.result.data, 'base64'));
+      return !!(r.result && r.result.data);
+    };
+    ok(await shot(p1, 'policy-row.png', '#chan-account-reach-dialog'), `GUARDS: ${path.join(GSHOTS, 'policy-row.png')}`);
+    // 390 px: page 3 as a phone — every guard row and its switch inside the screen
+    await p3.cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+    await sleep(800);
+    const fit = await p3.evaljs(`(() => { const d = document.getElementById('chan-account-reach-dialog'); if (!d) return { fail: 'gone' }; const g = d.querySelector('.chan-policy-guard-rows'); g.scrollIntoView({ block: 'center' });
+      const out = [...d.querySelectorAll('.chan-policy-guard, .chan-policy-guard-switch, .chan-policy-delegation')].map((e) => { const b = e.getBoundingClientRect(); return { c: e.className.split(' ')[0], l: Math.round(b.left), r: Math.round(b.right), w: Math.round(b.width) }; });
+      return { vw: innerWidth, out, inside: out.every((x) => x.l >= 0 && x.r <= innerWidth && x.w > 0) }; })()`);
+    ok(fit.vw === 390 && fit.inside && fit.out.filter((x) => x.c === 'settings-toggle').length === 2, 'GUARDS: at 390 px every guard row, both switches and the delegation line sit inside the screen', JSON.stringify(fit).slice(0, 700));
+    ok(await shot(p3, 'policy-row-phone.png', '#chan-account-reach-dialog .chan-policy-row'), `GUARDS: ${path.join(GSHOTS, 'policy-row-phone.png')}`);
+    // teardown: the switches back on (the defaults), both dialogs closed, page 3 gone
+    await p1.evaljs(`(() => { app.settings.set('channels.guardAttachmentsReview', true); app.settings.set('channels.guardLinksReview', true); return 1; })()`);
+    const restored = await until(async () => { const r = await p1.evaljs(ROWS); return r.rows === 'attachments:ask links:ask offHours:allow' ? r : null; }, 10000);
+    await sleep(900);   // the store's 500 ms save debounce
+    for (const pg of [p1, p3]) await pg.evaljs(`(() => { const d = document.getElementById('chan-account-reach-dialog'); if (d) { const o = d.closest('.dialog-overlay'); (o || d).remove(); } return 1; })()`);
+    try { await fetch(`http://127.0.0.1:${CDP_PORT}/json/close/${p3.id}`); } catch {}
+    p3.close();
+    ok(!!restored, 'GUARDS teardown: the switches are back on (every guard asks)');
+  }
   const back = await api('PUT', '/api/channels/adapters/fake-poll', { policy: null });
   const back2 = await api('PUT', '/api/channels/adapters/fake-poll/access', { access: acc0 });
   ok(back.status === 200 && back2.status === 200, 'POLICY DOOR teardown: the account back on the vendor\'s default');

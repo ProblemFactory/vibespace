@@ -74,16 +74,61 @@ function principals(app) {
   return out;
 }
 
-/** The guards as the client holds them (Settings → Channels) — the row model's guards line; never fetched here. */
+/** The guards as the client holds them (Settings → Channels) — the row model's guard rows; never fetched here. */
 export function policyGuards(app) {
   const g = (k) => { try { return app && app.settings ? app.settings.get(k) : undefined; } catch { return undefined; } };
-  return { linksReview: g('channels.guardLinksReview') !== false, attachmentsReview: g('channels.guardAttachmentsReview') !== false, offHoursTz: g('channels.offHoursTz') || '' };
+  return { linksReview: g('channels.guardLinksReview') !== false, attachmentsReview: g('channels.guardAttachmentsReview') !== false, offHoursTz: g('channels.offHoursTz') || '',
+    offHoursOn: g('channels.guardOffHours') !== false, offHoursStart: g('channels.offHoursStart') || '09:00', offHoursEnd: g('channels.offHoursEnd') || '18:00' };
+}
+const localZone = () => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch { return ''; } };
+/** The row model at the OWNER's view (this client is the owner's; an agent's view never gets switches). */
+export function ownerPolicyModel(app, { grain, policy, tr = t }) {
+  return P.policyRowModel({ grain, policy, guards: policyGuards(app), t: tr, modeText: policyModeText, owner: true, localTz: localZone() });
+}
+/** THE GUARD ROWS as drawn (lane guards-door): each guard a labelled house switch; a click writes the ONE instance
+ *  setting through the settings store (saved + broadcast — every open page's rows follow from the store); the
+ *  delegation line under them. `repaint()` redraws from the store; the box unsubscribes once it leaves the page. */
+export function guardRowsEl(app, m, { repaint } = {}) {
+  const box = el('div', 'chan-policy-guard-rows');
+  for (const r of m.guardRows) {
+    const row = el('div', 'chan-policy-guard');
+    row.dataset.guard = r.id;
+    row.dataset.state = r.state;
+    const text = el('div', 'chan-policy-guard-text');
+    text.appendChild(el('span', 'chan-policy-guard-label', r.label));
+    text.appendChild(el('span', 'chan-flow-note chan-policy-guard-words', r.words));
+    row.appendChild(text);
+    if (r.toggleTo !== null) {
+      const sw = el('label', 'settings-toggle chan-policy-guard-switch');
+      const cb = el('input'); cb.type = 'checkbox'; cb.checked = r.state === 'ask'; cb.setAttribute('role', 'switch');
+      cb.setAttribute('aria-label', `${r.label}: ${t('ask me first')}`);
+      cb.onchange = () => { app.settings.set(r.key, r.toggleTo); };
+      sw.appendChild(cb); sw.appendChild(el('span', 'settings-toggle-slider'));
+      row.appendChild(sw);
+    } else if (r.setZone) {
+      row.appendChild(btn(r.setZone.label, () => { app.settings.set(r.setZone.key, r.setZone.value); }, 'chan-policy-guard-zone'));
+    }
+    box.appendChild(row);
+  }
+  box.appendChild(el('div', `chan-flow-note chan-policy-delegation${m.fullDelegation ? ' chan-policy-full' : ''}`, m.delegationText));
+  box.appendChild(el('div', 'chan-flow-note chan-policy-guards', m.guardsText));
+  if (repaint && app && app.settings && typeof app.settings.on === 'function') {
+    const keys = [...Object.values(P.GUARD_KEYS), 'channels.offHoursStart', 'channels.offHoursEnd'];
+    // the repaint re-subscribes, so it runs AFTER the store's listener loop (a live Set: a listener added inside it is
+    // visited too ⇒ a repaint inside the loop never ends); one repaint per burst (a remote snapshot moves several keys)
+    let due = false;
+    const off = () => { for (const k of keys) app.settings.off(k, on); };
+    const on = () => { if (!box.isConnected) { off(); return; } if (due) return; due = true; queueMicrotask(() => { due = false; if (box.isConnected) repaint(); }); };
+    for (const k of keys) app.settings.on(k, on);
+    box._guardOff = off;
+  }
+  return box;
 }
 /** THE POLICY ROW as drawn (lane account-policy-door): ONE renderer over the PURE `policyRowModel` — the account's
  *  Reach & policy… and a conversation's draw the same select, the same words, the same source + guards lines.
  *  `onPick(mode | null, model, select)`. */
 export function policyRowEl(app, { grain, policy, onPick }) {
-  const m = P.policyRowModel({ grain, policy, guards: policyGuards(app), t, modeText: policyModeText });
+  const m = ownerPolicyModel(app, { grain, policy });
   const box = el('div', 'chan-policy-row');
   box.dataset.policySource = m.source;
   box.dataset.policyMode = m.mode;
@@ -96,7 +141,15 @@ export function policyRowEl(app, { grain, policy, onPick }) {
   box.appendChild(sel);
   box.appendChild(el('div', 'chan-flow-note chan-policy-source', m.sourceText));
   if (!m.offersDirect) box.appendChild(el('div', 'chan-flow-note', t('This channel offers no “send directly”: every message an agent drafts here waits for your approval on the Outbox card.')));
-  box.appendChild(el('div', 'chan-flow-note chan-policy-guards', m.guardsText));
+  // the guards drawn where the policy is read (lane guards-door) — a store change redraws the select's words + the rows
+  const paint = () => {
+    const cur = box.querySelector('.chan-policy-guard-rows');
+    const m2 = ownerPolicyModel(app, { grain, policy });
+    for (const op of sel.options) { const c = m2.choices.find((x) => (x.value || '') === op.value); if (c) op.textContent = c.label; }
+    const next = guardRowsEl(app, m2, { repaint: paint });
+    if (cur) { if (cur._guardOff) cur._guardOff(); cur.replaceWith(next); } else box.appendChild(next);
+  };
+  paint();
   return box;
 }
 

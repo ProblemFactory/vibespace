@@ -1092,6 +1092,7 @@ const CACHES = {
   'src/lib/channel-window.js|seen': 'vendor ids already drawn',
   'src/lib/channel-window.js|known': 'B-ff04: a member\'s conversation id → the last NAME the log knew it by (author / mention / raw.name) — names, never words',
   'src/lib/channel-window.js|clearedSeen': 'vendorId → a record a broadcast said was CLEARED (the sentence) — r5 ⑧',
+  'src/lib/channel-window.js|rowH': 'lane reaction-strip-anchor (B-59ff): a list row element → its last measured height (a number; a WeakMap — gone with the row, never words)',
   'src/lib/channels-panel.js|COLLAPSED': 'folded section keys',
   'src/lib/channels-panel.js|EXPANDED': 'expanded section keys',
   'src/lib/channels-panel.js|ends': 'list name → its end element (a sentinel / skeleton row — no words of a row)',

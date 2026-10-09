@@ -175,6 +175,8 @@ function picturePng(w = 200, h = 120) {
     conv('lark', 'oc_53', 'Fifty-three', 'group', caps(['user'], null));
     // ⑩g (verify round 5): a two-message room that fits its pane WITH an awaiting proposal card inside its list
     conv('lark', 'oc_card', 'Card room', 'group', caps(['user'], null));
+    conv('lark', 'oc_files', 'Files room', 'group', caps(['user'], null)); // ⑭ (lane outbox-attachment-preview)
+    conv('lark', 'oc_files_gone', 'Gone room', 'group', caps(['user'], null));
     // ⑩i (B-a085): a ticket thread with an awaiting REPLY-ALL proposal — the card lists every recipient before Approve
     conv('gmail', 't_replyall', 'Rack 12 PDU alarm', 'thread', caps([], 'send-scope-not-granted'));
     // ⑩h (verify round 6): THE BATTERY room (120 rows: two local pages above the first, then the vendor) and the
@@ -269,6 +271,30 @@ function picturePng(w = 200, h = 120) {
     const id = store.outbox.nextId();
     ob.proposals[id] = { id, adapterId: 'lark', convId: 'oc_card', key: 'lark/oc_card', title: 'Card room', text: 'a draft to review', originalText: 'a draft to review', replyTo: null, why: null, attachments: [], draftedBy: { kind: 'user', id: null, name: null }, authority: 'draft', at: NOW - MIN, updatedAt: NOW - MIN, state: 'awaiting-approval', policy: { mode: 'review', reasons: ['policy-review'], detail: null }, sendAs: 'user', identity: { sentAs: 'user', marking: 'none', where: null, text: null }, ttlMs: 7 * 86400e3, awaitingSince: NOW - MIN, edited: false, approvedBy: null, reason: null, result: null, receipt: null, receiptDelivery: null, history: [{ state: 'proposed', at: NOW - MIN, by: 'user' }, { state: 'awaiting-approval', at: NOW - MIN, by: 'policy' }] };
   });
+  // ⑭ (lane outbox-attachment-preview): a draft with a PICTURE + a markdown file (bytes stored where the engine keeps
+  // them), a draft whose file is no longer kept (its URL answers 404), and a received message carrying a .md file
+  {
+    const OFX = require(path.join(wt, 'src/channel-outbox-files.js'));
+    const crypto = require('node:crypto');
+    const sha = (b) => crypto.createHash('sha256').update(b).digest('hex');
+    const png = picturePng(), md = Buffer.from('# Release notes\n\nShipped the viewer.\n\n<img src=x onerror="window.__pwned=14">\n');
+    globalThis.__oap = { md };
+    const OAP_FILES = [{ n: 0, name: 'shot.png', bytes: png.length, sha256: sha(png), mime: 'image/png', kind: 'file' }, { n: 1, name: 'notes.md', bytes: md.length, sha256: sha(md), mime: 'text/markdown', kind: 'file' }];
+    const OAP_GONE = [{ n: 0, name: 'old.md', bytes: 9, sha256: sha(Buffer.from('gone\n')), mime: 'text/markdown', kind: 'file' }];
+    store.appendRecords('lark', 'oc_files', [{ id: 'lark:oc_files:om_f0', convId: 'oc_files', adapterId: 'lark', vendorId: 'om_f0', at: NOW - 5 * MIN, author: { id: 'ou_ada', name: 'Ada', isSelf: false, isBot: false }, text: 'the notes', mentions: [], attachments: [{ id: 'file_md1', name: 'notes.md', mime: 'text/markdown', bytes: 120, kind: 'file' }], replyTo: null, threadKey: null, raw: { msg_type: 'file' } }]);
+    await store.outbox.update((ob) => {
+      const id = store.outbox.nextId();
+    ob.proposals[id] = { id, adapterId: 'lark', convId: 'oc_files', key: 'lark/oc_files', title: 'Files room', text: 'a draft to review', originalText: 'a draft to review', replyTo: null, why: null, attachments: OAP_FILES, draftedBy: { kind: 'user', id: null, name: null }, authority: 'draft', at: NOW - MIN, updatedAt: NOW - MIN, state: 'awaiting-approval', policy: { mode: 'review', reasons: ['policy-review'], detail: null }, sendAs: 'user', identity: { sentAs: 'user', marking: 'none', where: null, text: null }, ttlMs: 7 * 86400e3, awaitingSince: NOW - MIN, edited: false, approvedBy: null, reason: null, result: null, receipt: null, receiptDelivery: null, history: [{ state: 'proposed', at: NOW - MIN, by: 'user' }, { state: 'awaiting-approval', at: NOW - MIN, by: 'policy' }] };
+      globalThis.__oap.id = id;
+    });
+    const dirF = OFX.folderOf(path.join(wt, 'data/channels'), globalThis.__oap.id);
+    fs.mkdirSync(dirF, { recursive: true }); fs.writeFileSync(path.join(dirF, '0'), png); fs.writeFileSync(path.join(dirF, '1'), md);
+    await store.outbox.update((ob) => {
+      const id = store.outbox.nextId();
+    ob.proposals[id] = { id, adapterId: 'lark', convId: 'oc_files_gone', key: 'lark/oc_files_gone', title: 'Gone room', text: 'a draft to review', originalText: 'a draft to review', replyTo: null, why: null, attachments: OAP_GONE, draftedBy: { kind: 'user', id: null, name: null }, authority: 'draft', at: NOW - MIN, updatedAt: NOW - MIN, state: 'awaiting-approval', policy: { mode: 'review', reasons: ['policy-review'], detail: null }, sendAs: 'user', identity: { sentAs: 'user', marking: 'none', where: null, text: null }, ttlMs: 7 * 86400e3, awaitingSince: NOW - MIN, edited: false, approvedBy: null, reason: null, result: null, receipt: null, receiptDelivery: null, history: [{ state: 'proposed', at: NOW - MIN, by: 'user' }, { state: 'awaiting-approval', at: NOW - MIN, by: 'policy' }] };
+      globalThis.__oap.gone = id;
+    });
+  }
   store.appendRecords('gmail', 't_fold', [mailOf('t_fold', 'm_f1', NOW - 60 * MIN, 'Brook Example <brook@example.com>', 'Fold thread', 'Top reply\n\nOn Sat, Sep 19, 2026 at 3:14 PM Ada Example <ada@example.com> wrote:\n> one\n> two\n> three\n> four\n> five\n> six\n')]);
   // ⑩i (B-a085): the ticket mail and an agent's reply-all to it (the envelope as the engine stores it: To + Cc resolved
   // at propose, the agent's own added Cc apart)
@@ -1483,6 +1509,57 @@ console.log('⑧ the Push… dialog says what push is');
 }
 
 // ═══ ⑥ the phone width ══════════════════════════════════════════════════
+console.log('⑭ outbox-attachment-preview: a draft\'s picture opens the overlay, its .md a viewer window titled by the file; ⤓ downloads (name kept); a gone draft says so; a message\'s .md chip opens too (desk + 390 px)');
+{
+  const DL = scratch('oap-dl'); fs.mkdirSync(DL, { recursive: true });
+  await p1.cdp('Page.setDownloadBehavior', { behavior: 'allow', downloadPath: DL });
+  const click = async (pt) => { await p1.cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: pt.x, y: pt.y }); for (const type of ['mousePressed', 'mouseReleased']) await p1.cdp('Input.dispatchMouseEvent', { type, x: pt.x, y: pt.y, button: 'left', clickCount: 1 }); };
+  const ptOf = (sel, i = 0) => p1.evaljs(`(() => { const e = ${WIN('oc_files')}.content.querySelectorAll(${J(sel)})[${i}]; if (!e) return null; e.scrollIntoView({ block: 'center' }); const R = e.getBoundingClientRect(); return { x: R.left + R.width / 2, y: R.top + R.height / 2 }; })()`);
+  const OAP = globalThis.__oap;
+  for (const [tag, metrics] of [['desk', { width: 1400, height: 1000, deviceScaleFactor: 1, mobile: false }], ['phone', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true }]]) {
+    await p1.cdp('Emulation.setDeviceMetricsOverride', metrics);
+    await p1.load(); // a fresh page: no dialog or window an earlier section left open covers the card
+    await p1.cdp('Page.setDownloadBehavior', { behavior: 'allow', downloadPath: DL });
+    await p1.evaljs(OPEN('lark', 'oc_files', "w.content.querySelectorAll('.chan-prop-file').length >= 2"));
+    await p1.evaljs(`(() => { window.__oapWins = []; const wm = window.app.wm; if (!wm.__oapSpy) { const orig = wm.createWindow.bind(wm); wm.createWindow = (o) => { const w = orig(o); window.__oapWins.push({ title: o.title, type: o.type, id: w && w.id }); return w; }; wm.__oapSpy = 1; } return 1; })()`);
+    await sleep(600);
+    const thumb = await ptOf('.chan-prop-file-thumb');
+    await sleep(300);
+    if (tag === 'phone') await p1.shot('oap-phone.png');
+    if (thumb) await click(await ptOf('.chan-prop-file-thumb'));
+    await sleep(700);
+    const ov = await p1.evaljs(`(() => { const i = document.querySelector('.chat-img-overlay img'); return { src: i ? i.getAttribute('src') : null, drawn: !!(i && i.naturalWidth > 0) }; })()`);
+    ok(!!thumb && new RegExp('/api/channels/outbox/' + OAP.id + '/attachment/0\\?inline=1$').test(ov.src || '') && ov.drawn, `⑭ ${tag}: a click on the draft's PICTURE opens THE image overlay over its ?inline=1 URL — drawn`, JSON.stringify(ov));
+    await p1.evaljs(`(() => { document.querySelectorAll('.chat-img-overlay').forEach((o) => o.remove()); return 1; })()`);
+    const name = await ptOf('.chan-prop-file-open[data-open="viewer"]');
+    if (name) await click(await ptOf('.chan-prop-file-open[data-open="viewer"]'));
+    let view = null;
+    for (let i = 0; i < 40; i++) { await sleep(150); view = await p1.evaljs(`(() => { const md = [...document.querySelectorAll('.file-viewer-md')].pop(); return { wins: window.__oapWins, md: md ? md.textContent.slice(0, 80) : null, h1: !!(md && md.querySelector('h1')), img: !!(md && md.querySelector('img[onerror]')), pwned: window.__pwned === 14 }; })()`); if (view.md) break; }
+    ok(!!name && view.wins.some((x) => x.type === 'viewer' && x.title === 'notes.md') && view.h1 && /Release notes/.test(view.md || '') && !view.img && !view.pwned, `⑭ ${tag}: a click on the .md NAME opens a viewer window titled "notes.md" — the markdown drawn, sanitized (no onerror survives, nothing ran)`, JSON.stringify(view));
+    if (tag === 'desk') {
+      await sleep(400); await p1.shot('oap-desk.png');
+      await p1.evaljs(`(() => { for (const x of window.__oapWins) if (x.id) window.app.wm.closeWindow(x.id); window.__oapWins = []; return 1; })()`);
+      const n0 = fs.readdirSync(DL).length;
+      const dl = await ptOf('.chan-prop-file-dl', 1);
+      if (dl) await click(await ptOf('.chan-prop-file-dl', 1));
+      let saved = null;
+      for (let i = 0; i < 40 && !saved; i++) { await sleep(150); const f = path.join(DL, 'notes.md'); if (fs.existsSync(f)) saved = fs.readFileSync(f); }
+      ok(!!dl && saved && saved.equals(OAP.md) && fs.readdirSync(DL).length === n0 + 1, '⑭ desk: the ⤓ still DOWNLOADS — saved as "notes.md" (the name kept), the stored bytes', JSON.stringify({ files: fs.readdirSync(DL) }));
+      await p1.evaljs(`(() => { window.app.openFile({ rawUrl: '/api/channels/outbox/${OAP.gone}/attachment/0', fileName: 'old.md' }); return 1; })()`);
+      let gone = null;
+      for (let i = 0; i < 40; i++) { await sleep(150); gone = await p1.evaljs(`(() => { const n = [...document.querySelectorAll('.file-viewer-url-note')].pop(); return { note: n ? n.textContent : null, wins: window.__oapWins }; })()`); if (gone.note) break; }
+      ok(gone.note === '这份草稿的文件已不再保留' && gone.wins.some((x) => x.type === 'viewer' && x.title === 'old.md'), '⑭ desk: a GONE draft\'s file (its URL answers 404) opens a window that SAYS so — never a blank (zh)', JSON.stringify(gone));
+      await p1.evaljs(`(() => { for (const x of window.__oapWins) if (x.id) window.app.wm.closeWindow(x.id); window.__oapWins = []; window.__oapCalls = []; window.app.openFile = function (x) { window.__oapCalls.push(x && typeof x === 'object' ? x : { path: x }); }; return 1; })()`);
+      const n1 = fs.readdirSync(DL).length;
+      const chip = await ptOf('.chanmsg-file[data-open="viewer"]');
+      if (chip) await click(await ptOf('.chanmsg-file[data-open="viewer"]'));
+      await sleep(800);
+      const calls = await p1.evaljs(`(() => { const c = window.__oapCalls; delete window.app.openFile; return c; })()`);
+      ok(!!chip && calls.length === 1 && /\/api\/channels\/lark\/oc_files\/attachment\/file_md1\?msg=om_f0$/.test(calls[0].rawUrl || '') && calls[0].fileName === 'notes.md' && fs.readdirSync(DL).length === n1, '⑭ desk: a received message\'s .md CHIP opens the viewer by URL through the same door — nothing downloaded', JSON.stringify({ calls, files: fs.readdirSync(DL) }));
+    }
+  }
+}
+
 console.log('⑥ the phone width');
 await p1.cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
 await p1.load();

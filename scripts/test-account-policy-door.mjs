@@ -7,7 +7,11 @@
 // account-grain access refuses send; PUT direct ⇒ the view the dialog re-reads lifts the cap (send offered), a
 // conversation with no policy reads direct (source account), one holding its own review keeps it; ④ the agent's
 // words (`status <conversation>`, the list row); ⑤ the doors in source (account ⋯ → Reach & policy…, the Edit
-// dialog's select, the in-place re-draw) + a PATCHED-COPY CONTROL (the dialog without its policy row ⇒ red).
+// dialog's select, the in-place re-draw) + a PATCHED-COPY CONTROL (the dialog without its policy row ⇒ red);
+// ⑥ THE GUARDS' DOOR (lane guards-door, owner 2026-10-09 "带文件是不是要直接允许也要加个开关，防止用户想要完全放权"):
+// the `guardRows` table (every guard × state × owner/agent view), `delegationText` only when direct + nothing asks,
+// the real renderer over a fake DOM (a click writes the ONE instance setting, the store's change redraws), the card's
+// pointer, the server's off-hours switch + 2 PATCHED-COPY CONTROLS (a per-grain write ⇒ red; delegation while a guard asks ⇒ red).
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -42,7 +46,7 @@ for (const modes of [LARK, SLACK]) for (const grain of ['account', 'conversation
   { mode: 'review', source: 'conversation', declared: 'review', inherits: { mode: 'direct', source: 'account' } },
   { mode: 'direct', source: 'adapter-default', declared: 'direct', inherits: null },
 ]) grid.push({ grain, modes, pol: { ...pol, modes } });
-for (const D of [null, ZH, JA]) for (const g of grid) for (const guards of [{}, { linksReview: false, attachmentsReview: false }, { offHoursTz: 'Asia/Shanghai' }]) P.policyRowModel({ grain: g.grain, policy: g.pol, guards, t: tOf(D) });
+for (const D of [null, ZH, JA]) for (const g of grid) for (const guards of [{}, { linksReview: false, attachmentsReview: false }, { offHoursTz: 'Asia/Shanghai' }, { offHoursTz: 'Asia/Shanghai', offHoursOn: false, linksReview: false }, { linksReview: false, attachmentsReview: false, offHoursTz: '' }]) for (const owner of [false, true]) P.policyRowModel({ grain: g.grain, policy: g.pol, guards, t: tOf(D), owner, localTz: 'Asia/Tokyo' });
 P.policyWhereText({ grain: 'account' }, tOf(ZH)); P.policyWhereText({ grain: 'conversation', source: 'conversation' }, tOf(ZH));
 P.policyWhereText({ grain: 'account' }, tOf(JA)); P.policyWhereText({ grain: 'conversation', source: 'conversation' }, tOf(JA));
 ok(miss.size === 0, `every word the row model says is in zh AND ja (${grid.length} rows × 3 guard sets)`, [...miss].join(' | '));
@@ -128,7 +132,7 @@ const doorPins = ({ panel, reach, dlg, editor }) => [
   ['the account dialog draws the policy row FIRST, then the Grant access body itself (imported), then the Notify door', /drawPolicy\(\);\n\s*body\.appendChild\(polHost\);[\s\S]*?grantAccessBody\(app, st, sec2, \{ close, target, notify: false/.test(reach) && /showNotifyDialog\(app, target\)/.test(reach) && /import \{ grainState, grantAccessBody, showNotifyDialog \} from '\.\/channel-filter-editor\.js'/.test(reach)],
   ['a pick PUTs {policy, base}, re-reads the view and re-draws section 2 in place (setCaps — no reopen)', /JSON\.stringify\(\{ policy: mode, base: m\.own \}\)[\s\S]*?part\.setCaps\(\{ \.\.\.st\.caps, policyRequiresReview: !\(pol && pol\.mode === 'direct'\) \}\)/.test(reach) && /const setCaps = \(caps\) => \{\s*st\.caps = caps;\s*cap = F\.authorityCapCode\(caps\);/.test(editor)],
   ['the conversation dialog draws the SAME row (its source said)', /policyRowEl\(app, \{ grain: 'conversation', policy: current\.policy/.test(reach)],
-  ['the account Edit dialog carries the policy select from the SAME model, saved with its base', /P\.policyRowModel\(\{ grain: 'account', policy: a\.policy/.test(dlg) && /patch\.policy = v\.policy \|\| null; patch\.base = pol\.own;/.test(dlg)],
+  ['the account Edit dialog carries the policy select from the SAME model, saved with its base', /ownerPolicyModel\(app, \{ grain: 'account', policy: a\.policy, tr \}\)/.test(dlg) && /P\.policyRowModel\(\{ grain, policy, guards: policyGuards\(app\)/.test(reach) && /patch\.policy = v\.policy \|\| null; patch\.base = pol\.own;/.test(dlg)],
   ['the Grant access refusal names where to change the policy', /cap\.code === 'policy-review' \? ` — \$\{P\.policyWhereText\(/.test(editor)],
 ];
 const real = { panel: SRC('src/lib/channels-panel.js'), reach: SRC('src/lib/channel-reach-editor.js'), dlg: SRC('src/lib/channel-account-dialogs.js'), editor: SRC('src/lib/channel-filter-editor.js') };
@@ -138,6 +142,112 @@ const mutant = { ...real, reach: real.reach.replace('  drawPolicy();\n  body.app
 ok(mutant.reach !== real.reach && mutant.panel !== real.panel, 'CONTROL: the patched copy differs from the tree (both mutations applied)');
 const red = doorPins(mutant).filter(([, held]) => !held).map(([n]) => n);
 ok(red.length === 2, `CONTROL: the dialog without its policy row and the ⋯ without its door are both RED (${red.length} red)`, red.join(' | '));
+
+console.log('⑥ the guards\' door (lane guards-door)');
+{
+  const DIRECT = { mode: 'direct', source: 'account', declared: 'direct', modes: LARK, inherits: { mode: 'review', source: 'default' } };
+  const REVIEW = { mode: 'review', source: 'account', declared: 'review', modes: LARK };
+  const ALLOW = { linksReview: false, attachmentsReview: false, offHoursTz: '' };
+  const ids = (mm) => mm.guardRows.map((r) => `${r.id}:${r.state}`).join(' ');
+  // the table: every guard × state, the owner's view vs an agent's
+  const cases = [];
+  for (const att of [true, false]) for (const lnk of [true, false]) for (const oh of ['none', 'on', 'off']) for (const owner of [true, false]) {
+    const guards = { attachmentsReview: att, linksReview: lnk, offHoursTz: oh === 'none' ? '' : 'Asia/Shanghai', offHoursOn: oh !== 'off', offHoursStart: '08:30', offHoursEnd: '17:00' };
+    const mm = m('account', DIRECT, { guards, owner, localTz: 'Asia/Tokyo' });
+    const R = Object.fromEntries(mm.guardRows.map((r) => [r.id, r]));
+    const want = { attachments: att ? 'ask' : 'allow', links: lnk ? 'ask' : 'allow', offHours: oh === 'on' ? 'ask' : 'allow' };
+    const good = mm.guardRows.length === 3
+      && R.attachments.key === 'channels.guardAttachmentsReview' && R.links.key === 'channels.guardLinksReview' && R.offHours.key === 'channels.guardOffHours'
+      && Object.entries(want).every(([k, v]) => R[k].state === v)
+      && R.attachments.toggleTo === (owner ? !att : null) && R.links.toggleTo === (owner ? !lnk : null)
+      && R.offHours.toggleTo === (owner && oh !== 'none' ? oh === 'off' : null)
+      && (R.offHours.setZone ? owner && oh === 'none' && R.offHours.setZone.key === 'channels.offHoursTz' && R.offHours.setZone.value === 'Asia/Tokyo' : !(owner && oh === 'none'))
+      && (oh === 'on' ? /outside 08:30–17:00 Mon–Fri \(Asia\/Shanghai\)/.test(R.offHours.words) : oh === 'off' ? /^off — any hour goes/.test(R.offHours.words) : /no working-hours time zone/.test(R.offHours.words))
+      && (mm.fullDelegation === (!att && !lnk && oh !== 'on'))
+      && mm.words === `Direct — agents with send authority send without your approval; files: ${att ? 'ask' : 'allow'} · links: ${lnk ? 'ask' : 'allow'} · off-hours: ${oh === 'on' ? 'on' : 'off'}`;
+    cases.push(good ? null : `${JSON.stringify(guards)} owner=${owner} ⇒ ${ids(mm)} ${JSON.stringify(mm.guardRows.map((r) => [r.toggleTo, r.setZone]))} ${mm.words}`);
+  }
+  ok(cases.every((c) => c === null), `guardRows: ${cases.length} cases (attachments × links × off-hours none/on/off × owner/agent) — state, the ONE instance key, toggleTo only for the owner, the zone button only without a zone, the direct words say the current answers`, cases.filter(Boolean).slice(0, 3).join(' || '));
+  const full = m('account', DIRECT, { guards: ALLOW, owner: true });
+  const oneAsks = m('account', DIRECT, { guards: { ...ALLOW, attachmentsReview: true }, owner: true });
+  const review = m('account', REVIEW, { guards: ALLOW, owner: true });
+  ok(full.fullDelegation && full.delegationText === 'Full delegation: an agent with send authority sends anything — files, links, at any hour — without asking'
+    && !oneAsks.fullDelegation && oneAsks.delegationText === 'Not full delegation — still asks you: A message with files'
+    && !review.fullDelegation && /^Not full delegation — the policy is Review/.test(review.delegationText),
+  'delegationText: "Full delegation" ONLY when the policy reads direct AND no guard asks; else what still asks (or that Review holds all)', `${full.delegationText} || ${oneAsks.delegationText} || ${review.delegationText}`);
+  const zhFull = m('account', DIRECT, { guards: ALLOW, t: tOf(ZH) }), jaFull = m('account', DIRECT, { guards: ALLOW, t: tOf(JA) });
+  ok(/^完全放权/.test(zhFull.delegationText) && /^完全な委任/.test(jaFull.delegationText), 'zh / ja: full delegation said in their words', `${zhFull.delegationText} | ${jaFull.delegationText}`);
+  ok(/also in Settings → Channels/.test(oneAsks.guardsText) && /an attachment always needs/.test(oneAsks.guardsText) && /^No guard is on \(also in Settings → Channels\)/.test(full.guardsText), 'the summary line reads the SAME rows and names where else it lives', `${oneAsks.guardsText} || ${full.guardsText}`);
+  // the keys are the INSTANCE settings — every one a schema row, booleans default true (no default changed)
+  const S = (await import(pathToFileURL(path.join(REPO, 'src/lib/settings-schema.js')).href)).SETTINGS_SCHEMA;
+  ok(['channels.guardAttachmentsReview', 'channels.guardLinksReview', 'channels.guardOffHours'].every((k) => S[k] && S[k].type === 'boolean' && S[k].default === true) && S['channels.offHoursTz'].default === '' && Object.values(P.GUARD_KEYS).every((k) => S[k]),
+    'every guard row key is an instance setting in the schema; the three switches default ON (asks) — no default changed');
+  // the card's pointer: a GUARD's reason, never the policy's own
+  const dec = (guards, proposal, mode = 'direct') => P.decideOutbound({ channelPolicy: { mode }, guards, proposal: { authority: 'send', ...proposal }, now: Date.UTC(2026, 9, 7, 19), tz: null });
+  const withFile = dec({ attachmentsReview: true, offHours: { enabled: false } }, { text: 'hi', attachments: [{ name: 'a.pdf' }] });
+  const allowed = dec({ attachmentsReview: false, offHours: { enabled: false } }, { text: 'hi', attachments: [{ name: 'a.pdf' }] });
+  const ohOff = dec({ attachmentsReview: true, offHours: { enabled: false, tz: 'Asia/Shanghai' } }, { text: 'hi' });
+  const ohOn = dec({ attachmentsReview: true, offHours: { enabled: true, tz: 'Asia/Shanghai' } }, { text: 'hi' });
+  ok(withFile.mode === 'review' && withFile.reasons.join() === 'attachments' && withFile.reasons.some((r) => P.GUARD_REASONS.includes(r)) && allowed.mode === 'direct' && ohOn.reasons.join() === 'off-hours' && ohOff.mode === 'direct' && !dec({}, { text: 'x' }, 'review').reasons.some((r) => P.GUARD_REASONS.includes(r)),
+    'a file under direct + attachments ask ⇒ review (attachments, a GUARD reason); allow ⇒ direct; off-hours switched off at 03:00 Shanghai ⇒ direct, on ⇒ off-hours; a review policy alone is not a guard', JSON.stringify([withFile, allowed, ohOff, ohOn].map((d) => [d.mode, d.reasons])));
+  const outbox = SRC('src/lib/channel-outbox.js'), outbound = SRC('src/server/channels-outbound.js');
+  ok(/if \(p\.policy\.mode !== 'direct' && \(p\.policy\.reasons \|\| \[\]\)\.some\(\(r\) => P\.GUARD_REASONS\.includes\(r\)\)\) pol\.textContent \+= ' ' \+ t\('\(a guard — change it in the policy row\)'\);/.test(outbox)
+    && /offHours: \{ enabled: read\('channels\.guardOffHours'\) !== false, tz:/.test(outbound),
+  'the card\'s "awaiting your approval" line points at the policy row when a guard held it; the server reads the off-hours switch');
+  // THE RENDERER: the real guardRowsEl over a fake DOM (its own source, evaluated with fake el/btn/t/P)
+  const reachSrc = SRC('src/lib/channel-reach-editor.js');
+  const fnSrc = (src) => { const i = src.indexOf('export function guardRowsEl('); const j = src.indexOf('\n}\n', i); return src.slice(i, j + 3).replace('export function', 'function'); };
+  const mkDom = () => {
+    const mk = (tag, cls, text) => { const n = { tag, className: cls || '', textContent: text == null ? '' : String(text), dataset: {}, children: [], parent: null, attrs: {}, checked: false, type: '',
+      setAttribute(k, v) { this.attrs[k] = v; }, appendChild(c) { c.parent = this; this.children.push(c); return c; },
+      replaceWith(x) { const p = this.parent; const i = p.children.indexOf(this); p.children[i] = x; x.parent = p; this.parent = null; },
+      get isConnected() { let q = this; while (q.parent) q = q.parent; return q.root === true; } }; return n; };
+    const all = (n, f, out = []) => { if (f(n)) out.push(n); for (const c of n.children) all(c, f, out); return out; };
+    return { mk, all };
+  };
+  const runRows = (src, guards, owner) => {
+    const D = mkDom(); const writes = []; const subs = {};
+    const store = { v: { ...guards }, set(k, v) { writes.push([k, v]); this.v[k] = v; for (const f of subs[k] || []) f(); }, get(k) { return this.v[k]; }, on(k, f) { (subs[k] = subs[k] || new Set()).add(f); }, off(k, f) { if (subs[k]) subs[k].delete(f); } };
+    const app = { settings: store, putGrain(x) { writes.push(['grain', x]); } };
+    const btn = (label, onClick, cls) => { const b = D.mk('button', 'mounts-btn ' + cls, label); b.onclick = onClick; return b; };
+    const guardRowsEl = new Function('el', 'btn', 't', 'P', fnSrc(src) + '\nreturn guardRowsEl;')(D.mk, btn, fill, P);
+    const model = () => P.policyRowModel({ grain: 'account', policy: DIRECT, guards: { linksReview: store.v['channels.guardLinksReview'] !== false, attachmentsReview: store.v['channels.guardAttachmentsReview'] !== false, offHoursTz: store.v['channels.offHoursTz'] || '', offHoursOn: store.v['channels.guardOffHours'] !== false }, owner, localTz: 'Asia/Tokyo' });
+    const host = D.mk('div'); host.root = true; let paints = 0;
+    const paint = () => { paints++; const next = guardRowsEl(app, model(), { repaint: paint }); if (host.children[0]) { if (host.children[0]._guardOff) host.children[0]._guardOff(); host.children[0].replaceWith(next); } else host.appendChild(next); };
+    paint();
+    return { D, host, writes, store, get paints() { return paints; }, rows: () => D.all(host, (n) => n.className === 'chan-policy-guard'), inputs: () => D.all(host, (n) => n.tag === 'input'), buttons: () => D.all(host, (n) => n.tag === 'button'), text: () => D.all(host, (n) => true).map((n) => n.textContent).join(' | '), subs: () => 0 };
+  };
+  const r = runRows(reachSrc, {}, true);
+  const rows0 = r.rows().map((n) => `${n.dataset.guard}:${n.dataset.state}`).join(' ');
+  const sw0 = r.inputs().map((n) => `${n.checked}:${n.attrs.role}`).join(' ');
+  const zone = r.buttons().map((b) => b.textContent).join();
+  r.inputs()[0].onchange(); await new Promise((res) => setTimeout(res, 0));
+  const after = r.rows().map((n) => `${n.dataset.guard}:${n.dataset.state}`).join(' ');
+  ok(rows0 === 'attachments:ask links:ask offHours:allow' && sw0 === 'true:switch true:switch' && zone === 'Use my time zone (Asia/Tokyo)'
+    && JSON.stringify(r.writes) === '[["channels.guardAttachmentsReview",false]]' && after === 'attachments:allow links:ask offHours:allow' && r.paints === 2,
+  'the renderer draws the model\'s rows (2 switches checked = asks, the zone button for off-hours); a click writes ONLY channels.guardAttachmentsReview=false and the store\'s change redraws the row (attachments: allow)', `${rows0} / ${sw0} / ${zone} / ${JSON.stringify(r.writes)} / ${after} / paints ${r.paints}`);
+  r.buttons()[0].onclick(); await new Promise((res) => setTimeout(res, 0));
+  ok(JSON.stringify(r.writes[1]) === '["channels.offHoursTz","Asia/Tokyo"]' && r.rows()[2].dataset.state === 'ask' && r.inputs().length === 3 && /Not full delegation — still asks you: A message with a link · Outside working hours/.test(r.text()),
+    'the zone button sets the working-hours zone; off-hours then asks and gets its switch; the delegation line follows', `${JSON.stringify(r.writes)} ${r.text().slice(0, 300)}`);
+  // a remote snapshot moving TWO keys at once ⇒ ONE repaint, and it ends (the store's live listener Set)
+  const before = r.paints; r.store.set('channels.guardLinksReview', false); r.store.set('channels.guardOffHours', false); await new Promise((res) => setTimeout(res, 0));
+  ok(r.paints === before + 1 && r.rows()[1].dataset.state === 'allow' && r.rows()[2].dataset.state === 'allow' && /^Full delegation/.test(r.text().split(' | ').find((x) => /delegation/.test(x)) || ''),
+    `a burst of store changes ⇒ one repaint after the listener loop (${r.paints - before}); links + off-hours allow ⇒ "Full delegation"`);
+  const ag = runRows(reachSrc, {}, false);
+  ok(ag.rows().length === 3 && ag.inputs().length === 0 && ag.buttons().length === 0, 'an agent\'s view (owner false): the same rows, no switch, no button');
+  // CONTROL (a): the toggle writes a per-grain field instead of the instance setting ⇒ RED
+  const perGrain = reachSrc.replace('cb.onchange = () => { app.settings.set(r.key, r.toggleTo); };', 'cb.onchange = () => { app.putGrain({ guards: { [r.id]: r.toggleTo } }); };');
+  const c1 = runRows(perGrain, {}, true); c1.inputs()[0].onchange(); await new Promise((res) => setTimeout(res, 0));
+  const c1red = perGrain !== reachSrc && !(JSON.stringify(c1.writes) === '[["channels.guardAttachmentsReview",false]]' && c1.rows()[0].dataset.state === 'allow');
+  ok(c1red, `CONTROL: a switch that writes a per-grain field instead of the instance setting is RED (writes ${JSON.stringify(c1.writes)}, row ${c1.rows()[0].dataset.state})`);
+  // CONTROL (b): delegationText said while a guard still asks ⇒ RED
+  const polSrc = SRC('src/channel-policy.js');
+  const mutSrc = polSrc.replace(': asking.length ? t(\'Not full delegation — still asks you: {list}\', { list: asking.join(\' · \') })', ': false ? null').replace(/require\('\.\/([\w-]+\.js)'\)/g, (x, f) => `require(${JSON.stringify(path.join(REPO, 'src', f))})`);
+  const mutFile = path.join(ROOT, 'channel-policy-mutant.js'); fs.writeFileSync(mutFile, mutSrc);
+  const PM = require(mutFile);
+  const mm = PM.policyRowModel({ grain: 'account', policy: DIRECT, guards: { ...ALLOW, attachmentsReview: true } });
+  ok(mutSrc !== polSrc && /^Full delegation/.test(mm.delegationText) && !(mm.delegationText === 'Not full delegation — still asks you: A message with files'), `CONTROL: a model that says full delegation while the attachment guard asks is RED ("${mm.delegationText.slice(0, 40)}…")`);
+}
 
 try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch {}
 console.log(`\n${fail ? `${fail} FAILED` : 'ALL PASS'} (${pass} passed${fail ? `, ${fail} failed` : ''})`);

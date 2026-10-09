@@ -163,7 +163,9 @@ class SettingsManager {
   _notify(path, newVal, oldVal) {
     const listeners = this._listeners[path];
     if (listeners) {
-      for (const cb of listeners) {
+      // a SNAPSHOT of the listeners (lane guards-door): the Set is live, so a listener that re-subscribes while it runs
+      // (a row that redraws itself) was visited again, forever — test-settings-view §8
+      for (const cb of [...listeners]) {
         try { cb(newVal, oldVal); } catch (e) { console.error(`Settings listener error [${path}]:`, e); }
       }
     }

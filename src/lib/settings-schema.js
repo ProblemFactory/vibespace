@@ -1169,13 +1169,19 @@ const SETTINGS_SCHEMA = {
   'channels.guardLinksReview': {
     type: 'boolean', default: true,
     label: t('Outbox: a message with a link always needs your approval'),
-    description: t('A proposal whose text carries a link goes to review even on a channel whose policy is "send directly". A guard can only tighten a policy, never relax it.'),
+    description: t('A proposal whose text carries a link goes to review even on a channel whose policy is "send directly". A guard can only tighten a policy, never relax it. Also switched in the policy row (a conversation\'s or an account\'s Reach & policy…).'),
     category: t('Channels'), liveApply: true,
   },
   'channels.guardAttachmentsReview': {
     type: 'boolean', default: true,
     label: t('Outbox: a message with an attachment always needs your approval'),
-    description: t('A proposal carrying an attachment goes to review even on a "send directly" channel.'),
+    description: t('A proposal carrying an attachment goes to review even on a "send directly" channel. Off = an agent with send authority on a "send directly" channel sends files without asking. Also switched in the policy row (a conversation\'s or an account\'s Reach & policy…).'),
+    category: t('Channels'), liveApply: true,
+  },
+  'channels.guardOffHours': {
+    type: 'boolean', default: true,
+    label: t('Outbox: outside working hours every message needs your approval'),
+    description: t('Applies once a working-hours time zone is set below. Off = an agent with send authority on a "send directly" channel sends at any hour. Also switched in the policy row (a conversation\'s or an account\'s Reach & policy…).'),
     category: t('Channels'), liveApply: true,
   },
   'channels.offHoursTz': {

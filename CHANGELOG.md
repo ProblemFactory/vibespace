@@ -2,6 +2,16 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.245 — 2026-10-09
+
+### Added
+- You can attach files and pictures to your own replies in a channel — the same way agents can.
+- A file on a draft or a sent message opens in the viewer with one click — pictures full-size, documents in a window — and can still be downloaded.
+- The sending guards — files, links, off-hours — can be switched right where the policy is shown, and full delegation is said in plain words.
+
+### Fixed
+- Reactions arriving on messages above your view no longer shift the text you are reading.
+
 ## 2.369.244 — 2026-10-09
 
 ### Added

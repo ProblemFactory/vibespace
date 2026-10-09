@@ -1597,6 +1597,7 @@ const CENSUS = [
   ['channel-outbox.js', 'input', 'text', 'the reject reason'],
   ['channel-outbox.js', 'textarea', 'text', 'THE OUTBOX EDITOR (a proposal edited before approval)'],
   ['channel-reach-editor.js', 'select', 'choice', 'the sending policy; a grant\'s level'],
+  ['channel-reach-editor.js', 'input', 'control', 'a sending guard\'s house switch — files / links / off-hours (a checkbox, role=switch: the policy row and the account Edit dialog — lane guards-door, joined at the 2.369.245 integration)'],
   ['chat-renderers.js', 'details', 'control', 'a diff / media fold, attached pages, a long message'],
   ['docx-viewer.js', 'shadow', 'none', 'the Word viewer\'s paper: a shadow root holding pages and a stylesheet, no field (the grep reads the JS that fills it)'],
   ['inbox-window.js', 'combobox', 'widget', 'the For-you list (role=listbox)'],

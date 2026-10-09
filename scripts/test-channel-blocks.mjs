@@ -999,7 +999,73 @@ console.log('⑮ the upward page: a scroll event pages only on the person\'s inp
   ok(PG.atTail({ scrollHeight: 1000, scrollTop: 961, clientHeight: 0 }) && !PG.atTail({ scrollHeight: 1000, scrollTop: 900, clientHeight: 40 }) && PG.atTail({ scrollHeight: 358, scrollTop: 0, clientHeight: 358 }), `atTail: within ${PG.TAIL_PX} px of the bottom; a list that fits its pane is at its tail`);
   // WIRING PINS: the window asks the verdict on every cause, notes only the person's input, never a bare scroll
   const win = read('src/lib/channel-window.js');
-  const IMPORT_RE = /import \{ pageUpVerdict, isGutterPress, isUpKey, isTypingTarget, wheelTowardOlder, nestedScrollTop, holdUntilAfter, atTail, PULL_PX \} from '\.\/channel-paging\.js';/;
+  // B-59ff (lane reaction-strip-anchor): A PATCH NEVER MOVES WHAT THE READER IS LOOKING AT — PURE `anchorDelta`
+  const AD = [
+    [{ rowTop: -200, rowBottom: -120, deltaH: 34 }, 34, 'above · grow'], [{ rowTop: -200, rowBottom: -120, deltaH: -34 }, -34, 'above · shrink'],
+    [{ rowTop: -80, rowBottom: 0, deltaH: 34 }, 34, 'bottom on the top edge · grow'], [{ rowTop: -40, rowBottom: 30, deltaH: 34 }, 0, 'straddling, line at the edge · grow'], [{ rowTop: -40, rowBottom: 30, viewportTop: 30, deltaH: 34 }, 34, 'straddling, the reader\'s line below it · grow'],
+    [{ rowTop: 100, rowBottom: 180, deltaH: 34 }, 0, 'in view · grow'], [{ rowTop: 100, rowBottom: 180, deltaH: -34 }, 0, 'in view · shrink'],
+    [{ rowTop: 900, rowBottom: 980, deltaH: 34 }, 0, 'below · grow'], [{ rowTop: 900, rowBottom: 980, deltaH: -34 }, 0, 'below · shrink'],
+    [{ rowTop: -200, rowBottom: -120, deltaH: 0 }, 0, 'above · unchanged'], [{ rowTop: -200, rowBottom: -120, deltaH: NaN }, 0, 'above · NaN'],
+  ];
+  const adBad = AD.filter(([f, want]) => PG.anchorDelta({ viewportTop: 0, ...f }) !== want).map(([f, want, n]) => [n, want, PG.anchorDelta({ viewportTop: 0, ...f })]);
+  ok(!adBad.length, `anchorDelta: ${AD.length} rows — a row above the reader's line moves scrollTop by its change (grow and shrink); the reader's row, rows in view and below move nothing`, J(adBad));
+  // THE WALK: a seeded 3 000-step model of a list (rows of 40–120 px, a 700 px viewport) — each step patches one random
+  // row by ±34 (a strip drawn / taken) or scrolls; the window's rule (scrollTop += Σ anchorDelta) must keep the first
+  // row at the 700 px view's middle (the reader's row) within 1 px of where it was
+  const walk = (ad) => {
+    let seed = 0x59ff; const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+    const h = Array.from({ length: 200 }, () => 40 + Math.floor(rnd() * 80)); let st = 4000, worst = 0;
+    const tops = () => { const t = []; let y = 0; for (const x of h) { t.push(y); y += x; } return t; };
+    for (let i = 0; i < 3000; i++) {
+      const total = h.reduce((a, b) => a + b, 0); st = Math.max(0, Math.min(st, total - 700));
+      if (rnd() < 0.2) { st += Math.round((rnd() - 0.5) * 400); continue; }
+      const t0 = tops(); const vis = t0.findIndex((y, k) => y + h[k] > st + 350); if (vis < 0) continue;
+      const k = Math.floor(rnd() * h.length); const dH = (rnd() < 0.5 && h[k] >= 74) ? -34 : 34;
+      const d = ad({ rowTop: t0[k] - st, rowBottom: t0[k] + h[k] - st, viewportTop: t0[vis] - st, deltaH: dH });
+      h[k] += dH; st += d;
+      if (k === vis) continue;   // the reader's own row grew at its bottom: its top holds by itself
+      worst = Math.max(worst, Math.abs((tops()[vis] - st) - (t0[vis] - (st - d))));
+    }
+    return worst;
+  };
+  ok(walk(PG.anchorDelta) <= 1, `anchorDelta WALK: 3 000 seeded steps (patches above / in / below × grow / shrink, scrolls between) — the reader's row (at the view's middle) never moves by more than 1 px (worst ${walk(PG.anchorDelta)} px)`);
+  const MA = await import(pathToFileURL(mutantCopies('chan-anchor', REPO).write('src/lib/channel-paging.js', read('src/lib/channel-paging.js').replace('? deltaH : 0;\n}', '? 0 : 0;\n}'), 'noanchor')).href);
+  ok(MA.anchorDelta({ rowTop: -200, rowBottom: -120, viewportTop: 0, deltaH: 34 }) === 0 && walk(MA.anchorDelta) >= 34, `CONTROL: without the compensation a strip on a row above moves the reader's row ${walk(MA.anchorDelta)} px in the walk (≥ 34)`);
+  // r2 THE LATE-HEIGHT CENSUS (B-59ff): every writer of a list row's height AFTER its first paint, each with its route —
+  // `row anchor` (the window's ONE ResizeObserver over every list row compensates it in the same frame), `fixed box` (a
+  // reserved size: the height does not change) or `below` (after every row: nothing under the reader moves). A needle
+  // that vanished reddens its row (the writer moved — re-census it); STRUCTURE: every row insertion into the list is
+  // followed by `observeRows(list)`, and observeRows hands every direct `.chanmsg` of the list to the row anchor —
+  // a PLANTED unrouted insertion (a mutant) is RED by name
+  const WRITERS = [
+    ['src/lib/reaction-picker.js', "row.insertBefore(strip, row.querySelector(':scope > .chanmsg-bar'))", 'row anchor', 'a late reaction strip (trickle / broadcast / re-read page / toggle answer)'],
+    ['src/lib/reaction-picker.js', 'if (!list.length) strip.remove();', 'row anchor', 'the last reaction gone — the strip leaves (compensated, never deferred)'],
+    ['src/lib/channel-mail-frame.js', "s.frame.style.height = hv.h + 'px'", 'row anchor', "a mail frame's measured height (the height budget's apply)"],
+    ['src/lib/channel-mail-frame.js', "ph.style.height = (s.h || MF.PLACEHOLDER_PX) + 'px'", 'fixed box', 'a frame dropped to its placeholder keeps the last measured height'],
+    ['src/lib/channel-mail-frame.js', "f.style.height = (s.h || MF.PLACEHOLDER_PX) + 'px'", 'fixed box', 'a placeholder mounted back as a frame at the same height'],
+    ['src/lib/channel-window.js', 'img.onload = () =>', 'row anchor', "a picture's decode (no reserved box: the browser lays the image out — no JS write to route)"],
+    ['src/lib/channel-window.js', 'img.replaceWith(wait);', 'row anchor', 'a picture waiting for its retry'],
+    ['src/lib/channel-window.js', 'img.replaceWith(chip);', 'row anchor', 'a refused picture becomes its chip'],
+    ['src/lib/channel-window.js', 'if (head && chip) head.appendChild(chip);', 'row anchor', 'a thread chip born (applyThreads / becomeTopicRoot)'],
+    ['src/lib/channel-window.js', 'function applyAuthors', 'row anchor', "an author's head re-spelled in place"],
+    ['src/lib/channel-window.js', 'outboxSec.replaceChildren(sec)', 'below', 'the inline proposals slot sits after every row'],
+  ];
+  const lateCensus = (srcOf) => {
+    const red = WRITERS.filter(([f, needle]) => !srcOf(f).includes(needle)).map(([f, n]) => `${f}: writer gone — ${n}`);
+    const win = srcOf('src/lib/channel-window.js');
+    const ins = win.split('list.insertBefore(rowsOf(').length - 1, obs = win.split('observeRows(list);').length - 1;
+    if (ins !== obs) red.push(`channel-window.js: ${ins} row insertions into the list, ${obs} observeRows(list) — an insertion the row anchor never sees`);
+    if (!/if \(rowRo && container === list\) for \(const row of list\.querySelectorAll\(':scope > \.chanmsg:not\(\[data-anchor-obs\]\)'\)\) \{ row\.dataset\.anchorObs = '1'; rowRo\.observe\(row\); \}/.test(win)) red.push('channel-window.js: observeRows no longer hands every list row to the row anchor');
+    if (!/if \(d\) list\.scrollTop \+= d;/.test(win) || !/anchorDelta\(\{ rowTop:/.test(win)) red.push('channel-window.js: the row anchor no longer moves scrollTop by PURE anchorDelta');
+    return red;
+  };
+  const lc = lateCensus(read);
+  ok(!lc.length, `LATE-HEIGHT CENSUS: ${WRITERS.length} writers of a list row's height after first paint — ${WRITERS.filter((w) => w[2] === 'row anchor').length} through the row anchor, ${WRITERS.filter((w) => w[2] === 'fixed box').length} fixed boxes, ${WRITERS.filter((w) => w[2] === 'below').length} below every row; every row insertion observed`, J(lc));
+  const planted = lateCensus((f) => f === 'src/lib/channel-window.js' ? read(f).replace('    list.insertBefore(rowsOf(fresh, seam)', '    list.insertBefore(rowsOf(fresh.slice(0, 1), seam), list.firstChild);\n    list.insertBefore(rowsOf(fresh, seam)') : read(f));
+  ok(planted.length === 1 && /row insertions/.test(planted[0]), 'CONTROL: a PLANTED unrouted row insertion (no observeRows after it) is RED by name', J(planted));
+  const css = read('public/style.css');
+  ok(/\.chanwin-list \{[^}]*overflow-anchor: none;/.test(css) && /\.chanmsg-rx \{[^}]*min-height: var\(--reaction-strip-h\)/.test(css), 'PIN: the list opts out of the browser\'s anchoring (the window\'s ONE mechanism) and a known strip\'s box reserves --reaction-strip-h at first paint');
+  const IMPORT_RE = /import \{ pageUpVerdict, isGutterPress, isUpKey, isTypingTarget, wheelTowardOlder, nestedScrollTop, holdUntilAfter, atTail, anchorDelta, PULL_PX \} from '\.\/channel-paging\.js';/;
   ok(IMPORT_RE.test(win) && /if \(!pageUpVerdict\(facts\(cause\)\)\.page\) return;/.test(win), 'PIN: the window\'s `pageUp` is refused by the PURE verdict — every page goes through it');
   ok(/list\.addEventListener\('scroll', \(\) => \{ tail = atTail\(list\); pageUp\('scroll'\); \}\);/.test(win) && /list\.addEventListener\('wheel', \(e\) => \{ if \(wheelTowardOlder\(\{ deltaY: e\.deltaY, ctrlKey: e\.ctrlKey, shiftKey: e\.shiftKey, innerScrollTop: innerScrollTop\(e\.target\) \}\)\) \{ noteInput\(\); pageUp\('wheel'\); \} \}, \{ passive: true \}\);/.test(win) && /pageUp\('pull'\)/.test(win) && /isGutterPress\(\{ clientX: e\.clientX, left: r\.left, clientWidth: list\.clientWidth \}\)/.test(win), 'PIN: a scroll event asks as `scroll`, a PLAIN vertical wheel UP (only — round 6: no Ctrl / Shift, not inside a scrolled nested scroller) is on record and asks as `wheel`, a finger pulled down as `pull`; a press counts only on the gutter');
   // verify round 6: the nested-scroller walk feeds the wheel, the finger and the key; the hold is a fact of the verdict, set only by holdUntilAfter

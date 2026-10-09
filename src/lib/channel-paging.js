@@ -197,3 +197,16 @@ export function pageUpVerdict({ cause = 'scroll', scrollTop = 0, prepending = fa
 export function atTail({ scrollHeight = 0, scrollTop = 0, clientHeight = 0 } = {}) {
   return (Number(scrollHeight) - Number(scrollTop) - Number(clientHeight)) < TAIL_PX;
 }
+
+// A PATCH NEVER MOVES WHAT THE READER IS LOOKING AT (B-59ff, lane reaction-strip-anchor): the reaction trickle draws a
+// strip ~1 s after a scroll; a row ABOVE the viewport that grew by it (34 px) pushed every row below it down with
+// scrollTop unchanged — the text moved under the reader's finger (measured on ad7a18198: the trickle asks only rows
+// in view, so its strip grows a VISIBLE row and every row below it moved 34 px). The window patches each row and asks
+// HERE how far scrollTop follows: a row whose bottom (where the strip lands) is at or above `viewportTop` — THE
+// READER'S LINE, the top of the row at the view's middle — moves the view by its height change, grown or shrunk (the
+// rows above the reader give way upward); the reader's row and every row below change in place (0). Coordinates
+// are the list's (0 = its top edge), rows measured BEFORE the patch.
+export function anchorDelta({ rowTop = 0, rowBottom = rowTop, viewportTop = 0, deltaH = 0 } = {}) {
+  if (!Number.isFinite(deltaH) || !deltaH) return 0;
+  return Number(rowBottom) <= Number(viewportTop) ? deltaH : 0;
+}

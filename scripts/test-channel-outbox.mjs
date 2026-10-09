@@ -1943,6 +1943,96 @@ async function ccReachLeg(engine, tag) {
         ok(texts(partly).includes('partly sent') && find(partly, 'chan-prop-state-partly').length === 1 && find(partly, 'chan-prop-reason').some((e) => e._cls.has('chan-warn') && /NOT landed: "report\.md"/.test(e.textContent)) && texts(line).includes('partly sent') && !texts(whole).includes('partly sent') && texts(whole).includes('sent'),
           'lark-upload-preflight: a sent proposal whose file did not land reads "partly sent" on the card and the Outbox row (the NOT-landed part in a warning line); a whole send reads "sent"', JSON.stringify(texts(line).slice(0, 4)));
       }
+      // lane outbox-attachment-preview (owner 2026-10-09 "草稿的那个界面怎么不能点开文件预览，只能下载"): a click on a draft's
+      // file OPENS it — a picture in THE image overlay, a document in a viewer window by URL — and the ⤓ on every row
+      // downloads; a type with no preview keeps its download. Controls: a mutant whose name downloads on click ⇒ RED.
+      {
+        const f = (n, name, mime) => ({ n, name, bytes: 2048, mime, sha256: 'b'.repeat(64), kind: 'file' });
+        const files = [f(0, 'shot.png', 'image/png'), f(1, 'notes.md', 'text/markdown'), f(2, 'q3.pdf', 'application/pdf'), f(3, 'plan.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'), f(4, 'logs.zip', 'application/zip'), f(5, 'page.html', 'text/html')];
+        const pv = { id: 'p-oap1', adapterId: 'lark-1', adapterLabel: 'Lark', convId: 'oc_1', key: 'lark-1/oc_1', state: 'awaiting-approval', text: 'files', draftedBy: { kind: 'agent', id: 'agent-1', name: 'Worker' }, attachments: files, canDecide: true, sendAs: 'user' };
+        const judgeRows = (M) => {
+          const opened = [];
+          const appV = { openFile: (spec, ...rest) => opened.push(rest.length || typeof spec !== 'object' ? 'PATH' : spec), openChannel() {}, openChannelOutbox() {} };
+          const card = M.renderProposalCard(appV, pv);
+          const rows = find(card, 'chan-prop-file');
+          const nameOf = (r) => find(r, 'chan-prop-file-name')[0];
+          const url = (n) => `/api/channels/outbox/p-oap1/attachment/${n}`;
+          body.childNodes = [];
+          const thumb = find(rows[0], 'chan-prop-file-thumb')[0];
+          if (thumb && thumb.onclick) thumb.onclick();
+          const ov = find(body, 'chat-img-overlay')[0];
+          const ovSrc = ov && ov.children[0] && ov.children[0].src;
+          body.childNodes = [];
+          for (const i of [1, 2, 3, 5]) nameOf(rows[i]).click();
+          const zip = nameOf(rows[4]);
+          const dls = find(card, 'chan-prop-file-dl');
+          return {
+            overlay: ovSrc === `${url(0)}?inline=1`,
+            viewer: opened.length === 4 && [1, 2, 3, 5].every((n, k) => opened[k] && opened[k].rawUrl === url(n) && opened[k].fileName === files[n].name) && [1, 2, 3, 5].every((i) => nameOf(rows[i]).getAttribute('download') === null),
+            zip: zip.getAttribute('download') === '' && typeof zip.onclick !== 'function' && zip.href === url(4),
+            dl: dls.length === files.length && dls.every((d, i) => d.getAttribute('download') === '' && d.href === url(i) && d.getAttribute('aria-label') === `Download ${files[i].name}`),
+            opened: opened.map((o) => (o === 'PATH' ? o : o.fileName)),
+          };
+        };
+        const v = judgeRows(CO);
+        ok(v.overlay, 'outbox-attachment-preview: a click on a draft\'s PICTURE opens THE image overlay over its ?inline=1 URL', JSON.stringify(v));
+        ok(v.viewer, 'outbox-attachment-preview: a click on a .md / .pdf / .docx / .html name opens the VIEWER door by URL (app.openFile({rawUrl, fileName})) — never a download, never a path', JSON.stringify(v));
+        ok(v.zip, 'outbox-attachment-preview: a type with no preview (.zip) keeps its download on the name', JSON.stringify(v));
+        ok(v.dl, 'outbox-attachment-preview: EVERY row carries the secondary ⤓ Download (its own URL, named by title + aria-label)', JSON.stringify(v));
+        ok(['overlay', 'viewer', 'viewer', 'viewer', 'download', 'viewer'].join() === files.map((x) => CO.attachmentOpenKind(x.name, x.mime)).join() && CO.attachmentOpenKind('evil.png', 'text/html') === 'viewer',
+          'outbox-attachment-preview: attachmentOpenKind (PURE) — raster ⇒ overlay, a drawable type ⇒ viewer, an archive ⇒ download; an HTML named .png goes to the viewer (read as TEXT there), never the overlay', files.map((x) => CO.attachmentOpenKind(x.name, x.mime)).join());
+        const gone = CO.renderProposalCard(app, { ...pv, id: 'p-oap2', state: 'sent', attachmentsGoneAt: 1 });
+        ok(find(gone, 'chan-prop-file-dl').length === 0 && find(gone, 'chan-prop-file-thumb').length === 0 && find(gone, 'chan-prop-file-name').every((e) => e.tagName === 'SPAN' && typeof e.onclick !== 'function'),
+          'outbox-attachment-preview: a draft whose files are GONE offers no open and no download — names only');
+        // CONTROL: a mutant whose name DOWNLOADS on a click (the pre-lane row) ⇒ the viewer leg reads RED
+        const oSrc = fs.readFileSync(path.join(REPO, 'src/lib/channel-outbox.js'), 'utf8');
+        const ONCLICK = "name.onclick = (ev) => { ev.preventDefault(); openAttachment(app, { url, name: a.name, mime: a.mime }); };";
+        ok(oSrc.includes(ONCLICK), 'outbox-attachment-preview: the control\'s anchor is present (the name\'s open door)');
+        const mOut = path.join(dir, 'channel-outbox-m1.mjs');
+        await esbuild.build({ stdin: { contents: oSrc.replace(ONCLICK, "name.setAttribute('download', '');"), resolveDir: path.join(REPO, 'src/lib'), sourcefile: 'channel-outbox.js', loader: 'js' }, bundle: true, format: 'esm', platform: 'node', target: 'es2022', outfile: mOut, logLevel: 'silent', loader: { '.css': 'empty' }, plugins: [stubBuildVersion] });
+        const vm1 = judgeRows(await import(mOut));
+        ok(!vm1.viewer, 'outbox-attachment-preview CONTROL: a row that DOWNLOADS on a click ⇒ the viewer leg is RED', JSON.stringify(vm1));
+        // THE VIEWER BY URL: FileViewer.renderInto(…, {rawUrl}) over the REAL module (heavy neighbours stubbed, a stub
+        // fetch): markdown through THE sanitizer, CSV into a table, HTML as TEXT, a gone draft says so, an archive never
+        // fetches; without rawUrl the path-built /api/file/raw is untouched. CONTROL: HTML drawn as markup ⇒ RED.
+        const STUBS = /\/(hex-viewer|code-editor|docx-viewer|docx-viewer-model|office-open|drag-feed|file-download|file-explorer-ops|window-types|utils|i18n|safe-html)\.js$|^pptx-preview$/;
+        const stubFv = { name: 'stub-fv', setup(b) {
+          b.onResolve({ filter: STUBS }, (a) => ({ path: a.path, namespace: 'fvstub' }));
+          b.onLoad({ filter: /.*/, namespace: 'fvstub' }, () => ({ loader: 'js', contents: "const S = function stub() { return null; }; module.exports = { HexViewer: S, CodeEditor: S, formatSize: S, escHtml: (x) => String(x), showConfirmDialog: S, showInputDialog: S, showToast: S, uiScale: () => 1, startPointerDrag: S, renderDocxViewer: S, showDocxRefusal: S, viewerVerdict: () => ({ kind: 'ok' }), refusalText: S, openWithVerdict: S, init: S, registerWindowType: S, svgIcon16: S, fsErrorText: S, wireFileDownload: S, t: (s, v) => String(s).replace(/\\{(\\w+)\\}/g, (m, x) => (v && x in v ? v[x] : m)), sanitizeHtml: (h) => 'SANITIZED:' + h };" }));
+        } };
+        const fvBundle = async (src, name) => { const o = path.join(dir, name); await esbuild.build({ stdin: { contents: src, resolveDir: path.join(REPO, 'src/lib'), sourcefile: 'file-viewer.js', loader: 'js' }, bundle: true, format: 'esm', platform: 'node', target: 'es2022', outfile: o, logLevel: 'silent', loader: { '.css': 'empty' }, plugins: [stubFv, stubBuildVersion] }); return (await import(o)).FileViewer; };
+        const fvSrc = fs.readFileSync(path.join(REPO, 'src/lib/file-viewer.js'), 'utf8');
+        const BYTES = { '/u/notes.md': '# Title\n\n<img src=x onerror=alert(1)>', '/u/t.csv': 'a,b\n"x, y",2\n', '/u/page.html': '<script>alert(1)</script><b>hi</b>' };
+        const judgeViewer = async (FV) => {
+          const asked = []; const realFetch = globalThis.fetch;
+          globalThis.fetch = async (u) => { asked.push(u); if (/p-gone/.test(u)) return { ok: false, status: 404, arrayBuffer: async () => new ArrayBuffer(0) }; const b = Buffer.from(BYTES[u] || ''); return { ok: true, status: 200, arrayBuffer: async () => b.buffer.slice(b.byteOffset, b.byteOffset + b.length) }; };
+          try {
+            const draw = async (name, rawUrl, filePath = '') => { const c = document.createElement('div'); await FV.renderInto(c, filePath, name, null, '', rawUrl ? { rawUrl } : {}); return c; };
+            const md = await draw('notes.md', '/u/notes.md'); const mdBody = find(md, 'file-viewer-md')[0];
+            const csv = await draw('t.csv', '/u/t.csv'); const cells = csv._all().filter((e) => e.tagName === 'TH' || e.tagName === 'TD').map((e) => e.textContent);
+            const html = await draw('page.html', '/u/page.html'); const pre = find(html, 'file-viewer-text')[0];
+            const gone = await draw('notes.md', '/api/channels/outbox/p-gone/attachment/0');
+            const n0 = asked.length; const zip = await draw('logs.zip', '/u/logs.zip');
+            const pdf = await draw('a.pdf', '', '/home/u/a.pdf'); const emb = pdf._all().find((e) => e.tagName === 'IFRAME');
+            return {
+              md: !!mdBody && mdBody.innerHTML.startsWith('SANITIZED:') && mdBody.innerHTML.includes('<h1'),
+              csv: cells.join('|') === 'a|b|x, y|2',
+              text: !!pre && pre.textContent === BYTES['/u/page.html'] && !pre._html && pre.childNodes.length === 1 && pre.childNodes[0].nodeType === 3 && html._all().every((e) => !e._html),
+              gone: gone.textContent === 'This draft’s files are gone',
+              zip: zip.textContent === 'No preview for this type here — Download' && asked.length === n0,
+              path: !!emb && emb.src === '/api/file/raw?path=%2Fhome%2Fu%2Fa.pdf',
+            };
+          } finally { globalThis.fetch = realFetch; }
+        };
+        const fv = await judgeViewer(await fvBundle(fvSrc, 'file-viewer.mjs'));
+        ok(fv.md && fv.csv, 'outbox-attachment-preview FileViewer: renderInto({rawUrl}) draws a markdown file through THE one sanitizer and a CSV into a table — from the URL\'s bytes', JSON.stringify(fv));
+        ok(fv.text, 'outbox-attachment-preview FileViewer: an HTML attachment is read as TEXT (textContent) — never markup in our origin', JSON.stringify(fv));
+        ok(fv.gone && fv.zip, 'outbox-attachment-preview FileViewer: a closed draft\'s URL (404) says its files are gone — never a blank; an archive says "Download" without a fetch', JSON.stringify(fv));
+        ok(fv.path, 'outbox-attachment-preview FileViewer: without rawUrl the path-built /api/file/raw source is untouched', JSON.stringify(fv));
+        const PRE_TEXT = 'pre.textContent = text;';
+        const fvm = fvSrc.includes(PRE_TEXT) ? await judgeViewer(await fvBundle(fvSrc.replace(PRE_TEXT, 'pre.innerHTML = text;'), 'file-viewer-m2.mjs')) : { text: true };
+        ok(!fvm.text, 'outbox-attachment-preview CONTROL: an HTML attachment drawn as MARKUP (innerHTML) ⇒ the text leg is RED', JSON.stringify(fvm));
+      }
       {
         const pre = fs.readFileSync(path.join(REPO, 'src/lib/channel-outbox.js'), 'utf-8');
         const FIXED = "where.appendChild(el('span', 'chan-prop-env', `${p.adapterLabel || p.adapterId} · ${t('New message')}`));";

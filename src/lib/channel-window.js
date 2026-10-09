@@ -66,7 +66,7 @@ import { accountBadges } from './channel-avatar.js';   // B-5fe1: the bar's acco
 import { showAssignFilterDialog, assignmentSummary } from './channel-filter-editor.js';
 // P3: the inline approval cards (the SAME renderer the Outbox window uses —
 // one store, two places, §9.2).
-import { renderInlineProposals, reasonLabel } from './channel-outbox.js';
+import { renderInlineProposals, reasonLabel, attachmentOpenKind, openAttachment } from './channel-outbox.js';
 // a3 i18n: a route failure is worded by its CODE, never by the engine's sentence.
 import { routeErrorText, attachmentReasonText } from './channel-words.js';
 // R3 (§23): a picture's next step (retry / the named chip) and the text line its placeholder leaves — PURE, shared with the engine
@@ -77,7 +77,7 @@ import { track } from './telemetry-client.js';
 import { renderBlocks, placedAttachments, blocksOfRecord } from './channel-blocks-view.js';
 import { renderFacts } from './channel-facts-view.js';   // lane message-facts (B-f066): a message's facts — the summary line, chips, details
 // verify round 3: THE UPWARD PAGE'S VERDICT — a scroll event is displacement; the person's input is intent (PURE)
-import { pageUpVerdict, isGutterPress, isUpKey, isTypingTarget, wheelTowardOlder, nestedScrollTop, holdUntilAfter, atTail, PULL_PX } from './channel-paging.js';
+import { pageUpVerdict, isGutterPress, isUpKey, isTypingTarget, wheelTowardOlder, nestedScrollTop, holdUntilAfter, atTail, anchorDelta, PULL_PX } from './channel-paging.js';
 // §25: the read-only footer's Re-authorize is the account's own re-auth dialog
 import { showReauthAccountDialog } from './channel-account-dialogs.js';
 // PURE, bundled directly (the task-color-seq / quota-model pattern): the
@@ -104,6 +104,135 @@ import { msgBarActions, msgMenuActions, barKey } from './msg-bar-model.js';
 import { renderMsgBar, syncMsgBar, holdBarOpen, msgActionMenu, renderMsgMore, isTouchFirst } from './channel-msg-bar.js';
 import * as P from '../channel-policy.js';
 import { firstLine } from '../channel-thread.js';
+
+// lane owner-composer-attach (owner 2026-10-09: "我能操作的那个聊天框不能上传文件"): THE OWNER'S FILES in the reply box —
+// a paperclip (the system picker; phone too), a drop onto the box, a paste of a file or picture. Each file is ONE chip
+// (name · size, a picture's thumbnail through `.src`), judged at once by PURE `P.composeFilesVerdict` over the adapter's
+// `sendAttachments` row and the account's `send-attachment` offer — a file past a limit is refused AT ITS CHIP by name,
+// a file this account cannot carry says so with the Re-authorize door and never LOOKS attached. Only the accepted bytes
+// ride the send (base64, the agents' `--attach` shape), through the same outbox store and adapter upload path.
+const COMPOSE_READ_MAX = P.ATTACH_MAX_TOTAL;
+function bytesToBase64(u8) {
+  let s = '';
+  for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+/** a refused chip's reason in the device's language (codes from `composeFilesVerdict`) */
+/** a size as the limits are declared (decimal MB — the engine's own refusal words), so a chip never reads 24.8 MB > 25 MB */
+const composeSize = (n) => (Number(n) >= 1e6 ? `${Math.round(Number(n) / 1e5) / 10} MB` : P.attachmentSize(n));
+export function composeFileWhyText(why, limit, { channel = '' } = {}) {
+  const mb = composeSize;
+  if (why === 'attachment-too-large') return t('too large — {channel} takes at most {limit}', { channel, limit: mb(limit) });
+  if (why === 'attachment-count') return t('one too many — {channel} takes at most {n} in one message', { channel, n: limit });
+  if (why === 'attachment-shape') return t('pictures and other files go in separate messages here');
+  if (why === 'attachment-empty') return t('the file is empty');
+  if (why === 'attachment-name') return t('its name cannot be sent');
+  if (why === 'attachment-data') return t('it could not be read');
+  return t('{channel} does not take this file', { channel });
+}
+function createComposeFiles({ app, comp, ta, row, caps, offer, account }) {
+  const picks = [];
+  const box = el('div', 'chanwin-compose-files');
+  box.dataset.channelComposeFiles = '1';
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.multiple = true;
+  input.hidden = true;
+  input.dataset.channelFileInput = '1';
+  const clip = btn('', () => input.click(), 'chanwin-compose-clip');
+  clip.appendChild(icon('attachment', 14));
+  clip.title = t('Attach files or pictures');
+  clip.setAttribute('aria-label', clip.title);
+  clip.dataset.channelAttach = '1';
+  let verdict = { chips: [], send: [], blocked: null, shape: false };
+  const draw = () => {
+    verdict = P.composeFilesVerdict(caps, offer, picks.map((p) => ({ name: p.name, bytes: p.bytes, kind: p.kind })), { hasText: !!ta.value.trim() });
+    box.textContent = '';
+    for (const ch of verdict.chips) {
+      const p = picks[ch.n];
+      const chip = el('div', `chanwin-file-chip chanwin-file-chip-${ch.state}`);
+      chip.dataset.channelFileChip = ch.state;
+      if (p.url && ch.state === 'ok') { const img = document.createElement('img'); img.className = 'chanwin-file-thumb'; img.alt = ''; img.src = p.url; chip.appendChild(img); }
+      else chip.appendChild(fileIcon(p.name, 13));
+      chip.appendChild(el('span', 'chanwin-file-name', p.name));
+      chip.appendChild(el('span', 'chanwin-file-meta', composeSize(p.bytes)));
+      if (ch.state === 'blocked') chip.appendChild(el('span', 'chanwin-file-why chan-warn', t('will NOT be sent')));
+      else if (ch.state === 'refused') { const w = el('span', 'chanwin-file-why chan-warn', `${t('not attached')} — ${composeFileWhyText(ch.why, ch.limit, { channel: account.label || account.id })}`); w.dataset.why = ch.why; chip.appendChild(w); }
+      const x = btn('', () => { if (p.url) URL.revokeObjectURL(p.url); picks.splice(picks.indexOf(p), 1); draw(); }, 'chanwin-file-x');
+      x.appendChild(icon('close', 10));
+      x.title = t('Remove');
+      x.setAttribute('aria-label', `${t('Remove')} ${p.name}`);
+      chip.appendChild(x);
+      box.appendChild(chip);
+    }
+    if (verdict.blocked && picks.length) {
+      const note = el('div', 'chanwin-file-note chan-warn', t('This account’s sign-in ({account}) cannot send files — re-authorize it, or send without the file.', { account: account.label || account.id }));
+      note.dataset.filesBlocked = verdict.blocked.requiredScopes.join(' ');
+      if (note.dataset.filesBlocked) note.title = t('Needs one of: {scopes}', { scopes: verdict.blocked.requiredScopes.join(', ') });
+      const fix = btn(t('Re-authorize'), async () => {
+        const d = await fetchJson('/api/channels?scope=accounts');
+        if (!d || d.error) { showToast(routeErrorText(d), { type: 'error' }); return; }
+        showReauthAccountDialog(app, (d.adapters || []).find((a) => a.id === account.id) || account, { kinds: d.kinds || [] });
+      });
+      fix.dataset.channelReauth = account.id;
+      note.appendChild(fix);
+      box.appendChild(note);
+    }
+    box.hidden = !picks.length;
+  };
+  async function add(files) {
+    for (const f of files) {
+      if (!f) continue;
+      const p = { name: String(f.name || 'pasted.png'), bytes: Number(f.size) || 0, kind: null, data: null, url: null };
+      if (p.bytes > 0 && p.bytes <= COMPOSE_READ_MAX) {
+        try {
+          const u8 = new Uint8Array(await f.arrayBuffer());
+          p.bytes = u8.length;
+          p.kind = P.sniffType(u8.subarray(0, 4096)).kind;
+          p.data = bytesToBase64(u8);
+          if (p.kind === 'image') p.url = URL.createObjectURL(f);
+        } catch { p.kind = null; }
+      }
+      picks.push(p);
+    }
+    draw();
+  }
+  input.onchange = () => { const fs = [...(input.files || [])]; input.value = ''; add(fs); };
+  const hasFiles = (e) => !!(e.dataTransfer && [...(e.dataTransfer.types || [])].includes('Files'));
+  comp.addEventListener('dragover', (e) => { if (!hasFiles(e)) return; e.preventDefault(); comp.classList.add('chanwin-composer-drop'); });
+  comp.addEventListener('dragleave', () => comp.classList.remove('chanwin-composer-drop'));
+  comp.addEventListener('drop', (e) => {
+    comp.classList.remove('chanwin-composer-drop');
+    const fs = [...((e.dataTransfer && e.dataTransfer.files) || [])];
+    if (!fs.length) return;
+    e.preventDefault();
+    add(fs);
+  });
+  ta.addEventListener('paste', (e) => {
+    const fs = [...((e.clipboardData && e.clipboardData.files) || [])];
+    if (!fs.length) return;
+    e.preventDefault();
+    add(fs);
+  });
+  ta.addEventListener('input', () => { if (picks.length) draw(); });
+  row.prepend(clip, input);
+  box.hidden = true;
+  return {
+    box,
+    count: () => picks.length,
+    /** what the Send carries: the accepted files only (never a blocked or refused one) */
+    sending: () => verdict.send.map((n) => ({ name: picks[n].name, data: picks[n].data })),
+    shape: () => verdict.shape,
+    clear: () => { for (const p of picks) if (p.url) URL.revokeObjectURL(p.url); picks.length = 0; draw(); },
+  };
+}
+/** the receipt of the owner's send with files: what landed, what did NOT and why (the card's parts, worded here) */
+export const composeMissed = (p) => ((p && p.result && Array.isArray(p.result.parts)) ? p.result.parts : []).filter((x) => x && !x.ok);
+export function composeReceiptText(p, n) {
+  const miss = composeMissed(p);
+  if (miss.length) return t('Partly sent — {files} NOT landed: {why}', { files: miss.map((x) => (x.part === 'text' ? t('the text') : String(x.name || ''))).join(', '), why: [...new Set(miss.map((x) => String(x.code || 'refused') + (Array.isArray(x.requiredScopes) && x.requiredScopes.length ? ` (${t('needs {scopes}', { scopes: x.requiredScopes.join(' or ') })})` : '')))].join('; ') });
+  return n === 1 ? t('Sent with 1 file') : t('Sent with {n} files', { n });
+}
 
 const ICON = svgIcon16('<path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z"/>');
 
@@ -183,6 +312,13 @@ function attachmentNode(rec, a, base) {
     c.appendChild(words);
     c.appendChild(icon('download', 12, 'chanmsg-att-dl'));
     c.title = t('Download {name} — it is saved, never opened here', { name: a.name || t('attachment') });
+    // lane outbox-attachment-preview: a file the viewer draws OPENS on a click — the ONE door the draft's rows use
+    // (channel-outbox openAttachment); its ⤓ glyph still downloads
+    if (attachmentOpenKind(a.name || '', a.mime || '') === 'viewer') {
+      c.dataset.open = 'viewer';
+      c.title = t('Open {name} — the arrow downloads it', { name: a.name || t('attachment') });
+      c.onclick = (ev) => { if (ev.target.closest && ev.target.closest('.chanmsg-att-dl')) return; ev.preventDefault(); openAttachment(null, { url, name: a.name || 'attachment', mime: a.mime || '' }); };
+    }
     return c;
   };
   if (!Att.isImage(a)) return chipOf();
@@ -641,7 +777,7 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
     // every broadcast); a change (a re-authorization, a disconnect) rebuilds it
     // and carries the typed text over into the new composer
     const ad0 = r.adapter || {};
-    const footKey = JSON.stringify([cm.mode, cm.why || null, (c.offers && c.offers.sendAsUser && c.offers.sendAsUser.why) || null, !!ad0.sendStartsTurn, ad0.sendForm || null, !!ad0.connectable, ad0.id || null, ad0.sendGrant ? ad0.sendGrant.missing : null, c.policy ? c.policy.mode : null, !!ad0.replyAll]);
+    const footKey = JSON.stringify([cm.mode, cm.why || null, (c.offers && c.offers.sendAsUser && c.offers.sendAsUser.why) || null, !!ad0.sendStartsTurn, ad0.sendForm || null, !!ad0.connectable, ad0.id || null, ad0.sendGrant ? ad0.sendGrant.missing : null, c.policy ? c.policy.mode : null, !!ad0.replyAll, ad0.sendAttachments ? ((c.offers && c.offers.sendAttachment) || {}).why || 'files' : null]);
     if (foot.dataset.footKey === footKey && foot.firstChild) return c;
     // a draft being typed is HELD across every rebuild — including the flip to the
     // read-only line (a disconnect mid-sentence) — and restored when the composer returns
@@ -661,6 +797,9 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
       ta.rows = 2;
       ta.value = typed;
       const row = el('div', 'chanwin-composer-row');
+      // lane owner-composer-attach: the owner's own send carries files where the adapter declares them (never a proposal's)
+      const cf = direct && ad0.sendAttachments && c.offers && c.offers.sendAttachment && (c.offers.sendAttachment.offered || c.offers.sendAttachment.why === 'attachments-not-sendable')
+        ? createComposeFiles({ app, comp, ta, row, caps: ad0.sendAttachments, offer: c.offers.sendAttachment, account: { id: ad0.id || adapterId, label: ad0.label || null } }) : null;
       // §25 (the owner: the footer was "a long sentence"): ONE SHORT LINE — how
       // this send goes out, by the adapter's declared form (`sendForm`, never
       // its id) — and the policy sentence behind the ⓘ beside it. A send that
@@ -699,18 +838,27 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
       if (direct) { sendBtn.dataset.channelDirect = '1'; sendBtn.prepend(icon('send', 11)); } else sendBtn.dataset.channelPropose = '1';
       sendBtn.onclick = async () => {
         const text = ta.value.trim();
-        if (!text) return;
+        const files = cf ? cf.sending() : [];
+        if (!text) { if (cf && cf.count()) showToast(t('Write a line to go with the files'), { type: 'warn' }); return; }
+        if (cf && cf.shape()) { showToast(t('Here a file is its own message — send the text first, then the files'), { type: 'warn' }); return; }
         sendBtn.disabled = true;
         // lane reaction-hover: a QUOTE picked from a message's action bar rides as the reply's placement (the engine's
         // PURE verdict re-judges it — a refusal is worded by its code and keeps both the words and the quote)
         const q = quoteTarget;
-        const r2 = await fetchJson(`/api/channels/${encodeURIComponent(adapterId)}/${encodeURIComponent(convId)}/${direct ? 'send' : 'propose'}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, expectWakes: wakes, ...(q ? { replyTo: q.vid, placement: 'quote' } : {}), ...(allBox && allBox.checked ? { replyAll: true } : {}) }) });
+        const r2 = await fetchJson(`/api/channels/${encodeURIComponent(adapterId)}/${encodeURIComponent(convId)}/${direct ? 'send' : 'propose'}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, expectWakes: wakes, ...(files.length ? { attachments: files } : {}), ...(q ? { replyTo: q.vid, placement: 'quote' } : {}), ...(allBox && allBox.checked ? { replyAll: true } : {}) }) });
         sendBtn.disabled = false;
         if (!r2 || r2.error) { showToast(routeErrorText(r2), { type: 'error' }); return; }
         ta.value = '';
         heldDraft = '';
         if (q && quoteTarget === q) { quoteTarget = null; drawQuote(); }
         const st = r2.proposal && r2.proposal.state;
+        if (files.length) {
+          // lane owner-composer-attach: the receipt names what landed — in the window (the line above the box) AND as a toast
+          cf.clear();
+          const said = st === 'sent' ? composeReceiptText(r2.proposal, files.length) : null;
+          let rl = comp.querySelector('.chanwin-compose-receipt');
+          if (said) { if (!rl) { rl = el('div', 'chanwin-compose-receipt'); comp.prepend(rl); } const partly = composeMissed(r2.proposal).length > 0; rl.textContent = said; rl.classList.toggle('chan-warn', partly); rl.dataset.channelReceipt = partly ? 'partly' : 'sent'; showToast(said, { type: partly ? 'warn' : 'success' }); return; }
+        }
         // the policy's reasons are an ENUM — worded through the card's own `reasonLabel` (a3 i18n)
         if (st === 'failed') showToast(t('The channel refused the send: {error}', { error: (r2.proposal && r2.proposal.reason) || '' }), { type: 'error' });
         else if (st === 'unknown') showToast(t('The send left but its answer was lost — check the conversation on the platform'), { type: 'warn' });
@@ -720,7 +868,7 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
       ta.addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); sendBtn.click(); } });
       row.prepend(note);
       row.appendChild(sendBtn);
-      comp.append(ta, row);
+      comp.append(...(cf ? [cf.box] : []), ta, row);
       foot.textContent = '';
       foot.appendChild(comp);
       drawQuote();   // a quote picked before this rebuild (a re-authorization, a policy change) comes back with the box
@@ -860,7 +1008,8 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
   // ── lane channel-threads (2026-09-28): the rows' place facts, the reaction strips, the pane ──
   /** Every drawn row of one message, in the list AND in the pane (a record may be drawn in both). */
   const rowsFor = (vid) => { const sel = `.chanmsg[data-vid="${CSS.escape(String(vid))}"]`; return [...list.querySelectorAll(sel), ...(pane ? pane.rows().querySelectorAll(sel) : [])]; };
-  /** A folded list the route / a broadcast answered → every drawn row's strip patched IN PLACE by key. */
+  /** A folded list the route / a broadcast answered → every drawn row's strip patched IN PLACE by key (the row anchor
+   *  below keeps the reader's row where it is). */
   const applyReactions = (vid, reactions) => { for (const row of rowsFor(vid)) patchReactionStrip(row, { vendorId: vid, reactions }, reactions || [], stripCtx({ vendorId: vid })); };
   /** The strip's context for one record (its chips toggle; adding a reaction is the row's action bar). */
   const stripCtx = (rec) => ({
@@ -1048,7 +1197,55 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
     if (rxVisible.size && !rxTimer) { rxTimer = setTimeout(() => { rxTimer = null; askReactions().catch(() => {}); }, RX_DEBOUNCE_MS); }
   }, { threshold: 0.1 }) : null;
   winInfo._listenerCtl?.signal.addEventListener('abort', () => { if (rxIo) rxIo.disconnect(); if (rxTimer) clearTimeout(rxTimer); });
+  // A LATE HEIGHT NEVER MOVES WHAT THE READER IS LOOKING AT (B-59ff, lane reaction-strip-anchor r2): a reaction strip,
+  // a mail frame's height, a picture's decode, a thread chip, a refused picture's chip — every late writer of a row's
+  // height is caught HERE, by ONE ResizeObserver on every list row (its callback runs after layout, before paint: the
+  // same frame). Each changed row's place BEFORE the change is its place now less the growth of the changed rows above
+  // it; PURE `anchorDelta` moves scrollTop by the change of each row above THE READER'S LINE (the top of the row at the
+  // view's middle — the trickle grows rows IN view). The list opts out of the browser's anchoring (`overflow-anchor:
+  // none`, measured: it held a row wholly above, not an in-view one, and answered the row cut by the top edge with
+  // −36 px) so this is the ONE mechanism. A row the person pressed or keyed within OWN_MS changed by THEIR act (a fold
+  // they opened, their reaction) and is left alone; a rebuild in flight (`listReady` false) is not a reader's view.
+  const OWN_MS = 2000;
+  const rowH = new WeakMap();
+  let ownRow = null, ownAt = 0;
+  const own = (e) => { ownRow = e.target && e.target.closest ? e.target.closest('.chanmsg') : null; ownAt = Date.now(); };
+  list.addEventListener('pointerdown', own, { capture: true, signal: winInfo._listenerCtl?.signal });
+  list.addEventListener('keydown', own, { capture: true, signal: winInfo._listenerCtl?.signal });
+  const rowRo = typeof ResizeObserver === 'function' ? new ResizeObserver((entries) => {
+    // a list hidden under the phone's pushed thread view (or a minimized window) lays its rows out at 0: no reading
+    // position to keep, and the heights it would record are not the rows' — keep the last shown ones
+    if (!list.clientHeight) return;
+    const grew = [];
+    for (const en of entries) {
+      const row = en.target, h = row.offsetHeight, h0 = rowH.get(row);
+      rowH.set(row, h);
+      if (h0 === undefined || h === h0 || !row.isConnected || (row === ownRow && Date.now() - ownAt < OWN_MS)) continue;
+      grew.push({ row, dH: h - h0 });
+    }
+    if (!grew.length || !listReady) return;
+    grew.sort((a, b) => (a.row.compareDocumentPosition(b.row) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
+    // THE READER'S ROW IS THE ONE AT THE MIDDLE BEFORE THE CHANGE (a row that grew 260 px may span the middle now)
+    const top = list.getBoundingClientRect().top, mid = top + list.clientHeight / 2;
+    const dOf = new Map(grew.map((g) => [g.row, g.dH]));
+    let line = null, cum = 0;
+    for (const x of list.querySelectorAll(':scope > .chanmsg')) {
+      const q = x.getBoundingClientRect(), dH = dOf.get(x) || 0;
+      if (q.bottom - cum - dH > mid) { line = q.top - cum - top; break; }
+      cum += dH;
+    }
+    if (line === null) return;
+    let before = 0, d = 0;
+    for (const g of grew) {
+      const r = g.row.getBoundingClientRect();
+      d += anchorDelta({ rowTop: r.top - before - top, rowBottom: r.bottom - before - g.dH - top, viewportTop: line, deltaH: g.dH });
+      before += g.dH;
+    }
+    if (d) list.scrollTop += d;
+  }) : null;
+  winInfo._listenerCtl?.signal.addEventListener('abort', () => { if (rowRo) rowRo.disconnect(); });
   function observeRows(container) {
+    if (rowRo && container === list) for (const row of list.querySelectorAll(':scope > .chanmsg:not([data-anchor-obs])')) { row.dataset.anchorObs = '1'; rowRo.observe(row); }
     if (!rxIo || !container) return;
     for (const row of container.querySelectorAll('.chanmsg[data-vid]:not([data-rx-obs])')) { if (row.classList.contains('chanmsg-sysrow')) continue; row.dataset.rxObs = '1'; rxIo.observe(row); }
   }

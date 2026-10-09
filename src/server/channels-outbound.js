@@ -72,7 +72,7 @@ function create(engineCtx) {
     return {
       linksReview: read('channels.guardLinksReview') !== false,
       attachmentsReview: read('channels.guardAttachmentsReview') !== false,
-      offHours: { enabled: true, tz: typeof tz === 'string' ? tz.trim() : '', start: read('channels.offHoursStart') || '09:00', end: read('channels.offHoursEnd') || '18:00' },
+      offHours: { enabled: read('channels.guardOffHours') !== false, tz: typeof tz === 'string' ? tz.trim() : '', start: read('channels.offHoursStart') || '09:00', end: read('channels.offHoursEnd') || '18:00' },
     };
   }
   /** THE SENDER HONESTY LINE SWITCH (§9.5, decision 17 as overruled): OFF by
@@ -1827,6 +1827,7 @@ function create(engineCtx) {
     honestyLineFor, sendIdentityFor, proposalsFor, agentProposalView, stashAbout, stashGate, outboxView, notifyOutbox, sendStartsTurn,
     outboxAttachment, filesSweep, propose, proposeReaction, compose, approve, reject, onProposal, withdrawProposal, replaceProposal,
     noteReceiptStash, reconcileReceiptFates, reconcile, sweepSending, sweepReplaces, receipt, expireSweep, pointerSync, learnSentFiles,
+    filesOfferFor,   // lane owner-composer-attach: the owner's composer judges its chips by the same offer the send reads
   };
 }
 

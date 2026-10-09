@@ -73,7 +73,8 @@
 // offers "Jump to this message" (it is a message of the thread now). More than `INLINE_FOLD_OVER` decided ⇒ the
 // settled ones sit under ONE folded line "Handled proposals (N)" that opens in place; an unknown / failed outcome
 // is never folded away (it still asks something of the owner). The Outbox window is unchanged.
-import { fetchJson, showToast, showContextMenu } from './utils.js';
+import { fetchJson, showToast, showContextMenu, showImageOverlay } from './utils.js';
+import { urlViewerKind } from './file-types.js';
 import { t } from './i18n.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { registerCommand, registerMenuItem } from './contributions.js';
@@ -144,8 +145,24 @@ function revealInto(node, s) {
   }
   return names;
 }
-/** design 005 §2.B: the attachment rows (keyed by the card — a changed record redraws the card) */
-function appendAttachments(card, p) {
+/** lane outbox-attachment-preview: what a click on an attachment does — 'overlay' (a raster picture: THE image overlay),
+ *  'viewer' (a type the viewer draws from a URL: a `viewer` window) or 'download' (nothing to preview). PURE. */
+export function attachmentOpenKind(name, mime) {
+  if (P.INLINE_RASTER.includes(String(mime || '').toLowerCase())) return 'overlay';
+  return urlViewerKind(name, mime) === 'none' ? 'download' : 'viewer';
+}
+/** THE ONE open door for an attachment served by URL (a draft's row here, a message's file chip in the channel
+ *  window): the picture into showImageOverlay, a document into `app.openFile({rawUrl})`; returns what it did. */
+export function openAttachment(app, { url, name, mime }) {
+  const kind = attachmentOpenKind(name, mime);
+  const a = app || globalThis.app;
+  if (kind === 'overlay') { showImageOverlay(`${url}${url.includes('?') ? '&' : '?'}inline=1`); return kind; }
+  if (kind === 'viewer' && a && typeof a.openFile === 'function') { a.openFile({ rawUrl: url, fileName: name, mime }); return kind; }
+  return 'download';
+}
+/** design 005 §2.B: the attachment rows (keyed by the card — a changed record redraws the card). lane
+ *  outbox-attachment-preview: a click on the thumb or the name OPENS (openAttachment); the ⤓ beside it downloads. */
+function appendAttachments(card, p, app = null) {
   const files = P.storedAttachments(p);
   if (!files.length) return;
   const gone = !!p.attachmentsGoneAt;
@@ -162,14 +179,32 @@ function appendAttachments(card, p) {
       img.alt = '';
       img.loading = 'lazy';
       img.src = `${url}?inline=1`;
+      img.title = t('Open {name}', { name: a.name });
+      img.onclick = () => openAttachment(app, { url, name: a.name, mime: a.mime });
       row.appendChild(img);
     }
     let name;
     if (gone) name = el('span', 'chan-prop-file-name');
-    else { name = document.createElement('a'); name.className = 'chan-prop-file-name'; name.href = url; name.setAttribute('download', ''); }
+    else {
+      name = document.createElement('a'); name.className = 'chan-prop-file-name'; name.href = url;
+      const kind = attachmentOpenKind(a.name, a.mime);
+      if (kind === 'download') name.setAttribute('download', '');
+      else {
+        name.classList.add('chan-prop-file-open'); name.dataset.open = kind;
+        name.title = t('Open {name}', { name: a.name });
+        name.onclick = (ev) => { ev.preventDefault(); openAttachment(app, { url, name: a.name, mime: a.mime }); };   // Enter on the focused name = a click
+      }
+    }
     revealInto(name, a.name);
     row.appendChild(name);
     row.appendChild(el('span', 'chan-prop-file-meta', `${P.attachmentSize(a.bytes)} · ${a.mime} · sha256 ${String(a.sha256).slice(0, 12)}…`));
+    if (!gone) {
+      const dl = document.createElement('a');
+      dl.className = 'chan-prop-file-dl'; dl.href = url; dl.setAttribute('download', '');
+      dl.title = t('Download {name}', { name: a.name }); dl.setAttribute('aria-label', dl.title);
+      dl.appendChild(icon('download', 12));
+      row.appendChild(dl);
+    }
     if (blocked) { row.classList.add('chan-prop-file-blocked'); row.appendChild(el('span', 'chan-prop-file-chip chan-warn', t('will NOT be sent'))); }
     const mm = P.nameTypeMismatch(a.name, a.mime);
     if (mm) row.appendChild(el('span', 'chan-prop-file-chip chan-warn', t('named .{ext}, but its bytes are {type}', { ext: mm.ext, type: a.mime })));
@@ -393,7 +428,7 @@ export function renderProposalCard(app, p, { compact = false, line = false, onLi
   // ── design 005 §2.B (B-fd1f): WHAT LEAVES WITH IT — one row per attachment: a thumbnail for a picture the server
   //    SNIFFED as one of the four raster types (served by the owner-only route; anything else is never drawn), the name,
   //    the size, the sniffed type (a chip when the name's extension says another), the sha256 shortened; a row downloads ──
-  appendAttachments(card, p);
+  appendAttachments(card, p, app);
   // ── ONE meta line: why · the policy verdict · the identity · expiry · the sender line ──
   const meta = el('div', 'chan-prop-meta');
   // WHY — a structured reference the panel can link, never an agent's sentence.
@@ -407,6 +442,8 @@ export function renderProposalCard(app, p, { compact = false, line = false, onLi
     const pol = el('span', 'chan-prop-policy');
     if (p.policy.mode === 'direct') pol.textContent = t('Sent directly: the channel policy is "direct" and no guard applied.');
     else pol.textContent = t('Needs approval: {why}', { why: (p.policy.reasons || []).map(reasonLabel).join('; ') || t('review') });
+    // lane guards-door: a GUARD held it — say where the owner switches it, from the place he hits it
+    if (p.policy.mode !== 'direct' && (p.policy.reasons || []).some((r) => P.GUARD_REASONS.includes(r))) pol.textContent += ' ' + t('(a guard — change it in the policy row)');
     if (p.policy.detail && p.policy.detail.unknownPolicy) pol.textContent += ' ' + t('(the stored policy value was not understood — review, fail closed)');
     if (p.policy.detail && p.policy.detail.guardsUnparseable) pol.textContent += ' ' + t('(a guard setting could not be read: {why} — review, fail closed)', { why: p.policy.detail.guardsUnparseable });
     meta.appendChild(pol);

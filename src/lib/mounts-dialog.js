@@ -180,7 +180,7 @@ export function renderFields(body, fields) {
     const label = document.createElement('label');
     label.textContent = f.label;
     let el;
-    const valueless = f.type === 'note' || f.type === 'copy';
+    const valueless = f.type === 'note' || f.type === 'copy' || f.type === 'node';
     if (f.type === 'select') {
       el = document.createElement('select');
       for (const [v, l] of f.options) { const o = document.createElement('option'); o.value = v; o.textContent = l; el.appendChild(o); }
@@ -195,6 +195,10 @@ export function renderFields(body, fields) {
       el.className = 'mounts-note';
       el.dataset.field = f.key;
       el.textContent = f.value || '';
+    } else if (f.type === 'node') {
+      // a live element a caller built (lane guards-door: the guard rows) — valueless, never in `inputs`
+      el = f.node || document.createElement('div');
+      el.dataset.field = f.key;
     } else if (f.type === 'copy') {
       el = document.createElement('div');
       el.className = 'mounts-oauth-link';
