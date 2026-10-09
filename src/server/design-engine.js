@@ -66,6 +66,7 @@
  */
 const fs = require('fs');
 const path = require('path');
+const DOOR = require('../mount-door'); // B-afc4: the blocked-path door — asked BEFORE a user-path read
 const crypto = require('crypto');
 const M = require('../design-model.js');
 const UL = require('../design-user-layer.js');   // lane design-tweaks: THE USER'S LAYER (user.json)
@@ -533,6 +534,7 @@ function create({
   }
   async function relist(w) {
     try {
+      if (DOOR.blocked(w.dir)) throw DOOR.refusal(DOOR.blocked(w.dir));   // B-afc4: refused by name, never read
       const ents = await fsp.readdir(w.dir, { withFileTypes: true });
       const names = ents.filter((e) => e.isFile() && isWatchable(e.name)).map((e) => e.name).sort((a, b) => (a === M.MANIFEST_FILE ? -1 : b === M.MANIFEST_FILE ? 1 : 0));
       for (const n of names.slice(0, DIR_STATS)) w.names.add(n);

@@ -24,6 +24,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
+const DOOR = require('./mount-door'); // B-afc4: the blocked-path door — asked BEFORE a user-path read
 
 const TOKEN_PREFIX = 'vsmt_';
 const LINK_PREFIX = 'vibespace-mount:v1:';
@@ -193,6 +194,7 @@ function registerWebdav(app, { tokens }) {
     const rel = decodeURIComponent(req.path).replace(/\/+$/, '');
     const target = path.resolve(tok.root, '.' + (rel || '/'));
     if (target !== tok.root && !target.startsWith(tok.root + path.sep)) return res.status(403).end();
+    if (DOOR.blocked(target)) return res.status(503).type('text/plain').send(DOOR.SENTENCE);   // B-afc4: answered, never read
     // symlink escape: the closest EXISTING ancestor's realpath must stay inside
     const containedReal = (p) => {
       let probe = p;

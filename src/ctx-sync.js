@@ -33,6 +33,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const DOOR = require('./mount-door'); // B-afc4: the blocked-path door — asked BEFORE a user-path read
 
 // Bounds: a sync must stay bounded (this runs on a 60s timer over a mux that
 // also carries live sessions) — but the old 2MB/400 silently ate real files.
@@ -51,9 +52,11 @@ const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
  * @param {number} [o.connectMs]
  */
 async function syncGroupCtxOverDevice({ hosts, hostId, group, remoteDir, onSkip = () => { }, connectMs = 15000 }) {
+  const local = group.contextDir.replace(/\/+$/, '');
+  const blockedMp = DOOR.blocked(local);   // B-afc4: a context folder on a storage that is not answering — never walked
+  if (blockedMp) throw DOOR.refusal(blockedMp);
   const dm = await hosts.deviceBounded(hostId, connectMs);
   if (!dm) throw new Error('device offline');
-  const local = group.contextDir.replace(/\/+$/, '');
   const inv = await dm.runCmd('sh', ['-c',
     `mkdir -p ${shq(remoteDir)}; cd ${shq(remoteDir)} && find . -type f ! -path './.vibespace/*' 2>/dev/null | while IFS= read -r f; do ` +
     `printf '%s\\t%s\\t%s\\n' "$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null || echo 0)" ` +

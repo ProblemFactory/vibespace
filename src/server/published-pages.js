@@ -19,6 +19,7 @@
 // preview iframes keep working (postMessage-only by design).
 const fs = require('fs');
 const path = require('path');
+const DOOR = require('../mount-door'); // B-afc4: the blocked-path door — asked BEFORE a user-path read
 
 const ID_RE = /^pg[a-z0-9]{10}$/;
 // B-f694 verify r1: the Pages list's routes are the USER's (any page, no ask) — an agent token (vsst_ / jbt_) is refused
@@ -152,6 +153,7 @@ function create({ dataDir, requestAuthed = () => true, publicUrl = () => null, l
    *  share URL. Returns the public record or {error}. */
   function publish({ srcPath, name, makePublic, req }) {
     const abs = path.resolve(String(srcPath || ''));
+    if (DOOR.blocked(abs)) return { error: DOOR.SENTENCE };   // B-afc4: a file on a storage that is not answering
     let st;
     try { st = fs.statSync(abs); } catch { return { error: 'file not found: ' + abs }; }
     if (!st.isFile()) return { error: 'not a file: ' + abs };

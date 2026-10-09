@@ -29,6 +29,9 @@ const { trackWorker } = require('./worker-memory');
 // Shared op implementation — also used as an in-main last-resort fallback if the
 // whole pool is unavailable (worker construction failing outright).
 const { runOp: _runOpInline } = require('./safe-fs-worker');
+const DOOR = require('./mount-door');
+// The payload keys that name a path (src/safe-fs-worker.js OPS).
+const PATH_KEYS = ['path', 'oldPath', 'newPath', 'src', 'dest'];
 
 // Per-op deadlines (ms). A deadline hit under a hung mount is exactly the case
 // we defend — generous enough for a real large read/copy on healthy storage,
@@ -50,6 +53,7 @@ class SafeFs {
     // Inline fallback when the pool is down — defaults to the fs op set; other
     // worker scripts (transcript-worker) pass their own runOp (2.235.0).
     this._inlineRun = opts.inlineRun || _runOpInline;
+    this._blockedOf = opts.blocked || DOOR.blocked;   // B-afc4: (path) → blocked mount root | false
     this.poolSize = Math.max(1, opts.poolSize || 4);
     this.timeouts = { ...DEFAULT_TIMEOUTS, ...(opts.timeouts || {}) };
     this._seq = 1;
@@ -151,8 +155,21 @@ class SafeFs {
    * Rejects with a 503-tagged Error (err.status===503, err.safeFsTimeout on
    * deadline) so routes can map to the "storage not responding" response.
    */
+  _blocked(payload) {
+    for (const k of PATH_KEYS) {
+      const p = payload && payload[k];
+      const mp = typeof p === 'string' && p ? this._blockedOf(p) : false;
+      if (mp) return mp;
+    }
+    return false;
+  }
+
   call(op, payload = {}, opts = {}) {
     if (this._closed) return Promise.reject(Object.assign(new Error('safeFs closed'), { status: 503 }));
+    // B-afc4 (lane mount-readers-blocked): a path under a BLOCKED mount is refused at the pool's door, in ms — never
+    // queued into a worker that would hang inside a dead FUSE (a hung worker is not killable either).
+    const mp = this._blocked(payload);
+    if (mp) return Promise.reject(DOOR.refusal(mp));
     const timeoutMs = opts.timeoutMs || this.timeouts[op] || this.timeouts.default;
     const rec = this._pick();
     if (!rec) {

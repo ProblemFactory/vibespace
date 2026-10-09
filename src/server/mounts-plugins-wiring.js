@@ -431,6 +431,7 @@ setTimeout(() => mounts.restore().catch(e => console.error('[mounts] restore:', 
 // (libuv threadpool saturation — see mounts.js _healthSweep).
 mounts.startHealthWatchdog();
 app.locals.mounts = mounts; // files.js circuit breaker asks it about blocked mount roots
+require('../mount-door').register(mounts); // B-afc4: every other user-path reader asks the same answer (src/mount-door.js)
 // Self-mount guard: a bridge token WE minted = the share points back at this
 // instance; fuse→HTTP→self deadlocks the threadpool (real incident).
 mounts.selfTokenCheck = (raw) => mountTokens.has(raw);

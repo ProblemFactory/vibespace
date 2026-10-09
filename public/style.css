@@ -2315,10 +2315,13 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
   background: var(--bg-dialog); color: var(--text);
   border: 1px solid var(--border); border-left: 3px solid var(--accent);
   box-shadow: 0 8px 24px rgba(0,0,0,0.35);
-  font-size: 12px; line-height: 1.4; pointer-events: auto;
+  /* B-a42d: the body passes the pointer to what is under it (a 320 px phone's 3 s clipboard toast sat over the app picture
+     and took its taps) — only the ✕, the actions and a toast's own tap target (.global-toast-tap) take it */
+  font-size: 12px; line-height: 1.4; pointer-events: none;
   animation: toast-in 0.18s ease-out;
   overflow-wrap: anywhere;
 }
+.global-toast-x, .global-toast-action, .global-toast-tap { pointer-events: auto; }
 .global-toast-body { min-width: 0; }
 .global-toast-x {
   flex: none; border: none; background: none; color: var(--text-dim);

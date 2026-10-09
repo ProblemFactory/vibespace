@@ -1426,19 +1426,29 @@ out({ success: false, error: 'fake: unknown verb ' + process.argv.slice(2).join(
   ok(!k1.threw && k1.afterStop && k1.afterStop.state === 'ready' && !k1.afterStop.closed && k1.afterStop.attempts === 0 && k1.afterStop.browser, '⑥ r5 MAJOR 1 (a): a Stop from the panel ends the record — the next start runs with a NEW ledger (0 attempts, no verdict)', k1.afterStop);
   // B-47f9 (lane browser-reliability): THE SLOW CLOSER — a chrome that dies after every relaunch, its closures 4 min apart on
   // the keeper's clock, 14 leased ticks: the 10-min window never holds 3 (r6's LOW 2: restarted for good, nobody told); the
-  // day tier stops it at HEAL_DAY_BUDGET relaunches with ONE notice naming the day
+  // day tier stops it at HEAL_DAY_BUDGET relaunches with ONE notice naming the day.
+  // B-b297 (lane ephemeral-base-red): the hand's ticks are the ONLY ticks — the attach starts the keeper's own 5 s timer; its
+  // tick saw the 5th chrome dead 29 ms BEFORE the hand moved the clock and judged at that relaunch's instant (t-8, t-4, t in
+  // 10 min ⇒ `browser_unstable` after 5 — red on master alone, int238–int241); `tickMs: 3600e3` as every injected-clock leg
+  // here. Each hand tick waits for the death of the chrome the last relaunch produced (reaped: /proc/<pid> gone) — evidence,
+  // never a sleep that must outlast FAKE_CHROME_TTL
   const slowLeg = async (Kmod, tag) => {
     clear6();
     const KEYS = tag === 'slow' ? 'bk-0000c503' : 'bk-0000c504';
     const ib = inbox6();
     let clock = Date.now();
-    const kk = mk6(Kmod, tag, new Set([KEYS]), HOME6, { FAKE_CHROME_TTL: '2000' }, { userTodos: ib.store, now: () => clock }); // a tick under load can outlast 1.2 s: the chrome must die BETWEEN ticks
+    const kk = mk6(Kmod, tag, new Set([KEYS]), HOME6, { FAKE_CHROME_TTL: '2000' }, { userTodos: ib.store, now: () => clock, tickMs: 3600e3 });
+    const reaped = async (pid, ms = 15000) => { const t0 = Date.now(); while (fs.existsSync('/proc/' + pid) && Date.now() - t0 < ms) await sleep(20); return !fs.existsSync('/proc/' + pid); };
     const bank = kk.createProfile({ label: 'Slow ' + tag }, { owner: { kind: 'instance', id: null } });
     const r = { tag, label: 'Slow ' + tag, perTick: [] };
     try {
       await kk.attach({ profileId: bank.id, browserKey: KEYS, sessionId: 'sess-w' });
       logs6.length = 0;
-      for (let i = 0; i < 14; i++) { await sleep(2400); clock += 4 * 60000; await kk.tick(); const x = recOf6(kk, bank.id); r.perTick.push(`${relaunchN()}:${x.closed || '-'}`); }
+      for (let i = 0; i < 14; i++) {
+        const was = recOf6(kk, bank.id).browser;
+        if (was && !(await reaped(was))) throw Object.assign(new Error(`tick ${i + 1}: chrome ${was} still runs 15 s after its relaunch (FAKE_CHROME_TTL 2000)`), { code: 'chrome_alive' });
+        clock += 4 * 60000; await kk.tick(); const x = recOf6(kk, bank.id); r.perTick.push(`${relaunchN()}:${x.closed || '-'}`);
+      }
       r.relaunches = relaunchN(); r.rec = recOf6(kk, bank.id);
       r.ledger = kk.browserOf(bank.id).heals || null;
       r.notices = ib.items.map((x) => ({ text: x.text, detail: x.detail }));

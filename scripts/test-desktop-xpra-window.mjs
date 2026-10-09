@@ -166,8 +166,30 @@ const BOOT_DEADLINE_MS = 120000;  // a scratch server copy answering /api/home �
 const SETTLE_DEADLINE_MS = 60000; // a window settled where the leg needs it (X agrees with the view / the pane) — slack 20× the old 3 s nap
 const XAGREE_DEADLINE_MS = 20000; // the X server reports a window where our client put it (xpra moves the corral after the first paint)
 const TITLE_DEADLINE_MS = 120000; // a real browser's page title reaching the title bar — slack 2.7× the old 45 s
-/** a scratch server copy is up: /api/home answers (true), or the copy exited (false, at once), or BOOT_DEADLINE_MS passed (false) */
-const bootedCopy = async (child, port) => (await until(async () => { if (child.exitCode !== null || child.signalCode) return 'dead'; await fetch(`http://127.0.0.1:${port}/api/home`); return 'up'; }, BOOT_DEADLINE_MS, 250)) === 'up';
+const KEY_DEADLINE_MS = 5000;     // one clicked key reaching the app's readout (its own copy shows it) — slack 12× the old 400 ms pace
+const REACH_DEADLINE_MS = 20000;  // a key's point hits the picture again (a toast over it has gone) — slack 6× an info toast's 3 s
+// EVERY SERVER COPY'S OUTPUT IS KEPT (lane xpra-suite-evidence, B-7ea8): the main server and each CONTROL copy spawn with stdout +
+// stderr in a ring of their last COPY_RING_LINES lines, named by the copy — a copy used to run with `stdio: 'ignore'`, so its boot
+// red under an 8-lane heavy load said only "did not boot"; a miss now prints what the copy itself last said, and the elapsed ms
+const COPY_RING_LINES = 60;
+const spawnCopy = (name, cwd, env) => {
+  const child = spawn(process.execPath, ['server.js'], { cwd, env: { ...VNC_ENV, ...env, HOME: env.HOME || fakeHome }, stdio: ['ignore', 'pipe', 'pipe'] }); // the per-run Desktop names (§57) under the copy's own; a scratch HOME always
+  const ring = { name, lines: [], part: { out: '', err: '' } };
+  const take = (k) => (d) => { const ls = (ring.part[k] + String(d)).split('\n'); ring.part[k] = ls.pop(); for (const l of ls) { ring.lines.push(l); if (ring.lines.length > COPY_RING_LINES) ring.lines.shift(); } };
+  child.stdout.on('data', take('out')); child.stderr.on('data', take('err'));
+  child.ring = ring;
+  return child;
+};
+const ringTail = (child, n = 5) => { const r = child.ring; return r ? [...r.lines, r.part.out, r.part.err].filter(Boolean).slice(-n) : []; };
+/** a scratch server copy is up: /api/home answers (true), or the copy exited (false, at once), or BOOT_DEADLINE_MS passed (false);
+ *  a miss leaves its evidence on `child.bootWhy` for the check to print: the copy's name, the elapsed ms, how it ended, its last 5 lines */
+const bootedCopy = async (child, port) => {
+  const t0 = Date.now();
+  const v = await until(async () => { if (child.exitCode !== null || child.signalCode) return 'dead'; await fetch(`http://127.0.0.1:${port}/api/home`); return 'up'; }, BOOT_DEADLINE_MS, 250);
+  const ms = Date.now() - t0;
+  child.bootWhy = v === 'up' ? null : `${child.ring ? child.ring.name : 'a server copy'} on :${port} ${v === 'dead' ? `exited (code ${child.exitCode}, signal ${child.signalCode})` : 'never answered /api/home'} after ${ms} ms (deadline ${BOOT_DEADLINE_MS} ms); its last lines:\n      ${ringTail(child).join('\n      ') || '(it printed nothing)'}`;
+  return v === 'up';
+};
 
 try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
@@ -197,7 +219,7 @@ const RUNTIME = path.join(fakeHome, 'run'); fs.mkdirSync(RUNTIME, { recursive: t
 const srvEnv = { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, XDG_RUNTIME_DIR: RUNTIME, VIBESPACE_SKIP_AGENT_HOOKS: '1', CLAUDE_CMD: FAKE_CLAUDE, PATH: FAKE_BIN + ':' + (process.env.PATH || '') };
 let srv = null;
 const srvLog = [];
-const bootServer = () => { srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: srvEnv, stdio: ['ignore', 'pipe', 'pipe'] }); srv.stdout.on('data', (d) => srvLog.push(String(d))); srv.stderr.on('data', (d) => srvLog.push(String(d))); return srv; };
+const bootServer = () => { srv = spawnCopy('the worktree server', wt, srvEnv); srv.stdout.on('data', (d) => srvLog.push(String(d))); srv.stderr.on('data', (d) => srvLog.push(String(d))); return srv; };
 bootServer();
 const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--disable-background-timer-throttling', '--window-size=1400,900', `--user-data-dir=${scratch('deskxpra-chrome')}`, 'about:blank'], { stdio: 'ignore' });
 const worktrees = [wt];
@@ -260,8 +282,7 @@ const cleanup = () => {
 process.on('exit', cleanup);
 for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { cleanup(); process.exit(1); });
 
-const waitServer = async () => { for (let i = 0; i < 80; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); return true; } catch { await sleep(250); } } return false; };
-check('worktree server boots', await waitServer());
+check('worktree server boots', await bootedCopy(srv, PORT), srv.bootWhy);
 const WebSocket = require('ws');
 const cdpTargets = async () => (await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json());
 const target = await until(async () => (await cdpTargets()).find((t) => t.type === 'page'), 20000, 250);
@@ -739,9 +760,9 @@ try {
     fs.writeFileSync(path.join(wtc, 'src/server/window-live-wiring.js'), wiring.replace(seatsAt, '    viewerSeatsPreX5: { // pre-x5 CONTROL:'));
     const [PORTC] = await freePorts(1);
     const homeC = scratchHome('deskxpra-x5ctl-home', fs);
-    const sc = spawn(process.execPath, ['server.js'], { cwd: wtc, env: { ...srvEnv, ...VNC_ENV, PORT: String(PORTC), HOME: homeC }, stdio: 'ignore' }); ctlServers.push(sc);
+    const sc = spawnCopy('the pre-x5 copy', wtc, { ...srvEnv, ...VNC_ENV, PORT: String(PORTC), HOME: homeC }); ctlServers.push(sc);
     let upC = await bootedCopy(sc, PORTC);
-    check('CONTROL: the pre-x5 copy boots', upC);
+    check('CONTROL: the pre-x5 copy boots', upC, sc.bootWhy);
     if (upC) {
       const ctlPage = async () => { const t = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/new?about:blank`, { method: 'PUT' })).json(); const p = await page(t); await openPage(p, `http://127.0.0.1:${PORTC}`); return { p, t }; };
       const CA = await ctlPage();
@@ -780,23 +801,69 @@ try {
   const R2 = (id) => `(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(id)}); if (!w) return null; const v = w._desktopAppView; if (!v || !v.pane) return null; const pr = v.pane.getBoundingClientRect(); const c = v.client; const main = c && c.windows.get(c.mainWid); const cv = v.pane.querySelector('.xpra-win-main canvas'); const cr = cv ? cv.getBoundingClientRect() : null; const er = w.element.getBoundingClientRect(); const ws = app.wm.workspace.getBoundingClientRect(); return { status: v.status.textContent, mode: v.mode, pane: { x: pr.x, y: pr.y, w: pr.width, h: pr.height }, main: main ? { x: main.x, y: main.y, w: main.w, h: main.h } : null, ratio: v.ratio, minSize: v.minSize, scale: v.stageScale, offset: v.stageOffset, transform: v.stage.style.transform, badge: v.fitBadge ? { shown: v.fitBadge.style.display !== 'none', text: v.fitBadge.textContent } : { shown: false, text: '' }, canvas: cv ? { w: cv.width, h: cv.height, rw: cr.width, rh: cr.height, rx: cr.x, ry: cr.y } : null, win: { x: er.x, y: er.y, w: er.width, h: er.height }, workspace: { x: ws.x, y: ws.y, w: ws.width, h: ws.height }, constraints: c ? c.mainConstraints : null, display: c ? c.display : null, lastReceived: c ? c.lastReceived : null }; })()`;
   // the digit keys of GNOME Calculator's basic keypad, found in the canvas BACKING (device px): dark glyph components on the digit-key grey
   const DIGITS7 = (id) => `(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(id)}); const cv = w._desktopAppView.pane.querySelector('.xpra-win-main canvas'); const main = w._desktopAppView.client.windows.get(w._desktopAppView.client.mainWid); const W = Math.min(cv.width, main.w), H = Math.min(cv.height, main.h); const d = cv.getContext('2d').getImageData(0, 0, W, H).data; const g = new Uint8Array(W * H); for (let i = 0; i < W * H; i++) g[i] = (d[i * 4] + d[i * 4 + 1] + d[i * 4 + 2]) / 3; const seen = new Uint8Array(W * H); const blobs = []; const y0 = Math.floor(H * 0.45); const st = []; for (let y = y0; y < H; y++) for (let x = 0; x < W; x++) { const i = y * W + x; if (seen[i] || g[i] >= 110) continue; let x0 = x, x1 = x, ya = y, yb = y, n = 0; st.push(i); seen[i] = 1; while (st.length) { const j = st.pop(); n++; const jx = j % W, jy = (j - jx) / W; if (jx < x0) x0 = jx; if (jx > x1) x1 = jx; if (jy < ya) ya = jy; if (jy > yb) yb = jy; for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nx = jx + dx, ny = jy + dy; if (nx < 0 || ny < y0 || nx >= W || ny >= H) continue; const k = ny * W + nx; if (!seen[k] && g[k] < 110) { seen[k] = 1; st.push(k); } } } const bh = yb - ya + 1, bw = x1 - x0 + 1; if (bh < H * 0.008 || bh > H * 0.06 || bw > W * 0.08 || n < 20) continue; const cy = Math.round((ya + yb) / 2); const L = g[cy * W + Math.max(0, x0 - Math.round(bh * 0.6))], R = g[cy * W + Math.min(W - 1, x1 + Math.round(bh * 0.6))]; if (!(L >= 196 && L <= 216 && R >= 196 && R <= 216)) continue; blobs.push({ cx: (x0 + x1) / 2, cy: (ya + yb) / 2, h: bh }); } const rows = []; for (const b of blobs.sort((a, b) => a.cy - b.cy)) { const row = rows.find((r) => Math.abs(r[0].cy - b.cy) < b.h); if (row) row.push(b); else rows.push([b]); } for (const r of rows) r.sort((a, b) => a.cx - b.cx); return rows.filter((r) => r.length === 3 || r.length === 1).slice(-4).map((r) => r.map((b) => ({ cx: b.cx, cy: b.cy }))); })()`;
-  const copyBack7 = async (p, id, prev) => {
+  const chordC7 = async (p) => {
     await p.cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Control', code: 'ControlLeft', windowsVirtualKeyCode: 17, modifiers: 2 });
     await p.cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'c', code: 'KeyC', windowsVirtualKeyCode: 67, modifiers: 2 });
     await p.cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'c', code: 'KeyC', windowsVirtualKeyCode: 67, modifiers: 2 });
     await p.cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Control', code: 'ControlLeft', windowsVirtualKeyCode: 17, modifiers: 0 });
+  };
+  const copyBack7 = async (p, id, prev) => {
+    await chordC7(p);
     return (await until(async () => { const v = await p.evalJs(R2(id)); return v && v.lastReceived && v.lastReceived !== prev ? v.lastReceived : null; }, 6000, 200)) || '';
   };
-  /** every digit key clicked through the page (the stage's offset + scale, the ratio), then the calculator's own copy read back */
+  // A KEY LANDS BY EVIDENCE, NOT BY A CLOCK (lane xpra-suite-evidence, B-7ea8): the digits were clicked 400 ms apart and read once
+  // at the end — beside test-desktop-app-snap on an 8-lane heavy, the phone leg read "789230" for 7894561230. Each click now waits
+  // until the calculator's OWN copy (the Ctrl+C copyBack7 reads) shows the readout grown by THAT digit (what was seen + the digit —
+  // never the full string, where one miss would double every later key), re-asked within KEY_DEADLINE_MS. Between a click and its
+  // copy the pointer rests on the readout's entry line (2.4 key rows above the 7, left), off the keypad: a pointer resting on a key
+  // while its copy was read lost the key BELOW it (lane xpra-control-judge — GNOME Calculator 50's keys carry tooltips; the C row
+  // sits right above the 7 and the history area above the entry shrinks at the app's minimum).
+  // A miss is evidence, never re-pressed: the key, what the readout showed, the ms. AND A CLICK IS AIMED ONLY AT THE PICTURE: each
+  // copy that reaches the page says "Copied to your clipboard" — a toast, centred above the taskbar on a phone, which took the
+  // clicks on 5 / 6 / 2 / 3 of the 320 px phone (measured, this lane's first run); so before each click the key's point must hit
+  // the pane (document.elementFromPoint), within REACH_DEADLINE_MS, and a miss names what covered it. A point OFF the page (nothing
+  // there — the r1 CONTROL's window left the workspace) waits for nothing: no click can land there, so it is a miss at once.
+  const HIT7 = (id, x, y) => `(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(id)}); const v = w && w._desktopAppView; const e = document.elementFromPoint(${x}, ${y}); if (!e) return 'nothing'; if (v && v.pane && v.pane.contains(e)) return 'pane'; const t = e.closest('[id]'); return e.tagName.toLowerCase() + (typeof e.className === 'string' && e.className.trim() ? '.' + e.className.trim().split(/\\s+/).join('.') : '') + (t ? ' in #' + t.id : ''); })()`;
+  const reach7 = async (p, id, k) => {
+    const t0 = Date.now(); let last = null;
+    await until(async () => { last = await p.evalJs(HIT7(id, k.x, k.y)); return last === 'pane' || last === 'nothing'; }, REACH_DEADLINE_MS, 150);
+    return { ok: last === 'pane', off: last === 'nothing', ms: Date.now() - t0, cover: last === 'pane' ? null : last };
+  };
+  const LAST7 = (id) => `(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(id)}); const c = w && w._desktopAppView && w._desktopAppView.client; return c ? c.lastReceived : null; })()`;
+  const keySeen7 = async (p, id, want) => {
+    const t0 = Date.now();
+    while (Date.now() - t0 < KEY_DEADLINE_MS) {
+      await chordC7(p);
+      if (await until(async () => (await p.evalJs(LAST7(id))) === want, Math.min(1500, Math.max(200, KEY_DEADLINE_MS - (Date.now() - t0))), 100)) return { seen: true, ms: Date.now() - t0 };
+    }
+    return { seen: false, ms: Date.now() - t0, readout: await p.evalJs(LAST7(id)).catch(() => null) };
+  };
+  /** every digit key clicked through the page (the stage's offset + scale, the ratio — read again per key), each one SEEN in the
+   *  calculator's own copy before the next is pressed */
   const allDigits7 = async (p, id) => {
-    const s = await p.evalJs(R2(id));
     const rows = await p.evalJs(DIGITS7(id));
     const order = [['7', '8', '9'], ['4', '5', '6'], ['1', '2', '3'], ['0']];
-    let want = '';
-    if (rows.length === 4) for (let i = 0; i < 4; i++) for (let j = 0; j < order[i].length; j++) { const q = rows[i][j]; if (!q) continue; await trustedClickAt(p, s.pane.x + s.offset.x + (q.cx / s.ratio) * s.scale, s.pane.y + s.offset.y + (q.cy / s.ratio) * s.scale); await sleep(400); want += order[i][j]; }
-    const got = await copyBack7(p, id, s.lastReceived);
+    let want = '', got = '';
+    const misses = [], keyMs = [], reachMs = [];
+    if (rows.length === 4) {
+      const park = { x: rows[0][0].cx, y: rows[0][0].cy - 2.4 * (rows[1][0].cy - rows[0][0].cy) }; // backing px: the entry line, off the keypad
+      for (let i = 0; i < 4; i++) for (let j = 0; j < order[i].length; j++) {
+        const q = rows[i][j]; if (!q) continue;
+        const s = await p.evalJs(R2(id));
+        const at = (bx, by) => ({ x: s.pane.x + s.offset.x + (bx / s.ratio) * s.scale, y: s.pane.y + s.offset.y + (by / s.ratio) * s.scale });
+        const k = at(q.cx, q.cy), pk = at(park.x, park.y);
+        const h = await reach7(p, id, k); reachMs.push(h.ms);
+        want += order[i][j];
+        if (h.off) { misses.push({ key: order[i][j], offPage: k }); continue; }
+        await trustedClickAt(p, k.x, k.y);
+        await p.cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: pk.x, y: pk.y });
+        const r = await keySeen7(p, id, got + order[i][j]);
+        if (r.seen) { got += order[i][j]; keyMs.push(r.ms); } else { misses.push({ key: order[i][j], readout: r.readout, ms: r.ms, ...(h.ok ? {} : { coveredBy: h.cover }) }); if (typeof r.readout === 'string' && /^\d*$/.test(r.readout)) got = r.readout; }
+      }
+    }
+    console.log(`    digit keys: ${keyMs.length}/${want.length} seen in the calculator's copy (slowest ${keyMs.length ? Math.max(...keyMs) : '-'} ms; the longest wait for a key's point to be the picture ${reachMs.length ? Math.max(...reachMs) : '-'} ms)${misses.length ? '; MISSED ' + misses.map((m) => (m.offPage ? `'${m.key}' (its point ${Math.round(m.offPage.x)},${Math.round(m.offPage.y)} is off the page)` : `'${m.key}' (the readout showed ${JSON.stringify(m.readout)} after ${m.ms} ms${m.coveredBy ? `; its point was under ${m.coveredBy}` : ''})`)).join(', ') : ''}`);
     await p.cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 }); await p.cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
-    return { want, got, rows: rows.length };
+    return { want, got, rows: rows.length, misses, slowestMs: keyMs.length ? Math.max(...keyMs) : null };
   };
   /** the canvas vs the screen, pixel for pixel: a FULL screenshot (device px — no clip resampling), the canvas read before and
    *  after it (a pixel xpra repainted in between is not counted), compared at the canvas's device origin (best of ±1 px) */
@@ -1021,9 +1088,9 @@ try {
     rebaseline(wtc); execSync('npm run build', { cwd: wtc, stdio: 'ignore' });
     const [PORTH] = await freePorts(1);
     const homeH = scratchHome('deskxpra-hidpictl-home', fs);
-    const sh = spawn(process.execPath, ['server.js'], { cwd: wtc, env: { ...srvEnv, ...VNC_ENV, PORT: String(PORTH), HOME: homeH }, stdio: 'ignore' }); ctlServers.push(sh);
+    const sh = spawnCopy('the pre-fix copy', wtc, { ...srvEnv, ...VNC_ENV, PORT: String(PORTH), HOME: homeH }); ctlServers.push(sh);
     let upH = await bootedCopy(sh, PORTH);
-    check('CONTROL: the pre-fix copy boots', upH);
+    check('CONTROL: the pre-fix copy boots', upH, sh.bootWhy);
     if (upH) {
       const B6 = await runHi(`http://127.0.0.1:${PORTH}`, wtc, 'ctl');
       const q = B6.out;
@@ -1175,9 +1242,9 @@ try {
     rebaseline(wtr); execSync('npm run build', { cwd: wtr, stdio: 'ignore' });
     const [PORTR] = await freePorts(1);
     const homeR = scratchHome('deskxpra-r2ctl-home', fs);
-    const sr = spawn(process.execPath, ['server.js'], { cwd: wtr, env: { ...srvEnv, ...VNC_ENV, PORT: String(PORTR), HOME: homeR }, stdio: 'ignore' }); ctlServers.push(sr);
+    const sr = spawnCopy('the r1 copy', wtr, { ...srvEnv, ...VNC_ENV, PORT: String(PORTR), HOME: homeR }); ctlServers.push(sr);
     let upR = await bootedCopy(sr, PORTR);
-    check('CONTROL (r1): the r1 copy boots', upR);
+    check('CONTROL (r1): the r1 copy boots', upR, sr.bootWhy);
     if (upR) {
       const Q = await runR2(`http://127.0.0.1:${PORTR}`, wtr, 'r1-ctl');
       r2Report(Q);
@@ -1609,9 +1676,9 @@ try {
       rebaseline(wtc); execSync('npm run build', { cwd: wtc, stdio: 'ignore' });
       const [PORTA] = await freePorts(1);
       const homeA = scratchHome('deskxpra-a2ctl-home', fs);
-      const sa = spawn(process.execPath, ['server.js'], { cwd: wtc, env: { ...srvEnv, ...VNC_ENV, PORT: String(PORTA), HOME: homeA }, stdio: 'ignore' }); ctlServers.push(sa);
+      const sa = spawnCopy('the pre-A2 copy', wtc, { ...srvEnv, ...VNC_ENV, PORT: String(PORTA), HOME: homeA }); ctlServers.push(sa);
       let upA = await bootedCopy(sa, PORTA);
-      check('CONTROL: the pre-A2 copy boots', upA);
+      check('CONTROL: the pre-A2 copy boots', upA, sa.bootWhy);
       if (upA) {
         const CT = await mkPage(`http://127.0.0.1:${PORTA}`, { width: 1200, height: 850, deviceScaleFactor: 1, mobile: false });
         try {
@@ -1622,8 +1689,20 @@ try {
             await sizeWinOn(CT.p, rc.id, 560, 760);
             const vc = await until(async () => { const v = await CT.p.evalJs(R2(rc.id)); return v && v.status === 'Connected' && v.main && v.main.h > 100 ? v : null; }, 40000, 300);
             await sleep(1200);
-            if (vc) await trustedClickAt(CT.p, vc.pane.x + (vc.main.x + vc.main.w) / vc.ratio - 22, vc.pane.y + vc.main.y / vc.ratio + 22);
-            const ex = await until(() => CT.p.evalJs(`fetch('/api/desktop/apps/${rc.id}').then((r) => r.json()).then((r) => (r.state === 'exited' ? r : null))`), 6000, 100);
+            // THE ✕ PRESS IS THIS CONTROL'S SETUP, judged by its effect (lane xpra-suite-evidence): a press GTK's relayout after the
+            // resize swallowed (the 1200 ms nap stands for that relayout — no paint ack to read) left the app running (`ex` null, l3 of
+            // this lane's loaded runs); so a press without an exit within 6 s is pressed again, at most 3 presses, each only once the
+            // ✕'s point hits the pane (a pointer resting at the top reveals OUR folded bars there), the pointer parked mid-pane between
+            let ex = null, presses = 0;
+            for (let k = 0; vc && !ex && k < 3; k++) {
+              const v = (await CT.p.evalJs(R2(rc.id))) || vc;
+              const x = v.pane.x + (v.main.x + v.main.w) / v.ratio - 22, y = v.pane.y + v.main.y / v.ratio + 22;
+              await reach7(CT.p, rc.id, { x, y });
+              await trustedClickAt(CT.p, x, y); presses++;
+              await CT.p.cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: v.pane.x + v.pane.w / 2, y: v.pane.y + v.pane.h / 2 });
+              ex = await until(() => CT.p.evalJs(`fetch('/api/desktop/apps/${rc.id}').then((r) => r.json()).then((r) => (r.state === 'exited' ? r : null))`), 6000, 100);
+            }
+            if (presses > 1) console.log(`  CONTROL pre-A2: the app's ✕ took ${presses} presses (${ex ? 'exited' : 'still running'})`);
             await sleep(2000);
             const still = await CT.p.evalJs(WIN(rc.id));
             check(`CONTROL: on the pre-A2 copy the same ✕ ends the app (${ex && ex.state}) and the VibeSpace window STAYS as a dead picture 2 s later (status ${JSON.stringify(still && still.status)}) — the leg above is the fix, not a coincidence`, !!ex && !!still, { ex: ex && ex.state, still });
@@ -1749,9 +1828,9 @@ try {
       fs.writeFileSync(path.join(wtc, 'src/desktop-serve.js'), kSrc.replace(pickLine, "const pick = { scale: M.appScaleFor(serverSetting('desktop.appScale'), v.launch.dpr), origin: null, from: null }; // pre-A3 CONTROL: dpr only"));
       const [PORTC] = await freePorts(1);
       const homeC = scratchHome('deskxpra-a3ctl-home', fs);
-      const sc = spawn(process.execPath, ['server.js'], { cwd: wtc, env: { ...srvEnv, ...VNC_ENV, PORT: String(PORTC), HOME: homeC }, stdio: 'ignore' }); ctlServers.push(sc);
+      const sc = spawnCopy('the pre-A3 copy', wtc, { ...srvEnv, ...VNC_ENV, PORT: String(PORTC), HOME: homeC }); ctlServers.push(sc);
       let upC = await bootedCopy(sc, PORTC);
-      check('CONTROL: the pre-A3 copy boots', upC);
+      check('CONTROL: the pre-A3 copy boots', upC, sc.bootWhy);
       if (upC) {
         await A.p.cdp('Page.navigate', { url: 'about:blank' }).catch(() => {});
         await openPage(A.p, `http://127.0.0.1:${PORTC}`); // the same page: DPR 2, localStorage uiScale 125 is per origin — set it here too
@@ -2095,9 +2174,9 @@ try {
       execFileSync(path.join(repo, 'node_modules/.bin/esbuild'), ['src/client.js', '--bundle', '--outfile=public/bundle.js', '--format=iife', '--platform=browser', '--target=es2020', '--loader:.css=css', '--minify'], { cwd: wtc, stdio: 'ignore' });
       const [PORTC] = await freePorts(1);
       const homeC = scratchHome('deskxpra-seamctl-home', fs);
-      const sc = spawn(process.execPath, ['server.js'], { cwd: wtc, env: { ...srvEnv, ...VNC_ENV, PORT: String(PORTC), HOME: homeC }, stdio: 'ignore' }); ctlServers.push(sc);
+      const sc = spawnCopy('the forced-false copy', wtc, { ...srvEnv, ...VNC_ENV, PORT: String(PORTC), HOME: homeC }); ctlServers.push(sc);
       let upC = await bootedCopy(sc, PORTC);
-      check('CONTROL: the forced-false copy boots', upC);
+      check('CONTROL: the forced-false copy boots', upC, sc.bootWhy);
       if (upC) {
         await A.p.cdp('Page.navigate', { url: 'about:blank' }).catch(() => {});
         await openPage(A.p, `http://127.0.0.1:${PORTC}`);
@@ -2278,9 +2357,9 @@ try {
       execFileSync(path.join(repo, 'node_modules/.bin/esbuild'), ['src/client.js', '--bundle', '--outfile=public/bundle.js', '--format=iife', '--platform=browser', '--target=es2020', '--loader:.css=css', '--minify'], { cwd: wtc, stdio: 'ignore' });
       const [PORTD] = await freePorts(1);
       const homeD = scratchHome('deskxpra-lanedctl-home', fs);
-      const sd = spawn(process.execPath, ['server.js'], { cwd: wtc, env: { ...srvEnv, PORT: String(PORTD), HOME: homeD }, stdio: 'ignore' }); ctlServers.push(sd);
+      const sd = spawnCopy('the lane-D-less copy', wtc, { ...srvEnv, PORT: String(PORTD), HOME: homeD }); ctlServers.push(sd);
       let upD = await bootedCopy(sd, PORTD);
-      check('CONTROL: the lane-D-less copy boots', upD);
+      check('CONTROL: the lane-D-less copy boots', upD, sd.bootWhy);
       if (upD) {
         await A.p.cdp('Page.navigate', { url: 'about:blank' }).catch(() => {});
         await openPage(A.p, `http://127.0.0.1:${PORTD}`);
@@ -2674,9 +2753,9 @@ try {
     rebaseline(wtd); execSync('npm run build', { cwd: wtd, stdio: 'ignore' });
     const [PORTD] = await freePorts(1);
     const homeD = scratchHome('deskxpra-dctl-home', fs);
-    const sd = spawn(process.execPath, ['server.js'], { cwd: wtd, env: { ...srvEnv, PORT: String(PORTD), HOME: homeD }, stdio: 'ignore' }); ctlServers.push(sd);
+    const sd = spawnCopy('the pre-lane-D copy', wtd, { ...srvEnv, PORT: String(PORTD), HOME: homeD }); ctlServers.push(sd);
     let upD = await bootedCopy(sd, PORTD);
-    check('§15/§16 CONTROL: the pre-lane-D copy boots', upD);
+    check('§15/§16 CONTROL: the pre-lane-D copy boots', upD, sd.bootWhy);
     if (upD) {
       const OD = `http://127.0.0.1:${PORTD}`;
       try {
@@ -2801,6 +2880,20 @@ try {
       const out = [];
       const order = ['gear', 'winmenu', 'scale', 'winlist', 'foryou'];
       const digits = ['7', '8', '9', '4', '5'];
+      // a re-entry after the control's Escape cleared the calculator: each key SEEN in its copy before the next (allDigits7's rule)
+      const park17 = { x: pts['7'].x, y: pts['7'].y - 2.4 * (pts['4'].y - pts['7'].y) };
+      const reenter17 = async (keys) => {
+        let seen = '';
+        for (const x of keys) {
+          const h = await reach7(P, id, pts[x]);
+          if (h.off) { console.log(`  §17 ${tag} re-entry: '${x}' MISSED (its point is off the page)`); continue; }
+          await trustedClickAt(P, pts[x].x, pts[x].y);
+          await P.cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: park17.x, y: park17.y });
+          const r = await keySeen7(P, id, seen + x);
+          if (r.seen) seen += x;
+          else { console.log(`  §17 ${tag} re-entry: '${x}' MISSED (the readout showed ${JSON.stringify(r.readout)} after ${r.ms} ms${h.ok ? '' : `; its point was under ${h.cover}`})`); if (typeof r.readout === 'string' && /^\d*$/.test(r.readout)) seen = r.readout; }
+        }
+      };
       // start from a clean display (Escape = the calculator's clear; the pane has focus after a click)
       const first = pts['1'];
       await trustedClickAt(P, first.x, first.y); await sleep(300);
@@ -2823,7 +2916,7 @@ try {
           await sleep(200);
           if (await P.evalJs(SURF[which].shown)) { const far = await P.evalJs(`(() => { const r = document.getElementById('toolbar').getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`); await trustedClickAt(P, far.x, far.y); await sleep(200); }
           // Escape went to the app too (the pane had focus): it cleared the calculator — re-enter the digits so far
-          for (const x of digits.slice(0, i + 1)) { await trustedClickAt(P, pts[x].x, pts[x].y); await sleep(250); }
+          await reenter17(digits.slice(0, i + 1));
         }
       }
       // TOUCH on the real pane (the helper judges a finger only as a TAP): the ⚙ menu open, a finger DRAG across the
@@ -2850,10 +2943,10 @@ try {
       if (touchLeg.afterTap && closeAfter) {
         await P.cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 }); await P.cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
         await sleep(200);
-        for (const x of typed) { await trustedClickAt(P, pts[x].x, pts[x].y); await sleep(250); }
+        await reenter17(typed);
       }
       const prev = (await P.evalJs(R2(id))).lastReceived;
-      const got = await copyBack7(P, id, prev);
+      const got = (await copyBack7(P, id, prev)) || (prev === typed.join('') ? prev : ''); // unchanged = the client drops it: a re-entry's copy already read it
       return { out, touch: touchLeg, got, want: typed.join('') };
     };
     try {
@@ -2894,9 +2987,9 @@ try {
       execFileSync(path.join(repo, 'node_modules/.bin/esbuild'), ['src/client.js', '--bundle', '--outfile=public/bundle.js', '--format=iife', '--platform=browser', '--target=es2020', '--loader:.css=css', '--minify'], { cwd: wtm, stdio: 'ignore' });
       const [PORTM] = await freePorts(1);
       const homeM = scratchHome('deskxpra-mctl-home', fs);
-      const sm = spawn(process.execPath, ['server.js'], { cwd: wtm, env: { ...srvEnv, PORT: String(PORTM), HOME: homeM }, stdio: 'ignore' }); ctlServers.push(sm);
+      const sm = spawnCopy('the pre-lane-closer copy', wtm, { ...srvEnv, PORT: String(PORTM), HOME: homeM }); ctlServers.push(sm);
       let upM = await bootedCopy(sm, PORTM);
-      check('CONTROL: the pre-lane-closer copy boots', upM);
+      check('CONTROL: the pre-lane-closer copy boots', upM, sm.bootWhy);
       if (upM) {
         const OM = `http://127.0.0.1:${PORTM}`;
         await A.p.cdp('Page.navigate', { url: 'about:blank' }).catch(() => {});

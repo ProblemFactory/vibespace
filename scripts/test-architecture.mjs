@@ -4661,5 +4661,36 @@ console.log('\n§84 a suite ends what it made (B-60d2)');
       `§85 CONTROL: the scope is the TRACKED data/bin — an ignored data/bin/rclone holding a kill line is never read (quiet), a tracked data/bin kill line is RED (scope ${JSON.stringify(tracked85)})`);
   } finally { fs.rmSync(s85, { recursive: true, force: true }); }
 }
+// §86 A BLOCKED MOUNT PATH IS ANSWERED, NEVER READ (B-afc4, lane mount-readers-blocked, 2026-10-09). rel242's two-strike
+// liveness rule blocked a silent cloud mount's root from strike 1, but only src/routes/files.js asked — every other
+// reader could hang inside a dead FUSE for two sweeps (a hung reader is not killable either). Every file that reads a
+// path is a ROW of scripts/mount-reader-census.mjs: user-path (asks src/mount-door.js / pathBlocked BEFORE the read) /
+// own-tree / exempt; SafeFs.call refuses a blocked path before it picks a worker.
+{
+  const C = await import('./mount-reader-census.mjs');
+  const files86 = C.censusFiles(REPO);
+  const j86 = C.judgeCensus(files86);
+  for (const r of j86.lines) console.log('    ' + r);
+  const sites86 = files86.reduce((n, [, s]) => n + C.sitesOf(s), 0);
+  ok(j86.red.length === 0, `§86 ${files86.length} files: ${C.ROWS.length} reader files (${sites86} sites), each a row ${JSON.stringify(j86.counts)}${j86.red.length ? ' — RED: ' + j86.red.join(' | ') : ''}`);
+  ok(j86.dead.length === 0, `§86 every row names a live reader${j86.dead.length ? ' — DEAD: ' + j86.dead.join(' | ') : ''}`);
+  const sfs86 = files86.find(([f]) => f === 'src/safe-fs.js')[1];
+  ok(C.doorPinned(sfs86), '§86 SafeFs.call asks the door before it picks a worker (a blocked path is never queued)');
+  // CONTROLS: the design folder read with its door taken away, an unlisted reader, a new read in an own-tree file, the
+  // SafeFs door moved after the pick, a dead row — and a comment naming a read that must stay quiet
+  const [df, dt] = files86.find(([f]) => f === 'src/design-fs.js');
+  const noDoor = dt.split('\n').filter((l) => !l.includes('DOOR.blocked(')).join('\n');
+  const red86 = (fl) => C.judgeCensus(fl).red.length > 0;
+  const [af, at] = files86.find(([f]) => f === 'src/auth.js');
+  const r86 = [
+    ['the design folder read without its door', noDoor !== dt && red86([[df, noDoor]]), true],
+    ['an unlisted reader file', red86([['src/x.js', 'const e = fs.readdirSync(dir);\n']]), true],
+    ['a new read in an own-tree file', red86([[af, at + '\nconst extra = fs.statSync(p);\n']]), true],
+    ['a comment naming fs.readdirSync(cwd)', red86([['src/x.js', '// fs.readdirSync(cwd) would hang here\n']]), false],
+    ['the SafeFs door moved after the pick', C.doorPinned(sfs86.replace(C.DOOR_PIN.door, '').replace(C.DOOR_PIN.before, C.DOOR_PIN.before + ' ' + C.DOOR_PIN.door)), false],
+    ['a row whose reader is gone', C.judgeCensus([[af, 'module.exports = 1;\n'], ['src/y.js', '']]).dead.length > 0, true],
+  ];
+  ok(r86.every(([, got, want]) => got === want), `§86 CONTROLS: ${r86.map(([n, got, want]) => `${n} (${got === want ? (want ? 'RED' : 'quiet') : 'WRONG'})`).join(', ')}`);
+}
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

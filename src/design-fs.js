@@ -16,6 +16,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const DOOR = require('./mount-door'); // B-afc4: the blocked-path door — asked BEFORE a user-path read
 const M = require('./design-model.js');
 const DT = require('./design-tokens.js');
 
@@ -26,6 +27,7 @@ const fail = (code, error, extra = {}) => ({ ok: false, code, error, ...extra })
 
 /** The folder's read: readdir, then every needed file through an O_NOFOLLOW handle (fstat judged before the read). */
 async function readFolder(dir) {
+  if (DOOR.blocked(dir)) return fail('storage_blocked', DOOR.SENTENCE);   // B-afc4: refused by name, never read
   let ents;
   try { ents = await fsp.readdir(dir, { withFileTypes: true }); }
   catch (e) { return e.code === 'ENOENT' ? fail('not_found', 'the folder does not exist') : e.code === 'ENOTDIR' ? fail('not_a_dir', 'that path is a file, not a folder') : fail('read_failed', `the folder could not be read (${e.code || e.message})`); }

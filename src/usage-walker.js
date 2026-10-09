@@ -49,6 +49,7 @@ const fs = require('fs');
 const zlib = require('zlib');
 const os = require('os');
 const path = require('path');
+const DOOR = require('./mount-door.js'); // B-afc4: the blocked-path door — asked BEFORE a user-path read
 // THE FIXTURE GUARD (2026-09-09). A suite's synthetic transcript is not usage:
 // its `assistant` records are hand-written, no API request ever happened, and
 // on this instance 74,133 such rows claiming 914,640 fabricated tokens had
@@ -58,6 +59,7 @@ const path = require('path');
 // host cannot require src/ — scripts/test-usage-walk-parity.mjs drives both
 // spellings over the same table, so a one-sided edit fails there.
 const { isFixtureProjectDir, isFixtureSid } = require('./fixture-guard.js');
+const _saidBlocked = new Set();   // B-afc4: blocked project folders already said
 
 // A UUIDv7's millisecond stamp (its first 48 bits); null for any other id
 // shape. Codex mints thread AND turn ids as v7, so "minted after the fork" is
@@ -265,10 +267,13 @@ function* walkSteps({ home = os.homedir(), cursorFile = defaultCursorFile(),
   }
 
   let projDirs = [];
-  try { projDirs = fs.readdirSync(PROJECTS); } catch { }
+  if (!DOOR.blocked(PROJECTS)) { try { projDirs = fs.readdirSync(PROJECTS); } catch { } }
   for (const pd of projDirs) {
     if (isFixtureProjectDir(pd)) continue; // a suite's throwaway cwd — never usage
     const pdAbs = path.join(PROJECTS, pd);
+    // B-afc4: a project folder under a BLOCKED mount (a symlinked transcript dir) is skipped this pass, said once
+    if (DOOR.blocked(pdAbs)) { if (!_saidBlocked.has(pdAbs)) { _saidBlocked.add(pdAbs); console.warn(`[usage] walk skipped ${pdAbs}: its storage is not answering`); } continue; }
+    _saidBlocked.delete(pdAbs);
     let entries = [];
     try { entries = fs.readdirSync(pdAbs); } catch { continue; }
     // Top-level transcripts PLUS subagent/workflow agent transcripts (the

@@ -2,6 +2,14 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.243 — 2026-10-09
+
+### Changed
+- While a mounted folder is not answering, every part of VibeSpace says so at once instead of waiting on it.
+
+### Fixed
+- A notification no longer blocks taps on what is under it — only its Dismiss and its buttons respond.
+
 ## 2.369.242 — 2026-10-09
 
 ### Changed

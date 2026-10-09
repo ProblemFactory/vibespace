@@ -900,6 +900,7 @@ export function installUserTodos(app) {
         // the click keeps the item's ID and key, never the item (lane-redact verify r5, a heap snapshot: the toast's handler
         // kept the original record — its words — reachable for the toast's life after a clear); it jumps with the LIVE record
         if (el) { const id = i.id, key = i.sessionKey; el.style.cursor = 'pointer'; el.onclick = () => jump(key, byId(id)); }
+        if (el) el.querySelector('.global-toast-body').classList.add('global-toast-tap');   // B-a42d: the ONE toast a body tap opens — its words, never the whole toast
         btn.classList.remove('ut-blink'); void btn.offsetWidth; btn.classList.add('ut-blink');
       }
     }

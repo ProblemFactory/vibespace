@@ -495,6 +495,8 @@
 - THE MOUNT PROBE ASKED THE VENDOR EVERY MINUTE (owner's OneDrive): dir-cache 30s under a 1 m poll broke rclone's poll < ttl, each probe = a Graph listing; a child got the s3 row; log truncated per remount. FIX = ONE PURE argv builder, dirCache by row, append + rotate. 不变量 = argv cells are row facts
 - THE HEALTH SWEEP TORE A CLOUD MOUNT DOWN ON ONE SLOW LISTING (OneDrive, 37×/7 d): a 6 s ls, no cloud strikes, a CPU guard blind to network waits, a cold probe; a child read the s3 row. FIX = two questions, a PURE verdict table, witnesses logged. 不变量 = a teardown names the daemon's own silence
 - REGEX CONTROL BY A CLOCK RATIO WENT RED (rel241 mirror, channel-filter ②; B-b683 peer-parsers 5/5 red under load): two clocks' ratio is noise. FIX = a catastrophic pattern blows a child deadline (2^40 steps); a bounded row finishes under one. 不变量 = a backtracking claim is a deadline, not a ratio
+- A TOAST TOOK THE TAPS MEANT FOR THE APP UNDER IT (B-a42d, the 3 s clipboard toast on a 320 px phone): the whole toast was a hit target while only ✕ and its actions have handlers. FIX = the body passes the pointer through, buttons keep it. 不变量 = a notice is never an input surface beyond its buttons
+- A BLOCKED MOUNT PATH WAS HONOURED BY ONE READER (B-afc4, after the two-strike liveness rule): every other server-side reader could hang inside a dead FUSE for two sweeps. FIX = ONE door every user-path reader asks before the read, a grep census. 不变量 = a blocked path is answered, never read
 
 ## THE HEALTH SWEEP TORE A CLOUD MOUNT DOWN ON ONE SLOW LISTING (lane mount-liveness, 2.369.242 — owner 2026-10-09 "我的 OneDrive 怎么一直在断？")
 

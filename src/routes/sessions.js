@@ -6,6 +6,7 @@
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
+const DOOR = require('../mount-door'); // B-afc4: the blocked-path door — asked BEFORE a user-path read
 const os = require('os');
 
 const router = express.Router();
@@ -40,6 +41,7 @@ const _realCwdCache = new Map();
 function realCwdOf(cwd) {
   if (!cwd) return null;
   if (_realCwdCache.has(cwd)) return _realCwdCache.get(cwd);
+  if (DOOR.blocked(cwd)) return null;   // B-afc4: a sync realpath into a dead FUSE would hang the event loop (not cached)
   let rp = null;
   try { const r = fs.realpathSync(cwd); if (r && r !== cwd) rp = r; } catch { /* gone/unreadable */ }
   _realCwdCache.set(cwd, rp);

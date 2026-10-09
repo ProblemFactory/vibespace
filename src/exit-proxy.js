@@ -30,6 +30,7 @@
 const fs = require('fs');
 const net = require('net');
 const path = require('path');
+const DOOR = require('./mount-door'); // B-afc4: the blocked-path door — asked BEFORE a user-path read
 const crypto = require('crypto');
 const os = require('os');
 const E = require('./exit-reach.js');
@@ -764,6 +765,7 @@ class ExitProxyManager {
     };
     let rf, lf;
     try {
+      if (DOOR.blocked(target)) throw DOOR.refusal(DOOR.blocked(target));   // B-afc4: the local side is on a storage that is not answering
       rf = await statOf(remote);
       if (verb === 'pull') { let st = null; try { st = fs.statSync(target); } catch { st = null; } lf = E.statFacts(st); }
       else lf = { kind: 'file', size: o.size, mtimeMs: 0 };   // the CLI read it: a regular file of `size` bytes

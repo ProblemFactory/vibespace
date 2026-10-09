@@ -148,5 +148,58 @@ const MC = mutantCopies('mount-liveness', REPO);
   const [a] = run(L1, [W('hung', 'skipped', 'skipped', 0)]);
   ok(a.teardown === true, '⑤ CONTROL: strikes 1 ⇒ the SIGSTOP strike-1 assert is red (one silent sweep tears down)');
 }
+
+// ⑥ B-afc4 (lane mount-readers-blocked): a BLOCKED path is answered by every door in ms, never read. The fake FUSE is a
+// reader that records the ask and NEVER resolves — a door that reads first would hang (or record) instead of answering.
+{
+  const DOOR = require(path.join(REPO, 'src/mount-door.js'));
+  const { SafeFs } = require(path.join(REPO, 'src/safe-fs.js'));
+  const DFS = require(path.join(REPO, 'src/design-fs.js'));
+  const { TaskGroupManager } = require(path.join(REPO, 'src/task-groups.js'));
+  const CTX = require(path.join(REPO, 'src/ctx-sync.js'));
+  const { runUsageWalk } = require(path.join(REPO, 'src/usage-walker.js'));
+  const os = require('node:os');
+  const tmp6 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-door-'));
+  const MP = path.join(tmp6, 'od'), PROJ = path.join(tmp6, 'projects'), PD = path.join(PROJ, '-home-x-proj');
+  fs.mkdirSync(path.join(MP, 'ctx'), { recursive: true }); fs.mkdirSync(PD, { recursive: true });
+  fs.writeFileSync(path.join(PD, 's1.jsonl'), '');
+  const roots = [MP, PD];
+  DOOR.register({ pathBlocked: (p) => roots.find((r) => p === r || p.startsWith(r + '/')) || false });
+  const asked = [], warn = [];
+  const fsp = fs.promises, rd0 = fsp.readdir, rds0 = fs.readdirSync, w0 = console.warn;
+  fsp.readdir = (p, ...a) => { asked.push(String(p)); return new Promise(() => {}); };   // the silent FUSE
+  fs.readdirSync = (p, ...a) => { if (String(p).startsWith(tmp6)) asked.push(String(p)); return rds0(p, ...a); };
+  console.warn = (...a) => warn.push(a.join(' '));
+  const timed = async (fn) => { const t0 = performance.now(); let v, e; try { v = await fn(); } catch (x) { e = x; } return { v, e, ms: performance.now() - t0 }; };
+  // SafeFs: the pool's door — a pool whose pick records and whose worker never answers
+  const sfs = Object.create(SafeFs.prototype);
+  let picked = 0;
+  Object.assign(sfs, { _closed: false, _blockedOf: DOOR.blocked, timeouts: { default: 60000 }, _pick: () => { picked++; return null; }, _inlineRun: () => new Promise(() => {}) });
+  const sf = await timed(() => sfs.call('listDir', { path: path.join(MP, 'Docs') }));
+  const sm = await timed(() => sfs.call('move', { src: '/var/tmp/x', dest: path.join(MP, 'x') }));
+  ok(sf.e?.status === 503 && sf.e.code === 'storage-blocked' && sf.e.message === DOOR.SENTENCE && sm.e?.code === 'storage-blocked' && picked === 0 && sf.ms < 50 && sm.ms < 50,
+    `⑥ SafeFs refuses a blocked path at the pool door: 503 storage-blocked by the files route's sentence in ${sf.ms.toFixed(1)} / ${sm.ms.toFixed(1)} ms (a move's dest too), no worker picked (${picked})`);
+  const df = await timed(() => DFS.run('read', { dir: path.join(MP, 'design') }));
+  ok(df.v?.ok === false && df.v.code === 'storage_blocked' && df.ms < 50 && !asked.some((p) => p.startsWith(MP)), `⑥ the design folder read answers storage_blocked in ${df.ms.toFixed(1)} ms, never read (${df.v?.code})`);
+  const tg = { _isPathShadowed: () => null, renderTaskMd() { asked.push('render'); return ''; } };
+  const tt = await timed(() => { TaskGroupManager.prototype._syncTaskMd.call(tg, { id: 'T-1', contextDir: path.join(MP, 'ctx') }); TaskGroupManager.prototype._syncTaskMd.call(tg, { id: 'T-1', contextDir: path.join(MP, 'ctx') }); });
+  ok(!asked.includes('render') && !fs.existsSync(path.join(MP, 'ctx', '.vibespace')) && warn.filter((l) => l.includes('TASK.md for T-1 skipped')).length === 1 && tt.ms < 50,
+    `⑥ the TASK.md writer skips a context folder under a blocked mount, said ONCE over two passes (${tt.ms.toFixed(1)} ms)`);
+  let dialled = 0;
+  const cx = await timed(() => CTX.syncGroupCtxOverDevice({ hosts: { deviceBounded: () => { dialled++; return new Promise(() => {}); } }, hostId: 'h', group: { contextDir: path.join(MP, 'ctx') }, remoteDir: '/r' }));
+  ok(cx.e?.code === 'storage-blocked' && dialled === 0 && cx.ms < 50, `⑥ the group context sync is refused by name before the device is dialled (${cx.ms.toFixed(1)} ms, dialled ${dialled})`);
+  const cur = path.join(tmp6, 'cursors.json');
+  const uw = await timed(() => { runUsageWalk({ projectsDir: PROJ, cursorFile: cur, home: tmp6 }); runUsageWalk({ projectsDir: PROJ, cursorFile: cur, home: tmp6 }); });
+  ok(!uw.e && !asked.includes(PD) && warn.filter((l) => l.includes('[usage] walk skipped') && l.includes(PD)).length === 1 && uw.ms < 50,
+    `⑥ the usage walk skips a blocked project folder, said ONCE over two walks (${uw.ms.toFixed(1)} ms${uw.e ? ', ' + uw.e.message : ''})`);
+  // CONTROL: no manager registered (a worker / a process with no mounts) ⇒ the same asks reach the reader
+  DOOR.register(null);
+  asked.length = 0;
+  sfs.call('listDir', { path: path.join(MP, 'Docs') });
+  DFS.run('read', { dir: path.join(MP, 'design') });
+  ok(picked === 1 && asked.includes(path.join(MP, 'design')), '⑥ CONTROL: with no blocked root the SafeFs pick and the design readdir ARE reached (the legs above prove the door, not a dead reader)');
+  fsp.readdir = rd0; fs.readdirSync = rds0; console.warn = w0;
+  fs.rmSync(tmp6, { recursive: true, force: true });
+}
 console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} (${pass} passed)`);
 process.exit(fail ? 1 : 0);

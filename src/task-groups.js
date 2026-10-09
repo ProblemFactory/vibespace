@@ -33,6 +33,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const DOOR = require('./mount-door'); // B-afc4: the blocked-path door — asked BEFORE a user-path read
 const { timedSync } = require('./timed-sync.js'); // PURE: the store-write clock (design 011 lane 1, store-timing)
 const crypto = require('crypto');
 const { pickColorSeq } = require('./task-color-seq');
@@ -374,6 +375,16 @@ class TaskGroupManager {
       return;
     }
     this._shadowWarned?.delete(t.id);
+    // B-afc4: a context folder under a BLOCKED mount (the liveness probe: slow / wedged / dead) is skipped the same way —
+    // the write would hang inside the dead FUSE. The next syncAllContextMd after it answers writes it.
+    if (DOOR.blocked(t.contextDir)) {
+      if (!(this._blockWarned ||= new Set()).has(t.id)) {
+        this._blockWarned.add(t.id);
+        console.warn(`[tasks] TASK.md for ${t.id} skipped: ${t.contextDir} is on a storage that is not answering`);
+      }
+      return;
+    }
+    this._blockWarned?.delete(t.id);
     try {
       const dir = path.join(t.contextDir, '.vibespace');
       const file = path.join(dir, 'TASK.md');
@@ -932,6 +943,7 @@ class TaskGroupManager {
     if (!real && cwd) {
       if (!this._realCache) this._realCache = new Map();
       if (this._realCache.has(cwd)) real = this._realCache.get(cwd);
+      else if (DOOR.blocked(cwd)) real = null;   // B-afc4: a sync realpath into a dead FUSE — not cached, resolved once it answers
       else {
         try { real = fs.realpathSync(cwd); } catch { real = null; }
         this._realCache.set(cwd, real);
