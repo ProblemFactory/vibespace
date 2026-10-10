@@ -394,7 +394,7 @@ const base = { adapterId: 'a', convId: 'c', vendorId: 'v1', at: 1700000000000, t
   ok(pre !== bsrc && codeFree(cl).some((x) => TAG.test(x)), 'CONTROL: the pre-lane text rung in a patched copy leaks the stored "<p>" into a block — the census above would be red on it', J(cl));
   // CONTROL (the re-stated predicate): a copy whose fence quotes nothing leaves the frame the reader assembled LIVE in the
   // text a stored record is read through (larkPlainText — recordView's rung; the tree's own schema pass is a second layer)
-  const unfenced = bsrc.replace("R.carriesFrame(x); i++) x = x.replace(FRAME_G,", "false; i++) x = x.replace(FRAME_G,");
+  const unfenced = bsrc.replace("R.foldFrames(String(s == null ? '' : s), ", "((x) => x)(String(s == null ? '' : s), ");   // lane belt-nested-opener: the fence is the belt's fixed point
   const cf = M7.load('src/channels/lark/blocks.js', unfenced, 'no-fence').larkPlainText(JSON.parse(CENSUS.find((c) => c[1].message_id === 'm15')[1].body.content).text);
   ok(unfenced !== bsrc && FRAME.test(cf), 'CONTROL: with the fence taken out of a copy, a frame name survives into the read text — the census above would be red on it', J(cf));
   for (const c of copiesCensus(M7.files, M7.dir, REPO, { minCopies: 1 })) ok(c.pass, c.name, c.detail);

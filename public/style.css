@@ -2361,6 +2361,12 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
 .global-toast-action:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); }
 .global-toast-error { border-left-color: var(--red, #e55); }
 .global-toast-error .global-toast-body { color: var(--red, #e55); }
+.global-toast-warn { border-left-color: var(--yellow, #e5c07b); }
+/* lane path-link-not-found: a toast with a long path and three actions — the words and its ✕ on the first line, the actions under them */
+.global-toast-wide { flex-wrap: wrap; }
+.global-toast-wide .global-toast-body { flex: 1 1 calc(100% - 24px); }
+.global-toast-wide .global-toast-x { order: 1; }
+.global-toast-wide .global-toast-action { order: 2; }
 .global-toast-out { opacity: 0; transition: opacity 0.25s; }
 @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 

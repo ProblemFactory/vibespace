@@ -208,7 +208,7 @@ function a2Holes(mod) {
   ok(a2Holes(ST).length === 0, 'r2 revert-table holes (A2): a frame assembled from two page fields, the browser CLI\'s own line, a stored pre-r1 block, the live-view body of a raw record, a prompt default with a quote — all inert / delimited', a2Holes(ST));
   const src = fs.readFileSync(path.join(REPO, 'src/browser-stuck.js'), 'utf8');
   const parts = {
-    '1.2': ['  return inertOpeners(t.replace(FRAME_TAG_RE,', '  return (t.replace(FRAME_TAG_RE,'],   // the .197 integration: the folded line (verify r6 F1: the dangling-opener walk)
+    '1.2': ['  return inertOpeners(foldFrames(t,', '  return (foldFrames(t,'],   // (lane belt-nested-opener: the fold runs to the fixed point)   // the .197 integration: the folded line (verify r6 F1: the dangling-opener walk)
     '1.8': ["message: pageText(m[2] !== undefined ? m[2].replace(/\\\\(.)/g, '$1') : m[3])", "message: clean(m[2] !== undefined ? m[2].replace(/\\\\(.)/g, '$1') : m[3])"],
     '1.9': [': pageText(d && d.message); }', ': clean(d && d.message); }'],
     '1.11': [": pageText(d.message);\n  const accept", ": clean(d.message);\n  const accept"],

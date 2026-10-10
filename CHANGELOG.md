@@ -2,6 +2,14 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.248 — 2026-10-10
+
+### Fixed
+- When a file path in a chat can't be opened, VibeSpace says which path it looked for and where, and offers to copy it, search by name or open the nearest folder.
+
+### Security
+- A message from outside can no longer smuggle an instruction frame to an agent by nesting it.
+
 ## 2.369.247 — 2026-10-09
 
 ### Added

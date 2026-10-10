@@ -176,13 +176,10 @@ function larkSystemSentence(c, fallback) {
 const TAG_LIKE_RE = /<\/?[A-Za-z][^<>]*>/;
 /** Does this string carry a tag-shaped `<…>`? */
 function carriesTag(s) { return typeof s === 'string' && s.indexOf('<') >= 0 && TAG_LIKE_RE.test(s); }
-/** OUR frame names: channel-record's pattern, global. */
-const FRAME_G = new RegExp(R.FRAME_TAG_RE.source, 'giu');
-/** The fence: a `<…>` whose name is one of OUR frame names becomes `‹…›`; any other `<…>` is content, as written. */
+/** The fence: a `<…>` whose name is one of OUR frame names becomes `‹…›`; any other `<…>` is content, as written.
+ *  To the belt's FIXED POINT — channel-record's `foldFrames` (≤ 4 passes, a deeper nest withheld), never a second loop. */
 function quoteTags(s) {
-  let x = String(s == null ? '' : s);
-  for (let i = 0; i < 4 && x.indexOf('<') >= 0 && R.carriesFrame(x); i++) x = x.replace(FRAME_G, (m) => '‹' + m.slice(1, -1) + '›');
-  return x;
+  return R.foldFrames(String(s == null ? '' : s), (m) => '‹' + m.slice(1, -1) + '›');
 }
 /** Seal every TEXT string of a tree (runs t/b/i/a/at, attribution, banner, card title/lines, sys);
  *  code runs and code blocks are code — shown as written. Returns the same (mutated) tree. */

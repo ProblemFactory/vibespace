@@ -511,6 +511,8 @@
 - AGENT ROWS LOOKED LIKE PEOPLE (owner 2026-10-09): VibeSpace's own groups wore the same coloured disc as a Lark group, told apart by an 8 px badge. FIX = the mark as the avatar on a muted disc, the block on a band. 不变量 = colour on the first screen means a person or a vendor
 - THE OWNER COULD NOT OPEN WHAT AN AGENT ASKED HIM TO REVIEW (owner 2026-10-09): an item was words, its paths dead text. FIX = --artifact chips (checked openable at submit) via the one open door + paths/links on the asker's cwd/host. 不变量 = what an agent asks the owner to look at opens in one press
 - A PERSON'S OWN TAGS VANISHED FROM A LARK MESSAGE (owner 10-09, <emphasis> for TTS): the reader stripped tags it did not know, the wall quoted the rest. FIX = a closed vocabulary; any other tag is content as written; only OUR frame names fenced. 不变量 = what a person typed reaches the agent as typed
+- FOUR CMD+CLICKS ON A PATH LINK, NOTHING SAID (userW 10-10 inc-mv1tlrix-eklc): a missing path flashed Not found 1.2 s; no ring kept it. FIX = a toast with the path, the machine and a way on; every link open is an op-ring row. 不变量 = a failed click is said where it happened, recorded for the bundle
+- A NESTED FRAME OPENER SLIPPED THE BELT (lane lark-unknown-tags finding, 2026-10-09): one pass inerted the inner opener and re-assembled the outer. FIX = inert to a fixed point (≤ 4), assert no live frame at every door, withhold otherwise. 不变量 = a peer can never forge a frame, however nested
 
 ## AGENT ROWS LOOKED LIKE PEOPLE (lane internal-rows-look, 2.369.247 — owner 2026-10-09 "这个 VibeSpace 内部的聊天群视觉上很难和其他的外部的区分开")
 

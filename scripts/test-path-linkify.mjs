@@ -6,6 +6,9 @@
 // ④⑤ (B-2dbc, userW inc-murolahg-3rtv): the REAL renderer never wraps text an
 // earlier pass already made a link — a `/p/<id>` page link in chat copied its
 // bare path and Cmd+click said "Not found" (the path pass re-wrapped its text).
+// ⑥⑦ (lane path-link-not-found, userW inc-mv1tlrix-eklc): a link that cannot be
+// opened is SAID (a toast: the path, the machine, a way on) and every link open's
+// end is an op-ring row — the path itself never.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -62,7 +65,7 @@ const esbuild = require2('esbuild');
 const SCR = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-tpl-'));
 const RENDERER = path.join(ROOT, 'src/lib/chat-renderers.js');
 let built = 0;
-async function renderer(patch) {
+async function renderer(patch, opts = {}) {
   const out = path.join(SCR, `chat-renderers-${built++}.mjs`);
   const plug = { name: 'tpl', setup(b) {
     b.onResolve({ filter: /(build-version|safe-html)\.js$/ }, (a) => ({ path: path.basename(a.path), namespace: 'tpl-stub' }));
@@ -71,7 +74,7 @@ async function renderer(patch) {
   } };
   await esbuild.build({ entryPoints: [RENDERER], bundle: true, format: 'esm', platform: 'node', target: 'es2022', outfile: out, logLevel: 'silent', loader: { '.css': 'text' }, plugins: [plug] });
   const { ChatRenderers } = await import(out);
-  return new ChatRenderers({ ws: null, sessionId: 's', app: {}, backend: 'claude', compact: false, messageList: mkEl() });
+  return new ChatRenderers({ ws: null, sessionId: 's', app: opts.app || {}, backend: 'claude', compact: false, messageList: opts.list || mkEl(), getSessionCtx: opts.ctx || null });
 }
 const mkEl = () => ({ className: '', dataset: {}, _html: '', classList: { add() {}, remove() {}, contains() { return false; }, toggle() {} }, set innerHTML(v) { this._html = v; }, get innerHTML() { return this._html; }, appendChild() {}, querySelector() { return null; }, querySelectorAll() { return []; }, addEventListener() {}, setAttribute() {}, getAttribute() { return null; } });
 {
@@ -138,6 +141,161 @@ ok(redCells.length >= 9, `the census goes RED on it (${redCells.length} cells: p
 const same = P0.map((x, i) => ({ ...x, now: H[i].html })).filter((x) => !offenders(x.html));
 const moved = same.filter((x) => x.html !== x.now);
 ok(same.length >= 15 && !moved.length, `BYTE IDENTITY: every cell the pre-fix rule rendered without a nested link is unchanged (${same.length} cells: paths, CJK, relative, markdown links, URLs in prose)` + (moved.length ? ' — ' + moved.map((x) => x.entry + ': ' + x.html + ' → ' + x.now).join(' ¦ ').slice(0, 900) : ''));
+console.log('⑥ A LINK THAT CANNOT BE OPENED IS SAID — the real renderer over a fake DOM, fetch and op ring (lane path-link-not-found)');
+// a small element: children, classes, text, listeners — enough for showToast / showContextMenu / flashLink
+class El {
+  constructor(tag) { this.tagName = String(tag).toUpperCase(); this.children = []; this.style = {}; this.dataset = {}; this.attrs = {}; this._c = new Set(); this.textContent = ''; this.parentNode = null; this.ls = {}; this.id = ''; }
+  get className() { return [...this._c].join(' '); }
+  set className(v) { this._c = new Set(String(v).split(/\s+/).filter(Boolean)); }
+  get classList() { const c = this._c; return { add: (...a) => a.forEach((x) => c.add(x)), remove: (...a) => a.forEach((x) => c.delete(x)), contains: (x) => c.has(x), toggle: (x, f) => ((f ?? !c.has(x)) ? c.add(x) : c.delete(x)) }; }
+  append(...k) { for (const x of k) this.appendChild(x); }
+  appendChild(k) { k.parentNode = this; this.children.push(k); return k; }
+  remove() { const p = this.parentNode; if (p) p.children = p.children.filter((x) => x !== this); this.parentNode = null; }
+  get firstChild() { return this.children[0] || null; }
+  setAttribute(k, v) { this.attrs[k] = String(v); }
+  getAttribute(k) { return this.attrs[k] ?? null; }
+  addEventListener(t, f) { (this.ls[t] ||= []).push(f); }
+  removeEventListener() {}
+  contains(x) { for (let n = x; n; n = n.parentNode) if (n === this) return true; return false; }
+  getBoundingClientRect() { return { left: 10, top: 10, right: 110, bottom: 30, width: 100, height: 20 }; }
+  get offsetParent() { return null; }
+  closest(sel) { const cls = String(sel).split(',')[0].trim().replace(/^\./, ''); for (let n = this; n; n = n.parentNode) if (n._c && n._c.has(cls)) return n; return null; }
+  querySelector() { return null; }
+  querySelectorAll() { return []; }
+  select() {}
+  get text() { return this.textContent + this.children.map((c) => c.text).join(''); }
+}
+const DOC = { body: new El('body'), createElement: (t) => new El(t), createTextNode: (t) => Object.assign(new El('#text'), { textContent: t }), addEventListener() {}, removeEventListener() {}, execCommand: () => true,
+  documentElement: new El('html'), head: new El('head'), querySelector() { return null; }, querySelectorAll() { return []; },
+  getElementById(id) { const walk = (n) => { if (n.id === id) return n; for (const k of n.children) { const f = walk(k); if (f) return f; } return null; }; return walk(DOC.body); } };
+const saved = { document: globalThis.document, fetch: globalThis.fetch, open: globalThis.open };
+globalThis.document = DOC;
+const clip = [];
+Object.defineProperty(globalThis, 'navigator', { value: { language: 'en', userAgent: 'node', clipboard: { writeText: async (x) => { clip.push(x); } } }, configurable: true, writable: true });
+let ROWS = [];
+globalThis.__vsOp = (op, data) => ROWS.push({ t: Date.now(), op, ...(data || {}) });
+const opened = [];
+globalThis.open = (u) => opened.push(['tab', u]);
+const APP = { openFile: (p, n, o) => opened.push(['file', p, o && o.line, o && o.host]), openFileExplorer: (p, o) => opened.push(['explorer', p, o && o.host]), sidebar: { _hostsData: { hosts: [{ id: 'h1', name: 'build-box' }] } } };
+let FS = {}; let ASKED = []; let THROW = false; let HITS = [];
+globalThis.fetch = async (u) => {
+  ASKED.push(u);
+  if (THROW) throw new TypeError('Failed to fetch');
+  const q = new URL(u, 'http://x');
+  if (q.pathname === '/api/file/locate') return { ok: true, json: async () => (q.searchParams.get('host') ? { hits: [], unsupported: 'remote' } : { hits: HITS }) };
+  const p = q.searchParams.get('path');
+  const e = FS[p];
+  return { ok: true, json: async () => (e === 'dir' ? { path: p, isDirectory: true } : e === 'file' ? { path: p, size: 3, isDirectory: false } : e ? { error: e } : { error: `ENOENT: no such file or directory, stat '${p}'` }) };
+};
+const toasts = () => { const st = DOC.getElementById('global-toasts'); return st ? st.children : []; };
+const toastOf = (el) => el && ({ cls: el.className, body: el.children.find((c) => c._c.has('global-toast-body'))?.textContent, acts: el.children.filter((c) => c._c.has('global-toast-action')).map((c) => c.textContent) });
+const clearToasts = () => { const st = DOC.getElementById('global-toasts'); if (st) st.remove(); };
+const reset = () => { clearToasts(); ROWS = []; ASKED = []; opened.length = 0; clip.length = 0; THROW = false; HITS = []; };
+const mkLink = (attrs) => { const a = new El('span'); a.className = 'chat-link chat-link-path'; Object.assign(a.dataset, attrs); const li = new El('div'); li.appendChild(a); return a; };
+const leaks = (rows, p) => rows.filter((r) => Object.values(r).some((v) => typeof v === 'string' && (v.includes('/') || (p && v.includes(p)))));
+const tick = () => new Promise((r) => setTimeout(r, 5));
+let CTX = { cwd: '/w/proj', host: null };
+const LIST = new El('div');
+const R = await renderer(null, { app: APP, list: LIST, ctx: () => CTX });
+const ABS = '/home/userW/x/out/report.md';
+
+reset();
+await R._openLinkTarget(mkLink({ path: ABS }), null, ABS);
+let T = toastOf(toasts()[0]);
+ok(toasts().length === 1 && /No such file on this machine: \/home\/userW\/x\/out\/report\.md — the agent may have written it elsewhere or removed it/.test(T?.body || ''), `a path that does not exist ⇒ ONE toast naming the FULL path and the machine (${T?.body})`);
+eq(T?.acts, ['Copy path', 'Search by name', 'Open the nearest folder'], '…with its three ways on');
+ok(/global-toast-warn/.test(T?.cls) && /global-toast-wide/.test(T?.cls), `…a warning, actions under the words (${T?.cls})`);
+eq(ROWS.map(({ op, kind, outcome, host, base, len }) => ({ op, kind, outcome, host, base, len })), [{ op: 'link-open', kind: 'path', outcome: 'not-found', host: null, base: 'report.md', len: ABS.length }], '…and ONE op-ring row: kind, outcome, host, the basename + the length');
+ok(typeof ROWS[0]?.t === 'number' && !leaks(ROWS, ABS).length, '…stamped, and no value in it carries the path');
+const acts = () => toasts()[0].children.filter((c) => c._c.has('global-toast-action'));
+await acts()[0].onclick({ stopPropagation() {} }); await tick();
+eq(clip, [ABS], 'Copy path copies the FULL path (and closes the toast)');
+ok(!toasts().length, '…the toast is gone after the press');
+reset(); await R._openLinkTarget(mkLink({ path: ABS }), null, ABS);
+FS = { '/home/userW/x': 'dir' };
+await acts()[2].onclick({ stopPropagation() {} }); for (let i = 0; i < 5; i++) await tick();
+eq(opened, [['explorer', '/home/userW/x', null]], 'Open the nearest folder walks up (out/ is gone too) and opens the explorer at the first folder that exists');
+reset(); FS = {}; await R._openLinkTarget(mkLink({ path: ABS }), null, ABS);
+HITS = ['/w/proj/docs/report.md']; await acts()[1].onclick({ stopPropagation() {} }); for (let i = 0; i < 5; i++) await tick();
+ok(ASKED.some((u) => /\/api\/file\/locate\?name=report\.md&root=%2Fw%2Fproj&type=f/.test(u)), 'Search by name asks the bounded find for the basename under the session folder');
+eq(opened, [['file', '/w/proj/docs/report.md', undefined, undefined]], '…one hit opens it');
+reset(); await R._openLinkTarget(mkLink({ path: ABS }), null, ABS);
+HITS = []; await acts()[1].onclick({ stopPropagation() {} }); for (let i = 0; i < 5; i++) await tick();
+ok(/No file named report\.md under \/w\/proj/.test(toastOf(toasts()[0])?.body || ''), `…none is SAID (${toastOf(toasts()[0])?.body})`);
+
+reset(); FS = { '/w/proj/docs': 'dir', '/w/proj/a.js': 'file' };
+await R._openLinkTarget(mkLink({ path: '/w/proj/docs' }), null, '/w/proj/docs');
+await R._openLinkTarget(mkLink({ path: '/w/proj/a.js:12' }), null, '/w/proj/a.js:12');
+eq(opened, [['explorer', '/w/proj/docs', null], ['file', '/w/proj/a.js', 12, null]], 'a folder ⇒ the explorer, a file:line ⇒ the viewer at its line (unchanged)');
+eq(ROWS.map((r) => `${r.kind}:${r.outcome}:${r.base}:${r.len}`), ['path:directory:docs:12', 'path:opened:a.js:12:15'], '…each a row (directory / opened)');
+ok(!toasts().length, '…and no toast');
+
+reset(); THROW = true;
+await R._openLinkTarget(mkLink({ path: ABS }), null, ABS);
+T = toastOf(toasts()[0]);
+ok(/Could not ask the server whether \/home\/userW\/x\/out\/report\.md exists on this machine/.test(T?.body || '') && /global-toast-error/.test(T?.cls), `a fetch that throws ⇒ the same toast in "could not ask the server" words (${T?.body})`);
+eq(ROWS.map((r) => r.outcome), ['error'], '…row outcome error');
+reset(); FS = { [ABS]: 'EACCES: permission denied, open' };
+await R._openLinkTarget(mkLink({ path: ABS }), null, ABS);
+ok(/Could not open \/home\/userW\/x\/out\/report\.md on this machine: EACCES: permission denied/.test(toastOf(toasts()[0])?.body || ''), "a refusal that is not ENOENT says the server's words, never \"no such file\"");
+
+reset(); FS = {}; CTX = { cwd: '/w/proj', host: 'h1' };
+await R._openLinkTarget(mkLink({ path: ABS }), null, ABS);
+T = toastOf(toasts()[0]);
+ok(/No such file on build-box: \/home\/userW\/x\/out\/report\.md/.test(T?.body || ''), `a remote session's link names ITS machine (${T?.body})`);
+eq(T?.acts, ['Copy path', 'Open the nearest folder'], '…and offers no search (the remote door has no bounded find)');
+eq(ROWS.map((r) => r.host), ['h1'], '…its row carries the host');
+ok(ASKED.every((u) => /&host=h1/.test(u)), '…and it was looked for on that host');
+
+reset(); CTX = { cwd: '/w/proj', host: null }; FS = {};
+await R._openRelTarget(mkLink({ rel: 'docs/x.md' }), 'docs/x.md');
+T = toastOf(toasts()[0]);
+ok(/No such file on this machine: \/w\/proj\/docs\/x\.md/.test(T?.body || ''), `a relative path with no candidate ⇒ the same toast, naming the first place it looked (${T?.body})`);
+ok(ASKED.some((u) => /\/api\/file\/locate\?name=x\.md&root=%2Fw%2Fproj&type=f/.test(u)), '…AFTER the bounded find under the session folder was asked (it threw on a stale name before)');
+eq(ROWS.map((r) => `${r.kind}:${r.outcome}:${r.base}:${r.len}`), ['rel:not-found:x.md:9'], '…row kind rel, outcome not-found');
+reset(); HITS = ['/w/proj/sub/docs/x.md'];
+await R._openRelTarget(mkLink({ rel: 'docs/x.md' }), 'docs/x.md');
+eq(opened, [['file', '/w/proj/sub/docs/x.md', undefined, null]], 'the bounded find works again: its one hit opens');
+eq(ROWS.map((r) => r.outcome), ['opened'], '…row opened');
+reset(); FS = { '/w/proj/docs/x.md': 'file' };
+await R._openRelTarget(mkLink({ rel: 'docs/x.md' }), 'docs/x.md');
+eq(ROWS.map((r) => `${r.kind}:${r.outcome}`), ['rel:opened'], 'a candidate that exists opens (row rel:opened)');
+
+reset();
+R._openLinkTarget(mkLink({ href: 'https://example.com/a/b?tok=1' }), 'https://example.com/a/b?tok=1', null);
+eq(opened, [['tab', 'https://example.com/a/b?tok=1']], 'a URL opens a tab');
+eq(ROWS.map((r) => `${r.kind}:${r.outcome}:${r.base}`), ['url:opened:'], '…its row keeps no part of the URL (only its length)');
+
+reset();
+const click = (list, link, mod) => list.ls.click[0]({ target: link, preventDefault() {}, stopPropagation() {}, ctrlKey: !!mod, metaKey: false, clientX: 5, clientY: 5 });
+click(LIST, mkLink({ path: ABS })); await tick();
+eq([clip, ROWS.map((r) => r.outcome)], [[ABS], ['copied']], 'a plain click copies — row copied');
+reset(); click(LIST, mkLink({ path: ABS }), true); for (let i = 0; i < 3; i++) await tick();
+eq(ROWS.map((r) => r.outcome), ['not-found'], 'Ctrl/Cmd+click opens — the not-found end');
+reset(); LIST.ls.contextmenu[0]({ target: mkLink({ path: ABS }), preventDefault() {}, stopPropagation() {}, clientX: 5, clientY: 5 });
+eq(ROWS.map((r) => r.outcome), ['menu'], 'a right-click menu — row menu');
+const TLIST = new El('div');
+await renderer(null, { app: { ...APP, isTouch: true }, list: TLIST, ctx: () => CTX });
+reset(); click(TLIST, mkLink({ path: ABS }));
+eq(ROWS.map((r) => `${r.kind}:${r.outcome}`), ['path:menu'], 'the phone: a tap is the Open / Copy menu — row menu');
+const ROWS_OK = ROWS;
+
+console.log('⑦ CONTROLS (patched copies of the renderer)');
+const LEAK_FROM = "base: kind === 'url' ? '' : s.replace(/[\\/]+$/, '').split('/').pop().slice(0, 60)";
+let n7 = 0;
+const leaky = await renderer((src) => { n7 = src.split(LEAK_FROM).length - 1; return src.split(LEAK_FROM).join('base: s'); }, { app: APP, list: new El('div'), ctx: () => CTX });
+ok(n7 === 1, `the leak control's patch applied exactly once (${n7})`);
+reset(); await leaky._openLinkTarget(mkLink({ path: ABS }), null, ABS);
+ok(leaks(ROWS, ABS).length === 1 && !leaks(ROWS_OK, ABS).length, 'RED CONTROL: a row that stores the full path is caught by the same check');
+const NORM = "        const norm = rel.replace(/\\/+$/, '');";
+let n7b = 0;
+const stale = await renderer((src) => { n7b = src.split(NORM).length - 1; return src.split(NORM).join('        void 0;'); }, { app: APP, list: new El('div'), ctx: () => CTX });
+ok(n7b === 1, `the stale-name control's patch applied exactly once (${n7b})`);
+reset(); FS = {}; HITS = ['/w/proj/sub/docs/x.md'];
+await stale._openRelTarget(mkLink({ rel: 'docs/x.md' }), 'docs/x.md');
+ok(!ASKED.some((u) => /\/api\/file\/locate/.test(u)) && !opened.length, 'RED CONTROL: the stale name (the 2.369.247 line) never reaches the bounded find — the leg above is red on it');
+clearToasts();
+globalThis.document = saved.document; globalThis.fetch = saved.fetch; globalThis.open = saved.open;
 fs.rmSync(SCR, { recursive: true, force: true });
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

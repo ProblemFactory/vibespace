@@ -85,6 +85,19 @@ const FRAME_HEAD = `<(?:${FOLD}*\\/)?[\\s${FRAME_FOLD}]*`;
 const FRAME_TAIL = `(?:(?!\\s)${FOLD})*`;
 const FRAME_TAG_RE = new RegExp(`${FRAME_HEAD}(${FRAME_NAMES})${FRAME_TAIL}(\\s[^<>]*)?>`, 'giu');
 const FRAME_OPEN_RE = new RegExp(`<(${FRAME_HEAD.slice(1)}(?:${FRAME_NAMES}))(?=${FRAME_TAIL}(?:\\s|$))`, 'iuy');
+// THE FIXED POINT (lane belt-nested-opener, B-2103): channel-record's `foldFrames` and its three constants, copied — one
+// pass re-assembled the outer opener of `<system-reminder <system-reminder>>`; ≤ 4 passes, a deeper nest WITHHELD whole.
+const FRAME_PASSES = 4;
+const FRAME_LIVE_RE = new RegExp(FRAME_TAG_RE.source, 'iu');
+const FRAME_WITHHELD = '[peer text withheld: a nested frame could not be inerted]';
+function foldFrames(t, fold) {
+  for (let i = 0; i < FRAME_PASSES; i++) {
+    const n = t.replace(FRAME_TAG_RE, fold);
+    if (n === t) return t;   // (a match always changes: it starts with `<`, a fold never does)
+    t = n;
+  }
+  return FRAME_LIVE_RE.test(t) ? FRAME_WITHHELD : t;
+}
 /** VibeSpace's own notice head (src/notification-senders.js VIBESPACE_NOTICE_HEAD) — a page never speaks under it. */
 const NOTICE_HEAD_RE = /VibeSpace \(this workspace, not another agent\) reports:/gi;
 /** THE DANGLING OPENERS of ONE line whose complete tags are already inert — judged RIGHT TO LEFT (lane peer-census verify r6
@@ -123,7 +136,7 @@ const INVISIBLE_RE = /[\p{Cf}\u034F\u115F\u1160\u17B4\u17B5\u180B-\u180F\u3164\u
  *  Idempotent; never longer than `max`. */
 function pageText(s, max = MESSAGE_MAX) {
   const t = clean(str(s).replace(INVISIBLE_RE, ''), max);
-  return inertOpeners(t.replace(FRAME_TAG_RE, (m, name) => '[' + String(name).replace(FOLD_G, '').trim() + ']'))
+  return inertOpeners(foldFrames(t, (m, name) => '[' + String(name).replace(FOLD_G, '').trim() + ']'))
     .replace(NOTICE_HEAD_RE, '[a VibeSpace notice head, written by the page]').slice(0, max);
 }
 /** Page text inside a sentence: ONE delimited string (JSON quoting — a `"` in it can never close the quote). */
@@ -885,7 +898,7 @@ function printWords(tIn) { const t = typeof tIn === 'function' ? (s, q) => tIn(s
 
 module.exports = {
   MESSAGE_MAX, BEFOREUNLOAD_TEXT, STUCK_AFTER, OK_RECENT_MS, COMMAND_TIMEOUT_MS, ENABLE_TIMEOUT_MS, NO_DIALOG_TEXT,
-  FRAME_TAGS, FRAME_TAG_RE, FRAME_OPEN_RE, inertOpeners, pageText, quoted, // verify r1 A2: page text is frame-inert, delimited, bounded
+  FRAME_TAGS, FRAME_TAG_RE, FRAME_OPEN_RE, FRAME_WITHHELD, foldFrames, inertOpeners, pageText, quoted, // verify r1 A2: page text is frame-inert, delimited, bounded
   AUTO_ACCEPT_MAX, AUTO_ACCEPT_WINDOW_MS, ALERT_NOTES_MAX, alertsNote, // verify r1 A3: an alert storm is bounded and told as one line
   LOADING_GRACE_MS, loadingText, // verify r1 A7: a timeout during a navigation the site has not answered is the network's (+ r2 #5: said, with the time so far)
   clean, dialogFromCdp, autoAnswerVerdict, messageOf, openForText, answerMeaning, dialogText, dialogBlock, answeredNote, answerDoneText,

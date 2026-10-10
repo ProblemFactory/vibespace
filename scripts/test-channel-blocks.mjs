@@ -1328,8 +1328,8 @@ console.log('⑳ a tag the reader does not know is content, as written; known ma
   const src = read('src/channels/lark/blocks.js');
   const M = mutantCopies('channel-blocks-unknown-tags', REPO);
   const oldReader = src.replace("    if (!knownTag(k.name)) { k.t = 'text'; k.v = k.raw; }", '');
-  const oldWall = src.replace("R.carriesFrame(x); i++) x = x.replace(FRAME_G,", "carriesTag(x); i++) x = x.replace(/<\\/?[A-Za-z][^<>]*>/g,");
-  const noFence = src.replace("R.carriesFrame(x); i++) x = x.replace(FRAME_G,", "false; i++) x = x.replace(FRAME_G,");
+  const oldWall = src.replace("R.foldFrames(String(s == null ? '' : s), ", "String(s == null ? '' : s).replace(/<\\/?[A-Za-z][^<>]*>/g, ");   // lane belt-nested-opener: the fence is the belt's fixed point now
+  const noFence = src.replace("R.foldFrames(String(s == null ? '' : s), ", "((x) => x)(String(s == null ? '' : s), ");
   const a1 = M.load('src/channels/lark/blocks.js', oldReader, 'old-reader').larkPlainText('<emphasis>Hello</emphasis> world');
   ok(oldReader !== src && a1 === 'Hello world', `CONTROL: the old reader (an unknown tag stripped) reads it as ${J(a1)} — the owner's report`);
   const a2 = M.load('src/channels/lark/blocks.js', oldWall, 'old-wall').larkPlainText('wait <break time="500ms"/> <emphasis>Hello</emphasis>');

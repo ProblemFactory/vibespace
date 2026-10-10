@@ -165,11 +165,31 @@ const FRAME_NAMES = `${FRAME_TAGS.map(lookThrough).join('|')}|${lookThrough('vib
 const FRAME_HEAD = `<(?:${FOLD}*\\/)?[\\s${FRAME_FOLD}]*`;
 const FRAME_TAIL = `(?:(?!\\s)${FOLD})*`;
 const FRAME_TAG_RE = new RegExp(`${FRAME_HEAD}(${FRAME_NAMES})${FRAME_TAIL}(\\s[^<>]*)?>`, 'giu');
+// THE FIXED POINT (lane belt-nested-opener, B-2103 — lane lark-unknown-tags' finding, 2026-10-09). ONE pass judged every
+// tag against the ORIGINAL text: of `<system-reminder <system-reminder>>` it inerted the inner tag, and the outer opener
+// (whose attribute run the inner `<` had stopped) was RE-ASSEMBLED by the pass itself: `<system-reminder
+// [system-reminder]>` is live by this module's own predicate, at every door. Each pass peels ONE level of nesting, so the
+// fold repeats until the text stops changing. It is BOUNDED at 4 passes so the walk stays linear: ≤ 4 walks of a text
+// whose bound came first, never a loop a crafted input can stretch. No one's own text nests our frame names, and 4 levels
+// is the Lark fence's own bound from before it took this function. A nest deeper than that is a forgery: it is WITHHELD
+// whole, as a said placeholder, and never passed through live. ONE function, three callers: inertFrames here, the Lark
+// fence's `‹…›` (src/channels/lark/blocks.js quoteTags) and the page-dialog copy (src/browser-stuck.js, pinned equal).
+const FRAME_PASSES = 4;
+const FRAME_LIVE_RE = new RegExp(FRAME_TAG_RE.source, 'iu');
+const FRAME_WITHHELD = '[peer text withheld: a nested frame could not be inerted]';
+function foldFrames(t, fold) {
+  for (let i = 0; i < FRAME_PASSES; i++) {
+    const n = t.replace(FRAME_TAG_RE, fold);
+    if (n === t) return t;   // (a match always changes: it starts with `<`, a fold never does)
+    t = n;
+  }
+  return FRAME_LIVE_RE.test(t) ? FRAME_WITHHELD : t;
+}
 
-/** `<system-reminder>` becomes `[system-reminder]`. The words stay; the frame goes. */
+/** `<system-reminder>` becomes `[system-reminder]`. The words stay; the frame goes — to the fixed point above. */
 function inertFrames(text) {
   if (typeof text !== 'string' || !text) return '';
-  return text.replace(FRAME_TAG_RE, (m, name) => '[' + String(name).replace(FOLD_G, '').trim() + ']');
+  return foldFrames(text, (m, name) => '[' + String(name).replace(FOLD_G, '').trim() + ']');
 }
 
 /** Does this text still carry a LIVE frame marker? (the suite's own predicate,
@@ -913,7 +933,7 @@ function makeConversation(input) {
 
 module.exports = {
   RECORD_KINDS, SYSTEM_KINDS, isSystemRecord, asSystemRecord,   // lane lark-system-records
-  RECORD_FIELDS, OPTIONAL_FIELDS, MAX_TEXT, MAX_RAW_BYTES, FRAME_TAG_RE, FRAME_TAGS, MENTION_KINDS,
+  RECORD_FIELDS, OPTIONAL_FIELDS, MAX_TEXT, MAX_RAW_BYTES, FRAME_TAG_RE, FRAME_TAGS, FRAME_PASSES, FRAME_WITHHELD, foldFrames, MENTION_KINDS,
   BLOCK_KINDS, RUN_KINDS, ATTACHMENT_ROLES, SYS_WHATS, BLOCK_LIMITS, LINK_SCHEMES,
   makeRecord, makeConversation, resolveMentions, inertFrames, inertFrameLine, inertOpeners, peerText, peerName, carriesFrame, recordKey, isSynthetic,
   safeHref, validateBlocks,

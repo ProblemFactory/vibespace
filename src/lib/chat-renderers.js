@@ -2670,10 +2670,12 @@ class ChatRenderers {
       e.preventDefault();
       e.stopPropagation();
       const { url, fp, rel } = this._linkTargets(link);
+      const kind = rel ? 'rel' : fp ? 'path' : 'url';
       const open = () => rel ? this._openRelTarget(link, rel) : this._openLinkTarget(link, url, fp);
-      const copy = () => copyText(fp || rel || url).then(() => this.flashLink(link, t('Copied!')));
+      const copy = () => copyText(fp || rel || url).then(() => { this.flashLink(link, t('Copied!')); this._linkOp(kind, 'copied', fp || rel || url); });
       if (isTouch) {
         // No Ctrl/hover on touch — tap shows both actions (copy used to be impossible)
+        this._linkOp(kind, 'menu', fp || rel || url);
         showContextMenu(e.clientX, e.clientY, [
           { label: (fp || rel) ? t('Open') : t('Open link'), action: open },
           { label: (fp || rel) ? t('Copy path') : t('Copy URL'), action: copy },
@@ -2692,9 +2694,11 @@ class ChatRenderers {
       e.preventDefault();
       e.stopPropagation();
       const { url, fp, rel } = this._linkTargets(link);
+      const kind = rel ? 'rel' : fp ? 'path' : 'url';
+      this._linkOp(kind, 'menu', fp || rel || url);
       showContextMenu(e.clientX, e.clientY, [
         { label: (fp || rel) ? t('Open') : t('Open link'), action: () => rel ? this._openRelTarget(link, rel) : this._openLinkTarget(link, url, fp) },
-        { label: (fp || rel) ? t('Copy path') : t('Copy URL'), action: () => copyText(fp || rel || url).then(() => this.flashLink(link, t('Copied!'))) },
+        { label: (fp || rel) ? t('Copy path') : t('Copy URL'), action: () => copyText(fp || rel || url).then(() => { this.flashLink(link, t('Copied!')); this._linkOp(kind, 'copied', fp || rel || url); }) },
       ]);
     });
   }
@@ -2709,9 +2713,11 @@ class ChatRenderers {
     const { cwd, host } = this._sessionCtx();
     const cands = relCandidates(rel, cwd); // src/path-linkify.js — the For-you links probe the same candidates
     const seen = new Set();
+    let asked = 0, threw = 0;
     for (const c of cands) {
       if (!c || seen.has(c)) continue;
       seen.add(c);
+      asked++;
       try {
         const r = await fetch(`/api/file/info?path=${encodeURIComponent(c)}${host ? '&host=' + encodeURIComponent(host) : ''}`);
         const info = await r.json();
@@ -2722,9 +2728,10 @@ class ChatRenderers {
           const from = this._sourceWinId();
           if (info.isDirectory) this.app.openFileExplorer(c, { host, from });
           else this.app.openFile(c, c.split('/').pop(), { host, from });
+          this._linkOp('rel', info.isDirectory ? 'directory' : 'opened', rel, host);
           return;
         }
-      } catch {}
+      } catch { threw++; }
     }
     // Last resort: bounded server-side search under the cwd — the reply may
     // reference a file that lives deeper (real case: `SCRIPTS.md` actually at
@@ -2732,6 +2739,7 @@ class ChatRenderers {
     // picker; prefer hits whose tail matches the full relative reference.
     if (cwd && !host) {
       try {
+        const norm = rel.replace(/\/+$/, ''); // it was a stale name since the candidates moved to path-linkify.js: this fallback threw, swallowed
         const base = norm.split('/').pop();
         const type = rel.endsWith('/') ? 'd' : 'f';
         const r = await fetch(`/api/file/locate?name=${encodeURIComponent(base)}&root=${encodeURIComponent(cwd)}&type=${type}`);
@@ -2739,15 +2747,16 @@ class ChatRenderers {
         const exact = hits.filter(h => h.endsWith('/' + norm));
         const use = exact.length ? exact : hits;
         const openHit = (h) => { const from = this._sourceWinId(); return type === 'd' ? this.app.openFileExplorer(h, { host, from }) : this.app.openFile(h, h.split('/').pop(), { host, from }); };
-        if (use.length === 1) { openHit(use[0]); return; }
+        if (use.length === 1) { openHit(use[0]); this._linkOp('rel', type === 'd' ? 'directory' : 'opened', rel, host); return; }
         if (use.length > 1) {
           const rect = link.getBoundingClientRect();
           showContextMenu(rect.left, rect.bottom + 4, use.map(h => ({ label: h, action: () => openHit(h) })));
+          this._linkOp('rel', 'menu', rel, host);
           return;
         }
       } catch {}
     }
-    this.flashLink(link, t('Not found near the session folder'));
+    this._linkMissing(link, { kind: 'rel', target: rel, path: [...seen][0] || rel, host, why: asked && threw === asked ? 'error' : 'not-found' });
   }
 
   /** Open a chat link target: file path (with optional :line suffix) in viewer/explorer, URL in new tab */
@@ -2769,21 +2778,89 @@ class ChatRenderers {
       // to local files) must resolve + open on the SESSION's host, not this
       // instance (real report: right-click → Open did nothing in remote chats).
       const { host } = this._sessionCtx();
-      fetch(`/api/file/info?path=${encodeURIComponent(cleanPath)}${host ? '&host=' + encodeURIComponent(host) : ''}`)
+      return fetch(`/api/file/info?path=${encodeURIComponent(cleanPath)}${host ? '&host=' + encodeURIComponent(host) : ''}`)
         .then(r => r.json())
         .then(info => {
           if (info.error) {
-            this.flashLink(link, t('Not found'));
+            // ENOENT says "no such file"; anything else (a refused read, an unreachable host) says the server's words
+            const missing = /ENOENT|no such file|not found|does not exist/i.test(String(info.error));
+            this._linkMissing(link, { kind: 'path', target: fp, path: cleanPath, host, why: missing ? 'not-found' : 'error', err: missing ? '' : String(info.error) });
           } else if (info.isDirectory) {
             this.app.openFileExplorer(cleanPath, { host, from: this._sourceWinId() });
+            this._linkOp('path', 'directory', fp, host);
           } else {
             this.app.openFile(cleanPath, cleanPath.split('/').pop(), { line: lineNum, host, from: this._sourceWinId() });
+            this._linkOp('path', 'opened', fp, host);
           }
         })
-        .catch(() => this.flashLink(link, t('Error')));
+        .catch(() => this._linkMissing(link, { kind: 'path', target: fp, path: cleanPath, host, why: 'error' }));
     } else if (url) {
       window.open(url, '_blank');
+      this._linkOp('url', 'opened', url, this._sessionCtx().host);
     }
+  }
+
+  /** lane path-link-not-found (userW inc-mv1tlrix-eklc, 2026-10-10: four Cmd+clicks on a path link in 30 s, nothing in
+   *  any ring): EVERY link open's end is an op-ring row the incident bundle carries — kind (path | rel | url), outcome
+   *  (opened | directory | not-found | error | copied | menu), the session's host. Never the path itself (a bundle is
+   *  shared with us): its last segment and its length. */
+  _linkOp(kind, outcome, target, host) {
+    const s = String(target || '');
+    try { window.__vsOp?.('link-open', { kind, outcome, host: host || null, base: kind === 'url' ? '' : s.replace(/[\/]+$/, '').split('/').pop().slice(0, 60), len: s.length }); } catch {}
+  }
+
+  /** The machine a path was looked for on, in words: this one, or the remote host's name (the sidebar's hosts list). */
+  _machineName(host) {
+    if (!host) return t('this machine');
+    try { return this.app?.sidebar?._hostsData?.hosts?.find((x) => x.id === host)?.name || host; } catch { return host; }
+  }
+
+  /** A path link that cannot be opened is SAID where it happened (it was a 1.2 s "Not found" beside the cursor): a toast
+   *  with the FULL path, the machine it was looked for on, and a way on — Copy path · Search by name (this machine's
+   *  bounded find; the remote door has none) · Open the nearest folder that exists. Its row goes to the op ring. */
+  _linkMissing(link, { kind, target, path, host, why, err = '' }) {
+    this._linkOp(kind, why, target, host);
+    const machine = this._machineName(host);
+    const msg = why === 'error'
+      ? (err ? t('Could not open {path} on {machine}: {why}', { path, machine, why: err }) : t('Could not ask the server whether {path} exists on {machine}', { path, machine }))
+      : t('No such file on {machine}: {path} — the agent may have written it elsewhere or removed it', { machine, path });
+    const actions = [{ label: t('Copy path'), run: () => copyText(path).then(() => this.flashLink(link, t('Copied!'))) }];
+    if (!host) actions.push({ label: t('Search by name'), run: () => this._searchByName(link, path) });
+    actions.push({ label: t('Open the nearest folder'), run: () => this._openNearestFolder(path, host) });
+    const el = showToast(msg, { type: why === 'error' ? 'error' : 'warn', duration: 12000, actions });
+    el?.classList?.add('global-toast-wide'); // the actions get their own line under the words (three buttons squeezed a phone's path)
+    return el;
+  }
+
+  /** "Search by name": the basename under the session folder (else home) through the bounded find — one hit opens,
+   *  several offer a picker, none is said. */
+  async _searchByName(link, p) {
+    const { cwd } = this._sessionCtx();
+    const name = String(p).replace(/\/+$/, '').split('/').pop();
+    const where = cwd || '~';
+    const r = await fetchJson(`/api/file/locate?name=${encodeURIComponent(name)}${cwd ? '&root=' + encodeURIComponent(cwd) : ''}&type=f`);
+    const hits = (r && Array.isArray(r.hits)) ? r.hits : [];
+    const openHit = (h) => this.app.openFile(h, h.split('/').pop(), { from: this._sourceWinId() });
+    if (hits.length === 1) { openHit(hits[0]); return hits; }
+    if (hits.length > 1) {
+      const rect = link.getBoundingClientRect();
+      showContextMenu(rect.left, rect.bottom + 4, hits.map((h) => ({ label: h, action: () => openHit(h) })));
+      return hits;
+    }
+    showToast(r && r.error ? t('Could not search for {name}: {why}', { name, why: r.error }) : t('No file named {name} under {dir}', { name, dir: where }), { type: 'warn', duration: 8000 });
+    return hits;
+  }
+
+  /** "Open the nearest folder": walk up the path until a folder exists on its machine, open the explorer there. */
+  async _openNearestFolder(p, host) {
+    const up = (d) => { const x = d.replace(/\/+$/, ''); const i = x.lastIndexOf('/'); return i > 0 ? x.slice(0, i) : (i === 0 && x.length > 1 ? '/' : ''); };
+    for (let d = up(String(p)); d; d = up(d)) {
+      const info = await fetchJson(`/api/file/info?path=${encodeURIComponent(d)}${host ? '&host=' + encodeURIComponent(host) : ''}`);
+      if (info && !info.error && info.isDirectory) { this.app.openFileExplorer(d, { host, from: this._sourceWinId() }); return d; }
+      if (d === '/') break;
+    }
+    showToast(t('No folder on the way to {path} exists on {machine}', { path: p, machine: this._machineName(host) }), { type: 'error' });
+    return null;
   }
 
   flashLink(link, msg) {

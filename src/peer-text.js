@@ -23,7 +23,11 @@
  *   3. FRAME — channel-record's rule 3 over the whole text (a tag whose attribute run crosses a line), then
  *      `inertFrameLine` PER LINE and per inline piece: a frame opener left dangling at a line's end loses its `<`, so
  *      the `>` of the NEXT line — a quote mark, a list bullet, a JSON quote, the next site's own prefix — completes
- *      nothing. (`<system-reminder>` → `[system-reminder]`, `hi <system-reminder` → `hi [system-reminder`.)
+ *      nothing. (`<system-reminder>` → `[system-reminder]`, `hi <system-reminder` → `hi [system-reminder`.) The fold
+ *      runs to a FIXED POINT (≤ 4 passes — a nested opener `<system-reminder <system-reminder>>` is inert, lane
+ *      belt-nested-opener);
+ *   4. ASSERT — the output carries no live frame by the rule's own predicate, or the whole piece is WITHHELD as a said
+ *      placeholder (`FRAME_WITHHELD`): a frame the passes could not inert is never passed through.
  *
  * `toAgentText(raw, {max, kind})`: `kind:'block'` (default) keeps the text's own lines (each judged on its own);
  * `kind:'line'` is ONE inline piece — every line break / tab run becomes one space (an author name, a title, a job's
@@ -71,9 +75,14 @@ function foldHidden(raw, { line = false } = {}) {
   return t;
 }
 
-/** THE BELT: bound → fold → frame rule per line (and per inline piece). Never longer than `max`; idempotent. */
+/** THE BELT: bound → fold → frame rule per line (and per inline piece) → assert. Never longer than `max`; idempotent. */
 function toAgentText(raw, { max = TEXT_MAX, kind = 'block' } = {}) {
-  const line = kind === 'line';
+  const out = beltPass(raw, max, kind === 'line');
+  // THE ASSERT (lane belt-nested-opener, B-2103): judged over the WHOLE output, the lines joined — a live frame left by
+  // any layer below withholds the piece; it is never handed to an agent
+  return R.carriesFrame(out) ? cutText(R.FRAME_WITHHELD, max) : out;
+}
+function beltPass(raw, max, line) {
   let t = cutText(raw, max);
   t = foldHidden(t, { line });
   if (line) return R.inertFrameLine(t);
@@ -92,5 +101,5 @@ module.exports = {
   TEXT_MAX, ELLIPSIS,
   cutText, foldHidden, toAgentText, toAgentLines,
   // the frame rule's own predicate, re-exported so a site's suite asks the rule that produced the text
-  carriesFrame: R.carriesFrame, FRAME_TAGS: R.FRAME_TAGS,
+  carriesFrame: R.carriesFrame, FRAME_TAGS: R.FRAME_TAGS, FRAME_WITHHELD: R.FRAME_WITHHELD,
 };
