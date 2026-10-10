@@ -413,7 +413,7 @@ function mkKeeper({ liveKeys = new Set([KEY_A, KEY_B]), providers = wired, dataD
   const L = launches();
   const O = opens();
   ok(sw.ok && sw.mode === 'switch' && sw.from === 'chromium' && sw.to === 'cloak' && Number.isInteger(sw.seed) && sw.seedMinted, 'the switch completed chromium → cloak with a minted seed');
-  ok(closes().length === 1 && L.length === 2 && L[1].pid !== pidBefore && L[1].profile === p.dir && L[1].exe === CLOAK_EXE && new RegExp(`^--no-sandbox,--fingerprint=${sw.seed},--proxy-server=http://127\\.0\\.0\\.1:\\d+,--proxy-bypass-list=<-loopback>$`).test(L[1].args) && L[1].vendor.cloak === 'cb_clusterkey000000', 'step 2+3: the chromium browser was STOPPED, the new one started on the SAME directory with the cloakbrowser binary, --no-sandbox, the seed, the egress proxy (loopback not bypassed) and the licence key in its env only', JSON.stringify(L[1]));
+  ok(closes().length === 1 && L.length === 2 && L[1].pid !== pidBefore && L[1].profile === p.dir && L[1].exe === CLOAK_EXE && new RegExp(`^--no-sandbox,--fingerprint=${sw.seed},--proxy-server=http://127\\.0\\.0\\.1:\\d+,--proxy-bypass-list=<-loopback>,--disable-logging,--log-level=3$`).test(L[1].args) && L[1].vendor.cloak === 'cb_clusterkey000000', 'step 2+3: the chromium browser was STOPPED, the new one started on the SAME directory with the cloakbrowser binary, --no-sandbox, the seed, the egress proxy (loopback not bypassed) and the licence key in its env only', JSON.stringify(L[1]));
   ok(relaunches().length === 0, 'lane-cloak: no call of the keeper\'s session carried a different launch view — the `get cdp-url` right after `open` rides the same env pair (on the real 0.38.1 a flag-less one RELAUNCHED the cloak browser without its arguments)', JSON.stringify(relaunches()));
   ok(!JSON.stringify(process.env).includes('cb_clusterkey000000') && !L[1].args.includes('cb_'), "the parent's environment never carried the vendor name and the key never rode argv (leg ii)");
   const reopened = O.filter((o) => o.url !== 'about:blank');
@@ -496,7 +496,7 @@ console.log('— ③c the cloak launch is an ENV pair on every call (the measure
   await kReal.start(pr.id);
   const r1 = relaunches().length;
   const lr = launches().filter((l) => l.profile === kReal.profile(pr.id).dir).pop();
-  ok(ksrc.includes(needle) && r1 === r0 && lr && lr.exe === CLOAK_EXE && /^--no-sandbox,--fingerprint=\d+,--proxy-server=http:\/\/127\.0\.0\.1:\d+,--proxy-bypass-list=<-loopback>$/.test(lr.args), 'the real keeper: a cloak start + its own `get cdp-url` carry ONE launch view (no relaunch logged), the binary + --no-sandbox + the seed + the egress proxy', JSON.stringify({ r0, r1, lr }));
+  ok(ksrc.includes(needle) && r1 === r0 && lr && lr.exe === CLOAK_EXE && /^--no-sandbox,--fingerprint=\d+,--proxy-server=http:\/\/127\.0\.0\.1:\d+,--proxy-bypass-list=<-loopback>,--disable-logging,--log-level=3$/.test(lr.args), 'the real keeper: a cloak start + its own `get cdp-url` carry ONE launch view (no relaunch logged), the binary + --no-sandbox + the seed + the egress proxy', JSON.stringify({ r0, r1, lr }));
   // §7.2.1 ENFORCED: the proxy the browser was pointed at is the keeper's own, its allowlist = the record's run hosts
   // (none) + the named sites; real CONNECTs to the vendor's hosts and to loopback are refused BEFORE any upstream
   const eg = kReal.cloakEgress();

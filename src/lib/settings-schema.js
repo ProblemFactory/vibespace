@@ -504,6 +504,13 @@ const SETTINGS_SCHEMA = {
     description: t('Where files dropped or attached in chat are saved. Empty = the session’s working directory (default). Set an absolute path (e.g. ~/Downloads or /data/uploads) to collect every upload in one place, or a name (e.g. uploads) for a folder under the working directory. For remote sessions the path is on the remote machine.'),
     category: t('Chat'), liveApply: true,
   },
+  // lane bypass-no-prompts (owner 2026-10-10): read SERVER-side at every ask (src/server/bypass-auto-allow.js)
+  'permissions.bypassAnswersAsks': {
+    type: 'boolean', default: true,
+    label: t('Answer Claude Code’s own safety prompts in bypass mode'),
+    description: t('In bypassPermissions conversations VibeSpace also answers the CLI’s own safety-check prompts — nothing waits on you; every auto-allow is logged in the chat. OFF: those prompts show a permission card, as before. Never applies to any other permission mode.'),
+    category: t('Chat'), liveApply: true,
+  },
   'agents.vibespaceIntegration': {
     type: 'boolean', default: true,
     label: t('VibeSpace agent integration (master switch)'),

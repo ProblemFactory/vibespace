@@ -2,6 +2,14 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.250 — 2026-10-10
+
+### Changed
+- A conversation in bypass mode no longer stops for Claude Code's own safety prompts: VibeSpace answers them and notes each in the chat. A switch turns it off.
+
+### Fixed
+- The agent browser no longer freezes after running for hours — its log output was filling a pipe nobody read.
+
 ## 2.369.249 — 2026-10-10
 
 ### Added

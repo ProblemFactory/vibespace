@@ -142,8 +142,8 @@ RUN npm install -g @anthropic-ai/claude-code @openai/codex
 # /usr/local/bin/agent-browser at the native binary; nothing is downloaded at
 # runtime: with no ~/.agent-browser/browsers it launches the Debian chromium
 # installed above (in the CDP census).
-RUN npm install -g agent-browser@0.38.1 \
-    && test "$(agent-browser --version)" = "agent-browser 0.38.1"
+RUN npm install -g agent-browser@0.38.2 \
+    && test "$(agent-browser --version)" = "agent-browser 0.38.2"
 
 # node:22 ships a `node` user at UID 1000 — remove it so `vibe` gets 1000
 # (matches the default host user, keeps bind-mount ownership sane).

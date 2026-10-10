@@ -6,6 +6,7 @@
 // control_request → commands_changed, as measured), answers our control requests
 // (apply_flag_settings ⇒ the 85 B success of ANOTHER id) and runs the tool only
 // when the ask is answered; headless chrome over raw CDP. No vendor call.
+// The switch permissions.bypassAnswersAsks is OFF here (2.369.250: ON answers a bypass ask at the door, no card).
 //   P1 the ask is a permission card; the chip says "waiting for you"
 //   P2 RESTART (the stub lives on in dtach), a fresh page: the card is back with
 //      its buttons, the view's turn state is requires_action, the typing line
@@ -100,6 +101,9 @@ execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' })
 for (const f of ['src', 'public', 'server.js', 'package.json', 'data/bin']) execSync(`rm -rf ${wt}/${f} && mkdir -p ${path.dirname(`${wt}/${f}`)} && cp -r ${repo}/${f} ${wt}/${f}`);
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
 fs.mkdirSync(path.join(wt, 'data'), { recursive: true });
+// lane bypass-no-prompts (2.369.250): under bypassPermissions the door answers this very ask by default — the parked card is
+// the switch-OFF world ("OFF = the card, as before"), and every other mode's; the stub keeps the incident's bypass init
+fs.writeFileSync(path.join(wt, 'data', 'settings.json'), JSON.stringify({ 'permissions.bypassAnswersAsks': false }));
 let srv = null;
 const SRV_LOG = path.join(stubDir, 'server.log');
 const startServer = () => { const fd = fs.openSync(SRV_LOG, 'a'); srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: ['ignore', fd, fd] }); fs.closeSync(fd); };

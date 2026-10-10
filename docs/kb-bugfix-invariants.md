@@ -514,6 +514,8 @@
 - FOUR CMD+CLICKS ON A PATH LINK, NOTHING SAID (userW 10-10 inc-mv1tlrix-eklc): a missing path flashed Not found 1.2 s; no ring kept it. FIX = a toast with the path, the machine and a way on; every link open is an op-ring row. 不变量 = a failed click is said where it happened, recorded for the bundle
 - A NESTED FRAME OPENER SLIPPED THE BELT (lane lark-unknown-tags finding, 2026-10-09): one pass inerted the inner opener and re-assembled the outer. FIX = inert to a fixed point (≤ 4), assert no live frame at every door, withhold otherwise. 不变量 = a peer can never forge a frame, however nested
 - A WEBHOOK CALLER IS AN OUTSIDER (lane webhook-l1-server, 2026-10-10): /hook/<slug> lets any system in with its own token. 不变量 = a caller sees nothing internal and pays no wake; the owner is the only identity; refusal before the body (src/webhook-auth.js ①–⑫, test-webhook-auth)
+- BYPASS STILL ASKED (owner 2026-10-10): the CLI's own safety checks (an unreadable -c script running rm) popped cards under bypass. FIX = VibeSpace answers them at once, with a quiet audit line and a switch. 不变量 = bypass means nothing waits on the person; every auto-allow is written down
+- THE BROWSER FROZE WHEN ITS LOG PIPE FILLED (userW inc-mv2qf3xs-7g87, 2026-10-10): the driver 0.38.1 piped Chrome's stderr, nothing read it; at 64 KB every write blocked. FIX = pin 0.38.2 (it drains the pipe) + no logging + the keeper names it. 不变量 = a child's output always has a reader or no pipe
 
 ## AGENT ROWS LOOKED LIKE PEOPLE (lane internal-rows-look, 2.369.247 — owner 2026-10-09 "这个 VibeSpace 内部的聊天群视觉上很难和其他的外部的区分开")
 

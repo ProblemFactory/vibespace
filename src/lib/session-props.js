@@ -578,6 +578,8 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
       }
     }
 
+    // lane bypass-no-prompts: the asks the bypass door answered for this conversation (this run)
+    if (s.autoAllowed > 0) row(cfgSection(), t('Auto-allowed under bypass'), escHtml(t('{n} this run', { n: String(s.autoAllowed) })));
     // ── Permission rules (READ-ONLY, owner ruling 10) ──
     // "Where does this rule come from" for THIS session. Gated on the caps row
     // (`permissionRules`), never on a backend id — a harness with no rule

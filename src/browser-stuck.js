@@ -762,7 +762,7 @@ function unresponsiveNotice({ label = '', since = 0, now = 0 } = {}) {
     detail: `Its DevTools endpoint has not answered for ${minutesSince(since, now)} min while its process is alive: it is hung, not busy, and every conversation using it is refused. Restart (here, or on its row in the Browser panel) stops it and starts it again — logins stay in the profile, its tabs are re-opened, every conversation on it is told. This item resolves itself when it answers again or is restarted.`,
   };
 }
-/** The UI's words (t = the client's i18n; every key a literal t('…')). `f` = {since, clock} — `clock` the viewer's "16:34". */
+/** The UI's words (t = the client's i18n; every key a literal t('…')). `f` = {since, clock, cause} — `clock` the viewer's "16:34", `cause` the keeper's (lane browser-stderr-pipe). */
 function unresponsiveWords(f, tIn) {
   if (!f) return null;
   const t = typeof tIn === 'function' ? (s, p) => tIn(s, p) : fill;
@@ -772,7 +772,10 @@ function unresponsiveWords(f, tIn) {
     chip: t('browser not answering'),
     banner: t('{label} has not answered since {clock}', { label: String(f.label || ''), clock }),
     action: t('Restart'),
-    tooltip: t('The browser stopped answering (it is hung, not busy) — Restart stops it and starts it again; logins stay in the profile, its tabs are re-opened and every conversation using it is told'),
+    // lane browser-stderr-pipe: the keeper's cause (`rec.unresponsive.cause`) — its Chrome blocked on the log pipe nobody read
+    tooltip: f.cause === 'stderr-pipe-full'
+      ? t('The browser froze because its log pipe filled and nothing read it (a fault of the browser driver 0.38.1, fixed in 0.38.2) — Restart starts it again on the updated driver; logins stay in the profile, its tabs are re-opened and every conversation using it is told')
+      : t('The browser stopped answering (it is hung, not busy) — Restart stops it and starts it again; logins stay in the profile, its tabs are re-opened and every conversation using it is told'),
   };
 }
 

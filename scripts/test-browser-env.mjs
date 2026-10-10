@@ -171,7 +171,7 @@ fs.writeFileSync(path.join(HOME, '.agent-browser', 'config.json'), JSON.stringif
   const p = k.createProfile({ label: 'Plain' }, { owner: { kind: 'instance', id: null } });
   await k.start(p.id, { why: 'test' });
   const L1 = fake.launches().at(-1);
-  ok(L1 && L1.config && argList(L1.config.args).join(' ') === `--no-sandbox ${FLAG} --vibespace-keeper=${p.id}` && !L1.args && k._reg().browsers[p.id].automationFlag === true, 'a named chromium profile\'s launch ran with the flag (the user\'s args kept, the mark last) and its record is stamped', L1);
+  ok(L1 && L1.config && argList(L1.config.args).join(' ') === `--no-sandbox ${FLAG} --disable-logging --log-level=3 --vibespace-keeper=${p.id}` && !L1.args && k._reg().browsers[p.id].automationFlag === true && k._reg().browsers[p.id].quietLog === true, 'a named chromium profile\'s launch ran with the flag + the quiet log switches (lane browser-stderr-pipe) (the user\'s args kept, the mark last) and its record is stamped', L1);
   const pc = k.createProfile({ label: 'Cloaked', provider: 'cloak' }, { owner: { kind: 'instance', id: null } });
   await k.start(pc.id, { why: 'test' });
   const L2 = fake.launches().at(-1);

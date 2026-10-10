@@ -109,6 +109,8 @@ scripts/test-ax-budget.mjs — THE AX BUDGET GATE (heavy; design-accessibility-t
 scripts/test-docx-viewer-model.mjs + test-docx-viewer.mjs + fixtures/docx/ — Word viewer gates: PURE tables + a patched copy per rule (fast); chrome over committed python-docx fixtures: no band, paper, mammoth oracle, hostile.docx, 80 pages, library controls (heavy) ⇒ kb-file-structure.md
 scripts/test-design-canvas.mjs — the design canvas gate (fast): the model's tables (view, layout twin, read, pick fence, frame docs), the source census (sandbox allow-scripts only, one message listener via routeMessage), patched-copy controls ⇒ kb-file-structure.md
 scripts/huge-transcript-fixture.mjs — the §1c huge compact-mode transcript generator (inc-mubvu3a4-x8sb shape, deterministic seed, ids by fixtureSid), ONE implementation shared by test-chat-paging + test-ax-budget; never a test-*.mjs ⇒ kb-file-structure.md
+src/browser-stderr.js — PURE (lane browser-stderr-pipe): a child's output always has a reader or no pipe — the quiet switches (`withQuietLogging`, a user's logging switch wins), `FIXED_IN` (0.38.2 drains Chrome's stderr), the stderr-pipe-full verdict + its /proc probe + journal line.
+scripts/test-browser-stderr-pipe.mjs (fast) + test-browser-stderr-pipe-real.mjs (heavy: a real Chrome) — census, verdict, a reader vs an unread pipe; the measured 0.38.1 hang and the held 0.38.2 pin.
 src/browser-stuck.js — PURE (CJS; shipped beside the CLI as vibespace-browser-stuck.js) a page that will not move must SAY so: the dialog record, alert-only auto-answer, THE dialog_open sentence, notes, the CLI's own lines as measured on 0.38.1, navigate / stuck verdicts … ⇒ kb-file-structure.md
 src/server/browser-dialogs.js — ORCH THE DIALOG WATCH: one Page-enabled CDP socket per live local browser, armed at /resolve before the verb, waking the in-flight verb; r3: a PAGE-opened tab is its opener's holder's (`openerId`), the witness kept on the lease (`l.tabs`) ⇒ kb-file-structure.md
 scripts/test-browser-stuck.mjs + test-browser-dialog-chrome.mjs + measure-dialog-hold.mjs — lane browser-stuck gates: PURE + watch + real routes/CLI (dialog_open < 1 s by mechanism) + bridge + controls (fast); a real beforeunload + userW's orphan (heavy) … ⇒ kb-file-structure.md
@@ -627,6 +629,8 @@ src/webhook-reply.js — PURE WHO A WEBHOOK REPLY GOES TO (lane webhook-l1-serve
 src/channels/webhook.js — ORCH THE BUILT-IN WEBHOOK ADAPTER (lane webhook-l1-server): the §3 caps row, declared reach grants / listed / seed / not removable / no consent; callersStore (callers.json 0600, hash / sealed token), the poll queue, live.deliver, replyEnvelope / send ⇒
 src/webhook-pair.js — PURE THE INSTANCE PAIRING (lane webhook-l3-cli-pair, design §12): vswp_ code encode/decode (10 min), hookUrlVerdict, completionVerdict + complete (verdict BEFORE the write), createPending, peerRecordValue / peerBody (canonical peer payload)
 src/routes/webhook.js — ORCH THE WEBHOOK ROUTES (lane webhook-l1-server): POST /hook/:slug walks webhook-auth's steps (express.raw only at ⑦), the caller's long-poll, the pairing (pair-code / join / completion), the owner's path / caller verbs behind the agent-bearer 403; stats() for the suites ⇒
+src/server/bypass-auto-allow.js — THE BYPASS DOOR (lane bypass-no-prompts): a `can_use_tool` under `bypassPermissions` (mode read per ask; switch `permissions.bypassAnswersAsks`) answered ALLOW with the exact input before any card; quiet line (`vs_auto_allow`), console audit row, `_autoAllowed`
+scripts/test-bypass-auto-allow.mjs — the bypass door over the REAL normalizer: the measured 2.1.288 ask, switch / mode / mid-session legs, helper + provenance + AskUserQuestion, refused line, rebuild, RED controls
 ```
 
 ## TASK → FILE MAP (moved verbatim from CLAUDE.md "Common Tasks → File Location Map", lane claude-md-diet)
@@ -766,6 +770,10 @@ data/bin/vibespace-remote-keeper — REMOTE-side persistence for remote CHAT ses
 
 ### src/browser-passkey.js
 PURE (CJS; shipped beside the CLI as vibespace-browser-passkey.js — boot copy in agent-tool-generators, AGENT_TOOLS, gitignored) a page waiting for a passkey must say so (lane browser-passkey, owner inc-muuvthv9-g69w): the ceremony record `{id, kind, rpId, startedAt, tab, outcome, endedAt}`, `passkeyVerdict` (unknown / none / pending / passkey_open after PENDING_SAID_MS = 3 s), THE SENTENCE (`passkeyText`), `loopVerdict` (acting verbs answer the sentence, reads note it, ways out run), `passkeyWords` (the live-view banner, t() + zh/ja), `forYouItem` (20 s, one per (profile, rpId)), and THE HOOK `installHook` / `hookSource` / `cancelExpression` — the MAIN-world wrapper of `CredentialsContainer.prototype.get/create` the dialog watch (src/server/browser-dialogs.js `armPasskey` / `passkeyIn` / `cancelPasskey`) injects per tab with ONE `Runtime.addBinding`. Gate: scripts/test-browser-passkey.mjs.
+
+### src/browser-stderr.js
+
+**Lane browser-stderr-pipe (2026-10-10):** measured on 0.38.1 — the driver spawned Chrome with `.stderr(Stdio::piped())` and read it only on a failed launch; 64 KB later (≈ 3.4 h idle at ≈ 5 B/s, ≈ 6 s under console logging) Chrome blocked in `anon_pipe_write` and DevTools answered 0 bytes. The pin is 0.38.2 (#2003 drains it). The keeper: `quietLogFor` adds the quiet switches to the config of a record stamped `quietLog` (a provider's own AGENT_BROWSER_ARGS too); `hangCause` asks /proc once per unresponsive run ⇒ `rec.unresponsive.cause` (a daemon still on 0.38.1 until its next start).
 
 ### src/browser-stuck.js
 

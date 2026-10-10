@@ -272,6 +272,7 @@ What survives for codex is the SESSION scope, which asks the session's OWN alrea
 **Two session modes** share the same dtach persistence layer but use different wrappers:
 - **Terminal**: `dtach → pty-wrapper.js → claude` (TUI, raw PTY output, xterm.js)
 - **Chat**: `dtach → chat-wrapper.js → claude --output-format stream-json --input-format stream-json --verbose --permission-prompt-tool stdio` (structured JSON, ChatView)
+- **The bypass door (lane bypass-no-prompts):** under `bypassPermissions` a `can_use_tool` is answered at the stdout door before the normalizer sees it (the hook path cannot: a PreToolUse allow does not stop the CLI's safety check) — and every auto-allow is written down: the quiet chat line, the console-ring audit row, the count. The mode is read per ask, never cached.
 
 **chat-wrapper.js**: Runs inside dtach, spawns claude with stream-json flags + `--permission-prompt-tool stdio`. Parses stdout JSON lines, writes to buffer file. Stdin: accepts JSON messages (JSONL schema: `{"type":"user","message":{"role":"user","content":[{"type":"text","text":"..."}]}}`). Plain text on stdin auto-wrapped. Also handles `control_request`/`control_response` protocol for permission approval over stdin/stdout.
 

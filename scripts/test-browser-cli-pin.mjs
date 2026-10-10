@@ -340,8 +340,8 @@ console.log('— ⑤ the client words (en / zh / ja) + the panel wiring');
   ok(named0.offer === 'install' && named0.version === '0.39.2' && W.cliOfferLabel(named0.offer, t, { version: named0.version, table: base.table }) === 'Install agent-browser 0.39.2…' && W.cliOfferLabel('install', t, { version: '0.38.1', table: '0.38.1' }) === 'Install the measured version…'
     && /0\.39\.2 \(your choice\) — drifts/.test(named1.text) && named1.warn, 'a version the user named: Install… says its number ("the measured version" only for the measured one) and, in use, the row says it drifts and warns', { named0, named1 });
   ok(/cliOfferLabel\(w\.offer, t, \{ version: w\.version, table: st\.cli && st\.cli\.table \}\)/.test(read('src/lib/browser-trace-view.js')), 'the panel labels the button with the version the install installs');
-  const cw = W.cliConfirmWords({ ...base }, t);
-  ok(/53 MB/.test(cw.message) && /registry\.npmjs\.org/.test(cw.message) && /119 MB/.test(cw.message) && /no script of the package runs/.test(cw.message) && cw.title === 'Install agent-browser 0.38.1?', 'the download confirm names the package, the host, the measured sizes and that no package script runs', cw);
+  const cw = W.cliConfirmWords({ ...base, table: V.TABLE_VERSION }, t); // lane browser-stderr-pipe: the confirm of THE pin (its record's sizes)
+  ok(/53 MB/.test(cw.message) && /registry\.npmjs\.org/.test(cw.message) && /118 MB/.test(cw.message) && /no script of the package runs/.test(cw.message) && cw.title === 'Install agent-browser 0.38.2?', 'the download confirm names the package, the host, the measured sizes and that no package script runs', cw);
   const said = new Set(); const rec = (k2) => { said.add(k2); return k2; };
   for (const x of [{ choice: { mode: 'path' }, onPath: { version: '0.39.2' } }, { choice: { mode: 'path' }, onPath: null }, { choice: { mode: 'pinned' }, pinned: { version: '0.38.1', installed: true }, onPath: { version: '0.39.2' } }, { choice: { mode: 'version' }, pinned: { version: '0.39.2', installed: true } }, { choice: { mode: 'pinned' }, pinned: { version: '0.38.1', installed: false }, onPath: { version: '0.39.2' } }, { choice: { mode: 'path' }, onPath: { version: '0.39.2' }, install: { running: true } }, { choice: { mode: 'path' }, onPath: { version: '0.39.2' }, install: { failed: true } }, { choice: { mode: 'path' }, onPath: { version: '0.39.2' }, npm: false }]) W.cliRowWords({ ...base, ...x }, rec);
   for (const o of ['install', 'install-again', 'use-pinned', 'use-path']) W.cliOfferLabel(o, rec);
@@ -620,7 +620,7 @@ console.log('— ⑦ lane dc-browser-providers (rv-browser F8): ONE agent-browse
   ok(off(dock, pkg).length === 0, `every spelling is the row's: table ${V.AGENT_BROWSER_CLI.table}, floor ${V.AGENT_BROWSER_CLI.floor}`, JSON.stringify(off(dock, pkg)));
   const B = require('../src/browser-profiles.js'), TR = require('../src/browser-trace.js'), W = require('../src/browser-windows.js');
   ok(V.TABLE_VERSION === V.AGENT_BROWSER_CLI.table && V.CLI_PIN_RECORD.version === V.AGENT_BROWSER_CLI.table && B.FLOOR_VERSION === V.AGENT_BROWSER_CLI.floor && TR.RECORDING_FLOOR === V.AGENT_BROWSER_CLI.recordingFloor && W.WINDOWS_PROOF.agentBrowser === V.AGENT_BROWSER_CLI.table, 'the code spellings READ the row (table, pin record, floor, recording floor, windows proof)');
-  ok(off(dock.replace(/agent-browser@\d+\.\d+\.\d+/, 'agent-browser@0.38.2'), pkg).length === 1 && off(dock, pkg.replace(/agent-browser@\d+\.\d+\.\d+/, 'agent-browser@0.37.1')).length === 1, 'control: an image pinned to another version, or the old 0.37.1 install hint, is RED by name');
+  ok(off(dock.replace(/agent-browser@\d+\.\d+\.\d+/, 'agent-browser@0.38.1'), pkg).length === 1 && off(dock, pkg.replace(/agent-browser@\d+\.\d+\.\d+/, 'agent-browser@0.37.1')).length === 1, 'control: an image pinned to another version, or the old 0.37.1 install hint, is RED by name');
 }
 
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);

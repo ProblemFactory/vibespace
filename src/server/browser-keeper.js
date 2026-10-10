@@ -79,6 +79,7 @@ const DSP = require('../browser-display.js'); // lane headless-fallback: headed 
 const HC = require('../hidden-chars.js'); // lane browser-propose: a proposal card's words carry no character that is not drawn (THE one set)
 const KB = require('../browser-kept.js'); // lane browser-resume (§3.9): the conversation's KEPT browser — tabs, D2's restore kind (PURE)
 const BB = require('../browser-builds.js');
+const BE = require('../browser-stderr.js'); // lane browser-stderr-pipe: the quiet log switches + the stderr-pipe-full verdict
 const CL = require('../browser-clone.js'); // lane browser-profile-clone (B-9669): New profile… copied from a stopped profile — the PURE tables + verdict
 const CR = require('./browser-clone-run.js'); // … and its copy, off the event loop (atomic: <dir>.copying renamed at the end)
 const BI = require('./browser-installs.js'); // rv-browser F7 (lane dc-browser-installs): THE install slot + one row per installable // lane browser-admin 2a: which Chrome build a profile runs (the machine's list + the ONE verdict)
@@ -134,6 +135,7 @@ function keeper() { return installed; }
  */
 function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast = null, serverSetting = () => undefined,
   serverNotice = null, getTelemetry = () => null, liveKeys: sessionLiveKeys = () => new Set(), remoteKeys = () => new Set(), userTodos = null,
+  stderrPipeProbe = null, // lane browser-stderr-pipe: the /proc facts of a hung Chrome (default BE.probeStderrPipe; a fixture in the fast gate)
   // lane jobs-browser (B-dbc1): is this Background Work job's run alive (state starting | up)? A running job CARRIES its
   // browser handle (src/browser-job-principal.js), so its lease outlives its owner conversation until the job ends
   jobRunning = () => false,
@@ -845,6 +847,13 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       return !!(reg.browsers[mark] && reg.browsers[mark].automationFlag);
     } catch { return false; }
   }
+  /** lane browser-stderr-pipe: does the file for (kind, mark) carry the quiet log switches (BE.QUIET_LOG_ARGS)? Only a
+   *  record LAUNCHED with them (`rec.quietLog`, the automationFlag precedent: a different launch config relaunches Chrome,
+   *  so a browser running at the update keeps its file until its next launch). No mark ⇒ no. */
+  function quietLogFor(kind, mark) {
+    if (!mark || kind === 'ephemeral') return false;
+    try { return !!(reg.browsers[mark] && reg.browsers[mark].quietLog); } catch { return false; }
+  }
   const automationFlagOn = () => setting('browser.automationFlag', true) !== false;
   function machineConfigFile(kind = 'machine', mark = null) {
     const markOk = mark && MARK_RE.test(String(mark)) ? String(mark) : null;
@@ -867,6 +876,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     let cfg;
     if (kind === 'ephemeral') cfg = B.generatedConfig({ userConfig: user || {}, projectConfig: null, pinnedDir: null, headed: h, mark: markOk, holdDialogs: hold, automationFlag: flag });
     else { cfg = VERBS.sanctionedConfig({ user }).config; if (h !== null) cfg.headed = h; if (flag) cfg.args = B.withAutomationFlag(cfg.args, { on: true }); if (markOk) cfg.args = B.withKeeperMark(cfg.args, markOk); if (hold) cfg.noAutoDialog = true; }
+    if (quietLogFor(kind, markOk)) cfg.args = B.withKeeperMark(BE.withQuietLogging(cfg.args), markOk); // lane browser-stderr-pipe: the mark rides last
     const text = JSON.stringify(cfg);
     const memoKey = kind + '|' + (markOk || '');
     const memo = configMemo.get(memoKey);
@@ -1954,14 +1964,30 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const was = rec.unresponsive || null;
     if (v.state === 'unresponsive') {
       const fact = BS.unresponsiveFact(v.next);
+      if (was && was.since === fact.since && was.cause) fact.cause = was.cause; // lane browser-stderr-pipe: the cause rides the run
       rec.unresponsive = fact; dirty = true;
-      if (!was || was.since !== fact.since) { log.warn?.(`[browser] ${BS.unresponsiveLine({ id: p.id, label: p.label, since: fact.since, asks: fact.asks, pid, gpu: gpuPctOf(p.id) })}`); noticeUnresponsive(rec, p); commit(); }
+      if (!was || was.since !== fact.since) { log.warn?.(`[browser] ${BS.unresponsiveLine({ id: p.id, label: p.label, since: fact.since, asks: fact.asks, pid, gpu: gpuPctOf(p.id) })}`); noticeUnresponsive(rec, p); commit(); hangCause(rec, p, pid, fact.since); }
     } else if (was) {
       rec.unresponsive = null; dirty = true;
       log.log?.(`[browser] ${BS.answeredAgainLine({ id: p.id, label: p.label, since: was.since, at, by: v.state === 'closed' || replaced ? 'its process ended' : by })}`);
       resolveUnresponsive(rec, 'browser-answered'); commit();
     }
     return rec.unresponsive || null;
+  }
+  /** lane browser-stderr-pipe: WHY it hangs, when /proc can say — its Chrome blocked writing into a stderr pipe nothing
+   *  reads (BE.stderrPipeVerdict over two samples) ⇒ `rec.unresponsive.cause` (the row's words, the journal line). Reports
+   *  only: the Restart stays the user's act or a gated agent's. → a promise of the cause | null. */
+  function hangCause(rec, p, pid, since) {
+    if (!Number.isInteger(pid)) return null;
+    return Promise.resolve().then(() => (stderrPipeProbe || BE.probeStderrPipe)(pid)).then((f) => {
+      const cause = BE.stderrPipeVerdict({ ...(f || {}), answered: false });
+      const u = rec.unresponsive;
+      if (!cause || !u || u.since !== since || reg.browsers[p.id] !== rec) return null;
+      u.cause = cause; dirty = true;
+      log.warn?.(`[browser] ${BE.stderrPipeLine({ id: p.id, label: p.label, pid, fd2: f.fd2 })}`);
+      commit();
+      return cause;
+    }).catch(() => null);
   }
   /** One `/json/version` ask of a live local browser (never two at once per profile). */
   async function askAnswer(rec, p, by = 'the tick') {
@@ -3543,6 +3569,10 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       if (!exe.ok) throw namedError('backend_unavailable', exe.error, { provider: p.provider, missing: prow.binary });
       providerEnv = SW.launchEnvFor(p.provider, { seed: p.fingerprintSeed, executablePath: exe.path, proxy: prow.egressProxy ? await cloakEgressUrl(p.id) : '' });
     } else if (!p.host) argvPrefix = SW.launchArgsFor(p.provider);
+    // lane browser-stderr-pipe: a local launch that starts a Chrome carries the quiet log switches — in its config (a record
+    // stamped `quietLog`, quietLogFor) and in a provider's own AGENT_BROWSER_ARGS (an env list replaces the config's)
+    const quietLog = !p.host && !!prow.starts && !argvPrefix.length;
+    if (quietLog && providerEnv.AGENT_BROWSER_ARGS) providerEnv = { ...providerEnv, AGENT_BROWSER_ARGS: BE.withQuietLogging(String(providerEnv.AGENT_BROWSER_ARGS)) };
     const p0 = (async () => {
       const ns = nsOf(profileId);
       const prevRec = reg.browsers[profileId] || null; // r2 M1: the browser the last launch recorded (its lock holder, if orphaned)
@@ -3553,7 +3583,8 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
         hostId: p.host || null, external: !(B.providerRow(p.provider) || {}).starts, forward: null, remoteCdpUrl: null, dir: null,
         // lane browser-propose (step 1): a chromium launch on THIS machine stops announcing automation (stamped before the
         // display fact reads the base file; a cloak launch carries its own build's patches — never stamped)
-        automationFlag: automationFlagOn() && !p.host && !!prow.automationFlag };
+        automationFlag: automationFlagOn() && !p.host && !!prow.automationFlag,
+        quietLog }; // lane browser-stderr-pipe: launched with the quiet log switches (its config carries them)
       // r5 LOW 3: the LAUNCH-MARK lineage rides every new record (a refused start too) — a profile once launched with the
       // mark never falls back to the pre-mark rule, whatever record comes next (set again at the launch below)
       if (prevRec && prevRec.mark) rec.mark = prevRec.mark;

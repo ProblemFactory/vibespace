@@ -1,0 +1,13 @@
+{
+ "source": "the browser CLI's `skills get core --full` on 0.38.2 (2026-10-10, lane browser-stderr-pipe re-measure: the same eight as 0.38.1 — 0.32.0's seven + `a11y`; 0.38.2's --help adds only the Browser Use environment lines)",
+ "verbs": [
+  "addinitscript",
+  "frame",
+  "dialog",
+  "keydown",
+  "keyup",
+  "window",
+  "state",
+  "a11y"
+ ]
+}

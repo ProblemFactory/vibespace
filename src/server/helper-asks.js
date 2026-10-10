@@ -326,4 +326,8 @@ function sessionForAnswer(data, activeSessions = deps && deps.activeSessions) {
   return { id, session };
 }
 
-module.exports = { install, sync, sessionForAnswer, knowsRequest, reconcileAll, forget, settledState, answerFrame, recordOf };
+/** The bypass door's answer (lane bypass-no-prompts, src/server/bypass-auto-allow.js): an ask NO card ever held — the
+ *  session's mode is bypassPermissions — so there is no table state to consult; the frame is still THE one answer. */
+function answerUnasked(session, data, { adapterRegistry, feedLive } = {}) { return answerPermission(session, data, { adapterRegistry, feedLive }); }
+
+module.exports = { install, sync, sessionForAnswer, knowsRequest, reconcileAll, forget, settledState, answerFrame, recordOf, answerUnasked };

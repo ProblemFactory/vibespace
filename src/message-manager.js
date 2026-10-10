@@ -1081,6 +1081,8 @@ class MessageManager extends MessageWindow {
     // the red Unknown-event card. The SAFETY STOP line is read from the census
     // and becomes the worded stop card (_safetyStopCard). Both carriers: the
     // stream's snake_case and the transcript row carry the same two fields.
+    // BYPASS ANSWERED THE CLI'S OWN ASK (lane bypass-no-prompts): VibeSpace's own record, never the CLI's
+    if (raw.subtype === 'vs_auto_allow') { this._autoAllowLine(raw, emit); return; }
     // INSTRUCTIONS TOO LARGE (`system`/`instruction_size_warning`, 2.1.288 — lane cli-2-1-288-records): the CLI
     // measured CLAUDE.md + rules + imports over the model's limit. The same dim harness notice, in OUR words
     // (`say` → the client's i18n line; `text` = the English fallback). Numbers only — no file path rides the record.
@@ -1600,6 +1602,7 @@ class MessageManager extends MessageWindow {
         if (existing.permission.resolved === 'unknown') { existing.permission.unknownHead = outcomeHead(resultText); this._noteOutcomeDrift(resultText, emit); } // verify r5
         permResolved = true;
       }
+      if (this._autoAllowLines) this._autoAllowRefused(toolUseId, resultText, tr.is_error, emit); // lane bypass-no-prompts
       // Replace tool_call content with tool_result (keeps input + adds output)
       existing.content = [{
         type: 'tool_result', toolCallId: toolUseId, toolName: pending.block.name,
@@ -2059,6 +2062,40 @@ class MessageManager extends MessageWindow {
     if (autoResolved === 'unknown') this._noteOutcomeDrift(rblock.output, emit);
     (this._askIds || (this._askIds = new Set())).add(existing.id); // the pending-asks level reads only the cards that ever asked
     if (emit) this._emit({ op: 'edit', id: existing.id, fields: { permission: existing.permission } });
+  }
+
+  /** BYPASS ANSWERED THE CLI'S OWN ASK (lane bypass-no-prompts): the `system`/`vs_auto_allow` record
+   *  src/server/bypass-auto-allow.js appends after the allow it wrote → the quiet line (the dim harness notice,
+   *  `say` = our words; never a message). Live, the ask never reached this normalizer; on a rebuild the replayed
+   *  ask comes off its card, so a reload shows what the live chat showed. */
+  _autoAllowLine(raw, emit) {
+    for (let i = this.messages.length - 1; i >= 0; i--) {
+      const m = this.messages[i];
+      if (m.permission && m.permission.requestId === raw.request_id) {
+        m.permission = null;
+        if (this._askIds) this._askIds.delete(m.id);
+        if (emit) this._emit({ op: 'edit', id: m.id, fields: { permission: null } });
+        break;
+      }
+    }
+    const tool = String(raw.tool || '?').slice(0, 80), head = String(raw.head || '').slice(0, 120);
+    const params = { tool, head, reasonType: raw.reason_type || null, reason: typeof raw.reason === 'string' ? raw.reason.slice(0, 300) : null, helper: !!raw.agent_id };
+    const msg = this._create({ role: 'system', status: 'complete', noticeKind: 'harness-informational', content: [{ type: 'harness_informational', text: `Auto-allowed (bypass): ${tool}${head ? ' — ' + head : ''}`, level: 'notice', say: 'bypass-auto-allow', params }] });
+    if (raw.tool_use_id) (this._autoAllowLines || (this._autoAllowLines = new Map())).set(raw.tool_use_id, msg.id);
+    if (emit) this._emit({ op: 'create', message: msg });
+  }
+
+  /** No silent failure: an auto-allowed call whose result reads as a DENIAL (the CLI refused our allow) turns its quiet line into a warning that says so. */
+  _autoAllowRefused(toolUseId, resultText, isError, emit) {
+    const id = this._autoAllowLines && this._autoAllowLines.get(toolUseId);
+    if (!id) return;
+    this._autoAllowLines.delete(toolUseId);
+    if (this._resolutionFromResult(resultText, isError) !== 'denied') return;
+    const m = this.messageIndex.get(id), b = m && m.content && m.content[0];
+    if (!b || b.say !== 'bypass-auto-allow') return;
+    b.level = 'warning';
+    b.params = { ...b.params, refused: String(resultText || '').replace(/\s+/g, ' ').slice(0, 160) };
+    if (emit) this._emit({ op: 'edit', id, fields: { content: m.content } });
   }
 
   /** The pending WebFetch call a provenance re-ask (a fresh tool_use_id, the same url) belongs to — the newest. */

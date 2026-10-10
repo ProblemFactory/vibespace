@@ -50,6 +50,9 @@ const WINDOWS_PROOF = Object.freeze({
   status: 'measured',
   measured: '2026-10-01',
   agentBrowser: require('./browser-verbs.js').AGENT_BROWSER_CLI.table, // the table's version (one row): a table bump re-measures this proof
+  // the 2.369.250 bump (0.38.1 → 0.38.2) re-measured it: both modes on 0.38.2 and on 0.38.1 the same day — every cell the same on both
+  // drivers, the ms within a few (4 / 6 ms beside 4504 → 4503 ms headless) — the rows above, measured on 0.38.1, stand for the pin
+  remeasured: '2026-10-10',
   chrome: 'Google Chrome 154.0.8037.57',
   modes: Object.freeze(['headless', 'hidden window (headed on the CLI\'s own Xvfb)']),
   script: 'scripts/measure-browser-windows.mjs',

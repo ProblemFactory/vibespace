@@ -144,7 +144,7 @@ const BOOL_FLAGS = new Set(['--allow-file-access', '--annotate', '--auto-connect
  *  the two files that cannot import it — deploy/docker/Dockerfile's `npm install -g agent-browser@…` and package.json's
  *  agentTools install hint — pinned to it by scripts/test-browser-cli-pin.mjs; `floor` = the oldest CLI VibeSpace runs on
  *  (src/browser-profiles.js FLOOR_VERSION, package.json's declared floor); `recordingFloor` = `record start`'s (src/browser-trace.js). */
-const AGENT_BROWSER_CLI = Object.freeze({ table: '0.38.1', floor: '0.37.1', recordingFloor: '0.37.0' });
+const AGENT_BROWSER_CLI = Object.freeze({ table: '0.38.2', floor: '0.37.1', recordingFloor: '0.37.0' }); // lane browser-stderr-pipe: 0.38.2 drains Chrome's stderr (#2003 — 0.38.1 froze once 64 KB of log filled the unread pipe); its --help adds lines, removes no verb or flag
 const TABLE_VERSION = AGENT_BROWSER_CLI.table; // lane H (2026-09-25): re-measured on 0.38.1 — was 0.32.0 (its fixtures stay as the r3 evidence)
 /** → the installed version when it is not the table's (`'unknown'` when the
  *  probe could not read one), else null. */
@@ -984,13 +984,13 @@ function resolveRealBinary({ PATH = '', shimDirs = [], exists = () => false, isS
 /** The npm package VibeSpace installs when the user pins the CLI (into data/browser-tools — never -g, never the checkout). */
 const CLI_PACKAGE = 'agent-browser';
 const CLI_VERSION_RE = /^\d{1,3}\.\d{1,3}\.\d{1,3}$/;
-/** THE MEASURED PACKAGE (2026-10-01, `npm view agent-browser@0.38.1 dist` + one download of its tarball, sha1 equal to the
+/** THE MEASURED PACKAGE (2026-10-10, `npm view agent-browser@0.38.2 dist` + one download of its tarball, sha1 equal to the
  *  registry's shasum): what the download confirm says in plain numbers — the package, the ONE host it comes from, how big
  *  it is and how big it unpacks (it carries every platform's native binary; nothing else is fetched: the install runs with
  *  `--ignore-scripts`, so the package's postinstall — which downloads a binary from GitHub when the tarball lacks one —
  *  never runs; the package's own launcher makes its binary executable). A version the table was NOT measured on carries
  *  no numbers (the confirm says so). */
-const CLI_PIN_RECORD = Object.freeze({ package: CLI_PACKAGE, version: TABLE_VERSION, registryHost: 'registry.npmjs.org', tarballBytes: 52885291, unpackedBytes: 119129537, shasum: '429660c741782299f154e7fa7f03deb51bb32248', measured: '2026-10-01' });
+const CLI_PIN_RECORD = Object.freeze({ package: CLI_PACKAGE, version: TABLE_VERSION, registryHost: 'registry.npmjs.org', tarballBytes: 52980321, unpackedBytes: 117855861, shasum: '3eeb49e7d02a31be255a0462830dd8a147fc5f29', measured: '2026-10-10' }); // lane browser-stderr-pipe: 0.38.2 re-measured (npm view dist + the tarball's sha1); 0.38.1 was 52885291 / 119129537 / 429660c7…
 /** lane chrome-builds-download (design 004, B-80c1): CHROME FOR TESTING, MEASURED 2026-10-03 03:32 UTC — the ONE place its two
  *  hosts are spelled. The version lists live on `listHost` (the 10 KB last-known-good file: four channels; the 5.2 MB
  *  known-good file: 2 549 versions 113 → 157, every one with a linux64 chrome zip); every zip on `fileHost`. Neither document

@@ -856,7 +856,7 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
     // lane browser-admin 2a: WHICH CHROME BUILD — the choice and, while it runs, the build the browser itself reports (the fold)
     const buildLine = cardBuildLine({ buildChoice: r.buildChoice, choice: r.browser, running: runningBuildOf(r.id), missing: r.buildMissing, live: !!r.live }, t);
     // lane browser-unresponsive: the keeper's verdict, in the viewer's clock ("Not answering since 16:34")
-    const uw = r.unresponsive && Number.isFinite(r.unresponsive.since) ? unresponsiveWords({ since: r.unresponsive.since, label: String(r.label || r.id), clock: new Date(r.unresponsive.since).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }, t) : null;
+    const uw = r.unresponsive && Number.isFinite(r.unresponsive.since) ? unresponsiveWords({ since: r.unresponsive.since, cause: r.unresponsive.cause || null, label: String(r.label || r.id), clock: new Date(r.unresponsive.since).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }, t) : null;
     const x = { unresponsive: uw, w: WORDS, chip: app.browserChipFor ? app.browserChipFor(r.id) : null, mine: app._browserProfiles && app._browserProfiles.machine ? String(app._browserProfiles.machine.host || '') : '', stuck: psw, autoDialogs: !!autoText, autoText, buildLine, limits: v?.limits || null, now: Date.now() };
     const L = rowLine(r, x);
     const isOpen = openFolds.has(r.id);

@@ -138,6 +138,9 @@ const LIVE_SESSION_FACTS = Object.freeze({
   // so the card's "N waiting" hint and the chat's strip are PATCHED in place from the payload (patchStashHints
   // below, ChatInput's strip) — a stash change never re-renders the list
   stash: { digest: null },
+  // lane bypass-no-prompts: how many of the CLI's own asks the bypass door answered this run (server.js `autoAllowed`) —
+  // CARRIED-ONLY: Session Properties reads the merged row when it opens; no card draws it
+  autoAllowed: { digest: null },
 });
 const LIVE_SESSION_FACT_KEYS = Object.freeze(Object.keys(LIVE_SESSION_FACTS));
 /** Carry the live facts verbatim; an absent live row states nothing (null). */

@@ -126,13 +126,15 @@ let keeper = null;
 function cleanup() { try { keeper?.shutdown?.(); } catch { } for (const l of launches()) { try { process.kill(l.pid, 'SIGKILL'); } catch { } } try { srv.close(); for (const s of socks) s.destroy(); } catch { } fs.rmSync(ROOT, { recursive: true, force: true }); }
 process.on('exit', cleanup);
 let clock = Date.now(); const now = () => clock;
+const probed = []; // lane browser-stderr-pipe: the pids the keeper asked /proc about
 const lines = []; const quiet = { log: (m) => lines.push(String(m)), warn: (m) => lines.push(String(m)), error: (m) => lines.push(String(m)) };
 const todos = [], statuses = [];
 const userTodos = { add: (k, it) => { const x = { id: 'ut-' + (todos.length + 1), status: 'open', ...it }; todos.push(x); return x; }, get: (id) => todos.find((x) => x.id === id) || null, setStatus: (id, st, by) => { statuses.push({ id, st, by }); const x = todos.find((y) => y.id === id); if (x) x.status = st; } };
 const rtEnv = { FAKE_AB_STATE: AB_STATE, FAKE_CDP_PORT: String(PORT), PATH: PATH_ENV, HOME };
 const KEY_A = 'bk-0000000a', KEY_B = 'bk-0000000b';
 keeper = K.create({ dataDir: path.join(ROOT, 'data'), homeDir: HOME, env: () => rtEnv, broadcast: () => { }, serverSetting: () => undefined, serverNotice: null, getTelemetry: () => null,
-  liveKeys: () => new Set([KEY_A, KEY_B]), runtime: F.createBrowserRuntime({ env: rtEnv }), facts: F.createBrowserFacts({ env: rtEnv }), log: quiet, now, install: false, tickMs: 100, answerAskMs: 250, userTodos });
+  liveKeys: () => new Set([KEY_A, KEY_B]), runtime: F.createBrowserRuntime({ env: rtEnv }), facts: F.createBrowserFacts({ env: rtEnv }), log: quiet, now, install: false, tickMs: 100, answerAskMs: 250, userTodos,
+  stderrPipeProbe: async (pid) => { probed.push(pid); return { pid, fd2: 'pipe:[351497172]', wchans: ['anon_pipe_write', 'anon_pipe_write'] }; } }); // lane browser-stderr-pipe: the measured base facts
 const relaunch = []; keeper.onRelaunch((ev) => relaunch.push(ev));
 const p = keeper.createProfile({ label: 'jarvis-work' }, { owner: { kind: 'instance', id: null } }); // int220: SHARED (the incident's case) — a second conversation holds it
 try { keeper.updateProfile?.(p.id, {}); } catch { }
@@ -147,6 +149,9 @@ const u = keeper.browserOf(p.id).unresponsive;
 ok(u && u.since >= t0 && u.asks >= 2 && clock - u.since >= 60000, 'the REAL tick judged it: rec.unresponsive {since, asks ≥ 2} after ≥ 60 s of unanswered asks', { u, rounds });
 ok(lines.some((l) => /not answering since \d\d:\d\d \(asks \d+, pid \d+ alive\) — browser_unresponsive; Restart offered/.test(l)), 'the journal line at the verdict', lines.filter((l) => /answer/.test(l)));
 await sleep(450); clock += 31000; await sleep(450);
+// lane browser-stderr-pipe: the verdict asked /proc WHY (once per run) — a Chrome blocked on its unread log pipe is NAMED
+ok(probed.length === 1 && Number.isInteger(probed[0]) && keeper.browserOf(p.id).unresponsive.cause === 'stderr-pipe-full', 'the keeper names the cause: rec.unresponsive.cause = stderr-pipe-full (one /proc probe per run)', { probed, u: keeper.browserOf(p.id).unresponsive });
+ok(lines.some((l) => /stderr-pipe-full — Chrome pid \d+ is blocked writing its log into pipe:\[351497172\] that nothing reads/.test(l)), 'the journal line names it (the incident bundle reads the journal)');
 ok(todos.length === 1 && todos[0].action && todos[0].action.type === 'browser-restart' && todos[0].action.profileId === p.id && todos[0].origin === 'browser' && /has not answered since/.test(todos[0].text), 'ONE For-you item per (profile, since) — origin browser, its Restart act — not one per tick', todos.map((x) => x.text));
 let ref = null; try { await keeper.agentTabAct({ browserKey: KEY_A, handle: '', argv: ['list'] }); } catch (e) { ref = e; }
 ok(ref && ref.code === 'browser_unresponsive' && /has not answered since/.test(ref.message) && /vibespace-browser restart/.test(ref.message), 'the agent\'s `tab list` is refused browser_unresponsive with the fact + the recipe (never "run the command again")', ref && { code: ref.code, m: ref.message });

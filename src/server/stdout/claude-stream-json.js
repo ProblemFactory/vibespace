@@ -34,6 +34,7 @@ const { cwdToProjectDir, findSessionJsonlPath } = require('../../session-store')
 const { feedPeerCard, seedHelperView, noteHelperResults } = require('../../normalizers'); // the rebuild-gated peer-card writer (same gate as feedLive); seedHelperView = a helper view created after its ask gets it (lane S1)
 // The CLI's control-channel records: never routed to a helper's view ALONE, whatever tags they carry (lane S1 verify r2, M2).
 const CONTROL_RECORD_TYPES = new Set(['control_request', 'control_response', 'control_cancel_request']);
+const bypassAutoAllow = require('../../server/bypass-auto-allow'); // (spelled from src/ like every require here) lane bypass-no-prompts: under bypassPermissions a can_use_tool is answered at the door
 const { ClaudeCodeAdapter } = require('../../adapters/claude-code.js');
 const { isTurnState, turnStateEffect } = require('../../turn-state.js');
 const { userChannelKind, userChannelRecord, userFilePaths } = require('../../user-channel.js');
@@ -1416,6 +1417,9 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
             }
             continue;
           }
+          // lane bypass-no-prompts: a can_use_tool under bypassPermissions is answered HERE, before any card forms
+          // (src/server/bypass-auto-allow.js — the mode read per ask, the switch, the quiet line + the audit row)
+          if (bypassAutoAllow.door(session, id, msg, { feedLive })) continue;
           // Feed into MessageManager (emits normalized msg ops to all clients)
           // — through the rebuild gate, never processLive directly (2.369.16)
           feedLive(session, msg);

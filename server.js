@@ -1583,7 +1583,7 @@ function activeSessionsPayload() {
       accountId: s._accountId || null,
       accountName: s._accountId ? (accounts.get(s._accountId)?.name || 'API key') : null,
       accountTail: s._accountId ? (accounts.get(s._accountId)?.tail || null) : null,
-      todo: s._todos || null, // {done, total, current} — the agent's own TodoWrite/plan
+      todo: s._todos || null, autoAllowed: s._autoAllowed || 0, // {done, total, current} — the agent's own TodoWrite/plan
       poolPin: poolPinFactOf(s), // THE CONVERSATION'S PIN (2026-09-28): the billing submenu's ✓ "pinned" row + Session Properties
       stash: stashFactOf(s), // 2026-09-27: what waits for this agent's next turn (both stashes, src/stash-summary.js) — the strip above its composer + the card's hint
       auth: sessionAuth(s), // billing identity (subscription / api-console / api-key / unknown)

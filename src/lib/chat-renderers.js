@@ -61,6 +61,15 @@ import { parseReply as parseInboxReply } from '../inbox-reply.js'; // PURE: the 
 // is a different concern than a project write — render "记忆更新 <name>"
 // instead of a Write card with a long dotfile path). Full path stays on the
 // link's data-path (copy/Ctrl+click unchanged).
+/** The bypass door's quiet line (lane bypass-no-prompts, src/server/bypass-auto-allow.js): what VibeSpace allowed, in
+ *  the card's words (tool + the first 120 chars of the command); one the CLI then refused says so. */
+function bypassLineWords(p) {
+  const text = p.refused
+    ? t('Auto-allowed (bypass), but the CLI did not run it: {tool} — {why}', { tool: p.tool || '?', why: p.refused })
+    : t('Auto-allowed (bypass): {tool} — {head}', { tool: p.tool || '?', head: p.head || '' });
+  return { text, title: t('VibeSpace answered this permission prompt because the conversation runs in bypass mode. Asked: {reason}', { reason: p.reason || p.reasonType || '—' }) };
+}
+
 function memoryBase(fp) {
   return fp && isAgentMemoryPath(fp) ? fp.split('/').pop() : null;
 }
@@ -1715,7 +1724,8 @@ class ChatRenderers {
       // `say` = a notice in OUR words (2.1.288 instruction_size_warning carries numbers only); else the CLI's own text
       const p = b.params || {};
       const ours = b.say === 'instruction-size' ? escHtml(t('The CLI warns the instructions are large: {chars} characters (limit {limit})', { chars: Number(p.chars).toLocaleString(), limit: p.limit == null ? '?' : Number(p.limit).toLocaleString() })) : null;
-      el.innerHTML = `<span class="chat-system-text" title="${escHtml(t('Harness message · {level}', { level: lv }))}">${lv === 'warning' ? UI_ICONS.alert : UI_ICONS.info || ''} ${ours ?? escHtml(b.text || '')}</span>`;
+      const auto = b.say === 'bypass-auto-allow' ? bypassLineWords(p) : null; // lane bypass-no-prompts
+      el.innerHTML = `<span class="chat-system-text" title="${escHtml(auto ? auto.title : t('Harness message · {level}', { level: lv }))}">${lv === 'warning' ? UI_ICONS.alert : UI_ICONS.info || ''} ${ours ?? (auto ? escHtml(auto.text) : escHtml(b.text || ''))}</span>`;
       return { el, sideEffect: null };
     }
     // THE SAFETY STOP (lane classifier-stop-card): a classifier stopped the
