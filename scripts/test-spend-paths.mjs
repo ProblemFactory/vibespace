@@ -2570,5 +2570,21 @@ console.log('\n§10b the pool\'s placement acts start no turn');
 console.log('\n§11 the patched copies never touch the tree');
 for (const r of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 8 })) ok('§11 ' + r.name, r.pass, r.detail);
 
+// §12 lane webhook-l1-server: THE PER-PATH WAKE BUDGET (docs/design-webhook.zh.md §6) is wired on the ONE wake door —
+// judged before the watcher's own pace and before the wake's ledger row (the bill); a refusal is a hold, never a turn
+console.log('\n§12 the per-path wake budget on the wake door');
+{
+  const eng = read('src/server/channels-engine.js');
+  const i = eng.indexOf('async function wakeNow(');
+  const b = eng.indexOf('const budget = pathBudgetVerdict(rec, convId, en, t);', i);
+  const p = eng.indexOf('const pace = F.paceVerdict(paceWakes, t, F.digestCap(w));', i);
+  const r = eng.indexOf('const resId = await reserveWake(', i);
+  ok('§12 wakeNow judges the per-path budget, THEN the watcher\'s pace, THEN reserves the wake row (the bill)', i > 0 && b > i && p > b && r > p, { i, b, p, r });
+  ok('§12 a budget refusal is a HOLD (keepPending + the named refusal) — never a dropped hit, never a billed turn', /if \(!budget\.ok\) \{\n\s+if \(!fromPending\) await keepPending\(rec, convId, freshHits, newElided, pk\);\n\s+await noteRefusal\(rec, convId, budget\.why, t, item\);/.test(eng));
+  const mut = eng.replace('const budget = pathBudgetVerdict(rec, convId, en, t);', '').replace('const pace = F.paceVerdict(paceWakes, t, F.digestCap(w));', 'const pace = F.paceVerdict(paceWakes, t, F.digestCap(w));\n    const budget = pathBudgetVerdict(rec, convId, en, t);');
+  const mb = mut.indexOf('const budget = pathBudgetVerdict(', i), mp = mut.indexOf('const pace = F.paceVerdict(', i);
+  ok('§12 CONTROL: the budget moved AFTER the pace is RED by the same order check', !(mb > i && mp > mb));
+}
+
 console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} (${pass})`);
 process.exit(fail ? 1 : 0);

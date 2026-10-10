@@ -1017,6 +1017,33 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
    * costs one window, and one older than the newest 5000 records is still
    * found. `null` when no line names it (or the log is unreadable: a reader).
    */
+  /** lane webhook-l1-server: THE ONE REWRITE OF STORED RECORDS (record-clear's `channel-webhook` door) — `fn(record)`
+   *  answers the replacement (or null = unchanged) for each record whose vendorId is named; the log is rewritten whole
+   *  (tmp + rename, like `trim`). `{changed: [ids], unknown: [ids]}`. */
+  function rewriteRecords(adapterId, convId, vendorIds, fn) {
+    const want = new Set((Array.isArray(vendorIds) ? vendorIds : []).map(String));
+    const fp = logPath(adapterId, convId);
+    let lines;
+    try { lines = fs.readFileSync(fp, 'utf-8').split('\n').filter(Boolean); } catch { return { changed: [], unknown: [...want] }; }
+    const seen = new Set(), changed = [];
+    const out = lines.map((l) => {
+      const id = recVendorId(l);
+      if (!id || !want.has(id)) return l;
+      seen.add(id);
+      let r; try { r = JSON.parse(l); } catch { return l; }
+      const next = fn(r);
+      if (!next) return l;
+      changed.push(id);
+      return JSON.stringify(next);
+    });
+    if (changed.length) {
+      const tmp = `${fp}.tmp-${process.pid}`;
+      fs.writeFileSync(tmp, out.join('\n') + '\n');
+      fs.renameSync(tmp, fp);
+      wrote(adapterId, convId, { kind: 'rewrite' });
+    }
+    return { changed, unknown: [...want].filter((x) => !seen.has(x)) };
+  }
   function findRecord(adapterId, convId, vendorId) {
     const id = String(vendorId || '');
     if (!id) return null;
@@ -1969,7 +1996,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     prependRecords, oldestRecord, search, attachmentGet, attachmentPut, attachmentUsage, avatarGet, avatarPut, avatarRefuse, peopleRead, peopleWrite,
     searchMemoRead, searchMemoWrite, searchMemoDrop,
     // R3 (§23): one record by its vendorId (the attachment's owner), the LRU ledger's coalesced flush
-    findRecord, lruFlush,
+    findRecord, rewriteRecords, lruFlush,
     // lane channel-threads: the side log (invariant 8) + which conversation holds a message
     appendSide, readSide, trimSide, sidePath, locateMessage,
     // lane lark-threads (A1): THE PLACE DOOR (widen-only) + the folded patches a reader applies

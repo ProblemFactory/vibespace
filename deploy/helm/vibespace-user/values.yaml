@@ -17,6 +17,9 @@ host: ""
 
 ingress:
   className: nginx             # your ingress controller's class (nginx / traefik / …)
+  # Behind this ingress every request reaches the pod from ONE proxy hop: set the instance setting
+  # `webhook.trustProxyHops` = 1 (Settings → Channels, advanced) so the webhook door's per-address stranger gate
+  # and a path's allow-list judge the CALLER's address (X-Forwarded-For, 1 hop from the right), not the ingress's.
   tls: true
   # Option A (preferred): reference a pre-issued WILDCARD cert secret you created
   # once for *.<domain> (a wildcard REQUIRES a DNS-01 issuer) — adding a user then

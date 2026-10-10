@@ -236,6 +236,11 @@ class Auth {
       // cookied tab (connect {flowId}). GET + exactly /api/channels/oauth/cb/<kind>
       // — pinned by scripts/test-slack-landing-nologin.mjs.
       if (req.method === 'GET' && /^\/api\/channels\/oauth\/cb\/[^/]+$/.test(p)) return next();
+      // THE WEBHOOK DOOR (lane webhook-l1-server, docs/design-webhook.zh.md §4): a caller is an external system holding its
+      // own token — src/routes/webhook.js judges it (every refusal before a byte of the body). The WHOLE /hook prefix (any
+      // method: a non-POST is its 405; /hook/<slug>/, /hook/<SLUG>, /hook/x/y are its misses — verify r1 #6, ONE shape), a
+      // caller's GET of its own replies, and the pairing completion. Pinned by scripts/test-webhook-routes.mjs.
+      if (/^\/hook(?:\/|$)/.test(p) || (req.method === 'GET' && /^\/api\/channels\/webhook\/[a-z0-9][a-z0-9-]{0,62}\/replies$/.test(p)) || (req.method === 'POST' && /^\/api\/channels\/webhook\/[a-z0-9][a-z0-9-]{0,62}\/pair$/.test(p))) return next();
       if (this.requestAuthed(req)) return next();
       // Browsers navigating to pages get the login form; API calls get 401
       const wantsHtml = req.method === 'GET' && (req.headers.accept || '').includes('text/html');

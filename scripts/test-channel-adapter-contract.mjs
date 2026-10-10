@@ -638,5 +638,21 @@ console.log('— the listing cursor contract (lane discovery-cursor-persist)');
   }
 }
 
+// ── lane webhook-l1-server: the webhook row registers, and every closed value it brought is a contract line ──
+{
+  const WHM = require(path.join(REPO, 'src/channels/webhook.js'));
+  const reg = CH.createChannelRegistry();
+  let e = null; try { reg.register(WHM); } catch (x) { e = x.message; }
+  ok(!e && reg.capsOf('webhook').pushTransport === 'http-inbound', 'webhook: the §3 caps row registers (validateCaps + validateVendor at load)', e);
+  const refusedCaps = (patch) => { try { CH.validateCaps('webhook', { ...WHM.caps, ...patch }); return null; } catch (x) { return x.message; } };
+  ok(CH.PUSH_TRANSPORTS.includes('http-inbound') && /pushTransport/.test(refusedCaps({ pushTransport: 'carrier-pigeon' }) || ''), 'pushTransport is a CLOSED set holding http-inbound (an undeclared transport is refused by name)');
+  ok(JSON.stringify(CH.HONESTY_LINES) === JSON.stringify(['option', 'never']) && /honestyLine/.test(refusedCaps({ honestyLine: 'sometimes' }) || ''), "caps.honestyLine: 'option' | 'never' (anything else refused)");
+  ok(/policyDefault/.test(refusedCaps({ policyDefault: 'auto' }) || '') && /policyDefault/.test(refusedCaps({ policyModes: ['review'], policyDefault: 'direct' }) || ''), 'caps.policyDefault must be one of the declared policyModes');
+  ok(/sendStartsTurn/.test(refusedCaps({ sendStartsTurn: 'yes' }) || '') && /kind/.test(refusedCaps({ kind: 'slack' }) || ''), 'caps.sendStartsTurn is a boolean; caps.kind names its own kind');
+  const refusedMod = (patch) => { try { CH.validateVendor('webhook', { ...WHM, ...patch }); return null; } catch (x) { return x.message; } };
+  ok(/reach/.test(refusedMod({ reach: 'everyone' }) || '') && /seed/.test(refusedMod({ removable: true }) || '') && /listed/.test(refusedMod({ listed: 'yes' }) || '') && !refusedMod({}), 'the DECLARED module facts: reach ∈ grants|msg-acl, a seeded module is removable:false, listed a boolean (control: the shipped module passes)');
+  ok(WHM.reach === 'grants' && WHM.removable === false && WHM.consent === null && WHM.listed === true && WHM.seed === true && require(path.join(REPO, 'src/channels/agents.js')).reach === 'msg-acl', 'webhook declares grants / not removable / no consent / listed / seeded; agents declares msg-acl');
+}
+
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

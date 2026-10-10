@@ -31,7 +31,7 @@ const RC = require('../record-clear.js');
 
 const MAX_ITEMS = RC.MAX_ITEMS; // ONE number: the PURE module's (a client chunks a bigger batch by it)
 
-function create({ tasks = null, userTodos = null, sessionStatus = null, getJobs = () => null, getGroups = () => null, log = (...a) => console.log(...a), now = () => Date.now() } = {}) {
+function create({ tasks = null, userTodos = null, sessionStatus = null, getJobs = () => null, getGroups = () => null, getChannels = () => null, log = (...a) => console.log(...a), now = () => Date.now() } = {}) {
   const byOf = (caller) => (caller && caller.role === 'owner' ? 'owner' : String((caller && caller.by) || 'agent'));
   const journal = (kind, container, ids, by) => {
     if (!ids.length) return;
@@ -60,7 +60,7 @@ function create({ tasks = null, userTodos = null, sessionStatus = null, getJobs 
     const groups = new Map();
     for (const it of items) {
       if (!RC.RECORD_KINDS.includes(it.kind)) { res.refused.push({ kind: it.kind, id: String(it.id), ...pick(RC.refuse('bad_kind')) }); continue; }
-      const container = it.kind === 'activity' || it.kind === 'group-message' ? String(it.groupId || '') : it.kind === 'status' ? String(it.sessionKey || '') : '';
+      const container = it.kind === 'activity' || it.kind === 'group-message' ? String(it.groupId || '') : it.kind === 'status' ? String(it.sessionKey || '') : it.kind === 'channel-webhook' ? String(it.path || '') : '';
       const k = it.kind + '\u0000' + container;
       if (!groups.has(k)) groups.set(k, { kind: it.kind, container, ids: [] });
       groups.get(k).ids.push(String(it.id));
@@ -127,6 +127,23 @@ function create({ tasks = null, userTodos = null, sessionStatus = null, getJobs 
       const r = await ge.clearMessages({ group: container, ids, by: who, at, allow: verdictFor('group-message', caller) });
       if (!r.ok) return { error: RC.refuse(r.code === 'not-found' ? 'not_found' : 'failed') };
       return r;
+    }
+    if (kind === 'channel-webhook') {
+      // lane webhook-l1-server: a webhook caller's call (data/channels/msgs/webhook/<path>.ndjson) — the store's rewrite door
+      const ch = getChannels && getChannels();
+      if (!ch || !ch.store || typeof ch.store.rewriteRecords !== 'function') return { error: RC.refuse('unavailable') };
+      if (!container) return { error: RC.refuse('bad_items') };
+      const allow = verdictFor('channel-webhook', caller);
+      const out = { cleared: [], already: [], unknown: [], refused: [] };
+      const r = ch.store.rewriteRecords('webhook', container, ids, (rec) => {
+        const v = allow ? allow(rec) : { ok: true };
+        if (!v || !v.ok) { out.refused.push({ id: String(rec.vendorId), code: (v && v.code) || 'not_yours', why: (v && v.why) || '', status: (v && v.status) || 403 }); return null; }
+        if (rec.clearedAt) { out.already.push(String(rec.vendorId)); return null; }
+        out.cleared.push(String(rec.vendorId));
+        return RC.clearedRecord(rec, { kind, by, at });
+      });
+      out.unknown = r.unknown;
+      return out;
     }
     return { error: RC.refuse('bad_kind') };
   }

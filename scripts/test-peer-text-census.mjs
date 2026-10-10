@@ -779,6 +779,15 @@ const PRINTS = {
     'x.error': 'judged:msgName — the hand-over refusal sentence (our words around the caller\'s own path and a conversation id)',
   }),
   ...rows('data/bin/vibespace-channels', {
+    // lane webhook-l3-cli-pair: a webhook path's callers (the read header, a refusal's rows) and compose --caller's lines —
+    // a caller's id / name pass agentId at the server (readFor, the outbound callerRow): a paired peer's name is ITS words
+    'r.callers': `${V}:the path's callers on a read (c.* — rows)`, 'j.callers': `${V}:the callers a refusal names (c.* — rows)`,
+    'c.id': 'judged:agentId — a caller id (c-<8 hex>), a line piece', 'c.name': 'judged:agentId — a caller\'s registered name (the owner\'s words, or a paired peer\'s), a line piece',
+    'c.delivery': `${V}:the delivery mode enum (none | reply-url | poll)`, 'c.lastCallAt': `${V}:an instant`, 'c.generation': `${V}:a count`,
+    'r.budget.text': 'judged:agentId — the path\'s wake-budget line (readFor: our words around the slug; int248 r2, verify r1 #13)', 'm.heldText': 'judged:agentId — a held record\'s notice (readFor: the budget\'s own words; int248 r2, verify r1 #13)',
+    'args': `${O}:the caller's own arguments (the conversation it named)`, 'x.proposal': `${V}:one caller's proposal record (p.* — rows)`,
+    'x.recipient': `${V}:a caller id prepareSend expanded (c-<8 hex>, filtered at the wrapper)`, 'x.error': `${V}:our refusal sentence for that caller's proposal`,
+    'x.code': `${V}:the refusal code`, 'p.policy': `${V}:the policy verdict (its reasons — our words)`, 'r.skipped': `${V}:caller ids (c-<8 hex>, filtered at the wrapper)`,
     // B-2198 the raw API verb (`api …`): the vendor's answer is belted at the door (apiAnswer); ids, codes, counts are ours
     'r.proposal.id': `${V}:an API proposal id`, 'r.proposal.status': `${V}:the API proposal status enum`, 'r.proposal.reason': 'user:the user\'s own reject reason',
     'r.proposal.result': 'judged:apiAnswer — the approved call\'s answer (status, headers, body), belted', 'r.creds': 'user:the credentials the user granted (account labels + ids + tiers)',
@@ -2255,6 +2264,14 @@ console.log('§6 the shared-store census (words another principal wrote into a s
   ok(c4.binUnowned.length === 1 && c4.binUnowned[0] === 'data/bin/zz-new-tool', 'CONTROL: a new data/bin file that is neither an agent CLI nor declared is red by name');
 }
 
+// int248 r2 (verify r1 #8 / #1): THE WEBHOOK READ DOOR's row — the agent's copy belts `raw` (a webhook record's raw.callText
+// is the caller's own bytes) and withholds every credential spelling; a copy without either line is RED
+{
+  const eng = read('src/server/channels-engine.js');
+  const door = (s) => /if \(x\.raw && typeof x\.raw === 'object'\) out\.raw = beltRaw\(x\.raw\);/.test(s) && /const beltRaw = \(v, d = 0\) => \(typeof v === 'string' \? agentText\(v, \{ kind: 'block' \}\)/.test(s) && /return withholdCreds\(out\);/.test(s);
+  ok(door(eng), 'src/server/channels-engine.js :: agentCopy( raw — the webhook read door: every string of `raw` through agentText (block), the whole copy through withholdCreds (vswh_ / vswp_)');
+  ok(!door(eng.replace(/\n    if \(x\.raw && typeof x\.raw === 'object'\) out\.raw = beltRaw\(x\.raw\);[^\n]*/, '')) && !door(eng.replace('return withholdCreds(out);', 'return out;')), 'CONTROL: a planted unbelted raw (the line gone) / an unwithheld copy ⇒ RED');
+}
 console.log('\nthe attack table');
 for (const [i, a] of attacks.entries()) console.log(`  ${String(i + 1).padStart(2)} · ${a.site.padEnd(28)} · ${a.vector.padEnd(38)} · ${a.verdict}`);
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

@@ -659,7 +659,7 @@ function create({ home = os.homedir(), stateDir, env = () => process.env, log = 
     let all;
     try { all = await require('dns').promises.lookup(host, { all: true, verbatim: true }); } catch (e) { throw named('fetch_failed', `${host} does not resolve (${e.code || e.message})`); }
     if (!all.length) throw named('fetch_failed', `${host} does not resolve`);
-    for (const a of all) { const why = A.addressVerdict(a.address); if (why) throw named('bad_address', `${host} points at a private address (${why}) — refused`); }
+    for (const a of all) { const why = require('./egress-fence.js').addressVerdict(a.address); if (why) throw named('bad_address', `${host} points at a private address (${why}) — refused`); }
     return all[0];
   }
   /** ONE GET of a judged address, connected to exactly `ip` → `{redirect}` | `{sha256, size}` (the body into `dest`). */

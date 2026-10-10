@@ -4823,6 +4823,43 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .chan-dot-idle { background: var(--text-dim); opacity: .6; }
 .chan-sec-note { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; font-size: 10px; line-height: 1.45; color: var(--text-dim); padding: 0 6px 4px 8px; }
 .chan-sec-note.chan-warn { color: var(--warn-text); }
+/* lane webhook-l2-ui: THE WEBHOOK OWNER SURFACE — the section's New path…, the wizard / caller panel / token-once / send
+   dialogs (channel-webhook.js) and the window's path row (Callers… · Send a message… · the budget words) */
+.chan-wh-new { margin: 2px 6px 6px 8px; font-size: 11px; display: inline-flex; align-items: center; gap: 4px; }
+.chan-wh-dialog { width: min(560px, calc(100vw - 24px)); max-height: calc(100vh - 32px); display: flex; flex-direction: column; }
+.chan-wh-dialog .dialog-body { overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+.chan-wh-field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.chan-wh-field > .chan-opt-input, .chan-wh-text { width: 100%; box-sizing: border-box; }
+.chan-wh-at { color: var(--text-secondary); word-break: break-all; }
+.chan-wh-facts { display: flex; flex-direction: column; gap: 4px; }
+.chan-wh-fact { display: grid; grid-template-columns: 1fr 1.4fr auto; gap: 4px; align-items: center; }
+.chan-wh-fact .chan-opt-input { min-width: 0; }
+.chan-wh-add { align-self: flex-start; display: inline-flex; align-items: center; gap: 4px; font-size: 11px; }
+.chan-wh-url { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); }
+.chan-wh-url-text, .chan-wh-token { flex: 1 1 auto; min-width: 0; font-size: 12px; color: var(--text); word-break: break-all; }
+.chan-wh-copy { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px; font-size: 11px; }
+.chan-wh-list { display: flex; flex-direction: column; gap: 6px; }
+.chan-wh-caller { padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.chan-wh-revoked { opacity: 0.6; }
+.chan-wh-caller-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; color: var(--text); }
+.chan-wh-caller-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.chan-wh-chip { font-size: 10px; padding: 0 5px; border-radius: 8px; background: var(--bg-hover); color: var(--text-secondary); }
+.chan-wh-caller-line { font-size: 11px; color: var(--text-secondary); word-break: break-word; }
+.chan-wh-dim { color: var(--text-dim); }
+.chan-wh-acts { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
+.chan-wh-acts .mounts-btn { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; }
+.chan-wh-delivery { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.chan-wh-delivery .chan-opt-input { flex: 1 1 160px; min-width: 0; }
+.chan-wh-register { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px dashed var(--border); border-radius: var(--radius-sm); }
+.chan-wh-register > .mounts-btn { align-self: flex-start; }
+.chan-wh-pick { align-items: baseline; flex-wrap: wrap; }
+.chan-wh-pick-off { color: var(--text-dim); }
+.chan-wh-why { flex-basis: 100%; padding-left: 22px; font-size: 11px; color: var(--warn-text); }
+.chanwin-wh { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; margin-top: 3px; }
+.chanwin-wh-btn { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 1px 8px; }
+.chanwin-wh-budget { font-size: 11px; color: var(--text-dim); min-width: 0; }
+.chanwin-wh-budget.chan-warn { color: var(--warn-text); }
+.chanwin-wh-to { padding: 0 10px 6px; font-size: 11px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* the SENTENCE takes the flex rule; the alert glyph is a fixed 11px slot beside it — an
    unqualified `> span` once matched the icon's span too and turned it into a 124px box that
    pushed the sentence ~110px right or left the glyph alone on a line (verifier, a4 r4) */
@@ -5137,6 +5174,8 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 /* …and on a phone it is a 36 px target like every other one (the comm-panel rule) — the head grows, nothing overlaps */
 @media (max-width: 768px) { .chanmsg-head .chanmsg-who-btn { display: inline-flex; align-items: center; min-height: 36px; } }
 .chanmsg-at { font-size: 10px; color: var(--text-dim); flex-shrink: 0; font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* verify r1 #14 (int248 r2): a webhook call's "raw cut at 8 KiB" note under its head */
+.chanmsg-rawcut { font-size: 11px; color: var(--text-dim); margin: 2px 0 0; }
 /* a continuation line's own time — in the avatar's gutter, on hover (the run's head carries the first) */
 .chanmsg-at-hover { position: absolute; top: 4px; left: 6px; width: calc(var(--chan-gutter) - 6px); text-align: right; opacity: 0; transition: opacity .12s; pointer-events: none; }
 .chanmsg-cont:hover > .chanmsg-at-hover, .chanmsg-cont:focus-within > .chanmsg-at-hover { opacity: 1; }

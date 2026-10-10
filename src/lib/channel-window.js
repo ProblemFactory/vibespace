@@ -64,6 +64,9 @@ import { icon, el, btn, avatar, convAvatar, fileIcon, warmAvatars } from './chan
 import { accountBadges } from './channel-avatar.js';   // B-5fe1: the bar's account badge
 // P2: the Assign & filter editor and the one-line summary the bar draws.
 import { showAssignFilterDialog, assignmentSummary } from './channel-filter-editor.js';
+// lane webhook-l2-ui: a webhook PATH's doors (its callers, a message to them), its budget line and the reply's caller
+import { offersPaths, budgetText, replyToText, rawCutText } from './webhook-view.js';
+import { showCallersDialog, showSendToCallersDialog } from './channel-webhook.js';
 // P3: the inline approval cards (the SAME renderer the Outbox window uses —
 // one store, two places, §9.2).
 import { renderInlineProposals, reasonLabel, attachmentOpenKind, openAttachment, openComposePick } from './channel-outbox.js';
@@ -555,6 +558,8 @@ function renderRecord(rec, { cont = false, base = null, folds = null, mail = nul
     const head = fx && !cont ? row.querySelector(':scope > .chanmsg-head') : null;
     if (fx && head && fx.classList.contains('chanmsg-facts-inline')) head.appendChild(fx); else if (fx) row.appendChild(fx);
   }
+  // verify r1 #14 (int248 r2): a webhook call whose body was over 8 KiB says so on its card (design §5: the raw keeps the first 8 KiB)
+  { const cut = rawCutText(rec.raw, { t }); if (cut) row.appendChild(el('div', 'chanmsg-rawcut', cut)); }
   // W1 (lane channel-threads): the QUOTE LINE of what this reply answers (a click jumps to it) and, for a reply the
   // main list shows inside a thread, the dim "in thread" tag (a click opens the pane on its root). In the pane a
   // reply to the ROOT carries no quote (the root is right above it); a nested reply does.
@@ -735,7 +740,7 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
     // phone the bar is one line (the avatar and the meta line hidden by CSS)
     // B-5fe1: the account's badge — its hue is a function of the WHOLE account list the route names
     const badge = accountBadges(r.accounts || (lastAdapter ? [lastAdapter] : [])).get(adapterId) || null;
-    bar.appendChild(convAvatar({ key: `${adapterId}/${convId}`, title: shownTitle, kind: c.kind, badge }, null, 'chanwin-av'));
+    bar.appendChild(convAvatar({ key: `${adapterId}/${convId}`, title: shownTitle, kind: c.kind, badge, glyph: offersPaths(lastAdapter) ? 'robot' : null }, null, 'chanwin-av'));
     const headCol = el('div', 'chanwin-head');
     bar.appendChild(headCol);
     const titleRow = el('div', 'chanwin-title-row');
@@ -780,6 +785,19 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
       titleRow.insertBefore(chipEl, more);
     }
 
+    // lane webhook-l2-ui: A PATH (the account's capability row declares an inbound door) — Callers… and Send a message…,
+    // then the path's wake budget: "path <slug>: N / M wakes this hour", once spent the ENGINE's own refusal words
+    if (offersPaths(lastAdapter)) {
+      const wh = el('div', 'chanwin-wh');
+      const cb = btn(t('Callers…'), () => showCallersDialog(app, convId, { adapterId, title: shownTitle }), 'chanwin-wh-btn');
+      cb.prepend(icon('robot', 11)); cb.dataset.whCallersOpen = '1';
+      const sb = btn(t('Send a message…'), () => showSendToCallersDialog(app, convId, { title: shownTitle }), 'chanwin-wh-btn');
+      sb.prepend(icon('send', 11)); sb.dataset.whSendOpen = '1';
+      wh.append(cb, sb);
+      const wb = c.wakeBudget;
+      if (wb) { const b = el('span', 'chanwin-wh-budget' + (wb.spent ? ' chan-warn' : ''), wb.spent && wb.why ? wb.why : budgetText(convId, wb)); b.dataset.whBudget = wb.spent ? 'spent' : 'ok'; wh.appendChild(b); }
+      headCol.appendChild(wh);
+    }
     // lane channel-threads (§2.4 / §9): READING reactions needs a permission this account's sign-in does not hold —
     // ONE short line says what unlocks it (the scope, the console step where declared) with the fix right there,
     // exactly like the send line; keyed so a repaint that changes nothing leaves it alone
@@ -800,7 +818,7 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
     // and carries the typed text over into the new composer
     const ad0 = r.adapter || {};
     const footKey = JSON.stringify([cm.mode, cm.why || null, (c.offers && c.offers.sendAsUser && c.offers.sendAsUser.why) || null, !!ad0.sendStartsTurn, ad0.sendForm || null, !!ad0.connectable, ad0.id || null, ad0.sendGrant ? ad0.sendGrant.missing : null, c.policy ? c.policy.mode : null, !!ad0.replyAll, ad0.sendAttachments ? ((c.offers && c.offers.sendAttachment) || {}).why || 'files' : null]);
-    if (foot.dataset.footKey === footKey && foot.firstChild) return c;
+    if (foot.dataset.footKey === footKey && foot.firstChild) { drawQuote(); return c; }   // lane webhook-l2-ui: the caller line follows the path's callers
     // a draft being typed is HELD across every rebuild — including the flip to the
     // read-only line (a disconnect mid-sentence) — and restored when the composer returns
     const typed = (foot.querySelector('textarea') || {}).value || heldDraft;
@@ -849,7 +867,7 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
       // B-a085: mail answers EVERYONE on the newest message when "Reply all" is ticked (its To + Cc, without you —
       // resolved by the server, in the thread); unticked = the sender only, as before
       let allBox = null;
-      if (ad0.replyAll) {
+      if (ad0.replyAll && !offersPaths(ad0)) {   // lane webhook-l2-ui: a path's reply goes to ONE caller — never "all"
         const lab = el('label', 'chanwin-reply-all');
         allBox = document.createElement('input');
         allBox.type = 'checkbox';
@@ -893,6 +911,8 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
       row.prepend(note);
       row.appendChild(sendBtn);
       comp.append(...(cf ? [cf.box] : []), ta, row);
+      // lane webhook-l2-ui: a reply on a path goes to a CALLER — named under the box (drawQuote words it)
+      if (offersPaths(ad0)) { const to = el('div', 'chanwin-wh-to'); to.dataset.whTo = '1'; comp.appendChild(to); }
       foot.textContent = '';
       foot.appendChild(comp);
       drawQuote();   // a quote picked before this rebuild (a re-authorization, a policy change) comes back with the box
@@ -1080,6 +1100,8 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
   function drawQuote() {
     const comp = foot.querySelector('.chanwin-composer');
     let line = comp ? comp.querySelector(':scope > .chanwin-quote') : null;
+    const toLine = comp ? comp.querySelector(':scope > .chanwin-wh-to') : null;   // lane webhook-l2-ui: the quoted call's caller, else the path's one
+    if (toLine) toLine.textContent = replyToText({ quoteWho: quoteTarget ? quoteTarget.who : '', kind: (lastConv && lastConv.kind) || '', participants: (lastConv && lastConv.participants) || '' });
     if (!comp || !quoteTarget) { if (line) line.remove(); return; }
     if (!line) { line = el('div', 'chanwin-quote'); comp.insertBefore(line, comp.firstChild); }
     line.textContent = '';

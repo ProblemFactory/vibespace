@@ -372,6 +372,10 @@ const FACT_SCHEMA = Object.freeze({
   'forwarded-from': Object.freeze({ type: 'party', nameless: true }),
   edited: Object.freeze({ type: 'time' }),
   recalled: Object.freeze({ type: 'flag' }),
+  // lane webhook-l1-server (docs/design-webhook.zh.md §5): a webhook call's EVENT word (the caller's X-Event header) and
+  // the path's DECLARED fields (one party per declared key: id = the key, name = the value the caller sent)
+  event: Object.freeze({ type: 'line' }),
+  fields: Object.freeze({ type: 'parties' }),
 });
 const FACT_KIND_NAMES = Object.freeze(Object.keys(FACT_SCHEMA));
 /** The bounds: facts are peer-derived and sync to every client. `bytes` = a record's whole list after JSON.stringify —

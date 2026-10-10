@@ -1670,7 +1670,7 @@ const newestIn = (eng, conv, n = 1) => eng.store.readTail(A, conv, { limit: n })
   await callB('/api/channels/:adapterId/:convId/send', { text: 'just the sender' });
   ok(seenR.length === 3 && seenR[0].input.replyAll === true && seenR[1].input.replyAll === true && seenR[1].input.direct === true && !('replyAll' in seenR[2].input), 'B-a085: the owner\'s /propose and /send carry replyAll to propose (absent = a plain reply)', JSON.stringify(seenR));
   const WSRC = fs.readFileSync(path.join(REPO, 'src/lib/channel-window.js'), 'utf-8');
-  ok(/if \(ad0\.replyAll\) \{/.test(WSRC) && /lab\.append\(allBox, document\.createTextNode\(' ' \+ t\('Reply all'\)\)\)/.test(WSRC) && /\.\.\.\(allBox && allBox\.checked \? \{ replyAll: true \} : \{\}\)/.test(WSRC) && /replyAll: c\.replyEnvelope === true,/.test(ESRC_R6), 'PIN B-a085: the window composer shows "Reply all" where the adapter view says `replyAll` (caps.replyEnvelope) and sends replyAll only when it is ticked');
+  ok(/if \(ad0\.replyAll(?: && !offersPaths\(ad0\))?\) \{/.test(WSRC) && /lab\.append\(allBox, document\.createTextNode\(' ' \+ t\('Reply all'\)\)\)/.test(WSRC) && /\.\.\.\(allBox && allBox\.checked \? \{ replyAll: true \} : \{\}\)/.test(WSRC) && /replyAll: c\.replyEnvelope === true,/.test(ESRC_R6), 'PIN B-a085: the window composer shows "Reply all" where the adapter view says `replyAll` (caps.replyEnvelope) and sends replyAll only when it is ticked');
 }
 
 // ── verify r1 (B-a085) F1: an agent's ADDED Cc is composing — compose's reach first, then compose's own verdict ──

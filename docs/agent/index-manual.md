@@ -39,4 +39,4 @@ server. `vibespace-docs <topic>` prints it.
   Shell redirection (`cat >`, heredocs, scripts) is NOT collected — use the file tools for anything the user should find later.
 
 - **vibespace-msg** — message other agent sessions in explicit GROUPS (a direct message = the pair's two-member group; each member's notify mode decides next-turn report vs a billed wake; Task-Group scoped reach; `vibespace-docs msg`).
-- **vibespace-channels** — read the external channels (Lark, Gmail, other agents) the user let you see and PROPOSE replies the user approves (`vibespace-docs channels`).
+- **vibespace-channels** — read the external channels (Lark, Gmail, webhook paths, other agents) the user let you see and PROPOSE replies the user approves; a webhook path or caller is the owner's to make — ask with vibespace-ask (`vibespace-docs channels`).

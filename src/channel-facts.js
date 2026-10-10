@@ -40,6 +40,9 @@ const FACT_KINDS = Object.freeze({
   'forwarded-from': row('forwarded-from', { label: 'Forwarded from', where: 'chip', chipWord: 'forwarded from {v}', chipBare: 'forwarded' }),
   edited: row('edited', { label: 'Edited', where: 'chip', mutable: true, chipWord: 'edited' }),
   recalled: row('recalled', { label: 'Recalled', where: 'chip', mutable: true, chipWord: 'recalled' }),
+  // lane webhook-l1-server: a webhook call's event (a chip + its details row) and the path's declared fields (details)
+  event: row('event', { label: 'Event', where: 'chip', detail: true, chipWord: 'event {v}' }),
+  fields: row('fields', { label: 'Fields', where: 'details' }),
 });
 const FACT_WHERE = Object.freeze(['summary', 'chip', 'details']);
 const FACT_AGENT = Object.freeze(['line', 'count', 'none']);

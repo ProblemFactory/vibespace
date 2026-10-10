@@ -18,10 +18,12 @@
  */
 const crypto = require('crypto');
 
-const KINDS = Object.freeze({ dial: { prefix: 'vsdt_', bytes: 18 }, host: { prefix: 'vsht_', bytes: 24 } });
+// lane webhook-l1-server: `webhook` — a webhook CALLER's token (`vswh_` + 48 hex; docs/design-webhook.zh.md §9): a Bearer
+// caller's record keeps only tokenHash, an HMAC caller's the secret-box ciphertext; shown ONCE in the register / rotate answer
+const KINDS = Object.freeze({ dial: { prefix: 'vsdt_', bytes: 18 }, host: { prefix: 'vsht_', bytes: 24 }, webhook: { prefix: 'vswh_', bytes: 24 } });
 const HASH_RE = /^[0-9a-f]{64}$/;
 
-/** A fresh token of `kind` ('dial' | 'host'). */
+/** A fresh token of `kind` ('dial' | 'host' | 'webhook'). */
 function mintToken(kind) {
   const k = KINDS[kind];
   if (!k) throw new Error(`pairing-token: unknown kind ${kind}`);

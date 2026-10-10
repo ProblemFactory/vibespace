@@ -41,6 +41,7 @@ import * as chanCaps from '../channel-caps.js';
 import { routeErrorText, wakeWhyText, principalKindText, groupTitle, principalText, accessAuthorityText, watcherHowText, grainSummaryText, clampNoteText, notifySentence, notifyAnswers, watcherOfAnswers } from './channel-words.js';
 // the ONE principal picker (search + list, keyed, recent picks) — never a <select> of the whole roster
 import { principalPicker, rosterFromApp } from './principal-picker.js';
+import { budgetText } from './webhook-view.js';   // lane webhook-l2-ui: a path's wake budget line
 
 const RULE_LABELS = () => ({
   'mention': t('mentions'),
@@ -61,6 +62,8 @@ const RULE_LABELS = () => ({
   // agent sent — the vendor's own marker, never a clock (lane channel-reply-real, owner 2026-10-08, B-a871); on a group
   // or All agents each member is judged for its own sends
   'reply-to-sent': t('is a quote, a reply in a thread, or a reply in the mail thread of a message this agent sent'),
+  // lane webhook-l2-ui: a FACT the message carries (a webhook path's declared keys, sender / subject / event) equals a value
+  'fact': t('has the fact (key = value)'),
 });
 
 
@@ -76,7 +79,7 @@ function numberInput(value, { min = 0, max = 1000, step = 1 } = {}) { const i = 
 function field(label, input) { const f = el('div', 'chan-af-field'); f.append(fieldLabel(label), input); return f; }
 function noteEl(text, warn = false) { return el('div', 'chan-flow-note' + (warn ? ' chan-warn' : ''), text); }
 /** A fresh rule of one kind (the shape the PURE validator expects). */
-function freshRule(kind) { return kind === 'time-window' ? { kind, from: '09:00', to: '18:00' } : kind === 'sender-in-group' ? { kind, members: [] } : F.PLACE_RULE_KINDS.includes(kind) || kind === 'has-attachment' ? { kind } : { kind, value: '' }; }
+function freshRule(kind) { return kind === 'time-window' ? { kind, from: '09:00', to: '18:00' } : kind === 'sender-in-group' ? { kind, members: [] } : kind === 'fact' ? { kind, key: '', value: '' } : F.PLACE_RULE_KINDS.includes(kind) || kind === 'has-attachment' ? { kind } : { kind, value: '' }; }
 
 /** The per-lane latency sentence from the digest's structure. */
 export function wakeLatencyText(wl) {
@@ -171,6 +174,7 @@ async function readGrain(target) {
       eligibleAbove: Array.isArray(conv.eligibleAbove) ? conv.eligibleAbove : [],
       caps: conv.authorityCaps || { offersSend: false, sendWhy: 'unknown', policyRequiresReview: true },
       latencyNote: wakeLatencyText(conv.wakeLatency), stats: conv.stats || null,
+      wakeBudget: conv.wakeBudget || null,   // lane webhook-l2-ui: the path's per-hour wake budget (`{used, lim}`) or null
       inherited: (conv.watchers || []).filter((w) => w.source && w.source !== 'conversation'),
       accessUrl: `${base}/access`, watchersUrl: `${base}/watchers`,
       preview: (rule) => fetchJson(`${base}/rules/preview`, { method: 'POST', headers: JSON_HDR, body: JSON.stringify({ rule }) }),
@@ -567,6 +571,7 @@ function watcherRow(host, { w = null, f = null, st, principals, onAnyChange, onR
       case 'has-attachment': case 'reply-to-mine': case 'in-thread-with-me': break;
       case 'reply-to-sent': fields.appendChild(noteEl(t('Set this on a group to cover each of its agents for their own sends — a reply notifies only the agent whose message it answers.'))); break;
       case 'time-window': bind(textInput(rule.from || '09:00', 'HH:MM'), 'from'); bind(textInput(rule.to || '18:00', 'HH:MM'), 'to'); break;
+      case 'fact': bind(textInput(rule.key, t('key, e.g. event')), 'key', (v) => v.trim()); bind(textInput(rule.value, t('value, e.g. deploy.failed')), 'value'); break;
       default: break;
     }
     if (fields.childNodes.length) row.appendChild(fields); else row.classList.add('chan-af-rule-nofield');
@@ -598,7 +603,9 @@ function watcherRow(host, { w = null, f = null, st, principals, onAnyChange, onR
   const whenNow = () => (wWake.inp.checked ? 'wake' : 'next-turn');
   // ── ③ HOW OFTEN AT MOST ──
   const cap0 = a0.cap;
-  const how0 = a0.how;
+  // lane webhook-l2-ui (design-webhook §6): on a conversation with a wake budget a NEW notification starts as a digest —
+  // a wake every time is chosen on purpose, with the budget line in sight
+  const how0 = !w && st.wakeBudget ? 'digest' : a0.how;
   const digestMin = numberInput(how0 === 'digest' ? a0.digestMinutes : F.DEFAULT_DIGEST_MINUTES, { min: F.MIN_DIGEST_MINUTES, max: F.MAX_DIGEST_MINUTES, step: 5 });
   digestMin.classList.add('chan-radio-field');
   const capInp = numberInput(cap0, { min: 0, max: F.MAX_DAILY_WAKE_CAP, step: 1 });
@@ -619,6 +626,11 @@ function watcherRow(host, { w = null, f = null, st, principals, onAnyChange, onR
   const capClamp = noteEl('', true);
   capClamp.dataset.clamp = 'cap';
   box.append(q(t('How often at most?')), hNow.lab, hDig.lab, digestClamp, capRow, capClamp);
+  if (st.wakeBudget) {
+    const bl = noteEl(`${budgetText(st.conv.id, st.wakeBudget)} — ${t('a digest by default here; every wake is a billed turn and the path holds the rest until the next hour')}`, !!st.wakeBudget.spent);
+    bl.dataset.whBudgetRow = '1';
+    box.appendChild(bl);
+  }
   if (st.kind !== 'conversation') box.appendChild(noteEl(t('One digest per window for ALL the conversations this covers — never one per conversation.')));
   const howNow = () => (hDig.inp.checked ? 'digest' : 'now');
   // ── ESTIMATE (live) + the authority its access carries ──

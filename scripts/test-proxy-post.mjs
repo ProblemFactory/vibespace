@@ -77,7 +77,8 @@ ok('non-proxy routes still get parsed JSON bodies', l.parsed && l.parsed.a === 1
 
 // 5. wiring pins: server.js carries the exact pattern (unstaged-wiring class)
 const sv = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
-ok('server.js json parser skips /proxy/', /req\.path\.startsWith\('\/proxy\/'\) \? next\(\) : jsonBody/.test(sv));
+// lane webhook-l1-server: the skip is ONE pattern now (/proxy/ + the webhook door + its pairing route read their own bytes)
+ok('server.js json parser skips /proxy/', /OWN_BODY_RE = \/\^\\\/\(\?:proxy\\\//.test(sv) && /OWN_BODY_RE\.test\(req\.path\) \? next\(\) : jsonBody/.test(sv));
 ok('unblocker still mounted AFTER auth (no open proxy)', sv.indexOf('auth.middleware()') < sv.indexOf('app.use(unblocker)'));
 
 target.close(); proxySrv.close();

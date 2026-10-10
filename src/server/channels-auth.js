@@ -859,9 +859,11 @@ function create(engineCtx) {
    *  entry, pending windows, running flow, index rows and record go —
    *  through the two serialized doors (its message logs stay on disk:
    *  archive-never-destroy). The built-in Agents row is not removable. */
+  /** lane webhook-l1-server: the module's DECLARED facts (removable / reach / listed / seed) — never a `builtin` branch. */
+  const declaredOf = (kind) => { try { return registry.get(kind) || {}; } catch { return {}; } };
   async function remove(adapterId) {
     const rec = recordOrThrow(adapterId);
-    if (rec.builtin) throw httpErr(400, 'builtin', `${rec.label || rec.id} is built in and cannot be removed`);
+    if (declaredOf(rec.kind).removable === false) throw httpErr(400, 'builtin', `${rec.label || rec.id} is built in and cannot be removed`);   // lane webhook-l1-server: the module's declared fact
     const refs = referencesOf(rec.id);
     if (refs.length) {
       const n = (k) => refs.filter((r) => r.kind === k).length;
@@ -934,7 +936,7 @@ function create(engineCtx) {
    *  grants, the log or its cursors (`DUPLICATE_NEVER`). */
   async function duplicate(adapterId, { name = null } = {}) {
     const src = recordOrThrow(adapterId);
-    if (src.builtin) throw httpErr(400, 'builtin', `${src.label || src.id} is built in and cannot be duplicated`);
+    if (declaredOf(src.kind).removable === false) throw httpErr(400, 'builtin', `${src.label || src.id} is built in and cannot be duplicated`);
     const mod = connectableFor(src.kind);
     if (src.credentialKey === OWN_KEY) {
       const r = await inlineLegacyClient(src);

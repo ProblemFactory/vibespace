@@ -574,5 +574,23 @@ console.log('lane lark-upload-preflight: the send-attachment offer table');
   ok(LK.capsOfScopes([...SEND, V1]).files.send === true && LK.capsOfScopes([...SEND, V2]).files.send === true && LK.capsOfScopes(SEND).files.send === false, 'caps.files.send: V1 alone ⇒ true, V2 alone ⇒ true, neither ⇒ false');
 }
 
+// ── lane webhook-l2-ui: a WEBHOOK PATH's reply box has NO paperclip — by the capability row (`attachments: 'none'`,
+// `sendAttachments: null`), never by the adapter's kind ──
+console.log('lane webhook-l2-ui: no clip where the row offers no files');
+{
+  const WH = require(path.join(REPO, 'src/channels/webhook.js'));
+  const NOW = Date.now();
+  const o = C.offers(WH.caps, { read: 'yes', sendAs: ['user'], at: NOW }, 'send-attachment', NOW);
+  ok(WH.caps.attachments === 'none' && WH.caps.sendAttachments === null && o.offered === false && o.why === 'attachments-not-offered', 'the webhook row: attachments none, no sendAttachments ⇒ send-attachment not offered (attachments-not-offered)', JSON.stringify(o));
+  const fsx = require('node:fs');
+  const eng = fsx.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const win = fsx.readFileSync(path.join(REPO, 'src/lib/channel-window.js'), 'utf-8');
+  ok(eng.includes('      sendAttachments: c.sendAttachments || null,') && win.includes('const cf = direct && ad0.sendAttachments && c.offers && c.offers.sendAttachment'), 'the clip is built only from the account view\'s sendAttachments row (null here) AND the conversation\'s offer — the composer never asks a kind');
+  const kindGate = /kind\s*===\s*'webhook'|adapterId\s*===\s*'webhook'|\.kind\s*!==\s*'webhook'/;
+  const files = ['src/lib/channel-window.js', 'src/lib/channels-panel.js', 'src/lib/channel-webhook.js', 'src/lib/webhook-view.js', 'src/lib/channel-filter-editor.js'];
+  const hits = files.filter((f) => kindGate.test(fsx.readFileSync(path.join(REPO, f), 'utf-8')));
+  ok(hits.length === 0 && kindGate.test("if (a.kind === 'webhook') x();"), 'the owner surface gates on the capability row (pushTransport http-inbound) — no client file tests the kind (control: the pattern catches one)', hits);
+}
+
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

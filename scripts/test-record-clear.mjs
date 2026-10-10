@@ -40,7 +40,7 @@ const mutant = (tag, from, to) => {
 
 console.log('imports nothing');
 ok(!/\brequire\(/.test(SRC.replace(/\/\/[^\n]*|\/\*[\s\S]*?\*\//g, '')) && !/^\s*import\s/m.test(SRC), 'src/record-clear.js requires nothing');
-ok(J(RC.RECORD_KINDS) === J(['activity', 'todo', 'status', 'job', 'group-message']), 'the CLOSED set of record kinds: activity, todo, status, job, group-message');
+ok(J(RC.RECORD_KINDS) === J(['activity', 'todo', 'status', 'job', 'group-message', 'channel-webhook']), 'the CLOSED set of record kinds: activity, todo, status, job, group-message, channel-webhook');
 
 // ── fixtures in the stores' REAL shapes ──
 const ME = 'claude:aaaa1111-0000-4000-8000-000000000001', MY_WEBUI = 'webui:cw-17', OTHER = 'claude:bbbb2222-0000-4000-8000-000000000002';
@@ -619,6 +619,32 @@ console.log('⑥ negative controls — each rule broken on a copy goes red');
 
 // ── ⑦ the census ──
 for (const row of copiesCensus(M.files, M.dir, ROOT, { minCopies: 8, label: '⑦ ' })) ok(row.pass, row.name, row.detail);
+
+// ── lane webhook-l1-server: `channel-webhook` — a webhook caller's call, cleared through the channel store's rewrite door
+// (the text, the kept body, the mapped facts; the author and the ids stay); the owner only — an agent never wrote one ──
+{
+  const os = require('os');
+  const { createChannelStore } = require(path.join(ROOT, 'src/channel-store.js'));
+  const CRm = require(path.join(ROOT, 'src/channel-record.js'));
+  const WRm = require(path.join(ROOT, 'src/webhook-record.js'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-rc-webhook-'));
+  try {
+    const store = createChannelStore({ dir, log: { log() {}, warn() {}, error() {} } });
+    const rec = WRm.toRecord({ adapterId: 'webhook', slug: 'ci', caller: { id: 'c-0000abcd', name: 'bot' }, value: { text: 'secret plan', env: 'prod' }, bodyText: '{"text":"secret plan","env":"prod"}', eventId: 'c-0000abcd:k1', at: 1e12, mapping: { textPath: 'text', facts: [{ key: 'env', path: 'env' }] } });
+    store.appendRecords('webhook', 'ci', [rec]);
+    const RCS = require(path.join(ROOT, 'src/server/record-clear.js')).create({ getChannels: () => ({ store }), log: () => {} });
+    const agent = await RCS.clear({ kind: 'channel-webhook', path: 'ci', id: rec.vendorId }, { caller: { role: 'agent', keys: ['k'], conversationId: 'cid-1' } });
+    const got0 = store.findRecord('webhook', 'ci', rec.vendorId);
+    ok(!agent.ok && agent.code === 'not_yours' && got0.text === 'secret plan', 'channel-webhook: an AGENT is refused (not_yours) — a caller\'s call is no session\'s words; nothing changed', agent);
+    const own = await RCS.clear({ kind: 'channel-webhook', path: 'ci', id: rec.vendorId }, { caller: { role: 'owner' } });
+    const got = store.findRecord('webhook', 'ci', rec.vendorId);
+    ok(own.ok && got.text === RC.CLEARED_TEXT && got.raw.callText === null && Array.isArray(got.facts) && got.facts.length === 0 && got.author.id === 'caller:c-0000abcd' && got.vendorId === rec.vendorId && got.clearedBy, 'channel-webhook: the OWNER clears the text, the kept body and the facts — the author and the ids stay', got);
+    const again = await RCS.clear({ kind: 'channel-webhook', path: 'ci', id: rec.vendorId }, { caller: { role: 'owner' } });
+    const unk = await RCS.clear({ kind: 'channel-webhook', path: 'ci', id: 'c-0000abcd:nope' }, { caller: { role: 'owner' } });
+    ok(again.ok && again.already === 1 && again.cleared === 0 && !unk.ok, 'channel-webhook: a second clear is `already`; an unknown id is refused');
+    ok(!CRm.carriesFrame(JSON.stringify(got)), 'control: the rewritten line is a plain record');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+}
 
 console.log(`\n${fail ? 'FAIL' : 'ALL PASS'} (${pass}${fail ? `, ${fail} failed` : ''})`);
 process.exit(fail ? 1 : 0);

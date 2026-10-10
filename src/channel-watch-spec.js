@@ -29,6 +29,8 @@ const RULE_FLAGS = Object.freeze([
   { kind: 'reply-to-mine', flag: '--reply-to-mine', value: null, rules: () => [{ kind: 'reply-to-mine' }] },
   { kind: 'in-thread-with-me', flag: '--in-thread-with-me', value: null, rules: () => [{ kind: 'in-thread-with-me' }] },
   { kind: 'reply-to-sent', flag: '--reply-to-sent', value: null, since: true, rules: () => [{ kind: 'reply-to-sent' }] },
+  // lane webhook-l1-server: `fact <key> == <value>` over the message's declared facts (a webhook path's mapped fields)
+  { kind: 'fact', flag: '--fact', value: 'key=value', since: true, rules: (v) => { const s = String(v === null || v === undefined ? '' : v); const i = s.indexOf('='); return [{ kind: 'fact', key: i > 0 ? s.slice(0, i).trim() : '', value: i > 0 ? s.slice(i + 1) : '' }]; } },
 ]);
 /** A RULE_KINDS entry the CLI does not offer, with the reason it says (the census: every kind = a flag or a row here). */
 const NOT_OFFERED = Object.freeze({});

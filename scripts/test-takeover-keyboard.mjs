@@ -1451,6 +1451,10 @@ const CENSUS = [
   ['channel-mail-frame.js', 'iframe', 'frame', 'a mail\'s formatted body (the sandboxed srcdoc frame, lane channel-rich)'],
   ['channel-thread-pane.js', 'tabindex', 'widget', 'the thread pane\'s reply list (-1, lane channel-threads)'],
   ['channel-thread-pane.js', 'textarea', 'text', 'THE THREAD PANE\'S COMPOSER (lane channel-threads)'],
+  // the 2.369.249 integration (int248): lane webhook-l2-ui's owner surface, classed by the census's own rules
+  ['channel-webhook.js', 'input', 'text+control', 'the New path wizard\'s fields (slug, title, reply name, keys, rate / wakes numbers, the reply URL); the Send a message caller picker\'s checkboxes'],
+  ['channel-webhook.js', 'select', 'choice', 'the wizard\'s delivery / policy / caller auth pickers (whSelect)'],
+  ['channel-webhook.js', 'textarea', 'text', 'THE SEND A MESSAGE BOX (a path\'s picked callers)'],
   ['channel-window.js', 'input', 'control', 'the Reply-all checkbox under a Gmail reply (lane gmail-reply-all — composed at the 2.369.202 integration)'],
   ['channel-window.js', 'textarea', 'text', 'THE CHANNEL COMPOSER (a conversation, an agent group)'],
   ['channel-window.js', 'tabindex', 'widget+control', 'the message list (-1, PageUp / Home); an info chip (0)'],

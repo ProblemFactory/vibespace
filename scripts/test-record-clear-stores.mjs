@@ -1378,7 +1378,7 @@ console.log('§7 wiring pins');
   const cut = (l) => { let q = null; for (let i = 0; i < l.length; i++) { const c = l[i]; if (q) { if (c === '\\') i++; else if (c === q) q = null; continue; } if (c === '"' || c === "'" || c === '`') q = c; else if (c === '/' && l[i + 1] === '/') return l.slice(0, i); } return l; };
   const strip = (s) => s.split('\n').map(cut).join('\n');
   const server = strip(read('server.js'));
-  ok(/require\('\.\/src\/server\/record-clear\.js'\)\.create\(\{ tasks, userTodos, sessionStatus, getJobs: jobsWiring\.getJobs, getGroups: \(\) => channelsWiring\.groups \}\)/.test(server) && /registerRecordClearRoutes\(app, \{ recordClear \}\)/.test(server) && /getRecordClear: \(\) => recordClear[, ][^\n]*\}\)/.test(server), 'server.js builds the ONE entry point over the five stores, registers the owner routes and hands it to the agent routes');
+  ok(/require\('\.\/src\/server\/record-clear\.js'\)\.create\(\{ tasks, userTodos, sessionStatus, getJobs: jobsWiring\.getJobs, getGroups: \(\) => channelsWiring\.groups, getChannels: \(\) => channelsWiring\.channels \}\)/.test(server) && /registerRecordClearRoutes\(app, \{ recordClear \}\)/.test(server) && /getRecordClear: \(\) => recordClear[, ][^\n]*\}\)/.test(server), 'server.js builds the ONE entry point over the five stores, registers the owner routes and hands it to the agent routes');
   const routes = strip(read('src/routes/records-clear.js'));
   ok((routes.match(/if \(isAgentBearer\(req\)\) return fail\(res, RC\.refuse\('agent_forbidden'\)\);/g) || []).length === 2, 'both owner routes refuse an agent token FIRST');
   for (const [f, re] of [

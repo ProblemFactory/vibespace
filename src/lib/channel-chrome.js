@@ -123,11 +123,13 @@ export function accountBadge(badge, cls = '', title = '') {
  *  an agent group wears the people glyph, a mail thread / mailbox the mail
  *  glyph, anything else the title's initials — on the hue of the key;
  *  `internal` (the first screen's VibeSpace rows): the mark, muted. */
-export function convAvatar({ key = '', title = '', kind = '', group = false, internal = false, badge = null, pic = null } = {}, px = null, cls = '') {
+export function convAvatar({ key = '', title = '', kind = '', group = false, internal = false, badge = null, pic = null, glyph: sys = null } = {}, px = null, cls = '') {
   // lane internal-rows-look (the owner, 2026-10-09: "这个 VibeSpace 内部的聊天群视觉上很难和其他的外部的区分开"): VibeSpace's OWN
   //  talk — every internal row, a group and a pair alike — wears the product's mark AS its avatar on a MUTED disc: no
   //  hue, no corner badge (the avatar is the mark), so colour on the first screen means a person or a vendor
   if (internal) return avatar({ name: title, glyph: 'vibespace', muted: true }, px, cls);
+  // lane webhook-l2-ui: a conversation with a SYSTEM (a webhook path's callers have no picture) wears its glyph, muted
+  if (sys) return avatar({ name: title, glyph: sys, muted: true }, px, cls);
   const glyph = group ? 'users' : (kind === 'thread' || kind === 'mailbox') ? 'mail' : null;
   return avatar({ name: title, key, glyph, badge, pic }, px, cls);
 }

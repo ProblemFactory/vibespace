@@ -45,7 +45,7 @@
  *   · APP_SCRIPT + appArgv + appCommands — the ONE root script (packages are argv POSITIONS, never interpolated), the
  *     argv the machine's ONE package slot runs (src/install-slot.js installLauncherArgv), the commands a person reads
  *   · parseRunLog — the script's `= …` lines (delta / desktop / service / deb / entry / base / pin / refused / ok)
- *   · fetchVerdict / addressVerdict / sniffInstaller / appImageOffset / debMembers / debIconOf / appImageRow / removePlanFor
+ *   · fetchVerdict / sniffInstaller / appImageOffset / debMembers / debIconOf / appImageRow / removePlanFor
  *     — an installer the agent names by ADDRESS or FILE (design 009 §2 A): the address judged before any byte moves (https,
  *     a public name, every redirect re-judged), the kind by the BYTES, the app's own .desktop out of the archive, the
  *     removal of every kind
@@ -1008,39 +1008,8 @@ function fetchVerdict(url, { testHosts = [] } = {}) {
   if (!test && PRIVATE_NAMES.some((n) => host === n || host.endsWith(`.${n}`))) return bad(`${host} is a private name, not a public site`);
   return { ok: true, url: u.href, host, port: u.port ? Number(u.port) : 443 };
 }
-const v4n = (s) => { const p = String(s).split('.').map(Number); return p.length === 4 && p.every((x) => Number.isInteger(x) && x >= 0 && x <= 255) ? ((p[0] << 24) >>> 0) + (p[1] << 16) + (p[2] << 8) + p[3] : null; };
-const V4_PRIVATE = [['0.0.0.0', 8], ['10.0.0.0', 8], ['100.64.0.0', 10], ['127.0.0.0', 8], ['169.254.0.0', 16], ['172.16.0.0', 12], ['192.0.0.0', 24], ['192.0.2.0', 24], ['192.88.99.0', 24], ['192.168.0.0', 16], ['198.18.0.0', 15], ['198.51.100.0', 24], ['203.0.113.0', 24], ['224.0.0.0', 4], ['240.0.0.0', 4]];
-/** IPv6 text → 8 groups, or null. */
-function v6groups(s) {
-  let t = String(s).toLowerCase().replace(/^\[|\]$/g, '').replace(/%.*$/, '');
-  const m4 = /(\d+\.\d+\.\d+\.\d+)$/.exec(t);
-  if (m4) { const n = v4n(m4[1]); if (n == null) return null; t = t.slice(0, -m4[1].length) + `${(n >>> 16).toString(16)}:${(n & 0xffff).toString(16)}`; }
-  const parts = t.split('::');
-  if (parts.length > 2) return null;
-  const head = parts[0] ? parts[0].split(':') : [], tail = parts.length === 2 && parts[1] ? parts[1].split(':') : [];
-  const fill = parts.length === 2 ? 8 - head.length - tail.length : 0;
-  if (fill < 0 || (parts.length === 1 && head.length !== 8)) return null;
-  const g = [...head, ...Array(fill).fill('0'), ...tail].map((x) => (/^[0-9a-f]{1,4}$/.test(x) ? parseInt(x, 16) : NaN));
-  return g.length === 8 && g.every((x) => Number.isInteger(x)) ? g : null;
-}
-/**
- * THE RESOLVED ADDRESS VERDICT (PURE): null = a public address; else the reason. Every private / loopback / link-local
- * / shared / documentation / multicast / reserved range of IPv4 and IPv6, an IPv4-mapped or NAT64 address judged as
- * its IPv4. The fetch connects to exactly the address judged (no second lookup — a rebinding name cannot move it).
- */
-function addressVerdict(ip) {
-  const s = String(ip || '');
-  const n = v4n(s);
-  if (n != null) { for (const [b, bits] of V4_PRIVATE) { const m = bits === 0 ? 0 : (~0 << (32 - bits)) >>> 0; if (((n & m) >>> 0) === ((v4n(b) & m) >>> 0)) return `${s} is a private or reserved address`; } return null; }
-  const g = v6groups(s);
-  if (!g) return `${s.slice(0, 60)} is not an address`;
-  const embedded = (hi, lo) => `${hi >>> 8}.${hi & 255}.${lo >>> 8}.${lo & 255}`;
-  if (g.slice(0, 5).every((x) => x === 0) && g[5] === 0xffff) return addressVerdict(embedded(g[6], g[7])); // ::ffff:a.b.c.d
-  if (g[0] === 0x64 && g[1] === 0xff9b && g.slice(2, 6).every((x) => x === 0)) return addressVerdict(embedded(g[6], g[7])); // NAT64
-  if (g.every((x) => x === 0) || (g.slice(0, 7).every((x) => x === 0) && g[7] === 1)) return `${s} is a loopback or unspecified address`;
-  if ((g[0] & 0xfe00) === 0xfc00 || (g[0] & 0xffc0) === 0xfe80 || (g[0] & 0xff00) === 0xff00 || (g[0] === 0x2001 && g[1] === 0x0db8) || (g[0] === 0x0100 && g.slice(1, 4).every((x) => x === 0)) || g.slice(0, 6).every((x) => x === 0)) return `${s} is a private or reserved address`;
-  return null;
-}
+// lane webhook-l1-server: THE RESOLVED ADDRESS VERDICT (`addressVerdict`) moved to src/egress-fence.js — the one fence every
+// owner-configured address is judged by (src/app-serve.js reads it from there).
 /**
  * THE KIND, BY THE BYTES (PURE) — never by the name. `head` = the file's first ≥ 64 bytes → `{kind:'deb'|'appimage'}` |
  * `{kind:null, why}`. A Debian archive is an ar archive whose first member is `debian-binary`; an AppImage (type 2) is
@@ -1135,5 +1104,5 @@ module.exports = {
   debFileName, packagesStanza, packagesIndex, parseStanza, cacheVerdict,
   replayRungs, driftVerdict,
   APP_SCRIPT, appArgv, appCommands, parseRunLog,
-  HOME_KINDS, FETCH_MAX, FETCH_REDIRECTS, PRIVATE_NAMES, fetchVerdict, addressVerdict, sniffInstaller, appImageOffset, debMembers, debDesktopOf, debIconOf, appImageRow, removePlanFor, desktopNames, normLabels,
+  HOME_KINDS, FETCH_MAX, FETCH_REDIRECTS, PRIVATE_NAMES, fetchVerdict, sniffInstaller, appImageOffset, debMembers, debDesktopOf, debIconOf, appImageRow, removePlanFor, desktopNames, normLabels,
 };

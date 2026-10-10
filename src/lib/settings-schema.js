@@ -1027,6 +1027,22 @@ const SETTINGS_SCHEMA = {
     tier: 'advanced',
     category: t('Channels'), liveApply: true,
   },
+  // ── Webhook paths (docs/design-webhook.zh.md §4 / §10; verify r1 #10, int248 r2): the two switches the door and the
+  //    egress fence read LIVE through serverSetting — each now has its door here ──
+  'webhook.trustProxyHops': {
+    type: 'number', default: 0, min: 0, max: 5, step: 1,
+    label: t('Webhook: proxy hops in front of this instance'),
+    description: t('The webhook door counts strangers per address and a path\'s allow-list judges the caller\'s address. Behind a reverse proxy or an ingress every call arrives from the proxy, so all callers would share one address: set how many proxies of yours stand in front (1 behind the Helm chart\'s ingress) and the door reads the caller\'s address that many hops from the right of X-Forwarded-For. 0 = the connecting address.'),
+    tier: 'advanced',
+    category: t('Channels'), liveApply: true,
+  },
+  'webhook.allowPrivateReplyUrl': {
+    type: 'boolean', default: false,
+    label: t('Webhook: allow private reply URLs'),
+    description: t('Off: a caller\'s reply URL and a paired instance must be public https addresses (the egress fence refuses loopback, private and reserved ranges). On: http and private addresses are allowed too — for a test bench or a LAN you trust.'),
+    tier: 'advanced',
+    category: t('Channels'), liveApply: true,
+  },
   // ── Channels: THE AGGREGATED IM's time and capacity numbers (owner ruling
   //    2026-09-26: "all of these time and capacity parameters should be
   //    configurable"; design §6.2 / §6.5). Every one is read LIVE by the

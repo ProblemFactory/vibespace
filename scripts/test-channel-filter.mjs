@@ -61,7 +61,7 @@ console.log('① validation refuses by name');
   const tt = (str, p) => { seen.push(str); return (p ? String(str).replace(/\{(\w+)\}/g, (m, k) => (k in p ? String(p[k]) : m)) : String(str)); };
   ok(F.filterProblemText(kw, { t: tt, ruleLabel: (k) => (k === 'keyword' ? 'contains keyword' : k) }) === 'the rule "contains keyword" needs a value' && seen.length === 1, 'filterProblemText words the code through the caller\'s t() and names the rule the way the editor labels it', JSON.stringify(seen));
   ok(F.filterProblemText(F.validateFilter({ rules: [] }), { t: tt }) === 'add at least one rule' && F.filterProblemText({ ok: true }) === '' && F.filterProblemText({ ok: false, code: 'bad-match', error: 'match must be any|every' }, { t: tt }) === 'match must be any|every', 'no-rules is worded; an accepted filter has no problem; a code the table does not know falls back to the contract sentence (never hidden)');
-  ok(F.RULE_KINDS.length === 12 && F.RULE_KINDS.every((k) => F.validateRule(k === 'time-window' ? { kind: k, from: '00:00', to: '01:00' } : k === 'sender-in-group' ? { kind: k, members: ['x'] } : k === 'has-attachment' || F.PLACE_RULE_KINDS.includes(k) ? { kind: k } : { kind: k, value: 'x' }).ok), 'every declared kind validates with its own minimal shape (' + F.RULE_KINDS.join(', ') + ')');
+  ok(F.RULE_KINDS.length === 13 && F.RULE_KINDS.every((k) => F.validateRule(k === 'fact' ? { kind: k, key: 'env', value: 'x' } : k === 'time-window' ? { kind: k, from: '00:00', to: '01:00' } : k === 'sender-in-group' ? { kind: k, members: ['x'] } : k === 'has-attachment' || F.PLACE_RULE_KINDS.includes(k) ? { kind: k } : { kind: k, value: 'x' }).ok), 'every declared kind validates with its own minimal shape (' + F.RULE_KINDS.join(', ') + ')');
 }
 
 // ── ② truth table per kind ───────────────────────────────────────────────
@@ -953,9 +953,13 @@ console.log('⑯ THE CENSUS (lane channel-reply-real, B-a871): every reply-to-se
     ['agents', 'a/b/c', 'none — no records at all (history() empty): the rule never fires there', 'src/channels/agents.js', 'async history() { return { records: [], anchor: null, reachedAnchor: true, complete: true }; },'],
     ['fake', 'a/b', 'replyTo / threadKey / root ← the seeded world', 'src/channels/fake.js', 'replyTo: synthetic ? null : (m.replyTo || null), threadKey: synthetic ? null : (m.threadKey || null), root: synthetic ? null : (m.root || null),'],
     ['fake', 'c', 'none — a chat is dm / group', 'src/channels/fake.js', "kind: c.meta.kind === 'dm' ? 'dm' : 'group'"],
+    // lane webhook-l1-server: a call names the reply it answers (X-In-Reply-To = the replyId we sent) and its thread key
+    ['webhook', 'a', 'replyTo ← X-In-Reply-To (the replyId VibeSpace sent)', 'src/webhook-record.js', 'replyTo: i.replyTo ? String(i.replyTo).slice(0, 200) : null,'],
+    ['webhook', 'b', 'threadKey ← X-Thread-Key', 'src/webhook-record.js', 'threadKey: i.threadKey ? String(i.threadKey).slice(0, 200) : null,'],
+    ['webhook', 'c', 'none — a path is dm (one caller) / group', 'src/channels/webhook.js', "kind: cs.length > 1 ? 'group' : 'dm',"],
   ];
   const missing = CENSUS.filter(([, , , file, needle]) => !src(file).includes(needle)).map((r) => r.slice(0, 2).join(' ') + ': ' + r[4].slice(0, 60));
-  ok(!missing.length && CENSUS.length === 14, `the census: ${CENSUS.length} rows (adapter × clause), every writer line pinned in its adapter`, J2(missing));
+  ok(!missing.length && CENSUS.length === 17, `the census: ${CENSUS.length} rows (adapter × clause), every writer line pinned in its adapter`, J2(missing));
   // threadOnly (Slack's thread_ts read without a topic) comes from the DECLARED placements: Slack has no quote, Lark has
   ok(src('src/channels/slack.js').includes("placements: Object.freeze(['chat', 'thread', 'thread+chat']), rootReply: 'thread'") && src('src/channels/lark.js').includes("placements: Object.freeze(['chat', 'quote', 'thread']), rootReply: 'quote'") && src('src/server/channels-engine.js').includes('threadOnly: F.threadOnlyCaps(registry.capsOf(rec.kind))'), 'threadOnly = the adapter\'s declared placements (Slack: no quote ⇒ thread_ts is the thread; Lark: quote ⇒ root_id may be a chain), handed over by the engine');
   const adapters = fs.readdirSync(path.join(REPO, 'src/channels')).filter((n) => /\.js$/.test(n) && !/^(index|registry-list)\.js$/.test(n) && !/^slack-/.test(n));
@@ -1044,7 +1048,7 @@ console.log('⑱ lane lark-system-records (B-ef03): a vendor system notice is no
 // and the engine's 'all' watcher skips it (pinned). Control: a copy without the guards lets the notice match ⇒ red. ──────
 {
   const T = NOW - 60e3;
-  const base = { adapterId: 'lark-a', convId: 'oc_s', at: T, text: 'Ada recalled a message', mentions: [{ id: 'ou_me', name: 'Me' }], attachments: [{ id: 'f1', name: 'a.png', bytes: 1, mime: 'image/png' }] };
+  const base = { adapterId: 'lark-a', convId: 'oc_s', at: T, text: 'Ada recalled a message', mentions: [{ id: 'ou_me', name: 'Me' }], attachments: [{ id: 'f1', name: 'a.png', bytes: 1, mime: 'image/png' }], facts: [{ k: 'event', v: 'recalled' }] };
   const sys = makeRecord({ ...base, vendorId: 'om_sys', kind: 'system', systemKind: 'recall', author: {} });
   const peer = makeRecord({ ...base, vendorId: 'om_peer', author: { id: 'ou_ada', name: 'Ada' }, replyTo: 'om_mine', threadKey: 'omt_t', root: 'om_mine' });
   const RULE_FOR = {
@@ -1053,6 +1057,7 @@ console.log('⑱ lane lark-system-records (B-ef03): a vendor system notice is no
     subject: { kind: 'subject', value: 'recalled' }, 'has-attachment': { kind: 'has-attachment' }, 'not-contains': { kind: 'not-contains', value: 'zzz-never' },
     'time-window': { kind: 'time-window', from: '00:00', to: '23:59', tzOffsetMinutes: 0 },
     'reply-to-mine': { kind: 'reply-to-mine' }, 'in-thread-with-me': { kind: 'in-thread-with-me' }, 'reply-to-sent': { kind: 'reply-to-sent' },
+    fact: { kind: 'fact', key: 'event', value: 'recalled' },
   };
   const ctx = { mine: new Set(['om_mine']), sentByMe: new Map([['om_mine', { at: T - 60e3, words: 'hi' }]]), ownerMine: new Set(), convKind: 'thread',
     kindOf: () => ({ kind: 'topic-reply', topic: 'omt_t', quotes: 'om_mine' }), threadOf: () => ['om_mine'], subjectOf: () => 'recalled' };

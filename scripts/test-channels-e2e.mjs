@@ -174,7 +174,7 @@ const OPEN_PANEL = `(async () => {
 })()`;
 const panel = await p1.evaljs(OPEN_PANEL);
 ok(panel.ok, 'the Channels rail panel renders', JSON.stringify(panel));
-ok(panel.sections.length === 4 && ['fake-poll', 'fake-push', 'fake-scan', 'Agents'].every((s) => panel.sections.includes(s)), 'the three fake adapters AND the built-in Agents adapter (P3, seeded whenever the wiring names live sessions) are sections', JSON.stringify(panel.sections));
+ok(panel.sections.length === 5 && ['fake-poll', 'fake-push', 'fake-scan', 'Webhook', 'Agents'].every((s) => panel.sections.includes(s)), 'the three fake adapters, the built-in Webhook adapter (seeded where the server mounts its door) AND the built-in Agents adapter (P3, seeded whenever the wiring names live sessions) are sections', JSON.stringify(panel.sections));
 ok(panel.rows.length >= 6, `EXIT ①: fake-adapter conversations APPEAR IN THE PANEL (${panel.rows.length} rows)`, JSON.stringify(panel.rows.slice(0, 2)));
 // EVERY ROW IS FETCHED (2026-09-26, the aggregated IM) — so every row claims
 // its cadence with ONE freshness pill, and no row says "not tracked".

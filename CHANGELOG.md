@@ -2,6 +2,13 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.249 — 2026-10-10
+
+### Added
+- Any system can message you through a webhook address of its own, your agents answer it as you, and it never sees how.
+- The Channels panel has a Webhook section: make a path, register its callers (each token shown once) and reply or send to them, with the wake budget in sight.
+- Two VibeSpace instances can pair with a one-time code and message each other through webhook paths; your agents reply to a chosen caller or to all of them.
+
 ## 2.369.248 — 2026-10-10
 
 ### Fixed

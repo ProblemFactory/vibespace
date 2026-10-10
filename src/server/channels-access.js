@@ -32,6 +32,7 @@ function create(engineCtx) {
     agentTitle, agentId, INBOX_KEY, i18nKey, INBOX_SOURCE, RESOLVED_BY, RECONCILE_SECONDS, ESTIMATE_CAP, registry, liveSessions, log, now, userTodos,
     store, adapterRecords, adapterFor, tiers, agentShareRefusal, isWatched, laneOf, effectiveConvCaps, rawFactsOf, viewOf, agentCopy, humanNameOf,
     vendorNameOf, notify, known, withView, NOT_A_THREAD, threadRead, vendorSearch, aroundFor, clearWakeTimer, coalesceSeconds, ownRecordOf,
+    pathBudgetVerdict,
   } = engineCtx;
   // created AFTER this family: read through the context at call time
   const sendIdentityFor = (...a) => engineCtx.sendIdentityFor(...a);
@@ -377,7 +378,7 @@ function create(engineCtx) {
     if (!ctx || ctx.kind === 'user') return { level: 'visible', via: 'user', grantId: null };
     let mod = null;
     try { mod = registry.get(rec.kind); } catch {}
-    if (mod && mod.builtin) {
+    if (mod && mod.reach === 'msg-acl') {   // lane webhook-l1-server: the module DECLARES who answers its reach
       const lv = typeof ctx.msgLevelFor === 'function' ? ctx.msgLevelFor(en.id) : 'none';
       return { level: ACL.fromMsgLevel(lv), via: 'msg-acl', grantId: null };
     }
@@ -674,7 +675,7 @@ function create(engineCtx) {
   function directoryLists(rec, en) {
     if (!rec || !en || rec.enabled === false) return false;
     let mod = null; try { mod = registry.get(rec.kind); } catch {}
-    if (mod && mod.builtin) return false;   // the built-in Agents adapter answers reach with msg-acl (§12.3)
+    if (mod && mod.reach === 'msg-acl') return false;   // the built-in Agents adapter answers reach with msg-acl (§12.3)
     return ACL.directoryListable(ACL.directoryOf(rec), en.kind);
   }
   /** The account's directory switches — the Edit dialog's `PUT {agentDirectory:{groups, singles}}`. */
@@ -706,7 +707,7 @@ function create(engineCtx) {
     }
     const rec = adapterRecords().adapters.find((x) => x.id === r0);
     let mod = null; try { mod = rec ? registry.get(rec.kind) : null; } catch {}
-    if (!rec || rec.enabled === false || (mod && mod.builtin)) return ACL.notFound();
+    if (!rec || rec.enabled === false || (mod && mod.reach === 'msg-acl')) return ACL.notFound();
     const acctReach = ACL.effective(ctx, { key: '\u0000', adapterId: rec.id }, (store.index.table('accountGrants') || []).filter((g) => g && g.scope && g.scope.kind === 'adapter' && g.scope.id === rec.id));
     const named = (effectiveForAccount(rec.id) || { access: [] }).access.some((x) => F.rowNames(x.row, ctx));
     if (!ACL.canSee(acctReach.level) && !named) {
@@ -990,7 +991,16 @@ function create(engineCtx) {
     stampAgentRead(en.key, ctx, upTo);
     // §25: an agent reads `text` — the render tree is for the eye only (never a second copy of the body in its context)
     // lane channel-threads (§5.1 / §6.4): the agent's copy — no tree, the place as words, reactions WITHOUT `by`
-    return { ok: true, conversation: { key: agentId(en.key), adapterId, id: agentId(convId), title: agentTitle(en, convId), polledAt: laneOf(en).lastPollAt || null }, records: withView(rec, records, { convId, agent: true }) };   // verify r1 F2: the title through the belt; r3 F6: the key + id
+    // lane webhook-l3-cli-pair: a webhook path's callers ride the read (who a reply can go to — never a key)
+    let callers = null;
+    try { const ad = adapterFor(rec); callers = ad && ad.adapter && typeof ad.adapter.callersOf === 'function' ? ad.adapter.callersOf(convId) : null; } catch { callers = null; }
+    // verify r1 #13 (int248 r2): a conversation's WAKE BUDGET reaches the agent too (design §6) — ONE header line "path <slug>:
+    // N / M wakes this hour (K held)" and, on a record still held (pending), a one-line notice; the caller still hears nothing
+    const bv = typeof pathBudgetVerdict === 'function' ? pathBudgetVerdict(rec, convId, en, now()) : { ok: true };
+    const heldIds = new Set((Array.isArray(en.pending) ? en.pending : []).map((p) => p && p.record && (typeof p.record === 'string' ? p.record : p.record.id)).filter((x) => typeof x === 'string'));
+    const budget = bv.lim ? { used: bv.used, lim: bv.lim, held: heldIds.size, spent: !bv.ok, text: agentId(`path ${convId}: ${bv.used} / ${bv.lim} wakes this hour (${heldIds.size} held)`, 300) } : null;
+    const heldText = agentId(bv.ok ? 'held — it rides the next wake' : `held — ${bv.why}; it rides the next wake`, 300);
+    return { ok: true, conversation: { key: agentId(en.key), adapterId, id: agentId(convId), title: agentTitle(en, convId), polledAt: laneOf(en).lastPollAt || null }, ...(Array.isArray(callers) ? { callers: callers.map((c) => ({ id: agentId(c.id, 40), name: agentId(c.name, 80), kind: c.kind, delivery: c.delivery, lastCallAt: c.lastCallAt, generation: c.generation })) } : {}), ...(budget ? { budget } : {}), records: withView(rec, records, { convId, agent: true }).map((r) => (r && heldIds.has(String(r.id)) ? { ...r, heldText } : r)) };   // verify r1 F2: the title through the belt; r3 F6: the key + id
   }
   /**
    * STAMP AN AGENT'S READ (R3 §23 — the owner: "某个agent刚刚读取了的"): `en.
@@ -1173,7 +1183,9 @@ function create(engineCtx) {
         if (w.filter && w.mode === 'filtered' && pk) return { ...w, filterId: inlineFilterIdFor(site, pk, prevW.get(pk)) };
         return w;
       });
-      const vw = F.validateWatchers(minted, access, { inherited: siteInheritedOf(site), members: membersNow() });   // lane channel-agent-watch W3: access here OR above; notify-rules-r2: or a member of a group that holds it
+      // lane webhook-l1-server: a conversation with a per-path wake budget defaults an 'all' row to a digest
+      const allNotify = site.kind === 'conversation' && site.holder && site.holder.options && Number(site.holder.options.wakesPerHour) > 0 ? 'digest' : null;
+      const vw = F.validateWatchers(minted, access, { inherited: siteInheritedOf(site), members: membersNow(), allNotify });   // lane channel-agent-watch W3: access here OR above; notify-rules-r2: or a member of a group that holds it
       if (!vw.ok) return { ok: false, code: vw.code, error: vw.error, ...(vw.why ? { why: vw.why } : {}), ...(vw.principal ? { principal: vw.principal } : {}), ...(vw.index !== undefined ? { index: vw.index } : {}) };
       watchers = [];
       for (let i = 0; i < vw.watchers.length; i++) {

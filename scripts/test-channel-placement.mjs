@@ -50,6 +50,7 @@ const fake = require(path.join(REPO, 'src/channels/fake.js'));
 const lark = require(path.join(REPO, 'src/channels/lark.js'));
 const gmail = require(path.join(REPO, 'src/channels/gmail.js'));
 const agents = require(path.join(REPO, 'src/channels/agents.js'));
+const webhook = require(path.join(REPO, 'src/channels/webhook.js'));   // lane webhook-l1-server: a reply names its record (quote), else chat
 const T = require(path.join(REPO, 'src/channel-touch.js'));
 const ENG = require(path.join(REPO, 'src/server/channels-engine.js'));
 const REC = require(path.join(REPO, 'src/channel-record.js'));
@@ -64,7 +65,7 @@ fs.mkdirSync(ROOT, { recursive: true });
 // ── the vendor rows: the SHIPPED declarations + Slack / Telegram as fixtures (spec §2.2, vendor facts S4 / T1–T2) ──
 const SLACK = { receive: 'poll', history: 'page', sendAs: ['user'], identityMarking: 'unknown', threads: { read: 'vendor', replyInto: true, listing: 'separate', placements: ['chat', 'thread', 'thread+chat'], rootReply: 'thread' } };
 const TELEGRAM = { receive: 'push', pushTransport: 'long-poll', pushAckBudgetMs: 3000, history: 'none', sendAs: ['bot'], identityMarking: 'marked', threads: { read: 'chain', replyInto: false, listing: 'none', placements: ['chat', 'quote'], rootReply: 'quote' } };
-const VENDORS = { lark: lark.caps, slack: SLACK, telegram: TELEGRAM, gmail: gmail.caps, agents: agents.caps, fake: fake.fakePoll.caps, 'fake-push': fake.fakePush.caps };
+const VENDORS = { lark: lark.caps, slack: SLACK, telegram: TELEGRAM, gmail: gmail.caps, agents: agents.caps, webhook: webhook.caps, fake: fake.fakePoll.caps, 'fake-push': fake.fakePush.caps };
 
 // ── ① THE TABLE ──────────────────────────────────────────────────────────
 // [vendor, the answered message: none | root (outside any thread) | thread (inside a vendor thread), asked, expected]
@@ -78,6 +79,7 @@ const ROWS = [
   ['telegram', 'none', null, 'chat'], ['telegram', 'root', null, 'quote*root'], ['telegram', 'root', 'thread', 'placement-not-offered/not-declared'], ['telegram', 'root', 'thread+chat', 'placement-not-offered/not-declared'],
   ['telegram', 'thread', null, 'placement-not-offered/parent-in-thread'],
   ['gmail', 'none', null, 'chat'], ['gmail', 'root', null, 'quote*root'], ['gmail', 'root', 'thread', 'placement-not-offered/not-declared'],
+  ['webhook', 'none', null, 'chat'], ['webhook', 'root', null, 'quote*root'], ['webhook', 'root', 'thread', 'placement-not-offered/not-declared'], ['webhook', 'thread', null, 'placement-not-offered/parent-in-thread'],
   ['agents', 'none', null, 'chat'], ['agents', 'root', null, 'placement-not-offered/no-replies'], ['agents', 'root', 'quote', 'placement-not-offered/not-declared'],
   ['fake', 'none', null, 'chat'], ['fake', 'root', null, 'quote*root'], ['fake', 'root', 'thread', 'thread'], ['fake', 'root', 'thread+chat', 'thread+chat'], ['fake', 'thread', null, 'thread*parent-in-thread'], ['fake', 'thread', 'quote', 'placement-not-offered/parent-in-thread'],
   ['fake-push', 'none', null, 'placement-not-offered/not-declared'],

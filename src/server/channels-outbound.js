@@ -80,6 +80,8 @@ function create(engineCtx) {
    *  default and the adapter record's own `senderHonestyLine` (true / false /
    *  null = follow the instance) overrides it — a per-channel option. */
   function honestyLineFor(rec) {
+    // lane webhook-l1-server: `caps.honestyLine: 'never'` — the other side may never learn an agent drafted it (no switch)
+    try { if (rec && registry.capsOf(rec.kind).honestyLine === 'never') return false; } catch { }
     if (rec && rec.senderHonestyLine === true) return true;
     if (rec && rec.senderHonestyLine === false) return false;
     let v; try { v = serverSetting('channels.senderHonestyLine'); } catch { v = undefined; }
@@ -199,7 +201,7 @@ function create(engineCtx) {
     const d = p && p.draftedBy;
     if (!d || d.kind !== 'agent' || !d.id) return true;
     const rec = adapterRecords().adapters.find((r) => r.id === p.adapterId) || null;
-    try { if (rec && registry.get(rec.kind).builtin) return true; } catch { }
+    try { if (rec && registry.get(rec.kind).reach === 'msg-acl') return true; } catch { }   // lane webhook-l1-server: the declared reach source
     let live = null;
     try { live = (liveSessions() || []).find((x) => x && x.cid === String(d.id)) || null; } catch { live = null; }
     const groups = live ? (Array.isArray(live.groups) ? live.groups.slice() : []) : (Array.isArray(p.drafterGroups) ? p.drafterGroups.slice() : []);
@@ -219,7 +221,7 @@ function create(engineCtx) {
    * else is withheld whole (dropped, never delivered, said in the log). An unreadable `about` withholds (fail closed).
    */
   const STASH_ABOUT_KEYS_MAX = 64;
-  const builtinAccount = (adapterId) => { const rec = adapterRecords().adapters.find((r) => r.id === adapterId) || null; try { return !!(rec && registry.get(rec.kind).builtin); } catch { return false; } };
+  const msgAclAccount = (adapterId) => { const rec = adapterRecords().adapters.find((r) => r.id === adapterId) || null; try { return !!(rec && registry.get(rec.kind).reach === 'msg-acl'); } catch { return false; } };
   const stashAbout = ({ keys = [], account = null, cid = null, groups = null } = {}) => {
     let g = groups;
     if (!Array.isArray(g)) g = cid ? groupsOfSession(String(cid)) : [];
@@ -241,7 +243,7 @@ function create(engineCtx) {
       const gk = groups.join('\u0000');
       const seesKey = (adapterId, convId) => {
         const mk = `${gk}\u0001${adapterId}\u0001${convId === null ? '' : convId}`;
-        if (!M.has(mk)) M.set(mk, builtinAccount(adapterId) || stillSees(ctx, adapterId, convId));
+        if (!M.has(mk)) M.set(mk, msgAclAccount(adapterId) || stillSees(ctx, adapterId, convId));
         return M.get(mk);
       };
       for (const k of Array.isArray(a.keys) ? a.keys.map(String) : []) {
@@ -425,9 +427,12 @@ function create(engineCtx) {
     const anchor = P.anchorView(record);
     if (!wantsEnvelope) return { ok: true, anchor, envelope: null };
     let env = null;
-    try { env = await adapterFor(rec).adapter.replyEnvelope(convId, { anchorId: String(record.vendorId), ...(all === true ? { all: true } : {}) }); }
+    // lane webhook-l1-server: `implicit` = no --to (the engine chose the newest record) — a path of several callers refuses it
+    try { env = await adapterFor(rec).adapter.replyEnvelope(convId, { anchorId: String(record.vendorId), ...(all === true ? { all: true } : {}), ...(replyTo === null || replyTo === undefined ? { implicit: true } : {}) }); }
     catch (err) {
       const why = (err && err.detail && err.detail.why) || (err && err.code) || 'unknown';
+      // lane webhook-l1-server: a refusal the adapter NAMES (`detail.named`: ambiguous-caller, caller-revoked, …) is said by its name
+      if (err && err.detail && err.detail.named === true && why !== 'reply-anchor-elsewhere') return { ok: false, answer: { ok: false, code: why === 'ambiguous-caller' ? 'bad-proposal' : (err.code || 'send-not-available'), why, error: `${(err && err.message) || why} — nothing was created`, ...(Array.isArray(err.detail.callers) ? { callers: err.detail.callers.slice(0, 50).map(callerRow) } : {}) } };
       if (why === 'reply-anchor-elsewhere' || why === 'reply-anchor-draft') return { ok: false, answer: { ok: false, code: 'bad-proposal', why: 'reply-anchor', error: why === 'reply-anchor-draft' ? `the message this reply answers is an unsent draft — nothing was created (${(err && err.message) || why})` : `the message this reply answers is not in this conversation on the platform (${(err && err.message) || why})` } };
       return { ok: false, answer: { ok: false, code: 'send-not-available', why: 'reply-envelope', error: `who this reply would go to could not be resolved (${(err && err.message) || why}) — nothing was created; propose it again` } };
     }
@@ -441,7 +446,7 @@ function create(engineCtx) {
   function replyRecheck(p, rec) {
     if (!p || p.compose || !p.convId) return null;
     const c = rec ? registry.capsOf(rec.kind) : {};
-    if (c.replyEnvelope === true && !(p.replyEnvelope && p.replyEnvelope.anchorId && p.replyEnvelope.to)) return 'reply-envelope-missing';
+    if (c.replyEnvelope === true && !(p.replyEnvelope && p.replyEnvelope.to && (p.replyEnvelope.anchorId || p.replyEnvelope.pinned === true))) return 'reply-envelope-missing';
     const anchorId = p.replyTo || (p.replyEnvelope && p.replyEnvelope.anchorId) || null;
     if (!anchorId) return null;
     const record = storedRecord(p.adapterId, p.convId, anchorId);
@@ -543,7 +548,19 @@ function create(engineCtx) {
     // below, direct only when compose's own verdict (the account's policy + its rows' authority) would be direct too
     const ccByAgent = !!(v.proposal.cc && ctx && ctx.kind === 'agent');
     if (ccByAgent && !ACL.canSee(ACL.effective(ctx, { key: '', adapterId: rec.id }, accountScopeGrants(rec.id)).level)) return { ok: false, code: 'bad-proposal', why: 'cc', error: 'adding people to a mail (--cc) is composing to them — it needs access to the whole account, like compose; yours covers this conversation — nothing was created (reply without --cc, or ask the user)' };
-    const ra = await replyTargetFor(rec, adapterId, convId, v.proposal.replyTo, { all: v.proposal.replyAll === true, cc: v.proposal.cc || null });
+    // lane webhook-l1-server: A PINNED RECIPIENT (compose --caller: one proposal per caller) — judged by the adapter's own
+    // prepareSend now (a recipient it does not answer for is refused by name), carried as the envelope, no anchor
+    const pin = typeof input.recipient === 'string' && input.recipient && !v.proposal.replyTo ? input.recipient : null;
+    let ra;
+    if (pin) {
+      const c1 = registry.capsOf(rec.kind);
+      if (!(c1.replyEnvelope === true && c1.prepareSend === true)) return { ok: false, code: 'bad-proposal', why: 'recipient', error: `${rec.label || rec.id} has no per-recipient sends — reply in the conversation` };
+      let pr = null;
+      try { pr = await adapterFor(rec).adapter.prepareSend(convId, { text: v.proposal.text, recipients: [pin] }); }
+      catch (err) { const why = (err && err.detail && err.detail.why) || (err && err.code) || 'unknown'; return { ok: false, code: err && err.code === 'not-found' ? 'not-found' : 'send-not-available', why, error: `${(err && err.message) || why} — nothing was created` }; }
+      if (!(pr && Array.isArray(pr.recipients) && pr.recipients.length === 1 && pr.recipients[0] === pin)) return { ok: false, code: 'send-not-available', why: 'recipient', error: `${pin.slice(0, 40)} cannot receive from here — nothing was created` };
+      ra = { ok: true, anchor: null, envelope: { anchorId: '', to: pin, cc: null, subject: '', inReplyTo: null, references: null, pinned: true } };
+    } else ra = await replyTargetFor(rec, adapterId, convId, v.proposal.replyTo, { all: v.proposal.replyAll === true, cc: v.proposal.cc || null });
     if (!ra.ok) return ra.answer;
     // THE PLACEMENT (2026-09-28, the owner: "the boolean is Lark-shaped") — decided HERE, before anything exists:
     // the PURE verdict over the adapter's DECLARED placements (its `threads` cap row) and ONE fact about the message
@@ -755,6 +772,29 @@ function create(engineCtx) {
    * the same receipt. The proposal is keyed `<account>/~compose/<id>` until
    * the vendor answers with the new thread's id.
    */
+  /**
+   * lane webhook-l1-server: COMPOSE TO NAMED RECIPIENTS of one conversation (`compose --caller <id>[,<id>]|all` on a webhook
+   * path) — the adapter's prepareSend expands and judges the list ONCE (unknown / revoked / delivery none refused by name,
+   * COMPOSE_MAX_RECIPIENTS the ceiling), then ONE proposal per recipient through `propose` (each its own policy, card,
+   * receipt). `{ok, proposals: [{recipient, ...answer}], skipped}`.
+   */
+  // lane webhook-l3-cli-pair: a caller row a refusal names reaches the agent through the belt (a paired peer's name is ITS words)
+  const callerRow = (c) => ({ id: agentId(String((c && c.id) || ''), 40), name: agentId(String((c && c.name) || ''), 80), delivery: c && c.delivery });
+  async function composeEach(ctx, adapterId, convId, input = {}, guards = {}) {
+    const { en, rec } = convFor(adapterId, convId);
+    if (!en || !rec) return ACL.notFound();
+    if (ctx && ctx.kind === 'agent' && !ACL.canSee(reachFor(ctx, rec, en).level)) return ACL.notFound();
+    const c = registry.capsOf(rec.kind);
+    if (!(c.prepareSend === true && c.replyEnvelope === true)) return { ok: false, code: 'compose-not-available', error: `${rec.label || rec.id} has no per-recipient sends` };
+    let pr;
+    try { pr = await adapterFor(rec).adapter.prepareSend(convId, { text: String((input && input.text) || ''), recipients: input && input.recipients }); }
+    catch (err) { const why = (err && err.detail && err.detail.why) || (err && err.code) || 'unknown'; return { ok: false, code: err && err.code === 'not-found' ? 'not-found' : 'send-not-available', why, error: (err && err.message) || why, ...(err && err.detail && Array.isArray(err.detail.callers) ? { callers: err.detail.callers.slice(0, 50).map(callerRow) } : {}) }; }
+    const ids = Array.isArray(pr && pr.recipients) ? pr.recipients : [];
+    if (!ids.length) return { ok: false, code: 'send-not-available', why: 'no-recipient', error: 'nobody to send to — nothing was created' };
+    const proposals = [];
+    for (const id of ids) proposals.push({ recipient: id, ...(await propose(ctx, adapterId, convId, { ...input, recipient: id, replyTo: null }, guards)) });
+    return { ok: proposals.every((x) => x.ok), proposals, skipped: Array.isArray(pr.skipped) ? pr.skipped : [] };
+  }
   async function compose(ctx, adapterId, input, guards = {}) {
     const rec = adapterRecords().adapters.find((r) => r.id === adapterId) || null;
     const agent = !!(ctx && ctx.kind === 'agent');
@@ -1825,7 +1865,7 @@ function create(engineCtx) {
 
   return {
     honestyLineFor, sendIdentityFor, proposalsFor, agentProposalView, stashAbout, stashGate, outboxView, notifyOutbox, sendStartsTurn,
-    outboxAttachment, filesSweep, propose, proposeReaction, compose, approve, reject, onProposal, withdrawProposal, replaceProposal,
+    outboxAttachment, filesSweep, propose, proposeReaction, compose, composeEach, approve, reject, onProposal, withdrawProposal, replaceProposal,
     noteReceiptStash, reconcileReceiptFates, reconcile, sweepSending, sweepReplaces, receipt, expireSweep, pointerSync, learnSentFiles,
     filesOfferFor,   // lane owner-composer-attach: the owner's composer judges its chips by the same offer the send reads
   };

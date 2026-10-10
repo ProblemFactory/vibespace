@@ -513,6 +513,7 @@
 - A PERSON'S OWN TAGS VANISHED FROM A LARK MESSAGE (owner 10-09, <emphasis> for TTS): the reader stripped tags it did not know, the wall quoted the rest. FIX = a closed vocabulary; any other tag is content as written; only OUR frame names fenced. 不变量 = what a person typed reaches the agent as typed
 - FOUR CMD+CLICKS ON A PATH LINK, NOTHING SAID (userW 10-10 inc-mv1tlrix-eklc): a missing path flashed Not found 1.2 s; no ring kept it. FIX = a toast with the path, the machine and a way on; every link open is an op-ring row. 不变量 = a failed click is said where it happened, recorded for the bundle
 - A NESTED FRAME OPENER SLIPPED THE BELT (lane lark-unknown-tags finding, 2026-10-09): one pass inerted the inner opener and re-assembled the outer. FIX = inert to a fixed point (≤ 4), assert no live frame at every door, withhold otherwise. 不变量 = a peer can never forge a frame, however nested
+- A WEBHOOK CALLER IS AN OUTSIDER (lane webhook-l1-server, 2026-10-10): /hook/<slug> lets any system in with its own token. 不变量 = a caller sees nothing internal and pays no wake; the owner is the only identity; refusal before the body (src/webhook-auth.js ①–⑫, test-webhook-auth)
 
 ## AGENT ROWS LOOKED LIKE PEOPLE (lane internal-rows-look, 2.369.247 — owner 2026-10-09 "这个 VibeSpace 内部的聊天群视觉上很难和其他的外部的区分开")
 

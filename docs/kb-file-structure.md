@@ -618,6 +618,15 @@ docs/
   keyboard-shortcuts.md — Complete shortcut reference
   screenshot-helper.js — JS sanitizer for privacy-safe screenshots
   screenshots/         — Documentation screenshots (overview, sidebar, settings, grid)
+src/egress-fence.js — SHARED THE EGRESS FENCE for an OWNER-CONFIGURED address (lane webhook-l1-server): addressVerdict (lifted from app-manifest), urlVerdict, fenceFetch = resolve ONCE, judge every answer, pin the socket, no 3xx, 10 s, ≤ 64 KiB, lost vs refused
+src/lib/channel-webhook.js — UI THE WEBHOOK OWNER DIALOGS (lane webhook-l2-ui): showNewPathDialog (the wizard), showCallersDialog (register / rotate / revoke / delivery, live by broadcast), showTokenOnce (the ONLY place a token is drawn), showSendToCallersDialog
+src/lib/webhook-view.js — UI-PURE THE WEBHOOK OWNER WORDS (lane webhook-l2-ui, DOM-free): offersPaths (pushTransport http-inbound), slugText (the server's slugProblem), callerRow (no token), pickerRows (no-reply ⇒ disabled + why), budgetText, replyToText, sendOutcomes
+src/webhook-auth.js — PURE THE WEBHOOK DOOR'S ORDER ①–⑫ (lane webhook-l1-server): verdict(step) per step, fixed ANSWERS (one 401 / 405 / 429 body), createIpGate + createCallerMemos (bounded, overflow fails CLOSED + counts), eventIdOf, receiptOf, clientIp (trustProxyHops); crypto handed in
+src/webhook-record.js — PURE A WEBHOOK CALL AS A RECORD (lane webhook-l1-server): validateMapping / pathVerdict (depth ≤ 16, ≤ 256 chars, own props), toRecord via makeRecord (the belt; author = the registered caller), facts sender / subject / event / fields, raw {callText, bytes, cut}
+src/webhook-reply.js — PURE WHO A WEBHOOK REPLY GOES TO (lane webhook-l1-server): replyTarget (--to ⇒ the record's caller; implicit + several ⇒ ambiguous-caller; revoked / none named), composeTargets (all | ids, COMPOSE_MAX_RECIPIENTS), envelopeOf
+src/channels/webhook.js — ORCH THE BUILT-IN WEBHOOK ADAPTER (lane webhook-l1-server): the §3 caps row, declared reach grants / listed / seed / not removable / no consent; callersStore (callers.json 0600, hash / sealed token), the poll queue, live.deliver, replyEnvelope / send ⇒
+src/webhook-pair.js — PURE THE INSTANCE PAIRING (lane webhook-l3-cli-pair, design §12): vswp_ code encode/decode (10 min), hookUrlVerdict, completionVerdict + complete (verdict BEFORE the write), createPending, peerRecordValue / peerBody (canonical peer payload)
+src/routes/webhook.js — ORCH THE WEBHOOK ROUTES (lane webhook-l1-server): POST /hook/:slug walks webhook-auth's steps (express.raw only at ⑦), the caller's long-poll, the pairing (pair-code / join / completion), the owner's path / caller verbs behind the agent-bearer 403; stats() for the suites ⇒
 ```
 
 ## TASK → FILE MAP (moved verbatim from CLAUDE.md "Common Tasks → File Location Map", lane claude-md-diet)
@@ -10689,3 +10698,18 @@ B-9428 (the owner's heap snapshot 2026-10-09: the WHOLE usage ledger parsed in t
 - **src/lib/channel-window.js** `createComposeFiles` — each pick keeps its `file` (the File) + `mime` (the File's type, else `P.sniffType`'s); the chip's thumb (`p.kind === 'image'`) and name open through `openComposePick(app, p)`; `forget(p)` (×) revokes, `clear()` (after the send) parks sent URLs in `spent`, `destroy()` revokes all; the window's `liveFiles` is destroyed at a footer rebuild and on `winInfo._listenerCtl` abort.
 - **src/lib/channel-outbox.js** `openComposePick(app, p)` — mints `p.url = URL.createObjectURL(p.file)` on the first open, then THE ONE door `openAttachment`; the door's overlay URL goes through `P.attachmentUrlFor(url, {inline: true})`.
 - **src/channel-policy.js** `attachmentUrlFor(url, {inline})` — PURE: `?inline=1` (or `&inline=1`) for a served attachment, a `blob:` URL unchanged (a query names no blob).
+
+### lane webhook-l1-server (rel249) — src/channels/webhook.js · src/routes/webhook.js · src/webhook-{auth,record,reply}.js · src/egress-fence.js
+- **src/channels/webhook.js** — `callersStore(dir, {secrets})` is memoized PER FILE so the routes and the engine's adapter instance share one in-memory view of callers.json; every mutation writes atomically FIRST (`register` / `rotate` mint, write, then return the token). `keyOf(c)`: an HMAC caller's sealed token, a Bearer caller's `tokenHash` (the reply signature / receipt / cursor key). `live.deliver(ev)` answers `not-armed` before a `start`; the engine's `pushInbound` arms the lane on demand. A revoke drops the hash / ciphertext and bumps `generation`.
+- **src/routes/webhook.js** — a refusal sets `Connection: close` and never touches the body; `STATS.bodyReads` counts step ⑦ only (test-webhook-auth proves 0 on a 300 KB bad-token call). `syncRow` writes the index row (title, kind dm|group, participants, `options`) + people.json and asks `refreshConvCaps` (a path the owner just made is sendable). The per-IP gate and the caller memos are module-level (one per process).
+- **src/webhook-auth.js** — no `require` at all (the crypto comes in as `tokenMatches` / `hmacHex` / `safeEqual`); a bearer arrives already read by src/channels/index.js `bearerOf` (no regex over a credential); the `vswh_` check is a substring test.
+- **src/egress-fence.js** — `addressVerdict` is the SAME function app-serve uses (moved, not copied); `fenceFetch`'s `lookup` option is the suites' resolver seam (a rebinding resolver proves one lookup).
+- Suites: test-webhook-auth · test-webhook-record · test-webhook-reply · test-egress-fence · test-webhook-token-sinks (fast) · test-webhook-routes (heavy, real server).
+
+### lane webhook-l3-cli-pair (rel249) — src/webhook-pair.js · src/routes/webhook.js (pairing) · data/bin/vibespace-channels (webhook words)
+- **src/webhook-pair.js** — imports webhook-auth only; `complete(input, {write})` is THE seam test-webhook-pair mutates (write-first ⇒ RED). The pending memo is in memory (≤ 32, 10 min): a restart voids every unspent code.
+- **src/routes/webhook.js** — the pair endpoint looks the pending code up from the HEADER (`X-Webhook-Caller`) before reading the body; `join` writes nothing until A answers 200; `instanceBase(req)` reads `app.locals.instancePublicUrl` (instanceUrl, no server.js line).
+- **src/channels/webhook.js** — a `peer` row holds `tokenEnc` (what the peer presents) + `outEnc` / `outCaller` (what we present on ITS path); revoke drops both; `callersOf` feeds the agent read header (no key, hash or URL).
+- **data/bin/vibespace-channels** — the ANSWER DOOR `answerOf(res)` parses every server answer (6 reads) and withholds `vswh_…` before a field can print (the peer-text census bans re-binding console); test-webhook-cli pins it verbatim, bans res.json() and raw writes, and holds the closed verb set.
+- Suites: test-webhook-pair · test-webhook-cli (fast) · test-webhook-token-sinks (+ self-pairing) · test-webhook-pair-e2e (heavy, two real servers).
+

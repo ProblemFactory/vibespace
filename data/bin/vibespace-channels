@@ -67,6 +67,10 @@ const verb = args[0];
 const SESS = process.env.VIBESPACE_SESSION_TOKEN || (verb === 'withdraw' ? process.env.VIBESPACE_JOB_TOKEN : null);
 if (!API || !SESS) { console.error('vibespace-channels: not inside a VibeSpace session (VIBESPACE_API / token missing)'); process.exit(2); }
 
+// lane webhook-l3-cli-pair (docs/design-webhook.zh.md §9): THE ANSWER DOOR — every server answer this CLI reads is parsed
+// HERE and a webhook token (vswh_…) or a pairing code (vswp_…, it carries one — verify r1 #1) in it is withheld before any field can be printed; no verb registers a caller or mints
+// a token (the owner does, in the Channels window — an agent proposes it with vibespace-ask). test-webhook-cli holds the census.
+async function answerOf(res) { return JSON.parse(String(await res.text()).replace(/(vswh|vswp)_[A-Za-z0-9_-]*/g, '$1_[withheld]')); }
 async function call(method, p, body) {
   const res = await fetch(API + p, {
     method, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + SESS },
@@ -74,14 +78,21 @@ async function call(method, p, body) {
   }).catch((e) => ({ _neterr: e.message }));
   if (res._neterr) { console.error('vibespace-channels: server unreachable (' + res._neterr + ')'); process.exit(3); }
   let j = {};
-  try { j = await res.json(); } catch { }
-  if (j.error) { console.error(j.error + (j.code ? ' [' + j.code + (/^attachments?-/.test(String(j.why || '')) ? ': ' + j.why : '') + ']' : '')); placementHint(j); process.exit(1); }
+  try { j = await answerOf(res); } catch { }
+  if (j.error) { console.error(j.error + (j.code ? ' [' + j.code + (/^attachments?-/.test(String(j.why || '')) ? ': ' + j.why : '') + ']' : '')); callerRows(j); placementHint(j); process.exit(1); }
   return j;
 }
 // THE NAIVE-USER PASS (2026-09-28): a `placement-not-offered` refusal names what IS offered in the placement's own
 // words ("offered here: chat, quote") — the agent asks for those with FLAGS, so it is told which flags, for what this
 // channel offers (a quote has no flag of its own: it is what --to alone gives where the channel quotes by default)
 const PLACEMENT_FLAGS = Object.freeze({ chat: 'chat: leave out --to', quote: 'quote: --to <msg id>', thread: 'thread: --to <msg id> --in-thread', 'thread+chat': 'thread+chat: --to <msg id> --also-in-chat' });
+// lane webhook-l3-cli-pair (design-webhook §7): a refusal that names a webhook path's callers lists them as rows, and an
+// ambiguous reply says the two ways on — nothing was sent
+function callerRows(j) {
+  if (!Array.isArray(j.callers) || !j.callers.length) return;
+  for (const c of j.callers.slice(0, 50)) console.error(`  ${c.id} "${c.name}"${c.delivery ? ` · delivery ${c.delivery}` : ''}`);
+  if (j.why === 'ambiguous-caller') console.error(`two ways on: reply to one caller's record — vibespace-channels reply ${args[1] || '<conv>'} "…" --to <record id>\n             or name them — vibespace-channels compose ${args[1] || '<conv>'} --caller <id>[,<id>]|all "…"`);
+}
 function placementHint(j) {
   if (!j || j.code !== 'placement-not-offered' || j.why !== 'not-declared' || !Array.isArray(j.offered)) return;
   const how = j.offered.map((x) => PLACEMENT_FLAGS[x]).filter(Boolean);
@@ -167,6 +178,10 @@ const USAGE = `vibespace-channels — read connected channels, PROPOSE replies (
                                                    ← PROPOSES a reaction (the user approves it unless the account's reaction policy is direct)
   vibespace-channels compose <account> --to <addr>[,<addr>] [--cc <addr>] --subject "…" "text" [--why "…"] [--attach <path>]… [--replaces <proposalId>]
                                                    ← PROPOSES a NEW message (needs access to the whole account)
+  vibespace-channels compose webhook/<path> --caller <id>[,<id>]|all "text" [--why "…"]
+                                                   ← a webhook path: ONE proposal per caller (read prints the callers); a reply
+                                                     to a caller's record is 'reply webhook/<path> "…" --to <record id>'; no verb
+                                                     makes a path or a caller token — propose one to the user with vibespace-ask
   vibespace-channels withdraw <proposalId> [--why "…"]
                                                    ← takes back YOUR proposal while the user has not decided it
                                                      (--replaces on reply/compose = withdraw it + propose the new one, in one step)
@@ -288,7 +303,7 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
     if (i <= 0) { console.error('<conv> is <adapter>/<conversation id>, as vibespace-channels list prints it'); process.exit(1); }
     const res = await fetch(API + `/api/agent/channels/${encodeURIComponent(conv.slice(0, i))}/${encodeURIComponent(conv.slice(i + 1))}/refresh`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + SESS }, body: '{}' }).catch((e) => ({ _neterr: e.message }));
     if (res._neterr) { console.error('vibespace-channels: server unreachable (' + res._neterr + ')'); process.exit(3); }
-    let j = {}; try { j = await res.json(); } catch { }
+    let j = {}; try { j = await answerOf(res); } catch { }
     if (REFRESH_REFUSED.includes(j.code)) return { refused: true, ...j };   // r5: a full request set is a refusal with its wait, like the others; r7: an account that changed while the refresh waited, the engine stopping
     if (j.error) { console.error(j.error + (j.code ? ' [' + j.code + ']' : '')); process.exit(1); }
     return j;
@@ -302,7 +317,7 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
     if (!conv || i <= 0 || conv.startsWith('--')) { console.error('usage: vibespace-channels refresh <conv> --thread <msg id>'); process.exit(1); }
     const res = await fetch(API + `/api/agent/channels/${encodeURIComponent(conv.slice(0, i))}/${encodeURIComponent(conv.slice(i + 1))}/thread/${encodeURIComponent(flag('--thread'))}/refresh`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + SESS }, body: '{}' }).catch((e) => ({ _neterr: e.message }));
     if (res._neterr) { console.error('vibespace-channels: server unreachable (' + res._neterr + ')'); process.exit(3); }
-    let j = {}; try { j = await res.json(); } catch { }
+    let j = {}; try { j = await answerOf(res); } catch { }
     if (THREAD_REFUSED.includes(j.code)) { console.log(`thread not loaded: ${j.error}${j.retryAfterSec ? ` (retry in ${j.retryAfterSec} s)` : ''} [${j.code}]`); process.exit(4); }
     if (j.error) { console.error(j.error + (j.code ? ' [' + j.code + ']' : '')); process.exit(1); }
     console.log(j.joined ? `the thread was being loaded already — read it: vibespace-channels read ${conv} --thread ${flag('--thread')}` : `loaded the thread: ${j.appended || 0} new message(s) — read it: vibespace-channels read ${conv} --thread ${flag('--thread')}`);
@@ -333,6 +348,13 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
     const recs = r.records || [];
     const th = r.thread || null;
     console.log(`${r.conversation.key} — ${r.conversation.title}${r.conversation.polledAt ? ` · fetched ${when(r.conversation.polledAt)}` : ''} · ${recs.length} message(s)${th ? ` · thread ${th.key || flag('--thread')} (${th.count || 0} repl${th.count === 1 ? 'y' : 'ies'})` : ''}`);
+    // lane webhook-l3-cli-pair (design-webhook §7): a webhook path's CALLERS — who a reply can go to — before the records
+    if (Array.isArray(r.callers)) {
+      console.log(`callers: ${r.callers.length ? r.callers.length : 'none yet — the owner registers callers (propose one with vibespace-ask)'}`);
+      for (const c of r.callers) console.log(`  ${c.id} "${c.name}" · ${c.kind} · delivery ${c.delivery} · last call ${c.lastCallAt ? when(c.lastCallAt) : 'never'} · generation ${c.generation}`);
+    }
+    // verify r1 #13 (int248 r2): the path's wake budget (the server's words) — and a held message says so under it
+    if (r.budget && r.budget.text) console.log(r.budget.text);
     if (r.note) console.log(r.note);
     for (const m of recs) {
       // lane lark-system-records: a vendor notice (a recall, a join) is nobody's message — ONE [system] line with its words
@@ -344,6 +366,7 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
       if (pl.line) console.log(`    ${pl.line}`);
       // lane message-facts (B-f066): the message's facts as ONE line — `to: … · cc: … · reply-to: … · list: … · importance: …` (the server's words)
       if (m.factsText) console.log(`    ${m.factsText}`);
+      if (m.heldText) console.log(`    ${m.heldText}`);
       if (m.reactionsText) console.log(`    ${m.reactionsText}`);
       // lane channel-attach-read: the id and the command that fetches it (each piece one shell word)
       for (const a of (m.attachments || [])) console.log(`    attachment: ${a.name || a.id}${a.mime ? ` (${a.mime})` : ''}${Number(a.bytes) > 0 ? `, ${a.bytes} bytes` : ''}${a.id && m.vendorId ? ` — id ${a.id}; fetch: vibespace-channels attachment ${shellWord(r.conversation.key)} ${shellWord(m.vendorId)} ${shellWord(a.id)}` : ''}`);
@@ -376,7 +399,7 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
     const res = await fetch(API + '/api/agent/channels/attachment?' + q, { headers: { Authorization: 'Bearer ' + SESS } }).catch((e) => ({ _neterr: e.message }));
     if (res._neterr) { console.error('vibespace-channels: server unreachable (' + res._neterr + ')'); process.exit(3); }
     if (!res.ok) {
-      let j = {}; try { j = await res.json(); } catch { }
+      let j = {}; try { j = await answerOf(res); } catch { }
       if (ATTACH_REFUSED.includes(j.code)) { console.log(`not fetched: ${j.error}${j.retryAfterSec ? ` (retry in ${j.retryAfterSec} s)` : ''} [${j.code}]`); process.exit(4); }
       console.error((j.error || `the server answered ${res.status}`) + (j.code ? ' [' + j.code + ']' : '')); process.exit(1);
     }
@@ -471,7 +494,7 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
     if (flag('--why')) body.why = flag('--why');
     const res = await fetch(API + '/api/agent/channels/react', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + SESS }, body: JSON.stringify(body) }).catch((e) => ({ _neterr: e.message }));
     if (res._neterr) { console.error('vibespace-channels: server unreachable (' + res._neterr + ')'); process.exit(3); }
-    let j = {}; try { j = await res.json(); } catch { }
+    let j = {}; try { j = await answerOf(res); } catch { }
     // a REFUSAL (exit 4) names why — the policy, the emoji, the message's own state; an ERROR is exit 1
     const RX_REFUSED = ['react-not-available', 'bad-emoji', 'already-reacted', 'reaction-not-mine', 'vendor-budget', 'backoff'];
     if (RX_REFUSED.includes(j.code)) { console.log(`not proposed: ${j.error}${j.why ? ` (${j.why})` : ''} [${j.code}]`); process.exit(4); }
@@ -534,6 +557,24 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
   if (verb === 'compose') {
     const account = args[1];
     const text = args.slice(2).filter((x, i, all) => !x.startsWith('--') && !(i > 0 && all[i - 1].startsWith('--'))).pop();
+    // lane webhook-l3-cli-pair (design-webhook §7): `compose webhook/<path> --caller <id>[,<id>]|all "…"` — ONE proposal per caller
+    if (args.includes('--caller')) {
+      const caller = flag('--caller');
+      if (!account || account.startsWith('--') || !caller || !text) { console.error('usage: vibespace-channels compose webhook/<path> --caller <id>[,<id>]|all "text" [--why "…"]'); process.exit(1); }
+      const body = { conv: account, caller, text };
+      if (flag('--why')) body.why = { kind: 'text', label: flag('--why') };
+      const r = await call('POST', '/api/agent/channels/compose', body);
+      for (const x of r.proposals || []) {
+        const p = x.proposal || {};
+        if (x.ok === false) console.log(`${x.recipient}: refused — ${x.error || x.code}`);
+        else if (p.state === 'sent') console.log(`sent directly (policy: direct) — proposal ${p.id} to ${x.recipient}`);
+        else if (p.state === 'awaiting-approval') console.log(`proposed — proposal ${p.id} to ${x.recipient} is awaiting the user's approval (${((p.policy && p.policy.reasons) || []).join(', ') || 'review'}); the receipt arrives in your next turn`);
+        else console.log(`proposal ${p.id} to ${x.recipient}: ${p.state}${p.reason ? ' — ' + p.reason : ''}`);
+      }
+      if ((r.skipped || []).length) console.log(`not sent to ${r.skipped.join(', ')} — delivery none (they take no replies)`);
+      if (r.ok === false) process.exit(1);
+      return;
+    }
     const to = flag('--to');
     const subject = flag('--subject');
     if (!account || account.startsWith('--') || !to || !subject || !text) { console.error('usage: vibespace-channels compose <account> --to <addr>[,<addr>] [--cc <addr>] --subject "…" "text" [--why "…"] [--attach <path>]… [--replaces <proposalId>]'); process.exit(1); }
@@ -632,7 +673,7 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
     const apiReq = async (method, p, body) => {
       const res = await fetch(API + p, { method, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + SESS }, body: body === undefined ? undefined : JSON.stringify(body) }).catch((e) => ({ _neterr: e.message }));
       if (res._neterr) return { error: 'vibespace-channels: server unreachable (' + res._neterr + ')', code: 'unreachable' };
-      try { return await res.json(); } catch { return { error: 'the server answered something that is not JSON (HTTP ' + res.status + ')', code: 'bad-answer' }; }
+      try { return await answerOf(res); } catch { return { error: 'the server answered something that is not JSON (HTTP ' + res.status + ')', code: 'bad-answer' }; }
     };
     if (!sub || sub === 'creds') { const r = await call('GET', '/api/agent/channels/api/creds'); if (!r.creds.length) console.log('no API credentials are granted to this conversation — the user grants them in Channels → the account → API access…'); else console.log(JSON.stringify(r.creds, null, 2)); return; }
     if (sub === 'docs' || sub === 'log') {

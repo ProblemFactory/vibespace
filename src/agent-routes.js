@@ -2047,6 +2047,8 @@ app.post('/api/agent/channels/compose', async (req, res) => {
   if (!eng || typeof eng.compose !== 'function') return res.status(503).json({ error: 'Channels are not available on this instance', code: 'unavailable' });
   const [s, id] = hit;
   const b = req.body || {};
+  // lane webhook-l3-cli-pair (design-webhook §7): `compose webhook/<slug> --caller <id>[,<id>]|all` — ONE proposal per caller (composeEach)
+  if (b.caller !== undefined) return composeCallers(req, res, eng, s, id, b);
   const account = String(b.account || '').trim();
   if (!account) return res.status(400).json({ error: 'account is required (the account id, as `vibespace-channels status` prints it)', code: 'bad-request' });
   // R4 verify r2: a field the verb does not carry (bcc, replyTo) is handed to the validator so it is REFUSED BY NAME, never dropped here
@@ -2063,6 +2065,19 @@ app.post('/api/agent/channels/compose', async (req, res) => {
   }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
+async function composeCallers(req, res, eng, s, id, b) {
+  const key = splitConvKey(b.conv);
+  if (!key) return res.status(400).json({ error: 'conv is required with --caller (webhook/<path>, as vibespace-channels list prints it)', code: 'bad-request' });
+  if (typeof eng.composeEach !== 'function') return res.status(503).json({ error: 'Channels are not available on this instance', code: 'unavailable' });
+  const own = ownConversationIdOf(s);
+  if (!own.cid) return res.status(409).json({ error: own.why, code: 'bad-member' });
+  try {
+    const r = await eng.composeEach(channelPrincipal(s, id), key.adapterId, key.convId, { text: b.text, why: b.why, recipients: b.caller });
+    for (const x of (r && r.proposals) || []) if (x.ok && x.proposal) touchChannel(id, [{ op: 'compose', adapterId: key.adapterId, convId: key.convId, title: x.proposal.title, account: x.proposal.adapterLabel, proposalId: x.proposal.id }]);
+    if (r && Array.isArray(r.proposals) && r.proposals.length) return res.json(r);   // one answer per caller (a refused one says so on its row)
+    chanAnswer(res, r);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+}
 // 2026-09-27 (the owner: "agent 似乎没有撤回之前制作的 draft 的能力，必须要我手动
 // reject 是吗？"): the drafting agent WITHDRAWS its own proposal while nobody
 // has decided it — a session (vsst_) as itself, a Background Work job (jbt_)

@@ -1,5 +1,14 @@
 # Instance Pairing (B-9069) — design to decision gate
 
+> **Superseded by docs/design-webhook.zh.md §12** (owner answer ④, 2026-10-10): the instance interconnect is candidate 3
+> below — two instances are each other's `peer` webhook caller. Phase 1 shipped in 2.369.249 (lane webhook-l3-cli-pair:
+> the one-time code, the dedicated completion endpoint, the canonical peer payload); the options below stay as history.
+
+## Candidate 3 — webhook peers (docs/design-webhook.zh.md §12; chosen)
+
+- A's owner mints a one-time code (10 min, single use) carrying A's hook URL (from instanceUrl) and the token A issues to B; B's owner pastes it on B; B posts a signed completion frame (B's hook URL + the token B issues to A) to A's dedicated `/api/channels/webhook/<slug>/pair` — never `/hook/` (a frame there is the same-shape 401 and no record).
+- Each side then holds the other as a `peer` caller (delivery reply-url = the other's hook); messages are the canonical record JSON `{text, threadKey, inReplyTo, attachments, from}` with `X-VibeSpace-Peer-Version: 1`. Re-pairing rotates both in place. Phase 2 = the artifact hand-over (attachments are links in phase 1).
+
 Status: **awaiting direction pick** (parked 2026-07-17; this doc = the "最小可用版设计" the parking note asked for). Two candidate directions, both riding transport we already have.
 
 ## What already exists (the 80% we don't build)

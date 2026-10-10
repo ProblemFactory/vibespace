@@ -6724,5 +6724,63 @@ console.log('\n㉖ lane lark-system-records: a vendor SYSTEM notice is never unr
 console.log('\ntree: the patched copies never touch the tree');
 for (const r of copiesCensus(MUTE.files, MUTE.dir, REPO, { minCopies: 30 })) ok(r.pass, 'tree: ' + r.name, r.pass ? undefined : r.detail);
 
+// ── lane webhook-l1-server: THE WEBHOOK ADAPTER IN THE ENGINE — seeded by its declared facts, the push door stores first
+// and dedups (bounded), the per-path wake budget judged BEFORE the watcher's pace, `mode: 'all'` defaulting to a digest on a
+// path with a budget, `honestyLine: 'never'` beating the instance switch ──
+console.log('\nwebhook: the engine side (budget before pace, digest default, dedup, declared facts)');
+{
+  const WH = require(path.join(REPO, 'src/channels/webhook.js'));
+  const WR = require(path.join(REPO, 'src/webhook-record.js'));
+  let clock = Date.parse('2026-10-10T10:00:00Z');
+  const ladder = { calls: [], stash: [], async deliverToConversation(cid, text, opts) { ladder.calls.push({ cid, text, opts }); return { ok: true, lane: 'message' }; }, stashFor(cid, env) { ladder.stash.push({ cid, ...env }); } };
+  const dataDir = path.join(ROOT, 'webhook-eng');
+  const settings = { 'channels.pushCoalesceSeconds': 0, 'channels.senderHonestyLine': true };
+  const e = ENG.create({ dataDir, env: {}, broadcast: () => {}, log: { log() {}, warn() {}, error() {} }, deliver: ladder, serverSetting: (k) => settings[k], liveSessions: () => [{ cid: 'agent-A', name: 'Alpha', groups: [] }], now: () => clock, httpInbound: true });
+  engines.push(e);
+  const recs = e.adapterRecords().adapters;
+  const wrec = recs.find((r) => r.id === 'webhook'), arec = recs.find((r) => r.id === 'agents');
+  ok(wrec && !wrec.builtin && wrec.push.claimedExclusive === 'exclusive' && wrec.push.enabled === true && arec && arec.builtin === true, 'seeded by DECLARED facts: the webhook row (no `builtin`, an inbound door ⇒ exclusive push) beside the agents row (its client word kept)', { wrec, arec });
+  ok(e.honestyLineFor(wrec) === false && e.honestyLineFor(arec) === true, "honestyLine 'never': the instance switch ON appends a line on agents (control), never on a webhook path");
+  const st = WH.callersStore(path.join(dataDir, 'channels', 'webhook'), { secrets: e.secrets, now: () => clock });
+  for (const slug of ['ci', 'plain']) {
+    st.putPath(slug, { title: slug.toUpperCase() });
+    await e.store.index.update(() => { const en = e.store.index.entry('webhook', slug); en.title = slug.toUpperCase(); en.kind = 'dm'; en.readAt = clock; if (slug === 'ci') en.options = { wakesPerHour: 2 }; });
+  }
+  const c = st.register('ci', { name: 'deploy-bot', auth: 'bearer', delivery: { mode: 'poll' } }).caller;
+  st.register('plain', { name: 'other', auth: 'bearer', delivery: { mode: 'poll' } });
+  const AL = { kind: 'agent', id: 'agent-A', name: 'Alpha' };
+  for (const slug of ['ci', 'plain']) await e.setAccess('webhook', { kind: 'conversation', convId: slug }, [{ principal: AL }]);
+  const wd = await e.setWatchers('webhook', { kind: 'conversation', convId: 'ci' }, [{ principal: AL }]);
+  const wp = await e.setWatchers('webhook', { kind: 'conversation', convId: 'plain' }, [{ principal: AL }]);
+  const notifyOf = (slug) => ((e.store.index.peek(`webhook/${slug}`) || {}).watchers || [])[0];
+  ok(wd.ok && notifyOf('ci') && notifyOf('ci').notify === 'digest' && wp.ok && notifyOf('plain').notify === 'wake', "mode 'all' with no notify ⇒ a DIGEST on a path that declares a wake budget (control: 'wake' on a conversation without one)", [notifyOf('ci'), notifyOf('plain')]);
+  await e.setWatchers('webhook', { kind: 'conversation', convId: 'ci' }, [{ principal: AL, notify: 'wake' }]);
+  ok(notifyOf('ci').notify === 'wake', "an explicit notify 'wake' is kept (the default only fills a row that named none)");
+  let n = 0;
+  const push = async (slug, text, key = `k${++n}`) => {
+    const rec = WR.toRecord({ adapterId: 'webhook', slug, caller: { id: c.id, name: c.name }, value: { text }, bodyText: JSON.stringify({ text }), eventId: `${c.id}:${key}`, at: clock, mapping: { textPath: 'text' } });
+    const r = await e.pushInbound('webhook', { kind: 'record', convId: slug, eventId: rec.vendorId, record: rec });
+    await e.settleWakes();
+    return r;
+  };
+  const r1 = await push('ci', 'deploy 1');
+  ok(r1 && r1.persisted === true && e.store.readTail('webhook', 'ci', { limit: 5 }).length === 1, 'the push door: stored FIRST (persisted: true is what lets the route answer 200)', r1);
+  const dup = await e.pushInbound('webhook', { kind: 'record', convId: 'ci', eventId: `${c.id}:k1`, record: e.store.readTail('webhook', 'ci', { limit: 1 })[0] });
+  ok(dup.duplicate === true && dup.persisted === false && e.store.readTail('webhook', 'ci', { limit: 5 }).length === 1 && ENG.PUSH_EVENT_DEDUP_MAX === 5000, 'the same eventId again ⇒ a duplicate, nothing stored twice (the memory bounded at 5 000)');
+  clock += 5 * 60e3; await push('ci', 'deploy 2');
+  const woke = ladder.calls.filter((x) => x.cid === 'agent-A').length;
+  clock += 5 * 60e3; const r3 = await push('ci', 'deploy 3');
+  const ref = (e.store.index.peek('webhook/ci').watchers[0].stats || {}).lastRefusal || {};
+  ok(woke === 2 && ladder.calls.length === 2 && /^path ci used 2 \/ 2 wakes this hour \(woke Alpha\)$/.test(ref.why || ''), `the 3rd call in the hour is HELD by the per-path budget (2 / 2), the refusal names the path and whom it woke: "${ref.why}"`, { woke, calls: ladder.calls.length, ref });
+  clock += 1000; await push('ci', 'deploy 4');
+  const ref2 = (e.store.index.peek('webhook/ci').watchers[0].stats || {}).lastRefusal || {};
+  ok(/^path ci used 2 \/ 2/.test(ref2.why || '') && ladder.calls.length === 2, 'BEFORE paceVerdict: a call 1 s later (inside the watcher\'s own pace floor too) is refused by the BUDGET — its words, not the pace\'s', ref2);
+  for (const t of ['a', 'b', 'c']) { clock += 5 * 60e3; await push('plain', 'x ' + t); }
+  ok(ladder.calls.length === 5, 'control: a conversation without a budget wakes on each of 3 spaced calls', ladder.calls.length);
+  clock += 61 * 60e3; await push('ci', 'next hour');
+  ok(ladder.calls.length === 6, 'the budget is an HOUR: past it the path wakes again', ladder.calls.length);
+  ok(!JSON.stringify(ladder.calls).includes('wakesPerHour') && r3.persisted === true, 'a budget refusal never refuses the CALL (the record is stored; the caller hears nothing of it)');
+}
+
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

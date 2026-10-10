@@ -33,7 +33,7 @@ export const ROWS = [
   ['src/browser-serve.js', 'own-tree', 7, null, DATA],
   ['src/browser-verbs.js', 'own-tree', 2, null, DATA],
   ['src/channel-outbox-files.js', 'own-tree', 5, null, DATA],
-  ['src/channel-store.js', 'own-tree', 30, null, DATA],
+  ['src/channel-store.js', 'own-tree', 31, null, DATA],   // lane webhook-l1-server: + rewriteRecords (record-clear's channel-webhook door)
   ['src/claude-lock-capture.js', 'own-tree', 3, null, CLI],
   ['src/cli-identity.js', 'own-tree', 18, null, PROC],
   ['src/codex-fork-ledger-purge.js', 'own-tree', 6, null, CLI],

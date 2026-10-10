@@ -76,6 +76,8 @@ import { showGroupMembersDialog, showGroupDetail, renameGroup, archiveGroup } fr
 // R4: access and notification — two operations (Grant access… / Notify…),
 // the grain menu, and the one-line summary a row draws.
 import { showGrantAccessDialog, showNotifyDialog, showGrainMenu, assignmentSummary } from './channel-filter-editor.js';
+import { offersPaths } from './webhook-view.js';   // lane webhook-l2-ui: an inbound door's account (its capability row)
+import { showNewPathDialog } from './channel-webhook.js';
 import { grainSummaryText } from './channel-words.js';
 // P3: the reach/policy dialog (row menu) and the Outbox window (header button).
 import { showReachDialog, showAccountReachDialog } from './channel-reach-editor.js';
@@ -1388,6 +1390,7 @@ export function renderChannelsPanel(app, c) {
     const adapters = (d && d.adapters) || [];
     const badges = accountBadges(adapters);   // lane channels-badges: this build's ONE map — the rows and the cards read it
     curBadges = badges;   // lane channels-list-polish: the per-account rows wear their account's badge too
+    curSystems = new Set(adapters.filter(offersPaths).map((a) => a.id));   // lane webhook-l2-ui: their rows wear the robot, muted
     // design 008: the ATTENTION rows the store holds — the server's list (verify r1: a held row's stale tag never draws
     //  it here); All and each account draw their own lists below
     const convs = focusRowsOf(store, Date.now());
@@ -1878,6 +1881,13 @@ export function renderChannelsPanel(app, c) {
     for (const n of adapterNotes(app, a)) sec.appendChild(n);
     // a SOURCE that is not built in takes the account and pattern grains too (§7.3)
     if (!builtinAgents) for (const n of grainLines(a)) sec.appendChild(n);
+    // lane webhook-l2-ui: an INBOUND DOOR's account (no sign-in, not removable) makes its conversations here — a path each
+    if (offersPaths(a)) sec.appendChild(keep('newpath:' + a.id, () => {
+      const b = btn(t('New path…'), () => showNewPathDialog(app, { adapterId: a.id }), 'chan-wh-new');
+      b.prepend(icon('plus', 11));
+      b.dataset.whNewPath = a.id;
+      return b;
+    }));
     const rowsEl = keep('rows:' + a.id, () => { const el = document.createElement('div'); el.className = 'chan-rows'; return el; });
     const rowKids = [];
     const rows = { appendChild: (x) => { rowKids.push(x); return x; } };
@@ -1885,7 +1895,7 @@ export function renderChannelsPanel(app, c) {
     if (!listed.length) {
       const e = document.createElement('div');
       e.className = 'empty-hint empty-hint-inline chan-sec-empty';
-      e.textContent = t('No conversations discovered yet.');
+      e.textContent = offersPaths(a) ? t('No path yet — each path is an address another system can call.') : t('No conversations discovered yet.');
       rows.appendChild(e);
     }
     for (const conv of listed) rows.appendChild(row(conv));
@@ -1897,6 +1907,7 @@ export function renderChannelsPanel(app, c) {
   }
 
   let curBadges = new Map();
+  let curSystems = new Set();
   function row(conv, { child = false } = {}) {
     // THE SIGNATURE NAMES EVERY FACT THE ROW PRINTS (verify round 5, 2026-09-27): line 3 is assignmentSummary(conv)
     //  = the WHOLE `access` and `watchers` lists, while round 4 signed only `assignment` (the FIRST watcher / access
@@ -1915,7 +1926,7 @@ export function renderChannelsPanel(app, c) {
     const el = document.createElement('div');
     el.className = 'chan-row chan-row-chat session-item-card' + (child ? ' chan-row-child' : '') + (conv.unread ? ' chan-row-unread' : '');
     el.dataset.conv = `${conv.adapterId}/${conv.id}`;
-    el.appendChild(convAvatar({ key: `${conv.adapterId}/${conv.id}`, title: conv.title || '', kind: conv.kind || '', badge: curBadges.get(conv.adapterId) || null, pic: conv.peer ? { account: conv.adapterId, author: conv.peer } : null }, null, 'chan-row-av'));
+    el.appendChild(convAvatar({ key: `${conv.adapterId}/${conv.id}`, title: conv.title || '', kind: conv.kind || '', badge: curBadges.get(conv.adapterId) || null, pic: conv.peer ? { account: conv.adapterId, author: conv.peer } : null, glyph: curSystems.has(conv.adapterId) ? 'robot' : null }, null, 'chan-row-av'));
     if (conv.peer) warmAvatars([{ account: conv.adapterId, author: conv.peer, conv: conv.id }]);   // deduped, the answered skipped
     // line 1: the title + the time (int214, the coordinator's call B: the freshness pill is on line 2)
     const line = document.createElement('div');

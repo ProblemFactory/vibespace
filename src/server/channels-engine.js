@@ -113,6 +113,7 @@ const CR = require('../channel-ref.js');   // B-c127 PURE: THE NAME LADDER every
 const P = require('../channel-policy.js');
 const ACL = require('../channel-acl.js');
 const agents = require('../channels/agents.js');
+const webhook = require('../channels/webhook.js');   // lane webhook-l1-server: the built-in inbound door (seeded like agents)
 // lane R2 verify r9: THE DRAIN'S SCHEDULING DECISION is PURE — every "what next, who is answered, when does the pass end" (src/channel-drain.js); this engine only drives it
 const Drain = require('../channel-drain.js');
 const Budget = require('../channel-budget.js');   // lane gmail-quota-share: the per-account vendor budget is LEARNED from the vendor's refusals (AIMD, PURE)
@@ -520,7 +521,7 @@ function create(deps = {}) {
 
   // Built-ins. The three fakes exercise BOTH axes; the real adapters register
   // the same way and nothing downstream learns their names.
-  for (const mod of [fake.fakePoll, fake.fakePush, fake.fakeScan, agents, ...REAL_ADAPTERS]) {
+  for (const mod of [fake.fakePoll, fake.fakePush, fake.fakeScan, agents, webhook, ...REAL_ADAPTERS]) {
     if (!registry.has(mod.kind)) registry.register(mod, { vendor: REAL_ADAPTERS.includes(mod) });
   }
   // The built-in Agents adapter (§12.3) exists where the server NAMES its
@@ -528,6 +529,11 @@ function create(deps = {}) {
   // always does; a bare suite engine has no sessions to address, so it gets
   // no row — the P0 exit "three fake rows" stays byte-true there).
   const agentsWanted = Object.prototype.hasOwnProperty.call(deps, 'liveSessions');
+  // lane webhook-l1-server: THE SEEDED MODULES (`seed: true`) — each seeded where the server wires what it needs: an
+  // `http-inbound` door exists where the server mounts src/routes/webhook.js (`deps.httpInbound`), the agents roster where
+  // it names its sessions (`liveSessions`). Never a branch on a kind or on `builtin`.
+  const SEEDED = [agents, webhook].filter((m) => m.seed === true);
+  const seedWanted = (m) => (registry.capsOf(m.kind).pushTransport === 'http-inbound' ? deps.httpInbound === true : agentsWanted);
   // Each row's Test runner belongs to its CONSUMER (src/channels/<kind>.js);
   // the store only dispatches (§14.3 constraint 1: the store constructs no
   // vendor request — and the fake has no vendor to request from).
@@ -564,7 +570,7 @@ function create(deps = {}) {
   // stays synchronous because it is on the render path (`digest()`); the WRITE
   // goes through the serialized door below.
   let seeded = false;
-  let agentsSeeded = false;
+  const seededNow = new Set();
   function adapterRecords() {
     const a = store.adapters.live();
     if (!seeded && !a.adapters.length && env.VIBESPACE_CHANNELS_FAKE === '1') {
@@ -586,18 +592,21 @@ function create(deps = {}) {
       seeded = true;
       saveAdapters().catch((err) => console.warn('[channels] adapters write failed:', err && err.message));
     }
-    // The built-in Agents row: NOT removable, no consent flow, seeded from
-    // the module's own capability row by its id (never a branch on kind).
-    if (agentsWanted && !agentsSeeded && !a.adapters.some((r) => r.id === agents.kind)) {
-      const c = registry.capsOf(agents.kind);
+    // The SEEDED rows (agents, webhook): NOT removable, no consent flow, each seeded from its module's own capability row
+    // by its id (never a branch on kind). An inbound door is its conversations' only source, so its push claim is
+    // `exclusive` (the record carries content); `builtin` stays on the agents row as the client's word (a projection).
+    for (const m of SEEDED) {
+      if (!seedWanted(m) || seededNow.has(m.kind) || a.adapters.some((r) => r.id === m.kind)) continue;
+      const c = registry.capsOf(m.kind);
+      const inbound = c.pushTransport === 'http-inbound';
       a.adapters.push({
-        id: agents.kind, kind: agents.kind, label: agents.label || agents.kind, enabled: true, builtin: true,
+        id: m.kind, kind: m.kind, label: m.label || m.kind, enabled: true, ...(m.listed === false ? { builtin: true } : {}),   // the client's word for an UNLISTED internal watcher
         auth: { tokenEnc: null, expiresAt: null, scopes: ['local'], user: 'you' },
         lastPass: null, consecutiveFailures: 0,
-        push: { enabled: false, claimedExclusive: 'unknown', state: null, lastEventAt: null, missRate: 0, demotedAt: null, demotedWhy: null, samples: [] },
+        push: { enabled: inbound, claimedExclusive: inbound ? 'exclusive' : 'unknown', state: null, lastEventAt: null, missRate: 0, demotedAt: null, demotedWhy: null, samples: [] },
         scan: c.receive === 'scan' ? { hostId: null, chosenSource: null, grantAskedAt: null, hostFacts: null } : null,
       });
-      agentsSeeded = true;
+      seededNow.add(m.kind);
       saveAdapters().catch((err) => console.warn('[channels] adapters write failed:', err && err.message));
     }
     return a;
@@ -714,7 +723,10 @@ function create(deps = {}) {
       // `pace` (lane R5): the adapter AWAITS it before every request it sends
       // (drain rule 18's bucket, the SAME one the pass's `wait` reads) and
       // then meters it — the per-second shape is enforced call by call.
-      const adapterDeps = { fetch: fetchFn, log, tokens: tokensFor(rec), state: stateFor(rec), people: { read: () => store.peopleRead(rec.id), write: (m) => store.peopleWrite(rec.id, m) }, oauth: flows, consent: consentDepsOf(rec.kind), onAuthDone: (adapterId, r) => onAuthDone(adapterId, r), deliver, liveSessions, credentialKey: rec.credentialKey || null, meter: (units) => { const x = live.get(rec.id) || paceCarry.get(rec.id); if (x) charge(x, units); }, pace: (units) => paceWait(rec.id, units, rec), named: (convId) => { const en = store.index.entry(rec.id, String(convId), { create: false }); return !!(en && en.named === true); } };
+      const adapterDeps = { fetch: fetchFn, log, tokens: tokensFor(rec), state: stateFor(rec), people: { read: () => store.peopleRead(rec.id), write: (m) => store.peopleWrite(rec.id, m) }, oauth: flows, consent: consentDepsOf(rec.kind), onAuthDone: (adapterId, r) => onAuthDone(adapterId, r), deliver, liveSessions, credentialKey: rec.credentialKey || null, meter: (units) => { const x = live.get(rec.id) || paceCarry.get(rec.id); if (x) charge(x, units); }, pace: (units) => paceWait(rec.id, units, rec), named: (convId) => { const en = store.index.entry(rec.id, String(convId), { create: false }); return !!(en && en.named === true); },
+        // lane webhook-l1-server: the account's OWN data directory (data/channels/<id>/), the channels secret-box, a stored
+        // record by its vendor id, an instance setting — handed to every adapter, read by the ones that need them
+        ownDir: path.join(dataDir, 'channels', String(rec.id)), secrets: { seal: (v) => box.enc(v), open: (v) => box.dec(v) }, findRecord: (convId, vendorId) => (store.index.entry(rec.id, String(convId), { create: false }) ? store.findRecord(rec.id, String(convId), String(vendorId)) : null), setting: (key) => { try { return serverSetting(key); } catch { return undefined; } } };
       // r4: the resolver is PER RECORD (`resolverFor`) — an account's own
       // (`custom`) client lives on its record, a preset in the store.
       const adapter = registry.create(rec.kind, rec, { now, resolveIntegration: resolverFor(rec), ...adapterDeps });
@@ -2684,10 +2696,35 @@ function create(deps = {}) {
   }
   /** design 008: the first screen's numbers — `all` = the listed rows of every account the first screen lists (not
    *  the built-in watcher), `byAdapter` = each account's listed rows: the kept facts, the old loops' numbers (V4). */
+  /** lane webhook-l1-server: does the first screen / the lists count this account — the module's DECLARED `listed` (the
+   *  agents watcher declares false; every vendor and the webhook adapter are listed). */
+  function listedAccount(rec) { try { return registry.get(rec.kind).listed !== false; } catch { return true; } }
+  /** lane webhook-l1-server: THE PER-PATH WAKE BUDGET's verdict — `{ok:true}` when the conversation declares none, else
+   *  the wakes of the last hour (every watcher's ledger rows) against `options.wakesPerHour`. The words: "path <slug> used
+   *  N / M wakes this hour (woke <session> on <account>)". */
+  /** the session a wake row reached, as its row names it (its name, else its conversation id) */
+  const wokeLabel = (row) => String((row && (row.name || row.cid)) || 'a session');
+  /** verify r1 #17 (int248 r2): the ONE fact line a wake block carries under a record's text — the facts the adapter DECLARES
+   *  (`wakeFactKeys`: a webhook path's sender + declared fields), through the agent's fact words; null when it declares none. */
+  function wakeFactLineOf(rec) {
+    let keys = [];
+    try { const ad = adapterFor(rec); keys = ad && ad.adapter && Array.isArray(ad.adapter.wakeFactKeys) ? ad.adapter.wakeFactKeys : []; } catch { keys = []; }
+    return keys.length ? (r) => (r && Array.isArray(r.facts) ? Facts.agentFactLines(r.facts.filter((f) => f && keys.includes(f.k))) : '') : null;
+  }
+  function pathBudgetVerdict(rec, convId, en, t) {
+    const lim = Math.floor(Number(en && en.options && en.options.wakesPerHour));
+    if (!(lim > 0)) return { ok: true };
+    const rows = (en.stats && Array.isArray(en.stats.wakes) ? en.stats.wakes : []).filter((x) => x && x.ok !== false && Number(x.at) > t - 3600e3 && Number(x.at) <= t);
+    if (rows.length < lim) return { ok: true, used: rows.length, lim };
+    const last = rows[rows.length - 1] || {};
+    let acct = null; try { acct = typeof deps.accountOfSession === 'function' && last.cid ? deps.accountOfSession(String(last.cid)) : null; } catch { acct = null; }
+    const who = wokeLabel(last);
+    return { ok: false, used: rows.length, lim, why: `path ${convId} used ${rows.length} / ${lim} wakes this hour (woke ${String(who).slice(0, 80)}${acct ? ` on ${String(acct).slice(0, 80)}` : ''})` };
+  }
   function countsOf(adapters) {
     const by = rowFactsNow();
     const out = { all: 0, byAdapter: {} };
-    for (const rec of adapters) { const n = (by.get(rec.id) || {}).conversations || 0; out.byAdapter[rec.id] = n; if (!rec.builtin) out.all += n; }
+    for (const rec of adapters) { const n = (by.get(rec.id) || {}).conversations || 0; out.byAdapter[rec.id] = n; if (listedAccount(rec)) out.all += n; }
     return out;
   }
   /** The rail badge's two numbers, nothing else (`?scope=totals`). */
@@ -2720,7 +2757,7 @@ function create(deps = {}) {
       let l = listed.get(en.adapterId);
       if (!l) { l = []; listed.set(en.adapterId, l); }
       l.push(en);
-      if (!rec.builtin && FO.candidateOf(en, ctx.outbox.get(en.key), t)) cands.push(en);
+      if (listedAccount(rec) && FO.candidateOf(en, ctx.outbox.get(en.key), t)) cands.push(en);
     }
     const views = new Map();
     const viewOf = (en) => { let v = views.get(en.key); if (!v) { v = rowView(byId.get(en.adapterId), en, ctx); views.set(en.key, v); } return v; };
@@ -2831,7 +2868,7 @@ function create(deps = {}) {
     };
     const keep = (en) => {
       const rec = byId.get(en.adapterId);
-      if (!rec || en.unlistedAt || (only ? en.adapterId !== only : rec.builtin)) return false;
+      if (!rec || en.unlistedAt || (only ? en.adapterId !== only : !listedAccount(rec))) return false;
       if (s && !matches(rec, en)) return false;
       return view !== 'focus' || (FO.candidateOf(en, ctx.outbox.get(en.key), t) && !!FO.statusTag(viewOf(en), t));
     };
@@ -3090,6 +3127,14 @@ function create(deps = {}) {
   // invisible / bidi / control characters, and a record the append-only log stored before that keeps a split tag as it was
   // written; the agent's read, thread read and search re-run the ONE rule over what they hand over (idempotent on a record
   // stored after it): the text through `inertFrames`, every name through the name door
+  // verify r1 #8 / #1 (int248 r2): EVERY byte an agent reads from a record goes through the belt — `raw` too (a webhook
+  // record's raw.callText is the caller's own bytes): each string of it folded by `agentText` (bounded depth); and a
+  // credential spelling (a `vswh_` token, a `vswp_` pairing code — it carries one) is withheld from the WHOLE copy
+  const CRED_SPELLING_RE = /(vswh|vswp)_[A-Za-z0-9_-]+/g;
+  const beltRaw = (v, d = 0) => (typeof v === 'string' ? agentText(v, { kind: 'block' }) : !v || typeof v !== 'object' || d > 6 ? v
+    : Array.isArray(v) ? v.slice(0, 200).map((y) => beltRaw(y, d + 1)) : Object.fromEntries(Object.entries(v).slice(0, 200).map(([k, y]) => [k, beltRaw(y, d + 1)])));
+  const withholdCreds = (v, d = 0) => (typeof v === 'string' ? (v.includes('vsw') ? v.replace(CRED_SPELLING_RE, '$1_[withheld]') : v) : !v || typeof v !== 'object' || d > 8 ? v
+    : Array.isArray(v) ? v.map((y) => withholdCreds(y, d + 1)) : Object.fromEntries(Object.entries(v).map(([k, y]) => [k, withholdCreds(y, d + 1)])));
   function agentCopy(r) {
     const x = withoutBlocks(r);
     if (!x || typeof x !== 'object') return x;
@@ -3111,7 +3156,8 @@ function create(deps = {}) {
     // record's `> …`; the store keeps them under the complete-tag rule (an id must fetch), the agent's copy takes the line rule
     if (Array.isArray(x.attachments)) out.attachments = x.attachments.map((a) => (a && typeof a === 'object' ? { ...a, name: peerName(a.name, 256) || '', id: agentText(a.id, { kind: 'line', max: 256 }), mime: agentText(a.mime, { kind: 'line', max: 128 }) } : a));
     if (Array.isArray(x.facts)) out.facts = agentFacts(x.facts);   // lane message-facts: the record's own facts through the door (withView folds the side ones in)
-    return out;
+    if (x.raw && typeof x.raw === 'object') out.raw = beltRaw(x.raw);   // verify r1 #8: the caller's raw bytes through the belt
+    return withholdCreds(out);   // verify r1 #1: no credential spelling in any field an agent reads
   }
   function titleOf(c, title) {
     if (!c || c.titleForm !== 'subject') return title;
@@ -3360,6 +3406,9 @@ function create(deps = {}) {
       inherits: { account: acct ? grainView(rec, acct, t) : null, patterns: pats.map((pa) => grainView(rec, pa, t)) },
       filter: (en.filterId && filterFor(en.filterId)) || null,
       stats: statsView(en, t),
+      // lane webhook-l2-ui: the per-path wake budget as the owner reads it (null where the conversation declares none) — the
+      // Notify dialog's budget row and, once spent, the header's refusal words (the engine's own sentence)
+      wakeBudget: (() => { const b = pathBudgetVerdict(rec, convId, en, t); return b.lim ? { used: b.used, lim: b.lim, spent: !b.ok, why: b.why || null } : null; })(),
       authorityCaps: authorityCapsFor(rec, en, t),
       wakeLatency: wakeLatencyFor(rec, en, lane, t),
       // P3 (design §8/§9): the sending policy as it READS, the reach rows
@@ -3427,6 +3476,7 @@ function create(deps = {}) {
     const c = registry.capsOf(rec.kind);
     const lane = laneOrScan(rec, {});
     const mod = registry.vendor(rec.kind) || null;
+    const decl = (() => { try { return registry.get(rec.kind); } catch { return null; } })();   // lane webhook-l1-server: declared facts
     const st = live.has(rec.id) ? live.get(rec.id).authState : null;
     // The adapter's OWN last answer outranks the record's stamps: a
     // withdrawn application credential is `needs-credentials` whatever
@@ -3434,6 +3484,10 @@ function create(deps = {}) {
     const auth = caps.authState(rec, t, { adapterState: st });
     return {
       id: rec.id, kind: rec.kind, label: rec.label, enabled: rec.enabled !== false, builtin: !!rec.builtin,
+      // lane webhook-l1-server: the module's DECLARED facts (the panel's remove / list / reach controls read these)
+      removable: !decl || decl.removable !== false, listed: !decl || decl.listed !== false, reach: (decl && decl.reach) || 'grants',
+      // lane webhook-l2-ui: the capability row's transport — an inbound door (`http-inbound`) ⇒ the panel offers paths + callers
+      pushTransport: c.pushTransport || null,
       // r3: a send here starts a BILLED TURN (the module's declaration) — the
       // composer says so and echoes the count with its Send (`expectWakes`)
       sendStartsTurn: sendStartsTurn(rec),
@@ -3445,7 +3499,7 @@ function create(deps = {}) {
       // `renews` (2026-09-26): the adapter says its refresh token is RE-ISSUED
       // on every automatic refresh (Lark: 7 days, sliding) — the card then
       // says nothing until renewals have actually stopped
-      auth: { ...auth, self: !!rec.builtin, user: rec.builtin ? null : ((st && st.user) || (rec.auth && rec.auth.user) || null), scopes: (rec.auth && rec.auth.scopes) || [], credentialSource: (st && st.credentialSource) || null, credentialKey: (st && st.credentialKey) || rec.credentialKey || null, tokenHeld: !!(rec.auth && rec.auth.tokenEnc), renews: !!(st && st.renews), renewWindowMs: (st && Number(st.renewWindowMs)) || null },
+      auth: { ...auth, self: !!(decl && decl.consent === null), user: decl && decl.consent === null ? null : ((st && st.user) || (rec.auth && rec.auth.user) || null), scopes: (rec.auth && rec.auth.scopes) || [], credentialSource: (st && st.credentialSource) || null, credentialKey: (st && st.credentialKey) || rec.credentialKey || null, tokenHeld: !!(rec.auth && rec.auth.tokenEnc), renews: !!(st && st.renews), renewWindowMs: (st && Number(st.renewWindowMs)) || null },
       lastPass: rec.lastPass || null, consecutiveFailures: rec.consecutiveFailures || 0,
       // 2026-09-26 (lane R2 verify): "last sync" is the last GOOD pass — a
       // failed one stamps `lastPass` too, and the card used to print it as a
@@ -3539,7 +3593,7 @@ function create(deps = {}) {
       // P4: the §21-item-3 proof (a real send's observed sender_type) and the
       // per-channel honesty switch as the panel draws them.
       identityObserved: rec.identityObserved ? { ...rec.identityObserved } : null,
-      senderHonestyLine: c.sendAs.length ? { record: rec.senderHonestyLine === true ? true : rec.senderHonestyLine === false ? false : null, effective: honestyLineFor(rec) } : null,
+      senderHonestyLine: c.sendAs.length && c.honestyLine !== 'never' ? { record: rec.senderHonestyLine === true ? true : rec.senderHonestyLine === false ? false : null, effective: honestyLineFor(rec) } : null,
       rawApi: !!(mod && mod.api),   // lane channel-vendor-one-file: the account menu's "API access…" row reads this, never a kind
       options: viewOptions(mod, rec),
       optionsSchema: (mod && mod.OPTIONS ? mod.OPTIONS : []).map((o) => ({ key: o.key, label: o.label, help: o.help || '', default: o.default === undefined ? '' : o.default, placeholder: o.placeholder || '', choices: Array.isArray(o.choices) ? o.choices.slice() : null, choiceLabels: o.choiceLabels && typeof o.choiceLabels === 'object' ? { ...o.choiceLabels } : null, usedWhen: o.usedWhen && typeof o.usedWhen === 'object' ? JSON.parse(JSON.stringify(o.usedWhen)) : null })),
@@ -6535,7 +6589,7 @@ function create(deps = {}) {
     const label = rec.label || rec.id;
     const title = humanNameOf(rec, en) || convId;   // B-c127 THE NAME LADDER (lane channel-agent-watch's next-turn wake, composed at the 2.369.202 integration)
     const inherited = item.source === 'conversation' ? null : { kind: item.source, label: item.source === 'pattern' ? F.patternSummary((patternById(item.patternId) || {}).pattern || { rules: [] }) : null };
-    const text = F.renderWakeBlock({ adapterLabel: label, title, convId, hits: fresh, elided: 0, inherited, others: othersFor(wakeEffOf(en), pk) });
+    const text = F.renderWakeBlock({ adapterLabel: label, title, convId, hits: fresh, elided: 0, inherited, others: othersFor(wakeEffOf(en), pk), factLine: wakeFactLineOf(rec) });
     let st = null;
     const fromName = `Channels · ${label}`;
     try { st = deliver.stashFor(target.cid, { source: 'channel', kind: 'notification', fromName, text, about: stashAbout({ keys: [`${rec.id}/${convId}`], cid: target.cid }) }); }
@@ -6939,6 +6993,17 @@ function create(deps = {}) {
       log.log(`[channels] ${rec.id}/${convId}: ${hits.length + allElided} hit(s) held for ${pk} — ${target.why}`);
       return { ok: false, why: target.why, held: true };
     }
+    // lane webhook-l1-server: THE PER-PATH WAKE BUDGET (design-webhook §6) — a conversation whose options declare
+    // `wakesPerHour` wakes at most that many times an hour across ALL its watchers, judged BEFORE the watcher's own pace.
+    // A refusal is a HOLD like a paced one; its words name the path and whom it woke (the owner's panel and the agent's
+    // refusal line — the caller's receipt never hears of it).
+    const budget = pathBudgetVerdict(rec, convId, en, t);
+    if (!budget.ok) {
+      if (!fromPending) await keepPending(rec, convId, freshHits, newElided, pk);
+      await noteRefusal(rec, convId, budget.why, t, item);
+      log.log(`[channels] ${rec.id}/${convId}: ${hits.length + allElided} hit(s) held for ${pk} — ${budget.why}`);
+      return { ok: false, why: budget.why, held: true, budget: true };
+    }
     // PACING (layer one, §7.4) — a refusal here is a HOLD, never a drop.
     const pace = F.paceVerdict(paceWakes, t, F.digestCap(w));
     if (!pace.ok) {
@@ -6954,7 +7019,7 @@ function create(deps = {}) {
     const others = othersFor(eff, pk);
     const text = digest
       ? F.renderDigestBlock({ adapterLabel: label, title, convId, hits, elided: allElided, windowMinutes: windowMinutes || w.digestMinutes })
-      : F.renderWakeBlock({ adapterLabel: label, title, convId, hits, elided: allElided, coalesced, inherited, others });
+      : F.renderWakeBlock({ adapterLabel: label, title, convId, hits, elided: allElided, coalesced, inherited, others, factLine: wakeFactLineOf(rec) });
     const fromName = `Channels · ${label}`;
     const n = hits.length + allElided;
     // B-c127: the card opens with the conversation's NAME (its ref makes it the link) and says who wrote — a mail's sender
@@ -7060,7 +7125,7 @@ function create(deps = {}) {
     presetsOf, clientFieldDecls, customClientView, vendorNameOf, adapterView, notify, disarmPush, syncPushLanes, kick, known, budgetRefusal,
     dropLive, outlived, reactionsPerMin, threadIxOf, vocabularyOf, reactionsFor, withView, offerNow, NOT_A_THREAD, threadRead, threadRefresh,
     rxBackedOff, rxBackoffRefusal, notePages, noteRxRateLimit, appendSides, react, unreact, vendorSearch, aroundFor, refreshConvCaps, retractUnsaved,
-    retractFailure, track, wakeTimers, clearWakeTimer, coalesceSeconds, billedWake,
+    retractFailure, track, wakeTimers, clearWakeTimer, coalesceSeconds, billedWake, pathBudgetVerdict,
     get stopped() { return stopped; },
     get timer() { return timer; },
   };
@@ -7074,7 +7139,7 @@ function create(deps = {}) {
     previewRule, membersNow,
   } = Object.assign(engineCtx, ChannelsAccess.create(engineCtx));
   const {
-    honestyLineFor, proposalsFor, stashAbout, stashGate, outboxView, sendStartsTurn, outboxAttachment, filesSweep, propose, proposeReaction, compose,
+    honestyLineFor, proposalsFor, stashAbout, stashGate, outboxView, sendStartsTurn, outboxAttachment, filesSweep, propose, proposeReaction, compose, composeEach,
     approve, reject, onProposal, withdrawProposal, replaceProposal, noteReceiptStash, reconcileReceiptFates, reconcile, sweepSending, sweepReplaces,
     receipt, expireSweep, pointerSync, learnSentFiles, filesOfferFor,
   } = Object.assign(engineCtx, ChannelsOutbound.create(engineCtx));
@@ -7385,6 +7450,23 @@ function create(deps = {}) {
       return { ...first, results };
     },
     adapterRecords, laneOrScan, start, stop,
+    // lane webhook-l1-server: THE HTTP INBOUND DOOR — an `http-inbound` push adapter's route hands a JUDGED event here and
+    // it reaches the armed lane's emitter (onPushEvent: stored first, deduped by eventId, then indexed / broadcast / the
+    // rule funnel); a lane not armed yet is armed now (its auth is local: `connected`). The route answers 200 only on
+    // `persisted` (or a duplicate of a stored event).
+    // lane webhook-l1-server: the channels secret-box (data/.channels-key) for the inbound door's callers file
+    secrets: Object.freeze({ seal: (v) => box.enc(v), open: (v) => box.dec(v) }),
+    pushInbound: async (adapterId, ev) => {
+      const rec = adapterRecords().adapters.find((r) => r.id === adapterId && r.enabled !== false);
+      if (!rec) return { ok: false, why: 'no-account', persisted: false };
+      const e = adapterFor(rec);
+      if (!e.liveToken) {
+        if (!e.authState) { try { e.authState = await e.adapter.auth.state(); } catch { e.authState = null; } }
+        if (pushWanted(rec, e)) armPush(rec, e);
+      }
+      if (!e.liveToken || !e.adapter.live || typeof e.adapter.live.deliver !== 'function') return { ok: false, why: 'not-armed', persisted: false };
+      return e.adapter.live.deliver(ev);
+    },
     // B-f32b r2: the census's definition (every row at `t`) and the paced census's clock walks, for the gates
     schedulerExact: (adapterId, t = now()) => { const rec = adapterRecords().adapters.find((r) => r.id === adapterId); return rec ? schedulerScan(rec, t) : null; },
     censusStats: () => Object.fromEntries(censusCount),
@@ -7417,6 +7499,7 @@ function create(deps = {}) {
     // B-2198: the raw API's engine side (src/server/channel-api.js is its orchestrator)
     apiGrants, setApiGrants, apiTierFor, apiCredential, apiAccounts,
     // P3: outbox / policy / reach + the agent-facing reads (§9, §8, §11)
+    composeEach,   // lane webhook-l1-server: compose --caller ⇒ one proposal per caller (its own line: test-channel-outbox anchors the next)
     propose, approve: (id, o) => onProposal(id, () => approve(id, o)), reject: (id, o) => onProposal(id, () => reject(id, o)), outboxView, expireSweep, pointerSync, receipt,
     filesSweep, outboxAttachment,   // design 005 §2.B (B-fd1f): attachments retention + the owner's file
     // 2026-09-27: the agent withdraws / replaces its OWN proposal (a decision of the user waits for a replace in flight)

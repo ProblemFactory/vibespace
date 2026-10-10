@@ -107,4 +107,7 @@ const EGRESS = Object.freeze([]);
  *  ladder — so the engine asks the owner's consent echo and (auth off) the
  *  owner's pace before it (src/server/channels-engine.js wakeGate). The
  *  engine reads the MODULE's declaration, never the kind. */
-module.exports = { kind: KIND, caps, create, builtin: true, label: 'Agents', policyDefault: 'direct', sendStartsTurn: true, EGRESS };
+/** lane webhook-l1-server: the DECLARED facts the engine reads (never a `builtin` branch): not removable, no consent flow,
+ *  reach answered by msg-acl (the roster's own rule), not listed on the first screen, seeded by the engine. `builtin` stays
+ *  on the RECORD as the client's word for "the internal watcher" (a projection, never a branch on the server). */
+module.exports = { kind: KIND, caps, create, builtin: true, label: 'Agents', policyDefault: 'direct', sendStartsTurn: true, EGRESS, removable: false, consent: null, reach: 'msg-acl', listed: false, seed: true };

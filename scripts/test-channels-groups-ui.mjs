@@ -128,7 +128,7 @@ console.log('§1 channel-groups-view (PURE)');
     const PS = read('src/lib/channels-panel.js'), WS = read('src/lib/channel-window.js'), RS = read('src/routes/channels.js'), CS = read('src/lib/channel-chrome.js');
     ok(/convAvatar\(\{ key: r\.key, [^\n]*badge: r\.account(?: \}|, pic: )/.test(PS) && /const acct = r\.account && r\.account\.multi \? r\.account\.label : '';/.test(PS) && /chanEl\('span', 'chan-grow-acct', acct\)/.test(PS) && /\} else if \(!acct\) \{/.test(PS),
       'B-5fe1 PIN: the first-screen row draws its account badge, says the account in small text at ≥ 2 accounts of a kind (one account name per row: the source chip stays away)');
-    ok(/const badge = accountBadges\(r\.accounts \|\| /.test(WS) && /convAvatar\(\{ key: `\$\{adapterId\}\/\$\{convId\}`, title: shownTitle, kind: c\.kind, badge \}/.test(WS) && /accounts: eng\.accountsBrief\(\)/.test(RS) && /b\.className = 'chan-av-badge';/.test(CS) && /UI_ICONS\[badge\.glyph\] \? badge\.glyph : 'chat'/.test(CS),
+    ok(/const badge = accountBadges\(r\.accounts \|\| /.test(WS) && /convAvatar\(\{ key: `\$\{adapterId\}\/\$\{convId\}`, title: shownTitle, kind: c\.kind, badge(?:, glyph: offersPaths\(lastAdapter\) \? 'robot' : null)? \}/.test(WS) && /accounts: eng\.accountsBrief\(\)/.test(RS) && /b\.className = 'chan-av-badge';/.test(CS) && /UI_ICONS\[badge\.glyph\] \? badge\.glyph : 'chat'/.test(CS),
       'B-5fe1 PIN: the window bar wears the same badge (its hue from the WHOLE account list the conversation route names); the badge is a library glyph inside the avatar (paint)');
   }
 

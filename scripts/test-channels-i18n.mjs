@@ -54,7 +54,7 @@ const { LARK_CALLBACK_URL } = createRequire(import.meta.url)(path.join(repo, 'sr
 // product deliberately shows as a value (an enum a select offers).
 export const ALLOWED_WORDS = [
   // vendors, products, protocols
-  'lark', 'feishu', 'gmail', 'google', 'pub', 'sub', 'oauth', 'vibespace', 'cloakbrowser', 'cloak', 'claude', 'codex',
+  'lark', 'feishu', 'gmail', 'google', 'pub', 'sub', 'oauth', 'vibespace', 'cloakbrowser', 'cloak', 'claude', 'codex', 'webhook' /* lane webhook-l1-server: the protocol's own name, kept in zh / ja */,
   'api', 'id', 'ids', 'url', 'http', 'https', 'json', 'utc', 'iana',
   // the product's own untranslated terms (the dictionaries map them to themselves)
   'agent', 'agents', 'turn',

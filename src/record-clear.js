@@ -30,6 +30,7 @@
  *   status         a session-status HISTORY entry   src/session-status.js clearHistory
  *   job            a Background Work record (registry AND archive) src/jobs.js clearJobs
  *   group-message  an agent-group log record        src/server/groups-engine.js clearMessages
+ *   channel-webhook a webhook caller's call (lane webhook-l1-server) src/channel-store.js rewriteRecords — owner only
  *
  * WHO (clearVerdict): the OWNER (cookie) may clear any record; an AGENT (vsst_)
  * only what ITS OWN SESSION wrote — an Activity entry whose `session` is one of
@@ -41,7 +42,7 @@
  * token (jbt_) never. Every refusal is a CODE with its sentence (REFUSALS).
  */
 
-const RECORD_KINDS = Object.freeze(['activity', 'todo', 'status', 'job', 'group-message']);
+const RECORD_KINDS = Object.freeze(['activity', 'todo', 'status', 'job', 'group-message', 'channel-webhook']);
 
 /** THE sentence — the English key every store writes and every client words. */
 const CLEARED_TEXT = "[cleared at the user's request]";
@@ -70,6 +71,9 @@ const SHAPES = Object.freeze({
     ['lastNotify.reason', 'drop'], ['notifyLog[].reason', 'drop'], ['runs[].lastLine', 'drop'], ['interaction.answers', 'empty'], ['interaction.pending', 'drop']]),
   // a group log record: its text, an invite's context line, a rename's previous name
   'group-message': Object.freeze([['text', 'text'], ['raw.context', 'drop'], ['raw.from', 'drop']]),
+  // lane webhook-l1-server: a webhook call — its text, the kept body (`raw.callText`) and the mapped facts; the author (the
+  // registered caller) and the ids stay
+  'channel-webhook': Object.freeze([['text', 'text'], ['raw.callText', 'drop'], ['facts', 'empty']]),
 });
 
 /** The text fields a clear of `kind` replaces, as `[{path, op}]` — record-aware
@@ -182,6 +186,8 @@ const OWNERSHIP = Object.freeze({
   status: (rec, c, key) => !!key && c.keys.has(key) && rec.setBy === 'agent',
   job: (rec, c) => !!c.cid && !!(rec.owner && rec.owner.conversation && rec.owner.conversation.id === c.cid) && (rec.owner.createdBy || '') !== 'user',
   'group-message': (rec, c) => !!c.cid && !!(rec.author && rec.author.id === c.cid) && ((rec.raw && rec.raw.kind) || 'message') === 'message',
+  // a caller's call is nobody's session's words — the owner clears it, an agent never
+  'channel-webhook': () => false,
 });
 
 /**
@@ -216,6 +222,7 @@ function recordWords(kind, rec) {
   if (kind === 'status') return rec.reason || rec.branch || rec.state || '';
   if (kind === 'job') return rec.name || '';
   if (kind === 'group-message') return rec.text || (rec.raw && rec.raw.context) || '';
+  if (kind === 'channel-webhook') return rec.text || '';
   return '';
 }
 /** The first `max` characters of `s` on one line (whitespace collapsed), `…` when cut. */

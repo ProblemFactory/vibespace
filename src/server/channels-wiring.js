@@ -12,6 +12,7 @@
 const { create: createEngine } = require('./channels-engine.js');
 const { create: createGroups } = require('./groups-engine.js');
 const channelsRoutes = require('../routes/channels.js');
+const webhookRoutes = require('../routes/webhook.js');   // lane webhook-l1-server: the inbound door + the owner's path / caller verbs
 const { create: createTouches } = require('./channel-touches.js');
 const { create: createChannelApi } = require('./channel-api.js');
 const { create: createApiCards } = require('./channel-api-cards.js');
@@ -74,7 +75,7 @@ function create({ app, dataDir, bcastAll = () => {}, now = () => Date.now(), env
     head: (mountId, opts = {}) => { const m = getMounts(); if (!m || typeof m.oauthClientIdOf !== 'function') noMounts(); return m.oauthClientIdOf(mountId, opts); },
     of: (mountId, opts = {}) => { const m = getMounts(); if (!m || typeof m.oauthClientOf !== 'function') noMounts(); return m.oauthClientOf(mountId, opts); },
   };
-  const channels = createEngine({ dataDir, broadcast: (msg) => bcastAll(msg), now, env, integrations, userTodos, deliver, serverSetting, liveSessions, mountClients });
+  const channels = createEngine({ dataDir, broadcast: (msg) => bcastAll(msg), now, env, integrations, userTodos, deliver, serverSetting, liveSessions, mountClients, httpInbound: true });
   // B-2198: the raw API pass-through's orchestrator (src/server/channel-api.js) — reached by the agent and owner routes as `channels.rawApi`
   channels.rawApi = createChannelApi({ dataDir, engine: channels, getMounts, now, broadcast: (msg) => { bcastAll(msg); if (channels.apiCards) channels.apiCards.onUpdate(msg); } });
   // B-2198 part 2: ONE card per proposal in the chat, the Outbox and For you; the next-turn receipt; the 24 h expiry + withdrawal
@@ -128,6 +129,8 @@ function create({ app, dataDir, bcastAll = () => {}, now = () => Date.now(), env
     accountOf: (id) => { const r = channels.adapterRecords().adapters.find((a) => a.id === id); if (!r) return null; let glyph = null; try { glyph = channels.registry.capsOf(r.kind).glyph || null; } catch { glyph = null; } return { label: r.label || r.id, kind: r.kind || null, glyph }; },
     nameOf: (adapterId, convId) => channels.conversationName(adapterId, convId) });   // B-c127: a touch names its conversation by THE NAME LADDER
   channelsRoutes.setup({ getEngine: () => channels, getGroups: () => groups, authEnabled, getTouches: () => touches });
+  webhookRoutes.setup({ getEngine: () => channels, dataDir, serverSetting, now });
+  app.use(webhookRoutes.router);
   app.use(channelsRoutes.router);
   channels.start();
   return { channels, groups, touches, flushGroupCards, shutdown: () => { try { channels.apiCards.stop(); } catch {} try { touches.flush(); } catch (e) { console.warn('[channel-touches] flush:', e && e.message); } try { flushGroupCards(); } catch (e) { console.warn('[groups] card flush:', e && e.message); } try { channels.stop(); } catch (e) { console.warn('[channels] shutdown:', e && e.message); } } };

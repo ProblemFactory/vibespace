@@ -137,6 +137,7 @@ const GROUPS_RAW_OK = new Set(['readFolded', 'originalsOf']);
 // channels-engine: every function that reads a store log, with the GATE that stands before the read (a
 // conversation this engine KNOWS = an adapter record + an index row — never the groups adapter)
 const CHANNELS_GATES = {
+  adapterFor: 'store.index.entry(rec.id',                // lane webhook-l1-server: the adapter's `findRecord` dep reads ITS OWN account's indexed conversation
   flushPushBatch: 'store.index.entry(rec.id',           // the adapter record's own conversation
   loadOlder: 'known(',
   storedHit: 'store.index.has(',                        // design 010: a vendor hit's "already stored?" — an index row first, then the conversation's oldest record / the id
@@ -1097,6 +1098,7 @@ const CACHES = {
   'src/lib/channels-panel.js|EXPANDED': 'expanded section keys',
   'src/lib/channels-panel.js|ends': 'list name → its end element (a sentinel / skeleton row — no words of a row)',
   'src/lib/channels-panel.js|aroundCache': 'design 010: the search dialog\'s around sheets — the vendor\'s records per found message, a local of ONE dialog (gone with it; never stored)',
+  'src/lib/channels-panel.js|curSystems': 'lane webhook-l2-ui: the account ids whose capability row declares an inbound door (pushTransport http-inbound) of the last build — ids, no words',
   'src/lib/channels-panel.js|curBadges': 'lane channels-list-polish: account id → its badge spec (hue / internal / vendor glyph) of the last build — no words',
   'src/lib/channels-panel.js|chain': 'list name → how many pages read while its end stayed in view (a number)',
   'src/lib/channels-panel.js|chainTop': 'list name → the scroll box\'s scrollTop at its last page read (a number)',
@@ -1781,6 +1783,7 @@ const I_RECV = {
   'src/lib/user-todos-actions.js|r.browser': ['browser profile', 'a profile label (the For-you Restart of a browser that stopped answering — int220, lane browser-unresponsive)'],
   'src/lib/channel-account-dialogs.js|k': ['channel account', 'an integration key label'], 'src/lib/channel-account-dialogs.js|v': ['channel account', 'an account name'],
   'src/lib/channel-group-dialogs.js|group': ['agent group', 'a group\'s name'], 'src/lib/channel-outbox.js|r': ['outbox proposal', 'a send\'s refusal reason'],
+  'src/lib/channel-webhook.js|v': ['channel author', 'a webhook caller\'s registered name (the owner typed it; the author of its calls)'], 'src/lib/channel-webhook.js|o': ['outbox proposal', 'a send\'s outcome — the caller\'s name + the server\'s refusal reason'], // lane webhook-l2-ui
   'src/lib/channels-panel.js|r': ['count', 'a refresh answer\'s pending flag'], 'src/lib/channel-window.js|group': ['agent group', 'a group\'s name'], 'src/lib/channel-window.js|a': ['channel author', 'lane lark-threads: an author\'s vendor name / id in the "Set a name…" dialog\'s title (the vendor\'s, never a record\'s words)'], 'src/lib/channel-window.js|r2.proposal': ['outbox proposal', 'the channel\'s refusal of a send'],
   'src/lib/chat-view.js|msg.page': ['published page', 'a page\'s name'], 'src/lib/chat-view.js|r': ['codex sub-agent', 'an unresolved sub-agent\'s reason code'],
   'src/lib/desktop-app-launcher.js|end': ['desktop app', 'an app label'], 'src/lib/desktop-manager.js|desk': ['desktop', 'a desktop\'s name'], 'src/lib/file-explorer.js|bk': ['bookmark', 'a bookmark label'],

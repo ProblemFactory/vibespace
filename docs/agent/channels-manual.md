@@ -264,6 +264,8 @@ The user gives you two DIFFERENT things, in this order:
     with the piece; matched case-insensitively) · `--mention name[,name]` ·
     `--from address[,address]` · `--subject "words"` ·
     `--sender-in-group id[,id]` · `--has-attachment` · `--not-contains w[,w]` ·
+    `--fact key=value` (a message FACT equals the value — a webhook path's mapped field, its
+    `sender` / `subject` / `event`; never the raw body) ·
     `--time-window HH:MM-HH:MM [--tz-offset ±minutes]` · `--reply-to-mine` ·
     `--in-thread-with-me` · `--reply-to-sent` (a quote of a message YOU sent,
     a reply in its thread, or a reply in its mail thread — the vendor's own
@@ -565,6 +567,37 @@ local copy. Both, in two tiers — use the free one first:
   turned it on, the approval card says so BEFORE approving and the receipt
   carries `honestyLine: true`. It applies only to text an agent drafted —
   never to the user's own drafts.
+
+## Webhook paths (`webhook/<path>`)
+
+A **webhook path** is a conversation other SYSTEMS write into: the owner made `/hook/<path>` on this instance and
+registered its **callers** (a CI, a monitor, another VibeSpace paired with this one — a `peer`), each with its own
+token. Every call is a record by the caller's REGISTERED name (a name inside the payload is only a fact).
+
+    vibespace-channels read webhook/ci                ← first a `callers:` header: id, "name", kind (system | peer),
+                                                         delivery, last call, generation — then the records
+    vibespace-channels reply webhook/ci "…" --to <record id>
+                                                      ← goes to THAT record's caller (the caller follows the record)
+    vibespace-channels reply webhook/ci "…"           ← one caller: it. Several: refused (ambiguous-caller), the callers
+                                                         listed as rows — nothing is sent
+    vibespace-channels compose webhook/ci --caller <id>[,<id>]|all "…"
+                                                      ← ONE proposal per caller; `all` = every caller that takes replies
+
+- **You reply as the owner.** A caller sees one name (the path's reply name), only its own replies and receipts; it
+  cannot @ anyone, read other records or learn who answered.
+- **Delivery** decides where a reply goes: `reply-url` (one signed POST to the caller's address), `poll` (the caller
+  fetches it), `none` (it takes no replies — naming it is refused by name).
+- **A peer** is another VibeSpace: what it sends arrives as a record by its registered name, what you send it arrives
+  there as a record by this instance's name. Links in a peer's message are plain links (no file hand-over yet).
+- **What you cannot do:** make a path; register, rotate or revoke a caller; see or print a token; pair two instances.
+  Those are the owner's (the Channels window). If a system should be able to call in, PROPOSE it:
+  `vibespace-ask "Register a webhook caller for <system> on webhook/<path>?" --detail "why + the delivery it needs"`.
+  The owner's webhook routes answer an agent token 403 with that advice; this CLI never prints a `vswh_` token or a
+  `vswp_` pairing code (it carries one) — both read as `…_[withheld]`, and a call that carries one is refused at the door.
+- Each path has a wake budget (default 6 per hour): `read` prints `path <slug>: N / M wakes this hour (K held)` under
+  the callers, and a message the budget still holds says `held — …; it rides the next wake` under it.
+- **A Bearer caller** has no replay protection (a captured call can be sent again under a new Idempotency-Key) and its
+  replies are signed with sha256(token) — when you propose a caller for a system that can sign, propose HMAC.
 
 ## Slack (what the user asked → what you do)
 

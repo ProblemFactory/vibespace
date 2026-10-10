@@ -137,6 +137,15 @@ const Feed = require('../channel-feed.js');   // PURE (lane lark-search-poll): t
 const { peerName, FACT_KIND_NAMES, validateFacts } = require('../channel-record.js');   // + lane message-facts: the closed fact kinds, the one validator
 const SR = require('../channel-search.js');   // design 010: the search row's enums + THE snippet bound (PURE)
 const RECEIVE_MODES = Object.freeze(['push', 'poll', 'scan']);
+// lane webhook-l1-server: HOW a push lane hears its vendor — CLOSED (a long-lived socket, a pull subscription, a long
+// poll, or an HTTP door the vendor calls: `http-inbound`, the webhook adapter's `/hook/<slug>`)
+const PUSH_TRANSPORTS = Object.freeze(['ws-long-conn', 'pubsub-pull', 'long-poll', 'http-inbound']);
+// lane webhook-l1-server: the sender honesty line on this channel — `option` (the owner's switch decides; absent = this) or
+// `never` (the other side may never learn an agent drafted it: the engine appends none and the panel hides the switch)
+const HONESTY_LINES = Object.freeze(['option', 'never']);
+// lane webhook-l1-server: what a MODULE declares instead of a `builtin` branch — WHO answers reach (`msg-acl` = the agents
+// roster's own rule; `grants` = AgentReach rows, like every vendor)
+const REACH_SOURCES = Object.freeze(['grants', 'msg-acl']);
 const SCAN_SOURCES = Object.freeze(['store', 'ui']);
 const HISTORY_MODES = Object.freeze(['page', 'since', 'none']);
 const SEND_IDENTITIES = Object.freeze(['user', 'bot']);
@@ -379,6 +388,12 @@ function validateCaps(kind, caps, { channelSettings } = {}) {
     if (new Set(c.policyModes).size !== c.policyModes.length) bad('caps.policyModes names a mode twice');
     if (!c.policyModes.includes('review')) bad("caps.policyModes without 'review' — every account must be able to ask before it sends");
   }
+  // lane webhook-l1-server: the policy the vendor STARTS at (one of its own modes) — the module's `policyDefault` word
+  // is the same fact for an older module; a caps row that says it must say one the picker can show
+  if (c.policyDefault !== undefined && !(Array.isArray(c.policyModes) ? c.policyModes : POLICY_MODES).includes(c.policyDefault)) bad(`caps.policyDefault must be one of the declared policy modes (got ${JSON.stringify(c.policyDefault)})`);
+  if (c.honestyLine !== undefined && !HONESTY_LINES.includes(c.honestyLine)) bad(`caps.honestyLine must be one of ${HONESTY_LINES.join('|')} (got ${JSON.stringify(c.honestyLine)})`);
+  if (c.sendStartsTurn !== undefined && typeof c.sendStartsTurn !== 'boolean') bad('caps.sendStartsTurn must be a boolean (true = a send here is a billed agent turn)');
+  if (c.kind !== undefined && c.kind !== kind) bad(`caps.kind ${JSON.stringify(c.kind)} is not the adapter's own kind`);
   if (c.prepareSend !== undefined && typeof c.prepareSend !== 'boolean') bad('caps.prepareSend must be a boolean (true = prepareSend(convId, {text}) decides the mentions when a proposal is made)');
   if (c.prepareSend === true && !(Array.isArray(c.sendAs) && c.sendAs.length)) bad('caps.prepareSend on a read-only adapter (caps.sendAs is empty)');
   if (c.retention !== undefined && !RETENTION_MODES.includes(c.retention)) bad(`caps.retention must be one of ${RETENTION_MODES.join('|')}`);
@@ -499,7 +514,7 @@ function validateCaps(kind, caps, { channelSettings } = {}) {
     if (q.scope !== null && q.scope !== undefined && !(typeof q.scope === 'string' && q.scope && q.scope.length <= 100)) bad('caps.search.scope must be a scope name or null');
   }
   if (c.receive === 'push') {
-    if (!c.pushTransport) bad("caps.receive 'push' must declare pushTransport");
+    if (!PUSH_TRANSPORTS.includes(c.pushTransport)) bad(`caps.receive 'push' must declare pushTransport, one of ${PUSH_TRANSPORTS.join('|')} (got ${JSON.stringify(c.pushTransport)})`);
     if (!Number.isFinite(Number(c.pushAckBudgetMs))) bad("caps.receive 'push' must declare pushAckBudgetMs (the vendor's own deadline — fence 11 acks AFTER durability)");
   }
 
@@ -597,7 +612,8 @@ function validateMethods(kind, caps, mod) {
 /** lane dc-channels-manifest (rv F2): the fields the engine reads off a VENDOR module, checked at register — `label`
  *  (≤ 40), `integration` (an existing integration-registry row) with its `integrationTest` (a function, or absent),
  *  `OPTIONS` (a declared table: key / label / default, the default among its `choices`), `optionOf` / `effectiveOptions`
- *  / `vendorNameOf` (functions), `builtin` (boolean), `policyDefault` (a word), `manifest` (its own kind). */
+ *  / `vendorNameOf` (functions), `builtin` (boolean), `policyDefault` (a word), `manifest` (its own kind); lane
+ *  webhook-l1-server: `removable` / `listed` / `seed` (booleans) and `reach` (REACH_SOURCES). */
 function validateVendor(kind, mod) {
   const bad = (why) => { throw new Error(`channel vendor '${kind}': ${why}`); };
   if (typeof mod.label !== 'string' || !mod.label.trim() || mod.label.length > 40) bad('label must be a non-empty string of at most 40 characters');
@@ -605,6 +621,10 @@ function validateVendor(kind, mod) {
   if (mod.integrationTest !== undefined && (typeof mod.integrationTest !== 'function' || mod.integration === undefined)) bad('integrationTest must be a function, on a module that names its integration row');
   for (const f of ['optionOf', 'effectiveOptions', 'vendorNameOf']) if (mod[f] !== undefined && typeof mod[f] !== 'function') bad(`${f} must be a function`);
   if (mod.builtin !== undefined && typeof mod.builtin !== 'boolean') bad('builtin must be a boolean');
+  // lane webhook-l1-server: the DECLARED facts the engine reads instead of a `builtin` branch
+  for (const f of ['removable', 'listed', 'seed']) if (mod[f] !== undefined && typeof mod[f] !== 'boolean') bad(`${f} must be a boolean`);
+  if (mod.reach !== undefined && !REACH_SOURCES.includes(mod.reach)) bad(`reach must be one of ${REACH_SOURCES.join('|')}`);
+  if (mod.seed === true && mod.removable !== false) bad('a seeded adapter (seed: true) is removable: false — the engine would only seed it again');
   if (mod.policyDefault !== undefined && !(typeof mod.policyDefault === 'string' && /^[a-z][a-z-]{0,31}$/.test(mod.policyDefault))) bad('policyDefault must be a policy word');
   if (mod.OPTIONS !== undefined) {
     if (!Array.isArray(mod.OPTIONS)) bad('OPTIONS must be an array of {key, label, default}');
@@ -893,7 +913,8 @@ function createChannelRegistry({ channelSettings } = {}) {
         const r = (await gated('prepareSend', impl.prepareSend && impl.prepareSend.bind(impl))(convId, opts)) || {};
         const names = (v) => (Array.isArray(v) ? v : []).map((x) => peerName(x, 100)).filter(Boolean).slice(0, 50);
         const mentions = (Array.isArray(r.mentions) ? r.mentions : []).filter((x) => x && typeof x.id === 'string' && /^[A-Z0-9][A-Z0-9_]{1,40}$/.test(x.id) && peerName(x.name, 100)).slice(0, 50).map((x) => ({ name: peerName(x.name, 100), id: x.id }));
-        return { text: typeof r.text === 'string' ? r.text : '', notifies: names(r.notifies), unresolved: names(r.unresolved), plain: names(r.plain), mentions, tooLong: r.tooLong === true, sendMax: Number.isInteger(r.sendMax) && r.sendMax > 0 ? r.sendMax : null, at: Number.isFinite(r.at) ? r.at : Date.now() };
+        // lane webhook-l1-server: an explicit-recipient send (`recipients`: the callers a compose --caller expanded to, ids only)
+        return { text: typeof r.text === 'string' ? r.text : '', notifies: names(r.notifies), unresolved: names(r.unresolved), plain: names(r.plain), mentions, tooLong: r.tooLong === true, sendMax: Number.isInteger(r.sendMax) && r.sendMax > 0 ? r.sendMax : null, at: Number.isFinite(r.at) ? r.at : Date.now(), ...(Array.isArray(r.recipients) ? { recipients: r.recipients.filter((x) => typeof x === 'string' && /^c-[0-9a-f]{8}$/.test(x)).slice(0, 50), skipped: (Array.isArray(r.skipped) ? r.skipped : []).filter((x) => typeof x === 'string' && /^c-[0-9a-f]{8}$/.test(x)).slice(0, 50) } : {}) };
       },
       /** lane message-facts (B-f066): a stored thread's facts — `{facts: {[vendorId]: [...]}}`, each list through the ONE
        *  validator and held to `caps.facts` (an undeclared kind is dropped by name), ≤ 500 messages, ids bounded. */
@@ -915,6 +936,10 @@ function createChannelRegistry({ channelSettings } = {}) {
       heldAttachment: typeof impl.heldAttachment === 'function' ? (messageId, attachmentId) => {
         try { const h = impl.heldAttachment(messageId, attachmentId); return h && Buffer.isBuffer(h.data) ? { data: h.data, mime: typeof h.mime === 'string' ? h.mime : null, name: typeof h.name === 'string' ? h.name : null } : null; } catch { return null; }
       } : null,
+      // lane webhook-l3-cli-pair: a conversation's CALLERS (webhook paths) for the agent's `read` header — synchronous, bounded, never throws
+      // verify r1 #17 (int248 r2): the fact keys a wake block carries under a record's text (declared; [] when none)
+      wakeFactKeys: Array.isArray(impl.wakeFactKeys) ? impl.wakeFactKeys.filter((k) => typeof k === 'string').slice(0, 8) : [],
+      callersOf: typeof impl.callersOf === 'function' ? (convId) => { try { const r = impl.callersOf(convId); return Array.isArray(r) ? r.slice(0, 50) : null; } catch { return null; } } : null,
       scanHost: gated('scanHost', impl.scanHost && impl.scanHost.bind(impl)),
       // lane channel-threads: every one gated on its capability row; an undeclared one throws `not-supported`
       /** ONE thread's replies, newest-first to its anchor (`{records, anchor, reachedAnchor, complete}` like
@@ -1098,4 +1123,5 @@ module.exports = {
   // lane dc-channels-consent: the consent row's ONE schema
   validateConsent, CONSENT_MODES, CONSENT_ROW_KEYS,
   validateVendor,   // lane dc-channels-manifest
+  PUSH_TRANSPORTS, HONESTY_LINES, REACH_SOURCES,   // lane webhook-l1-server
 };

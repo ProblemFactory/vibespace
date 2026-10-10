@@ -78,7 +78,10 @@ const { inertFrames, isSystemRecord } = require('./channel-record.js');   // + i
 const { toAgentText, cutText, foldHidden } = require('./peer-text.js');   // lane peer-census: THE belt (bound → fold → the frame rule per line / piece) every agent-facing line takes
 
 /** The CLOSED rule set. A kind outside it is refused by `validateFilter`. */
-const RULE_KINDS = Object.freeze(['mention', 'keyword', 'regex', 'sender-in-group', 'from-address', 'subject', 'has-attachment', 'not-contains', 'time-window', 'reply-to-mine', 'in-thread-with-me', 'reply-to-sent']);
+const RULE_KINDS = Object.freeze(['mention', 'keyword', 'regex', 'sender-in-group', 'from-address', 'subject', 'has-attachment', 'not-contains', 'time-window', 'reply-to-mine', 'in-thread-with-me', 'reply-to-sent', 'fact']);
+/** lane webhook-l1-server: the `fact` rule's key — a fact kind (`sender`, `subject`, `event`, …) or a webhook path's
+ *  declared field (the `fields` fact's entry of that id); matched ONLY over the record's facts, never its raw body. */
+const FACT_RULE_KEY_RE = /^[A-Za-z][A-Za-z0-9_-]{0,39}$/;
 /** lane channel-threads (spec §5.4): the two rule kinds that read a record's PLACE — `reply-to-mine` and
  *  `in-thread-with-me`. Both read `ctx.mine` (a Set of the vendor ids the OWNER wrote or THIS principal sent from here,
  *  built by the engine per watcher from the conversation's log + the outbox's `sentBy`), `ctx.kindOf(record)` = THE
@@ -384,6 +387,13 @@ function validateRule(rule) {
       break;
     }
     case 'has-attachment': case 'reply-to-mine': case 'in-thread-with-me': case 'reply-to-sent': break;
+    case 'fact': {
+      const key = str(r.key).trim();
+      if (!FACT_RULE_KEY_RE.test(key)) return refuse('key-required', 'fact: key (a fact kind or a declared field — letters, digits, - _) is required', { kind: r.kind });
+      const v = str(r.value).trim().slice(0, 200).trim();
+      if (!v) return refuse('value-required', 'fact: value is required', { kind: r.kind });
+      out.key = key; out.value = v; break;
+    }
     case 'time-window': {
       const from = hhmm(r.from), to = hhmm(r.to);
       if (from === null || to === null) return refuse('time-format', 'time-window: from and to must be HH:MM', { kind: r.kind });
@@ -451,6 +461,7 @@ function ruleWhy(rule) {
     case 'sender-in-group': return `sender in ${rule.label || 'group'}`;
     case 'from-address': return `from ${rule.value}`;
     case 'subject': return `subject "${rule.value}"`;
+    case 'fact': return `fact ${rule.key} == "${rule.value}"`;
     case 'has-attachment': return 'has attachment';
     case 'not-contains': return `does not contain "${rule.value}"`;
     case 'time-window': return `within ${rule.from}-${rule.to}`;
@@ -564,6 +575,16 @@ function placeHit(rule, record, ctx) {
   return null;
 }
 
+/** lane webhook-l1-server: the lower-cased values a record's FACTS hold for `key` — a fact kind's own value (a line, a
+ *  party's id and name, each party of a list), else the `fields` fact's entry of that id. Never the raw body. */
+function factValuesOf(rec, key) {
+  const facts = Array.isArray(rec && rec.facts) ? rec.facts : [];
+  const words = (v) => (v && typeof v === 'object' ? [v.id, v.name] : [v]).filter((x) => typeof x === 'string' && x).map(lower);
+  const own = facts.find((f) => f && f.k === key);
+  if (own) return Array.isArray(own.v) ? own.v.flatMap(words) : words(own.v);
+  const fl = facts.find((f) => f && f.k === 'fields');
+  return fl && Array.isArray(fl.v) ? fl.v.filter((p) => p && p.id === key).flatMap((p) => words(p.name)) : [];
+}
 /** Does ONE rule hit ONE record. `ctx.now` is unused today but every rule
  *  takes the same signature so a new kind never grows a second one. */
 function ruleHits(rule, record, ctx) {
@@ -610,6 +631,7 @@ function ruleHits(rule, record, ctx) {
       return from <= to ? (minutes >= from && minutes < to) : (minutes >= from || minutes < to);   // a window past midnight wraps
     }
     case 'reply-to-mine': case 'in-thread-with-me': case 'reply-to-sent': return placeHit(rule, rec, ctx) !== null;
+    case 'fact': return factValuesOf(rec, rule.key).some((x) => x === lower(rule.value));
     default: return false;
   }
 }
@@ -844,7 +866,10 @@ function validateAccess(list, caps = {}) {
  * receiptWake}`. It carries NO authority (that is the access row's). The
  * defaults are the design's numbers.
  */
-function validateWatcher(input) {
+/** lane webhook-l1-server: `allNotify: 'digest'` = a conversation whose options declare a per-path wake budget
+ *  (`wakesPerHour`) — there a `mode: 'all'` row that names no notify DEFAULTS to a digest ("every call" is one paced
+ *  wake per window, never one per call); a row that names `wake` keeps it. */
+function validateWatcher(input, { allNotify = null } = {}) {
   const a = input && typeof input === 'object' ? input : null;
   if (!a) return refuse('bad-watcher', 'a watcher must be an object', { why: 'not-an-object' });
   const pv = cleanPrincipal(a.principal);
@@ -853,7 +878,7 @@ function validateWatcher(input) {
   if (!ASSIGN_MODES.includes(mode)) return refuse('bad-watcher', `mode must be ${ASSIGN_MODES.join('|')}`, { why: 'mode' });
   const filterId = a.filterId === undefined || a.filterId === null ? null : str(a.filterId).trim() || null;
   if (mode === 'filtered' && !filterId) return refuse('bad-watcher', "mode 'filtered' needs a filterId", { why: 'filter-missing' });
-  const notify = a.notify === undefined ? 'wake' : a.notify;
+  const notify = a.notify === undefined ? (mode === 'all' && allNotify === 'digest' ? 'digest' : 'wake') : a.notify;
   if (!NOTIFY_MODES.includes(notify)) return refuse('bad-watcher', `notify must be ${NOTIFY_MODES.join('|')}`, { why: 'notify' });
   let digestMinutes = a.digestMinutes === undefined || a.digestMinutes === null || a.digestMinutes === '' ? DEFAULT_DIGEST_MINUTES : Number(a.digestMinutes);
   if (!Number.isFinite(digestMinutes)) return refuse('bad-watcher', 'digestMinutes must be a number', { why: 'digest' });
@@ -930,7 +955,7 @@ function memberStill(row, members = []) {
  * a watcher without access is refused BY NAME (`watcher-needs-access`):
  * notification is the second operation, access is its prerequisite.
  */
-function validateWatchers(list, access = [], { inherited = [], members = [] } = {}) {
+function validateWatchers(list, access = [], { inherited = [], members = [], allNotify = null } = {}) {
   if (!Array.isArray(list)) return refuse('bad-watcher', 'watchers must be a list', { why: 'not-an-object' });
   if (list.length > MAX_WATCHER_ROWS) return refuse('too-many-rows', `a grain holds at most ${MAX_WATCHER_ROWS} watchers`, { max: MAX_WATCHER_ROWS });
   // lane channel-agent-watch W3: access at THIS grain or ABOVE it (the account, a matching rule, a visible grant here)
@@ -938,7 +963,7 @@ function validateWatchers(list, access = [], { inherited = [], members = [] } = 
   const rows = [];
   const seen = new Set();
   for (let i = 0; i < list.length; i++) {
-    const v = validateWatcher(list[i]);
+    const v = validateWatcher(list[i], { allNotify });
     if (!v.ok) return { ...v, index: i };
     const k = principalKey(v.watcher.principal);
     if (seen.has(k)) return refuse('duplicate-principal', `${principalWords(v.watcher.principal)} is listed twice — one notification per agent or group`, { index: i, principal: v.watcher.principal });
@@ -1396,7 +1421,7 @@ function safeInline(text, max) {
  * (`{n, seconds}`) says "N in this window" when the push lane's window
  * folded a burst (fence 12). Budgeted and frame-inert (see the header).
  */
-function renderWakeBlock({ adapterLabel = 'channel', title = '', convId = '', hits = [], elided = 0, coalesced = null, replyHint = true, inherited = null, others = null } = {}, { maxRecords = BLOCK_MAX_RECORDS, maxChars = BLOCK_MAX_CHARS, budget = BLOCK_MAX_BYTES } = {}) {
+function renderWakeBlock({ adapterLabel = 'channel', title = '', convId = '', hits = [], elided = 0, coalesced = null, replyHint = true, inherited = null, others = null, factLine = null } = {}, { maxRecords = BLOCK_MAX_RECORDS, maxChars = BLOCK_MAX_CHARS, budget = BLOCK_MAX_BYTES } = {}) {
   const list = (Array.isArray(hits) ? hits : []).filter((h) => h && h.record);
   const shown = list.slice(-maxRecords);
   const dropped = list.length - shown.length + (Number(elided) || 0);
@@ -1414,7 +1439,9 @@ function renderWakeBlock({ adapterLabel = 'channel', title = '', convId = '', hi
     const r = h.record;
     const who = safeInline((r.author && (r.author.display || r.author.name || r.author.id)) || '(no sender)', 80);   // lane lark-system-records: never "unknown"
     const re = h.sent && typeof h.sent === 'object' ? `Reply to your message (${h.sent.at ? stamp(h.sent.at) : 'earlier'}, "${safeInline(h.sent.words || '', 60)}"): ` : '';
-    return `${re}from ${who} at ${stamp(r.at)}\n${safeLine(r.text, max)}`;
+    // verify r1 #17 (int248 r2): the facts the adapter declares for a wake (a webhook call's sender + declared fields) under the text
+    const fl = typeof factLine === 'function' ? String(factLine(r) || '') : '';
+    return `${re}from ${who} at ${stamp(r.at)}\n${safeLine(r.text, max)}${fl ? `\n${safeLine(fl, 300)}` : ''}`;
   };
   let body = shown.map((h) => lineOf(h, maxChars));
   if (dropped > 0) body.push(`(${dropped} older elided)`);

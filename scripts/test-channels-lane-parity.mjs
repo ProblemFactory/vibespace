@@ -99,7 +99,7 @@ function laneAdapter(kind, receive, world) {
   const plat = process.platform;
   const caps = {
     receive,
-    pushTransport: receive === 'push' ? 'test-lane' : null,
+    pushTransport: receive === 'push' ? 'ws-long-conn' : null,   // lane webhook-l1-server: pushTransport is a CLOSED set now
     pushAckBudgetMs: receive === 'push' ? 3000 : null,
     pollInterval: { hot: 30, cold: 300, floor: 10 },
     scanSources: receive === 'scan' ? { [plat]: 'store' } : null,

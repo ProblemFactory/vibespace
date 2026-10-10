@@ -222,5 +222,20 @@ console.log('§2 controls: the rule over synthetic files');
     'the primitive detector matches the request shapes and not fetchJson/prefetch');
 }
 
+// ── lane webhook-l1-server: THE OWNER-CONFIGURED HOST — a webhook caller's reply URL is no vendor's host (no EGRESS row
+// can name it), so it is judged by the address it RESOLVES to: src/egress-fence.js is the one client (resolve once, every
+// answer through addressVerdict, the socket pinned to the judged address, no redirect followed) and the webhook adapter
+// constructs no request of its own ──
+{
+  const ef = fs.readFileSync(path.join(REPO, 'src/egress-fence.js'), 'utf-8');
+  const wh = fs.readFileSync(path.join(REPO, 'src/channels/webhook.js'), 'utf-8');
+  const at = (t, n) => t.indexOf(n);
+  const fetchBody = ef.slice(at(ef, 'async function fenceFetch('));
+  ok(at(fetchBody, 'resolveOnce(') > 0 && at(fetchBody, 'mod.request(') > at(fetchBody, 'resolveOnce(') && /lookup: pinned/.test(fetchBody) && (fetchBody.match(/mod\.request\(/g) || []).length === 1, 'owner-configured host: the fence resolves ONCE, then makes its ONE request with the lookup pinned to the judged address');
+  ok(/const why = addressVerdict\(a\.address\); if \(why\) return \{ ok: false, code: 'private-address'/.test(ef) && /for \(const a of all\)/.test(ef), 'owner-configured host: EVERY resolved answer is judged by addressVerdict (private refused unless the switch says so)');
+  ok(!/statusCode >= 300[^\n]*location/i.test(fetchBody) && /code: 'redirect'/.test(fetchBody), 'owner-configured host: a 3xx is an answer — never followed');
+  ok(!PRIMITIVE.test(wh.replace(/fetchFence\(/g, 'X(')) && /fetchFence\(c\.delivery\.replyUrl, /.test(wh) && /EGRESS = Object\.freeze\(\[\]\)/.test(wh), 'the webhook adapter constructs no request: its one send goes through the fence (EGRESS = [] — no vendor host)');
+}
+
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

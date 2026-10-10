@@ -50,6 +50,10 @@ const GENERIC = [
   { id: 'mongo-uri', re: /\bmongodb(?:\+srv)?:\/\/[^\s:@/]+:[^\s:@/]+@/, d: 'MongoDB URI with credentials' },
   { id: 'pg-uri', re: /\b(?:postgres(?:ql)?|mysql|redis|amqp):\/\/[^\s:@/]+:[^\s:@/]+@/, d: 'DB/queue URI with password' },
   { id: 'generic-secret-assign', re: /(?:password|passwd|secret|api[_-]?key|token|access[_-]?key|private[_-]?key)\s*[:=]\s*["']?[A-Za-z0-9+/_\-]{16,}["']?/i, d: 'secret-looking assignment', entropyGate: true },
+  // lane webhook-l1-server: a webhook caller's token (src/pairing-token.js kind `webhook`) — minted here, shown once
+  { id: 'vibespace-webhook-token', re: /\bvswh_[0-9a-f]{48}\b/, d: 'VibeSpace webhook caller token' },
+  // lane webhook-l3-cli-pair: an instance pairing code (src/webhook-pair.js) — base64url JSON that CARRIES a vswh_ token
+  { id: 'vibespace-webhook-pair-code', re: /\bvswp_[A-Za-z0-9_-]{40,2048}/, d: 'VibeSpace webhook pairing code' },
   { id: 'basic-auth-url', re: /https?:\/\/[^\s:@/]+:[^\s:@/]{6,}@/, d: 'URL with inline credentials' },
 ];
 // literals that make generic-secret-assign a false positive (placeholders)

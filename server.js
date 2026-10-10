@@ -184,9 +184,9 @@ registerWebdav(app, { tokens: mountTokens });
 // Proxied requests must reach unblocker with their body UNREAD — express.json
 // consuming a proxied JSON POST forwarded a body-less request that hung the
 // target on Content-Length (inc-mt2bpw2f: page rendered, every button dead).
-// Skip here rather than mount unblocker earlier: auth must keep covering /proxy/.
-const jsonBody = express.json({ limit: '50mb' });
-app.use((req, res, next) => (req.path.startsWith('/proxy/') ? next() : jsonBody(req, res, next)));
+// Skip here rather than mount unblocker earlier: auth must keep covering /proxy/. lane webhook-l1-server: /hook/<slug> + the pairing read their OWN raw bytes after their refusals.
+const jsonBody = express.json({ limit: '50mb' }), OWN_BODY_RE = /^\/(?:proxy\/|hook\/|api\/channels\/webhook\/[^/]+\/pair$)/;
+app.use((req, res, next) => (OWN_BODY_RE.test(req.path) ? next() : jsonBody(req, res, next)));
 
 app.get('/xterm.css', (req, res) => {
   res.sendFile(path.join(__dirname, 'node_modules/@xterm/xterm/css/xterm.css'));
@@ -1141,7 +1141,7 @@ app.post('/api/sessions/:id/msg-reachability', (req, res) => {
   try { writeSessionMeta(s.sockName, { ...readSessionMeta(s.sockName), msgReachability: s._msgReachability }); } catch { }
   res.json({ ok: true, level: lv });
 });
-const recordClear = require('./src/server/record-clear.js').create({ tasks, userTodos, sessionStatus, getJobs: jobsWiring.getJobs, getGroups: () => channelsWiring.groups }); require('./src/routes/records-clear.js').registerRecordClearRoutes(app, { recordClear }); // "Clear content…" (2026-09-28): ONE entry point (PURE verdict, each store's door, the journal line); the owner's POST /api/records/clear[-many] here, an agent's own verbs through setupAgentRoutes
+const recordClear = require('./src/server/record-clear.js').create({ tasks, userTodos, sessionStatus, getJobs: jobsWiring.getJobs, getGroups: () => channelsWiring.groups, getChannels: () => channelsWiring.channels }); require('./src/routes/records-clear.js').registerRecordClearRoutes(app, { recordClear }); // "Clear content…" (2026-09-28): ONE entry point (PURE verdict, each store's door, the journal line); the owner's POST /api/records/clear[-many] here, an agent's own verbs through setupAgentRoutes
 setupAgentRoutes({ app, activeSessions, tasks, sessionStatus, SessionStatusManager, userTodos, sessionStatusKey, serverSetting, spendGuard, scheduleCtxSync, remoteCtxBaseFor, readUserState: () => persistenceRouter.readUserState(), getJobs: jobsWiring.getJobs, deliver, getPublishedPages: () => publishedPages, getChannels: () => channelsWiring.channels, getGroups: () => channelsWiring.groups, getTouches: () => channelsWiring.touches, getRecordClear: () => recordClear, getSendUserInput: () => sendUserInput }); // lazy getters: all three are created further down (TDZ at boot otherwise); getChannels = the vibespace-channels routes' engine (P3); getSendUserInput = THE typing path for a dispatch's `/compact` (lane worker-dispatch — sendUserInput is declared further down)
 app.get('/api/agent-hooks', (req, res) => res.json({ ...agentHooksStatus(), integrationOff: !integrationEnabled(), cliConfig: harnessConfig.cliConfigStatus() })); // cliConfig = fresh per-key receipts for the managed CLI-config rows (Settings window chips + the Machines card; D2: never persisted)
 app.post('/api/agent-hooks/install', (req, res) => {
