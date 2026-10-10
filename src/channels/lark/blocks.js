@@ -157,23 +157,31 @@ function larkSystemSentence(c, fallback) {
 // `<b>`/`<strong>` bold runs, `<i>`/`<em>` italic runs, `<a href>` a link
 // through `safeHref`, `<at>` a mention chip, `<pre>` a code block, headings
 // bold, list items bulleted, script/style/iframe/… dropped WITH their
-// contents, and every other tag STRIPPED to its text — never printed.
+// contents, the closed `MK_STRIP` list stripped to its text.
 //
-// THE WALL (`sealTags`): a tag-shaped `<…>` that is still left in a text run
-// after the reader — a lone `<country>` placeholder a person typed, a
-// `Vec<String>` — becomes `‹country›` (its words kept, its angle brackets the
-// typographic ones), so NO `<…>` literal survives into a Lark block or
-// `rec.text` (inline code and code blocks are code: shown as written).
-// `TAG_LIKE_RE` is the census's own predicate (test-channel-record ⑦).
+// THE VOCABULARY IS CLOSED (owner 2026-10-09: "我们现在处理 lark 的 html tag 的
+// 时候会静默丢弃不认识的 tag，但其实有些 tag 并不是 lark 加上的而是用户自己要发的"):
+// a tag the reader does NOT know is CONTENT — a speech-control tag a person
+// typed (`<emphasis>Hello</emphasis>`, `<break time="500ms"/>`) stays in its
+// text run AS WRITTEN: in the blocks, `rec.text`, an agent's text and the
+// window (text runs are textContent — shown, never parsed as HTML).
+//
+// THE WALL IS THE FENCE (`sealTags` / `quoteTags`): a `<…>` left in a text run
+// becomes `‹…›` ONLY when its name is one of OUR frame names — channel-record's
+// `FRAME_TAG_RE`, the belt's own pattern, never a second spelling (a frame the
+// reader ASSEMBLED out of the pieces around a tag it read is caught here);
+// every other `<…>` is content. `TAG_LIKE_RE` / `carriesTag` only route a body
+// to the reader (inline code and code blocks are code: shown as written).
 /** A `<…>` that reads as a tag: `<`, an optional `/`, a letter, no angle bracket, `>`. */
 const TAG_LIKE_RE = /<\/?[A-Za-z][^<>]*>/;
-const TAG_LIKE_G = /<\/?[A-Za-z][^<>]*>/g;
 /** Does this string carry a tag-shaped `<…>`? */
 function carriesTag(s) { return typeof s === 'string' && s.indexOf('<') >= 0 && TAG_LIKE_RE.test(s); }
-/** The wall: every tag-shaped `<…>` left in a string becomes `‹…›`. */
+/** OUR frame names: channel-record's pattern, global. */
+const FRAME_G = new RegExp(R.FRAME_TAG_RE.source, 'giu');
+/** The fence: a `<…>` whose name is one of OUR frame names becomes `‹…›`; any other `<…>` is content, as written. */
 function quoteTags(s) {
   let x = String(s == null ? '' : s);
-  for (let i = 0; i < 4 && carriesTag(x); i++) x = x.replace(TAG_LIKE_G, (m) => '‹' + m.slice(1, -1) + '›');
+  for (let i = 0; i < 4 && x.indexOf('<') >= 0 && R.carriesFrame(x); i++) x = x.replace(FRAME_G, (m) => '‹' + m.slice(1, -1) + '›');
   return x;
 }
 /** Seal every TEXT string of a tree (runs t/b/i/a/at, attribution, banner, card title/lines, sys);
@@ -207,7 +215,7 @@ function decodeEntities(s) {
   });
 }
 
-/** How the reader treats each tag it KNOWS. Everything else is unknown: stripped to its text. */
+/** How the reader treats each tag it KNOWS — the CLOSED vocabulary. Every other tag is CONTENT: text, as written. */
 const MK_BLOCK = new Set(['p', 'div', 'section', 'article', 'header', 'footer', 'main', 'aside', 'nav', 'figure', 'figcaption', 'address', 'center', 'table', 'thead', 'tbody', 'tfoot', 'tr', 'caption', 'dl', 'dt', 'dd', 'ul', 'ol', 'form', 'fieldset', 'details', 'summary', 'html', 'body']);
 const MK_HEAD = new Set(['h1', 'h2', 'h3', 'h4', 'h5', 'h6']);
 const MK_BOLD = new Set(['b', 'strong']);
@@ -215,9 +223,11 @@ const MK_ITALIC = new Set(['i', 'em', 'cite', 'var', 'dfn']);
 const MK_CELL = new Set(['td', 'th']);
 /** Dropped WITH their contents (a script's words are not the message). */
 const MK_DROP = new Set(['script', 'style', 'iframe', 'object', 'embed', 'noscript', 'template', 'textarea', 'title', 'head', 'svg', 'math', 'select', 'option', 'applet', 'noembed', 'noframes', 'xmp', 'video', 'audio', 'canvas']);
-/** Void / inline tags the reader knows and passes through (their text kept). */
-const MK_INLINE = new Set(['span', 'font', 'u', 'ins', 's', 'del', 'strike', 'small', 'big', 'sub', 'sup', 'mark', 'abbr', 'q', 'tt', 'kbd', 'samp', 'time', 'label', 'text_tag', 'link', 'bdi', 'bdo', 'wbr', 'nobr', 'button', 'legend', 'meta', 'base', 'input', 'img', 'source', 'track', 'param', 'col', 'colgroup', 'area', 'map', 'picture', 'frame', 'frameset', 'hr', 'br', 'li', 'blockquote', 'pre', 'code', 'a', 'at', 'person']);
-const knownTag = (n) => MK_BLOCK.has(n) || MK_HEAD.has(n) || MK_BOLD.has(n) || MK_ITALIC.has(n) || MK_CELL.has(n) || MK_DROP.has(n) || MK_INLINE.has(n);
+/** STRIPPED to their text (a void one to nothing): HTML's inline / void tags and Lark's own (`font`, `text_tag`, `link`, `emotion`, …). */
+const MK_STRIP = new Set(['span', 'font', 'u', 'ins', 's', 'del', 'strike', 'small', 'big', 'sub', 'sup', 'mark', 'abbr', 'q', 'tt', 'kbd', 'samp', 'time', 'label', 'text_tag', 'link', 'emotion', 'local_datetime', 'number_tag', 'bdi', 'bdo', 'wbr', 'nobr', 'button', 'legend', 'meta', 'base', 'input', 'img', 'source', 'track', 'param', 'col', 'colgroup', 'area', 'map', 'picture', 'frame', 'frameset']);
+/** READ into structure: a break, a rule, a list item, a quote, code, a link, a mention. */
+const MK_READ = new Set(['hr', 'br', 'li', 'blockquote', 'pre', 'code', 'a', 'at', 'person']);
+const knownTag = (n) => MK_BLOCK.has(n) || MK_HEAD.has(n) || MK_BOLD.has(n) || MK_ITALIC.has(n) || MK_CELL.has(n) || MK_DROP.has(n) || MK_STRIP.has(n) || MK_READ.has(n);
 /** A tag: `<` `/`? name attrs? `/`? `>`; a comment; a declaration.
  *  LINEAR (security verify, 2026-09-28): the attribute run is ONE greedy `[^<>]*` — the earlier lazy run followed
  *  by `\s*` backtracked quadratically over a long whitespace run (`<a` + 64 KB of spaces = 1.7 s of the server's
@@ -258,12 +268,12 @@ function markupTokens(src) {
     }
     if (last < s.length) toks.push({ t: 'text', v: s.slice(last) });
   }
-  // an UNKNOWN tag is markup when it is paired, carries attributes or closes itself — else it is a lone
-  // `<word>` a person typed (a placeholder, a generic): kept as TEXT (the wall words it ‹word›)
-  const opened = new Set(), closed = new Set();
-  for (const k of toks) { if (k.t === 'open') opened.add(k.name); else if (k.t === 'close') closed.add(k.name); }
+  // A TAG THE READER DOES NOT KNOW IS CONTENT (owner 2026-10-09): paired or lone, with attributes or none, closing
+  // itself or not, it is TEXT as written where it stood — never stripped, never quoted; text pieces are joined again
+  const closed = new Set();
+  for (const k of toks) if (k.t === 'close') closed.add(k.name);
   for (const k of toks) {
-    if (k.t !== 'open' && k.t !== 'close') continue;
+    if (k.t === 'text') continue;
     // A DROP TAG WITH NO CLOSER IS NOT A DROP (security verify r2, 2026-09-28): "please set the <title> of the
     // page", "the <select> is broken", "hello <svg> world" — an open drop tag ran to the END of the message and
     // everything after it was silently gone from the agent's text AND the window (a data loss anyone can send,
@@ -274,11 +284,11 @@ function markupTokens(src) {
       if (!k.attrs.trim()) { k.t = 'text'; k.v = k.raw; k.lone = true; } else k.t = 'self';
       continue;
     }
-    if (knownTag(k.name)) continue;
-    const paired = opened.has(k.name) && closed.has(k.name);
-    if (!paired && !k.attrs.trim()) { k.t = 'text'; k.v = k.raw; k.lone = true; }
+    if (!knownTag(k.name)) { k.t = 'text'; k.v = k.raw; }
   }
-  return toks;
+  const out = [];
+  for (const k of toks) { const p = out[out.length - 1]; if (k.t === 'text' && !k.code && p && p.t === 'text' && !p.code) p.v += k.v; else out.push(k); }
+  return out;
 }
 
 /** Italic `*x*` / `_x_` and `~~strike~~` of Lark markdown over a run list (bold `**x**` is `inlineRuns`'). */
@@ -433,7 +443,7 @@ function markupRead(text, opts = {}) {
     if (MK_CELL.has(n)) { if (open) { if (runs.length && !/\s/.test(tail)) pushRun({ k: 't', text: '  ' }); } continue; }
     if (MK_BLOCK.has(n)) { brk(); continue; }
     if (n === 'code') continue;   // an HTML <code> inline: its text (a backtick span is the code run)
-    // img / meta / input / font / span / every unknown paired tag: stripped to its text (nothing)
+    // MK_STRIP (img / meta / input / font / span / …): stripped to its text (nothing) — an unknown tag is text by now
   }
   if (link) { const l = link; link = null; styled([{ k: 't', text: l.text }]); }
   if (at) { const w = at; at = null; if (w.text) styled([{ k: 't', text: w.text }]); }

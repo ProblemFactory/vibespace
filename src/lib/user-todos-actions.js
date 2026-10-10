@@ -25,6 +25,7 @@ import { appRefusalText } from './app-install-dialog.js'; // a refusal code → 
 import { shownDigest, openRowOf } from './app-card-model.js'; // design 009: the digest of the card pressed; the row an Installed card opens // Layer 0 apps: THE install dialog an agent's install proposal opens (the same component as "Install xpra on {machine}…")
 import { openResetCreditDialog } from './reset-credit-dialog.js'; // THE one reset-credit confirm dialog (design-reset-credits p2): the ask-mode item's button
 import { showReauthAccountDialog } from './channel-account-dialogs.js'; // lane channel-names-readable: a `channel-reauth` item's verb = THE account's Re-authorize dialog
+import { askArtifactRow, askArtifactProbe, linkTarget } from './foryou-links.js'; // PURE (lane foryou-attachments): an ask's chip → its artifact row + the open-time probe; a link in the words → its target
 import { clearRecords, isCleared, clearedText } from './record-clear-ui.js'; // "Clear content…" (2026-09-28): THE confirm dialog + request path; a cleared item's words
 
 /** The badge's tiers — ONE spelling shared by the taskbar / nav button, the
@@ -120,6 +121,47 @@ export function inboxModel(app) {
     } else if (s.status === 'tmux') app.attachTmuxSession(s.tmuxTarget, displayName(s), s.cwd);
     else if (s.status === 'stopped') app.resumeSession(s.sessionId, s.cwd, displayName(s), { backend: s.backend, hostId: s.hostId || s.host || undefined });
     else showToast(t('This session is running outside VibeSpace'), { type: 'error' });
+  };
+  // ── WHAT AN ITEM SHOWS (lane foryou-attachments, owner 2026-10-09 "经常 agent 会让我 review 一个产物/文件/网页，我却没法
+  // 轻易从 inbox 里打开") — its --artifact chips and the paths / links in its words; ONE verb each for the tray and the window ──
+  /** A chip: the open-time re-check (a file / design / page gone since the ask ⇒ a toast that SAYS so, never silent), then
+   *  THE ONE artifact open door (artifacts-window.js openArtifactRow — the asking conversation's chat view when this client
+   *  shows it, else the row's own facts: a file in its viewer on its host, a design in the Design window, a page by /p/). */
+  const openArtifact = async (item, k) => {
+    const a = item && Array.isArray(item.artifacts) ? item.artifacts[k] : null;
+    const row = askArtifactRow(a);
+    if (!row) return false;
+    const pr = askArtifactProbe(a);
+    let gone = false;
+    try {
+      const r = await fetch(pr.url, { method: pr.method });
+      const j = pr.method === 'GET' ? await r.json().catch(() => null) : null;
+      gone = !r.ok || !!(j && (j.error || (row.kind !== 'design' && j.isDirectory)));
+    } catch { gone = false; } // unreachable server: the door says what it can
+    if (gone) { showToast(row.kind === 'page' ? t('{name} is no longer published', { name: row.name }) : t('{name} is gone — nothing at {path} any more', { name: row.name, path: row.path }), { type: 'error', history: { m: t('An attachment is gone'), ref: { kind: 'todo', id: item.id } } }); return false; } // the history keeps the head + a ref, never the item's words
+    const s = sessionFor(item.sessionKey);
+    const { openArtifactRow } = await import('./artifacts-window.js');
+    openArtifactRow(app, (s && s.webuiId) || '', row);
+    return true;
+  };
+  /** A link in the words (src/lib/foryou-links.js): a URL / mail address / page per the chat's link convention (a new
+   *  tab); a path probed on the ASKER's host against its cwd (the chat's candidates) — a folder opens the explorer there,
+   *  nothing found ⇒ a toast that says so. */
+  const openLink = async (item, kind, ref) => {
+    const tg = linkTarget(kind, ref, { cwd: (item && item.cwd) || '', host: (item && item.hostId) || '' });
+    if (!tg) return false;
+    if (tg.open === 'url' || tg.open === 'mail') { window.open(tg.href, '_blank', 'noopener'); return true; }
+    if (tg.open === 'page') { window.open(new URL(tg.path, location.origin).href, '_blank', 'noopener'); return true; }
+    const host = tg.host || undefined;
+    for (const c of tg.cands) {
+      const info = await fetchJson(`/api/file/info?path=${encodeURIComponent(c)}${host ? '&host=' + encodeURIComponent(host) : ''}`);
+      if (!info || info.error) continue;
+      if (info.isDirectory) app.openFileExplorer?.(c, { host });
+      else app.openFile?.(c, c.split('/').pop(), { host, ...(tg.line ? { line: tg.line } : {}) });
+      return true;
+    }
+    showToast(t('Not found: {path}', { path: String(ref) }), { type: 'error', history: { m: t('A link in an item was not found'), ref: { kind: 'todo', id: item && item.id } } });
+    return false;
   };
   /** ✓ / ✕ / ↺ → POST /api/user-todos/:id. Resolves true on success. */
   const setStatus = async (id, status) => {
@@ -373,7 +415,7 @@ export function inboxModel(app) {
   const model = {
     get todos() { return todos; },
     get loaded() { return loaded; },
-    byId, sessionFor, displayName, wordsOf, detailOf, nameFor, jump, setStatus, postReply, runAction, ensureDetail, clearContent, menuFor, isCleared,
+    byId, sessionFor, displayName, wordsOf, detailOf, nameFor, jump, setStatus, postReply, runAction, ensureDetail, clearContent, menuFor, isCleared, openArtifact, openLink,
     ingestLive, factFor, keyForWebui, webuiIdsFor, keysFor, replyState, patchDot, boardOf, drafts,
     /** THE row renderer's context (src/lib/user-todos-row.js) — the words,
      *  names and the live verdict; a surface passes it (or a copy with its flags) */

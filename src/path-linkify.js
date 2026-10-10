@@ -28,4 +28,33 @@ const TRAILING = new RegExp('[`\'".,;:!?)}\\]' + CJK_PUNCT + ']+$');
 /** Strip trailing punctuation from a matched path or URL — ASCII and CJK alike. */
 function cleanPath(p) { return String(p).replace(TRAILING, ''); }
 
-module.exports = { pathRe, cleanPath, PATH_SRC, CJK_PUNCT };
+/** A RELATIVE reference (kb-features 2.75.0 — moved here from the chat renderer, lane foryou-attachments, so the For-you
+ *  links read the SAME rule): a code span that IS a relative path or a bare filename (`B2BTasks/x/final/`, `SCRIPTS.md`,
+ *  `generate.py`) — never digits/dots/slashes only (versions, IPs, CIDR ranges 10.0.0.0/8), never a digit-dot stem
+ *  (192.0.2.10), never a sentence end, never a URL. */
+function looksRelPath(s) {
+  const txt = String(s || '');
+  return /^[\w@%+=.\-][^\s<>"'`|]*$/.test(txt) && txt.length >= 3 && txt.length <= 200
+    && (txt.includes('/') || /\.[A-Za-z0-9]{1,8}$/.test(txt))
+    && !/^[\d./]+$/.test(txt) && !/^[\d.]+$/.test(txt.replace(/\.[A-Za-z0-9]+$/, ''))
+    && !txt.endsWith('.') && !txt.includes('//');
+}
+/** Where a relative reference may live, in the order a click probes them (existence-probed at CLICK time, no render IO):
+ *  `~/…` as written (the session's host expands it); else <cwd>/<rel>, the cwd's own segment overlap (`repo/docs/x`
+ *  asked from inside `…/repo/sub`), the cwd's parent. */
+function relCandidates(rel, cwd) {
+  const r = String(rel || '');
+  const norm = r.replace(/\/+$/, '');
+  const cands = [];
+  if (r.startsWith('~/')) cands.push(r);
+  else if (cwd) {
+    cands.push(cwd + '/' + norm);
+    const cwdSegs = String(cwd).split('/'), relSegs = norm.split('/');
+    const at = cwdSegs.lastIndexOf(relSegs[0]);
+    if (at >= 0) cands.push([...cwdSegs.slice(0, at), ...relSegs].join('/'));
+    cands.push(cwdSegs.slice(0, -1).join('/') + '/' + norm);
+  }
+  return [...new Set(cands.filter(Boolean))];
+}
+
+module.exports = { pathRe, cleanPath, looksRelPath, relCandidates, PATH_SRC, CJK_PUNCT };

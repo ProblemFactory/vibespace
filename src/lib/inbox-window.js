@@ -31,7 +31,7 @@ import { registerWindowType, svgIcon16 } from './window-types.js';
 import { registerMenuItem } from './contributions.js';
 import { inboxModel, actionWords } from './user-todos-actions.js'; // THE store + the verbs (one implementation with the popup)
 import { sortGroups, openLayout, nextLayout, entriesFor, splitNotices, isNotice, noticeGroups, tabCounts, originOf, ORIGIN_LABELS } from './user-todos-layout.js'; // PURE: the popup's order, notices, counts
-import { reconcileKeyed, agoText, expiresText, resolvedByText, appCardHtml } from './user-todos-row.js'; // THE keyed reconciler + the row words
+import { reconcileKeyed, agoText, expiresText, resolvedByText, appCardHtml, askChipEls, linkifyInto } from './user-todos-row.js'; // THE keyed reconciler + the row words
 import { TABS, nextSelection, holdSelection, paneMode, scopeRows, rowPreview, itemView } from './inbox-window-layout.js'; // PURE: the window's rules (test-inbox-window-model)
 
 // The taskbar For-you button's own glyph (UI_ICONS.inbox's paths), in the registry's 16px chrome.
@@ -288,8 +288,9 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
     const why = mk('div', 'iw-reply-why');
     reply.append(ta, why);
     const actions = mk('div', 'iw-actions');
-    el.append(head, title, detail, cutLine, replied, opts, reply, actions);
-    return { el, id, dot, sess, ld, nm, board, meta, title, detail, cutLine, replied, opts, reply, ta, why, actions, sig: {} };
+    const arts = mk('div', 'iw-arts'); // lane foryou-attachments: the ask's --artifact chips, under the question
+    el.append(head, title, arts, detail, cutLine, replied, opts, reply, actions);
+    return { el, id, dot, sess, ld, nm, board, meta, title, arts, detail, cutLine, replied, opts, reply, ta, why, actions, sig: {} };
   };
   /** A previewed detail (a resolved item's snapshot carries 300 chars): load the rest ONCE
    *  through the model; a failure lands on the pane as its sentence, never silently. */
@@ -401,7 +402,9 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
     c.el.classList.toggle('iw-item-resolved', v.resolved);
     c.el.classList.toggle('iw-item-cleared', model.isCleared(it)); // "Clear content…": the cleared sentence, dimmed
     // the words: the title and the detail at FULL width, rendered (escaped raw HTML + sanitizeHtml), selectable
-    if (c.sig.title !== v.title) { mdInto(c.title, v.title, { inline: true }); c.sig.title = v.title; }
+    if (c.sig.title !== v.title) { mdInto(c.title, v.title, { inline: true }); linkifyInto(c.title); c.sig.title = v.title; } // lane foryou-attachments: its paths / links press-to-open
+    const artsSig = JSON.stringify((!model.isCleared(it) && it.artifacts) || null);
+    if (c.sig.arts !== artsSig) { c.arts.replaceChildren(...askChipEls(it, t)); c.arts.style.display = c.arts.childElementCount ? '' : 'none'; c.sig.arts = artsSig; } // NODES, its words textContent
     // verify-r4 F4: an exit ask's detail IS the command it asks to run — shown VERBATIM (textContent in a <pre>), never as
     // markdown: `echo "*important*"` rendered as "echo "important"" (the asterisks gone) and a `# clean up` line as a
     // heading, the line breaks folded — the user allowed a command the pane did not show (reproduced)
@@ -419,6 +422,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
       if (card) { c.detail.innerHTML = appCardHtml(it, t, { lang: resolveLang(), resolved: v.resolved, buttons: false }); c.detail.style.display = ''; }
       else if (plain) { const pre = mk('pre', 'iw-exit-cmd'); pre.textContent = v.detail; c.detail.replaceChildren(pre); }
       else mdInto(c.detail, v.detail);
+      if (!card) linkifyInto(c.detail); // lane foryou-attachments: text nodes only — the words stay as written
       if (!card) c.detail.style.display = v.detail ? '' : 'none';
       c.sig.detail = detailSig;
     }
@@ -640,7 +644,16 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
   };
 
   // ── events (all bound to this window's life: the listener controller's signal) ──
+  root.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.classList && e.target.classList.contains('fy-link')) { e.preventDefault(); e.target.click(); } });
   root.addEventListener('click', (e) => {
+    // lane foryou-attachments: a chip (THE one artifact door) / a link in the words (the asker's cwd on its host)
+    const fy = e.target.closest('.ut-art, .fy-link');
+    if (fy && st.cur && st.cur.el.contains(fy)) {
+      e.preventDefault();
+      const it = model.byId(st.cur.id);
+      if (it) { if (fy.classList.contains('ut-art')) model.openArtifact(it, Number(fy.dataset.ai)); else model.openLink(it, fy.dataset.fy, fy.dataset.ref); }
+      return;
+    }
     // A NAVIGATION IS A NEW VIEW (verify round): a tab or scope switch re-sorts the list like an open
     // does (a row resolved here leaves its slot for the tail, a newer urgent group rises) — the
     // append-only slots (inc-mtw02kbq-kj96) hold only BETWEEN navigations, where the pointer rests

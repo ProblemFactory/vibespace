@@ -79,6 +79,20 @@ export function installUserTodos(app) {
   const hidePopup = () => { popup.classList.add('hidden'); layout = null; dropRows(); };
   const dropRows = () => { if (!popup.firstChild) return; stashDrafts(popup); popup.replaceChildren(); };
   const jump = (key, item) => model.jump(key, item, { close: hidePopup });
+  /** lane foryou-attachments: a press on an ask's chip (THE one artifact door) or a link in its words (resolved against the
+   *  asker's cwd on its host) — the tray steps aside first (on the phone it covers the viewer). True = handled. */
+  const fyPress = (e, close) => {
+    const fy = e.target.closest && e.target.closest('.ut-art, .fy-link');
+    if (!fy) return false;
+    e.preventDefault(); e.stopPropagation();
+    const rowEl = fy.closest('.ut-item');
+    const it = rowEl && byId(rowEl.dataset.id);
+    if (!it) return true;
+    close();
+    if (fy.classList.contains('ut-art')) model.openArtifact(it, Number(fy.dataset.ai));
+    else model.openLink(it, fy.dataset.fy, fy.dataset.ref);
+    return true;
+  };
   const setStatus = (id, status) => model.setStatus(id, status);
 
   // the row words (ago / expires / who resolved it) live with THE row renderer
@@ -605,6 +619,7 @@ export function installUserTodos(app) {
     const empty = mk('div', 'empty-hint ut-mini-empty', t('all clear'));
     pop.append(head, rows, empty);
     pop.addEventListener('click', (e) => {
+      if (fyPress(e, () => pop.remove())) return; // lane foryou-attachments: a chip / a link in the words
       if (e.target.closest('.ut-detail-exp')) return;
       if (e.target.closest('.ut-mini-head > .ut-open-win')) { pop.remove(); app.openInbox({ sessionKey: primaryKey(mini?.keys || keys) }); return; }
       const item = e.target.closest('.ut-item');
@@ -728,7 +743,9 @@ export function installUserTodos(app) {
     delete btnEl.dataset.busy; btnEl.disabled = false;
     if (!r || !r.ok) showToast(t('Could not update {n} items: {why}', { n: ids.length, why: r && r.error ? r.error : t('server unreachable') }), { type: 'error' });
   };
+  popup.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.classList && e.target.classList.contains('fy-link')) { e.preventDefault(); e.target.click(); } }); // a link span is keyboard-reachable (tabindex 0)
   popup.addEventListener('click', (e) => {
+    if (fyPress(e, hidePopup)) return; // lane foryou-attachments: a chip / a link in the words opens what it names, never the row's jump
     // §9: the whole inbox as THE window (the popup steps aside for it)
     if (e.target.closest('.ut-tabs > .ut-open-win')) { hidePopup(); app.openInbox(); return; }
     const tb = e.target.closest('.ut-tab');

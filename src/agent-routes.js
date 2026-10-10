@@ -338,7 +338,7 @@ function setupAgentRoutes({ app, activeSessions, tasks, sessionStatus, SessionSt
     return (k) => live.has(k);
   };
 // ── vibespace-ask / vibespace-status — src/agent-routes/status.js (the status / todos family, decoupling wave 2b)
-require('./agent-routes/status.js').register(app, { activeSessions, sessionStatus, userTodos, sessionStatusKey, clearAsAgent, agentSession, toolOn, toolDisabled, bookkept });
+require('./agent-routes/status.js').register(app, { activeSessions, sessionStatus, userTodos, sessionStatusKey, clearAsAgent, agentSession, toolOn, toolDisabled, bookkept, handoverItems: (b) => handoverItems(b) }); // lane foryou-attachments: vibespace-ask --artifact reads the hand-over's argument shape
 // "CLEAR CONTENT…" AS AN AGENT (2026-09-28): the caller an agent's own verbs
 // hand the ONE clear entry point (src/server/record-clear.js) — its keys (the
 // status key and the pre-conversation webui key: an entry written before the
@@ -963,7 +963,7 @@ app.get('/api/agent/prompt-context', (req, res) => {
       // Per-feature toggles: the reminder lists only ENABLED tools (2.211.0).
       const segs = [];
       if (toolFlags.status) segs.push('vibespace-status <state> — keep your board state honest');
-      if (toolFlags.ask) segs.push('vibespace-ask "q" — MIRROR every chat question into their For you tray (bottom right of their screen — name it that way, never "your inbox"; the FULL content still goes in your chat reply — the tray is only the notification), and resolve <id|text> the moment they answer');
+      if (toolFlags.ask) segs.push('vibespace-ask "q" [--artifact <path|/p/id>…] — MIRROR every chat question into their For you tray (bottom right of their screen — name it that way, never "your inbox"; the FULL content still goes in your chat reply — the tray is only the notification), and resolve <id|text> the moment they answer');
       if (toolFlags.task) segs.push(`vibespace-task ${multi ? '--group <id> ' : ''}progress "summary" — log finished work`);
       if (toolFlags.jobs) segs.push('vibespace-job run "cmd" --name x --context "brief" — background work that must OUTLIVE this conversation (auto-notifies you on completion; poll/show/subscribe/announce; full manual: vibespace-job docs)');
       segs.push('vibespace-docs [status|ask|task|jobs|msg|pages|browser] — the full manual for any of these tools');

@@ -65,11 +65,11 @@ export function warmAvatars(list) {
     probe.src = url;
   }
 }
-export function avatar({ name = '', key = '', self = false, glyph = null, badge = null, pic = null } = {}, px = null, cls = '') {
+export function avatar({ name = '', key = '', self = false, glyph = null, badge = null, pic = null, muted = false } = {}, px = null, cls = '') {
   const a = avatarOf({ name, key, self });
   const s = document.createElement('span');
-  s.className = 'chan-av' + (a.self ? ' chan-av-self' : '') + (glyph ? ' chan-av-glyph' : '') + (cls ? ' ' + cls : '');
-  if (a.hue !== null) s.dataset.hue = String(a.hue);
+  s.className = 'chan-av' + (a.self ? ' chan-av-self' : '') + (glyph ? ' chan-av-glyph' : '') + (muted ? ' chan-av-vs' : '') + (cls ? ' ' + cls : '');
+  if (a.hue !== null && !muted) s.dataset.hue = String(a.hue);   // `muted`: no hue at all (VibeSpace's own talk, below)
   s.setAttribute('aria-hidden', 'true');
   // the diameter: a fixed `px`, else the stylesheet's (`--av-size` by surface and width)
   if (px) s.style.setProperty('--av-size', px + 'px');
@@ -121,8 +121,13 @@ export function accountBadge(badge, cls = '', title = '') {
 
 /** A CONVERSATION's avatar (the window's bar, the panel's first-screen row):
  *  an agent group wears the people glyph, a mail thread / mailbox the mail
- *  glyph, anything else the title's initials — on the hue of the key. */
-export function convAvatar({ key = '', title = '', kind = '', group = false, badge = null, pic = null } = {}, px = null, cls = '') {
+ *  glyph, anything else the title's initials — on the hue of the key;
+ *  `internal` (the first screen's VibeSpace rows): the mark, muted. */
+export function convAvatar({ key = '', title = '', kind = '', group = false, internal = false, badge = null, pic = null } = {}, px = null, cls = '') {
+  // lane internal-rows-look (the owner, 2026-10-09: "这个 VibeSpace 内部的聊天群视觉上很难和其他的外部的区分开"): VibeSpace's OWN
+  //  talk — every internal row, a group and a pair alike — wears the product's mark AS its avatar on a MUTED disc: no
+  //  hue, no corner badge (the avatar is the mark), so colour on the first screen means a person or a vendor
+  if (internal) return avatar({ name: title, glyph: 'vibespace', muted: true }, px, cls);
   const glyph = group ? 'users' : (kind === 'thread' || kind === 'mailbox') ? 'mail' : null;
   return avatar({ name: title, key, glyph, badge, pic }, px, cls);
 }

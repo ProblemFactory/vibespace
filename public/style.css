@@ -1437,6 +1437,22 @@ body.wm-dragging .window iframe, body.wm-dragging .window canvas, body.wm-draggi
 }
 .ut-opt:not(:disabled):hover { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .ut-opt:disabled { opacity: 0.45; cursor: not-allowed; }
+/* lane foryou-attachments: an ask's --artifact chips (icon + name + host) and the links in its words — one press opens */
+.ut-arts { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.ut-art {
+  display: inline-flex; align-items: center; gap: 4px; max-width: 100%; min-width: 0;
+  border: 1px solid var(--border); background: var(--bg-input); color: var(--text);
+  border-radius: 6px; padding: 2px 8px 2px 6px; font-size: 11px; line-height: 16px; cursor: pointer;
+}
+.ut-art:hover, .ut-art:focus-visible { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.ut-art-ic { display: inline-flex; flex: none; width: 14px; height: 14px; }
+.ut-art-ic svg { width: 14px; height: 14px; }
+.ut-art-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.ut-art-host { flex: none; color: var(--text-dim); font-size: 10px; }
+.fy-link { color: var(--accent); text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 2px; cursor: pointer; overflow-wrap: anywhere; }
+.fy-link:hover, .fy-link:focus-visible { text-decoration-style: solid; outline: none; }
+.iw-arts .ut-arts { margin: 10px 0 2px; gap: 6px; }
+.iw-arts .ut-art { font-size: 12px; padding: 4px 10px 4px 8px; }
 .ut-reply { display: flex; gap: 4px; align-items: flex-end; margin-top: 4px; cursor: default; }
 .ut-reply-input {
   flex: 1; min-width: 0; resize: none; overflow-y: auto; min-height: 22px; max-height: 140px;
@@ -2243,6 +2259,7 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
   #user-todos-popup .ut-group-head { min-height: 36px; }
   /* the reply controls are touch targets too (design-user-inbox-reply chunk 2) */
   #user-todos-popup .ut-opt { min-height: 36px; padding: 6px 14px; font-size: 12px; line-height: 22px; }
+  #user-todos-popup .ut-art, .iw-arts .ut-art { min-height: 36px; padding: 6px 12px 6px 10px; font-size: 12px; } /* lane foryou-attachments: touch targets */
   #user-todos-popup .ut-reply-input { min-height: 36px; font-size: 13px; padding: 7px 8px; }
   #user-todos-popup .ut-reply-send { min-width: 36px; min-height: 36px; }
   #user-todos-popup .ut-reply-btn svg, #user-todos-popup .ut-reply-send svg { width: 15px; height: 15px; }
@@ -4941,6 +4958,15 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .chan-ihead-at { flex-shrink: 0; font-size: 10px; font-weight: 700; color: var(--accent); }
 .chan-ihead .chan-ihead-unread { flex-shrink: 0; }
 @media (max-width: 600px) { .chan-ihead { min-height: 36px; } }
+/* lane internal-rows-look (the owner, 2026-10-09: "这个 VibeSpace 内部的聊天群视觉上很难和其他的外部的区分开"): VibeSpace's OWN
+   talk looks internal at a glance — the block (the head + its rows; folded, the head alone) sits on an inset BAND with a
+   muted 2 px left rule, every internal row wears the product's mark AS its avatar on a muted disc (no hue, no corner
+   badge — the head's mark the same), and its kind chip is the muted variant: colour on the first screen means a person
+   or a vendor. Theme variables only. */
+.chan-iband { margin: 2px 1px; padding: 2px 0; border-radius: var(--radius); background: color-mix(in srgb, var(--text-dim) 7%, transparent); box-shadow: inset 2px 0 0 color-mix(in srgb, var(--text-dim) 45%, transparent); }
+.chan-av.chan-av-vs { background: color-mix(in srgb, var(--text-dim) 16%, var(--av-surface)); color: var(--text-secondary); }
+.chan-av-badge.chan-ihead-badge[data-vs] { --acct: color-mix(in srgb, var(--text-dim) 16%, var(--av-surface)); color: var(--text-secondary); }
+.chan-src-chip.chan-src-chip-internal { color: var(--text-dim); background: transparent; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text-dim) 35%, transparent); }
 /* THE LOOK (channel-polish, 2026-09-27): an IM row — the conversation's AVATAR, the name (bold when
    unread), the time right; line 2 = the ONE tag · the last message (one line, dim) · the unread count.
    A GRID so the avatar can span both lines where there is room (≥ 220 px of panel: the 340 / 500 px rails,

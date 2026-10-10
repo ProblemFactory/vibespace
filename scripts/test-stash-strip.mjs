@@ -1413,7 +1413,8 @@ function producerCensus(src) {
     const R5 = MUTO.load('src/agent-routes.js', r5src, 'r5');
     const then = Object.fromEntries(Object.entries(shapes).map(([k, sh]) => [k, run(R5, sh)]));
     // lane artifacts-prompt-hint: r5's calls predate `fileTools`, so its Artifacts sentence is the UNNAMED one — that one delta is folded before the identity
-    const unnamed = (c) => c.replace(/Use your file tools \([^)\n]*\) for files/g, 'Use your file tools for files');
+    // lane foryou-attachments: the ask segment now names `[--artifact <path|/p/id>…]` (the brief: the reminder mentions it) — folded the same way
+    const unnamed = (c) => c.replace(/Use your file tools \([^)\n]*\) for files/g, 'Use your file tools for files').split('vibespace-ask "q" [--artifact <path|/p/id>…] — ').join('vibespace-ask "q" — ');
     const same = Object.keys(shapes).filter((k) => then[k] === unnamed(now[k]));
     const common = (k) => { const a = orderOf(then[k]), b = orderOf(now[k]); const both = a.filter((t) => b.includes(t)); return a.filter((t) => both.includes(t)).join() === b.filter((t) => both.includes(t)).join(); };
     ok(same.includes('full') && same.includes('diff') && same.includes('quiet') && same.includes('reminder') && Object.keys(shapes).every(common) && orderOf(then.manager).includes('<vibespace-jobs-missed-while-away>') && !orderOf(now.manager).includes('<vibespace-jobs-missed-while-away>'),

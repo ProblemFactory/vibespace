@@ -17,6 +17,7 @@ and a user told "check your inbox" does not know where to look.
 ```
 vibespace-ask "the question"  --detail "options + your recommendation" --urgency high
 vibespace-ask "Run the migration now?" --options "run now|wait for backup"
+vibespace-ask "Review the dry run?" --artifact out/DRY-DUMP.md /p/<id>   # chips the user opens in one press
 vibespace-ask list                     # your session's open items
 vibespace-ask resolve <id|text-match>  # the MOMENT they answer (a chat answer counts)
 vibespace-ask show <id>                # one item of yours in full, any status, with the user's reply
@@ -27,6 +28,22 @@ vibespace-ask clear <id>               # an item YOU filed: it stays in the tray
   non-empty, no `|` inside a label — `"A||B"` or a trailing `|` is refused by
   name, never trimmed away). The user sees them as chips; clicking one replies
   with exactly that label. Decisions with options sort first in the inbox.
+
+- `--artifact <path|/p/id>…` = up to 8 things the user should OPEN from the
+  item: a file you want reviewed, a design folder (it holds `design.json`), a
+  page you published (`/p/<id>`). Every argument after the flag until the next
+  flag; a path is absolute against your shell's cwd. They show as chips under
+  the question (the tray row AND the For you window); one press opens each in
+  its viewer / the Design window / the page. Each is CHECKED at submit: the file
+  exists and is readable on YOUR machine, a design folder holds its manifest, a
+  page is published — any that would not open ⇒ NOTHING is filed, the CLI prints
+  one line per bad attachment with the fix and exits 2; fix it and run the same
+  `vibespace-ask` again (no duplicate is left behind). The attachments also show
+  in your conversation's Artifacts list.
+- Paths and links you WRITE in the question or `--detail` are clickable for the
+  user: absolute paths, `~/…`, relative paths (`docs/plan.md`, or a bare
+  filename in backticks) resolved against your cwd on your machine, http(s)
+  links, `/p/<id>` pages.
 
 - One item per genuine decision — don't split a single question into several
   items, don't re-file what's already open (re-filing the same text refreshes

@@ -37,9 +37,24 @@ const options = optionsRaw === undefined ? undefined : optionsRaw.split('|').map
 // lands in the inbox's own Notices section with a grey count, never the red badge.
 const noticeIdx = rawArgs.indexOf('--notice');
 const kind = noticeIdx >= 0 ? (rawArgs.splice(noticeIdx, 1), 'notice') : undefined;
+// --artifact <path|/p/id>… (lane foryou-attachments, owner 2026-10-09): what you want the user to OPEN from this item —
+// vibespace-msg's hand-over grammar: every argument after the flag until the next flag (only the first while the question
+// is still to come); a path absolute against this shell's cwd, a /p/<id> page link as is. The server checks that each one
+// OPENS (a readable file, a design folder, a published page; ≤ 8) — any that would not ⇒ NOTHING is filed (exit 2).
+const artifacts = [];
+for (let i = rawArgs.indexOf('--artifact'); i >= 0; i = rawArgs.indexOf('--artifact')) {
+  const textIn = rawArgs.slice(0, i).some((a) => !a.startsWith('-'));
+  let n = 0;
+  while (rawArgs[i + 1 + n] !== undefined && !rawArgs[i + 1 + n].startsWith('--') && (textIn || n < 1)) n++;
+  for (const v of rawArgs.splice(i, 1 + n).slice(1)) artifacts.push(/^\/p\/[\w-]+\/?$/.test(v) || v.startsWith('/') ? v : require('node:path').resolve(v));
+}
 const USAGE = [
   'usage — mirror questions for the USER into their For you tray, bottom right of their screen (they may not be watching this window):',
-  '  vibespace-ask "question or decision needed" [--detail "context, options, your recommendation (up to 8000 chars)"] [--urgency low|normal|high|urgent] [--options "A|B|C"] [--notice]',
+  '  vibespace-ask "question or decision needed" [--detail "context, options, your recommendation (up to 8000 chars)"] [--urgency low|normal|high|urgent] [--options "A|B|C"] [--notice] [--artifact <path|/p/id>…]',
+  '      --artifact = up to 8 things the user should OPEN from the item (a file you want reviewed, a design folder, a published /p/<id> page) —',
+  '                   chips under the question, one press opens each; every path after the flag until the next flag, relative to this shell\'s cwd.',
+  '                   Each must open NOW (exists, readable, a design holds design.json, a page is published) or NOTHING is filed (exit 2) —',
+  '                   fix the named attachment and run vibespace-ask again. Paths and links written in the question / --detail are clickable too',
   '      --options = up to 6 one-click answers (≤40 chars each) — the user\'s reply is then exactly one label',
   '      --notice = for their information only (no action needed): its own Notices section, grey count, never the red badge',
   '  vibespace-ask list                    print this session\'s open items',
@@ -58,6 +73,11 @@ async function call(body) {
     body: JSON.stringify(body),
   });
   const data = await res.json().catch(() => ({}));
+  if (!res.ok && data.code === 'bad-artifact' && Array.isArray(data.refused)) { // lane foryou-attachments: one line per attachment that would not open
+    for (const b of data.refused) console.error('vibespace-ask: ' + b.error);
+    console.error('nothing was filed — fix the attachment and run vibespace-ask again');
+    process.exit(2);
+  }
   if (!res.ok) { console.error('vibespace-ask:', data.error || res.status); process.exit(1); }
   return data;
 }
@@ -122,9 +142,13 @@ async function main() {
 }
 async function fileItem(text) {
   if (!text) { console.error(USAGE); process.exit(1); }
-  const { item } = await call({ add: { text, detail, urgency, kind, options } });
+  const body = { add: { text, detail, urgency, kind, options } };
+  if (artifacts.length) body.add.artifacts = artifacts; // lane foryou-attachments: judged by the server — any that would not open ⇒ nothing filed
+  const { item } = await call(body);
   console.log((item.existing ? 'already in the user\'s For you tray (refreshed): ' : 'added to the user\'s For you tray (bottom right of their screen): ') + item.text + '  (' + item.id + ')');
   if (Array.isArray(item.options) && item.options.length) console.log('  options: ' + item.options.join(' | ') + '  (a chip reply arrives as exactly that label)');
+  for (const a of Array.isArray(item.artifacts) ? item.artifacts : []) console.log('  attached: ' + (a.kind === 'page' ? a.url : a.path) + ' (' + a.kind + (a.host ? ' on ' + a.host : '') + ') — one press opens it from the item');
+  if (item.artifactsCut) console.log('NOTE: only the first ' + item.artifactsCut + ' attachments were kept — attach the rest to a second item.');
   // THE CUT, NAMED (2026-09-27): the store keeps a question up to 500 chars and a detail up
   // to 8000 and says on the returned record which cap it hit — a longer --detail used to
   // lose its tail silently (the user read a question whose context stopped mid-sentence)

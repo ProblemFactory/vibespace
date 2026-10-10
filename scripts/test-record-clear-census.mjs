@@ -1746,6 +1746,7 @@ const I_RECV = {
   'src/lib/jobs-panel.js|j': ['job', 'a job snapshot the panel drew'],
   'src/lib/jobs-panel.js|job': ['job', 'the job the Job input window drew'],
   'src/lib/user-todos-panel.js|nameFor()': ['todo', 'a For-you item\'s label (a Background Work item\'s is the job\'s name)'],
+  'src/lib/user-todos-actions.js|row': ['todo', 'an ask\'s --artifact row (its name / path — lane foryou-attachments; a clear drops the item\'s artifacts: SHAPES todo)'],
   'src/lib/user-todos-panel.js|wordsOf()': ['todo', 'a For-you item\'s words (the model\'s)'],
   'src/server/conversation-deliver.js|opts': ['carrier', 'the card label + text of a delivery (a job\'s `Background Work · <name>`)'],
   'src/server/conversation-deliver.js|shown[0]': ['carrier', 'the retry park\'s single landed entry at its card (notify-retry verify r2: the card is built AFTER the post from the words as they stand — a clear that reached it mid-flight already rewrote them to the sentence)'],
@@ -1930,6 +1931,7 @@ const I_SITES = {
   'src/lib/jobs-panel.js|title|job.name': ['live', 'the Job input window\'s title, re-worded on every render + generic in every layout record (WORDLESS_TITLES)'],
   'src/lib/user-todos-panel.js|toast|nameFor()': ['ref', 'the arrival toast: the history keeps the head + {kind: todo, id} (r4 ⑤ / r5 ⑩)'],
   'src/lib/user-todos-panel.js|toast|wordsOf()': ['ref', 'the arrival toast: the history keeps the head + {kind: todo, id} (r4 ⑤)'],
+  'src/lib/user-todos-actions.js|toast|row.name': ['ref', 'an ask\'s attachment gone at open (lane foryou-attachments): the history keeps the head + {kind: todo, id}'],
   'src/server/conversation-deliver.js|peer|opts.fromName': ['transcript', 'the card drawn when a delivery REACHED the conversation (cardOk)'],
   'src/server/conversation-deliver.js|peer|opts.cardText': ['transcript', 'the card drawn when a delivery reached the conversation'],
   // notify-retry verify r2: the retry park's landing card is built AFTER the post from the entry's words AS THEY STAND (a clear

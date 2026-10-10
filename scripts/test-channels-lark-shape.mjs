@@ -755,6 +755,13 @@ function gateCensus(src, { gateRe, ungatedIds }) {
   ok(r1.ok === true && r1.vendorMessageId === 'om_sent_0001' && r1.sentAs === 'user' && r1.at === T0 + 1000 && r1.uuid === 'p-0001', 'the answer carries the vendor id, the instant, sentAs user and the uuid used', JSON.stringify(r1));
   ok(r1.observed && r1.observed.senderType === 'user' && r1.observed.senderId === 'ou_member_a', 'the vendor\'s OWN sender_type rides back as `observed` — the §21-item-3 measurement the engine records (the fixture value is a SHAPE, not evidence)');
   ok(v.calls.filter((c) => c.method === 'POST').length === 1, 'exactly one request was sent');
+  {   // lane lark-unknown-tags (owner 2026-10-09): what an agent sends goes out AS WRITTEN — its own speech-control tags included
+    const t = mk(SEND);
+    const TTS = '<speak><emphasis>Hello</emphasis> <break time="500ms"/> world</speak>';
+    const rt = await t.a.send(C, { text: TTS, idemKey: 'p-tts-1', as: 'user' });
+    const pt = t.v.calls.find((c) => c.method === 'POST' && c.path === '/open-apis/im/v1/messages');
+    ok(rt.ok === true && !!pt && pt.body.msg_type === 'text' && JSON.parse(pt.body.content).text === TTS, 'an agent\'s "<speak><emphasis>Hello</emphasis> <break time=\"500ms\"/> world</speak>" reaches the Lark request body VERBATIM (a `text` message; stub vendor)', JSON.stringify(pt && pt.body));
+  }
   v.calls.length = 0;
   const ANCHOR_010 = { vendorId: 'om_ops_010', convId: C, raw: { chat_id: C } };
   const r2 = await a.send(C, { text: 'ok, on it', idemKey: 'p-0002', as: 'user', replyTo: 'om_ops_010', replyAnchor: ANCHOR_010 });
@@ -946,7 +953,7 @@ console.log('\n⑩ a body the reader cannot read is its words, never a throw (la
   const it = () => ({ message_id: 'om_guard', msg_type: 'text', create_time: '1', sender: { id: 'ou_x', sender_type: 'user' }, body: once() });
   let r = null, e = null;
   try { r = lark.toRecord('lark', 'oc_g', it(), {}); } catch (x) { e = x; }
-  ok(!e && r && r.text === 'raw ‹b›words‹/b› here', `a reader that throws inside textOf: the record carries the raw words, tags sealed (${e ? e.message : JSON.stringify(r && r.text)})`);
+  ok(!e && r && r.text === 'raw <b>words</b> here', `a reader that throws inside textOf: the record carries the raw words behind the fence (only a frame name is quoted — lane lark-unknown-tags) (${e ? e.message : JSON.stringify(r && r.text)})`);
   const MG = mutantCopies('chan-lark-guard', REPO);
   const srcL = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf-8');
   const G = '  try { return Blocks.quoteTags(textOfRaw(item)); } catch {';

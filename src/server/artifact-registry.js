@@ -15,6 +15,9 @@
  *   · handover({from, to, items, reach}) — `vibespace-msg send <agent> "…" --artifact <path>…`: the helper's OWN rows
  *     land as the receiver's rows with `via: {kind:'handover', from}`; a design re-registers under the receiver and
  *     opens its Design window; the helper's row keeps `handedTo`.
+ *   · presentAsk(session, artifacts, {id}) — `vibespace-ask … --artifact <path|/p/id>…` (lane foryou-attachments): each
+ *     attachment the ask carries is a `present` op (AF.askOp) on the asking conversation's rows — its Artifacts list shows
+ *     what it asked the owner to look at; `judgeAsk` (the route's submit check) proved each one OPENS before anything is filed
  *   · touch({sessionId, host, path, summary}) — the user's own save in an editor window linked to the chat
  *     (ws `artifact-touch`): the row gets `by: user, edits+1` and the conversation hears ONE next-turn note.
  * THE REGISTRIES (lane artifacts-registries) — the three stores' ONE notification points hand their records here; the
@@ -178,6 +181,73 @@ function handover({ from = {}, to = [], items = [], reach = null, at = Date.now(
   return { ok: handed.length > 0, handed, refused, ...(handed.length ? {} : { code: 'nothing-handed', error: (refused[0] && refused[0].error) || 'nothing handed over' }) };
 }
 
+// ── WHAT AN ASK SHOWS (lane foryou-attachments, owner 2026-10-09 21:42Z, binding: "artifact attachment 必须要在 agent 提交的时候
+// 检查 validity，确保用户收到的时候可以打开，不然就提醒 agent 重发") ──
+const ASK_MANIFEST = 'design.json'; // src/design-model.js MANIFEST_FILE — a design folder is one that holds it
+const errWhy = (e) => { const s = String((e && (e.code || '')) + ' ' + ((e && e.message) || '')); return /EACCES|EPERM|permission denied/i.test(s) ? 'unreadable' : /ENOENT|ENOTDIR|no such file|not found/i.test(s) ? 'missing' : 'unopenable'; };
+/** THE SUBMIT JUDGE: every --artifact must OPEN for the owner — a file exists and is readable on the ASKING conversation's
+ *  host (a remote host through RemoteFs `info`, never a local stat of a remote path; locally the SafeFs door: `stat`, then a
+ *  one-byte `readChunk` = R_OK; a link whose target is gone fails the stat), a folder only as a design (its design.json
+ *  readable), a /p/<id> registered on this server AND published. `items` = absolute paths / page links (the CLI made them
+ *  absolute against its shell's cwd); `fsCall(op, payload)` = the SafeFs call; `remote` = the RemoteFs.
+ *  → {artifacts: [{kind, host, path|page, name, url?}], bad: [{item, why, error}]} — ANY bad ⇒ the route files NOTHING. */
+async function judgeAsk({ session = null, items = [], fsCall = null, remote = null } = {}) {
+  const host = session && session.host && session.host !== 'local' ? String(session.host) : '';
+  const cwd = (session && session.cwd) || '';
+  const artifacts = [], bad = [];
+  const where = host ? `on ${host}` : 'on this machine';
+  const probe = async (p) => {
+    if (host) {
+      if (!remote || typeof remote.info !== 'function') throw Object.assign(new Error(`${host} cannot be reached for files`), { code: 'no-remote' });
+      const i = await remote.info(host, p);
+      return { dir: !!(i && i.isDirectory) };
+    }
+    const st = await fsCall('stat', { path: p });
+    if (!st || !st.isDirectory) await fsCall('readChunk', { path: p, offset: 0, length: 1 }); // R_OK: an unreadable file throws EACCES here
+    return { dir: !!(st && st.isDirectory) };
+  };
+  for (const raw of items) {
+    const item = String(raw || '').trim();
+    const pm = /^\/p\/([\w-]+)\/?$/.exec(item);
+    if (pm) {
+      const store = deps.pages && deps.pages();
+      let hit = null;
+      try { hit = store && typeof store.byId === 'function' ? store.byId(pm[1]) : null; } catch { hit = null; }
+      if (!hit) { bad.push({ item, why: 'no-page', error: `${item}: no such page on this server — publish the file first (vibespace-page publish <file>) and attach the /p/<id> it prints` }); continue; }
+      if (!hit.page) { bad.push({ item, why: 'unpublished', error: `${item}: not published (it was taken down) — publish it again first (vibespace-page publish <file>)` }); continue; }
+      artifacts.push({ kind: 'page', host: '', page: pm[1], name: String(hit.page.name || pm[1]).slice(0, 200), url: '/p/' + pm[1] });
+      continue;
+    }
+    const p = AF.absPath(item, cwd).replace(/\/+$/, '') || item;
+    if (!p.startsWith('/')) { bad.push({ item, why: 'not-absolute', error: `${item}: not a path this server can open — pass a path (absolute, or relative to your shell's cwd) or a /p/<id> page link` }); continue; }
+    let r;
+    try { r = await probe(p); } catch (e) {
+      const why = errWhy(e);
+      bad.push({ item, why, error: why === 'missing' ? `${item}: no such file ${where} — check the path (absolute against your shell's cwd); a link whose target is gone counts as missing`
+        : why === 'unreadable' ? `${item}: not readable ${where} (permission denied) — make it readable (chmod a+r) or attach a readable copy`
+        : `${item}: cannot be opened ${where} (${String((e && e.message) || e).slice(0, 160)}) — check the path and run vibespace-ask again` });
+      continue;
+    }
+    if (r.dir) {
+      try { const m = await probe(p + '/' + ASK_MANIFEST); if (m.dir) throw Object.assign(new Error('a folder'), { code: 'ENOENT' }); }
+      catch { bad.push({ item, why: 'folder', error: `${item}: a folder without ${ASK_MANIFEST} — attach a file in it, or a design folder (vibespace-design new|open makes one)` }); continue; }
+      artifacts.push({ kind: 'design', host, path: p, name: AF.baseName(p) });
+    } else artifacts.push({ kind: 'file', host, path: p, name: AF.baseName(p) });
+  }
+  return { artifacts, bad };
+}
+/** A filed ask's attachments → the asking conversation's rows (ONE `present` op each through noteOp — the one writer). */
+function presentAsk(session, artifacts, { id = '', at = Date.now() } = {}) {
+  if (!session || !Array.isArray(artifacts)) return 0;
+  let n = 0;
+  artifacts.forEach((a, k) => {
+    const op = AF.askOp(a, { at, id: id ? `ask:${id}:${k}` : '' });
+    if (!op) return;
+    try { if (!noteOp(session, { ...op, by: 'agent' }).skipped) n++; } catch (e) { deps.log.warn?.(`[artifacts] ask attachment not shown: ${e.message}`); }
+  });
+  return n;
+}
+
 // ── THE REGISTRIES (lane artifacts-registries) ──
 /** A published page's notification (onPublished: publish / re-publish / flags / unpublish) → its conversation's row; every
  *  OTHER conversation that shows its link hears `artifacts-changed` (its presented row re-resolves: a new name, gone). */
@@ -308,5 +378,5 @@ function listFor(sessionId) {
 }
 function mount(app) { app.get('/api/artifacts', (req, res) => res.json(listFor(req.query && req.query.sessionId))); return api; }
 
-const api = { configure, mount, listFor, observe, helperOps, handover, ownerOf, noteEdit, touch, notePage, noteDesign, noteUploads, storeRowsOf, servicesOf, noteService, noteForwards, DOC_EDIT_FROM };
+const api = { configure, mount, listFor, observe, helperOps, handover, judgeAsk, presentAsk, ownerOf, noteEdit, touch, notePage, noteDesign, noteUploads, storeRowsOf, servicesOf, noteService, noteForwards, DOC_EDIT_FROM };
 module.exports = api;

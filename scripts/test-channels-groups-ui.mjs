@@ -197,6 +197,59 @@ console.log('§1 channel-groups-view (PURE)');
       && /const toggle = \(\) => \{ setFold\('internal', !b\.folded\); draw\(\); \};/.test(PS) && V.PANEL_PARTS.includes('internal'),
       'channels-badges PIN: the first screen draws through internalBlock; its head folds through setFold (user state `channelsPanelFolds.internal`, broadcast to every client); lane channels-fold: before the folds load it is the default (folded)');
   }
+  // lane internal-rows-look (the owner, 2026-10-09: "这个 VibeSpace 内部的聊天群视觉上很难和其他的外部的区分开" — seven agent rows
+  // and a Lark row read as ONE list, told apart by an 8 px corner mark): THE REAL convAvatar over a minimal DOM — an
+  // internal row (a group and a pair alike) wears the VibeSpace mark AS its avatar on a muted disc: no hue, no corner
+  // badge; a Lark row keeps its hue, its picture slot and its vendor mark. CONTROL: a channel-chrome copy without the
+  // internal branch paints the internal row on a hue with a corner badge ⇒ the leg is red. The band (ONE kept
+  // container) + the node identity across a draw are measured in the real DOM: test-channels-internal-look (chrome).
+  {
+    const mkEl = (tag) => {
+      const e = { tagName: tag, className: '', dataset: {}, attrs: {}, children: [], title: '', textContent: '', _html: '' };
+      e.style = { setProperty(k, v) { this[k] = v; } };
+      e.classList = { add(c) { e.className = (e.className + ' ' + c).trim(); }, contains: (c) => e.className.split(/\s+/).includes(c) };
+      e.appendChild = (x) => { e.children.push(x); return x; };
+      e.insertBefore = (x) => { e.children.unshift(x); return x; };
+      e.setAttribute = (k, v) => { e.attrs[k] = String(v); };
+      e.querySelector = () => null;
+      Object.defineProperty(e, 'innerHTML', { set(v) { e._html = String(v); }, get() { return e._html; } });
+      return e;
+    };
+    const saved = Object.getOwnPropertyDescriptor(globalThis, 'document');
+    globalThis.document = { createElement: mkEl, querySelectorAll: () => [] };
+    try {
+      const IC = await import(path.join(REPO, 'src/lib/icons.js'));
+      const AV = await import(path.join(REPO, 'src/lib/channel-avatar.js'));
+      const lark = AV.accountBadges([{ id: 'lark:a', kind: 'lark', label: 'Office' }]).get('lark:a');
+      const look = (CC) => {
+        const own = CC.convAvatar({ key: 'vibespace-groups/g1', title: 'VibeSpace 车道群', group: true, internal: true, badge: AV.INTERNAL_BADGE }, null, 'chan-grow-av');
+        const pair = CC.convAvatar({ key: 'vibespace-groups/p1', title: 'a · b', group: true, internal: true, badge: AV.INTERNAL_BADGE }, null, 'chan-grow-av');
+        const ext = CC.convAvatar({ key: 'lark:a/oc_1', title: 'Dana', kind: 'p2p', badge: lark, pic: { account: 'lark:a', author: 'ou_dana1' } }, null, 'chan-grow-av');
+        const badgeOf = (a) => a.children.find((k) => /\bchan-av-badge\b/.test(k.className)) || null;
+        const shape = (a) => ({ cls: a.className, hue: a.dataset.hue || null, badge: !!badgeOf(a), mark: a.children.some((k) => k._html === IC.UI_ICONS.vibespace), vendor: (badgeOf(a) && badgeOf(a).children[0] && badgeOf(a).children[0].dataset.mark) || null, pic: a.dataset.av || null });
+        return { own: shape(own), pair: shape(pair), ext: shape(ext) };
+      };
+      const mutedMark = (x) => x.cls.split(' ').includes('chan-av-vs') && x.hue === null && !x.badge && x.mark && !x.cls.includes('chan-av-badged');
+      const L = look(await import(path.join(REPO, 'src/lib/channel-chrome.js')));
+      ok(mutedMark(L.own) && mutedMark(L.pair),
+        'internal-rows-look: an internal row\'s avatar IS the VibeSpace mark on a muted disc — no hue, no corner badge (a group and a pair alike, ONE rule)', JSON.stringify(L));
+      ok(L.ext.hue !== null && L.ext.badge && L.ext.vendor === 'lark' && L.ext.pic === 'lark:a\nou_dana1' && !L.ext.cls.includes('chan-av-vs'),
+        'internal-rows-look: a Lark row keeps its coloured disc, its picture slot and its vendor mark at the corner', JSON.stringify(L.ext));
+      const CS = read('src/lib/channel-chrome.js');
+      const BRANCH = "  if (internal) return avatar({ name: title, glyph: 'vibespace', muted: true }, px, cls);\n";
+      ok(CS.split(BRANCH).length === 2, 'internal-rows-look CONTROL setup: the internal branch is spelled once');
+      const MC = mutantCopies('chan-internal-look', REPO);
+      const L0 = look(await import(MC.write('src/lib/channel-chrome.js', CS.replace(BRANCH, ''), 'no-internal-branch', { esm: true })));
+      ok(!mutedMark(L0.own) && L0.own.hue !== null && L0.own.badge,
+        'internal-rows-look CONTROL: without the internal branch the agent group wears a hue and the 8 px corner badge (the owner\'s screenshot) — the leg above would be red', JSON.stringify(L0.own));
+      for (const c of copiesCensus(MC.files, MC.dir, REPO, { minCopies: 1, label: 'chan-internal-look: ' })) ok(c.pass, c.name, c.pass ? undefined : c.detail);
+    } finally { if (saved) Object.defineProperty(globalThis, 'document', saved); else delete globalThis.document; }
+    const PS = read('src/lib/channels-panel.js');
+    ok(/const band = ib\.block \? keep\('internal-band', /.test(PS) && /reconcile\(band, bandKids\);/.test(PS) && /inBand = r\.kind === 'internal-head' \|\| \(inBand && isInternal\(r\)\);/.test(PS)
+      && /const own = isInternal\(r\);/.test(PS) && /internal: own, badge: r\.account/.test(PS) && /src\.className = 'chan-src-chip' \+ \(own \? ' chan-src-chip-internal' : ''\);/.test(PS)
+      && /tag, r\.account, isInternal\(r\)\]\);/.test(PS),
+      'internal-rows-look PIN: the block is ONE kept band (keep + reconcile — never replaced), the internal flag decides the avatar and the muted kind chip, and it is in the row\'s memo signature (a row that changes kind redraws)');
+  }
   // lane channels-fold (the owner, 2026-10-03 — channels-badges gap 2: Slack had no glyph, so two glyph-less vendors
   // looked alike): THE GLYPH CENSUS — every adapter kind that can be CONNECTED (the engine's REAL_ADAPTERS, each
   // module's own `kind`) has its `vendor-<kind>` silhouette in the library, the one the account badge and the account

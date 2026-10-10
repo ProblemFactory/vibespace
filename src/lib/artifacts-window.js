@@ -28,11 +28,15 @@ export function windowRows(v, { rail = 'all', q = '', col = 'changed', dir = '' 
   const f = filterRows(railRows(rowsOfView(v), rail), q);
   return { rows: sortRows(f.rows, { col, dir }), filtered: f.q ? f : null };
 }
-/** A row opens through the conversation's chat view when this client shows it (its one door), else by its kind. */
-function openFrom(app, sessionId, b) {
-  const cv = [...(app.sessions?.values?.() || [])].find((x) => x && x.sessionId === sessionId && typeof x._openArtifact === 'function');
+/** THE ONE ARTIFACT OPEN DOOR: a row opens through the conversation's chat view when this client shows it (its one door),
+ *  else by its kind. Exported for the For-you chips (lane foryou-attachments: an ask's --artifact rows — a page by its
+ *  /p/ link, a design in the Design window, a file in its viewer on its host). */
+export function openArtifactRow(app, sessionId, b) {
+  if (!app || !b) return;
+  const cv = sessionId ? [...(app.sessions?.values?.() || [])].find((x) => x && x.sessionId === sessionId && typeof x._openArtifact === 'function') : null;
   if (cv) return cv._openArtifact(b);
   if (b.kind === 'service') { if (app.openBrowser && b.url) app.openBrowser(b.url); return; }
+  if (b.kind === 'page' && b.url) { const u = new URL(b.url, location.origin).href; if (app.openBrowser) app.openBrowser(u); else window.open(u, '_blank', 'noopener'); return; }
   if (b.kind === 'design') { app.openDesign?.({ host: b.host || '', dir: b.path, sessionId }); return; }
   if (b.path) app.openFile?.(b.path, b.name || b.path.split('/').pop(), { host: b.host || undefined });
 }
@@ -89,7 +93,7 @@ export function mountArtifactsWindow(root, { app = null, sessionId = '', signal 
       more.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); const q = e.currentTarget.getBoundingClientRect(); showContextMenu(q.left, q.bottom, artifactRowMenu(r._afRow, { app, onOpen: (x) => openFrom(app, sessionId, x) })); });
       const cell = div('af-td af-c-more'); cell.appendChild(more);
       r.append(name, div('af-td af-c-kind'), div('af-td af-c-helper'), div('af-td af-c-edits'), div('af-td af-c-changed'), div('af-td af-c-path'), cell);
-      r.addEventListener('click', () => { if (app) openFrom(app, sessionId, r._afRow); });
+      r.addEventListener('click', () => { if (app) openArtifactRow(app, sessionId, r._afRow); });
       r.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); r.click(); } });
       rowEls.set(b.key, r);
     }

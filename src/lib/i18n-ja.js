@@ -8096,4 +8096,10 @@ export default {
   "(a guard — change it in the policy row)": "（ガードです — ポリシー行で変更できます）",
   "Outbox: outside working hours every message needs your approval": "送信箱: 勤務時間外のメッセージはすべて承認が必要",
   "Applies once a working-hours time zone is set below. Off = an agent with send authority on a \"send directly\" channel sends at any hour. Also switched in the policy row (a conversation's or an account's Reach & policy…).": "下の勤務時間のタイムゾーンを設定すると有効になります。オフ = 「直接送信」のチャンネルで送信権限のあるエージェントがいつでも送信します。ポリシー行（会話またはアカウントの「範囲とポリシー…」）でも切り替えられます。",
+  // lane foryou-attachments: an ask's chip / link whose target is gone
+  "An attachment is gone": "添付がなくなりました",
+  "A link in an item was not found": "項目内のリンクが見つかりません",
+  "Not found: {path}": "見つかりません: {path}",
+  "{name} is no longer published": "{name} は公開されていません",
+  "{name} is gone — nothing at {path} any more": "{name} はもうありません — {path} に見つかりません",
 };

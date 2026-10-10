@@ -447,8 +447,9 @@ try {
   // the buttons FLOAT at the row's top-right and the words use the full width below them (owner 2026-09-25: a sibling
   // column reserved the right third of every tall row); the pre-2.369.175 flex column fails textShare (≈0.65) by construction
   check('⑩w …the words use the FULL row width (textShare ≥ 0.95), the buttons sit at the top-right and the text runs on below them', !!m10 && m10.textShare >= 0.95 && m10.actionsTop < 12 && m10.actionsRight < 12 && m10.textBelowActions > 0, m10);
-  // the control is LIVE: the old `overflow-wrap: normal` put back on the same row must overflow, else the assertion proves nothing
-  await evalJs(`(() => { const st = document.createElement('style'); st.id = 'x10w-control'; st.textContent = '.ut-mini-popover .ut-text { overflow-wrap: normal !important; }'; document.head.appendChild(st); return true; })()`);
+  // the control is LIVE: the old `overflow-wrap: normal` put back on the same row must overflow, else the assertion proves nothing —
+  // on the words AND the links in them (2.369.247: a path in an item's words is a .fy-link that wraps by its own rule)
+  await evalJs(`(() => { const st = document.createElement('style'); st.id = 'x10w-control'; st.textContent = '.ut-mini-popover .ut-text, .ut-mini-popover .ut-text .fy-link { overflow-wrap: normal !important; }'; document.head.appendChild(st); return true; })()`);
   const m10c = await evalJs(measure);
   await evalJs(`document.getElementById('x10w-control')?.remove(); true`);
   check('⑩w CONTROL: with the old overflow-wrap the same row runs past its text box (the wrap rule is what holds it)', !!m10c && m10c.textOver > 1, m10c);

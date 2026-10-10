@@ -107,7 +107,7 @@ function apply(rows, op) {
   if (prev && o.id && prev.lastId === o.id) return { rows: cur, row: prev, born: false, evicted: [], skipped: 'seen' };
   const row = prev ? { ...prev } : { key, host, path, name: baseName(path), kind: isKind(o.kind) ? o.kind : kindOf(path, o.op), firstAt: at, lastAt: at, by, writes: 0, edits: 0, lastOp: o.op, bytes: null, lastId: null };
   if (prev && isKind(o.kind) && o.kind !== 'code' && row.kind !== o.kind && !outranks(row.kind, o.kind)) row.kind = o.kind; // a registry's kind (page / design / upload) names it better than an extension
-  if (REG_OPS.includes(o.op)) { if (o.url !== undefined) row.url = o.url ? String(o.url) : null; if (o.state) row.state = String(o.state); if (o.name) row.name = String(o.name).slice(0, 200); if (o.op === 'present' && !prev) { row.presented = true; row.page = String(o.page || ''); row.origin = String(o.origin || ''); } }
+  if (REG_OPS.includes(o.op)) { if (o.url !== undefined) row.url = o.url ? String(o.url) : null; if (o.state) row.state = String(o.state); if (o.name) row.name = String(o.name).slice(0, 200); if (o.op === 'present' && !prev && o.page) { row.presented = true; row.page = String(o.page || ''); row.origin = String(o.origin || ''); } }
   else if (o.op === 'write' && by === 'agent') row.writes += 1; else row.edits += 1;
   const via = viaOf(o.via);
   if (via && (!prev || !row.via)) row.via = via; // lane artifacts-handover: WHO made it for this conversation (a subagent / a helper conversation) — the birth's
@@ -293,6 +293,16 @@ function presentOp(link) {
   if (!link || !link.id) return null;
   return { op: 'present', kind: 'page', host: '', path: '/p/' + link.id, page: link.id, origin: String(link.origin || ''), url: String(link.origin || '') + '/p/' + link.id };
 }
+/** An ask's attachment (lane foryou-attachments: `vibespace-ask … --artifact <path|/p/id>…`) → the reducer's op: a page =
+ *  presentOp (a presented row, resolved at every read); a file / a design = a `present` birth of its row — NAMED, never
+ *  counted (REG_OPS) — so the asking conversation's Artifacts list shows what it asked the owner to look at. */
+function askOp(a, { at = Date.now(), id = '' } = {}) {
+  if (!a) return null;
+  const tag = { at, ...(id ? { id: String(id) } : {}) };
+  if (a.kind === 'page') { const op = presentOp({ id: a.page, origin: '' }); return op && { ...op, ...tag }; }
+  if (!a.path || (a.kind !== 'file' && a.kind !== 'design')) return null;
+  return { op: 'present', ...(a.kind === 'design' ? { kind: 'design' } : {}), host: a.host || '', path: a.path, name: a.name || '', ...tag };
+}
 /** THE READ (the registry's list, every time): each presented row against the pages store. `pageOf(id)` → {page} (live) |
  *  {gone: true} (unpublished — B-f694's 410) | null (never published here); `own(page)` = this conversation published it;
  *  `base` = this instance's origin; `nameOf(page)` = the publisher conversation's live name. Own page ⇒ dropped (the own
@@ -423,6 +433,6 @@ const kindWord = (kind, lang = 'en') => (KIND_WORDS[kind] || KIND_WORDS.other)[l
 module.exports = { KINDS, VIEW_ORDER, OPS, REG_OPS, KIND_RANK, BY, MAX_ROWS, CATEGORY_KIND, KIND_WORDS, kindOf, absPath, keyOf, apply, fold, merge, view,
   cardWorthy, cardBlock, cardPlacement, timeSlot, cardFacts, autoOpenVerdict, ownerOfIn, editNoteText, lineDelta, kindWord, baseName,
   pageOp, designOp, uploadOp, storeRows,
-  MAX_PRESENTED, PAGE_LINK, pageLinksIn, presentOp, resolvePresented,
+  MAX_PRESENTED, PAGE_LINK, pageLinksIn, presentOp, askOp, resolvePresented,
   SERVICE_KEEP_MS, jobOwnerCid, forwardFor, serviceLink, serviceRow, serviceRows,
   VIA_KINDS, MAX_HANDOVER, viaOf, handoverOp, markHanded, rowFor };

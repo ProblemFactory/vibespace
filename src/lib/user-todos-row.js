@@ -30,6 +30,8 @@
 //          replyState(item) → {show, enabled, why}, mini?}
 import { escHtml } from './utils.js';
 import { UI_ICONS } from './icons.js';
+import { getFileIcon } from './file-types.js';
+import { linkedHtml, segmentText } from './foryou-links.js'; // PURE (lane foryou-attachments): THE links in an item's words — one grammar with the chat
 import { cardWords, progressWords } from './app-card-model.js'; // design 009: THE words of an app install's one card (PURE)
 
 /** "3min ago" / "2h ago" / a date — words by the caller's t(). */
@@ -163,7 +165,7 @@ function partsOf(entry, ctx) {
     : `<span class="ut-dot" data-urgency="${notice ? '' : escHtml(i.urgency || 'normal')}" title="${escHtml(notice ? t('notice') : (i.urgency || 'normal'))}"></span>`;
   // Detail rides behind a collapsed expander (up to 2000 chars of agent context).
   // (an exit ask's detail IS its command — shown whole above its Allow / Deny, never again folded below them)
-  const detailHtml = detail && !(i.action && i.action.type === 'exit-run-ask') ? `<details class="ut-detail-exp"><summary>${escHtml(t('detail'))}</summary><div class="ut-detail">${escHtml(detail)}</div></details>` : '';
+  const detailHtml = detail && !(i.action && i.action.type === 'exit-run-ask') ? `<details class="ut-detail-exp"><summary>${escHtml(t('detail'))}</summary><div class="ut-detail">${linkedHtml(detail, { escape: escHtml })}</div></details>` : '';
   // lane browser-propose: an open proposal's words are shown whole ABOVE its Approve (proposalAskHtml) — never folded again below
   const detailFold = i && i.action && (i.action.type === 'browser-proposal' || i.action.type === 'channel-api-proposal') && !resolved ? '' : detailHtml;
   // OPTION CHIPS (design-user-inbox-reply D3a): one click = a reply whose text
@@ -184,7 +186,7 @@ function partsOf(entry, ctx) {
     meta = (notice ? `<span class="ut-sess">${escHtml(ctx.nameFor(i.sessionKey, [i]))}</span> · ` : '')
       + escHtml(agoText(i.createdAt, t)) + (exp ? ' · ' + escHtml(exp) : '');
   }
-  const body = `<div class="ut-text">${escHtml(words)}</div>${card ? appCardHtml(i, t, { lang, resolved }) : !resolved ? exitAskHtml(i, t) + proposalAskHtml(i, t, detail) + appAskHtml(i, t) : ''}${card ? '' : detailFold}${opts}<div class="ut-meta">${meta}</div>`;
+  const body = `<div class="ut-text">${card ? escHtml(words) : linkedHtml(words, { escape: escHtml })}</div>${askChipsHtml(i, t)}${card ? appCardHtml(i, t, { lang, resolved }) : !resolved ? exitAskHtml(i, t) + proposalAskHtml(i, t, detail) + appAskHtml(i, t) : ''}${card ? '' : detailFold}${opts}<div class="ut-meta">${meta}</div>`;
   // ⤢ = THE For-you window ON this item (design-user-inbox-reply §9: long text at full width, reply / done there)
   const view = `<button class="ut-act ut-view" title="${escHtml(t('Open in the For-you window'))}" aria-label="${escHtml(t('Open in the For-you window'))}">⤢</button>`;
   // design 009: a card's Reply / Mark done / Ignore / Copy / Clear content… live behind its ⋯ (two buttons on its face)
@@ -200,6 +202,66 @@ function partsOf(entry, ctx) {
 
 /** The reply box (design-user-inbox-reply D3b): Enter sends, Shift+Enter is a
  *  newline, Esc folds — the panel owns those keys; this only builds it. */
+/** lane foryou-attachments: an ask's --artifact CHIPS under the question — an SVG kind icon + the name (+ the host when it
+ *  is not this box). Addressed by INDEX (data-ai): a click reads the item's own row, never a path back off an attribute. */
+const askArts = (i) => (i && !i.clearedAt && Array.isArray(i.artifacts) ? i.artifacts : []); // a CLEARED item shows none (SHAPES todo drops them)
+const chipFacts = (a, t) => ({ icon: a.kind === 'design' ? UI_ICONS.design : a.kind === 'page' ? UI_ICONS.globe : getFileIcon(a.name || a.path || ''),
+  title: t('Open {name}', { name: (a.kind === 'page' ? a.url : a.path) || a.name || '' }) });
+export function askChipsHtml(i, t) {
+  const arts = askArts(i);
+  if (!arts.length) return '';
+  return `<div class="ut-arts">${arts.map((a, k) => {
+    const f = chipFacts(a, t);
+    return `<button type="button" class="ut-art" data-ai="${k}" data-kind="${escHtml(a.kind)}" title="${escHtml(f.title)}">`
+      + `<span class="ut-art-ic" aria-hidden="true">${f.icon || ''}</span><span class="ut-art-name">${escHtml(a.name || '')}</span>`
+      + (a.host ? `<span class="ut-art-host">${escHtml(a.host)}</span>` : '') + '</button>';
+  }).join('')}</div>`;
+}
+/** The same chips as NODES (the For-you window — every item string is textContent there; the icon is a constant SVG). */
+export function askChipEls(i, t) {
+  const arts = askArts(i);
+  if (!arts.length || typeof document === 'undefined') return [];
+  const box = document.createElement('div');
+  box.className = 'ut-arts';
+  arts.forEach((a, k) => {
+    const f = chipFacts(a, t);
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'ut-art'; b.dataset.ai = String(k); b.dataset.kind = a.kind; b.title = f.title;
+    const ic = document.createElement('span'); ic.className = 'ut-art-ic'; ic.setAttribute('aria-hidden', 'true'); ic.innerHTML = f.icon || '';
+    const nm = document.createElement('span'); nm.className = 'ut-art-name'; nm.textContent = a.name || '';
+    b.append(ic, nm);
+    if (a.host) { const h = document.createElement('span'); h.className = 'ut-art-host'; h.textContent = a.host; b.append(h); }
+    box.append(b);
+  });
+  return [box];
+}
+/** lane foryou-attachments: the For-you window's words are markdown (escaped raw HTML + sanitizeHtml) — its TEXT nodes get
+ *  the same links (src/lib/foryou-links.js), built as NODES (textContent), never HTML; a markdown <a> keeps its own link;
+ *  a <code> run holds a relative path / bare filename (the chat's rule). */
+export function linkifyInto(el) {
+  if (!el || typeof document === 'undefined') return 0;
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  const nodes = [];
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) if (n.data && !(n.parentElement && n.parentElement.closest('a, .fy-link'))) nodes.push(n);
+  let made = 0;
+  for (const n of nodes) {
+    const inCode = !!(n.parentElement && n.parentElement.closest('code'));
+    let segs = segmentText(inCode ? '`' + n.data + '`' : n.data);
+    if (inCode) segs = segs.length > 1 && segs[0].s === '`' && segs[segs.length - 1].s === '`' ? segs.slice(1, -1) : segmentText(n.data);
+    if (!segs.some((g) => g.t === 'link')) continue;
+    const frag = document.createDocumentFragment();
+    for (const g of segs) {
+      if (g.t !== 'link') { frag.append(document.createTextNode(g.s)); continue; }
+      const a = document.createElement('span');
+      a.className = 'fy-link'; a.setAttribute('role', 'link'); a.tabIndex = 0;
+      a.dataset.fy = g.kind; a.dataset.ref = g.ref; a.textContent = g.s;
+      frag.append(a); made++;
+    }
+    n.replaceWith(frag);
+  }
+  return made;
+}
+
 export function replyBoxEl(t) {
   const box = document.createElement('div');
   box.className = 'ut-reply';

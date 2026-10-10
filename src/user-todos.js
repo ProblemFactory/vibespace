@@ -130,6 +130,30 @@ const STATUSES = ['open', 'done', 'dismissed'];
 // 2 MB per broadcast); GET /api/user-todos/:id serves one record whole.
 const TEXT_MAX = 500;
 const DETAIL_MAX = 8000;
+// ARTIFACTS (lane foryou-attachments, owner 2026-10-09): what the agent asks the owner to LOOK AT. The route's submit judge
+// proved each one opens (src/server/artifact-registry.js judgeAsk); the store keeps only the SHAPE — ≤ ARTIFACTS_MAX rows
+// of {kind: file|design|page, host, path|page, name, url?}; past the cap the rest is cut and the cut is NAMED on the
+// returned record (`artifactsCut`, like the text/detail caps); a malformed row THROWS by name.
+const ARTIFACTS_MAX = 8;
+const ARTIFACT_KINDS = ['file', 'design', 'page'];
+function normalizeArtifacts(list) {
+  if (list == null) return { artifacts: null, cut: 0 };
+  if (!Array.isArray(list)) throw new Error('artifacts must be a list');
+  const out = list.slice(0, ARTIFACTS_MAX).map((a, k) => {
+    if (!a || !ARTIFACT_KINDS.includes(a.kind)) throw new Error(`artifacts[${k}].kind must be one of ${ARTIFACT_KINDS.join('/')}`);
+    const name = typeof a.name === 'string' ? a.name.slice(0, 200) : '';
+    if (a.kind === 'page') {
+      const page = String(a.page || '');
+      if (!/^[\w-]{1,64}$/.test(page)) throw new Error(`artifacts[${k}].page is not a page id`);
+      return { kind: 'page', host: '', page, name: name || page, url: '/p/' + page };
+    }
+    const p = String(a.path || '');
+    if (!p.startsWith('/') || p.length > 4096) throw new Error(`artifacts[${k}].path must be an absolute path`);
+    const host = typeof a.host === 'string' && a.host !== 'local' ? a.host.slice(0, 120) : '';
+    return { kind: a.kind, host, path: p, name: name || p.replace(/\/+$/, '').split('/').pop() || p };
+  });
+  return { artifacts: out.length ? out : null, cut: list.length > ARTIFACTS_MAX ? ARTIFACTS_MAX : 0 };
+}
 const DETAIL_PREVIEW = 300;
 /** A RESOLVED item as the snapshot carries it: a detail past DETAIL_PREVIEW becomes its
  *  first DETAIL_PREVIEW chars + `detailTruncated: true`; anything shorter (or no detail)
@@ -310,7 +334,7 @@ class UserTodoManager {
 
   get(id) { return this._state.items.find((i) => i.id === id) || null; }
 
-  add(sessionKey, { text, detail, urgency, by = 'agent', sessionName = null, jobId = null, kind = null, i18n = null, expiresAt = null, action = null, options = null, origin = null, card = null } = {}) {
+  add(sessionKey, { text, detail, urgency, by = 'agent', sessionName = null, jobId = null, kind = null, i18n = null, expiresAt = null, action = null, options = null, origin = null, card = null, artifacts = null, cwd = null, hostId = null } = {}) {
     const rawText = typeof text === 'string' ? text.trim() : '';
     text = rawText.slice(0, TEXT_MAX);
     const textCut = rawText.length > TEXT_MAX ? TEXT_MAX : 0; // the cap it hit, named on the return
@@ -327,6 +351,12 @@ class UserTodoManager {
     action = normalizeAction(action); // a server producer's decision payload (reset credit, §5), or null
     card = normalizeCard(card); // a server producer's view of the item (design 009: an app install's one card), or null
     options = normalizeOptions(options); // option chips (vibespace-ask --options "A|B|C"): ≤6 distinct labels ≤40 chars, else THROWS by name — or null
+    const arts = normalizeArtifacts(artifacts); // lane foryou-attachments: vibespace-ask --artifact — ≤8 rows, the cut named, a bad shape THROWS by name
+    artifacts = arts.artifacts;
+    // WHERE ITS WORDS LIVE (lane foryou-attachments): the asking conversation's cwd + host — a path in the words opens
+    // against them (resolution for OPENING only, never a spawn)
+    cwd = typeof cwd === 'string' && cwd.startsWith('/') ? cwd.slice(0, 4096) : null;
+    hostId = typeof hostId === 'string' && hostId && hostId !== 'local' ? hostId.slice(0, 120) : null;
     // ORIGIN (B-328d, 2026-09-24): WHO filed it — a closed set (src/inbox-origin.js).
     // REQUIRED (r2, fail closed): a caller naming none THROWS `origin required
     // (one of …)` and a value outside the set THROWS by name — either files
@@ -346,7 +376,8 @@ class UserTodoManager {
     detail = rawDetail ? rawDetail.slice(0, DETAIL_MAX) : null;
     const detailCut = rawDetail.length > DETAIL_MAX ? DETAIL_MAX : 0;
     // the cut is named on the RETURNED record only (the ledger never carries it)
-    const cut = (o) => (textCut || detailCut ? { ...o, ...(textCut ? { textCut } : {}), ...(detailCut ? { detailCut } : {}) } : o);
+    const named = (o) => (arts.cut ? { ...o, artifactsCut: arts.cut } : o); // lane foryou-attachments: the attachments' cap, named the same way
+    const cut = (o) => (textCut || detailCut ? { ...named(o), ...(textCut ? { textCut } : {}), ...(detailCut ? { detailCut } : {}) } : named(o));
     // Idempotent BY TEXT across ALL statuses: re-filing an open question
     // refreshes it; re-filing a RESOLVED/DISMISSED one REOPENS the same item
     // (same id). Minting a fresh id per re-file would let an add→resolve loop
@@ -394,6 +425,9 @@ class UserTodoManager {
       if (action && JSON.stringify(action) !== JSON.stringify(existing.action || null)) { existing.action = action; changed = true; }
       if (card && JSON.stringify(card) !== JSON.stringify(existing.card || null)) { existing.card = card; changed = true; }
       if (options && JSON.stringify(options) !== JSON.stringify(existing.options || null)) { existing.options = options; changed = true; } // a re-file WITH options replaces them; one without keeps the old set
+      if (artifacts && JSON.stringify(artifacts) !== JSON.stringify(existing.artifacts || null)) { existing.artifacts = artifacts; changed = true; } // lane foryou-attachments: the same rule as options
+      if (cwd && cwd !== existing.cwd) { existing.cwd = cwd; changed = true; }
+      if (hostId && hostId !== existing.hostId) { existing.hostId = hostId; changed = true; }
       // a DECLARED origin is kept (the item's producer does not change on a re-file);
       // an item filed before the field existed takes the re-filer's declaration
       if (!existing.origin) { existing.origin = origin; changed = true; }
@@ -414,6 +448,8 @@ class UserTodoManager {
       ...(card ? { card } : {}), // design 009: the producer's VIEW the client draws the item from (an app install's one card)
       expiresAt, // ms epoch the item dies at (resolved 'expired' by expireDue), or null = lasting
       options, // the one-click answers (≤6 labels), or null — a chip's reply IS its label (design-user-inbox-reply D3a)
+      ...(artifacts ? { artifacts } : {}), // lane foryou-attachments: what the agent asks the owner to open (chips → the one artifact door)
+      ...(cwd ? { cwd } : {}), ...(hostId ? { hostId } : {}), // where its words' paths resolve (the asker's cwd on its host)
       reply: null, // {text, at} once the user replied from the inbox (resolveByReply)
       origin, // the PRODUCER (B-328d): spend|login|pool|jobs|channels|browser|agent — REQUIRED (r2), the Notices area groups by it
       createdAt: Date.now(), resolvedAt: null, resolvedBy: null,
@@ -613,4 +649,4 @@ class UserTodoManager {
   }
 }
 
-module.exports = { UserTodoManager, EXPIRY_SWEEP_MS, RESOLVED_TAIL, RESOLVED_RECENT_MS, RESOLVED_SNAPSHOT_MAX, TEXT_MAX, DETAIL_MAX, DETAIL_PREVIEW, previewOf, validExpiry, normalizeAction };
+module.exports = { UserTodoManager, EXPIRY_SWEEP_MS, RESOLVED_TAIL, RESOLVED_RECENT_MS, RESOLVED_SNAPSHOT_MAX, TEXT_MAX, DETAIL_MAX, DETAIL_PREVIEW, ARTIFACTS_MAX, previewOf, validExpiry, normalizeAction, normalizeArtifacts };

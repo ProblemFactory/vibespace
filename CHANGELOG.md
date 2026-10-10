@@ -2,6 +2,17 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.247 — 2026-10-09
+
+### Added
+- An agent's question in For you can carry the file, design or page it wants you to look at — one press opens it; paths and links in the question are clickable.
+
+### Changed
+- Your agents' own groups and chats are told apart from people and services at a glance in the Channels list.
+
+### Fixed
+- Tags a person types in a Lark message — like speech-control tags — are kept exactly as written instead of being silently removed.
+
 ## 2.369.246 — 2026-10-09
 
 ### Added

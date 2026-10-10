@@ -508,6 +508,21 @@
 - THE WHOLE USAGE LEDGER LIVED IN THE HEAP (B-9428, heap snapshot: 406 MB of 1.17 GB; transcript cache 328 MB; estimator lines 46 MB): no cache had a byte bound. FIX = a window + a byte ceiling per cache, the rest read from the shards, the boot census names them. 不变量 = a cache has a ceiling + a name
 - A COLUMN-WIDE CLOCK ON A LAPSED ACCOUNT'S ROW (owner 2026-10-09, the third unsized roster SVG after 2.369.13 and the login chip): the lapsed chip reused ROSTER_ICONS.CLOCK in a wrapper no CSS sized. FIX = a roster icon carries its own size + a use-site census. 不变量 = an inline SVG is never unsized
 - A FILE ATTACHED IN THE OWNER'S REPLY BOX COULD NOT BE LOOKED AT (owner 2026-10-09): the composer chip had only a ×. FIX = the chip opens through THE ONE attachment door from the local File (a blob URL, revoked with the chip). 不变量 = whatever can be sent can be looked at first, through the one door
+- AGENT ROWS LOOKED LIKE PEOPLE (owner 2026-10-09): VibeSpace's own groups wore the same coloured disc as a Lark group, told apart by an 8 px badge. FIX = the mark as the avatar on a muted disc, the block on a band. 不变量 = colour on the first screen means a person or a vendor
+- THE OWNER COULD NOT OPEN WHAT AN AGENT ASKED HIM TO REVIEW (owner 2026-10-09): an item was words, its paths dead text. FIX = --artifact chips (checked openable at submit) via the one open door + paths/links on the asker's cwd/host. 不变量 = what an agent asks the owner to look at opens in one press
+- A PERSON'S OWN TAGS VANISHED FROM A LARK MESSAGE (owner 10-09, <emphasis> for TTS): the reader stripped tags it did not know, the wall quoted the rest. FIX = a closed vocabulary; any other tag is content as written; only OUR frame names fenced. 不变量 = what a person typed reaches the agent as typed
+
+## AGENT ROWS LOOKED LIKE PEOPLE (lane internal-rows-look, 2.369.247 — owner 2026-10-09 "这个 VibeSpace 内部的聊天群视觉上很难和其他的外部的区分开")
+
+**Symptom.** In the owner's Channels list seven VibeSpace rows (one agent group, six agent pairs) and a colleague's Lark row read as one list: every row a coloured disc with the people glyph on the hue of its key, the group's only mark of "ours" an 8 px corner badge and the "Agents" / "私聊" chip.
+
+**Cause.** `convAvatar({group: true})` drew an agent group exactly as a Lark group (the `users` glyph on the key's hue); the internal block was a head row followed by ordinary rows, with nothing around them.
+
+**Fix.** One rule for every internal row (group and pair alike): the VibeSpace mark IS the avatar, on an achromatic disc — no hue, no corner badge (channel-chrome.js `convAvatar({internal})`); the head's mark the same; the kind chip an outline (`chan-src-chip-internal`); the head and its rows inside ONE kept band container (`keep('internal-band')`, reconciled, never replaced; folded, the head alone). `isInternal(r)` joined the row's memo signature.
+
+**Invariant.** Colour on the first screen means a person or a vendor; VibeSpace's own talk is grey and banded.
+
+**Gates:** test-channels-groups-ui (the real convAvatar over a minimal DOM + CONTROL: the internal branch removed ⇒ a hue and the corner badge), test-channels-internal-look (chrome: the real panel, desk + 390 px, the band/head/row nodes kept across a broadcast, the fold; CONTROL: keep() bypassed ⇒ the band replaced).
 
 ## A FILE ATTACHED IN THE OWNER'S REPLY BOX COULD NOT BE LOOKED AT (lane compose-chip-open, owner 2026-10-09 on 2.369.245)
 
@@ -5335,3 +5350,15 @@ userW's pod: one conversation's hidden-window browser drew Mercury's payments da
 **Invariant.** A message from nobody is the vendor's notice about the chat, never a peer's message: it is never matched, counted, previewed or delivered as one, and no surface ever prints "unknown" as an author.
 
 **Gates:** test-channel-record, test-channels-lark-shape, test-channels-slack-shape, test-channel-filter ⑱ (+ control), test-channels-focus, test-channels-engine ㉖ (+ control), test-channel-window-render (heavy), test-peer-text-census.
+
+## A PERSON'S OWN TAGS VANISHED FROM A LARK MESSAGE (lane lark-unknown-tags, owner 2026-10-09)
+
+**Symptom.** The owner, from the peer system's logs: "我们现在处理 lark 的 html tag 的时候会静默丢弃不认识的 tag，但其实有些 tag 并不是 lark 加上的而是用户自己要发的，比如我们做 tts 的时候会加一些控制 tag <emphasis>Hello</emphasis>". A Lark `text` message `<emphasis>Hello</emphasis> world` reached the agent as `Hello world`; `<break time="500ms"/>` vanished; a lone `<country>` became `‹country›`.
+
+**Cause.** Twice over in src/channels/lark/blocks.js: the markup reader stripped every paired / attributed / self-closing tag it did not know to its text, and THE WALL (`sealTags` / `quoteTags`) quoted every tag-shaped `<…>` left in a run.
+
+**Fix.** The vocabulary is CLOSED: the known sets (`MK_BLOCK` … `MK_DROP`, `MK_STRIP`, `MK_READ`) are markup; any other tag is a TEXT token, as written, in the run where it stood. The wall narrows to the fence: it quotes only a `<…>` matching channel-record's `FRAME_TAG_RE` (the belt's own pattern — a frame the reader assembles around a tag it read, `<system-<b></b>reminder>`, still becomes `‹system-reminder›`). Outbound was already verbatim (a `text` body); now pinned.
+
+**Invariant.** What a person typed reaches the agent as typed; only OUR frame names are fenced, in one pattern.
+
+**Gates:** test-channel-blocks ⑳ (+ old-reader / old-wall / no-fence controls), test-channel-record ⑦ (predicate = `carriesFrame`, + control), test-channels-lark-shape ⑧ / ⑩, test-channel-window-render ④b (heavy), test-peer-text-census.

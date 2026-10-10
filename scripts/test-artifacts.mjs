@@ -374,5 +374,23 @@ console.log('⑪ a page ANOTHER conversation published, shown here by its /p/<id
   ok(MP && Object.keys(capRows).length === 55, 'CONTROL: without the cap 55 links keep 55 rows (the cap assert sees it)');
 }
 
+console.log('ASK ATTACHMENTS (lane foryou-attachments) — vibespace-ask --artifact → a `present` op through THE ONE reducer');
+{
+  const f = AF.askOp({ kind: 'file', host: '', path: '/tmp/x/repo/report.md', name: 'report.md' }, { at: 9, id: 'ask:ut-1:0' });
+  let rows = AF.fold({}, f);
+  const r = rows[':/tmp/x/repo/report.md'];
+  ok(f.op === 'present' && r && r.lastOp === 'present' && !r.presented && r.kind === 'doc' && r.writes === 0 && r.edits === 0 && r.name === 'report.md', 'a file an ask attaches is a NAMED row (a `present` op: never counted, never a presented page)', r);
+  rows = AF.fold(rows, AF.askOp({ kind: 'page', page: 'pgabcdefghij', name: 'Plan' }, { at: 10 }));
+  ok(rows[':/p/pgabcdefghij'] && rows[':/p/pgabcdefghij'].presented === true && rows[':/p/pgabcdefghij'].page === 'pgabcdefghij', 'a page an ask attaches is a PRESENTED row (resolved against the pages store at every read)');
+  const d = AF.fold({}, AF.askOp({ kind: 'design', host: 'h1', path: '/srv/d', name: 'd' }, { at: 3 }));
+  ok(d['h1:/srv/d'] && d['h1:/srv/d'].kind === 'design', 'a design keeps its kind on its host');
+  ok(AF.apply(rows, f).skipped === 'seen', 'the same ask re-filed folds nothing twice (its op id)');
+  const own = AF.fold({ ':/tmp/x/repo/report.md': { ...r, lastOp: 'write', writes: 2 } }, { ...f, id: 'ask:ut-2:0' })[':/tmp/x/repo/report.md'];
+  ok(own.writes === 2 && !own.presented, 'a file the conversation wrote keeps its counts when an ask attaches it');
+  ok(AF.askOp({ kind: 'exe', path: '/x' }) === null && AF.askOp({ kind: 'file' }) === null, 'a malformed attachment is no op');
+  const rs = require('node:fs').readFileSync(path.join(REPO, 'src/agent-routes/status.js'), 'utf8');
+  ok(/require\('\.\.\/server\/artifact-registry\.js'\)\.presentAsk\(s, item\.artifacts, \{ id: item\.id \}\)/.test(rs) && !/_artifacts/.test(rs), 'THE ONE WRITER: the ask route hands its attachments to the registry (presentAsk → noteOp), never the rows itself');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

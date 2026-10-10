@@ -11,8 +11,8 @@ const { sameToken } = require('../pairing-token.js'); // B-8dda: every vsst_ loo
 const { liveForkPending } = require('../claude-lock-capture.js');
 
 function register(app, c) {
-const { activeSessions, sessionStatus, userTodos, sessionStatusKey, clearAsAgent, agentSession, toolOn, toolDisabled, bookkept } = c;
-app.post('/api/agent/user-todo', (req, res) => {
+const { activeSessions, sessionStatus, userTodos, sessionStatusKey, clearAsAgent, agentSession, toolOn, toolDisabled, bookkept, handoverItems } = c;
+app.post('/api/agent/user-todo', async (req, res) => {
   const hit = agentSession(req, res);
   if (!hit) return;
   if (!toolOn('Ask')) return toolDisabled(res, 'vibespace-ask');
@@ -31,7 +31,23 @@ app.post('/api/agent/user-todo', (req, res) => {
     if (resolve) { const item = userTodos.resolveByAgent(key, resolve); bookkept(s); return res.json({ success: true, item }); }
     if (show) { const it = userTodos.getForSession([key, `webui:${id}`], String(show)); return it ? res.json({ success: true, item: it }) : res.status(404).json({ error: `no item ${String(show).slice(0, 40)} in this session` }); } // `vibespace-ask show <id>`: one item of THIS session whatever its status (a reply's quote cuts a long detail and points here)
     if (add && add.text) {
-      const item = userTodos.add(key, { text: add.text, detail: add.detail, urgency: add.urgency, by: 'agent', origin: 'agent', sessionName: s.name || null, kind: add.kind || null, options: add.options == null ? null : add.options }); // kind: 'notice' = FYI only (vibespace-ask --notice); options = one-click answers (--options "A|B|C") — both validated by the store, a bad shape refused by name
+      // lane foryou-attachments: `--artifact <path|/p/id>…` — vibespace-msg's hand-over argument shape (handoverItems), judged
+      // AT SUBMIT for OPENABILITY (owner 2026-10-09 21:42Z, binding): ANY attachment the owner could not open ⇒ the WHOLE ask
+      // is refused (422, one line per bad one, naming the fix) and NOTHING is filed — the agent fixes it and asks once
+      const items = handoverItems(add);
+      let artifacts = null;
+      if (items.length) {
+        const reg = require('../server/artifact-registry.js');
+        const MAX = require('../user-todos.js').ARTIFACTS_MAX;
+        const sfs = req.app.locals.safeFs;
+        const fsCall = sfs ? (op, p) => sfs.call(op, p) : async (op, p) => (await require('../safe-fs-worker').runOp(op, p)).result;
+        const j = items.length > MAX ? { bad: [{ item: '', why: 'too-many', error: `${items.length} attachments — at most ${MAX} per item; attach the rest to a second item` }] }
+          : await reg.judgeAsk({ session: s, items, fsCall, remote: req.app.locals.getRemoteFs?.() || null });
+        if (j.bad.length) return res.status(422).json({ code: 'bad-artifact', refused: j.bad, error: `nothing was filed — ${j.bad.length} attachment${j.bad.length > 1 ? 's' : ''} would not open for the user: ${j.bad.map((b) => b.error).join(' | ')}` });
+        artifacts = j.artifacts;
+      }
+      const item = userTodos.add(key, { text: add.text, detail: add.detail, urgency: add.urgency, by: 'agent', origin: 'agent', sessionName: s.name || null, kind: add.kind || null, options: add.options == null ? null : add.options, artifacts, cwd: s.cwd || null, hostId: s.host && s.host !== 'local' ? s.host : null });
+      if (artifacts) require('../server/artifact-registry.js').presentAsk(s, item.artifacts, { id: item.id }); // the conversation's Artifacts list shows them (the one writer) // kind: 'notice' = FYI only (vibespace-ask --notice); options = one-click answers (--options "A|B|C") — both validated by the store, a bad shape refused by name
       bookkept(s);
       return res.json({ success: true, item });
     }

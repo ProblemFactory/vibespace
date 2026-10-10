@@ -18,7 +18,7 @@ import { createBackendIconHtml, getBackendMeta } from './agent-meta.js';
 import { t } from './i18n.js';
 import { stripSetModelBackticks } from '../model-echo.js'; // the ONE /model echo spelling (PURE, shared with chat-view + the server)
 import { searchQueryOf } from '../search-card.js'; // shared with the server (CJS pulled into the bundle, like task-color-seq.js)
-import { pathRe as sharedPathRe, cleanPath as sharedCleanPath } from '../path-linkify.js'; // PURE: where a path ENDS (CJK punctuation too, 2026-09-10)
+import { pathRe as sharedPathRe, cleanPath as sharedCleanPath, looksRelPath, relCandidates } from '../path-linkify.js'; // PURE: where a path ENDS (CJK punctuation too, 2026-09-10)
 import { mcpParts } from './chat-run-summary.js';
 import { assistantNoteOf, noteSentence, toolResultSentence } from './chat-run-summary.js'; // lane S3: text addressed to the ASSISTANT is a note, harness bookkeeping in a tool result is a sentence
 import { isVibespaceNotice, noticeCardView, impersonatesVibespace } from '../notification-senders.js'; // lane S3: a VibeSpace notice is titled "VibeSpace · …", never `Message from "…"`; S3 verify F3: decided by the record's PATH (`peerVia`), never its sender's name or first sentence
@@ -2628,13 +2628,7 @@ class ChatRenderers {
             // none of it linkified). Make it clickable and resolve against the
             // session cwd at CLICK time (existence-probed, no render-time IO).
             const txt = inner.trim().replace(/&amp;/g, '&');
-            const looksRel = /^[\w@%+=.\-][^\s<>"'`|]*$/.test(txt) && txt.length >= 3 && txt.length <= 200
-              && (txt.includes('/') || /\.[A-Za-z0-9]{1,8}$/.test(txt))
-              // digits/dots/slashes only = versions, IPs, CIDR ranges (10.0.0.0/8);
-              // digit-dot stem = IP-ish tokens like 192.0.2.10 — never file refs
-              && !/^[\d./]+$/.test(txt) && !/^[\d.]+$/.test(txt.replace(/\.[A-Za-z0-9]+$/, ''))
-              && !txt.endsWith('.') && !txt.includes('//');
-            if (looksRel) {
+            if (looksRelPath(txt)) { // src/path-linkify.js — THE relative rule (the For-you links read it too)
               return open + `<span class="chat-link chat-link-path chat-link-rel" data-rel="${escHtml(txt)}" title="${t('Click to copy, Ctrl+Click to locate & open')}">${inner}</span>` + close;
             }
           }
@@ -2713,16 +2707,7 @@ class ChatRenderers {
    * sessions. Probing happens only on an explicit open click. */
   async _openRelTarget(link, rel) {
     const { cwd, host } = this._sessionCtx();
-    const norm = rel.replace(/\/+$/, '');
-    const cands = [];
-    if (rel.startsWith('~/')) cands.push(rel);
-    else if (cwd) {
-      cands.push(cwd + '/' + norm);
-      const cwdSegs = cwd.split('/'), relSegs = norm.split('/');
-      const at = cwdSegs.lastIndexOf(relSegs[0]);
-      if (at >= 0) cands.push([...cwdSegs.slice(0, at), ...relSegs].join('/'));
-      cands.push(cwdSegs.slice(0, -1).join('/') + '/' + norm);
-    }
+    const cands = relCandidates(rel, cwd); // src/path-linkify.js — the For-you links probe the same candidates
     const seen = new Set();
     for (const c of cands) {
       if (!c || seen.has(c)) continue;

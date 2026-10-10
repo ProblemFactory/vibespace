@@ -66,7 +66,7 @@ import * as R from '../integration-registry.js';
 // a3 i18n: a route failure is worded by its CODE here, never by the engine's sentence.
 import { routeErrorText, groupErrorText, statusTagParts, viewSwitchText } from './channel-words.js';
 // g3 (design §22): the IM-first list's arithmetic and the group dialogs.
-import { groupListRows, foldsFrom, GROUP_ADAPTER_ID, firstScreen, statusTag, filterRows, internalBlock } from './channel-groups-view.js';
+import { groupListRows, foldsFrom, GROUP_ADAPTER_ID, firstScreen, statusTag, filterRows, internalBlock, isInternal } from './channel-groups-view.js';
 // design 008 (B-3cf8): the rows this panel HOLDS — the first read + every page read, keyed (PURE)
 import { createRowStore, applyFirst, applyPage, applyBroadcast, listRows, focusRowsOf, ensureList, pageQueryOf, accountList } from './channel-rows.js';
 import { afterCursor, PAGE_MAX, listRowModel } from '../channel-focus.js';
@@ -1459,7 +1459,19 @@ export function renderChannelsPanel(app, c) {
     //  stands for it — a row that needs the owner keeps its own row on top. A query searches everything: nothing folds
     //  under it. lane channels-fold: FOLDED BY DEFAULT (foldsFrom) — the user's unfold is user state, synced
     const ib = internalBlock(fs.shown, { folded: (FOLDS || foldsFrom(null)).internal && !q.trim(), now });
-    for (const r of ib.rows) list.appendChild(r.kind === 'internal-head' ? internalHead(r.block) : groupRow(r, now));
+    // lane internal-rows-look (the owner, 2026-10-09: "这个 VibeSpace 内部的聊天群视觉上很难和其他的外部的区分开"): THE BLOCK IS
+    //  A BAND — the head and the internal rows right under it sit inside ONE kept container (the keep() precedent: its
+    //  rows reconciled, never replaced); folded, the head alone. A row that needs the owner (on top while folded) stays
+    //  out of it — its avatar still says "ours"
+    const band = ib.block ? keep('internal-band', () => { const el = document.createElement('div'); el.className = 'chan-iband'; el.dataset.internalBand = '1'; return el; }) : null;
+    const bandKids = [];
+    let inBand = false;
+    for (const r of ib.rows) {
+      inBand = r.kind === 'internal-head' || (inBand && isInternal(r));
+      if (r.kind === 'internal-head') list.appendChild(band);
+      (inBand ? bandKids : listKids).push(r.kind === 'internal-head' ? internalHead(r.block) : groupRow(r, now));
+    }
+    if (band) { band.classList.toggle('chan-iband-folded', ib.block.folded); reconcile(band, bandKids); }
     // lane channel-avatars: the attention list warms its VISIBLE direct chats' pictures (≤ Av.WARM_MAX — never an account sweep)
     warmAvatars(ib.rows.filter((r) => r && r.conv && r.conv.peer).slice(0, 40).map((r) => ({ account: r.conv.adapterId, author: r.conv.peer, conv: r.conv.id })));
     const allEnd = fs.view === 'all' ? endOfList(allName) : null;
@@ -1593,19 +1605,20 @@ export function renderChannelsPanel(app, c) {
   function groupRow(r, now = Date.now()) {
     const st = r.kind === 'conv' ? statusTag(r, now) : null;
     const tag = statusTagParts(st, { now });
-    const sig = JSON.stringify(['g', r.kind, r.id, r.adapterId, r.title, r.lastAt, r.unread, r.archived, r.pair, r.memberCount, r.sourceLabel, r.lastText, !!(r.group && r.group.lastCleared), r.conv ? r.conv.kind : '', rowTime(r.lastAt), st && st.code, tag, r.account]);   // r.group.lastCleared: the last line drawn as the cleared sentence ("Clear content…", the merge onto master's signature census)
+    const sig = JSON.stringify(['g', r.kind, r.id, r.adapterId, r.title, r.lastAt, r.unread, r.archived, r.pair, r.memberCount, r.sourceLabel, r.lastText, !!(r.group && r.group.lastCleared), r.conv ? r.conv.kind : '', rowTime(r.lastAt), st && st.code, tag, r.account, isInternal(r)]);   // r.group.lastCleared: the last line drawn as the cleared sentence ("Clear content…", the merge onto master's signature census)
     return memoRow('g:' + r.key, sig, r, (cur) => groupRowBuild(r, now, cur, st, tag));
   }
   function groupRowBuild(r, now, cur, st, tag) {
     const el = document.createElement('div');
-    el.className = 'chan-grow' + (r.unread ? ' chan-grow-unread-on' : '') + (r.archived ? ' chan-grow-archived' : '');
+    const own = isInternal(r);   // lane internal-rows-look: VibeSpace's own talk — the mark avatar, the muted kind chip
+    el.className = 'chan-grow' + (r.unread ? ' chan-grow-unread-on' : '') + (r.archived ? ' chan-grow-archived' : '') + (own ? ' chan-grow-internal' : '');
     el.dataset.grow = r.key;
     el.dataset.at = String(r.lastAt || 0);   // the activity instant the list is ordered by
     if (r.kind === 'group') el.dataset.group = r.id;
     // THE LOOK (channel-polish): the conversation's avatar — the SAME circle its window's bar wears
     // (an agent group the people glyph, a mail thread the mail glyph, a chat the title's initials)
     // B-5fe1: …wearing its ACCOUNT's badge (the vendor glyph on the account's own hue — two Lark accounts differ)
-    el.appendChild(convAvatar({ key: r.key, title: r.title, kind: r.conv ? r.conv.kind : '', group: r.kind === 'group', badge: r.account, pic: r.conv && r.conv.peer ? { account: r.conv.adapterId, author: r.conv.peer } : null }, null, 'chan-grow-av'));
+    el.appendChild(convAvatar({ key: r.key, title: r.title, kind: r.conv ? r.conv.kind : '', group: r.kind === 'group', internal: own, badge: r.account, pic: r.conv && r.conv.peer ? { account: r.conv.adapterId, author: r.conv.peer } : null }, null, 'chan-grow-av'));
     const line = document.createElement('div');
     line.className = 'chan-grow-line';
     const title = document.createElement('span');
@@ -1639,7 +1652,7 @@ export function renderChannelsPanel(app, c) {
       sub.appendChild(g);
     } else if (!acct) {
       const src = document.createElement('span');
-      src.className = 'chan-src-chip';
+      src.className = 'chan-src-chip' + (own ? ' chan-src-chip-internal' : '');
       src.textContent = r.kind === 'group' ? (r.pair ? t('Direct') : t('Agents')) : r.sourceLabel;
       src.title = srcTitle;
       sub.appendChild(src);

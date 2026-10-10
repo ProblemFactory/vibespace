@@ -522,8 +522,8 @@ function cardText(c) {
 /** Plain text for every `msg_type` this adapter recognises; an unknown type
  *  is named rather than dropped (a message that was sent is a message). */
 function textOf(item) {
-  // lane channel-rich (D1): NO tag-shaped `<…>` survives into `rec.text` — the markup reader for a body that
-  // carries it, the wall (‹…›) for anything left. GUARDED (security verify, 2026-09-28): a body the reader
+  // lane channel-rich (D1): the markup reader for a body that carries a tag, then the fence: a `<…>` named as one of
+  // OUR frames becomes ‹…›, any other is content as written (owner 2026-10-09). GUARDED (security verify, 2026-09-28): a body the reader
   // cannot read is its raw words behind the wall, never a throw — a throwing normalizer is a poison message
   // that fails every pass of its conversation
   try { return Blocks.quoteTags(textOfRaw(item)); } catch {

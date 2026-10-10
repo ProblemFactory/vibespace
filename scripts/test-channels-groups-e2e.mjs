@@ -445,7 +445,7 @@ const armFetch = await p1.evaljs(`(() => { window.__gf = 0; const of = window.fe
 // R3 (§23): the first screen is the ATTENTION list — an untouched conversation is under ALL, one switch away
 // (the switch redraws from the digest in hand: it is inside the zero-fetch window below)
 await p1.evaljs(`(() => { document.querySelector('.rail-panel-channels .chan-view-btn[data-view="all"]').click(); return 1; })()`);
-const ORDER = `(() => [...document.querySelectorAll('.rail-panel-channels .chan-groups > .chan-grow')].map((r) => ({ key: r.dataset.grow, at: Number(r.dataset.at) })))()`;
+const ORDER = `(() => [...document.querySelectorAll('.rail-panel-channels .chan-groups .chan-grow')].map((r) => ({ key: r.dataset.grow, at: Number(r.dataset.at) })))()`;
 const A2 = `groups/${second.body.group.id}`, A1 = `groups/${gid}`, CONV = 'fake-poll/fake-poll-ops';
 const sortedByActivity = (o) => o.every((x, i) => i === 0 || o[i - 1].at >= x.at);
 const idx = (o, k) => o.findIndex((x) => x.key === k);
@@ -497,7 +497,7 @@ ok(watcher === false, 'CONTROL: the Message watcher section (never folded) is op
 //    9 join the groups, each with ONE tag, repainted from the broadcasts; "All" is the whole list; the filter
 //    works in both views ("{n} more in All"); at 375 px the tag sits UNDER the title in one column. ──
 {
-  const FOCUS = `(() => { const rows = [...document.querySelectorAll('.rail-panel-channels .chan-groups > .chan-grow')]; const segs = [...document.querySelectorAll('.rail-panel-channels .chan-view-btn')].map((b) => ({ view: b.dataset.view, text: b.textContent, on: b.classList.contains('chan-seg-on') })); return { view: (document.querySelector('.rail-panel-channels .chan-groups') || {}).dataset?.view, segs, rows: rows.map((r) => ({ key: r.dataset.grow, group: !!r.dataset.group, tag: r.querySelector('.chan-grow-tag') ? r.querySelector('.chan-grow-tag').dataset.tag : null, tagText: r.querySelector('.chan-grow-tag') ? r.querySelector('.chan-grow-tag').textContent : null, who: r.querySelector('.chan-tag-who') ? r.querySelector('.chan-tag-who').textContent : null })) }; })()`;
+  const FOCUS = `(() => { const rows = [...document.querySelectorAll('.rail-panel-channels .chan-groups .chan-grow')]; const segs = [...document.querySelectorAll('.rail-panel-channels .chan-view-btn')].map((b) => ({ view: b.dataset.view, text: b.textContent, on: b.classList.contains('chan-seg-on') })); return { view: (document.querySelector('.rail-panel-channels .chan-groups') || {}).dataset?.view, segs, rows: rows.map((r) => ({ key: r.dataset.grow, group: !!r.dataset.group, tag: r.querySelector('.chan-grow-tag') ? r.querySelector('.chan-grow-tag').dataset.tag : null, tagText: r.querySelector('.chan-grow-tag') ? r.querySelector('.chan-grow-tag').textContent : null, who: r.querySelector('.chan-tag-who') ? r.querySelector('.chan-tag-who').textContent : null })) }; })()`;
   const d0 = await api('GET', '/api/channels');
   const convs = (d0.body.conversations || []).filter((c) => !c.unlisted && !(d0.body.adapters || []).find((a) => a.id === c.adapterId && a.builtin));
   const groupsNow = (await api('GET', '/api/channel-groups')).body.groups.filter((g) => !g.archivedAt);
@@ -567,7 +567,7 @@ ok(watcher === false, 'CONTROL: the Message watcher section (never folded) is op
   ok(await p1.load(), 'page reloaded at 375 × 667 (a phone)');
   const phone = await until(`(async () => {
     if (!document.querySelector('.chan-window .chan-groups')) { window.app.openChannels(); await new Promise((r) => setTimeout(r, 300)); }
-    const rows = [...document.querySelectorAll('.chan-window .chan-groups > .chan-grow')].filter((r) => r.querySelector('.chan-grow-tag'));
+    const rows = [...document.querySelectorAll('.chan-window .chan-groups .chan-grow')].filter((r) => r.querySelector('.chan-grow-tag'));
     if (rows.length < ${N1}) return null;
     const list = document.querySelector('.chan-window .chan-groups').getBoundingClientRect();
     return rows.map((r) => { const ti = r.querySelector('.chan-grow-title').getBoundingClientRect(), tg = r.querySelector('.chan-grow-tag').getBoundingClientRect(), rr = r.getBoundingClientRect(); const words = [...r.querySelectorAll('.chan-tag-words')]; const who = r.querySelector('.chan-tag-who'); return { key: r.dataset.grow, under: tg.top >= ti.bottom - 0.5, tagW: Math.round(tg.width), wordsWhole: words.every((w) => w.scrollWidth <= w.clientWidth + 0.5), whoWhole: !who || who.scrollWidth <= who.clientWidth + 0.5, rowW: Math.round(rr.width), listW: Math.round(list.width) }; });
@@ -754,7 +754,7 @@ ok(watcher === false, 'CONTROL: the Message watcher section (never folded) is op
     const sig = (b) => (b ? [b.dataset.hue || '', b.dataset.vs || '', (b.querySelector('svg') || {}).innerHTML || ''].join('|') : null);
     const rows = [...P.querySelectorAll('.chan-groups .chan-grow')];
     const conv = rows.filter((r) => !r.dataset.group).map((r) => ({ key: r.dataset.grow, b: sig(r.querySelector('.chan-av-badge')), t: (r.querySelector('.chan-av-badge') || {}).title || '' }));
-    const groups = rows.filter((r) => r.dataset.group).map((r) => ({ id: r.dataset.group, b: sig(r.querySelector('.chan-av-badge')) }));
+    const groups = rows.filter((r) => r.dataset.group).map((r) => { const av = r.querySelector('.chan-av'); return { id: r.dataset.group, b: sig(r.querySelector('.chan-av-badge')), vs: !!(av && av.classList.contains('chan-av-vs')), hue: av ? av.dataset.hue || null : null, mark: av ? ((av.querySelector(':scope > .chan-ic svg') || {}).innerHTML || '') : '' }; });
     const heads = {};
     for (const s of P.querySelectorAll('.chan-sec[data-adapter]')) { const b = s.querySelector('.chan-sec-head .chan-av-badge'); heads[s.dataset.adapter] = { b: sig(b), t: b ? b.title : '', kindTile: !!s.querySelector('.chan-sec-head .chan-av.chan-sec-kind') }; }
     const ih = P.querySelector('.chan-groups .chan-ihead');
@@ -765,8 +765,10 @@ ok(watcher === false, 'CONTROL: the Message watcher section (never folded) is op
   const adapterOf = (k) => { const i = k.lastIndexOf('/'); return k.slice(0, i); };
   ok(cs && cs.conv.every((c) => { const h = cs.heads[adapterOf(c.key)]; return h && h.b && h.b === c.b && h.t && c.t === h.t; }) && Object.values(cs.heads).every((h) => h.b && !h.kindTile),
     `⑪ BADGE CENSUS: every conversation row's badge (glyph + hue) is EXACTLY its account card's icon, and both hovers name the account (${cs ? cs.conv.length : 0} rows, ${cs ? Object.keys(cs.heads).length : 0} cards)`, JSON.stringify(cs));
-  ok(cs && cs.groups.length >= 1 && cs.groups.every((g) => g.b && g.b === cs.ihead && g.b.split('|')[1] === '1') && Object.values(cs.heads).some((h) => h.b === cs.ihead),
-    '⑪ every agent group row wears the VibeSpace badge — the same one the internal head and the built-in agents card wear', JSON.stringify(cs && { groups: cs.groups, ihead: cs.ihead }));
+  // lane internal-rows-look (the owner, 2026-10-09: the 8 px corner badge did not tell agent rows from a Lark group): the
+  //  group row's avatar IS the VibeSpace mark on a muted disc — no hue, no corner badge; the internal head wears that mark
+  ok(cs && cs.groups.length >= 1 && cs.ihead && cs.ihead.split('|')[1] === '1' && cs.groups.every((g) => !g.b && g.vs && g.hue === null && g.mark && g.mark === cs.ihead.split('|')[2]) && Object.values(cs.heads).some((h) => h.b === cs.ihead),
+    '⑪ every agent group row wears the VibeSpace mark AS its avatar (muted, no hue, no corner badge) — the mark the internal head and the built-in agents card wear', JSON.stringify(cs && { groups: cs.groups, ihead: cs.ihead }));
   const shots = process.env.VS_SHOTS_DIR || '';
   // the account cards folded for this page only (their heads — icon · name — in one view with the internal block)
   const shoot = async (name) => {

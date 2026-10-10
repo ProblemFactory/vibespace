@@ -546,6 +546,34 @@ console.log('⑪ NOTICES BY ORIGIN (B-328d) — the closed producer set, the leg
   console.log('     sites: ' + C.sites.map((x) => `${x.rel.replace(/^src\//, '')}:${x.line}=${x.origin}`).join(' · '));
   ok(C.sites.length >= 12, `the census scope is non-vacuous (${C.sites.length} sites; 12 when this shipped)`);
   ok(C.problems.length === 0, 'every site declares a literal origin of the closed set, the one its file produces; every origin has a producer; every PRODUCERS row files', C.problems);
+  // lane foryou-attachments: THE CENSUS GAINS `artifacts` — what an item asks the owner to OPEN is declared at exactly one
+  // site, the agent route (vibespace-ask --artifact, each attachment judged openable there first), with the asker's cwd + host
+  const artSites = Object.entries(files).filter(([, src]) => /\.add\([^;]*\bartifacts\b/.test(src)).map(([rel]) => rel).filter((rel) => C.sites.some((x) => x.rel === rel));
+  eq(artSites, ['src/agent-routes/status.js'], 'the census: ONE add() site declares `artifacts` (the agent route)');
+  ok(/userTodos\.add\(key, \{[^\n]*origin: 'agent'[^\n]*, artifacts, cwd: s\.cwd \|\| null, hostId: s\.host && s\.host !== 'local' \? s\.host : null \}\)/.test(files['src/agent-routes/status.js']), 'the agent route declares artifacts + the asker\'s cwd + host at the call');
+  {
+    const os = await import('node:os');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ut-arts-'));
+    try {
+      const { UserTodoManager, ARTIFACTS_MAX } = req(path.join(ROOT, 'src/user-todos.js'));
+      const m = new UserTodoManager({ dataDir: dir, onChange: () => { }, expirySweepMs: 0 });
+      const nine = Array.from({ length: 9 }, (_, i) => ({ kind: 'file', host: '', path: `/w/r/f${i}.md` }));
+      const a = m.add('claude:c1', { text: 'review these', origin: 'agent', artifacts: nine, cwd: '/w/r', hostId: 'local' });
+      ok(ARTIFACTS_MAX === 8 && a.artifacts.length === 8 && a.artifactsCut === 8 && a.artifacts[0].name === 'f0.md' && !('artifactsCut' in m.get(a.id)), 'the store SLICES past 8 and SAYS so on the returned record (artifactsCut — never in the ledger), a name defaults to the basename');
+      ok(a.cwd === '/w/r' && !('hostId' in a), 'the asker\'s cwd is stamped; this box (local) stamps no host');
+      let msg = '';
+      try { m.add('claude:c1', { text: 'bad kind', origin: 'agent', artifacts: [{ kind: 'exe', path: '/x' }] }); } catch (e) { msg = e.message; }
+      ok(/artifacts\[0\]\.kind must be one of file\/design\/page/.test(msg) && !m.snapshot().open.some((i) => i.text === 'bad kind'), 'a malformed attachment THROWS by name and files nothing', msg);
+      try { m.add('claude:c1', { text: 'rel path', origin: 'agent', artifacts: [{ kind: 'file', path: 'docs/x.md' }] }); msg = ''; } catch (e) { msg = e.message; }
+      ok(/must be an absolute path/.test(msg), 'a relative attachment path THROWS (the route made it absolute)', msg);
+      const p = m.add('claude:c1', { text: 'a page', origin: 'agent', artifacts: [{ kind: 'page', page: 'pgabcdefghij', name: 'Plan' }], hostId: 'h1' });
+      ok(p.artifacts[0].url === '/p/pgabcdefghij' && p.artifacts[0].host === '' && p.hostId === 'h1', 'a page row carries its /p/ url; a remote asker\'s host is stamped');
+      const plain = m.add('claude:c1', { text: 'no attachments', origin: 'agent' });
+      ok(!('artifacts' in plain) && !('cwd' in plain) && !('hostId' in plain), 'an item filed without them has no new keys (older fixtures keep their shape)');
+      const RC = req(path.join(ROOT, 'src/record-clear.js'));
+      ok(RC.SHAPES.todo.some(([k, op]) => k === 'artifacts' && op === 'drop'), '"Clear content…" drops an item\'s attachments with its words (record-clear SHAPES todo)');
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }
   eq(C.sites.length, 43, 'the widened match finds exactly the 43 declared sites (every classList.add(a, b) excluded, lane browser-disk-sample the profile disk item (src/server/browser-disk-run.js, origin browser), lane fuse-canary-notice the wedged-mount item (src/server/mount-health-watch.js, origin server), lane browser-resource-care the memory-pressure item (src/server/memory-pressure-watch.js, origin server), lane channel-names-readable the names item (speakNames, origin channels); lane parked-ask-inbox the main conversation ask item (src/server/main-asks.js, origin agent), lane lark-upload-preflight the partly-sent item (speakPartial, origin channels); lane gmail-quota-share the slowed-polling item (speakSlowed, origin channels); lane browser-unresponsive the browser keeper\'s not-answering item (its Restart act); B-2198 part 2 the raw-API proposal item (src/server/channel-api-cards.js); lane win-upgrade-pipe added device-upgrade-watch\'s never-came-back item; no other two-argument add in the tree; lane H verify r5 added the browser keeper\'s keeps-closing notice; lane S1 the helper-ask item; R4 (B-6acc) the channels engine\'s composed-message approval pointer; lane R5 verify r6 the channels engine\'s unsaved-sign-in item; lane-pairing ⑥ the exit ask; lane-pool-pin r2 the pool engine\'s removed-member hold notice — the owner\'s 全B; lane browser-propose the agent\'s proposal; lane hooks-create the late-hooks line; lane browser-admin the browser keeper\'s vanished-Chrome-build notice; lane browser-admin verify r2 (B5) its fall-back notice when a new Chrome build closed within seconds; Layer 0 apps the agent\'s install proposal + the failed-restore notice; lane reset-path verify r2 the pool engine\'s unreadable-attempts-file notice; lane reset-path verify r5 the pool engine\'s unknown-vendor-word item (origin pool — the engine IS the pool producer); lane reset-path verify r8 ⑥ the pool engine\'s late-wall notice (a limit hit on a conversation whose records arrive late — origin pool); lane channel-agent-watch the channels engine\'s wake-request item (origin channels); lane unexpected-exit (B-f698) the restarted-once item; lane for-you-jobs B-dfb4 the jobs wiring\'s dropped-at-the-cap notice; lane device-upgrade-stuck the stuck-upgrade notice; lane browser-passkey the page-waits-for-a-passkey item (mounts-plugins-wiring, origin browser); lane pool-subscription-lapsed the lapsed-subscription item (usage-pool-engine noteMemberServeFailure, origin pool))');
   eq(C.sites.filter((x) => /^src\/server\/channels-(engine|access|outbound|auth)\.js$/.test(x.rel)).length, 11, 'channels-engine files from eleven sites — all eleven declared (lane channel-names-readable: + speakNames, origin channels; lane lark-upload-preflight: + speakPartial, origin channels; lane gmail-quota-share: + speakSlowed, origin channels; R4: + composePointerSync, origin channels; R5 verify r6: the unsaved-sign-in item; lane channel-agent-watch: an agent\'s wake request)');
   console.log('   negative controls (the census must be able to go red)');

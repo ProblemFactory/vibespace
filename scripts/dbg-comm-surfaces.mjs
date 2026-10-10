@@ -973,7 +973,7 @@ const IM_MEASURE = `(function (rootSel, groups) {
   return out;
 })`;
 const IM_PANEL_GROUPS = {
-  grow: { sel: '.chan-groups > .chan-grow', parts: { av: '.chan-av', icon: '.chan-grow-ic', title: '.chan-grow-title', at: '.chan-grow-at', tag: '.chan-grow-tag', src: '.chan-src-chip', last: '.chan-grow-last', unread: '.chan-grow-unread' }, whole: ['at', 'unread'], wholeAll: ['.chan-tag-words'] },
+  grow: { sel: '.chan-groups .chan-grow', parts: { av: '.chan-av', icon: '.chan-grow-ic', title: '.chan-grow-title', at: '.chan-grow-at', tag: '.chan-grow-tag', src: '.chan-src-chip', last: '.chan-grow-last', unread: '.chan-grow-unread' }, whole: ['at', 'unread'], wholeAll: ['.chan-tag-words'] },
   bar: { sel: '.chan-find', parts: { input: '.chan-find-input', newgroup: '.chan-newgroup-btn', outbox: '.chan-outbox-btn' } },
   seg: { sel: '.chan-bar', parts: { focus: '.chan-view-btn[data-view="focus"]', all: '.chan-view-btn[data-view="all"]' } },
   head: { sel: '.chan-account > .chan-sec-head', parts: { chev: '.chan-sec-chev', kind: '.chan-sec-kind', name: '.chan-sec-name', chip: '.chan-cred-chip', dot: '.chan-dot', count: '.chan-sec-count', edit: '.chan-sec-edit', more: '.chan-sec-more' }, whole: ['count'] },
@@ -1060,7 +1060,7 @@ async function imPass({ lang, viewport, theme }) {
   await sleep(1500);
   if (!mobile) {
     await openPanel(page);
-    await waitFor(page, `document.querySelectorAll('.rail-panel-channels .chan-groups > .chan-grow').length >= 3`, 60);
+    await waitFor(page, `document.querySelectorAll('.rail-panel-channels .chan-groups .chan-grow').length >= 3`, 60);
     await sleep(500);
     for (const w of [260, 200, 340, 500]) {
       await page.evaljs(`(() => { const sb = window.app.sidebar; sb._resizer._setSize(${w}); sb._applySidebarLayoutWidth(${w}); return 1; })()`);
@@ -1086,7 +1086,7 @@ async function imPass({ lang, viewport, theme }) {
     await sleep(300);
   } else {
     await page.evaljs(`(() => { const w = window.app.openChannels({ forceWindow: true }); return !!w; })()`);
-    await waitFor(page, `document.querySelectorAll('.chan-window .chan-groups > .chan-grow').length >= 3`, 60);
+    await waitFor(page, `document.querySelectorAll('.chan-window .chan-groups .chan-grow').length >= 3`, 60);
     await sleep(500);
     await imCapture(page, tag, 'm-list-focus', '.chan-window', IM_PANEL_GROUPS, { clipSel: 'body' });
     await page.evaljs(`(() => { for (const w of [...window.app.wm.windows.values()].filter((x) => x.type === 'channels')) window.app.wm.closeWindow(w.id); return 1; })()`);

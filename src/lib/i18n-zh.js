@@ -8097,4 +8097,10 @@ export default {
   "(a guard — change it in the policy row)": "（这是护栏 —— 在策略行里改）",
   "Outbox: outside working hours every message needs your approval": "发件箱：非工作时间的每条消息都需要你审批",
   "Applies once a working-hours time zone is set below. Off = an agent with send authority on a \"send directly\" channel sends at any hour. Also switched in the policy row (a conversation's or an account's Reach & policy…).": "设置了下面的工作时间时区后才生效。关 = 在“直接发送”的频道上，有发送权限的智能体任何时间都会发出。也可在策略行里切换（会话或账号的“可见性与策略…”）。",
+  // lane foryou-attachments: an ask's chip / link whose target is gone
+  "An attachment is gone": "一个附件已不在",
+  "A link in an item was not found": "条目里的一个链接找不到",
+  "Not found: {path}": "找不到：{path}",
+  "{name} is no longer published": "{name} 已不再发布",
+  "{name} is gone — nothing at {path} any more": "{name} 已不在了 —— {path} 处已没有它",
 };
