@@ -2,6 +2,19 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.254 — 2026-10-11
+
+### Added
+- An app an agent installs for you no longer lands "outside VibeSpace": Flatpaks install through it, anything else is registered with its launch options.
+- An app installed outside VibeSpace can be added with one press — with its launch options and how to remove it; agent-registered apps show the same.
+
+### Changed
+- The Apps dialog opens at once and its 'Installed outside VibeSpace' list shows only what you or an agent added — not the system's own entries, unless you ask.
+- A window an agent opens no longer jumps in front of your work — it appears beside the agent's chat, behind you, with a taskbar hint; the old way is a setting.
+
+### Fixed
+- When an app you let an agent drive opens a dialog, the agent now sees it in its screenshot and types into it.
+
 ## 2.369.253 — 2026-10-11
 
 ### Maintenance

@@ -50,6 +50,9 @@ const SYS = require('./app-system.js');
 
 const APP_OPS = Object.freeze(['app-status', 'app-plan', 'app-install', 'app-remove', 'app-refresh', 'app-adopt-drift', 'app-fetch', 'app-unstage', 'app-forget']);
 const K = require('./app-kinds/index.js'); // PURE — an app kind is its own file + one index line (lanes dc-apps-rows, dc-app-kinds)
+const FP = require('./app-kinds/flatpak.js'); // PURE — the flatpak door (lane app-register-model)
+const RG = require('./app-kinds/registered.js'); // PURE — a registered app's declaration + THE witness-match rule
+const AWD = require('./argv-words.js'); // PURE — an argv shown as one line
 const W = require('./app-witness.js'); // PURE — what is installed OUTSIDE the door, by witness (lane apps-launcher-witness)
 const PLAN_KINDS = Object.freeze([...K.PLAN_KINDS, ...SYS.SYS_KINDS]); // design 019: `move` = the user's click (the host apps INTO the app system), `forget` = its second step
 /** A file VibeSpace staged for a proposal: `<16 hex>.deb` / `.AppImage` / `.icon.png|svg` (a download in flight: `.part`). */
@@ -199,7 +202,7 @@ function fetchHttps(url, { max = KEY_MAX, timeout = 20000, redirects = 3 } = {})
  *                    loopback "vendor" by a RESERVED `.test` name (never a real site); production passes nothing
  */
 function create({ home = os.homedir(), stateDir, env = () => process.env, log = console, now = Date.now, binOnPath = null, installState = null,
-  dpkgStatus = '/var/lib/dpkg/status', markerDir = A.MARKER_DIR, systemLists = '/var/lib/apt/lists', osRelease = '/etc/os-release', isRoot = null, runner = run, fetchSeam = null, rootUid = 0, witnessDirs = null } = {}) {
+  dpkgStatus = '/var/lib/dpkg/status', markerDir = A.MARKER_DIR, systemLists = '/var/lib/apt/lists', osRelease = '/etc/os-release', isRoot = null, runner = run, fetchSeam = null, rootUid = 0, witnessDirs = null, engineIds = null } = {}) {
   if (!stateDir) throw new Error('app-serve: stateDir is required');
   if (typeof env !== 'function') { const e0 = env; env = () => e0; }
   const appsDir = path.join(home, A.APPS_REL);
@@ -436,6 +439,17 @@ function create({ home = os.homedir(), stateDir, env = () => process.env, log = 
       const row = { ...r, args: [...r.args], env: { APPDIR: path.dirname(apprun) }, app: e.id };
       if (M.validateAppRow(row).ok) out.push(row);
     }
+    // lane app-register-model: a Flatpak's row = its EXPORTED desktop file's (else `flatpak run <appId>`); a registered app's =
+    // its default variant (every variant on the row — the launch door picks one by id). Both run AS THE USER, no root.
+    for (const e of manifest.entries.filter((x) => x.kind === FP.id)) {
+      const file = FP.exportedDesktop(home, e.appId);
+      let parsed = null;
+      try { const r = A.parseDesktopFile((await fsp.readFile(file, 'utf8')).slice(0, DESKTOP_MAX), { entry: e.id, path: file, primary: true, validate: M.validateAppRow }); if (r.ok) parsed = r.row; } catch { parsed = null; }
+      const rm = FP.removeArgvOf(e), ri = FP.reinstallArgvOf(e);
+      const row = { ...FP.rowOf(e, parsed), remove: { exec: rm[0], args: rm.slice(1) }, reinstall: { exec: ri[0], args: ri.slice(1) } };
+      if (M.validateAppRow(row).ok) out.push(row);
+    }
+    for (const e of manifest.entries.filter((x) => x.kind === RG.id)) { const row = { ...RG.rowOf(e, { home }), ...(e.remove ? { remove: { exec: e.remove.exec, args: [...e.remove.args] } } : {}), ...(e.reinstall ? { reinstall: { exec: e.reinstall.exec, args: [...e.reinstall.args] } } : {}) }; if (M.validateAppRow(row).ok) out.push(row); }
     return out;
   }
   /** The rows as desktop-serve's registry() last saw them (refreshCatalog keeps them current). */
@@ -444,15 +458,16 @@ function create({ home = os.homedir(), stateDir, env = () => process.env, log = 
   // listed as what it is — its own group, its own source; the four directories' mtimes are the cheap change signature ──
   const wDirs = { user: path.join(home, '.local', 'share', 'applications'), system: '/usr/share/applications', flatpakUser: path.join(home, '.local', 'share', 'flatpak', 'app'), flatpakSystem: '/var/lib/flatpak/app', ...(witnessDirs || {}) };
   const witnessFile = path.join(stateDir, W.WITNESS_FILE);
-  let witness = null; // { rows, listedAt, sig, flatpak } — the file's, read at the first ask
+  let witness = null; // { rows, listedAt, sig, flatpak, tookMs, scope } — the file's, read at the first ask
   let witnessFlight = null;
+  const witnessListeners = new Set(); // lane apps-dialog-fast: told when a listing LANDS (its rows, or that "listing…" is over)
   async function witnessSig() { let s = ''; for (const d of [wDirs.user, wDirs.system, wDirs.flatpakUser, wDirs.flatpakSystem]) s += `${await mtimeOf(d)};`; return s; }
   async function readWitness() {
     if (witness) return witness;
     try {
       const j = JSON.parse(await fsp.readFile(witnessFile, 'utf8'));
-      witness = { rows: (Array.isArray(j.rows) ? j.rows : []).filter((r) => r && r.witnessed === true && String(r.id || '').startsWith(W.WITNESS_PREFIX) && M.validateAppRow(r).ok), listedAt: Number.isFinite(j.listedAt) ? j.listedAt : null, sig: typeof j.sig === 'string' ? j.sig : null, flatpak: typeof j.flatpak === 'boolean' ? j.flatpak : null };
-    } catch { witness = { rows: [], listedAt: null, sig: null, flatpak: null }; }
+      witness = { rows: (Array.isArray(j.rows) ? j.rows : []).filter((r) => r && r.witnessed === true && String(r.id || '').startsWith(W.WITNESS_PREFIX) && M.validateAppRow(r).ok), listedAt: Number.isFinite(j.listedAt) ? j.listedAt : null, sig: typeof j.sig === 'string' ? j.sig : null, flatpak: typeof j.flatpak === 'boolean' ? j.flatpak : null, tookMs: Number.isFinite(j.tookMs) ? j.tookMs : null };
+    } catch { witness = { rows: [], listedAt: null, sig: null, flatpak: null, tookMs: null }; }
     return witness;
   }
   /** ONE desktop file the user (or anyone) wrote: opened O_NONBLOCK|O_NOFOLLOW (a FIFO or a link never blocks a pool
@@ -473,37 +488,79 @@ function create({ home = os.homedir(), stateDir, env = () => process.env, log = 
     for (const n of names) { if (now() > until) break; const text = await readEntryFile(path.join(dir, n)); if (text != null) out.push({ path: path.join(dir, n), text, scope }); }
     return out;
   }
+  /** THE dpkg touch time — status()'s drift tripwire and outsidePackages() read this ONE helper (int254). verify-r1 F7: the
+   *  apt hook (DPkg::Post-Invoke) never runs for a plain `dpkg -i` — the dpkg status file's own write time is a touch too
+   *  (every dpkg run rewrites it; VibeSpace's own runs end before slot-ended is stamped). null = neither exists. */
+  async function dpkgTouchedAt() {
+    const hookAt = await mtimeOf(marker(A.DRIFT_MARKER)), statusAt = await mtimeOf(dpkgStatus);
+    const touchedAt = hookAt == null && statusAt == null ? null : Math.max(hookAt || 0, statusAt || 0);
+    return touchedAt;
+  }
+  /** lane apps-dialog-fast: the packages installed after the apps system's BASE (status()'s drift verdict, read the same
+   *  way) → a Set — empty when nothing drifted; null = no base on this machine (the apps system never ran a package job). */
+  async function outsidePackages() {
+    const touchedAt = await dpkgTouchedAt(), slotEndedAt = await mtimeOf(marker(A.SLOT_ENDED));
+    const lastTxt = touchedAt == null || slotEndedAt == null ? null : await readRootFile(marker(A.LAST_LIST), 16 * 1024 * 1024);
+    if (lastTxt == null) return null;
+    const d = A.driftVerdict({ touchedAt, slotEndedAt, last: A.parseDpkgList(lastTxt), now: (await dpkgNow()).list || [], managed: [] });
+    return new Set(d.drift ? d.added.map((p) => p.package) : []);
+  }
+  /** ONE bounded `dpkg -S` over the listed system entries (never per row, never sync) → {path: package}; no dpkg = {}. */
+  async function ownersOf(paths) {
+    const ps = paths.filter((p) => !/[*?[\]\\]/.test(p)); // a glob character would make dpkg read it as a pattern
+    if (!ps.length) return {};
+    try { const r = await runner('dpkg', ['-S', ...ps], { env: env(), timeout: W.WITNESS_BUDGET_MS, maxBuffer: 4 * 1024 * 1024 }); return W.parseDpkgSearch(r && r.stdout); } catch { return {}; }
+  }
   async function listWitness() {
     const until = now() + W.WITNESS_BUDGET_MS;
+    const t0 = Date.now();
     const sig = await witnessSig();
     const fl = await Promise.all(['user', 'system'].map((scope) => runner('flatpak', ['list', '--app', `--${scope}`, `--columns=${W.FLATPAK_COLUMNS}`], { env: env(), timeout: W.WITNESS_BUDGET_MS, maxBuffer: 4 * 1024 * 1024 })));
     const flatpak = fl.some((r) => r.code === 0);
     const flatpaks = fl.flatMap((r, i) => (r.code === 0 ? W.parseFlatpakList(r.stdout, { scope: i ? 'system' : 'user' }) : []));
     const desktops = [...await entryFiles(wDirs.user, 'user', until), ...await entryFiles(wDirs.system, 'system', until)];
     try { await refreshCatalog(); } catch { /* the last rows */ }
-    const rows = W.witnessRows({ flatpaks, desktops, catalog: catalog.rows, validate: M.validateAppRow, parse: A.parseDesktopFile });
+    const sysPaths = desktops.filter((d) => d.scope === 'system').map((d) => d.path);
+    const [owners, drift] = await Promise.all([ownersOf(sysPaths), outsidePackages().catch(() => null)]);
+    const rows = W.witnessRows({ flatpaks, desktops, catalog: catalog.rows, validate: M.validateAppRow, parse: A.parseDesktopFile, drift: drift && [...drift], owners });
     for (const r of rows) if (r.exec.includes('/') && now() <= until && !(await exists(r.exec))) r.execGone = true; // the registry says so (never a sync stat there)
-    witness = { rows, listedAt: now(), sig, flatpak };
-    try { await writeJsonAtomic(witnessFile, witness); } catch (e) { log.warn?.(`[apps] ${W.WITNESS_FILE} could not be written (${e.message}) — the list is kept in memory`); }
+    const before = witness && JSON.stringify(witness.rows);
+    witness = { rows, listedAt: now(), sig, flatpak, tookMs: Date.now() - t0, scope: { ...W.witnessScope(rows), base: drift != null } };
+    witness.changed = before !== JSON.stringify(rows);
+    try { await writeJsonAtomic(witnessFile, { ...witness, changed: undefined }); } catch (e) { log.warn?.(`[apps] ${W.WITNESS_FILE} could not be written (${e.message}) — the list is kept in memory`); }
     return witness;
   }
   /** Re-list when the rule says so (app-witness refreshVerdict; `reason` open | install | helper | recheck) — one
-   *  listing in flight at a time, the caller waits ≤ WITNESS_BUDGET_MS (then the last list is served). → the view. */
+   *  listing in flight at a time. lane apps-dialog-fast: an OPEN never waits (app-witness openAnswer — the last list now,
+   *  the new one pushed through onWitness when it lands changed); the other reasons wait ≤ WITNESS_BUDGET_MS. → the view. */
   async function refreshWitness({ reason = 'open' } = {}) {
     const w0 = await readWitness();
     const v = W.refreshVerdict({ listedAt: w0.listedAt, sig: w0.sig, sigNow: reason === 'open' ? await witnessSig() : null, now: now(), reason });
-    if (v.due && !witnessFlight) witnessFlight = listWitness().catch((e) => { log.warn?.(`[apps] the installed-apps witness failed (${e.message}) — the last list is served`); return witness; }).finally(() => { witnessFlight = null; });
-    if (witnessFlight) { let t; await Promise.race([witnessFlight, new Promise((r) => { t = setTimeout(r, W.WITNESS_BUDGET_MS); })]); clearTimeout(t); }
+    const o = reason === 'open' ? W.openAnswer({ cache: w0, due: v.due, inFlight: !!witnessFlight }) : { refresh: v.due && !witnessFlight, wait: true };
+    if (o.refresh) {
+      witnessFlight = listWitness().catch((e) => { log.warn?.(`[apps] the installed-apps witness failed (${e.message}) — the last list is served`); return witness; }).finally(() => {
+        witnessFlight = null;
+        const view = { ...witnessView(), changed: !!(witness && witness.changed) };
+        for (const fn of witnessListeners) { try { fn(view); } catch (e) { log.warn?.(`[apps] a witness listener failed: ${e.message}`); } }
+      });
+    }
+    if (witnessFlight && o.wait) { let t; await Promise.race([witnessFlight, new Promise((r) => { t = setTimeout(r, W.WITNESS_BUDGET_MS); })]); clearTimeout(t); }
     return witnessView();
   }
-  function witnessView() { const w = witness || { rows: [], listedAt: null, flatpak: null }; return { listedAt: w.listedAt, count: w.rows.length, flatpak: w.flatpak }; }
+  /** `listing` = a listing is running (the group says "listing…"); `count` = the rows the group lists, `hidden` = the distro's. */
+  function witnessView() { const w = witness || { rows: [], listedAt: null, flatpak: null }; const hidden = w.rows.filter((r) => r.distro).length; return { listedAt: w.listedAt, count: w.rows.length - hidden, hidden, flatpak: w.flatpak, listing: !!witnessFlight, tookMs: w.tookMs ?? null }; }
+  /** lane apps-dialog-fast: (view) => … after a listing whose rows changed → the unsubscribe; `witnessSettled()` = the running listing. */
+  function onWitness(fn) { witnessListeners.add(fn); return () => witnessListeners.delete(fn); }
+  const witnessSettled = () => witnessFlight || Promise.resolve(witness);
   /** The witnessed rows as last listed (copies — registry() decorates them). */
   function witnessRows() { return ((witness && witness.rows) || []).map((r) => ({ ...r, args: [...r.args] })); }
   /** The icon file a row may show → {file, type} | null: a PNG / SVG under /usr/share/{icons,pixmaps}, a regular file. */
   async function iconFile(rowId) {
     const row = catalog.rows.find((r) => r.id === rowId);
     if (!row || !row.icon) return null;
-    for (const c0 of A.iconCandidates(row.icon, { appsDir })) {
+    const own = row.registered && row.icon.startsWith('/') && /\.(?:png|svg)$/.test(row.icon) && !row.icon.includes('/../') ? [row.icon] // validated at its record (validateRegistered)
+      : row.flatpak && /^[A-Za-z0-9._-]{1,255}$/.test(row.icon) ? ['scalable/apps/{n}.svg', '256x256/apps/{n}.png', '128x128/apps/{n}.png', '64x64/apps/{n}.png', '48x48/apps/{n}.png'].map((x) => `${FP.exportedIcons(home)}hicolor/${x.replace('{n}', row.icon)}`) : null;
+    for (const c0 of own || A.iconCandidates(row.icon, { appsDir })) {
       const c = row.layer === 'sys' ? (c0.startsWith('/usr/share/') ? await sys.inRoot(sys.rootfs, c0) : null) : c0; // an app-system row's icon lives in its userland (no link on the way)
       if (!c) continue;
       try { const st = await fsp.stat(c); if (st.isFile() && st.size <= 1024 * 1024) return { file: c, type: c.endsWith('.svg') ? 'image/svg+xml' : 'image/png' }; } catch { /* next */ }
@@ -564,15 +621,13 @@ function create({ home = os.homedir(), stateDir, env = () => process.env, log = 
     const missing = installed ? entries.filter((e) => !e.packages.every((p) => installed.has(p))).map((e) => e.id) : null;
     const decision = A.replayRungs({ entries: entries.length, markerHit: replayedAt != null, baseShaNow: now0.sha, baseShaStored: A.SHA256_RE.test(baseShaStored || '') ? baseShaStored : null, missing: missing ? missing.length : null });
     let drift = { drift: false, why: 'no-tripwire' };
-    // verify-r1 F7: the apt hook (DPkg::Post-Invoke) never runs for a plain `dpkg -i` — the dpkg status file's own write
-    // time is a touch too (every dpkg run rewrites it; VibeSpace's own runs end before slot-ended is stamped)
-    const hookAt = await mtimeOf(marker(A.DRIFT_MARKER)), statusAt = await mtimeOf(dpkgStatus);
-    const touchedAt = hookAt == null && statusAt == null ? null : Math.max(hookAt || 0, statusAt || 0);
+    const touchedAt = await dpkgTouchedAt(); // verify-r1 F7 (the helper)
     if (touchedAt != null) {
       const lastTxt = await readRootFile(marker(A.LAST_LIST), 16 * 1024 * 1024);
       const managed = new Set([...entries.flatMap((e) => e.packages), ...manifest.resolved.debs.map((d) => d.package)]);
       drift = A.driftVerdict({ touchedAt, slotEndedAt: await mtimeOf(marker(A.SLOT_ENDED)), last: lastTxt == null ? null : A.parseDpkgList(lastTxt), now: now0.list || [], managed: [...managed] });
     }
+    const reinstall = await reinstallRungs(manifest);
     const f0 = await facts();
     const appSystem = await sys.view({ facts: f0, slot: await slotState() }); // Layer 1: the dialog's Set up… / Repair / Migrate… / Roll back… read this
     const sysE = await sys.entries();
@@ -581,7 +636,7 @@ function create({ home = os.homedir(), stateDir, env = () => process.env, log = 
       // `uncached`: an entry's own packages with no saved .deb and not in the image's base — the replay can never put them
       // back (an app adopted from a .deb that exists in no archive); the row says so (verify-r1 F6)
       entries: entries.map((e) => ({ id: e.id, packages: e.packages, rows: rows.filter((r) => r.app === e.id).map((r) => r.id), indexed: manifest.entries.some((m) => m.id === e.id), uncached: e.packages.filter((p) => !cached.has(p) && !baseSet.has(p)) })).concat(sysE.map((e) => ({ id: e.id, layer: 'sys', packages: e.packages, rows: rows.filter((r) => r.app === e.id).map((r) => r.id), indexed: manifest.entries.some((m) => m.id === e.id), uncached: [] }))),
-      replay: { markerAt: replayedAt, decision, missing, baseShaNow: now0.sha, baseShaStored: baseShaStored || null, last: state.replay || null },
+      reinstall, replay: { markerAt: replayedAt, decision, userRungs: reinstall, missing, baseShaNow: now0.sha, baseShaStored: baseShaStored || null, last: state.replay || null },
       drift, updates: state.updates || null, refreshedAt: state.refreshedAt || null, slot: await slotState(), stateDir,
     };
   }
@@ -618,11 +673,17 @@ function create({ home = os.homedir(), stateDir, env = () => process.env, log = 
     if (kind === 'search') {
       const words = A.searchWords(p.query);
       if (!words) throw named('bad-request', 'search for plain words (letters, digits, + . -)');
+      if (p.flatpak === true) { // lane app-register-model: the flatpak door's ids (bounded ≤ 5 s, as the user)
+        const argv = FP.searchArgv(words);
+        const r = await runner(argv[0], argv.slice(1), { env: env(), timeout: FP.SEARCH_BUDGET_MS, maxBuffer: 1024 * 1024 });
+        return { results: [], flatpaks: r.code === 0 ? FP.parseSearch(r.stdout) : [], code: r.code === 0 ? null : 'no_flatpak', facts: f, install };
+      }
       if (!f.apt) return { results: [], facts: f, install, code: 'no_apt' };
       const opts = await aptOpts();
       const r = await runner('apt-cache', [...opts, 'search', '--names-only', ...words], { env: env(), timeout: 30000 });
       return { results: A.parseSearch(r.stdout, 60), facts: f, install };
     }
+    if (kind === RG.id) return ret(await registerPlan(p, manifest)); // lane app-register-model: a declaration needs no apt
     if (!f.apt) return ret({ ok: false, code: 'no_apt', error: `${f.prettyName || 'this machine'} has no apt-get — VibeSpace installs apps with apt only`, kind });
     const planRow = K.kindRow(kind) || {};
     if (planRow.planner) return planRow.planner({ p, f, kind, manifest, nonce, canRun, intoSys, ret, simOpts, moveTail, label0, A, M, appsDir, both, env, runner, fsp, path, DEB_MAX, dpkgNow, entryIdFor, twinOf, rootEntries, sys, stage, stagedFile, readHashed, debApp, appImageInfo, stageIcon }); // an app kind plans itself (its own file in src/app-kinds/, lane dc-app-kinds)
@@ -915,7 +976,7 @@ function create({ home = os.homedir(), stateDir, env = () => process.env, log = 
       let st = null;
       try { st = await fsp.lstat(dir); } catch { st = null; }
       if (st && st.isDirectory()) await fsp.rm(dir, { recursive: true, force: true });
-    } else {
+    } else if (pl.homeArgv) { // a registered app without a remove recipe: only its record goes
       const argv = pl.homeArgv.map((a) => (a === '~/.local' ? path.join(home, '.local') : a));
       const r = await runner(argv[0], argv.slice(1), { env: env(), timeout: 300000 });
       if (r.code !== 0 && !/not installed|No such|is not a|nothing to/i.test(both(r))) throw named('remove_failed', `${argv.join(' ')} failed (exit ${r.code}): ${both(r).trim().split('\n').slice(-2).join(' ').slice(0, 300)}`);
@@ -1044,7 +1105,8 @@ function create({ home = os.homedir(), stateDir, env = () => process.env, log = 
   }
   /** A USER-LEVEL tool (`vibespace-app add --kind uv|npm`, design §3.4) installed by the agent as the user — in HOME,
    *  nothing to replay: recorded for the record (who, why), never through root. (An AppImage is proposed: design 009.) */
-  async function recordUserKind({ kind, name, why = null, by }) {
+  async function recordUserKind({ kind, name, why = null, by, remote = null }) {
+    if (kind === FP.id) return recordFlatpak({ appId: name, remote, why, by });
     if (!['uv-tool', 'npm'].includes(kind)) throw named('bad-request', 'kind must be uv-tool / npm (an AppImage is proposed: vibespace-app install --file)');
     if (typeof name !== 'string' || !/^[@a-z0-9][a-z0-9@/._+-]{0,120}$/i.test(name)) throw named('bad_name', 'not a tool name');
     const { manifest, corrupt } = await readManifest();
@@ -1054,6 +1116,85 @@ function create({ home = os.homedir(), stateDir, env = () => process.env, log = 
     await writeManifest(m, { corrupt });
     return { entry: m.entries.find((e) => e.id === id) };
   }
+  // ── lane app-register-model: the flatpak door + registered declarations ──
+  /** The absolute path the USER would run for `x` (an absolute path: executable file; a bare name: on the user's PATH). */
+  async function resolveExec(x) {
+    const s0 = String(x || '').trim();
+    if (s0.startsWith('/')) { try { await fsp.access(s0, fs.constants.X_OK); return (await fsp.stat(s0)).isFile() ? s0 : null; } catch { return null; } }
+    if (!/^[A-Za-z0-9._+-]{1,128}$/.test(s0)) return null;
+    const w = which(s0);
+    if (w) return w;
+    for (const d of String((env() || {}).PATH || '').split(':').filter((d) => d.startsWith('/')).slice(0, 40)) { const r = await resolveExec(path.join(d, s0)); if (r) return r; }
+    return null;
+  }
+  /** A declaration → THE validation (src/app-kinds/registered.js) with this machine's facts (execs resolved, icon size). */
+  async function declared(entry, manifest) {
+    const e = entry && typeof entry === 'object' ? entry : {};
+    const execs = [...(Array.isArray(e.launch) ? e.launch.slice(0, RG.VARIANTS_MAX) : []).map((v) => v && v.exec), e.remove && e.remove.exec].filter((x) => typeof x === 'string');
+    const map = new Map();
+    for (const x of execs) map.set(x.trim(), await resolveExec(x));
+    let iconN = null;
+    if (typeof e.icon === 'string' && e.icon.startsWith('/')) { try { const st = await fsp.stat(e.icon); iconN = st.isFile() ? st.size : null; } catch { iconN = null; } }
+    return RG.validateRegistered(e, { resolve: (x) => map.get(String(x).trim()) || null, iconBytes: () => iconN, home, engineIds: typeof engineIds === 'function' ? engineIds() : [], entries: manifest.entries });
+  }
+  /** THE plan of a declaration: validated, its id, THE WITNESS-MATCH RULE's verdict (`witnessed` = the seen row's id: nothing
+   *  new becomes launchable ⇒ recorded directly; null ⇒ the owner's click), every argv as a line a person reads. */
+  async function registerPlan(p, manifest) {
+    const v = await declared(p.entry, manifest);
+    if (!v.ok) return { ok: false, code: v.code, error: v.error, kind: RG.id };
+    const prev = manifest.entries.find((x) => x.kind === RG.id && x.id === v.entry.slug);
+    const entryId = prev ? prev.id : A.entryIdFor(v.entry.slug, [...(await rootEntries()).map((x) => x.id), ...manifest.entries.map((x) => x.id)]);
+    try { await refreshWitness({ reason: 'open' }); await witnessSettled(); } catch { /* the last list */ } // an open no longer waits (lane apps-dialog-fast): THE RULE judges the listing that was due (int254)
+    const v0 = v.entry.launch[0], seen = [];
+    for (const r of witnessRows()) { if (!r.exec.startsWith('/') && r.exec.split('/').pop() === String(v0.exec).split('/').pop()) r.path = await resolveExec(r.exec); seen.push(r); }
+    const wm = RG.witnessMatch(v.entry, seen);
+    const entry = { ...v.entry, witness: wm.match ? wm.witness : null };
+    delete entry.slug;
+    return { ok: true, code: null, error: null, canRun: true, kind: RG.id, mode: 'register', entryId, label: entry.label, packages: [], closure: [], removes: [], downloadBytes: 0, installedBytes: 0,
+      closureKey: `register ${entryId} ${JSON.stringify(entry)}`, commands: RG.commandLines(entry, AWD.joinWords), entry, witnessed: wm.match ? wm.seen.id : null };
+  }
+  /** Record a declaration — `direct` (an agent's, no click) only when THE WITNESS-MATCH RULE says nothing new becomes
+   *  launchable (judged again here, never taken from the caller); else after the owner's click / the owner's own Adopt. */
+  async function recordRegistered({ entry, by, why = null, direct = false, session = null }) {
+    const { manifest, corrupt } = await readManifest();
+    const pl = await registerPlan({ entry }, manifest);
+    if (!pl.ok) throw named(pl.code || 'bad-request', pl.error);
+    if (direct && !pl.witnessed) throw named('not_witnessed', `${pl.entryId}: its default launch is nothing this machine already lists — registering it is the owner's click`);
+    const prev = manifest.entries.find((e) => e.id === pl.entryId);
+    const m = A.withEntry(manifest, { id: pl.entryId, packages: [], addedAt: (prev && prev.addedAt) || now(), by: byOf(by), approvedAt: now(), rows: [], services: [], ...(why ? { why: String(why).slice(0, 500) } : {}), ...pl.entry, registered: { session: session ? String(session).slice(0, 120) : null, at: now() } });
+    await writeManifest(m, { corrupt });
+    catalog.sig = null;
+    const rows = (await refreshCatalog()).filter((r) => r.app === pl.entryId);
+    return { entry: m.entries.find((e) => e.id === pl.entryId), rows, witnessed: pl.witnessed };
+  }
+  /** `vibespace-app add --kind flatpak <appId>` ran `flatpak install --user` as the user (its CLI card held that): recorded —
+   *  only when the app is there (~/.local/share/flatpak/app/<appId>); its label from the exported desktop file. */
+  async function recordFlatpak({ appId, remote = null, why = null, by }) {
+    if (!FP.appIdOk(appId)) throw named('bad_name', 'not a Flatpak application id (org.example.App)');
+    if (remote != null && remote !== '' && !FP.remoteOk(remote)) throw named('bad_name', 'not a Flatpak remote name');
+    if (!(await exists(FP.appDir(home, appId)))) throw named('not_recorded', `${appId} is not installed for you (${FP.appDir(home, appId)} is missing) — run: ${FP.installCmd(appId, remote || null).join(' ')}`);
+    const { manifest, corrupt } = await readManifest();
+    const prev = manifest.entries.find((e) => e.kind === FP.id && e.appId === appId);
+    let label = appId, noDesktop = true;
+    try { const r = A.parseDesktopFile((await fsp.readFile(FP.exportedDesktop(home, appId), 'utf8')).slice(0, DESKTOP_MAX), { entry: 'x', primary: true }); if (r.ok) { label = r.row.label; noDesktop = false; } } catch { noDesktop = true; }
+    const id = prev ? prev.id : A.entryIdFor(label, [...(await rootEntries()).map((x) => x.id), ...manifest.entries.map((x) => x.id)]);
+    const m = A.withEntry(manifest, { id, kind: FP.id, packages: [], label: String(label).slice(0, 80), appId, remote: remote || null, ...(noDesktop ? { noDesktop: true } : {}), addedAt: (prev && prev.addedAt) || now(), by: byOf(by), approvedAt: null, rows: [], services: [], ...(why ? { why } : {}) });
+    await writeManifest(m, { corrupt });
+    catalog.sig = null;
+    const rows = (await refreshCatalog()).filter((r) => r.app === id);
+    return { entry: m.entries.find((e) => e.id === id), rows };
+  }
+  /** After a rebuild (or anything else) a home entry whose program is GONE: its reinstall, a USER-CLICK rung (never run here). */
+  async function reinstallRungs(manifest) {
+    const out = [];
+    for (const e of manifest.entries.filter((x) => x.kind === FP.id || x.kind === RG.id).slice(0, 64)) {
+      const gone = e.kind === FP.id ? !(await exists(FP.appDir(home, e.appId))) || !(await resolveExec('flatpak')) : !(await resolveExec(e.launch[0].exec));
+      if (!gone) continue;
+      const kr = K.kindRow(e.kind), argv = kr.reinstallArgvOf(e);
+      out.push({ id: e.id, label: e.label || e.id, kind: e.kind, argv: argv || null, words: kr.goneWords(e), click: 'user' });
+    }
+    return out;
+  }
   async function recordSource({ sourceId, nonce, source, by, remove = false }) {
     const run0 = await runOf(sourceId, nonce);
     const { manifest, corrupt } = await readManifest();
@@ -1062,7 +1203,7 @@ function create({ home = os.homedir(), stateDir, env = () => process.env, log = 
     return { source: remove ? null : m.sources.find((s) => s.id === sourceId), removed: remove ? sourceId : null };
   }
 
-  return { sys, appsDir, sysDir, stagingDir, manifestFile, stateFile, listsRoot, facts, plan, status, fetchInstaller, unstage, installAppImage, removeHome, appImageInfo, readManifest, writeManifest, readState, writeState, recordEntry, recordRemove, recordRefresh, recordSource, recordUserKind, recordForget, reconcile, refreshCatalog, catalogRows, iconFile, refreshWitness, witnessRows, witnessView, rootEntries, dpkgNow, aptOpts, slotState };
+  return { sys, appsDir, sysDir, stagingDir, manifestFile, stateFile, listsRoot, facts, plan, status, fetchInstaller, unstage, installAppImage, removeHome, appImageInfo, readManifest, writeManifest, readState, writeState, recordEntry, recordRemove, recordRefresh, recordSource, recordUserKind, recordRegistered, recordFlatpak, resolveExec, recordForget, reconcile, refreshCatalog, catalogRows, iconFile, refreshWitness, witnessRows, witnessView, onWitness, witnessSettled, rootEntries, dpkgNow, aptOpts, slotState };
 }
 
 const bad = (error) => ({ ok: false, code: 'bad-request', error });
@@ -1072,7 +1213,9 @@ const bad = (error) => ({ ok: false, code: 'bad-request', error });
  *   app-status      {}                                              → {ok, status}
  *   app-plan        {kind, packages?, debPath?, source?, entryId?, sourceId?, query?, rung?}  → {ok, plan, facts, install} | {ok, results} (search)
  *   app-install     {entryId, nonce, kind?, by, why?, label?, deb?, source?, staged?, icon?}  → {ok, entry, rows, run}   (after the slot ran)
- *                   {kind: uv-tool|npm, name, why, by}              → {ok, entry}   (a user-level tool — no slot, no root)
+ *                   {kind: uv-tool|npm|flatpak, name, why, by, remote?}  → {ok, entry}   (a user-level tool — no slot, no root)
+ *                   {kind: 'registered', entry, by, why?, direct?, session?}  → {ok, entry, rows, witnessed}  (a declaration;
+ *                   `direct` = an agent's, recorded only when THE WITNESS-MATCH RULE holds — else `not_witnessed`)
  *                   {kind: 'appimage', staged, sha256, entryId, by, why?, label?, from?, icon?}  → {ok, entry, rows, run}  (unpacked as the user)
  *   app-fetch       {url} | {file}                                  → {ok, staged, sha256, size, kind, hosts, url?, file?}
  *   app-unstage     {names?: [staged…], keep?: [staged…]}           → {ok, removed}
@@ -1095,13 +1238,18 @@ async function runAppOp0(apps, action, params = {}) {
   const p = params && typeof params === 'object' ? params : {};
   const nonceOk = () => A.NONCE_RE.test(String(p.nonce || ''));
   try {
-    if (op === 'app-status') return { ok: true, status: await apps.status() };
+    if (op === 'app-status') { // lane apps-dialog-fast: + the apps the launcher's outside group lists (never the distro's, never a wait)
+      const st = await apps.status();
+      if (typeof apps.refreshWitness === 'function') { await apps.refreshWitness({ reason: 'open' }); st.outside = apps.witnessRows().filter((r) => !r.distro).map((r) => `${r.label} (${r.source})`); }
+      return { ok: true, status: st };
+    }
     if (op === 'app-plan') return { ok: true, ...(await apps.plan(p)) };
     if (op === 'app-fetch') return { ok: true, ...(await apps.fetchInstaller(p)) };
     if (op === 'app-unstage') return { ok: true, ...(await apps.unstage(p)) };
     if (op === 'app-install' && (K.kindRow(p.kind) || {}).unpacked) return { ok: true, ...(await apps.installAppImage(p)) }; // no slot, no root: unpacked as the user
     if (op === 'app-remove' && p.home === true) return { ok: true, ...(await apps.removeHome({ entryId: p.entryId })) };
-    if (op === 'app-install' && (K.kindRow(p.kind) || {}).addArgv) return { ok: true, ...(await apps.recordUserKind({ kind: p.kind, name: p.name, why: p.why, by: p.by })) }; // a user-level tool: no slot ran, nothing to key
+    if (op === 'app-install' && p.kind === RG.id) return { ok: true, ...(await apps.recordRegistered({ entry: p.entry, by: p.by, why: p.why, direct: p.direct === true, session: p.session || null })) }; // a declaration: no slot, no root
+    if (op === 'app-install' && (K.kindRow(p.kind) || {}).addArgv) return { ok: true, ...(await apps.recordUserKind({ kind: p.kind, name: p.name, why: p.why, by: p.by, remote: p.remote || null })) }; // a user-level tool: no slot ran, nothing to key
     if (!nonceOk()) return bad(`${op} needs the run's nonce`);
     if (op === 'app-install') {
       if (p.kind === 'source') return { ok: true, ...(await apps.recordSource({ sourceId: p.sourceId, nonce: p.nonce, source: p.source, by: p.by })) };

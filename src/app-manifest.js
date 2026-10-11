@@ -1086,6 +1086,11 @@ function removePlanFor(entry, { appsDir = '~/.vibespace/apps' } = {}) {
   const name = String(entry.label || '');
   const common = { ok: true, code: null, canRun: true, kind: 'remove', mode: 'home-remove', entryKind: entry.kind, entryId: entry.id, packages: [], closure: [], removes: [], downloadBytes: 0, installedBytes: 0, label: name || entry.id };
   const kr = K.kindRow(entry.kind);
+  if (kr.removeArgvOf) { // lane app-register-model: a Flatpak (its appId) / a registered app (its own remove recipe — none: only the record goes)
+    const argv = kr.removeArgvOf(entry);
+    return argv ? { ...common, homeArgv: argv, closureKey: `home-remove ${entry.kind} ${entry.id} ${argv.join(' ')}`, commands: [argv.join(' ')] }
+      : { ...common, homeArgv: null, closureKey: `home-remove ${entry.kind} ${entry.id}`, commands: ['# no remove recipe was registered — VibeSpace forgets the registration; the app itself stays installed'] };
+  }
   if (!kr.removeArgv) return { ...common, dir: `${appsDir}/appimage/${entry.id}`, closureKey: `home-remove appimage ${entry.id}`, commands: [`rm -r ~/.vibespace/apps/appimage/${entry.id}`, '# VibeSpace drops its row from Apps'] };
   if (!/^[@a-z0-9][a-z0-9@/._+-]{0,120}$/i.test(name)) return { ok: false, code: 'bad_name', error: `${entry.id} names no tool` };
   const argv = [...kr.removeArgv, name];

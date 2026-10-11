@@ -1418,6 +1418,29 @@ class WindowManager {
     return true;
   }
 
+  /** lane agent-window-no-steal (an agent's action may PLACE a window; only a person's action may FOCUS one): stack `id`'s
+   *  frame directly UNDER the active window's frame — the person's window stays on top, focused, its caret where it was. No
+   *  active window (an empty desk) ⇒ nothing to go under. Never focuses, never switches a desktop. */
+  placeBehind(id) {
+    const win = this.windows.get(id); if (!win) return false;
+    const frameOf = (w) => (w && w._tabChain && this.windows.get(w._tabChain.tabs[0])) || w;
+    const frame = frameOf(win), top = frameOf(this.windows.get(this.activeWindowId));
+    if (!top || top === frame) return false;
+    const z = parseInt(top.element.style.zIndex, 10) || 1;
+    frame.element.style.zIndex = String(Math.max(1, z - 1));
+    top.element.style.zIndex = String(Math.max(z, 2)); // the active frame keeps the higher number (a 1 would tie)
+    frame.element.classList.remove('window-active', 'highlight-subtle', 'highlight-strong');
+    this._scheduleOverlapUpdate?.();
+    return true;
+  }
+  /** The quiet "it is there" of a window a non-human placed: its taskbar entry (and the phone's title) pulses, then keeps an
+   *  accent mark until the person focuses it (focusWindow clears it) — no toast, no For-you. */
+  markArrived(id) {
+    const win = this.windows.get(id); if (!win) return;
+    win.element.classList.add('window-arrived');
+    this._notify();
+  }
+
   // ── Layout Presets ──
   focusWindow(id, { _stageBypass = false } = {}) {
     const win = this.windows.get(id); if (!win) return;
@@ -1431,6 +1454,7 @@ class WindowManager {
       return;
     }
     this._mobileYieldSidebar();
+    for (const tid of (win._tabChain ? win._tabChain.tabs : [win.id])) this.windows.get(tid)?.element.classList.remove('window-arrived'); // the person came to it — its group's frame shows it (markArrived)
     // If this window is a grouped guest, focus the host and switch to this tab
     if (win._tabChain && win._tabChain.tabs[0] !== win.id) {
       const idx = win._tabChain.tabs.indexOf(win.id);

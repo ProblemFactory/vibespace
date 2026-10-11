@@ -4,6 +4,7 @@
 // cannot drift. The FACE never carries a package-system word (deb / AppImage / apt / root / sudo / sha); Details may —
 // scripts/test-app-card.mjs is the census, in en / zh / ja, with a planted word as its control.
 import { shownDigest as digestOfView } from '../app-card.js';
+import { joinWords } from '../argv-words.js'; // lane app-register-ui: a registration's argv, one line each, verbatim
 import { fmtBytes } from '../app-manifest.js';
 import { installPlace } from '../app-witness.js'; // lane apps-launcher-witness: an Installed card names the machine it landed on
 import { ROWS } from '../app-kinds/index.js'; // PURE — an app kind is one row (lane dc-apps-rows)
@@ -34,9 +35,29 @@ export function originWords(origin) {
 
 /** The card's lines: `{title, by, from, fromNote, gives, firstUse, changed, go, later}` (a line that does not apply is '')
  *  + `details` = [{text, mono?}] for the fold. */
+/** lane app-register-ui: a registration's witness source, in the launcher's chip words. */
+const sourceWords = (s, t) => (s === 'flatpak-user' ? t('Flatpak · yours') : s === 'flatpak-system' ? t('Flatpak · system') : s === 'desktop-system' ? t('Desktop entry · system') : t('Desktop entry · yours'));
+/** An agent's REGISTRATION card: "<agent> registered <label>", the program it runs, every variant as `label — exec args…`,
+ *  the remove / reinstall recipes VERBATIM and the witness line — `argv` lines are the face's (never folded away). */
+export function registeredWords(v, t, app) {
+  const g = v.registered || {};
+  const name = v.by && v.by.name ? v.by.name : '';
+  const why = String(v.why || '').trim();
+  const argv = [...(g.variants || []).map((x) => `${x.label || x.exec} — ${joinWords([x.exec, ...(x.args || [])])}`),
+    g.remove ? t('Remove: {cmd}', { cmd: joinWords([g.remove.exec, ...(g.remove.args || [])]) }) : t('No remove recipe — Forget only'),
+    ...(g.reinstall ? [t('Reinstall: {cmd}', { cmd: joinWords([g.reinstall.exec, ...(g.reinstall.args || [])]) })] : [])];
+  return {
+    title: name ? t('{name} registered {app}', { name, app }) : t('Register {app}?', { app }), by: why ? t('Why: {why}', { why }) : '',
+    from: g.path ? t('Runs {path}', { path: g.path }) : '', argv,
+    fromNote: g.witness ? t('already listed as {source}: {what}', { source: sourceWords(g.witness.source, t), what: g.witness.what }) : t('a program the machine did not list — check the command'),
+    gives: t('It appears in Apps with these launch options.'), firstUse: '', changed: v.planChanged ? t('The plan changed — take another look.') : '',
+    go: t('Install'), later: t('Not now'), details: [],
+  };
+}
 export function cardWords(view, t, lang = 'en') {
   const v = view || {};
   const k = v.kind || 'package';
+  if (k === 'registered') return registeredWords(v, t, appName(v, lang));
   const app = appName(v, lang);
   const title = k === 'remove' ? t('Remove {app}?', { app }) : k === 'source' ? t('Add the app source {app}?', { app }) : t('Install {app}?', { app });
   const name = v.by && v.by.name ? v.by.name : '';

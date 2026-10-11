@@ -688,7 +688,7 @@ module.exports = Object.freeze([
     const ref = await cli(api, ['add', '--kind', 'nope', 'tool']);
     srv.close();
     legs.cliSaid = `${acc.status} ${acc.stderr.slice(0, 160)} | ${ref.status} ${ref.stderr.slice(0, 120)}`;
-    legs.cli = acc.status !== 2 && /acme/.test(acc.stderr) && ref.status === 2 && /--kind uv\|npm\|acme /.test(ref.stderr);
+    legs.cli = acc.status !== 2 && /acme/.test(acc.stderr) && ref.status === 2 && /--kind uv\|npm\|flatpak\|acme /.test(ref.stderr) /* lane app-register-model: the flatpak door is a cliWord kind */;
     legs.lists = kx.kindsView().some((r) => r.id === 'acme-root' && r.doing === 'acme-ing' && !('planner' in r));
     return legs;
   };

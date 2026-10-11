@@ -174,7 +174,7 @@ export function appSummaryBlock(view) {
   const w = cardWords(view, t, resolveLang());
   const box = el('div', 'app-card-sum');
   box.appendChild(el('div', 'app-card-sum-title', w.title));
-  for (const [cls, s] of [['by', w.by], ['from', w.from], ['note', w.fromNote], ['gives', w.gives], ['first', w.firstUse]]) if (s) box.appendChild(el('div', `app-card-sum-line app-card-sum-${cls}`, s));
+  for (const [cls, s] of [['by', w.by], ['from', w.from], ...(w.argv || []).map((l) => ['argv', l]), ['note', w.fromNote], ['gives', w.gives], ['first', w.firstUse]]) if (s) box.appendChild(el('div', `app-card-sum-line app-card-sum-${cls}`, s));
   return box;
 }
 

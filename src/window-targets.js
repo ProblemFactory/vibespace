@@ -504,12 +504,12 @@ async function afterKill(r, { what, timeout, bins, xenv, keysyms = [], buttons =
  *  pointer's CURRENT position waits for a motion that never comes (7 s, then
  *  the second key in a row failed `inject_failed`); one xdotool connection
  *  orders the motion before the key anyway. */
-async function injectKey({ bins, xenv, chord, focus = null, timeout = 5000, signal = null, python = 'python3' } = {}) {
+async function injectKey({ bins, xenv, chord, focus = null, window = null, timeout = 5000, signal = null, python = 'python3' } = {}) {
   if (!bins || !bins.xdotool) return refuse('no_injection_backend', 'xdotool not on PATH');
   if (!chord || !chord.ok) return refuse('bad_chord', 'injectKey needs a parsed chord');
   const args = [];
   if (focus && Number.isFinite(focus.x) && Number.isFinite(focus.y)) args.push('mousemove', String(Math.round(focus.x)), String(Math.round(focus.y)));
-  args.push('key', '--clearmodifiers', chord.xdotool);
+  args.push(...focusArgs(window), 'key', '--clearmodifiers', chord.xdotool);
   const r = await runInject(bins.xdotool, args, { env: xenv, timeout, signal });
   if (r.killed) return afterKill(r, { what: `the chord ${chord.xdotool}`, timeout, bins, xenv, keysyms: keysymsOfChord(chord), python });
   return r.err ? refuse('inject_failed', `xdotool key failed: ${r.err.message.split('\n')[0]}`) : { ok: true, did: { verb: 'key', chord: chord.xdotool, backend: 'xtest' } };
@@ -574,7 +574,11 @@ function xdoStderr(stderr) {
   const other = lines.length - known.length;
   return [...known, ...(other ? [`${other} other line${other === 1 ? '' : 's'} withheld`] : [])].join('; ') || 'no message';
 }
-async function injectType({ bins, xenv, text, replace = false, focus = null, timeout = null, signal = null, python = 'python3', delay = TYPE_DELAY_MS } = {}) {
+/** Lane window-dialog-member: X focus to ONE window (a dialog's top-level, `window` = its xid) in the same xdotool
+ *  connection, before the keys — measured on xpra: with a viewer the main window holds X focus and a modal dialog's keys
+ *  went to it; with none, focus is PointerRoot. */
+const focusArgs = (window) => (Number.isInteger(window) && window > 0 ? ['windowfocus', String(window)] : []);
+async function injectType({ bins, xenv, text, replace = false, focus = null, window = null, timeout = null, signal = null, python = 'python3', delay = TYPE_DELAY_MS } = {}) {
   if (!bins || !bins.xdotool) return refuse('no_injection_backend', 'xdotool not on PATH');
   const s = String(text ?? '');
   if (!s) return refuse('bad-request', 'type needs some text');
@@ -593,7 +597,7 @@ async function injectType({ bins, xenv, text, replace = false, focus = null, tim
   const wide = firstNonAscii(s);
   const loc = wide ? await display.utf8LocaleEnv(xenv, { bins }) : { ok: true, env: xenv };
   if (!loc.ok) return refuse('no_utf8_locale', `the text holds ${JSON.stringify(wide.ch)} (U+${wide.cp.toString(16).toUpperCase().padStart(4, '0')}, character ${wide.n}), and xdotool can type a non-ASCII character only through a UTF-8 locale — none loads on this machine (tried ${loc.tried.join(', ')}: ${loc.why}); nothing was typed`);
-  const r = await runInject(bins.xdotool, [...move, ...(replace ? ['key', '--clearmodifiers', 'ctrl+a'] : []), 'type', '--clearmodifiers', '--delay', String(d), '--', s], { env: loc.env, timeout: tmo, signal });
+  const r = await runInject(bins.xdotool, [...move, ...focusArgs(window), ...(replace ? ['key', '--clearmodifiers', 'ctrl+a'] : []), 'type', '--clearmodifiers', '--delay', String(d), '--', s], { env: loc.env, timeout: tmo, signal });
   if (r.killed) return afterKill(r, { what: `typing ${s.length} character(s)`, timeout: tmo, bins, xenv, keysyms: keysymsOfText(s, { replace }), python });
   // a type xdotool gave up on AFTER it started may have typed what came before the failure (`partial`); its own message
   // is the why — never the command line, which holds the text (the audit records a length, never the text)
@@ -618,6 +622,49 @@ async function windowShot({ xenv, out, plan, wallMs = TRAVERSAL_LIMITS.ACT_WALL_
 async function focusNode({ entry, callTimeoutMs = TRAVERSAL_LIMITS.CALL_TIMEOUT_MS, wallMs = TRAVERSAL_LIMITS.ACT_WALL_MS, env = process.env, ...rest } = {}) {
   if (!entry || !Number.isInteger(entry.pid) || !Array.isArray(entry.path)) return refuse('bad-request', 'focusNode needs a ref entry (pid + path)');
   return runHelper({ op: 'act', pid: entry.pid, path: entry.path, expect: { role: entry.role, name: entry.name }, verb: 'focus', callTimeoutMs }, { env, wallMs, ...rest });
+}
+
+/** Lane window-dialog-member: map the xpra corrals of the app's top-levels no viewer has shown (window-reach
+ *  `unshownFrames`) — what an attaching viewer's map-window does; ONE xdotool, bounded. */
+async function showWindows({ bins, xenv, frames = [], timeout = 3000 } = {}) {
+  if (!bins || !bins.xdotool) return refuse('no_injection_backend', 'xdotool not on PATH');
+  const ids = (Array.isArray(frames) ? frames : []).filter((f) => Number.isInteger(f) && f > 0).slice(0, 16);
+  if (!ids.length) return { ok: true, mapped: [] };
+  const r = await runInject(bins.xdotool, ids.flatMap((f) => ['windowmap', String(f)]), { env: xenv, timeout });
+  return r.err ? refuse('inject_failed', `xdotool windowmap failed: ${String(r.err.message).split('\n')[0]}`) : { ok: true, mapped: ids };
+}
+
+// ── an app's DIALOG is part of its window (lane window-dialog-member, owner 2026-10-11) ──────────
+const DIALOG_ROLES = Object.freeze(['dialog', 'alert', 'file chooser', 'color chooser', 'font chooser']);
+const sane = (b) => !!b && Number(b.w) > 1 && Number(b.h) > 1 && Math.abs(Number(b.x)) < 1e6 && Math.abs(Number(b.y)) < 1e6;
+/** PURE: a snapshot's nodes → `{ nodes, dialog }`. When the tree holds a SHOWING dialog (the shallowest, last-listed one:
+ *  a dialog opened over another wins), its subtree comes FIRST (refs unchanged) and `dialog` = `{ ref, role, name,
+ *  bounds, path, field }` — `field` = its focused editable, else its first showing editable (null when none). */
+function dialogFirst(nodes) {
+  const list = Array.isArray(nodes) ? nodes : [];
+  const shown = list.filter((n) => n && DIALOG_ROLES.includes(n.role) && Array.isArray(n.states) && n.states.includes('showing'));
+  if (!shown.length) return { nodes: list, dialog: null };
+  const minDepth = Math.min(...shown.map((n) => Number(n.depth) || 0));
+  const d = shown.filter((n) => (Number(n.depth) || 0) === minDepth).pop();
+  const byRef = new Map(list.map((n) => [n.ref, n]));
+  const inside = (n) => { for (let c = n, hops = 0; c && hops < 200; c = byRef.get(c.parent), hops++) if (c === d) return true; return false; };
+  const mine = list.filter(inside), rest = list.filter((n) => !inside(n));
+  const ed = mine.filter((n) => n !== d && (n.editable || (Array.isArray(n.states) && n.states.includes('editable'))) && sane(n.bounds));
+  const f = ed.find((n) => n.states.includes('focused')) || ed.find((n) => (n.states || []).includes('showing')) || ed[0] || null;
+  return { nodes: [...mine, ...rest], dialog: { ref: d.ref, role: d.role, name: d.name || '', bounds: d.bounds || null, path: d.path || null, field: f ? { ref: f.ref, role: f.role, name: f.name || '' } : null } };
+}
+/** PURE: the snapshot's head line when a dialog is up (null otherwise). */
+function dialogHead(dialog) {
+  if (!dialog) return null;
+  return `a dialog is up: ${JSON.stringify(dialog.name || dialog.role)} (${dialog.ref}) — act on it first; ${dialog.field ? `its text field: ${dialog.field.ref}` : 'it has no text field'} (its subtree is listed first; to dismiss it, click its button by ref or key Escape)`;
+}
+/** PURE: `type` WITHOUT a ref while the last snapshot showed a dialog — the focused node when it is an editable (the
+ *  dialog's own field holds focus, or the dialog was closed since), else the dialog's text field; never a non-editable
+ *  focus such as the frame's document (JASP's `document web` ⇒ node_not_editable, owner 2026-10-11). */
+function typeTarget({ focused = null, dialog = null } = {}) {
+  const editable = !!(focused && (focused.editable || (Array.isArray(focused.states) && focused.states.includes('editable'))));
+  if (!dialog || !dialog.field || editable) return { use: 'focused', ref: focused ? focused.ref : null };
+  return { use: 'dialog-field', ref: dialog.field.ref };
 }
 
 /** A snapshot's node list trimmed to what an agent reads (the path stays
@@ -647,4 +694,6 @@ module.exports = {
   TYPE_DELAY_MS, typeTimeoutMs, runInject, releaseHeld, keysymsOfText, keysymsOfChord, RELEASE_PY, RELEASE_MAX,
   // lane E verify r3 (F3): the text's first non-ASCII character (the no_utf8_locale refusal names it)
   firstNonAscii,
+  // lane window-dialog-member: an app's dialog is part of its window
+  DIALOG_ROLES, dialogFirst, dialogHead, typeTarget, showWindows,
 };

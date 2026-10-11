@@ -46,7 +46,7 @@ function cardView(p) {
   const x = p || {};
   const rq = x.request || {};
   const sm = x.summary || {};
-  const kind = K.cardRow(rq.kind).card;
+  const kind = rq.kind === 'registered' ? 'registered' : K.cardRow(rq.kind).card; // lane app-register-ui: an agent's registration's card
   const fromK = K.fromOf(rq.kind);
   const app = x.app && typeof x.app === 'object' ? x.app : {};
   const labels = {};
@@ -68,6 +68,7 @@ function cardView(p) {
     ...(sm.fingerprints && sm.fingerprints.length ? { fingerprints: strs(sm.fingerprints, 4, 64) } : {}),
     ...(sm.removes && sm.removes.length ? { removes: strs(sm.removes, 32, 80) } : {}), ...(sm.address && sm.address.length ? { address: strs(sm.address, 4, 300) } : {}),
   };
+  const registered = kind === 'registered' ? registeredView(x, rq) : null;
   const r = x.result && typeof x.result === 'object' ? x.result : null;
   const result = !r ? null : x.state === 'done' ? { rows: (Array.isArray(r.rows) ? r.rows : []).slice(0, 8).map((w) => ({ id: str(w && w.id, 80), label: str(w && w.label, 120) })) }
     : x.state === 'failed' ? { step: ['prepare', 'install', 'record'].includes(r.step) ? r.step : 'install', code: str(r.code, 40), error: str(r.error, 300) } : null;
@@ -76,9 +77,24 @@ function cardView(p) {
     app: { name: str(app.name || x.label || (rq.packages || []).join(' ') || rq.entryId || (rq.source && rq.source.id) || '', 120), labels, ...(app.icon ? { icon: str(app.icon, 300) } : {}) },
     by: x.by && x.by.name ? { name: str(x.by.name, 80) } : null, why: str(x.why, 500), from,
     bytes: { download: num(sm.downloadBytes), installed: num(sm.installedBytes) }, keeps, ...(x.firstUse ? { firstUse: true } : {}),
-    details, digest: str(x.digest, 64), ...(x.planChanged ? { planChanged: true } : {}), ...(result ? { result } : {}),
+    details, ...(registered ? { registered } : {}), digest: str(x.digest, 64), ...(x.planChanged ? { planChanged: true } : {}), ...(result ? { result } : {}),
   };
 }
+
+/** lane app-register-ui: what an agent's REGISTRATION runs, verbatim (bounded) — the resolved program, every launch
+ *  variant, the remove / reinstall recipes, and whether the machine itself listed the program (the witness). */
+const argvOf = (c) => (c && typeof c === 'object' && c.exec ? { exec: str(c.exec, 400), args: strs(c.args, 64, 400) } : null);
+function registeredView(x, rq) {
+  const pick = (k) => (rq[k] !== undefined ? rq[k] : x[k]);
+  const w = pick('witness');
+  return {
+    path: str(pick('path') || pick('resolved') || '', 400),
+    variants: (Array.isArray(pick('launch')) ? pick('launch') : []).slice(0, 8).map((v) => ({ label: str(v && v.label, 80), ...argvOf(v) })).filter((v) => v.exec),
+    remove: argvOf(pick('remove')), reinstall: argvOf(pick('reinstall')),
+    witness: w && typeof w === 'object' ? { source: str(w.source, 40), what: str(w.appId || w.id || w.file || '', 200) } : null,
+  };
+}
+const argvLine = (c) => (c ? [c.exec, ...(c.args || [])].join('\u0002') : '');
 
 /** WHAT THE CARD SHOWED, as one ordered list — everything a person reads on its face or in its Details, and the plan's
  *  own digest; never the state / progress / result (those move while the one click runs). */
@@ -88,7 +104,9 @@ function shownFields(v) {
   const list = (l) => (Array.isArray(l) ? l.map(String).join('\u0001') : '');
   return [x.id || '', x.host || '', x.kind || '', a.name || '', (a.labels && a.labels.zh) || '', (a.labels && a.labels.ja) || '', (x.by && x.by.name) || '', x.why || '',
     f.kind || '', f.origin || '', f.host || '', f.recipe || '', num(b.download), num(b.installed), x.keeps || '', x.firstUse ? 1 : 0,
-    list(d.packages), num(d.count), list(d.commands), list(d.origins), d.sha256 || '', list(d.scripts), list(d.fingerprints), list(d.removes), list(d.address), d.file || '', x.digest || ''];
+    list(d.packages), num(d.count), list(d.commands), list(d.origins), d.sha256 || '', list(d.scripts), list(d.fingerprints), list(d.removes), list(d.address), d.file || '', x.digest || '',
+    ...(x.registered ? [x.registered.path || '', list((x.registered.variants || []).map((v) => `${v.label}\u0003${argvLine(v)}`)), argvLine(x.registered.remove), argvLine(x.registered.reinstall),
+      x.registered.witness ? `${x.registered.witness.source}\u0003${x.registered.witness.what}` : ''] : [])]; // a registration's argv is on its face: in the digest (other kinds' digests unchanged)
 }
 function fnv32(s, seed) {
   let h = seed >>> 0;

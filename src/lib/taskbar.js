@@ -126,6 +126,7 @@ function _rebuildTaskbarItems(app, container, entries) {
     if (id === app.wm.activeWindowId && !win.isMinimized) item.classList.add('active');
     if (win.isMinimized) item.classList.add('minimized');
     if (win.element.classList.contains('window-waiting')) item.classList.add('waiting');
+    if (win.element.classList.contains('window-arrived')) item.classList.add('arrived'); // an agent placed it (window.js markArrived)
     // Icon: clone the window's backend+mode icon if available, else use type emoji
     const icon = document.createElement('span');
     icon.className = 'taskbar-icon';
@@ -304,6 +305,7 @@ function _applyTaskbarItemState(app, el) {
   el.classList.toggle('active', ids.includes(app.wm.activeWindowId) && !win.isMinimized);
   el.classList.toggle('minimized', win.isMinimized);
   el.classList.toggle('waiting', ids.some(tid => app.wm.windows.get(tid)?.element.classList.contains('window-waiting')));
+  el.classList.toggle('arrived', ids.some(tid => app.wm.windows.get(tid)?.element.classList.contains('window-arrived')));
 }
 
 function _cloneTabIcon(win) {

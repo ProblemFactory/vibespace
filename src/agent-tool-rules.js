@@ -89,8 +89,9 @@ const PAGE_VERBS = Object.freeze(['list']);
 const DESIGN_VERBS = Object.freeze(['new', 'add', 'check', 'sync', 'open', 'show', 'list', 'ask', 'preview', 'systems']);
 /** vibespace-app's pre-approved verbs (Layer 0 apps, docs/design-app-persistence.zh.md §3.1): nothing here EXECUTES —
  *  `install` / `remove` only PROPOSE (one For-you item; the user installs); `add` (a user-level installer run as the
- *  user) is held. */
-const APP_VERBS = Object.freeze(['search', 'list', 'plan', 'install', 'remove', 'status', 'wait', 'docs', 'help']);
+ *  user — uv / npm / flatpak) is held; `register` (lane app-register-model) DECLARES an app installed by other means — it
+ *  executes nothing (the witness-match rule records it or files one For-you item). */
+const APP_VERBS = Object.freeze(['search', 'list', 'plan', 'install', 'remove', 'status', 'wait', 'register', 'docs', 'help']);
 
 /** tool → the verbs pre-approved (null = every verb), the verbs held and why,
  *  and (`ask`) the held verbs the spawn ALSO names as ask rules — an ask rule

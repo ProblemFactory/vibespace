@@ -326,13 +326,16 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
   if (!apps) {
     let home = appsHome;
     if (!home) { try { home = (env() || {}).HOME || null; } catch { home = null; } }
-    apps = AS.create({ home: home || os.homedir(), stateDir: dataDir, env, log, now, binOnPath: display.binOnPath ? (n, o) => display.binOnPath(n, o) : null, installState: display.installState ? (d) => display.installState(d) : null });
+    apps = AS.create({ home: home || os.homedir(), stateDir: dataDir, env, log, now, engineIds: () => registryRows.map((r) => r.id), binOnPath: display.binOnPath ? (n, o) => display.binOnPath(n, o) : null, installState: display.installState ? (d) => display.installState(d) : null });
   }
   display.assertLocal(hostId, 'keeper');
   const storeFile = path.join(dataDir, STORE_FILE);
   const logRoot = path.join(dataDir, LOG_DIR);
   const sampleEvery = guardSampleMs || limits.GUARD_SAMPLE_MS;
   const H = hooks && typeof hooks === 'object' ? hooks : {};
+  // lane apps-dialog-fast: the open never waits for the witness walk — a listing that LANDS is pushed as its result (the
+  // registry's own witnessed rows, decorated as an open's answer is) through `hooks.onWitness`
+  if (typeof apps.onWitness === 'function') apps.onWitness((witness) => { facts().then((f) => H.onWitness?.({ witness, rows: registry(f).filter((r) => r.witnessed) })).catch((e) => log.warn?.(`[apps] the witness push failed: ${e.message}`)); });
 
   // ── state ──
   let store = { apps: {} }; // (no `runawayParkedUntil` since 2026-09-25 — an old file's map is dropped on read; migration 2026-09-runaway-parks-void clears the disk)
@@ -421,6 +424,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
       const p = row.exec.includes('/') ? (fs.existsSync(row.exec) ? row.exec : null) : binOf(row.exec);
       // Layer 1: an app-system row is greyed while its app system cannot run here (not enabled, another architecture, no helper…)
       if (row.blocked) return { ...row, args: [...row.args], available: false, path: p, reason: row.blocked === 'shim-not-ours' ? `${row.label}: its launcher in ~/.vibespace/sysroot/bin is not VibeSpace's — it is not run` : `${row.label} lives in the app system, which cannot run here (${row.blocked})`, reasonCode: 'app-system' };
+      if (!p && (row.registered || row.flatpak) && row.app) return { ...row, args: [...row.args], available: false, path: null, reason: `${row.label}: its program is gone${row.reinstall ? ` — reinstall: ${[row.reinstall.exec, ...(row.reinstall.args || [])].join(' ')} (your click)` : ''}`, reasonCode: 'exec-gone' }; // lane app-register-model: a home app is never reinstalled silently
       return { ...row, args: [...row.args], available: !!p, path: p, reason: p ? null : `${row.label} is not installed on this machine (yet)`, reasonCode: p ? null : 'app-missing' };
     });
     // lane apps-launcher-witness: what is installed OUTSIDE the door (src/app-witness.js) — its own `seen.` ids, flagged
@@ -1381,7 +1385,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     const r = await display.enumerateWindows({ hostId, display: rec.display, authFile: xenv.XAUTHORITY, env: xenv });
     if (!r.ok) return r;
     const rows = M.capsOf(rec, backends).perWindow ? display.seamlessWindows(r.windows) : r.windows.filter((w) => w.mapped !== false && w.w > 1 && w.h > 1);
-    return { ok: true, why: null, windows: rows.map((w) => ({ id: w.id, title: w.name, cls: w.cls, instance: w.instance, x: w.x, y: w.y, w: w.w, h: w.h, mapped: w.mapped, depth: w.depth == null ? null : w.depth })) }; // depth 1 = a top-level (P8-2 x4)
+    return { ok: true, why: null, windows: rows.map((w) => ({ id: w.id, title: w.name, cls: w.cls, instance: w.instance, x: w.x, y: w.y, w: w.w, h: w.h, mapped: w.mapped, depth: w.depth == null ? null : w.depth, ...(w.frame ? { frame: w.frame } : {}) })) }; // depth 1 = a top-level (P8-2 x4); frame = its xpra corral
   }
   /** Where this machine's xpra ships its html5 client (null = no xpra, or a
    *  build without the www tree) — the hosted-client route's root. */

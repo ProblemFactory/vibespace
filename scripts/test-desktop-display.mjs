@@ -868,5 +868,15 @@ console.log('\n§tree the patched copies never touch the tree');
 if (!MUTDD.files.length) skip('§tree: no patched copy was made this run (§5 (f) needs xpra) — nothing to measure');
 else for (const r of copiesCensus(MUTDD.files, MUTDD.dir, repo, { minCopies: 1 })) ok(r.pass, '§tree ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 
+// lane window-dialog-member: the enumerate parse over a CAPTURED xpra 6.5.4 tree (scripts/fixtures/window-dialog/, the
+// GTK fixture's Open dialog): rows TOPMOST FIRST, each client carries `frame` = its xpra corral; seamlessWindows keeps it
+{
+  const txt = fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), 'fixtures', 'window-dialog', 'xpra-gtk-open-unshown.tree.txt'), 'utf8');
+  const rows = D.parseWininfoTree(txt);
+  const dlg = rows.find((r) => r.name === 'Open'), main = rows.find((r) => r.name === 'vs dialog fixture');
+  ok(dlg && main && dlg.frame === 0x20000c && main.frame === 0x200006 && dlg.depth === 2 && rows.indexOf(dlg) < rows.indexOf(main), 'dialog fixture: each client row names its corral (`frame`), the dialog listed before (above) its main window', rows.filter((r) => r.frame));
+  ok(rows.filter((r) => r.depth === 1).every((r) => r.frame === undefined) && D.seamlessWindows(rows).find((r) => r.name === 'Open').frame === 0x20000c, 'a top-level row has no frame; seamlessWindows keeps a client\'s frame');
+}
+
 console.log(`${fail ? `\n${fail} FAILED (${pass} passed` : `\nALL PASS (${pass}`}${skipped ? `, ${skipped} skipped` : ''})`);
 process.exit(fail ? 1 : 0);

@@ -133,6 +133,16 @@ function validateLaunchRequest(body, registry = []) {
     if (!row) return { ok: false, error: `unknown appId ${JSON.stringify(body.appId)}` };
     if (!row.browser && (hasUrl || body.keepProfile !== undefined)) return { ok: false, error: `${hasUrl ? 'url' : 'keepProfile'} is only for a browser app — ${row.label} is not one`, code: 'not-a-browser' };
     if (hasFile && !O.isOfficeModule(row.office)) return { ok: false, error: `${row.label} does not open documents — LibreOffice does`, code: 'not-office-app' };
+    // lane app-register-model: `variant` = one of a registered app's launch variants (default variants[0]) — run through
+    // the same door as any row; a row without variants refuses one by name, never ignores it
+    if (body.variant !== undefined && body.variant !== null && body.variant !== '') {
+      const vs = Array.isArray(row.launch) ? row.launch : null;
+      const pick = vs && vs.find((x) => x && x.id === String(body.variant));
+      if (!pick) return { ok: false, error: vs ? `${row.label} has no launch variant ${JSON.stringify(String(body.variant).slice(0, 40))}` : `${row.label} has no launch variants`, code: 'bad-request' };
+      const vr = { ...row, exec: pick.exec, args: [...(pick.args || [])], env: pick.env ? { ...pick.env } : row.env, cwd: pick.cwd || null, variant: pick.id };
+      if (!validateAppRow(vr).ok) return { ok: false, error: `${row.label}: variant ${pick.id} is not a runnable row`, code: 'bad-request' };
+      return { ok: true, error: null, launch: { source: 'registry', row: vr, dpr: normalizeDpr(body.dpr), uiScale: normalizeUiScale(body.uiScale), scaleChoice } };
+    }
     let url = null;
     if (hasUrl) { const u = validateBrowserUrl(body.url); if (!u.ok) return { ok: false, error: u.error, code: u.code }; url = u.url; }
     return { ok: true, error: null, launch: { source: 'registry', row, dpr: normalizeDpr(body.dpr), uiScale: normalizeUiScale(body.uiScale), scaleChoice, ...(row.browser ? { url, keepProfile: body.keepProfile === true } : {}), ...(file ? { file } : {}) } };

@@ -31,7 +31,12 @@
  *                                             is a 200 whose body starts with keep-alive spaces, then the JSON) → one item
  *   GET  /api/agent/apps/proposals/:id?wait=<s>&since=<state>   its own proposal; `wait` ≤ 100 s, repeatable
  *   GET  /api/agent/apps/status?host=          replay / drift / updates in one line each
- *   POST /api/agent/apps/user-kind {kind, name, why}   record a USER-LEVEL tool the agent installed as the user (`add`)
+ *   POST /api/agent/apps/user-kind {kind, name, why, remote?}   record a USER-LEVEL tool the agent installed as the user (`add`
+ *                                             — uv / npm / flatpak)
+ *   POST /api/agent/apps/register {label, launch, remove?, reinstall?, icon?, why}   lane app-register-model: DECLARE an app
+ *                                             installed by other means → THE WITNESS-MATCH RULE: `{ok, id, recorded:true}` (its
+ *                                             default launch is already listed outside VibeSpace) | `{ok, id, proposalId,
+ *                                             waiting:true}` (one For-you click) | `{ok:false, code, error}`; + `place`
  * `host` = '' / 'local' = this machine; a paired machine by id (its daemon must name `app-install`). Every failure
  * answers `{error, code}` — fetchJson never throws, so a 200-with-nothing would be a silent failure.
  */
@@ -42,6 +47,8 @@ const A = require('../app-manifest.js');
 const K = require('../app-kinds/index.js'); // PURE — an app kind is one row (lane dc-apps-rows, F-A1)
 const { liveForkPending, addressableId } = require('../claude-lock-capture.js');
 const { toAgentText } = require('../peer-text.js');
+const AWD = require('../argv-words.js'); // PURE — one line of words → an argv (no shell)
+const AW = require('../app-witness.js'); // PURE — the install-place words (a registration answers where it landed)
 const { sameToken } = require('../pairing-token.js'); // B-8dda (lane agent-cli-fixes): a raw secret is compared in constant time
 // THE belt on what a PACKAGE wrote (apt's summaries, a .desktop Name, apt's error lines) on its way to an agent: a source
 // the user approved is still a third party's words — one inert line each (test-peer-text-census declares the CLI on it)
@@ -66,7 +73,7 @@ function setup(deps) { ctx = deps; }
 const LOCAL = new Set(['', 'local']);
 const HOST_RE = /^[A-Za-z0-9._-]{1,80}$/;
 const STATUS = {
-  'bad-request': 400, bad_name: 400, bad_source: 400, 'unsupported-host': 400, bad_address: 400, not_an_installer: 400, too_large: 400,
+  'bad-request': 400, bad_name: 400, bad_label: 400, bad_exec: 400, bad_args: 400, too_many_variants: 400, needs_root: 400, bad_icon: 400, shadow: 400, not_witnessed: 409, bad_source: 400, 'unsupported-host': 400, bad_address: 400, not_an_installer: 400, too_large: 400,
   agent_forbidden: 403, 'not-yours': 403,
   'not-found': 404, not_found: 404,
   busy: 409, plan_changed: 409, proposal_state: 409, no_sudo: 409, no_apt: 409, conflict: 409, removes: 409, needs_snap: 409, disk: 409, shared: 409, nothing: 409, not_run: 409, refused: 409, not_recorded: 409, host_needs_daemon: 409, no_conversation: 409, not_filed: 409,
@@ -231,13 +238,14 @@ router.get('/api/agent/apps', async (req, res) => {
   const host = agentHost(req, g.who); if (!LOCAL.has(host) && !HOST_RE.test(host)) return fail(res, { code: 'bad-request', message: 'bad host' });
   try {
     const st = await g.engine.status(host);
-    const entries = (st.manifest && st.manifest.entries || []).map((e) => ({ id: e.id, kind: e.kind, packages: e.packages, ...(e.label ? { label: pkgWords(e.label, 80) } : {}), rows: (st.rows || []).filter((r) => r.app === e.id).map((r) => ({ id: r.id, label: pkgWords(r.label, 120) })), by: e.by && e.by.kind, addedAt: e.addedAt }));
+    const entries = (st.manifest && st.manifest.entries || []).map((e) => ({ id: e.id, kind: e.kind, packages: e.packages, ...(e.label ? { label: pkgWords(e.label, 80) } : {}),
+      ...(e.kind === 'registered' ? inertDeep({ launch: (e.launch || []).map((v) => ({ id: v.id, label: v.label, exec: v.exec, args: v.args })), remove: e.remove || null, reinstall: e.reinstall || null, witness: e.witness || null }) : {}), ...(e.kind === 'flatpak' ? { appId: e.appId, remote: e.remote || null } : {}), rows: (st.rows || []).filter((r) => r.app === e.id).map((r) => ({ id: r.id, label: pkgWords(r.label, 120) })), by: e.by && e.by.kind, addedAt: e.addedAt }));
     res.json({ host, entries, proposals: g.who.conversation ? inertDeep(g.engine.proposalsOf(g.who.conversation)) : [], replay: st.replay && st.replay.decision, drift: st.drift && st.drift.drift ? { added: st.drift.added.map((x) => x.package) } : null, updates: st.updates ? st.updates.count : null, refreshedAt: st.refreshedAt || null });
   } catch (e) { fail(res, e); }
 });
 router.get('/api/agent/apps/search', async (req, res) => {
   const g = agentGate(req, res); if (!g) return;
-  try { const r = await g.engine.search(agentHost(req, g.who), String(req.query.q || '')); res.json({ ...r, results: (r.results || []).map((x) => ({ ...x, summary: pkgWords(x.summary, 200) })) }); } catch (e) { fail(res, e); }
+  try { const r = await g.engine.search(agentHost(req, g.who), String(req.query.q || ''), { kind: req.query.kind === 'flatpak' ? 'flatpak' : null }); if (r.flatpaks) r.flatpaks = inertDeep(r.flatpaks); res.json({ ...r, results: (r.results || []).map((x) => ({ ...x, summary: pkgWords(x.summary, 200) })) }); } catch (e) { fail(res, e); }
 });
 router.post('/api/agent/apps/plan', async (req, res) => {
   const g = agentGate(req, res); if (!g) return;
@@ -281,7 +289,37 @@ router.post('/api/agent/apps/user-kind', async (req, res) => {
   const kr = K.kindRow(kind);
   if (kr && kr.entry === 'home' && !kr.addArgv) return fail(res, { code: 'bad-request', message: `an ${kr.word} is proposed, not recorded: vibespace-app install --file <the .${kr.staged}> --why "…"` });
   if (!kr || !kr.addArgv) return fail(res, { code: 'bad-request', message: `kind must be ${K.ROWS.filter((r) => r.addArgv).map((r) => r.id).join(' / ')}` });
-  try { res.json({ ok: true, ...(await g.engine.recordUserKind(agentHost(req, g.who), { kind, name: String(b.name || ''), why: String(b.why || '').slice(0, 500), by: { kind: 'agent', conversation: g.who.conversation, name: g.who.name } })) }); } catch (e) { fail(res, e); }
+  try { res.json({ ok: true, ...(await g.engine.recordUserKind(agentHost(req, g.who), { kind, name: String(b.name || ''), remote: b.remote != null ? String(b.remote) : null, why: String(b.why || '').slice(0, 500), by: { kind: 'agent', conversation: g.who.conversation, name: g.who.name } })) }); } catch (e) { fail(res, e); }
+});
+/** A variant / recipe the CLI sends as ONE LINE (`{line}`, or `args` as a string) → argv by THE splitter (src/argv-words.js —
+ *  no shell reads it; an unquoted | ; & > < $ ` is refused by name with its position). */
+function argvLines(b) {
+  const one = (x, what) => {
+    if (!x || typeof x !== 'object') return { ok: true, v: x };
+    if (typeof x.line === 'string') { const r = AWD.splitWords(x.line); if (!r.ok || !r.argv.length) return { ok: false, error: `${what}: ${r.ok ? 'an empty line' : `${r.error} (at ${r.at})`}` }; const { line, ...rest } = x; void line; return { ok: true, v: { ...rest, exec: r.argv[0], args: r.argv.slice(1) } }; }
+    if (typeof x.args === 'string') { const r = AWD.splitWords(x.args); if (!r.ok) return { ok: false, error: `${what}: ${r.error} (at ${r.at})` }; return { ok: true, v: { ...x, args: r.argv } }; }
+    return { ok: true, v: x };
+  };
+  const launch = [];
+  for (const [i, v] of (Array.isArray(b.launch) ? b.launch.slice(0, 9) : []).entries()) { const r = one(v, `variant ${i + 1}`); if (!r.ok) return r; launch.push(r.v); }
+  const out = { ok: true, launch: Array.isArray(b.launch) ? launch : b.launch };
+  for (const k of ['remove', 'reinstall']) { const r = one(b[k], k); if (!r.ok) return r; out[k] = r.v; }
+  return out;
+}
+/** lane app-register-model — `vibespace-app register`: an app installed by other means DECLARED (its launch variants, its
+ *  remove / reinstall recipes). PRE-APPROVED in the CLI hook (it executes nothing): THE WITNESS-MATCH RULE (the engine) records
+ *  it directly or files ONE For-you item. Answers the row id + where it landed + whether it waits. */
+router.post('/api/agent/apps/register', async (req, res) => {
+  const g = agentGate(req, res); if (!g) return;
+  if (g.who.borrowed) return fail(res, { code: 'no_conversation', message: g.who.borrowed });
+  const b = req.body || {};
+  const lines = argvLines(b);
+  if (!lines.ok) return fail(res, { code: 'bad_args', message: lines.error });
+  const entry = { label: b.label, launch: lines.launch, ...(lines.remove != null ? { remove: lines.remove } : {}), ...(lines.reinstall != null ? { reinstall: lines.reinstall } : {}), ...(b.icon != null ? { icon: b.icon } : {}) };
+  try {
+    const r = await g.engine.register({ host: agentHost(req, g.who), entry, why: String(b.why || '').slice(0, 500), by: { kind: 'agent', sessionId: g.who.sessionId, conversation: g.who.conversation, name: g.who.name, sessionKey: g.who.sessionKey } });
+    res.json({ ...r, place: AW.installPlace({ hostId: r.host }) });
+  } catch (e) { fail(res, e); }
 });
 /** THE DECLARED KIND ROWS (src/app-kinds/) — the CLI's copy reads them (vibespace-app add: its --kind words, the argv
  *  that installs a home tool; the proposal view's card words). Data only. */
@@ -293,7 +331,8 @@ router.get('/api/agent/apps/status', async (req, res) => {
   const g = agentGate(req, res); if (!g) return;
   try {
     const st = await g.engine.status(agentHost(req, g.who));
-    res.json({ host: st.host, apps: (st.manifest && st.manifest.entries || []).length, replay: st.replay && st.replay.decision, replaying: !!st.replaying, drift: st.drift && st.drift.drift ? st.drift.added.map((x) => x.package) : [], updates: st.updates ? st.updates.count : null, refreshedAt: st.refreshedAt || null });
+    const ents = (st.manifest && st.manifest.entries) || [];
+    res.json({ host: st.host, apps: ents.length, registeredByAgent: ents.filter((e) => e.kind === 'registered' && e.by && e.by.kind === 'agent').length, reinstall: inertDeep(st.reinstall || []), replay: st.replay && st.replay.decision, replaying: !!st.replaying, drift: st.drift && st.drift.drift ? st.drift.added.map((x) => x.package) : [], updates: st.updates ? st.updates.count : null, refreshedAt: st.refreshedAt || null, outside: Array.isArray(st.outside) ? st.outside : [] });
   } catch (e) { fail(res, e); }
 });
 

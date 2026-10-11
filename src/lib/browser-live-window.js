@@ -247,7 +247,7 @@ const BIND_SVG = svgIcon16('<rect x="1.5" y="3" width="5.5" height="10" rx="1"/>
 
 /** Go to a live view the user named: goToWinId IS the door (§62); the bare raise is the fallback for a stub app in a suite. */
 function goToWin(app, id) { if (typeof app.goToWinId === 'function') app.goToWinId(id); else app.wm.focusWindow(id); }
-export function openBrowserLive(app, { sessionId, profileId = null, syncId, intoChain = null, popOut = false } = {}) {
+export function openBrowserLive(app, { sessionId, profileId = null, syncId, intoChain = null, popOut = false, quiet = false } = {}) {
   if (!sessionId) { showToast(t('No session to view'), { type: 'error' }); return null; }
   // naive study 2 (finding 2): ONE live view per session — a MANUAL open (the status-bar chip's "Open live view", the
   // card, the phone's switcher, Session Properties) goes to the session's existing view instead of opening another
@@ -267,7 +267,7 @@ export function openBrowserLive(app, { sessionId, profileId = null, syncId, into
   syncId = plan.syncId;
   app._hideWelcome?.();
   const winInfo = app.wm.createWindow({
-    title: t('Agent browser (live)'), type: 'browser-live', syncId, intoChain: intoChain || undefined,
+    title: t('Agent browser (live)'), type: 'browser-live', syncId, intoChain: intoChain || undefined, ...(quiet ? { quiet: true } : {}),
     openSpec: { action: 'openBrowserLive', sessionId, profileId: profileId || null },
   });
   const L = createLiveView(app, winInfo, { sessionId, profileId });
@@ -2720,7 +2720,12 @@ export function autoBindLiveViews(app, prev, digest) {
     // a chat already split gets the browser as a quiet TAB (browser side, else its own) — nothing on screen moves
     const place = livePlacement(host._tabChain, host.id, (x) => app.wm._paneFacts?.(x) || {});
     const intoChain = place.mode === 'split' ? { hostId: host.id, split: true, side: 'right' } : { hostId: host.id, quiet: true, side: place.side };
-    const w = openBrowserLive(app, { sessionId: l.sessionId, profileId: l.ephemeral ? EPHEMERAL_REF : l.profileId, syncId, intoChain });
+    // lane agent-window-no-steal: the agent's browser starting is an AGENT's act — the view is placed beside the chat, never
+    // focused (the chat's frame keeps its place in the stack, the person's caret stays), unless Settings → Desktop apps →
+    // "Agent-opened windows come to the front"
+    const quiet = app.settings?.get('desktop.agentWindowsFront') !== true;
+    const w = openBrowserLive(app, { sessionId: l.sessionId, profileId: l.ephemeral ? EPHEMERAL_REF : l.profileId, syncId, intoChain, quiet });
+    if (w && quiet) app.wm.markArrived(w.id);
     if (w) opened.push(w.id);
   }
   return opened;

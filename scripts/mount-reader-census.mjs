@@ -25,7 +25,7 @@ export const ROWS = [
   ['src/account-material.js', 'own-tree', 1, null, CLI],
   ['src/accounts.js', 'own-tree', 18, null, CLI],
   ['src/acp-message-manager.js', 'own-tree', 1, null, CLI],
-  ['src/app-serve.js', 'own-tree', 32, null, `${DATA}; lane apps-launcher-witness +3: the witness file (data/) + the XDG application dirs (~/.local/share/applications, /usr/share/applications — the OS's own records at fixed paths, opened O_NONBLOCK|O_NOFOLLOW, never a path anyone names)`],
+  ['src/app-serve.js', 'own-tree', 37, null, `${DATA}; lane apps-launcher-witness +3: the witness file (data/) + the XDG application dirs (~/.local/share/applications, /usr/share/applications — the OS's own records at fixed paths, opened O_NONBLOCK|O_NOFOLLOW, never a path anyone names); lane app-register-model +5: a Flatpak's exported desktop file (×2, a fixed path under the user's own ~/.local/share/flatpak), a declared exec's access/stat (resolving it as the user would run it) and a declared icon's size (validated under the home or /usr/share)`],
   ['src/app-squashfs.js', 'own-tree', 2, null, DATA],
   ['src/app-system-serve.js', 'own-tree', 13, null, DATA],
   ['src/auth.js', 'own-tree', 1, null, DATA],

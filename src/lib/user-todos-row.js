@@ -133,7 +133,7 @@ export function appCardHtml(i, t, { lang = 'en', resolved = false, buttons = tru
   const pg = progressWords(v, t);
   const line = (cls, s) => (s ? `<div class="ut-app-line ${cls}">${escHtml(s)}</div>` : '');
   const icon = v.app && typeof v.app.icon === 'string' && (v.app.icon.startsWith('/api/apps/icon?') || PROPOSAL_ICON_RE.test(v.app.icon)) ? `<img class="ut-app-icon" alt="" src="${escHtml(v.app.icon)}">` : '';
-  let html = icon + line('ut-app-by', w.by) + line('ut-app-from', w.from) + line('ut-app-note', w.fromNote) + line('ut-app-gives', w.gives) + line('ut-app-first', w.firstUse) + line('ut-app-changed', w.changed);
+  let html = icon + line('ut-app-by', w.by) + line('ut-app-from', w.from) + (w.argv || []).map((l) => line('ut-app-argv', l)).join('') + line('ut-app-note', w.fromNote) + line('ut-app-gives', w.gives) + line('ut-app-first', w.firstUse) + line('ut-app-changed', w.changed);
   if (pg) {
     const acts = buttons ? pg.actions.map((a) => `<button type="button" class="ut-act ut-action-app ut-app-${a}" data-answer="${a}">${escHtml(a === 'open' ? t('Open') : t('Try again'))}</button>`).join('') : '';
     html += `<div class="ut-app-progress" data-kind="${pg.kind}">${pg.kind === 'busy' ? '<span class="ut-app-spin" aria-hidden="true"></span>' : ''}<span class="ut-app-progress-text">${escHtml(pg.text)}</span>${acts}</div>`;

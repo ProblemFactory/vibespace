@@ -87,7 +87,9 @@ import { wireAppPrefs, appPrefs, appPrefsReady, onAppPrefs, saveAppPrefs } from 
 import { mountLaunchShareRow, launchKeyOf } from './window-share.js';
 import { showMachineDesktopDialog } from './machine-desktop.js'; // design 014 D1: a Windows / macOS machine's whole desktop
 import { OFFICE_MODULES, installSpecFor, FONTS_ID } from '../office-open.js'; // §7.9: the LibreOffice table (PURE)
+import { splitWords, joinWords } from '../argv-words.js'; // lane app-register-ui: a variant's / a recipe's ONE line ↔ its words (PURE, shared with the server)
 import { installPlace } from '../app-witness.js'; // lane apps-launcher-witness: THE install-place words (PURE, shared with the engine's outcome)
+import { SHOW_SYSTEM_KEY } from '../app-witness.js'; // lane apps-dialog-fast: the person's "Show them" (user state)
 import { appPlanBlock, appSummaryBlock, appRefusalText, appDialogTitle, appGoLabel, appPlanNote, appDoneText, renderAppsSection, openDebInstall, openAppSearch, openAgentHelp, appsBannerModel } from './app-install-dialog.js'; // Layer 0 apps: THE install dialog shows an app's plan too
 const AGENT_BROWSER_ORIGIN = 'agent-browser'; // src/server/window-targets-engine.js AGENT_BROWSER_ORIGIN
 /** lane e2a r3 (verify r1 #11): a record the agent launched through its own door — the chip / the running row words. */
@@ -209,12 +211,44 @@ export function noteLocalHostName(n) { if (typeof n === 'string' && n) localHost
 export function installPlaceOf(m) { return installPlace({ hostId: (m && m.hostId) || 'local', label: (m && m.label) || '', localName: localHostName }, t); }
 /** A witnessed row's source chip (src/app-witness.js WITNESS_SOURCES). */
 export function witnessSourceText(source) {
-  return source === 'flatpak-user' ? t('Flatpak · yours') : source === 'flatpak-system' ? t('Flatpak · system') : source === 'desktop-system' ? t('Desktop entry · system') : t('Desktop entry · yours');
+  return source === 'flatpak-user' ? t('Flatpak · yours') : source === 'flatpak-system' ? t('Flatpak · system') : source === 'desktop-system' ? t('Desktop entry · system') : source === 'agent' ? t('Registered by an agent') : t('Desktop entry · yours');
 }
 /** A witnessed card's second line: its command as written (shown, never trusted as an engine row) — or that it is gone. */
 export function witnessSubText(row) {
   const cmd = [row.exec, ...(row.args || [])].join(' ');
   return row.available ? cmd : t('Its program is gone: {cmd}', { cmd });
+}
+/** lane app-register-ui: a card's own "…" rows beside its default-scale rows, by KIND — `head` above them (a registered
+ *  card's launch variants, ≥ 2 only: one variant is the card's press), `tail` below (Add to VibeSpace… on a witnessed
+ *  card; Remove… — or Forget when it has no recipe — and Show command on a registered one). The dialog words + wires. */
+export function cardMenuModel(row) {
+  const r = row || {};
+  const own = !r.witnessed && (r.registered || r.removable); // a witnessed row is never registered (the contract); a removable engine row has its recipe too
+  const launch = own && Array.isArray(r.launch) ? r.launch.slice(0, 8) : [];
+  const head = launch.length >= 2 ? launch.map((v, i) => ({ kind: 'variant', id: String(v.id), label: String(v.label || v.id), ...(i === 0 ? { isDefault: true } : {}) })) : [];
+  const tail = r.witnessed ? [{ kind: 'adopt' }] : own ? [{ kind: r.removable ? 'remove' : 'forget' }, { kind: 'command' }] : [];
+  return { head, tail };
+}
+export function cardMenuRowLabel(m) {
+  if (m.kind === 'variant') return m.isDefault ? m.label : t('Open · {variant}', { variant: m.label }); // the default reads as itself ("Open", never "Open · Open")
+  return m.kind === 'adopt' ? t('Add to VibeSpace…') : m.kind === 'remove' ? t('Remove…') : m.kind === 'forget' ? t('Forget') : t('Show command');
+}
+/** The command a recipe / a variant runs, as ONE line read back to the same words (never hidden, never re-quoted twice). */
+export function recipeLine(rec) { return rec && rec.exec ? joinWords([rec.exec, ...(Array.isArray(rec.args) ? rec.args : [])]) : ''; }
+/** After Remove… answered ok: the program is gone — or only the entry is (the witness lists the program again). */
+export function removedToastText(stillListed) { return stillListed ? t('Forgotten — the program is still on the machine') : t('Removed'); }
+/** An adopt refusal lands under the field it concerns (the answer's own `field` when it names one, else by its code). */
+export const ADOPT_FIELDS = Object.freeze(['label', 'launch', 'remove', 'reinstall']);
+export function adoptErrorField(r) {
+  if (r && ADOPT_FIELDS.includes(r.field)) return r.field;
+  const c = r && r.code;
+  return c === 'bad_label' || c === 'shadow' || c === 'bad_icon' ? 'label' : c === 'needs_root' ? 'remove' : 'launch';
+}
+/** A variant's / a recipe's typed line → `{ok, argv}` or the refusal said in words (where the line broke). */
+export function argvLineVerdict(line) {
+  const v = splitWords(line);
+  if (!v.ok) return { ok: false, code: 'bad_args', error: t('This line cannot be read as a command near character {n} — quote | ; & > < $ and backticks, and close every quote', { n: v.at + 1 }) };
+  return v;
 }
 /** The filter box: a card matches when every word is in its name, its command or its flatpak id. PURE. */
 export function launchFilterMatch(row, q) {
@@ -371,6 +405,130 @@ export function splitArgs(line) {
 }
 
 let launcherApp = null; // design 009 §B5: the install dialog's hand-off opens a helper conversation, which needs the app
+// ── lane app-register-ui (owner 2026-10-11: an agent-installed JASP sat under "Installed outside VibeSpace"): ONE
+// press makes an outside app VibeSpace's own — its label, its launch variants and how to remove / reinstall it, each
+// typed as ONE line and shown back as its words (src/argv-words.js, the server's own reader); nothing a row runs is
+// hidden. The ADOPT dialog is prefilled by the server (GET …/adopt-prefill), an error lands under its field. ──
+const POST_JSON = (body) => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+/** The words a line reads as, one chip each (textContent: a word is the person's / an agent's text) — or why it can't be read. */
+function renderChips(box, line) {
+  box.textContent = '';
+  const v = argvLineVerdict(line);
+  box.classList.toggle('is-bad', !v.ok);
+  if (!v.ok) { box.textContent = v.error; return v; }
+  for (const w of v.argv) { const c = document.createElement('span'); c.className = 'desktop-adopt-chip'; c.textContent = w; box.appendChild(c); }
+  return v;
+}
+/** The prefill's witness line ("found as Flatpak · yours: org.jaspstats.JASP"). */
+export function adoptWitnessText(w, row = {}) {
+  if (typeof w === 'string' && w) return w;
+  const o = w && typeof w === 'object' ? w : {};
+  const what = o.appId || o.id || o.file || recipeLine(o.exec ? o : row) || '';
+  return t('found as {source}: {what}', { source: witnessSourceText(o.source || row.source), what });
+}
+export async function showAdoptDialog(row, { host = 'local', onDone = null } = {}) {
+  const app = catalogLabel(row);
+  const { body, close } = createModalShell({ id: 'desktop-adopt-dialog', title: t('Add {app} to VibeSpace', { app }), dialogClass: 'desktop-adopt', escapeToClose: true });
+  body.innerHTML = `
+    <p class="desktop-adopt-witness"></p>
+    <div class="desktop-adopt-field" data-field="label"><label><span>${escHtml(t('Label'))}</span><input type="text" class="desktop-adopt-label" autocomplete="off" spellcheck="false" maxlength="80"></label><div class="desktop-adopt-err"></div></div>
+    <div class="desktop-adopt-field" data-field="launch"><span class="desktop-adopt-head">${escHtml(t('Launch variants'))}</span><span class="desktop-adopt-hint">${escHtml(t('The first one is what a press on the card opens'))}</span><div class="desktop-adopt-variants"></div><button type="button" class="file-tool-btn desktop-adopt-add-variant">${escHtml(t('Add a variant'))}</button><div class="desktop-adopt-err"></div></div>
+    <div class="desktop-adopt-field" data-field="remove"><label><span>${escHtml(t('Remove recipe'))}</span><input type="text" class="desktop-adopt-remove desktop-adopt-cmd" autocomplete="off" spellcheck="false" placeholder="${escHtml(t('leave empty: Forget only'))}"></label><div class="desktop-adopt-chips"></div><div class="desktop-adopt-err"></div></div>
+    <div class="desktop-adopt-field" data-field="reinstall"><label><span>${escHtml(t('Reinstall recipe (optional)'))}</span><input type="text" class="desktop-adopt-reinstall desktop-adopt-cmd" autocomplete="off" spellcheck="false"></label><div class="desktop-adopt-chips"></div><div class="desktop-adopt-err"></div></div>
+    <div class="desktop-adopt-actions"><button type="button" class="btn-cancel desktop-adopt-cancel">${escHtml(t('Cancel'))}</button><button type="button" class="btn-create desktop-adopt-go" disabled>${escHtml(t('Add'))}</button></div>`;
+  const $ = (sel) => body.querySelector(sel);
+  const field = (f) => body.querySelector(`.desktop-adopt-field[data-field="${f}"]`);
+  const sayErr = (f, text) => { const e = field(f)?.querySelector(':scope > .desktop-adopt-err'); if (e) e.textContent = text || ''; };
+  const clearErrs = () => { for (const f of ADOPT_FIELDS) sayErr(f, ''); };
+  const labelIn = $('.desktop-adopt-label'), varEl = $('.desktop-adopt-variants'), goBtn = $('.desktop-adopt-go');
+  let n = 0;
+  const addVariant = (v = {}) => {
+    const r = document.createElement('div'); r.className = 'desktop-adopt-variant'; r.dataset.vid = v.id ? String(v.id) : `v${Date.now().toString(36)}${n}`; n++;
+    r.innerHTML = `<input type="text" class="desktop-adopt-vlabel" autocomplete="off" spellcheck="false" maxlength="60" aria-label="${escHtml(t('Variant name'))}" placeholder="${escHtml(t('Name'))}"><input type="text" class="desktop-adopt-vcmd desktop-adopt-cmd" autocomplete="off" spellcheck="false" aria-label="${escHtml(t('Command'))}" placeholder="${escHtml(t('Command'))}"><button type="button" class="file-tool-btn desktop-adopt-vdel" title="${escHtml(t('Remove this variant'))}" aria-label="${escHtml(t('Remove this variant'))}">${UI_ICONS.close}</button><div class="desktop-adopt-chips"></div>`;
+    r.querySelector('.desktop-adopt-vlabel').value = String(v.label || (varEl.children.length ? '' : t('Open')));
+    const cmd = r.querySelector('.desktop-adopt-vcmd'); cmd.value = v.exec ? recipeLine(v) : '';
+    cmd.oninput = () => renderChips(r.querySelector('.desktop-adopt-chips'), cmd.value);
+    r.querySelector('.desktop-adopt-vdel').onclick = () => { if (varEl.children.length > 1) { r.remove(); syncDel(); } };
+    varEl.appendChild(r); cmd.oninput(); syncDel();
+    return r;
+  };
+  const syncDel = () => { const many = varEl.children.length > 1; for (const b of varEl.querySelectorAll('.desktop-adopt-vdel')) b.disabled = !many; $('.desktop-adopt-add-variant').disabled = varEl.children.length >= 8; };
+  $('.desktop-adopt-add-variant').onclick = () => addVariant().querySelector('.desktop-adopt-vlabel').focus();
+  for (const f of ['remove', 'reinstall']) { const i = $(`.desktop-adopt-${f}`); i.oninput = () => renderChips(field(f).querySelector('.desktop-adopt-chips'), i.value); }
+  $('.desktop-adopt-cancel').onclick = () => close();
+  const wit = $('.desktop-adopt-witness'); wit.textContent = t('Reading what this machine says about {app}…', { app });
+  const q = `seenId=${encodeURIComponent(row.id)}${host && host !== 'local' ? `&host=${encodeURIComponent(host)}` : ''}`;
+  const pre = await fetchJson(`/api/desktop/apps/adopt-prefill?${q}`);
+  if (!body.isConnected) return null;
+  if (!pre || pre.error || pre.ok === false) { wit.textContent = (pre && pre.error) || t('Could not read what this machine says about {app}', { app }); wit.classList.add('is-bad'); }
+  else wit.textContent = adoptWitnessText(pre.witness, row);
+  labelIn.value = String((pre && pre.label) || app);
+  const launch = pre && Array.isArray(pre.launch) && pre.launch.length ? pre.launch : [{ id: 'open', label: t('Open'), exec: row.exec, args: row.args || [] }];
+  for (const v of launch.slice(0, 8)) addVariant(v);
+  for (const f of ['remove', 'reinstall']) { const i = $(`.desktop-adopt-${f}`); i.value = pre && pre[f] && pre[f].exec ? recipeLine(pre[f]) : ''; i.oninput(); }
+  goBtn.disabled = false;
+  goBtn.onclick = async () => {
+    clearErrs();
+    const label = labelIn.value.trim();
+    if (!label) { sayErr('label', t('Give it a name')); labelIn.focus(); return; }
+    const variants = [];
+    for (const r of varEl.children) {
+      const v = argvLineVerdict(r.querySelector('.desktop-adopt-vcmd').value);
+      if (!v.ok || !v.argv.length) { sayErr('launch', v.ok ? t('Each variant needs a command') : v.error); r.querySelector('.desktop-adopt-vcmd').focus(); return; }
+      variants.push({ id: r.dataset.vid, label: r.querySelector('.desktop-adopt-vlabel').value.trim() || v.argv[0], exec: v.argv[0], args: v.argv.slice(1) });
+    }
+    const recipe = {};
+    for (const f of ['remove', 'reinstall']) {
+      const line = $(`.desktop-adopt-${f}`).value;
+      if (!line.trim()) continue;
+      const v = argvLineVerdict(line);
+      if (!v.ok) { sayErr(f, v.error); $(`.desktop-adopt-${f}`).focus(); return; }
+      recipe[f] = { exec: v.argv[0], args: v.argv.slice(1) };
+    }
+    goBtn.disabled = true;
+    const r = await fetchJson('/api/desktop/apps/adopt', POST_JSON({ seenId: row.id, label, launch: variants, ...recipe, ...(host && host !== 'local' ? { host } : {}) }));
+    goBtn.disabled = false;
+    if (!r || r.ok === false || r.error) { // the no-silent-failure law: said under the field it concerns, never a toast alone
+      const f = adoptErrorField(r || {});
+      sayErr(f, (r && r.error) || t('Could not add {app}', { app: label }));
+      field(f)?.querySelector('input')?.focus();
+      return;
+    }
+    close();
+    showToast(t('{app} is now in your Apps', { app: label })); // the name the person just confirmed
+    onDone?.(r.row || null);
+  };
+  setTimeout(() => { try { labelIn.focus({ preventScroll: true }); } catch {} }, 0);
+  return { close };
+}
+/** Remove… (the entry's recipe, run as the user, after ONE confirm that shows it verbatim) — or Forget (the entry leaves
+ *  the index, the program stays: the witness lists it again). A failure shows the output's last lines in a dialog. */
+export async function removeRegistered(row, { forget = false, onDone = null } = {}) {
+  const app = catalogLabel(row);
+  const rec = recipeLine(row.remove);
+  const ok = await showConfirmDialog({
+    title: forget ? t('Forget {app}?', { app }) : t('Remove {app}?', { app }),
+    message: forget ? t('{app} leaves Apps; the program stays on this machine and is listed under “Installed outside VibeSpace” again.', { app })
+      : rec ? t('This runs as you: {cmd}', { cmd: rec }) : t('This runs the remove recipe {app} was registered with, as you.', { app }),
+    confirmText: forget ? t('Forget') : t('Remove'), danger: !forget,
+  });
+  if (!ok) return null;
+  const r = await fetchJson(`/api/desktop/apps/${encodeURIComponent(row.id)}/${forget ? 'forget' : 'remove'}`, POST_JSON({}));
+  if (!r || r.ok === false || r.error) {
+    const { body } = createModalShell({ id: 'desktop-remove-failed', title: t('Could not remove {app}', { app }), dialogClass: 'desktop-adopt', escapeToClose: true });
+    const said = r && r.code === 'no_recipe' ? t('{app} has no remove recipe — use Forget', { app }) : r && r.code === 'needs_root' ? t('Its remove recipe needs administrator rights — VibeSpace runs recipes as you only') : t('The remove recipe failed');
+    const p = document.createElement('p'); p.className = 'desktop-adopt-witness is-bad'; p.textContent = [said, r && r.error].filter(Boolean).join(' — ');
+    body.appendChild(p);
+    const out = String((r && r.output) || '').trimEnd().split('\n').slice(-12).join('\n');
+    if (out) { const pre = document.createElement('pre'); pre.className = 'desktop-install-pre desktop-remove-output'; pre.textContent = out; body.appendChild(pre); }
+    return null;
+  }
+  const fresh = onDone ? await onDone() : null;
+  const still = forget || !!(fresh && (fresh.registry || []).some((w) => w.witnessed && (w.label === row.label || recipeLine(w) === recipeLine(row))));
+  showToast(removedToastText(still));
+  return r;
+}
+
 export function installDesktopAppLauncher(app) {
   app._desktopAppsAvailable = false;
   launcherApp = app;
@@ -539,12 +697,14 @@ export async function showLaunchDialog(app, opts = {}) {
     </section>
     <section class="desktop-launch-sec desktop-launch-catalog-sec">
       <h4>${escHtml(t('Apps'))}</h4>
+      <p class="desktop-launch-catalog-note">${escHtml(t('Installed through VibeSpace or registered with it — kept across a rebuild where it can be, with their launch options'))}</p>
       <input type="search" class="desktop-launch-filter" placeholder="${escHtml(t('Filter apps'))}" aria-label="${escHtml(t('Filter apps'))}" autocomplete="off" spellcheck="false">
       <div class="desktop-launch-registry desktop-launch-grid"></div>
     </section>
     <section class="desktop-launch-sec desktop-launch-seen-sec is-empty">
-      <h4><span class="desktop-launch-seen-title"></span><button type="button" class="desktop-launch-seen-recheck">${escHtml(t('Check again'))}</button></h4>
-      <p class="desktop-launch-seen-note">${escHtml(t('Installed by you or an agent without VibeSpace — listed as found on this machine; VibeSpace does not manage them or bring them back after a rebuild.'))}</p>
+      <h4><span class="desktop-launch-seen-title"></span><span class="desktop-launch-seen-state" hidden>${UI_ICONS.refresh}<span>${escHtml(t('listing…'))}</span></span><button type="button" class="desktop-launch-seen-recheck">${escHtml(t('Check again'))}</button></h4>
+      <p class="desktop-launch-seen-more" hidden><span class="desktop-launch-seen-more-text"></span> <button type="button" class="desktop-launch-seen-show"></button></p>
+      <p class="desktop-launch-seen-note">${escHtml(t('Found on this machine but not registered: Add to VibeSpace… to keep it, with its launch options and how to remove it'))}</p>
       <div class="desktop-launch-seen desktop-launch-grid"></div>
     </section>
     <section class="desktop-launch-sec desktop-launch-browsers-sec is-empty">
@@ -666,9 +826,46 @@ export async function showLaunchDialog(app, opts = {}) {
         refocusScale = row.id;
         saveAppPrefs(SCALE_PREF_KEY, (map) => setScaleChoice(map, key, m.choice), t('Could not save the app’s default scale'));
       } }));
-      const pop = showContextMenu(r.left, r.bottom + 2, [{ label: t('Default scale for {app}', { app: catalogLabel(row) }), disabled: true }, ...rows]);
+      const own = cardMenuItems(row); // lane app-register-ui: the card's variants above, Add / Remove / Show command below
+      const pop = showContextMenu(r.left, r.bottom + 2, tidyMenu([...own.head, { label: t('Default scale for {app}', { app: catalogLabel(row) }), disabled: true }, ...rows, ...own.tail]));
       // Esc closes THIS menu only: the dialog's own Esc (createModalShell's overlay listener) would close the whole dialog
       const onEsc = (ev) => {
+        if (!pop.isConnected) { document.removeEventListener('keydown', onEsc, true); return; }
+        if (ev.key !== 'Escape') return;
+        ev.stopPropagation(); ev.preventDefault(); pop.remove(); document.removeEventListener('keydown', onEsc, true); focusQuiet(c);
+      };
+      document.addEventListener('keydown', onEsc, true);
+    };
+    return c;
+  };
+
+  // lane app-register-ui: a card's own menu rows (cardMenuModel), worded + wired; `tidyMenu` drops doubled separators
+  const tidyMenu = (items) => items.filter((x, i, a) => !x.separator || (i > 0 && i < a.length - 1 && !a[i - 1].separator));
+  const cardMenuItems = (row) => {
+    const m = doc ? { head: [], tail: [] } : cardMenuModel(row);
+    const off = !!listError || !data?.availability?.backend || launching.has(row.id);
+    const item = (x) => ({ label: cardMenuRowLabel(x), disabled: x.kind === 'variant' && off, action: () => cardMenuAct(row, x) });
+    return { head: m.head.length ? [...m.head.map(item), { separator: true }] : [], tail: m.tail.length ? [{ separator: true }, ...m.tail.map(item)] : [] };
+  };
+  const cardMenuAct = async (row, x) => {
+    if (x.kind === 'variant') { // the chosen variant, through the same door as the card's press (badges unchanged)
+      launching.add(row.id); render();
+      const r = await launch({ appId: row.id, variant: x.id }, null);
+      if (!r) { launching.delete(row.id); render(); }
+    } else if (x.kind === 'adopt') showAdoptDialog(row, { host, onDone: () => { if (overlay.isConnected) refresh(); } });
+    else if (x.kind === 'remove' || x.kind === 'forget') removeRegistered(row, { forget: x.kind === 'forget', onDone: async () => { if (!overlay.isConnected) return null; await refresh(); return data; } });
+    else { const ok = await copyText(recipeLine(row)); showToast(ok === false ? recipeLine(row) : t('Command copied: {cmd}', { cmd: recipeLine(row) }), ok === false ? { type: 'error' } : undefined); }
+  };
+  const cardMenuControl = (row) => {
+    const c = document.createElement('button'); c.type = 'button'; c.className = 'desktop-launch-card-menu';
+    c.innerHTML = UI_ICONS.more;
+    c.title = t('More for {app}', { app: catalogLabel(row) }); c.setAttribute('aria-label', c.title); c.setAttribute('aria-haspopup', 'menu');
+    c.onclick = (e, at = null) => {
+      e.stopPropagation();
+      const r = at || c.getBoundingClientRect();
+      const own = cardMenuItems(row);
+      const pop = showContextMenu(r.left, r.bottom + 2, tidyMenu([...own.head, ...own.tail]));
+      const onEsc = (ev) => { // Esc closes THIS menu only (the dialog's own Esc would close the whole dialog)
         if (!pop.isConnected) { document.removeEventListener('keydown', onEsc, true); return; }
         if (ev.key !== 'Escape') return;
         ev.stopPropagation(); ev.preventDefault(); pop.remove(); document.removeEventListener('keydown', onEsc, true); focusQuiet(c);
@@ -788,7 +985,11 @@ export async function showLaunchDialog(app, opts = {}) {
     // the count is the LIVE list's (the broadcast refreshes `data.apps`, never the cap snapshot taken at open — a starting session read "0 of 6")
     countEl.textContent = live.length ? (cap ? t('{used} of {cap} slots in use', { used: Math.max(capUsed, live.length), cap }) : t('{n} running', { n: live.length })) : '';
   };
-  const render = () => {
+  // lane apps-dialog-fast: the "Installed outside VibeSpace" group is patched IN PLACE (`render({seenOnly})`, keyed cards)
+  // when its listing lands (the open never waited for it) or Check again answers; the distro's own entries wait behind
+  // "Show them" (the person's choice, user state)
+  let showSystem = false, rechecking = false;
+  const render = ({ seenOnly = false } = {}) => {
     const mName = host === 'local' ? null : machineName(machineOf(host));
     availEl.textContent = listError ? machineErrorText(listError.code, mName || machineName(null), listError.error) : availabilityText(data && data.availability, mName);
     const availBad = !!listError || !!(data && data.availability && !data.availability.backend);
@@ -800,13 +1001,17 @@ export async function showLaunchDialog(app, opts = {}) {
     const dead = !!listError || !data?.availability?.backend;
     const scales = !dead && !!data?.availability?.caps?.scales; // lane D: only a rung that scales apps offers a default scale (the row's cell)
     // ── the catalog: applications, then browsers (B-bfe6) under their own heading ──
-    regEl.innerHTML = '';
-    browsersEl.innerHTML = '';
-    seenEl.innerHTML = '';
+    if (!seenOnly) { regEl.innerHTML = ''; browsersEl.innerHTML = ''; }
+    const seenOld = new Map(seenOnly ? [...seenEl.children].map((w) => [w.dataset.seenKey, w]) : []), seenWant = [];
     if (host === 'local' && data && data.hostName) noteLocalHostName(data.hostName);
     // §7.9 FILE MODE: the document's own LibreOffice row only (its module opens it — the PURE verdict's rule)
     const rows = (data?.registry || []).filter((row) => !doc || (row.office && row.office === doc.module));
+    const distroN = rows.filter((row) => row.witnessed && row.distro).length;
     for (const row of rows) {
+      if (seenOnly && !row.witnessed) continue;
+      if (row.witnessed && row.distro && !showSystem) continue;
+      const seenKey = row.witnessed ? JSON.stringify([row.id, row.label, row.exec, row.args, row.available, row.reason, row.source, row.distro, launching.has(row.id), dead, scales]) : null;
+      if (seenKey && seenOld.has(seenKey)) { const w0 = seenOld.get(seenKey); w0.hidden = !launchFilterMatch(row, filterIn.value); seenWant.push(w0); continue; }
       // §7.9: an absent LibreOffice row in FILE MODE is not a dimmed card — ONE plain sentence + "Install LibreOffice on
       // <machine>…" (the owner's rule: never a greyed control with a hint)
       if (doc && !row.available) {
@@ -827,7 +1032,7 @@ export async function showLaunchDialog(app, opts = {}) {
       const unavailable = !row.available || !!row.parkedUntil;
       b.className = 'desktop-launch-card' + (unavailable ? ' is-unavailable' : '') + (isLaunching ? ' is-launching' : '');
       // a dimmed BROWSER row says its verdict SHORT and translated (by the server's code); the sentence is its tooltip
-      const sub = isLaunching ? t('Launching…') : row.witnessed ? witnessSubText(row) : row.available ? (row.reason || row.exec) : ((row.browser && browserReasonShort(row.reasonCode)) || (row.office && officeReasonShort(row.reasonCode)) || (row.app && appReasonShort(row.reasonCode)) || registryReasonShort(row) || row.reason || t('not on PATH'));
+      const sub = isLaunching ? t('Launching…') : row.witnessed || row.registered ? witnessSubText(row) : row.available ? (row.reason || row.exec) : ((row.browser && browserReasonShort(row.reasonCode)) || (row.office && officeReasonShort(row.reasonCode)) || (row.app && appReasonShort(row.reasonCode)) || registryReasonShort(row) || row.reason || t('not on PATH'));
       // faces B: a startable browser card names its face ("Browser app · chromium"); a dimmed one says only its short reason
       const docSub = doc && !isLaunching && !unavailable ? t('opens {file}', { file: doc.label || doc.path }) : null; // §7.9 FILE MODE: the card names the document it opens
       b.innerHTML = `<span class="desktop-launch-card-icon">${isLaunching ? UI_ICONS.refresh : cardIconFor(row.category, row.office)}</span><span class="desktop-launch-card-label">${escHtml(catalogLabel(row))}</span><span class="desktop-launch-card-sub">${docSub !== null ? escHtml(docSub) : escHtml(row.browser && !isLaunching && !unavailable ? `${t('Browser app')} · ${sub}` : sub)}</span>`;
@@ -837,7 +1042,7 @@ export async function showLaunchDialog(app, opts = {}) {
         img.src = `/api/apps/icon?host=${encodeURIComponent(host)}&row=${encodeURIComponent(row.id)}`;
         const ic = b.querySelector('.desktop-launch-card-icon'); if (ic) { ic.textContent = ''; ic.appendChild(img); }
       }
-      if (row.witnessed && !isLaunching) { const chip = document.createElement('span'); chip.className = 'desktop-launch-chip'; chip.textContent = witnessSourceText(row.source); b.querySelector('.desktop-launch-card-sub')?.prepend(chip, ' '); } // the source chip leads the command line (the card's grid keeps two rows)
+      if ((row.witnessed || row.registered) && !isLaunching) { const chip = document.createElement('span'); chip.className = 'desktop-launch-chip'; chip.textContent = witnessSourceText(row.source); b.querySelector('.desktop-launch-card-sub')?.prepend(chip, ' '); } // the source chip leads the command line (the card's grid keeps two rows)
       b.disabled = unavailable || dead || isLaunching;
       b.setAttribute('aria-disabled', b.disabled ? 'true' : 'false');
       if (isLaunching) b.setAttribute('aria-busy', 'true');
@@ -867,6 +1072,21 @@ export async function showLaunchDialog(app, opts = {}) {
         // design 009 §B4: a right-click (a long press on a phone) on the card opens the same menu, at the pointer
         b.addEventListener('contextmenu', (e) => { e.preventDefault(); sc.onclick(e, { left: e.clientX, bottom: e.clientY }); });
       }
+      // lane app-register-ui: a card with its own rows (variants, Add to VibeSpace…, Remove… / Forget) and no scale
+      // control gets the same "…" — a right-click / a long press opens it at the pointer (a dimmed card too: on the wrap)
+      if (!doc && !wrap.querySelector('.desktop-launch-card-scale')) {
+        const own = cardMenuItems(row);
+        if (own.head.length || own.tail.length) {
+          const mc = cardMenuControl(row); wrap.appendChild(mc);
+          wrap.addEventListener('contextmenu', (e) => { if (e.target === mc) return; e.preventDefault(); mc.onclick(e, { left: e.clientX, bottom: e.clientY }); });
+        }
+      }
+      if (row.witnessed && !doc) { // desk width: the adopt beside the card (a phone reaches it in the long-press menu)
+        const ab = document.createElement('button'); ab.type = 'button'; ab.className = 'desktop-launch-card-adopt';
+        ab.textContent = t('Add…'); ab.title = t('Add to VibeSpace…'); ab.setAttribute('aria-label', t('Add {app} to VibeSpace…', { app: catalogLabel(row) }));
+        ab.onclick = (e) => { e.stopPropagation(); cardMenuAct(row, { kind: 'adopt' }); };
+        wrap.appendChild(ab);
+      }
       // §7.9: a LibreOffice row that is not installed carries its install beside it (the plan first, never a silent apt)
       if (row.office && !row.available && !dead) {
         const ib = document.createElement('button'); ib.type = 'button'; ib.className = 'desktop-launch-card-install';
@@ -876,11 +1096,20 @@ export async function showLaunchDialog(app, opts = {}) {
         wrap.appendChild(ib);
       }
       wrap.hidden = !doc && !launchFilterMatch(row, filterIn.value); // the filter box, across Apps and the witnessed group
-      (row.witnessed ? seenEl : row.browser ? browsersEl : regEl).appendChild(wrap);
+      if (row.witnessed) { wrap.dataset.seenKey = seenKey; seenWant.push(wrap); } else (row.browser ? browsersEl : regEl).appendChild(wrap);
     }
+    seenWant.forEach((w, i) => { if (seenEl.children[i] !== w) seenEl.insertBefore(w, seenEl.children[i] || null); });
+    while (seenEl.children.length > seenWant.length) seenEl.lastElementChild.remove();
     // lane apps-launcher-witness: the apps found installed OUTSIDE the door, in their own group (never among the engine's)
-    seenSec.classList.toggle('is-empty', !seenEl.children.length);
-    $('.desktop-launch-seen-title').textContent = t('Installed outside VibeSpace ({n})', { n: seenEl.children.length });
+    const listing = rechecking || !!data?.witness?.listing;
+    seenSec.classList.toggle('is-empty', !seenEl.children.length && !listing && !distroN);
+    $('.desktop-launch-seen-title').textContent = t('Installed outside VibeSpace ({n})', { n: seenWant.length - (showSystem ? distroN : 0) });
+    $('.desktop-launch-seen-state').hidden = !listing;
+    $('.desktop-launch-seen-recheck').disabled = listing;
+    $('.desktop-launch-seen-more').hidden = !distroN;
+    $('.desktop-launch-seen-more-text').textContent = showSystem ? t('{n} system entries shown', { n: distroN }) : t('{n} system entries not shown', { n: distroN });
+    $('.desktop-launch-seen-show').textContent = showSystem ? t('Hide them') : t('Show them');
+    if (seenOnly) return { registryEmpty: false };
     if (refocusScale) { const el = body.querySelector(`.desktop-launch-card-scale[data-scale-for="${CSS.escape(refocusScale)}"]`); refocusScale = null; focusQuiet(el); }
     browsersSec.classList.toggle('is-empty', !browsersEl.children.length);
     shareRow.decorateCards([regEl, browsersEl]); // lane E verify: a card that will launch shared names it (the app's remembered share)
@@ -904,11 +1133,13 @@ export async function showLaunchDialog(app, opts = {}) {
     execIn.disabled = argsIn.disabled = cwdIn.disabled = dead;
     return { registryEmpty };
   };
+  const seenPatch = (rows, witness) => { if (!data) return; data.registry = (data.registry || []).filter((r) => !r.witnessed).concat(rows || []); data.witness = witness || null; render({ seenOnly: true }); };
   const refresh = async ({ recheck = false } = {}) => {
     const asked = host;
     const q = [asked === 'local' ? '' : `host=${encodeURIComponent(asked)}`, recheck ? 'witness=recheck' : ''].filter(Boolean).join('&');
     const d = await fetchJson(`/api/desktop/apps${q ? `?${q}` : ''}`);
     if (asked !== host) return { registryEmpty: false }; // the person picked another machine meanwhile
+    if (recheck && data && d && !d.error) return seenPatch((d.registry || []).filter((r) => r.witnessed), d.witness); // Check again: the group only
     if (d && !d.error) { data = d; listError = null; }
     else if (d && d.error) {
       if (asked === 'local') showToast(d.error, { type: 'error' });
@@ -918,7 +1149,8 @@ export async function showLaunchDialog(app, opts = {}) {
   };
   filterIn.oninput = () => render();
   const recheckBtn = $('.desktop-launch-seen-recheck');
-  recheckBtn.onclick = async () => { recheckBtn.disabled = true; try { await refresh({ recheck: true }); } finally { recheckBtn.disabled = false; } };
+  recheckBtn.onclick = async () => { rechecking = true; render({ seenOnly: true }); try { await refresh({ recheck: true }); } finally { rechecking = false; if (overlay.isConnected) render({ seenOnly: true }); } }; // the spinner in the group head, the rest usable
+  $('.desktop-launch-seen-show').onclick = () => { showSystem = !showSystem; patchUserState({ [SHOW_SYSTEM_KEY]: showSystem }); render({ seenOnly: true }); };
   runBtn.onclick = () => {
     const exec = execIn.value.trim();
     if (!exec) { showToast(t('Type a command to run'), { type: 'error' }); focusQuiet(execIn); return; }
@@ -931,6 +1163,7 @@ export async function showLaunchDialog(app, opts = {}) {
 
   const off = app.ws.onGlobal((m) => { if (m.type === 'desktop-apps-updated' && overlay.isConnected) { if (data) { data.apps = m.apps; renderRunning(); } } }); // the Running rows only — never the catalog under the user's pointer
   const offApps = app.ws.onGlobal((m) => { if (m.type === 'apps-updated' && overlay.isConnected && (m.host || 'local') === host) refresh(); }); // Layer 0: an app installed / removed / put back — the catalog's rows follow
+  const offSeen = app.ws.onGlobal((m) => { if (m.type === 'desktop-apps-witness' && overlay.isConnected && (m.host || 'local') === host && Array.isArray(m.rows)) seenPatch(m.rows, m.witness); }); // lane apps-dialog-fast: the listing landed — the group only
   // ── P10 (design-agent-browser-v2 §6.6 / D27 (b)): the user's side of the
   // OTHER window class — the switch's state and, per window an agent holds on
   // their real desktop, a Pause / Resume that rides the same takeover verdicts
@@ -964,7 +1197,7 @@ export async function showLaunchDialog(app, opts = {}) {
   // lane D: a default scale chosen here, in a window's Scale ▸ or on another client re-renders the cards
   wireAppPrefs(app);
   const offPrefs = onAppPrefs(() => { if (overlay.isConnected) render(); });
-  const obs = new MutationObserver(() => { if (!overlay.isConnected) { try { off?.(); } catch {} try { offApps?.(); } catch {} try { appsSec?.dispose(); } catch {} try { offDesk?.(); } catch {} try { offPrefs?.(); } catch {} obs.disconnect(); } });
+  const obs = new MutationObserver(() => { if (!overlay.isConnected) { try { off?.(); } catch {} try { offApps?.(); } catch {} try { offSeen?.(); } catch {} try { appsSec?.dispose(); } catch {} try { offDesk?.(); } catch {} try { offPrefs?.(); } catch {} obs.disconnect(); } });
   obs.observe(document.body, { childList: true });
 
   render();
@@ -976,6 +1209,7 @@ export async function showLaunchDialog(app, opts = {}) {
   mountApps();
   const [state, first] = await Promise.all([fetchJson('/api/user-state'), refresh()]);
   if (state && Array.isArray(state[RECENTS_KEY])) { recents = state[RECENTS_KEY].slice(0, RECENTS_MAX); render(); }
+  if (state && state[SHOW_SYSTEM_KEY] === true && !showSystem) { showSystem = true; render({ seenOnly: true }); }
   setAdvanced(doc ? false : advancedOpenFor(state, !!first?.registryEmpty)); // §7.9: a document never opens "Advanced"
   setTimeout(() => {
     if (!overlay.isConnected) return;

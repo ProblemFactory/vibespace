@@ -1006,6 +1006,7 @@ const geomDoorsPin2 = (W, TG, DA, L) => [
 const GEOM_PRIMS = ['toggleMaximize', 'minimize', 'restore', 'snapToHalf', 'snapActiveToCell', 'applyLayout', '_snapToGrid', '_snapToGridRange', '_applySnap', '_positionToCell'];
 const GEOM_SELF = ['snapToHalf', 'snapActiveToCell', 'applyLayout', 'startMoveMode', 'revealWindow', 'loadPreset'];
 const GEOM_MACHINE = [
+  ['app.js', 'constructor', "lane agent-window-no-steal: an AGENT-opened window waits minimized on the taskbar while the person is mid-act (agentWindowPlacement `minimize`) — the agent's placement, never a user act, so it stamps no geometry witness"],
   ['layout.js', '_applyRemoteState', "the apply of a record — a witness here would hold another client's act for a minute (r3 ①)"],
   ['layout.js', '_createRemoteWindow', 'the apply creating a window the record lists, at its recorded state'],
   ['layout.js', 'restoreState', 'the boot / a replay restoring a record'],

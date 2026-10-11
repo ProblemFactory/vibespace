@@ -68,6 +68,7 @@ const WORDS = Object.freeze({
   wantsOne: i18nKey('{name} wants to install {app} ({size} to download)'),
   wantsRemove: i18nKey('{name} wants to remove {app}'),
   wantsSource: i18nKey('{name} wants to add the package source {app}'),
+  registers: i18nKey('{name} registered {app}: {cmd}'),
   restoreFailed: i18nKey('Some apps could not be put back after this machine was rebuilt: {apps}'),
   source: i18nKey('Apps'),
 });
@@ -214,7 +215,12 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
     const card = shown.card ? AC.cardView({ ...cardInput(p), summary: summaryOf(shown.plan), digest: shown.digest, state: 'plan' }) : null;
     return { ...shown, card, proposal: view(p) };
   }
-  async function search(host, query) {
+  async function search(host, query, { kind = null } = {}) {
+    if (kind === 'flatpak') { // lane app-register-model: the flatpak door's ids — `flatpak search --user` on that machine (≤ 5 s)
+      if (!A.searchWords(query)) throw named('bad-request', 'search for plain words (letters, digits, + . -)');
+      const r = await access.call(host, 'app-plan', { kind: 'search', query, flatpak: true });
+      return { host: host || 'local', results: [], flatpaks: r.flatpaks || [], code: r.code || null, recipes: [] };
+    }
     const recipes = R.searchRecipes(query).map(R.publicRow); // design 009: "微信" finds WeChat — the apt search takes plain words only
     if (!A.searchWords(query)) { if (recipes.length) return { host: host || 'local', results: [], code: null, recipes }; throw named('bad-request', 'search for plain words (letters, digits, + . -) or an app\'s name'); }
     const r = await access.call(host, 'app-plan', { kind: 'search', query });
@@ -302,18 +308,20 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
       const name = String(by.name || 'An agent').slice(0, 80);
       const k = shown.request.kind;
       const one = n <= 1 || fetched;
-      const text = k === 'remove' ? `${name} wants to remove ${label}` : k === 'source' ? `${name} wants to add the package source ${label}` : one ? `${name} wants to install ${label} (${size} to download)` : `${name} wants to install ${label} (${n} packages, ${size} to download)`;
+      const cmd0 = String((pl.commands || [])[0] || '').slice(0, 300);
+      const text = k === 'remove' ? `${name} wants to remove ${label}` : k === 'registered' ? `${name} registered ${label}: ${cmd0}` : k === 'source' ? `${name} wants to add the package source ${label}` : one ? `${name} wants to install ${label} (${size} to download)` : `${name} wants to install ${label} (${n} packages, ${size} to download)`;
       const lines = [];
       if (p.why) lines.push(`Why: ${p.why}`);
       if (fetched) lines.push(`From: ${card.from.host ? `${card.from.host}${card.from.recipe ? ` (${card.from.recipe}'s official download address)` : ' (VibeSpace cannot confirm who published it)'}` : `the file ${shown.request.from && shown.request.from.file}`}`, `sha256 ${shown.request.sha256}`, ...((K.kindRow(k) || {}).proposeLines ? K.kindRow(k).proposeLines(pl) : []));
-      if ((K.kindRow(k) || {}).entry === 'home') lines.push(`Download ${size}, ${sizeWords(pl.installedBytes)} on disk — unpacked in your home, nothing runs as administrator`);
+      if (k === 'registered') lines.push(...(pl.commands || []).slice(0, 12), 'Accept = it becomes an app in Apps: it runs as you (nothing as administrator); registering runs nothing by itself');
+      else if ((K.kindRow(k) || {}).entry === 'home') lines.push(`Download ${size}, ${sizeWords(pl.installedBytes)} on disk — unpacked in your home, nothing runs as administrator`);
       else if (k === 'source') lines.push(`Address: ${shown.request.source.uris.join(' ')}`, `Key fingerprint: ${(pl.sourceSpec && pl.sourceSpec.fingerprints || []).join(' ')}`);
       else if (k !== 'remove') lines.push(`Packages: ${(pl.closure || []).map((c) => c.package).slice(0, 60).join(' ')}${n > 60 ? ` … (+${n - 60})` : ''}`, `From: ${(pl.origins || []).join(', ')}`, `Download ${size}, ${sizeWords(pl.installedBytes)} on disk`);
       else lines.push(`Removes: ${(pl.removes || []).join(' ') || '(nothing else)'}`);
       try {
         const it = userTodos.add(by.sessionKey, { origin: 'apps', kind: 'action', urgency: 'normal', by: 'agent', text, detail: lines.join('\n'), sessionName: name,
           action: { type: 'app-install', id, host: p.host, kind: k }, card: cardViewOf(p),
-          i18n: { text: { key: k === 'remove' ? WORDS.wantsRemove : k === 'source' ? WORDS.wantsSource : one ? WORDS.wantsOne : WORDS.wants, params: { name, app: String(label).slice(0, 120), n, size } }, source: { key: WORDS.source } } });
+          i18n: { text: { key: k === 'remove' ? WORDS.wantsRemove : k === 'registered' ? WORDS.registers : k === 'source' ? WORDS.wantsSource : one ? WORDS.wantsOne : WORDS.wants, params: { name, app: String(label).slice(0, 120), n, size, ...(k === 'registered' ? { cmd: cmd0 } : {}) } }, source: { key: WORDS.source } } });
         p.todoId = it && it.id;
       } catch (e) { log.warn?.(`[apps] proposal ${id} not filed in For you: ${e.message}`); store.proposals = store.proposals.filter((x) => x !== p); await drop([fetched && fetched.staged, pl.app && pl.app.icon]); throw named('not_filed', `the proposal could not be shown to the user (${e.message}) — nothing was proposed`); }
     }
@@ -355,9 +363,10 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
         const hp = home.plan;
         if (!hp.ok) throw named(hp.code || 'refused', hp.error || 'the machine refused the plan', { plan: hp });
         if (expectDigest != null && home.digest !== String(expectDigest)) throw named('plan_changed', 'what would run changed after it was shown — nothing ran', { plan: hp, digest: home.digest });
-        onData(Buffer.from(`${(K.kindRow(rq.kind) || {}).entry === 'home' ? 'unpacking' : 'removing'} ${hp.label || hp.entryId} …\n`));
+        onData(Buffer.from(`${rq.kind === 'registered' ? 'registering' : (K.kindRow(rq.kind) || {}).entry === 'home' ? 'unpacking' : 'removing'} ${hp.label || hp.entryId} …\n`));
         const who = p ? { kind: 'agent', conversation: p.by.conversation, name: p.by.name } : by;
-        homeRec = (K.kindRow(rq.kind) || {}).entry === 'home'
+        homeRec = rq.kind === 'registered' ? await access.call(host, 'app-install', { kind: 'registered', entry: rq.entry, by: who, why: p ? p.why : null, session: p ? p.by.sessionId : null }) // lane app-register-model: the owner's click on a declaration
+          : (K.kindRow(rq.kind) || {}).entry === 'home'
           ? await access.call(host, 'app-install', { kind: 'appimage', staged: rq.staged, sha256: rq.sha256, entryId: hp.entryId, by: who, why: p ? p.why : null, label: p ? p.label : hp.label, from: (rq.from && (rq.from.url || rq.from.file)) || null, icon: (hp.app && hp.app.icon) || null })
           : await access.call(host, 'app-remove', { entryId: hp.entryId, home: true });
         onData(Buffer.from('done\n'));
@@ -525,10 +534,34 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
     try { const mine = deliver.stashEntries(p.by.conversation).filter((e) => e && e.ref === p.id && e.fromName === FROM_NAME && !e.ho); if (mine.length) deliver.drainStash(p.by.conversation, new Set(mine)); } catch { /* the next turn tells it */ }
   }
   /** `vibespace-app add --kind …` — a user-level tool the agent installed as the user (HELD by its CLI's card): recorded. */
-  async function recordUserKind(host, { kind, name, why = null, by }) {
-    const r = await access.call(host, 'app-install', { kind, name, why, by });
+  async function recordUserKind(host, { kind, name, why = null, by, remote = null }) {
+    const r = await access.call(host, 'app-install', { kind, name, why, by, ...(remote ? { remote } : {}) });
     bump(host);
     return r;
+  }
+  /** lane app-register-model — `vibespace-app register`: THE WITNESS-MATCH RULE decides. A declaration whose default launch the
+   *  machine already lists (outside VibeSpace) is RECORDED DIRECTLY (nothing new becomes launchable); any other is a PROPOSAL
+   *  (one For-you item, the owner's one click — `vibespace-app wait` works, a decline is final). Nothing here executes. */
+  async function register({ host = 'local', entry, why = '', by }) {
+    if (!by || by.kind !== 'agent' || !by.conversation) throw named('bad-request', 'a registration names its conversation');
+    const shown = await plan(host, { kind: 'registered', entry }, { agent: true });
+    const pl = shown.plan || {};
+    if (!pl.ok) throw named(pl.code || 'refused', pl.error || 'the machine refused the registration', { plan: pl });
+    if (pl.witnessed) {
+      const rec = await access.call(host, 'app-install', { kind: 'registered', entry, by: { kind: 'agent', conversation: by.conversation, name: by.name || null }, why: String(why || '').replace(HC.HIDDEN_RE, '').slice(0, 500), direct: true, session: by.sessionId || null });
+      bump(host);
+      log.log?.(`[apps] ${by.name || by.conversation} registered ${pl.entryId} on ${host || 'local'} (witnessed ${pl.witnessed} — recorded directly)`);
+      return { ok: true, id: `app.${rec.entry.id}`, entryId: rec.entry.id, recorded: true, waiting: false, witnessed: pl.witnessed, host: host || 'local' };
+    }
+    const p = await propose({ host, request: { kind: 'registered', entry }, why, by });
+    return { ok: true, id: `app.${pl.entryId}`, entryId: pl.entryId, proposalId: p.id, waiting: true, recorded: false, again: !!p.again, host: host || 'local' };
+  }
+  /** The OWNER's Adopt (POST /api/desktop/apps/adopt — a person's click, never an agent's): a declaration recorded at once. */
+  async function adopt(host, entry) {
+    const rec = await access.call(host, 'app-install', { kind: 'registered', entry, by: { kind: 'user' }, why: 'installed outside VibeSpace, adopted' });
+    lastStatus.delete(host || 'local');
+    bump(host);
+    return rec;
   }
   /** An agent's own proposals (its conversation's). */
   function proposalsOf(conversation) { return store.proposals.filter((p) => p.by && p.by.conversation === conversation).map((p) => ({ ...view(p), text: outcomeText(p) })); }
@@ -614,7 +647,7 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
 
   /** The staged icon of a proposal (the card's picture before anything is installed) → {host, name} | null. */
   const proposalIcon = (id) => { const p = get(id); const n = p && p.card && p.card.app && p.card.app.icon; return n && !TERMINAL.has(p.state) ? { host: p.host, name: n } : null; };
-  return { plan, planProposal, search, status, propose, recordUserKind, run, approve, card: (id) => { const p = get(id); return p ? cardViewOf(p) : null; }, reject, withdraw, sweep, proposalIcon, wait, proposalsOf, get: (id) => { const p = get(id); return p ? view(p) : null; }, outcomeText: (id) => { const p = get(id); return p ? outcomeText(p) : null; }, afterListen, decorate, isReplaying, addHelper, dropHelper, helperIds, helpers: () => store.helpers.slice(), planner, storeFile: file };
+  return { plan, planProposal, search, status, propose, register, adopt, recordUserKind, run, approve, card: (id) => { const p = get(id); return p ? cardViewOf(p) : null; }, reject, withdraw, sweep, proposalIcon, wait, proposalsOf, get: (id) => { const p = get(id); return p ? view(p) : null; }, outcomeText: (id) => { const p = get(id); return p ? outcomeText(p) : null; }, afterListen, decorate, isReplaying, addHelper, dropHelper, helperIds, helpers: () => store.helpers.slice(), planner, storeFile: file };
 }
 
 module.exports = { create, normRequest, recordOf, whatOf, SYS_REQUEST_KINDS, STORE_FILE, FROM_NAME, INBOX_KEY, WAIT_MAX_MS, PROPOSAL_STATES, REQUEST_KINDS, AGENT_KINDS, EXPIRE_MS, WORDS };

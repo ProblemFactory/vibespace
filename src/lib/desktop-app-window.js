@@ -163,6 +163,7 @@ import { paneState } from '../desktop-viewers.js';
 import { exitCloseVerdict, outerCloseVerdict, OUTER_CLOSE_AGAIN_MS, scaleKnobs, scaleMenuModel, renderOf, relaunchPaneCss, relaunchVerdict } from '../desktop-fit.js';
 import { memoryText } from '../runaway-guard.js';
 import { launchDpr, launchUiScale, explicitScaleLabel, stopDesktopApp, confirmDiscard, agentBrowserText } from './desktop-app-launcher.js';
+import { satelliteFocus, agentOpenedRecord } from './desktop-app-placement.js';
 import { startCenterVerdict } from '../office-open.js'; // B-04da ⑤ (PURE)
 import { PIN_CHOICES, pinOf, pinChipText } from '../desktop-pin.js'; // lane e2b (§E2.2): the pinned pixel size (PURE)
 import { UI_ICONS } from './icons.js';
@@ -368,16 +369,17 @@ function announceMainView(id, entry) {
 }
 const mainWindowOf = (app, id) => [...app.wm.windows.values()].find((w) => w._desktopAppId === id && !w._desktopSatelliteWid) || null;
 
-export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain } = {}) {
+export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain, quiet = false } = {}) {
   if (typeof id !== 'string' || !id) return null;
   if (Number.isInteger(wid) && wid > 0) return openSatelliteWindow(app, id, wid, { syncId, title }); // S2: a satellite (a replay / another client)
   for (const [winId, win] of app.wm.windows) {
-    if (win._desktopAppId === id && !win._desktopSatelliteWid) { app.wm.revealWindow(winId, { replay: !!syncId }); return win; }
+    if (win._desktopAppId === id && !win._desktopSatelliteWid) { if (!quiet) app.wm.revealWindow(winId, { replay: !!syncId }); return win; } // quiet (an agent's open): it stays where it is
   }
   app._hideWelcome();
   const winInfo = app.wm.createWindow({
     title: t('Desktop app'), type: 'desktop-app', syncId, width: 900, height: 620,
     openSpec: { action: 'openDesktopApp', id }, ...(intoChain ? { intoChain } : {}), // lane e2a: the agent's browser beside its chat (app.linkPlacement)
+    ...(quiet ? { quiet: true } : {}), // lane agent-window-no-steal: an agent's open never takes the focus (createWindow's asked quiet)
   });
   winInfo._desktopAppId = id;
   // round 3 A2: unseen until the first record answers — a dead record (a layout replay) closes it before it ever paints
@@ -454,6 +456,7 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
     labels: { starting: t('Starting application…'), unavailable: t('Desktop app unavailable') },
     before: readyGate, autoReconnect: true,
     onStatus: (s) => { viewConnected = s === 'connected'; if (s === 'connected') applyViewOnly(); applySeamless(); },
+    mayFocus: () => app.wm.activeWindowId === winInfo.id, // lane agent-window-no-steal: a picture that connects behind the person's work never takes the caret
   });
   const setAppIcon = (dataUrl) => {
     if (!dataUrl || !/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(dataUrl)) return;
@@ -468,7 +471,7 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
   const ensureView = (kind) => {
     if (view) return view;
     // ONE call for every kind: each view reads the options it knows (the RFB view none of the protocol window's callbacks)
-    view = viewOf(kind)(winInfo.content, { ...viewOpts(), workerUrl: `/api/desktop/${encodeURIComponent(id)}/xpra-ui/js/Protocol.js`, onTitle: (text) => { appTitle = String(text || ''); render(); }, onIcon: setAppIcon, onMinSize: applyMinSize, onFixedSize: applyFixedSize, fixedFollows: () => !app.wm._mobileLayout(), onFront: (f) => { front = f && !f.main ? { wid: f.wid, title: String(f.title || '') } : null; render(); }, onSatellite: ({ wid, title }) => { openSatelliteWindow(app, id, wid, { title, beside: winInfo, fresh: true }); }, onMain: onAppMain, onState: onAppState, onMoveResize: onAppMoveResize, dpi: () => (rec && Number.isInteger(rec.dpi) ? rec.dpi : 96), pictureScale: () => renderOf(rec).picture }) // lane D (a): the RECORD says what it was drawn at;
+    view = viewOf(kind)(winInfo.content, { ...viewOpts(), workerUrl: `/api/desktop/${encodeURIComponent(id)}/xpra-ui/js/Protocol.js`, onTitle: (text) => { appTitle = String(text || ''); render(); }, onIcon: setAppIcon, onMinSize: applyMinSize, onFixedSize: applyFixedSize, fixedFollows: () => !app.wm._mobileLayout(), onFront: (f) => { front = f && !f.main ? { wid: f.wid, title: String(f.title || '') } : null; render(); }, onSatellite: ({ wid, title }) => { openSatelliteWindow(app, id, wid, { title, beside: winInfo, fresh: true, quiet: !satelliteFocus({ agentOpened: agentOpenedRecord(rec), mainActive: app.wm.activeWindowId === winInfo.id, front: app.settings?.get('desktop.agentWindowsFront') === true }).focus }); }, onMain: onAppMain, onState: onAppState, onMoveResize: onAppMoveResize, dpi: () => (rec && Number.isInteger(rec.dpi) ? rec.dpi : 96), pictureScale: () => renderOf(rec).picture }) // lane D (a): the RECORD says what it was drawn at;
     view.mount.classList.add('desktop-app-mount');
     winInfo._desktopAppView = view; // the raw handle the heavy suite reads (never the DOM)
     if (cap(rec, 'satellites')) announceMainView(id, { view, winInfo }); // S2: satellites replayed before this view bind to it now
@@ -1103,8 +1106,10 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
  * never a socket. Raw handles the heavy suite reads: _desktopSatellite (the pane handle), _desktopSatelliteWid,
  * _desktopSatelliteGone (why it closed itself), _desktopSeamless, _desktopCloseVerdict, _desktopMinPane / _desktopFixedPane.
  */
-function openSatelliteWindow(app, id, wid, { syncId, title = '', beside = null, fresh = false } = {}) {
-  const inFront = (w) => { if (fresh) app.wm.revealWindow(w.id); return w; }; // a window the app just opened comes to the front (on a phone: the shown window)
+function openSatelliteWindow(app, id, wid, { syncId, title = '', beside = null, fresh = false, quiet = false } = {}) {
+  // a window the app just opened comes to the front (on a phone: the shown window) — unless `quiet` (lane agent-window-no-steal
+  // rule 3: an agent-opened app's new top-level is placed beside its main pane, under the active window, its taskbar entry pulsing)
+  const inFront = (w) => { if (fresh && !quiet) app.wm.revealWindow(w.id); else if (fresh) { app.wm.placeBehind(w.id); app.wm.markArrived(w.id); } return w; };
   for (const w of app.wm.windows.values()) if (w._desktopAppId === id && w._desktopSatelliteWid === wid) return inFront(w);
   const main = beside || mainWindowOf(app, id);
   const entry0 = mainViews.get(id), c0 = entry0 && entry0.view.client, r0 = entry0 ? entry0.view.ratio : 1;
@@ -1113,7 +1118,7 @@ function openSatelliteWindow(app, id, wid, { syncId, title = '', beside = null, 
   const paneCss = x0 ? { w: Math.max(Math.ceil(x0.w / r0 - 1e-9), m0 ? m0.w : 0), h: Math.max(Math.ceil(x0.h / r0 - 1e-9), m0 ? m0.h : 0) } : { w: 640, h: 480 };
   const ws = app.wm.workspace, key = main && typeof main._desktopAppKey === 'function' ? main._desktopAppKey() : null;
   const at = !syncId && main && ws ? satellitePlacement({ x: main.element.offsetLeft, y: main.element.offsetTop, w: main.element.offsetWidth, h: main.element.offsetHeight }, { w: paneCss.w, h: paneCss.h + 32 }, { w: ws.clientWidth, h: ws.clientHeight }, key ? appPrefs(SATELLITE_PREF_KEY)[key] : null) : null;
-  const winInfo = app.wm.createWindow({ title: title || t('Desktop app'), type: 'desktop-app', syncId, width: paneCss.w, height: paneCss.h + 32, ...(at || {}), openSpec: { action: 'openDesktopApp', id, wid, title: String(title || '') } });
+  const winInfo = app.wm.createWindow({ title: title || t('Desktop app'), type: 'desktop-app', syncId, width: paneCss.w, height: paneCss.h + 32, ...(at || {}), openSpec: { action: 'openDesktopApp', id, wid, title: String(title || '') }, ...(quiet ? { quiet: true } : {}) });
   winInfo._desktopAppId = id;
   winInfo._desktopSatelliteWid = wid;
   const lsig = winInfo._listenerCtl?.signal;
@@ -1226,7 +1231,7 @@ function openSatelliteWindow(app, id, wid, { syncId, title = '', beside = null, 
     handle = entry.view.attachSatellite(mount, wid, cb);
     winInfo._desktopSatellite = handle; // the raw handle the heavy suite reads
     render();
-    if (fresh) handle.focus();
+    if (fresh && !quiet) handle.focus();
   };
   const waiters = viewWaiters.get(id) || viewWaiters.set(id, new Set()).get(id);
   let lonely = null;

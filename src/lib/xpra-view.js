@@ -144,7 +144,7 @@ export function startingText(ms) {
  * Returns { container, bar, mount, pane, status, connect, disconnect, setStatus, addControl,
  *           focus, dispose, setViewOnly, get client, get state, get wanted, windows() }.
  */
-export function createXpraView(host, { url, workerUrl, before = null, labels = {}, autoReconnect = false, onStatus = null, onTitle = null, onIcon = null, onMinSize = null, onMain = null, onState = null, onMoveResize = null, onFixedSize = null, onFront = null, onSatellite = null, fixedFollows = () => true, dpi = 96, pixelRatio = () => (typeof devicePixelRatio === 'number' ? devicePixelRatio : 1), pictureScale = () => 1, Worker: WorkerCtor = undefined, decode = defaultDecode, now = undefined, secure = null, clipboardApi = null, log = console } = {}) {
+export function createXpraView(host, { url, workerUrl, before = null, labels = {}, autoReconnect = false, onStatus = null, onTitle = null, onIcon = null, onMinSize = null, onMain = null, onState = null, onMoveResize = null, onFixedSize = null, onFront = null, onSatellite = null, mayFocus = () => true, fixedFollows = () => true, dpi = 96, pixelRatio = () => (typeof devicePixelRatio === 'number' ? devicePixelRatio : 1), pictureScale = () => 1, Worker: WorkerCtor = undefined, decode = defaultDecode, now = undefined, secure = null, clipboardApi = null, log = console } = {}) {
   const shell = createPictureShell(host, { labels: { starting: t('Starting application…'), unavailable: t('Desktop app unavailable'), ...labels }, autoReconnect, onStatus, background: 'var(--bg-primary)', focus: () => focus() });
   const { container, bar, mount, status, pasteBtn, reBtn, labels: L, setStatus, addControl, emit } = shell;
 
@@ -569,7 +569,7 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
       on: {
         status: (st, detail) => {
           if (shell.closed) return;
-          if (st === 'connected') { shell.resetLadder(); waitWords(t('Waiting for the application window…')); emit('connected', detail); ime.focus({ preventScroll: true }); listWait(); return; }
+          if (st === 'connected') { shell.resetLadder(); waitWords(t('Waiting for the application window…')); emit('connected', detail); if (mayFocus()) ime.focus({ preventScroll: true }); listWait(); return; }
           if (st === 'closed') {
             const reason = detail && detail !== 'closed by the window' ? String(detail) : '';
             const ours = detail === 'closed by the window';

@@ -11,6 +11,8 @@
 //   §5 the registry (src/desktop-serve.js): witnessed rows beside the engine's, a gone program stays listed and says so,
 //      the launch door accepts a witnessed row by id
 //   §6 THE PLACE WORDS: the door's card and the helper's outcome name the machine (en / zh / ja)
+//   §7 lane apps-dialog-fast: the scope rule (outside the base, never the distro), `dpkg -S`, openAnswer, an open that
+//      never waits for a slow walk + the push when it lands, Check again waits, tookMs/scope in the file, the status line
 // Run: node scripts/test-apps-witness.mjs
 import fs from 'node:fs';
 import os from 'node:os';
@@ -104,15 +106,16 @@ execFileSync('mkfifo', [path.join(dirs.user, 'zz-fifo.desktop')]);
 const calls = [];
 const runner = async (cmd, args, o) => { calls.push([cmd, ...args].join(' ')); if (cmd !== 'flatpak') return { code: 127, stdout: '', stderr: 'no' }; return args.includes('--user') ? { code: 0, stdout: `${JASP_LINE}\n`, stderr: '' } : { code: 0, stdout: '', stderr: '' }; };
 let clock = 2_000_000_000_000;
-const apps = AS.create({ home: path.join(tmp, 'home'), stateDir: path.join(tmp, 'data'), env: { PATH: '/usr/bin:/bin', HOME: path.join(tmp, 'home') }, log: { warn() { }, info() { } }, runner, now: () => clock, witnessDirs: dirs });
+const apps = AS.create({ home: path.join(tmp, 'home'), stateDir: path.join(tmp, 'data'), env: { PATH: '/usr/bin:/bin', HOME: path.join(tmp, 'home') }, log: { warn() { }, info() { } }, runner, now: () => clock, witnessDirs: dirs, markerDir: path.join(tmp, 'no-base') });
 fs.mkdirSync(path.join(tmp, 'data'), { recursive: true });
 {
   const t0 = Date.now();
-  const v = await apps.refreshWitness({ reason: 'open' });
+  await apps.refreshWitness({ reason: 'open' }); await apps.witnessSettled(); // lane apps-dialog-fast: an open never waits — the listing settles on its own
+  const v = apps.witnessView();
   const ms = Date.now() - t0;
   const rows = apps.witnessRows();
-  ok(v.count === 3 && v.flatpak === true && rows.map((r) => r.label).join('|') === 'JASP|Notes|Calculator', 'the first open lists JASP (the user flatpak) + the two desktop entries — the user\'s own first (NoDisplay, a broken file, a FIFO skipped)', { v, rows: rows.map((r) => r.id) });
-  ok(ms < W.WITNESS_BUDGET_MS && calls.filter((c) => c.startsWith('flatpak list --app')).length === 2 && calls.every((c) => !/install|uninstall|update/.test(c)), `inside the budget (${ms} ms) — two read-only \`flatpak list\` children, nothing else`, calls);
+  ok(v.count === 2 && v.hidden === 1 && v.flatpak === true && rows.map((r) => r.label).join('|') === 'JASP|Notes|Calculator', 'the first open lists JASP (the user flatpak) + the two desktop entries — the user\'s own first (NoDisplay, a broken file, a FIFO skipped)', { v, rows: rows.map((r) => r.id) });
+  ok(ms < W.WITNESS_BUDGET_MS && calls.filter((c) => c.startsWith('flatpak list --app')).length === 2 && calls.filter((c) => !c.startsWith('flatpak list --app')).length === 1 && calls.some((c) => /^dpkg -S .*\/calc\.desktop/.test(c)) && calls.every((c) => !/install|uninstall|update/.test(c)), `inside the budget (${ms} ms) — two read-only \`flatpak list\` children + ONE \`dpkg -S\` over the system entries, nothing else`, calls);
   const file = JSON.parse(fs.readFileSync(path.join(tmp, 'data', W.WITNESS_FILE), 'utf8'));
   ok(file.rows.length === 3 && file.listedAt === clock && typeof file.sig === 'string', `cached in data/${W.WITNESS_FILE} with listedAt + the directories' signature`);
   const n0 = calls.length;
@@ -120,13 +123,13 @@ fs.mkdirSync(path.join(tmp, 'data'), { recursive: true });
   ok(calls.length === n0, 'a second open a minute later lists nothing (fresh, nothing changed)', calls.slice(n0));
   fs.mkdirSync(path.join(dirs.flatpakUser, 'org.example.New'));
   await new Promise((r) => setTimeout(r, 15));
-  clock += 1000; await apps.refreshWitness({ reason: 'open' });
-  ok(calls.length === n0 + 2, 'a new flatpak directory (an install around the door) re-lists at the next open', calls.slice(n0));
+  clock += 1000; await apps.refreshWitness({ reason: 'open' }); await apps.witnessSettled();
+  ok(calls.length === n0 + 3, 'a new flatpak directory (an install around the door) re-lists at the next open', calls.slice(n0));
   const n1 = calls.length; await apps.refreshWitness({ reason: 'recheck' });
-  ok(calls.length === n1 + 2, 'Check again re-lists at once');
+  ok(calls.length === n1 + 3, 'Check again re-lists at once');
   const apps2 = AS.create({ home: path.join(tmp, 'home'), stateDir: path.join(tmp, 'data'), env: {}, log: { warn() { } }, runner: async () => { throw new Error('must not run'); }, now: () => clock, witnessDirs: dirs });
   const v2 = await apps2.refreshWitness({ reason: 'open' });
-  ok(v2.count === 3 && apps2.witnessRows().length === 3, 'a restarted machine half serves the file\'s list (fresh: no child)', v2);
+  ok(v2.count === 2 && v2.hidden === 1 && apps2.witnessRows().length === 3, 'a restarted machine half serves the file\'s list (fresh: no child)', v2);
   const r = await AS.runAppOp({ ...apps, plan: async () => ({}), recordUserKind: async () => ({ entry: { id: 'x' } }), refreshWitness: async (o) => { calls.push(`refresh:${o.reason}`); return apps.refreshWitness(o); } }, 'app-install', { kind: 'uv-tool', name: 'x', why: 'w', by: 'user' });
   await new Promise((r2) => setTimeout(r2, 5));
   ok(r.ok && calls.includes('refresh:install'), 'an install through the door re-lists what is installed (runAppOp)', r);
@@ -162,6 +165,89 @@ console.log('§6 the place words');
   const src = fs.readFileSync(new URL('../src/server/apps-engine.js', import.meta.url), 'utf8');
   ok(/is done on \$\{placeOf\(p\.host\)\}/.test(src) && /It landed on \$\{placeOf\(p\.host\)\}/.test(src), 'the helper\'s outcome (the agent\'s sentence) names the place through the same words');
   for (const k of ['Installed outside VibeSpace ({n})', 'Flatpak · yours', 'Desktop entry · yours', 'Its program is gone: {cmd}', 'Filter apps', 'Installed on {place}', 'this VibeSpace machine ({name})']) ok(zh[k] && ja[k], `zh + ja: ${k}`);
+}
+
+console.log('§7 lane apps-dialog-fast — the open never waits; "outside the door" = outside the base, never the distro');
+{
+  // the PURE scope rule
+  const sys = (n, ex) => ({ path: `/usr/share/applications/${n}.desktop`, scope: 'system', text: de({ Name: n, Exec: ex || n }) });
+  const fx = { flatpaks: [...W.parseFlatpakList(JASP_LINE, { scope: 'user' }), ...W.parseFlatpakList('org.inkscape.Inkscape\tInkscape\t1.4', { scope: 'system' })],
+    desktops: [sys('gedit'), sys('mytool'), sys('orphan'), { path: '/h/.local/share/applications/notes.desktop', scope: 'user', text: de({ Name: 'Notes', Exec: 'notes' }) }], validate: M.validateAppRow, ...P,
+    owners: { '/usr/share/applications/gedit.desktop': 'gedit', '/usr/share/applications/mytool.desktop': 'mytool' } };
+  const shown = (rows) => rows.filter((r) => !r.distro).map((r) => r.label).join('|'), hid = (rows) => rows.filter((r) => r.distro).map((r) => r.label).join('|');
+  const withBase = W.witnessRows({ ...fx, drift: ['mytool'] });
+  ok(shown(withBase) === 'JASP|Notes|Inkscape|mytool' && hid(withBase) === 'gedit|orphan', 'with a base: the user\'s rows always, a system flatpak always, a system entry only when its package is in the drift set — the distro\'s (and an unowned one) flagged distro, ranked last', withBase.map((r) => [r.label, r.source, !!r.distro]));
+  const noBase = W.witnessRows({ ...fx, drift: null });
+  ok(shown(noBase) === 'JASP|Notes|Inkscape' && hid(noBase) === 'gedit|mytool|orphan', 'no base on this machine: every system entry hidden (the count kept), the user\'s rows + the system flatpak listed', noBase.map((r) => [r.label, !!r.distro]));
+  const RED = (o) => W.witnessRows({ ...o, drift: undefined, owners: undefined }); // the pre-lane rule: no scope
+  ok(hid(RED(fx)) === 'gedit|mytool|orphan', 'RED CONTROL: without a base the distro\'s rows are caught as hidden (not silently listed)');
+  ok(JSON.stringify(W.witnessScope(withBase)) === JSON.stringify({ distro: 2, 'flatpak-user': 1, 'flatpak-system': 1, 'desktop-user': 1, 'desktop-system': 1 }), 'witnessScope: the per-source counts + the distro\'s', W.witnessScope(withBase));
+  const own = W.parseDpkgSearch('apport-gtk: /usr/share/applications/apport-gtk.desktop\nlibreoffice-core:amd64, libreoffice-common: /usr/share/applications/x.desktop\ndiversion by foo from: /usr/share/applications/d.desktop\ndpkg-query: no path found matching pattern /z.desktop\ngarbage\n');
+  ok(JSON.stringify(own) === JSON.stringify({ '/usr/share/applications/apport-gtk.desktop': 'apport-gtk', '/usr/share/applications/x.desktop': 'libreoffice-core' }), 'dpkg -S: the first owner (arch stripped); a diversion, a miss and garbage skipped', own);
+  // THE OPEN'S VERDICT
+  const all = [];
+  for (const due of [false, true]) for (const inFlight of [false, true]) all.push({ due, inFlight, ...W.openAnswer({ cache: { rows: [1] }, due, inFlight }) });
+  ok(all.every((a) => a.wait === false && a.answer.rows[0] === 1 && a.refresh === (a.due && !a.inFlight)), 'openAnswer: the answer is the cache, refresh = due && !inFlight, NEVER a wait (all four cases)', all);
+  // the machine half: a SLOW walk (the stub answers after 600 ms) — the open answers at once, the listing lands later and is pushed
+  const t7 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-witness7-'));
+  const d7 = { user: path.join(t7, 'user'), system: path.join(t7, 'sys'), flatpakUser: path.join(t7, 'fu'), flatpakSystem: path.join(t7, 'fs') };
+  for (const d of Object.values(d7)) fs.mkdirSync(d, { recursive: true });
+  fs.writeFileSync(path.join(d7.system, 'gedit.desktop'), de({ Name: 'Text Editor', Exec: 'gedit' }));
+  fs.writeFileSync(path.join(d7.system, 'mytool.desktop'), de({ Name: 'My Tool', Exec: 'mytool' }));
+  // a base: last-dpkg.list (coreutils, gedit) + slot-ended, then dpkg ran outside (mytool added) — the drift set = {mytool}
+  const mk = path.join(t7, 'markers'); fs.mkdirSync(mk);
+  const dpkgStatus = path.join(t7, 'status');
+  fs.writeFileSync(dpkgStatus, ['coreutils', 'gedit', 'mytool'].map((p) => `Package: ${p}\nStatus: install ok installed\nArchitecture: amd64\nVersion: 1.0\n`).join('\n'));
+  fs.writeFileSync(path.join(mk, 'last-dpkg.list'), 'coreutils:amd64 1.0\ngedit:amd64 1.0\n');
+  fs.writeFileSync(path.join(mk, 'slot-ended'), '');
+  const old = new Date(Date.now() - 3600e3); fs.utimesSync(path.join(mk, 'slot-ended'), old, old); fs.utimesSync(path.join(mk, 'last-dpkg.list'), old, old);
+  fs.writeFileSync(path.join(mk, 'dpkg-touched'), '');
+  fs.chmodSync(mk, 0o755); for (const f of fs.readdirSync(mk)) fs.chmodSync(path.join(mk, f), 0o644); // readRootFile: never group/other-writable
+  const c7 = [];
+  let slow = 600;
+  const run7 = async (cmd, args) => { c7.push(`${cmd} ${args[0]}`); if (cmd === 'flatpak') { await new Promise((r) => setTimeout(r, slow)); return args.includes('--user') ? { code: 0, stdout: `${JASP_LINE}\n`, stderr: '' } : { code: 0, stdout: '', stderr: '' }; }
+    if (cmd === 'dpkg') return { code: 0, stdout: args.slice(1).map((p) => `${p.endsWith('mytool.desktop') ? 'mytool' : 'gedit'}: ${p}`).join('\n'), stderr: '' }; return { code: 127, stdout: '', stderr: '' }; };
+  const a7 = AS.create({ home: path.join(t7, 'home'), stateDir: path.join(t7, 'data'), env: { PATH: '/usr/bin:/bin' }, log: { warn() { }, info() { } }, runner: run7, witnessDirs: d7, markerDir: mk, dpkgStatus, rootUid: process.getuid() });
+  fs.mkdirSync(path.join(t7, 'data'), { recursive: true });
+  const pushed = [];
+  a7.onWitness((v) => pushed.push(v));
+  let t0 = Date.now();
+  const v0 = await a7.refreshWitness({ reason: 'open' });
+  const openMs = Date.now() - t0;
+  ok(openMs < 100 && v0.listing === true && v0.count === 0 && pushed.length === 0, `a due open with a 600 ms walk answers in ${openMs} ms — the last list (nothing yet), "listing…", nothing pushed yet`, v0);
+  await a7.refreshWitness({ reason: 'open' });
+  ok(c7.filter((c) => c.startsWith('flatpak')).length <= 2, 'a second open while the walk runs starts no second walk', c7);
+  await a7.witnessSettled(); await new Promise((r) => setTimeout(r, 5));
+  const v1 = a7.witnessView(), r1 = a7.witnessRows();
+  ok(pushed.length === 1 && pushed[0].listing === false && pushed[0].changed === true && pushed[0].count === 2 && pushed[0].hidden === 1, 'the walk LANDS and is pushed once — listing over, changed, 2 listed + 1 hidden', pushed);
+  ok(r1.filter((r) => !r.distro).map((r) => r.label).join('|') === 'JASP|My Tool' && r1.find((r) => r.label === 'Text Editor')?.distro === true, 'with the base: My Tool (its package installed after the base) listed, the distro\'s Text Editor hidden', r1.map((r) => [r.label, !!r.distro]));
+  const file7 = JSON.parse(fs.readFileSync(path.join(t7, 'data', W.WITNESS_FILE), 'utf8'));
+  ok(Number.isFinite(file7.tookMs) && file7.tookMs >= 500 && file7.scope && file7.scope.distro === 1 && file7.scope['flatpak-user'] === 1 && file7.scope['desktop-system'] === 1 && file7.scope.base === true && file7.changed === undefined, `the cache file keeps tookMs (${file7.tookMs} ms) + the scope counts (why a list is long)`, { tookMs: file7.tookMs, scope: file7.scope });
+  slow = 300; t0 = Date.now();
+  const vr = await a7.refreshWitness({ reason: 'recheck' });
+  const reMs = Date.now() - t0;
+  await new Promise((r) => setTimeout(r, 5));
+  ok(reMs >= 280 && vr.listing === false && pushed.length === 2 && pushed[1].changed === false, `Check again WAITS for its walk (${reMs} ms — the person asked); an unchanged landing still ends "listing…" (pushed, changed:false)`, { reMs, vr, p: pushed[1] });
+  // the push reaches the hub as the registry's own decorated rows (desktop-serve hooks.onWitness → the keeper's broadcast)
+  const DS = require('../src/desktop-serve.js');
+  const hooked = [];
+  const ds7 = DS.install({ dataDir: path.join(t7, 'ds'), env: { PATH: '/usr/bin:/bin', HOME: path.join(t7, 'home') }, apps: a7, hooks: { onWitness: (w) => hooked.push(w) }, log: { warn() { }, info() { }, log() { } } });
+  try {
+    fs.writeFileSync(path.join(d7.user, 'notes.desktop'), de({ Name: 'Notes', Exec: 'notes-app' }));
+    slow = 50; await a7.refreshWitness({ reason: 'recheck' });
+    for (let i = 0; i < 200 && !hooked.length; i++) await new Promise((r) => setTimeout(r, 25)); // the machine's facts first (cached after)
+    const h = hooked[hooked.length - 1];
+    ok(h && h.witness.changed === true && h.rows.some((r) => r.label === 'Notes' && r.witnessed && r.available === false && r.reasonCode === 'exec-gone') && h.rows.length === 4, 'desktop-serve pushes the landing through hooks.onWitness — the registry\'s witnessed rows, decorated (available / reasonCode)', h && h.rows.map((r) => [r.label, r.available]));
+    const ksrc = fs.readFileSync(new URL('../src/server/desktop-app-keeper.js', import.meta.url), 'utf8');
+    ok(/onWitness: notifyWitness/.test(ksrc) && /type: 'desktop-apps-witness', host: 'local', witness, rows/.test(ksrc), 'the keeper turns it into ONE desktop-apps-witness broadcast {host, witness, rows}');
+  } finally { try { await ds7.shutdown?.(); } catch { } }
+  // vibespace-app status follows the same rule (the machine's app-status op + the CLI line)
+  let st = null;
+  try { st = await AS.runAppOp({ plan: async () => ({}), status: async () => ({ drift: { drift: false } }), refreshWitness: a7.refreshWitness, witnessRows: a7.witnessRows }, 'app-status', {}); } catch (e) { st = { error: e.message }; }
+  ok(st && st.ok && JSON.stringify(st.status.outside) === JSON.stringify(['JASP (flatpak-user)', 'Notes (desktop-user)', 'My Tool (desktop-system)']), 'app-status carries the apps the group lists (the distro\'s Text Editor not)', st);
+  const cli = fs.readFileSync(new URL('../data/bin/vibespace-app', import.meta.url), 'utf8');
+  ok(/\(j\.outside \|\| \[\]\)\.length\) lines\.push\(`Apps installed OUTSIDE VibeSpace/.test(cli), 'vibespace-app status prints that list on its OUTSIDE line');
+  fs.rmSync(t7, { recursive: true, force: true });
 }
 
 fs.rmSync(tmp, { recursive: true, force: true });

@@ -1613,6 +1613,92 @@ console.log('§4 the engine over a fake keeper + the routes');
   stub.close();
 }
 
+// ── lane window-dialog-member (owner 2026-10-11: JASP's Open dialog was in the tree, not in the screenshot) ──────────
+// MEASURED on a scratch xpra 6.5.4 (scripts/fixtures/window-dialog/*.tree.txt, captured): xwininfo prints a parent's
+// children TOPMOST FIRST; a dialog mapped while no viewer is attached sits in an UNMAPPED corral (`frame`).
+console.log('§DLG an app\'s dialog is part of its window — the plan, the snapshot, type / key');
+{
+  const R = require('../src/window-reach.js');
+  const DD = require('../src/desktop-display.js');
+  const FXD = path.join(path.dirname(new URL(import.meta.url).pathname), 'fixtures', 'window-dialog');
+  const parse = (f) => DD.seamlessWindows(DD.parseWininfoTree(fs.readFileSync(path.join(FXD, f), 'utf8'))).map((w) => ({ id: w.id, title: w.name, cls: w.cls, instance: w.instance, x: w.x, y: w.y, w: w.w, h: w.h, depth: w.depth, ...(w.frame ? { frame: w.frame } : {}) }));
+  // the measured viewable sets: shown = dialog + main mapped; unshown = only the main (the dialog's corral never mapped)
+  const shown = parse('xpra-gtk-open-shown.tree.txt').map((w) => ({ ...w, mapped: w.id === 0x400384 || w.id === 0x400004 }));
+  const unshown = parse('xpra-gtk-open-unshown.tree.txt').map((w) => ({ ...w, mapped: w.id === 0x400004 }));
+  const dlgRow = shown.find((w) => w.title === 'Open'), mainRow = shown.find((w) => w.title === 'vs dialog fixture');
+  ok(dlgRow && mainRow && shown.indexOf(dlgRow) < shown.indexOf(mainRow) && dlgRow.frame === 0x20000c, 'fixture: the captured tree lists the dialog (on top) BEFORE its main window, the dialog inside corral 0x20000c', shown);
+  const pS = R.pixelPlan(shown);
+  ok(pS.members.length === 2 && pS.members[pS.members.length - 1].id === 0x400384 && pS.members[0].id === 0x400004, 'pixelPlan composes bottom→top: the main window first, its dialog LAST (drawn over it)', pS.members);
+  const pU = R.pixelPlan(unshown);
+  ok(pU.members.length === 1 && pU.visible === true, 'unshown: the plan holds the main only (the owner\'s audit: windows 1)', pU);
+  ok(JSON.stringify(R.unshownFrames(unshown)) === JSON.stringify([0x20000c]) && R.unshownFrames(shown).length === 0, 'unshownFrames names the dialog\'s corral while the main is mapped — none once it is shown', R.unshownFrames(unshown));
+  ok(R.unshownFrames(unshown.map((w) => ({ ...w, mapped: false }))).length === 0, 'unshownFrames maps nothing while the MAIN is unmapped too (no viewer ever showed the app ⇒ window_not_visible, unchanged)');
+  // a dialog LEFT of / ABOVE its main: the union's top-left is the origin; --at maps back through it
+  const lu = [{ id: 2, title: 'Dlg', cls: 'a', x: 40, y: 10, w: 200, h: 100, mapped: true }, { id: 1, title: 'Main', cls: 'a', x: 100, y: 50, w: 400, h: 300, mapped: true }];
+  const pL = R.pixelPlan(lu);
+  ok(pL.origin.x === 40 && pL.origin.y === 10 && pL.w === 460 && pL.h === 340 && pL.members.map((m) => m.id).join() === '1,2', 'a dialog left of / above the main: origin = the union\'s top-left (40,10), 460x340, the dialog drawn last', pL);
+  const mp = R.mapPoint(pL, { x: 5, y: 5 });
+  ok(mp.ok && mp.x === 45 && mp.y === 15, '--at 5,5 of that image is display 45,15 (a pixel over the dialog lands on the dialog)', mp);
+  const pPin = R.pixelPlan(lu, { pin: { w: 400, h: 300 } });
+  ok(pPin.origin.x === 100 && pPin.w === 400 && pPin.h === 300, 'a PINNED window keeps the pin\'s box at the main\'s origin (lane e2b, unchanged)', pPin);
+  ok(R.pixelPlan([{ id: 1, title: 'M', cls: 'a', x: 0, y: 0, w: 300, h: 200, mapped: true }, { id: 3, title: 'off', cls: 'a', x: -100, y: -100, w: 50, h: 50, mapped: true }]).origin.x === 0, 'a member left of the DISPLAY never moves the origin below 0');
+  // windowOfNode: the tree's dialog node → its X window (GTK 3: the bounds ARE the X geometry — measured)
+  ok(R.windowOfNode({ bounds: { x: 0, y: 0, w: 1096, h: 822 } }, pS.members)?.id === 0x400384 && R.windowOfNode({ bounds: { x: 62, y: 0, w: 640, h: 480 } }, [{ id: 1, x: 0, y: 0, w: 785, h: 486 }, { id: 9, x: 62, y: 0, w: 640, h: 480 }])?.id === 9, 'windowOfNode: equal size ⇒ that window (the owner\'s JASP shape 640x480 at 62,0 over 785x486)');
+  ok(R.windowOfNode({ bounds: { x: 100, y: 100, w: 30, h: 30 } }, [{ id: 1, x: 0, y: 0, w: 785, h: 486 }, { id: 9, x: 62, y: 0, w: 640, h: 480 }])?.id === 9 && R.windowOfNode({ bounds: { x: -2147483648, y: -2147483648, w: 1, h: 1 } }, pS.members) === null, 'windowOfNode: else the smallest window holding its centre; an off-screen sentinel node ⇒ null');
+  // the snapshot: the measured GTK shape (the dialog a SIBLING of the frame, refs breadth-first) and the JASP shape (under the frame)
+  const N = (ref, parent, depth, role, name, extra = {}) => ({ ref, parent, depth, role, name, path: extra.path || [], states: extra.states || ['showing', 'visible'], bounds: extra.bounds || { x: 0, y: 0, w: 100, h: 50 }, ...(extra.editable ? { editable: true } : {}) });
+  const jasp = [N('@e1', null, 0, 'application', 'JASP'), N('@e10', '@e1', 1, 'frame', 'JASP', { path: [0] }), N('@e11', '@e10', 2, 'dialog', 'Open', { path: [0, 3], states: ['showing', 'visible'], bounds: { x: 62, y: 0, w: 640, h: 480 } }), N('@e154', '@e10', 2, 'document web', '', { path: [0, 4], states: ['focused', 'showing'] }), N('@e12', '@e11', 3, 'label', 'Recent Folders', { path: [0, 3, 0] }), N('@e15', '@e11', 3, 'text', '', { path: [0, 3, 2], editable: true, states: ['editable', 'focusable', 'showing'], bounds: { x: 77, y: 28, w: 300, h: 20 } })];
+  const df = WT.dialogFirst(jasp);
+  ok(df.dialog && df.dialog.ref === '@e11' && df.dialog.field && df.dialog.field.ref === '@e15' && df.nodes.map((n) => n.ref).join() === '@e11,@e12,@e15,@e1,@e10,@e154', 'dialogFirst: the showing dialog\'s subtree comes FIRST (refs unchanged), its text field named', df.nodes.map((n) => n.ref));
+  ok(WT.dialogHead(df.dialog) === 'a dialog is up: "Open" (@e11) — act on it first; its text field: @e15 (its subtree is listed first; to dismiss it, click its button by ref or key Escape)', 'the head line names the dialog and its field', WT.dialogHead(df.dialog));
+  ok(WT.dialogFirst(jasp.filter((n) => n.ref !== '@e11' && n.parent !== '@e11')).dialog === null && WT.dialogFirst(jasp.map((n) => (n.ref === '@e11' ? { ...n, states: ['visible'] } : n))).dialog === null, 'no dialog (or one not showing) ⇒ no head, order unchanged');
+  const gtk = [N('@e1', null, 0, 'application', 'dialog-app.py'), N('@e2', '@e1', 1, 'frame', 'vs dialog fixture'), N('@e3', '@e1', 1, 'file chooser', 'Save as', { states: ['active', 'modal', 'showing', 'visible'] }), N('@e15', '@e3', 2, 'file chooser', 'File Chooser Widget'), N('@e27', '@e15', 3, 'text', '', { editable: true, states: ['editable'], bounds: { x: -2147483648, y: -2147483648, w: 1, h: 1 } }), N('@e60', '@e15', 3, 'text', '', { editable: true, states: ['editable', 'focused', 'showing'], bounds: { x: 63, y: 10, w: 1023, h: 34 } })];
+  const dg = WT.dialogFirst(gtk);
+  ok(dg.dialog.ref === '@e3' && dg.dialog.field.ref === '@e60', 'GTK\'s Save as (measured): the shallowest showing chooser, its FOCUSED editable — never the hidden sentinel-bounds entry', dg.dialog);
+  // type without a ref: JASP's focus was `document web` ⇒ the dialog's field; a focused editable wins
+  const t1 = WT.typeTarget({ focused: { ref: '@e154', role: 'document web', editable: false, states: ['focused'] }, dialog: df.dialog });
+  const t2 = WT.typeTarget({ focused: { ref: '@e15', editable: true }, dialog: df.dialog });
+  const t3 = WT.typeTarget({ focused: { ref: '@e154', editable: false }, dialog: null });
+  ok(t1.use === 'dialog-field' && t1.ref === '@e15' && t2.use === 'focused' && t2.ref === '@e15' && t3.use === 'focused', 'typeTarget: a non-editable focus under a dialog ⇒ the dialog\'s field (never the frame\'s document); a focused editable wins; no dialog ⇒ unchanged', { t1, t2, t3 });
+
+  // THE ENGINE over a fake xpra keeper: the plan is read FRESH at every verb, an unshown corral is mapped, keys go to the dialog
+  const recX = { id: 'da-dlg', label: 'Dlg', exec: 'x', state: 'ready', display: ':97', pids: { app: 4343 }, backend: 'xpra', startedAt: Date.now(), readyAt: Date.now() };
+  let rows = [{ id: 1, title: 'Main', cls: 'a', x: 0, y: 0, w: 785, h: 486, mapped: true, frame: 11 }];
+  const keeperX = { listApps: () => [recX], get: (id) => (id === recX.id ? recX : null), sessionPids: () => [4343], x11EnvFor: () => ({ DISPLAY: ':97' }), windows: async () => ({ ok: true, windows: rows.map((w) => ({ ...w })) }) };
+  const shots = [], keys = [], shown2 = [], typed = [];
+  const wtX = { ...WT,
+    probeInputBackends: async () => ({ rows: [{ backend: 'xtest', ok: true }], injection: { backend: 'xtest' }, ours: true }),
+    probeA11y: async () => ({ ok: true, apps: 1 }),
+    snapshotTarget: async () => ({ ok: true, snapshot: { nodes: jasp.map((n) => ({ ...n, pid: 4343 })), census: { nodes: jasp.length, action: 0, editableText: 1, text: 1, buttons: 0, buttonsWithAction: 0 }, unreadable: [], truncated: false, budget: 500, ms: 1, nodesPerSec: 1, apps: [] }, refs: WT.refTableOf({ nodes: jasp.map((n) => ({ ...n, pid: 4343 })) }) }),
+    focusedNode: async () => ({ ok: true, node: { ref: '@e154', pid: 4343, path: [0, 4], role: 'document web', name: '', editable: false, states: ['focused'] } }),
+    actOnNode: async (o) => { typed.push(o.entry.ref); return { ok: true, did: {}, ms: 1 }; },
+    windowShot: async ({ out, plan }) => { shots.push(plan.members.map((m) => m.id)); fs.writeFileSync(out, 'png'); return { ok: true, w: plan.w, h: plan.h, lit: 9, bytes: 3 }; },
+    injectKey: async (o) => { keys.push({ window: o.window, focus: o.focus }); return { ok: true, did: { verb: 'key' } }; },
+    showWindows: async ({ frames }) => { shown2.push(...frames); rows = rows.map((w) => (frames.includes(w.frame) ? { ...w, mapped: true } : w)); return { ok: true, mapped: frames }; },
+  };
+  const sessX = new Map([['s1', { agentToken: 'vsst_dlg', name: 'alpha', backend: 'claude', backendSessionId: 'conv-dlg' }]]);
+  const EX = ENGINE.create({ keeper: keeperX, dataDir: path.join(dir, 'dialog-engine'), env: () => ({}), activeSessions: sessX, wt: wtX, bins: { xdotool: '/bin/true' }, log: { warn() { }, log() { } }, groupsOf: () => [], modeProbeMs: 0 });
+  const fX = { sessionId: 's1', session: sessX.get('s1'), browserKey: null, name: 'alpha' };
+  EX.grantReach('da-dlg', { kind: 'session', id: 's1' }); EX.setShareMode('da-dlg', 'tree'); EX.attach('da-dlg', fX);
+  try {
+    const s1 = await EX.screenshot('da-dlg', fX);
+    rows = [{ id: 9, title: 'Open', cls: 'a', x: 62, y: 0, w: 640, h: 480, mapped: true, frame: 12 }, ...rows]; // the dialog maps BETWEEN two verbs (topmost first)
+    const s2 = await EX.screenshot('da-dlg', fX);
+    ok(s1.windows === 1 && s2.windows === 2 && JSON.stringify(shots[1]) === '[1,9]', 'CONTROL: a window mapped between two verbs is in the second\'s plan (read fresh), composed main first, dialog over it', shots);
+    rows = [{ ...rows[0], id: 19, frame: 13, mapped: false }, rows[1]]; // the owner's shape: the dialog opened with no viewer — its corral unmapped
+    const s3 = await EX.screenshot('da-dlg', fX);
+    ok(JSON.stringify(shown2) === '[13]' && s3.windows === 2 && JSON.stringify(shots[2]) === '[1,19]', 'an UNSHOWN dialog (corral unmapped, the main mapped) ⇒ the engine maps its corral and composes it (the owner\'s windows:1 case)', { shown2, shots });
+    const snap = await EX.snapshot('da-dlg', fX);
+    ok(snap.head && snap.head.startsWith('a dialog is up: "Open" (@e11)') && snap.nodes[0].ref === '@e11' && snap.dialog.field.ref === '@e15', 'snapshot: the head line names the dialog, its subtree first', { head: snap.head, first: snap.nodes[0] });
+    await EX.act('da-dlg', fX, { verb: 'type', text: '/tmp/data.csv' });
+    ok(typed.join() === '@e15', 'type WITHOUT a ref under the dialog lands in the dialog\'s field (@e15) — never JASP\'s focused `document web` (node_not_editable before)', typed);
+    await EX.act('da-dlg', fX, { verb: 'key', chord: 'Escape' });
+    ok(keys.length === 1 && keys[0].window === 19 && keys[0].focus.x === 62 + 320 && keys[0].focus.y === 240, 'key: X focus to the DIALOG\'s window (windowOfNode) and the pointer inside it — not the main window under it', keys);
+    const audit = fs.readFileSync(EX.auditFile, 'utf8');
+    ok(/"verb":"show-window"[^\n]*"ok":true/.test(audit) && /"verb":"key"[^\n]*"focusedBy":"window"/.test(audit), 'audited: show-window (by window) and the key focusedBy:window', audit.split('\n').filter((l) => /show-window|"key"/.test(l)));
+  } catch (e) { fail++; console.error('  ✗ §DLG engine threw:', e.stack || e.message); }
+}
+
 console.log(`\n${pass} passed, ${fail} failed, ${skipped} skipped`);
 cleanup();
 process.exit(fail ? 1 : 0);

@@ -1036,9 +1036,12 @@ function wininfoName(part) {
  *  by 3 more (measured: `     0x20000c "xterm"` then `        0x200011 (has no
  *  name)` for xterm's inner VT window), so depth 1 = a TOP-LEVEL window — the
  *  only kind the fit plan may move; a child moved inside its parent would
- *  wreck the app. `x`/`y` are the ABSOLUTE position (the last pair). */
+ *  wreck the app. `x`/`y` are the ABSOLUTE position (the last pair).
+ *  ORDER (lane window-dialog-member, measured against XQueryTree): xwininfo prints a parent's children TOPMOST FIRST —
+ *  the rows are top→bottom; window-reach `pixelPlan` composes them bottom→top. */
 function parseWininfoTree(text) {
   const rows = [];
+  let top = null; // lane window-dialog-member: the last depth-1 row — an xpra corral wraps the ONE client printed under it
   for (const line of String(text).split('\n')) {
     const h = TREE_HEAD_RE.exec(line);
     if (!h) continue;
@@ -1047,7 +1050,12 @@ function parseWininfoTree(text) {
     const body = h[3].slice(0, g.index);
     const c = TREE_CLASS_RE.exec(body);
     const depth = Math.max(1, Math.round((h[1].length - 2) / 3));
-    rows.push({ id: parseInt(h[2], 16), name: wininfoName(c ? c[1] : body), instance: (c && c[2]) || null, cls: (c && c[3]) || null, w: +g[1], h: +g[2], x: +g[5], y: +g[6], depth });
+    const row = { id: parseInt(h[2], 16), name: wininfoName(c ? c[1] : body), instance: (c && c[2]) || null, cls: (c && c[3]) || null, w: +g[1], h: +g[2], x: +g[5], y: +g[6], depth };
+    // `frame` = the xpra corral holding this client (lane window-dialog-member, MEASURED): a dialog an app opens while no
+    // viewer is attached stays inside an UNMAPPED corral — the app's tree says "showing", X has no pixels for it
+    if (depth === 1) top = row;
+    else if (depth === 2 && top && typeof top.name === 'string' && top.name.startsWith('Xpra-CorralWindow-')) row.frame = top.id;
+    rows.push(row);
   }
   return rows;
 }

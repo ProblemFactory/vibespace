@@ -1830,6 +1830,8 @@ vibespace-window detach <handle>                 # drop the lease; the app keeps
 通道（注入）从后门放回来，而且是在 agent 以为自己在用树的时候。**（iii）`list` 默认只列我们自己起的
 窗口**，用户桌面上那些要 D27 明确打开，且开着的时候每一行都标出它是"你的桌面"。
 
+**As-built（2.369.254，lane window-dialog-member；owner 2026-10-11，JASP 的 Open 对话框）：应用弹出的对话框是它窗口的一部分。** 实测（scratch xpra 6.5.4 + GTK 3 fixture）两处断点：① 没有 viewer 连着时应用新映射的顶层窗口留在未映射的 `Xpra-CorralWindow-*` 里（主窗口早先已映射，viewer 离开后仍映射），可访问性树却说它 showing——截图计划只有 1 个成员；② xwininfo 先打印最上层的子窗口，pixelPlan 照这个顺序合成，主窗口盖住了比它小的对话框。现在：主窗口已映射时引擎先映射这些 corral（审计 `show-window`），成员按堆叠顺序自下而上合成、图像取并集（`originX/originY` 为并集左上角，`--at` 照旧经计划映射）；snapshot 第一行写 `a dialog is up: "Open" (@e11) — act on it first; its text field: @e15` 并先列出对话框子树；不带 ref 的 `type` 在焦点节点不可编辑时写进对话框的输入框；`key` 先把 X 焦点给对话框自己的窗口（`windowOfNode` → `windowfocus`，`focusedBy: 'window'`）。owner 的面板无需改动：xpra 客户端映射每个新窗口，并把对话框放进面板内（`placeInside`）。
+
 ### 5.2 一个 agent 怎么学到这些
 
 * **默认什么都不用学。** 一个一个字都不读的 agent 从 §3.2 拿到隔离。
@@ -2831,6 +2833,7 @@ src/browser-backends/desktop-app.js（新）· src/browser-backends/index.js · 
 - 启动——与 E2.5 的**一处偏离**：放在 window-targets 引擎（`openAgentBrowser`），不在 browser-keeper.js。引擎是窗口目标租约与 `openerGrant` 的**唯一**主人，且本就持有 desktop-app keeper；浏览器 keeper 只管 CDP 租约。注册表行按 `BROWSER_KINDS` 顺序选（chromium 系优先）；keeper 的启动只从引擎的 opts 盖上 `origin: 'agent-browser'` + `by: {sessionId}`（src/desktop-serve.js——启动 body 与设备 op 从不带它）；Chrome 的 pid + starttime 就是 keeper 现有的部件身份（无新的 kill 点）。A2：启动的 await 之后开启者已不在 ⇒ 停掉该窗口，答 `not_live`（无租约、无广播）。
 - 驱动：租约带 `origin: 'agent-browser'`（持久化、可恢复），预留 `pin: null`（E2b）与 `mode: null`（E2c）；`vibespace-browser --profile <handle> <verb>` 答 `no_cdp_on_this_backend` 并给出窗口配方（resolve 路由问 `agentBrowserFor(handle, 调用者自己的 key)`——绝不证实别的对话的窗口）；`vibespace-window open chromium` / `--url` 仍是 `browser_is_human`，措辞点名新门；此 origin 的 `isHumanBrowser` 为 false。
 - 摆放：`desktop-app-opened {sessionId, appId, origin}`；PURE `src/lib/desktop-app-placement.js`（正在显示 ⇒ 并排，手机 ⇒ 自己一个窗口，否则什么都不开）；app.js → `openDesktopApp(id, {intoChain: linkPlacement(chatWin)})`。关闭后的可见性沿用现有 `window_not_visible` 判定（无新代码）。
+- **as-built（lane agent-window-no-steal，2.369.254，主人 2026-10-11「另一个对话操作 chrome 的时候还是疯狂把自己提到前台」）——D3 的「人这一侧」：agent 的动作只能**摆放**窗口，只有人的动作能让窗口**获得焦点**。** PURE `agentWindowPlacement`（同一文件，扩展 D3 的判定）：聊天窗在当前桌面且未最小化 ⇒ 并排（链内，createWindow 的 quiet，聊天窗的框架不上浮）；聊天窗在别的桌面 ⇒ 在那个桌面创建（隐藏，不切换桌面）；聊天窗最小化 ⇒ 自己一个窗口，压在当前窗口之下（人正在拖动 / 输入时最小化到任务栏）；本客户端没有该聊天窗 ⇒ 不开（D3 原样）；手机 ⇒ 自己一个窗口，但从不替换正在显示的窗口。格子 `focus:false`、`deskSwitch:false`，任务栏条目闪一下（`wm.markArrived`）；设置 → 桌面应用 →「agent 打开的窗口切到前台」（`desktop.agentWindowsFront`，默认关）= D3 的旧答案加焦点。应用的第二个顶层窗口（fresh 卫星）走 `satelliteFocus`：agent 打开的应用 ⇒ 放在主窗格旁、不揭示，除非人此刻正看着主窗格；xpra 画面连上时只有它是当前窗口才把输入焦点给自己（`mayFocus`）；live view 的自动打开同样 quiet。
 - 文字：browser-recipes 的 `DESKTOP_APP_POINTER` 并入 `RECIPE_POINTER`（status + 首个动词）；工具介绍不变（字节预算）。
 - D6（r2 → r3，verify r1 #0/#1）：以**记录**的开启者（`rec.by.sessionId`）为键，绝不以租约为键——引擎的 `endAgentBrowsers` 遍历 `keeper.listApps()`（reconcile 在 60 s 宽限后；`dropSession` 立即）：已 detach 的浏览器照样随它的对话结束，非开启者的持有者结束只丢掉它自己的租约。开启者自己的门：`vibespace-window stop <handle>`（`stopOwn`；其他人 ⇒ `not_your_browser`）。
 - r3（#3/#10）：**用户**正在操作（接管——保留它的租约，不在其手下 handback）或有查看者打开着时，停止最多再等一个宽限，并只说一次（一条审计 + `desktop-app-ending` ⇒ 显示它的客户端提示"你离开后它会关闭"）。

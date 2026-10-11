@@ -137,6 +137,7 @@
  * `{ error, code }`: fetchJson never throws, so a route that returned
  * 200-with-nothing would be a silent failure of a user action.
  */
+const RG = require('../app-kinds/registered.js'); // PURE — lane app-register-model: the owner's Adopt prefill
 const express = require('express');
 const { capsOf, scaleChoiceVerdict, relaunchLeaseVerdict, TIGHTVNC, machineDesktopId } = require('../desktop-apps');
 const { INSTALL_WHATS, DEFAULT_INSTALL, installRow } = require('../installs'); // THE INSTALLABLES — the routes ask the row (lane dc-apps-rows)
@@ -172,7 +173,7 @@ const isAgentBearer = (req) => /^Bearer\s+(vsst_|jbt_)/i.test(String((req.header
 function fail(res, e) {
   const code = e?.code || null;
   const status = code === 'not-found' || code === 'file-missing' ? 404 : code === 'bad-request' || code === 'exec-not-found' || code === 'cwd-missing' || code === 'needs-wayland' || code === 'bad-url' || code === 'not-a-browser' || code === 'automation-flag' || code === 'profile-not-owned' || code === 'profile-is-users' || code === 'unsupported-host'
-      || code === 'relative-path' || code === 'not-office-file' || code === 'not-office-app' ? 400
+      || code === 'relative-path' || code === 'not-office-file' || code === 'not-office-app' || ['bad_label', 'bad_exec', 'bad_args', 'too_many_variants', 'needs_root', 'bad_icon', 'shadow'].includes(code) ? 400
     : code === 'cap' || code === 'no-backend' || code === 'backend-not-wired' || code === 'held' || code === 'not_taken' || code === 'no_lease' || code === 'not-xpra' || code === 'no_viewer' || code === 'not-ready' || code === 'relaunch-browser' || code === 'browser-absent' || code === 'snap-profile-unreachable'
       || code === 'host_needs_daemon' || code === 'no_x11' || code === 'no_apt' || code === 'no_repo' || code === 'no_sudo' || code === 'no_facts' || code === 'busy' || code === 'no_conversation' || code === 'fork_pending' || code === 'wake_paced'
       || code === 'machine-mismatch' || code === 'app-absent' || code === 'still-absent' || code === 'app-asked' || code === 'lease' ? 409
@@ -222,6 +223,27 @@ router.post('/api/desktop/apps', async (req, res) => {
       try { reach = ctx.windowEngine.shareAtLaunch(r.id, share); } catch (e) { return res.json({ ...r, reach: null, reachError: { error: String(e.message || e), code: e.code || null } }); } // the app runs; the share's failure is said, never silent
     }
     res.json(reach ? { ...r, reach } : r);
+  } catch (e) { fail(res, e); }
+});
+// lane app-register-model: the OWNER's Adopt — a row of "Installed outside VibeSpace" becomes a registered app (the prefill
+// of src/app-kinds/registered.js adoptPrefill, the dialog's edits on top). A person's click: an agent token is refused.
+router.post('/api/desktop/apps/adopt', async (req, res) => {
+  const host = hostParam(req, res); if (!host) return;
+  if (isAgentBearer(req)) return fail(res, { code: 'agent_forbidden', message: 'adopting an app is the owner\'s click — an agent registers with vibespace-app register' });
+  if (!appsEngine || typeof appsEngine.adopt !== 'function') return fail(res, { code: 'host_unavailable', message: 'apps are not available in this process' });
+  const b = req.body || {};
+  const seenId = String(b.seenId || '');
+  if (!/^seen\.[A-Za-z0-9._-]{1,72}$/.test(seenId)) return fail(res, { code: 'bad-request', message: 'name the row of Installed outside VibeSpace (seenId)' });
+  try {
+    const list = host === 'local' ? await ctx.keeper.list() : await ctx.keeper.list({ host });
+    const seen = ((list && list.registry) || []).find((r) => r && r.id === seenId && r.witnessed === true);
+    if (!seen) return fail(res, { code: 'not-found', message: `${seenId} is not listed outside VibeSpace on that machine (any more)` });
+    const pre = RG.adoptPrefill(seen);
+    const entry = { ...pre, ...(b.label != null ? { label: b.label } : {}), ...(Array.isArray(b.launch) ? { launch: b.launch } : {}), ...(b.remove !== undefined ? { remove: b.remove } : {}), ...(b.reinstall !== undefined ? { reinstall: b.reinstall } : {}), ...(b.icon != null ? { icon: b.icon } : {}) };
+    for (const k of ['remove', 'reinstall', 'icon']) if (entry[k] == null) delete entry[k];
+    const rec = await appsEngine.adopt(host, entry);
+    const row = ((rec && rec.rows) || [])[0] || null;
+    res.json({ ok: true, id: row ? row.id : `app.${rec.entry.id}`, entryId: rec.entry.id, row, prefill: pre });
   } catch (e) { fail(res, e); }
 });
 // lane C2: the machine picker, the install rung's plan, and the install itself (streamed)

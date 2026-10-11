@@ -36,7 +36,7 @@ import { updateTaskbar as updateTaskbarFn } from './taskbar.js';
 import { openBrowser as openBrowserFn } from './browser-window.js';
 import { openDesktop as openDesktopFn } from './desktop-window.js';
 import { openDesktopApp as openDesktopAppFn } from './desktop-app-window.js';
-import { agentBrowserPlacement } from './desktop-app-placement.js';
+import { agentWindowPlacement } from './desktop-app-placement.js';
 import { installDesktopAppLauncher } from './desktop-app-launcher.js';
 import { installOpenWith } from './open-with.js'; // §7.9: app.openWithDesktopApp (the ONE door) + the file-changed relay
 import { openBrowserLive as openBrowserLiveFn, openBrowserLiveBeside as openBrowserLiveBesideFn, installBrowserLive } from './browser-live-window.js'; // agent browser P2 (§4.4): the live view window; P7 (§4.6): auto-bind
@@ -451,13 +451,25 @@ class App {
       if (changed) { try { this.sidebar?._render?.(); } catch {} }
     });
     // lane e2a (design-agent-browser-v2 §E2.1 Placement, D3): the agent's own desktop-app browser opens BESIDE its chat —
-    // only on the client SHOWING that chat (PURE agentBrowserPlacement), through lane F's split door; elsewhere nothing
+    // only on a client that has that chat, through lane F's split door. lane agent-window-no-steal (THE PERSON'S SIDE of D3:
+    // an agent's action may PLACE a window; only a person's action may FOCUS one — PURE agentWindowPlacement): placed quiet
+    // (never focused, no desktop switch) beside the chat / on the chat's desktop / behind the active window, its taskbar entry
+    // pulses; Settings → Desktop apps → "Agent-opened windows come to the front" (default OFF) is D3's old front + focus
     this.ws.onGlobal((msg) => {
       if (msg.type !== 'desktop-app-opened') return;
-      const chats = [...(this.sessions?.entries?.() || [])].map(([winId, v]) => { const w = this.wm.windows.get(winId); return { winId, sessionId: v?.sessionId, minimized: !w || !!w.isMinimized, hidden: !w || !!w._hiddenByDesktop }; });
-      const p = agentBrowserPlacement({ msg, chats, phone: !!this.isMobile, visible: document.visibilityState !== 'hidden' });
-      if (p.act === 'beside') this.openDesktopApp(msg.appId, { intoChain: this.linkPlacement(p.fromWin) });
-      else if (p.act === 'own') this.openDesktopApp(msg.appId);
+      const dm = this.desktopManager;
+      const chats = [...(this.sessions?.entries?.() || [])].map(([winId, v]) => { const w = this.wm.windows.get(winId); const top = w && w._tabChain ? this.wm.windows.get(w._tabChain.tabs[0]) || w : w; return { winId, sessionId: v?.sessionId, minimized: !top || !!top.isMinimized, hidden: !top || !!top._hiddenByDesktop, deskId: top?._desktopId || null }; });
+      const ae = document.activeElement;
+      const interacting = !!document.querySelector('.window.dragging, .window.resizing') || !!(ae && (ae.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName)));
+      const p = agentWindowPlacement({ msg, chats, active: this.wm.activeWindowId || null, desk: dm?.activeDesktopId || null, phone: !!this.isMobile, visible: document.visibilityState !== 'hidden', interacting, front: this.settings?.get('desktop.agentWindowsFront') === true });
+      if (p.act === 'none') return;
+      if (p.focus) { if (p.act === 'beside') this.openDesktopApp(msg.appId, { intoChain: this.linkPlacement(p.fromWin) }); else this.openDesktopApp(msg.appId); return; }
+      const w = this.openDesktopApp(msg.appId, { intoChain: p.act === 'beside' ? this.linkPlacement(p.fromWin) : undefined, quiet: true });
+      if (!w) return;
+      if (p.act === 'desk') dm?.moveWindowToDesktop(w.id, p.deskId); // created on the chat's desktop: hidden there, no switch
+      else if (!w._tabChain) this.wm.placeBehind(w.id); // a free window goes under the active one (a chain guest is drawn by the chat's frame, which keeps its place)
+      if (p.minimize) this.wm.minimize(w.id); // the person is mid-act: it waits on the taskbar
+      if (p.badge) this.wm.markArrived(w.id);
     });
     // lane e2a r3 (verify r1 #3/#10): its conversation ended while the user drives / views it — it waits, and says so once here
     this.ws.onGlobal((msg) => {

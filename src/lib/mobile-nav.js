@@ -127,6 +127,7 @@ export class MobileNav {
     const win = wm.windows.get(wm.activeWindowId);
     const count = [...wm.windows.values()].filter(w => !w._hiddenByDesktop && !minimizedOf(wm, w)).length;
     this._titleEl.textContent = (win?.title || 'VibeSpace') + (count > 1 ? ` (${count})` : '');
+    this._titleEl.classList.toggle('arrived', [...wm.windows.values()].some((w) => w.element.classList.contains('window-arrived'))); // an agent placed a window (never shown in front of this one)
   }
 
   _showWindowSwitcher() {

@@ -4,7 +4,7 @@
 // worktree (own data/, a scratch HOME holding two user .desktop entries — one whose program is gone) with a STUB
 // `flatpak` first on PATH (`list --user` answers JASP's real row; `run <id>` writes its argv + DISPLAY to a marker and
 // waits) + headless chrome over raw CDP:
-//   ① desk 1400 px: Apps → the group "Installed outside VibeSpace (n)" under the engine's rows — JASP (Flatpak · yours),
+//   ① desk 1100 px: Apps → the group "Installed outside VibeSpace (n)" under the engine's rows — JASP (Flatpak · yours),
 //      the user's tool (Desktop entry · yours), the gone one says so (disabled, never hidden); no witnessed card inside
 //      the engine's grid
 //   ② the filter box finds JASP (and hides the rest); clearing it restores both groups
@@ -16,7 +16,12 @@
 //      display-backend binary (named by the product's own DISPLAY_BACKENDS ladder) off PATH — the user's tool still
 //      listed with its own command, dimmed like every card, the launcher saying why. Skipped as redundant when this
 //      machine has no backend (① already ran on that shape). ① judges pressable == "a display backend answers".
-// SKIPs by name: no chrome / no dtach / no xpra (③ only). ~35 s.
+//   ⓪ lane apps-dialog-fast (owner 2026-10-11: "打开App界面很卡"): the walk is SLOW (the stub's `list` sleeps 3 s) and due
+//      (a new entry in the user's directory) — the catalog paints ≤ 300 ms after the press, the group says "listing…",
+//      then the rows arrive by the broadcast and patch in place (the same card nodes, the filter kept)
+//   ⑥ the distro's own entries (a stub `dpkg` owns none of them) are not listed — "n system entries not shown — Show
+//      them" reveals them, remembered in the user state
+// SKIPs by name: no chrome / no dtach / no xpra (③ only); ⑥ with no system .desktop entry on this machine. ~40 s.
 import { execSync, spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -52,12 +57,14 @@ fs.mkdirSync(path.join(wt, 'data'), { recursive: true });
 const MARK = path.join(stubDir, 'flatpak-run.json');
 fs.writeFileSync(path.join(stubDir, 'flatpak'), `#!/bin/sh
 case "$1" in
-  list) case " $* " in *" --user "*) printf 'org.jaspstats.JASP\\tJASP\\t0.98.1\\n' ;; esac; exit 0 ;;
+  list) [ -f ${JSON.stringify(path.join(stubDir, 'slow'))} ] && sleep "$(cat ${JSON.stringify(path.join(stubDir, 'slow'))})"; case " $* " in *" --user "*) printf 'org.jaspstats.JASP\\tJASP\\t0.98.1\\n' ;; esac; exit 0 ;;
   run) printf '{"argv":"%s","display":"%s"}' "$*" "$DISPLAY" > ${JSON.stringify(MARK)}; exec sleep 60 ;;
 esac
 exit 1
 `, { mode: 0o755 });
 fs.writeFileSync(path.join(stubDir, 'mytool'), '#!/bin/sh\nexec sleep 60\n', { mode: 0o755 });
+fs.writeFileSync(path.join(stubDir, 'dpkg'), '#!/bin/sh\nexit 1\n', { mode: 0o755 }); // ⑥: owns no system entry (the real dpkg is never asked)
+fs.writeFileSync(path.join(stubDir, 'slow'), '3'); // ⓪: every `flatpak list` takes 3 s
 const apps = path.join(fakeHome, '.local', 'share', 'applications'); fs.mkdirSync(apps, { recursive: true });
 fs.writeFileSync(path.join(apps, 'my-tool.desktop'), `[Desktop Entry]\nType=Application\nName=My Witness Tool\nExec=${path.join(stubDir, 'mytool')} %F\nCategories=Utility;\n`);
 fs.writeFileSync(path.join(apps, 'gone-app.desktop'), '[Desktop Entry]\nType=Application\nName=Gone Witness App\nExec=/opt/vs-witness-gone/bin/gone\n');
@@ -127,15 +134,31 @@ const D = '#desktop-launch-dialog';
 const groupState = `(() => { const d = document.querySelector('${D}'); if (!d) return null; const sec = d.querySelector('.desktop-launch-seen-sec'); const cards = [...d.querySelectorAll('.desktop-launch-seen .desktop-launch-card-wrap')].filter((w) => !w.hidden).map((w) => { const b = w.querySelector('.desktop-launch-card'); return { id: b.dataset.appId, label: b.querySelector('.desktop-launch-card-label')?.textContent, chip: b.querySelector('.desktop-launch-chip')?.textContent || null, sub: (b.querySelector('.desktop-launch-card-sub')?.textContent || '').replace(b.querySelector('.desktop-launch-chip')?.textContent || '\u0000', '').trim(), subRect: (() => { const s = b.querySelector('.desktop-launch-card-sub'), l = b.querySelector('.desktop-launch-card-label'); if (!s || !l) return null; const a = s.getBoundingClientRect(), c = l.getBoundingClientRect(); return { subLeft: Math.round(a.left), labelLeft: Math.round(c.left), subW: Math.round(a.width) }; })(), disabled: b.disabled }; }); const eng = [...d.querySelectorAll('.desktop-launch-registry .desktop-launch-card-wrap')].filter((w) => !w.hidden).map((w) => w.querySelector('.desktop-launch-card').dataset.appId); return { shown: !!sec && !sec.classList.contains('is-empty') && getComputedStyle(sec).display !== 'none', title: d.querySelector('.desktop-launch-seen-title')?.textContent, cards, eng }; })()`;
 try {
   await cdp('Runtime.enable'); await cdp('Page.enable'); await cdp('Network.enable');
-  await cdp('Emulation.setDeviceMetricsOverride', { width: 1400, height: 900, deviceScaleFactor: 1, mobile: false });
+  await cdp('Emulation.setDeviceMetricsOverride', { width: 1100, height: 900, deviceScaleFactor: 1, mobile: false });
   await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });
   await cdp('Page.addScriptToEvaluateOnNewDocument', { source: `(() => { const f0 = window.fetch; window.__launches = []; window.fetch = function (u, o) { try { if (String(u).startsWith('/api/desktop/apps') && o && o.method === 'POST') window.__launches.push(JSON.parse(o.body)); } catch {} return f0.apply(this, arguments); }; })();` });
   await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
   await evalJs('new Promise((res, rej) => { const t0 = Date.now(); (function w() { if (window.app) return res(app.ready); if (Date.now() - t0 > 20000) return rej(new Error("no app after 20s")); setTimeout(w, 200); })(); })');
   await waitFor(`!!window.app && !!app._desktopAppsAvailable && !!document.getElementById('btn-desktop-apps') && !document.getElementById('loading-screen')`, 20000);
 
+  console.log('⓪ the open never waits for a slow walk');
+  const WFILE = path.join(wt, 'data', 'desktop-apps-witness.json');
+  for (let i = 0; i < 100 && !fs.existsSync(WFILE); i++) await sleep(100); // the startup probe's walk landed
+  fs.writeFileSync(path.join(apps, 'late-tool.desktop'), `[Desktop Entry]\nType=Application\nName=Late Witness Tool\nExec=${path.join(stubDir, 'mytool')}\n`);
+  await sleep(30);
+  const fp = await evalJs(`new Promise((res) => { const t0 = performance.now(); document.getElementById('btn-desktop-apps').click(); (function w() { const d = document.querySelector('${D}'); const n = d ? d.querySelectorAll('.desktop-launch-registry .desktop-launch-card').length : 0; const st = d && d.querySelector('.desktop-launch-seen-state'); if (n && st && !st.hidden) return res({ ms: Math.round(performance.now() - t0), n, state: st.textContent.trim() }); if (performance.now() - t0 > 8000) return res({ ms: -1, n, hidden: st ? st.hidden : null }); requestAnimationFrame(w); })(); })`);
+  console.log(`  · time to first card with a due 3 s walk: ${fp.ms} ms`);
+  check(`the catalog paints ${fp.ms} ms after the press (≤ 300) while the 3 s walk runs — the group says "listing…"`, fp.ms >= 0 && fp.ms <= 300 && fp.state === 'listing…', fp);
+  const g0 = await evalJs(groupState);
+  check('the last list is shown meanwhile (JASP), the new entry not yet', (g0.cards || []).some((c) => c.label === 'JASP') && !(g0.cards || []).some((c) => c.label === 'Late Witness Tool'), g0.cards);
+  await typeInto(`${D} .desktop-launch-filter`, 'witness'); // (typing re-renders the dialog — the mark below is set after it)
+  await evalJs(`(() => { const w = [...document.querySelectorAll('${D} .desktop-launch-seen .desktop-launch-card-wrap')].find((x) => x.textContent.includes('JASP')); if (w) w.__keep = 1; return !!w; })()`);
+  check('the rows arrive by the broadcast and patch in — the new entry listed, "listing…" over, the filter kept (JASP filtered out)', await waitFor(`(() => { const s = ${groupState}; return s.cards.some((c) => c.label === 'Late Witness Tool') && !s.cards.some((c) => c.label === 'JASP') && document.querySelector('${D} .desktop-launch-seen-state').hidden && document.querySelector('${D} .desktop-launch-filter').value === 'witness'; })()`, 8000), await evalJs(groupState));
+  check('in place: the JASP card is the same node (keyed rows, never a rebuild)', await evalJs(`(() => { const w = [...document.querySelectorAll('${D} .desktop-launch-seen .desktop-launch-card-wrap')].find((x) => x.textContent.includes('JASP')); return !!(w && w.__keep); })()`));
+  await evalJs(`(() => { const e = document.querySelector('${D} .desktop-launch-filter'); e.value = ''; e.dispatchEvent(new Event('input')); return true; })()`);
+  fs.rmSync(path.join(stubDir, 'slow'));
+
   console.log('① desk: the group under the engine\'s rows');
-  await evalJs(`document.getElementById('btn-desktop-apps').click(); true`);
   check('the group "Installed outside VibeSpace (n)" appears', await waitFor(`(${groupState})?.shown === true`, 15000), await evalJs(groupState));
   const g = await evalJs(groupState);
   const by = (l) => (g.cards || []).find((c) => c.label === l);
@@ -150,6 +173,18 @@ try {
   check('no witnessed card sits in the engine\'s grid', (g.eng || []).every((id) => !id.startsWith('seen.')), g.eng);
   check('the user\'s own rows come first (JASP leads)', g.cards[0] && g.cards[0].chip && /yours/.test(g.cards[0].chip) && g.cards.findIndex((c) => /system/.test(c.chip || '')) !== 0, g.cards.slice(0, 4));
   check('every card\'s command line sits under its name (the chip leads it — never squeezed into the icon column)', g.cards.every((c) => c.subRect && c.subRect.subLeft === c.subRect.labelLeft && c.subRect.subW > 60), g.cards.filter((c) => !(c.subRect && c.subRect.subLeft === c.subRect.labelLeft && c.subRect.subW > 60)).slice(0, 3));
+  console.log('⑥ the distro\'s own entries wait behind "Show them"');
+  const sysN = await evalJs(`(async () => { const r = await (await fetch('/api/desktop/apps')).json(); return (r.registry || []).filter((x) => x.witnessed && x.distro).length; })()`);
+  const more = `(() => { const d = document.querySelector('${D}'); return { shown: !d.querySelector('.desktop-launch-seen-more').hidden, text: d.querySelector('.desktop-launch-seen-more-text').textContent, btn: d.querySelector('.desktop-launch-seen-show').textContent, n: d.querySelectorAll('.desktop-launch-seen .desktop-launch-card-wrap').length, sys: [...d.querySelectorAll('.desktop-launch-seen .desktop-launch-chip')].filter((c) => /system/i.test(c.textContent)).length }; })()`;
+  if (!sysN) { skipped++; console.log('  ⊘ SKIP no system .desktop entry on this machine'); } else {
+    const m0 = await evalJs(more);
+    check(`no system entry is listed; the head says "${sysN} system entries not shown — Show them"`, m0.shown && m0.sys === 0 && m0.text === `${sysN} system entries not shown` && m0.btn === 'Show them', m0);
+    await realClick(`${D} .desktop-launch-seen-show`);
+    check(`Show them reveals the ${sysN} (the line says shown, the button Hide them)`, await waitFor(`(() => { const m = ${more}; return m.n === ${m0.n + sysN} && m.text === '${sysN} system entries shown' && m.btn === 'Hide them'; })()`, 5000), await evalJs(more));
+    check('remembered in the user state', await evalJs(`(async () => (await (await fetch('/api/user-state')).json()).desktopAppsShowSystem === true)()`));
+    await realClick(`${D} .desktop-launch-seen-show`);
+    check('Hide them puts them back behind the line', await waitFor(`(${more}).n === ${m0.n}`, 5000), await evalJs(more));
+  }
   await evalJs(`document.querySelector('${D} .desktop-launch-seen-sec').scrollIntoView({ block: 'start' }); true`);
   await sleep(250);
   await shot('desk');
@@ -200,7 +235,7 @@ try {
     srv = startServer(noBackendPath());
     const up5 = await serverUp(); const b5 = up5 ? await backendNow() : 'down';
     check(`the server came back with ${BACKEND_BINS.join('/')} off PATH and no display backend`, up5 && b5 === null, { up5, backend: b5 });
-    await cdp('Emulation.setDeviceMetricsOverride', { width: 1400, height: 900, deviceScaleFactor: 1, mobile: false });
+    await cdp('Emulation.setDeviceMetricsOverride', { width: 1100, height: 900, deviceScaleFactor: 1, mobile: false });
     pageErrors.length = 0;
     await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
     await waitFor(`!!window.app && !!app._desktopAppsAvailable && !!document.getElementById('btn-desktop-apps') && !document.getElementById('loading-screen')`, 20000);

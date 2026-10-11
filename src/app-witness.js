@@ -7,7 +7,10 @@
  * result card and the helper's outcome say where an install landed with THE place words below.
  *   parseFlatpakList(text, {scope})  `flatpak list --app --<scope> --columns=application,name,version` → [{appId, name, version, scope}]
  *   desktopWitness(text, {path, scope, validate, parse})  a .desktop file → {ok, row} | {ok:false, skip|error} (never a throw)
- *   witnessRows({flatpaks, desktops, catalog, validate, parse})  → the rows of the "Installed outside VibeSpace" group
+ *   witnessRows({flatpaks, desktops, catalog, validate, parse, drift, owners})  → the rows of the "Installed outside VibeSpace" group
+ *   parseDpkgSearch(text)  `dpkg -S <path…>` → {path: package} (lane apps-dialog-fast: who owns a system entry)
+ *   witnessScope(rows)  → the per-source counts + `distro` (the cache file's "why is this list long")
+ *   openAnswer({cache, due, inFlight})  → {answer, refresh, wait:false} — an open answers what is known, NEVER waits
  *   refreshVerdict({listedAt, sig, sigNow, now, reason})  → {due, why} — the refresh rule
  *   installPlace({hostId, label, localName}, tr)  → "this VibeSpace machine (linux-box-hub)" | "<machine>"
  * THE SECURITY RULE STAYS (app-serve's catalog is "never from the user-writable index"): a witnessed row lives in its OWN
@@ -26,6 +29,7 @@ const FLATPAK_COLUMNS = 'application,name,version';
 const FLATPAK_ID_RE = /^[A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z0-9_-]+){2,}$/;
 const WITNESS_SOURCES = Object.freeze(['flatpak-user', 'flatpak-system', 'desktop-user', 'desktop-system']);
 const FORCED = new Set(['install', 'helper', 'recheck']);
+const SHOW_SYSTEM_KEY = 'desktopAppsShowSystem'; // user state: the person pressed "Show them" (lane apps-dialog-fast)
 
 const clip = (s, max) => String(s == null ? '' : s).replace(/[\0\r\n\t]+/g, ' ').trim().slice(0, max);
 const slug = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^[^a-z0-9]+/, '').replace(/-+$/, '');
@@ -67,15 +71,35 @@ function desktopWitness(text, { path: p = '', scope = 'user', validate = null, p
   return { ok: true, row };
 }
 
+/** `dpkg -S /a.desktop /b.desktop` → {path: package} — `pkg[:arch][, pkg2…]: /path` lines (the first owner); a diversion
+ *  line, a "no path found" (stderr) or garbage is skipped. */
+function parseDpkgSearch(text) {
+  const out = {};
+  for (const line of String(text || '').split('\n')) {
+    const m = /^([a-z0-9][a-z0-9+.-]*)(?::[a-z0-9-]+)?(?:, [^:]+)*: (\/\S.*)$/.exec(line.replace(/\r$/, ''));
+    if (m && !line.startsWith('diversion ')) out[m[2]] = m[1];
+  }
+  return out;
+}
+
 /**
  * The group's rows: the flatpaks (user before system) + the desktop entries (the user's before the system's — the XDG
  * rule: a user file of the same name hides the system one, a NoDisplay one included), minus what the engine's catalog
  * already lists (its .desktop paths, its flatpaks) and minus an entry that only starts a listed flatpak. The user's own
  * first (an agent installs as the user), then by name; ≤ WITNESS_MAX. `desktops` = [{path, text, scope}]; `catalog` = the engine's rows (app-serve catalogRows).
+ * THE SCOPE RULE (lane apps-dialog-fast, owner 2026-10-11: 34 of 35 rows were the distro's own /usr/share/applications):
+ * "outside the door" means outside the BASE, never the distro — a `-user` row is always listed (the user's home: a person
+ * or an agent put it there), a system flatpak too (the engine never installs one); a `desktop-system` row is listed only
+ * when the dpkg package that owns it (`owners`, ONE `dpkg -S`) is in `drift` (the packages installed after the apps
+ * system's base — status()'s drift verdict); `drift` null = no base on this machine. Any other system entry is kept,
+ * flagged `distro: true` and ranked last — the launcher hides it behind "Show them".
  */
-function witnessRows({ flatpaks = [], desktops = [], catalog = [], validate = null, parse = null } = {}) {
+function witnessRows({ flatpaks = [], desktops = [], catalog = [], validate = null, parse = null, drift = null, owners = null } = {}) {
+  const outside = drift ? new Set(drift) : null;
   const engineDesktops = new Set(), engineFlatpaks = new Set();
-  for (const r of catalog || []) { if (r && r.desktop) engineDesktops.add(String(r.desktop)); const fp = flatpakOf(r); if (fp) engineFlatpaks.add(fp); }
+  const engineExecs = new Set(); // lane app-register-model: a registered app's own exec + args covers the desktop entry that runs it
+  const execKey = (r) => `${r.exec}\0${(r.args || []).join('\0')}`;
+  for (const r of catalog || []) { if (r && r.desktop) engineDesktops.add(String(r.desktop)); const fp = flatpakOf(r); if (fp) engineFlatpaks.add(fp); if (r && r.registered && String(r.exec || '').startsWith('/')) engineExecs.add(execKey(r)); }
   const rows = [], ids = new Set(), fps = new Set();
   const take = (row) => { if (ids.has(row.id) || rows.length >= WITNESS_MAX) return; ids.add(row.id); rows.push(row); };
   for (const f of [...(flatpaks || [])].sort((a, b) => (a.scope === 'user' ? 0 : 1) - (b.scope === 'user' ? 0 : 1))) {
@@ -93,11 +117,27 @@ function witnessRows({ flatpaks = [], desktops = [], catalog = [], validate = nu
     stems.add(stem);
     if (engineDesktops.has(d.path)) continue;
     const w = desktopWitness(d.text, { path: d.path, scope: d.scope, validate, parse });
-    if (!w.ok || (w.row.flatpak && (fps.has(w.row.flatpak) || engineFlatpaks.has(w.row.flatpak)))) continue;
+    if (!w.ok || (w.row.flatpak && (fps.has(w.row.flatpak) || engineFlatpaks.has(w.row.flatpak))) || engineExecs.has(execKey(w.row))) continue;
+    if (w.row.source === 'desktop-system' && !(outside && owners && outside.has(owners[d.path]))) w.row.distro = true;
     take(w.row);
   }
-  const rank = (r) => (/-user$/.test(r.source) ? 0 : 1); // what you (or an agent as you) installed first, then the system's
+  const rank = (r) => (r.distro ? 2 : /-user$/.test(r.source) ? 0 : 1); // what you (or an agent as you) installed first, then the system's, the distro's last
   return rows.sort((a, b) => rank(a) - rank(b) || a.label.toLowerCase().localeCompare(b.label.toLowerCase()) || (a.id < b.id ? -1 : 1));
+}
+
+/** The counts the cache file keeps (per listed source + the distro's hidden entries). */
+function witnessScope(rows) {
+  const out = { distro: 0 };
+  for (const s of WITNESS_SOURCES) out[s] = 0;
+  for (const r of rows || []) { if (r.distro) out.distro++; else if (out[r.source] != null) out[r.source]++; }
+  return out;
+}
+
+/** THE OPEN'S VERDICT (lane apps-dialog-fast, owner 2026-10-11: "打开App界面很卡"): an open answers from the last list at
+ *  once and starts a listing in the background when one is due and none is running — it never waits for the walk (the
+ *  result is pushed when it lands). Check again is the person's ask and waits (app-serve refreshWitness). */
+function openAnswer({ cache = null, due = false, inFlight = false } = {}) {
+  return { answer: cache, refresh: !!due && !inFlight, wait: false };
 }
 
 /** The refresh rule: an install through the door, the helper's turn end and "Check again" re-list at once; a launcher
@@ -120,4 +160,4 @@ function installPlace({ hostId = 'local', label = '', localName = '' } = {}, tr 
   return clip(label || hostId, 80);
 }
 
-module.exports = { parseFlatpakList, desktopWitness, witnessRows, refreshVerdict, installPlace, flatpakOf, WITNESS_PREFIX, WITNESS_MAX, DESKTOP_FILES_MAX, WITNESS_BUDGET_MS, WITNESS_REFRESH_MS, WITNESS_FILE, FLATPAK_COLUMNS, WITNESS_SOURCES };
+module.exports = { parseFlatpakList, desktopWitness, witnessRows, refreshVerdict, installPlace, flatpakOf, parseDpkgSearch, witnessScope, openAnswer, SHOW_SYSTEM_KEY, WITNESS_PREFIX, WITNESS_MAX, DESKTOP_FILES_MAX, WITNESS_BUDGET_MS, WITNESS_REFRESH_MS, WITNESS_FILE, FLATPAK_COLUMNS, WITNESS_SOURCES };

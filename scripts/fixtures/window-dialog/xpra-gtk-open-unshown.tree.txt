@@ -1,0 +1,23 @@
+
+xwininfo: Window id: 0x2cf (the root window) "Xpra"
+
+  Root window id: 0x2cf (the root window) "Xpra"
+  Parent window id: 0x0 (none)
+     8 children:
+     0x20000c "Xpra-CorralWindow-0x400384": ()  1096x822+0+0  +0+0
+        1 child:
+        0x400384 "Open": ("dialog-app.py" "Dialog-app.py")  1096x822+0+0  +0+0
+           1 child:
+           0x400385 (has no name): ()  1x1+-1+-1  +-1+-1
+     0x40000d (has no name): ()  1x1+-1+-1  +-1+-1
+     0x200006 "Xpra-CorralWindow-0x400004": ()  560x400+0+0  +0+0
+        1 child:
+        0x400004 "vs dialog fixture": ("dialog-app.py" "Dialog-app.py")  560x400+0+0  +0+0
+           1 child:
+           0x400005 (has no name): ()  1x1+-1+-1  +-1+-1
+     0x400001 "dialog-app.py": ("dialog-app.py" "")  10x10+10+10  +10+10
+     0x200004 "Xpra": ()  1x1+-1+-1  +-1+-1
+     0x200003 (has no name): ()  1x1+-1+-1  +-1+-1
+     0x200002 (has no name): ()  1x1+-1+-1  +-1+-1
+     0x200001 (has no name): ()  1x1+-1+-1  +-1+-1
+

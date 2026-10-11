@@ -2725,7 +2725,13 @@ body.taskbar-top #taskbar-hotzone { bottom: auto; top: 0; }
 .desktop-launch-seen-sec.is-empty { display: none; }
 .desktop-launch-seen-recheck { margin-left: auto; flex: none; white-space: nowrap; font-size: 11px; font-weight: 400; padding: 1px 8px; border: 1px solid var(--border); border-radius: 5px; background: transparent; color: var(--text-secondary); cursor: pointer; }
 .desktop-launch-seen-recheck:hover { color: var(--text); background: var(--bg-hover); }
-.desktop-launch-seen-note { margin: 0 0 6px; font-size: 11px; color: var(--text-secondary); }
+.desktop-launch-seen-note, .desktop-launch-catalog-note { margin: 0 0 6px; font-size: 11px; color: var(--text-secondary); }
+.desktop-launch-seen-state { display: inline-flex; align-items: center; gap: 4px; margin-left: 8px; font-size: 11px; font-weight: 400; color: var(--text-secondary); }
+.desktop-launch-seen-state[hidden], .desktop-launch-seen-more[hidden] { display: none; }
+.desktop-launch-seen-state svg { width: 12px; height: 12px; animation: usage-refresh-spin 0.9s linear infinite; }
+.desktop-launch-seen-recheck:disabled { opacity: 0.5; cursor: progress; }
+.desktop-launch-seen-more { margin: 0 0 6px; font-size: 11px; color: var(--text-secondary); }
+.desktop-launch-seen-show { font-size: 11px; padding: 0; border: 0; background: none; color: var(--accent); cursor: pointer; text-decoration: underline; }
 .desktop-launch-chip { display: inline-block; vertical-align: baseline; font-size: 10px; line-height: 1.4; padding: 0 6px; border-radius: 8px; background: var(--bg-hover); color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .desktop-launch-card-wrap[hidden] { display: none; }
 .desktop-launch-browser-note { margin: 0 0 6px; font-size: 11px; line-height: 1.45; color: var(--text-secondary); }
@@ -2773,6 +2779,47 @@ body.taskbar-top #taskbar-hotzone { bottom: auto; top: 0; }
   border: 1px solid var(--border); border-left: 0; border-radius: 0 var(--radius) var(--radius) 0; cursor: pointer; white-space: nowrap; }
 .desktop-launch-card-install:hover { background: var(--bg-hover); color: var(--text); }
 .desktop-launch-card-install:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+/* lane app-register-ui: a card's own ⋯ (variants / Add to VibeSpace… / Remove…, no scale rows), "Add…" beside a
+   witnessed card at desk width (a phone reaches it by a long press), and the ADOPT dialog — a full-height sheet on a phone */
+.desktop-launch-card-menu { flex: none; min-width: 32px; padding: 0 6px; font: inherit; color: var(--text-secondary); background: var(--bg-input);
+  border: 1px solid var(--border); border-left: 0; border-radius: 0 var(--radius) var(--radius) 0; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.desktop-launch-card-adopt { flex: none; padding: 0 8px; font: inherit; font-size: 10px; color: var(--accent); background: var(--bg-input);
+  border: 1px solid var(--border); border-left: 0; border-radius: 0 var(--radius) var(--radius) 0; cursor: pointer; white-space: nowrap; }
+.desktop-launch-card-menu:not(:last-child) { border-radius: 0; }
+.desktop-launch-card-menu:hover, .desktop-launch-card-adopt:hover { background: var(--bg-hover); color: var(--text); }
+.desktop-launch-card-menu:focus-visible, .desktop-launch-card-adopt:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+@media (max-width: 600px) {
+  .desktop-launch-card-adopt { display: none; }
+  .desktop-launch-card-wrap > .desktop-launch-card-menu:nth-last-child(2) { border-radius: 0 var(--radius) var(--radius) 0; }
+}
+.dialog.desktop-adopt { width: min(560px, calc(94vw / var(--ui-scale, 1))); }
+.desktop-adopt .dialog-body { max-height: 80vh; overflow: auto; display: flex; flex-direction: column; gap: 10px; }
+.desktop-adopt-witness { margin: 0; font-size: 12px; color: var(--text-secondary); overflow-wrap: anywhere; }
+.desktop-adopt-witness.is-bad, .desktop-adopt-err, .desktop-adopt-chips.is-bad { color: var(--red); }
+.desktop-adopt-err { font-size: 11px; overflow-wrap: anywhere; }
+.desktop-adopt-err:empty { display: none; }
+.desktop-adopt-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.desktop-adopt-field label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--text); }
+.desktop-adopt-head { font-size: 12px; color: var(--text); }
+.desktop-adopt-hint { font-size: 11px; color: var(--text-secondary); }
+.desktop-adopt-field input { width: 100%; min-width: 0; box-sizing: border-box; font-size: 12px; padding: 4px 6px; color: var(--text); background: var(--bg-input);
+  border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.desktop-adopt-field input.desktop-adopt-cmd { font-family: var(--font-mono, monospace); }
+.desktop-adopt-variants { display: flex; flex-direction: column; gap: 6px; }
+.desktop-adopt-variant { display: grid; grid-template-columns: minmax(80px, 1fr) minmax(0, 3fr) auto; gap: 3px 6px; align-items: center; }
+.desktop-adopt-variant > .desktop-adopt-chips { grid-column: 1 / -1; }
+.desktop-adopt-chips { display: flex; flex-wrap: wrap; gap: 3px; font-size: 11px; min-width: 0; }
+.desktop-adopt-chip { padding: 0 6px; border-radius: 8px; background: var(--bg-hover); color: var(--text); font-family: var(--font-mono, monospace); font-size: 11px;
+  white-space: pre; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.file-tool-btn.desktop-adopt-add-variant { width: auto; padding: 0 10px; align-self: flex-start; }
+.desktop-adopt-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.desktop-remove-output { max-height: 40vh; overflow: auto; }
+@media (max-width: 600px) {
+  .dialog.desktop-adopt { width: calc(100vw / var(--ui-scale, 1)) !important; max-width: none; height: calc(100dvh / var(--ui-scale, 1)); max-height: calc(100dvh / var(--ui-scale, 1)); border-radius: 0; display: flex; flex-direction: column; } /* out-ranks the phone .dialog 95vw !important */
+  .desktop-adopt .dialog-body { max-height: none; flex: 1 1 auto; }
+  .desktop-adopt-variant { grid-template-columns: minmax(0, 1fr) auto; }
+  .desktop-adopt-variant > .desktop-adopt-vcmd { grid-column: 1 / -1; grid-row: 2; }
+}
 .desktop-launch-file-note { margin: 0 0 8px; font-size: 12px; color: var(--red); }
 .desktop-launch-office-absent { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px;
   border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-input); }
@@ -5882,6 +5929,9 @@ label.chan-cap-row { cursor: default; }
 /* MULTIVIEW D5 (a): a live view that arrived as a quiet TAB (nothing on screen moved) pulses once */
 .tab-item.tab-arrived { animation: tab-split-pulse 1.2s ease-out 2; }
 @media (prefers-reduced-motion: reduce) { .tab-item.tab-arrived { animation: none; outline: 1px solid var(--accent); } }
+/* lane agent-window-no-steal: a window an agent PLACED (never focused) — its taskbar entry / the phone's title pulses twice, then keeps an accent underline until the person goes to it */
+.taskbar-item.arrived, #mobile-nav-title.arrived { animation: tab-split-pulse 1.2s ease-out 2; box-shadow: inset 0 -3px 0 var(--accent); background: color-mix(in srgb, var(--accent) 22%, transparent); }
+@media (prefers-reduced-motion: reduce) { .taskbar-item.arrived, #mobile-nav-title.arrived { animation: none; } }
 .browser-live-bar { display: flex; align-items: center; gap: 6px; padding: 4px 8px; flex-shrink: 0; border-bottom: 1px solid var(--border); background: var(--bg-secondary); font-size: 11px; min-width: 0; overflow: hidden; }
 /* lane I (2026-09-25, the owner's zh screenshots): A CHROME BAR NEVER WRAPS — every child keeps its words on ONE line at
    its own width (flex: 0 0 auto + nowrap), the URL alone flexes (down to 120 px = URL_MIN_PX in browser-live-window.js),
@@ -6908,3 +6958,5 @@ button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: u
 .sys-search-rebuild { font-size: 11px; padding: 2px 8px; }
 .palette-search-all .palette-name { color: var(--accent); }
 @media (max-width: 480px) { .search-hit { flex-direction: column; gap: 2px; } .search-group-name { white-space: normal; overflow-wrap: anywhere; } }
+/* lane app-register-ui: an agent's registration card shows every argv verbatim, one line each */
+.ut-app-argv, .app-card-sum-argv { font-family: var(--font-mono, monospace); font-size: 11px; overflow-wrap: anywhere; }

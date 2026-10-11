@@ -173,8 +173,10 @@ try {
   // host window, so its own element measures 0×0 — the pair IS the evidence; the PNG shows the two panes side by side)
   const dw = await until(async () => { const v = await desk.ev(WHERE(H)); lastDesk = v; return v && !v.pending && v.chain && v.split ? v : null; }, 60000, 500);
   check(`the desktop client opened it BESIDE the chat — the split pair of the chat's own chain (${dw ? `chain ${dw.chain}, split ${dw.split}, host ${dw.chat.w}×${dw.chat.h}` : 'no split'})`, !!dw, dw || lastDesk);
-  const pw = await until(async () => { const v = await phone.ev(WHERE(H)); return v && !v.pending && v.app.w >= 300 ? v : null; }, 60000, 500);
-  check(`the phone opened it as its OWN window (${pw ? `${pw.app.w}×${pw.app.h}` : 'none'})`, !!pw && !pw.chain, pw);
+  // lane agent-window-no-steal rule 4: the phone holds it as its OWN window but never shows it in place of the shown one
+  const pw = await until(async () => { const v = await phone.ev(WHERE(H)); return v && !v.pending ? v : null; }, 60000, 500);
+  const pShown = await phone.ev(`({ chatShown: app.wm.activeWindowId === [...app.sessions.entries()].find(([, v]) => v && v.sessionId === ${JSON.stringify(SID)})[0], badge: !!document.getElementById('mobile-nav-title')?.classList.contains('arrived') })`);
+  check(`the phone holds it as its OWN window, never shown in place of the chat (the chat stays shown, the title carries the badge)`, !!pw && !pw.chain && !!pShown && pShown.chatShown && pShown.badge, { pw, pShown });
   const chip = await until(() => desk.ev(`(() => { const w = [...app.wm.windows.values()].find((x) => x._desktopAppId === ${JSON.stringify(H)}); const host = w && (w._tabChain ? app.wm.windows.get(w._tabChain.tabs[0]) : w); const el = host && host.element.querySelector('.desktop-app-chip-agent-browser'); return el ? el.textContent : null; })()`), 30000, 500);
   check(`r3 #11: the window says whose browser it is ("${chip}" — the opener's live name)`, !!rec && chip === `Agent browser (${rec.by.name})`, chip);
   await sleep(4000); // the xpra picture paints

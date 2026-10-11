@@ -3,7 +3,7 @@
  * AN APP KIND IS ITS OWN FILE + ONE LINE BELOW — PURE, imports nothing but its siblings (lane dc-app-kinds, 2026-10-05,
  * decoupling wave 3; before it lane dc-apps-rows' one table, review rv-desktop-apps F-A1 / F-A2 / F-A3). Every kind the apps of a machine know — an index entry's kind (apt / deb / uv-tool / npm / appimage), a request
  * a person or an agent sends (installer, source, remove, refresh …), a plan the machine half makes (search, forget …) —
- * is ONE row (src/app-kinds/<kind>.js; the requests that are no app kind: ops.js), declaring what the code used to ask its id. The lists derive (ENTRY_KINDS, HOME_KINDS, PLAN_KINDS,
+ * is ONE row (src/app-kinds/<kind>.js — lane app-register-model added flatpak (a door) + registered (a declaration); the requests that are no app kind: ops.js), declaring what the code used to ask its id. The lists derive (ENTRY_KINDS, HOME_KINDS, PLAN_KINDS,
  * REQUEST_KINDS, AGENT_KINDS, the card word); the manifest, the machine half (src/app-serve.js — a kind's plan body
  * is its row's `planner`), the engine (src/server/apps-engine.js), THE card (src/app-card.js), the routes and
  * the CLI (data/bin/vibespace-app reads the declared rows from GET /api/agent/apps/kinds) ask the row. The app system's
@@ -45,6 +45,8 @@ const LIST = [
   require('./uv-tool.js'),
   require('./npm.js'),
   require('./appimage.js'),
+  require('./flatpak.js'),
+  require('./registered.js'),
   require('./installer.js'),
   ...OPS.requests,
 ];
@@ -75,6 +77,6 @@ const keepsOf = (k) => cardRow(k).keeps || 'replay';
 /** Where a card of request kind `k` says it comes from: 'download' | 'source' | 'none' | 'sources'. */
 const fromOf = (k) => cardRow(k).from || 'sources';
 /** The declared rows as data (GET /api/agent/apps/kinds — the CLI's copy): every column but the functions. */
-const kindsView = () => ROWS.map((r) => Object.fromEntries(Object.entries(r).filter(([, v]) => typeof v !== 'function')));
+const kindsView = () => ROWS.map((r) => Object.fromEntries(Object.entries(r).filter(([, v]) => typeof v !== 'function' && !(v instanceof RegExp))));
 
 module.exports = { ROWS, kindRow, rootRowOf, ENTRY_KINDS, HOME_KINDS, PLAN_KINDS, REQUEST_KINDS, AGENT_KINDS, SYS_VIEW_KINDS, cardRow, keepsOf, fromOf, kindsView };

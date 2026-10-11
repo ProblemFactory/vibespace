@@ -242,8 +242,9 @@ console.log('§1 launch → listening → handshake → record → stop clean');
   ok(disk.apps[rec.id] && disk.apps[rec.id].state === 'ready' && disk.apps[rec.id].pids.app === ready.pids.app, 'the record is on disk (writeJsonAtomic) with the same pids');
   ok(fs.existsSync(path.join(k.logRoot, rec.id, 'app.log')) && fs.existsSync(path.join(k.logRoot, rec.id, 'Xauthority')), 'per-app dir holds app.log + the Xauthority cookie file');
   ok((fs.statSync(path.join(k.logRoot, rec.id, 'Xauthority')).mode & 0o777) === 0o600, 'the cookie file is 0600');
-  const states = k._events.map((e) => (e.apps.find((a) => a.id === rec.id) || {}).state);
-  ok(k._events.every((e) => e.type === 'desktop-apps-updated') && states.includes('launching') && states.includes('ready'), 'every change was broadcast as desktop-apps-updated (launching → ready)', states);
+  const casts = k._events.filter((e) => e.type !== 'desktop-apps-witness'); // lane apps-dialog-fast: a witness listing that lands has its own broadcast
+  const states = casts.map((e) => (e.apps.find((a) => a.id === rec.id) || {}).state);
+  ok(casts.every((e) => e.type === 'desktop-apps-updated') && states.includes('launching') && states.includes('ready'), 'every change was broadcast as desktop-apps-updated (launching → ready)', states);
   ok(k.streamTarget(rec.id) && k.streamTarget(rec.id).kind === 'rfb' && k.streamTarget(rec.id).port === ready.port, 'streamTarget names the rfb port for the bridge');
   const enumd = await D.enumerateWindows({ display: ready.display, authFile: path.join(k.logRoot, rec.id, 'Xauthority'), env: baseEnv() });
   ok(enumd.ok && enumd.windows.some((w) => w.mapped !== false && w.w > 0), `the app's window is really on the private display (${enumd.windows.length} window(s))`, enumd);
@@ -756,7 +757,7 @@ console.log('§8 r2 — the round-1 verifier\'s findings, each reproduced on the
   process.off('uncaughtException', onU);
   ok(uncaught === null, 'the keeper PROCESS survived the spawn failure (no uncaught ENOENT — round 1 died here)', uncaught && uncaught.message);
   ok(done && done.state === 'failed' && /x11vnc/.test(done.lastError) && /exec-vanished/.test(done.lastError), 'the record is `failed` and names the vanished binary by name (exec-vanished)', done && done.lastError);
-  const seen = k._events.map((e) => e.apps.find((a) => a.id === rec.id)).filter(Boolean);
+  const seen = k._events.filter((e) => e.type === 'desktop-apps-updated').map((e) => (e.apps || []).find((a) => a.id === rec.id)).filter(Boolean);
   ok(seen.some((a) => a.state === 'launching' && a.pids.x > 0 && a.pids.server === null), 'the X server\'s pid was COMMITTED (broadcast) while still launching — before the picture server was even tried');
   ok(done.pids.x > 0 && !alive(done.pids.x), 'the X server it had started is RECORDED and REAPED (round 1 left it alive and unrecorded)');
   ok(procCensus(k.logRoot).length === 0, 'nothing names this keeper\'s dir any more');

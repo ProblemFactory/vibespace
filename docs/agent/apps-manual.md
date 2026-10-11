@@ -112,6 +112,23 @@ package itself with a normal `install`.
 installed OUTSIDE VibeSpace (they will be lost at the next rebuild — the user can adopt them in Desktop apps). Updates
 are the user's: "N updates · last refreshed …" + Refresh in Desktop apps. Never upgrade anything yourself.
 
+## Installed something by other means? REGISTER it
+
+Installed something by other means (flatpak, pip, a vendor script)? REGISTER it: `vibespace-app register …` — never leave it
+outside VibeSpace. A Flatpak has its own door (it installs as you, then records): `vibespace-app search --kind flatpak <words>`
+finds the id, `vibespace-app add --kind flatpak <appId> [--remote flathub] --why "…"` installs it (asks your permission).
+
+```
+vibespace-app register --label "JASP" --exec flatpak --args "run org.jaspstats.JASP" \
+  --variant "Safe mode=flatpak run org.jaspstats.JASP --safe-mode" \
+  --remove "flatpak uninstall --user -y org.jaspstats.JASP" --reinstall "flatpak install --user -y flathub org.jaspstats.JASP" --why "…"
+```
+Each line is split into argv words (quotes group, no shell runs it; an unquoted | ; & > < $ ` is refused). Nothing executes.
+THE WITNESS-MATCH RULE: a default launch the machine already lists "Installed outside VibeSpace" is recorded at once (nothing new
+becomes launchable); any other is one item in the user's For you tray (`vibespace-app wait <id>`; a decline is final). Refusals:
+bad_label, bad_exec (does not resolve as you), bad_args, too_many_variants (> 8), needs_root (a recipe naming sudo / pkexec /
+doas), bad_icon, shadow (the name is a catalog app's). After a rebuild a gone program's reinstall is the USER's click.
+
 ## User-level tools (no root, nothing to replay)
 
 ```

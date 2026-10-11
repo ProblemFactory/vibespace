@@ -285,12 +285,17 @@ function verbGate({ mode = 'auto', resolved = null, resolvedWhy = null, verb, ha
 
 // ── the pixel road (D7) ──────────────────────────────────────────────────────
 /**
- * The app's windows (desktop-app keeper `windows(id)`: `[{id, title, cls, instance, x, y, w, h, mapped, depth}]`,
- * x/y ROOT coordinates) → the plan a screenshot composes and a point act maps through:
+ * The app's windows (desktop-app keeper `windows(id)`: `[{id, title, cls, instance, x, y, w, h, mapped, depth, frame?}]`,
+ * x/y ROOT coordinates, in xwininfo's order = TOPMOST FIRST) → the plan a screenshot composes and a point act maps through:
  * `{ ok, main, origin:{x,y}, w, h, members, visible, why }`. The MAIN window is the largest one that names itself
- * (a class, an instance or a title) — preferring a mapped one; the ORIGIN is its top-left (stable while popups
- * come and go); the image extends to the right/bottom of every member (a member left of / above the main
- * window is clipped there). `visible` = the main window's own mapped state (null = unknown).
+ * (a class, an instance or a title) — preferring a mapped one. MEMBERS = every mapped top-level of the app (a transient
+ * dialog, a popup menu, a tooltip) in STACKING order bottom→top, so a dialog over its parent draws over it; the image is
+ * their union — the ORIGIN is the union's top-left (never left of / above the display unless the main itself is); a window
+ * up-left of the main joins only when it overlaps the main window.
+ * Lane window-dialog-member (owner 2026-10-11, JASP's Open on xpra): the members came TOPMOST FIRST and were drawn in
+ * that order — the main window painted over its own dialog — and a member left of / above the main was clipped away.
+ * `visible` = the main window's own mapped state (null = unknown). A PINNED window (lane e2b) keeps the pin's box at
+ * the main's origin.
  */
 function pixelPlan(windows, { pin = null } = {}) {
   const rows = (Array.isArray(windows) ? windows : []).filter((w) => w && Number.isFinite(Number(w.x)) && Number.isFinite(Number(w.y)) && Number(w.w) > 1 && Number(w.h) > 1 && (w.cls || w.instance || w.title || w.name));
@@ -299,15 +304,48 @@ function pixelPlan(windows, { pin = null } = {}) {
   const mapped = rows.filter((w) => w.mapped !== false);
   const pool = mapped.length ? mapped : rows;
   const main = pool.reduce((a, b) => (area(b) > area(a) ? b : a));
-  const ox = Number(main.x), oy = Number(main.y);
-  const members = (mapped.length ? mapped : [main]).filter((w) => Number(w.x) + Number(w.w) > ox && Number(w.y) + Number(w.h) > oy);
-  let right = ox + Number(main.w), bottom = oy + Number(main.h);
-  for (const w of members) { right = Math.max(right, Number(w.x) + Number(w.w)); bottom = Math.max(bottom, Number(w.y) + Number(w.h)); }
+  const mx = Number(main.x), my = Number(main.y);
+  // a member right of / below the main's origin as before, or one OVERLAPPING the main window (a dialog over its parent, even
+  // where it sticks out left / above); a detached helper up-left of the main (Chrome's 15x15) never shifts the coordinates
+  const over = (w) => Number(w.x) < mx + Number(main.w) && Number(w.x) + Number(w.w) > mx && Number(w.y) < my + Number(main.h) && Number(w.y) + Number(w.h) > my;
+  const members = (mapped.length ? mapped : [main]).filter((w) => w === main || over(w) || (Number(w.x) + Number(w.w) > mx && Number(w.y) + Number(w.h) > my)).reverse(); // bottom→top
+  let ox = mx, oy = my, right = mx + Number(main.w), bottom = my + Number(main.h);
+  for (const w of members) { ox = Math.min(ox, Number(w.x)); oy = Math.min(oy, Number(w.y)); right = Math.max(right, Number(w.x) + Number(w.w)); bottom = Math.max(bottom, Number(w.y) + Number(w.h)); }
+  ox = Math.max(ox, Math.min(mx, 0)); oy = Math.max(oy, Math.min(my, 0)); // the display starts at 0,0
   // lane e2b r3 (§E2.2 "pixel coordinates = the pin"): a PINNED window's image is the pin's box at the main's origin — an app's other
   // top-level that outgrows it (measured: the agent's Chrome keeps one at its first 2033×2284) never widens what the agent is shown
-  if (pin && pin.w > 0 && pin.h > 0) { right = Math.min(right, ox + Number(pin.w)); bottom = Math.min(bottom, oy + Number(pin.h)); }
-  return { ok: true, main: { id: main.id, x: ox, y: oy, w: Number(main.w), h: Number(main.h), mapped: main.mapped === undefined ? null : main.mapped }, origin: { x: ox, y: oy }, w: right - ox, h: bottom - oy,
-    members: members.map((w) => ({ id: w.id, x: Number(w.x), y: Number(w.y), w: Number(w.w), h: Number(w.h) })), visible: main.mapped === undefined ? null : main.mapped, why: null };
+  if (pin && pin.w > 0 && pin.h > 0) { ox = mx; oy = my; right = Math.min(right, mx + Number(pin.w)); bottom = Math.min(bottom, my + Number(pin.h)); }
+  return { ok: true, main: { id: main.id, x: mx, y: my, w: Number(main.w), h: Number(main.h), mapped: main.mapped === undefined ? null : main.mapped }, origin: { x: ox, y: oy }, w: right - ox, h: bottom - oy,
+    members: members.filter((w) => Number(w.x) + Number(w.w) > ox && Number(w.y) + Number(w.h) > oy && Number(w.x) < right && Number(w.y) < bottom).map((w) => ({ id: w.id, x: Number(w.x), y: Number(w.y), w: Number(w.w), h: Number(w.h) })),
+    visible: main.mapped === undefined ? null : main.mapped, why: null };
+}
+/**
+ * Lane window-dialog-member (MEASURED on xpra 6.5.4): a top-level the app maps while NO viewer is attached stays inside an
+ * unmapped xpra corral — the app's tree says the dialog is showing, X has no pixels for it and keys never reach it. The
+ * corrals to map (what an attaching viewer's map-window would do) — only while the main window itself is mapped (no viewer
+ * ever showed the app ⇒ `window_not_visible`, unchanged). `rows` = the keeper's windows (a `frame` = its corral).
+ */
+function unshownFrames(rows) {
+  const list = Array.isArray(rows) ? rows : [];
+  const plan = pixelPlan(list);
+  if (!plan.ok || plan.visible !== true) return [];
+  return [...new Set(list.filter((w) => w && w.mapped === false && Number.isInteger(w.frame) && w.frame > 0 && Number(w.w) > 1 && Number(w.h) > 1 && (w.cls || w.instance || w.title || w.name)).map((w) => w.frame))];
+}
+/**
+ * The X window that holds an accessibility node (a dialog's tree node → its top-level): the window whose size equals the
+ * node's (±2 px; measured: GTK 3's dialog bounds = its X geometry at scale 1) nearest its position, else the smallest window
+ * that holds the node's centre; null when none does. `windows` = plan members or keeper rows.
+ */
+function windowOfNode(node, windows) {
+  const b = node && node.bounds;
+  const list = (Array.isArray(windows) ? windows : []).filter((w) => w && Number(w.w) > 1 && Number(w.h) > 1);
+  if (!b || !(Number(b.w) > 1) || !(Number(b.h) > 1) || Math.abs(Number(b.x)) > 1e6 || !list.length) return null;
+  const dist = (w) => Math.abs(Number(w.x) - b.x) + Math.abs(Number(w.y) - b.y);
+  const same = list.filter((w) => Math.abs(Number(w.w) - b.w) <= 2 && Math.abs(Number(w.h) - b.h) <= 2).sort((p, q) => dist(p) - dist(q));
+  if (same.length) return same[0];
+  const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
+  const holds = list.filter((w) => cx >= Number(w.x) && cy >= Number(w.y) && cx < Number(w.x) + Number(w.w) && cy < Number(w.y) + Number(w.h)).sort((p, q) => Number(p.w) * Number(p.h) - Number(q.w) * Number(q.h));
+  return holds[0] || null;
 }
 /**
  * May a PIXEL verb (screenshot / click --at / key / scroll / an injected type) run on this window? Whole-display
@@ -497,6 +535,7 @@ function normShare(share) {
 }
 
 module.exports = {
+  unshownFrames, windowOfNode, // lane window-dialog-member
   LEVELS, RANK, PRINCIPAL_KINDS, EVERYONE_ID, GRANT_ORIGINS, MODES, RESOLVED_MODES, REFUSALS, refuse, PIXELS_SENTENCE, NOT_EXPOSED_SENTENCE, REACH_UNREADABLE_SENTENCE, NOTE_MAX, CONTAINER_ROLES, TREE_VERBS,
   sessionKeyOf, callerKeys, normPrincipal, principalKey,
   emptyRecord, normRecord, grant, revoke, setMode, openerGrant, reachFor, isExposed,

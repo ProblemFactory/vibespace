@@ -134,10 +134,15 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
 
   // THE MACHINE KEEPER of device #0 — in-process, ONE store shared with this registry; the policy is handed in as hooks
   const machine = DS.install({ dataDir, env, serverSetting, singleton, display, limits, registryRows, backends, log, now, tickMs, guardSampleMs, geometry, hostId, fitSlowBeltMs,
-    hooks: { view, onCommit: () => { dirty = false; notify(); }, idle: idleVerdict, readyTick, onSample: reportSample, onTeardown } });
+    hooks: { view, onCommit: () => { dirty = false; notify(); }, idle: idleVerdict, readyTick, onSample: reportSample, onTeardown, onWitness: notifyWitness } });
   /** The shared store, read through the machine (it owns load/save). */
   const store = { get apps() { return machine._store().apps; } };
 
+  /** lane apps-dialog-fast: this machine's "Installed outside VibeSpace" listing landed — ONE `desktop-apps-witness`
+   *  {host, witness, rows} to every client; an open launcher patches its group in place (it never waited for the walk). */
+  function notifyWitness({ witness, rows }) {
+    try { broadcast?.({ type: 'desktop-apps-witness', host: 'local', witness, rows }); } catch (e) { log.warn?.(`[desktop] witness broadcast failed: ${e.message}`); }
+  }
   function notify() {
     try { broadcast?.({ type: 'desktop-apps-updated', apps: listApps() }); } catch (e) { log.warn?.(`[desktop] broadcast failed: ${e.message}`); }
     signalFileChanges();

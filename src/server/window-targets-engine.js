@@ -390,7 +390,21 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   /** Lane E: the app's windows → the pixel plan (null when the keeper cannot say — a keeper without `windows`). */
   async function planFor(rec) {
     if (rec.origin === 'desktop' || typeof keeper.windows !== 'function') return null;
-    try { const r = await keeper.windows(rec.id); return r && r.ok ? R.pixelPlan(r.windows, { pin: PIN.pinOf(rec.pin) }) : null; } catch { return null; } // lane e2b: a pinned window's image = the pin
+    try {
+      let r = await keeper.windows(rec.id);
+      if (!r || !r.ok) return null;
+      // lane window-dialog-member (owner 2026-10-11, JASP's Open; MEASURED on xpra 6.5.4): a dialog the app opened while no
+      // viewer was attached stays in an UNMAPPED corral — the tree said "showing", the plan had one member, keys went to the
+      // main window. Map its corral (what an attaching viewer does), then read the plan FRESH; never when the main is unmapped
+      const frames = capsOf(rec).perWindow ? R.unshownFrames(r.windows) : [];
+      if (frames.length) {
+        const xenv = xenvOf(rec);
+        const m = await (wt.showWindows || WT.showWindows)({ bins: { xdotool: (bins && bins.xdotool) || require('../desktop-display').binOnPath('xdotool', { env: xenv, now }) }, xenv, frames });
+        audit({ handle: rec.id, verb: 'show-window', by: 'window', ok: !!m.ok, frames: frames.length, ...(m.ok ? {} : { code: m.code }) });
+        if (m.ok) { await sleep(300); const again = await keeper.windows(rec.id); if (again && again.ok) r = again; } // the dialog draws on its map
+      }
+      return R.pixelPlan(r.windows, { pin: PIN.pinOf(rec.pin) }); // lane e2b: a pinned window's image = the pin
+    } catch { return null; }
   }
   const streamOf = (rec) => (rec && (rec.stream || M.streamKindOf(rec))) || null; // a FACT the reach view reports, never a branch
   const capsOf = (rec) => M.capsOf(rec); // the rung's capability cells (the view's, else the row's)
@@ -1104,9 +1118,12 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
         throw namedError('mode_pixels', `${v.why}: read it with screenshot, act with click --at x,y / type / key / scroll`, { mode: 'auto', resolvedMode: 'pixels', nodes: s.census.nodes });
       }
     }
-    held.refs = r.refs; held.snapshotAt = now();
-    audit({ ...who, verb: 'snapshot', by: 'tree', ok: true, nodes: s.census.nodes, unreadable: s.unreadable.length });
-    return { handle: rec.id, label: rec.label, origin: rec.origin || ORIGIN, yourDesktop: rec.origin === 'desktop', apps: s.apps, nodes: s.nodes.map(wt.nodeView), census: s.census, unreadable: s.unreadable, truncated: s.truncated, budget: s.budget, callTimeoutMs: s.callTimeoutMs, ms: s.ms, nodesPerSec: s.nodesPerSec,
+    // lane window-dialog-member: a SHOWING dialog is named first — the head line, its subtree listed before the rest (refs unchanged)
+    const dl = WT.dialogFirst(s.nodes);
+    held.refs = r.refs; held.snapshotAt = now(); held.dialog = dl.dialog;
+    audit({ ...who, verb: 'snapshot', by: 'tree', ok: true, nodes: s.census.nodes, unreadable: s.unreadable.length, ...(dl.dialog ? { dialog: dl.dialog.ref } : {}) });
+    return { handle: rec.id, label: rec.label, origin: rec.origin || ORIGIN, yourDesktop: rec.origin === 'desktop', apps: s.apps, nodes: dl.nodes.map(wt.nodeView), census: s.census,
+      dialog: dl.dialog ? { ref: dl.dialog.ref, role: dl.dialog.role, name: dl.dialog.name, field: dl.dialog.field } : null, head: WT.dialogHead(dl.dialog), unreadable: s.unreadable, truncated: s.truncated, budget: s.budget, callTimeoutMs: s.callTimeoutMs, ms: s.ms, nodesPerSec: s.nodesPerSec,
       ...(rec.origin !== 'desktop' ? { mode: modeInfo(rec.id) } : {}),
       empty: s.nodes.length === 0 ? `no application of ${rec.label} is on the accessibility bus yet (pids ${pids.join(',')}) — it may still be starting, or its toolkit exports no tree` : null };
   }
@@ -1229,8 +1246,9 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
         const px = await pixelsFor(rec, who, 'type');
         if (e) { held(); const f = await wt.focusNode({ entry: e, env: base, ...helperOpts() }); fromHelper(f, { verb: 'focus', by: 'node', node: nodeLine(e) }); await sleep(120); }
         held();
-        const r = await injecting((signal) => wt.injectType({ bins: px.bins, xenv: px.xenv, text, replace: !!body.replace, focus: mainFocus(px, lease), signal, python }));
-        fromHelper(r, { verb: 'type', by: 'inject', chars: text.length, ...(e ? { node: nodeLine(e), focusedBy: 'tree' } : {}), ...line, backend: px.backends.injection.backend });
+        const dw = e ? null : dialogWindow(px, lease);
+        const r = await injecting((signal) => wt.injectType({ bins: px.bins, xenv: px.xenv, text, replace: !!body.replace, focus: mainFocus(px, lease), window: dw ? dw.id : null, signal, python }));
+        fromHelper(r, { verb: 'type', by: 'inject', chars: text.length, ...(e ? { node: nodeLine(e), focusedBy: 'tree' } : dw ? { focusedBy: 'window' } : {}), ...line, backend: px.backends.injection.backend });
         return { ok: true, handle: rec.id, did: { verb: 'type', by: 'inject', ...(e ? { ref: e.ref } : {}), chars: text.length, replaced: !!body.replace } };
       };
       if (!body.ref && pixelShare) return injected(null, { mode: rr.mode });
@@ -1242,6 +1260,9 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
         if (!f.ok) throw namedError(f.code, f.why, { helper: true });
         if (!f.node) throw namedError('no_focused_node', `nothing in ${rec.label} holds keyboard focus${rec.origin === 'desktop' ? '' : ' on its accessibility tree'} — name the field: \`vibespace-window type ${rec.id} @eN "…"\`${rec.origin === 'desktop' ? '' : ', or click it first and type again (a window with no tree: the user can share it in pixel mode, where type sends keys)'}`);
         e = { ref: f.node.ref, pid: f.node.pid, path: f.node.path, role: f.node.role, name: f.node.name, actions: f.node.actions || null, editable: !!f.node.editable, bounds: f.node.bounds || null, states: f.node.states || [] };
+        // lane window-dialog-member: under a showing dialog the text goes into the DIALOG's field, never the frame's document
+        const tt = WT.typeTarget({ focused: e, dialog: lease.dialog || null });
+        if (tt.use === 'dialog-field' && lease.refs) { const d = wt.resolveRef(lease.refs, tt.ref); if (d.ok) e = d.entry; }
       }
       if (!e.editable) {
         // lane E (D4, measured on Chrome 153): an entry that SAYS it is editable (its state) but exports no EditableText
@@ -1262,15 +1283,23 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
       // where the pointer rests before a chord (a bare display has PointerRoot focus): inside the MAIN window when the
       // keeper names it (lane E — tree bounds are toolkit coordinates), else the last snapshot's frame
       held();
-      const r = await injecting((signal) => wt.injectKey({ bins: px.bins, xenv: px.xenv, chord, focus: mainFocus(px, lease), signal, python }));
-      fromHelper(r, { verb: 'key', by: 'inject', chord: chord.hasModifier ? chord.xdotool : '(key)', backend: px.backends.injection.backend });
+      const dw = dialogWindow(px, lease); // lane window-dialog-member: a dialog's keys go to ITS X window
+      const r = await injecting((signal) => wt.injectKey({ bins: px.bins, xenv: px.xenv, chord, focus: mainFocus(px, lease), window: dw ? dw.id : null, signal, python }));
+      fromHelper(r, { verb: 'key', by: 'inject', chord: chord.hasModifier ? chord.xdotool : '(key)', ...(dw ? { focusedBy: 'window' } : {}), backend: px.backends.injection.backend });
       return { ok: true, handle: rec.id, did: r.did };
     }
     throw namedError('bad-request', `unknown verb ${JSON.stringify(verb)} — click | type | key | scroll`);
   }
   /** Where the pointer rests before injected keys (a bare display has PointerRoot focus): inside the MAIN window when
    *  the keeper names it (lane E — tree bounds are toolkit coordinates), else the last snapshot's frame. */
+  /** Lane window-dialog-member: the X window holding the last snapshot's showing dialog (a plan member), or null. */
+  function dialogWindow(px, lease) {
+    const d = lease && lease.dialog;
+    return d && px && px.plan && px.plan.members ? R.windowOfNode(d, px.plan.members) : null;
+  }
   function mainFocus(px, lease) {
+    const dw = dialogWindow(px, lease);
+    if (dw) return { x: dw.x + Math.floor(dw.w / 2), y: dw.y + Math.floor(dw.h / 2) }; // inside the dialog, never the window under it
     const m = px && px.plan && px.plan.main;
     return m ? { x: m.x + Math.min(20, Math.floor(m.w / 2)), y: m.y + Math.min(20, Math.floor(m.h / 2)) } : focusPoint(lease);
   }
