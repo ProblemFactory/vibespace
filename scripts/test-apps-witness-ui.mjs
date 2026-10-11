@@ -11,7 +11,12 @@
 //   ③ a press on JASP launches THROUGH THE DOOR: POST /api/desktop/apps {appId: seen.f.org.jaspstats.jasp} → the stub
 //      `flatpak run org.jaspstats.JASP` runs on the session's private display (its marker)
 //   ④ phone 390 px: the group fits (nothing wider than the screen) — PNGs desk.png / phone.png (VS_SHOT_DIR)
-// SKIPs by name: no chrome / no dtach / no xpra (③ only). ~25 s.
+//   ⑤ CONTROL — the runner's shape (rel252 mirror red: the GitHub runner has no xpra/Xvnc, so EVERY card is dimmed and
+//      a leg that wanted the user's tool pressable went red there, green here): the same server restarted with every
+//      display-backend binary (named by the product's own DISPLAY_BACKENDS ladder) off PATH — the user's tool still
+//      listed with its own command, dimmed like every card, the launcher saying why. Skipped as redundant when this
+//      machine has no backend (① already ran on that shape). ① judges pressable == "a display backend answers".
+// SKIPs by name: no chrome / no dtach / no xpra (③ only). ~35 s.
 import { execSync, spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -58,11 +63,26 @@ fs.writeFileSync(path.join(apps, 'my-tool.desktop'), `[Desktop Entry]\nType=Appl
 fs.writeFileSync(path.join(apps, 'gone-app.desktop'), '[Desktop Entry]\nType=Application\nName=Gone Witness App\nExec=/opt/vs-witness-gone/bin/gone\n');
 fs.writeFileSync(path.join(apps, 'hidden.desktop'), '[Desktop Entry]\nType=Application\nName=Hidden Witness\nNoDisplay=true\nExec=true\n');
 
+// ⑤'s PATH: every PATH dir holding a display-backend binary becomes a symlink farm without those binaries — the
+// binaries come from the product's own ladder (a census of what the server looks for, never a hand list)
+const BACKEND_BINS = [...new Set(require(path.join(repo, 'src', 'desktop-apps.js')).DISPLAY_BACKENDS.flatMap((r) => r.needs.flat()).filter((b) => !b.includes(':')))];
+const noBackendPath = () => process.env.PATH.split(':').filter(Boolean).map((dir, i) => {
+  let names; try { names = fs.readdirSync(dir); } catch { return dir; }
+  if (!names.some((n) => BACKEND_BINS.includes(n))) return dir;
+  const farm = path.join(stubDir, `path-${i}`); fs.mkdirSync(farm, { recursive: true });
+  for (const n of names) if (!BACKEND_BINS.includes(n)) { try { fs.symlinkSync(path.join(dir, n), path.join(farm, n)); } catch {} }
+  return farm;
+}).join(':');
+
 let srv = null;
 const LOG = path.join(stubDir, 'server.log');
-const fd = fs.openSync(LOG, 'a');
-srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PATH: `${stubDir}:${process.env.PATH}`, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: ['ignore', fd, fd], detached: true });
-fs.closeSync(fd);
+const startServer = (pathTail) => {
+  const fd = fs.openSync(LOG, 'a');
+  const p = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PATH: `${stubDir}:${pathTail}`, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: ['ignore', fd, fd], detached: true });
+  fs.closeSync(fd);
+  return p;
+};
+srv = startServer(process.env.PATH);
 const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--disable-background-timer-throttling', `--user-data-dir=${wt}-chrome`, 'about:blank'], { stdio: 'ignore', detached: true });
 let cleaned = false;
 const cleanup = () => {
@@ -75,8 +95,9 @@ const cleanup = () => {
 };
 process.on('exit', cleanup);
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(1); });
-let up = false;
-for (let i = 0; i < 160 && !up; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); up = true; } catch { await sleep(250); } }
+const serverUp = async () => { for (let i = 0; i < 160; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); return true; } catch { await sleep(250); } } return false; };
+const backendNow = async () => { try { return ((await (await fetch(`http://127.0.0.1:${PORT}/api/desktop/apps`)).json()).availability || {}).backend || null; } catch { return null; } };
+const up = await serverUp();
 check('the worktree server answered', up, fs.existsSync(LOG) ? fs.readFileSync(LOG, 'utf8').slice(-2000) : '');
 
 const WebSocket = require('ws');
@@ -118,8 +139,11 @@ try {
   check('the group "Installed outside VibeSpace (n)" appears', await waitFor(`(${groupState})?.shown === true`, 15000), await evalJs(groupState));
   const g = await evalJs(groupState);
   const by = (l) => (g.cards || []).find((c) => c.label === l);
+  const BACKEND = await backendNow(); // the launcher dims EVERY card when this machine has no display backend (the runner's shape)
+  const mineListed = (m) => !!m && m.chip === 'Desktop entry · yours' && m.sub === path.join(stubDir, 'mytool');
   check('JASP is listed — Flatpak · yours, its command shown', !!by('JASP') && by('JASP').chip === 'Flatpak · yours' && by('JASP').sub === 'flatpak run org.jaspstats.JASP' && by('JASP').id === 'seen.f.org.jaspstats.jasp', g.cards);
-  check('the user\'s tool is listed — Desktop entry · yours', !!by('My Witness Tool') && by('My Witness Tool').chip === 'Desktop entry · yours' && !by('My Witness Tool').disabled, g.cards);
+  check('the user\'s tool is listed — Desktop entry · yours, its own command shown (never "gone")', mineListed(by('My Witness Tool')), g.cards);
+  check(`the user's tool is pressable exactly when a display backend answers (here: ${BACKEND || 'none'})`, !!by('My Witness Tool') && by('My Witness Tool').disabled === !BACKEND, { backend: BACKEND, mine: by('My Witness Tool') });
   check('a gone program stays listed and says so (disabled, never hidden)', !!by('Gone Witness App') && by('Gone Witness App').disabled && /Its program is gone: \/opt\/vs-witness-gone\/bin\/gone/.test(by('Gone Witness App').sub), by('Gone Witness App'));
   check('a NoDisplay entry is not listed', !by('Hidden Witness'));
   check(`the title counts the group (${g.title})`, new RegExp(`^Installed outside VibeSpace \\(${g.cards.length}\\)$`).test(g.title || ''), g.title);
@@ -166,5 +190,28 @@ try {
   check('Check again is never narrower than its words', !!btn && btn.sw <= btn.cw, btn);
   await shot('phone');
   check('no page error', pageErrors.length === 0, pageErrors.slice(0, 3));
+
+  console.log('⑤ control — the runner\'s shape: no display backend');
+  if (!BACKEND) console.log('  (① already ran without a display backend — this machine IS that shape)');
+  else {
+    await cdp('Page.navigate', { url: 'about:blank' }); await sleep(200);
+    try { process.kill(-srv.pid, 'SIGKILL'); } catch {}
+    for (let i = 0; i < 80; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); await sleep(100); } catch { break; } }
+    srv = startServer(noBackendPath());
+    const up5 = await serverUp(); const b5 = up5 ? await backendNow() : 'down';
+    check(`the server came back with ${BACKEND_BINS.join('/')} off PATH and no display backend`, up5 && b5 === null, { up5, backend: b5 });
+    await cdp('Emulation.setDeviceMetricsOverride', { width: 1400, height: 900, deviceScaleFactor: 1, mobile: false });
+    pageErrors.length = 0;
+    await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
+    await waitFor(`!!window.app && !!app._desktopAppsAvailable && !!document.getElementById('btn-desktop-apps') && !document.getElementById('loading-screen')`, 20000);
+    await evalJs(`document.getElementById('btn-desktop-apps').click(); true`);
+    check('the group appears without a display backend', await waitFor(`(${groupState})?.shown === true`, 15000), await evalJs(groupState));
+    const g5 = await evalJs(groupState);
+    const mine5 = (g5.cards || []).find((c) => c.label === 'My Witness Tool');
+    const avail5 = await evalJs(`document.querySelector('${D} .desktop-launch-avail')?.textContent || ''`);
+    check('the user\'s tool is still listed — Desktop entry · yours, its own command shown (never hidden, never "gone")', mineListed(mine5), g5.cards);
+    check('…dimmed like every card, the launcher saying why (No display backend)', !!mine5 && mine5.disabled === true && g5.cards.every((c) => c.disabled) && /No display backend/.test(avail5), { avail5, cards: g5.cards.map((c) => ({ id: c.id, disabled: c.disabled })) });
+    check('no page error without a display backend', pageErrors.length === 0, pageErrors.slice(0, 3));
+  }
 } catch (e) { check('the suite ran to its end', false, e.stack || String(e)); }
 done();

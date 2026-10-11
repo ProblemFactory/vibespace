@@ -4,6 +4,16 @@ This file is the engineers' record of every release: the lanes, the verification
 
 `CHANGELOG.md` (with `CHANGELOG.zh.md` and `CHANGELOG.ja.md`) is the user's: what changed for the person using VibeSpace, one plain line per change, in the interface's language — the rules are in docs/changelog-style.md. From 2.369.199 on, every release also writes its section here, under the same `## <version> — <date>` heading as its user entry and in the same commit, newest first above the verbatim record.
 
+## 2.369.253 — 2026-10-11
+
+### apps-witness-ci-red — rel252's heavy mirror red (test-apps-witness-ui ① "the user's tool is listed"), on 6027818ef
+- **Measured cause:** the runner DID list the user's tool (`seen.d.my-tool`, Desktop entry · yours, its command). The runner has no xpra / Xvnc / Xvfb, so `availability.backend` is null and the launcher dims EVERY card (`dead`), saying "No display backend on this machine". The leg also asserted `!disabled` — a capability of this box, not of the witness. Reproduced here with a runner-shaped PATH (a /usr/bin symlink farm without the five backend binaries): the unchanged suite went red on exactly that leg, `1 FAILED (15, 1 skipped)` — the runner's count.
+- **Product:** unchanged — without a backend every card is dimmed (the engine's too) and the launcher says why; the user entry is the one Maintenance line (src/changelog-style.js pins its words).
+- **Suite:** ① splits into "listed with its own command (never gone)" + "pressable exactly when a display backend answers" (the backend read from GET /api/desktop/apps). New ⑤ CONTROL restarts the same server with every binary the product's own `DISPLAY_BACKENDS` ladder names off PATH (symlink farms per PATH dir — a census, never a hand list) and judges the runner's shape on every box that has a backend: the user's tool listed, dimmed like every card, the launcher saying why. Mutant (rel252's claim put back into ⑤): exactly that leg red, `1 FAILED (26)`.
+- **Gates:** test-apps-witness-ui native `ALL PASS (27)` (⑤ ran) + runner-shaped PATH `ALL PASS (17, 1 skipped)` (⑤ redundant there, says so); fast tier green on the final tree (marker = HEAD).
+- **Release:** cut by the lane (no integrator for a suite-only fix): 2.369.253 in package.json, package-lock.json ×2, src/agentd/version.js.
+- **Seam the release itself hit:** test-changelog-style plants its bad words into the first ≤ 120-char bullet of CHANGELOG.md — on a Maintenance-only release that is the pinned Maintenance line, so every patched copy also broke the "maintenance" rule and three controls (banned table / CJK / length) went red on the final tree (`3 FAILED (37 passed)`). The plant host now skips the pinned Maintenance lines: `ALL PASS (40)` on the same CHANGELOG.
+
 ## 2.369.252 — 2026-10-11
 
 ### int251 → rel252 — the integration (Opus): machine-desktop-apps + apps-launcher-witness + machine-app-crop, all on 82859e6f5 (2.369.250), onto 471b652b6 (2.369.251)

@@ -521,6 +521,7 @@
 - THE MACHINE'S DESKTOP DIALOG LISTED EXAMPLES, NOT ITS APPS (owner 2026-10-11): an installed app never appeared; a button squeezed into a column. FIX = list the machine by witness via a gated device op; a button never narrower than its words. 不变量 = a list of a machine's apps comes from the machine
 - AN APP AN AGENT INSTALLED WAS NOT IN THE LAUNCHER (owner 2026-10-11, JASP as a user flatpak): the catalog knew only the engine's files; no result said where it landed. FIX = witnessed entries in their own group; every install names its machine. 不变量 = what is installed is listed, as what it is
 - AN APP ON A PAIRED WINDOWS / MAC MACHINE COULD ONLY BE SEEN AS THE WHOLE DESKTOP (owner 2026-10-11): invariant — it can be shown as its own window (the device follows + pins its window, the page crops); the pin is undone when it closes (kb-bugfix-invariants)
+- A USER'S DESKTOP ENTRY LOOKED MISSING ON THE RUNNER (rel252 mirror): listed, but no xpra/Xvnc there dims every card. FIX = pressable == a backend answers; ⑤ reruns with backend bins off PATH. 不变量 = an environment-shaped assertion is a census or a control, never a local assumption
 
 ## AN APP ON A PAIRED WINDOWS / MAC MACHINE COULD ONLY BE SEEN AS THE WHOLE DESKTOP (lane machine-app-crop, 2.369.252 — owner 2026-10-11 "都做吧", route ② of B-bb0b)
 
