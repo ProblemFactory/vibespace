@@ -278,11 +278,11 @@ console.log('§1 channel-groups-view (PURE)');
   }
   // wake echo + folds
   ok(JSON.stringify(V.wakeCount({ woke: [1, 2], refused: [3], later: [] })) === '{"woke":2,"refused":1,"later":0}' && JSON.stringify(V.wakeCount(null)) === '{"woke":0,"refused":0,"later":0}', 'wakeCount: the answer\'s woke / refused / later counts, zero when absent');
-  ok(JSON.stringify(V.foldsFrom({ channelsPanelFolds: { accounts: true, watcher: 'yes', junk: true } })) === '{"accounts":true,"watcher":false,"internal":true}' && JSON.stringify(V.foldsFrom(null)) === '{"accounts":false,"watcher":false,"internal":true}', 'foldsFrom: only the KNOWN parts, only a literal true folds Accounts / the watcher (user state never grows from this map)');
+  ok(JSON.stringify(V.foldsFrom({ channelsPanelFolds: { accounts: true, watcher: 'yes', junk: true } })) === '{"accounts":true,"watcher":false,"internal":true}' && JSON.stringify(V.foldsFrom(null)) === '{"accounts":null,"watcher":false,"internal":true}', 'foldsFrom: only the KNOWN parts, only a literal true folds Accounts / the watcher (user state never grows from this map); Accounts with no choice is `null` — the panel derives it (lane channels-fold-default)');
   // lane channels-fold (the owner, 2026-10-03: VibeSpace internal is FOLDED by default; an explicit choice still wins)
   ok(V.foldsFrom({}).internal === true && V.foldsFrom({ channelsPanelFolds: { internal: 'no' } }).internal === true && V.foldsFrom({ channelsPanelFolds: { internal: 0 } }).internal === true
     && V.foldsFrom({ channelsPanelFolds: { internal: false } }).internal === false && V.foldsFrom({ channelsPanelFolds: { internal: true } }).internal === true && JSON.stringify(V.FOLDED_BY_DEFAULT) === '["internal"]',
-    'channels-fold: VibeSpace internal is FOLDED unless the user unfolded it — absent / junk = folded, only a literal false (the user\'s unfold) opens it; Accounts and the watcher keep their open default');
+    'channels-fold: VibeSpace internal is FOLDED unless the user unfolded it — absent / junk = folded, only a literal false (the user\'s unfold) opens it; the watcher keeps its open default');
 
   // THE PARITY: wakePreview ≡ the engine's wakeVerdict over notify × mention
   const names = { a: 'alpha', b: 'beta', c: 'gamma lane' };
@@ -597,13 +597,69 @@ console.log('§verify r1 — a legacy chip after "İ" covers its @');
   const { pathToFileURL } = await import('node:url');
   const src = fs.readFileSync(path.join(REPO, 'src/lib/channel-groups-view.js'), 'utf-8');
   const old = src.replace('const lower = foldCase(text);', 'const lower = text.toLowerCase();').replace("const needle = '@' + foldCase(m.name);", "const needle = '@' + String(m.name).toLowerCase();")
-    .replace("from '../channel-groups.js'", 'from ' + JSON.stringify(pathToFileURL(path.join(REPO, 'src/channel-groups.js')).href)).replace("from './channel-focus.js'", 'from ' + JSON.stringify(pathToFileURL(path.join(REPO, 'src/lib/channel-focus.js')).href))
+    .replace("from '../channel-groups.js'", 'from ' + JSON.stringify(pathToFileURL(path.join(REPO, 'src/channel-groups.js')).href)).replaceAll("from './channel-focus.js'", 'from ' + JSON.stringify(pathToFileURL(path.join(REPO, 'src/lib/channel-focus.js')).href))
     .replace("from '../channel-ref.js'", 'from ' + JSON.stringify(pathToFileURL(path.join(REPO, 'src/channel-ref.js')).href))
     .replace("from './channel-avatar.js'", 'from ' + JSON.stringify(pathToFileURL(path.join(REPO, 'src/lib/channel-avatar.js')).href));   // + channels-polish's account badges   // memberName climbs channel-names' ladder (the 2.369.202 integration)
   const oldFile = path.join(ROOT, 'channel-groups-view-v1-old.mjs');
   fs.writeFileSync(oldFile, old);
   const OLDV = await import(pathToFileURL(oldFile).href);
   ok(src.includes('const lower = foldCase(text);') && !old.includes('foldCase(text)') && runs(OLDV, rec) !== 'İ [@beta] hi', 'CONTROL: the lane head\'s toLowerCase in a patched copy draws a shifted chip — the leg above would be red', runs(OLDV, rec));
+}
+
+// ── lane channels-fold-default (the owner, 2026-10-11: "能不能让 channels 默认收缩，不然翻找起来很困难" — his Lark alone opened
+// with 81 conversations): every account section starts FOLDED unless a row in it needs the person; the person's open /
+// close (user state `acct:<id>`) wins both ways; a row that comes to need them later never opens it (the default is
+// HELD per page); a filter opens a section holding a match without writing it; Accounts folds when every section does.
+console.log('\nchannels-fold-default: the account sections\' fold');
+{
+  const now = Date.now(), H = 3600e3;
+  const plain = { key: 'l/1', adapterId: 'l', title: 'Weekly sync', lastAt: now - H, unread: 3 };
+  const assigned = { key: 'l/2', adapterId: 'l', title: 'Invoice March', lastAt: now - H, assignment: { principal: { id: 'claude:x', name: 'Ops', kind: 'agent' }, source: 'conversation' } };
+  const awaiting = { key: 'l/3', adapterId: 'l', title: 'Draft', outbox: { awaiting: 1 } };
+  const dm = { key: 'l/4', adapterId: 'l', title: 'Dana', kind: 'dm', unread: 2, lastAt: now - H };
+  const readBy = { key: 'l/5', adapterId: 'l', title: 'Read by an agent', touch: { read: { at: now - H, upTo: now, name: 'Ops' } }, lastAt: now - 2 * H };
+  const atYou = { key: 'l/6', adapterId: 'l', title: 'Ping', atYou: 1 };
+  ok(!V.needsYou(plain, now) && V.needsYou(assigned, now) && V.needsYou(awaiting, now) && V.needsYou(dm, now) && !V.needsYou(readBy, now) && V.needsYou(atYou, now) && !V.needsYou({ ...assigned, unlisted: true }, now)
+    && JSON.stringify(V.NEEDS_YOU_TAGS) === '["awaiting","unknown","assigned","held","direct"]',
+    'fold-default: what NEEDS THE PERSON — handed to someone, awaiting them, a held wake, a direct message unread, an @ of them; an agent\'s read and a plain unread row do not');
+  const legDefault = (M) => M.accountFoldDefault({ needN: 0, dot: 'ok' }) === true && M.accountFoldDefault({ needN: 2, dot: 'ok' }) === false && M.accountFoldDefault({ needN: 0, dot: 'bad' }) === false && M.accountFoldDefault({ needN: 0, dot: 'warn' }) === false && M.accountFoldDefault({ needN: 0, dot: 'idle' }) === true;
+  ok(legDefault(V), 'fold-default: nothing in a section needs the person ⇒ it starts FOLDED; a row does (or the account must sign in again) ⇒ open');
+  const F = (M, o) => JSON.stringify(M.accountFold(o));
+  const legChoice = (M) => F(M, { held: true }) === '{"folded":true,"virtual":false}' && F(M, { held: false }) === '{"folded":false,"virtual":false}' && F(M, { choice: false, held: true }) === '{"folded":false,"virtual":false}' && F(M, { choice: true, held: false }) === '{"folded":true,"virtual":false}';
+  ok(legChoice(V), 'fold-default: the REMEMBERED fold wins over the default both ways (opened a folded-by-default section; folded an open one)');
+  ok(F(V, { choice: true, held: true, q: 'inv', matches: 1 }) === '{"folded":false,"virtual":true}' && F(V, { choice: true, held: true, q: 'inv', matches: 0 }) === '{"folded":true,"virtual":false}' && F(V, { choice: true, held: true, q: '  ', matches: 3 }) === '{"folded":true,"virtual":false}',
+    'fold-default: a filter OPENS a section holding a match (virtual — never written; cleared, the fold is back); no match / a blank filter keeps the fold');
+  ok(V.accountMatches([plain, assigned, { ...dm, title: 'Invoice reply', unlisted: true }], 'INVOICE').map((r) => r.key).join() === 'l/2' && V.accountMatches([plain], '').length === 0 && V.accountMatches([{ key: 'k', id: 'oc_x', lastText: 'the invoice is attached' }], 'invoice').length === 1,
+    'fold-default: a section\'s matches use the filter\'s own rule (title / source / last line, any case) — unlisted rows never');
+  const st = { channelsPanelFolds: { accounts: 'x', watcher: false, 'acct:lark:a': false, 'acct:gone': true, 'acct:': true, junk: true, 'acct:n': 'yes' } };
+  const fo = V.foldsFrom(st);
+  ok(fo.accounts === null && fo['acct:lark:a'] === false && fo['acct:gone'] === true && !('acct:' in fo) && !('junk' in fo) && !('acct:n' in fo) && V.accountFoldKey('lark:a') === 'acct:lark:a',
+    'fold-default: the person\'s per-account choices ride the SAME map (`acct:<id>`, literal booleans only); Accounts with no choice stays `null`', JSON.stringify(fo));
+  const w = V.foldsToWrite({ ...fo, 'acct:slack:a': true }, new Set(['lark:a', 'slack:a']));
+  ok(JSON.stringify(w) === '{"watcher":false,"internal":true,"acct:lark:a":false,"acct:slack:a":true}',
+    'fold-default: the map WRITTEN keeps only booleans and the accounts that still exist (`acct:gone` pruned, Accounts\' `null` dropped) — user state never outlives an account', JSON.stringify(w));
+  const many = {}; for (let i = 0; i < 100; i++) many['acct:a' + i] = true;
+  ok(Object.keys(V.foldsToWrite(many)).length === V.ACCOUNT_FOLDS_MAX && Object.keys(V.foldsFrom({ channelsPanelFolds: many })).length === 3 + V.ACCOUNT_FOLDS_MAX && V.ACCOUNT_FOLDS_MAX === 64,
+    'fold-default: at most ACCOUNT_FOLDS_MAX (64) account folds read or written');
+  // the panel's wiring (source pins): the default HELD per page, the choice in user state, the derived Accounts fold
+  const PS = read('src/lib/channels-panel.js');
+  ok(/if \(!DEFAULT_FOLD\.has\(a\.id\)\) DEFAULT_FOLD\.set\(a\.id, accountFoldDefault\(\{ needN, dot: /.test(PS) && /const choice = FOLDS \? FOLDS\[accountFoldKey\(a\.id\)\] : null;/.test(PS)
+    && PS.split('setFold(accountFoldKey(a.id), nowFolded);').length === 3 && /FOLDS = foldsToWrite\(\{ \.\.\.\(FOLDS \|\| \{\}\), \[part\]: !!folded \}, LIVE_ACCOUNTS\);/.test(PS)
+    && /const allFolded = accounts\.length > 0 && accounts\.every\(\(a\) => curFolds\.get\(a\.id\)\.folded\);/.test(PS) && /\}, allFolded\)\);/.test(PS)
+    && /for \(const conv of fo\.virtual \? fo\.matchRows : listed\) rows\.appendChild\(row\(conv, \{ child: true \}\)\);/.test(PS),
+    'fold-default PIN: each section\'s default is decided ONCE per page (a new row that needs the person never opens it), the person\'s open / close is user state (both heads), Accounts folds when every section does, a filter-opened section draws its matches');
+  // CONTROLS: the rule's two halves, each removed from a copy of the model
+  const MC = mutantCopies('chan-fold-default', REPO);
+  const VS = read('src/lib/channel-groups-view.js');
+  const DEF = 'return !(Number(needN) > 0 || DOT_NEEDS_YOU.includes(dot));', CH = "  if (typeof choice === 'boolean') return { folded: choice, virtual: false };\n";
+  ok(VS.split(DEF).length === 2 && VS.split(CH).length === 2, 'fold-default CONTROL setup: the default and the choice are each spelled once');
+  const V1 = await import(MC.write('src/lib/channel-groups-view.js', VS.replace(DEF, 'return false;'), 'fold-open-default', { esm: true }));
+  ok(!legDefault(V1) && V1.accountFold({ held: V1.accountFoldDefault({ needN: 0, dot: 'ok' }) }).folded === false,
+    'CONTROL: a copy whose sections open by default without anything that needs the person (the base rule) — the default leg is RED');
+  const V2 = await import(MC.write('src/lib/channel-groups-view.js', VS.replace(CH, ''), 'fold-no-memory', { esm: true }));
+  ok(!legChoice(V2) && V2.accountFold({ choice: false, held: true }).folded === true,
+    'CONTROL: a copy that ignores the remembered fold — the person\'s open of a folded-by-default section is lost, the choice leg is RED');
+  for (const c of copiesCensus(MC.files, MC.dir, REPO, { minCopies: 2, label: 'chan-fold-default: ' })) ok(c.pass, c.name, c.pass ? undefined : c.detail);
 }
 
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);

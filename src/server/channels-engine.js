@@ -760,6 +760,9 @@ function create(deps = {}) {
         // process's first window (the measurement never judges before it), the sliding minute's page instants, the
         // records waiting for a complete window to cover them, the describe budget
         feedSeen: new Map(), feedGroups: new Map(), feedUnlisted: new Map(), feedTokens: { steady: null, catchUp: null }, feedMemStart: null, feedCalls: [], feedPending: [], feedDescribe: { at: 0, n: 0 }, feedPrevSig: null,
+        // lane lark-search-miss: the completed windows (≤ Feed.SEARCH_WINS_MAX `[from, to]` — which windows searched a missed
+        // record) and the newest instant a hit named per conversation (≤ Feed.FEED_SEEN_MAX — a miss's `hadSearchHit`)
+        feedWins: [], feedConvAt: new Map(),
         // lane lark-threads (A4): the feed hits behind an owed chat read (≤ FEED_MISSING_MAX: vendorId → {convId, at,
         // observedAt}) — one the read did not find is read BY ID; the by-id answers remembered (≤ FEED_MISSING_MAX,
         // BYID_MEMORY_MS: vendorId → {at, kind}) and the tick's by-id count
@@ -825,6 +828,8 @@ function create(deps = {}) {
   }
   /** lane lark-search-poll: the change feed's settings, read LIVE. */
   const feedOpts = () => ({ everySec: setting('channels.feedEverySec'), overlapSec: setting('channels.feedOverlapSec') });
+  /** lane lark-search-miss: the measurement's rule revision — a feed row measured under an older one starts over once. */
+  const FEED_MEASURE_REV = 2;
   const historyPageSize = () => Math.round(setting('channels.historyPageSize'));
   const agentRefreshFloorSec = () => setting('channels.agentRefreshFloorSec');
   const agentBudgetSharePct = () => setting('channels.agentBudgetSharePct');
@@ -1363,8 +1368,34 @@ function create(deps = {}) {
     if (!f.counters.missedTypes || typeof f.counters.missedTypes !== 'object') f.counters.missedTypes = {};
     if (!Array.isArray(f.counters.malformedFields)) f.counters.malformedFields = [];
     if (!Array.isArray(f.counters.unreadableRecent)) f.counters.unreadableRecent = [];   // verify r2: the last hour's ring
+    // lane lark-search-miss: a measurement taken before misses had classes counted records the search cannot return (6 of
+    // the 7 that demoted the owner's feed were `system` records) — it starts over ONCE under the classified rule, measuring
+    if (f.measureRev !== FEED_MEASURE_REV) {
+      if (f.samples.length || f.mode !== 'measuring') log.log(`[channels] ${rec.id}: the change feed's measurement starts over — a miss now has a class, and only a miss the search could have returned counts`);
+      f.samples = []; f.mode = 'measuring'; f.lastFlip = null; f.measureRev = FEED_MEASURE_REV;
+    }
     return f;
   }
+  /** lane lark-search-miss: the overlap THIS account's windows use (seconds) — the setting, or the learned index lag
+   *  (`feed.lagMargin`, Feed.lagMargin over the miss memo) when wider. */
+  function feedOverlapOf(rec) { const f = rec && rec.feed; return Feed.overlapOf(setting('channels.feedOverlapSec'), f && f.lagMargin); }
+  /**
+   * lane lark-search-miss: THE MISS MEMO per account (`<account>/feed-misses.json` — Feed.memoAdd's rows, ≤ 500, no text,
+   * no author): read once at its first use, written whole when a miss is named (rare — never per page), dropped with the
+   * account (dropLive's disconnect / removal).
+   */
+  const feedMemos = new Map();
+  function feedMemoOf(rec) {
+    if (feedMemos.has(rec.id)) return feedMemos.get(rec.id);
+    const rows = Feed.memoFromDisk(store.feedMissRead(rec.id));
+    feedMemos.set(rec.id, rows);
+    return rows;
+  }
+  function feedMemoKeep(rec, rows) {
+    feedMemos.set(rec.id, rows);
+    try { store.feedMissWrite(rec.id, { v: 1, rows }); } catch (err) { log.warn(`[channels] ${rec.id}: the change feed's miss memo could not be written: ${(err && err.message) || err}`); }
+  }
+  function forgetFeedMemo(id) { feedMemos.delete(id); store.feedMissDrop(id); }
   /**
    * A FEED ROW THE OLD HIT READER WROTE STARTS OVER (lane lark-p2p, 2026-09-30). The adapter declares its reader's
    * revision (`caps.changeFeed.reader`); a row written by an older one carries that reader's cursor, its window in
@@ -1501,12 +1532,12 @@ function create(deps = {}) {
     if (Number(f.backoffUntil) > t) return { noCall: true };
     let kind = null, win = null, token = null;
     if (f.window) {
-      const w = Feed.window(f, t, decl, { overlapSec: opts.overlapSec, tokenAt: e.feedTokens.steady ? e.feedTokens.steady.at : null });
+      const w = Feed.window(f, t, decl, { overlapSec: feedOverlapOf(rec), tokenAt: e.feedTokens.steady ? e.feedTokens.steady.at : null });
       kind = 'steady'; win = { from: w.from, to: w.to };
       token = w.act === 'continue' ? e.feedTokens.steady.token : null;
       if (w.act === 'restart') { e.feedTokens.steady = null; f.window = { ...f.window, pages: 0 }; }
     } else if (!f.lastRunAt || t - Number(f.lastRunAt) >= opts.everySec * 1000) {
-      const w = Feed.window(f, t, decl, { overlapSec: opts.overlapSec });
+      const w = Feed.window(f, t, decl, { overlapSec: feedOverlapOf(rec) });
       f.lastRunAt = t;
       if (w.act === 'none') { log.warn(`[channels] ${rec.id}: the clock is behind the change feed's cursor — no page this tick`); await store.adapters.update(() => {}); return { noCall: true }; }
       kind = 'steady'; win = { from: w.from, to: w.to };
@@ -1665,6 +1696,8 @@ function create(deps = {}) {
     if (writes) try { store.index.flush(); } catch (err) { durable = false; log.warn(`[channels] ${rec.id}: the change feed's owed marks were not flushed (${(err && err.message) || err}) — its cursor stays; the window is read again`); }
     for (const [vid] of fold.seenAdd) e.feedSeen.set(vid, t);
     Feed.trimSeen(e.feedSeen, t);
+    for (const h of verdict.hits) if (h && h.convId && !(Number(e.feedConvAt.get(h.convId)) >= Number(h.at))) { e.feedConvAt.delete(h.convId); e.feedConvAt.set(h.convId, Number(h.at) || 0); }
+    while (e.feedConvAt.size > Feed.FEED_SEEN_MAX) e.feedConvAt.delete(e.feedConvAt.keys().next().value);
     if (fold.groups.size) {
       // the chat listing is the authority on group membership — discovery lists it, its mark is written then. Verify r1: a
       // chat a COMPLETE walk did not list within the last cold cycle re-arms nothing (it used to set discoverSoon on every
@@ -1688,6 +1721,7 @@ function create(deps = {}) {
       if (!durable) e.feedTokens.steady = null;
       else if (page.more) { e.feedTokens.steady = { token: page.pageToken, at: t }; more = true; }
       else {
+        e.feedWins = Feed.winsAdd(e.feedWins, f.window.from, f.window.to);   // lane lark-search-miss: which windows searched what
         f.cursorAt = f.window.to; f.window = null; e.feedTokens.steady = null; f.lastOkAt = t; f.strikes = 0; f.strikeWhy = null; f.backoffUntil = null;
         // a window that completed an OLD span (a restart re-read it, a pass cut it) is followed by a fresh one in the same
         // pass when a tick's worth of time has passed — the feed catches up inside the rule-21 bound, never a pass late
@@ -1983,23 +2017,47 @@ function create(deps = {}) {
     const fs = feedStateOf(rec);
     if (!fs.on) return;
     const f = feedRow(rec);
-    const coveredTo = Number(f.cursorAt) > 0 ? Number(f.cursorAt) - feedOpts().overlapSec * 1000 : null;
-    const sm = Feed.coverageOf(records.map((r) => ({ vendorId: r && r.vendorId, at: r && r.at, msgType: rawFactsOf(rec, r).type })), { coveredTo, memStart: e.feedMemStart, seen: e.feedSeen, pending: e.feedPending, gaps: f.gaps });
-    e.feedPending = sm.pending;
-    if (!sm.n) return;
     const t = now();
-    f.samples = caps.pushSamplesAdd(f.samples, { at: t, n: sm.n, p: sm.p });
+    const ov = feedOverlapOf(rec);
+    const coveredTo = Number(f.cursorAt) > 0 ? Number(f.cursorAt) - ov * 1000 : null;
+    // lane lark-search-miss: each record's facts the class reads — its chat's kind, a reply in a thread, a bot's — and when
+    // the per-chat poll (the authority) first saw it; never its text
+    const liveIx = store.index.live();
+    const facts = records.map((r) => {
+      const en = r && r.convId ? liveIx[`${rec.id}/${r.convId}`] : null;
+      return { vendorId: r && r.vendorId, at: r && r.at, msgType: rawFactsOf(rec, r).type, convId: r && r.convId, chatType: en && en.kind ? en.kind : null, inThread: !!(r && r.threadKey && (r.root || r.replyTo)), fromBot: !!(r && r.author && r.author.isBot === true), firstSeenAt: t };
+    });
+    const sm = Feed.coverageOf(facts, { coveredTo, memStart: e.feedMemStart, seen: e.feedSeen, pending: e.feedPending, gaps: f.gaps, blind: feedDecl(rec).blind, wins: e.feedWins, convAt: e.feedConvAt, now: t });
+    e.feedPending = sm.pending;
     for (const [ty, n] of Object.entries(sm.missedTypes)) if (Object.keys(f.counters.missedTypes).length < 20 || f.counters.missedTypes[ty]) f.counters.missedTypes[ty] = (Number(f.counters.missedTypes[ty]) || 0) + n;
+    // every miss is NAMED (the memo), counted or not; a lag miss re-learns the overlap (persisted with the feed row)
+    let memo = null;
+    if (sm.misses.length) {
+      memo = Feed.memoAdd(feedMemoOf(rec), sm.misses);
+      feedMemoKeep(rec, memo);
+      const lm = Feed.lagMargin(memo);
+      if (lm && !(f.lagMargin && Number(f.lagMargin.sec) === lm.sec)) { f.lagMargin = { sec: lm.sec, n: lm.n, at: t }; log.log(`[channels] ${rec.id}: the change feed's window now overlaps by ${Feed.overlapOf(setting('channels.feedOverlapSec'), f.lagMargin)} s — learned from ${lm.n} message(s) the search had not indexed yet`); }
+      const byCls = Feed.memoCounts(sm.misses);
+      log.log(`[channels] ${rec.id}: the change feed did not find ${sm.misses.length} fetched message(s) — ${Object.entries(byCls).map(([k, n]) => `${k} ×${n}`).join(', ')}${sm.p ? `; ${sm.p} counted` : '; none counted'}`);
+    }
+    if (!sm.n) return;
+    f.samples = caps.pushSamplesAdd(f.samples, { at: t, n: sm.n, p: sm.p });
     const m = caps.pushMissRate(f.samples, t);
+    let lastMissAt = 0;
+    for (const x of f.samples) if (Number(x && x.p) > 0 && Number(x.at) > lastMissAt) lastMissAt = Number(x.at);
     // verify r1: a promotion waits for ONE FULL COLD CYCLE of measurement (+ the overlap + two ticks: the cold reading
     // lands in a pass, its misses are judged there — never a promotion by that pass's earlier ingests) — only then has
     // every conversation, including one whose messages the search misses entirely, had its own independent reading judged
     const fo = feedOpts();
-    const v = Feed.modeVerdict(f.mode, m, { spanMs: e.feedMemStart !== null ? t - e.feedMemStart : 0, minSpanMs: (tiers().coldSec + fo.overlapSec + 2 * fo.everySec) * 1000 });
+    // lane lark-search-miss: a promotion needs the last Feed.PROMOTE_CYCLES full cycles CLEAN (no counted miss since) and a
+    // demotion holds Feed.DEMOTE_HOLD_MS
+    const memStart = e.feedMemStart !== null ? e.feedMemStart : t;
+    const v = Feed.modeVerdict(f.mode, m, { spanMs: e.feedMemStart !== null ? t - e.feedMemStart : 0, minSpanMs: (tiers().coldSec + ov + 2 * fo.everySec) * 1000, cleanMs: t - Math.max(memStart, lastMissAt), sinceDemotedMs: Number(f.demotedAt) > 0 ? t - Number(f.demotedAt) : Infinity });
     if (v.flipped) {
       f.mode = v.mode;
       if (v.mode === 'carrying') f.promotedAt = t; else f.demotedAt = t;
-      f.lastFlip = { at: t, from: v.from, to: v.mode, total: m.total, missed: m.missed, rate: m.rate };
+      // the flip's numbers AND its class — the card's one line says them until the next flip
+      f.lastFlip = { at: t, from: v.from, to: v.mode, total: m.total, missed: m.missed, rate: m.rate, cls: v.mode === 'demoted' ? Feed.dominantClass(memo || feedMemoOf(rec)) : null };
       log.log(`[channels] ${rec.id}: the change feed ${v.mode === 'carrying' ? 'CARRIES the account' : 'was DEMOTED'} — ${m.missed} of ${m.total} fetched messages (${(Math.round(m.rate * 1000) / 10)} %) were not found by it; ${v.mode === 'carrying' ? `each conversation now also polls every ${Math.round(setting('channels.relaxedPollSec') / 60)} min (an open window every ${setting('channels.pollHotSec')} s)` : 'each conversation polls at its own cadence again'}`);
       notify([]);
     }
@@ -2018,7 +2076,10 @@ function create(deps = {}) {
       requiredScopes: fs.requiredScopes || [], until: fs.until || null, retryAt: fs.retryAt || null,
       // lane lark-p2p: the back-off's count and kind ("did not answer 3× in a row … until 03:28"), a shape park's fields
       strikes: Number(f.strikes) || 0, strikeWhy: f.strikeWhy || null, fields: fs.fields || [],
-      everySec: o.everySec, overlapSec: o.overlapSec, relaxedSec: setting('channels.relaxedPollSec'), promoteMin: Feed.PROMOTE_MIN,
+      everySec: o.everySec, overlapSec: feedOverlapOf(rec), overlapSettingSec: o.overlapSec, lagLearned: f.lagMargin && Number(f.lagMargin.sec) > 0 ? { sec: Number(f.lagMargin.sec), n: Number(f.lagMargin.n) || 0 } : null,
+      relaxedSec: setting('channels.relaxedPollSec'), promoteMin: Feed.PROMOTE_MIN,
+      // lane lark-search-miss: the NAMED misses — the last Feed.MISS_SHOW_MAX with their class — and the classes over the memo
+      ...(() => { const memo = feedMemoOf(rec); return { misses: memo.slice(-Feed.MISS_SHOW_MAX).map((x) => ({ id: x.id, convId: x.convId, msgType: x.msgType, chatType: x.chatType, at: x.createdAt, ageSec: x.ageAtFirstSeen, searchAgeSec: Feed.searchAgeSec(x), inThread: !!x.inThread, fromBot: !!x.fromBot, hadSearchHit: !!x.hadSearchHit, cls: x.cls })), missClasses: Feed.memoCounts(memo), missUncounted: Object.fromEntries(Object.entries(Feed.memoCounts(memo)).filter(([k]) => !Feed.MISS_COUNTED.includes(k))) }; })(),
       measured: { total: m.total, missed: m.missed, rate: m.rate }, lastOkAt: f.lastOkAt || null, cursorAt: f.cursorAt || null,
       catchUp: cu, lastFlip: f.lastFlip || null,
       // lane gmail-feed-gap: the cursor feed's gap — "catching up since <t>" (the last good page), the carrying fact's `since`
@@ -4256,7 +4317,7 @@ function create(deps = {}) {
   function dropLive(id, why) {
     // lane search-card-open (.233): the vendor-search memo outlives a rebuild (options, client, disabled) but not the
     // account — a disconnect or a removal forgets it, file and all (a later sign-in may be someone else)
-    if (why === 'disconnected' || why === 'removed') forgetSearchMemo(id);
+    if (why === 'disconnected' || why === 'removed') { forgetSearchMemo(id); forgetFeedMemo(id); }   // lane lark-search-miss: the miss memo too
     const e = live.get(id);
     if (!e) return;
     disarmPush(e, why);

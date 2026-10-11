@@ -359,7 +359,12 @@ const caps = Object.freeze({
   // doc (im-v1/message/search, response `meta_data.create_time` "创建时间(iso8601)") and the production answer agree; the
   // .197 declaration `ms` read every one of 241 260 hits malformed. `reader: 2` = the hit reader's revision (a feed row
   // the old reader wrote starts over — the engine's `feedReaderHeal`)
-  changeFeed: Object.freeze({ via: 'search', scope: SEARCH_SCOPE, option: 'search', pageSize: 30, pagesPerPass: 5, perMin: 10, maxWindowSec: 3600, catchUp: Object.freeze({ chatType: 'p2p', pagesMax: 20 }), describes: true, timeUnit: 'iso', reader: 2 }),
+  // lane lark-search-miss (owner 2026-10-11, measured read-only on the owner's account): what this search does NOT return —
+  // `system` records (a member joined / left: 6 of the 7 misses that demoted the feed, 51 of 59 lifetime) — and the thread
+  // replies, whose declared source is the topic check (the recent-roots recheck, 检查新话题): a miss of either is named,
+  // never counted. Bot messages ARE returned (no app-sent card was ever missed), so `bots: false`
+  changeFeed: Object.freeze({ via: 'search', scope: SEARCH_SCOPE, option: 'search', pageSize: 30, pagesPerPass: 5, perMin: 10, maxWindowSec: 3600, catchUp: Object.freeze({ chatType: 'p2p', pagesMax: 20 }),
+    blind: Object.freeze({ msgTypes: Object.freeze(['system']), chatTypes: Object.freeze([]), bots: false, threadReplies: true }), describes: true, timeUnit: 'iso', reader: 2 }),
   // design 010 (B-c9be, lane channels-full-search): THE OWNER'S FULL SEARCH — the same endpoint with the owner's WORDS and
   // no time filter (F6: no filter = the whole searchable history), on a person's press only. 3 pages a press, 12 pages a
   // sliding minute beside the feed's 10 (22 of the vendor's 100/min tenant tier together); a hit read in context = the

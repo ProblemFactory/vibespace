@@ -2515,6 +2515,8 @@ console.log('⑫ the change feed at the owner\'s scale: measuring = ② + the fe
     ok(d.size === 50 && [...d.keys()].every((k) => tierOf(k) === 'hot') && Wf.calls.changes - c0 === 1, `measuring at +31 s: EXACTLY the 50 hot rows (②) + ONE feed page (${d.size} + ${Wf.calls.changes - c0})`, JSON.stringify({ d: d.size, pages: Wf.calls.changes - c0 }));
     ok(bud1.spent - bud0.spent === 51 && bud1.spentBy.timer - bud0.spentBy.timer === 51 && bud1.spentBy.owner === bud0.spentBy.owner, 'the feed page is counted in the minute\'s budget and charged to the TIMER (50 fetches + 1 page)', JSON.stringify([bud0, bud1]));
   }
+  // lane lark-search-miss: a promotion needs THREE clean full polling cycles of measurement (each ≈ 1 020 s here)
+  for (let c = 0; c < 2; c++) { clock += 900e3; await ef.pass('feedy'); }
   // TRAFFIC: the owner's day on the hot rows — the feed finds every message (after its lag) ⇒ CARRYING, measured
   let mid = 0;
   const traffic = (n, lagAgo = 25e3) => { for (let i = 0; i < n; i++) { const x = Wf.convs.get(`c${String((mid * 7 + i) % 50).padStart(4, '0')}`); x.recs.push({ vendorId: `${x.id}-live${++mid}`, at: clock - lagAgo - i * 10, author: { id: 'u-1', name: 'Brook' }, text: `live ${mid}`, attachments: [] }); } };

@@ -422,7 +422,10 @@ const rec = (push) => ({ push: { enabled: true, state: 'live', lastEventAt: NOW 
     unreadable: w({ state: 'refused', why: 'shape', fields: [['meta_data.create_time'], ['id', 'meta_data.message_id']] }), unreadableBare: w({ state: 'refused', why: 'shape' }),
     measuring: w({ state: 'measuring', everySec: 30, measured: { total: 57 } }), carrying: w({ state: 'carrying', everySec: 30, relaxedSec: 300 }),
     measuringMiss: w({ state: 'measuring', everySec: 30, promoteMin: 200, measured: { total: 760, missed: 76, rate: 0.1 } }), measuringFull: w({ state: 'measuring', everySec: 30, promoteMin: 200, measured: { total: 300, missed: 3, rate: 0.01 } }),
-    demoted: w({ state: 'demoted', measured: { missed: 5, total: 60, rate: 5 / 60 } }),
+    demoted: w({ state: 'demoted', everySec: 30, measured: { missed: 5, total: 60, rate: 5 / 60 }, lastFlip: { to: 'demoted', total: 200, missed: 5, rate: 0.025, cls: 'lag' } }),
+    // lane lark-search-miss: the line changes only on a FLIP — the live rate moving says nothing new; no flip yet ⇒ confirming
+    demotedLive: w({ state: 'demoted', everySec: 30, measured: { missed: 9, total: 240, rate: 9 / 240 }, lastFlip: { to: 'demoted', total: 200, missed: 5, rate: 0.025, cls: 'lag' } }),
+    demotedNoFlip: w({ state: 'demoted', everySec: 30, measured: { missed: 5, total: 60, rate: 5 / 60 } }),
   };
   const WANT = {
     optOff: 'New-message search is off — each chat is checked on its own', scope: '', none: '',
@@ -440,14 +443,44 @@ const rec = (push) => ({ push: { enabled: true, state: 'live', lastEventAt: NOW 
     unreadable: "Lark's search answers, but its hits have a shape this version does not read (missing or unreadable: meta_data.create_time, id, meta_data.message_id) — the single-chat feed is off until an update; each chat is checked on its own",
     unreadableBare: "Lark's search answers, but its hits have a shape this version does not read — the single-chat feed is off until an update; each chat is checked on its own",
     behind: 'Search is behind — each chat is checked on its own until it catches up',
-    measuring: 'New messages: a search every 30 s · each chat is still checked on its own until 200 messages show it finds everything (57/200)',
-    carrying: 'New messages come from a search every 30 s; each chat is also checked every 5 min',
-    measuringMiss: 'Search misses 76 of 760 messages (10%) — each chat is checked on its own',
-    measuringFull: 'New messages: a search every 30 s · 3 of 300 messages missed — each chat is still checked on its own until one full polling cycle confirms it',
-    demoted: 'Search missed 5 of 60 messages (8.3%) — each chat is checked on its own again',
+    // lane lark-search-miss (owner 2026-10-11): ONE quiet status line per state — the numbers live in the tooltip
+    measuring: 'New messages: a search every 30 s + each chat checked (confirming)',
+    carrying: 'New messages: a search every 30 s (checked: it misses nothing)',
+    measuringMiss: 'New messages: a search every 30 s + each chat checked (confirming)',
+    measuringFull: 'New messages: a search every 30 s + each chat checked (confirming)',
+    demoted: 'New messages: a search every 30 s + each chat checked (the search missed 2.5%, the index lag)',
+    demotedLive: 'New messages: a search every 30 s + each chat checked (the search missed 2.5%, the index lag)',
+    demotedNoFlip: 'New messages: a search every 30 s + each chat checked (confirming)',
   };
   const badW = Object.keys(WANT).filter((k) => W1[k] !== WANT[k]);
   ok(!badW.length, 'feedText: every state says one sentence (a missing scope says nothing here — the grants line does)', badW.map((k) => `${k}: ${JSON.stringify(W1[k])}`).join(' | '));
+  // lane lark-search-miss (owner 2026-10-11 「老有这个提示是咋回事」): the measurement's line is NEVER the old warning — no
+  // state of it says a count of misses or "checked on its own again"; CONTROL: the same judge over the old sentence is RED
+  {
+    const OLDW = /Search miss(ed|es) \d+ of \d+|checked on its own again|messages missed —/;
+    const lines = ['measuring', 'carrying', 'measuringMiss', 'measuringFull', 'demoted', 'demotedLive', 'demotedNoFlip'].map((k) => W1[k]);
+    ok(lines.every((x) => x && !OLDW.test(x)) && new Set(lines).size === 3, 'feedText (lane lark-search-miss): the search\'s state is ONE quiet line in 3 spellings (confirming / misses nothing / missed N %, class) — never a miss count, never "again"', lines.join(' | '));
+    ok(OLDW.test('Search missed 7 of 200 messages (3.5%) — each chat is checked on its own again'), 'CONTROL: the judge flags the owner\'s old warning line (搜索漏掉了 200 条中的 7 条 …) — the leg above would be red on it');
+    // THE TOOLTIP: the live numbers, how each chat is checked, the learned overlap, the classes not counted, the last
+    // misses with their class (newest first), and the topic checks that left the row
+    const fv = { state: 'demoted', everySec: 30, overlapSec: 223, overlapSettingSec: 60, lagLearned: { sec: 223, n: 1 }, measured: { missed: 1, total: 120, rate: 1 / 120 },
+      missUncounted: { 'excluded-type': 6, thread: 2 }, misses: [{ at: Date.UTC(2026, 9, 10, 20, 38), msgType: 'system', cls: 'excluded-type', searchAgeSec: 80 }, { at: Date.UTC(2026, 9, 10, 20, 6), msgType: 'post', cls: 'lag', searchAgeSec: 90 }],
+      counters: { pages: 10, threadHits: 250, rechecks: 7872, recheckWidened: 159 } };
+    const tip = C.feedFactsText(fv, { clock: clk }).split('\n');
+    const WANT_TIP = ['Measured: the search missed 1 of 120 messages (0.8%)', 'Each chat is checked on its own until 3 full polling cycles pass without a miss',
+      'The search window overlaps by 223 s — learned from 1 messages the search had not indexed yet', 'Not counted (the search does not return them): a message type the search does not return ×6, a thread reply ×2',
+      'The last messages the search did not find:', '@20:06 · post — younger than the index lag (90 s)', '@20:38 · system — a message type the search does not return (system)',
+      'Threads: 250 search hits named a thread · 7872 chat checks for new threads found 159'];
+    ok(JSON.stringify(tip) === JSON.stringify(WANT_TIP), 'feedFactsText: the tooltip holds the facts the line no longer says — the topic checks included', JSON.stringify(tip));
+    const tipC = C.feedFactsText({ state: 'carrying', everySec: 30, relaxedSec: 300, overlapSec: 60, overlapSettingSec: 60, measured: { missed: 0, total: 300, rate: 0 } }, { clock: clk });
+    ok(tipC === 'Measured: the search missed 0 of 300 messages (0%)\nEach chat is also checked every 5 min' && C.feedFactsText({}) === '', 'feedFactsText: a carrying feed says its numbers and the 5-minute net; an empty view says nothing', JSON.stringify(tipC));
+    ok(['lag', 'thread', 'bot', 'excluded-type', 'excluded-chat', 'gap', 'unknown', 'nonsense'].map((k) => C.missClassWord(k)).join(' | ') === 'the index lag | a thread reply | a bot message | a message type the search does not return | a chat type the search excludes | older than the window (a gap) | cause unknown | cause unknown', 'missClassWord: every class has its words; an unknown name reads "cause unknown"');
+    // the panel: the line is quiet for a demotion (warn only for a refusal / a failing search), its facts are its title,
+    // and the topic-check line left the row
+    const panelSrc2 = fs.readFileSync(path.join(REPO, 'src/lib/channels-panel.js'), 'utf-8');
+    const warnL = /const n = noteLine\('chan-sec-note', fl, \{ warn: ([^\n]*) \}\);\n\s*n\.dataset\.chanFeed = a\.id;/.exec(panelSrc2);
+    ok(warnL && !/demoted/.test(warnL[1]) && /refused/.test(warnL[1]) && /chanCaps\.feedFactsText\(a\.feed, \{ t, clock \}\);\n\s*if \(facts\) n\.title = facts;/.test(panelSrc2) && !/chanFeedThreads/.test(panelSrc2), 'the panel: the feed line is no warning when demoted, its tooltip is feedFactsText, no separate topic-check line', warnL && warnL[1]);
+  }
   // verify r3 (the revert table: r2's quiet-feed sentences lost their zh / ja entries and no gate noticed — i18n-check only
   // WARNS on a gap, the chrome census is heavy): EVERY word this module says — each `t('…')` literal in its source,
   // grep-derived — has its zh AND ja entry. CONTROL: the same judge over a dictionary missing one of them flags it.
@@ -457,7 +490,7 @@ const rec = (push) => ({ push: { enabled: true, state: 'live', lastEventAt: NOW 
     const csrc = fsx.readFileSync(path.join(REPO, 'src/channel-caps.js'), 'utf-8');
     const keys = new Set([...csrc.matchAll(/\bt\(\s*'((?:[^'\\]|\\.)*)'/g)].map((m) => m[1].replace(/\\'/g, "'")));
     const gaps = (zh, ja) => [...keys].filter((k) => !zh[k] || !ja[k]);
-    const k0 = 'New messages: a search every {s} s · {missed} of {total} messages missed — each chat is still checked on its own until one full polling cycle confirms it';
+    const k0 = 'New messages: a search every {s} s + each chat checked (the search missed {pct}%, {cls})';
     ok(keys.size >= 100 && keys.has(k0) && !gaps(ZHd, JAd).length, `every word channel-caps says (${keys.size} t() keys, grep-derived) has its zh AND ja entry`, gaps(ZHd, JAd).join(' | '));
     const { [k0]: _drop, ...zhLess } = ZHd;
     ok(gaps(zhLess, JAd).join('|') === k0, 'CONTROL: the judge flags a dictionary missing the quiet feed\'s sentence');

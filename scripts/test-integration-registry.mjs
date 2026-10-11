@@ -631,6 +631,7 @@ const ENV_ALLOW = new Map([
   ['src/integration-registry.js', 'DECLARES the names a row is served under (never reads them)'],
   ['scripts/test-integration-registry.mjs', 'this census + the store legs'],
   ['scripts/test-integrations-ui.mjs', 'the heavy leg injects the env into a worktree server'],
+  ['scripts/test-feed-miss-ui.mjs', 'lane lark-search-miss: the heavy leg injects the fake row\'s cluster key into its worktree server (a signed-in account is what draws the feed line)'],
   ['scripts/dbg-comm-surfaces.mjs', 'the comm-panel screenshot driver injects the cluster copy path into its worktree server (a1 of the polish; the i18n census drives it)'],
   ['scripts/test-browser-backend.mjs', 'the agent-browser key legs (design-agent-browser-v2 §9 iii) inject a cluster default into the store\'s env HANDLE (never process.env) and assert user > cluster > none'],
   ['scripts/test-agentd-session.mjs', 'the second-holder leg boots a real daemon under the name and asserts neither the daemon nor any child sees it'],

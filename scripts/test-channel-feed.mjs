@@ -573,6 +573,82 @@ console.log('⑩ lane gmail-feed-gap: the gap verdict (gap × cursor × expired)
   const sil = Fs.coverageOf(recs, { ...cov, gaps: [gap] });
   ok(mode(F0, real) === 'carrying' && sil.p === 40 && mode(Fs, sil) === 'demoted', `CONTROL: a copy counting the gap's silence as misses ⇒ ${sil.p} of ${sil.n} "missed" ⇒ the complete feed DEMOTED (real: ${mode(F0, real)})`);
 }
+// ⑪ lane lark-search-miss (owner 2026-10-11 「老有这个提示是咋回事 能根治吗？」): EVERY MISS NAMED — a class per miss (the
+//    fixtures: lag / thread / bot / excluded type + chat / gap / unknown), only what the search COULD return counts, the
+//    overlap LEARNED from the index lag (a stub search lagging 90 s), promotion after 3 CLEAN cycles, a demotion held 6 h.
+//    RED controls (patched copies): an unclassified miss counted as 0; the window without the learned overlap; the promote
+//    rule with one clean cycle.
+{
+  const T = Date.UTC(2026, 9, 10, 20, 0);
+  const BL = { msgTypes: ['system'], chatTypes: ['secret'], bots: true, threadReplies: true };
+  const wins = [[T - 60e3, T + 30e3], [T, T + 60e3], [T + 30e3, T + 90e3], [T - 1310e3, T - 600e3]];
+  const rec = (id, o = {}) => ({ vendorId: id, at: T + 10e3, msgType: 'text', convId: 'oc_a', chatType: 'group', firstSeenAt: T + 233e3, ...o });
+  const FX = { lag: rec('om_lag'), 'excluded-type': rec('om_sys', { msgType: 'system' }), 'excluded-chat': rec('om_sec', { chatType: 'secret' }), bot: rec('om_bot', { fromBot: true }),
+    thread: rec('om_thr', { inThread: true }), gap: rec('om_gap', { at: T - 3600e3 }), unknown: rec('om_unk', { at: T - 1300e3 }) };
+  const found = [rec('om_ok'), rec('om_sys_ok', { msgType: 'system' })];
+  const seen = new Map(found.map((r) => [r.vendorId, T]));
+  const convAt = new Map([['oc_a', T + 20e3]]);
+  const run = (F) => F.sample([...Object.values(FX), ...found], { coveredTo: T + 200e3, memStart: T - 4000e3, seen, blind: BL, wins, convAt, now: T + 233e3 });
+  const sm = run(F0);
+  const cls = Object.fromEntries(sm.misses.map((x) => [x.id, x.cls]));
+  const wantCls = Object.fromEntries(Object.entries(FX).map(([k, r]) => [r.vendorId, k]));
+  ok(JSON.stringify(cls) === JSON.stringify(wantCls), '⑪ every miss has ONE class: lag / excluded type / excluded chat / bot / thread reply / gap / unknown', JSON.stringify(cls));
+  ok(sm.n === 3 && sm.p === 2 && JSON.stringify(sm.excluded) === JSON.stringify({ 'excluded-type': 2, 'excluded-chat': 1, bot: 1, thread: 1, gap: 1 }), '⑪ only a miss the search COULD return counts (lag + unknown: 2 of 3 samples); a record it cannot return is no sample, found or not', JSON.stringify({ n: sm.n, p: sm.p, ex: sm.excluded }));
+  const lagRow = sm.misses.find((x) => x.id === 'om_lag');
+  ok(lagRow && lagRow.ageAtFirstSeen === 223 && lagRow.searchWindow.from === T - 60e3 && lagRow.searchWindow.to === T + 60e3 && F0.searchAgeSec(lagRow) === 50 && lagRow.hadSearchHit === true && lagRow.convId === 'oc_a' && lagRow.chatType === 'group' && !('text' in lagRow),
+    '⑪ a memo row: id, conversation, chat type, type, created / first seen (age 223 s), the windows that searched it (last look 50 s in), hadSearchHit — never text', JSON.stringify(lagRow));
+  const noWins = F0.sample([FX.gap], { coveredTo: T + 200e3, memStart: T - 4000e3, seen: new Map() });
+  ok(noWins.p === 1 && noWins.misses[0].cls === 'unknown', '⑪ a caller that hands no windows cannot say gap or lag — the miss is unknown and COUNTS', JSON.stringify(noWins.misses));
+  // THE MEMO: bounded (oldest out), one row per id, read back field by field
+  const many = Array.from({ length: 620 }, (_, i) => ({ id: `om_${i}`, cls: 'lag', createdAt: i }));
+  const memo = F0.memoAdd(F0.memoAdd([], many), [{ id: 'om_619', cls: 'unknown', createdAt: 9 }]);
+  const disk = F0.memoFromDisk({ rows: [...memo.slice(-2), { id: 'bad id!', cls: 'lag' }, { id: 'om_x', cls: 'nonsense' }, 'junk', { id: 'om_y', cls: 'gap', text: 'secret', searchWindow: { from: 'a' } }] });
+  ok(memo.length === F0.MISS_MEMO_MAX && memo[0].id === 'om_120' && memo.filter((x) => x.id === 'om_619').length === 1 && memo[memo.length - 1].cls === 'unknown' && disk.length === 3 && !('text' in disk[2]) && disk[2].searchWindow === null,
+    `⑪ the memo holds ≤ ${F0.MISS_MEMO_MAX} rows (the oldest out), one per id; the file is read back field by field (garbage dropped, no text)`, JSON.stringify({ n: memo.length, first: memo[0].id, disk }));
+  // THE LEARNED OVERLAP: p95 of the lag rows' ageAtFirstSeen, bounded 30 s – 10 min, the newest 20
+  const lagRows = (ages) => ages.map((a, i) => ({ id: `om_l${i}`, cls: 'lag', ageAtFirstSeen: a }));
+  const lm = [F0.lagMargin(lagRows([223])), F0.lagMargin(lagRows([10])), F0.lagMargin(lagRows([5000])), F0.lagMargin(lagRows(Array.from({ length: 20 }, (_, i) => (i + 1) * 10))), F0.lagMargin([...lagRows([600, 600, 600, 600, 600]), ...lagRows(Array(20).fill(100))]), F0.lagMargin([{ id: 'a', cls: 'unknown', ageAtFirstSeen: 900 }])];
+  ok(lm[0].sec === 223 && lm[1].sec === 30 && lm[2].sec === 600 && lm[3].sec === 190 && lm[4].sec === 100 && lm[5] === null, '⑪ lagMargin: p95 (nearest rank) of the lag rows\' age, bounded [30 s, 10 min], re-learned from the newest 20; none ⇒ the setting stands', JSON.stringify(lm));
+  ok(F0.overlapOf(60, null) === 60 && F0.overlapOf(60, { sec: 223 }) === 223 && F0.overlapOf(300, { sec: 100 }) === 300 && F0.overlapOf(10, null) === 30 && F0.overlapOf(60, { sec: 9999 }) === 600, '⑪ overlapOf: the setting or the learned margin, whichever is wider (≥ 30 s, the margin ≤ 10 min)');
+  // A STUB SEARCH WHOSE INDEX LAGS 90 s: a message every 7 s for 40 min; the per-chat poll fetches each 223 s after it was
+  // written. The feed's window learns its overlap from the first lag misses ⇒ the second half is found WHOLE.
+  const simulate = (F) => {
+    const LAG = 90e3, decl = { maxWindowSec: 3600 };
+    const msgs = Array.from({ length: Math.floor(2400 / 7) }, (_, i) => ({ id: `om_s${i}`, at: T + i * 7e3 }));
+    const feed = { cursorAt: null };
+    const seenS = new Map(); let wins2 = []; let memo2 = []; let margin = null; let pending = []; const missAt = [];
+    let fetched = 0;
+    for (let t = T + 30e3; t <= T + 2700e3; t += 30e3) {
+      const ov = F.overlapOf(60, margin);
+      const w = F.window(feed, t, decl, { overlapSec: ov });
+      for (const m of msgs) if (m.at >= w.from && m.at <= w.to && t - m.at >= LAG) seenS.set(m.id, t);
+      wins2 = F.winsAdd(wins2, w.from, w.to); feed.cursorAt = w.to;
+      const batch = [];
+      while (fetched < msgs.length && msgs[fetched].at + 223e3 <= t) { const m = msgs[fetched++]; batch.push({ vendorId: m.id, at: m.at, msgType: 'text', convId: 'oc_s', firstSeenAt: t }); }
+      const sm2 = F.sample(batch, { coveredTo: feed.cursorAt - ov * 1000, memStart: T, seen: seenS, pending, wins: wins2, now: t });
+      pending = sm2.pending;
+      if (sm2.misses.length) { memo2 = F.memoAdd(memo2, sm2.misses); margin = F.lagMargin(memo2); for (const x of sm2.misses) if (F.MISS_COUNTED.includes(x.cls)) missAt.push(x.createdAt); }
+    }
+    return { early: missAt.filter((a) => a < T + 1200e3).length, late: missAt.filter((a) => a >= T + 1200e3).length, margin, classes: F.memoCounts(memo2) };
+  };
+  const sim = simulate(F0);
+  ok(sim.early > 0 && sim.late === 0 && sim.margin && sim.margin.sec >= 200 && Object.keys(sim.classes).join() === 'lag', `⑪ a search lagging 90 s: ${sim.early} lag misses before the overlap learned ${sim.margin && sim.margin.sec} s, then NONE — the window finds every record`, JSON.stringify(sim));
+  // THE FLIP RULES: promote only after 3 CLEAN cycles; a demotion holds 6 h; demote unchanged (> 2 % over ≥ 20)
+  const CYC = 1020e3, full = { rate: 0, total: 300, missed: 0 };
+  const fv = [F0.modeVerdict('measuring', full, { spanMs: 3 * CYC, minSpanMs: CYC, cleanMs: CYC }).mode, F0.modeVerdict('measuring', full, { spanMs: 3 * CYC, minSpanMs: CYC, cleanMs: 3 * CYC - 1 }).mode, F0.modeVerdict('measuring', full, { spanMs: 3 * CYC, minSpanMs: CYC, cleanMs: 3 * CYC }).mode,
+    F0.modeVerdict('demoted', full, { minSpanMs: CYC, cleanMs: 3 * CYC, sinceDemotedMs: 6 * 3600e3 - 1 }).mode, F0.modeVerdict('demoted', full, { minSpanMs: CYC, cleanMs: 3 * CYC, sinceDemotedMs: 6 * 3600e3 }).mode,
+    F0.modeVerdict('carrying', { rate: 0.05, total: 20, missed: 1 }, { minSpanMs: CYC, cleanMs: 0 }).mode];
+  ok(JSON.stringify(fv) === JSON.stringify(['measuring', 'measuring', 'carrying', 'demoted', 'carrying', 'demoted']), '⑪ promote only after 3 clean full cycles (1 or 2.99 are not enough); a demotion never flips back < 6 h; demote unchanged', JSON.stringify(fv));
+  // RED CONTROLS
+  const Fu = patch("const MISS_COUNTED = Object.freeze(['lag', 'unknown']);", "const MISS_COUNTED = Object.freeze(['lag']);", 'miss-unclassified-free');
+  const smU = run(Fu);
+  ok(smU.p === 1 && sm.p === 2, `CONTROL: a copy counting an unclassified miss as 0 reads ${smU.p} counted miss(es) where there are 2 — ⑪'s count would be red`, JSON.stringify({ mut: smU.p, real: sm.p }));
+  const Fo = patch('  return Math.max(OVERLAP_MIN_SEC, Math.round(s), Math.round(m));', '  return Math.max(OVERLAP_MIN_SEC, Math.round(s));', 'overlap-unlearned');
+  const simO = simulate(Fo);
+  ok(simO.late > 0, `CONTROL: the window WITHOUT the learned overlap keeps missing (${simO.late} lag misses in the second half) — ⑪'s simulation would be red`, JSON.stringify(simO));
+  const Fp = patch('const PROMOTE_CYCLES = 3;', 'const PROMOTE_CYCLES = 1;', 'promote-one-cycle');
+  ok(Fp.modeVerdict('measuring', full, { spanMs: 3 * CYC, minSpanMs: CYC, cleanMs: CYC }).mode === 'carrying', 'CONTROL: the promote rule with ONE clean cycle promotes the fixture ⑪ holds back — red');
+}
 for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 8, label: 'larkfeed: ' })) ok(c.pass, c.name, c.pass ? undefined : c.detail);
 
 console.log(`\n${failN ? '✗' : '✓'} test-channel-feed: ${passN} passed, ${failN} failed`);

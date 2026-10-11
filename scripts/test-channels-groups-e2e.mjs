@@ -477,7 +477,8 @@ const railAfter = await until(`(() => { const n = ${RAIL}; return n === ${railBe
 ok(railBefore >= 1 && railAfter !== null, `the RAIL's Channels badge counts the group's unread too (${railBefore} → ${railBefore - 1} as the group is read)`, JSON.stringify({ railBefore, railAfter }));
 
 // ── ⑧ the Accounts fold is persisted ──
-await p1.evaljs(`(() => { const h = document.querySelector('.rail-panel-channels .chan-part[data-part="accounts"] .chan-part-head'); h.click(); return 1; })()`);
+// lane channels-fold-default: Accounts starts folded when every account section in it does — open it first, then fold it
+await p1.evaljs(`(() => { const h = document.querySelector('.rail-panel-channels .chan-part[data-part="accounts"] .chan-part-head'); if (h.parentElement.classList.contains('chan-part-collapsed')) h.click(); h.click(); return 1; })()`);
 let us = null;
 for (let i = 0; i < 20; i++) { us = (await api('GET', '/api/user-state')).body; if (us && us.channelsPanelFolds && us.channelsPanelFolds.accounts === true) break; await sleep(250); }
 ok(us && us.channelsPanelFolds && us.channelsPanelFolds.accounts === true, 'folding Accounts PATCHes user state (`channelsPanelFolds.accounts: true`)', JSON.stringify(us && us.channelsPanelFolds));

@@ -1046,6 +1046,7 @@ const BELT = [
   ['src/lib/channel-groups-view.js', "const text = String((rec && rec.text) || '');", 'B-ff04 groupBodyRuns: the group window calls it only for a record NOT cleared (renderGroupRecord draws clearedText() for a cleared one first)'],
   ['src/lib/channel-groups-view.js', "title: g.name || g.id, lastAt: num(g.lastAt || g.createdAt), lastText: g.lastText || '',", 'the PURE row model (data): the panel words lastCleared'],
   ['src/lib/channel-groups-view.js', "title: c.title || (typeof untitled === 'function' ? untitled(c.kind) : '') || c.id, lastAt: num(c.lastAt), lastText: c.lastText || '',", 'an ADAPTER conversation (not a group) — lark-search-poll words an untitled one (the .197 integration re-pinned the line)'],
+  ['src/lib/channel-groups-view.js', "return (rows || []).filter((r) => r && !r.unlisted && textMatches([r.title || r.id, r.adapterLabel, r.lastText], s));", 'lane channels-fold-default accountMatches: the filter\'s rule over the rows the panel holds — a yes / no per row, no words kept or drawn here'],
 ];
 const beltCensus = (srcs) => {
   const hits = [];
@@ -1099,6 +1100,8 @@ const CACHES = {
   'src/lib/channels-panel.js|ends': 'list name → its end element (a sentinel / skeleton row — no words of a row)',
   'src/lib/channels-panel.js|aroundCache': 'design 010: the search dialog\'s around sheets — the vendor\'s records per found message, a local of ONE dialog (gone with it; never stored)',
   'src/lib/channels-panel.js|curSystems': 'lane webhook-l2-ui: the account ids whose capability row declares an inbound door (pushTransport http-inbound) of the last build — ids, no words',
+  'src/lib/channels-panel.js|DEFAULT_FOLD': 'lane channels-fold-default: account id → its default fold held for the page (a boolean — no words)',
+  'src/lib/channels-panel.js|curFolds': 'lane channels-fold-default: account id → this build\'s fold {folded, virtual, needN, matchRows} — matchRows are the store\'s own row objects, replaced whole at every build (a clear\'s broadcast redraws it)',
   'src/lib/channels-panel.js|curBadges': 'lane channels-list-polish: account id → its badge spec (hue / internal / vendor glyph) of the last build — no words',
   'src/lib/channels-panel.js|chain': 'list name → how many pages read while its end stayed in view (a number)',
   'src/lib/channels-panel.js|chainTop': 'list name → the scroll box\'s scrollTop at its last page read (a number)',

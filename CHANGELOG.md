@@ -2,6 +2,14 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.251 — 2026-10-11
+
+### Changed
+- The Channels list starts folded — each account shows its counts, opens with one press, and remembers your choice; anything that needs you is open already.
+
+### Fixed
+- Lark's new-message search no longer flips on and off or repeats its warning — misses are found and fixed at their cause, and the row says its state once.
+
 ## 2.369.250 — 2026-10-10
 
 ### Changed

@@ -4797,6 +4797,14 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .chan-sec-chev { font-size: 10px; color: var(--text-dim); transition: transform var(--transition); }
 .chan-sec.chan-collapsed .chan-sec-chev { transform: rotate(-90deg); }
 .chan-sec.chan-collapsed .chan-rows, .chan-sec.chan-collapsed .chan-sec-note, .chan-sec.chan-collapsed .chan-sec-empty, .chan-sec.chan-collapsed .chan-sec-health, .chan-sec.chan-collapsed .mounts-errline { display: none; }
+/* lane channels-fold-default: a FOLDED section's head says what is inside — what needs the person (the accent), the
+   unread, a dot — on one line that gives way before the buttons do */
+.chan-sec-fold { display: none; }
+.chan-sec.chan-collapsed .chan-sec-fold { display: inline-flex; align-items: center; gap: 4px; min-width: 0; flex: 0 1 auto; overflow: hidden; white-space: nowrap; font-weight: 500; color: var(--text-dim); }
+.chan-sec-fold > span:empty:not(.chan-sec-news) { display: none; }
+.chan-sec-fold-need { color: var(--accent); font-weight: 600; flex-shrink: 0; }
+.chan-sec-fold-unread { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.chan-sec-news { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex: none; }
 .chan-sec-kind { font-size: 13px; color: var(--text-dim); }
 /* THE LOOK (channel-polish): an account's kind is a small TILE on its hue (the avatar grammar, square-ish so
    an account never reads as a person) */

@@ -500,16 +500,31 @@ function birthFacts(hit, { linkedAt = 0, backlogUntil = 0, catchUp = false, wind
  * COMPLETE window has searched: `coveredTo` = the cursor − the overlap. A record not yet covered waits in `pending`
  * (bounded — judged once a window covers it); a record older than `memStart` (this process's first window) is never
  * judged (it was never this process's to find). Missed = its message id is not in `seen`.
- *   records   [{vendorId, at, msgType?}]  (what an ingest / a thread walk appended)
- * → { n, p, pending, missedTypes: {type: n} }
+ * lane lark-search-miss: EVERY miss is NAMED (`misses` — a memo row with its class, `classifyMiss`) and only a miss the
+ * search COULD have returned counts (`MISS_COUNTED`); a record of a class the search cannot return (`blind` — the
+ * adapter's declaration) or that no window searched (a gap) is no sample at all, found or not (`excluded` by class).
+ *   records   [{vendorId, at, msgType?, convId?, chatType?, inThread?, fromBot?, firstSeenAt?}]  (what an ingest / a
+ *             thread walk appended)
+ *   blind     the adapter's `caps.changeFeed.blind` · wins  the completed windows `[[from, to]…]` (the engine's ring)
+ *   convAt    Map convId → the newest instant a search hit named in that conversation (`hadSearchHit`)
+ * → { n, p, pending, missedTypes: {type: n}, misses: [memo row], excluded: {class: n} }
  */
-function sample(records, { coveredTo = null, memStart = null, seen = new Map(), pending = [] } = {}) {
+function sample(records, { coveredTo = null, memStart = null, seen = new Map(), pending = [], blind = null, wins = null, convAt = null, now = null } = {}) {
   const cov = num(coveredTo), ms = num(memStart);
-  const out = { n: 0, p: 0, pending: [], missedTypes: {} };
+  const out = { n: 0, p: 0, pending: [], missedTypes: {}, misses: [], excluded: {} };
   if (ms === null) return out;
+  const bl = blindOf(blind);
   const judge = (r) => {
-    out.n++;
-    if (!(seen && typeof seen.has === 'function' && seen.has(r.vendorId))) { out.p++; const ty = String(r.msgType || 'message').slice(0, 32); out.missedTypes[ty] = (out.missedTypes[ty] || 0) + 1; }
+    const found = !!(seen && typeof seen.has === 'function' && seen.has(r.vendorId));
+    const own = blindClass(r, bl);
+    if (found && own) { out.excluded[own] = (out.excluded[own] || 0) + 1; return; }
+    if (found) { out.n++; return; }
+    const row = missRow(r, { wins, convAt, now });
+    row.cls = classifyMiss(row, bl, { windowsKnown: Array.isArray(wins) });
+    out.misses.push(row);
+    const ty = String(r.msgType || 'message').slice(0, 32); out.missedTypes[ty] = (out.missedTypes[ty] || 0) + 1;
+    if (!MISS_COUNTED.includes(row.cls)) { out.excluded[row.cls] = (out.excluded[row.cls] || 0) + 1; return; }
+    out.n++; out.p++;
   };
   const all = (Array.isArray(pending) ? pending : []).concat(Array.isArray(records) ? records : []);
   const dedup = new Set();
@@ -519,7 +534,7 @@ function sample(records, { coveredTo = null, memStart = null, seen = new Map(), 
     const at = Number(r.at) || 0;
     if (at < ms) continue;
     if (cov !== null && at <= cov) judge(r);
-    else out.pending.push({ vendorId: String(r.vendorId), at, msgType: r.msgType || null });
+    else out.pending.push(pendingOf(r, at));
   }
   if (out.pending.length > PENDING_SAMPLES_MAX) out.pending = out.pending.slice(out.pending.length - PENDING_SAMPLES_MAX);
   return out;
@@ -549,11 +564,16 @@ function pagesLeft(calls, now, perMin) { return Math.max(0, Math.floor(Number(pe
  * later). Within one cold cycle every conversation has had its own independent reading judged.
  * → { mode, flipped, from, why }
  */
-function modeVerdict(mode, m, { spanMs = Infinity, minSpanMs = 0 } = {}) {
+function modeVerdict(mode, m, { spanMs = Infinity, minSpanMs = 0, cleanMs = Infinity, cycles = PROMOTE_CYCLES, sinceDemotedMs = Infinity } = {}) {
   const cur = MODES.includes(mode) ? mode : 'measuring';
   const rate = Number(m && m.rate) || 0, total = Number(m && m.total) || 0;
   const spanned = !(Number(spanMs) < Number(minSpanMs));
-  if ((cur === 'measuring' || cur === 'demoted') && total >= PROMOTE_MIN && rate <= MISS_THRESHOLD && spanned) return { mode: 'carrying', flipped: true, from: cur, why: 'complete' };
+  // lane lark-search-miss (owner 2026-10-11): a promotion needs the last `cycles` FULL polling cycles CLEAN — no counted
+  // miss (`cleanMs` = now − the newest counted miss, or the measurement's start) — and a demotion holds DEMOTE_HOLD_MS
+  // before the feed may carry again by itself (the 200-sample rule alone re-promoted and re-demoted it every cycle)
+  const clean = !(Number(cleanMs) < Math.max(1, Number(cycles) || PROMOTE_CYCLES) * (Number(minSpanMs) || 0));
+  const held = cur === 'demoted' && Number(sinceDemotedMs) < DEMOTE_HOLD_MS;
+  if ((cur === 'measuring' || cur === 'demoted') && total >= PROMOTE_MIN && rate <= MISS_THRESHOLD && spanned && clean && !held) return { mode: 'carrying', flipped: true, from: cur, why: 'complete' };
   if (cur === 'carrying' && total >= DEMOTE_MIN && rate > MISS_THRESHOLD) return { mode: 'demoted', flipped: true, from: cur, why: 'missed' };
   return { mode: cur, flipped: false, from: cur, why: null };
 }
@@ -633,6 +653,161 @@ function coverageOf(records, { gaps = [], ...o } = {}) {
   return { ...sample(keep, { ...o, pending: pend }), excluded };
 }
 
+/**
+ * THE MISS MEMO (lane lark-search-miss, owner 2026-10-11 「老有这个提示是咋回事 能根治吗？」). The measurement used to COUNT
+ * misses and never NAME one; the feed re-promoted and re-demoted every cycle and warned each time. Measured on the
+ * owner's account (read-only, 2026-10-11): 6 of the 7 misses that demoted it were `system` records (a member joined /
+ * left — the search does not index them) and 1 a `post` the per-chat poll fetched 223 s after it was written (the
+ * search had last looked at it ~90 s in: the index lag); lifetime, 51 of 59 misses were `system`. So every miss is a
+ * ROW with its facts and ONE class (`MISS_CLASSES`, first match wins):
+ *   excluded-type / excluded-chat / bot / thread  — a record the search CANNOT (or is not asked to) return, as the
+ *              adapter DECLARES it (`caps.changeFeed.blind`): its source is the per-chat poll / the topic check, never
+ *              counted (not even as a sample)
+ *   gap        no window of this process searched its instant (a long stop's older span — the catch-up's)
+ *   lag        the search last looked at it < LAG_MAX_SEC after it was written: younger than the index lag — COUNTED,
+ *              and the window's overlap learns from it (`lagMargin`)
+ *   unknown    anything else — COUNTED (a miss with no class is never free)
+ * The memo is bounded (MISS_MEMO_MAX rows, oldest out); the card shows the last MISS_SHOW_MAX.
+ */
+const MISS_MEMO_MAX = 500;
+const MISS_SHOW_MAX = 20;
+const MISS_CLASSES = Object.freeze(['excluded-type', 'excluded-chat', 'bot', 'thread', 'gap', 'lag', 'unknown']);
+const MISS_COUNTED = Object.freeze(['lag', 'unknown']);
+/** The learned overlap's bounds (seconds) and the lag-class ages it learns from (the newest kept). */
+const LAG_MIN_SEC = 30;
+const LAG_MAX_SEC = 600;
+const LAG_LEARN_N = 20;
+/** A promotion needs this many full polling cycles without a counted miss; a demotion holds this long. */
+const PROMOTE_CYCLES = 3;
+const DEMOTE_HOLD_MS = 6 * 3600e3;
+/** The completed windows the engine remembers to say which windows searched a missed record (≈ 4 h at 30 s). */
+const SEARCH_WINS_MAX = 512;
+const TYPE_RE = /^[a-z0-9_]{1,32}$/;
+const typeOf = (v) => { const x = String(v === null || v === undefined ? '' : v).toLowerCase().slice(0, 32); return TYPE_RE.test(x) ? x : null; };
+/** The adapter's declaration of what its search cannot return → `{msgTypes, chatTypes, bots, threadReplies}` (closed). */
+function blindOf(decl) {
+  const d = decl && typeof decl === 'object' ? decl : {};
+  const list = (a) => (Array.isArray(a) ? a.map(typeOf).filter(Boolean).slice(0, 16) : []);
+  return { msgTypes: list(d.msgTypes), chatTypes: list(d.chatTypes), bots: d.bots === true, threadReplies: d.threadReplies === true };
+}
+/** A record's OWN class the search cannot return (its type, its chat, its author, its thread) — or null. */
+function blindClass(r, bl) {
+  const b = bl || blindOf(null);
+  if (!r) return null;
+  const ty = typeOf(r.msgType);
+  if (ty && b.msgTypes.includes(ty)) return 'excluded-type';
+  const ct = typeOf(r.chatType);
+  if (ct && b.chatTypes.includes(ct)) return 'excluded-chat';
+  if (r.fromBot === true && b.bots) return 'bot';
+  if (r.inThread === true && b.threadReplies) return 'thread';
+  return null;
+}
+/** The span of the completed windows that searched instant `at` → `{from, to}` | null (none did). */
+function searchWindowOf(wins, at) {
+  const t = num(at);
+  if (t === null || !Array.isArray(wins)) return null;
+  let from = null, to = null;
+  for (const w of wins) {
+    const a = num(w && w[0]), b = num(w && w[1]);
+    if (a === null || b === null || t < a || t > b) continue;
+    if (from === null || a < from) from = a;
+    if (to === null || b > to) to = b;
+  }
+  return from === null ? null : { from, to };
+}
+/** A pending record keeps the facts its judgement needs (bounded). */
+function pendingOf(r, at) {
+  return { vendorId: String(r.vendorId), at, msgType: typeOf(r.msgType), convId: idOf(r.convId), chatType: typeOf(r.chatType), inThread: r.inThread === true, fromBot: r.fromBot === true, firstSeenAt: num(r.firstSeenAt) };
+}
+/** ONE memo row (bounded — ids in the vendor alphabet, types in [a-z0-9_]) — no text, no author, no snippet. */
+function missRow(r, { wins = null, convAt = null, now = null } = {}) {
+  const at = Number(r && r.at) || 0;
+  const seenAt = num(r && r.firstSeenAt) !== null ? Number(r.firstSeenAt) : num(now);
+  const sw = searchWindowOf(wins, at);
+  const convId = idOf(r && r.convId);
+  const hitAt = convId && convAt && typeof convAt.get === 'function' ? num(convAt.get(convId)) : null;
+  return {
+    id: idOf(r && r.vendorId), convId, chatType: typeOf(r && r.chatType), msgType: typeOf(r && r.msgType), createdAt: at,
+    firstSeenAt: seenAt, ageAtFirstSeen: seenAt !== null ? Math.max(0, Math.round((seenAt - at) / 1000)) : null,
+    searchWindow: sw, inThread: !!(r && r.inThread === true), fromBot: !!(r && r.fromBot === true),
+    // the search named this conversation at or after the windows that searched this record (its other messages were found)
+    hadSearchHit: hitAt !== null && hitAt >= (sw ? sw.from : at),
+  };
+}
+/** THE CLASS of a memo row (first match wins — `MISS_CLASSES`'s order). `blind` = `blindOf(caps.changeFeed.blind)`;
+ *  `windowsKnown` = the caller handed the completed windows (without them neither a gap nor a lag can be said). */
+function classifyMiss(row, blind, { windowsKnown = true } = {}) {
+  const own = blindClass(row, blind && blind.msgTypes ? blind : blindOf(blind));
+  if (own) return own;
+  const sw = row && row.searchWindow;
+  if (!sw || num(sw.to) === null) return windowsKnown ? 'gap' : 'unknown';
+  const looked = (Number(sw.to) - (Number(row.createdAt) || 0)) / 1000;
+  return looked >= 0 && looked < LAG_MAX_SEC ? 'lag' : 'unknown';
+}
+/** The seconds the search last looked at a row after it was written (the class word's number) — or null. */
+function searchAgeSec(row) {
+  const sw = row && row.searchWindow;
+  return sw && num(sw.to) !== null ? Math.max(0, Math.round((Number(sw.to) - (Number(row.createdAt) || 0)) / 1000)) : null;
+}
+/** The memo after new rows: a NEW array, the oldest out past MISS_MEMO_MAX, one row per id (the newest kept). */
+function memoAdd(memo, rows) {
+  const list = (Array.isArray(memo) ? memo : []).filter((x) => x && typeof x === 'object');
+  const add = (Array.isArray(rows) ? rows : []).filter((x) => x && typeof x === 'object');
+  const ids = new Set(add.map((x) => x.id).filter(Boolean));
+  const out = list.filter((x) => !(x.id && ids.has(x.id))).concat(add);
+  return out.length > MISS_MEMO_MAX ? out.slice(out.length - MISS_MEMO_MAX) : out;
+}
+/** The memo read back from its file — every row rebuilt field by field (bound before trust), at most MISS_MEMO_MAX. */
+function memoFromDisk(disk) {
+  const rows = disk && typeof disk === 'object' && Array.isArray(disk.rows) ? disk.rows.slice(-MISS_MEMO_MAX) : [];
+  const out = [];
+  for (const x of rows) {
+    if (!x || typeof x !== 'object' || !idOf(x.id) || !MISS_CLASSES.includes(x.cls)) continue;
+    const sw = x.searchWindow && num(x.searchWindow.from) !== null && num(x.searchWindow.to) !== null ? { from: Number(x.searchWindow.from), to: Number(x.searchWindow.to) } : null;
+    out.push({ id: idOf(x.id), convId: idOf(x.convId), chatType: typeOf(x.chatType), msgType: typeOf(x.msgType), createdAt: num(x.createdAt) || 0, firstSeenAt: num(x.firstSeenAt), ageAtFirstSeen: num(x.ageAtFirstSeen), searchWindow: sw, inThread: x.inThread === true, fromBot: x.fromBot === true, hadSearchHit: x.hadSearchHit === true, cls: x.cls });
+  }
+  return out;
+}
+/** Rows per class over the memo → `{class: n}`. */
+function memoCounts(memo) {
+  const out = {};
+  for (const x of Array.isArray(memo) ? memo : []) if (x && MISS_CLASSES.includes(x.cls)) out[x.cls] = (out[x.cls] || 0) + 1;
+  return out;
+}
+/** The class most of the last MISS_SHOW_MAX COUNTED rows hold (the line's word at a flip) — or null. */
+function dominantClass(memo) {
+  const rows = (Array.isArray(memo) ? memo : []).filter((x) => x && MISS_COUNTED.includes(x.cls)).slice(-MISS_SHOW_MAX);
+  const c = memoCounts(rows);
+  let best = null;
+  for (const k of MISS_COUNTED) if (c[k] && (!best || c[k] > c[best])) best = k;
+  return best;
+}
+/**
+ * THE LEARNED OVERLAP: the 95th percentile (nearest rank) of `ageAtFirstSeen` over the newest LAG_LEARN_N lag-class
+ * rows — the age at which the per-chat poll (the authority) found what the search had not yet indexed — bounded to
+ * [LAG_MIN_SEC, LAG_MAX_SEC]. → `{sec, n}` | null (no lag miss yet: the setting's overlap stands). Re-learned on every
+ * new lag row; the engine persists it with the feed row.
+ */
+function lagMargin(memo) {
+  const ages = (Array.isArray(memo) ? memo : []).filter((x) => x && x.cls === 'lag' && num(x.ageAtFirstSeen) !== null).slice(-LAG_LEARN_N).map((x) => Number(x.ageAtFirstSeen)).sort((a, b) => a - b);
+  if (!ages.length) return null;
+  const p95 = ages[Math.max(0, Math.ceil(0.95 * ages.length) - 1)];
+  return { sec: Math.min(LAG_MAX_SEC, Math.max(LAG_MIN_SEC, Math.round(p95))), n: ages.length };
+}
+/** The overlap a window uses (seconds): the setting (≥ OVERLAP_MIN_SEC) or the learned margin, whichever is wider. */
+function overlapOf(settingSec, margin) {
+  const s = num(settingSec) === null ? OVERLAP_DEFAULT_SEC : Number(settingSec);
+  const m = margin && num(margin.sec) !== null ? Math.min(LAG_MAX_SEC, Number(margin.sec)) : 0;
+  return Math.max(OVERLAP_MIN_SEC, Math.round(s), Math.round(m));
+}
+/** The completed windows' ring after one more `[from, to]` (a NEW array, ≤ SEARCH_WINS_MAX, the oldest out). */
+function winsAdd(wins, from, to) {
+  const a = num(from), b = num(to);
+  const list = Array.isArray(wins) ? wins.slice() : [];
+  if (a !== null && b !== null && b > a) list.push([a, b]);
+  return list.length > SEARCH_WINS_MAX ? list.slice(list.length - SEARCH_WINS_MAX) : list;
+}
+
 /** The feed's fresh bound (§2.8): the feed carries only while its last good page is younger than this. */
 function freshMs(everySec, overlapSec) { return Math.max(180e3, (3 * (Number(everySec) || 30) + (Number(overlapSec) || OVERLAP_DEFAULT_SEC)) * 1000); }
 
@@ -645,4 +820,6 @@ module.exports = {
   sample, minuteAt, pagesLeft, modeVerdict, trimSeen, threadDueKey, splitThreadDueKey, freshMs, idOf,
   fieldList, mergeFieldLists, shapeVerdict, recentUnreadable, recentUnreadableCount,
   GAPS_MAX, gapVerdict, addGap, coverageOf,
+  MISS_MEMO_MAX, MISS_SHOW_MAX, MISS_CLASSES, MISS_COUNTED, LAG_MIN_SEC, LAG_MAX_SEC, LAG_LEARN_N, PROMOTE_CYCLES, DEMOTE_HOLD_MS, SEARCH_WINS_MAX,
+  blindOf, blindClass, searchWindowOf, missRow, classifyMiss, searchAgeSec, memoAdd, memoFromDisk, memoCounts, dominantClass, lagMargin, overlapOf, winsAdd,
 };

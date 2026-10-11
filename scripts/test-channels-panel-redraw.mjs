@@ -95,6 +95,8 @@ for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => { clean
 const waitServer = async () => { for (let i = 0; i < 160; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); return true; } catch { await sleep(250); } } return false; };
 ok(await waitServer(), 'the worktree server booted on the seeded store');
 const api = async (method, p, body) => { const r = await fetch(`http://127.0.0.1:${PORT}${p}`, { method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) }); let j = {}; try { j = await r.json(); } catch {} return { status: r.status, json: j }; };
+// lane channels-fold-default: the account card starts folded (nothing in it needs the person) — the person opened it
+await api('PATCH', '/api/user-state', { channelsPanelFolds: { 'acct:lark': false } });
 const WebSocket = require(path.join(repo, 'node_modules/ws'));
 for (let i = 0; i < 120; i++) { try { await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json(); break; } catch { await sleep(250); } }
 async function newPage() {
@@ -215,7 +217,8 @@ const F = await p1.evaljs(`(async () => {
   const d = ${J(digest)};
   const fire = (dd) => { for (const fn of window.app.ws.globalHandlers) { try { fn({ type: 'channels-updated', digest: dd, partial: !!dd.partial }); } catch (e) {} } };
   const sec = document.querySelector('.chan-sec.chan-account');
-  sec.querySelector('.chan-sec-head').click();
+  // lane channels-fold-default: a section with nothing that needs the person starts folded — fold it only if it is open
+  if (!sec.classList.contains('chan-collapsed')) sec.querySelector('.chan-sec-head').click();
   const folded0 = sec.classList.contains('chan-collapsed');
   fire(d); await new Promise((r) => setTimeout(r, 50));
   const sec1 = document.querySelector('.chan-sec.chan-account');

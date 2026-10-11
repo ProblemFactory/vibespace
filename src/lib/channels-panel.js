@@ -67,6 +67,7 @@ import * as R from '../integration-registry.js';
 import { routeErrorText, groupErrorText, statusTagParts, viewSwitchText } from './channel-words.js';
 // g3 (design §22): the IM-first list's arithmetic and the group dialogs.
 import { groupListRows, foldsFrom, GROUP_ADAPTER_ID, firstScreen, statusTag, filterRows, internalBlock, isInternal } from './channel-groups-view.js';
+import { accountFold, accountFoldDefault, accountFoldKey, accountMatches, foldsToWrite, needsYou } from './channel-groups-view.js';   // lane channels-fold-default
 // design 008 (B-3cf8): the rows this panel HOLDS — the first read + every page read, keyed (PURE)
 import { createRowStore, applyFirst, applyPage, applyBroadcast, listRows, focusRowsOf, ensureList, pageQueryOf, accountList } from './channel-rows.js';
 import { afterCursor, PAGE_MAX, listRowModel } from '../channel-focus.js';
@@ -315,11 +316,13 @@ function accountLines(app, a, kinds) {
       const clock = (ms) => { try { return new Date(ms).toLocaleTimeString(deviceLocale(), { hour: '2-digit', minute: '2-digit' }); } catch { return ''; } };
       const fl = chanCaps.feedText(a.feed, { t, vendor: vendorW, now: Date.now(), clock });
       if (fl) {
-        const n = noteLine('chan-sec-note', fl, { warn: a.feed.state === 'refused' || a.feed.state === 'demoted' || (a.feed.state === 'backoff' && a.feed.why === 'failed') });
+        // lane lark-search-miss (owner 2026-10-11): the measurement's state is ONE QUIET line — a demotion is no warning (the
+        // per-chat poll carries every message meanwhile); only a refusal and a failing search keep the warning style
+        const n = noteLine('chan-sec-note', fl, { warn: a.feed.state === 'refused' || (a.feed.state === 'backoff' && a.feed.why === 'failed') });
         n.dataset.chanFeed = a.id;
-        // U3's answer, said where it is asked: which message types the search did not find (the measurement's diagnostic)
-        const mt = a.feed.counters && a.feed.counters.missedTypes ? Object.entries(a.feed.counters.missedTypes).filter(([, v]) => Number(v) > 0) : [];
-        if (mt.length) n.title = t('Not found by the search: {types}', { types: mt.map(([k, v]) => `${k} ×${v}`).join(', ') });
+        // its FACTS are the tooltip: the live numbers, the named misses with their class, the learned overlap, the topic checks
+        const facts = chanCaps.feedFactsText(a.feed, { t, clock });
+        if (facts) n.title = facts;
         if (a.feed.state === 'refused' && a.feed.why === 'forbidden') { const v = btn(t('Re-authorize'), reauth); v.classList.add('chan-sec-verb'); n.appendChild(v); }
         out.push(n);
         // lane lark-p2p verify r1: the hits the search returned that this version could not read are SAID on the card, with
@@ -327,9 +330,6 @@ function accountLines(app, a, kinds) {
         // desktop, while a feed dropping 89 % of what it finds is a silent failure); the shape park's line says them itself
         const un = a.feed.state === 'refused' && a.feed.why === 'shape' ? '' : chanCaps.feedUnreadableText(a.feed, { t });
         if (un) { const u = noteLine('chan-sec-note', un); u.dataset.chanFeedUnreadable = a.id; out.push(u); }
-        // lane lark-threads (A5): the thread measurement — does the search name threads, what the by-id reads found
-        const th = chanCaps.feedThreadsText(a.feed, { t });
-        if (th) { const u = noteLine('chan-sec-note', th); u.dataset.chanFeedThreads = a.id; out.push(u); }
       }
       const cl = chanCaps.feedCatchUpText(a.feed.catchUp, { t });
       if (cl) { const n = noteLine('chan-sec-note', cl); n.dataset.chanFeedCatchup = a.id; out.push(n); }
@@ -1027,6 +1027,12 @@ export function registerChannelsGearRow() {
 const COLLAPSED = new Set();
 /** Sections a user EXPLICITLY OPENED (overrides a default fold). */
 const EXPANDED = new Set();
+/** lane channels-fold-default: each ACCOUNT section's default fold, decided at its first draw on this page and HELD
+ *  (a row that comes to need the person later never opens a list under their hand — the folded head's count and dot
+ *  rise instead). The person's own open / close is user state (`channelsPanelFolds['acct:<id>']`) and wins. */
+const DEFAULT_FOLD = new Map();
+/** The accounts of the last draw — the fold map written back keeps only theirs (it never outlives an account). */
+let LIVE_ACCOUNTS = null;
 /** The archived-groups fold (per page session — a list the user asked to see). */
 let ARCHIVED_OPEN = false;
 /** THE LONG LISTS (2026-09-26: an account is an aggregated IM — 873
@@ -1054,13 +1060,16 @@ let VIEW = 'focus';
 // `user-state-updated` broadcast. ──
 let FOLDS = null;
 let foldsWired = false;
+/** lane channels-fold-default: this page's fold PATCHes in flight — the broadcast echo of an EARLIER one is older than
+ *  FOLDS (two quick presses: fold, open — the first echo would fold the section again under the person's hand) */
+let FOLD_WRITES = 0;
 /** Every live panel's `{c, draw}` — a fold another client made repaints them
  *  all; a panel no longer in the document is pruned at the next dispatch. */
 const FOLD_LISTENERS = new Set();
 async function loadFolds(app) {
   if (!foldsWired) {
     foldsWired = true;
-    app.ws.onGlobal((msg) => { if (msg.type === 'user-state-updated' && msg.state && msg.state.channelsPanelFolds) { FOLDS = foldsFrom(msg.state); for (const l of [...FOLD_LISTENERS]) { if (!l.c.isConnected) { FOLD_LISTENERS.delete(l); continue; } try { l.draw(); } catch {} } } });
+    app.ws.onGlobal((msg) => { if (msg.type === 'user-state-updated' && msg.state && msg.state.channelsPanelFolds) { if (FOLD_WRITES > 0) return; FOLDS = foldsFrom(msg.state); for (const l of [...FOLD_LISTENERS]) { if (!l.c.isConnected) { FOLD_LISTENERS.delete(l); continue; } try { l.draw(); } catch {} } } });
   }
   if (FOLDS) return FOLDS;
   const st = await fetchJson('/api/user-state');
@@ -1068,8 +1077,9 @@ async function loadFolds(app) {
   return FOLDS;
 }
 function setFold(part, folded) {
-  FOLDS = { ...(FOLDS || {}), [part]: !!folded };
-  fetch('/api/user-state', { method: 'PATCH', headers: JSON_HDR, body: JSON.stringify({ channelsPanelFolds: FOLDS }) }).catch(() => {});
+  FOLDS = foldsToWrite({ ...(FOLDS || {}), [part]: !!folded }, LIVE_ACCOUNTS);
+  FOLD_WRITES++;
+  fetch('/api/user-state', { method: 'PATCH', headers: JSON_HDR, body: JSON.stringify({ channelsPanelFolds: FOLDS }) }).catch(() => {}).finally(() => { FOLD_WRITES = Math.max(0, FOLD_WRITES - 1); });
 }
 
 /** A row's time: HH:MM today, "Yesterday", else the date in the DEVICE's language. */
@@ -1356,7 +1366,7 @@ export function renderChannelsPanel(app, c) {
 
   /** A SECONDARY section (Accounts / Message watcher): a fold head + a body;
    *  the fold is the user's, persisted (`channelsPanelFolds`). */
-  function part(key, label, countText, fill) {
+  function part(key, label, countText, fill, foldedByDefault = false) {
     const p = keep('part:' + key, () => {
       const el = document.createElement('div');
       el.dataset.part = key;
@@ -1371,7 +1381,9 @@ export function renderChannelsPanel(app, c) {
       el.append(h, b);
       return el;
     });
-    const folded = !!(FOLDS && FOLDS[key]);
+    // lane channels-fold-default: a literal boolean is the person's choice; none (Accounts' `null`) ⇒ the derived default
+    const choice = FOLDS ? FOLDS[key] : null;
+    const folded = typeof choice === 'boolean' ? choice : !!foldedByDefault;
     p.className = 'chan-part' + (folded ? ' chan-part-collapsed' : '');
     const h = p.firstChild, b = p.lastChild;
     h.querySelector('.chan-part-name').textContent = label;
@@ -1513,6 +1525,10 @@ export function renderChannelsPanel(app, c) {
     const ordinal = new Map();
     for (const a of adapters) { const n = (siblings.get(a.kind) || 0) + 1; siblings.set(a.kind, n); ordinal.set(a.id, n); }
     const kinds = (d && Array.isArray(d.kinds)) ? d.kinds : [];
+    // lane channels-fold-default: every account section's fold this draw — Accounts itself folds by default when all do
+    LIVE_ACCOUNTS = new Set(adapters.map((a) => a.id));
+    curFolds = new Map(accounts.map((a) => [a.id, foldOf(a, listRows(store, accountList(a.id)), q, now)]));
+    const allFolded = accounts.length > 0 && accounts.every((a) => curFolds.get(a.id).folded);
     into.appendChild(part('accounts', t('Accounts'), accounts.length ? String(accounts.length) : '', (b) => {
       if (!accounts.length && !kinds.length) b.appendChild(chanLine('empty-hint empty-hint-inline', t('No account connected.')));
       for (const a of accounts) b.appendChild(section(a, listRows(store, accountList(a.id)), siblings, ordinal, badges.get(a.id)));
@@ -1534,7 +1550,7 @@ export function renderChannelsPanel(app, c) {
         blk.appendChild(cb);
         b.appendChild(blk);
       }
-    }));
+    }, allFolded));
     // ── SECONDARY: the message watcher (agents as SOURCES: track / assign / filter) ──
     if (watcher.length) {
       into.appendChild(part('watcher', t('Message watcher'), '', (b) => {
@@ -1696,8 +1712,10 @@ export function renderChannelsPanel(app, c) {
     const secEl = keep('sec:' + a.id, () => { const el = document.createElement('div'); el.dataset.adapter = a.id; return el; });
     const secKids = [];
     const sec = { appendChild: (x) => { secKids.push(x); return x; }, classList: secEl.classList };
-    const folded = EXPANDED.has(a.id) ? false : COLLAPSED.has(a.id);
+    const fo = curFolds.get(a.id) || { folded: false, virtual: false, needN: 0, matchRows: [] };
+    const folded = fo.folded;
     secEl.className = 'chan-sec chan-account' + (folded ? ' chan-collapsed' : '');
+    secEl.dataset.fold = fo.virtual ? 'filter' : folded ? 'folded' : 'open';
     // THE HEAD IS A KEPT NODE, PATCHED IN PLACE (verify round 6, 2026-09-27): round 5 kept a head rebuilt EQUAL, but
     //  the count's title ("{n} conversations · {k} unread") changes on every message a broadcast brings, so on a busy
     //  account a trusted 300 ms press on ⋯ across one such broadcast was still lost (3/3 reproduced; 10 % of presses at
@@ -1713,6 +1731,7 @@ export function renderChannelsPanel(app, c) {
       const cc0 = document.createElement('span'); cc0.className = 'chan-chip chan-cred-chip'; cc0.style.display = 'none'; el.appendChild(cc0);
       const dot0 = document.createElement('span'); dot0.className = 'chan-dot'; el.appendChild(dot0);
       const cnt0 = document.createElement('span'); cnt0.className = 'chan-sec-count'; el.appendChild(cnt0);
+      el.appendChild(foldBitsEl());   // lane channels-fold-default: what the folded section holds
       const edit0 = document.createElement('button'); edit0.type = 'button'; edit0.className = 'mounts-icon-btn chan-sec-edit';
       edit0.appendChild(icon('pencil', 13));   // the library's own static SVG through the ONE icon helper (§17; no innerHTML here — the groups-ui XSS census)
       el.appendChild(edit0);
@@ -1721,7 +1740,7 @@ export function renderChannelsPanel(app, c) {
       el.appendChild(more0);
       return el;
     });
-    const [, tileSlot, nm, cc, dot, cnt, edit, more] = h.childNodes;
+    const [, tileSlot, nm, cc, dot, cnt, fold, edit, more] = h.childNodes;
     const name = accountName(a, siblings.get(a.kind) || 1, ordinal.get(a.id) || 1);
     // lane channels-badges (the owner: "至少应该在账号下面把图标对应上"): the account's icon IS the badge its conversations
     //  wear — ONE record (accountBadges: the same glyph on the same hue), ONE element (accountBadge), titled by its name
@@ -1746,6 +1765,7 @@ export function renderChannelsPanel(app, c) {
     if (cnt.textContent !== cntText) cnt.textContent = cntText;
     const cntTitle = unreadN ? t('{n} conversations · {k} unread', { n: total, k: unreadN }) : t('{n} conversations', { n: total });
     if (cnt.title !== cntTitle) cnt.title = cntTitle;
+    foldBits(fold, unreadN, fo.needN);
     edit.title = t('Edit the account (client, filters, push)');
     edit.setAttribute('aria-label', t('Edit'));
     edit.onclick = (ev) => { ev.stopPropagation(); showEditAccountDialog(app, a, { kinds }); };
@@ -1756,7 +1776,7 @@ export function renderChannelsPanel(app, c) {
     h.onclick = () => {
       const nowFolded = !sec.classList.contains('chan-collapsed');
       sec.classList.toggle('chan-collapsed', nowFolded);
-      if (nowFolded) { COLLAPSED.add(a.id); EXPANDED.delete(a.id); } else { COLLAPSED.delete(a.id); EXPANDED.add(a.id); }
+      setFold(accountFoldKey(a.id), nowFolded);   // lane channels-fold-default: the person's choice, kept (user state)
     };
     h.oncontextmenu = (ev) => { ev.preventDefault(); openMenu(ev.clientX, ev.clientY); };
     sec.appendChild(h);
@@ -1766,8 +1786,9 @@ export function renderChannelsPanel(app, c) {
     const rowsEl = keep('rows:' + a.id, () => { const el = document.createElement('div'); el.className = 'chan-rows'; return el; });
     const rowKids = [];
     const rows = { appendChild: (x) => { rowKids.push(x); return x; } };
-    for (const conv of listed) rows.appendChild(row(conv, { child: true }));
-    moreRows(a, rows);
+    // a filter opened this section (it is folded otherwise): its MATCHES, not its whole list
+    for (const conv of fo.virtual ? fo.matchRows : listed) rows.appendChild(row(conv, { child: true }));
+    if (!fo.virtual) moreRows(a, rows);
     if (!listed.length && a.enabled !== false && (a.auth || {}).state === 'connected') rows.appendChild(chanLine('empty-hint empty-hint-inline chan-sec-empty', t('No conversations yet — the first pass lists them.')));
     reconcile(rowsEl, rowKids);
     sec.appendChild(rowsEl);
@@ -1828,8 +1849,11 @@ export function renderChannelsPanel(app, c) {
     // caption says what assigning does; an explicit open/close survives repaints.
     const builtinAgents = !!a.builtin;
     const nothingAssigned = mine.length > 0 && !mine.some((x) => x.assignment);
-    const folded = EXPANDED.has(a.id) ? false : (COLLAPSED.has(a.id) || (builtinAgents && nothingAssigned));
+    // lane channels-fold-default: every other source folds like an account (curFolds); the agents watcher keeps its rule
+    const fo = builtinAgents ? null : (curFolds.get(a.id) || { folded: false, virtual: false, needN: 0, matchRows: [] });
+    const folded = fo ? fo.folded : EXPANDED.has(a.id) ? false : (COLLAPSED.has(a.id) || nothingAssigned);
     secEl.className = 'chan-sec' + (folded ? ' chan-collapsed' : '');
+    if (fo) secEl.dataset.fold = fo.virtual ? 'filter' : folded ? 'folded' : 'open';
     const h = document.createElement('div');
     h.className = 'chan-sec-head folder-header';
     h.appendChild(icon('chevronDown', 10, 'chan-sec-chev'));
@@ -1853,6 +1877,7 @@ export function renderChannelsPanel(app, c) {
     cnt.textContent = String(total);
     cnt.title = t('{n} conversations', { n: total });
     h.appendChild(cnt);
+    if (fo) { const fb = foldBitsEl(); foldBits(fb, mine.reduce((n, x) => n + (x.unlisted ? 0 : Number(x.unread) || 0), 0), fo.needN); h.appendChild(fb); }
     const more = document.createElement('button');
     more.type = 'button';
     more.className = 'icon-btn chan-sec-more';
@@ -1865,7 +1890,8 @@ export function renderChannelsPanel(app, c) {
     h.onclick = () => {
       const nowFolded = !sec.classList.contains('chan-collapsed');
       sec.classList.toggle('chan-collapsed', nowFolded);
-      if (nowFolded) { COLLAPSED.add(a.id); EXPANDED.delete(a.id); } else { COLLAPSED.delete(a.id); EXPANDED.add(a.id); }
+      if (fo) setFold(accountFoldKey(a.id), nowFolded);   // lane channels-fold-default
+      else if (nowFolded) { COLLAPSED.add(a.id); EXPANDED.delete(a.id); } else { COLLAPSED.delete(a.id); EXPANDED.add(a.id); }
     };
     h.oncontextmenu = (ev) => { ev.preventDefault(); openMenu(ev.clientX, ev.clientY); };
     sec.appendChild(h);
@@ -1898,8 +1924,8 @@ export function renderChannelsPanel(app, c) {
       e.textContent = offersPaths(a) ? t('No path yet — each path is an address another system can call.') : t('No conversations discovered yet.');
       rows.appendChild(e);
     }
-    for (const conv of listed) rows.appendChild(row(conv));
-    moreRows(a, rows);
+    for (const conv of fo && fo.virtual ? fo.matchRows : listed) rows.appendChild(row(conv));
+    if (!(fo && fo.virtual)) moreRows(a, rows);
     reconcile(rowsEl, rowKids);
     sec.appendChild(rowsEl);
     reconcile(secEl, secKids);
@@ -1907,6 +1933,41 @@ export function renderChannelsPanel(app, c) {
   }
 
   let curBadges = new Map();
+  /** lane channels-fold-default: this draw's account folds (`foldOf`), by account id */
+  let curFolds = new Map();
+  /** An ACCOUNT section's fold this draw (PURE accountFold) + what its folded head says: the rows that need the person
+   *  (its rows and its attention rows the client holds) and, under a filter, the rows that match (its rows and the
+   *  server's search answer for it — a search result is never hidden by a fold). */
+  function foldOf(a, mine, q, now) {
+    const own = new Map();
+    for (const r of mine) if (r && r.key) own.set(r.key, r);
+    for (const r of focusRowsOf(store, now)) if (r && r.key && r.adapterId === a.id && !own.has(r.key)) own.set(r.key, r);
+    let needN = 0;
+    for (const r of own.values()) if (needsYou(r, now)) needN++;
+    if (!DEFAULT_FOLD.has(a.id)) DEFAULT_FOLD.set(a.id, accountFoldDefault({ needN, dot: a.connectable ? accountDot(a) : adapterDot(a) }));
+    let matchRows = [];
+    if (q.trim()) {
+      const pool = new Map(own);
+      const sl = store.lists.get('search');
+      if (sl && sl.q === q.trim()) for (const r of listRows(store, 'search')) if (r && r.key && r.adapterId === a.id && !pool.has(r.key)) pool.set(r.key, r);
+      matchRows = accountMatches([...pool.values()], q).sort((x, y) => (y.lastAt || 0) - (x.lastAt || 0));
+    }
+    const choice = FOLDS ? FOLDS[accountFoldKey(a.id)] : null;
+    return { ...accountFold({ choice, held: DEFAULT_FOLD.get(a.id), matches: matchRows.length, q }), needN, matchRows };
+  }
+  /** THE FOLDED HEAD SAYS WHAT IS INSIDE (lane channels-fold-default): "· 3 need attention" (the accent) "· 642 unread"
+   *  and a dot while something in it needs the person — CSS shows the span only while the section is folded. */
+  function foldBits(el, unreadN, needN) {
+    const [need, un, news] = el.childNodes;
+    const needText = needN ? '· ' + t('{n} need attention', { n: needN }) : '';
+    if (need.textContent !== needText) need.textContent = needText;
+    const unText = unreadN ? '· ' + t('{n} unread', { n: unreadN }) : '';
+    if (un.textContent !== unText) un.textContent = unText;
+    news.style.display = needN ? '' : 'none';
+    el.dataset.need = String(needN);
+    el.dataset.unread = String(unreadN);
+  }
+  const foldBitsEl = () => { const el = chanEl('span', 'chan-sec-fold'); el.append(chanEl('span', 'chan-sec-fold-need'), chanEl('span', 'chan-sec-fold-unread'), chanEl('span', 'chan-sec-news')); return el; };
   let curSystems = new Set();
   function row(conv, { child = false } = {}) {
     // THE SIGNATURE NAMES EVERY FACT THE ROW PRINTS (verify round 5, 2026-09-27): line 3 is assignmentSummary(conv)

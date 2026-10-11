@@ -1135,28 +1135,60 @@ function feedText(view, { t = defaultT, vendor = '', now = Date.now(), clock = h
     case 'behind': return t('Search is behind — each chat is checked on its own until it catches up');
     // lane gmail-feed-gap: a cursor feed after a gap — ONE walk from where it stopped, never a read of every chat
     case 'catching-up': return t('Catching up since {time} — the change feed resumes from where it stopped', { time: clock(Number(v.gapSince)) });
-    case 'measuring': {
-      const m = v.measured || {};
-      // verify r1: a measurement that already HAS its samples and finds the search missing messages says so — "checking …
-      // (200/200)" for ever was the card of a search that never finds everything (a 10 % blind spot, every hit unusable)
-      if ((Number(m.total) || 0) >= (Number(v.promoteMin) || 200) && Number(m.rate) > PUSH_MISS_THRESHOLD) {
-        return t('Search misses {missed} of {total} messages ({pct}%) — each chat is checked on its own', { missed: Number(m.missed) || 0, total: Number(m.total) || 0, pct: (Math.round(Number(m.rate || 0) * 1000) / 10).toString() });
-      }
-      // verify r2 (item 2 #6): the words say WHY each chat is still polled on its own — a quiet account's measurement can
-      // take days to hold its 200 messages (the sample floor), and a complete one still waits one full polling cycle
-      // (every conversation read once on its own) before anything relaxes; "checking … (n/200)" said neither
-      const pm = Number(v.promoteMin) || 200;
-      if ((Number(m.total) || 0) >= pm) return t('New messages: a search every {s} s · {missed} of {total} messages missed — each chat is still checked on its own until one full polling cycle confirms it', { s: every, missed: Number(m.missed) || 0, total: Number(m.total) || 0 });
-      return t('New messages: a search every {s} s · each chat is still checked on its own until {m} messages show it finds everything ({n}/{m})', { s: every, n: Math.min(Number(m.total) || 0, pm), m: pm });
-    }
-    case 'carrying': return t('New messages come from a search every {s} s; each chat is also checked every {min} min', { s: every, min: Math.max(1, Math.round((Number(v.relaxedSec) || 300) / 60)) });
+    // lane lark-search-miss (owner 2026-10-11 「老有这个提示是咋回事 能根治吗？」): the measurement's state is ONE quiet line
+    // that changes only on a FLIP — the demoted line says the flip's own numbers and class (`lastFlip`), never the live rate
+    // (a line re-worded every pass is a nag); the live numbers, the named misses and the topic checks are its tooltip
+    // (`feedFactsText`)
+    case 'measuring': return t('New messages: a search every {s} s + each chat checked (confirming)', { s: every });
+    case 'carrying': return t('New messages: a search every {s} s (checked: it misses nothing)', { s: every });
     case 'demoted': {
-      const m = v.measured || {};
-      const pct = (Math.round(Number(m.rate || 0) * 1000) / 10).toString();
-      return t('Search missed {missed} of {total} messages ({pct}%) — each chat is checked on its own again', { missed: Number(m.missed) || 0, total: Number(m.total) || 0, pct });
+      const lf = v.lastFlip && typeof v.lastFlip === 'object' && v.lastFlip.to === 'demoted' ? v.lastFlip : null;
+      if (!lf) return t('New messages: a search every {s} s + each chat checked (confirming)', { s: every });
+      return t('New messages: a search every {s} s + each chat checked (the search missed {pct}%, {cls})', { s: every, pct: pctOf(lf.rate), cls: missClassWord(lf.cls, { t }) });
     }
     default: return '';
   }
+}
+const pctOf = (r) => (Math.round(Number(r || 0) * 1000) / 10).toString();
+/** lane lark-search-miss: a miss class (src/channel-feed.js MISS_CLASSES) in words — `n` = the seconds the search last
+ *  looked at it after it was written (a lag row), `type` = its message type (an excluded-type row). */
+function missClassWord(cls, { t = defaultT, n = null, type = null } = {}) {
+  switch (cls) {
+    case 'lag': return Number.isFinite(Number(n)) && n !== null ? t('younger than the index lag ({n} s)', { n: Math.round(Number(n)) }) : t('the index lag');
+    case 'thread': return t('a thread reply');
+    case 'bot': return t('a bot message');
+    case 'excluded-type': return type ? t('a message type the search does not return ({type})', { type: String(type).slice(0, 32) }) : t('a message type the search does not return');
+    case 'excluded-chat': return t('a chat type the search excludes');
+    case 'gap': return t('older than the window (a gap)');
+    default: return t('cause unknown');
+  }
+}
+/**
+ * lane lark-search-miss: THE FEED LINE'S FACTS (its tooltip — the line itself says the state once): the live measurement,
+ * how each chat is checked, the learned overlap, the classes the search does not return (named, not counted), the last
+ * MISS_SHOW_MAX named misses with their class, and the topic checks (`feedThreadsText` — "checked for new threads N
+ * times, found M": it left the row). '' when there is nothing to say.
+ */
+function feedFactsText(view, { t = defaultT, clock = hhmm } = {}) {
+  const v = view && typeof view === 'object' ? view : {};
+  const lines = [];
+  const m = v.measured || {};
+  const total = Math.max(0, Math.floor(Number(m.total) || 0)), missed = Math.max(0, Math.floor(Number(m.missed) || 0));
+  if (total > 0) lines.push(t('Measured: the search missed {missed} of {total} messages ({pct}%)', { missed, total, pct: pctOf(m.rate) }));
+  if (v.state === 'carrying') lines.push(t('Each chat is also checked every {min} min', { min: Math.max(1, Math.round((Number(v.relaxedSec) || 300) / 60)) }));
+  else if (v.state === 'measuring' || v.state === 'demoted') lines.push(t('Each chat is checked on its own until {n} full polling cycles pass without a miss', { n: 3 }));
+  const ov = Math.round(Number(v.overlapSec) || 0);
+  if (v.lagLearned && ov > (Number(v.overlapSettingSec) || 0)) lines.push(t('The search window overlaps by {s} s — learned from {n} messages the search had not indexed yet', { s: ov, n: Math.max(1, Math.floor(Number(v.lagLearned.n) || 0)) }));
+  const nc = v.missUncounted && typeof v.missUncounted === 'object' ? Object.entries(v.missUncounted).filter(([, n]) => Number(n) > 0) : [];
+  if (nc.length) lines.push(t('Not counted (the search does not return them): {list}', { list: nc.map(([k, n]) => `${missClassWord(k, { t })} ×${Math.floor(Number(n))}`).join(', ') }));
+  const rows = Array.isArray(v.misses) ? v.misses.slice(-20) : [];
+  if (rows.length) {
+    lines.push(t('The last messages the search did not find:'));
+    for (const x of rows.slice().reverse()) lines.push(`${clock(Number(x && x.at) || 0)} · ${String((x && x.msgType) || '?').slice(0, 32)} — ${missClassWord(x && x.cls, { t, n: x ? x.searchAgeSec : null, type: x ? x.msgType : null })}`);
+  }
+  const th = feedThreadsText(v, { t });
+  if (th) lines.push(th);
+  return lines.join('\n');
 }
 /** Hits the search returned that this version could not read, BELOW the park (lane lark-p2p): said with the fields, so
  *  a feed that drops some of what it finds is never silent. '' when none were dropped. Verify r2: the count is the LAST
@@ -1290,7 +1322,7 @@ module.exports = {
   authWhyText, laneWhyText, errorCodeText, deliveryLaneText, scanSourceText, wakeRefusalText,
   pushWindow, pushSamplesAdd, pushMissRate, pushDemotionVerdict, pushLaneText,
   // lane lark-search-poll: the change feed's one lane answer + its words
-  FEED_MODES, FEED_DEFAULTS, feedState, FEED_AUTHORITIES, feedAuthoritative, feedText, feedCatchUpText, grantsText, untitledText, credentialChangedAt, feedBoundSec, feedFreshMs, changeFeedRow,
+  FEED_MODES, FEED_DEFAULTS, feedState, FEED_AUTHORITIES, feedAuthoritative, feedText, feedFactsText, missClassWord, feedCatchUpText, grantsText, untitledText, credentialChangedAt, feedBoundSec, feedFreshMs, changeFeedRow,
   // lane lark-p2p: a shape park's bounded field lists + the unreadable-hits line; verify r1: the lone-miss bound
   shapeFields, feedUnreadableText, FEED_LOUD_STRIKES,
   // lane lark-threads (A5): the thread measurement's one sentence

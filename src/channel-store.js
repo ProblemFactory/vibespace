@@ -1625,6 +1625,24 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     if (!safeSeg(adapterId)) return false;
     try { fs.unlinkSync(searchMemoFile(adapterId)); return true; } catch { return false; }
   }
+  /** lane lark-search-miss: THE CHANGE FEED'S MISS MEMO (`<account>/feed-misses.json`, beside search-memo.json) — the
+   *  named misses (src/channel-feed.js `memoAdd`'s rows, ≤ 500, no text). Written whole (0600, atomic) when a miss is
+   *  named; read once at first use (`Feed.memoFromDisk` bounds it); DROPPED with the account. */
+  const feedMissFile = (adapterId) => path.join(dir, safeSeg(adapterId), 'feed-misses.json');
+  function feedMissRead(adapterId) {
+    if (!safeSeg(adapterId)) return null;
+    try { return JSON.parse(fs.readFileSync(feedMissFile(adapterId), 'utf-8')); } catch { return null; }
+  }
+  function feedMissWrite(adapterId, obj) {
+    if (!safeSeg(adapterId)) return false;
+    fs.mkdirSync(path.join(dir, safeSeg(adapterId)), { recursive: true, mode: 0o700 });
+    writeJsonAtomic(feedMissFile(adapterId), obj, { mode: 0o600 });
+    return true;
+  }
+  function feedMissDrop(adapterId) {
+    if (!safeSeg(adapterId)) return false;
+    try { fs.unlinkSync(feedMissFile(adapterId)); return true; } catch { return false; }
+  }
   /** A cached attachment: `{file, meta}` or null. A hit refreshes its LRU stamp. */
   // verify r1 (lane channel-attach-read): `msg` names the message whose part it is (a Gmail `part:N` repeats per mail)
   const attSlot = (attId, msg) => attHash(msg ? `${msg}\n${attId}` : attId);
@@ -1995,6 +2013,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     // 2026-09-26 (the aggregated IM): backfill, search, attachments
     prependRecords, oldestRecord, search, attachmentGet, attachmentPut, attachmentUsage, avatarGet, avatarPut, avatarRefuse, peopleRead, peopleWrite,
     searchMemoRead, searchMemoWrite, searchMemoDrop,
+    feedMissRead, feedMissWrite, feedMissDrop,
     // R3 (§23): one record by its vendorId (the attachment's owner), the LRU ledger's coalesced flush
     findRecord, rewriteRecords, lruFlush,
     // lane channel-threads: the side log (invariant 8) + which conversation holds a message

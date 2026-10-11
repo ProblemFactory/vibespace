@@ -516,6 +516,8 @@
 - A WEBHOOK CALLER IS AN OUTSIDER (lane webhook-l1-server, 2026-10-10): /hook/<slug> lets any system in with its own token. 不变量 = a caller sees nothing internal and pays no wake; the owner is the only identity; refusal before the body (src/webhook-auth.js ①–⑫, test-webhook-auth)
 - BYPASS STILL ASKED (owner 2026-10-10): the CLI's own safety checks (an unreadable -c script running rm) popped cards under bypass. FIX = VibeSpace answers them at once, with a quiet audit line and a switch. 不变量 = bypass means nothing waits on the person; every auto-allow is written down
 - THE BROWSER FROZE WHEN ITS LOG PIPE FILLED (userW inc-mv2qf3xs-7g87, 2026-10-10): the driver 0.38.1 piped Chrome's stderr, nothing read it; at 64 KB every write blocked. FIX = pin 0.38.2 (it drains the pipe) + no logging + the keeper names it. 不变量 = a child's output always has a reader or no pipe
+- THE CHANNELS LIST OPENED WITH EVERY CONVERSATION SHOWING (owner 2026-10-11): 81 rows to scroll to find one. FIX = sections start folded unless something needs the person; the folded head carries its counts; opens are remembered. 不变量 = the first screen shows what needs you, the rest one press away
+- THE SEARCH FEED FLAPPED AND NAGGED (owner 2026-10-11): misses counted, not named; re-promoted, re-demoted, warned per cycle. FIX = name every miss, overlap the window by the measured index lag, promote only on a clean record, say it once. 不变量 = a miss has a class; a status changes only on a flip
 
 ## AGENT ROWS LOOKED LIKE PEOPLE (lane internal-rows-look, 2.369.247 — owner 2026-10-09 "这个 VibeSpace 内部的聊天群视觉上很难和其他的外部的区分开")
 

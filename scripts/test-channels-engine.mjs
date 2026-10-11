@@ -4461,6 +4461,7 @@ console.log('\n㉑ verify r3 (money/memory): the per-account memories — the ce
     th: 'LIVE_MEMS — the count cap + the 30-day trim',
     // lane lark-search-poll: the change feed's memory
     feedSeen: 'the message ids the change feed saw — FEED_SEEN_MAX (20 000) / 2 h, trimmed after every page (channel-feed trimSeen)',
+    feedConvAt: 'lane lark-search-miss: the newest instant a search hit named per conversation (a miss\'s hadSearchHit) — FEED_SEEN_MAX (20 000), oldest first',
     feedGroups: 'the groups the feed found before discovery listed them — ≤ 200, cleared by a complete discovery walk',
     feedUnlisted: 'verify r1: the chats a complete listing did not list — FEED_UNLISTED_MAX (500), oldest first; each for one cold cycle',
     searchAgentAt: 'design 010: the last --full of each agent conversation (the 20 s floor) — 500, the oldest dropped',
@@ -4560,8 +4561,8 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
   let clock = Date.UTC(2026, 8, 28, 12, 0, 0);
   const clockFn = () => clock;
   const mkWorld = () => ({ groups: ['g-ops', 'g-dev'], dms: { 'dm-ann': { id: 'ou_ann', name: 'Ann' } }, recs: new Map(), threads: new Map(), lagMs: 0, ignoreRange: false, fail: null, failHistory: null, calls: { changes: [], history: [], thread: [], describe: 0, list: 0 } });
-  const addMsg = (W, conv, id, at, { thread = null, author = { id: 'ou_x', name: 'X' }, text = 'hi', unindexed = false } = {}) => {
-    const r = { vendorId: id, at, author, text, threadKey: thread, unindexed };
+  const addMsg = (W, conv, id, at, { thread = null, author = { id: 'ou_x', name: 'X' }, text = 'hi', unindexed = false, msgType = null } = {}) => {
+    const r = { vendorId: id, at, author, text, threadKey: thread, unindexed, msgType };
     const k = thread ? `${conv}#${thread}` : conv;
     const M = thread ? W.threads : W.recs;
     if (!M.has(k)) M.set(k, []);
@@ -4577,9 +4578,10 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
     return { pg, anchor: pg.length ? pg[pg.length - 1].vendorId : anchor, done: anchorFound && drained };
   };
   function feedMod(kind, W) {
-    const recOf = (A, conv, m) => makeRecord({ adapterId: A, convId: conv, vendorId: m.vendorId, at: m.at, author: { id: m.author.id, name: m.author.name, isSelf: false, isBot: false }, text: m.text, threadKey: m.threadKey || null, raw: { msg_type: 'text' } });
+    const recOf = (A, conv, m) => makeRecord({ adapterId: A, convId: conv, vendorId: m.vendorId, at: m.at, author: { id: m.author.id, name: m.author.name, isSelf: false, isBot: false }, text: m.text, threadKey: m.threadKey || null, raw: { msg_type: m.msgType || 'text' } });
     return {
       kind,
+      rawFacts: (r) => ({ type: r && r.raw && r.raw.msg_type }),   // lane lark-search-miss: a record's type (the miss class reads it)
       caps: { receive: 'poll', pollInterval: { hot: 30, cold: 300, floor: 10 }, history: 'page', listConversations: true, sendAs: [], identityMarking: 'none', budget: { unit: 'request', default: 600, settingKey: null, metered: true }, changeFeed: W.fd || FD, threads: { read: 'vendor', replyInto: false, listing: 'separate' } },
       create(record, deps) {
         const A = record.id;
@@ -5111,7 +5113,8 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
   writeRec(dM, ['search:message'], clock - 3600e3);
   const Mx = mkFeedEng(dM, Wm);
   await Mx.eng.pass('feedy');
-  clock += 1000e3; await Mx.eng.pass('feedy');   // verify r1: a promotion waits for one full cold cycle of measurement
+  // verify r1: a promotion waits for one full cold cycle of measurement — lane lark-search-miss: THREE clean ones
+  for (let c = 0; c < 3; c++) { clock += 1000e3; await Mx.eng.pass('feedy'); }
   let n = 0;
   for (let round = 0; round < 12; round++) {
     clock += 31e3;
@@ -5135,6 +5138,42 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
   await Mx.eng.pass('feedy');
   const vM2 = Mx.eng.adapterView(Mx.eng.adapterRecords().adapters[0]).feed;
   ok(vM2.state === 'demoted' && vM2.measured.missed >= 30 && Mx.eng.cadenceOf('feedy', 'g-dev').source === 'tier', `30 messages the search never indexed, found by the 5-minute net ⇒ DEMOTED (${vM2.measured.missed} of ${vM2.measured.total}); every row back on its own cadence`, JSON.stringify(vM2.measured));
+
+  // ── (I2) lane lark-search-miss (owner 2026-10-11): EVERY MISS NAMED by the reconciliation — a search that never returns
+  //       `system` records (declared `blind`) and misses one text: the per-chat poll's fetch names each miss with its class
+  //       in the account's memo (persisted, no text), the system ones never count, `hadSearchHit` says whether the search
+  //       named that conversation; the overlap learns from the lag miss; a disconnect drops the memo
+  {
+    const Wn = mkWorld();
+    Wn.fd = { ...FD, blind: { msgTypes: ['system'], chatTypes: [], bots: false, threadReplies: false } };
+    addMsg(Wn, 'g-ops', 'n-ops-0', clock - 86400e3); addMsg(Wn, 'g-dev', 'n-dev-0', clock - 86400e3);
+    const dN = path.join(ROOT, 'feed-named');
+    writeRec(dN, ['search:message'], clock - 3600e3);
+    const N = mkFeedEng(dN, Wn);
+    await N.eng.pass('feedy'); clock += 31e3; await N.eng.pass('feedy');
+    for (let i = 0; i < 3; i++) addMsg(Wn, 'g-dev', `n-sys-${i}`, clock - 5e3 - i, { unindexed: true, msgType: 'system' });
+    addMsg(Wn, 'g-dev', 'n-lost', clock - 4e3, { unindexed: true });
+    addMsg(Wn, 'g-ops', 'n-ops-lost', clock - 4e3, { unindexed: true });
+    for (let i = 0; i < 5; i++) addMsg(Wn, 'g-dev', `n-ok-${i}`, clock - 3e3 + i);
+    for (let r = 0; r < 6; r++) { clock += 31e3; await N.eng.pass('feedy'); }
+    clock += 1000e3; await N.eng.pass('feedy');   // every row polled on its own (the authority) — the cold one too
+    for (let r = 0; r < 4; r++) { clock += 31e3; await N.eng.pass('feedy'); }
+    const v = N.eng.adapterView(N.eng.adapterRecords().adapters[0]).feed;
+    const by = Object.fromEntries((v.misses || []).map((x) => [x.id, x]));
+    const file = path.join(dN, 'channels', 'feedy', 'feed-misses.json');
+    const disk = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf-8')) : null;
+    ok(by['n-sys-0'] && by['n-sys-0'].cls === 'excluded-type' && by['n-lost'] && by['n-lost'].cls === 'lag' && by['n-ops-lost'] && by['n-ops-lost'].cls === 'lag' && v.missUncounted['excluded-type'] === 3 && v.measured.missed === 2 && v.misses.length === 5,
+      `(I2) every miss is NAMED with its class — 3 system records (not counted: the search does not return them) + 2 lag misses counted (${v.measured.missed} of ${v.measured.total})`, JSON.stringify({ misses: v.misses, un: v.missUncounted, m: v.measured }));
+    ok(by['n-lost'] && by['n-lost'].hadSearchHit === true && by['n-ops-lost'] && by['n-ops-lost'].hadSearchHit === false && by['n-lost'].ageSec > 0 && by['n-lost'].searchAgeSec !== null,
+      '(I2) the reconciliation marks hadSearchHit: the search named g-dev (its other messages found) and never g-ops', JSON.stringify([by['n-lost'], by['n-ops-lost']]));
+    ok(disk && disk.rows.length === 5 && disk.rows.length <= 500 && disk.rows.every((x) => !('text' in x) && !('author' in x)) && (fs.statSync(file).mode & 0o777) === 0o600,
+      '(I2) the memo is the account\'s file (feed-misses.json, 0600, ≤ 500 rows, no text, no author)', JSON.stringify(disk && disk.rows.map((x) => [x.id, x.cls])));
+    ok(v.lagLearned && v.lagLearned.sec >= 30 && v.overlapSec === Math.max(60, v.lagLearned.sec) && N.eng.adapterRecords().adapters[0].feed.lagMargin.sec === v.lagLearned.sec,
+      `(I2) the lag misses taught the window its overlap (${v.overlapSec} s, persisted with the feed row)`, JSON.stringify({ ov: v.overlapSec, l: v.lagLearned }));
+    await N.eng.disconnect('feedy');
+    ok(!fs.existsSync(file), '(I2) a disconnect drops the account\'s miss memo, file and all');
+    N.eng.stop();
+  }
 
   // ── (K) THE DESCRIBE BOUND counts REQUESTS: a catch-up that births 12 single chats, each describe costing 3 requests
   //       (the chat, then two people), names ≤ 2 of them in one feed tick — the rest over the next ticks, never a
@@ -5461,7 +5500,7 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
   };
   const bs1 = await blindSpot(ENG, 'real');
   ok(bs1.earlyMode === 'measuring' && bs1.carryingAt === null && bs1.mode === 'measuring' && bs1.measured.missed > 0, `a search blind to 2 of 20 busy chats is never promoted (at 6.7 min: ${bs1.earlyMode}; after 20 min: ${bs1.mode}, ${bs1.measured.missed} of ${bs1.measured.total} missed)`, JSON.stringify(bs1));
-  const SPANL = "const v = Feed.modeVerdict(f.mode, m, { spanMs: e.feedMemStart !== null ? t - e.feedMemStart : 0, minSpanMs: (tiers().coldSec + fo.overlapSec + 2 * fo.everySec) * 1000 });";
+  const SPANL = "const v = Feed.modeVerdict(f.mode, m, { spanMs: e.feedMemStart !== null ? t - e.feedMemStart : 0, minSpanMs: (tiers().coldSec + ov + 2 * fo.everySec) * 1000, cleanMs: t - Math.max(memStart, lastMissAt), sinceDemotedMs: Number(f.demotedAt) > 0 ? t - Number(f.demotedAt) : Infinity });";
   ok(esrcF.split(SPANL).length === 2, 'CONTROL setup: the mode verdict call is spelled once');
   const bs0 = await blindSpot(MUTE.load('src/server/channels-engine.js', esrcF.replace(SPANL, 'const v = Feed.modeVerdict(f.mode, m);'), 'feed-promote-unspanned'), 'mut');
   ok(bs0.carryingAt !== null && bs0.carryingAt < 600, `CONTROL: the copy without the span gate PROMOTES the blind search to carrying at ${bs0.carryingAt} s (its samples, all from the chats it found, held no miss) — the leg above would be red`, JSON.stringify(bs0));

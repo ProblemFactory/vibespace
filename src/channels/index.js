@@ -172,7 +172,9 @@ const PACE_COSTS = Object.freeze(['fetch', 'discover', 'scanHost', 'feed']);
  *                option: the account option that switches it off (null = none), pageSize, pagesPerPass, perMin (pages
  *                per sliding minute), maxWindowSec, catchUp: {chatType, pagesMax} | null, describes: bool,
  *                timeUnit: 'ms' | 's' | 'iso' (THE ONE declared form a hit's instant is read in — never guessed),
- *                reader?: the hit reader's revision (lane lark-p2p — a bump restarts a feed row the old reader wrote) }
+ *                reader?: the hit reader's revision (lane lark-p2p — a bump restarts a feed row the old reader wrote),
+ *                blind?: {msgTypes, chatTypes, bots, threadReplies} — what the search does NOT return, measured (lane
+ *                lark-search-miss): a miss of one is named with its class, never counted (src/channel-feed.js classifyMiss) }
  * `changes(opts)` answers ONE page: `{hits, more, pageToken, total, malformed, malformedFields}` — a hit is a MARK
  * (`malformedFields` = ≤ 3 lists of the field NAMES the adapter could not read — never a value; the card says them)
  * (`Feed.HIT_FIELDS`), never words: this wrapper refuses a page larger than `pageSize` and STRIPS every field outside
@@ -499,6 +501,12 @@ function validateCaps(kind, caps, { channelSettings } = {}) {
     // lane lark-p2p: the adapter's HIT-READER revision (optional, default 1) — a reader fix that makes hits readable which
     // the previous reader refused bumps it, and a feed row the old reader wrote starts over (the engine's `feedReaderHeal`)
     if (f.reader !== undefined && !(Number.isInteger(f.reader) && f.reader > 0 && f.reader <= 1000)) bad('caps.changeFeed.reader must be a positive integer (the hit reader\'s revision) or absent');
+    // lane lark-search-miss: what the search cannot return is DECLARED (measured), never guessed from the misses
+    if (f.blind !== undefined) {
+      const b = f.blind;
+      const okList = (a) => Array.isArray(a) && a.length <= 16 && a.every((x) => typeof x === 'string' && /^[a-z0-9_]{1,32}$/.test(x));
+      if (authoritative || !b || typeof b !== 'object' || !okList(b.msgTypes) || !okList(b.chatTypes) || typeof b.bots !== 'boolean' || typeof b.threadReplies !== 'boolean') bad('caps.changeFeed.blind must be {msgTypes: [type…], chatTypes: [kind…] (≤ 16 each, [a-z0-9_]{1,32}), bots: bool, threadReplies: bool} on a measured feed');
+    }
     if (c.listConversations === false) bad('caps.changeFeed on an adapter that cannot list its conversations — a group the feed finds is born by discovery');
   }
   if (c.search !== undefined) {

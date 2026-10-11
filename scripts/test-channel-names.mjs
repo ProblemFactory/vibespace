@@ -63,6 +63,7 @@ const JUDGED = [
   ['src/channel-filter.js', '`### Channel digest —', 'AGENT-FACING digest block head (the engine hands it the ladder name)'],
   ['src/channel-policy.js', 'Channel receipt —', 'AGENT-FACING receipt block head (the engine hands it the ladder name)'],
   ['src/lib/channel-rows.js', 'textMatches([r.title || r.id, r.adapterLabel, r.lastText]', '③ — the store matches a held row the way the server\'s `q` does (the ladder name, else the id); r.title is the ladder name (rowView humanNameOf)'],
+  ['src/lib/channel-groups-view.js', 'textMatches([r.title || r.id, r.adapterLabel, r.lastText]', 'lane channels-fold-default accountMatches — the SAME rule as the store\'s match above over the same held rows (r.title is the ladder name); a yes / no, nothing drawn'],
   ['src/channel-touch.js', 'const title = (row && (row.title || row.convId))', '③ — the touch title is the ladder name, set at record time (src/server/channel-touches.js nameOf)'],
   ['src/channel-touch.js', 'return `${t(\'Channels\')} ·', '③ — the touch title is the ladder name, set at record time'],
   ['src/channel-touch.js', "open: 'search', adapterId: row.adapterId, convId: row.convId, title: row.title || row.convId", '③ — the touch title is the ladder name, set at record time; the search verdict hands it to the scoped search dialog\'s title (lane channel-search-view)'],

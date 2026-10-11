@@ -754,6 +754,8 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
   await sleep(500);
   const grid = await p1.evaljs(`(async () => {
     for (let i = 0; i < 80; i++) { if (document.querySelectorAll('.rail-panel-channels .chan-row').length >= 4) break; await new Promise((r) => setTimeout(r, 250)); }
+    // lane channels-fold-default: a section with nothing that needs the person starts folded — open them to measure their rows
+    for (const h of document.querySelectorAll('.rail-panel-channels .chan-sec.chan-collapsed > .chan-sec-head')) h.click();
     const rows = [...document.querySelectorAll('.rail-panel-channels .chan-row')];
     const trackedRows = rows.length;   // 2026-09-26: every row is fetched, every row claims its cadence
     const R = (el) => el.getBoundingClientRect();
@@ -874,11 +876,13 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
     const of = window.fetch; window.fetch = function (u, ...r) { if (/^\\/api\\/channels(\\?|$)/.test(String(u))) m.fetches++; return of.call(this, u, ...r); };
     m.unpatch = () => { mo.disconnect(); window.fetch = of; };
     window.app.ws.onGlobal((msg) => { if (msg.type === 'channels-updated') { m.broadcasts++; setTimeout(() => m.samples.push(sb.listEl.scrollTop), 300); } });
-    const head = document.querySelector('.rail-panel-channels .chan-sec:not(.chan-connect) .chan-sec-head'); if (head) head.click();   // a fold the user made
+    // lane channels-fold-default: sections with nothing that needs the person start folded — the user folds an OPEN one
+    const folded0 = document.querySelectorAll('.rail-panel-channels .chan-sec.chan-collapsed').length;
+    const head = document.querySelector('.rail-panel-channels .chan-sec:not(.chan-connect):not(.chan-collapsed) .chan-sec-head'); window.__d12sec = head && head.parentElement; if (head) head.click();   // a fold the user made
     const sc = sb.listEl; sc.scrollTop = 60; m.scrollSet = sc.scrollTop; m.scrollable = sc.scrollHeight - sc.clientHeight;
-    return { scrollSet: m.scrollSet, scrollable: m.scrollable, folded: document.querySelectorAll('.rail-panel-channels .chan-sec.chan-collapsed').length };
+    return { scrollSet: m.scrollSet, scrollable: m.scrollable, folded0, folded: document.querySelectorAll('.rail-panel-channels .chan-sec.chan-collapsed').length };
   })()`);
-  ok(armed.scrollSet >= 30 && armed.folded === 1, `FIXTURE: the list scrolls (${armed.scrollSet}px of ${armed.scrollable}) and one section is folded`, JSON.stringify(armed));
+  ok(armed.scrollSet >= 30 && armed.folded === armed.folded0 + 1, `FIXTURE: the list scrolls (${armed.scrollSet}px of ${armed.scrollable}) and the user folded one more section`, JSON.stringify(armed));
   const act = async (method, p, body) => (await fetch(`http://127.0.0.1:${PORT}${p}`, { method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) })).status;
   await act('PUT', '/api/channels/fake-poll/fake-poll-announce/refresh', { every: 60 }); await sleep(900);
   await act('POST', '/api/channels/fake-poll/fake-poll-ops/read', {}); await sleep(900);
@@ -890,8 +894,9 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
   ok(m.panelRemoved === 0 && m.panelAdded === 0, `D12: across ${m.broadcasts} broadcasts the panel is NEVER torn down and rebuilt (removed ${m.panelRemoved}, added ${m.panelAdded} — it was 7/7 for 7)`, JSON.stringify(m));
   ok(m.fetches === 0, `D12: ZERO /api/channels fetches across ${m.broadcasts} broadcasts — the digest on the broadcast is the computation (it was one per broadcast)`, JSON.stringify(m));
   ok(Math.abs(m.scrollNow - m.scrollSet) <= 1 && m.samples.length >= 4 && m.samples.every((x) => Math.abs(x - m.scrollSet) <= 1), `D12: the scroller stays at ${m.scrollSet}px through every repaint (samples ${JSON.stringify(m.samples)}; it used to clamp to 0)`, JSON.stringify(m));
-  ok(m.foldedAfter === 1 && m.rows >= 4, 'D12: a section the user folded stays folded and the rows are still there', JSON.stringify(m));
-  await p1.evaljs(`(() => { const h = document.querySelector('.rail-panel-channels .chan-sec.chan-collapsed .chan-sec-head'); if (h) h.click(); return 1; })()`);
+  ok(m.foldedAfter === armed.folded && m.rows >= 4, 'D12: a section the user folded stays folded and the rows are still there', JSON.stringify(m));
+  // …and every section open again, as the legs after this one measure their rows (the defaults folded some)
+  await p1.evaljs(`(() => { for (const h of document.querySelectorAll('.rail-panel-channels .chan-sec.chan-collapsed > .chan-sec-head')) h.click(); return 1; })()`);
   await p1.cdp('Emulation.setDeviceMetricsOverride', { width: 1200, height: 800, deviceScaleFactor: 1, mobile: false });
   await sleep(400);
 }

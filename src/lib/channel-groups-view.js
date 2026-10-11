@@ -34,6 +34,8 @@
 //                     server-resolved mentions put one, and the name a member
 //                     (or a member who left) is shown by.
 //   foldsFrom       — the panel's secondary sections' persisted folds.
+//   accountFold / accountFoldDefault / needsYou / foldsToWrite (lane channels-fold-default) — every account section
+//                     starts folded unless something in it needs the person; the person's open / close wins.
 //   focusRows / statusTag / firstScreen (R3, 2026-09-26, re-exported from the
 //                     PURE src/lib/channel-focus.js) — the first screen is the
 //                     ATTENTION list: what matters, one tag per row, the full
@@ -47,6 +49,7 @@ import { accountBadges, INTERNAL_BADGE } from './channel-avatar.js';
 
 export { GROUP_ADAPTER_ID, NOTIFY_MODES, DEFAULT_NOTIFY, OWNER };
 export { focusRows, statusTag, filterRows, firstScreen, heldOf, heldPending, FOCUS_WINDOW_MS, HELD_WINDOW_MS, TAG_ORDER, isInternal, needsOwner, internalBlock } from './channel-focus.js';
+import { statusTag as tagOf, textMatches } from './channel-focus.js';   // lane channels-fold-default: the account fold reads the same tags and the filter's rule
 
 /** Is this (adapterId, convId) pair an agent GROUP rather than a channel
  *  conversation? The group log's namespace (the store files a group's log
@@ -214,7 +217,66 @@ export function foldsFrom(state) {
   const f = state && state.channelsPanelFolds && typeof state.channelsPanelFolds === 'object' ? state.channelsPanelFolds : {};
   const out = {};
   for (const p of PANEL_PARTS) out[p] = FOLDED_BY_DEFAULT.includes(p) ? f[p] !== false : f[p] === true;
+  // lane channels-fold-default: Accounts with no choice of the person's is `null` — the panel derives it (folded when
+  //  every account section in it is folded); only a literal boolean is a choice
+  if (typeof f.accounts !== 'boolean') out.accounts = null;
+  let n = 0;
+  for (const [k, v] of Object.entries(f)) if (n < ACCOUNT_FOLDS_MAX && typeof v === 'boolean' && isAccountFoldKey(k)) { out[k] = v; n++; }
   return out;
+}
+
+// ── lane channels-fold-default (the owner, 2026-10-11: "能不能让 channels 默认收缩，不然翻找起来很困难" — his Lark alone opened
+// with 81 conversations): EVERY ACCOUNT SECTION STARTS FOLDED unless something in it needs the person; the folded head
+// carries its counts; an open / close is the person's, kept in the same map (`acct:<account id>`, a literal boolean),
+// pruned to the accounts that still exist at every write (user state never outlives an account), at most
+// ACCOUNT_FOLDS_MAX. ──
+export const ACCOUNT_FOLD_PREFIX = 'acct:';
+export const ACCOUNT_FOLDS_MAX = 64;
+export const accountFoldKey = (id) => ACCOUNT_FOLD_PREFIX + String(id);
+const isAccountFoldKey = (k) => typeof k === 'string' && k.startsWith(ACCOUNT_FOLD_PREFIX) && k.length > ACCOUNT_FOLD_PREFIX.length && k.length <= 200;
+/** The map the panel writes: only literal booleans, only the known parts and the accounts in `liveIds` (null = keep
+ *  every account key — the accounts are not known yet). */
+export function foldsToWrite(folds, liveIds = null) {
+  const out = {};
+  let n = 0;
+  for (const [k, v] of Object.entries(folds && typeof folds === 'object' ? folds : {})) {
+    if (typeof v !== 'boolean') continue;
+    if (PANEL_PARTS.includes(k)) out[k] = v;
+    else if (isAccountFoldKey(k) && n < ACCOUNT_FOLDS_MAX && (!liveIds || liveIds.has(k.slice(ACCOUNT_FOLD_PREFIX.length)))) { out[k] = v; n++; }
+  }
+  return out;
+}
+/** What NEEDS THE PERSON (the tag codes that open a section): handed to someone, awaiting their answer (or unknown),
+ *  a held wake, a direct message they have not read — and an @ of them. An agent's read and their own reply are
+ *  activity, not a need. */
+export const NEEDS_YOU_TAGS = Object.freeze(['awaiting', 'unknown', 'assigned', 'held', 'direct']);
+export function needsYou(row, now = Date.now()) {
+  if (!row || row.unlisted) return false;
+  if (Number(row.atYou) > 0) return true;
+  const st = tagOf(row, now);
+  return !!(st && NEEDS_YOU_TAGS.includes(st.code));
+}
+/** An account that needs signing in again / a client / a consent in flight is a need too (its error line folds away). */
+const DOT_NEEDS_YOU = Object.freeze(['bad', 'warn', 'attn']);
+/** The section's DEFAULT (decided at its first draw on a page and then HELD — a row that comes to need the person
+ *  later raises the folded head's count and dot, it never opens the list under the person's hand): open when a row
+ *  needs the person or the account itself does, else folded. */
+export function accountFoldDefault({ needN = 0, dot = '' } = {}) {
+  return !(Number(needN) > 0 || DOT_NEEDS_YOU.includes(dot));
+}
+/** The rows of an account a FILTER matches (the filter's own rule: title / source / last line, case-insensitive). */
+export function accountMatches(rows, q) {
+  const s = String(q || '').trim().toLowerCase();
+  if (!s) return [];
+  return (rows || []).filter((r) => r && !r.unlisted && textMatches([r.title || r.id, r.adapterLabel, r.lastText], s));
+}
+/** An account section's fold this draw: `{folded, virtual}`. A filter being typed opens a section holding a match
+ *  (`virtual` — never written; cleared, every section is back to its own fold); else the person's choice
+ *  (`choice`, a literal boolean) wins both ways; else the held default. */
+export function accountFold({ choice = null, held = true, matches = 0, q = '' } = {}) {
+  if (String(q || '').trim() && Number(matches) > 0) return { folded: false, virtual: true };
+  if (typeof choice === 'boolean') return { folded: choice, virtual: false };
+  return { folded: !!held, virtual: false };
 }
 
 /**

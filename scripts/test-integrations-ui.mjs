@@ -572,6 +572,8 @@ const p2 = await newPage();
   ok(accts.length === 1 && A.kind === 'gmail' && A.credentialKey === 'cluster:org1' && A.auth.tokenHeld && A.auth.user === 'ada@example.test', `Connect CREATED the account under the chosen preset, signed in as the stub's user (${JSON.stringify(accts.map((a) => ({ id: a.id, key: a.credentialKey, user: a.auth.user })))})`);
   ok(await p1.evaljs(`(async () => { for (let i = 0; i < 60; i++) { if (!document.querySelector('#mounts-dialog-overlay')) return true; await new Promise((r) => setTimeout(r, 100)); } return false; })()`), 'and closed the dialog');
 
+  // lane channels-fold-default: a section with nothing that needs the person starts folded (and Accounts with it) — the person opened it
+  await api('PATCH', '/api/user-state', { channelsPanelFolds: { [`acct:${A.id}`]: false } });
   // (g) the credential-first card (2026-09-26, the aggregated IM: a linked account IS its conversations)
   ok(await p1.evaljs(panelWait(`() => { const c = ${card(A.id)}; return !!(c && c.querySelector('.chan-sec-health') && /last sync/.test(c.querySelector('.chan-sec-health').textContent) && c.querySelectorAll('.chan-row').length === 3); }`)), 'the account card is drawn with its health line and its conversations after its first pass');
   const c0 = await p1.evaljs(`(() => { const c = ${card(A.id)}; const h = c.querySelector('.chan-sec-head'); return { name: h.querySelector('.chan-sec-name').textContent, chip: (h.querySelector('.chan-cred-chip') || {}).textContent, dot: h.querySelector('.chan-dot').dataset.state, edit: !!h.querySelector('.mounts-icon-btn'), more: !!h.querySelector('.chan-sec-more'), tag: c.querySelector('.chan-sec-health .mounts-typetag').textContent, health: c.querySelector('.chan-sec-health-text').textContent, empty: !!c.querySelector('.chan-sec-empty'), rows: c.querySelectorAll('.chan-row').length }; })()`);
@@ -642,6 +644,7 @@ const p2 = await newPage();
   ok(/Create & connect/.test(dupSigned || ''), `the block says the copy signed in (${JSON.stringify(dupSigned)})`);
   await p1.evaljs(`${DLG('duplicate')}.querySelector('.dialog-actions .btn-create').click(); 1`);
   const B = copyRec;
+  await api('PATCH', '/api/user-state', { channelsPanelFolds: { [`acct:${A.id}`]: false, [`acct:${B.id}`]: false } });   // lane channels-fold-default: opened by the person
   ok(await p1.evaljs(panelWait(`() => !!${card(B.id)} && !document.querySelector('#mounts-dialog-overlay')`)), 'Create & connect closed the dialog; the SIBLING card appears');
 
   // (l) the dead sign-in: the storage error line + Re-authorize, and the dialog heals it
