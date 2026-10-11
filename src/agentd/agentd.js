@@ -1251,6 +1251,15 @@ function serveFolder(mux, msg) {
 // server-side policy); the daemon trusts its hostToken-authed paired server.
 // CONNECT only, no-auth; domain names resolve HERE (socks5h = DNS on the exit).
 const socksServers = new Map(); // port → { server, owner: mux }
+// lane machine-app-crop: the followed app windows (`window-track` with `watch`) — wid → { owner: mux, h, last, pinned }. A watch
+// belongs to the link that asked it (its death stops it; the hub re-arms it); a pin it made is undone when it stops.
+const windowWatches = new Map();
+function unpinWindow(rec) {
+  rec.pinned = false;
+  const a = rec.last;
+  if (!a || a.state === 'gone') return; // the window closed: its place on top went with it
+  try { require('./../machine-window.js').pinWindow({ platform: process.platform, hwnd: a.hwnd, pid: a.pid, on: false, execFile: require('child_process').execFile, env: spawnEnv() }).catch(() => { }); } catch { }
+}
 function serveSocks(mux, msg) {
   const net = require('net');
   const REPLY = (code) => Buffer.from([0x05, code, 0x00, 0x01, 0, 0, 0, 0, 0, 0]);
@@ -1513,7 +1522,7 @@ function serveConnection(sock) {
           // per-op capability gating (three-tier design): consumers check the
           // capability, NEVER parse daemonVersion — unknown ops on an old
           // daemon get no reply and hang the request until its timeout
-          capabilities: ['probe', 'transcript-op', 'usage-scan', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events', 'pool-orders', 'sysinfo', 'design-fs', 'session-events', 'proc-list', 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'browser-end-daemon', 'desktop-serve', 'dial-status', 'run-shell', 'app-install', 'fs-portable', 'fs-write-stream'],
+          capabilities: ['probe', 'transcript-op', 'usage-scan', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events', 'pool-orders', 'sysinfo', 'design-fs', 'session-events', 'proc-list', 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'browser-end-daemon', 'desktop-serve', 'window-track', 'window-pin', 'dial-status', 'run-shell', 'app-install', 'fs-portable', 'fs-write-stream', 'desktop-apps-list'],
         }));
         return;
       }
@@ -1972,6 +1981,18 @@ function serveConnection(sock) {
         })();
         return;
       }
+      if (msg.op === 'desktop-apps-list') {
+        // the installed-apps list, owner 2026-10-11: the apps INSTALLED here, listed by witness (the Start Menu + the registry's Uninstall
+        // keys on Windows, /Applications on macOS) through THE shared module (src/installed-apps.js) — bounded on this
+        // machine (its budget kills the script), answered with the op on the reply (the id-keyed routing set)
+        (async () => {
+          try {
+            const IA = require('./../installed-apps.js');
+            mux.control({ op: 'desktop-apps-list-result', id: msg.id, result: await IA.listInstalled({ platform: process.platform, home: process.env.HOME || process.env.USERPROFILE || require('os').homedir(), budgetMs: msg.budgetMs, env: spawnEnv() }) });
+          } catch (e) { mux.control({ op: 'desktop-apps-list-result', id: msg.id, error: String(e.message || e) }); }
+        })();
+        return;
+      }
       if (msg.op === 'peer-post') {
         // Cross-machine conversation delivery (2.362.0, B-dfd2): the hub asks
         // THIS machine to post one message into a conversation whose CLI runs
@@ -2064,6 +2085,31 @@ function serveConnection(sock) {
             mux.control({ op: 'desktop-serve-result', id: msg.id, result: r });
           } catch (e) { mux.control({ op: 'desktop-serve-result', id: msg.id, error: String(e.message || e) }); }
         })();
+        return;
+      }
+      // lane machine-app-crop (THREE-TOUCH: this handler, `window-track` / `window-pin` in the hello-ack, the client's gated
+      // methods): ONE app's window on THIS machine — found by the launched process (or its start time), its rectangle
+      // followed (`watch`: each change pushed as `window-rect` by `wid`, the unsolicited branch on the hub), kept on top —
+      // through THE shared module (src/machine-window.js) with this daemon's spawn. Bounded: the finding look ends at its
+      // wait, a watch ends with its window, its link, or `window-untrack`.
+      if (msg.op === 'window-track') {
+        const MW = require('./../machine-window.js');
+        const wid = msg.watch ? String(msg.wid || '').slice(0, 80) : '';
+        if (wid && windowWatches.has(wid)) windowWatches.get(wid).h.stop();
+        const rec = { owner: mux, h: null, last: null, pinned: false };
+        rec.h = MW.runWindowTrack({ platform: process.platform, params: msg, spawn: require('child_process').spawn, env: spawnEnv(),
+          onAnswer: (a, first) => { rec.last = a; try { mux.control(first ? { op: 'window-track-result', id: msg.id, result: a } : { op: 'window-rect', wid, result: a }); } catch { } },
+          onEnd: () => { if (wid && windowWatches.get(wid) === rec) windowWatches.delete(wid); if (rec.pinned) unpinWindow(rec); } });
+        if (wid && !rec.h.stopped) windowWatches.set(wid, rec);
+        return;
+      }
+      if (msg.op === 'window-untrack') { const rec = windowWatches.get(String(msg.wid || '')); if (rec) rec.h.stop(); mux.control({ op: 'window-untrack-result', id: msg.id, stopped: !!rec }); return; }
+      if (msg.op === 'window-pin') {
+        const rec = windowWatches.get(String(msg.wid || ''));
+        if (!rec || !rec.last || rec.last.state !== 'found') { mux.control({ op: 'window-pin-result', id: msg.id, result: { ok: false, code: 'not_tracked', error: 'that window is not followed here (it closed, or its watch ended)' } }); return; }
+        const on = !!msg.on;
+        require('./../machine-window.js').pinWindow({ platform: process.platform, hwnd: rec.last.hwnd, pid: rec.last.pid, on, execFile: require('child_process').execFile, env: spawnEnv() })
+          .then((r) => { if (r && r.ok) rec.pinned = !!r.pinned; mux.control({ op: 'window-pin-result', id: msg.id, result: r }); }, (e) => mux.control({ op: 'window-pin-result', id: msg.id, error: String((e && e.message) || e) }));
         return;
       }
       if (msg.op === 'proc-list') {
@@ -2381,6 +2427,7 @@ function serveConnection(sock) {
       // outlive the server that asked for it (ExitManager re-creates on reconnect)
       for (const [port, s] of socksServers) { if (s.owner === mux) { try { s.server.close(); } catch { } socksServers.delete(port); } }
       if (this._discoWatch) { for (const w of this._discoWatch) { try { w.close(); } catch { } } this._discoWatch = null; }
+      for (const rec of [...windowWatches.values()]) if (rec.owner === mux) rec.h.stop(); // lane machine-app-crop: a watch dies with its link (unpinned); the hub re-arms it
       if (this._usageEvWatch) { try { for (const w of this._usageEvWatch.watches) w.close(); } catch { } this._usageEvWatch = null; }
       pipeSessions.detachAll(mux);
     },

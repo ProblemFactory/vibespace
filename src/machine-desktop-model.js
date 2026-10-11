@@ -76,15 +76,17 @@ const PS_ARGV = Object.freeze(['powershell.exe', '-NoProfile', '-NonInteractive'
  * Refused by name: not_desktop_machine (any other platform), empty, too_long, multi_line (CR / LF — one line only),
  * hidden_chars (naming the first code point).
  */
-function desktopRunPlan(platform, line) {
+function desktopRunPlan(platform, line, { report = false } = {}) {
   if (!DESKTOP_PLATFORMS.includes(platform)) return { ok: false, code: 'not_desktop_machine', error: `"Run on its desktop" is for Windows and macOS machines (this one runs ${platform || 'an unknown system'})` };
   if (typeof line !== 'string' || !line.trim()) return { ok: false, code: 'empty', error: 'type a command to run' };
   if (line.length > RUN_LINE_MAX) return { ok: false, code: 'too_long', error: `a command is at most ${RUN_LINE_MAX} characters (this one has ${line.length})` };
   if (/[\r\n]/.test(line)) return { ok: false, code: 'multi_line', error: 'one line only — a line break would start a second command' };
   const hid = HC.hiddenCharsOf(line, { max: 1 });
   if (hid.length) return { ok: false, code: 'hidden_chars', error: `the command holds an invisible character (${hid[0]}) — what runs must be what you see; retype it` };
-  if (platform === 'darwin') return { ok: true, platform, shown: line, argv: ['/bin/sh', '-c', 'nohup /bin/sh -lc "$1" </dev/null >/dev/null 2>&1 &', 'vibespace-run', line] };
-  const script = `$ErrorActionPreference = 'Stop'; try { Start-Process -FilePath $env:ComSpec -WindowStyle Minimized -ArgumentList ('/d /s /c "' + ${psQuote(line)} + '"') } catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }`;
+  // lane machine-app-crop: `report` (the "show it as its own window" run) also prints `vibespace-launched <pid> <the machine's
+  // epoch ms>` — the started process and the machine's own clock, which src/machine-window.js finds the app's window by
+  if (platform === 'darwin') { const mac = { ok: true, platform, shown: line, argv: ['/bin/sh', '-c', 'nohup /bin/sh -lc "$1" </dev/null >/dev/null 2>&1 &', 'vibespace-run', line] }; if (report) mac.argv[2] += ' echo "vibespace-launched $! $(date +%s)000"'; return mac; }
+  const script = `$ErrorActionPreference = 'Stop'; try { ${report ? '$at = [DateTimeOffset]::Now.ToUnixTimeMilliseconds(); $p = ' : ''}Start-Process -FilePath $env:ComSpec -WindowStyle Minimized -ArgumentList ('/d /s /c "' + ${psQuote(line)} + '"')${report ? " -PassThru; [Console]::Out.WriteLine('vibespace-launched ' + $p.Id + ' ' + $at)" : ''} } catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }`;
   return { ok: true, platform, shown: line, argv: [...PS_ARGV, psEncoded(script)] };
 }
 /** The box's presets per platform (design 014: "presets: Blender"), then up to RUN_REMEMBER_MAX of the owner's own
@@ -185,5 +187,5 @@ function tightvncInstallPlan(f) {
 const TIGHTVNC_INSTALL = Object.freeze({ id: TIGHTVNC.id, from: 'hello', humanOnly: true, local: Object.freeze({ code: 'not_windows', error: 'TightVNC is the one-time setup of a paired Windows machine' }), plan: tightvncInstallPlan, done: 'vnc' });
 
 module.exports = {
-  DESKTOP_PLATFORMS, MACHINE_DESKTOP_PORT, MACHINE_DESKTOP_PREFIX, machineDesktopId, machineDesktopHost, desktopPickRow, RUN_LINE_MAX, psQuote, psEncoded, desktopRunPlan, DESKTOP_RUN_PRESETS, RUN_REMEMBER_MAX, desktopRunPresets, rememberRun, TIGHTVNC, TIGHTVNC_NO_ADMIN_EXIT, tightvncInstallPlan, TIGHTVNC_INSTALL,
+  DESKTOP_PLATFORMS, MACHINE_DESKTOP_PORT, MACHINE_DESKTOP_PREFIX, machineDesktopId, machineDesktopHost, desktopPickRow, RUN_LINE_MAX, psQuote, psEncoded, PS_ARGV, desktopRunPlan, DESKTOP_RUN_PRESETS, RUN_REMEMBER_MAX, desktopRunPresets, rememberRun, TIGHTVNC, TIGHTVNC_NO_ADMIN_EXIT, tightvncInstallPlan, TIGHTVNC_INSTALL,
 };

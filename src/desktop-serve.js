@@ -423,12 +423,18 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
       if (row.blocked) return { ...row, args: [...row.args], available: false, path: p, reason: row.blocked === 'shim-not-ours' ? `${row.label}: its launcher in ~/.vibespace/sysroot/bin is not VibeSpace's — it is not run` : `${row.label} lives in the app system, which cannot run here (${row.blocked})`, reasonCode: 'app-system' };
       return { ...row, args: [...row.args], available: !!p, path: p, reason: p ? null : `${row.label} is not installed on this machine (yet)`, reasonCode: p ? null : 'app-missing' };
     });
+    // lane apps-launcher-witness: what is installed OUTSIDE the door (src/app-witness.js) — its own `seen.` ids, flagged
+    // `witnessed`, never an engine row's id; a row whose program is gone stays listed and says so (never hidden)
+    const seenRows = (apps && typeof apps.witnessRows === 'function' ? apps.witnessRows() : []).filter((r) => !registryRows.some((x) => x.id === r.id) && !appRows.some((x) => x.id === r.id)).map((row) => {
+      const p = row.exec.includes('/') ? (row.execGone ? null : row.exec) : binOf(row.exec); // execGone: judged by the listing (async), never a sync stat of a user-written path here
+      return { ...row, args: [...row.args], available: !!p, path: p, reason: p ? null : `${row.exec} no longer resolves on this machine`, reasonCode: p ? null : 'exec-gone' };
+    });
     return registryRows.map((row) => {
       if (row.browser) return browserRegistryRow(row, binOf);
       if (row.office) return { ...O.officeRowFor(row, officeFactsOf(hostFacts, binOf)), args: [...(row.args || [])] }; // §7.9: presence = the binary AND the module's library
       const p = row.exec.includes('/') ? (fs.existsSync(row.exec) ? row.exec : null) : binOf(row.exec);
       return { ...row, args: [...row.args], available: !!p, path: p, reason: p ? null : `${row.exec} not on PATH` };
-    }).concat(appRows);
+    }).concat(appRows, seenRows);
   }
   /** §7.9: the machine's LibreOffice facts — hostFacts carries them (desktop-display officeFacts); a facts object from an
    *  older display module (a suite's stand-in) is read from its bins alone: the binary known, the modules not. */
@@ -530,8 +536,10 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     const serverSetting0 = opts.settings ? settingsReader(opts.settings) : serverSetting;
     const f = await facts();
     try { await apps.refreshCatalog(); } catch (e) { log.warn?.(`[apps] the catalog could not be read (${e.message}) — its last rows are served`); }
+    let witness = null; // lane apps-launcher-witness: `opts.witness: 'recheck'` = the group's Check again (else the open rule)
+    try { if (typeof apps.refreshWitness === 'function') witness = await apps.refreshWitness({ reason: opts.witness === 'recheck' ? 'recheck' : 'open' }); } catch { /* the last list */ }
     const resolved = resolve(f, undefined, serverSetting0);
-    return { apps: listApps(), registry: registry(f), availability: { backend: resolved.backend, via: resolved.via, recipe: resolved.recipe, stream: resolved.stream, caps: M.capsOf({ backend: resolved.backend }, backends), fallbackWhy: resolved.fallbackWhy, ladder: resolved.ladder, prefs: instancePrefs(serverSetting0), xpra: f.xpra, bins: f.bins }, cap: { used: liveRecords().length, cap: limits.CONCURRENT_CAP }, idleTimeoutMin: idleTimeoutMin(serverSetting0) };
+    return { apps: listApps(), registry: registry(f), witness, hostName: os.hostname(), availability: { backend: resolved.backend, via: resolved.via, recipe: resolved.recipe, stream: resolved.stream, caps: M.capsOf({ backend: resolved.backend }, backends), fallbackWhy: resolved.fallbackWhy, ladder: resolved.ladder, prefs: instancePrefs(serverSetting0), xpra: f.xpra, bins: f.bins }, cap: { used: liveRecords().length, cap: limits.CONCURRENT_CAP }, idleTimeoutMin: idleTimeoutMin(serverSetting0) };
   }
 
   function idleTimeoutMin(read = serverSetting) {
@@ -571,6 +579,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     const serverSetting = opts.settings ? settingsReader(opts.settings) : serverSetting0; // an op's settings shadow the hub's reader
     const f = await facts();
     try { await apps.refreshCatalog(); } catch { /* the last rows */ }
+    if (body && typeof body.appId === 'string' && body.appId.startsWith('seen.') && typeof apps.refreshWitness === 'function') { try { await apps.refreshWitness({ reason: 'open' }); } catch { /* the last list */ } } // a witnessed row: its list read (cheap when fresh)
     const reg = registry(f);
     const v = M.validateLaunchRequest(body || {}, reg);
     if (!v.ok) throw namedError(v.code || 'bad-request', v.error);
@@ -1600,7 +1609,7 @@ async function runDesktopServeOp(ds, action, params = {}) {
       if (p.install !== true) return { ok: true, facts };
       return { ok: true, facts, install: typeof ds.installFacts === 'function' ? await ds.installFacts() : null };
     }
-    if (op === 'list') return { ok: true, ...(await ds.list(settings ? { settings } : {})) };
+    if (op === 'list') return { ok: true, ...(await ds.list({ ...(settings ? { settings } : {}), ...(p.witness === 'recheck' ? { witness: 'recheck' } : {}) })) };
     if (op === 'launch') {
       if (!p.body || typeof p.body !== 'object') return bad('launch needs a `body` (the launch request)');
       const opts = {};

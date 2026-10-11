@@ -72,6 +72,9 @@
  *                                     paired machine, each with the PURE picker verdict
  *                                     (`selectable`, `code`: ready | connect | offline |
  *                                     host_needs_daemon | no_x11) — greyed, never hidden
+ *   GET  /api/desktop/machine-desktop/apps?host=[&fresh=1]   lane machine-desktop-apps: a Windows / macOS machine's
+ *                                     INSTALLED apps, listed on it by witness (people only) — {rows:[{name, launch,
+ *                                     source, seenAt}], listedAt, total, truncated, code?}
  *   GET  /api/desktop/install-plan?host=     the xpra INSTALL RUNG's plan for a machine (its facts +
  *                                     the PURE plan: source apt | xpra.org, the commands, canRun)
  *                                     — SHOWN before anything runs
@@ -181,7 +184,8 @@ const ID_RE = /^[A-Za-z0-9._-]{1,80}$/;
 
 router.get('/api/desktop/apps', async (req, res) => {
   const host = hostParam(req, res); if (!host) return;
-  try { const r = host === 'local' ? await ctx.keeper.list() : await ctx.keeper.list({ host }); res.json(appsEngine ? appsEngine.decorate(host, r) : r); } catch (e) { fail(res, e); }
+  const witness = req.query.witness === 'recheck' ? { witness: 'recheck' } : null; // lane apps-launcher-witness: the "Installed outside VibeSpace" group's Check again
+  try { const r = host === 'local' ? await (witness ? ctx.keeper.list(witness) : ctx.keeper.list()) : await ctx.keeper.list({ host, ...witness }); res.json(appsEngine ? appsEngine.decorate(host, r) : r); } catch (e) { fail(res, e); }
 });
 router.post('/api/desktop/apps', async (req, res) => {
   const host = hostParam(req, res); if (!host) return;
@@ -316,7 +320,43 @@ router.post('/api/desktop/machine-desktop/run', async (req, res) => {
   if (humanOnly(req, res)) return;
   const host = hostParam(req, res); if (!host) return;
   if (!ctx.access) return noAccess(res);
-  try { res.json(await ctx.access.runOnDesktop(host, req.body ? req.body.cmd : undefined)); } catch (e) { fail(res, e); }
+  try { res.json(await ctx.access.runOnDesktop(host, req.body ? req.body.cmd : undefined, { report: !!(req.body && req.body.window === true) })); } catch (e) { fail(res, e); }
+});
+// lane machine-app-crop: ONE app of the machine as its own window — the device follows the app's window, the page crops the
+// whole picture to it (src/server/machine-app.js; people only, like the whole desktop). `not_tracked` = its watch ended.
+let machineApps = null;
+const appsOf = (res) => { if (!ctx.access || typeof ctx.access.deviceOf !== 'function') { noAccess(res); return null; } return machineApps || (machineApps = require('../server/machine-app.js').create({ access: ctx.access, log: console })); };
+const appFail = (res, e) => (e && e.code === 'not_tracked' ? res.status(404).json({ error: String(e.message), code: e.code }) : fail(res, e));
+router.post('/api/desktop/machine-app/track', async (req, res) => {
+  if (humanOnly(req, res)) return;
+  const host = hostParam(req, res); if (!host) return;
+  const ma = appsOf(res); if (!ma) return;
+  const b = req.body || {};
+  try { res.json(await ma.track(host, { pid: b.pid ?? null, since: b.since ?? null, target: b.target ?? null })); } catch (e) { appFail(res, e); }
+});
+router.get('/api/desktop/machine-app/watch', async (req, res) => {
+  if (humanOnly(req, res)) return;
+  const ma = appsOf(res); if (!ma) return;
+  res.json(await ma.poll(String(req.query.key || ''), Number(req.query.seq ?? -1), Number(req.query.waitMs) || undefined));
+});
+router.post('/api/desktop/machine-app/on-top', async (req, res) => {
+  if (humanOnly(req, res)) return;
+  const ma = appsOf(res); if (!ma) return;
+  try { res.json(await ma.pin(String((req.body && req.body.key) || ''), !!(req.body && req.body.on))); } catch (e) { appFail(res, e); }
+});
+router.post('/api/desktop/machine-app/untrack', (req, res) => {
+  if (humanOnly(req, res)) return;
+  const ma = appsOf(res); if (!ma) return;
+  res.json(ma.untrack(String((req.body && req.body.key) || '')));
+});
+/** lane machine-desktop-apps: the machine's INSTALLED apps — listed ON it by witness (src/installed-apps.js), kept by the
+ *  hub; `fresh=1` = Check again (listed now). Answered 200 with the list as it is when the machine cannot list right
+ *  now (`code`: host_needs_daemon = its agent predates the op, offline, list_failed) — the dialog words each. */
+router.get('/api/desktop/machine-desktop/apps', async (req, res) => {
+  if (humanOnly(req, res)) return;
+  const host = hostParam(req, res); if (!host) return;
+  if (!ctx.access || typeof ctx.access.installedApps !== 'function') return noAccess(res);
+  try { res.json(await ctx.access.installedApps(host, { why: req.query.fresh === '1' ? 'recheck' : 'open' })); } catch (e) { fail(res, e); }
 });
 /** The bridge's own record of a machine desktop's last close (the window words it — "<machine> went offline"). */
 router.get('/api/desktop/machine-desktop/last-close', (req, res) => {

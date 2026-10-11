@@ -365,8 +365,9 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
    *  running sessions of every machine. `host` absent / 'local' = this machine, exactly as before lane C2. */
   async function list(opts = {}) {
     const host = opts && opts.host;
-    if (isLocalHost(host)) { const r = await machine.list(); return hasRemote() ? { ...r, apps: listApps() } : r; }
-    const r = await acc().call(host, 'list', { settings: settingsForOp() });
+    const witness = opts && opts.witness === 'recheck' ? { witness: 'recheck' } : {}; // lane apps-launcher-witness: the group's Check again
+    if (isLocalHost(host)) { const r = await machine.list(witness); return hasRemote() ? { ...r, apps: listApps() } : r; }
+    const r = await acc().call(host, 'list', { settings: settingsForOp(), ...witness });
     ingestHost(host, r.apps, { www: r.availability && r.availability.xpra ? r.availability.xpra.www || null : null });
     return { apps: listApps(), registry: r.registry, availability: r.availability && { ...r.availability, caps: M.capsOf(r.availability, backends) }, cap: r.cap, idleTimeoutMin: r.idleTimeoutMin, host: { hostId: host, label: labelOf(host) } };
   }
@@ -527,6 +528,8 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
   // answers again (never "exited": the app may well be running there). The resource REPORT judges the device's own
   // sample with the same verdict module (report only — the 2.369.171 law); the idle verdict stops through the op.
   let remote = { hosts: {} }; // hostId → { apps: {id: device view}, hub: {id: {lastInputAt, appTitle}}, online, lastSyncAt, lastError, www }
+  //   + `installed` (the installed-apps list, owner 2026-10-11): hostId → { platform, rows, total, truncated, listedAt } — a Windows / macOS
+  //   machine's INSTALLED apps as it last listed them (src/installed-apps.js; asked by src/server/desktop-access.js)
   let remoteDirty = false;
   const syncing = new Map();   // hostId → the in-flight sync (single flight)
   const judged = new Map();    // id → the sample instant last judged (a device sample is judged once)
@@ -535,7 +538,7 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
   function loadRemote() {
     try {
       const j = JSON.parse(fs.readFileSync(remoteFile, 'utf8'));
-      if (j && typeof j === 'object' && j.hosts && typeof j.hosts === 'object') remote = { hosts: j.hosts };
+      if (j && typeof j === 'object' && j.hosts && typeof j.hosts === 'object') remote = { hosts: j.hosts, ...(j.installed && typeof j.installed === 'object' ? { installed: j.installed } : {}) };
     } catch (e) { if (e.code !== 'ENOENT') log.warn?.(`[desktop] ${REMOTE_FILE} unreadable (${e.message}) — the paired machines are re-asked at boot`); }
     for (const h of Object.values(remote.hosts)) { h.apps = h.apps || {}; h.hub = h.hub || {}; h.online = null; } // not asked yet this boot
   }
@@ -700,6 +703,14 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
     await machine.adoptAll();
     adoptRemote().catch((e) => log.warn?.(`[desktop] adopting the paired machines' apps failed: ${e && e.message}`));
   }
+  // the installed-apps list, owner 2026-10-11: the paired machines' installed-app lists live in THIS file (beside, never inside, a host's
+  // app records — a listed machine is not a machine with desktop apps to adopt); the access layer decides when to list
+  const installedOf = (hostId) => { const e = remote.installed && remote.installed[hostId]; return e && Array.isArray(e.rows) ? e : null; };
+  function noteInstalled(hostId, entry) {
+    if (!remote.installed) remote.installed = {};
+    if (entry && Array.isArray(entry.rows)) remote.installed[hostId] = entry; else delete remote.installed[hostId];
+    saveRemote();
+  }
   /** The window-targets engine's world is THIS machine's (an agent acts through xdotool / AT-SPI here): a view of this
    *  keeper whose get / listApps never answer a paired machine's record. */
   function localOnly(k) { return Object.assign({}, k, { get: (id) => machine.get(id), listApps: () => machine.listApps() }); }
@@ -709,7 +720,8 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
     viewerJoined, viewerLeft, takeoverViewer, activeViewer, viewersView, onViewers, refreshAppTitle, viewerGraceMs, carrySeat, relaunchSeatMs, // P8-2 x5 + A r1
     machine, // lane C1: device #0's machine keeper — src/server/desktop-access.js runs its local rung against THIS object (never a second keeper on the same store)
     storeFile: machine.storeFile, logRoot: machine.logRoot, STORE_FILE: DS.STORE_FILE, LOG_DIR: DS.LOG_DIR, SESSION_ENV: DS.SESSION_ENV, _store: machine._store,
-    remoteFile, REMOTE_FILE, _remote: () => remote }; // lane C2
+    remoteFile, REMOTE_FILE, _remote: () => remote, // lane C2
+    installedOf, noteInstalled }; // the installed-apps list, owner 2026-10-11
   keeper.local = localOnly(keeper);
   return keeper;
 }

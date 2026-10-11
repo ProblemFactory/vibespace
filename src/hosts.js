@@ -190,10 +190,15 @@ class HostManager {
    *  In-flight ops on the old dm finish undisturbed. */
   onDialIn(deviceId) {
     const h = this.findByDeviceId(deviceId);
+    for (const fn of this._dialInHooks || []) { try { fn(h ? h.id : null); } catch { /* a hook never breaks the dial-in */ } }
     if (!h || h.transport === 'dial') return;
     const cached = this._devices?.get(h.id);
     if (cached && !cached._dialStream) this._devices.delete(h.id);
   }
+
+  /** lane machine-desktop-apps: another layer hears every dial-in (the device's daemon said hello on a fresh link) —
+   *  `fn(hostId)`; the access layer lists a Windows / macOS machine's installed apps then. → unsubscribe */
+  addDialInHook(fn) { if (!this._dialInHooks) this._dialInHooks = new Set(); this._dialInHooks.add(fn); return () => this._dialInHooks.delete(fn); }
 
   /** Pairing credential lives ON the host record (B-f3e8 — dial-tokens.json
    *  folded in). setDialToken find-or-creates so re-pairing an existing name

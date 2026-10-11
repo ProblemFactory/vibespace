@@ -29,6 +29,10 @@
  *   the catalog      catalogRows(): one row per .desktop file root listed for an entry (re-parsed from apt's own
  *                    /usr/share/applications, never from the user-writable index) — desktop-serve's registry() serves
  *                    them beside DEFAULT_REGISTRY; iconFile(): the one icon a row may show (PNG / SVG under /usr/share).
+ *   the witness      refreshWitness() / witnessRows() (lane apps-launcher-witness): what is installed OUTSIDE the door —
+ *                    `flatpak list --app --user|--system` + the user's and the system's desktop entries, read as the user
+ *                    (bounded, ≤ 5 s), cached in <stateDir>/desktop-apps-witness.json — rows of their OWN group
+ *                    (`seen.<…>`, src/app-witness.js), never catalog rows.
  * Every probe is a bounded async child or an async fs call — never a sync walk on the loop (the hub's event loop).
  */
 const fs = require('fs');
@@ -46,6 +50,7 @@ const SYS = require('./app-system.js');
 
 const APP_OPS = Object.freeze(['app-status', 'app-plan', 'app-install', 'app-remove', 'app-refresh', 'app-adopt-drift', 'app-fetch', 'app-unstage', 'app-forget']);
 const K = require('./app-kinds/index.js'); // PURE — an app kind is its own file + one index line (lanes dc-apps-rows, dc-app-kinds)
+const W = require('./app-witness.js'); // PURE — what is installed OUTSIDE the door, by witness (lane apps-launcher-witness)
 const PLAN_KINDS = Object.freeze([...K.PLAN_KINDS, ...SYS.SYS_KINDS]); // design 019: `move` = the user's click (the host apps INTO the app system), `forget` = its second step
 /** A file VibeSpace staged for a proposal: `<16 hex>.deb` / `.AppImage` / `.icon.png|svg` (a download in flight: `.part`). */
 const STAGED_RE = /^[0-9a-f]{16}\.(?:deb|AppImage|icon\.(?:png|svg))$/;
@@ -194,7 +199,7 @@ function fetchHttps(url, { max = KEY_MAX, timeout = 20000, redirects = 3 } = {})
  *                    loopback "vendor" by a RESERVED `.test` name (never a real site); production passes nothing
  */
 function create({ home = os.homedir(), stateDir, env = () => process.env, log = console, now = Date.now, binOnPath = null, installState = null,
-  dpkgStatus = '/var/lib/dpkg/status', markerDir = A.MARKER_DIR, systemLists = '/var/lib/apt/lists', osRelease = '/etc/os-release', isRoot = null, runner = run, fetchSeam = null, rootUid = 0 } = {}) {
+  dpkgStatus = '/var/lib/dpkg/status', markerDir = A.MARKER_DIR, systemLists = '/var/lib/apt/lists', osRelease = '/etc/os-release', isRoot = null, runner = run, fetchSeam = null, rootUid = 0, witnessDirs = null } = {}) {
   if (!stateDir) throw new Error('app-serve: stateDir is required');
   if (typeof env !== 'function') { const e0 = env; env = () => e0; }
   const appsDir = path.join(home, A.APPS_REL);
@@ -435,6 +440,65 @@ function create({ home = os.homedir(), stateDir, env = () => process.env, log = 
   }
   /** The rows as desktop-serve's registry() last saw them (refreshCatalog keeps them current). */
   function catalogRows() { return catalog.rows.map((r) => sys.verifyRow({ ...r, args: [...r.args] })); } // Layer 1: a sys row's launcher is re-checked at every read (= at launch)
+  // ── THE WITNESS (lane apps-launcher-witness): an app installed around the door (an agent's `flatpak install --user`) is
+  // listed as what it is — its own group, its own source; the four directories' mtimes are the cheap change signature ──
+  const wDirs = { user: path.join(home, '.local', 'share', 'applications'), system: '/usr/share/applications', flatpakUser: path.join(home, '.local', 'share', 'flatpak', 'app'), flatpakSystem: '/var/lib/flatpak/app', ...(witnessDirs || {}) };
+  const witnessFile = path.join(stateDir, W.WITNESS_FILE);
+  let witness = null; // { rows, listedAt, sig, flatpak } — the file's, read at the first ask
+  let witnessFlight = null;
+  async function witnessSig() { let s = ''; for (const d of [wDirs.user, wDirs.system, wDirs.flatpakUser, wDirs.flatpakSystem]) s += `${await mtimeOf(d)};`; return s; }
+  async function readWitness() {
+    if (witness) return witness;
+    try {
+      const j = JSON.parse(await fsp.readFile(witnessFile, 'utf8'));
+      witness = { rows: (Array.isArray(j.rows) ? j.rows : []).filter((r) => r && r.witnessed === true && String(r.id || '').startsWith(W.WITNESS_PREFIX) && M.validateAppRow(r).ok), listedAt: Number.isFinite(j.listedAt) ? j.listedAt : null, sig: typeof j.sig === 'string' ? j.sig : null, flatpak: typeof j.flatpak === 'boolean' ? j.flatpak : null };
+    } catch { witness = { rows: [], listedAt: null, sig: null, flatpak: null }; }
+    return witness;
+  }
+  /** ONE desktop file the user (or anyone) wrote: opened O_NONBLOCK|O_NOFOLLOW (a FIFO or a link never blocks a pool
+   *  thread), a regular file ≤ DESKTOP_MAX judged on the open fd. null = not one. */
+  async function readEntryFile(file) {
+    let fh = null;
+    try {
+      fh = await fsp.open(file, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK | fs.constants.O_NOFOLLOW);
+      const st = await fh.stat();
+      if (!st.isFile() || st.size > DESKTOP_MAX) return null;
+      return await fh.readFile('utf8');
+    } catch { return null; } finally { if (fh) await fh.close().catch(() => { }); }
+  }
+  async function entryFiles(dir, scope, until) {
+    let names = [];
+    try { names = (await fsp.readdir(dir)).filter((n) => n.endsWith('.desktop')).sort().slice(0, W.DESKTOP_FILES_MAX); } catch { return []; }
+    const out = [];
+    for (const n of names) { if (now() > until) break; const text = await readEntryFile(path.join(dir, n)); if (text != null) out.push({ path: path.join(dir, n), text, scope }); }
+    return out;
+  }
+  async function listWitness() {
+    const until = now() + W.WITNESS_BUDGET_MS;
+    const sig = await witnessSig();
+    const fl = await Promise.all(['user', 'system'].map((scope) => runner('flatpak', ['list', '--app', `--${scope}`, `--columns=${W.FLATPAK_COLUMNS}`], { env: env(), timeout: W.WITNESS_BUDGET_MS, maxBuffer: 4 * 1024 * 1024 })));
+    const flatpak = fl.some((r) => r.code === 0);
+    const flatpaks = fl.flatMap((r, i) => (r.code === 0 ? W.parseFlatpakList(r.stdout, { scope: i ? 'system' : 'user' }) : []));
+    const desktops = [...await entryFiles(wDirs.user, 'user', until), ...await entryFiles(wDirs.system, 'system', until)];
+    try { await refreshCatalog(); } catch { /* the last rows */ }
+    const rows = W.witnessRows({ flatpaks, desktops, catalog: catalog.rows, validate: M.validateAppRow, parse: A.parseDesktopFile });
+    for (const r of rows) if (r.exec.includes('/') && now() <= until && !(await exists(r.exec))) r.execGone = true; // the registry says so (never a sync stat there)
+    witness = { rows, listedAt: now(), sig, flatpak };
+    try { await writeJsonAtomic(witnessFile, witness); } catch (e) { log.warn?.(`[apps] ${W.WITNESS_FILE} could not be written (${e.message}) — the list is kept in memory`); }
+    return witness;
+  }
+  /** Re-list when the rule says so (app-witness refreshVerdict; `reason` open | install | helper | recheck) — one
+   *  listing in flight at a time, the caller waits ≤ WITNESS_BUDGET_MS (then the last list is served). → the view. */
+  async function refreshWitness({ reason = 'open' } = {}) {
+    const w0 = await readWitness();
+    const v = W.refreshVerdict({ listedAt: w0.listedAt, sig: w0.sig, sigNow: reason === 'open' ? await witnessSig() : null, now: now(), reason });
+    if (v.due && !witnessFlight) witnessFlight = listWitness().catch((e) => { log.warn?.(`[apps] the installed-apps witness failed (${e.message}) — the last list is served`); return witness; }).finally(() => { witnessFlight = null; });
+    if (witnessFlight) { let t; await Promise.race([witnessFlight, new Promise((r) => { t = setTimeout(r, W.WITNESS_BUDGET_MS); })]); clearTimeout(t); }
+    return witnessView();
+  }
+  function witnessView() { const w = witness || { rows: [], listedAt: null, flatpak: null }; return { listedAt: w.listedAt, count: w.rows.length, flatpak: w.flatpak }; }
+  /** The witnessed rows as last listed (copies — registry() decorates them). */
+  function witnessRows() { return ((witness && witness.rows) || []).map((r) => ({ ...r, args: [...r.args] })); }
   /** The icon file a row may show → {file, type} | null: a PNG / SVG under /usr/share/{icons,pixmaps}, a regular file. */
   async function iconFile(rowId) {
     const row = catalog.rows.find((r) => r.id === rowId);
@@ -998,7 +1062,7 @@ function create({ home = os.homedir(), stateDir, env = () => process.env, log = 
     return { source: remove ? null : m.sources.find((s) => s.id === sourceId), removed: remove ? sourceId : null };
   }
 
-  return { sys, appsDir, sysDir, stagingDir, manifestFile, stateFile, listsRoot, facts, plan, status, fetchInstaller, unstage, installAppImage, removeHome, appImageInfo, readManifest, writeManifest, readState, writeState, recordEntry, recordRemove, recordRefresh, recordSource, recordUserKind, recordForget, reconcile, refreshCatalog, catalogRows, iconFile, rootEntries, dpkgNow, aptOpts, slotState };
+  return { sys, appsDir, sysDir, stagingDir, manifestFile, stateFile, listsRoot, facts, plan, status, fetchInstaller, unstage, installAppImage, removeHome, appImageInfo, readManifest, writeManifest, readState, writeState, recordEntry, recordRemove, recordRefresh, recordSource, recordUserKind, recordForget, reconcile, refreshCatalog, catalogRows, iconFile, refreshWitness, witnessRows, witnessView, rootEntries, dpkgNow, aptOpts, slotState };
 }
 
 const bad = (error) => ({ ok: false, code: 'bad-request', error });
@@ -1019,6 +1083,12 @@ const bad = (error) => ({ ok: false, code: 'bad-request', error });
  *   app-forget      {entryId, nonce}                                → {ok, forgot, run, relayered}   (a move's second step ran)
  */
 async function runAppOp(apps, action, params = {}) {
+  const r = await runAppOp0(apps, action, params);
+  // lane apps-launcher-witness: an install / removal through the door re-lists what is installed (in the background)
+  if (r && r.ok && (action === 'app-install' || action === 'app-remove') && typeof apps.refreshWitness === 'function') apps.refreshWitness({ reason: 'install' }).catch(() => { });
+  return r;
+}
+async function runAppOp0(apps, action, params = {}) {
   const op = String(action || '');
   if (!APP_OPS.includes(op)) return bad(`unknown app op ${JSON.stringify(op)} — one of ${APP_OPS.join(', ')}`);
   if (!apps || typeof apps.plan !== 'function') return { ok: false, code: 'host_unavailable', error: 'the apps machine half is not installed on this machine' };

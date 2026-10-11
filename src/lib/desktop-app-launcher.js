@@ -87,6 +87,7 @@ import { wireAppPrefs, appPrefs, appPrefsReady, onAppPrefs, saveAppPrefs } from 
 import { mountLaunchShareRow, launchKeyOf } from './window-share.js';
 import { showMachineDesktopDialog } from './machine-desktop.js'; // design 014 D1: a Windows / macOS machine's whole desktop
 import { OFFICE_MODULES, installSpecFor, FONTS_ID } from '../office-open.js'; // §7.9: the LibreOffice table (PURE)
+import { installPlace } from '../app-witness.js'; // lane apps-launcher-witness: THE install-place words (PURE, shared with the engine's outcome)
 import { appPlanBlock, appSummaryBlock, appRefusalText, appDialogTitle, appGoLabel, appPlanNote, appDoneText, renderAppsSection, openDebInstall, openAppSearch, openAgentHelp, appsBannerModel } from './app-install-dialog.js'; // Layer 0 apps: THE install dialog shows an app's plan too
 const AGENT_BROWSER_ORIGIN = 'agent-browser'; // src/server/window-targets-engine.js AGENT_BROWSER_ORIGIN
 /** lane e2a r3 (verify r1 #11): a record the agent launched through its own door — the chip / the running row words. */
@@ -201,6 +202,27 @@ export function availabilityText(av, machine = null) {
 }
 
 /** lane C2: a machine picker row's name ("This machine" for the hub itself — a DISPLAY string, never a spawn input). */
+/** lane apps-launcher-witness: this hub's own name, as the last local list said it (the place words name it). */
+let localHostName = '';
+export function noteLocalHostName(n) { if (typeof n === 'string' && n) localHostName = n.slice(0, 64); }
+/** Where an install landed: "this VibeSpace machine (linux-box-hub)" | the paired machine's label (PURE installPlace). */
+export function installPlaceOf(m) { return installPlace({ hostId: (m && m.hostId) || 'local', label: (m && m.label) || '', localName: localHostName }, t); }
+/** A witnessed row's source chip (src/app-witness.js WITNESS_SOURCES). */
+export function witnessSourceText(source) {
+  return source === 'flatpak-user' ? t('Flatpak · yours') : source === 'flatpak-system' ? t('Flatpak · system') : source === 'desktop-system' ? t('Desktop entry · system') : t('Desktop entry · yours');
+}
+/** A witnessed card's second line: its command as written (shown, never trusted as an engine row) — or that it is gone. */
+export function witnessSubText(row) {
+  const cmd = [row.exec, ...(row.args || [])].join(' ');
+  return row.available ? cmd : t('Its program is gone: {cmd}', { cmd });
+}
+/** The filter box: a card matches when every word is in its name, its command or its flatpak id. PURE. */
+export function launchFilterMatch(row, q) {
+  const words = String(q || '').toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) return true;
+  const hay = [row.label, (row.labels && (row.labels.zh || '')) || '', (row.labels && (row.labels.ja || '')) || '', row.exec, ...(row.args || []), row.flatpak || ''].join(' ').toLowerCase();
+  return words.every((w) => hay.includes(w));
+}
 export function machineName(m) { return !m || !m.hostId || m.hostId === 'local' ? t('This machine') : String(m.label || m.hostId); }
 /** §7.9: a machine's name INSIDE a sentence ("… is not installed on this machine" — never a capitalised "This machine"). */
 export function machineInSentence(m) { return !m || !m.hostId || m.hostId === 'local' ? t('this machine') : String(m.label || m.hostId); }
@@ -475,9 +497,9 @@ export async function showInstallDialog(m, { what = 'xpra', onDone = null, reque
         if (o.done || o.error) end = o;
       }
     }
-    if (end && end.done && isApp) { note.textContent = appDoneText(end, name); note.classList.remove('is-bad'); showToast(appDoneText(end, name)); goBtn.style.display = 'none'; onDone?.(end); }
+    if (end && end.done && isApp) { note.textContent = appDoneText(end, installPlaceOf(m)); note.classList.remove('is-bad'); showToast(appDoneText(end, installPlaceOf(m))); goBtn.style.display = 'none'; onDone?.(end); }
     else if (end && end.done && xp) { note.textContent = t('xpra {version} is installed on {machine}', { version: end.installed || '', machine: name }); showToast(t('xpra is installed on {machine}', { machine: name })); onDone?.(); }
-    else if (end && end.done) { note.textContent = t('{app} is installed on {machine}', { app: end.label || appLabel, machine: name }); showToast(t('{app} is installed on {machine}', { app: end.label || appLabel, machine: name })); onDone?.(); }
+    else if (end && end.done) { note.textContent = t('{app} is installed on {machine}', { app: end.label || appLabel, machine: installPlaceOf(m) }); showToast(t('{app} is installed on {machine}', { app: end.label || appLabel, machine: installPlaceOf(m) })); onDone?.(); }
     else if (end && end.code === 'plan_changed' && end.plan && Array.isArray(end.plan.commands)) {
       // verify-r6 I1: the machine's plan moved after the dialog showed it — NOTHING ran; the new commands replace the old
       // ones above the button, and the next press names THEM
@@ -517,7 +539,13 @@ export async function showLaunchDialog(app, opts = {}) {
     </section>
     <section class="desktop-launch-sec desktop-launch-catalog-sec">
       <h4>${escHtml(t('Apps'))}</h4>
+      <input type="search" class="desktop-launch-filter" placeholder="${escHtml(t('Filter apps'))}" aria-label="${escHtml(t('Filter apps'))}" autocomplete="off" spellcheck="false">
       <div class="desktop-launch-registry desktop-launch-grid"></div>
+    </section>
+    <section class="desktop-launch-sec desktop-launch-seen-sec is-empty">
+      <h4><span class="desktop-launch-seen-title"></span><button type="button" class="desktop-launch-seen-recheck">${escHtml(t('Check again'))}</button></h4>
+      <p class="desktop-launch-seen-note">${escHtml(t('Installed by you or an agent without VibeSpace — listed as found on this machine; VibeSpace does not manage them or bring them back after a rebuild.'))}</p>
+      <div class="desktop-launch-seen desktop-launch-grid"></div>
     </section>
     <section class="desktop-launch-sec desktop-launch-browsers-sec is-empty">
       <h4>${escHtml(t('Browsers'))}</h4>
@@ -561,6 +589,7 @@ export async function showLaunchDialog(app, opts = {}) {
       </section>
     </div>`;
   const $ = (sel) => body.querySelector(sel);
+  const seenSec = $('.desktop-launch-seen-sec'), seenEl = $('.desktop-launch-seen'), filterIn = $('.desktop-launch-filter'); // lane apps-launcher-witness
   const availEl = $('.desktop-launch-avail'), regEl = $('.desktop-launch-registry'), runEl = $('.desktop-launch-running'), recEl = $('.desktop-launch-recents');
   const browsersSec = $('.desktop-launch-browsers-sec'), browsersEl = $('.desktop-launch-browsers'), urlIn = $('.desktop-launch-url'), keepIn = $('.desktop-launch-keep-profile');
   const runSec = $('.desktop-launch-running-sec'), countEl = $('.desktop-launch-count');
@@ -588,6 +617,7 @@ export async function showLaunchDialog(app, opts = {}) {
     $('.desktop-launch-adv').style.display = 'none';
     $('.desktop-launch-desk-sec').style.display = 'none'; // agents on the real desktop: not this dialog's question
     $('.desktop-launch-apps-sec').style.display = 'none'; // installing apps: not this dialog's question
+    filterIn.style.display = 'none'; seenSec.style.display = 'none'; // a document opens in LibreOffice only
   }
   // Layer 0 apps: the "Your installed apps" section, for the chosen machine (re-mounted when the machine changes)
   let appsSec = null;
@@ -772,6 +802,8 @@ export async function showLaunchDialog(app, opts = {}) {
     // ── the catalog: applications, then browsers (B-bfe6) under their own heading ──
     regEl.innerHTML = '';
     browsersEl.innerHTML = '';
+    seenEl.innerHTML = '';
+    if (host === 'local' && data && data.hostName) noteLocalHostName(data.hostName);
     // §7.9 FILE MODE: the document's own LibreOffice row only (its module opens it — the PURE verdict's rule)
     const rows = (data?.registry || []).filter((row) => !doc || (row.office && row.office === doc.module));
     for (const row of rows) {
@@ -795,7 +827,7 @@ export async function showLaunchDialog(app, opts = {}) {
       const unavailable = !row.available || !!row.parkedUntil;
       b.className = 'desktop-launch-card' + (unavailable ? ' is-unavailable' : '') + (isLaunching ? ' is-launching' : '');
       // a dimmed BROWSER row says its verdict SHORT and translated (by the server's code); the sentence is its tooltip
-      const sub = isLaunching ? t('Launching…') : row.available ? (row.reason || row.exec) : ((row.browser && browserReasonShort(row.reasonCode)) || (row.office && officeReasonShort(row.reasonCode)) || (row.app && appReasonShort(row.reasonCode)) || registryReasonShort(row) || row.reason || t('not on PATH'));
+      const sub = isLaunching ? t('Launching…') : row.witnessed ? witnessSubText(row) : row.available ? (row.reason || row.exec) : ((row.browser && browserReasonShort(row.reasonCode)) || (row.office && officeReasonShort(row.reasonCode)) || (row.app && appReasonShort(row.reasonCode)) || registryReasonShort(row) || row.reason || t('not on PATH'));
       // faces B: a startable browser card names its face ("Browser app · chromium"); a dimmed one says only its short reason
       const docSub = doc && !isLaunching && !unavailable ? t('opens {file}', { file: doc.label || doc.path }) : null; // §7.9 FILE MODE: the card names the document it opens
       b.innerHTML = `<span class="desktop-launch-card-icon">${isLaunching ? UI_ICONS.refresh : cardIconFor(row.category, row.office)}</span><span class="desktop-launch-card-label">${escHtml(catalogLabel(row))}</span><span class="desktop-launch-card-sub">${docSub !== null ? escHtml(docSub) : escHtml(row.browser && !isLaunching && !unavailable ? `${t('Browser app')} · ${sub}` : sub)}</span>`;
@@ -805,6 +837,7 @@ export async function showLaunchDialog(app, opts = {}) {
         img.src = `/api/apps/icon?host=${encodeURIComponent(host)}&row=${encodeURIComponent(row.id)}`;
         const ic = b.querySelector('.desktop-launch-card-icon'); if (ic) { ic.textContent = ''; ic.appendChild(img); }
       }
+      if (row.witnessed && !isLaunching) { const chip = document.createElement('span'); chip.className = 'desktop-launch-chip'; chip.textContent = witnessSourceText(row.source); b.querySelector('.desktop-launch-card-sub')?.prepend(chip, ' '); } // the source chip leads the command line (the card's grid keeps two rows)
       b.disabled = unavailable || dead || isLaunching;
       b.setAttribute('aria-disabled', b.disabled ? 'true' : 'false');
       if (isLaunching) b.setAttribute('aria-busy', 'true');
@@ -842,8 +875,12 @@ export async function showLaunchDialog(app, opts = {}) {
         ib.onclick = (e) => { e.stopPropagation(); showInstallDialog(machineOf(host), { what: row.id, onDone: () => { if (overlay.isConnected) refresh(); } }); };
         wrap.appendChild(ib);
       }
-      (row.browser ? browsersEl : regEl).appendChild(wrap);
+      wrap.hidden = !doc && !launchFilterMatch(row, filterIn.value); // the filter box, across Apps and the witnessed group
+      (row.witnessed ? seenEl : row.browser ? browsersEl : regEl).appendChild(wrap);
     }
+    // lane apps-launcher-witness: the apps found installed OUTSIDE the door, in their own group (never among the engine's)
+    seenSec.classList.toggle('is-empty', !seenEl.children.length);
+    $('.desktop-launch-seen-title').textContent = t('Installed outside VibeSpace ({n})', { n: seenEl.children.length });
     if (refocusScale) { const el = body.querySelector(`.desktop-launch-card-scale[data-scale-for="${CSS.escape(refocusScale)}"]`); refocusScale = null; focusQuiet(el); }
     browsersSec.classList.toggle('is-empty', !browsersEl.children.length);
     shareRow.decorateCards([regEl, browsersEl]); // lane E verify: a card that will launch shared names it (the app's remembered share)
@@ -867,9 +904,10 @@ export async function showLaunchDialog(app, opts = {}) {
     execIn.disabled = argsIn.disabled = cwdIn.disabled = dead;
     return { registryEmpty };
   };
-  const refresh = async () => {
+  const refresh = async ({ recheck = false } = {}) => {
     const asked = host;
-    const d = await fetchJson(asked === 'local' ? '/api/desktop/apps' : `/api/desktop/apps?host=${encodeURIComponent(asked)}`);
+    const q = [asked === 'local' ? '' : `host=${encodeURIComponent(asked)}`, recheck ? 'witness=recheck' : ''].filter(Boolean).join('&');
+    const d = await fetchJson(`/api/desktop/apps${q ? `?${q}` : ''}`);
     if (asked !== host) return { registryEmpty: false }; // the person picked another machine meanwhile
     if (d && !d.error) { data = d; listError = null; }
     else if (d && d.error) {
@@ -878,6 +916,9 @@ export async function showLaunchDialog(app, opts = {}) {
     }
     return render();
   };
+  filterIn.oninput = () => render();
+  const recheckBtn = $('.desktop-launch-seen-recheck');
+  recheckBtn.onclick = async () => { recheckBtn.disabled = true; try { await refresh({ recheck: true }); } finally { recheckBtn.disabled = false; } };
   runBtn.onclick = () => {
     const exec = execIn.value.trim();
     if (!exec) { showToast(t('Type a command to run'), { type: 'error' }); focusQuiet(execIn); return; }

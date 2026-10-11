@@ -48,7 +48,9 @@ const M = require('../desktop-apps.js');
 const SLOT = require('../install-slot.js'); // the machine's ONE package slot (its launcher, its files, its argv)
 const I = require('../installs.js'); // THE INSTALLABLES: one row each — this layer asks the row, never a name
 const SYS = require('../app-system.js'); // Layer 1: a sys plan's digest binds what it runs (sysDigestPart)
+const MW = require('../machine-window.js'); // lane machine-app-crop: the run's launch report (one app as its own window)
 const D = require('../desktop-display.js'); // design 014 D1: the PURE RFB greeting read of the vnc-native rung
+const IA = require('../installed-apps.js'); // lane machine-desktop-apps: a Windows / macOS machine's installed apps (SHARED: the device lists, the hub judges again)
 
 let installed = null;
 /** The wired layer; an unwired process gets a LOUD refusal, never a no-op. */
@@ -63,6 +65,7 @@ function access() {
     installPackage: async () => { const e = new Error('the desktop access layer is not wired on this instance'); e.code = 'host_unavailable'; throw e; },
     installBusy: () => null, setAppPlanner: () => { },
     machineDesktopTarget: () => null, machineDesktopGone: () => null, // design 014 D1
+    installedApps: async () => { const e = new Error('the desktop access layer is not wired on this instance'); e.code = 'host_unavailable'; throw e; }, // lane machine-desktop-apps
   };
 }
 
@@ -73,7 +76,7 @@ const INSTALL_LOG_NAME = `~/.vibespace/${SLOT.INSTALL_FILES.log}`; // how a mess
  * @param hosts   HostManager (deviceBounded / get / isLocal) or null (local only)
  * @param local   () => THIS machine's desktop-serve handle (the hub keeper's `machine`)
  */
-function create({ hosts = null, local = null, env = () => process.env, log = console, install = true, connectMs = 8000, installMs = 15 * 60 * 1000, holdMs = 60 * 60 * 1000, pollMs = 15000, vncPort = D.VNC_NATIVE.port, probeMs = 3000, audit = null } = {}) {
+function create({ hosts = null, local = null, env = () => process.env, log = console, install = true, connectMs = 8000, installMs = 15 * 60 * 1000, holdMs = 60 * 60 * 1000, pollMs = 15000, vncPort = D.VNC_NATIVE.port, probeMs = 3000, audit = null, installedStore = null, helloListMs = 3000 } = {}) {
   const forwards = new Map(); // `${hostId}:${remotePort}` → { server, sockets, localPort, hostId, remotePort, refs }
   const opening = new Map();  // key → the in-flight listen (a concurrent second caller joins it)
   const installs = new Map(); // machine key → { since, running } — THIS hub's follower; the machine's own slot is its pidfile (installState)
@@ -448,11 +451,11 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
     let machine = hostId; try { const h = hosts && hosts.get ? hosts.get(hostId) : null; machine = String((h && (h.name || h.id)) || hostId); } catch { /* the id */ }
     try { audit({ hostId, machine, sessionId: null, sessionKey: null, name: 'you — Run on its desktop', by: 'user', grant: 'run', verb: 'run', via: 'desktop', cmd: line, ...extra }); } catch (e) { log.warn?.(`[desktop] the run on ${hostId} was not audited: ${e && e.message}`); }
   };
-  async function runOnDesktop(hostId, line) {
+  async function runOnDesktop(hostId, line, { report = false } = {}) {
     if (isLocal(hostId)) throw named('not_desktop_machine', 'this machine runs apps through the Apps launcher');
     const dm = await deviceOf(hostId);
     const platform = platformOfHandle(dm);
-    const plan = M.desktopRunPlan(platform, line);
+    const plan = M.desktopRunPlan(platform, line, { report }); // lane machine-app-crop: `report` = "show it as its own window" (the launch report)
     if (!plan.ok) { auditRun(hostId, line, { ok: false, refusal: plan.code, ...(platform ? { platform } : {}) }); throw named(plan.code, plan.error); }
     let r;
     const t0 = Date.now();
@@ -461,7 +464,7 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
     auditRun(hostId, line, { ok: !!r && r.code === 0, code: r && Number.isInteger(r.code) ? r.code : null, ms: Date.now() - t0, platform, ...(!r || r.code !== 0 ? { refusal: 'run_failed' } : {}) });
     if (!r || r.code !== 0) throw named('run_failed', `the command did not start on ${hostId} (exit ${r ? r.code : '?'}${r && r.stderr ? `: ${String(r.stderr).trim().split('\n')[0].slice(0, 200)}` : ''})`);
     log.log?.(`[desktop] started on ${hostId}'s desktop at the owner's click (${String(line).length} characters)`);
-    return { ok: true, hostId, platform, shown: plan.shown };
+    return { ok: true, hostId, platform, shown: plan.shown, ...(report ? { launched: MW.parseLaunchReport(r.stdout) } : {}) };
   }
   /** design 014 D1, the owner's option A (2026-10-03): THE WINDOWS INSTALL. The agent runs unelevated, so the plan's
    *  argv asks Windows for elevation ON THAT MACHINE'S SCREEN and waits: someone there clicks Yes and types the VNC
@@ -479,6 +482,7 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
     if (!r || r.code == null) throw fail(r && r.timedOut ? 'install_timeout' : 'install_link_lost', `the install on ${hostId} reported no exit (${(r && r.error) || (r && r.timedOut ? 'past its deadline' : 'the link dropped')}) — check again`);
     if (r.code !== 0) throw fail('install_failed', `the install exited ${r.code} on ${hostId} — the administrator window there said why`);
     desktops.delete(hostId);
+    installedNow(hostId, plan.label); // lane machine-desktop-apps: what our door installed is on the machine's list at once
     return { ok: true, what: plan.what, hostId, plan, before: null, after: await probeDesktop(hostId, dm), facts: null, reattached: false };
   }
 
@@ -493,6 +497,64 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
     return r.data;
   }
 
+  // ── lane machine-desktop-apps: a Windows / macOS machine's INSTALLED apps, listed BY WITNESS on the machine ──
+  /** The list the hub keeps per machine (`installedStore` = the keeper: data/desktop-apps-hosts.json `installed`), asked
+   *  through the `desktop-apps-list` device op (src/installed-apps.js listInstalled — the SHARED lister the daemon runs,
+   *  bounded there) only when IA.listDue says so: Check again (`recheck`), an install through our door (`install`), the
+   *  daemon's hello (`hello`), a dialog opening on a list older than 10 min (`open`). ONE listing per machine at a time
+   *  (a second caller joins it); the device's rows are judged again here (IA.rowsFromDevice). An agent that predates the
+   *  op is never asked (the client's capability gate): `code: 'host_needs_daemon'` with the list as it was; a machine
+   *  not answering: `offline`. → { hostId, platform, rows, total, truncated, listedAt, code?, error? } */
+  const listing = new Map(); // hostId → the in-flight listing
+  const storeOf = () => { const st = typeof installedStore === 'function' ? installedStore() : installedStore; return st && typeof st.installedOf === 'function' ? st : null; };
+  const listAnswer = (hostId, e, extra = {}) => ({ hostId, platform: (e && e.platform) || null, rows: e ? e.rows : [], total: e ? (Number.isFinite(e.total) ? e.total : e.rows.length) : 0, truncated: !!(e && e.truncated), listedAt: (e && e.listedAt) || null, ...extra });
+  async function installedApps(hostId, { why = 'open' } = {}) {
+    if (isLocal(hostId)) throw named('not_desktop_machine', 'this machine\'s apps are in the Apps launcher');
+    const store = storeOf();
+    const cached = store ? store.installedOf(hostId) : null;
+    if (!IA.listDue(cached, why, Date.now())) return listAnswer(hostId, cached);
+    if (listing.has(hostId)) return listing.get(hostId);
+    const p = (async () => {
+      let dm;
+      try { dm = await deviceOf(hostId); } catch (e) { if (e.code === 'unsupported-host') throw e; return listAnswer(hostId, cached, { code: e.code === 'host_needs_daemon' ? e.code : 'offline', error: e.message }); }
+      const platform = platformOfHandle(dm);
+      if (!M.DESKTOP_PLATFORMS.includes(platform)) throw notDesktop(hostId, platform);
+      if (typeof dm.desktopAppsList !== 'function') return listAnswer(hostId, cached, { code: 'host_needs_daemon', error: `${hostId}: its agent cannot list its apps` });
+      let r;
+      const t0 = Date.now();
+      try { r = await dm.desktopAppsList({ budgetMs: IA.LIST_BUDGET_MS, timeoutMs: IA.LIST_BUDGET_MS + 10000 }); }
+      catch (e) { return listAnswer(hostId, cached, { code: e && e.code === 'host_needs_daemon' ? 'host_needs_daemon' : 'list_failed', error: `${hostId}: ${e && e.message}` }); }
+      if (!r || r.ok === false) return listAnswer(hostId, cached, { code: (r && r.code) || 'list_failed', error: (r && r.error) || `${hostId} did not list its apps` });
+      const at = Date.now();
+      const rows = IA.rowsFromDevice(platform, r.rows, at);
+      const entry = { platform, rows, total: Number.isFinite(r.total) ? r.total : rows.length, truncated: !!r.truncated, listedAt: at, ...(r.timedOut ? { timedOut: true } : {}) };
+      if (store) store.noteInstalled(hostId, entry);
+      log.log?.(`[desktop] ${hostId} listed ${rows.length} installed app(s) in ${at - t0} ms (${why})`);
+      return listAnswer(hostId, entry);
+    })().finally(() => listing.delete(hostId));
+    listing.set(hostId, p);
+    return p;
+  }
+  /** An install through our door finished on a machine: its app is on the list AT ONCE (`pending` — nothing to press yet)
+   *  and the machine is listed again; that listing (the machine's own records) replaces it. */
+  function installedNow(hostId, name) {
+    const store = storeOf();
+    if (!store || !name) return;
+    const cur = store.installedOf(hostId);
+    const rows = [{ name: String(name).slice(0, 200), launch: null, source: 'install', seenAt: Date.now(), pending: true }, ...(cur ? cur.rows.filter((r) => r.name !== name) : [])];
+    store.noteInstalled(hostId, { platform: cur ? cur.platform : null, rows, total: rows.length, truncated: !!(cur && cur.truncated), listedAt: cur ? cur.listedAt : null });
+    installedApps(hostId, { why: 'install' }).catch((e) => log.warn?.(`[desktop] listing ${hostId}'s apps after the install failed: ${e && e.message}`));
+  }
+  // the daemon's hello (every dial-in): a Windows / macOS machine is listed once its link answers (IA.listDue 'hello' —
+  // a flapping link is not listed twice a minute); any other machine, or an agent without the op, is never asked
+  if (hosts && typeof hosts.addDialInHook === 'function') {
+    hosts.addDialInHook((hostId) => {
+      if (!hostId || !storeOf()) return;
+      const t = setTimeout(() => { installedApps(hostId, { why: 'hello' }).catch(() => { /* not a Windows / macOS machine, or gone again */ }); }, helloListMs);
+      t.unref?.();
+    });
+  }
+
   /** §7.9: is this machine reachable RIGHT NOW without starting a connect ladder (this machine, or a paired machine
    *  whose agent handle is already connected)? The explorer's menu asks it so a right-click never bootstraps an ssh
    *  machine's agent — the click on "Open with LibreOffice" (an explicit act) is what connects. */
@@ -501,7 +563,7 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
     try { return !!(hosts && typeof hosts.connectedDevice === 'function' && hosts.connectedDevice(hostId)); } catch { return false; }
   }
 
-  const layer = { call, forwardPort, closeForward, forwards: listForwards, hostKnown, isLocal, shutdown, machines, installPlan, installXpra, installPackage, installBusy, runArgv, readFile, connectedNow, setAppPlanner, planDigest, probeDesktop, openMachineDesktop, machineDesktopTarget, machineDesktopGone, runOnDesktop };
+  const layer = { call, forwardPort, closeForward, forwards: listForwards, hostKnown, isLocal, shutdown, machines, installPlan, installXpra, installPackage, installBusy, runArgv, readFile, connectedNow, setAppPlanner, planDigest, probeDesktop, openMachineDesktop, machineDesktopTarget, machineDesktopGone, runOnDesktop, installedApps, installedNow, deviceOf };
   if (install) installed = layer;
   return layer;
 }

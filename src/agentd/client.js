@@ -329,7 +329,7 @@ class DeviceManager {
             mux.onWritable = (chan) => { sessions.get(chan)?.onWritable?.(); };
             const prevControl = mux.onControl;
             mux.onControl = (m) => {
-              if (m.op === 'fs-result' || m.op === 'discovery-result' || m.op === 'discovery-watching' || m.op === 'usage-events-watching' || m.op === 'session-events-watching' || m.op === 'cmd-result' || m.op === 'probe-result' || m.op === 'secret-result' || m.op === 'quota-result' || m.op === 'sysinfo-result' || m.op === 'design-fs-result' || m.op === 'dial-status-result' || m.op === 'proc-list-result' || m.op === 'opencode-serve-result' || m.op === 'browser-serve-result' || m.op === 'desktop-serve-result' || m.op === 'peer-post-result' || m.op === 'pool-orders-ok' || m.op === 'tcp-open' || m.op === 'listen-open' || m.op === 'serve-folder-result' || m.op === 'serve-socks-result') {
+              if (m.op === 'fs-result' || m.op === 'discovery-result' || m.op === 'discovery-watching' || m.op === 'usage-events-watching' || m.op === 'session-events-watching' || m.op === 'cmd-result' || m.op === 'probe-result' || m.op === 'secret-result' || m.op === 'quota-result' || m.op === 'sysinfo-result' || m.op === 'desktop-apps-list-result' || m.op === 'design-fs-result' || m.op === 'dial-status-result' || m.op === 'proc-list-result' || m.op === 'opencode-serve-result' || m.op === 'browser-serve-result' || m.op === 'desktop-serve-result' || m.op === 'window-track-result' || m.op === 'window-untrack-result' || m.op === 'window-pin-result' || m.op === 'peer-post-result' || m.op === 'pool-orders-ok' || m.op === 'tcp-open' || m.op === 'listen-open' || m.op === 'serve-folder-result' || m.op === 'serve-socks-result') {
                 const r = pending.get(m.id); if (r) { pending.delete(m.id); r(m); }
                 if (m.op === 'tcp-open' && !m.error) return; // channel stays live
                 return;
@@ -352,6 +352,7 @@ class DeviceManager {
               if (m.op === 'discovery-dirty') { this._onDiscoveryDirty?.(); return; }
               if (m.op === 'usage-events') { this._onUsageEvents?.(m); return; }
               if (m.op === 'session-events') { this._onSessionEvents?.(m); return; } // step-2 dark stream (unsolicited push branch — the three-touch rule)
+              if (m.op === 'window-rect') { this._windowWatches?.get(m.wid)?.push(m.result); return; } // lane machine-app-crop: a followed window's change (unsolicited push branch)
               if (m.op === 'pool-orders-executed') { this._onPoolOrdersExecuted?.(m.events || []); return; }
               if (m.op === 'session-open' || m.op === 'pipe-session-open') { sessions.get(m.chan)?.onOpen?.(m); return; }
               if (m.op === 'session-exit') { const h = sessions.get(m.chan); sessions.delete(m.chan); h?.onExit?.(m.code); return; }
@@ -393,6 +394,7 @@ class DeviceManager {
             if (this._onDiscoveryDirty) this._request({ op: 'discovery-watch' }).catch(() => { });
             if (this._onUsageEvents) this._request({ op: 'usage-events-watch' }).catch(() => { });
             if (this._onSessionEvents) this._request({ op: 'session-events-watch' }).catch(() => { }); // session-brain step 2 re-arm
+            for (const w of this._windowWatches?.values() || []) w.rearm(); // lane machine-app-crop: a followed window is followed again (and re-pinned)
             return;
           }
           if (msg.op === 'auth-fail') {
@@ -855,6 +857,17 @@ class DeviceManager {
     return rest;
   }
 
+  /** The apps INSTALLED on THIS device, listed by witness where they are (the installed-apps list, owner 2026-10-11: the SHARED
+   *  src/installed-apps.js listInstalled — Windows' Start Menu + Uninstall keys, macOS' /Applications). Capability-gated:
+   *  an old daemon that does not know the op would HANG (the 2.300.0 rule), so it is never asked — `host_needs_daemon`. */
+  async desktopAppsList({ budgetMs, timeoutMs = 30000 } = {}) {
+    const conn = await this.connect();
+    if (!conn.info?.capabilities?.includes?.('desktop-apps-list')) { const e = new Error('daemon lacks desktop-apps-list (capabilities gate) -- upgrade the agent on this machine'); e.code = 'host_needs_daemon'; throw e; }
+    const r = await this._request({ op: 'desktop-apps-list', budgetMs, timeoutMs });
+    if (r.error) throw new Error(r.error);
+    return r.result || {};
+  }
+
   /** One OpenCode-serve op on THIS device (S9 remainder piece (e), B-eac2).
    *  The op names and shapes come from the SHARED table src/opencode-remote.js
    *  -- the daemon runs the very same runOpencodeOp() against its own facts,
@@ -903,6 +916,49 @@ class DeviceManager {
     const r = await this._request({ op: 'desktop-serve', action, params, timeoutMs });
     if (r.error) throw new Error(r.error);
     return r.result || {};
+  }
+
+  /** lane machine-app-crop: FIND one app's window on THIS device (src/machine-window.js runWindowTrack, where the windows are)
+   *  — `{pid, since}` of the launched process, or `target` (the window). With `onPush` it is FOLLOWED: every change arrives
+   *  there (`window-rect`, ≥ 100 ms apart), the watch is re-armed after a reconnect (by its window; re-pinned if it was),
+   *  and `windowUntrack(wid)` ends it. Capability-gated: an old daemon does not know the op and would HANG (the 2.300.0
+   *  rule), so it is never asked — `host_needs_daemon`. → { wid?, result } */
+  async windowTrack(params = {}, { onPush = null, timeoutMs = 45000 } = {}) {
+    const conn = await this.connect();
+    if (!conn.info?.capabilities?.includes?.('window-track')) { const e = new Error('daemon lacks window-track (capabilities gate) -- upgrade the agent on this machine to show one app as its own window'); e.code = 'host_needs_daemon'; throw e; }
+    const ask = { pid: params.pid, since: params.since, target: params.target, findMs: params.findMs };
+    if (!onPush) { const r = await this._request({ op: 'window-track', ...ask, timeoutMs }); if (r.error) throw new Error(r.error); return { result: r.result || { state: 'none' } }; }
+    if (!this._windowWatches) this._windowWatches = new Map();
+    const wid = 'w' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    const w = { pinned: false, target: null, push: (a) => { if (a && a.state === 'found') w.target = a.hwnd ?? a.windowId ?? w.target; if (a && a.state !== 'found') this._windowWatches.delete(wid); try { onPush(a); } catch { } },
+      rearm: () => { if (!w.target) return; this._request({ op: 'window-track', target: w.target, watch: true, wid, timeoutMs }).then((r) => { if (r.result) w.push(r.result); if (w.pinned && r.result && r.result.state === 'found') this._request({ op: 'window-pin', wid, on: true, timeoutMs: 15000 }).catch(() => { }); }, () => { }); } };
+    this._windowWatches.set(wid, w);
+    let r;
+    try { r = await this._request({ op: 'window-track', ...ask, watch: true, wid, timeoutMs }); } catch (e) { this._windowWatches.delete(wid); throw e; }
+    if (r.error) { this._windowWatches.delete(wid); throw new Error(r.error); }
+    const result = r.result || { state: 'none' };
+    if (result.state === 'found') w.target = result.hwnd ?? result.windowId ?? null; else this._windowWatches.delete(wid);
+    return { wid, result };
+  }
+  /** lane machine-app-crop: stop following a window (its pin, if any, is undone on the device). */
+  async windowUntrack(wid) {
+    const w = this._windowWatches?.get(wid);
+    this._windowWatches?.delete(wid);
+    const conn = await this.connect();
+    if (!conn.info?.capabilities?.includes?.('window-track')) return { stopped: false };
+    const r = await this._request({ op: 'window-untrack', wid, timeoutMs: 15000 });
+    return { stopped: !!(r && r.stopped), wasPinned: !!(w && w.pinned) };
+  }
+  /** lane machine-app-crop: keep a followed window on top (`on`) or not — Windows' topmost; a Mac activates the app instead.
+   *  Capability-gated like windowTrack. → { ok, pinned, state?, note? } */
+  async windowPin(wid, on) {
+    const conn = await this.connect();
+    if (!conn.info?.capabilities?.includes?.('window-pin')) { const e = new Error('daemon lacks window-pin (capabilities gate) -- upgrade the agent on this machine'); e.code = 'host_needs_daemon'; throw e; }
+    const r = await this._request({ op: 'window-pin', wid, on: !!on, timeoutMs: 15000 });
+    if (r.error) throw new Error(r.error);
+    const w = this._windowWatches?.get(wid);
+    if (w && r.result && r.result.ok) w.pinned = !!on;
+    return r.result || { ok: false, code: 'pin_failed', error: 'no answer' };
   }
 
   /** Full process table (System panel process manager, 2.354.0). */

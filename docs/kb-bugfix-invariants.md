@@ -518,6 +518,34 @@
 - THE BROWSER FROZE WHEN ITS LOG PIPE FILLED (userW inc-mv2qf3xs-7g87, 2026-10-10): the driver 0.38.1 piped Chrome's stderr, nothing read it; at 64 KB every write blocked. FIX = pin 0.38.2 (it drains the pipe) + no logging + the keeper names it. 不变量 = a child's output always has a reader or no pipe
 - THE CHANNELS LIST OPENED WITH EVERY CONVERSATION SHOWING (owner 2026-10-11): 81 rows to scroll to find one. FIX = sections start folded unless something needs the person; the folded head carries its counts; opens are remembered. 不变量 = the first screen shows what needs you, the rest one press away
 - THE SEARCH FEED FLAPPED AND NAGGED (owner 2026-10-11): misses counted, not named; re-promoted, re-demoted, warned per cycle. FIX = name every miss, overlap the window by the measured index lag, promote only on a clean record, say it once. 不变量 = a miss has a class; a status changes only on a flip
+- THE MACHINE'S DESKTOP DIALOG LISTED EXAMPLES, NOT ITS APPS (owner 2026-10-11): an installed app never appeared; a button squeezed into a column. FIX = list the machine by witness via a gated device op; a button never narrower than its words. 不变量 = a list of a machine's apps comes from the machine
+- AN APP AN AGENT INSTALLED WAS NOT IN THE LAUNCHER (owner 2026-10-11, JASP as a user flatpak): the catalog knew only the engine's files; no result said where it landed. FIX = witnessed entries in their own group; every install names its machine. 不变量 = what is installed is listed, as what it is
+- AN APP ON A PAIRED WINDOWS / MAC MACHINE COULD ONLY BE SEEN AS THE WHOLE DESKTOP (owner 2026-10-11): invariant — it can be shown as its own window (the device follows + pins its window, the page crops); the pin is undone when it closes (kb-bugfix-invariants)
+
+## AN APP ON A PAIRED WINDOWS / MAC MACHINE COULD ONLY BE SEEN AS THE WHOLE DESKTOP (lane machine-app-crop, 2.369.252 — owner 2026-10-11 "都做吧", route ② of B-bb0b)
+
+**Symptom.** Running an app on WIN-DESK1 ("Run on its desktop…") left the person to find it inside the machine's whole screen; there was no way to see just that app.
+
+**Measured.** The run answered no process (Windows started the line through cmd.exe, so the app is cmd.exe's child; macOS `open -a` hands the launch to launchd); nothing on the device could name an app's window.
+
+**Fix.** The run reports its process + the machine's clock; the device op `window-track` finds the app's window (lineage ⇒ start time ⇒ new window) and follows its rectangle, `window-pin` keeps it on top (a Mac activates it); the `machine-app` window crops the whole VNC picture to that rectangle by layout (noVNC's pointer math stays exact) and sends input only inside it.
+
+**Invariant.** An app on a paired machine can be shown as its own window; the pin is undone when it closes (the watch's end undoes it; a pin the hub could not undo is reported, never forced).
+
+**Gates:** test-machine-window (fast), test-machine-app-chrome (heavy).
+
+## THE MACHINE'S DESKTOP DIALOG LISTED EXAMPLES, NOT ITS APPS (lane machine-desktop-apps, 2.369.252 — owner 2026-10-11 "这个界面布局有问题 另外刚才我让 agent 装了 jasp 但是列表里没有")
+
+**Symptom.** WIN-DESK1's dialog (a paired Windows machine, src/lib/machine-desktop.js) drew "再检查一次" one character per line beside "安装 TightVNC Server…", and its "Run on its desktop…" list showed Blender — a preset — and nothing the machine has.
+
+**Measured.** (1) Check again is a `.file-tool-btn`: viewers.css's 24 px ICON box; `.desktop-install-actions` (no wrap) kept it 24 px wide ⇒ a column of characters. (2) The list was `desktopRunPresets` (per-platform presets + the owner's last 3 lines) — nothing enumerated the machine. (3) JASP itself (production journal + data/app-proposals.json, read-only): the owner's "Let an agent help install an app" helper ran with host = local; the apps engine installed `flatpak` on the hub and the agent then ran `flatpak install --user` JASP there — it was never on WIN-DESK1.
+
+**Fix.** The `desktop-apps-list` device op (three touches + its capability gate): the daemon runs THE shared lister (src/installed-apps.js — Windows: ONE encoded PowerShell script over both Start Menus' .lnk + the three Uninstall keys; macOS: /Applications + ~/Applications bundles), bounded at 20 s, ≤ 500 rows, each `{name, launch, source, seenAt}` with a launch line the run door (desktopRunPlan) accepts; the hub judges the rows again, keeps them per machine (data/desktop-apps-hosts.json `installed`) and lists again on Check again, after an install through our door (the row shows at once, pending), on the daemon's hello (not twice a minute) and when the dialog opens on a list older than 10 min. An old agent is never asked: the dialog says its agent needs updating. The action row wraps; every button there is `flex: none; white-space: nowrap`, the icon-button class sized by its words.
+
+**Invariant.** A list of a machine's apps comes from the machine (its own records), never from our declaration; a button is never narrower than its words.
+
+**Gates:** test-installed-apps (fast: the parsers over a Start Menu + Uninstall dump and a /Applications listing, the lister's budget, the capability gate + RED control, the cache rules, the route, the dialog over a fake DOM + the action-row rule with the base CSS as RED control); test-machine-desktop-apps-chrome (heavy: three REAL agentd copies — Windows-shaped through a fixture powershell.exe, Mac-shaped, old — the dialog at 900 / 390 px, measured button widths, RED control = the base rule's column).
+
 
 ## AGENT ROWS LOOKED LIKE PEOPLE (lane internal-rows-look, 2.369.247 — owner 2026-10-09 "这个 VibeSpace 内部的聊天群视觉上很难和其他的外部的区分开")
 
@@ -5369,3 +5397,13 @@ userW's pod: one conversation's hidden-window browser drew Mercury's payments da
 **Invariant.** What a person typed reaches the agent as typed; only OUR frame names are fenced, in one pattern.
 
 **Gates:** test-channel-blocks ⑳ (+ old-reader / old-wall / no-fence controls), test-channel-record ⑦ (predicate = `carriesFrame`, + control), test-channels-lark-shape ⑧ / ⑩, test-channel-window-render ④b (heavy), test-peer-text-census.
+
+## AN APP AN AGENT INSTALLED WAS NOT IN THE LAUNCHER (lane apps-launcher-witness, 2.369.252 — owner 2026-10-11 "我让 agent 装了 jasp 但是列表里没有 … 我说的其实就是本机")
+
+**What happened.** The launcher's "Let an agent help install an app" helper ran on the hub; its agent proposed apt `flatpak` through the door, then ran `flatpak install --user flathub org.jaspstats.JASP` itself. The hub's Apps launcher lists the apps engine's catalog only — root-owned .desktop files the engine recorded ("never from the user-writable index", a security rule) — so JASP, a user-scope flatpak, was nowhere. The door's result said "installed on This machine", so the owner looked for it on the paired WIN-DESK1.
+
+**Fix.** List by WITNESS what is installed outside the door (`flatpak list --app --user/--system`, ~/.local/share/applications + /usr/share/applications) in its OWN group, "Installed outside VibeSpace (n)": its own `seen.` ids (never an engine id, never merged, never able to shadow an engine app of the same name), the source on each card, the Exec shown, launched through the same door; a gone program stays listed and says so. Re-listed on launcher open (a witnessed directory's mtime moved, or 10 min), after an install through the door, after a helper's turn, on Check again. Every install result — the door's dialog / toast / card and the helper's outcome — names the machine through ONE word helper (`installPlace`).
+
+**Invariant.** What is installed is listed, as what it is; an install says where it landed.
+
+**Gates:** test-apps-witness (fast, incl. the merged-list RED control), test-apps-witness-ui (heavy: the group, the filter, a launch through the door, desk + phone 390), test-app-card, test-apps-engine.

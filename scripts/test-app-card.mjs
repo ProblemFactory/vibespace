@@ -92,7 +92,7 @@ const faces = []; // [lang, label, text]
   ok(M.cardWords(AC.cardView({ ...HELLO, keeps: 'system', firstUse: true }), tz, 'zh').gives === '装好后出现在「应用」里，一直都在。' && M.cardWords(AC.cardView({ ...HELLO, firstUse: true }), tz, 'zh').firstUse === '第一次安装要先准备应用空间（约 1 分钟）。', 'Layer 1: "一直都在" on an app-system machine; the first install\'s line');
   ok(M.cardWords(AC.cardView({ ...HELLO, planChanged: true }), tz, 'zh').changed === '计划有变化，请再看一眼。', 'a changed plan says so on the card');
   const pz = (st) => M.progressWords(AC.cardView({ ...HELLO, ...st }), tz);
-  ok(pz({ state: 'installing' }).text === zh['Installing…'] && /安装/.test(pz({ state: 'installing' }).text) && pz({ state: 'done', result: { rows: [{ id: 'app.hello' }] } }).text === '已安装' && pz({ state: 'done', result: { rows: [{ id: 'app.hello' }] } }).actions.join() === 'open' && pz({ state: 'failed', result: { step: 'install' } }).actions.join() === 'retry' && pz({}) === null,
+  ok(pz({ state: 'installing' }).text === zh['Installing…'] && /安装/.test(pz({ state: 'installing' }).text) && pz({ state: 'done', result: { rows: [{ id: 'app.hello' }] } }).text === '已安装到本 VibeSpace 机器' && pz({ state: 'done', result: { rows: [{ id: 'app.hello' }] } }).actions.join() === 'open' && pz({ state: 'failed', result: { step: 'install' } }).actions.join() === 'retry' && pz({}) === null,
     'progress in the card: 正在安装… → 已安装 · [打开]; a failure → [再试一次]; nothing pressed → the two buttons');
   ok(M.openRowOf(AC.cardView({ ...HELLO, state: 'done', result: { rows: [{ id: 'app.hello', label: 'Hello' }] } })) === 'app.hello' && M.openRowOf(AC.cardView(HELLO)) === null, 'Open starts the row the install added');
   const d1 = M.detailLines(AC.cardView(HELLO), te).map((l) => l.text);

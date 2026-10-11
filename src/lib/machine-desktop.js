@@ -14,11 +14,17 @@
 //     (resizeSession off) — the fixed-size rule of app windows does not apply to it
 //   • "Run on its desktop…": the exact command is shown before it runs and in the answer; the presets per platform +
 //     the owner's 3 latest lines on that machine (this browser's localStorage — the owner's own lines only)
+//   • lane machine-desktop-apps (owner 2026-10-11): the apps INSTALLED on the machine, listed ON it by witness (its
+//     Start Menu + Uninstall keys / its /Applications — src/installed-apps.js through the device op), filtered here; a
+//     press fills the command box with the row's launch line. The presets stay as "Examples", the owner's lines as
+//     "Recent". The action row wraps and no button is ever narrower than its words
 import { t } from './i18n.js';
 import { createModalShell, fetchJson, showToast } from './utils.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { createVncView, streamUrl } from './vnc-view.js';
 import { desktopRunPlan, desktopRunPresets, rememberRun, machineDesktopId } from '../machine-desktop-model.js';
+import { namesGuiApp } from '../machine-window.js';
+import { openMachineApp } from './machine-app.js'; // lane machine-app-crop: one app of the machine as its own window
 
 const RUNS_KEY = 'vibespace.machineDesktopRuns'; // { [hostId]: [line…] } — the owner's latest lines per machine (≤ 3)
 function readRuns() { try { const o = JSON.parse(localStorage.getItem(RUNS_KEY) || '{}'); return o && typeof o === 'object' && !Array.isArray(o) ? o : {}; } catch { return {}; } }
@@ -89,18 +95,38 @@ export function openMachineDesktop(app, m) {
   c.style.display = 'flex'; c.style.flexDirection = 'column';
   c.append(el('div', 'flex:0 0 auto;padding:3px 10px;font-size:12px;color:var(--text-secondary);border-bottom:1px solid var(--border)', t('This window shows everything on {machine}’s screen, and what you type here goes to it.', { machine })));
   const pane = el('div', 'position:relative;flex:1 1 auto;min-height:0'); c.append(pane);
-  let auth = m.auth || null;
   const view = createVncView(pane, {
     url: streamUrl(`/api/desktop/${id}/stream`),
     autoReconnect: true,
     resizeSession: false,
-    lastClose: async () => { const r = await fetchJson(`/api/desktop/machine-desktop/last-close?host=${encodeURIComponent(m.hostId)}`); return r && !r.error ? r.close : null; },
-    before: async () => { const r = await post('/api/desktop/machine-desktop/connect', { host: m.hostId }); if (!r || r.error) return { ok: false, error: desktopRefusalText(r, m) }; auth = r.auth || auth; return { ok: true }; },
-    credentials: (types) => askCredentials(m, types, auth),
+    ...machineViewOpts(m),
   });
   winInfo.onClose = () => view.dispose();
   view.connect();
   return winInfo;
+}
+
+/** The machine's picture options both windows share (the whole desktop's and one app's — lane machine-app-crop): the bridge's
+ *  last close, the connect gate (the machine reached, its VNC server answering) and the sign-in asked here each time. */
+function machineViewOpts(m) {
+  let auth = m.auth || null;
+  return {
+    lastClose: async () => { const r = await fetchJson(`/api/desktop/machine-desktop/last-close?host=${encodeURIComponent(m.hostId)}`); return r && !r.error ? r.close : null; },
+    before: async () => { const r = await post('/api/desktop/machine-desktop/connect', { host: m.hostId }); if (!r || r.error) return { ok: false, error: desktopRefusalText(r, m) }; auth = r.auth || auth; return { ok: true }; },
+    credentials: (types) => askCredentials(m, types, auth),
+  };
+}
+/** lane machine-app-crop: "Run as its own window…" — the line confirmed as itself, run with the launch report, then the
+ *  app's own window (src/lib/machine-app.js) follows the window that process opens. → the answer | null (cancelled) */
+export async function runAsAppWindow(app, m, line) {
+  const plan = desktopRunPlan(m.setup, line);
+  if (!plan.ok) { showToast(desktopRefusalText({ code: plan.code, error: plan.error }, m), { type: 'error' }); return null; }
+  if (!(await confirmRun(m, line))) return null;
+  const r = await post('/api/desktop/machine-desktop/run', { host: m.hostId, cmd: line, window: true });
+  if (!r || r.error) { showToast(desktopRefusalText(r, m), { type: 'error' }); return null; }
+  saveRun(m.hostId, line);
+  openMachineApp(app, m, { cmd: line, track: { launched: r.launched || null }, view: machineViewOpts(m), openDesktop: () => openMachineDesktop(app, m), runAgain: () => runAsAppWindow(app, m, line) });
+  return r;
 }
 
 /** The command, shown as itself, before it runs. → true | false */
@@ -117,26 +143,108 @@ function confirmRun(m, line) {
   });
 }
 
+/** A row's source, in words (the OS record it came from). */
+const SOURCE_WORDS = { 'start-menu': () => t('Start menu'), uninstall: () => t('Installed programs'), applications: () => t('Applications'), install: () => t('just installed — being listed') };
+/**
+ * THE MACHINE'S INSTALLED APPS (lane machine-desktop-apps): `set(answer)` draws GET /api/desktop/machine-desktop/apps'
+ * answer — `{rows, total, truncated, code?}` (+ `loading` while it is asked); the filter narrows by name. Rows are
+ * KEYED by their launch line (a pending row by its name): a re-list moves the existing nodes, never rebuilds them.
+ * A press hands the row's launch line to `onPick` — the run door judges it like any typed line.
+ */
+function installedList(m, { onPick }) {
+  const box = el('div'); box.className = 'machine-apps';
+  const head = el('div'); head.className = 'machine-apps-head';
+  const title = el('span'); title.className = 'machine-apps-title';
+  const filter = el('input'); filter.type = 'search'; filter.className = 'machine-apps-filter'; filter.spellcheck = false; filter.autocomplete = 'off';
+  filter.placeholder = t('Filter'); filter.setAttribute('aria-label', t('Filter the installed apps'));
+  head.append(title, filter);
+  const note = el('p'); note.className = 'machine-apps-note';
+  const list = el('div'); list.className = 'machine-apps-list'; list.setAttribute('role', 'list');
+  box.append(head, note, list);
+  const nodes = new Map(); // key → the row's button
+  let ans = { rows: [], loading: true }, off = false;
+  function draw() {
+    const machine = nameOf(m);
+    const rows = Array.isArray(ans.rows) ? ans.rows : [];
+    const q = filter.value.trim().toLowerCase();
+    const shown = q ? rows.filter((r) => String(r.name).toLowerCase().includes(q)) : rows;
+    title.textContent = t('Installed on {machine} ({n})', { machine, n: rows.length });
+    const words = ans.loading ? t('Listing the apps on {machine}…', { machine })
+      : ans.code === 'host_needs_daemon' ? t('The list needs {machine}’s VibeSpace agent updated (it updates itself; check again in a minute)', { machine })
+      : ans.code === 'offline' ? (rows.length ? t('{machine} is offline — this is the list it gave last', { machine }) : t('{machine} is offline', { machine }))
+      : ans.code ? t('{machine} could not list its apps: {why}', { machine, why: String(ans.error || ans.code).slice(0, 200) })
+      : !rows.length ? t('No apps found on {machine}', { machine })
+      : ans.truncated ? t('{machine} has {total} apps — the first {n} are listed; filter to find one', { machine, total: ans.total, n: rows.length })
+      : q && !shown.length ? t('Nothing matches “{q}”', { q: filter.value.trim() }) : '';
+    note.textContent = words;
+    note.classList.toggle('is-bad', ans.code === 'host_needs_daemon' || (!!ans.code && ans.code !== 'offline'));
+    filter.hidden = !rows.length;
+    const keyOf = (r) => r.launch || `pending:${r.name}`;
+    const listed = new Set(rows.map(keyOf)), visible = new Set(shown.map(keyOf));
+    for (const [key, b] of nodes) if (!listed.has(key)) { b.remove(); nodes.delete(key); } else if (!visible.has(key)) b.remove(); // filtered out: detached, kept
+    for (const r of shown) {
+      const key = keyOf(r);
+      let b = nodes.get(key);
+      if (!b) {
+        b = document.createElement('button'); b.type = 'button'; b.className = 'machine-apps-row'; b.setAttribute('role', 'listitem');
+        b.append(el('span'), el('span')); b.firstChild.className = 'machine-apps-name'; b.lastChild.className = 'machine-apps-src';
+        nodes.set(key, b);
+      }
+      b.firstChild.textContent = r.name;
+      b.lastChild.textContent = (SOURCE_WORDS[r.source] || (() => ''))();
+      b.title = r.launch || '';
+      b.disabled = off || !r.launch;
+      b.onclick = () => { if (r.launch) onPick(r.launch); };
+      list.append(b); // in order: an existing node moves
+    }
+    list.hidden = !shown.length;
+  }
+  filter.oninput = () => draw();
+  return { el: box, set(next) { ans = next || { rows: [] }; draw(); }, get: () => ans, disable(v) { off = !!v; draw(); } };
+}
+
 /**
  * THE MACHINE'S DIALOG (the launcher opens it for a Windows / macOS row): its state, "Open its desktop", the one-time
  * setup (the Mac's words; Windows' Install… through the launcher's install dialog, `install`), and "Run on its
- * desktop…". `recheck(hostId)` re-reads the machine rows (the probe runs again — an explicit act, never a timer).
+ * desktop…" — the machine's installed apps, then the Examples / Recent lines, then the command box. `recheck(hostId)`
+ * re-reads the machine rows (the probe runs again — an explicit act, never a timer); Check again also lists the
+ * machine's apps again (on the machine, now).
  */
 export function showMachineDesktopDialog(app, m0, { install = null, recheck = null } = {}) {
   let m = m0;
   const machine = nameOf(m);
-  const { body } = createModalShell({ id: 'machine-desktop-dialog', title: t('{machine} — its desktop', { machine }), dialogClass: 'machine-desktop-dialog', escapeToClose: true });
-  const state = el('p', 'margin:4px 0');
+  const { body, close: closeDialog } = createModalShell({ id: 'machine-desktop-dialog', title: t('{machine} — its desktop', { machine }), dialogClass: 'machine-desktop-dialog', escapeToClose: true });
+  const state = el('p', 'margin:4px 0'); state.className = 'machine-desktop-state';
   const acts = el('div'); acts.className = 'desktop-install-actions';
   const scope = el('p', NOTE, t('Its desktop shows everything on {machine}’s screen, and what you type there goes to it. Only people can open it — agents cannot.', { machine }));
   const runHead = el('div', 'margin-top:12px;font-weight:600', t('Run on its desktop…'));
-  const presets = el('div', 'display:flex;flex-wrap:wrap;gap:6px;margin:6px 0');
-  const runRow = el('div', 'display:flex;gap:6px');
   const input = el('input', 'flex:1 1 auto;min-width:0;font-family:var(--font-mono, monospace)'); input.type = 'text'; input.spellcheck = false; input.autocomplete = 'off'; input.className = 'machine-desktop-cmd';
+  const apps = installedList(m, { onPick: (line) => { input.value = line; pickDefault(); input.focus(); } });
+  const presets = el('div'); presets.className = 'machine-apps-chips';
+  const runRow = el('div', 'display:flex;gap:6px');
   const runBtn = btn('btn-create', t('Run…'), () => run());
-  runRow.append(input, runBtn);
-  body.append(state, acts, scope, runHead, presets, runRow, el('p', NOTE, t('It starts on {machine}’s desktop as you — the exact command is shown before it runs.', { machine })));
-  const check = async () => { if (!recheck) return; const next = await recheck(m.hostId); if (next && body.isConnected) { m = next; render(); } };
+  // lane machine-app-crop: "Run as its own window…" beside "Run…" — the DEFAULT (the filled button, Enter) when the line names a
+  // GUI app (`open -a …` / `start "" …`); the whole-desktop run stays as it was
+  const winBtn = btn('file-tool-btn', t('Run as its own window…'), () => run({ window: true }));
+  for (const b of [winBtn, runBtn]) b.style.cssText = 'width:auto;padding:0 10px;flex:0 0 auto;white-space:nowrap';
+  const asWindow = () => namesGuiApp(m.setup, input.value);
+  const pickDefault = () => { const w = asWindow(); winBtn.className = w ? 'btn-create' : 'file-tool-btn'; runBtn.className = w ? 'file-tool-btn' : 'btn-create'; };
+  input.addEventListener('input', pickDefault);
+  runRow.append(input, winBtn, runBtn);
+  body.append(state, acts, scope, runHead, apps.el, presets, runRow, el('p', NOTE, t('It starts on {machine}’s desktop as you — the exact command is shown before it runs.', { machine })));
+  let asked = 0; // the newest listing asked (an older answer never overwrites a newer one)
+  const listApps = async (fresh) => {
+    const mine = ++asked;
+    apps.set({ ...apps.get(), loading: true });
+    const r = await fetchJson(`/api/desktop/machine-desktop/apps?host=${encodeURIComponent(m.hostId)}${fresh ? '&fresh=1' : ''}`);
+    if (mine !== asked || !body.isConnected) return;
+    apps.set(r && Array.isArray(r.rows) ? r : { rows: apps.get().rows || [], code: (r && r.code) || 'list_failed', error: (r && r.error) || t('server unreachable') }); // a list answer may carry a code (an old agent, offline) — its rows are still the list
+  };
+  const check = async () => {
+    const listed = listApps(true);
+    if (recheck) { const next = await recheck(m.hostId); if (next && body.isConnected) { m = next; render(); } }
+    await listed;
+  };
   function render() {
     state.textContent = desktopStateText(m);
     state.style.color = m.code === 'desktop_ready' ? '' : 'var(--warning, #d9822b)';
@@ -145,13 +253,16 @@ export function showMachineDesktopDialog(app, m0, { install = null, recheck = nu
     if (m.code === 'no_vnc' && m.setup === 'win32' && install) acts.append(btn('btn-create', t('Install TightVNC Server…'), () => install(m, { what: 'tightvnc', onDone: () => check() })));
     if (m.code !== 'offline' && recheck) acts.append(btn('file-tool-btn', t('Check again'), () => check()));
     const offline = m.code === 'offline';
-    input.disabled = offline; runBtn.disabled = offline;
+    input.disabled = offline; runBtn.disabled = offline; winBtn.disabled = offline; apps.disable(offline); pickDefault();
     const list = desktopRunPresets(m.setup, readRuns()[m.hostId]);
     input.placeholder = list.length ? t('A command, e.g. {example}', { example: list[0].cmd }) : t('A command');
-    presets.replaceChildren(...list.map((p) => { const b = btn('file-tool-btn', p.label, () => { input.value = p.cmd; input.focus(); }); b.style.cssText = 'width:auto;padding:0 10px'; b.title = p.cmd; b.disabled = offline; return b; }));
+    const chip = (p) => { const b = btn('file-tool-btn machine-apps-chip', p.label, () => { input.value = p.cmd; pickDefault(); input.focus(); }); b.title = p.cmd; b.disabled = offline; return b; };
+    const group = (label, ps) => { if (!ps.length) return null; const g = el('div'); g.className = 'machine-apps-group'; g.append(el('span', null, label), ...ps.map(chip)); return g; };
+    presets.replaceChildren(...[group(t('Recent'), list.filter((p) => p.remembered)), group(t('Examples'), list.filter((p) => !p.remembered))].filter(Boolean));
   }
-  async function run() {
+  async function run({ window: own = false } = {}) {
     const line = input.value;
+    if (own) { winBtn.disabled = true; const r = await runAsAppWindow(app, m, line); winBtn.disabled = false; if (r) closeDialog(); else if (body.isConnected) render(); return; } // the app's window is what the person wants to see now
     const plan = desktopRunPlan(m.setup, line); // the hub judges it again (the same PURE rule)
     if (!plan.ok) { showToast(desktopRefusalText({ code: plan.code, error: plan.error }, m), { type: 'error' }); return; }
     if (!(await confirmRun(m, line))) return;
@@ -163,8 +274,9 @@ export function showMachineDesktopDialog(app, m0, { install = null, recheck = nu
     if (body.isConnected) render();
     showToast(t('Started on {machine}: {cmd}', { machine, cmd: r.shown }));
   }
-  input.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); run(); } };
+  input.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); run({ window: asWindow() }); } };
   render();
+  listApps(false);
 }
 
 // ── WINDOW-TYPE REGISTRATION ── not persisted: a reload never re-opens a machine's whole screen (it asks the sign-in)

@@ -2,6 +2,18 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.252 — 2026-10-11
+
+### Added
+- A paired computer's desktop dialog lists the apps actually installed on it — one press picks any of them to run.
+- An app you run on a paired Windows or Mac computer can be shown as its own window instead of the whole desktop — one app at a time.
+
+### Changed
+- The Apps launcher also lists apps installed on this machine outside VibeSpace — in their own group — and every install says which machine it landed on.
+
+### Fixed
+- The buttons in a paired computer's desktop dialog no longer squeeze into a column of single characters.
+
 ## 2.369.251 — 2026-10-11
 
 ### Changed

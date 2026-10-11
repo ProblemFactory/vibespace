@@ -7478,6 +7478,22 @@ export default {
   "{machine} — its desktop": "{machine} — 它的桌面",
   "This window shows everything on {machine}’s screen, and what you type here goes to it.": "这个窗口显示{machine}屏幕上的一切，你在这里输入的内容会发到那台机器。",
   "Run on {machine}’s desktop?": "在{machine}的桌面上运行？",
+  "No window of “{cmd}” appeared on {machine} within 20 seconds": "{machine}上在 20 秒内没有出现“{cmd}”的窗口", // lane machine-app-crop
+  "“{title}” closed on {machine}": "“{title}”已在{machine}上关闭", // lane machine-app-crop
+  "{machine}’s VibeSpace agent is too old to show one app — update the agent there (its whole desktop still works)": "{machine}上的 VibeSpace 代理太旧，无法单独显示一个应用——请在那台电脑上更新代理（它的整个桌面仍可使用）", // lane machine-app-crop
+  "Could not follow the app’s window on {machine}: {why}": "无法跟随{machine}上该应用的窗口：{why}", // lane machine-app-crop
+  "{app} on {machine}": "{machine}上的{app}", // lane machine-app-crop
+  "An app": "一个应用", // lane machine-app-crop
+  "Only this app of {machine} shows here, and what you type here goes to it.": "这里只显示{machine}上的这个应用，你在这里输入的内容会发送给它。", // lane machine-app-crop
+  "Keep this one on top": "让这个保持在最前", // lane machine-app-crop
+  "{machine} has one screen: “{title}” is kept on top there, so it may cover this app": "{machine}只有一个屏幕：“{title}”被保持在最前，可能会遮住这个应用", // lane machine-app-crop
+  "another app": "另一个应用", // lane machine-app-crop
+  "Kept on top of the other windows on {machine}": "保持在{machine}上其他窗口的前面", // lane machine-app-crop
+  "Open its whole desktop": "打开它的整个桌面", // lane machine-app-crop
+  "Run again": "再次运行", // lane machine-app-crop
+  "“{title}” is not on the screen {machine} shares (minimized, or on another display)": "“{title}”不在{machine}共享的屏幕上（已最小化，或在另一个显示器上）", // lane machine-app-crop
+  "Waiting for the app’s window on {machine}…": "正在等待{machine}上该应用的窗口…", // lane machine-app-crop
+  "Run as its own window…": "作为独立窗口运行…", // lane machine-app-crop
   "Run": "运行",
   "This exact command starts on {machine}’s desktop, as its signed-in user:": "这条命令会原样在{machine}的桌面上、以当前登录的用户身份启动：",
   "Its desktop shows everything on {machine}’s screen, and what you type there goes to it. Only people can open it — agents cannot.": "「它的桌面」显示{machine}屏幕上的一切，你在里面输入的内容会发到那台机器。只有人能打开，智能体不能。",
@@ -8236,4 +8252,31 @@ export default {
   "The webhook door counts strangers per address and a path's allow-list judges the caller's address. Behind a reverse proxy or an ingress every call arrives from the proxy, so all callers would share one address: set how many proxies of yours stand in front (1 behind the Helm chart's ingress) and the door reads the caller's address that many hops from the right of X-Forwarded-For. 0 = the connecting address.": "Webhook 入口按地址统计陌生请求，路径的允许列表也按调用方地址判断。在反向代理或 ingress 后面，所有调用都来自代理，所有调用方会共用一个地址：填写你自己的代理有几层（Helm chart 的 ingress 后面填 1），入口就从 X-Forwarded-For 右数第这么多跳读取调用方地址。0 = 直连地址。",
   "Webhook: allow private reply URLs": "Webhook：允许私有回复地址",
   "Off: a caller's reply URL and a paired instance must be public https addresses (the egress fence refuses loopback, private and reserved ranges). On: http and private addresses are allowed too — for a test bench or a LAN you trust.": "关：调用方的回复地址和配对实例必须是公网 https 地址（出站围栏拒绝回环、私有和保留地址段）。开：也允许 http 和私有地址——用于测试台或你信任的局域网。",
+  // lane machine-desktop-apps: a Windows / macOS machine's installed apps
+  "Start menu": "开始菜单",
+  "Installed programs": "已安装的程序",
+  "just installed — being listed": "刚装好 — 正在列出",
+  "Filter": "筛选",
+  "Filter the installed apps": "筛选已安装的应用",
+  "Installed on {machine} ({n})": "{machine}上已安装（{n}）",
+  "Listing the apps on {machine}…": "正在列出{machine}上的应用…",
+  "The list needs {machine}’s VibeSpace agent updated (it updates itself; check again in a minute)": "这份列表需要更新{machine}上的 VibeSpace 代理（它会自动更新；一分钟后再检查一次）",
+  "{machine} is offline — this is the list it gave last": "{machine}已离线 — 这是它上次给出的列表",
+  "{machine} could not list its apps: {why}": "{machine}未能列出它的应用：{why}",
+  "No apps found on {machine}": "在{machine}上没有找到应用",
+  "{machine} has {total} apps — the first {n} are listed; filter to find one": "{machine}有 {total} 个应用 — 只列出前 {n} 个；用筛选找到其他的",
+  "Nothing matches “{q}”": "没有与“{q}”匹配的项",
+  "Examples": "示例",
+  // lane apps-launcher-witness
+  "this VibeSpace machine ({name})": "本 VibeSpace 机器（{name}）",
+  "this VibeSpace machine": "本 VibeSpace 机器",
+  "Installed on {place}": "已安装到{place}",
+  "Flatpak · yours": "Flatpak · 你的",
+  "Flatpak · system": "Flatpak · 系统",
+  "Desktop entry · system": "桌面条目 · 系统",
+  "Desktop entry · yours": "桌面条目 · 你的",
+  "Its program is gone: {cmd}": "它的程序已不在：{cmd}",
+  "Filter apps": "筛选应用",
+  "Installed by you or an agent without VibeSpace — listed as found on this machine; VibeSpace does not manage them or bring them back after a rebuild.": "由你或 agent 绕过 VibeSpace 安装——按在本机找到的样子列出；VibeSpace 不管理它们，重建后也不会自动装回。",
+  "Installed outside VibeSpace ({n})": "在 VibeSpace 之外安装的（{n}）",
 };

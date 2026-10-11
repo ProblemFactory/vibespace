@@ -1265,6 +1265,8 @@ console.log('— §6c every kill door is declared: an actor marked before the ki
     // the 2.369.237 integration — lane daemon-orphan-end's end-daemon op and lane fork-flag-server-side's fork proof
     'src/browser-serve.js': [2, "not a conversation: a machine's browser daemon with no browser, ended by pid+starttime when the hub asks (end-daemon, daemon-orphan-end)"],
     'src/ws-create.js': [1, "actor fork-resumed-parent: a pending fork's own CLI holding its parent's id, SIGKILLed before its first turn (B-8b7b)"],
+    // the 2.369.252 integration — lane machine-app-crop's window watch on a paired Windows / macOS machine
+    'src/machine-window.js': [1, "device: the window look's child (window-track's PowerShell / osascript follow loop, run by the daemon) — ended when the watch stops or its first look never answers (machine-app-crop)"],
   };
   // the actor pins: the mark is set BEFORE the kill it names (the teardown reads it; the kill case deletes the session late)
   const ACTOR_PINS = [

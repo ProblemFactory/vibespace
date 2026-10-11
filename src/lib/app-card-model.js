@@ -5,6 +5,7 @@
 // scripts/test-app-card.mjs is the census, in en / zh / ja, with a planted word as its control.
 import { shownDigest as digestOfView } from '../app-card.js';
 import { fmtBytes } from '../app-manifest.js';
+import { installPlace } from '../app-witness.js'; // lane apps-launcher-witness: an Installed card names the machine it landed on
 import { ROWS } from '../app-kinds/index.js'; // PURE — an app kind is one row (lane dc-apps-rows)
 
 /** The digest of the view a card drew — what its Install sends (`shown`); the engine compares it with the proposal. */
@@ -101,7 +102,7 @@ export function progressWords(view, t) {
   if (v.state === 'installing') return { text: k === 'remove' ? t('Removing…') : k === 'source' ? t('Adding…') : t('Installing…'), kind: 'busy', actions: [] };
   if (v.state === 'done') {
     const rows = (v.result && Array.isArray(v.result.rows) ? v.result.rows : []).filter((r) => r && r.id);
-    return { text: k === 'remove' ? t('Removed') : k === 'source' ? t('Added') : t('Installed'), kind: 'done', actions: isInstall(k) && rows.length ? ['open'] : [] };
+    return { text: k === 'remove' ? t('Removed') : k === 'source' ? t('Added') : t('Installed on {place}', { place: installPlace({ hostId: v.host }, t) }), kind: 'done', actions: isInstall(k) && rows.length ? ['open'] : [] };
   }
   if (v.state === 'failed') {
     const step = v.result && v.result.step;

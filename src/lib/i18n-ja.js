@@ -7477,6 +7477,22 @@ export default {
   "{machine} — its desktop": "{machine} — そのデスクトップ",
   "This window shows everything on {machine}’s screen, and what you type here goes to it.": "このウィンドウには{machine}の画面のすべてが映り、ここで入力した内容はそのマシンに送られます。",
   "Run on {machine}’s desktop?": "{machine}のデスクトップで実行しますか？",
+  "No window of “{cmd}” appeared on {machine} within 20 seconds": "{machine}で 20 秒以内に「{cmd}」のウィンドウが表示されませんでした", // lane machine-app-crop
+  "“{title}” closed on {machine}": "「{title}」は{machine}で閉じられました", // lane machine-app-crop
+  "{machine}’s VibeSpace agent is too old to show one app — update the agent there (its whole desktop still works)": "{machine}の VibeSpace エージェントが古いため、アプリを単独で表示できません——そのマシンでエージェントを更新してください（デスクトップ全体は引き続き使えます）", // lane machine-app-crop
+  "Could not follow the app’s window on {machine}: {why}": "{machine}のアプリのウィンドウを追跡できませんでした：{why}", // lane machine-app-crop
+  "{app} on {machine}": "{machine}の{app}", // lane machine-app-crop
+  "An app": "アプリ", // lane machine-app-crop
+  "Only this app of {machine} shows here, and what you type here goes to it.": "ここには{machine}のこのアプリだけが表示され、ここでの入力はこのアプリに送られます。", // lane machine-app-crop
+  "Keep this one on top": "これを最前面に保つ", // lane machine-app-crop
+  "{machine} has one screen: “{title}” is kept on top there, so it may cover this app": "{machine}の画面は 1 つです：「{title}」が最前面に保たれているため、このアプリが隠れることがあります", // lane machine-app-crop
+  "another app": "別のアプリ", // lane machine-app-crop
+  "Kept on top of the other windows on {machine}": "{machine}のほかのウィンドウより前面に保っています", // lane machine-app-crop
+  "Open its whole desktop": "デスクトップ全体を開く", // lane machine-app-crop
+  "Run again": "もう一度実行", // lane machine-app-crop
+  "“{title}” is not on the screen {machine} shares (minimized, or on another display)": "「{title}」は{machine}が共有している画面にありません（最小化されているか、別のディスプレイにあります）", // lane machine-app-crop
+  "Waiting for the app’s window on {machine}…": "{machine}のアプリのウィンドウを待っています…", // lane machine-app-crop
+  "Run as its own window…": "独立したウィンドウとして実行…", // lane machine-app-crop
   "Run": "実行",
   "This exact command starts on {machine}’s desktop, as its signed-in user:": "このコマンドがそのまま、{machine}のデスクトップでサインイン中のユーザーとして開始されます：",
   "Its desktop shows everything on {machine}’s screen, and what you type there goes to it. Only people can open it — agents cannot.": "「そのデスクトップ」には{machine}の画面のすべてが映り、そこで入力した内容はそのマシンに送られます。開けるのは人だけで、エージェントは開けません。",
@@ -8235,4 +8251,31 @@ export default {
   "The webhook door counts strangers per address and a path's allow-list judges the caller's address. Behind a reverse proxy or an ingress every call arrives from the proxy, so all callers would share one address: set how many proxies of yours stand in front (1 behind the Helm chart's ingress) and the door reads the caller's address that many hops from the right of X-Forwarded-For. 0 = the connecting address.": "Webhook の入口は見知らぬリクエストをアドレスごとに数え、パスの許可リストも呼び出し元のアドレスで判定します。リバースプロキシや ingress の後ろでは全呼び出しがプロキシから届くため、全呼び出し元が 1 つのアドレスを共有してしまいます。前段にある自分のプロキシの段数を設定すると（Helm chart の ingress の後ろなら 1）、入口は X-Forwarded-For の右からその段数目を呼び出し元のアドレスとして読みます。0 = 接続元のアドレス。",
   "Webhook: allow private reply URLs": "Webhook：プライベートな返信 URL を許可",
   "Off: a caller's reply URL and a paired instance must be public https addresses (the egress fence refuses loopback, private and reserved ranges). On: http and private addresses are allowed too — for a test bench or a LAN you trust.": "オフ：呼び出し元の返信 URL とペアリング先はパブリックな https アドレスである必要があります（送信フェンスはループバック・プライベート・予約済みの範囲を拒否）。オン：http とプライベートアドレスも許可 — テスト環境や信頼できる LAN 向け。",
+  // lane machine-desktop-apps: a Windows / macOS machine's installed apps
+  "Start menu": "スタートメニュー",
+  "Installed programs": "インストール済みのプログラム",
+  "just installed — being listed": "インストール直後 — 一覧を取得中",
+  "Filter": "絞り込み",
+  "Filter the installed apps": "インストール済みのアプリを絞り込む",
+  "Installed on {machine} ({n})": "{machine}にインストール済み（{n}）",
+  "Listing the apps on {machine}…": "{machine}のアプリを一覧にしています…",
+  "The list needs {machine}’s VibeSpace agent updated (it updates itself; check again in a minute)": "一覧には{machine}の VibeSpace エージェントの更新が必要です（自動で更新されます。1 分後にもう一度確認してください）",
+  "{machine} is offline — this is the list it gave last": "{machine}はオフラインです — これは前回の一覧です",
+  "{machine} could not list its apps: {why}": "{machine}はアプリを一覧にできませんでした：{why}",
+  "No apps found on {machine}": "{machine}にアプリが見つかりません",
+  "{machine} has {total} apps — the first {n} are listed; filter to find one": "{machine}には {total} 個のアプリがあります — 最初の {n} 個を表示しています。絞り込みで探してください",
+  "Nothing matches “{q}”": "「{q}」に一致するものはありません",
+  "Examples": "例",
+  // lane apps-launcher-witness
+  "this VibeSpace machine ({name})": "この VibeSpace マシン（{name}）",
+  "this VibeSpace machine": "この VibeSpace マシン",
+  "Installed on {place}": "{place}にインストール済み",
+  "Flatpak · yours": "Flatpak · あなたの",
+  "Flatpak · system": "Flatpak · システム",
+  "Desktop entry · system": "デスクトップエントリ · システム",
+  "Desktop entry · yours": "デスクトップエントリ · あなたの",
+  "Its program is gone: {cmd}": "プログラムが見つかりません：{cmd}",
+  "Filter apps": "アプリを絞り込む",
+  "Installed by you or an agent without VibeSpace — listed as found on this machine; VibeSpace does not manage them or bring them back after a rebuild.": "あなたまたはエージェントが VibeSpace を通さずにインストールしたもの——このマシンで見つかったとおりに表示します。VibeSpace は管理せず、再構築後にも戻しません。",
+  "Installed outside VibeSpace ({n})": "VibeSpace 外でインストール済み（{n}）",
 };

@@ -2614,7 +2614,34 @@ body.taskbar-top #taskbar-hotzone { bottom: auto; top: 0; }
 .desktop-install-pre { margin: 0; padding: 8px; max-height: 220px; overflow: auto; font-family: var(--font-mono, monospace); font-size: 11px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius-sm); white-space: pre-wrap; overflow-wrap: anywhere; }
 .desktop-install-note { font-size: 12px; color: var(--text-secondary); }
 .desktop-install-note.is-bad { color: var(--red); }
-.desktop-install-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.desktop-install-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+/* lane machine-desktop-apps (owner 2026-10-11): a button in an action row is never narrower than its words — the row
+   wraps instead. The owner's WIN-DESK1 dialog drew "再检查一次" one character per line beside the Install button: its
+   Check again is a .file-tool-btn, viewers.css's 24 px ICON box — here it is a text button sized by its words (0,2,0) */
+.desktop-install-actions > button { flex: none; white-space: nowrap; }
+.desktop-install-actions > .file-tool-btn { width: auto; height: auto; min-height: 28px; padding: 0 12px; border-color: var(--border); }
+/* a Windows / macOS machine's dialog: its INSTALLED apps (listed on it by witness), filtered; Examples / Recent below */
+.dialog.machine-desktop-dialog { width: 520px; max-width: calc(100vw - 24px); }
+.machine-apps { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; min-width: 0; }
+.machine-apps-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.machine-apps-title { flex: 1 1 auto; min-width: 0; font-size: 12px; color: var(--text-secondary); }
+.dialog-body input.machine-apps-filter { flex: 0 1 180px; min-width: 120px; width: auto; }
+.dialog-body input.machine-apps-filter[hidden] { display: none; }
+.machine-apps-note { font-size: 12px; color: var(--text-secondary); margin: 0; }
+.machine-apps-note:empty { display: none; }
+.machine-apps-note.is-bad { color: var(--warning, #d9822b); }
+.machine-apps-list { display: flex; flex-direction: column; max-height: 220px; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.machine-apps-list[hidden] { display: none; }
+.machine-apps-row { display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 4px 10px; border: 0; border-bottom: 1px solid var(--border); background: transparent; color: var(--text); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.machine-apps-row:last-child { border-bottom: 0; }
+.machine-apps-row:hover:not(:disabled) { background: var(--bg-hover); }
+.machine-apps-row:disabled { cursor: default; opacity: 0.6; }
+.machine-apps-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.machine-apps-src { flex: none; font-size: 11px; color: var(--text-secondary); white-space: nowrap; }
+.machine-apps-chips { display: flex; flex-direction: column; gap: 4px; margin: 6px 0; }
+.machine-apps-group { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); }
+.file-tool-btn.machine-apps-chip { width: auto; height: 26px; padding: 0 10px; flex: none; white-space: nowrap; border-color: var(--border); }
+@media (max-width: 600px) { .machine-apps-row { min-height: 40px; } .machine-apps-list { max-height: 40vh; } }
 /* Layer 0 apps (docs/design-app-persistence.zh.md §3.1): an app's plan facts above the commands, the "Your installed
    apps" section of the Desktop apps dialog, the search / .deb / source / helper dialogs. Theme variables only. */
 .desktop-install-facts { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--text); }
@@ -2693,6 +2720,14 @@ body.taskbar-top #taskbar-hotzone { bottom: auto; top: 0; }
 .desktop-launch-running-sec.is-empty { display: none; } /* no global .hidden in this project */
 /* B-bfe6: the Browsers section — the note that separates it from the Agent browser, the optional URL + keep-profile row */
 .desktop-launch-browsers-sec.is-empty { display: none; }
+/* lane apps-launcher-witness: the filter box across Apps + the witnessed group; the group's head, note and source chip */
+.desktop-launch-filter { width: 100%; box-sizing: border-box; margin: 0 0 8px; padding: 5px 8px; font-size: 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-input); color: var(--text); }
+.desktop-launch-seen-sec.is-empty { display: none; }
+.desktop-launch-seen-recheck { margin-left: auto; flex: none; white-space: nowrap; font-size: 11px; font-weight: 400; padding: 1px 8px; border: 1px solid var(--border); border-radius: 5px; background: transparent; color: var(--text-secondary); cursor: pointer; }
+.desktop-launch-seen-recheck:hover { color: var(--text); background: var(--bg-hover); }
+.desktop-launch-seen-note { margin: 0 0 6px; font-size: 11px; color: var(--text-secondary); }
+.desktop-launch-chip { display: inline-block; vertical-align: baseline; font-size: 10px; line-height: 1.4; padding: 0 6px; border-radius: 8px; background: var(--bg-hover); color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.desktop-launch-card-wrap[hidden] { display: none; }
 .desktop-launch-browser-note { margin: 0 0 6px; font-size: 11px; line-height: 1.45; color: var(--text-secondary); }
 .desktop-launch-browser-opts { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
 .desktop-launch-browser-opts .desktop-launch-url-field { flex: 1 1 260px; min-width: 0; margin-bottom: 6px; }

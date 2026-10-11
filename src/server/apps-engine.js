@@ -36,6 +36,7 @@ const { toAgentText } = require('../peer-text.js');
 const K = require('../app-kinds/index.js'); // PURE — an app kind is its own file + one index line (lanes dc-apps-rows, dc-app-kinds)
 const SYS = require('../app-system.js'); // PURE — the app system's own request rows (SYS_KINDS)
 const AC = require('../app-card.js'); // PURE: THE one card of an install (design 009 §4) — its view and the digest of what it showed
+const AW = require('../app-witness.js'); // PURE: THE install-place words (lane apps-launcher-witness) — the door's result card says them too
 const HC = require('../hidden-chars.js'); // THE one set: an agent's why on the approval card carries no hidden / reordering character (verify-r1 F8) // THE belt on text toward an agent: a package's .desktop Name / the machine's error words ride the outcome
 /** a piece of an outcome sentence that a PACKAGE (its .desktop Name) or the MACHINE (an error line) wrote — the belt (line) */
 const piece = (s, max = 160) => toAgentText(String(s == null ? '' : s), { max, kind: 'line' });
@@ -141,6 +142,8 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
     try { writeJsonAtomic(file, store); } catch (e) { log.warn?.(`[apps] ${STORE_FILE} not written: ${e.message}`); }
   };
   const bump = (host) => { try { broadcast({ type: 'apps-updated', host: host || 'local' }); } catch { /* no clients */ } };
+  /** lane apps-launcher-witness: where an install landed, in the agent's words — this hub by its own name, a paired machine by its label. */
+  const placeOf = (host) => AW.installPlace({ hostId: host || 'local', label: typeof access.labelOf === 'function' ? access.labelOf(host) : host, localName: require('os').hostname() });
   const get = (id) => store.proposals.find((p) => p.id === id) || null;
   const sessions = () => { try { return (typeof activeSessions === 'function' ? activeSessions() : activeSessions) || new Map(); } catch { return new Map(); } };
   const notify = (p) => { const s = waiters.get(p.id); if (s) for (const fn of [...s]) { try { fn(p); } catch { /* gone */ } } };
@@ -468,11 +471,11 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
   function outcomeText(p) {
     const label = piece(p.label, 120);
     const what = p.request.kind === 'remove' ? `removing ${label}` : p.request.kind === 'source' ? `adding the package source ${label}` : `installing ${label}`;
-    if (p.state === 'done' && p.request.staged) { const rows = (p.result && p.result.rows) || []; return `Installed: ${label}${rows.length ? ` — open it with \`vibespace-window open ${piece(rows[0].id, 64)}\`` : ''} (your proposal ${p.id}).`; }
+    if (p.state === 'done' && p.request.staged) { const rows = (p.result && p.result.rows) || []; return `Installed: ${label}${rows.length ? ` — open it with \`vibespace-window open ${piece(rows[0].id, 64)}\`` : ''} (your proposal ${p.id}). It landed on ${placeOf(p.host)}.`; }
     if (p.state === 'withdrawn') return `Your proposal ${p.id} (${what}) ${p.result && p.result.code === 'expired' ? 'expired unanswered after 24 h' : 'was withdrawn'} — nothing was installed and its download was deleted. Propose it again only if the user still wants it.`;
     if (p.state === 'done') {
       const rows = (p.result && p.result.rows) || [];
-      return `Your proposal ${p.id} (${what}) was approved by the user and is done.` + (rows.length ? ` Open it with: ${rows.map((x) => `vibespace-window open ${piece(x.id, 64)}`).join(' · ')}` : ((K.kindRow(p.request.kind) || {}).doneNote || ''));
+      return `Your proposal ${p.id} (${what}) was approved by the user and is done on ${placeOf(p.host)}.` + (rows.length ? ` Open it with: ${rows.map((x) => `vibespace-window open ${piece(x.id, 64)}`).join(' · ')}` : ((K.kindRow(p.request.kind) || {}).doneNote || ''));
     }
     if (p.state === 'rejected') return `Your proposal ${p.id} (${what}) was declined by the user (Not now). Nothing was installed. Do not propose it again unless they ask.`;
     if (p.state === 'failed') return `Your proposal ${p.id} (${what}) was approved but failed: ${piece((p.result && p.result.error) || 'see the Desktop apps dialog', 400)}.`;
@@ -598,6 +601,16 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
   }
   function dropHelper(sessionId) { const n = store.helpers.length; store.helpers = store.helpers.filter((x) => x.sessionId !== sessionId); if (store.helpers.length !== n) { save(); bump('local'); } }
   const helperIds = () => new Set(store.helpers.map((x) => x.sessionId));
+  // lane apps-launcher-witness: a HELPER's turn end re-lists what is installed on its machine (it may have installed
+  // around the door — the owner's JASP, a user flatpak) — the machine's `list` op with Check again's rule, then the
+  // launcher hears `apps-updated`. An old daemon ignores the param (list is an old op): never a hang.
+  if (deliver && typeof deliver.onTurnEnd === 'function') deliver.onTurnEnd((cid) => {
+    if (!cid) return;
+    const all = sessions();
+    const h = store.helpers.find((x) => { const s = all.get(x.sessionId); return s && (s.claudeSessionId === cid || s.backendSessionId === cid); });
+    if (!h) return;
+    Promise.resolve().then(() => access.call(h.host || 'local', 'list', { witness: 'recheck' })).then(() => bump(h.host), (e) => log.warn?.(`[apps] the helper's machine was not re-listed (${e && e.message})`));
+  });
 
   /** The staged icon of a proposal (the card's picture before anything is installed) → {host, name} | null. */
   const proposalIcon = (id) => { const p = get(id); const n = p && p.card && p.card.app && p.card.app.icon; return n && !TERMINAL.has(p.state) ? { host: p.host, name: n } : null; };
