@@ -2,6 +2,12 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.256 — 2026-10-11
+
+### Fixed
+- A Flatpak or Snap app or a browser you open in a VibeSpace window now shows its file dialogs inside that window instead of on your main desktop.
+- The agent browser starts again on machines whose VibeSpace folder has a long path — Chrome's socket path no longer overflows.
+
 ## 2.369.255 — 2026-10-11
 
 ### Changed

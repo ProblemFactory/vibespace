@@ -387,6 +387,42 @@ function configNamesProfile(cfg) {
  */
 const SOCKET_PATH_MAX = 103;
 const SOCKET_DIR_BASE = '/tmp';
+/** lane browser-tmpdir-socket-length (owner 2026-10-12: EVERY new agent browser died at launch): Chrome puts its
+ *  process-singleton socket at `$TMPDIR/org.chromium.Chromium.XXXXXX/SingletonSocket` and aborts FATAL "Socket path too
+ *  long" when that path is >= sizeof(sun_path) = 108 — the daemon's TMPDIR = `<dataDir>/browser-env/tmp` (B-afeb: off
+ *  the RAM-backed /tmp) ONLY while it fits (≤ 62 bytes), else a SHORT disk-backed per-uid root under `/var/tmp`, else
+ *  (a RAM `/var/tmp`) the same shape under `fallback` with the why said. `{dir, short, why}`; dir null = none fits
+ *  (the CLI keeps its own TMPDIR). Judged against the OS by test-browser-tmpdir's bind control, not by this constant. */
+const SUN_PATH_LIMIT = 108;
+const CHROME_SINGLETON_TAIL = '/org.chromium.Chromium.XXXXXX/SingletonSocket';
+const BROWSER_TMP_SHORT_BASE = '/var/tmp';
+function browserTmpDir({ dataDir, uid = null, limit = SUN_PATH_LIMIT, shortBase = BROWSER_TMP_SHORT_BASE, shortFsType = null, fallback = '/tmp' } = {}) {
+  const tail = utf8Bytes(CHROME_SINGLETON_TAIL);
+  const fits = (d) => utf8Bytes(d) + tail < limit;
+  const trim = (d) => String(d).replace(/\/+$/, '');
+  const data = typeof dataDir === 'string' && dataDir.startsWith('/') ? `${trim(dataDir)}/browser-env/tmp` : null;
+  if (data && fits(data)) return { dir: data, short: false, why: null };
+  const said = data ? `the data path ${data} is ${utf8Bytes(data)} bytes; Chrome's socket needs ≤ ${limit - 1 - tail}` : 'no data path';
+  const ram = /^(tmpfs|ramfs)$/i.test(String(shortFsType || ''));
+  const base = ram ? fallback : shortBase;
+  const dir = typeof base === 'string' && base.startsWith('/') ? `${trim(base) || ''}/vibespace-${uid == null ? 'u' : uid}/browser-tmp` : null;
+  if (!dir || !fits(dir)) return { dir: null, short: true, why: `${said}, and no short root fits — the CLI keeps its own TMPDIR` };
+  return { dir, short: true, why: ram ? `${said}; ${shortBase} is ${shortFsType} (RAM), so the fallback root` : said };
+}
+/** A Chrome FATAL at launch named by its cause (the CLI's answer carries Chrome's stderr): `{reason, error}` | null.
+ *  Never a profile lock — lockRefusalAfterLaunch says those first. */
+const LAUNCH_FATALS = [
+  { reason: 'socket_path_too_long', re: /Socket path too long/i, fix: "the browser's temp path is too long for Chrome's singleton socket (a Unix socket path must stay under 108 bytes) — the daemon's TMPDIR needs a shorter root" },
+  { reason: 'tmp_dir_unwritable', re: /cannot create default profile directory/i, fix: "Chrome could not create its profile under the daemon's TMPDIR — that directory is missing or not writable" },
+];
+function launchFatalOf(text) {
+  const s = String(text || '');
+  for (const f of LAUNCH_FATALS) {
+    const m = f.re.exec(s);
+    if (m) { const line = (s.slice(0, m.index).split('\n').pop() + s.slice(m.index).split('\n')[0]).trim().slice(0, 240); return { reason: f.reason, error: `the browser did not start (${f.reason}): ${f.fix} — Chrome said: ${line}` }; }
+  }
+  return null;
+}
 /** Bytes, not characters: the kernel's `sun_path` counts bytes. */
 function utf8Bytes(s) {
   const str = String(s == null ? '' : s);
@@ -3320,7 +3356,7 @@ module.exports = {
   sessionNameFor, mintBrowserKey, isBrowserKey, BROWSER_KEY_RE,
   browserKeyFor, LATE_KEY_WHYS, lateKeyVerdict, lateKeyRefusal, lateDefaultPin, isPinWitness, isEmptyPinWitness, witnessCap, // B-f7ab: the late key (first use); r2: the witnessed default (a PREFERENCE — the list admits)
   VARIANTS, REJECTED_VARIANTS, ISOLATED_VARIANTS, isolatedVariant, variantLadder, fencedRungReason, configNamesProfile,
-  SOCKET_PATH_MAX, SOCKET_DIR_BASE, utf8Bytes, socketTailBytes, socketRootFor, socketDirBaseOf, socketDirDecision,
+  SOCKET_PATH_MAX, SOCKET_DIR_BASE, SUN_PATH_LIMIT, CHROME_SINGLETON_TAIL, BROWSER_TMP_SHORT_BASE, browserTmpDir, launchFatalOf, utf8Bytes, socketTailBytes, socketRootFor, socketDirBaseOf, socketDirDecision,
   USER_CONFIG_REL, PROJECT_CONFIG_NAME, layerProjectConfig,
   DEFAULT_IDLE_TIMEOUT_MS, idleTimeoutMs,
   browserEnvFor,

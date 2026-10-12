@@ -132,6 +132,16 @@ doas), bad_icon, shadow (the name is a catalog app's). After a rebuild a gone pr
 A bare `--exec` name (no `/`) is resolved again on VibeSpace's PATH on that machine at every launch: the `[path]` shown beside it
 is advisory (what it resolved to when you registered it) — give an absolute path when it must be that one program.
 
+## A sandboxed app's file dialogs
+
+A Flatpak or Snap app, or a browser, opened in a VibeSpace window gets its own
+desktop portal on that window's display (setting `desktop.appPortal`: `auto`
+default, `all`, `off`), so its Open/Save dialogs appear inside its window. When the record says
+`portal: unavailable: <why>` (no xdg-desktop-portal-gtk on the machine), its
+dialog opens on the user's main Desktop window: pick the file there, or run the
+app with the portal off: `flatpak run --env=QT_QPA_PLATFORMTHEME=gtk3 <id>` (Qt)
+or `flatpak run --env=GTK_USE_PORTAL=0 <id>` (GTK).
+
 ## User-level tools (no root, nothing to replay)
 
 ```

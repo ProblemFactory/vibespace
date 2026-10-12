@@ -1267,6 +1267,8 @@ console.log('— §6c every kill door is declared: an actor marked before the ki
     'src/ws-create.js': [1, "actor fork-resumed-parent: a pending fork's own CLI holding its parent's id, SIGKILLed before its first turn (B-8b7b)"],
     // the 2.369.252 integration — lane machine-app-crop's window watch on a paired Windows / macOS machine
     'src/machine-window.js': [1, "device: the window look's child (window-track's PowerShell / osascript follow loop, run by the daemon) — ended when the watch stops or its first look never answers (machine-app-crop)"],
+    // the 2.369.256 integration — lane app-display-portal's own session bus for a sandboxed app (startPortalBus)
+    'src/desktop-display.js': [1, "not a conversation: desktop apps — a sandboxed app's own portal bus (dbus-daemon) that never listened within its deadline, SIGKILLed through our own spawn handle (app-display-portal)"],
   };
   // the actor pins: the mark is set BEFORE the kill it names (the teardown reads it; the kill case deletes the session late)
   const ACTOR_PINS = [

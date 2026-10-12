@@ -3,7 +3,7 @@
 // re-pointed by rel254-verify-fixes r2 — in .254 this suite answered adopt-prefill / remove / forget from its own in-page
 // stub, so Remove… / Forget shipped dead: a contract between lanes is a census, never a stub). A THROWAWAY server in a git
 // worktree, its HOME a scratch one holding the fixtures (a stub `flatpak` listing JASP for the user and uninstalling it, a
-// `dpkg` that does not answer, a remove recipe that writes what it ran, a user .desktop "Tool", a seeded manifest with a
+// `dpkg` that does not answer, a stub `xpra` (the display backend — int256), a remove recipe that writes what it ran, a user .desktop "Tool", a seeded manifest with a
 // two-variant registered app — its second variant carries env — and one changed outside VibeSpace: a sudo recipe). Only
 // the LAUNCH POST is captured in the page (no app is started); every desktop-apps route the launcher calls is the server's:
 //   ① desk 1100: the registered card + its command; "…" = Open | Open · Safe mode | Remove… | Show command; the variant's
@@ -50,6 +50,10 @@ for (const d of [FBIN, OPT, path.join(fakeHome, '.local/share/applications'), pa
 const sh = (f, body) => fs.writeFileSync(f, `#!/bin/sh\n${body}\n`, { mode: 0o755 });
 sh(path.join(FBIN, 'flatpak'), 'case "$1" in\n list) case "$*" in *--user*) [ -d "$HOME/.local/share/flatpak/app/org.jaspstats.JASP" ] && printf "org.jaspstats.JASP\\tJASP\\t0.19\\n";; esac; exit 0;;\n uninstall) printf "%s|%s\\n" "$*" "$PWD" > "$HOME/uninstall-ran"; rm -r "$HOME/.local/share/flatpak/app/org.jaspstats.JASP"; echo "Uninstalling org.jaspstats.JASP"; echo Done; exit 0;;\nesac\nexit 0');
 sh(path.join(FBIN, 'dpkg'), 'exit 2'); // dpkg does not answer ⇒ no system entry is read as "unowned" (the distro's stay hidden)
+// int256 (rel255's Actions mirror red, twice): the GitHub runner has NO display backend (no xpra / Xvnc / Xvfb + x11vnc) ⇒ the
+// launcher disables every launch row (`!availability.backend`) and "Open · Safe mode" POSTed nothing. A stub xpra on the server's
+// PATH makes the backend the same on every machine; it only answers --version (this suite starts no app: the launch POST is the page's)
+sh(path.join(FBIN, 'xpra'), 'case "$1" in --version) echo "xpra v6.5.4";; esac\nexit 0');
 const TOOLS = path.join(OPT, 'jasp-tools'), TOOL = path.join(OPT, 'tool');
 sh(TOOLS, 'exit 0'); sh(TOOL, 'exit 0');
 fs.writeFileSync(path.join(fakeHome, '.local/share/applications/tool.desktop'), `[Desktop Entry]\nType=Application\nName=Tool\nExec=${TOOL}\n`);
@@ -146,8 +150,10 @@ try {
   const tip = await evalJs(`[...document.querySelectorAll('.context-menu .context-menu-item')].find((e) => e.textContent.trim() === 'Open · Safe mode')?.title || ''`);
   check('rel254 verify F3: the variant row shows its env (what it RUNS)', tip === `env JASP_SAFE=1 ${TOOLS} --safe`, tip);
   await shot('desk-menu');
+  const backend = await evalJs(`fetch('/api/desktop/apps').then((r) => r.json()).then((j) => (j.availability && j.availability.backend) || null)`);
+  check('int256: the server sees a display backend (the stub xpra) — the launch rows are pressable on any machine, the runner too', backend === 'xpra', backend);
   check('"Open · Safe mode" launches the second variant', await clickMenu('Open · Safe mode'));
-  await waitFor(`window.__reg.launches.length > 0`, 5000);
+  await waitFor(`window.__reg.launches.length > 0`, 15000);
   const launchPost = (await evalJs('window.__reg.launches'))[0];
   check('…POST /api/desktop/apps {appId, variant: "safe"}', !!launchPost && launchPost.appId === REG.id && launchPost.variant === 'safe', launchPost);
 

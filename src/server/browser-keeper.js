@@ -207,10 +207,10 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   const pinnedCli = () => { try { return cliPinPath(); } catch { return null; } };
   const bf = facts || F.createBrowserFacts({ env: rtEnv, pinned: pinnedCli });
   const bfPath = F.createBrowserFacts({ env: rtEnv });
-  // lane browser-resource-care: the daemon's TMPDIR = data/browser-env/tmp (browser-env.js TMP_DIR — spelled here: the
+  // lane browser-resource-care: the daemon's TMPDIR = data/browser-env/tmp (browser-env.js TMP_DIR — the same verdict: the
   // keeper requires nothing of that module), so its ephemeral profiles and Xvfb auth files stay off the RAM-backed /tmp
   let daemonTmpMade = null; // made ONCE (data/ may be a network mount — never an mkdir per CLI call)
-  const daemonTmp = () => { if (daemonTmpMade) return daemonTmpMade; const d = path.join(dataDir, 'browser-env', 'tmp'); try { fs.mkdirSync(d, { recursive: true, mode: 0o700 }); daemonTmpMade = d; return d; } catch { return null; } };
+  const daemonTmp = () => { if (daemonTmpMade) return daemonTmpMade; const d = F.makeBrowserTmpDir({ dataDir, log }); if (d) daemonTmpMade = d; return d; }; // lane browser-tmpdir-socket-length: only while Chrome's socket fits, else a short /var/tmp root
   const rt = configured(runtime || F.createBrowserRuntime({ env: rtEnv, log, pinned: pinnedCli, tmpDir: daemonTmp }));
   /**
    * takeover r3 (finding 2): THE CONFIG IS NAMED, NEVER SEARCHED. Without
@@ -2552,7 +2552,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
         if (!r.ok) {
           const text = (r.stderr || r.error || r.stdout || '').trim().slice(0, 300);
           const lr = lockRefusalAfterLaunch(p, prev); // verify r2 (F1): its kept directory taken meanwhile ⇒ said by name
-          rec.state = 'failed'; rec.endedAt = now(); rec.lastError = lr ? lr.error : `the browser did not start: ${text}`;
+          rec.state = 'failed'; rec.endedAt = now(); rec.lastError = lr ? lr.error : ((B.launchFatalOf(r.stderr || r.error || r.stdout) || {}).error || `the browser did not start: ${text}`); // lane browser-tmpdir-socket-length: a known FATAL named with its fix
           commit();
           // verify r3 (F3): said in the journal on this row too (the named start's sentence; the ephemeral start said nothing)
           if (lr) { log.warn?.(`[browser] ephemeral ${profileId} "${p.label}": NOT started — ${lr.tookOver ? `a lock of this machine's previous name ${lr.tookOver} reached the launch (taken over now)` : 'the directory was taken while launching'}: ${lr.error}`); throw namedError(lr.code, lr.error, lr.holderPid ? { holderPid: lr.holderPid } : {}); }
@@ -3675,7 +3675,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
         // a key-bearing launch that fails on licence/concurrency is the THIRD
         // named refusal (§7.4, round 8 #3) — under a cluster default it says
         // the seats are shared fleet-wide and offers the one click out
-        const cls = intId ? SW.classifyLaunchFailure({ provider: p.provider, text, source: key ? key.source : 'none', integrationId: intId }) : { code: 'launch_failed', error: `the browser did not start: ${text}`, action: null };
+        const cls = intId ? SW.classifyLaunchFailure({ provider: p.provider, text, source: key ? key.source : 'none', integrationId: intId }) : { code: 'launch_failed', error: (B.launchFatalOf(r.stderr || r.error || r.stdout) || {}).error || `the browser did not start: ${text}`, action: null };
         rec.state = 'failed'; rec.endedAt = now(); rec.lastError = cls.error;
         commit();
         throw namedError(cls.code, cls.error, { provider: p.provider, action: cls.action || null });

@@ -2175,6 +2175,32 @@ console.log('§20 round 3 A3 (docs/design-desktop-apps-seamless §3.4) — the s
 // one counted them as product code; they are written to this process's scratch
 // dir now (scripts/mutant-copy.mjs).
 console.log('\n§tree the patched copies never touch the tree');
+console.log('§portal — lane app-display-portal: the real keeper starts an app\'s OWN bus + portal (part `portal`) before the app, on its display, and reaps it with the app; no binaries ⇒ the app starts as before');
+{
+  const quiet = { log() {}, warn() {}, error() {} };
+  const mkp = (dataDir, extra = {}) => { fs.mkdirSync(dataDir, { recursive: true }); const k = K.create({ ...PINNED, serverSetting: (key) => (key === 'desktop.appPortal' ? 'all' : PIN[key]), dataDir, env: baseEnv, broadcast: () => {}, display: { ...NO_XVNC, ...extra }, log: quiet }); keepers.push(k); return k; };
+  const pk = mkp(path.join(root, 'portal-on'));
+  await pk.adoptAll(); pk.start();
+  const p0 = await pk.launch({ exec: '/bin/sleep', args: ['3600'], label: 'portal-all' });
+  const pr = await until(() => { const g = pk.get(p0.id); return g && g.state === 'ready' && g; }, 20000);
+  const penv = pr && pr.pids.app ? fs.readFileSync(`/proc/${pr.pids.app}/environ`, 'utf8').split('\0') : [];
+  const bus = penv.find((e) => e.startsWith('DBUS_SESSION_BUS_ADDRESS=')) || '';
+  ok(pr && pr.portal === 'on' && pr.portalWhy === 'all' && alive(pr.pids.portal), `desktop.appPortal = all ⇒ the record says portal 'on' (why ${pr && pr.portalWhy}), its part \`portal\` (pid ${pr && pr.pids.portal}) alive`, pr && { portal: pr.portal, pids: pr.pids });
+  ok(/^DBUS_SESSION_BUS_ADDRESS=unix:path=.*\/portal\/bus$/.test(bus) && penv.includes(`DISPLAY=${pr && pr.display}`), `the app runs ON that bus (${bus.slice(25)}), on its own display ${pr && pr.display}`);
+  const pp = pk.sessionPids ? pk.sessionPids(pr) : null;
+  ok(!pp || pp.includes(pr.pids.portal), 'sessionPids holds the companion (the tree\'s pid set names its chooser)');
+  await pk.stop(p0.id);
+  await sleep(500);
+  ok(!alive(pr.pids.portal) && markerPids(p0.id).length === 0, 'stopped: the companion bus is gone with the app; nothing carries the marker', markerPids(p0.id));
+  pk.shutdown();
+  const nk = mkp(path.join(root, 'portal-none'), { portalBins: () => ({}) });
+  await nk.adoptAll(); nk.start();
+  const n0 = await nk.launch({ exec: '/bin/sleep', args: ['3600'], label: 'portal-none' });
+  const nr = await until(() => { const g = nk.get(n0.id); return g && g.state === 'ready' && g; }, 20000);
+  ok(nr && /^unavailable: dbus-daemon, xdg-desktop-portal, xdg-desktop-portal-gtk not found/.test(nr.portal || '') && !nr.pids.portal, `no portal binaries ⇒ the app is READY anyway, the record says "${nr && nr.portal}"`);
+  await nk.stop(n0.id); nk.shutdown();
+}
+
 for (const r of copiesCensus(MUTK.files, MUTK.dir, repo, { minCopies: 1 })) ok(r.pass, '§tree ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 
 console.log(`${fail ? `\n${fail} FAILED (${pass} passed` : `\nALL PASS (${pass}`}${skipped ? `, ${skipped} skipped` : ''})`);

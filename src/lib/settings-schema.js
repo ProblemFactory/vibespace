@@ -168,6 +168,18 @@ const SETTINGS_SCHEMA = {
     when: { fact: 'desktopApps' },
     category: t('Desktop apps'), liveApply: true,
   },
+  // lane app-display-portal: which desktop apps get their own file-dialog portal on their own display (desktop-serve launch)
+  'desktop.appPortal': {
+    type: 'enum', default: 'auto', options: [
+      { value: 'auto', label: t('Browsers, Flatpak and Snap apps') },
+      { value: 'all', label: t('Every app') },
+      { value: 'off', label: t('Off') },
+    ], label: t('Desktop app file dialogs in their own window'),
+    description: t('A Flatpak or Snap app, and a browser, asks a desktop portal for its file dialogs; VibeSpace starts one on the app\'s own display, so the dialog opens inside its window, not on your main desktop (3 more processes per app, gone with it). Every app: GTK apps too. Off: as before. Applies to apps started after the change.'),
+    when: { fact: 'desktopApps' },
+    tier: 'advanced',
+    category: t('Desktop apps'), liveApply: true,
+  },
   // lane agent-window-no-steal: the person's opt-in to the old behaviour (app.js agentWindowPlacement `front`)
   'desktop.agentWindowsFront': {
     type: 'boolean', default: false, label: t('Agent-opened windows come to the front'),

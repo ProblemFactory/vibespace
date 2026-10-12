@@ -8331,5 +8331,11 @@ export default {
   "Show them": "表示する",
   "Hide them": "隠す",
   "Agent-opened windows come to the front": "agent が開いたウィンドウを前面に出す",
+  "Browsers, Flatpak and Snap apps": "ブラウザ、Flatpak と Snap のアプリ",
+  "Every app": "すべてのアプリ",
+  "Desktop app file dialogs in their own window": "デスクトップアプリのファイルダイアログを自分のウィンドウ内に開く",
+  "A Flatpak or Snap app, and a browser, asks a desktop portal for its file dialogs; VibeSpace starts one on the app's own display, so the dialog opens inside its window, not on your main desktop (3 more processes per app, gone with it). Every app: GTK apps too. Off: as before. Applies to apps started after the change.": "Flatpak や Snap のアプリとブラウザはファイルダイアログをデスクトップポータルに頼みます。VibeSpace はアプリ自身のディスプレイにポータルを起動するので、ダイアログはメインデスクトップではなくそのウィンドウ内に開きます（アプリごとに 3 プロセス、アプリと一緒に終了）。すべてのアプリ：GTK アプリも。オフ：従来どおり。変更後に起動したアプリに適用されます。",
+  "file dialogs in this window (3 processes)": "ファイルダイアログはこのウィンドウ内（3 プロセス）",
+  "file dialogs on your main desktop — {why}": "ファイルダイアログはメインデスクトップに — {why}",
   "OFF (the default): a window an agent opens — its own browser, an app it starts, a second window of that app, its live view — is placed beside the agent's chat (or on that chat's desktop), behind what you are doing, and its taskbar entry pulses; it never takes your focus or switches your desktop. ON: it comes to the front and takes the focus, as before.": "オフ（既定）：agent が開くウィンドウ（自分のブラウザ、起動したアプリ、そのアプリの 2 つ目のウィンドウ、ライブビュー）は、その agent のチャットの横（またはそのチャットのデスクトップ）に、作業中のウィンドウの後ろに置かれ、タスクバーの項目が点滅します。フォーカスを奪うこともデスクトップを切り替えることもありません。オン：以前どおり前面に出てフォーカスを取ります。",
 };

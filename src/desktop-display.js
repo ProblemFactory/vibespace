@@ -1315,6 +1315,60 @@ function rfbGreeting(buf) {
   return { ok: true, server, reply, types, type, auth: rfbAuthOf(type) };
 }
 
+// ── a sandboxed app's own portal (lane app-display-portal, 2026-10-12) ──────
+/** Where the portal services live: NOT on PATH (Debian/Ubuntu/Fedora ship them in /usr/libexec, Arch in /usr/lib) —
+ *  PATH first, then these dirs. */
+const PORTAL_LIBEXEC_DIRS = Object.freeze(['/usr/libexec', '/usr/lib/xdg-desktop-portal', '/usr/lib']);
+function portalBins({ env = process.env, names = require('./desktop-apps').PORTAL_BINS, dirs = PORTAL_LIBEXEC_DIRS } = {}) {
+  const out = {};
+  for (const n of names) {
+    out[n] = binOnPath(n, { env });
+    for (const d of dirs) { if (out[n]) break; const p = path.join(d, n); try { const st = fs.statSync(p); if (st.isFile() && (st.mode & 0o111)) out[n] = p; } catch { /* not here */ } }
+  }
+  return out;
+}
+/** The USER's a11y bus address (AT-SPI): the env's own, else org.a11y.Bus.GetAddress on the session bus `env` names —
+ *  handed to a portal-companion app so it (and its chooser) stays on the bus the tree snapshot reads. null = unknown. */
+async function a11yBusAddress({ env = process.env, timeout = 2000 } = {}) {
+  if (env.AT_SPI_BUS_ADDRESS) return env.AT_SPI_BUS_ADDRESS;
+  const ds = binOnPath('dbus-send', { env });
+  if (!ds || !env.DBUS_SESSION_BUS_ADDRESS) return null;
+  const r = await run(ds, ['--session', '--print-reply=literal', '--reply-timeout=' + timeout, '--dest=org.a11y.Bus', '/org/a11y/bus', 'org.a11y.Bus.GetAddress'], { env, timeout: timeout + 500 });
+  const a = r.err ? '' : r.stdout.trim();
+  return /^unix:/.test(a) ? a : null;
+}
+/** Start the companion bus of `plan` (PURE desktop-apps portalPlan): its dirs (0700) and files, then ONE detached
+ *  `dbus-daemon --nofork` with the plan's env over `env` (every service it activates inherits that env — the app's
+ *  display, the private config/data/runtime dirs), resolved once its socket exists. Rejects by name. */
+async function startPortalBus({ plan, env, logFd = 'ignore', deadlineMs = 5000, now = Date.now, stepMs = 50 } = {}) {
+  for (const d of plan.dirs) { fs.mkdirSync(d, { recursive: true, mode: 0o700 }); fs.chmodSync(d, 0o700); }
+  for (const f of plan.files) fs.writeFileSync(f.file, f.text, { mode: 0o600 });
+  const sock = plan.address.replace(/^unix:path=/, '');
+  try { fs.unlinkSync(sock); } catch { /* none left */ }
+  assertExecutable(plan.busArgv[0], 'dbus-daemon');
+  const e = withoutWayland({ ...(env || {}), ...plan.env });
+  const child = await spawnDetached(plan.busArgv[0], plan.busArgv.slice(1), { env: e, logFd, name: 'dbus-daemon (portal)' }).spawned;
+  const until = now() + deadlineMs;
+  while (now() < until) {
+    if (fs.existsSync(sock)) return child;
+    if (child.exitCode !== null || child.signalCode) break;
+    await new Promise((r) => setTimeout(r, stepMs));
+  }
+  try { child.kill('SIGKILL'); } catch { /* gone */ } // our own handle
+  throw namedError('portal-bus', `the portal bus did not listen on ${sock} within ${deadlineMs} ms`);
+}
+/** Lazily unmount every FUSE mount under `dir` (the document portal's run/doc — a killed portal leaves it behind,
+ *  "Transport endpoint is not connected"). Reads /proc/self/mountinfo; resolves the mount points it asked about. */
+async function unmountUnder(dir, { env = process.env, mountinfo = '/proc/self/mountinfo' } = {}) {
+  let text = '';
+  try { text = fs.readFileSync(mountinfo, 'utf8'); } catch { return []; }
+  const root = path.resolve(dir) + '/';
+  const hits = text.split('\n').map((l) => (l.split(' ')[4] || '').replace(/\\(\d{3})/g, (_, o) => String.fromCharCode(parseInt(o, 8)))).filter((m) => m && (m + '/').startsWith(root));
+  const fu = binOnPath('fusermount3', { env }) || binOnPath('fusermount', { env });
+  if (fu) for (const m of hits) await run(fu, ['-u', '-z', m], { env });
+  return hits;
+}
+
 module.exports = {
   assertLocal, binOnPath, resetBinMemo, forgetBin, assertExecutable, PROBE_BINS, probeBinsOf, BROWSER_BINS, browserConfinement, hostFacts, officeFacts, x11Env, NO_WAYLAND_DISPLAY, withoutWayland,
   newCookie, writeXauthority, xauthEntry, freePort, rfbBanner, waitForRfb, httpProbe, waitForHttp, waitForListen, portAnswers, LISTEN_PROBES,
@@ -1326,4 +1380,5 @@ module.exports = {
   parseWininfoTree, windowTree, viewableWindows, enumerateWindows, displaySize, setDisplaySize, applyWindowPlan, xpraVersion, installFacts, installState,
   UTF8_LOCALE, utf8Env, utf8LocaleEnv,
   VNC_NATIVE, RFB_VIEWER_TYPES, RFB_VERSIONS, rfbAuthOf, rfbGreeting, // design 014 D1
+  PORTAL_LIBEXEC_DIRS, portalBins, a11yBusAddress, startPortalBus, unmountUnder, // lane app-display-portal
 };

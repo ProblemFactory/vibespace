@@ -95,6 +95,7 @@ function validateAppRow(row) {
     if (row.execs !== undefined && !execsOk(row.execs)) return { ok: false, error: 'execs must be a non-empty array of bare binary names' };
     if ((row.args || []).some((a) => /^-env:UserInstallation=/.test(a))) return { ok: false, error: 'an office row may not carry its own -env:UserInstallation — the session\'s profile is the keeper\'s' };
   } else if (row.execs !== undefined) return { ok: false, error: 'execs is for a browser or office row only' };
+  if (row.portal !== undefined && typeof row.portal !== 'boolean') return { ok: false, error: 'portal must be true or false' }; // lane app-display-portal
   return { ok: true, error: null };
 }
 
@@ -476,6 +477,78 @@ function machinePickRow(h) {
   return { selectable: true, code: r.link === 'offline' ? 'offline' : 'connect' };
 }
 
+// ── lane app-display-portal (2026-10-12): a SANDBOXED app's own desktop portal, on its own display ──
+// MEASURED (production, read-only): JASP (flatpak, Qt) on xpra :4 asked org.freedesktop.portal.FileChooser through
+// flatpak's bus proxy to the user's SESSION bus, where xdg-desktop-portal(-gnome/-gtk) run with DISPLAY=:2 — the
+// chooser drew on the owner's main desktop, never in the JASP pane (and never in the agent's screenshot of :4). So a
+// sandboxed app (a flatpak or a snap — `sandboxOf`), a desktop-app BROWSER (r2, owner 2026-10-12: Chrome on xpra :6 sent
+// the Turnitin upload's chooser to :2 — Chromium PREFERS the portal FileChooser whenever one answers on its bus; known by
+// the row's `browser` fact, never by its exec name), a row that says `portal: true`, or every app under
+// `desktop.appPortal = all` gets ONE private session bus whose ONLY activatable services are the portal frontend, its
+// gtk backend, the document portal and the permission store, all started by that bus with the APP's display; the app
+// is launched on that bus (flatpak's proxy then reaches OUR portal). Non-sandboxed apps keep the user's bus (keyring,
+// notifications). The a11y bus stays the user's (AT_SPI_BUS_ADDRESS handed to the app and to the portal), so the
+// tree snapshot still names the app and its chooser. Missing binaries ⇒ the app launches as before and the record
+// says `portal: 'unavailable: <why>'` — never a refusal to launch.
+const APP_PORTAL_MODES = Object.freeze(['auto', 'all', 'off']); // auto = sandboxed apps + browser rows
+const APP_PORTAL_DEFAULT = 'auto';
+const appPortalMode = (v) => (APP_PORTAL_MODES.includes(v) ? v : APP_PORTAL_DEFAULT);
+/** [bus name, binary] — the private bus's activatable services; the first two are required, the rest join when present */
+const PORTAL_SERVICES = Object.freeze([
+  ['org.freedesktop.portal.Desktop', 'xdg-desktop-portal'],
+  ['org.freedesktop.impl.portal.desktop.gtk', 'xdg-desktop-portal-gtk'],
+  ['org.freedesktop.portal.Documents', 'xdg-document-portal'], // a flatpak's chosen file is handed over through it
+  ['org.freedesktop.impl.portal.PermissionStore', 'xdg-permission-store'],
+]);
+const PORTAL_REQUIRED = Object.freeze(['dbus-daemon', 'xdg-desktop-portal', 'xdg-desktop-portal-gtk']);
+const PORTAL_BINS = Object.freeze(['dbus-daemon', ...PORTAL_SERVICES.map(([, b]) => b)]);
+const SOCKET_PATH_MAX = 107; // sun_path is 108 bytes with its NUL
+const firstWord = (args) => (Array.isArray(args) ? args.find((a) => typeof a === 'string' && !a.startsWith('-')) : undefined);
+/** 'flatpak' | 'snap' | null — what the launched program is (`flatpak run …`, `snap run …`, /snap/bin/<name>). */
+function sandboxOf(row) {
+  const exec = String((row && row.exec) || '');
+  const base = exec.split('/').pop();
+  if (base === 'flatpak' && firstWord(row.args) === 'run') return 'flatpak';
+  if ((base === 'snap' && firstWord(row.args) === 'run') || exec.startsWith('/snap/bin/')) return 'snap';
+  return null;
+}
+/** WHY a launch gets a private portal — 'flatpak' | 'snap' | 'browser' | 'row' | 'all' — or null (decided once, at launch).
+ *  A browser row (`row.browser`, the rung's own fact) keeps `--password-store=basic` (browserArgv): no keyring is lost. */
+function portalWanted(row, { mode, ownsDisplay = true } = {}) {
+  const m = appPortalMode(mode);
+  if (m === 'off' || !ownsDisplay) return null;
+  return sandboxOf(row) || (row && row.browser ? 'browser' : null) || (row && row.portal === true ? 'row' : m === 'all' ? 'all' : null);
+}
+const xmlText = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+/**
+ * The companion's whole plan, PURE: `dir` = the app's own dir, `bins` = { name: path|null } over PORTAL_BINS,
+ * `a11y` = the user's a11y bus address (null = unknown: nothing is set), `why` = portalWanted's answer.
+ * → { ok:false, why } | { ok:true, address, busArgv, dirs, files:[{file,text}], env (the bus's — every activated
+ * service inherits it), appEnv (laid over the app's env) }.
+ */
+function portalPlan({ dir, display, authFile, bins = {}, a11y = null, why = null } = {}) {
+  const miss = PORTAL_REQUIRED.filter((n) => !bins[n]);
+  if (miss.length) return { ok: false, why: `${miss.join(', ')} not found on this machine` };
+  if (!dir || !display) return { ok: false, why: 'no app dir or display yet' };
+  const root = `${dir}/portal`, sock = `${root}/bus`;
+  if (sock.length > SOCKET_PATH_MAX) return { ok: false, why: `the bus socket path is ${sock.length} bytes (over ${SOCKET_PATH_MAX})` };
+  const address = `unix:path=${sock}`;
+  const conf = ['<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN" "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">',
+    '<busconfig>', '  <type>session</type>', '  <keep_umask/>', `  <listen>unix:path=${xmlText(sock)}</listen>`, '  <auth>EXTERNAL</auth>',
+    `  <servicedir>${xmlText(root)}/services</servicedir>`,
+    '  <policy context="default"><allow send_destination="*" eavesdrop="true"/><allow eavesdrop="true"/><allow own="*"/></policy>', '</busconfig>', ''].join('\n');
+  const services = PORTAL_SERVICES.filter(([, b]) => bins[b]).map(([name, b]) => ({ file: `${root}/services/${name}.service`, text: `[D-BUS Service]\nName=${name}\nExec=${bins[b]}\n` }));
+  const files = [{ file: `${root}/bus.conf`, text: conf }, ...services, { file: `${root}/config/xdg-desktop-portal/portals.conf`, text: '[preferred]\ndefault=gtk\n' }];
+  const a = a11y ? { AT_SPI_BUS_ADDRESS: a11y } : {};
+  const env = {
+    DISPLAY: display, ...(authFile ? { XAUTHORITY: authFile } : {}), DBUS_SESSION_BUS_ADDRESS: address, XDG_CURRENT_DESKTOP: 'GNOME',
+    XDG_CONFIG_HOME: `${root}/config`, XDG_DATA_HOME: `${root}/data`, XDG_RUNTIME_DIR: `${root}/run`, // the document portal mounts under run/, its database and the permission store's under data/ — never the user's
+    GIO_USE_VFS: 'local', GVFS_DISABLE_FUSE: '1', GTK_USE_PORTAL: '0', ...a,
+  };
+  const appEnv = { DBUS_SESSION_BUS_ADDRESS: address, ...a, ...(why === 'all' ? { GTK_USE_PORTAL: '1' } : {}) };
+  return { ok: true, address, busArgv: [bins['dbus-daemon'], '--nofork', `--config-file=${root}/bus.conf`], dirs: [root, `${root}/services`, `${root}/config/xdg-desktop-portal`, `${root}/data`, `${root}/run`], files, env, appEnv };
+}
+
 module.exports = {
   LIMITS, DESKTOP_SINGLETON_ID, APP_STATES, LIVE_STATES, DEFAULT_IDLE_TIMEOUT_MIN, KEEPER_ENV,
   DISPLAY_BACKENDS, BACKEND_IDS, backendById, CAP_KEYS, capsOf, recipeFor, needsVerdict, resolveBackend, fallbackLogLine, parseBackendPrefs, streamKindOf,
@@ -495,4 +568,5 @@ module.exports = {
   planLines, PKG_RE, APT_LOCK_WAIT_S, packageInstallPlan,
   INSTALL_FILES, INSTALL_UNRECORDED_EXIT, INSTALL_LOCK_PREFIX, INSTALL_RUNNER, INSTALL_LAUNCHER, installLauncherArgv,
   DESKTOP_PLATFORMS, MACHINE_DESKTOP_PORT, MACHINE_DESKTOP_PREFIX, machineDesktopId, machineDesktopHost, desktopPickRow, RUN_LINE_MAX, psQuote, psEncoded, desktopRunPlan, DESKTOP_RUN_PRESETS, RUN_REMEMBER_MAX, desktopRunPresets, rememberRun, TIGHTVNC, TIGHTVNC_NO_ADMIN_EXIT, tightvncInstallPlan, // design 014 D1
+  APP_PORTAL_MODES, APP_PORTAL_DEFAULT, appPortalMode, PORTAL_SERVICES, PORTAL_REQUIRED, PORTAL_BINS, sandboxOf, portalWanted, portalPlan, // lane app-display-portal
 };

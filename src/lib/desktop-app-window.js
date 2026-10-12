@@ -205,6 +205,9 @@ export function aboutWindowText(rec) {
   const l = rec.live, parts = [];
   if (l && Number.isFinite(l.memBytes) && l.memBytes >= 0) parts.push(t('{size} memory', { size: memSize(l.memBytes) }));
   if (rec.backend) parts.push(rec.fallbackWhy ? t('shown with {backend} — {why}', { backend: rec.backend, why: rec.fallbackWhy }) : t('shown with {backend}', { backend: rec.backend }));
+  // lane app-display-portal: a sandboxed app's own portal (3 processes) — or why its dialogs open on the main desktop
+  if (rec.portal === 'on') parts.push(t('file dialogs in this window (3 processes)'));
+  else if (typeof rec.portal === 'string' && rec.portal.startsWith('unavailable')) parts.push(t('file dialogs on your main desktop — {why}', { why: rec.portal.replace(/^unavailable:\s*/, '') }));
   return parts.length ? t('About this window: {facts}', { facts: parts.join(' · ') }) : '';
 }
 /** A footprint in plain units — "131 MB" / "1.4 GB" (the metric's name stays in the tooltip). */

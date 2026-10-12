@@ -274,7 +274,7 @@ const FILE_STAT_MS = 4000;
 /** The env marker every process of a session inherits — its identity when
  *  the leader is gone (KEEPER_ENV in the PURE model reserves the name). */
 const SESSION_ENV = 'VIBESPACE_DESKTOP_APP';
-const PARTS = Object.freeze(['app', 'server', 'wm', 'x']); // teardown order
+const PARTS = Object.freeze(['app', 'portal', 'server', 'wm', 'x']); // teardown order (`portal` = a sandboxed app's own bus + portal, lane app-display-portal)
 
 function writeJsonAtomic(file, obj) {
   const tmp = `${file}.${process.pid}.tmp`;
@@ -293,7 +293,7 @@ const AGENT_BROWSER_ORIGIN = 'agent-browser';
 const AGENT_BROWSER_ENDING_WORDS = Object.freeze({ 'opener-ended': 'closed with the conversation that opened it', 'opener-gone': 'closed: the conversation that opened it ended while it started', 'opener-stopped': 'closed by the agent that opened it' });
 const DESKTOP_SERVE_OPS = Object.freeze(['facts', 'launch', 'stop', 'status', 'list', 'windows', 'fit', 'keep-alive', 'pin', 'relaunch', ...AS.APP_OPS]);
 /** The hub settings a machine's decisions read (the op carries them as `settings`; in-process they are the hub's own reader). */
-const SETTING_KEYS = Object.freeze(['desktop.backendPrefs', 'desktop.appScale', 'desktop.idleTimeoutMin']);
+const SETTING_KEYS = Object.freeze(['desktop.backendPrefs', 'desktop.appScale', 'desktop.idleTimeoutMin', 'desktop.appPortal']);
 const settingsReader = (obj) => (key) => (obj && typeof obj === 'object' && SETTING_KEYS.includes(key) ? obj[key] : undefined);
 
 /**
@@ -683,6 +683,10 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     if (office) { rec.office = office.module; rec.profileDir = office.profileDir; } // §7.9
     if (doc) { rec.file = doc.file; rec.fileMtimeAtLaunch = doc.mtime; } // §7.9: the after-edit fact's baseline
     rec.recipe = resolved.recipe;
+    // lane app-display-portal: a sandboxed app (or a `portal: true` row, or every app under `desktop.appPortal = all`) gets its OWN
+    // portal on its own display — decided once, here, from the setting; the bring-up starts it (M.portalWanted / M.portalPlan)
+    const portalWhy = M.portalWanted(row, { mode: serverSetting('desktop.appPortal'), ownsDisplay: M.capsOf({ backend: backend.id }, backends).ownsDisplay });
+    if (portalWhy) rec.portalWhy = portalWhy;
     store.apps[id] = rec;
     pruneHistory();
     commit();
@@ -873,9 +877,25 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
         if (wm) ctx.onPart('wm', wm.child, {});
         if (gone()) return;
       } else commit();
+      // lane app-display-portal: the app's OWN session bus + desktop portal ON ITS DISPLAY (a flatpak's file chooser is the
+      // portal's — on the user's bus it drew on the main desktop, never in this pane). Started BEFORE the app (the app is
+      // launched on that bus); a missing binary or a bus that never listens is recorded, and the app starts as before.
+      let portalEnv = {};
+      if (own && rec.portalWhy) {
+        const plan = M.portalPlan({ dir, display: up.display, authFile: sessionAuth, bins: display.portalBins({ env: base }), a11y: await display.a11yBusAddress({ env: base }), why: rec.portalWhy });
+        if (gone()) return;
+        if (!plan.ok) rec.portal = `unavailable: ${plan.why}`;
+        else {
+          try { const pc = await display.startPortalBus({ plan, env: ctx.x11Env(up.display), logFd }); ctx.onPart('portal', pc, {}); rec.portal = 'on'; portalEnv = plan.appEnv; }
+          catch (e) { rec.portal = `unavailable: ${e.message}`; }
+        }
+        if (rec.portal !== 'on') log.warn?.(`[desktop] ${id}: no portal of its own (${rec.portal}) — its file dialogs open on the session's portal`);
+        commit();
+        if (gone()) return;
+      }
       // the app itself — the sanitised env + the scale's knobs + the row's own (a row may pin GDK_SCALE) + the display
       const knobs = M.scaleKnobs(rec.scale || 1, { rule: M.scaleRuleOf(rec) }); // the same rule the launch recorded (lane D (a))
-      const appEnv = { ...display.x11Env(base, { display: up.display, authFile: sessionAuth || base.XAUTHORITY }), ...(M.capsOf(rec, backends).scales ? knobs.env : {}), ...(rec.env || {}) };
+      const appEnv = { ...display.x11Env(base, { display: up.display, authFile: sessionAuth || base.XAUTHORITY }), ...(M.capsOf(rec, backends).scales ? knobs.env : {}), ...portalEnv, ...(rec.env || {}) };
       if (!sessionAuth) delete appEnv.XAUTHORITY;
       // r2 (the verifier's race): xpra REPLACES the display's resource database ~1 s after its display is up — an app
       // started before read no Xft.dpi (Xvfb's 100 dpi: a "1.5×" xterm got a 7×14 cell) and a merge before it was wiped.
@@ -1080,6 +1100,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
       log.warn?.(`[desktop] ${rec.id}: ${escaped.length} process(es) still carry its marker after the session teardown (in no recorded leader's session: a member that setsid()'d, or a part that arrived after the sweep): ${escaped.join(', ')} — reaping`);
       if (!(await signalVerified(rec, 'session marker leftover', escaped, null))) clean = false;
     }
+    if (rec.portal === 'on') { try { await display.unmountUnder(path.join(logRoot, rec.id, 'portal')); } catch (e) { log.warn?.(`[desktop] ${rec.id}: portal unmount failed: ${e.message}`); } } // the document portal's FUSE outlives a killed portal
     children.delete(rec.id); sampledAt.delete(rec.id); samples.delete(rec.id); clearFit(rec.id);
     if (rec.file) await noteFileEnd(rec, { clean }); // §7.9: every part is gone — the document's mtime now vs at launch (the hub's file-changed); its lock, when this session wrote it
     try { H.onTeardown?.(rec.id); } catch (e) { log.warn?.(`[desktop] ${rec.id}: teardown hook failed: ${e.message}`); } // the hub's guard + live rows go with the session
@@ -1402,7 +1423,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
    *  handed in by the tick's ONE census). */
   function sessionPids(rec, extra = []) {
     const own = M.capsOf(rec, backends).ownsDisplay;
-    const out = new Set(display.sessionCensus(own ? [rec.pids.app, rec.pids.server, rec.pids.wm, rec.pids.x] : [rec.pids.app]));
+    const out = new Set(display.sessionCensus(own ? [rec.pids.app, rec.pids.portal, rec.pids.server, rec.pids.wm, rec.pids.x] : [rec.pids.app])); // `portal`: its chooser is the app's dialog (the tree's pid set)
     for (const p of extra) if (p !== process.pid) out.add(p);
     return [...out];
   }

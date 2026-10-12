@@ -6,7 +6,9 @@ entry holds the focus) and a "Show message" button (Gtk.MessageDialog).
 stdin lines drive it without the tree: `open` / `save` / `message` / `close`.
 Prints `READY <pid> <xid>` once the main window is mapped, `DIALOG <kind>
 <xid>` when a dialog maps, `ANSWER <kind> <response> <text>` when one is
-answered (the SAVE dialog's text = the Name field). Exits on SIGTERM."""
+answered (the SAVE dialog's text = the Name field). Exits on SIGTERM.
+VS_DLG_NATIVE=1 (lane app-display-portal): "Open file…" is a Gtk.FileChooserNative — under GTK_USE_PORTAL=1 it
+asks the desktop PORTAL (another process draws it); prints `NATIVE open` when asked, `ANSWER open <response> <path>`."""
 import os
 import sys
 
@@ -51,6 +53,13 @@ class App(Gtk.Window):
         d.show_all()
 
     def open_file(self):
+        if os.environ.get("VS_DLG_NATIVE") == "1":
+            n = Gtk.FileChooserNative.new("Open", self, Gtk.FileChooserAction.OPEN, "_Open", "_Cancel")
+            n.connect("response", lambda d, r: (say("ANSWER", "open", int(r), d.get_filename() or ""), self.status.set_text("answered open %d" % int(r))))
+            self.native = n  # kept alive until it answers
+            n.show()
+            say("NATIVE", "open")
+            return
         d = Gtk.FileChooserDialog(title="Open", transient_for=self, modal=True, action=Gtk.FileChooserAction.OPEN)
         d.add_buttons("_Cancel", Gtk.ResponseType.CANCEL, "_Open", Gtk.ResponseType.ACCEPT)
         self.shown("open", d)

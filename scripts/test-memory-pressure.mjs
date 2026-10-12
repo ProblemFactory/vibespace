@@ -117,7 +117,7 @@ try {
   const RS = fs.readFileSync(path.join(ROOT, 'src/routes/browser.js'), 'utf8');
   ok(/out\.tmpDir = t;/.test(RS), '/resolve names tmpDir for a local session (envBasis)');
   const KS = fs.readFileSync(path.join(ROOT, 'src/server/browser-keeper.js'), 'utf8');
-  ok(/createBrowserRuntime\(\{ env: rtEnv, log, pinned: pinnedCli, tmpDir: daemonTmp \}\)/.test(KS) && KS.includes("path.join(dataDir, 'browser-env', 'tmp')"), 'the keeper hands its runtime data/browser-env/tmp');
+  ok(/createBrowserRuntime\(\{ env: rtEnv, log, pinned: pinnedCli, tmpDir: daemonTmp \}\)/.test(KS) && KS.includes('F.makeBrowserTmpDir({ dataDir, log })'), "the keeper hands its runtime the TMPDIR verdict (data/browser-env/tmp while Chrome's socket fits — test-browser-tmpdir)");
 } finally { fs.rmSync(scratch, { recursive: true, force: true }); }
 
 console.log('⑥ the watch (one item per episode, self-resolve; the own-Chrome tell)');

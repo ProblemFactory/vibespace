@@ -636,7 +636,34 @@ async function probeDisplay({ env = process.env, x11Dir = undefined, connectMs =
   return D.displayVerdict({ env, runtimeDir, entries, x11Dir: xdir, xvfb, vncDisplay });
 }
 
-module.exports = { daemonRows, versionFromProbe, cliPinReader, createBrowserFacts, binaryResolver, sanitizeProbeEnv, VERSION_TTL_MS, createBrowserRuntime, pidAlive, procStart, sameProcess, treeUsage,
+/** lane browser-tmpdir-socket-length: THE daemon TMPDIR, made — B.browserTmpDir's verdict on this machine (the short
+ *  root's file system read off /proc/self/mountinfo), made 0700; a per-uid name in a shared /var/tmp must be OURS (lstat:
+ *  a directory owned by this uid, never a symlink) or it is refused. The why said once (callers memoize). null = the CLI
+ *  keeps its own TMPDIR. */
+function makeBrowserTmpDir({ dataDir, log = null, mountinfo = null, shortBase = undefined } = {}) {
+  const uid = typeof process.getuid === 'function' ? process.getuid() : null;
+  let mi = mountinfo;
+  if (mi == null) { try { mi = fs.readFileSync('/proc/self/mountinfo', 'utf8'); } catch { mi = ''; } }
+  const sb = shortBase || B.BROWSER_TMP_SHORT_BASE;
+  const mnt = require('./fd-budget.js').mountOf(sb, mi);
+  const v = B.browserTmpDir({ dataDir, uid, shortBase: sb, shortFsType: mnt ? mnt.fstype : null, fallback: require('os').tmpdir() });
+  const say = (lvl, line) => { try { (log && (log[lvl] || log.log))?.call(log, line); } catch { } };
+  if (!v.dir) { say('warn', `[browser] daemon TMPDIR: ${v.why}`); return null; }
+  try {
+    if (v.short) {
+      const own = path.dirname(v.dir);
+      fs.mkdirSync(own, { recursive: true, mode: 0o700 });
+      const st = fs.lstatSync(own);
+      if (!st.isDirectory() || (uid != null && st.uid !== uid)) throw new Error(`${own} is not this user's own directory`);
+      if ((st.mode & 0o777) !== 0o700) fs.chmodSync(own, 0o700);
+    }
+    fs.mkdirSync(v.dir, { recursive: true, mode: 0o700 });
+  } catch (e) { say('warn', `[browser] daemon TMPDIR ${v.dir} could not be made (${e.message}) — the CLI keeps its own`); return null; }
+  if (v.why) say(/RAM/.test(v.why) ? 'warn' : 'log', `[browser] browser TMPDIR = ${v.dir} (${v.why})`);
+  return v.dir;
+}
+
+module.exports = { makeBrowserTmpDir, daemonRows, versionFromProbe, cliPinReader, createBrowserFacts, binaryResolver, sanitizeProbeEnv, VERSION_TTL_MS, createBrowserRuntime, pidAlive, procStart, sameProcess, treeUsage,
   // lane headless-fallback: the display this machine has now (probed at every launch where the browser runs)
   probeDisplay,
   // lane H verify r2 (M1): the browser a daemon launched, and who holds a profile directory's lock

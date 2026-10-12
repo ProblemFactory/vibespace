@@ -236,6 +236,12 @@ the dialog's text field (never the window's document behind it), and `key`
 goes to the dialog's own window. To dismiss it, `click` its button by ref or
 `key <handle> Escape`, then take a new snapshot.
 
+A Flatpak or Snap app's (or a desktop-app browser's) file chooser is drawn by its
+own desktop portal on the app's display (since 2.369.256), so it is in the window like any other dialog.
+If `vibespace-window list` shows the app's `portal` as `unavailable: …`, the
+chooser opens on the user's main desktop instead: ask them to pick the file
+there, or relaunch with the portal off (see the apps manual).
+
 ### `click @ref` — act on a node
 
 Runs the node's own declared action (`click` > `press` > `activate` >

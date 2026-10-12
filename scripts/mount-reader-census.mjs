@@ -29,7 +29,7 @@ export const ROWS = [
   ['src/app-squashfs.js', 'own-tree', 2, null, DATA],
   ['src/app-system-serve.js', 'own-tree', 13, null, DATA],
   ['src/auth.js', 'own-tree', 1, null, DATA],
-  ['src/browser-facts.js', 'own-tree', 24, null, PROC],
+  ['src/browser-facts.js', 'own-tree', 26, null, PROC], // + makeBrowserTmpDir: /proc/self/mountinfo + the per-uid dir's lstat (lane browser-tmpdir-socket-length)
   ['src/browser-serve.js', 'own-tree', 7, null, DATA],
   ['src/browser-verbs.js', 'own-tree', 2, null, DATA],
   ['src/channel-outbox-files.js', 'own-tree', 5, null, DATA],
@@ -41,7 +41,7 @@ export const ROWS = [
   ['src/conversation-index.js', 'own-tree', 1, null, DATA],
   ['src/ctx-sync.js', 'user-path', 4, 'DOOR\\.blocked\\(', 'the group context folder walk: refused by name before the device is dialled'],
   ['src/design-fs.js', 'user-path', 7, 'DOOR\\.blocked\\(', 'the design folder read: storage_blocked by name'],
-  ['src/desktop-display.js', 'own-tree', 19, null, PROC],
+  ['src/desktop-display.js', 'own-tree', 22, null, PROC], // +3 lane app-display-portal: portal binaries stat'd in /usr/libexec, the app dir's bus socket, /proc/self/mountinfo
   ['src/desktop-serve.js', 'own-tree', 10, null, DATA],
   ['src/device-mount.js', 'exempt', 5, null, 'the device pull mount: /proc scans + its own mount point (its owner’s liveness)'],
   ['src/discovery-facts.js', 'own-tree', 5, null, PROC],

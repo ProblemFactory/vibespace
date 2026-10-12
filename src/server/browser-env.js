@@ -122,7 +122,7 @@ const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 const B = require('../browser-profiles.js');
-const { createBrowserFacts, dirIdentity } = require('../browser-facts.js');
+const { createBrowserFacts, dirIdentity, makeBrowserTmpDir } = require('../browser-facts.js');
 const { repointPoolSymlink } = require('../account-material.js');
 const browserBindings = require('./browser-bindings.js');
 const KB = require('../browser-kept.js');
@@ -885,7 +885,7 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
     // B-f7ab: the late key (src/server/browser-key.js) names WHY `envFor` gave nothing — this switch off, before it asks
     isolationOn: () => enabled(),
     // lane browser-resource-care: the daemon's TMPDIR (made 0700 on first ask; null when it cannot be made — the CLI keeps its own)
-    tmpDir: () => { if (tmpMade) return TMP_DIR; try { mkdirPrivate(ENV_DIR); mkdirPrivate(TMP_DIR); tmpMade = true; return TMP_DIR; } catch { return null; } },
+    tmpDir: () => { if (tmpMade) return tmpMade; try { mkdirPrivate(ENV_DIR); } catch { } const d = makeBrowserTmpDir({ dataDir, log }); if (d) tmpMade = d; return d; }, // lane browser-tmpdir-socket-length: TMP_DIR only while Chrome's socket fits
     // paths, so the suite asserts the real ones rather than its own guess
     ENV_DIR, PROFILE_DIR, TMP_DIR, configPathFor, linkPathFor, cwdPathFor, scratchDirFor, effectiveConfig, ensureSocketDir,
     // takeover r2: the base the remote prelude's short socket dir is built on — `/resolve` names it to a

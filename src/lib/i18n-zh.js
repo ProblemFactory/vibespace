@@ -8332,5 +8332,11 @@ export default {
   "Show them": "显示",
   "Hide them": "隐藏",
   "Agent-opened windows come to the front": "agent 打开的窗口切到前台",
+  "Browsers, Flatpak and Snap apps": "浏览器、Flatpak 和 Snap 应用",
+  "Every app": "所有应用",
+  "Desktop app file dialogs in their own window": "桌面应用的文件对话框开在自己的窗口里",
+  "A Flatpak or Snap app, and a browser, asks a desktop portal for its file dialogs; VibeSpace starts one on the app's own display, so the dialog opens inside its window, not on your main desktop (3 more processes per app, gone with it). Every app: GTK apps too. Off: as before. Applies to apps started after the change.": "Flatpak、Snap 应用和浏览器通过桌面门户打开文件对话框；VibeSpace 在应用自己的显示上启动一个门户，对话框就开在它的窗口里，而不是你的主桌面（每个应用多 3 个进程，随应用结束）。所有应用：GTK 应用也一样。关闭：同以前。对更改之后启动的应用生效。",
+  "file dialogs in this window (3 processes)": "文件对话框在本窗口内（3 个进程）",
+  "file dialogs on your main desktop — {why}": "文件对话框在你的主桌面 — {why}",
   "OFF (the default): a window an agent opens — its own browser, an app it starts, a second window of that app, its live view — is placed beside the agent's chat (or on that chat's desktop), behind what you are doing, and its taskbar entry pulses; it never takes your focus or switches your desktop. ON: it comes to the front and takes the focus, as before.": "关闭（默认）：agent 打开的窗口——它自己的浏览器、它启动的应用、该应用的第二个窗口、它的实况窗口——放在该 agent 的对话旁边（或那个对话所在的桌面），在你正在做的事情后面，任务栏条目闪一下；它从不夺走你的焦点，也不切换你的桌面。开启：像以前一样切到前台并获得焦点。",
 };
