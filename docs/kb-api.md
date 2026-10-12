@@ -902,6 +902,12 @@ and restored at boot.
 - `PUT …/policy {mode:'direct'}` on a Slack conversation or account = `{ok:false, code:'bad-policy', why:'mode-not-offered'}`.
 - A Slack proposal carries `prepared {mentions:[{name,id}], notifies, plain, at}` and `audience {kind: dm|private|public|external,
   orgs, members, title}`; `propose` refuses `why:'mention-ambiguous'` (`ambiguous:[names]`) and `why:'too-long'` (> 4 000).
+- lane slack-search (2.369.259): the Slack row declares `caps.search = {via:'query', scope:'search:read', pageSize:20,
+  pagesPerPress:2, perMin:10, cost:1, snippet:true, context:'around', match:'tokens', adds:'unsaved'}` — `GET
+  /api/channels/search/full?adapter=<slack id>&q=` (a press: ≤ 2 `search.messages` pages; `page=<token>` = Slack's page
+  number '2'…'100') and `GET /api/channels/:id/:convId/around?msg=<ts>&at=` (the channel at the hit, or a reply's thread;
+  nothing stored) answer for Slack (were `not-supported`). No search:read held = `{ok:false, code:'needs-scope'}` with zero
+  requests; Slack's 429 = `{ok:false, code:'backoff', retryAfterSec}` after ONE request (the method held for its Retry-After).
 
 ## Integrations & keys (P0b, docs/design-communication-panel.zh.md §14)
 

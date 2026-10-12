@@ -2,6 +2,15 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.259 — 2026-10-12
+
+### Added
+- The Channels search box now searches your Slack workspace too — results open in context.
+
+### Fixed
+- A paired Mac's desktop now signs in from any address you open VibeSpace at, says so when the sign-in cannot complete, and Open its desktop closes the dialog.
+- The comments you add to a document now follow you to every device and browser — VibeSpace keeps them, not one browser.
+
 ## 2.369.258 — 2026-10-12
 
 ### Changed

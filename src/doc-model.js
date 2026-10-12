@@ -11,6 +11,10 @@
 //     ≤ 200 chars, a note ≤ 1000); `commentsBatches` packs ONE send (≤ 200 items) into the fewest messages, each
 //     ≤ 20 rows and ≤ 4 KB UTF-8, headed (k/n) with the numbering continuous — a bound on a MESSAGE is met by sending
 //     more messages, never by refusing the send (hot fix 2.369.257: 18 comments were refused "send some first").
+//   · THE STRIP'S RECORD (lane doc-comments-synced — owner 2026-10-12: eighteen comments "disappeared"; they were in another
+//     computer's browser): `commentRows` bounds the comment drafts the server's `drafts` SyncStore keeps per document
+//     (≤ 200 rows {id, quote, line?, note}); `mergeComments(server, local)` folds a browser's old device copy in ONCE —
+//     the server's rows first, local-only ids appended, a shared id keeps the server's row: a stale copy can only add.
 //   · THE EDIT NOTE: `editSummary(before, after)` = "+a −b lines; sections: <the headings whose section changed, ≤ 3>".
 //   · THE CONFLICT TABLE: `conflictVerdict` (disk moved × unsaved edits × "Keep editing") and `saveVerdict` (the one ask
 //     before a save over a newer disk version).
@@ -183,6 +187,36 @@ function commentsBatches(path, items) {
   return { ok: true, batches, count: list.length, clipped };
 }
 
+// ── the strip's record (lane doc-comments-synced) ──
+const RAW_KINDS = ['html', 'front', 'markdown'];
+/** A raw-block comment's anchor — lane doc-comment-raw-block's ONE extra field {pos, line, kind, offset?} — kept through the
+ *  record (int259 seam: the record's rows dropped it, so a reload lost the block a comment points at): pos / line / offset
+ *  non-negative integers, kind one of RAW_KINDS; anything else ⇒ no anchor (a plain comment). */
+function commentRaw(x) {
+  if (!x || typeof x !== 'object' || !Number.isInteger(x.pos) || x.pos < 0 || !RAW_KINDS.includes(x.kind)) return null;
+  return { pos: x.pos, line: Number.isInteger(x.line) && x.line > 0 ? x.line : 0, kind: x.kind, ...(Number.isInteger(x.offset) && x.offset >= 0 ? { offset: x.offset } : {}) };
+}
+/** The `drafts` store's `doc:<host>\u0001<path>` value → its rows {id, quote, line?, raw?, note}: each bounded as commentItem
+ *  bounds it (+ commentRaw), a row without an id or a note skipped, an id once, ≤ LIMITS.sendItems (what one Send all carries). */
+function commentRows(v) {
+  const out = [], seen = new Set();
+  for (const r of Array.isArray(v) ? v : []) {
+    if (out.length >= LIMITS.sendItems) break;
+    if (!r || typeof r.id !== 'string' || !r.id || r.id.length > 64 || seen.has(r.id)) continue;
+    const c = commentItem(r);
+    if (!c) continue;
+    const raw = commentRaw(r.raw);
+    seen.add(r.id); out.push({ id: r.id, quote: c.quote, ...(c.line ? { line: c.line } : {}), ...(raw ? { raw } : {}), note: c.note });
+  }
+  return out;
+}
+/** THE ONE-TIME MIGRATION's merge: the server's rows in their order, then the local rows whose id the server lacks, in
+ *  local order; a shared id keeps the SERVER's row; bounded by commentRows. PURE — the window writes what it returns. */
+function mergeComments(server, local) {
+  const s = commentRows(server), have = new Set(s.map((c) => c.id));
+  return commentRows([...s, ...commentRows(local).filter((c) => !have.has(c.id))]);
+}
+
 // ── the edit note ──
 /** Lines added / removed (an LCS over the changed middle; a middle too big for it counts by multiset). */
 function lineDelta(before, after) {
@@ -242,4 +276,4 @@ function saveVerdict({ disk = 0, base = 0, confirmed = 0 } = {}) {
   return disk && disk > base && !(confirmed && confirmed >= disk) ? 'ask' : 'write';
 }
 
-module.exports = { LIMITS, RAW_WHY, isDocPath, utf8Len, rawReasons, fidelityVerdict, patchBlocks, saveText, commentItem, commentsText, commentsBatches, lineDelta, sectionsOf, editSummary, conflictVerdict, saveVerdict };
+module.exports = { LIMITS, RAW_WHY, isDocPath, utf8Len, rawReasons, fidelityVerdict, patchBlocks, saveText, commentItem, commentsText, commentsBatches, commentRaw, commentRows, mergeComments, lineDelta, sectionsOf, editSummary, conflictVerdict, saveVerdict };

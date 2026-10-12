@@ -20,6 +20,11 @@
 //      flow status, record, call record, log line or error — a planted leak as the control
 //   ⑨ every user scope Slack's validator accepted, asked once (the 51 measured); the create answer's team_domain names
 //      the workspace; Slack tokens of every length tokenShapeOf accepts redacted (300 / 480 bodies; a 255-bound control)
+//   ⑩ THE VENDOR'S OWN SEARCH (lane slack-search, owner 2026-10-12): the row; search.messages pages in Slack's documented
+//      shape (a match with thread_ts, one whose permalink names its thread, one without; an empty page; a next page; odd
+//      matches) through the registry wrapper — the query verbatim, the closed field list, the snippet through the door;
+//      a 429 holds the method's own bucket for its Retry-After (ONE request, never a retry); around = the channel at the
+//      hit (the after side only when it is the hit's neighbours) or a reply's thread; patched-copy controls
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -591,6 +596,107 @@ console.log('design 018: the workspace app (state, consent URL, relay rule)');
   const FXS = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/slack-state.json'), 'utf-8'));
   const fsign = signer(FXS.key);
   ok(FXS.rows.length >= 5 && FXS.rows.every((r) => Manifest.stateVerdict(r.state, { sign: fsign, now: FXS.now, ttlMs: 30 * 60e3 }).why === r.verdict && (r.relay ? Manifest.relayTargetVerdict(Manifest.stateParts(r.state) ? Manifest.stateParts(r.state).origin : '', { allow: r.allow || [] }) === r.relay : true)), `scripts/fixtures/slack-state.json: each state's verdict under its key and its relay answer hold (${FXS.rows.length} rows)`);
+}
+
+// ── ⑩ THE VENDOR'S OWN SEARCH (lane slack-search, owner 2026-10-12: 「话说slack不支持搜索吗？」) ──
+console.log('⑩ the vendor\'s own search');
+{
+  const SR = require(path.join(REPO, 'src/channel-search.js'));
+  const SV = require(path.join(REPO, 'scripts/fixtures/slack-vendor.cjs'));
+  const row = slack.caps.search;
+  ok(JSON.stringify(row) === JSON.stringify({ via: 'query', scope: 'search:read', pageSize: 20, pagesPerPress: 2, perMin: 10, cost: 1, snippet: true, context: 'around', match: 'tokens', adds: 'unsaved' }) && CH.validateCaps('slack', slack.caps) === true,
+    'the row: a query search under the HELD search:read, 2 pages of 20 a press, 10 a sliding minute, 1 request a page, a snippet, read in context by around, token matching ("may be related"), hits not saved here');
+  ok(Manifest.USER_SCOPES.includes(row.scope) && Limits.perMinOf('search.messages') === 20 && row.perMin <= Limits.perMinOf('search.messages') / 2, `the scope is one every workspace app asks; search.messages has its OWN bucket (Tier 2: ${Limits.perMinOf('search.messages')}/min) and the row asks at most half of it`);
+  const said3 = SR.statusText({ state: 'done', found: 3, match: row.match, adds: row.adds }, { vendor: 'Slack' });
+  ok(said3 === "Asked Slack's whole history: 3 not saved here — may be related" && SR.sectionHead([row.adds], { vendor: 'Slack' }) === "Not saved here — from Slack's search", 'VS3 + F2: Slack\'s hits are "not saved here" and "may be related" — never "found", never a mailbox', said3);
+
+  const { a, v, meters } = mkAdapter();
+  const p1 = await a.search({ query: 'launch plan' });
+  const c1 = v.calls.filter((c) => c.method === 'search.messages');
+  ok(c1.length === 1 && c1[0].auth === 'ok' && JSON.stringify(c1[0].params) === JSON.stringify({ query: 'launch plan', sort: 'timestamp', sort_dir: 'desc', count: '20', page: '1' }), 'a press = ONE search.messages with the words as Slack\'s query, newest first, the row\'s page size, page 1', c1.map((c) => c.params));
+  ok(p1.hits.length === 2 && p1.next === '2' && p1.stripped === 0 && p1.malformed === 0 && meters.n === 1, `page one: 2 hits, the next page token '2' (Slack's paging.pages), one request metered (${meters.n})`, p1);
+  ok(p1.hits.every((h) => Object.keys(h).join() === CH.SEARCH_HIT_FIELDS.join()), 'every hit carries exactly the closed field list', p1.hits.map((h) => Object.keys(h)));
+  const [h1, h2] = p1.hits;
+  ok(h1.convId === 'C0LAUNCH01' && h1.vendorId === '1699990300.000300' && h1.at === 1699990300000 && h1.fromId === 'U0ALICE01' && h1.threadKey === '1699990000.000200', 'a reply in a channel never joined: its channel id, ts, instant, author and THREAD (the match\'s thread_ts)', h1);
+  ok(h1.snippet === 'the *launch plan* v2 is ready for @U0BOB0001', 'its snippet: the mrkdwn read — a mention drawn as @<id> (a search asks no people lookup; a name the adapter already holds is used), never the raw <@U…>', h1.snippet);
+  ok(h2.convId === 'C0GENERAL' && h2.threadKey === null && h2.snippet === 'launch plan draft — see the plan (https://x.test/plan) & comment', 'a channel message with no thread: the link read as words (label + address), the entity decoded', h2);
+  const p2 = await a.search({ query: 'launch plan', pageToken: p1.next });
+  ok(p2.hits.length === 1 && p2.hits[0].convId === 'D0ALICE01' && p2.next === null && v.calls.filter((c) => c.method === 'search.messages').pop().params.page === '2', 'the scroll\'s next page = page 2: the DM hit, no further token (the last page)', p2);
+  const pl = await a.search({ query: 'only link thread' });
+  ok(pl.hits.length === 1 && pl.hits[0].threadKey === '1699990000.000200', 'a match WITHOUT thread_ts (the documented shape) names its thread through its permalink (?thread_ts=…)', pl.hits);
+  const pe = await a.search({ query: 'zz nothing here' });
+  ok(pe.hits.length === 0 && pe.next === null, 'an empty page: no hits, no token', pe);
+  const po = await a.search({ query: 'odd answers' });
+  ok(po.hits.length === 1 && po.malformed === 2 && po.hits[0].snippet.length <= SR.SNIPPET_MAX, `odd matches: a channel that is not an id and a ts that is not a ts are counted malformed (2), a 5 000-character text is cut to ≤ ${SR.SNIPPET_MAX}`, po);
+  const typed = 'in:#general from:@alice before:2023-11-01 plan';
+  await a.search({ query: typed });
+  ok(v.calls.filter((c) => c.method === 'search.messages').pop().params.query === typed, 'the person\'s own modifiers ride VERBATIM — nothing invented, nothing dropped');
+  const n0 = v.calls.length;
+  const badTok = [];
+  for (const tk of ['abc', '0', '101', '2; DROP']) badTok.push(await threw(() => a.search({ query: 'launch plan', pageToken: tk })));
+  ok(badTok.every((e) => e && e.code === 'not-found' && e.detail && e.detail.why === 'page-token') && v.calls.length === n0, 'a page token that is not a page number 1–100 is refused by name — no request', badTok.map((e) => e && e.code));
+
+  // the vendor's 429: ONE request, the method held for its Retry-After, the engine told rate-limited (never a retry loop)
+  const b9 = Limits.createBuckets(), r9 = mkAdapter({ mode: { status429: { 'search.messages': 30 } }, buckets: b9 });
+  const e9 = await threw(() => r9.a.search({ query: 'launch plan' }));
+  const sent9 = r9.v.calls.filter((c) => c.method === 'search.messages').length;
+  const e9b = await threw(() => r9.a.search({ query: 'launch plan' }));
+  ok(e9 && e9.code === 'rate-limited' && e9.detail.retryAfterSec === 30 && sent9 === 1, `a 429 with Retry-After 30 = rate-limited carrying 30 s after ONE request (${sent9})`, e9 && e9.detail);
+  ok(e9b && e9b.code === 'rate-limited' && e9b.detail.why === 'vendor-hold' && r9.v.calls.filter((c) => c.method === 'search.messages').length === 1 && b9.view(now())['search.messages'].heldFor >= 29, 'asked again inside the hold: refused by the method\'s own bucket, NO request', e9b && e9b.detail);
+  const bk = Limits.createBuckets();
+  let gone = 0; for (let i = 0; i < 20; i++) if (bk.take('search.messages', 5000 + i).go) gone++;
+  const v21 = bk.take('search.messages', 5100);
+  ok(gone === 20 && !v21.go && v21.why === 'method-minute' && bk.take('conversations.history', 5100).go, 'search.messages\' own minute: 20 go, the 21st waits — the history bucket untouched');
+
+  // around: the channel at the hit — before page (latest, inclusive) + the after window when it is the hit's neighbours
+  const m = mkAdapter();
+  const ar = await m.a.around('C0GENERAL', { vendorId: '1699900000.000050', at: 1699900000000 });
+  const hc = m.v.calls.filter((c) => c.method === 'conversations.history');
+  ok(ar.records.map((r) => r.vendorId).join() === '1699899000.000040,1699899500.000045,1699900000.000050,1699900200.000055,1699900400.000060' && ar.records.every((r) => r.convId === 'C0GENERAL') && ar.facts.target && ar.facts.before === 2 && ar.facts.after === 2 && ar.requests === 2,
+    'around a channel hit: the messages before and after it, oldest first, the hit among them — 2 requests', ar.records.map((r) => r.vendorId));
+  ok(hc.length === 2 && hc[0].params.latest === '1699900000.000050' && hc[0].params.inclusive === 'true' && hc[0].params.limit === '25' && hc[1].params.oldest === '1699900000.000050' && hc[1].params.inclusive === 'false' && hc[1].params.latest === '1699900600.000050',
+    'the two reads: latest = the hit (inclusive, 25), then oldest = the hit (exclusive) … the hit + half the span the first page covered (≥ 600 s)', hc.map((c) => c.params));
+  const tr = await m.a.around('C0LAUNCH01', { vendorId: '1699990300.000300', at: 1699990300000 });
+  const rc = m.v.calls.filter((c) => c.method === 'conversations.replies');
+  ok(tr.records.map((r) => r.vendorId).join() === '1699990000.000200,1699990100.000250,1699990300.000300' && tr.records[2].replyTo === '1699990000.000200' && tr.facts.target && tr.requests === 2 && rc.length === 1 && rc[0].params.ts === '1699990300.000300',
+    'around a THREAD reply (the channel listing does not hold it): its thread, root first — conversations.replies named by the reply\'s own ts', tr);
+  const gone1 = await m.a.around('C0LAUNCH01', { vendorId: '1699990333.000333', at: 1699990333000 });
+  ok(gone1.facts.target === false && gone1.records.length === 1 && gone1.records[0].vendorId === '1699990000.000200', 'a hit Slack no longer finds (thread_not_found): the channel page alone, the target said missing — never a failure', gone1);
+  const busy = 'C0BUSY0001', hitTs = '1699800000.000100';
+  SV.SX.archive[busy] = [];
+  for (let i = 40; i >= 1; i--) SV.SX.archive[busy].push({ type: 'message', user: 'U0BOB0001', text: `after ${i}`, ts: `${1699800000 + i * 10}.000100` });
+  for (let i = 0; i <= 30; i++) SV.SX.archive[busy].push({ type: 'message', user: 'U0ALICE01', text: `before ${i}`, ts: `${1699800000 - i * 10}.000100` });
+  const bz = await m.a.around(busy, { vendorId: hitTs, at: 1699800000000 });
+  ok(bz.facts.target && bz.facts.before === 24 && bz.facts.after === 0 && bz.records.length === 25, 'a hit whose after-window holds more than a page (Slack answers it NEWEST first — not the hit\'s neighbours): that side is left out, never drawn with a gap', bz.facts);
+  SV.SX.archive[busy] = SV.SX.archive[busy].filter((x) => !/^after (1[1-9]|[2-4]\d)$/.test(x.text));
+  const bz2 = await m.a.around(busy, { vendorId: hitTs, at: 1699800000000 });
+  ok(bz2.facts.after === 10 && bz2.records.length === 35 && bz2.records[bz2.records.length - 1].text === 'after 10', 'the same hit with 10 messages after it: all 10 drawn after it (they ARE its neighbours)', bz2.facts);
+  delete SV.SX.archive[busy];
+  const ea = await threw(() => m.a.around('C0GENERAL', { vendorId: 'nope', at: 0 }));
+  ok(ea && ea.code === 'not-found', 'around without a ts or an instant is refused by name');
+
+  // patched-copy controls
+  const ssrc = fs.readFileSync(path.join(REPO, 'src/channels/slack.js'), 'utf-8');
+  const ADJ = '        if (!after.next) msgs.push(...after.msgs);';
+  ok(ssrc.includes(ADJ), 'the patch site of the neighbours control is in slack.js');
+  const S5 = require(MC.write('src/channels/slack.js', ssrc.replace(ADJ, '        msgs.push(...after.msgs);'), 'nobusy'));
+  const m5 = mkAdapter({ mod: S5 });
+  SV.SX.archive[busy] = [];
+  for (let i = 40; i >= 1; i--) SV.SX.archive[busy].push({ type: 'message', user: 'U0BOB0001', text: `after ${i}`, ts: `${1699800000 + i * 10}.000100` });
+  SV.SX.archive[busy].push({ type: 'message', user: 'U0ALICE01', text: 'the hit', ts: hitTs });
+  const b5 = await m5.a.around(busy, { vendorId: hitTs, at: 1699800000000 });
+  delete SV.SX.archive[busy];
+  ok(b5.facts.after === 25 && b5.records[1].text === 'after 16', `NEGATIVE CONTROL — a copy without the neighbours rule draws the window\'s NEWEST page right after the hit (a gap of ${b5.records[1] && b5.records[1].text})`, b5.records.slice(0, 3).map((r) => r.text));
+  const LINK = '  const x = THREAD_IN_LINK_RE.exec(';
+  ok(ssrc.includes(LINK), 'the patch site of the permalink-thread control is in slack.js');
+  const S6 = require(MC.write('src/channels/slack.js', ssrc.replace(LINK, '  const x = null && THREAD_IN_LINK_RE.exec('), 'nolink'));
+  const p6 = await mkAdapter({ mod: S6 }).a.search({ query: 'only link thread' });
+  ok(p6.hits[0].threadKey === null, 'NEGATIVE CONTROL — a copy that reads no permalink loses the documented match\'s thread', p6.hits);
+  const NOROW = "  search: Object.freeze({ via: 'query', scope: 'search:read'";
+  ok(ssrc.includes(NOROW), 'the patch site of the row control is in slack.js');
+  const S7 = require(MC.write('src/channels/slack.js', ssrc.replace(NOROW, "  searchGone: Object.freeze({ via: 'query', scope: 'search:read'"), 'norow'));
+  const e7 = await threw(() => CH.validateMethods('slack', S7.caps, S7.create({ id: 'slack' }, {})));
+  ok(e7 && /search is implemented but caps\.search does not declare it/.test(String(e7.message)), 'NEGATIVE CONTROL — the methods without the row are refused by the registry (the census can go red)', e7 && e7.message);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

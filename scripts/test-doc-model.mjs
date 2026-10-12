@@ -5,7 +5,8 @@
 // over stub senders, wiring pins over the window, and a patched copy per rule (scripts/mutant-copy.mjs) turning its
 // table red.
 //   §1 the fidelity corpus · §2 the save text · §3 the comments message · §4 the edit summary · §5 the conflict table
-//   §6 the hub (owner, typing sender, stash, the edit note, the agent bearer refused) · §7 wiring pins · §8 controls
+//   §3b the strip's record (lane doc-comments-synced: commentRows, the one-time mergeComments) · §6 the hub (owner, typing
+//   sender, stash, the edit note, the agent bearer refused) · §7 wiring pins · §8 controls
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -113,6 +114,46 @@ const giant = M.commentsBatches(giantPath, [{ quote: '引'.repeat(200), note: '�
 ok(giant.ok && giant.clipped === 1 && giant.batches.every((b) => M.utf8Len(b.text) <= 4096) && /注…/.test(giant.batches[0].text) && M.utf8Len(giant.batches[0].text) > 4000 && rowsOf(giant).at(-1) === '② after', 'one comment bigger than a message ⇒ its note clipped with … to fit (counted), never refused; the next keeps ②', giant.ok && giant.batches.map((b) => M.utf8Len(b.text)));
 ok(M.commentsBatches('/a.md', Array.from({ length: 201 }, () => ({ note: 'n' }))).code === 'too_many' && M.commentsBatches('/a.md', Array.from({ length: 200 }, () => ({ note: 'n' }))).batches.length === 10, 'the per-SEND sanity cap is 200 (201 ⇒ too_many; 200 ⇒ 10 messages)');
 
+// ── §3b the strip's record (lane doc-comments-synced — the owner's eighteen comments were in another computer's browser) ──
+console.log('§3b the strip\'s record: commentRows bounds it, mergeComments folds a browser\'s old copy in once');
+{
+  const row = (id, note, extra = {}) => ({ id, quote: '', note, ...extra });
+  const ids = (rows) => rows.map((c) => c.id).join(',');
+  const s1 = row('s1', 'server one'), s2 = row('s2', 'server two'), l1 = row('l1', 'local one'), l2 = row('l2', 'local two');
+  const MERGE = [
+    ['empty / empty', [], [], ''],
+    ['server only', [s1, s2], [], 's1,s2'],
+    ['local only (the upload)', [], [l1, l2], 'l1,l2'],
+    ['both: the server\'s order first, local-only rows appended in local order', [s2, s1], [l2, l1], 's2,s1,l2,l1'],
+    ['an overlap by id: once, at the server\'s place', [s1, s2], [l1, row('s2', 'stale local text')], 's1,s2,l1'],
+    ['a junk server value ⇒ the local rows', 'x', [l1], 'l1'],
+  ];
+  for (const [name, a, b, want] of MERGE) ok(ids(M.mergeComments(a, b)) === want, `mergeComments ${name} ⇒ [${want}]`, ids(M.mergeComments(a, b)));
+  const kept = M.mergeComments([s1, s2], [row('s2', 'stale local text')]);
+  ok(kept.length === 2 && kept[1].note === 'server two', 'a shared id keeps the SERVER\'s row (a stale browser copy can only add, never clobber)', kept);
+  const big = Array.from({ length: 199 }, (_, i) => row('s' + i, 'n' + i));
+  const capped = M.mergeComments(big, [l1, l2]);
+  ok(capped.length === M.LIMITS.sendItems && capped.length === 200 && capped[199].id === 'l1', `the cap: ≤ ${M.LIMITS.sendItems} rows (199 + 2 ⇒ 200; the window keeps the left-out row in the browser for room)`, capped.length);
+  const junk = M.commentRows([row('a', 'ok', { line: 7, quote: 'q'.repeat(300) }), { id: 'b', note: '   ' }, { note: 'no id' }, row('a', 'dup'), null, row('x'.repeat(65), 'long id'), row('c', 'n'.repeat(1200))]);
+  ok(ids(junk) === 'a,c' && junk[0].line === 7 && Array.from(junk[0].quote).length === M.LIMITS.quote && junk[1].note.length === M.LIMITS.note, 'commentRows: each row bounded as commentItem bounds it; no id / an empty note / a repeated id / an id past 64 chars skipped', junk.map((c) => [c.id, c.quote.length, c.note.length]));
+  ok(JSON.stringify(M.commentRows([row('a', 'x', { line: 3 })])) === JSON.stringify([{ id: 'a', quote: '', line: 3, note: 'x' }]) && M.commentRows('').length === 0 && M.commentRows(undefined).length === 0, 'a row keeps the strip\'s own shape {id, quote, line?, note}; an absent record (\'\' / undefined) is no rows');
+  // int259 seam: a raw-block comment's anchor (lane doc-comment-raw-block) survives the record — else a reload loses its block
+  const RAW = [
+    ['an HTML block\'s anchor', { pos: 41, line: 9, kind: 'html' }, { pos: 41, line: 9, kind: 'html' }],
+    ['a selection inside the source box (offset)', { pos: 41, line: 9, kind: 'html', offset: 13 }, { pos: 41, line: 9, kind: 'html', offset: 13 }],
+    ['front matter at the top (pos 0, line 1)', { pos: 0, line: 1, kind: 'front' }, { pos: 0, line: 1, kind: 'front' }],
+    ['a stray key dropped, a bad line ⇒ 0, a negative offset dropped', { pos: 5, line: -2, kind: 'markdown', offset: -1, evil: '<img>' }, { pos: 5, line: 0, kind: 'markdown' }],
+    ['an unknown kind ⇒ no anchor', { pos: 5, line: 2, kind: 'script' }, null],
+    ['a string pos ⇒ no anchor', { pos: '5', line: 2, kind: 'html' }, null],
+    ['a negative pos ⇒ no anchor', { pos: -1, line: 2, kind: 'html' }, null],
+    ['not an object ⇒ no anchor', 'html', null],
+  ];
+  for (const [name, raw, want] of RAW) { const got = M.commentRows([row('r', 'x', { line: 9, raw })])[0].raw || null; ok(JSON.stringify(got) === JSON.stringify(want), `commentRows keeps a raw-block comment's anchor: ${name}`, got); }
+  ok(JSON.stringify(M.commentRows([row('r', 'x', { line: 9, raw: { pos: 41, line: 9, kind: 'html' } })])[0]) === JSON.stringify({ id: 'r', quote: '', line: 9, raw: { pos: 41, line: 9, kind: 'html' }, note: 'x' }), 'a raw-block row keeps the window\'s own key order {id, quote, line, raw, note}');
+  const mig = M.mergeComments([], [row('l', 'from a 2.369.258 browser', { line: 9, raw: { pos: 41, line: 9, kind: 'html' } })]);
+  ok(mig.length === 1 && mig[0].raw && mig[0].raw.kind === 'html', 'the one-time migration carries a 2.369.258 browser\'s raw-block comment WITH its anchor', mig);
+}
+
 // ── §4 the edit summary ──
 console.log('§4 the edit summary');
 const B = '# Brief\nintro\n\n## Goals\n- a\n- b\n\n## Risks\n- r\n';
@@ -210,7 +251,9 @@ ok(/const timer = host \? 0 : setInterval\(check, POLL_MS\);/.test(ui) && /const
   (function walk(n) { if (!n || typeof n.type !== 'string') return; if (n.type === 'CallExpression' && n.callee.type === 'MemberExpression' && n.callee.property.name === 'addEventListener') { const obj = ui.slice(n.callee.object.start, n.callee.object.end); const third = n.arguments[2] ? ui.slice(n.arguments[2].start, n.arguments[2].end) : ''; if (!/\bsignal\b/.test(third) && !/^(b|x|cancel|add|signal)$/.test(obj)) loose.push(obj + '.addEventListener(' + ui.slice(n.arguments[0].start, n.arguments[0].end)); } for (const k in n) { const v = n[k]; if (Array.isArray(v)) v.forEach(walk); else if (v && typeof v.type === 'string') walk(v); } })(acorn.parse(ui, { ecmaVersion: 'latest', sourceType: 'module' }));
   ok(loose.length === 0, 'every window-level listener rides the window\'s AbortController signal (only the transient popover / note / strip-row buttons, which die with their elements, and the abort hook itself go without)', loose);
 }
-ok(/const STORE_PREFIX = 'vs-doc-comments:';/.test(ui) && /slice\(0, M\.LIMITS\.items\)/.test(ui), 'the strip is device-kept per (host, path) under vs-doc-comments:, bounded');
+ok(/draftKey = 'doc:' \+ draftId/.test(ui) && /saveDraft\('doc', draftId, comments\.length \? comments\.slice\(\) : ''\)/.test(ui) && /let comments = M\.commentRows\(loadDraft\('doc', draftId\)\);/.test(ui) && /sync\?\.on\('drafts', draftKey, onRecord\);/.test(ui) && /saveDraft, loadDraft, getStateSync, isPhone:/.test(door), 'lane doc-comments-synced: the strip\'s record is the server\'s drafts SyncStore row doc:<host>\\u0001<path> through the composer\'s draft door (handed over by the door), bounded by commentRows, live through the StateSync listener');
+ok((ui.match(/localStorage\.(get|set|remove)Item\(oldKey/g) || []).length === 3 && /const merged = M\.mergeComments\(comments, local\);/.test(ui) && /if \(!sync \|\| !\(await sync\.init\('drafts'\)\) \|\| signal\.aborted\) return;/.test(ui), 'the browser\'s old copy is read ONCE after the store\'s snapshot (a loading store is never taken for an empty one), merged by the model, removed (only rows past the cap stay) — never written with the strip');
+ok(/drop\(batch\);/.test(ui) && /drop\(batch\.slice\(0, r\.sent\)\);/.test(ui) && /const drop = \(rows\) => \{ const gone = new Set\(rows\.map\(\(c\) => c\.id\)\); comments = comments\.filter\(\(c\) => !gone\.has\(c\.id\)\); saveComments\(true\);/.test(ui), 'Send all removes the rows IT sent (by id — another client\'s row added meanwhile stays) and writes at once; a part-way send removes only what went out');
 ok(/const lines = v\.batches\.map\(\(b\) => agentText\(b\.text, \{ kind: 'block', max: M\.LIMITS\.messageBytes \}\)\);/.test(eng), 'each comments message goes through THE belt (peer-text toAgentText) before the sender or the stash');
 ok(!/from '(prosemirror|markdown-it|@tiptap)/.test(door) && /import\(new URL\('\/doc-editor\.js', location\.origin\)\.href\)/.test(door), 'the door (main bundle) imports no editor module — the editor is the lazy public/doc-editor.js');
 const pkg = JSON.parse(read('package.json'));
@@ -244,6 +287,9 @@ const RULES = [
   ['the numbering restarts per message', 'commentsText(path, rows, from, groups.length', 'commentsText(path, rows, 0, groups.length', (X) => X.commentsBatches('/w/docs/设计.md', EIGHTEEN).batches[1].text.split('\n')[1].startsWith('① ')],
   ['the quote bound removed', 'const quote = clip(oneLine(x.quote), LIMITS.quote);', 'const quote = oneLine(x.quote);', (X) => X.commentsBatches('/a.md', [{ quote: 'q'.repeat(500), note: 'n' }]).batches[0].text.includes('q'.repeat(300))],
   ['the dirty check removed (a repaint over unsaved edits)', "  if (!dirty) return 'repaint';", "  return 'repaint';", (X) => X.conflictVerdict({ disk: 11, base: 10, dirty: true }) === 'repaint'],
+  ['the merge lets a stale browser copy clobber the server\'s row', 'return commentRows([...s, ...commentRows(local).filter((c) => !have.has(c.id))]);', 'return commentRows([...commentRows(local), ...s]);', (X) => X.mergeComments([{ id: 's', quote: '', note: 'server' }], [{ id: 's', quote: '', note: 'stale' }])[0].note === 'stale'],
+  ['the record drops a raw-block comment\'s anchor (the int259 seam undone)', '    const raw = commentRaw(r.raw);\n', '    const raw = null;\n', (X) => !X.commentRows([{ id: 'r', note: 'x', raw: { pos: 1, line: 2, kind: 'html' } }])[0].raw],
+  ['the record\'s row cap removed', '    if (out.length >= LIMITS.sendItems) break;\n', '', (X) => X.commentRows(Array.from({ length: 250 }, (_, i) => ({ id: 'r' + i, note: 'n' }))).length === 250],
   ['the save ask removed (a silent overwrite)', "return disk && disk > base && !(confirmed && confirmed >= disk) ? 'ask' : 'write';", "return 'write';", (X) => X.saveVerdict({ disk: 11, base: 10 }) === 'write'],
 ];
 for (const [name, from, to, red] of RULES) {

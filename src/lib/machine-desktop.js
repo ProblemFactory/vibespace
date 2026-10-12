@@ -210,10 +210,13 @@ function installedList(m, { onPick }) {
  * re-reads the machine rows (the probe runs again — an explicit act, never a timer); Check again also lists the
  * machine's apps again (on the machine, now).
  */
-export function showMachineDesktopDialog(app, m0, { install = null, recheck = null } = {}) {
+export function showMachineDesktopDialog(app, m0, { install = null, recheck = null, closeOpener = null } = {}) {
   let m = m0;
   const machine = nameOf(m);
   const { body, close: closeDialog } = createModalShell({ id: 'machine-desktop-dialog', title: t('{machine} — its desktop', { machine }), dialogClass: 'machine-desktop-dialog', escapeToClose: true });
+  // inc-mv51w0ow-crw3 (owner: "选择打开桌面之后不会自动关闭无关对话框直接展示桌面连接窗口"): a press that opens a window closes
+  // this dialog AND the one it was opened from (the Apps dialog, `closeOpener`) — the window is what the person asked to see
+  const toWindow = () => { closeDialog(); try { closeOpener?.(); } catch { /* the opener is gone already */ } };
   const state = el('p', 'margin:4px 0'); state.className = 'machine-desktop-state';
   const acts = el('div'); acts.className = 'desktop-install-actions';
   const scope = el('p', NOTE, t('Its desktop shows everything on {machine}’s screen, and what you type there goes to it. Only people can open it — agents cannot.', { machine }));
@@ -249,7 +252,7 @@ export function showMachineDesktopDialog(app, m0, { install = null, recheck = nu
     state.textContent = desktopStateText(m);
     state.style.color = m.code === 'desktop_ready' ? '' : 'var(--warning, #d9822b)';
     acts.replaceChildren();
-    if (m.code === 'desktop_ready') acts.append(btn('btn-create', t('Open its desktop'), () => { openMachineDesktop(app, m); }));
+    if (m.code === 'desktop_ready') acts.append(btn('btn-create', t('Open its desktop'), () => { toWindow(); openMachineDesktop(app, m); }));
     if (m.code === 'no_vnc' && m.setup === 'win32' && install) acts.append(btn('btn-create', t('Install TightVNC Server…'), () => install(m, { what: 'tightvnc', onDone: () => check() })));
     if (m.code !== 'offline' && recheck) acts.append(btn('file-tool-btn', t('Check again'), () => check()));
     const offline = m.code === 'offline';
@@ -262,7 +265,7 @@ export function showMachineDesktopDialog(app, m0, { install = null, recheck = nu
   }
   async function run({ window: own = false } = {}) {
     const line = input.value;
-    if (own) { winBtn.disabled = true; const r = await runAsAppWindow(app, m, line); winBtn.disabled = false; if (r) closeDialog(); else if (body.isConnected) render(); return; } // the app's window is what the person wants to see now
+    if (own) { winBtn.disabled = true; const r = await runAsAppWindow(app, m, line); winBtn.disabled = false; if (r) toWindow(); else if (body.isConnected) render(); return; } // the app's window is what the person wants to see now
     const plan = desktopRunPlan(m.setup, line); // the hub judges it again (the same PURE rule)
     if (!plan.ok) { showToast(desktopRefusalText({ code: plan.code, error: plan.error }, m), { type: 'error' }); return; }
     if (!(await confirmRun(m, line))) return;

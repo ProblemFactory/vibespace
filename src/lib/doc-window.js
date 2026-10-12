@@ -8,7 +8,7 @@
 //     window; the main bundle's helpers are handed to it (`deps`) so it carries no second copy of utils / i18n (nor of the
 //     bar fold and the glyphs — design 020's bar).
 //   · Raw = the existing CodeEditor for the same file, mounted IN this window (`makeRaw`).
-import { showToast, fetchJson, createModalShell, showConfirmDialog, showInputDialog, createPopover, showContextMenu, uiScale, copyText } from './utils.js';
+import { showToast, fetchJson, createModalShell, showConfirmDialog, showInputDialog, createPopover, showContextMenu, uiScale, copyText, saveDraft, loadDraft, getStateSync } from './utils.js';
 import { sanitizeHtml } from './safe-html.js';
 import { Marked } from 'marked'; // the house renderer's class (chat's marked) — the Doc window's export / print READS the source with it
 import { t } from './i18n.js';
@@ -39,7 +39,7 @@ export function openDoc(app, { host = '', path = '', from = '', syncId, intoChai
   winInfo.content.appendChild(root);
   const signal = winInfo._listenerCtl.signal;
   const makeRaw = (pane) => { const sub = Object.create(winInfo); sub.content = pane; return new CodeEditor(sub, p, name, app, { host: h }); };
-  const deps = { t, showToast, fetchJson, createModalShell, showConfirmDialog, showInputDialog, createPopover, showContextMenu, uiScale, onFileChanged, sameFile, makeRaw, createBarFold, icons: UI_ICONS, sanitizeHtml, copyText, Marked, isPhone: () => !!app.isMobile || window.innerWidth <= 768 };
+  const deps = { t, showToast, fetchJson, createModalShell, showConfirmDialog, showInputDialog, createPopover, showContextMenu, uiScale, onFileChanged, sameFile, makeRaw, createBarFold, icons: UI_ICONS, sanitizeHtml, copyText, Marked, saveDraft, loadDraft, getStateSync, isPhone: () => !!app.isMobile || window.innerWidth <= 768 };
   loadEditor().then((mod) => { if (!signal.aborted) { root.textContent = ''; mod.mountDocWindow({ root, winInfo, host: h, path: p, name, from: from || '', signal, deps }); } },
     () => { root.textContent = t('Could not load the document editor — reload the page'); });
   winInfo.onClose = () => { try { winInfo._docClose?.(); } catch { } app._checkWelcome?.(); };

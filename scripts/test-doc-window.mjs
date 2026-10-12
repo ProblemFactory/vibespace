@@ -42,6 +42,11 @@
 //      the strip lists both and a press selects the block in view; the source box open ⇒ no button + a toast; phone 390 ⇒
 //      the comment sheet. PNGs desk.png + phone.png (+ desk-offer / desk-select / desk-editing) into $VS_DOC_RAWCMT_SHOTS
 //      (else $VS_DOC_WINDOW_SHOTS). VS_DOC_WINDOW_ONLY=rawcmt runs §13 alone.
+//      §15 (lane doc-comments-synced — owner 2026-10-12: his eighteen comments were in another computer's browser): two pages
+//      on one instance — A adds 2 comments ⇒ B shows them without a reload; B removes one ⇒ A shows 1; A reloads ⇒ 1 from
+//      the server (no localStorage key); a page with 3 rows under the OLD key ⇒ the server holds 3, the key gone; a second
+//      browser's stale copy only adds; Send all on A ⇒ B's strip empties; the phone sheet. PNGs desk-a.png / desk-b.png /
+//      phone.png into $VS_DOC_SYNC_SHOTS (else $VS_DOC_WINDOW_SHOTS). VS_DOC_WINDOW_ONLY=synced runs §15 alone.
 // Run: node scripts/test-doc-window.mjs   (SKIPs with evidence when google-chrome is absent; ~1 min)
 import fs from 'node:fs';
 import path from 'node:path';
@@ -149,6 +154,8 @@ const stdinTexts = () => {
   for (const l of fs.readFileSync(f, 'utf8').split('\n').filter(Boolean)) { try { const o = JSON.parse(l); const c = o.message && o.message.content; if (typeof c === 'string') out.push(c); else if (Array.isArray(c)) for (const x of c) if (x && x.type === 'text') out.push(x.text); } catch { } }
   return out;
 };
+/** The server's drafts SyncStore (lane doc-comments-synced: a document's comment rows live there under doc:<host>\u0001<path>). */
+const drafts = async () => { try { return (await (await fetch(base + '/api/sync/drafts')).json()).data || {}; } catch { return {}; } };
 
 const FILLER = Array.from({ length: 40 }, (_, i) => `Filler line ${i + 1}.`).join('\n\n');
 const BRIEF = `# Launch brief\n\nIntro paragraph.\n\n## Goals\n\n- ship the rendered view\n- keep the agent informed\n\n## Plan\n\nParagraph P0.\n\n1. read\n2. edit\n\n> a quote\n\n\`\`\`js\nconst x = 1;\n\`\`\`\n\n## Notes\n\n${FILLER}\n`;
@@ -336,7 +343,8 @@ try {
   const c2 = await comment('.ProseMirror ul li p', 40, 'add a date');
   const strip = await ev(`const w = ${W}; return [...w.content.querySelectorAll('.doc-cmt')].map((e) => ({ q: e.querySelector('.doc-cmt-q') && e.querySelector('.doc-cmt-q').textContent, n: e.querySelector('.doc-cmt-n').textContent }));`);
   ok(strip.length === 2 && strip[0].n === 'make this punchier' && strip[1].n === 'add a date' && !!strip[0].q && !!strip[1].q, 'two comments in the strip (quote + note), keyed rows', { c1, c2, strip });
-  ok(await ev(`return !!localStorage.getItem('vs-doc-comments:' + '\\u0001' + ${S(P)});`), 'the strip is device-kept per (host, path)');
+  const rec5 = await until(async () => { const v = (await drafts())['doc:\u0001' + P]; return Array.isArray(v) && v.length === 2 ? v : null; }, 4000);
+  ok(!!rec5 && rec5.map((c) => c.note).join('|') === 'make this punchier|add a date' && !(await ev(`return localStorage.getItem('vs-doc-comments:' + '\\u0001' + ${S(P)});`)), 'the strip is VibeSpace\'s (lane doc-comments-synced): the server\'s drafts store holds both rows under doc:<host>\\u0001<path>, nothing in this browser\'s storage', rec5);
   const before = stdinTexts().length;
   await click(await rectIn('.doc-send'));
   const sent = await until(() => stdinTexts().slice(before).filter((t) => t.startsWith('[Doc comments]')), 8000);
@@ -346,7 +354,7 @@ try {
   const want = `[Doc comments] ${P}\n① L5 "${qOf(strip[0])}" — make this punchier\n② L7 "${qOf(strip[1])}" — add a date`;
   ok(!!sent && sent.length === 1 && sent[0] === want, 'Send all ⇒ exactly ONE message on the agent\'s stdin, in the contract\'s shape', sent || stdinTexts().slice(-2));
   await sleep(500);
-  ok(stdinTexts().slice(before).length === 1 && (await ev(`return ${W}.content.querySelectorAll('.doc-cmt').length;`)) === 0 && !(await ev(`return localStorage.getItem('vs-doc-comments:' + '\\u0001' + ${S(P)});`)), 'one message only; the strip and its device copy are empty after');
+  ok(stdinTexts().slice(before).length === 1 && (await ev(`return ${W}.content.querySelectorAll('.doc-cmt').length;`)) === 0 && !(await drafts())['doc:\u0001' + P], 'one message only; the strip and its server record are empty after');
 
   // THE COMMENT BUTTON OUTLIVED ITS SELECTION (userW inc-muxrol54-uv2d, lane doc-comment-dismiss): real mouse selections
   // in this .md; the popover is sampled every 100 ms (never two, gone means it STAYS gone — no re-offer)
@@ -713,7 +721,7 @@ try {
   const CD = path.join(fs.realpathSync(PROJ), 'rawcmt'); fs.mkdirSync(CD, { recursive: true });
   const CDOC = '---\ntitle: Draft\n---\n\n# Blog draft\n\nIntro paragraph for the reader.\n\n<!-- [CONFIRM-BLOCK id=7]\nkeep the bag\n-->\n\nTail paragraph.\n';
   const CP = path.join(CD, 'blog-draft.md'); fs.writeFileSync(CP, CDOC);
-  const KEY = 'vs-doc-comments:\u0001' + CP;
+  const KEY = 'doc:\u0001' + CP; // the drafts store's row (lane doc-comments-synced; int259 seam: this section read localStorage)
   async function openDoc(max) {
     await ev(`for (const w of [...app.wm.windows.values()]) app.wm.closeWindow(w.id); return true;`); await sleep(300);
     await ev(`app.openFile(${S(CP)}, 'blog-draft.md', {}); return true;`);
@@ -730,8 +738,8 @@ try {
     const add = await until(() => ev(`const a = document.querySelector('.doc-note-add'); if (!a) return null; const r = a.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 };`), 3000);
     await click(add); await sleep(250);
   };
-  const stored = () => ev(`try { return JSON.parse(localStorage.getItem(${S(KEY)}) || '[]'); } catch { return null; }`);
-  await ev(`localStorage.removeItem(${S(KEY)}); return true;`);
+  const stored = async () => { const v = (await drafts())[KEY]; return Array.isArray(v) ? v : []; };
+  const storedN = async (n) => (await until(async () => { const v = await stored(); return v.length === n ? v : null; }, 8000, 150)) || (await stored());
   if (!ok(!!(await boot(1100, 900, false)), '§13 the client re-booted at 1100×900 (en)')) throw new Error('no app for §13');
   ok(!!(await openDoc(true)), '① a blog draft with front matter, a paragraph and an HTML comment block opened, maximized at 1100 px');
   const kinds = await inC(`H.scrollIntoView({ block: 'center' }); return [...pm.querySelectorAll('.doc-rawblock')].map((b) => (b.querySelector('.doc-raw-head') || {}).textContent);`);
@@ -745,7 +753,7 @@ try {
   await cshot('desk-offer.png');
   ok(!!b1 && sel1.node, '③ a click on the HTML block selects it (one unit) and offers Add comment', { b1, sel1 });
   if (b1) await addNote(b1, 'Confirm this block before publishing');
-  const s1 = await stored();
+  const s1 = await storedN(1);
   const strip1 = await inC(`return [...w.content.querySelectorAll('.doc-cmt')].map((e) => ({ k: (e.querySelector('.doc-cmt-k') || {}).textContent || '', q: (e.querySelector('.doc-cmt-q') || {}).textContent || '', raw: e.classList.contains('doc-cmt-raw') }));`);
   ok(s1 && s1.length === 1 && s1[0].quote === 'HTML block: <!-- [CONFIRM-BLOCK id=7] keep the bag -->' && s1[0].line === 9 && s1[0].raw && s1[0].raw.kind === 'html' && s1[0].raw.line === 9 && Number.isInteger(s1[0].raw.pos) && s1[0].note === 'Confirm this block before publishing',
     '④ the comment is saved with the block quote ("HTML block: <!-- [CONFIRM-BLOCK id=7] keep the bag -->"), the block\'s source line (L9) and ONE extra field raw {pos, line, kind}', s1);
@@ -762,7 +770,7 @@ try {
   await cshot('desk-select.png');
   ok(!!b2 && dsel === 'keep the bag', '⑥ a mouse selection INSIDE the source box (a DOM selection the editor does not own) offers Add comment', { b2, dsel });
   if (b2) await addNote(b2, 'Say which bag');
-  const s2 = await stored();
+  const s2 = await storedN(2);
   ok(s2 && s2.length === 2 && s2[1].quote === 'keep the bag' && s2[1].line === 10 && s2[1].raw && s2[1].raw.kind === 'html' && s2[1].raw.offset === CDOC.split('<!--')[1].indexOf('keep') + 4, '⑦ that comment\'s quote = the selected text, its line = the text\'s own source line (L10), the offset in the block kept', s2 && s2[1]);
   // ⑨ reload ⇒ the strip shows both; a press on the block comment selects the block and scrolls it into view
   if (!ok(!!(await boot(1100, 900, false)), '⑧ reload (the client re-booted)')) throw new Error('no app after reload');
@@ -800,7 +808,112 @@ try {
   ok(pageErrors.length === 0, '⑬ no page exception through §13', pageErrors.slice(0, 3));
   if (CSHOTS) ok(['desk.png', 'phone.png'].every((f) => fs.existsSync(path.join(CSHOTS, f)) && fs.statSync(path.join(CSHOTS, f)).size > 10000), `⑭ PNGs for the owner: ${path.join(CSHOTS, 'desk.png')} + phone.png (+ desk-offer, desk-select, desk-editing)`);
   }
-  if (ONLY !== 'width' && ONLY !== 'print' && ONLY !== 'raw' && ONLY !== 'rawcmt') {
+  if (ONLY === '' || ONLY === 'synced') {
+  // ── §15 A DOCUMENT'S COMMENTS ARE VIBESPACE'S (lane doc-comments-synced — owner 2026-10-12: his eighteen comments
+  //    "disappeared"; they were in another computer's browser): two pages on one instance, live both ways, a reload reads
+  //    the server, a browser's old localStorage copy migrates once (upload; merge = the server's rows kept, local-only added)
+  section('§15 a document\'s comments are VibeSpace\'s: two pages on one instance, live both ways; the old browser copy migrates once');
+  const SSHOTS = process.env.VS_DOC_SYNC_SHOTS || SHOTS;
+  const SY = path.join(fs.realpathSync(PROJ), 'docs', 'SYNC.md'), SY2 = path.join(fs.realpathSync(PROJ), 'docs', 'OLD.md');
+  fs.writeFileSync(SY, '# Synced comments\n\nThe first paragraph says what the plan is.\n\n## Steps\n\n- write the note on one device\n- read it on the other device\n');
+  fs.writeFileSync(SY2, '# Old notes\n\nA document whose notes lived in one browser.\n');
+  const recOf = async (p) => { const v = (await drafts())['doc:\u0001' + p]; return Array.isArray(v) ? v : null; };
+  const oldKeyOf = (p) => 'vs-doc-comments:\u0001' + p;
+  await call('Page.addScriptToEvaluateOnNewDocument', { source: `try { localStorage.setItem('vibespace.lang', 'en'); localStorage.removeItem('vs-doc-width'); } catch {}` });
+  const chatA = await boot(1100, 800, false);
+  // page B: a second tab on the same instance, its own CDP session (another browser, as far as the strip can tell)
+  const tB = await (await fetch(`http://127.0.0.1:${CDP}/json/new?about:blank`, { method: 'PUT' })).json();
+  const cdpB = new WebSocket(tB.webSocketDebuggerUrl, { maxPayload: 256 * 1024 * 1024 });
+  await new Promise((r, e) => { cdpB.on('open', r); cdpB.on('error', e); });
+  let seqB = 0; const pendB = new Map(); const errsB = [];
+  cdpB.on('message', (d) => { const m = JSON.parse(d); if (m.id && pendB.has(m.id)) { pendB.get(m.id)(m); pendB.delete(m.id); return; } if (m.method === 'Runtime.exceptionThrown') errsB.push(m.params?.exceptionDetails?.exception?.description || m.params?.exceptionDetails?.text || 'exception'); });
+  const callB = (method, params = {}) => new Promise((r, e) => { const id = ++seqB; pendB.set(id, (m) => (m.error ? e(new Error(method + ': ' + m.error.message)) : r(m.result))); cdpB.send(S({ id, method, params })); });
+  const evB = async (js) => { const r = await callB('Runtime.evaluate', { expression: `(async () => { const app = window.app; ${js} })()`, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || 'eval threw'); return r.result?.value; };
+  const clickB = async (p) => { await callB('Input.dispatchMouseEvent', { type: 'mouseMoved', x: p.x, y: p.y, button: 'none' }); for (const type of ['mousePressed', 'mouseReleased']) await callB('Input.dispatchMouseEvent', { type, x: p.x, y: p.y, button: 'left', clickCount: 1 }); await sleep(150); };
+  async function bootB(width, height, mobile) {
+    await callB('Page.enable'); await callB('Runtime.enable');
+    await callB('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: mobile ? 2 : 1, mobile });
+    await callB('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });
+    await callB('Page.addScriptToEvaluateOnNewDocument', { source: `try { localStorage.setItem('vibespace.lang', 'en'); } catch {}` });
+    await callB('Page.navigate', { url: base + '/' });
+    const up = await until(async () => evB(`if (!app || !app.ready) return false; await app.ready; return true;`), 60000, 300);
+    await sleep(800);
+    return up;
+  }
+  const shotOn = async (c, name) => { if (!SSHOTS) return null; await c('Page.bringToFront'); await sleep(400); const r = await c('Page.captureScreenshot', { format: 'png' }); const f = path.join(SSHOTS, name); fs.writeFileSync(f, Buffer.from(r.data, 'base64')); return f; };
+  const openOn = async (E, p, nm, from) => {
+    await E(`app.openFile(${S(p)}, ${S(nm)}, ${from ? `{ from: ${S(from)} }` : '{}'}); return true;`);
+    return until(() => E(`const w = ${DW(p)}; const pm = w && w.content.offsetParent && w.content.querySelector('.doc-page .ProseMirror'); return pm && pm.querySelector('h1') ? w.id : null;`), 20000, 200);
+  };
+  const notesOn = (E, p) => E(`const w = ${DW(p)}; if (!w) return null; return [...w.content.querySelectorAll('.doc-cmt')].map((e) => e.querySelector('.doc-cmt-n').textContent);`);
+  const stripOpen = (E, p) => E(`const w = ${DW(p)}; const s = w.content.querySelector('.doc-strip'); if (s.hidden) w.content.querySelector('.doc-strip-btn').click(); return true;`);
+  const until15 = (fn) => until(fn, 8000, 150);
+  if (!ok(!!chatA && !!(await bootB(1100, 800, false)), '§15 page A (1100×800, its chat attached) and page B (a second tab, 1100×800) booted on ONE instance')) throw new Error('no pages for §15');
+  const wa = await openOn(ev, SY, 'SYNC.md', chatA), wb = await openOn(evB, SY, 'SYNC.md');
+  ok(!!wa && !!wb && (await notesOn(ev, SY)).length === 0 && (await notesOn(evB, SY)).length === 0 && !(await recOf(SY)), '① SYNC.md open on both pages, no comments anywhere yet', { wa, wb });
+  // ② A adds two (real mouse selections — A is the tab in front, as the person's hands are) ⇒ B shows them without a reload
+  await call('Page.bringToFront'); await sleep(300);
+  const s1 = await comment('.ProseMirror h2', 12, 'say which device', SY);
+  const s2 = await comment('.ProseMirror ul li p', 30, 'name the second step', SY);
+  const liveB = await until15(async () => { const n = await notesOn(evB, SY); return n && n.length === 2 ? n : null; });
+  const rec2 = await recOf(SY);
+  ok(!!liveB && liveB.join('|') === 'say which device|name the second step' && !!rec2 && rec2.length === 2, '② A adds 2 comments ⇒ B\'s strip shows both, in order, WITHOUT a reload; the server\'s drafts store holds them', { s1, s2, liveB, rec2 });
+  ok(!(await ev(`return localStorage.getItem(${S(oldKeyOf(SY))});`)) && !(await evB(`return localStorage.getItem(${S(oldKeyOf(SY))});`)), '② …and neither browser\'s storage holds them (the record is the server\'s)');
+  // B's person comes to that tab: brought to the front it adopts the desktop's shared layout (A's windows — its own Doc
+  // window goes with it), so it opens the document again — the strip reads the server's two rows at mount
+  await callB('Page.bringToFront'); await sleep(1500);
+  await openOn(evB, SY, 'SYNC.md'); await stripOpen(evB, SY);
+  const atMountB = await until15(async () => { const n = await notesOn(evB, SY); return n && n.length === 2 ? n : null; });
+  ok(!!atMountB, '② …a Doc window opened on B afterwards reads both rows at its mount (the server\'s record)', atMountB);
+  const deskA = await shotOn(call, 'desk-a.png'), deskB = await shotOn(callB, 'desk-b.png');
+  // ③ B removes one (a real click on its ✕) ⇒ A shows one
+  const xB = await until15(() => evB(`const w = ${DW(SY)}; const x = w.content.querySelector('.doc-cmt .doc-cmt-x'); if (!x || !x.offsetParent) return null; const r = x.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 };`));
+  await callB('Page.bringToFront'); await sleep(300);
+  if (xB) await clickB(xB);
+  const liveA = await until15(async () => { const n = await notesOn(ev, SY); return n && n.length === 1 ? n : null; });
+  ok(!!xB && !!liveA && liveA[0] === 'name the second step' && (await notesOn(evB, SY)).join() === 'name the second step', '③ B removes the first ⇒ A\'s strip shows the one left, without a reload', { xB, liveA });
+  // ④ A reloads ⇒ the one row, from the server (no browser copy)
+  const rec3 = await until15(async () => { const r = await recOf(SY); return r && r.length === 1 ? r : null; });
+  await call('Page.bringToFront');
+  const chatA2 = await boot(1100, 800, false);
+  await openOn(ev, SY, 'SYNC.md', chatA2);
+  const afterReload = await until15(async () => { const n = await notesOn(ev, SY); return n && n.length === 1 ? n : null; });
+  ok(!!rec3 && !!afterReload && afterReload[0] === 'name the second step' && !(await ev(`return localStorage.getItem(${S(oldKeyOf(SY))});`)), '④ A reloads ⇒ its strip reads the one row from the server; no localStorage key', { rec3, afterReload });
+  // ⑤ THE MIGRATION: B carries three rows under the OLD key of a document the server knows nothing about ⇒ uploaded, key gone
+  const OLD3 = [1, 2, 3].map((i) => ({ id: 'old' + i, quote: 'A document whose notes lived in one browser.', line: 3, note: 'old note ' + i }));
+  await evB(`localStorage.setItem(${S(oldKeyOf(SY2))}, ${S(S(OLD3))}); return true;`);
+  await openOn(evB, SY2, 'OLD.md');
+  const up3 = await until15(async () => { const r = await recOf(SY2); return r && r.length === 3 ? r : null; });
+  const gone3 = await until15(() => evB(`return localStorage.getItem(${S(oldKeyOf(SY2))}) === null ? true : null;`));
+  ok(!!up3 && up3.map((c) => c.id).join() === 'old1,old2,old3' && !!gone3 && (await notesOn(evB, SY2)).length === 3, '⑤ a page with 3 rows under the OLD localStorage key ⇒ after mount the server holds the 3 and the local key is gone', { up3, gone3 });
+  // ⑥ …and a second browser's stale copy can only ADD: A carries old2 (stale text) + one of its own ⇒ the server keeps old2's text, adds a-only
+  await ev(`localStorage.setItem(${S(oldKeyOf(SY2))}, ${S(S([{ id: 'old2', quote: '', note: 'a stale copy of old note 2' }, { id: 'a-only', quote: 'Old notes', line: 1, note: 'only this browser had me' }]))}); return true;`);
+  await openOn(ev, SY2, 'OLD.md', chatA2);
+  const up4 = await until15(async () => { const r = await recOf(SY2); return r && r.length === 4 ? r : null; });
+  const liveB4 = await until15(async () => { const n = await notesOn(evB, SY2); return n && n.length === 4 ? n : null; });
+  ok(!!up4 && up4.map((c) => c.id).join() === 'old1,old2,old3,a-only' && up4[1].note === 'old note 2' && !(await ev(`return localStorage.getItem(${S(oldKeyOf(SY2))});`)) && !!liveB4, '⑥ a second browser\'s old copy merges: the server\'s rows kept (old2 keeps ITS text), the local-only row appended, the key gone; B sees 4 live', { up4, liveB4 });
+  // ⑦ Send all on A ⇒ B's strip empties
+  await openOn(ev, SY, 'SYNC.md', chatA2); await stripOpen(ev, SY); await sleep(300);
+  const before15 = stdinTexts().length;
+  const sendA = await rectIn('.doc-send', SY);
+  if (sendA) await click(sendA);
+  const sent15 = await until15(() => { const t = stdinTexts().slice(before15).filter((x) => x.startsWith('[Doc comments] ' + SY)); return t.length ? t : null; });
+  const emptyB = await until15(async () => { const n = await notesOn(evB, SY); return n && n.length === 0 ? true : null; });
+  ok(!!sendA && !!sent15 && sent15[0].includes('name the second step') && !!emptyB && !(await recOf(SY)), '⑦ Send all on A ⇒ the chat gets the message, the server\'s record is gone and B\'s strip empties (no reload)', { sendA, sent15, emptyB });
+  // ⑧ the phone: B at 390 shows the migrated document's four rows in its bottom sheet
+  await bootB(390, 844, true);
+  await openOn(evB, SY2, 'OLD.md');
+  await stripOpen(evB, SY2);
+  const sheetB = await until15(() => evB(`const w = ${DW(SY2)}; const s = w.content.querySelector('.doc-strip'); if (s.hidden || s.querySelectorAll('.doc-cmt').length !== 4) return null; const r = s.getBoundingClientRect(); return { w: Math.round(r.width), n: s.querySelectorAll('.doc-cmt').length, phone: /doc-phone/.test(w.content.querySelector('.doc-window').className) };`));
+  ok(!!sheetB && sheetB.phone && sheetB.n === 4 && sheetB.w <= 390, '⑧ on a phone (390) the same four rows, in the bottom sheet', sheetB);
+  const phone = await shotOn(callB, 'phone.png');
+  await call('Page.bringToFront');
+  ok(errsB.length === 0, '⑨ no page exception on page B', errsB.slice(0, 3));
+  if (SSHOTS) ok([deskA, deskB, phone].every((f) => f && fs.statSync(f).size > 5000), `⑩ PNGs for the owner: ${deskA}, ${deskB}, ${phone}`);
+  try { cdpB.close(); } catch { }
+  try { await fetch(`http://127.0.0.1:${CDP}/json/close/${tB.id}`); } catch { }
+  }
+  if (ONLY !== 'width' && ONLY !== 'print' && ONLY !== 'raw' && ONLY !== 'rawcmt' && ONLY !== 'synced') {
 
   // ── §9 design 020 (lane doc-editor-ui, 2.369.223): the design desk's audit sample (every block kind) at 1280 / 390 ×
   //    dark / light × zh / en — the PNGs carry the audit's names with `after-` so the owner flips between before and after

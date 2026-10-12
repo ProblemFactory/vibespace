@@ -21,7 +21,10 @@ const DIR = process.env.VS_VENDOR_STUB_DIR || null;
 const HOSTS = new Set(['oauth2.googleapis.com', 'accounts.google.com', 'gmail.googleapis.com', 'www.googleapis.com', 'pubsub.googleapis.com', 'open.feishu.cn', 'open.larksuite.com', 'slack.com', 'files.slack.com']);
 // design 012 (Slack S1): slack.com / files.slack.com are answered by the SAME recorded fake the fast suites use
 // (scripts/fixtures/slack-vendor.cjs), its messages moved to an hour ago (the store keeps recent messages only)
-const slackFake = require('./slack-vendor.cjs').createSlackVendor({ mode: { tsShift: Math.floor(Date.now() / 1000) - 1700000100 - 3600 } });
+// lane slack-search: mode.json `slackScopes` (the scopes header Slack answers — e.g. with search:read) and `slack429`
+// ({method: retryAfterSec}) steer the same fake, re-read on every call
+const slackMode = { tsShift: Math.floor(Date.now() / 1000) - 1700000100 - 3600 };
+const slackFake = require('./slack-vendor.cjs').createSlackVendor({ mode: slackMode });
 const real = globalThis.fetch;
 let n = 0;
 const mode = () => { try { return JSON.parse(fs.readFileSync(path.join(DIR, 'mode.json'), 'utf-8')); } catch { return {}; } };
@@ -41,7 +44,7 @@ globalThis.fetch = async function stubFetch(url, init = {}) {
   if (!HOSTS.has(u.hostname)) return real(url, init);
   const m = mode();
   if (DIR) { try { fs.appendFileSync(path.join(DIR, 'calls.ndjson'), JSON.stringify({ at: Date.now(), method: (init && init.method) || 'GET', host: u.hostname, path: u.pathname }) + '\n'); } catch {} }
-  if (u.hostname === 'slack.com' || u.hostname === 'files.slack.com') return slackFake.fetchFn(url, init);
+  if (u.hostname === 'slack.com' || u.hostname === 'files.slack.com') { slackMode.scopes = m.slackScopes || undefined; slackMode.status429 = m.slack429 || undefined; return slackFake.fetchFn(url, init); }
   if (u.hostname === 'oauth2.googleapis.com' && u.pathname === '/token') {
     const form = new URLSearchParams(String((init && init.body) || ''));
     n++;

@@ -61,6 +61,7 @@ const Text = require('./slack-text.js');
 const Limits = require('./slack-limits.js');
 const Manifest = require('./slack-manifest.js');
 const Words = require('./slack-words.js');
+const SR = require('../channel-search.js');   // lane slack-search: the search row's bounds + the snippet bound (PURE)
 
 const KIND = 'slack';
 const LABEL = 'Slack';
@@ -110,6 +111,19 @@ const ATTACH_MAX_BYTES = 100 * 1024 * 1024;
  *  picture: the initials stay); fetched with NO token, ≤ 256 KiB. */
 const AVATAR_ORIGIN = 'https://avatars.slack-edge.com/';
 const AVATAR_MAX_BYTES = 256 * 1024;
+/** lane slack-search: `search.messages` pages by NUMBER (1…100 — the vendor's own bound on `page`). */
+const SEARCH_PAGES_MAX = 100;
+/** The "around" read's after-window floor (s): the messages after a hit are read inside half the span its before-page
+ *  covered, never less than this (Slack answers a window newest first — see `around`). */
+const AROUND_SPAN_MIN_SEC = 600;
+const THREAD_IN_LINK_RE = /[?&]thread_ts=(\d{9,11}\.\d{1,6})(?:&|$)/;
+/** The thread a search MATCH sits in: its own `thread_ts`, else the one its permalink names (Slack's documented match
+ *  carries no thread field; a reply's permalink ends `?thread_ts=<root>&cid=<channel>`). PURE. */
+function threadOfMatch(m) {
+  if (m && TS_RE.test(String(m.thread_ts || ''))) return String(m.thread_ts);
+  const x = THREAD_IN_LINK_RE.exec(typeof (m && m.permalink) === 'string' ? m.permalink.slice(0, 2048) : '');
+  return x ? x[1] : null;
+}
 /** The picture address a `users.info` answer names (`profile.image_72`), '' = no uploaded picture. Peer bytes. */
 function avatarUrlOf(u) {
   const p = u && typeof u === 'object' && u.profile && typeof u.profile === 'object' ? u.profile : null;
@@ -174,6 +188,14 @@ const caps = Object.freeze({
   policyModes: Object.freeze(['review']),
   prepareSend: true,
   retention: 'purge-on-remove',
+  // design 010's third reading row (lane slack-search, owner 2026-10-12: 「话说slack不支持搜索吗？」): THE OWNER'S FULL
+  // SEARCH — `search.messages` with the person's words as Slack's own `query`, on a person's press only, under the HELD
+  // `search:read` (every workspace app asks it — slack-manifest USER_SCOPES). 2 pages of 20 a press, 10 pages a sliding
+  // minute (half the method's own Tier 2 bucket, slack-limits.js); a page = one request of the account's budget. A hit
+  // read in context = `around` (the channel at its instant; a thread reply = its thread). Slack matches WORDS and its
+  // modifiers (`in:` `from:` `before:`), so `tokens`: the words say "may be related". A hit ADDS what the copy here never
+  // saved — a public channel never joined, history before the first read, a thread reply — so `unsaved`, never "older".
+  search: Object.freeze({ via: 'query', scope: 'search:read', pageSize: 20, pagesPerPress: 2, perMin: 10, cost: 1, snippet: true, context: 'around', match: 'tokens', adds: 'unsaved' }),
 });
 
 const READ_SCOPES = Manifest.READ_SCOPES;
@@ -873,6 +895,94 @@ function create(record = {}, deps = {}) {
       const ctx = await ctxFor(msgs);
       return { records: msgs.slice(0, size).reverse().map((m) => toRecord(adapterId, convId, m, ctx)) };
     },
+    /**
+     * THE OWNER'S FULL SEARCH, ONE PAGE (design 010; lane slack-search): `search.messages` with the words as Slack's
+     * `query` VERBATIM — no modifier invented (the engine names no conversation scope; the person's own `in:#…` /
+     * `from:@…` / `before:` ride as typed) — newest first, `count` = the row's page, the continuation = Slack's page
+     * NUMBER (≤ 100). Messages only (`search.all` would add files). The envelope is judged (no `messages` object, or
+     * `matches` that is not a list, is not a page); per match the channel id (this adapter's conversation id), its ts,
+     * its author, the thread it sits in (`threadOfMatch`), and the snippet = its text through the mrkdwn reader and the
+     * name door (cut to SR.SNIPPET_READ_MAX first, ≤ SR.SNIPPET_MAX). A 429 holds the method's own bucket for its
+     * Retry-After (`api`) and reaches the engine as `rate-limited` — never retried here.
+     */
+    async search({ query, pageToken = null } = {}) {
+      const q = String(query || '').trim().slice(0, SR.QUERY_MAX);
+      const size = caps.search.pageSize;
+      const tok = pageToken === null || pageToken === undefined || pageToken === '' ? '1' : String(pageToken);
+      const pg = /^\d{1,3}$/.test(tok) ? Number(tok) : 0;
+      if (!(pg >= 1 && pg <= SEARCH_PAGES_MAX)) throw new ChannelError('not-found', `slack search: a page token is a page number 1–${SEARCH_PAGES_MAX}`, { retryable: false, detail: { why: 'page-token' } });
+      const d = await api('search.messages', { query: q, sort: 'timestamp', sort_dir: 'desc', count: size, page: pg });
+      const envelope = (field, why) => new ChannelError('vendor-error', `slack search.messages: ${why} — not a search page`, { retryable: true, detail: { envelope: field } });
+      const box = d && d.messages;
+      if (!box || typeof box !== 'object' || Array.isArray(box)) throw envelope('messages', 'the answer carries no messages');
+      if (box.matches !== undefined && box.matches !== null && !Array.isArray(box.matches)) throw envelope('matches', 'matches is not a list');
+      const items = Array.isArray(box.matches) ? box.matches : [];
+      const paging = box.paging && typeof box.paging === 'object' ? box.paging : {};
+      const pagination = box.pagination && typeof box.pagination === 'object' ? box.pagination : {};
+      const pages = Math.min(SEARCH_PAGES_MAX, Math.max(0, Math.floor(Number(paging.pages !== undefined ? paging.pages : pagination.page_count) || 0)));
+      const ctx = { users: nameMap(), channels: chanNames };
+      const hits = [];
+      let malformed = 0, holding = 0, withSnippet = 0, shape = null;
+      for (const m of items) {
+        const cid = m && m.channel && typeof m.channel === 'object' ? String(m.channel.id || '') : '';
+        const ts = String((m && m.ts) || '');
+        if (!ID_RE.test(cid) || !TS_RE.test(ts)) { malformed++; continue; }
+        const raw = typeof m.text === 'string' ? m.text.slice(0, SR.SNIPPET_READ_MAX) : '';
+        const snippet = raw ? peerName(Text.mrkdwnText(raw, ctx).text, SR.SNIPPET_MAX) : null;
+        if (!shape && m.text !== undefined) shape = SR.snippetShape(m.text);
+        if (snippet) { withSnippet++; if (SR.holdsQuery(snippet, q)) holding++; }
+        hits.push({ convId: cid, vendorId: ts, at: tsMs(ts), fromId: typeof m.user === 'string' && ID_RE.test(m.user) ? m.user : null, threadKey: threadOfMatch(m), snippet });
+      }
+      return { hits, next: items.length && pg < pages ? String(pg + 1) : null, malformed, facts: { shape: shape || SR.snippetShape(undefined), holding, of: withSnippet } };
+    },
+
+    /**
+     * A HIT IN CONTEXT (design 010; lane slack-search): the conversation AT the hit, read-only, ≤ SR.AROUND_MAX, ≤ 3
+     * requests. `conversations.history` ending at its ts (`latest`, inclusive — the hit and the messages before it), then
+     * the messages after it inside half the span that page covered (`oldest` exclusive … `latest`): Slack answers a
+     * window NEWEST first, so an after-window holding more than a page is not the hit's neighbours — that side is left
+     * out (never drawn with a gap). A hit the channel listing does not hold is a THREAD reply (Slack lists replies
+     * apart): its thread is read instead — `conversations.replies` named by the reply's own ts (the vendor's documented
+     * door), oldest first, root first; a thread longer than the page is read again from the hit (`oldest`, inclusive)
+     * under its root. A thread Slack no longer finds (a deleted reply) leaves the channel page.
+     */
+    async around(convId, { vendorId = null, at = null } = {}) {
+      const cid = String(convId || '');
+      const ts = TS_RE.test(String(vendorId || '')) ? String(vendorId) : msTs(at);
+      if (!ID_RE.test(cid) || !ts || !TS_RE.test(ts)) throw new ChannelError('not-found', 'slack around: a hit is named by its conversation and its timestamp', { retryable: false });
+      const half = Math.floor(SR.AROUND_MAX / 2);
+      let requests = 1;
+      const before = await page('conversations.history', cid, { latest: ts, inclusive: 'true', limit: half });
+      let msgs = before.msgs.slice();
+      if (msgs.some((m) => String(m.ts) === ts)) {
+        const oldest = msgs.reduce((a, m) => Math.min(a, Number(m.ts)), Number(ts));
+        const span = Math.max(AROUND_SPAN_MIN_SEC, Math.floor((Number(ts) - oldest) / 2));
+        requests++;
+        const after = await page('conversations.history', cid, { oldest: ts, inclusive: 'false', latest: (Number(ts) + span).toFixed(6), limit: half });
+        if (!after.next) msgs.push(...after.msgs);
+      } else {
+        let r = null;
+        requests++;
+        try { r = await page('conversations.replies', cid, { ts, limit: SR.AROUND_MAX }); }
+        catch (e) { if (!(e instanceof ChannelError && e.code === 'not-found')) throw e; }
+        if (r && r.msgs.length) {
+          msgs = r.msgs.slice();
+          if (!msgs.some((m) => String(m.ts) === ts) && r.next) {
+            const root = msgs.find((m) => String(m.ts) === String(m.thread_ts || '')) || null;
+            requests++;
+            const tail = await page('conversations.replies', cid, { ts, oldest: ts, inclusive: 'true', limit: half });
+            msgs = [...(root ? [root] : []), ...tail.msgs];
+          }
+        }
+      }
+      const seen = new Set();
+      msgs = msgs.filter((m) => !seen.has(String(m.ts)) && seen.add(String(m.ts))).sort((x, y) => Number(x.ts) - Number(y.ts));
+      const hit = msgs.findIndex((m) => String(m.ts) === ts);
+      if (msgs.length > SR.AROUND_MAX) { const from = Math.max(0, Math.min(msgs.length - SR.AROUND_MAX, (hit < 0 ? msgs.length : hit) - half)); msgs = msgs.slice(from, from + SR.AROUND_MAX); }
+      const ctx = await ctxFor(msgs);
+      return { records: msgs.map((m) => toRecord(adapterId, cid, m, ctx)), requests, facts: { before: msgs.filter((m) => Number(m.ts) < Number(ts)).length, after: msgs.filter((m) => Number(m.ts) > Number(ts)).length, target: hit >= 0 } };
+    },
+
     /** ONE message's reactions: the last page's own `reactions[]` while fresh (no request), else `reactions.get`. */
     async reactions(convId, { messageId } = {}) {
       const ts = String(messageId || '');
@@ -990,7 +1100,7 @@ const REACTIONS_GRANT = Object.freeze({ scopes: Object.freeze(['reactions:read']
 module.exports = {
   kind: KIND, caps, create, manifest: MANIFEST, api: API_ROW, sendGrant: SEND_GRANT, reactionsGrant: REACTIONS_GRANT, API_ROW, consent: CONSENT, label: LABEL, integration: INTEGRATION, OPTIONS, optionOf,
   EGRESS, API, FILES_ORIGIN, FIRST_INGEST_MAX, WALK_TTL_MS, PAGE_MAX, PEOPLE_TTL_MS, PEOPLE_LOOKUPS_PER_CALL, RX_CACHE_TTL_MS, ATTACH_MAX_BYTES,
-  toRecord, recordView, factsOfMessage, personOf, avatarUrlOf, AVATAR_ORIGIN, callSlack, sendCapsOf, capsOfScopes, vendorNameOf, tsMs, msTs,
+  toRecord, recordView, factsOfMessage, personOf, avatarUrlOf, AVATAR_ORIGIN, callSlack, sendCapsOf, capsOfScopes, vendorNameOf, tsMs, msTs, threadOfMatch, SEARCH_PAGES_MAX,
   SEND_GRANT, REACTIONS_GRANT, READ_SCOPES, SEND_SCOPES, blocksOf: Text.slackStoredBlocks,
 };
 // lane dc-channels-manifest (rv F2): the module IS the registered thing — register() validates every field the engine

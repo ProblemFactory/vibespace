@@ -187,6 +187,9 @@ const ROWS = [
     shapes: { '<<<<': (n) => '<'.repeat(n), '<@U1>': (n) => '<@U1>'.repeat(n / 5), 'rich_text': (n) => ({ ts: '1700000000.000100', user: 'U1', text: 'x', blocks: slackMany(n) }) } },
   { mod: 'slack', fn: 'recordView', cap: { n: 64 * K, holds: (out) => out && out.author.name.length <= 200 }, capInput: (n) => ({ text: 'x', author: { id: 'B1', name: 'x'.repeat(n), isBot: true }, raw: { username: 'y'.repeat(n) } }), run: (m, x) => m.recordView(typeof x === 'string' ? { text: 'x', author: { id: 'B1', name: x, isBot: true }, raw: { username: x } } : x),
     shapes: { 'a long bot name': (n) => 'a'.repeat(n), '\u202e marks': (n) => '\u202e'.repeat(n) } },
+  // lane slack-search: a search MATCH's thread — its thread_ts (one anchored regex) or the permalink's, cut at 2 048 first
+  { mod: 'slack', fn: 'threadOfMatch', cap: { n: 64 * K, holds: (out) => out === null || /^\d{9,11}\.\d{1,6}$/.test(out) }, capInput: (n) => ({ permalink: 'https://acme.slack.com/archives/C1/p1?' + 'a'.repeat(n) + '&thread_ts=1700000000.000100' }), run: (m, x) => m.threadOfMatch(typeof x === 'string' ? { permalink: x, thread_ts: x } : x),
+    shapes: { 'thread_ts=': (n) => '?thread_ts='.repeat(n / 11), 'digits': (n) => '1'.repeat(n), 'a long permalink': (n) => 'https://x/?' + '&a=1'.repeat(n / 4) } },
 ];
 /** Exports that are NOT parsers over unbounded peer bytes — each with the reason it is not a row. */
 const EXCLUDED = {

@@ -1026,16 +1026,22 @@ class StateSync {
     wsManager.onStateChange(this._stateHandler);
   }
 
-  // Load initial snapshot from server
-  async init(storeName) {
-    if (this.stores[storeName]) return;
-    this.stores[storeName] = { version: 0, data: {}, listeners: new Map() };
-    try {
-      const res = await fetch(`/api/sync/${storeName}`);
-      const snap = await res.json();
-      this.stores[storeName].data = snap.data || {};
-      this.stores[storeName].version = snap.version || 0;
-    } catch {}
+  // Load initial snapshot from server. Resolves true once the server's snapshot is in (false: it could not be read);
+  // a second caller awaits the SAME load — a surface reading a store at its mount (the Doc window's comments, lane
+  // doc-comments-synced) must never take a store still loading for an empty one.
+  init(storeName) {
+    if (this.stores[storeName]) return this.stores[storeName].loaded;
+    const s = this.stores[storeName] = { version: 0, data: {}, listeners: new Map(), loaded: null };
+    s.loaded = (async () => {
+      try {
+        const res = await fetch(`/api/sync/${storeName}`);
+        const snap = await res.json();
+        s.data = snap.data || {};
+        s.version = snap.version || 0;
+        return !!res.ok;
+      } catch { return false; }
+    })();
+    return s.loaded;
   }
 
   get(storeName, key) { return this.stores[storeName]?.data[key]; }

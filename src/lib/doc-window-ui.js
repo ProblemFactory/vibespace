@@ -8,7 +8,9 @@
 //     edits ⇒ the bar "Reload | Keep editing"; after Keep editing the save asks ONCE before overwriting.
 //   · COMMENTS: a selection ⇒ a floating Comment button (the house popover, living exactly as long as its selection —
 //     commentOffer below) ⇒ a note box; the strip on the right
-//     (device-kept per (host, path); a bottom sheet on a phone); Send all = ONE POST /api/doc/comments.
+//     (a bottom sheet on a phone); Send all = ONE POST /api/doc/comments. The strip's rows are VibeSpace's, not a
+//     browser's (lane doc-comments-synced): the server's `drafts` SyncStore row `doc:<host>\u0001<path>`, live on every
+//     client; a browser's old localStorage copy is folded in once (adoptRecord) and removed.
 //   · THE FRAME (design 020, lane doc-editor-ui, 2.369.223 — docs/design-doc-editor-wheel.md § UI): ONE folding bar of glyph
 //     groups (the house bar-fold), ONE status strip of keyed chips (absent with nothing to say), the page a 76ch column
 //     with a block rhythm; tables get hover grips onto the existing menu, code blocks their language chip.
@@ -29,7 +31,8 @@ import { WIDTH_KEY, widthChoice, nextWidth, columnRule, TABLE_CSS, downloadHref,
 
 const POLL_MS = 2000;
 const SHEET_BELOW = 640;   // px of window width: below it the comments strip is a bottom sheet
-const STORE_PREFIX = 'vs-doc-comments:';
+const OLD_PREFIX = 'vs-doc-comments:'; // the device copy before lane doc-comments-synced — read once, folded into the server's record, removed
+const WRITE_MS = 300;                  // the strip's record: changes within this window go out as one write
 const CSS = `
 .doc-window{display:flex;flex-direction:column;height:100%;min-height:0;background:var(--bg-window);color:var(--text);position:relative}
 .doc-window [hidden]{display:none!important}
@@ -197,14 +200,43 @@ export function commentOffer(open) {
 }
 
 export function mountDocWindow({ root, winInfo, host, path, name, from, signal, deps }) {
-  const { t, showToast, fetchJson, createModalShell, showConfirmDialog, showInputDialog, createPopover, showContextMenu, uiScale, onFileChanged, sameFile, makeRaw, isPhone, createBarFold, icons: I, sanitizeHtml, copyText, Marked } = deps;
+  const { t, showToast, fetchJson, createModalShell, showConfirmDialog, showInputDialog, createPopover, showContextMenu, uiScale, onFileChanged, sameFile, makeRaw, isPhone, createBarFold, icons: I, sanitizeHtml, copyText, Marked, saveDraft, loadDraft, getStateSync } = deps;
   if (!document.getElementById('doc-window-css')) { const st = mk('style'); st.id = 'doc-window-css'; st.textContent = CSS; document.head.appendChild(st); }
   let widthPref = 'fit'; try { widthPref = widthChoice(localStorage.getItem(WIDTH_KEY)); } catch { } // a DEVICE's choice
   const S = { width: widthPref, source: '', base: 0, mode: 'rich', verdict: null, dirty: false, kept: 0, confirmed: 0, busy: false, view: null, ed: null, loaded: null, raw: null, rawBefore: '', owner: null, from, sending: false, at: '', note: '', stripOpen: false };
-  const storeKey = STORE_PREFIX + (host || '') + '\u0001' + path;
-  const loadComments = () => { try { const v = JSON.parse(localStorage.getItem(storeKey) || '[]'); return Array.isArray(v) ? v.filter((c) => c && typeof c.id === 'string' && typeof c.note === 'string').slice(0, M.LIMITS.items) : []; } catch { return []; } };
-  const saveComments = () => { try { if (comments.length) localStorage.setItem(storeKey, JSON.stringify(comments)); else localStorage.removeItem(storeKey); } catch { } };
-  let comments = loadComments();
+  // THE STRIP'S RECORD IS THE SERVER'S (lane doc-comments-synced — owner 2026-10-12: eighteen comments "disappeared"; they
+  // were in another computer's browser): the `drafts` SyncStore's `doc:<host>\u0001<path>` row through the composer's own
+  // draft door (saveDraft / loadDraft / the StateSync listener), live on every client.
+  const draftId = (host || '') + '\u0001' + path, draftKey = 'doc:' + draftId, oldKey = OLD_PREFIX + draftId;
+  const sync = getStateSync ? getStateSync() : null;
+  let comments = M.commentRows(loadDraft('doc', draftId));
+  let writeT = 0;
+  const writeNow = () => { clearTimeout(writeT); writeT = 0; saveDraft('doc', draftId, comments.length ? comments.slice() : ''); };
+  // every change writes the record: coalesced within WRITE_MS; a send's emptying at once (`now`)
+  const saveComments = (now = false) => { clearTimeout(writeT); writeT = 0; if (now) writeNow(); else writeT = setTimeout(writeNow, WRITE_MS); };
+  // another client's change patches this strip in place (keyed rows; an open note box is its own popover, left alone);
+  // a write of ours still pending is newer and wins — it goes out within WRITE_MS
+  const onRecord = (v) => { if (writeT) return; comments = M.commentRows(v); renderStrip(); };
+  sync?.on('drafts', draftKey, onRecord);
+  window.addEventListener('pagehide', () => { if (writeT) writeNow(); }, { signal });
+  signal.addEventListener('abort', () => { sync?.off('drafts', draftKey, onRecord); if (writeT) writeNow(); });
+  /** THE ONE-TIME MIGRATION, per browser per document: the store's snapshot first (a store still loading is never taken
+   *  for an empty one), then this browser's old rows folded in (M.mergeComments — the server's first, local-only ids
+   *  appended: a stale copy can only add) and written; the old key removed (rows past the cap wait there for room). */
+  async function adoptRecord() {
+    if (!sync || !(await sync.init('drafts')) || signal.aborted) return;
+    const server = M.commentRows(loadDraft('doc', draftId));
+    comments = writeT ? M.mergeComments(server, comments) : server;
+    let local = [];
+    try { local = M.commentRows(JSON.parse(localStorage.getItem(oldKey) || '[]')); } catch { local = []; }
+    if (local.length) {
+      const merged = M.mergeComments(comments, local);
+      if (JSON.stringify(merged) !== JSON.stringify(comments)) { comments = merged; saveComments(true); }
+      const left = local.filter((c) => !merged.some((m) => m.id === c.id));
+      try { if (left.length) localStorage.setItem(oldKey, JSON.stringify(left)); else localStorage.removeItem(oldKey); } catch { }
+    }
+    renderStrip();
+  }
 
   // ── THE BAR (design 020): ONE row, glyph groups [block style ▾] | B I </> | • 1. ☑ | table link image | raw, folded by
   //    priority into its ⋯ (src/lib/bar-fold.js — the house fold; 0 never folds, higher folds first); comments at the end ──
@@ -792,7 +824,7 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
     cancel.addEventListener('click', () => close());
     add.addEventListener('click', () => {
       const note = ta.value.trim(); if (!note) { ta.focus(); return; }
-      if (comments.length >= M.LIMITS.items) { say(t('At most {n} comments — send these first', { n: M.LIMITS.items })); return; }
+      if (comments.length >= M.LIMITS.sendItems) { say(t('At most {n} comments — send these first', { n: M.LIMITS.sendItems })); return; }
       comments.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), quote: M.commentItem({ quote, note }).quote, ...(line ? { line } : {}), ...(raw ? { raw } : {}), note });
       saveComments(); renderStrip(); close(); setStrip(true);
     });
@@ -842,16 +874,18 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
   btnSend.addEventListener('click', async () => {
     if (S.sending || !comments.length) return;
     S.sending = true; btnSend.textContent = t('Sending…');
-    const r = await fetchJson('/api/doc/comments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ host, path, from: S.from, items: comments.map((c) => ({ quote: c.quote, ...(c.line ? { line: c.line } : {}), note: c.note })) }) });
+    const batch = comments.slice(); // this send's rows — another client may add or remove one while it is out
+    const drop = (rows) => { const gone = new Set(rows.map((c) => c.id)); comments = comments.filter((c) => !gone.has(c.id)); saveComments(true); renderStrip(); };
+    const r = await fetchJson('/api/doc/comments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ host, path, from: S.from, items: batch.map((c) => ({ quote: c.quote, ...(c.line ? { line: c.line } : {}), note: c.note })) }) });
     S.sending = false; btnSend.textContent = t('Send all');
     if (r && r.ok) {
-      comments = []; saveComments(); renderStrip();
+      drop(batch);
       showToast(r.delivered === 'stashed' ? t('Comments wait for the chat\'s next turn') : t('Comments sent to the chat'), { type: 'success' });
       say(r.messages > 1 ? t('Sent {n} comments in {m} messages', { n: r.count, m: r.messages }) : t('Sent {n} comments', { n: r.count }));
     } else if (r && r.code === 'no_owner') { S.owner = null; renderStrip(); }
     else if (r && Number.isInteger(r.sent) && r.sent > 0) {   // part-way: what went out leaves the strip, the rest stays
-      const n = comments.length; comments = comments.slice(r.sent); saveComments(); renderStrip();
-      say(t('Sent {sent} of {n} — the rest are still here', { sent: r.sent, n }));
+      drop(batch.slice(0, r.sent));
+      say(t('Sent {sent} of {n} — the rest are still here', { sent: r.sent, n: batch.length }));
     } else say(t('Could not send the comments: {why}', { why: (r && r.error) || t('the server did not answer') }));
   }, { signal });
   async function resolveOwner() {
@@ -861,6 +895,6 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
   winInfo._docAdopt = (sid) => { S.from = sid; if (winInfo._openSpec) winInfo._openSpec = { ...winInfo._openSpec, from: sid }; resolveOwner(); };
   winInfo._docClose = () => { clearInterval(timer); };
 
-  renderStrip(); resolveOwner(); load({ first: true });
+  renderStrip(); adoptRecord(); resolveOwner(); load({ first: true });
   return { save, load, state: S };
 }

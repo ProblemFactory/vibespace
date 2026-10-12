@@ -1,0 +1,238 @@
+{
+ "_note": "lane slack-search: search.messages answers in Slack's DOCUMENTED shape (docs.slack.dev/reference/methods/search.messages, read 2026-10-12: messages.matches[] {channel{id,name,…}, iid, permalink, team, text, ts, type, user, username}, messages.paging {count,total,page,pages}, messages.pagination {total_count,page,per_page,page_count,first,last}); the documented match has no thread field — a reply's permalink names it (?thread_ts=…&cid=…), and one match here also carries thread_ts. `archive` = history the first read never reaches: served by conversations.history ONLY to a `latest`-bounded read (older / around), per channel. C0LAUNCH01 is a public channel the person never joined (not in users.conversations) — search still finds it. Invented text, no real data.",
+ "search": {
+  "launch plan": [
+   [
+    {
+     "channel": {
+      "id": "C0LAUNCH01",
+      "is_ext_shared": false,
+      "is_mpim": false,
+      "is_org_shared": false,
+      "is_pending_ext_shared": false,
+      "is_private": false,
+      "is_shared": false,
+      "name": "launch",
+      "pending_shared": []
+     },
+     "iid": "iid-C0LAUNCH01-1699990300.000300",
+     "permalink": "https://acme-ai.slack.com/archives/C0LAUNCH01/p1699990300000300?thread_ts=1699990000.000200&cid=C0LAUNCH01",
+     "team": "T0ACME001",
+     "text": "the *launch plan* v2 is ready for <@U0BOB0001>",
+     "ts": "1699990300.000300",
+     "type": "message",
+     "user": "U0ALICE01",
+     "username": "u0alice01",
+     "thread_ts": "1699990000.000200"
+    },
+    {
+     "channel": {
+      "id": "C0GENERAL",
+      "is_ext_shared": false,
+      "is_mpim": false,
+      "is_org_shared": false,
+      "is_pending_ext_shared": false,
+      "is_private": false,
+      "is_shared": false,
+      "name": "general",
+      "pending_shared": []
+     },
+     "iid": "iid-C0GENERAL-1699900000.000050",
+     "permalink": "https://acme-ai.slack.com/archives/C0GENERAL/p1699900000000050",
+     "team": "T0ACME001",
+     "text": "launch plan draft — see <https://x.test/plan|the plan> &amp; comment",
+     "ts": "1699900000.000050",
+     "type": "message",
+     "user": "U0BOB0001",
+     "username": "u0bob0001"
+    }
+   ],
+   [
+    {
+     "channel": {
+      "id": "D0ALICE01",
+      "is_ext_shared": false,
+      "is_mpim": false,
+      "is_org_shared": false,
+      "is_pending_ext_shared": false,
+      "is_private": false,
+      "is_shared": false,
+      "name": "U0ALICE01",
+      "pending_shared": [],
+      "is_im": true
+     },
+     "iid": "iid-D0ALICE01-1699950000.000070",
+     "permalink": "https://acme-ai.slack.com/archives/D0ALICE01/p1699950000000070",
+     "team": "T0ACME001",
+     "text": "can you share the launch plan?",
+     "ts": "1699950000.000070",
+     "type": "message",
+     "user": "U0ALICE01",
+     "username": "u0alice01"
+    }
+   ]
+  ],
+  "only link thread": [
+   [
+    {
+     "channel": {
+      "id": "C0LAUNCH01",
+      "is_ext_shared": false,
+      "is_mpim": false,
+      "is_org_shared": false,
+      "is_pending_ext_shared": false,
+      "is_private": false,
+      "is_shared": false,
+      "name": "launch",
+      "pending_shared": []
+     },
+     "iid": "iid-C0LAUNCH01-1699990100.000250",
+     "permalink": "https://acme-ai.slack.com/archives/C0LAUNCH01/p1699990100000250?thread_ts=1699990000.000200&cid=C0LAUNCH01",
+     "team": "T0ACME001",
+     "text": "first draft of the thread",
+     "ts": "1699990100.000250",
+     "type": "message",
+     "user": "U0BOB0001",
+     "username": "u0bob0001"
+    }
+   ]
+  ],
+  "odd answers": [
+   [
+    {
+     "channel": {
+      "id": "not an id"
+     },
+     "ts": "1699900000.000050",
+     "text": "bad channel"
+    },
+    {
+     "channel": {
+      "id": "C0GENERAL"
+     },
+     "ts": "yesterday",
+     "text": "bad ts"
+    },
+    {
+     "channel": {
+      "id": "C0GENERAL"
+     },
+     "ts": "1699900400.000060",
+     "user": "U0ALICE01",
+     "text": "<b>xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    }
+   ]
+  ]
+ },
+ "archive": {
+  "C0GENERAL": [
+   {
+    "type": "message",
+    "user": "U0ALICE01",
+    "text": "I'll review it tonight",
+    "ts": "1699900400.000060",
+    "team": "T0ACME001"
+   },
+   {
+    "type": "message",
+    "user": "U0SELF001",
+    "text": "thanks, reading now",
+    "ts": "1699900200.000055",
+    "team": "T0ACME001"
+   },
+   {
+    "type": "message",
+    "user": "U0BOB0001",
+    "text": "launch plan draft — see <https://x.test/plan|the plan> &amp; comment",
+    "ts": "1699900000.000050",
+    "team": "T0ACME001"
+   },
+   {
+    "type": "message",
+    "user": "U0ALICE01",
+    "text": "agenda for the kickoff",
+    "ts": "1699899500.000045",
+    "team": "T0ACME001"
+   },
+   {
+    "type": "message",
+    "user": "U0BOB0001",
+    "text": "kickoff notes are up",
+    "ts": "1699899000.000040",
+    "team": "T0ACME001"
+   }
+  ],
+  "C0LAUNCH01": [
+   {
+    "type": "message",
+    "user": "U0BOB0001",
+    "text": "unrelated channel message",
+    "ts": "1699990500.000400",
+    "team": "T0ACME001"
+   },
+   {
+    "type": "message",
+    "user": "U0BOB0001",
+    "text": "Launch thread",
+    "ts": "1699990000.000200",
+    "team": "T0ACME001",
+    "thread_ts": "1699990000.000200",
+    "reply_count": 2,
+    "latest_reply": "1699990300.000300"
+   }
+  ],
+  "D0ALICE01": [
+   {
+    "type": "message",
+    "user": "U0ALICE01",
+    "text": "can you share the launch plan?",
+    "ts": "1699950000.000070",
+    "team": "T0ACME001"
+   },
+   {
+    "type": "message",
+    "user": "U0SELF001",
+    "text": "hi Alice",
+    "ts": "1699949000.000065",
+    "team": "T0ACME001"
+   }
+  ]
+ },
+ "replies": {
+  "C0LAUNCH01|1699990000.000200": {
+   "ok": true,
+   "has_more": false,
+   "response_metadata": {
+    "next_cursor": ""
+   },
+   "messages": [
+    {
+     "type": "message",
+     "user": "U0BOB0001",
+     "text": "Launch thread",
+     "ts": "1699990000.000200",
+     "team": "T0ACME001",
+     "thread_ts": "1699990000.000200",
+     "reply_count": 2,
+     "latest_reply": "1699990300.000300"
+    },
+    {
+     "type": "message",
+     "user": "U0BOB0001",
+     "text": "first draft of the thread",
+     "ts": "1699990100.000250",
+     "team": "T0ACME001",
+     "thread_ts": "1699990000.000200"
+    },
+    {
+     "type": "message",
+     "user": "U0ALICE01",
+     "text": "the *launch plan* v2 is ready for <@U0BOB0001>",
+     "ts": "1699990300.000300",
+     "team": "T0ACME001",
+     "thread_ts": "1699990000.000200"
+    }
+   ]
+  }
+ }
+}

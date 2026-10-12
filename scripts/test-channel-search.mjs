@@ -80,9 +80,9 @@ const words = (match) => SR.statusText({ state: 'done', found: 12, match }, { ve
 // verify r1 F2: the words read the row's `adds` (what a hit ADDS to the saved copy), never the adapter id
 const said = (adds, found, match, vendor = 'Gmail') => SR.statusText({ state: 'done', found, match, adds }, { vendor });
 const addsTable = [
-  [said('unsaved', 3, 'tokens'), "Asked Gmail's whole mailbox: 3 not saved here — may be related"],
-  [said('unsaved', 3, 'substring'), "Asked Gmail's whole mailbox: found 3 not saved here"],
-  [said('unsaved', 0, 'tokens'), "Asked Gmail's whole mailbox: nothing that is not saved here"],
+  [said('unsaved', 3, 'tokens'), "Asked Gmail's whole history: 3 not saved here — may be related"],
+  [said('unsaved', 3, 'substring'), "Asked Gmail's whole history: found 3 not saved here"],
+  [said('unsaved', 0, 'tokens'), "Asked Gmail's whole history: nothing that is not saved here"],
   [said('older', 3, 'unknown', 'Lark'), "Asked Lark's whole history: 3 older messages may be related"],
   [said('older', 3, 'substring', 'Lark'), "Asked Lark's whole history: 3 older found"],
   [said('older', 0, 'unknown', 'Lark'), "Asked Lark's whole history: nothing older"],
@@ -93,6 +93,10 @@ const addsTable = [
 ];
 ok(addsTable.every(([got, want]) => got === want), "F2 the words per `adds`: 'unsaved' says \"not saved here\" (Gmail's hits: mail outside the synced scope, a reply not synced yet), 'older' keeps Lark's words; one 'unsaved' row among the asked turns the head", JSON.stringify(addsTable.filter(([g, w]) => g !== w)));
 const gRow = require(path.join(REPO, 'src/channels/gmail.js')).caps.search, lRow = require(path.join(REPO, 'src/channels/lark.js')).caps.search;
+// lane slack-search (owner 2026-10-12): Slack's row — a hit adds what the copy never saved (a channel never joined, a thread
+// reply, history before the first read): "not saved here", and token matching: "may be related", never "found"
+const sRow = require(path.join(REPO, 'src/channels/slack.js')).caps.search;
+ok(sRow && sRow.adds === 'unsaved' && sRow.match === 'tokens' && sRow.context === 'around' && SR.sectionHead([sRow.adds], { vendor: 'Slack' }) === "Not saved here — from Slack's search" && !/found|older/i.test(said(sRow.adds, 3, sRow.match, 'Slack')), "Slack's row: adds 'unsaved', matches tokens — its press says \"not saved here\" and never \"found\" / \"older\"", JSON.stringify([sRow && sRow.adds, said(sRow.adds, 3, sRow.match, 'Slack')]));
 ok(gRow.adds === 'unsaved' && lRow.adds === 'older' && !/older/i.test(said(gRow.adds, 3, gRow.match) + SR.sectionHead([gRow.adds], { vendor: 'Gmail' })) && said(lRow.adds, 12, lRow.match, 'Lark') === words('unknown'), "F2 the rows: Gmail declares adds 'unsaved' (its press never says \"older\"), Lark 'older' (its words unchanged)", JSON.stringify([gRow.adds, lRow.adds]));
 ok(words('unknown') === "Asked Lark's whole history: 12 older messages may be related" && words('tokens') === words('unknown') && words('substring') === "Asked Lark's whole history: 12 older found", 'VS3: only a measured `substring` says "found" — until then "may be related"');
 ok(/Re-authorize/.test(SR.statusText({ state: 'refused', code: 'needs-scope' })) && /40 s/.test(SR.statusText({ state: 'refused', code: 'vendor-budget', retryAfterSec: 40 }, { vendor: 'Lark' })) && SR.statusText({ state: 'refused', code: 'not-supported' }) === 'This channel offers no search of its own', 'the refusals are worded: Re-authorize, the wait, no search of its own');

@@ -943,7 +943,7 @@ export async function showLaunchDialog(app, opts = {}) {
       b.title = !b.disabled ? machineName(m) : `${machineName(m)} — ${why}`;
       b.onclick = () => {
         // design 014 D1: a Windows / macOS row opens ITS DESKTOP's dialog — the app catalog stays on the machine it shows
-        if (m.desktop && !b.disabled) { showMachineDesktopDialog(app, m, { install: (mm, o) => showInstallDialog(mm, o), recheck: async (id) => { const r = await fetchJson('/api/desktop/machines'); if (!r || !Array.isArray(r.machines)) return null; if (overlay.isConnected) { machines = r.machines; renderMachines(); } return r.machines.find((x) => x.hostId === id) || null; } }); return; }
+        if (m.desktop && !b.disabled) { showMachineDesktopDialog(app, m, { install: (mm, o) => showInstallDialog(mm, o), closeOpener: close, recheck: async (id) => { const r = await fetchJson('/api/desktop/machines'); if (!r || !Array.isArray(r.machines)) return null; if (overlay.isConnected) { machines = r.machines; renderMachines(); } return r.machines.find((x) => x.hostId === id) || null; } }); return; }
         if (b.disabled || host === m.hostId) return; host = m.hostId; data = data ? { apps: data.apps } : null; listError = null; renderMachines(); render(); refresh(); mountApps(); };
       machinesEl.appendChild(b);
     }

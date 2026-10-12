@@ -306,8 +306,8 @@ function statusText(s, { t = defaultT, vendor = '' } = {}) {
   if (v.state === 'done') {
     const n = Math.max(0, Number(v.found) || 0);
     if (v.adds === 'unsaved') {
-      if (!n) return t("Asked {vendor}'s whole mailbox: nothing that is not saved here", { vendor: V });
-      return v.match === 'substring' ? t("Asked {vendor}'s whole mailbox: found {n} not saved here", { vendor: V, n }) : t("Asked {vendor}'s whole mailbox: {n} not saved here — may be related", { vendor: V, n });
+      if (!n) return t("Asked {vendor}'s whole history: nothing that is not saved here", { vendor: V });
+      return v.match === 'substring' ? t("Asked {vendor}'s whole history: found {n} not saved here", { vendor: V, n }) : t("Asked {vendor}'s whole history: {n} not saved here — may be related", { vendor: V, n });
     }
     if (!n) return t("Asked {vendor}'s whole history: nothing older", { vendor: V });
     return v.match === 'substring' ? t("Asked {vendor}'s whole history: {n} older found", { vendor: V, n }) : t("Asked {vendor}'s whole history: {n} older messages may be related", { vendor: V, n });

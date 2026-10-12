@@ -27,6 +27,7 @@
 import { t } from './i18n.js';
 import { showToast, COUNTER_ZOOM } from './utils.js';
 import { createPictureShell, RECONNECT_LADDER, streamUrl, pageIsSecure, closeWordsKey } from './picture-shell.js';
+import { installSubtleFallback } from './aes-fallback.js';
 
 // noVNC uses top-level await, which can't live inside our IIFE bundle — it's
 // built as a SEPARATE ESM file (public/novnc.js, see the build script) and
@@ -55,6 +56,8 @@ export { COUNTER_ZOOM }; // the ONE definition is utils.js (shared with every xt
 export { RECONNECT_LADDER, streamUrl };
 /** The stream KIND this view shows (a record's `stream`) — desktop-app-window.js registers the view under it. */
 export const STREAM_KIND = 'rfb';
+/** lane mac-ard-signin: how long a sign-in handed to noVNC may go unanswered before the view says it could not complete. */
+export const SIGNIN_BOUND_MS = 20000;
 
 /**
  * createVncView(host, opts) — mounts the picture view into `host`.
@@ -84,9 +87,24 @@ export function createVncView(host, { url, before = null, labels = {}, autoRecon
   let refused = null; // design 014 D1: the RFB whose sign-in was refused / cancelled (its words stay, no retry)
   let rfbLive = false; // K2: noVNC logs "Tried changing state of a disconnected RFB object" for a disconnect() on a dead RFB — never ask
   let mode = 'active'; // x5
+  // lane mac-ard-signin (owner 2026-10-12: the Mac's name + password typed, then 连接中… for 268 s): the sign-in handed to
+  // noVNC and not answered yet — { rfb, timer, off }. It ends at 'connect', at a refusal, or as a NAMED failure: noVNC's
+  // async auth rejecting (it has no error event — the rejection is unhandled, so this view listens for one from noVNC's
+  // own code while it waits), 20 s of silence, or the socket closing before the desktop came. Never 连接中… past a sign-in.
+  let signing = null;
+  const endSignIn = () => { if (!signing) return; clearTimeout(signing.timer); signing.off(); signing = null; };
+  const signInFailed = (mine, why) => {
+    if (mine !== rfb || shell.closed || refused === mine) return;
+    endSignIn();
+    refused = mine; shell.unwant(); // its words stay (the disconnect that follows keeps them) and the ladder does not re-ask the sign-in
+    setStatus(t('The sign-in could not be completed: {why}', { why }), { error: true, reconnect: true });
+    emit('error', 'signin');
+    if (rfbLive) { try { mine.disconnect(); } catch {} }
+  };
 
   const connect = async () => {
     if (shell.closed) return;
+    endSignIn();
     shell.want();
     setStatus(L.starting);
     emit('starting');
@@ -108,6 +126,9 @@ export function createVncView(host, { url, before = null, labels = {}, autoRecon
     catch { setStatus(L.unavailable, { error: true, reconnect: true }); emit('error', L.unavailable); return; }
     if (shell.closed) return;
     try { if (rfb && rfbLive) rfb.disconnect(); } catch {}
+    // lane mac-ard-signin: a Mac's ARD sign-in encrypts with WebCrypto, which an http page (not a secure context) lacks —
+    // the PURE AES stands in as an own `crypto.subtle` there (src/lib/aes-fallback.js); a secure context never sees it
+    if (credentials) installSubtleFallback(globalThis.crypto);
     rfb = new RFB(mount, typeof url === 'function' ? url() : url);
     rfbLive = true;
     const mine = rfb;
@@ -123,14 +144,20 @@ export function createVncView(host, { url, before = null, labels = {}, autoRecon
         try { c = await credentials((e.detail && e.detail.types) || ['password']); } catch { c = null; }
         if (mine !== rfb || shell.closed) return;
         if (!c) { refused = mine; shell.unwant(); try { rfb.disconnect(); } catch {} setStatus(t('Sign-in cancelled'), { reconnect: true }); return; }
-        try { rfb.sendCredentials(c); } catch {}
+        try { rfb.sendCredentials(c); } catch (err) { signInFailed(mine, String((err && err.message) || err).slice(0, 160)); return; }
+        endSignIn();
+        setStatus(t('Signing in…'));
+        const onRejection = (ev) => { const r = ev && ev.reason; if (/novnc/i.test(String((r && r.stack) || ''))) signInFailed(mine, String((r && r.message) || r).slice(0, 160)); };
+        globalThis.addEventListener?.('unhandledrejection', onRejection);
+        signing = { rfb: mine, timer: setTimeout(() => signInFailed(mine, t('the machine did not answer in {n} s', { n: SIGNIN_BOUND_MS / 1000 })), SIGNIN_BOUND_MS), off: () => globalThis.removeEventListener?.('unhandledrejection', onRejection) };
       });
-      rfb.addEventListener('securityfailure', (e) => { refused = mine; shell.unwant(); setStatus(t('The machine refused the sign-in: {why}', { why: (e.detail && e.detail.reason) || t('wrong name or password') }), { error: true, reconnect: true }); emit('error', 'securityfailure'); });
+      rfb.addEventListener('securityfailure', (e) => { if (signing && signing.rfb === mine) endSignIn(); refused = mine; shell.unwant(); setStatus(t('The machine refused the sign-in: {why}', { why: (e.detail && e.detail.reason) || t('wrong name or password') }), { error: true, reconnect: true }); emit('error', 'securityfailure'); });
     }
-    rfb.addEventListener('connect', () => { shell.resetLadder(); shell.setCloseWords(''); setStatus(t('Connected')); emit('connected'); });
+    rfb.addEventListener('connect', () => { if (signing && signing.rfb === mine) endSignIn(); shell.resetLadder(); shell.setCloseWords(''); setStatus(t('Connected')); emit('connected'); });
     rfb.addEventListener('disconnect', (e) => {
       if (mine === rfb) rfbLive = false;
       if (shell.closed) return;
+      if (signing && signing.rfb === mine) signInFailed(mine, t('the machine closed the connection')); // lane mac-ard-signin: a close while signing in
       if (refused === mine) { emit('disconnected', { clean: false }); return; } // design 014 D1: the sign-in's own words stay
       setStatus(e.detail?.clean ? t('Disconnected') : t('Connection lost'), { error: !e.detail?.clean, reconnect: true });
       emit('disconnected', { clean: !!e.detail?.clean });
@@ -169,7 +196,7 @@ export function createVncView(host, { url, before = null, labels = {}, autoRecon
   });
   reBtn.onclick = () => { shell.resetLadder(); connect(); };
 
-  const disconnect = () => { shell.unwant(); try { rfb?.disconnect(); } catch {} rfb = null; };
+  const disconnect = () => { endSignIn(); shell.unwant(); try { rfb?.disconnect(); } catch {} rfb = null; };
   const dispose = () => { shell.close(); disconnect(); };
   const focus = () => { try { rfb?.focus(); } catch {} };
   /** x5: 'active' drives the display (and re-asks for this pane's size), 'watch' / 'blocked' are view-only. */

@@ -748,7 +748,7 @@ const STORAGE = {
   'src/lib/chat-view.js|localStorage|TAUGHT_KEY': ['pref', 'lane artifacts-auto-open-quiet: "1" once the one-time toast about the automatic open was shown on this device (vs-auto-open-taught) — a flag, never a name or a path'],
   'src/lib/artifact-card.js|localStorage|VIEW_KEY': ['pref', 'lane artifacts-list-scale: the Artifacts list\'s view on this device (vs-artifacts-view) — the group / sort choice and the folded group keys (a kind, a helper\'s label, a day); never a row, a name or a path'],
   'src/lib/doc-window-ui.js|localStorage|WIDTH_KEY': ['pref', 'lane doc-window-width-export: the Doc window\'s page width on this device (fit | comfortable — doc-window-model widthChoice)'],
-  'src/lib/doc-window-ui.js|localStorage|storeKey': ['owner', 'lane doc-window: the Doc window\'s comments strip per (host, path) on this device — the owner\'s own notes on a markdown file, each with the quote of the text it is about, until Send all; never a store record of the five kinds'],
+  'src/lib/doc-window-ui.js|localStorage|oldKey': ['owner', 'lane doc-window → lane doc-comments-synced: the Doc window\'s OLD device copy of a comments strip per (host, path) — read once, folded into the server\'s drafts record, removed (only rows past the 200 cap are written back, waiting for room); the owner\'s own notes on a markdown file, each with the quote of the text it is about; never a store record of the five kinds'],
   'src/lib/sidebar-state.js|localStorage|\'sessionCustomNames\'': ['owner', 'the names the owner typed for sessions (never a store record)'],
   'src/lib/machine-desktop.js|localStorage|RUNS_KEY': ['owner', 'design 014 D1: the owner\'s own last 3 "Run on its desktop…" lines per machine (typed by the owner, re-judged by desktopRunPlan before they are offered; never an agent\'s, never a record)'],
   'src/lib/sidebar-state.js|localStorage|\'sessionModes\'': ['ids', 'terminal | chat per session id'],
@@ -866,7 +866,7 @@ const foldsCarryWords = async (layoutPath) => {
 // runtime leg) or why none can reach it. A new store is RED until it says which; a row the tree no longer has is RED.
 const SERVER_STORES = {
   // key: [class, what it holds + the gate]
-  'sync:drafts': ['owner', 'data/drafts.json — the composer\'s draft per session: what the owner typed (the only writers are chat-input.js and utils.js clearDraft, pinned below); declared in CLIENT_EXCEPTIONS'],
+  'sync:drafts': ['owner', 'data/drafts.json — the composer\'s draft per session + (lane doc-comments-synced) a document\'s comment drafts per (host, path) under doc:: what the owner typed and the quote of the markdown text it is about (the only writers are chat-input.js, doc-window-ui.js and utils.js clearDraft, pinned below); declared in CLIENT_EXCEPTIONS'],
   'sync:settings': ['pref', 'data/settings-sync.json — a dormant settings mirror (server code reads data/settings.json); schema keys, values the owner picked or typed'],
   'sync:uploads': ['ids', 'data/uploads-sync.json — the upload history: file names, paths, sizes'],
   'sync:stage': ['ids', 'data/stage-sync.json — the stage\'s hero / slot / grid / per-session workspace: openSpecs (H2: ids), bounds, scroll offsets (stage-manager _captureExtras) — no title'],
@@ -912,7 +912,7 @@ const serverStores = (srcs) => {
   ok(Object.values(SERVER_STORES).every(([c, why]) => SERVER_STORE_CLASSES.has(c) && why.length >= 30), 'H1c every row names its class (owner / pref / ids / guarded / telemetry / declared) and what it holds');
   // the one store the owner TYPES into: nothing but the composer writes a draft
   const drafters = [...libSources()].filter(([, text]) => /\bsaveDraft\(/.test(text.replace(/export function saveDraft\(/, ''))).map(([rel]) => rel);
-  ok(drafters.join() === 'src/lib/chat-input.js,src/lib/utils.js' && /export function clearDraft\(type, id\) \{\s*saveDraft\(type, id, ''\);/.test(read('src/lib/utils.js')), 'H1c …a composer draft is written by the composer only (chat-input.js; utils.js clearDraft writes \'\') — no surface puts a record\'s words into data/drafts.json', drafters);
+  ok(drafters.join() === 'src/lib/chat-input.js,src/lib/doc-window-ui.js,src/lib/utils.js' && /saveDraft\('doc', draftId, comments\.length \? comments\.slice\(\) : ''\)/.test(read('src/lib/doc-window-ui.js')) && /export function clearDraft\(type, id\) \{\s*saveDraft\(type, id, ''\);/.test(read('src/lib/utils.js')), 'H1c …a draft is written by the composer (chat-input.js; utils.js clearDraft writes \'\') and the Doc window\'s comment strip only (doc-window-ui.js: the owner\'s notes on a markdown file under doc:) — no surface puts a record\'s words into data/drafts.json', drafters);
   // the export leg: the walk's probe exports EVERY section the route offers, after the clear
   const walk = read('scripts/test-record-clear-walk.mjs');
   const secs = rows.filter((r) => r.startsWith('export:')).map((r) => r.slice(7));
@@ -1765,6 +1765,7 @@ const I_RECV = {
   // ── not a record: what each is ──
   'src/harnesses/claude-oat-expiry.js|a': ['account', 'an account / pool name'], 'server.js|h': ['host', 'a machine name'],
   'src/accounts.js|a': ['account', 'an account'], 'src/accounts.js|target': ['account', 'an account'],
+  'src/lib/aes-fallback.js|key.algorithm': ['crypto key', 'the imported AES key\'s algorithm name (AES-CBC / AES-ECB) in a mismatch Error — a constant of the fallback, never a record (lane mac-ard-signin; int259 seam)'],
   'src/browser-profiles.js|f': ['launch fatal row', 'a fixed reason code of LAUNCH_FATALS (lane browser-tmpdir-socket-length)'],
   'src/browser-profiles.js|existing': ['browser profile', 'a profile label'], 'src/browser-profiles.js|profile': ['browser profile', 'a profile label'], 'src/browser-profiles.js|row': ['browser profile', 'a profile label'],
   'src/browser-switch.js|profile': ['browser profile', 'a profile label'], 'src/browser-trace.js|profile': ['browser profile', 'a profile label'],

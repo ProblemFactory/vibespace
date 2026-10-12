@@ -41,6 +41,9 @@ const METHOD_TIERS = Object.freeze({
   'files.getUploadURLExternal': 4,
   'files.upload': 4,
   'files.completeUploadExternal': 4,
+  // lane slack-search (owner 2026-10-12): the owner's full search — `search.messages` (a user token, search:read), its
+  // own bucket at the published Tier 2 floor; the engine's search row asks ≤ 10 pages of it a sliding minute
+  'search.messages': 2,
 });
 const METHODS = Object.freeze(Object.keys(METHOD_TIERS));
 const WINDOW_MS = 60 * 1000;

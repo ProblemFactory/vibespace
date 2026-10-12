@@ -16,11 +16,16 @@
 // only HTTP Basic WS_CLIENT_ID:WS_CLIENT_SECRET, a live code (used once) and the SAME redirect_uri, with
 // `authed_user.access_token` (an issued token auth.test then accepts). `mode.whoami[<token>]` overrides auth.test's
 // answer for that token (a second member).
+// lane slack-search: `search.messages` answers scripts/fixtures/slack/search.json's pages by the query as sent (Slack's documented
+// shape; an unknown query = an empty page); its `archive` = history the first read never reaches, served by
+// conversations.history only to a `latest`-bounded read (older / around); `inclusive: 'true'` widens oldest / latest;
+// conversations.replies answers a thread named by ANY of its messages' ts (the vendor's documented door), paged by `limit`.
 // Also loaded by scripts/fixtures/channels-vendor-stub.cjs for chrome legs (the same answers).
 'use strict';
 const fs = require('fs');
 const path = require('path');
 const FX = JSON.parse(fs.readFileSync(path.join(__dirname, 'slack', 'recorded.json'), 'utf-8'));
+const SX = JSON.parse(fs.readFileSync(path.join(__dirname, 'slack', 'search.json'), 'utf-8'));   // lane slack-search
 const TOKEN = ['xoxp', '1111111111', '2222222222', '3333333333', 'fixturetokenabcdef'].join('-'); // split: a token-shaped literal in the source trips GitHub push protection
 const CONFIG_TOKEN = 'xoxe.' + ['xoxp', '1', 'Mi0yLTEwMjM0NTY3ODkw', 'configfixtureabcdef'].join('-'); // split, as above
 const CLIENT_SECRET = ['fixture', 'client', 'secret', '0123456789abcdef'].join('');
@@ -98,11 +103,13 @@ function createSlackVendor({ token = TOKEN, mode = {} } = {}) {
       case 'conversations.info': return J(200, by('conversations.info', p.channel) || { ok: false, error: 'channel_not_found' });
       case 'conversations.members': return J(200, by('conversations.members', p.channel) || { ok: false, error: 'channel_not_found' });
       case 'conversations.history': {
-        const h = by('history', p.channel);
+        const arch = p.latest ? (SX.archive[p.channel] || []) : [];
+        const h = by('history', p.channel) || (arch.length ? { ok: true, has_more: false, messages: [], response_metadata: { next_cursor: '' } } : null);
         if (!h) return J(200, { ok: false, error: 'channel_not_found' });
-        let msgs = h.messages.slice();
-        if (p.oldest) msgs = msgs.filter((m) => Number(m.ts) > Number(p.oldest));
-        if (p.latest) msgs = msgs.filter((m) => Number(m.ts) < Number(p.latest));
+        let msgs = h.messages.concat(arch).sort((a, b) => Number(b.ts) - Number(a.ts));
+        const inc = p.inclusive === 'true';
+        if (p.oldest) msgs = msgs.filter((m) => (inc ? Number(m.ts) >= Number(p.oldest) : Number(m.ts) > Number(p.oldest)));
+        if (p.latest) msgs = msgs.filter((m) => (inc ? Number(m.ts) <= Number(p.latest) : Number(m.ts) < Number(p.latest)));
         const lim = mode.limited15 ? Math.min(15, Number(p.limit) || 100) : Math.min(999, Number(p.limit) || 100);
         const start = p.cursor ? Number(String(p.cursor).replace('cur-', '')) || 0 : 0;
         const page = msgs.slice(start, start + lim);
@@ -110,8 +117,24 @@ function createSlackVendor({ token = TOKEN, mode = {} } = {}) {
         return J(200, { ...h, messages: page, has_more: more, response_metadata: { next_cursor: more ? `cur-${start + lim}` : '' } });
       }
       case 'conversations.replies': {
-        const r = by('replies', `${p.channel}|${p.ts}`);
-        return J(200, r || { ok: false, error: 'thread_not_found' });
+        const all = { ...(FX.replies || {}), ...SX.replies };
+        const r = all[`${p.channel}|${p.ts}`] || Object.entries(all).find(([k, v]) => k.startsWith(`${p.channel}|`) && v.messages.some((m) => m.ts === p.ts))?.[1] || null;
+        if (!r) return J(200, { ok: false, error: 'thread_not_found' });
+        const inc = p.inclusive === 'true';
+        let msgs = r.messages.slice();
+        if (p.oldest) msgs = msgs.filter((m) => (inc ? Number(m.ts) >= Number(p.oldest) : Number(m.ts) > Number(p.oldest)));
+        if (p.latest) msgs = msgs.filter((m) => (inc ? Number(m.ts) <= Number(p.latest) : Number(m.ts) < Number(p.latest)));
+        const lim = Math.min(1000, Number(p.limit) || 1000);
+        const start = p.cursor ? Number(String(p.cursor).replace('cur-', '')) || 0 : 0;
+        const more = start + lim < msgs.length;
+        return J(200, { ...r, messages: msgs.slice(start, start + lim), has_more: more, response_metadata: { next_cursor: more ? `cur-${start + lim}` : '' } });
+      }
+      case 'search.messages': {
+        const pages = SX.search[String(p.query || '')] || [];
+        const count = Math.min(100, Number(p.count) || 20), page = Math.max(1, Number(p.page) || 1);
+        const matches = (pages[page - 1] || []).slice(0, count), total = pages.reduce((a, x) => a + x.length, 0);
+        if (!String(p.query || '').trim()) return J(200, { ok: false, error: 'no_query' });
+        return J(200, { ok: true, query: String(p.query), messages: { matches, total, paging: { count, total, page, pages: pages.length }, pagination: { total_count: total, page, per_page: count, page_count: pages.length, first: 1, last: total } } });
       }
       case 'reactions.get': return J(200, by('reactions.get', `${p.channel}|${p.timestamp}`) || { ok: false, error: 'message_not_found' });
       case 'reactions.add': state.reactions.push({ op: 'add', ...p }); return J(200, { ok: true });
@@ -140,4 +163,4 @@ function createSlackVendor({ token = TOKEN, mode = {} } = {}) {
   return { fetchFn, calls, state, FX, token, allow };
 }
 
-module.exports = { createSlackVendor, FX, TOKEN, CONFIG_TOKEN, CLIENT_SECRET, WS_CLIENT_ID, WS_CLIENT_SECRET, WS_REGISTERED, WS_TOKEN };
+module.exports = { createSlackVendor, FX, SX, TOKEN, CONFIG_TOKEN, CLIENT_SECRET, WS_CLIENT_ID, WS_CLIENT_SECRET, WS_REGISTERED, WS_TOKEN };

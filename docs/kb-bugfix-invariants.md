@@ -537,6 +537,9 @@
 - THE WEBHOOK SECTION'S NEW-PATH BUTTON HUNG BELOW ITS HEAD AND THE BUILT-IN DOOR SAT AMONG THE USER'S ACCOUNTS (owner 2026-10-12) — 不变量 = a section's one action lives on its head row; what the person did not add sorts after what they did
 - A CHANNEL MESSAGE OPENED FOR EDITING IN A THREE-ROW BOX (a fleet user, 2026-10-12): the editors were default-height textareas — 不变量 = an editor opens at the size of its text and grows as you type, clamped to the pane; the person's drag wins
 - A DOCUMENT'S RAW BLOCK COULD NOT BE COMMENTED (owner 2026-10-12): the comment popover keyed only to the editor's text selection; an atom's NodeSelection and a DOM selection inside it never counted — 不变量 = every block of a document is commentable; what the person selected is the quote
+- SLACK HAD NO SEARCH ROW (owner 2026-10-12): the adapter never declared the vendor's own search though the app held search:read — 不变量 = a capability the vendor offers and the scope holds is a declared row, never an undeclared not-supported
+- (2026-10-12) THE MAC'S SIGN-IN WAS TYPED AND NOTHING HAPPENED (owner; http ⇒ no WebCrypto ⇒ noVNC's ARD AES threw, 连接中… stayed) — 不变量 = a feature is verified at the user's ADDRESS (an insecure origin), never only on loopback; a step the person completed never leaves the status at the one before
+- (2026-10-12) THE OWNER'S EIGHTEEN COMMENTS WERE ON ANOTHER COMPUTER (comment drafts lived in one browser's localStorage) — 不变量 = a draft the person typed is the server's, synced live to every client; a browser's storage is a cache with a one-time migration, never the record
 
 ## THE SPLIT BUTTON MOVED THE RIGHT TAB TO THE LEFT PANE (owner 2026-10-12, inc-mv4q1u6b-ksyh, lane split-keeps-sides)
 

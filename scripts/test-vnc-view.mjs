@@ -609,5 +609,98 @@ console.log('§D014 a machine\'s whole desktop: the sign-in is asked in the page
   plain.dispose();
 }
 
+// ── lane mac-ard-signin (owner 2026-10-12 "连mac似乎不太成功": the Mac's name + password typed, then 连接中… for 268 s — the
+// page was http://<hostname>:3456, no WebCrypto, noVNC's ARD AES threw inside its async auth and nothing said so) ──
+console.log('§ARD a sign-in handed to noVNC SAYS so: "Signing in…" at once; noVNC\'s auth rejecting, 20 s of silence or a close ⇒ "The sign-in could not be completed: …" with Reconnect, no ladder; the AES fallback only where crypto.subtle is absent');
+{
+  const nap = (ms) => new Promise((r) => setTimeout(r, ms));
+  const listeners = new Map(); // a recording window for the view's unhandledrejection listener
+  const realAdd = globalThis.addEventListener, realRemove = globalThis.removeEventListener, realST = globalThis.setTimeout, realCT = globalThis.clearTimeout;
+  globalThis.addEventListener = (k, fn) => { if (!listeners.has(k)) listeners.set(k, new Set()); listeners.get(k).add(fn); };
+  globalThis.removeEventListener = (k, fn) => { listeners.get(k)?.delete(fn); };
+  const live = () => (listeners.get('unhandledrejection') || new Set()).size;
+  const reject = (reason) => { for (const fn of [...(listeners.get('unhandledrejection') || [])]) fn({ reason }); };
+  const novncError = (msg) => { const e = new TypeError(msg); e.stack = `TypeError: ${msg}\n    at AESECBCipher._importKey (http://192.168.1.20:3456/novnc.js:1:23456)\n    at async RFB._negotiateARDAuthAsync (http://192.168.1.20:3456/novnc.js:1:98765)`; return e; };
+  const bound = []; // FAKE TIMERS for the 20 s bound only (every other timer is real)
+  globalThis.setTimeout = (fn, ms, ...a) => { if (ms === V.SIGNIN_BOUND_MS) { const h = { fn, cleared: false }; bound.push(h); return h; } return realST(fn, ms, ...a); };
+  globalThis.clearTimeout = (h) => { if (h && typeof h === 'object' && 'cleared' in h) h.cleared = true; else realCT(h); };
+  const armed = () => bound.filter((h) => !h.cleared).length;
+  const fireBound = () => { for (const h of bound.splice(0)) if (!h.cleared) h.fn(); };
+  const mk = (extra = {}) => V.createVncView(new El('div'), { url: 'ws://192.168.1.20:3456/api/desktop/machine-desktop.mac-a/stream', autoReconnect: true, resizeSession: false, loadRFB, credentials: async () => ({ username: 'mart', password: 'Sekr3t!x' }), ...extra });
+  const signIn = async (view) => { await view.connect(); const r = FakeRFB.instances[FakeRFB.instances.length - 1]; r.emit('credentialsrequired', { types: ['username', 'password'] }); await nap(5); return r; };
+  const NAMED = /^The sign-in could not be completed: /;
+  try {
+    ok(V.SIGNIN_BOUND_MS === 20000, 'the bound is 20 s (SIGNIN_BOUND_MS)');
+    // A — handed over ⇒ "Signing in…"; noVNC's connect ends it
+    FakeRFB.instances.length = 0;
+    const a = mk();
+    const ra = await signIn(a);
+    ok(ra.sent?.length === 1 && a.status.textContent === 'Signing in…' && live() === 1 && armed() === 1, 'the sign-in handed to noVNC ⇒ "Signing in…" at once (never "Connecting…" past it), one rejection listener + one 20 s bound armed', { st: a.status.textContent, live: live(), armed: armed() });
+    ra.emit('connect');
+    ok(a.status.textContent === 'Connected' && live() === 0 && armed() === 0, 'noVNC\'s connect ends it: "Connected", the listener removed, the bound cleared', { st: a.status.textContent, live: live(), armed: armed() });
+    a.dispose();
+    // B — noVNC's async auth rejects (what the http page did: no WebCrypto) ⇒ the named status
+    const b = mk();
+    const rb = await signIn(b);
+    reject(new Error('unrelated: a chat fetch failed'));
+    ok(b.status.textContent === 'Signing in…' && live() === 1, 'CONTROL: a rejection from code that is not noVNC\'s leaves the sign-in waiting', b.status.textContent);
+    reject(novncError("Cannot read properties of undefined (reading 'importKey')"));
+    ok(NAMED.test(b.status.textContent) && /reading 'importKey'/.test(b.status.textContent) && b.status.style.color && rb.disconnected === 1 && b.wanted === false && live() === 0 && armed() === 0, 'noVNC\'s auth rejecting ⇒ "The sign-in could not be completed: <its words>" in the error colour, the RFB disconnected, the ladder off, listener + bound gone', { st: b.status.textContent, d: rb.disconnected, wanted: b.wanted, live: live(), armed: armed() });
+    const nB = FakeRFB.instances.length, wordsB = b.status.textContent;
+    rb.emit('disconnect', { clean: false });
+    await nap(1300);
+    ok(b.status.textContent === wordsB && FakeRFB.instances.length === nB, 'the disconnect that follows keeps those words and nothing re-asks the sign-in (no ladder rung)', { st: b.status.textContent, n: FakeRFB.instances.length - nB });
+    b.dispose();
+    // C — 20 s of silence
+    const c = mk();
+    const rc = await signIn(c);
+    ok(c.status.textContent === 'Signing in…' && armed() === 1, '(C) waiting on the machine: "Signing in…" with the bound armed');
+    fireBound();
+    ok(c.status.textContent === 'The sign-in could not be completed: the machine did not answer in 20 s' && rc.disconnected === 1 && c.wanted === false && live() === 0, '20 s of silence ⇒ "… the machine did not answer in 20 s", the RFB disconnected, no ladder', { st: c.status.textContent, d: rc.disconnected });
+    c.dispose();
+    // D — the socket closes before the desktop came (what the Mac did after 268 s)
+    const d = mk();
+    const rd = await signIn(d);
+    rd.emit('disconnect', { clean: true });
+    await nap(1300);
+    ok(d.status.textContent === 'The sign-in could not be completed: the machine closed the connection' && rd.disconnected === 0 && d.wanted === false && live() === 0 && armed() === 0 && FakeRFB.instances[FakeRFB.instances.length - 1] === rd, 'a close while signing in ⇒ "… the machine closed the connection" (no disconnect() on a dead RFB, no ladder), never "Disconnected"', { st: d.status.textContent, d: rd.disconnected });
+    d.dispose();
+    // E — a refused sign-in keeps its own words (design 014 D1) and ends the wait
+    const e = mk();
+    const re = await signIn(e);
+    re.emit('securityfailure', { reason: 'Authentication failed' });
+    fireBound(); reject(novncError('late'));
+    ok(/refused the sign-in: Authentication failed/.test(e.status.textContent) && live() === 0 && armed() === 0, 'a refused sign-in keeps "The machine refused the sign-in: …" — the bound and the listener ended with it', e.status.textContent);
+    e.dispose();
+    // F — a view disposed mid-sign-in leaves nothing behind
+    const f = mk();
+    await signIn(f);
+    f.dispose();
+    ok(live() === 0 && armed() === 0, 'a view closed while signing in leaves no listener and no bound');
+    // G — the AES fallback: only where crypto.subtle is absent, before noVNC exists
+    const realCrypto = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
+    const g0 = mk(); await g0.connect(); g0.dispose();
+    ok(globalThis.crypto?.subtle && !Object.prototype.hasOwnProperty.call(globalThis.crypto, 'subtle'), 'a secure context (node: crypto.subtle present) never gets the fallback');
+    const insecure = { getRandomValues: (x) => x };
+    let seenAtNew = null;
+    try {
+      Object.defineProperty(globalThis, 'crypto', { value: insecure, configurable: true, writable: true });
+      class SpyRFB extends FakeRFB { constructor(...a) { seenAtNew = globalThis.crypto.subtle || null; super(...a); } }
+      const plainView = V.createVncView(new El('div'), { url: 'ws://192.168.1.20:3456/api/vnc', loadRFB: async () => SpyRFB });
+      await plainView.connect(); plainView.dispose();
+      ok(seenAtNew === null && insecure.subtle === undefined, 'CONTROL: a view that asks no sign-in (an app window) leaves an http page\'s crypto alone');
+      const g = mk({ loadRFB: async () => SpyRFB });
+      await g.connect(); g.dispose();
+      ok(seenAtNew && typeof seenAtNew.importKey === 'function' && typeof seenAtNew.encrypt === 'function' && Object.getOwnPropertyDescriptor(insecure, 'subtle'), 'an http page (crypto without subtle) gets the PURE AES as an own crypto.subtle BEFORE new RFB — noVNC\'s ARD path finds it');
+    } finally { Object.defineProperty(globalThis, 'crypto', realCrypto); }
+    const vsrc = read('src/lib/vnc-view.js');
+    ok((vsrc.match(/installSubtleFallback\(/g) || []).length === 1 && vsrc.indexOf('installSubtleFallback(') < vsrc.indexOf('new RFB('), 'vnc-view.js installs the fallback in ONE place, before new RFB');
+    const libs = fs.readdirSync(path.join(repo, 'src/lib')).filter((x) => x.endsWith('.js') && x !== 'aes-fallback.js' && /defineProperty\([^)]*['"]subtle['"]/.test(read(`src/lib/${x}`)));
+    ok(libs.length === 0, 'no other client file defines crypto.subtle', libs);
+  } finally {
+    globalThis.addEventListener = realAdd; globalThis.removeEventListener = realRemove; globalThis.setTimeout = realST; globalThis.clearTimeout = realCT;
+  }
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
