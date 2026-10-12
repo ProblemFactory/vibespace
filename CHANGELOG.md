@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.257 — 2026-10-12
+
+### Fixed
+- Send all in a document's comment strip now sends any number of comments — a long set goes as several numbered messages, in order.
+
 ## 2.369.256 — 2026-10-11
 
 ### Fixed

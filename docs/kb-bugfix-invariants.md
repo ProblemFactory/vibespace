@@ -531,6 +531,7 @@
 - A FIXED 100 MS STALL BOUND WENT RED TWICE ON THE RUNNER WHILE THE FOLD WITNESS HELD (rel254 mirror) — 不变量 = a timing bound is judged against a same-box control measured in the same run, with its mutant still red; the witness is the claim
 - A FLATPAK'S FILE DIALOG OPENED ON THE OWNER'S MAIN DESKTOP, NOT ITS PANE (JASP + Chrome, 2026-10-12): its portal ran on the session bus with DISPLAY=:2 — 不变量 = a sandboxed app or a browser on its own display gets its own portal there; an app's dialog is on its display or not the app's
 - EVERY NEW AGENT BROWSER DIED AT LAUNCH ON A LONG DATA PATH (owner 2026-10-12): TMPDIR = data/browser-env/tmp ⇒ Chrome's singleton socket path 112 > 108 — 不变量 = a path handed to a Unix socket is judged by its length against the OS limit, with a control that binds it
+- (2026-10-12) EIGHTEEN COMMENTS COULD NOT BE SENT AND THE PERSON WAS TOLD TO SEND SOME FIRST (owner): a per-message bound was applied per send, behind a refusal with no door — 不变量 = a bound on a message is met by sending more messages; a refusal never asks for what the surface cannot do
 
 ## THE AGENT COULD NOT SEE THE DIALOG IT HAD OPENED (owner 2026-10-11, lane window-dialog-member)
 

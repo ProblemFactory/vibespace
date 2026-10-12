@@ -19,7 +19,7 @@ const { addressableId } = require('../claude-lock-capture.js');
 
 const DOC_COMMENT_FROM = 'Doc comments';
 const SUMMARY_MAX = 400;
-const STATUS = Object.freeze({ bad_path: 400, empty: 400, too_many: 400, too_long: 413, bad_summary: 400, no_owner: 409, no_conversation: 409, send_failed: 502 });
+const STATUS = Object.freeze({ bad_path: 400, empty: 400, too_many: 400, bad_summary: 400, no_owner: 409, no_conversation: 409, send_failed: 502 });
 const fail = (code, error, extra = {}) => ({ ok: false, code, error, ...extra });
 const hostOf = (h) => (h && h !== 'local' ? String(h) : null);
 const docPath = (p) => typeof p === 'string' && p.startsWith('/') && M.isDocPath(p);
@@ -40,26 +40,41 @@ function create({ activeSessions = new Map(), getDeliver = () => null, sendUserI
     if (owner.conversationId) for (const [id, s] of activeSessions) if (s && addressableId(s) === owner.conversationId) { if (s.mode === 'chat') return id; any = any || id; }
     return any || owner.sessionId;
   }
-  /** The strip's notes → ONE message: THE typing sender, else the stash. → {ok, delivered:'sent'|'stashed', count, …} */
+  /** The strip's notes → the fewest messages (M.commentsBatches), IN ORDER through ONE door: THE typing sender (one call
+   *  per message; the CLI queues them mid-turn), else the stash (one entry per message; the drain keeps insertion order).
+   *  → {ok, delivered:'sent'|'stashed', count, messages, sent, clipped, …} | fail(code, why, {sent}) — `sent` = the items
+   *  that went out before the message that failed, so the strip keeps only the rest. */
   function comments({ host = null, path, from = '', items } = {}) {
-    const v = M.commentsVerdict(path, items);
+    const v = M.commentsBatches(path, items);
     if (!v.ok) return fail(v.code, v.why);
     const owner = ownerOf({ host, path, from });
     if (!owner) return fail('no_owner', 'open this document from a chat to send comments to it');
-    const line = agentText(v.text, { kind: 'block', max: M.LIMITS.messageBytes });
+    const lines = v.batches.map((b) => agentText(b.text, { kind: 'block', max: M.LIMITS.messageBytes }));
+    const done = { count: v.count, messages: lines.length, sent: v.count, clipped: v.clipped };
     const sessionId = liveSessionFor(owner);
-    const r = sessionId && typeof sendUserInput === 'function' ? sendUserInput(sessionId, line, { msgId: now() + '-doc', origin: 'doc-comment' }) : { ok: false, code: 'no_session' };
-    if (r && r.ok) return { ok: true, delivered: 'sent', msgId: r.msgId, count: v.count, text: line };
-    if (!r || (r.code !== 'no_session' && r.code !== 'not_chat')) return fail((r && r.code) || 'send_failed', (r && r.error) || 'the comments were not sent');
+    const msgIds = [];
+    let sent = 0;
+    for (let k = 0; k < lines.length; k++) {
+      const r = sessionId && typeof sendUserInput === 'function' ? sendUserInput(sessionId, lines[k], { msgId: `${now()}-doc${lines.length > 1 ? '-' + (k + 1) : ''}`, origin: 'doc-comment' }) : { ok: false, code: 'no_session' };
+      if (r && r.ok) { msgIds.push(r.msgId); sent += v.batches[k].count; continue; }
+      if (k > 0 || !r || (r.code !== 'no_session' && r.code !== 'not_chat')) return fail((r && r.code) || 'send_failed', (r && r.error) || 'the comments were not sent', { sent });
+      break;   // the first message found no typing session ⇒ every message waits in the stash
+    }
+    if (msgIds.length === lines.length) return { ok: true, delivered: 'sent', msgId: msgIds[0], msgIds, ...done, text: lines.join('\n\n') };
     const s = sessionId ? activeSessions.get(sessionId) : null;
     const cid = owner.conversationId || (s ? addressableId(s) : null);
     if (!cid) return fail('no_conversation', 'this conversation is not running and has no id yet — open its chat and send the comments there');
     const deliver = getDeliver();
     if (!deliver || typeof deliver.stashFor !== 'function') return fail('send_failed', 'the conversation is not running and its waiting queue is unavailable');
-    let st;
-    try { st = deliver.stashFor(cid, { source: 'doc-comment', kind: 'peer', fromName: DOC_COMMENT_FROM, text: line }); }
-    catch (e) { return fail('send_failed', e.message); }
-    return { ok: true, delivered: 'stashed', stored: !st || st.stored !== false, conversationId: cid, count: v.count, text: line };
+    let stored = true;
+    for (let k = 0; k < lines.length; k++) {
+      let st;
+      try { st = deliver.stashFor(cid, { source: 'doc-comment', kind: 'peer', fromName: DOC_COMMENT_FROM, text: lines[k] }); }
+      catch (e) { return fail('send_failed', e.message, { sent }); }
+      if (st && st.stored === false) stored = false;
+      sent += v.batches[k].count;
+    }
+    return { ok: true, delivered: 'stashed', stored, conversationId: cid, ...done, text: lines.join('\n\n') };
   }
   /** A save from the window → the registry's free next-turn note to the owner. */
   function edited({ host = null, path, from = '', summary } = {}) {

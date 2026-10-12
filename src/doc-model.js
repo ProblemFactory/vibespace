@@ -7,13 +7,15 @@
 //     rich editor cannot carry even block by block (CRLF, a size past the cap — each with its WHY in `RAW_WHY`) ⇒ the
 //     window opens RAW and says why. `patchBlocks` is the save: untouched blocks keep their lines byte-identical
 //     (lane doc-editor-wheel). `fidelityVerdict(source, roundTripped)` = the whole-document compare (kept for callers).
-//   · THE COMMENTS MESSAGE: `commentsText(path, items)` = `[Doc comments] <path>\n① "quoted…" — note\n② …` (a quote
-//     ≤ 200 chars, a note ≤ 1000, ≤ 20 items, the whole ≤ 4 KB UTF-8); `commentsVerdict` refuses by name.
+//   · THE COMMENTS MESSAGES: `commentsText(path, items)` = `[Doc comments] <path>\n① "quoted…" — note\n② …` (a quote
+//     ≤ 200 chars, a note ≤ 1000); `commentsBatches` packs ONE send (≤ 200 items) into the fewest messages, each
+//     ≤ 20 rows and ≤ 4 KB UTF-8, headed (k/n) with the numbering continuous — a bound on a MESSAGE is met by sending
+//     more messages, never by refusing the send (hot fix 2.369.257: 18 comments were refused "send some first").
 //   · THE EDIT NOTE: `editSummary(before, after)` = "+a −b lines; sections: <the headings whose section changed, ≤ 3>".
 //   · THE CONFLICT TABLE: `conflictVerdict` (disk moved × unsaved edits × "Keep editing") and `saveVerdict` (the one ask
 //     before a save over a newer disk version).
 
-const LIMITS = Object.freeze({ quote: 200, note: 1000, items: 20, messageBytes: 4096, headings: 3, source: 1024 * 1024, pathChars: 400, lcsCells: 4e6 });
+const LIMITS = Object.freeze({ quote: 200, note: 1000, items: 20, messageBytes: 4096, sendItems: 200, headings: 3, source: 1024 * 1024, pathChars: 400, lcsCells: 4e6 });
 const DOC_EXT = /\.(md|markdown)$/i;
 const isDocPath = (p) => typeof p === 'string' && DOC_EXT.test(p);
 
@@ -135,19 +137,50 @@ function commentItem(x) {
   const line = Number.isInteger(x.line) && x.line > 0 ? x.line : 0; // the SOURCE line the selection maps to (0 = none)
   return { quote, ...(line ? { line } : {}), note: Array.from(note).length > LIMITS.note ? Array.from(note).slice(0, LIMITS.note).join('') : note };
 }
-function commentsText(path, items) {
-  const rows = (items || []).map(commentItem).filter(Boolean).map((c, i) => `${CIRCLED(i + 1)} ${c.line ? `L${c.line} ` : ''}${c.quote ? `"${c.quote}" — ` : ''}${c.note.replace(/\n+/g, ' / ')}`);
-  return `[Doc comments] ${clip(oneLine(path), LIMITS.pathChars)}\n${rows.join('\n')}`;
+const commentRow = (c, n) => `${CIRCLED(n)} ${c.line ? `L${c.line} ` : ''}${c.quote ? `"${c.quote}" — ` : ''}${c.note.replace(/\n+/g, ' / ')}`;
+/** `start` = the items already numbered in earlier messages; `of` = {k, n} heads one message of several. */
+function commentsText(path, items, start = 0, of = null) {
+  const rows = (items || []).map(commentItem).filter(Boolean).map((c, i) => commentRow(c, start + i + 1));
+  return `[Doc comments] ${clip(oneLine(path), LIMITS.pathChars)}${of ? ` (${of.k}/${of.n})` : ''}\n${rows.join('\n')}`;
 }
-/** → {ok, text, count} | {ok:false, code: empty | too_many | too_long | bad_path, why}. */
-function commentsVerdict(path, items) {
+/** ONE send → {ok, batches:[{text, count, from, to}], count, clipped} | {ok:false, code: empty | too_many | bad_path, why}.
+ *  Greedy in order: a message takes the next item while its SPELLED text stays ≤ 20 rows and ≤ 4 KB (measured with the
+ *  widest (k/n) heading the send can have); an item too big for a message of its own has its note clipped with "…". */
+function commentsBatches(path, items) {
   if (!isDocPath(path) || !String(path).startsWith('/')) return { ok: false, code: 'bad_path', why: 'name the markdown file by its absolute path' };
   const list = Array.isArray(items) ? items.map(commentItem).filter(Boolean) : [];
   if (!list.length) return { ok: false, code: 'empty', why: 'no comment to send' };
-  if (list.length > LIMITS.items) return { ok: false, code: 'too_many', why: `at most ${LIMITS.items} comments at once` };
-  const text = commentsText(path, list);
-  if (utf8Len(text) > LIMITS.messageBytes) return { ok: false, code: 'too_long', why: 'the comments are longer than 4 KB — send some of them first' };
-  return { ok: true, text, count: list.length };
+  if (list.length > LIMITS.sendItems) return { ok: false, code: 'too_many', why: `at most ${LIMITS.sendItems} comments in one send` };
+  const fits = (rows, start, of) => rows.length <= LIMITS.items && utf8Len(commentsText(path, rows, start, of)) <= LIMITS.messageBytes;
+  const groups = [];
+  let clipped = 0;
+  if (fits(list, 0, null)) groups.push(list);
+  else {
+    const widest = { k: list.length, n: list.length };
+    let cur = [];
+    list.forEach((c, i) => {
+      const start = i - cur.length;
+      if (cur.length && fits([...cur, c], start, widest)) { cur.push(c); return; }
+      if (cur.length) groups.push(cur);
+      cur = [c];
+      if (fits(cur, i, widest)) return;
+      const note = Array.from(c.note);
+      let lo = 0, hi = note.length - 1;   // the most note characters (+ "…") that let the item fit a message of its own
+      while (lo < hi) { const mid = Math.ceil((lo + hi) / 2); if (fits([{ ...c, note: note.slice(0, mid).join('') + '…' }], i, widest)) lo = mid; else hi = mid - 1; }
+      cur = [{ ...c, note: note.slice(0, lo).join('') + '…' }];
+      clipped++;
+    });
+    groups.push(cur);
+  }
+  let from = 0;
+  const batches = groups.map((rows, k) => {
+    const text = commentsText(path, rows, from, groups.length > 1 ? { k: k + 1, n: groups.length } : null);
+    if (rows.length > LIMITS.items || utf8Len(text) > LIMITS.messageBytes) throw new Error(`commentsBatches: message ${k + 1} is past the bound (${rows.length} rows, ${utf8Len(text)} bytes)`);
+    const b = { text, count: rows.length, from: from + 1, to: from + rows.length };
+    from += rows.length;
+    return b;
+  });
+  return { ok: true, batches, count: list.length, clipped };
 }
 
 // ── the edit note ──
@@ -209,4 +242,4 @@ function saveVerdict({ disk = 0, base = 0, confirmed = 0 } = {}) {
   return disk && disk > base && !(confirmed && confirmed >= disk) ? 'ask' : 'write';
 }
 
-module.exports = { LIMITS, RAW_WHY, isDocPath, utf8Len, rawReasons, fidelityVerdict, patchBlocks, saveText, commentItem, commentsText, commentsVerdict, lineDelta, sectionsOf, editSummary, conflictVerdict, saveVerdict };
+module.exports = { LIMITS, RAW_WHY, isDocPath, utf8Len, rawReasons, fidelityVerdict, patchBlocks, saveText, commentItem, commentsText, commentsBatches, lineDelta, sectionsOf, editSummary, conflictVerdict, saveVerdict };

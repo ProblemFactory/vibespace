@@ -86,16 +86,32 @@ ok(M.saveText('a', 'x\n') === 'a\n' && M.saveText('a\n\n', 'x\n') === 'a\n' && M
 
 // ── §3 the comments message ──
 console.log('§3 the comments message');
-const cv = M.commentsVerdict('/w/docs/BRIEF.md', [{ quote: 'the  rendered\nview', note: 'say more' }, { quote: '', note: 'add a summary' }, { quote: 'x', note: '   ' }]);
-ok(cv.ok && cv.count === 2 && cv.text === '[Doc comments] /w/docs/BRIEF.md\n① "the rendered view" — say more\n② add a summary', 'the exact message: header + circled rows, quotes one line, an empty note dropped', cv.text);
-const long = M.commentsVerdict('/a.md', [{ quote: 'q'.repeat(500), note: 'n' }]);
-ok(long.ok && long.text.includes('"' + 'q'.repeat(199) + '…"'), 'a quote is bounded at 200 chars (199 + …)');
-ok(M.commentsVerdict('/a.md', Array.from({ length: 21 }, () => ({ note: 'n' }))).code === 'too_many', '21 notes ⇒ too_many');
-const big = M.commentsVerdict('/a.md', Array.from({ length: 5 }, () => ({ quote: 'q'.repeat(200), note: '注'.repeat(1000) })));
-ok(big.code === 'too_long', 'past 4 KB (UTF-8) ⇒ too_long — never a cut message', big.code);
-const edge = M.commentsVerdict('/a.md', Array.from({ length: 20 }, (_, i) => ({ quote: 'q' + i, note: 'n'.repeat(150) })));
-ok(edge.ok && M.utf8Len(edge.text) <= 4096 && edge.text.split('\n').length === 21 && edge.text.includes('⑳'), '20 notes under 4 KB ⇒ ①…⑳', M.utf8Len(edge.text));
-ok(M.commentsVerdict('/a.txt', [{ note: 'n' }]).code === 'bad_path' && M.commentsVerdict('a.md', [{ note: 'n' }]).code === 'bad_path' && M.commentsVerdict('/a.md', []).code === 'empty', 'a non-markdown / relative path, no notes ⇒ refused by name');
+const cv = M.commentsBatches('/w/docs/BRIEF.md', [{ quote: 'the  rendered\nview', note: 'say more' }, { quote: '', note: 'add a summary' }, { quote: 'x', note: '   ' }]);
+ok(cv.ok && cv.count === 2 && cv.batches.length === 1 && cv.batches[0].text === '[Doc comments] /w/docs/BRIEF.md\n① "the rendered view" — say more\n② add a summary', 'the exact message: header + circled rows, quotes one line, an empty note dropped', cv);
+const long = M.commentsBatches('/a.md', [{ quote: 'q'.repeat(500), note: 'n' }]);
+ok(long.ok && long.batches[0].text.includes('"' + 'q'.repeat(199) + '…"'), 'a quote is bounded at 200 chars (199 + …)');
+const edge = M.commentsBatches('/a.md', Array.from({ length: 20 }, (_, i) => ({ quote: 'q' + i, note: 'n'.repeat(150) })));
+ok(edge.ok && edge.batches.length === 1 && M.utf8Len(edge.batches[0].text) <= 4096 && edge.batches[0].text.split('\n').length === 21 && edge.batches[0].text.includes('⑳'), '20 notes under 4 KB ⇒ ONE message ①…⑳, no (k/n)', edge.batches.map((b) => M.utf8Len(b.text)));
+ok(M.commentsBatches('/a.txt', [{ note: 'n' }]).code === 'bad_path' && M.commentsBatches('a.md', [{ note: 'n' }]).code === 'bad_path' && M.commentsBatches('/a.md', []).code === 'empty', 'a non-markdown / relative path, no notes ⇒ refused by name');
+// HOT FIX 2.369.257 (owner: 18 comments refused "longer than 4 KB — send some of them first"): the bound is per MESSAGE
+const C = (n) => String.fromCodePoint(0x245f + n);
+const rowsOf = (r) => r.batches.flatMap((b) => b.text.split('\n').slice(1));
+const EIGHTEEN = Array.from({ length: 18 }, (_, i) => ({ quote: '引'.repeat(200), note: `第${i + 1}条 ` + '注'.repeat(60) }));
+const e18 = M.commentsBatches('/w/docs/设计.md', EIGHTEEN);
+const n18 = e18.ok ? e18.batches.length : 0;
+ok(e18.ok && n18 >= 3 && e18.count === 18 && e18.clipped === 0, `18 CJK comments with 200-char quotes ⇒ ${n18} messages (≥ 3), none refused`, e18.code);
+ok(e18.ok && e18.batches.every((b) => M.utf8Len(b.text) <= 4096 && b.text.split('\n').length - 1 <= 20), 'every message ≤ 4096 bytes UTF-8 and ≤ 20 rows', e18.ok && e18.batches.map((b) => M.utf8Len(b.text)));
+ok(e18.ok && e18.batches.every((b, k) => b.text.split('\n')[0] === `[Doc comments] /w/docs/设计.md (${k + 1}/${n18})`), 'each heading names its place: (k/n)');
+ok(e18.ok && rowsOf(e18).length === 18 && rowsOf(e18).every((r, i) => r === `${C(i + 1)} "${'引'.repeat(200)}" — 第${i + 1}条 ${'注'.repeat(60)}`), 'the rows across the messages = the input, in order, numbered ①…⑱ continuously');
+ok(e18.ok && e18.batches[0].from === 1 && e18.batches.every((b, k) => b.to - b.from + 1 === b.count && (k === 0 || b.from === e18.batches[k - 1].to + 1)) && e18.batches.at(-1).to === 18, 'from/to cover 1…18 with no gap', e18.ok && e18.batches.map((b) => [b.from, b.to]));
+const s21 = M.commentsBatches('/a.md', Array.from({ length: 21 }, (_, i) => ({ note: 'n' + i })));
+ok(s21.ok && s21.batches.map((b) => b.count).join() === '20,1' && s21.batches[1].text === '[Doc comments] /a.md (2/2)\n(21) n20', '21 short notes ⇒ 2 messages by the row cap; the 21st keeps its number', s21.ok && s21.batches.map((b) => b.text.slice(-30)));
+const big = M.commentsBatches('/a.md', Array.from({ length: 5 }, () => ({ quote: 'q'.repeat(200), note: '注'.repeat(1000) })));
+ok(big.ok && big.batches.length === 5 && big.clipped === 0 && big.batches.every((b) => M.utf8Len(b.text) <= 4096), '5 notes of 1000 CJK chars ⇒ 5 messages, each whole', big.ok && big.batches.map((b) => M.utf8Len(b.text)));
+const giantPath = '/' + '路'.repeat(390) + '.md';
+const giant = M.commentsBatches(giantPath, [{ quote: '引'.repeat(200), note: '注'.repeat(1000) }, { note: 'after' }]);
+ok(giant.ok && giant.clipped === 1 && giant.batches.every((b) => M.utf8Len(b.text) <= 4096) && /注…/.test(giant.batches[0].text) && M.utf8Len(giant.batches[0].text) > 4000 && rowsOf(giant).at(-1) === '② after', 'one comment bigger than a message ⇒ its note clipped with … to fit (counted), never refused; the next keeps ②', giant.ok && giant.batches.map((b) => M.utf8Len(b.text)));
+ok(M.commentsBatches('/a.md', Array.from({ length: 201 }, () => ({ note: 'n' }))).code === 'too_many' && M.commentsBatches('/a.md', Array.from({ length: 200 }, () => ({ note: 'n' }))).batches.length === 10, 'the per-SEND sanity cap is 200 (201 ⇒ too_many; 200 ⇒ 10 messages)');
 
 // ── §4 the edit summary ──
 console.log('§4 the edit summary');
@@ -134,7 +150,7 @@ function world({ sendOk = true, registry = null } = {}) {
   const rec = { sent: [], stashed: [] };
   const activeSessions = new Map([['w1', { mode: 'chat', backend: 'claude', claudeSessionId: 'conv-1' }]]);
   const deliver = { stashFor: (cid, e) => { rec.stashed.push({ cid, ...e }); return { stored: true }; } };
-  const sendUserInput = (sid, text, opts) => { rec.sent.push({ sid, text, opts }); return sendOk ? { ok: true, msgId: 'm1' } : { ok: false, code: 'no_session' }; };
+  const sendUserInput = (sid, text, opts) => { rec.sent.push({ sid, text, opts }); const good = typeof sendOk === 'function' ? sendOk(rec.sent.length) : sendOk; return good ? { ok: true, msgId: 'm' + rec.sent.length } : { ok: false, code: typeof sendOk === 'function' ? 'input_rejected' : 'no_session' }; };
   const mine = () => AR.configure({ activeSessions: () => activeSessions, deliver, sessionMeta: null, log: quiet }); // the registry is a module: each world re-points it before a call
   const artifacts = { ownerOf: (a) => (registry ? registry(a) : (mine(), AR.ownerOf(a))), noteEdit: (a) => { rec.note = a; mine(); return AR.noteEdit(a); } };
   return { rec, activeSessions, doc: DE.create({ activeSessions, getDeliver: () => deliver, sendUserInput, artifacts, now: () => 7 }) };
@@ -195,12 +211,27 @@ ok(/const timer = host \? 0 : setInterval\(check, POLL_MS\);/.test(ui) && /const
   ok(loose.length === 0, 'every window-level listener rides the window\'s AbortController signal (only the transient popover / note / strip-row buttons, which die with their elements, and the abort hook itself go without)', loose);
 }
 ok(/const STORE_PREFIX = 'vs-doc-comments:';/.test(ui) && /slice\(0, M\.LIMITS\.items\)/.test(ui), 'the strip is device-kept per (host, path) under vs-doc-comments:, bounded');
-ok(/const line = agentText\(v\.text, \{ kind: 'block', max: M\.LIMITS\.messageBytes \}\);/.test(eng), 'the comments block goes through THE belt (peer-text toAgentText) before the sender or the stash');
+ok(/const lines = v\.batches\.map\(\(b\) => agentText\(b\.text, \{ kind: 'block', max: M\.LIMITS\.messageBytes \}\)\);/.test(eng), 'each comments message goes through THE belt (peer-text toAgentText) before the sender or the stash');
 ok(!/from '(prosemirror|markdown-it|@tiptap)/.test(door) && /import\(new URL\('\/doc-editor\.js', location\.origin\)\.href\)/.test(door), 'the door (main bundle) imports no editor module — the editor is the lazy public/doc-editor.js');
 const pkg = JSON.parse(read('package.json'));
 const PINS = ['@tiptap/core', '@tiptap/extension-image', '@tiptap/extension-link', '@tiptap/extension-list', '@tiptap/extension-table', '@tiptap/markdown', '@tiptap/pm', '@tiptap/starter-kit']; // lane doc-editor-wheel
 ok(PINS.every((p) => /^\d+\.\d+\.\d+$/.test(pkg.dependencies[p] || '')), 'the editor packages are pinned EXACT', PINS.map((p) => p + '@' + pkg.dependencies[p]));
 ok(/esbuild src\/doc-editor-entry\.js --bundle --outfile=public\/doc-editor\.js --format=esm/.test(pkg.scripts.build) && /^public\/doc-editor\.js$/m.test(read('.gitignore')), 'npm run build makes public/doc-editor.js (gitignored build output)');
+
+{ // HOT FIX 2.369.257: many messages, in order, through the same door; a failure part-way names what went out
+  const want = M.commentsBatches('/w/BRIEF.md', EIGHTEEN).batches.map((b) => b.text);
+  const w = world();
+  const r = w.doc.comments({ path: '/w/BRIEF.md', from: 'w1', items: EIGHTEEN });
+  ok(r.ok && r.delivered === 'sent' && r.messages === want.length && want.length >= 3 && r.sent === 18 && r.count === 18 && w.rec.sent.map((x) => x.text).join('\u0000') === want.join('\u0000') && w.rec.sent.every((x) => x.sid === 'w1' && x.opts.origin === 'doc-comment'), `18 comments ⇒ ${want.length} calls on THE typing sender, in order`, r);
+  const w2 = world({ sendOk: false });
+  const r2 = w2.doc.comments({ path: '/w/BRIEF.md', from: 'w1', items: EIGHTEEN });
+  ok(r2.ok && r2.delivered === 'stashed' && r2.messages === want.length && w2.rec.sent.length === 1 && w2.rec.stashed.map((x) => x.text).join('\u0000') === want.join('\u0000') && w2.rec.stashed.every((x) => x.cid === 'conv-1' && x.source === 'doc-comment'), `no live process ⇒ ${want.length} stash rows, in order`, w2.rec.stashed.length);
+  const w3 = world({ sendOk: (n) => n !== 2 });
+  const r3 = w3.doc.comments({ path: '/w/BRIEF.md', from: 'w1', items: EIGHTEEN });
+  const first = M.commentsBatches('/w/BRIEF.md', EIGHTEEN).batches[0].count;
+  ok(!r3.ok && r3.code === 'input_rejected' && r3.sent === first && w3.rec.sent.length === 2 && w3.rec.stashed.length === 0, `the sender refuses message 2 ⇒ fail with sent = ${first} (message 1's count), nothing stashed, message 3 never sent`, r3);
+  ok(!('too_long' in DE.STATUS), 'too_long is gone from the engine (a long set is never refused)');
+}
 
 // ── §8 patched copies: each rule removed turns its table red ──
 console.log('§8 patched-copy controls');
@@ -209,8 +240,9 @@ const msrc = read('src/doc-model.js');
 const RULES = [
   ['the round-trip compare removed (every file "lossless")', "for (let i = 0; i < Math.max(a.length, b.length); i++) if (a[i] !== b[i]) return { ok: false, code: 'lossy', line: i + 1 };", '', (X) => X.fidelityVerdict('Price 5 * 3\n', 'Price 5 \\* 3').ok === true],
   ['the CRLF rule removed', "  ['crlf', (s) => s.includes('\\r')],", "  ['crlf_off', () => false],", (X) => !X.rawReasons('a\\r\\nb').includes('crlf')],
-  ['the 4 KB bound removed', 'if (utf8Len(text) > LIMITS.messageBytes)', 'if (false)', (X) => X.commentsVerdict('/a.md', Array.from({ length: 5 }, () => ({ quote: 'q'.repeat(200), note: '注'.repeat(1000) }))).ok === true],
-  ['the quote bound removed', 'const quote = clip(oneLine(x.quote), LIMITS.quote);', 'const quote = oneLine(x.quote);', (X) => X.commentsVerdict('/a.md', [{ quote: 'q'.repeat(500), note: 'n' }]).text.includes('q'.repeat(300))],
+  ['the packer\'s 4 KB fit removed', ' && utf8Len(commentsText(path, rows, start, of)) <= LIMITS.messageBytes;', ';', (X) => { try { X.commentsBatches('/w/docs/设计.md', EIGHTEEN); return false; } catch (e) { return /past the bound/.test(e.message); } }],
+  ['the numbering restarts per message', 'commentsText(path, rows, from, groups.length', 'commentsText(path, rows, 0, groups.length', (X) => X.commentsBatches('/w/docs/设计.md', EIGHTEEN).batches[1].text.split('\n')[1].startsWith('① ')],
+  ['the quote bound removed', 'const quote = clip(oneLine(x.quote), LIMITS.quote);', 'const quote = oneLine(x.quote);', (X) => X.commentsBatches('/a.md', [{ quote: 'q'.repeat(500), note: 'n' }]).batches[0].text.includes('q'.repeat(300))],
   ['the dirty check removed (a repaint over unsaved edits)', "  if (!dirty) return 'repaint';", "  return 'repaint';", (X) => X.conflictVerdict({ disk: 11, base: 10, dirty: true }) === 'repaint'],
   ['the save ask removed (a silent overwrite)', "return disk && disk > base && !(confirmed && confirmed >= disk) ? 'ask' : 'write';", "return 'write';", (X) => X.saveVerdict({ disk: 11, base: 10 }) === 'write'],
 ];

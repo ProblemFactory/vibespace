@@ -4,13 +4,14 @@
  * with the engine's STATUS. OWNER routes only (an agent's vsst_ / jbt_ bearer is refused by name — a comment and an
  * edit are the USER's acts; the file itself is read and written through the existing /api/file/* routes):
  *   GET  /api/doc/owner?host=&path=&from=        → {owner: {via:'registry'|'from', sessionId} | null}
- *   POST /api/doc/comments {host, path, from, items:[{quote, note}]} → {ok, delivered:'sent'|'stashed', count}
+ *   POST /api/doc/comments {host, path, from, items:[{quote, note}]} → {ok, delivered:'sent'|'stashed', count, messages, sent}
+ *        (a failure part-way also carries `sent` = the items delivered before it)
  *   POST /api/doc/edited   {host, path, from, summary}             → {ok, delivered} — the owner's next-turn note
  */
 const { STATUS } = require('../server/doc-engine.js');
 const { isAgentBearer } = require('./design.js');
 
-const answer = (res, r) => (r && r.ok ? res.json(r) : res.status(STATUS[r && r.code] || 400).json({ error: (r && r.error) || 'refused', code: (r && r.code) || 'refused' }));
+const answer = (res, r) => (r && r.ok ? res.json(r) : res.status(STATUS[r && r.code] || 400).json({ error: (r && r.error) || 'refused', code: (r && r.code) || 'refused', ...(r && Number.isInteger(r.sent) ? { sent: r.sent } : {}) }));
 
 function registerDocRoutes(app, { doc }) {
   const ownerOnly = (req, res) => {

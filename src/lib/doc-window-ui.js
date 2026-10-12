@@ -781,8 +781,12 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
     if (r && r.ok) {
       comments = []; saveComments(); renderStrip();
       showToast(r.delivered === 'stashed' ? t('Comments wait for the chat\'s next turn') : t('Comments sent to the chat'), { type: 'success' });
+      say(r.messages > 1 ? t('Sent {n} comments in {m} messages', { n: r.count, m: r.messages }) : t('Sent {n} comments', { n: r.count }));
     } else if (r && r.code === 'no_owner') { S.owner = null; renderStrip(); }
-    else say(t('Could not send the comments: {why}', { why: (r && r.error) || t('the server did not answer') }));
+    else if (r && Number.isInteger(r.sent) && r.sent > 0) {   // part-way: what went out leaves the strip, the rest stays
+      const n = comments.length; comments = comments.slice(r.sent); saveComments(); renderStrip();
+      say(t('Sent {sent} of {n} — the rest are still here', { sent: r.sent, n }));
+    } else say(t('Could not send the comments: {why}', { why: (r && r.error) || t('the server did not answer') }));
   }, { signal });
   async function resolveOwner() {
     const r = await fetchJson('/api/doc/owner?' + q(host, path) + (S.from ? '&from=' + encodeURIComponent(S.from) : ''));
