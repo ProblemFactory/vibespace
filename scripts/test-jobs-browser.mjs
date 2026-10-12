@@ -329,10 +329,13 @@ console.log('— ④ the real routes + keeper: a job gets its own lease + window
     ok(roots.includes(late) && windowTabs(lw(H)).includes(late), `THE .229 MIRROR: a root stamped while a tab read was in flight (${late.slice(0, 4)}…, the job's window's new tab) survives that read — it was pruned as gone and the finalize closed nothing`, { late, roots }); }
   // the job's end: finalize releases (what onRunEnded calls), the evidence rule releases what a missed finalize left
   const winH = lw(H), tabsH = windowTabs(winH), tabsKA = windowTabs(winKA);
+  const leaseRoots = (bk) => { const l = B.findLease(k._reg().leases, pBank.id, bk); return l ? [...(l.targetId ? [l.targetId] : []), ...(l.tabRoots || [])].map((x) => String(x).slice(0, 4)) : null; };
+  const rootsAtRelease = leaseRoots(H), jlAtRelease = jl.length, rebinds = jl.filter((x) => x.includes(H + ':') && /a new tab bound|bound to the browser's only tab/.test(x)).length; // the red's evidence: what the closer could hold, a rebind that replaced its roots, what the keeper said after
+  const f11State = (w, tabs, roots, from) => ({ open: windowTabs(w).map((t) => t.slice(0, 4)), states: tabs.map((t) => t.slice(0, 4) + ':' + model.targets.get(t).state), roots, said: jl.slice(from).filter((x) => /window|tick|job|closed|pruned|detached/.test(x)).map((x) => x.replace(/^\[browser\] /, '').slice(0, 150)).slice(-4), windows: [...model.windows].map(([id, ts]) => id + ':' + [...ts].map((t) => t.slice(0, 4)).join('/')) });
   jobs.get('jb-0000aaaa').state = 'done';
   const released = k.releaseJob('jb-0000aaaa', 'the job run ended');
   // accept-fixes-jobs F11 (the acceptance of 2.369.202: after `vibespace-job stop` the job's window stayed open in the shared profile)
-  ok(tabsH.length > 0 && await until(() => !model.windows.has(winH) && tabsH.every((t) => model.targets.get(t).state === 'closed')) && tabsKA.length > 0 && tabsKA.every((t) => model.targets.get(t).state !== 'closed'), `F11: AT FINALIZE the job's WINDOW closes (window ${winH}: ${tabsH.length} tab(s) closed over CDP) — the owner's page in its own window is untouched; the window stayed open before`, { winH, tabsH, open: windowTabs(winH), tabsKA, journal: jl.filter((x) => x.includes(H)) }); // THE .229 MIRROR: one deadline for both facts; the keeper's own lines name the closer's branch
+  ok(tabsH.length > 0 && await until(() => !model.windows.has(winH) && tabsH.every((t) => model.targets.get(t).state === 'closed'), 15000) && tabsKA.length > 0 && tabsKA.every((t) => model.targets.get(t).state !== 'closed'), `F11: AT FINALIZE the job's WINDOW closes (window ${winH}: ${tabsH.length} tab(s) closed over CDP) — the owner's page in its own window is untouched; the window stayed open before`, { winH, ...f11State(winH, tabsH, rootsAtRelease, jlAtRelease), rebinds, owner: tabsKA.map((t) => t.slice(0, 4) + ':' + model.targets.get(t).state) }); // THE .229 MIRROR: one deadline for both facts; the keeper's own lines name the closer's branch
   ok(!Object.values(k._reg().leftTabs || {}).some((m) => m && m[H]), 'F11: no "left tab" is kept for the released job handle (a job never comes back for its page)', k._reg().leftTabs);
   ok(released.includes(H) && !leasesOf(H).length && !k._reg().children[H], 'AT FINALIZE the job\'s lease and handle are gone (its window closes with the lease)', { released, leases: leasesOf(H) });
   await call('/api/agent/browser/resolve', 'jbt_bbbb', { argv: ['snapshot'] });
@@ -340,9 +343,52 @@ console.log('— ④ the real routes + keeper: a job gets its own lease + window
   const winH2 = lw(H2), tabsH2 = windowTabs(winH2);
   jobs.get('jb-0000bbbb').state = 'failed';
   k.reconcile({ graceMs: 120000 });
-  ok(tabsH2.length > 0 && await until(() => !model.windows.has(winH2) && tabsH2.every((t) => model.targets.get(t).state === 'closed')), `F11: THE SWEEP closes the window too (a job that ended without its finalize: window ${winH2}, ${tabsH2.length} tab(s))`, { winH2, open: windowTabs(winH2) });
+  ok(tabsH2.length > 0 && await until(() => !model.windows.has(winH2) && tabsH2.every((t) => model.targets.get(t).state === 'closed'), 15000), `F11: THE SWEEP closes the window too (a job that ended without its finalize: window ${winH2}, ${tabsH2.length} tab(s))`, { winH2, ...f11State(winH2, tabsH2, leaseRoots(H2), 0) });
   ok(H2 && !k._reg().children[H2] && !leasesOf(H2).length, 'THE SWEEP: a job that ended without its finalize hook is released at the next reconcile (evidence: not running)', { H2, children: Object.keys(k._reg().children) });
   ok(jl.some((x) => /job jb-0000aaaa uses the conversation's browser as bk-00000a01\.\d+/.test(x)) && jl.some((x) => /job handle released \(the job run ended\)/.test(x)), 'the journal names the job by its ID at the mint and the release (never its name)', jl.filter((x) => /job/.test(x)));
+  // THE .229 RULE'S SECOND ORDERING (lane jobs-browser-f11-race — F11 red on the rel251/rel253 runners: roots at the release
+  // [0009…, 0005…], tab 0004 left open): the narrowing's close of a holder's session (closeLeaseSession: `tab close`, `close`,
+  // the lost-tab mark — never awaited by the refusal) landed AFTER the holder's re-attach had bound its session to its NEW
+  // window's tab: it closed THAT tab and marked the new lease lost, the next verb rebound a fresh tab whose root replaced the
+  // window's, and the finalize (it closes what the lease roots) left the window open. Interleaved BY HAND, no timing: the
+  // close is held at its `tab close` (a gated runtime; the binary's close also closes that CDP target, as Chrome does) while
+  // the re-attach runs — the shipped keeper parks the attach behind the close; the pre-fix copy binds first (RED).
+  const tabsOfWindow = (w) => [...model.targets].filter(([, t]) => t.windowId === w).map(([id]) => id);
+  const closeThenAttach = async (Kmod, tag) => {
+    const rt0 = F.createBrowserRuntime({ env }); let gate = null, held = false; const jl2 = [];
+    const rt = Object.assign(Object.create(rt0), { exec: async (ns, argv, o) => { const a = Array.isArray(argv) ? argv : []; const closing = a.length === 2 && a[0] === 'tab' && a[1] === 'close'; if (closing && gate) { held = true; const g = gate; gate = null; await g; } const r = await rt0.exec(ns, argv, o); if (closing && r && r.ok && r.json && r.json.data && r.json.data.targetId) closeTab(String(r.json.data.targetId).toUpperCase()); return r; } });
+    const kk = mk(Kmod, { dataDir: path.join(O, 'data-close-' + tag), runtime: rt, log: { log: (x) => jl2.push(String(x)), warn: (x) => jl2.push(String(x)), error() { } } });
+    await kk._facts.probeVersion();
+    const X = 'bk-00000c03'; live.add(X);
+    const pN = kk.createProfile({ label: 'Narrowed ' + tag });
+    const prof = () => kk._reg().profiles.find((x) => x.id === pN.id), lease = () => B.findLease(kk._reg().leases, pN.id, X);
+    await kk.attach({ profileId: pN.id, browserKey: X });
+    const w1 = lease() && lease().windowId, t1 = tabsOfWindow(w1)[0] || null;
+    let go; gate = new Promise((r) => { go = r; });
+    prof().owner = { kind: 'only', who: [{ kind: 'session', id: KB }] };
+    const refused = await kk.attach({ profileId: pN.id, browserKey: X }).then(() => null, (e) => e);
+    const parkedClose = await until(() => held, 15000); // witness: the narrowing's close is in flight, held at its `tab close`
+    prof().owner = { kind: 'instance' };
+    let settled = false; const again = kk.attach({ profileId: pN.id, browserKey: X }).then(() => { settled = true; }, () => { settled = true; });
+    await until(() => settled || jl2.some((x) => x.includes(`${X}: its attach on ${pN.id} waits for its session's close`)), 15000); // witness: parked (shipped) or bound (pre-fix)
+    const attachFirst = settled;
+    go(); await again;
+    await until(() => jl2.some((x) => x.includes(`${X}: its tab in ${pN.id}`)), 15000); // witness: the close said its outcome
+    await kk.attach({ profileId: pN.id, browserKey: X }); // the next verb's attach
+    const l = lease(), w2 = l ? l.windowId : null, t2 = w2 != null && w2 !== w1 ? tabsOfWindow(w2)[0] || null : null, roots = l ? (l.tabRoots || []).map(String) : [];
+    const st = (t) => (t && model.targets.get(t) ? model.targets.get(t).state : null);
+    live.delete(X); try { kk.shutdown(); } catch { }
+    return { refused: refused && refused.code, parkedClose, attachFirst, w1, t1: t1 && t1.slice(0, 4), t1State: st(t1), w2, t2: t2 && t2.slice(0, 4), t2State: st(t2), rooted: !!t2 && roots.includes(t2), roots: roots.map((x) => x.slice(0, 4)), rebinds: jl2.filter((x) => x.includes(X + ':') && /a new tab bound|bound to the browser's only tab/.test(x)).length };
+  };
+  const ord = await closeThenAttach(K, 'shipped');
+  ok(ord.refused === 'not_owner' && ord.parkedClose && !ord.attachFirst && ord.t1State === 'closed' && ord.t2State === 'ok' && ord.rooted && ord.rebinds === 0, 'THE SECOND ORDERING: a narrowing\'s session close still in flight when the holder re-attaches FINISHES FIRST — it closes the tab the narrowing took (not the re-attach\'s), the new window\'s tab stays open and rooted, no rebind replaces its root (the F11 runner red: the close landed on the new tab, the finalize left the window open)', ord);
+  const KSRC = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
+  const WAIT_LINE = "    if (cw.wait) { log.log?.(`[browser] ${browserKey}: its attach on ${p.id} waits for its session's close in flight (bounded by the browser CLI's own timeouts, ~30 s at most)`); await sessionCloses.get(cw.key); }\n";
+  const MK = mutantCopies('jobs-browser-close', REPO);
+  ok(KSRC.includes(WAIT_LINE), 'control "the attach does not wait for its close": its needle is in the shipped keeper');
+  const pre = await closeThenAttach(MK.load('src/server/browser-keeper.js', KSRC.replace(WAIT_LINE, ''), 'no-close-wait'), 'prefix');
+  ok(pre.attachFirst && pre.t2State === 'closed' && !pre.rooted && pre.rebinds > 0, 'control "the attach does not wait for its close" (the pre-fix keeper): the SAME hand interleave goes RED — the re-attach binds first, the late close shuts the NEW window\'s tab and marks it lost, the next verb rebinds a fresh root', pre);
+  for (const row of copiesCensus(MK.files, MK.dir, REPO, { minCopies: 1 })) ok(row.pass, row.name, row.detail);
 }
 
 

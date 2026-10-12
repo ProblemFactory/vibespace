@@ -242,9 +242,12 @@ ok(usU && usU.channelsPanelFolds && usU.channelsPanelFolds.internal === false &&
   '①b the owner\'s UNFOLD is an explicit choice — user state `channelsPanelFolds.internal: false` — and the group\'s row stands under the open head', JSON.stringify({ fd1, folds: usU && usU.channelsPanelFolds }));
 
 // ── ② the hostile name is TEXT ──
-const xss = await p1.evaljs(`(() => ({ pwned: window.__pwned === 1, rowText: [...document.querySelectorAll('.rail-panel-channels .chan-grow[data-group="${gid}"] .chan-grow-title')].map((n) => n.textContent)[0] || null, imgs: document.querySelectorAll('.rail-panel-channels .chan-groups img, .chanwin img, .taskbar img[src="x"]').length, title: [...window.app.wm.windows.values()].find((w) => w._openSpec && w._openSpec.convId === '${gid}').title }))()`);
+const xss = await p1.evaljs(`(() => { const INJ = '.rail-panel-channels .chan-groups img[src="x"], .chanwin img[src="x"], .taskbar img[src="x"]'; return ({ pwned: window.__pwned === 1, rowText: [...document.querySelectorAll('.rail-panel-channels .chan-grow[data-group="${gid}"] .chan-grow-title')].map((n) => n.textContent)[0] || null, imgs: document.querySelectorAll(INJ).length, planted: (() => { const g = document.querySelector('.rail-panel-channels .chan-groups'); if (!g) return -1; const i = document.createElement('img'); i.setAttribute('src', 'x'); g.appendChild(i); const n = document.querySelectorAll(INJ).length; i.remove(); return n; })(), title: [...window.app.wm.windows.values()].find((w) => w._openSpec && w._openSpec.convId === '${gid}').title }); })()`);
 ok(xss.rowText === HOSTILE && dlg.win.title === HOSTILE && xss.title === HOSTILE, 'a HOSTILE group name renders as TEXT in the list row, the window bar and the window title', JSON.stringify(xss));
-ok(xss.pwned === false && xss.imgs === 0, 'no element was injected and no script ran (the name reached the DOM through textContent only)', JSON.stringify(xss));
+// int257 seam 3: the census counts the HOSTILE element itself (`<img src=x …>` ⇒ an img whose src attribute is "x"), not every img —
+// the rows' avatar PICTURES (lane channel-avatars, `img.chan-av-img` over our /api/channels/avatar route) are content, not an injection;
+// a planted `img[src=x]` in the list proves the selector still sees one (never vacuous)
+ok(xss.pwned === false && xss.imgs === 0 && xss.planted === 1, 'no element was injected and no script ran (the name reached the DOM through textContent only; a planted img[src=x] is seen)', JSON.stringify(xss));
 
 // ── ③ each invitee's stub got exactly ONE invite frame, with the context ──
 await sleep(800);

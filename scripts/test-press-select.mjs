@@ -370,6 +370,7 @@ const OPT_INS = {
   'incident-recorder: report id': 'the incident id a person reads out (all)',
   'session-lifecycle: error panel': 'a failed window\'s error text',
   'sidebar-mounts: dav url': 'a WebDAV URL a person pastes elsewhere (all)',
+  'doc-window-ui: raw block source': 'a document\'s raw block (HTML / front matter kept as source) — a selection inside it is a comment\'s quote (lane doc-comment-raw-block; classified at the 2.369.258 integration)',
 };
 const CHROME_TOKENS = ['context-menu', 'popover', 'toast', 'overlap-switcher', 'chooser', 'tab-item', 'msg-meta-pop', 'dropdown', 'menu'];
 const files = execFileSync('git', ['ls-files', 'public/*.css', 'src/lib/*.js'], { cwd: repo, encoding: 'utf8' }).split('\n').filter(Boolean);
@@ -393,7 +394,8 @@ for (const f of files) {
           : f.endsWith('file-explorer-ops.js') ? 'file-explorer-ops: properties value'
             : f.endsWith('incident-recorder.js') ? 'incident-recorder: report id'
               : f.endsWith('session-lifecycle.js') ? 'session-lifecycle: error panel'
-                : f.endsWith('sidebar-mounts.js') ? 'sidebar-mounts: dav url' : `${f}:${i + 1}`;
+                : f.endsWith('sidebar-mounts.js') ? 'sidebar-mounts: dav url'
+                  : f.endsWith('doc-window-ui.js') ? 'doc-window-ui: raw block source' : `${f}:${i + 1}`;
         found.push({ where: `${f}:${i + 1}`, selector: sel, value: d[1] });
       }
     });

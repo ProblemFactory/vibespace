@@ -48,6 +48,12 @@
 //      OFF (the reporter's own pull from the ring, Δ −451/+351, was a reorder for the whole drag on b970f16d);
 //      a wobble within the margin stays a reorder. Controls: the pre-fix "never tears", a tear that only looks
 //      down. + a wiring pin: tab-group.js asks it every move with the host's title bar as the band.
+//   ⑰ A SPLIT NEVER MOVES A TAB ACROSS THE STRIP (inc-mv4q1u6b-ksyh, the owner 2026-10-12: "这个分屏的逻辑非常
+//      诡异，为啥在右侧的标签页分屏后跑到左侧了"): `splitSideFor` — the guest's side = where it sits beside the anchor
+//      in the VISUAL order, the pair in visual order — and enterSplit's CUT (a guest already on its side keeps its
+//      place, the tabs between stay with the anchor); the button's composition (splitPartner → splitSideFor →
+//      enterSplit) over EVERY 2–5-tab strip × active × recent partner keeps the strip and the active tab's side.
+//      Controls: the old rule (the guest always on the right) and the old creation (the guest always alone).
 //   ⑪ (v2 verify r1, finding ①) THE HELD RATIO: a user's divider act holds its
 //      ratio (holdRatio) until a save carries it (releaseRatio); heldRatio
 //      answers only while the chain still shows that value and for at most
@@ -377,6 +383,45 @@ function legs(C, { quiet = false } = {}) {
     leg(run(() => md({ mode: 'reorder', dx: 300, dy: 200, y: 400, band: null })) === 'reorder' && run(() => md({ mode: 'reorder', dx: 1, dy: 1, y: 'x', band })) === 'reorder', '⑮ no band known / an unreadable y ⇒ stays a reorder (never a guessed tear)');
     leg(run(() => md({ mode: 'detach', dx: 1, dy: 0, y: 104, band })) === 'detach', '⑮ a detach never goes back to a reorder (the torn tab follows the pointer; the strip is a merge target again)');
   }
+
+  // ⑰ A SPLIT NEVER MOVES A TAB ACROSS THE STRIP (inc-mv4q1u6b-ksyh): the pane sides follow the strip's visual order
+  {
+    const side = F('splitSideFor');
+    const two = (active) => F('normalizeChain')({ tabs: ['A', 'B'], active });
+    leg(J(run(() => side(two(1), 'B', 'A'))) === J({ side: 'left', pair: ['A', 'B'] }), '⑰ the incident: the active tab B on the RIGHT of its partner A ⇒ the guest A goes LEFT, pair [A, B] (the old rule put B on the left)', J(run(() => side(two(1), 'B', 'A'))));
+    leg(J(run(() => side(two(0), 'A', 'B'))) === J({ side: 'right', pair: ['A', 'B'] }), '⑰ the mirror: the active A left of B ⇒ the guest B goes right, pair [A, B]');
+    const three = F('normalizeChain')({ tabs: ['A', 'B', 'C'], active: 0 });
+    leg(J(run(() => side(three, 'A', 'C'))) === J({ side: 'right', pair: ['A', 'C'] }) && J(run(() => side(three, 'C', 'A'))) === J({ side: 'left', pair: ['A', 'C'] }), '⑰ 3 tabs, a FAR partner (not a neighbour): the side still follows the strip, both ways');
+    const reordered = F('normalizeChain')({ tabs: ['A', 'B', 'C'], active: 0, order: ['C', 'A', 'B'] });
+    leg(J(run(() => side(reordered, 'A', 'C'))) === J({ side: 'left', pair: ['C', 'A'] }), '⑰ the VISUAL order decides (the strip [C, A, B]), never the membership order `tabs`');
+    leg(run(() => side(three, 'A', 'Z')) === null && run(() => side(three, 'A', 'A')) === null && run(() => side(null, 'A', 'B')) === null, '⑰ a non-member, the same tab, no chain ⇒ null');
+    // through the verbs the button composes (splitActive = splitPartner → splitSideFor → enterSplit → normalize)
+    const button = (c) => { const a = c.tabs[c.active]; const g = F('splitPartner')(c, c.recent); const at = side(c, a, g); F('enterSplit')(c, { anchorId: a, guestId: g, side: at ? at.side : 'right' }); return c; };
+    const b2 = button(F('normalizeChain')({ tabs: ['A', 'B'], active: 1, recent: ['B', 'A'] }));
+    leg(b2.layout === 'split' && J(b2.split.left) === J(['A']) && J(b2.split.right) === J(['B']) && J(b2.split.pair) === J(['A', 'B']) && b2.tabs[b2.active] === 'B', '⑰ the button on [A, B] with B active: A left, B right — the active tab stays on the side it was on', J(b2));
+    const b3 = button(F('normalizeChain')({ tabs: ['A', 'B', 'C'], active: 2, recent: ['C', 'B', 'A'] }));
+    leg(J(b3.split.pair) === J(['B', 'C']) && J(b3.split.left) === J(['A', 'B']) && J(b3.split.right) === J(['C']) && J(b3.order) === J(['A', 'B', 'C']), '⑰ the button on [A, B, C] with C active, B the most recent: B left, C right, A stays left of B — the split never moves a tab across the strip (the guest-alone creation made it [B | A, C])', J(b3));
+    const b4 = button(F('normalizeChain')({ tabs: ['A', 'B', 'C', 'D'], active: 0, recent: ['A', 'C'] }));
+    leg(J(b4.split.pair) === J(['A', 'C']) && J(b4.split.left) === J(['A', 'B']) && J(b4.split.right) === J(['C', 'D']), '⑰ a far partner on the right: the cut sits right before it — the tabs between stay with the anchor, those beyond go with the guest', J(b4));
+    // EVERY strip of 2–5 tabs × every active tab × every partner the recent list can name
+    let seen = 0, bad = null;
+    for (let n = 2; n <= 5 && !bad; n++) {
+      const ids = 'ABCDE'.slice(0, n).split('');
+      const perms = (xs) => (xs.length <= 1 ? [xs] : xs.flatMap((x, i) => perms([...xs.slice(0, i), ...xs.slice(i + 1)]).map((p) => [x, ...p])));
+      for (const order of perms(ids)) for (let ai = 0; ai < n && !bad; ai++) for (const p of ids) {
+        if (p === ids[ai] || bad) continue;
+        const c = button(F('normalizeChain')({ tabs: [...ids], active: ai, order: [...order], recent: [ids[ai], p] }));
+        seen++;
+        const a = ids[ai], leftOf = order.indexOf(a) < order.indexOf(p);
+        if (c.layout !== 'split' || J(c.order) !== J(order) || c.tabs[c.active] !== a || J(c.split.pair) !== J(leftOf ? [a, p] : [p, a]) || invariantBroken(c)) bad = { order, a, p, got: c };
+      }
+    }
+    leg(!bad && seen === 2728, `⑰ over every 2–5-tab strip × active × partner (${seen} splits) the strip order is kept, the pair is in visual order and the active tab stays on its side — a split never moves a tab across the strip`, J(bad));
+    // the verbs that NAME a side keep it: "Beside X (on the right)" for X left of the anchor moves X alone, nothing else
+    const named = F('normalizeChain')({ tabs: ['A', 'X', 'B'], active: 0, order: ['X', 'A', 'B'] });
+    F('enterSplit')(named, { anchorId: 'A', guestId: 'X', side: 'right' });
+    leg(J(named.split.left) === J(['A', 'B']) && J(named.split.right) === J(['X']) && J(named.split.pair) === J(['A', 'X']), '⑰ a verb that NAMES the side ("Beside X (on the right)", X on the left) still moves X — alone; every other tab with the anchor', J(named));
+  }
   return failed;
 }
 
@@ -409,6 +454,10 @@ const MUTANTS = [
   // inc-muly2izg-cks3: the pre-fix rule (a reorder is a reorder for the whole drag — the reporter's pull never left the
   // group) and a tear that only looks down (a tab pulled UP toward the desktop previews would stay in the bar)
   { tag: 'reorder-never-tears', find: "    return py < top - TAB_TEAR_PX || py > bottom + TAB_TEAR_PX ? 'detach' : 'reorder';", repl: "    return 'reorder';", expect: /reporter's pull/ },
+  // inc-mv4q1u6b-ksyh: the pre-fix rule (the guest always on the right of the active tab) and the pre-fix creation (the
+  // guest always ALONE on its side — a far partner dragged the tabs between across it)
+  { tag: 'side-always-right', find: "  return gi > ai ? { side: 'right', pair: [a, g] } : { side: 'left', pair: [g, a] };", repl: "  return { side: 'right', pair: [a, g] };", expect: /the incident: the active tab B on the RIGHT/ },
+  { tag: 'guest-always-alone', find: "  const cut = side === 'left' ? (gi < ai ? gi + 1 : -1) : (gi > ai ? gi : -1);", repl: '  const cut = -1;', expect: /never moves a tab across the strip/ },
   { tag: 'tear-only-downward', find: "    return py < top - TAB_TEAR_PX || py > bottom + TAB_TEAR_PX ? 'detach' : 'reorder';", repl: "    return py > bottom + TAB_TEAR_PX ? 'detach' : 'reorder';", expect: /pulled UP past the margin/ },
 ];
 for (const m of MUTANTS) {
@@ -452,6 +501,19 @@ console.log('— ⑮ wiring: src/lib/tab-group.js classifies the tab drag throug
   ok(v3.act === 'restore' && v3.chain.layout === 'split' && v3.chain.tabs.join() === 'h,g' && v3.chain.split.ratio === 0.4, '⑯ a third member the RECORD dropped (unbuildable) ⇒ the rest restored, split kept', JSON.stringify(v3));
   ok(C.restoreVerdict(rec, has(['h']), ['g']).act === 'drop', '⑯ the pair\'s other member dropped by the record ⇒ nothing left to group (drop)');
   ok(C.restoreVerdict(r3, has(['h', 'g'])).act === 'wait', '⑯ CONTROL: the same three-member chain with nothing dropped still waits for its third');
+}
+
+// ⑰ WIRING (inc-mv4q1u6b-ksyh): every door that picks the side itself asks splitSideFor — the strip button / command mode
+// `v` / the merge toast (splitActive), the merge drop under mergeDropLayout = split (F3) and the button's words
+console.log('— ⑰ wiring: src/lib/tab-group.js picks a default side through splitSideFor');
+{
+  const TG = fs.readFileSync(path.join(REPO, 'src/lib/tab-group.js'), 'utf8');
+  const fnAt = (head) => { const i = TG.indexOf(head); const j = TG.indexOf('\n  },\n', i); return i >= 0 && j > i ? TG.slice(i, j) : ''; };
+  const sa = fnAt('  splitActive(chain, { announce = false } = {}) {'), um = fnAt('  _afterUserMerge(chain, '), words = fnAt('  _splitBtnWords(chain) {');
+  ok(/import \{[^}]*\bsplitSideFor\b[^}]*\} from '\.\/chain-layout\.js';/.test(TG), '⑰ tab-group.js imports splitSideFor from the PURE model');
+  ok(/const at = splitSideFor\(chain, anchor\.id, guest\.id\);/.test(sa) && /side: at \? at\.side : 'right'/.test(sa) && !/side: 'right', announce/.test(sa), '⑰ splitActive (the button, `v`, the merge toast) takes the side from splitSideFor — no literal right left', sa.slice(0, 300));
+  ok(/splitSideFor\(chain, anchor\.id, draggedWin\.id\)/.test(um) && /side: at\.side, announce: true/.test(um), '⑰ the merge drop under mergeDropLayout = split (F3) keeps the dragged window on the side it was dropped on', um.slice(0, 300));
+  ok(/splitSideFor\(chain, chain\.tabs\[chain\.active\], partner\?\.id\)\?\.side === 'left'/.test(words) && /\{name\} on the left, this tab on the right/.test(words), '⑰ the button\'s words name the side the click WILL give (a partner on the left is named on the left)', words);
 }
 
 console.log(`\n${fail ? 'FAIL' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);

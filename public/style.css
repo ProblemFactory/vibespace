@@ -4915,7 +4915,14 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .chan-sec-note.chan-warn { color: var(--warn-text); }
 /* lane webhook-l2-ui: THE WEBHOOK OWNER SURFACE — the section's New path…, the wizard / caller panel / token-once / send
    dialogs (channel-webhook.js) and the window's path row (Callers… · Send a message… · the budget words) */
-.chan-wh-new { margin: 2px 6px 6px 8px; font-size: 11px; display: inline-flex; align-items: center; gap: 4px; }
+.chan-wh-new { margin: 0; padding: 1px 7px; font-size: 11px; font-weight: 500; display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; white-space: nowrap; }
+/* lane webhook-section-place: New path… sits ON the section's head row (right of the name, before the count and the ⋯);
+   on a phone or a ≤ 300 px panel (New group's threshold) the glyph alone — the word rides its tooltip and heads the ⋯ menu */
+@container chan-panel (max-width: 300px) { .chan-wh-new-label { display: none; } .chan-wh-new { padding: 1px 4px; } }
+/* int257 seam 2: under 160 px of panel (the 200 px rail = 112 px) the head already sheds its name and the count stands in —
+   the glyph steps aside too (its ⋯ menu's first row is New path…), else the ⋯ leaves the list and it scrolls sideways */
+@container chan-panel (max-width: 160px) { .chan-sec-head .chan-wh-new { display: none; } }
+@media (max-width: 480px) { .chan-wh-new-label { display: none; } .chan-wh-new { width: 36px; height: 36px; padding: 0; justify-content: center; } }
 .chan-wh-dialog { width: min(560px, calc(100vw - 24px)); max-height: calc(100vh - 32px); display: flex; flex-direction: column; }
 .chan-wh-dialog .dialog-body { overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
 .chan-wh-field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }

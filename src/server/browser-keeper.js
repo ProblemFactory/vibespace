@@ -1289,11 +1289,13 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
    *  the lease session's own `close` — the CLI's `close` of an attachment, that session's connection and its tab, never
    *  the browser (the other conversations keep theirs). A mediated lease's tabs were closed by the mediator's revoke in
    *  detach(). Best effort, never awaited by the write that caused it; said in the journal. */
+  const sessionCloses = new Map(); // B.sessionCloseKey → the close in flight (lane jobs-browser-f11-race: the same holder's next attach waits for it)
   function closeLeaseSession(p, browserKey, why) {
     if (!p || isEph(p) || isMediated(p)) return;
     const rec = reg.browsers[p.id];
     if (!B.isLiveBrowser(rec) || !isLocalRec(rec)) return;
-    (async () => {
+    const ck = B.sessionCloseKey(p.id, browserKey);
+    const run = (async () => {
       const o = await leaseCliOpts(p.id, browserKey);
       if (!o) return;
       // the session's OWN tab (its bound tab — measured on 0.38.1: a CDP-connected session's `close` ends its connection
@@ -1305,7 +1307,8 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       // measured on 0.38.1: the session stays bound to the tab it lost (`tab_gone` on its next command) — marked, so the
       // conversation's NEXT attach binds it a new tab first (persisted: a restart in between keeps the mark)
       if (t && t.ok) { markTabLost(p.id, browserKey, 'closed'); commit(); }
-    })().catch((e) => log.warn?.(`[browser] ${browserKey}: its tab in ${p.id} was not closed (${why}) — ${e && e.message}`));
+    })().catch((e) => log.warn?.(`[browser] ${browserKey}: its tab in ${p.id} was not closed (${why}) — ${e && e.message}`)).finally(() => { if (sessionCloses.get(ck) === run) sessionCloses.delete(ck); });
+    sessionCloses.set(ck, run);
   }
   /**
    * THE PICK WRITES THE LIST (§3.3 — the owner's default 1, 2026-09-27): the USER picked `p` for the conversation
@@ -3950,6 +3953,10 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     if (!p) throw namedError('not-found', `no profile ${profileId || ref}`);
     if (p.ambiguous) throw namedError('ambiguous', `"${ref}" names ${p.ambiguous.length} profiles (${p.ambiguous.join(', ')}) — use the id`);
     if (isEph(p)) throw namedError('not_attachable', `"${p.label}" is a conversation's managed ephemeral browser — a bare \`vibespace-browser <verb>\` of that conversation lands on it; it is never attached by id`);
+    // lane jobs-browser-f11-race (the .229 rule's second ordering, PURE B.attachWaitVerdict): a narrowing's close of THIS
+    // holder's session still in flight finishes first — else it lands on the tab this attach binds (closed, marked lost)
+    const cw = B.attachWaitVerdict({ closing: sessionCloses, profileId: p.id, browserKey });
+    if (cw.wait) { log.log?.(`[browser] ${browserKey}: its attach on ${p.id} waits for its session's close in flight (bounded by the browser CLI's own timeouts, ~30 s at most)`); await sessionCloses.get(cw.key); }
     // identity verify r2 (2026-09-28): a conversation on ANOTHER machine never holds a lease here — its `use` used to
     // launch this machine's Chrome and hand the other machine a loopback CDP url it cannot reach (refused BY NAME, first)
     if (isRemoteKey(browserKey)) {

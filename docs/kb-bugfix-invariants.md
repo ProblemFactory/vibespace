@@ -532,6 +532,19 @@
 - A FLATPAK'S FILE DIALOG OPENED ON THE OWNER'S MAIN DESKTOP, NOT ITS PANE (JASP + Chrome, 2026-10-12): its portal ran on the session bus with DISPLAY=:2 — 不变量 = a sandboxed app or a browser on its own display gets its own portal there; an app's dialog is on its display or not the app's
 - EVERY NEW AGENT BROWSER DIED AT LAUNCH ON A LONG DATA PATH (owner 2026-10-12): TMPDIR = data/browser-env/tmp ⇒ Chrome's singleton socket path 112 > 108 — 不变量 = a path handed to a Unix socket is judged by its length against the OS limit, with a control that binds it
 - (2026-10-12) EIGHTEEN COMMENTS COULD NOT BE SENT AND THE PERSON WAS TOLD TO SEND SOME FIRST (owner): a per-message bound was applied per send, behind a refusal with no door — 不变量 = a bound on a message is met by sending more messages; a refusal never asks for what the surface cannot do
+- THE SPLIT BUTTON MOVED THE RIGHT TAB TO THE LEFT PANE (owner 2026-10-12, inc-mv4q1u6b-ksyh): splitActive put the ACTIVE tab left whatever its place in the strip — 不变量 = a split never moves a tab across the strip; pane sides follow the strip's visual order
+- THE .229 FIX LEFT A SECOND ORDERING (F11 red on the rel251/253 runners): a narrowing's unawaited session close landed after the holder's re-attach had bound its new window's tab — closed it, marked it lost, a rebind replaced the root. 不变量 = a holder's close and its next attach are one sequence
+- THE WEBHOOK SECTION'S NEW-PATH BUTTON HUNG BELOW ITS HEAD AND THE BUILT-IN DOOR SAT AMONG THE USER'S ACCOUNTS (owner 2026-10-12) — 不变量 = a section's one action lives on its head row; what the person did not add sorts after what they did
+- A CHANNEL MESSAGE OPENED FOR EDITING IN A THREE-ROW BOX (a fleet user, 2026-10-12): the editors were default-height textareas — 不变量 = an editor opens at the size of its text and grows as you type, clamped to the pane; the person's drag wins
+- A DOCUMENT'S RAW BLOCK COULD NOT BE COMMENTED (owner 2026-10-12): the comment popover keyed only to the editor's text selection; an atom's NodeSelection and a DOM selection inside it never counted — 不变量 = every block of a document is commentable; what the person selected is the quote
+
+## THE SPLIT BUTTON MOVED THE RIGHT TAB TO THE LEFT PANE (owner 2026-10-12, inc-mv4q1u6b-ksyh, lane split-keeps-sides)
+
+The owner: "这个分屏的逻辑非常诡异，为啥在右侧的标签页分屏后跑到左侧了". The bundle's action ring (client 2.369.254): ⫿ pressed on a tabs group (`splitActive`), a click in a `tab-strip-half`, ⫿ again (the split menu). `splitActive` was "the ACTIVE tab on the left, the default partner on the right" — so whenever the active tab sat to the RIGHT of its partner in the strip, the split moved it to the left pane. A far partner had a second form of the same move: `enterSplit` sent the guest ALONE to its side, so [A, B, C] with C active and B the partner became [B | A, C] — A crossed B.
+
+**Invariant: a split never moves a tab across the strip — the pane sides follow the strip's visual order.** PURE `splitSideFor(chain, anchorId, guestId)` (chain-layout.js) answers the guest's side from `visualTabOrder`; `enterSplit` from tabs cuts the strip when the guest already sits on `side` (the tabs between stay with the anchor). Every door that picks the side itself asks it: `splitActive` (the ⫿ button, command mode `v`, the "Grouped as tabs" toast), the merge drop under `mergeDropLayout = split` (F3 — the dropped window stays on the side it was dropped on), the button's tooltip. Verbs that NAME a side ("Beside {name} (on the right)", `chain.splitBeside`, the live view's bind) keep it.
+
+**Gates:** test-chain-layout ⑰ (fast: the table, 2 728 composed splits over every 2–5-tab strip × active × partner, controls "always right" + "guest alone", a wiring pin) + test-split-ux §14 (heavy: 1100×800 real ⫿ clicks with pane rects / halves / focus, the pre-fix door as the control, a 390×844 phone).
 
 ## THE AGENT COULD NOT SEE THE DIALOG IT HAD OPENED (owner 2026-10-11, lane window-dialog-member)
 
@@ -5295,6 +5308,14 @@ The owner: 「调用 channel provider 自己的在线搜索的时候缓存结果
 **Invariant:** a read prunes only what it could have seen — any state written while the read was in flight survives it; a judge asserting two facts waits for both under one deadline.
 
 **Gates:** test-jobs-browser THE .229 MIRROR leg (a gated CDP read, a root stamped while it is held), F11 + THE SWEEP one-deadline judges; control: the base keeper ⇒ 2 red (the leg + F11 with window 104 left open).
+
+**The second ordering (lane jobs-browser-f11-race, rel257 — the same F11 red on the rel251 / rel253 fast shards, 2026-10-11, B-33e0).** The runner's detail (run 38163545391) read `open:[0004]` with 0005 closed: the closer ran and closed what the lease rooted, and 0004 was not among the roots. Traced with every root change and journal line timestamped (a keeper on a 20 ms tick shifts the event loop enough: 2/3 red): the not_owner refusal (`rejudgeLeases` 'verb-time') detached the job lease and started `closeLeaseSession` — the session's `tab close`, its `close`, then `markTabLost`, best effort and never awaited. The next resolve re-attached the same handle first: `ownWindowAtAttach` opened window 104, bound the session to 0004 and cleared the mark. Then the close landed: its `tab close` shut the session's CURRENT tab (0004, in Chrome), and its mark made the next attach rebind (`tab new`, `tabRoots = [that tab]`) — 0004's root was gone, the finalize held 0005 only (roots at release `[0009…, 0005…]`). Load alone never reordered it here (taskset 4 cores + 3 fast suites 10×, + 8 spinning workers 10×: both paths are ~80 ms of binary spawns).
+
+**Fix:** the close registers under `B.sessionCloseKey(profile, key)`; `attach` asks the PURE `B.attachWaitVerdict` first and waits for its own key's close in flight (a journal line; bounded by the CLI's 15 s timeouts). Only the same (profile, key) waits — a parent's or a sibling helper's session is its own.
+
+**Invariant:** a holder's close and its next attach are one sequence — a close issued for a lease finishes before that holder binds again, so it touches only what the refusal took.
+
+**Gates:** test-jobs-browser THE SECOND ORDERING — a gated runtime holds the close at its `tab close` while the holder re-attaches (the binary's close also closes that CDP target, as Chrome does): the attach parks, the narrowed tab closes, the new window's tab stays rooted; control: the keeper copy without the wait ⇒ RED (the re-attach binds first, the late close shuts the NEW tab, a rebind replaces its root). F11 + THE SWEEP await their witnesses ≤ 15 s and print the roots at release, the tab states and any rebind.
 
 ## THE ARTIFACTS POPOVER RAN OFF THE VIEWPORT AND HAD ONE ORDER (lane artifacts-list-scale, owner 2026-10-07, 43 + 174 rows)
 

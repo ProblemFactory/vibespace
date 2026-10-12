@@ -79,6 +79,7 @@ import { t } from './i18n.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { registerCommand, registerMenuItem } from './contributions.js';
 import { icon, el, btn, convAvatar } from './channel-chrome.js';
+import { autosizeEditor } from './channel-editor-size.js';   // lane channel-edit-autosize: every message editor opens at its text's size
 import { accountBadges } from './channel-avatar.js';   // B-f467: the row's avatar wears its account badge (B-5fe1)
 import * as chanCaps from '../channel-caps.js';
 // PURE, bundled (a3 i18n): the proposal's OUTCOME as structure → words here.
@@ -606,6 +607,7 @@ export function renderProposalCard(app, p, { compact = false, line = false, onLi
       editor = el('textarea', 'chan-prop-edit');
       editor.value = p.text || '';
       body.replaceWith(editor);
+      autosizeEditor(editor);   // the agent's draft opens at its size (min 4 rows, max ~60 % of the pane)
       approve.textContent = noFile ? t('Send without the file') : toAgent ? approveLabel(pressedDelivery(approve), { edited: true }) : t('Approve edited');
       edit.disabled = true;
       editor.focus();

@@ -100,7 +100,7 @@ ok(body.includes("s.empty || !view.hasFocus() || S.mode !== 'rich' ? null"), 'no
 ok(body.includes('blur: () => { clearTimeout(selTimer); offer.dismiss(); return false; }'), "the editor's blur dismisses it (and cancels a pending offer)");
 ok(body.includes("pane.addEventListener('scroll', () => offer.dismiss(), { signal, passive: true })"), "the pane's scroll dismisses it");
 ok(/signal\.addEventListener\('abort', \(\) => \{[^\n]*offer\.dismiss\(\)/.test(body), "the window's close dismisses it");
-ok(body.includes("const pop = createPopover(pane, 'doc-cpop'") && body.includes('offer.dismiss(); noteBox(quote, c, line);'), 'the house popover; its button dismisses it before the note box');
+ok(body.includes("const pop = createPopover(pane, 'doc-cpop'") && body.includes('offer.dismiss(); noteBox(quote, c, line, raw);'), 'the house popover; its button dismisses it before the note box');
 ok(!/\bpop\.remove\(\)/.test(body.slice(body.indexOf('function offerComment'), body.indexOf('function noteBox'))) && !body.includes('let pop = null'), 'no second owner of the popover (the keeper is the only one)');
 ok(app.includes("const floats = document.querySelectorAll('[data-popover]');") && app.includes('floats.forEach(el => el.remove())'), "app.js's Esc protocol removes every [data-popover] (the walk's escape())");
 

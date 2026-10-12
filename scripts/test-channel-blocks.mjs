@@ -1339,6 +1339,44 @@ console.log('⑳ a tag the reader does not know is content, as written; known ma
   for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 1 })) ok(c.pass, c.name, c.detail);
 }
 
+// ═══ ㉑ lane channel-edit-autosize (a fleet user 2026-10-12, inc-mv4toyhw-t7ym): A MESSAGE EDITOR OPENS AT ITS TEXT'S SIZE ═══
+// The proposal card's Edit box opened an agent's 25-line draft in a 3-row box. editorHeight = the content, clamped
+// between minRows rows and maxFrac of the pane; the DOM binding feeds it scrollHeight (wrapped lines included).
+{
+  console.log('\n㉑ a message editor opens at its text\'s size, clamped to the pane');
+  const ES = await import(pathToFileURL(path.join(REPO, 'src/lib/channel-editor-size.js')).href);
+  const H = (o) => ES.editorHeight({ rowPx: 20, minRows: 4, panePx: 1000, maxFrac: 0.6, ...o });
+  const rows = [
+    // [what, input, px, scroll]
+    ['empty text ⇒ the min (4 rows)', { contentPx: 0 }, 80, false],
+    ['3 lines ⇒ still the min', { contentPx: 60 }, 80, false],
+    ['25 lines ⇒ the text (no inner scroll)', { contentPx: 500 }, 500, false],
+    ['ONE long line wrapped to 12 rows ⇒ its wrapped height', { contentPx: 240 }, 240, false],
+    ['200 lines ⇒ clamped at 60 % of the pane, scrolls inside', { contentPx: 4000 }, 600, true],
+    ['a fractional height rounds UP (no 1 px inner scrollbar)', { contentPx: 300.4 }, 301, false],
+    ['a tiny pane ⇒ the min still wins', { contentPx: 4000, panePx: 50 }, 80, true],
+    ['no pane laid out yet ⇒ 20 rows, never unbounded', { contentPx: 4000, panePx: 0 }, 400, true],
+    ['a composer (minRows 2) empty ⇒ its two rows', { contentPx: 0, minRows: 2 }, 40, false],
+  ];
+  for (const [what, inp, px, scroll] of rows) { const v = H(inp); ok(v.px === px && v.scroll === scroll, `editorHeight: ${what}`, J(v)); }
+  // CONTROLS: the clamp and the min each spelled once — taken out, the table goes red
+  const src = read('src/lib/channel-editor-size.js');
+  const M = mutantCopies('channel-editor-size', REPO);
+  const noMax = src.replace('const px = Math.min(maxPx, Math.max(minPx, want));', 'const px = Math.max(minPx, want);');
+  const noMin = src.replace('const px = Math.min(maxPx, Math.max(minPx, want));', 'const px = Math.min(maxPx, want);');
+  ok(noMax !== src && noMin !== src, 'CONTROL setup: the clamp is spelled once');
+  const E1 = await import(pathToFileURL(M.write('src/lib/channel-editor-size.js', noMax, 'nomax')).href);
+  const E2 = await import(pathToFileURL(M.write('src/lib/channel-editor-size.js', noMin, 'nomin')).href);
+  ok(E1.editorHeight({ contentPx: 4000, rowPx: 20, panePx: 1000 }).px === 4000, 'CONTROL: without the max a 200-line draft opens 4000 px tall (the pane overflows)');
+  ok(E2.editorHeight({ contentPx: 60, rowPx: 20, panePx: 1000 }).px === 60, 'CONTROL: without the min a 3-line text opens at 3 rows');
+  // the wiring: every message editor binds the ONE helper (no per-editor copies)
+  const uses = [['src/lib/channel-outbox.js', 'autosizeEditor(editor);', 1], ['src/lib/channel-window.js', 'autosizeEditor(ta, { minRows: 2 });', 2], ['src/lib/channel-thread-pane.js', 'autosizeEditor(ta, { minRows: 2 });', 1]];
+  for (const [f, needle, n] of uses) { const k = read(f).split(needle).length - 1; ok(k === n, `${f}: the editor binds autosizeEditor (${n})`, `found ${k}`); }
+  const copies = ['src/lib/channel-window.js', 'src/lib/channel-outbox.js', 'src/lib/channel-thread-pane.js'].filter((f) => /scrollHeight[^;\n]*style\.height|style\.height[^;\n]*scrollHeight/.test(read(f)));
+  ok(!copies.length, 'no editor measures its own height (the helper is the one copy)', J(copies));
+  for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 1 })) ok(c.pass, c.name, c.detail);
+}
+
 console.log(`\n(${Date.now() - t0} ms)`);
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

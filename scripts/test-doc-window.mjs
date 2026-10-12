@@ -36,6 +36,12 @@
 //      opens its source IN PLACE, Esc re-renders, Ctrl+S ⇒ only that block's lines change. PNGs <tag>.png (the table) +
 //      <tag>-raw.png + <tag>-raw-edit.png into $VS_DOC_RAW_SHOTS (tag = $VS_DOC_RAW_SHOT_TAG, else after).
 //      VS_DOC_WINDOW_ONLY=raw runs §12 alone.
+//      §13 (lane doc-comment-raw-block, 2.369.258 — owner "这个html部分无法批注"): at 1100×900 in en a blog draft (front matter,
+//      a paragraph, an HTML comment block): a click on the block ⇒ Add comment, the quote = "HTML block: <!-- …", the strip's
+//      context line = its kind; a mouse drag inside its source box ⇒ the quote = the selected text (its own line); reload ⇒
+//      the strip lists both and a press selects the block in view; the source box open ⇒ no button + a toast; phone 390 ⇒
+//      the comment sheet. PNGs desk.png + phone.png (+ desk-offer / desk-select / desk-editing) into $VS_DOC_RAWCMT_SHOTS
+//      (else $VS_DOC_WINDOW_SHOTS). VS_DOC_WINDOW_ONLY=rawcmt runs §13 alone.
 // Run: node scripts/test-doc-window.mjs   (SKIPs with evidence when google-chrome is absent; ~1 min)
 import fs from 'node:fs';
 import path from 'node:path';
@@ -697,7 +703,104 @@ try {
   ok(!!(await until(() => (pageErrors.length === 0 ? true : null), 300)) || pageErrors.length === 0, '⑪ no page exception through §12', pageErrors.slice(0, 3));
   if (RSHOTS) ok(!!ownShot && fs.statSync(ownShot).size > 10000, `⑫ PNGs for the owner: ${path.join(RSHOTS, RTAG + '.png')} (+ -raw, -raw-edit)`);
   }
-  if (ONLY !== 'width' && ONLY !== 'print' && ONLY !== 'raw') {
+  if (ONLY === '' || ONLY === 'rawcmt') {
+  // ── §13 a raw block is commentable (lane doc-comment-raw-block, 2.369.258 — owner 2026-10-12 "这个html部分无法批注": a blog
+  //    draft's HTML comment block "<!-- [CONFIRM-BLOCK …] -->" drawn as its source box could not be annotated)
+  section('§13 a raw block is commentable: a click on it quotes the block, a selection inside its source box quotes the text; reload ⇒ the strip finds it; an open box ⇒ no button + a toast; desk 1100 + phone 390');
+  const CSHOTS = process.env.VS_DOC_RAWCMT_SHOTS || SHOTS;
+  const cshot = async (n) => { if (!CSHOTS) return null; const r = await call('Page.captureScreenshot', { format: 'png' }); const f = path.join(CSHOTS, n); fs.writeFileSync(f, Buffer.from(r.data, 'base64')); return f; };
+  await call('Page.addScriptToEvaluateOnNewDocument', { source: `try { localStorage.setItem('vibespace.lang', 'en'); localStorage.removeItem('vs-doc-width'); } catch {}` });
+  const CD = path.join(fs.realpathSync(PROJ), 'rawcmt'); fs.mkdirSync(CD, { recursive: true });
+  const CDOC = '---\ntitle: Draft\n---\n\n# Blog draft\n\nIntro paragraph for the reader.\n\n<!-- [CONFIRM-BLOCK id=7]\nkeep the bag\n-->\n\nTail paragraph.\n';
+  const CP = path.join(CD, 'blog-draft.md'); fs.writeFileSync(CP, CDOC);
+  const KEY = 'vs-doc-comments:\u0001' + CP;
+  async function openDoc(max) {
+    await ev(`for (const w of [...app.wm.windows.values()]) app.wm.closeWindow(w.id); return true;`); await sleep(300);
+    await ev(`app.openFile(${S(CP)}, 'blog-draft.md', {}); return true;`);
+    const up = await until(() => ev(`const w = ${DW(CP)}; const pm = w && w.content.offsetParent && w.content.querySelector('.doc-page .ProseMirror'); return pm && pm.querySelectorAll('.doc-rawblock').length >= 2 ? w.id : null;`), 20000, 200);
+    if (up && max) { await ev(`app.wm.toggleMaximize(${S(up)}); return true;`); await sleep(700); }
+    return up;
+  }
+  const inC = (js) => ev(`const w = ${DW(CP)}; const pm = w.content.querySelector('.doc-page .ProseMirror'); const R = (e) => e.getBoundingClientRect(); const H = [...pm.querySelectorAll('.doc-rawblock')].find((b) => /^HTML/.test((b.querySelector('.doc-raw-head') || {}).textContent || '')); ${js}`);
+  const btnNow = () => ev(`const b = document.querySelector('.doc-cpop .doc-comment-btn'); if (!b || !b.offsetParent) return null; const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 };`);
+  const addNote = async (b, note) => {
+    await click(b);
+    await until(() => ev(`return document.activeElement && document.activeElement.tagName === 'TEXTAREA' && !!document.activeElement.closest('.doc-note');`), 3000);
+    await type(note);
+    const add = await until(() => ev(`const a = document.querySelector('.doc-note-add'); if (!a) return null; const r = a.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 };`), 3000);
+    await click(add); await sleep(250);
+  };
+  const stored = () => ev(`try { return JSON.parse(localStorage.getItem(${S(KEY)}) || '[]'); } catch { return null; }`);
+  await ev(`localStorage.removeItem(${S(KEY)}); return true;`);
+  if (!ok(!!(await boot(1100, 900, false)), '§13 the client re-booted at 1100×900 (en)')) throw new Error('no app for §13');
+  ok(!!(await openDoc(true)), '① a blog draft with front matter, a paragraph and an HTML comment block opened, maximized at 1100 px');
+  const kinds = await inC(`H.scrollIntoView({ block: 'center' }); return [...pm.querySelectorAll('.doc-rawblock')].map((b) => (b.querySelector('.doc-raw-head') || {}).textContent);`);
+  ok(kinds.length === 2 && /^front matter/.test(kinds[0]) && /^HTML · cannot be rendered/.test(kinds[1]), '② two raw blocks: the front matter and the HTML comment (its source shown, "cannot be rendered")', kinds);
+  await sleep(300);
+  // ③ a click on the block (its NodeSelection) ⇒ Add comment; the quote = the block's kind + source
+  const hb = await inC(`const s = H.querySelector('.doc-raw-src'); const r = R(s); return { x: r.right - 40, y: r.top + r.height / 2 };`);
+  await click(hb);
+  const b1 = await until(btnNow, 4000);
+  const sel1 = await inC(`return { node: !!H.classList.contains('ProseMirror-selectednode'), focus: pm.contains(document.activeElement) || document.activeElement === pm };`);
+  await cshot('desk-offer.png');
+  ok(!!b1 && sel1.node, '③ a click on the HTML block selects it (one unit) and offers Add comment', { b1, sel1 });
+  if (b1) await addNote(b1, 'Confirm this block before publishing');
+  const s1 = await stored();
+  const strip1 = await inC(`return [...w.content.querySelectorAll('.doc-cmt')].map((e) => ({ k: (e.querySelector('.doc-cmt-k') || {}).textContent || '', q: (e.querySelector('.doc-cmt-q') || {}).textContent || '', raw: e.classList.contains('doc-cmt-raw') }));`);
+  ok(s1 && s1.length === 1 && s1[0].quote === 'HTML block: <!-- [CONFIRM-BLOCK id=7] keep the bag -->' && s1[0].line === 9 && s1[0].raw && s1[0].raw.kind === 'html' && s1[0].raw.line === 9 && Number.isInteger(s1[0].raw.pos) && s1[0].note === 'Confirm this block before publishing',
+    '④ the comment is saved with the block quote ("HTML block: <!-- [CONFIRM-BLOCK id=7] keep the bag -->"), the block\'s source line (L9) and ONE extra field raw {pos, line, kind}', s1);
+  ok(strip1.length === 1 && strip1[0].raw && strip1[0].k === 'L9 · HTML block' && strip1[0].q.startsWith('HTML block: <!-- [CONFIRM-BLOCK'), '⑤ the strip lists it with the block\'s kind as its context line', strip1);
+  // ⑥ a real mouse drag across "keep the bag" inside the source box ⇒ Add comment, the quote = the selected text
+  await click(await inC(`const p = [...pm.querySelectorAll('p')].find((x) => /Tail paragraph/.test(x.textContent)); const r = R(p); return { x: r.left + 20, y: r.top + r.height / 2 };`)); await sleep(300);
+  const span = await inC(`const s = H.querySelector('.doc-raw-src'), tn = s.firstChild, i = tn.data.indexOf('keep the bag'); const g = document.createRange(); g.setStart(tn, i); g.setEnd(tn, i + 1); const a = g.getBoundingClientRect(); g.setStart(tn, i + 11); g.setEnd(tn, i + 12); const z = g.getBoundingClientRect(); return { a: { x: a.left + 1, y: a.top + a.height / 2 }, z: { x: z.right - 1, y: z.top + z.height / 2 } };`);
+  await mouse('mouseMoved', span.a.x, span.a.y, { button: 'none' });
+  await mouse('mousePressed', span.a.x, span.a.y, { clickCount: 1, buttons: 1 });
+  for (let i = 1; i <= 6; i++) await mouse('mouseMoved', span.a.x + (span.z.x - span.a.x) * i / 6, span.a.y, { buttons: 1 });
+  await mouse('mouseReleased', span.z.x, span.z.y, { clickCount: 1 });
+  const b2 = await until(btnNow, 4000);
+  const dsel = await ev(`return String(getSelection());`);
+  await cshot('desk-select.png');
+  ok(!!b2 && dsel === 'keep the bag', '⑥ a mouse selection INSIDE the source box (a DOM selection the editor does not own) offers Add comment', { b2, dsel });
+  if (b2) await addNote(b2, 'Say which bag');
+  const s2 = await stored();
+  ok(s2 && s2.length === 2 && s2[1].quote === 'keep the bag' && s2[1].line === 10 && s2[1].raw && s2[1].raw.kind === 'html' && s2[1].raw.offset === CDOC.split('<!--')[1].indexOf('keep') + 4, '⑦ that comment\'s quote = the selected text, its line = the text\'s own source line (L10), the offset in the block kept', s2 && s2[1]);
+  // ⑨ reload ⇒ the strip shows both; a press on the block comment selects the block and scrolls it into view
+  if (!ok(!!(await boot(1100, 900, false)), '⑧ reload (the client re-booted)')) throw new Error('no app after reload');
+  ok(!!(await openDoc(true)), '⑧ the draft re-opened');
+  await inC(`w.content.querySelector('.doc-page').scrollTop = 0; return true;`); await sleep(300);
+  const opener = (await rectIn('.doc-strip-btn', CP)) || (await rectIn('.doc-cmts-chip', CP));
+  if (opener) await click(opener); await sleep(300);
+  const strip2 = await inC(`return [...w.content.querySelectorAll('.doc-cmt')].map((e) => ({ k: (e.querySelector('.doc-cmt-k') || {}).textContent || '', q: (e.querySelector('.doc-cmt-q') || {}).textContent || '' }));`);
+  ok(strip2.length === 2 && strip2[0].k === 'L9 · HTML block' && strip2[1].k === 'L10 · HTML block' && strip2[1].q === 'keep the bag', '⑨ after a reload the strip lists both raw-block comments (kind + line as context)', strip2);
+  await inC(`pm.querySelector('h1') && pm.querySelector('h1').scrollIntoView({ block: 'start' }); return true;`);
+  await click(await inC(`const e = w.content.querySelector('.doc-cmt .doc-cmt-n'); const r = R(e); return { x: r.left + 10, y: r.top + r.height / 2 };`)); await sleep(500);
+  const back = await inC(`const r = R(H), pg = R(w.content.querySelector('.doc-page')); return { node: H.classList.contains('ProseMirror-selectednode'), inView: r.top >= pg.top - 1 && r.bottom <= pg.bottom + 1 };`);
+  ok(back.node && back.inView, '⑩ a press on the comment in the strip selects its block (one unit) and scrolls it into view', back);
+  await cshot('desk.png');
+  // ⑪ the block's source box open (editing) ⇒ a selection in it offers no Add comment; a toast says Finish first
+  await click(await inC(`const r = R(H.querySelector('.doc-raw-head')); return { x: r.x + r.width / 2, y: r.y + r.height / 2 };`)); await sleep(300);
+  const ta = await inC(`const t = H.querySelector('textarea.doc-raw-edit'); if (!t) return null; const r = R(t); return { x: r.left + 6, y: r.top + 10, x2: r.left + 120 };`);
+  if (ta) { await mouse('mouseMoved', ta.x, ta.y, { button: 'none' }); await mouse('mousePressed', ta.x, ta.y, { clickCount: 1, buttons: 1 }); for (let i = 1; i <= 5; i++) await mouse('mouseMoved', ta.x + (ta.x2 - ta.x) * i / 5, ta.y, { buttons: 1 }); await mouse('mouseReleased', ta.x2, ta.y, { clickCount: 1 }); }
+  await sleep(700);
+  const ed = await inC(`const t = H.querySelector('textarea.doc-raw-edit'); return { ta: !!t, sel: t ? t.selectionEnd - t.selectionStart : 0, btn: !!document.querySelector('.doc-cpop .doc-comment-btn'), toast: document.body.innerText.includes('Press Finish first — a block whose source is open cannot be commented') };`);
+  await cshot('desk-editing.png');
+  ok(ed.ta && ed.sel > 0 && !ed.btn && ed.toast, '⑪ the block\'s source box open: a selection in it offers NO Add comment, and a toast says to press Finish first (not silence)', ed);
+  await call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 }); await call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 }); await sleep(300);
+  ok(fs.readFileSync(CP, 'utf8') === CDOC, '⑪ nothing on disk changed (comments are not edits)');
+  // ⑫ phone 390: a tap on the block ⇒ Add comment ⇒ the comment sheet as today
+  if (!ok(!!(await boot(390, 800, true)), '⑫ the client re-booted as a phone (390×800)')) throw new Error('no phone');
+  ok(!!(await openDoc(false)), '⑫ the draft opened on the phone');
+  await inC(`H.scrollIntoView({ block: 'center' }); return true;`); await sleep(400);
+  await click(await inC(`const r = R(H.querySelector('.doc-raw-src')); return { x: r.left + r.width / 2, y: r.top + r.height / 2 };`));
+  const pb = await until(btnNow, 4000);
+  if (pb) { await click(pb); await sleep(500); }
+  const sheet = await ev(`const d = document.querySelector('.doc-note-sheet'); return d ? { q: (d.querySelector('.doc-note-q') || {}).textContent || '', w: Math.round(d.getBoundingClientRect().width) } : null;`);
+  await cshot('phone.png');
+  ok(!!pb && !!sheet && sheet.q.startsWith('“HTML block: <!-- [CONFIRM-BLOCK'), '⑫ phone: a tap on the HTML block offers Add comment, which opens the comment sheet quoting the block', { pb, sheet });
+  ok(pageErrors.length === 0, '⑬ no page exception through §13', pageErrors.slice(0, 3));
+  if (CSHOTS) ok(['desk.png', 'phone.png'].every((f) => fs.existsSync(path.join(CSHOTS, f)) && fs.statSync(path.join(CSHOTS, f)).size > 10000), `⑭ PNGs for the owner: ${path.join(CSHOTS, 'desk.png')} + phone.png (+ desk-offer, desk-select, desk-editing)`);
+  }
+  if (ONLY !== 'width' && ONLY !== 'print' && ONLY !== 'raw' && ONLY !== 'rawcmt') {
 
   // ── §9 design 020 (lane doc-editor-ui, 2.369.223): the design desk's audit sample (every block kind) at 1280 / 390 ×
   //    dark / light × zh / en — the PNGs carry the audit's names with `after-` so the owner flips between before and after

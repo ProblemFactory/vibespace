@@ -21,11 +21,11 @@
 //   · SAVE: the serializer's output through the atomic /api/file/write of THIS window's path only, then
 //     POST /api/doc/edited {summary} — the owning chat's free next-turn note.
 import { Editor, Extension } from '@tiptap/core';
-import { Plugin } from '@tiptap/pm/state';
+import { Plugin, NodeSelection } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import M from '../doc-model.js';
 import { schema, extensions, loadDoc, saveDoc, sourceLine, docFidelity, safeHref, safeImageSrc } from './doc-markdown.js';
-import { WIDTH_KEY, widthChoice, nextWidth, columnRule, TABLE_CSS, downloadHref, exportName, localImagePath, exportDocument, readingHtml, rawReading, colsBand } from './doc-window-model.js';
+import { WIDTH_KEY, widthChoice, nextWidth, columnRule, TABLE_CSS, downloadHref, exportName, localImagePath, exportDocument, readingHtml, rawReading, colsBand, rawCommentAnchor, rawCommentTarget, RAW_KIND_WORD } from './doc-window-model.js';
 
 const POLL_MS = 2000;
 const SHEET_BELOW = 640;   // px of window width: below it the comments strip is a bottom sheet
@@ -111,6 +111,7 @@ ${TABLE_CSS}
 .doc-page .ProseMirror kbd{font:.84em/1 var(--font-mono,'SF Mono','Fira Code',monospace);padding:1px 5px;border:1px solid var(--border);border-bottom-width:2px;border-radius:var(--radius-sm);background:var(--bg-input);white-space:nowrap}
 .doc-page .ProseMirror .doc-rawblock{border:1px dashed var(--border);border-radius:var(--radius);padding:0 14px 12px;white-space:normal;cursor:default}
 .doc-page .ProseMirror .doc-rawblock.ProseMirror-selectednode{outline:2px solid var(--accent-dim);outline-offset:1px}
+.doc-page .ProseMirror .doc-rawblock :is(.doc-raw-src,.doc-raw-read){-webkit-user-select:text;user-select:text} /* a selection inside a raw block is a comment's quote: Chrome starts none in a contenteditable=false island without it */
 .doc-page .ProseMirror .doc-raw-head{display:block;box-sizing:border-box;width:calc(100% + 28px);margin:0 -14px 10px;padding:3px 10px;background:var(--bg-input);border:none;border-bottom:1px solid var(--border);border-radius:var(--radius) var(--radius) 0 0;font:inherit;font-size:10px;line-height:1.5;text-align:left;color:var(--text-dim);cursor:pointer}
 .doc-page .ProseMirror .doc-raw-head:hover,.doc-page .ProseMirror .doc-raw-head:focus-visible{color:var(--text);background:color-mix(in srgb,var(--accent) 12%,var(--bg-input));outline:none}
 .doc-page .ProseMirror .doc-raw-read>*{margin-top:0;margin-bottom:0}
@@ -137,6 +138,9 @@ ${TABLE_CSS}
 .doc-cmt-q{color:var(--text-dim);border-left:2px solid var(--accent-dim);padding-left:6px;margin-bottom:4px;overflow-wrap:anywhere}
 .doc-cmt-n{white-space:pre-wrap;overflow-wrap:anywhere}
 .doc-cmt-x{position:absolute;top:2px;right:2px;border:none!important;background:none!important;padding:2px 6px!important;color:var(--text-dim)!important}
+.doc-cmt-raw{cursor:pointer}
+.doc-cmt-raw:hover{border-color:var(--accent-dim)}
+.doc-cmt-k{font-size:11px;color:var(--text-dim);margin-bottom:2px}
 .doc-strip-foot{padding:8px 10px;border-top:1px solid var(--border);font-size:12px;display:flex;flex-direction:column;gap:6px}
 .doc-strip-foot .doc-send{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
 .doc-strip-empty{color:var(--text-dim);font-size:12px;padding:4px 2px}
@@ -368,6 +372,8 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
       done.addEventListener('click', () => commit(), { signal });
       const fit = () => { ta.style.height = 'auto'; ta.style.height = Math.max(h, ta.scrollHeight + 2) + 'px'; };
       ta.addEventListener('input', fit, { signal });
+      let told = false; // a selection in the open box is not commentable until Finish — said once per opening (a toast, not silence)
+      ta.addEventListener('select', () => { if (!told && ta.selectionEnd > ta.selectionStart) { told = true; showToast(t('Press Finish first — a block whose source is open cannot be commented'), { type: 'info' }); } }, { signal });
       ta.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); commit(); view.focus(); }
         else if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 's') { e.preventDefault(); e.stopPropagation(); commit(); save(); }
@@ -389,13 +395,58 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
       destroy: () => { ta = null; },
     };
   };
+  // A RAW BLOCK IS COMMENTABLE (lane doc-comment-raw-block, 2.369.258 — owner 2026-10-12 "这个html部分无法批注"): a click
+  // on it (a NodeSelection) quotes the block; a DOM selection inside its body (the reading or the source box — an atom:
+  // the editor owns neither) quotes the selected text. rawCommentAnchor (doc-window-model) decides; a selection with an
+  // end outside the block is the editor's TEXT rule's. The popover, the note box and the strip are the text comment's.
+  let lineMemo = { doc: null, loaded: null, m: new Map() }; // a block's SOURCE line per (document, load) — a drag asks on every selectionchange
+  const blockLine = (view, pos) => {
+    if (lineMemo.doc !== view.state.doc || lineMemo.loaded !== S.loaded) lineMemo = { doc: view.state.doc, loaded: S.loaded, m: new Map() };
+    if (!lineMemo.m.has(pos)) { let line = 0; try { line = sourceLine(S.loaded, current(), pos + 1); } catch { line = 0; } lineMemo.m.set(pos, line); } // + 1: a position INSIDE the block (at its start = the block before)
+    return lineMemo.m.get(pos);
+  };
+  const rawInfo = (view, el) => {
+    let hit = null;
+    view.state.doc.descendants((n, pos) => { if (hit) return false; if (n.type.name === 'rawBlock' && view.nodeDOM(pos) === el) hit = { pos, source: n.attrs.source || '' }; return !n.isTextblock; });
+    if (!hit) return null;
+    return { ...hit, line: blockLine(view, hit.pos), editing: el.classList.contains('doc-raw-editing') };
+  };
+  const rawOf = (view, n) => { const e = n && (n.nodeType === 1 ? n : n.parentElement), b = e && e.closest('[data-raw-block]'); return b && view.dom.contains(b) ? b : null; };
+  const rawSel = (view) => { // a non-collapsed DOM selection with an end in a raw block ⇒ its anchor | { refused } | null (not ours)
+    const ds = document.getSelection();
+    if (!ds || !ds.rangeCount || ds.isCollapsed) return null;
+    const ea = rawOf(view, ds.anchorNode), eb = rawOf(view, ds.focusNode);
+    if (!ea && !eb) return null;
+    const rg = ds.getRangeAt(0), a = ea && rawInfo(view, ea), b = eb === ea ? a : eb && rawInfo(view, eb), text = ds.toString();
+    const body = ea && ea.querySelector('.doc-raw-src, .doc-raw-read'); let at = -1;
+    if (body && body.contains(rg.startContainer)) { const pre = document.createRange(); pre.setStart(body, 0); pre.setEnd(rg.startContainer, rg.startOffset); at = pre.toString().length; }
+    const r = rawCommentAnchor({ dom: { a, b, text, offset: body && body.classList.contains('doc-raw-src') ? at : -1 } });
+    if (r.refused) return r.refused === 'text' ? null : r;
+    const box = rg.getBoundingClientRect();
+    return { from: r.raw.pos, to: 'r' + at + '+' + text.length, view, ...r, at: { left: box.right, bottom: box.bottom } };
+  };
+  const rawNodeSel = (view, s) => { // a click on a raw block (its NodeSelection) ⇒ the block's anchor, the popover under its first line
+    const el = view.nodeDOM(s.from), r = el ? rawCommentAnchor({ node: rawInfo(view, el) }) : { refused: 'text' };
+    if (r.refused) return null;
+    const box = el.getBoundingClientRect(), head = el.querySelector('.doc-raw-head'), hb = head ? head.getBoundingClientRect() : box;
+    return { from: s.from, to: s.to, view, ...r, at: { left: Math.max(box.left, box.right - 150), bottom: Math.min(box.bottom, hb.bottom + 24) } }; // inside the block's right edge
+  };
   let selTimer = 0;
   // the selection the comment popover is keyed to: null = none (empty, the editor unfocused, Raw). Every update syncs AT
   // ONCE (a collapsed or changed selection drops the popover now); the offer waits for the selection to settle (250 ms)
   const offer = commentOffer((sel) => offerComment(sel));
-  const selNow = (view) => { const s = view.state.selection; return s.empty || !view.hasFocus() || S.mode !== 'rich' ? null : { from: s.from, to: s.to, view }; };
+  const selNow = (view) => { const d = S.mode === 'rich' ? rawSel(view) : null; if (d) return d.refused ? null : d; const s = view.state.selection; return s.empty || !view.hasFocus() || S.mode !== 'rich' ? null : s instanceof NodeSelection && s.node.type.name === 'rawBlock' ? rawNodeSel(view, s) : { from: s.from, to: s.to, view }; };
+  const resync = (view) => { offer.sync(selNow(view)); clearTimeout(selTimer); selTimer = setTimeout(() => offer.sync(selNow(view), true), 250); };
+  // the editor never sees a selection inside an atom (its node view ignores it): the document's selectionchange does —
+  // only one with an end in a raw block of THIS editor, or the one that ends such an offer
+  let rawLast = false;
+  document.addEventListener('selectionchange', () => {
+    const v = S.view, ds = document.getSelection(); if (!v || !ds) return;
+    const ours = !!(rawOf(v, ds.anchorNode) || rawOf(v, ds.focusNode));
+    if (ours || rawLast) { rawLast = ours; resync(v); }
+  }, { signal });
   const selPlugin = new Plugin({
-    view: () => ({ update: (view) => { offer.sync(selNow(view)); clearTimeout(selTimer); selTimer = setTimeout(() => offer.sync(selNow(view), true), 250); } }),
+    view: () => ({ update: (view) => resync(view) }),
     props: { handleDOMEvents: { blur: () => { clearTimeout(selTimer); offer.dismiss(); return false; } } },
   });
   // node decorations (UI only — the document is untouched): a code block's fence language → `data-lang` (its chip) — a raw
@@ -716,19 +767,20 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
 
   // ── comments ──
   pane.addEventListener('scroll', () => offer.dismiss(), { signal, passive: true }); // a fixed popover never follows the text
-  function offerComment({ from, to, view }) {
-    const quote = view.state.doc.textBetween(from, to, ' ', ' ').trim();
+  function offerComment(sel) {
+    const { from, to, view, raw } = sel; // raw: a raw block's anchor (rawCommentAnchor) — its quote, line and place come with it
+    const quote = raw ? sel.quote : view.state.doc.textBetween(from, to, ' ', ' ').trim();
     if (!quote) return null;
-    const c = view.coordsAtPos(to);
-    let line = 0; try { line = sourceLine(S.loaded, current(), from); } catch { line = 0; } // the SOURCE line (PM state + the block map)
+    const c = raw ? sel.at : view.coordsAtPos(to);
+    let line = raw ? sel.line : 0; if (!raw) try { line = sourceLine(S.loaded, current(), from); } catch { line = 0; } // the SOURCE line (PM state + the block map)
     const pop = createPopover(pane, 'doc-cpop', { position: 'cursor', x: c.left, y: c.bottom + 4 });
     const b = mk('button', 'doc-comment-btn', t('Add comment')); // its own words (lane artifacts-e2e): the shared 'Comment' is the Design window's 评论, this window says 批注 everywhere else
     b.addEventListener('mousedown', (e) => e.preventDefault());
-    b.addEventListener('click', () => { offer.dismiss(); noteBox(quote, c, line); });
+    b.addEventListener('click', () => { offer.dismiss(); noteBox(quote, c, line, raw); });
     pop.appendChild(b);
     return pop;
   }
-  function noteBox(quote, c, line) {
+  function noteBox(quote, c, line, raw) {
     const box = mk('div', 'doc-note'); box.setAttribute('role', 'dialog');
     const qq = mk('div', 'doc-note-q', '“' + M.commentItem({ quote, note: '-' }).quote + '”');
     const ta = mk('textarea'); ta.placeholder = t('What should change?'); ta.maxLength = M.LIMITS.note;
@@ -741,10 +793,22 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
     add.addEventListener('click', () => {
       const note = ta.value.trim(); if (!note) { ta.focus(); return; }
       if (comments.length >= M.LIMITS.items) { say(t('At most {n} comments — send these first', { n: M.LIMITS.items })); return; }
-      comments.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), quote: M.commentItem({ quote, note }).quote, ...(line ? { line } : {}), note });
+      comments.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), quote: M.commentItem({ quote, note }).quote, ...(line ? { line } : {}), ...(raw ? { raw } : {}), note });
       saveComments(); renderStrip(); close(); setStrip(true);
     });
     setTimeout(() => ta.focus(), 0);
+  }
+  /** A raw-block comment's block, found again (rawCommentTarget — a reload, an edit above it): selected (a NodeSelection) and
+   *  scrolled into view; a phone's sheet steps aside. Gone ⇒ said. */
+  function showRawComment(c) {
+    const v = S.view; if (!v || S.mode !== 'rich') return;
+    const blocks = [];
+    v.state.doc.descendants((n, pos) => { if (n.type.name === 'rawBlock') blocks.push({ pos, line: blockLine(v, pos), source: n.attrs.source || '' }); return !n.isTextblock; });
+    const b = rawCommentTarget(blocks, c);
+    if (!b) { say(t('That block is no longer in the document')); return; }
+    if (sheetMode()) setStrip(false);
+    v.dispatch(v.state.tr.setSelection(NodeSelection.create(v.state.doc, b.pos)));
+    v.nodeDOM(b.pos)?.scrollIntoView({ block: 'center' });
   }
   function renderStrip() {
     stripHead.textContent = comments.length ? t('Comments ({n})', { n: comments.length }) : t('Comments');
@@ -754,10 +818,12 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
       let el = keep.get(c.id);
       if (!el) {
         el = mk('div', 'doc-cmt'); el.dataset.key = c.id;
-        if (c.quote || c.line) el.appendChild(mk('div', 'doc-cmt-q', (c.line ? 'L' + c.line + ' ' : '') + (c.quote || '')));
+        if (c.raw) { el.classList.add('doc-cmt-raw'); el.appendChild(mk('div', 'doc-cmt-k', (c.line ? 'L' + c.line + ' · ' : '') + t(RAW_KIND_WORD[Object.hasOwn(RAW_KIND_WORD, c.raw.kind) ? c.raw.kind : 'markdown']))); }
+        if (c.quote || (c.line && !c.raw)) el.appendChild(mk('div', 'doc-cmt-q', (c.line && !c.raw ? 'L' + c.line + ' ' : '') + (c.quote || '')));
         el.appendChild(mk('div', 'doc-cmt-n', c.note));
         const x = mk('button', 'doc-cmt-x', '×'); x.title = t('Remove'); x.setAttribute('aria-label', t('Remove'));
-        x.addEventListener('click', () => { comments = comments.filter((y) => y.id !== c.id); saveComments(); renderStrip(); });
+        x.addEventListener('click', (e) => { e.stopPropagation(); comments = comments.filter((y) => y.id !== c.id); saveComments(); renderStrip(); });
+        if (c.raw) el.addEventListener('click', () => showRawComment(c), { signal }); // its block: selected + scrolled into view
         el.appendChild(x);
       }
       return el;

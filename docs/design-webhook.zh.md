@@ -224,3 +224,9 @@ caps = {
 - **#3 Bearer 的两个限制说出来**：无重放保护（截获的调用换 Idempotency-Key 可重发）、回复签名用 sha256(token)——token 一次框、Signing 选择器旁、`vibespace-docs channels`、kb-api。
 - **#14 / #17 卡片**：owner 卡片在 raw 被截时说「raw cut at 8 KiB (N bytes received)」；agent 的叫醒块在正文下带 adapter 声明的事实（`wakeFactKeys`：sender + 声明的 fields）。
 - **不动**：#5（拒在读之前的固有性质）、#7（owner 路由的 CSRF，越出本车道，backlog B-60cf）、#11（后一次轮换胜出即设计）。
+
+## 18. As-built — Webhook 节的位置（2.369.258，lane webhook-section-place；owner 2026-10-12）
+
+- **「新建路径…」在节的标题行上**：原先它是标题行下面单独一行的按钮；现在建在标题行里——名字右侧、计数与 ⋯ 之前（同一个按钮、同一个 `data-wh-new-path`、同一个向导）；按下不折叠该节（`btn` 截住点击）。手机（屏宽 ≤ 480 px）或 Channels 面板 ≤ 300 px（与「新建群」同一阈值）时只留 + 图标，字在 tooltip 与 aria-label 里；标题行的 ⋯ / 右键菜单（同一个菜单）第一行也是「新建路径…」。
+- **内置入站门排在账号列表最后**：选「最后」而不是「顶部」——用户自己加的账号在前。唯一规则 = PURE `accountSectionOrder`（src/lib/webhook-view.js，按能力行 `pushTransport: 'http-inbound'` 判，不看 kind）：用户账号按原顺序，然后每个入站门按原顺序；Accounts 部分只调用它一次。agents 观察者仍在它自己的部分。
+- **门禁**：test-webhook-ui §8（快：顺序表 + 两个 RED 变体、标题行源码律、菜单行）；test-webhook-section-place（重，chrome：真实面板 iife + 桩 HTTP，桌面 1100 / 手机 390 的矩形、真实按下不折叠、菜单首行，两个 CONTROL 包）。

@@ -19,10 +19,10 @@
 //   3  body NEGATIVE — B dragged into A's content area and HELD 1.5 s ⇒ no chain, B moved
 //   4  the merge is the only exception — B onto A's icon stack ⇒ a tabs chain, the ⫿
 //      button pulsing, the "Grouped as tabs" toast with "Show side by side"; clicking it ⇒
-//      split, pair [B,A] (the active B LEFT), strip order == pair order, ONE glyph between
+//      split, pair [A,B] (the active B stays RIGHT, where the strip has it — §14), strip order == pair order, ONE glyph between
 //      the pane tabs, each pane tab's underline = ownerColor(its session) (computed colours)
 //   5  the badge — .on + aria-pressed; its menu = Unsplit / Swap left and right; swap ⇒ pair
-//      and strip [A,B]; unsplit ⇒ tabs, the host rect unchanged (±1 px), the button back
+//      and strip [B,A]; unsplit ⇒ tabs, the host rect unchanged (±1 px), the button back
 //   6  undo — an announced bindSplit(A, free B) names both + Undo ⇒ B free at its pre-split
 //      rect (±2 px), A unmoved; from a tabs chain via the button + Undo ⇒ tabs, host ±1 px;
 //      a STALE undo (the pair changed first) ⇒ the "Nothing to undo" toast, never silence
@@ -55,6 +55,12 @@
 //      Android phone booted on the record: the switcher's HOST row shows Alpha (P1 — the incident), the guest row
 //      Bravo (P2), a tap into the content keeps the tab (P3), the host row with another window on screen (P2b), the
 //      reveal saved like a tab click while the desktop keeps its own tab (P4), and the door neutered ⇒ the incident (P5)
+//  14  inc-mv4q1u6b-ksyh (the owner 2026-10-12: "这个分屏的逻辑非常诡异，为啥在右侧的标签页分屏后跑到左侧了"): A SPLIT NEVER
+//      MOVES A TAB ACROSS THE STRIP — at 1100×800 a REAL click on the ⫿ button of [A, B] with B active ⇒ A's pane LEFT, B's
+//      RIGHT, halves [A] | [B], the focus on B (CONTROL: the pre-fix door — the guest always on the right — puts B LEFT);
+//      the mirror (A active); [A, B, C] with C active and B the most recent ⇒ B | C, halves [A, B] | [C], the strip kept;
+//      a 390×844 phone client: one strip, the sides still [A, B] | [C]. SPLIT_UX_ONLY=sides runs it alone;
+//      SPLIT_UX_PNG_DIR receives before.png / after.png / phone.png.
 // RED on 2.369.160 (the title-bar half zone): 1 / 1a / 2 split, 4 has no button / toast.
 // SKIPs with evidence without chrome / dtach. Free ports, scratch dirs only.
 import fs from 'node:fs';
@@ -188,6 +194,102 @@ else await (async () => {
   const zoneRect = (z) => ({ left: z.left, top: z.top, width: z.width, height: z.height });
   const layoutPx = (o) => ({ left: o.left, top: o.top, width: o.width, height: o.height });
 
+  // ── 14 · THE SPLIT KEEPS EVERY TAB ON ITS SIDE (inc-mv4q1u6b-ksyh, the owner 2026-10-12: "这个分屏的逻辑非常诡异，为啥在
+  // 右侧的标签页分屏后跑到左侧了") — defined here, run LAST; SPLIT_UX_ONLY=sides runs it alone. A 1100×800 desk, a REAL
+  // click on the strip's ⫿ button; the panes' rects, the halves' tabs, the focus; then a 390×844 phone client.
+  const sidesLegs = async () => {
+    console.log('— 14 · the split keeps every tab on its side (inc-mv4q1u6b-ksyh)');
+    const png = async (X, name) => { const dir = process.env.SPLIT_UX_PNG_DIR; if (!dir) return; const r = await X.send('Page.captureScreenshot', { format: 'png' }); if (r.result?.data) fs.writeFileSync(path.join(dir, name), Buffer.from(r.result.data, 'base64')); };
+    const NAMES = { [sidA]: 'Alpha', [sidB]: 'Bravo', [sidC]: 'Charlie' };
+    await P1.send('Page.bringToFront');
+    await P1.send('Emulation.setDeviceMetricsOverride', { width: 1100, height: 800, deviceScaleFactor: 1, mobile: false });
+    await sleep(300);
+    // the chats `sids` as ONE tabs chain in that strip order (the first the host) at a free rect; `show` = the tabs switched to, in order
+    const group = async (sids, show) => {
+      await clearToasts();
+      await ev(`app.settings.set('window.mergeDropLayout', 'tabs'); for (const w of [...wm.windows.values()]) wm.closeWindow(w.id); return true;`);
+      await until(() => ev('return wm.windows.size === 0;'), 5000);
+      for (const sid of sids) { await ev(`app.attachSession(${S(sid)}, ${S(NAMES[sid])}, ${S(ROOT)}, { mode: 'chat', backend: 'claude' }); return true;`); await until(() => ev(`return !!bySid(${S(sid)});`), 10000); }
+      await sleep(300);
+      await ev(`const W = ${S(sids)}.map(bySid); const A = W[0]; if (A._isSnapped || A.isMaximized) { A._isSnapped = false; A._preSnapBounds = null; } A.element.style.left = '40px'; A.element.style.top = '40px'; A.element.style.width = '980px'; A.element.style.height = '600px'; wm._captureGridBounds(A); wm.createTabChain(A, W[1]); for (const w of W.slice(2)) wm.addToTabChain(A._tabChain, w); const ch = A._tabChain; for (const sid of ${S(show)}) wm.switchTab(ch, ch.tabs.indexOf(bySid(sid).id)); document.getElementById('global-toasts')?.remove(); return true;`);
+      await sleep(400);
+    };
+    const look = () => ev(`const ch = bySid(${S(sidA)})._tabChain; const host = wm.windows.get(ch.tabs[0]); const tb = host.titleBar; const b = tb.querySelector(':scope > .tab-split-btn'); const pane = (sid) => { const w = bySid(sid); return w && w._tabChain === ch && disp(w.content) !== 'none' ? rect(w.content) : null; }; return { layout: ch.layout, pair: ch.split ? ch.split.pair.map(sidOf) : null, left: ch.split ? ch.split.left.map(sidOf) : null, right: ch.split ? ch.split.right.map(sidOf) : null, order: ch.order.map(sidOf), active: sidOf(ch.tabs[ch.active]), focus: sidOf(wm.activeWindowId), halves: [...tb.querySelectorAll('.tab-strip-half')].map((h) => ({ side: h.dataset.side, tabs: [...h.querySelectorAll('.tab-item')].map((t) => sidOf(t.dataset.winId)) })), strip: [...tb.querySelectorAll('.tab-item')].map((t) => ({ sid: sidOf(t.dataset.winId), x: t.getBoundingClientRect().left })).sort((p, q) => p.x - q.x).map((t) => t.sid), panes: Object.fromEntries(ch.tabs.map((id) => [sidOf(id), pane(sidOf(id))])), titles: Object.fromEntries(ch.tabs.map((id) => [sidOf(id), String(wm.windows.get(id).title || '')])), btn: b ? { r: rect(b), title: b.title } : null };`);
+    // the button's words: the partner on the side the click will give it, by its name (the attach name, or the window title
+    // a later rename gave it — the words are written at render / switch, a rename does not rewrite them)
+    const says = (x, side, sid) => !!(x.btn && (side === 'left' ? /^Show side by side — .+ on the left, this tab on the right$/ : /^Show side by side — this tab on the left, .+ on the right$/).test(x.btn.title) && [NAMES[sid], String(x.titles[sid] || '').split(' — ')[0]].some((n) => n && x.btn.title.includes(n)));
+    const L = (sids) => sids.map((x) => (x === sidA ? 'A' : x === sidB ? 'B' : x === sidC ? 'C' : x)).join(',');
+    const sideBySide = (x, l, r) => !!(x.panes[l] && x.panes[r] && x.panes[l].right <= x.panes[r].left + 8 && x.panes[l].width > 150 && x.panes[r].width > 150);
+    // ① the incident: [A, B], B active (B on the RIGHT of the strip) ⇒ the button ⇒ A LEFT, B RIGHT, the focus on B
+    await group([sidA, sidB], [sidB]);
+    const b0 = await look();
+    ok(b0.layout === 'tabs' && L(b0.strip) === 'A,B' && b0.active === sidB && b0.btn && says(b0, 'left', sidA), `14① the scene: tabs [A, B], B active; the ⫿ button says "${b0.btn && b0.btn.title}" (the partner on ITS side)`, S(b0));
+    await png(P1, 'before.png');
+    if (b0.btn) await click(centre(b0.btn.r));
+    await sleep(400);
+    const b1 = await look();
+    const t1 = await toastWith('Side by side');
+    ok(b1.layout === 'split' && L(b1.pair) === 'A,B' && sideBySide(b1, sidA, sidB), `14① the click ⇒ A's pane LEFT, B's pane RIGHT (A ${b1.panes[sidA] && Math.round(b1.panes[sidA].left)}–${b1.panes[sidA] && Math.round(b1.panes[sidA].right)}, B ${b1.panes[sidB] && Math.round(b1.panes[sidB].left)}–${b1.panes[sidB] && Math.round(b1.panes[sidB].right)}) — B stays on the side it sat on`, S(b1));
+    ok(S(b1.halves) === S([{ side: 'left', tabs: [sidA] }, { side: 'right', tabs: [sidB] }]) && L(b1.strip) === 'A,B', '14① the halves: [A] | [B] — the strip order unchanged', S(b1.halves));
+    ok(b1.active === sidB && b1.focus === sidB, '14① the focus stays on B (the tab the user acted on)', S({ active: b1.active, focus: b1.focus }));
+    ok(t1 && / \| /.test(t1.body) && [NAMES[sidA], b1.titles[sidA].split(' — ')[0]].some((n) => t1.body.split(' | ')[0].includes(n)) && [NAMES[sidB], b1.titles[sidB].split(' — ')[0]].some((n) => t1.body.split(' | ')[1].includes(n)), `14① the toast names the panes left | right: "${t1 && t1.body}"`, S(t1));
+    await png(P1, 'after.png');
+    // CONTROL: the pre-fix door on the same scene (splitActive's old call — the guest always on the right) ⇒ B's pane LEFT
+    await group([sidA, sidB], [sidB]);
+    await ev(`const ch = bySid(${S(sidA)})._tabChain; wm.bindSplit(bySid(${S(sidB)}), bySid(${S(sidA)}), { side: 'right', focus: 'anchor' }); return true;`);
+    await sleep(400);
+    const k1 = await look();
+    ok(k1.layout === 'split' && L(k1.pair) === 'B,A' && sideBySide(k1, sidB, sidA), '14① CONTROL: the pre-fix door puts B (the RIGHT tab) in the LEFT pane — the owner\'s incident; the leg sees it', S(k1));
+    // ② the mirror: [A, B], A active ⇒ A LEFT, B RIGHT, the focus on A
+    await group([sidA, sidB], [sidB, sidA]);
+    const m0 = await look();
+    ok(m0.layout === 'tabs' && m0.active === sidA && m0.btn && says(m0, 'right', sidB), `14② the mirror scene: A active; the button says "${m0.btn && m0.btn.title}"`, S(m0));
+    if (m0.btn) await click(centre(m0.btn.r));
+    await sleep(400);
+    const m1 = await look();
+    ok(m1.layout === 'split' && L(m1.pair) === 'A,B' && sideBySide(m1, sidA, sidB) && m1.focus === sidA && S(m1.halves) === S([{ side: 'left', tabs: [sidA] }, { side: 'right', tabs: [sidB] }]), '14② the click ⇒ A LEFT, B RIGHT, the focus on A', S(m1));
+    // ③ [A, B, C], C active, B the most recent ⇒ B LEFT, C RIGHT; A stays left of B (halves [A, B] | [C])
+    await group([sidA, sidB, sidC], [sidB, sidC]);
+    const r0 = await look();
+    ok(r0.layout === 'tabs' && L(r0.strip) === 'A,B,C' && r0.active === sidC && r0.btn && says(r0, 'left', sidB), `14③ the scene: tabs [A, B, C], C active, B the most recent; the button says "${r0.btn && r0.btn.title}"`, S(r0));
+    if (r0.btn) await click(centre(r0.btn.r));
+    await sleep(400);
+    const r1 = await look();
+    ok(r1.layout === 'split' && L(r1.pair) === 'B,C' && sideBySide(r1, sidB, sidC) && !r1.panes[sidA], '14③ the click ⇒ B LEFT, C RIGHT (A hidden on the left side)', S(r1));
+    ok(S(r1.halves) === S([{ side: 'left', tabs: [sidA, sidB] }, { side: 'right', tabs: [sidC] }]) && L(r1.strip) === 'A,B,C' && r1.focus === sidC, '14③ the halves [A, B] | [C] — the strip [A, B, C] unchanged, no tab crossed it (the guest-alone creation gave [B | A, C]); the focus on C', S({ halves: r1.halves, strip: r1.strip, focus: r1.focus }));
+    // ④ the phone (≤ 768 px the halves dissolve into ONE strip): the same chain from the server, the sides still hold
+    const deskId14 = await ev('return app.desktopManager ? app.desktopManager.activeDesktopId : null;');
+    const recOnDisk = () => { try { const d = JSON.parse(fs.readFileSync(path.join(wt, 'data', 'layouts.json'), 'utf8')); const st = (deskId14 && d.desktops && d.desktops[deskId14] && d.desktops[deskId14].autoSave) || d.autoSave; const w = ((st && st.windows) || []).find((x) => x.tabChain && !x.isTabGuest); return w ? w.tabChain : null; } catch { return null; } };
+    await ev(`const lm = app.layoutManager; lm._userDirty = true; lm._lastUserInputAt = Date.now(); lm._lastSentJson = null; return lm._doAutoSave();`);
+    ok(await until(() => { const c = recOnDisk(); return !!(c && c.layout === 'split' && c.split && Array.isArray(c.split.left) && c.split.left.length === 2); }, 8000), '14④ the [A, B | C] split is on disk before the phone boots', S(recOnDisk()));
+    const created = await P1.send('Target.createTarget', { url: 'about:blank', newWindow: true });
+    let pt = null; for (let i = 0; i < 40 && !pt; i++) { try { pt = (await (await fetch(`http://127.0.0.1:${CDP}/json`)).json()).find((t) => t.type === 'page' && t.id === created.result.targetId); } catch { } if (!pt) await sleep(150); }
+    if (!ok(!!pt, '14④ a phone page target')) return;
+    const P = await client(pt.webSocketDebuggerUrl);
+    try {
+      await P.send('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); // §47
+      await P.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+      await P.send('Emulation.setUserAgentOverride', { userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1', platform: 'iPhone' });
+      await P.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+      await P.send('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
+      if (!ok(await bootOk(P), '14④ the app booted on the phone page (390×844)')) return;
+      if (deskId14) await P.ev(`const dm = app.desktopManager; if (dm && dm.activeDesktopId !== ${S(deskId14)}) await dm.switchTo(${S(deskId14)}); return true;`);
+      ok(await until(() => P.ev("const c = chats().find((w) => w._tabChain); return !!(c && c._tabChain.layout === 'split');"), 15000), '14④ the phone restored the chain WITH the split');
+      // a phone booted on the record shows the group once a window of it is picked (the switcher's tap = focusWindow)
+      await P.ev(`const c = chats().find((w) => w._tabChain); const ch = c._tabChain; wm.focusWindow(ch.tabs[ch.active]); return true;`);
+      await sleep(800);
+      const ph = await P.ev(`const c = chats().find((w) => w._tabChain); const ch = c._tabChain; const host = wm.windows.get(ch.tabs[0]); const items = [...host.titleBar.querySelectorAll('.tab-item')].filter((t) => t.getBoundingClientRect().width > 0); return { left: ch.split.left.map(sidOf), right: ch.split.right.map(sidOf), strip: items.map((t) => ({ sid: sidOf(t.dataset.winId), x: t.getBoundingClientRect().left, y: t.getBoundingClientRect().top })).sort((p, q) => (Math.abs(p.y - q.y) > 8 ? p.y - q.y : p.x - q.x)).map((t) => t.sid), halvesShown: [...host.titleBar.querySelectorAll('.tab-strip-half')].filter((h) => h.getBoundingClientRect().width > 0).length, shown: ch.tabs.filter((id) => disp(wm.windows.get(id).content) !== 'none').map(sidOf), isMobile: !!app.isMobile };`);
+      ok(ph.isMobile && L(ph.left) === 'A,B' && L(ph.right) === 'C', '14④ the phone\'s model keeps the sides [A, B] | [C]', S(ph));
+      ok(L(ph.strip) === 'A,B,C' && ph.halvesShown === 0 && ph.shown.length === 1, `14④ the phone draws ONE strip (the halves dissolved) in the strip order ${L(ph.strip)} — the sides still hold; one pane shown`, S(ph));
+      await png(P, 'phone.png');
+    } finally {
+      P.close();
+      await P1.send('Target.closeTarget', { targetId: created.result.targetId });
+      await P1.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
+    }
+  };
+  if (process.env.SPLIT_UX_ONLY === 'sides') { await sidesLegs(); return; }
+
   // ── 1 · G1 ──
   console.log('— 1 · G1: B dragged LEFT, released on the RIGHT half of A\'s title bar ⇒ a move, never a split');
   {
@@ -270,8 +372,8 @@ else await (async () => {
     await click(centre(tt.actionRect));
     await sleep(300);
     const s = await ev(`const A = wm.windows.get(${S(ids.A)}), B = wm.windows.get(${S(ids.B)}); const ch = A._tabChain; const host = wm.windows.get(ch.tabs[0]); const strip = [...host.titleBar.querySelectorAll('.tab-item')]; const glyphs = [...host.titleBar.querySelectorAll('.tab-split-glyph')]; const g = glyphs[0]; const probe = (c) => { const p = document.createElement('div'); p.style.background = c; document.body.appendChild(p); const v = getComputedStyle(p).backgroundColor; p.remove(); return v; }; return { layout: ch.layout, pair: ch.split && ch.split.pair, active: ch.tabs[ch.active], strip: strip.map((t) => t.dataset.winId), glyphs: glyphs.length, glyphBetween: (() => { if (!g) return false; const d = host.element.querySelector(':scope > .tab-split-divider'); if (!d) return false; const gr = g.getBoundingClientRect(), dr = d.getBoundingClientRect(); const tl = strip.find((t) => t.dataset.winId === ch.split.pair[0]).getBoundingClientRect(), trr = strip.find((t) => t.dataset.winId === ch.split.pair[1]).getBoundingClientRect(); return Math.abs((gr.left + gr.width / 2) - (dr.left + dr.width / 2)) <= 1 && tl.right <= gr.left + 1 && trr.left >= gr.right - 1; })(), glyphHidden: g ? g.getAttribute('aria-hidden') : null, panes: strip.filter((t) => t.classList.contains('tab-pane')).map((t) => ({ id: t.dataset.winId, sid: sidOf(t.dataset.winId), got: getComputedStyle(t, '::before').backgroundColor })), probe: { A: probe(${S(C.ownerColor(sidA))}), B: probe(${S(C.ownerColor(sidB))}) }, aLeft: rect(A.content).left, bLeft: rect(B.content).left };`);
-    ok(s.layout === 'split' && S(s.pair) === S([ids.B, ids.A]) && s.active === ids.B, 'one click ⇒ split, pair [B, A]: the active B on the LEFT', S(s));
-    ok(s.bLeft < s.aLeft, `B's pane is drawn left of A's (${Math.round(s.bLeft)} < ${Math.round(s.aLeft)})`, S(s));
+    ok(s.layout === 'split' && S(s.pair) === S([ids.A, ids.B]) && s.active === ids.B, 'one click ⇒ split, pair [A, B]: the active B stays on the RIGHT, where the strip has it (inc-mv4q1u6b-ksyh — the old rule put it LEFT)', S(s));
+    ok(s.bLeft > s.aLeft, `B's pane is drawn right of A's (${Math.round(s.bLeft)} > ${Math.round(s.aLeft)})`, S(s));
     ok(S(s.strip) === S(s.pair), 'the strip\'s tab order == the pane order (tab-item data-win-id sequence)', S({ strip: s.strip, pair: s.pair }));
     ok(s.glyphs === 1 && s.glyphBetween && s.glyphHidden === 'true', 'exactly ONE .tab-split-glyph, between the two pane tabs — over the divider, ±1 px (split tabs v2: the halves\' boundary) — aria-hidden', S(s));
     const pa = s.panes.find((p) => p.sid === sidA), pb = s.panes.find((p) => p.sid === sidB);
@@ -290,7 +392,7 @@ else await (async () => {
     ok(items && S(items.map((i) => i.label)) === S(['Unsplit', 'Swap left and right']), 'clicking it opens a menu: Unsplit / Swap left and right', S(items));
     if (items) await click(centre(items.find((i) => i.label === 'Swap left and right').rect));
     const sw = await ev(`const ch = wm.windows.get(${S(ids.A)})._tabChain; const host = wm.windows.get(ch.tabs[0]); return { pair: ch.split && ch.split.pair, strip: [...host.titleBar.querySelectorAll('.tab-item')].map((t) => t.dataset.winId) };`);
-    ok(S(sw.pair) === S([ids.A, ids.B]) && S(sw.strip) === S([ids.A, ids.B]), 'Swap ⇒ pair [A, B] and the strip follows [A, B]', S(sw));
+    ok(S(sw.pair) === S([ids.B, ids.A]) && S(sw.strip) === S([ids.B, ids.A]), 'Swap ⇒ pair [B, A] and the strip follows [B, A]', S(sw));
     const before = await ev(`const ch = wm.windows.get(${S(ids.A)})._tabChain; const host = wm.windows.get(ch.tabs[0]); return { host: rect(host.element), btn: rect(host.titleBar.querySelector(':scope > .tab-split-btn')) };`);
     await click(centre(before.btn));
     items = await menuItems();
@@ -469,11 +571,11 @@ else await (async () => {
       await P1.send('Input.dispatchKeyEvent', { type: 'keyUp', key: k, code: 'Key' + k.toUpperCase(), windowsVirtualKeyCode: k.toUpperCase().charCodeAt(0), modifiers: shift ? 8 : 0 });
       await sleep(300);
     };
-    const cm = () => ev(`const ch = chats().find((w) => w._tabChain)._tabChain; return { layout: ch.layout, pair: ch.split ? [...ch.split.pair] : null, active: ch.tabs[ch.active] };`);
+    const cm = () => ev(`const ch = chats().find((w) => w._tabChain)._tabChain; return { layout: ch.layout, pair: ch.split ? [...ch.split.pair] : null, active: ch.tabs[ch.active], order: [...ch.order] };`);
     const c0 = await cm();
     await key('v');
     const c1 = await cm();
-    ok(c0.layout === 'tabs' && c1.layout === 'split' && c1.pair[0] === c0.active, 'Ctrl+\\ v on a tabs chain ⇒ side by side, the active tab on the left', S({ c0, c1 }));
+    ok(c0.layout === 'tabs' && c1.layout === 'split' && c1.pair.includes(c0.active) && S(c1.pair) === S(c0.order.filter((x) => c1.pair.includes(x))) && S(c1.order) === S(c0.order), 'Ctrl+\\ v on a tabs chain ⇒ side by side, the active tab with its partner each on the side the strip has them (the strip unchanged)', S({ c0, c1 }));
     await key('v');
     const c2 = await cm();
     ok(c2.layout === 'tabs', 'Ctrl+\\ v again ⇒ back to tabs', S(c2));
@@ -531,12 +633,12 @@ else await (async () => {
     ok(b0.tabs === 3 && b0.layout === 'tabs', '11① a 3-tab chain in tabs after split + unsplit', S(b0));
     const tb = await tabRect(ids.B);
     if (tb) await click(centre(tb));
-    const b1 = await ev(`const ch = wm.windows.get(${S(ids.A)})._tabChain; const btn = wm.windows.get(ch.tabs[0]).titleBar.querySelector(':scope > .tab-split-btn'); const partner = wm.windows.get((${C.splitPartner.toString()})(ch, ch.recent)); return { active: ch.tabs[ch.active], recent: ch.recent, partnerId: partner && partner.id, partnerTitle: partner && String(partner.title || ''), title: btn && btn.title, aria: btn && btn.getAttribute('aria-label'), btn: btn && rect(btn), others: ch.tabs.filter((x) => partner && x !== partner.id && x !== ch.tabs[ch.active]).map((x) => String(wm.windows.get(x).title || '')) };`);
+    const b1 = await ev(`const ch = wm.windows.get(${S(ids.A)})._tabChain; const btn = wm.windows.get(ch.tabs[0]).titleBar.querySelector(':scope > .tab-split-btn'); const partner = wm.windows.get((${C.splitPartner.toString()})(ch, ch.recent)); return { active: ch.tabs[ch.active], order: [...ch.order], recent: ch.recent, partnerId: partner && partner.id, partnerTitle: partner && String(partner.title || ''), title: btn && btn.title, aria: btn && btn.getAttribute('aria-label'), btn: btn && rect(btn), others: ch.tabs.filter((x) => partner && x !== partner.id && x !== ch.tabs[ch.active]).map((x) => String(wm.windows.get(x).title || '')) };`);
     ok(b1.active === ids.B && b1.partnerId && b1.partnerId !== ids.B, '11① the Bravo tab click made Bravo active; splitPartner names another tab', S(b1));
     ok(b1.title && b1.partnerTitle && b1.title.includes(b1.partnerTitle) && !b1.others.some((o) => o && b1.title.includes(o + ' on the right')) && b1.aria === b1.title, `11① the button's title/aria-label names splitPartner's window "${b1.partnerTitle}" (r0: the stale name from before the switch)`, S(b1));
     if (b1.btn) await click(centre(b1.btn));
     const p1 = await ev(`const ch = wm.windows.get(${S(ids.A)})._tabChain; return { layout: ch.layout, pair: ch.split && ch.split.pair };`);
-    ok(p1.layout === 'split' && S(p1.pair) === S([ids.B, b1.partnerId]), '11① the click used the partner the tooltip named: pair [Bravo, that window]', S({ p1, b1 }));
+    ok(p1.layout === 'split' && S(p1.pair) === S(b1.order.filter((x) => x === ids.B || x === b1.partnerId)), '11① the click used the partner the tooltip named: pair = Bravo and that window in strip order', S({ p1, b1 }));
 
     // ③ right-click the Alpha tab ⇒ Show side by side ▸ Beside Charlie ⇒ pair [A, C], the focus stays on A
     await clearToasts();
@@ -952,16 +1054,24 @@ else await (async () => {
     g7t = await triScene(false);
     await barDrag(centre(g7t.cTitle), slot(g7t));
     const s7d = await v2(P1), t7d = await toastActs('Side by side');
-    ok(s7d.layout === 'split' && S(s7d.right) === S([sidC]) && s7d.pair[1] === sidC && t7d && S(t7d.map((a) => a.label)) === S(['Undo', 'Unsplit']), 'L7b under `split` the same drop lands side by side, C alone on the RIGHT, the toast offers Undo / Unsplit', S({ s7d, t7d }));
+    ok(s7d.layout === 'split' && S(s7d.left) === S([sidA, sidC]) && S(s7d.right) === S([sidB]) && S(s7d.pair) === S([sidC, sidB]) && t7d && S(t7d.map((a) => a.label)) === S(['Undo', 'Unsplit']), 'L7b under `split` the same drop lands side by side WHERE IT WAS DROPPED — C beside B on its left, [A, C | B] (inc-mv4q1u6b-ksyh; as shipped C went alone to the RIGHT), the toast offers Undo / Unsplit', S({ s7d, t7d }));
     if (t7d) await click(centre(t7d[1].r));
     const u7d = await v2(P1);
     ok(u7d.layout === 'tabs' && S(u7d.order) === S(ref7.order), `L7b the toast's Unsplit returns C to the slot it was DROPPED on — ${S(u7d.order.map((x) => x === sidA ? 'A' : x === sidB ? 'B' : 'C'))}, the tabs setting's own result (as shipped: C last)`, S({ got: u7d.order, want: ref7.order }));
-    // CONTROL: Unsplit without the drop slot (the badge menu's plain Unsplit — "left then right") ⇒ C last
+    // the badge menu's plain Unsplit ("left then right") agrees: the split never moved C (inc-mv4q1u6b-ksyh)
     g7t = await triScene(false);
     await barDrag(centre(g7t.cTitle), slot(g7t));
     await ev(`const ch = bySid(${S(sidA)})._tabChain; wm.unbindSplit(ch); return true;`);
     const c7d = await v2(P1);
-    ok(S(c7d.order) === S([sidA, sidB, sidC]), 'L7b CONTROL: the plain Unsplit of the same split reads left then right ([A, B, C]) — the slot comes from the toast, not from the model', S(c7d.order));
+    ok(S(c7d.order) === S([sidA, sidC, sidB]), 'L7b the plain Unsplit of the same split reads left then right = [A, C, B] too — the drop split never moved C', S(c7d.order));
+    // CONTROL: the pre-fix F3 door (the dragged window always on the RIGHT) on the same [A, C, B] ⇒ C alone on the right,
+    // the plain Unsplit [A, B, C] — the leg sees a tab crossing the strip
+    await ev(`app.settings.set('window.mergeDropLayout', 'tabs'); return true;`);
+    g7t = await triScene(false);
+    await barDrag(centre(g7t.cTitle), slot(g7t));
+    await ev(`app.settings.set('window.mergeDropLayout', 'split'); const ch = bySid(${S(sidA)})._tabChain; wm.bindSplit(bySid(${S(sidB)}), bySid(${S(sidC)}), { side: 'right', focus: 'guest' }); wm.unbindSplit(ch); return true;`);
+    const k7d = await v2(P1);
+    ok(S(k7d.order) === S([sidA, sidB, sidC]), 'L7b CONTROL: the pre-fix F3 side (always right) moves C past B — [A, B, C] after the plain Unsplit', S(k7d.order));
     await clearToasts();
     // L7c — a drop onto a chain ALREADY split (either setting): C joins the half under the pointer and is shown there;
     // the toast says so and offers Undo — C back at its pre-drag rect, the split back to [A | B]. As shipped: silent.
@@ -1168,6 +1278,9 @@ else await (async () => {
       ok(d6c && d6c.before === sidC && d6c.after === sidA && d6c.active === sidA && d6c.hidden, '13 D6 CONTROL: the r0 door (a tab choice that does not keep the active window) makes the desktop-hidden host the active window — the leg sees it', S(d6c));
     }
   }
+
+  // ── 14 · the split keeps every tab on its side (defined above, after the helpers) ──
+  await sidesLegs();
 
   } finally {
     if (P1) P1.close();

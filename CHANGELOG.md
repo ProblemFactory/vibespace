@@ -2,6 +2,17 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.258 — 2026-10-12
+
+### Changed
+- In Channels, the Webhook section's New path… button sits on its header row and the section stays at the end of the list.
+- In a document, a block kept as source (HTML, front matter) can be commented like any paragraph.
+
+### Fixed
+- Splitting a tab group keeps each tab on the side it already sits on in the strip — the right tab stays right.
+- A browser window a conversation or job opens right after you give its profile back is no longer closed by mistake, so a job's window closes when it ends.
+- Editing a message in a channel window opens an editor already sized to the text and grows as you type.
+
 ## 2.369.257 — 2026-10-12
 
 ### Fixed

@@ -193,6 +193,7 @@ export function accountMenuOrder(panel) {
     const body = m[3];
     if (/separator: true/.test(body) && !/label:/.test(body)) continue;
     if (/when: sender\b|sender\(c\)/.test(body)) continue;   // a SOURCE's sender-line rows (an account's lives in Edit)
+    if (/when: \(c\) => offersPaths\(A\(c\)\)/.test(body)) continue;   // lane webhook-section-place: an INBOUND DOOR's own New path… row (no account with a sign-in sees it)
     const keys = [...body.matchAll(/\bt\('([^']+)'\)/g)].map((x) => x[1]).filter((k) => !/^(on|off|\(instance default\)|Sender line: \{v\})$/.test(k));
     const labelPart = (body.match(/label: ([^\n]*?)(?:, run:|, tooltip:|, labelHtml:|$)/) || [])[1] || '';
     const labels = [...labelPart.matchAll(/\bt\('([^']+)'\)/g)].map((x) => x[1]);

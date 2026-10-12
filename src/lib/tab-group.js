@@ -6,7 +6,7 @@ import { inboxCountText } from './title-chips.js'; // lane G: the inbox chip nev
 import { showWindowContextMenu } from './taskbar.js';
 import { dragEndVerdict } from './drag-end.js';
 import { captureOn, setDragShield, attachDragFeed, startPointerDrag } from './drag-feed.js'; // ONE feed for every drag door (lane-drag-release verify r1)
-import { normalizeChain, displayedPanes, clampRatio, splitColumns, paneMinPx, visualTabOrder, splitPartner, ownerColor, chainSyncKey, showTab, enterSplit, insertTab, moveTab, removeTab, swapSides, SPLIT_RATIO_DEFAULT, holdRatio, heldRatio, releaseRatio, ratioDiffers, followFor, foldBackTarget, tabDragMode, closeAsks, groupCloseList } from './chain-layout.js';
+import { normalizeChain, displayedPanes, clampRatio, splitColumns, paneMinPx, visualTabOrder, splitPartner, splitSideFor, ownerColor, chainSyncKey, showTab, enterSplit, insertTab, moveTab, removeTab, swapSides, SPLIT_RATIO_DEFAULT, holdRatio, heldRatio, releaseRatio, ratioDiffers, followFor, foldBackTarget, tabDragMode, closeAsks, groupCloseList } from './chain-layout.js';
 
 /**
  * Tab grouping — mixin methods for WindowManager.
@@ -566,15 +566,20 @@ const tabGroupMethods = {
     return this.moveTabInChain(chain, w.id, { side: chain.layout === 'split' ? (chain.split.left.includes(w.id) ? 'left' : 'right') : null, index: at });
   },
 
-  /** The strip's button in the tabs state: the ACTIVE tab on the left, the
-   *  default partner (PURE splitPartner — the most recent other tab, else the
-   *  next neighbour) on the right; the focus stays on the active tab. */
+  /** The strip's button in the tabs state (command mode `v`, the merge toast's
+   *  "Show side by side"): the ACTIVE tab beside its default partner (PURE
+   *  splitPartner — the most recent other tab, else the next neighbour), EACH ON
+   *  THE SIDE IT ALREADY SITS ON in the strip (PURE splitSideFor — a split never
+   *  moves a tab across the strip; inc-mv4q1u6b-ksyh: "the active tab on the
+   *  left" put the owner's right tab in the left pane); the focus stays on the
+   *  active tab. */
   splitActive(chain, { announce = false } = {}) {
     if (!chain || chain.layout === 'split' || !Array.isArray(chain.tabs) || chain.tabs.length < 2) return null;
     const anchor = this.windows.get(chain.tabs[chain.active]);
     const guest = this.windows.get(splitPartner(chain, chain.recent));
     if (!anchor || !guest) return null;
-    return this.bindSplit(anchor, guest, { side: 'right', announce, focus: 'anchor' });
+    const at = splitSideFor(chain, anchor.id, guest.id);
+    return this.bindSplit(anchor, guest, { side: at ? at.side : 'right', announce, focus: 'anchor' });
   },
 
   /** R5: put back what an announced bind changed — ONLY while nothing else has
@@ -647,7 +652,8 @@ const tabGroupMethods = {
    *  A target that was ALREADY split (either setting) ⇒ `_announceSplitJoin`
    *  (say so + Undo — v2 verify r1 ④). `window.mergeDropLayout` is read HERE,
    *  at the drop (split tabs v2, F3): 'split' lands the merge side by side at
-   *  once — the dragged window on the RIGHT, the tab it joined on the left —
+   *  once — the dragged window beside the tab it joined, on the side of it it
+   *  was DROPPED on in the strip (PURE splitSideFor, inc-mv4q1u6b-ksyh) —
    *  with a toast offering Undo (the dragged window back where it stood,
    *  `from`) and Unsplit (stay grouped as tabs, at the drop slot — r1 ③); the
    *  default 'tabs' keeps the two steps: the button pulses once (1.2 s; none
@@ -659,7 +665,8 @@ const tabGroupMethods = {
     if (chain.layout === 'split') { this._announceSplitJoin(chain, { dragged: draggedWin, from, before }); return; } // the target was ALREADY split (either setting)
     if ((this._settings?.get('window.mergeDropLayout') ?? 'tabs') === 'split' && draggedWin) {
       const anchor = this.windows.get(splitPartner({ ...chain, active: chain.tabs.indexOf(draggedWin.id) }, chain.recent));
-      if (anchor && anchor !== draggedWin) { this.bindSplit(anchor, draggedWin, { side: 'right', announce: true, focus: 'guest', freeRect: from || null, unsplitAction: true, unsplitOrder: [...chain.order] }); return; }
+      const at = anchor && anchor !== draggedWin ? splitSideFor(chain, anchor.id, draggedWin.id) : null; // where it was dropped: a split never moves a tab across the strip
+      if (at) { this.bindSplit(anchor, draggedWin, { side: at.side, announce: true, focus: 'guest', freeRect: from || null, unsplitAction: true, unsplitOrder: [...chain.order] }); return; }
     }
     chain._pulseUntil = Date.now() + 1200;
     const host = this.windows.get(chain.tabs[0]);
@@ -968,15 +975,23 @@ const tabGroupMethods = {
 
   /** The strip button's words (title + aria-label) from the chain AS IT IS NOW:
    *  in the tabs state they name splitPartner(chain, chain.recent) — the window
-   *  the click WILL use. `recent` changes on every tab switch, so switchTab
+   *  the click WILL use — on the side the click WILL give it (splitSideFor). `recent` changes on every tab switch, so switchTab
    *  re-labels (split r1: a label computed once at render named a stale partner). */
   _labelSplitBtn(chain, btn) {
     if (!chain || !btn) return;
     const label = chain.layout === 'split' && chain.split && Array.isArray(chain.split.pair) // the same predicate as _renderTabBar's isSplit
       ? t('Shown side by side — click for Unsplit / Swap')
-      : t('Show side by side — this tab on the left, {name} on the right', { name: String(this.windows.get(splitPartner(chain, chain.recent))?.title || '') });
+      : this._splitBtnWords(chain);
     btn.title = label;
     btn.setAttribute('aria-label', label);
+  },
+
+  _splitBtnWords(chain) {
+    const partner = this.windows.get(splitPartner(chain, chain.recent));
+    const name = String(partner?.title || '');
+    return splitSideFor(chain, chain.tabs[chain.active], partner?.id)?.side === 'left'
+      ? t('Show side by side — {name} on the left, this tab on the right', { name })
+      : t('Show side by side — this tab on the left, {name} on the right', { name });
   },
 
   /** THE RIGHT COLUMN'S TAIL (v2 verify r1 ②). The ⫿ badge and the window

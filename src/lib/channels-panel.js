@@ -77,7 +77,7 @@ import { showGroupMembersDialog, showGroupDetail, renameGroup, archiveGroup } fr
 // R4: access and notification — two operations (Grant access… / Notify…),
 // the grain menu, and the one-line summary a row draws.
 import { showGrantAccessDialog, showNotifyDialog, showGrainMenu, assignmentSummary } from './channel-filter-editor.js';
-import { offersPaths } from './webhook-view.js';   // lane webhook-l2-ui: an inbound door's account (its capability row)
+import { offersPaths, accountSectionOrder } from './webhook-view.js';   // lane webhook-l2-ui: an inbound door's account (its capability row)
 import { showNewPathDialog } from './channel-webhook.js';
 import { grainSummaryText } from './channel-words.js';
 // P3: the reach/policy dialog (row menu) and the Outbox window (header button).
@@ -876,6 +876,8 @@ export function registerChannelAdapterMenu() {
   // design 008: an account's rows may not be loaded (its head is the newest 30) — the verbs ask its COUNT (`count`, the
   // kept facts) and the loaded rows only for what they open (the newest, which the head always holds)
   const convCount = (c) => (Number.isFinite(c.count) ? c.count : (c.convs || []).length);
+  // lane webhook-section-place: an inbound door's New path… heads its menu (the head-row button's glyph-only form keeps the word here)
+  registerMenuItem({ menu: M, group: '1_rows', order: 1, when: (c) => offersPaths(A(c)), label: () => t('New path…'), run: (c) => showNewPathDialog(c.app, { adapterId: A(c).id }) });
   registerMenuItem({ menu: M, group: '1_rows', order: 5, when: (c) => acct(c) && convCount(c) > 0, label: () => t('Open conversation window'), run: (c) => openConversationOf(c.app, c.convs) });
   registerMenuItem({ menu: M, group: '1_rows', order: 8, when: (c) => !A(c).builtin && convCount(c) > 0, label: () => t('Search messages…'), run: (c) => showSearchDialog(c.app, A(c)) });
   // R4 (2026-09-27, design §7.3): TWO OPERATIONS, ACCESS FIRST — who may see
@@ -1516,7 +1518,7 @@ export function renderChannelsPanel(app, c) {
     into.appendChild(listEl);
 
     // ── SECONDARY: the accounts (every non-built-in adapter + Connect) ──
-    const accounts = adapters.filter((a) => !a.builtin);
+    const accounts = accountSectionOrder(adapters.filter((a) => !a.builtin));   // lane webhook-section-place: built-in doors LAST
     const watcher = adapters.filter((a) => a.builtin);
     // THE ACCOUNT MODEL: how many accounts each kind holds (a lone one keeps
     // the kind's label; further ones are numbered in record order until the
@@ -1871,6 +1873,20 @@ export function renderChannelsPanel(app, c) {
     dot.className = 'chan-dot chan-dot-' + adapterDot(a);
     dot.title = dotTitle(a);
     h.appendChild(dot);
+    // lane webhook-section-place (the owner, 2026-10-12: "这个新建路径其实应该放在webhook提示右侧"): an inbound door's ONE
+    //  action lives ON its head row — right of the name, before the count and the ⋯; btn stops the press (the head never
+    //  folds). Narrow (a phone, a ≤ 300 px panel) the glyph alone: the word rides its tooltip and heads the ⋯ menu
+    if (offersPaths(a)) {
+      const np = btn('', () => showNewPathDialog(app, { adapterId: a.id }), 'chan-wh-new');
+      const lab = document.createElement('span');
+      lab.className = 'chan-wh-new-label';
+      lab.textContent = t('New path…');
+      np.append(icon('plus', 11), lab);
+      np.title = t('New path…');
+      np.setAttribute('aria-label', t('New path…'));
+      np.dataset.whNewPath = a.id;
+      h.appendChild(np);
+    }
     const cnt = document.createElement('span');
     cnt.className = 'chan-sec-count';
     const total = accountCount(a, mine.length);
@@ -1907,13 +1923,6 @@ export function renderChannelsPanel(app, c) {
     for (const n of adapterNotes(app, a)) sec.appendChild(n);
     // a SOURCE that is not built in takes the account and pattern grains too (§7.3)
     if (!builtinAgents) for (const n of grainLines(a)) sec.appendChild(n);
-    // lane webhook-l2-ui: an INBOUND DOOR's account (no sign-in, not removable) makes its conversations here — a path each
-    if (offersPaths(a)) sec.appendChild(keep('newpath:' + a.id, () => {
-      const b = btn(t('New path…'), () => showNewPathDialog(app, { adapterId: a.id }), 'chan-wh-new');
-      b.prepend(icon('plus', 11));
-      b.dataset.whNewPath = a.id;
-      return b;
-    }));
     const rowsEl = keep('rows:' + a.id, () => { const el = document.createElement('div'); el.className = 'chan-rows'; return el; });
     const rowKids = [];
     const rows = { appendChild: (x) => { rowKids.push(x); return x; } };

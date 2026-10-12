@@ -15,6 +15,7 @@
 import { fetchJson, showToast } from './utils.js';
 import { t, tc } from './i18n.js';
 import { icon, el, btn } from './channel-chrome.js';
+import { autosizeEditor } from './channel-editor-size.js';   // lane channel-edit-autosize: every message editor opens at its text's size
 import { routeErrorText } from './channel-words.js';
 import * as chanCaps from '../channel-caps.js';
 import { paneMode, firstLine } from '../channel-thread.js';
@@ -274,6 +275,7 @@ export function createThreadPane(host, ctx) {
     ta.placeholder = t('Reply in thread…');
     ta.rows = 2;
     ta.value = drafts.get(cur.key) || '';
+    autosizeEditor(ta, { minRows: 2 });
     ta.addEventListener('input', () => drafts.set(cur.key, ta.value));
     const row = el('div', 'chanwin-composer-row');
     const note = el('div', 'chanwin-note');
@@ -297,6 +299,7 @@ export function createThreadPane(host, ctx) {
       drafts.delete(cur.key); targets.delete(cur.key);
       for (const x of foot.querySelectorAll('textarea')) if (x.value === ta.value || x.value.trim() === text) x.value = '';
       ta.value = '';
+      ta._autosize.fit();
       showToast(st === 'sent' ? t('Sent') : st === 'awaiting-approval' ? t('Held in the outbox for your approval ({why})', { why: '' }) : t('Proposal {state}', { state: st || '?' }));
       drawFoot();
     };

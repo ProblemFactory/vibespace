@@ -2114,6 +2114,19 @@ function decideDetach({ leases, profileId, browserKey } = {}) {
   const remaining = (leases || []).filter((l) => !(l.profileId === profileId && l.browserKey === browserKey));
   return { ok: true, lease, remaining, others: remaining.filter((l) => l.profileId === profileId).length };
 }
+/** THE .229 RULE'S SECOND ORDERING (lane jobs-browser-f11-race; test-jobs-browser F11 red on the rel251/rel253 runners):
+ *  a holder's session CLOSE — the narrowing's (rejudgeLeases → closeLeaseSession: its bound tab, its connection, the
+ *  lost-tab mark; best effort, never awaited by the refusal) — and THAT holder's next attach on the same browser are ONE
+ *  sequence: the attach waits for the close in flight under its key. Measured: the close landed after the re-attach had
+ *  bound the session to its NEW window's tab, so it closed that tab and marked the new lease lost; the next verb rebound a
+ *  fresh tab whose root replaced the window's, and the job's finalize (it closes what the lease roots) left the window
+ *  open. Only the same (profile, key): a parent's and a sibling helper's sessions are their own, another browser's close
+ *  never holds it. `closing` = the sessionCloseKey()s in flight (a Map or a Set). → {wait, key} */
+function sessionCloseKey(profileId, browserKey) { return `${String(profileId || '')}|${String(browserKey || '')}`; }
+function attachWaitVerdict({ closing = null, profileId, browserKey } = {}) {
+  const key = sessionCloseKey(profileId, browserKey);
+  return { wait: !!(profileId && browserKey && closing && typeof closing.has === 'function' && closing.has(key)), key };
+}
 /** The leases a browser key holds — a parent's set includes its children. */
 function leasesOf(leases, browserKey, { children = false } = {}) {
   return (leases || []).filter((l) => l.browserKey === browserKey || (children && parentKeyOf(l.browserKey) === browserKey && l.browserKey !== browserKey));
@@ -3352,6 +3365,7 @@ function floorNotice(v) {
 }
 
 module.exports = {
+  sessionCloseKey, attachWaitVerdict, // lane jobs-browser-f11-race: a holder's session close, then its next attach — one sequence
   desktopAppNewVerdict, DESKTOP_APP_DOOR, NOT_YET_FLAGS, // lane e2a (§E2): the desktop-app rung's door
   sessionNameFor, mintBrowserKey, isBrowserKey, BROWSER_KEY_RE,
   browserKeyFor, LATE_KEY_WHYS, lateKeyVerdict, lateKeyRefusal, lateDefaultPin, isPinWitness, isEmptyPinWitness, witnessCap, // B-f7ab: the late key (first use); r2: the witnessed default (a PREFERENCE — the list admits)

@@ -5,7 +5,9 @@
 //   §2 THE TOKEN LAW: a register / rotate answer's token reaches showTokenOnce and nothing else (+ a RED control)
 //   §3 "Send a message…"'s picker: a no-reply caller is disabled WITH its reason; revoked callers are not offered
 //   §4 the budget row's words + the engine's projection; §5 the section by the capability row (no remove, no sign-in);
-//   §6 the reply line and the send outcomes; §7 every new literal has zh + ja.
+//   §6 the reply line and the send outcomes; §7 every new literal has zh + ja;
+//   §8 (lane webhook-section-place) the built-in door's section sorts LAST (PURE accountSectionOrder + RED mutants) and its
+//   New path… lives on the head row (source laws; the chrome twin is test-webhook-section-place).
 // Heavy twin: test-webhook-ui-e2e (a real server + Chrome). Run: node scripts/test-webhook-ui.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -73,7 +75,7 @@ console.log('§5 the section, by the capability row');
 ok(V.offersPaths({ pushTransport: 'http-inbound' }) && !V.offersPaths({ pushTransport: 'webhook' }) && !V.offersPaths({ kind: 'webhook' }) && !V.offersPaths(null), 'offersPaths reads the row\'s transport, never the kind');
 ok(ENG.includes('      pushTransport: c.pushTransport || null,'), 'the account view projects the row\'s pushTransport');
 const PANEL = read('src/lib/channels-panel.js');
-ok(PANEL.includes("if (offersPaths(a)) sec.appendChild(keep('newpath:' + a.id,") && PANEL.includes("glyph: curSystems.has(conv.adapterId) ? 'robot' : null"), 'the section offers New path… and its rows wear the robot, muted — both by offersPaths');
+ok(PANEL.includes("      const np = btn('', () => showNewPathDialog(app, { adapterId: a.id }), 'chan-wh-new');") && PANEL.includes("glyph: curSystems.has(conv.adapterId) ? 'robot' : null"), 'the section offers New path… and its rows wear the robot, muted — both by offersPaths');
 const WH = require(path.join(REPO, 'src/channels/webhook.js'));
 ok(WH.removable === false && WH.consent === null && WH.manifest === undefined && WH.seed === true && WH.listed === true, 'the module declares removable: false, no consent and no manifest ⇒ not a connectable account (no Remove / Re-authorize / Disconnect in its ⋯)');
 
@@ -89,6 +91,34 @@ const keys = new Set();
 for (const f of ['src/lib/channel-webhook.js', 'src/lib/webhook-view.js']) for (const m of read(f).matchAll(/\bt\((['"])((?:\\.|(?!\1).)*)\1/g)) keys.add(m[2].replace(/\\'/g, "'"));
 const lack = [...keys].filter((k) => !zh.includes(JSON.stringify(k) + ':') || !ja.includes(JSON.stringify(k) + ':'));
 ok(keys.size > 60 && lack.length === 0, `${keys.size} literals, each in zh and ja`, lack);
+
+console.log('§8 the Webhook section: last in Accounts, its New path… on the head row (lane webhook-section-place)');
+{
+  const door = (id) => ({ id, kind: 'webhook', pushTransport: 'http-inbound' });
+  const acct = (id, kind) => ({ id, kind });
+  // THE TABLE: [given (arrival order), wanted ids] — the person's accounts keep their order, every door after them
+  const TABLE = [
+    [[door('webhook'), acct('lark:a', 'lark'), acct('gmail:a', 'gmail')], ['lark:a', 'gmail:a', 'webhook']],
+    [[acct('lark:a', 'lark'), door('webhook'), acct('slack:a', 'slack'), acct('lark:b', 'lark')], ['lark:a', 'slack:a', 'lark:b', 'webhook']],
+    [[door('webhook'), door('webhook:2')], ['webhook', 'webhook:2']],
+    [[acct('gmail:a', 'gmail'), acct('lark:a', 'lark')], ['gmail:a', 'lark:a']],
+    [[{ id: 'hook-ish', kind: 'webhook' }, acct('lark:a', 'lark')], ['hook-ish', 'lark:a']],   // the capability row decides, never the kind
+    [[], []],
+  ];
+  const judge = (rule) => TABLE.filter(([given, want]) => { const got = rule(given.slice()).map((a) => a.id); return got.join(',') !== want.join(','); }).length;
+  ok(judge(V.accountSectionOrder) === 0 && V.accountSectionOrder(null).length === 0 && V.accountSectionOrder([null, acct('x', 'lark')]).length === 1, `accountSectionOrder: ${TABLE.length} rows — the person's own accounts first in arrival order, every inbound door after them`);
+  const given = [door('webhook'), acct('lark:a', 'lark')];
+  ok(V.accountSectionOrder(given) !== given && given[0].id === 'webhook', 'the rule returns a new list (the digest\'s adapters are never reordered in place)');
+  ok(judge((xs) => xs) > 0 && judge((xs) => [...xs.filter(V.offersPaths), ...xs.filter((a) => !V.offersPaths(a))]) > 0, 'RED controls: arrival order (a webhook listed before a user account) and doors-first are each judged wrong by the same table');
+  ok(PANEL.includes('    const accounts = accountSectionOrder(adapters.filter((a) => !a.builtin));') && (PANEL.match(/accountSectionOrder\(/g) || []).length === 1 && !/\.sort\([^)]*offersPaths/.test(PANEL), 'the Accounts part orders its sections by the rule — its ONE call site, no second sort');
+  const sec = PANEL.slice(PANEL.indexOf('  function section(a, mine, siblings, ordinal, badge) {'), PANEL.indexOf('  let curBadges = new Map();'));
+  const iNp = sec.indexOf("      h.appendChild(np);"), iCnt = sec.indexOf("    h.appendChild(cnt);"), iDot = sec.indexOf("    h.appendChild(dot);"), iMore = sec.indexOf("    h.appendChild(more);");
+  ok(iDot > 0 && iNp > iDot && iCnt > iNp && iMore > iCnt && !/sec\.appendChild\([^\n]*(newpath|chan-wh-new|np\b)/.test(sec) && !sec.includes("keep('newpath:"), 'New path… is built INTO the head row — after the name and dot, before the count and the ⋯ — and no longer hangs below it', { iDot, iNp, iCnt, iMore });
+  ok(sec.includes("np.title = t('New path…');") && sec.includes("np.setAttribute('aria-label', t('New path…'));") && sec.includes("lab.className = 'chan-wh-new-label';") && read('src/lib/channel-chrome.js').includes('b.onclick = (ev) => { ev.stopPropagation(); onClick(ev); };'), 'its glyph-only form keeps the word in a tooltip + aria-label; btn stops the press (the head does not fold)');
+  ok(PANEL.includes("registerMenuItem({ menu: M, group: '1_rows', order: 1, when: (c) => offersPaths(A(c)), label: () => t('New path…'), run: (c) => showNewPathDialog(c.app, { adapterId: A(c).id }) });"), 'the head\'s ⋯ / right-click menu (one menu) gains New path… as its first row, for an inbound door only');
+  const CSS = read('public/style.css');
+  ok(CSS.includes('@container chan-panel (max-width: 300px) { .chan-wh-new-label { display: none; }') && CSS.includes('@media (max-width: 480px) { .chan-wh-new-label { display: none; }'), 'narrow (a phone, a ≤ 300 px panel) the button keeps its glyph alone');
+}
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

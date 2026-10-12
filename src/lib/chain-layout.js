@@ -302,6 +302,22 @@ function splitPartner(chain, recent = chain && chain.recent) {
   return order[oi + 1] ?? order[oi - 1] ?? null;
 }
 
+/** THE SIDE A DEFAULT SPLIT GIVES ITS GUEST (inc-mv4q1u6b-ksyh, the owner 2026-10-12: "这个分屏的逻辑非常
+ *  诡异，为啥在右侧的标签页分屏后跑到左侧了" — the active tab sat on the RIGHT of the strip, the button put
+ *  it in the LEFT pane). THE RULE: a split never moves a tab across the strip — the pane sides follow the
+ *  strip's VISUAL order (visualTabOrder). `{ side, pair }`: `side` = where `guestId` lands beside
+ *  `anchorId` ('right' when the guest sits to the anchor's right in the strip, else 'left' — what the
+ *  doors that pick the side themselves pass to enterSplit); `pair` = the two in visual order [left,
+ *  right]. null when either is not a member, or they are the same tab. */
+function splitSideFor(chain, anchorId, guestId) {
+  if (!chain || !Array.isArray(chain.tabs)) return null;
+  const a = String(anchorId), g = String(guestId);
+  const order = visualTabOrder(chain);
+  const ai = order.indexOf(a), gi = order.indexOf(g);
+  if (ai < 0 || gi < 0 || a === g) return null;
+  return gi > ai ? { side: 'right', pair: [a, g] } : { side: 'left', pair: [g, a] };
+}
+
 // ── THE VERBS (split tabs v2, docs/design-split-ux.zh.md §8) ──
 // Each mutates IN PLACE and ends in normalizeChain; each picks its substitute
 // pane itself (the validator never guesses). tab-group.js calls them and then
@@ -325,9 +341,12 @@ function showTab(chain, id) {
   return normalizeChain(chain);
 }
 
-/** ENTER (or widen) a split. From tabs: the guest goes ALONE to `side`, every
- *  other tab stays with the anchor on the other side (strip order kept), the
- *  pair = [anchor, guest] ordered by `side`. On a chain that is ALREADY split
+/** ENTER (or widen) a split. From tabs, the strip is CUT — no tab crosses it
+ *  (inc-mv4q1u6b-ksyh): a guest already on `side` of the anchor in the strip
+ *  takes that side with every tab beyond it, the tabs between stay with the
+ *  anchor; a guest the verb sends ACROSS ("Beside {name} (on the right)" for a
+ *  tab on the left) goes ALONE to `side` — only it moves — every other tab
+ *  with the anchor (strip order kept). The pair = [anchor, guest] ordered by `side`. On a chain that is ALREADY split
  *  the anchor keeps its side and the guest goes to the OTHER side (its end,
  *  unless it is already there) — both shown: "beside the source" is the side
  *  the source is not on, never a literal "right" that could cover it. */
@@ -347,10 +366,14 @@ function enterSplit(chain, { anchorId, guestId, side = 'right' } = {}) {
     return normalizeChain(chain);
   }
   const pair = pairFor({ anchorId: a, guestId: g, side });
+  const ai = chain.order.indexOf(a), gi = chain.order.indexOf(g);
   const rest = chain.order.filter((x) => x !== g);
   const ratio = chain.split && Number.isFinite(Number(chain.split.ratio)) ? chain.split.ratio : SPLIT_RATIO_DEFAULT;
+  const cut = side === 'left' ? (gi < ai ? gi + 1 : -1) : (gi > ai ? gi : -1); // where the strip is cut when the guest is already on `side`
   chain.layout = 'split';
-  chain.split = { pair, ratio, dir: 'row', left: side === 'left' ? [g] : rest, right: side === 'left' ? rest : [g] };
+  chain.split = cut >= 0
+    ? { pair, ratio, dir: 'row', left: chain.order.slice(0, cut), right: chain.order.slice(cut) }
+    : { pair, ratio, dir: 'row', left: side === 'left' ? [g] : rest, right: side === 'left' ? rest : [g] };
   return normalizeChain(chain);
 }
 
@@ -719,6 +742,7 @@ module.exports = {
   SPLIT_RATIO_MIN, SPLIT_RATIO_MAX, SPLIT_RATIO_DEFAULT, SPLIT_DIVIDER_PX, SPLIT_TAIL_FLOOR_PX, SPLIT_PANE_MIN_MAX,
   RATIO_HOLD_MS, holdRatio, heldRatio, releaseRatio,
   clampRatio, splitValid, normalizeChain, cloneChain, chainSyncKey, ratioDiffers, displayedPanes, splitAnchor, pairFor, splitColumns, paneMinPx, visualTabOrder, sidesOf, sideOf, swappedPair, splitPartner,
+  splitSideFor, // inc-mv4q1u6b-ksyh: a split never moves a tab across the strip
   showTab, enterSplit, insertTab, moveTab, removeTab, swapSides,
   withoutMembers, // inc-mukeyzpt-lpou: a record read without the windows this client closed
   restoreVerdict, // inc-muundq37-cjay: a queued chain waits for its LAST member, then is rebuilt whole

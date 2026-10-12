@@ -105,7 +105,7 @@ export function readingHtml(src, { Marked, sanitize } = {}) {
  *  window shows the source, as before, and its chip says so. No sanitizer / no renderer ⇒ throws (fail closed). */
 export function rawReading(src, { Marked, sanitize } = {}) {
   if (typeof sanitize !== 'function' || typeof Marked !== 'function') throw new Error('rawReading needs Marked + the sanitizer');
-  const s = String(src ?? ''), kind = /^\s*</.test(s) ? 'html' : /^(---|\+\+\+)/.test(s) ? 'front' : 'markdown';
+  const s = String(src ?? ''), kind = rawKind(s);
   let html = '';
   try { html = String(readingHtml(s, { Marked, sanitize }) || ''); } catch { return { kind, html: '', rendered: false }; }
   const text = html.replace(/<[^>]*>/g, '').replace(/&nbsp;|&#160;/gi, ' ').trim();
@@ -153,4 +153,53 @@ export function exportDocument({ title = '', body = '', css = '', tokens = [], f
     + `<meta name="generator" content="VibeSpace Doc window"><title>${esc(title)}</title>`
     + `<style>:root{${vars.join(';')}}\n${base}\n${String(css || '').replace(/<\/style/gi, '<\\/style')}\n${TABLE_CSS}\n${PRINT_CSS}</style></head>`
     + `<body><main class="doc-page"><article class="ProseMirror doc-read">${b}</article></main></body></html>`;
+}
+
+/** THE RAW-BLOCK COMMENT ANCHOR (lane doc-comment-raw-block, 2.369.258 — owner 2026-10-12 "这个html部分无法批注": the comment
+ *  popover keyed only to the editor's TEXT selection, so a raw block — an atom — was never commentable). The rule: every
+ *  block of a document is commentable; what the person selected is the quote. The window reads the selection, this
+ *  decides. A block = { pos, line (its first SOURCE line), source, editing (its source box is open) }.
+ *    { node: block }  — a NodeSelection on the block (a click on it): the quote = its kind + its source (≤ 200 chars)
+ *    { dom: { a, b, text, offset } } — a non-collapsed DOM selection; a / b = the block each end sits in (null = outside
+ *      any raw block); offset = where `text` starts in the block's source when the box SHOWS the source (else -1):
+ *      the quote = the selected text, the line = the block's line + the source lines before `offset`
+ *  → { quote, line, raw: { pos, line, kind, offset? } } — the comment's anchor: the existing { quote, line } + ONE field
+ *  `raw` (the strip re-finds the block by it) | { refused: 'text' } — an end outside the block, or the two ends in two
+ *  blocks: THE TEXT RULE WINS (the editor's own selection: a selection spanning a paragraph and a raw block quotes the
+ *  paragraph's text, the block — an atom — adds none) | { refused: 'editing' } — the block's source box is open: not
+ *  commentable until Finish | { refused: 'empty' } — only whitespace selected. */
+export const RAW_QUOTE = 200;
+export const RAW_KIND_WORD = Object.freeze({ html: 'HTML block', front: 'Front matter', markdown: 'Markdown block' });
+const rawKind = (s) => (/^\s*</.test(s) ? 'html' : /^(---|\+\+\+)/.test(s) ? 'front' : 'markdown');
+const oneLine = (s) => String(s ?? '').replace(/\s+/g, ' ').trim();
+const clipCp = (s, n) => { const a = Array.from(s); return a.length > n ? a.slice(0, n - 1).join('') + '…' : s; };
+const isBlock = (b) => !!b && Number.isInteger(b.pos) && b.pos >= 0 && typeof b.source === 'string';
+export function rawCommentAnchor(sel) {
+  const anchor = (b, quote, line, offset) => ({ quote, line, raw: { pos: b.pos, line: b.line > 0 ? b.line : 0, kind: rawKind(b.source), ...(offset >= 0 ? { offset } : {}) } });
+  if (sel && sel.node) {
+    const b = sel.node; if (!isBlock(b)) return { refused: 'text' };
+    if (b.editing) return { refused: 'editing' };
+    const src = oneLine(b.source); if (!src) return { refused: 'empty' };
+    return anchor(b, clipCp(RAW_KIND_WORD[rawKind(b.source)] + ': ' + src, RAW_QUOTE), b.line > 0 ? b.line : 0, -1);
+  }
+  const d = sel && sel.dom; if (!d) return { refused: 'text' };
+  const { a, b } = d;
+  if (!isBlock(a) || !isBlock(b) || a.pos !== b.pos) return { refused: 'text' };
+  if (a.editing) return { refused: 'editing' };
+  const text = String(d.text ?? ''); if (!oneLine(text)) return { refused: 'empty' };
+  const off = Number.isInteger(d.offset) && d.offset >= 0 && a.source.slice(d.offset, d.offset + text.length) === text ? d.offset : -1;
+  const line = a.line > 0 ? a.line + (off > 0 ? a.source.slice(0, off).split('\n').length - 1 : 0) : 0;
+  return anchor(a, clipCp(oneLine(text), RAW_QUOTE), line, off);
+}
+/** The strip's way back to a raw-block comment's block (a reload, an edit above it): the block whose one-line source
+ *  holds the quote (its kind prefix and the clip's … dropped), nearest the saved line; else the block at the saved
+ *  position or line; else null (the block is gone). blocks = the document's raw blocks now, [{ pos, line, source }]. */
+export function rawCommentTarget(blocks, c) {
+  const r = c && c.raw, list = Array.isArray(blocks) ? blocks.filter(isBlock) : [];
+  if (!r || !list.length) return null;
+  let q = oneLine(c.quote); const word = RAW_KIND_WORD[r.kind];
+  if (word && q.startsWith(word + ': ')) q = q.slice(word.length + 2);
+  q = q.replace(/…$/, '');
+  const near = (xs) => xs.reduce((m, x) => (!m || Math.abs(x.line - r.line) < Math.abs(m.line - r.line) ? x : m), null);
+  return (q && near(list.filter((x) => oneLine(x.source).includes(q)))) || list.find((x) => x.pos === r.pos) || list.find((x) => x.line === r.line) || null;
 }

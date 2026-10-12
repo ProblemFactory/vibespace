@@ -9,6 +9,14 @@ import * as WA from '../webhook-auth.js';
 
 /** An account whose capability row declares an inbound door offers paths and callers. */
 export const offersPaths = (a) => !!(a && a.pushTransport === 'http-inbound');
+/** lane webhook-section-place (the owner, 2026-10-12: "webhook应该保持在列表最后或者顶部，因为不是自由添加的"): THE ACCOUNT
+ *  SECTIONS' ORDER — the person's own accounts first, in the order they arrive; then every account whose capability row
+ *  is an inbound door (built in: no sign-in, not removable, never freely added), in theirs. The ONE place the Accounts
+ *  part orders its sections (the agents watcher keeps its own part). */
+export function accountSectionOrder(accounts) {
+  const list = Array.isArray(accounts) ? accounts.filter(Boolean) : [];
+  return [...list.filter((a) => !offersPaths(a)), ...list.filter(offersPaths)];
+}
 export const AUTH_MODES = Object.freeze(['hmac', 'bearer']);   // HMAC first: the default
 export const DELIVERY_MODES = Object.freeze(['none', 'reply-url', 'poll']);
 export const WAKES_DEFAULT = 6;

@@ -27,6 +27,13 @@
 //      table shows `STEP-<code>-nn` as written, no <code> element opened (the editor keeps that table raw: rule 2 unchanged).
 //      RED CONTROLS: the editor's DOM exported (its raw blocks) ⇒ red; a rawReading that skips the sanitizer ⇒ red; the
 //      reader without its unpaired-tag rule ⇒ the cell's tail in code type ⇒ red.
+//   ⑦ (lane doc-comment-raw-block, 2.369.258 — owner 2026-10-12 "这个html部分无法批注"): every block of a document is
+//      commentable; what the person selected is the quote. rawCommentAnchor's table: a click on a raw block (its
+//      NodeSelection) ⇒ the block's anchor, the quote = its kind + its source (≤ 200); a DOM selection inside its body ⇒
+//      the selected text, the line moved by the source lines before it when the box shows the source; an end outside the
+//      block (a paragraph + the block) or two blocks ⇒ refused 'text' (the editor's TEXT rule wins); an open source box ⇒
+//      refused 'editing'; rawCommentTarget finds the block again after a reload / an edit above it. RED CONTROL: the
+//      window's selNow without the raw branch ⇒ a click on the block offers nothing.
 // Run: node scripts/test-doc-window-width.mjs   (in-process, ~0.06 s; the chrome half = scripts/test-doc-window.mjs §10)
 import fs from 'node:fs';
 import os from 'node:os';
@@ -221,5 +228,53 @@ try {
   const v7 = rawVerdicts((await import(pathToFileURL(path.join(TMP6, 'u.mjs')).href)).readingHtml(MIXED, { Marked, sanitize: (h) => h }));
   ok(mut7 !== src6 && v7.includes('the bare placeholder opened an element (the cell\'s tail in code type)'), 'RED CONTROL: the reader without its unpaired-tag rule ⇒ red (a <code> element opened at STEP-<code>-nn, the rest of the cell in code type)', v7);
 } finally { fs.rmSync(TMP6, { recursive: true, force: true }); }
+section('⑦ a raw block is commentable: rawCommentAnchor (PURE) — the selection → the anchor + the quote, or a refusal by name');
+{
+  const CONF = '<!-- [CONFIRM-BLOCK id=7]\nkeep the bag\n-->';
+  const html = { pos: 12, line: 5, source: CONF, editing: false }, fm = { pos: 0, line: 1, source: '---\ntitle: x\n---', editing: false }, md = { pos: 40, line: 9, source: '| a | <code>b |\n|---|---|', editing: false };
+  const LONG = { pos: 3, line: 2, source: '<div>' + 'x'.repeat(400) + '</div>', editing: false };
+  const J = (x) => JSON.stringify(x);
+  const T = [
+    ['a click (NodeSelection) on an HTML comment block ⇒ the block, kind named', { node: html }, { quote: 'HTML block: <!-- [CONFIRM-BLOCK id=7] keep the bag -->', line: 5, raw: { pos: 12, line: 5, kind: 'html' } }],
+    ['a click on front matter ⇒ "Front matter: …"', { node: fm }, { quote: 'Front matter: --- title: x ---', line: 1, raw: { pos: 0, line: 1, kind: 'front' } }],
+    ['a click on a Markdown raw block ⇒ "Markdown block: …"', { node: md }, { quote: 'Markdown block: | a | <code>b | |---|---|', line: 9, raw: { pos: 40, line: 9, kind: 'markdown' } }],
+    ['a click on a long block ⇒ the quote clipped to 200 code points with …', { node: LONG }, (r) => Array.from(r.quote).length === 200 && r.quote.endsWith('…') && r.quote.startsWith('HTML block: <div>xxx')],
+    ['a DOM selection inside the source box ⇒ the selected text, its line = the block\'s + the lines before it, the offset kept', { dom: { a: html, b: html, text: 'keep the bag', offset: CONF.indexOf('keep') } }, { quote: 'keep the bag', line: 6, raw: { pos: 12, line: 5, kind: 'html', offset: CONF.indexOf('keep') } }],
+    ['a DOM selection inside the rendered reading (no source offset) ⇒ the selected text at the block\'s line', { dom: { a: md, b: md, text: 'a', offset: -1 } }, { quote: 'a', line: 9, raw: { pos: 40, line: 9, kind: 'markdown' } }],
+    ['an offset that does not hold the text (a stale read) ⇒ dropped, the block\'s line', { dom: { a: html, b: html, text: 'keep the bag', offset: 1 } }, { quote: 'keep the bag', line: 5, raw: { pos: 12, line: 5, kind: 'html' } }],
+    ['a multi-line selection ⇒ one line in the quote', { dom: { a: html, b: html, text: 'id=7]\nkeep', offset: CONF.indexOf('id=7]') } }, { quote: 'id=7] keep', line: 5, raw: { pos: 12, line: 5, kind: 'html', offset: CONF.indexOf('id=7]') } }],
+    ['a selection spanning a paragraph and the block ⇒ refused "text" (THE TEXT RULE WINS: the editor quotes the paragraph)', { dom: { a: null, b: html, text: 'Intro line. <!--', offset: -1 } }, { refused: 'text' }],
+    ['…the other way round (anchor in the block, focus in a paragraph) ⇒ "text"', { dom: { a: html, b: null, text: 'bag --> Tail', offset: -1 } }, { refused: 'text' }],
+    ['two raw blocks ⇒ "text"', { dom: { a: html, b: md, text: 'x', offset: -1 } }, { refused: 'text' }],
+    ['a block whose source box is open (editing) ⇒ refused "editing" — a DOM selection…', { dom: { a: { ...html, editing: true }, b: { ...html, editing: true }, text: 'keep', offset: -1 } }, { refused: 'editing' }],
+    ['…and a click', { node: { ...html, editing: true } }, { refused: 'editing' }],
+    ['only whitespace selected ⇒ refused "empty"', { dom: { a: html, b: html, text: ' \n ', offset: -1 } }, { refused: 'empty' }],
+    ['no selection / garbage ⇒ "text" (never throws)', null, { refused: 'text' }],
+    ['a node without a position ⇒ "text"', { node: { source: 'x' } }, { refused: 'text' }],
+  ];
+  const bad = T.filter(([, sel, want]) => { const r = M.rawCommentAnchor(sel); return typeof want === 'function' ? !want(r) : J(r) !== J(want); }).map(([n, sel]) => n + ' ⇒ ' + J(M.rawCommentAnchor(sel)));
+  ok(bad.length === 0, `rawCommentAnchor: ${T.length} rows — a click quotes the block (kind named), a DOM selection inside it quotes the selected text, a paragraph + the block ⇒ the text rule, an open box ⇒ "editing"`, bad);
+  // the strip's way back: the quote's block nearest the saved line; else the saved pos / line; else gone
+  const A = M.rawCommentAnchor({ node: html }), I = M.rawCommentAnchor({ dom: { a: html, b: html, text: 'keep the bag', offset: CONF.indexOf('keep') } });
+  const now = [fm, { ...html }, md], moved = [fm, { pos: 30, line: 8, source: '<p>new</p>' }, { pos: 50, line: 11, source: CONF }, md];
+  const TT = [
+    ['unchanged ⇒ the same block', now, { ...A, quote: A.quote }, 12],
+    ['a block inserted above (pos + line moved) ⇒ found by its quote', moved, A, 50],
+    ['a selection quote ⇒ found by the text', moved, I, 50],
+    ['the quote no longer in any block ⇒ the block at the saved pos', [fm, { pos: 12, line: 5, source: '<!-- rewritten -->' }], A, 12],
+    ['the block gone ⇒ null', [fm, md], A, null],
+    ['a text comment (no raw) ⇒ null', now, { quote: 'x', line: 3 }, null],
+  ];
+  const badT = TT.filter(([, bl, c, want]) => ((M.rawCommentTarget(bl, c) || {}).pos ?? null) !== want).map(([n, bl, c]) => n + ' ⇒ ' + J(M.rawCommentTarget(bl, c)));
+  ok(badT.length === 0, `rawCommentTarget: ${TT.length} rows — after a reload / an edit above it the strip finds the block by its quote, else its place; gone ⇒ null`, badT);
+  // the window wears it: one anchor model (the strip item gains ONE field), the selection reader, the strip's way back
+  ok(UI.includes("s instanceof NodeSelection && s.node.type.name === 'rawBlock' ? rawNodeSel(view, s)") && UI.includes("document.addEventListener('selectionchange'") && UI.includes("...(raw ? { raw } : {}), note });") && UI.includes('noteBox(quote, c, line, raw);') && UI.includes('rawCommentTarget(blocks, c)') && UI.includes("showToast(t('Press Finish first — a block whose source is open cannot be commented')"),
+    'the window: a NodeSelection on a raw block and a DOM selection inside one reach the SAME popover / note box; the comment stores ONE extra field `raw`; the strip re-finds the block; an open source box says why (a toast)');
+  for (const lang of ['zh', 'ja']) { const Dd = rd(`src/lib/i18n-${lang}.js`); ok(['HTML block', 'Front matter', 'Markdown block', 'Press Finish first — a block whose source is open cannot be commented', 'That block is no longer in the document'].every((k) => Dd.includes(`"${k}": `)), `the raw-comment words are in i18n-${lang}.js`); }
+  // RED CONTROL: the window's selNow without the raw branch (the pre-lane line) — a NodeSelection on an atom quotes nothing
+  const pre = "const s = view.state.selection; return s.empty || !view.hasFocus() || S.mode !== 'rich' ? null : { from: s.from, to: s.to, view };";
+  const cut = UI.replace(/const selNow = \(view\) => \{[^\n]*\n/, 'const selNow = (view) => { ' + pre + ' };\n');
+  ok(cut !== UI && !cut.includes('rawNodeSel(view, s)'), 'RED CONTROL: the pre-lane selNow (no raw branch) ⇒ the pin above goes red (a click on the block offers nothing: textBetween over an atom is empty)');
+}
 console.log(`\n[doc-window-width] ${fail ? fail + ' FAILED (' + pass + ' passed)' : 'ALL PASS (' + pass + ')'}`);
 process.exit(fail ? 1 : 0);

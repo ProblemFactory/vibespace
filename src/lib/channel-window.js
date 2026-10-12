@@ -61,6 +61,7 @@ import { t, deviceLocale } from './i18n.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { menuItems } from './contributions.js';
 import { icon, el, btn, avatar, convAvatar, fileIcon, warmAvatars } from './channel-chrome.js';
+import { autosizeEditor } from './channel-editor-size.js';   // lane channel-edit-autosize: every message editor opens at its text's size
 import { accountBadges } from './channel-avatar.js';   // B-5fe1: the bar's account badge
 // P2: the Assign & filter editor and the one-line summary the bar draws.
 import { showAssignFilterDialog, assignmentSummary } from './channel-filter-editor.js';
@@ -837,6 +838,7 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
       ta.placeholder = direct ? t('Write a message — it is sent at once, as you') : t('Write a reply…');
       ta.rows = 2;
       ta.value = typed;
+      autosizeEditor(ta, { minRows: 2 });   // a held draft opens at its size (the empty box keeps its two rows)
       const row = el('div', 'chanwin-composer-row');
       // lane owner-composer-attach: the owner's own send carries files where the adapter declares them (never a proposal's)
       const cf = direct && ad0.sendAttachments && c.offers && c.offers.sendAttachment && (c.offers.sendAttachment.offered || c.offers.sendAttachment.why === 'attachments-not-sendable')
@@ -891,6 +893,7 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
         sendBtn.disabled = false;
         if (!r2 || r2.error) { showToast(routeErrorText(r2), { type: 'error' }); return; }
         ta.value = '';
+        ta._autosize.fit();
         heldDraft = '';
         if (q && quoteTarget === q) { quoteTarget = null; drawQuote(); }
         const st = r2.proposal && r2.proposal.state;
@@ -1983,6 +1986,7 @@ function openGroupWindow(app, winInfo, groupId, { bar, list, foot }) {
     row.append(note, sendBtn);
     comp.append(pop, ta, row);
     foot.appendChild(comp);
+    autosizeEditor(ta, { minRows: 2 });
     // B-ff04 ①: the members the person PICKED from the @ list, in order — sent as places by id, never re-read by name
     let picks = [];
     const spansOf = (s) => pickedSpans(s, picks);
@@ -2059,6 +2063,7 @@ function openGroupWindow(app, winInfo, groupId, { bar, list, foot }) {
         return;
       }
       ta.value = '';
+      ta._autosize.fit();
       picks = [];
       preview();
       // the send answers with its record — drawn NOW, never waiting for the broadcast echo
