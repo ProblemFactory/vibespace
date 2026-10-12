@@ -1087,6 +1087,8 @@ function removePlanFor(entry, { appsDir = '~/.vibespace/apps' } = {}) {
   const common = { ok: true, code: null, canRun: true, kind: 'remove', mode: 'home-remove', entryKind: entry.kind, entryId: entry.id, packages: [], closure: [], removes: [], downloadBytes: 0, installedBytes: 0, label: name || entry.id };
   const kr = K.kindRow(entry.kind);
   if (kr.removeArgvOf) { // lane app-register-model: a Flatpak (its appId) / a registered app (its own remove recipe — none: only the record goes)
+    const bad = kr.shapeError ? kr.shapeError(entry) : null; // rel254 verify F4: the user-writable record is re-checked at every read — a changed one never runs
+    if (bad) return { ok: false, code: bad.code, error: `${entry.id} was changed outside VibeSpace and is not runnable: ${bad.error}` };
     const argv = kr.removeArgvOf(entry);
     return argv ? { ...common, homeArgv: argv, closureKey: `home-remove ${entry.kind} ${entry.id} ${argv.join(' ')}`, commands: [argv.join(' ')] }
       : { ...common, homeArgv: null, closureKey: `home-remove ${entry.kind} ${entry.id}`, commands: ['# no remove recipe was registered — VibeSpace forgets the registration; the app itself stays installed'] };

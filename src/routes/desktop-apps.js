@@ -176,7 +176,7 @@ function fail(res, e) {
       || code === 'relative-path' || code === 'not-office-file' || code === 'not-office-app' || ['bad_label', 'bad_exec', 'bad_args', 'too_many_variants', 'needs_root', 'bad_icon', 'shadow'].includes(code) ? 400
     : code === 'cap' || code === 'no-backend' || code === 'backend-not-wired' || code === 'held' || code === 'not_taken' || code === 'no_lease' || code === 'not-xpra' || code === 'no_viewer' || code === 'not-ready' || code === 'relaunch-browser' || code === 'browser-absent' || code === 'snap-profile-unreachable'
       || code === 'host_needs_daemon' || code === 'no_x11' || code === 'no_apt' || code === 'no_repo' || code === 'no_sudo' || code === 'no_facts' || code === 'busy' || code === 'no_conversation' || code === 'fork_pending' || code === 'wake_paced'
-      || code === 'machine-mismatch' || code === 'app-absent' || code === 'still-absent' || code === 'app-asked' || code === 'lease' ? 409
+      || code === 'machine-mismatch' || code === 'app-absent' || code === 'still-absent' || code === 'app-asked' || code === 'changed_outside' || code === 'lease' ? 409
       : code === 'agent_forbidden' ? 403 : code === 'not_live' ? 404 : code === 'bad_principal' || code === 'bad_mode' || code === 'share_local_only' ? 400
       : code === 'no-engine' || code === 'xpra-ui-unavailable' || code === 'host_unavailable' || code === 'install_link_lost' || code === 'host-unreachable' ? 503 : code === 'install_timeout' ? 504 : 500;
   res.status(D014_STATUS[code] || status).json({ error: String(e?.message || e), code, ...(e && e.plan ? { plan: e.plan } : {}), ...(e && e.remedy ? { remedy: e.remedy } : {}), ...(e && e.vnc ? { vnc: e.vnc, platform: e.platform || null } : {}) });
@@ -227,16 +227,59 @@ router.post('/api/desktop/apps', async (req, res) => {
 });
 // lane app-register-model: the OWNER's Adopt — a row of "Installed outside VibeSpace" becomes a registered app (the prefill
 // of src/app-kinds/registered.js adoptPrefill, the dialog's edits on top). A person's click: an agent token is refused.
+const SEEN_RE = /^seen\.[A-Za-z0-9._-]{1,72}$/;
+/** The witnessed row a seenId names on that machine (null = not listed there any more). */
+async function seenRow(host, seenId) {
+  const list = host === 'local' ? await ctx.keeper.list() : await ctx.keeper.list({ host });
+  return ((list && list.registry) || []).find((r) => r && r.id === seenId && r.witnessed === true) || null;
+}
+/** rel254 verify F1: the three OWNER routes the launcher calls — registered BEFORE `GET /api/desktop/apps/:id` (an
+ *  `adopt-prefill` must never fall into `:id`); a person's click only (an agent's vsst_ / jbt_ bearer is refused). */
+function ownerGate(req, res, what) {
+  const host = hostParam(req, res); if (!host) return null;
+  if (isAgentBearer(req)) { fail(res, { code: 'agent_forbidden', message: `${what} is the owner's click — an agent token cannot` }); return null; }
+  if (!appsEngine) { fail(res, { code: 'host_unavailable', message: 'apps are not available in this process' }); return null; }
+  return host;
+}
+router.get('/api/desktop/apps/adopt-prefill', async (req, res) => {
+  const host = ownerGate(req, res, 'adopting an app'); if (!host) return;
+  const seenId = String(req.query.seenId || '');
+  if (!SEEN_RE.test(seenId)) return fail(res, { code: 'bad-request', message: 'name the row of Installed outside VibeSpace (seenId)' });
+  try {
+    const seen = await seenRow(host, seenId);
+    if (!seen) return fail(res, { code: 'not-found', message: `${seenId} is not listed outside VibeSpace on that machine (any more)` });
+    const pre = RG.adoptPrefill(seen);
+    res.json({ ok: true, seenId, label: pre.label, launch: pre.launch, remove: pre.remove || null, reinstall: pre.reinstall || null, witness: pre.witness });
+  } catch (e) { fail(res, e); }
+});
+const ENTRY_ROW_RE = /^app\.([a-z0-9][a-z0-9-]{0,39})$/; // = app-manifest ENTRY_ID_RE behind `app.`
+/** POST …/:id/remove | …/:id/forget — `:id` = a home app's row id (`app.<entry>`); an unknown one ⇒ 404 by name. */
+function ownerEntryRoute(verb) {
+  return async (req, res) => {
+    const host = ownerGate(req, res, verb === 'remove' ? 'removing an app' : 'forgetting an app'); if (!host) return;
+    const m = ENTRY_ROW_RE.exec(String(req.params.id || ''));
+    if (!m) return fail(res, { code: 'bad-request', message: `${JSON.stringify(String(req.params.id).slice(0, 40))} is not an app's row id (app.<name>)` });
+    try {
+      const r = verb === 'remove' ? await appsEngine.ownerRemove(host, m[1]) : await appsEngine.ownerForget(host, m[1]);
+      if (r.ok) return res.json(r);
+      res.status(r.code === 'failed' ? 500 : r.code === 'no_recipe' ? 409 : 400).json(r);
+    } catch (e) {
+      if (e && (e.code === 'not_found' || e.code === 'not-found')) return res.status(404).json({ ok: false, code: 'not-found', error: `no app ${m[1]} in your home on that machine — nothing to ${verb}` });
+      fail(res, e);
+    }
+  };
+}
+router.post('/api/desktop/apps/:id/remove', ownerEntryRoute('remove'));
+router.post('/api/desktop/apps/:id/forget', ownerEntryRoute('forget'));
 router.post('/api/desktop/apps/adopt', async (req, res) => {
   const host = hostParam(req, res); if (!host) return;
   if (isAgentBearer(req)) return fail(res, { code: 'agent_forbidden', message: 'adopting an app is the owner\'s click — an agent registers with vibespace-app register' });
   if (!appsEngine || typeof appsEngine.adopt !== 'function') return fail(res, { code: 'host_unavailable', message: 'apps are not available in this process' });
   const b = req.body || {};
   const seenId = String(b.seenId || '');
-  if (!/^seen\.[A-Za-z0-9._-]{1,72}$/.test(seenId)) return fail(res, { code: 'bad-request', message: 'name the row of Installed outside VibeSpace (seenId)' });
+  if (!SEEN_RE.test(seenId)) return fail(res, { code: 'bad-request', message: 'name the row of Installed outside VibeSpace (seenId)' });
   try {
-    const list = host === 'local' ? await ctx.keeper.list() : await ctx.keeper.list({ host });
-    const seen = ((list && list.registry) || []).find((r) => r && r.id === seenId && r.witnessed === true);
+    const seen = await seenRow(host, seenId);
     if (!seen) return fail(res, { code: 'not-found', message: `${seenId} is not listed outside VibeSpace on that machine (any more)` });
     const pre = RG.adoptPrefill(seen);
     const entry = { ...pre, ...(b.label != null ? { label: b.label } : {}), ...(Array.isArray(b.launch) ? { launch: b.launch } : {}), ...(b.remove !== undefined ? { remove: b.remove } : {}), ...(b.reinstall !== undefined ? { reinstall: b.reinstall } : {}), ...(b.icon != null ? { icon: b.icon } : {}) };

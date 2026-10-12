@@ -125,9 +125,12 @@ vibespace-app register --label "JASP" --exec flatpak --args "run org.jaspstats.J
 ```
 Each line is split into argv words (quotes group, no shell runs it; an unquoted | ; & > < $ ` is refused). Nothing executes.
 THE WITNESS-MATCH RULE: a default launch the machine already lists "Installed outside VibeSpace" is recorded at once (nothing new
+(rel254-verify-fixes, 2.369.255 — the rule is TIGHTER: recorded at once ONLY when EVERY launch variant is exactly the witnessed argv (a Flatpak: `flatpak run <appId>` with nothing else, through this machine's own `flatpak`), no variant has `env` or `cwd`, and the remove / reinstall recipes are absent or exactly the program's own (`flatpak uninstall|install --user -y …`). A second variant with other args (a "Safe mode", a `--command=`), any env, any cwd or any other recipe is ONE For-you click — every line, env and cwd included, is shown. A recipe NAMING sudo / pkexec / doas / su / run0 / sudoedit is refused by its basename; VibeSpace does not try to recognise every road to root — a recipe the user accepts runs as them. The manifest is the user's own file: a hand-edited row is re-checked at every read and shown disabled when it fails. `add --kind flatpak` takes a bare application id only (no path, no `.flatpakref` / `.flatpak`) — `bad_target`.)
 becomes launchable); any other is one item in the user's For you tray (`vibespace-app wait <id>`; a decline is final). Refusals:
 bad_label, bad_exec (does not resolve as you), bad_args, too_many_variants (> 8), needs_root (a recipe naming sudo / pkexec /
 doas), bad_icon, shadow (the name is a catalog app's). After a rebuild a gone program's reinstall is the USER's click.
+A bare `--exec` name (no `/`) is resolved again on VibeSpace's PATH on that machine at every launch: the `[path]` shown beside it
+is advisory (what it resolved to when you registered it) — give an absolute path when it must be that one program.
 
 ## User-level tools (no root, nothing to replay)
 

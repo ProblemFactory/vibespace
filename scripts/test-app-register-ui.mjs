@@ -1,19 +1,22 @@
 #!/usr/bin/env node
-// test-app-register-ui — APP REGISTRATION, the launcher half, in a real browser (lane app-register-ui, owner 2026-10-11:
-// an agent-installed JASP sat under "Installed outside VibeSpace"; one press should make it VibeSpace's own, with its
-// launch options and how to remove it). A THROWAWAY server in a git worktree + headless chrome over raw CDP; the
-// desktop-apps routes answer THE CONTRACT from an in-page stub (the server half is the sibling lane app-register-model —
-// rows `registered/launch/removable/source/exec/args`, adopt-prefill, adopt, remove), so no xpra / flatpak is touched:
-//   ① desk 1100: a registered row with 2 variants — its chip + command line; its "…" lists the default by its label ("Open") + "Open · Safe mode" above
-//      Remove… / Show command; "Open · Safe mode" POSTs {appId, variant:'safe'}
-//   ② the witnessed JASP card's "Add…" opens the adopt dialog PREFILLED (label, the variant's command + its words as
-//      chips, the remove / reinstall recipes, the witness line)
-//   ③ a bad_args answer lands under the variants field (the dialog stays); Add then moves the card: JASP leaves the
-//      outside group and is in Apps ONCE (no duplicate), the toast says so
-//   ④ Remove… shows the recipe verbatim; ok ⇒ the row leaves Apps, the toast says "Removed"
-//   ⑤ phone 390: no "Add…" button; a LONG PRESS on the witnessed card opens its menu → Add to VibeSpace… → the adopt
-//      dialog is a full-height sheet, nothing wider than the screen
-// PNGs desk (no menu over the cards) / desk-menu / adopt / phone (VS_SHOT_DIR); "Add…" is measured whole in its cell. SKIPs by name: no chrome. ~25 s.
+// test-app-register-ui — APP REGISTRATION, the launcher half, in a real browser AGAINST THE REAL ROUTES (lane app-register-ui;
+// re-pointed by rel254-verify-fixes r2 — in .254 this suite answered adopt-prefill / remove / forget from its own in-page
+// stub, so Remove… / Forget shipped dead: a contract between lanes is a census, never a stub). A THROWAWAY server in a git
+// worktree, its HOME a scratch one holding the fixtures (a stub `flatpak` listing JASP for the user and uninstalling it, a
+// `dpkg` that does not answer, a remove recipe that writes what it ran, a user .desktop "Tool", a seeded manifest with a
+// two-variant registered app — its second variant carries env — and one changed outside VibeSpace: a sudo recipe). Only
+// the LAUNCH POST is captured in the page (no app is started); every desktop-apps route the launcher calls is the server's:
+//   ① desk 1100: the registered card + its command; "…" = Open | Open · Safe mode | Remove… | Show command; the variant's
+//      tooltip shows its env (rel254 verify F3); "Open · Safe mode" POSTs {appId, variant:'safe'}
+//   ② JASP's "Add…" → the adopt dialog PREFILLED from the REAL GET …/adopt-prefill (command + chips, both recipes, witness)
+//   ③ a command the machine cannot run ⇒ the server's bad_exec under "Launch variants"; Add ⇒ JASP leaves the outside group
+//      and is in Apps ONCE (the real POST …/adopt)
+//   ④ Remove… shows the recipe; ok ⇒ the REAL POST …/:id/remove ran the stub recipe as the user and the card leaves
+//   ⑤ Tool added without a recipe ⇒ its menu offers Forget; Forget ⇒ the entry leaves, the program stays — the witness
+//      lists Tool outside VibeSpace again
+//   ⑥ the changed-outside row: a DISABLED card saying why; its remove refused by name (needs_root), nothing ran
+//   ⑦ phone 390: a long press on the outside card → Add to VibeSpace… → a full-height sheet, nothing wider than the screen
+// PNGs desk / remove / phone (+ desk-menu, adopt) in VS_SHOT_DIR. SKIPs by name: no chrome. ~40 s.
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -40,9 +43,24 @@ execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' })
 for (const f of ['src', 'public', 'server.js', 'package.json', 'data/bin', 'docs/agent']) execSync(`rm -rf ${wt}/${f} && mkdir -p ${path.dirname(`${wt}/${f}`)} && cp -r ${repo}/${f} ${wt}/${f}`);
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
 fs.mkdirSync(path.join(wt, 'data'), { recursive: true });
+// ── THE FIXTURES, in the scratch HOME (before the server starts): no real flatpak / dpkg ever runs ──
+const AM = require(path.join(repo, 'src/app-manifest.js'));
+const FBIN = path.join(fakeHome, 'bin'), OPT = path.join(fakeHome, 'opt');
+for (const d of [FBIN, OPT, path.join(fakeHome, '.local/share/applications'), path.join(fakeHome, '.local/share/flatpak/app/org.jaspstats.JASP'), path.join(fakeHome, AM.APPS_REL)]) fs.mkdirSync(d, { recursive: true });
+const sh = (f, body) => fs.writeFileSync(f, `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+sh(path.join(FBIN, 'flatpak'), 'case "$1" in\n list) case "$*" in *--user*) [ -d "$HOME/.local/share/flatpak/app/org.jaspstats.JASP" ] && printf "org.jaspstats.JASP\\tJASP\\t0.19\\n";; esac; exit 0;;\n uninstall) printf "%s|%s\\n" "$*" "$PWD" > "$HOME/uninstall-ran"; rm -r "$HOME/.local/share/flatpak/app/org.jaspstats.JASP"; echo "Uninstalling org.jaspstats.JASP"; echo Done; exit 0;;\nesac\nexit 0');
+sh(path.join(FBIN, 'dpkg'), 'exit 2'); // dpkg does not answer ⇒ no system entry is read as "unowned" (the distro's stay hidden)
+const TOOLS = path.join(OPT, 'jasp-tools'), TOOL = path.join(OPT, 'tool');
+sh(TOOLS, 'exit 0'); sh(TOOL, 'exit 0');
+fs.writeFileSync(path.join(fakeHome, '.local/share/applications/tool.desktop'), `[Desktop Entry]\nType=Application\nName=Tool\nExec=${TOOL}\n`);
+const ENTRY = (o) => ({ kind: 'registered', packages: [], rows: [], services: [], addedAt: 1791743734821, approvedAt: 1791743734821, by: { kind: 'agent', conversation: 'c-ui' }, witness: null, registered: { session: null, at: 1791743734821 }, ...o });
+fs.writeFileSync(path.join(fakeHome, AM.APPS_REL, 'manifest.json'), JSON.stringify({ ...AM.emptyManifest(), entries: [
+  ENTRY({ id: 'jasp-tools', label: 'JASP Tools', launch: [{ id: 'default', label: 'Open', exec: TOOLS, args: ['--profile', 'main'] }, { id: 'safe', label: 'Safe mode', exec: TOOLS, args: ['--safe'], env: { JASP_SAFE: '1' } }], remove: { exec: 'flatpak', args: ['uninstall', '--user', '-y', 'org.example.Tools'] } }),
+  ENTRY({ id: 'broken', label: 'Broken', launch: [{ id: 'default', label: 'Open', exec: TOOLS, args: [] }], remove: { exec: 'sudo', args: ['rm', '-rf', '/'] } }), // changed outside VibeSpace
+] }));
 const LOG = path.join(fakeHome, 'server.log');
 const fd = fs.openSync(LOG, 'a');
-const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: ['ignore', fd, fd], detached: true });
+const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PATH: `${FBIN}:${process.env.PATH}`, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: ['ignore', fd, fd], detached: true });
 fs.closeSync(fd);
 const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--disable-background-timer-throttling', `--user-data-dir=${wt}-chrome`, 'about:blank'], { stdio: 'ignore' });
 let cleaned = false;
@@ -59,35 +77,14 @@ for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); proc
 let up = false; for (let i = 0; i < 160 && !up; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); up = true; } catch { await sleep(250); } }
 check('the worktree server answered', up, fs.existsSync(LOG) ? fs.readFileSync(LOG, 'utf8').slice(-2000) : '');
 
-// ── THE CONTRACT, stubbed in the page (window.fetch): the sibling's fixture JSON when it exists, else these rows ──
-const FIX = '/var/tmp/vibespace-lanes/app-register-model/fixtures';
-const readFix = (n) => { try { return JSON.parse(fs.readFileSync(path.join(FIX, n), 'utf8')); } catch { return null; } };
-const REG = { id: 'reg.jasp-tools', label: 'JASP Tools', registered: true, removable: true, source: 'agent', available: true, category: 'utility', exec: '/opt/jasp-tools/bin/jasp-tools', args: ['--profile', 'main'],
-  launch: [{ id: 'open', label: 'Open' }, { id: 'safe', label: 'Safe mode' }], remove: { exec: '/opt/jasp-tools/uninstall', args: ['--yes'] }, by: { who: 'agent', at: 1791743734821 } };
-const SEEN = { id: 'seen.f.org.jaspstats.jasp', label: 'JASP', witnessed: true, source: 'flatpak-user', available: true, category: 'utility', exec: 'flatpak', args: ['run', 'org.jaspstats.JASP'] };
-const SIB = readFix('adopt-prefill.json'); // the sibling's recorded {request, answer: {row, prefill}} — checked for the contract's keys below
-const PREFILL = { label: 'JASP', launch: [{ id: 'open', label: 'Open', exec: 'flatpak', args: ['run', 'org.jaspstats.JASP'] }],
-  remove: { exec: 'flatpak', args: ['uninstall', '--user', '-y', 'org.jaspstats.JASP'] }, reinstall: { exec: 'flatpak', args: ['install', '--user', '-y', 'org.jaspstats.JASP'] }, witness: { source: 'flatpak-user', appId: 'org.jaspstats.JASP' } };
+// ── ONLY the launch is captured in the page (no app starts here); every other desktop-apps route is the REAL server's ──
+const REG = { id: 'app.jasp-tools' }, SEEN = { id: 'seen.f.org.jaspstats.jasp' };
 const STUB = `(() => {
-  const S = window.__reg = { rows: ${JSON.stringify([REG, SEEN])}, posts: [], prefill: ${JSON.stringify(PREFILL)} };
+  const S = window.__reg = { launches: [] };
   const f0 = window.fetch;
-  const ans = (o) => Promise.resolve(new Response(JSON.stringify(o), { status: 200, headers: { 'Content-Type': 'application/json' } }));
   window.fetch = function (u, o) {
-    const url = String(u), m = (o && o.method) || 'GET', p = url.split('?')[0];
-    if (!p.startsWith('/api/desktop/apps')) return f0.apply(this, arguments);
-    const body = o && o.body ? JSON.parse(o.body) : null;
-    if (m === 'POST') S.posts.push({ p, body });
-    if (p === '/api/desktop/apps' && m === 'GET') return ans({ apps: [], registry: S.rows, availability: { backend: 'xpra', caps: {} }, cap: { used: 0, cap: 6 }, hostName: 'stub' });
-    if (p === '/api/desktop/apps/adopt-prefill') return ans(S.prefill);
-    if (p === '/api/desktop/apps/adopt') {
-      if (JSON.stringify(body.launch).includes('BAD')) return ans({ ok: false, code: 'bad_args', error: 'stub: a variant\\'s arguments were refused' });
-      const row = { id: 'reg.jasp', label: body.label, registered: true, removable: !!body.remove, remove: body.remove, source: 'flatpak-user', available: true, category: 'utility', exec: body.launch[0].exec, args: body.launch[0].args, launch: body.launch.map((v) => ({ id: v.id, label: v.label })), by: { who: 'user', at: Date.now() } };
-      S.rows = S.rows.filter((r) => r.id !== body.seenId).concat([row]);
-      return ans({ ok: true, row });
-    }
-    const rm = /^\\/api\\/desktop\\/apps\\/([^/]+)\\/(remove|forget)$/.exec(p);
-    if (rm) { S.rows = S.rows.filter((r) => r.id !== decodeURIComponent(rm[1])); return ans({ ok: true, output: 'Uninstalling org.jaspstats.JASP\\nDone' }); }
-    if (p === '/api/desktop/apps' && m === 'POST') return ans({ error: 'stub: the launch was recorded' });
+    const p = String(u).split('?')[0], m = (o && o.method) || 'GET';
+    if (p === '/api/desktop/apps' && m === 'POST') { S.launches.push(JSON.parse(o.body)); return Promise.resolve(new Response(JSON.stringify({ error: 'the launch was recorded (this suite starts no app)' }), { status: 200, headers: { 'Content-Type': 'application/json' } })); }
     return f0.apply(this, arguments);
   };
 })();`;
@@ -129,64 +126,95 @@ const boot = async (w, h, mobile) => {
   return waitFor(`(${cards})?.seen?.length > 0`, 15000);
 };
 try {
+  const toast = (t) => `[...document.querySelectorAll('.toast, [class*="toast"]')].some((e) => e.textContent.includes(${JSON.stringify(t)}))`;
+  const confirmOk = () => evalJs(`(() => { const o = [...document.querySelectorAll('.dialog-overlay')].pop(); o.querySelector('.btn-create').click(); return true; })()`);
+  // a runnable row's "…" is its scale control (its own rows merged below the default-scale rows); a dimmed one has the plain "…"
+  const openMenu = async (id) => { const card = `${D} .desktop-launch-card[data-app-id="${id}"]`; const sel = (await evalJs(`!!document.querySelector('${card} ~ .desktop-launch-card-scale')`)) ? `${card} ~ .desktop-launch-card-scale` : `${card} ~ .desktop-launch-card-menu`; await realClick(sel); return waitFor(`!!document.querySelector('.context-menu')`, 3000); };
+  const ownRows = async () => (await menuRows()).filter((r) => /^(Open|Open · .+|Remove…|Forget|Show command|Add to VibeSpace…)$/.test(r)); // the card's own rows (not the scale rungs)
+  const manifest = () => JSON.parse(fs.readFileSync(path.join(fakeHome, AM.APPS_REL, 'manifest.json'), 'utf8'));
 
-  console.log('① desk 1100: a registered row with 2 variants');
+  console.log('① desk 1100: a registered row with 2 variants (the seeded manifest, the real catalog)');
   check('the Apps dialog lists both groups', await boot(1100, 800, false), await evalJs(cards).catch((e) => String(e)));
-  await sleep(300); await shot('desk'); // both groups, no menu over them (desk-menu.png shows the menu)
+  check('the outside group lists JASP (the stub flatpak) and Tool (the user .desktop)', await waitFor(`(() => { const c = (${cards}); return c.seen.some((x) => x.id === '${SEEN.id}') && c.seen.some((x) => x.label === 'Tool'); })()`, 15000), await evalJs(cards));
+  await sleep(300); await shot('desk');
   let c = await evalJs(cards);
   const reg = c.apps.find((x) => x.id === REG.id);
-  check('the registered card: chip "Registered by an agent" + its command, never hidden', !!reg && reg.chip === 'Registered by an agent' && reg.sub.includes('/opt/jasp-tools/bin/jasp-tools --profile main'), c.apps);
-  check('each group head explains itself in one line', c.notes.length === 2 && /^Installed through VibeSpace or registered with it/.test(c.notes[0]) && /^Found on this machine but not registered: Add to VibeSpace…/.test(c.notes[1]), c.notes);
-  check('the registered card has its "…" (no scale rung here)', await realClick(`${D} .desktop-launch-card[data-app-id="${REG.id}"] ~ .desktop-launch-card-menu`) === true);
-  await waitFor(`!!document.querySelector('.context-menu')`, 3000);
-  const rows = await menuRows();
-  check('its menu: the default variant ("Open") + "Open · Safe mode" above Remove… / Show command', rows.join('|') === 'Open|Open · Safe mode|Remove…|Show command', rows);
+  check('the registered card shows its command, never hidden', !!reg && !!reg.chip && reg.sub.includes(`${TOOLS} --profile main`), c.apps);
+  check('the registered card has its "…"', await openMenu(REG.id));
+  const rows = await ownRows();
+  check('its menu: "Open" + "Open · Safe mode" above Remove… / Show command', rows.join('|') === 'Open|Open · Safe mode|Remove…|Show command', rows);
+  const tip = await evalJs(`[...document.querySelectorAll('.context-menu .context-menu-item')].find((e) => e.textContent.trim() === 'Open · Safe mode')?.title || ''`);
+  check('rel254 verify F3: the variant row shows its env (what it RUNS)', tip === `env JASP_SAFE=1 ${TOOLS} --safe`, tip);
   await shot('desk-menu');
   check('"Open · Safe mode" launches the second variant', await clickMenu('Open · Safe mode'));
-  await waitFor(`window.__reg.posts.some((x) => x.p === '/api/desktop/apps')`, 5000);
-  const launchPost = (await evalJs('window.__reg.posts')).find((x) => x.p === '/api/desktop/apps');
-  check('…POST /api/desktop/apps {appId, variant: "safe"}', !!launchPost && launchPost.body.appId === REG.id && launchPost.body.variant === 'safe', launchPost);
+  await waitFor(`window.__reg.launches.length > 0`, 5000);
+  const launchPost = (await evalJs('window.__reg.launches'))[0];
+  check('…POST /api/desktop/apps {appId, variant: "safe"}', !!launchPost && launchPost.appId === REG.id && launchPost.variant === 'safe', launchPost);
 
-  console.log('② the witnessed JASP card → Add to VibeSpace… (prefilled)');
-  const addGeo = await evalJs(`(() => { const b = document.querySelector('${D} .desktop-launch-card[data-app-id="${SEEN.id}"] ~ .desktop-launch-card-adopt'); const w = b.parentElement, cell = w.getBoundingClientRect(), q = b.getBoundingClientRect(), cs = getComputedStyle(b); return { text: b.textContent, sw: b.scrollWidth, cw: b.clientWidth, right: q.right, wrapRight: cell.right, w: q.width, wrapW: cell.width, cols: getComputedStyle(w.parentElement).gridTemplateColumns, font: cs.fontSize, pad: cs.padding, minw: cs.minWidth, maxw: cs.maxWidth, flex: cs.flex, ov: cs.overflow }; })()`);
+  console.log('② JASP → Add to VibeSpace… (prefilled by the REAL GET /api/desktop/apps/adopt-prefill)');
+  const addGeo = await evalJs(`(() => { const b = document.querySelector('${D} .desktop-launch-card[data-app-id="${SEEN.id}"] ~ .desktop-launch-card-adopt'); const w = b.parentElement, cell = w.getBoundingClientRect(), q = b.getBoundingClientRect(); return { text: b.textContent, sw: b.scrollWidth, cw: b.clientWidth, right: q.right, wrapRight: cell.right, w: q.width }; })()`);
   check('"Add…" shows its whole word beside the card (never clipped, inside its grid cell)', addGeo.text === 'Add…' && addGeo.sw <= addGeo.cw + 1 && addGeo.right <= addGeo.wrapRight + 0.5 && addGeo.w >= 30, addGeo);
   check('the witnessed card carries "Add…" at desk width', await realClick(`${D} .desktop-launch-card[data-app-id="${SEEN.id}"] ~ .desktop-launch-card-adopt`) === true);
   check('the adopt dialog opens', await waitFor(`!!document.querySelector('${A} .desktop-adopt-vcmd') && !document.querySelector('${A} .desktop-adopt-go').disabled`, 8000));
-  const pre = await evalJs(`(() => { const d = document.querySelector('${A}'); return { label: d.querySelector('.desktop-adopt-label').value, cmds: [...d.querySelectorAll('.desktop-adopt-vcmd')].map((i) => i.value), chips: [...d.querySelectorAll('.desktop-adopt-variant .desktop-adopt-chip')].map((s) => s.textContent), remove: d.querySelector('.desktop-adopt-remove').value, reinstall: d.querySelector('.desktop-adopt-reinstall').value, witness: d.querySelector('.desktop-adopt-witness').textContent }; })()`);
-  check('prefilled: label, the variant\'s command + its words as chips, both recipes, the witness line', pre.label === 'JASP' && pre.cmds.join() === 'flatpak run org.jaspstats.JASP' && pre.chips.join('|') === 'flatpak|run|org.jaspstats.JASP' && pre.remove === 'flatpak uninstall --user -y org.jaspstats.JASP' && pre.reinstall === 'flatpak install --user -y org.jaspstats.JASP' && pre.witness === 'found as Flatpak · yours: org.jaspstats.JASP', pre);
+  const pre = await evalJs(`(() => { const d = document.querySelector('${A}'); return { label: d.querySelector('.desktop-adopt-label').value, cmds: [...d.querySelectorAll('.desktop-adopt-vcmd')].map((i) => i.value), chips: [...d.querySelectorAll('.desktop-adopt-variant .desktop-adopt-chip')].map((s) => s.textContent), remove: d.querySelector('.desktop-adopt-remove').value, reinstall: d.querySelector('.desktop-adopt-reinstall').value, witness: d.querySelector('.desktop-adopt-witness').textContent, bad: d.querySelector('.desktop-adopt-witness').classList.contains('is-bad') }; })()`);
+  check('prefilled by the server: label, the command + its words as chips, both recipes, the witness line', !pre.bad && pre.label === 'JASP' && pre.cmds.join() === 'flatpak run org.jaspstats.JASP' && pre.chips.join('|') === 'flatpak|run|org.jaspstats.JASP' && pre.remove === 'flatpak uninstall --user -y org.jaspstats.JASP' && /^flatpak install --user -y .*org\.jaspstats\.JASP$/.test(pre.reinstall) && pre.witness === 'flatpak:org.jaspstats.JASP', pre);
   await shot('adopt');
-  const sp = SIB && SIB.answer && SIB.answer.prefill;
-  if (sp) check('the sibling\'s recorded prefill has the keys this dialog reads (label, launch[].exec/args, remove)', typeof sp.label === 'string' && Array.isArray(sp.launch) && sp.launch.every((v) => v.exec && Array.isArray(v.args)) && !!sp.remove && Array.isArray(sp.remove.args), sp);
-  else { skipped++; console.log('  ⊘ SKIP the sibling\'s fixture prefill is not recorded yet'); }
 
-  console.log('③ a bad_args answer lands under the variants; Add moves the card');
+  console.log('③ the server\'s refusal lands under the variants; Add (the REAL POST …/adopt) moves the card');
   await evalJs(`document.querySelector('${A} .desktop-adopt-add-variant').click(); true`);
-  await evalJs(`(() => { const r = [...document.querySelectorAll('${A} .desktop-adopt-variant')].pop(); r.querySelector('.desktop-adopt-vlabel').value = 'Debug'; const i = r.querySelector('.desktop-adopt-vcmd'); i.value = 'flatpak run --command=BAD org.jaspstats.JASP'; i.dispatchEvent(new Event('input')); return true; })()`);
+  await evalJs(`(() => { const r = [...document.querySelectorAll('${A} .desktop-adopt-variant')].pop(); r.querySelector('.desktop-adopt-vlabel').value = 'Debug'; const i = r.querySelector('.desktop-adopt-vcmd'); i.value = 'nosuchprog-vs-ui --debug'; i.dispatchEvent(new Event('input')); return true; })()`);
   await realClick(`${A} .desktop-adopt-go`);
-  check('the refusal is said under "Launch variants" (the dialog stays)', await waitFor(`document.querySelector('${A} [data-field="launch"] > .desktop-adopt-err')?.textContent === "stub: a variant's arguments were refused"`, 5000), await evalJs(`document.querySelector('${A}')?.innerText`).catch(() => null));
+  check('the server\'s bad_exec is said under "Launch variants" (the dialog stays)', await waitFor(`/nosuchprog-vs-ui does not resolve/.test(document.querySelector('${A} [data-field="launch"] > .desktop-adopt-err')?.textContent || '')`, 8000), await evalJs(`document.querySelector('${A}')?.innerText`).catch(() => null));
   await evalJs(`(() => { const i = [...document.querySelectorAll('${A} .desktop-adopt-vcmd')].pop(); i.value = "flatpak run --command='jasp --debug' org.jaspstats.JASP"; i.dispatchEvent(new Event('input')); return true; })()`);
   const chips2 = await evalJs(`[...[...document.querySelectorAll('${A} .desktop-adopt-variant')].pop().querySelectorAll('.desktop-adopt-chip')].map((s) => s.textContent)`);
   check('a quoted argument is ONE word (its chip)', chips2.join('|') === 'flatpak|run|--command=jasp --debug|org.jaspstats.JASP', chips2);
   await realClick(`${A} .desktop-adopt-go`);
-  check('Add closes the dialog', await waitFor(`!document.querySelector('${A}')`, 5000));
-  check('JASP leaves the outside group and is in Apps ONCE', await waitFor(`(() => { const c = (${cards}); return !c.seen.some((x) => x.label === 'JASP') && c.apps.filter((x) => x.label === 'JASP').length === 1; })()`, 5000), await evalJs(cards));
-  const adoptPost = (await evalJs('window.__reg.posts')).filter((x) => x.p === '/api/desktop/apps/adopt').pop();
-  check('the adopt POST carried the seenId, both variants as argv and the recipes', !!adoptPost && adoptPost.body.seenId === SEEN.id && adoptPost.body.launch.length === 2 && adoptPost.body.launch[1].args.join('|') === 'run|--command=jasp --debug|org.jaspstats.JASP' && adoptPost.body.remove.args.join(' ') === 'uninstall --user -y org.jaspstats.JASP', adoptPost);
-  check('the toast says so', await waitFor(`[...document.querySelectorAll('.toast, [class*="toast"]')].some((e) => e.textContent.includes('JASP is now in your Apps'))`, 4000));
+  check('Add closes the dialog', await waitFor(`!document.querySelector('${A}')`, 8000));
+  check('JASP leaves the outside group and is in Apps ONCE', await waitFor(`(() => { const c = (${cards}); return !c.seen.some((x) => x.label === 'JASP') && c.apps.filter((x) => x.label === 'JASP').length === 1; })()`, 15000), await evalJs(cards));
+  const ej = manifest().entries.find((e) => e.id === 'jasp');
+  check('the server recorded both variants as argv and the recipes', !!ej && ej.launch.length === 2 && ej.launch[1].args.join('|') === 'run|--command=jasp --debug|org.jaspstats.JASP' && ej.remove.args.join(' ') === 'uninstall --user -y org.jaspstats.JASP', ej);
+  check('the toast says so', await waitFor(toast('JASP is now in your Apps'), 4000));
 
-  console.log('④ Remove… shows the recipe; ok ⇒ the row leaves');
-  await realClick(`${D} .desktop-launch-card[data-app-id="reg.jasp"] ~ .desktop-launch-card-menu`);
-  await waitFor(`!!document.querySelector('.context-menu')`, 3000);
-  check('the adopted card\'s menu: its 2 variants + Remove…', (await menuRows()).join('|') === 'Open|Open · Debug|Remove…|Show command', await menuRows());
+  console.log('④ Remove… shows the recipe; ok ⇒ the REAL POST …/:id/remove ran it as the user, the card leaves');
+  await openMenu('app.jasp');
+  check('the adopted card\'s menu: its 2 variants + Remove…', (await ownRows()).join('|') === 'Open|Open · Debug|Remove…|Show command', await ownRows());
   await clickMenu('Remove…');
   check('the confirm shows the recipe verbatim', await waitFor(`[...document.querySelectorAll('.dialog-overlay')].some((o) => o.textContent.includes('This runs as you: flatpak uninstall --user -y org.jaspstats.JASP'))`, 4000));
-  await evalJs(`(() => { const o = [...document.querySelectorAll('.dialog-overlay')].pop(); o.querySelector('.btn-create').click(); return true; })()`);
-  check('ok ⇒ the row leaves Apps; the toast says "Removed"', await waitFor(`!(${cards}).apps.some((x) => x.id === 'reg.jasp') && [...document.querySelectorAll('.toast, [class*="toast"]')].some((e) => e.textContent.trim().endsWith('Removed') || e.textContent.includes('Removed'))`, 5000), await evalJs(cards));
+  await shot('remove');
+  await confirmOk();
+  check('ok ⇒ the card leaves Apps', await waitFor(`!(${cards}).apps.some((x) => x.id === 'app.jasp')`, 10000), await evalJs(cards));
+  const ran = fs.existsSync(path.join(fakeHome, 'uninstall-ran')) ? fs.readFileSync(path.join(fakeHome, 'uninstall-ran'), 'utf8').trim() : '';
+  check('the stub recipe RAN as the user, in the home (the real door)', ran === `uninstall --user -y org.jaspstats.JASP|${fakeHome}` && !fs.existsSync(path.join(fakeHome, '.local/share/flatpak/app/org.jaspstats.JASP')) && !manifest().entries.some((e) => e.id === 'jasp'), ran);
+  check('the toast names the outcome', await waitFor(`${toast('Removed')} || ${toast('Forgotten')}`, 5000));
 
-  console.log('⑤ phone 390: the long-press menu + the adopt sheet');
-  check('the phone dialog lists the witnessed group', await boot(390, 844, true));
+  console.log('⑤ Tool added WITHOUT a recipe ⇒ Forget; the program stays and is listed outside again');
+  const toolSeen = (await evalJs(cards)).seen.find((x) => x.label === 'Tool');
+  await realClick(`${D} .desktop-launch-card[data-app-id="${toolSeen.id}"] ~ .desktop-launch-card-adopt`);
+  await waitFor(`!!document.querySelector('${A} .desktop-adopt-vcmd') && !document.querySelector('${A} .desktop-adopt-go').disabled`, 8000);
+  check('Tool\'s prefill: its Exec, no recipe', await evalJs(`(() => { const d = document.querySelector('${A}'); return d.querySelector('.desktop-adopt-vcmd').value === ${JSON.stringify(TOOL)} && d.querySelector('.desktop-adopt-remove').value === ''; })()`));
+  await realClick(`${A} .desktop-adopt-go`);
+  check('Tool is in Apps', await waitFor(`!document.querySelector('${A}') && (${cards}).apps.some((x) => x.id === 'app.tool')`, 15000), await evalJs(cards));
+  await openMenu('app.tool');
+  check('a row without a recipe offers Forget (not Remove…)', (await ownRows()).join('|') === 'Forget|Show command', await ownRows());
+  await clickMenu('Forget');
+  await waitFor(`[...document.querySelectorAll('.dialog-overlay')].some((o) => o.textContent.includes('the program stays on this machine'))`, 4000);
+  await confirmOk();
+  check('Forget ⇒ Tool leaves Apps and the witness lists it outside VibeSpace again; the program stays', await waitFor(`(() => { const c = (${cards}); return !c.apps.some((x) => x.id === 'app.tool') && c.seen.some((x) => x.label === 'Tool'); })()`, 15000) && fs.existsSync(TOOL) && !manifest().entries.some((e) => e.id === 'tool'), await evalJs(cards));
+
+  console.log('⑥ the row changed outside VibeSpace: disabled, its reason said, its remove refused by name');
+  const broken = await evalJs(`(() => { const b = document.querySelector('${D} .desktop-launch-card[data-app-id="app.broken"]'); return b && { dis: b.classList.contains('is-unavailable'), sub: b.querySelector('.desktop-launch-card-sub')?.textContent }; })()`);
+  check('a DISABLED card: "This entry was changed outside VibeSpace and is not runnable: …"', !!broken && broken.dis && /This entry was changed outside VibeSpace and is not runnable: .*names sudo/.test(broken.sub), broken);
+  await openMenu('app.broken');
+  check('its menu offers Forget only (no Remove…, no variant)', (await ownRows()).join('|') === 'Forget|Show command', await ownRows());
+  await evalJs(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); true`);
+  const rr = await evalJs(`fetch('/api/desktop/apps/app.broken/remove', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(async (r) => ({ s: r.status, j: await r.json() }))`);
+  check('its remove is refused by name (needs_root), the entry stays, nothing ran', rr.s === 400 && rr.j.code === 'needs_root' && manifest().entries.some((e) => e.id === 'broken'), rr);
+
+  console.log('⑦ phone 390: the long-press menu + the adopt sheet');
+  check('the phone dialog lists the outside group', await boot(390, 844, true));
   check('no "Add…" button on a phone (the long press has it)', await evalJs(`(() => { const b = document.querySelector('${D} .desktop-launch-card-adopt'); return !!b && getComputedStyle(b).display === 'none'; })()`));
-  const at = await centerOf(`${D} .desktop-launch-card[data-app-id="${SEEN.id}"]`);
+  const toolId = (await evalJs(cards)).seen.find((x) => x.label === 'Tool').id;
+  const at = await centerOf(`${D} .desktop-launch-card[data-app-id="${toolId}"]`);
   await cdp('Input.synthesizeTapGesture', { x: Math.round(at.x), y: Math.round(at.y), duration: 1200, tapCount: 1, gestureSourceType: 'touch' });
   check('a long press opens the card\'s menu with Add to VibeSpace…', await waitFor(`[...document.querySelectorAll('.context-menu .context-menu-item')].some((e) => e.textContent.trim() === 'Add to VibeSpace…')`, 4000), await menuRows());
   await clickMenu('Add to VibeSpace…');

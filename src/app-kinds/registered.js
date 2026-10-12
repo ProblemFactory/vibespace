@@ -10,9 +10,10 @@ const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
 const ENV_RE = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
 const BARE_RE = /^[A-Za-z0-9._+-]{1,128}$/;
 const FLATPAK_ID_RE = /^[A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z0-9_-]+){2,}$/; // = src/app-witness.js FLATPAK_ID_RE
-const ROOT_WORDS = Object.freeze(['sudo', 'pkexec', 'doas', 'su', 'run0']);
+const ROOT_WORDS = Object.freeze(['sudo', 'pkexec', 'doas', 'su', 'run0', 'sudoedit']); // a recipe NAMING one is refused by its basename — not every road to root (docs)
 const VARIANTS_MAX = 8, ARGS_MAX = 32, ARG_MAX = 256, ENV_MAX = 8, ICON_MAX = 1024 * 1024;
 const CTRL_RE = /[\0-\x1f\x7f]/;
+const LABEL_BAD_RE = /[\p{Cf}\p{Cc}\u2028\u2029]/u; // rel254 verify F10: a label / variant name holds no bidi control, zero-width character or newline
 const named = (code, error) => ({ ok: false, code, error });
 const slugOf = (s) => String(s || '').toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 32) || 'app';
 const base = (x) => String(x || '').split('/').pop();
@@ -34,7 +35,7 @@ function argvOf(x, what) {
 function validateRegistered(entry, { resolve = () => null, iconBytes = () => null, home = '', engineIds = [], entries = [] } = {}) {
   const e = entry && typeof entry === 'object' ? entry : {};
   const label = typeof e.label === 'string' ? e.label.trim() : '';
-  if (!label || label.length > 80 || CTRL_RE.test(label)) return named('bad_label', 'label must be 1–80 characters on one line');
+  if (!label || label.length > 80 || LABEL_BAD_RE.test(label)) return named('bad_label', 'label must be 1–80 characters on one line, without invisible characters');
   if (!Array.isArray(e.launch) || !e.launch.length) return named('bad_args', 'launch must list 1–8 variants');
   if (e.launch.length > VARIANTS_MAX) return named('too_many_variants', `at most ${VARIANTS_MAX} launch variants (${e.launch.length} given)`);
   const launch = [], ids = new Set();
@@ -44,7 +45,7 @@ function validateRegistered(entry, { resolve = () => null, iconBytes = () => nul
     if (!SLUG_RE.test(id) || ids.has(id)) return named('bad_args', `variant ${i + 1}: id must be a unique slug of ≤ 32 characters`);
     ids.add(id);
     const vl = v.label == null || v.label === '' ? (i ? id : 'Open') : String(v.label).trim();
-    if (!vl || vl.length > 40 || CTRL_RE.test(vl)) return named('bad_label', `variant ${i + 1}: label must be 1–40 characters`);
+    if (!vl || vl.length > 40 || LABEL_BAD_RE.test(vl)) return named('bad_label', `variant ${i + 1}: label must be 1–40 characters, without invisible characters`);
     const a = argvOf(v, `variant ${id}`);
     if (!a.ok) return a;
     if (namesRoot([a.exec, ...a.args])) return named('needs_root', `variant ${id} names ${a.exec} — a registered app runs as you, never as root`);
@@ -95,18 +96,29 @@ function flatpakIdOf(v) {
   if (!v || base(v.exec) !== 'flatpak' || !Array.isArray(v.args) || v.args[0] !== 'run') return null;
   return v.args.slice(1).find((a) => !a.startsWith('-') && FLATPAK_ID_RE.test(a)) || null;
 }
-/** THE WITNESS-MATCH RULE. `entry` = a validated declaration, `seen` = the witnessed rows (src/app-witness.js; `path` = the
- *  resolved exec where the registry knows it). → { match: true, seen, witness } (recorded directly) | { match: false }. */
-function witnessMatch(entry, seen = []) {
-  const v = entry && entry.launch && entry.launch[0];
-  if (!v) return { match: false };
-  const fp = flatpakIdOf(v);
-  const same = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
+const sameWords = (a, b) => Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((x, i) => x === b[i]);
+const sameRecipe = (x, y) => !!x && !!y && x.exec === y.exec && sameWords(x.args || [], y.args || []);
+/** THE WITNESS-MATCH RULE (tightened by rel254 verify F2 — "nothing new becomes launchable without your click" is TRUE):
+ *  recorded directly ONLY when EVERY launch variant is exactly the witnessed argv (a Flatpak: its exec resolves to this
+ *  machine's `flatpak` — `flatpakPath`, F8 — and args === ['run', appId]; a desktop entry: exec + args === its Exec), NO
+ *  variant carries env or cwd, and the remove / reinstall recipes are absent or exactly the witness's own (a Flatpak's
+ *  `flatpak uninstall|install --user -y …`; a desktop entry has none). Anything else is ONE For-you click. `entry` = a
+ *  validated declaration (each variant's resolved `path`), `seen` = the witnessed rows. → {match, seen, witness} | {match:false}. */
+function witnessMatch(entry, seen = [], { flatpakPath = null } = {}) {
+  const vs = entry && Array.isArray(entry.launch) ? entry.launch : [];
+  if (!vs.length || vs.some((v) => !v || v.env != null || v.cwd != null)) return { match: false };
+  const fp = flatpakIdOf(vs[0]);
   for (const r of seen || []) {
     if (!r || r.witnessed !== true) continue;
-    if (fp && r.flatpak === fp && same(v.args, ['run', fp])) return { match: true, seen: r, witness: `flatpak:${fp}` };
+    if (fp) {
+      if (r.flatpak !== fp || !flatpakPath || !vs.every((v) => base(v.exec) === 'flatpak' && v.path === flatpakPath && sameWords(v.args, ['run', fp]))) continue;
+      const own = adoptPrefill(r); // the witness's own canonical recipes (a system install has none)
+      if ((entry.remove != null && !sameRecipe(entry.remove, own.remove)) || (entry.reinstall != null && !sameRecipe(entry.reinstall, own.reinstall))) continue;
+      return { match: true, seen: r, witness: `flatpak:${fp}` };
+    }
     const rp = String(r.exec || '').startsWith('/') ? r.exec : r.path || null;
-    if (!fp && rp && (rp === v.path || rp === v.exec) && same(v.args, r.args || [])) return { match: true, seen: r, witness: r.desktop ? `desktop:${r.desktop}` : null };
+    if (!rp || r.flatpak || entry.remove != null || entry.reinstall != null) continue;
+    if (vs.every((v) => !flatpakIdOf(v) && (rp === v.path || rp === v.exec) && sameWords(v.args, r.args || []))) return { match: true, seen: r, witness: r.desktop ? `desktop:${r.desktop}` : null };
   }
   return { match: false };
 }
@@ -129,27 +141,40 @@ function record(e, { isObj, str, num }) {
   return { launch, ...(rec(e.remove) ? { remove: rec(e.remove) } : {}), ...(rec(e.reinstall) ? { reinstall: rec(e.reinstall) } : {}), ...(typeof e.icon === 'string' && e.icon.startsWith('/') ? { icon: e.icon } : {}), witness: typeof e.witness === 'string' ? e.witness.slice(0, 4096) : null,
     registered: { who: by.kind === 'agent' ? 'agent' : 'user', ...(str(e.registered && e.registered.session, 120) ? { session: str(e.registered.session, 120) } : {}), at: num(e.registered && e.registered.at) } };
 }
+/** rel254 verify F4 — the manifest is the USER's file and is what runs: a stored entry's shape is checked again at every
+ *  READ (the same checks as a declaration: root words by basename, control characters, the exec form, args / env / cwd
+ *  shape). → null | {code: 'needs_root' | 'changed_outside', error}. A failing entry is never launched or removed. */
+function shapeError(e) {
+  const x = e && typeof e === 'object' ? e : {};
+  const v = validateRegistered({ label: x.label, launch: x.launch, remove: x.remove, reinstall: x.reinstall }, { resolve: (p) => p });
+  return v.ok ? null : { code: v.code === 'needs_root' ? 'needs_root' : 'changed_outside', error: v.error };
+}
 /** The source word of its row: its witness's (the chip it kept), else 'registered'. */
 const sourceOf = (e, home = '') => (!e.witness ? 'registered' : e.witness.startsWith('flatpak:') ? 'flatpak-user' : home && e.witness.startsWith(`desktop:${home}/`) ? 'desktop-user' : 'desktop-system');
 /** THE row of an entry (variants[0] = the default; `launch` = every variant, the launch door picks one by id). */
 function rowOf(e, { home = '' } = {}) {
   const v = e.launch[0];
+  const bad = shapeError(e); // F4: shown DISABLED with its reason, never launched or removed (Forget stays: it runs nothing)
   return { id: `app.${e.id}`, label: e.label || e.id, exec: v.exec, args: [...v.args], ...(v.env ? { env: { ...v.env } } : {}), ...(v.cwd ? { cwd: v.cwd } : {}), category: 'app', app: e.id,
-    registered: true, removable: true, source: sourceOf(e, home), launch: e.launch.map((x) => ({ id: x.id, label: x.label, exec: x.exec, args: [...x.args], ...(x.env ? { env: { ...x.env } } : {}), ...(x.cwd ? { cwd: x.cwd } : {}) })),
+    registered: true, removable: !!e.remove && !bad, source: sourceOf(e, home), ...(bad ? { changed: bad.error, changedCode: bad.code } : {}), launch: e.launch.map((x) => ({ id: x.id, label: x.label, exec: x.exec, args: [...x.args], ...(x.env ? { env: { ...x.env } } : {}), ...(x.cwd ? { cwd: x.cwd } : {}) })),
     ...(e.icon ? { icon: e.icon } : {}), ...(e.witness && e.witness.startsWith('desktop:') ? { desktop: e.witness.slice(8) } : {}), ...(flatpakIdOf(v) ? { flatpak: flatpakIdOf(v) } : {}) };
 }
 const removeArgvOf = (e) => (e.remove ? [e.remove.exec, ...e.remove.args] : null);
 const reinstallArgvOf = (e) => (e.reinstall ? [e.reinstall.exec, ...e.reinstall.args] : null);
 /** The lines a person reads for a declaration (the For-you item, the card's Details): every argv verbatim, the resolved path. */
-function commandLines(e, join) {
-  const out = e.launch.map((v, i) => `${i ? v.label : `${v.label} (default)`}: ${join([v.exec, ...v.args])}${v.path && v.path !== v.exec ? `  [${v.path}]` : ''}`);
-  if (e.remove) out.push(`remove: ${join(removeArgvOf(e))}`);
-  if (e.reinstall) out.push(`reinstall: ${join(reinstallArgvOf(e))}`);
+/** A variant as it RUNS: its own env, else the default's (desktop-apps.js — a variant without env inherits it); its cwd. */
+const asRun = (e, v, i) => ({ exec: v.exec, args: v.args, ...(v.env ? { env: v.env } : i && e.launch[0].env ? { env: e.launch[0].env } : {}), ...(v.cwd ? { cwd: v.cwd } : {}) });
+/** The lines a person reads for a declaration (the For-you item, the card's Details): every argv WITH its env and cwd
+ *  (rel254 verify F3 — nothing that runs is unseen), the resolved path. `line` = src/argv-words.js commandLine. */
+function commandLines(e, line) {
+  const out = e.launch.map((v, i) => `${i ? v.label : `${v.label} (default)`}: ${line(asRun(e, v, i))}${v.path && v.path !== v.exec ? `  [${v.path}]` : ''}`);
+  if (e.remove) out.push(`remove: ${line(e.remove)}`);
+  if (e.reinstall) out.push(`reinstall: ${line(e.reinstall)}`);
   return out;
 }
 const requestOf = (x) => (x && x.entry && typeof x.entry === 'object' ? { ok: true, request: { kind: 'registered', entry: x.entry } } : { ok: false, code: 'bad-request', error: 'a registration names its entry (label, launch, …)' });
 const goneWords = (e) => (e.reinstall ? `reinstall: ${reinstallArgvOf(e).join(' ')}` : 'its program is gone — no reinstall recipe was registered');
 
-module.exports = Object.freeze({ id: 'registered', entry: 'home', plan: true, request: true, agent: true, card: 'registered', keeps: 'home', from: 'none', word: 'registered app', doing: 'registering',
-  record, requestOf, rowOf, removeArgvOf, reinstallArgvOf, goneWords, commandLines, validateRegistered, witnessMatch, adoptPrefill, flatpakIdOf, slugOf, sourceOf,
+module.exports = Object.freeze({ id: 'registered', entry: 'home', plan: true, request: true, agent: true, card: 'registered', keeps: 'home', from: 'none', word: 'registered app', doing: 'registering', forgets: true,
+  record, requestOf, rowOf, removeArgvOf, reinstallArgvOf, goneWords, commandLines, validateRegistered, witnessMatch, adoptPrefill, flatpakIdOf, slugOf, sourceOf, shapeError, asRun,
   ROOT_WORDS, VARIANTS_MAX, ICON_MAX });

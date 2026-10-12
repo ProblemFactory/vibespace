@@ -25,6 +25,8 @@
  *   cliWord    the word `vibespace-app add --kind` takes for it (a home kind the agent installs itself, then records)
  *   addArgv / removeArgv   the argv prefix (+ the tool's name) that installs / removes a recorded home tool as the user
  *              (`~/.local` = the user's ~/.local)
+ *   forgets    the owner's Forget may drop its record and leave its program: the program lives outside VibeSpace's own dirs
+ *              (the witness lists it again) — an unpacked / user-tool kind is REMOVED, never forgotten (int255, verify r2 N1)
  * The kind's OWN behaviour (lane dc-app-kinds — the core asks these cells, never an id):
  *   planner(c)   THE plan from apt's / the file's words (src/app-serve.js plan() hands `c`); `plansWith` = another row's
  *                planner + request words (adopt plans like apt)

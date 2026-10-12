@@ -10,7 +10,14 @@ const ID_RE = /^[A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z0-9_-]+){2,}$/; // = src/app-
 const REMOTE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const SEARCH_COLUMNS = 'application,name,description';
 const SEARCH_BUDGET_MS = 5000;
-const appIdOk = (x) => typeof x === 'string' && x.length <= 255 && ID_RE.test(x);
+/** rel254 verify F7: `flatpak install` reads a `.flatpakref` / `.flatpak` / a path as a FILE (a new remote, a bundle) —
+ *  the target is a bare application id or nothing is spawned (`bad_target` by name; the CLI runs the same check). */
+const BUNDLE_RE = /\.flatpak(ref|repo)?$/i;
+function targetVerdict(x) {
+  if (typeof x !== 'string' || !x || x.length > 255 || x.startsWith('-') || x.includes('/') || BUNDLE_RE.test(x) || !ID_RE.test(x)) return { ok: false, code: 'bad_target', error: `${JSON.stringify(String(x == null ? '' : x).slice(0, 80))} is not a bare Flatpak application id (org.example.App) — no path, no .flatpakref / .flatpak file` };
+  return { ok: true };
+}
+const appIdOk = (x) => targetVerdict(x).ok;
 const remoteOk = (x) => typeof x === 'string' && REMOTE_RE.test(x);
 /** Where flatpak exports a user install's desktop file / icons, and where the app itself lives (all under the user's home). */
 const exportedDesktop = (home, appId) => `${home}/.local/share/flatpak/exports/share/applications/${appId}.desktop`;
@@ -34,10 +41,12 @@ function parseSearch(text, max = 30) {
 }
 /** THE row of an entry: the exported desktop file's (`parsed` = the caller's parseDesktopFile row) when it runs `flatpak run …
  *  <appId>`, else `flatpak run <appId>`. A Flatpak row is removable and says where it came from (`source`). */
-function rowOf(e, parsed = null) {
+function rowOf(e, parsed = null, { execOk = true } = {}) {
   const base = { id: `app.${e.id}`, label: e.label || e.appId, exec: 'flatpak', args: ['run', e.appId], category: 'app', app: e.id, flatpak: e.appId, removable: true, source: 'flatpak-user' };
   if (parsed && /(^|\/)flatpak$/.test(String(parsed.exec || '')) && Array.isArray(parsed.args) && parsed.args[0] === 'run' && parsed.args.includes(e.appId)) {
-    return { ...base, label: parsed.label || base.label, exec: parsed.exec, args: [...parsed.args], ...(parsed.icon ? { icon: parsed.icon } : {}), ...(parsed.desktop ? { desktop: parsed.desktop } : {}) };
+    // F8: the exported file is the user's — an exec that is not THIS machine's flatpak (`execOk`, judged by the caller) is shown disabled
+    return { ...base, label: parsed.label || base.label, exec: parsed.exec, args: [...parsed.args], ...(parsed.icon ? { icon: parsed.icon } : {}), ...(parsed.desktop ? { desktop: parsed.desktop } : {}),
+      ...(execOk ? {} : { removable: false, changed: `its desktop file runs ${parsed.exec}, which is not this machine's flatpak`, changedCode: 'changed_outside' }) };
   }
   return base;
 }
@@ -48,7 +57,7 @@ const record = (e) => (appIdOk(e.appId) ? { appId: e.appId, remote: remoteOk(e.r
 const requestOf = () => ({ ok: false, code: 'bad-request', error: 'a Flatpak is installed as you, then recorded: vibespace-app add --kind flatpak <appId> --why "…"' });
 const goneWords = (e) => `reinstall: ${reinstallArgvOf(e).join(' ')}`;
 
-module.exports = Object.freeze({ id: 'flatpak', entry: 'home', agent: true, cliWord: 'flatpak', card: 'flatpak', keeps: 'home', from: 'none', word: 'Flatpak',
+module.exports = Object.freeze({ id: 'flatpak', entry: 'home', agent: true, cliWord: 'flatpak', card: 'flatpak', keeps: 'home', from: 'none', word: 'Flatpak', forgets: true,
   addArgv: Object.freeze(['flatpak', 'install', '--user', '-y']), removeArgv: Object.freeze(['flatpak', 'uninstall', '--user', '-y']), remoteFlag: true,
-  request: true, requestOf, record, rowOf, removeArgvOf, reinstallArgvOf, installCmd, searchArgv, parseSearch, goneWords, exportedDesktop, exportedIcons, appDir, appIdOk, remoteOk,
+  request: true, requestOf, record, rowOf, removeArgvOf, reinstallArgvOf, installCmd, searchArgv, parseSearch, goneWords, exportedDesktop, exportedIcons, appDir, appIdOk, remoteOk, targetVerdict,
   ID_RE, SEARCH_COLUMNS, SEARCH_BUDGET_MS });

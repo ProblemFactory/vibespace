@@ -87,7 +87,7 @@ import { wireAppPrefs, appPrefs, appPrefsReady, onAppPrefs, saveAppPrefs } from 
 import { mountLaunchShareRow, launchKeyOf } from './window-share.js';
 import { showMachineDesktopDialog } from './machine-desktop.js'; // design 014 D1: a Windows / macOS machine's whole desktop
 import { OFFICE_MODULES, installSpecFor, FONTS_ID } from '../office-open.js'; // §7.9: the LibreOffice table (PURE)
-import { splitWords, joinWords } from '../argv-words.js'; // lane app-register-ui: a variant's / a recipe's ONE line ↔ its words (PURE, shared with the server)
+import { splitWords, joinWords, commandLine } from '../argv-words.js'; // lane app-register-ui: a variant's / a recipe's ONE line ↔ its words (PURE, shared with the server)
 import { installPlace } from '../app-witness.js'; // lane apps-launcher-witness: THE install-place words (PURE, shared with the engine's outcome)
 import { SHOW_SYSTEM_KEY } from '../app-witness.js'; // lane apps-dialog-fast: the person's "Show them" (user state)
 import { appPlanBlock, appSummaryBlock, appRefusalText, appDialogTitle, appGoLabel, appPlanNote, appDoneText, renderAppsSection, openDebInstall, openAppSearch, openAgentHelp, appsBannerModel } from './app-install-dialog.js'; // Layer 0 apps: THE install dialog shows an app's plan too
@@ -215,6 +215,7 @@ export function witnessSourceText(source) {
 }
 /** A witnessed card's second line: its command as written (shown, never trusted as an engine row) — or that it is gone. */
 export function witnessSubText(row) {
+  if (row.changed) return t('This entry was changed outside VibeSpace and is not runnable: {why}', { why: row.changed }); // rel254 verify F4: shown, never run
   const cmd = [row.exec, ...(row.args || [])].join(' ');
   return row.available ? cmd : t('Its program is gone: {cmd}', { cmd });
 }
@@ -235,6 +236,13 @@ export function cardMenuRowLabel(m) {
 }
 /** The command a recipe / a variant runs, as ONE line read back to the same words (never hidden, never re-quoted twice). */
 export function recipeLine(rec) { return rec && rec.exec ? joinWords([rec.exec, ...(Array.isArray(rec.args) ? rec.args : [])]) : ''; }
+/** rel254 verify F3: what a row / a variant RUNS, as a person reads it — `env K=V …` before, `(in <cwd>)` after, every
+ *  invisible character shown (src/argv-words.js commandLine). A variant without its own env inherits the row's (the default's). */
+export function runLine(row, variant = null) {
+  const r = row || {};
+  const v = variant || r;
+  return v && v.exec ? commandLine({ exec: v.exec, args: v.args || [], ...(v.env ? { env: v.env } : variant && r.env ? { env: r.env } : {}), ...(v.cwd ? { cwd: v.cwd } : {}) }) : '';
+}
 /** After Remove… answered ok: the program is gone — or only the entry is (the witness lists the program again). */
 export function removedToastText(stillListed) { return stillListed ? t('Forgotten — the program is still on the machine') : t('Removed'); }
 /** An adopt refusal lands under the field it concerns (the answer's own `field` when it names one, else by its code). */
@@ -247,7 +255,7 @@ export function adoptErrorField(r) {
 /** A variant's / a recipe's typed line → `{ok, argv}` or the refusal said in words (where the line broke). */
 export function argvLineVerdict(line) {
   const v = splitWords(line);
-  if (!v.ok) return { ok: false, code: 'bad_args', error: t('This line cannot be read as a command near character {n} — quote | ; & > < $ and backticks, and close every quote', { n: v.at + 1 }) };
+  if (!v.ok) return { ok: false, code: 'bad_args', at: v.at, error: t('This line cannot be read as a command near character {n} — quote | ; & > < $ and backticks, and close every quote', { n: v.at + 1 }) };
   return v;
 }
 /** The filter box: a card matches when every word is in its name, its command or its flatpak id. PURE. */
@@ -844,7 +852,8 @@ export async function showLaunchDialog(app, opts = {}) {
   const cardMenuItems = (row) => {
     const m = doc ? { head: [], tail: [] } : cardMenuModel(row);
     const off = !!listError || !data?.availability?.backend || launching.has(row.id);
-    const item = (x) => ({ label: cardMenuRowLabel(x), disabled: x.kind === 'variant' && off, action: () => cardMenuAct(row, x) });
+    // rel254 verify F3: a variant row / Show command carries what it RUNS (env, argv, cwd) as its tooltip; a changed row runs no variant
+    const item = (x) => ({ label: cardMenuRowLabel(x), disabled: x.kind === 'variant' && (off || !!row.changed), ...(x.kind === 'variant' ? { title: runLine(row, (row.launch || []).find((v) => String(v.id) === x.id) || null) } : x.kind === 'command' ? { title: runLine(row) } : {}), action: () => cardMenuAct(row, x) });
     return { head: m.head.length ? [...m.head.map(item), { separator: true }] : [], tail: m.tail.length ? [{ separator: true }, ...m.tail.map(item)] : [] };
   };
   const cardMenuAct = async (row, x) => {
@@ -854,7 +863,7 @@ export async function showLaunchDialog(app, opts = {}) {
       if (!r) { launching.delete(row.id); render(); }
     } else if (x.kind === 'adopt') showAdoptDialog(row, { host, onDone: () => { if (overlay.isConnected) refresh(); } });
     else if (x.kind === 'remove' || x.kind === 'forget') removeRegistered(row, { forget: x.kind === 'forget', onDone: async () => { if (!overlay.isConnected) return null; await refresh(); return data; } });
-    else { const ok = await copyText(recipeLine(row)); showToast(ok === false ? recipeLine(row) : t('Command copied: {cmd}', { cmd: recipeLine(row) }), ok === false ? { type: 'error' } : undefined); }
+    else { const line = runLine(row); const ok = await copyText(line); showToast(ok === false ? line : t('Command copied: {cmd}', { cmd: line }), ok === false ? { type: 'error' } : undefined); } // F3: with its env / cwd
   };
   const cardMenuControl = (row) => {
     const c = document.createElement('button'); c.type = 'button'; c.className = 'desktop-launch-card-menu';

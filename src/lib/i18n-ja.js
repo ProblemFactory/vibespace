@@ -8276,6 +8276,7 @@ export default {
   "Desktop entry · system": "デスクトップエントリ · システム",
   "Desktop entry · yours": "デスクトップエントリ · あなたの",
   "Its program is gone: {cmd}": "プログラムが見つかりません：{cmd}",
+  "This entry was changed outside VibeSpace and is not runnable: {why}": "この項目は VibeSpace の外で変更されたため実行できません：{why}",
   "Filter apps": "アプリを絞り込む",
   "Installed outside VibeSpace ({n})": "VibeSpace 外でインストール済み（{n}）",
   // lane app-register-ui: Add to VibeSpace…, launch variants, Remove… / Forget, a registration card

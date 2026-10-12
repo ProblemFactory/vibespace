@@ -8277,6 +8277,7 @@ export default {
   "Desktop entry · system": "桌面条目 · 系统",
   "Desktop entry · yours": "桌面条目 · 你的",
   "Its program is gone: {cmd}": "它的程序已不在：{cmd}",
+  "This entry was changed outside VibeSpace and is not runnable: {why}": "这一项在 VibeSpace 之外被改过，不能运行：{why}",
   "Filter apps": "筛选应用",
   "Installed outside VibeSpace ({n})": "在 VibeSpace 之外安装的（{n}）",
   // lane app-register-ui: Add to VibeSpace…, launch variants, Remove… / Forget, a registration card

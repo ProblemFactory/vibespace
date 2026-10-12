@@ -118,7 +118,11 @@ function witnessRows({ flatpaks = [], desktops = [], catalog = [], validate = nu
     if (engineDesktops.has(d.path)) continue;
     const w = desktopWitness(d.text, { path: d.path, scope: d.scope, validate, parse });
     if (!w.ok || (w.row.flatpak && (fps.has(w.row.flatpak) || engineFlatpaks.has(w.row.flatpak))) || engineExecs.has(execKey(w.row))) continue;
-    if (w.row.source === 'desktop-system' && !(outside && owners && outside.has(owners[d.path]))) w.row.distro = true;
+    // rel254 verify F6: a system entry dpkg owns NOTHING of (hand-copied by root, a vendor script) is the clearest "outside the
+    // base" — LISTED; `owners` null = dpkg did not answer (never read as "unowned")
+    const owner = owners ? owners[d.path] : undefined;
+    if (w.row.source === 'desktop-system' && owners && owner == null) w.row.unowned = true;
+    else if (w.row.source === 'desktop-system' && !(outside && owner != null && outside.has(owner))) w.row.distro = true;
     take(w.row);
   }
   const rank = (r) => (r.distro ? 2 : /-user$/.test(r.source) ? 0 : 1); // what you (or an agent as you) installed first, then the system's, the distro's last

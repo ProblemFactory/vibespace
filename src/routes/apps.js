@@ -296,8 +296,8 @@ router.post('/api/agent/apps/user-kind', async (req, res) => {
 function argvLines(b) {
   const one = (x, what) => {
     if (!x || typeof x !== 'object') return { ok: true, v: x };
-    if (typeof x.line === 'string') { const r = AWD.splitWords(x.line); if (!r.ok || !r.argv.length) return { ok: false, error: `${what}: ${r.ok ? 'an empty line' : `${r.error} (at ${r.at})`}` }; const { line, ...rest } = x; void line; return { ok: true, v: { ...rest, exec: r.argv[0], args: r.argv.slice(1) } }; }
-    if (typeof x.args === 'string') { const r = AWD.splitWords(x.args); if (!r.ok) return { ok: false, error: `${what}: ${r.error} (at ${r.at})` }; return { ok: true, v: { ...x, args: r.argv } }; }
+    if (typeof x.line === 'string') { const r = AWD.splitWords(x.line); if (!r.ok || !r.argv.length) return { ok: false, error: `${what}: ${r.ok ? 'an empty line' : r.error}` }; /* F9: the refused character named */ const { line, ...rest } = x; void line; return { ok: true, v: { ...rest, exec: r.argv[0], args: r.argv.slice(1) } }; }
+    if (typeof x.args === 'string') { const r = AWD.splitWords(x.args); if (!r.ok) return { ok: false, error: `${what}: ${r.error}` }; return { ok: true, v: { ...x, args: r.argv } }; }
     return { ok: true, v: x };
   };
   const launch = [];
@@ -313,11 +313,12 @@ router.post('/api/agent/apps/register', async (req, res) => {
   const g = agentGate(req, res); if (!g) return;
   if (g.who.borrowed) return fail(res, { code: 'no_conversation', message: g.who.borrowed });
   const b = req.body || {};
+  const host = agentHost(req, g.who); if (!LOCAL.has(host) && !HOST_RE.test(host)) return fail(res, { code: 'bad-request', message: 'bad host' }); // rel254 verify: validated like the GET
   const lines = argvLines(b);
   if (!lines.ok) return fail(res, { code: 'bad_args', message: lines.error });
   const entry = { label: b.label, launch: lines.launch, ...(lines.remove != null ? { remove: lines.remove } : {}), ...(lines.reinstall != null ? { reinstall: lines.reinstall } : {}), ...(b.icon != null ? { icon: b.icon } : {}) };
   try {
-    const r = await g.engine.register({ host: agentHost(req, g.who), entry, why: String(b.why || '').slice(0, 500), by: { kind: 'agent', sessionId: g.who.sessionId, conversation: g.who.conversation, name: g.who.name, sessionKey: g.who.sessionKey } });
+    const r = await g.engine.register({ host, entry, why: String(b.why || '').slice(0, 500), by: { kind: 'agent', sessionId: g.who.sessionId, conversation: g.who.conversation, name: g.who.name, sessionKey: g.who.sessionKey } });
     res.json({ ...r, place: AW.installPlace({ hostId: r.host }) });
   } catch (e) { fail(res, e); }
 });

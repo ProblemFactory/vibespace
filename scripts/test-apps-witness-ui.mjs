@@ -19,7 +19,8 @@
 //   ⓪ lane apps-dialog-fast (owner 2026-10-11: "打开App界面很卡"): the walk is SLOW (the stub's `list` sleeps 3 s) and due
 //      (a new entry in the user's directory) — the catalog paints ≤ 300 ms after the press, the group says "listing…",
 //      then the rows arrive by the broadcast and patch in place (the same card nodes, the filter kept)
-//   ⑥ the distro's own entries (a stub `dpkg` owns none of them) are not listed — "n system entries not shown — Show
+//   ⑥ the distro's own entries (a stub `dpkg` owns every one of them — int255: a system entry dpkg owns NOTHING of is hand-copied
+//      and LISTED since rel254 verify F6, so the old "owns none" stub made ⑥ skip silently) are not listed — "n system entries not shown — Show
 //      them" reveals them, remembered in the user state
 // SKIPs by name: no chrome / no dtach / no xpra (③ only); ⑥ with no system .desktop entry on this machine. ~40 s.
 import { execSync, spawn, spawnSync } from 'node:child_process';
@@ -63,7 +64,9 @@ esac
 exit 1
 `, { mode: 0o755 });
 fs.writeFileSync(path.join(stubDir, 'mytool'), '#!/bin/sh\nexec sleep 60\n', { mode: 0o755 });
-fs.writeFileSync(path.join(stubDir, 'dpkg'), '#!/bin/sh\nexit 1\n', { mode: 0o755 }); // ⑥: owns no system entry (the real dpkg is never asked)
+// ⑥: `dpkg -S <path>…` — a distro package owns every system entry asked about (the real dpkg is never asked); no drift is known
+// in this HOME, so each one is the distro's (int255: "owns none" now means hand-copied ⇒ listed, rel254 verify F6)
+fs.writeFileSync(path.join(stubDir, 'dpkg'), '#!/bin/sh\n[ "$1" = -S ] || exit 1\nshift\nfor p in "$@"; do echo "distro-desktop: $p"; done\n', { mode: 0o755 });
 fs.writeFileSync(path.join(stubDir, 'slow'), '3'); // ⓪: every `flatpak list` takes 3 s
 const apps = path.join(fakeHome, '.local', 'share', 'applications'); fs.mkdirSync(apps, { recursive: true });
 fs.writeFileSync(path.join(apps, 'my-tool.desktop'), `[Desktop Entry]\nType=Application\nName=My Witness Tool\nExec=${path.join(stubDir, 'mytool')} %F\nCategories=Utility;\n`);
@@ -176,6 +179,9 @@ try {
   console.log('⑥ the distro\'s own entries wait behind "Show them"');
   const sysN = await evalJs(`(async () => { const r = await (await fetch('/api/desktop/apps')).json(); return (r.registry || []).filter((x) => x.witnessed && x.distro).length; })()`);
   const more = `(() => { const d = document.querySelector('${D}'); return { shown: !d.querySelector('.desktop-launch-seen-more').hidden, text: d.querySelector('.desktop-launch-seen-more-text').textContent, btn: d.querySelector('.desktop-launch-seen-show').textContent, n: d.querySelectorAll('.desktop-launch-seen .desktop-launch-card-wrap').length, sys: [...d.querySelectorAll('.desktop-launch-seen .desktop-launch-chip')].filter((c) => /system/i.test(c.textContent)).length }; })()`;
+  // int255: never vacuous — a machine whose system entries are LISTED but none waits behind the line is a red, not a skip
+  const sysListed = await evalJs(`(async () => { const r = await (await fetch('/api/desktop/apps')).json(); return (r.registry || []).filter((x) => x.witnessed && x.source === 'desktop-system' && !x.distro).length; })()`);
+  check(`the stub dpkg owns every system entry, so none is listed as hand-copied (${sysListed} listed, ${sysN} hidden)`, sysListed === 0, sysListed);
   if (!sysN) { skipped++; console.log('  ⊘ SKIP no system .desktop entry on this machine'); } else {
     const m0 = await evalJs(more);
     check(`no system entry is listed; the head says "${sysN} system entries not shown — Show them"`, m0.shown && m0.sys === 0 && m0.text === `${sysN} system entries not shown` && m0.btn === 'Show them', m0);

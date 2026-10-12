@@ -563,6 +563,24 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
     bump(host);
     return rec;
   }
+  /** rel254 verify F1 — the OWNER's Remove… on a registered / Flatpak card: the entry's remove recipe runs AS THE USER through
+   *  the SAME door as an accepted remove (app-serve removeHome: sanitised env, cwd = home, ≤ 120 s, output ≤ 8 KiB), then
+   *  its row leaves the index. → {ok, removed, output} | {ok:false, code: no_recipe|needs_root|changed_outside|failed, error, output}. */
+  async function ownerRemove(host, entryId) {
+    const r = await access.call(host, 'app-remove', { entryId, home: true, owner: true });
+    lastStatus.delete(host || 'local'); bump(host);
+    if (r && r.failed) return { ok: false, code: r.failed.code, error: r.failed.error, output: String(r.output || '') };
+    log.log?.(`[apps] the owner removed ${entryId} on ${host || 'local'}`);
+    return { ok: true, removed: r.removed, output: String(r.output || '') };
+  }
+  /** …and Forget: the entry leaves the index, the program stays (the witness lists it again). Nothing runs. Only a kind whose
+   *  row `forgets` (registered / Flatpak — int255, verify r2 N1); any other ⇒ {ok:false, code: not_forgettable, error}. */
+  async function ownerForget(host, entryId) {
+    const r = await access.call(host, 'app-forget', { entryId, home: true });
+    lastStatus.delete(host || 'local'); bump(host);
+    if (r && r.failed) return { ok: false, code: r.failed.code, error: r.failed.error };
+    return { ok: true, forgot: r.forgot };
+  }
   /** An agent's own proposals (its conversation's). */
   function proposalsOf(conversation) { return store.proposals.filter((p) => p.by && p.by.conversation === conversation).map((p) => ({ ...view(p), text: outcomeText(p) })); }
 
@@ -647,7 +665,7 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
 
   /** The staged icon of a proposal (the card's picture before anything is installed) → {host, name} | null. */
   const proposalIcon = (id) => { const p = get(id); const n = p && p.card && p.card.app && p.card.app.icon; return n && !TERMINAL.has(p.state) ? { host: p.host, name: n } : null; };
-  return { plan, planProposal, search, status, propose, register, adopt, recordUserKind, run, approve, card: (id) => { const p = get(id); return p ? cardViewOf(p) : null; }, reject, withdraw, sweep, proposalIcon, wait, proposalsOf, get: (id) => { const p = get(id); return p ? view(p) : null; }, outcomeText: (id) => { const p = get(id); return p ? outcomeText(p) : null; }, afterListen, decorate, isReplaying, addHelper, dropHelper, helperIds, helpers: () => store.helpers.slice(), planner, storeFile: file };
+  return { plan, planProposal, search, status, propose, register, adopt, ownerRemove, ownerForget, recordUserKind, run, approve, card: (id) => { const p = get(id); return p ? cardViewOf(p) : null; }, reject, withdraw, sweep, proposalIcon, wait, proposalsOf, get: (id) => { const p = get(id); return p ? view(p) : null; }, outcomeText: (id) => { const p = get(id); return p ? outcomeText(p) : null; }, afterListen, decorate, isReplaying, addHelper, dropHelper, helperIds, helpers: () => store.helpers.slice(), planner, storeFile: file };
 }
 
 module.exports = { create, normRequest, recordOf, whatOf, SYS_REQUEST_KINDS, STORE_FILE, FROM_NAME, INBOX_KEY, WAIT_MAX_MS, PROPOSAL_STATES, REQUEST_KINDS, AGENT_KINDS, EXPIRE_MS, WORDS };

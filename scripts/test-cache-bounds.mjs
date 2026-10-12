@@ -55,6 +55,19 @@ function lagProbe() {
   const iv = setInterval(() => { const n = performance.now(); max = Math.max(max, n - last - 5); last = n; }, 5);
   return { stop() { const n = performance.now(); max = Math.max(max, n - last - 5); clearInterval(iv); return max; } };
 }
+/** A timing bound's same-box CONTROL (rel254 mirror: a fixed `stall < 100` went red at 101/111 ms on a loaded 4-core runner
+ *  while the fold witness held): the longest stall while the test's OWN work runs `n` times, one task each, without the product. */
+async function directStall(work, n) {
+  const p = lagProbe();
+  for (let k = 0; k < n; k++) { work(); await new Promise((r) => setTimeout(r, 10)); }
+  return p.stop();
+}
+/** The rule: stall <= control + HALF a sync fold of the same query, timed on this box in this run (median of 3). Neither a
+ *  fixed margin nor a ratio bites here — measured, the r2rung mutant's fold on the loop adds ~23 ms over a ~11 ms control
+ *  (+50 ms passes it, ×3.1 sits on a 3× line) — while a margin in folds scales with the box's load and bites by design. */
+const foldMs = (fn) => { const ms = []; for (let k = 0; k < 3; k++) { const t0 = performance.now(); fn(); ms.push(performance.now() - t0); } return ms.sort((x, y) => x - y)[1]; };
+const stallOk = (stall, control, fold) => stall <= control + fold / 2;
+const boundLine = (tag, measured, control, rule) => console.log(`  ${tag} bound: measured ${Math.round(measured)} ms / control ${Math.round(control)} ms / rule ${rule}`);
 
 console.log('§1 PURE cache-bounds');
 {
@@ -358,14 +371,20 @@ console.log('§13–§19 r3: no loop fold, worker death / deadline / missing sha
   writeRows(t.dir, all.filter((e) => typeof e.i !== 'string'));
   t.warm();
   let allRowsCalls = 0; const realAll = t._allRows.bind(t); t._allRows = function* (...a) { allRowsCalls++; yield* realAll(...a); };
+  // §13 (verify #0/#9): appends on EVERY try — one walk, as-of its start, never a loop fold. The claim is the witness
+  // (_allRows ×0); the stall is judged against the SAME hook work driven directly on a copy of the fixture (directStall),
+  // and the probe starts after the test's own sync answer (sync0 is the reference, not the product's walk)
+  const q = { pivots: [['day', 'account']] }, sync0 = t.aggregate(q), fold = foldMs(() => t.aggregate(q)); allRowsCalls = 0;
+  const append = (u) => { writeRows(u.dir, [mkRow(NOW - 1000)]); u._evCache.checkedAt = 0; u._loadEvents(); };
+  const tc = mkUh('r3c', 40 * DAY, 60 * 1024); fs.cpSync(t.dir, tc.dir, { recursive: true }); tc.warm();
+  let tries13 = 0; t.walkHook = () => { tries13++; append(t); };
   const probe = lagProbe();
-  // §13 (verify #0/#9): appends on EVERY try — one walk, as-of its start, never a loop fold
-  const q = { pivots: [['day', 'account']] }, sync0 = t.aggregate(q); allRowsCalls = 0;
-  t.walkHook = () => { writeRows(t.dir, [mkRow(NOW - 1000)]); t._evCache.checkedAt = 0; t._loadEvents(); };
   const a = await t.aggregateAsync(q); t.walkHook = null;
-  const stall = probe.stop();
+  const stall = probe.stop(), control = await directStall(() => append(tc), tries13);
   eq(a, sync0, '§13 appends on every try: the answer = the sync answer at the walk start');
-  ok(allRowsCalls === 0 && stall < 100, `§13 no fold of the ledger on the loop (_allRows ×${allRowsCalls}), longest stall ${Math.round(stall)} ms`);
+  ok(allRowsCalls === 0, `§13 no fold of the ledger on the loop (_allRows ×${allRowsCalls})`);
+  boundLine('§13', stall, control, `stall <= control + fold/2, fold ${Math.round(fold)} ms (${tries13} tries)`);
+  ok(stallOk(stall, control, fold), `§13 the walk's longest stall ${Math.round(stall)} ms <= its own hook work's ${Math.round(control)} ms + half a fold (${Math.round(fold / 2)} ms)`);
   // rewrites on every try ⇒ the worker re-runs (≤ 3), then an ERROR — still never the loop
   const swapTwo = () => { const f = path.join(t.dir, fs.readdirSync(t.dir).filter((x) => x.startsWith('events-')).sort()[0]); const ls = fs.readFileSync(f, 'utf8').split('\n'); [ls[0], ls[1]] = [ls[1], ls[0]]; fs.writeFileSync(f, ls.join('\n')); t._evCache.checkedAt = 0; t._loadEvents(); };
   t.walkHook = swapTwo; let err13 = null; allRowsCalls = 0;
@@ -377,9 +396,14 @@ console.log('§13–§19 r3: no loop fold, worker death / deadline / missing sha
   const UH2 = M.load('src/usage-history.js', r2rung, 'r2rung').UsageHistory;
   const t2 = new UH2({ dataDir: path.join(tmp, 'r3'), homeDir: tmp }); t2.ledgerWindowMs = 40 * DAY; t2.ledgerHotMaxBytes = 60 * 1024; t2.warm();
   let n2 = 0; const real2 = t2._allRows.bind(t2); t2._allRows = function* (...x) { n2++; yield* real2(...x); };
-  t2.walkHook = () => { const f = path.join(t2.dir, fs.readdirSync(t2.dir).filter((x) => x.startsWith('events-')).sort()[0]); const ls = fs.readFileSync(f, 'utf8').split('\n'); [ls[0], ls[1]] = [ls[1], ls[0]]; fs.writeFileSync(f, ls.join('\n')); t2._evCache.checkedAt = 0; t2._loadEvents(); };
+  const swap = (u) => { const f = path.join(u.dir, fs.readdirSync(u.dir).filter((x) => x.startsWith('events-')).sort()[0]); const ls = fs.readFileSync(f, 'utf8').split('\n'); [ls[0], ls[1]] = [ls[1], ls[0]]; fs.writeFileSync(f, ls.join('\n')); u._evCache.checkedAt = 0; u._loadEvents(); };
+  const tc2 = mkUh('r3c2', 40 * DAY, 60 * 1024); fs.cpSync(t2.dir, tc2.dir, { recursive: true }); tc2.warm();
+  let tries2 = 0; t2.walkHook = () => { tries2++; swap(t2); };
+  const probe2 = lagProbe();
   await t2.aggregateAsync({ to: NOW - 3 }).catch(() => null); t2.walkHook = null;
-  ok(r2rung !== uhSrc && n2 > 0, `control (the r2 last rung): the ledger folded on the loop ×${n2} ⇒ RED`);
+  const stall2 = probe2.stop(), control2 = await directStall(() => swap(tc2), tries2), fold2 = foldMs(() => tc2.aggregate({ to: NOW - 3 }));
+  boundLine('§13 r2rung', stall2, control2, `stall <= control + fold/2 must FAIL, fold ${Math.round(fold2)} ms (${tries2} tries)`);
+  ok(r2rung !== uhSrc && n2 > 0 && !stallOk(stall2, control2, fold2), `control (the r2 last rung): the ledger folded on the loop ×${n2}, longest stall ${Math.round(stall2)} ms > its hook work's ${Math.round(control2)} ms + half a fold (${Math.round(fold2 / 2)} ms) ⇒ RED`);
   // §14 (verify #1/#12): a worker that runs out of memory ⇒ an error, fast; the next request gets a new worker
   // (a fold worker that allocates 200 MB under a 32 MB cap — a cap below ~16 MB kills the WHOLE process while
   // V8 deserializes the isolate, measured: never set one that low)
@@ -388,8 +412,17 @@ console.log('§13–§19 r3: no loop fold, worker death / deadline / missing sha
   t.coldWorkerFile = oom; t.coldWorkerHeapMb = 32; let err14 = null; const t0 = Date.now(); allRowsCalls = 0;
   try { await t.aggregateAsync({ to: NOW - 4 }); } catch (e) { err14 = e; }
   const took14 = Date.now() - t0; t.coldWorkerHeapMb = 0; t.coldWorkerFile = null;
-  ok(err14 && /memory|exited|failed/.test(err14.message) && allRowsCalls === 0 && took14 < 3000 && t._evCache.walking === 0, `§14 a worker out of memory ⇒ "${err14 && err14.message}" in ${took14} ms, no loop fold, the walk released`);
-  ok(JSON.stringify((await t.aggregateAsync({ to: NOW - 5 })).totals) === JSON.stringify(t.aggregate({ to: NOW - 5 }).totals), '§14 the next request starts a NEW worker and answers');
+  // "fast" = the worker's own death answers, never the 10-min deadline (the witness: code ≠ DEADLINE); the time is printed
+  // beside a same-run control (the next request's NEW worker spawn + fold), and the deaf-walk mutant below reds the witness
+  ok(err14 && /memory|exited|failed/.test(err14.message) && err14.code !== 'DEADLINE' && allRowsCalls === 0 && t._evCache.walking === 0, `§14 a worker out of memory ⇒ "${err14 && err14.message}" (${err14 && err14.code}) in ${took14} ms — its own death, not the deadline; no loop fold, the walk released`);
+  const t14n = Date.now(), next14 = await t.aggregateAsync({ to: NOW - 5 }), took14n = Date.now() - t14n;
+  ok(JSON.stringify(next14.totals) === JSON.stringify(t.aggregate({ to: NOW - 5 }).totals), '§14 the next request starts a NEW worker and answers');
+  boundLine('§14', took14, took14n, 'witness: the error is the worker death (code ≠ DEADLINE)');
+  const deaf = uhSrc.replace("w.on('error', (e) => end(reject,", "w.on('error', (e) => void (reject,").replace("w.on('exit', (code) => end(reject,", "w.on('exit', (code) => void (reject,");
+  const td = new (M.load('src/usage-history.js', deaf, 'deaf').UsageHistory)({ dataDir: path.join(tmp, 'r3'), homeDir: tmp }); td.ledgerWindowMs = 40 * DAY; td.ledgerHotMaxBytes = 60 * 1024; td.warm();
+  td.coldWorkerFile = oom; td.coldWorkerHeapMb = 32; td.coldFoldDeadlineMs = 1500;
+  const e14d = await td.aggregateAsync({ to: NOW - 7 }).then(() => null, (e) => e);
+  ok(deaf !== uhSrc && e14d && e14d.code === 'DEADLINE', `control (a walk deaf to its worker's death): "${e14d && e14d.message}" ⇒ RED`);
   const fb = uhSrc.replace("      throw e;\n    } finally { if (c.walking > 0) c.walking--; }", "      return this.aggregate(opts); // the r2 fallback\n    } finally { if (c.walking > 0) c.walking--; }");
   const UHf = M.load('src/usage-history.js', fb, 'fallback').UsageHistory;
   const tf = new UHf({ dataDir: path.join(tmp, 'r3'), homeDir: tmp }); tf.ledgerWindowMs = 40 * DAY; tf.ledgerHotMaxBytes = 60 * 1024; tf.warm(); tf.coldWorkerHeapMb = 32; tf.coldWorkerFile = oom;
@@ -571,10 +604,13 @@ console.log('§25–§31 r4: the person is told, stuck workers, the whole-line h
   const until = async (fn, ms = 5000) => { const end = Date.now() + ms; while (!fn() && Date.now() < end) await new Promise((r) => setTimeout(r, 25)); return fn(); };
   t4.coldWorkerFile = blocked; t4.coldFoldDeadlineMs = 300; t4.coldTerminateDeadlineMs = 300;
   const w26 = t4._coldWalks;
-  const e1 = await t4.aggregateAsync({ to: NOW - 40 }).then(() => null, (e) => e);
+  const tq1 = Date.now(), e1 = await t4.aggregateAsync({ to: NOW - 40 }).then(() => null, (e) => e), took1 = Date.now() - tq1;
   const tq = Date.now(); const e2 = await t4.aggregateAsync({ to: NOW - 41 }).then(() => null, (e) => e); const took2 = Date.now() - tq;
+  // "at once" = refused before a worker spawns (the witness: _coldWalks +1 — the r3stuck mutant below spawns ×2); the time is
+  // printed beside the same-run control, the first request's deadline wait
+  boundLine('§26', took2, took1, 'witness: refused before a worker spawns (_coldWalks +1)');
   const row26 = t4.cacheCensus().find((x) => x.name === 'usage fold workers stuck');
-  ok(e1 && e1.code === 'DEADLINE' && e2 && e2.code === 'STUCK' && /1 fold worker\(s\) stuck/.test(e2.message) && took2 < 200 && t4._coldWalks - w26 === 1 && row26 && row26.count === 1, `§26 a worker blocked in a read: DEADLINE once, then "${e2 && e2.message.slice(0, 60)}…" at once (${took2} ms), 1 worker spawned, the census counts it`);
+  ok(e1 && e1.code === 'DEADLINE' && e2 && e2.code === 'STUCK' && /1 fold worker\(s\) stuck/.test(e2.message) && t4._coldWalks - w26 === 1 && row26 && row26.count === 1, `§26 a worker blocked in a read: DEADLINE once, then "${e2 && e2.message.slice(0, 60)}…" at once (${took2} ms), 1 worker spawned, the census counts it`);
   t4.coldWorkerFile = null; release();
   await until(() => !t4.cacheCensus().some((x) => x.name === 'usage fold workers stuck'));
   const a26 = await t4.aggregateAsync({ to: NOW - 42 }).then((x) => x, (e) => e);

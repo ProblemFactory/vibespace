@@ -4,7 +4,7 @@
 // cannot drift. The FACE never carries a package-system word (deb / AppImage / apt / root / sudo / sha); Details may —
 // scripts/test-app-card.mjs is the census, in en / zh / ja, with a planted word as its control.
 import { shownDigest as digestOfView } from '../app-card.js';
-import { joinWords } from '../argv-words.js'; // lane app-register-ui: a registration's argv, one line each, verbatim
+import { commandLine } from '../argv-words.js'; // lane app-register-ui: a registration's argv, one line each, verbatim — with its env / cwd (rel254 verify F3)
 import { fmtBytes } from '../app-manifest.js';
 import { installPlace } from '../app-witness.js'; // lane apps-launcher-witness: an Installed card names the machine it landed on
 import { ROWS } from '../app-kinds/index.js'; // PURE — an app kind is one row (lane dc-apps-rows)
@@ -43,9 +43,9 @@ export function registeredWords(v, t, app) {
   const g = v.registered || {};
   const name = v.by && v.by.name ? v.by.name : '';
   const why = String(v.why || '').trim();
-  const argv = [...(g.variants || []).map((x) => `${x.label || x.exec} — ${joinWords([x.exec, ...(x.args || [])])}`),
-    g.remove ? t('Remove: {cmd}', { cmd: joinWords([g.remove.exec, ...(g.remove.args || [])]) }) : t('No remove recipe — Forget only'),
-    ...(g.reinstall ? [t('Reinstall: {cmd}', { cmd: joinWords([g.reinstall.exec, ...(g.reinstall.args || [])]) })] : [])];
+  const argv = [...(g.variants || []).map((x) => `${x.label || x.exec} — ${commandLine(x)}`),
+    g.remove ? t('Remove: {cmd}', { cmd: commandLine(g.remove) }) : t('No remove recipe — Forget only'),
+    ...(g.reinstall ? [t('Reinstall: {cmd}', { cmd: commandLine(g.reinstall) })] : [])];
   return {
     title: name ? t('{name} registered {app}', { name, app }) : t('Register {app}?', { app }), by: why ? t('Why: {why}', { why }) : '',
     from: g.path ? t('Runs {path}', { path: g.path }) : '', argv,

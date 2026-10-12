@@ -113,5 +113,24 @@ ok(/launch\(\{ appId: row\.id, variant: x\.id \}, null\)/.test(src), 'WIRING: an
 ok(/sayErr\(f, \(r && r\.error\)/.test(src) && /const f = adoptErrorField\(r \|\| \{\}\);/.test(src), 'WIRING: an adopt refusal is said under its field (never a toast alone)');
 ok(/message: forget \?[^\n]*\n\s*: rec \? t\('This runs as you: \{cmd\}', \{ cmd: rec \}\)/.test(src), 'WIRING: Remove… confirms with the recipe verbatim');
 
+// rel254 verify F9 / F10: a refused line NAMES the character; invisible characters shown; NBSP kept; POSIX continuation
+{
+  const RG = require('../src/app-kinds/registered.js');
+  const q = AW.splitWords('flatpak run "org.x.Y');
+  ok(!q.ok && q.error === 'unbalanced quote at 13' && q.at === 12, 'F9: an unbalanced quote is named with its place (1-based)', q);
+  const p = AW.splitWords('a b | c');
+  ok(!p.ok && p.error === 'a | outside quotes at 5', 'F9: a | outside quotes is named', p);
+  ok(AW.splitWords('a\\').error === 'a trailing \\ at 2', 'F9: a trailing backslash is named');
+  const nb = AW.splitWords('/opt/My\u00a0App/run --x');
+  ok(nb.ok && nb.argv.length === 2 && nb.argv[0] === '/opt/My\u00a0App/run', 'F10: a no-break space stays inside its word (a path may hold it)', nb);
+  ok(JSON.stringify(AW.splitWords('a \\\nb').argv) === '["a","b"]' && JSON.stringify(AW.splitWords("'a \\\nb'").argv) === '["a \\\\\\nb"]', 'F10: backslash-newline outside quotes is a continuation; inside quotes it is kept', [AW.splitWords('a \\\nb'), AW.splitWords("'a \\\nb'")]);
+  const w = ['x\u202ey', 'zero\u200bwidth', 'nb\u00a0sp', 'tab\tin'];
+  ok(JSON.stringify(AW.splitWords(AW.joinWords(w)).argv) === JSON.stringify(w), 'the round trip still holds for invisible characters');
+  ok(AW.commandLine({ exec: '/x', args: ['a\u202eb'] }) === "/x 'a<U+202E>b'" && AW.commandLine({ exec: '/x', args: [], env: { K: 'v w' }, cwd: '/tmp' }) === "env K='v w' /x (in /tmp)", 'F10/F3: the display shows <U+202E>, env and cwd', AW.commandLine({ exec: '/x', args: ['a\u202eb'] }));
+  const V = (label, vl) => RG.validateRegistered({ label, launch: [{ exec: '/bin/true', ...(vl ? { label: vl } : {}) }, { exec: '/bin/true', label: vl || 'Two' }] }, { resolve: (x) => x });
+  ok(V('Fire\u200bfox').code === 'bad_label' && V('A\u202eB').code === 'bad_label' && V('ok', 'v\u2028w').code === 'bad_label' && V('JASP').ok, 'F10: a label / variant name with a zero-width / bidi / line-separator character is bad_label');
+  ok(RG.ROOT_WORDS.includes('sudoedit') && RG.validateRegistered({ label: 'X', launch: [{ exec: '/bin/true' }], remove: { exec: 'sudoedit', args: ['/etc/x'] } }, { resolve: (x) => x }).code === 'needs_root', 'F5: sudoedit is a root word');
+}
+
 console.log(`\n${fail ? `${fail} FAILED` : 'ALL PASS'} (${pass}) in ${Date.now() - T0} ms`);
 process.exit(fail ? 1 : 0);

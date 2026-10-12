@@ -95,7 +95,8 @@ function entryLines(e) {
   const head = `  ${e.id}  ${e.packages.join(' ') || `${e.label || e.id} (${(rows.find((r) => r.id === e.kind) || {}).word || e.kind}, in your home)`}${e.rows.length ? `  → ${e.rows.map((r) => `${r.id} (${r.label})`).join(', ')}` : '  (no desktop app — on PATH)'}${e.by === 'agent' ? '  [proposed by an agent]' : ''}`;
   const more = [];
   if (e.kind === 'flatpak') more.push(`      flatpak ${e.appId}${e.remote ? ` (from ${e.remote})` : ''}`);
-  for (const v of e.launch || []) more.push(`      launch ${v.id} (${v.label}): ${[v.exec, ...(v.args || [])].join(' ')}`);
+  const shown = (v) => `${v.env && Object.keys(v.env).length ? `env ${Object.entries(v.env).map(([k, x]) => `${k}=${x}`).join(' ')} ` : ''}${[v.exec, ...(v.args || [])].join(' ')}${v.cwd ? ` (in ${v.cwd})` : ''}`; // rel254 verify F3: env + cwd shown
+  for (const [i, v] of (e.launch || []).entries()) more.push(`      launch ${v.id} (${v.label}): ${shown(i && !v.env && e.launch[0].env ? { ...v, env: e.launch[0].env } : v)}`);
   if (e.remove) more.push(`      remove: ${[e.remove.exec, ...(e.remove.args || [])].join(' ')}`);
   if (e.reinstall) more.push(`      reinstall: ${[e.reinstall.exec, ...(e.reinstall.args || [])].join(' ')}`);
   return [head, ...more];
@@ -227,6 +228,8 @@ function planLine(p) {
       return;
     }
     if (!/^[@a-z0-9][a-z0-9@/._+-]{0,120}$/i.test(target)) { console.error('vibespace-app add: not a package name'); process.exit(2); }
+    // rel254 verify F7: flatpak reads a .flatpakref / .flatpak / a path as a FILE (a new remote, a bundle) — a bare application id only, nothing spawned otherwise
+    if (kr.id === 'flatpak' && (target.includes('/') || /\.flatpak(ref|repo)?$/i.test(target) || !/^[A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z0-9_-]+){2,}$/.test(target))) { console.error(`vibespace-app add: bad_target — ${target} is not a bare Flatpak application id (org.example.App); find one with: vibespace-app search --kind flatpak <words>`); process.exit(2); }
     const run = (cmd, a) => { const r = spawnSync(cmd, a, { stdio: 'inherit' }); if (r.error) { console.error(`vibespace-app add: ${cmd} could not run (${r.error.message})`); process.exit(5); } if (r.status !== 0) { console.error(`vibespace-app add: ${cmd} exited ${r.status}`); process.exit(r.status || 1); } };
     const name = target;
     const remote = kr.remoteFlag ? flag('--remote') : undefined;

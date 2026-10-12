@@ -527,6 +527,8 @@
 - THE AGENT COULD NOT SEE THE DIALOG IT HAD OPENED (owner 2026-10-11, JASP's Open on xpra): the tree held it, the screenshot's plan had one member, keys went to the main window — 不变量 = an app's dialog is part of its window: composed, named first, the target of type/key (kb-bugfix-invariants)
 - THE APPS DIALOG WAITED FOR A 5 S WALK AND LISTED THE DISTRO AS 'INSTALLED OUTSIDE VIBESPACE' (owner 2026-10-11) — 不变量 = a dialog opens on what is known and is told what changes; 'outside the door' means outside the base, never the distro
 - THE AGENT'S NEW BROWSER WINDOW TOOK THE PERSON'S FOCUS, SIX TIMES A DAY (owner 2026-10-11): every desktop-app-opened revealed + focused its pane — 不变量 = an agent's action may place a window; only a person's action may focus one
+- REMOVE… AND FORGET NEVER WORKED — THE LAUNCHER CALLED THREE ROUTES ITS SIBLING LANE NEVER BUILT (rel254 verify F1): a UI lane stubbed the contract — 不变量 = a contract between lanes is a grep-derived route census in the fast tier, never a stub; every path a client calls is served or red
+- A FIXED 100 MS STALL BOUND WENT RED TWICE ON THE RUNNER WHILE THE FOLD WITNESS HELD (rel254 mirror) — 不变量 = a timing bound is judged against a same-box control measured in the same run, with its mutant still red; the witness is the claim
 
 ## THE AGENT COULD NOT SEE THE DIALOG IT HAD OPENED (owner 2026-10-11, lane window-dialog-member)
 

@@ -2,6 +2,15 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.255 — 2026-10-11
+
+### Changed
+- Every command an app runs is shown with its environment and working directory; an app entry changed outside VibeSpace is greyed out and never run.
+
+### Fixed
+- Remove… and Forget on a registered app now work; an agent's registration skips your click only when every launch option is exactly what the machine lists.
+- Unbind on a live view beside a chat brings that live view to the front again.
+
 ## 2.369.254 — 2026-10-11
 
 ### Added

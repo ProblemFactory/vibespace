@@ -176,12 +176,14 @@ console.log('§7 lane apps-dialog-fast — the open never waits; "outside the do
     owners: { '/usr/share/applications/gedit.desktop': 'gedit', '/usr/share/applications/mytool.desktop': 'mytool' } };
   const shown = (rows) => rows.filter((r) => !r.distro).map((r) => r.label).join('|'), hid = (rows) => rows.filter((r) => r.distro).map((r) => r.label).join('|');
   const withBase = W.witnessRows({ ...fx, drift: ['mytool'] });
-  ok(shown(withBase) === 'JASP|Notes|Inkscape|mytool' && hid(withBase) === 'gedit|orphan', 'with a base: the user\'s rows always, a system flatpak always, a system entry only when its package is in the drift set — the distro\'s (and an unowned one) flagged distro, ranked last', withBase.map((r) => [r.label, r.source, !!r.distro]));
+  ok(shown(withBase) === 'JASP|Notes|Inkscape|mytool|orphan' && hid(withBase) === 'gedit' && withBase.find((r) => r.label === 'orphan').unowned === true, 'with a base: the user\'s rows always, a system flatpak always, a system entry when its package is in the drift set OR dpkg owns nothing of it (rel254 verify F6: unowned = outside the base, listed) — the distro\'s flagged distro, ranked last', withBase.map((r) => [r.label, r.source, !!r.distro]));
   const noBase = W.witnessRows({ ...fx, drift: null });
-  ok(shown(noBase) === 'JASP|Notes|Inkscape' && hid(noBase) === 'gedit|mytool|orphan', 'no base on this machine: every system entry hidden (the count kept), the user\'s rows + the system flatpak listed', noBase.map((r) => [r.label, !!r.distro]));
+  ok(shown(noBase) === 'JASP|Notes|Inkscape|orphan' && hid(noBase) === 'gedit|mytool', 'no base on this machine: every OWNED system entry hidden (the count kept), the user\'s rows + the system flatpak + an unowned system entry listed (F6)', noBase.map((r) => [r.label, !!r.distro]));
+  ok(hid(W.witnessRows({ ...fx, drift: null, owners: null })) === 'gedit|mytool|orphan', 'dpkg did not answer (owners null) ⇒ nothing is read as unowned — every system entry hidden');
+  ok(hid(W.witnessRows({ ...fx, drift: null, owners: { ...fx.owners, '/usr/share/applications/orphan.desktop': 'x' } })).includes('orphan'), 'F6 CONTROL: the same entry once dpkg owns it is the distro\'s (hidden) — the listing hangs on the owner alone');
   const RED = (o) => W.witnessRows({ ...o, drift: undefined, owners: undefined }); // the pre-lane rule: no scope
   ok(hid(RED(fx)) === 'gedit|mytool|orphan', 'RED CONTROL: without a base the distro\'s rows are caught as hidden (not silently listed)');
-  ok(JSON.stringify(W.witnessScope(withBase)) === JSON.stringify({ distro: 2, 'flatpak-user': 1, 'flatpak-system': 1, 'desktop-user': 1, 'desktop-system': 1 }), 'witnessScope: the per-source counts + the distro\'s', W.witnessScope(withBase));
+  ok(JSON.stringify(W.witnessScope(withBase)) === JSON.stringify({ distro: 1, 'flatpak-user': 1, 'flatpak-system': 1, 'desktop-user': 1, 'desktop-system': 2 }), 'witnessScope: the per-source counts + the distro\'s', W.witnessScope(withBase));
   const own = W.parseDpkgSearch('apport-gtk: /usr/share/applications/apport-gtk.desktop\nlibreoffice-core:amd64, libreoffice-common: /usr/share/applications/x.desktop\ndiversion by foo from: /usr/share/applications/d.desktop\ndpkg-query: no path found matching pattern /z.desktop\ngarbage\n');
   ok(JSON.stringify(own) === JSON.stringify({ '/usr/share/applications/apport-gtk.desktop': 'apport-gtk', '/usr/share/applications/x.desktop': 'libreoffice-core' }), 'dpkg -S: the first owner (arch stripped); a diversion, a miss and garbage skipped', own);
   // THE OPEN'S VERDICT

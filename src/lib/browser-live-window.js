@@ -1395,7 +1395,12 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
     bindBtn.setAttribute('aria-label', label); bindBtn.title = label + ' — ' + bindTitle(); titleBind.title = bindTitle();
   };
   function toggleBind() {
-    if (isBound()) { app.wm.unbindSplit(winInfo._tabChain); renderBind(); return true; }
+    if (isBound()) { // int254 R1: the PERSON's Unbind is a person's action — it may focus: the live view comes to the front of its chain
+      app.wm.unbindSplit(winInfo._tabChain);
+      const ch = winInfo._tabChain, i = ch && Array.isArray(ch.tabs) ? ch.tabs.indexOf(winInfo.id) : -1;
+      if (i >= 0 && typeof app.wm.switchTab === 'function') app.wm.switchTab(ch, i);
+      renderBind(); return true;
+    }
     const host = sessionWindowFor(app, sessionId);
     if (!host) { showToast(t('Open the session’s window first — there is nothing to snap beside'), { type: 'warn' }); return false; }
     app.wm.bindSplit(host, winInfo, { side: 'right', announce: true }); // a user's explicit act ⇒ the 5 s Undo toast (split UX R5); the auto-bind (createWindow({intoChain})) stays silent

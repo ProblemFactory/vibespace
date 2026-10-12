@@ -220,6 +220,7 @@ const { parsePin, pinOf } = require('./desktop-pin'); // lane e2b (§E2.2): the 
 const O = require('./office-open'); // §7.9: the LibreOffice rows as a machine serves them, the open-with verdict, the argv
 const LIMITS = require('./keeper-limits');
 const displayFacts = require('./desktop-display');
+const AWD = require('./argv-words.js'); // PURE — a launch journalled as the one line a person reads (rel254 verify F4b)
 const AS = require('./app-serve'); // Layer 0 apps (docs/design-app-persistence.zh.md §3.1): the app-* ops + the catalog rows of the apps the user installed
 
 const STORE_FILE = 'desktop-apps.json';
@@ -423,6 +424,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     const appRows = (apps && typeof apps.catalogRows === 'function' ? apps.catalogRows() : []).filter((r) => !registryRows.some((x) => x.id === r.id)).map((row) => {
       const p = row.exec.includes('/') ? (fs.existsSync(row.exec) ? row.exec : null) : binOf(row.exec);
       // Layer 1: an app-system row is greyed while its app system cannot run here (not enabled, another architecture, no helper…)
+      if (row.changed) return { ...row, args: [...row.args], available: false, path: p, reason: `${row.label}: this entry was changed outside VibeSpace and is not runnable: ${row.changed}`, reasonCode: 'changed_outside' }; // rel254 verify F4/F8: shown, never run
       if (row.blocked) return { ...row, args: [...row.args], available: false, path: p, reason: row.blocked === 'shim-not-ours' ? `${row.label}: its launcher in ~/.vibespace/sysroot/bin is not VibeSpace's — it is not run` : `${row.label} lives in the app system, which cannot run here (${row.blocked})`, reasonCode: 'app-system' };
       if (!p && (row.registered || row.flatpak) && row.app) return { ...row, args: [...row.args], available: false, path: null, reason: `${row.label}: its program is gone${row.reinstall ? ` — reinstall: ${[row.reinstall.exec, ...(row.reinstall.args || [])].join(' ')} (your click)` : ''}`, reasonCode: 'exec-gone' }; // lane app-register-model: a home app is never reinstalled silently
       return { ...row, args: [...row.args], available: !!p, path: p, reason: p ? null : `${row.label} is not installed on this machine (yet)`, reasonCode: p ? null : 'app-missing' };
@@ -606,8 +608,13 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     if (row.browser && !row.path) throw namedError('browser-absent', row.reason || `${row.label} is not installed`); // the catalog's own verdict (browserRowFor), never a guessed binary
     if (row.office && !row.available) { const e = namedError(row.reasonCode || 'app-absent', row.reason || `${row.label} is not installed`); if (row.remedy) e.remedy = row.remedy; throw e; } // §7.9: the catalog's own verdict (officeRowFor) — the binary AND the module
     if (row.layer === 'sys' && !row.available) throw namedError(row.reasonCode || 'app-system', row.reason || `${row.label} cannot run from the app system here`); // Layer 1: a blocked app-system row (its launcher not VibeSpace's, no helper…) never launches
+    if (row.changed) { // rel254 verify F4: re-checked at every read — a changed home row never launches; int255 (verify r2 N2): the refusal is journalled
+      log.log?.(`[apps] launch ${row.id}${row.variant ? ` (variant ${row.variant})` : ''} refused (changed_outside): nothing ran`);
+      throw namedError('changed_outside', `this entry was changed outside VibeSpace and is not runnable: ${row.changed}`);
+    }
     const execPath = resolveExec(row.exec);
     const cwd = resolveCwd(row.cwd);
+    if (row.registered || row.flatpak) log.log?.(`[apps] launch ${row.id}${row.variant ? ` (variant ${row.variant})` : ''}: ${AWD.commandLine({ exec: execPath, args: row.args, env: row.env, cwd })}`); // F4b: every launch of a home app journalled with its exact argv
     const id = opts.id || newId(); // a relaunch mints the successor's id first (the old record names it before it stops)
     // B-bfe6: a browser row gets its OWN profile dir (the app session's), its argv from the PURE model (profile flags,
     // then the optional URL) — every refusal by name BEFORE anything is recorded or started

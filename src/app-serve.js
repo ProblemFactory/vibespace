@@ -64,6 +64,7 @@ const STATE_FILE = 'state.json';
 /** How long the user's own apt lists count as fresh (a machine whose system has no lists — a container image). */
 const LISTS_TTL_MS = 6 * 3600 * 1000;
 const SIM_MS = 120000;
+const REMOVE_MS = 120000, OUTPUT_MAX = 8 * 1024; // rel254 verify F1: a remove recipe run as the user — ≤ 120 s, its output ≤ 8 KiB back to the person
 const UPDATE_MS = 300000;
 const KEY_MAX = 1024 * 1024;
 const DEB_MAX = 4 * 1024 * 1024 * 1024;
@@ -441,15 +442,22 @@ function create({ home = os.homedir(), stateDir, env = () => process.env, log = 
     }
     // lane app-register-model: a Flatpak's row = its EXPORTED desktop file's (else `flatpak run <appId>`); a registered app's =
     // its default variant (every variant on the row — the launch door picks one by id). Both run AS THE USER, no root.
+    const fpReal = await realOf(await resolveExec('flatpak'));
     for (const e of manifest.entries.filter((x) => x.kind === FP.id)) {
       const file = FP.exportedDesktop(home, e.appId);
       let parsed = null;
       try { const r = A.parseDesktopFile((await fsp.readFile(file, 'utf8')).slice(0, DESKTOP_MAX), { entry: e.id, path: file, primary: true, validate: M.validateAppRow }); if (r.ok) parsed = r.row; } catch { parsed = null; }
+      const execOk = !parsed || !String(parsed.exec || '').includes('/') || (!!fpReal && (await realOf(parsed.exec)) === fpReal); // F8: the SAME flatpak the PATH names
       const rm = FP.removeArgvOf(e), ri = FP.reinstallArgvOf(e);
-      const row = { ...FP.rowOf(e, parsed), remove: { exec: rm[0], args: rm.slice(1) }, reinstall: { exec: ri[0], args: ri.slice(1) } };
+      const row = { ...FP.rowOf(e, parsed, { execOk }), remove: { exec: rm[0], args: rm.slice(1) }, reinstall: { exec: ri[0], args: ri.slice(1) } };
       if (M.validateAppRow(row).ok) out.push(row);
     }
-    for (const e of manifest.entries.filter((x) => x.kind === RG.id)) { const row = { ...RG.rowOf(e, { home }), ...(e.remove ? { remove: { exec: e.remove.exec, args: [...e.remove.args] } } : {}), ...(e.reinstall ? { reinstall: { exec: e.reinstall.exec, args: [...e.reinstall.args] } } : {}) }; if (M.validateAppRow(row).ok) out.push(row); }
+    for (const e of manifest.entries.filter((x) => x.kind === RG.id)) {
+      const row = { ...RG.rowOf(e, { home }), ...(e.remove ? { remove: { exec: e.remove.exec, args: [...e.remove.args] } } : {}), ...(e.reinstall ? { reinstall: { exec: e.reinstall.exec, args: [...e.reinstall.args] } } : {}) };
+      if (M.validateAppRow(row).ok) out.push(row);
+      // F4: a row changed outside VibeSpace past what a row may hold is still SHOWN (disabled, its reason) — never run
+      else if (row.changed) out.push({ id: row.id, label: String(e.id), exec: '/bin/false', args: [], category: 'app', app: e.id, registered: true, removable: false, source: row.source, changed: row.changed, changedCode: row.changedCode });
+    }
     return out;
   }
   /** The rows as desktop-serve's registry() last saw them (refreshCatalog keeps them current). */
@@ -509,7 +517,8 @@ function create({ home = os.homedir(), stateDir, env = () => process.env, log = 
   async function ownersOf(paths) {
     const ps = paths.filter((p) => !/[*?[\]\\]/.test(p)); // a glob character would make dpkg read it as a pattern
     if (!ps.length) return {};
-    try { const r = await runner('dpkg', ['-S', ...ps], { env: env(), timeout: W.WITNESS_BUDGET_MS, maxBuffer: 4 * 1024 * 1024 }); return W.parseDpkgSearch(r && r.stdout); } catch { return {}; }
+    // rel254 verify F6: dpkg answering (0 / 1 = some path unowned) ⇒ its map; no dpkg / a failure ⇒ null — never "unowned"
+    try { const r = await runner('dpkg', ['-S', ...ps], { env: env(), timeout: W.WITNESS_BUDGET_MS, maxBuffer: 4 * 1024 * 1024 }); return r && (r.code === 0 || r.code === 1) ? W.parseDpkgSearch(r.stdout) : null; } catch { return null; }
   }
   async function listWitness() {
     const until = now() + W.WITNESS_BUDGET_MS;
@@ -684,6 +693,10 @@ function create({ home = os.homedir(), stateDir, env = () => process.env, log = 
       return { results: A.parseSearch(r.stdout, 60), facts: f, install };
     }
     if (kind === RG.id) return ret(await registerPlan(p, manifest)); // lane app-register-model: a declaration needs no apt
+    if (kind === 'remove') { // int254 R2: removing an app in the HOME (a registered / Flatpak / uv / npm / AppImage one) needs no apt — before its gate
+      const homeE = manifest.entries.find((x) => x.id === p.entryId && A.HOME_KINDS.includes(x.kind));
+      if (homeE && !(await rootEntries()).some((x) => x.id === homeE.id)) return ret(A.removePlanFor(homeE));
+    }
     if (!f.apt) return ret({ ok: false, code: 'no_apt', error: `${f.prettyName || 'this machine'} has no apt-get — VibeSpace installs apps with apt only`, kind });
     const planRow = K.kindRow(kind) || {};
     if (planRow.planner) return planRow.planner({ p, f, kind, manifest, nonce, canRun, intoSys, ret, simOpts, moveTail, label0, A, M, appsDir, both, env, runner, fsp, path, DEB_MAX, dpkgNow, entryIdFor, twinOf, rootEntries, sys, stage, stagedFile, readHashed, debApp, appImageInfo, stageIcon }); // an app kind plans itself (its own file in src/app-kinds/, lane dc-app-kinds)
@@ -965,12 +978,16 @@ function create({ home = os.homedir(), stateDir, env = () => process.env, log = 
   }
   /** design 009 S3 — removing an entry that lives in the home: an AppImage's own directory (lstat'ed, never a link) and
    *  row; a uv / npm tool through its own uninstaller, as the user. */
-  async function removeHome({ entryId }) {
+  async function removeHome({ entryId, owner = false }) {
     const { manifest, corrupt } = await readManifest();
     const e = manifest.entries.find((x) => x.id === entryId && A.HOME_KINDS.includes(x.kind));
     if (!e) throw named('not_found', `no app ${JSON.stringify(String(entryId || '').slice(0, 40))} in your home`);
     const pl = A.removePlanFor(e);
-    if (!pl.ok) throw named(pl.code, pl.error);
+    // rel254 verify F1: the OWNER's Remove… answers its refusals as data (`failed` — a recipe's output must reach the person)
+    const refuse = (code, error, output = '') => { if (code !== 'failed') log.log?.(`[apps] remove ${e.id} refused (${code}): nothing ran`); if (!owner) { const err = named(code === 'failed' ? 'remove_failed' : code, error); throw err; } return { removed: null, failed: { code, error }, output }; };
+    if (!pl.ok) return refuse(pl.code, pl.error);
+    let output = '';
+    if (owner && !pl.homeArgv && !K.kindRow(e.kind).unpacked) return refuse('no_recipe', `${e.id} has no remove recipe — Forget drops it from Apps and leaves the program`);
     if (K.kindRow(e.kind).unpacked) {
       const dir = path.join(appsDir, 'appimage', e.id);
       let st = null;
@@ -978,12 +995,34 @@ function create({ home = os.homedir(), stateDir, env = () => process.env, log = 
       if (st && st.isDirectory()) await fsp.rm(dir, { recursive: true, force: true });
     } else if (pl.homeArgv) { // a registered app without a remove recipe: only its record goes
       const argv = pl.homeArgv.map((a) => (a === '~/.local' ? path.join(home, '.local') : a));
-      const r = await runner(argv[0], argv.slice(1), { env: env(), timeout: 300000 });
-      if (r.code !== 0 && !/not installed|No such|is not a|nothing to/i.test(both(r))) throw named('remove_failed', `${argv.join(' ')} failed (exit ${r.code}): ${both(r).trim().split('\n').slice(-2).join(' ').slice(0, 300)}`);
+      // AS THE USER: the sanitised env, cwd = home, ≤ 120 s, the output bounded (≤ 8 KiB) and returned; journalled with its exact argv (F4b)
+      const r = await runner(argv[0], argv.slice(1), { env: env(), cwd: home, timeout: REMOVE_MS });
+      output = both(r).slice(-OUTPUT_MAX);
+      log.log?.(`[apps] remove ${e.id}: ran ${AWD.commandLine({ exec: argv[0], args: argv.slice(1) })} as the user (exit ${r.code})`);
+      const benign = e.kind !== RG.id && /not installed|No such|is not a|nothing to/i.test(both(r)); // a tool's own uninstaller saying it is gone already — never a registered recipe's
+      if (r.code !== 0 && !benign) return refuse('failed', `${argv.join(' ')} failed (exit ${r.code}): ${both(r).trim().split('\n').slice(-2).join(' ').slice(0, 300)}`, output);
     }
     await writeManifest(A.withoutEntry(manifest, e.id), { corrupt });
     catalog.sig = null; await refreshCatalog();
-    return { removed: e.id, kind: e.kind };
+    return { removed: e.id, kind: e.kind, output };
+  }
+  /** rel254 verify F1 — the OWNER's Forget: a home entry leaves the index, its program stays (nothing runs); the witness
+   *  re-lists at once, so the program is "Installed outside VibeSpace" again. */
+  async function forgetHome({ entryId }) {
+    const { manifest, corrupt } = await readManifest();
+    const e = manifest.entries.find((x) => x.id === entryId && A.HOME_KINDS.includes(x.kind));
+    if (!e) throw named('not_found', `no app ${JSON.stringify(String(entryId || '').slice(0, 40))} in your home`);
+    // int255 (verify r2 N1): only a kind whose row `forgets` (a declaration, a Flatpak) — an AppImage / uv / npm row's Forget would
+    // orphan what VibeSpace itself put in the home (~/.vibespace/apps/appimage/<id> is listed by no witness): its Remove… is the way out
+    if (!K.kindRow(e.kind).forgets) {
+      log.log?.(`[apps] forget ${e.id} refused (not_forgettable): nothing changed`);
+      return { forgot: null, failed: { code: 'not_forgettable', error: `${e.id} (${K.kindRow(e.kind).word || e.kind}) was installed by VibeSpace — Remove… takes it away; Forget would leave its files behind` } };
+    }
+    await writeManifest(A.withoutEntry(manifest, e.id), { corrupt });
+    log.log?.(`[apps] forget ${e.id}: its record left Apps (nothing ran)`);
+    catalog.sig = null; await refreshCatalog();
+    try { await refreshWitness({ reason: 'install' }); } catch { /* the next open re-lists */ }
+    return { forgot: e.id, kind: e.kind };
   }
 
   // ── records (after the slot ran) ──
@@ -1117,6 +1156,7 @@ function create({ home = os.homedir(), stateDir, env = () => process.env, log = 
     return { entry: m.entries.find((e) => e.id === id) };
   }
   // ── lane app-register-model: the flatpak door + registered declarations ──
+  async function realOf(p) { if (!p) return null; try { return await fsp.realpath(p); } catch { return null; } }
   /** The absolute path the USER would run for `x` (an absolute path: executable file; a bare name: on the user's PATH). */
   async function resolveExec(x) {
     const s0 = String(x || '').trim();
@@ -1147,11 +1187,14 @@ function create({ home = os.homedir(), stateDir, env = () => process.env, log = 
     try { await refreshWitness({ reason: 'open' }); await witnessSettled(); } catch { /* the last list */ } // an open no longer waits (lane apps-dialog-fast): THE RULE judges the listing that was due (int254)
     const v0 = v.entry.launch[0], seen = [];
     for (const r of witnessRows()) { if (!r.exec.startsWith('/') && r.exec.split('/').pop() === String(v0.exec).split('/').pop()) r.path = await resolveExec(r.exec); seen.push(r); }
-    const wm = RG.witnessMatch(v.entry, seen);
+    // rel254 verify F2/F8: EVERY variant judged; a Flatpak variant's program must be THIS machine's flatpak (real paths compared)
+    const fpReal = await realOf(await resolveExec('flatpak'));
+    const real = { ...v.entry, launch: await Promise.all(v.entry.launch.map(async (x) => (RG.flatpakIdOf(x) ? { ...x, path: await realOf(x.path) } : x))) };
+    const wm = RG.witnessMatch(real, seen, { flatpakPath: fpReal });
     const entry = { ...v.entry, witness: wm.match ? wm.witness : null };
     delete entry.slug;
     return { ok: true, code: null, error: null, canRun: true, kind: RG.id, mode: 'register', entryId, label: entry.label, packages: [], closure: [], removes: [], downloadBytes: 0, installedBytes: 0,
-      closureKey: `register ${entryId} ${JSON.stringify(entry)}`, commands: RG.commandLines(entry, AWD.joinWords), entry, witnessed: wm.match ? wm.seen.id : null };
+      closureKey: `register ${entryId} ${JSON.stringify(entry)}`, commands: RG.commandLines(entry, AWD.commandLine), entry, witnessed: wm.match ? wm.seen.id : null };
   }
   /** Record a declaration — `direct` (an agent's, no click) only when THE WITNESS-MATCH RULE says nothing new becomes
    *  launchable (judged again here, never taken from the caller); else after the owner's click / the owner's own Adopt. */
@@ -1159,7 +1202,7 @@ function create({ home = os.homedir(), stateDir, env = () => process.env, log = 
     const { manifest, corrupt } = await readManifest();
     const pl = await registerPlan({ entry }, manifest);
     if (!pl.ok) throw named(pl.code || 'bad-request', pl.error);
-    if (direct && !pl.witnessed) throw named('not_witnessed', `${pl.entryId}: its default launch is nothing this machine already lists — registering it is the owner's click`);
+    if (direct && !pl.witnessed) throw named('not_witnessed', `${pl.entryId}: not every launch option is exactly what this machine already lists (no env, no cwd, only the program's own recipes) — registering it is the owner's click`);
     const prev = manifest.entries.find((e) => e.id === pl.entryId);
     const m = A.withEntry(manifest, { id: pl.entryId, packages: [], addedAt: (prev && prev.addedAt) || now(), by: byOf(by), approvedAt: now(), rows: [], services: [], ...(why ? { why: String(why).slice(0, 500) } : {}), ...pl.entry, registered: { session: session ? String(session).slice(0, 120) : null, at: now() } });
     await writeManifest(m, { corrupt });
@@ -1170,7 +1213,8 @@ function create({ home = os.homedir(), stateDir, env = () => process.env, log = 
   /** `vibespace-app add --kind flatpak <appId>` ran `flatpak install --user` as the user (its CLI card held that): recorded —
    *  only when the app is there (~/.local/share/flatpak/app/<appId>); its label from the exported desktop file. */
   async function recordFlatpak({ appId, remote = null, why = null, by }) {
-    if (!FP.appIdOk(appId)) throw named('bad_name', 'not a Flatpak application id (org.example.App)');
+    const tv = FP.targetVerdict(appId); // rel254 verify F7: a bare id only — never a .flatpakref / .flatpak / path
+    if (!tv.ok) throw named(tv.code, tv.error);
     if (remote != null && remote !== '' && !FP.remoteOk(remote)) throw named('bad_name', 'not a Flatpak remote name');
     if (!(await exists(FP.appDir(home, appId)))) throw named('not_recorded', `${appId} is not installed for you (${FP.appDir(home, appId)} is missing) — run: ${FP.installCmd(appId, remote || null).join(' ')}`);
     const { manifest, corrupt } = await readManifest();
@@ -1203,7 +1247,7 @@ function create({ home = os.homedir(), stateDir, env = () => process.env, log = 
     return { source: remove ? null : m.sources.find((s) => s.id === sourceId), removed: remove ? sourceId : null };
   }
 
-  return { sys, appsDir, sysDir, stagingDir, manifestFile, stateFile, listsRoot, facts, plan, status, fetchInstaller, unstage, installAppImage, removeHome, appImageInfo, readManifest, writeManifest, readState, writeState, recordEntry, recordRemove, recordRefresh, recordSource, recordUserKind, recordRegistered, recordFlatpak, resolveExec, recordForget, reconcile, refreshCatalog, catalogRows, iconFile, refreshWitness, witnessRows, witnessView, onWitness, witnessSettled, rootEntries, dpkgNow, aptOpts, slotState };
+  return { sys, appsDir, sysDir, stagingDir, manifestFile, stateFile, listsRoot, facts, plan, status, fetchInstaller, unstage, installAppImage, removeHome, appImageInfo, readManifest, writeManifest, readState, writeState, recordEntry, recordRemove, recordRefresh, recordSource, recordUserKind, recordRegistered, recordFlatpak, resolveExec, recordForget, forgetHome, reconcile, refreshCatalog, catalogRows, iconFile, refreshWitness, witnessRows, witnessView, onWitness, witnessSettled, rootEntries, dpkgNow, aptOpts, slotState };
 }
 
 const bad = (error) => ({ ok: false, code: 'bad-request', error });
@@ -1224,6 +1268,8 @@ const bad = (error) => ({ ok: false, code: 'bad-request', error });
  *   app-refresh     {nonce, id: 'refresh'|'replay'|'sysroot', mode}  → {ok, state, run}   ('sysroot' = an app-system run, Layer 1)
  *   app-adopt-drift {entryId, nonce, by}                            → {ok, entry, rows, run}
  *   app-forget      {entryId, nonce}                                → {ok, forgot, run, relayered}   (a move's second step ran)
+ *                   {entryId, home: true}                           → {ok, forgot, kind} | {ok, forgot: null, failed: {code: not_forgettable, error}}   (the owner's Forget of a home app whose kind `forgets`: the record goes, the program stays)
+ *   app-remove      {entryId, home: true, owner: true}              → {ok, removed, kind, output} | {ok, removed: null, failed: {code: no_recipe|needs_root|changed_outside|failed, error}, output}
  */
 async function runAppOp(apps, action, params = {}) {
   const r = await runAppOp0(apps, action, params);
@@ -1247,7 +1293,8 @@ async function runAppOp0(apps, action, params = {}) {
     if (op === 'app-fetch') return { ok: true, ...(await apps.fetchInstaller(p)) };
     if (op === 'app-unstage') return { ok: true, ...(await apps.unstage(p)) };
     if (op === 'app-install' && (K.kindRow(p.kind) || {}).unpacked) return { ok: true, ...(await apps.installAppImage(p)) }; // no slot, no root: unpacked as the user
-    if (op === 'app-remove' && p.home === true) return { ok: true, ...(await apps.removeHome({ entryId: p.entryId })) };
+    if (op === 'app-remove' && p.home === true) return { ok: true, ...(await apps.removeHome({ entryId: p.entryId, owner: p.owner === true })) }; // owner: the person's Remove… (refusals as data)
+    if (op === 'app-forget' && p.home === true) return { ok: true, ...(await apps.forgetHome({ entryId: p.entryId })) }; // rel254 verify F1: the person's Forget (nothing runs)
     if (op === 'app-install' && p.kind === RG.id) return { ok: true, ...(await apps.recordRegistered({ entry: p.entry, by: p.by, why: p.why, direct: p.direct === true, session: p.session || null })) }; // a declaration: no slot, no root
     if (op === 'app-install' && (K.kindRow(p.kind) || {}).addArgv) return { ok: true, ...(await apps.recordUserKind({ kind: p.kind, name: p.name, why: p.why, by: p.by, remote: p.remote || null })) }; // a user-level tool: no slot ran, nothing to key
     if (!nonceOk()) return bad(`${op} needs the run's nonce`);

@@ -83,18 +83,23 @@ function cardView(p) {
 
 /** lane app-register-ui: what an agent's REGISTRATION runs, verbatim (bounded) — the resolved program, every launch
  *  variant, the remove / reinstall recipes, and whether the machine itself listed the program (the witness). */
-const argvOf = (c) => (c && typeof c === 'object' && c.exec ? { exec: str(c.exec, 400), args: strs(c.args, 64, 400) } : null);
+// rel254 verify F3: a variant's env and cwd are on the card's face too (and in its digest) — an Accept approves what it saw
+const envOf = (e) => (e && typeof e === 'object' && !Array.isArray(e) && Object.keys(e).length ? Object.fromEntries(Object.entries(e).slice(0, 8).map(([k, v]) => [str(k, 64), str(v, 400)])) : null);
+const argvOf = (c) => (c && typeof c === 'object' && c.exec ? { exec: str(c.exec, 400), args: strs(c.args, 64, 400), ...(envOf(c.env) ? { env: envOf(c.env) } : {}), ...(typeof c.cwd === 'string' && c.cwd ? { cwd: str(c.cwd, 400) } : {}) } : null);
 function registeredView(x, rq) {
   const pick = (k) => (rq[k] !== undefined ? rq[k] : x[k]);
   const w = pick('witness');
+  const launch = Array.isArray(pick('launch')) ? pick('launch') : [];
+  const d0 = launch[0] && typeof launch[0] === 'object' ? launch[0] : {};
   return {
     path: str(pick('path') || pick('resolved') || '', 400),
-    variants: (Array.isArray(pick('launch')) ? pick('launch') : []).slice(0, 8).map((v) => ({ label: str(v && v.label, 80), ...argvOf(v) })).filter((v) => v.exec),
+    // a variant without its own env runs with the default's (desktop-apps.js) — shown with it
+    variants: launch.slice(0, 8).map((v, i) => ({ label: str(v && v.label, 80), ...argvOf(i && v && v.env == null && d0.env ? { ...v, env: d0.env } : v) })).filter((v) => v.exec),
     remove: argvOf(pick('remove')), reinstall: argvOf(pick('reinstall')),
     witness: w && typeof w === 'object' ? { source: str(w.source, 40), what: str(w.appId || w.id || w.file || '', 200) } : null,
   };
 }
-const argvLine = (c) => (c ? [c.exec, ...(c.args || [])].join('\u0002') : '');
+const argvLine = (c) => (c ? [c.exec, ...(c.args || [])].join('\u0002') + (c.env ? `\u0004${Object.entries(c.env).map(([k, v]) => `${k}=${v}`).join('\u0002')}` : '') + (c.cwd ? `\u0005${c.cwd}` : '') : ''); // no env / cwd ⇒ the same digest as before
 
 /** WHAT THE CARD SHOWED, as one ordered list — everything a person reads on its face or in its Details, and the plan's
  *  own digest; never the state / progress / result (those move while the one click runs). */
