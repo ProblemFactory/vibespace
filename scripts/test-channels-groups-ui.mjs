@@ -620,7 +620,7 @@ console.log('\nchannels-fold-default: the account sections\' fold');
   const readBy = { key: 'l/5', adapterId: 'l', title: 'Read by an agent', touch: { read: { at: now - H, upTo: now, name: 'Ops' } }, lastAt: now - 2 * H };
   const atYou = { key: 'l/6', adapterId: 'l', title: 'Ping', atYou: 1 };
   ok(!V.needsYou(plain, now) && V.needsYou(assigned, now) && V.needsYou(awaiting, now) && V.needsYou(dm, now) && !V.needsYou(readBy, now) && V.needsYou(atYou, now) && !V.needsYou({ ...assigned, unlisted: true }, now)
-    && JSON.stringify(V.NEEDS_YOU_TAGS) === '["awaiting","unknown","assigned","held","direct"]',
+    && JSON.stringify(V.NEEDS_YOU_TAGS) === '["awaiting","unknown","at-you","assigned","held","direct"]',
     'fold-default: what NEEDS THE PERSON — handed to someone, awaiting them, a held wake, a direct message unread, an @ of them; an agent\'s read and a plain unread row do not');
   const legDefault = (M) => M.accountFoldDefault({ needN: 0, dot: 'ok' }) === true && M.accountFoldDefault({ needN: 2, dot: 'ok' }) === false && M.accountFoldDefault({ needN: 0, dot: 'bad' }) === false && M.accountFoldDefault({ needN: 0, dot: 'warn' }) === false && M.accountFoldDefault({ needN: 0, dot: 'idle' }) === true;
   ok(legDefault(V), 'fold-default: nothing in a section needs the person ⇒ it starts FOLDED; a row does (or the account must sign in again) ⇒ open');

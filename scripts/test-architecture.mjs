@@ -224,6 +224,9 @@ const PURE = new Set(['src/voice-model.js' /* Dropline voice input q-029 P0: dic
   // masking rule. The browser renders the declarations; the server store is the
   // only thing that ever sees a value.
   'src/integration-registry.js',
+  // PLUGIN SETTINGS (lane plugin-settings-p0): one table per built-in plugin, bundled AND required by the server;
+  // since lane integrations-menu-home the registry reads which plugin names a row (the window's 插件 group) from it
+  'src/plugin-settings.js',
   // THE SPAWN-ENV SANITIZER (2026-09-14): one rule for the orchestrator's agentEnv() AND
   // the daemon's spawnEnv()/its own birth — the daemon is a second holder of the server
   // env, so the filter has to run in both processes and the daemon bundles it

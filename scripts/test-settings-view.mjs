@@ -268,7 +268,7 @@ console.log('§10 「需关注 · 怎么判断」 (lane attention-policy): one b
   const FO = await import('../src/channel-focus.js');
   const block = Object.entries(SCHEMA).filter(([, r]) => r.block === 'attention' || r.alsoBlock === 'attention').map(([p]) => p);   // int263 seam b: + the plugin's two rows the block draws too
   const rules = FO.ATTENTION_RULES.map((c) => `channels.attention.rule.${c}`);
-  ok(block.join() === ['channels.attention.preset', ...rules, 'channels.attention.judge', 'decision.threshold', 'decision.attentionBlock'].join(), 'the block, in order: the preset, the seven rule switches, the judge\'s switch, its threshold, "what matters to me"', block.join());
+  ok(block.join() === ['channels.attention.preset', ...rules, 'channels.attention.judge', 'decision.threshold', 'decision.attentionBlock'].join(), 'the block, in order: the preset, the eight rule switches, the judge\'s switch, its threshold, "what matters to me"', block.join());
   const rows = block.map((p) => SCHEMA[p]);
   ok(rows.filter((r) => r.block).every((r) => r.category === SCHEMA['channels.offHoursTz'].category && r.liveApply === true && !r.tier && !r.when && r.blockTitle === rows[0].blockTitle), 'every row: category Channels, liveApply, everyday (no tier / when), the block\'s one head');
   ok(rules.every((p) => SCHEMA[p].type === 'boolean' && SCHEMA[p].default === true && !SCHEMA[p].store), 'each fixed rule: a boolean, default ON (today\'s first screen), stored in settings');
@@ -287,9 +287,35 @@ console.log('§10 「需关注 · 怎么判断」 (lane attention-policy): one b
   ok(own.every((p) => hitZh.includes(p)) && own.every((p) => hitEn.includes(p)), `the Settings search finds every row of the block: 需关注 (${hitZh.filter((p) => own.includes(p)).length}/${own.length}) · attention (${hitEn.filter((p) => own.includes(p)).length}/${own.length})`);
   const noHead = Object.fromEntries(Object.entries(zhSchema).map(([p, r]) => [p, { ...r, blockTitle: undefined }]));
   ok(!find(noHead, '需关注').includes('channels.attention.rule.replied'), 'CONTROL: without the head in the search words, 需关注 misses 「我 24 小时内回过的」 ⇒ the leg above is the head\'s doing');
+  // lane attention-rule-at-you: the 8th switch, its owner words, found by 「@」 in zh and en
+  const AY = SCHEMA['channels.attention.rule.at-you'];
+  ok(AY && FO.ATTENTION_RULES.includes('at-you') && zh[AY.label] === '有人 @ 了我、我还没读的' && zh[AY.description] === '群里或单聊里点名 @ 你、24 小时内还没读的消息。', 'the 8th rule: 「有人 @ 了我、我还没读的」 with its hint, a switch of the block', AY && zh[AY.label]);
+  ok(find(zhSchema, '@').includes('channels.attention.rule.at-you') && find(SCHEMA, '@').includes('channels.attention.rule.at-you'), 'the Settings search 「@」 finds the at-you row (zh and en)');
   const UI = fs.readFileSync(path.join(REPO, 'src/lib/settings-ui.js'), 'utf8');
   ok(/if \(schema\.store\) return this\._createStoredElsewhere\(path, schema, row\);/.test(UI) && /\/api\/plugins\/\$\{encodeURIComponent\(id\)\}\/config/.test(UI) && !UI.slice(UI.indexOf('  _createStoredElsewhere(path, schema, row) {'), UI.indexOf('  _createSlider(path, schema, row, value) {')).includes('this.settings.set(path'), 'a stored-elsewhere row never writes settings: the judge\'s switch writes through the plugin\'s own config door');
   ok(/if \(schema\.slider\) return this\._createSlider/.test(UI) && /input\.type = 'range'/.test(UI) && /renderBlock\(block, \{ items = null \} = \{\}\)/.test(UI), 'the threshold draws as a range; ONE renderBlock serves the Settings window and the Channels door');
+}
+
+// ── lane decision-spend-readout: the judge's MONEY where Settings names the judge (owner 2026-10-13) ──
+{
+  console.log('\nthe Decision API\'s money in Settings (lane decision-spend-readout)');
+  const UI = fs.readFileSync(path.join(REPO, 'src/lib/settings-ui.js'), 'utf8');
+  const DM = (await import('../src/decision-model.js')).default;
+  const BUDGET = 'plugin.decision-api.dailyBudgetUsd';
+  const SCHEMA = S.SETTINGS_SCHEMA;
+  const wired = (ui) => ui.includes(`const DECISION_BUDGET_PATH = '${BUDGET}';`) && /if \(path === DECISION_BUDGET_PATH\) this\._renderDecisionToday\(info\);/.test(ui)
+    && /_renderDecisionToday\(info\) \{[\s\S]{0,400}liveDecisionLine\(line, \(L\) => paintDecisionLine\(line, L, 'text'\)\);/.test(ui);
+  ok(SCHEMA[BUDGET] && SCHEMA[BUDGET].type === 'number' && wired(UI), 'the budget row (plugin.decision-api.dailyBudgetUsd) draws today\'s money against its cap under it — the PURE line, live');
+  ok(!wired(UI.replace('    if (path === DECISION_BUDGET_PATH) this._renderDecisionToday(info);', '')), 'RED CONTROL: without the row\'s dispatch line the leg above is red');
+  const att = UI.slice(UI.indexOf('  _renderAttentionToday(info) {'), UI.indexOf('  _renderDecisionToday(info) {'));
+  ok(/money && money\.on \? ' · ' \+ money\.spend : ''/.test(att) && /liveDecisionLine\(line, \(L\) => \{ money = L; draw\(\); \}\)/.test(att), 'the 需关注 block\'s judge line adds the money (the PURE line\'s spend half), patched in place');
+  ok(/if \(cat === t\('Spending'\)\) this\._renderDecisionSpend\(section, content, nav\);/.test(UI) && /paintDecisionLine\(line, L, 'month'\)/.test(UI) && /pluginCategoryOf\('decision-api'\)/.test(UI), 'Settings › Spending lists the Decision API (today / cap / month) with a door to its section');
+  const tz = (w, v = {}) => String(zh[w] || w).replace(/\{(\w+)\}/g, (m, k) => (k in v ? String(v[k]) : m));
+  const L = DM.decisionTodayLine({ byUse: { attention: { calls: 60, usd: 0.009, hits: 1 }, inbox: { calls: 3, usd: 0.001 } } }, 1, { t: tz, monthUsd: 0.4 });
+  ok(L.text === '今天：判断了 63 条 · 命中 1 条 · 已花 < $0.01（上限 $1.00）' && L.short === '今天 < $0.01 / $1.00 · 判断 63 · 命中 1' && L.title === '需关注 $0.009 · 托盘 $0.001 · 规则 $0' && L.month === '决策 API · 今天 < $0.01 / $1.00 · 本月 $0.40', 'zh: the owner\'s words — 「今天：判断了 63 条 · 命中 1 条 · 已花 < $0.01（上限 $1.00）」', L);
+  const words = ['Today {spent} / {cap} · judged {n} · hits {m}', 'The Decision API is off — it spends nothing', 'Decision API · today {spent} / {cap} · this month {month}', 'Needs attention', 'For-you tray', 'Rules', 'Routing', 'Webhooks', 'Test', '{spent} spent (limit {cap})', 'Open settings'];
+  const miss = words.filter((w) => !zh[w] || !ja[w]);
+  ok(!miss.length, `every word of the readout in zh and ja (${words.length} strings)`, miss.join(' | '));
 }
 
 console.log(`\ntest-settings-view: ${pass} passed, ${fail} failed`);

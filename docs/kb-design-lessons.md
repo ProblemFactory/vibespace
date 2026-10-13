@@ -470,7 +470,11 @@ REMAINING BACKLOG (not yet fixed — see [[project-code-review-2026-07-backlog]]
 
 **It belongs in…** src/decision-model.js (PURE: the dialect table, the use's input plan, budgetVerdict, journalRow, the rubric) + src/server/decision-engine.js `judge()` (the ONE caller: memo, budget, one fetch, counter, journal, backoff) + its vendor-whitelist ALLOW row. Never a second fetch, never a key outside the registry row, never vendor prose in UI or agent context.
 
-**Gated by (run BEFORE commit):** test-decision-model + test-vendor-whitelist (+ heavy test-decision-engine).
+**Gated by (run BEFORE commit):** test-decision-model + test-vendor-whitelist (+ test-decision-attention for the attention use; heavy test-decision-engine).
+
+**Lesson (lane decision-attention-facts, 2026-10-13): a judge asked about "the reader" must be TOLD who the reader is — in facts, not text.** On the owner's hub the attention judge was right on ~4 of 16 "needs you" rows and scored an @ of him 0.15: the record never said who the reader is, `matters` was asked against an empty block (a coin flip 140 / 145 times), and the product's own facts (an @, a DM, unread since the read line, one mail in 3 inboxes, a bulk sender) never left the hub. Rules: (1) what the PRODUCT measured goes in as a `facts:` line FIRST in the record — counts, kinds, ages, never a name (census); (2) never ask a question about an input that is empty (`rubricQuestions({hasBlock})`); (3) the questions carry their own instructions — the state never repeats them (13 % of a call); (4) facts that move with reads are input, NOT memo material (re-judge on a new message, not on a read); (5) a body is what the reader has NOT read, in whole messages, the rest COUNTED — never a silent cut; (6) a bound taken from a brief is measured on the owner's data first (the duplicate-mail window: 15 min missed his own 22-min notice).
+
+**Lesson (INBOX v2, lane decision-inbox-rank, 2026-10-13):** a question every record answers the same way is no question — v1 asked whether "an agent waits on your decision" of For-you items, every one of which is that. Hand the judge the hub's FACTS as one line of counts / kinds / ages (no names, no ids), ask a choice whose values differ per record, and let a fact the hub already holds (a blocked status, the clock) place the record before any call — the same law as the channel judge's fact tags.
 
 ### Row: Live session stdout consumers
 

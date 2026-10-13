@@ -7,13 +7,13 @@ import { BACKEND_META } from './agent-meta.js';
 import { t } from './i18n.js';
 import { renderVoiceSheet } from './voice-plugin-card.js'; // the Voice row's 「待处理 N」 sheet: Connect + the proposal cards
 import { pluginCategoryOf } from './settings-schema.js';
+import { decisionLineOf, paintDecisionLine, liveDecisionLine } from './decision-readout.js'; // lane decision-spend-readout: the judge's money as the row's second line
 
 // lane plugin-settings-p0 (owner 2026-10-13, the VS Code plugin model — docs/design-plugin-settings.zh.md): the
 // Plugins sidebar is a plain LIST — one row per plugin: name · one-line description · status chip · on/off switch ·
 // [install / uninstall] · ⚙ (opens All Settings at the plugin's section). Every configuration row lives in All
 // Settings (src/plugin-settings.js); keys stay in Services › Integrations. A chip that has something waiting (Voice
 // proposals, a Tailscale sign-in, a manifest plugin's windows) opens it — an action door, never settings.
-const usd = (n) => '$' + (Number(n) || 0).toFixed(n && n < 0.01 ? 6 : 2);
 /** the on/off switch (role=switch over a checkbox): the row's one toggle */
 function makeSwitch(on, { disabled = false, label, onChange }) {
   const l = document.createElement('label');
@@ -26,12 +26,14 @@ function makeSwitch(on, { disabled = false, label, onChange }) {
   l.title = label;
   return l;
 }
-/** one list row: icon dot · name + description · chip · switch · [install] · ⚙ */
-function pluginRow({ id, label, description, tone, chip, chipTitle, onChip, sw, install, gear }) {
+/** one list row: icon dot · name + description [+ a readout line] · chip · switch · [install] · ⚙ — `fact` is a READOUT
+ *  (a drawn element, not a control: the Decision API's money today, lane decision-spend-readout), under the description */
+function pluginRow({ id, label, description, tone, chip, chipTitle, onChip, sw, install, gear, fact = null }) {
   const row = document.createElement('div');
   row.className = 'plugin-row'; row.dataset.plugin = id;
   const main = document.createElement('div'); main.className = 'plugin-row-main';
   main.append(Object.assign(document.createElement('div'), { className: 'plugin-row-name', textContent: label }), Object.assign(document.createElement('div'), { className: 'plugin-row-desc', textContent: description || '' }));
+  if (fact) main.appendChild(fact);
   main.title = description || '';
   const c = document.createElement(onChip ? 'button' : 'span');
   c.className = 'plugin-chip' + (tone ? ' plugin-chip-' + tone : ''); c.textContent = chip; c.title = chipTitle ? `${chip} · ${chipTitle}` : chip; // the narrow rail clips the chip — its whole word on hover
@@ -92,16 +94,17 @@ export function installPluginsUI(App) {
         const api = (pathTail, opts) => fetchJson(`/api/plugins/${p.id}/${pathTail}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, ...opts })
           .then((x) => { if (!x) throw new Error(t('Server unreachable — nothing was changed')); if (x.error) throw new Error(x.error); return x; });
         const act = async (fn) => { try { await fn(); } catch (e) { showToast(e.message || t('Failed'), { type: 'error' }); } render(); };
-        let chip, tone = '', chipTitle = '', onChip = null, swOn = !!p.enabled, swDisabled = false, onSwitch, install = null;
+        let chip, tone = '', chipTitle = '', onChip = null, swOn = !!p.enabled, swDisabled = false, onSwitch, install = null, fact = null;
         if (isDecision) {
           const d = p.decision || {};
-          const tot = (d.today && d.today.total) || { calls: 0, usd: 0 };
-          const hits = (d.today && d.today.byUse && d.today.byUse.attention && d.today.byUse.attention.hits) || 0;
+          const L = decisionLineOf(p);   // ONE PURE line (decision-model decisionTodayLine): the money is drawn, not hidden in a title
           chip = !p.enabled ? t('turned off') : p.configured ? t('on · {provider}', { provider: d.providerLabel || '' }) : t('on — no provider key yet');
           tone = p.enabled && p.configured ? 'ok' : p.enabled ? 'warn' : '';
-          chipTitle = t('Today: judged {n} · {m} needed you', { n: tot.calls, m: hits }) + ' · ' + t('{spent} spent (limit {cap})', { spent: usd((Number(tot.usd) || 0) + (Number(d.today && d.today.reserved) || 0)), cap: usd((Number(d.dailyBudgetCents) || 0) / 100) })
+          chipTitle = L.text
             + (d.reconnect ? ' · ' + t('Reconnect: the provider refused this key (HTTP {status}).', { status: d.reconnect.status }) : '');
           onSwitch = (on) => act(() => api('enabled', { body: JSON.stringify({ enabled: on }) }));
+          fact = Object.assign(document.createElement('div'), { className: 'plugin-row-fact' }); fact.dataset.decisionToday = '1';
+          liveDecisionLine(fact, (x) => paintDecisionLine(fact, x, 'short'), { first: p });   // patched in place every 60 s while drawn
         } else if (isDictation) {
           let waiting = 0;
           if (p.configured) { const v = await fetchJson('/api/voice/teach'); waiting = (v && Array.isArray(v.proposals)) ? v.proposals.length : 0; }
@@ -158,7 +161,7 @@ export function installPluginsUI(App) {
         }
         list.appendChild(pluginRow({ id: p.id, label: p.label, description: t(p.description), tone, chip, chipTitle, onChip,
           sw: makeSwitch(swOn, { disabled: swDisabled, label: t('Turn {name} on or off', { name: p.label }), onChange: (on, cb) => onSwitch(on, cb) }),
-          install, gear: this._pluginGear(p.id, p.label) }));
+          install, fact, gear: this._pluginGear(p.id, p.label) }));
       }
       await renderManifestPlugins(body);
     };

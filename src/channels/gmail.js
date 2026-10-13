@@ -248,6 +248,7 @@ const CONSENT = Object.freeze({ mode: 'ephemeral', landing: null });
 const caps = Object.freeze({
   receive: 'push',
   pushTransport: 'pubsub-pull',
+  mentions: 'not-applicable',   // lane attention-rule-at-you: mail has no @ — a To / Cc is the direct address
   pushAckBudgetMs: 10000,          // Pub/Sub's default ack deadline — we ack after the engine answered (fence 11)
   pushOptIn: true,                 // DEFAULT OFF (decision 20): `push.enabled === true` on the record turns it on
   pollInterval: { hot: 60, cold: 300, floor: 30 },

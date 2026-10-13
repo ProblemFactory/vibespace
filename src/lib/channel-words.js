@@ -507,6 +507,7 @@ export function statusTagParts(tag, { now = Date.now(), t = tDevice } = {}) {
     case 'held': return { ...around(t('last wake held'), ''), tone: 'warn', icon: 'alert', title: t('A wake for this conversation is held — its messages wait for the agent\'s next turn') };
     // lane lark-search-poll (owner decision 1): a single chat with unread messages — "单聊 · N 条新消息" (the tag's WIDTH
     // BUDGET lives in its words — test-channels-e2e ⑰: en "DM · N new", ja "個別 · 新着 N 件")
+    case 'at-you': return { ...around(t('@ me · {n}', { n: tag.n || 1 }), ''), tone: 'attn', icon: null, title: t('Somebody named you with @ here — {n} unread in the last 24 hours', { n: tag.n || 1 }) };
     case 'direct': return { ...around(t('DM · {n} new', { n: tag.n || 1 }), ''), tone: 'attn', icon: null, title: t('Somebody wrote to you in a single chat — {n} unread', { n: tag.n || 1 }) };
     case 'replied': return { ...around(t('replied {ago}', { ago: agoText(tag.at) }), ''), tone: 'neutral', icon: null, title: t('You wrote in this conversation {ago}', { ago: agoText(tag.at) }) };
     // lane decision-attention (D2): the Decision API judged that this row needs the owner — "needs you · 0.82 · asks you,

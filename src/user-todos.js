@@ -55,6 +55,16 @@ function normalizeI18n(x) {
   return out;
 }
 
+/** lane decision-inbox-rank (the Decision API's INBOX v2): the board's FACTS of an item as the store keeps them —
+ *  {state, dated (≤ 40 characters of the item's own words, a date phrase), due, reasks, askedAt} — or null. Counts,
+ *  kinds and times only: what the tray orders by without reading the item's text. */
+const FACT_STATES = ['blocked', 'continued', 'finished', 'unknown'];
+function normalizeFacts(f) {
+  if (!f || typeof f !== 'object' || !FACT_STATES.includes(f.state)) return null;
+  const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+  return { state: f.state, dated: typeof f.dated === 'string' && f.dated ? f.dated.slice(0, 40) : null, due: num(f.due), reasks: Math.max(0, Math.floor(num(f.reasks) || 0)), askedAt: num(f.askedAt) || 0 };
+}
+
 /** A producer's ACTION PAYLOAD (design-reset-credits §5, 2026-09-22): what the
  *  inbox button does when the user decides — `{type, …flat facts}`. Validated
  *  here like `i18n`: a kebab-case `type`, at most 12 flat fields of
@@ -341,7 +351,10 @@ class UserTodoManager {
   /** USE ④ (lane inbox-decision-group): the Decision API's door. `setGrouping(fn)` — what the snapshot says about the
    *  tray's sections (null = off); `openItems()` — the open items (copies); `setJudged(id, judged)` — writes the judge's
    *  verdict BESIDE an open item (`judged: {group: 'now'|'later'|null, p, at, v}`) and nothing else: the item's
-   *  urgency is the agent's declaration and is never written here. → true when it wrote. */
+   *  urgency is the agent's declaration and is never written here. → true when it wrote.
+   *  lane decision-inbox-rank (INBOX v2): the verdict also keeps `why` (the chosen value), `facts` (normalizeFacts) and
+   *  `sig` (what it was made under); `setFacts([[id, facts]…])` — the engine's pass writes each item's current facts
+   *  into `judged.facts` (a `{group: null, v: 0}` stand-in before any verdict), only what changed, ONE broadcast. */
   setGrouping(fn) { this._grouping = typeof fn === 'function' ? fn : null; }
   openItems() { return this._state.items.filter((i) => i.status === 'open').map((i) => ({ ...i })); }
   setJudged(id, judged) {
@@ -350,8 +363,24 @@ class UserTodoManager {
     const group = judged.group === 'now' || judged.group === 'later' ? judged.group : null;
     const p = typeof judged.p === 'number' && Number.isFinite(judged.p) ? judged.p : null;
     it.judged = { group, p, at: Number(judged.at) || this._now(), v: Number(judged.v) || 1 };
+    it.judged.why = typeof judged.why === 'string' && /^[a-z]{1,20}$/.test(judged.why) ? judged.why : null;
+    it.judged.facts = normalizeFacts(judged.facts);
+    it.judged.sig = typeof judged.sig === 'string' ? judged.sig.slice(0, 200) : null;
     this._save(); this._notify();
     return true;
+  }
+  setFacts(entries) {
+    let changed = false;
+    for (const [id, f] of Array.isArray(entries) ? entries : []) {
+      const it = this.get(id), facts = normalizeFacts(f);
+      if (!it || it.status !== 'open' || !facts) continue;
+      const j = it.judged && typeof it.judged === 'object' ? it.judged : null;
+      if (j && JSON.stringify(j.facts || null) === JSON.stringify(facts)) continue;
+      it.judged = j ? { ...j, facts } : { group: null, p: null, at: 0, v: 0, why: null, facts, sig: null };
+      changed = true;
+    }
+    if (changed) { this._save(); this._notify(); }
+    return changed;
   }
   notify() { this._notify(); }
 
@@ -432,6 +461,10 @@ class UserTodoManager {
     const openCount = this._state.items.filter((i) => i.sessionKey === sessionKey && i.status === 'open').length;
     if (existing) {
       let changed = false;
+      // lane decision-inbox-rank: an agent filing the SAME words (text, and the same detail or none) of an item still open
+      // is a RE-ASK — counted (the tray's judge reads "re-asked N times"; the 48 h decay restarts at the last one); new
+      // words are an edit (F2 below), and a server producer's periodic re-file is not an ask
+      const reask = existing.status === 'open' && origin === 'agent' && (!detail || detail === existing.detail);
       if (existing.status !== 'open') {
         if (openCount >= MAX_OPEN_PER_SESSION) throw new Error(`this session already has ${openCount} open items — resolve some before adding more`);
         existing.status = 'open'; existing.resolvedAt = null; existing.resolvedBy = null;
@@ -441,12 +474,14 @@ class UserTodoManager {
         existing.expiresAt = expiresAt;
         existing.reply = null; // a re-filed ask is a NEW question: the last reply answered the old filing
         delete existing.judged; // inbox-verify F2: …and the judge's verdict judged the old filing
+        delete existing.reasks; delete existing.reaskedAt; // lane decision-inbox-rank: a new filing has no re-asks yet
         changed = true;
       } else if (expiresAt && existing.expiresAt != null && expiresAt > existing.expiresAt) {
         // an OPEN item merges to the LATER end; one with no expiresAt is lasting
         // (it never expires) and a re-file never shortens that
         existing.expiresAt = expiresAt; changed = true;
       }
+      if (reask) { existing.reasks = (Number(existing.reasks) || 0) + 1; existing.reaskedAt = this._now(); changed = true; }
       if (detail && detail !== existing.detail) { existing.detail = detail; delete existing.judged; changed = true; } // F2: new words, no old verdict
       if (urgency && urgency !== existing.urgency) { existing.urgency = urgency; changed = true; }
       if (kind && kind !== existing.kind) { existing.kind = kind; changed = true; }

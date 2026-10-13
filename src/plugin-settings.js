@@ -49,6 +49,11 @@ const PLUGIN_SETTINGS = {
       { key: 'attentionBlock', path: 'decision.attentionBlock', type: 'text', multiline: true, maxLength: 1500, draft: 'decision', default: '', apply: 'server',
         label: t('What matters to me (Decision API)'),
         description: t('With the Decision API plugin on, the Channels first screen also lists conversations the judge thinks need you now. Say in your own words what matters to you (at most 1,500 characters) — it goes to the judge as written. "Draft from my recent decisions" proposes lines from your ✓ / ✗ answers for you to edit; nothing is saved until you save it.') },
+      // lane decision-attention-facts: IMPLICIT LABELS — a reply ⇒ "needs", a listed row left unopened a day ⇒ "not"
+      // (src/server/channels-attention.js `learn`); off by default, nothing written while off
+      { key: 'implicitLabels', path: 'decision.implicitLabels', type: 'boolean', default: false, apply: 'server',
+        label: t('Learn from what I do'),
+        description: t('Besides your ✓ / ✗, it learns from what you do. Example: you reply in a conversation it did not pick out, so similar ones are picked out next time; one it picked out that you leave unopened for a day counts as a “no”. You see it in what Channels home lists. Your own ✓ / ✗ always come first.') },
     ],
   },
   'voice-input': {

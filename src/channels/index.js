@@ -143,6 +143,10 @@ const PUSH_TRANSPORTS = Object.freeze(['ws-long-conn', 'pubsub-pull', 'long-poll
 // lane webhook-l1-server: the sender honesty line on this channel — `option` (the owner's switch decides; absent = this) or
 // `never` (the other side may never learn an agent drafted it: the engine appends none and the panel hides the switch)
 const HONESTY_LINES = Object.freeze(['option', 'never']);
+// lane attention-rule-at-you: does this channel's record carry WHO a message @s (`mentions`, resolved — src/channel-record.js)?
+// `people` = its records name the persons they @ (the first screen's 「有人 @ 了我」 rule reads them), `none` = it never does,
+// `not-applicable` = the medium has no @ (mail: a To / Cc is the direct address). Absent = `none`. CLOSED.
+const MENTION_CAPS = Object.freeze(['people', 'none', 'not-applicable']);
 // lane webhook-l1-server: what a MODULE declares instead of a `builtin` branch — WHO answers reach (`msg-acl` = the agents
 // roster's own rule; `grants` = AgentReach rows, like every vendor)
 const REACH_SOURCES = Object.freeze(['grants', 'msg-acl']);
@@ -406,6 +410,7 @@ function validateCaps(kind, caps, { channelSettings } = {}) {
   if (c.honestyLine !== undefined && !HONESTY_LINES.includes(c.honestyLine)) bad(`caps.honestyLine must be one of ${HONESTY_LINES.join('|')} (got ${JSON.stringify(c.honestyLine)})`);
   if (c.sendStartsTurn !== undefined && typeof c.sendStartsTurn !== 'boolean') bad('caps.sendStartsTurn must be a boolean (true = a send here is a billed agent turn)');
   if (c.kind !== undefined && c.kind !== kind) bad(`caps.kind ${JSON.stringify(c.kind)} is not the adapter's own kind`);
+  if (c.mentions !== undefined && !MENTION_CAPS.includes(c.mentions)) bad(`caps.mentions must be one of ${MENTION_CAPS.join('|')} (got ${JSON.stringify(c.mentions)})`);
   if (c.prepareSend !== undefined && typeof c.prepareSend !== 'boolean') bad('caps.prepareSend must be a boolean (true = prepareSend(convId, {text}) decides the mentions when a proposal is made)');
   if (c.prepareSend === true && !(Array.isArray(c.sendAs) && c.sendAs.length)) bad('caps.prepareSend on a read-only adapter (caps.sendAs is empty)');
   if (c.retention !== undefined && !RETENTION_MODES.includes(c.retention)) bad(`caps.retention must be one of ${RETENTION_MODES.join('|')}`);

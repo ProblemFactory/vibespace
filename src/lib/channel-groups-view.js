@@ -249,7 +249,7 @@ export function foldsToWrite(folds, liveIds = null) {
 /** What NEEDS THE PERSON (the tag codes that open a section): handed to someone, awaiting their answer (or unknown),
  *  a held wake, a direct message they have not read — and an @ of them. An agent's read and their own reply are
  *  activity, not a need. */
-export const NEEDS_YOU_TAGS = Object.freeze(['awaiting', 'unknown', 'assigned', 'held', 'direct']);
+export const NEEDS_YOU_TAGS = Object.freeze(['awaiting', 'unknown', 'at-you', 'assigned', 'held', 'direct']);
 export function needsYou(row, now = Date.now()) {
   if (!row || row.unlisted) return false;
   if (Number(row.atYou) > 0) return true;

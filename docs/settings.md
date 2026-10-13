@@ -304,6 +304,7 @@ A linked Lark or Gmail account is an aggregated IM (2026-09-26, docs/design-comm
 | `channels.offHoursEnd` | string | `18:00` | **Outbox: working hours end (HH:MM)** — Only used when the time zone above is set. |
 | `channels.attention.preset` | enum | `both` | **How "needs attention" is decided** — A shortcut that sets the switches below. Change any switch and this shows the mix you have. |
 | `channels.attention.rule.direct` | boolean | `true` | **Someone wrote to me directly and I have not read it** — A one-to-one chat with unread messages from the last 24 hours (an app or bot never counts). |
+| `channels.attention.rule.at-you` | boolean | `true` | **Someone @-mentioned me and I have not read it** — A message in a group or a one-to-one chat that names you with @, from the last 24 hours, that you have not read. |
 | `channels.attention.rule.awaiting` | boolean | `true` | **A message waiting for my approval to send** — A draft or a reply sitting in the Outbox until you approve it. |
 | `channels.attention.rule.assigned` | boolean | `true` | **Handed to an agent or a group, and it acted on it** — A conversation you handed over; a whole-account or pattern hand-over lists it once the agent was woken for it in the last 24 hours. |
 | `channels.attention.rule.read` | boolean | `true` | **An agent read it (or new messages came after it read)** — An agent read the conversation in the last 24 hours. |
@@ -446,6 +447,7 @@ now fails the build if a category ever goes unlisted again.
 | `plugin.decision-api.dailyBudgetUsd` | number | `1` | **Spend at most per day (USD)** — Once a day's calls have cost this much, nothing more is sent to the model until midnight. The Plugins list shows today's count on the Decision API row. |
 | `decision.threshold` | number | `0.7` | **Needs-attention threshold (Decision API)** — How sure the judge must be (0.50–0.90) before a conversation joins the first screen. Higher = fewer, surer rows. |
 | `decision.attentionBlock` | text | `''` | **What matters to me (Decision API)** — With the Decision API plugin on, the Channels first screen also lists conversations the judge thinks need you now. Say in your own words what matters to you (at most 1,500 characters) — it goes to the judge as written. "Draft from my recent decisions" proposes lines from your ✓ / ✗ answers for you to edit; nothing is saved until you save it. |
+| `decision.implicitLabels` | boolean | `false` | **Learn from what I do** — Besides your ✓ / ✗, it learns from what you do. Example: you reply in a conversation it did not pick out, so similar ones are picked out next time; one it picked out that you leave unopened for a day counts as a “no”. You see it in what Channels home lists. Your own ✓ / ✗ always come first. |
 <!-- /settings-table -->
 
 ### Plugin: Voice input · Dropline

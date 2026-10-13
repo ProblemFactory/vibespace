@@ -127,6 +127,7 @@ const Av = require('../channel-avatars.js');   // lane channel-avatars (B-5fe1):
 // design 008 (B-3cf8, userW's first Channels open: 77.5 MB, 1.49 s): THE FIRST SCREEN'S PREDICATE + the page rules,
 // shared with the panel (PURE) — the first read views only the rows `candidateOf` names and `statusTag` decides.
 const FO = require('../channel-focus.js');
+const DM = require('../decision-model.js');   // lane decision-attention-facts (PURE): the duplicate-inbox key + count of a scan's facts
 // verify r1 (S): the characters a name door drops (peerName / the ladder's oneLine) — the search's raw side drops them too
 const { HIDDEN_RE } = require('../hidden-chars.js');
 // §25 (2026-09-27, the render layer): a record's typed render tree — served for
@@ -411,6 +412,24 @@ function previewText(w) {
   const newest = Array.isArray(w && w.fresh) ? w.fresh.find((r) => r && Number(r.at) === Number(w.lastAt) && Array.isArray(r.blocks)) : null;
   return (newest && Blocks.previewOf(newest.blocks, LAST_TEXT_MAX)) || w.lastText;
 }
+/** lane attention-rule-at-you: the NEWEST record of a batch that @s the owner, as the row quotes it (`{at, text, who}`), or
+ *  `prev` when the batch holds none newer. */
+function atYouLastOf(prev, recs, selfId) {
+  let best = prev && Number(prev.at) > 0 ? prev : null;
+  for (const r of Array.isArray(recs) ? recs : []) {
+    if (!FO.mentionsSelf(r, selfId) || !(Number(r.at) > (best ? Number(best.at) : 0))) continue;
+    best = { at: Number(r.at), text: lastTextOf((Array.isArray(r.blocks) && Blocks.previewOf(r.blocks, LAST_TEXT_MAX)) || r.text), who: String((r.author && r.author.name) || '').slice(0, 100) };
+  }
+  return best;
+}
+/** The row's @-me facts: the kept instants past the read line + the newest one's words ({} when none is unread). */
+function atYouView(en) {
+  const line = Number(en.readAt) || 0;
+  const ats = (Array.isArray(en.atYouAts) ? en.atYouAts : []).filter((at) => Number(at) > line);
+  if (!ats.length) return {};
+  const l = en.atYouLast && Number(en.atYouLast.at) > line ? en.atYouLast : null;
+  return { atYouAts: ats, ...(l ? { atYouText: l.text || '', atYouWho: l.who || '' } : {}) };
+}
 const COALESCE_MAX_SECONDS = 600;
 
 function create(deps = {}) {
@@ -488,7 +507,10 @@ function create(deps = {}) {
     policy: () => FO.attentionPolicy((k) => serverSetting(k)),   // lane attention-policy: the owner's switches (the judge sees what they let go)
     viewNow: (key) => { const en = store.index.live()[key]; const rec = en && !en.unlistedAt && adapterRecords().adapters.find((r) => r.id === en.adapterId); return rec ? rowView(rec, en) : null; },
     accountNever: (id) => { const r = adapterRecords().adapters.find((x) => x.id === id); return !!(r && r.judge === 'never'); },
-    tailOf: (v) => attentionTail(v) });
+    tailOf: (v, o) => attentionTail(v, o),
+    // lane decision-attention-facts: the facts of ONE scan (built once per drain) + the row's read line / own newest message
+    facts: () => attentionScanFacts(),
+    rowState: (key) => { const en = store.index.live()[key]; return en ? { readAt: Number(en.readAt) || 0, selfAt: Number(en.selfAt) || 0, lastAt: Number(en.lastAt) || 0 } : null; } });
   // A store file that could not be read at boot was SET ASIDE (r2 — never
   // silently read as empty and overwritten): ONE "For you" item per file,
   // naming where its bytes are. The store already logged the named line.
@@ -2679,6 +2701,9 @@ function create(deps = {}) {
     const ra = FO.readAdvance(en.readAt, fresh, selfIdOf(rec));
     if (ra.moved) { en.readAt = ra.readAt; en.unread = unreadSince(rec.id, convId, ra.readAt); }
     else en.unread = (Number(en.unread) || 0) + ra.unread;
+    // lane attention-rule-at-you: the instants of the records that @ the owner (FO.keepAtYou; the row counts them past readAt)
+    const ay = FO.keepAtYou(en.atYouAts, fresh, selfIdOf(rec));
+    if (ay.length) { en.atYouAts = ay; en.atYouLast = atYouLastOf(en.atYouLast, fresh, selfIdOf(rec)); }
   }
   /** The distinct authors seen in a conversation, newest first, bounded —
    *  the facts a pattern's `participant` / `from-address` rules match. */
@@ -3353,6 +3378,7 @@ function create(deps = {}) {
     return {
       key: en.key, id: en.id, adapterId: en.adapterId, adapterLabel: rec.label || rec.id, title: humanNameOf(rec, en), kind: en.kind, ...(en.app ? { app: true } : {}), ...picOf(rec, en, c),   // B-c127: THE NAME LADDER (null = nothing known; the client's ③)
       participants: en.participants, lastAt: en.lastAt, lastText: en.lastText || '', ...lastWhoOf(rec, en), unread: en.unread || 0,
+      ...atYouView(en),   // lane attention-rule-at-you: the @-me instants past the read line + the newest one's words
       ...(en.lastRecalled && Number(en.lastRecalled.at) >= (Number(en.lastAt) || 0) ? { lastRecalled: true } : {}),   // lane channel-record-revisions
       unlisted: !!en.unlistedAt,
       refresh: en.refresh && typeof en.refresh === 'object' ? { every: en.refresh.every, by: en.refresh.by || null } : null,
@@ -4045,7 +4071,7 @@ function create(deps = {}) {
     if (!e.pushBatch) e.pushBatch = new Map();
     const b = e.pushBatch.get(convId) || { appended: 0, lastAt: null, lastText: null, lastTextAt: -Infinity, selfAt: 0 };
     b.appended += w.appended;
-    if (Array.isArray(w.fresh)) { const sa = selfAtOf(w.fresh, selfIdOf(rec)); if (sa > (b.selfAt || 0)) b.selfAt = sa; }
+    if (Array.isArray(w.fresh)) { const sa = selfAtOf(w.fresh, selfIdOf(rec)); if (sa > (b.selfAt || 0)) b.selfAt = sa; b.atYouAts = FO.keepAtYou(b.atYouAts, w.fresh, selfIdOf(rec)); b.atYouLast = atYouLastOf(b.atYouLast, w.fresh, selfIdOf(rec)); }
     if (w.lastAt && (!b.lastAt || w.lastAt > b.lastAt)) b.lastAt = w.lastAt;
     if (w.lastAt && w.lastAt >= b.lastTextAt && typeof w.lastText === 'string') { b.lastTextAt = w.lastAt; b.lastText = previewText(w); }
     e.pushBatch.set(convId, b);
@@ -4066,6 +4092,7 @@ function create(deps = {}) {
         if (b.selfAt > (Number(en.selfAt) || 0)) en.selfAt = b.selfAt;
         if (b.selfAt > (Number(en.readAt) || 0)) en.readAt = b.selfAt;   // lane channel-self-unread: sending = read up to it
         en.unread = unreadSince(rec.id, convId, en.readAt || 0);
+        if (b.atYouAts && b.atYouAts.length) { en.atYouAts = FO.keepAtYou([...(en.atYouAts || []), ...b.atYouAts], []); if (b.atYouLast && !(Number(en.atYouLast && en.atYouLast.at) >= b.atYouLast.at)) en.atYouLast = b.atYouLast; }   // lane attention-rule-at-you
         en.lane = { ...(en.lane || {}), via: 'push', lastPushAt: now(), firstSeenTotal: ((en.lane && en.lane.firstSeenTotal) || 0) + b.appended };
         changed.push(`${rec.id}/${convId}`);
       }
@@ -6006,10 +6033,47 @@ function create(deps = {}) {
     return { ok: true, judge: value };
   }
   /** lane decision-attention: the judge's body — a KNOWN conversation's newest records (an index row first; the record-clear
-   *  census's gate), never a system notice; the owner's own marked (`self`). */
-  function attentionTail(v) {
+   *  census's gate), never a system notice; the owner's own marked (`self`). lane decision-attention-facts: ONE bounded
+   *  backward read (`limit`, ≤ 50 — never the whole log); with the read line known (`since`) the records past it when any,
+   *  else the last 8; each with its instant and its FLAGS for the facts line — an @ of the owner (`FO.mentionsSelf`, the
+   *  at-you rule's predicate), a reply to one of the owner's messages in the read, the mail's `automated` level. */
+  function attentionTail(v, { since = 0, limit = 8 } = {}) {
     if (!v || !store.index.has(`${v.adapterId}/${v.id}`)) return [];
-    return store.readTail(v.adapterId, v.id, { limit: 8 }).filter((r) => r && !FO.systemRead(r)).map((r) => ({ who: r.author && r.author.name, text: r.text, self: FO.selfRead(r) }));
+    const rec = adapterRecords().adapters.find((r) => r.id === v.adapterId);
+    const selfId = rec ? selfIdOf(rec) : null;
+    const recs = store.readTail(v.adapterId, v.id, { limit: Math.max(1, Math.min(50, Number(limit) || 8)) }).filter((r) => r && !FO.systemRead(r));
+    const line = Number(since) || 0;
+    const shown = line > 0 && recs.some((r) => Number(r.at) > line) ? recs.filter((r) => Number(r.at) > line) : recs.slice(-8);
+    const own = new Set(recs.filter((r) => FO.selfRead(r, selfId)).map((r) => r.vendorId));
+    return shown.map((r) => ({ who: r.author && r.author.name, text: r.text, self: FO.selfRead(r, selfId), at: Number(r.at) || 0, atYou: FO.mentionsSelf(r, selfId), toSelf: !!(r.replyTo && own.has(r.replyTo)), automated: DM.automatedOf(r.facts) }));
+  }
+  /** lane decision-attention-facts: THE FACTS OF ONE ATTENTION SCAN — the duplicate-inbox map built ONCE over the live
+   *  index (O(rows): the mail accounts' rows by subject + sender, `DM.inboxKey`), then per row (by key) its kind, the
+   *  members the vendor counted, the owner's newest message (null = never stamped), the read line, the unread count, how
+   *  many of the owner's inboxes got the same mail (`DM.inboxCount`). Counts, kinds and instants — never a name. */
+  function attentionScanFacts() {
+    const live = store.index.live();
+    const mailIds = new Set(adapterRecords().adapters.filter((r) => registry.capsOf(r.kind).glyph === 'mail').map((r) => r.id));
+    const senderOf = (en) => (Array.isArray(en.authors) && en.authors[0] && en.authors[0].name) || '';
+    const byKey = new Map();
+    for (const en of Object.values(live)) {
+      if (!en || !mailIds.has(en.adapterId) || en.unlistedAt) continue;
+      const k = DM.inboxKey(en.title, senderOf(en));
+      if (!k) continue;
+      let a = byKey.get(k);
+      if (!a) byKey.set(k, (a = []));
+      a.push({ adapterId: en.adapterId, lastAt: Number(en.lastAt) || 0 });
+    }
+    return (v) => {
+      const en = v && live[v.key];
+      if (!en) return {};
+      const mail = mailIds.has(en.adapterId);
+      const k = mail ? DM.inboxKey(en.title, senderOf(en)) : '';
+      const aud = en.convCaps && en.convCaps.audience;
+      return { dm: en.kind === 'dm', app: !!en.app, mail, members: aud && Number.isInteger(aud.members) ? aud.members : null,
+        selfAt: 'selfAt' in en || Number(v.touch && v.touch.selfAt) > 0 ? Math.max(Number(en.selfAt) || 0, Number(v.touch && v.touch.selfAt) || 0) : null, readAt: Number(en.readAt) || 0, unread: Number(en.unread) || 0,
+        inboxes: k ? DM.inboxCount(byKey.get(k), en.adapterId, en.lastAt) : 0 };
+    };
   }
   /** lane decision-attention: "needs" / "not" on a judged row — a labeled example (src/server/channels-attention.js). */
   function labelJudged(key, lastAt, label) {

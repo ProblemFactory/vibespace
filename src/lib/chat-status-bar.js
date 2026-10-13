@@ -12,6 +12,7 @@ const PHONE_MQ = typeof window !== 'undefined' && window.matchMedia ? window.mat
 import { waitingChip } from '../helper-ask.js'; // PURE (lane S1): the waiting chip names who waits
 import { billingAuthKey, placementNote } from './pool-priority-model.js'; // PURE: THE ONE billing re-render key + the placement note (the title chip's twin)
 import { chipText as channelChipText, rowName as channelRowName, rowWords as channelRowWords, glyphFor as channelGlyphFor } from '../channel-touch.js'; // PURE (§26, B-099e): the channels chip's words
+import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
 
 /** Alias-tolerant model identity ('fable' vs 'claude-fable-5', a [1m] suffix) — the mismatch and the refusal chip (B-c643) ask the same. */
 const modelCore = (v) => String(v || '').replace(/\[1m\]$/, '').trim().replace(/^claude-/, '');
@@ -1134,7 +1135,7 @@ export class ChatStatusBar {
       dropdown.remove();
     };
     row.append(askLabel, pubLabel, sys.el, go);
-    box.append(ta, row);
+    box.append(voiceField(ta, attachDictation(ta)), row);
     const designs = document.createElement('div');
     designs.className = 'chat-design-designs' + (this._designs.length ? '' : ' hidden');
     this._designsEl = designs; // refilled in place on designs-updated while the popover is open
@@ -1616,7 +1617,7 @@ export class ChatStatusBar {
       resumeLink.title = t('Re-activate the last cleared/completed goal');
       resumeLink.onclick = () => { dropdown.remove(); this._ws.send({ type: 'set-goal', sessionId: this._sessionId, action: 'resume' }); };
       actions.append(resumeLink);
-      content.append(hint, input, actions);
+      content.append(hint, voiceField(input, attachDictation(input)), actions);
       dropdown.appendChild(content);
       setTimeout(() => input.focus(), 0);
       return;
@@ -1654,7 +1655,7 @@ export class ChatStatusBar {
             if (!sha) return;
             target = { type: 'commit', sha: sha.trim() };
           } else if (option.kind === 'custom') {
-            const instructions = await showInputDialog({ title: t('Custom review'), label: t('Review instructions'), confirmText: t('Review'), multiline: true });
+            const instructions = await showInputDialog({ title: t('Custom review'), label: t('Review instructions'), confirmText: t('Review'), multiline: true, decorate: (ta) => { const d = attachDictation(ta); voiceField(ta, d); return d; } });
             if (!instructions) return;
             target = { type: 'custom', instructions: instructions.trim() };
           }

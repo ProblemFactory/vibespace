@@ -37,6 +37,7 @@ import { mountDesignChanges } from './design-changes.js';
 import { mountDesignPresent } from './design-present.js';
 import { mountDesignTweaks } from './design-tweaks.js';
 import { openDesignHome } from './design-home.js'; // lane design-systems-home: the window with no folder = the home
+import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
 
 const RELOAD_COALESCE_MS = 250;
 const CHIP_MS = 10000;
@@ -406,7 +407,7 @@ export function openDesign(app, { host = '', dir = '', sessionId = '', syncId } 
     const cancel = mk('button', 'btn-cancel'); cancel.type = 'button'; cancel.textContent = t('Cancel');
     const send = mk('button', 'btn-create'); send.type = 'button'; send.textContent = t('Send');
     foot.append(cancel, send);
-    box.append(quote, ta, foot);
+    box.append(quote, voiceField(ta, attachDictation(ta)), foot);
     changes.composer(box, foot, ta); // "Add" beside Send + the Style row (src/lib/design-changes.js)
     cancel.onclick = () => closeComposer();
     send.onclick = () => sendComment();

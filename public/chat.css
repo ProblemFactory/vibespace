@@ -1865,9 +1865,14 @@ body.hide-empty-thinking .chat-compact .chat-msg.chat-empty-thinking { display: 
   .chat-plus-btn:active { background: var(--bg-hover); color: var(--text); }
   .chat-plus-btn svg { display: block; }
   .chat-input-field { position: relative; flex: 1; min-width: 0; display: flex; }
-  .chat-input-field .chat-input { min-height: 44px; max-height: 164px; padding: 10px 44px 10px 12px; border-radius: 22px; line-height: 24px; }
-  .chat-input-field .chat-voice-btn { position: absolute; right: 6px; bottom: 6px; min-width: 32px; min-height: 32px; height: 32px; padding: 0 8px; }
-  .chat-input-field .chat-expand-btn { display: none; top: 6px; right: 12px; bottom: auto; }
+  .chat-input-field .chat-input { min-height: 44px; max-height: 164px; padding: 10px 46px 10px 12px; border-radius: 22px; line-height: 24px; }
+  html.voice-absent .chat-input-field:not(.chat-input-tall) .chat-input { padding-right: 12px; }
+  /* lane voice-everywhere (owner: "点麦克风很容易误触展开"): the mic and ⤢ never share a point — the mic owns the
+     trailing edge's bottom, ⤢ the field's top-right corner (shown from three lines, where the field is ≥ 92 px: the two
+     40×40 hit areas keep ≥ 8 px between them; test-voice-chrome measures it) */
+  .chat-input-field .chat-voice-btn { position: absolute; right: 2px; bottom: 2px; min-width: 40px; min-height: 40px; height: 40px; padding: 0 10px; }
+  .chat-input-field .chat-voice-btn svg { width: 20px; height: 20px; }
+  .chat-input-field .chat-expand-btn { display: none; top: 2px; right: 2px; bottom: auto; width: 40px; height: 40px; font-size: 16px; }
   .chat-input-field.chat-input-tall .chat-expand-btn { display: flex; }
   .chat-input-area .chat-send-btn { width: 40px; height: 40px; margin-bottom: 2px; }
   .chat-input-area .chat-shortcut-hint { display: none; }

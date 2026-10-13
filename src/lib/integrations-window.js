@@ -1,4 +1,4 @@
-// THE INTEGRATIONS WINDOW — ⚙ → Integrations (集成与密钥)
+// THE INTEGRATIONS WINDOW — ⚙ → System ▸ Integrations (集成与密钥)
 // (docs/design-communication-panel.zh.md §14.5; docs/design-agent-browser-v2.md
 // §7.5 consumes the same window through `app.openIntegration(id)`).
 //
@@ -21,6 +21,10 @@
 //      proves less than the reader assumes is the mirror-image lie of a
 //      "Test connection" that never went online;
 //   6. "where this key is used", from `consumers` (or the phase it is wired in).
+//
+// THE CARDS ARE GROUPED by what uses the key (lane integrations-menu-home): 通讯 / 浏览器 / 插件, PURE
+// `R.groupOf` (derived, never a list of ids), a plain-noun head only over a group that has a card. Today no
+// communication row is a card — a Lark / Gmail / Slack account's client is chosen where the account is added.
 //
 // XSS LAW: every string here is either ours or a vendor's error text; all of
 // it renders through textContent. No innerHTML with dynamic content on any
@@ -400,7 +404,7 @@ export function openIntegrationsWindow(app, opts = {}) {
     const old = cards.get(id);
     if (old && old.querySelector('.integ-editing')) { old.dataset.stale = '1'; return; }
     const fresh = renderCard(app, r.integration, { refresh: refreshOne, focus: null });
-    if (old) old.replaceWith(fresh); else root.appendChild(fresh);
+    if (old) old.replaceWith(fresh); else (root.querySelector(`.integ-group[data-group="${R.groupOf(id)}"]`) || root).appendChild(fresh);
     cards.set(id, fresh);
   }
 
@@ -417,10 +421,23 @@ export function openIntegrationsWindow(app, opts = {}) {
     }
     drawPresets(r.presets || null);
     if (r.storeError) root.appendChild(el('div', 'plugin-detail plugin-cfg-warn', storeErrorText(r.storeError)));
-    for (const v of r.integrations) {
-      const card = renderCard(app, v, { refresh: refreshOne, focus: null });
-      cards.set(v.id, card);
-      root.appendChild(card);
+    // one section per group in R.GROUPS order; a row this page's registry cannot place (a newer server) still draws, last
+    const byGroup = new Map();
+    for (const v of r.integrations) { const g = R.groupOf(v.id); if (!byGroup.has(g)) byGroup.set(g, []); byGroup.get(g).push(v); }
+    for (const g of [...R.GROUPS, null]) {
+      if (!byGroup.has(g)) continue;
+      let box = root;
+      if (g) {
+        box = el('div', 'integ-group');
+        box.dataset.group = g;
+        box.appendChild(el('div', 'jobs-sec-head integ-group-head', t(R.GROUP_WORDS[g])));
+        root.appendChild(box);
+      }
+      for (const v of byGroup.get(g)) {
+        const card = renderCard(app, v, { refresh: refreshOne, focus: null });
+        cards.set(v.id, card);
+        box.appendChild(card);
+      }
     }
     if (pendingFocus) { const id = pendingFocus; pendingFocus = null; scrollTo(id); }
   }
@@ -445,8 +462,10 @@ registerWindowType({
   replay: (app, spec, { syncId } = {}) => app.openIntegration(spec && spec.focus, { syncId }),
 });
 
+// Under System ▸, beside the password — both are secrets (lane integrations-menu-home, owner 2026-10-13: the window
+// holds browser and plugin keys too, so a key store is a system thing, not Communication's).
 registerMenuItem({
-  menu: 'gear', parent: 'comm', order: 30, icon: ICON, // under Communication ▸ (gear-menu.js head 'comm'; Channels 10 · Outbox 20 · this 30)
+  menu: 'gear', parent: 'system', order: 55, icon: ICON, // gear-menu.js head 'system'; Backup & migrate… 50 · this 55 · Change password… 60
   label: () => t('Integrations…'),
   run: (c) => c.app.openIntegration(),
 });

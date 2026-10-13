@@ -99,7 +99,7 @@ for (const use of M.USES) {
   ok(/at most 1 record/.test(String(over)), 'a two-record attention ask is REFUSED by name — never a silent drop', over);
   const b = M.buildInput('attention', { rubric: M.rubricText(), records: Array.from({ length: 5 }, (_, i) => ({ title: 'T' + i, body: SENT })) }, { batch: 5 });
   ok(b.n === 5 && (b.text.match(/\[record \d\]/g) || []).length === 5 && b.ceiling === 1700 + 5 * 800, 'the probe\'s explicit {batch: 5} override still builds a 5-record input (the measurement), ceiling 1 700 + 5 × 800');
-  const qs = M.batchQuestions(M.rubricQuestions(), 2);
+  const qs = M.batchQuestions(M.rubricQuestions({ hasBlock: true }), 2);
   const un = M.unbatchAnswers(qs.map((q) => ({ name: q.name, type: 'predicate', probability: q.name.startsWith('r2_') ? 0.9 : 0.1 })), 2);
   ok(qs.length === 16 && qs[0].name === 'r1_needs_now' && un.length === 2 && un[1][0].name === 'needs_now' && un[1][0].probability === 0.9 && un[0].length === 8, 'batch questions r<i>_<name> and split back per record');
   const one = M.buildInput('rule', { condition: 'mentions an invoice', body: 'Invoice 42 is attached.' });
@@ -112,7 +112,7 @@ console.log('⑤ the memo key');
   const k = M.memoKey('attention', m, sha);
   ok(k === M.memoKey('attention', { ...m }, sha) && /^[0-9a-f]{64}$/.test(k), 'stable for the same record + state (a redraw / reopen / restart finds it)');
   ok(new Set([k, M.memoKey('attention', { ...m, lastAt: 101 }, sha), M.memoKey('attention', { ...m, userBlock: 'x' }, sha), M.memoKey('attention', { ...m, examples: 'f' }, sha), M.memoKey('rule', { id: 'c1', rule: 'r' }, sha)]).size === 5, 'a new message / user block / example set / use ⇒ a new key');
-  ok(M.memoMaterial('attention', m).includes('"v1"'), 'the rubric version is in the key');
+  ok(M.memoMaterial('attention', m).includes('"v2"'), 'the rubric version is in the key (v2 since lane decision-attention-facts — every row judged once more)');
 }
 
 console.log('⑥ budgetVerdict — the full table (USD: settled + reserved + this estimate; 100 cents default)');
@@ -156,10 +156,10 @@ console.log('⑦ journalRow — never the key, never a text');
   ok(!/SECRET|record text|vendor said|Bearer|answers/.test(s) && row.keyFp === 'abcdef' && row.memo.length === 16 && Object.keys(row).every((k) => M.JOURNAL_FIELDS.includes(k)), 'a fixed field list: the key only as a 6-char fingerprint, no text of anyone\'s', row);
 }
 
-console.log('⑧ the rubric v1 — the reason = the clauses the decision selected (golden set)');
+console.log('⑧ the rubric v2 — the reason = the clauses the decision selected (golden set)');
 {
   const names = [M.RUBRIC.needsNow, ...M.RUBRIC.clauses].map((c) => c.name);
-  ok(M.RUBRIC.version === 1 && eq(names, ['needs_now', 'to_me', 'asks_me', 'decision', 'deadline_money', 'waiting', 'escalation', 'matters']) && M.rubricQuestions().every((q) => !M.questionError(q)), 'needs_now + the seven clauses, each a valid predicate');
+  ok(M.RUBRIC.version === 2 && eq(names, ['needs_now', 'to_me', 'asks_me', 'decision', 'deadline_money', 'waiting', 'escalation', 'matters']) && eq(M.rubricQuestions({ hasBlock: true }).map((q) => q.name), names) && M.rubricQuestions({ hasBlock: true }).every((q) => !M.questionError(q)), 'needs_now + the seven clauses (with the person\'s block), each a valid predicate');
   ok(M.GOLDEN.length >= 4 && M.GOLDEN.every((g) => typeof g.text === 'string' && Object.keys(g.expect).every((k) => names.includes(k))), 'the golden set names only rubric clauses (the probe measures agreement on it)');
   for (const g of M.GOLDEN) {
     const answers = names.map((n) => ({ name: n, type: 'predicate', probability: g.expect[n] === true ? 0.9 : 0.1 }));
@@ -213,7 +213,7 @@ console.log('§ the attention use\'s input, verdict and examples (lane decision-
   // THE VERDICT a row keeps
   const ans = [{ name: 'needs_now', probability: 0.82 }, { name: 'asks_me', probability: 0.9 }, { name: 'deadline_money', probability: 0.61 }, { name: 'escalation', probability: 0.2 }, { name: 'to_me', refused: true, why: 'missing' }];
   const j = M.judgedOf(ans, 77);
-  ok(j && j.p === 0.82 && eq(j.clauses, ['asks_me', 'deadline_money']) && j.lastAt === 77 && j.rubricV === 1 && j.source === 'judge' && !('threshold' in j), 'the verdict a row keeps: p, the clause NAMES at their own thresholds, the message it is about — threshold-free (the row applies the current setting)', j);
+  ok(j && j.p === 0.82 && eq(j.clauses, ['asks_me', 'deadline_money']) && j.lastAt === 77 && j.rubricV === 2 && j.source === 'judge' && !('threshold' in j), 'the verdict a row keeps: p, the clause NAMES at their own thresholds, the message it is about — threshold-free (the row applies the current setting)', j);
   ok(M.judgedOf([{ name: 'needs_now', refused: true, why: 'refusal' }], 1) === null && M.criteriaQuestions().length === 20 && M.criteriaQuestions().every((q) => M.questionError(q) === null), 'a refused needs_now keeps no verdict; the draft\'s 20 catalogue questions are well-formed');
 }
 
@@ -286,6 +286,210 @@ console.log('the ONE scrub (inbox-verify F1)');
   const late = MC.load('src/decision-model.js', src.replace('const bounded = P.cutText(scrub(raw, max), Math.max(64, max * 4));', 'const bounded = scrub(P.cutText(str(raw), Math.max(64, max * 4)), max);'), 'late');
   const tn = noScrub.buildInput('rule', PER.rule).text, tl = late.buildInput('rule', { condition: 'c', records: [{ body: straddle }] }).text;
   ok(leaks(tn).length >= 4 && tl.includes('sk-ant'), `RED CONTROLS: cleanPart without the scrub leaks [${leaks(tn)}]; the scrub after the bound leaks the split key's head`, { tn: leaks(tn), tl: tl.slice(-60) });
+}
+
+// ── lane decision-spend-readout: decisionTodayLine — THE JUDGE'S MONEY IN ONE LINE (owner 2026-10-13) ──
+{
+  console.log('\ndecisionTodayLine (lane decision-spend-readout)');
+  const L = (u, cap, o) => M.decisionTodayLine(u, cap, o);
+  const zero = L({ byUse: {} }, 1);
+  ok(zero.on && zero.money === '$0' && zero.short === 'Today $0 / $1.00 · judged 0 · hits 0' && !zero.warn, 'zero: nothing moved ⇒ $0 (no red)', zero);
+  const sub = L({ byUse: { attention: { calls: 60, usd: 0.009, hits: 1 }, inbox: { calls: 3, usd: 0.001 } } }, 1);
+  ok(sub.money === '< $0.01' && sub.short === 'Today < $0.01 / $1.00 · judged 63 · hits 1' && sub.text === 'Today: judged 63 · 1 needed you · < $0.01 spent (limit $1.00)', 'sub-cent: 63 calls under a cent ⇒ 「< $0.01」, never $0.00', sub);
+  ok(sub.title === 'Needs attention $0.009 · For-you tray $0.001 · Rules $0', 'the by-use breakdown (the title) keeps a tenth of a cent', sub.title);
+  const free = L({ byUse: { attention: { calls: 2, usd: 0 } } }, 1);
+  ok(free.money === '< $0.01', 'calls > 0 at a recorded $0 still says money moved (「< $0.01」)', free.money);
+  const norm = L({ day: '2026-10-13', byUse: { attention: { calls: 9, usd: 0.4 } }, total: { calls: 9, usd: 0.4 }, reserved: 0.02 }, 2.5, { monthUsd: 3.21 });
+  ok(norm.money === '$0.42' && norm.cap === '$2.50' && !norm.warn && norm.month === 'Decision API · today $0.42 / $2.50 · this month $3.21', 'normal: the engine `today` (total + reserved) and the month', norm);
+  const near = L({ byUse: { rule: { calls: 200, usd: 0.9 } } }, 1), under = L({ byUse: { rule: { calls: 200, usd: 0.899 } } }, 1), at = L({ byUse: { rule: { calls: 300, usd: 1 } } }, 1);
+  ok(near.warn && at.warn && !under.warn, 'red from 90 % of the cap (0.90 of 1.00 red, 0.899 not, at the cap red)', [near.warn, under.warn, at.warn]);
+  const off = L({ byUse: { attention: { calls: 5, usd: 0.3 } } }, 1, { on: false });
+  ok(!off.on && off.short === 'The Decision API is off — it spends nothing' && off.text === off.short && off.month === off.short && !/\$/.test(off.short + off.month), 'off: every string says so instead of a number', off);
+  const zh = L({ byUse: { attention: { calls: 1, usd: 0.002 } } }, 1, { t: (s, v = {}) => ({ 'Today {spent} / {cap} · judged {n} · hits {m}': '今天 {spent} / {cap} · 判断 {n} · 命中 {m}' }[s] || s).replace(/\{(\w+)\}/g, (m, k) => (k in v ? String(v[k]) : m)) });
+  ok(zh.short === '今天 < $0.01 / $1.00 · 判断 1 · 命中 0', 'the words go through the caller\'s t (device words)', zh.short);
+  const mo = M.monthSpend([{ at: Date.UTC(2026, 9, 1, 5), usd: 0.2, outcome: 'ok' }, { at: Date.UTC(2026, 8, 30, 5), usd: 9, outcome: 'ok' }, { at: Date.UTC(2026, 9, 13), outcome: 'refused' }, null, 'x', { at: Date.UTC(2026, 9, 12), usd: 0.05, outcome: 'ok' }], '2026-10');
+  ok(mo.usd === 0.25 && mo.calls === 2 && mo.days === 2, 'monthSpend: Σ usd of this month\'s rows (last month, refusals and junk skipped)', mo);
+  // RED CONTROL: the old two-decimal money (toFixed(2)) draws 63 calls as $0.00 — the owner's "can't see the money"
+  const src = fs.readFileSync(new URL('../src/decision-model.js', import.meta.url), 'utf8');
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const MC = mutantCopies('dmreadout', new URL('..', import.meta.url).pathname);
+  const needle = "  return n > 0 || moved ? `< $${floor}` : '$0';";
+  ok(src.includes(needle), 'mutant needle present (moneyText floor)');
+  const two = MC.load('src/decision-model.js', src.replace(needle, () => "  return '$' + n.toFixed(2);"), 'twodec');
+  const r = two.decisionTodayLine({ byUse: { attention: { calls: 60, usd: 0.009 } } }, 1);
+  ok(r.money === '$0.01' || r.money === '$0.00', `RED CONTROL: a two-decimal formatter draws money that moved as ${r.money} (the floor rule is what keeps 「< $0.01」)`, r.money);
+  const r0 = two.decisionTodayLine({ byUse: { attention: { calls: 60, usd: 0.004 } } }, 1);
+  ok(r0.money === '$0.00', 'RED CONTROL: …and 60 calls at $0.004 as $0.00', r0.money);
+}
+
+console.log('⑬ THE FACTS LINE (lane decision-attention-facts) — what the product measured, worded; never a name, an id or an address');
+{
+  const T = 1_800_000_000_000, H = 3600e3;
+  const ctx = { now: T, mentioned: false, replyToSelf: false, dm: false, members: 312, mail: false, selfAt: T - 2 * H, readAt: T - 3 * H, unread: 121, inboxes: 0, automated: null };
+  const line = M.attentionFacts({}, ctx);
+  ok(line === 'addressed: no mention of the reader; kind: a group of 312; the reader last spoke here 2 h ago; 121 messages since the reader last read, 3 h ago', 'a group: addressed first, the size the vendor counted, when the reader last spoke, the unread since the read line', line);
+  ok(M.attentionFacts({}, { ...ctx, mentioned: true }).startsWith('addressed: @-mentioned the reader;') && M.attentionFacts({ kind: 'dm' }, { now: T }).startsWith('addressed: a direct message; kind: a direct message')
+    && M.attentionFacts({}, { now: T, replyToSelf: true }).startsWith('addressed: a reply to the reader\'s message;') && M.attentionFacts({ kind: 'dm', app: true }, { now: T }) === 'addressed: no mention of the reader; kind: a direct message from an app'
+    && M.attentionFacts({ kind: 'group' }, { now: T }) === 'addressed: no mention of the reader; kind: a group', 'addressed: an @ of the reader › a direct message › a reply to the reader\'s message › none (an app\'s DM is no person writing to them); a group of unknown size is "a group"');
+  const mail = M.attentionFacts({}, { now: T, mail: true, selfAt: 0, inboxes: 3, automated: 'bulk' });
+  ok(mail === 'addressed: no mention of the reader; kind: an email thread; the reader has not spoken here lately; the same message reached 3 of the reader\'s inboxes; an automated or bulk sender (bulk)', 'a mail: the thread kind, no word of the reader\'s on record, the same mail in 3 inboxes, the adapter\'s automated level by its word', mail);
+  ok(!/inboxes|automated|spoke|spoken|since the reader/.test(M.attentionFacts({}, { now: T, inboxes: 1, automated: 'spam', selfAt: null, readAt: 0 })), 'only the facts that apply: one inbox, an unknown level, an unknown last word, an unknown read line say nothing');
+  ok(M.ageWords(30e3) === '1 min' && M.ageWords(59 * 60e3) === '59 min' && M.ageWords(90 * 60e3) === '2 h' && M.ageWords(47 * H) === '47 h' && M.ageWords(72 * H) === '3 d', 'ages: min under an hour, h under two days, then d');
+  // THE CENSUS: a view whose every field is a name, an address or an id ⇒ none of them reaches the line
+  const NEEDLES = ['Dana Lee', 'dana.lee@acme.example', 'ou_7f3a9c2e1d', 'oc_51b2e0aa', 'U07ABCDEF', 'gmail:203365a7', 'Acme Scale API', 'Ottilie'];
+  const loud = NEEDLES.join(' · ');
+  const view = { key: `gmail:203365a7/${loud}`, id: loud, adapterId: 'gmail:203365a7', adapterLabel: loud, title: loud, participants: loud, lastText: loud, lastWho: { name: loud }, atYouWho: loud, atYouText: loud, kind: loud, touch: { selfAt: T - H, read: { name: loud } } };
+  const full = { ...ctx, mentioned: true, replyToSelf: true, mail: true, inboxes: 3, automated: 'notification', who: loud, title: loud, name: loud };
+  const hit = (s) => NEEDLES.filter((n) => s.includes(n));
+  const fl = M.attentionFacts(view, full);
+  ok(hit(fl).length === 0 && fl.length > 80, `CENSUS: every field of the view (and stray ctx fields) a name / address / id ⇒ none in the facts line (${fl.length} characters of counts, kinds, ages)`, { hit: hit(fl), fl });
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const src = fs.readFileSync(new URL('../src/decision-model.js', import.meta.url), 'utf8');
+  const anchor = 'const out = [`addressed: ';
+  const MC = mutantCopies('dmfacts', new URL('..', import.meta.url).pathname);
+  const leaky = MC.load('src/decision-model.js', src.replace(anchor, 'const out = [`about: ${str(v.title)}`, `addressed: '), 'title');
+  ok(src.split(anchor).length === 2 && hit(leaky.attentionFacts(view, full)).length === NEEDLES.length, 'RED CONTROL: a scratch copy that also words the title ⇒ the census finds every name', hit(leaky.attentionFacts(view, full)));
+  // FIRST in the record; not memo material
+  const rec = M.attentionRecord({ title: 'Q3 budget', adapterLabel: 'Work mail', lastWho: { name: 'Dana' } }, [{ who: 'Dana', text: 'can you approve by Friday?', at: T - 60e3 }], line);
+  const recPart = M.buildInput('attention', { rubric: M.rubricText(), ...rec }).text.split('[record]\n')[1];
+  ok(recPart.startsWith(`facts: ${line}\ntitle: Q3 budget\n`), 'the facts line is the record\'s FIRST line, before the title', recPart.slice(0, 220));
+  ok(eq(M.PLANS.attention.memo, ['use', 'id', 'lastAt', 'rubric', 'userBlock', 'examples']) && M.memoMaterial('attention', { id: 'k', lastAt: 1, facts: line }) === M.memoMaterial('attention', { id: 'k', lastAt: 1, facts: 'other' }), 'the facts are NOT memo material (they move with every read — a row is judged again on a new message, never on a new read)');
+}
+
+console.log('⑭ the rubric v2 — `matters` only with a block; the rubric is not sent twice (measured on the GOLDEN set)');
+{
+  const no = M.rubricQuestions(), yes = M.rubricQuestions({ hasBlock: true });
+  ok(no.length === 7 && !no.some((q) => q.name === 'matters') && yes.length === 8 && yes[7].name === 'matters' && eq(M.rubricClauses().map((c) => c.name), no.slice(1).map((q) => q.name)), 'an empty block ⇒ 7 questions, no `matters`; a block ⇒ 8');
+  const ans = [{ name: 'needs_now', probability: 0.8 }, { name: 'matters', probability: 0.9 }, { name: 'asks_me', probability: 0.9 }];
+  ok(eq(M.attentionVerdict(ans, 0.7, { hasBlock: false }).clauses.map((c) => c.name), ['asks_me']) && eq(M.judgedOf(ans, 1, { hasBlock: false }).clauses, ['asks_me']) && eq(M.judgedOf(ans, 1, { hasBlock: true }).clauses, ['asks_me', 'matters']), 'an empty block ⇒ `matters` is absent from the verdict\'s clauses too, even when an answer names it');
+  ok(/^Is the latest message addressed to the reader\? The facts line states an @-mention, a direct message or a reply to the reader; otherwise judge from the text\.$/.test(M.RUBRIC.clauses.find((c) => c.name === 'to_me').instructions), 'to_me reads the facts line first, the text second');
+  const r2 = M.rubricText(), r2b = M.rubricText({ hasBlock: true });
+  ok(r2 === 'Rubric v2 — answer each question for the reader; the facts line is measured by the product, trust it over the text.' && !r2b.includes('\n') && r2b.includes('[userBlock]') && ![M.RUBRIC.needsNow, ...M.RUBRIC.clauses].some((c) => r2b.includes(c.instructions)), 'the state\'s [rubric] part is ONE line — no question\'s instructions ride in it (they ride with the questions)', r2b);
+  // MEASURED: the v1 rubric (frozen here — the base's text, the RED reference) against v2, each GOLDEN sentence as a record
+  const V1_TO_ME = 'Is the latest message addressed directly to the reader (by name, as a direct message, or as a reply to them)?';
+  const v1All = [M.RUBRIC.needsNow, ...M.RUBRIC.clauses].map((c) => ({ ...c, instructions: c.name === 'to_me' ? V1_TO_ME : c.instructions }));
+  const v1Text = `Rubric v1. Judge the record below for the reader. ${v1All.map((c) => `${c.name}: ${c.instructions}`).join(' ')}`;
+  const v1Qs = v1All.map((c) => ({ type: 'predicate', name: c.name, instructions: c.instructions }));
+  const FACTS = 'addressed: no mention of the reader; kind: a group of 12; the reader last spoke here 3 h ago; 2 messages since the reader last read, 40 min ago';
+  const measure = (block) => {
+    let before = 0, after = 0;
+    for (const g of M.GOLDEN) {
+      const parts = { userBlock: block, examples: [], title: 'Team chat', source: 'Work chat', body: `Sam: ${g.text}` };
+      before += M.buildInput('attention', { ...parts, rubric: v1Text }).est + M.questionTokens(v1Qs);
+      after += M.buildInput('attention', { ...parts, facts: FACTS, rubric: M.rubricText({ hasBlock: !!block }) }).est + M.questionTokens(M.rubricQuestions({ hasBlock: !!block }));
+    }
+    return { before, after, saved: Math.round((1 - after / before) * 100) };
+  };
+  const e = measure(''), b = measure('Invoices, contracts and anything my manager asks.');
+  console.log(`    measured (estTokens, ${M.GOLDEN.length} GOLDEN sentences, a facts line added to v2): empty block ${e.before} → ${e.after} (−${e.saved} %) · with a block ${b.before} → ${b.after} (−${b.saved} %)`);
+  ok(e.saved >= 25 && b.saved >= 20, `v2 is smaller than v1 even with its facts line: −${e.saved} % (empty block: no \`matters\`) / −${b.saved} % (a block) — the rubric rides once`, { e, b });
+}
+
+// v1's record (frozen — the base's attentionRecord: the last 8 newest first, raw text): the RED reference of ⑮ / ⑯
+const v1Record = (view, tail) => ({ title: view.title || '', source: view.adapterLabel || '', sender: '', body: tail.filter((r) => r && String(r.text).trim()).slice(-8).reverse().map((r) => `${r.self ? 'me' : r.who || 'someone'}: ${r.text}`).join('\n') || view.lastText || '' });
+const V1_RUBRIC = `Rubric v1. Judge the record below for the reader. ${[M.RUBRIC.needsNow, ...M.RUBRIC.clauses].map((c) => `${c.name}: ${c.instructions}`).join(' ')}`;
+const measured = (parts) => { const i = M.buildInput('attention', parts); return { est: i.est, truncated: i.truncated }; };
+
+console.log('⑮ the body = what the reader has not read (newest first, ≤ 12 whole messages within the ceiling, the rest counted)');
+{
+  const T = 1_800_000_000_000;
+  const tail = Array.from({ length: 30 }, (_, i) => ({ who: i % 3 ? 'userR' : 'AJB', text: `message ${i} about the launch plan and the API quota for next week`, at: T - (30 - i) * 60e3 }));
+  const since = tail[17].at;   // 12 records past the read line in the bounded read; the row counts 121
+  const r = M.attentionRecord({ title: 'API room' }, tail, 'addressed: no mention of the reader', { since, unread: 121 });
+  const lines = r.body.split('\n');
+  ok(lines[0].startsWith('userR: message 29') && lines.length === 13 && lines[11].includes('message 18') && lines[12] === '(109 earlier unread messages omitted)', 'past the read line: the 12 newest NEWEST FIRST, then "(109 earlier unread messages omitted)" — the row\'s count (121) knows what the bounded read never reached', lines.slice(0, 2).concat(lines.slice(-2)));
+  const inp = M.buildInput('attention', { rubric: M.rubricText(), ...r });
+  ok(!inp.truncated && inp.text.includes('(109 earlier unread messages omitted)'), `whole messages only: the record fits, nothing is cut mid-message (est ${inp.est}, truncated false)`, { est: inp.est, truncated: inp.truncated });
+  const long = tail.map((x) => ({ ...x, text: 'long '.repeat(120) + x.text }));
+  const rl = M.attentionRecord({ title: 'API room' }, long, '', { since, unread: 12 });
+  const shown = rl.body.split('\n').filter((l) => !l.startsWith('(')).length;
+  const inl = M.buildInput('attention', { rubric: M.rubricText(), ...rl });
+  ok(shown >= 1 && shown < 12 && rl.body.endsWith(`(${12 - shown} earlier unread messages omitted)`) && !inl.truncated, `long messages: only the ${shown} newest that fit the record, the rest counted (never a cut message)`, { shown, est: inl.est, truncated: inl.truncated });
+  const unknown = M.attentionRecord({ title: 'API room' }, tail, '', {});
+  ok(unknown.body.split('\n').length === 8 && unknown.body.startsWith('userR: message 29') && !unknown.body.includes('omitted'), 'the read line unknown ⇒ the last 8 as v1, no count');
+  ok(M.attentionRecord({ title: 'API room' }, tail, '', { since: tail[29].at, unread: 0 }).body.split('\n').length === 8 && M.attentionRecord({ lastText: 'fallback' }, [], '', { since }).body === 'fallback', 'nothing past the read line ⇒ the last 8 as v1; no records ⇒ the row\'s last line');
+  // the owner's 121-unread Lark group (findings §一: the judge saw the last 8 of 121 and could not tell) — v1 vs v2
+  const b = measured({ rubric: V1_RUBRIC, ...v1Record({ title: 'API room' }, tail) }), a = measured({ rubric: M.rubricText(), ...r });
+  console.log(`    hub shape · a 121-unread group: v1 ${b.est} tokens, truncated ${b.truncated}, 8 messages, no count → v2 ${a.est} tokens, truncated ${a.truncated}, 12 newest + "109 earlier unread omitted"`);
+  ok(!a.truncated, 'the 121-unread group: v2 is not truncated', { b, a });
+}
+
+console.log('⑯ trimMailBody — a mail body before the cut (gmail records only, never chat text)');
+{
+  // THE GOOGLE WORKSPACE NOTICE'S SHAPE (the owner's 3 copies, 2026-10-12: ~4 400 characters, 119 lines, 44 blank, "You are
+  // receiving this…" at 3 % — it STAYS; the © line at 92 %, "You have received this…" at 94 %) — our words, their shape
+  const para = (i) => `Paragraph ${i} of the announcement: the new setting applies to OAuth clients that act as agents; administrators review them in the console before the rollout.  `;
+  const NOTICE = ['Workspace logo', '  ', '', '  ', 'A new setting for OAuth clients ahead of the rollout.', '', '  ', 'Dear developer,', '',
+    'You are receiving this communication because your organization administers  ', 'or develops applications that connect to the suite via OAuth.', '',
+    ...Array.from({ length: 22 }, (_, i) => [para(i), '  ', '']).flat(), 'Thanks,', 'The Workspace Team', '', '',
+    '© 2026 Example LLC 1600 Example Parkway, Mountain View, CA 94043', '', 'You have received this important update about your account because of your role as an administrator.', 'Privacy Policy  |  Terms of Service'].join('\n');
+  const at = (s) => Math.round(NOTICE.indexOf(s) / NOTICE.length * 100);
+  ok(at('You are receiving') <= 5 && at('© 2026') >= 88, `FIXTURE: the notice's shape (${NOTICE.length} characters; "You are receiving this" at ${at('You are receiving')} %, © at ${at('© 2026')} %)`);
+  const tn = M.trimMailBody(NOTICE);
+  ok(tn.includes('You are receiving this communication') && tn.includes('Paragraph 21') && tn.endsWith('The Workspace Team') && !tn.includes('©') && !tn.includes('You have received') && !/\n\n\n|[ \t]\n/.test(tn), `the notice: the footer from the © line (past 40 %) is gone, its opening "You are receiving this…" (3 %) stays, blank runs folded (${NOTICE.length} → ${tn.length} characters)`, tn.slice(-120));
+  // A GMAIL THREAD WITH 3 QUOTED REPLIES (the "On … wrote:" header wrapped over two lines, as Gmail sends it)
+  const THREAD = ['Sounds good, I will send the signed copy by Friday.', '', 'Best,', 'Ann', '', '-- ', 'Ann Lee | Partnerships', 'Example Corp · +1 555 0100', '',
+    'On Mon, Oct 12, 2026 at 9:14 AM Dana Smith <', 'dana@example.com> wrote:', '', ...Array.from({ length: 6 }, () => '> Can you confirm the licensing terms for the commercial tier before the end of the quarter?'), '>',
+    '> On Sun, Oct 11, 2026 at 6:02 PM Ann Lee <ann@example.com> wrote:', ...Array.from({ length: 6 }, () => '>> We need the commercial licence for the S2 model and the on-prem option.'), '>>',
+    '>> On Sat, Oct 10, 2026 Dana <dana@example.com> wrote:', ...Array.from({ length: 6 }, () => '>>> Which tier are you looking at, and for how many seats?')].join('\n');
+  const tt = M.trimMailBody(THREAD);
+  ok(tt === 'Sounds good, I will send the signed copy by Friday.\n\nBest,\nAnn', `a thread with 3 quoted replies: the quoted chain from its two-line "On … wrote:" header and the signature from "-- " are gone (${THREAD.length} → ${tt.length} characters)`, tt);
+  ok(M.trimMailBody('好的，周五前发。\n\n在 2026年10月12日周一 09:14，Dana <dana@example.com> 写道：\n> 能确认授权条款吗？') === '好的，周五前发。' && M.trimMailBody('Reply above.\n> one quoted line\nmore of mine') === 'Reply above.\nmore of mine', 'the Chinese header (在 … 写道：) too; a stray `>` line alone');
+  ok(M.trimMailBody('View in browser | Unsubscribe\nThe real news of the week is this paragraph, long enough to carry the mail.') === 'View in browser | Unsubscribe\nThe real news of the week is this paragraph, long enough to carry the mail.' && M.trimMailBody('> only a quote') === '> only a quote' && M.trimMailBody('') === '', 'an unsubscribe line in the first 40 % stays; a mail that is only a quote is never trimmed to nothing');
+  // a Lark message: never trimmed (the record says mail: false) — its own `>` and `-- ` lines reach the judge
+  const LARK = 'this one should be (at)Bram (at)Matthew and (at)Ottilie\n> the earlier ask\n-- \nsee the doc';
+  const recLark = M.attentionRecord({ title: 'GTM' }, [{ who: 'userR', text: LARK, at: 2 }], '', {}), recMail = M.attentionRecord({ title: 'GTM' }, [{ who: 'userR', text: LARK, at: 2 }], '', { mail: true });
+  ok(recLark.body === `userR: ${LARK}` && recMail.body === 'userR: this one should be (at)Bram (at)Matthew and (at)Ottilie', 'a chat record is untouched (mail: false); the same text as a mail is trimmed');
+  // the hub shapes, v1 → v2 (estTokens of the whole input, truncated)
+  const shape = (title, text, mail, facts) => {
+    const b = measured({ rubric: V1_RUBRIC, ...v1Record({ title }, [{ who: 'Sender', text, at: 2 }]) });
+    const a = measured({ rubric: M.rubricText(), ...M.attentionRecord({ title }, [{ who: 'Sender', text, at: 2 }], facts, { since: 1, unread: 1, mail }) });
+    console.log(`    hub shape · ${title}: v1 ${b.est} tokens, truncated ${b.truncated} → v2 ${a.est} tokens, truncated ${a.truncated}`);
+    return { b, a };
+  };
+  const n = shape('the Workspace notice', NOTICE, true, 'addressed: no mention of the reader; kind: an email thread; the reader has not spoken here lately; 1 message since the reader last read, 14 d ago; the same message reached 3 of the reader\'s inboxes');
+  const q = shape('a thread with 3 quoted replies', THREAD, true, 'addressed: no mention of the reader; kind: an email thread; the reader last spoke here 1 d ago');
+  ok(n.a.est < n.b.est && q.a.est < q.b.est && !q.a.truncated && q.b.truncated, 'the two mail shapes cost fewer tokens in v2 (facts line included); the quoted thread is no longer truncated', { n, q });
+}
+
+console.log('⑰ the journal row carries p (needs_now, 2 decimals)');
+{
+  ok(M.JOURNAL_FIELDS.includes('p') && M.journalRow({ use: 'attention', p: 0.8567 }).p === 0.86 && !('p' in M.journalRow({ p: 1.2 })) && !('p' in M.journalRow({ p: 'high' })), 'p rides the journal line rounded to 2 decimals; a value that is no probability is dropped');
+  ok(M.automatedOf([{ k: 'to', v: [] }, { k: 'automated', v: 'bulk' }]) === 'bulk' && M.automatedOf([{ k: 'automated', v: 'spam' }]) === null && M.automatedOf(null) === null, 'automatedOf: the record\'s `automated` level (a level outside the table is none) — read in the model, the engine\'s facts path stays kind-free');
+  ok(M.needsNowP([{ name: 'asks_me', probability: 0.9 }, { name: 'needs_now', probability: 0.734 }]) === 0.734 && M.needsNowP([{ name: 'needs_now', refused: true }]) === undefined && M.needsNowP(null) === undefined, 'needsNowP: the needs_now answer\'s probability (refused / missing ⇒ none)');
+}
+
+console.log('⑱ implicit labels (the switch decision.implicitLabels) — the clock table, the person\'s own labels win');
+{
+  const T = 1_800_000_000_000, H = 3600e3;
+  const v = { p: 0.82, lastAt: T, at: T + 60e3 };
+  const L = (row, now, verdict = v) => M.implicitLabel(verdict, row, now, 0.7);
+  ok(L({ selfAt: T + 2 * H, readAt: T + 2 * H }, T + 3 * H) === 'needs' && L({ selfAt: T + 23 * H }, T + 23 * H, { ...v, p: 0.1 }) === 'needs', '(a) a reply after the judged message within 24 h of the verdict ⇒ needs (whatever p was — a missed one teaches most)');
+  ok(L({ selfAt: T + 30 * H }, T + 30 * H) === null, '(a) a reply 30 h after the verdict ⇒ nothing (late; and answered, so never "not")');
+  ok(L({ selfAt: 0, readAt: T - H }, T + 25 * H) === 'not' && L({ selfAt: 0, readAt: T - H }, T + 23 * H) === null, '(b) listed (p ≥ threshold), unopened and unanswered 24 h after the verdict ⇒ not; at 23 h ⇒ wait');
+  ok(L({ selfAt: 0, readAt: T }, T + 25 * H) === null && L({ selfAt: 0, readAt: 0 }, T + 25 * H, { ...v, p: 0.5 }) === null && M.implicitLabel({ p: 0.9, lastAt: T }, { readAt: 0 }, T + 30 * H) === null, '(b) opened (readAt reached the message) / never listed (p below) / no verdict instant ⇒ nothing');
+  // the store: an implicit example never replaces the person's own; over the cap the oldest implicit goes first
+  const ex = (k, verdict, source) => M.exampleOf({ key: k, lastAt: 1, title: k, body: 'b' }, verdict, [], 1, { source });
+  let list = [ex('im/a', 'not', null)];
+  list = M.addExample(list, ex('im/a', 'needs', 'implicit'));
+  ok(list.length === 1 && list[0].verdict === 'not' && !list[0].source && ex('im/b', 'needs', 'implicit').source === 'implicit', 'an implicit example never replaces the person\'s own label for the same record');
+  list = [];
+  for (let i = 0; i < 150; i++) list = M.addExample(list, ex(`im/e${i}`, 'needs', null));
+  for (let i = 0; i < 60; i++) list = M.addExample(list, ex(`im/i${i}`, 'not', 'implicit'));
+  ok(list.length === 200 && list.filter((x) => !x.source).length === 150 && list.some((x) => x.key === 'im/e0'), 'the store keeps ≤ 200 and drops the oldest IMPLICIT first — the person\'s 150 labels all stay');
+  const sent = M.examplesForInput([ex('im/i1', 'not', 'implicit'), ex('im/e1', 'needs', null), ex('im/i2', 'needs', 'implicit'), ex('im/e2', 'not', null)]);
+  ok(eq(sent.map((x) => x.snippet.split(' ')[0] + (x.inferred ? '*' : '')), ['im/e2', 'im/e1', 'im/i2*', 'im/i1*']) && M.examplesForInput(Array.from({ length: 14 }, (_, i) => ex(`im/x${i}`, 'needs', null)).concat([ex('im/i9', 'not', 'implicit')])).every((x) => !x.inferred), 'the person\'s labels go FIRST, the implicit ones fill only the slots left (12 own ⇒ none inferred)', sent);
+  const inp = M.buildInput('attention', { rubric: M.rubricText(), examples: sent, title: 't', body: 'b' });
+  ok(inp.text.includes('→ not (inferred)') && inp.text.includes('→ needs\n'), 'an inferred example says so in the input', inp.text.slice(0, 300));
+}
+
+console.log('⑲ one mail in K inboxes — the key and the window (measured on the owner\'s notice: 3 copies over 22 min)');
+{
+  ok(M.inboxKey('Re: FWD: [Action Required]  Mark AI agent OAuth clients', 'The  Workspace Team') === M.inboxKey('[action required] mark ai agent oauth clients', 'the workspace team') && M.inboxKey('', 'x') === '' && M.inboxKey('t', '') === '', 'the key folds Re: / Fwd:, case and spacing; a missing subject or sender is never counted');
+  const T = 1_800_000_000_000, M1 = 60e3;
+  const seen = [{ adapterId: 'gmail:a', lastAt: T }, { adapterId: 'gmail', lastAt: T + 170e3 }, { adapterId: 'gmail:b', lastAt: T + 1327e3 }];   // the owner's spread: 170 s, then 19 min
+  ok(seen.every((x) => M.inboxCount(seen, x.adapterId, x.lastAt) === 3) && M.inboxCount(seen, 'gmail:c', T + 1327e3 + 59 * M1) === 2 && M.inboxCount(seen, 'gmail:c', T + 1327e3 + 61 * M1) === 1, 'the hour window: each of the 3 copies says 3; a fourth inbox 59 min after the last copy counts it, 61 min after counts none');
+  ok(eq(seen.map((x) => M.inboxCount(seen, x.adapterId, x.lastAt, 15 * M1)), [2, 2, 1]), 'RED REFERENCE: the brief\'s 15-minute window says 2 / 2 / 1 on the owner\'s own notice — the third copy would read as a mail to one inbox');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

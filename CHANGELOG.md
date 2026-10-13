@@ -2,6 +2,26 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.266 — 2026-10-13
+
+### Added
+- The Channels first screen lists chats where someone @-mentioned you and you have not read it, tagged “@ me · N” with the message quoted — a switch under ⚙.
+- “Learn from what I do” in All Settings › Plugins › Decision API: the chats you answer or leave unopened teach the judge too. Off by default.
+- The microphone is on every box you type a message into: For-you replies, the Inbox window, Channels, threads and the message dialogs.
+
+### Changed
+- The Decision API's spend shows again: today's money and cap on its Plugins row, under its daily limit, in Needs attention and in Settings › Spending.
+- The Decision API judges Channels home with what VibeSpace knows: an @ of you, a direct message, your unread count, one mail in several inboxes.
+- The judge reads what you have not read yet (up to 12 messages, newest first), and mail without quoted replies, signatures or footers.
+- After this update each conversation on Channels home is judged once more (about $0.04 of Decision API calls).
+- The For-you tray's Decision API sort now weighs how long ago an agent asked, whether it still waits and any date it names; each row says why.
+- Tapping the microphone never opens the phone keyboard; if the keyboard is already up it stays, and the words land where your cursor was.
+- With voice input off or Dropline not connected, no microphone is shown at all.
+- Integrations & keys moved from ⚙ → Communication to ⚙ → System, beside the password; inside, keys are grouped by what uses them: Browser, Plugins.
+
+### Fixed
+- On a phone, the expand button no longer sits on the microphone after you send a long message; each has its own corner.
+
 ## 2.369.265 — 2026-10-13
 
 ### Added

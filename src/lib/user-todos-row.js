@@ -34,6 +34,7 @@ import { getFileIcon } from './file-types.js';
 import { linkedHtml, segmentText } from './foryou-links.js'; // PURE (lane foryou-attachments): THE links in an item's words — one grammar with the chat
 import { inboxChip } from './user-todos-layout.js'; // PURE (lane inbox-decision-group): a judged item's chip
 import { cardWords, progressWords } from './app-card-model.js'; // design 009: THE words of an app install's one card (PURE)
+import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
 
 /** "3min ago" / "2h ago" / a date — words by the caller's t(). */
 export function agoText(ts, t) {
@@ -212,14 +213,24 @@ function partsOf(entry, ctx) {
 
 /** The reply box (design-user-inbox-reply D3b): Enter sends, Shift+Enter is a
  *  newline, Esc folds — the panel owns those keys; this only builds it. */
-/** lane inbox-decision-group: a JUDGED item's chip (现在 / 可等) while the tray draws the Decision API's sections —
- *  the clause in OUR words in its title (never the vendor's), the judge's p beside it. Nothing when off. */
+/** lane inbox-decision-group: a placed item's chip while the tray draws the Decision API's sections. v2 (lane
+ *  decision-inbox-rank): THE REASON in OUR words, never the vendor's — 卡住等你 / 有期限 · <the item's own date phrase> /
+ *  随时 / 48 小时无人再问; the title says who placed it (the agent's status, the clock, or the judge with its p). A v1
+ *  verdict keeps 现在 / 可等 until v2 scores it again. Nothing when off. */
 export function judgedChipHtml(i, t, ctx) {
-  const c = ctx && ctx.grouping ? inboxChip(i) : null;
+  const c = ctx && ctx.grouping ? inboxChip(i, Date.now()) : null;
   if (!c) return '';
-  const word = c.group === 'now' ? t('needs you now: an agent waits on your decision, a deadline, money or someone waiting on your reply') : t('can wait: a notice, a finished report, nothing to do');
-  const title = t('Sorted by the Decision API — {why}', { why: word }) + (c.p !== null ? ` (p ${c.p.toFixed(2)})` : '');
-  return ` · <span class="ut-judged" data-group="${c.group}" title="${escHtml(title)}">${escHtml(c.group === 'now' ? t('now') : t('can wait'))}</span>`;
+  const p = c.p !== null ? ` (p ${c.p.toFixed(2)})` : '';
+  let word, title;
+  if (c.why === 'stale') { word = t('Nobody asked again in 48 h'); title = t('Asked over 48 hours ago, and nobody asked again since'); }
+  else if (c.why === 'blocked') { word = t('Agent waits on you'); title = c.fact ? t('Its agent set its status to blocked for this question') : t('The Decision API chose this reason') + p; }
+  else if (c.why === 'dated') { word = c.dated ? t('Due {when}', { when: c.dated }) : t('Has a deadline'); title = t('The Decision API chose this reason') + p; }
+  else if (c.why === 'whenever') { word = t('Any time'); title = t('The Decision API chose this reason') + p; }
+  else {
+    word = c.group === 'now' ? t('now') : t('can wait');
+    title = t('Sorted by the Decision API — {why}', { why: c.group === 'now' ? t('needs you now: an agent waits on your decision, a deadline, money or someone waiting on your reply') : t('can wait: a notice, a finished report, nothing to do') }) + p;
+  }
+  return ` · <span class="ut-judged" data-group="${c.group}" data-why="${c.why || ''}" title="${escHtml(title)}">${escHtml(word)}</span>`;
 }
 
 /** lane foryou-attachments: an ask's --artifact CHIPS under the question — an SVG kind icon + the name (+ the host when it
@@ -296,7 +307,7 @@ export function replyBoxEl(t) {
   send.title = t('Send reply (Enter) · newline (Shift+Enter)');
   send.setAttribute('aria-label', send.title);
   send.innerHTML = UI_ICONS.send;
-  box.append(ta, send);
+  box.append(voiceField(ta, attachDictation(ta)), send); // the microphone inside the box's trailing edge, Send unchanged
   return box;
 }
 

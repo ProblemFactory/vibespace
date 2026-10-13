@@ -1,4 +1,4 @@
-import { SETTINGS_SCHEMA, SETTINGS_CATEGORIES, pluginSectionFor, harnessSectionFor, harnessFileRel, harnessCategory, channelVendorName, orderedCategories, settingsGroupOf, settingsGroups, clampToSchema } from './settings-schema.js';
+import { SETTINGS_SCHEMA, SETTINGS_CATEGORIES, pluginSectionFor, harnessSectionFor, harnessFileRel, harnessCategory, channelVendorName, orderedCategories, settingsGroupOf, settingsGroups, clampToSchema, pluginCategoryOf } from './settings-schema.js';
 import { settingsViewModel, hiddenAdvancedText, whenClauses, clauseKind, SHOW_ADVANCED_KEY } from './settings-view.js'; // PURE: what is drawn — tiers, `when`, search, modified (B-df40 part 2)
 import { showConfirmDialog, fetchJson, showToast, copyText } from './utils.js';
 import { receiptLine, offLine, applyHead, refusalLine, recoveredLine } from './cli-config-chips.js';
@@ -8,6 +8,8 @@ import { escHtml } from './utils.js';
 import { UI_ICONS } from './icons.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { ATTENTION_RULES, attentionPolicy, presetOf, presetSwitches } from './channel-focus.js';   // lane attention-policy
+import { paintDecisionLine, liveDecisionLine } from './decision-readout.js';   // lane decision-spend-readout: the judge's money (ONE PURE line)
+const DECISION_BUDGET_PATH = 'plugin.decision-api.dailyBudgetUsd';   // src/plugin-settings.js: the judge's daily cap row
 
 // lane attention-policy: A PLUGIN'S FEATURE SWITCH shown as a settings row (`store: {plugin, feature}`) — read from GET
 // /api/plugins (the plugin row's own `decision` / `config` answer), written through POST /api/plugins/<id>/config, the
@@ -279,6 +281,7 @@ class SettingsUI {
       sectionTitle.className = 'settings-section-title';
       sectionTitle.textContent = cat;
       section.appendChild(sectionTitle);
+      if (cat === t('Spending')) this._renderDecisionSpend(section, content, nav);   // lane decision-spend-readout: the judge bills too
       // A HARNESS section (derived from its descriptor table, design §4.2):
       // one line saying what these values are for, then THREE sub-blocks by
       // what a row is (2.369.132, owner "区分全局配置项和 session-level 配置项"):
@@ -420,6 +423,7 @@ class SettingsUI {
     else if (schema.channel) this._renderChannelChip(info, schema);
     if (schema.fact === 'browser-display') this._renderDisplayFact(info);
     if (schema.fact === 'attention-today') this._renderAttentionToday(info);
+    if (path === DECISION_BUDGET_PATH) this._renderDecisionToday(info);   // the cap's row says what today cost against it
     if (schema.fact === 'https-address') { row.classList.add('has-wide-fact'); this._renderHttpsFact(row); } // the full row's width (a phone's label column is too narrow for an address)
 
     const controlWrap = document.createElement('div');
@@ -473,10 +477,44 @@ class SettingsUI {
     line.dataset.attentionToday = '1';
     line.textContent = t('checking…');
     info.appendChild(line);
-    fetchJson('/api/channels/attention').then((r) => {
-      const d = (r && r.today) || {};
-      line.textContent = r && r.on ? t('Today: judged {n} · {m} needed you', { n: Number(d.judged) || 0, m: Number(d.hits) || 0 }) : t('The judge is off — nothing is judged');
-    }).catch(() => { line.textContent = ''; });
+    // the counts are the 需关注 judge's own (GET /api/channels/attention); the money is the plugin's day (lane
+    // decision-spend-readout: every place that names the judge says what it cost — the by-use breakdown on hover)
+    let counts = null, money = null;
+    const draw = () => {
+      if (!counts) return;
+      const d = counts.today || {};
+      if (!counts.on) { line.textContent = t('The judge is off — nothing is judged'); line.title = ''; return; }
+      paintDecisionLine(line, money || { title: '', warn: false }, () => t('Today: judged {n} · {m} needed you', { n: Number(d.judged) || 0, m: Number(d.hits) || 0 }) + (money && money.on ? ' · ' + money.spend : ''));
+    };
+    fetchJson('/api/channels/attention').then((r) => { counts = r || { on: false }; draw(); }).catch(() => { line.textContent = ''; });
+    liveDecisionLine(line, (L) => { money = L; draw(); });
+  }
+
+  /** lane decision-spend-readout: under the plugin.decision-api.dailyBudgetUsd row — today's money against that cap
+   *  (red at 90 %), the by-use breakdown on hover; patched in place while the row is drawn. */
+  _renderDecisionToday(info) {
+    const line = document.createElement('div');
+    line.className = 'settings-row-fact';
+    line.dataset.decisionToday = '1';
+    line.textContent = t('checking…');
+    info.appendChild(line);
+    liveDecisionLine(line, (L) => paintDecisionLine(line, L, 'text'));
+  }
+
+  /** lane decision-spend-readout: Settings › Spending lists what bills — the Decision API's day and month beside the
+   *  ceilings, with a door to the plugin's own section (the cap lives there). */
+  _renderDecisionSpend(section, content, nav) {
+    const row = document.createElement('div');
+    row.className = 'settings-row settings-spend-producer';
+    row.dataset.spendProducer = 'decision-api';
+    const line = Object.assign(document.createElement('div'), { className: 'settings-row-fact', textContent: t('checking…') });
+    const open = Object.assign(document.createElement('button'), { className: 'settings-link-btn', textContent: t('Open settings') });
+    const cat = pluginCategoryOf('decision-api');
+    open.disabled = !cat;
+    open.onclick = () => { if (cat) { this._onlyCategory = null; this._renderContent(content, nav); this._showCategory(content, nav, cat); } };
+    row.append(line, open);
+    section.appendChild(row);
+    liveDecisionLine(line, (L) => paintDecisionLine(line, L, 'month'));
   }
 
   /** lane attention-policy: a row that stores NOTHING in settings — the judge's switch (`store: {plugin, feature}`, the

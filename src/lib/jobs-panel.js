@@ -10,6 +10,7 @@ import { marked } from 'marked';
 import { sanitizeHtml } from './safe-html.js';
 import { registerWindowType } from './window-types.js';
 import { badgeCounts, foldTasks, pruneFolds, heldText, ackableIds, isFoldKey } from './jobs-layout.js';
+import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
 
 const GLYPH = { 'awaiting-user': '⚑', failed: '✖', unverified: '?', missed: '✖', up: '●', starting: '◌', down: '○', scheduled: '◷', interrupted: '⚠', done: '✔' }; // text glyphs only — emoji ban
 const SEV = { failed: 'bad', missed: 'bad', unverified: 'bad', 'awaiting-user': 'warn', interrupted: 'warn', up: 'ok', starting: 'ok', scheduled: 'idle', down: 'idle', done: 'idle' };
@@ -528,7 +529,7 @@ function renderPanelBlocks(app, root, jobId, pending, { onAnswered } = {}) {
         const inp = document.createElement(b.type === 'input' ? 'input' : 'textarea');
         inp.placeholder = b.placeholder || ''; inp.style.cssText = 'width:100%;box-sizing:border-box';
         inp.oninput = () => { values[b.id] = inp.value; };
-        w.appendChild(inp); root.appendChild(w);
+        w.appendChild(b.type === 'textarea' ? voiceField(inp, attachDictation(inp)) : inp); root.appendChild(w);
       }
       else if (b.type === 'choice') {
         const w = document.createElement('div');

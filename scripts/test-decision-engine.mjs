@@ -111,7 +111,7 @@ console.log('C one call per dialect — the body, the accounting, the journal');
   let over = null; try { await eng.judge('attention', { rubric: M.rubricText(), records: [{ body: 'a' }, { body: 'b' }] }, { questions: M.rubricQuestions() }); } catch (e) { over = e.message; }
   ok(/at most 1 record/.test(String(over)) && got.length === 1, 'r2: a two-record attention ask is refused by name before any request (one record per call)', over);
   const recs = [{ title: 'Conv 0', sender: 'Ann', body: 'Please approve invoice 0.' }];
-  const r2 = await eng.judge('attention', { rubric: M.rubricText(), userBlock: 'invoices', records: recs }, { questions: M.rubricQuestions(), memo: { id: 'att-1', lastAt: 1 } });
+  const r2 = await eng.judge('attention', { rubric: M.rubricText({ hasBlock: true }), userBlock: 'invoices', records: recs }, { questions: M.rubricQuestions({ hasBlock: true }), memo: { id: 'att-1', lastAt: 1 } });   // a block ⇒ `matters` too (rubric v2)
   const q2 = got[got.length - 1];
   ok(r2.ok && got.length === 2 && q2.path === '/api/alpha/decisions' && q2.body.model === 'openai/gpt-6-luna-decisions' && typeof q2.body.state === 'string' && Object.keys(q2.body.questions).length === 8 && q2.body.questions.needs_now.type === 'noul', 'openrouter: ONE request for ONE record (the 8 rubric questions, noul) on the PINNED model, state = the text', Object.keys((q2.body && q2.body.questions) || {}).slice(0, 4));
   ok(r2.answers.length === 8 && r2.answers[0].name === 'needs_now' && r2.answers[0].probability === 0.3, 'the answers in the one shape, per question');

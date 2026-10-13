@@ -43,7 +43,15 @@ let voicePlugin = { peek: () => ({}), update: () => {}, settings: () => ({}), wr
 // registry row `decision-api` gives the key, its Test runner is the engine's own one-question judgment
 const decisionEngine = require('./decision-engine.js').create({ dataDir: path.join(rootDir, 'data'), integrations, serverNotice });
 try { if (integrations && typeof integrations.registerTest === 'function') integrations.registerTest('decision-api', decisionEngine.testRunner); } catch (e) { console.warn('[decision] Test runner not registered:', e.message); }
-if (userTodos) decisionEngine.attachInbox(userTodos); // lane inbox-decision-group: use ④ — the For-you tray's two sections (a 60 s tick, a pass every 5 min, off every wake path)
+// lane decision-inbox-rank: THE BOARD the For-you judge's facts are read from, once a pass — vibespace-status's record +
+// history of a conversation and its newest vibespace-task progress note (the stores' own readers; nothing is kept here)
+const inboxBoard = () => {
+  const st = getSessionStatus ? getSessionStatus() : null, tasks = getTasks ? getTasks() : null;
+  const progressAt = new Map();
+  for (const g of tasks && typeof tasks.list === 'function' ? tasks.list() : []) for (const p of g.progress || []) if (p && p.session && !(progressAt.get(p.session) >= p.at)) progressAt.set(p.session, p.at);
+  return (key) => ({ status: st ? st.get(key) : null, history: st ? st.history(key) : [], progressAt: progressAt.get(key) || 0 });
+};
+if (userTodos) decisionEngine.attachInbox(userTodos, { board: inboxBoard }); // lane inbox-decision-group: use ④ — the For-you tray's sections (a 60 s tick, a pass every 5 min, off every wake path)
 const plugins = new PluginManager({
   dataDir: path.join(rootDir, 'data'), integrations: () => integrations,
   // lane plugin-settings-p0: THE settings store — every plugin configuration row is read / written here (one truth)

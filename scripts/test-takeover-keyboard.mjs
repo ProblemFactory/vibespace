@@ -1591,6 +1591,7 @@ const CENSUS = [
   ['utils.js', 'tabindex', 'dialog', 'createModalShell\'s overlay (-1), a confirm\'s own focus — every modal ANNOUNCES its open (announceModal, lane dialog-keys)'],
   ['vnc-view.js', 'novnc', 'picture', 'THE DESKTOP / a VNC app (noVNC\'s canvas)'],
   ['voice-input.js', 'execcommand', 'helper', 'the dictation\'s insertText at the stop-time cursor + the chip\'s Undo (Dropline voice input, q-029 P0)'],
+  ['voice-input.js', 'tabindex', 'none', 'the microphone on the phone (-1: never a Tab stop, a tap never focuses the box — lane voice-everywhere; the desk keeps Tab)'],
   ['voice-teach-ui.js', 'input', 'control', 'a proposal\'s term ticks and the per-project opt-in (checkboxes) on the Voice row\'s sheet (q-029 P1; the teach / context switches are settings rows — lane plugin-settings-p0)'],
   ['window-share.js', 'input', 'control', 'the wake / hold checkboxes'],
   ['window-share.js', 'textarea', 'text', 'the share note'],

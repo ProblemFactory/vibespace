@@ -831,8 +831,8 @@ console.log("㉑ THE DECISION API'S TRAY SECTIONS (lane inbox-decision-group) �
   ok(!bad.length, 'inboxSectionOf: urgent / high and every item with options / buttons in 「现在要你」; a NORMAL option-less item by its verdict, 「待判断」 until one exists; low / answered wait', bad.map(([i, w]) => [i.id, w, L.inboxSectionOf(i)]));
   {   // RED CONTROL (F3/F4): the base rule (5a9119e99) drew an Allow item and an unscored item in 「可以等」 — this table reads it red
     const src = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-layout.js'), 'utf8');
-    const fixed = "  if ((Array.isArray(item.options) && item.options.length) || item.action) return 'now';\n  const c = inboxChip(item);\n  if (c) return c.group;\n  return u === 'normal' && !item.reply ? 'pending' : 'later';";
-    const pre = src.replace(fixed, "  const c = inboxChip(item);\n  return c && c.group === 'now' ? 'now' : 'later';");
+    const fixed = "export function inboxSectionOf(item, now = 0) { return inboxPlace(item, now).section; }";
+    const pre = src.replace(fixed, "export function inboxSectionOf(item, now = 0) { const c = inboxChip(item, now); return c && c.group === 'now' ? 'now' : 'later'; }");
     ok(pre !== src, 'CONTROL (F3/F4): the base rule patches in');
     const { pathToFileURL } = await import('node:url');
     const { mutantCopies } = await import(path.join(ROOT, 'scripts/mutant-copy.mjs'));
@@ -845,7 +845,7 @@ console.log("㉑ THE DECISION API'S TRAY SECTIONS (lane inbox-decision-group) �
   const rows = [['claude:a', [{ item: it('a1'), resolved: false }, { item: it('a2', J('now')), resolved: false }, { item: it('a3', { urgency: 'high' }), resolved: true }]], ['claude:b', [{ item: it('b1', { sk: 'claude:b' }), resolved: false }]]];
   const held = new Map();
   const s1 = L.inboxSections(rows, { prev: held });
-  eq(s1.now.map(([k, e, n]) => [k, e.map((x) => x.item.id), n]), [['claude:a', ['a2', 'a3'], 1]], 'inboxSections: 「现在要你」 keeps the layout order, openCount recounted');
+  eq(s1.now.map(([k, e, n]) => [k, e.map((x) => x.item.id), n]), [['claude:a', ['a3', 'a2'], 1]], 'inboxSections: 「现在要你」 in THE PURE RANK\'s order (a high item before a judged ask — lane decision-inbox-rank), openCount recounted');
   eq(s1.pending.map(([k, e, n]) => [k, e.map((x) => x.item.id), n]), [['claude:a', ['a1'], 1], ['claude:b', ['b1'], 1]], 'inboxSections: 「待判断」 (not scored yet) — a session group may stand in more than one section');
   eq(s1.later, [], 'inboxSections: 「可以等」 holds only what a verdict (or low / answered) put there');
   const rows2 = [['claude:a', [{ item: it('a1', J('now')), resolved: false }, ...rows[0][1].slice(1)]], rows[1]];
@@ -853,14 +853,63 @@ console.log("㉑ THE DECISION API'S TRAY SECTIONS (lane inbox-decision-group) �
   ok(s2.pending.some(([, e]) => e.some((x) => x.item.id === 'a1')), 'THE SLOT LAW: a row judged while the popup is open stays in the section it was first drawn in (held per open)');
   ok(L.inboxSections(rows2).now.some(([, e]) => e.some((x) => x.item.id === 'a1')), '…and the next open (a fresh hold) draws it in 「现在要你」');
   const panel = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-panel.js'), 'utf8');
-  ok(/const sections = todos\.grouping \? inboxSections\(rows, \{ prev: secHeld \}\) : null;/.test(panel) && /else drawGroups\(root\.querySelector\(':scope > \.ut-groups'\), rows, ''\);/.test(panel), 'wiring: the panel draws sections ONLY while the snapshot carries `grouping`; off ⇒ the one .ut-groups pass of today');
+  ok(/const sections = todos\.grouping \? inboxSections\(rows, \{ prev: secHeld, now: Date\.now\(\) \}\) : null;/.test(panel) && /else drawGroups\(root\.querySelector\(':scope > \.ut-groups'\), rows, ''\);/.test(panel), 'wiring: the panel draws sections ONLY while the snapshot carries `grouping`; off ⇒ the one .ut-groups pass of today');
   ok(/if \(!sections\) \{ for \(const el of \[nowHead, pendHead, pending, laterHead, later\]\) if \(el\) el\.remove\(\); return null; \}/.test(panel), 'wiring: the switch going off removes every section node (today\'s DOM, node for node)');
   ok((panel.match(/gEl\.dataset\.fk \|\| gEl\.dataset\.key/g) || []).length === 2 && /groupOpen\.set\(pre \+ key, openIds\)/.test(panel), 'wiring: a 「可以等」 group\'s Mark all seen / fold are keyed apart (later|<key>) — never the 「现在要你」 twin\'s ids');
   const row = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-row.js'), 'utf8');
-  ok(/const c = ctx && ctx\.grouping \? inboxChip\(i\) : null;/.test(row) && /rowCtx\.grouping = !!todos\.grouping;/.test(panel), 'the chip is drawn only while the sections are (ctx.grouping from the snapshot)');
+  ok(/const c = ctx && ctx\.grouping \? inboxChip\(i, Date\.now\(\)\) : null;/.test(row) && /rowCtx\.grouping = !!todos\.grouping;/.test(panel), 'the chip is drawn only while the sections are (ctx.grouping from the snapshot)');
   // the RED control: a panel that sections without asking the switch fails the wiring pin above
-  const mut = panel.replace('const sections = todos.grouping ? inboxSections(rows, { prev: secHeld }) : null;', 'const sections = inboxSections(rows, { prev: secHeld });');
+  const mut = panel.replace('const sections = todos.grouping ? inboxSections(rows, { prev: secHeld, now: Date.now() }) : null;', 'const sections = inboxSections(rows, { prev: secHeld, now: Date.now() });');
   ok(mut !== panel && !/const sections = todos\.grouping \? inboxSections/.test(mut), 'CONTROL: a panel that always sections is caught by the wiring pin (off would not be today\'s layout)');
+
+  // lane decision-inbox-rank (INBOX v2): THE ORDER inside each section is the PURE rank's, held per open; THE CHIP says why
+  const H = 3600e3, T = Date.UTC(2026, 9, 13, 18, 0);
+  const F = (o = {}) => ({ state: 'unknown', dated: null, due: null, reasks: 0, askedAt: T - H, ...o });
+  const V = (why, ageH, o = {}) => ({ createdAt: T - ageH * H, judged: { group: why === 'whenever' ? 'later' : 'now', why, p: 0.8, v: 2, facts: F({ askedAt: T - ageH * H, ...o }) } });
+  const E = (id, sk, o) => ({ item: it(id, { sk, ...o }), resolved: false });
+  const rowsV2 = [['claude:a', [E('aL', 'claude:a', V('whenever', 3)), E('aB', 'claude:a', V('blocked', 2))]], ['claude:b', [E('bD', 'claude:b', V('dated', 1, { dated: '今晚 22:00', due: T + 2 * H })), E('bL', 'claude:b', V('whenever', 1))]],
+    ['claude:c', [E('cS', 'claude:c', V('blocked', 49))]]];
+  const hv = new Map();
+  const sv = L.inboxSections(rowsV2, { prev: hv, now: T });
+  const ids = (sec) => sec.map(([k, e]) => [k, e.map((x) => x.item.id)]);
+  eq(ids(sv.now), [['claude:a', ['aB']], ['claude:b', ['bD']]], 'v2 order: 「现在要你」 — the blocked ask\'s group before the dated one\'s');
+  eq(ids(sv.later), [['claude:b', ['bL']], ['claude:a', ['aL']], ['claude:c', ['cS']]], 'v2 order: 「可以等」 newest first — and the 49-hour-old judged-blocked ask is there (the decay), last');
+  const rowsV2b = [[rowsV2[0][0], [E('aL', 'claude:a', V('blocked', 3)), rowsV2[0][1][1]]], rowsV2[1], [rowsV2[2][0], [...rowsV2[2][1], E('cN', 'claude:c', V('blocked', 0.1))]]];
+  const sv2 = L.inboxSections(rowsV2b, { prev: hv, now: T });
+  eq(ids(sv2.now), [['claude:a', ['aB']], ['claude:b', ['bD']], ['claude:c', ['cN']]], 'THE SLOT LAW (v2): a row re-judged while open keeps its section; a row first seen while open goes LAST in its section');
+  eq(ids(sv2.later), ids(sv.later), '…and no row of 「可以等」 moved');
+  // the chip: the reason in OUR words (the row renderer, under the same minimal DOM as the N-ask leg)
+  const noop = () => {};
+  const mkEl = () => ({ dataset: {}, className: '', innerHTML: '', querySelector: () => null, querySelectorAll: () => [], appendChild: noop, addEventListener: noop, setAttribute: noop, classList: { add: noop, remove: noop, toggle: noop }, style: {} });
+  const had = { window: globalThis.window, document: globalThis.document, localStorage: globalThis.localStorage };
+  globalThis.window = globalThis; globalThis.addEventListener = globalThis.addEventListener || noop; globalThis.removeEventListener = globalThis.removeEventListener || noop;
+  globalThis.localStorage = { getItem: () => null, setItem: noop, removeItem: noop };
+  globalThis.document = { createElement: mkEl, querySelector: () => null, querySelectorAll: () => [], getElementById: () => null, addEventListener: noop, removeEventListener: noop, documentElement: { style: {}, lang: 'en' }, body: mkEl(), head: mkEl() };
+  try {
+    const { pathToFileURL } = await import('node:url');
+    const R = await import(pathToFileURL(path.join(ROOT, 'src/lib/user-todos-row.js')).href);
+    const zhSrc = fs.readFileSync(path.join(ROOT, 'src/lib/i18n-zh.js'), 'utf8');
+    const zhOf = (k) => { const m = zhSrc.match(new RegExp('^  ' + JSON.stringify(k).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ': (".*"),$', 'm')); return m ? JSON.parse(m[1]) : null; };
+    const tZh = (k, p) => { const z = zhOf(k) || k; return p ? z.replace(/\{(\w+)\}/g, (m, x) => (p[x] !== undefined ? String(p[x]) : m)) : z; };
+    const now = Date.now();
+    const Fz = (o = {}) => ({ state: 'unknown', dated: null, due: null, reasks: 0, askedAt: now - H, ...o });
+    const C = (judged, o = {}) => R.judgedChipHtml(it('x', { createdAt: now - H, judged, ...o }), tZh, { grouping: true });
+    const word = (html) => (html.match(/>([^<]*)<\/span>$/) || [, ''])[1];
+    const cases = [
+      ['a blocked fact', C({ group: null, v: 0, facts: Fz({ state: 'blocked' }) }), '卡住等你', /它的 agent 为这个问题把状态设成了「卡住」/],
+      ['the judge: dated', C({ group: 'now', why: 'dated', p: 0.81, v: 2, facts: Fz({ dated: '今晚 22:00', due: now + H }) }), '有期限 · 今晚 22:00', /Decision API 选的理由 \(p 0\.81\)/],
+      ['the judge: whenever', C({ group: 'later', why: 'whenever', p: 0.9, v: 2, facts: Fz() }), '随时', /Decision API 选的理由 \(p 0\.90\)/],
+      ['the decay', C({ group: 'now', why: 'blocked', p: 1, v: 2, facts: Fz({ askedAt: now - 49 * H }) }, { createdAt: now - 49 * H }), '48 小时无人再问', /48 小时前问的，之后没人再问/],
+      ['a v1 verdict (until v2 scores it)', C({ group: 'now', p: 0.7, v: 1 }), '现在', /由 Decision API 分组/],
+    ];
+    const badC = cases.filter(([, html, w, title]) => word(html) !== w || !title.test(html));
+    ok(!badC.length, 'THE CHIP (zh): 卡住等你 / 有期限 · <the item\'s date phrase> / 随时 / 48 小时无人再问 — OUR words through t(); the title says who placed it (its agent, the judge with its p, the clock)', badC.map(([n, h]) => [n, h]));
+    ok(/data-why="stale"/.test(cases[3][1]) && /data-group="later"/.test(cases[3][1]) && /data-group="now"/.test(cases[0][1]), 'the chip carries its section + reason (data-group / data-why — the stale one is drawn dashed)');
+    ok(R.judgedChipHtml(it('x', { judged: { group: 'now', why: 'blocked', p: 1, v: 2 } }), tZh, { grouping: false }) === '' && R.judgedChipHtml(it('x', { urgency: 'high', judged: { group: null, v: 0, facts: Fz({ state: 'blocked' }) } }), tZh, { grouping: true }) === '', 'no chip while the sections are off, and none on an item that stands by its own urgency');
+    const newKeys = ['Agent waits on you', 'Due {when}', 'Has a deadline', 'Any time', 'Nobody asked again in 48 h', 'Asked over 48 hours ago, and nobody asked again since', 'Its agent set its status to blocked for this question', 'The Decision API chose this reason'];
+    ok(newKeys.every((k) => !/—/.test(k) && !/—/.test(zhOf(k) || '—')), 'the card grammar: no em-dash sentence in the new chip words (en / zh)', newKeys.filter((k) => /—/.test(k) || /—/.test(zhOf(k) || '—')));
+  } catch (e) { ok(false, 'v2 chip: the row renderer runs under the minimal DOM', e.stack); }
+  finally { for (const [k, v] of Object.entries(had)) { if (v === undefined) delete globalThis[k]; else globalThis[k] = v; } }
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

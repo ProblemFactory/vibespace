@@ -108,6 +108,7 @@ import { msgBarActions, msgMenuActions, barKey } from './msg-bar-model.js';
 import { renderMsgBar, syncMsgBar, holdBarOpen, msgActionMenu, renderMsgMore, isTouchFirst } from './channel-msg-bar.js';
 import * as P from '../channel-policy.js';
 import { firstLine } from '../channel-thread.js';
+import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
 
 // lane owner-composer-attach (owner 2026-10-09: "我能操作的那个聊天框不能上传文件"): THE OWNER'S FILES in the reply box —
 // a paperclip (the system picker; phone too), a drop onto the box, a paste of a file or picture. Each file is ONE chip
@@ -970,7 +971,7 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
       ta.addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); sendBtn.click(); } });
       row.prepend(note);
       row.appendChild(sendBtn);
-      comp.append(...(cf ? [cf.box] : []), ta, row);
+      comp.append(...(cf ? [cf.box] : []), voiceField(ta, attachDictation(ta)), row);
       // lane webhook-l2-ui: a reply on a path goes to a CALLER — named under the box (drawQuote words it)
       if (offersPaths(ad0)) { const to = el('div', 'chanwin-wh-to'); to.dataset.whTo = '1'; comp.appendChild(to); }
       foot.textContent = '';
@@ -2052,7 +2053,7 @@ function openGroupWindow(app, winInfo, groupId, { bar, list, foot }) {
     sendBtn.dataset.groupSend = '1';
     sendBtn.prepend(icon('send', 11));
     row.append(note, sendBtn);
-    comp.append(pop, ta, row);
+    comp.append(pop, voiceField(ta, attachDictation(ta)), row);
     foot.appendChild(comp);
     autosizeEditor(ta, { minRows: 2 });
     // B-ff04 ①: the members the person PICKED from the @ list, in order — sent as places by id, never re-read by name

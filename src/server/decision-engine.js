@@ -28,6 +28,12 @@
  * under this level table) are scored ONE item a call through `judge('inbox', …)` — the same memo, reserve / settle and
  * journal as every use. The verdict lands beside the item (`store.setJudged`: `judged {group, p, at, v}`); the item's
  * urgency is never written.
+ * v2 (lane decision-inbox-rank): each pass first reads the BOARD once (`attachInbox(store, {board})` — the wiring's
+ * reader of vibespace-status's record + history and the newest vibespace-task progress note of a conversation; never a
+ * store of its own) and writes every sortable item's PURE `inboxFacts` (`store.setFacts`, only when they changed — no
+ * call); then the items the rules do not place already (a blocked fact, the 48 h decay) are judged with their facts line
+ * (`judged {group, why, p, at, v, facts, sig}`). A pass a refusal stopped is SAID: a log line when the reason changes and
+ * `status().inbox` {at, judged, placed, stopped} (the plugin's status carries it).
  */
 const fs = require('fs');
 const path = require('path');
@@ -226,7 +232,9 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
       try { writeJsonAtomic(F.usage, d); } catch (e) { log.warn?.(`[decision] usage not saved: ${e.message}`); }
     }
     lastOutcome = { at: now(), use, outcome: 'ok' };
-    journal({ ...base, outcome: 'ok', status, inputTokens: u.inputTokens, outputTokens: u.outputTokens, usd, hits });
+    // lane decision-attention-facts: an attention call's needs_now rides its journal line (`p`, 2 decimals)
+    const p = use === 'attention' && n === 1 ? M.needsNowP(answers) : undefined;
+    journal({ ...base, outcome: 'ok', status, inputTokens: u.inputTokens, outputTokens: u.outputTokens, usd, hits, p });
     return { ok: true, memo: false, answers: n > 1 ? M.unbatchAnswers(answers, n) : answers, usage: u, usd };
   }
 
@@ -239,6 +247,25 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
     return { ok: !refused, error: refused ? 'the judge refused the question' : null, detail: { p: refused ? null : first.probability, inputTokens: r.usage.inputTokens, usd: r.usd } };
   }
 
+  /** lane decision-spend-readout: the month so far for Settings › Spending — Σ usd of the journal's rows this local month,
+   *  read from a BOUNDED tail (≤ 2 MB: the journal itself is cut at 5 000 lines / 30 days) and kept 60 s. */
+  let monthMemo = { at: -Infinity, v: null };
+  function monthSoFar() {
+    if (now() - monthMemo.at < 60000) return monthMemo.v;
+    let rows = [];
+    try {
+      const fd = fs.openSync(F.journal, 'r');
+      try {
+        const size = fs.fstatSync(fd).size, n = Math.min(size, 2 * 1024 * 1024), buf = Buffer.alloc(n);
+        fs.readSync(fd, buf, 0, n, size - n);
+        rows = buf.toString('utf8').split('\n').slice(n < size ? 1 : 0).map((l) => { try { return JSON.parse(l); } catch { return null; } });
+      } finally { fs.closeSync(fd); }
+    } catch { rows = []; }
+    const v = M.monthSpend(rows, today().day.slice(0, 7), tzOffset);
+    monthMemo = { at: now(), v };
+    return v;
+  }
+
   function status() {
     const s = settings();
     const cred = credential();
@@ -247,12 +274,15 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
       configured: !!cred, provider: cred ? cred.provider : null, providerLabel: cred ? M.PROVIDER_LABEL[cred.provider] : null, model: cred ? cred.model : null, keySource: cred ? cred.source : null,
       features: s.features, dailyBudgetCents: s.dailyBudgetCents, threshold: s.threshold,
       today: { day: d.day, byUse: d.byUse, total: totalOf(d), reserved: Math.round(reservedUsd() * 1e8) / 1e8, inFlight: open.size },
+      month: monthSoFar(),
       backoffUntil: backoff.until > now() ? backoff.until : 0, reconnect: refused && cred && refused.keySha === sha(cred.key) ? { status: refused.status, at: refused.at } : null, last: lastOutcome,
+      inbox: inboxLast,   // lane decision-inbox-rank: the For-you tray's last pass {at, judged, placed, stopped} — a stopped pass is said
     };
   }
 
   // ── use ④: the For-you pass (lane inbox-decision-group) ───────────────────
   let inbox = null, inboxTimer = null, inboxBusy = false, inboxOnWas = null, inboxLastPass = 0;
+  let inboxBoard = null, inboxLast = null, inboxStopSaid = null;   // lane decision-inbox-rank: the board's reader; the last pass, as status() says it
   const inboxOn = () => { const s = settings(); return !!(s.pluginOn && s.features.inbox); };
   /** What the tray draws its section head from (the store puts it in its snapshot): null = the switch is off ⇒
    *  today's layout, byte for byte. `today` = the inbox use's paid calls of the instance's day. */
@@ -268,30 +298,47 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
     inboxOnWas = on;
     try { if (inbox && typeof inbox.notify === 'function') inbox.notify(); } catch { }
   }
-  /** ONE pass: ≤ `max` eligible items, one call each (refused ⇒ the pass stops; the next one retries). */
+  /** ONE pass: the facts of every sortable item (free), then ≤ `max` eligible items, one call each (refused ⇒ the pass
+   *  stops, says why, and the next one retries). */
   async function inboxPass({ max = M.inputPlan('inbox').perPass } = {}) {
     if (!inbox || inboxBusy || !inboxOn()) return { ran: false, judged: 0 };
     inboxBusy = true; inboxLastPass = now();
-    let judged = 0;
+    let judged = 0, placed = 0, stopped = null;
     try {
-      const t = now();
-      const items = inbox.openItems().filter((i) => M.inboxEligible(i, t) === true).slice(0, max);
-      for (const it of items) {
-        const r = await judge('inbox', M.inboxScoreInput(it), { questions: [M.INBOX_QUESTION], memo: M.inboxMemoOf(it, sha) });
-        if (!r.ok) break;
+      const t = now(), tz = tzOffset(t);
+      let of = null;
+      try { of = inboxBoard ? inboxBoard() : null; } catch (e) { log.warn?.(`[decision] For-you pass: the board was not read (${e.message}) — facts without it`); }
+      const facts = [], due = [];
+      for (const it of inbox.openItems()) {
+        if (M.inboxSorts(it) !== true) continue;
+        let b = null;
+        try { b = of ? of(it.sessionKey) : null; } catch { b = null; }
+        const f = M.inboxFacts(it, { now: t, board: b, tzOffsetMin: tz });
+        facts.push([it.id, f]);
+        const e = M.inboxEligible(it, t, f);
+        if (e === 'placed') placed++;
+        if (e === true) due.push([it, f]);
+      }
+      if (facts.length && typeof inbox.setFacts === 'function') inbox.setFacts(facts);
+      for (const [it, f] of due.slice(0, max)) {
+        const r = await judge('inbox', M.inboxScoreInput(it, f, t), { questions: [M.INBOX_QUESTION], memo: M.inboxMemoOf(it, sha, f) });
+        if (!r.ok) { stopped = r.why || 'refused'; break; }
         const v = M.inboxVerdict(r.answers[0]);
-        if (inbox.setJudged(it.id, { group: v ? v.group : null, p: v ? v.p : null, at: now(), v: M.INBOX.version })) judged++;
+        if (inbox.setJudged(it.id, { group: v ? v.group : null, why: v ? v.why : null, p: v ? v.p : null, at: now(), v: M.INBOX.version, facts: f, sig: M.inboxFactsSig(f) })) judged++;
       }
     } finally { inboxBusy = false; }
-    return { ran: true, judged };
+    inboxLast = { at: inboxLastPass, judged, placed, stopped };
+    if (stopped !== inboxStopSaid) { inboxStopSaid = stopped; if (stopped) log.warn?.(`[decision] For-you pass stopped after ${judged} judged: ${stopped} (the next pass retries in ${Math.round(M.INBOX.passMs / 60000)} min)`); }
+    return { ran: true, judged, placed, stopped };
   }
-  function attachInbox(store, { tickMs = 60 * 1000 } = {}) {
+  function attachInbox(store, { tickMs = 60 * 1000, board = null } = {}) {
     inbox = store && typeof store.setJudged === 'function' && typeof store.openItems === 'function' ? store : null;
+    inboxBoard = typeof board === 'function' ? board : null;
     if (!inbox) return;
     if (typeof inbox.setGrouping === 'function') inbox.setGrouping(grouping);
     inboxOnWas = inboxOn();
     if (tickMs > 0 && !inboxTimer) {
-      inboxTimer = setInterval(() => { inboxSwitched(); if (now() - inboxLastPass >= M.INBOX.passMs) inboxPass().catch(() => { }); }, tickMs);
+      inboxTimer = setInterval(() => { inboxSwitched(); if (now() - inboxLastPass >= M.INBOX.passMs) inboxPass().catch((e) => log.warn?.(`[decision] For-you pass failed: ${e.message}`)); }, tickMs);
       if (inboxTimer.unref) inboxTimer.unref();
     }
   }

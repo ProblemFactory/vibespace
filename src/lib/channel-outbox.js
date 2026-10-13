@@ -87,6 +87,7 @@ import * as P from '../channel-policy.js';
 // a3 i18n: a route failure is worded by its CODE, never by the engine's sentence.
 import { routeErrorText } from './channel-words.js';
 import { apiOutboxSection } from './channel-api-card-view.js';   // B-2198 part 2: one row per raw-API proposal, its card under it
+import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
 
 const ICON = svgIcon16('<path d="M2.5 4.5h11v8h-11z"/><path d="M2.5 4.5l5.5 4 5.5-4"/><path d="M8 2v3"/>');
 const JSON_HDR = { 'Content-Type': 'application/json' };
@@ -606,7 +607,7 @@ export function renderProposalCard(app, p, { compact = false, line = false, onLi
       if (editor) return;
       editor = el('textarea', 'chan-prop-edit');
       editor.value = p.text || '';
-      body.replaceWith(editor);
+      body.replaceWith(voiceField(editor, attachDictation(editor)));
       autosizeEditor(editor);   // the agent's draft opens at its size (min 4 rows, max ~60 % of the pane)
       approve.textContent = noFile ? t('Send without the file') : toAgent ? approveLabel(pressedDelivery(approve), { edited: true }) : t('Approve edited');
       edit.disabled = true;
@@ -1078,7 +1079,7 @@ registerWindowType({
 registerCommand({ id: 'channels.openOutbox', title: () => t('Outbox…'), run: (c) => c.app.openChannelOutbox() });
 /** The ⚙ row beside "Channels…" — registered by the owning module. */
 registerMenuItem({
-  menu: 'gear', parent: 'comm', order: 20, // under Communication ▸ (gear-menu.js head 'comm'; Channels 10 · this 20 · Integrations 30)
+  menu: 'gear', parent: 'comm', order: 20, // under Communication ▸ (gear-menu.js head 'comm'; For you 5 · Channels 10 · this 20)
   icon: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4.5h11v8h-11z"/><path d="M2.5 4.5l5.5 4 5.5-4"/></svg>',
   label: () => t('Outbox…'),
   run: (c) => c.app.openChannelOutbox(),

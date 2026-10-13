@@ -86,6 +86,7 @@ function maskValue(v) {
 }
 
 const VendorList = require('./channels/registry-list.js');   // lane dc-channels-manifest: the channel vendors' rows (PURE manifests)
+const PluginSettings = require('./plugin-settings.js');      // lane integrations-menu-home: which built-in plugin names a row (PURE, imports nothing)
 const okV = Object.freeze({ ok: true });
 const bad = (why) => ({ ok: false, why });
 const V = {
@@ -537,6 +538,28 @@ function oauthClientVendorOf(row) {
   return r.delegate && r.delegate.to === 'drive-presets' ? 'google' : null;
 }
 
+/** THE INTEGRATIONS WINDOW'S GROUPS (lane integrations-menu-home, owner 2026-10-13: 「如果 decision api 的密钥配置在
+ *  这里，那不应该放在通信里吧」) — what USES a row's key, DERIVED from what is already declared, never a list of ids:
+ *  `communication` = a channel adapter consumes it (a consumer under src/channels/), `browser` = the agent-browser
+ *  backend consumes it (the one module that resolves the browser keys), `plugins` = a built-in plugin's settings
+ *  table names it (plugin-settings.js `integration`). A row matching none of the three — or two — is `null`, and the
+ *  suite's census is RED: a new row lands in a group by what it declares. The window draws them in GROUPS order. */
+const GROUPS = Object.freeze(['communication', 'browser', 'plugins']);
+const GROUP_WORDS = Object.freeze({ communication: i18nKey('Communication'), browser: i18nKey('Browser'), plugins: i18nKey('Plugins') });
+const BROWSER_CONSUMER = 'src/server/browser-backend.js';
+const PLUGIN_ROWS = new Set(Object.values(PluginSettings.PLUGIN_SETTINGS).map((p) => p && p.integration).filter(Boolean));
+function groupOf(row) {
+  const r = typeof row === 'string' ? rowById(row) : row;
+  if (!r) return null;
+  const used = Array.isArray(r.consumers) ? r.consumers.map(String) : [];
+  const hits = [
+    used.some((c) => c.startsWith('src/channels/')) && 'communication',
+    used.includes(BROWSER_CONSUMER) && 'browser',
+    PLUGIN_ROWS.has(r.id) && 'plugins',
+  ].filter(Boolean);
+  return hits.length === 1 ? hits[0] : null;
+}
+
 /** Registry-level self-checks the suite runs; kept here so the rules are one place. */
 function checkRow(row) {
   const errs = [];
@@ -582,4 +605,5 @@ module.exports = {
   ROWS, TEST_KINDS, SIGNIN_KINDS, TEST_BUTTON_LABEL, MASK, MASK_TAIL_MIN,
   rowById, rowIds, maskValue, validateValues, missingFields, resolvePrecedence, pickPreset,
   fieldDecls, checkRow, TRIM_NOTE, credentialWhyText, clientFieldsOf, bindsPerAccount, oauthClientVendorOf,
+  GROUPS, GROUP_WORDS, groupOf,
 };

@@ -1309,6 +1309,11 @@ const SETTINGS_SCHEMA = {
     label: t('Someone wrote to me directly and I have not read it'),
     description: t('A one-to-one chat with unread messages from the last 24 hours (an app or bot never counts).'),
   },
+  'channels.attention.rule.at-you': {
+    type: 'boolean', default: true, ...ATTENTION_BLOCK,
+    label: t('Someone @-mentioned me and I have not read it'),
+    description: t('A message in a group or a one-to-one chat that names you with @, from the last 24 hours, that you have not read.'),
+  },
   'channels.attention.rule.awaiting': {
     type: 'boolean', default: true, ...ATTENTION_BLOCK,
     label: t('A message waiting for my approval to send'),

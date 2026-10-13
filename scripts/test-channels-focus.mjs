@@ -165,7 +165,7 @@ const FIXTURE = [
   for (const p of peel) { p(cur); const t2 = Fo.statusTag(cur, NOW); steps.push(t2 ? t2.code : null); }
   const WANT = ['awaiting', 'unknown', 'assigned', 'new-since-read', 'read', 'held', 'replied', null];
   ok(JSON.stringify(steps) === JSON.stringify(WANT), `THE ONE TAG, by priority: ${WANT.map(String).join(' › ')}`, JSON.stringify(steps));
-  ok(JSON.stringify(Fo.TAG_ORDER) === JSON.stringify(['awaiting', 'unknown', 'assigned', 'read', 'new-since-read', 'held', 'judged', 'direct', 'replied']), 'TAG_ORDER is the documented table (read / new-since-read are ONE fact split by what arrived after it; `judged` — the Decision API\'s verdict, lane decision-attention — after held, before direct; `direct` — a single chat with unread messages — before replied)');
+  ok(JSON.stringify(Fo.TAG_ORDER) === JSON.stringify(['awaiting', 'unknown', 'at-you', 'assigned', 'read', 'new-since-read', 'held', 'judged', 'direct', 'replied']), 'TAG_ORDER is the documented table (read / new-since-read are ONE fact split by what arrived after it; `judged` — the Decision API\'s verdict, lane decision-attention — after held, before direct; `direct` — a single chat with unread messages — before replied)');
   const dTag = Wd.statusTagParts({ code: 'direct', n: 3 }, { now: NOW });
   ok(dTag && dTag.before === 'DM · 3 new' && dTag.tone === 'attn' && /single chat/.test(dTag.title), 'the direct tag\'s words: "DM · 3 new" (zh 单聊 · 3 条新消息, ja 個別 · 新着 3 件 — the tag\'s width budget lives in its words)', JSON.stringify(dTag));
   const heldAssigned = Fo.statusTag(row('x', { assignment: principal('Alpha'), touch: { pending: 1 } }), NOW);
@@ -602,7 +602,7 @@ console.log('⑦ the R3 × R4 seam (2.369.191): a DIGEST watcher\'s open window 
   ok(F.needsOwner(cv('u', { lastAt: t - 1 }, { outbox: { unknown: 1 } }), t) && !F.needsOwner(cv('h', { lastAt: t - 1 }, { touch: { pending: 2 } }), t) && !F.needsOwner(grp('q', { unread: 9 }), t),
     'channels-badges: a send of unknown outcome needs the owner; a held wake, unread agent talk do not');
   const fsrc = fs.readFileSync(path.join(REPO, 'src/channel-focus.js'), 'utf8');
-  const PIN = '  if (num(r.atYou) > 0) return true;\n';
+  const PIN = '  if (atYouOf(r, now) > 0) return true;\n';   // lane attention-rule-at-you: THE predicate (an agent group's own count first)
   ok(fsrc.split(PIN).length === 2, 'channels-badges CONTROL setup: the @-you clause is spelled once');
   const F0 = require(MUT.write('src/channel-focus.js', fsrc.replace(PIN, ''), 'badges-no-at'));
   ok(!keys(F0.internalBlock(L, { folded: true, now: t })).includes('g2'), 'channels-badges NEGATIVE CONTROL: a copy without the @-you clause folds the group that @-mentions the owner away — the leg above would be red');
@@ -647,11 +647,12 @@ console.log('⑬ the attention POLICY (lane attention-policy): every rule a swit
   const lastAt = NOW - 5 * 60e3;
   const judgedRow = row('judged-90', { judged: { p: 0.9, clauses: ['asks you'], threshold: 0.7, lastAt } });
   const multi = row('dm-awaiting', { kind: 'dm', unread: 2, lastAt: NOW - H, outbox: { awaiting: 1, unknown: 0 } });
-  const ROWS = [...FIXTURE.map(([r]) => r), judgedRow, multi];
+  const atRow = row('at-you-1', { kind: 'group', atYouAts: [NOW - H], lastAt: NOW - H });   // lane attention-rule-at-you: the 8th rule's row
+  const ROWS = [...FIXTURE.map(([r]) => r), judgedRow, multi, atRow];
   const tagOf = (F, r, pol) => { const g = F.statusTag(conv(r), NOW, pol); return g ? g.code : null; };
   const ruleOfTag = (code) => (code === 'new-since-read' ? 'read' : code);
   const keysOf = (F, pol, view = 'focus') => F.firstScreen(ROWS.map(conv), { view, now: NOW, policy: pol }).shown.map((x) => x.conv.key).join();
-  ok(RULES.length === 7 && RULES.every((c) => Fo.TAG_ORDER.includes(c)) && !RULES.includes('judged') && !RULES.includes('new-since-read'), 'seven fixed rules, each a tag of the table (read covers new-since-read; judged is the judge\'s switch)', RULES.join());
+  ok(RULES.length === 8 && RULES.includes('at-you') && RULES.every((c) => Fo.TAG_ORDER.includes(c)) && !RULES.includes('judged') && !RULES.includes('new-since-read'), 'eight fixed rules (+ at-you), each a tag of the table (read covers new-since-read; judged is the judge\'s switch)', RULES.join());
   // DEFAULT = TODAY, byte for byte: no policy, an empty reader, and every switch written on
   const allOn = attentionPolicy((k) => (k.startsWith('channels.attention.rule.') ? true : undefined), true);
   const same = ROWS.every((r) => JSON.stringify(Fo.statusTag(conv(r), NOW)) === JSON.stringify(Fo.statusTag(conv(r), NOW, attentionPolicy())) && JSON.stringify(Fo.statusTag(conv(r), NOW)) === JSON.stringify(Fo.statusTag(conv(r), NOW, allOn)));
@@ -695,6 +696,64 @@ console.log('⑬ the attention POLICY (lane attention-policy): every rule a swit
   ok(FOCUS_SRC.includes(IGN), 'the policy\'s patch site is in channel-focus.js');
   const Fi = await import(pathToFileURL(MUT.write('src/channel-focus.js', FOCUS_SRC.replace(IGN, '  const on = () => true;'), 'policy-ignored')).href);
   ok(keysOf(Fi, ruleOff('direct')).split(',').includes('lark/direct') && keysOf(Fi, null) === keysOf(Fo, null), 'CONTROL: a copy that ignores the policy keeps the switched-off "direct" row on the first screen (and equals today) ⇒ the leg above reddens on it');
+}
+
+// ── lane attention-rule-at-you (owner 2026-10-13 on the 需关注 block: "怎么没有 at 我的这个选项"): BEING NAMED BY A PERSON IS A
+// FIRST-SCREEN RULE OF ITS OWN — a row whose unread records (24 h) @ the owner's resolved identity, ranked after
+// awaiting / unknown and before assigned, a switch like the rest; the judge never sees a row it claims ──
+console.log('⑭ the at-you rule (lane attention-rule-at-you): an unread @ of me inside 24 h, its rank, its switch, its census');
+{
+  const conv = (r) => ({ kind: 'conv', conv: r });
+  const SELF = 'ou_self';
+  const rec = (at, mentions, author = { id: 'ou_peer', name: 'Pat' }, extra = {}) => ({ at, author, text: 'hi', mentions, ...extra });
+  const me = [{ id: SELF, name: 'Me' }];
+  // the predicate: a PERSON mention of the resolved self — never a broadcast / a group, never my own record, never a system notice, never an unknown self
+  ok(Fo.mentionsSelf(rec(NOW, me), SELF) && !Fo.mentionsSelf(rec(NOW, [{ id: '!all', name: 'all', kind: 'broadcast' }]), SELF) && !Fo.mentionsSelf(rec(NOW, [{ id: SELF, name: 'x', kind: 'group' }]), SELF)
+    && !Fo.mentionsSelf(rec(NOW, me, { id: SELF, name: 'Me' }), SELF) && !Fo.mentionsSelf(rec(NOW, me, { id: 'ou_peer', isSelf: true }), SELF) && !Fo.mentionsSelf(rec(NOW, me, {}, { kind: 'system' }), SELF)
+    && !Fo.mentionsSelf(rec(NOW, me), null) && !Fo.mentionsSelf(rec(NOW, [{ id: 'ou_other', name: 'Other' }]), SELF),
+    'mentionsSelf: a person @ of the resolved self only — a broadcast, a group, my own message (self-mention), a system notice, an unknown self never count');
+  const kept = Fo.keepAtYou([NOW - 3 * H], [rec(NOW - H, me), rec(NOW - 2 * H, [{ id: 'ou_other' }]), rec(NOW - H, me), rec(NOW - 30 * 60e3, me, { id: SELF })], SELF);
+  ok(JSON.stringify(kept) === JSON.stringify([NOW - 3 * H, NOW - H]), 'keepAtYou: the instants of the records that @ me, ascending, unique (self-mention and others dropped)', JSON.stringify(kept));
+  const many = Fo.keepAtYou([], Array.from({ length: 80 }, (_, i) => rec(NOW - i * 1000, me)), SELF);
+  ok(many.length === Fo.AT_YOU_MAX && many[many.length - 1] === NOW, `keepAtYou is bounded: the newest ${Fo.AT_YOU_MAX} instants`, many.length);
+  // the tag, its rank, its window, read-up-to
+  const at1 = row('at1', { kind: 'group', atYouAts: [NOW - 2 * H, NOW - H] });
+  ok(JSON.stringify(Fo.statusTag(conv(at1), NOW)) === '{"code":"at-you","n":2}', 'an unread @ of me inside 24 h ⇒ the at-you tag with its count', JSON.stringify(Fo.statusTag(conv(at1), NOW)));
+  const assignedToo = row('at2', { atYouAts: [NOW - H], assignment: { principal: { id: 'claude:x', name: 'Ops', kind: 'agent' }, source: 'conversation' } });
+  const awaitingToo = row('at3', { atYouAts: [NOW - H], outbox: { awaiting: 1, unknown: 0 } });
+  const unknownToo = row('at3u', { atYouAts: [NOW - H], outbox: { awaiting: 0, unknown: 1 } });
+  ok(Fo.statusTag(conv(assignedToo), NOW).code === 'at-you' && Fo.statusTag(conv(awaitingToo), NOW).code === 'awaiting' && Fo.statusTag(conv(unknownToo), NOW).code === 'unknown'
+    && Fo.TAG_ORDER.indexOf('at-you') === Fo.TAG_ORDER.indexOf('unknown') + 1 && Fo.TAG_ORDER.indexOf('at-you') + 1 === Fo.TAG_ORDER.indexOf('assigned'),
+    'its rank: after awaiting / unknown, before assigned (being asked by name outranks being assigned)');
+  const edge = row('at4', { atYouAts: [NOW - D] }), inside = row('at5', { atYouAts: [NOW - D + 1] });
+  ok(Fo.statusTag(conv(edge), NOW) === null && Fo.statusTag(conv(inside), NOW).code === 'at-you' && Fo.atYouOf(conv(row('at6', { atYouAts: [NOW - D, NOW - H] })), NOW) === 1,
+    'the 24 h window: an @ exactly 24 h old has left (the edge is EXCLUSIVE); only the ones inside count');
+  const readPast = row('at7', { atYouAts: [NOW - 2 * H, NOW - H], readAt: NOW - H }), readHalf = row('at8', { atYouAts: [NOW - 2 * H, NOW - H], readAt: NOW - 90 * 60e3 });
+  ok(Fo.statusTag(conv(readPast), NOW) === null && Fo.atYouOf(conv(readHalf), NOW) === 1, 'read-up-to clears it: the kept @s at or before the read line no longer count');
+  ok(!Fo.firstScreen([conv(readPast)], { now: NOW }).shown.length && Fo.firstScreen([conv(at1)], { now: NOW }).shown.length === 1, 'the first screen lists the @ row, and drops it once read');
+  // the switch: off ⇒ the row answers with its next rule that is on, else it leaves for All
+  const off = Fo.attentionPolicy((k) => (k === 'channels.attention.rule.at-you' ? false : undefined));
+  ok(Fo.statusTag(conv(assignedToo), NOW, off).code === 'assigned' && Fo.statusTag(conv(at1), NOW, off) === null
+    && !Fo.firstScreen([conv(at1)], { now: NOW, policy: off }).shown.length && Fo.firstScreen([conv(at1)], { view: 'all', now: NOW, policy: off }).shown.length === 1,
+    'policy off ⇒ the row falls to its next rule ("assigned") or leaves for All');
+  ok(['both', 'rules'].every((p) => Fo.presetSwitches(p).settings['channels.attention.rule.at-you'] === true) && Fo.presetSwitches('judge').settings['channels.attention.rule.at-you'] === false
+    && Fo.attentionPolicy().rules['at-you'] === true, 'presets: 固定规则 + 判断模型 / 只用固定规则 ⇒ on; 只用判断模型 ⇒ off; unset = on');
+  // the judge never sees a row this tag claims (by construction); the server's pre-filter over-includes it (candidateOf ⊇ statusTag)
+  const fresh = row('at9', { kind: 'group', atYouAts: [NOW - 60e3], lastAt: NOW - 60e3 });
+  ok(Fo.judgeCandidate(conv(fresh), NOW) === false && Fo.judgeCandidate(conv({ ...fresh, atYouAts: [] }), NOW) === true && Fo.judgeCandidate(conv(fresh), NOW, off) === true,
+    'the judge never sees an at-you row (a fact is free and stronger) — only once the owner switched the rule off');
+  ok(Fo.candidateOf({ atYouAts: [NOW - H], readAt: 0, lastAt: NOW - 30 * H }, null, NOW) === true && Fo.candidateOf({ atYouAts: [NOW - H], readAt: NOW, lastAt: NOW - 30 * H }, null, NOW) === false,
+    'candidateOf (the scan\'s pre-filter) over-includes a row with an unread @ of me, never a read one');
+  ok(Fo.needsOwner({ kind: 'group', group: {}, atYou: 2 }, NOW) && Fo.needsOwner(conv(at1), NOW) && !Fo.needsOwner(conv(readPast), NOW), 'needsOwner asks the same predicate (an agent group\'s own count, a conversation\'s kept @s)');
+  // the words
+  const tp = Wd.statusTagParts({ code: 'at-you', n: 3 }, { now: NOW });
+  ok(tp && /3/.test(tp.text || tp.label || JSON.stringify(tp)) && tp.tone === 'attn', 'the chip: "@ me · N", the attention tone', JSON.stringify(tp));
+  // RED CONTROL: a copy of channel-focus without the at-you clause (the base: mentions never decide membership) leaves the row off the first screen
+  const fsrc = fs.readFileSync(path.join(REPO, 'src/channel-focus.js'), 'utf8');
+  const CLAUSE = "  if (ay > 0) return { code: 'at-you', n: ay };\n";
+  ok(fsrc.split(CLAUSE).length === 2, 'at-you CONTROL setup: the clause is spelled once');
+  const Fb = require(MUT.write('src/channel-focus.js', fsrc.replace(CLAUSE, ''), 'no-at-you'));
+  ok(Fb.statusTag(conv(at1), NOW) === null && !Fb.firstScreen([conv(at1)], { now: NOW }).shown.length, 'RED CONTROL: a copy that ignores mentions never lists the @ row — the legs above would be red');
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

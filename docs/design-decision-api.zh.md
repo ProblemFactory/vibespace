@@ -63,6 +63,7 @@ owner 2026-10-12 提出；设计台（Fable）2026-10-12，**修订 r1**（同�
 - **答案 → 标签**：`needs_now ≥ 阈值`（默认 0.7，设置里 0.5–0.9）⇒ 行戴 `judged` 标签（`TAG_ORDER` 插在 `held` 后、`direct` 前——事实标签永远在前），芯片「需要你 · 0.82 · 问你、有截止」，**理由 = 条款名**（我们的词表，三语），厂商没有一字进 UI 或 agent 上下文；模拟来源加「估计」。行上两个小按钮「需要 / 不需要」= 样本 + 立刻改标签。
 - **不动的**：规则标签的行；agent 的 wake 不因 `judged` 而发（它只是第一屏的排序；要叫醒走 §2.5 的规则）。
 - **as-built（lane attention-policy，owner 2026-10-13「应该允许禁用原来的固定规则…」）**：第一屏是 owner 的策略——每条固定规则一个开关（`channels.attention.rule.<code>`，默认开，大白话写明意思），判断模型的开关就是插件自己的 `attention`（一个存储，经 POST /api/plugins/decision-api/config 写），阈值出了 Advanced（滑块），「我在乎什么」在其下，预设单选只设开关；关掉的规则不让行进第一屏，判断模型可判它（`judgeCandidate(v, now, policy)`）；判断模型关时 `judgedFor` 为 null。同一块「需关注 · 怎么判断」在设置窗口与第一屏 ⚙ 怎么判断 里（settings-ui `renderBlock`）。
+- **as-built（lane attention-rule-at-you，owner 2026-10-13「怎么没有 at 我的这个选项」）**：第 8 条固定规则 `channels.attention.rule.at-you`「有人 @ 了我、我还没读的」——会话里 24 小时内、读线之后、`mentions` 点名到账号自己（已解析的 selfId；@所有人 / 用户组 / 自己的消息都不算）的记录，标签「@我 · N 条」，排在 awaiting / unknown 之后、assigned 之前；默认开，三个预设照常设置它（只用判断模型 ⇒ 关）。被它认领的行判断模型看不到（judgeCandidate 由 statusTag 构造保证）。适配器在能力行 `caps.mentions` 说明自己是否带 mentions：Slack / Lark = people，Gmail = not-applicable。
 
 ### 2.5 用途 ②：规则种类 `decision`
 - 行形：`{kind:'decision', condition(≤500 字符), question:'predicate'|'choice', choices?[≤8 个 {value, description}], threshold(0.5–0.95，默认 0.7), perHour(默认 20)}`；`validateRule` 一个 case；`ruleWhy` = `decision: <condition> (p=0.82)` / `(choice=billing 0.71)`；范围 = watcher 自己的 grain。

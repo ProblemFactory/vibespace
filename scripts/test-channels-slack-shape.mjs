@@ -713,5 +713,21 @@ console.log('⑩ the vendor\'s own search');
   ok(e7 && /search is implemented but caps\.search does not declare it/.test(String(e7.message)), 'NEGATIVE CONTROL — the methods without the row are refused by the registry (the census can go red)', e7 && e7.message);
 }
 
+// ── lane attention-rule-at-you: THE MENTIONS CENSUS — a Slack <@U…> is a person mention (the first screen's @-me rule reads
+// it); <!here> / a user group keep their own kind and never read as 「@ 我」; every shipped adapter declares caps.mentions ──
+console.log('\nattention-rule-at-you: Slack carries mentions; every adapter declares caps.mentions');
+{
+  const FO = require(path.join(REPO, 'src/channel-focus.js'));
+  const users = new Map([['U0SELF', 'Me'], ['U0PAT', 'Pat']]);
+  const r = slack.toRecord('slack', 'C0AT', { ts: '1760000000.000100', user: 'U0PAT', text: '<@U0SELF> look <!here>' }, { users });
+  ok(slack.caps.mentions === 'people' && r.mentions.some((m) => m.id === 'U0SELF') && FO.mentionsSelf(r, 'U0SELF') && !FO.mentionsSelf(r, 'U0OTHER'), 'a <@U…> of me ⇒ 「@ 我」; caps.mentions = people', JSON.stringify(r.mentions));
+  const here = slack.toRecord('slack', 'C0AT', { ts: '1760000000.000200', user: 'U0PAT', text: '<!here> standup' }, { users });
+  ok(!FO.mentionsSelf(here, 'U0SELF') && here.mentions.every((m) => m.kind === 'broadcast'), '<!here> alone is a broadcast — never 「@ 我」', JSON.stringify(here.mentions));
+  const gmail = require(path.join(REPO, 'src/channels/gmail.js')), lark = require(path.join(REPO, 'src/channels/lark.js'));
+  ok(gmail.caps.mentions === 'not-applicable' && lark.caps.mentions === 'people', 'the census: Slack people · Lark people · Gmail not-applicable (mail has no @: a To / Cc is the direct address)');
+  const bad = (() => { try { CH.validateCaps ? CH.validateCaps('x', { ...slack.caps, mentions: 'yes' }) : null; return null; } catch (e) { return String(e && e.message); } })();
+  ok(bad === null ? !CH.validateCaps : /caps\.mentions must be one of people\|none\|not-applicable/.test(bad), 'caps.mentions is CLOSED (a word outside people / none / not-applicable is refused)', bad);
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

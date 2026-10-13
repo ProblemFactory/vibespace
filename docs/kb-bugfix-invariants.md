@@ -578,6 +578,8 @@
 - (2026-10-13) THE OWNER COULD NOT FULLY TRUST THEIR OWN AGENT'S API USE (every delete asked) — 不变量 = a fourth tier 完全信任 runs sensitive calls for a NAMED principal only, journaled and capped; everyone stays read at most
 - (2026-10-13) A ROW WITH A LIVE LONG-LIVED TOKEN WAS CALLED DEAD WHEN ITS OAUTH LOGIN EXPIRED (owner) — 不变量 = login and token are two facts; a row lives by the better one; only the quota refresh needs the login, and the chip says exactly that
 - (2026-10-13) FULL TRUST COULD BE GRANTED TO A WHOLE TASK GROUP (tier-verify M1) — 不变量 = the top tier names ONE principal; a grant and a downgrade each write a log line pinned by a fast test
+- (2026-10-13) THE FIRST SCREEN HAD NO 'SOMEONE @-ED ME' RULE (owner) — 不变量 = being named by a person is a first-screen rule of its own, ranked above assignment, switchable like the rest; every adapter says whether it carries mentions
+- (2026-10-13) THE JUDGE'S MONEY HID IN A TOOLTIP AFTER THE PLUGIN LIST (owner) — 不变量 = what a feature costs today is visible wherever the feature is named: one PURE line, four places, never only a title
 
 ## A RECALLED LARK MESSAGE STAYED UNMARKED (owner 2026-10-13, userW's recall; lane channel-record-revisions, .262)
 

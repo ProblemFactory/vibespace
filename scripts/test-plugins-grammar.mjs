@@ -56,6 +56,15 @@ ok(/cb\.setAttribute\('role', 'switch'\)/.test(now), '② the toggle is a role=s
 const rowFn = now.slice(now.indexOf('function pluginRow('), now.indexOf('\n}\n', now.indexOf('function pluginRow(')));
 ok(/row\.append\(dot, main, c, sw\);\s*\n\s*if \(install\) row\.appendChild\(install\);\s*\n\s*row\.appendChild\(gear\);/.test(rowFn), '② a row appends exactly dot · name+description · chip · switch · [install] · ⚙');
 ok((listSrc(now).match(/pluginRow\(\{/g) || []).length === 2, '② built-in AND manifest plugins draw through the same row');
+// lane decision-spend-readout: the ONE extra line a row may carry is a READOUT under the description (the Decision API's
+// money today) — a div inside the name+description block, painted from the PURE line, never a control
+const factIsReadout = (src, fn) => /if \(fact\) main\.appendChild\(fact\);/.test(fn)
+  && (src.match(/\bfact = Object\.assign\(document\.createElement\('(\w+)'\)/g) || []).every((m) => /'div'/.test(m))
+  && /\bfact = Object\.assign\(document\.createElement\('div'\), \{ className: 'plugin-row-fact' \}\)/.test(src)
+  && !/\bfact\.(onclick|addEventListener|tabIndex|contentEditable)\b/.test(src) && /paintDecisionLine\(fact, x, 'short'\)/.test(src);
+ok(factIsReadout(listSrc(now), rowFn), '② the row\'s second line (plugin-row-fact) is a readout in the name+description block: a div, painted from decisionTodayLine, no handler');
+const asButton = listSrc(now).replace("fact = Object.assign(document.createElement('div'), { className: 'plugin-row-fact' });", () => "fact = Object.assign(document.createElement('button'), { className: 'plugin-row-fact' }); fact.onclick = () => {};");
+ok(asButton !== listSrc(now) && !factIsReadout(asButton, rowFn), '② RED CONTROL: the same line drawn as a button with a handler is refused by the census');
 const b = base('src/lib/plugins-ui.js');
 const cb = b === null ? null : controls(helpersSrc(b) + listSrc(b));
 if (!cb) skip('② RED CONTROL (the base card)'); else ok(cb.inputs > 1 && cb.checkbox >= 3 && cb.integrationCard > 0, `② RED CONTROL: the base's panel (7b6fa3c7b) draws ${cb.inputs} inputs, ${cb.checkbox} checkboxes, a key box (${cb.integrationCard} card mounts) — this census refuses it`);

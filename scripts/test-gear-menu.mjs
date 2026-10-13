@@ -19,6 +19,10 @@
 //   head's members inline, every visible row is ≥ 44 px tall, another tap
 //   swaps / collapses, the Appearance panel renders inline, a tap on a
 //   member runs a stubbed openUsage and closes the popover.
+//   INTEGRATIONS… UNDER SYSTEM ▸ (lane integrations-menu-home, owner 2026-10-13): Communication no longer holds it;
+//   System holds it between Backup & migrate… and the password; a click opens THE window with its cards grouped
+//   by what uses the key (the registry's groupOf, read off the registry); the phone reaches it under System; a zh
+//   pass takes the owner's PNGs (⚙ → 系统 ▸ 集成与密钥…, the 浏览器 / 插件 heads, the phone).
 // Throwaway server in a git worktree (scripts/scratch.mjs paths + ports —
 // never a fixed name, never the repo's data/) + headless chrome over raw CDP.
 // Run: node scripts/test-gear-menu.mjs   (SKIPs without chrome)
@@ -30,6 +34,7 @@ import { createRequire } from 'node:module';
 import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
+const REG = require('../src/integration-registry.js'); // the window's expected groups (lane integrations-menu-home) — read off the registry, not typed
 
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => fs.existsSync(p));
@@ -132,7 +137,7 @@ const tap = async (sel) => {
 const POP = '.global-settings-popover';
 // screenshots for the mandatory human look (test-ui-scale's habit): kept in
 // their own scratch dir, NOT removed by cleanup, swept by the gate's reaper
-const SHOTS = scratch('gear-menu-shots');
+const SHOTS = process.env.VS_UI_SHOTS_DIR || scratch('gear-menu-shots'); // VS_UI_SHOTS_DIR keeps them (a scratch dir is removed at exit)
 fs.mkdirSync(SHOTS, { recursive: true });
 const shot = async (name) => { const r = await cdp('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(SHOTS, name), Buffer.from(r.data, 'base64')); };
 const isOpen = (id) => `(() => { const h = document.querySelector('${POP} .gs-menu-item[data-id="${id}"]'); if (!h) return false; const s = h.querySelector(':scope > .gs-flyout') || h.nextElementSibling; return !!s && s.classList.contains('open') && h.getAttribute('aria-expanded') === 'true'; })()`;
@@ -181,7 +186,9 @@ try {
   await hover(`${POP} .gs-menu > .gs-menu-item[data-id="comm"]`);
   const commOpen = !!(await until(isOpen('comm')));
   check('hovering Communication swaps the open flyout (one per level at a time)', commOpen && !(await evalJs(isOpen('tools'))));
-  check(`Communication holds Channels / Outbox / Integrations`, await evalJs(`(() => { const rows = [...document.querySelectorAll('${POP} [data-id="comm"] .gs-flyout .gs-menu-item')].map((x) => x.textContent); return rows.some((r) => /Channels/.test(r)) && rows.some((r) => /Outbox/.test(r)) && rows.some((r) => /Integrations/.test(r)); })()`));
+  const commRows = await evalJs(`[...document.querySelectorAll('${POP} [data-id="comm"] .gs-flyout .gs-menu-item')].map((x) => x.textContent.trim())`);
+  // lane integrations-menu-home (owner 2026-10-13): Integrations… left Communication for System ▸ — the window holds browser and plugin keys too
+  check(`Communication holds For you / Channels / Outbox and no Integrations… (${commRows.join(' / ')})`, commRows.some((r) => /For you/.test(r)) && commRows.some((r) => /Channels/.test(r)) && commRows.some((r) => /Outbox/.test(r)) && !commRows.some((r) => /Integrations/.test(r)));
 
   // keyboard
   await evalJs(`document.querySelector('${POP} .gs-menu > .gs-menu-item[data-id="appearance"]').focus(); true`);
@@ -265,6 +272,29 @@ try {
   check('Esc closes the nested flyout first; the Appearance panel and the popover stay', !(await evalJs(isOpen('language'))) && await evalJs(isOpen('appearance')) && await evalJs(`!!document.querySelector('${POP}')`));
   await evalJs(`document.querySelector('${POP}')?.remove(); true`);
 
+  // ── lane integrations-menu-home: Integrations… sits under System ▸ between Backup & migrate… and the password (keys
+  //    beside the password), and the row opens THE window with its cards grouped by what uses the key ──
+  await openGear();
+  await hover(`${POP} .gs-menu > .gs-menu-item[data-id="system"]`);
+  check('(setup) the System flyout opens on hover', !!(await until(isOpen('system'))));
+  const sysRows = await evalJs(`[...document.querySelectorAll('${POP} [data-id="system"] .gs-flyout .gs-menu-item')].map((x) => x.textContent.trim())`);
+  const iInteg = sysRows.indexOf('Integrations…');
+  check(`System holds Integrations… right after Backup & migrate… and right before the password row (${sysRows.join(' / ')})`, iInteg > 0 && sysRows[iInteg - 1] === 'Backup & migrate…' && /password/.test(sysRows[iInteg + 1] || ''));
+  check('…wearing the key icon (an SVG, like its neighbours)', await evalJs(`(() => { const r = [...document.querySelectorAll('${POP} [data-id="system"] .gs-flyout .gs-menu-item')].find((x) => x.textContent.trim() === 'Integrations…'); return !!(r && r.querySelector('svg')); })()`));
+  await shot('desktop-system-integrations.png');
+  await evalJs(`[...document.querySelectorAll('${POP} [data-id="system"] .gs-flyout .gs-menu-item')].find((x) => x.textContent.trim() === 'Integrations…').id = 'gs-smoke-integ'; true`);
+  await click('#gs-smoke-integ');
+  check('a click on System ▸ Integrations… closes the popover', !(await evalJs(`!!document.querySelector('${POP}')`)));
+  const groupsWant = (() => { const by = []; for (const g of [...REG.GROUPS]) { const ids = REG.ROWS.filter((r) => !r.bindsPerAccount && REG.groupOf(r) === g).map((r) => r.id); if (ids.length) by.push({ g, head: REG.GROUP_WORDS[g], ids }); } return by; })();
+  const nCards = groupsWant.reduce((n, x) => n + x.ids.length, 0);
+  await until(`document.querySelectorAll('.integ-win .integ-card').length >= ${nCards}`, { timeout: 10000, step: 100 });
+  const groupsGot = await evalJs(`[...document.querySelectorAll('.integ-win .integ-body > .integ-group')].map((s) => ({ g: s.dataset.group, head: s.querySelector(':scope > .integ-group-head')?.textContent, ids: [...s.querySelectorAll(':scope > .integ-card')].map((c) => c.dataset.integ) }))`);
+  check(`…and opens THE window with its cards in groups, in order, by what uses the key (${groupsGot.map((x) => x.head + ': ' + x.ids.join(',')).join(' | ')})`, JSON.stringify(groupsGot) === JSON.stringify(groupsWant), JSON.stringify(groupsWant));
+  check('no card sits outside a group, and no head stands over nothing (today no communication row is a card: an account picks its own client)', await evalJs(`!document.querySelector('.integ-body > .integ-card') && [...document.querySelectorAll('.integ-group')].every((s) => s.querySelector('.integ-card')) && !document.querySelector('.integ-group[data-group="communication"]')`));
+  check('the window is still the one singleton', await evalJs(`[...app.wm.windows.values()].filter((w) => w.type === 'integrations').length === 1`));
+  await shot('desktop-integrations-window.png');
+  await evalJs(`for (const w of [...app.wm.windows.values()]) if (w.type === 'integrations') app.wm.closeWindow(w.id); true`);
+
   // ══ PHONE ══
   console.log('gear-menu — phone 390×844, touch + hover:none (accordion mode)');
   await cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
@@ -286,6 +316,10 @@ try {
   check(`every visible row is ≥ 44 px tall on touch (min ${Math.min(...heights)} px over ${heights.length} rows, members included)`, heights.length > 8 && heights.every((h) => h >= 44));
   await tap(`${POP} .gs-menu > .gs-menu-item[data-id="system"]`);
   check('tapping another head swaps (one open per level)', !(await evalJs(isOpen('tools'))) && await evalJs(isOpen('system')));
+  const phoneSys = await evalJs(`[...document.querySelectorAll('${POP} [data-id="system"] + .gs-sub .gs-menu-item')].filter((r) => r.getClientRects().length).map((r) => ({ t: r.textContent.trim(), h: Math.round(r.getBoundingClientRect().height), in: r.getBoundingClientRect().bottom <= innerHeight }))`);
+  const pInteg = phoneSys.find((r) => r.t === 'Integrations…');
+  check(`the phone reaches Integrations… under System, a ≥ 44 px row on screen (${phoneSys.map((r) => r.t).join(' / ')})`, !!pInteg && pInteg.h >= 44 && pInteg.in);
+  await shot('phone-accordion-system.png');
   await tap(`${POP} .gs-menu > .gs-menu-item[data-id="system"]`);
   check('tapping the open head again collapses it', !(await evalJs(isOpen('system'))));
   await tap(`${POP} .gs-menu > .gs-menu-item[data-id="appearance"]`);
@@ -341,6 +375,57 @@ await evalJs(`localStorage.removeItem('vibespace.settingsNavFolds'); localStorag
   check('the bundle note names the freeze and the snapshot carries the inventory (canvases, webgl, domNodes, screen, memory, visibility)', !!inv && typeof inv.canvases === 'number' && 'webgl' in inv && typeof inv.domNodes === 'number' && inv.screen && typeof inv.screen.dpr === 'number' && 'memory' in inv && typeof inv.visibility === 'string' && /^auto: probe — suite/.test(bundle.note || ''), JSON.stringify({ note: bundle && bundle.note, inv }).slice(0, 400));
   const toast = await evalJs(`[...document.querySelectorAll('#global-toasts *')].map((e) => e.textContent).join(' | ')`);
   check('the capture is not silent: a toast names the incident id', new RegExp(String(id)).test(toast), toast);
+}
+// ── lane integrations-menu-home: the owner's words (zh) — ⚙ → 系统 ▸ 集成与密钥…, the window's heads, the phone ──
+{
+  console.log('zh — ⚙ → 系统 ▸ 集成与密钥… (desktop + phone) and the window\'s group heads');
+  await cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
+  await cdp('Emulation.setTouchEmulationEnabled', { enabled: false });
+  await cdp('Page.addScriptToEvaluateOnNewDocument', { source: "try { localStorage.setItem('vibespace.lang', 'zh'); } catch {}" });
+  await cdp('Page.navigate', { url: URL });
+  await sleep(1500);
+  await evalJs(POLL_APP);
+  await sleep(600);
+  try {
+    await openGear();
+    await hover(`${POP} .gs-menu > .gs-menu-item[data-id="system"]`);
+    await until(isOpen('system'));
+    const zSys = await evalJs(`[...document.querySelectorAll('${POP} [data-id="system"] .gs-flyout .gs-menu-item')].map((x) => x.textContent.trim())`);
+    const zHead = await evalJs(`document.querySelector('${POP} .gs-menu > .gs-menu-item[data-id="system"]').textContent.trim()`);
+    const zComm = await evalJs(`(() => { const h = document.querySelector('${POP} .gs-menu > .gs-menu-item[data-id="comm"]'); return h ? h.textContent.trim() : ''; })()`);
+    check(`zh: 系统 holds 集成与密钥… after 备份与迁移… (${zHead} ▸ ${zSys.join(' / ')}; 通讯 = ${zComm})`, /系统/.test(zHead) && zSys.indexOf('集成与密钥…') > 0 && zSys[zSys.indexOf('集成与密钥…') - 1] === '备份与迁移…');
+    await shot('zh-desktop-system-integrations.png');
+    await evalJs(`[...document.querySelectorAll('${POP} [data-id="system"] .gs-flyout .gs-menu-item')].find((x) => x.textContent.trim() === '集成与密钥…').id = 'gs-smoke-integ-zh'; true`);
+    await click('#gs-smoke-integ-zh');
+    await until(`document.querySelectorAll('.integ-win .integ-card').length >= 8`, { timeout: 10000, step: 100 });
+    const zHeads = await evalJs(`[...document.querySelectorAll('.integ-win .integ-group-head')].map((h) => h.textContent)`);
+    check(`zh: the window's heads are the plain nouns (${zHeads.join(' / ')})`, JSON.stringify(zHeads) === JSON.stringify(['浏览器', '插件']));
+    await shot('zh-desktop-integrations-window.png');
+    await evalJs(`document.querySelector('.integ-group[data-group="plugins"]').scrollIntoView({ block: 'start' }); true`);
+    await sleep(150);
+    await shot('zh-desktop-integrations-plugins.png');
+    await evalJs(`for (const w of [...app.wm.windows.values()]) if (w.type === 'integrations') app.wm.closeWindow(w.id); true`);
+    // the phone: a tap on 系统 shows the row; a tap on the row opens the window
+    await cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+    await cdp('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+    await cdp('Page.navigate', { url: URL });
+    await sleep(1500);
+    await evalJs(POLL_APP);
+    await sleep(600);
+    await tap('#mobile-nav-gear');
+    await tap(`${POP} .gs-menu > .gs-menu-item[data-id="system"]`);
+    await evalJs(`(() => { const r = [...document.querySelectorAll('${POP} [data-id="system"] + .gs-sub .gs-menu-item')].find((x) => x.textContent.trim() === '集成与密钥…'); if (r) r.id = 'gs-smoke-integ-phone'; return !!r; })()`);
+    check('zh phone: 系统 expands with 集成与密钥… among its rows', await evalJs(`!!document.getElementById('gs-smoke-integ-phone')`));
+    await shot('zh-phone-system-integrations.png');
+    await tap('#gs-smoke-integ-phone');
+    await until(`document.querySelectorAll('.integ-win .integ-card').length >= 8`, { timeout: 10000, step: 100 });
+    check('zh phone: the tap opens the window, grouped', await evalJs(`!document.querySelector('${POP}') && document.querySelectorAll('.integ-win .integ-group').length >= 2`));
+    await shot('zh-phone-integrations-window.png');
+    await evalJs(`for (const w of [...app.wm.windows.values()]) if (w.type === 'integrations') app.wm.closeWindow(w.id); true`);
+  } catch (e) {
+    failed++;
+    console.error('  ✗ zh leg crashed: ' + e.message);
+  }
 }
 console.log(`screenshots: ${SHOTS}`);
 console.log(failed ? `FAILED (${failed})` : 'ALL PASS');

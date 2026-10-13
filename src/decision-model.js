@@ -20,8 +20,13 @@
  *    ceiling = 100 cents (owner 2026-10-12: 1 USD a day); `settleUsd` — what a call finally costs (the vendor's
  *    recorded cost, else the reservation; an answered 4xx / 5xx costs 0); `nextBackoff` — a wall is never retried;
  *  · `journalRow` — what a call leaves behind: never the key, never a text the vendor or a peer wrote;
- *  · RUBRIC v1 (needs_now + the seven clauses) — the REASON of a verdict is the clauses the decision itself
- *    selected (predicate ≥ the clause threshold), named through OUR word table; vendor prose has no field here;
+ *  · RUBRIC v2 (needs_now + the seven clauses; `matters` only when the person's block is non-empty) — the REASON of a
+ *    verdict is the clauses the decision itself selected (predicate ≥ the clause threshold), named through OUR word
+ *    table; vendor prose has no field here;
+ *  · THE FACTS LINE of an attention record (lane decision-attention-facts): `attentionFacts` words what the PRODUCT
+ *    measured (addressed / kind / when the reader last spoke / unread since the read line / the same mail in K inboxes /
+ *    an automated sender) — counts, kinds and ages, never a name, an id or an address; `trimMailBody` drops a mail's
+ *    quoted replies, signature and footer before the cut; `implicitLabel` reads an example off what the owner did;
  *  · `criteriaProposal` — the candidate catalogue against the person's labeled examples: it PROPOSES lines of
  *    text for their own block, it never applies one.
  * No I/O, no clock, no crypto: the engine hands in `now`, the local-day offset and `sha`.
@@ -236,10 +241,10 @@ function cleanPart(raw, max, kind = 'block') {
 // one record per call (many questions per record stay: batchQuestions); `memo` = what the memo key is made of.
 const PART = (name, max, extra = {}) => Object.freeze({ name, max, ...extra });
 const PLANS = Object.freeze({
-  attention: Object.freeze({ fixed: [PART('rubric', 2400), PART('userBlock', 1500), PART('examples', 12 * 220, { each: 200, count: 12 })], variable: [PART('title', 200, { kind: 'line' }), PART('source', 200, { kind: 'line' }), PART('sender', 200, { kind: 'line' }), PART('body', 2048)], fixedCeiling: 1700, recordCeiling: 800, batch: 1, wakePath: false, memo: ['use', 'id', 'lastAt', 'rubric', 'userBlock', 'examples'] }),
+  attention: Object.freeze({ fixed: [PART('rubric', 2400), PART('userBlock', 1500), PART('examples', 12 * 220, { each: 200, count: 12 })], variable: [PART('facts', 400, { kind: 'line' }), PART('title', 200, { kind: 'line' }), PART('source', 200, { kind: 'line' }), PART('sender', 200, { kind: 'line' }), PART('body', 2048)], fixedCeiling: 1700, recordCeiling: 800, batch: 1, wakePath: false, memo: ['use', 'id', 'lastAt', 'rubric', 'userBlock', 'examples'] }),
   rule: Object.freeze({ fixed: [PART('condition', 500), PART('choices', 8 * 130, { each: 120, count: 8 })], variable: [PART('body', 2048), PART('thread', 3 * 320, { each: 300, count: 3 })], fixedCeiling: 500, recordCeiling: 1000, batch: 1, wakePath: true, memo: ['use', 'id', 'rule'] }),
   routing: Object.freeze({ fixed: [PART('condition', 500), PART('choices', 9 * 210, { each: 200, count: 9 })], variable: [PART('body', 2048), PART('thread', 3 * 320, { each: 300, count: 3 })], fixedCeiling: 800, recordCeiling: 1000, batch: 1, wakePath: true, memo: ['use', 'id', 'rule', 'groups'] }),
-  inbox: Object.freeze({ fixed: [PART('levels', 600)], variable: [PART('text', 400), PART('detail', 800), PART('session', 200, { kind: 'line' })], fixedCeiling: 200, recordCeiling: 400, batch: 1, perPass: 10, wakePath: false, memo: ['use', 'id', 'levels', 'digest'] }),
+  inbox: Object.freeze({ fixed: [PART('levels', 600)], variable: [PART('facts', 240, { kind: 'line' }), PART('text', 400), PART('detail', 800), PART('session', 200, { kind: 'line' })], fixedCeiling: 200, recordCeiling: 400, batch: 1, perPass: 10, wakePath: false, memo: ['use', 'id', 'levels', 'digest'] }),
   webhook: Object.freeze({ fixed: [PART('condition', 500)], variable: [PART('payload', 4096, { json: true })], fixedCeiling: 200, recordCeiling: 1400, batch: 1, wakePath: true, memo: ['use', 'id', 'rule'] }),
   test: Object.freeze({ fixed: [], variable: [PART('body', 200)], fixedCeiling: 0, recordCeiling: 120, batch: 1, wakePath: false, memo: ['use', 'id'] }),
 });
@@ -252,7 +257,7 @@ function inputPlan(use, n = 1, batch = null) {
   const k = Math.max(1, Math.min(batch || p.batch, Math.floor(Number(n) || 1)));
   return { use, ...p, n: k, ceiling: p.fixedCeiling + k * p.recordCeiling, never: NEVER };
 }
-const listPart = (v, each, count) => (Array.isArray(v) ? v : v ? [v] : []).slice(-count).map((x) => cleanPart(typeof x === 'object' && x ? [x.title, x.snippet || x.text, x.verdict ? `→ ${x.verdict}` : ''].filter(Boolean).join(' · ') : x, each, 'line')).filter(Boolean);
+const listPart = (v, each, count) => (Array.isArray(v) ? v : v ? [v] : []).slice(-count).map((x) => cleanPart(typeof x === 'object' && x ? [x.title, x.snippet || x.text, x.verdict ? `→ ${x.verdict}${x.inferred ? ' (inferred)' : ''}` : ''].filter(Boolean).join(' · ') : x, each, 'line')).filter(Boolean);
 /** THE INPUT of one call: `[fixed parts] ——— [record 1] … [record n]`, every part cleaned and capped, the whole
  *  fitted to the plan's ceiling (a record that cannot fit is cut further, head + tail). `parts` = the fixed
  *  part values by name + `records: [{name → value}]` (or the record's values directly for one record).
@@ -370,7 +375,8 @@ const isWall = (status) => status === 429 || (status >= 500 && status <= 599) ||
 const isKeyRefused = (status) => status === 401 || status === 403;
 
 /** A journal line: a fixed field list (no key, no text of anyone's) — the key only as its 6-character fingerprint. */
-const JOURNAL_FIELDS = Object.freeze(['at', 'use', 'memo', 'dialect', 'model', 'outcome', 'why', 'status', 'inputTokens', 'outputTokens', 'reserved', 'usd', 'est', 'truncated', 'n', 'keyFp', 'rubric', 'hits']);
+// + `p` (lane decision-attention-facts): an attention call's needs_now, 2 decimals — the next quality check needs no memo join
+const JOURNAL_FIELDS = Object.freeze(['at', 'use', 'memo', 'dialect', 'model', 'outcome', 'why', 'status', 'inputTokens', 'outputTokens', 'reserved', 'usd', 'est', 'truncated', 'n', 'keyFp', 'rubric', 'hits', 'p']);
 function journalRow(o = {}) {
   const row = {};
   for (const k of JOURNAL_FIELDS) {
@@ -378,19 +384,24 @@ function journalRow(o = {}) {
     if (v === undefined || v === null) continue;
     if (k === 'keyFp') v = str(v).slice(0, 6);
     else if (k === 'memo') v = str(v).slice(0, 16);
+    else if (k === 'p') { if (prob(v) === null) continue; v = Math.round(v * 100) / 100; }
     else if (typeof v === 'string') v = v.slice(0, 64);
     row[k] = v;
   }
   return row;
 }
 
-// ── the rubric v1 (design §2.4) ───────────────────────────────────────────
+// ── the rubric v2 (design §2.4; v2 = lane decision-attention-facts, 2026-10-13) ─────────────────────────────
+// v1 → v2: `to_me` reads the FACTS LINE (the input never said who the reader is, so "addressed to the reader" was a guess
+// and a real @-mention scored 0.15); `matters` is asked ONLY when the person's block is non-empty (with it empty 140 of
+// 145 answers were 0.4–0.5); the state's [rubric] part is ONE line (the questions carry their own instructions — the
+// full text rode twice, ≈ 13 % of a call). The memo key carries the version: every row is judged once more.
 const clause = (name, word, instructions, threshold = 0.6) => Object.freeze({ name, word, instructions, threshold, type: 'predicate' });
 const RUBRIC = Object.freeze({
-  version: 1,
+  version: 2,
   needsNow: clause('needs_now', 'needs you now', 'Does this conversation need the reader\'s attention now — a reply, a decision or an action from them, soon?', THRESHOLD_DEFAULT),
   clauses: Object.freeze([
-    clause('to_me', 'said to you', 'Is the latest message addressed directly to the reader (by name, as a direct message, or as a reply to them)?'),
+    clause('to_me', 'said to you', 'Is the latest message addressed to the reader? The facts line states an @-mention, a direct message or a reply to the reader; otherwise judge from the text.'),
     clause('asks_me', 'asks you', 'Does the latest message ask the reader a question or ask them to do something?'),
     clause('decision', 'wants your decision', 'Does someone need the reader to decide, approve or sign off on something?'),
     clause('deadline_money', 'deadline or money', 'Does the conversation mention a deadline, a due date, a payment, an invoice or an amount of money that concerns the reader?'),
@@ -399,16 +410,19 @@ const RUBRIC = Object.freeze({
     clause('matters', 'what you care about', 'Does it match what the reader said they care about (the reader block above)?'),
   ]),
 });
-const rubricQuestions = () => [RUBRIC.needsNow, ...RUBRIC.clauses].map((c) => ({ type: 'predicate', name: c.name, instructions: c.instructions }));
-const rubricText = () => `Rubric v${RUBRIC.version}. Judge the record below for the reader. ${[RUBRIC.needsNow, ...RUBRIC.clauses].map((c) => `${c.name}: ${c.instructions}`).join(' ')}`;
+/** The clauses asked: `matters` only when the person's block says something (`hasBlock`) — never a question about an empty block. */
+const rubricClauses = ({ hasBlock = false } = {}) => RUBRIC.clauses.filter((c) => hasBlock || c.name !== 'matters');
+const rubricQuestions = ({ hasBlock = false } = {}) => [RUBRIC.needsNow, ...rubricClauses({ hasBlock })].map((c) => ({ type: 'predicate', name: c.name, instructions: c.instructions }));
+/** The state's [rubric] part — ONE line (each question carries its own instructions; v1 sent the whole rubric here too). */
+const rubricText = ({ hasBlock = false } = {}) => `Rubric v${RUBRIC.version} — answer each question for the reader; the facts line is measured by the product, trust it over the text.${hasBlock ? ' The [userBlock] part is the reader\'s own words on what matters to them.' : ''}`;
 /** THE VERDICT of the attention use: needs_now ≥ threshold ⇒ judged; the REASON = the rubric clauses whose own
  *  predicate reached its threshold, as {name, word} from OUR table (the client words them). A refused or
  *  missing needs_now is no verdict. */
-function attentionVerdict(answers, threshold = THRESHOLD_DEFAULT) {
+function attentionVerdict(answers, threshold = THRESHOLD_DEFAULT, { hasBlock = true } = {}) {
   const by = new Map((answers || []).map((a) => [a.name, a]));
   const n = by.get('needs_now');
   if (!n || n.refused || prob(n.probability) === null) return { judged: false, p: null, clauses: [], why: 'no-answer' };
-  const clauses = RUBRIC.clauses.filter((c) => { const a = by.get(c.name); return a && !a.refused && prob(a.probability) !== null && a.probability >= c.threshold; }).map((c) => ({ name: c.name, word: c.word }));
+  const clauses = rubricClauses({ hasBlock }).filter((c) => { const a = by.get(c.name); return a && !a.refused && prob(a.probability) !== null && a.probability >= c.threshold; }).map((c) => ({ name: c.name, word: c.word }));
   return { judged: n.probability >= threshold, p: n.probability, clauses };
 }
 // THE GOLDEN SET: one sentence each way per clause (the probe measures agreement on them; the suite pins the
@@ -459,15 +473,115 @@ function attentionThreshold(v) {
   return Number.isFinite(n) && n >= ATTENTION_THRESHOLD_RANGE[0] && n <= ATTENTION_THRESHOLD_RANGE[1] ? n : THRESHOLD_DEFAULT;
 }
 const userBlockOf = (v) => str(v).slice(0, USER_BLOCK_MAX);
-/** THE RECORD PARTS of one first-screen row (a rowView): title, the account, the newest message's sender (a display
- *  name — never the owner), the body = the newest messages NEWEST FIRST (`tail` oldest → newest: {who, text, self,
- *  agent}; an agent's reply is marked `agent:`, the owner's `me:`), else the row's last line. */
-function attentionRecord(view, tail = []) {
+
+// ── the facts line (lane decision-attention-facts, owner 2026-10-13: 「decision api给的优先级评估都不怎么样」) ──
+// What the PRODUCT already measured, worded in the rubric's language, FIRST in the record: the judge was handed text
+// only, so "is this addressed to the reader" was a guess. The engine computes `ctx` from what it holds (the at-you
+// rule's predicate, the row's kind, `touch.selfAt`, the read line, the gmail adapter's `automated` fact, the
+// duplicate-inbox map built once per scan); this words ONLY the facts that apply and NEVER a name, an id or an address
+// — counts, kinds and ages (the census in test-decision-model ⑬ feeds a view whose every field is a name or an id).
+const UNREAD_SENT = 12;          // the body when the read line is known: the messages past it, newest first, at most 12
+const TAIL_SENT = 8;             // … when it is unknown: the last 8 (as v1)
+const INBOX_DUP_MS = 60 * 60e3;  // one mail in K inboxes: same subject + sender within an hour (the owner's 3-copy Workspace notice spans 22 min)
+const IMPLICIT_MS = 24 * 3600e3; // an implicit label's window: a reply within 24 h of the verdict / 24 h unopened after it
+const ADDRESSED = Object.freeze({ mention: '@-mentioned the reader', direct: 'a direct message', reply: 'a reply to the reader\'s message', none: 'no mention of the reader' });
+const AUTOMATED = Object.freeze(['auto-reply', 'bulk', 'notification']);   // the gmail adapter's `automated` levels (src/channel-record.js)
+const count = (n) => (Number.isInteger(n) && n >= 0 ? n : null);
+/** The `automated` level a stored record's facts carry (the gmail adapter's Auto-Submitted / Precedence reading), else
+ *  null — read HERE so the engine's facts path stays kind-free (test-channel-facts V7). */
+function automatedOf(facts) {
+  const f = (Array.isArray(facts) ? facts : []).find((x) => x && x.k === 'automated');
+  return f && AUTOMATED.includes(f.v) ? f.v : null;
+}
+/** An age in the line's words: "5 min", "2 h", "3 d". */
+function ageWords(ms) {
+  const m = Math.max(0, Number(ms) || 0) / 60e3;
+  if (m < 60) return `${Math.max(1, Math.round(m))} min`;
+  const h = m / 60;
+  return h < 48 ? `${Math.round(h)} h` : `${Math.round(h / 24)} d`;
+}
+/** THE FACTS LINE of one row. `ctx` = {now, mentioned, replyToSelf, dm, app, members, mail, selfAt (null = unknown, 0 = none
+ *  on record — the engine stamps it as records arrive and heals an old row from its last 200, so 0 is "not lately", never
+ *  a proven "never"), readAt (0 = unknown), unread, inboxes, automated} — every field a flag, a count or an instant. */
+function attentionFacts(view, ctx = {}) {
+  const v = view || {}, c = ctx || {};
+  const t = Number(c.now) || 0;
+  const dm = typeof c.dm === 'boolean' ? c.dm : v.kind === 'dm', app = typeof c.app === 'boolean' ? c.app : !!v.app;
+  const out = [`addressed: ${ADDRESSED[c.mentioned ? 'mention' : dm && !app ? 'direct' : c.replyToSelf ? 'reply' : 'none']}`];
+  const members = count(c.members);
+  out.push(`kind: ${dm ? (app ? 'a direct message from an app' : 'a direct message') : c.mail ? 'an email thread' : members !== null ? `a group of ${members}` : 'a group'}`);
+  if (t && c.selfAt !== null && c.selfAt !== undefined) out.push(Number(c.selfAt) > 0 ? `the reader last spoke here ${ageWords(t - Number(c.selfAt))} ago` : 'the reader has not spoken here lately');
+  if (t && Number(c.readAt) > 0) { const n = count(c.unread) || 0; out.push(`${n} message${n === 1 ? '' : 's'} since the reader last read, ${ageWords(t - Number(c.readAt))} ago`); }
+  const k = count(c.inboxes);
+  if (k !== null && k >= 2) out.push(`the same message reached ${k} of the reader's inboxes`);
+  if (AUTOMATED.includes(c.automated)) out.push(`an automated or bulk sender (${c.automated})`);
+  return out.join('; ');
+}
+/** The duplicate-inbox map's key of a mail row: its subject (Re: / Fwd: prefixes, case and spacing folded) + the
+ *  sender's display name — '' when either is missing (never counted). */
+function inboxKey(title, sender) {
+  let t = str(title).normalize('NFKC').replace(/\s+/g, ' ').trim().toLowerCase();
+  for (let i = 0; i < 5; i++) { const m = /^(?:re|fwd?|fw|aw|回复|答复|转发)\s*[:：]\s*/.exec(t); if (!m) break; t = t.slice(m[0].length); }
+  const s = str(sender).normalize('NFKC').replace(/\s+/g, ' ').trim().toLowerCase();
+  return t && s ? `${t.slice(0, 300)}|${s.slice(0, 100)}` : '';
+}
+/** How many of the owner's inboxes got it: the distinct accounts among `seen` ([{adapterId, lastAt}] under one key)
+ *  whose row moved within `windowMs` of this one's — this row's own account included. */
+function inboxCount(seen, adapterId, lastAt, windowMs = INBOX_DUP_MS) {
+  const ids = new Set([adapterId]);
+  for (const x of Array.isArray(seen) ? seen : []) if (x && Math.abs((Number(x.lastAt) || 0) - (Number(lastAt) || 0)) <= windowMs) ids.add(x.adapterId);
+  return ids.size;
+}
+/** A MAIL BODY TRIMMED before the cut (gmail records only — never chat text): the quoted earlier mail from its
+ *  "On … wrote:" / "在 … 写道：" header to the end, `>` lines, the signature from the `-- ` marker, a footer from the
+ *  first unsubscribe / "You have received this" / "You are receiving this" / © line that starts past 40 % of the text
+ *  (a notice's opening "You are receiving this…" stays), blank runs folded. Never trimmed to nothing. */
+const FOOTER_RE = /unsubscribe|you have received this|you are receiving this|^\s*©/i;
+function trimMailBody(text) {
+  const src = str(text);
+  let lines = src.replace(/\r\n?/g, '\n').split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const a = lines[i].trim(), two = i + 1 < lines.length && a.length < 300 ? `${a} ${lines[i + 1].trim()}` : a;
+    const head = (/^On\s/.test(a) && (/\swrote:$/.test(a) || /\swrote:$/.test(two))) || (/^在/.test(a) && (/写道[:：]$/.test(a) || /写道[:：]$/.test(two)));
+    if (head) { lines = lines.slice(0, i); break; }
+  }
+  lines = lines.filter((l) => !/^\s*>/.test(l));
+  const sig = lines.findIndex((l) => /^--\s?$/.test(l));
+  if (sig >= 0) lines = lines.slice(0, sig);
+  const total = lines.join('\n').length;
+  for (let i = 0, at = 0; i < lines.length; at += lines[i].length + 1, i++) if (at > total * 0.4 && FOOTER_RE.test(lines[i])) { lines = lines.slice(0, i); break; }
+  const out = lines.map((l) => l.replace(/[ \t]+$/, '')).join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  return out || src.trim();
+}
+/** THE RECORD PARTS of one first-screen row (a rowView): the facts line (FIRST), title, the account, the newest
+ *  message's sender (a display name — never the owner), the body. `tail` oldest → newest: {who, text, self, agent, at};
+ *  an agent's reply is marked `agent:`, the owner's `me:`. THE BODY = what the reader has not read: with the read line
+ *  known (`since`) the messages past it NEWEST FIRST, at most 12 and only whole messages that fit the record ceiling,
+ *  then "(N earlier unread messages omitted)" when cut (`unread` = the row's own count, which knows the messages the
+ *  bounded read never reached); else the last 8 as v1; else the row's last line. `mail` ⇒ each text `trimMailBody`. */
+function attentionRecord(view, tail = [], facts = '', { since = 0, unread = 0, mail = false } = {}) {
   const v = view || {};
-  const lines = (Array.isArray(tail) ? tail : []).filter((r) => r && str(r.text).trim()).slice(-8).reverse()
-    .map((r) => `${r.self ? 'me' : r.agent ? 'agent' : str(r.who).slice(0, 80) || 'someone'}: ${str(r.text)}`);
   const w = v.lastWho && typeof v.lastWho === 'object' ? v.lastWho : null;
-  return { title: str(v.title), source: str(v.adapterLabel), sender: w && !w.self ? str(w.name) : '', body: lines.length ? lines.join('\n') : str(v.lastText) };
+  const head = { facts: str(facts), title: str(v.title), source: str(v.adapterLabel), sender: w && !w.self ? str(w.name) : '' };
+  const all = (Array.isArray(tail) ? tail : []).filter((r) => r && str(r.text).trim());
+  const said = (r) => `${r.self ? 'me' : r.agent ? 'agent' : str(r.who).slice(0, 80) || 'someone'}: ${mail ? trimMailBody(r.text) : str(r.text)}`;
+  const line = Number(since) || 0;
+  const fresh = line > 0 ? all.filter((r) => Number(r.at) > line) : [];
+  if (!fresh.length) {
+    const lines = all.slice(-TAIL_SENT).reverse().map(said);
+    return { ...head, body: lines.length ? lines.join('\n') : str(v.lastText) };
+  }
+  const plan = PLANS.attention, bodyMax = plan.variable.find((p) => p.name === 'body').max - 64;
+  const room = plan.recordCeiling - estTokens(Object.values(head).join('\n')) - 48;   // tokens left for the body (+ the omitted line)
+  const lines = [];
+  for (const r of fresh.slice(-UNREAD_SENT).reverse()) {
+    const next = [...lines, said(r)].join('\n');
+    if (lines.length && (estTokens(next) > room || next.length > bodyMax)) break;
+    lines.push(said(r));
+  }
+  const omitted = Math.max(fresh.length, count(unread) || 0) - lines.length;
+  if (omitted > 0) lines.push(`(${omitted} earlier unread message${omitted === 1 ? '' : 's'} omitted)`);
+  return { ...head, body: lines.join('\n') };
 }
 /** The verdict a row keeps: {p, clauses: [name], rubricV, lastAt, source} — threshold-free (the row's tag applies
  *  the CURRENT setting); null when needs_now was refused or missing. */
@@ -476,81 +590,334 @@ function attentionRecord(view, tail = []) {
 function attentionHits(perRecord, threshold = THRESHOLD_DEFAULT) {
   return (Array.isArray(perRecord) ? perRecord : []).reduce((m, a) => m + (attentionVerdict(a, attentionThreshold(threshold)).judged ? 1 : 0), 0);
 }
-function judgedOf(answers, lastAt) {
-  const v = attentionVerdict(answers, 1);
+function judgedOf(answers, lastAt, { hasBlock = true } = {}) {
+  const v = attentionVerdict(answers, 1, { hasBlock });
   return v.p === null ? null : { p: v.p, clauses: v.clauses.map((c) => c.name), rubricV: RUBRIC.version, lastAt: Number(lastAt) || 0, source: 'judge' };
 }
 /** A LABELED EXAMPLE {key, lastAt, snippet, verdict, clauses, at}: the record's digest (title — the newest line,
  *  ≤ 200 characters, cleaned like every part on its way out), the person's verdict, the clauses the judge had named. */
-function exampleOf(rec, verdict, clauses = [], at = 0) {
+function exampleOf(rec, verdict, clauses = [], at = 0, { source = null } = {}) {
   if (!VERDICTS.includes(verdict)) throw new Error('a label is needs or not');
   const r = rec || {};
   const snippet = cleanPart([str(r.title), str(r.body).split('\n')[0]].filter(Boolean).join(' — '), EXAMPLE_DIGEST_MAX, 'line');
   const names = new Set(RUBRIC.clauses.map((c) => c.name));
-  return { key: str(r.key).slice(0, 300), lastAt: Number(r.lastAt) || 0, snippet, verdict, clauses: (Array.isArray(clauses) ? clauses : []).filter((c) => names.has(c)), at: Number(at) || 0 };
+  return { key: str(r.key).slice(0, 300), lastAt: Number(r.lastAt) || 0, snippet, verdict, clauses: (Array.isArray(clauses) ? clauses : []).filter((c) => names.has(c)), at: Number(at) || 0, ...(source === 'implicit' ? { source: 'implicit' } : {}) };
 }
-/** The store after a label: NEWEST FIRST, one example per record (a new label replaces its older one), ≤ max. */
-const addExample = (list, ex, max = EXAMPLES_KEPT) => [ex, ...(Array.isArray(list) ? list : []).filter((x) => x && x.key !== ex.key)].slice(0, max);
-/** What an input carries: the newest ≤ n, oldest first (the plan keeps the LAST of the list it is handed). */
-const examplesForInput = (list, n = EXAMPLES_SENT) => (Array.isArray(list) ? list : []).slice(0, n).reverse().map((x) => ({ snippet: x.snippet, verdict: x.verdict }));
+const isImplicit = (x) => !!x && x.source === 'implicit';
+/** The store after a label: NEWEST FIRST, one example per record (a new label replaces its older one), ≤ max. An
+ *  IMPLICIT example never replaces the person's own for the same record; over the cap the oldest implicit one goes first. */
+function addExample(list, ex, max = EXAMPLES_KEPT) {
+  const prev = Array.isArray(list) ? list : [];
+  if (isImplicit(ex) && prev.some((x) => x && x.key === ex.key && !isImplicit(x))) return prev.slice(0, max);
+  const out = [ex, ...prev.filter((x) => x && x.key !== ex.key)];
+  while (out.length > max) { let i = out.length - 1; while (i > 0 && !isImplicit(out[i])) i--; out.splice(i > 0 ? i : out.length - 1, 1); }
+  return out;
+}
+/** What an input carries: the person's own labels FIRST (the newest ≤ n, oldest first among them), then the implicit
+ *  ones fill the slots left (marked `inferred`) — the plan keeps the LAST of the list it is handed, ≤ n in all. */
+function examplesForInput(list, n = EXAMPLES_SENT) {
+  const all = Array.isArray(list) ? list : [];
+  const mine = all.filter((x) => x && !isImplicit(x)).slice(0, n);
+  const inferred = all.filter(isImplicit).slice(0, Math.max(0, n - mine.length));
+  return [...mine.reverse().map((x) => ({ snippet: x.snippet, verdict: x.verdict })), ...inferred.reverse().map((x) => ({ snippet: x.snippet, verdict: x.verdict, inferred: true }))];
+}
+/** AN IMPLICIT LABEL off what the owner did (the switch `decision.implicitLabels`, off by default): 'needs' when they
+ *  replied after the judged message within 24 h of the verdict (`row.selfAt`); 'not' when a row judged at or above the
+ *  threshold stayed unopened (`row.readAt` short of the message) and unanswered for 24 h after it; null = nothing (yet).
+ *  `v` = the kept verdict {p, lastAt, at (when it was judged)}. */
+function implicitLabel(v, row, now = 0, threshold = THRESHOLD_DEFAULT) {
+  if (!v || !row || !(Number(v.at) > 0) || prob(v.p) === null) return null;
+  const lastAt = Number(v.lastAt) || 0, at = Number(v.at), selfAt = Number(row.selfAt) || 0, readAt = Number(row.readAt) || 0;
+  if (selfAt > lastAt) return selfAt - at <= IMPLICIT_MS ? 'needs' : null;
+  return v.p >= threshold && now - at >= IMPLICIT_MS && readAt < lastAt ? 'not' : null;
+}
+/** The journal's `p`: an answers list's needs_now probability (undefined when refused / missing). */
+function needsNowP(answers) {
+  const a = (Array.isArray(answers) ? answers : []).find((x) => x && x.name === 'needs_now');
+  return a && !a.refused && prob(a.probability) !== null ? a.probability : undefined;
+}
 /** The catalogue as questions (the "draft from my decisions" button asks them of each example). */
 const criteriaQuestions = () => CRITERIA_CATALOGUE.map((c) => ({ type: 'predicate', name: c.name, instructions: c.instructions }));
 
-// ── use ④: the For-you tray's two sections (lane inbox-decision-group, design §2.6 row 「For-you 托盘分组」 + §2.10 ④) ──
-// THE LEVEL TABLE v1 — one score question, two levels (low → high). The judge only ever SORTS an item into a section:
-// the item's own urgency is the agent's declaration and is never written (the tray draws urgent / high in 「现在要你」
-// by that urgency alone). `word` = OUR words for the clause (the chip's title), never the vendor's.
+// ── use ④: the For-you tray's sections (lane inbox-decision-group, design §2.6 row 「For-you 托盘分组」 + §2.10 ④) ──
+// v2 (lane decision-inbox-rank, decision-quality findings §二, 2026-10-13: 25 of 34 items in 「现在要你」, a 14-day-old
+// ask at p 1.0): v1's one score question defined `now` as "an agent waits on your decision", and every For-you item is
+// one. v2 hands the judge the hub's own FACTS (how long ago, what the agent did since, a named date, re-asks), asks ONE
+// choice of three, and PURE rules overrule it (the decay, a blocked fact) and order the sections. The item's own urgency
+// is the agent's declaration and is never written; the card's words are OURS (src/lib/user-todos-row.js through t()).
 const INBOX = Object.freeze({
-  version: 1,
+  version: 2,
   minAgeMs: 60 * 1000,                 // the For-you rule: an ask nobody answered in a minute
   passMs: 5 * 60 * 1000,               // a pass every 5 minutes, off every wake path
-  levels: Object.freeze([
-    Object.freeze({ label: 'later', word: 'can wait: a notice, a finished report, nothing to do', description: 'Can wait: a notice, a status or completion report, or nothing the reader has to do.' }),
-    Object.freeze({ label: 'now', word: 'needs you now: an agent waits on your decision, a deadline, money or someone waiting on your reply', description: 'Needs the reader now: an agent cannot continue without their decision, there is a deadline, money is involved, or someone is waiting on their reply.' }),
+  decayMs: 48 * 60 * 60 * 1000,        // THE DECAY: 48 h since the last ask, no progress after it, no live date ⇒ 「可以等」
+  linkMs: 10 * 60 * 1000,              // a blocked status set ≤ 10 min after the ask is THAT ask's; activity later than that is the agent going on
+  choices: Object.freeze([
+    Object.freeze({ value: 'blocked', group: 'now', description: 'The agent cannot go on without the reader\'s answer and is waiting now.' }),
+    Object.freeze({ value: 'dated', group: 'now', description: 'The reader must act by a named date or time.' }),
+    Object.freeze({ value: 'whenever', group: 'later', description: 'The agent continued on a default, finished, or only needs the reader\'s eventual word: a notice, a report, a question with no clock.' }),
   ]),
 });
-const INBOX_QUESTION = Object.freeze({ type: 'score', name: 'needs_now', instructions: 'How soon does the reader have to act on this item an agent filed for them?', levels: INBOX.levels.map((l) => ({ label: l.label, description: l.description })) });
-const inboxLevelsText = () => `Levels v${INBOX.version}. Sort the For-you item below. ${INBOX.levels.map((l, i) => `${i} ${l.label}: ${l.description}`).join(' ')}`;
-/** May the judge score this item? An OPEN action item of NORMAL urgency (a missing urgency is normal) with no option
- *  chips and no producer buttons (an item that carries its answers is a decision already), no reply yet, filed at
- *  least a minute ago, and never scored under this level table. → true | the reason it is not (a word). */
-function inboxEligible(item, now = 0) {
+const INBOX_QUESTION = Object.freeze({ type: 'choice', name: 'inbox_need', instructions: 'What does the agent that filed this item need from the reader? Read the facts line first: it is the hub\'s own record.', choices: INBOX.choices.map((c) => ({ value: c.value, description: c.description })) });
+const inboxLevelsText = () => `Choices v${INBOX.version}: ${INBOX.choices.map((c) => c.value).join(' | ')} (the question describes each). Sort the For-you item below. Its facts line (age, what the agent did since the ask, a named date, re-asks) is the hub's own record: trust it over the item's words.`;
+/** Does the tray's judge sort this item at all? An OPEN action item of NORMAL urgency (a missing urgency is normal) with
+ *  no option chips and no producer buttons (an item that carries its answers is a decision already) and no reply yet.
+ *  → true | the reason it is not (a word). */
+function inboxSorts(item) {
   const i = item || {};
   if (i.status !== 'open') return 'not-open';
   if (i.kind === 'notice') return 'notice';
   if ((i.urgency || 'normal') !== 'normal') return 'urgency';
   if ((Array.isArray(i.options) && i.options.length) || i.action) return 'answers';
   if (i.reply) return 'answered';
-  if (!(Number(now) - (Number(i.createdAt) || 0) >= INBOX.minAgeMs)) return 'young';
-  if (i.judged && i.judged.v === INBOX.version) return 'scored';
   return true;
 }
-/** THE INPUT of one item — the never-list by construction: ONLY its words (text, detail) and the conversation's name;
- *  never its artifacts, its reply, its action / card, nor any other item. */
-/** THE MEMO MATERIAL of one item (inbox-verify F2): its id + a DIGEST (16 hex of `sha`) of the words the judge reads —
- *  text + detail, cleaned and cut as the input cuts them — so a re-file / reopen / edit with new words is a new key. */
-function inboxMemoOf(item, sha) {
-  const [t, d] = PLANS.inbox.variable;
-  return { id: str(item && item.id), digest: String(sha(JSON.stringify([cleanPart(item && item.text, t.max), cleanPart(item && item.detail, d.max)]))).slice(0, 16) };
+/** May the judge score this item NOW? It sorts (above), it was filed at least a minute ago, the rules do not place it
+ *  already (`facts`: a blocked fact or the decay — those cost no call), and it was never scored under this table with
+ *  these facts (a new state, date or re-ask is judged again). → true | the reason it is not (a word). */
+function inboxEligible(item, now = 0, facts = null) {
+  const i = item || {};
+  const s = inboxSorts(i);
+  if (s !== true) return s;
+  if (!(Number(now) - (Number(i.createdAt) || 0) >= INBOX.minAgeMs)) return 'young';
+  if (facts && (facts.state === 'blocked' || inboxStale(facts, now))) return 'placed';
+  if (i.judged && i.judged.v === INBOX.version && (!facts || i.judged.sig === inboxFactsSig(facts))) return 'scored';
+  return true;
 }
-const inboxScoreInput = (item) => ({ levels: inboxLevelsText(), text: str(item && item.text), detail: str(item && item.detail), session: str(item && item.sessionName) });
-/** The section an answer puts an item in: {group: 'now' | 'later', p} — p = the judge's probability of `now` (else
- *  the score itself); a refused / missing answer is no verdict (null). */
+
+// THE DATE TABLE — conservative: a phrase that names WHEN (a bare number never counts; 上周五 is past). Rows → a kind
+// the resolver knows; tokens ≤ 4 characters apart (a space, a comma, "at") are ONE phrase (「今晚 22:00」, "by Friday 5pm").
+const DATE_TABLE = Object.freeze([
+  ['iso', /\b(20\d\d)-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])\b/g],
+  ['md', /(?<![\d/.:-])(?:(1[0-2]|0[1-9])\/(3[01]|[12]\d|0?[1-9])|([1-9])\/(3[01]|[12]\d|0[1-9]))(?![\d/])/g],   // 10/13, 1/15 — never 1/2 (a fraction)
+  ['hm', /(?<![\d:.])([01]?\d|2[0-3]):([0-5]\d)(?![\d:])(?:\s?(am|pm)\b)?(?:\s?(?:PT|PST|PDT|ET|UTC)\b)?/gi],
+  ['hap', /(?<![\d:.])(1[0-2]|[1-9])\s?(am|pm)\b/gi],
+  ['day', /今晚|今夜|明早|明晚|明天|明日|后天|\btonight\b|\btomorrow\b|\bEOD\b|\bend of (?:the )?day\b/gi],
+  ['weekday', /(?<!上)(下)?(?:周|星期|礼拜)([一二三四五六日天])|\bby (mon|tue|wed|thu|fri|sat|sun)(?:day|sday|nesday|rsday|urday)?\b/gi],
+  ['month-end', /月底|\bend of (?:the )?month\b/gi],
+  ['mark', /截止|\bdeadline\b/gi],
+]);
+const WEEKDAY = Object.freeze({ 日: 0, 天: 0, 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 });
+const DAY_MS = 24 * 60 * 60 * 1000;
+const localOf = (ms, off) => { const x = new Date(Number(ms) - off * 60000); return { y: x.getUTCFullYear(), mo: x.getUTCMonth(), d: x.getUTCDate(), dow: x.getUTCDay() }; };
+const atLocal = (y, mo, d, h, mi, off) => Date.UTC(y, mo, d, h, mi) + off * 60000;
+/** The first phrase in `text` that names a date or a time (PURE): {phrase (≤ 40 characters, the text's own), due (ms —
+ *  resolved against `base`, the ask, in the hub's zone `tzOffsetMin` (Date#getTimezoneOffset); a day without a time is
+ *  its 23:59, a time alone is the ask's day or the next one) | null (截止 / deadline alone)} | null. */
+function datePhraseOf(text, base = 0, tzOffsetMin = 0) {
+  const s = str(text);
+  if (!s) return null;
+  const hits = [];
+  for (const [kind, re] of DATE_TABLE) { re.lastIndex = 0; for (let m = re.exec(s); m && hits.length < 40; m = re.exec(s)) hits.push({ kind, m, start: m.index, end: m.index + m[0].length }); }
+  if (!hits.length) return null;
+  hits.sort((a, b) => (a.start - b.start) || (b.end - a.end));
+  const run = [hits[0]];
+  for (const h of hits.slice(1)) {
+    const last = run[run.length - 1];
+    if (h.start < last.end) continue;
+    if (h.start - last.end > 4 || !/^(?:\s|,|，|、|at|@)*$/i.test(s.slice(last.end, h.start))) break;
+    run.push(h);
+  }
+  const phrase = s.slice(run[0].start, run[run.length - 1].end).replace(/\s+/g, ' ').trim().slice(0, 40);
+  const off = Number(tzOffsetMin) || 0, L = localOf(base, off);
+  let day = null, hm = null;
+  for (const { kind, m } of run) {
+    if (kind === 'iso') day = [+m[1], +m[2] - 1, +m[3]];
+    else if (kind === 'md') { const mo = +(m[1] || m[3]) - 1, d = +(m[2] || m[4]); day = [atLocal(L.y, mo, d, 23, 59, off) < Number(base) - 180 * DAY_MS ? L.y + 1 : L.y, mo, d]; }
+    else if (kind === 'hm') hm = [m[3] ? (+m[1] % 12) + (/pm/i.test(m[3]) ? 12 : 0) : +m[1], +m[2]];
+    else if (kind === 'hap') hm = [(+m[1] % 12) + (/pm/i.test(m[2]) ? 12 : 0), 0];
+    else if (kind === 'day') day = [L.y, L.mo, L.d + (/后天/.test(m[0]) ? 2 : /明|tomorrow/i.test(m[0]) ? 1 : 0)];
+    else if (kind === 'weekday') {
+      const want = WEEKDAY[m[2] || String(m[3]).toLowerCase()];
+      day = [L.y, L.mo, L.d + (m[1] ? 7 - ((L.dow + 6) % 7) + ((want + 6) % 7) : (want - L.dow + 7) % 7)];
+    } else if (kind === 'month-end') day = [L.y, L.mo + 1, 0];
+  }
+  let due = null;
+  if (day) due = atLocal(day[0], day[1], day[2], hm ? hm[0] : 23, hm ? hm[1] : 59, off);
+  else if (hm) { due = atLocal(L.y, L.mo, L.d, hm[0], hm[1], off); if (due < Number(base)) due += DAY_MS; }
+  return { phrase, due: Number.isFinite(due) ? due : null };
+}
+
+const BLOCKING = Object.freeze(['blocked', 'needs-input']);
+const words = (s) => str(s).toLowerCase().replace(/\s+/g, ' ').trim();
+/** Does a status sentence name THIS item? Its id, or the first 24 characters of its text (at least 8 of them). */
+function refersTo(sentence, item) {
+  const s = words(sentence), head = words(item && item.text).slice(0, 24);
+  return !!s && ((!!(item && item.id) && s.includes(words(item.id))) || (head.length >= 8 && s.includes(head)));
+}
+/** THE FACTS of one item (PURE — the engine hands in `now`, the board's record of the item's conversation and the hub's
+ *  zone): {state, dated, due, reasks, askedAt}. `board` = {status: vibespace-status's record {state, at, reason, detail}
+ *  | null, history: its entries [{state, at, setBy}], progressAt: the conversation's newest vibespace-task progress note}.
+ *  state: 'blocked' — the record says blocked / needs-input NOW and it is this ask's (set before the ask or ≤ linkMs
+ *  after it, or its sentence names the item) | 'finished' — done since the ask | 'continued' — the agent set a status or
+ *  posted progress after the ask (a non-blocking status at any time after it, anything later than linkMs after it) |
+ *  'unknown'. askedAt = the last ask (a re-ask restarts the decay); dated / due = datePhraseOf the text, else the detail. */
+function inboxFacts(item, { now = 0, board = null, tzOffsetMin = 0 } = {}) {
+  const i = item || {};
+  const askedAt = Math.max(Number(i.createdAt) || 0, Number(i.reaskedAt) || 0);
+  const b = board || {}, st = b.status && typeof b.status === 'object' ? b.status : null;
+  const hist = (Array.isArray(b.history) ? b.history : []).filter((h) => h && h.setBy === 'agent' && typeof h.state === 'string' && !h.event);
+  const late = (at) => Number(at) > askedAt + INBOX.linkMs;
+  let state = 'unknown';
+  if (st && BLOCKING.includes(st.state)) {
+    let since = Number(st.at) || 0;   // the start of the current blocked run (the history skips no-op repeats)
+    for (let k = hist.length - 1; k >= 0 && BLOCKING.includes(hist[k].state); k--) since = Math.min(since, Number(hist[k].at) || since);
+    if (since <= askedAt + INBOX.linkMs || refersTo(`${str(st.reason)} ${str(st.detail)}`, i)) state = 'blocked';
+  }
+  if (state === 'unknown') {
+    if (st && st.state === 'done' && Number(st.at) > askedAt) state = 'finished';
+    else if (hist.some((h) => Number(h.at) > askedAt && (late(h.at) || !BLOCKING.includes(h.state))) || late(b.progressAt)) state = 'continued';
+  }
+  const d = datePhraseOf(i.text, askedAt, tzOffsetMin) || datePhraseOf(i.detail, askedAt, tzOffsetMin);
+  return { state, dated: d ? d.phrase : null, due: d ? d.due : null, reasks: Math.max(0, Math.floor(Number(i.reasks) || 0)), askedAt };
+}
+/** What a verdict was made under: the state, the date phrase, the re-asks (never the age — the decay owns the clock). */
+const inboxFactsSig = (f) => (f ? [str(f.state), str(f.dated), Number(f.reasks) || 0].join('|') : '');
+const agoWords = (ms) => { const m = Math.max(0, Math.round(Number(ms) / 60000)); return m < 60 ? `${m} min` : m < 48 * 60 ? `${Math.round(m / 60)} h` : `${Math.round(m / 1440)} days`; };
+const INBOX_STATE_LINE = Object.freeze({ blocked: 'the agent is blocked, waiting for this answer', continued: 'the agent continued on a default', finished: 'the agent finished', unknown: '' });
+/** The facts as ONE English line for the judge — counts, kinds, ages and a quoted date phrase, never a name or an id. */
+function inboxFactsLine(item, facts, now = 0) {
+  const f = facts || {}, n = Number(f.reasks) || 0;
+  const parts = [`asked ${agoWords(Number(now) - (Number(item && item.createdAt) || Number(f.askedAt) || 0))} ago`];
+  if (INBOX_STATE_LINE[f.state]) parts.push(INBOX_STATE_LINE[f.state]);
+  if (f.dated) parts.push(`a date or time is named: "${str(f.dated).slice(0, 40)}"`);
+  if (n > 0) parts.push(`the item was re-asked ${n} time${n === 1 ? '' : 's'}, last ${agoWords(Number(now) - (Number(f.askedAt) || 0))} ago`);
+  return parts.join(' · ');
+}
+/** THE INPUT of one item — the never-list by construction: ONLY its words (text, detail), the conversation's name and the
+ *  facts line; never its artifacts, its reply, its action / card, nor any other item. */
+const inboxScoreInput = (item, facts = null, now = 0) => ({ levels: inboxLevelsText(), facts: facts ? inboxFactsLine(item, facts, now) : '', text: str(item && item.text), detail: str(item && item.detail), session: str(item && item.sessionName) });
+/** THE MEMO MATERIAL of one item (inbox-verify F2): its id + a DIGEST (16 hex of `sha`) of the words the judge reads —
+ *  text + detail, cleaned and cut as the input cuts them — and the facts' signature, so a re-file / reopen / edit with
+ *  new words, or a new state / date / re-ask, is a new key. */
+function inboxMemoOf(item, sha, facts = null) {
+  const cap = (n) => PLANS.inbox.variable.find((f) => f.name === n).max;
+  const said = [cleanPart(item && item.text, cap('text')), cleanPart(item && item.detail, cap('detail'))];
+  return { id: str(item && item.id), digest: String(sha(JSON.stringify(facts ? [...said, inboxFactsSig(facts)] : said))).slice(0, 16) };
+}
+/** The judge's choice → {group: 'now' | 'later', why: the chosen value, p: its probability (else the confidence) | null};
+ *  a refused / missing / foreign answer is no verdict (null). */
 function inboxVerdict(answer) {
   const a = answer || {};
-  if (a.refused || typeof a.score !== 'number' || !Number.isFinite(a.score)) return null;
+  const c = !a.refused && INBOX.choices.find((x) => x.value === a.choice);
+  if (!c) return null;
   const pr = a.probabilities || {};
-  const p = prob(pr.now) !== null ? pr.now : prob(pr['1']) !== null ? pr['1'] : Math.max(0, Math.min(1, a.score));
-  return { group: p >= 0.5 ? 'now' : 'later', p: Math.round(p * 1000) / 1000 };
+  const p = prob(pr[c.value]) !== null ? pr[c.value] : prob(a.confidence);
+  return { group: c.group, why: c.value, p: p === null ? null : Math.round(p * 1000) / 1000 };
+}
+/** (a) THE DECAY: 48 h since the last ask, no progress after it (continued / finished) and no live date (one still ahead,
+ *  or passed less than 48 h ago) ⇒ the item can wait, whatever the judge said. PURE: `now` is handed in. */
+function inboxStale(facts, now = 0) {
+  const f = facts || {};
+  if (f.state === 'continued' || f.state === 'finished') return false;
+  if (!(Number(now) - (Number(f.askedAt) || 0) > INBOX.decayMs)) return false;
+  return !(typeof f.due === 'number' && Number.isFinite(f.due) && Number(now) <= f.due + INBOX.decayMs);
+}
+/** ONE item's place in the tray (PURE; reads the item's declaration + `judged {group, why, p, facts}`, never its words):
+ *  {section: 'now' | 'pending' | 'later', why: 'blocked' | 'dated' | 'whenever' | 'stale' | null, tier, due, p, askedAt}.
+ *  The agent's declaration first (urgent / high and an item carrying its answers ⇒ now; low / answered ⇒ later), then the
+ *  RULES THAT OVERRULE THE JUDGE — (a) the decay, (b) a blocked fact from the board — then the judge's choice (a v1 verdict
+ *  keeps its group until v2 scores it again); no verdict ⇒ pending. */
+function inboxPlace(item, now = 0) {
+  const i = item || {}, u = i.urgency || 'normal';
+  const j = i.judged && typeof i.judged === 'object' ? i.judged : {};
+  const f = j.facts && typeof j.facts === 'object' ? j.facts : null;
+  const base = { section: 'later', why: null, tier: 9, due: f && typeof f.due === 'number' && Number.isFinite(f.due) ? f.due : null, p: prob(j.p), askedAt: Math.max(Number(i.createdAt) || 0, f ? Number(f.askedAt) || 0 : 0) };
+  if (u === 'urgent' || u === 'high') return { ...base, section: 'now', tier: u === 'urgent' ? 0 : 1 };
+  if ((Array.isArray(i.options) && i.options.length) || i.action) return { ...base, section: 'now', tier: 3 };
+  if (u !== 'normal' || i.reply) return base;
+  if (f && inboxStale(f, now)) return { ...base, why: 'stale' };
+  if (f && f.state === 'blocked') return { ...base, section: 'now', why: 'blocked', tier: 2 };
+  const c = INBOX.choices.find((x) => x.value === j.why);
+  if (c) return { ...base, section: c.group, why: c.value, tier: c.value === 'blocked' ? 2 : c.value === 'dated' ? 4 : 5 };
+  if (j.group === 'now' || j.group === 'later') return { ...base, section: j.group, tier: 5 };
+  return { ...base, section: 'pending' };
+}
+/** THE ORDER (PURE, `now` handed in): the items → [{id, section, why, …place}] sorted — 「现在要你」 first: urgent ›
+ *  high › blocked (the oldest ask first) › decisions (options / buttons, newest first) › dated (the nearest date first, an
+ *  unknown one after) › the rest by the judge's p (desc, then newest); then 「待判断」 and 「可以等」, newest first. */
+const SECTION_ORDER = Object.freeze({ now: 0, pending: 1, later: 2 });
+function inboxRank(items, now = 0) {
+  const rows = (Array.isArray(items) ? items : []).filter((i) => i && i.id).map((i) => ({ id: i.id, ...inboxPlace(i, now) }));
+  const newest = (a, b) => b.askedAt - a.askedAt;
+  const due = (a, b) => (a.due === null) - (b.due === null) || (a.due !== null && b.due !== null ? a.due - b.due : 0);
+  const inNow = (a, b) => (a.tier - b.tier) || (a.tier === 2 ? a.askedAt - b.askedAt : a.tier === 4 ? due(a, b) || (a.askedAt - b.askedAt) : a.tier === 5 ? ((b.p ?? -1) - (a.p ?? -1)) || newest(a, b) : newest(a, b));
+  return rows.sort((a, b) => (SECTION_ORDER[a.section] - SECTION_ORDER[b.section]) || (a.section === 'now' ? inNow(a, b) : newest(a, b)));
+}
+
+// ── lane decision-spend-readout (owner 2026-10-13: 「看不到 decision api 花了多少钱了」) ─────────────────────────
+// THE JUDGE'S MONEY IN ONE LINE: what the judge cost today, said the same way wherever the judge is named — the
+// Plugins list row (a second line, never only the chip's title), the Settings budget row, the 需关注 block and
+// Settings › Spending. Words go through the caller's `t` (the client's device words; a `{name}` filler stands in
+// for a test). Money that moved is NEVER drawn as $0.00: under a cent with calls > 0 is 「< $0.01」.
+const READOUT_WARN_AT = 0.9;                                   // ≥ 90 % of the day's cap ⇒ the line turns red
+const READOUT_USES = Object.freeze(['attention', 'inbox', 'rule', 'routing', 'webhook', 'test']);   // the title's order
+const useWord = (k, t) => ({ attention: t('Needs attention'), inbox: t('For-you tray'), rule: t('Rules'), routing: t('Routing'), webhook: t('Webhooks'), test: t('Test') })[k] || k;
+const fillWords = (s, v = {}) => String(s).replace(/\{(\w+)\}/g, (m, k) => (Object.prototype.hasOwnProperty.call(v, k) ? String(v[k]) : m));
+const num0 = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : 0);
+/** `$1.23` · `< $0.01` when anything moved under a cent · `$0` when nothing did. `fine` (the by-use title) keeps a
+ *  tenth of a cent: `$0.009`, `< $0.001`. */
+function moneyText(usd, moved = false, { fine = false } = {}) {
+  const n = num0(usd);
+  const floor = fine ? 0.001 : 0.01;
+  if (n >= 0.01) return '$' + n.toFixed(2);
+  if (fine && n >= floor) return '$' + n.toFixed(3);
+  return n > 0 || moved ? `< $${floor}` : '$0';
+}
+/** decisionTodayLine(usage, capUsd, {on, t, monthUsd}) — `usage` = the engine's `today` ({byUse, total?, reserved?}) or
+ *  data/decision-usage.json itself; `capUsd` = the plugin.decision-api.dailyBudgetUsd row. → `{on, calls, hits, spentUsd,
+ *  capUsd, warn, money, cap, short, spend, text, title, month}`: `short` = the list row's second line, `text` = the full
+ *  sentence, `spend` = its money half (for a line whose counts come from elsewhere), `title` = the by-use breakdown,
+ *  `month` = 「Decision API · today … · this month …」 (Settings › Spending). Off ⇒ every string says so, never a number. */
+function decisionTodayLine(usage, capUsd, { on = true, t = fillWords, monthUsd = null } = {}) {
+  const u = usage && typeof usage === 'object' ? usage : {};
+  const byUse = u.byUse && typeof u.byUse === 'object' ? u.byUse : {};
+  const sum = (f) => Object.values(byUse).reduce((a, x) => a + num0(x && x[f]), 0);
+  const calls = u.total && u.total.calls !== undefined ? num0(u.total.calls) : sum('calls');
+  const spentUsd = (u.total && u.total.usd !== undefined ? num0(u.total.usd) : sum('usd')) + num0(u.reserved);
+  const hits = sum('hits');
+  const cap = Number.isFinite(Number(capUsd)) && Number(capUsd) >= 0 ? Number(capUsd) : DAILY_BUDGET_CENTS_DEFAULT / 100;
+  if (!on) {
+    const off = t('The Decision API is off — it spends nothing');
+    return { on: false, calls: 0, hits: 0, spentUsd: 0, capUsd: cap, warn: false, money: '', cap: '', short: off, spend: off, text: off, title: '', month: off };
+  }
+  const moved = calls > 0 || spentUsd > 0;
+  const money = moneyText(spentUsd, moved), capText = '$' + cap.toFixed(2);
+  const warn = moved && (cap > 0 ? microUsd(spentUsd) >= microUsd(cap * READOUT_WARN_AT) : true);
+  const spend = t('{spent} spent (limit {cap})', { spent: money, cap: capText });
+  const title = READOUT_USES.filter((k) => byUse[k] || k === 'attention' || k === 'inbox' || k === 'rule')
+    .map((k) => `${useWord(k, t)} ${moneyText(byUse[k] && byUse[k].usd, num0(byUse[k] && byUse[k].calls) > 0, { fine: true })}`).join(' · ');
+  const mo = monthUsd === null || monthUsd === undefined ? null : Math.max(num0(monthUsd), spentUsd);
+  return {
+    on: true, calls, hits, spentUsd, capUsd: cap, warn, money, cap: capText, spend, title,
+    short: t('Today {spent} / {cap} · judged {n} · hits {m}', { spent: money, cap: capText, n: calls, m: hits }),
+    text: t('Today: judged {n} · {m} needed you', { n: calls, m: hits }) + ' · ' + spend,
+    month: t('Decision API · today {spent} / {cap} · this month {month}', { spent: money, cap: capText, month: mo === null ? '—' : moneyText(mo, moved || mo > 0) }),
+  };
+}
+/** The month so far from journal rows (data/decision-journal.jsonl, the caller's bounded tail): Σ usd of the rows whose
+ *  local day starts with `month` ('YYYY-MM'). Malformed rows are skipped. → {usd, calls, days}. */
+function monthSpend(rows, month, offsetMinOf = () => 0) {
+  const days = new Set();
+  let usd = 0, calls = 0;
+  for (const r of Array.isArray(rows) ? rows : []) {
+    if (!r || typeof r !== 'object' || !Number.isFinite(Number(r.at))) continue;
+    const day = dayOf(r.at, offsetMinOf(Number(r.at)));
+    if (day.slice(0, 7) !== month) continue;
+    const v = num0(r.usd);
+    if (v > 0 || r.outcome === 'ok') { usd += v; calls += 1; days.add(day); }
+  }
+  return { usd: Math.round(usd * 1e8) / 1e8, calls, days: days.size };
 }
 
 module.exports = {
-  INBOX, INBOX_QUESTION, inboxLevelsText, inboxEligible, inboxScoreInput, inboxVerdict, inboxMemoOf,   // lane inbox-decision-group (use ④)
+  INBOX, INBOX_QUESTION, inboxLevelsText, inboxSorts, inboxEligible, inboxScoreInput, inboxVerdict, inboxMemoOf, datePhraseOf, inboxFacts, inboxFactsSig, inboxFactsLine, inboxStale, inboxPlace, inboxRank,   // lane inbox-decision-group (use ④) + lane decision-inbox-rank (v2)
   ATTENTION_THRESHOLD_RANGE, USER_BLOCK_MAX, EXAMPLES_KEPT, EXAMPLES_SENT, EXAMPLE_DIGEST_MAX, VERDICTS,   // lane decision-attention
   attentionThreshold, attentionHits, userBlockOf, attentionRecord, judgedOf, exampleOf, addExample, examplesForInput, criteriaQuestions,
+  UNREAD_SENT, TAIL_SENT, INBOX_DUP_MS, IMPLICIT_MS, ADDRESSED, attentionFacts, ageWords, automatedOf, inboxKey, inboxCount, trimMailBody, implicitLabel, needsNowP, rubricClauses,   // lane decision-attention-facts
   QUESTION_TYPES, PROVIDERS, PROVIDER_LABEL, DEFAULT_MODEL, PRICE_PER_MTOK_USD, DAILY_BUDGET_CENTS_DEFAULT, THRESHOLD_DEFAULT, THRESHOLD_RANGE,
   BACKOFF_MS, RETRY_AFTER_MAX_MS, RATE_MIN_CALLS, MEMO_MAX, FEATURES, WHY, DIALECTS, USES, PLANS, NEVER, JOURNAL_FIELDS, RUBRIC, GOLDEN, CRITERIA_CATALOGUE,
   dialectOf, urlOf, questionError, buildRequest, normalizeAnswers, usageOf, estimateUsd, usdOf, estTokens, questionTokens,
   cutHeadTail, fitTokens, maskAddresses, eraseSecrets, scrub, cleanPart, inputPlan, buildInput, memoMaterial, memoKey, batchQuestions, unbatchAnswers,
+  READOUT_WARN_AT, READOUT_USES, moneyText, decisionTodayLine, monthSpend,   // lane decision-spend-readout
   dayOf, rateOf, budgetVerdict, settleUsd, retryAfterMs, nextBackoff, isWall, isKeyRefused, journalRow, rubricQuestions, rubricText, attentionVerdict, criteriaProposal,
 };

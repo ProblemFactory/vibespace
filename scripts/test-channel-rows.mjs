@@ -55,7 +55,9 @@ for (const [e, d] of edges(DAY)) {
   add(A, `own-sent-${e}`, { _sent: T - d }, e === 'in');
   add(A, `direct-${e}`, { kind: 'dm', unread: 2, lastAt: T - d }, e === 'in');
   add(B, `woken-${e}`, { stats: { wakes: [{ at: T - d, ok: true, lane: 'live', n: 1 }] } }, e === 'in');
+  add(A, `at-you-${e}`, { atYouAts: [T - d] }, e === 'in');   // lane attention-rule-at-you: an unread @ of me (the kept instant), at the window's edge
 }
+add(A, 'at-you-read', { atYouAts: [T - 2 * H], readAt: T - H }, false);   // lane attention-rule-at-you: read past it ⇒ no tag
 for (const [e, d] of edges(WEEK)) {
   add(A, `held-wake-${e}`, { stats: { wakes: [{ at: T - d, ok: false, lane: 'none', n: 1 }] } }, e === 'in');
   add(A, `refusal-${e}`, { stats: { lastRefusal: { at: T - d, why: 'cap' } } }, e === 'in');

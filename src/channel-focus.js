@@ -43,7 +43,7 @@
 // and a non-archived AGENT GROUP always does (the owner's explicit act, D1).
 //
 // ONE TAG PER ROW, first match wins (§23.3):
-//   awaiting › unknown › assigned (→ Agent X; amber when its wake is held)
+//   awaiting › unknown › at-you (@ of me · N) › assigned (→ Agent X; amber when its wake is held)
 //   › read (Agent X read N min ago) | new-since-read (new since Agent X read)
 //   › held › judged › direct › replied
 // `read` and `new-since-read` are the SAME fact split by whether anything
@@ -56,7 +56,7 @@
 const FOCUS_WINDOW_MS = 24 * 3600e3;
 const HELD_WINDOW_MS = 7 * 86400e3;
 /** The tag codes, in priority order (the table the suite pins). */
-const TAG_ORDER = Object.freeze(['awaiting', 'unknown', 'assigned', 'read', 'new-since-read', 'held', 'judged', 'direct', 'replied']);
+const TAG_ORDER = Object.freeze(['awaiting', 'unknown', 'at-you', 'assigned', 'read', 'new-since-read', 'held', 'judged', 'direct', 'replied']);
 
 // lane attention-policy (owner 2026-10-13: "应该允许禁用原来的固定规则，或者直接加个配置选项可以改怎么判断需关注"): THE FIRST
 // SCREEN IS THE OWNER'S POLICY. Each fixed rule is a switch — the setting `channels.attention.rule.<code>`, default on
@@ -66,7 +66,7 @@ const TAG_ORDER = Object.freeze(['awaiting', 'unknown', 'assigned', 'read', 'new
 // facts. No policy, or every switch on = the table above, byte for byte. A preset SETS the switches (a convenience
 // over the same rows, never a third store).
 /** The fixed rules a policy switches, in the order the settings rows list them. */
-const ATTENTION_RULES = Object.freeze(['direct', 'awaiting', 'assigned', 'read', 'held', 'unknown', 'replied']);
+const ATTENTION_RULES = Object.freeze(['direct', 'at-you', 'awaiting', 'assigned', 'read', 'held', 'unknown', 'replied']);
 /** The presets — what each one sets: every fixed rule (`rules`) and the judge's switch (`judge`). */
 const ATTENTION_PRESETS = Object.freeze({
   both: Object.freeze({ rules: true, judge: true }),
@@ -130,6 +130,36 @@ function readAdvance(readAt, recs, selfId = null) {
   return { readAt: line, unread, moved: line > num(readAt) };
 }
 const within = (at, now, win) => { const a = num(at); return a > 0 && now - a < win; };
+
+// lane attention-rule-at-you (owner 2026-10-13 on the 需关注 block: "怎么没有 at 我的这个选项"): BEING NAMED BY A PERSON IS
+// A FIRST-SCREEN RULE OF ITS OWN. A record @s the owner when one of its RESOLVED `mentions` (src/channel-record.js) is a
+// PERSON whose id is the account's resolved `selfId` — a broadcast (@here / @all) or a user group never is (D21), the
+// owner's own record never is, a system notice never is, and an unknown self (no identity resolved yet) never guesses.
+// The engine keeps the INSTANTS of such records on the index entry (`atYouAts`, newest AT_YOU_MAX, `keepAtYou`); the
+// row's count is the kept instants past the read line (`readAt`) inside FOCUS_WINDOW_MS (`atYouOf` — THE predicate:
+// statusTag's tag, the server's pre-filter `candidateOf`, the fold's `needsOwner` all ask it), so a read-up-to clears it.
+const AT_YOU_MAX = 50;
+/** Does record `r` @ the owner (a person mention whose id is the resolved `selfId`)? */
+function mentionsSelf(r, selfId = null) {
+  if (!r || typeof r !== 'object' || typeof selfId !== 'string' || selfId === '' || selfRead(r, selfId) || systemRead(r)) return false;
+  return Array.isArray(r.mentions) && r.mentions.some((m) => m && (m.kind == null || m.kind === 'person') && m.id != null && String(m.id) === selfId);
+}
+/** The kept instants after a batch `recs`: `ats` + the batch's records that @ the owner, ascending, unique, newest AT_YOU_MAX. */
+function keepAtYou(ats, recs, selfId = null) {
+  const set = new Set((Array.isArray(ats) ? ats : []).map(num).filter((x) => x > 0));
+  for (const r of Array.isArray(recs) ? recs : []) if (mentionsSelf(r, selfId) && num(r.at) > 0) set.add(num(r.at));
+  return [...set].sort((a, b) => a - b).slice(-AT_YOU_MAX);
+}
+/** THE @-YOU COUNT of a row: an agent group's own `atYou`, else its conversation's kept instants past `readAt`, inside the window. */
+function atYouOf(row, now = Date.now()) {
+  if (!row) return 0;
+  if (num(row.atYou) > 0) return num(row.atYou);
+  const c = row.conv || row;
+  const line = num(c.readAt);
+  let n = 0;
+  for (const at of Array.isArray(c.atYouAts) ? c.atYouAts : []) if (num(at) > line && within(at, now, FOCUS_WINDOW_MS)) n++;
+  return n;
+}
 
 // lane decision-attention (D2 of docs/design-decision-api.zh.md §2.4): THE JUDGED TAG — a row no FACT tag claims, judged by
 // the Decision API (the engine's async scan, src/server/channels-attention.js) to need the owner now. The row's `judged` =
@@ -207,6 +237,9 @@ function statusTag(row, now = Date.now(), policy = null) {
   const on = (code) => ruleOn(policy, code);
   if (num(ob.awaiting) > 0 && on('awaiting')) return { code: 'awaiting', n: num(ob.awaiting) };
   if (num(ob.unknown) > 0 && on('unknown')) return { code: 'unknown', n: num(ob.unknown) };
+  // lane attention-rule-at-you: being named by a person outranks being assigned
+  const ay = on('at-you') ? atYouOf(c, now) : 0;
+  if (ay > 0) return { code: 'at-you', n: ay };
   const held = heldOf(touch, now, c.watchers);
   const a = c.assignment;
   if (a && a.principal && (a.principal.id || a.principal.name) && on('assigned')) {
@@ -295,6 +328,8 @@ function candidateOf(en, ob, now = Date.now(), judged = null) {
   if (judgedTag(judged, en.lastAt)) return true;
   // awaiting / unknown — the outbox's count for the key
   if (ob && (num(ob.awaiting) > 0 || num(ob.unknown) > 0)) return true;
+  // at-you — the kept @ instants past the read line (atYouOf reads `en.atYouAts` / `en.readAt` raw)
+  if ((en.atYou || (en.atYouAts && en.atYouAts.length)) && atYouOf(en, now) > 0) return true;   // int265 seam: no kept instants ⇒ 0 (index-scale ⑨: the per-row pre-filter stays at base cost)
   // assigned, the CONVERSATION grain — the conversation's own rows (convGrainOf reads exactly these three)
   if ((Array.isArray(en.access) && en.access.length) || (Array.isArray(en.watchers) && en.watchers.length) || (en.assignment && en.assignment.principal)) return true;
   // the LAST wake (touchView's `wake`): delivered inside the window (a pattern / account grain that acted) or held
@@ -407,7 +442,7 @@ function isInternal(r) { return !!(r && (r.internal === true || (r.kind === 'gro
 /** Does this row need the OWNER (it never folds)? An @ of the owner, or a draft / a send awaiting the owner. */
 function needsOwner(r, now = Date.now()) {
   if (!r) return false;
-  if (num(r.atYou) > 0) return true;
+  if (atYouOf(r, now) > 0) return true;
   const st = statusTag(r, now);
   return !!(st && (st.code === 'awaiting' || st.code === 'unknown'));
 }
@@ -467,4 +502,5 @@ module.exports = {
   pageOrder, pageCursor, afterCursor, selectPage, queryOf, textMatches,
   isInternal, needsOwner, internalBlock,
   selfRead, readAdvance, systemRead,   // + systemRead: B-ef03
+  AT_YOU_MAX, mentionsSelf, keepAtYou, atYouOf,   // lane attention-rule-at-you
 };

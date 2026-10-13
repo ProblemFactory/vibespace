@@ -129,6 +129,7 @@ async function page(w, h, { phone, theme = 'dark', css = 'real' }) {
   await ev('window.__mount()');
   await ev('document.fonts.ready.then(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))');
   const until = async (expr, ms = 8000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await ev(expr).catch(() => false)) return true; await sleep(60); } return false; };
+  await until(`!document.documentElement.classList.contains('voice-absent')`, 5000); // lane voice-everywhere: the mic shows once /api/voice/status said on
   const mouse = async (type, x, y, buttons = 0) => cdp('Input.dispatchMouseEvent', { type, x, y, button: type === 'mouseMoved' && !buttons ? 'none' : 'left', buttons, clickCount: type === 'mouseMoved' ? 0 : 1 });
   const tap = async (sel) => {
     const r = await ev(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return null; const b = e.getBoundingClientRect(); return b.width ? [b.left + b.width / 2, b.top + b.height / 2] : null; })()`);
@@ -168,7 +169,7 @@ async function phoneLeg(w, minRatio) {
   const plus = await p.ev(rect('#frame .chat-plus-btn')), send = await p.ev(rect('#frame .chat-send-btn')), field = await p.ev(rect('#frame .chat-input-field textarea')), mic = await p.ev(rect('#frame .chat-input-field .chat-voice-btn'));
   ok(`${w}: the + door is 36×36`, plus && Math.round(plus.w) === 36 && Math.round(plus.h) === 36, plus);
   ok(`${w}: send is 40×40`, send && Math.round(send.w) === 40 && Math.round(send.h) === 40, send);
-  ok(`${w}: the mic sits INSIDE the field at its trailing edge (32 px)`, inside(mic, field) && field.r - mic.r <= 8 && Math.round(mic.h) === 32, { mic, field });
+  ok(`${w}: the mic sits INSIDE the field at its trailing edge (a 40×40 hit area — lane voice-everywhere)`, inside(mic, field) && field.r - mic.r <= 8 && Math.round(mic.h) === 40, { mic, field });
   ok(`${w}: the status bar is ONE row ≤ 40 px`, m.barH <= 40, m.barH);
   ok(`${w}: no horizontal overflow with the agent-browser chip present`, m.browser && m.sw <= m.cw, m);
   ok(`${w}: no gap between bar chips > 8 px, ⋯ present`, m.gap <= 8 && m.more, m);

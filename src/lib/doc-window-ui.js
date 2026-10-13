@@ -33,6 +33,7 @@ import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import M from '../doc-model.js';
 import { schema, extensions, loadDoc, saveDoc, sourceLine, docFidelity, safeHref, safeImageSrc } from './doc-markdown.js';
 import { WIDTH_KEY, widthChoice, nextWidth, columnRule, TABLE_CSS, downloadHref, exportName, localImagePath, exportDocument, readingHtml, rawReading, colsBand, rawCommentAnchor, rawCommentTarget, RAW_KIND_WORD, linkBarModel, linkPlan, sendAllLabel, sendWords } from './doc-window-model.js';
+import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
 
 const POLL_MS = 2000;
 const SHEET_BELOW = 640;   // px of window width: below it the comments strip is a bottom sheet
@@ -939,7 +940,7 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
     const qq = mk('div', 'doc-note-q', '“' + M.commentItem({ quote, note: '-' }).quote + '”');
     const ta = mk('textarea'); ta.placeholder = t('What should change?'); ta.maxLength = M.LIMITS.note;
     const acts = mk('div', 'doc-note-acts'); const cancel = mk('button', null, t('Cancel')); const add = mk('button', 'doc-note-add', t('Add'));
-    acts.append(cancel, add); box.append(qq, ta, acts);
+    acts.append(cancel, add); box.append(qq, voiceField(ta, attachDictation(ta)), acts);
     let close;
     if (isPhone()) { const sh = createModalShell({ title: t('Add comment'), escapeToClose: true, dialogClass: 'doc-note-sheet' }); sh.body.appendChild(box); close = () => sh.close(); }
     else { const p = createPopover(pane, 'doc-note-pop', { position: 'cursor', x: c.left, y: c.bottom + 4 }); p.appendChild(box); close = () => p.remove(); }

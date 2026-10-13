@@ -385,8 +385,13 @@ export class ChatInput {
     const field = document.createElement('div');
     field.className = 'chat-input-field';
     const deskKids = [...inputWrap.childNodes];
-    // the ⤢ glyph shows inside the phone field only past two lines (the mic owns the trailing edge under it)
-    const tall = () => field.classList.toggle('chat-input-tall', this._textarea.scrollHeight > 72);
+    // the ⤢ glyph shows inside the phone field only where it has ROOM above the mic (lane voice-everywhere, owner
+    // 2026-10-13: a mic tap hit ⤢ and opened the keyboard): two 40-px hit areas + 8 px between them = a box ≥ 92 px,
+    // judged on the box's own height every time it changes — a send that empties it, deleted lines, the expand. The
+    // old rule read scrollHeight on input only, so after a multi-line send the field shrank to one line with ⤢ still
+    // shown ON the mic.
+    const tall = () => field.classList.toggle('chat-input-tall', this._textarea.offsetHeight >= 92);
+    if (typeof ResizeObserver === 'function') new ResizeObserver(tall).observe(this._textarea);
     const phoneFace = (on) => {
       if (on === inputWrap.classList.contains('chat-input-phone')) return;
       if (on) { field.append(this._textarea, this._voice.btn, expandBtn); inputWrap.replaceChildren(plusBtn, attachInput, fileInput, dirInput, field, this._slashDropdown, this._voice.chip); tall(); }

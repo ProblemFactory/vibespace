@@ -91,6 +91,9 @@ const eng = ENG.create({ dataDir, registry, env: {}, broadcast: (m) => { for (co
 await eng.pass('im', { force: true });
 // the direct chat: two messages the owner has not read (a first pass's history is its baseline — set as the kept fact)
 await eng.store.index.update(() => { const en = eng.store.index.entry('im', 'c6', { create: false }); en.unread = 2; });
+// lane attention-rule-at-you: a group chat (also handed to Ops desk) where a person @-ed the owner 10 min ago, unread — the kept facts
+const AY_AT = Date.now() - 10 * 60e3;
+await eng.store.index.update(() => { const en = eng.store.index.entry('im', 'c3', { create: false }); en.atYouAts = [AY_AT]; en.atYouLast = { at: AY_AT, text: 'can you sign the March invoice today?', who: 'Dana' }; en.readAt = Math.min(Number(en.readAt) || 0, AY_AT - 1); });
 for (const id of ['c1', 'c3']) await eng.setAssignment('im', id, { principal: { kind: 'agent', id: `cid-${id}`, name: 'Ops desk' }, mode: 'all' });
 plug = { enabled: true, config: { attention: true } };
 const idle = async () => { for (let i = 0; i < 300 && !eng.attention.idle(); i++) await sleep(25); };
@@ -142,6 +145,9 @@ app.use(routes.router);
 // the plugin's own door (the GET /api/plugins row + POST /api/plugins/<id>/config of mounts-plugins-wiring, over `plug`)
 const PLUG_WRITES = [], SET_KEYS = [];
 app.get('/api/plugins', (req, res) => res.json({ plugins: [{ id: 'decision-api', enabled: plug.enabled, configured: true, decision: { ...plug.config } }] }));
+// lane decision-spend-readout: the plugin's status row (mounts-plugins-wiring GET /api/plugins/:id/status) — the REAL decision
+// engine's `today` + `month` under the plugin's shape (src/plugins/decision-api.js status)
+app.get('/api/plugins/decision-api/status', (req, res) => res.json({ installed: true, running: plug.enabled, enabled: plug.enabled, configured: true, decision: { ...decision.status(), ...plug.config } }));
 app.post('/api/plugins/decision-api/config', (req, res) => { PLUG_WRITES.push(req.body); plug = { ...plug, config: { ...plug.config, ...req.body } }; res.json({ ok: true }); });
 app.post('/api/settings', (req, res) => { SET_KEYS.push(...Object.keys(req.body || {})); Object.assign(SV, req.body || {}); res.json({ ok: true }); });
 app.get('/api/channel-groups', (req, res) => res.json({ groups: [] }));
@@ -186,7 +192,7 @@ const BLOCK = `(() => { const b = document.querySelector('[data-settings-block="
 const flip = (p, label) => p.ev(`(() => { const r = [...document.querySelectorAll('[data-settings-block="attention"] .settings-row')].find((x) => x.querySelector('.settings-row-label')?.textContent === ${JSON.stringify(label)}); r.querySelector('.settings-toggle input').click(); return true; })()`);
 const pick = (p, v) => p.ev(`(document.querySelector('[data-settings-block="attention"] input[type=radio][value="${v}"]').click(), true)`);
 const HEADN = `parseInt((document.querySelector('.chan-view-btn[data-view="focus"]') || {}).textContent, 10)`;
-const DIRECT = '有人直接发给我、我还没读的', JUDGE = '让判断模型挑出需要我的（Decision API）';
+const DIRECT = '有人直接发给我、我还没读的', AT_YOU = '有人 @ 了我、我还没读的', JUDGE = '让判断模型挑出需要我的（Decision API）';
 const JUDGE_READY = `(() => { const i = document.querySelector('[data-settings-block="attention"] input[data-plugin-feature="decision-api.attention"]'); return !!(i && !i.disabled && i.checked); })()`;
 const settled = async (p) => { await waitFor(p, JUDGE_READY, (v) => v === true); await sleep(350); };   // the plugin's answer drawn, the toggle's transition done
 const has = (rows, key, tag) => rows.some((r) => r.key === key && (!tag || r.tag === tag));
@@ -195,12 +201,20 @@ console.log('① desk 1100 px: the ⚙ door opens the block — the Settings win
 const d = await page(1100, 900, 'w=100%25');
 await d.go();
 let rows = await until(d, (rs) => has(rs, 'im/c6', 'direct') && judgedKeys(rs) === 'im/c0,im/c4', 12000);
+const ayRow = await d.ev(`(() => { const r = document.querySelector('.chan-grow[data-grow="im/c3"]'); const g = r && r.querySelector('.chan-grow-tag'); const l = r && r.querySelector('.chan-grow-last'); return r ? { tag: g ? g.dataset.tag : null, text: g ? g.textContent : '', last: l ? l.textContent : '' } : null; })()`);
+ok(ayRow && ayRow.tag === 'at-you' && /@我 · 1 条/.test(ayRow.text) && ayRow.last === 'Dana: can you sign the March invoice today?', 'lane attention-rule-at-you: the @-ed group wears 「@我 · 1 条」 (it outranks its hand-over) and its preview quotes the mentioning message', ayRow);
+await d.shot('row.png');
 ok(has(rows, 'im/c6', 'direct') && has(rows, 'im/c1', 'assigned') && judgedKeys(rows) === 'im/c0,im/c4', 'the first screen: the direct chat, the hand-overs and the two judged rows', { rows: rows.map((r) => r.key + ':' + r.tag), c6: ((eng.digest({ keys: ['im/c6'] }).conversations || [])[0] || {}) });
 await idle();
 await d.ev(`(${DOOR}.click(), true)`);
 let st = await waitFor(d, BLOCK, (s) => s && /今天：判断了 \d+ 条/.test(s.today));
-ok(st && st.inPop && st.rows.length === 11 && st.head === '需关注 · 怎么判断' && st.radio === 'both' && st.rows.filter((r) => r.on === true).length === 8, 'the door: a popover holding 「需关注 · 怎么判断」 — 11 rows, the preset on 固定规则 + 判断模型, the 7 rules and the judge on', st);
+ok(st && st.inPop && st.rows.length === 12 && st.head === '需关注 · 怎么判断' && st.radio === 'both' && st.rows.filter((r) => r.on === true).length === 9 && st.rows.some((r) => r.label === AT_YOU && r.on === true), 'the door: a popover holding 「需关注 · 怎么判断」 — 12 rows, the preset on 固定规则 + 判断模型, the 8 rules (+ 「有人 @ 了我、我还没读的」, lane attention-rule-at-you) and the judge on', st);
 ok(st && /今天：判断了 4 条 · 命中 2 条/.test(st.today), 'the readout under the judge\'s switch: 今天：判断了 4 条 · 命中 2 条 (four rows judged, two at 0.86)', st && st.today);
+// lane decision-spend-readout: the same line says what the judge COST today (the PURE decisionTodayLine's money half) —
+// four calls to the fake provider moved money, so it is never 「$0」 nor $0.00; the by-use breakdown is the hover
+st = await waitFor(d, BLOCK, (s) => s && /已花 /.test(s.today));
+const money = await d.ev(`(() => { const l = document.querySelector('[data-settings-block="attention"] [data-attention-today]'); return l ? { text: l.textContent, title: l.title } : null; })()`);
+ok(money && /^今天：判断了 4 条 · 命中 2 条 · 已花 (< \$0\.01|\$\d+\.\d\d)（上限 \$1\.00）$/.test(money.text) && !/已花 \$0（|\$0\.00/.test(money.text) && /^需关注 (< )?\$0?\.?\d/.test(money.title), 'the 需关注 block\'s judge line carries the money: 「…命中 2 条 · 已花 <money>（上限 $1.00）」, never $0 after 4 calls; 需关注 $… on hover', money);
 await settled(d);
 await d.shot('door-desk.png');
 
@@ -218,7 +232,7 @@ rows = await until(d, (rs) => has(rs, 'im/c6'));
 ok(has(rows, 'im/c6'), 'under 全部 the direct chat is still there', rows.map((r) => r.key));
 await d.ev(`(document.querySelector('.chan-view-btn[data-view="focus"]').click(), true)`);
 await d.ev(`(${DOOR}.click(), true)`);
-await waitFor(d, BLOCK, (s) => s && s.rows.length === 11);
+await waitFor(d, BLOCK, (s) => s && s.rows.length === 12);
 await flip(d, DIRECT);
 rows = await until(d, (rs) => has(rs, 'im/c6', 'direct'));
 ok(has(rows, 'im/c6', 'direct') && (await d.ev(HEADN)) === n0, 'flipped back on: the direct chat returns and the count with it');
@@ -226,7 +240,7 @@ ok(has(rows, 'im/c6', 'direct') && (await d.ev(HEADN)) === n0, 'flipped back on:
 console.log('③ the preset 只用判断模型: every rule off, the judge on ⇒ only judged rows');
 await pick(d, 'judge');
 st = await waitFor(d, BLOCK, (s) => s && s.radio === 'judge' && s.rows.filter((r) => r.on === true).length === 1);
-ok(st && st.rows.filter((r) => r.on === true).map((r) => r.label).join() === JUDGE && plug.config.attention === true, 'the preset set the switches it claims: the 7 rules off, the judge\'s on', st && st.rows.filter((r) => r.on === true).map((r) => r.label));
+ok(st && st.rows.filter((r) => r.on === true).map((r) => r.label).join() === JUDGE && plug.config.attention === true, 'the preset set the switches it claims: the 8 rules off, the judge\'s on', st && st.rows.filter((r) => r.on === true).map((r) => r.label));
 rows = await until(d, (rs) => rs.length && rs.every((r) => r.tag === 'judged'));
 ok(rows.length && rows.every((r) => r.tag === 'judged') && has(rows, 'im/c0') && has(rows, 'im/c4') && !has(rows, 'im/c6'), 'only the judge: every listed row is a judged one', rows.map((r) => r.key + ':' + r.tag));
 await pick(d, 'both');
@@ -251,7 +265,7 @@ await ph.go();
 await until(ph, (rs) => has(rs, 'im/c1'));
 await ph.ev(`(${DOOR}.click(), true)`);
 st = await waitFor(ph, BLOCK, (s) => s && s.inSheet);
-ok(st && st.inSheet && st.rows.length === 11 && st.sw <= st.cw + 1 && st.right <= st.vw, 'the sheet: the same 11 rows, nothing wider than the 390 px screen', st && { sw: st.sw, cw: st.cw, right: st.right, vw: st.vw });
+ok(st && st.inSheet && st.rows.length === 12 && st.sw <= st.cw + 1 && st.right <= st.vw, 'the sheet: the same 12 rows, nothing wider than the 390 px screen', st && { sw: st.sw, cw: st.cw, right: st.right, vw: st.vw });
 await settled(ph);
 await ph.shot('door-phone.png');
 ph.close();
@@ -262,7 +276,7 @@ await sp.go();
 st = await waitFor(sp, BLOCK, (s) => s && s.rows.length);
 // int263 seam (b): in the Settings window the threshold + 我在乎什么 are the Decision API plugin's rows (插件 › Decision API, plugin-settings-p0);
 // the block draws its own NINE there — the Channels ⚙ door (legs above) draws all eleven (alsoBlock)
-ok(st && st.rows.length === 9 && st.head === '需关注 · 怎么判断', 'the window\'s own content renderer, its search 需关注: the block under its head, its own 9 rows', st && st.rows.map((r) => r.label));
+ok(st && st.rows.length === 10 && st.head === '需关注 · 怎么判断', 'the window\'s own content renderer, its search 需关注: the block under its head, its own 10 rows', st && st.rows.map((r) => r.label));
 await settled(sp);
 await sp.shot('settings.png');
 sp.close();
@@ -272,7 +286,7 @@ const cp = await page(1100, 900, 'w=100%25&b=ctl');
 await cp.go();
 await until(cp, (rs) => has(rs, 'im/c6', 'direct'));
 await cp.ev(`(${DOOR}.click(), true)`);
-await waitFor(cp, BLOCK, (s) => s && s.rows.length === 11);
+await waitFor(cp, BLOCK, (s) => s && s.rows.length === 12);
 await flip(cp, DIRECT);
 await sleep(1000);
 const cr = await cp.ev(ROWS);

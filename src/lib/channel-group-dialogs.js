@@ -23,6 +23,7 @@ import { memberRows, NOTIFY_MODES, GROUP_ADAPTER_ID } from './channel-groups-vie
 // the ONE principal picker (search + list, keyed, recent picks) — never a checkbox wall of the whole roster
 import { principalPicker } from './principal-picker.js';
 import { folderTail } from './principal-picker-model.js';
+import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
 
 const JSON_HDR = { 'Content-Type': 'application/json' };
 /** POST a group verb; a refusal is TOASTED by its code (no silent failure)
@@ -97,7 +98,7 @@ export async function showGroupMembersDialog(app, { group = null } = {}) {
   const ctx = document.createElement('textarea');
   ctx.className = 'chan-opt-input chan-group-context'; ctx.rows = 3; ctx.maxLength = 4000;
   ctx.placeholder = t('Why they are here — the first thing each new member reads');
-  body.appendChild(ctx);
+  body.appendChild(voiceField(ctx, attachDictation(ctx)));
   const wakeRow = el('label', 'dialog-check-row chan-group-wake');
   const wake = document.createElement('input');
   wake.type = 'checkbox'; wake.checked = true;

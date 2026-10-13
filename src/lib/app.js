@@ -69,6 +69,7 @@ import { installBrowserReplay } from './browser-replay-window.js'; // 2026-09-27
 import { permissionModeOptions } from './permission-mode-labels.js'; // lane L: permission modes in plain words, the raw value as a hint
 import { BACKEND_META, createBackendIconHtml, getSessionKey, pickAgentIdentity, settingsPrefixFor, effortLabel, effortOptions, noteModelCatalog, worktreeCapsFor, backendFeatureCaps, billingRow, terminalOnly } from './agent-meta.js';
 import { sessionGivenName } from '../session-name.js'; // lane session-title-record: THE name ladder's given rungs (the window title)
+import { noteVoicePlugins } from './voice-input.js'; // lane voice-everywhere: every microphone follows the voice plugin (absent when off)
 
 const BACKEND_SESSION_OPTIONS = {
   claude: {
@@ -439,6 +440,7 @@ class App {
     // state, so every client learns them from the same broadcast (multi-client
     // law) and the sidebar's "history is hidden" row follows.
     this.ws.onGlobal((msg) => {
+      if (msg.type === 'plugins-updated') noteVoicePlugins(msg.plugins); // voice input off / no Dropline ⇒ no microphone on any box
       if (msg.type !== 'plugins-updated' || !msg.services) return;
       let changed = false;
       for (const meta of Object.values(BACKEND_META)) {

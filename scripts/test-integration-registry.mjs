@@ -73,7 +73,7 @@ function patchCopy(srcPath, tag, replacements) {
 console.log('§1 the PURE table');
 {
   const src = fs.readFileSync(path.join(REPO, 'src/integration-registry.js'), 'utf-8');
-  ok((src.replace(/^\s*(\*|\/\/).*$/gm, '').match(/\brequire\(|\bimport\s/g) || []).length === 1 && src.includes("require('./channels/registry-list.js')"), 'src/integration-registry.js imports NOTHING but the PURE vendor list (lane dc-channels-manifest: the vendors\' rows are their manifests\')');
+  ok((src.replace(/^\s*(\*|\/\/).*$/gm, '').match(/\brequire\(|\bimport\s/g) || []).length === 2 && src.includes("require('./channels/registry-list.js')") && src.includes("require('./plugin-settings.js')"), 'src/integration-registry.js imports NOTHING but two PURE tables: the vendor list (lane dc-channels-manifest: the vendors\' rows are their manifests\') and the plugin settings table (lane integrations-menu-home: which built-in plugin names a row)');
   const ids = R.rowIds();
   ok(new Set(ids).size === ids.length && ids.length >= 4, `row ids are unique (${ids.join(', ')})`);
   for (const row of R.ROWS) { const errs = R.checkRow(row); ok(!errs.length, `row ${row.id} passes its own checks`, errs.join('; ')); }
@@ -114,6 +114,36 @@ console.log('§1 the PURE table');
   ok(R.checkRow({ ...lark, fields: lark.fields.map((f) => ({ ...f, secret: true })) }).some((e) => /non-secret field/.test(e)) && R.checkRow({ ...lark, fields: [...lark.fields, { ...lark.fields[1], key: 'x' }] }).some((e) => /exactly ONE secret/.test(e)), 'CONTROL: an account-bound row needs exactly one secret field and a non-secret one (the custom client\'s id + secret)');
   ok(R.checkRow({ ...cloak, clientHint: 'x' }).some((e) => /bindsPerAccount row only/.test(e)) && R.checkRow({ ...cloak, bindsPerAccount: 'yes' }).some((e) => /boolean/.test(e)), 'CONTROL: a hint on a card row, or a non-boolean flag, is refused');
   ok(R.credentialWhyText({ whyCode: 'own-retired' }) !== 'own-retired' && /per account/.test(R.credentialWhyText({ whyCode: 'own-retired' })) && /\(clientSecret\)/.test(R.credentialWhyText({ whyCode: 'custom-missing', whyParams: { fields: ['clientSecret'] } })) && /decrypted/.test(R.credentialWhyText({ whyCode: 'custom-undecryptable' })), 'credentialWhyText words the r4 codes (own-retired / custom-missing / custom-undecryptable)');
+}
+
+// ═══ §1b THE WINDOW'S GROUPS (lane integrations-menu-home, owner 2026-10-13) ═══
+// The Integrations window groups its cards by what USES the key: 通讯 / 浏览器 / 插件. `groupOf` DERIVES the group from
+// what is already declared (a channel adapter among the consumers / the browser backend among them / a built-in
+// plugin's settings table naming the row) — never a list of ids. A row matching none, or two, is null ⇒ RED here.
+console.log("§1b the window's groups");
+{
+  const PS = require(path.join(REPO, 'src/plugin-settings.js'));
+  const table = R.ROWS.map((r) => [r.id, R.groupOf(r)]);
+  const ids = (g) => table.filter(([, x]) => x === g).map(([id]) => id).sort().join();
+  ok(JSON.stringify(R.GROUPS) === JSON.stringify(['communication', 'browser', 'plugins']) && R.GROUPS.every((g) => typeof R.GROUP_WORDS[g] === 'string' && R.GROUP_WORDS[g].length > 0), 'three groups in the window\'s order (communication, browser, plugins), each with its plain noun');
+  ok(table.every(([, g]) => R.GROUPS.includes(g)), `every row lands in exactly ONE group (${table.map(([id, g]) => id + '→' + g).join(', ')})`);
+  ok(ids('browser') === R.ROWS.filter((r) => r.id === 'cloak' || r.id.startsWith('cloud:')).map((r) => r.id).sort().join() && ids('browser').split(',').length === 6, `browser = cloak + every cloud:* row (${ids('browser')})`);
+  const named = Object.values(PS.PLUGIN_SETTINGS).map((p) => p.integration).filter(Boolean).sort().join();
+  ok(ids('plugins') === named && /decision-api/.test(named) && /dropline/.test(named), `plugins = exactly the rows a built-in plugin's settings table names (${ids('plugins')}) — the Decision API's key is a plugin's, not Communication's`);
+  ok(ids('communication') === R.ROWS.filter((r) => r.consumers.some((c) => c.startsWith('src/channels/'))).map((r) => r.id).sort().join() && R.ROWS.filter((r) => R.groupOf(r) === 'communication').every((r) => r.bindsPerAccount === true),
+    `communication = the rows a channel adapter consumes (${ids('communication')}); today every one is account-bound, so the window (which draws no account-bound row) shows no 通讯 head — it draws when such a row becomes a card`);
+  ok(R.groupOf('decision-api') === 'plugins' && R.groupOf('cloud:kernel') === 'browser' && R.groupOf('no-such-row') === null && R.groupOf(null) === null, 'groupOf answers an id as it answers the row; an unknown id is null (the window draws it last, never drops it)');
+  // derived, never listed: groupOf's own source names no row id
+  const src = fs.readFileSync(path.join(REPO, 'src/integration-registry.js'), 'utf-8');
+  const body = src.slice(src.indexOf('function groupOf('), src.indexOf('\n}\n', src.indexOf('function groupOf(')));
+  const quoted = R.rowIds().filter((id) => body.includes(`'${id}'`) || body.includes(`"${id}"`));
+  ok(body.length > 50 && !quoted.length, `groupOf names no row id — the group is derived (${quoted.join(', ') || 'none named'})`);
+  // CONTROLS — each must be null (the census above is RED for such a row)
+  const cloak = R.rowById('cloak'), dec = R.rowById('decision-api');
+  ok(R.groupOf({ ...cloak, id: 'brand-new', consumers: ['src/server/brand-new.js'] }) === null, 'CONTROL: a new row whose consumer is neither a channel adapter nor the browser backend and that no plugin names is null (RED)');
+  ok(R.groupOf({ ...dec, id: 'decision-api-2' }) === null, 'CONTROL: the Decision API row under an id no plugin names is null (the plugins group comes from the plugin table, not the row\'s look)');
+  ok(R.groupOf({ ...cloak, consumers: ['src/server/browser-backend.js', 'src/channels/fake.js'] }) === null, 'CONTROL: a row consumed by both a channel adapter and the browser backend (two groups) is null');
+  ok(R.groupOf({ ...cloak, consumers: [] }) === null, 'CONTROL: a row with no consumer is null');
 }
 
 // ═══ §2 masking + validation ═══════════════════════════════════════════════

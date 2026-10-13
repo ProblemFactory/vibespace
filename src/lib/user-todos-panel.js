@@ -48,7 +48,7 @@ export function installUserTodos(app) {
   // while the popup is open, like the layout (cleared on close and on open).
   const folds = new Map();
   const groupOpen = new Map(); // group key → the open ACTION ids the last paint listed (hidden rows included) — what "Mark all seen" resolves
-  const secHeld = new Map(); // lane inbox-decision-group: item id → its tray section ('now' | 'later') for this open (the slot law)
+  const secHeld = new Map(); // lane inbox-decision-group: item id → its tray section + rank slot ({sec, ix} — lane decision-inbox-rank) for this open (the slot law)
   // NOTICES BY ORIGIN (B-328d): the filter is per DEVICE (like the language) and
   // survives a close; the group ORDER is append-only while the popup is open
   // (the origins the last paint listed — null on every open, like the layout).
@@ -465,7 +465,7 @@ export function installUserTodos(app) {
     // groups, keyed by data-key — lane inbox-decision-group: with the Decision API's tray switch on (the snapshot's
     // `grouping`) the same groups are drawn into three sections, 「现在要你」 (.ut-groups), 「待判断」 (.ut-groups-pending)
     // and 「可以等」 (.ut-groups-later); a group's "Mark all seen" / fold there are keyed `pending|<key>` / `later|<key>` (data-fk)
-    const sections = todos.grouping ? inboxSections(rows, { prev: secHeld }) : null;
+    const sections = todos.grouping ? inboxSections(rows, { prev: secHeld, now: Date.now() }) : null;
     const boxes = patchSections(root, sections);
     const drawGroups = (gBox, rows, pre) => {
       const gExisting = new Map([...gBox.children].map((c) => [c.dataset.key, c]));
@@ -823,7 +823,7 @@ export function installUserTodos(app) {
     const id = item.dataset.id;
     // the reply box is a place to type, never a jump
     const sendBtn = e.target.closest('.ut-reply-send');
-    if (sendBtn) { if (!sendBtn.disabled) { const ta = item.querySelector(':scope > .ut-body > .ut-reply > textarea'); sendReply(item, ta ? ta.value : ''); } return; }
+    if (sendBtn) { if (!sendBtn.disabled) { const ta = item.querySelector(':scope > .ut-body > .ut-reply textarea'); sendReply(item, ta ? ta.value : ''); } return; }
     if (e.target.closest('.ut-reply')) return;
     const chip = e.target.closest('.ut-opt');
     if (chip) {

@@ -21,6 +21,7 @@ import { pickerModel, shareSummary, MODES, proposalOf, setProposal, launchShare,
 // the ONE principal picker (channel-polish, 2026-09-27): search + list + chips, keyed rows patched in place
 import { principalPicker } from './principal-picker.js';
 import { folderTail } from './principal-picker-model.js';
+import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
 
 export const REACH_KEY = 'desktopAppReach';
 const JSON_HDR = { 'Content-Type': 'application/json' };
@@ -423,7 +424,7 @@ export async function openAskDialog(app, id, { label = '' } = {}) {
     holdLab.style.display = lease && lease.sessionId !== pickedId() ? '' : 'none';
   };
   wake.onchange = sync;
-  body.append(el('div', 'wshare-sec', t('Agent')), pick.el, note, wakeLab, holdLab, explain);
+  body.append(el('div', 'wshare-sec', t('Agent')), pick.el, voiceField(note, attachDictation(note)), wakeLab, holdLab, explain);
   const cancel = el('button', 'btn-cancel', t('Cancel')); cancel.type = 'button'; cancel.onclick = () => close();
   const send = el('button', 'btn-create', t('Send')); send.type = 'button';
   send.onclick = async () => {

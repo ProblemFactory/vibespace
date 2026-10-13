@@ -149,6 +149,7 @@ const CONSENT = Object.freeze({
 /** THE CAPABILITY ROW (design §4 Lane S1). */
 const caps = Object.freeze({
   receive: 'poll',
+  mentions: 'people',   // lane attention-rule-at-you: rich_text `user` elements → mentions (slack-text.js; usergroup / broadcast keep their own kind)
   pollInterval: { hot: 30, cold: 300, floor: 10 },   // D5: no Slack-only cadence — the tiers, the floor and the budget ladder bound it
   scanSources: null,
   scanLatency: null,

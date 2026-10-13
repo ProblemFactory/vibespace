@@ -33,6 +33,7 @@ import { inboxModel, actionWords } from './user-todos-actions.js'; // THE store 
 import { sortGroups, openLayout, nextLayout, entriesFor, splitNotices, isNotice, noticeGroups, tabCounts, originOf, ORIGIN_LABELS } from './user-todos-layout.js'; // PURE: the popup's order, notices, counts
 import { reconcileKeyed, agoText, expiresText, resolvedByText, appCardHtml, askChipEls, linkifyInto } from './user-todos-row.js'; // THE keyed reconciler + the row words
 import { TABS, nextSelection, holdSelection, paneMode, scopeRows, rowPreview, itemView } from './inbox-window-layout.js'; // PURE: the window's rules (test-inbox-window-model)
+import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
 
 // The taskbar For-you button's own glyph (UI_ICONS.inbox's paths), in the registry's 16px chrome.
 const ICON = svgIcon16('<path d="M2 9.5h3l1 1.8h4l1-1.8h3"/><path d="M3.5 3.5h9l1.5 6v3.5a1 1 0 01-1 1H3a1 1 0 01-1-1V9.5z"/>');
@@ -286,7 +287,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
     ta.setAttribute('aria-label', t('Reply'));
     ta.value = model.drafts.get(id) || '';
     const why = mk('div', 'iw-reply-why');
-    reply.append(ta, why);
+    reply.append(voiceField(ta, attachDictation(ta)), why);
     const actions = mk('div', 'iw-actions');
     const arts = mk('div', 'iw-arts'); // lane foryou-attachments: the ask's --artifact chips, under the question
     el.append(head, title, arts, detail, cutLine, replied, opts, reply, actions);
@@ -786,7 +787,7 @@ registerWindowType({
 });
 /** ⚙ Communication ▸ For you… — the whole inbox as a window (§9 entry point d). */
 registerMenuItem({
-  menu: 'gear', parent: 'comm', order: 5, icon: ICON, // under Communication ▸ (gear-menu.js head 'comm'; this 5 · Channels 10 · Outbox 20 · Integrations 30)
+  menu: 'gear', parent: 'comm', order: 5, icon: ICON, // under Communication ▸ (gear-menu.js head 'comm'; this 5 · Channels 10 · Outbox 20)
   label: () => t('For you…'),
   run: (c) => c.app.openInbox(),
 });

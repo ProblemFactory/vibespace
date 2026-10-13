@@ -21,7 +21,20 @@
  *    when), the newest 200 kept, the newest 12 in every input; a "not" drops the tag at once (the label wins), and the
  *    examples hash in the memo material means the next scan judges again with it;
  *  · THE DRAFT ("Draft from my recent decisions"): D1's catalogue asked of the newest labeled examples (one call each,
- *    memoised), `M.criteriaProposal` PROPOSES lines for the person's own block — never applied by itself.
+ *    memoised), `M.criteriaProposal` PROPOSES lines for the person's own block — never applied by itself;
+ *  · THE FACTS (lane decision-attention-facts): each record carries a facts line FIRST (PURE `M.attentionFacts` — counts,
+ *    kinds, ages, never a name) from the engine's `facts()` — built ONCE per scan (a drain from the first queued row
+ *    until the queue is empty and nothing flies: the duplicate-inbox map is O(rows), never per row) — and the tail's
+ *    own flags (an @ of the owner: the at-you rule's `FO.atYouOf` / `FO.mentionsSelf`; a reply to the owner's
+ *    message; the newest mail's `automated` level). The facts are input, NOT memo material: they move with every read,
+ *    so a row is judged again on a new message, never on a new read. The body is what the reader has not read
+ *    (`tailOf(v, {since: readAt, limit: 12})`), mail trimmed; `matters` is asked only when the person's block is
+ *    non-empty;
+ *  · IMPLICIT LABELS (the switch `decision.implicitLabels`, OFF by default — nothing is written while it is off): at
+ *    most once an hour (the examples hash is memo material: a batch of new examples re-judges the candidates once,
+ *    not per example), a verdict the owner answered within 24 h ⇒ a "needs" example, a listed one left unopened and
+ *    unanswered for 24 h ⇒ "not" (`M.implicitLabel`), `source: 'implicit'`; the person's own labels win, go first and
+ *    are never replaced by one. A verdict's `at` is when it landed (a memo answer after a restart starts it again).
  */
 const fs = require('fs');
 const path = require('path');
@@ -35,19 +48,22 @@ const QUEUE_MAX = 500;
 const KICK_MS = 200;            // a burst of reads queues ONE drain
 const VERDICTS_MAX = 5000;
 const DRAFT_EXAMPLES = 30;
+const LEARN_EVERY_MS = 3600e3;   // the implicit-label pass, at most once an hour
 // a refusal no other row would escape — the queue is emptied, the next read queues again
 const STOP = Object.freeze(['plugin-off', 'feature-off', 'no-key', 'daily-budget', 'per-hour', 'backoff', 'over-ceiling']);
 const hash16 = (s) => crypto.createHash('sha256').update(String(s)).digest('hex').slice(0, 16);
 
 function create({ dataDir, decision = null, serverSetting = () => undefined, now = () => Date.now(), tailOf = () => [], notify = () => { },
-  accountNever = () => false, viewNow = null, log = console, policy = () => null } = {}) {
+  accountNever = () => false, viewNow = null, log = console, policy = () => null, facts = () => () => ({}), rowState = () => null } = {}) {
   const FILE = path.join(dataDir, 'decision-examples.json');
   let examples = readExamples();
   const verdicts = new Map();   // row key → {p, clauses, rubricV, lastAt, source, mk}
   const queue = new Map();      // row key → the rowView it was queued with
   const flying = new Set();     // row keys whose call is in flight (a read meanwhile must not queue them again — one call per row)
   let inFlight = 0, timer = null, lastWhy = null;
-  const stats = { calls: 0, memo: 0, refused: 0 };
+  const stats = { calls: 0, memo: 0, refused: 0, scans: 0, implicit: 0 };
+  let scanFacts = null;   // the engine's facts of THIS scan (built once at its first call, dropped when the scan ends)
+  let learnedAt = -Infinity;
   // lane attention-policy: the owner's readout — "today: judged N · M needed you" (the local day, counted where a verdict lands)
   let today = { day: null, judged: 0, hits: 0 };
   const todayNow = () => { const day = M.dayOf(now(), new Date(now()).getTimezoneOffset()); if (today.day !== day) today = { day, judged: 0, hits: 0 }; return today; };
@@ -68,6 +84,7 @@ function create({ dataDir, decision = null, serverSetting = () => undefined, now
   const setting = (k) => { try { return serverSetting(k); } catch { return undefined; } };
   const threshold = () => M.attentionThreshold(setting('decision.threshold'));
   const userBlock = () => M.userBlockOf(setting('decision.attentionBlock'));
+  const hasBlock = () => userBlock().trim() !== '';
   /** Is the attention use switched on (the plugin + its feature)? The key and the budget are the engine's to judge. */
   function on() {
     try { const s = decision && typeof decision.settings === 'function' ? decision.settings() : null; return !!(s && s.pluginOn && s.features && s.features.attention); } catch { return false; }
@@ -92,6 +109,7 @@ function create({ dataDir, decision = null, serverSetting = () => undefined, now
   function note(views) {
     if (!decision || !on()) return 0;
     const t = now();
+    learn(t);
     let n = 0;
     for (const v of Array.isArray(views) ? views : []) {
       if (!v || !v.key || queue.has(v.key) || flying.has(v.key) || queue.size >= QUEUE_MAX) continue;
@@ -110,8 +128,22 @@ function create({ dataDir, decision = null, serverSetting = () => undefined, now
       const [key, v] = queue.entries().next().value;
       queue.delete(key);
       inFlight++; flying.add(key);
-      judgeOne(v).catch((e) => log.warn?.(`[decision] attention: ${e && e.message}`)).finally(() => { inFlight--; flying.delete(key); drain(); });
+      judgeOne(v).catch((e) => log.warn?.(`[decision] attention: ${e && e.message}`)).finally(() => { inFlight--; flying.delete(key); drain(); if (!queue.size && !inFlight) scanFacts = null; });
     }
+  }
+  /** The engine's facts of THIS scan — built at its first call (the duplicate-inbox map is O(rows)), dropped when it ends. */
+  function rowFacts(v) {
+    if (!scanFacts) { try { scanFacts = facts() || (() => ({})); } catch { scanFacts = () => ({}); } stats.scans++; }
+    try { return scanFacts(v) || {}; } catch { return {}; }
+  }
+  /** The row's facts line: the scan's facts `c` + the tail's own flags (an @ of the owner, a reply to them, the newest
+   *  mail's `automated` level) — never a name. */
+  function factsFor(v, tail, c) {
+    const t = now(), line = Number(c.readAt) || 0;
+    const shown = line > 0 && tail.some((r) => Number(r.at) > line) ? tail.filter((r) => Number(r.at) > line) : tail.slice(-M.TAIL_SENT);
+    const newest = [...tail].reverse().find((r) => r && !r.self) || null;
+    const ctx = { ...c, now: t, mentioned: FO.atYouOf(v, t) > 0 || shown.some((r) => r && r.atYou), replyToSelf: shown.some((r) => r && r.toSelf), automated: newest ? newest.automated || null : null };
+    return { line: M.attentionFacts(v, ctx), ctx };
   }
   async function judgeOne(queued) {
     // THE ROW AS IT IS NOW, asked again right before the call: a row queued by an earlier read may since have been
@@ -120,16 +152,19 @@ function create({ dataDir, decision = null, serverSetting = () => undefined, now
     const lastAt = Number(v && v.lastAt) || 0;
     if (!v || accountNever(v.adapterId) || !FO.judgeCandidate(v, now(), pol()) || labelOf(v.key, lastAt)) return;
     const mp = memoParts(v.key, lastAt);
+    const block = hasBlock();
+    const c = rowFacts(v), since = Number(c.readAt) || 0;
     let tail = [];
-    try { tail = tailOf(v) || []; } catch { tail = []; }
-    const parts = { rubric: M.rubricText(), userBlock: userBlock(), examples: M.examplesForInput(examples), ...M.attentionRecord(v, tail) };
-    const r = await decision.judge('attention', parts, { questions: M.rubricQuestions(), memo: mp, accountNever: accountNever(v.adapterId), perHour: PER_HOUR });
+    try { tail = tailOf(v, { since, limit: since > 0 ? M.UNREAD_SENT : M.TAIL_SENT }) || []; } catch { tail = []; }
+    const f = factsFor(v, tail, c);
+    const parts = { rubric: M.rubricText({ hasBlock: block }), userBlock: userBlock(), examples: M.examplesForInput(examples), ...M.attentionRecord(v, tail, f.line, { since: f.ctx.readAt, unread: f.ctx.unread, mail: !!f.ctx.mail }) };
+    const r = await decision.judge('attention', parts, { questions: M.rubricQuestions({ hasBlock: block }), memo: mp, accountNever: accountNever(v.adapterId), perHour: PER_HOUR });
     if (!r || !r.ok) { lastWhy = r ? r.why : 'no-answer'; stats.refused++; if (STOP.includes(lastWhy)) queue.clear(); return; }
     lastWhy = null;
     if (r.memo) stats.memo++; else stats.calls++;
-    const j = M.judgedOf(r.answers, lastAt);
+    const j = M.judgedOf(r.answers, lastAt, { hasBlock: block });
     verdicts.delete(v.key);
-    verdicts.set(v.key, { ...(j || { p: null, clauses: [], rubricV: M.RUBRIC.version, lastAt, source: 'judge' }), mk: M.memoMaterial('attention', mp) });
+    verdicts.set(v.key, { ...(j || { p: null, clauses: [], rubricV: M.RUBRIC.version, lastAt, source: 'judge' }), mk: M.memoMaterial('attention', mp), at: now() });
     while (verdicts.size > VERDICTS_MAX) verdicts.delete(verdicts.keys().next().value);
     const hit = !!(j && FO.judgedTag({ ...j, threshold: threshold() }, lastAt));
     const d = todayNow(); d.judged++; if (hit) d.hits++;
@@ -149,6 +184,32 @@ function create({ dataDir, decision = null, serverSetting = () => undefined, now
     save();
     notify([key]);
     return { ok: true, label: verdict, examples: examples.length };
+  }
+
+  /** IMPLICIT LABELS (the switch, off by default): at most once an hour, every kept verdict asked `M.implicitLabel`
+   *  against the row as it is now (`rowState`: readAt, selfAt) — one example per verdict, the person's own label wins. */
+  function learn(t = now()) {
+    if (setting('decision.implicitLabels') !== true || t - learnedAt < LEARN_EVERY_MS) return 0;
+    learnedAt = t;
+    let n = 0;
+    for (const [key, v] of verdicts) {
+      if (v.learned || !(Number(v.at) > 0) || v.p === null) continue;
+      if (examples.some((x) => x.key === key && x.source !== 'implicit')) { v.learned = true; continue; }
+      let row = null;
+      try { row = rowState(key); } catch { row = null; }
+      if (!row) continue;
+      const verdict = M.implicitLabel(v, row, t, threshold());
+      if (!verdict) { if (t - v.at >= M.IMPLICIT_MS) v.learned = true; continue; }
+      v.learned = true;
+      const view = typeof viewNow === 'function' ? viewNow(key) : null;
+      if (!view) continue;
+      let tail = [];
+      try { tail = tailOf(view, { since: 0, limit: M.TAIL_SENT }) || []; } catch { tail = []; }
+      examples = M.addExample(examples, M.exampleOf({ ...M.attentionRecord(view, tail), key, lastAt: v.lastAt }, verdict, v.clauses, t, { source: 'implicit' }));
+      n++;
+    }
+    if (n) { stats.implicit += n; save(); }
+    return n;
   }
 
   /** "Draft from my recent decisions": the catalogue over the newest labeled examples → PROPOSED lines (never applied). */
@@ -175,7 +236,7 @@ function create({ dataDir, decision = null, serverSetting = () => undefined, now
   }
 
   const status = () => ({ on: !!decision && on(), queued: queue.size, inFlight, ...stats, why: lastWhy, examples: examples.length, threshold: threshold(), today: { ...todayNow() } });
-  return { note, viewOf, judgedFor, label, draft, status, on: () => !!decision && on(), examples: () => examples.slice(), idle: () => !queue.size && !inFlight && !timer, file: FILE };
+  return { note, viewOf, judgedFor, label, draft, status, learn, on: () => !!decision && on(), examples: () => examples.slice(), idle: () => !queue.size && !inFlight && !timer, file: FILE };
 }
 
-module.exports = { create, CONCURRENCY, PER_HOUR, STOP };
+module.exports = { create, CONCURRENCY, PER_HOUR, STOP, LEARN_EVERY_MS };

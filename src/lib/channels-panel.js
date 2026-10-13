@@ -1020,7 +1020,7 @@ export function registerChannelsMenus() {
  *  exists, a window otherwise. */
 export function registerChannelsGearRow() {
   registerMenuItem({
-    menu: 'gear', parent: 'comm', order: 10, // under Communication ▸ (gear-menu.js head 'comm'; this 10 · Outbox 20 · Integrations 30)
+    menu: 'gear', parent: 'comm', order: 10, // under Communication ▸ (gear-menu.js head 'comm'; For you 5 · this 10 · Outbox 20)
     icon: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z"/></svg>',
     label: () => t('Channels…'),
     run: (c) => c.app.openChannels(),
@@ -1663,7 +1663,7 @@ export function renderChannelsPanel(app, c) {
   function groupRow(r, now = Date.now()) {
     const st = r.kind === 'conv' ? (statusTag(r, now, attnPolicy()) || statusTag(r, now)) : null;   // lane attention-policy: the tag that listed it, else its fact
     const tag = statusTagParts(st, { now });
-    const sig = JSON.stringify(['g', r.kind, r.id, r.adapterId, r.title, r.lastAt, r.unread, r.archived, r.pair, r.memberCount, r.sourceLabel, r.lastText, !!(r.group && r.group.lastCleared), r.conv ? r.conv.kind : '', rowTime(r.lastAt), st && st.code, tag, r.account, isInternal(r)]);   // r.group.lastCleared: the last line drawn as the cleared sentence ("Clear content…", the merge onto master's signature census)
+    const sig = JSON.stringify(['g', r.kind, r.id, r.adapterId, r.title, r.lastAt, r.unread, r.archived, r.pair, r.memberCount, r.sourceLabel, r.lastText, r.conv && r.conv.atYouText, !!(r.group && r.group.lastCleared), r.conv ? r.conv.kind : '', rowTime(r.lastAt), st && st.code, tag, r.account, isInternal(r)]);   // r.group.lastCleared: the last line drawn as the cleared sentence ("Clear content…", the merge onto master's signature census)
     return memoRow('g:' + r.key, sig, r, (cur) => groupRowBuild(r, now, cur, st, tag));
   }
   function groupRowBuild(r, now, cur, st, tag) {
@@ -1721,6 +1721,8 @@ export function renderChannelsPanel(app, c) {
     const last = document.createElement('span');
     last.className = 'chan-grow-last';
     last.textContent = r.lastText || '';
+    // lane attention-rule-at-you: a row listed for an @ of the owner quotes the mentioning message
+    if (st && st.code === 'at-you' && r.conv && r.conv.atYouText) last.textContent = (r.conv.atYouWho ? r.conv.atYouWho + ': ' : '') + r.conv.atYouText;
     // "Clear content…": the newest line was cleared — the sentence in this device's words, dimmed
     if (r.group && r.group.lastCleared) { last.textContent = clearedText(); last.classList.add('rc-cleared'); }
     sub.appendChild(last);

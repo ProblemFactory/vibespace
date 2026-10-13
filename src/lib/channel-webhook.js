@@ -10,6 +10,7 @@ import { t } from './i18n.js';
 import { icon, el, btn } from './channel-chrome.js';
 import { routeErrorText } from './channel-words.js';
 import * as V from './webhook-view.js';
+import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
 
 const JSON_HDR = { 'Content-Type': 'application/json' };
 const BASE = '/api/channels/webhook/paths';
@@ -299,7 +300,7 @@ export async function showSendToCallersDialog(app, slug, { title = '' } = {}) {
   all.onchange = () => { for (const b of boxes) b.checked = all.checked; };
   for (const b of boxes) b.onchange = () => { all.checked = boxes.every((x) => x.checked); };
   const ta = el('textarea', 'chan-opt-input chan-wh-text'); ta.rows = 3; ta.placeholder = t('Write a message — sent as you, signed from the path\'s reply name');
-  m.body.appendChild(ta);
+  m.body.appendChild(voiceField(ta, attachDictation(ta)));
   const send = btn(t('Send'), null, 'mounts-btn-primary');
   send.dataset.whSendGo = '1';
   send.prepend(icon('send', 11));

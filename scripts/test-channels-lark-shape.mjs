@@ -2373,5 +2373,29 @@ console.log('\n⑱ design 010 (B-c9be): the owner\'s full search — the words a
   ok(peer.kind === undefined && peer.author.id === 'ou_ada', "a person's message is unchanged (no kind)");
 }
 
+// ── lane attention-rule-at-you: THE MENTIONS CENSUS — a Lark message's at-user list reaches the record's `mentions` (resolved
+// open_id + name) on BOTH arrivals (the poll's item, the push event's object id); @所有人 is a broadcast, never 「@ 我」 ──
+console.log('\nattention-rule-at-you: Lark carries mentions (the first screen\'s @-me rule reads them)');
+{
+  const FO = require(path.join(REPO, 'src/channel-focus.js'));
+  const REC = require(path.join(REPO, 'src/channel-record.js'));
+  const T = 1760000000000;
+  const item = { message_id: 'om_at1', chat_id: 'oc_at', create_time: String(T), msg_type: 'text', sender: { id: 'ou_peer', sender_type: 'user' },
+    body: { content: JSON.stringify({ text: '@_user_1 please look @_all' }) },
+    mentions: [{ key: '@_all', id: 'all', name: '所有人' }, { key: '@_user_1', id: 'ou_self', id_type: 'open_id', name: 'Me' }] };
+  const r = lark.toRecord('lark', 'oc_at', item, { selfId: 'ou_self' });
+  const v = REC.validateRecord ? REC.validateRecord(r) : null;
+  ok(lark.caps.mentions === 'people' && r.mentions[0].id === 'ou_self' && r.mentions[0].name === 'Me' && r.mentions[1].kind === 'broadcast' && FO.mentionsSelf(r, 'ou_self') && !(v && v.ok === false),
+    'the poll item: mentions = the at-user list in ordinal order, resolved (open_id + name); caps.mentions = people', JSON.stringify(r.mentions));
+  const allOnly = lark.toRecord('lark', 'oc_at', { ...item, mentions: [{ key: '@_all', id: 'all', name: '所有人' }] }, { selfId: 'ou_self' });
+  ok(!FO.mentionsSelf(allOnly, 'ou_self') && !FO.mentionsSelf(lark.toRecord('lark', 'oc_at', { ...item, sender: { id: 'ou_self', sender_type: 'user' } }, { selfId: 'ou_self' }), 'ou_self'),
+    '@所有人 alone is a broadcast (never 「@ 我」); my own message naming me is never 「@ 我」');
+  const LV = require(path.join(REPO, 'src/channels/live/lark.js'));
+  const pushed = LV.eventToItem({ event: { sender: { sender_id: { open_id: 'ou_peer' }, sender_type: 'user' }, message: { message_id: 'om_at2', chat_id: 'oc_at', create_time: String(T + 1), message_type: 'text', content: JSON.stringify({ text: '@_user_1 hi' }),
+    mentions: [{ key: '@_user_1', id: { open_id: 'ou_self', union_id: 'on_x', user_id: 'u_x' }, name: 'Me' }] } } });
+  const pr = lark.toRecord('lark', 'oc_at', pushed, { selfId: 'ou_self' });
+  ok(pr.mentions.length === 1 && pr.mentions[0].id === 'ou_self' && FO.mentionsSelf(pr, 'ou_self'), 'the push event: the mention\'s object id resolves to its open_id ⇒ the same 「@ 我」', JSON.stringify(pr.mentions));
+}
+
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

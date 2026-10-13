@@ -12,12 +12,13 @@
 //   Manage agents… direct — the most-clicked admin row
 //   Tools ▸        Usage… · Background Work… · Desktop apps… · Plugins… ·
 //                  rule · plugin-contributed windows (`expand`)
-//   Communication ▸ Channels… · Outbox… · Integrations… — registered by
+//   Communication ▸ For you… · Channels… · Outbox… — registered by
 //                  their OWNING modules with parent:'comm' (this block never
 //                  learns their names)
 //   System ▸       Report a problem… (first: the panic action) ·
 //                  Diagnostics report… · rule · Restore a previous layout… ·
-//                  Backup & migrate… · Change/Set password…
+//                  Backup & migrate… · Integrations… (integrations-window.js,
+//                  order 55: keys beside the password) · Change/Set password…
 //   Update VibeSpace… direct — its two-line "vX → vY" label IS the update
 //                  indicator, a submenu would hide it
 //   All Settings… direct — the settings window is a destination, not a preference (2.369.131)
@@ -130,8 +131,8 @@ export function registerGearMenu() {
     menu: M, parent: 'tools', order: 60, id: 'gear/plugin-windows',
     expand: (c) => (c.app.pluginClient?.contributedWindows?.() || []).map((w) => ({ label: w.title, icon: PLUGIN_ICON, action: () => c.app.pluginClient.open(w.pluginId, w.windowId) })),
   });
-  // ── Communication ▸ — members come from their owners (channels-panel.js,
-  //    channel-outbox.js, integrations-window.js: parent:'comm'); with none
+  // ── Communication ▸ — members come from their owners (inbox-window.js,
+  //    channels-panel.js, channel-outbox.js: parent:'comm'); with none
   //    visible the head drops itself ──
   registerMenuItem({ menu: M, id: 'comm', submenu: true, group: '1_admin', order: 30, icon: I.chat, label: () => t('Communication') });
   // ── System ▸ ──
@@ -141,6 +142,7 @@ export function registerGearMenu() {
   registerMenuItem({ menu: M, parent: 'system', order: 30, separator: true });
   registerMenuItem({ menu: M, parent: 'system', order: 40, icon: I.exp || I.pulse, label: () => t('Restore a previous layout…'), run: (c) => c.app._showLayoutHistory() });
   registerMenuItem({ menu: M, parent: 'system', order: 50, icon: I.exp, label: () => t('Backup & migrate…'), run: (c) => c.app._showTransferDialog() });
+  // (order 55 = Integrations…, registered by integrations-window.js with parent:'system' — keys beside the password)
   registerMenuItem({ menu: M, parent: 'system', order: 60, icon: I.lock, label: (c) => (c.app._authEnabled ? t('Change password…') : t('Set password…')), run: (c) => c.app._showPasswordDialog() });
   // Self-update: runs scripts/update.sh visibly in a shell terminal (same
   // pattern as Manage Agents' CLI updates). The dtach terminal survives the

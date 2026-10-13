@@ -214,6 +214,7 @@ const writes = () => calls.filter((c) => c.p === '/v1/terms' || c.p === '/v1/con
 async function dictate(p, conv, messages = null) {
   await p.ev(`(() => { window.__facts.conv = ${JSON.stringify(conv)}; ${messages ? `window.__facts.messages = ${JSON.stringify(messages)};` : ''} ${TA}.value = ''; ${TA}.focus(); return true; })()`);
   const n = calls.filter((c) => c.p === '/v1/dictate').length;
+  await p.until(`document.querySelector(${JSON.stringify(MIC)}).offsetWidth > 0`, 5000); // lane voice-everywhere: the mic shows once /api/voice/status said on
   await p.clickSel(MIC);
   if (!(await p.until(`document.querySelector(${JSON.stringify(MIC)}).classList.contains('recording')`))) throw new Error('the mic did not record: ' + JSON.stringify(await p.ev(`({ cls: document.querySelector(${JSON.stringify(MIC)}).className, chip: (document.querySelector('#frame .voice-chip')||{}).textContent, errs: window.__errs, top: (() => { const b = document.querySelector(${JSON.stringify(MIC)}).getBoundingClientRect(); const h = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2); return h && (h.className || h.tagName); })() })`)));
   await sleep(300);

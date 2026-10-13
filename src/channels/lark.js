@@ -289,6 +289,7 @@ const CONSENT = Object.freeze({ mode: 'fixed', landing: null, callbackUrl: requi
 const caps = Object.freeze({
   receive: 'push',
   pushTransport: 'ws-long-conn',
+  mentions: 'people',   // lane attention-rule-at-you: the message's at-user list → mentions (mentionsOf, open_id on both lanes); @所有人 is a broadcast
   pushAckBudgetMs: 3000,           // the vendor's: HTTP 200 within 3 s — we ack after DURABILITY (fence 11)
   pollInterval: { hot: 30, cold: 300, floor: 10 },
   scanSources: null,
@@ -590,7 +591,8 @@ function mentionsOf(item) {
   const ms = Array.isArray(item.mentions) ? item.mentions.slice() : [];
   const ord = (m) => { const mm = /^@_user_(\d+)$/.exec(String((m && m.key) || '')); return mm ? Number(mm[1]) : Number.MAX_SAFE_INTEGER; };
   ms.sort((a, b) => ord(a) - ord(b));
-  return ms.map((m) => ({ id: String((m && m.id) || ''), name: String((m && m.name) || '') }));
+  // lane attention-rule-at-you: @所有人 (`@_all`) is a BROADCAST (D21) — its own id, never a person's, so it never reads as @ me
+  return ms.map((m) => (String((m && m.key) || '') === '@_all' ? { id: '!all', name: 'all', kind: 'broadcast' } : { id: String((m && m.id) || ''), name: String((m && m.name) || '') }));
 }
 
 // ── D3 (lane channel-rich, 2026-09-28): A BOT HAS A NAME ────────────────

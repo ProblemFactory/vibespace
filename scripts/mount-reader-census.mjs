@@ -107,7 +107,7 @@ export const ROWS = [
   ['src/server/cli-env.js', 'own-tree', 4, null, PROC],
   ['src/server/cluster-presets.js', 'own-tree', 7, null, DATA],
   ['src/server/conversation-deliver.js', 'own-tree', 2, null, DATA],
-  ['src/server/decision-engine.js', 'own-tree', 3, null, DATA],   // lane decision-core: data/decision-{memo,usage}.json + the journal
+  ['src/server/decision-engine.js', 'own-tree', 4, null, DATA],   // lane decision-core: data/decision-{memo,usage}.json + the journal; lane decision-spend-readout: the journal's bounded tail (the month so far)
   ['src/server/channels-attention.js', 'own-tree', 1, null, DATA],   // lane decision-attention: data/decision-examples.json (its ONE writer)
   ['src/server/doc-engine.js', 'own-tree', 1, null, DATA], // lane doc-comments-stopped-owner: data/doc-owners.json (the owner memo)
   ['src/server/design-engine.js', 'user-path', 6, 'DOOR\\.blocked\\(', 'the design watch relist: refused by name, never read'],

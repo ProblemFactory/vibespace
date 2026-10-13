@@ -23,6 +23,7 @@ import { composerMode } from './channel-groups-view.js';
 // the window's ONE paging verdict (a scroll event is displacement; the person's input is intent) — the pane's older
 // page is a metered vendor walk where replies are listed separately, so it is asked of the same PURE rule
 import { pageUpVerdict, isUpKey, isTypingTarget, wheelTowardOlder } from './channel-paging.js';
+import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
 
 /** W1 — THE QUOTE LINE above a reply's body: `↩ author: first line` as a button (a click jumps to the parent);
  *  a parent not loaded / in another chat is said in words, never a blank. `onJump(vendorId, place)`. */
@@ -305,7 +306,7 @@ export function createThreadPane(host, ctx) {
     };
     ta.addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); send.click(); } });
     row.append(note, send);
-    comp.append(ta, row);
+    comp.append(voiceField(ta, attachDictation(ta)), row);
     foot.appendChild(comp);
     if (keepFocus) ta.focus();
   }

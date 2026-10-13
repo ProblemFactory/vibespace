@@ -122,7 +122,8 @@ ok(await idle(A.eng), 'the queue drains');
 ok(midFlight && got.length === 4, `two reads while a row's call is in flight queue it NOT again — one call per row (${got.length} calls; the heavy leg's reload caught the double call)`);
 ok(got.length === 4 && got.every((g) => g.body.questions.length === 8 && (String(g.body.input).match(/\[record\]/g) || []).length === 1 && /\/v1\/decisions$/.test(g.url)), 'exactly 4 calls — ONE record each, every one of the 8 rubric questions (needs_now + 7 clauses) in that call', got.map((g) => [g.body.questions.length, (String(g.body.input).match(/\[record\]/g) || []).length]));
 ok(maxIn === 3, `the queue keeps ≤ 3 calls in flight (measured ${maxIn})`);
-ok(got.every((g) => String(g.body.input).includes('Invoices and contracts matter to me.') && String(g.body.input).includes('Rubric v1') && !g.raw.includes('SECRET') && g.auth === 'Bearer sk-dummy-SECRET-123456'), 'each input carries the rubric v1 and the person\'s block as written; the key rides the header only, never the body');
+ok(got.every((g) => /^\n\n\[record\]\nfacts: addressed: no mention of the reader; kind: a group; 0 messages since the reader last read, \d+ min ago\ntitle: /.test(recordPart(g.body.input))) && A.eng.attention.status().scans === 1, 'lane decision-attention-facts: each record opens with its facts line (the backlog of a first walk is read by construction: 0 since the read line); the scan\'s facts built ONCE for the 4 rows', recordPart(got[0].body.input).slice(0, 200));
+ok(got.every((g) => String(g.body.input).includes('Invoices and contracts matter to me.') && String(g.body.input).includes('Rubric v2') && !g.raw.includes('SECRET') && g.auth === 'Bearer sk-dummy-SECRET-123456'), 'each input carries the rubric v2 and the person\'s block as written; the key rides the header only, never the body');
 
 console.log('② the candidate-set census: a fact-tagged row is never sent, not once');
 ok(factNamed(got).length === 0, 'CENSUS: no request body names a fact-tagged row', factNamed(got).map((g) => recordPart(g.body.input).slice(0, 80)));
@@ -132,7 +133,7 @@ const partialKeys = A.events.filter((e) => e.type === 'channels-updated' && e.pa
 ok(partialKeys.slice().sort().join() === 'im/c0,im/c4', 'ONE partial broadcast per row the judge put over the threshold (c0, c4) — none for the rows below it', partialKeys);
 const d1 = A.eng.digest();
 const j0 = rowOf(d1, 'c0').judged, t0g = tagOf(d1, 'c0');
-ok(t0g && t0g.code === 'judged' && t0g.p === 0.86 && j0.threshold === 0.7 && j0.clauses.join() === 'asks_me,deadline_money' && j0.rubricV === 1, 'the row carries judged {p 0.86, clauses asks_me + deadline_money, threshold 0.70} and statusTag says judged', { j0, t0g });
+ok(t0g && t0g.code === 'judged' && t0g.p === 0.86 && j0.threshold === 0.7 && j0.clauses.join() === 'asks_me,deadline_money' && j0.rubricV === 2, 'the row carries judged {p 0.86, clauses asks_me + deadline_money, threshold 0.70} and statusTag says judged', { j0, t0g });
 ok(tagOf(d1, 'c2') === null && tagOf(d1, 'c5') === null && (tagOf(d1, 'c4') || {}).code === 'judged', 'a row judged 0.22 stays untagged; Contract URGENT is judged');
 ok(d1.attention.total === 4, `the first read's attention list = the 2 facts + the 2 judged rows (${d1.attention.total})`);
 settings['decision.threshold'] = 0.9;
@@ -232,6 +233,135 @@ C2.eng.digest();
 await idle(C2.eng);
 ok(factNamed(got.slice(n)).length >= 1, `CONTROL: judging the QUEUED snapshot (no re-read before the call) sends the rows handed over after they were queued (${factNamed(got.slice(n)).length}) — the race leg ② caught`);
 for (const x of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 4 })) ok(x.pass, 'tree: ' + x.name + (x.pass ? '' : ' — ' + x.detail));
+
+console.log('⑩ THE FACTS LINE through the REAL engine (lane decision-attention-facts): @ / reply / DM / unread since the read line / one mail in 2 inboxes / an automated sender / mail trimmed — never a name');
+{
+  // the world: a chat account (the owner = me1) + TWO mail accounts (caps.glyph 'mail') that both got the same notice 19 min apart
+  const T0 = clock;
+  const person = (id, name) => ({ id, name, isSelf: false, isBot: false });
+  const ME = { id: 'me1', name: 'Owner Person', isSelf: true, isBot: false };
+  const CHAT = new Map([
+    ['ops', { kind: 'group', title: 'Ops room', recs: Array.from({ length: 30 }, (_, i) => ({ vendorId: `ops-${i}`, at: T0 - (40 - i) * 60e3, author: person(i % 2 ? 'u2' : 'u3', i % 2 ? 'userR Q' : 'Kato Y'), text: `ops line ${i}: the quota for next week` })) }],
+    ['launch', { kind: 'group', title: 'Launch', recs: [{ vendorId: 'l-0', at: T0 - 9 * 60e3, author: person('u4', 'Will R'), text: 'this one should be @Owner Person', mentions: [{ kind: 'person', id: 'me1', name: 'Owner Person' }] }] }],
+    ['review', { kind: 'group', title: 'Review', recs: [{ vendorId: 'r-0', at: T0 - 20 * 60e3, author: ME, text: 'I pushed the fix' }, { vendorId: 'r-1', at: T0 - 8 * 60e3, author: person('u5', 'Ada K'), text: 'looks good, merging', replyTo: 'r-0' }] }],
+    ['dm', { kind: 'dm', title: 'Ada K', recs: [{ vendorId: 'd-0', at: T0 - 7 * 60e3, author: person('u5', 'Ada K'), text: 'lunch at noon?' }] }],
+  ]);
+  const NOTICE = ['A new setting for OAuth clients.', '', 'You are receiving this because you administer the suite.', '', ...Array.from({ length: 12 }, (_, i) => `Paragraph ${i}: the setting applies to agent clients; review them before the rollout.`), '', '© 2026 Example LLC, 1600 Example Parkway', 'You have received this mandatory update. Unsubscribe never applies.'].join('\n');
+  const WS = person('workspace-noreply@example.com', 'The Workspace Team');
+  const MAIL = {
+    mail1: new Map([['n1', { kind: 'thread', title: '[Action Required] Mark AI agent OAuth clients', recs: [{ vendorId: 'n1-0', at: T0 - 30 * 60e3, author: WS, text: NOTICE, facts: [{ k: 'automated', v: 'notification' }] }] }],
+      ['q1', { kind: 'thread', title: 'Re: licensing', recs: [{ vendorId: 'q1-0', at: T0 - 6 * 60e3, author: person('ann@example.com', 'Ann L'), text: 'Signed copy by Friday.\n\n-- \nAnn L | Partnerships\n\nOn Mon, Oct 12, 2026 at 9:14 AM Dana <\ndana@example.com> wrote:\n> Can you confirm the licensing terms?\n> QUOTED-TAIL' }] }]]),
+    mail2: new Map([['n2', { kind: 'thread', title: 'Re: [Action Required] Mark AI agent OAuth clients', recs: [{ vendorId: 'n2-0', at: T0 - 11 * 60e3, author: WS, text: NOTICE }] }]]),
+  };
+  const mod = (kind, glyph) => ({
+    kind,
+    caps: { ...fake.fakePoll.caps, receive: 'poll', attachments: 'fetch', olderHistory: 'page', budget: { unit: 'request', default: 100000, settingKey: null, metered: true }, ...(glyph ? { glyph, facts: ['automated'] } : {}) },
+    create(record) {
+      const Wd = kind === 'chatx' ? CHAT : MAIL[record.id];
+      const rec = (id, m) => REC.makeRecord({ adapterId: record.id, convId: id, vendorId: m.vendorId, at: m.at, author: m.author, text: m.text, attachments: [], threadKey: id, raw: {}, ...(m.mentions ? { mentions: m.mentions } : {}), ...(m.replyTo ? { replyTo: m.replyTo } : {}), ...(m.facts ? { facts: m.facts } : {}) });
+      return {
+        selfId: () => (kind === 'chatx' ? 'me1' : null),
+        auth: { async state() { return { state: 'connected', expiresAt: null, scopes: ['x'], why: null }; } },
+        async listConversations() { return { conversations: [...Wd.entries()].map(([id, x]) => REC.makeConversation({ id, title: x.title, kind: x.kind, lastAt: x.recs[x.recs.length - 1].at })), cursor: null, complete: true }; },
+        async convCaps() { return { read: 'yes', sendAs: [], why: 'read-only-mailbox', at: Date.now() }; },
+        async history(id) { const x = Wd.get(id); return { records: x.recs.map((m) => rec(id, m)), anchor: x.recs[x.recs.length - 1].vendorId, reachedAnchor: true, complete: true }; },
+        async older() { return { records: [], exhausted: true }; },
+      };
+    },
+  });
+  const dataDir = path.join(ROOT, 'facts');
+  fs.mkdirSync(path.join(dataDir, 'channels'), { recursive: true });
+  const acct = (id, kind, label) => ({ id, kind, label, enabled: true, auth: { tokenEnc: null, expiresAt: null, scopes: [] }, lastPass: null, consecutiveFailures: 0, push: { enabled: true, claimedExclusive: 'unknown', state: null, lastEventAt: null, missRate: 0, demotedAt: null, demotedWhy: null, samples: [] }, scan: null });
+  fs.writeFileSync(path.join(dataDir, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: [acct('chat', 'chatx', 'Team chat'), acct('mail1', 'mailx', 'Work mail'), acct('mail2', 'mailx', 'Old mail')] }));
+  const registry = CH.createChannelRegistry();
+  registry.register(mod('chatx', null));
+  registry.register(mod('mailx', 'mail'));
+  // the at-you / replied / direct facts claim those rows on the first screen: off here, so the judge sees them (preset "judge only")
+  for (const r of ['at-you', 'replied', 'direct']) settings[`channels.attention.rule.${r}`] = false;
+  const decision = decisionEngine(dataDir);
+  const eng = ENG.create({ dataDir, registry, env: {}, now, broadcast: () => { }, serverSetting: (k) => settings[k], liveSessions: () => [], deliver: null, log: quiet, decisionEngine: decision });
+  for (const a of ['chat', 'mail1', 'mail2']) await eng.pass(a, { force: true });
+  await eng.markRead('chat', 'ops', CHAT.get('ops').recs[9].at);   // the owner read up to line 9 ⇒ 20 unread
+  const n0 = got.length;
+  eng.digest();
+  await idle(eng);
+  const mine = got.slice(n0);
+  const byTitle = (t) => mine.find((g) => recordPart(g.body.input).includes(`title: ${t}\n`));
+  const factsOf = (g) => { const m = /\[record\]\nfacts: ([^\n]*)\n/.exec(String(g && g.body.input)); return m ? m[1] : null; };
+  ok(mine.length === 7 && mine.every((g) => factsOf(g) !== null && recordPart(g.body.input).startsWith('\n\n[record]\nfacts: ')), `all 7 rows judged, each record's FIRST line is its facts line (${mine.length} calls)`, mine.map((g) => recordPart(g.body.input).slice(0, 90)));
+  const F = Object.fromEntries(['Ops room', 'Launch', 'Review', 'Ada K', 'Re: licensing'].map((t) => [t, factsOf(byTitle(t))]));
+  const notices = mine.filter((g) => /Action Required/.test(recordPart(g.body.input)));
+  ok(/^addressed: no mention of the reader; kind: a group; .*20 messages since the reader last read, 3\d min ago$/.test(F['Ops room']), '"Ops room": no mention, a group, 20 messages since the read line (markRead at line 9)', F['Ops room']);
+  ok(F.Launch.startsWith('addressed: @-mentioned the reader; kind: a group') && F.Review.startsWith('addressed: a reply to the reader\'s message; kind: a group; the reader last spoke here 20 min ago') && F['Ada K'].startsWith('addressed: a direct message; kind: a direct message'), 'an @ of the owner (the at-you rule\'s predicate), a reply to the owner\'s message (+ when they last spoke), a direct message', F);
+  ok(notices.length === 2 && notices.every((g) => factsOf(g).includes('kind: an email thread') && factsOf(g).includes('the same message reached 2 of the reader\'s inboxes')) && notices.filter((g) => factsOf(g).includes('an automated or bulk sender (notification)')).length === 1, 'the notice in BOTH mail accounts (19 min apart, one subject with "Re:"): "the same message reached 2 of the reader\'s inboxes"; the copy whose headers said so: "an automated or bulk sender (notification)"', notices.map(factsOf));
+  ok(notices.every((g) => recordPart(g.body.input).includes('You are receiving this') && !recordPart(g.body.input).includes('©') && !recordPart(g.body.input).includes('Unsubscribe')) && !recordPart(byTitle('Re: licensing').body.input).includes('QUOTED-TAIL') && !/wrote:|Partnerships/.test(recordPart(byTitle('Re: licensing').body.input)), 'mail bodies are trimmed before the cut: the notice\'s footer, the thread\'s signature and quoted reply are gone; the notice\'s opening line stays');
+  const ops = recordPart(byTitle('Ops room').body.input).split('body: ')[1].split('\n');
+  ok(ops[0] === 'userR Q: ops line 29: the quota for next week' && ops.filter((l) => /^(userR Q|Kato Y): ops line/.test(l)).length === 12 && ops.includes('(8 earlier unread messages omitted)') && !ops.some((l) => /ops line [0-9]:/.test(l)), 'the body = what the owner has not read: the 12 newest past the read line NEWEST FIRST + "(8 earlier unread messages omitted)" — nothing at or before the read line', ops.slice(0, 2).concat(ops.slice(-2)));
+  const NAMES = ['userR', 'Kato', 'Will R', 'Ada K', 'Owner Person', 'Workspace Team', 'Ann L', 'me1', 'u2', 'u5', 'mail1', 'mail2', 'workspace-noreply', 'Ops room', 'Launch', 'licensing'];
+  const leaked = mine.flatMap((g) => NAMES.filter((x) => factsOf(g).includes(x)));
+  ok(leaked.length === 0, 'CENSUS: no facts line names a person, an account, an id, an address or a title (16 needles over 7 lines)', leaked);
+  ok(eng.attention.status().scans === 1, `the scan's facts (the duplicate-inbox map over the live index) were built ONCE for the 7 rows (${eng.attention.status().scans})`);
+  ok(mine.every((g) => g.body.questions.length === 8 && String(g.body.input).includes('Rubric v2 — ') && !String(g.body.input).includes(M.RUBRIC.clauses[0].instructions)), 'with the person\'s block: 8 questions; the [rubric] part is one line — no question\'s instructions ride twice');
+  const journal = fs.readFileSync(path.join(dataDir, 'decision-journal.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((r) => r.use === 'attention' && r.outcome === 'ok');
+  ok(journal.length === 7 && journal.every((r) => r.p === 0.22 && r.rubric === 2), 'each journal line carries p (needs_now, 2 decimals) and rubric 2 — the next quality check needs no memo join', journal.map((r) => r.p));
+  // an EMPTY block: 7 questions, no `matters`, the [userBlock] part absent; the memo key moved (the block hash) ⇒ judged again
+  const blockWas = settings['decision.attentionBlock'];
+  settings['decision.attentionBlock'] = '';
+  const n1 = got.length;
+  eng.digest();
+  await idle(eng);
+  const empty = got.slice(n1);
+  ok(empty.length === 7 && empty.every((g) => g.body.questions.length === 7 && !g.body.questions.some((q) => q.name === 'matters') && !String(g.body.input).includes('[userBlock]')), 'an EMPTY "what matters to me" ⇒ 7 questions, `matters` never asked', empty.map((g) => g.body.questions.length));
+  settings['decision.attentionBlock'] = blockWas;
+  for (const r of ['at-you', 'replied', 'direct']) delete settings[`channels.attention.rule.${r}`];
+}
+
+console.log('⑪ IMPLICIT LABELS (decision.implicitLabels): a reply ⇒ "needs", listed and unopened 24 h ⇒ "not"; the person\'s label wins; OFF writes nothing');
+{
+  const run = async (name, on) => {
+    settings['decision.implicitLabels'] = on;
+    const Wd = world();
+    const E = await engines(name, Wd);
+    // a first walk's backlog is READ by construction: a new ask in "Invoice URGENT" arrives after it (unread — the leg's (b))
+    clock += 60e3;   // after the listing instant (the read line of a first walk)
+    Wd.get('c0').recs.push({ vendorId: 'c0-new', at: clock - 500, author: { id: 'u1', name: 'Ada', isSelf: false, isBot: false }, text: 'Invoice URGENT: second ask' });
+    await E.eng.pass('im', { force: true });
+    E.eng.digest();
+    await idle(E.eng);
+    const d = E.eng.digest();
+    const judged = ['c0', 'c4'].every((id) => (tagOf(d, id) || {}).code === 'judged') && tagOf(d, 'c2') === null;
+    // the owner answers in "Lunch plans" (judged 0.22 — a miss) an hour later; labels "Contract URGENT" themselves
+    clock += 60 * 60e3;
+    const c2 = Wd.get('c2');
+    c2.recs.push({ vendorId: 'c2-me', at: clock - 1000, author: { id: 'me', name: 'Me', isSelf: true, isBot: false }, text: 'yes, noon works' });
+    await E.eng.pass('im', { force: true });
+    E.eng.labelJudged('im/c4', rowOf(d, 'c4').lastAt, 'needs');
+    clock += 25 * 3600e3;   // a day passes — "Invoice URGENT" (listed) was never opened nor answered
+    E.eng.digest();
+    await idle(E.eng);
+    const file = path.join(E.dataDir, 'decision-examples.json');
+    const ex = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')).examples : null;
+    return { E, Wd, ex, judged, file };
+  };
+  const OFF = await run('implicit-off', false);
+  ok(OFF.judged && OFF.ex.length === 1 && OFF.ex[0].key === 'im/c4' && !OFF.ex.some((x) => x.source === 'implicit') && OFF.E.eng.attention.status().implicit === 0, 'the switch OFF (the default): the reply and the unopened day write NOTHING — only the person\'s own label is in the file', OFF.ex);
+  const ON = await run('implicit-on', true);
+  const by = Object.fromEntries((ON.ex || []).map((x) => [x.key, x]));
+  ok(ON.judged && by['im/c2'] && by['im/c2'].verdict === 'needs' && by['im/c2'].source === 'implicit', '(a) the owner replied in a row the judge put at 0.22 within 24 h of the verdict ⇒ an implicit "needs" example', by['im/c2']);
+  ok(by['im/c0'] && by['im/c0'].verdict === 'not' && by['im/c0'].source === 'implicit', '(b) "Invoice URGENT" was listed (0.86) and left unopened and unanswered 24 h ⇒ an implicit "not"', by['im/c0']);
+  ok(by['im/c4'] && by['im/c4'].verdict === 'needs' && !by['im/c4'].source && !by['im/c5'] && ON.E.eng.attention.status().implicit === 2, 'the person\'s own "needs" on Contract URGENT is untouched (an implicit one never replaces it); the 0.22 row nobody touched teaches nothing', ON.ex);
+  // the next judged row's input: the person's label first, the inferred ones after it, marked
+  const c5 = ON.Wd.get('c5');
+  c5.recs.push({ vendorId: 'c5-new', at: clock - 1000, author: { id: 'u1', name: 'Ada', isSelf: false, isBot: false }, text: 'Newsletter: one more thing' });
+  await ON.E.eng.pass('im', { force: true });
+  const n2 = got.length;
+  ON.E.eng.digest();
+  await idle(ON.E.eng);
+  const inp = String((got.slice(n2).find((g) => recordPart(g.body.input).includes('Newsletter')) || { body: {} }).body.input || '');
+  const iMine = inp.indexOf('Contract URGENT'), iInf = inp.indexOf('(inferred)');
+  ok(iMine > 0 && iInf > iMine && (inp.match(/\(inferred\)/g) || []).length === 2, 'the next call carries the person\'s label FIRST and the two inferred examples after it, each marked "(inferred)"', inp.split('———')[0].slice(-400));
+  delete settings['decision.implicitLabels'];
+}
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

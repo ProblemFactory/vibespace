@@ -74,7 +74,7 @@ function _modalShell(title) {
   return { overlay, body, okBtn, cancelBtn, closeBtn };
 }
 
-export function showInputDialog({ title = t('Input'), label = '', value = '', placeholder = '', confirmText = t('OK'), multiline = false } = {}) {
+export function showInputDialog({ title = t('Input'), label = '', value = '', placeholder = '', confirmText = t('OK'), multiline = false, decorate = null } = {}) {
   return new Promise((resolve) => {
     const { overlay, body, okBtn, cancelBtn, closeBtn } = _modalShell(title);
     okBtn.textContent = confirmText;
@@ -87,7 +87,9 @@ export function showInputDialog({ title = t('Input'), label = '', value = '', pl
     input.placeholder = placeholder;
     wrap.appendChild(input);
     body.appendChild(wrap);
-    const done = (result) => { overlay.remove(); resolve(result); };
+    // a multi-line box is a message: its caller may attach to it (the microphone — src/lib/voice-input.js; utils imports none of it)
+    const deco = multiline && typeof decorate === 'function' ? decorate(input) : null;
+    const done = (result) => { try { deco && deco.destroy && deco.destroy(); } catch { } overlay.remove(); resolve(result); };
     okBtn.onclick = () => done(input.value);
     cancelBtn.onclick = closeBtn.onclick = () => done(null);
     overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) done(null); });
