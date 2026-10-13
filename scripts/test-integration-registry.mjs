@@ -918,6 +918,19 @@ if (tracked.length) {
   // lane decision-core: the decision engine's one-question Test, registered the way mounts-plugins-wiring does
   const de = require(path.join(REPO, 'src/server/decision-engine.js')).create({ dataDir: (() => { const d = path.join(ROOT, 'decision'); fs.mkdirSync(d, { recursive: true }); return d; })(), integrations: store, log: { warn() {} } });
   store.registerTest(de.ROW_ID, de.testRunner);
+  // lane decision-card-words (owner on .261: "每个选项说法太抽象了"): the card speaks the user's words — the row's own
+  // title + three ORDERED steps + its own radio words reach the view, every other row keeps the shared ones, and no
+  // string the card shows (row, plugin description, the three switches + their example hints) carries an engine word
+  const ENGINE = /\b(judge[sd]?|judg(e)?ments?|records?|rows?|first screen|route[sd]?|routing|predicates?)\b/i;
+  const dv = store.publicView('decision-api');
+  ok(dv.setup && dv.setup.title === 'How to use it' && dv.setup.ordered === true && dv.setup.prerequisites.length === 3 && /Test connection/.test(dv.setup.prerequisites[1]) && dv.choiceWords && dv.choiceWords.cluster === 'Use the key the cluster set up' && dv.choiceWords.own === 'Use a key of my own', 'decision-api: the view carries its own title, three ordered steps (the second names the Test button) and its radios\' words', JSON.stringify([dv.setup, dv.choiceWords]));
+  ok(R.ROWS.every((r) => r.id === 'decision-api' || (!(r.setup && (r.setup.title || r.setup.ordered)) && !r.choiceWords)) && store.publicView('cloak').choiceWords === null && store.publicView('cloak').setup === null, 'every other row keeps the shared words (no title / ordered / choiceWords; the view says null)');
+  const featSrc = (readRepo('src/lib/plugins-ui.js').match(/const decisionFeatures = \(\) => \[([\s\S]*?)\n\];/) || [])[1] || '';
+  const feats = [...featSrc.matchAll(/t\('((?:[^'\\]|\\.)*)'/g)].map((m) => m[1]).filter((s) => !/^(needs you|asks you|Notify)/.test(s));
+  ok(feats.length === 6 && feats.filter((s) => /^Example: /.test(s)).length === 3, `the three switches each carry ONE example hint (${feats.length} strings)`);
+  const shown = [dv.setup.title, ...dv.setup.prerequisites, dv.choiceWords.cluster, dv.choiceWords.own, dv.testDescribe, dv.testCaveat, dv.usedBy, require(path.join(REPO, 'src/plugins/decision-api.js')).description, ...feats];
+  ok(shown.every((s) => typeof s === 'string' && s && !ENGINE.test(s)), `no engine word on the card (${shown.length} strings)`, shown.filter((s) => ENGINE.test(s)).join(' | '));
+  ok(ENGINE.test('Lets VibeSpace judge records for you') && ENGINE.test('Judge the first screen\'s other rows') && ENGINE.test('Route records to a group or agent'), 'CONTROL: the .261 card words are caught by the same needle');
   for (const row of R.ROWS) {
     if (row.wiredIn) continue;
     // D7 (r4): an account-bound row is not a card — no Test verb, no runner (the store refuses test() by name)

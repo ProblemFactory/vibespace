@@ -990,7 +990,7 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
     if (!comments.length && !list.querySelector('.doc-strip-empty')) list.appendChild(mk('div', 'doc-strip-empty', t('Select text in the document, then press Add comment.')));
     if (comments.length) list.querySelector('.doc-strip-empty')?.remove();
     btnSend.hidden = !comments.length; renderSend();
-    ownerLine.textContent = S.owner ? '' : t('Open this document from a chat to send comments to it');
+    ownerLine.textContent = S.owner ? '' : t('No conversation goes with this document — open it from a chat to comment');
     ownerLine.hidden = !!S.owner;
     renderStatus();
   }

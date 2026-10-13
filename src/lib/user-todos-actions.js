@@ -205,6 +205,13 @@ export function inboxModel(app) {
       showReauthAccountDialog(app, acct, { kinds: d.kinds || [] });
       return true;
     }
+    if (rec && rec.action && rec.action.type === 'desktop-app-notify') {
+      // lane app-display-notify-sink: an app's notification that needed the person — its window, raised; the hub resolves the item
+      const appId = String(rec.action.appId || '');
+      app.openDesktopApp(appId);
+      const r = await fetchJson(`/api/desktop/apps/${encodeURIComponent(appId)}/notifications/seen`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      return !!(r && r.ok);
+    }
     if (rec && rec.action && rec.action.type === 'browser-restart') {
       // lane browser-unresponsive: a HUNG browser's ONE way out — THE user's Restart (cookie route; the keeper's recovery
       // tells every conversation on it and resolves this item)

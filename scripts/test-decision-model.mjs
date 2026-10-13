@@ -6,6 +6,7 @@
 // reason rule over the golden set, criteriaProposal on a labeled fixture. In-process, < 1 s.
 import { createRequire } from 'module';
 import crypto from 'crypto';
+import fs from 'fs';
 const require = createRequire(import.meta.url);
 const M = require('../src/decision-model.js');
 const P = require('../src/peer-text.js');
@@ -82,7 +83,7 @@ for (const use of M.USES) {
   ok(b.truncated === true && /…\[\d+ characters omitted\]…/.test(b.text), `${use}: the cut is marked (truncated + the elision marker)`);
   ok(!P.carriesFrame(b.text) && !/<system-reminder|<vibespace-x/.test(b.text), `${use}: no live frame reaches the vendor`);
   ok(!/tok_SECRET_123|Bearer abc|"s3"/.test(b.text), `${use}: secret-named fields erased / never present`);
-  if (plan.variable.some((f) => f.json)) ok(/"apiToken":"\[erased\]"/.test(b.text) && /"fine":"ok"/.test(b.text), `${use}: a JSON payload keeps its keys and plain values, erases the secret-named ones`, b.text.slice(0, 400));
+  if (plan.variable.some((f) => f.json)) ok(/"apiToken":"«redacted»"/.test(b.text) && /"fine":"ok"/.test(b.text), `${use}: a JSON payload keeps its keys and plain values, erases the secret-named ones (eraseSecrets' [erased], re-marked «redacted» by the ONE scrub's R2 — inbox-verify F1)`, b.text.slice(0, 400));
 }
 {
   const s = 'First sentence here. Second one follows! Third? ' + 'Middle filler sentence. '.repeat(50) + 'The tail sentence. Last words.';
@@ -236,6 +237,53 @@ console.log('⑫ lane decision-rule (D3): the rule / routing inputs exactly as t
   const keys = [k1, k2].sort().join(',');
   const memo = (use, m) => M.memoKey(use, m, sha);
   ok(memo('routing', { id: 'm1', rule: keys, groups: k2 }) === memo('routing', { id: 'm1', rule: [k2, k1].sort().join(','), groups: k2 }) && memo('routing', { id: 'm1', rule: keys, groups: k2 }) !== memo('routing', { id: 'm2', rule: keys, groups: k2 }) && memo('rule', { id: 'm1', rule: k1 }) !== memo('rule', { id: 'm1', rule: keys }) && memo('rule', { id: 'm1', rule: F.decisionKeyOf({ ...r1, threshold: 0.9 }) }) === memo('rule', { id: 'm1', rule: k1 }), "the engine's memo: the same record + the same rule set ⇒ the same key (in any order); a new record or another rule set ⇒ a new one; a moved threshold ⇒ the same (never re-billed)");
+}
+
+// ── the ONE scrub (inbox-verify F1, 2026-10-13): a record's secret-shaped text never leaves — every use, every part,
+// before any cut; a census of the part-building sites; RED controls (no scrub, the scrub after the cut) ──
+console.log('the ONE scrub (inbox-verify F1)');
+{
+  const SIX = { ant: ['sk', '-ant-api03-AbCdEf0123456789XyZ_aaaaaaaaaaaaaaaaaaaaaaa'].join(''), slack: ['xo', 'xb-1234567890-0987654321-AbCdEfGhIjKlMnOp'].join(''), pem: ['-----BEGIN RSA ', 'PRIVATE KEY-----'].join(''), pemBody: ['MIIEowIB', 'AAKCAQEAu1SU1LfVLPHCozMxH2Mo'].join(''), mail: 'alice.smith@example.com', urlTok: ['https://hooks.example.com/cb?to', 'ken=tok_9f8e7d6c5b4a&sig=ab12'].join(''), gh: ['gh', 'p_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'].join('') };
+  // the verify's leg-1 fixture verbatim (its PEM header is unclosed ⇒ R1 hides every later line) + each shape on its own line, the PEM closed and last
+  const VTEXT = `Use key ${SIX.ant} for the deploy?`, VDETAIL = `slack ${SIX.slack}\n${SIX.pem}\n${SIX.pemBody}\nmail ${SIX.mail}\ncallback ${SIX.urlTok}\ngh ${SIX.gh}`;
+  const LINES = `key ${SIX.ant}\nslack ${SIX.slack}\nmail ${SIX.mail}\ncallback ${SIX.urlTok}\ngh ${SIX.gh}\n${SIX.pem}\n${SIX.pemBody}\n-----END RSA PRIVATE KEY-----`;
+  // the PEM header line is the shape's NAME (R1 keeps it, the body goes); the address keeps its domain (maskAddresses — addressing, not a secret)
+  const leaks = (t) => Object.entries(SIX).filter(([k, v]) => k !== 'pem' && t.includes(k === 'urlTok' ? 'tok_9f8e7d6c5b4a' : v)).map(([k]) => k);
+  const PER = { attention: { rubric: M.rubricText(), records: [{ title: VTEXT, source: SIX.urlTok, sender: SIX.mail, body: VDETAIL }] }, rule: { condition: 'deploys', records: [{ body: LINES, thread: [VTEXT, VDETAIL] }] },
+    routing: { condition: 'deploys', records: [{ body: LINES, thread: [{ title: VTEXT, snippet: VDETAIL }] }] }, foryou: { levels: 'now / can wait', records: [{ text: VTEXT, detail: VDETAIL, session: SIX.gh }, { text: LINES, detail: LINES }] },
+    webhook: { condition: 'deploys', records: [{ payload: { note: VTEXT, nested: { lines: LINES, list: [VDETAIL] }, url: SIX.urlTok } }] } };
+  for (const [use, parts] of Object.entries(PER)) {
+    const t = M.buildInput(use, parts, { batch: parts.records.length }).text;
+    console.log(`    ${use}: ${JSON.stringify(t.split('———').pop())}`);
+    ok(leaks(t).length === 0 && t.includes('«redacted»'), `use ${use}: none of the six leaves through the real buildInput (printed above)`, leaks(t));
+  }
+  // a secret STRADDLING the bound: the 4× bound cuts at 8 192 for a 2 048 body; only 8 characters of the key fit before it
+  const straddle = 'word '.repeat(1636) + 'xx ' + SIX.ant + ' end';
+  const ts = M.buildInput('rule', { condition: 'c', records: [{ body: straddle }] }).text;
+  ok(!ts.includes('sk-ant') && !ts.includes('AbCdEf0123'), 'a key split by the bound leaks no head (the scrub runs on the raw text, before any cut)', ts.slice(-80));
+  ok(!M.cleanPart(`{"note":"${SIX.pem}\\n${SIX.pemBody}"}`, 400).includes(SIX.pemBody) && !JSON.stringify(M.eraseSecrets({ note: `${SIX.pem}\n${SIX.pemBody}` })).includes(SIX.pemBody), 'a webhook payload: the PEM body inside a JSON string goes (eraseSecrets scrubs each string BEFORE its stringify + cut)');
+  ok(M.cleanPart('Reach Bob at bob.jones@corp.example.com about https://x.io/a?page=2 — commit 9e2852896', 400) === 'Reach Bob at …@corp.example.com about https://x.io/a?page=2 — commit 9e2852896', 'NEGATIVE: an address keeps its domain (addressing, not a secret), a plain URL and a short sha stay');
+  // the census (grep-derived from decision-model.js): every vendor-bound part construction names the scrub — a new site without it is RED
+  const src = fs.readFileSync(new URL('../src/decision-model.js', import.meta.url), 'utf8');
+  const fnSrc = (name) => { const i = src.search(new RegExp(`^(?:function ${name}\\(|const ${name} = )`, 'm')); return i < 0 ? '' : src.slice(i, src.indexOf('\n}', i) > 0 && src.slice(i, i + 9) === 'function ' ? src.indexOf('\n}', i) + 2 : src.indexOf(';\n', i) + 1); };
+  const bi = fnSrc('buildInput'), cp = fnSrc('cleanPart'), sc = fnSrc('scrub'), lp = fnSrc('listPart'), es = fnSrc('eraseSecrets');
+  const pushes = [...bi.matchAll(/\.push\(`([^`]*)`\)/g)].map((m) => m[1]);
+  const vars = pushes.flatMap((t) => [...t.matchAll(/\$\{([^}]+)\}/g)].map((m) => m[1])).filter((v) => v !== 'f.name');
+  const rhsOf = (v) => { const m = new RegExp(`const ${v} = ([\\s\\S]*?);\\n`).exec(bi); return m ? m[1] : ''; };
+  const bad = vars.filter((v) => !/^[A-Za-z_]\w*$/.test(v) || !/\b(?:cleanPart|listPart)\(/.test(rhsOf(v)) || /\bstr\(|String\(|\$\{v\}/.test(rhsOf(v).replace(/cleanPart\([^)]*\)|listPart\([^)]*\)/g, '')));
+  const cpSites = src.split('\n').map((l, i) => [i + 1, l]).filter(([, l]) => /\bcleanPart\(/.test(l) && !/^function cleanPart/.test(l));
+  console.log(`    census: buildInput pushes ${pushes.length} part line(s) via [${vars.join(', ')}]; cleanPart call sites at lines ${cpSites.map(([n]) => n).join(', ')}`);
+  ok(pushes.length === 2 && vars.length === 2 && bad.length === 0, 'census: every part line buildInput pushes is built by cleanPart / listPart (a raw value pushed is RED)', { pushes, bad });
+  ok(/\bS\.redactSecrets\(/.test(sc) && /runs: true/.test(sc) && cp.indexOf('scrub(') > 0 && cp.indexOf('scrub(') < cp.indexOf('cutHeadTail(') && /cutText\(scrub\(raw/.test(cp), 'census: cleanPart runs the ONE scrub (redactSecrets, runs on) on the raw text before every cut', cp);
+  ok(/cleanPart\(/.test(lp) && /scrub\(v, \d+\)/.test(es) && es.indexOf('scrub(v') < es.indexOf('slice(0, 200)'), 'census: listPart goes through cleanPart; eraseSecrets scrubs each string before its 200-character cut', es);
+  ok(cpSites.length >= 5 && (src.match(/redactSecrets\(/g) || []).length === 1, `census: ${cpSites.length} cleanPart sites, ONE redactSecrets call in the file (no second table)`);
+  // RED controls: patched copies — cleanPart without the scrub, and the scrub AFTER the bound
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const MC = mutantCopies('dmscrub', new URL('..', import.meta.url).pathname);
+  const noScrub = MC.load('src/decision-model.js', src.replace('P.cutText(scrub(raw, max), ', 'P.cutText(str(raw), '), 'noscrub');
+  const late = MC.load('src/decision-model.js', src.replace('const bounded = P.cutText(scrub(raw, max), Math.max(64, max * 4));', 'const bounded = scrub(P.cutText(str(raw), Math.max(64, max * 4)), max);'), 'late');
+  const tn = noScrub.buildInput('rule', PER.rule).text, tl = late.buildInput('rule', { condition: 'c', records: [{ body: straddle }] }).text;
+  ok(leaks(tn).length >= 4 && tl.includes('sk-ant'), `RED CONTROLS: cleanPart without the scrub leaks [${leaks(tn)}]; the scrub after the bound leaks the split key's head`, { tn: leaks(tn), tl: tl.slice(-60) });
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

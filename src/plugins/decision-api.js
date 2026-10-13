@@ -25,7 +25,7 @@ function configPatch(cur, patch) {
 module.exports = {
   id: 'decision-api',
   label: 'Decision API',
-  description: 'Lets VibeSpace judge records for you with a decisions API (OpenAI or OpenRouter) — within a daily budget you set.',
+  description: 'Sends the messages in your channels to a model (OpenAI or OpenRouter) that answers yes/no questions for you, like “do I need to look at this now?”. It never spends more per day than the limit you set.',
   provides: ['decision'],
   create(h) {
     const eng = h.opts.decisionEngine || null;

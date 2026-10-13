@@ -488,7 +488,8 @@ function machinePickRow(h) {
 // gtk backend, the document portal and the permission store, all started by that bus with the APP's display; the app
 // is launched on that bus (flatpak's proxy then reaches OUR portal). Non-sandboxed apps keep the user's bus (keyring,
 // notifications). The a11y bus stays the user's (AT_SPI_BUS_ADDRESS handed to the app and to the portal), so the
-// tree snapshot still names the app and its chooser. Missing binaries ⇒ the app launches as before and the record
+// tree snapshot still names the app and its chooser — where the user HAS one; where the user has none (a pod) the
+// bus activates its own (lane app-display-a11y-bus, a11yBusPlan below). Missing binaries ⇒ the app launches as before and the record
 // says `portal: 'unavailable: <why>'` — never a refusal to launch.
 const APP_PORTAL_MODES = Object.freeze(['auto', 'all', 'off']); // auto = sandboxed apps + browser rows
 const APP_PORTAL_DEFAULT = 'auto';
@@ -499,6 +500,7 @@ const PORTAL_SERVICES = Object.freeze([
   ['org.freedesktop.impl.portal.desktop.gtk', 'xdg-desktop-portal-gtk'],
   ['org.freedesktop.portal.Documents', 'xdg-document-portal'], // a flatpak's chosen file is handed over through it
   ['org.freedesktop.impl.portal.PermissionStore', 'xdg-permission-store'],
+  ['org.a11y.Bus', 'at-spi-bus-launcher'], // lane app-display-a11y-bus: the app's OWN a11y bus — asked only where the user has none (a11yBusPlan)
 ]);
 const PORTAL_REQUIRED = Object.freeze(['dbus-daemon', 'xdg-desktop-portal', 'xdg-desktop-portal-gtk']);
 const PORTAL_BINS = Object.freeze(['dbus-daemon', ...PORTAL_SERVICES.map(([, b]) => b)]);
@@ -512,6 +514,36 @@ function sandboxOf(row) {
   if ((base === 'snap' && firstWord(row.args) === 'run') || exec.startsWith('/snap/bin/')) return 'snap';
   return null;
 }
+// ── lane app-display-a11y-bus (2026-10-12, B-4a59 piece 3): THE APP'S OWN ACCESSIBILITY BUS where the user has none (a
+// fleet pod, a hub without a desktop session). MEASURED on a scratch Xvfb + this plan's bus with no user bus: the GTK
+// fixture warned "Error retrieving accessibility bus address: …ServiceUnknown (org.a11y.Bus)" and the agent's tree
+// reader died "Couldn't connect to accessibility bus" (SIGABRT ⇒ helper_error) or, handed the app's DISPLAY, read 0
+// nodes. Now the private bus ACTIVATES org.a11y.Bus (at-spi-bus-launcher: its own a11y dbus-daemon under the plan's
+// run/ dir; at-spi2-registryd follows from the system's accessibility-services dir — all in the bus's session, reaped
+// with it); the bring-up asks GetAddress once (8 ms) and hands the address to the app (AT_SPI_BUS_ADDRESS) and to the
+// record (`a11yBus`) — the agent's tree reads of THIS app target that bus, never a global (window-targets treeEnvOf).
+// Where the user HAS an a11y bus nothing changes: the app and the portal are handed the user's, the private service
+// stays dormant (libatspi reads AT_SPI_BUS_ADDRESS first). The launcher sets no AT_SPI_BUS root property on the display
+// (measured), so the address is the only way in.
+const A11Y_BUS_NAME = 'org.a11y.Bus';
+const A11Y_BINS = Object.freeze(['at-spi-bus-launcher', 'at-spi2-registryd']);
+const A11Y_PACKAGE = 'at-spi2-core';
+/** PURE: whose a11y bus an app on its own private bus gets. `user` = the user's a11y address (null = none: a pod),
+ *  `bins` = portalBins over A11Y_BINS. → { a11y: 'user' | 'own' | 'unavailable: <why>', ask } — `ask` = ask the private
+ *  bus for org.a11y.Bus.GetAddress (that activates the launcher). Never throws: a machine without the binaries says so. */
+function a11yBusPlan({ user = null, bins = {} } = {}) {
+  if (user) return { a11y: 'user', ask: false };
+  const miss = A11Y_BINS.filter((b) => !(bins && bins[b]));
+  if (miss.length) return { a11y: `unavailable: ${miss.join(', ')} not found on this machine (package ${A11Y_PACKAGE})`, ask: false };
+  return { a11y: 'own', ask: true };
+}
+/** PURE: the ask's answer (`got` = GetAddress's address, null = none) → the record's facts { a11y, bus } + `appEnv`, laid
+ *  over the app's env. 'user' / 'unavailable' hand nothing (the plan's appEnv already carries the user's address). */
+function a11yBusOf({ plan, got = null } = {}) {
+  if (!plan || !plan.ask) return { a11y: (plan && plan.a11y) || 'user', bus: null, appEnv: {} };
+  if (typeof got !== 'string' || !/^unix:/.test(got)) return { a11y: `unavailable: the private bus gave no ${A11Y_BUS_NAME} address (at-spi-bus-launcher did not answer)`, bus: null, appEnv: {} };
+  return { a11y: 'own', bus: got, appEnv: { AT_SPI_BUS_ADDRESS: got } };
+}
 /** WHY a launch gets a private portal — 'flatpak' | 'snap' | 'browser' | 'row' | 'all' — or null (decided once, at launch).
  *  A browser row (`row.browser`, the rung's own fact) keeps `--password-store=basic` (browserArgv): no keyring is lost. */
 function portalWanted(row, { mode, ownsDisplay = true } = {}) {
@@ -520,13 +552,52 @@ function portalWanted(row, { mode, ownsDisplay = true } = {}) {
   return sandboxOf(row) || (row && row.browser ? 'browser' : null) || (row && row.portal === true ? 'row' : m === 'all' ? 'all' : null);
 }
 const xmlText = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+// ── lane app-display-secrets (2026-10-12, B-4a59 piece 4 — owner path 1): THE APP'S KEYRING. MEASURED on a scratch
+// private bus with no user bus: libsecret failed every call in ≤ 3 ms ("The name org.freedesktop.secrets was not provided
+// by any .service files" — nothing hangs, nothing is kept) and Chrome 154 asked NameHasOwner(org.freedesktop.secrets) and
+// the portal, then gave up on both (os_crypt.portal.prev_init_success false). Now the bus ACTIVATES src/secret-service.py
+// (python3 + GDBus): one default collection, never locked, never a prompt; libsecret asks dh-ietf1024-sha256-aes128-cbc-
+// pkcs7 first and takes `plain` on NotSupported (measured) — the bus is a 0700 socket of the same user. Its items are ONE
+// sealed file in the plan's 0700 root, sealed by src/app-secrets-seal.js (secret-box's cipher) under a per-display key
+// the hub derives from data/.app-secrets-key (desktop-display appSecretsFacts) — handed over in the BUS env only
+// (VS_APP_SECRETS_KEY; never argv, a log, the record or the app's env — like the key file, the bus's starting env is
+// readable by the same user only). No env var is needed by the app: libsecret finds
+// the service by its name on DBUS_SESSION_BUS_ADDRESS. The passkey store (q-027) is a separate store — never merged.
+const APP_SECRETS_MODES = Object.freeze(['on', 'off']);
+const APP_SECRETS_DEFAULT = 'on'; // the owner's path-1 ruling (2026-10-12)
+const appSecretsMode = (v) => (APP_SECRETS_MODES.includes(v) ? v : APP_SECRETS_DEFAULT);
+const SECRETS_NAME = 'org.freedesktop.secrets';
+const SECRETS_STORE_FILE = 'secrets.json';
+/** PURE: the Secret Service's facts → what it adds to a started portalPlan (`plan`): its service file (pushed into
+ *  plan.files) + the bus env (laid over plan.env) + `secrets` ('on' | 'off' | 'unavailable: <why>') + the store path.
+ *  `facts` = null / { off } (the setting), { why } (a missing piece — said, never a refusal to launch), or
+ *  { python, service, node, sealer, keyHex }. */
+function secretServicePlan({ plan, facts } = {}) {
+  const none = (secrets) => ({ secrets, file: null, env: {}, store: null });
+  if (!plan || !plan.ok || !Array.isArray(plan.dirs) || !plan.dirs[0]) return none('unavailable: no private bus');
+  if (!facts || facts.off) return none('off');
+  if (facts.why) return none(`unavailable: ${facts.why}`);
+  if (!/^[0-9a-f]{64}$/.test(String(facts.keyHex || ''))) return none('unavailable: no per-display key');
+  const root = plan.dirs[0], store = `${root}/${SECRETS_STORE_FILE}`;
+  const argv = [facts.python, facts.service, store, facts.node, facts.sealer];
+  if (argv.some((a) => !a || /\s/.test(a))) return none('unavailable: a path has a space (a service Exec= line splits on it)');
+  return { secrets: 'on', store, env: { VS_APP_SECRETS_KEY: facts.keyHex },
+    file: { file: `${root}/services/${SECRETS_NAME}.service`, text: `[D-BUS Service]\nName=${SECRETS_NAME}\nExec=${argv.join(' ')}\n` } };
+}
+/** PURE: the sealed store's text → how many logins it keeps (its plaintext `n`; null = none / not a store). */
+function secretsCountOf(raw) {
+  let o = null;
+  try { o = JSON.parse(String(raw)); } catch { return null; }
+  return o && Number.isInteger(o.n) && o.n >= 0 ? o.n : null;
+}
 /**
  * The companion's whole plan, PURE: `dir` = the app's own dir, `bins` = { name: path|null } over PORTAL_BINS,
- * `a11y` = the user's a11y bus address (null = unknown: nothing is set), `why` = portalWanted's answer.
+ * `a11y` = the user's a11y bus address (null = unknown: nothing is set), `why` = portalWanted's answer, `notify` = the
+ * notifications sink's facts (lane app-display-notify-sink: notifySinkOf's answer — null = the setting is off).
  * → { ok:false, why } | { ok:true, address, busArgv, dirs, files:[{file,text}], env (the bus's — every activated
- * service inherits it), appEnv (laid over the app's env) }.
+ * service inherits it), appEnv (laid over the app's env), notify ('on' | 'off' | 'unavailable: <why>'), journal }.
  */
-function portalPlan({ dir, display, authFile, bins = {}, a11y = null, why = null } = {}) {
+function portalPlan({ dir, display, authFile, bins = {}, a11y = null, why = null, notify = null } = {}) {
   const miss = PORTAL_REQUIRED.filter((n) => !bins[n]);
   if (miss.length) return { ok: false, why: `${miss.join(', ')} not found on this machine` };
   if (!dir || !display) return { ok: false, why: 'no app dir or display yet' };
@@ -539,18 +610,106 @@ function portalPlan({ dir, display, authFile, bins = {}, a11y = null, why = null
     '  <policy context="default"><allow send_destination="*" eavesdrop="true"/><allow eavesdrop="true"/><allow own="*"/></policy>', '</busconfig>', ''].join('\n');
   const services = PORTAL_SERVICES.filter(([, b]) => bins[b]).map(([name, b]) => ({ file: `${root}/services/${name}.service`, text: `[D-BUS Service]\nName=${name}\nExec=${bins[b]}\n` }));
   const files = [{ file: `${root}/bus.conf`, text: conf }, ...services, { file: `${root}/config/xdg-desktop-portal/portals.conf`, text: '[preferred]\ndefault=gtk\n' }];
+  // lane app-display-notify-sink: org.freedesktop.Notifications is ACTIVATED by this bus like the portal (the sink's own
+  // file + the interpreter, never a shell) — it journals to a file in this 0700 dir; the machine keeper reads it
+  const sink = notifySinkPlan({ root, notify });
+  if (sink.file) files.push(sink.file);
   const a = a11y ? { AT_SPI_BUS_ADDRESS: a11y } : {};
   const env = {
     DISPLAY: display, ...(authFile ? { XAUTHORITY: authFile } : {}), DBUS_SESSION_BUS_ADDRESS: address, XDG_CURRENT_DESKTOP: 'GNOME',
     XDG_CONFIG_HOME: `${root}/config`, XDG_DATA_HOME: `${root}/data`, XDG_RUNTIME_DIR: `${root}/run`, // the document portal mounts under run/, its database and the permission store's under data/ — never the user's
-    GIO_USE_VFS: 'local', GVFS_DISABLE_FUSE: '1', GTK_USE_PORTAL: '0', ...a,
+    GIO_USE_VFS: 'local', GVFS_DISABLE_FUSE: '1', GTK_USE_PORTAL: '0', ...a, ...sink.env,
   };
   const appEnv = { DBUS_SESSION_BUS_ADDRESS: address, ...a, ...(why === 'all' ? { GTK_USE_PORTAL: '1' } : {}) };
-  return { ok: true, address, busArgv: [bins['dbus-daemon'], '--nofork', `--config-file=${root}/bus.conf`], dirs: [root, `${root}/services`, `${root}/config/xdg-desktop-portal`, `${root}/data`, `${root}/run`], files, env, appEnv };
+  return { ok: true, address, busArgv: [bins['dbus-daemon'], '--nofork', `--config-file=${root}/bus.conf`], dirs: [root, `${root}/services`, `${root}/config/xdg-desktop-portal`, `${root}/data`, `${root}/run`], files, env, appEnv, notify: sink.notify, journal: sink.journal };
+}
+
+// ── lane app-display-notify-sink (2026-10-12, B-4a59 piece 2 — owner path 1: "an app's display is a complete private
+// session"): the private bus above had NOBODY owning org.freedesktop.Notifications. MEASURED on a scratch bus with the
+// .256 services dir: libnotify / GApplication got ServiceUnknown (the notification silently dropped, a GLib warning),
+// the portal's Notification.AddNotification answered () and its gtk backend dropped it, and Ubuntu's notify-send CLI
+// (AppArmor profile `notify-send`: the user bus paths only) failed "Could not connect: Permission denied" in 8 ms. Now
+// the bus activates a SINK (src/notify-sink.py, Python 3 + GDBus — node has no D-Bus) that journals each notification;
+// the hub shows it inside the app's window and, when it is critical or the window is not in front of the person, as ONE
+// For-you item. SESSION_BUS_NAMES is the census: every well-known name a GUI app may ask its session bus for is
+// PROVIDED by this plan or ABSENT-AND-SAID (what the app sees, which piece adds it) — scripts/test-app-display-session-census.
+const APP_NOTIFICATIONS_MODES = Object.freeze(['on', 'off']);
+const APP_NOTIFICATIONS_DEFAULT = 'on'; // the owner's path-1 ruling (2026-10-12)
+const appNotificationsMode = (v) => (APP_NOTIFICATIONS_MODES.includes(v) ? v : APP_NOTIFICATIONS_DEFAULT);
+const NOTIFY_SINK_NAME = 'org.freedesktop.Notifications';
+const NOTIFY_JOURNAL_MAX = 50;   // the per-display ring the window's ⋯ ▸ Notifications reads
+const NOTIFY_TOAST_MS = 6000;
+const NOTIFY_SUMMARY_MAX = 200, NOTIFY_BODY_MAX = 1000, NOTIFY_APP_MAX = 80;
+const NOTIFY_URGENCIES = Object.freeze(['low', 'normal', 'critical']);
+/** The sink's facts → `notify` for portalPlan: null/'off' = the setting is off; { python, sink } = both on this machine;
+ *  { why } = what is missing (said, never a refusal to launch). */
+function notifySinkOf({ mode, python = null, sink = null, gi = true } = {}) {
+  if (appNotificationsMode(mode) === 'off') return { off: true };
+  if (!python) return { why: 'python3 not found on this machine' };
+  if (!gi) return { why: 'python3 has no GObject introspection (python3-gi) on this machine' };
+  if (!sink) return { why: 'the notifications sink is not installed on this machine' };
+  return { python, sink };
+}
+/** PURE: the sink's service file + the bus env it reads (inherited by every activated service). */
+function notifySinkPlan({ root, notify }) {
+  if (!notify || notify.off) return { notify: 'off', file: null, env: {}, journal: null };
+  if (notify.why || !notify.python || !notify.sink) return { notify: `unavailable: ${notify.why || 'no sink'}`, file: null, env: {}, journal: null };
+  if (/\s/.test(notify.python + notify.sink)) return { notify: 'unavailable: the sink path has a space (a service Exec= line splits on it)', file: null, env: {}, journal: null };
+  const journal = `${root}/notify.jsonl`;
+  return { notify: 'on', journal, env: { VS_NOTIFY_JOURNAL: journal },
+    file: { file: `${root}/services/${NOTIFY_SINK_NAME}.service`, text: `[D-BUS Service]\nName=${NOTIFY_SINK_NAME}\nExec=${notify.python} ${notify.sink}\n` } };
+}
+const clip = (v, n) => String(v == null ? '' : v).replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '').slice(0, n);
+/** PURE: one journal line (the sink's JSON) → { nid, app, summary, body, urgency, at } | { nid, closed, at } | null. */
+function notifyRecord(raw, { now = Date.now() } = {}) {
+  let o = raw;
+  if (typeof raw === 'string') { try { o = JSON.parse(raw); } catch { return null; } }
+  if (!o || typeof o !== 'object' || !Number.isInteger(o.nid) || o.nid <= 0) return null;
+  const at = Number.isFinite(o.at) ? o.at : now;
+  if (o.closed === true) return { nid: o.nid, closed: true, at };
+  const summary = clip(o.summary, NOTIFY_SUMMARY_MAX).trim();
+  if (!summary && !String(o.body || '').trim()) return null;
+  return { nid: o.nid, app: clip(o.app, NOTIFY_APP_MAX).trim(), summary, body: clip(o.body, NOTIFY_BODY_MAX).trim(), urgency: NOTIFY_URGENCIES.includes(o.urgency) ? o.urgency : 'normal', at };
+}
+/** PURE: what one notification does — always a toast inside the app's window; ONE For-you item when it is critical or
+ *  the window is not in front of the person (no pane shows it). */
+function notifyVerdict({ note, visible }) {
+  if (!note || note.closed) return { toast: false, forYou: false };
+  return { toast: true, forYou: note.urgency === 'critical' || !visible };
+}
+/** THE CENSUS (B-4a59): every well-known SESSION-bus name a GUI app may ask for — `provided` by the plan above (the
+ *  piece that provides it), or `absent` with what the app sees and the piece that will add it (`never` = by design). */
+const SESSION_BUS_NAMES = Object.freeze([
+  { name: 'org.freedesktop.portal.Desktop', provided: 'portal (2.369.256)' },
+  { name: 'org.freedesktop.impl.portal.desktop.gtk', provided: 'portal (2.369.256)' },
+  { name: 'org.freedesktop.portal.Documents', provided: 'portal (2.369.256, when xdg-document-portal is installed)' },
+  { name: 'org.freedesktop.impl.portal.PermissionStore', provided: 'portal (2.369.256, when xdg-permission-store is installed)' },
+  { name: NOTIFY_SINK_NAME, provided: 'notifications sink (B-4a59 piece 2; desktop.appNotifications)' },
+  { name: 'org.a11y.Bus', provided: 'a11y bus (B-4a59 piece 3: at-spi-bus-launcher, asked only where the user has none — when at-spi2-core is installed)' },
+  { name: 'org.freedesktop.secrets', provided: 'secret service (B-4a59 piece 4: src/secret-service.py — desktop.appSecrets, when python3-gi is installed)' },
+  { name: 'org.freedesktop.ScreenSaver', absent: { sees: 'Inhibit fails with ServiceUnknown — harmless: the app\'s own display never blanks', piece: 'never (nothing to inhibit)' } },
+  { name: 'org.freedesktop.PowerManagement.Inhibit', absent: { sees: 'Inhibit fails with ServiceUnknown — harmless: the machine\'s power policy is the user\'s session\'s', piece: 'never (nothing to inhibit)' } },
+  { name: 'org.kde.StatusNotifierWatcher', absent: { sees: 'no tray: a tray icon is not shown (Qt says no system tray); a message it would show reaches the sink only over org.freedesktop.Notifications', piece: 'not planned (a tray row)' } },
+  { name: 'org.gtk.vfs.Daemon', absent: { sees: 'no gvfs: the bus pins GIO_USE_VFS=local — local files only (no smb:// or sftp:// in its dialogs); a gvfs FUSE mount would outlive the bus', piece: 'never (by design)' } },
+  { name: 'ca.desrt.dconf', absent: { sees: 'no dconf writer: GSettings reads the user\'s settings but a preference the app changes is not saved', piece: 'not planned' } },
+  { name: 'org.freedesktop.PolicyKit1.AuthenticationAgent', absent: { sees: 'no polkit agent: an action that needs a password is refused — nobody would ask on this display', piece: 'never (by design)' } },
+]);
+/** PURE: the census verdict. `universe` = the names judged (printed by the suite), `activatable` = what a started
+ *  private bus answered to ListActivatableNames. → rows [{ name, verdict: 'provided' | 'absent-said' | 'RED', why }]. */
+function sessionBusCensus({ universe = [], activatable = [], table = SESSION_BUS_NAMES } = {}) {
+  const act = new Set(activatable);
+  return [...new Set(universe)].map((name) => {
+    const row = table.find((r) => r.name === name);
+    if (!row) return { name, verdict: 'RED', why: 'neither provided by the plan nor said absent' };
+    if (row.provided) return act.has(name) ? { name, verdict: 'provided', why: row.provided } : { name, verdict: 'RED', why: `the plan says ${row.provided} but the bus does not activate it` };
+    if (!row.absent || !row.absent.sees || !row.absent.piece) return { name, verdict: 'RED', why: 'absent without saying what the app sees and which piece adds it' };
+    return { name, verdict: 'absent-said', why: `${row.absent.sees} — ${row.absent.piece}` };
+  });
 }
 
 module.exports = {
   LIMITS, DESKTOP_SINGLETON_ID, APP_STATES, LIVE_STATES, DEFAULT_IDLE_TIMEOUT_MIN, KEEPER_ENV,
+  APP_SECRETS_MODES, APP_SECRETS_DEFAULT, appSecretsMode, SECRETS_NAME, SECRETS_STORE_FILE, secretServicePlan, secretsCountOf, // lane app-display-secrets
   DISPLAY_BACKENDS, BACKEND_IDS, backendById, CAP_KEYS, capsOf, recipeFor, needsVerdict, resolveBackend, fallbackLogLine, parseBackendPrefs, streamKindOf,
   fitPolicyOf, keeperFits, topLevelWindows, appWindows, appFitPlan, appMainWindow, windowTitleOf, APP_TITLE_MAX,
   validateAppRow, validateLaunchRequest, DEFAULT_REGISTRY, APP_SCALES, normalizeDpr, appScaleFor, scaleKnobs, SCALE_RULES, scaleRuleOf, renderOf, relaunchPaneCss, // lane D (a)
@@ -568,5 +727,7 @@ module.exports = {
   planLines, PKG_RE, APT_LOCK_WAIT_S, packageInstallPlan,
   INSTALL_FILES, INSTALL_UNRECORDED_EXIT, INSTALL_LOCK_PREFIX, INSTALL_RUNNER, INSTALL_LAUNCHER, installLauncherArgv,
   DESKTOP_PLATFORMS, MACHINE_DESKTOP_PORT, MACHINE_DESKTOP_PREFIX, machineDesktopId, machineDesktopHost, desktopPickRow, RUN_LINE_MAX, psQuote, psEncoded, desktopRunPlan, DESKTOP_RUN_PRESETS, RUN_REMEMBER_MAX, desktopRunPresets, rememberRun, TIGHTVNC, TIGHTVNC_NO_ADMIN_EXIT, tightvncInstallPlan, // design 014 D1
+  A11Y_BUS_NAME, A11Y_BINS, A11Y_PACKAGE, a11yBusPlan, a11yBusOf, // lane app-display-a11y-bus
   APP_PORTAL_MODES, APP_PORTAL_DEFAULT, appPortalMode, PORTAL_SERVICES, PORTAL_REQUIRED, PORTAL_BINS, sandboxOf, portalWanted, portalPlan, // lane app-display-portal
+  APP_NOTIFICATIONS_MODES, APP_NOTIFICATIONS_DEFAULT, appNotificationsMode, NOTIFY_SINK_NAME, NOTIFY_JOURNAL_MAX, NOTIFY_TOAST_MS, NOTIFY_SUMMARY_MAX, NOTIFY_BODY_MAX, NOTIFY_URGENCIES, notifySinkOf, notifySinkPlan, notifyRecord, notifyVerdict, SESSION_BUS_NAMES, sessionBusCensus, // lane app-display-notify-sink
 };

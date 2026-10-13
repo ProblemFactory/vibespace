@@ -7,7 +7,9 @@
 // keeping a desk button beside the field, the phone CSS un-gated, the ⋯ chip on the desk.
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import os from 'node:os';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { phoneBarFold, PHONE_BAR_NEVER_FOLD } from '../src/lib/title-chips.js';
 
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
@@ -72,6 +74,29 @@ ok('RED: the desk row gaining the + door', !judgeInput(ci.replace(deskLine, `inp
 ok('RED: the phone face keeping the desk mic beside the field', !judgeInput(ci.replace(PHONE_ROW, 'plusBtn, attachInput, this._voice.btn, fileInput, dirInput, field, this._slashDropdown, this._voice.chip')).phone);
 ok('RED: the phone CSS un-gated', !judgeCss(css.replace(/(THE PHONE COMPOSER[\s\S]*?)@media \(max-width: 768px\) \{/, '$1@media all {')).gated);
 ok('RED: ⋯ on the desk', !judgeBar(sb.replace("if (PHONE_MQ?.matches) chip('more', ", "chip('more', ")).more);
+
+console.log('④ the fold table (PURE phoneBarFold; lane phone-bar-billing-nofold — mirror-262: the runner\'s fonts folded the billing chip)');
+// a row = the bar's chips as measured at 390 px (room = 390 − 24 padding − ⋯ 36 − gap 8 = 322): the hub's fonts, then
+// the runner's DejaVu (model 66 → 74, billing 117 → 121 — the base folded it: 112 px were left after goal/auto/design)
+const row = (model, bill) => [['search', 36], ['model', model], ['effort', 51], ['goal', 20], ['style', 80], ['autoresume', 20], ['design', 20], ['billing', bill.full], ['perm', 51]]
+  .map(([key, w]) => (key === 'billing' ? { key, w, forms: bill } : { key, w }));
+const plan = (fold, model, bill, room = 322) => { const p = fold({ chips: row(model, bill), room, gap: 8 }); return { folded: [...p.folded].join(','), billing: p.billing }; };
+ok('the never-fold set: search · model · turn state · health · the billing chip (who pays)', ['search', 'model', 'turnstate', 'health', 'billing'].every((k) => PHONE_BAR_NEVER_FOLD.includes(k)) && PHONE_BAR_NEVER_FOLD.length === 5, PHONE_BAR_NEVER_FOLD);
+const hub = plan(phoneBarFold, 66, { full: 117, compact: 63, icon: 19 }), runner = plan(phoneBarFold, 74, { full: 121, compact: 64, icon: 19 });
+ok('hub fonts: billing full; effort · style · perm fold', hub.billing === 'full' && hub.folded === 'effort,style,perm', hub);
+ok('runner fonts: billing STILL full — design folds instead', runner.billing === 'full' && runner.folded === 'effort,style,design,perm', runner);
+const wide = plan(phoneBarFold, 74, { full: 200, compact: 64, icon: 19 }), narrow = plan(phoneBarFold, 74, { full: 121, compact: 64, icon: 19 }, 150), none = plan(phoneBarFold, 74, { full: 121, compact: 64, icon: 19 }, 60);
+ok('the three forms by the room the other never-fold chips leave: full → compact → icon', wide.billing === 'compact' && narrow.billing === 'icon' && runner.billing === 'full', { wide, narrow });
+ok('no room at all: the icon still draws — the billing chip is never in the folded set', none.billing === 'icon' && !none.folded.split(',').includes('billing') && none.folded.includes('goal'), none);
+ok('effort + style always fold and their width folds nothing else (style 80 px > the room left)', hub.folded.split(',').includes('style') && !hub.folded.includes('autoresume'), hub);
+ok('wiring: _fold lays the bar by phoneBarFold and writes the billing form; _fitBilling leaves the closed phone row to it',
+  /const plan = phoneBarFold\(\{ chips, room, gap \}\);/.test(sb) && /bill\.el\.dataset\.mode = plan\.billing;/.test(sb) && /if \(PHONE_MQ\?\.matches && !this\._foldOpen\) return;/.test(sb), null);
+{ // RED control: the billing chip foldable again (the base's rule) — the runner row folds it
+  const tc = read('src/lib/title-chips.js'), f = path.join(os.tmpdir(), `vs-phonebar-red-${process.pid}.mjs`);
+  fs.writeFileSync(f, tc.replace("'turnstate', 'health', 'billing']", "'turnstate', 'health']"));
+  try { const red = await import(pathToFileURL(f).href), r = plan(red.phoneBarFold, 74, { full: 121, compact: 64, icon: 19 }); ok('RED: billing out of the never-fold set ⇒ the runner row folds it', r.folded.split(',').includes('billing'), r); }
+  finally { fs.rmSync(f, { force: true }); }
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -169,6 +169,17 @@ const SETTINGS_SCHEMA = {
     category: t('Desktop apps'), liveApply: true,
   },
   // lane app-display-portal: which desktop apps get their own file-dialog portal on their own display (desktop-serve launch)
+  // lane app-display-secrets: an app on its own display keeps its logins in VibeSpace's Secret Service (sealed per display)
+  'desktop.appSecrets': {
+    type: 'enum', default: 'on', options: [
+      { value: 'on', label: t('On') },
+      { value: 'off', label: t('Off') },
+    ], label: t('Desktop apps keep their logins'),
+    description: t('An app in its own window (a browser, a mail or chat app) keeps its saved logins in a keyring; VibeSpace holds one for each app, sealed, so it does not ask again after a restart. Off: such an app finds no keyring and asks again each time.'),
+    when: { fact: 'desktopApps' },
+    tier: 'advanced',
+    category: t('Desktop apps'), liveApply: true,
+  },
   'desktop.appPortal': {
     type: 'enum', default: 'auto', options: [
       { value: 'auto', label: t('Browsers, Flatpak and Snap apps') },
@@ -176,6 +187,17 @@ const SETTINGS_SCHEMA = {
       { value: 'off', label: t('Off') },
     ], label: t('Desktop app file dialogs in their own window'),
     description: t('A Flatpak or Snap app, and a browser, asks a desktop portal for its file dialogs; VibeSpace starts one on the app\'s own display, so the dialog opens inside its window, not on your main desktop (3 more processes per app, gone with it). Every app: GTK apps too. Off: as before. Applies to apps started after the change.'),
+    when: { fact: 'desktopApps' },
+    tier: 'advanced',
+    category: t('Desktop apps'), liveApply: true,
+  },
+  // lane app-display-notify-sink: an app on its own display (the portal's private bus) gets a notifications sink (desktop-serve launch)
+  'desktop.appNotifications': {
+    type: 'enum', default: 'on', options: [
+      { value: 'on', label: t('On') },
+      { value: 'off', label: t('Off') },
+    ], label: t('Desktop app notifications in their own window'),
+    description: t('An app with its own file-dialog portal (see above) also gets a notifications service on its own display: what it announces shows inside its window, and in For you when it is urgent or the window is not in front. Off: those notifications are dropped, as before. Applies to apps started after the change.'),
     when: { fact: 'desktopApps' },
     tier: 'advanced',
     category: t('Desktop apps'), liveApply: true,

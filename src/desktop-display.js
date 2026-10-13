@@ -1327,6 +1327,21 @@ function portalBins({ env = process.env, names = require('./desktop-apps').PORTA
   }
   return out;
 }
+/** lane app-display-notify-sink: the notifications sink's facts on THIS machine (python3 on PATH, its GObject
+ *  introspection, the sink file beside this module) → desktop-apps notifySinkOf's answer. The gi probe runs once per
+ *  interpreter (a child, ≤ 5 s); a machine without it gets `unavailable: <why>` — the app still launches. */
+const NOTIFY_SINK_FILE = path.join(__dirname, 'notify-sink.py');
+let notifyGiMemo = null;
+async function notifySinkFacts({ env = process.env, mode, sink = NOTIFY_SINK_FILE } = {}) {
+  const M = require('./desktop-apps');
+  if (M.appNotificationsMode(mode) === 'off') return M.notifySinkOf({ mode });
+  const python = binOnPath('python3', { env });
+  if (python && (!notifyGiMemo || notifyGiMemo.python !== python)) {
+    const r = await run(python, ['-c', 'import gi; gi.require_version("Gio", "2.0"); from gi.repository import Gio'], { env, timeout: 5000 });
+    notifyGiMemo = { python, ok: !r.err };
+  }
+  return M.notifySinkOf({ mode, python, gi: !!(python && notifyGiMemo.ok), sink: fs.existsSync(sink) ? sink : null });
+}
 /** The USER's a11y bus address (AT-SPI): the env's own, else org.a11y.Bus.GetAddress on the session bus `env` names —
  *  handed to a portal-companion app so it (and its chooser) stays on the bus the tree snapshot reads. null = unknown. */
 async function a11yBusAddress({ env = process.env, timeout = 2000 } = {}) {
@@ -1336,6 +1351,15 @@ async function a11yBusAddress({ env = process.env, timeout = 2000 } = {}) {
   const r = await run(ds, ['--session', '--print-reply=literal', '--reply-timeout=' + timeout, '--dest=org.a11y.Bus', '/org/a11y/bus', 'org.a11y.Bus.GetAddress'], { env, timeout: timeout + 500 });
   const a = r.err ? '' : r.stdout.trim();
   return /^unix:/.test(a) ? a : null;
+}
+/** lane app-display-a11y-bus: the a11y bus of an app on its private bus (`address`) — desktop-apps a11yBusPlan over THIS
+ *  machine's binaries (`user` = the user's address: kept), then ONE GetAddress on the private bus (it activates
+ *  at-spi-bus-launcher) → a11yBusOf's { a11y, bus, appEnv }. Never throws (a paired device without at-spi2-core says so). */
+async function appA11yBus({ user = null, address = null, env = process.env, timeout = 3000 } = {}) {
+  const M = require('./desktop-apps');
+  const plan = M.a11yBusPlan({ user, bins: portalBins({ env, names: M.A11Y_BINS }) });
+  const got = plan.ask && address ? await a11yBusAddress({ env: { ...env, DBUS_SESSION_BUS_ADDRESS: address, AT_SPI_BUS_ADDRESS: '' }, timeout }) : null;
+  return M.a11yBusOf({ plan, got });
 }
 /** Start the companion bus of `plan` (PURE desktop-apps portalPlan): its dirs (0700) and files, then ONE detached
  *  `dbus-daemon --nofork` with the plan's env over `env` (every service it activates inherits that env — the app's
@@ -1370,6 +1394,7 @@ async function unmountUnder(dir, { env = process.env, mountinfo = '/proc/self/mo
 }
 
 module.exports = {
+  appSecretsFacts: (o) => require('./app-secrets').appSecretsFacts(o), appSecretsOf: (o) => require('./app-secrets').appSecretsOf(o), forgetAppSecrets: (o) => require('./app-secrets').forgetAppSecrets(o), // lane app-display-secrets (src/app-secrets.js)
   assertLocal, binOnPath, resetBinMemo, forgetBin, assertExecutable, PROBE_BINS, probeBinsOf, BROWSER_BINS, browserConfinement, hostFacts, officeFacts, x11Env, NO_WAYLAND_DISPLAY, withoutWayland,
   newCookie, writeXauthority, xauthEntry, freePort, rfbBanner, waitForRfb, httpProbe, waitForHttp, waitForListen, portAnswers, LISTEN_PROBES,
   listenerInode, pidHoldsInode, listenerHeldBy,
@@ -1380,5 +1405,7 @@ module.exports = {
   parseWininfoTree, windowTree, viewableWindows, enumerateWindows, displaySize, setDisplaySize, applyWindowPlan, xpraVersion, installFacts, installState,
   UTF8_LOCALE, utf8Env, utf8LocaleEnv,
   VNC_NATIVE, RFB_VIEWER_TYPES, RFB_VERSIONS, rfbAuthOf, rfbGreeting, // design 014 D1
+  appA11yBus, // lane app-display-a11y-bus
   PORTAL_LIBEXEC_DIRS, portalBins, a11yBusAddress, startPortalBus, unmountUnder, // lane app-display-portal
+  NOTIFY_SINK_FILE, notifySinkFacts, // lane app-display-notify-sink
 };

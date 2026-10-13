@@ -32,7 +32,7 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { SUITES, EXCLUDED, censusFindings, listSuiteFiles, heavyBlocker, machineGlobalFixtures, defaultLockPath, killedFromOutside, OUTSIDE_SIGNALS, scratchOrphans, judgeScratch, liveScratchPaths, SCRATCH_ROOT_RE, REAP_NAMES, reapReport, reapByHand, scratchRootsOf, ROOT_ENV, argvScratchRoots, PRODUCT_ROOT_RE, FAST_DISQUALIFIERS, FAST_MAX_MS, fastRuleFindings } from './ci.mjs';
+import { SUITES, EXCLUDED, censusFindings, listSuiteFiles, heavyBlocker, machineGlobalFixtures, defaultLockPath, killedFromOutside, OUTSIDE_SIGNALS, scratchOrphans, judgeScratch, liveScratchPaths, SCRATCH_ROOT_RE, REAP_NAMES, reapReport, reapByHand, scratchRootsOf, ROOT_ENV, argvScratchRoots, PRODUCT_ROOT_RE, FAST_DISQUALIFIERS, FAST_MAX_MS, fastRuleFindings, FAST_SUM_CAP_MS } from './ci.mjs';
 import { pathToFileURL } from 'node:url';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { GIT_REDIRECTORS, gitEnvFrom } from './git-env.mjs';
@@ -164,7 +164,8 @@ console.log('\n§2 tier hygiene');
   ok(exceptions.join() === 'test-chat-e2e', `there is ONE exception, the owner's real turn (${exceptions.join(', ') || 'none'})`);
   const measured = fast.map((s) => fastRuleFindings(s, '').measuredMs || 0);
   const budget = measured.reduce((a, b) => a + b, 0);
-  ok(budget < 8 * 60 * 1000, `the fast tier's measured sum stays under 8 min (${Math.round(budget / 1000)} s over ${fast.length} suites — the rule's point, re-measured)`);
+  ok(FAST_SUM_CAP_MS === 600 * 1000, `the fast tier's sum cap is 600 s (policy 2.369.263, was 480 s) — raising it is a deliberate edit here (${FAST_SUM_CAP_MS / 1000} s)`);
+  ok(budget < FAST_SUM_CAP_MS, `the fast tier's measured sum stays under ${FAST_SUM_CAP_MS / 1000} s (${Math.round(budget / 1000)} s over ${fast.length} suites — the rule's point, re-measured)`);
   // The census must be able to go red — every disqualifier through its own
   // shape, the non-shapes that must NOT trip it, and every why rule.
   // The shapes are ASSEMBLED from pieces so this file's own source does not

@@ -1271,6 +1271,8 @@ console.log('— §6c every kill door is declared: an actor marked before the ki
     'src/desktop-display.js': [1, "not a conversation: desktop apps — a sandboxed app's own portal bus (dbus-daemon) that never listened within its deadline, SIGKILLed through our own spawn handle (app-display-portal)"],
     // the 2.369.262 integration — lane tls-pass-retry's runChild: execFile WITHOUT its timeout + our own bound
     'src/server/tls.js': [1, "not a conversation: a tailscale status / cert child past its own bound, killed by runChild's timer so the answer it already wrote is kept (tls-pass-retry)"],
+    // the 2.369.263 integration — lane oat-mint-flow (+ oat-verify-fixes): the hub's own `claude setup-token` PTY
+    'src/server/oat-mint.js': [1, "not a conversation: the token mint's own setup-token PTY (node-pty, our spawn handle), SIGKILLed when the mint ends, is cancelled or times out (oat-mint-flow)"],
   };
   // the actor pins: the mark is set BEFORE the kill it names (the teardown reads it; the kill case deletes the session late)
   const ACTOR_PINS = [

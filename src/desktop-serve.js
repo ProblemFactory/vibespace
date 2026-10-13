@@ -293,7 +293,7 @@ const AGENT_BROWSER_ORIGIN = 'agent-browser';
 const AGENT_BROWSER_ENDING_WORDS = Object.freeze({ 'opener-ended': 'closed with the conversation that opened it', 'opener-gone': 'closed: the conversation that opened it ended while it started', 'opener-stopped': 'closed by the agent that opened it' });
 const DESKTOP_SERVE_OPS = Object.freeze(['facts', 'launch', 'stop', 'status', 'list', 'windows', 'fit', 'keep-alive', 'pin', 'relaunch', ...AS.APP_OPS]);
 /** The hub settings a machine's decisions read (the op carries them as `settings`; in-process they are the hub's own reader). */
-const SETTING_KEYS = Object.freeze(['desktop.backendPrefs', 'desktop.appScale', 'desktop.idleTimeoutMin', 'desktop.appPortal']);
+const SETTING_KEYS = Object.freeze(['desktop.backendPrefs', 'desktop.appScale', 'desktop.idleTimeoutMin', 'desktop.appPortal', 'desktop.appNotifications', 'desktop.appSecrets']);
 const settingsReader = (obj) => (key) => (obj && typeof obj === 'object' && SETTING_KEYS.includes(key) ? obj[key] : undefined);
 
 /**
@@ -790,6 +790,45 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     return { ok: true, why: v.why };
   }
   function appDir(id) { const d = path.join(logRoot, id); fs.mkdirSync(d, { recursive: true }); return d; }
+  // ── lane app-display-notify-sink: THE NOTIFICATIONS of an app on its own display — the sink (src/notify-sink.py) on the
+  // app's private bus appends one JSON line per Notify to <app dir>/portal/notify.jsonl; this reads what is new (a watch
+  // on the dir + every tick), keeps the last NOTIFY_JOURNAL_MAX per app (the window's ⋯ ▸ Notifications) and hands each
+  // new one to the hub (`hooks.onNotify` — a daemon installs none: its ring answers the hub's read). A restart reads the
+  // file's tail into the ring without re-announcing it.
+  const notes = new Map(); // id -> { off, tail, ring: [], watch: FSWatcher|null }
+  const NOTE_READ_MAX = 256 * 1024;
+  function drainNotes(rec, { announce = true } = {}) {
+    if (!rec || rec.notify !== 'on') return;
+    const dir = path.join(logRoot, rec.id, 'portal'), file = path.join(dir, 'notify.jsonl');
+    let n = notes.get(rec.id);
+    const first = !n;
+    if (first) {
+      n = { off: 0, tail: '', ring: [], watch: null };
+      notes.set(rec.id, n);
+      try { n.watch = fs.watch(dir, (ev, name) => { if (name === 'notify.jsonl') drainNotes(store.apps[rec.id]); }); n.watch.on('error', () => {}); } catch { /* the tick still drains */ }
+    }
+    let size = 0;
+    try { size = fs.statSync(file).size; } catch { return; }
+    if (size < n.off) { n.off = 0; n.tail = ''; } // a new bus wrote a new file
+    if (size === n.off) return;
+    const from = Math.max(n.off, size - NOTE_READ_MAX), buf = Buffer.alloc(size - from);
+    let fd = null;
+    try { fd = fs.openSync(file, 'r'); fs.readSync(fd, buf, 0, buf.length, from); } catch (e) { log.warn?.(`[desktop] ${rec.id}: notifications not read — ${e.message}`); return; } finally { if (fd !== null) try { fs.closeSync(fd); } catch { /* closed */ } }
+    n.off = size;
+    const lines = (n.tail + buf.toString('utf8')).split('\n');
+    n.tail = lines.pop();
+    for (const line of lines) {
+      const note = M.notifyRecord(line, { now: now() });
+      if (!note) continue;
+      if (note.closed) { const o = n.ring.find((x) => x.nid === note.nid); if (o) o.closed = true; continue; }
+      n.ring.push(note);
+      if (n.ring.length > M.NOTIFY_JOURNAL_MAX) n.ring.splice(0, n.ring.length - M.NOTIFY_JOURNAL_MAX);
+      if (announce && !first) { try { H.onNotify?.(rec, note); } catch (e) { log.warn?.(`[desktop] ${rec.id}: notification hook failed: ${e.message}`); } }
+    }
+  }
+  function endNotes(id) { const n = notes.get(id); if (n && n.watch) { try { n.watch.close(); } catch { /* closed */ } } notes.delete(id); }
+  /** The app's last notifications (newest last) — the window's ⋯ ▸ Notifications. */
+  function notifications(id) { const rec = store.apps[id]; if (rec) drainNotes(rec); return { notify: (rec && rec.notify) || 'off', notes: ((notes.get(id) || {}).ring || []).map((x) => ({ ...x })) }; }
   const sessionMarker = (id) => `${SESSION_ENV}=${id}`;
   /** The environ needles that PROVE a pid belongs to `rec` (2026-09-22): the
    *  marker every process the keeper starts inherits, and — on a display of
@@ -882,16 +921,35 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
       // launched on that bus); a missing binary or a bus that never listens is recorded, and the app starts as before.
       let portalEnv = {};
       if (own && rec.portalWhy) {
-        const plan = M.portalPlan({ dir, display: up.display, authFile: sessionAuth, bins: display.portalBins({ env: base }), a11y: await display.a11yBusAddress({ env: base }), why: rec.portalWhy });
+        const notify = display.notifySinkFacts ? await display.notifySinkFacts({ env: base, mode: serverSetting('desktop.appNotifications') }) : null; // lane app-display-notify-sink
+        const plan = M.portalPlan({ dir, display: up.display, authFile: sessionAuth, bins: display.portalBins({ env: base }), a11y: await display.a11yBusAddress({ env: base }), why: rec.portalWhy, notify });
         if (gone()) return;
+        // lane app-display-secrets (B-4a59 piece 4): the same bus activates the app's Secret Service — its service file
+        // and the per-display key (the BUS env only) are laid over the plan here; `rec.secrets` is said once the bus runs
+        const secrets = plan.ok && display.appSecretsFacts ? M.secretServicePlan({ plan, facts: await display.appSecretsFacts({ env: base, mode: serverSetting('desktop.appSecrets'), dataDir, id }) }) : null;
+        if (gone()) return;
+        if (secrets && secrets.file) { plan.files.push(secrets.file); Object.assign(plan.env, secrets.env); }
         if (!plan.ok) rec.portal = `unavailable: ${plan.why}`;
         else {
-          try { const pc = await display.startPortalBus({ plan, env: ctx.x11Env(up.display), logFd }); ctx.onPart('portal', pc, {}); rec.portal = 'on'; portalEnv = plan.appEnv; }
+          try { const pc = await display.startPortalBus({ plan, env: ctx.x11Env(up.display), logFd }); ctx.onPart('portal', pc, {}); rec.portal = 'on'; rec.notify = plan.notify; portalEnv = plan.appEnv; drainNotes(rec); } // drainNotes: a launch announces from byte 0
           catch (e) { rec.portal = `unavailable: ${e.message}`; }
         }
+        if (secrets) rec.secrets = rec.portal === 'on' ? secrets.secrets : `unavailable: no private bus (${rec.portal})`; // lane app-display-secrets
         if (rec.portal !== 'on') log.warn?.(`[desktop] ${id}: no portal of its own (${rec.portal}) — its file dialogs open on the session's portal`);
         commit();
         if (gone()) return;
+      }
+      // lane app-display-a11y-bus (B-4a59 piece 3): an app on its OWN bus gets an a11y bus — the user's when there is one
+      // (the plan handed it), else the private bus's own (at-spi-bus-launcher, asked once); the record keeps the address
+      // (`a11yBus`) so the agent's tree reads target THIS app's bus. No at-spi2-core ⇒ `a11y: 'unavailable: <why>'`, it starts.
+      if (rec.portal === 'on' && display.appA11yBus) {
+        const ab = await display.appA11yBus({ user: portalEnv.AT_SPI_BUS_ADDRESS || null, address: portalEnv.DBUS_SESSION_BUS_ADDRESS, env: base });
+        if (gone()) return;
+        rec.a11y = ab.a11y;
+        if (ab.bus) rec.a11yBus = ab.bus; else delete rec.a11yBus;
+        portalEnv = { ...portalEnv, ...ab.appEnv };
+        if (ab.a11y.startsWith('unavailable')) log.warn?.(`[desktop] ${id}: no accessibility bus of its own (${ab.a11y}) — an agent cannot read its tree`);
+        commit();
       }
       // the app itself — the sanitised env + the scale's knobs + the row's own (a row may pin GDK_SCALE) + the display
       const knobs = M.scaleKnobs(rec.scale || 1, { rule: M.scaleRuleOf(rec) }); // the same rule the launch recorded (lane D (a))
@@ -1101,7 +1159,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
       if (!(await signalVerified(rec, 'session marker leftover', escaped, null))) clean = false;
     }
     if (rec.portal === 'on') { try { await display.unmountUnder(path.join(logRoot, rec.id, 'portal')); } catch (e) { log.warn?.(`[desktop] ${rec.id}: portal unmount failed: ${e.message}`); } } // the document portal's FUSE outlives a killed portal
-    children.delete(rec.id); sampledAt.delete(rec.id); samples.delete(rec.id); clearFit(rec.id);
+    children.delete(rec.id); sampledAt.delete(rec.id); samples.delete(rec.id); clearFit(rec.id); endNotes(rec.id);
     if (rec.file) await noteFileEnd(rec, { clean }); // §7.9: every part is gone — the document's mtime now vs at launch (the hub's file-changed); its lock, when this session wrote it
     try { H.onTeardown?.(rec.id); } catch (e) { log.warn?.(`[desktop] ${rec.id}: teardown hook failed: ${e.message}`); } // the hub's guard + live rows go with the session
     if (rec.profileDir && !M.isLiveState(rec.state) && !stopping.has(rec.id)) await retireProfile(rec, { clean, why: rec.state }); // B-bfe6: a stop retires AFTER its verdict (below)
@@ -1550,6 +1608,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
         if (fitApplies(rec) && !(f && (f.timer || f.inflight)) && beltDue(rec.id, fitState(rec.id), t)) fitApp(rec.id, 'tick').catch((e) => log.warn?.(`[desktop] ${rec.id}: tick fit failed: ${e.message}`));
         // x5 LOW-2: while a BLOCKED pane exists on the xpra rung, the record keeps the app's own title fresh (rate-limited)
         H.readyTick?.(rec, t);
+        drainNotes(rec); // lane app-display-notify-sink: the watch's fallback
       }
       if (t - (sampledAt.get(rec.id) || 0) >= sampleEvery) {
         // rule 5: the whole session set, never one pid — rule 10: plus what left it
@@ -1599,7 +1658,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
   const isStopping = (id) => stopping.has(id);
 
   load();
-  return { launch, relaunch, startDeferred, stop, reshapeStore, setPin, keepAlive, noteInput, noteDesktopSize, setWatchProbe, fitApp, get, list, listApps, liveRecords, streamTarget, x11EnvFor, windows, xpraWww, instancePrefs, facts, installFacts, installState, registry, adoptAll, start, shutdown, tick, sessionPids, apps,
+  return { notifications, launch, relaunch, startDeferred, stop, reshapeStore, setPin, keepAlive, noteInput, noteDesktopSize, setWatchProbe, fitApp, get, list, listApps, liveRecords, streamTarget, x11EnvFor, windows, xpraWww, instancePrefs, facts, installFacts, installState, registry, adoptAll, start, shutdown, tick, sessionPids, apps,
     machineView, commit, markDirty, latestSample, isStopping, backends,
     storeFile, logRoot, STORE_FILE, LOG_DIR, SESSION_ENV, _store: () => store };
 }

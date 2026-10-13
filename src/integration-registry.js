@@ -358,19 +358,24 @@ const ROWS = Object.freeze([
         help: i18nKey('Your OpenAI key (platform.openai.com → API keys) or OpenRouter key (openrouter.ai → Keys). It is sent only to the provider above, and never shown again.'), validate: V.minLen(8) },
     ],
     clusterEnv: { json: 'VIBESPACE_INTEGRATIONS', prefix: 'VIBESPACE_INTEGRATION_DECISION_API_' },
+    // lane decision-card-words: the card's words are the user's — a titled, numbered recipe (`setup.title` +
+    // `ordered`) and the radios' own words (`choiceWords`); a row without them keeps the shared ones
     setup: {
+      title: i18nKey('How to use it'), ordered: true,
       prerequisites: [
-        i18nKey('A provider (openai or openrouter) and its API key are saved below, or the cluster provides them'),
-        i18nKey('The text of the records you let it judge is sent to that provider'),
+        i18nKey('Pick a key: use the one the cluster set up, or paste your own (OpenAI or OpenRouter)'),
+        i18nKey('Click “Test connection”'),
+        i18nKey('Turn on the features you want below'),
       ],
     },
+    choiceWords: { cluster: i18nKey('Use the key the cluster set up'), own: i18nKey('Use a key of my own') },
     test: {
       kind: 'credential-exchange',
-      describe: i18nKey('One real judgment: a single yes/no question about one fixed sentence (about 60 input tokens, well under $0.0001). It counts toward today\'s budget.'),
-      caveat: i18nKey('Proves the provider accepts this key and model for one question. The OpenRouter route is an alpha: the models it accepts may change.'),
+      describe: i18nKey('Asks the model one yes/no question about a fixed sentence (about 60 input tokens, well under $0.0001). It counts toward today\'s spending.'),
+      caveat: i18nKey('“Passed” means this key just asked the model one question and it answered. (OpenRouter\'s endpoint for this is still a beta; model names may change later.)'),
     },
     consumers: ['src/server/decision-engine.js'],
-    usedBy: i18nKey('Used by the Decision API plugin'),
+    usedBy: i18nKey('Only the Decision API plugin uses this key'),
     docs: 'docs/design-decision-api.zh.md',
   },
 ]);

@@ -15,7 +15,7 @@ const { mk } = require('./lazy.js');
 
 function create({ app, rootDir, HOST, CLAUDE_CMD, NODE_CMD,
   CLAUDE_SUBSCRIPTION_LOGIN_HELPER, activeSessions, auth, engine,
-  serverSetting, recordUsageAttribution, liveAccountIdSet, broadcastActiveSessions = () => { },
+  serverSetting, recordUsageAttribution, liveAccountIdSet, broadcastActiveSessions = () => { }, broadcastAll = () => { },
   buildClaudeSubscriptionLoginCommand, getAccounts, getHosts, getMounts,
   getTelemetry, getUsageHistory, getLoginExpiryWatch }) {
   const { clearSealedOrders } = engine;
@@ -595,6 +595,21 @@ app.delete('/api/accounts/:id/oat', (req, res) => {
   }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
+
+// THE MINT (lane oat-mint-flow, owner 2026-10-13): the dialog drives
+// `claude setup-token` in a PTY the hub owns (src/server/oat-mint.js) and the
+// token goes from the PTY straight into accounts.setOat — the save path above,
+// its checks kept. Phases ride the WS `oat-mint` broadcast so every client's
+// dialog follows; the routes are human-only. A token is saved only under the
+// row it PROVES (oat-verify F1): one /usage read with the new token through the
+// auto-cli spawn, its window against the anchors; else the person picks.
+// Outcomes journal into the probe log; stopAll rides the exit (F3).
+const usageRoutesMod = require('../usage-routes.js');
+const oatMint = require('./oat-mint.js').create({ accounts, claudeCmd: CLAUDE_CMD, broadcastAll, exitHook: true,
+  probePanel: require('./oat-mint.js').panelProbeVia((o, done) => usageRoutesMod.spawnPanelProbe(CLAUDE_CMD, o, done), usageRoutesMod.parseCliUsageText),
+  windows: () => (typeof engine.establishedWindows === 'function' ? engine.establishedWindows() : {}),
+  journal: (rec) => { try { require('./usage-probe-log.js').appendProbeLog(accounts.dataDir, { rung: 'oat-mint', ...rec }); } catch { } } });
+require('./oat-mint.js').registerMintRoutes(app, { mint: oatMint, isAgentBearer });
 
 app.post('/api/accounts/subscription', (req, res) => {
   try {

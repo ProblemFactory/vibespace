@@ -146,6 +146,12 @@ function resetProbeMemo() { _memo.clear(); }
  *  hears the other's answer. */
 const envKeyOf = (env) => ['PATH', 'DBUS_SESSION_BUS_ADDRESS', 'AT_SPI_BUS_ADDRESS', 'DISPLAY', 'WAYLAND_DISPLAY', 'XDG_RUNTIME_DIR'].map((k) => (env && env[k]) || '').join('\u0001');
 
+/** lane app-display-a11y-bus (B-4a59 piece 3): the env a tree read of `rec` runs in — the app's OWN a11y bus when its
+ *  display has one (`rec.a11yBus`, desktop-serve's fact: an app's private session where the user has no a11y bus), else
+ *  `base` (the user's). Every tree call of the engine goes through this — never a global bus for an app with its own. */
+const treeEnvOf = (rec, base) => (rec && typeof rec.a11yBus === 'string' && /^unix:/.test(rec.a11yBus) ? { ...base, AT_SPI_BUS_ADDRESS: rec.a11yBus } : base);
+/** The distinct own a11y buses of `recs` (the listing reads each once). */
+const a11yBusesOf = (recs) => [...new Set((recs || []).map((r) => r && r.a11yBus).filter((b) => typeof b === 'string' && /^unix:/.test(b)))];
 /** Is AT-SPI reachable from here (the helper + its binding + the a11y bus)?
  *  `{ok, apps, why}`; a YES is remembered PROBE_MEMO_MS, a NO is re-asked. */
 async function probeA11y({ env = process.env, now = Date.now, ...rest } = {}) {
@@ -682,6 +688,7 @@ function nodeView(n) {
 }
 
 module.exports = {
+  treeEnvOf, a11yBusesOf, // lane app-display-a11y-bus
   HELPER_PATH, HELPER_FILE, TRAVERSAL_LIMITS, REFUSALS, refuse,
   // mirror red on 2.369.181: the failures that mean "no tree here" (an auto share folds them into mode_pixels)
   TREE_UNREACHABLE, treeUnreachable,

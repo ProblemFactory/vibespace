@@ -483,7 +483,8 @@ function create(deps = {}) {
     return {
       id: row.id, label: row.label,
       fields: R.fieldDecls(row),
-      setup: row.setup ? { callbackUrl: row.setup.callbackUrl || null, callbackNote: row.setup.callbackNote || null, prerequisites: (row.setup.prerequisites || []).slice() } : null,
+      setup: row.setup ? { callbackUrl: row.setup.callbackUrl || null, callbackNote: row.setup.callbackNote || null, prerequisites: (row.setup.prerequisites || []).slice(), title: row.setup.title || null, ordered: row.setup.ordered === true } : null,
+      choiceWords: row.choiceWords ? { cluster: row.choiceWords.cluster, own: row.choiceWords.own } : null,
       source: res.source, why: res.why, whyCode: res.whyCode || null, whyParams: res.whyParams || null, clusterKey: res.clusterKey, savedClusterKey: res.savedClusterKey, clusterLabel: res.clusterLabel,
       clusterAvailable: !!cluster.def, clusterWhy: cluster.def ? null : cluster.why, clusterWhyCode: cluster.def ? null : (cluster.whyCode || null), clusterWhyParams: cluster.def ? null : (cluster.whyParams || null),
       clusterOptions: cluster.options,           // key + label ONLY

@@ -48,6 +48,12 @@ const probeLog = require('./server/usage-probe-log.js'); // the raw /usage probe
 // one file per probe. `--strict-mcp-config` with no `--mcp-config` = none loaded;
 // the probe's one vendor call is the panel. One spelling: the spawn and the log.
 const PANEL_PROBE_ARGS = Object.freeze(['-p', '/usage', '--strict-mcp-config']);
+// THE ONE PANEL SPAWN: the auto-cli rung below and the long-lived token mint's
+// second look (src/server/oat-mint.js, oat-verify F1) — one site, one argv.
+function spawnPanelProbe(bin, { env, cwd }, done) {
+  const { execFile } = require('child_process');
+  return execFile(bin, [...PANEL_PROBE_ARGS], { env, cwd, timeout: 60000, maxBuffer: 1024 * 1024 }, done);
+}
 function setupUsage({ app, accounts, hosts, usageHistory, activeSessions, serverSetting, ensureDir, USAGE_CACHE_FILE, USAGE_CACHE_DIR, CODEX_SESSIONS_DIR, META_DIR, AVAILABLE_MODELS, BUFFERS_DIR, apiDerivedWindow, establishedWindows, repairIdentityAnchors, probeUsageForAccountKey, onMemberReadingFresh, CLAUDE_CMD }) {
 const https = require('https');
 function readUsageCache() {
@@ -605,7 +611,6 @@ async function refreshViaCliPanel(key) {
   }
   const cliPanel = await new Promise((resolve) => {
     try {
-      const { execFile } = require('child_process');
       const env = { ...process.env };
       delete env.ANTHROPIC_API_KEY; delete env.CLAUDE_CODE_OAUTH_TOKEN; delete env.CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR;
       // the secret store relocates (session-spawn parity) AND the org context
@@ -616,7 +621,7 @@ async function refreshViaCliPanel(key) {
       const bin = CLAUDE_CMD || 'claude';
       probeRec.argv = [bin, ...PANEL_PROBE_ARGS];
       const t0 = Date.now();
-      execFile(bin, [...PANEL_PROBE_ARGS], { env, cwd: probeCwd, timeout: 60000, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
+      spawnPanelProbe(bin, { env, cwd: probeCwd }, (err, stdout, stderr) => {
         probeRec.ms = Date.now() - t0;
         probeRec.exitCode = err ? (typeof err.code === 'number' ? err.code : (err.killed ? 'killed' : String(err.code || err.signal || 'error'))) : 0;
         probeRec.rawStdout = stdout == null ? '' : String(stdout);
@@ -1481,4 +1486,4 @@ app.get('/api/usage', (req, res) => {
   return { refreshViaCliPanel, panelVerdictFor, getOAuthToken, usagePollingEnabled, refreshRateLimit, reloadRateLimitCache, ingestPassiveUsage, summarizeCodexRateLimit, summarizeCodexRateLimits };
 }
 
-module.exports = { setupUsage, parseCliUsageText, normalizeCodexRateLimit, PANEL_PROBE_ARGS };
+module.exports = { setupUsage, parseCliUsageText, normalizeCodexRateLimit, PANEL_PROBE_ARGS, spawnPanelProbe };

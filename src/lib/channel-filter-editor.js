@@ -491,8 +491,8 @@ function decisionOffWhy(row, route) {
   if (!row.enabled) return t('The Decision API plugin is off — this rule judges nothing (and never matches) until you turn it on.');
   if (!row.configured) return t('The Decision API has no provider key yet — this rule judges nothing until you add one on its card.');
   const f = (row.decision && row.decision.features) || {};
-  if (route && f.routing !== true) return t('The Decision API\'s "routing" switch is off — this rule routes nothing until you turn it on.');
-  if (!route && f.rules !== true) return t('The Decision API\'s "rules" switch is off — this rule judges nothing until you turn it on.');
+  if (route && f.routing !== true) return t('The Decision API\'s switch “Hand messages to a task group or agent by what they say” is off — this rule hands nothing out until you turn it on.');
+  if (!route && f.rules !== true) return t('The Decision API\'s switch “Notification rules can use a sentence as the condition” is off — this rule checks nothing until you turn it on.');
   return null;
 }
 function decisionBlock(rule, { principals, changed }) {

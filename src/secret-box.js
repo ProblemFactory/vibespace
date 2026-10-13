@@ -139,30 +139,34 @@ function secretBox(keyFile) {
     return cached;
   }
 
-  function enc(text) {
-    const iv = crypto.randomBytes(12);
-    const c = crypto.createCipheriv('aes-256-gcm', readKey(), iv);
-    const data = Buffer.concat([c.update(String(text), 'utf8'), c.final()]);
-    return `${iv.toString('base64')}.${c.getAuthTag().toString('base64')}.${data.toString('base64')}`;
-  }
-
-  function dec(blob) {
-    const parts = String(blob).split('.');
-    if (parts.length !== 3) throw new SecretBoxError('bad-ciphertext', 'secret-box: a ciphertext is `iv.tag.data` (three base64 segments)');
-    const [iv, tag, data] = parts.map((s) => Buffer.from(s, 'base64'));
-    const key = readKey();
-    try {
-      const d = crypto.createDecipheriv('aes-256-gcm', key, iv);
-      d.setAuthTag(tag);
-      return Buffer.concat([d.update(data), d.final()]).toString('utf8');
-    } catch (e) {
-      throw new SecretBoxError('bad-ciphertext', `secret-box: could not decrypt (${(e && e.message) || e}) — the key file may not be the one this ciphertext was written with`, e);
-    }
-  }
+  const enc = (text) => encWith(readKey(), text);
+  const dec = (blob) => decWith(readKey(), blob);
 
   const hasKey = () => { try { fs.statSync(keyFile); return true; } catch { return false; } };
 
   return { enc, dec, readKey, hasKey, keyFile };
 }
 
-module.exports = { secretBox, SecretBoxError, KEY_HEX_RE, describeJsonError };
+/** THE cipher of every box, over an explicit 32-byte key (lane app-display-secrets: a per-display key DERIVED from a
+ *  box's key — the app's Secret Service store, sealed by src/app-secrets-seal.js). Same bytes as `enc`/`dec`. */
+function encWith(key, text) {
+  const iv = crypto.randomBytes(12);
+  const c = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const data = Buffer.concat([c.update(String(text), 'utf8'), c.final()]);
+  return `${iv.toString('base64')}.${c.getAuthTag().toString('base64')}.${data.toString('base64')}`;
+}
+
+function decWith(key, blob) {
+  const parts = String(blob).split('.');
+  if (parts.length !== 3) throw new SecretBoxError('bad-ciphertext', 'secret-box: a ciphertext is `iv.tag.data` (three base64 segments)');
+  const [iv, tag, data] = parts.map((s) => Buffer.from(s, 'base64'));
+  try {
+    const d = crypto.createDecipheriv('aes-256-gcm', key, iv);
+    d.setAuthTag(tag);
+    return Buffer.concat([d.update(data), d.final()]).toString('utf8');
+  } catch (e) {
+    throw new SecretBoxError('bad-ciphertext', `secret-box: could not decrypt (${(e && e.message) || e}) — the key file may not be the one this ciphertext was written with`, e);
+  }
+}
+
+module.exports = { secretBox, SecretBoxError, KEY_HEX_RE, describeJsonError, encWith, decWith };

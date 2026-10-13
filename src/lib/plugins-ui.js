@@ -11,8 +11,13 @@ import { mountIntegrationCard } from './integrations-window.js';
 
 /** The Decision API card's body (provides 'decision'): the feature toggles, the daily budget (stored in cents, shown
  *  as USD), today's counter per use, the pause line. The switch is the card's own button; the key is the registry's. */
-const decisionFeatures = () => [['attention', t('Judge the first screen\'s other rows (needs attention)')], ['rules', t('Notification rules that ask the judge')], ['routing', t('Route records to a group or agent')]];
-const decisionUseWord = (use) => ({ attention: t('needs attention'), rule: t('rules'), routing: t('routing'), foryou: t('For you sorting'), webhook: t('webhook facts'), test: t('Test') }[use] || use);
+// lane decision-card-words: each switch = what you get + ONE example (its hint) + where it shows up
+const decisionFeatures = () => [
+  ['attention', t('Channels home: pick out the messages that need me'), t('Example: a colleague asks “Can you get back to me today?” — it gets marked “{label}” and moves to the top of Channels home; tap ✓ / ✗ to teach it.', { label: t('needs you · {p}', { p: t('asks you') }) })],
+  ['rules', t('Notification rules can use a sentence as the condition'), t('Example: the rule “Notify me when someone chases me for a payment” — the model checks whether each message fits. Set it up in {notify} by adding a rule.', { notify: t('Notify…') })],
+  ['routing', t('Hand messages to a task group or agent by what they say'), t('Example: “expense claims go to the Finance task group, server alerts go to the ops agent”. Set it up in a rule\'s “One of a list” option.')],
+];
+const decisionUseWord = (use) => ({ attention: t('Channels home'), rule: t('Notification rules'), routing: t('Handing out by content'), foryou: t('For you sorting'), webhook: t('webhook facts'), test: t('Test') }[use] || use);
 const usd = (n) => '$' + (Number(n) || 0).toFixed(n && n < 0.01 ? 6 : 2);
 function decisionCard(app, p, { actions, cfgBox, api, render }) {
   const d = p.decision || {};
@@ -24,12 +29,12 @@ function decisionCard(app, p, { actions, cfgBox, api, render }) {
   const integ = document.createElement('div'); integ.className = 'decision-integ';
   cfgBox.appendChild(integ);
   mountIntegrationCard(app, integ, 'decision-api');
-  for (const [key, label] of decisionFeatures()) {
+  for (const [key, label, hint] of decisionFeatures()) {
     const r = document.createElement('label'); r.className = 'plugin-cfg-row';
     const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = d[key] === true; cb.dataset.decisionFeature = key;
     cb.onchange = () => api('config', { body: JSON.stringify({ [key]: cb.checked }) }).catch((e) => { cb.checked = !cb.checked; showToast(e.message, { type: 'error' }); });
     r.append(cb, document.createTextNode(' ' + label));
-    cfgBox.appendChild(r);
+    cfgBox.append(r, Object.assign(document.createElement('div'), { className: 'plugin-detail plugin-cfg-hint decision-feature-hint', textContent: hint }));
   }
   const br = document.createElement('div'); br.className = 'plugin-cfg-row';
   const inp = document.createElement('input'); inp.className = 'plugin-cfg-flags decision-budget'; inp.type = 'number'; inp.min = '0'; inp.step = '0.01';
@@ -39,15 +44,17 @@ function decisionCard(app, p, { actions, cfgBox, api, render }) {
     const cents = Math.round(Number(inp.value) * 100);
     try { await api('config', { body: JSON.stringify({ dailyBudgetCents: cents }) }); showToast(t('Daily budget saved')); } catch (e) { showToast(e.message, { type: 'error' }); }
   };
-  br.append(Object.assign(document.createElement('span'), { className: 'plugin-cfg-label', textContent: t('Daily budget (USD)') }), inp, save);
+  br.append(Object.assign(document.createElement('span'), { className: 'plugin-cfg-label', textContent: t('Spend at most per day (USD)') }), inp, save);
   cfgBox.appendChild(br);
   const tot = (d.today && d.today.total) || { calls: 0, inputTokens: 0, usd: 0 };   // usd = settled; + the calls in flight's reservations
   const cnt = document.createElement('div'); cnt.className = 'plugin-detail decision-counter';
-  cnt.textContent = t('Today: {calls} calls · {tokens} input tokens · {usd} of {budget}', { calls: tot.calls, tokens: tot.inputTokens, usd: usd((Number(tot.usd) || 0) + (Number(d.today && d.today.reserved) || 0)), budget: usd((Number(d.dailyBudgetCents) || 0) / 100) });
+  cnt.textContent = t('Today: {n} checked · {spent} spent (limit {cap})', { n: tot.calls, spent: usd((Number(tot.usd) || 0) + (Number(d.today && d.today.reserved) || 0)), cap: usd((Number(d.dailyBudgetCents) || 0) / 100) });
+  cnt.title = t('{tokens} input tokens', { tokens: tot.inputTokens });
   cfgBox.appendChild(cnt);
   for (const [use, x] of Object.entries((d.today && d.today.byUse) || {})) {
     const u = document.createElement('div'); u.className = 'plugin-detail plugin-cfg-hint decision-use'; u.dataset.use = use;
-    u.textContent = t('{use}: {calls} calls · {tokens} tokens · {usd}', { use: decisionUseWord(use), calls: x.calls, tokens: x.inputTokens, usd: usd(x.usd) });
+    u.textContent = t('{use}: {n} checked · {spent}', { use: decisionUseWord(use), n: x.calls, spent: usd(x.usd) });
+    u.title = t('{tokens} input tokens', { tokens: x.inputTokens });
     cfgBox.appendChild(u);
   }
   if (d.reconnect) cfgBox.appendChild(Object.assign(document.createElement('div'), { className: 'plugin-detail plugin-cfg-warn decision-reconnect', textContent: t('Reconnect: the provider refused this key (HTTP {status}). No calls until you save a new key above.', { status: d.reconnect.status }) }));

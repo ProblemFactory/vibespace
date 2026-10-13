@@ -59,6 +59,10 @@
 //      reads "Send all (18 → 3 messages)"; row 7's ➤ ⇒ ONE POST of ONE item, row 7 gone, 17 stay, page B follows; the phone
 //      sheet's glyphs fit their rows; a stopped owner ⇒ "Sending 17 comments…" (rows held) then the STASHED words. PNGs
 //      desk.png / phone.png into $VS_DOC_SEND_SHOTS (else the §15 folder).
+//      §16 (lane doc-comments-stopped-owner, B-b51a): a chat opens STOP.md, the chat is STOPPED (ws kill) ⇒ Send all is
+//      stashed for its conversation (the toast says next turn, never refused); resumed (same conversation) ⇒ the chat's
+//      `stash` fact counts the messages and the hand-over delivers them in order on the stub's stdin.
+//      VS_DOC_WINDOW_ONLY=stopped runs §16 alone.
 // Run: node scripts/test-doc-window.mjs   (SKIPs with evidence when google-chrome is absent; ~1 min)
 import fs from 'node:fs';
 import path from 'node:path';
@@ -110,19 +114,20 @@ const args = process.argv.slice(2);
 if (args.includes('--version') || args[0] === '-v') { process.stdout.write('2.1.281 (Claude Code)\\n'); process.exit(0); }
 fs.appendFileSync(ROOT + '/stub-env.ndjson', JSON.stringify({ pid: process.pid, args, api: !!process.env.VIBESPACE_API, token: !!process.env.VIBESPACE_SESSION_TOKEN }) + '\\n');
 if (!args.includes('--output-format')) { setInterval(() => {}, 1e6); return; }
-const SID = 'e2e00000-0000-4000-8000-' + String(process.pid).padStart(12, '0');
+const SID = args.includes('--resume') ? args[args.indexOf('--resume') + 1] : 'e2e00000-0000-4000-8000-' + String(process.pid).padStart(12, '0'); // a resume keeps its conversation id (§16)
 const out = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
 setTimeout(() => out({ type: 'system', subtype: 'init', session_id: SID, cwd: process.cwd(), model: 'claude-fable-5', apiKeySource: 'none', tools: [], mcp_servers: [], permissionMode: 'default' }), 50);
 let buf = '';
 process.stdin.setEncoding('utf8');
 process.stdin.on('data', (d) => { buf += d; let i; while ((i = buf.indexOf('\\n')) >= 0) { const line = buf.slice(0, i); buf = buf.slice(i + 1); fs.appendFileSync(ROOT + '/stub-stdin.ndjson', line + '\\n'); } });
-const done = new Set();
+const done = new Set((() => { try { return fs.readdirSync(ROOT + '/cmds'); } catch { return []; } })()); // a stub started later never replays earlier commands (§16: a resumed stub replayed §5's prompt-context and drained its own stash)
 setInterval(() => {
   let names = [];
   try { names = fs.readdirSync(ROOT + '/cmds').filter((n) => n.endsWith('.json')); } catch { return; }
   for (const n of names.sort()) {
     if (done.has(n)) continue; done.add(n);
     let c = null; try { c = JSON.parse(fs.readFileSync(ROOT + '/cmds/' + n, 'utf8')); } catch { continue; }
+    if (c.sid && c.sid !== SID) continue;   // §16: a command for ONE conversation's stub (several stubs live)
     (async () => {
       let res;
       try {
@@ -1123,7 +1128,66 @@ try {
   try { cdpB.close(); } catch { }
   try { await fetch(`http://127.0.0.1:${CDP}/json/close/${tB.id}`); } catch { }
   }
-  if (ONLY !== 'width' && ONLY !== 'print' && ONLY !== 'raw' && ONLY !== 'rawcmt' && ONLY !== 'link' && ONLY !== 'synced') {
+  if (ONLY === '' || ONLY === 'stopped') {
+  // ── §16 A STOPPED OWNER IS AN ADDRESSEE (lane doc-comments-stopped-owner, B-b51a — lane doc-comments-ui found a stopped
+  //    chat's document answering "Open this document from a chat…"): the exit unlinks the session's meta, the engine's
+  //    owner memo (data/doc-owners.json) still names the conversation ⇒ the stash; the resumed chat gets them in order
+  section('§16 a stopped owner: Send all waits in its stash; the resumed chat gets the messages in order');
+  const ST = path.join(fs.realpathSync(PROJ), 'docs', 'STOP.md');
+  fs.writeFileSync(ST, '# Stopped owner\n\nThe plan has two steps.\n\n## Steps\n\n- the first step\n- the second step\n');
+  const envPids = () => (fs.existsSync(path.join(ROOT, 'stub-env.ndjson')) ? fs.readFileSync(path.join(ROOT, 'stub-env.ndjson'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((x) => x.args.includes('--output-format')).map((x) => x.pid) : []);
+  const pids0 = envPids();
+  ws.send(S({ type: 'create', backend: 'claude', mode: 'chat', cwd: PROJ, cols: 80, rows: 24, reqId: 'dw16', name: 'Stopped owner' }));
+  const c16 = await until(() => msgs.find((m) => m.type === 'created' && m.reqId === 'dw16'), 20000);
+  const pid16 = await until(() => envPids().find((x) => !pids0.includes(x)), 15000);
+  const CONV16 = pid16 && 'e2e00000-0000-4000-8000-' + String(pid16).padStart(12, '0');
+  if (!ok(!!c16 && !!CONV16, '§16 a chat of its own on the stub claude (conversation ' + CONV16 + ')')) throw new Error('no §16 chat');
+  const SID16 = c16.sessionId;
+  await call('Page.addScriptToEvaluateOnNewDocument', { source: `try { localStorage.setItem('vibespace.lang', 'en'); } catch {}` });
+  ok(!!(await boot(1100, 800, false)), '§16 the client booted (1100×800, en)');
+  await ev(`app.attachSession(${S(SID16)}, 'Stopped owner', ${S(PROJ)}, { mode: 'chat', backend: 'claude' }); return true;`);
+  const chat16 = await until(() => ev(`for (const [id, v] of app.sessions) if (v.sessionId === ${S(SID16)}) return id; return null;`), 15000);   // openFile's `from` = the client's chat window id (as §15's boot)
+  const w16 = await until(async () => { await ev(`app.openFile(${S(ST)}, 'STOP.md', { from: ${S(chat16)} }); return true;`); return until(() => ev(`const w = ${DW(ST)}; const pm = w && w.content.offsetParent && w.content.querySelector('.doc-page .ProseMirror'); return pm && pm.querySelector('h1') ? w.id : null;`), 8000, 200); }, 20000, 500);
+  const owned = await until(async () => { const r = await (await fetch(`${base}/api/doc/owner?path=${encodeURIComponent(ST)}&from=${encodeURIComponent(SID16)}`)).json(); return r.owner && r.owner.via === 'from' ? r.owner : null; }, 8000, 200);
+  ok(!!w16 && !!owned, '① STOP.md open from that chat; the owner resolves via its live session', { w16, owned });
+  await call('Page.bringToFront'); await sleep(300);
+  const n1 = await comment('.ProseMirror h2', 12, 'stopped note one', ST);
+  const n2 = await comment('.ProseMirror ul li p', 30, 'stopped note two', ST);
+  // ② the chat STOPS (the product's Terminate: ws kill — its live record goes and its session-meta file is unlinked)
+  ws.send(S({ type: 'kill', sessionId: SID16, reqId: 'k16' }));
+  const gone = await until(async () => { const r = await (await fetch(`${base}/api/doc/owner?path=${encodeURIComponent(ST)}&from=${encodeURIComponent(SID16)}`)).json(); return r.owner && r.owner.via === 'stopped' ? r.owner : null; }, 15000, 250);
+  ok(!!n1 && !!n2 && !!gone && gone.sessionId === SID16, '② the chat stopped ⇒ GET /api/doc/owner still names it (via stopped), never null', { n1, n2, gone });
+  const ownerLine = await ev(`const w = ${DW(ST)}; const o = w.content.querySelector('.doc-owner'); return o ? { hidden: o.hidden, text: o.textContent } : null;`);
+  // ③ Send all ⇒ stashed (the toast says the next turn), the strip empties, nothing typed into a stub
+  const before16 = stdinTexts().length;
+  await ev(`const w = ${DW(ST)}; const s = w.content.querySelector('.doc-strip'); if (s.hidden) w.content.querySelector('.doc-strip-btn').click(); return true;`); await sleep(300);
+  const send16 = await until(() => ev(`const w = ${DW(ST)}; const b = w.content.querySelector('.doc-send'); if (!b || !b.offsetParent || b.disabled) return null; const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 };`), 8000, 200);
+  if (send16) await click(send16);
+  const toast16 = await until(() => ev(`const t = [...document.querySelectorAll('[class*=toast]')].map((e) => e.textContent).find((x) => /next turn/i.test(x)); return t || null;`), 8000, 150);
+  const empty16 = await until(async () => ((await ev(`return ${DW(ST)}.content.querySelectorAll('.doc-cmt').length;`)) === 0 ? true : null), 8000, 150);
+  ok(!!send16 && !!toast16 && !!empty16 && !/open (this document|it) from a chat/i.test(toast16) && stdinTexts().length === before16, '③ Send all on a stopped owner ⇒ "' + (toast16 || '') + '" (stashed, not refused), the strip empties, nothing typed', { send16, toast16, empty16, ownerLine });
+  // ④ resumed (same conversation, a new session id) ⇒ the chat's `stash` fact counts the message; the hand-over delivers it in order
+  const pids1 = envPids();
+  ws.send(S({ type: 'create', backend: 'claude', mode: 'chat', cwd: PROJ, cols: 80, rows: 24, reqId: 'dw16r', name: 'Stopped owner', resume: true, resumeId: CONV16 }));
+  const r16 = await until(() => msgs.find((m) => (m.type === 'created' || m.type === 'error') && m.reqId === 'dw16r'), 20000);
+  await until(() => envPids().find((x) => !pids1.includes(x)), 15000);
+  const fact = await until(() => { const a = [...msgs].reverse().find((m) => m.type === 'active-sessions' && Array.isArray(m.sessions) && m.sessions.some((x) => (x.id || x.sessionId) === (r16 && r16.sessionId) && x.stash)); const x = a && a.sessions.find((y) => (y.id || y.sessionId) === r16.sessionId); return x ? x.stash : null; }, 15000, 200);
+  ok(!!r16 && r16.type === 'created' && r16.sessionId !== SID16 && !!fact, '④ resumed under a new session id ⇒ its `stash` fact says something waits', { r16: r16 && { type: r16.type, id: r16.sessionId, message: r16.message }, fact });
+  // ⑤ the resumed chat's next turn: its UserPromptSubmit hook's call (the REAL GET /api/agent/prompt-context, as that
+  //    stub with its own session token) drains the stash ⇒ the [Doc comments] message, notes in order; drained once
+  // (the first prompt also carries the tools intro: a stash that does not fit the room waits for the next prompt — product
+  //  behaviour, agent-routes drainStashUnderCap — so up to three turns are asked, and exactly ONE may carry the notes)
+  const turns = [];
+  for (let t = 0; t < 3; t++) {
+    const pc = await stub({ kind: 'http', path: '/api/agent/prompt-context', sid: CONV16 });
+    const c = String((pc && pc.body && pc.body.context) || '');
+    turns.push({ sid: pc && pc.sid, len: c.length, doc: c.includes('[Doc comments] ' + ST), one: c.indexOf('stopped note one'), two: c.indexOf('stopped note two') });
+    if (turns.filter((x) => x.one > -1).length && t >= 1) break;
+  }
+  const carry = turns.filter((x) => x.one > -1);
+  ok(turns.every((x) => x.sid === CONV16) && carry.length === 1 && carry[0].doc && carry[0].one < carry[0].two && turns.indexOf(carry[0]) < turns.length - 1, '⑤ the resumed chat\'s next turn (its hook\'s REAL prompt-context) carries the [Doc comments] message, notes in order — once', turns);
+  }
+  if (ONLY !== 'width' && ONLY !== 'print' && ONLY !== 'raw' && ONLY !== 'rawcmt' && ONLY !== 'link' && ONLY !== 'synced' && ONLY !== 'stopped') {
 
   // ── §9 design 020 (lane doc-editor-ui, 2.369.223): the design desk's audit sample (every block kind) at 1280 / 390 ×
   //    dark / light × zh / en — the PNGs carry the audit's names with `after-` so the owner flips between before and after

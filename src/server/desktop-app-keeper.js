@@ -104,6 +104,7 @@ function writeJsonAtomic(file, obj) {
  *                    `refresh()` (= vnc.js status()) is asked before every verdict.
  *   display        — the desktop-display module (injectable for the suite)
  *   limits         — src/keeper-limits (injectable: the resource suite shrinks them)
+ *   getUserTodos   — optional () => the For-you store (lane app-display-notify-sink: an app's notification that needs the person)
  *   serverNotice   — optional (key, text, opts) => number — the resource report (server.js's notice; returns the clients
  *                    it reached — 0 ⇒ the report level re-sends the same key on the next over sample)
  *   registryRows   — the registry (default DEFAULT_REGISTRY; the suite hands a CPU burner)
@@ -114,7 +115,7 @@ function writeJsonAtomic(file, obj) {
  *   viewerGraceMs  — x5: how long the active pane's seat is held after its socket closed (default VIEWER_GRACE_MS; 0 = re-elect at once)
  *   relaunchSeatMs — A r1: how long a relaunch's carried seat waits for its pane after the answer (default RELAUNCH_SEAT_MS)
  */
-function create({ dataDir, env, broadcast, serverSetting = () => undefined, getTelemetry = () => null, serverNotice = null, singleton = null,
+function create({ dataDir, env, broadcast, serverSetting = () => undefined, getTelemetry = () => null, serverNotice = null, singleton = null, getUserTodos = () => null,
   display = displayFacts, limits = LIMITS, registryRows = M.DEFAULT_REGISTRY, backends = M.DISPLAY_BACKENDS, log = console, now = Date.now, tickMs = DS.TICK_MS, guardSampleMs = null, geometry, hostId = null, fitSlowBeltMs = DS.FIT_SLOW_BELT_MS, viewerGraceMs = VIEWER_GRACE_MS, relaunchSeatMs = RELAUNCH_SEAT_MS,
   access = null, hostLabel = (h) => h, remoteHosts = () => [] } = {}) {
   if (!dataDir) throw new Error('desktop-app-keeper: dataDir is required');
@@ -134,7 +135,7 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
 
   // THE MACHINE KEEPER of device #0 — in-process, ONE store shared with this registry; the policy is handed in as hooks
   const machine = DS.install({ dataDir, env, serverSetting, singleton, display, limits, registryRows, backends, log, now, tickMs, guardSampleMs, geometry, hostId, fitSlowBeltMs,
-    hooks: { view, onCommit: () => { dirty = false; notify(); }, idle: idleVerdict, readyTick, onSample: reportSample, onTeardown, onWitness: notifyWitness } });
+    hooks: { view, onCommit: () => { dirty = false; notify(); }, idle: idleVerdict, readyTick, onSample: reportSample, onTeardown, onWitness: notifyWitness, onNotify } });
   /** The shared store, read through the machine (it owns load/save). */
   const store = { get apps() { return machine._store().apps; } };
 
@@ -480,7 +481,38 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
   /** x5 LOW-2: while a BLOCKED pane exists on the xpra rung, the record keeps the app's own title fresh (rate-limited). */
   function readyTick(rec) { const vs = viewerSets.get(rec.id); if (vs && [...vs.entries.keys()].some((v) => v !== vs.active)) refreshAppTitle(rec.id, 'tick'); }
   /** A session ended (every terminal path passes the machine's teardown): its report slot and live row go with it. */
-  function onTeardown(id) { guard.delete(id); live.delete(id); }
+  function onTeardown(id) { guard.delete(id); live.delete(id); notifySeen(id); }
+  // ── lane app-display-notify-sink: an app's notification (the sink on its private bus → the machine's journal) — a toast
+  // INSIDE its window on every client (`desktop-app-notify`), and ONE For-you item per app while it is critical or no
+  // pane shows the window (M.notifyVerdict); the item resolves when the person raises the window (POST …/notifications/seen)
+  // or the app ends. A second notification while the item is open is the window's (toast + ⋯ ▸ Notifications), never a second item.
+  const attention = new Map(); // id -> the open For-you item's id
+  const NOTIFY_INBOX_KEY = 'desktop-app-notify';
+  function onNotify(rec, note) {
+    const s = viewerSets.get(rec.id);
+    const v = M.notifyVerdict({ note, visible: !!(s && (s.active || s.entries.size)) });
+    const label = String(rec.label || rec.appId || rec.id).slice(0, 80);
+    try { broadcast?.({ type: 'desktop-app-notify', id: rec.id, label, note, attention: v.forYou }); } catch (e) { log.warn?.(`[desktop] ${rec.id}: notify broadcast failed: ${e.message}`); }
+    if (!v.forYou) return;
+    const todos = getUserTodos && getUserTodos();
+    const held = attention.get(rec.id);
+    if (!todos || (held && todos.get(held) && todos.get(held).status === 'open')) return;
+    try {
+      const r = todos.add(NOTIFY_INBOX_KEY, { origin: 'server', urgency: note.urgency === 'critical' ? 'high' : 'normal', by: 'agent', sessionName: label,
+        text: `${label}: ${note.summary || note.body}`.slice(0, 500), detail: note.summary ? note.body.slice(0, 2000) || null : null, action: { type: 'desktop-app-notify', appId: rec.id } });
+      const itemId = r && (r.id || (r.item && r.item.id));
+      if (itemId) attention.set(rec.id, itemId);
+    } catch (e) { log.warn?.(`[desktop] ${rec.id}: the For-you item was not filed — ${e.message}`); }
+  }
+  /** The person raised the window (or the app ended): its open For-you item resolves. → whether one did. */
+  function notifySeen(id) {
+    const itemId = attention.get(id);
+    attention.delete(id);
+    const todos = itemId && getUserTodos && getUserTodos();
+    if (!todos) return false;
+    try { const it = todos.get(itemId); if (it && it.status === 'open') { todos.setStatus(itemId, 'done', 'agent'); return true; } } catch { /* the person cleared it */ }
+    return false;
+  }
   /**
    * THE RESOURCE REPORT of one sample (the machine sampled the whole session set; `pids` = what it counted).
    * ONE verdict module (src/runaway-guard.js) and ONE guard pick per record (guardFor: a browser row by the browser
@@ -727,7 +759,12 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
     storeFile: machine.storeFile, logRoot: machine.logRoot, STORE_FILE: DS.STORE_FILE, LOG_DIR: DS.LOG_DIR, SESSION_ENV: DS.SESSION_ENV, _store: machine._store,
     remoteFile, REMOTE_FILE, _remote: () => remote, // lane C2
     installedOf, noteInstalled }; // the installed-apps list, owner 2026-10-11
+  // lane app-display-secrets: the logins an app's Secret Service keeps (device #0's apps) — the ⋯ menu's count + its door
+  keeper.appSecrets = (id) => displayFacts.appSecretsOf({ rec: machine.get(id), dir: path.join(machine.logRoot, id) });
+  keeper.forgetAppSecrets = (id) => displayFacts.forgetAppSecrets({ rec: machine.get(id), dir: path.join(machine.logRoot, id) });
   keeper.local = localOnly(keeper);
+  keeper.notifications = (id) => machine.notifications(id); // lane app-display-notify-sink (device #0's apps)
+  keeper.notifySeen = notifySeen;
   return keeper;
 }
 

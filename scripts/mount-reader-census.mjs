@@ -41,8 +41,8 @@ export const ROWS = [
   ['src/conversation-index.js', 'own-tree', 1, null, DATA],
   ['src/ctx-sync.js', 'user-path', 4, 'DOOR\\.blocked\\(', 'the group context folder walk: refused by name before the device is dialled'],
   ['src/design-fs.js', 'user-path', 7, 'DOOR\\.blocked\\(', 'the design folder read: storage_blocked by name'],
-  ['src/desktop-display.js', 'own-tree', 22, null, PROC], // +3 lane app-display-portal: portal binaries stat'd in /usr/libexec, the app dir's bus socket, /proc/self/mountinfo
-  ['src/desktop-serve.js', 'own-tree', 10, null, DATA],
+  ['src/desktop-display.js', 'own-tree', 23, null, PROC], // +3 lane app-display-portal: portal binaries stat'd in /usr/libexec, the app dir's bus socket, /proc/self/mountinfo; +1 lane app-display-notify-sink: the sink file beside the module
+  ['src/desktop-serve.js', 'own-tree', 12, null, DATA], // +2 lane app-display-notify-sink: the app's notification journal (stat + read) in its own 0700 portal dir
   ['src/device-mount.js', 'exempt', 5, null, 'the device pull mount: /proc scans + its own mount point (its owner’s liveness)'],
   ['src/discovery-facts.js', 'own-tree', 5, null, PROC],
   ['src/exit-proxy.js', 'user-path', 10, 'DOOR\\.blocked\\(', 'an exit-run transfer’s local side: refused by name (transfer_failed)'],
@@ -79,6 +79,8 @@ export const ROWS = [
   ['src/safe-fs-worker.js', 'exempt', 18, null, 'the SafeFs worker: it runs a path SafeFs.call already asked the door about (src/safe-fs.js _blocked)'],
   ['src/search-index-worker.js', 'own-tree', 5, null, CLI],
   ['src/secret-box.js', 'own-tree', 5, null, DATA],
+  ['src/app-secrets.js', 'own-tree', 4, null, DATA], // lane app-display-secrets: the service/sealer files beside it, the key file (secret-box), the app dir's sealed store + bus socket
+  ['src/app-secrets-seal.js', 'own-tree', 2, null, DATA], // lane app-display-secrets: the app dir's sealed store + its stdin
   ['src/server/account-usage-routes.js', 'own-tree', 1, null, CLI],
   ['src/server/agent-tool-generators.js', 'user-path', 21, 'DOOR\\.blocked\\(', 'a session root’s git facts: the sentence as facts.error'],
   ['src/server/apps-engine.js', 'own-tree', 1, null, DATA],
@@ -107,6 +109,7 @@ export const ROWS = [
   ['src/server/conversation-deliver.js', 'own-tree', 2, null, DATA],
   ['src/server/decision-engine.js', 'own-tree', 3, null, DATA],   // lane decision-core: data/decision-{memo,usage}.json + the journal
   ['src/server/channels-attention.js', 'own-tree', 1, null, DATA],   // lane decision-attention: data/decision-examples.json (its ONE writer)
+  ['src/server/doc-engine.js', 'own-tree', 1, null, DATA], // lane doc-comments-stopped-owner: data/doc-owners.json (the owner memo)
   ['src/server/design-engine.js', 'user-path', 6, 'DOOR\\.blocked\\(', 'the design watch relist: refused by name, never read'],
   ['src/server/desktop-app-keeper.js', 'own-tree', 1, null, DATA],
   ['src/server/device-upgrade-watch.js', 'own-tree', 1, null, DATA],
@@ -127,6 +130,7 @@ export const ROWS = [
   ['src/server/migrations.js', 'own-tree', 37, null, DATA],
   ['src/server/mount-health-watch.js', 'exempt', 6, null, 'the server-tree watch: /proc + mountinfo, never a user path (the judge’s P4)'],
   ['src/server/mounts-plugins-wiring.js', 'own-tree', 10, null, DATA], // lane passkey-store-core: +3 — data/browser-passkeys.json + its key file (own data dir)
+  ['src/server/oat-mint.js', 'own-tree', 3, null, 'its own 0700 scratch dir per mint (the $BROWSER URL file) + the boot sweep of its own orphaned vs-oat-mint-* dirs (readdir + lstat of tmpRoot)'],
   ['src/server/ops-routes.js', 'own-tree', 10, null, DATA],
   ['src/server/otel-ingest.js', 'own-tree', 4, null, CLI],
   ['src/server/permission-rules.js', 'own-tree', 3, null, CLI],

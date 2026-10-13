@@ -2510,6 +2510,15 @@ body.taskbar-top #taskbar-hotzone { bottom: auto; top: 0; }
 .xpra-fit-badge { position: absolute; left: 50%; bottom: 6px; transform: translateX(-50%); z-index: 400000; max-width: calc(100% - 12px); padding: 2px 8px; border-radius: var(--radius-sm); font-size: 11px; color: var(--text-secondary); background: color-mix(in srgb, var(--bg-window) 88%, transparent); border: 1px solid var(--border); pointer-events: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* x5: a BLOCKED pane (another client is active) — the terminal's "Resume here" overlay (.term-blocked-*), NO picture */
 .desktop-app-blocked { z-index: 20; }
+/* lane app-display-notify-sink: an app's notification INSIDE its window (top-right of the picture, above it; a click raises the window) */
+.desktop-app-notes { position: absolute; top: 8px; right: 8px; z-index: 21; display: flex; flex-direction: column; gap: 6px; max-width: min(320px, calc(100% - 16px)); pointer-events: none; }
+.desktop-app-note { pointer-events: auto; cursor: pointer; display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; background: var(--bg-dialog); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.28); font-size: 12px; line-height: 1.35; }
+.desktop-app-note-critical { border-color: var(--accent); }
+.desktop-app-note-icon { flex: none; width: 16px; height: 16px; margin-top: 1px; color: var(--accent); }
+.desktop-app-note-words { min-width: 0; }
+.desktop-app-note-app { font-size: 11px; color: var(--text-secondary); }
+.desktop-app-note-summary { font-weight: 600; overflow-wrap: anywhere; }
+.desktop-app-note-body { color: var(--text-secondary); overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .desktop-app-blocked-title { font-size: 13px; font-weight: 600; color: var(--text); max-width: 90%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .desktop-app-is-blocked > :not(.desktop-app-blocked) { visibility: hidden; }
 .file-tool-btn.desktop-copied-chip { color: var(--accent); border-color: var(--accent); } /* lane I: (0,2,0) — the tie with viewers.css */
@@ -4641,8 +4650,21 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .pool-prio-menu { flex-shrink: 0; min-width: 28px; }
 
 /* Long-lived token dialog (B-211a) */
-.oat-steps { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; font-size: 12px; color: var(--text-secondary); }
 .oat-row { margin: 8px 0; }
+/* lane oat-mint-flow: the mint's phases inside the dialog (it stays open) */
+.oat-mint { margin: 10px 0; display: flex; flex-direction: column; gap: 6px; }
+.oat-link-row, .oat-code-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.oat-link-row a.btn-create { text-decoration: none; display: inline-flex; align-items: center; }
+.oat-code-row input { flex: 1 1 160px; min-width: 0; }
+.oat-code-label { font-size: 12px; color: var(--text-secondary); }
+.oat-wait { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.oat-spin { width: 12px; height: 12px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: oat-spin 0.9s linear infinite; }
+@keyframes oat-spin { to { transform: rotate(360deg); } }
+.oat-saved { font-weight: 600; }
+.oat-manual { margin: 8px 0; font-size: 12px; }
+.oat-manual > summary { cursor: pointer; color: var(--text-secondary); }
+#oat-hub-row { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+#oat-hub-row[hidden] { display: none; }
 
 .chat-status-dropdown-sep { height: 1px; background: var(--border); margin: 3px 0; }
 /* Locked model badge: keep the base pill colors (accent bg + --bg-root text —

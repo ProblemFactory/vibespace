@@ -27,6 +27,7 @@
  * No I/O, no clock, no crypto: the engine hands in `now`, the local-day offset and `sha`.
  */
 const P = require('./peer-text.js');
+const S = require('./secret-shapes.js');
 
 const QUESTION_TYPES = Object.freeze(['predicate', 'choice', 'score']);
 const PROVIDERS = Object.freeze(['openai', 'openrouter']);
@@ -212,13 +213,18 @@ function eraseSecrets(v, depth = 0) {
     for (const [k, x] of Object.entries(v).slice(0, 50)) o[k] = SECRET_KEY_RE.test(k) ? '[erased]' : eraseSecrets(x, depth + 1);
     return o;
   }
-  if (typeof v === 'string') return v.length > 200 ? v.slice(0, 200) + '…' : v;
+  if (typeof v === 'string') { const t = scrub(v, 50); return t.length > 200 ? t.slice(0, 200) + '…' : t; }   // the scrub before the cut (inbox-verify F1)
   return typeof v === 'number' || typeof v === 'boolean' || v === null ? v : str(v).slice(0, 200);
 }
-/** EVERY text part on its way out: bounded first (the belt walks no more than 4× its cap), folded and frame-inert
- *  (the belt), addresses cut to their domain, then the head + tail cut to the part's own cap. */
+/** THE ONE SCRUB (inbox-verify F1, design §2.8 — the law: no vendor-bound text leaves without it): the tree's ONE secret
+ *  table (secret-shapes.js redactSecrets, R1–R8 incl. the opt-in key-material runs) on the RAW text, BEFORE any cut — a
+ *  secret split by a cut must not leak its head. Bounded first to 4× the part's cap + the longest value the table judges
+ *  whole (VALUE_MAX): a secret that starts inside the kept 4× is seen whole. Addresses are NOT secrets (maskAddresses). */
+const scrub = (raw, max) => S.redactSecrets(P.cutText(str(raw), Math.max(64, max * 4) + S.VALUE_MAX), { runs: true }).text;
+/** EVERY text part on its way out: scrubbed first (the ONE scrub, above), bounded (the belt walks no more than 4× its
+ *  cap), folded and frame-inert (the belt), addresses cut to their domain, then the head + tail cut to the part's own cap. */
 function cleanPart(raw, max, kind = 'block') {
-  const bounded = P.cutText(str(raw), Math.max(64, max * 4));
+  const bounded = P.cutText(scrub(raw, max), Math.max(64, max * 4));
   return cutHeadTail(maskAddresses(P.toAgentText(bounded, { max: Math.max(64, max * 4), kind })), max);
 }
 
@@ -238,7 +244,7 @@ const PLANS = Object.freeze({
   test: Object.freeze({ fixed: [], variable: [PART('body', 200)], fixedCeiling: 0, recordCeiling: 120, batch: 1, wakePath: false, memo: ['use', 'id'] }),
 });
 const USES = Object.freeze(Object.keys(PLANS));
-const NEVER = Object.freeze(['credentials, tokens, cookies, API keys (secret-named fields are erased)', 'attachment bytes, images, page screenshots', 'records of other accounts', 'agent frame text (inert through the belt)', 'mail addresses (display name + domain only)', 'the owner\'s agent-internal context']);
+const NEVER = Object.freeze(['credentials, tokens, cookies, API keys (secret-named fields are erased; secret-shaped text is redacted — the ONE scrub)', 'attachment bytes, images, page screenshots', 'records of other accounts', 'agent frame text (inert through the belt)', 'mail addresses (display name + domain only)', 'the owner\'s agent-internal context']);
 /** The plan of one use, with its ceiling for `n` records (n ≤ batch; `batch` = the probe's own measurement override). */
 function inputPlan(use, n = 1, batch = null) {
   const p = PLANS[use];
@@ -491,6 +497,6 @@ module.exports = {
   QUESTION_TYPES, PROVIDERS, PROVIDER_LABEL, DEFAULT_MODEL, PRICE_PER_MTOK_USD, DAILY_BUDGET_CENTS_DEFAULT, THRESHOLD_DEFAULT, THRESHOLD_RANGE,
   BACKOFF_MS, RETRY_AFTER_MAX_MS, RATE_MIN_CALLS, MEMO_MAX, FEATURES, WHY, DIALECTS, USES, PLANS, NEVER, JOURNAL_FIELDS, RUBRIC, GOLDEN, CRITERIA_CATALOGUE,
   dialectOf, urlOf, questionError, buildRequest, normalizeAnswers, usageOf, estimateUsd, usdOf, estTokens, questionTokens,
-  cutHeadTail, fitTokens, maskAddresses, eraseSecrets, cleanPart, inputPlan, buildInput, memoMaterial, memoKey, batchQuestions, unbatchAnswers,
+  cutHeadTail, fitTokens, maskAddresses, eraseSecrets, scrub, cleanPart, inputPlan, buildInput, memoMaterial, memoKey, batchQuestions, unbatchAnswers,
   dayOf, rateOf, budgetVerdict, settleUsd, retryAfterMs, nextBackoff, isWall, isKeyRefused, journalRow, rubricQuestions, rubricText, attentionVerdict, criteriaProposal,
 };

@@ -529,5 +529,49 @@ console.log('— ⑧ A SAVE WAITS FOR THE DROP (stage-blank verify r5: a tab tor
   ok(/if \(!win\) return;\n\s+this\._app\?\.layoutManager\?\.noteDrop\?\.\(\);/.test(read('src/lib/tab-group.js')) && /noteDrop\(\) \{ this\._dropAt = Date\.now\(\); \}/.test(LJ8), '⑧ the tab drag\'s detached drop tells the layout manager (noteDrop) before its own 250 ms capture');
 }
 
+console.log('— ⑨ B-9cd4: the ⫿ words follow a rename; a rebuilt chain\'s focus is its frame (the phone\'s first paint)');
+{
+  // the REAL WindowManager.setTitle / restoreTabChain + the mixin's REAL _labelSplitBtn over fake elements (⑦'s globals)
+  const { WindowManager } = await import(path.join(REPO, 'src/lib/window.js'));
+  const { installTabGroupMixin } = await import(path.join(REPO, 'src/lib/tab-group.js'));
+  const cls9 = () => { const s = new Set(); return { contains: (n) => s.has(n), add: (...n) => n.forEach((x) => s.add(x)), remove: (...n) => n.forEach((x) => s.delete(x)), toggle() { } }; };
+  const scene9 = () => {
+    const wm = Object.create(WindowManager.prototype);
+    Object.assign(wm, { windows: new Map(), zIndex: 100, activeWindowId: null, _settings: { get: () => undefined } });
+    installTabGroupMixin(wm);
+    for (const k of ['_notify', '_applyChainLayout', '_renderTabBar', '_fitChipsSoon', 'syncHiddenViews']) wm[k] = () => { };
+    const btn = { title: '', attrs: {}, setAttribute(k, v) { this.attrs[k] = v; }, getAttribute(k) { return this.attrs[k]; } };
+    const labels = {};
+    const titleBar = { querySelector: (sel) => { if (sel === ':scope > .tab-split-btn') return btn; const m = /data-win-id="([^"]+)"/.exec(sel); return m ? labels[m[1]] || null : null; } };
+    for (const [id, title] of [['A', 'Alpha — /r'], ['B', 'Bravo — /r'], ['C', 'Charlie — /r']]) {
+      labels[id] = { textContent: title };
+      wm.windows.set(id, { id, title, titleSpan: { textContent: title }, element: { classList: cls9(), style: {}, appendChild() { } }, content: { classList: cls9() }, titleBar });
+    }
+    return { wm, btn, labels };
+  };
+  // ② rename-then-read: tabs [A, B, C], C active, B the most recent ⇒ the button names B; a rename of B re-words it at once
+  const renameRow = (neuter) => {
+    const { wm, btn, labels } = scene9();
+    const chain = { tabs: ['A', 'B', 'C'], active: 2, recent: ['C', 'B', 'A'], layout: 'tabs', order: ['A', 'B', 'C'] };
+    for (const w of wm.windows.values()) w._tabChain = chain;
+    wm._labelSplitBtn(chain, btn);
+    const before = btn.title;
+    if (neuter) wm._labelSplitBtn = () => { }; // the CONTROL: the pre-fix setTitle (the words written at render / switch only)
+    wm.setTitle('B', 'Renamed Bravo — /r');
+    return { before, title: btn.title, aria: btn.getAttribute('aria-label'), tab: labels.B.textContent };
+  };
+  const rr = renameRow(false), rc = renameRow(true);
+  const fresh = (x) => /Bravo — \/r on the left, this tab on the right$/.test(x.before) && x.title.includes('Renamed Bravo') && x.aria === x.title && x.tab === 'Renamed Bravo — /r';
+  ok(fresh(rr), `⑨ B-9cd4 a rename of the partner re-words the ⫿ button (title + aria-label) at once: "${rr.before}" → "${rr.title}"`, JSON.stringify(rr));
+  ok(!fresh(rc) && rc.title === rc.before, '⑨ B-9cd4 CONTROL: without the relabel in setTitle the button keeps the OLD name (the observed stale tooltip)', JSON.stringify(rc));
+  // ① the restore: the boot focused guest C standalone; the record's split [A, B | C] (C active) is rebuilt ⇒ the FRAME A
+  // carries the mark and the focus names C (the pre-fix restore left the mark on C's hidden frame — a blank phone)
+  const { wm } = scene9();
+  wm.activeWindowId = 'C'; wm.windows.get('C').element.classList.add('window-active');
+  wm.restoreTabChain(['A', 'B', 'C'], 2, { layout: 'split', split: { pair: ['B', 'C'], ratio: 0.5, left: ['A', 'B'], right: ['C'] }, order: ['A', 'B', 'C'] });
+  const marks = [...wm.windows.values()].filter((w) => w.element.classList.contains('window-active')).map((w) => w.id);
+  ok(JSON.stringify(marks) === '["A"]' && wm.activeWindowId === 'C' && wm.windows.get('A')._tabChain?.layout === 'split', '⑨ B-9cd4 a split restored around the focused guest C: the frame A carries the ONE active mark, the focus names C', JSON.stringify({ marks, active: wm.activeWindowId }));
+}
+
 console.log(`\n${fail ? 'FAIL' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);
 process.exit(fail ? 1 : 0);

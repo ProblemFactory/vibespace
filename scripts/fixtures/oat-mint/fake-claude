@@ -1,0 +1,80 @@
+#!/usr/bin/env node
+'use strict';
+// A FAKE `claude setup-token` (lane oat-mint-flow) for scripts/test-oat-mint.mjs
+// and the chrome leg (test-oat-mint-ui): it draws the screen the way CLI
+// 2.1.296 does (measured — spaces as ESC[1C, the prompt's words placed with
+// ESC[nG, the URL as an OSC-8 link, every line \r\r\n), hands $BROWSER the
+// localhost-callback URL, waits for a code line, prints a token wrapped at
+// 60 columns. Never dials anything. FAKE_OAT_MODE: code (default) | error
+// (OAuth error after the code) | exit (dies after the URL) | hang (never
+// prompts) | local (the localhost callback completes it, no code).
+// FAKE_OAT_RECORD: a file that gets one JSON line of facts about the run
+// (never the token; env NAMES only). FAKE_OAT_IDENTITY (JSON, or a file named
+// by FAKE_OAT_IDENTITY_FILE): an oauthAccount the success writes into
+// $CLAUDE_CONFIG_DIR/.claude.json (2.1.296 itself writes none). `-p /usage`:
+// prints FAKE_OAT_PANEL (exit 0) or fails like a scope refusal (exit 1).
+// The mint child's env is an allowlist (oat-verify F2), so suites hand these
+// knobs over as FAKE_OAT_HEX_<NAME> exports in a wrapper (fake-wrap.mjs).
+const fs = require('fs');
+const path = require('path');
+const http = require('http');
+const { spawnSync } = require('child_process');
+for (const [k, v] of Object.entries(process.env)) if (k.startsWith('FAKE_OAT_HEX_')) process.env['FAKE_OAT_' + k.slice(13)] = Buffer.from(v, 'hex').toString('utf8');
+const mode = process.env.FAKE_OAT_MODE || 'code';
+const token = process.env.FAKE_OAT_TOKEN || (['sk', '-ant-oat01-FAKE'].join('') + 'x'.repeat(92));
+const out = (s) => process.stdout.write(s.replace(/\n/g, '\r\r\n'));
+const sp = (s) => s.split(' ').join('\x1b[1C');
+const record = (o) => { if (process.env.FAKE_OAT_RECORD) fs.appendFileSync(process.env.FAKE_OAT_RECORD, JSON.stringify(o) + '\n'); };
+const facts = { pid: process.pid, argv: process.argv.slice(2), home: process.env.HOME, config: process.env.CLAUDE_CONFIG_DIR,
+  apiKey: !!process.env.ANTHROPIC_API_KEY, oauthEnv: !!process.env.CLAUDE_CODE_OAUTH_TOKEN, vibespaceVars: Object.keys(process.env).filter((k) => k.startsWith('VIBESPACE_')), browser: !!process.env.BROWSER,
+  envKeys: Object.keys(process.env) };
+if (process.argv[2] === '-p' && process.argv[3] === '/usage') {
+  record({ ...facts, probe: true, tokenIsTheMinted: process.env.CLAUDE_CODE_OAUTH_TOKEN === token, tokenInArgv: process.argv.some((a) => a.includes(['sk', '-ant-'].join(''))) });
+  if (process.env.FAKE_OAT_PANEL) { process.stdout.write(process.env.FAKE_OAT_PANEL); process.exit(0); }
+  process.stderr.write('fake claude: /usage is not available for this token\n'); process.exit(1);
+}
+if (process.argv[2] !== 'setup-token') { process.stderr.write('fake claude: only setup-token\n'); process.exit(2); }
+const identity = () => {
+  const f = process.env.FAKE_OAT_IDENTITY_FILE;
+  const j = process.env.FAKE_OAT_IDENTITY || (f && fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : '');
+  if (!j.trim() || !process.env.CLAUDE_CONFIG_DIR) return;
+  fs.mkdirSync(process.env.CLAUDE_CONFIG_DIR, { recursive: true });
+  fs.writeFileSync(path.join(process.env.CLAUDE_CONFIG_DIR, '.claude.json'), JSON.stringify({ oauthAccount: JSON.parse(j) }));
+};
+const success = () => {
+  identity();
+  const wrapped = token.match(/.{1,60}/g).join('\n');
+  out('\n\x1b[32m✓ ' + sp('Long-lived authentication token created successfully!') + '\x1b[39m\n\n' + sp('Your OAuth token (valid for 1 year):') + '\n\n\x1b[33m' + wrapped + '\x1b[39m\n\n'
+    + sp("Store this token securely. You won't be able to see it again.") + '\n\n' + sp('Use this token by setting: export CLAUDE_CODE_OAUTH_TOKEN=<token>') + '\n');
+  setTimeout(() => process.exit(0), 150);
+};
+const draw = (localUrl) => {
+  if (process.env.BROWSER) spawnSync(process.env.BROWSER, [localUrl], { stdio: 'ignore' });
+  out('\x1b7\x1b8' + sp('Welcome to Claude Code v2.1.296 (fake)') + '\n\n' + sp('This will guide you through long-lived (1-year) auth token setup for your') + '\n' + sp('Claude account. Claude subscription required.') + '\n\n· ' + sp('Opening browser to sign in…') + '\n');
+  for (const f of ['✢', '*', '✶', '✻']) out('\r' + f + '\n');
+  const url = 'https://claude.example/cai/oauth/authorize?code=true&client_id=fake&response_type=code&redirect_uri=https%3A%2F%2Fplatform.claude.example%2Foauth%2Fcode%2Fcallback&scope=user%3Ainference&state=FAKESTATE' + process.pid;
+  out('\r ' + sp("Browser didn't open? Use the url below to sign in (c to copy)") + '\n\n\x1b]8;id=x;' + url + '\x07' + url + '\x1b]8;;\x07\n\n');
+  if (mode === 'exit') { out(sp('Error: the sign-in server went away') + '\n'); setTimeout(() => process.exit(1), 100); return; }
+  if (mode === 'hang') return;
+  out('\n\x1b[2GPaste\x1b[8Gcode\x1b[13Ghere\x1b[18Gif\x1b[21Gprompted\x1b[30G>\n');
+};
+let lineBuf = '';
+process.stdin.on('data', (d) => {
+  lineBuf += d.toString('utf8');
+  const nl = lineBuf.search(/[\r\n]/);
+  if (nl < 0) return;
+  const code = lineBuf.slice(0, nl); lineBuf = '';
+  record({ ...facts, code });
+  if (mode === 'error') out('\n' + sp('OAuth error: Invalid code. Please make sure the full code was copied.') + '\n' + sp('Press Enter to retry.') + '\n');
+  else success();
+});
+if (mode === 'local') {
+  const srv = http.createServer((req, res) => {
+    if (req.url.startsWith('/callback')) { res.end('<!doctype html><title>Signed in</title><h1>Signed in — you can close this tab</h1>'); record({ ...facts, code: null, callback: true }); success(); return; }
+    res.setHeader('Content-Type', 'text/html'); res.end('<!doctype html><title>Authorize (fake)</title><a id="allow" href="/callback?code=fake">Authorize</a>');
+  });
+  srv.listen(0, '127.0.0.1', () => draw('http://127.0.0.1:' + srv.address().port + '/authorize'));
+} else {
+  record(facts);
+  draw('https://claude.example/cai/oauth/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A45555%2Fcallback&state=FAKESTATE' + process.pid);
+}

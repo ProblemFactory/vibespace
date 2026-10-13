@@ -336,14 +336,14 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   }
   /** D7: one probe of the app's tree (a YOUNG app is re-asked for up to modeProbeMs) → auto's resolution. */
   async function probeMode(rec) {
-    const a11y = await wt.probeA11y({ env: env(), ...helperOpts() });
+    const a11y = await wt.probeA11y({ env: WT.treeEnvOf(rec, env()), ...helperOpts() });
     // mirror red on 2.369.181: WHY the tree is unreachable (no python3, no gi binding, no bus, a helper that died)
     // is a fact about this machine — it rides in the sentence, the resolution is pixels whatever it is
     if (!a11y.ok) return R.resolveMode({ mode: 'auto', probe: { a11yOk: false, reason: a11y.why || a11y.code || null } });
     const t0 = Date.now();
     let last = { a11yOk: true, nodes: 0, usable: 0 };
     for (let i = 0; i < 8; i++) {
-      const r = await wt.snapshotTarget({ pids: pidsOf(rec), budget: MODE_PROBE_BUDGET, text: false, env: env(), ...helperOpts() });
+      const r = await wt.snapshotTarget({ pids: pidsOf(rec), budget: MODE_PROBE_BUDGET, text: false, env: WT.treeEnvOf(rec, env()), ...helperOpts() });
       if (r.ok) last = { a11yOk: true, nodes: r.snapshot.nodes.length, usable: R.usableNodes(r.snapshot.nodes) };
       else if (WT.treeUnreachable(r)) { last = { a11yOk: false, reason: `${r.code}: ${r.why}` }; break; }
       if (last.usable) break;
@@ -597,6 +597,13 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     const a11y = await wt.probeA11y({ env: base, ...helperOpts() });
     let a11yApps = [];
     if (a11y.ok) { const r = await wt.runHelper({ op: 'apps' }, { env: base, wallMs: 8000, ...helperOpts() }); if (r.ok) a11yApps = r.apps || []; }
+    // lane app-display-a11y-bus: an app with its OWN a11y bus (its private session where the user has none) is on THAT
+    // bus — its tree facts join the rows (never the desktop class's), and it counts for the verbs' tree verdict
+    let a11yV = a11y;
+    for (const bus of WT.a11yBusesOf(keeper.listApps() || [])) {
+      const r = await wt.runHelper({ op: 'apps' }, { env: WT.treeEnvOf({ a11yBus: bus }, base), wallMs: 8000, ...helperOpts() });
+      if (r.ok) { a11yApps = [...a11yApps, ...(r.apps || []).map((x) => ({ ...x, ownBus: true }))]; if (!a11yV.ok) a11yV = { ok: true }; }
+    }
     const first = sharedRows(facts, a11yApps);
     let backends = null;
     if (first.rows.length) { try { backends = (await backendsFor(liveRecord(first.rows[0].handle))).backends; } catch { backends = null; } }
@@ -604,15 +611,15 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     // unreadable while the backends were probed never hands that window's row over (one await late); the rows, the count
     // and the note are this answer's. The backends describe the first row's display only while that row is still listed.
     const { rows, reachUnreadable } = stillListed(facts, a11yApps);
-    const verbs = !rows.length ? wt.verbVerdicts({ a11y, backends: { rows: [], injection: null, ours: true } })
-      : backends && rows.some((r) => r.handle === first.rows[0].handle) ? wt.verbVerdicts({ a11y, backends }) : wt.verbVerdicts({ a11y });
+    const verbs = !rows.length ? wt.verbVerdicts({ a11y: a11yV, backends: { rows: [], injection: null, ours: true } })
+      : backends && rows.some((r) => r.handle === first.rows[0].handle) ? wt.verbVerdicts({ a11y: a11yV, backends }) : wt.verbVerdicts({ a11y: a11yV });
     // P10: the other class — only while the switch is on; the rows are the bus
     // minus ours, marked; the switch off drops every desktop lease right here
     enforceConsent();
     let desktopRowsOut = [];
     const enabled = desktopEnabled();
     if (enabled) {
-      const drows = DESK.desktopRows(a11yApps, { ourPids: ourPids(), selfPid });
+      const drows = DESK.desktopRows(a11yApps.filter((x) => !x.ownBus), { ourPids: ourPids(), selfPid });
       desktopSeen.clear();
       for (const r of drows) desktopSeen.set(r.pid, r);
       desktopRowsOut = drows.map((r) => { const l = leases.get(r.handle); return { ...r, lease: leaseView(l), mine: !!(l && facts && l.sessionId === facts.sessionId) }; });
@@ -1094,7 +1101,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     const who = { sessionId: facts.sessionId, browserKey: facts.browserKey, handle: rec.id, origin: rec.origin || ORIGIN };
     gateMode(rec, lease, 'snapshot', false, who); // lane E (D7): an explicit pixel share refuses the tree by name; auto snapshots AS the probe
     const pids = pidsOf(rec);
-    const r = await wt.snapshotTarget({ pids, budget, text, env: env(), ...helperOpts() });
+    const r = await wt.snapshotTarget({ pids, budget, text, env: WT.treeEnvOf(rec, env()), ...helperOpts() });
     const held = stillHeld(rec, facts, 'snapshot'); // lane E verify: a revoke during the traversal ⇒ the tree is never handed over
     // mirror red on 2.369.181: under `auto` the snapshot IS the probe, and a tree this machine cannot read — for ANY reason
     // (no python3, no gi binding, no bus, a helper that died or hung) — resolves to pixels like a window with no tree:
@@ -1134,7 +1141,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     const verb = String(body.verb || '');
     const { rec, lease } = requireLease(handle, facts, verb || 'act');
     if (rec.origin === AGENT_BROWSER_ORIGIN) { try { keeper.noteInput?.(rec.id); } catch { /* the idle clock only */ } } // lane e2a r3 (#7): an agent driving its own browser is not idle
-    const base = env();
+    const base = WT.treeEnvOf(rec, env()); // lane app-display-a11y-bus: the node verbs act on THIS app's a11y bus
     const who = { sessionId: facts.sessionId, browserKey: facts.browserKey, handle: rec.id, origin: rec.origin || ORIGIN };
     // P10 (§6.6): on the user's own desktop the two INJECTION verbs are refused
     // by NAME before any backend is probed — nothing is ever injected there

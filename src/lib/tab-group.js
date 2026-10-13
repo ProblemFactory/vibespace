@@ -6,7 +6,7 @@ import { inboxCountText } from './title-chips.js'; // lane G: the inbox chip nev
 import { showWindowContextMenu } from './taskbar.js';
 import { dragEndVerdict } from './drag-end.js';
 import { captureOn, setDragShield, attachDragFeed, startPointerDrag } from './drag-feed.js'; // ONE feed for every drag door (lane-drag-release verify r1)
-import { normalizeChain, displayedPanes, clampRatio, splitColumns, paneMinPx, visualTabOrder, splitPartner, splitSideFor, ownerColor, chainSyncKey, showTab, enterSplit, insertTab, moveTab, removeTab, swapSides, SPLIT_RATIO_DEFAULT, holdRatio, heldRatio, releaseRatio, ratioDiffers, followFor, foldBackTarget, tabDragMode, closeAsks, groupCloseList } from './chain-layout.js';
+import { normalizeChain, displayedPanes, clampRatio, splitColumns, paneMinPx, visualTabOrder, splitPartner, splitSideFor, chainFocusOf, ownerColor, chainSyncKey, showTab, enterSplit, insertTab, moveTab, removeTab, swapSides, SPLIT_RATIO_DEFAULT, holdRatio, heldRatio, releaseRatio, ratioDiffers, followFor, foldBackTarget, tabDragMode, closeAsks, groupCloseList } from './chain-layout.js';
 
 /**
  * Tab grouping — mixin methods for WindowManager.
@@ -1647,6 +1647,17 @@ const tabGroupMethods = {
     return kept;
   },
 
+  /** B-9cd4: the focus on a rebuilt chain's member (PURE chainFocusOf) moves to its FRAME and names its active tab —
+   *  a phone shows only the marked window, and the mark the boot left on a guest's hidden frame was a blank screen
+   *  until a pick. Called before _applyChainLayout, which syncs the hidden views. null = nothing moves. */
+  _focusChainFrame(focus) {
+    if (!focus) return;
+    this.windows.forEach((w) => w.element.classList.remove('window-active', 'highlight-subtle', 'highlight-strong'));
+    const intensity = this._settings?.get('window.activeHighlightIntensity') ?? 'normal';
+    this.windows.get(focus.frame).element.classList.add('window-active', ...(intensity === 'subtle' ? ['highlight-subtle'] : intensity === 'strong' ? ['highlight-strong'] : []));
+    this.activeWindowId = focus.active;
+  },
+
   /** Rebuild a chain from a persisted / remote record: `order` (the strip) and
    *  `split.left` / `split.right` (the sides) are copied as given — a record
    *  written before split tabs v2 has neither and normalize repairs it by rule;
@@ -1677,7 +1688,8 @@ const tabGroupMethods = {
     if (activeWin) activeWin.content.classList.remove('tab-hidden');
     if (chain.active !== 0) hostWin.content.classList.add('tab-hidden');
     this._normalizeChain(chain); // a persisted pair whose member did not come back ⇒ tabs
-    this._applyChainLayout(chain);
+    this._focusChainFrame(chainFocusOf(chain, this.activeWindowId)); // B-9cd4: a focused member ⇒ the FRAME carries the mark
+    this._applyChainLayout(chain); // (syncs the hidden views — the mark just moved)
     try { this._app?.stage?.onChainJoined?.(chain, { restored: true }); } catch (err) { console.warn('[tab-group] stage onChainJoined failed', err); } // the FRAME is the hero (verify r2): a remote record that groups the hero under another session's host; `restored` (verify r3): a record re-forming the hero's own frame keeps the frame's home
     this._renderTabBar(chain);
     // like every other chain mutation: the taskbar (one GROUPED button, the

@@ -318,6 +318,15 @@ function splitSideFor(chain, anchorId, guestId) {
   return gi > ai ? { side: 'right', pair: [a, g] } : { side: 'left', pair: [g, a] };
 }
 
+/** B-9cd4 — WHERE THE FOCUS SITS once a chain is (re)built around the window that had it: a grouped window paints
+ *  only inside its FRAME (`tabs[0]`), so the frame carries the active mark and the focus names the chain's ACTIVE tab
+ *  (in a split, the pane the split verdict left active). null = the focus is not on a member (nothing moves). A phone
+ *  shows ONLY the marked window: a mark left on a guest's hidden frame was a blank screen until a window was picked. */
+function chainFocusOf(chain, focusId) {
+  if (!chain || !Array.isArray(chain.tabs) || !chain.tabs.length || focusId == null || !chain.tabs.includes(String(focusId))) return null;
+  return { frame: chain.tabs[0], active: chain.tabs[chain.active] ?? chain.tabs[0] };
+}
+
 // ── THE VERBS (split tabs v2, docs/design-split-ux.zh.md §8) ──
 // Each mutates IN PLACE and ends in normalizeChain; each picks its substitute
 // pane itself (the validator never guesses). tab-group.js calls them and then
@@ -743,6 +752,7 @@ module.exports = {
   RATIO_HOLD_MS, holdRatio, heldRatio, releaseRatio,
   clampRatio, splitValid, normalizeChain, cloneChain, chainSyncKey, ratioDiffers, displayedPanes, splitAnchor, pairFor, splitColumns, paneMinPx, visualTabOrder, sidesOf, sideOf, swappedPair, splitPartner,
   splitSideFor, // inc-mv4q1u6b-ksyh: a split never moves a tab across the strip
+  chainFocusOf, // B-9cd4: a rebuilt chain's focus is its frame showing its active tab (the phone's first paint)
   showTab, enterSplit, insertTab, moveTab, removeTab, swapSides,
   withoutMembers, // inc-mukeyzpt-lpou: a record read without the windows this client closed
   restoreVerdict, // inc-muundq37-cjay: a queued chain waits for its LAST member, then is rebuilt whole

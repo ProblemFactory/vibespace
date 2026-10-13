@@ -179,6 +179,25 @@ import { openShareDialog, openAskDialog, shareChipText } from './window-share.js
 const WATCH_HINT_EVERY_MS = 8000;
 /** The status's minimum on the strip (its ONE flexible item) — public/style.css `.desktop-bar > .desktop-status` min-width says the same (test-live-bar-layout pins the pair). */
 export const DESK_STATUS_MIN_PX = 40;
+// lane app-display-notify-sink: an app's notification inside its window (= src/desktop-apps.js NOTIFY_TOAST_MS / NOTIFY_JOURNAL_MAX)
+export const NOTE_TOAST_MS = 6000;
+export const NOTE_RING_MAX = 50;
+/** ⋯ ▸ Notifications: one row — the time, the summary (the body rides the row's tooltip). */
+export function noteLine(n) {
+  const d = new Date(Number(n && n.at) || 0);
+  const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  return `${hm}  ${String((n && (n.summary || n.body)) || '').slice(0, 80)}`;
+}
+/** The toast's bell (an SVG built in the SVG namespace — markup parsed as HTML draws nothing). */
+function noteIcon() {
+  const NS = 'http://www.w3.org/2000/svg', svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('class', 'desktop-app-note-icon'); svg.setAttribute('aria-hidden', 'true');
+  const p = document.createElementNS(NS, 'path');
+  p.setAttribute('d', 'M12 3a6 6 0 0 0-6 6v4l-2 3h16l-2-3V9a6 6 0 0 0-6-6zm-2 15a2 2 0 0 0 4 0');
+  p.setAttribute('fill', 'none'); p.setAttribute('stroke', 'currentColor'); p.setAttribute('stroke-width', '1.8'); p.setAttribute('stroke-linejoin', 'round');
+  svg.appendChild(p);
+  return svg;
+}
 
 /** A capability cell of the record's rung, as the server served it (`rec.caps` — src/desktop-apps.js capsOf on the
  *  view; lane dc-desktop-caps): the window reads these, never a rung id or a stream kind. An absent cell is false. */
@@ -824,6 +843,24 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
   const openPinMenu = (e) => { e?.stopPropagation?.(); const r = pinChip.getBoundingClientRect(); showContextMenu(r.left, r.bottom + 2, pinItems()); };
   pinChip.addEventListener('click', openPinMenu, { signal: lsig });
   pinChip.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') { e.preventDefault(); openPinMenu(e); } }, { signal: lsig });
+  // lane app-display-secrets: the logins the app's Secret Service keeps on its private bus — ⋯ ▸ Stored logins (n) with
+  // ONE door (Forget all, confirmed); the count is read when the window opens and each time the pointer reaches ⋯
+  let secretsCount = null;
+  const refetchSecrets = async () => { if (!rec || rec.secrets !== 'on') return; const r = await fetchJson(`/api/desktop/apps/${encodeURIComponent(id)}/secrets`); if (!closed && r && Number.isInteger(r.count)) secretsCount = r.count; };
+  const forgetSecrets = async () => {
+    const ok = await showConfirmDialog({ title: t('Forget the logins this app keeps?'), message: t('VibeSpace keeps this app\'s logins for it in its own session; after you forget them the app asks again.'), confirmText: t('Forget all'), danger: true });
+    if (!ok) return;
+    const r = await fetchJson(`/api/desktop/apps/${encodeURIComponent(id)}/secrets/forget`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    if (!r || r.error) { showToast(r?.error || t('Could not forget the logins'), { type: 'error' }); return; }
+    secretsCount = 0;
+    showToast(t('Forgot {n} stored logins', { n: r.forgot || 0 }), { duration: 3500 });
+  };
+  const secretsItems = () => [
+    { label: t('VibeSpace keeps this app\'s logins for it in its own session; after you forget them the app asks again.'), disabled: true, style: 'min-width:18em;max-width:22em;white-space:normal' },
+    { label: t('Forget all'), action: () => forgetSecrets(), disabled: !secretsCount },
+  ];
+  moreBtn.addEventListener('pointerenter', () => { refetchSecrets(); }, { signal: lsig });
+  refetchSecrets();
   moreBtn.onclick = (e) => {
     e.stopPropagation();
     const r = moreBtn.getBoundingClientRect();
@@ -837,9 +874,11 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
     if (cap(rec, 'seamless')) items.push({ label: t('Show window frame'), children: frameItems() });
     if (cap(rec, 'scales')) items.push({ label: t('Scale'), children: scaleItems() });
     if (cap(rec, 'scales')) items.push({ label: t('Pin size…'), children: pinItems() }); // lane e2b: the xpra per-window rung (the client fits the pin)
+    if (rec && rec.secrets === 'on') items.push({ label: t('Stored logins ({n})', { n: secretsCount == null ? '…' : secretsCount }), children: secretsItems() }); // lane app-display-secrets
     items.push(...shareItems()); // lane E: Share with agent… / Ask an agent to take control… (a local app, every rung)
     if (canKeep()) items.push({ label: t('Keep running'), action: () => keepBtn.onclick() });
     if (canStop()) items.push({ label: t('Stop app'), action: () => stopApp() });
+    if (rec && (rec.notify === 'on' || appNotes.length)) items.push({ label: t('Notifications'), children: notesItems() }); // lane app-display-notify-sink
     if (items.length && items[items.length - 1].separator) items.pop();
     if (!items.length) return;
     showContextMenu(r.left, r.bottom + 2, items);
@@ -951,17 +990,47 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
   const off = app.ws.onGlobal((m) => {
     if (m.type === 'window-reach-updated') { const v = (m.reach || []).find((x) => x && x.handle === id) || null; if (v || reachView) applyReach(v); return; } // lane E
     if (m.type === 'desktop-app-viewers') { if (m.id === id) applyViewers(m); return; } // x5
+    if (m.type === 'desktop-app-notify') { if (m.id === id) showAppNote(m); return; } // lane app-display-notify-sink
     if (m.type === 'window-leases-updated') { const l = (m.leases || []).find((x) => x && x.handle === id) || null; if ((l && !lease) || (!l && lease) || (l && lease && (l.input !== lease.input || l.sessionId !== lease.sessionId || (l.takenBy && l.takenBy.viewerId) !== (lease.takenBy && lease.takenBy.viewerId)))) applyLease(l); else lease = l; return; }
     if (m.type !== 'desktop-apps-updated') return;
     const r = (m.apps || []).find((a) => a.id === id);
     if (r) applyRecord(r);
   });
+  // ── lane app-display-notify-sink: the app's notifications (the sink on its private bus → the hub) — a toast INSIDE this
+  // window (the app's name, its words, NOTE_TOAST_MS, a click raises the window), the last 50 under ⋯ ▸ Notifications, and
+  // "seen" told to the hub when the person is at the window while a For-you item waits (it resolves there).
+  let appNotes = [], noteWaiting = false;
+  const refetchNotes = async () => { const r = await fetchJson(`/api/desktop/apps/${encodeURIComponent(id)}/notifications`); if (!closed && r && Array.isArray(r.notes)) appNotes = r.notes.slice(-NOTE_RING_MAX); };
+  const noteSeen = () => { if (!noteWaiting) return; noteWaiting = false; fetchJson(`/api/desktop/apps/${encodeURIComponent(id)}/notifications/seen`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); };
+  const notesItems = () => (appNotes.length ? appNotes.slice().reverse().map((n) => ({ label: noteLine(n), title: n.body || '', disabled: true })) : [{ label: t('No notifications yet'), disabled: true }]);
+  const showAppNote = (m) => {
+    const n = m.note || {};
+    appNotes.push(n); if (appNotes.length > NOTE_RING_MAX) appNotes.splice(0, appNotes.length - NOTE_RING_MAX);
+    if (m.attention) noteWaiting = true;
+    let stack = winInfo.content.querySelector(':scope > .desktop-app-notes');
+    if (!stack) { stack = document.createElement('div'); stack.className = 'desktop-app-notes'; winInfo.content.appendChild(stack); }
+    const el = document.createElement('div');
+    el.className = 'desktop-app-note' + (n.urgency === 'critical' ? ' desktop-app-note-critical' : '');
+    el.setAttribute('role', 'status'); el.title = t('Show this window');
+    el.appendChild(noteIcon());
+    const words = document.createElement('div'); words.className = 'desktop-app-note-words';
+    for (const [cls, text] of [['desktop-app-note-app', m.label || titleText()], ['desktop-app-note-summary', n.summary], ['desktop-app-note-body', n.body]]) {
+      if (!text) continue;
+      const d = document.createElement('div'); d.className = cls; d.textContent = String(text); words.appendChild(d);
+    }
+    el.appendChild(words);
+    el.addEventListener('click', () => { el.remove(); app.wm.revealWindow(winInfo.id); noteSeen(); });
+    stack.appendChild(el);
+    while (stack.children.length > 3) stack.firstElementChild.remove();
+    setTimeout(() => el.remove(), NOTE_TOAST_MS);
+  };
   const refetchLease = async () => { const r = await fetchJson(`/api/desktop/apps/${encodeURIComponent(id)}/lease`); if (r && !r.error) applyLease(r.lease); };
   const refetchViewers = async () => { const r = await fetchJson(`/api/desktop/apps/${encodeURIComponent(id)}/viewers`); if (r && !r.error) applyViewers(r); };
   // a server restart ADOPTS the session before any client reconnects, so the
   // adoption broadcast reaches nobody — re-read the record on every reconnect
-  const onWs = (connected) => { if (connected) { refetch(); refetchLease(); refetchViewers(); refetchReach(); } };
+  const onWs = (connected) => { if (connected) { refetch(); refetchLease(); refetchViewers(); refetchReach(); refetchNotes(); } };
   app.ws.onStateChange(onWs);
+  winInfo.element.addEventListener('pointerdown', () => noteSeen(), { capture: true, signal: lsig }); // lane app-display-notify-sink: the person is at this window
   const tick = setInterval(() => {
     if (rec && rec.state === 'ready') { const it = idleChipText(rec); idleChip.textContent = it; idleChip.style.display = it ? '' : 'none'; }
     // seamless: the idle chip is folded away — the last minute before an idle stop is said as a toast, once per approach
@@ -1087,6 +1156,7 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
   renderLease();
   refetchLease();
   refetchViewers();
+  refetchNotes(); // lane app-display-notify-sink
   // first record, then the connect (the gate re-reads if the GET raced the launch)
   fetchJson(`/api/desktop/apps/${encodeURIComponent(id)}`).then((r) => {
     if (closed) return;

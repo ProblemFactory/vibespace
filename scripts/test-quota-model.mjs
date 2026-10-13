@@ -440,6 +440,7 @@ console.log('\n⑨ backend shape detection is by FIELDS, never by key name');
       ['src/usage-anchors.js', ['migrated', 'an empty bucket anchors as no-bucket, like the fabricated status:unknown one']],
       ['src/usage-estimator.js', ['migrated', 'overlayCache never replaces a bucket the raw reading marks empty']],
       ['src/reading-lag.js', ['migrated', 'windowOf skips empty windows — a sliding reset is not identity evidence']],
+      ['src/server/oat-mint.js', ['migrated', 'the token mint\'s second look (oat-verify F1) reads the /usage panel only through reading-lag windowOf / compareWindows, which skip empty windows']],
       ['src/lib/usage-meter.js', ['migrated', 'renders every limit, and an empty window says "starts on first use" instead of a reset']],
       ['src/rate-limit-capture.js', ['migrated', 'produces the bucket, writes through the one path']],
       ['src/usage-routes.js', ['migrated', 'every writer goes through the write path; the codex summariser accumulates PER limitId']],

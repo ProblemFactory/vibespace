@@ -138,6 +138,42 @@ export function billingPillHtml(forms, esc) {
   return `<span class="pill-full">${esc(f.full || '')}</span>` + (f.compact ? `<span class="pill-compact">${esc(f.compact)}</span>` : '') + `<span class="pill-icon">${icon}</span>`;
 }
 
+/**
+ * THE PHONE BAR'S FOLD (lane phone-chat-composer; lane phone-bar-billing-nofold — mirror-262 red on the runner: its
+ * wider DejaVu fonts left the billing chip less room than its full words and the fold hid it behind ⋯). The bar is ONE
+ * row of `room` px (⋯ and its gap already taken); `chips` = { key, w } in bar order (w = the drawn width, 0 = a chip
+ * this face never shows), the billing chip with `forms` = its { full, compact, icon } widths. The NEVER-FOLD chips are
+ * laid first — search · model · a turn waiting on the person · a broken-setup alert · the billing chip, the phone's
+ * stand-in for the title bar's badge (who pays) at the widest form that fits beside them (full → compact → icon; the
+ * icon even when nothing fits) — then every other chip in bar order while it fits; past the first that does not, the
+ * rest fold too; effort + style always fold (the model chip's sheet carries them).
+ * → { folded: Set of keys, billing: 'full' | 'compact' | 'icon' | null (no billing chip) }
+ */
+export const PHONE_BAR_NEVER_FOLD = Object.freeze(['search', 'model', 'turnstate', 'health', 'billing']);
+export function phoneBarFold({ chips = [], room = 0, gap = 0 } = {}) {
+  const px = (v) => (Number.isFinite(fin(v)) ? v : 0);
+  const used = (w) => (w > 0 ? w + px(gap) : 0);
+  let left = px(room);
+  for (const c of chips) if (c.key !== 'billing' && PHONE_BAR_NEVER_FOLD.includes(c.key)) left -= used(px(c.w));
+  const bill = chips.find((c) => c.key === 'billing');
+  let billing = null;
+  if (bill) {
+    const f = bill.forms || { full: px(bill.w) };
+    billing = pillMode({ slotPx: Math.max(0, left), fullPx: f.full, compactPx: f.compact });
+    left -= used(px(f[billing] ?? f.full));
+  }
+  const folded = new Set();
+  let full = false;
+  for (const c of chips) {
+    if (PHONE_BAR_NEVER_FOLD.includes(c.key)) continue;
+    if (c.key === 'effort' || c.key === 'style') { folded.add(c.key); continue; } // never part of the row: their width folds nothing else
+    const w = px(c.w);
+    if (full || w > left) { folded.add(c.key); full = true; continue; }
+    left -= used(w);
+  }
+  return { folded, billing };
+}
+
 /** The inbox chip's number as drawn: the count, never wider than two digits and a plus. */
 export function inboxCountText(count) {
   const n = Math.max(0, Math.floor(Number(count) || 0));

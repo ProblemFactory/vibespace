@@ -225,7 +225,7 @@ const ROWS = [
     ['an exit / error code stays', 'code: ENOENT\nEXIT_CODE=1', null],
     ['"Basic Latin" stays', 'Basic Latin and Basic authentication', null],
     ['an empty value stays', 'TOKEN=\nSECRET=', null],
-    ['a URL is the URL rule\'s (not this one)', 'https://api.x/v1?access_token=abc', null],
+    ['a URL query value: hidden by R7 now (inbox-verify F1 — a stored head runs the URL rule first; a judge\'s input had none)', 'https://api.x/v1?access_token=abc', 'abc'],
     ['a plain key with nothing after it and a sibling at the same depth stays', 'token:\nnext: 1\nkept', null],
     ['a Stripe publishable key stays (public), a reg query Name row stays', 'pk_live_4eC39HqLyjWDarjtT1zdp7dc\n    Name    REG_SZ    bob', null],
 ];
@@ -274,6 +274,22 @@ await section('§2b PURE secret-shapes: what a stored head never keeps (verify r
   const shapes = { quoteNoClose: (n) => 'token="' + 'x'.repeat(n), kvStorm: (n) => 'a=b '.repeat(n / 4), pwStorm: (n) => 'password '.repeat(n / 9), eyJ: (n) => 'eyJ'.repeat(n / 3), bearer: (n) => 'Bearer '.repeat(n / 7), colon: (n) => ':'.repeat(n), spaces: (n) => 'a: ' + ' '.repeat(n) };
   const best = (mk, n) => { let b = Infinity; for (let i = 0; i < 5; i++) { const t = mk(n); const t0 = process.hrtime.bigint(); SS.redactSecrets(t); b = Math.min(b, Number(process.hrtime.bigint() - t0) / 1e6); } return b; };
   for (const [k, mk] of Object.entries(shapes)) { const a = best(mk, 16384), b = best(mk, 65536); ok(b <= 1000 && (a < 0.5 || b / a <= 8), `linear on ${k}: ${a.toFixed(2)} ms → ${b.toFixed(2)} ms (×4 input)`); }
+  // R7 / R8 (inbox-verify F1, 2026-10-13 — the Decision API's judge read a record's token query values and its key material verbatim)
+  const R7A = ['https://hooks.example.com/cb?to', 'ken=tok_9f8e7d6c5b4a&sig=ab12'].join(''), R7B = 'see https://x.io/a?access_token=AT-99zz&api_key=K-77yy&x=1#key=frag-55';
+  const qa = SS.redactSecrets(R7A).text, qb = SS.redactSecrets(R7B).text;
+  ok(qa === ['https://hooks.example.com/cb?to', 'ken=«redacted»&sig=«redacted»'].join('') && !/AT-99zz|K-77yy|frag-55/.test(qb) && qb.includes('&x=1') && SS.redactSecrets(qb).text === qb, 'R7: a URL query value named by a secret word goes, its name and the plain parameters stay (idempotent)', [qa, qb]);
+  ok(SS.redactSecrets('https://x.io/a?redirect=/home&page=2&code=abc').redacted === 0, "R7 NEGATIVE: a plain parameter (and `code`, R2's exception) stays");
+  const RUNS = { hex: '9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08', b64: 'QWxhZGRpbjpvcGVuIHNlc2FtZQQWxhZGRpbjpvcGVuIHNlc2FtZQ==', b64url: 'Zk3_xQ9-Lm2PwR7tYb4NcV8sHj6KdF1gA0eU5iO' };
+  for (const [k, v] of Object.entries(RUNS)) { const on = SS.redactSecrets(`x ${v} y`, { runs: true }).text, off = SS.redactSecrets(`x ${v} y`).text; ok(on === 'x «redacted» y' && off.includes(v) && SS.redactSecrets(on, { runs: true }).text === on, `R8 (${k}): key material with no name goes when asked ({ runs: true } — the judge's input), stays in a stored head (a sha is diagnosis)`, [on, off]); }
+  const KEEP = ['/var/tmp/vibespace-lanes/wt-decision-input-scrub/src/decision-model.js', 'phone-arrangement-verify-r1-NO-GO-2026Oct12', 'AIWorkspaceVibespaceDecisionModelScrubLane', 'sha 9e2852896 short', 'a'.repeat(40)];
+  ok(KEEP.every((t) => SS.redactSecrets(t, { runs: true }).redacted === 0), 'R8 NEGATIVE: a path, a slug, an identifier with no digit, a short sha, one repeated letter stay');
+  const bestRuns = (mk, n) => { let b = Infinity; for (let i = 0; i < 5; i++) { const t = mk(n); const t0 = process.hrtime.bigint(); SS.redactSecrets(t, { runs: true }); b = Math.min(b, Number(process.hrtime.bigint() - t0) / 1e6); } return b; };
+  for (const [k, mk] of Object.entries({ queryStorm: (n) => ['?to', 'ken='].join('').repeat(n / 7), queryName: (n) => '?' + 'a'.repeat(n), runStorm: (n) => ('aB1' + 'x'.repeat(27) + ' ').repeat(n / 31), runWhole: (n) => 'aB1/'.repeat(n / 4) })) { const a = bestRuns(mk, 16384), b = bestRuns(mk, 65536); ok(b <= 1000 && (a < 0.5 || b / a <= 8), `R7 / R8 linear on ${k}: ${a.toFixed(2)} ms → ${b.toFixed(2)} ms (×4 input)`); }
+  // RED CONTROL: the table without R7 / R8 (a patched copy) keeps the query value and the run — the legs above can fail
+  const src78 = fs.readFileSync(path.join(REPO, 'src/secret-shapes.js'), 'utf8');
+  const cut78 = src78.split('\n').filter((l) => !/text = text\.replace\(URL_QUERY_RE|if \(runs\) text = text\.replace\(RUN_RE/.test(l)).join('\n');
+  const SS78 = mutantCopies('exr78', REPO).load('src/secret-shapes.js', cut78, 'nor78');
+  ok(cut78 !== src78 && SS78.redactSecrets(R7A).text.includes('tok_9f8e7d6c5b4a') && SS78.redactSecrets(`x ${RUNS.hex} y`, { runs: true }).text.includes(RUNS.hex), 'RED CONTROL: secret-shapes without R7 / R8 keeps the query value and the key material');
   // the wiring: the stored head carries the redaction (through outputHeads), the URL rule still first
   const h = E.outputHeads({ stdout: 'GITHUB_TOKEN=ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789\nhttps://u:pw@x.example/a?token=s3cr3t\n', stderr: '-----BEGIN EC PRIVATE KEY-----\nMHQCAQEEIBRz\n-----END EC PRIVATE KEY-----\n' });
   ok(!/ABCDEFGHIJKLMNOPQRSTUVWXYZ|pw@|s3cr3t|MHQCAQEEIBRz/.test(h.stdout + h.stderr) && /GITHUB_TOKEN=«redacted»/.test(h.stdout) && /BEGIN EC PRIVATE KEY-----\n«redacted»\n-----END/.test(h.stderr), 'outputHeads: the stored heads redact the shapes (pre-fix: all nine verbatim on the audit line, the broadcast, the card, the history, the CLI)', h);

@@ -129,7 +129,7 @@ function renderCard(app, v, { refresh, focus }) {
   // ── 2. SETUP BLOCK, ABOVE THE FIELDS ──
   if (v.setup) {
     const setup = el('div', 'integ-setup');
-    setup.appendChild(el('div', 'integ-setup-title', t('Before connecting')));
+    setup.appendChild(el('div', 'integ-setup-title', v.setup.title ? t(v.setup.title) : t('Before connecting')));
     if (v.setup.callbackUrl) {
       const row = el('div', 'integ-cb-row');
       row.appendChild(el('span', 'plugin-cfg-label', t('Callback URL')));
@@ -149,7 +149,7 @@ function renderCard(app, v, { refresh, focus }) {
       if (v.setup.callbackNote) setup.appendChild(el('div', 'plugin-detail', t(v.setup.callbackNote)));
     }
     if (v.setup.prerequisites && v.setup.prerequisites.length) {
-      const ul = el('ul', 'integ-prereq');
+      const ul = el(v.setup.ordered ? 'ol' : 'ul', 'integ-prereq');
       for (const p of v.setup.prerequisites) ul.appendChild(el('li', null, t(p)));
       setup.appendChild(ul);
     }
@@ -184,8 +184,8 @@ function renderCard(app, v, { refresh, focus }) {
       if (why) wrap.appendChild(el('span', 'plugin-cfg-hint', why));
       return { wrap, r };
     };
-    const cluster = mk('cluster', t('Use cluster default'), v.source === 'cluster', !v.clusterAvailable, v.clusterAvailable ? null : (v.clusterWhy ? R.credentialWhyText({ whyCode: v.clusterWhyCode, whyParams: v.clusterWhyParams, why: v.clusterWhy }, { t }) : t('no cluster default on this instance')));
-    const own = mk('own', t('Use my own key'), v.source !== 'cluster', false, null);
+    const cluster = mk('cluster', v.choiceWords ? t(v.choiceWords.cluster) : t('Use cluster default'), v.source === 'cluster', !v.clusterAvailable, v.clusterAvailable ? null : (v.clusterWhy ? R.credentialWhyText({ whyCode: v.clusterWhyCode, whyParams: v.clusterWhyParams, why: v.clusterWhy }, { t }) : t('no cluster default on this instance')));
+    const own = mk('own', v.choiceWords ? t(v.choiceWords.own) : t('Use my own key'), v.source !== 'cluster', false, null);
     cluster.r.onchange = async () => {
       if (!cluster.r.checked) return;
       const r = await call(`/api/integrations/${encodeURIComponent(v.id)}`, json('PUT', { use: 'cluster' }), t('Could not switch to the cluster default'));

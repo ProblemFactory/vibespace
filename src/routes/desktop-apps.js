@@ -587,10 +587,33 @@ router.post('/api/desktop/apps/:id/takeover', (req, res) => {
   } catch (e) { fail(res, e); }
 });
 // P8-2 x5: ONE active viewer per app window — who watches, and "Resume here"
+// lane app-display-secrets: the logins the app's Secret Service keeps (the window's ⋯ ▸ Stored logins) and its one door
+router.get('/api/desktop/apps/:id/secrets', (req, res) => {
+  if (!ID_RE.test(req.params.id)) return res.status(400).json({ error: 'bad id', code: 'bad-request' });
+  if (!ctx.keeper.get(req.params.id)) return res.status(404).json({ error: `no desktop app ${req.params.id}`, code: 'not-found' });
+  res.json(ctx.keeper.appSecrets ? ctx.keeper.appSecrets(req.params.id) : { secrets: 'off', count: 0 });
+});
+router.post('/api/desktop/apps/:id/secrets/forget', async (req, res) => {
+  if (!ID_RE.test(req.params.id)) return res.status(400).json({ error: 'bad id', code: 'bad-request' });
+  if (!ctx.keeper.get(req.params.id)) return res.status(404).json({ error: `no desktop app ${req.params.id}`, code: 'not-found' });
+  if (!ctx.keeper.forgetAppSecrets) return res.json({ ok: true, forgot: 0 });
+  const r = await ctx.keeper.forgetAppSecrets(req.params.id);
+  res.status(r.ok ? 200 : 500).json(r.ok ? r : { error: r.why, code: 'forget-failed' });
+});
 router.get('/api/desktop/apps/:id/viewers', (req, res) => {
   if (!ID_RE.test(req.params.id)) return res.status(400).json({ error: 'bad id', code: 'bad-request' });
   if (!ctx.keeper.get(req.params.id)) return res.status(404).json({ error: `no desktop app ${req.params.id}`, code: 'not-found' });
   res.json(ctx.keeper.viewersView(req.params.id));
+});
+// lane app-display-notify-sink: the app's last notifications (the window's ⋯ ▸ Notifications) and "the person raised it"
+router.get('/api/desktop/apps/:id/notifications', (req, res) => {
+  if (!ID_RE.test(req.params.id)) return res.status(400).json({ error: 'bad id', code: 'bad-request' });
+  if (!ctx.keeper.get(req.params.id)) return res.status(404).json({ error: `no desktop app ${req.params.id}`, code: 'not-found' });
+  res.json(ctx.keeper.notifications ? ctx.keeper.notifications(req.params.id) : { notify: 'off', notes: [] });
+});
+router.post('/api/desktop/apps/:id/notifications/seen', (req, res) => {
+  if (!ID_RE.test(req.params.id)) return res.status(400).json({ error: 'bad id', code: 'bad-request' });
+  res.json({ ok: true, resolved: ctx.keeper.notifySeen ? ctx.keeper.notifySeen(req.params.id) : false });
 });
 router.post('/api/desktop/apps/:id/viewers/takeover', (req, res) => {
   const id = req.params.id;

@@ -564,52 +564,177 @@ export function installManageAgents(App, ctx = {}) {
   // interactive OAuth consent: the BROWSER login chooses which account the
   // token belongs to, so the dialog says that in bold terms.
   _oatDialog(id, a, refresh) {
-    const { body, close } = createModalShell({ id: 'oat-dialog', title: t('Long-lived token — {name}', { name: a?.name || '' }), minWidth: '460px', escapeToClose: true });
+    // THE MINT IN THE DIALOG (lane oat-mint-flow, owner 2026-10-13): the hub
+    // runs `claude setup-token` itself (src/server/oat-mint.js) and this
+    // dialog STAYS OPEN on its phases — the link, the code if the page shows
+    // one, then "saved". The token never reaches this page; the WS
+    // `oat-mint` broadcast keeps every client's dialog on the same phase.
+    const name = a?.name || '';
+    const enc = encodeURIComponent(id);
+    let mint = null, closeTimer = null, gone = false;
+    const { overlay, body, close: shut } = createModalShell({ id: 'oat-dialog', title: t('Long-lived token — {name}', { name }), minWidth: 'min(460px, 92vw)', onClose: () => { gone = true; off?.(); clearTimeout(closeTimer); } });
+    const live = () => mint && !['saved', 'failed', 'cancelled'].includes(mint.phase);
     const status = a?.oat
       ? (a.oatDaysLeft <= 0
         ? `<div class="usage-warn">${t('The stored token has EXPIRED — sessions using it fail until you paste a fresh one.')}</div>`
-        : `<div class="usage-note">${t('Active — renews in {n} days.', { n: a.oatDaysLeft })}</div>`)
+        : `<div class="usage-note" id="oat-active">${t('Active — renews in {n} days.', { n: a.oatDaysLeft })}</div>`)
       : '';
     body.innerHTML = `
       <div class="usage-note">${t('A long-lived token (Anthropic’s official `claude setup-token`, the same one the Claude Code GitHub Action uses) lets this subscription run on remote machines and paired devices WITHOUT shipping its interactive login: it lasts 1 year and never rotates, so nothing can get out of sync. This is the intended way to run your own subscription on your own remote/CI machines — safer than shipping the login. It still bills YOUR subscription and is tied to it, so treat it like the account itself; Anthropic recommends an API key instead when a credential is shared broadly across many contexts. Limits: quota refresh (⟳) does not work through it, and when it expires sessions fail until you re-mint.')}</div>
       ${status}
-      <div class="oat-steps">
-        <div>1. ${t('Run the mint command in a terminal, then complete the sign-in it opens in your browser.')}</div>
-        <div class="usage-warn">${t('The BROWSER account you sign in with decides which account the token bills — sign in as “{name}”.', { name: escHtml(a?.name || '') })}</div>
-        <div>2. ${t('Copy the sk-ant-oat01-… value it prints and paste it below.')}</div>
-      </div>
-      <div class="oat-row"><button class="btn-create" id="oat-run">${t('Open a terminal with `claude setup-token`')}</button></div>
-      <div class="oat-row"><input type="text" id="oat-paste" class="settings-input-text" placeholder="sk-ant-oat01-…" spellcheck="false" autocomplete="off" style="width:100%"></div>
+      <div class="oat-mint" id="oat-mint"></div>
+      <details class="oat-manual"><summary>${t('Another way: paste a token')}</summary>
+        <div class="usage-note">${t('Minted it yourself with `claude setup-token`? Paste the sk-ant-oat01-… value here.')}</div>
+        <div class="oat-row"><input type="text" id="oat-paste" class="settings-input-text" placeholder="sk-ant-oat01-…" spellcheck="false" autocomplete="off" style="width:100%"></div>
+        <div class="oat-row"><button class="btn-create" id="oat-save">${t('Save token')}</button></div>
+      </details>
       <div class="dialog-buttons">
         ${a?.oat ? `<button class="btn-create danger" id="oat-remove">${t('Remove token')}</button>` : ''}
-        <button class="btn-create" id="oat-save">${t('Save token')}</button>
       </div>`;
-    body.querySelector('#oat-run').onclick = () => {
-      // LOCAL helper terminal — setup-token only needs a browser for the
-      // consent; local creds do not decide the account. CLOSE the dialog
-      // FIRST: modal overlays sit at z≈99998 while windows live at z≈9000,
-      // so the terminal would open blurred and unclickable behind it
-      // (adversarial-review must-fix).
-      close();
-      this.openShellTerminal(undefined, { initialCommand: 'claude setup-token' });
-      showToast(t('Complete the sign-in in your browser, copy the sk-ant-oat01-… value, then reopen ⋯ → Long-lived token to paste it.'), { duration: 9000 });
+    const box = body.querySelector('#oat-mint');
+    const mintApi = (path, opts) => fetchJson(`/api/accounts/${enc}/oat/mint${path}`, opts);
+    const startBtn = (label) => `<div class="oat-row"><button class="btn-create" id="oat-run">${escHtml(label)}</button></div>`;
+    const render = (m) => {
+      if (gone) return;
+      if (m && mint && m.id !== mint.id && live() && m.startedAt < mint.startedAt) return; // an older run's echo
+      mint = m || null;
+      const ph = mint?.phase || 'idle';
+      box.dataset.phase = ph;
+      let h = '';
+      if (ph === 'idle' || ph === 'cancelled') {
+        h = (ph === 'cancelled' ? `<div class="usage-note">${t('Sign-in cancelled.')}</div>` : '')
+          + `<div class="usage-warn">${t('The BROWSER account you sign in with decides which account the token bills — sign in as “{name}”.', { name: escHtml(name) })}</div>`
+          + startBtn(t('Start: sign in in your browser'));
+      } else if (ph === 'starting') {
+        h = `<div class="oat-wait"><span class="oat-spin"></span> ${t('Starting the sign-in…')}</div>`;
+      } else if (ph === 'url' || ph === 'waiting-code') {
+        h = `<div class="oat-who"><b>${t('Sign in as “{name}”', { name: escHtml(name) })}</b></div>`
+          + `<div class="oat-row oat-link-row"><a class="btn-create" id="oat-open" href="${escHtml(mint.url || '#')}" target="_blank" rel="noopener noreferrer">${t('Open the sign-in page')}</a>`
+          + `<button class="acct-icon" id="oat-copy" title="${escHtml(t('Copy link'))}" aria-label="${escHtml(t('Copy link'))}">⧉</button></div>`
+          + `<div class="oat-row" id="oat-hub-row" hidden></div>`
+          + (ph === 'waiting-code'
+            ? `<div class="usage-note">${t('This device’s browser cannot reach the sign-in command running on the hub, so the page shows a code instead.')}</div>`
+              + `<label class="oat-code-label" for="oat-code">${t('If the page gave you a sign-in code, paste it here')}</label>`
+              + `<div class="oat-row oat-code-row"><input type="text" id="oat-code" class="settings-input-text" spellcheck="false" autocomplete="off" autocapitalize="off"><button class="btn-create" id="oat-send">${t('Send')}</button></div>`
+            : '');
+      } else if (ph === 'minting') {
+        h = `<div class="oat-wait"><span class="oat-spin"></span> ${t('Creating the token…')}</div>`;
+      } else if (ph === 'confirm') {
+        // oat-verify F1: nothing PROVED whose token this is — the person names
+        // the account (the hub journals it owner-confirmed); the token waits on
+        // the hub, never on this page
+        const opts = (mint.choices || []).map((c) => `<option value="${escHtml(c.id)}"${c.id === id ? ' selected' : ''}>${escHtml(c.name)}</option>`).join('');
+        h = `<div class="usage-warn oat-confirm-q">${t('The CLI’s setup-token does not record which account signed in, so this cannot be checked automatically. Which account did you just sign in with in the browser?')}</div>`
+          + (mint.signedInAs ? `<div class="usage-note oat-signed-in">${t('This sign-in is {email}.', { email: escHtml(mint.signedInAs) })}</div>` : '')
+          + `<div class="oat-row"><select id="oat-pick" class="settings-input-text">${opts}</select></div>`
+          + `<div class="oat-row"><button class="btn-create" id="oat-keep">${t('Save')}</button><button class="btn-cancel" id="oat-drop">${t('Don’t save')}</button></div>`;
+      } else if (ph === 'saved') {
+        h = `<div class="usage-note oat-saved">✓ ${t('Saved · valid for 1 year')}</div>`;
+      } else if (ph === 'failed') {
+        // another account's token (its sign-in identity, or its /usage window
+        // matching another row's) — said with display names only, nothing saved
+        const said = mint.reason === 'identity_mismatch'
+          ? (mint.other ? t('This token’s usage window matches {other}, not {name} — not saved.', { other: escHtml(mint.other), name: escHtml(name) })
+            : t('This token belongs to {email}, not {name} — not saved.', { email: escHtml(mint.signedInAs || '?'), name: escHtml(name) }))
+          : escHtml(mint.error || t('The sign-in did not finish.'));
+        h = `<div class="usage-warn oat-failed">${said}</div>` + startBtn(t('Retry'));
+      }
+      const keep = body.querySelector('#oat-code')?.value || '';
+      box.innerHTML = h;
+      const code = box.querySelector('#oat-code'); if (code && keep) code.value = keep;
+      const run = box.querySelector('#oat-run');
+      if (run) run.onclick = async () => {
+        run.disabled = true;
+        const r = await mintApi('', { method: 'POST' }).catch(() => null);
+        if (r?.mint) render(r.mint);
+        if (!r?.success) { run.disabled = false; showToast(r?.error || t('Could not start — server unreachable'), { type: 'error' }); }
+      };
+      const cp = box.querySelector('#oat-copy');
+      if (cp) cp.onclick = () => { copyText(mint?.url || ''); showToast(t('Copied'), { duration: 2000 }); };
+      const send = box.querySelector('#oat-send');
+      if (send) {
+        const go = async () => {
+          const v = code.value.trim();
+          if (!v) { code.focus(); return; }
+          send.disabled = true;
+          const r = await mintApi(`/${encodeURIComponent(mint.id)}/code`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: v }) }).catch(() => null);
+          if (r?.mint) render(r.mint);
+          if (!r?.success) { if (box.querySelector('#oat-send')) box.querySelector('#oat-send').disabled = false; showToast(r?.error || t('Send failed'), { type: 'error' }); }
+        };
+        send.onclick = go;
+        code.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); go(); } };
+      }
+      const yesBtn = box.querySelector('#oat-keep'), noBtn = box.querySelector('#oat-drop');
+      if (yesBtn && noBtn) {
+        const answer = async (yes) => {
+          yesBtn.disabled = noBtn.disabled = true;
+          const pick = box.querySelector('#oat-pick')?.value || id;
+          const r = await mintApi(`/${encodeURIComponent(mint.id)}/confirm`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(yes ? { save: true, accountId: pick } : { save: false }) }).catch(() => null);
+          if (r?.mint) render(r.mint);
+          if (!r?.success) { yesBtn.disabled = noBtn.disabled = false; showToast(r?.error || t('Save failed'), { type: 'error' }); }
+        };
+        yesBtn.onclick = () => answer(true);
+        noBtn.onclick = () => answer(false);
+      }
+      if ((ph === 'url' || ph === 'waiting-code') && mint.localUrl) hubRow();
+      if (ph === 'saved') {
+        refresh?.();
+        clearTimeout(closeTimer);
+        closeTimer = setTimeout(() => shut(), 2000);
+      }
     };
+    // ZERO-COPY: a browser profile on the hub opens the URL whose callback is
+    // the hub's own localhost — the CLI gets the sign-in with no code shown.
+    // Offered only when a profile exists; the words name it.
+    const hubRow = async () => {
+      const row = box.querySelector('#oat-hub-row'); if (!row) return;
+      const list = await fetchJson('/api/browser/profiles').catch(() => null);
+      const profiles = (Array.isArray(list) ? list : (list?.profiles || [])).filter((p) => p && p.id);
+      if (!profiles.length || !box.contains(row)) return;
+      const p = profiles.find((x) => x.default || x.isDefault) || profiles[0];
+      const label = p.label || p.name || p.id;
+      row.hidden = false;
+      row.innerHTML = `<button class="btn-create" id="oat-hub">${t('Sign in in VibeSpace’s browser')}</button><span class="usage-note">${t('Opens in the “{profile}” profile on the hub — no code to copy.', { profile: escHtml(label) })}</span>`;
+      row.querySelector('#oat-hub').onclick = async () => {
+        const url = mint?.localUrl; if (!url) return;
+        // the keeper's browse answer is idempotent (a second press focuses):
+        // take the tab's key, point it at the URL, then the live window
+        const r = await fetchJson('/api/browser/profiles/' + encodeURIComponent(p.id) + '/browse', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => null);
+        if (!r?.key) { showToast(r?.error || t('server unreachable'), { type: 'error' }); return; }
+        await fetchJson('/api/browser/browse/' + encodeURIComponent(r.key) + '/navigate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) }).catch(() => null);
+        this.browseYourself?.(p.id, { label });
+      };
+    };
+    const off = this.ws?.onGlobal?.((msg) => { if (msg?.type === 'oat-mint' && msg.mint?.accountId === id) render(msg.mint); });
+    // Esc: a sign-in in flight is cancelled (asked first); otherwise it closes.
+    overlay.addEventListener('keydown', async (e) => {
+      if (e.key !== 'Escape') return;
+      e.stopPropagation();
+      if (!live()) { shut(); return; }
+      if (!(await showConfirmDialog({ title: t('Cancel the sign-in?'), message: t('The sign-in for “{name}” is still running. Cancel it?', { name }), danger: true }))) return;
+      await mintApi(`/${encodeURIComponent(mint.id)}`, { method: 'DELETE' }).catch(() => null);
+      shut();
+    });
+    render(null);
+    // a reopened dialog (this client or another) picks up a sign-in still
+    // RUNNING; a finished one is history, not a phase to show again
+    mintApi('').then((r) => { if (r?.mint && !mint && !['saved', 'failed', 'cancelled'].includes(r.mint.phase)) render(r.mint); }).catch(() => { });
     body.querySelector('#oat-save').onclick = async () => {
       const tok = body.querySelector('#oat-paste').value.trim();
       if (!tok) { showToast(t('Paste the sk-ant-oat01-… token first'), { type: 'error' }); return; }
       try {
-        const r = await fetchJson(`/api/accounts/${encodeURIComponent(id)}/oat`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: tok }) });
+        const r = await fetchJson(`/api/accounts/${enc}/oat`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: tok }) });
         if (!r?.success) { showToast(r?.error || t('Save failed'), { type: 'error' }); return; }
-        showToast(t('Long-lived token stored — “{name}” is now usable on any machine.', { name: a?.name || '' }));
-        close(); refresh?.();
+        showToast(t('Long-lived token stored — “{name}” is now usable on any machine.', { name }));
+        shut(); refresh?.();
       } catch (e) { showToast(e?.message || t('Save failed'), { type: 'error' }); }
     };
     const rm = body.querySelector('#oat-remove');
     if (rm) rm.onclick = async () => {
-      if (!(await showConfirmDialog({ title: t('Remove token'), message: t('Remove the long-lived token from “{name}”? Machines relying on it lose access at their next spawn (running sessions keep working).', { name: a?.name || '' }) }))) return;
-      const r = await fetchJson(`/api/accounts/${encodeURIComponent(id)}/oat`, { method: 'DELETE' });
+      if (!(await showConfirmDialog({ title: t('Remove token'), message: t('Remove the long-lived token from “{name}”? Machines relying on it lose access at their next spawn (running sessions keep working).', { name }) }))) return;
+      const r = await fetchJson(`/api/accounts/${enc}/oat`, { method: 'DELETE' });
       if (!r?.success) { showToast(r?.error || t('Remove failed'), { type: 'error' }); return; }
-      showToast(t('Removed')); close(); refresh?.();
+      showToast(t('Removed')); shut(); refresh?.();
     };
   },
 

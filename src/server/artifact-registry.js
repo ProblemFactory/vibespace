@@ -37,7 +37,7 @@
  *   At every rebuild the pages + designs rows come back from THEIR stores (`storeRowsOf`, normalizers' store-rows seam);
  *   the uploads live in the persisted rows (the composer's attachment record IS this registry).
  * THE CONTRACT TOWARD doc-window (spelled in src/artifacts.js's header + kb-file-structure):
- *   ownerOf({host, path}) → {sessionId, row} | null     noteEdit({sessionId, host, path, summary}) → boolean
+ *   ownerOf({host, path}) → {sessionId, row} | null     noteEdit({sessionId, conversationId?, host, path, summary}) → boolean
  */
 const AF = require('../artifacts.js');
 const { toAgentText: agentText } = require('../peer-text.js');
@@ -337,12 +337,14 @@ function registries() {
 /** THE CONTRACT (doc-window): the newest conversation whose registry holds {host, path}. */
 function ownerOf({ host, path } = {}) { return AF.ownerOfIn(registries(), { host, path }); }
 /** THE CONTRACT (doc-window): ONE next-turn note to the conversation through the stash — free, never a billed wake. */
-function noteEdit({ sessionId, host, path, summary } = {}) {
+function noteEdit({ sessionId, conversationId = null, host, path, summary } = {}) {
   require('./search-index.js').noteArtifact({ sessionId, host, path }); // lane global-search: the saved file is re-read into the index
   const session = sessions().get(sessionId);
-  if (!session || !deps.deliver || typeof deps.deliver.stashFor !== 'function') return false;
+  // a STOPPED owner (lane doc-comments-stopped-owner): no live session, but the conversation the doc engine remembers — the note waits in its stash
+  if ((!session && !conversationId) || !deps.deliver || typeof deps.deliver.stashFor !== 'function') return false;
   let cid = null;
-  try { cid = require('../claude-lock-capture.js').addressableId(session); } catch { cid = null; }
+  try { cid = session ? require('../claude-lock-capture.js').addressableId(session) : null; } catch { cid = null; }
+  cid = cid || (conversationId ? String(conversationId) : null);
   if (!cid) return false;
   const st = deps.deliver.stashFor(cid, { source: 'doc-edit', kind: 'peer', fromName: DOC_EDIT_FROM, ref: 'artifact:' + AF.keyOf(host, path), text: agentText(AF.editNoteText({ path, summary }), { kind: 'block', max: 1200 }) }); // the Doc window's summary names the FILE's section headings ⇒ the belt
   return !(st && st.stored === false && st.queued === false);

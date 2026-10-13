@@ -166,6 +166,29 @@ console.log('G the counter survives a restart');
   ok(JSON.stringify(eng.status().today) === JSON.stringify(before) && pm.list()[0].decision.today.total.calls === 1, 'data/decision-usage.json is read back (no reset on restart)');
 }
 
+console.log('H the ONE scrub: a record\'s secret-shaped text never reaches the vendor (inbox-verify F1, 2026-10-13)');
+{
+  const SIX = { ant: ['sk', '-ant-api03-AbCdEf0123456789XyZ_aaaaaaaaaaaaaaaaaaaaaaa'].join(''), slack: ['xo', 'xb-1234567890-0987654321-AbCdEfGhIjKlMnOp'].join(''), pem: ['-----BEGIN RSA ', 'PRIVATE KEY-----'].join(''), pemBody: ['MIIEowIB', 'AAKCAQEAu1SU1LfVLPHCozMxH2Mo'].join(''), mail: 'alice.smith@example.com', urlTok: ['https://hooks.example.com/cb?to', 'ken=tok_9f8e7d6c5b4a&sig=ab12'].join(''), gh: ['gh', 'p_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'].join('') };
+  // the verify's leg-1 fixture verbatim (its PEM header is unclosed ⇒ R1 hides every later line) + each shape on its own line, the PEM closed and last
+  const VTEXT = `Use key ${SIX.ant} for the deploy?`, VDETAIL = `slack ${SIX.slack}\n${SIX.pem}\n${SIX.pemBody}\nmail ${SIX.mail}\ncallback ${SIX.urlTok}\ngh ${SIX.gh}`;
+  const LINES = `key ${SIX.ant}\nslack ${SIX.slack}\nmail ${SIX.mail}\ncallback ${SIX.urlTok}\ngh ${SIX.gh}\n${SIX.pem}\n${SIX.pemBody}\n-----END RSA PRIVATE KEY-----`;
+  // the PEM header line is the shape's NAME (R1 keeps it, the body goes); the address keeps its domain (maskAddresses — addressing, not a secret)
+  const leaks = (t) => Object.entries(SIX).filter(([k, v]) => k !== 'pem' && t.includes(k === 'urlTok' ? 'tok_9f8e7d6c5b4a' : v)).map(([k]) => k);
+  const dir2 = path.join(root, 'scrub'); fs.mkdirSync(dir2, { recursive: true });
+  const store2 = S.create({ dataDir: dir2, env: {}, log: { warn() {}, log() {} } });
+  const eng2 = E.create({ dataDir: dir2, integrations: store2, baseUrlFor: BASE, now: () => T, tzOffset: () => 0, serverNotice: () => 1, log: { warn() {} } });
+  const pm2 = new PluginManager({ dataDir: dir2, plugins: [DP], decisionEngine: eng2 });
+  pm2.setEnabled('decision-api', true); pm2.setConfig('decision-api', { rules: true, attention: true });
+  store2.setIntegration('decision-api', { provider: 'openai', apiKey: SECRET });
+  const n0 = got.length;
+  const rr = await eng2.judge('rule', { condition: 'mentions a deploy', body: LINES, thread: [VTEXT, VDETAIL] }, { questions: RULE_Q, memo: { id: 'scrub-r', rule: 'r1' } });
+  const ra = await eng2.judge('attention', { rubric: M.rubricText(), records: [{ title: VTEXT, sender: 'Ann', body: VDETAIL }] }, { questions: M.rubricQuestions(), memo: { id: 'scrub-a', lastAt: 1 } });
+  const bodies = got.slice(n0).map((g) => g.raw);
+  for (const g of got.slice(n0)) console.log(`    the fake vendor received (${g.path}): ${JSON.stringify(g.body && (g.body.input || g.body.state))}`);
+  const leaked = bodies.flatMap(leaks);
+  ok(rr.ok && ra.ok && bodies.length === 2 && leaked.length === 0 && bodies.every((b) => b.includes('«redacted»')) && bodies[0].includes('…@example.com'), 'the six shapes (sk-ant, xoxb, a PEM body, a URL token query, a GitHub token, + the address cut to its domain) reach the fake vendor through NEITHER use ① attention nor ② rule — redacted, the names kept', { leaked, rr: rr.ok, ra: ra.ok });
+}
+
 // ── the plugins card in headless Chrome ───────────────────────────────────
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
 if (!CHROME) { console.log('SKIP card leg: no chrome/chromium'); finish(); }
@@ -239,7 +262,7 @@ const CARD = `(() => {
   const D = await pg.ev(CARD);
   ok(D.fields >= 2 && /Provider/.test(D.integText) && /API key/.test(D.integText) && /openrouter/.test(D.integText) && D.keyInputs === 0, 'desk: the registry card\'s fields (Provider, Model, API key) are ON the card, and the card draws no second key box', D);
   ok(/OpenRouter/.test(D.state) && /sent to OpenRouter/.test(D.privacy) && /attachments, images and raw webhook payloads never are/.test(D.privacy), `desk: the privacy sentence names the provider ("${D.privacy}")`);
-  ok(D.budget === '1.00' && /Today: 1 calls/.test(D.counter) && /\$1\.00/.test(D.counter) && D.uses.includes('rule'), `desk: the budget reads USD (1.00 = 100 cents), the counter shows the fake call ("${D.counter}")`, D);
+  ok(D.budget === '1.00' && /Today: 1 checked/.test(D.counter) && /\$1\.00/.test(D.counter) && D.uses.includes('rule'), `desk: the budget reads USD (1.00 = 100 cents), the counter shows the fake call ("${D.counter}")`, D);
   ok(JSON.stringify(D.features) === JSON.stringify(['attention:true', 'rules:true', 'routing:false']), 'desk: the feature toggles show the saved switches', D.features);
   await pg.ev(`(() => { const i = document.querySelector('.decision-budget'); i.value = '0.50'; })()`);
   await pg.press('.decision-budget + .mounts-btn');
@@ -250,7 +273,7 @@ const CARD = `(() => {
   pg.close();
   const ph = await page(390, 844, 'zh');
   const P = await ph.ev(CARD);
-  ok(P && P.sw2 <= P.vw + 1 && /OpenRouter/.test(P.privacy) && /今日/.test(P.counter) && P.fields >= 2, `phone 390 (zh): the card fits (scrollWidth ${P && P.sw2} ≤ ${P && P.vw}), the privacy sentence and the counter in Chinese`, P);
+  ok(P && P.sw2 <= P.vw + 1 && /OpenRouter/.test(P.privacy) && /今天/.test(P.counter) && P.fields >= 2, `phone 390 (zh): the card fits (scrollWidth ${P && P.sw2} ≤ ${P && P.vw}), the privacy sentence and the counter in Chinese`, P);
   await ph.shot('phone.png');
   ph.close();
 }

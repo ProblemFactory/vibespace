@@ -252,6 +252,19 @@ else await (async () => {
     await group([sidA, sidB, sidC], [sidB, sidC]);
     const r0 = await look();
     ok(r0.layout === 'tabs' && L(r0.strip) === 'A,B,C' && r0.active === sidC && r0.btn && says(r0, 'left', sidB), `14③ the scene: tabs [A, B, C], C active, B the most recent; the button says "${r0.btn && r0.btn.title}"`, S(r0));
+    // B-9cd4 ② the ⫿ words name a window by its LIVE name: a rename of the partner B re-words the button at once (wm.setTitle —
+    // the rename door the tab label already follows); the pre-fix words were written at render / switch only
+    const renamed = 'Renamed Bravo';
+    const rn = await ev(`const ch = bySid(${S(sidA)})._tabChain; const host = wm.windows.get(ch.tabs[0]); const b = host.titleBar.querySelector(':scope > .tab-split-btn'); const B = bySid(${S(sidB)}); const before = b.title; wm.setTitle(B.id, ${S(renamed)} + ' — ' + (String(B.title).split(' — ')[1] || '')); const r = b.getBoundingClientRect(); const tb = host.titleBar.getBoundingClientRect(); return { before, title: b.title, aria: b.getAttribute('aria-label'), tab: (host.titleBar.querySelector('.tab-item[data-win-id="' + B.id + '"] .tab-label') || {}).textContent || '', r: { x: r.left + r.width / 2, y: r.top + r.height / 2 }, tb: { x: tb.left, y: tb.top, w: tb.width, h: tb.height } };`);
+    ok(rn.title.includes(renamed) && !rn.before.includes(renamed) && rn.aria === rn.title && / on the left, this tab on the right$/.test(rn.title) && rn.tab.startsWith(renamed), `14③ B-9cd4 a rename of the partner re-words the ⫿ button at once: "${rn.before}" → "${rn.title}"`, S(rn));
+    if (process.env.SPLIT_UX_PNG_DIR) { // the hovered button + its title attribute (a native tooltip never paints into a CDP screenshot — the caption is the attribute, read live)
+      await P1.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: rn.r.x, y: rn.r.y });
+      await ev(`const ch = bySid(${S(sidA)})._tabChain; const b = wm.windows.get(ch.tabs[0]).titleBar.querySelector(':scope > .tab-split-btn'); const cap = document.createElement('div'); cap.id = 'vs-tip-evidence'; cap.textContent = 'title attribute: ' + b.title; cap.style.cssText = 'position:fixed;left:' + Math.max(0, ${rn.tb.x}) + 'px;top:' + (${rn.tb.y} + ${rn.tb.h} + 6) + 'px;z-index:2147483647;background:#ffffe1;color:#000;border:1px solid #777;font:12px sans-serif;padding:3px 6px;'; document.body.appendChild(cap); return true;`);
+      await sleep(200);
+      const shot = await P1.send('Page.captureScreenshot', { format: 'png', clip: { x: Math.max(0, rn.tb.x), y: Math.max(0, rn.tb.y - 4), width: Math.min(1100, rn.tb.w + 8), height: rn.tb.h + 40, scale: 1 } });
+      if (shot.result?.data) fs.writeFileSync(path.join(process.env.SPLIT_UX_PNG_DIR, 'tooltip.png'), Buffer.from(shot.result.data, 'base64'));
+      await ev(`document.getElementById('vs-tip-evidence')?.remove(); return true;`);
+    }
     if (r0.btn) await click(centre(r0.btn.r));
     await sleep(400);
     const r1 = await look();
@@ -275,13 +288,19 @@ else await (async () => {
       if (!ok(await bootOk(P), '14④ the app booted on the phone page (390×844)')) return;
       if (deskId14) await P.ev(`const dm = app.desktopManager; if (dm && dm.activeDesktopId !== ${S(deskId14)}) await dm.switchTo(${S(deskId14)}); return true;`);
       ok(await until(() => P.ev("const c = chats().find((w) => w._tabChain); return !!(c && c._tabChain.layout === 'split');"), 15000), '14④ the phone restored the chain WITH the split');
+      // B-9cd4 ① BEFORE any pick the phone paints the group: the frame carries the active mark (the ONE window a phone shows)
+      // and the focus names the chain's active tab C — the pre-fix boot left the mark on a hidden guest frame (a blank screen)
+      await sleep(800);
+      const ph0 = await P.ev(`const c = chats().find((w) => w._tabChain); const ch = c._tabChain; const host = wm.windows.get(ch.tabs[0]); const marks = [...document.querySelectorAll('.window.window-active')].map((e) => [...wm.windows.values()].find((w) => w.element === e)?.id || '?'); const r = host.element.getBoundingClientRect(); const pane = wm.windows.get(ch.tabs[ch.active]).content.getBoundingClientRect(); return { activeId: sidOf(wm.activeWindowId), chainActive: sidOf(ch.tabs[ch.active]), host: sidOf(host.id), marks: marks.map(sidOf), hostRect: { w: r.width, h: r.height }, pane: { w: pane.width, h: pane.height }, disp: getComputedStyle(host.element).display };`);
+      ok(ph0.chainActive === sidC && ph0.activeId === sidC && L(ph0.marks) === L([ph0.host]) && ph0.disp !== 'none' && ph0.hostRect.w > 300 && ph0.pane.w > 300 && ph0.pane.h > 300, `14④ B-9cd4 the phone's FIRST paint (no pick) is the group's frame showing its active tab C (the split verdict's active pane) — never a blank screen`, S(ph0));
+      await png(P, 'phone.png');
       // a phone booted on the record shows the group once a window of it is picked (the switcher's tap = focusWindow)
       await P.ev(`const c = chats().find((w) => w._tabChain); const ch = c._tabChain; wm.focusWindow(ch.tabs[ch.active]); return true;`);
       await sleep(800);
       const ph = await P.ev(`const c = chats().find((w) => w._tabChain); const ch = c._tabChain; const host = wm.windows.get(ch.tabs[0]); const items = [...host.titleBar.querySelectorAll('.tab-item')].filter((t) => t.getBoundingClientRect().width > 0); return { left: ch.split.left.map(sidOf), right: ch.split.right.map(sidOf), strip: items.map((t) => ({ sid: sidOf(t.dataset.winId), x: t.getBoundingClientRect().left, y: t.getBoundingClientRect().top })).sort((p, q) => (Math.abs(p.y - q.y) > 8 ? p.y - q.y : p.x - q.x)).map((t) => t.sid), halvesShown: [...host.titleBar.querySelectorAll('.tab-strip-half')].filter((h) => h.getBoundingClientRect().width > 0).length, shown: ch.tabs.filter((id) => disp(wm.windows.get(id).content) !== 'none').map(sidOf), isMobile: !!app.isMobile };`);
       ok(ph.isMobile && L(ph.left) === 'A,B' && L(ph.right) === 'C', '14④ the phone\'s model keeps the sides [A, B] | [C]', S(ph));
       ok(L(ph.strip) === 'A,B,C' && ph.halvesShown === 0 && ph.shown.length === 1, `14④ the phone draws ONE strip (the halves dissolved) in the strip order ${L(ph.strip)} — the sides still hold; one pane shown`, S(ph));
-      await png(P, 'phone.png');
+      await png(P, 'phone-picked.png');
     } finally {
       P.close();
       await P1.send('Target.closeTarget', { targetId: created.result.targetId });

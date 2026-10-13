@@ -1,4 +1,4 @@
-import { pillMode, billingPillForms, billingPillHtml } from './title-chips.js'; // lane phone-chip: the billing pill folds, never cuts
+import { pillMode, billingPillForms, billingPillHtml, phoneBarFold } from './title-chips.js'; // lane phone-chip: the billing pill folds, never cuts
 import { escHtml, showInputDialog, showConfirmDialog, uiScale, showToast, fetchJson, copyText, absUrl, onOutsidePress } from './utils.js';
 import { renderArtifactList } from './artifact-card.js'; // lane artifacts-model: the Artifacts chip's list
 import { UI_ICONS } from './icons.js';
@@ -1010,6 +1010,7 @@ export class ChatStatusBar {
       if (!el.querySelector('.pill-compact')) w.compact = Infinity;   // no short word: full or the glyph
       this._billingW = w;
     }
+    if (PHONE_MQ?.matches && !this._foldOpen) return; // the phone's ONE row: `_fold` picks the form (lane phone-bar-billing-nofold)
     const mode = pillMode({ slotPx, fullPx: this._billingW.full, compactPx: this._billingW.compact });
     if (el.dataset.mode !== mode) el.dataset.mode = mode;
   }
@@ -1063,7 +1064,8 @@ export class ChatStatusBar {
   /** THE PHONE BAR (lane phone-chat-composer, owner 2026-10-13 "状态栏又很稀疏"): on a phone the bar is ONE row —
    *  the chips that fit stay in bar order, everything past the width folds behind ⋯ (a tap opens the bar in place,
    *  wrapped, so every chip keeps its own menu); effort + style always fold (the model chip's sheet carries them).
-   *  The desk bar is never touched (no ⋯ chip, no class written). */
+   *  The billing chip (who pays) never folds: it goes compact, then icon (PURE `phoneBarFold`, lane
+   *  phone-bar-billing-nofold — the runner's wider fonts folded it). The desk bar is never touched (no ⋯ chip, no class written). */
   _fold() {
     const bar = this._element, phone = !!PHONE_MQ?.matches, open = phone && this._foldOpen;
     if (!phone && !this._phoneFolded) return; // the desk bar: nothing read, nothing written
@@ -1073,17 +1075,19 @@ export class ChatStatusBar {
     if (!PHONE_MQ?.matches || open) return;
     const more = this._chipEls.get('more')?.el;
     const cs = getComputedStyle(bar), gap = parseFloat(cs.columnGap) || 0;
-    let room = bar.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) - (more ? more.offsetWidth + gap : 0);
-    let full = false;
+    const room = bar.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) - (more ? more.offsetWidth + gap : 0);
+    const bill = this._chipEls.get('billing');
+    if (bill && (!this._billingW || this._billingW.html !== bill.html)) this._fitBilling(); // its three widths (cached per words)
+    const bw = bill && this._billingW && this._billingW.html === bill.html ? this._billingW : null;
+    const chips = [];
     for (const el of bar.children) {
       if (el === more) continue;
       const key = el.getAttribute('data-chip');
-      const w = el.offsetWidth;
-      // search · model · a turn waiting on the person · a broken-setup alert never fold (they lead the bar order)
-      const keep = key === 'search' || key === 'model' || key === 'turnstate' || key === 'health';
-      if (!keep && (full || key === 'effort' || key === 'style' || w > room)) { el.classList.add('chat-status-folded'); if (w > room) full = true; continue; }
-      if (w) room -= w + gap; // 0 = a chip this face never shows
+      chips.push(key === 'billing' && bw ? { key, w: el.offsetWidth, forms: { full: bw.full / bw.k, compact: bw.compact / bw.k, icon: bw.icon / bw.k } } : { key, w: el.offsetWidth });
     }
+    const plan = phoneBarFold({ chips, room, gap });
+    for (const el of bar.children) if (plan.folded.has(el.getAttribute('data-chip'))) el.classList.add('chat-status-folded');
+    if (bill && plan.billing && bill.el.dataset.mode !== plan.billing) bill.el.dataset.mode = plan.billing;
   }
 
   // ── Private ──

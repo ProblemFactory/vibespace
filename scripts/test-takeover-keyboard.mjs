@@ -1527,6 +1527,7 @@ const CENSUS = [
   ['jobs-panel.js', 'select', 'choice', 'kind / schedule'],
   ['manage-agents.js', 'input', 'text+control', 'the token paste; the pool member checkboxes'],
   ['manage-agents.js', 'textarea', 'text', 'instructions'],
+  ['manage-agents.js', 'select', 'choice', 'the token mint\'s account pick when the sign-in proved no account (lane oat-verify-fixes: #oat-pick)'],
   ['manage-agents.js', 'tabindex', 'control', 'the re-login chip (role=button)'],
   ['mounts-dialog.js', 'input', 'text+control', 'a mount\'s fields; a read-only key / link'],
   ['mounts-dialog.js', 'textarea', 'text', 'a multi-line field'],

@@ -2,6 +2,23 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.263 — 2026-10-13
+
+### Added
+- An app running in its own VibeSpace window now shows its notifications inside that window (and in For you when it needs you)
+- Agents can read the dialogs and buttons of an app in its own VibeSpace window on every machine, including cluster instances
+- An app in its own VibeSpace window can keep its logins — VibeSpace holds them for that app, sealed, with one place to forget them
+
+### Changed
+- A long-lived token is minted from the dialog itself: sign in in your browser (paste the code if one is shown) and the token is saved — no terminal, no copying
+- The Decision API card now says what each switch does, with one example and where it shows up; setting it up is three numbered steps.
+
+### Fixed
+- Comments on a document whose conversation is stopped now wait for its next turn instead of being refused
+- On a phone, a split tab group opens on its active window instead of a blank screen; the split button's tooltip follows a rename
+- Decision API: passwords, API keys, tokens and private keys in a message are now hidden before the text is sent to the provider for judging
+- On a phone, the billing chip in a conversation's status bar no longer hides behind ⋯ when the row is narrow; it shortens, then shows only its icon
+
 ## 2.369.262 — 2026-10-13
 
 ### Added

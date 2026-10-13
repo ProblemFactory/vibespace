@@ -93,6 +93,7 @@ owner 2026-10-12 提出；设计台（Fable）2026-10-12，**修订 r1**（同�
 - 插件开关旁的句子（三语，提供方名随行变）：「你连接的频道里的消息文本（标题、发信人、最新几条）会发给 <提供方> 做判断；凭据与附件从不发送。OpenAI 对合资格客户提供零数据保留；OpenRouter 会转给第三方模型（按其政策）。」
 - 每账号退出：账号 ⋯ 菜单「从不判断这个账号」（账号记录字段 `judge:'never'`，与 retention 同处）；默认全部账号参与（owner 问题 3）。
 - 集群预设钥匙 = 集群替用户付钱、文本到 OpenRouter ⇒ 插件仍由**本人**打开（预设只是把钥匙填好）。
+- **法则：唯一的密钥擦除（inbox-verify F1，2026-10-13）**：任何送往厂商的文本都必须先经过那唯一的密钥擦除才能离开。每个 use 的每一段都走 `cleanPart`（src/decision-model.js），它先在**原文**上跑 `secret-shapes.js` 的 `redactSecrets`（`{ runs: true }`；R1–R8：PEM 块、带密名的值、Bearer/Basic、已知前缀 sk-/xox*/ghp_/github_pat_/JWT、URL 查询里带密名的值、无名的 hex/base64 key 材料 ≥ 32），**然后**才做任何截断，被截断劈开的密钥不能漏出它的头。webhook payload 里的每个字符串也在 stringify 和 200 字截断之前擦除。只有一张表（secret-shapes.js），decision-model 里没有第二张。邮件地址是寻址、不是密钥，仍按 maskAddresses 只留域名。拼装各段的位置由 test-decision-model 从源码普查得出，新增一处不经 cleanPart / listPart 的段即红。
 
 ### 2.9 厂商白名单（新厂商类）
 - 新文件 `src/server/decision-engine.js` 是**唯一**构造处：`ALLOW['src/server/decision-engine.js'] = { max: 2, gates: ['budgetVerdict', 'decisionPluginOn', 'resolveIntegration'] }`；`CONSTRUCT_HOSTS` 加 `openrouter\.ai`；compatible 的任意 baseUrl 用源码标记 `DECISION_ENDPOINT` 计数（census 认标记不认主机）；控制：种一份去掉 `budgetVerdict` 的拷贝 ⇒ 红；设备守护进程源码与包仍为零；客户端包不含钥匙字段（登记行 secret 的既有法）。

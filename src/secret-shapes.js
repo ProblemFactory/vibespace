@@ -39,6 +39,13 @@
  *      next token after password / passwd / passphrase, and a 24+ run of key material within 3 characters of any
  *      secret word
  *   R6 a `reg query` row (verify r2 F4) — `<name with a secret word>    REG_SZ    <value>`: the value column (runs before R5, verify r4 F7)
+ *   R7 a URL query value (inbox-verify F1, 2026-10-13) — `?token=…`, `&sig=…`, `;access_token=…`, `#key=…`: a parameter whose
+ *      name carries a secret word (the R2 words) ⇒ its value to the next `& # ; ' " < >` or blank; the name stays (the judge,
+ *      a reader, still sees what the link was)
+ *   R8 key material with no name (`{ runs: true }`, the Decision API's judge input only — inbox-verify F1): a 32+ run of
+ *      hex with a digit and a letter, or of base64 / base64url with an upper, a lower and a digit and no lowercase word of
+ *      4+ between its `/ _ - + =` (a path, a slug, an identifier keeps its words). Opt-in: a command's stored head
+ *      keeps its commit shas and hashes (diagnosis); a text bound for a vendor's model loses them (nothing to diagnose)
  * Every quantifier is bounded at the input bound and every run is consumed WHOLE (verify r2 F2: a cut inside a value kept
  * the value's tail past 4096 characters — a 6 KB bearer, an RSA-4096 `client-key-data`); no pass throws (a text that
  * cannot be judged is returned unchanged — never a stall, never a crash, and the caller's belt still runs).
@@ -231,8 +238,20 @@ const WORD_RUN_RE = /\b(token|secret|apikey|api[_-]key|auth|key|credential|priva
 // so `SEC\u200DRET=hunter2` reached every rule with its name split and the reader saw `SECRET=hunter2` (the joiner draws nothing
 // between Latin letters). A joiner between two ASCII word characters joins nothing: folded out here, before the rules, on
 // every copy the rule judges; one inside an emoji sequence or a non-ASCII word stays
+// R7 (inbox-verify F1): `[?&;#]name=value` — KV_HEAD's openers stop at `?` / `&` (a URL keeps its path words), so a
+// query value is judged here: the name by secretName (R2's words), the value one bounded run, consumed whole
+const URL_QUERY_RE = /([?&;#])([A-Za-z0-9_.\-\[\]%]{1,80})=(?!«)([^&#;\s"'<>]{1,65536})/g;
+// R8 (opt-in, inbox-verify F1): a maximal run of the base64 / base64url / hex class, judged in code (one linear scan)
+const RUN_RE = /[A-Za-z0-9+/=_\-]{32,65536}/g;
+function keyMaterial(run) {
+  const core = run.replace(/=+$/, '');
+  if (core.length < 32) return false;
+  if (/^[0-9a-fA-F]+$/.test(core)) return /[0-9]/.test(core) && /[a-fA-F]/.test(core);
+  if (!/[A-Z]/.test(core) || !/[a-z]/.test(core) || !/[0-9]/.test(core)) return false;
+  return !core.split(/[/_\-+=]+/).some((w) => /^[a-z]{4,}$/.test(w));
+}
 const JOINER_IN_WORD_RE = /(?<=[A-Za-z0-9_.\-])[\u200C\u200D]+(?=[A-Za-z0-9_.\-])/g;
-function redactSecrets(raw) {
+function redactSecrets(raw, { runs = false } = {}) {
   let text = String(raw == null ? '' : raw);
   if (text.length > INPUT_MAX) text = text.slice(0, INPUT_MAX);
   if (!text) return { text, redacted: 0 };
@@ -248,6 +267,8 @@ function redactSecrets(raw) {
     text = text.replace(PREFIX_RE, (m) => { n++; const h = PREFIX_HEAD.exec(m); return `${h ? h[1] : ''}${REDACTED}`; });
     text = text.replace(WORD_NEXT_RE, (m, w, sp) => { n++; return `${w}${sp}${REDACTED}`; });
     text = text.replace(WORD_RUN_RE, (m, w, sp) => { n++; return `${w}${sp}${REDACTED}`; });
+    text = text.replace(URL_QUERY_RE, (m, sep, name) => { if (!secretName(name)) return m; n++; return `${sep}${name}=${REDACTED}`; });
+    if (runs) text = text.replace(RUN_RE, (m) => { if (!keyMaterial(m)) return m; n++; return REDACTED; });
   } catch { /* a text that cannot be judged is returned as far as it got — the caller's belt still runs */ }
   return { text, redacted: n };
 }

@@ -1807,6 +1807,7 @@ class WindowManager {
       }
     }
     this._fitChipsSoon(win); // a new title may need the room the billing chip holds (or give it back)
+    if (win._tabChain) this._labelSplitBtn?.(win._tabChain, this.windows.get(win._tabChain.tabs[0])?.titleBar.querySelector(':scope > .tab-split-btn')); // B-9cd4: the ⫿ words name a window — by its live name
     this._notify();
   }
 

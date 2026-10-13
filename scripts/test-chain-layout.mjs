@@ -421,6 +421,14 @@ function legs(C, { quiet = false } = {}) {
     const named = F('normalizeChain')({ tabs: ['A', 'X', 'B'], active: 0, order: ['X', 'A', 'B'] });
     F('enterSplit')(named, { anchorId: 'A', guestId: 'X', side: 'right' });
     leg(J(named.split.left) === J(['A', 'B']) && J(named.split.right) === J(['X']) && J(named.split.pair) === J(['A', 'X']), '⑰ a verb that NAMES the side ("Beside X (on the right)", X on the left) still moves X — alone; every other tab with the anchor', J(named));
+    // B-9cd4 the phone row: a chain rebuilt around the focused window — the FRAME carries the mark (a phone shows only the
+    // marked window), the focus names the ACTIVE tab (the split's active pane); a focus elsewhere moves nothing
+    const focusOf = F('chainFocusOf');
+    const ph = F('normalizeChain')({ tabs: ['A', 'B', 'C'], active: 2, layout: 'split', order: ['A', 'B', 'C'], split: { pair: ['B', 'C'], ratio: 0.5, left: ['A', 'B'], right: ['C'] } });
+    leg(J(run(() => focusOf(ph, 'C'))) === J({ frame: 'A', active: 'C' }), '⑰ B-9cd4 the phone row: a split [A, B | C] with the GUEST C active and the focus on C ⇒ the frame A carries the mark, the focus names C', J(ph));
+    leg(J(run(() => focusOf(ph, 'B'))) === J({ frame: 'A', active: 'C' }) && run(() => focusOf(ph, 'Z')) === null && run(() => focusOf(null, 'A')) === null, '⑰ B-9cd4 a focus on another member names the active tab too; a focus off the chain / no chain ⇒ null (nothing moves)');
+    const stay = (c, id) => ({ frame: String(id), active: String(id) }); // the pre-fix boot: the mark stayed on the window that had it
+    leg(J(stay(ph, 'C')) !== J(run(() => focusOf(ph, 'C'))), '⑰ B-9cd4 CONTROL: the pre-fix rule (the mark stays on the guest C — a hidden frame, a blank phone) fails the phone row');
   }
   return failed;
 }
@@ -511,6 +519,8 @@ console.log('— ⑰ wiring: src/lib/tab-group.js picks a default side through s
   const fnAt = (head) => { const i = TG.indexOf(head); const j = TG.indexOf('\n  },\n', i); return i >= 0 && j > i ? TG.slice(i, j) : ''; };
   const sa = fnAt('  splitActive(chain, { announce = false } = {}) {'), um = fnAt('  _afterUserMerge(chain, '), words = fnAt('  _splitBtnWords(chain) {');
   ok(/import \{[^}]*\bsplitSideFor\b[^}]*\} from '\.\/chain-layout\.js';/.test(TG), '⑰ tab-group.js imports splitSideFor from the PURE model');
+  const rt = fnAt('  restoreTabChain(tabIds, activeIndex, { layout, split, order } = {}) {'), fc = fnAt('  _focusChainFrame(focus) {');
+  ok(/import \{[^}]*\bchainFocusOf\b[^}]*\} from '\.\/chain-layout\.js';/.test(TG) && /this\._focusChainFrame\(chainFocusOf\(chain, this\.activeWindowId\)\);/.test(rt) && /this\.windows\.get\(focus\.frame\)\.element\.classList\.add\('window-active'/.test(fc) && /this\.activeWindowId = focus\.active;/.test(fc) && rt.indexOf('chainFocusOf(') < rt.indexOf('this._applyChainLayout(chain)'), '⑰ B-9cd4 restoreTabChain marks the frame chainFocusOf names (_focusChainFrame), before the layout syncs the hidden views', rt.slice(0, 200));
   ok(/const at = splitSideFor\(chain, anchor\.id, guest\.id\);/.test(sa) && /side: at \? at\.side : 'right'/.test(sa) && !/side: 'right', announce/.test(sa), '⑰ splitActive (the button, `v`, the merge toast) takes the side from splitSideFor — no literal right left', sa.slice(0, 300));
   ok(/splitSideFor\(chain, anchor\.id, draggedWin\.id\)/.test(um) && /side: at\.side, announce: true/.test(um), '⑰ the merge drop under mergeDropLayout = split (F3) keeps the dragged window on the side it was dropped on', um.slice(0, 300));
   ok(/splitSideFor\(chain, chain\.tabs\[chain\.active\], partner\?\.id\)\?\.side === 'left'/.test(words) && /\{name\} on the left, this tab on the right/.test(words), '⑰ the button\'s words name the side the click WILL give (a partner on the left is named on the left)', words);
