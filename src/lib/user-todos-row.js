@@ -108,7 +108,16 @@ const exitAskHtml = (i, t) => (i && i.action && i.action.type === 'exit-run-ask'
  *  line: what Approve runs) ABOVE Approve / Reject, never folded (the exit-ask lesson: a folded detail below the button
  *  read as the whole story). ONE primary (Approve), a quiet Reject; open items only. */
 const PROPOSAL_ACTIONS = ['browser-proposal', 'channel-watch-request', 'channel-api-proposal'];   // B-2198 part 2: a raw-API proposal too   // lane channel-agent-watch: an agent's wake request is answered the same way
-const proposalAskHtml = (i, t, detail) => (i && i.action && PROPOSAL_ACTIONS.includes(i.action.type)
+/** lane passkey-ui: a PASSKEY card (`pk-…`) answers with ITS choices (register: Allow once / Not now; sign-in: Allow once /
+ *  Always allow / Not now / Never) — the words above them say what the agent may do after; the first = the primary. */
+const PK_CHOICES = ['once', 'always', 'no', 'never'];
+const pkChoiceWord = (c, t) => (c === 'once' ? t('Allow once') : c === 'always' ? t('Always allow') : c === 'no' ? t('Not now') : t('Never'));
+const passkeyAskHtml = (i, t, detail) => {
+  const cs = String(i.action.choices || '').split(' ').filter((c) => PK_CHOICES.includes(c));
+  return `<div class="ut-proposal-plan">${escHtml(detail || '')}</div>`
+    + (cs.length ? `<div class="ut-exit-answer ut-proposal-answer ut-passkey-answer">${cs.map((c, k) => `<button type="button" class="ut-act ut-action-proposal ${k === 0 ? 'ut-proposal-approve' : 'ut-proposal-reject'} ut-passkey-${c}" data-answer="pk:${c}">${escHtml(pkChoiceWord(c, t))}</button>`).join('')}</div>` : '');
+};
+const proposalAskHtml = (i, t, detail) => (i && i.action && i.action.type === 'browser-proposal' && /^pk-[0-9a-f]{8}$/.test(String(i.action.id || '')) ? passkeyAskHtml(i, t, detail) : i && i.action && PROPOSAL_ACTIONS.includes(i.action.type)
   ? `<div class="ut-proposal-plan">${escHtml(detail || '')}</div>`
     + (i.action.id ? `<div class="ut-exit-answer ut-proposal-answer"><button type="button" class="ut-act ut-action-proposal ut-proposal-approve" data-answer="approve" title="${escHtml(t('Runs exactly what this card says'))}">${escHtml(t('Approve'))}</button><button type="button" class="ut-act ut-action-proposal ut-proposal-reject" data-answer="reject">${escHtml(t('Reject'))}</button></div>` : '') : '');
 

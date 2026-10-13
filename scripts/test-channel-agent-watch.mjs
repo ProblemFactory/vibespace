@@ -469,6 +469,9 @@ async function parityLeg(ENGM, name) {
   out.show = eng.agentWatchesFor(AG, KEY);
   out.refused = await eng.agentWatch(AG, KEY, { target: KEY, args: ['--regex', '(a+)+'] });
   out.kind = await eng.agentWatch(AG, KEY, { target: KEY, spec: { filter: { rules: [{ kind: 'nope' }] } } });
+  // lane decision-rule: the Decision API rule through the agent's flags (the same grammar), read back by --show
+  out.dec = await eng.agentWatch(AG, KEY, { target: KEY, args: ['--kind', 'decision', '--condition', 'the sender asks me to pay', '--per-hour', '5'] });
+  out.decShow = eng.agentWatchesFor(AG, KEY);
   // the USER sets a digest for this agent on the whole account — the agent reads it, never writes it
   await eng.setGrain(A, { kind: 'account' }, { access: [acc(AGENT)], watchers: [{ principal: AGENT, notify: 'digest', digestMinutes: 60, mode: 'filtered', filter: { match: 'any', rules: [{ kind: 'mention', value: 'Worker' }] } }] });
   out.all = eng.agentWatchesFor(AG);
@@ -486,6 +489,8 @@ async function parityLeg(ENGM, name) {
   const d = F.validateRule({ kind: 'regex', value: '(a+)+' });
   ok(!o.refused.ok && o.refused.badSpec && o.refused.code === d.code && o.refused.error === d.error, 'a pattern the dialog refuses is refused to the agent identically (code + words; the route answers 400)', JSON.stringify(o.refused));
   ok(!o.kind.ok && o.kind.code === 'bad-kind', 'a kind the dialog does not know is refused by the same validator', JSON.stringify(o.kind));
+  { const dr = o.decShow && o.decShow.rows && o.decShow.rows[0]; const r0 = dr && dr.filter && dr.filter.rules[0];
+    ok(o.dec.ok && o.dec.set && /decision "the sender asks me to pay"/.test(o.dec.what || '') && r0 && r0.kind === 'decision' && r0.perHour === 5 && r0.threshold === 0.7 && r0.question === 'predicate', 'lane decision-rule: `--kind decision --condition … --per-hour 5` is set at once (next-turn) and read back with its why words, cap 5/h, threshold 0.70', JSON.stringify(o.dec)); }
   const acct = (o.all.watches || []).find((w) => w.grain === 'account');
   const conv = (o.all.watches || []).find((w) => w.grain === 'conversation');
   ok(acct && acct.setBy === 'user' && acct.notify === 'digest' && acct.digestMinutes === 60 && /mention @Worker/.test(acct.what) && conv && conv.setBy === 'agent', '`watches` lists every grain: its own row AND the row the user set for it (a digest on the account — read-only)', JSON.stringify(o.all.watches));

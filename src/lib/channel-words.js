@@ -509,7 +509,31 @@ export function statusTagParts(tag, { now = Date.now(), t = tDevice } = {}) {
     // BUDGET lives in its words — test-channels-e2e ⑰: en "DM · N new", ja "個別 · 新着 N 件")
     case 'direct': return { ...around(t('DM · {n} new', { n: tag.n || 1 }), ''), tone: 'attn', icon: null, title: t('Somebody wrote to you in a single chat — {n} unread', { n: tag.n || 1 }) };
     case 'replied': return { ...around(t('replied {ago}', { ago: agoText(tag.at) }), ''), tone: 'neutral', icon: null, title: t('You wrote in this conversation {ago}', { ago: agoText(tag.at) }) };
+    // lane decision-attention (D2): the Decision API judged that this row needs the owner — "needs you · 0.82 · asks you,
+    // deadline or money": the probability and the clauses OUR rubric names (judgeClauseWord), never a word of the vendor's
+    case 'judged': {
+      const why = (Array.isArray(tag.clauses) ? tag.clauses : []).map((c) => judgeClauseWord(c, { t })).filter(Boolean);
+      const p = typeof tag.p === 'number' && Number.isFinite(tag.p) ? tag.p.toFixed(2) : '';
+      const head = tag.source === 'you' ? t('needs you ✓') : !p ? t('needs you') : t('needs you · {p}', { p });   // ✓ = the person said so (the tag's width budget: test-channels-e2e ⑰)
+      return { ...around([head, why.slice(0, 2).join(t(', '))].filter(Boolean).join(' · '), ''), tone: 'attn', icon: null,
+        title: tag.source === 'you' || !p ? t('You marked this conversation as needing you') : t('The Decision API judged that this needs you now (p = {p}): {why}', { p, why: why.length ? why.join(t(', ')) : t('no single reason stood out') }) };
+    }
     default: return null;
+  }
+}
+
+/** lane decision-attention: a rubric clause (src/decision-model.js RUBRIC v1) in the device's words — '' for a name the
+ *  rubric never wrote (nothing a vendor says reaches the UI). */
+export function judgeClauseWord(name, { t = tDevice } = {}) {
+  switch (name) {
+    case 'to_me': return t('said to you');
+    case 'asks_me': return t('asks you');
+    case 'decision': return t('wants your decision');
+    case 'deadline_money': return t('deadline or money');
+    case 'waiting': return t('someone is waiting');
+    case 'escalation': return t('escalation or incident');
+    case 'matters': return t('what you care about');
+    default: return '';
   }
 }
 

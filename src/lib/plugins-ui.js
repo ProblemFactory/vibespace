@@ -6,6 +6,53 @@ import { createModalShell, fetchJson, showToast, showConfirmDialog, showContextM
 import { BACKEND_META } from './agent-meta.js';
 import { t } from './i18n.js';
 import { renderDictationCard } from './voice-plugin-card.js';
+// lane decision-core: the Decision API card shows the registry row's own card (provider / model / key) — one key box
+import { mountIntegrationCard } from './integrations-window.js';
+
+/** The Decision API card's body (provides 'decision'): the feature toggles, the daily budget (stored in cents, shown
+ *  as USD), today's counter per use, the pause line. The switch is the card's own button; the key is the registry's. */
+const decisionFeatures = () => [['attention', t('Judge the first screen\'s other rows (needs attention)')], ['rules', t('Notification rules that ask the judge')], ['routing', t('Route records to a group or agent')]];
+const decisionUseWord = (use) => ({ attention: t('needs attention'), rule: t('rules'), routing: t('routing'), foryou: t('For you sorting'), webhook: t('webhook facts'), test: t('Test') }[use] || use);
+const usd = (n) => '$' + (Number(n) || 0).toFixed(n && n < 0.01 ? 6 : 2);
+function decisionCard(app, p, { actions, cfgBox, api, render }) {
+  const d = p.decision || {};
+  const sw = document.createElement('button');
+  sw.className = 'mounts-btn' + (p.enabled ? '' : ' mounts-btn-primary'); sw.dataset.decisionSwitch = p.enabled ? 'on' : 'off';
+  sw.textContent = p.enabled ? t('Turn off') : t('Turn on');
+  sw.onclick = async () => { sw.disabled = true; try { await api('enabled', { body: JSON.stringify({ enabled: !p.enabled }) }); } catch (e) { showToast(e.message, { type: 'error' }); } sw.disabled = false; render(); };
+  actions.appendChild(sw);
+  const integ = document.createElement('div'); integ.className = 'decision-integ';
+  cfgBox.appendChild(integ);
+  mountIntegrationCard(app, integ, 'decision-api');
+  for (const [key, label] of decisionFeatures()) {
+    const r = document.createElement('label'); r.className = 'plugin-cfg-row';
+    const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = d[key] === true; cb.dataset.decisionFeature = key;
+    cb.onchange = () => api('config', { body: JSON.stringify({ [key]: cb.checked }) }).catch((e) => { cb.checked = !cb.checked; showToast(e.message, { type: 'error' }); });
+    r.append(cb, document.createTextNode(' ' + label));
+    cfgBox.appendChild(r);
+  }
+  const br = document.createElement('div'); br.className = 'plugin-cfg-row';
+  const inp = document.createElement('input'); inp.className = 'plugin-cfg-flags decision-budget'; inp.type = 'number'; inp.min = '0'; inp.step = '0.01';
+  inp.value = ((Number(d.dailyBudgetCents) || 0) / 100).toFixed(2);
+  const save = document.createElement('button'); save.className = 'mounts-btn'; save.textContent = t('Save');
+  save.onclick = async () => {
+    const cents = Math.round(Number(inp.value) * 100);
+    try { await api('config', { body: JSON.stringify({ dailyBudgetCents: cents }) }); showToast(t('Daily budget saved')); } catch (e) { showToast(e.message, { type: 'error' }); }
+  };
+  br.append(Object.assign(document.createElement('span'), { className: 'plugin-cfg-label', textContent: t('Daily budget (USD)') }), inp, save);
+  cfgBox.appendChild(br);
+  const tot = (d.today && d.today.total) || { calls: 0, inputTokens: 0, usd: 0 };   // usd = settled; + the calls in flight's reservations
+  const cnt = document.createElement('div'); cnt.className = 'plugin-detail decision-counter';
+  cnt.textContent = t('Today: {calls} calls · {tokens} input tokens · {usd} of {budget}', { calls: tot.calls, tokens: tot.inputTokens, usd: usd((Number(tot.usd) || 0) + (Number(d.today && d.today.reserved) || 0)), budget: usd((Number(d.dailyBudgetCents) || 0) / 100) });
+  cfgBox.appendChild(cnt);
+  for (const [use, x] of Object.entries((d.today && d.today.byUse) || {})) {
+    const u = document.createElement('div'); u.className = 'plugin-detail plugin-cfg-hint decision-use'; u.dataset.use = use;
+    u.textContent = t('{use}: {calls} calls · {tokens} tokens · {usd}', { use: decisionUseWord(use), calls: x.calls, tokens: x.inputTokens, usd: usd(x.usd) });
+    cfgBox.appendChild(u);
+  }
+  if (d.reconnect) cfgBox.appendChild(Object.assign(document.createElement('div'), { className: 'plugin-detail plugin-cfg-warn decision-reconnect', textContent: t('Reconnect: the provider refused this key (HTTP {status}). No calls until you save a new key above.', { status: d.reconnect.status }) }));
+  if (d.backoffUntil) cfgBox.appendChild(Object.assign(document.createElement('div'), { className: 'plugin-detail plugin-cfg-warn', textContent: t('Paused until {time}: the provider said it is busy (it is not retried before then).', { time: new Date(d.backoffUntil).toLocaleTimeString() }) }));
+}
 
 // How long we wait for a just-enabled background service to answer before we
 // hand the pending user action back anyway (the keeper's own boot budget is
@@ -57,7 +104,9 @@ export function installPluginsUI(App) {
         const isServe = provides(p, 'serve');
         const isTunnel = provides(p, 'tunnel');
         const isDictation = provides(p, 'dictation'); // Dropline voice input (q-029 P0): src/lib/voice-plugin-card.js draws its card
+        const isDecision = provides(p, 'decision');
         const stateTxt = isDictation ? (!p.configured ? t('no Dropline key yet') : p.enabled ? t('on') : t('turned off'))
+          : isDecision ? (!p.enabled ? t('turned off') : p.configured ? t('on · {provider}', { provider: p.decision?.providerLabel || '' }) : t('on — no provider key yet'))
           : isServe
           ? (!p.installed ? t('the opencode CLI is not installed')
             : p.parkedKind === 'runaway' ? t('stopped as a runaway')
@@ -71,10 +120,12 @@ export function installPluginsUI(App) {
             : p.mode === 'system' ? t('managed by the system (outside VibeSpace)')
               : running ? (p.backendState === 'Running' ? t('connected') : (p.backendState || t('starting…')))
                 : p.installed ? t('stopped') : t('not installed');
-        const dot = `<span class="plugin-dot ${isDictation ? (p.running ? 'ok' : '') : isServe ? (running ? 'ok' : p.parked ? 'err' : p.starting ? 'warn' : '')
+        const dot = `<span class="plugin-dot ${isDictation ? (p.running ? 'ok' : '') : isDecision ? (p.enabled && p.configured ? 'ok' : p.enabled ? 'warn' : '') : isServe ? (running ? 'ok' : p.parked ? 'err' : p.starting ? 'warn' : '')
           : isRelay ? (running ? 'ok' : '')
             : (running && p.backendState === 'Running' ? 'ok' : running ? 'warn' : '')}"></span>`;
         let detail = '';
+        // the privacy sentence (design §2.8): what leaves the instance, to whom — beside the switch, always
+        if (isDecision) detail += `<div class="plugin-detail decision-privacy">${escHtml(t('The text of your channel records is sent to {provider} to be judged; attachments, images and raw webhook payloads never are.', { provider: p.decision?.providerLabel || t('the provider you choose') }))}</div>`;
         if (isServe) {
           if (p.envForced === true) detail += `<div class="plugin-detail plugin-cfg-hint">${escHtml(t('Forced ON by the environment (VIBESPACE_OPENCODE_SERVE=1) — the switch below is ignored on this instance.'))}</div>`;
           if (p.envForced === false) detail += `<div class="plugin-detail plugin-cfg-warn">${escHtml(t('Forced OFF by the environment (VIBESPACE_OPENCODE_SERVE=0) — the switch below is ignored on this instance.'))}</div>`;
@@ -133,6 +184,8 @@ export function installPluginsUI(App) {
         // only once a relay is configured (env default or user-entered).
         if (isDictation) {
           renderDictationCard({ p, actions, cfgBox, api, rerender: render });
+        } else if (isDecision) {
+          decisionCard(this, p, { actions, cfgBox, api, render });
         } else if (isServe) {
           // The OpenCode service has nothing to install (it runs the user's own
           // CLI) and nothing to configure — Start / Stop and one deliberate

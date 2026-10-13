@@ -1043,7 +1043,7 @@ router.post('/api/browser/switch', async (req, res) => {
 // ── lane browser-propose step 3: THE PROPOSAL — the USER's Approve / Reject (owner-only: an agent's bearer is refused by
 // name here, and the PURE step refuses any actor but the user). Approve runs EXACTLY the proposal's frozen fields: the
 // body names the digest of the card that was pressed (`shown`); another one ⇒ 409 proposal_changed, nothing runs ──
-const PROPOSAL_ID_RE = /^(?:bl|sr)-[0-9a-f]{8}$/; // lane site-reset: + a site-reset proposal (`sr-…`) — the same routes
+const PROPOSAL_ID_RE = /^(?:bl|sr|pk)-[0-9a-f]{8}$/; // lane passkey-store-core: + a passkey card (`pk-…`, the dialog watch's own — register / sign-in) // lane site-reset: + a site-reset proposal (`sr-…`) — the same routes
 const PROPOSAL_IS_USERS = 'approving or rejecting a browser proposal is the user\'s act — an agent token may not do it; tell the user a card waits for their Approve';
 function proposalsOr503(res) { const p = ctx?.proposals || null; if (!p) res.status(503).json({ error: 'browser proposals are not available on this server', code: 'unavailable' }); return p; }
 router.get('/api/browser/proposals/:id', (req, res) => {
@@ -1062,6 +1062,7 @@ router.post('/api/browser/proposals/:id/approve', (req, res) => {
   if (!PROPOSAL_ID_RE.test(String(req.params.id || ''))) return res.status(400).json({ error: 'bad id', code: 'bad-request' });
   const shown = typeof req.body?.shown === 'string' ? req.body.shown.slice(0, 40) : null;
   if (!shown) return res.status(400).json({ error: 'an Approve names the card it was pressed on (`shown`)', code: 'shown_required' });
+  if (String(req.params.id).startsWith('pk-')) return passkeyAnswer(req, res, typeof req.body?.choice === 'string' ? req.body.choice : 'once', shown); // lane passkey-store-core
   try { const r = pr.approve(req.params.id, { shown, by: 'user' }); if (!r.ok) return failVerdict(res, r); res.json(r); } catch (e) { fail(res, e); }
 });
 router.post('/api/browser/proposals/:id/reject', (req, res) => {
@@ -1069,8 +1070,35 @@ router.post('/api/browser/proposals/:id/reject', (req, res) => {
   if (refuseAgentBearer(req, res, PROPOSAL_IS_USERS)) return;
   const pr = proposalsOr503(res); if (!pr) return;
   if (!PROPOSAL_ID_RE.test(String(req.params.id || ''))) return res.status(400).json({ error: 'bad id', code: 'bad-request' });
+  if (String(req.params.id).startsWith('pk-')) return passkeyAnswer(req, res, 'no', null); // lane passkey-store-core
   try { const r = pr.reject(req.params.id, { by: 'user' }); if (!r.ok) return failVerdict(res, r); res.json(r); } catch (e) { fail(res, e); }
 });
+/** lane passkey-store-core: THE OWNER's answer on a passkey card — register: allow once (a 10-min one-time grant) | no;
+ *  sign-in: once | always | no | never (always / never remembered on the key). Only the person's session reaches here. */
+function passkeyAnswer(req, res, choice, shown) {
+  const D = ctx.dialogs;
+  if (!D || typeof D.answerPasskey !== 'function') return res.status(503).json({ error: 'VibeSpace keeps no passkeys on this server', code: 'unavailable' });
+  const r = D.answerPasskey(req.params.id, { choice, shown });
+  if (!r.ok) return res.status(r.code === 'not-found' ? 404 : r.code === 'bad-request' ? 400 : 409).json({ error: r.error, code: r.code });
+  res.json({ ok: true, proposal: r.proposal });
+}
+/** lane passkey-store-core: the owner's passkey table (publicRow only — never a key), a key's policy, its removal, the
+ *  profile's "agents never sign in with passkeys" switch. Owner routes: an agent's bearer is refused by name. */
+const PASSKEYS_ARE_USERS = 'the passkey table is the user\'s — an agent uses `vibespace-browser passkey list | register | forget`';
+function passkeyOwnerTarget(req, res) {
+  if (refuseHost(req, res)) return null;
+  if (refuseAgentBearer(req, res, PASSKEYS_ARE_USERS)) return null;
+  const k = keeperOr503(res); if (!k) return null;
+  const D = ctx.dialogs;
+  if (!D || typeof D.passkeyList !== 'function') { res.status(503).json({ error: 'VibeSpace keeps no passkeys on this server', code: 'unavailable' }); return null; }
+  let p = null; try { p = profileRefFor(k, req.params.profile || req.query.profile); } catch (e) { fail(res, e); return null; }
+  if (!p) { res.status(404).json({ error: `no profile ${req.params.profile || req.query.profile || ''}`, code: 'not-found' }); return null; }
+  return { D, p };
+}
+router.get('/api/browser/passkeys', (req, res) => { const t = passkeyOwnerTarget(req, res); if (!t) return; res.json({ ok: true, profileId: t.p.id, ...t.D.passkeyList(t.p.id) }); });
+router.patch('/api/browser/passkeys/:profile/:id', (req, res) => { const t = passkeyOwnerTarget(req, res); if (!t) return; const r = t.D.passkeyPolicy(t.p.id, req.params.id, String(req.body?.policy || '')); if (!r.ok) return res.status(r.code === 'not-found' ? 404 : 400).json({ error: r.error, code: r.code }); res.json(r); });
+router.delete('/api/browser/passkeys/:profile/:id', (req, res) => { const t = passkeyOwnerTarget(req, res); if (!t) return; const r = t.D.passkeyForget(t.p.id, req.params.id, { by: 'user' }); if (!r.ok) return res.status(404).json({ error: r.error, code: r.code }); res.json(r); });
+router.put('/api/browser/passkeys/:profile/switch', (req, res) => { const t = passkeyOwnerTarget(req, res); if (!t) return; if (typeof req.body?.agentsOff !== 'boolean') return res.status(400).json({ error: 'agentsOff: true | false', code: 'bad-request' }); res.json(t.D.passkeySwitch(t.p.id, req.body.agentsOff)); });
 router.delete('/api/browser/blocked/:id', (req, res) => {
   if (refuseHost(req, res)) return;
   const k = keeperOr503(res); if (!k) return;
@@ -1846,7 +1874,9 @@ router.post('/api/agent/browser/passkey', async (req, res) => {
   const PK = require('../browser-passkey.js');
   if (!D || typeof D.cancelPasskey !== 'function') return res.status(409).json({ error: 'VibeSpace does not watch passkey requests on this server', code: 'not_watched' });
   const action = String(req.body?.action || 'status');
-  if (!['status', 'cancel'].includes(action)) return res.status(400).json({ error: 'passkey takes status | cancel', code: 'bad-request' });
+  if (!['status', 'cancel', 'list', 'register', 'forget'].includes(action)) return res.status(400).json({ error: 'passkey takes status | cancel | list | register <rpId> | forget <rpId|id>', code: 'bad-request' });
+  // lane passkey-store-core: a Background Work job never registers a passkey — nobody is at the keyboard to approve it
+  if (action === 'register' && /^Bearer\s+jbt_/i.test(String(req.headers.authorization || ''))) return res.status(403).json({ error: 'a Background Work job cannot register a passkey — a job has no owner at the keyboard to approve the card; register it from the conversation itself', code: 'job_forbidden' });
   const t0 = dialogTargetFor(k, f, req.body?.profile);
   if (!t0.ok) return failVerdict(res, t0);
   try {
@@ -1855,7 +1885,21 @@ router.post('/api/agent/browser/passkey', async (req, res) => {
     const t = dialogTargetFor(k, f, req.body?.profile); // the reach, asked again after the await
     if (!t.ok) return failVerdict(res, t);
     const v = D.passkeyIn(t.profileId, D.scopeFor(t));
-    if (action === 'status') return res.json({ ok: true, passkey: PK.passkeyBlock(v), text: v.state === PK.PASSKEY_OPEN_CODE ? v.text : v.state === 'unknown' ? PK.UNKNOWN_TEXT : v.state === 'pending' ? `A passkey request (${PK.rpWord(v.record.rpId) || 'this site'}) started under ${Math.ceil(PK.PENDING_SAID_MS / 1000)} s ago — a present authenticator may still answer it.` : PK.NONE_TEXT });
+    // lane passkey-store-core: the store's answer (publicRow only — never a key) beside the page's state
+    const L = typeof D.passkeyList === 'function' ? D.passkeyList(t.profileId) : null;
+    const storeLine = !L ? '' : L.agentsOff ? 'The owner turned passkeys off for agents on this profile.' : L.keys.length ? `This profile holds ${L.keys.length} passkey${L.keys.length === 1 ? '' : 's'}: ${L.keys.slice(0, 8).map((x) => `${x.rpId} (${x.userName || x.id}, policy ${x.policy})`).join(', ')}.` : 'This profile holds no passkeys — `vibespace-browser passkey register <site>` asks the owner first.';
+    if (action === 'list') return res.json({ ok: true, keys: L ? L.keys : [], agentsOff: !!(L && L.agentsOff), text: storeLine });
+    if (action === 'register' || action === 'forget') {
+      if (!L) return res.status(409).json({ error: 'VibeSpace keeps no passkeys on this server', code: 'not_watched' });
+      const ref = String(req.body?.rpId || req.body?.ref || '').trim().slice(0, 300);
+      if (!ref) return res.status(400).json({ error: action === 'register' ? 'passkey register <site> (e.g. github.com)' : 'passkey forget <site|id>', code: 'bad-request' });
+      if (action === 'forget') { const r = D.passkeyForget(t.profileId, ref, { by: 'agent' }); if (!r.ok) return res.status(r.code === 'not-found' ? 404 : 409).json({ error: r.error, code: r.code }); return res.json({ ok: true, removed: r.removed, text: `Removed ${r.removed.length} passkey${r.removed.length === 1 ? '' : 's'} (${r.removed.map((x) => `${x.rpId} ${x.userName || x.id}`).join(', ')}).` }); }
+      const waitMs = Math.max(0, Math.min(Number(req.body?.waitSec) || 0, 300)) * 1000;
+      const r = await D.passkeyRegister({ profileId: t.profileId, browserKey: f.browserKey, sessionId: f.sessionId || null, rpId: ref, user: String(req.body?.user || '').slice(0, 64) }, { waitMs });
+      if (!r.ok) return res.status(r.code === 'bad-request' ? 400 : 409).json({ error: r.error, code: r.code });
+      return res.json({ ok: true, state: r.state, proposal: { id: r.proposal.id, rpId: r.proposal.rpId, expiresAt: r.proposal.expiresAt }, text: PK.registerText(r.state, r.proposal.rpId) });
+    }
+    if (action === 'status') return res.json({ ok: true, passkey: PK.passkeyBlock(v), store: L ? { keys: L.keys.length, agentsOff: L.agentsOff } : null, text: (v.state === PK.PASSKEY_OPEN_CODE || v.state === PK.PASSKEY_ASK_CODE || v.state === 'refused' ? v.text : v.state === 'unknown' ? PK.UNKNOWN_TEXT : v.state === 'pending' ? `A passkey request (${PK.rpWord(v.record.rpId) || 'this site'}) started under ${Math.ceil(PK.PENDING_SAID_MS / 1000)} s ago — a present authenticator may still answer it.` : PK.NONE_TEXT) + (storeLine ? ' ' + storeLine : '') });
     let st = null; try { st = k.inputStateFor(t.ephemeral ? t.browserKey : f.browserKey, t.ephemeral ? null : t.profileId); } catch { st = null; }
     if (st && st.input === 'user') return res.status(409).json({ error: require('../browser-interrupt.js').interruptedText('passkey cancel'), code: 'browser_interrupted', takenAt: st.takenAt || 0 });
     const r = await D.cancelPasskey(t, { by: 'agent' });

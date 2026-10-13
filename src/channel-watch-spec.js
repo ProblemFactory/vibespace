@@ -31,11 +31,16 @@ const RULE_FLAGS = Object.freeze([
   { kind: 'reply-to-sent', flag: '--reply-to-sent', value: null, since: true, rules: () => [{ kind: 'reply-to-sent' }] },
   // lane webhook-l1-server: `fact <key> == <value>` over the message's declared facts (a webhook path's mapped fields)
   { kind: 'fact', flag: '--fact', value: 'key=value', since: true, rules: (v) => { const s = String(v === null || v === undefined ? '' : v); const i = s.indexOf('='); return [{ kind: 'fact', key: i > 0 ? s.slice(0, i).trim() : '', value: i > 0 ? s.slice(i + 1) : '' }]; } },
+  // lane decision-rule: `--kind decision --condition "…" [--choice a,b,c] [--threshold 0.7] [--per-hour 20]` — the Decision
+  // API judges each message (the plugin's switches + daily budget; the rule's own hour cap); --choice makes it "one of"
+  { kind: 'decision', flag: '--condition', value: 'words', since: true, rules: (v) => [{ kind: 'decision', condition: String(v === null || v === undefined ? '' : v) }] },
 ]);
 /** A RULE_KINDS entry the CLI does not offer, with the reason it says (the census: every kind = a flag or a row here). */
 const NOT_OFFERED = Object.freeze({});
 /** The non-rule flags (value-taking unless listed in BOOL). */
-const OTHER_FLAGS = Object.freeze(['--mode', '--digest-minutes', '--cap', '--match', '--why', '--spec', '--tz-offset']);
+const OTHER_FLAGS = Object.freeze(['--mode', '--digest-minutes', '--cap', '--match', '--why', '--spec', '--tz-offset', '--kind', '--choice', '--threshold', '--per-hour']);
+/** lane decision-rule: the flags that shape a `decision` rule (they need its --condition). */
+const DECISION_FLAGS = Object.freeze(['--choice', '--threshold', '--per-hour']);
 const MODES = Object.freeze(['next-turn', 'wake', 'digest']);
 const MODE_WORDS = '--mode must be next-turn (free: the news rides your next turn), wake (a billed turn now — the user approves it) or digest (a billed turn per window — the user approves it)';
 const PLACEHOLDER = Object.freeze({ kind: 'agent', id: 'spec', name: null });   // the validator needs a principal; the engine sets the real one
@@ -104,6 +109,16 @@ function watchSpecFromArgs(argv) {
     if (!tw.length) return refuse('tz-without-window', '--tz-offset goes with --time-window', { flag: '--tz-offset' });
     for (const r of tw) r.tzOffsetMinutes = one['--tz-offset'];
   }
+  // lane decision-rule: `--kind` names the one kind that takes several flags; the shaping flags ride its rule(s)
+  if (one['--kind'] !== undefined && one['--kind'] !== 'decision') return refuse('bad-kind', '--kind decision is the one kind flag (with --condition "…"); every other rule kind has its own flag', { flag: '--kind' });
+  const dec = rules.filter((r) => r.kind === 'decision');
+  if (one['--kind'] === 'decision' && !dec.length) return refuse('kind-without-condition', '--kind decision needs --condition "…" (what to judge, in plain words)', { flag: '--condition' });
+  for (const f of DECISION_FLAGS) if (one[f] !== undefined && !dec.length) return refuse('decision-flag-without-condition', `${f} goes with --kind decision --condition "…"`, { flag: f });
+  for (const r of dec) {
+    if (one['--choice'] !== undefined) { r.question = 'choice'; r.choices = split(one['--choice']); }
+    if (one['--threshold'] !== undefined) r.threshold = one['--threshold'] === '' ? NaN : Number(one['--threshold']);
+    if (one['--per-hour'] !== undefined) r.perHour = one['--per-hour'] === '' ? NaN : Number(one['--per-hour']);
+  }
   if (one['--match'] !== undefined && !rules.length) return refuse('match-without-rules', '--match says how the rules combine — give at least one rule flag', { flag: '--match' });
   const num = (v) => (v === undefined ? undefined : v === '' ? NaN : Number(v));
   return specVerdict({
@@ -140,4 +155,4 @@ function watchWhatWords(w, filter = null) {
   return (f.match === 'every' ? 'messages matching all of: ' : 'messages matching any of: ') + f.rules.map((r) => F.ruleWhy(r)).join(f.match === 'every' ? ' and ' : ', ');
 }
 
-module.exports = { RULE_FLAGS, NOT_OFFERED, OTHER_FLAGS, MODES, MODE_WORDS, specVerdict, watchSpecFromArgs, watchSpecOfBody, watchHowWords, watchWhatWords };
+module.exports = { RULE_FLAGS, NOT_OFFERED, OTHER_FLAGS, DECISION_FLAGS, MODES, MODE_WORDS, specVerdict, watchSpecFromArgs, watchSpecOfBody, watchHowWords, watchWhatWords };

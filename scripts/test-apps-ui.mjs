@@ -7,6 +7,9 @@
 // plans are the PURE parse of real captured apt output) + headless chrome over raw CDP. A stub `claude` runs behind the
 // REAL chat-wrapper through the REAL create path (a live conversation with its own session token); the suite plays its
 // agent by running the SHIPPED data/bin/vibespace-app with that token.
+//   ⓪ the catalog answers late (the Actions runner's shape, mirror-260): GET /api/desktop/apps held in the page past the
+//      section's own GET /api/apps — the "Your installed apps" doors are not shown while the catalog above them can still
+//      grow (they moved ~270 px under the pointer: the press hit the group that slid there), then a real click opens search
 //   ① the user's door: Desktop apps → Your installed apps → Install an app… → search → pick → THE install dialog (the
 //      plan's facts: packages, sizes, how it comes back after a rebuild; every command) → Install (a real click) → the
 //      log streams, the dialog says done, the entry is a row of "Your installed apps"
@@ -32,7 +35,11 @@ const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => fs.existsSync(p));
 let passed = 0, failed = 0, skipped = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1500) : ''}`); } return !!c; };
+// THE PAGE'S OWN WORDS ON ANY RED (lane apps-ui-runner-red): every uncaught exception and console error the page raised since
+// the last red prints under the failing check — a red names the page's cause, not only the suite's symptom
+const pageErrors = [], pageConsole = []; let pageSaid = 0;
+const pageWords = () => { const all = [...pageErrors.map((x) => 'exception: ' + x), ...pageConsole.map((x) => 'console: ' + x)]; const fresh = all.length > pageSaid ? `\n    the page said (${all.length - pageSaid} since the last red):\n      ` + all.slice(pageSaid).map((x) => String(x).slice(0, 700)).join('\n      ') : `\n    the page said nothing (no exception, no console error)`; pageSaid = all.length; return fresh; };
+const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1500) : ''}${pageWords()}`); } return !!c; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const T0 = Date.now();
 const done = () => { console.log(`\n${failed ? `${failed} FAILED` : 'ALL PASS'} (${passed}${skipped ? `, ${skipped} skipped` : ''}) in ${Math.round((Date.now() - T0) / 1000)} s`); process.exit(failed ? 1 : 0); };
@@ -95,8 +102,13 @@ for (let i = 0; i < 120 && !target; i++) { try { target = (await (await fetch(`h
 if (!target) { console.error('✗ chrome never exposed a CDP page target'); process.exit(1); }
 const sock = new WebSocket(target.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
 await new Promise((r) => sock.on('open', r));
-let seq = 0; const pend = new Map(); const pageErrors = [];
-sock.on('message', (d) => { const m = JSON.parse(d); if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); } if (m.method === 'Runtime.exceptionThrown') { try { pageErrors.push(m.params.exceptionDetails?.exception?.description || m.params.exceptionDetails?.text || 'unknown'); } catch {} } });
+let seq = 0; const pend = new Map();
+sock.on('message', (d) => {
+  const m = JSON.parse(d);
+  if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); }
+  if (m.method === 'Runtime.exceptionThrown') { try { pageErrors.push(m.params.exceptionDetails?.exception?.description || m.params.exceptionDetails?.text || 'unknown'); } catch {} }
+  if (m.method === 'Runtime.consoleAPICalled' && (m.params.type === 'error' || m.params.type === 'assert')) { try { pageConsole.push(m.params.args.map((a) => a.description ?? a.value ?? a.type).join(' ')); } catch {} }
+});
 const cdp = (method, params = {}) => new Promise((res, rej) => { const id = ++seq; pend.set(id, (m) => (m.error ? rej(new Error(m.error.message)) : res(m.result))); sock.send(JSON.stringify({ id, method, params })); });
 const evalJs = async (expr) => { const r = await cdp('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error('page threw: ' + (r.exceptionDetails.exception?.description || r.exceptionDetails.text)); return r.result.value; };
 const waitFor = async (expr, ms = 15000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { try { if (await evalJs(expr)) return true; } catch {} await sleep(150); } try { return await evalJs(expr); } catch { return false; } };
@@ -109,7 +121,7 @@ const realClick = async (sel) => {
   await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: r.x, y: r.y, button: 'left', clickCount: 1 });
   return true;
 };
-const typeInto = async (sel, text) => { await evalJs(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); e.focus(); e.value = ''; return true; })()`); await cdp('Input.insertText', { text }); };
+const typeInto = async (sel, text) => { if (!await evalJs(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return false; e.focus(); e.value = ''; return true; })()`)) throw new Error(`typeInto: the page has no ${sel}`); await cdp('Input.insertText', { text }); };
 const shot = async (name) => { const dir = process.env.VS_SHOT_DIR; if (!dir) return; try { const img = await cdp('Page.captureScreenshot', { format: 'png' }); fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(path.join(dir, name + '.png'), Buffer.from(img.data, 'base64')); console.log(`    (screenshot ${name}.png)`); } catch (e) { console.log(`    (screenshot ${name} failed: ${e.message})`); } };
 const api = async (method, p, body, headers = {}) => { const r = await fetch(`http://127.0.0.1:${PORT}${p}`, { method, headers: { 'Content-Type': 'application/json', ...headers }, body: body === undefined ? undefined : JSON.stringify(body) }); const text = await r.text(); let j = null; try { j = JSON.parse(text); } catch { j = text; } return { status: r.status, body: j }; };
 const cli = (args, token) => new Promise((resolve) => { const c = spawn(process.execPath, [path.join(wt, 'data', 'bin', 'vibespace-app'), ...args], { env: { PATH: process.env.PATH, HOME: fakeHome, VIBESPACE_API: `http://127.0.0.1:${PORT}`, VIBESPACE_SESSION_TOKEN: token } }); let out = '', err = ''; c.stdout.on('data', (d) => { out += d; }); c.stderr.on('data', (d) => { err += d; }); c.on('close', (code) => resolve({ code, out, err })); });
@@ -122,9 +134,22 @@ try {
   await evalJs('new Promise((res, rej) => { const t0 = Date.now(); (function w() { if (window.app) return res(app.ready); if (Date.now() - t0 > 20000) return rej(new Error("no app after 20s")); setTimeout(w, 200); })(); })');
   await sleep(500);
 
+  console.log('⓪ the catalog answers late: the doors below it wait for it');
+  await evalJs(`(() => { let go; window.__vsHold = new Promise((r) => { go = r; }); window.__vsRelease = go; window.__vsFetch0 = window.fetch; window.fetch = async (u, ...a) => { if (String(u) === '/api/desktop/apps') await window.__vsHold; return window.__vsFetch0(u, ...a); }; return true; })()`);
+  await evalJs(`document.getElementById('btn-desktop-apps').click(); true`);
+  check('held: the section\'s own answer is in (its empty line is written)', await waitFor(`/Nothing installed through VibeSpace yet/.test(document.querySelector('#desktop-launch-dialog .app-sec-list')?.textContent || '')`, 8000));
+  await sleep(300);
+  const heldRect = await evalJs(`(() => { const e = document.querySelector('#desktop-launch-dialog .app-sec-install'); const q = e && e.getClientRects()[0]; return q ? { top: Math.round(q.top), left: Math.round(q.left) } : null; })()`);
+  check('while the catalog is pending, Install an app… is not shown (nothing to aim at that the catalog will push down)', heldRect === null && await evalJs(`!document.querySelector('#desktop-launch-dialog .desktop-launch-registry .desktop-launch-card')`) === true, heldRect);
+  await evalJs(`window.__vsRelease(); true`);
+  check('released: the catalog lands, then the doors show', await waitFor(`!!document.querySelector('#desktop-launch-dialog .desktop-launch-registry .desktop-launch-card') && document.querySelector('#desktop-launch-dialog .app-sec-install')?.getClientRects().length === 1`, 10000));
+  check('a real click on Install an app… (catalog landed late)', await realClick('#desktop-launch-dialog .app-sec-install') === true);
+  check('…opens the search dialog with its input focused', await waitFor(`!!document.querySelector('#app-search-dialog .app-search-input') && document.activeElement === document.querySelector('#app-search-dialog .app-search-input')`, 5000));
+  await evalJs(`window.fetch = window.__vsFetch0; document.querySelectorAll('.dialog-overlay').forEach((o) => o.remove()); true`);
+
   console.log('① the user\'s door: Desktop apps → Install an app… → search → plan → Install');
   await evalJs(`document.getElementById('btn-desktop-apps').click(); true`);
-  check('the Desktop apps dialog has the "Your installed apps" section with its doors', await waitFor(`!!document.querySelector('#desktop-launch-dialog .desktop-launch-apps .app-sec-install') && !!document.querySelector('#desktop-launch-dialog .app-sec-deb') && !!document.querySelector('#desktop-launch-dialog .app-sec-help')`, 15000));
+  check('the Desktop apps dialog has the "Your installed apps" section with its doors, shown', await waitFor(`!!document.querySelector('#desktop-launch-dialog .desktop-launch-apps .app-sec-install') && !!document.querySelector('#desktop-launch-dialog .app-sec-deb') && !!document.querySelector('#desktop-launch-dialog .app-sec-help') && document.querySelector('#desktop-launch-dialog .app-sec-install').getClientRects().length === 1`, 15000));
   check('the empty section says what it is for', await waitFor(`/Nothing installed through VibeSpace yet/.test(document.querySelector('#desktop-launch-dialog .app-sec-list')?.textContent || '')`, 8000));
   check('a real click on Install an app…', await realClick('#desktop-launch-dialog .app-sec-install') === true);
   check('the search dialog opens with its input focused', await waitFor(`!!document.querySelector('#app-search-dialog .app-search-input') && document.activeElement === document.querySelector('#app-search-dialog .app-search-input')`, 5000));

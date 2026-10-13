@@ -789,6 +789,17 @@ export async function showLaunchDialog(app, opts = {}) {
   }
   // Layer 0 apps: the "Your installed apps" section, for the chosen machine (re-mounted when the machine changes)
   let appsSec = null;
+  // lane apps-ui-runner-red (mirror-260): the section sits BELOW the catalog, and its own GET /api/apps answers first — shown
+  // at once, its doors moved down ~270 px when the catalog landed, and a press aimed at Install an app… hit the
+  // "Installed outside VibeSpace" group that slid under the pointer (nothing opened, nothing said). The section waits
+  // for the catalog's answer (or its refusal) for the machine it shows before it appears — nothing above it grows after
+  const appsSecEl = $('.desktop-launch-apps-sec');
+  const holdApps = (answered) => {
+    if (doc) return;
+    appsSecEl.hidden = true;
+    const asked = host;
+    Promise.resolve(answered).finally(() => { if (asked === host && overlay.isConnected) appsSecEl.hidden = false; });
+  };
   const mountApps = () => {
     if (doc) return;
     try { appsSec?.dispose(); } catch { }
@@ -944,7 +955,7 @@ export async function showLaunchDialog(app, opts = {}) {
       b.onclick = () => {
         // design 014 D1: a Windows / macOS row opens ITS DESKTOP's dialog — the app catalog stays on the machine it shows
         if (m.desktop && !b.disabled) { showMachineDesktopDialog(app, m, { install: (mm, o) => showInstallDialog(mm, o), closeOpener: close, recheck: async (id) => { const r = await fetchJson('/api/desktop/machines'); if (!r || !Array.isArray(r.machines)) return null; if (overlay.isConnected) { machines = r.machines; renderMachines(); } return r.machines.find((x) => x.hostId === id) || null; } }); return; }
-        if (b.disabled || host === m.hostId) return; host = m.hostId; data = data ? { apps: data.apps } : null; listError = null; renderMachines(); render(); refresh(); mountApps(); };
+        if (b.disabled || host === m.hostId) return; host = m.hostId; data = data ? { apps: data.apps } : null; listError = null; renderMachines(); render(); holdApps(refresh()); mountApps(); };
       machinesEl.appendChild(b);
     }
   };
@@ -1216,9 +1227,10 @@ export async function showLaunchDialog(app, opts = {}) {
   fetchJson('/api/desktop/machines').then((r) => { if (r && Array.isArray(r.machines) && overlay.isConnected) { machines = r.machines; renderMachines(); } else if (r && r.error) showToast(r.error, { type: 'error' }); });
   renderMachines();
   mountApps();
-  const [state, first] = await Promise.all([fetchJson('/api/user-state'), refresh()]);
+  const opened = Promise.all([fetchJson('/api/user-state'), refresh()]);
+  holdApps(opened.then(([st]) => { if (st && st[SHOW_SYSTEM_KEY] === true && !showSystem) { showSystem = true; render({ seenOnly: true }); } })); // the person's "Show them" grows the group above too
+  const [state, first] = await opened;
   if (state && Array.isArray(state[RECENTS_KEY])) { recents = state[RECENTS_KEY].slice(0, RECENTS_MAX); render(); }
-  if (state && state[SHOW_SYSTEM_KEY] === true && !showSystem) { showSystem = true; render({ seenOnly: true }); }
   setAdvanced(doc ? false : advancedOpenFor(state, !!first?.registryEmpty)); // §7.9: a document never opens "Advanced"
   setTimeout(() => {
     if (!overlay.isConnected) return;

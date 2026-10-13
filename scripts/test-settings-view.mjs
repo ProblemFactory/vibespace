@@ -251,6 +251,17 @@ console.log('§8 the store\'s notifier walks a snapshot of its listeners');
   for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 1 })) ok(r.pass, r.name, r.detail);
 }
 
+console.log('§9 the Decision API rows (lane decision-attention, D2): the person\'s block + the threshold');
+{
+  const SCHEMA = S.SETTINGS_SCHEMA;
+  const b = SCHEMA['decision.attentionBlock'], th = SCHEMA['decision.threshold'];
+  ok(b && b.type === 'text' && b.multiline === true && b.maxLength === 1500 && b.draft === 'decision' && b.default === '' && !b.tier && !b.when && b.liveApply === true, '"What matters to me": a multiline text of at most 1 500 characters, everyday (no tier, no when), with the draft button', b && { type: b.type, multiline: b.multiline, maxLength: b.maxLength, draft: b.draft, tier: b.tier });
+  ok(th && th.type === 'number' && th.default === 0.7 && th.min === 0.5 && th.max === 0.9 && th.step === 0.05 && th.tier === 'advanced', 'the threshold: a number 0.50–0.90, default 0.70, step 0.05, advanced', th && { d: th.default, min: th.min, max: th.max, tier: th.tier });
+  ok(b.category === th.category && zh[b.label] && zh[th.label] && zh[b.description] && zh[th.description], 'both rows sit in the Channels category, their label and description worded in zh');
+  const UI = fs.readFileSync(path.join(REPO, 'src/lib/settings-ui.js'), 'utf8');
+  ok(/schema\.type === 'text' && schema\.multiline/.test(UI) && /'\/api\/channels\/decision\/draft'/.test(UI) && !/draft[\s\S]{0,400}this\.settings\.set\(path, r\.text/.test(UI), 'the UI draws the multiline row as a textarea, its draft button asks /api/channels/decision/draft, and the proposal is NEVER saved by itself (only Save / an edit saves)');
+}
+
 console.log(`\ntest-settings-view: ${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);
 console.log('ALL PASS (' + pass + ')');

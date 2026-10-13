@@ -18,8 +18,12 @@
  */
 
 const PASSKEY_OPEN_CODE = 'passkey_open';
+/** lane passkey-store-core: the page waits for the OWNER's answer on a card (a stored key whose policy is `ask`). */
+const PASSKEY_ASK_CODE = 'passkey_ask';
 const KINDS = Object.freeze(['get', 'create']);
-const OUTCOMES = Object.freeze(['pending', 'ok', 'error', 'cancelled', 'aborted-by-page']);
+const OUTCOMES = Object.freeze(['pending', 'ok', 'error', 'cancelled', 'aborted-by-page', 'refused']);
+/** lane passkey-store-core: a refusal is said to the agent's verbs this long after it (the page already showed its words). */
+const REFUSED_SAID_MS = 60 * 1000;
 /** A ceremony pending this long is SAID. 3 s: a ceremony a present authenticator answers ends well inside it (the CDP
  *  virtual authenticator of the heavy control: < 0.2 s; a platform authenticator's own prompt is answered or refused by a
  *  person at the screen in a second or two), while the incident's never ended — and 3 s is still far below the browser
@@ -43,13 +47,19 @@ function rpWord(v) {
 function parseEvent(payload) {
   let o = null; try { o = JSON.parse(str(payload).slice(0, 4096)); } catch { return null; }
   if (!o || typeof o !== 'object' || !Number.isSafeInteger(o.id) || o.id <= 0) return null;
-  if (o.ev === 'start') return { ev: 'start', id: o.id, kind: KINDS.includes(o.kind) ? o.kind : 'get', rpId: rpWord(o.rpId) };
+  if (o.ev === 'start') {
+    const user = o.user && typeof o.user === 'object' ? { name: str(o.user.name).slice(0, 64), displayName: str(o.user.displayName).slice(0, 64) } : null;
+    const allow = (Array.isArray(o.allow) ? o.allow : []).map(str).filter((x) => /^[A-Za-z0-9_-]{1,1400}$/.test(x)).slice(0, 20);
+    const origin = /^https?:\/\/[^\s/?#]{1,300}$/i.test(str(o.origin)) ? str(o.origin) : '';
+    return { ev: 'start', id: o.id, kind: KINDS.includes(o.kind) ? o.kind : 'get', rpId: rpWord(o.rpId), ...(o.uv ? { uv: str(o.uv).slice(0, 20) } : {}), allow, ...(user ? { user } : {}), origin, conditional: o.mediation === 'conditional' };
+  }
   if (o.ev === 'end') return { ev: 'end', id: o.id, outcome: OUTCOMES.includes(o.outcome) && o.outcome !== 'pending' ? o.outcome : 'error', name: /^[A-Za-z]{1,40}$/.test(str(o.name)) ? str(o.name) : null };
   return null;
 }
 /** The ceremony record: `{id, kind, rpId, startedAt, tab, outcome, endedAt}` (`id` = `<tab>:<ctx>:<n>` — unique per document). */
 function recordOf(ev, { tab = null, ctx = 0, now = 0 } = {}) {
-  return { id: `${str(tab)}:${Number(ctx) || 0}:${ev.id}`, n: ev.id, ctx: Number(ctx) || 0, kind: ev.kind, rpId: ev.rpId, startedAt: Number(now) || 0, tab: tab == null ? null : str(tab), outcome: 'pending', endedAt: 0 };
+  return { id: `${str(tab)}:${Number(ctx) || 0}:${ev.id}`, n: ev.id, ctx: Number(ctx) || 0, kind: ev.kind, rpId: ev.rpId, startedAt: Number(now) || 0, tab: tab == null ? null : str(tab), outcome: 'pending', endedAt: 0,
+    ...(ev.conditional ? { conditional: true } : {}), ...(ev.allow && ev.allow.length ? { allow: ev.allow } : {}), ...(ev.user ? { user: ev.user } : {}), ...(ev.origin ? { origin: ev.origin } : {}) };
 }
 /** Apply an event to a tab's records (in place; bounded) → the record it touched, or null. */
 function applyEvent(records, ev, { tab = null, ctx = 0, now = 0 } = {}) {
@@ -62,6 +72,7 @@ function applyEvent(records, ev, { tab = null, ctx = 0, now = 0 } = {}) {
   }
   const r = records.find((x) => x.n === ev.id && x.ctx === (Number(ctx) || 0) && x.outcome === 'pending');
   if (!r) return null;
+  if (r.refused) { r.endedAt = Number(now) || 0; r.outcome = 'refused'; return r; } // lane passkey-store-core: the watch refused it (its reason kept)
   r.outcome = ev.outcome; r.endedAt = Number(now) || 0; if (ev.name) r.error = ev.name;
   return r;
 }
@@ -76,8 +87,14 @@ function endPending(records, { now = 0, ctx = null } = {}) {
  *  (younger than PENDING_SAID_MS — `sayAt` is when it will be said), or `passkey_open` with THE SENTENCE. */
 function passkeyVerdict(records, now, { armed = true, saidMs = PENDING_SAID_MS } = {}) {
   if (!armed) return { state: 'unknown' };
-  const pend = (records || []).filter((r) => r && r.outcome === 'pending').sort((a, b) => a.startedAt - b.startedAt);
-  if (!pend.length) return { state: 'none' };
+  // lane passkey-store-core: an autofill (conditional) get waits for a pick by nature — never `passkey_open`, only an ask
+  const pend = (records || []).filter((r) => r && r.outcome === 'pending' && (!r.conditional || r.ask)).sort((a, b) => a.startedAt - b.startedAt);
+  const asking = pend.find((r) => r.ask);
+  if (asking) return { state: PASSKEY_ASK_CODE, record: asking, since: asking.startedAt, rpId: asking.rpId, text: askText(asking) };
+  if (!pend.length) {
+    const ref = (records || []).filter((r) => r && r.outcome === 'refused' && r.why && r.why !== 'none' && (Number(now) || 0) - r.endedAt < REFUSED_SAID_MS).sort((a, b) => b.endedAt - a.endedAt)[0];
+    return ref ? { state: 'refused', record: ref, why: ref.why, rpId: ref.rpId, text: refusedText(ref.why, ref.rpId) } : { state: 'none' };
+  }
   const r = pend[0];
   const age = (Number(now) || 0) - r.startedAt;
   if (age < saidMs) return { state: 'pending', record: r, sayAt: r.startedAt + saidMs };
@@ -86,13 +103,41 @@ function passkeyVerdict(records, now, { armed = true, saidMs = PENDING_SAID_MS }
 /** THE SENTENCE — the first words of every agent-facing surface while a ceremony is open. */
 function passkeyText(r) {
   const rp = rpWord(r && r.rpId) || 'this site';
-  return `This page is waiting for a passkey (${rp}). The agent's browser holds no passkey of yours — cancel it (\`vibespace-browser passkey cancel\`) and use the page's other way in (a recovery code, a password), or ask the user to sign in on their own device.`;
+  return `This page is waiting for a passkey (${rp}) and nothing in VibeSpace answers it — cancel it (\`vibespace-browser passkey cancel\`) and use the page's other way in (a recovery code, a password), or ask the user to sign in on their own device.`;
+}
+/** lane passkey-store-core (§2.4): the page waits for the owner's card. */
+function askText(r) {
+  const rp = rpWord(r && r.rpId) || 'this site';
+  return `This page is waiting for the owner to allow the passkey for ${rp} (a card is in their For-you tray). Do not retry the click — \`vibespace-browser passkey status\` says when it is answered; \`passkey cancel\` withdraws the request.`;
+}
+/** lane passkey-store-core: the refused ceremony's sentence by reason (the page itself was told NotAllowedError). */
+function refusedText(why, rpId) {
+  const rp = rpWord(rpId) || 'this site';
+  switch (why) {
+    case 'no-grant': return `Registering a passkey on ${rp} needs the owner's permission first: run \`vibespace-browser passkey register ${rp}\`, then press the page's button again.`;
+    case 'policy-no': return `The owner does not let agents sign in to ${rp} with this passkey — the page was told it was not allowed; use its other way in, or ask the owner.`;
+    case 'declined': return `The owner said no to this passkey sign-in on ${rp} — the page was told it was not allowed; ask the owner before you try again.`;
+    case 'expired': return `The owner's permission for the passkey on ${rp} was not there in time (no answer within 5 minutes, or a registration permission older than 10 minutes) — the page was told it was not allowed; ask again (\`vibespace-browser passkey register ${rp}\` to register; press the page's button again to sign in).`;
+    case 'profile-switch': return `The owner turned passkeys off for agents on this browser profile — ${rp}'s request was refused; use the page's other way in.`;
+    case 'rp-mismatch': return `The page asked for a passkey of ${rp}, which its own address may not use — refused.`;
+    case 'withdrawn': return `The user took over the browser — your passkey request on ${rp} was withdrawn.`;
+    default: return `The passkey request on ${rp} was refused.`;
+  }
+}
+/** lane passkey-store-core: `passkey register`'s answers. */
+function registerText(state, rpId) {
+  const rp = rpWord(rpId) || 'this site';
+  if (state === 'approved') return `Allowed: register the passkey on ${rp} now — press the page's "create a passkey" button (the permission is good for one passkey for 10 minutes).`;
+  if (state === 'rejected') return `The owner said no — do not register a passkey on ${rp}.`;
+  if (state === 'expired') return `Nobody answered the card for ${rp} in 5 minutes — ask the owner, then run \`vibespace-browser passkey register ${rp}\` again.`;
+  return `A card asking the owner to let you register a passkey on ${rp} is in their For-you tray — \`vibespace-browser passkey status\` says when it is answered.`;
 }
 /** A verdict as the routes and the CLI carry it (no clock inside; `record` trimmed to what a reader needs). */
 function passkeyBlock(v) {
-  if (!v || v.state !== PASSKEY_OPEN_CODE) return v ? { state: v.state } : null;
+  if (v && v.state === 'refused') return { state: 'refused', why: v.why, rpId: v.rpId, text: v.text }; // lane passkey-store-core
+  if (!v || (v.state !== PASSKEY_OPEN_CODE && v.state !== PASSKEY_ASK_CODE)) return v ? { state: v.state } : null;
   const r = v.record;
-  return { state: v.state, id: r.id, kind: r.kind, rpId: r.rpId, tab: r.tab, startedAt: r.startedAt, text: v.text };
+  return { state: v.state, id: r.id, kind: r.kind, rpId: r.rpId, tab: r.tab, startedAt: r.startedAt, text: v.text, ...(r.ask ? { proposal: r.ask } : {}) };
 }
 const passkeyPasses = (verb) => PASSKEY_PASS_VERBS.includes(str(verb));
 const passkeyReads = (verb) => PASSKEY_READ_VERBS.includes(str(verb));
@@ -100,10 +145,10 @@ const passkeyReads = (verb) => PASSKEY_READ_VERBS.includes(str(verb));
  *  typing — the page takes no input under Chrome's window) answers THE SENTENCE instead of acting, every time — `answer`;
  *  a reading verb runs with the sentence first (`note`); the ways out run (`run`). */
 function loopVerdict(verb, v) {
-  if (!v || v.state !== PASSKEY_OPEN_CODE) return { act: 'run' };
+  if (!v || (v.state !== PASSKEY_OPEN_CODE && v.state !== PASSKEY_ASK_CODE)) return { act: 'run' };
   if (passkeyPasses(verb)) return { act: 'run' };
-  if (passkeyReads(verb)) return { act: 'note', code: PASSKEY_OPEN_CODE, text: v.text };
-  return { act: 'answer', code: PASSKEY_OPEN_CODE, text: v.text };
+  if (passkeyReads(verb)) return { act: 'note', code: v.state, text: v.text };
+  return { act: 'answer', code: v.state, text: v.text };
 }
 function cancelText({ n = 0, rpId = '' } = {}) {
   if (!n) return 'No passkey request is waiting on your browser.';
@@ -114,14 +159,20 @@ const NONE_TEXT = 'No passkey request is waiting on your browser.';
 const UNKNOWN_TEXT = 'VibeSpace cannot see passkey requests on this browser (it started before VibeSpace could watch them) — a page that will not move may be waiting for one: navigate elsewhere or close the tab.';
 
 function fill(s, p) { return String(s).replace(/\{(\w+)\}/g, (m, k) => (p && p[k] !== undefined ? String(p[k]) : m)); }
-/** The live view's banner (ONE button: Cancel) and the chip — `headed`: Chrome's own window is on this computer's desktop. */
-function passkeyWords(b, tIn, { headed = false } = {}) {
-  if (!b || b.state !== PASSKEY_OPEN_CODE) return null;
+/** The live view's banner (ONE button: Cancel) and the chip — `headed`: Chrome's own window is on this computer's desktop.
+ *  lane passkey-ui (§2.4 / §2.5): `passkey_ask` = the page waits for the OWNER's card — the banner carries that card's
+ *  words and choices (`card`, the same buttons as the tray and the chat; the same approve route). */
+function passkeyWords(b, tIn, { headed = false, card = null } = {}) {
+  if (!b || (b.state !== PASSKEY_OPEN_CODE && b.state !== PASSKEY_ASK_CODE)) return null;
   const t = typeof tIn === 'function' ? (s, p) => tIn(s, p) : fill;
   const rp = rpWord(b.rpId) || t('this site');
+  if (b.state === PASSKEY_ASK_CODE) {
+    const cw = passkeyCardWords(card, tIn);
+    return { ask: true, title: t('This page is waiting for you to allow the passkey for {rp}', { rp }), line: cw ? `${cw.title}. ${cw.after}` : '', desktop: '', buttons: cw ? cw.buttons : [], cardId: cw ? String(card.id) : '', shown: cw ? String(card.shown || '') : '', cancel: t('Cancel passkey request'), chip: t('page waits for your passkey answer') };
+  }
   return {
     title: t('This page is waiting for a passkey ({rp})', { rp }),
-    line: t('The agent\'s browser holds no passkey of yours — cancel the request, then use the page\'s other way in (a recovery code, a password), or sign in on your own device.'),
+    line: t('A site this profile keeps no passkey for offers its own other ways in; a kept passkey signs in by the policy you set in the Agent browser panel; a new one is registered only after you allow it. Cancel this request, then use the page\'s other way in, or sign in on your own device.'),
     desktop: headed ? t('Chrome\'s own passkey window is open on this computer\'s desktop — it does not show in this view.') : '',
     cancel: t('Cancel passkey request'),
     chip: t('page waits for a passkey'),
@@ -130,19 +181,52 @@ function passkeyWords(b, tIn, { headed = false } = {}) {
 /** The For-you item (origin browser; ONE per (profile, rpId); resolved by itself when the request ends). Literal keys. */
 const FOR_YOU_WORDS = Object.freeze({
   text: 'A page in the agent\'s browser is waiting for a passkey ({rp})',
-  detail: 'The agent\'s browser holds no passkey of yours. Cancel the request in the live view (or the agent runs `vibespace-browser passkey cancel`), then use the page\'s other way in, or sign in on your own device.',
+  detail: 'A site this profile keeps no passkey for offers its own other ways in; a kept passkey signs in by the policy you set in the Agent browser panel; a new one is registered only after you allow it. Cancel the request in the live view (or the agent runs `vibespace-browser passkey cancel`), then use the page\'s other way in.',
 });
+/** lane passkey-ui (§2.5): THE PASSKEY CARD's words — the SAME card in the For-you tray, the chat and the live banner. Who
+ *  asks for what, what the agent may do AFTER the answer, the card's choices in order (the first = the primary), and a
+ *  decided card's outcome + the policy now in force. `card` = browser-passkey-store's proposalCard (peer-controlled
+ *  rpId / user names: every surface puts these words through textContent or escHtml). */
+const CHOICE_WORDS = Object.freeze({ once: 'Allow once', always: 'Always allow', no: 'Not now', never: 'Never' });
+function passkeyCardWords(card, tIn) {
+  if (!card || card.type !== 'passkey') return null;
+  const t = typeof tIn === 'function' ? (s, p) => tIn(s, p) : fill;
+  const rp = rpWord(card.rpId) || t('this site');
+  const k0 = Array.isArray(card.keys) && card.keys[0] ? card.keys[0] : null;
+  const user = str((card.user && (card.user.name || card.user.displayName)) || (k0 && (k0.userName || k0.displayName)) || '').slice(0, 64);
+  const profile = str(card.profile || card.profileId || '').slice(0, 80);
+  const reg = card.kind === 'register';
+  const title = reg
+    ? (user ? t('{profile} wants to register a passkey on {rp} for {user}', { profile, rp, user }) : t('{profile} wants to register a passkey on {rp}', { profile, rp }))
+    : (user ? t('{profile} wants to sign in to {rp} with {user}\'s passkey', { profile, rp, user }) : t('{profile} wants to sign in to {rp} with a passkey', { profile, rp }));
+  const after = reg
+    ? t('After this the agent can create ONE passkey on {rp} in the next 10 minutes; it stays sealed in this VibeSpace and each sign-in with it asks you first.', { rp })
+    : (user ? t('After this the agent can sign in to {rp} as {user} until you change the policy.', { rp, user }) : t('After this the agent can sign in to {rp} with this passkey until you change the policy.', { rp }));
+  const open = card.state === 'open';
+  const buttons = open ? (Array.isArray(card.choices) ? card.choices : []).filter((c) => CHOICE_WORDS[c]).map((c, i) => ({ choice: c, label: t(CHOICE_WORDS[c]), primary: i === 0 })) : [];
+  let outcome = '';
+  if (card.state === 'answered') {
+    const a = card.answer;
+    outcome = a === 'always' ? t('Always allowed — the policy for this passkey is now: allow.')
+      : a === 'never' ? t('Never — the policy for this passkey is now: never.')
+      : a === 'once' ? (reg ? t('Allowed once — the agent may register the passkey now (for 10 minutes).') : t('Allowed once — this sign-in went through; the policy stays: ask each time.'))
+      : (reg ? t('Not now — nothing was registered.') : t('Not now — this sign-in was refused; the policy stays: ask each time.'));
+  } else if (card.state === 'expired') outcome = t('Expired — nobody answered in time; nothing was allowed.');
+  else if (card.state === 'withdrawn') outcome = t('Withdrawn — the request ended before an answer; nothing was allowed.');
+  return { title, after, buttons, outcome, open, rp, user, profile, kind: reg ? 'register' : 'sign-in' };
+}
 function forYouItem(b, { label = '' } = {}) {
   const rp = rpWord(b && b.rpId) || 'this site';
   return {
     text: fill(FOR_YOU_WORDS.text, { rp }) + (label ? ` — ${str(label).slice(0, 80)}` : ''),
     detail: FOR_YOU_WORDS.detail,
-    i18n: { text: { key: FOR_YOU_WORDS.text, params: { rp } }, detail: { key: FOR_YOU_WORDS.detail } },
+    i18n: { text: { key: FOR_YOU_WORDS.text, params: { rp } }, detail: [{ key: FOR_YOU_WORDS.detail }] }, // lane passkey-ui: detail = an array of lines (user-todos normalizeI18n refused the object)
   };
 }
 
-/** THE HOOK — runs in the page's MAIN world before any page script (`Page.addScriptToEvaluateOnNewDocument`); stringified,
- *  so it references nothing outside itself. `G` = the global, `cfg` = {binding, key} (both random per arm).
+/** THE HOOK — runs in the page's MAIN world: before any page script of a new document (`Page.addScriptToEvaluateOnNewDocument`),
+ *  in a document already there only when the watch finds no hook of ours in it (`Runtime.evaluate`); stringified, so it
+ *  references nothing outside itself. `G` = the global, `cfg` = {binding, key} (both minted per ARM, never per profile).
  *  · the binding (`Runtime.addBinding`) is captured into the closure and DELETED from the global — the page finds nothing;
  *  · `get` / `create` on CredentialsContainer.prototype are replaced keeping the native descriptor's flags (a WebIDL
  *    operation is enumerable/writable/configurable — new flags would be the fingerprint), `this` and every argument
@@ -151,18 +235,31 @@ function forYouItem(b, { label = '' } = {}) {
  *  · a ceremony's options reach the native call as `Object.create(options, {signal})` — every member the caller set is
  *    read through the prototype chain (WebIDL dictionaries read with [[Get]]), the signal = the caller's own composed
  *    with a product-held AbortController (AbortSignal.any, else a relay);
- *  · the registry lives in this closure. THE CANCEL: the watch runs `Runtime.evaluate` in the tab's main world calling
- *    the hooked `get` with ('cancel', key) — a 128-bit key only this closure and the watch know; the closure aborts
- *    every pending controller, the native promise rejects with AbortError. */
+ *  · the registry lives in this closure. THE CANCEL: the watch calls `ctl` (below) with (key, 'cancel'); the closure aborts
+ *    every pending controller, the native promise rejects with AbortError.
+ *  · lane passkey-prewrap-fix (passkey-verify lens ②): THE WATCH REACHES THIS CLOSURE BY OBJECT IDENTITY, NEVER THROUGH THE
+ *    SLOT, AND NEVER BY TEXT. The slot stays `configurable` (a locked slot would be the fingerprint), so whatever sits at
+ *    `CredentialsContainer.prototype.get` may be the page's — the wrappers take NO control verbs at all. `ctl` lives in a
+ *    PRIVATE FIELD stamped on the prototype under the profile's random slot name (hookSource writes it in): page script can
+ *    neither read nor enumerate a private field, nor make one without its name; the watch reads it with
+ *    `Runtime.getProperties` (privateProperties) and calls it with `Runtime.callFunctionOn` (CTL_FN / REARM_FN). A RE-ARM
+ *    (the watch's new socket) hands THAT `ctl` the new binding + the new key and `retake`s the slot when the page put its
+ *    own function there (ours back; `hook-displaced`). The key is minted per arm — an old one is refused after a re-arm. */
 function installHook(G, cfg) {
+  'use strict';
   const send = G[cfg.binding];
   try { delete G[cfg.binding]; } catch (e) { /* a binding that cannot go stays named by a random word */ }
   if (typeof send !== 'function' || !G.CredentialsContainer || !G.AbortController) return false;
   const proto = G.CredentialsContainer.prototype;
+  // taken here — in a new document before any page script — so `retake` and the reports never use what a page replaced later
+  const gopd = G.Object.getOwnPropertyDescriptor, defp = G.Object.defineProperty, enc = G.JSON.stringify;
   const AC = G.AbortController, AS = G.AbortSignal;
   const reg = new Map();
-  let seq = 0;
-  const say = (o) => { try { send(JSON.stringify(o)); } catch (e) { /* the watch went */ } };
+  let seq = 0, tell = send, key = String(cfg.key || '');
+  let busy = null;      // hold mode: a released ceremony in flight (+ the watch's drain) — a later one of this document queues behind it
+  let drainedFn = null;
+  const say = (o) => { try { tell(enc(o)); } catch (e) { /* the watch went */ } };
+  const err = (name, msg) => { try { return new G.DOMException(msg, name); } catch (e) { const x = new Error(msg); x.name = name; return x; } };
   const both = (a, b) => {
     if (AS && typeof AS.any === 'function') return AS.any([a, b]);
     const c = new AC();
@@ -171,46 +268,127 @@ function installHook(G, cfg) {
     return c.signal;
   };
   const rpOf = (kind, pk) => { try { const v = kind === 'create' ? (pk.rp && pk.rp.id) : pk.rpId; return typeof v === 'string' && v ? v : String((G.location && G.location.hostname) || ''); } catch (e) { return ''; } };
+  const b64u = (v) => { try { const u = v instanceof ArrayBuffer ? new Uint8Array(v) : new Uint8Array(v.buffer, v.byteOffset, v.byteLength); let b = ''; for (let i = 0; i < u.length && i < 1024; i++) b += String.fromCharCode(u[i]); return G.btoa(b).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); } catch (e) { return ''; } };
+  const fields = (kind, pk, mediation) => {
+    const o = {};
+    try { o.uv = String((kind === 'create' ? pk.authenticatorSelection && pk.authenticatorSelection.userVerification : pk.userVerification) || 'preferred'); } catch (e) { /* */ }
+    try { if (kind === 'get' && Array.isArray(pk.allowCredentials)) o.allow = pk.allowCredentials.slice(0, 20).map((c) => b64u(c && c.id)).filter(Boolean); } catch (e) { /* */ }
+    try { if (kind === 'create' && pk.user) o.user = { name: String(pk.user.name || '').slice(0, 64), displayName: String(pk.user.displayName || '').slice(0, 64) }; } catch (e) { /* */ }
+    try { o.origin = String(G.location.origin || ''); } catch (e) { /* */ }
+    if (mediation === 'conditional') o.mediation = 'conditional';
+    return o;
+  };
+  /** The watch's verbs on a held ceremony (through `ctl` only). */
+  const control = (verb, id) => {
+    if (verb === 'cancel') { let n = 0; for (const r of reg.values()) if (!r.ctl.signal.aborted) { r.cancelled = true; r.ctl.abort(); n++; } return n; }
+    if (verb === 'drained') { const f = drainedFn; drainedFn = null; if (f) f(); return 1; }
+    const r = reg.get(Number(id));
+    if (!r || !r.held) return 0;
+    if (verb === 'wait') { r.arm(); return 1; }
+    if (verb === 'refuse') { r.fail(err('NotAllowedError', 'The operation either timed out or was not allowed.'), 'refused'); return 1; }
+    if (verb === 'release') { r.release(); return 1; }
+    return 0;
+  };
+  const mine = {}; // kind → our wrapper + the native slot's flags (what `retake` puts back)
+  /** The page's own function in our slot ⇒ ours back; a slot the page made non-configurable stays the page's (said, not fought). */
+  const retake = () => {
+    const out = { displaced: [], kept: [] };
+    for (const kind of ['get', 'create']) {
+      const m = mine[kind];
+      let d = null; try { d = m ? gopd(proto, kind) : null; } catch (e) { d = null; }
+      if (!m || (d && d.value === m.fn)) continue;
+      out.displaced.push(kind);
+      try { if (d && !d.configurable) throw new Error('fixed'); defp(proto, kind, { value: m.fn, writable: m.writable, enumerable: m.enumerable, configurable: m.configurable }); } catch (e) { out.kept.push(kind); }
+    }
+    return out;
+  };
+  /** THE CONTROL — reachable only through the private field (the watch's CDP call; `this` there = this function). `rebind`
+   *  = a re-arm: the new binding + the new key (reaching `ctl` IS the proof — the old key is not needed and dies here). */
+  const ctl = function (k, verb, a, b) {
+    if (verb === 'rebind') { if (typeof a === 'function') tell = a; if (typeof b === 'string' && b) key = b; return retake(); }
+    if (typeof k !== 'string' || !k || k !== key) return -2;
+    return control(String(verb), a);
+  };
   const wrap = (kind) => {
-    const desc = Object.getOwnPropertyDescriptor(proto, kind);
+    const desc = gopd(proto, kind);
     if (!desc || typeof desc.value !== 'function') return;
     const native = desc.value;
     const hooked = { [kind](...args) {
-      if (args.length === 2 && args[1] === cfg.key && args[0] === 'cancel') {
-        let n = 0;
-        for (const r of reg.values()) if (!r.ctl.signal.aborted) { r.cancelled = true; r.ctl.abort(); n++; }
-        return n;
-      }
       const opts = args[0];
       let pk = null, mediation = null, callerSignal = null;
       try { pk = opts && typeof opts === 'object' ? opts.publicKey : null; mediation = opts && opts.mediation; callerSignal = opts && opts.signal ? opts.signal : null; } catch (e) { pk = null; }
-      if (!pk || typeof pk !== 'object' || mediation === 'conditional') return Reflect.apply(native, this, args);
+      if (!pk || typeof pk !== 'object' || (mediation === 'conditional' && !cfg.hold)) return Reflect.apply(native, this, args);
       const id = ++seq;
       const ctl = new AC();
-      const rec = { ctl, cancelled: false };
+      const rec = { ctl, cancelled: false, held: false };
       const signal = callerSignal ? both(callerSignal, ctl.signal) : ctl.signal;
       const pass = [Object.create(opts, { signal: { value: signal, enumerable: true } }), ...args.slice(1)];
-      reg.set(id, rec);
-      say({ ev: 'start', id, kind, rpId: rpOf(kind, pk) });
-      const done = (outcome, name) => { reg.delete(id); say({ ev: 'end', id, outcome, name }); };
-      let p;
-      try { p = Reflect.apply(native, this, pass); } catch (e) { done('error', e && e.name); throw e; }
-      Promise.resolve(p).then(() => done('ok'), (e) => done(rec.cancelled ? 'cancelled' : (callerSignal && callerSignal.aborted ? 'aborted-by-page' : 'error'), String((e && e.name) || 'Error')));
-      return p;
+      const ended = (e) => (rec.cancelled ? 'cancelled' : (callerSignal && callerSignal.aborted ? 'aborted-by-page' : (e ? 'error' : 'ok')));
+      if (!cfg.hold) {
+        reg.set(id, rec);
+        say({ ev: 'start', id, kind, rpId: rpOf(kind, pk) });
+        const done = (outcome, name) => { reg.delete(id); say({ ev: 'end', id, outcome, name }); };
+        let p;
+        try { p = Reflect.apply(native, this, pass); } catch (e) { done('error', e && e.name); throw e; }
+        Promise.resolve(p).then(() => done('ok'), (e) => done(ended(e), String((e && e.name) || 'Error')));
+        return p;
+      }
+      // lane passkey-store-core: HOLD — the native call waits for the watch's verdict (the store's key is loaded into the
+      // tab's empty authenticator only on `release`); no verdict in cfg.holdMs ⇒ rejected in-page (P0 ④: never the native call)
+      const self = this;
+      return new Promise((resolve, reject) => {
+        let timer = null;
+        const done = (outcome, name) => { if (!reg.has(id)) return; reg.delete(id); if (timer) clearTimeout(timer); say({ ev: 'end', id, outcome, name }); };
+        rec.fail = (e, outcome) => { if (!rec.held) return; rec.held = false; done(outcome, e && e.name); reject(e); };
+        rec.arm = () => { if (timer) clearTimeout(timer); timer = setTimeout(() => rec.fail(err('NotAllowedError', 'The operation either timed out or was not allowed.'), 'error'), Number(cfg.holdMs) || 1500); };
+        rec.release = () => {
+          rec.held = false; if (timer) clearTimeout(timer);
+          let settle = null; const mine = new Promise((r) => { settle = r; }); busy = mine;
+          const after = () => { new Promise((r) => { drainedFn = r; setTimeout(r, 300); }) /* the watch serializes a tab's ceremonies itself; this only spares a dead watch's page */.then(() => { if (busy === mine) busy = null; settle(); }); };
+          let p;
+          try { p = Reflect.apply(native, self, pass); } catch (e) { done('error', e && e.name); reject(e); after(); return; }
+          Promise.resolve(p).then((v) => { done('ok'); resolve(v); after(); }, (e) => { done(ended(e), String((e && e.name) || 'Error')); reject(e); after(); });
+        };
+        signal.addEventListener('abort', () => rec.fail(signal.reason && typeof signal.reason === 'object' ? signal.reason : err('AbortError', 'The operation was aborted.'), rec.cancelled ? 'cancelled' : 'aborted-by-page'), { once: true });
+        const start = () => {
+          if (signal.aborted) { reject(signal.reason && typeof signal.reason === 'object' ? signal.reason : err('AbortError', 'The operation was aborted.')); return; }
+          rec.held = true; reg.set(id, rec);
+          say({ ev: 'start', id, kind, rpId: rpOf(kind, pk), ...fields(kind, pk, mediation) });
+          rec.arm();
+        };
+        if (busy) busy.then(start, start); else start();
+      });
     } }[kind];
-    Object.defineProperty(proto, kind, { value: hooked, writable: desc.writable, enumerable: desc.enumerable, configurable: desc.configurable });
+    mine[kind] = { fn: hooked, writable: desc.writable, enumerable: desc.enumerable, configurable: desc.configurable };
+    defp(proto, kind, { value: hooked, writable: desc.writable, enumerable: desc.enumerable, configurable: desc.configurable });
   };
+  // THE STAMP first (no stamp ⇒ no wrapper: a held ceremony nobody can release would hang the page): `ctl` in a private
+  // field of the prototype — the base constructor returns the prototype itself, so the field lands on it
+  try { class Base { constructor(o) { return o; } } class Stamp extends Base { #vsPasskeyCtl; constructor(o) { super(o); this.#vsPasskeyCtl = ctl; } } new Stamp(proto); } catch (e) { return false; }
   wrap('get'); wrap('create');
+  if (typeof cfg.expose === 'function') cfg.expose(ctl); // PURE tests only — the injected cfg is JSON (never a function)
   return true;
 }
-/** The script the watch injects (one per arm). */
-function hookSource({ binding, key }) { return `;(${installHook.toString()})(globalThis, ${JSON.stringify({ binding: str(binding), key: str(key) })});`; }
-/** The watch's cancel expression (evaluated in the tab's main world). */
-function cancelExpression(key) { return `(function(){try{return CredentialsContainer.prototype.get.call(null,'cancel',${JSON.stringify(str(key))})}catch(e){return -1}})()`; }
+/** lane passkey-prewrap-fix: the private field's name in installHook's text — hookSource writes the profile's slot name over it. */
+const SLOT_MARK = '#vsPasskeyCtl';
+const slotName = (slot) => (/^[A-Za-z][A-Za-z0-9_]{7,63}$/.test(str(slot)) ? '#' + str(slot) : SLOT_MARK);
+/** The script the watch injects (one per arm; the same text evaluated into a document that has no hook of ours yet). */
+function hookSource({ binding, key, slot = '', hold = false, holdMs = HOOK_HOLD_MS }) { return `;(${installHook.toString().split(SLOT_MARK).join(slotName(slot))})(globalThis, ${JSON.stringify({ binding: str(binding), key: str(key), ...(hold ? { hold: true, holdMs: Number(holdMs) || HOOK_HOLD_MS } : {}) })});`; }
+/** lane passkey-prewrap-fix: the watch's calls on the `ctl` it found by identity (`Runtime.callFunctionOn`, `this` = ctl) — a
+ *  direct call (never `Function.prototype.call`, the page's to replace). CTL = a verb with this arm's key: `cancel`, the
+ *  verdict on a held ceremony (`release` | `refuse` | `wait` — the ask's heartbeat), `drained` (the authenticator is empty
+ *  again). REARM = this arm's binding taken off the global in the same step + the new key; answers `retake`'s {displaced, kept}. */
+const CTL_FN = 'function (k, v, a) { return this(k, v, a); }';
+const REARM_FN = 'function (b, k) { var g = (function () { return this; })(), s = null; try { s = g[b]; delete g[b]; } catch (e) { s = null; } return this("", "rebind", typeof s === "function" ? s : null, k); }';
+/** The binding of an arm that reached no hook in a document leaves its global (a page never keeps it). */
+function dropExpression(binding) { return `(function(){var g=(function(){return this})();try{delete g[${JSON.stringify(str(binding))}]}catch(e){}return 0})()`; }
+/** The hook's in-page deadline (P0 ④: after the watch's socket goes the native get hangs past the page's own timeout). */
+const HOOK_HOLD_MS = 1500;
 
 module.exports = {
-  PASSKEY_OPEN_CODE, KINDS, OUTCOMES, PENDING_SAID_MS, FOR_YOU_AFTER_MS, RECORDS_KEEP, PASSKEY_PASS_VERBS, PASSKEY_READ_VERBS,
+  passkeyCardWords, CHOICE_WORDS, // lane passkey-ui
+  PASSKEY_OPEN_CODE, PASSKEY_ASK_CODE, REFUSED_SAID_MS, HOOK_HOLD_MS, KINDS, OUTCOMES, PENDING_SAID_MS, FOR_YOU_AFTER_MS, RECORDS_KEEP, PASSKEY_PASS_VERBS, PASSKEY_READ_VERBS,
   NONE_TEXT, UNKNOWN_TEXT, FOR_YOU_WORDS,
   rpWord, parseEvent, recordOf, applyEvent, endPending, passkeyVerdict, passkeyText, passkeyBlock, passkeyPasses, passkeyReads,
-  loopVerdict, cancelText, passkeyWords, forYouItem, installHook, hookSource, cancelExpression,
+  loopVerdict, cancelText, passkeyWords, forYouItem, installHook, hookSource, SLOT_MARK, CTL_FN, REARM_FN, dropExpression, askText, refusedText, registerText, // lane passkey-prewrap-fix: − the slot-road expressions
 };

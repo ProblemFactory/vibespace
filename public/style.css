@@ -5167,6 +5167,11 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .chan-find-input:focus { outline: none; border-color: var(--accent); }
 .chan-grow-tag { flex: 0 1 auto; display: inline-flex; align-items: center; gap: 3px; max-width: 75%; min-width: 0; box-sizing: border-box; overflow: hidden; font-size: 9px; font-weight: 600; padding: 0 6px; line-height: 13px; border-radius: 999px; border: 1px solid transparent; }
 .chan-grow-tag .chan-ic { font-size: 9px; flex-shrink: 0; }
+/* lane decision-attention: a JUDGED row's two answers (✓ needs me / ✗ not) — small, beside the tag, never wider than the line */
+.chan-judge { display: inline-flex; gap: 2px; flex-shrink: 0; }
+.chan-judge-btn { font-size: 10px; line-height: 13px; min-width: 18px; height: 15px; padding: 0 3px; border-radius: 999px; border: 1px solid var(--border); background: transparent; color: var(--text-secondary); cursor: pointer; }
+.chan-judge-btn:hover { color: var(--accent); border-color: var(--accent); }
+.chan-judge-btn:disabled { opacity: .5; cursor: default; }
 .chan-tag-words { white-space: pre; flex-shrink: 0; }
 .chan-tag-who { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chan-tag-neutral { color: var(--text-secondary); background: color-mix(in srgb, var(--text-secondary) 12%, transparent); }
@@ -5723,6 +5728,18 @@ a.chan-prop-file-name:hover, a.chan-prop-file-name:focus-visible { text-decorati
 .chan-af-rule .chan-opt-input { min-width: 0; width: 100%; }
 .chan-af-fields { display: flex; gap: 4px; min-width: 0; }
 .chan-af-rule.chan-af-rule-nofield { grid-template-columns: minmax(110px, 1fr) auto; }
+/* lane decision-rule: the decision rule's row — the condition, the answer kind, options (+ a route), threshold, cost */
+.chan-af-decision { display: flex; flex-direction: column; gap: 6px; margin: 0 0 6px; padding: 8px; border: 1px solid var(--border); border-radius: 6px; }
+.chan-af-decision .chan-dec-cond { width: 100%; min-height: 54px; resize: vertical; font: inherit; }
+.chan-dec-opts { display: flex; flex-direction: column; gap: 4px; }
+.chan-dec-opt { display: grid; grid-template-columns: minmax(70px, 18%) 1fr minmax(150px, 36%) auto; gap: 4px; align-items: center; }
+.chan-dec-opt .chan-opt-input, .chan-dec-opt select { min-width: 0; width: 100%; }
+.chan-dec-thwrap { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.chan-dec-th { flex: 1; min-width: 0; }
+.chan-dec-thv { font-variant-numeric: tabular-nums; min-width: 2.6em; text-align: right; }
+.chan-dec-off { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.chan-dec-cost.chan-warn { color: var(--warning, #b7791f); }
+@media (max-width: 600px) { .chan-dec-opt { grid-template-columns: 1fr 1fr auto; } .chan-dec-opt .chan-dec-desc { grid-column: 1 / -1; grid-row: 2; } }
 /* lane notify-rules-r2: a keyword / regex rule's preview — the newest ≤ 10 stored messages it matches */
 .chan-rule-preview { margin: 2px 0 6px; font-size: 12px; color: var(--text-secondary); }
 .chan-rule-preview:empty { display: none; }
@@ -6978,3 +6995,35 @@ button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: u
 @media (max-width: 480px) { .search-hit { flex-direction: column; gap: 2px; } .search-group-name { white-space: normal; overflow-wrap: anywhere; } }
 /* lane app-register-ui: an agent's registration card shows every argv verbatim, one line each */
 .ut-app-argv, .app-card-sum-argv { font-family: var(--font-mono, monospace); font-size: 11px; overflow-wrap: anywhere; }
+
+/* lane passkey-ui (design-passkey-store §2.5): a profile's Passkeys table — desk: a fold-out under its row (spans the
+   table's grid); phone: a bottom sheet. The policy is a three-way segmented control; theme vars only. */
+.bprof-pk { grid-column: 1 / -1; margin: 2px 0 8px 22px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-input); font-size: 12px; min-width: 0; }
+.bprof-pk-top { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.bprof-pk-title { font-weight: 600; color: var(--text); flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bprof-pk-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; padding: 2px 0 6px; border-bottom: 1px solid var(--border); }
+.bprof-pk-switch { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; color: var(--text); }
+.bprof-pk-note { font-size: 11px; }
+.bprof-pk-err { color: var(--red); padding: 4px 0; }
+.bprof-pk-row { display: grid; grid-template-columns: minmax(110px, 1.3fr) minmax(90px, 1fr) minmax(90px, 0.9fr) minmax(70px, 0.7fr) max-content 28px; gap: 8px; align-items: center; padding: 4px 0; border-bottom: 1px solid var(--border); }
+.bprof-pk-cols { color: var(--text-dim); font-size: 11px; padding-top: 6px; }
+.bprof-pk-cell { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); }
+.bprof-pk-site, .bprof-pk-user { color: var(--text); }
+.bprof-pk-policy { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
+.bprof-pk-seg { border: 0; border-right: 1px solid var(--border); background: transparent; color: var(--text-secondary); font: inherit; font-size: 11px; padding: 3px 8px; min-height: 26px; cursor: pointer; white-space: nowrap; transition: background var(--transition); }
+.bprof-pk-seg:last-child { border-right: 0; }
+.bprof-pk-seg:hover { background: var(--bg-hover); }
+.bprof-pk-seg.on { background: var(--accent); color: var(--bg-dialog); }
+.bprof-pk-row[data-policy="no"] .bprof-pk-seg.on { background: var(--red); }
+.bprof-pk-empty { display: flex; flex-wrap: wrap; gap: 4px 10px; padding: 8px 0 2px; }
+.bprof-pk-hint { font-size: 11px; color: var(--text-secondary); }
+.bprof-pk-sheet { position: fixed; inset: 0; z-index: 1200; display: flex; flex-direction: column; justify-content: flex-end; }
+.bprof-pk-scrim { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.35); }
+.bprof-pk.bprof-pk-in-sheet { position: relative; margin: 0; max-height: 75vh; overflow: auto; border-radius: var(--radius) var(--radius) 0 0; background: var(--bg-dialog); padding: 12px 12px calc(12px + env(safe-area-inset-bottom)); }
+.bprof-pk-in-sheet .bprof-pk-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 36px; grid-template-areas: "site site more" "user source more" "used used used" "policy policy policy"; row-gap: 4px; padding: 8px 0; }
+.bprof-pk-in-sheet .bprof-pk-cols { display: none; }
+.bprof-pk-in-sheet .bprof-pk-site { grid-area: site; } .bprof-pk-in-sheet .bprof-pk-user { grid-area: user; } .bprof-pk-in-sheet .bprof-pk-source { grid-area: source; }
+.bprof-pk-in-sheet .bprof-pk-used { grid-area: used; } .bprof-pk-in-sheet .bprof-pk-policy { grid-area: policy; display: flex; } .bprof-pk-in-sheet .bprof-pk-more { grid-area: more; min-width: 36px; min-height: 36px; }
+.bprof-pk-in-sheet .bprof-pk-seg { flex: 1 1 0; min-height: 36px; font-size: 12px; }
+.bprof-pk-in-sheet .bprof-pk-switch { min-height: 36px; }
+.chat-browser-pk-actions, .ut-passkey-answer, .browser-live-passkey-ask { display: flex; flex-wrap: wrap; gap: 6px; }

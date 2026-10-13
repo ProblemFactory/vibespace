@@ -48,16 +48,19 @@
  *
  * THE PASSKEY CEREMONY (lane browser-passkey, 2026-10-05 — owner inc-muuvthv9-g69w: Chrome's own WebAuthn window sat on the
  * box's desktop, invisible in the live view, and the page took no input): on every tab this socket enables, ONE
- * `Runtime.addBinding` (a random name per watch) + PURE PK.installHook injected in the MAIN world
- * (`Page.addScriptToEvaluateOnNewDocument {runImmediately}`) — the page's own `navigator.credentials.get / .create` report
+ * `Runtime.addBinding` (a random name per ARM) + PURE PK.installHook injected in the MAIN world of every new document
+ * (`Page.addScriptToEvaluateOnNewDocument`; the documents already there reached by identity — pkReach, lane
+ * passkey-prewrap-fix) — the page's own `navigator.credentials.get / .create` report
  * `start` / `end` here; PK.passkeyVerdict names a ceremony pending PK.PENDING_SAID_MS `passkey_open` (the routes' fact, the
  * verb in flight woken like a dialog, the chip / live-view banner, ONE For-you item per (profile, rpId) after
- * PK.FOR_YOU_AFTER_MS, resolved when it ends). `cancelPasskey` = `Runtime.evaluate` of PK.cancelExpression in the
- * ceremony's own execution context: the hooked closure aborts its AbortControllers — the page's promise rejects AbortError.
+ * PK.FOR_YOU_AFTER_MS, resolved when it ends). `cancelPasskey` = `Runtime.callFunctionOn` of PK.CTL_FN on the hook's
+ * own `ctl` in the ceremony's execution context (found by identity, never through the page's slot): the hooked closure
+ * aborts its AbortControllers — the page's promise rejects AbortError.
  * A tab whose hook never armed is `unknown`, never `passkey_open`.
  */
 const ST = require('../browser-stuck.js');
 const PK = require('../browser-passkey.js');
+const PS = require('../browser-passkey-store.js'); // lane passkey-store-core: the sealed per-profile table + THE GATE (this file is its one writer)
 const crypto = require('crypto');
 let WS = null; try { WS = require('ws').WebSocket; } catch { WS = null; }
 
@@ -70,7 +73,8 @@ const STOP_RETRIES = 4, STOP_RETRY_MS = 120; // verify r4 #5: Page.stopLoading u
 function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.now,
   enableTimeoutMs = ST.ENABLE_TIMEOUT_MS, connectTimeoutMs = 3000, callTimeoutMs = 5000, captureTimeoutMs = ST.LOOP_SCREENSHOT_MS, quietMs = ST.LOOP_QUIET_MS, reEnableMs = RE_ENABLE_MS, // verify r1: the quiet rule is a clock a fast gate shortens (lane browser-held-not-hung: the re-ask too)
   tabsOf = null, holdersOf = null, leaseCountOf = null, labelOf = null, notice = null, withdraw = null, forYou = null,
-  promptAskMs = ST.PROMPT_ASK_MS, authHoldMaxMs = ST.AUTH_HOLD_MAX_MS } = {}) { // lane browser-ui-prompts: the sign-in's two clocks (a fast gate shortens them)
+  promptAskMs = ST.PROMPT_ASK_MS, authHoldMaxMs = ST.AUTH_HOLD_MAX_MS,
+  passkeys = null, takeoverOf = null } = {}) { // lane passkey-store-core: `passkeys` = {read, write, cipher} (the wiring: data/browser-passkeys.json 0600 + the key file); none ⇒ today's tab-native passkeys // lane browser-ui-prompts: the sign-in's two clocks (a fast gate shortens them)
   const watches = new Map();       // profileId → watch
   const listeners = new Set();
   const waiters = new Set();       // long-polls: {profileId, scope(), resolve}
@@ -96,6 +100,14 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     return best;
   };
   let tabsFn = typeof tabsOf === 'function' ? tabsOf : null;
+  // lane passkey-store-core: the store handle (ONE writer: here), the profile's hook SLOT name kept across the watch's sockets
+  // (a re-arm finds the closure already in the page by it — P0 ④; lane passkey-prewrap-fix: a locator, never a credential —
+  // the binding + the key are minted per ARM), the open cards (`pk-…`), the approved registration grants
+  const pks = passkeys && typeof passkeys.read === 'function' && typeof passkeys.write === 'function' && passkeys.cipher ? passkeys : null;
+  let pkCache = null;
+  const pkIds = new Map(), pkAsks = new Map(), pkGrants = new Map();
+  const pkIdsFor = (pid) => { if (!pkIds.has(pid)) pkIds.set(pid, { slot: 'vs' + crypto.randomBytes(16).toString('hex') }); return pkIds.get(pid); };
+  const pkDisplacedAt = new Map(); // lane passkey-prewrap-fix: profileId → the episodes a page replaced the credentials API (the Passkeys card's line)
   const sayOnce = new Set();
   const say = (key, line) => { if (sayOnce.has(key)) return; sayOnce.add(key); try { log.warn?.(`[browser-dialog] ${line}`); } catch { /* */ } };
 
@@ -115,7 +127,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   // ── the socket ──
   function newWatch(profileId, url) {
     const w = { profileId, url, holds: true, ws: null, state: 'connecting', id: 0, waiting: new Map(), sessions: new Map(), targets: new Map(), open: new Map(), pendingBy: new Map(), answered: [], seq: 0, readyP: null, commands: [],
-      pkBinding: 'vs' + crypto.randomBytes(12).toString('hex'), pkKey: crypto.randomBytes(16).toString('hex'), pkForYou: new Map(), headed: null, bornAt: now(), // lane browser-passkey
+      pkSlot: pkIdsFor(profileId).slot, pkForYou: new Map(), headed: null, bornAt: now(), // lane browser-passkey
       prompts: new Map(), authReq: new Map(), promptNotes: [], promptTimers: new Map(), promptForYou: new Map(), // lane browser-ui-prompts (authReq: prompt id → the paused request — never in a record)
       permCtx: new Map(), grants: new Map(), printing: new Set() }; // lane browser-ui-prompts-r2: contexts decided ahead (ctx → the decision's promise), the agent's per-origin flips, previews being released
     let readyResolve;
@@ -185,7 +197,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     const known = w.targets.get(tid);
     if (known) { known.url = String(info.url || known.url || ''); known.title = String(info.title || known.title || ''); return known.enabling || Promise.resolve(); }
     const e = { targetId: tid, url: String(info.url || ''), title: String(info.title || ''), sid: null, enabled: false, heldAt: 0, enabling: null, reEnable: null, hops: [], loop: null, req: null, hopStart: null, quiet: null,
-      seenAt: w.state === 'open' && w.readySeen ? now() : 0, agentHopAt: 0, owner: null, opener: info.openerId ? String(info.openerId) : null, pk: { armed: false, records: [] } }; // lane site-reset: a tab that appeared while watched (the agent's `tab new`), the last browser-initiated hop on it
+      seenAt: w.state === 'open' && w.readySeen ? now() : 0, agentHopAt: 0, owner: null, opener: info.openerId ? String(info.openerId) : null, pk: { armed: false, records: [], binding: '', key: '', ctxs: new Set(), ctl: new Map(), seen: new Set() } }; // lane site-reset: a tab that appeared while watched (the agent's `tab new`), the last browser-initiated hop on it
     // verify r2: the ONE conversation whose verb was in flight when it appeared (null = nobody / unclear) — verify r3 #1: only for
     // a tab born of NO page (the CLI's `tab new`, the page it gets on attach: measured, no `openerId`); a tab a PAGE opened
     // (`window.open`, a `target=_blank` link — `openerId` set even under `noopener`, measured) is its OPENER's, whoever's verb
@@ -274,9 +286,20 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       case 'Page.javascriptDialogOpening': return onOpen(w, w.sessions.get(String(m.sessionId || '')) || null, p);
       case 'Page.javascriptDialogClosed': return onClosed(w, w.sessions.get(String(m.sessionId || '')) || null, p);
       // lane browser-passkey: the hook's report; a document that went ends its pending ceremonies (the page no longer waits)
-      case 'Runtime.bindingCalled': { if (p.name !== w.pkBinding) return; const e = tabOf(w, m); const ev = e && PK.parseEvent(p.payload); if (ev && PK.applyEvent(e.pk.records, ev, { tab: e.targetId, ctx: p.executionContextId, now: now() })) passkeyChanged(w, e, ev.ev === 'start'); return; }
-      case 'Runtime.executionContextDestroyed': { const e = tabOf(w, m); if (e && PK.endPending(e.pk.records, { now: now(), ctx: Number(p.executionContextId) }).length) passkeyChanged(w, e); return; }
-      case 'Runtime.executionContextsCleared': { const e = tabOf(w, m); if (e && PK.endPending(e.pk.records, { now: now() }).length) passkeyChanged(w, e); return; }
+      case 'Runtime.bindingCalled': {
+        const e = tabOf(w, m); if (!e || !e.pk.binding || p.name !== e.pk.binding) return; // lane passkey-prewrap-fix: this arm's binding
+        const ev = PK.parseEvent(p.payload);
+        const rec = ev && PK.applyEvent(e.pk.records, ev, { tab: e.targetId, ctx: p.executionContextId, now: now() });
+        if (!rec) return;
+        passkeyChanged(w, e, ev.ev === 'start');
+        if (pks) (ev.ev === 'start' ? pkGate(w, e, rec) : pkEnd(w, e, rec)).catch((err) => say('pk-flow:' + (err && err.message), `${w.profileId}: a passkey ceremony step failed — ${err && err.message}`)); // lane passkey-store-core
+        return;
+      }
+      case 'WebAuthn.credentialAdded': case 'WebAuthn.credentialAsserted': { const e = tabOf(w, m); if (e && pks) pkHarvest(w, e, m.method, p); return; } // lane passkey-store-core: the harvest
+      // lane passkey-prewrap-fix: the main-world documents a (re-)arm reaches by identity
+      case 'Runtime.executionContextCreated': { const e = tabOf(w, m); const c = p.context; if (e && c && c.auxData && c.auxData.isDefault) e.pk.ctxs.add(Number(c.id)); return; }
+      case 'Runtime.executionContextDestroyed': { const e = tabOf(w, m); if (e) { e.pk.ctxs.delete(Number(p.executionContextId)); e.pk.ctl.delete(Number(p.executionContextId)); } if (e && PK.endPending(e.pk.records, { now: now(), ctx: Number(p.executionContextId) }).length) passkeyChanged(w, e); return; }
+      case 'Runtime.executionContextsCleared': { const e = tabOf(w, m); if (e) { e.pk.ctxs.clear(); e.pk.ctl.clear(); } if (e && PK.endPending(e.pk.records, { now: now() }).length) passkeyChanged(w, e); return; }
       default: return;
     }
   }
@@ -768,6 +791,8 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       if (br && br.unresponsive && Number.isFinite(br.unresponsive.since)) { let p = null; try { p = keeper.profile(c.profileId); } catch { p = null; } return { state: 'unresponsive', why: 'browser', count: Number(br.unresponsive.asks) || 0, since: br.unresponsive.since, label: (p && p.label) || c.profileId, profileId: c.profileId }; }
       const f = factFor({ ...c, browserKey: bk, consume: false });
       // lane browser-passkey: a page waiting for a passkey (after a held dialog — that is answered first)
+      // lane passkey-ui: + `passkey_ask` — the page waits for the OWNER's card: the fact carries that card (the live banner's buttons)
+      if (!f.open && f.passkey && f.passkey.state === PK.PASSKEY_ASK_CODE) { const a = f.passkey.proposal ? pkAsks.get(String(f.passkey.proposal)) : null; return { state: 'passkey', passkey: f.passkey, ...(a && a.state === 'open' ? { card: a.card } : {}), headed: false, since: f.passkey.startedAt, profileId: c.profileId }; }
       if (!f.open && f.passkey && f.passkey.state === PK.PASSKEY_OPEN_CODE) return { state: 'passkey', passkey: f.passkey, headed: onDesktop(c.profileId), since: f.passkey.startedAt, profileId: c.profileId };
       const fact = ST.stuckFact({ dialog: f.open ? { ...f.open, id: f.open.id } : null, prompt: f.prompt, verdict: f.stuck || (f.held && !f.loopAny ? f.held : null), loop: f.loopAny, now: now() }); // lane browser-ui-prompts: + the browser's own prompt
       if (fact) return { ...fact, profileId: c.profileId };
@@ -786,7 +811,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     const d = openIn(pid, scope());
     if (d) return Promise.resolve({ dialog: d, via: 'already-open', at: now() });
     if (loop) { const l = loopIn(pid, scope(), { after: Number(loop.after) || 0, current: true }); if (l) return Promise.resolve({ loop: l, via: 'already-looping', at: now() }); }
-    if (passkey) { const v = passkeyIn(pid, scope()); if (v.state === PK.PASSKEY_OPEN_CODE) return Promise.resolve({ passkey: PK.passkeyBlock(v), via: 'already-waiting', at: now() }); } // lane browser-passkey
+    if (passkey) { const v = passkeyIn(pid, scope()); if (v.state === PK.PASSKEY_OPEN_CODE || v.state === PK.PASSKEY_ASK_CODE) return Promise.resolve({ passkey: PK.passkeyBlock(v), via: 'already-waiting', at: now() }); } // lane browser-passkey
     if (prompt) { const r = promptIn(pid, scope()); if (r && r.type === 'http-auth') return Promise.resolve({ prompt: ST.promptBlock(r, { now: now() }), via: 'already-waiting', at: now() }); } // lane browser-ui-prompts-r2
     return new Promise((resolve) => {
       let t = null;
@@ -1057,11 +1082,18 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (!e.pk.armed && !e.pk.arming && e.sid) e.pk.arming = armHook(w, e, e.sid).finally(() => { e.pk.arming = null; });
     return e.pk.arming || null;
   }
+  // lane passkey-prewrap-fix (passkey-verify lens ②): a binding + a key minted for THIS arm (never the profile's); new
+  // documents get the hook from the script, the documents already here are reached by identity (pkReach) — never
+  // `runImmediately`, which ran the hook over whatever the page had put in the slot by then
+  const pkSource = (w, e) => PK.hookSource({ binding: e.pk.binding, key: e.pk.key, slot: w.pkSlot, hold: !!pks });
   async function armHook(w, e, sid) {
-    const r1 = await call(w, 'Runtime.addBinding', { name: w.pkBinding }, sid);
-    const r2 = r1 && r1.result ? await call(w, 'Page.addScriptToEvaluateOnNewDocument', { source: PK.hookSource({ binding: w.pkBinding, key: w.pkKey }), runImmediately: true }, sid) : null;
-    const r3 = r2 && r2.result ? await call(w, 'Runtime.enable', {}, sid) : null; // the documents that go (a navigation ends its ceremonies)
+    e.pk.binding = 'vs' + crypto.randomBytes(12).toString('hex'); e.pk.key = crypto.randomBytes(16).toString('hex'); e.pk.ctl.clear();
+    const r1 = await call(w, 'Runtime.addBinding', { name: e.pk.binding }, sid);
+    const r2 = r1 && r1.result ? await call(w, 'Page.addScriptToEvaluateOnNewDocument', { source: pkSource(w, e) }, sid) : null;
+    const r3 = r2 && r2.result ? await call(w, 'Runtime.enable', {}, sid) : null; // the documents that go (a navigation ends its ceremonies) + the ones here
     e.pk.armed = !!(r3 && r3.result) && e.sid === sid;
+    if (e.pk.armed) for (const ctx of [...e.pk.ctxs]) await pkReach(w, e, ctx, { arm: true });
+    if (e.pk.armed && pks) e.pk.auth = await pairAuthenticator(w, e, sid); // lane passkey-store-core: the tab's EMPTY authenticator, re-paired on every attach
     if (!e.pk.armed) say('pk-arm:' + w.profileId, `${w.profileId}: the passkey hook did not arm on a tab — its passkey requests read as unknown (${(r1 && r1.error && r1.error.message) || (r2 && r2.error && r2.error.message) || (r3 && r3.error && r3.error.message) || 'no answer'})`);
   }
   /** lane browser-passkey-chrome (MEASURED on 0.38.1): Chrome draws its passkey dialog TAB-MODAL in the browser's own window —
@@ -1089,7 +1121,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (started) for (const ms of [PK.PENDING_SAID_MS, PK.FOR_YOU_AFTER_MS]) { const t = setTimeout(() => { if (w.state === 'open') passkeyChanged(w, e); }, ms + 20); if (t.unref) t.unref(); }
     const v = PK.passkeyVerdict(e.pk.records, now());
     emit({ kind: 'passkey', profileId: w.profileId, targetId: e.targetId, state: v.state });
-    if (v.state === PK.PASSKEY_OPEN_CODE) for (const x of [...waiters]) if (x.profileId === w.profileId && x.passkey && inScope(x.scope(), e.targetId)) { waiters.delete(x); x.resolve({ passkey: PK.passkeyBlock(v), via: 'event', at: now() }); }
+    if (v.state === PK.PASSKEY_OPEN_CODE || v.state === PK.PASSKEY_ASK_CODE) for (const x of [...waiters]) if (x.profileId === w.profileId && x.passkey && inScope(x.scope(), e.targetId)) { waiters.delete(x); x.resolve({ passkey: PK.passkeyBlock(v), via: 'event', at: now() }); }
     if (!forYou) return;
     const open = new Map(); // rpId → the oldest pending record on this browser past the For-you bound
     for (const t of w.targets.values()) for (const r of t.pk.records) if (r.outcome === 'pending' && now() - r.startedAt >= PK.FOR_YOU_AFTER_MS && !open.has(r.rpId)) open.set(r.rpId, r);
@@ -1111,7 +1143,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     for (const e of passkeyTabs(w, scopeFor(t))) {
       const ctxs = [...new Set(e.pk.records.filter((r) => r.outcome === 'pending').map((r) => r.ctx))];
       for (const ctx of ctxs) {
-        const r = await call(w, 'Runtime.evaluate', { expression: PK.cancelExpression(w.pkKey), contextId: ctx, returnByValue: true }, e.sid);
+        const r = await pkCall(w, e, ctx, 'cancel');
         const k = r && r.result && r.result.result ? Number(r.result.result.value) || 0 : 0;
         if (k > 0) { n += k; for (const rec of e.pk.records) if (rec.outcome === 'pending' && rec.ctx === ctx) { rec.outcome = 'cancelled'; rec.endedAt = now(); rec.by = by; rpId = rpId || rec.rpId; } }
       }
@@ -1119,6 +1151,243 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     }
     return { ok: true, n, rpId, text: PK.cancelText({ n, rpId }) };
   }
+  // ── lane passkey-store-core: THE PASSKEY STORE'S CEREMONIES (docs/design-passkey-store.zh.md; P0's corrections) ──
+  // The tab's virtual authenticator is EMPTY between ceremonies; a held ceremony is judged by PURE PS.gateVerdict and only
+  // the rows it may use are loaded for it; `end` unloads everything. THIS file is the store's ONE writer.
+  const pkRead = () => { if (!pkCache) { let raw = null; try { raw = pks.read(); } catch (e) { say('pk-read:' + (e && e.message), `the passkey store could not be read — ${e && e.message}`); } pkCache = PS.normalizeStore(raw); } return pkCache; };
+  const pkWrite = (next) => { pkCache = PS.normalizeStore(next); try { pks.write(pkCache); } catch (e) { say('pk-write:' + (e && e.message), `the passkey store was not written — ${e && e.message}`); } };
+  const b64 = (u) => { const s = String(u || '').replace(/-/g, '+').replace(/_/g, '/'); return s + '='.repeat((4 - (s.length % 4)) % 4); };
+  const b64u = (s) => String(s || '').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  /** P0 (b): `enable` and the authenticator are ONE step — an enabled domain with no authenticator hangs every get. */
+  async function pairAuthenticator(w, e, sid) {
+    const en = await call(w, 'WebAuthn.enable', { enableUI: false }, sid);
+    if (!en || !en.result) { say('pk-auth:' + w.profileId, `${w.profileId}: the passkey authenticator was not attached — ${(en && en.error && en.error.message) || 'no answer'}`); return null; }
+    const a = await call(w, 'WebAuthn.addVirtualAuthenticator', { options: { protocol: 'ctap2', ctap2Version: 'ctap2_1', transport: 'internal', hasResidentKey: true, hasUserVerification: true, isUserVerified: false, automaticPresenceSimulation: true } }, sid);
+    const id = a && a.result && a.result.authenticatorId ? String(a.result.authenticatorId) : null;
+    if (!id) { await call(w, 'WebAuthn.disable', {}, sid); say('pk-auth:' + w.profileId, `${w.profileId}: the passkey authenticator was not attached — ${(a && a.error && a.error.message) || 'no answer'}`); }
+    return id;
+  }
+  const pkCtl = (w, e, rec, verb) => pkCall(w, e, rec ? rec.ctx : null, verb, rec ? rec.n : 0);
+  /** lane passkey-prewrap-fix (passkey-verify lens ②): OUR closure in a document, by OBJECT IDENTITY — the private field the
+   *  hook stamped on CredentialsContainer.prototype under the profile's slot name (page script can neither read one nor make
+   *  one without that name). On an ARM: found ⇒ REARM (this arm's binding + key; a slot the page took is taken back —
+   *  `hook-displaced`); none ⇒ the hook evaluated into the document as it is; two ⇒ neither is called. Nothing is ever
+   *  handed to whatever sits in the slot. */
+  async function pkFind(w, sid, ctx) {
+    const P = await call(w, 'Runtime.evaluate', { expression: 'CredentialsContainer.prototype', contextId: ctx }, sid);
+    const id = P && P.result && P.result.result && P.result.result.objectId;
+    if (!id) return { n: -1, ctl: null };
+    const g = await call(w, 'Runtime.getProperties', { objectId: String(id), ownProperties: true }, sid);
+    const hit = ((g && g.result && g.result.privateProperties) || []).filter((x) => x && x.name === '#' + w.pkSlot && x.value && x.value.objectId);
+    return { n: hit.length, ctl: hit.length === 1 ? String(hit[0].value.objectId) : null };
+  }
+  async function pkReach(w, e, ctx, { arm = false } = {}) {
+    const sid = e.sid;
+    if (!sid || !Number.isFinite(Number(ctx))) return null;
+    if (!arm && e.pk.ctl.has(ctx)) return e.pk.ctl.get(ctx);
+    let f = await pkFind(w, sid, ctx);
+    if (arm && f.n === 0) {
+      const r = await call(w, 'Runtime.evaluate', { expression: pkSource(w, e), contextId: ctx, returnByValue: true }, sid);
+      f = r && r.result && r.result.result && r.result.result.value === true ? await pkFind(w, sid, ctx) : { n: 0, ctl: null };
+    } else if (arm && f.n === 1) {
+      const r = await call(w, 'Runtime.callFunctionOn', { objectId: f.ctl, functionDeclaration: PK.REARM_FN, arguments: [{ value: e.pk.binding }, { value: e.pk.key }], returnByValue: true }, sid);
+      const v = r && r.result && r.result.result ? r.result.result.value : null;
+      if (v && Array.isArray(v.displaced) && v.displaced.length) pkDisplaced(w, e, ctx, v);
+    }
+    if (f.n !== 1) {
+      if (arm) await call(w, 'Runtime.evaluate', { expression: PK.dropExpression(e.pk.binding), contextId: ctx }, sid);
+      if (f.n > 1) say('pk-twin:' + w.profileId, `${w.profileId}: two passkey hooks answered in one document — neither was armed`);
+      return null;
+    }
+    e.pk.ctl.set(ctx, f.ctl);
+    return f.ctl;
+  }
+  async function pkCall(w, e, ctx, verb, id = 0) {
+    const ctl = ctx == null ? null : await pkReach(w, e, Number(ctx));
+    if (!ctl || !e.sid) return null;
+    return call(w, 'Runtime.callFunctionOn', { objectId: ctl, functionDeclaration: PK.CTL_FN, arguments: [{ value: e.pk.key }, { value: String(verb) }, { value: Number(id) || 0 }], returnByValue: true }, e.sid);
+  }
+  /** A page replaced the credentials API in a watched document: said ONCE per (tab, document) — the trace row, the log line
+   *  and the Passkeys card's line (`passkeyList().displaced`). */
+  function pkDisplaced(w, e, ctx, v) {
+    const k = e.targetId + ':' + ctx;
+    if (e.pk.seen.has(k)) return;
+    e.pk.seen.add(k);
+    const kept = Array.isArray(v.kept) && v.kept.length > 0;
+    const list = pkDisplacedAt.get(w.profileId) || []; list.push(now()); pkDisplacedAt.set(w.profileId, list.slice(-8));
+    say('pk-displaced:' + w.profileId + ':' + k, `${w.profileId}: a page replaced its credentials API (${v.displaced.join(', ')}) — ${kept ? 'it made the slot fixed: its requests no longer reach the passkey store' : 'the hook took it back'}`);
+    pkTrace(w, e, { kind: v.displaced[0] === 'create' ? 'create' : 'get', rpId: '', by: 'page' }, 'hook-displaced', kept ? { kept: true } : {});
+  }
+  /** The conversation a tab's ceremony is for (the witness, else the one holder whose scope has the tab). */
+  function pkOwner(w, e) {
+    if (e.owner) return e.owner;
+    const hs = (holdersOf ? holdersOf(w.profileId) : []).filter((h) => h && !h.human);
+    const hit = hs.filter((h) => { try { return inScope(scopeFor({ profileId: w.profileId, browserKey: h.browserKey, ephemeral: !!h.ephemeral }), e.targetId); } catch { return false; } });
+    return hit.length === 1 ? hit[0].browserKey : hs.length === 1 ? hs[0].browserKey : null;
+  }
+  /** The person operates this tab NOW (a takeover of its conversation's view, Browse yourself). */
+  function pkTakeover(w, e) {
+    if (typeof takeoverOf === 'function') { try { return !!takeoverOf(w.profileId, e.targetId, pkOwner(w, e)); } catch { return false; } }
+    try {
+      const bk = pkOwner(w, e);
+      if (bk && keeper && typeof keeper.inputStateFor === 'function') for (const p of [w.profileId, null]) { const st = keeper.inputStateFor(bk, p); if (st && st.input === 'user') return true; }
+      return (holdersOf ? holdersOf(w.profileId) : []).some((h) => h && h.human && h.input === 'user' && (!bk || h.browserKey === bk));
+    } catch { return false; }
+  }
+  function pkTrace(w, e, rec, outcome, extra = {}) {
+    emit({ kind: 'passkey-trace', profileId: w.profileId, targetId: e.targetId, owner: pkOwner(w, e), act: { kind: rec.kind, rpId: rec.rpId, user: (rec.user && rec.user.name) || rec.userName || '', outcome, by: rec.by || 'agent', ...extra } });
+  }
+  /** ① a held ceremony starts → ② the gate → release (load ONLY its rows) | ask (a card) | refuse (the hook rejects in-page). */
+  async function pkGate(w, e, rec) {
+    if (!e.pk.auth) return pkCtl(w, e, rec, 'release'); // no authenticator on this tab: Chrome's own behaviour (said passkey_open if it never ends)
+    if (e.pk.draining) await e.pk.draining.catch(() => {}); // ONE ceremony per tab at a time: the last one's unload first
+    const pid = w.profileId, part = PS.profileOf(pkRead(), pid);
+    if (!rec.by) rec.by = pkTakeover(w, e) ? 'human' : 'agent'; // the operator at the START (a takeover never lifts an agent's ceremony)
+    const owner = pkOwner(w, e);
+    const gk = pid + ' ' + PS.grantKey(rec.rpId, owner || '');
+    const grant = pkGrants.get(gk) || null;
+    const v = PS.gateVerdict({ kind: rec.conditional ? 'conditional' : rec.kind, rpId: rec.rpId, origin: rec.origin || e.url, rows: part.rows, grant, input: { allow: rec.allow || [] }, answer: rec.answer || null, profileSwitch: part.agentsOff, takeover: rec.by === 'human', now: now() });
+    if (v.verdict === 'refuse') { rec.refused = true; rec.why = v.why; if (v.why !== 'none') pkTrace(w, e, rec, 'refused', { why: v.why }); await pkCtl(w, e, rec, 'refuse'); passkeyChanged(w, e); return v; }
+    if (v.verdict === 'ask') return pkAsk(w, e, rec, v.rows);
+    if (v.consumeGrant) pkGrants.delete(gk);
+    rec.createdBy = v.createdBy || null;
+    let store = pkRead(); const loaded = [];
+    for (const cid of v.load) {
+      const row = PS.profileOf(store, pid).rows.find((r) => r.credentialId === cid); if (!row) continue;
+      const key = PS.open(pks.cipher, row);
+      if (!key) { say('pk-open:' + cid.slice(0, 8), `${pid}: a stored passkey (${cid.slice(0, 8)}) could not be unsealed — the key file changed?`); continue; }
+      const b = PS.bumpSignCount(row); store = PS.withRow(store, pid, b.row); loaded.push({ row, key, loadAs: b.loadAs });
+    }
+    if (loaded.length) pkWrite(store); // the count on disk BEFORE the release
+    for (const l of loaded) {
+      const r = await call(w, 'WebAuthn.addCredential', { authenticatorId: e.pk.auth, credential: { credentialId: b64(l.row.credentialId), isResidentCredential: true, rpId: l.row.rpId, privateKey: l.key, ...(l.row.userHandle ? { userHandle: b64(l.row.userHandle) } : {}), signCount: l.loadAs, ...(l.row.userName ? { userName: l.row.userName } : {}), ...(l.row.displayName ? { userDisplayName: l.row.displayName } : {}) } }, e.sid);
+      if (r && r.error) say('pk-add:' + pid, `${pid}: a stored passkey was not loaded — ${r.error.message}`);
+    }
+    if (v.uv) await call(w, 'WebAuthn.setUserVerified', { authenticatorId: e.pk.auth, isUserVerified: true }, e.sid);
+    rec.loaded = loaded.map((l) => l.row.credentialId); rec.uvSet = !!v.uv;
+    await pkCtl(w, e, rec, 'release');
+    return v;
+  }
+  /** ⑤ the ceremony ended: EVERYTHING leaves the authenticator (getCredentials is [] between ceremonies), UV off, the hook told. */
+  async function pkEnd(w, e, rec) {
+    const a = rec.ask && pkAsks.get(rec.ask); if (a && a.state === 'open') pkClose(a, 'withdrawn');
+    if (!e.pk.auth || !e.sid) return;
+    const job = pkUnload(w, e, rec); e.pk.draining = job;
+    try { await job; } finally { if (e.pk.draining === job) e.pk.draining = null; }
+  }
+  async function pkUnload(w, e, rec) {
+    if (rec.loaded || rec.uvSet) {
+      const g = await call(w, 'WebAuthn.getCredentials', { authenticatorId: e.pk.auth }, e.sid);
+      for (const c of (g && g.result && g.result.credentials) || []) await call(w, 'WebAuthn.removeCredential', { authenticatorId: e.pk.auth, credentialId: c.credentialId }, e.sid);
+      if (rec.uvSet) await call(w, 'WebAuthn.setUserVerified', { authenticatorId: e.pk.auth, isUserVerified: false }, e.sid);
+      if (!rec.refused) pkTrace(w, e, rec, rec.outcome, rec.harvested ? { harvested: true } : {});
+    }
+    await pkCtl(w, e, rec, 'drained');
+  }
+  /** ④ the harvest: a new key sealed + stored (`credentialAdded`), a sign count reconciled (`credentialAsserted`). */
+  function pkHarvest(w, e, method, p) {
+    const c = p && p.credential; if (!c || !c.credentialId) return;
+    const pid = w.profileId, cid = b64u(c.credentialId);
+    const rec = [...e.pk.records].reverse().find((r) => r.outcome === 'pending' && !r.refused) || [...e.pk.records].reverse().find((r) => r.kind === (method === 'WebAuthn.credentialAdded' ? 'create' : 'get')) || null;
+    const store = pkRead(), row = PS.profileOf(store, pid).rows.find((r) => r.credentialId === cid);
+    if (method === 'WebAuthn.credentialAsserted') { if (row) { pkWrite(PS.withRow(store, pid, PS.reconcile(row, c.signCount, now()))); if (rec) rec.userName = row.userName; } return; }
+    if (row || !c.privateKey) return; // a stored key we loaded ourselves
+    const nr = PS.normalizeRow({ credentialId: cid, rpId: c.rpId, userHandle: b64u(c.userHandle), userName: c.userName, displayName: c.userDisplayName, keySealed: PS.seal(pks.cipher, c.privateKey), signCount: c.signCount, createdBy: rec && rec.createdBy === 'human' ? 'human' : 'agent', bySession: pkOwner(w, e), createdAt: now(), policy: PS.NEW_KEY_POLICY });
+    if (!nr) return say('pk-harvest:' + pid, `${pid}: a new passkey was not stored (its fields did not read)`);
+    pkWrite(PS.withRow(store, pid, nr));
+    if (rec) { rec.harvested = true; rec.userName = nr.userName; }
+    emit({ kind: 'passkeys', profileId: pid });
+  }
+  /** `ask`: ONE card (the For-you item + the chat card's event; P2 draws it) — the hook kept waiting by a heartbeat. */
+  function pkAsk(w, e, rec, rowIds) {
+    const rows = PS.profileOf(pkRead(), w.profileId).rows.filter((r) => rowIds.includes(r.credentialId));
+    const a = pkNewAsk({ kind: 'sign-in', profileId: w.profileId, rpId: rec.rpId, user: rows[0] ? { name: rows[0].userName, displayName: rows[0].displayName } : null, rows, browserKey: pkOwner(w, e) });
+    Object.assign(a, { w, e, rec }); rec.ask = a.id;
+    a.beat = setInterval(() => {
+      if (rec.outcome !== 'pending' || w.state !== 'open') return pkClose(a, 'withdrawn');
+      if (rec.by === 'agent' && pkTakeover(w, e)) { pkClose(a, 'withdrawn'); rec.ask = null; rec.refused = true; rec.why = 'withdrawn'; pkTrace(w, e, rec, 'refused', { why: 'withdrawn' }); pkCtl(w, e, rec, 'refuse'); passkeyChanged(w, e); return; }
+      if (now() > a.card.expiresAt) { pkClose(a, 'expired'); rec.ask = null; rec.answer = 'expired'; pkGate(w, e, rec); return; }
+      pkCtl(w, e, rec, 'wait');
+    }, 1000);
+    if (a.beat.unref) a.beat.unref();
+    pkCtl(w, e, rec, 'wait'); passkeyChanged(w, e);
+    return { verdict: 'ask', id: a.id };
+  }
+  function pkNewAsk({ kind, profileId, rpId, user = null, rows = [], browserKey = null, sessionId = null }) {
+    let label = null; try { label = labelOf ? labelOf(profileId) : null; } catch { label = null; }
+    const id = 'pk-' + crypto.randomBytes(4).toString('hex');
+    const card = PS.proposalCard({ id, kind, profileId, profileLabel: label || '', rpId, user, rows, expiresAt: now() + PS.ASK_MS });
+    const a = { id, card, profileId, browserKey, sessionId, state: 'open', waiters: [], itemId: null, beat: null, at: now() };
+    pkAsks.set(id, a);
+    if (forYou) { try { a.itemId = forYou.add?.(profileId, PS.proposalItem(card)) || null; } catch (err) { say('pk-card:' + (err && err.message), `the passkey card was not filed — ${err && err.message}`); } }
+    emit({ kind: 'passkey-proposal', profileId, card, browserKey, sessionId, block: PS.cardBlock(card, a.at) });
+    if (pkAsks.size > 64) for (const [k, x] of pkAsks) { if (x.state !== 'open') pkAsks.delete(k); if (pkAsks.size <= 32) break; }
+    return a;
+  }
+  function pkClose(a, state, answer = null) {
+    if (a.state !== 'open') return;
+    a.state = state; a.card.state = state; a.card.answer = answer;
+    if (a.beat) clearInterval(a.beat);
+    if (a.itemId && forYou) { try { forYou.resolve?.(a.itemId, state === 'answered' ? 'done' : 'dismissed'); } catch { /* the tray's own failure */ } }
+    emit({ kind: 'passkey-proposal', profileId: a.profileId, card: a.card, browserKey: a.browserKey, sessionId: a.sessionId, block: PS.cardBlock(a.card, a.at) });
+    for (const fn of a.waiters.splice(0)) { try { fn(a.card); } catch { /* */ } }
+  }
+  /** THE OWNER's answer (the approve / reject routes for a `pk-` id): register ⇒ a ONE-TIME grant (10 min); sign-in ⇒ the
+   *  key's policy remembered (always / never) and the held ceremony decided. → {ok, proposal} | {ok:false, code, error}. */
+  function answerPasskey(id, { choice = 'once', shown = null } = {}) {
+    const a = pkAsks.get(String(id || ''));
+    if (!a) return { ok: false, code: 'not-found', error: `no passkey request ${id}` };
+    if (a.state !== 'open') return { ok: false, code: 'proposal_state', error: `that passkey request was already ${a.state}` };
+    if (shown != null && shown !== a.card.shown) return { ok: false, code: 'proposal_changed', error: 'that card changed after it was shown — nothing ran; read it again' };
+    const choices = PS.CHOICES[a.card.kind] || [];
+    if (!choices.includes(choice)) return { ok: false, code: 'bad-request', error: `this card's choices are ${choices.join(' | ')}` };
+    pkClose(a, 'answered', choice);
+    if (a.card.kind === 'register') {
+      if (choice === 'once') pkGrants.set(a.profileId + ' ' + PS.grantKey(a.card.rpId, a.browserKey || ''), PS.grantOf({ rpId: a.card.rpId, browserKey: a.browserKey, user: a.card.user.name, now: now() }));
+      return { ok: true, proposal: a.card };
+    }
+    if (choice === 'always' || choice === 'never') { let s = pkRead(); for (const k of a.card.keys) { const r = PS.profileOf(s, a.profileId).rows.find((x) => x.credentialId.startsWith(k.id)); if (r) s = PS.setPolicy(s, a.profileId, r.credentialId, choice === 'always' ? 'yes' : 'no'); } pkWrite(s); emit({ kind: 'passkeys', profileId: a.profileId }); }
+    if (a.rec && a.rec.outcome === 'pending') { a.rec.ask = null; a.rec.answer = choice; pkGate(a.w, a.e, a.rec); }
+    return { ok: true, proposal: a.card };
+  }
+  /** The agent's `passkey register <rpId>`: ONE card; `waitMs` > 0 waits for its answer. → {ok, proposal, state}. */
+  async function passkeyRegister({ profileId, browserKey, sessionId = null, rpId, user = '' }, { waitMs = 0 } = {}) {
+    const pid = String(profileId || ''), rp = PS.hostWord(rpId);
+    if (!pks) return { ok: false, code: 'not_watched', error: 'VibeSpace keeps no passkeys on this server' };
+    if (!rp || (!rp.includes('.') && rp !== 'localhost')) return { ok: false, code: 'bad-request', error: `"${rpId}" is not a site name (e.g. github.com)` };
+    if (PS.profileOf(pkRead(), pid).agentsOff) return { ok: false, code: 'passkeys_off', error: PK.refusedText('profile-switch', rp) };
+    const bk = String(browserKey || '').replace(/\.\d+$/, '');
+    const live = [...pkAsks.values()].find((x) => x.state === 'open' && x.card.kind === 'register' && x.profileId === pid && x.card.rpId === rp && x.browserKey === bk);
+    const a = live || pkNewAsk({ kind: 'register', profileId: pid, rpId: rp, user: user ? { name: user, displayName: user } : null, browserKey: bk, sessionId });
+    if (!live) { a.beat = setTimeout(() => pkClose(a, 'expired'), PS.ASK_MS); if (a.beat.unref) a.beat.unref(); }
+    if (waitMs > 0 && a.state === 'open') await new Promise((res) => { const t = setTimeout(() => { a.waiters = a.waiters.filter((f) => f !== done); res(); }, waitMs); if (t.unref) t.unref(); const done = () => { clearTimeout(t); res(); }; a.waiters.push(done); });
+    return { ok: true, proposal: a.card, state: a.state === 'answered' ? (a.card.answer === 'once' ? 'approved' : 'rejected') : a.state };
+  }
+  /** The table as it may leave the server (publicRow only) + the profile's switch. */
+  function passkeyList(profileId) { const p = PS.profileOf(pkRead(), String(profileId || '')); return { agentsOff: p.agentsOff, keys: p.rows.map(PS.publicRow), displaced: (pkDisplacedAt.get(String(profileId || '')) || []).filter((at) => now() - at < 3600e3).length, asks: [...pkAsks.values()].filter((a) => a.state === 'open' && a.profileId === String(profileId || '')).map((a) => a.card) }; }
+  /** `forget`: an agent removes only keys an AGENT registered; the owner removes any. */
+  function passkeyForget(profileId, ref, { by = 'agent' } = {}) {
+    const pid = String(profileId || ''); const rows = PS.findRows(PS.profileOf(pkRead(), pid).rows, ref);
+    if (!rows.length) return { ok: false, code: 'not-found', error: `this profile holds no passkey "${String(ref || '').slice(0, 80)}" — \`vibespace-browser passkey list\`` };
+    if (by !== 'user' && rows.some((r) => r.createdBy === 'human')) return { ok: false, code: 'owner_key', error: 'a passkey the owner registered is removed only by the owner (the Agent browser panel)' };
+    const ids = new Set(rows.map((r) => r.credentialId));
+    const d = PS.dropRows(pkRead(), pid, (r) => ids.has(r.credentialId)); pkWrite(d.store); emit({ kind: 'passkeys', profileId: pid });
+    return { ok: true, removed: d.rows.map(PS.publicRow) };
+  }
+  function passkeyPolicy(profileId, id, policy) {
+    const pid = String(profileId || ''); const rows = PS.findRows(PS.profileOf(pkRead(), pid).rows, id);
+    if (rows.length !== 1 || !PS.POLICIES.includes(policy)) return { ok: false, code: rows.length ? 'bad-request' : 'not-found', error: rows.length ? `policy is ${PS.POLICIES.join(' | ')}` : `no passkey ${id}` };
+    pkWrite(PS.setPolicy(pkRead(), pid, rows[0].credentialId, policy)); emit({ kind: 'passkeys', profileId: pid });
+    return { ok: true, key: PS.publicRow(PS.profileOf(pkRead(), pid).rows.find((r) => r.credentialId === rows[0].credentialId)) };
+  }
+  /** lane passkey-ui: each profile's passkey count (the panel's "Passkeys (n)…") — counts only, never a row. */
+  /** int258: the chat cards of ONE conversation's browser key, open and decided (a rebuild draws each with its latest state,
+   *  like the keeper's proposal cards) — in memory, as the asks are: a server stop ends them. */
+  function passkeyCards(browserKey) { const k = String(browserKey || ''); return k ? [...pkAsks.values()].filter((a) => String(a.browserKey || '').replace(/\.\d+$/, '') === k).sort((x, y) => x.at - y.at).map((a) => PS.cardBlock(a.card, a.at)) : []; }
+  function passkeyCounts() { if (!pks) return {}; const s = pkRead(); const out = {}; for (const pid of Object.keys(s.profiles || {})) out[pid] = PS.profileOf(s, pid).rows.length; return out; }
+  function passkeySwitch(profileId, on) { const pid = String(profileId || ''); pkWrite(PS.setAgentsOff(pkRead(), pid, !!on)); emit({ kind: 'passkeys', profileId: pid }); return { ok: true, agentsOff: !!on }; }
+  /** `removeProfile`: the profile's keys go with it (said in the removal answer). */
+  function dropPasskeys(profileId) { if (!pks) return 0; const d = PS.dropProfile(pkRead(), String(profileId || '')); if (d.removed || pkRead().profiles[String(profileId || '')]) pkWrite(d.store); return d.removed; }
   function setTabsOf(fn) { tabsFn = typeof fn === 'function' ? fn : null; }
   /** r4 #2: the orphan tabs of a browser and what they hold (a diagnostic read — the suites, `stats`). */
   function orphansOf(profileId, scope = new Set(['-'])) { const w = watches.get(String(profileId || '')); const ob = orphanBusy(w, scope); return { orphans: ob.orphans ? [...ob.orphans] : [], loop: ob.loop ? ob.loop.targetId : null, busy: ob.busy, loading: w && ob.orphans ? (loadingIn(w.profileId, ob.orphans) || null) : null, open: w && ob.orphans ? !!openIn(w.profileId, ob.orphans) : false }; }
@@ -1269,6 +1538,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     ownsTab, pickTab, stopTab, closeTab, captureTab, noteCut, busyFor, // lane site-reset: a looping tab never disables the browser
     ownTabs, clearSite, // lane site-reset step 2: one site's stored login, cleared
     passkeyIn, cancelPasskey, // lane browser-passkey: a page waiting for a passkey, named and cancellable
+    answerPasskey, passkeyRegister, passkeyList, passkeyForget, passkeyPolicy, passkeySwitch, dropPasskeys, passkeyCounts, passkeyCards, // lane passkey-ui: + the counts // int258: + the chat cards a rebuild draws // lane passkey-store-core: the store, its cards, its grants
     paintFacts, freezePaint, thawPaint, // lane browser-swiftshader-cpu: a browser nobody watches and nobody drives paints nothing
     promptIn, answerPrompt, // lane browser-ui-prompts: a file chooser / an HTTP sign-in, named and answerable
     setPermission, permissionsOf, // lane browser-ui-prompts-r2: every permission decided ahead; the agent's per-origin flip

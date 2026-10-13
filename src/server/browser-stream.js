@@ -282,12 +282,13 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
   /** The agent's own dialog answer is a page act on the trace: the stream mirror's command/result shape, to the TAPS
    *  only (the recorder), never to a viewer. */
   let dialogActSeq = 0;
-  function tapDialogAct({ sessionId, profileId = null, action, dialog = null, permission = null } = {}) {
+  function tapDialogAct({ sessionId, profileId = null, action, dialog = null, permission = null, passkey = null } = {}) {
     const pm = action === 'permission' && permission ? { kind: String(permission.kind || ''), setting: String(permission.setting || ''), origin: String(permission.origin || '') } : null; // lane browser-ui-prompts-r2: the agent's permission decision
-    const verb = pm ? 'permission' : 'dialog';
+    const pk = action === 'passkey' && passkey ? { kind: String(passkey.kind || ''), rpId: String(passkey.rpId || ''), user: String(passkey.user || '').slice(0, 64), outcome: String(passkey.outcome || ''), by: passkey.by === 'human' ? 'human' : 'agent', ...(passkey.why ? { why: String(passkey.why) } : {}) } : null; // lane passkey-store-core: a ceremony (never a key)
+    const verb = pm ? 'permission' : pk ? 'passkey' : 'dialog';
     const id = `r-vs-${verb}-${++dialogActSeq}`; const t = now();
-    const cmd = { type: 'command', action: verb, id, params: pm ? { action: verb, id, ...pm } : { action: 'dialog', id, response: String(action || '') }, timestamp: t };
-    const res = { type: 'result', action: verb, id, success: true, data: pm || (dialog ? { type: dialog.type, message: dialog.message } : null), duration_ms: 0, timestamp: t };
+    const cmd = { type: 'command', action: verb, id, params: pm ? { action: verb, id, ...pm } : pk ? { action: verb, id, ...pk } : { action: 'dialog', id, response: String(action || '') }, timestamp: t };
+    const res = { type: 'result', action: verb, id, success: true, data: pm || pk || (dialog ? { type: dialog.type, message: dialog.message } : null), duration_ms: 0, timestamp: t };
     let n = 0;
     for (const r of relays.values()) {
       if (r.sessionId !== sessionId || (r.target.profileId || null) !== (profileId || null) || r.target.child || r.target.kind === 'child') continue;

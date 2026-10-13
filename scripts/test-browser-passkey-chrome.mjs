@@ -51,6 +51,184 @@ process.on('exit', cleanup);
 for (const sg of ['SIGINT', 'SIGTERM']) process.on(sg, () => { cleanup(); process.exit(130); });
 const done = () => { console.log(fail ? `\n${fail} FAILED (${pass} passed, ${skipped} skipped)` : `\nALL PASS (${pass}, ${skipped} skipped)`); process.exit(fail ? 1 : 0); };
 
+// ── LANE PASSKEY-STORE-CORE (2026-10-12): THE STORE'S CEREMONIES on a REAL HEADED Chrome on this run's own Xvfb (a pinned
+// high display, private HOME; a scratch user-data-dir; loopback pages served as http://localhost) — the real dialog watch
+// with a passkey store (a real sealed file), driven over Chrome's own CDP; per tab:
+//   S1 an empty authenticator ⇒ get fails in ms, no window;  S2 an ungranted create ⇒ refused in-page (no-grant)
+//   S3 register → the card → allow once ⇒ create harvested, sealed, stored 0600, the authenticator EMPTY after `end`
+//   S4 policy ask ⇒ passkey_ask + ONE card, allow once ⇒ ok;  S5 policy yes ⇒ silent, signCount +1 on disk
+//   S6 a conditional (autofill) get with a stored key + ask ⇒ passkey_ask, allow once ⇒ ok
+//   S7 the takeover race (the ask withdrawn; the person's own ceremony lands as "you");  S8 P0 ④ the watch's socket closed ⇒
+//      the next get fails IN-PAGE ≤ 2 s, the re-attach re-arms;  S9 lane passkey-prewrap-fix (passkey-verify lens ②): the page
+//      puts a MARKED function in the slot, then a re-arm ⇒ (a) that function is never called (no binding, no key), the slot is
+//      ours again, hook-displaced said once; (b) a sign-in completes; (c) the old key is refused (slot + the hook itself);
+//      CONTROLS (mutant copies): skip removeCredential at end ⇒ S5's empty-after-end red; skip the grant check ⇒ S2 red;
+//      enable without an authenticator ⇒ S1 red; the re-arm reads the SLOT ⇒ S9 (a) red; no retake ⇒ S9 (a) red; the
+//      re-arm keeps the old key ⇒ S9 (c) red
+// lane passkey-prewrap-fix: the page's own function in the slot, carrying the old source-string mark the pre-fix re-arm trusted
+const LENS2_PAGE = `(() => { const real = CredentialsContainer.prototype.get; window.__caught = []; const evil = { get(...a) { 'vs-passkey-hook'; window.__caught.push(a.map((x) => typeof x === 'function' ? 'FN' : typeof x === 'string' ? x : typeof x)); return real.apply(this, a); } }.get; window.__evil = evil; Object.defineProperty(CredentialsContainer.prototype, 'get', { value: evil, writable: true, enumerable: true, configurable: true }); return 'set'; })()`;
+// the pre-fix control road: a verb + a key through whatever sits in the slot
+const SLOT_REPLAY = (k) => `(() => { try { const v = CredentialsContainer.prototype.get.call(null, 'cancel', ${JSON.stringify(String(k))}); if (v && typeof v.catch === 'function') v.catch(() => {}); return typeof v === 'number' ? 'control:' + v : 'not-a-control'; } catch (e) { return 'not-a-control'; } })()`;
+async function storeLegs() {
+  const PSx = require('../src/browser-passkey-store.js');
+  const WSI = require('ws').WebSocket;
+  const CHROME = '/opt/google/chrome/chrome';
+  if (!fs.existsSync(CHROME) || !fs.existsSync('/usr/bin/Xvfb')) return skip('passkey store legs: no Google Chrome / Xvfb');
+  const S = path.join(ROOT, 'pkstore'); for (const d of ['home', 'prof', 'mut/src/server']) fs.mkdirSync(path.join(S, d), { recursive: true });
+  const disp = ':' + (47400 + (process.pid % 500));
+  const kids = [];
+  const xv = spawn('/usr/bin/Xvfb', [disp, '-screen', '0', '1280x800x24', '-nolisten', 'tcp'], { stdio: 'ignore', detached: true }); kids.push(xv);
+  await sleep(800);
+  const pg = http.createServer((q, r) => { r.setHeader('content-type', 'text/html'); r.end(`<!doctype html><title>PKS</title><input autocomplete="username webauthn"><script>
+const ch=()=>crypto.getRandomValues(new Uint8Array(32));
+window.reg=(name)=>navigator.credentials.create({publicKey:{challenge:ch(),rp:{id:'localhost',name:'L'},user:{id:new TextEncoder().encode(name),name,displayName:name.toUpperCase()},pubKeyCredParams:[{type:'public-key',alg:-7}],authenticatorSelection:{residentKey:'required',userVerification:'preferred'},timeout:8000}}).then(()=>'ok',(e)=>e.name);
+window.signin=(cond)=>navigator.credentials.get({publicKey:{challenge:ch(),rpId:'localhost',userVerification:'preferred',timeout:8000},...(cond?{mediation:'conditional'}:{})}).then(()=>'ok',(e)=>e.name);
+</script>`); });
+  await new Promise((r) => pg.listen(0, '127.0.0.1', r)); const PAGE = `http://localhost:${pg.address().port}/`;
+  const ch = spawn(CHROME, [`--user-data-dir=${path.join(S, 'prof')}`, '--remote-debugging-port=0', '--no-first-run', '--no-default-browser-check', '--password-store=basic', '--disable-gpu', 'about:blank'], { env: { ...BASE_ENV, DISPLAY: disp, HOME: path.join(S, 'home') }, stdio: 'ignore', detached: true }); kids.push(ch);
+  const portFile = path.join(S, 'prof', 'DevToolsActivePort');
+  const pf = await until(() => fs.existsSync(portFile) && fs.readFileSync(portFile, 'utf8').split('\n').length >= 2 && fs.readFileSync(portFile, 'utf8'), 15000);
+  const end = () => { for (const k of kids) { try { process.kill(-k.pid, 'SIGKILL'); } catch { } } try { pg.close(); } catch { } };
+  if (!pf) { end(); return skip('passkey store legs: Chrome did not start on ' + disp); }
+  const [port, wsPath] = pf.split('\n');
+  const BWS = `ws://127.0.0.1:${port}${wsPath}`;
+  // the driver: its own CDP socket (never the watch's) — open a tab, run page code
+  const drv = new WSI(BWS); await new Promise((r) => drv.once('open', r));
+  let did = 0; const pend = new Map();
+  drv.on('message', (d) => { const m = JSON.parse(d); if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); } });
+  const dcall = (method, params = {}, sessionId) => new Promise((r) => { const id = ++did; pend.set(id, r); drv.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) })); });
+  const KEYF = path.join(S, 'k.bin'); fs.writeFileSync(KEYF, crypto.randomBytes(32), { mode: 0o600 });
+  const STORE = path.join(S, 'browser-passkeys.json');
+  const items = []; let takeover = false;
+  const mk = (Dmod, PSmod) => { const c = PSmod.cipherOf(crypto, fs.readFileSync(KEYF)); return Dmod.create({ keeper: { cdpEndpointFor: async () => ({ ok: true, url: BWS }) }, WebSocketImpl: WSI, log: { warn: () => {}, log: () => {} }, holdersOf: () => [{ browserKey: 'bk-aaaaaaaa', sessionId: 's1' }], takeoverOf: () => takeover, forYou: { add: (pid, it) => { items.push(it); return 'it' + items.length; }, resolve: () => {} }, passkeys: { read: () => (fs.existsSync(STORE) ? JSON.parse(fs.readFileSync(STORE, 'utf8')) : null), write: (o) => { fs.writeFileSync(STORE + '.tmp', JSON.stringify(o), { mode: 0o600 }); fs.renameSync(STORE + '.tmp', STORE); }, cipher: c } }); };
+  const PID = 'bp-pkstore';
+  const tab = async (W) => {
+    const t = await dcall('Target.createTarget', { url: PAGE }); const tid = t.result.targetId;
+    const a = await dcall('Target.attachToTarget', { targetId: tid, flatten: true }); const sid = a.result.sessionId;
+    await until(async () => { const r = await dcall('Runtime.evaluate', { expression: 'typeof window.signin', returnByValue: true }, sid); return r.result && r.result.result.value === 'function'; }, 8000);
+    await until(() => { const w = W._watches.get(PID); const e = w && w.targets.get(tid); return e && e.pk.armed && e.pk.auth !== undefined; }, 8000);
+    const run = async (expr, ms = 12000) => { const t0 = Date.now(); const r = await Promise.race([dcall('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }, sid), sleep(ms).then(() => null)]); return { v: r && r.result && r.result.result ? r.result.result.value : 'timeout', ms: Date.now() - t0 }; };
+    const watchCall = (method, params = {}) => { const w = W._watches.get(PID), e = w.targets.get(tid); return new Promise((r) => { const id = 9e8 + (++did); w.waiting.set(id, r); w.ws.send(JSON.stringify({ id, method, params: { authenticatorId: e.pk.auth, ...params }, sessionId: e.sid })); }); };
+    const creds = async () => { const r = await watchCall('WebAuthn.getCredentials'); return r.result ? r.result.credentials.length : -1; };
+    return { tid, sid, run, creds, close: () => dcall('Target.closeTarget', { targetId: tid }) };
+  };
+  // lane passkey-prewrap-fix: lens ② — the page wraps `get` with a function carrying the old mark, recording every call;
+  // the watch's socket goes and a re-arm runs; what did the page's function receive, whose function is in the slot
+  const lens2 = async (Wx, Tx) => {
+    const oldKey = Wx._watches.get(PID).targets.get(Tx.tid).pk.key;
+    await Tx.run(LENS2_PAGE);
+    const traces = []; const off = Wx.onChange((ev) => { if (ev && ev.kind === 'passkey-trace') traces.push(ev.act); });
+    Wx._watches.get(PID).ws.terminate(); await sleep(300);
+    const armed = (await Wx.arm(PID, { budgetMs: 5000 })).ok;
+    await until(() => { const e = Wx._watches.get(PID).targets.get(Tx.tid); return e && e.pk.armed && e.pk.auth; }, 5000);
+    await sleep(200);
+    const seen = JSON.parse((await Tx.run('JSON.stringify(window.__caught)')).v || '[]');
+    const ours = (await Tx.run('CredentialsContainer.prototype.get !== window.__evil')).v;
+    const globals = (await Tx.run('Object.getOwnPropertyNames(window).filter((n) => /^vs[0-9a-f]{24}$/.test(n)).length')).v;
+    off();
+    return { armed, seen, ours, globals, traces, oldKey, newKey: Wx._watches.get(PID).targets.get(Tx.tid).pk.key };
+  };
+  // the hook's own `ctl`, found by identity the way the watch does (the private field under the profile's slot name)
+  const viaCtl = async (Wx, Tx, k) => {
+    const P = await dcall('Runtime.evaluate', { expression: 'CredentialsContainer.prototype' }, Tx.sid);
+    const g = await dcall('Runtime.getProperties', { objectId: P.result.result.objectId, ownProperties: true }, Tx.sid);
+    const h = ((g.result && g.result.privateProperties) || []).filter((x) => x.name === '#' + Wx._watches.get(PID).pkSlot);
+    if (h.length !== 1) return 'no-ctl:' + h.length;
+    const r = await dcall('Runtime.callFunctionOn', { objectId: h[0].value.objectId, functionDeclaration: PK.CTL_FN, arguments: [{ value: k }, { value: 'cancel' }, { value: 0 }], returnByValue: true }, Tx.sid);
+    return r.result && r.result.result ? r.result.result.value : null;
+  };
+  const rows = () => (PSx.normalizeStore(fs.existsSync(STORE) ? JSON.parse(fs.readFileSync(STORE, 'utf8')) : null).profiles[PID] || { rows: [] }).rows;
+  const answerLast = (W, choice) => { const it = items[items.length - 1]; return W.answerPasskey(it.action.id, { choice, shown: it.action.shown }); };
+  try {
+    let W = mk(D, PSx); ok((await W.arm(PID, { budgetMs: 5000 })).ok, 'S0 the watch armed on the real headed Chrome (' + disp + ')');
+    let T = await tab(W);
+    ok(!!W._watches.get(PID).targets.get(T.tid).pk.auth && (await T.creds()) === 0, 'S0 the tab carries ITS OWN authenticator (enable + add as one step), empty');
+    let r = await T.run('signin()');
+    ok(r.v === 'NotAllowedError' && r.ms < 1000, `S1 an empty authenticator: get fails in ${r.ms} ms (NotAllowedError), no window`, r);
+    r = await T.run("reg('alice')");
+    ok(r.v === 'NotAllowedError' && rows().length === 0 && W.passkeyIn(PID, null).state === 'refused' && /passkey register localhost/.test(W.passkeyIn(PID, null).text), `S2 an UNGRANTED create ⇒ refused in-page in ${r.ms} ms, nothing stored, the agent told to register first`, [r, W.passkeyIn(PID, null)]);
+    const g = await W.passkeyRegister({ profileId: PID, browserKey: 'bk-aaaaaaaa', rpId: 'localhost', user: 'alice' });
+    ok(g.ok && g.state === 'open' && items.length === 1 && items[0].action.type === 'browser-proposal' && /register a passkey on localhost/.test(items[0].text), 'S3 `passkey register localhost` ⇒ ONE card (the For-you item, browser-proposal)', items[0]);
+    ok(answerLast(W, 'once').ok, 'S3 the owner allows once');
+    r = await T.run("reg('alice')");
+    await until(() => rows().length === 1, 3000);
+    const st = fs.statSync(STORE);
+    const row1 = rows()[0];
+    ok(r.v === 'ok' && row1 && row1.createdBy === 'agent' && row1.policy === 'ask' && /^v1\./.test(row1.keySealed) && (st.mode & 0o777) === 0o600 && !fs.readFileSync(STORE, 'utf8').includes('MIG'), `S3 the granted create: ok in ${r.ms} ms, harvested, SEALED, stored 0600, policy ask`, [r, row1 && PSx.publicRow(row1)]);
+    await sleep(300); ok((await T.creds()) === 0, 'S3 `getCredentials` is EMPTY after `end` (the key lives only in the sealed store)');
+    r = await T.run("reg('bob')"); ok(r.v === 'NotAllowedError', 'S3 the grant was ONE use: a second create is refused');
+    const n0 = items.length; const pS4 = T.run('signin()', 15000);
+    await until(() => W.passkeyIn(PID, null).state === 'passkey_ask', 3000);
+    ok(W.passkeyIn(PID, null).state === 'passkey_ask' && items.length === n0 + 1 && /sign in to localhost with alice/.test(items[n0].text), 'S4 policy ask ⇒ passkey_ask + ONE sign-in card', [W.passkeyIn(PID, null).state, items[n0]]);
+    await sleep(2500); ok(answerLast(W, 'once').ok, 'S4 (held 2.5 s past the hook\'s 1.5 s by the heartbeat) the owner allows once');
+    r = await pS4; await sleep(300);
+    ok(r.v === 'ok' && rows()[0].signCount >= 2 && rows()[0].uses === 1 && (await T.creds()) === 0, `S4 ⇒ the sign-in succeeds; signCount ${rows()[0].signCount} on disk; the authenticator empty again`, [r, PSx.publicRow(rows()[0])]);
+    ok(W.passkeyPolicy(PID, rows()[0].credentialId.slice(0, 8), 'yes').ok, 'S5 the key\'s policy set to yes');
+    const c0 = rows()[0].signCount; r = await T.run('signin()'); await sleep(300);
+    ok(r.v === 'ok' && r.ms < 1000 && rows()[0].signCount === c0 + 1 && items.length === n0 + 1, `S5 policy yes ⇒ silent in ${r.ms} ms, no card, signCount ${c0} → ${rows()[0].signCount} on disk`);
+    const s5empty = (await T.creds()) === 0; ok(s5empty, 'S5 the authenticator empty after `end`');
+    W.passkeyPolicy(PID, rows()[0].credentialId.slice(0, 8), 'ask');
+    const n1 = items.length; const pS6 = T.run('signin(true)', 15000);
+    await until(() => W.passkeyIn(PID, null).state === 'passkey_ask', 3000);
+    ok(W.passkeyIn(PID, null).state === 'passkey_ask' && items.length === n1 + 1, 'S6 a conditional (autofill) get with a stored key + ask ⇒ passkey_ask + a card (never silent)');
+    answerLast(W, 'once'); r = await pS6; ok(r.v === 'ok', `S6 allow once ⇒ the autofill sign-in completes (${r.v})`);
+    const n2 = items.length; const pS7 = T.run('signin()', 15000);
+    await until(() => W.passkeyIn(PID, null).state === 'passkey_ask', 3000);
+    takeover = true; r = await pS7;
+    ok(r.v === 'NotAllowedError' && items.length === n2 + 1 && W.passkeyList(PID).asks.length === 0, `S7 the person takes over mid-ask ⇒ the agent's ask WITHDRAWN (page: ${r.v}, the card closed)`);
+    r = await T.run('signin()'); const n3 = items.length; const r2 = await T.run("reg('carol')"); await until(() => rows().length === 2, 3000);
+    ok(r.v === 'ok' && r2.v === 'ok' && items.length === n3 && rows().some((x) => x.userName === 'carol' && x.createdBy === 'human') && PSx.publicRow(rows().find((x) => x.userName === 'carol')).source === 'you', 'S7 the person\'s own sign-in and registration: no card, the new key lands as "you"', [r, r2]);
+    takeover = false;
+    W.passkeyPolicy(PID, rows()[0].credentialId.slice(0, 8), 'yes');
+    W._watches.get(PID).ws.terminate(); await sleep(300);
+    r = await T.run('(async()=>{const t=performance.now();const v=await signin();return v+":"+Math.round(performance.now()-t)})()');
+    const [s8v, s8ms] = String(r.v).split(':');
+    ok(s8v === 'NotAllowedError' && Number(s8ms) <= 2000, `S8 P0 ④: the watch's socket closed ⇒ the page's get fails IN-PAGE in ${s8ms} ms by the page's clock (${r.ms} ms round trip; never the ≥ 9 s native hang)`, r);
+    ok((await W.arm(PID, { budgetMs: 5000 })).ok, 'S8 the watch re-attaches');
+    await until(() => { const e = W._watches.get(PID).targets.get(T.tid); return e && e.pk.auth; }, 5000);
+    r = await T.run('signin()'); ok(r.v === 'ok' && r.ms < 1500, `S8 … re-armed (authenticator + the SAME hook rebound): a policy-yes sign-in works again (${r.v}, ${r.ms} ms)`);
+    // S9 lane passkey-prewrap-fix (passkey-verify lens ②): the page's MARKED function in the slot BEFORE a re-arm
+    const L = await lens2(W, T);
+    ok(L.armed && L.seen.length === 0 && L.oldKey && L.newKey && L.oldKey !== L.newKey, `S9 (a) lens ②: the page's MARKED function in the slot before a re-arm is never called — no binding, no key (${L.seen.length} calls); the key minted anew`, L.seen);
+    ok(L.ours === true && L.globals === 0, 'S9 (a) … the slot is OURS again (retaken) and no binding is left on the global', { ours: L.ours, globals: L.globals });
+    ok(L.traces.filter((a) => a.outcome === 'hook-displaced').length === 1 && W.passkeyList(PID).displaced === 1, 'S9 (a) … the trace says hook-displaced ONCE; the Passkeys card counts the episode', L.traces);
+    r = await T.run('signin()');
+    ok(r.v === 'ok' && r.ms < 1500 && (await T.run('JSON.stringify(window.__caught)')).v === '[]', `S9 (b) the re-armed hook works: a policy-yes sign-in completes (${r.v}, ${r.ms} ms); the page's function stayed out`);
+    const viaSlot = (await T.run(SLOT_REPLAY(L.oldKey))).v, oldAt = await viaCtl(W, T, L.oldKey), newAt = await viaCtl(W, T, L.newKey);
+    ok(viaSlot === 'not-a-control' && oldAt === -2 && newAt === 0, `S9 (c) the OLD key after a re-arm is refused — the slot takes no verbs at all (${viaSlot}), the hook itself answers ${oldAt}; the new key answers ${newAt}`);
+    await T.close(); W.shutdown();
+    // CONTROLS — mutant copies (src/server/browser-dialogs.js, src/browser-passkey-store.js) on the same Chrome, a fresh tab each
+    const M = path.join(S, 'mut', 'src');
+    for (const x of ['browser-stuck.js', 'browser-passkey.js', 'browser-passkey-store.js']) fs.copyFileSync(path.join(REPO, 'src', x), path.join(M, x));
+    const dsrc = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8'), psrc = fs.readFileSync(path.join(REPO, 'src/browser-passkey-store.js'), 'utf8'), hsrc = fs.readFileSync(path.join(REPO, 'src/browser-passkey.js'), 'utf8');
+    const mutant = async (name, file, from, to, leg) => {
+      const src = file === 'dialogs' ? dsrc : file === 'hook' ? hsrc : psrc;
+      if (!src.includes(from)) return ok(false, `CONTROL ${name}: the anchor moved`, from);
+      return mutantWith(name, { [file]: src.replace(from, to) }, leg);
+    };
+    const mutantWith = async (name, files, leg) => {
+      fs.writeFileSync(path.join(M, 'server/browser-dialogs.js'), files.dialogs || dsrc);
+      fs.writeFileSync(path.join(M, 'browser-passkey-store.js'), files.store || psrc);
+      fs.writeFileSync(path.join(M, 'browser-passkey.js'), files.hook || hsrc);
+      for (const k of Object.keys(require.cache)) if (k.startsWith(path.join(S, 'mut'))) delete require.cache[k];
+      const Wm = mk(require(path.join(M, 'server/browser-dialogs.js')), require(path.join(M, 'browser-passkey-store.js')));
+      await Wm.arm(PID, { budgetMs: 5000 }); const Tm = await tab(Wm);
+      let red = false; try { red = await leg(Wm, Tm); } catch (e) { red = true; }
+      ok(red, `CONTROL ${name} ⇒ its leg is RED`);
+      await Tm.close(); Wm.shutdown(); await sleep(300);
+    };
+    await mutant('"skip removeCredential at end"', 'dialogs', "await call(w, 'WebAuthn.removeCredential',", "void 0 && call(w, 'WebAuthn.removeCredential',", async (Wm, Tm) => { await Tm.run('signin()'); await sleep(300); return (await Tm.creds()) !== 0; });
+    await mutant('"skip the grant check"', 'store', "if (!grant || grant.rpId !== rp || grant.used) return refuse('no-grant');\n    if (nat(now) > nat(grant.expiresAt)) return refuse('expired');", '', async (Wm, Tm) => { const n = rows().length; const x = await Tm.run("reg('mallory')"); await sleep(300); return x.v === 'ok' || rows().length > n; });
+    // lane passkey-prewrap-fix: the lens ② controls (each leg = a fresh tab, the page's marked function, a re-arm)
+    await mutant('"the re-arm reads the SLOT, not the private field"', 'dialogs', "((g && g.result && g.result.privateProperties) || []).filter((x) => x && x.name === '#' + w.pkSlot && x.value && x.value.objectId)", "((g && g.result && g.result.result) || []).filter((x) => x && x.name === 'get' && x.value && x.value.objectId)", async (Wm, Tm) => (await lens2(Wm, Tm)).seen.length > 0);
+    await mutant('"no retake"', 'hook', 'return retake(); }', 'return { displaced: [], kept: [] }; }', async (Wm, Tm) => (await lens2(Wm, Tm)).ours !== true);
+    await mutant('"the re-arm keeps the old key"', 'hook', "if (typeof b === 'string' && b) key = b;", '', async (Wm, Tm) => { const Lm = await lens2(Wm, Tm); return (await viaCtl(Wm, Tm, Lm.oldKey)) !== -2; });
+    if (process.env.VS_PK_BASE_SRC) await mutantWith('"BASE tree (the pre-fix re-arm)"', { dialogs: fs.readFileSync(path.join(process.env.VS_PK_BASE_SRC, 'browser-dialogs.js'), 'utf8'), hook: fs.readFileSync(path.join(process.env.VS_PK_BASE_SRC, 'browser-passkey.js'), 'utf8') }, async (Wm, Tm) => { const Lm = await lens2(Wm, Tm); console.log('   BASE: the marked function received', JSON.stringify(Lm.seen)); return Lm.seen.some((c) => c.includes('FN')); }); // lane-only RED control on the base tree's two files
+    await mutant('"enable without an authenticator"', 'dialogs', "    const a = await call(w, 'WebAuthn.addVirtualAuthenticator',", "    const a = { result: { authenticatorId: 'none' } }; void 0 && await call(w, 'WebAuthn.addVirtualAuthenticator',", async (Wm, Tm) => { const x = await Tm.run('signin()', 4000); return !(x.v === 'NotAllowedError' && x.ms < 1000); });
+  } finally { try { drv.close(); } catch { } end(); }
+}
+await storeLegs();
+
 const REAL_AB = (() => { try { return Ff.binaryResolver('agent-browser', BASE_ENV)(); } catch { return null; } })();
 let ver = null; try { ver = REAL_AB ? execFileSync(REAL_AB, ['--version'], { encoding: 'utf8', timeout: 8000, env: BASE_ENV }).trim() : null; } catch { }
 if (!ver || !/\b0\.38\.1\b/.test(ver)) { skip(`test-browser-passkey-chrome: no real agent-browser 0.38.1 resolves past the shim (${REAL_AB || 'none'}: ${ver || 'no version'})`); done(); }
@@ -173,7 +351,7 @@ async function cdpPage(w, re) {
   ws.onmessage = (m) => { const d = JSON.parse(String(m.data)); if (d.id && wait.has(d.id)) { wait.get(d.id)(d); wait.delete(d.id); } };
   return { send: (method, params = {}) => new Promise((r) => { const i = ++id; wait.set(i, r); ws.send(JSON.stringify({ id: i, method, params })); }), close: () => ws.close() };
 }
-const HEAD = 'This page is waiting for a passkey (localhost).';
+const HEAD = 'This page is waiting for a passkey (localhost) and nothing in VibeSpace answers it'; // lane passkey-store-core: §2.4's words (no store wired here ⇒ nothing answers it)
 const starts = (after) => SEEN.filter((x) => x.ev === 'start' && x.at >= after);
 
 try {
@@ -216,7 +394,7 @@ try {
     // the desktop note only where the window IS on a desktop (lane browser-passkey-chrome's fix: Chrome says it is headed
     // here, but its window — and the tab-modal dialog in it — is on the CLI's own Xvfb, which nobody sees)
     const rung = ((w.kk.browserOf(w.prof.id) || {}).display || {}).fallback;
-    ok(words && words.title === HEAD.replace(/\.$/, '') && words.cancel && rung && rung.rung === 'hidden-window' && stuck.headed === false && words.desktop === '', `(a) the live view\'s banner: the stuck fact \`passkey\` ⇒ the title, ONE Cancel — and NO desktop note on the hidden-window rung (the keeper\'s display fact: ${rung && rung.rung})`, { stuck, words, rung });
+    ok(words && words.title === 'This page is waiting for a passkey (localhost)' && words.cancel && rung && rung.rung === 'hidden-window' && stuck.headed === false && words.desktop === '', `(a) the live view\'s banner: the stuck fact \`passkey\` ⇒ the title, ONE Cancel — and NO desktop note on the hidden-window rung (the keeper\'s display fact: ${rung && rung.rung})`, { stuck, words, rung });
     // (f) the For-you item after 20 s — ONE
     await until(() => FY.adds.length > 0, 22000, 100);
     await sleep(1200);
@@ -288,7 +466,7 @@ try {
   }
   // (d) CONTROL 2: the hook never armed
   const dsrc = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
-  const needle = "const r1 = await call(w, 'Runtime.addBinding', { name: w.pkBinding }, sid);";
+  const needle = "const r1 = await call(w, 'Runtime.addBinding', { name: e.pk.binding }, sid);";
   ok(dsrc.includes(needle), 'CONTROL 2: the addBinding step is where this suite removes it');
   const Dmut = MUT.load('src/server/browser-dialogs.js', dsrc.replace(needle, 'const r1 = null;'), 'no-arm');
   let wc = null;

@@ -6283,15 +6283,59 @@ export default {
   "The page shows a message": "网页弹出了一条消息",
   "The page asks you to confirm": "网页请你确认",
   "This page is waiting for a passkey ({rp})": "此网页正在等待通行密钥（{rp}）", // lane browser-passkey
-  "The agent's browser holds no passkey of yours — cancel the request, then use the page's other way in (a recovery code, a password), or sign in on your own device.": "代理的浏览器里没有你的通行密钥——请取消这个请求，再用网页的其他登录方式（恢复码、密码），或在你自己的设备上登录。", // lane browser-passkey
+  "A site this profile keeps no passkey for offers its own other ways in; a kept passkey signs in by the policy you set in the Agent browser panel; a new one is registered only after you allow it. Cancel this request, then use the page's other way in, or sign in on your own device.": "这个 profile 没存通行密钥的网站会给出它自己的其他登录方式；存着的通行密钥按你在 Agent 浏览器面板里设的策略登录；新的通行密钥只有你允许后才会注册。请取消这个请求，再用网页的其他登录方式，或在你自己的设备上登录。", // lane passkey-ui (replaces the old no-passkey line)
   "Chrome's own passkey window is open on this computer's desktop — it does not show in this view.": "Chrome 自己的通行密钥窗口开在这台电脑的桌面上——这个视图里看不到它。", // lane browser-passkey
   "Cancel passkey request": "取消通行密钥请求", // lane browser-passkey
   "page waits for a passkey": "网页在等通行密钥", // lane browser-passkey
   "this site": "此网站", // lane browser-passkey
   "The page is waiting for a passkey — cancel it in the live view": "网页在等待通行密钥——请在实时视图中取消", // lane browser-passkey
   "A page in the agent's browser is waiting for a passkey ({rp})": "代理浏览器中的一个网页正在等待通行密钥（{rp}）", // lane browser-passkey
-  "The agent's browser holds no passkey of yours. Cancel the request in the live view (or the agent runs `vibespace-browser passkey cancel`), then use the page's other way in, or sign in on your own device.": "代理的浏览器里没有你的通行密钥。请在实时视图中取消这个请求（或由代理运行 `vibespace-browser passkey cancel`），再用网页的其他登录方式，或在你自己的设备上登录。", // lane browser-passkey
+  "A site this profile keeps no passkey for offers its own other ways in; a kept passkey signs in by the policy you set in the Agent browser panel; a new one is registered only after you allow it. Cancel the request in the live view (or the agent runs `vibespace-browser passkey cancel`), then use the page's other way in.": "这个 profile 没存通行密钥的网站会给出它自己的其他登录方式；存着的通行密钥按你在 Agent 浏览器面板里设的策略登录；新的通行密钥只有你允许后才会注册。请在实时视图中取消这个请求（或由代理运行 `vibespace-browser passkey cancel`），再用网页的其他登录方式。", // lane passkey-ui (replaces the old no-passkey line)
   "The passkey request could not be cancelled: {why}": "无法取消通行密钥请求：{why}", // lane browser-passkey
+  "This page is waiting for you to allow the passkey for {rp}": "此网页正在等你允许 {rp} 的通行密钥", // lane passkey-ui
+  "page waits for your passkey answer": "网页在等你回答通行密钥", // lane passkey-ui
+  "The page is waiting for you to allow a passkey — answer its card in For you or in the live view": "网页在等你允许通行密钥——请在 For you 或实时视图里回答那张卡片", // lane passkey-ui
+  "{profile} wants to register a passkey on {rp} for {user}": "{profile} 要在 {rp} 为 {user} 注册通行密钥", // lane passkey-ui
+  "{profile} wants to register a passkey on {rp}": "{profile} 要在 {rp} 注册通行密钥", // lane passkey-ui
+  "{profile} wants to sign in to {rp} with {user}'s passkey": "{profile} 要用 {user} 的通行密钥登录 {rp}", // lane passkey-ui
+  "{profile} wants to sign in to {rp} with a passkey": "{profile} 要用通行密钥登录 {rp}", // lane passkey-ui
+  "After this the agent can create ONE passkey on {rp} in the next 10 minutes; it stays sealed in this VibeSpace and each sign-in with it asks you first.": "允许后，代理可以在接下来 10 分钟内在 {rp} 创建一把通行密钥；它密封保存在这台 VibeSpace 里，之后每次用它登录都会先问你。", // lane passkey-ui
+  "After this the agent can sign in to {rp} as {user} until you change the policy.": "允许后，在你改策略之前，代理可以以 {user} 的身份登录 {rp}。", // lane passkey-ui
+  "After this the agent can sign in to {rp} with this passkey until you change the policy.": "允许后，在你改策略之前，代理可以用这把通行密钥登录 {rp}。", // lane passkey-ui
+  "Allow once": "允许一次", // lane passkey-ui
+  "Always allow": "一直允许", // lane passkey-ui
+  "Always allowed — the policy for this passkey is now: allow.": "已一直允许——这把通行密钥的策略现在是：允许。", // lane passkey-ui
+  "Never — the policy for this passkey is now: never.": "永不——这把通行密钥的策略现在是：不允许。", // lane passkey-ui
+  "Allowed once — the agent may register the passkey now (for 10 minutes).": "已允许一次——代理现在可以注册这把通行密钥（10 分钟内）。", // lane passkey-ui
+  "Allowed once — this sign-in went through; the policy stays: ask each time.": "已允许一次——这次登录已放行；策略仍是：每次问。", // lane passkey-ui
+  "Not now — nothing was registered.": "暂不——什么都没有注册。", // lane passkey-ui
+  "Not now — this sign-in was refused; the policy stays: ask each time.": "暂不——这次登录被拒绝；策略仍是：每次问。", // lane passkey-ui
+  "Expired — nobody answered in time; nothing was allowed.": "已过期——没有人及时回答；什么都没有允许。", // lane passkey-ui
+  "Withdrawn — the request ended before an answer; nothing was allowed.": "已撤回——请求在回答前就结束了；什么都没有允许。", // lane passkey-ui
+  "A passkey for {rp}": "{rp} 的通行密钥", // lane passkey-ui
+  "Refused — the page was told it was not allowed": "已拒绝——网页收到了「不允许」", // lane passkey-ui
+  "Allowed — the agent may register the passkey now": "已允许——代理现在可以注册这把通行密钥", // lane passkey-ui
+  "Allowed — the page signs in": "已允许——网页正在登录", // lane passkey-ui
+  "Passkeys ({n})…": "通行密钥（{n}）…", // lane passkey-ui
+  "The passkeys this profile keeps — site, user, who registered it, last use, policy": "这个 profile 存着的通行密钥——站点、用户、谁注册的、最近使用、策略", // lane passkey-ui
+  "Ask each time": "每次问", // lane passkey-ui
+  "Agents never sign in with passkeys": "代理永不用通行密钥登录", // lane passkey-ui
+  "Keys live only in this VibeSpace; deleting the profile deletes them": "钥匙只存在这台 VibeSpace 里；删除这个 profile 会一起删除它们", // lane passkey-ui
+  "A page replaced the credentials API (taken back)": "页面替换了凭据 API（已重新接管）", // lane passkey-prewrap-fix
+  "Site": "站点", // lane passkey-ui
+  "Last used": "最近使用", // lane passkey-ui
+  "Policy": "策略", // lane passkey-ui
+  "No passkeys yet — when an agent asks to register one, its card appears in For you.": "还没有通行密钥——代理请求注册时，你会在 For you 里看到它的卡片。", // lane passkey-ui
+  "Delete the passkey for {site}?": "删除 {site} 的通行密钥？", // lane passkey-ui
+  "The passkey of {user} on {site} is deleted from this VibeSpace — signing in to {site} with it stops working; the site keeps its own record until you remove it there.": "{site} 上 {user} 的通行密钥会从这台 VibeSpace 删除——之后用它登录 {site} 将失效；网站那边的记录要你到网站上自己删除。", // lane passkey-ui
+  "The passkey on {site} is deleted from this VibeSpace — signing in to {site} with it stops working; the site keeps its own record until you remove it there.": "{site} 的通行密钥会从这台 VibeSpace 删除——之后用它登录 {site} 将失效；网站那边的记录要你到网站上自己删除。", // lane passkey-ui
+  "Passkeys — {label}": "通行密钥——{label}", // lane passkey-ui
+  "Could not change the passkey switch": "无法更改通行密钥开关", // lane passkey-ui
+  "Passkeys unavailable: {why}": "通行密钥不可用：{why}", // lane passkey-ui
+  "{n} sign-in(s)": "{n} 次登录", // lane passkey-ui
+  "Could not change the passkey policy": "无法更改通行密钥策略", // lane passkey-ui
+  "Could not delete the passkey": "无法删除通行密钥", // lane passkey-ui
+  "Deleted the passkey for {site}": "已删除 {site} 的通行密钥", // lane passkey-ui
   "The page asks for text": "网页请你输入文字",
   "Leave this page?": "要离开这个页面吗？",
   "The page opened a dialog": "网页打开了一个对话框",
@@ -7839,6 +7883,9 @@ export default {
   "Numbered list": "有序列表",
   "Link": "链接",
   "Link address": "链接地址",
+  "Edit link": "编辑链接",
+  "Remove link": "移除链接",
+  "Link text": "链接文字",
   "An image address, or a path beside this file": "图片地址，或这个文件旁边的路径",
   "Not a link this document can carry: {url}": "这个文档不能带这种链接：{url}",
   "Not an image this document can carry: {url}": "这个文档不能带这种图片：{url}",
@@ -8447,4 +8494,99 @@ export default {
   "Off (http only)": "关闭（只用 http）",
   "Secure address (https)": "安全地址（https）",
   "VibeSpace also answers https on its own port. Automatic: on a Tailscale network with HTTPS Certificates on, it fetches and renews a certificate for <machine>.<tailnet>.ts.net itself. My own certificate files: VIBESPACE_TLS_CERT + VIBESPACE_TLS_KEY. The microphone, a Mac's sign-in and other secure-only features need this address on every device but this one.": "VibeSpace 在同一个端口上也用 https 应答。自动：在打开了 HTTPS Certificates 的 Tailscale 网络里，它自己为 <machine>.<tailnet>.ts.net 获取并续期证书。我自己的证书文件：VIBESPACE_TLS_CERT + VIBESPACE_TLS_KEY。除了这台机器本身，其他设备上的麦克风、Mac 的登录等只在安全环境下可用的功能都需要这个地址。",
+  // lane decision-core: the Decision API plugin card + its registry row
+  "Turn on": "打开",
+  "Judge the first screen's other rows (needs attention)": "判断第一屏的其余行（需关注）",
+  "Notification rules that ask the judge": "让判官参与的通知规则",
+  "Route records to a group or agent": "把记录路由到某个组或 agent",
+  "rules": "规则",
+  "routing": "路由",
+  "For you sorting": "For you 分组",
+  "webhook facts": "webhook 事实",
+  "Daily budget saved": "日预算已保存",
+  "Daily budget (USD)": "日预算（美元）",
+  "Today: {calls} calls · {tokens} input tokens · {usd} of {budget}": "今日：{calls} 次 · {tokens} 输入 tokens · {usd} / {budget}",
+  "{use}: {calls} calls · {tokens} tokens · {usd}": "{use}：{calls} 次 · {tokens} tokens · {usd}",
+  "Reconnect: the provider refused this key (HTTP {status}). No calls until you save a new key above.": "需要重新连接：提供方拒绝了这个密钥（HTTP {status}）。在上方保存新密钥之前不会再调用。",
+  "Paused until {time}: the provider said it is busy (it is not retried before then).": "暂停到 {time}：提供方说它忙（在那之前不会重试）。",
+  "on · {provider}": "已打开 · {provider}",
+  "on — no provider key yet": "已打开 — 还没有提供方钥匙",
+  "The text of your channel records is sent to {provider} to be judged; attachments, images and raw webhook payloads never are.": "你的频道记录的文本会发给 {provider} 做判断；附件、图片和 webhook 原始载荷从不发送。",
+  "the provider you choose": "你选择的提供方",
+  "Could not load the provider card — the server did not answer.": "无法加载提供方卡片 — 服务器没有响应。",
+  "Lets VibeSpace judge records for you with a decisions API (OpenAI or OpenRouter) — within a daily budget you set.": "让 VibeSpace 用决策 API（OpenAI 或 OpenRouter）替你判断记录 — 在你设定的日预算之内。",
+  "Decision API": "决策 API",
+  "openai (POST /v1/decisions) or openrouter (POST /api/alpha/decisions). The text that is judged is sent to this provider.": "openai（POST /v1/decisions）或 openrouter（POST /api/alpha/decisions）。被判断的文本会发给这个提供方。",
+  "Optional; empty = the provider's default (gpt-6-luna on OpenAI, openai/gpt-6-luna-decisions on OpenRouter).": "可选；留空 = 提供方的默认模型（OpenAI 上是 gpt-6-luna，OpenRouter 上是 openai/gpt-6-luna-decisions）。",
+  "Your OpenAI key (platform.openai.com → API keys) or OpenRouter key (openrouter.ai → Keys). It is sent only to the provider above, and never shown again.": "你的 OpenAI 钥匙（platform.openai.com → API keys）或 OpenRouter 钥匙（openrouter.ai → Keys）。它只发给上面的提供方，保存后不再显示。",
+  "A provider (openai or openrouter) and its API key are saved below, or the cluster provides them": "下面已保存提供方（openai 或 openrouter）和它的 API 钥匙，或由集群提供",
+  "The text of the records you let it judge is sent to that provider": "你让它判断的记录文本会发给那个提供方",
+  "One real judgment: a single yes/no question about one fixed sentence (about 60 input tokens, well under $0.0001). It counts toward today's budget.": "一次真实判断：对一句固定的话问一个是/否问题（约 60 输入 tokens，远低于 $0.0001）。计入今天的预算。",
+  "Proves the provider accepts this key and model for one question. The OpenRouter route is an alpha: the models it accepts may change.": "证明提供方接受这把钥匙和这个模型回答一个问题。OpenRouter 的路由是 alpha：它接受的模型可能会变。",
+  "Used by the Decision API plugin": "由决策 API 插件使用",
+  // lane decision-attention: the judged rows, their answers, the account's "never judge", the settings block
+  "needs you ✓": "需要你 ✓",
+  "needs you": "需要你",
+  "needs you · {p}": "需要你 · {p}",
+  ", ": "、",
+  "You marked this conversation as needing you": "你把这个对话标成了需要你",
+  "The Decision API judged that this needs you now (p = {p}): {why}": "决策 API 判断它现在需要你（p = {p}）：{why}",
+  "no single reason stood out": "没有哪条理由特别突出",
+  "said to you": "对你说",
+  "asks you": "问你",
+  "wants your decision": "要你拍板",
+  "deadline or money": "截止或钱款",
+  "someone is waiting": "有人在等",
+  "escalation or incident": "升级或事故",
+  "what you care about": "你在乎的",
+  "Yes — this needs me": "是 — 这需要我",
+  "No — this does not need me": "否 — 这不需要我",
+  "Noted — this message is off the list": "记下了 — 这条消息已移出列表",
+  "Noted — the judge learns from it": "记下了 — 判官会从中学习",
+  "Judge this account again": "重新判断这个账号",
+  "Never judge this account": "从不判断这个账号",
+  "What matters to me (Decision API)": "我在乎什么（决策 API）",
+  "With the Decision API plugin on, the Channels first screen also lists conversations the judge thinks need you now. Say in your own words what matters to you (at most 1,500 characters) — it goes to the judge as written. \"Draft from my recent decisions\" proposes lines from your ✓ / ✗ answers for you to edit; nothing is saved until you save it.": "打开决策 API 插件后，Channels 第一屏还会列出判官认为现在需要你的对话。用你自己的话写下你在乎什么（最多 1,500 字符）——原样交给判官。「从我最近的判定草拟」按你的 ✓ / ✗ 提议几行供你修改；不保存就不生效。",
+  "Needs-attention threshold (Decision API)": "需关注阈值（决策 API）",
+  "How sure the judge must be (0.50–0.90) before a conversation joins the first screen. Higher = fewer, surer rows.": "判官要多确定（0.50–0.90）对话才进第一屏。越高 = 越少、越准。",
+  "Draft from my recent decisions": "从我最近的判定草拟",
+  "Asks the Decision API which kinds of message your ✓ / ✗ answers set apart, and proposes lines for you to edit — never saved by itself": "问决策 API 你的 ✓ / ✗ 区分了哪些类消息，并提议几行供你修改——从不自动保存",
+  "answer ✓ and ✗ on a few judged rows first": "先在几条判定行上回答 ✓ 和 ✗",
+  "No lines proposed ({n} of your decisions read) — {why}": "没有提议（读了你的 {n} 条判定）——{why}",
+  "Read {n} of your decisions — {m} lines proposed; edit them, then Save": "读了你的 {n} 条判定——提议了 {m} 行；改好后按保存",
+  // lane decision-rule: the decision rule kind — its row in Notify…, its refusals, its cost line
+  "the decision rule needs a condition in plain words": "决策规则需要一句白话条件",
+  "the condition is longer than {n} characters": "条件超过 {n} 个字符",
+  "the decision is either yes / no or one of a list": "判定只能是「是 / 否」或「列表中的一项」",
+  "a \"one of\" decision names 1 to {n} options (none is always added)": "「其中一项」判定需列出 1 到 {n} 个选项（总会附加 none）",
+  "an option is a short word: letters, digits, - or _ (up to 40)": "选项是一个短词：字母、数字、- 或 _（最多 40 个）",
+  "two options have the same word": "两个选项用了同一个词",
+  "an option's description is longer than {n} characters": "选项说明超过 {n} 个字符",
+  "a route names a Task Group or an agent": "路由要指定一个任务组或 agent",
+  "the threshold is between {min} and {max}": "阈值在 {min} 到 {max} 之间",
+  "the judgments per hour are a whole number from 1 to {n}": "每小时判定次数是 1 到 {n} 的整数",
+  "is judged by the Decision API": "由决策 API 判断",
+  "The Decision API plugin is not available on this server — this rule never matches.": "这台服务器没有决策 API 插件——这条规则永远不会命中。",
+  "The Decision API plugin is off — this rule judges nothing (and never matches) until you turn it on.": "决策 API 插件已关闭——打开之前这条规则不做判断（也不会命中）。",
+  "The Decision API has no provider key yet — this rule judges nothing until you add one on its card.": "决策 API 还没有提供方钥匙——在它的卡片上添加之前，这条规则不做判断。",
+  "The Decision API's \"routing\" switch is off — this rule routes nothing until you turn it on.": "决策 API 的「路由」开关已关闭——打开之前这条规则不路由任何消息。",
+  "The Decision API's \"rules\" switch is off — this rule judges nothing until you turn it on.": "决策 API 的「规则」开关已关闭——打开之前这条规则不做判断。",
+  "In plain words — e.g. the sender asks me to pay or approve something": "用白话写——例如：发信人要我付款或批准某事",
+  "Condition (judged for each message)": "条件（每条消息判断一次）",
+  "Yes or no — a hit when it is likely enough": "是或否——足够可能时命中",
+  "One of a list — or route to a group or agent": "列表中的一项——或路由到组或 agent",
+  "a word, e.g. billing": "一个词，例如 billing",
+  "what it means (optional)": "含义（可选）",
+  "not routed": "不路由",
+  "Route to": "路由到",
+  "Add option": "添加选项",
+  "\"none\" is always an answer and notifies nobody. A message routed to a group or agent reaches it through its own notification row here — give that row this same rule (the judge is asked once per message).": "「none」总是一个答案，不通知任何人。路由到某个组或 agent 的消息经它自己在这里的通知行送达——给那一行加上同一条规则（每条消息只问判官一次）。",
+  "Answer": "回答",
+  "Hit when the judge is at least this sure": "判官至少这么确定时命中",
+  "Judgments per hour, at most": "每小时最多判定次数",
+  "Cost: estimating…": "费用：估算中…",
+  "≈ {n} judgments/day ≈ {usd} at the current price — within your {budget} daily budget.": "≈ 每天 {n} 次判定 ≈ 按现价 {usd}——在你每天 {budget} 的预算内。",
+  "≈ {n} judgments/day ≈ {usd} at the current price — over your {budget} daily budget: judging stops for the day when it is spent.": "≈ 每天 {n} 次判定 ≈ 按现价 {usd}——超过你每天 {budget} 的预算：花完当天就停止判定。",
+  "(the hourly limit holds it there)": "（每小时上限把它限制在这里）",
+  "How often it hits is known only once it runs.": "命中频率要跑起来才知道。",
 };

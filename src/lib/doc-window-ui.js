@@ -22,14 +22,17 @@
 //   · RAW BLOCKS READ AS A DOCUMENT (lane doc-raw-blocks, 2.369.246 — owner "这个会莫名其妙变成源码的问题还没修复"): a block
 //     the wheel carries as written is drawn through the house renderer + the one sanitizer (rawReading), read-only; its
 //     chip opens its source IN PLACE (rawView below). Reading never shows source.
+//   · LINKS (lane doc-link-bubble, 2.369.261 — owner "markdown富文本编辑器里url无法点击和编辑"): the caret on a link (a click, the
+//     arrows) or a hover ≥ 300 ms shows its BAR — the address + Open / Edit / Copy / Remove (doc-window-model linkBarModel); the
+//     toolbar's Link and Ctrl/Cmd+K EDIT the link the caret is on, never remove it (linkPlan); read-only: a plain click opens.
 //   · SAVE: the serializer's output through the atomic /api/file/write of THIS window's path only, then
 //     POST /api/doc/edited {summary} — the owning chat's free next-turn note.
-import { Editor, Extension } from '@tiptap/core';
+import { Editor, Extension, getMarkRange } from '@tiptap/core';
 import { Plugin, NodeSelection } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import M from '../doc-model.js';
 import { schema, extensions, loadDoc, saveDoc, sourceLine, docFidelity, safeHref, safeImageSrc } from './doc-markdown.js';
-import { WIDTH_KEY, widthChoice, nextWidth, columnRule, TABLE_CSS, downloadHref, exportName, localImagePath, exportDocument, readingHtml, rawReading, colsBand, rawCommentAnchor, rawCommentTarget, RAW_KIND_WORD, sendAllLabel, sendWords } from './doc-window-model.js';
+import { WIDTH_KEY, widthChoice, nextWidth, columnRule, TABLE_CSS, downloadHref, exportName, localImagePath, exportDocument, readingHtml, rawReading, colsBand, rawCommentAnchor, rawCommentTarget, RAW_KIND_WORD, linkBarModel, linkPlan, sendAllLabel, sendWords } from './doc-window-model.js';
 
 const POLL_MS = 2000;
 const SHEET_BELOW = 640;   // px of window width: below it the comments strip is a bottom sheet
@@ -156,6 +159,16 @@ ${TABLE_CSS}
 .doc-strip-empty{color:var(--text-dim);font-size:12px;padding:4px 2px}
 .doc-cpop{background:var(--bg-dialog);border:1px solid var(--border);border-radius:var(--radius);padding:4px;box-shadow:var(--shadow-window)}
 .doc-cpop button{background:var(--accent);color:var(--accent-fg);border:none;border-radius:var(--radius-sm);padding:4px 10px;cursor:pointer;font:inherit;font-size:12px}
+.doc-lbar{display:flex;align-items:center;gap:2px;max-width:min(460px,calc(100vw - 16px));box-sizing:border-box;background:var(--bg-dialog);border:1px solid var(--border);border-radius:var(--radius);padding:3px 3px 3px 10px;box-shadow:var(--shadow-window);font-size:12px}
+.doc-lbar-href{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--accent);margin-right:6px}
+.doc-lbar-href[data-blocked]{color:var(--text-dim)}
+.doc-lbar-btn{display:inline-flex;align-items:center;justify-content:center;gap:4px;min-width:26px;height:26px;box-sizing:border-box;padding:0 5px;background:none;border:none;border-radius:var(--radius-sm);color:var(--text-secondary);cursor:pointer;font:inherit;font-size:12px}
+.doc-lbar-btn:hover{background:var(--bg-hover);color:var(--text)}
+.doc-lbar-btn svg{width:15px!important;height:15px!important;flex:none}
+.doc-lbar.doc-lbar-phone{left:0!important;right:0;top:auto!important;bottom:0;max-width:none;flex-wrap:wrap;gap:4px;border-radius:12px 12px 0 0;padding:8px 8px calc(8px + env(safe-area-inset-bottom))}
+.doc-lbar-phone .doc-lbar-href{flex:1 0 100%;margin:2px 6px 4px}
+.doc-lbar-phone .doc-lbar-btn{flex:1 1 0;flex-direction:column;gap:2px;height:auto;min-height:44px;font-size:11px}
+.doc-page .ProseMirror[contenteditable="false"] a[href]{cursor:pointer}
 .doc-note{background:var(--bg-dialog);border:1px solid var(--border);border-radius:var(--radius);padding:8px;width:280px;box-shadow:var(--shadow-window);display:flex;flex-direction:column;gap:6px;font-size:12px}
 .doc-note textarea{width:100%;box-sizing:border-box;min-height:70px;background:var(--bg-window);color:var(--text);border:1px solid var(--border);border-radius:var(--radius-sm);font:inherit;padding:5px}
 .doc-note-q{color:var(--text-dim);overflow-wrap:anywhere}
@@ -402,7 +415,7 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
       if (typeof pos !== 'number' || v === (cur.attrs.source || '')) { draw(); return; }
       const tr = view.state.tr;
       if (v.trim()) tr.setNodeMarkup(pos, null, { ...cur.attrs, source: v }); else tr.delete(pos, pos + cur.nodeSize); // emptied ⇒ the block goes
-      view.dispatch(tr);
+      view.dispatch(tr.setMeta('preventAutolink', true)); // a block's source is no typing in the text: autolink (doc-markdown SafeLink) stays out
     };
     const open = () => {
       if (ta || !view.editable) return;
@@ -487,7 +500,7 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
     if (ours || rawLast) { rawLast = ours; resync(v); }
   }, { signal });
   const selPlugin = new Plugin({
-    view: () => ({ update: (view) => resync(view) }),
+    view: () => ({ update: (view) => { resync(view); linkBar.show(caretLink(view)); } }),
     props: { handleDOMEvents: { blur: () => { clearTimeout(selTimer); offer.dismiss(); return false; } } },
   });
   // node decorations (UI only — the document is untouched): a code block's fence language → `data-lang` (its chip) — a raw
@@ -501,7 +514,7 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
     return DecorationSet.create(doc, out);
   };
   const decoPlugin = new Plugin({ state: { init: (_c, st) => decorate(st.doc), apply: (tr, old) => (tr.docChanged ? decorate(tr.doc) : old) }, props: { decorations(st) { return this.getState(st); } } });
-  const DocUi = Extension.create({ name: 'docUi', addKeyboardShortcuts: () => ({ 'Mod-s': () => { save(); return true; } }), addProseMirrorPlugins: () => [selPlugin, decoPlugin] });
+  const DocUi = Extension.create({ name: 'docUi', addKeyboardShortcuts: () => ({ 'Mod-s': () => { save(); return true; }, 'Mod-k': () => { if (!S.view || !S.view.editable) return false; editLink(); return true; } }), addProseMirrorPlugins: () => [selPlugin, decoPlugin] });
   const uiExtensions = extensions.map((e) => (e.name === 'image' ? e.extend({ addNodeView: () => ({ node }) => imgView(node) })
     : e.name === 'rawBlock' ? e.extend({ addNodeView: () => ({ node, view, getPos }) => rawView(node, view, getPos) }) : e)).concat(DocUi);
   const inTable = () => !!(S.ed && S.ed.isActive('table'));
@@ -533,9 +546,13 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
     if (S.ed) return S.ed;
     S.ed = new Editor({
       element: page, extensions: uiExtensions, content: json,
-      editorProps: { handleDOMEvents: {
-        click: (_v, e) => { const a = e.target.closest && e.target.closest('a[href]'); if (a && (e.ctrlKey || e.metaKey)) { window.open(a.href, '_blank', 'noopener'); } if (a) e.preventDefault(); return false; },
+      // data-own-mod-k: Ctrl/Cmd+K in the text is the editor's Link (session-palette's capture listener steps aside)
+      editorProps: { attributes: { 'data-own-mod-k': '' }, handleDOMEvents: {
+        // a link never navigates the app: Ctrl/Cmd+click opens it at once; an editor that cannot edit has no caret to protect ⇒ a
+        // plain click opens it; else the caret lands and its bar shows (a click re-shows a bar the house closed — Esc, a press outside)
+        click: (v, e) => { const a = e.target.closest && e.target.closest('a[href]'); if (!a) return false; e.preventDefault(); if (e.ctrlKey || e.metaKey || !v.editable) openHref(a.getAttribute('href')); else linkBar.show(linkAtDom(a), true); return false; },
         contextmenu: (_v, e) => { if (!inTable()) return false; e.preventDefault(); tableMenu(e.clientX, e.clientY); return true; },
+        blur: () => { linkBar.blurred(); return false; }, // the caret's link bar goes with the focus (a hover's stays)
       } },
     });
     S.view = S.ed.view;
@@ -550,7 +567,7 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
     if (!S.ed) { ensureView(json); return; }
     const top = pane.scrollTop;
     const doc = S.ed.schema.nodeFromJSON(json);
-    S.view.dispatch(S.view.state.tr.replaceWith(0, S.view.state.doc.content.size, doc.content).setMeta('doc-repaint', true).setMeta('addToHistory', false));
+    S.view.dispatch(S.view.state.tr.replaceWith(0, S.view.state.doc.content.size, doc.content).setMeta('doc-repaint', true).setMeta('addToHistory', false).setMeta('preventAutolink', true)); // the disk's words, never linked by the editor
     pane.scrollTop = top;
   };
   // ── tables + task lists: the toolbar, the house context menu (right-click in a table) and the ⋯ beside them ──
@@ -562,7 +579,7 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
     const col = $p.index(d - 1), table = $p.node(d - 2), start = $p.start(d - 2), tr = st.tr;
     let pos = start;
     table.forEach((row) => { let cpos = pos + 1; row.forEach((cell, _o, i) => { if (i === col) tr.setNodeMarkup(cpos, null, { ...cell.attrs, align }); cpos += cell.nodeSize; }); pos += row.nodeSize; });
-    S.view.dispatch(tr);
+    S.view.dispatch(tr.setMeta('preventAutolink', true)); // an alignment is no typing: a cell's bare URL stays text
   }
   function tableMenu(x, y) {
     showContextMenu(x, y, [
@@ -614,17 +631,112 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
       const r = g.getBoundingClientRect(); tableMenu(r.left, r.bottom + 2);
     }, { signal });
   }
-  // ── link + image: the house input dialog; only what the view may carry (safeHref / safeImageSrc) ──
-  async function editLink() {
-    if (!S.ed || S.mode !== 'rich') return;
-    if (S.ed.isActive('link')) { S.ed.chain().focus().extendMarkRange('link').unsetLink().run(); return; }
-    const href = ((await showInputDialog({ title: t('Link'), label: t('Link address'), placeholder: 'https://' })) || '').trim();
-    if (!href || !S.ed) return;
-    if (!safeHref(href)) { say(t('Not a link this document can carry: {url}', { url: href })); return; }
-    const c = S.ed.chain().focus();
-    if (S.ed.state.selection.empty) c.insertContent({ type: 'text', text: href, marks: [{ type: 'link', attrs: { href } }] }).run();
-    else c.extendMarkRange('link').setLink({ href }).run();
+  // ── A LINK OPENS AND EDITS (lane doc-link-bubble, 2.369.261 — owner 2026-10-12 "markdown富文本编辑器里url无法点击和编辑": a plain
+  //    click on a link did nothing and the toolbar's Link REMOVED it). THE BAR: the caret on a link (a click, the arrows) or a
+  //    hover ≥ 300 ms shows ONE bar keyed to that link (its range + address) — the caret moving inside it keeps it, leaving
+  //    drops it; a bar the house closed (Esc, a press outside the page) stays closed for that link until a click on it. Its
+  //    acts are linkBarModel's (doc-window-model); a phone gets a bottom row of the same acts, a tap shows it (no hover).
+  /** The link at a position — the caret either side of it, or a selection inside it (to): { from, to, href, text, attrs } | null. */
+  const linkAtPos = (st, pos, to = pos) => {
+    const type = st.schema.marks.link; if (!type) return null;
+    let r = null; try { r = getMarkRange(st.doc.resolve(pos), type); } catch { r = null; }
+    if (!r || r.from > pos || r.to < to) return null;
+    const m = ((st.doc.nodeAt(r.from) || {}).marks || []).find((x) => x.type === type);
+    return m && m.attrs.href ? { from: r.from, to: r.to, href: String(m.attrs.href), text: st.doc.textBetween(r.from, r.to, ' '), attrs: { ...m.attrs } } : null;
+  };
+  const linkAtDom = (a) => { try { return S.view ? linkAtPos(S.view.state, S.view.posAtDOM(a, 0)) : null; } catch { return null; } };
+  const caretLink = (view) => { const s = view.state.selection; return S.mode === 'rich' && s.empty && view.hasFocus() ? linkAtPos(view.state, s.from) : null; };
+  const openHref = (href) => { const u = safeHref(href); if (u) window.open(u, '_blank', 'noopener'); };
+  const linkBar = (() => {
+    let bar = null, key = '', via = '', hoverEl = null, hoverT = 0, leaveT = 0;
+    const keyOf = (l) => (l ? l.from + '-' + l.to + '\u0001' + l.href : '');
+    const drop = () => { clearTimeout(leaveT); if (bar) { bar._closeCtl?.abort(); bar.remove(); bar = null; } };
+    function open(l) {
+      const m = S.view && linkBarModel(l, { editable: S.view.editable, judge: safeHref }); if (!m) return null;
+      const phone = isPhone(), c = S.view.coordsAtPos(l.from);
+      const p = createPopover(pane, 'doc-lbar' + (phone ? ' doc-lbar-phone' : ''), { position: 'cursor', x: c.left, y: c.bottom + 4 }); // the pane stays excluded: a press in the text moves the caret, which decides
+      p.setAttribute('role', 'toolbar'); p.setAttribute('aria-label', t('Link'));
+      const addr = mk('span', 'doc-lbar-href', m.shown); addr.title = m.href; if (!m.canOpen) addr.dataset.blocked = ''; // textContent: the address is never HTML
+      p.appendChild(addr);
+      const ACTS = {
+        open: [I.external, t('Open link'), t('Open'), () => openHref(m.href)],
+        edit: [I.pencil, t('Edit link'), t('Edit'), () => editLink(l)],
+        copy: [I.copy, t('Copy link'), t('Copy'), () => copyText(m.href).then(() => showToast(t('Link copied'), { type: 'success' }))],
+        remove: [I.unlink, t('Remove link'), t('Remove'), () => removeLink(l)],
+      };
+      for (const a of m.acts) {
+        const [icon, label, word, act] = ACTS[a];
+        const b = mk('button', 'doc-lbar-btn'); b.type = 'button'; b.dataset.act = a; b.title = label; b.setAttribute('aria-label', label);
+        b.appendChild(glyph(icon)); if (phone) b.appendChild(mk('span', null, word));
+        b.addEventListener('mousedown', (e) => e.preventDefault(), { signal }); // the editor keeps its caret
+        b.addEventListener('click', () => act(), { signal });
+        p.appendChild(b);
+      }
+      p.addEventListener('mouseenter', () => clearTimeout(leaveT), { signal });
+      p.addEventListener('mouseleave', () => leave(), { signal });
+      return p;
+    }
+    /** l = the link to show (null = none); force = a click / a hover on it (re-shows a bar the house closed). */
+    function show(l, force = false, how = 'caret') {
+      const k = keyOf(l);
+      if (k !== key) { drop(); key = k; via = how; bar = l ? open(l) : null; return; }
+      if (l && force && !(bar && bar.isConnected)) { via = how; bar = open(l); }
+    }
+    function leave() {
+      clearTimeout(leaveT); if (via !== 'hover' || !bar) return;
+      leaveT = setTimeout(() => { if (hoverEl || (bar && bar.matches(':hover'))) return; drop(); key = ''; show(S.view ? caretLink(S.view) : null); }, 300);
+    }
+    function hover(a) {
+      if (a === hoverEl) return;
+      hoverEl = a; clearTimeout(hoverT);
+      if (!a) { leave(); return; }
+      clearTimeout(leaveT);
+      hoverT = setTimeout(() => { if (hoverEl === a) { const l = linkAtDom(a); if (l) show(l, true, 'hover'); } }, 300);
+    }
+    return { show, hover, drop, blurred: () => { if (via === 'caret') drop(); }, get bar() { return bar && bar.isConnected ? bar : null; } };
+  })();
+  pane.addEventListener('mouseover', (e) => { if (isPhone() || S.mode !== 'rich' || !S.view) return; const a = e.target.closest && e.target.closest('a[href]'); linkBar.hover(a && S.view.dom.contains(a) ? a : null); }, { signal });
+  pane.addEventListener('mouseleave', () => linkBar.hover(null), { signal });
+  /** The Link dialog (the house modal): the address + the link's text, prefilled when editing; Enter applies, Esc / Cancel ⇒ null. */
+  const linkDialog = (title, href, text) => new Promise((resolve) => {
+    const sh = createModalShell({ title, dialogClass: 'doc-link-dialog', onClose: () => resolve(null) });
+    const field = (label, value, placeholder) => { const w = mk('label', null, label), i = mk('input'); i.type = 'text'; i.value = value || ''; i.placeholder = placeholder; w.appendChild(i); sh.body.appendChild(w); return i; };
+    const hrefIn = field(t('Link address'), href, 'https://'), textIn = field(t('Link text'), text, '');
+    hrefIn.className = 'doc-link-href'; textIn.className = 'doc-link-text';
+    const foot = mk('div', 'dialog-footer'), cancel = mk('button', 'btn-cancel', t('Cancel')), apply = mk('button', 'btn-create', t('Apply'));
+    cancel.type = 'button'; apply.type = 'button'; foot.append(cancel, apply); sh.dialog.appendChild(foot);
+    const done = (v) => { resolve(v); sh.close(); };
+    const answer = () => done({ href: hrefIn.value, text: textIn.value });
+    apply.addEventListener('click', answer, { signal });
+    cancel.addEventListener('click', () => done(null), { signal });
+    for (const i of [hrefIn, textIn]) i.addEventListener('keydown', (e) => { if (e.isComposing || e.keyCode === 229) return; if (e.key === 'Enter') { e.preventDefault(); answer(); } else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); done(null); } }, { signal });
+    setTimeout(() => { hrefIn.focus(); hrefIn.select(); }, 0);
+  });
+  /** THE LINK DOOR — the toolbar's Link, Ctrl/Cmd+K and the bar's Edit: the caret on a link (or a selection inside one) ⇒ EDIT it
+   *  (the address + its text, prefilled); a selection ⇒ link it; a bare caret ⇒ the address inserted as its own text. It never
+   *  removes a link (the bar's Remove does). safeHref judges the address; a refusal is said. */
+  async function editLink(on) {
+    if (!S.ed || S.mode !== 'rich' || !S.view.editable) return;
+    const st = S.view.state, { from, to } = st.selection;
+    const link = on ? linkAtPos(st, on.from) : linkAtPos(st, from, to);
+    const cur = link ? { link } : { from, to, text: from === to ? '' : st.doc.textBetween(from, to, ' ') };
+    linkBar.drop();
+    const ans = await linkDialog(link ? t('Edit link') : t('Link'), link ? link.href : '', link ? link.text : cur.text);
+    if (!ans || !S.ed || S.mode !== 'rich') return;
+    if (S.view.state.doc !== st.doc) { say(t('Changed on disk')); return; } // the positions it was opened on are gone
+    const plan = linkPlan(cur, ans, safeHref);
+    if (!plan) { S.ed.commands.focus(); return; }
+    if (plan.refused) { say(t('Not a link this document can carry: {url}', { url: plan.refused })); return; }
+    let c = S.ed.chain().focus();
+    for (const [cmd, ...args] of plan.steps) c = c[cmd](...args);
+    c.setMeta('preventAutolink', true).run();
   }
+  function removeLink(l) {
+    const at = S.ed && S.mode === 'rich' && linkAtPos(S.view.state, l.from); if (!at) return;
+    linkBar.drop();
+    S.ed.chain().focus().setTextSelection({ from: at.from, to: at.to }).unsetLink().setTextSelection(at.to).run(); // the words stay, the mark goes
+  }
+  // ── image: the house input dialog; only what the view may carry (safeImageSrc) ──
   async function insertImage() {
     if (!S.ed || S.mode !== 'rich') return;
     const src = ((await showInputDialog({ title: t('Image'), label: t('An image address, or a path beside this file'), placeholder: 'img/figure.png' })) || '').trim();
@@ -804,10 +916,11 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
   const timer = host ? 0 : setInterval(check, POLL_MS);
   window.addEventListener('focus', check, { signal });
   onFileChanged((d) => { if (sameFile(d, { host: host || null, path })) check(); }, { signal });
-  signal.addEventListener('abort', () => { clearInterval(timer); clearTimeout(selTimer); offer.dismiss(); ro?.disconnect(); S.ed?.destroy(); });
+  signal.addEventListener('abort', () => { clearInterval(timer); clearTimeout(selTimer); offer.dismiss(); linkBar.drop(); ro?.disconnect(); S.ed?.destroy(); });
 
   // ── comments ──
   pane.addEventListener('scroll', () => offer.dismiss(), { signal, passive: true }); // a fixed popover never follows the text
+  pane.addEventListener('scroll', () => { if (!isPhone()) linkBar.drop(); }, { signal, passive: true }); // …nor the link bar (the phone's row sits at the bottom)
   function offerComment(sel) {
     const { from, to, view, raw } = sel; // raw: a raw block's anchor (rawCommentAnchor) — its quote, line and place come with it
     const quote = raw ? sel.quote : view.state.doc.textBetween(from, to, ' ', ' ').trim();

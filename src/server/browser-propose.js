@@ -300,4 +300,19 @@ function siteResetClearer({ dialogs, keeper }) {
   };
 }
 
-module.exports = { create, siteResetClearer };
+/** THE CHAT'S PROPOSAL CARD SOURCE (normalizers.setProposalCardSource: a rebuild / a view-only history places each card by
+ *  time) — the keeper's proposal cards (bl- / sr-) and, since int258, the dialog watch's passkey cards (pk-) of the
+ *  conversation's browser key; the bindings name a stopped conversation's key. */
+function cardSource({ proposals = null, dialogs = null, bindings = null } = {}) {
+  return ({ session = null, conversationId = null } = {}) => {
+    let key = session && /^bk-[0-9a-f]{8}$/.test(String(session._browserKey || '')) ? session._browserKey : null;
+    const cid = conversationId || (session && (session.claudeSessionId || session.backendSessionId)) || null;
+    if (!key && cid && bindings && typeof bindings.lookup === 'function') { try { key = bindings.lookup(cid) || null; } catch { key = null; } }
+    if (!key) return [];
+    const out = proposals && typeof proposals.cardsFor === 'function' ? proposals.cardsFor(key) : [];
+    if (dialogs && typeof dialogs.passkeyCards === 'function') out.push(...dialogs.passkeyCards(key));
+    return out;
+  };
+}
+
+module.exports = { create, siteResetClearer, cardSource };

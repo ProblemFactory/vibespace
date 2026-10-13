@@ -130,8 +130,11 @@ PAGE VERBS (your own browser, or the attachment you name):
                                                   user's tab is counted, never listed, switched to or closed — not_your_tab)
   vibespace-browser dialog status | accept [text] | dismiss   a page dialog (confirm / prompt / leave-page) holds the page
                                                   until answered — a verb that meets one says [dialog_open] and names it
-  vibespace-browser passkey status|cancel         a page waiting for a passkey ([passkey_open]): you hold none — cancel it,
-                                                  then the page's other way in (a recovery code, a password) or ask the user
+  vibespace-browser passkey status|cancel         a page waiting for a passkey: [passkey_ask] = a card waits for the owner
+                                                  (do not retry; cancel withdraws it); [passkey_open] = nothing answers it
+  vibespace-browser passkey list | register <site> [--user <name>] | forget <site|id>   this profile's passkeys (never a
+                                                  key); register asks the owner first (waits ≤ 5 min), then press the page's
+                                                  "create a passkey"; each sign-in follows the policy the owner set per key
   vibespace-browser permission <kind> allow|deny [origin] [lat,lon]   every page permission is DENIED ahead (no prompt
                                                   ever pends); flip one kind for one origin (your tab's by default)
   vibespace-browser stop                          stop the current tab loading (at once, even while it loops)
@@ -744,11 +747,14 @@ async function runPage(c) {
   // lane browser-passkey: a page WAITING FOR A PASSKEY (Chrome's own window holds it; the page takes no input) — a verb that
   // would act on the page answers THE SENTENCE instead of acting, every time (the incident's 4× Escape); a read runs with
   // the sentence first; the ways out (passkey cancel, a navigation, tab / close / stop) run
-  const pkStand = dlg && dlg.passkey && dlg.passkey.state === 'passkey_open' ? dlg.passkey : null;
+  // lane passkey-store-core: + [passkey_ask] (a card waits for the owner) the same way; a refusal rides the next verb as a note
+  const pkStand = dlg && dlg.passkey && ['passkey_open', 'passkey_ask'].includes(dlg.passkey.state) ? dlg.passkey : null;
+  if (dlg && dlg.passkey && dlg.passkey.state === 'refused' && dlg.passkey.text) head.unshift(`note: ${dlg.passkey.text} [passkey_refused]`);
   const printPasskey = (b) => {
-    if (wantsJson) console.log(JSON.stringify({ success: false, data: null, code: 'passkey_open', passkey: b, error: b.text || '' }));
+    const code = b.state === 'passkey_ask' ? 'passkey_ask' : 'passkey_open';
+    if (wantsJson) console.log(JSON.stringify({ success: false, data: null, code, passkey: b, error: b.text || '' }));
     else console.log(b.text || 'This page is waiting for a passkey — cancel it: vibespace-browser passkey cancel');
-    console.error('[passkey_open]');
+    console.error(`[${code}]`);
   };
   if (pkStand && PKS) {
     const pv = PKS.loopVerdict(words0[0] || '', pkStand);
@@ -758,7 +764,7 @@ async function runPage(c) {
       await call('POST', '/api/agent/browser/audit', { profile: dlg.profileId, verb: words0[0] || null, ok: false, ...(Number(r.at) > 0 ? { since: Number(r.at) } : {}) }, { soft: true }).catch(() => null);
       process.exit(1);
     }
-    if (pv.act === 'note') head.unshift(`note: ${pkStand.text} [passkey_open]`);
+    if (pv.act === 'note') head.unshift(`note: ${pkStand.text} [${pv.code}]`);
   }
   // lane site-reset: a NAVIGATION LOOP standing on this conversation's tab — a verb that waits for the page to settle is
   // answered at once with it (it would only time out); the ways out (stop, tab …, close, screenshot, site-reset, a
@@ -942,7 +948,7 @@ async function runPage(c) {
     const notes = after && Array.isArray(after.notes) ? after.notes : [];
     const strip = !!DS && !dialogVerb && !!(open || notes.length); // verify r1 A5: the browser CLI's own `dialog` verb (the fallback) prints ITS dialog lines — they are the answer
     // lane browser-passkey: the verb met a page waiting for a passkey (the long-poll's hit, or a timeout while one stands) ⇒ THE SENTENCE first
-    const pkHit = passkeyHit || (timedOut && after && after.passkey && after.passkey.state === 'passkey_open' ? after.passkey : null);
+    const pkHit = passkeyHit || (timedOut && after && after.passkey && ['passkey_open', 'passkey_ask'].includes(after.passkey.state) ? after.passkey : null);
     if (open) printDialogOpen(open);
     else if (promptHit) { // lane browser-ui-prompts-r2: the page asked for an HTTP sign-in and waits — THE SENTENCE first, the verb's own timeout never
       if (wantsJson) console.log(JSON.stringify({ success: false, data: null, code: 'page_prompt', prompt: promptHit, error: promptHit.text || '' }));
@@ -1051,8 +1057,13 @@ async function runOursPage(cls, { r, head, profileId, wantsJson }) {
   // promise rejects AbortError; its other way in takes input again)
   if (verbName === 'passkey') {
     const sub = words[1] || 'status';
-    if (!['status', 'cancel'].includes(sub) || words.length > 2) refuseLocally({ code: 'bad-request', error: `passkey takes status | cancel — not "${words.slice(1).join(' ')}"`, remedy: 'vibespace-browser passkey status' }, 2);
-    const a = await call('POST', '/api/agent/browser/passkey', { profile: profileId, action: sub }, { soft: true });
+    // lane passkey-store-core: list | register <site> [--user <name>] | forget <site|id> beside status | cancel
+    const ui = cls.argv.indexOf('--user'); const user = ui >= 0 ? String(cls.argv[ui + 1] || '') : '';
+    const rest = words.slice(2).filter((x) => x !== user);
+    const okShape = ['status', 'cancel', 'list'].includes(sub) ? rest.length === 0 : ['register', 'forget'].includes(sub) && rest.length === 1;
+    if (!okShape) refuseLocally({ code: 'bad-request', error: `passkey takes status | cancel | list | register <site> [--user <name>] | forget <site|id> — not "${words.slice(1).join(' ')}"`, remedy: 'vibespace-browser passkey status' }, 2);
+    if (sub === 'register') console.error(`asking the owner to let you register a passkey on ${rest[0]} (a card in their For-you tray; waiting up to 5 min)…`);
+    const a = await call('POST', '/api/agent/browser/passkey', { profile: profileId, action: sub, ...(rest[0] ? { rpId: rest[0] } : {}), ...(user ? { user } : {}), ...(sub === 'register' ? { waitSec: 290 } : {}) }, { soft: true });
     for (const h of head) console.error(h);
     await call('POST', '/api/agent/browser/audit', { profile: profileId, verb: 'passkey', ok: !a._failed, ...(Number(r.at) > 0 ? { since: Number(r.at) } : {}) }, { soft: true }).catch(() => null);
     if (a._failed) {
@@ -1060,7 +1071,8 @@ async function runOursPage(cls, { r, head, profileId, wantsJson }) {
       console.error(`${a.error || 'HTTP ' + a._status} [${a.code || 'refused'}]`);
       process.exit(1);
     }
-    if (wantsJson) console.log(JSON.stringify({ success: true, data: sub === 'status' ? { passkey: a.passkey || null } : { cancelled: a.cancelled || 0 }, error: null }));
+    if (wantsJson) console.log(JSON.stringify({ success: true, data: sub === 'status' ? { passkey: a.passkey || null, store: a.store || null } : sub === 'list' ? { keys: a.keys || [], agentsOff: !!a.agentsOff } : sub === 'register' ? { state: a.state, proposal: a.proposal || null } : sub === 'forget' ? { removed: a.removed || [] } : { cancelled: a.cancelled || 0 }, error: null }));
+    else if (sub === 'list' && Array.isArray(a.keys) && a.keys.length) { console.log(a.text); for (const k of a.keys) console.log(`  ${k.id}  ${k.rpId}  ${k.userName || '-'}  by ${k.source}  policy ${k.policy}  last used ${k.lastUsedAt ? new Date(k.lastUsedAt).toISOString().slice(0, 16).replace('T', ' ') : 'never'}`); }
     else console.log(a.text || 'done');
     process.exit(0);
   }

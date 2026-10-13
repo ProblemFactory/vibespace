@@ -1262,6 +1262,21 @@ const SETTINGS_SCHEMA = {
   //    OFF by default. The message goes out as the user's own words; who the
   //    other side will see is said on the approval card and in the receipt.
   //    Each adapter row can override this default (Channels panel).
+  // lane decision-attention (D2 of docs/design-decision-api.zh.md §2.3 / §2.4): read SERVER-side by the first screen's
+  // judge (src/server/channels-attention.js via serverSetting) — your own words go to the judge as written, never rewritten
+  'decision.attentionBlock': {
+    type: 'text', multiline: true, maxLength: 1500, draft: 'decision', default: '',
+    label: t('What matters to me (Decision API)'),
+    description: t('With the Decision API plugin on, the Channels first screen also lists conversations the judge thinks need you now. Say in your own words what matters to you (at most 1,500 characters) — it goes to the judge as written. "Draft from my recent decisions" proposes lines from your ✓ / ✗ answers for you to edit; nothing is saved until you save it.'),
+    category: t('Channels'), liveApply: true,
+  },
+  'decision.threshold': {
+    type: 'number', default: 0.7, min: 0.5, max: 0.9, step: 0.05,
+    label: t('Needs-attention threshold (Decision API)'),
+    description: t('How sure the judge must be (0.50–0.90) before a conversation joins the first screen. Higher = fewer, surer rows.'),
+    tier: 'advanced',
+    category: t('Channels'), liveApply: true,
+  },
   'channels.senderHonestyLine': {
     type: 'boolean', default: false,
     label: t('Outbox: append a "drafted by <agent>" line to messages an agent drafted'),

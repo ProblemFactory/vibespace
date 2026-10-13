@@ -61,7 +61,7 @@ console.log('① validation refuses by name');
   const tt = (str, p) => { seen.push(str); return (p ? String(str).replace(/\{(\w+)\}/g, (m, k) => (k in p ? String(p[k]) : m)) : String(str)); };
   ok(F.filterProblemText(kw, { t: tt, ruleLabel: (k) => (k === 'keyword' ? 'contains keyword' : k) }) === 'the rule "contains keyword" needs a value' && seen.length === 1, 'filterProblemText words the code through the caller\'s t() and names the rule the way the editor labels it', JSON.stringify(seen));
   ok(F.filterProblemText(F.validateFilter({ rules: [] }), { t: tt }) === 'add at least one rule' && F.filterProblemText({ ok: true }) === '' && F.filterProblemText({ ok: false, code: 'bad-match', error: 'match must be any|every' }, { t: tt }) === 'match must be any|every', 'no-rules is worded; an accepted filter has no problem; a code the table does not know falls back to the contract sentence (never hidden)');
-  ok(F.RULE_KINDS.length === 13 && F.RULE_KINDS.every((k) => F.validateRule(k === 'fact' ? { kind: k, key: 'env', value: 'x' } : k === 'time-window' ? { kind: k, from: '00:00', to: '01:00' } : k === 'sender-in-group' ? { kind: k, members: ['x'] } : k === 'has-attachment' || F.PLACE_RULE_KINDS.includes(k) ? { kind: k } : { kind: k, value: 'x' }).ok), 'every declared kind validates with its own minimal shape (' + F.RULE_KINDS.join(', ') + ')');
+  ok(F.RULE_KINDS.length === 14 && F.RULE_KINDS.every((k) => F.validateRule(k === 'decision' ? { kind: k, condition: 'x' } : k === 'fact' ? { kind: k, key: 'env', value: 'x' } : k === 'time-window' ? { kind: k, from: '00:00', to: '01:00' } : k === 'sender-in-group' ? { kind: k, members: ['x'] } : k === 'has-attachment' || F.PLACE_RULE_KINDS.includes(k) ? { kind: k } : { kind: k, value: 'x' }).ok), 'every declared kind validates with its own minimal shape (' + F.RULE_KINDS.join(', ') + ')');
 }
 
 // ── ② truth table per kind ───────────────────────────────────────────────
@@ -1058,8 +1058,11 @@ console.log('⑱ lane lark-system-records (B-ef03): a vendor system notice is no
     'time-window': { kind: 'time-window', from: '00:00', to: '23:59', tzOffsetMinutes: 0 },
     'reply-to-mine': { kind: 'reply-to-mine' }, 'in-thread-with-me': { kind: 'in-thread-with-me' }, 'reply-to-sent': { kind: 'reply-to-sent' },
     fact: { kind: 'fact', key: 'event', value: 'recalled' },
+    decision: { kind: 'decision', condition: 'a message was recalled', question: 'predicate', threshold: 0.7, perHour: 20 },   // lane decision-rule
   };
-  const ctx = { mine: new Set(['om_mine']), sentByMe: new Map([['om_mine', { at: T - 60e3, words: 'hi' }]]), ownerMine: new Set(), convKind: 'thread',
+  // lane decision-rule: the pre-judged verdicts — the SAME sure answer for the notice and its peer twin (the notice must still miss)
+  const decisions = { [`${F.decisionKeyOf(RULE_FOR.decision)}|${sys.id}`]: { type: 'predicate', probability: 0.99 }, [`${F.decisionKeyOf(RULE_FOR.decision)}|${peer.id}`]: { type: 'predicate', probability: 0.99 } };
+  const ctx = { decisions, mine: new Set(['om_mine']), sentByMe: new Map([['om_mine', { at: T - 60e3, words: 'hi' }]]), ownerMine: new Set(), convKind: 'thread',
     kindOf: () => ({ kind: 'topic-reply', topic: 'omt_t', quotes: 'om_mine' }), threadOf: () => ['om_mine'], subjectOf: () => 'recalled' };
   ok(sys.kind === 'system' && sys.author.isSystem === true && !sys.author.id, 'setup: the notice is a system record (no author id)');
   const missing = F.RULE_KINDS.filter((k) => !RULE_FOR[k]);
@@ -1087,6 +1090,77 @@ console.log('⑱ lane lark-system-records (B-ef03): a vendor system notice is no
   const FX = M.load('src/channel-filter.js', FSRC.replace(G1, '').replace(G2, ''), 'no-system-guard');
   const xHits = F.RULE_KINDS.filter((k) => FX.matchRecord({ rules: [RULE_FOR[k]] }, sys, ctx).hit);
   ok(xHits.includes('keyword') && xHits.includes('not-contains') && xHits.includes('time-window'), 'CONTROL: a copy without the system guard lets the notice match (keyword / not-contains / time-window) — the census goes RED', xHits.join(','));
+  for (const x of copiesCensus(M.files, M.dir, REPO, { minCopies: 1 })) ok(x.pass, 'tree: ' + x.name, x.detail);
+}
+
+// ── ⑲ lane decision-rule (D3 of docs/design-decision-api.zh.md §2.5): THE `decision` KIND — the truth table over the
+// PRE-JUDGED answers in `ctx.decisions` (a missing verdict never matches; the threshold edge; a choice value; a ROUTE
+// hits only for the watcher that is its principal; `none` never), the validator's refusals by name, the key (what the
+// judge is asked — never the slider), D1's question shape, the estimate (records judged a day, the hit rate unknown) and
+// the cost line. CONTROL: a copy whose predicate verdict ignores the threshold ⇒ the edge legs go red. ──────────────────
+{
+  const DM = require(path.join(REPO, 'src/decision-model.js'));
+  const R = F.validateRule({ kind: 'decision', condition: '  the sender asks me to pay an invoice  ' });
+  ok(R.ok && J2(R.rule) === J2({ kind: 'decision', condition: 'the sender asks me to pay an invoice', question: 'predicate', threshold: 0.7, perHour: 20 }), 'a bare condition validates with the defaults (predicate, 0.70, 20/h) — the words kept, trimmed', J2(R));
+  const r = R.rule, k = F.decisionKeyOf(r);
+  const one = rec(1, { text: 'Please pay invoice 7 by Friday' });
+  const at = (p, extra = {}) => ({ decisions: { [`${k}|${one.id}`]: { type: 'predicate', probability: p } }, ...extra });
+  const m1 = F.matchRecord({ rules: [r] }, one, at(0.82));
+  ok(m1.hit && J2(m1.why) === J2(['decision: the sender asks me to pay an invoice → 0.82']), 'a pre-judged p 0.82 ≥ 0.70 HITS; the why names the condition and the probability', J2(m1));
+  ok(!F.matchRecord({ rules: [r] }, one, {}).hit && !F.matchRecord({ rules: [r] }, one, { decisions: new Map() }).hit && !F.matchRecord({ rules: [r] }, rec(2), at(0.99)).hit, 'NO verdict (no ctx, an empty Map, another record\'s verdict) ⇒ never a hit (fail closed — the grammar never waits on a network)');
+  ok(F.matchRecord({ rules: [r] }, one, at(0.7)).hit && !F.matchRecord({ rules: [r] }, one, at(0.69)).hit, 'the threshold edge: p = 0.70 hits at 0.70, 0.69 does not');
+  ok(!F.matchRecord({ rules: [r] }, one, { decisions: { [`${k}|${one.id}`]: { type: 'predicate', refused: true, why: 'missing' } } }).hit && !F.matchRecord({ rules: [r] }, one, at('0.9')).hit, 'a refused / malformed answer never hits');
+  const r9 = F.validateRule({ kind: 'decision', condition: r.condition, threshold: 0.9 }).rule;
+  ok(F.decisionKeyOf(r9) === k && F.decisionKeyOf({ ...r, perHour: 3 }) === k && F.decisionKeyOf({ ...r, condition: r.condition + '!' }) !== k && /^d[0-9a-f]{16}$/.test(k), 'the key is what the judge is ASKED: the threshold / hour cap leave it (a moved slider never re-bills), the words change it', k);
+  ok(F.matchRecord({ rules: [r9] }, one, { decisions: { [`${k}|${one.id}`]: { type: 'predicate', probability: 0.85 } } }).hit === false, 'the same verdict under a 0.90 rule: no hit (the threshold is the rule\'s, the answer is shared)');
+  ok(F.matchRecord({ match: 'every', rules: [{ kind: 'keyword', value: 'invoice' }, r] }, one, {}).hit === false && F.matchRecord({ match: 'every', rules: [{ kind: 'keyword', value: 'invoice' }, r] }, one, at(0.9)).hit === true, "match 'every': a missing verdict fails the whole filter; with it, both rules fire");
+  // the choice form + routes
+  const GA = { kind: 'group', id: 'T-a', name: 'Billing desk' }, GB = { kind: 'group', id: 'T-b', name: 'Tech desk' };
+  const C = F.validateRule({ kind: 'decision', condition: 'which desk should take it', question: 'choice', choices: [{ value: 'billing', description: 'money, invoices', to: GA }, { value: 'tech', to: GB }, 'NONE'], threshold: 0.6, perHour: 5 });
+  ok(C.ok && C.rule.choices.length === 2 && C.rule.choices[0].to.id === 'T-a' && !C.rule.choices.some((o) => o.value.toLowerCase() === 'none') && C.rule.perHour === 5, 'a choice with two routes validates; a user "none" is dropped (it is always added)', J2(C));
+  const c = C.rule, ck = F.decisionKeyOf(c);
+  const cAt = (ans) => ({ [`${ck}|${one.id}`]: ans });
+  const tech = { type: 'choice', choice: 'tech', probabilities: { tech: 0.8, billing: 0.2 }, confidence: 0.8 };
+  const hitFor = (p, ans = tech) => F.matchRecord({ rules: [c] }, one, { decisions: cAt(ans), principal: p });
+  ok(hitFor(GB).hit && J2(hitFor(GB).why) === J2(['decision: which desk should take it → Tech desk 0.80']) && !hitFor(GA).hit && !hitFor({ kind: 'agent', id: 'x' }).hit, 'a ROUTE hits ONLY for the watcher that is its principal (group B), never group A or an agent — the why names the route');
+  ok(!hitFor(GB, { type: 'choice', choice: 'none', probabilities: { none: 0.9 } }).hit && !hitFor(GA, { type: 'choice', choice: 'none', probabilities: { none: 0.9 } }).hit, '`none` notifies nobody');
+  ok(!hitFor(GB, { ...tech, probabilities: { tech: 0.55 }, confidence: 0.55 }).hit && hitFor(GB, { type: 'choice', choice: 'tech' }).hit, 'a choice below the threshold misses; an answer with no probability keeps its choice (OpenRouter may omit it)');
+  const L = F.validateRule({ kind: 'decision', condition: 'what kind of message', question: 'choice', choices: ['bug', 'question'] }).rule;
+  const lAt = { decisions: { [`${F.decisionKeyOf(L)}|${one.id}`]: { type: 'choice', choice: 'bug', probabilities: { bug: 0.77 } } } };
+  ok(J2(F.matchRecord({ rules: [L] }, one, lAt).why) === J2(['decision: what kind of message → bug 0.77']), 'a plain choice (no route) hits on any option but none — the why carries the VALUE');
+  const allItem = { kind: 'everyone', id: '*', target: 'cid-9' };
+  ok(F.routeNames({ kind: 'agent', id: 'cid-9' }, allItem) && !F.routeNames({ kind: 'agent', id: 'cid-8' }, allItem) && F.routeNames(GA, { kind: 'group', id: 'T-a', target: 'cid-1' }), 'an All-agents fan-out item answers for the agent it targets; a group member item for its group');
+  ok(F.isRouteRule(c) && !F.isRouteRule(L) && !F.isRouteRule(r) && F.decisionRulesOf({ rules: [{ kind: 'keyword', value: 'x' }, r, c] }).length === 2, 'isRouteRule (the `routing` switch\'s rules) / decisionRulesOf');
+  // D1's question shape (decision-model's own judge)
+  const q1 = F.decisionQuestion(r, 'q1'), q2 = F.decisionQuestion(c, 'q2');
+  const C8 = F.validateRule({ kind: 'decision', condition: 'x', question: 'choice', choices: Array.from({ length: 8 }, (_, i) => `o${i}`) }).rule;
+  ok(DM.questionError(q1) === null && DM.questionError(q2) === null && DM.questionError(F.decisionQuestion(C8, 'q3')) === null && q2.choices.length === 3 && q2.choices[2].value === 'none' && q1.instructions.includes(r.condition), "decisionQuestion = D1's question shape (questionError null) — a choice of 8 + none = 9, D1's ceiling; the condition rides the instructions", J2([q1, q2]));
+  // refusals by name
+  const no = (rule, code) => { const v = F.validateRule({ kind: 'decision', ...rule }); return !v.ok && v.code === code; };
+  const long = 'x'.repeat(501);
+  ok(no({}, 'condition-required') && no({ condition: '   ' }, 'condition-required') && no({ condition: long }, 'condition-too-long') && no({ condition: 'x', question: 'score' }, 'question-kind'), 'refused by name: condition-required, condition-too-long (> 500), question-kind');
+  ok(no({ condition: 'x', question: 'choice' }, 'choices-count') && no({ condition: 'x', question: 'choice', choices: ['none'] }, 'choices-count') && no({ condition: 'x', question: 'choice', choices: Array.from({ length: 9 }, (_, i) => `o${i}`) }, 'choices-count') && no({ condition: 'x', question: 'choice', choices: ['a b'] }, 'choice-value') && no({ condition: 'x', question: 'choice', choices: ['A', 'a'] }, 'choice-duplicate') && no({ condition: 'x', question: 'choice', choices: [{ value: 'a', description: 'd'.repeat(121) }] }, 'choice-too-long') && no({ condition: 'x', question: 'choice', choices: [{ value: 'a', to: { kind: 'everyone', id: '*' } }] }, 'route-principal'), 'refused by name: choices-count (0 / only none / 9), choice-value, choice-duplicate, choice-too-long (> 120), route-principal');
+  ok(no({ condition: 'x', threshold: 0.45 }, 'threshold-range') && no({ condition: 'x', threshold: 0.95 }, 'threshold-range') && no({ condition: 'x', threshold: 'high' }, 'threshold-range') && no({ condition: 'x', perHour: 0 }, 'per-hour-range') && no({ condition: 'x', perHour: 61 }, 'per-hour-range') && no({ condition: 'x', perHour: 1.5 }, 'per-hour-range') && F.validateRule({ kind: 'decision', condition: 'x', threshold: 0.5, perHour: 60 }).ok && F.validateRule({ kind: 'decision', condition: 'x', threshold: 0.9, perHour: 1 }).ok, 'refused by name: threshold-range (0.50–0.90), per-hour-range (1–60, whole); both bounds accepted');
+  const words = F.filterProblemText(F.validateRule({ kind: 'decision', condition: long }), { t: (x, p) => String(x).replace(/\{(\w+)\}/g, (m0, q) => (p && q in p ? String(p[q]) : m0)) });
+  ok(words === 'the condition is longer than 500 characters' && ['condition-required', 'question-kind', 'choices-count', 'choice-value', 'choice-duplicate', 'choice-too-long', 'route-principal', 'threshold-range', 'per-hour-range'].every((code) => F.filterProblemText({ ok: false, code, error: 'CONTRACT' }) !== 'CONTRACT'), 'every decision refusal has the editor\'s words (never the contract sentence)', words);
+  ok(F.ruleWhy(r) === 'decision "the sender asks me to pay an invoice"' && F.ruleWhy(c) === 'decision "which desk should take it" (one of billing → Billing desk | tech → Tech desk | none)', 'ruleWhy (the watch listing) says the condition and the options', F.ruleWhy(c));
+  // the estimate + the cost line
+  const hist = Array.from({ length: 14 }, (_, i) => rec(i * 12, { at: NOW - i * 12 * H }));
+  const est = F.estimate({ match: 'any', rules: [r, { kind: 'keyword', value: 'message 0' }] }, hist, { days: 7, now: NOW });
+  ok(est.decision && est.decision.rules === 1 && est.decision.judgedPerDay === est.totalPerDay && est.decision.hitsUnknown === true && est.matched === 1, 'the estimate says the records a day the rule would JUDGE (= every record here) and that its hit rate is unknown — the matched count is only the other rules\'', J2(est));
+  ok(!('decision' in F.estimate({ rules: [{ kind: 'keyword', value: 'x' }] }, hist, { now: NOW })), 'a filter with no decision rule: the estimate is unchanged');
+  const cost = F.decisionCost({ recordsPerDay: 200, perHour: 20, tokensPerCall: DM.inputPlan('rule').ceiling, pricePerMtok: DM.PRICE_PER_MTOK_USD.openai, budgetCents: DM.DAILY_BUDGET_CENTS_DEFAULT });
+  ok(cost.judgmentsPerDay === 200 && Math.abs(cost.usdPerDay - 200 * 1500 * 0.1 / 1e6) < 1e-12 && cost.within && !cost.capped && cost.budgetUsd === 1, `the cost line: 200 records/day × ${DM.inputPlan('rule').ceiling} tokens × $0.10/M = $${cost.usdPerDay} — within $1.00`, J2(cost));
+  const capped = F.decisionCost({ recordsPerDay: 2000, perHour: 5, tokensPerCall: 1800, pricePerMtok: 0.1, budgetCents: 1 });
+  ok(capped.judgmentsPerDay === 120 && capped.capped && !capped.within, 'the hour cap bounds the judgments (5/h ⇒ 120/day); over a 1 ¢ budget it says so', J2(capped));
+  // CONTROL: a copy whose predicate verdict ignores the threshold
+  const { mutantCopies, copiesCensus } = await import('./mutant-copy.mjs');
+  const M = mutantCopies('chan-filter-dec', REPO);
+  const SRC = fs.readFileSync(path.join(REPO, 'src/channel-filter.js'), 'utf-8');
+  const EDGE = "return p !== null && p >= th ? `decision: ${conditionWords(rule)} → ${p.toFixed(2)}` : null;";
+  ok(SRC.split(EDGE).length === 2, 'control setup: the predicate verdict is one line');
+  const FX = M.load('src/channel-filter.js', SRC.replace(EDGE, EDGE.replace('p !== null && p >= th', 'p !== null')), 'no-threshold');
+  ok(FX.matchRecord({ rules: [r] }, one, at(0.69)).hit === true, 'CONTROL: a copy that ignores the threshold hits at 0.69 — the edge leg above goes RED');
   for (const x of copiesCensus(M.files, M.dir, REPO, { minCopies: 1 })) ok(x.pass, 'tree: ' + x.name, x.detail);
 }
 

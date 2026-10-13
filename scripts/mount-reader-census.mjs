@@ -105,6 +105,8 @@ export const ROWS = [
   ['src/server/cli-env.js', 'own-tree', 4, null, PROC],
   ['src/server/cluster-presets.js', 'own-tree', 7, null, DATA],
   ['src/server/conversation-deliver.js', 'own-tree', 2, null, DATA],
+  ['src/server/decision-engine.js', 'own-tree', 3, null, DATA],   // lane decision-core: data/decision-{memo,usage}.json + the journal
+  ['src/server/channels-attention.js', 'own-tree', 1, null, DATA],   // lane decision-attention: data/decision-examples.json (its ONE writer)
   ['src/server/design-engine.js', 'user-path', 6, 'DOOR\\.blocked\\(', 'the design watch relist: refused by name, never read'],
   ['src/server/desktop-app-keeper.js', 'own-tree', 1, null, DATA],
   ['src/server/device-upgrade-watch.js', 'own-tree', 1, null, DATA],
@@ -124,7 +126,7 @@ export const ROWS = [
   ['src/server/memory-sampler.js', 'own-tree', 1, null, PROC],
   ['src/server/migrations.js', 'own-tree', 37, null, DATA],
   ['src/server/mount-health-watch.js', 'exempt', 6, null, 'the server-tree watch: /proc + mountinfo, never a user path (the judge’s P4)'],
-  ['src/server/mounts-plugins-wiring.js', 'own-tree', 7, null, DATA],
+  ['src/server/mounts-plugins-wiring.js', 'own-tree', 10, null, DATA], // lane passkey-store-core: +3 — data/browser-passkeys.json + its key file (own data dir)
   ['src/server/ops-routes.js', 'own-tree', 10, null, DATA],
   ['src/server/otel-ingest.js', 'own-tree', 4, null, CLI],
   ['src/server/permission-rules.js', 'own-tree', 3, null, CLI],

@@ -141,6 +141,7 @@ const CHANNELS_GATES = {
   flushPushBatch: 'store.index.entry(rec.id',           // the adapter record's own conversation
   loadOlder: 'known(',
   storedHit: 'store.index.has(',                        // design 010: a vendor hit's "already stored?" — an index row first, then the conversation's oldest record / the id
+  attentionTail: 'store.index.has(',                    // lane decision-attention: the judge's body — an index row first, then the conversation's newest records
   vendorSearch: 'store.index.has(',                     // design 010 S6 (lane channels-followups): the `storedAt` hint — an index row first, then the id's stored instant (no text)
   readAroundFor: 'ACL.canSee(',                         // design 010: the agent's --around — reach before the instant's look-up
   ownerRecordOf: { callers: ['attachment'] },           // a helper: every call site sits inside a gated function (attachment: known( before the call)
@@ -162,6 +163,7 @@ const CHANNELS_GATES = {
   // anchor), each with the gate that stands before its read
   onPushEvent: 'const p = pushRow(rec);',               // a push lane's own adapter record (the groups adapter has no push lane); the read only checks a message's membership
   threadIxOf: 'store.index',                            // the log of a conversation with an index row — else the caller's records alone
+  decisionTail: 'store.index.peek(',                    // lane decision-rule: the decision rule's thread digest (3 turns before a fresh record) — a KNOWN conversation's own log
   react: 'convOr404(',
   unreact: 'convOr404(',
   storedRecord: 'store.index',                          // a reply's anchor: a KNOWN conversation's stored message

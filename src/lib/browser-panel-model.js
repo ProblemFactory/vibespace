@@ -19,7 +19,7 @@ export const GRID = Object.freeze({ mins: Object.freeze([140, 100, 170, 120]), g
 export function gridNeed(actsPx) { return GRID.mins.reduce((s, n) => s + n, 0) + Math.max(0, Number(actsPx) || 0) + GRID.gap * GRID.mins.length; }
 
 /** Every act a profile row offers, once: the primary, the ⋯ menu's items, the who cell's Change… (the ACT CENSUS). */
-export const ROW_ACTS = Object.freeze(['browse', 'record', 'record-mine', 'replay', 'build', 'rename', 'stop', 'restart', 'restart-hold', 'delete', 'who']);
+export const ROW_ACTS = Object.freeze(['browse', 'record', 'record-mine', 'replay', 'build', 'rename', 'stop', 'restart', 'restart-hold', 'passkeys', 'delete', 'who']); // lane passkey-ui: + Passkeys (n)…
 
 const T = (x) => (x && x.w && typeof x.w.t === 'function' ? x.w.t : (s) => s);
 const W = (x, k, d) => (x && x.w && typeof x.w[k] === 'function' ? x.w[k] : d);
@@ -107,6 +107,8 @@ export function rowMenu(r, x = {}) {
   if (r.live) out.push({ id: 'stop', label: t('Stop'), title: t('Stop this profile\'s browser now — its logins stay in the profile; the next command starts it again (this also resets a browser that keeps closing)') });
   if (hung(r, x)) { /* Restart is the row's primary (never twice) */ } else if (x.stuck && x.stuck.action && r.live && !r.host) out.push({ id: 'restart', label: String(x.stuck.action), title: String(x.stuck.tooltip || '') });
   else if (x.autoDialogs) out.push({ id: 'restart-hold', label: t('Restart to hold dialogs'), title: t('Restart this browser so VibeSpace holds leave-page dialogs for a decision instead of the browser accepting them — its tabs close, logins stay') });
+  // lane passkey-ui (design-passkey-store §2.5): Passkeys (n)… — n = 0 too (the agents-never switch lives inside)
+  if (!notOurs(r)) out.push({ id: 'passkeys', label: t('Passkeys ({n})…', { n: Math.max(0, Number(x.passkeys) || 0) }), title: t('The passkeys this profile keeps — site, user, who registered it, last use, policy') });
   if (!notOurs(r)) { out.push({ sep: true }); out.push({ id: 'delete', label: t('Delete…'), warn: true, title: t('Stop it, take it away from every conversation that uses it, and move its directory beside itself — nothing is deleted for good until you click Delete permanently below') }); }
   return out;
 }
@@ -167,4 +169,52 @@ export function rowFold(r, x = {}) {
 export function orphanOrder(list) {
   const n = (o) => (o && Number.isFinite(Number(o.bytes)) && o.bytes !== null ? Number(o.bytes) : -1);
   return (Array.isArray(list) ? list : []).slice().sort((a, b) => n(b) - n(a) || String((a && a.name) || '').localeCompare(String((b && b.name) || '')));
+}
+
+// ── lane passkey-ui (design-passkey-store §2.5): THE PASSKEYS TABLE — the owner's publicRows (P1's GET
+// /api/browser/passkeys) as the panel draws them. A row is built from NAMED fields only, never a spread: a row that
+// carries a key field (or the whole credential id) is REFUSED — never drawn, counted in `refused`. ──
+export const PASSKEY_POLICIES = Object.freeze(['yes', 'ask', 'no']);
+export const PASSKEY_KEY_FIELDS = Object.freeze(['keySealed', 'key', 'privateKey', 'userHandle', 'credentialId']);
+/** The three-way control's words, in order (allow / ask each time / never). */
+export function policySegments(policy, x = {}) {
+  const t = T(x), on = PASSKEY_POLICIES.includes(policy) ? policy : 'ask';
+  const words = { yes: t('Allow'), ask: t('Ask each time'), no: t('Never') };
+  return PASSKEY_POLICIES.map((p) => ({ value: p, label: words[p], on: p === on }));
+}
+/** One table row from one publicRow — null (refused) when it carries a key field. */
+export function passkeyRow(k, x = {}) {
+  if (!k || typeof k !== 'object' || PASSKEY_KEY_FIELDS.some((f) => Object.prototype.hasOwnProperty.call(k, f))) return null;
+  const t = T(x), date = W(x, 'date', (n) => new Date(n).toISOString().slice(0, 10)), ago = W(x, 'ago', date); // no `ago` words ⇒ the date
+  const id = String(k.id || '').slice(0, 8);
+  if (!/^[A-Za-z0-9_-]{1,8}$/.test(id)) return null;
+  const user = String(k.userName || k.displayName || '').slice(0, 64);
+  const disp = String(k.displayName || '').slice(0, 64);
+  const created = Number(k.createdAt) || 0, used = Number(k.lastUsedAt) || 0;
+  const policy = PASSKEY_POLICIES.includes(k.policy) ? k.policy : 'ask';
+  return {
+    id, site: String(k.rpId || '').slice(0, 253), user, userTitle: disp && disp !== user ? disp : '',
+    source: k.source === 'you' ? 'you' : 'agent',
+    sourceText: (k.source === 'you' ? t('you') : t('agent')) + (created ? ' · ' + String(date(created) || '') : ''),
+    lastUsed: used ? String(ago(used) || '') : t('never'), uses: Math.max(0, Number(k.uses) || 0),
+    policy, segments: policySegments(policy, x),
+  };
+}
+/** The whole table: the head row (the switch + the one sentence), the column titles, the rows, the empty state. */
+export function passkeyTable(list, x = {}) {
+  const t = T(x), keys = Array.isArray(list && list.keys) ? list.keys : [];
+  const rows = keys.map((k) => passkeyRow(k, x)).filter(Boolean);
+  return {
+    switchOn: !!(list && list.agentsOff), switchLabel: t('Agents never sign in with passkeys'),
+    // lane passkey-prewrap-fix: a page that replaced the credentials API in the last hour (taken back) is said here, once
+    note: (list && Number(list.displaced) > 0 ? t('A page replaced the credentials API (taken back)') + ' · ' : '') + t('Keys live only in this VibeSpace; deleting the profile deletes them'),
+    columns: [t('Site'), t('User'), t('Source'), t('Last used'), t('Policy'), ''],
+    rows, refused: keys.length - rows.length,
+    empty: rows.length ? null : { line: t('No passkeys yet — when an agent asks to register one, its card appears in For you.'), hint: 'vibespace-browser passkey register <site>' },
+  };
+}
+/** Delete…'s confirm words — the site and the user named. */
+export function passkeyDeleteWords(row, x = {}) {
+  const t = T(x);
+  return { title: t('Delete the passkey for {site}?', { site: row.site }), message: row.user ? t('The passkey of {user} on {site} is deleted from this VibeSpace — signing in to {site} with it stops working; the site keeps its own record until you remove it there.', { user: row.user, site: row.site }) : t('The passkey on {site} is deleted from this VibeSpace — signing in to {site} with it stops working; the site keeps its own record until you remove it there.', { site: row.site }), confirm: t('Delete') };
 }

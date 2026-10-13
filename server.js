@@ -1440,7 +1440,7 @@ const integrationsWiring = require('./src/server/integrations-wiring.js').create
   app, dataDir: path.join(__dirname, 'data'), bcastAll: (...a) => bcastAll(...a), drivePresets: () => require('./src/mounts').MountManager.drivePresets(),
 }); // created BEFORE the mounts-plugins wiring: the agent browser's key consumer (P4 §7.5) registers its Test runners with this store and the keeper resolves through it
 // ── Mounts + plugins + dial-session wiring (src/server/mounts-plugins-wiring.js, decomposition #12) ──
-const { mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages, browserKeeper, bootBrowserKeeper, browserStream, browserHandback, browserTrace, browserKeys, browserDialogs, pluginLoader,
+const { decisionEngine, mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages, browserKeeper, bootBrowserKeeper, browserStream, browserHandback, browserTrace, browserKeys, browserDialogs, pluginLoader,
 } = require('./src/server/mounts-plugins-wiring.js').create({
   app, server: hub, rootDir: __dirname, HOST, PORT, BUFFERS_DIR, PERMISSION_MODES, integrations: integrationsWiring.store, getJobs: () => jobsWiring.getJobs(), // + lane jobs-browser: a job browses as its owner conversation // + agent browser P4 second half (§7.5): the key consumer's store
   auth, wss, WS_OPEN,
@@ -1462,7 +1462,7 @@ const { router: sessionsRouter, setup: setupSessions } = require('./src/routes/s
 setupSessions({ activeSessions, webuiPids, refreshWebuiPids, createSessionMessages, BUFFERS_DIR, PERMISSION_MODES, execFileSync, hosts, accounts, sessionAuth, serverSetting, paused: (kind) => mountHealth.paused(kind) });
 // ── Channels / communication panel (src/server/channels-wiring.js) ──
 const channelsWiring = require('./src/server/channels-wiring.js').create({
-  app, dataDir: path.join(__dirname, 'data'), bcastAll: (...a) => bcastAll(...a), integrations: integrationsWiring.store, getMounts: () => mounts, // 2.369.195: a storage mount's own OAuth client, borrowed by an account (server-side copy)
+  app, dataDir: path.join(__dirname, 'data'), bcastAll: (...a) => bcastAll(...a), integrations: integrationsWiring.store, getMounts: () => mounts, decisionEngine, // lanes decision-attention + decision-rule: the judged rows and the decision rule's pre-judge ask THE decisions caller // 2.369.195: a storage mount's own OAuth client, borrowed by an account (server-side copy)
   userTodos, readUserState: () => persistenceRouter.readUserState(), convIndex: () => hosts && hosts.convIndex, // lane pair-group-fate: the archived list the groups' liveness reads (+ r2: which machine owns a conversation — another's is never gone) · P1: a failing adapter files ONE "For you" item after 3 consecutive failed passes and the same engine retracts it on recovery (fence 8)
   onGroupsPending: () => { try { stashView.changed(); } catch { } }, // lane group-report-card: a post / a marker / a membership change moves what waits for a member — the strip above its composer re-publishes (debounced)
   deliver, serverSetting, authEnabled: () => auth.enabled, sessions: () => activeSessions, sessionMeta: () => ({ readSessionMeta, writeSessionMeta }), // §26 (B-099e): the channel witness's ring lives on the live session + its meta · P2: THE delivery ladder (fence 2 — the one door to an unattended turn, spendReason 'channel-message', the authorizer inside it) + the coalescing window setting (fence 12) · r2: `authEnabled` — with auth OFF the owner's group routes are paced like an agent's (anyone local can reach them)

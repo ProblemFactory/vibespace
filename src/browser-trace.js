@@ -202,6 +202,14 @@ function commandText(action, redacted) {
   const r = redacted && typeof redacted === 'object' ? redacted : {};
   // verify r1 F6: the live view's own resize is never spelled as an agent command
   if (a === 'permission') return `vibespace-browser permission ${r.kind || ''} ${r.setting === 'granted' ? 'allow' : 'deny'} ${r.origin || ''}`.trim(); // lane browser-ui-prompts-r2
+  // lane passkey-ui: a passkey ceremony's row (the watch's own, tapDialogAct) — what happened, in words
+  if (a === 'passkey') {
+    const rp = r.rpId || 'a site', u = r.user ? String(r.user).slice(0, 64) : '', who = r.by === 'human' ? 'you ' : '';
+    if (r.outcome === 'hook-displaced') return `the page replaced its passkey API — ${r.kept ? 'it fixed the slot: its requests no longer reach the passkey store' : 'VibeSpace took it back'}`; // lane passkey-prewrap-fix
+    if (r.outcome === 'refused') return `refused: a passkey ${r.kind === 'create' ? 'registration' : 'sign-in'} on ${rp}${r.why ? ` (${r.why})` : ''}`;
+    if (r.outcome && r.outcome !== 'ok') return `passkey ${r.kind === 'create' ? 'registration' : 'sign-in'} on ${rp}: ${r.outcome}`;
+    return r.kind === 'create' ? `${who}registered a passkey on ${rp}${u ? ` for ${u}` : ''}` : `${who}signed in with ${u ? `${u}'s` : 'a'} passkey on ${rp}`;
+  }
   if (a === 'viewer-fit') return `live view: set ${r.device ? `device ${r.device}` : `viewport ${r.width} ${r.height}`}${r.why ? ` (${r.why})` : ''}`;
   const parts = ['agent-browser', a];
   const sel = selectorOf(r);

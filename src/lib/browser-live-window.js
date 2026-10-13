@@ -160,6 +160,7 @@ import { receiptBook, noteInputSent, noteInputReceipt, sweepInputReceipts } from
 import { humanEndChoices, humanRefusalText, humanSyncId, addressVerdict, humanShareLine, LAUNCH_CODES } from '../browser-human.js'; // BROWSE YOURSELF (B-6ae8): the user's own browsing — its end buttons, its refusals, the address row (PURE)
 import { dialogWords, answeredWords, stuckWords, promptWords, permissionWords, printWords } from '../browser-stuck.js'; // lane browser-stuck: a page dialog / an unresponsive page in words (PURE)
 import { createLoopBanner } from './browser-loop-banner.js';
+import { patchPasskeyButtons } from './browser-proposal-card.js'; // lane passkey-ui: the passkey_ask banner's choices = the card's (one approve route)
 import { passkeyWords } from '../browser-passkey.js'; // lane browser-passkey: a page waiting for a passkey — ONE button, Cancel (PURE words) // lane site-reset: the navigation loop, keyed + patched in place
 import { displayFactOf, displayFactText } from './browser-display-words.js'; // lane headless-fallback: a headless browser (no desktop session) says so under the bar
 
@@ -981,15 +982,21 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
     }
     if (dialogBar.dataset.prompt) delete dialogBar.dataset.prompt;
     const pk = !d && st.fact && st.fact.stuck && st.fact.stuck.state === 'passkey' ? st.fact.stuck : null;
-    const pkw = pk ? passkeyWords(pk.passkey, t, { headed: pk.headed === true }) : null;
+    const pkw = pk ? passkeyWords(pk.passkey, t, { headed: pk.headed === true, card: pk.card || null }) : null;
     if (pkw) {
-      const key = String(pk.passkey.id || '');
+      const key = String(pk.passkey.id || '') + (pkw.ask ? ':ask:' + pkw.cardId : ''); // lane passkey-ui: passkey_ask = the owner's card inline
       if (dialogBar.dataset.passkey !== key || dialogBar.dataset.pkBusy !== String(!!st.passkeyCancelling)) {
         dialogBar.textContent = ''; dialogBar.dataset.passkey = key; dialogBar.dataset.pkBusy = String(!!st.passkeyCancelling);
         const title = document.createElement('div'); title.className = 'browser-live-dialog-title'; title.textContent = pkw.title;
         const line = document.createElement('div'); line.className = 'browser-live-dialog-body'; line.textContent = pkw.line;
         dialogBar.append(title, line);
         if (pkw.desktop) { const n = document.createElement('div'); n.className = 'browser-live-dialog-note'; n.textContent = pkw.desktop; dialogBar.append(n); }
+        if (pkw.ask) { // lane passkey-ui: the card's choices (Allow once / Always allow / Not now / Never) — the same approve route
+          const row = document.createElement('div'); row.className = 'browser-live-dialog-actions browser-live-passkey-ask';
+          if (pk.card) patchPasskeyButtons(row, pk.card); dialogBar.append(row);
+          dialogBar.style.display = ''; dialogBar.classList.toggle('stuck', true);
+          return;
+        }
         const acts = document.createElement('div'); acts.className = 'browser-live-dialog-actions';
         const b = textBtn(pkw.cancel, () => { if (st.passkeyCancelling) return; st.passkeyCancelling = true; renderDialog(); send({ type: 'passkey-cancel' }); }, 'browser-live-dialog-dismiss browser-live-passkey-cancel');
         b.disabled = !!st.passkeyCancelling;

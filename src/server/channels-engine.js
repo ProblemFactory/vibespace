@@ -467,6 +467,11 @@ function create(deps = {}) {
     // (`sealCustom`) and never answers it on a route. Optional: without it a
     // `fromMount` choice is refused by name (`no-mounts`).
     mountClients = null,
+    // THE DECISION ENGINE (D1 of docs/design-decision-api.zh.md: src/server/decision-engine.js — the ONE decisions-API
+    // caller, its memo + budget + journal), ONE instance for both of its uses here: lane decision-attention's judged rows
+    // ask it through src/server/channels-attention.js (null = no judged rows); lane decision-rule's pre-judge asks it for
+    // the `decision` rule (null ⇒ a decision rule never hits — fail closed).
+    decisionEngine = null,
     // B-f32b r2: the clock census's pace (ms) and its trailing timer `(fn, ms) => {cancel()}` — a suite injects both
     censusEveryMs = CENSUS_EVERY_MS,
     censusTimer = (fn, ms) => { const h = setTimeout(fn, Math.max(0, ms)); if (h.unref) h.unref(); return { cancel: () => clearTimeout(h) }; },
@@ -476,6 +481,12 @@ function create(deps = {}) {
   // lane channel-threads: ONE write hook — every log writer (a pass, the push lane, a backfill, a trim, the side
   // log) keeps the derived caches (the thread index, the message → conversation map) honest; never a call-site list
   const store = createChannelStore({ dir: path.join(dataDir, 'channels'), now, log, onWrite: (a, c, w) => onStoreWrite(a, c, w) });
+  // lane decision-attention (D2): the first screen's JUDGED rows — the scan, the examples, the draft; a verdict is patched
+  // in by one partial broadcast of its row. The body it reads = the conversation's newest records (the store's tail).
+  const attention = require('./channels-attention.js').create({ dataDir, decision: decisionEngine, serverSetting, now, log, notify: (keys) => notify(keys),
+    viewNow: (key) => { const en = store.index.live()[key]; const rec = en && !en.unlistedAt && adapterRecords().adapters.find((r) => r.id === en.adapterId); return rec ? rowView(rec, en) : null; },
+    accountNever: (id) => { const r = adapterRecords().adapters.find((x) => x.id === id); return !!(r && r.judge === 'never'); },
+    tailOf: (v) => attentionTail(v) });
   // A store file that could not be read at boot was SET ASIDE (r2 — never
   // silently read as empty and overwritten): ONE "For you" item per file,
   // naming where its bytes are. The store already logged the named line.
@@ -2727,6 +2738,7 @@ function create(deps = {}) {
       conversations = keys.map((k) => liveIx[k]).filter(Boolean).map((en) => { const rec = byId.get(en.adapterId); return rec ? rowView(rec, en, ctx) : null; }).filter(Boolean);
       conversations.sort((a, b) => (b.lastAt || 0) - (a.lastAt || 0));
     } else if (scope !== 'accounts') { first = firstRead(byId, liveIx, ctx); conversations = first.conversations; }
+    if (conversations) attention.note(conversations);   // lane decision-attention: the judge never holds a read up — it queues
     // THE TOTALS are over EVERY conversation, partial or not (the rail badge
     // reads them off each broadcast) — KEPT, not re-summed (B-f32b): a partial
     // broadcast re-reads the rows touched since the last one; the kept facts re-sum on a whole-map touch or a minute
@@ -2752,6 +2764,7 @@ function create(deps = {}) {
       // the For-you item alone left a real instance's vanished accounts
       // unexplained in the panel
       quarantined: (store.quarantined || []).map(({ file, to, why, at, blocked }) => ({ file, to: to || null, why, at, blocked: !!blocked })),
+      judging: attention.on(),   // lane decision-attention: the Decision API judges the first screen (the account ⋯ "never judge" row)
       at: t,
     };
   }
@@ -2818,15 +2831,15 @@ function create(deps = {}) {
       let l = listed.get(en.adapterId);
       if (!l) { l = []; listed.set(en.adapterId, l); }
       l.push(en);
-      if (listedAccount(rec) && FO.candidateOf(en, ctx.outbox.get(en.key), t)) cands.push(en);
+      if (listedAccount(rec) && FO.candidateOf(en, ctx.outbox.get(en.key), t, attention.judgedFor(en, rec))) cands.push(en);
     }
     const views = new Map();
     const viewOf = (en) => { let v = views.get(en.key); if (!v) { v = rowView(byId.get(en.adapterId), en, ctx); views.set(en.key, v); } return v; };
     const tagged = [];
-    for (const en of cands) { const v = viewOf(en); const tag = FO.statusTag(v, t); if (tag) tagged.push({ v, rank: FO.TAG_ORDER.indexOf(tag.code) }); }
+    for (const en of cands) { const v = viewOf(en); const tag = FO.statusTag(v, t); if (tag) tagged.push({ v, rank: FO.TAG_ORDER.indexOf(tag.code), p: tag.p || 0 }); }
     // verify r1 (C): 300 newer "replied" rows used to push an old draft awaiting approval off the first screen — the cut
     // keeps statusTag's own order of urgency first, then the newest
-    tagged.sort((a, b) => (a.rank - b.rank) || FO.pageOrder(a.v, b.v));
+    tagged.sort((a, b) => (a.rank - b.rank) || (b.p - a.p) || FO.pageOrder(a.v, b.v));   // lane decision-attention: judged rows by p
     const out = new Map();
     for (const { v } of tagged.slice(0, FO.ATTENTION_MAX)) out.set(v.key, v);
     const heads = {};
@@ -2931,7 +2944,7 @@ function create(deps = {}) {
       const rec = byId.get(en.adapterId);
       if (!rec || en.unlistedAt || (only ? en.adapterId !== only : !listedAccount(rec))) return false;
       if (s && !matches(rec, en)) return false;
-      return view !== 'focus' || (FO.candidateOf(en, ctx.outbox.get(en.key), t) && !!FO.statusTag(viewOf(en), t));
+      return view !== 'focus' || (FO.candidateOf(en, ctx.outbox.get(en.key), t, attention.judgedFor(en, byId.get(en.adapterId))) && !!FO.statusTag(viewOf(en), t));
     };
     const page = FO.selectPage(Object.values(liveIx), { before, limit: n, keep });
     return { ok: true, rows: page.items.map(viewOf), next: page.next, total: page.total };
@@ -3355,6 +3368,7 @@ function create(deps = {}) {
       // first screen's attention list is decided from (PURE src/lib/channel-focus.js) — present only on a row
       // something touched, so the 800 untouched rows of an aggregated account stay the slim row
       touch: touchView(en, lw, ob),
+      ...attention.viewOf(en, rec),   // lane decision-attention: `judged` — the Decision API's verdict on this row's newest message
       lane: { via: lane.via, why: lane.why || null, source: lane.source || null },
       lastError: en.lane && en.lane.lastError ? { code: en.lane.lastError.code, at: en.lane.lastError.at } : null,
     };
@@ -3600,6 +3614,7 @@ function create(deps = {}) {
       namesReadable: caps.namesView(rec.namesReadable),
       names: caps.namesRow(rec.namesReadable),
       reactionPolicy: P.reactionPolicyOf(rec.reactionPolicy),
+      judge: rec.judge === 'never' ? 'never' : null,   // lane decision-attention: the account's "never judge" (design §2.8)
       agentDirectory: ACL.directoryOf(rec),   // lane channel-agent-watch W2: may agents see the list of conversations (groups / single chats)
       reactions: (() => { const x = live.get(rec.id); const m = x ? Drain.rxMinuteAt(x.rxMinute, t) : { n: 0 }; return { read: reactionsRow(registry.capsOf(rec.kind)).read, add: !!reactionsRow(registry.capsOf(rec.kind)).add, perMinute: reactionsPerMin(), listedThisMinute: m.n, calls60s: x ? (x.rxCalls || []).filter((y) => t - y < 60e3).length : 0 }; })(),
       // P1: what the panel's connect / re-authorize / options controls read.
@@ -5841,6 +5856,28 @@ function create(deps = {}) {
     return { ok: true, reactionPolicy: value };
   }
 
+  /** lane decision-attention (design §2.8): the account's "never judge" — 'never' | null (every account judged by default). */
+  async function setJudge(adapterId, value) {
+    const rec = adapterRecords().adapters.find((r) => r.id === adapterId);
+    if (!rec) return { ok: false, code: 'not-found', error: 'no such account' };
+    if (value !== 'never' && value !== null) return { ok: false, code: 'bad-request', error: 'judge must be never or null' };
+    await store.adapters.update(() => { if (value === 'never') rec.judge = 'never'; else delete rec.judge; });
+    notify([]);
+    return { ok: true, judge: value };
+  }
+  /** lane decision-attention: the judge's body — a KNOWN conversation's newest records (an index row first; the record-clear
+   *  census's gate), never a system notice; the owner's own marked (`self`). */
+  function attentionTail(v) {
+    if (!v || !store.index.has(`${v.adapterId}/${v.id}`)) return [];
+    return store.readTail(v.adapterId, v.id, { limit: 8 }).filter((r) => r && !FO.systemRead(r)).map((r) => ({ who: r.author && r.author.name, text: r.text, self: FO.selfRead(r) }));
+  }
+  /** lane decision-attention: "needs" / "not" on a judged row — a labeled example (src/server/channels-attention.js). */
+  function labelJudged(key, lastAt, label) {
+    const en = store.index.live()[String(key || '')];
+    const rec = en && adapterRecords().adapters.find((r) => r.id === en.adapterId);
+    return attention.label(String(key || ''), lastAt, label, rec ? rowView(rec, en) : null);
+  }
+
   /** SEARCH one account's local logs (design §6.5) — async, byte-capped. */
   async function search(adapterId, q, { limit = 100, convId = null } = {}) {
     const rec = adapterRecords().adapters.find((r) => r.id === adapterId);
@@ -6485,6 +6522,74 @@ function create(deps = {}) {
     return Math.min(COALESCE_MAX_SECONDS, v);
   }
 
+  // ── THE DECISION RULE'S PRE-JUDGE (lane decision-rule, D3 of docs/design-decision-api.zh.md §2.5) ──────────────
+  // `matchRecord` is SYNC and PURE, so the answers come FIRST: for every fresh record a `decision` rule in scope could
+  // match, ONE judgment through D1's engine (the ONE caller: its memo — a re-pass never re-bills —, its daily budget,
+  // its backoff) carrying EVERY such rule's question (a rule on several rows = one question; the wake path never
+  // batches records); the answers land in `ctx.decisions` (rule key + record id) before any filter runs. A refusal (no
+  // key, the budget, a backoff, a switch off, the rule's own hour cap) = no hit + ONE journal line per rule per hour —
+  // never a wake, never a toast. A hit wakes through the existing ladder (`channel-message`; no new spend reason).
+  const DECISION_SAY_MS = 3600e3;
+  const decisionHours = new Map();   // rule key → the judgments it took this hour (its `perHour`; a memo answer costs none)
+  const decisionSaid = new Map();    // `${rule key} ${why}` → when the journal last said it (once an hour)
+  function decisionSay(rec, convId, key, rule, why) {
+    const k = `${key} ${why}`, t = now();
+    if (t - (decisionSaid.get(k) || 0) < DECISION_SAY_MS) return;
+    decisionSaid.set(k, t);
+    if (decisionSaid.size > 2000) decisionSaid.delete(decisionSaid.keys().next().value);
+    log.log(`[channels] ${rec.id}/${convId}: decision rule ${key} not judged — ${why} (no match; said once an hour)`);
+  }
+  /** The conversation's last 3 turns before each record (author as the owner reads them + text; D1's plan cuts each). */
+  function decisionTail(rec, convId, fresh) {
+    let tail = [];
+    if (store.index.peek(`${rec.id}/${convId}`)) { try { tail = store.readTail(rec.id, convId, { limit: fresh.length + 3 }) || []; } catch { tail = []; } }   // a KNOWN conversation's own log only
+    const ids = tail.map((r) => String(r && r.id));
+    return (r) => {
+      const i = ids.indexOf(String(r.id));
+      return (i >= 0 ? tail.slice(Math.max(0, i - 3), i) : tail.slice(-3)).filter((x) => x && !FO.systemRead(x)).map((x) => { const v = viewOf(rec, x); return `${(v.author && (v.author.display || v.author.name)) || 'someone'}: ${v.text || ''}`; });
+    };
+  }
+  async function preJudge(rec, convId, fresh, order, selfId) {
+    const rules = new Map();
+    for (const item of order) { const w = item.watcher; if (w.mode === 'filtered') for (const r of F.decisionRulesOf(filterFor(w.filterId))) rules.set(F.decisionKeyOf(r), r); }
+    if (!rules.size) return null;
+    const decisions = new Map();
+    const keys = [...rules.keys()].sort();   // a stable question order: a memo answer lines up with the same rules
+    if (!decisionEngine || typeof decisionEngine.judge !== 'function') { for (const k of keys) decisionSay(rec, convId, k, rules.get(k), 'no Decision API on this server'); return decisions; }
+    const s = decisionEngine.settings();
+    if (!s.pluginOn) { for (const k of keys) decisionSay(rec, convId, k, rules.get(k), 'plugin-off'); return decisions; }
+    let tailOf = null;
+    for (const r0 of fresh) {
+      if (FO.selfRead(r0, selfId) || FO.systemRead(r0)) continue;   // the owner's own message and a vendor notice are never judged
+      const t = now();
+      const ask = [];
+      for (const k of keys) {
+        const rule = rules.get(k);
+        if (s.features[F.isRouteRule(rule) ? 'routing' : 'rules'] !== true) { decisionSay(rec, convId, k, rule, 'feature-off'); continue; }
+        const hrs = (decisionHours.get(k) || []).filter((x) => x > t - 3600e3);
+        decisionHours.set(k, hrs);
+        if (hrs.length >= F.decisionPerHour(rule)) { decisionSay(rec, convId, k, rule, 'per-hour'); continue; }
+        hrs.push(t);   // RESERVE the rule's hour slot in the same step as its check (decision-verify F5): concurrent passes see it
+        ask.push(k);
+      }
+      if (!ask.length) continue;
+      tailOf = tailOf || decisionTail(rec, convId, fresh);
+      const routes = ask.filter((k) => F.isRouteRule(rules.get(k)));
+      const memo = { id: String(r0.id), rule: ask.join(','), ...(routes.length ? { groups: routes.join(',') } : {}) };
+      let res = null;
+      try {
+        res = await decisionEngine.judge(routes.length ? 'routing' : 'rule', { body: r0.text || '', thread: tailOf(r0) }, { questions: ask.map((k, i) => F.decisionQuestion(rules.get(k), `q${i + 1}`)), memo, accountNever: rec.judge === 'never' });
+      } catch (err) { res = { ok: false, why: `error: ${(err && err.message) || err}`.slice(0, 160) }; }
+      if (!res || !res.ok || res.memo) {   // no call made (a refusal, a memo answer): the reserved hour slots go back
+        for (const k of ask) { const a = decisionHours.get(k) || []; const i = a.lastIndexOf(t); if (i >= 0) a.splice(i, 1); }
+      }
+      if (!res || !res.ok) { for (const k of ask) decisionSay(rec, convId, k, rules.get(k), (res && res.why) || 'refused'); continue; }
+      ask.forEach((k, i) => { decisions.set(`${k}|${r0.id}`, res.answers[i] || null); });
+    }
+    if (decisionHours.size > 2000) for (const [k, v] of decisionHours) if (!v.length) decisionHours.delete(k);
+    return decisions;
+  }
+
   /** THE FUNNEL ENTRY. `fresh` are the records that just became durable.
    *  R4: EVERY WATCHER in effect matches with ITS OWN filter and is delivered
    *  on its own (a wake, a digest window, a scope digest), each against its
@@ -6568,6 +6673,9 @@ function create(deps = {}) {
     // watcher, the good records beside the bad one) was lost silently. Each
     // record is matched, and each watcher prepared, on its own: a failure is
     // logged BY NAME and skipped, never dropped for the batch.
+    // lane decision-rule: the decision rules' answers BEFORE any filter runs (null = no decision rule in scope — no cost)
+    let decisions = null;
+    try { decisions = await preJudge(rec, convId, fresh, order, selfId); } catch (err) { log.warn(`[channels] ${rec.id}/${convId}: the decision pre-judge failed — no decision rule hits this batch: ${(err && err.message) || err}`); }
     for (const item of order) {
       try {
         const w = item.watcher;
@@ -6578,7 +6686,7 @@ function create(deps = {}) {
         const filter = item.split ? F.splitFilter(filter0, item.split) : filter0;
         if (item.split && !filter) continue;
         const hits = [];
-        const mctx = { ...(filter && Array.isArray(filter.rules) && filter.rules.some((x) => x && F.PLACE_RULE_KINDS.includes(x.kind)) ? placeCtx(w.principal) : {}), subjectOf };
+        const mctx = { ...(filter && Array.isArray(filter.rules) && filter.rules.some((x) => x && F.PLACE_RULE_KINDS.includes(x.kind)) ? placeCtx(w.principal) : {}), subjectOf, ...(decisions ? { decisions, principal: w.principal } : {}) };
         for (const r of fresh) {
           try {
             // lane channel-self-unread (B-c91b: 'inc-' matched the owner's OWN Outbox replies to userW): the owner's
@@ -7569,6 +7677,7 @@ function create(deps = {}) {
     reconcile: (id, o) => onProposal(id, () => reconcile(id, o)), sweepSending, sweepReplaces, setSenderHonesty, honestyLineFor, deprecatedReceiptWakes,   // verify r2: two Check-outcome presses ask the adapter ONCE
     setPolicy, policyFor, setReach, reachView, reachFor, request, decideRequest,
     agentWatch, agentUnwatch, agentWatchesFor, setAgentDirectory, directoryLists,   // lane channel-agent-watch
+    attention, setJudge, labelJudged,   // lane decision-attention: the judged rows' scan, the account's "never judge", a label
     onFresh,   // lane channel-agent-watch: the hit dispatch, driven by test-channel-agent-watch ⑤ with records the store already holds
     listFor, readFor, statusFor,
     flushPending: (adapterId, convId, opts) => { const rec = adapterRecords().adapters.find((r) => r.id === adapterId); return rec ? flushPending(rec, convId, opts || {}) : Promise.resolve({ ok: false, why: 'no-such-adapter' }); },

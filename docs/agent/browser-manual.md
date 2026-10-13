@@ -32,10 +32,10 @@ takes over in the live view. Never launch chromium / google-chrome / playwright 
 next step — follow it. `vibespace-browser status` says when this machine has no display.
 Say: "I am using the Agent browser — open the Agent browser window to watch it or take over."
 
-**(e) "A site asks for a passkey"** (a "Use your passkey" page; a command ending `[passkey_open]`): your
-browser holds no passkey of the user's — you cannot provide one. `vibespace-browser passkey cancel`, then take
-the page's other way in (a recovery code, a password), or ask the user. Never press Escape or click again and
-again — the page takes no input while it waits. Say: "<site> asks for a passkey my browser does not have — I cancelled it; please sign in on your own device, or tell me another way in."
+**(e) "A site asks for a passkey"**: VibeSpace may hold the user's key for that site (sealed — never shown to you); a
+sign-in follows the owner's policy per key — `[passkey_ask]` = a card waits for the owner: do not click again. To CREATE
+one: `vibespace-browser passkey register <site>` first. `[passkey_open]` ⇒ `vibespace-browser passkey cancel`, then the
+page's other way in (a recovery code, a password) or ask the user. Never press Escape or click again and again.
 
 **(f) "A site wants my location / the camera / to print"**: every permission is DENIED ahead, so the page never waits — a page waiting on a permission: decide it with `permission` (`vibespace-browser permission geolocation allow [origin] [<lat>,<lon>]`; `deny` puts it back). A print window never opens (VibeSpace closes it; your result says so) — for a printout: `vibespace-browser pdf <path>`.
 **(g) "The agent browser cannot get past this site"**: a REAL desktop browser of your own, beside your chat — ONE door: `vibespace-browser new "<site>" --backend desktop-app [--url https://…] [--keep-profile] [--size WxH] [--mode auto|tree|pixels]` answers a window HANDLE you then drive with `vibespace-window snapshot / click @ref / type @ref "…" / key / screenshot <handle>` (`vibespace-docs window`); `vibespace-browser --profile <handle> <verb>` answers `no_cdp_on_this_backend`. A real Chrome, NO egress policy, its own throwaway profile (deleted with the window's session unless `--keep-profile`); the user can act in it any time. Pick the mode with `--mode`: `tree` when the page's controls have names (forms, buttons — snapshot + @refs), `pixels` for a canvas / map / game / a page whose tree is empty (it pins 1920×1080 so `click --at x,y` speaks fixed pixels; `--size WxH` overrides), default `auto` (attach probes it); a browser without accessibility is pixels whatever you ask; switch later with `vibespace-window mode <handle> tree|pixels|auto`. Never start chromium yourself; `vibespace-window open chromium` stays `browser_is_human`; never a user name or password in `--url` (log in inside the page); at most 2 per conversation — `vibespace-window stop <handle>` stops one, and they end with your conversation.
@@ -326,30 +326,39 @@ guess from a timeout:
   Agent browser panel; it loses what was typed on the page); never retry in a
   loop.
 
-### A page waiting for a passkey — `[passkey_open]`
+### A page waiting for a passkey — `[passkey_open]` / `[passkey_ask]`; the passkeys your browser holds
 
-A sign-in page may call the browser's passkey API (WebAuthn: "Use your passkey", "Continue with Passkey").
-Chrome then shows ITS OWN window — not page pixels: the live view and your screenshots never show it — and
-the page takes no input until it ends. **Your browser holds no passkey of the user's**, so it never ends by
-itself. VibeSpace watches every tab of your browser for these requests:
+A sign-in page may call the browser's passkey API (WebAuthn: "Use your passkey", "Create a passkey"). VibeSpace keeps
+the user's passkeys for each browser profile SEALED in its own store (never in Chrome, never shown to you), and judges
+every request on your tabs — the page waits a few milliseconds while it does:
 
-* **A request pending 3 s is a named fact.** A command that would act on the page (`click`, `press`,
-  `type`, `fill`, …) does NOT act: it returns `[passkey_open]`, exit 1, and its result STARTS with the sentence
-  `This page is waiting for a passkey (<site>). The agent's browser holds no passkey of yours — cancel it
-  (\`vibespace-browser passkey cancel\`) and use the page's other way in (a recovery code, a password), or ask
-  the user to sign in on their own device.` (`--json`: `{"success":false,"code":"passkey_open","passkey":
-  {state,id,kind,rpId,tab,startedAt,text},"error":"<the sentence>"}`). A command already running when the
-  request turns 3 s old returns the same at once; a read (`snapshot`, `screenshot`, `get …`) runs with the
-  sentence as its first note. Pressing Escape again and again changes nothing — that is the incident this
-  answers.
-* **`vibespace-browser passkey status`** — what is pending (or "No passkey request is waiting on your
-  browser."). **`vibespace-browser passkey cancel`** — aborts the page's request: the page is told it was
-  aborted (its own error path runs, its spinner stops), Chrome's window closes, and the page's other ways in
-  ("Use a recovery code", "Sign in with password") take clicks again. Then choose one — or ask the user.
+* **No passkey for the site** ⇒ the page's request fails at once (NotAllowedError) and the page shows its other ways
+  in. Nothing to cancel.
+* **A passkey whose policy is "allowed"** ⇒ the sign-in just works (one line on your browser's trace).
+* **Policy "ask"** (every new key starts here) ⇒ a card goes to the owner's For-you tray; a command that would act on
+  the page returns `[passkey_ask]`, exit 1, starting `This page is waiting for the owner to allow the passkey for
+  <site> (a card is in their For-you tray). Do not retry the click — \`vibespace-browser passkey status\` says when it
+  is answered; \`passkey cancel\` withdraws the request.` Allowed ⇒ the page signs in; refused or unanswered in 5 min ⇒
+  the page is told it was not allowed, and your next command says why (`[passkey_refused]` note).
+* **Policy "no"**, or the owner switched passkeys off for agents on this profile ⇒ refused at once, said by name.
+* **Creating a passkey needs the owner's permission FIRST:** `vibespace-browser passkey register <site> [--user <name>]`
+  files a card and waits (≤ 5 min) — "Allowed: … press the page's button" lets ONE passkey be created in the next
+  10 minutes; then press the page's "create a passkey". Without it the page's create is refused: `Registering a passkey
+  on <site> needs the owner's permission first: run \`vibespace-browser passkey register <site>\`, then press the
+  page's button again.` A Background Work job cannot register one (no owner at the keyboard).
+* `vibespace-browser passkey list` — this profile's passkeys (site, user, by agent / you, last used, policy, the first
+  8 characters of the id — never a key); `passkey forget <site|id>` removes one YOU registered (the owner's own keys are
+  his to remove); `passkey status` — what a page waits for + what the profile holds.
+* **`[passkey_open]`** — a request nothing in VibeSpace answers (a browser started before VibeSpace could watch it):
+  a command that would act returns `[passkey_open]` starting `This page is waiting for a passkey (<site>) and nothing
+  in VibeSpace answers it — cancel it (\`vibespace-browser passkey cancel\`) and use the page's other way in (a recovery
+  code, a password), or ask the user to sign in on their own device.` (`--json`: `{"success":false,"code":"passkey_open",
+  "passkey":{state,id,kind,rpId,tab,startedAt,text},"error":"<the sentence>"}`); a read runs with it as its first note.
+  `vibespace-browser passkey cancel` aborts it: the page's other ways in take clicks again.
 * A browser VibeSpace began watching after a page already asked (rare: a restart) cannot be seen into —
   `passkey status` says so; navigate elsewhere or close the tab.
-* The user sees the same in the live view (a banner with ONE button, Cancel — and, for a browser with a
-  window, that Chrome's own passkey window is on this computer's desktop), and, after 20 s, one "For you" item.
+* While the user drives the browser, what the page does is theirs: their own passkey sign-ins and registrations raise
+  no card (the key is marked "you"), and your pending request is withdrawn.
 
 ### A page that keeps reloading — a navigation loop
 
@@ -756,8 +765,8 @@ default with `*`.
 * **Never echo a cookie, a token or an `Authorization` header** into your reply
   or into a file. The OUTPUT of `cookies get`, `state save` and `storage` is a
   secret; so are screenshots of logged-in pages and HAR captures.
-* **`passkey_open` is cancelled, never waited out or pressed at.** `vibespace-browser passkey cancel`, then the
-  page's other way in, or ask the user — you never have the user's passkey.
+* **`passkey_open` is cancelled, never waited out or pressed at; `passkey_ask` is waited for, never clicked again.**
+  A passkey is created only after `passkey register <site>` was allowed; you never see a key.
 * **`dialog_open` is answered, never waited out.** Read what the page asks,
   decide from the task, `vibespace-browser dialog accept [text]` or `dismiss`,
   then continue — never retry the command that ran into it.

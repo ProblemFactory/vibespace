@@ -42,6 +42,7 @@ import { routeErrorText, wakeWhyText, principalKindText, groupTitle, principalTe
 // the ONE principal picker (search + list, keyed, recent picks) — never a <select> of the whole roster
 import { principalPicker, rosterFromApp } from './principal-picker.js';
 import { budgetText } from './webhook-view.js';   // lane webhook-l2-ui: a path's wake budget line
+import * as DM from '../decision-model.js';   // lane decision-rule: D1's plan ceilings, price and budget default (the cost line)
 
 const RULE_LABELS = () => ({
   'mention': t('mentions'),
@@ -64,6 +65,8 @@ const RULE_LABELS = () => ({
   'reply-to-sent': t('is a quote, a reply in a thread, or a reply in the mail thread of a message this agent sent'),
   // lane webhook-l2-ui: a FACT the message carries (a webhook path's declared keys, sender / subject / event) equals a value
   'fact': t('has the fact (key = value)'),
+  // lane decision-rule: the person's condition in plain words, judged per message by the Decision API plugin
+  'decision': t('is judged by the Decision API'),
 });
 
 
@@ -79,7 +82,7 @@ function numberInput(value, { min = 0, max = 1000, step = 1 } = {}) { const i = 
 function field(label, input) { const f = el('div', 'chan-af-field'); f.append(fieldLabel(label), input); return f; }
 function noteEl(text, warn = false) { return el('div', 'chan-flow-note' + (warn ? ' chan-warn' : ''), text); }
 /** A fresh rule of one kind (the shape the PURE validator expects). */
-function freshRule(kind) { return kind === 'time-window' ? { kind, from: '09:00', to: '18:00' } : kind === 'sender-in-group' ? { kind, members: [] } : kind === 'fact' ? { kind, key: '', value: '' } : F.PLACE_RULE_KINDS.includes(kind) || kind === 'has-attachment' ? { kind } : { kind, value: '' }; }
+function freshRule(kind) { return kind === 'decision' ? { kind, condition: '', question: 'predicate', threshold: F.DECISION.threshold.def, perHour: F.DECISION.perHour.def } : kind === 'time-window' ? { kind, from: '09:00', to: '18:00' } : kind === 'sender-in-group' ? { kind, members: [] } : kind === 'fact' ? { kind, key: '', value: '' } : F.PLACE_RULE_KINDS.includes(kind) || kind === 'has-attachment' ? { kind } : { kind, value: '' }; }
 
 /** The per-lane latency sentence from the digest's structure. */
 export function wakeLatencyText(wl) {
@@ -467,6 +470,127 @@ let cardSeq = 0;
  *  the cap was a third exclusive answer, so a digest's cap sat in a disabled field). The per-notification
  *  receipt switch is gone from the dialog and NO control sets `receiptWake` today (lane channel-withdraw
  *  retires the field; the engine still honours a stored `true`); a stored value rides through untouched. */
+// ── THE DECISION RULE'S ROW (lane decision-rule, D3 of docs/design-decision-api.zh.md §2.5) ─────────────────────────
+// The condition in plain words, yes/no or one of a list (an option may ROUTE to a Task Group / an agent that holds
+// access here), the threshold, the rule's own hour cap, and THE COST LINE — the records a day this grain would have
+// judged (the server's estimate) × D1's token ceiling for the use × the price, against the plugin's daily budget (the
+// hit rate is unknown until it runs, and said so). The plugin off / no key / its switch off is SAID on the row with a
+// way to the Plugins card — never a greyed control with a hint.
+let decisionPlugin = { at: 0, row: null, pending: null };
+function decisionPluginRow() {
+  if (decisionPlugin.row && Date.now() - decisionPlugin.at < 10e3) return Promise.resolve(decisionPlugin.row);
+  if (!decisionPlugin.pending) decisionPlugin.pending = fetchJson('/api/plugins').then((r) => { decisionPlugin = { at: Date.now(), row: (((r && r.plugins) || []).find((p) => Array.isArray(p.provides) && p.provides.includes('decision'))) || { missing: true }, pending: null }; return decisionPlugin.row; }, () => { decisionPlugin.pending = null; return { missing: true }; });
+  return decisionPlugin.pending;
+}
+const usdText = (v) => `$${v > 0 && v < 0.01 ? v.toFixed(4) : v.toFixed(2)}`;
+const valueSlug = (s) => String(s || '').toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40) || 'option';
+/** Why this rule judges nothing right now (null = it will judge): the plugin row's own facts. */
+function decisionOffWhy(row, route) {
+  if (!row) return null;
+  if (row.missing) return t('The Decision API plugin is not available on this server — this rule never matches.');
+  if (!row.enabled) return t('The Decision API plugin is off — this rule judges nothing (and never matches) until you turn it on.');
+  if (!row.configured) return t('The Decision API has no provider key yet — this rule judges nothing until you add one on its card.');
+  const f = (row.decision && row.decision.features) || {};
+  if (route && f.routing !== true) return t('The Decision API\'s "routing" switch is off — this rule routes nothing until you turn it on.');
+  if (!route && f.rules !== true) return t('The Decision API\'s "rules" switch is off — this rule judges nothing until you turn it on.');
+  return null;
+}
+function decisionBlock(rule, { principals, changed }) {
+  const box = el('div', 'chan-af-decision');
+  const cond = document.createElement('textarea');
+  cond.className = 'chan-opt-input chan-dec-cond'; cond.rows = 3; cond.maxLength = F.DECISION.conditionMax; cond.value = rule.condition || '';
+  cond.placeholder = t('In plain words — e.g. the sender asks me to pay or approve something');
+  cond.oninput = () => { rule.condition = cond.value; changed(); };
+  box.appendChild(field(t('Condition (judged for each message)'), cond));
+  const qSel = selectBox([{ value: 'predicate', label: t('Yes or no — a hit when it is likely enough') }, { value: 'choice', label: t('One of a list — or route to a group or agent') }], rule.question === 'choice' ? 'choice' : 'predicate');
+  qSel.classList.add('chan-dec-q');
+  const opts = el('div', 'chan-dec-opts');
+  const routeTo = [{ value: '', label: t('not routed') }, ...principals.filter((p) => p.kind === 'agent' || p.kind === 'group').map((p) => ({ value: p.value, label: p.label }))];
+  function drawOpts() {
+    opts.textContent = '';
+    if (rule.question !== 'choice') return;
+    (rule.choices || []).forEach((o, i) => {
+      const r = el('div', 'chan-dec-opt');
+      const v = textInput(o.value, t('a word, e.g. billing')); v.classList.add('chan-dec-val');
+      v.oninput = () => { o.value = v.value.trim(); changed(); };
+      const d = textInput(o.description, t('what it means (optional)')); d.maxLength = F.DECISION.choiceChars; d.classList.add('chan-dec-desc');
+      d.oninput = () => { o.description = d.value; changed(); };
+      const to = selectBox(routeTo, o.to ? `${o.to.kind}:${o.to.id}` : ''); to.title = t('Route to'); to.classList.add('chan-dec-to');
+      to.onchange = () => {
+        const p = principals.find((x) => x.value === to.value);
+        if (p) { o.to = { kind: p.kind, id: p.id, name: p.name || null }; if (!o.value) { o.value = valueSlug(p.name || p.id); v.value = o.value; } } else delete o.to;
+        changed(); refresh();
+      };
+      const rm = document.createElement('button');
+      rm.type = 'button'; rm.className = 'icon-btn chan-af-rm'; rm.title = t('Remove'); rm.setAttribute('aria-label', t('Remove'));
+      rm.appendChild(icon('close', 12));
+      rm.onclick = () => { rule.choices.splice(i, 1); drawOpts(); changed(); refresh(); };
+      r.append(v, d, to, rm);
+      opts.appendChild(r);
+    });
+    if ((rule.choices || []).length < F.DECISION.choicesMax) {
+      const add = btn(t('Add option'), null, 'chan-af-add chan-dec-add'); add.prepend(icon('plus', 11));
+      add.onclick = () => { rule.choices = [...(rule.choices || []), { value: '', description: '' }]; drawOpts(); changed(); };
+      opts.appendChild(add);
+    }
+    opts.appendChild(noteEl(t('"none" is always an answer and notifies nobody. A message routed to a group or agent reaches it through its own notification row here — give that row this same rule (the judge is asked once per message).')));
+  }
+  qSel.onchange = () => {
+    rule.question = qSel.value;
+    if (rule.question === 'choice' && !(rule.choices || []).length) rule.choices = [{ value: '', description: '' }];
+    if (rule.question !== 'choice') delete rule.choices;
+    drawOpts(); changed(); refresh();
+  };
+  box.append(field(t('Answer'), qSel), opts);
+  const th = document.createElement('input');
+  th.type = 'range'; th.className = 'chan-dec-th'; th.min = String(F.DECISION.threshold.min); th.max = String(F.DECISION.threshold.max); th.step = '0.05';
+  th.value = String(F.decisionThreshold(rule));
+  th.setAttribute('aria-label', t('Hit when the judge is at least this sure'));
+  const thv = el('span', 'chan-dec-thv', Number(th.value).toFixed(2));
+  th.oninput = () => { rule.threshold = Math.round(Number(th.value) * 100) / 100; thv.textContent = rule.threshold.toFixed(2); changed(); };
+  const thWrap = el('span', 'chan-dec-thwrap');
+  thWrap.append(th, thv);
+  const ph = numberInput(F.decisionPerHour(rule), { min: F.DECISION.perHour.min, max: F.DECISION.perHour.max, step: 1 });
+  ph.classList.add('chan-dec-ph');
+  ph.oninput = () => { rule.perHour = ph.value === '' ? undefined : Number(ph.value); changed(); refresh(); };
+  const grid = el('div', 'chan-af-grid');
+  grid.append(field(t('Hit when the judge is at least this sure'), thWrap), field(t('Judgments per hour, at most'), ph));
+  box.appendChild(grid);
+  const cost = noteEl(t('Cost: estimating…'));
+  cost.classList.add('chan-dec-cost');
+  const off = el('div', 'chan-dec-plugin');
+  box.append(cost, off);
+  let row = null, est = null;
+  function refresh() {
+    const route = F.isRouteRule(rule);
+    off.textContent = '';
+    const why = decisionOffWhy(row, route);
+    if (why) {
+      const line = noteEl(why, true);
+      line.classList.add('chan-dec-off');
+      if (!(row && row.missing)) {
+        const open = btn(t('Open Plugins'), null, 'chan-dec-open');
+        open.onclick = () => { const a = globalThis.app; if (a && typeof a.openPluginsDialog === 'function') a.openPluginsDialog(); };
+        line.append(' ', open);
+      }
+      off.appendChild(line);
+    }
+    const perDay = est ? (est.decision ? est.decision.judgedPerDay : est.totalPerDay) : null;
+    if (perDay === null || perDay === undefined) { cost.textContent = t('Cost: estimating…'); cost.classList.remove('chan-warn'); return; }
+    const d = (row && row.decision) || {};
+    const provider = DM.PROVIDERS.includes(d.provider) ? d.provider : DM.PROVIDERS[0];
+    const budgetCents = Number.isFinite(Number(d.dailyBudgetCents)) ? Number(d.dailyBudgetCents) : DM.DAILY_BUDGET_CENTS_DEFAULT;
+    const c = F.decisionCost({ recordsPerDay: perDay, perHour: F.decisionPerHour(rule), tokensPerCall: DM.inputPlan(route ? 'routing' : 'rule').ceiling, pricePerMtok: DM.PRICE_PER_MTOK_USD[provider], budgetCents });
+    const p = { n: c.judgmentsPerDay, usd: usdText(c.usdPerDay), budget: usdText(c.budgetUsd) };
+    cost.textContent = [c.within ? t('≈ {n} judgments/day ≈ {usd} at the current price — within your {budget} daily budget.', p) : t('≈ {n} judgments/day ≈ {usd} at the current price — over your {budget} daily budget: judging stops for the day when it is spent.', p),
+      c.capped ? t('(the hourly limit holds it there)') : '', t('How often it hits is known only once it runs.')].filter(Boolean).join(' ');
+    cost.classList.toggle('chan-warn', !c.within);
+  }
+  decisionPluginRow().then((r) => { row = r; refresh(); });
+  drawOpts();
+  return { el: box, onEstimate(e) { est = e || null; refresh(); } };
+}
+
 function watcherRow(host, { w = null, f = null, st, principals, onAnyChange, onRemove }) {
   const seq = ++cardSeq;
   const box = el('div', 'chan-watch-row');
@@ -553,7 +677,9 @@ function watcherRow(host, { w = null, f = null, st, principals, onAnyChange, onR
   addRule.prepend(icon('plus', 11));
   rulesBox.appendChild(addRule);
   box.append(rulesBox, wMen.lab);
-  const rules = (what0 === 'rule' && f && Array.isArray(f.rules) ? f.rules : []).map((r) => ({ ...r }));
+  const rules = (what0 === 'rule' && f && Array.isArray(f.rules) ? f.rules : []).map((r) => ({ ...r, ...(Array.isArray(r.choices) ? { choices: r.choices.map((o) => ({ ...o })) } : {}) }));
+  const decisionRows = new Set();   // lane decision-rule: each decision row's cost line follows the live estimate
+  let decisionEst = null;
   const problemWords = (v) => F.filterProblemText(v, { t, ruleLabel: (k) => RULE_LABELS()[k] || PATTERN_LABELS()[k] || k });
   function ruleRow(rule, idx) {
     const row = el('div', 'chan-af-rule');
@@ -572,6 +698,7 @@ function watcherRow(host, { w = null, f = null, st, principals, onAnyChange, onR
       case 'reply-to-sent': fields.appendChild(noteEl(t('Set this on a group to cover each of its agents for their own sends — a reply notifies only the agent whose message it answers.'))); break;
       case 'time-window': bind(textInput(rule.from || '09:00', 'HH:MM'), 'from'); bind(textInput(rule.to || '18:00', 'HH:MM'), 'to'); break;
       case 'fact': bind(textInput(rule.key, t('key, e.g. event')), 'key', (v) => v.trim()); bind(textInput(rule.value, t('value, e.g. deploy.failed')), 'value'); break;
+      case 'decision': { const d = decisionBlock(rule, { principals, changed }); row._extra = d.el; decisionRows.add(d); if (decisionEst) d.onEstimate(decisionEst); break; }   // lane decision-rule
       default: break;
     }
     if (fields.childNodes.length) row.appendChild(fields); else row.classList.add('chan-af-rule-nofield');
@@ -586,8 +713,9 @@ function watcherRow(host, { w = null, f = null, st, principals, onAnyChange, onR
   }
   function drawRules() {
     rulesList.textContent = '';
+    decisionRows.clear();
     if (!rules.length) rulesList.appendChild(noteEl(t('No rules yet — add one below. With no rule nothing matches (a wake is money, so the filter fails closed).')));
-    rules.forEach((r, i) => { const row = ruleRow(r, i); rulesList.appendChild(row); if (row._preview) rulesList.appendChild(row._preview.el); });
+    rules.forEach((r, i) => { const row = ruleRow(r, i); rulesList.appendChild(row); if (row._extra) rulesList.appendChild(row._extra); if (row._preview) rulesList.appendChild(row._preview.el); });
   }
   addRule.onclick = () => { rules.push(freshRule('keyword')); drawRules(); changed(); const last = [...rulesList.querySelectorAll('.chan-af-rule')].pop(); const inp = last && last.querySelector('input'); if (inp) inp.focus(); };
   drawRules();
@@ -687,6 +815,8 @@ function watcherRow(host, { w = null, f = null, st, principals, onAnyChange, onR
       const r = await st.estimate(filter, { notify: cur.notify, digestMinutes: cur.digestMinutes, dailyWakeCap: cur.dailyWakeCap }, cur.principal ? { kind: cur.principal.kind, id: cur.principal.id } : null);
       if (!r || r.error) { est.className = 'chan-af-stat chan-flow-status chan-warn'; est.textContent = (r && r.error) || t('Estimate failed'); estHint.textContent = ''; state.lastEstimate = null; onAnyChange(); return; }
       state.lastEstimate = r.estimate;
+      decisionEst = r.estimate;
+      for (const d of decisionRows) d.onEstimate(r.estimate);
       est.className = 'chan-af-stat chan-flow-status';
       est.textContent = r.stat;
       estHint.textContent = r.hint || '';

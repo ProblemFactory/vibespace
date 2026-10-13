@@ -407,6 +407,7 @@ function stuckWords(f, tIn) {
   // lane browser-passkey: a page waiting for a passkey (the banner's words are browser-passkey's passkeyWords)
   // lane browser-ui-prompts: the browser's own prompt (the bar's words are promptWords)
   if (f.state === 'prompt') return f.prompt && f.prompt.type === 'http-auth' ? { chip: t('page asks for a sign-in'), line: t('The page asks for an HTTP sign-in — enter it in the live view'), action: null } : { chip: t('page asks for a file'), line: t('The page asks for a file — the agent uploads it'), action: null };
+  if (f.state === 'passkey' && f.passkey && f.passkey.state === 'passkey_ask') return { chip: t('page waits for your passkey answer'), line: t('The page is waiting for you to allow a passkey — answer its card in For you or in the live view'), action: null }; // lane passkey-ui
   if (f.state === 'passkey') return { chip: t('page waits for a passkey'), line: t('The page is waiting for a passkey — cancel it in the live view'), action: null };
   // lane site-reset: the loop (with its cycle where the fact carries it; the panel row's digest carries kinds only)
   if (f.state === 'loop') { const w = f.loop ? loopWords(f.loop, tIn) : null; return { chip: w ? w.chip : t('page keeps reloading'), line: w ? w.line : t('The page keeps reloading by itself (a navigation loop) — its stored login may be stale'), action: null, loop: w }; } // verify r4 #4: the chip follows the shape (a self-refreshing page says its period)

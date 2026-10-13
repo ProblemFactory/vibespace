@@ -918,8 +918,8 @@ console.log('contributions — D. wiring pins');
   const gm = read('src/lib/gear-menu.js');
   ok(/^registerGearMenu\(\);/m.test(gm) && /el\.innerHTML = `<span class="gs-menu-icon">\$\{svg\}<\/span><span>\$\{escHtml\(label\)\}<\/span>`/.test(gm), 'gear-menu registers at module load; the row label is escHtml()ed (plugin window titles reach it)');
   const pal = read('src/lib/session-palette.js');
-  ok(/registerCommand\(\{ id: 'session\.palette'/.test(pal) && /\(e\.ctrlKey \|\| e\.metaKey\) && e\.key\.toLowerCase\(\) === 'k' && !e\.target\.closest\?\.\('\.xterm'\)/.test(pal) && /runCommand\('session\.palette', \{ app \}\)/.test(pal) && /\}, true\);/.test(pal),
-    "palette registers command 'session.palette'; the lenient capture-phase Ctrl+K check stays byte-identical and routes through runCommand");
+  ok(/registerCommand\(\{ id: 'session\.palette'/.test(pal) && /\(e\.ctrlKey \|\| e\.metaKey\) && e\.key\.toLowerCase\(\) === 'k' && !e\.target\.closest\?\.\('\.xterm, \[data-own-mod-k\]'\)/.test(pal) && /runCommand\('session\.palette', \{ app \}\)/.test(pal) && /\}, true\);/.test(pal),
+    "palette registers command 'session.palette'; the lenient capture-phase Ctrl+K check stays byte-identical (its exclusions: a terminal, and since lane doc-link-bubble an editor that claims the chord — [data-own-mod-k], the Doc window's text) and routes through runCommand");
   const cm = read('src/lib/command-mode.js');
   ok(/\}, true\); \/\/ capture phase/.test(cm) && /toggle\(\) \{ if \(this\._cmdMode\) this\.exit\(\); else this\.enter\(\); \}/.test(cm) && /^registerCommandModeCommands\(\);/m.test(cm), 'command-mode keeps its capture-phase prefix dispatch (listener order is load-bearing) and exposes toggle()');
   ok(!/registerKeybinding\(/.test(cm) && !/registerKeybinding\(/.test(pal), 'core key chords are NOT registerKeybinding chords (modifier-lenient checks + capture order would change behaviour) — commands only');

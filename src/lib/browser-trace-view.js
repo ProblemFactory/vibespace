@@ -55,6 +55,7 @@ import { humanStateLine, humanRefusalText } from '../browser-human.js'; // BROWS
 import { dividerText, sessionRowText, sessionReplays, retentionText, sizeText } from './browser-session-words.js'; // the words every session surface shares
 import { displayFactText } from './browser-display-words.js';
 import { rowLine, rowFold, rowMenu, gridNeed, orphanOrder, usageLine as usageCell, diskFold } from './browser-panel-model.js'; // design 015 (lane browser-panel-tidy): the row's line / fold / menu (PURE)
+import { createPasskeysSection, isPhoneWidth } from './browser-passkeys-view.js'; // lane passkey-ui: a profile's Passkeys table
 import { barLayout } from './live-bar-layout.js'; // design 015 §2b: a cell's line never wraps — what does not fit folds by width (the bar-fold rule) // lane headless-fallback: a browser that runs headless because the machine has no desktop session says so
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
@@ -832,6 +833,18 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
   /** lane browser-admin 2a: the build a profile's browser REPORTS (the digest's browser record — the fact, not the choice). */
   function runningBuildOf(id) { const b = app._browserProfiles && app._browserProfiles.browsers ? app._browserProfiles.browsers[id] : null; return b && typeof b.runningBuild === 'string' ? b.runningBuild : null; }
   /** lane browser-stuck: the digest's `pageStuck` row fact (a dialog holds its page / it does not respond). */
+  // ── lane passkey-ui (design-passkey-store §2.5): a profile's Passkeys table (src/lib/browser-passkeys-view.js) — desk: a
+  // fold-out under its row that survives a rebuild; phone: a bottom sheet ──
+  const pkOpen = new Map(); // profileId → the open section
+  const pkCountOf = (id) => Math.max(0, Number((app._browserProfiles && app._browserProfiles.passkeyCounts && app._browserProfiles.passkeyCounts[id]) || 0));
+  function pkClose(pid) { const o = pkOpen.get(pid); if (!o) return; pkOpen.delete(pid); o.close(); }
+  function pkToggle(r) {
+    if (pkOpen.has(r.id)) { pkClose(r.id); return; }
+    const o = createPasskeysSection({ profileId: r.id, label: String(r.label || r.id), words: WORDS, phone: isPhoneWidth(), onClose: () => pkOpen.delete(r.id) });
+    pkOpen.set(r.id, o);
+    if (!o.sheet) { const had = rowsById.get(r.id); if (had && had.row.isConnected) had.row.after(o.sec); }
+    o.load();
+  }
   function pageStuckOf(id) { const m = app._browserProfiles && app._browserProfiles.pageStuck; return m && typeof m === 'object' && m[id] && typeof m[id] === 'object' ? m[id] : null; }
   /** verify r1 A6: a running local browser launched BEFORE the lane (its record carries no `holdDialogs` launch stamp) still
    *  has 0.38.1 accept alert + leave-page dialogs by itself until its next start — the row SAYS which mode it runs in. */
@@ -910,8 +923,9 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
   }
   /** The ⋯ menu (showContextMenu): the model's items in order — the record switches as check rows, Delete… last in the
    *  warn colour; each row carries its act's class (`bprof-replay`, `bprof-stop`, `bprof-restart`, `bprof-forget`, …). */
-  const ACT_CLASS = { record: 'bprof-record', 'record-mine': 'bprof-record-mine', replay: 'bprof-replay', build: 'bprof-build-btn', rename: 'bprof-rename', stop: 'bprof-stop', restart: 'bprof-restart', 'restart-hold': 'bprof-restart-hold', delete: 'bprof-forget' };
-  function openRowMenu(r, x, anchor) {
+  const ACT_CLASS = { passkeys: 'bprof-passkeys', record: 'bprof-record', 'record-mine': 'bprof-record-mine', replay: 'bprof-replay', build: 'bprof-build-btn', rename: 'bprof-rename', stop: 'bprof-stop', restart: 'bprof-restart', 'restart-hold': 'bprof-restart-hold', delete: 'bprof-forget' };
+  function openRowMenu(r, x0, anchor) {
+    const x = { ...x0, passkeys: pkCountOf(r.id) }; // lane passkey-ui: the menu's "Passkeys (n)…" reads the digest's count now
     const items = rowMenu(r, x).map((m) => {
       if (m.sep) return { separator: true };
       const check = m.check === undefined ? '' : `<span class="chan-menu-check${m.check ? ' chan-menu-check-on' : ''}">${m.check ? UI_ICONS.check : ''}</span>`;
@@ -925,6 +939,7 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
   const patchSwitch = async (r, body) => { st.busy = true; await act(`/api/browser/profiles/${encodeURIComponent(r.id)}`, jsonInit('PATCH', body), t('Could not change recording')); st.busy = false; load(); };
   // THE ACTS by the model's ids — the ⋯ menu's rows run these (the primary and the who cell's Change… are their own buttons)
   const RUN = {
+    passkeys: (r) => pkToggle(r), // lane passkey-ui: the profile's Passkeys table (desk: fold-out under the row; phone: a bottom sheet)
     record: (r) => patchSwitch(r, { record: !r.record }),
     'record-mine': (r) => patchSwitch(r, { recordMine: r.recordMine === false }),
     // 2026-09-27: every browser session on this profile, each with its replay (the replay window, this profile's list)
@@ -1108,9 +1123,10 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
       else { row = profileRow(r, v); rowsById.set(r.id, { row, sig }); }
       patchDisk(row, r);
       table.appendChild(row);
+      const pko = pkOpen.get(r.id); if (pko && !pko.sheet) table.appendChild(pko.sec); // lane passkey-ui: an open table stays under its row across a rebuild
     }
     if (rows.length) prof.appendChild(table);
-    for (const id of [...rowsById.keys()]) if (!seen.has(id)) { rowsById.delete(id); whoCells.delete(id); openFolds.delete(id); }
+    for (const id of [...rowsById.keys()]) if (!seen.has(id)) { rowsById.delete(id); whoCells.delete(id); openFolds.delete(id); pkClose(id); }
     // takeover C3: every conversation's managed ephemeral browser — watched like a profile, gone with its conversation
     // design 015 (a): the browsers without a profile — their records' count and size in this section's head (no pseudo-row)
     const et = v.ephemeral?.trace || { n: 0, bytes: 0 };
@@ -1240,7 +1256,7 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
   }
   const scheduleLoad = () => { if (st.timer) clearTimeout(st.timer); st.timer = setTimeout(() => { st.timer = null; load(); }, PANEL_REFRESH_DEBOUNCE_MS); };
   // (+ tasks-updated: a Task Group's title / membership on a "Who can use it" chip follows the store)
-  const onGlobal = (m) => { if (st.closed || !m) return; if (m.type === 'browser-housekeeping-updated' || m.type === 'browser-profiles-updated' || m.type === 'browser-trace-appended' || m.type === 'tasks-updated' || m.type === 'browser-kept-updated') scheduleLoad(); }; // lane browser-resume: + the kept browsers
+  const onGlobal = (m) => { if (st.closed || !m) return; if (m.type === 'browser-passkeys-updated' && pkOpen.has(String(m.profileId || ''))) pkOpen.get(String(m.profileId)).load(); if (m.type === 'browser-housekeeping-updated' || m.type === 'browser-profiles-updated' || m.type === 'browser-trace-appended' || m.type === 'tasks-updated' || m.type === 'browser-kept-updated') scheduleLoad(); }; // lane browser-resume: + the kept browsers
   app.ws?.onGlobal?.(onGlobal);
   sweepBtn.onclick = async () => { sweepBtn.disabled = true; const r = await act('/api/browser/housekeeping/sweep', jsonInit('POST'), t('Sweep failed')); sweepBtn.disabled = false; if (r) showToast(t('Sweep: removed the frames of {n} action(s) ({bytes}) and {r} recording(s) ({rbytes})', { n: r.removed || 0, bytes: bytesText(r.bytesRemoved || 0), r: r.recordingsRemoved || 0, rbytes: bytesText(r.recordingBytesRemoved || 0) }), { duration: 6000 }); load(); };
   refreshBtn.onclick = () => load();

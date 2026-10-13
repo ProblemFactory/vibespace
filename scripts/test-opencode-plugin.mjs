@@ -64,7 +64,7 @@ console.log('— ① the built-in plugin def + its state');
   // bare `require` sees; the panel must still render something honest
   const pm = mkManager(dir, { broadcast: (m) => sent.push(m) });
   const def = pm.defs()[OPENCODE_SERVE_ID];
-  ok('a THIRD built-in plugin exists next to tailscale/frp, with the same def shape', !!def && def.id === 'opencode-serve' && /OpenCode/.test(def.label) && def.description.length > 40 && ['tailscale', 'frp', OPENCODE_SERVE_ID].every((k) => k in pm.defs()));   // int260: by name — voice P0's voice-input is a 4th built-in
+  ok('a THIRD built-in plugin exists next to tailscale/frp, with the same def shape', !!def && def.id === 'opencode-serve' && /OpenCode/.test(def.label) && def.description.length > 40 && ['tailscale', 'frp', OPENCODE_SERVE_ID].every((k) => k in pm.defs()));   // int260 + int258: by name — voice-input and decision-api are built-ins too
   const st0 = pm.status(OPENCODE_SERVE_ID);
   ok('FRESH instance ⇒ OFF: enabled false, desiredUp false, prompted false, running false (the owner decision, no migration needed)', st0.enabled === false && st0.desiredUp === false && st0.prompted === false && st0.running === false);
   ok('wantsServiceUp is false on a fresh record (this is the plugin half of the autostart decision)', pm.wantsServiceUp(OPENCODE_SERVE_ID) === false);
@@ -87,7 +87,7 @@ console.log('— ① the built-in plugin def + its state');
     let calls = 0; const spy = mkManager(dir);
     const real = spy.status.bind(spy); spy.status = (id) => { calls++; return real(id); };
     spy._snapshot();
-    const n = Object.keys(spy.defs()).length;   // int260: the manager's own census, never a literal (voice P0's voice-input made it 4)
+    const n = Object.keys(spy.defs()).length;   // int260 + int258: the manager's own census, never a literal (voice-input and decision-api made it 5)
     ok('list + services are built in ONE pass (one status() per plugin), never two walks over a probing status()', n >= 3 && calls === n, { calls, n });
   }
   pm.setPrompted(OPENCODE_SERVE_ID, false);

@@ -45,7 +45,7 @@
 // ONE TAG PER ROW, first match wins (§23.3):
 //   awaiting › unknown › assigned (→ Agent X; amber when its wake is held)
 //   › read (Agent X read N min ago) | new-since-read (new since Agent X read)
-//   › held › direct › replied
+//   › held › judged › direct › replied
 // `read` and `new-since-read` are the SAME fact split by whether anything
 // arrived after the read (`lastAt > upTo`), so they never compete.
 //
@@ -56,7 +56,7 @@
 const FOCUS_WINDOW_MS = 24 * 3600e3;
 const HELD_WINDOW_MS = 7 * 86400e3;
 /** The tag codes, in priority order (the table the suite pins). */
-const TAG_ORDER = Object.freeze(['awaiting', 'unknown', 'assigned', 'read', 'new-since-read', 'held', 'direct', 'replied']);
+const TAG_ORDER = Object.freeze(['awaiting', 'unknown', 'assigned', 'read', 'new-since-read', 'held', 'judged', 'direct', 'replied']);
 
 const num = (x) => (Number.isFinite(Number(x)) ? Number(x) : 0);
 
@@ -89,6 +89,20 @@ function readAdvance(readAt, recs, selfId = null) {
   return { readAt: line, unread, moved: line > num(readAt) };
 }
 const within = (at, now, win) => { const a = num(at); return a > 0 && now - a < win; };
+
+// lane decision-attention (D2 of docs/design-decision-api.zh.md §2.4): THE JUDGED TAG — a row no FACT tag claims, judged by
+// the Decision API (the engine's async scan, src/server/channels-attention.js) to need the owner now. The row's `judged` =
+// `{p, clauses: [name], source, rubricV, lastAt, threshold, label?}`: it speaks ONLY of the message it was judged on
+// (`lastAt` — a newer message waits for its own verdict), `p ≥ threshold` (the setting `decision.threshold`), and the
+// person's own label wins (`label: 'needs'` keeps it, `'not'` drops it). The facts are free and stronger: the scan never
+// sends a row a fact tag claims (`judgeCandidate`), and `statusTag` asks every fact tag above `held` before this one.
+/** The `judged` tag of a row's verdict, or null. */
+function judgedTag(j, lastAt) {
+  if (!j || typeof j !== 'object' || num(j.lastAt) !== num(lastAt) || j.label === 'not') return null;
+  const p = typeof j.p === 'number' && Number.isFinite(j.p) ? j.p : null;
+  if (j.label !== 'needs' && !(p !== null && p >= num(j.threshold))) return null;
+  return { code: 'judged', p, clauses: Array.isArray(j.clauses) ? j.clauses.slice(0, 7) : [], source: j.label === 'needs' ? 'you' : 'judge' };
+}
 
 /** A principal's key as the engine spells it (channel-filter's `principalKey`: `kind:id`). */
 const pkOf = (p) => (p && p.kind && String(p.id == null ? '' : p.id).trim() ? `${p.kind}:${String(p.id).trim()}` : '');
@@ -171,6 +185,8 @@ function statusTag(row, now = Date.now()) {
     return newsAt > num(rd.upTo) ? { code: 'new-since-read', name, kind, at: num(rd.at) } : { code: 'read', name, kind, at: num(rd.at) };
   }
   if (held) return { code: 'held', n: heldPending(touch, now, c.watchers) };
+  const jt = judgedTag(c.judged, c.lastAt);
+  if (jt) return jt;
   // lane lark-search-poll (owner decision 1): a single chat somebody wrote in and the owner has not read
   // design 012 (Slack S1): an APP's DM (a bot, an integration) is never "somebody wrote to you"
   if (c.kind === 'dm' && !c.app && num(c.unread) > 0 && within(c.lastAt, now, FOCUS_WINDOW_MS)) return { code: 'direct', n: num(c.unread) };
@@ -230,8 +246,10 @@ const QUERY_MAX = 100;       // characters of a server-side filter
  * touchView derive the tag's inputs from — `en` the live index entry, `ob` the viewCtx's outbox count for its key
  * (`{awaiting, unknown, ownSentAt}`) — one clause per tag:
  */
-function candidateOf(en, ob, now = Date.now()) {
+function candidateOf(en, ob, now = Date.now(), judged = null) {
   if (!en) return false;
+  // judged — the scan's verdict on this row's newest message (the engine hands its cached verdict in)
+  if (judgedTag(judged, en.lastAt)) return true;
   // awaiting / unknown — the outbox's count for the key
   if (ob && (num(ob.awaiting) > 0 || num(ob.unknown) > 0)) return true;
   // assigned, the CONVERSATION grain — the conversation's own rows (convGrainOf reads exactly these three)
@@ -257,6 +275,20 @@ function candidateOf(en, ob, now = Date.now()) {
   if (en.kind === 'dm' && !en.app && num(en.unread) > 0 && within(en.lastAt, now, FOCUS_WINDOW_MS)) return true;
   // replied — the owner's own message (a record of theirs, or a send from here)
   return within(en.selfAt, now, FOCUS_WINDOW_MS) || !!(ob && within(ob.ownSentAt, now, FOCUS_WINDOW_MS));
+}
+
+/**
+ * lane decision-attention: MAY THE JUDGE SEE THIS ROW? A first-screen conversation row (a rowView) that NO fact tag
+ * claims (`statusTag` null when its own verdict is left out — a fact is free and stronger), whose newest message is
+ * inside the 24 h window and is not the owner's own (`touch.selfAt`), not VibeSpace's own talk. The scan sends
+ * nothing else — the candidate-set census (test-decision-attention) pins it: a fact-tagged row is never sent.
+ */
+function judgeCandidate(v, now = Date.now()) {
+  if (!v || typeof v !== 'object' || (v.kind === 'group' && v.group) || isInternal(v) || v.unlisted) return false;
+  const c = v.conv || v;
+  if (!within(c.lastAt, now, FOCUS_WINDOW_MS)) return false;
+  if (c.touch && num(c.touch.selfAt) >= num(c.lastAt)) return false;
+  return !statusTag({ ...c, judged: null }, now);
 }
 
 /** THE ORDER every page and every list keeps: newest first (`lastAt` desc), then `key` — total, so a cursor is exact. */
@@ -384,7 +416,8 @@ function listRowModel(conv) {
 module.exports = {
   LIST_LAST_MAX, listRowModel,
   FOCUS_WINDOW_MS, HELD_WINDOW_MS, TAG_ORDER, heldPending, heldOf, statusTag, focusRows, filterRows, firstScreen,
-  ATTENTION_MAX, HEAD_ROWS, PAGE_ROWS, PAGE_MAX, QUERY_MAX, candidateOf, pageOrder, pageCursor, afterCursor, selectPage, queryOf, textMatches,
+  ATTENTION_MAX, HEAD_ROWS, PAGE_ROWS, PAGE_MAX, QUERY_MAX, candidateOf, judgedTag, judgeCandidate,   // + judgedTag / judgeCandidate: lane decision-attention
+  pageOrder, pageCursor, afterCursor, selectPage, queryOf, textMatches,
   isInternal, needsOwner, internalBlock,
   selfRead, readAdvance, systemRead,   // + systemRead: B-ef03
 };

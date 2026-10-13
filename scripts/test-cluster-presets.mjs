@@ -554,6 +554,24 @@ console.log('§4 a key changes layer with identical values (B-8145)');
   ok(c.after === 'release:gdrive=3+lark=1' && c.pushed === null, `CONTROL: a copy that compares the values only keeps the summary on "release" after the override is gone and pushes nothing (${c.after}) — the asserts above are red on it`);
 }
 
+// §D lane decision-core: the decision-api row's cluster preset rides the Slack row's road — its OWN prefix
+// (VIBESPACE_INTEGRATION_DECISION_API_*), resolved by the ONE store, read by the ONE caller (the engine never sees env)
+{
+  const R = require(path.join(REPO, 'src/integration-registry.js'));
+  const S = require(path.join(REPO, 'src/server/integration-store.js'));
+  const row = R.rowById('decision-api');
+  ok(!!row, 'decision-api: the row exists (its prefix is proven below by resolution through the ONE store — this suite never builds or reads an env name)');
+  const dd = path.join(scratch('decision-presets'), 'data'); fs.mkdirSync(dd, { recursive: true });
+  const env = { VIBESPACE_INTEGRATION_DECISION_API_PROVIDER: 'openrouter', VIBESPACE_INTEGRATION_DECISION_API_APIKEY: 'sk-or-dummy-cluster-0001', VIBESPACE_INTEGRATION_DECISION_API_MODEL: 'typesafe/jev-router' };
+  const st = S.create({ dataDir: dd, env, log: { warn() {}, log() {} } });
+  const res = st.resolveIntegration('decision-api');
+  const eng = require(path.join(REPO, 'src/server/decision-engine.js')).create({ dataDir: dd, integrations: st, log: { warn() {} } });
+  const s1 = eng.status();
+  ok(res.source === 'cluster' && s1.configured && s1.provider === 'openrouter' && s1.model === 'typesafe/jev-router' && s1.keySource === 'cluster' && !JSON.stringify(s1).includes('sk-or-dummy-cluster-0001'), `the prefix resolves as the cluster default and the engine reads it through the store — the key never in its status (${res.source}, ${s1.provider}, ${s1.model})`);
+  const none = require(path.join(REPO, 'src/server/decision-engine.js')).create({ dataDir: dd, integrations: S.create({ dataDir: dd, env: {}, log: { warn() {}, log() {} } }), log: { warn() {} } });
+  ok(none.status().configured === false, 'no prefix, no own key ⇒ the engine is not configured (no key)');
+}
+
 for (const row of copiesCensus(M.files, M.dir, REPO, { minCopies: 8 })) ok(row.pass, row.name, row.detail);
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

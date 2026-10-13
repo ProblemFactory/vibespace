@@ -39,8 +39,12 @@ function create({ app, server, rootDir, HOST, PORT, BUFFERS_DIR, PERMISSION_MODE
 // ── Plugins (2.140.0, B-2d44): host-level capabilities with persistent state ──
 const { PluginManager } = require('../plugins');
 let voicePlugin = { peek: () => ({}), update: () => {} }; // Dropline voice input (q-029 P0): the plugin hands its record reader back here
+// THE DECISION ENGINE (lane decision-core): the ONE decisions-API caller — the plugin row attaches its switches, the
+// registry row `decision-api` gives the key, its Test runner is the engine's own one-question judgment
+const decisionEngine = require('./decision-engine.js').create({ dataDir: path.join(rootDir, 'data'), integrations, serverNotice });
+try { if (integrations && typeof integrations.registerTest === 'function') integrations.registerTest('decision-api', decisionEngine.testRunner); } catch (e) { console.warn('[decision] Test runner not registered:', e.message); }
 const plugins = new PluginManager({
-  dataDir: path.join(rootDir, 'data'), integrations: () => integrations, voiceBind: (v) => { voicePlugin = v; }, droplineConnected: () => !!(dropline && dropline.connected()),
+  dataDir: path.join(rootDir, 'data'), integrations: () => integrations, voiceBind: (v) => { voicePlugin = v; }, droplineConnected: () => !!(dropline && dropline.connected()), decisionEngine,
   broadcast: (msg) => {
     const json = JSON.stringify(msg);
     wss.clients.forEach(c => { if (c.readyState === WS_OPEN) { try { c.send(json); } catch {} } });
@@ -883,6 +887,24 @@ function createSessionMessages(session, sessionId) {
           add: (profileId, item) => { if (!userTodos) return null; const r = userTodos.add('browser', { origin: 'browser', kind: 'notice', urgency: 'normal', by: 'agent', sessionName: 'Agent browser', ...item }); return r && (r.id || (typeof r === 'string' ? r : null)); },
           resolve: (id) => { if (userTodos && userTodos.get(id)?.status === 'open') userTodos.setStatus(id, 'done', 'browser'); },
         },
+        // lane passkey-store-core: THE PASSKEY STORE — data/browser-passkeys.json (0600, written only by the watch) + the
+        // per-instance key file data/browser-passkeys.key (0600, made once; B-4a59(b)'s keyring replaces this pair)
+        passkeys: (() => {
+          const PS = require('../browser-passkey-store.js'), crypto = require('crypto');
+          const file = path.join(rootDir, 'data', 'browser-passkeys.json'), keyFile = path.join(rootDir, 'data', 'browser-passkeys.key');
+          let cipher = null;
+          const cipherNow = () => {
+            if (cipher) return cipher;
+            let key = null; try { key = fs.readFileSync(keyFile); } catch (e) { if (e.code !== 'ENOENT') throw e; }
+            if (!key) { key = crypto.randomBytes(32); try { fs.writeFileSync(keyFile, key, { mode: 0o600, flag: 'wx' }); } catch (e) { if (e.code !== 'EEXIST') throw e; key = fs.readFileSync(keyFile); } }
+            cipher = PS.cipherOf(crypto, key); return cipher;
+          };
+          return {
+            read: () => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { if (e.code === 'ENOENT') return null; throw e; } },
+            write: (o) => require('../channel-store.js').writeJsonAtomic(file, o, { mode: 0o600 }),
+            cipher: { seal: (t) => cipherNow().seal(t), open: (t) => cipherNow().open(t) },
+          };
+        })(),
         leaseCountOf: (profileId) => new Set(holdersOf(profileId).map((h) => h.browserKey)).size,
         labelOf: (profileId) => { try { const p = browserKeeper.profile(profileId); return p ? p.label : null; } catch { return null; } },
         // rule 6: a dialog that opened while the conversation ran no browser verb ⇒ ONE free next-turn line (never a wake)
@@ -892,6 +914,7 @@ function createSessionMessages(session, sessionId) {
         withdraw: (sessionId, dialogId) => { const st = getSessionStatus ? getSessionStatus() : null; const s = activeSessions.get(sessionId); if (st && sessionStatusKey && s && typeof st.dropNotices === 'function') st.dropNotices(sessionStatusKey(s, sessionId), (x) => x && x.kind === 'browser-dialog' && x.dialog && x.dialog.id === dialogId); },
       });
       browserKeeper.setStuckSource((bk) => browserDialogs.stuckForKey(bk));
+      browserKeeper.setPasskeyDrop?.((pid) => browserDialogs.dropPasskeys(pid)); // lane passkey-store-core: a removed profile's keys go with it
       browserKeeper.setPaintWatch?.(browserDialogs); // lane browser-swiftshader-cpu: idle paint stops on the watch's own socket
       // verify r1 (site-reset): a holder's tabs the KEEPER can attribute (its pinned tab, its mediated lease's tabs, the user's
       // own + adopted ones) — the watch's `tabsOf` from here on; the stream bridge below UNIONS its live view's active target
@@ -901,9 +924,22 @@ function createSessionMessages(session, sessionId) {
       // the Agent browser panel's row: the digest carries `pageStuck` (kinds only), re-broadcast when a dialog / verdict moves
       // NAMED profiles only: the digest also reaches agents, and another conversation's ephemeral record is never named to them
       browserKeeper.addDigest(() => ({ pageStuck: Object.fromEntries(Object.entries(browserDialogs.pageStuckMap()).filter(([pid]) => { try { return !browserKeeper.isEphemeral(pid); } catch { return false; } })) }));
+      // lane passkey-ui: each NAMED profile's passkey COUNT (the panel's "Passkeys (n)…"; counts only — never a row)
+      browserKeeper.addDigest(() => ({ passkeyCounts: Object.fromEntries(Object.entries(typeof browserDialogs.passkeyCounts === 'function' ? browserDialogs.passkeyCounts() : {}).filter(([pid]) => { try { return !browserKeeper.isEphemeral(pid); } catch { return false; } })) }));
       let digestTimer = null;
       browserDialogs.onChange((ev) => {
-        if (!ev || !['open', 'closed', 'stuck', 'held', 'held-cleared', 'down', 'loop', 'loop-cleared', 'passkey', 'prompt'].includes(ev.kind) || digestTimer) return; // lane site-reset: + a navigation loop begun / ended
+        // lane passkey-store-core: every ceremony = one trace row on its conversation's live view (the stream mirror's shape)
+        if (ev && ev.kind === 'passkey-trace' && ev.owner) { const h = holdersOf(ev.profileId).find((x) => x.browserKey === ev.owner && x.sessionId); if (h) browserStream?.tapDialogAct?.({ sessionId: h.sessionId, profileId: ev.profileId, action: 'passkey', passkey: ev.act }); }
+        // lane passkey-ui: a passkey card (new / decided) = ONE chat card in its conversation (the SAME card as the tray's) +
+        // a broadcast the live banner and the panel's table read; a table change re-reads an open table
+        if (ev && ev.kind === 'passkey-proposal' && ev.card) {
+          const sid = ev.sessionId || (holdersOf(ev.profileId).find((x) => x.sessionId && String(x.browserKey || '').replace(/\.\d+$/, '') === String(ev.browserKey || '')) || {}).sessionId;
+          const s = sid && activeSessions ? activeSessions.get(sid) : null;
+          if (s) { try { require('../normalizers').feedProposalCard(s, ev.block); } catch (e) { console.warn('[browser-dialog] the passkey card was not put in the chat — ' + (e && e.message)); } }
+          try { bcastAll({ type: 'browser-passkey-card', profileId: ev.profileId, card: ev.card }); } catch { /* the broadcast's own failure */ }
+        }
+        if (ev && ev.kind === 'passkeys') { try { bcastAll({ type: 'browser-passkeys-updated', profileId: ev.profileId }); } catch { /* the broadcast's own failure */ } }
+        if (!ev || !['open', 'closed', 'passkeys', 'stuck', 'held', 'held-cleared', 'down', 'loop', 'loop-cleared', 'passkey', 'prompt'].includes(ev.kind) || digestTimer) return; // lane passkey-ui: + 'passkeys' (the menu's count) // lane site-reset: + a navigation loop begun / ended
         digestTimer = setTimeout(() => { digestTimer = null; try { bcastAll({ type: 'browser-profiles-updated', ...browserKeeper.list() }); } catch (e) { console.warn('[browser-dialog] the digest was not re-published — ' + (e && e.message)); } }, 300);
         if (digestTimer.unref) digestTimer.unref();
       });
@@ -1058,12 +1094,7 @@ function createSessionMessages(session, sessionId) {
       // the chat's card source: a rebuild / a view-only history places each proposal card by time (the bindings name a
       // stopped conversation's key)
       let pBindings = null; try { pBindings = require('./browser-bindings').create({ dataDir: path.join(rootDir, 'data') }); } catch { pBindings = null; }
-      N.setProposalCardSource(({ session = null, conversationId = null } = {}) => {
-        let key = session && /^bk-[0-9a-f]{8}$/.test(String(session._browserKey || '')) ? session._browserKey : null;
-        const cid = conversationId || (session && (session.claudeSessionId || session.backendSessionId)) || null;
-        if (!key && cid && pBindings && typeof pBindings.lookup === 'function') { try { key = pBindings.lookup(cid) || null; } catch { key = null; } }
-        return key ? browserProposals.cardsFor(key) : [];
-      });
+      N.setProposalCardSource(require('./browser-propose').cardSource({ proposals: browserProposals, dialogs: browserDialogs, bindings: pBindings }));   // int258: + the passkey cards
     } catch (e) { browserProposals = null; console.warn('[browser] proposal runner unavailable — ' + (e && e.message)); }
   } catch (e) { console.warn('[browser] profile keeper unavailable — ' + (e && e.message)); }
   /** §3.5's boot path — server.js calls it right AFTER restoreSessions() so
@@ -1146,6 +1177,6 @@ function createSessionMessages(session, sessionId) {
     } catch (e) { console.warn('[browser-trace] boot failed:', e && e.message); }
   };
 
-  return { mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages, pluginLoader, browserKeeper, bootBrowserKeeper: () => { bootBrowserKeeper(bootBrowserTrace); }, browserStream, browserHandback, browserTrace, browserKeys, browserDialogs };
+  return { decisionEngine, mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages, pluginLoader, browserKeeper, bootBrowserKeeper: () => { bootBrowserKeeper(bootBrowserTrace); }, browserStream, browserHandback, browserTrace, browserKeys, browserDialogs };
 }
 module.exports = { create };

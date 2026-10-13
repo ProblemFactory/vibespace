@@ -247,6 +247,14 @@ export function inboxModel(app) {
       // presses, with the digest of what this row showed (`shown`); the proposal's card patches itself, the runner answers
       // this item. A refusal is said by name, never swallowed.
       const id = encodeURIComponent(rec.action.id);
+      // lane passkey-ui: a passkey card's choice (pk:once | pk:always | pk:no | pk:never) — the approve route with {shown, choice}
+      if (/^pk:(once|always|no|never)$/.test(String(answer))) {
+        const choice = String(answer).slice(3);
+        const rr = await fetchJson(`/api/browser/proposals/${id}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ shown: rec.action.shown, choice }) });
+        if (rr && rr.ok) { showToast(choice === 'no' || choice === 'never' ? t('Refused — the page was told it was not allowed') : String(rec.action.choices || '') === 'once no' ? t('Allowed — the agent may register the passkey now') : t('Allowed — the page signs in')); return true; }
+        showToast(rr && rr.code === 'proposal_changed' ? t('That card changed after it was shown — nothing ran; read it again') : rr && rr.code === 'proposal_state' ? t('That proposal was already decided') : (rr && rr.error) || t('server unreachable'), { type: 'error' });
+        return false;
+      }
       const r = answer === 'reject'
         ? await fetchJson(`/api/browser/proposals/${id}/reject`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
         : await fetchJson(`/api/browser/proposals/${id}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ shown: rec.action.shown }) });

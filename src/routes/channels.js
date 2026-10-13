@@ -516,9 +516,33 @@ router.put('/api/channels/adapters/:id', async (req, res) => {
     if (b.reactionPolicy !== undefined) { const rp = await engine().setReactionPolicy(req.params.id, b.reactionPolicy); if (!rp.ok) return res.status(rp.code === 'not-found' ? 404 : 400).json({ error: rp.error, code: rp.code }); out = { ...out, ...rp }; }
     // lane channel-agent-watch W2: may agents see the LIST of conversations (titles, to request one) — groups / single chats
     if (b.agentDirectory !== undefined) { const ad = await engine().setAgentDirectory(req.params.id, b.agentDirectory); if (!ad.ok) return res.status(ad.code === 'not-found' ? 404 : 400).json({ error: ad.error, code: ad.code }); out = { ...out, ...ad }; }
+    // lane decision-attention (design §2.8): the account's "never judge" — 'never' | null
+    if (b.judge !== undefined) { const jr = await engine().setJudge(req.params.id, b.judge); if (!jr.ok) return res.status(jr.code === 'not-found' ? 404 : 400).json({ error: jr.error, code: jr.code }); out = { ...out, ...jr }; }
     if (typeof b.label === 'string') out = { ...out, ...(await engine().setLabel(req.params.id, b.label)) };
     if (b.credential && typeof b.credential === 'object' && !Array.isArray(b.credential)) out = { ...out, ...(await engine().setCustomSecret(req.params.id, { appId: b.credential.appId, appSecret: b.credential.appSecret })) };
     res.json(out);
+  } catch (e) { fail(res, e); }
+});
+
+/** lane decision-attention (D2 of docs/design-decision-api.zh.md): the owner's verdict on a JUDGED row — `{key, lastAt,
+ *  label: 'needs' | 'not'}` = a labeled example (data/decision-examples.json; "not" drops the tag at once) — and the
+ *  settings block's "Draft from my recent decisions" (PROPOSED lines, never applied). Owner-only: an agent never labels. */
+const DECISION_IS_OWNERS = 'the judged rows are the owner\'s — an agent never labels them';
+router.post('/api/channels/decision/label', (req, res) => {
+  try {
+    forHost(req);
+    if (refuseAgentBearer(req, res, DECISION_IS_OWNERS)) return;
+    const b = req.body || {};
+    const r = engine().labelJudged(String(b.key || ''), Number(b.lastAt) || 0, b.label);
+    if (!r.ok) return res.status(r.code === 'not-found' ? 404 : 400).json({ error: r.error, code: r.code });
+    res.json(r);
+  } catch (e) { fail(res, e); }
+});
+router.post('/api/channels/decision/draft', async (req, res) => {
+  try {
+    forHost(req);
+    if (refuseAgentBearer(req, res, DECISION_IS_OWNERS)) return;
+    res.json(await engine().attention.draft());
   } catch (e) { fail(res, e); }
 });
 

@@ -280,7 +280,7 @@ function browserCardsFor(q) {
 // (`{view id}:bp:{claim id}`: the live op and every rebuild name the SAME card), PATCHED IN PLACE on every change (an
 // `edit` op carrying the new block — never a status, so the client patches the element it has instead of swapping it;
 // feedback: a card re-created per update blinks). The block is SW.proposalCardBlock's (structure, never markup).
-const isProposalBlock = (c) => !!(c && c.type === 'browser_proposal' && /^(?:bl|sr)-[0-9a-f]{8}$/.test(String(c.id || ''))); // lane site-reset: + `sr-…` (a site-reset proposal, the same card)
+const isProposalBlock = (c) => !!(c && c.type === 'browser_proposal' && /^(?:bl|sr|pk)-[0-9a-f]{8}$/.test(String(c.id || ''))); // lane passkey-ui: + `pk-…` (a passkey card, the watch's own; int258: rebuilt from browser-propose cardSource ← the watch's passkeyCards) // lane site-reset: + `sr-…` (a site-reset proposal, the same card)
 function placeProposalCard(mm, block, { emit = false } = {}) {
   if (!mm || !Array.isArray(mm.messages) || !mm.messageIndex || !isProposalBlock(block)) return null;
   const id = `${mm.sessionId || 'view'}:bp:${block.id}`;

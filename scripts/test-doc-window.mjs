@@ -42,6 +42,14 @@
 //      the strip lists both and a press selects the block in view; the source box open ⇒ no button + a toast; phone 390 ⇒
 //      the comment sheet. PNGs desk.png + phone.png (+ desk-offer / desk-select / desk-editing) into $VS_DOC_RAWCMT_SHOTS
 //      (else $VS_DOC_WINDOW_SHOTS). VS_DOC_WINDOW_ONLY=rawcmt runs §13 alone.
+//      §14 (lane doc-link-bubble, 2.369.261 — owner "markdown富文本编辑器里url无法点击和编辑"): at 1280 in en a document with two
+//      links: a click ⇒ the link's bar (address + Open / Edit / Copy / Remove); Open ⇒ a new tab (a new page target); Copy ⇒
+//      the clipboard + a toast; Edit ⇒ the dialog prefilled, a new address / text rewrites the link (the markdown on disk); a
+//      javascript: address refused; the toolbar's Link on a link ⇒ Edit (RED on the pre-lane build: it removed the link);
+//      Remove ⇒ the words stay; Ctrl+K on a selection ⇒ the dialog (not the palette); a URL pasted over a selection links it,
+//      javascript: pasted stays text; autolink on a typed URL (README.md stays a word); a hover's bar; read-only ⇒ a plain
+//      click opens; phone 390 ⇒ the bottom row. PNGs bar.png + edit.png + phone.png into $VS_DOC_LINK_SHOTS (else
+//      $VS_DOC_WINDOW_SHOTS). VS_DOC_WINDOW_ONLY=link runs §14 alone.
 //      §15 (lane doc-comments-synced — owner 2026-10-12: his eighteen comments were in another computer's browser): two pages
 //      on one instance — A adds 2 comments ⇒ B shows them without a reload; B removes one ⇒ A shows 1; A reloads ⇒ 1 from
 //      the server (no localStorage key); a page with 3 rows under the OLD key ⇒ the server holds 3, the key gone; a second
@@ -812,6 +820,152 @@ try {
   ok(pageErrors.length === 0, '⑬ no page exception through §13', pageErrors.slice(0, 3));
   if (CSHOTS) ok(['desk.png', 'phone.png'].every((f) => fs.existsSync(path.join(CSHOTS, f)) && fs.statSync(path.join(CSHOTS, f)).size > 10000), `⑭ PNGs for the owner: ${path.join(CSHOTS, 'desk.png')} + phone.png (+ desk-offer, desk-select, desk-editing)`);
   }
+  if (ONLY === '' || ONLY === 'link') {
+  // ── §14 a link opens and edits (lane doc-link-bubble, 2.369.261 — owner 2026-10-12 "markdown富文本编辑器里url无法点击和编辑": a
+  //    plain click on a link did nothing, the toolbar's Link REMOVED an existing link, nothing edited one)
+  section('§14 a link opens and edits: a click shows its bar; Open / Copy / Edit / Remove; the toolbar\'s Link edits (never removes); Ctrl/Cmd+K; paste + autolink; hover; read-only opens; phone 390');
+  const LSHOTS = process.env.VS_DOC_LINK_SHOTS || SHOTS;
+  const lshot = async (n) => { if (!LSHOTS) return null; const r = await call('Page.captureScreenshot', { format: 'png' }); const f = path.join(LSHOTS, n); fs.writeFileSync(f, Buffer.from(r.data, 'base64')); return f; };
+  await call('Page.addScriptToEvaluateOnNewDocument', { source: `try { localStorage.setItem('vibespace.lang', 'en'); localStorage.removeItem('vs-doc-width'); } catch {}` });
+  const LD = path.join(fs.realpathSync(PROJ), 'links'); fs.mkdirSync(LD, { recursive: true });
+  const LDOC = '# Links\n\nRead the [design notes](https://example.com/design) before you start.\n\nThe [tracker](https://tracker.example.org/board) has the rest.\n\nA plain line to paste over and to link.\n';
+  const LP = path.join(LD, 'links.md'); fs.writeFileSync(LP, LDOC);
+  ok(MD.docFidelity(LDOC).ok, '§14 fixture: a document with two links opens rich (the wheel)');
+  const LW = DW(LP);
+  async function openLinks(max) {
+    await ev(`for (const w of [...app.wm.windows.values()]) app.wm.closeWindow(w.id); return true;`); await sleep(300);
+    await ev(`app.openFile(${S(LP)}, 'links.md', {}); return true;`);
+    const up = await until(() => ev(`const w = ${LW}; const pm = w && w.content.offsetParent && w.content.querySelector('.doc-page .ProseMirror'); return pm && pm.querySelectorAll('a[href]').length >= 2 ? w.id : null;`), 20000, 200);
+    if (up && max) { await ev(`app.wm.toggleMaximize(${S(up)}); return true;`); await sleep(700); }
+    return up;
+  }
+  const inL = (js) => ev(`const w = ${LW}; const pm = w.content.querySelector('.doc-page .ProseMirror'); const R = (e) => e.getBoundingClientRect(); const A = (h) => [...pm.querySelectorAll('a')].find((a) => a.getAttribute('href') === h || a.textContent === h); ${js}`);
+  const linkPt = (h, frac = 0.5) => inL(`const a = A(${S(h)}); if (!a) return null; const r = R(a); return { x: r.left + r.width * ${frac}, y: r.top + r.height / 2 };`);
+  const wordPt = (word) => inL(`for (const p of pm.querySelectorAll('p')) for (const n of p.childNodes) { if (n.nodeType !== 3) continue; const i = n.data.indexOf(${S(word)}); if (i < 0) continue; const g = document.createRange(); g.setStart(n, i); g.setEnd(n, i + ${word.length}); const r = g.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, end: r.right }; } return null;`);
+  const barNow = () => ev(`const b = document.querySelector('.doc-lbar'); if (!b || !b.isConnected || b.style.visibility === 'hidden') return null; const r = b.getBoundingClientRect(), h = b.querySelector('.doc-lbar-href') || {}; return { href: h.textContent || '', title: h.title || '', acts: [...b.querySelectorAll('.doc-lbar-btn')].map((x) => x.dataset.act), phone: b.classList.contains('doc-lbar-phone'), left: r.left, top: r.top, bottom: r.bottom, w: r.width, vh: innerHeight, vw: innerWidth, btnH: Math.min(...[...b.querySelectorAll('.doc-lbar-btn')].map((x) => x.getBoundingClientRect().height)), words: [...b.querySelectorAll('.doc-lbar-btn')].map((x) => x.textContent) };`);
+  const barBtn = (act) => ev(`const b = document.querySelector('.doc-lbar .doc-lbar-btn[data-act=${act}]'); if (!b) return null; const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 };`);
+  const dialogNow = () => ev(`const d = document.querySelector('.doc-link-dialog'); if (!d) return null; return { title: (d.querySelector('.dialog-header h3') || {}).textContent || '', href: (d.querySelector('input.doc-link-href') || {}).value, text: (d.querySelector('input.doc-link-text') || {}).value, focus: (document.activeElement && document.activeElement.className) || '' };`);
+  const key = async (k, code, vk, modifiers = 0) => { await call('Input.dispatchKeyEvent', { type: 'keyDown', modifiers, key: k, code, windowsVirtualKeyCode: vk }); await call('Input.dispatchKeyEvent', { type: 'keyUp', modifiers, key: k, code, windowsVirtualKeyCode: vk }); };
+  const enter = () => key('Enter', 'Enter', 13), esc = () => key('Escape', 'Escape', 27);
+  const pages = async () => (await (await fetch(`http://127.0.0.1:${CDP}/json`)).json()).filter((x) => x.type === 'page');
+  const newPage = async (before) => until(async () => (await pages()).find((x) => !before.some((b) => b.id === x.id)) || null, 6000, 200);
+  const closePage = async (p) => { if (p) { try { await fetch(`http://127.0.0.1:${CDP}/json/close/${p.id}`); } catch { } } await call('Page.bringToFront'); await sleep(300); };
+  const linksNow = () => inL(`return [...pm.querySelectorAll('a')].map((a) => [a.textContent, a.getAttribute('href')]);`);
+  const saved = async (want) => { await ctrlS(); return until(() => (fs.readFileSync(LP, 'utf8') === want ? true : null), 6000); };
+  const pasteText = (text) => inL(`const dt = new DataTransfer(); dt.setData('text/plain', ${S(text)}); pm.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true })); return true;`);
+  await call('Browser.grantPermissions', { permissions: ['clipboardReadWrite', 'clipboardSanitizedWrite'], origin: base }).catch(() => null);
+  if (!ok(!!(await boot(1280, 900, false)), '§14 the client re-booted at 1280×900 (en)')) throw new Error('no app for §14');
+  ok(!!(await openLinks(true)), '① a document with two links opened, maximized');
+  // ⓪ the toolbar's Link with the caret on a link ⇒ the Edit dialog, prefilled — never a removal (FIRST: the RED control on the
+  //    pre-lane build reaches it — there the button unset the link and asked nothing)
+  await click(await linkPt('design notes', 0.5)); await sleep(300);
+  await pressTool('.doc-tb[data-key="link"]', 'Link', LP);
+  const d0 = await until(dialogNow, 3000);
+  await esc(); await sleep(300);
+  const l0 = await linksNow();
+  ok(!!d0 && d0.title === 'Edit link' && d0.href === 'https://example.com/design' && d0.text === 'design notes' && l0.some(([t, h]) => t === 'design notes' && h === 'https://example.com/design'),
+    '⓪ the toolbar\'s Link with the caret on a link ⇒ "Edit link" prefilled; Esc ⇒ the link still there (the pre-lane button REMOVED it)', { d0, l0 });
+  // ① a real click on a link ⇒ its bar: the address + Open / Edit / Copy / Remove
+  await click(await linkPt('design notes', 0.4));
+  const b1 = await until(barNow, 4000);
+  await lshot('bar.png');
+  ok(!!b1 && b1.href === 'https://example.com/design' && b1.title === 'https://example.com/design' && S(b1.acts) === S(['open', 'edit', 'copy', 'remove']) && !b1.phone, '① a plain click on "design notes" shows its bar: the address + Open / Edit / Copy / Remove', b1);
+  // ② Open ⇒ a new tab (a new page target)
+  let before = await pages();
+  await click(await barBtn('open'));
+  let tab = await newPage(before);
+  const tabUrl = tab && (await until(async () => { const p = (await pages()).find((x) => x.id === tab.id); return p && /example\.com\/design/.test(p.url) ? p.url : null; }, 4000, 200));
+  ok(!!tab && !!tabUrl, '② Open ⇒ ONE new tab at the link\'s address (a new page target)', { tab, tabUrl, pages: before.length });
+  await closePage(tab);
+  // ③ Copy ⇒ the address on the clipboard + a toast
+  await click(await linkPt('design notes', 0.6)); await until(barNow, 3000);
+  await click(await barBtn('copy'));
+  const cp = await until(() => ev(`return document.body.innerText.includes('Link copied') ? true : null;`), 3000);
+  const clip = await ev(`try { return await navigator.clipboard.readText(); } catch (e) { return 'ERR ' + e.message; }`);
+  ok(!!cp && clip === 'https://example.com/design', '③ Copy ⇒ the address on the clipboard + the toast "Link copied"', { cp, clip });
+  // ④ Edit ⇒ the dialog prefilled (address + text); a new address rewrites the link ⇒ the markdown on disk
+  await click(await linkPt('design notes', 0.5)); await until(barNow, 3000);
+  await click(await barBtn('edit'));
+  const d1 = await until(async () => { const d = await dialogNow(); return d && /doc-link-href/.test(d.focus) ? d : null; }, 3000);
+  await lshot('edit.png');
+  ok(!!d1 && d1.title === 'Edit link' && d1.href === 'https://example.com/design' && d1.text === 'design notes', '④ Edit opens "Edit link" prefilled: the address (focused, selected) + the link\'s text', d1);
+  await type('https://example.com/design-v2'); await enter(); await sleep(400);
+  const l4 = await linksNow(), b4 = await until(barNow, 2000);
+  const want4 = LDOC.replace('(https://example.com/design)', '(https://example.com/design-v2)');
+  ok(!(await dialogNow()) && S(l4[0]) === S(['design notes', 'https://example.com/design-v2']) && !!(await saved(want4)), '④ Enter applies: the link points at the new address, its words kept; Ctrl+S ⇒ "[design notes](https://example.com/design-v2)" on disk, nothing else changed', { l4, disk: fs.readFileSync(LP, 'utf8') });
+  ok(!!b4 && b4.href === 'https://example.com/design-v2', '④ the bar now shows the new address (the caret after the link)', b4);
+  // ④b a new text replaces the words, the address kept
+  await click(await linkPt('design notes', 0.5)); await until(barNow, 3000); await click(await barBtn('edit'));
+  await until(async () => { const d = await dialogNow(); return d && /doc-link-href/.test(d.focus) ? d : null; }, 3000);
+  await ev(`const i = document.querySelector('input.doc-link-text'); i.focus(); i.select(); return true;`); await type('design doc'); await enter(); await sleep(400);
+  const want4b = want4.replace('[design notes]', '[design doc]');
+  ok(!!(await saved(want4b)), '④b a new text in the dialog ⇒ "[design doc](https://example.com/design-v2)" on disk', fs.readFileSync(LP, 'utf8'));
+  // ⑤ a javascript: address is refused by safeHref, said, the link untouched
+  await click(await linkPt('design doc', 0.5)); await until(barNow, 3000); await click(await barBtn('edit'));
+  await until(async () => { const d = await dialogNow(); return d && /doc-link-href/.test(d.focus) ? d : null; }, 3000);
+  await type('javascript:alert(1)'); await enter(); await sleep(400);
+  const r5 = await inL(`return { said: w.content.innerText.includes('Not a link this document can carry: javascript:alert(1)'), links: [...pm.querySelectorAll('a')].map((a) => a.getAttribute('href')) };`);
+  ok(r5.said && r5.links.includes('https://example.com/design-v2') && !r5.links.some((h) => /javascript/i.test(h || '')), '⑤ Edit to javascript:alert(1) ⇒ refused (safeHref), the strip says so, the link unchanged', r5);
+  // ⑦ Remove ⇒ the words stay, the mark goes
+  await click(await linkPt('tracker', 0.5)); const b7 = await until(barNow, 3000);
+  await click(await barBtn('remove')); await sleep(300);
+  const l7 = await linksNow(), t7 = await inL(`return pm.textContent.includes('The tracker has the rest.');`);
+  const want7 = want4b.replace('[tracker](https://tracker.example.org/board)', 'tracker');
+  ok(!!b7 && b7.href === 'https://tracker.example.org/board' && !l7.some(([, h]) => /tracker/.test(h || '')) && t7 && !!(await saved(want7)), '⑦ Remove on "tracker" ⇒ the words stay, the link goes; on disk "The tracker has the rest."', { b7, l7, disk: fs.readFileSync(LP, 'utf8') });
+  // ⑧ Ctrl/Cmd+K on a selection ⇒ the Link dialog (never the session palette); the selection linked
+  await click(await wordPt('plain'), 2); await sleep(300);
+  await key('k', 'KeyK', 75, 2);
+  const d8 = await until(async () => { const d = await dialogNow(); return d && /doc-link-href/.test(d.focus) ? d : null; }, 3000), pal8 = await ev(`return !!document.querySelector('.palette-overlay');`); // typed only once the dialog holds the focus
+  ok(!!d8 && d8.title === 'Link' && d8.href === '' && d8.text === 'plain' && !pal8, '⑧ Ctrl+K on the selected word "plain" ⇒ the Link dialog (its text prefilled), NOT the session palette', { d8, pal8 });
+  if (d8) { await type('https://example.com/plain'); await enter(); await sleep(400); }
+  ok((await linksNow()).some(([t, h]) => t === 'plain' && h === 'https://example.com/plain'), '⑧ Enter ⇒ "plain" links to https://example.com/plain', await linksNow());
+  // ⑨ paste a URL over a selection ⇒ linked; a javascript: URL pasted ⇒ plain text (safeHref)
+  await click(await wordPt('paste'), 2); await sleep(300);
+  await pasteText('https://example.com/pasted'); await sleep(300);
+  const l9 = await linksNow();
+  ok(l9.some(([t, h]) => t === 'paste' && h === 'https://example.com/pasted'), '⑨ a URL pasted over the selected word "paste" links it (its words kept)', l9);
+  await click(await wordPt('link.'), 2); await sleep(300);
+  await pasteText('javascript:alert(1)'); await sleep(300);
+  const r9 = await inL(`return { text: pm.textContent, bad: [...pm.querySelectorAll('a')].filter((a) => !a.hasAttribute('href') || /javascript/i.test(a.getAttribute('href'))).length };`);
+  ok(r9.text.includes('javascript:alert(1)') && r9.bad === 0, '⑨ javascript:alert(1) pasted over a selection ⇒ plain text, never a link', r9);
+  // ⑩ autolink: a typed URL + a space links itself; README.md stays a word
+  const endP = await inL(`const p = [...pm.querySelectorAll('p')].pop(); const r = R(p); return { x: r.right - 2, y: r.top + r.height / 2 };`);
+  await click(endP); await key('End', 'End', 35); await type(' see https://example.com/typed '); await sleep(200); await type('and README.md '); await sleep(300);
+  const l10 = await linksNow();
+  ok(l10.some(([t, h]) => t === 'https://example.com/typed' && h === 'https://example.com/typed') && !l10.some(([t]) => /README/.test(t)), '⑩ typing "https://example.com/typed " links it (autolink); "README.md " stays a word', l10);
+  await ctrlS(); await sleep(1200);
+  const disk10 = fs.readFileSync(LP, 'utf8'), json10 = S(MD.parseMd(disk10).toJSON());
+  ok(disk10.includes('[plain](https://example.com/plain)') && disk10.includes('[paste](https://example.com/pasted)') && !/\]\(javascript/i.test(disk10) && json10.includes('"href":"https://example.com/typed"') && !json10.includes('README.md"}]') && disk10.includes('README.md'),
+    '⑩ on disk: [plain](…/plain), [paste](…/pasted), the typed URL a link, README.md text, no javascript: link', disk10);
+  // ⑪ hover ≥ 300 ms over a link (the caret elsewhere) ⇒ its bar; the pointer leaving ⇒ gone
+  await click(await inL(`const r = R(pm.querySelector('h1')); return { x: r.left + 10, y: r.top + r.height / 2 };`)); await sleep(300);
+  const hv = await linkPt('design doc', 0.5);
+  await mouse('mouseMoved', hv.x, hv.y, { button: 'none' }); await sleep(700);
+  const b11 = await barNow();
+  await mouse('mouseMoved', hv.x, hv.y + 160, { button: 'none' }); await sleep(1000);
+  const b11b = await barNow();
+  ok(!!b11 && b11.href === 'https://example.com/design-v2' && !b11b, '⑪ a hover ≥ 300 ms over "design doc" shows its bar; moving away drops it', { b11, b11b });
+  // ⑫ read-only (the editor not editable): a plain click OPENS the link; a hover's bar offers Open + Copy only
+  const ro = await inL(`pm.editor.setEditable(false); return pm.getAttribute('contenteditable');`); await sleep(200);
+  await mouse('mouseMoved', hv.x, hv.y, { button: 'none' }); await sleep(700);
+  const b12 = await barNow();
+  before = await pages();
+  await click(hv);
+  tab = await newPage(before);
+  ok(ro === 'false' && !!b12 && S(b12.acts) === S(['open', 'copy']) && !!tab, '⑫ read-only: the hover bar offers Open + Copy; a plain click opens the link in a new tab', { ro, b12, tab: tab && tab.url });
+  await closePage(tab);
+  await inL(`pm.editor.setEditable(true); return true;`);
+  // ⑬ phone 390: a tap on a link ⇒ the bar as a bottom row of the four acts (36 px+ targets, their words)
+  if (!ok(!!(await boot(390, 844, true)), '⑬ the client re-booted as a phone (390×844)')) throw new Error('no phone');
+  ok(!!(await openLinks(false)), '⑬ the document opened on the phone');
+  await click(await linkPt('design doc', 0.5));
+  const b13 = await until(barNow, 4000);
+  await lshot('phone.png');
+  ok(!!b13 && b13.phone && S(b13.acts) === S(['open', 'edit', 'copy', 'remove']) && Math.abs(b13.bottom - b13.vh) <= 2 && b13.left <= 1 && b13.w >= b13.vw - 2 && b13.btnH >= 36 && S(b13.words) === S(['Open', 'Edit', 'Copy', 'Remove']),
+    '⑬ phone: a tap on "design doc" ⇒ the bar as a bottom row (full width, at the bottom), Open / Edit / Copy / Remove with words, ≥ 36 px', b13);
+  ok(pageErrors.length === 0, '⑭ no page exception through §14', pageErrors.slice(0, 3));
+  if (LSHOTS) ok(['bar.png', 'edit.png', 'phone.png'].every((f) => fs.existsSync(path.join(LSHOTS, f)) && fs.statSync(path.join(LSHOTS, f)).size > 10000), `⑭ PNGs for the owner: ${path.join(LSHOTS, 'bar.png')} + edit.png + phone.png`);
+  }
   if (ONLY === '' || ONLY === 'synced') {
   // ── §15 A DOCUMENT'S COMMENTS ARE VIBESPACE'S (lane doc-comments-synced — owner 2026-10-12: his eighteen comments
   //    "disappeared"; they were in another computer's browser): two pages on one instance, live both ways, a reload reads
@@ -969,7 +1123,7 @@ try {
   try { cdpB.close(); } catch { }
   try { await fetch(`http://127.0.0.1:${CDP}/json/close/${tB.id}`); } catch { }
   }
-  if (ONLY !== 'width' && ONLY !== 'print' && ONLY !== 'raw' && ONLY !== 'rawcmt' && ONLY !== 'synced') {
+  if (ONLY !== 'width' && ONLY !== 'print' && ONLY !== 'raw' && ONLY !== 'rawcmt' && ONLY !== 'link' && ONLY !== 'synced') {
 
   // ── §9 design 020 (lane doc-editor-ui, 2.369.223): the design desk's audit sample (every block kind) at 1280 / 390 ×
   //    dark / light × zh / en — the PNGs carry the audit's names with `after-` so the owner flips between before and after

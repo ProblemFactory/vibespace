@@ -231,3 +231,47 @@ export function sendWords(t, r, n) {
   if (r && Number.isInteger(r.sent) && r.sent > 0) return { words: t('Sent {sent} of {n} — the rest are still here', { sent: r.sent, n }), kind: 'partial' };
   return { words: t('Could not send the comments: {why}', { why: (r && r.error) || t('the server did not answer') }), kind: 'failed' };
 }
+
+// ── A LINK OPENS AND EDITS (lane doc-link-bubble, 2.369.261 — owner 2026-10-12 "markdown富文本编辑器里url无法点击和编辑": a plain
+//    click on a link was swallowed, the toolbar's Link REMOVED an existing link). The window reads the link under the caret
+//    (its range, address, text, attrs) and hands in the editable flag + THE judge (doc-markdown's safeHref); this decides.
+export const LINK_SHOWN = 48;
+/** An address as the bar shows it: ≤ `max` code points, the middle elided so the host and the tail both stay (the full one is the title). */
+export function clipHref(href, max = LINK_SHOWN) {
+  const a = Array.from(String(href ?? ''));
+  if (a.length <= max) return a.join('');
+  const tail = Math.min(16, Math.floor((max - 1) / 3));
+  return a.slice(0, max - 1 - tail).join('') + '…' + a.slice(a.length - tail).join('');
+}
+/** The bar for a link: null (no link) | { href, text, shown, canEdit, canOpen, acts } — acts in the bar's order. A link the view
+ *  may not carry (the judge refuses its address) is shown and reachable by Edit / Copy / Remove, never opened; a read-only view
+ *  (nothing to edit) offers Open + Copy. */
+export function linkBarModel(link, { editable = true, judge = (h) => h } = {}) {
+  if (!link || typeof link.href !== 'string' || !link.href.trim()) return null;
+  const canOpen = !!judge(link.href), canEdit = !!editable;
+  const acts = [...(canOpen ? ['open'] : []), ...(canEdit ? ['edit'] : []), 'copy', ...(canEdit ? ['remove'] : [])];
+  return { href: link.href, text: String(link.text ?? ''), shown: clipHref(link.href), canEdit, canOpen, acts };
+}
+/** The Link dialog's answer → the editor's commands AS DATA ({ steps: [[command, ...args]] } the window chains), { refused: href }
+ *  (the judge said no — the window says so) or null (nothing to do: no address, nothing changed). `cur` = what the dialog opened
+ *  on: { link: { from, to, href, text, attrs } } (the caret on a link ⇒ EDIT it: its address, its text if changed) | { from, to,
+ *  text } (a selection ⇒ link it; a changed text replaces it) | { from, to } with from === to (a bare caret ⇒ the text, else the
+ *  address, inserted as its own linked text). An action on an existing link EDITS it — never removes it (Remove is the bar's).
+ *  The caret ends after the link (no selection left behind for the comment popover to offer). */
+export function linkPlan(cur, ans, judge = (h) => h) {
+  const href = String(ans?.href ?? '').trim(), text = String(ans?.text ?? '').trim();
+  if (!href || !cur) return null;
+  if (!judge(href)) return { refused: href };
+  const textNode = (attrs) => ({ type: 'text', text: text || href, marks: [{ type: 'link', attrs }] });
+  const link = cur.link;
+  if (link) {
+    const at = { from: link.from, to: link.to };
+    if (text && text !== String(link.text ?? '').trim()) return { steps: [['insertContentAt', at, textNode({ ...(link.attrs || {}), href })]] };
+    if (href === link.href) return null;
+    return { steps: [['setTextSelection', at], ['setLink', { href }], ['setTextSelection', at.to]] };
+  }
+  const at = { from: cur.from, to: cur.to };
+  if (at.from === at.to) return { steps: [['insertContentAt', at.from, textNode({ href })]] };
+  if (text && text !== String(cur.text ?? '').trim()) return { steps: [['insertContentAt', at, textNode({ href })]] };
+  return { steps: [['setTextSelection', at], ['setLink', { href }], ['setTextSelection', at.to]] };
+}

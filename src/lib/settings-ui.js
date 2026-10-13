@@ -678,6 +678,48 @@ class SettingsUI {
       return textarea;
     }
 
+    // lane decision-attention: a LONG text (the Decision API's "what matters to me") — a textarea bounded by the row's
+    // maxLength; `draft: 'decision'` adds "Draft from my recent decisions": the server PROPOSES lines from the person's
+    // ✓ / ✗ answers, they land in the box for editing, and nothing is saved until the person presses Save
+    if (schema.type === 'text' && schema.multiline) {
+      const wrap = document.createElement('div');
+      wrap.className = 'settings-multiline';
+      const ta = document.createElement('textarea');
+      ta.className = 'settings-json settings-multiline-text';
+      ta.rows = 5;
+      if (schema.maxLength) ta.maxLength = schema.maxLength;
+      ta.value = String(value || '');
+      const save = () => { this.settings.set(path, ta.value.slice(0, schema.maxLength || undefined)); row.classList.toggle('modified', this.settings.isModified(path)); saveBtn.hidden = true; };
+      ta.onchange = save;
+      const saveBtn = document.createElement('button');
+      saveBtn.className = 'settings-link-btn'; saveBtn.textContent = t('Save'); saveBtn.hidden = true; saveBtn.onclick = save;
+      ta.oninput = () => { saveBtn.hidden = false; };
+      wrap.appendChild(ta);
+      if (schema.draft === 'decision') {
+        const d = document.createElement('button');
+        d.className = 'settings-link-btn'; d.dataset.draft = 'decision';
+        d.textContent = t('Draft from my recent decisions');
+        d.title = t('Asks the Decision API which kinds of message your ✓ / ✗ answers set apart, and proposes lines for you to edit — never saved by itself');
+        d.onclick = async () => {
+          d.disabled = true;
+          const r = await fetchJson('/api/channels/decision/draft', { method: 'POST' });
+          d.disabled = false;
+          if (!r || r.error || r.ok === false || !r.text) {
+            const why = r && r.why === 'need-both-labels' ? t('answer ✓ and ✗ on a few judged rows first') : (r && (r.why || r.error)) || t('server unreachable');
+            showToast(t('No lines proposed ({n} of your decisions read) — {why}', { n: (r && r.read) || 0, why }), { type: 'error' });
+            return;
+          }
+          ta.value = [ta.value.trim(), r.text].filter(Boolean).join('\n').slice(0, schema.maxLength || undefined);
+          saveBtn.hidden = false;
+          ta.focus();
+          showToast(t('Read {n} of your decisions — {m} lines proposed; edit them, then Save', { n: r.read, m: (r.lines || []).length }));
+        };
+        wrap.appendChild(d);
+      }
+      wrap.appendChild(saveBtn);
+      return wrap;
+    }
+
     // Fallback: text input
     const input = document.createElement('input');
     input.type = 'text';

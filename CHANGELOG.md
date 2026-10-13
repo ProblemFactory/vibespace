@@ -2,6 +2,21 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.261 — 2026-10-12
+
+### Added
+- A Decision API plugin: enable it, enter a provider and key (or use your workspace's preset), set a daily budget — VibeSpace can then judge records for you.
+- With the Decision API on, the Channels first screen also lists records the judge thinks need you now — with the reason and a way to say it was wrong.
+- A notification rule can ask the Decision API: write the condition in plain words, cap it per hour, and let it judge each record — or route records to a group.
+- Agent browsers can hold passkeys for you: a site's passkey is registered only after you allow it, each sign-in follows the policy you set per key.
+- The Agent browser panel lists each profile's passkeys (site, user, who registered it, last use, policy); the passkey cards say exactly what the agent may do.
+
+### Changed
+- In a document, a link now shows a small bar when you click it — open, edit the address, copy or remove it; the toolbar's Link edits it instead of removing it.
+
+### Fixed
+- The Apps window's Install an app… button no longer slides away from your click while the app catalog is still loading.
+
 ## 2.369.260 — 2026-10-12
 
 ### Added

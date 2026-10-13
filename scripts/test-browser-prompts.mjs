@@ -256,7 +256,7 @@ plM.w.shutdown(); await plM.ch.close();
 // the wiring (source pins)
 const cli = read('data/bin/vibespace-browser'), rsrc = read('src/routes/browser.js');
 ok(/\$\{pmWake \? '&prompt=1' : ''\}/.test(cli) && /if \(w\.prompt && pmWake\) \{ promptHit = w\.prompt;/.test(cli) && /console\.error\('\[page_prompt\]'\)/.test(cli) && /prompt: String\(req\.query\.prompt \|\| ''\) === '1'/.test(rsrc), 'the CLI asks `prompt=1` and ends its verb with THE SENTENCE [page_prompt]; the route passes it to the seam');
-ok(/router\.post\('\/api\/agent\/browser\/permission'/.test(rsrc) && /verbName === 'permission'/.test(cli) && /tapDialogAct\(\{ sessionId, profileId = null, action, dialog = null, permission = null \}/.test(ssrc), 'the permission verb: CLI → route → the watch, its trace row through the dialog act\'s tap');
+ok(/router\.post\('\/api\/agent\/browser\/permission'/.test(rsrc) && /verbName === 'permission'/.test(cli) && /tapDialogAct\(\{ sessionId, profileId = null, action, dialog = null, permission = null(?:, passkey = null)? \}/.test(ssrc), 'the permission verb: CLI → route → the watch, its trace row through the dialog act\'s tap');
 ok(/a page waiting on a permission: decide it with `permission`/.test(read('docs/agent/browser-manual.md')), 'the browser manual §0 recipe');
 fs.rmSync(ROOT, { recursive: true, force: true });
 console.log(`\n${pass} passed, ${fail} failed`);

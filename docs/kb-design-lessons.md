@@ -463,6 +463,14 @@ REMAINING BACKLOG (not yet fixed — see [[project-code-review-2026-07-backlog]]
 
 ## §18 The three-tier routing table — full rows, and the long laws (moved VERBATIM from the CLAUDE.md index on 2026-09-15 — CLAUDE.md keeps the head of each entry; this section is the full text)
 
+### Row: A judgment by the decision API
+
+**The change touches…** **A judgment by the decision API** (OpenAI /v1/decisions, OpenRouter /api/alpha/decisions — any use: attention rows, a `decision` rule, routing)
+
+**It belongs in…** src/decision-model.js (PURE: the dialect table, the use's input plan, budgetVerdict, journalRow, the rubric) + src/server/decision-engine.js `judge()` (the ONE caller: memo, budget, one fetch, counter, journal, backoff) + its vendor-whitelist ALLOW row. Never a second fetch, never a key outside the registry row, never vendor prose in UI or agent context.
+
+**Gated by (run BEFORE commit):** test-decision-model + test-vendor-whitelist (+ heavy test-decision-engine).
+
 ### Row: Live session stdout consumers
 
 **The change touches…** **Live session stdout consumers** (served model, usage odometer, banners, todos…)
@@ -634,6 +642,10 @@ REMAINING BACKLOG (not yet fixed — see [[project-code-review-2026-07-backlog]]
 A shared machine-facts walk (the routing table's first row) that the SERVER runs on its own loop hands the loop back on a byte budget — a hook INSIDE the one implementation (`runUsageWalk({budgetBytes, onBudget})`), never a second walker; the same module run in a daemon CHILD or shipped as a single file stays synchronous (a child has no loop to block), and the parity suite pins all three spellings (test-usage-walk-parity: yielding ≡ sync ≡ shipped scanner on events, cursors, filesTouched). A walk that yields is still ONE logical walk: its output is committed once, synchronously, at the end, and every reader that answers from it awaits the settle (`UsageHistory.scanSettled()` — the usage-stats route, the pool odometer tick, the rid lookups). An in-flight or throttled scan keeps the sync `{skipped}` answer, so the single-flight and the throttle keep their meaning.
 
 **The index-line rule (lane claude-md-diet, B-23e7).** A lane's incident = its kb-bugfix-invariants entry + ONE index line at the head of kb-bugfix-invariants.md (≤ 300 chars, appended at the END of its `## INDEX` list); a changed file = its kb-file-structure.md INDEX line + essay. CLAUDE.md gets a line only for a law or a routing-table change: it is re-sent at every session start AND after every compaction (≈ 115K tokens a copy before this lane, ≈ 9K after). test-architecture §82 holds CLAUDE.md ≤ 100 000 bytes (a ratchet: the measured 37 491 + 10 %), every `⇒ kb-…` pointer resolving, both INDEX heads ≤ 300 chars a new line, and every moved line still in its new home (scripts/fixtures/claude-md-moved.json); `node scripts/measure-claude-md.mjs` measures it. **Retiring a moved line (lane claude-md-retire, B-00be):** a lane that deletes or renames a file runs `node scripts/claude-md-retire.mjs <block|home file> "<the line's first ≥ 20 characters | the file path it names>" --why "…"` (`--dry-run` first) — it appends `{head, why, at}` to the block's `retired` in the fixture and removes that ONE line from the INDEX head; a rename then writes the new line itself (a new line is not in the fixture). Never delete a moved line bare: §82 prints it `lost: <block> row <n>: "<its 48-character head>"`; a retirement whose line is still there is a "dead retirement"; a why under 12 characters or an `at` not YYYY-MM-DD is red.
+
+### Row: A passkey of the person inside an agent browser (lane passkey-store-core, 2026-10-12)
+
+**The change touches…** a passkey the agent browser holds, registers or uses for the person (WebAuthn in a watched tab). **It belongs in…** the PURE store + gate `src/browser-passkey-store.js` (the row, publicRow — never the key, the sealed field via an injected cipher, rpMatches, `gateVerdict` = docs/design-passkey-store.zh.md §2.3), the ONE writer `src/server/browser-dialogs.js` (the per-tab virtual authenticator paired with `enable` as one step, EMPTY between ceremonies; load only the matching rows at release; unload at `end`; the cards and grants), the hold/release hook in `src/browser-passkey.js` (no verdict in 1.5 s ⇒ rejected in-page — never the native hang). **Gated by** test-browser-passkey-store + test-browser-passkey (fast), test-browser-passkey-chrome (heavy: S0–S8 on a headed Chrome + the three mutant controls).
 
 ### Row: The agent browser's spawn environment / profile directory (moved VERBATIM from the CLAUDE.md index on 2026-09-21 — the index keeps a head)
 

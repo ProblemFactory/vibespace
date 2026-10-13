@@ -890,6 +890,9 @@ export function registerChannelAdapterMenu() {
   // B-2198: the RAW API pass-through — who may call this account's vendor API, at which tier (off until granted)
   registerMenuItem({ menu: M, group: '1_rows', order: 11.5, when: (c) => !A(c).builtin && !!A(c).rawApi, label: () => t('API access…'), run: (c) => showApiAccessDialog(c.app, A(c).id) });
   registerMenuItem({ menu: M, group: '1_rows', order: 12, when: (c) => !A(c).builtin, label: () => t('Conversations matching a rule…'), run: (c) => showGrantAccessDialog(c.app, { kind: 'pattern', adapter: A(c), id: null }) });
+  // lane decision-attention (design §2.8): the account's "never judge" — shown while the Decision API judges the first screen
+  // (or to undo it); the field lives on the account record, the engine skips the account's rows
+  registerMenuItem({ menu: M, group: '1_rows', order: 13, when: (c) => !A(c).builtin && (A(c).judge === 'never' || !!c.judging), label: (c) => (A(c).judge === 'never' ? t('Judge this account again') : t('Never judge this account')), run: (c) => put(`/api/channels/adapters/${encodeURIComponent(A(c).id)}`, { judge: A(c).judge === 'never' ? null : 'never' }).catch((e) => showToast(e.message, { type: 'error' })) });
   registerMenuItem({ menu: M, group: '1_rows', order: 20, when: (c) => (A(c).optionsSchema || []).length > 0, label: () => t('Options'), run: (c) => showOptionsDialog(c.app, A(c)) });
   registerMenuItem({ menu: M, group: '1_rows', order: 30, when: (c) => !!A(c).push, label: () => t('Push…'), tooltip: (c) => pushWhat(A(c)), run: (c) => showPushDialog(c.app, A(c)) });
   // P4: THE SENDER HONESTY SWITCH (§9.5) — per channel, OFF by default, drawn
@@ -1623,6 +1626,23 @@ export function renderChannelsPanel(app, c) {
     memoSeen = new Set(); boxSeen = new Set();
   }
 
+  /** lane decision-attention: ✓ / ✗ on a judged row → POST /api/channels/decision/label (the row re-draws from the broadcast). */
+  function judgeButtons(cur) {
+    const box = chanEl('span', 'chan-judge');
+    for (const [label, glyph, tip] of [['needs', '✓', t('Yes — this needs me')], ['not', '✗', t('No — this does not need me')]]) {
+      const b = chanEl('button', 'chan-judge-btn', glyph);
+      b.type = 'button'; b.dataset.judge = label; b.title = tip; b.setAttribute('aria-label', tip);
+      b.onclick = async (ev) => {
+        ev.stopPropagation();
+        const x = cur();
+        b.disabled = true;
+        try { await post('/api/channels/decision/label', { key: x.key, lastAt: x.lastAt, label }); showToast(label === 'not' ? t('Noted — this message is off the list') : t('Noted — the judge learns from it')); }
+        catch (e) { showToast(e.message, { type: 'error' }); b.disabled = false; }
+      };
+      box.appendChild(b);
+    }
+    return box;
+  }
   function groupRow(r, now = Date.now()) {
     const st = r.kind === 'conv' ? statusTag(r, now) : null;
     const tag = statusTagParts(st, { now });
@@ -1671,6 +1691,9 @@ export function renderChannelsPanel(app, c) {
       if (tag.after) g.appendChild(chanEl('span', 'chan-tag-words', tag.after));
       g.title = `${tag.title} · ${srcTitle}`;
       sub.appendChild(g);
+      // lane decision-attention (D2): a JUDGED row carries the person's two answers — each a labeled example the judge
+      // learns from; "not" drops the tag at once (the label wins over the verdict)
+      if (st.code === 'judged') sub.appendChild(judgeButtons(cur));
     } else if (!acct) {
       const src = document.createElement('span');
       src.className = 'chan-src-chip' + (own ? ' chan-src-chip-internal' : '');
@@ -1772,7 +1795,7 @@ export function renderChannelsPanel(app, c) {
     edit.setAttribute('aria-label', t('Edit'));
     edit.onclick = (ev) => { ev.stopPropagation(); showEditAccountDialog(app, a, { kinds }); };
     more.title = t('More actions');
-    const openMenu = (x, y) => showContextMenu(x, y, menuItems('channel-adapter', { app, adapter: a, convs: mine, count: total, kinds }));
+    const openMenu = (x, y) => showContextMenu(x, y, menuItems('channel-adapter', { app, adapter: a, convs: mine, count: total, kinds, judging: !!(digest && digest.judging) }));
     // `ev.currentTarget`, never `more`: the handler is re-assigned onto the KEPT button every draw
     more.onclick = (ev) => { ev.stopPropagation(); const r = ev.currentTarget.getBoundingClientRect(); openMenu(r.left, r.bottom + 2); };
     h.onclick = () => {
@@ -1899,7 +1922,7 @@ export function renderChannelsPanel(app, c) {
     more.className = 'icon-btn chan-sec-more';
     more.title = t('More actions');
     more.appendChild(icon('more', 13));
-    const openMenu = (x, y) => showContextMenu(x, y, menuItems('channel-adapter', { app, adapter: a, convs: mine, count: total, kinds: (digest && digest.kinds) || [] }));
+    const openMenu = (x, y) => showContextMenu(x, y, menuItems('channel-adapter', { app, adapter: a, convs: mine, count: total, kinds: (digest && digest.kinds) || [], judging: !!(digest && digest.judging) }));
     // `ev.currentTarget`, never `more`: reconcile may adopt this handler onto the KEPT button (round 5) and `more` is then the fresh, detached one
     more.onclick = (ev) => { ev.stopPropagation(); const r = ev.currentTarget.getBoundingClientRect(); openMenu(r.left, r.bottom + 2); };
     h.appendChild(more);

@@ -546,6 +546,10 @@
 - (2026-10-12) TWO HEAVY SUITES WERE RED ON MASTER FOR A TIMER EDGE AND FOR LOAD (B-1542) — 不变量 = a timing bound is derived from the clock it measures and names its terms; a control's premise is waited for on the page's own frames, never a fixed sleep or a literal
 - (2026-10-12) EVERY HOP OF A PAIRED MACHINE'S PICTURE PATH KEPT NAGLE ON (owner '延迟更低'; the demux fix's mechanism, generalised) — 不变量 = a socket that carries a person's picture or input is noDelay at both ends; the census in test-architecture names every net hop
 - (2026-10-13) THE VOICE CONTEXT CARRIED COMPACTION SUMMARIES AND THE AUTO TIER SENT THE PERSON'S OWN WORDS (voice-verify F1/F2) — 不变量 = what leaves for a vendor is named by source (agent code spans, project paths), never by shape; a never-list shares the UI's own predicate
+- A DOCUMENT'S LINK COULD NOT BE OPENED OR EDITED (owner 2026-10-12): a plain click was swallowed and the Link button removed an existing link — 不变量 = a link in an editor shows its bar (open, edit, copy, remove); an action on an existing thing edits it, never silently removes it
+- (2026-10-13) THE DECISION BUDGET GATED ON AN ESTIMATE AND RACED ITS OWN WRITE (decision-verify F1–F5) — 不变量 = a billed cap reserves before the call in one step and settles to the recorded cost; a reply without usage still costs; a 401 stops the row
+- (2026-10-13) INSTALL AN APP… DID NOT OPEN ON THE RUNNER (mirror-259/260) — 不变量 = a door shows only once nothing above it can still grow (the catalog landed late and slid the group under the press); a chrome suite prints the page's own errors on any red; the late-catalog shape runs on the hub
+- (2026-10-13) THE PASSKEY HOOK'S RE-ARM TRUSTED A SOURCE-STRING MARK (passkey-verify lens ②) — 不变量 = a privileged binding is handed to a function known by OBJECT identity held in our own closure, with a key minted per arm; text is never identity
 
 ## THE SPLIT BUTTON MOVED THE RIGHT TAB TO THE LEFT PANE (owner 2026-10-12, inc-mv4q1u6b-ksyh, lane split-keeps-sides)
 
@@ -5452,3 +5456,8 @@ userW's pod: one conversation's hidden-window browser drew Mercury's payments da
 **Invariant.** What is installed is listed, as what it is; an install says where it landed.
 
 **Gates:** test-apps-witness (fast, incl. the merged-list RED control), test-apps-witness-ui (heavy: the group, the filter, a launch through the door, desk + phone 390), test-app-card, test-apps-engine.
+
+## THE JUDGE NEVER SEES A FACT-TAGGED ROW, AND NEVER BILLS ONE ROW TWICE (lane decision-attention, 2.369.261 — a feature, no incident)
+**Invariant.** The first screen's judge (src/server/channels-attention.js) sends a row only when no fact tag claims it — asked when the row is queued AND again, on the row as it is NOW, right before its call (a hand-over can land in between); a row whose call is in flight is never queued again; a redraw never re-bills (D1's memo, per record). The vendor's text never reaches the UI: the chip is p + our clause words.
+
+**Gates:** test-decision-attention (fast: the candidate-set census + the bypassed-filter and stale-snapshot controls, the mid-flight re-read leg), test-decision-attention-ui (heavy: four rows ⇒ four calls, a reload ⇒ none).

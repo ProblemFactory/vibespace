@@ -176,8 +176,10 @@ export function installSessionPalette(app) {
   // the key dispatch is left byte-identical and only the action is
   // registry-routed.
   registerCommand({ id: 'session.palette', title: 'Jump to a session…', run: () => open() });
+  // lane doc-link-bubble (2.369.261): a text editor that claims the chord ([data-own-mod-k] — the Doc window's rich text, where
+  // Ctrl/Cmd+K = Link as in every editor) keeps it, like a terminal; everywhere else the palette, unchanged
   document.addEventListener('keydown', (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k' && !e.target.closest?.('.xterm')) {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k' && !e.target.closest?.('.xterm, [data-own-mod-k]')) {
       e.preventDefault();
       runCommand('session.palette', { app });
     }

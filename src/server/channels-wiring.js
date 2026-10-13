@@ -52,7 +52,7 @@ function livenessReader({ liveSessions = () => [], readUserState = () => ({}), c
   };
 }
 
-function create({ app, dataDir, bcastAll = () => {}, now = () => Date.now(), env = process.env, integrations = null, userTodos = null, deliver = null, serverSetting = () => undefined, liveSessions = () => [], readUserState = () => ({}), convIndex = () => null, groupSetting = () => 'none', authEnabled = () => false, getMounts = () => null, sessions = () => null, sessionMeta = () => null, onGroupsPending = () => {} } = {}) {
+function create({ app, dataDir, bcastAll = () => {}, now = () => Date.now(), env = process.env, integrations = null, userTodos = null, deliver = null, serverSetting = () => undefined, liveSessions = () => [], readUserState = () => ({}), convIndex = () => null, groupSetting = () => 'none', authEnabled = () => false, getMounts = () => null, sessions = () => null, sessionMeta = () => null, onGroupsPending = () => {}, decisionEngine = null } = {}) {
   if (!app) throw new Error('channels-wiring: app is required');
   if (!dataDir) throw new Error('channels-wiring: dataDir is required');
 
@@ -75,7 +75,7 @@ function create({ app, dataDir, bcastAll = () => {}, now = () => Date.now(), env
     head: (mountId, opts = {}) => { const m = getMounts(); if (!m || typeof m.oauthClientIdOf !== 'function') noMounts(); return m.oauthClientIdOf(mountId, opts); },
     of: (mountId, opts = {}) => { const m = getMounts(); if (!m || typeof m.oauthClientOf !== 'function') noMounts(); return m.oauthClientOf(mountId, opts); },
   };
-  const channels = createEngine({ dataDir, broadcast: (msg) => bcastAll(msg), now, env, integrations, userTodos, deliver, serverSetting, liveSessions, mountClients, httpInbound: true });
+  const channels = createEngine({ dataDir, broadcast: (msg) => bcastAll(msg), now, env, integrations, userTodos, deliver, serverSetting, liveSessions, mountClients, httpInbound: true, decisionEngine });   // + D1's ONE decision engine: lane decision-attention's judged rows + lane decision-rule's pre-judge
   // B-2198: the raw API pass-through's orchestrator (src/server/channel-api.js) — reached by the agent and owner routes as `channels.rawApi`
   channels.rawApi = createChannelApi({ dataDir, engine: channels, getMounts, now, broadcast: (msg) => { bcastAll(msg); if (channels.apiCards) channels.apiCards.onUpdate(msg); } });
   // B-2198 part 2: ONE card per proposal in the chat, the Outbox and For you; the next-turn receipt; the 24 h expiry + withdrawal

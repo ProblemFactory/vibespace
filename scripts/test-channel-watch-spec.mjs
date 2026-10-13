@@ -37,6 +37,10 @@ const ROWS = [
   [['--in-thread-with-me'], { rules: [{ kind: 'in-thread-with-me' }] }],
   [['--has-attachment', '--from', 'a@x.io', '--match', 'every'], { match: 'every', rules: [{ kind: 'has-attachment' }, { kind: 'from-address', value: 'a@x.io' }] }],
   [['--cap', '5', '--why', 'on call'], { dailyWakeCap: 5, why: 'on call' }],
+  // lane decision-rule: the Decision API rule — the condition, its answer kind, threshold and hour cap
+  [['--kind', 'decision', '--condition', 'the sender asks me to pay', '--threshold', '0.8', '--per-hour', '5'], { rules: [{ kind: 'decision', condition: 'the sender asks me to pay', question: 'predicate', threshold: 0.8, perHour: 5 }] }],
+  [['--condition', 'what kind of message', '--choice', 'bug, question'], { rules: [{ kind: 'decision', condition: 'what kind of message', question: 'choice', choices: [{ value: 'bug', description: '' }, { value: 'question', description: '' }], threshold: 0.7, perHour: 20 }] }],
+  [['--keyword', 'invoice', '--kind', 'decision', '--condition', 'asks me to pay it', '--match', 'every'], { match: 'every', rules: [{ kind: 'keyword', value: 'invoice' }, { kind: 'decision', condition: 'asks me to pay it', question: 'predicate', threshold: 0.7, perHour: 20 }] }],
 ];
 const OKS = [];
 for (const [argv, want] of ROWS) {
@@ -69,6 +73,10 @@ const REFUSALS = [
   [['--spec', J({ mode: 'filtered' })], 'not-an-object'], [['--spec', J({ notify: 'loud' })], 'bad-watcher'], [['--spec', J({ notify: 'digest', dailyWakeCap: 0 })], 'bad-watcher'],
   [['--spec', J({ filter: { rules: Array.from({ length: 51 }, () => ({ kind: 'has-attachment' })) } })], 'too-many-rules'],
   ...(kindsNow ? [] : [[['--reply-to-sent'], 'not-on-this-version']]),
+  // lane decision-rule
+  [['--kind', 'keyword'], 'bad-kind'], [['--kind', 'decision'], 'kind-without-condition'], [['--choice', 'a,b'], 'decision-flag-without-condition'],
+  [['--per-hour', '5', '--keyword', 'x'], 'decision-flag-without-condition'], [['--condition', ''], 'condition-required'], [['--condition', 'x', '--threshold', '0.95'], 'threshold-range'],
+  [['--condition', 'x', '--per-hour', '61'], 'per-hour-range'], [['--condition', 'x', '--choice', 'a b'], 'choice-value'], [['--condition', 'x', '--choice', 'none'], 'choices-count'],
 ];
 for (const [argv, code] of REFUSALS) {
   const r = WS.watchSpecFromArgs(argv);

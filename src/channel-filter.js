@@ -78,7 +78,7 @@ const { inertFrames, isSystemRecord } = require('./channel-record.js');   // + i
 const { toAgentText, cutText, foldHidden } = require('./peer-text.js');   // lane peer-census: THE belt (bound → fold → the frame rule per line / piece) every agent-facing line takes
 
 /** The CLOSED rule set. A kind outside it is refused by `validateFilter`. */
-const RULE_KINDS = Object.freeze(['mention', 'keyword', 'regex', 'sender-in-group', 'from-address', 'subject', 'has-attachment', 'not-contains', 'time-window', 'reply-to-mine', 'in-thread-with-me', 'reply-to-sent', 'fact']);
+const RULE_KINDS = Object.freeze(['mention', 'keyword', 'regex', 'sender-in-group', 'from-address', 'subject', 'has-attachment', 'not-contains', 'time-window', 'reply-to-mine', 'in-thread-with-me', 'reply-to-sent', 'fact', 'decision']);
 /** lane webhook-l1-server: the `fact` rule's key — a fact kind (`sender`, `subject`, `event`, …) or a webhook path's
  *  declared field (the `fields` fact's entry of that id); matched ONLY over the record's facts, never its raw body. */
 const FACT_RULE_KEY_RE = /^[A-Za-z][A-Za-z0-9_-]{0,39}$/;
@@ -194,6 +194,85 @@ function hhmm(v) {
 }
 
 const MAX_RULES = 50;
+/** lane decision-rule (D3 of docs/design-decision-api.zh.md §2.5): THE `decision` RULE — the person's CONDITION in plain
+ *  words, judged by the Decision API (src/server/decision-engine.js, the ONE caller: its memo, its budget). `matchRecord`
+ *  stays SYNC and PURE: the channels engine PRE-JUDGES every fresh record a decision rule in scope could match (ONE
+ *  judgment per record carrying EVERY such rule's question — the same rule on two rows is one question) and hands the
+ *  answers in `ctx.decisions` keyed `decisionKeyOf(rule) + '|' + record.id` (a Map or an object) — the place rules'
+ *  road. No answer (no key, the day's budget, a backoff, a switch off, the rule's own hour cap) ⇒ NO hit: fail closed,
+ *  a wake is money. `question: 'predicate'` (the default) hits at p ≥ threshold; `'choice'` hits when the chosen option
+ *  (never `none`, which every choice question carries) has p ≥ threshold (an answer without a probability keeps its
+ *  choice). An option with `to` (a Task Group or an agent) is a ROUTE: it hits only for the watcher that IS that
+ *  principal (`ctx.principal` — an All-agents fan-out item counts as its agent), so the one rule on two groups' rows
+ *  hands each record to one of them, and `none` to nobody. The `why` names the condition and the verdict (p / value). */
+const DECISION = Object.freeze({
+  conditionMax: 500, choicesMax: 8, choiceChars: 120, none: 'none', questions: Object.freeze(['predicate', 'choice']),
+  threshold: Object.freeze({ min: 0.5, max: 0.9, def: 0.7 }), perHour: Object.freeze({ min: 1, max: 60, def: 20 }),
+});
+const DECISION_VALUE_RE = /^[a-z0-9][a-z0-9_-]{0,39}$/i;
+const DECISION_WHY_CHARS = 120;
+/** A stable short key of what the judge is ASKED (question, condition, options + routes) — never the threshold or the
+ *  hour cap, which do not change the answer (a moved slider never re-bills). FNV-1a twice, 16 hex. */
+function decisionKeyOf(rule) {
+  const r = rule || {};
+  const c = JSON.stringify([str(r.question) || 'predicate', str(r.condition), (Array.isArray(r.choices) ? r.choices : []).map((o) => [str(o && o.value), str(o && o.description), o && o.to ? `${str(o.to.kind)}:${str(o.to.id)}` : ''])]);
+  let a = 0x811c9dc5, b = 0x9747b28c;
+  for (let i = 0; i < c.length; i++) { const k = c.charCodeAt(i); a = Math.imul(a ^ k, 16777619); b = Math.imul(b ^ k, 0x5bd1e995); b ^= b >>> 15; }
+  return 'd' + (a >>> 0).toString(16).padStart(8, '0') + (b >>> 0).toString(16).padStart(8, '0');
+}
+const isDecisionRule = (r) => !!r && r.kind === 'decision';
+/** A ROUTE rule: a choice whose options name a Task Group / an agent (the plugin's `routing` switch gates it, not `rules`). */
+const isRouteRule = (r) => isDecisionRule(r) && r.question === 'choice' && Array.isArray(r.choices) && r.choices.some((o) => o && o.to);
+function decisionRulesOf(filter) { return filter && Array.isArray(filter.rules) ? filter.rules.filter(isDecisionRule) : []; }
+const decisionThreshold = (r) => (r && Number.isFinite(Number(r.threshold)) && r.threshold !== null && r.threshold !== '' ? Number(r.threshold) : DECISION.threshold.def);
+const decisionPerHour = (r) => (r && Number.isInteger(Number(r.perHour)) && Number(r.perHour) >= DECISION.perHour.min ? Math.min(DECISION.perHour.max, Number(r.perHour)) : DECISION.perHour.def);
+const conditionWords = (r) => { const c = str(r && r.condition).replace(/\s+/g, ' ').trim(); return c.length > DECISION_WHY_CHARS ? c.slice(0, DECISION_WHY_CHARS - 1) + '…' : c; };
+/** The judge's question for ONE rule (D1's question shape — decision-model.js `questionError` judges it): the
+ *  condition rides the question's instructions (the input carries the record once); a choice always offers `none`. */
+function decisionQuestion(rule, name) {
+  const cond = str(rule && rule.condition).trim();
+  if (!rule || rule.question !== 'choice') return { type: 'predicate', name, instructions: `Does the message match this condition? ${cond}`, whenTrue: 'Yes — the message matches the condition.', whenFalse: 'No — it does not match.' };
+  const opts = (Array.isArray(rule.choices) ? rule.choices : []).map((o) => ({ value: o.value, description: str(o.description) || (o.to ? `hand it to ${str(o.to.name) || str(o.to.id)}` : o.value) }));
+  return { type: 'choice', name, instructions: `${cond} — pick the option that fits the message, or "${DECISION.none}" when none does.`, choices: [...opts, { value: DECISION.none, description: 'none of the options fits' }] };
+}
+/** Does a route option name THIS watcher's principal (an All-agents fan-out item counts as the agent it targets). */
+function routeNames(to, p) {
+  if (!to || !p) return false;
+  if (to.kind === 'group') return p.kind === 'group' && str(p.id) === str(to.id);
+  if (to.kind === 'agent') return (p.kind === 'agent' && str(p.id) === str(to.id)) || (p.kind === 'everyone' && fanTargetOf(p) === str(to.id));
+  return false;
+}
+function decisionAnswerOf(rule, record, ctx) {
+  const d = ctx && ctx.decisions;
+  if (!d || !record || record.id === undefined || record.id === null) return null;
+  const k = `${decisionKeyOf(rule)}|${str(record.id)}`;
+  return (d instanceof Map ? d.get(k) : d[k]) || null;
+}
+/** THE DECISION RULE'S ONE VERDICT over the pre-judged answer → the `why` that fired, or null (no answer = no hit). */
+function decisionHit(rule, record, ctx) {
+  const a = decisionAnswerOf(rule, record, ctx);
+  if (!a || a.refused) return null;
+  const th = decisionThreshold(rule);
+  const pOf = (v) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1 ? v : null);
+  if (rule.question !== 'choice') { const p = pOf(a.probability); return p !== null && p >= th ? `decision: ${conditionWords(rule)} → ${p.toFixed(2)}` : null; }
+  const v = str(a.choice);
+  if (!v || v === DECISION.none) return null;
+  const opt = (Array.isArray(rule.choices) ? rule.choices : []).find((o) => o && o.value === v);
+  if (!opt) return null;
+  const p = pOf(a.probabilities && a.probabilities[v]) !== null ? pOf(a.probabilities[v]) : pOf(a.confidence);
+  if (p !== null && p < th) return null;
+  if (opt.to && !routeNames(opt.to, ctx && ctx.principal)) return null;
+  return `decision: ${conditionWords(rule)} → ${opt.to ? str(opt.to.name) || str(opt.to.id) : v}${p !== null ? ' ' + p.toFixed(2) : ''}`;
+}
+/** The rule editor's COST LINE (design §2.5 — `estimate` never calls the vendor): the records a day the rule would judge
+ *  (bounded by its hour cap) × the use's token ceiling × the price; the hit rate is unknown until it runs. */
+function decisionCost({ recordsPerDay = 0, perHour = DECISION.perHour.def, tokensPerCall = 0, pricePerMtok = 0, budgetCents = 0 } = {}) {
+  const want = Math.max(0, Number(recordsPerDay) || 0);
+  const n = Math.min(want, Math.max(0, Number(perHour) || 0) * 24);
+  const usdPerDay = (n * Math.max(0, Number(tokensPerCall) || 0) * Math.max(0, Number(pricePerMtok) || 0)) / 1e6;
+  const budgetUsd = Math.max(0, Number(budgetCents) || 0) / 100;
+  return { judgmentsPerDay: Math.round(n * 10) / 10, usdPerDay, budgetUsd, within: usdPerDay <= budgetUsd, capped: n < want };
+}
 
 /** A refusal: the English `error` is the ROUTE'S CONTRACT (the agent CLI
  *  prints it verbatim, test-channel-filter pins its words); the `code` (+
@@ -394,6 +473,42 @@ function validateRule(rule) {
       if (!v) return refuse('value-required', 'fact: value is required', { kind: r.kind });
       out.key = key; out.value = v; break;
     }
+    case 'decision': {
+      // lane decision-rule: the condition in plain words (never rewritten), the question, the options (+ `none`, implicit),
+      // the threshold, the rule's own hour cap
+      const cond = str(r.condition).trim();
+      if (!cond) return refuse('condition-required', 'decision: condition (what to judge, in plain words) is required', { kind: r.kind });
+      if (cond.length > DECISION.conditionMax) return refuse('condition-too-long', `decision: the condition is longer than ${DECISION.conditionMax} characters`, { kind: r.kind, max: DECISION.conditionMax });
+      const q = r.question === undefined || r.question === null || r.question === '' ? 'predicate' : r.question;
+      if (!DECISION.questions.includes(q)) return refuse('question-kind', `decision: question must be ${DECISION.questions.join('|')}`, { kind: r.kind });
+      out.condition = cond; out.question = q;
+      if (q === 'choice') {
+        const list = (Array.isArray(r.choices) ? r.choices : []).map((o) => (o && typeof o === 'object' ? o : { value: o })).filter((o) => str(o.value).trim().toLowerCase() !== DECISION.none);
+        if (!list.length || list.length > DECISION.choicesMax) return refuse('choices-count', `decision: a choice names 1–${DECISION.choicesMax} options ("${DECISION.none}" is always added)`, { kind: r.kind, max: DECISION.choicesMax });
+        const choices = [];
+        for (const o of list) {
+          const value = str(o.value).trim();
+          if (!DECISION_VALUE_RE.test(value)) return refuse('choice-value', 'decision: an option value is a short word (letters, digits, - _; up to 40)', { kind: r.kind, value: value.slice(0, 60) });
+          if (choices.some((c) => c.value.toLowerCase() === value.toLowerCase())) return refuse('choice-duplicate', 'decision: two options have the same value', { kind: r.kind, value });
+          const description = str(o.description).trim();
+          if (description.length > DECISION.choiceChars) return refuse('choice-too-long', `decision: an option's description is longer than ${DECISION.choiceChars} characters`, { kind: r.kind, max: DECISION.choiceChars });
+          const c = { value, description };
+          if (o.to !== undefined && o.to !== null) {
+            const to = o.to;
+            if (!to || !['agent', 'group'].includes(to.kind) || !str(to.id).trim()) return refuse('route-principal', 'decision: a route names a Task Group or an agent ({kind:"group"|"agent", id})', { kind: r.kind, value });
+            c.to = { kind: to.kind, id: str(to.id).trim().slice(0, 200), name: str(to.name).trim().slice(0, 100) || null };
+          }
+          choices.push(c);
+        }
+        out.choices = choices;
+      }
+      const th = r.threshold === undefined || r.threshold === null || r.threshold === '' ? DECISION.threshold.def : Number(r.threshold);
+      if (!(th >= DECISION.threshold.min && th <= DECISION.threshold.max)) return refuse('threshold-range', `decision: threshold must be between ${DECISION.threshold.min} and ${DECISION.threshold.max}`, { kind: r.kind });
+      const ph = r.perHour === undefined || r.perHour === null || r.perHour === '' ? DECISION.perHour.def : Number(r.perHour);
+      if (!Number.isInteger(ph) || ph < DECISION.perHour.min || ph > DECISION.perHour.max) return refuse('per-hour-range', `decision: perHour must be a whole number from ${DECISION.perHour.min} to ${DECISION.perHour.max}`, { kind: r.kind, max: DECISION.perHour.max });
+      out.threshold = Math.round(th * 100) / 100; out.perHour = ph;
+      break;
+    }
     case 'time-window': {
       const from = hhmm(r.from), to = hhmm(r.to);
       if (from === null || to === null) return refuse('time-format', 'time-window: from and to must be HH:MM', { kind: r.kind });
@@ -448,6 +563,16 @@ function filterProblemText(v, { t = (s, p) => (p ? String(s).replace(/\{(\w+)\}/
     case 'regex-adjacent-quantifier': return t('the regex is refused: two repeated pieces side by side can match the same text ({piece}) and take very long', { piece: v.piece || '' });
     case 'regex-leading-repeat': return t('the regex is refused: the repeated piece {piece} can re-read where a match starts and take very long — begin with a fixed word or ^', { piece: v.piece || '' });
     case 'regex-empty-match': return t('the regex is refused: it matches an empty message, so it would match everything');
+    case 'condition-required': return t('the decision rule needs a condition in plain words');
+    case 'condition-too-long': return t('the condition is longer than {n} characters', { n: v.max || DECISION.conditionMax });
+    case 'question-kind': return t('the decision is either yes / no or one of a list');
+    case 'choices-count': return t('a "one of" decision names 1 to {n} options (none is always added)', { n: v.max || DECISION.choicesMax });
+    case 'choice-value': return t('an option is a short word: letters, digits, - or _ (up to 40)');
+    case 'choice-duplicate': return t('two options have the same word');
+    case 'choice-too-long': return t('an option\'s description is longer than {n} characters', { n: v.max || DECISION.choiceChars });
+    case 'route-principal': return t('a route names a Task Group or an agent');
+    case 'threshold-range': return t('the threshold is between {min} and {max}', { min: DECISION.threshold.min, max: DECISION.threshold.max });
+    case 'per-hour-range': return t('the judgments per hour are a whole number from 1 to {n}', { n: v.max || DECISION.perHour.max });
     default: return String(v.error || v.code || '');
   }
 }
@@ -468,6 +593,7 @@ function ruleWhy(rule) {
     case 'reply-to-mine': return WHY_REPLY;
     case 'in-thread-with-me': return WHY_THREAD;
     case 'reply-to-sent': return WHY_SENT;
+    case 'decision': return `decision "${conditionWords(rule)}"${rule.question === 'choice' && Array.isArray(rule.choices) ? ` (one of ${rule.choices.map((o) => (o.to ? `${o.value} → ${o.to.name || o.to.id}` : o.value)).join(' | ')} | ${DECISION.none})` : ''}`;
     default: return rule.kind;
   }
 }
@@ -632,6 +758,7 @@ function ruleHits(rule, record, ctx) {
     }
     case 'reply-to-mine': case 'in-thread-with-me': case 'reply-to-sent': return placeHit(rule, rec, ctx) !== null;
     case 'fact': return factValuesOf(rec, rule.key).some((x) => x === lower(rule.value));
+    case 'decision': return decisionHit(rule, rec, ctx) !== null;   // lane decision-rule: the pre-judged answer only
     default: return false;
   }
 }
@@ -656,7 +783,8 @@ function matchRecord(filter, record, ctx = {}) {
     if (rule.kind === 'reply-to-sent' && !sent) { const s = sentHit(record, ctx); if (s) sent = s.sent; }
     // a place rule names the clause that fired ("quoted your message" / "a reply to …" / "in a thread …")
     const placeWhy = PLACE_RULE_KINDS.includes(rule.kind) ? placeHit(rule, record, ctx) : undefined;
-    if (placeWhy !== undefined ? placeWhy !== null : ruleHits(rule, record, ctx)) { hits++; why.push(placeWhy || ruleWhy(rule)); }
+    const named = placeWhy !== undefined ? placeWhy : rule.kind === 'decision' ? decisionHit(rule, record, ctx) : undefined;   // lane decision-rule: the verdict's own words
+    if (named !== undefined ? named !== null : ruleHits(rule, record, ctx)) { hits++; why.push(named || ruleWhy(rule)); }
     else if (match === 'every') return { hit: false, why: [] };
   }
   const hit = match === 'every' ? hits === f.rules.length && hits > 0 : hits > 0;
@@ -697,7 +825,11 @@ function estimate(filter, records, { days = 7, now = Date.now(), capHit = false,
   const truncated = oldest !== null && !capHit && spanDays < win * 0.98;
   const windowDays = truncated ? Math.round(spanDays * 100) / 100 : win;
   const per = (n) => Math.round((n / windowDays) * 10) / 10;
-  return { matched, total, matchedPerDay: per(matched), totalPerDay: per(total), windowDays, sampled: !!capHit, truncated };
+  // lane decision-rule: a decision rule's hits are unknown until it runs (the estimate never calls the judge) — say how
+  // many records a day it would JUDGE (the editor's cost line), never a hit rate it cannot know
+  const dec = decisionRulesOf(filter).length;
+  const judged = dec ? list.filter((r) => !isSystemRecord(r)).length : 0;
+  return { matched, total, matchedPerDay: per(matched), totalPerDay: per(total), windowDays, sampled: !!capHit, truncated, ...(dec ? { decision: { rules: dec, judgedPerDay: per(judged), hitsUnknown: true } } : {}) };
 }
 
 // ── the assignment ─────────────────────────────────────────────────────────
@@ -1539,6 +1671,8 @@ module.exports = {
   DEFAULT_DIGEST_MINUTES, MIN_DIGEST_MINUTES, MAX_DIGEST_MINUTES, DEFAULT_DAILY_WAKE_CAP, MAX_DAILY_WAKE_CAP,
   BLOCK_MAX_RECORDS, BLOCK_MAX_CHARS, BLOCK_MAX_BYTES,
   validateRule, validateFilter, filterProblemText, MAX_RULES, ruleWhy, placeHit, PLACE_WHYS, matchRecord, estimate,
+  // lane decision-rule: the `decision` kind — its bounds, the pre-judge's key + question, the verdict, the cost line
+  DECISION, decisionKeyOf, decisionQuestion, decisionHit, decisionRulesOf, isRouteRule, routeNames, decisionThreshold, decisionPerHour, decisionCost,
   validateAssignment, ASSIGN_REFUSALS, authorityCap, authorityCapCode, authorityCapText, effectiveAuthority, pickRoundRobin, paceVerdict, digestCap, pruneLedger, countSince,
   renderWakeBlock, renderDigestBlock, whyText,
   // 2026-09-26: the three grains + conversation patterns + the scope digest

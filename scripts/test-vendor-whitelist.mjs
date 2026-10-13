@@ -38,7 +38,9 @@ const VENDOR = /api\.anthropic\.com|platform\.claude\.com|console\.anthropic\.co
 // The CONSTRUCTION census also counts OpenAI hosts (dc-pool-quota verify r1): the codex live quota read moved into
 // src/harnesses/codex-quota.js and rides the official client's app-server — a raw fetch to ChatGPT/OpenAI beside it
 // was invisible here. Only the census widens: whole-file VENDOR reads (permission-rules' comments name chatgpt.com) keep theirs
-const CONSTRUCT_HOSTS = new RegExp(VENDOR.source + '|chatgpt\\.com|openai\\.com|fish\\.audio'); // + Dropline voice input (q-029): api.dropline.fish.audio | api.fish.audio | fish.audio
+// lane decision-core: + openrouter.ai and the decisions marker — the ONE decisions caller fetches a URL the PURE model
+// builds (any base URL), so the census counts the source marker DECISION_ENDPOINT beside the request, not a host
+const CONSTRUCT_HOSTS = new RegExp(VENDOR.source + '|chatgpt\\.com|openai\\.com|fish\\.audio|openrouter\\.ai|DECISION_ENDPOINT'); // + Dropline voice input (q-029): api.dropline.fish.audio | api.fish.audio | fish.audio
 const REQUESTY = /https?\.request\s*\(|\bfetch\s*\(|axios|got\s*\(/;
 
 // ── collect every server-side JS file (the browser bundle never holds tokens) ──
@@ -89,6 +91,9 @@ const ALLOW = {
   // proxy); every request gated by the plugin's switch and the `dropline` row's key; P1 (lane voice-p1-oauth-teach):
   // the OAuth tier (register / token exchange / single-flight refresh) + the teach writes behind teachCap — same 6 sites
   'src/server/dropline-client.js': { max: 6, gates: ['pluginOn', 'credentialOf', 'teachCap', 'refreshing'] },
+  // lane decision-core: THE decisions API caller (OpenAI /v1/decisions, OpenRouter /api/alpha/decisions) — ONE fetch,
+  // behind the PURE budget verdict, the plugin's own switch and the registry row's key
+  'src/server/decision-engine.js': { max: 1, gates: ['budgetVerdict', 'pluginOn', "resolveIntegration(ROW_ID)", 'DECISION_ENDPOINT'] },
 };
 for (const [rel, n] of Object.entries(constructions)) {
   const a = ALLOW[rel];
@@ -132,6 +137,18 @@ for (const [rel, n] of Object.entries(constructions)) {
   const planted = t.replace("'use strict';\n", "'use strict';\nconst sneak = (body) => fetch(require('./dropline-client.js').DROPLINE_BASE + '/v1/terms', { method: 'POST', body });\n");
   const hostLines = (s) => s.split('\n').filter((l) => CONSTRUCT_HOSTS.test(l)).length;
   ok(planted !== t && hostLines(planted) === hostLines(t) && baseReaders({ ...texts, [rel]: planted }).includes(`${rel} ← src/server/dropline-client.js`), 'CONTROL (voice-verify m2): a fetch in the teach engine built from the exported DROPLINE_BASE adds no host literal (the count above stays green) but is RED here');
+}
+// CONTROL (lane decision-core): a copy of the decisions fetch planted anywhere else — beside the PURE model's own URLs,
+// or a marker-carrying fetch in another server file — is a construction outside the allowlist (RED); the engine with
+// its budget gate taken out no longer carries the gate marker (RED)
+{
+  const constructionsIn = (text) => { const L = text.split('\n'); let n = 0; for (let i = 0; i < L.length; i++) if (CONSTRUCT_HOSTS.test(L[i]) && REQUESTY.test(L.slice(Math.max(0, i - 4), i + 5).join('\n'))) n++; return n; };
+  const dm = fs.readFileSync(path.join(REPO, 'src/decision-model.js'), 'utf-8');
+  const eng = fs.readFileSync(path.join(REPO, 'src/server/decision-engine.js'), 'utf-8');
+  const plantedModel = dm.replace("openrouter: { baseUrl: 'https://openrouter.ai',", "openrouter: { peek: () => fetch('https://openrouter.ai/api/alpha/decisions'), baseUrl: 'https://openrouter.ai',");
+  const plantedEngine = eng.replace(/^.*budgetVerdict\(\{\s*$/m, '    const v = { ok: true }; ({');
+  ok(!ALLOW['src/decision-model.js'] && constructionsIn(dm) === 0 && plantedModel !== dm && constructionsIn(plantedModel) >= 1, 'CONTROL: a decisions fetch planted in the PURE model (beside its own URL) is a construction outside the allowlist (RED)', String(constructionsIn(plantedModel)));
+  ok(constructionsIn(eng) === 1 && plantedEngine !== eng && (plantedEngine.match(/budgetVerdict\(/g) || []).length < (eng.match(/budgetVerdict\(/g) || []).length, 'CONTROL: the engine with its budgetVerdict call removed loses the gate the row names (the gate census turns RED)');
 }
 for (const [rel, a] of Object.entries(ALLOW)) {
   ok(constructions[rel] > 0, `${rel} still holds its allowlisted vendor call (moved/renamed ⇒ update the allowlist)`);

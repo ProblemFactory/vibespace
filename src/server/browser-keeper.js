@@ -1099,7 +1099,9 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     commit();
     if (isEph(p)) log.log?.(`[browser] ephemeral browser record ${id} "${p.label}" removed with its conversation ${p.owner.id}${p.dir ? ' (its scratch directory ' + p.dir + ' is browser-env\'s sweep to reclaim)' : ''}`);
     else log.log?.(`[browser] profile ${id} "${p.label}" removed from the registry (its directory ${p.dir} is kept — deletion is a human act)`);
-    return { removed: id, dir: p.dir };
+    let passkeys = 0; try { passkeys = passkeyDrop ? Number(passkeyDrop(id)) || 0 : 0; } catch (e) { log.warn?.(`[browser] the passkeys of ${id} were not removed — ${e && e.message}`); }
+    if (passkeys) log.log?.(`[browser] profile ${id}: its ${passkeys} passkey(s) removed with it`);
+    return { removed: id, dir: p.dir, passkeys };
   }
   /** LANE REMOTE-PROFILE-START (design 014 lane 3b): a PAIRED machine's profile goes WITH its folder there — the machine's
    *  `remove` op (it composes ~/.agent-browser/vs-bp-<id> from the id itself; the hub never names a path), asked BEFORE the
@@ -5117,6 +5119,8 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   /** lane browser-stuck: the dialog watch (src/server/browser-dialogs.js) answers a conversation's stuck fact. */
   let stuckSource = null;
   function setStuckSource(fn) { stuckSource = typeof fn === 'function' ? fn : null; }
+  let passkeyDrop = null; // lane passkey-store-core: the dialog watch (the passkey store's one writer) drops a removed profile's keys
+  function setPasskeyDrop(fn) { passkeyDrop = typeof fn === 'function' ? fn : null; }
   /** lane S2: THE browser fact of one live session (`sessionFacts` = browser-fact.sessionFactsOf(session)). */
   function factFor(sessionFacts) {
     if (!sessionFacts || !sessionFacts.browserKey) return null;
@@ -6587,7 +6591,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     tabVisibilityFor, captureTabFor, watchTabFor, // lane browser-windows (U3/U0b): a background tab is said and polled; a watched tab's frames
     setViewportFor, freshFrameFor, // lane S4: size the page to the pane (never starting a browser) + a fresh frame after a navigation
     watchCopiesFor, // lane live-input: the copies the page performs while the user drives (copy out)
-    cdpEndpointFor, setStuckSource, holdsDialogsFor, setPaintWatch, sweepIdlePaint, // lane browser-swiftshader-cpu
+    cdpEndpointFor, setStuckSource, setPasskeyDrop, holdsDialogsFor, setPaintWatch, sweepIdlePaint, // lane browser-swiftshader-cpu
     // lane browser-stuck: the dialog watch's upstream by profile id; the conversation's stuck fact on factView
     viewportNoteFor, noteViewport, // verify r1: the page-size note on the browser's own record (agent choice / applied / baseline / floor)
     // MULTIVIEW D4 / B-325a: the per-conversation cap, the own count, the release after the turn, the viewers the bridge reports

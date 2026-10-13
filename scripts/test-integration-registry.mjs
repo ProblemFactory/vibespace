@@ -201,7 +201,7 @@ store.registerTest(CARD, shapeRunner);
 {
   const r0 = await get('/api/integrations');
   const cards = R.ROWS.filter((r) => !r.bindsPerAccount).map((r) => r.id);
-  ok(r0.status === 200 && Array.isArray(r0.json.integrations) && r0.json.integrations.map((x) => x.id).join() === cards.join() && cards.length === 7 && cards[6] === 'dropline', `GET /api/integrations lists the six browser key rows + the Dropline voice key row ONLY (${r0.json.integrations.map((x) => x.id).join(', ')})`);
+  ok(r0.status === 200 && Array.isArray(r0.json.integrations) && r0.json.integrations.map((x) => x.id).join() === cards.join() && cards.length === 8 && cards[6] === 'dropline' && cards[7] === 'decision-api', `GET /api/integrations lists the six browser key rows + the Dropline voice key row + the decision-api row ONLY (${r0.json.integrations.map((x) => x.id).join(', ')})`);
   ok(['fake', 'lark', 'gmail'].every((id) => !r0.json.integrations.some((x) => x.id === id)) && ['fake', 'lark', 'gmail'].every((id) => R.rowById(id).bindsPerAccount === true), 'r4: the account-bound rows (fake / lark / gmail) are NOT cards — absent from the list');
   // every card verb on an account-bound row: 404 BY NAME
   for (const id of ['fake', 'lark', 'gmail']) {
@@ -915,6 +915,9 @@ if (tracked.length) {
   // Dropline voice input (q-029 P0): the wiring registers the `dropline` row's Test (GET /v1/me) from THE vendor module
   store.registerTest('dropline', require(path.join(REPO, 'src/server/dropline-client.js')).create({ integrations: () => store }).testRunner);
   ok(registered.length === 6 && registered.includes('cloak') && registered.includes('cloud:agentcore'), `browser-backend registered its six rows' runners through the real store (${registered.join(', ')})`);
+  // lane decision-core: the decision engine's one-question Test, registered the way mounts-plugins-wiring does
+  const de = require(path.join(REPO, 'src/server/decision-engine.js')).create({ dataDir: (() => { const d = path.join(ROOT, 'decision'); fs.mkdirSync(d, { recursive: true }); return d; })(), integrations: store, log: { warn() {} } });
+  store.registerTest(de.ROW_ID, de.testRunner);
   for (const row of R.ROWS) {
     if (row.wiredIn) continue;
     // D7 (r4): an account-bound row is not a card — no Test verb, no runner (the store refuses test() by name)

@@ -34,6 +34,12 @@
 //      block (a paragraph + the block) or two blocks ⇒ refused 'text' (the editor's TEXT rule wins); an open source box ⇒
 //      refused 'editing'; rawCommentTarget finds the block again after a reload / an edit above it. RED CONTROL: the
 //      window's selNow without the raw branch ⇒ a click on the block offers nothing.
+//   ⑧ (lane doc-link-bubble, 2.369.261 — owner 2026-10-12 "markdown富文本编辑器里url无法点击和编辑"): a link OPENS and EDITS —
+//      linkBarModel's table (the bar's acts: editable / read-only / a refused address), clipHref (48 code points, the middle
+//      elided), linkPlan (the Link door as data: EDIT an existing link — address, text — never remove it; ADD on a selection /
+//      at a bare caret; every safeHref refusal on the Edit path); RED CONTROL: the pre-lane door (unsetLink) fails the EDIT row.
+//      Pins: one door (toolbar / Ctrl+K / the bar), the bar keyed to the caret, read-only opens, the palette steps aside for
+//      [data-own-mod-k], SafeLink autolink/paste only for a URL with its scheme. The chrome half = test-doc-window.mjs §14.
 // Run: node scripts/test-doc-window-width.mjs   (in-process, ~0.06 s; the chrome half = scripts/test-doc-window.mjs §10)
 import fs from 'node:fs';
 import os from 'node:os';
@@ -275,6 +281,64 @@ section('⑦ a raw block is commentable: rawCommentAnchor (PURE) — the selecti
   const pre = "const s = view.state.selection; return s.empty || !view.hasFocus() || S.mode !== 'rich' ? null : { from: s.from, to: s.to, view };";
   const cut = UI.replace(/const selNow = \(view\) => \{[^\n]*\n/, 'const selNow = (view) => { ' + pre + ' };\n');
   ok(cut !== UI && !cut.includes('rawNodeSel(view, s)'), 'RED CONTROL: the pre-lane selNow (no raw branch) ⇒ the pin above goes red (a click on the block offers nothing: textBetween over an atom is empty)');
+}
+section('⑧ a link opens and edits: linkBarModel / clipHref / linkPlan (PURE) — the bar, the address shown, the Link door as data');
+{
+  const { safeHref } = await import(pathToFileURL(path.join(REPO, 'src/lib/doc-markdown.js')).href);
+  const UI = rd('src/lib/doc-window-ui.js'), MD = rd('src/lib/doc-markdown.js'), PAL = rd('src/lib/session-palette.js');
+  const J = (x) => JSON.stringify(x);
+  const L = { from: 10, to: 15, href: 'https://example.com/a', text: 'hello', attrs: { href: 'https://example.com/a', title: 'T' } };
+  const LONG = 'https://docs.example.com/some/very/long/path/that/keeps/going/and/going/report-2026.html';
+  // [label, got, want]
+  const T = [
+    ['no link ⇒ no bar', M.linkBarModel(null, { judge: safeHref }), null],
+    ['an empty address ⇒ no bar', M.linkBarModel({ href: '  ' }, { judge: safeHref }), null],
+    ['the caret on a link (editable) ⇒ Open / Edit / Copy / Remove', M.linkBarModel(L, { editable: true, judge: safeHref }), { href: L.href, text: 'hello', shown: L.href, canEdit: true, canOpen: true, acts: ['open', 'edit', 'copy', 'remove'] }],
+    ['read-only ⇒ Open + Copy (nothing to edit)', M.linkBarModel(L, { editable: false, judge: safeHref }).acts, ['open', 'copy']],
+    ['a javascript: link from the source ⇒ shown, never opened; Edit / Copy / Remove reach it', M.linkBarModel({ href: 'javascript:alert(1)', text: 'x' }, { judge: safeHref }).acts, ['edit', 'copy', 'remove']],
+    ['a relative link (beside the file) opens', M.linkBarModel({ href: 'notes/b.md', text: 'b' }, { judge: safeHref }).canOpen, true],
+    ['a short address is shown whole', M.clipHref('https://a.com/x'), 'https://a.com/x'],
+    ['a long address ⇒ 48 code points, the middle elided (host + tail kept)', [Array.from(M.clipHref(LONG)).length, M.clipHref(LONG).startsWith('https://docs.example.com/'), M.clipHref(LONG).endsWith('/report-2026.html'.slice(-15)), M.clipHref(LONG).includes('…')], [48, true, true, true]],
+    ['clipping counts code points (no half emoji)', Array.from(M.clipHref('https://x.com/' + '😀'.repeat(60))).length, 48],
+    // the Link door
+    ['EDIT: the caret on a link, a new address ⇒ select its range, setLink, the caret after it', M.linkPlan({ link: L }, { href: 'https://b.org', text: 'hello' }, safeHref), { steps: [['setTextSelection', { from: 10, to: 15 }], ['setLink', { href: 'https://b.org' }], ['setTextSelection', 15]] }],
+    ['EDIT: a new text ⇒ the range replaced by the text carrying the link (its title kept)', M.linkPlan({ link: L }, { href: 'https://b.org', text: 'world' }, safeHref), { steps: [['insertContentAt', { from: 10, to: 15 }, { type: 'text', text: 'world', marks: [{ type: 'link', attrs: { href: 'https://b.org', title: 'T' } }] }]] }],
+    ['EDIT: nothing changed ⇒ nothing to do', M.linkPlan({ link: L }, { href: L.href, text: 'hello' }, safeHref), null],
+    ['EDIT: the address emptied ⇒ nothing (never a silent remove)', M.linkPlan({ link: L }, { href: '  ', text: 'hello' }, safeHref), null],
+    ['EDIT: javascript: ⇒ refused by safeHref', M.linkPlan({ link: L }, { href: 'javascript:alert(1)', text: 'hello' }, safeHref), { refused: 'javascript:alert(1)' }],
+    ['EDIT: data: ⇒ refused', M.linkPlan({ link: L }, { href: 'data:text/html,<b>x</b>', text: '' }, safeHref), { refused: 'data:text/html,<b>x</b>' }],
+    ['EDIT: vbscript: (any case) ⇒ refused', M.linkPlan({ link: L }, { href: ' VBScript:x ', text: '' }, safeHref), { refused: 'VBScript:x' }],
+    ['EDIT: a control character ⇒ refused', M.linkPlan({ link: L }, { href: 'https://a.com/\u0007', text: '' }, safeHref), { refused: 'https://a.com/\u0007' }],
+    ['ADD on a selection ⇒ setLink over it, the caret after it', M.linkPlan({ from: 3, to: 8, text: 'words' }, { href: 'mailto:a@b.com', text: 'words' }, safeHref), { steps: [['setTextSelection', { from: 3, to: 8 }], ['setLink', { href: 'mailto:a@b.com' }], ['setTextSelection', 8]] }],
+    ['ADD on a selection with a new text ⇒ replaced', M.linkPlan({ from: 3, to: 8, text: 'words' }, { href: 'https://a.com', text: 'site' }, safeHref), { steps: [['insertContentAt', { from: 3, to: 8 }, { type: 'text', text: 'site', marks: [{ type: 'link', attrs: { href: 'https://a.com' } }] }]] }],
+    ['ADD at a bare caret ⇒ the address inserted as its own text', M.linkPlan({ from: 4, to: 4, text: '' }, { href: 'https://a.com', text: '' }, safeHref), { steps: [['insertContentAt', 4, { type: 'text', text: 'https://a.com', marks: [{ type: 'link', attrs: { href: 'https://a.com' } }] }]] }],
+    ['ADD at a bare caret with a text ⇒ that text, linked', M.linkPlan({ from: 4, to: 4, text: '' }, { href: '#intro', text: 'Intro' }, safeHref), { steps: [['insertContentAt', 4, { type: 'text', text: 'Intro', marks: [{ type: 'link', attrs: { href: '#intro' } }] }]] }],
+    ['ADD: javascript: ⇒ refused', M.linkPlan({ from: 3, to: 8, text: 'words' }, { href: 'javascript:void(0)', text: '' }, safeHref), { refused: 'javascript:void(0)' }],
+    ['a cancelled dialog ⇒ nothing', M.linkPlan({ link: L }, null, safeHref), null],
+  ];
+  const bad = T.filter(([, got, want]) => J(got) !== J(want)).map(([n, got, want]) => ({ n, got, want }));
+  ok(bad.length === 0, `the link table: ${T.length} rows — the bar's acts (editable / read-only / a refused address), the clip, the door as data, every safeHref refusal on the Edit path`, bad);
+  // RED CONTROL: the pre-lane door as a plan — the caret on a link ⇒ unsetLink — fails the table's EDIT rows
+  const preLane = (cur, ans) => (cur && cur.link ? { steps: [['extendMarkRange', 'link'], ['unsetLink']] } : M.linkPlan(cur, ans, safeHref));
+  ok(J(preLane({ link: L }, { href: 'https://b.org', text: 'hello' })) !== J(T[9][2]), 'RED CONTROL: the pre-lane door (the caret on a link ⇒ extendMarkRange + unsetLink) fails the EDIT row');
+  // the window wears it: one door for the toolbar / Ctrl+K / the bar's Edit; the bar keyed to the caret; read-only opens
+  const door = UI.slice(UI.indexOf('async function editLink(on)'), UI.indexOf('function removeLink(l)'));
+  ok(door.length > 200 && !door.includes('unsetLink') && door.includes('linkPlan(cur, ans, safeHref)') && door.includes("say(t('Not a link this document can carry: {url}'")
+    && UI.includes("tool('link', I.link, t('Link'), 4, () => editLink())") && UI.includes("'Mod-k': () => { if (!S.view || !S.view.editable) return false; editLink(); return true; }"),
+    'the window: ONE link door (the toolbar\'s Link, Ctrl/Cmd+K, the bar\'s Edit) runs linkPlan — it never unsets a link; a refusal is said');
+  ok(UI.includes('linkBar.show(caretLink(view))') && UI.includes("if (e.ctrlKey || e.metaKey || !v.editable) openHref(a.getAttribute('href')); else linkBar.show(linkAtDom(a), true);")
+    && UI.includes("linkBarModel(l, { editable: S.view.editable, judge: safeHref })") && /const openHref = \(href\) => \{ const u = safeHref\(href\); if \(u\) window\.open\(u, '_blank', 'noopener'\); \};/.test(UI),
+    'the window: the bar follows the caret (every update), a click on a link re-shows it, Ctrl/Cmd+click or a read-only view opens it — through safeHref, noopener');
+  ok(UI.includes("editorProps: { attributes: { 'data-own-mod-k': '' }") && PAL.includes("!e.target.closest?.('.xterm, [data-own-mod-k]')"),
+    'Ctrl/Cmd+K: the house palette (session-palette, capture phase) steps aside for an editor that claims the chord — the Doc window\'s text; everywhere else the palette');
+  ok(/autolink: true, linkOnPaste: true, isAllowedUri: \(url\) => !!safeHref\(url\), shouldAutoLink: \(url\) => AUTO_LINK\.test\(url\) && !!safeHref\(url\)/.test(MD) && MD.includes('inclusive() { return false; }')
+    && UI.includes(".setMeta('doc-repaint', true).setMeta('addToHistory', false).setMeta('preventAutolink', true)"),
+    'SafeLink: autolink + link-on-paste only for an address with its scheme (or www.) that safeHref keeps; links stay non-inclusive; a repaint from disk is never auto-linked');
+  const AUTO = /^(https?:\/\/|mailto:|www\.)/i, auto = (u) => AUTO.test(u) && !!safeHref(u);
+  const AT = [['https://a.com/x', true], ['www.a.com', true], ['mailto:a@b.com', true], ['README.md', false], ['node.js', false], ['javascript:alert(1)', false], ['data:text/html,x', false], ['http://a.com/\u0001', false]];
+  const badA = AT.filter(([u, w]) => auto(u) !== w);
+  ok(badA.length === 0, `shouldAutoLink: ${AT.length} rows — a URL with its scheme links, README.md / node.js stay words, javascript: / data: never`, badA);
+  for (const lang of ['zh', 'ja']) { const Dd = rd(`src/lib/i18n-${lang}.js`); ok(['Edit link', 'Remove link', 'Link text', 'Open link', 'Copy link', 'Link copied', 'Link address', 'Apply'].every((k) => Dd.includes(`"${k}":`)), `i18n-${lang}: the bar's and the dialog's words`); }
 }
 console.log(`\n[doc-window-width] ${fail ? fail + ' FAILED (' + pass + ' passed)' : 'ALL PASS (' + pass + ')'}`);
 process.exit(fail ? 1 : 0);

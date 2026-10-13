@@ -110,8 +110,12 @@ function compactTable(node, h) {
   const line = (cells) => '| ' + cells.join(' | ') + ' |';
   return [line(rows[0]), line(head), ...rows.slice(1).map(line)].join('\n');
 }
-const SafeLink = Link.extend({ renderHTML({ HTMLAttributes: a }) { const href = safeHref(a.href); return ['a', { ...(href ? { href } : {}), title: a.title || null, rel: 'noopener noreferrer nofollow' }, 0]; } })
-  .configure({ openOnClick: false, autolink: false, linkOnPaste: true, isAllowedUri: (url) => !!safeHref(url) });
+// lane doc-link-bubble (2.369.261): a typed URL + a space links itself (autolink) and a URL pasted over a selection links it
+// (linkOnPaste) — both only for an address WITH its scheme (or www.): linkify alone would link `README.md` as http://README.md;
+// safeHref judges every one. A link stays NON-inclusive (Tiptap ties inclusive to autolink): typing after it is plain text.
+const AUTO_LINK = /^(https?:\/\/|mailto:|www\.)/i;
+const SafeLink = Link.extend({ inclusive() { return false; }, renderHTML({ HTMLAttributes: a }) { const href = safeHref(a.href); return ['a', { ...(href ? { href } : {}), title: a.title || null, rel: 'noopener noreferrer nofollow' }, 0]; } })
+  .configure({ openOnClick: false, autolink: true, linkOnPaste: true, isAllowedUri: (url) => !!safeHref(url), shouldAutoLink: (url) => AUTO_LINK.test(url) && !!safeHref(url) });
 /** The document extensions (the window adds its UI-only ones beside them). */
 export const extensions = [
   // int223: the browser's spell check underlined code — a code block and inline code opt out; the prose keeps it

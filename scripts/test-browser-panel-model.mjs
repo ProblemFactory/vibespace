@@ -94,10 +94,10 @@ console.log('— ② the fold: only the facts present');
 console.log('— ③ the menu: the closed act list, no disabled item');
 {
   const ids = (r, more) => M.rowMenu(r, x(r, more)).map((m) => (m.sep ? '|' : m.id)).join(',');
-  ok(ids(P.personal) === 'record,record-mine,replay,build,rename,stop,|,delete', 'a live local profile: record ☐ · record mine ☑ · Replay… · Change build… · Rename… · Stop | Delete…', ids(P.personal));
-  ok(ids(P.sales, { stuck: STUCK }) === 'record,record-mine,replay,build,rename,stop,restart,|,delete' && ids(P.dialogs, { autoDialogs: true, autoText: AUTO }) === 'record,record-mine,replay,build,rename,stop,restart-hold,|,delete', 'stuck ⇒ Restart (its words), else leave-page dialogs ⇒ Restart to hold dialogs — never both', [ids(P.sales, { stuck: STUCK }), ids(P.dialogs, { autoDialogs: true })]);
-  ok(ids(P.sales, { stuck: BS.stuckWords({ state: 'blind', why: 'held' }, tOf(null)) }) === 'record,record-mine,replay,build,rename,stop,|,delete', 'lane browser-held-not-hung: a blind watch offers NO Restart (the page answers — a restart is not the cure the row pushes)');
-  ok(ids(P.office) === 'build,rename,|,delete' && ids(P.notours) === 'rename', "a paired machine's: no record switches; a not-ours: Rename… only (no record, no build, no Delete…)", [ids(P.office), ids(P.notours)]);
+  ok(ids(P.personal) === 'record,record-mine,replay,build,rename,stop,passkeys,|,delete', 'a live local profile: record ☐ · record mine ☑ · Replay… · Change build… · Rename… · Stop | Delete…', ids(P.personal));
+  ok(ids(P.sales, { stuck: STUCK }) === 'record,record-mine,replay,build,rename,stop,restart,passkeys,|,delete' && ids(P.dialogs, { autoDialogs: true, autoText: AUTO }) === 'record,record-mine,replay,build,rename,stop,restart-hold,passkeys,|,delete', 'stuck ⇒ Restart (its words), else leave-page dialogs ⇒ Restart to hold dialogs — never both', [ids(P.sales, { stuck: STUCK }), ids(P.dialogs, { autoDialogs: true })]);
+  ok(ids(P.sales, { stuck: BS.stuckWords({ state: 'blind', why: 'held' }, tOf(null)) }) === 'record,record-mine,replay,build,rename,stop,passkeys,|,delete', 'lane browser-held-not-hung: a blind watch offers NO Restart (the page answers — a restart is not the cure the row pushes)');
+  ok(ids(P.office) === 'build,rename,passkeys,|,delete' && ids(P.notours) === 'rename', "a paired machine's: no record switches; a not-ours: Rename… only (no record, no build, no Delete…)", [ids(P.office), ids(P.notours)]);
   const all = Object.values(P).flatMap((r) => M.rowMenu(r, x(r, { stuck: STUCK, autoDialogs: true, autoText: AUTO })));
   ok(all.every((m) => !('disabled' in m)) && all.filter((m) => m.check !== undefined).every((m) => ['record', 'record-mine'].includes(m.id)), 'no menu item is ever `disabled`; only the two switches are check rows', all.filter((m) => 'disabled' in m));
   const pm = M.rowMenu(P.personal, x(P.personal));
@@ -117,7 +117,7 @@ const census = (Mod) => {
   return { missing, dup, union: [...union] };
 };
 {
-  ok(Object.values(TODAY).length === 11 && Object.values(TODAY).every((id) => M.ROW_ACTS.includes(id)) && M.ROW_ACTS.length === 11, 'the model names the eleven acts the 2.369.204 row offered (ROW_ACTS)');
+  ok(Object.values(TODAY).length === 11 && Object.values(TODAY).every((id) => M.ROW_ACTS.includes(id)) && M.ROW_ACTS.length === 12 && M.ROW_ACTS.includes('passkeys'), 'the model names the eleven acts the 2.369.204 row offered + lane passkey-ui\'s Passkeys (n)… (ROW_ACTS)');
   const c = census(M);
   ok(!c.missing.length && !c.dup.length, 'every act appears in the primary ∪ the ⋯ menu ∪ the who cell — exactly once per row (a full live row + a leave-page-dialogs row cover all eleven)', c);
   for (const r of Object.values(P)) { const a = M.rowActs(r, x(r, { stuck: STUCK, autoDialogs: true, autoText: AUTO })); if (new Set(a).size !== a.length) ok(false, `no act twice on ${r.label}`, a); }
@@ -126,7 +126,7 @@ const census = (Mod) => {
   const tv = read('src/lib/browser-trace-view.js');
   const runBlk = tv.slice(tv.indexOf('  const RUN = {'), tv.indexOf('\n  };\n', tv.indexOf('  const RUN = {')));
   const runIds = [...runBlk.matchAll(/^    '?([a-z-]+)'?: (?:async )?\(r\) =>/gm)].map((m) => m[1]);
-  ok(M.ROW_ACTS.filter((id) => id !== 'browse' && id !== 'who').every((id) => runIds.includes(id)) && runIds.length === 9, 'the view runs each of the nine menu acts by its id (RUN)', runIds);
+  ok(M.ROW_ACTS.filter((id) => id !== 'browse' && id !== 'who').every((id) => runIds.includes(id)) && runIds.length === 10, 'the view runs each of the ten menu acts by its id (RUN; lane passkey-ui: + passkeys)', runIds);
   ok(/if \(L\.primary\) \{[\s\S]{0,400}app\.browseYourself\(r\.id/.test(tv) && /btn\(t\('Change…'\), \(\) => \{ if \(rowNow\) openWhoDialog\(app, rowNow\.id/.test(tv), 'the primary opens Browse yourself; the who cell\'s Change… opens the who dialog');
   // lane browser-unresponsive: a hung row's primary is Restart — the view runs RUN.restart (THE user's restart route)
   ok(/if \(L\.primary\.id === 'restart'\) \{[^\n]*bb\.onclick = \(\) => RUN\.restart\(r\);/.test(tv), 'a hung row\'s primary (Restart) runs RUN.restart');
@@ -158,6 +158,36 @@ console.log('— ⑤ the grid and the order');
   ok(o.map((r) => r.name).join() === 'c,a2,b,a', 'orphanOrder: the largest first, ties by name, an unmeasured one last', o.map((r) => r.name));
 }
 
+console.log('— ⑦ lane passkey-ui: THE PASSKEYS TABLE (design-passkey-store §2.5)');
+{
+  const pub = (o) => ({ id: 'abcd1234', rpId: 'github.com', userName: 'alice', displayName: 'Alice A', source: 'agent', createdAt: Date.UTC(2026, 9, 1), lastUsedAt: 0, uses: 0, signCount: 0, policy: 'ask', ...o });
+  const xw = { w: { t: (s, p) => String(s).replace(/\{(\w+)\}/g, (m, k) => (p && p[k] !== undefined ? p[k] : m)), ago: () => '5m ago', date: () => '2026-10-01' } };
+  const tb = M.passkeyTable({ keys: [pub({}), pub({ id: 'ef567890', rpId: 'vercel.com', userName: '', displayName: 'Bob', source: 'you', lastUsedAt: 5, uses: 3, policy: 'yes' })], agentsOff: false }, xw);
+  ok(tb.rows.length === 2 && tb.rows[0].site === 'github.com' && tb.rows[0].user === 'alice' && tb.rows[0].userTitle === 'Alice A' && tb.rows[0].sourceText === 'agent · 2026-10-01' && tb.rows[0].lastUsed === 'never' && tb.rows[1].user === 'Bob' && tb.rows[1].source === 'you' && tb.rows[1].lastUsed === '5m ago' && tb.rows[1].uses === 3, 'rows from publicRows: site · user (display name in its title) · source + date · last used', tb.rows);
+  ok(tb.rows[0].segments.map((s) => `${s.value}:${s.label}:${s.on ? 1 : 0}`).join() === 'yes:Allow:0,ask:Ask each time:1,no:Never:0' && tb.rows[1].segments.find((s) => s.on).value === 'yes' && M.policySegments('bogus').find((s) => s.on).value === 'ask', 'the policy control: three segments in order, exactly one on (an unknown policy reads ask)');
+  ok(tb.switchOn === false && M.passkeyTable({ keys: [], agentsOff: true }, xw).switchOn === true && tb.switchLabel === 'Agents never sign in with passkeys' && /deleting the profile deletes them/.test(tb.note), 'the head row: the agents-never switch + its one sentence');
+  { const dn = M.passkeyTable({ keys: [], agentsOff: false, displaced: 1 }, xw).note; ok(dn.startsWith('A page replaced the credentials API (taken back) · ') && /deleting the profile deletes them/.test(dn) && !/replaced/.test(tb.note), 'lane passkey-prewrap-fix: a page that replaced the credentials API (the last hour) is said first on the Passkeys card\'s line; none ⇒ not said', dn); }
+  const em = M.passkeyTable({ keys: [], agentsOff: false }, xw);
+  ok(!tb.empty && em.empty && /card appears in For you/.test(em.empty.line) && em.empty.hint === 'vibespace-browser passkey register <site>' && !em.rows.length, 'the empty state: one line + the agents\' CLI hint');
+  const leak = M.passkeyTable({ keys: [pub({ keySealed: 'AAAA' }), pub({ id: 'zz', credentialId: 'zzzzzzzzzzzz' }), pub({ id: 'bad id!' })] }, xw);
+  ok(leak.rows.length === 0 && leak.refused === 3, 'a row that carries a key field (or the whole credential id, or a bad id) is REFUSED — never drawn', leak);
+  const keyCensus = (Mx) => { const t2 = Mx.passkeyTable({ keys: [pub({ keySealed: 'SECRET' })] }, xw); return JSON.stringify(t2).includes('SECRET'); };
+  ok(!keyCensus(M), 'the key census: no table output carries a key field\'s value');
+  const dw = M.passkeyDeleteWords(tb.rows[0], xw);
+  ok(dw.title === 'Delete the passkey for github.com?' && /alice on github\.com/.test(dw.message), 'Delete… names the site and the user', dw);
+  ok(M.rowMenu(P.personal, x(P.personal, { passkeys: 2 }))[M.rowMenu(P.personal, x(P.personal, {})).findIndex((m) => m.id === 'passkeys')].label === 'Passkeys (2)…' && M.rowMenu(P.personal, x(P.personal, {})).find((m) => m.id === 'passkeys').label === 'Passkeys (0)…' && !M.rowMenu(P.notours, x(P.notours, {})).some((m) => m.id === 'passkeys'), 'the ⋯ menu: Passkeys (n)… with n = 0 too; a not-ours profile has none');
+  // RED CONTROL: a row model that SPREADS the publicRow (and drops the refusal) carries the key into the table
+  const src = read('src/lib/browser-panel-model.js');
+  const n1 = "  if (!k || typeof k !== 'object' || PASSKEY_KEY_FIELDS.some((f) => Object.prototype.hasOwnProperty.call(k, f))) return null;";
+  const n2 = '  return {\n    id, site:';
+  ok(src.includes(n1) && src.includes(n2), 'control setup: the refusal + the named-field row are where the control cuts');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-bpm-pk-'));
+  const f = path.join(dir, 'browser-panel-model.mjs');
+  fs.writeFileSync(f, src.replace(n1, "  if (!k || typeof k !== 'object') return null;").replace(n2, '  return {\n    ...k, id, site:'));
+  const Mc = await import(f);
+  ok(keyCensus(Mc) && Mc.passkeyTable({ keys: [pub({ keySealed: 'SECRET' })] }, xw).refused === 0, 'CONTROL: a copy whose row spreads the publicRow (no refusal) is caught by the key census (RED)');
+  fs.rmSync(dir, { recursive: true, force: true });
+}
 console.log('— ⑥ words and purity');
 {
   const src = read('src/lib/browser-panel-model.js');

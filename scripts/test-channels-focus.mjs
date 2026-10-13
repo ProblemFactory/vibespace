@@ -165,7 +165,7 @@ const FIXTURE = [
   for (const p of peel) { p(cur); const t2 = Fo.statusTag(cur, NOW); steps.push(t2 ? t2.code : null); }
   const WANT = ['awaiting', 'unknown', 'assigned', 'new-since-read', 'read', 'held', 'replied', null];
   ok(JSON.stringify(steps) === JSON.stringify(WANT), `THE ONE TAG, by priority: ${WANT.map(String).join(' › ')}`, JSON.stringify(steps));
-  ok(JSON.stringify(Fo.TAG_ORDER) === JSON.stringify(['awaiting', 'unknown', 'assigned', 'read', 'new-since-read', 'held', 'direct', 'replied']), 'TAG_ORDER is the documented table (read / new-since-read are ONE fact split by what arrived after it; `direct` — a single chat with unread messages — after held, before replied)');
+  ok(JSON.stringify(Fo.TAG_ORDER) === JSON.stringify(['awaiting', 'unknown', 'assigned', 'read', 'new-since-read', 'held', 'judged', 'direct', 'replied']), 'TAG_ORDER is the documented table (read / new-since-read are ONE fact split by what arrived after it; `judged` — the Decision API\'s verdict, lane decision-attention — after held, before direct; `direct` — a single chat with unread messages — before replied)');
   const dTag = Wd.statusTagParts({ code: 'direct', n: 3 }, { now: NOW });
   ok(dTag && dTag.before === 'DM · 3 new' && dTag.tone === 'attn' && /single chat/.test(dTag.title), 'the direct tag\'s words: "DM · 3 new" (zh 单聊 · 3 条新消息, ja 個別 · 新着 3 件 — the tag\'s width budget lives in its words)', JSON.stringify(dTag));
   const heldAssigned = Fo.statusTag(row('x', { assignment: principal('Alpha'), touch: { pending: 1 } }), NOW);
@@ -606,6 +606,35 @@ console.log('⑦ the R3 × R4 seam (2.369.191): a DIGEST watcher\'s open window 
   ok(fsrc.split(PIN).length === 2, 'channels-badges CONTROL setup: the @-you clause is spelled once');
   const F0 = require(MUT.write('src/channel-focus.js', fsrc.replace(PIN, ''), 'badges-no-at'));
   ok(!keys(F0.internalBlock(L, { folded: true, now: t })).includes('g2'), 'channels-badges NEGATIVE CONTROL: a copy without the @-you clause folds the group that @-mentions the owner away — the leg above would be red');
+}
+
+// ═══ ⑧ THE JUDGED TAG (lane decision-attention, D2 of docs/design-decision-api.zh.md §2.4) ═══════════════════
+console.log('⑧ the judged tag: a verdict on THIS message, p ≥ the threshold, the label wins, every fact tag first; the cut sorts judged rows by p');
+{
+  const FC = createRequire(import.meta.url)(path.join(REPO, 'src/channel-focus.js'));
+  const base = { kind: 'group', id: 'j', key: 'im/j', lastAt: NOW - 60e3, unread: 0, touch: null };
+  const J = (o = {}) => ({ p: 0.82, clauses: ['asks_me', 'deadline_money'], source: 'judge', rubricV: 1, lastAt: base.lastAt, threshold: 0.7, ...o });
+  const tagOf = (o, row = {}) => Fo.statusTag({ ...base, ...row, judged: o }, NOW);
+  const t1 = tagOf(J());
+  ok(t1 && t1.code === 'judged' && t1.p === 0.82 && t1.clauses.join() === 'asks_me,deadline_money' && t1.source === 'judge', 'a verdict p 0.82 ≥ 0.70 on the row\'s newest message ⇒ the judged tag, with p and its clause NAMES', JSON.stringify(t1));
+  ok(tagOf(J({ p: 0.69 })) === null && tagOf(J({ p: 0.7 })).code === 'judged', 'the threshold is inclusive at 0.70 and a verdict below it is no tag');
+  ok(tagOf(J({ lastAt: base.lastAt - 1 })) === null, 'a verdict on an OLDER message is no tag (a newer message waits for its own verdict)');
+  ok(tagOf(J({ label: 'not' })) === null && tagOf(J({ p: 0.1, label: 'needs' })).source === 'you' && tagOf({ p: null, clauses: [], lastAt: base.lastAt, threshold: 0.7, label: 'needs' }).code === 'judged', 'the person\'s label wins: "not" drops it whatever p says, "needs" keeps it (source you) — even without a verdict');
+  const held = tagOf(J(), { touch: { pending: 2, pendingFor: null } });
+  const dm = tagOf(J(), { kind: 'dm', unread: 2 });
+  ok(held.code === 'held' && dm.code === 'judged', 'a FACT above it wins (held); `direct` sits below it in TAG_ORDER (a direct row is never a candidate — the scan only sends untagged rows)', JSON.stringify({ held, dm }));
+  ok(Wd.statusTagParts(t1, { now: NOW }).before.includes('0.82') && Wd.statusTagParts(t1, { now: NOW }).tone === 'attn', 'its words carry p and the tone that says it needs you');
+  const en = { key: 'im/j', lastAt: base.lastAt, kind: 'group' };
+  ok(Fo.candidateOf(en, null, NOW, J()) === true && Fo.candidateOf(en, null, NOW, J({ p: 0.2 })) === false && Fo.candidateOf(en, null, NOW) === false, 'candidateOf ⊇ statusTag: an entry with a standing verdict is a candidate of the first read (the engine hands its cached verdict in)');
+  ok(FC.judgeCandidate({ ...base }, NOW) && !FC.judgeCandidate({ ...base, touch: { pending: 1, pendingFor: null } }, NOW) && !FC.judgeCandidate({ ...base, lastAt: NOW - 25 * 3600e3 }, NOW)
+    && !FC.judgeCandidate({ ...base, touch: { selfAt: base.lastAt } }, NOW) && !FC.judgeCandidate({ ...base, internal: true }, NOW) && FC.judgeCandidate({ ...base, judged: J({ label: 'needs' }) }, NOW),
+    'judgeCandidate: an untagged row inside 24 h whose newest message is not the owner\'s and not VibeSpace\'s own — a fact-tagged row (held), an old one, the owner\'s own last word, an internal row are never sent; its own verdict does not hide it');
+  const rows = [['a', 0.75], ['b', 0.93], ['c', 0.81]].map(([id, p], i) => ({ v: { key: id, lastAt: NOW - i * 1000 }, rank: Fo.TAG_ORDER.indexOf('judged'), p }));
+  rows.push({ v: { key: 'h', lastAt: NOW - 9e6 }, rank: Fo.TAG_ORDER.indexOf('held'), p: 0 });
+  const E = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf8');
+  const cut = E.match(/tagged\.sort\(\(a, b\) => ([^;]+)\);/);
+  const sorted = rows.slice().sort(new Function('FO', `return (a, b) => ${cut ? cut[1] : '0'};`)(Fo));
+  ok(cut && sorted.map((x) => x.v.key).join() === 'h,b,c,a', 'the first read\'s cut keeps TAG_ORDER first, then judged rows by p (0.93 › 0.81 › 0.75), then the newest — the engine\'s own comparator, read off its source', sorted.map((x) => x.v.key).join());
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

@@ -851,6 +851,11 @@ export function installUserTodos(app) {
     if (propBtn) {
       // lane browser-propose: the agent's proposal answered where it appears (Approve / Reject) — an Approve that appeared
       // or moved under the pointer a moment ago is not the one the user read (the exit ask's V1 rule)
+      if (String(propBtn.dataset.answer || '').startsWith('pk:') && propBtn.classList.contains('ut-proposal-approve')) { // lane passkey-ui: a passkey card's primary (Allow once) obeys the same rule
+        armExitButtons();
+        const pk = pressVerdict({ since: propBtn._armSince ?? null, now: performance.now() });
+        if (!pk.ok) { showToast(t('That Approve moved under the pointer just now — read it, then press it again')); return; }
+      }
       if (propBtn.dataset.answer === 'approve') {
         armExitButtons();
         const pv = pressVerdict({ since: propBtn._armSince ?? null, now: performance.now() });

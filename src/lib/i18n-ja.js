@@ -6282,15 +6282,59 @@ export default {
   "The page shows a message": "ページがメッセージを表示しています",
   "The page asks you to confirm": "ページが確認を求めています",
   "This page is waiting for a passkey ({rp})": "このページはパスキーを待っています（{rp}）", // lane browser-passkey
-  "The agent's browser holds no passkey of yours — cancel the request, then use the page's other way in (a recovery code, a password), or sign in on your own device.": "エージェントのブラウザにはあなたのパスキーはありません。リクエストをキャンセルして、ページの別のサインイン方法（リカバリーコード、パスワード）を使うか、ご自身のデバイスでサインインしてください。", // lane browser-passkey
+  "A site this profile keeps no passkey for offers its own other ways in; a kept passkey signs in by the policy you set in the Agent browser panel; a new one is registered only after you allow it. Cancel this request, then use the page's other way in, or sign in on your own device.": "このプロファイルがパスキーを持っていないサイトは独自の別のログイン方法を示します。保存済みのパスキーは Agent ブラウザパネルで設定したポリシーに従ってログインし、新しいパスキーはあなたが許可した後にだけ登録されます。このリクエストをキャンセルし、ページの別のログイン方法を使うか、ご自身のデバイスでログインしてください。", // lane passkey-ui (replaces the old no-passkey line)
   "Chrome's own passkey window is open on this computer's desktop — it does not show in this view.": "Chrome 自身のパスキーウィンドウがこのコンピューターのデスクトップに開いています。このビューには表示されません。", // lane browser-passkey
   "Cancel passkey request": "パスキーのリクエストをキャンセル", // lane browser-passkey
   "page waits for a passkey": "ページがパスキー待ち", // lane browser-passkey
   "this site": "このサイト", // lane browser-passkey
   "The page is waiting for a passkey — cancel it in the live view": "ページがパスキーを待っています。ライブビューでキャンセルしてください", // lane browser-passkey
   "A page in the agent's browser is waiting for a passkey ({rp})": "エージェントのブラウザのページがパスキーを待っています（{rp}）", // lane browser-passkey
-  "The agent's browser holds no passkey of yours. Cancel the request in the live view (or the agent runs `vibespace-browser passkey cancel`), then use the page's other way in, or sign in on your own device.": "エージェントのブラウザにはあなたのパスキーはありません。ライブビューでリクエストをキャンセルし（またはエージェントが `vibespace-browser passkey cancel` を実行）、ページの別のサインイン方法を使うか、ご自身のデバイスでサインインしてください。", // lane browser-passkey
+  "A site this profile keeps no passkey for offers its own other ways in; a kept passkey signs in by the policy you set in the Agent browser panel; a new one is registered only after you allow it. Cancel the request in the live view (or the agent runs `vibespace-browser passkey cancel`), then use the page's other way in.": "このプロファイルがパスキーを持っていないサイトは独自の別のログイン方法を示します。保存済みのパスキーは Agent ブラウザパネルで設定したポリシーに従ってログインし、新しいパスキーはあなたが許可した後にだけ登録されます。ライブビューでリクエストをキャンセルし（またはエージェントが `vibespace-browser passkey cancel` を実行）、ページの別のログイン方法を使ってください。", // lane passkey-ui (replaces the old no-passkey line)
   "The passkey request could not be cancelled: {why}": "パスキーのリクエストをキャンセルできませんでした: {why}", // lane browser-passkey
+  "This page is waiting for you to allow the passkey for {rp}": "このページは {rp} のパスキーをあなたが許可するのを待っています", // lane passkey-ui
+  "page waits for your passkey answer": "ページがパスキーの回答待ち", // lane passkey-ui
+  "The page is waiting for you to allow a passkey — answer its card in For you or in the live view": "ページがパスキーの許可を待っています — For you またはライブビューでカードに回答してください", // lane passkey-ui
+  "{profile} wants to register a passkey on {rp} for {user}": "{profile} が {rp} に {user} のパスキーを登録しようとしています", // lane passkey-ui
+  "{profile} wants to register a passkey on {rp}": "{profile} が {rp} にパスキーを登録しようとしています", // lane passkey-ui
+  "{profile} wants to sign in to {rp} with {user}'s passkey": "{profile} が {user} のパスキーで {rp} にログインしようとしています", // lane passkey-ui
+  "{profile} wants to sign in to {rp} with a passkey": "{profile} がパスキーで {rp} にログインしようとしています", // lane passkey-ui
+  "After this the agent can create ONE passkey on {rp} in the next 10 minutes; it stays sealed in this VibeSpace and each sign-in with it asks you first.": "許可すると、エージェントは今後 10 分以内に {rp} でパスキーを 1 つ作成できます。この VibeSpace に封印して保存され、それを使うログインは毎回まずあなたに確認します。", // lane passkey-ui
+  "After this the agent can sign in to {rp} as {user} until you change the policy.": "許可すると、ポリシーを変更するまでエージェントは {user} として {rp} にログインできます。", // lane passkey-ui
+  "After this the agent can sign in to {rp} with this passkey until you change the policy.": "許可すると、ポリシーを変更するまでエージェントはこのパスキーで {rp} にログインできます。", // lane passkey-ui
+  "Allow once": "1 回だけ許可", // lane passkey-ui
+  "Always allow": "常に許可", // lane passkey-ui
+  "Always allowed — the policy for this passkey is now: allow.": "常に許可しました — このパスキーのポリシーは現在「許可」です。", // lane passkey-ui
+  "Never — the policy for this passkey is now: never.": "許可しない — このパスキーのポリシーは現在「許可しない」です。", // lane passkey-ui
+  "Allowed once — the agent may register the passkey now (for 10 minutes).": "1 回だけ許可しました — エージェントは今パスキーを登録できます（10 分間）。", // lane passkey-ui
+  "Allowed once — this sign-in went through; the policy stays: ask each time.": "1 回だけ許可しました — このログインは通りました。ポリシーは「毎回確認」のままです。", // lane passkey-ui
+  "Not now — nothing was registered.": "今はしない — 何も登録されていません。", // lane passkey-ui
+  "Not now — this sign-in was refused; the policy stays: ask each time.": "今はしない — このログインは拒否されました。ポリシーは「毎回確認」のままです。", // lane passkey-ui
+  "Expired — nobody answered in time; nothing was allowed.": "期限切れ — 時間内に回答がなく、何も許可されていません。", // lane passkey-ui
+  "Withdrawn — the request ended before an answer; nothing was allowed.": "取り下げ — 回答前にリクエストが終了し、何も許可されていません。", // lane passkey-ui
+  "A passkey for {rp}": "{rp} のパスキー", // lane passkey-ui
+  "Refused — the page was told it was not allowed": "拒否しました — ページには許可されなかったと伝えました", // lane passkey-ui
+  "Allowed — the agent may register the passkey now": "許可しました — エージェントは今パスキーを登録できます", // lane passkey-ui
+  "Allowed — the page signs in": "許可しました — ページがログインします", // lane passkey-ui
+  "Passkeys ({n})…": "パスキー（{n}）…", // lane passkey-ui
+  "The passkeys this profile keeps — site, user, who registered it, last use, policy": "このプロファイルが保存しているパスキー — サイト、ユーザー、登録者、最終使用、ポリシー", // lane passkey-ui
+  "Ask each time": "毎回確認", // lane passkey-ui
+  "Agents never sign in with passkeys": "エージェントはパスキーでログインしない", // lane passkey-ui
+  "Keys live only in this VibeSpace; deleting the profile deletes them": "鍵はこの VibeSpace の中にだけあり、プロファイルを削除すると一緒に削除されます", // lane passkey-ui
+  "A page replaced the credentials API (taken back)": "ページが認証情報 API を置き換えました（取り戻しました）", // lane passkey-prewrap-fix
+  "Site": "サイト", // lane passkey-ui
+  "Last used": "最終使用", // lane passkey-ui
+  "Policy": "ポリシー", // lane passkey-ui
+  "No passkeys yet — when an agent asks to register one, its card appears in For you.": "パスキーはまだありません — エージェントが登録を求めると、そのカードが For you に表示されます。", // lane passkey-ui
+  "Delete the passkey for {site}?": "{site} のパスキーを削除しますか？", // lane passkey-ui
+  "The passkey of {user} on {site} is deleted from this VibeSpace — signing in to {site} with it stops working; the site keeps its own record until you remove it there.": "{site} の {user} のパスキーをこの VibeSpace から削除します — それを使った {site} へのログインはできなくなります。サイト側の記録は、サイトで削除するまで残ります。", // lane passkey-ui
+  "The passkey on {site} is deleted from this VibeSpace — signing in to {site} with it stops working; the site keeps its own record until you remove it there.": "{site} のパスキーをこの VibeSpace から削除します — それを使った {site} へのログインはできなくなります。サイト側の記録は、サイトで削除するまで残ります。", // lane passkey-ui
+  "Passkeys — {label}": "パスキー — {label}", // lane passkey-ui
+  "Could not change the passkey switch": "パスキーのスイッチを変更できませんでした", // lane passkey-ui
+  "Passkeys unavailable: {why}": "パスキーを利用できません：{why}", // lane passkey-ui
+  "{n} sign-in(s)": "{n} 回ログイン", // lane passkey-ui
+  "Could not change the passkey policy": "パスキーのポリシーを変更できませんでした", // lane passkey-ui
+  "Could not delete the passkey": "パスキーを削除できませんでした", // lane passkey-ui
+  "Deleted the passkey for {site}": "{site} のパスキーを削除しました", // lane passkey-ui
   "The page asks for text": "ページが文字の入力を求めています",
   "Leave this page?": "このページから移動しますか？",
   "The page opened a dialog": "ページがダイアログを開きました",
@@ -7838,6 +7882,9 @@ export default {
   "Numbered list": "番号付きリスト",
   "Link": "リンク",
   "Link address": "リンク先",
+  "Edit link": "リンクを編集",
+  "Remove link": "リンクを解除",
+  "Link text": "リンクの文字",
   "An image address, or a path beside this file": "画像のアドレス、またはこのファイルからのパス",
   "Not a link this document can carry: {url}": "この文書に入れられないリンクです：{url}",
   "Not an image this document can carry: {url}": "この文書に入れられない画像です：{url}",
@@ -8446,4 +8493,99 @@ export default {
   "Off (http only)": "オフ（http のみ）",
   "Secure address (https)": "安全なアドレス（https）",
   "VibeSpace also answers https on its own port. Automatic: on a Tailscale network with HTTPS Certificates on, it fetches and renews a certificate for <machine>.<tailnet>.ts.net itself. My own certificate files: VIBESPACE_TLS_CERT + VIBESPACE_TLS_KEY. The microphone, a Mac's sign-in and other secure-only features need this address on every device but this one.": "VibeSpace は同じポートで https にも応答します。自動：HTTPS Certificates がオンの Tailscale ネットワークでは、<machine>.<tailnet>.ts.net の証明書を自分で取得・更新します。自分の証明書ファイル：VIBESPACE_TLS_CERT + VIBESPACE_TLS_KEY。このマシン以外のデバイスでマイクや Mac のサインインなど安全な環境でだけ動く機能を使うには、このアドレスが必要です。",
+  // lane decision-core: the Decision API plugin card + its registry row
+  "Turn on": "オンにする",
+  "Judge the first screen's other rows (needs attention)": "最初の画面の残りの行を判定する（要対応）",
+  "Notification rules that ask the judge": "判定を使う通知ルール",
+  "Route records to a group or agent": "記録をグループや agent に振り分ける",
+  "rules": "ルール",
+  "routing": "振り分け",
+  "For you sorting": "For you の整理",
+  "webhook facts": "webhook の事実",
+  "Daily budget saved": "1 日の予算を保存しました",
+  "Daily budget (USD)": "1 日の予算（USD）",
+  "Today: {calls} calls · {tokens} input tokens · {usd} of {budget}": "今日：{calls} 回 · 入力 {tokens} トークン · {usd} / {budget}",
+  "{use}: {calls} calls · {tokens} tokens · {usd}": "{use}：{calls} 回 · {tokens} トークン · {usd}",
+  "Reconnect: the provider refused this key (HTTP {status}). No calls until you save a new key above.": "再接続が必要です：プロバイダーがこのキーを拒否しました（HTTP {status}）。上で新しいキーを保存するまで呼び出しません。",
+  "Paused until {time}: the provider said it is busy (it is not retried before then).": "{time} まで一時停止：プロバイダーが混雑していると応答しました（それまで再試行しません）。",
+  "on · {provider}": "オン · {provider}",
+  "on — no provider key yet": "オン — プロバイダーのキーがまだありません",
+  "The text of your channel records is sent to {provider} to be judged; attachments, images and raw webhook payloads never are.": "チャンネルの記録のテキストは判定のため {provider} に送られます。添付ファイル、画像、webhook の生データは送られません。",
+  "the provider you choose": "選んだプロバイダー",
+  "Could not load the provider card — the server did not answer.": "プロバイダーのカードを読み込めません — サーバーが応答しませんでした。",
+  "Lets VibeSpace judge records for you with a decisions API (OpenAI or OpenRouter) — within a daily budget you set.": "VibeSpace が decisions API（OpenAI または OpenRouter）で記録を判定します — 設定した 1 日の予算の範囲内で。",
+  "Decision API": "判定 API",
+  "openai (POST /v1/decisions) or openrouter (POST /api/alpha/decisions). The text that is judged is sent to this provider.": "openai（POST /v1/decisions）または openrouter（POST /api/alpha/decisions）。判定されるテキストはこのプロバイダーに送られます。",
+  "Optional; empty = the provider's default (gpt-6-luna on OpenAI, openai/gpt-6-luna-decisions on OpenRouter).": "任意。空欄 = プロバイダーの既定（OpenAI では gpt-6-luna、OpenRouter では openai/gpt-6-luna-decisions）。",
+  "Your OpenAI key (platform.openai.com → API keys) or OpenRouter key (openrouter.ai → Keys). It is sent only to the provider above, and never shown again.": "OpenAI のキー（platform.openai.com → API keys）または OpenRouter のキー（openrouter.ai → Keys）。上のプロバイダーにだけ送られ、二度と表示されません。",
+  "A provider (openai or openrouter) and its API key are saved below, or the cluster provides them": "下にプロバイダー（openai または openrouter）と API キーが保存されている、またはクラスターが提供している",
+  "The text of the records you let it judge is sent to that provider": "判定させる記録のテキストはそのプロバイダーに送られる",
+  "One real judgment: a single yes/no question about one fixed sentence (about 60 input tokens, well under $0.0001). It counts toward today's budget.": "実際の判定を 1 回：固定の 1 文について はい/いいえ の質問を 1 つ（入力約 60 トークン、$0.0001 を大きく下回る）。今日の予算に含まれます。",
+  "Proves the provider accepts this key and model for one question. The OpenRouter route is an alpha: the models it accepts may change.": "プロバイダーがこのキーとモデルで 1 問に答えることを確かめます。OpenRouter のルートは alpha で、受け付けるモデルは変わることがあります。",
+  "Used by the Decision API plugin": "判定 API プラグインが使用",
+  // lane decision-attention: the judged rows, their answers, the account's "never judge", the settings block
+  "needs you ✓": "要対応 ✓",
+  "needs you": "要対応",
+  "needs you · {p}": "要対応 · {p}",
+  ", ": "、",
+  "You marked this conversation as needing you": "この会話をあなたが要対応と指定しました",
+  "The Decision API judged that this needs you now (p = {p}): {why}": "判定 API はいまあなたの対応が必要と判断しました（p = {p}）：{why}",
+  "no single reason stood out": "際立った理由はありません",
+  "said to you": "あなた宛て",
+  "asks you": "あなたへの質問",
+  "wants your decision": "判断待ち",
+  "deadline or money": "期限・金銭",
+  "someone is waiting": "待っている人",
+  "escalation or incident": "エスカレーション・障害",
+  "what you care about": "関心事",
+  "Yes — this needs me": "はい — 対応が必要",
+  "No — this does not need me": "いいえ — 対応不要",
+  "Noted — this message is off the list": "記録しました — このメッセージは一覧から外れます",
+  "Noted — the judge learns from it": "記録しました — 判定はこれを学習します",
+  "Judge this account again": "このアカウントを再び判定する",
+  "Never judge this account": "このアカウントは判定しない",
+  "What matters to me (Decision API)": "私にとって大事なこと（判定 API）",
+  "With the Decision API plugin on, the Channels first screen also lists conversations the judge thinks need you now. Say in your own words what matters to you (at most 1,500 characters) — it goes to the judge as written. \"Draft from my recent decisions\" proposes lines from your ✓ / ✗ answers for you to edit; nothing is saved until you save it.": "判定 API プラグインをオンにすると、Channels の最初の画面に、判定があなたの対応が必要と見た会話も並びます。大事なことを自分の言葉で書いてください（最大 1,500 文字）— そのまま判定に渡します。「最近の判断から下書き」は ✓ / ✗ の回答から行を提案し、あなたが編集します。保存するまで反映されません。",
+  "Needs-attention threshold (Decision API)": "要対応のしきい値（判定 API）",
+  "How sure the judge must be (0.50–0.90) before a conversation joins the first screen. Higher = fewer, surer rows.": "会話が最初の画面に入るまでに判定に求める確かさ（0.50–0.90）。高いほど少なく、確実に。",
+  "Draft from my recent decisions": "最近の判断から下書き",
+  "Asks the Decision API which kinds of message your ✓ / ✗ answers set apart, and proposes lines for you to edit — never saved by itself": "✓ / ✗ の回答がどんな種類のメッセージを分けているかを判定 API に尋ね、編集用の行を提案します — 自動では保存しません",
+  "answer ✓ and ✗ on a few judged rows first": "まず判定された行でいくつか ✓ と ✗ を付けてください",
+  "No lines proposed ({n} of your decisions read) — {why}": "提案なし（判断を {n} 件読みました）— {why}",
+  "Read {n} of your decisions — {m} lines proposed; edit them, then Save": "判断を {n} 件読みました — {m} 行を提案；編集してから保存してください",
+  // lane decision-rule: the decision rule kind — its row in Notify…, its refusals, its cost line
+  "the decision rule needs a condition in plain words": "判定ルールには平易な言葉の条件が必要です",
+  "the condition is longer than {n} characters": "条件が {n} 文字を超えています",
+  "the decision is either yes / no or one of a list": "判定は「はい / いいえ」か「リストの一つ」です",
+  "a \"one of\" decision names 1 to {n} options (none is always added)": "「どれか一つ」の判定は 1〜{n} 個の選択肢（none は常に追加）",
+  "an option is a short word: letters, digits, - or _ (up to 40)": "選択肢は短い語です：英数字、- または _（40 文字まで）",
+  "two options have the same word": "二つの選択肢が同じ語です",
+  "an option's description is longer than {n} characters": "選択肢の説明が {n} 文字を超えています",
+  "a route names a Task Group or an agent": "ルートはタスクグループか agent を指定します",
+  "the threshold is between {min} and {max}": "しきい値は {min}〜{max} です",
+  "the judgments per hour are a whole number from 1 to {n}": "1 時間あたりの判定回数は 1〜{n} の整数です",
+  "is judged by the Decision API": "判定 API が判定する",
+  "The Decision API plugin is not available on this server — this rule never matches.": "このサーバーには判定 API プラグインがありません — このルールは一致しません。",
+  "The Decision API plugin is off — this rule judges nothing (and never matches) until you turn it on.": "判定 API プラグインはオフです — オンにするまでこのルールは判定せず、一致もしません。",
+  "The Decision API has no provider key yet — this rule judges nothing until you add one on its card.": "判定 API にはまだプロバイダーのキーがありません — カードで追加するまでこのルールは判定しません。",
+  "The Decision API's \"routing\" switch is off — this rule routes nothing until you turn it on.": "判定 API の「ルーティング」スイッチはオフです — オンにするまでこのルールは振り分けません。",
+  "The Decision API's \"rules\" switch is off — this rule judges nothing until you turn it on.": "判定 API の「ルール」スイッチはオフです — オンにするまでこのルールは判定しません。",
+  "In plain words — e.g. the sender asks me to pay or approve something": "平易な言葉で — 例：送信者が支払いや承認を求めている",
+  "Condition (judged for each message)": "条件（メッセージごとに判定）",
+  "Yes or no — a hit when it is likely enough": "はい / いいえ — 十分に確からしいとき一致",
+  "One of a list — or route to a group or agent": "リストの一つ — またはグループや agent に振り分け",
+  "a word, e.g. billing": "語（例：billing）",
+  "what it means (optional)": "意味（任意）",
+  "not routed": "振り分けなし",
+  "Route to": "振り分け先",
+  "Add option": "選択肢を追加",
+  "\"none\" is always an answer and notifies nobody. A message routed to a group or agent reaches it through its own notification row here — give that row this same rule (the judge is asked once per message).": "「none」は常に答えの一つで、誰にも通知しません。グループや agent に振り分けたメッセージは、ここにあるその通知行を通って届きます — その行にも同じルールを付けてください（判定はメッセージごとに一度）。",
+  "Answer": "答え",
+  "Hit when the judge is at least this sure": "判定がこの確かさ以上で一致",
+  "Judgments per hour, at most": "1 時間あたりの判定回数の上限",
+  "Cost: estimating…": "費用：見積もり中…",
+  "≈ {n} judgments/day ≈ {usd} at the current price — within your {budget} daily budget.": "≈ 1 日 {n} 回の判定 ≈ 現在の価格で {usd} — 1 日の予算 {budget} 以内。",
+  "≈ {n} judgments/day ≈ {usd} at the current price — over your {budget} daily budget: judging stops for the day when it is spent.": "≈ 1 日 {n} 回の判定 ≈ 現在の価格で {usd} — 1 日の予算 {budget} を超えます：使い切るとその日は判定を止めます。",
+  "(the hourly limit holds it there)": "（1 時間の上限で抑えています）",
+  "How often it hits is known only once it runs.": "どれくらい一致するかは動かしてみるまでわかりません。",
 };

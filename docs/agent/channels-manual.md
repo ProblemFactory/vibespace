@@ -271,6 +271,15 @@ The user gives you two DIFFERENT things, in this order:
     a reply in its thread, or a reply in its mail thread — the vendor's own
     reply marker, never "any message after yours"; refused as
     `not-on-this-version` where the server lacks it).
+  - judged by the Decision API (only where the user turned the plugin and its
+    `rules` switch on; each judgment is paid from THEIR daily budget):
+    `--kind decision --condition "words" [--choice a,b,c] [--threshold 0.7]
+    [--per-hour 20]` — the condition in plain words (≤ 500 characters); with
+    `--choice` the judge picks one of the options (or `none`, never a hit);
+    threshold 0.5–0.9 (default 0.7); at most `--per-hour` judgments an hour
+    (≤ 60, default 20). The wake's `why` names the condition and the verdict
+    (`decision: … → 0.82` / `→ billing 0.71`). No key, the day's budget spent or
+    the hour cap reached ⇒ that message is simply not a hit.
   - the whole row as JSON: `--spec '{"notify":"digest","digestMinutes":60,
     "filter":{"match":"every","rules":[{"kind":"regex","value":"^deploy"},
     {"kind":"has-attachment"}]},"dailyWakeCap":10}'` or `--spec @row.json`

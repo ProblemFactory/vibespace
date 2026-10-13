@@ -13,6 +13,7 @@ import { UI_ICONS } from './icons.js';
 import { btn, el } from './channel-chrome.js';
 import * as SW from '../browser-switch.js';
 import { pressVerdict } from './press-arm.js'; // verify r1: an Approve counts only once it sat still where it was read
+import { passkeyCardWords } from '../browser-passkey.js'; // lane passkey-ui: THE passkey card's words (tray = chat = live banner)
 
 // ── verify r1: THE PRESS-ARM RULE on the chat card (the outbox card's F6, the For-you rows' V1) — reproduced in chrome: a
 // press the instant the card appeared under the pointer ran the whole proposal (the install, the site, the switch). An
@@ -120,6 +121,51 @@ export async function rejectProposal(b, tt = t) {
   if (!r || r.error || !r.ok) { showToast(refusalText(r, tt), { type: 'error' }); return false; }
   return true;
 }
+/** lane passkey-ui: THE OWNER's answer on a passkey card (`pk-…`) — the approve route with the digest of the card pressed
+ *  and the choice (once | always | no | never). → the decided card, or null (the refusal toasted by name). */
+export async function answerPasskeyCard(card, choice, tt = t) {
+  const r = await fetchJson(`/api/browser/proposals/${encodeURIComponent(card.id)}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ shown: card.shown, choice }) });
+  if (!r || r.error || !r.ok) { showToast(refusalText(r, tt), { type: 'error' }); return null; }
+  return r.proposal || null;
+}
+/** lane passkey-ui: the card's choice buttons (ONE primary = the first, the rest quiet) into `row`, rebuilt only when the
+ *  card's choice set changes; a press posts {shown, choice}; an allowing press obeys the press-arm rule. */
+export function patchPasskeyButtons(row, card, { onAnswer = null } = {}) {
+  const w = passkeyCardWords(card, t);
+  const sig = w && w.open ? card.id + ':' + w.buttons.map((b) => b.choice).join(',') : '';
+  if (row.dataset.pkChoices !== sig) {
+    row.dataset.pkChoices = sig; row.textContent = '';
+    for (const b of (w && w.open ? w.buttons : [])) {
+      const cls = (b.primary ? 'chat-browser-proposal-approve' : 'chat-browser-proposal-reject') + ' chat-browser-pk-choice chat-browser-pk-' + b.choice;
+      const bt = btn(b.label, () => {
+        if ((b.choice === 'once' || b.choice === 'always') && bt.classList.contains('chat-browser-proposal-approve') && !approveArmed(bt)) return;
+        for (const x of row.querySelectorAll('button')) x.disabled = true;
+        answerPasskeyCard(row._pkCard || card, b.choice).then((done) => { if (!done) for (const x of row.querySelectorAll('button')) x.disabled = false; else if (onAnswer) onAnswer(done); });
+      }, cls);
+      bt.dataset.choice = b.choice;
+      row.appendChild(bt);
+      if (b.primary) { listenArm(); armNow(bt); }
+    }
+  }
+  row._pkCard = card;
+  row.style.display = sig ? '' : 'none';
+  return w;
+}
+/** lane passkey-ui: a passkey card's patch — the same keyed children as every proposal card, its own words + choices. */
+function patchPasskeyCard(el0, b) {
+  const card = b.passkey || {};
+  const w = passkeyCardWords(card, t) || { title: '', after: '', outcome: '', rp: '' };
+  const set = (sel, text) => { const n = el0.querySelector(sel); if (!n) return; const v = text || ''; if (n.textContent !== v) n.textContent = v; n.style.display = v ? '' : 'none'; };
+  el0.dataset.state = String(card.state || ''); el0.dataset.passkey = String(card.kind || '');
+  set('.chat-browser-proposal-title', t('VibeSpace · {what}', { what: t('A passkey for {rp}', { rp: w.rp }) }));
+  set('.chat-browser-proposal-claim', w.title);
+  set('.chat-browser-proposal-evidence', w.after);
+  set('.chat-browser-proposal-none', '');
+  set('.chat-browser-proposal-state', w.outcome);
+  const list = el0.querySelector('.chat-browser-proposal-plan'); if (list) list.style.display = 'none';
+  const row = el0.querySelector('.chat-browser-proposal-actions:not(.chat-browser-pk-actions)'); if (row) row.style.display = 'none';
+  const pk = el0.querySelector('.chat-browser-pk-actions'); if (pk) patchPasskeyButtons(pk, card);
+}
 /** The broadcast a run's change sends (`browser-proposal-updated`): a FAILED run this client started is toasted by
  *  name (the card says it too). Installed once per app. */
 let listening = false;
@@ -157,6 +203,7 @@ export function renderProposalCard(msg, { app = null } = {}) {
   const reject = btn(t('Reject'), () => { const cur = el0._rawMsg && el0._rawMsg.content && el0._rawMsg.content[0]; if (!cur) return; approve.disabled = true; reject.disabled = true; rejectProposal(cur).then((ok) => { if (!ok) { approve.disabled = false; reject.disabled = false; } }); }, 'chat-browser-proposal-reject');
   row.appendChild(approve); row.appendChild(reject);
   el0.appendChild(row);
+  if (b.kind === 'passkey') el0.appendChild(el('div', 'chat-browser-proposal-actions chat-browser-pk-actions')); // lane passkey-ui: the card's own choices
   patchProposalCard(el0, msg);
   listenArm();
   armNow(approve); // it just APPEARED: armed ARM_MS from now; its first position is read once it is laid out
@@ -168,6 +215,7 @@ export function patchProposalCard(el0, msg) {
   if (!el0 || !msg || !msg.content || !msg.content[0]) return;
   el0._rawMsg = msg;
   const b = msg.content[0];
+  if (b.kind === 'passkey') return patchPasskeyCard(el0, b); // lane passkey-ui
   const set = (sel, text) => { const n = el0.querySelector(sel); if (!n) return; const v = text || ''; if (n.textContent !== v) n.textContent = v; n.style.display = v ? '' : 'none'; };
   const L = SW.proposalLines(b);
   el0.dataset.state = String(b.state || '');
