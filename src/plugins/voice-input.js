@@ -26,27 +26,27 @@ module.exports = {
       stop() { const rec = h.rec(); rec.enabled = false; h.save(); h.notify(); return { stopped: true }; },
       enable(on) { return on ? verbs.start() : verbs.stop(); },
       bootReplay() { }, // nothing runs — the switch is read per dictation
+      // the old /config door: the language is a SETTINGS row (All Settings › Plugins › Voice input · Dropline)
       config(patch = {}) {
-        const rec = h.rec();
-        rec.config = rec.config || {};
         if (patch.language !== undefined) {
           if (!VM.LANGUAGES.includes(patch.language)) throw new Error(`language must be one of ${VM.LANGUAGES.join(' | ')}`);
-          rec.config.language = patch.language;
+          h.writeSettings({ language: patch.language });
         }
-        h.save(); h.notify();
-        return { config: rec.config };
+        h.notify();
+        return { config: { language: h.setting('language') } };
       },
       status() {
         const rec = h.peek();
         const hasKey = keyed();
         return {
           installed: true, configured: hasKey, enabled: !!rec.enabled && hasKey, running: !!rec.enabled && hasKey,
-          language: VM.languageOf(rec.config && rec.config.language), integration: 'dropline',
+          language: VM.languageOf(h.setting('language')), integration: 'dropline',
         };
       },
     };
-    // P1: the teach engine keeps its switches in rec.config and its state (proposals, ignores, journal) in rec.teach
-    if (typeof h.opts.voiceBind === 'function') h.opts.voiceBind({ peek: () => h.peek(), status: () => verbs.status(), update: (fn) => { const rec = h.rec(); fn(rec); h.save(); } });
+    // P1: the teach engine's switches are SETTINGS rows (h.settings / h.writeSettings — lane plugin-settings-p0) and
+    // its state (proposals, ignores, journal) stays in rec.teach
+    if (typeof h.opts.voiceBind === 'function') h.opts.voiceBind({ peek: () => h.peek(), status: () => verbs.status(), update: (fn) => { const rec = h.rec(); fn(rec); h.save(); }, settings: () => h.settings(), writeSettings: (patch) => { h.writeSettings(patch); h.notify(); } });
     return verbs;
   },
 };

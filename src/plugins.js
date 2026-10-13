@@ -26,7 +26,9 @@
 // is a different family and stays separate; the two meet only in the ⚙ → Plugins panel (src/lib/plugins-ui.js
 // renders these rows, then renderManifestPlugins).
 //
-// State: data/plugins.json { plugins: { <id>: { enabled, config, desiredUp } } }
+// State: data/plugins.json { plugins: { <id>: { enabled, desiredUp, … } } } — enabled = the on-switch; a plugin's
+// CONFIGURATION lives in data/settings.json (src/plugin-settings.js tables, read via h.setting / h.settings);
+// the one secret a plugin holds itself (frp's relay token) stays in its record (config.token), never a setting.
 // (enabled = replay at boot; runtime pid/state live in the plugin dir itself).
 const fs = require('fs');
 const os = require('os');
@@ -34,11 +36,12 @@ const path = require('path');
 
 const PLUGIN_ROOT = path.join(os.homedir(), '.vibespace', 'plugins');
 const BUILTIN = require('./plugins/index.js');
+const PS = require('./plugin-settings.js'); // PURE: one settings table per built-in plugin (docs/design-plugin-settings.zh.md)
 
 // the verbs a declared capability obliges (the manager's relay surface calls these on the 'relay' provider)
 const CAP_VERBS = Object.freeze({ relay: ['publish', 'unpublish', 'setSelfDialSub'] });
 const REQUIRED_VERBS = ['install', 'start', 'stop', 'status'];
-const OPTIONAL_VERBS = ['setup', 'config', 'mode', 'enable', 'bootReplay'];
+const OPTIONAL_VERBS = ['setup', 'config', 'mode', 'enable', 'bootReplay', 'applySettings'];
 
 /** The ONE contract check — a plugin that breaks it is refused at registration, by name. */
 function validatePlugin(def, verbs) {
@@ -60,6 +63,11 @@ class PluginManager {
   // plugins = the registry (default: THE list, src/plugins/index.js); every other option reaches the plugins as
   // h.opts (opencodeServe = the SHARED serve module, injected so tests can drive a fake keeper).
   constructor({ dataDir, broadcast, plugins = BUILTIN, ...opts }) {
+    // settings = THE settings store ({ read() → data/settings.json, patch(obj) → the one writer }): a plugin's
+    // configuration rows (src/plugin-settings.js) are read through h.setting / h.settings, never plugins.json
+    // (a manager built without one — a suite — keeps its values in memory)
+    let mem = {};
+    this._settings = opts.settings || { read: () => mem, patch: (p) => { mem = { ...mem, ...p }; for (const [k, v] of Object.entries(mem)) if (v === null) delete mem[k]; } };
     this._file = path.join(dataDir, 'plugins.json');
     this.broadcast = broadcast || (() => {});
     try { this._state = JSON.parse(fs.readFileSync(this._file, 'utf-8')); } catch { this._state = { plugins: {} }; }
@@ -73,6 +81,9 @@ class PluginManager {
         rec: () => this._rec(id), peek: () => this._state.plugins[id] || {},
         save: () => this._save(), notify: () => this._notify(),
         probeProto: (port, o) => this._probeProto(port, o),
+        settings: () => PS.valuesOf(id, this._readSettings()),
+        setting: (key) => PS.valuesOf(id, this._readSettings())[key],
+        writeSettings: (patch) => this._writeSettings(id, patch),
       };
       const verbs = def.create(h);
       validatePlugin(def, verbs);
@@ -86,6 +97,40 @@ class PluginManager {
       fs.writeFileSync(tmp, JSON.stringify(this._state, null, 2), { mode: 0o600 });
       fs.renameSync(tmp, this._file);
     } catch { }
+  }
+
+  _readSettings() { try { return this._settings.read() || {}; } catch { return {}; } }
+  /** a plugin's own rows written through the ONE settings writer (a key outside its table is refused by name) */
+  _writeSettings(id, patch = {}) {
+    const tbl = PS.PLUGIN_SETTINGS[id];
+    const out = {};
+    for (const [k, v] of Object.entries(patch)) {
+      const r = tbl && tbl.rows.find((x) => x.key === k);
+      if (!r) throw new Error(`plugin ${id} has no setting ${k}`);
+      out[PS.rowPath(id, r)] = v === undefined || v === r.default ? null : v; // a default is dropped (sparse store)
+    }
+    if (Object.keys(out).length) this._settings.patch(out);
+  }
+  /** THE ONE-TIME MOVE (migration 2026-10-plugin-config-to-settings, src/server/migrations.js): the table rows'
+   *  old values leave data/plugins.json for settings.json — through this live manager (it holds plugins.json). */
+  migrateConfigToSettings() {
+    const { patch, strip } = PS.migrationPlan(this._state, this._readSettings());
+    if (Object.keys(patch).length) this._settings.patch(patch);
+    for (const [id, fields] of Object.entries(strip)) {
+      const rec = this._state.plugins[id];
+      for (const f of fields) { const [a, b] = f.split('.'); if (b === undefined) delete rec[a]; else if (rec[a]) delete rec[a][b]; }
+      if (rec.config && !Object.keys(rec.config).length) delete rec.config;
+    }
+    if (Object.keys(strip).length) this._save();
+    return { moved: Object.keys(patch), stripped: strip };
+  }
+  /** settings.json changed (server.js onSettingsWrite): a plugin whose `plugin-config` row moved re-applies it */
+  onSettingsWrite(next, prev) {
+    for (const [id, tbl] of Object.entries(PS.PLUGIN_SETTINGS)) {
+      const moved = tbl.rows.some((r) => r.apply === 'plugin-config' && JSON.stringify((next || {})[PS.rowPath(id, r)]) !== JSON.stringify((prev || {})[PS.rowPath(id, r)]));
+      const v = this._verbs.get(id);
+      if (moved && v && typeof v.applySettings === 'function') { try { v.applySettings(); } catch (e) { console.warn(`[plugins] ${id} could not apply its settings:`, e.message); } }
+    }
   }
 
   _rec(id) { return (this._state.plugins[id] = this._state.plugins[id] || {}); }

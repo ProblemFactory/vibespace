@@ -85,7 +85,7 @@ registry.register({
 });
 const decision = DE.create({ dataDir, integrations: { resolveIntegration: () => ({ values: { provider: 'openai', apiKey: 'sk-fake-ui', model: '' }, source: 'user' }) }, baseUrlFor: { openai: `http://127.0.0.1:${PPORT}` }, log: quiet });
 let plug = { enabled: true, config: { attention: false } };   // OFF while the fixture is built: the page's first read starts the judging
-decision.attachPlugin({ peek: () => plug });
+decision.attachPlugin({ peek: () => plug, settings: () => plug.config || {} }); // lane plugin-settings-p0: the engine reads the settings rows
 const pages = new Set();
 const eng = ENG.create({ dataDir, registry, env: {}, broadcast: (m) => { for (const p of pages) p.fire(m); }, serverSetting: (k) => (k === 'decision.attentionBlock' ? 'Invoices and contracts matter to me.' : undefined), liveSessions: () => [], deliver: null, log: quiet, decisionEngine: decision });
 await eng.pass('im', { force: true });

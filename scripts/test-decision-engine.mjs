@@ -64,7 +64,10 @@ const notices = [];
 const store = S.create({ dataDir, env: {}, log: { warn() {}, log() {} } });
 const mkEngine = () => E.create({ dataDir, integrations: store, baseUrlFor: BASE, now: () => T, tzOffset: () => 0, serverNotice: (id, text) => { notices.push({ id, text }); return 1; }, log: { warn() {} } });
 let eng = mkEngine();
-const mkPlugins = (e) => new PluginManager({ dataDir, plugins: [DP], decisionEngine: e });
+// lane plugin-settings-p0: the plugin's switches / budget are SETTINGS rows — one in-memory settings store (the server's is data/settings.json)
+let settingsObj = {};
+const settingsStore = { read: () => settingsObj, patch: (p) => { settingsObj = { ...settingsObj, ...p }; for (const [k, v] of Object.entries(settingsObj)) if (v === null) delete settingsObj[k]; } };
+const mkPlugins = (e) => new PluginManager({ dataDir, plugins: [DP], decisionEngine: e, settings: settingsStore });
 let pm = mkPlugins(eng);
 const journal = () => { try { return fs.readFileSync(path.join(dataDir, 'decision-journal.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
 const RULE_Q = [{ type: 'predicate', name: 'invoice', instructions: 'Does it mention an invoice?' }];
@@ -237,43 +240,38 @@ async function page(w, h, lang) {
   const ev = async (expr) => { const r = await cdp('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.result?.exceptionDetails) throw new Error('page threw: ' + JSON.stringify(r.result.exceptionDetails).slice(0, 600)); return r.result?.result?.value; };
   const until = async (expr, n = 80) => { for (let i = 0; i < n; i++) { await sleep(150); if (await ev(expr).catch(() => false)) return true; } return false; };
   await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/?lang=${lang}` });
-  await until(`!!document.querySelector('.decision-integ .plugin-card')`);
+  await until(`!!document.querySelector('.plugin-row[data-plugin="decision-api"]')`);
   const press = async (sel) => { const r = await ev(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return null; e.scrollIntoView({ block: 'center' }); const b = e.getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]; })()`); if (!r) return false; const [x, y] = r; await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y }); await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 }); await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 }); await sleep(250); return true; };
   const shot = async (file) => { if (!SHOTS) return; fs.mkdirSync(SHOTS, { recursive: true }); await ev('window.scrollTo(0, 0)'); const [ww, hh] = await ev(`(() => { const b = document.getElementById('win').getBoundingClientRect(); return [Math.ceil(b.width), Math.ceil(b.height)]; })()`); const r = await cdp('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true, clip: { x: 0, y: 0, width: ww, height: hh, scale: 1 } }); fs.writeFileSync(path.join(SHOTS, file), Buffer.from(r.result.data, 'base64')); };
   return { ev, until, press, shot, close: () => { try { ws.close(); } catch {} } };
 }
-const CARD = `(() => {
-  const card = [...document.querySelectorAll('.plugin-card')].find((c) => c.querySelector('.decision-integ'));
-  if (!card) return null;
-  const integ = card.querySelector('.decision-integ');
-  return { state: card.querySelector('.plugin-state')?.textContent, sw: card.querySelector('[data-decision-switch]')?.dataset.decisionSwitch,
-    fields: [...integ.querySelectorAll('input')].map((i) => i.type).length, integText: integ.textContent, keyInputs: [...card.querySelectorAll('input[type=password]')].filter((i) => !integ.contains(i)).length,
-    features: [...card.querySelectorAll('[data-decision-feature]')].map((c) => c.dataset.decisionFeature + ':' + c.checked), budget: card.querySelector('.decision-budget')?.value,
-    counter: card.querySelector('.decision-counter')?.textContent, uses: [...card.querySelectorAll('.decision-use')].map((u) => u.dataset.use), privacy: card.querySelector('.decision-privacy')?.textContent,
-    sw2: document.documentElement.scrollWidth, vw: document.documentElement.clientWidth };
+// lane plugin-settings-p0 (the VS Code plugin model): the Decision API is ONE ROW of the Plugins list — chip · switch · ⚙;
+// its switches, budget and threshold are All Settings rows (scripts/test-plugin-settings.mjs), its key the registry card
+const ROW = `(() => {
+  const r = document.querySelector('.plugin-row[data-plugin="decision-api"]');
+  if (!r) return null;
+  const c = r.querySelector('.plugin-chip');
+  return { chip: c?.textContent, title: c?.title, sw: r.querySelector('input[role=switch]')?.checked, inputs: r.querySelectorAll('input, select, textarea').length,
+    gear: !!r.querySelector('.plugin-gear') && !r.querySelector('.plugin-gear').disabled, sw2: document.documentElement.scrollWidth, vw: document.documentElement.clientWidth };
 })()`;
 {
   pm.setEnabled('decision-api', false);
   const pg = await page(1100, 900, 'en');
-  const D0 = await pg.ev(CARD);
-  ok(D0 && D0.sw === 'off' && D0.state === 'turned off', 'desk: the Decision API card is drawn, its switch off', D0);
-  ok(await pg.press('[data-decision-switch]') && await pg.until(`document.querySelector('[data-decision-switch]')?.dataset.decisionSwitch === 'on'`) && pm.list()[0].enabled === true, 'desk: a press on the switch turns the plugin on (the server record says enabled)');
-  await pg.until(`!!document.querySelector('.decision-integ .plugin-card')`);
-  const D = await pg.ev(CARD);
-  ok(D.fields >= 2 && /Provider/.test(D.integText) && /API key/.test(D.integText) && /openrouter/.test(D.integText) && D.keyInputs === 0, 'desk: the registry card\'s fields (Provider, Model, API key) are ON the card, and the card draws no second key box', D);
-  ok(/OpenRouter/.test(D.state) && /sent to OpenRouter/.test(D.privacy) && /attachments, images and raw webhook payloads never are/.test(D.privacy), `desk: the privacy sentence names the provider ("${D.privacy}")`);
-  ok(D.budget === '1.00' && /Today: 1 checked/.test(D.counter) && /\$1\.00/.test(D.counter) && D.uses.includes('rule'), `desk: the budget reads USD (1.00 = 100 cents), the counter shows the fake call ("${D.counter}")`, D);
-  ok(JSON.stringify(D.features) === JSON.stringify(['attention:true', 'rules:true', 'routing:false']), 'desk: the feature toggles show the saved switches', D.features);
-  await pg.ev(`(() => { const i = document.querySelector('.decision-budget'); i.value = '0.50'; })()`);
-  await pg.press('.decision-budget + .mounts-btn');
-  ok(await pg.until(`true`, 2) && pm.list()[0].decision.dailyBudgetCents === 50, 'desk: Save sends cents (0.50 USD ⇒ 50)', pm.list()[0].decision.dailyBudgetCents);
-  pm.setConfig('decision-api', { dailyBudgetCents: 100 });
-  await pg.ev('window.__render()'); await pg.until(`document.querySelector('.decision-budget')?.value === '1.00' && !!document.querySelector('.decision-integ .plugin-card')`);
+  const D0 = await pg.ev(ROW);
+  ok(D0 && D0.sw === false && D0.chip === 'turned off' && D0.inputs === 1 && D0.gear, 'desk: the Decision API row is drawn — chip "turned off", ONE control (its switch) + ⚙', D0);
+  ok(await pg.press('.plugin-row[data-plugin="decision-api"] .plugin-sw') && await pg.until(`document.querySelector('.plugin-row[data-plugin="decision-api"] input[role=switch]')?.checked === true`) && pm.list()[0].enabled === true, 'desk: a press on the switch turns the plugin on (the server record)');
+  await pg.until(`/OpenRouter/.test(document.querySelector('.plugin-row[data-plugin="decision-api"] .plugin-chip')?.textContent || '')`);
+  const D = await pg.ev(ROW);
+  ok(/OpenRouter/.test(D.chip) && / · Today: judged 1 · 0 needed you · /.test(D.title) && /limit \$1\.00/.test(D.title), `desk: the chip names the provider; its title is today's count + spend ("${D.title}")`);
+  ok(D.inputs === 1, 'desk: no key box, no feature checkbox, no budget on the row (configuration lives in All Settings)', D);
+  settingsStore.patch({ 'plugin.decision-api.dailyBudgetUsd': 0.5 });
+  ok(pm.list()[0].decision.dailyBudgetCents === 50, 'the budget SETTING (0.50 USD) reaches the engine as 50 cents', pm.list()[0].decision.dailyBudgetCents);
+  settingsStore.patch({ 'plugin.decision-api.dailyBudgetUsd': null });
   await pg.shot('card.png');
   pg.close();
   const ph = await page(390, 844, 'zh');
-  const P = await ph.ev(CARD);
-  ok(P && P.sw2 <= P.vw + 1 && /OpenRouter/.test(P.privacy) && /今天/.test(P.counter) && P.fields >= 2, `phone 390 (zh): the card fits (scrollWidth ${P && P.sw2} ≤ ${P && P.vw}), the privacy sentence and the counter in Chinese`, P);
+  const P = await ph.ev(ROW);
+  ok(P && P.sw2 <= P.vw + 1 && / · 今天：判断了 1 条 · 命中 0 条 · /.test(P.title) && P.inputs === 1, `phone 390 (zh): the row fits (scrollWidth ${P && P.sw2} ≤ ${P && P.vw}), the chip title counts in Chinese`, P);
   await ph.shot('phone.png');
   ph.close();
 }

@@ -315,7 +315,15 @@ class LayoutManager {
         return;
       }
     }
-    this._applyRemoteState(msg.state, { closeOnlyWired: !!msg.resync, receivedAt });
+    // THE SECOND BELT (§6b guard 10): a record a PHONE wrote is membership + content on a desktop — never its z, boxes,
+    // maximize / minimize / snap or sidebar (an old phone bundle still captures them off its own full-screen box); an
+    // unstamped record (an old sender) is a desktop's, as before. LIVE only: the stamp names the WRITER, it never means
+    // "ignore this record's arrangement" — a phone's record carries the held desktop arrangement verbatim (belt 1), so a
+    // RE-READ (the reconnect / outage resync, like the boot) takes it whole: it is the truth on disk and the page's own
+    // newer acts are kept by the held-act witnesses (phone-arrangement-verify F1: the re-read dropped another desktop's
+    // drag and this page's next save wrote its stale boxes over it, on disk and on that desktop)
+    const membershipOnly = !msg.resync && (msg.viewport ?? msg.state?.viewport) === 'phone' && !this.app.isMobile;
+    this._applyRemoteState(msg.state, { closeOnlyWired: !!msg.resync, receivedAt, membershipOnly });
     if (dm && msg.desktopId) {
       dm.noteWire(msg.desktopId, msg.state); // the record this desktop was last seen as on the wire
       // …and the held record of the desktop on show follows it (the view's base: the next save merges the page's
@@ -326,7 +334,7 @@ class LayoutManager {
   }
 
   // Apply remote state: diff against local windows, update only what changed
-  _applyRemoteState(state, { closeOnlyWired = false, receivedAt = Date.now() } = {}) {
+  _applyRemoteState(state, { closeOnlyWired = false, receivedAt = Date.now(), membershipOnly = false } = {}) {
     if (!state) return;
     this._restoring = true;
     this._applying = true;
@@ -340,14 +348,14 @@ class LayoutManager {
     const chainHeld = (tabs) => Array.isArray(tabs) && tabs.some((id) => heldChain.has(String(id)));
     try {
       // Grid
-      if (state.grid) {
+      if (state.grid && !membershipOnly) {
         const cur = this.app.wm.grid;
         if (!cur || cur.rows !== state.grid.rows || cur.cols !== state.grid.cols) {
           this.app.wm.setGrid(state.grid.rows, state.grid.cols);
         }
       }
       // Sidebar
-      if (state.sidebarOpen !== undefined && state.sidebarOpen !== this.app.sidebar.isOpen) {
+      if (state.sidebarOpen !== undefined && !membershipOnly && state.sidebarOpen !== this.app.sidebar.isOpen) {
         this.app.sidebar.toggle(state.sidebarOpen);
       }
       // Taskbar height
@@ -371,7 +379,7 @@ class LayoutManager {
             // yet — the record is OLDER than the close; it never re-creates the window (the close goes out below)
             if (heldIds.includes(winId)) { heldClosed = true; continue; }
             // Window doesn't exist locally — create it
-            this._createRemoteWindow(rw);
+            this._createRemoteWindow(rw, { membershipOnly });
             continue;
           }
           // THE HELD MOVE (verify r2): this page moved the window AFTER the record arrived (a drop on a preview at
@@ -398,7 +406,7 @@ class LayoutManager {
           // 1280w) — the old 0.0001 epsilon saw that as a "change" and clients
           // with different viewport sizes re-broadcast forever (ping-pong).
           // 0.002 ≈ 2-4px: below any real move, above all rounding noise.
-          if (rw.gridBounds && !heldGeom) {
+          if (rw.gridBounds && !heldGeom && !membershipOnly) { // a phone's record moves no box (guard 10)
             const EPS = 0.002;
             const changed = !win.gridBounds
               || Math.abs(win.gridBounds.left - rw.gridBounds.left) > EPS
@@ -414,18 +422,19 @@ class LayoutManager {
           // z-index: only apply if remote z is higher (local focus wins)
           const z = rw.z || rw.zIndex || 0;
           const localZ = parseInt(win.element.style.zIndex) || 0;
-          if (z > localZ) {
+          if (z > localZ && !membershipOnly) {
             win.element.style.zIndex = z;
             if (z >= this.app.wm.zIndex) this.app.wm.zIndex = z + 1;
           }
-          if (!heldGeom) {
+          if (!heldGeom && !membershipOnly) {
             // maximize
             const isMax = rw.isMaximized ?? false;
             if (isMax && !win.isMaximized) this.app.wm.toggleMaximize(win.id);
             if (!isMax && win.isMaximized) this.app.wm.toggleMaximize(win.id);
             // minimize/restore
             const isMin = rw.min ?? rw.isMinimized ?? false;
-            if (isMin && !win.isMinimized) this.app.wm.minimize(win.id);
+            // the phone's window ON SHOW is its own (guard 10): a record minimizing it does not take it off this screen
+            if (isMin && !win.isMinimized && !(this.app.isMobile && win.element.classList.contains('window-active'))) this.app.wm.minimize(win.id);
             if (!isMin && win.isMinimized) this.app.wm.restore(win.id);
             // snap state
             win._isSnapped = rw.snap ?? rw.isSnapped ?? false;
@@ -543,7 +552,7 @@ class LayoutManager {
               if (w._tabChain) this.app.wm._ungroupLast(w._tabChain);
               for (const id of members) {
                 const rw = recorded.get(id), win = this.app.wm.windows.get(id);
-                if (rw && rw.gridBounds && win && !win._onStage) { win.gridBounds = { ...rw.gridBounds }; this.app.wm._applyGridBounds(win); }
+                if (rw && rw.gridBounds && win && !win._onStage && !membershipOnly) { win.gridBounds = { ...rw.gridBounds }; this.app.wm._applyGridBounds(win); }
               }
             }
           }
@@ -895,19 +904,24 @@ class LayoutManager {
   }
 
   // Create a window from remote layout state using its saved openSpec
-  _createRemoteWindow(rw) {
+  _createRemoteWindow(rw, { membershipOnly = false } = {}) {
     const winId = rw.winId || rw.id;
     const spec = rw.openSpec;
     if (!spec) return; // no spec = can't recreate
+    // a phone keeps ITS window on show when another client opens one (§6b guard 10): the replay's focus is handed back
+    const wm = this.app.wm, shown = this.app.isMobile ? wm.activeWindowId : null;
+    const keepShown = () => { if (shown && wm.activeWindowId !== shown && wm.windows.has(shown)) wm.focusWindow(shown); };
 
     try {
       this.app.replayOpenSpec(spec, winId);
+      keepShown();
       // an async opener (FileViewer.open) has not created the window yet — a chain naming it waits (_queueChain)
       if (!this.app.wm.windows.has(winId)) { (this._replaying ||= new Set()).add(winId); setTimeout(() => this._replaying?.delete(winId), 10000); }
       // Apply position after creation (may be async)
       setTimeout(() => {
         const winInfo = this.app.wm.windows.get(winId);
-        if (!winInfo) return;
+        keepShown();
+        if (!winInfo || membershipOnly) return; // a phone's record: placed by this desktop's own default (guard 10)
         if (rw.gridBounds) { winInfo.gridBounds = rw.gridBounds; this.app.wm._applyGridBounds(winInfo); }
         if (rw.isSnapped) { winInfo._isSnapped = true; winInfo._preSnapBounds = rw.preSnapBounds; }
         if (rw.isMaximized) this.app.wm.toggleMaximize(winInfo.id);
@@ -1324,8 +1338,10 @@ class LayoutManager {
     }, 1100);
   }
 
-  _isMobile() {
-    return window.innerWidth <= 768 || ('ontouchstart' in window && window.innerWidth < 1024);
+  /** THE VIEWPORT CLASS this page writes as (§6b guard 10) — app.isMobile, the one predicate: a `phone` never writes
+   *  arrangement (desktop-record.js captureForViewport) and stamps every layout-sync it sends `viewport: 'phone'`. */
+  _viewport() {
+    return this.app.isMobile ? 'phone' : 'desktop';
   }
 
   async _doAutoSave() {
@@ -1368,7 +1384,7 @@ class LayoutManager {
     const sentAt = Date.now(), sentDesks = [];
     for (const d of dm?.takeDirty?.() || []) {
       const st = dm.recordFor(d);
-      this.app.ws.send({ type: 'layout-sync', state: st, desktopId: d, evidence: dm.evidence(), sentAt });
+      this.app.ws.send({ type: 'layout-sync', state: st, desktopId: d, evidence: dm.evidence(), sentAt, viewport: this._viewport() });
       sentDesks.push(d);
       dm.noteSent(d, st);
     }
@@ -1392,7 +1408,7 @@ class LayoutManager {
     }
     this._lastSentJson = json;
     // Full state to server for disk persistence (+ the evidence the server's shrink belt reads)
-    this.app.ws.send({ type: 'layout-sync', state, desktopId, evidence: dm?.evidence?.() || [], sentAt });
+    this.app.ws.send({ type: 'layout-sync', state, desktopId, evidence: dm?.evidence?.() || [], sentAt, viewport: this._viewport() });
     sentDesks.push(desktopId || '');
     this.noteLayoutSent(sentDesks, sentAt);
     if (desktopId) { if (dm?.noteSent) dm.noteSent(desktopId, state); else dm?.noteWire?.(desktopId, state); }
@@ -1435,12 +1451,12 @@ class LayoutManager {
       // persisted state must be honored HERE too — else a stale localStorage
       // (applied by _setupToolbarResize moments ago) resurrects an erased
       // scale and the first autosave re-broadcasts it fleet-wide.
-      const bootState = this._isMobile() ? (data.autoSaveMobile || data.autoSave)
-        : (data.desktopMeta?.length ? data.desktops?.[data.desktopMeta[0].id]?.autoSave : data.autoSave);
+      const bootState = data.desktopMeta?.length ? data.desktops?.[data.desktopMeta[0].id]?.autoSave : data.autoSave;
       this._applyToolbarState(bootState || data.autoSave);
       // Desktop-aware restore: delegate to DesktopManager
       if (this.app.desktopManager) {
         await this.app.desktopManager.loadFromServer(data);
+        this.app._mobileNav?.restoreShown?.(); // the phone's window on show is this tab's own (§6b guard 10)
         // Fold NON-ACTIVE desktops' lazy saved states into the resume-all
         // collector. THE 2.331.0 WIRING: that commit shipped the pure
         // scanStoppedInDesktopStates + its unit test but this call site was
@@ -1465,7 +1481,7 @@ class LayoutManager {
         } catch { }
       } else {
         // Fallback: original single-desktop restore
-        const toRestore = this._isMobile() ? (data.autoSaveMobile || data.autoSave) : data.autoSave;
+        const toRestore = data.autoSave;
         if (toRestore && toRestore.windows && toRestore.windows.length > 0) {
           await this.restoreState(toRestore);
         }
@@ -1500,7 +1516,10 @@ class LayoutManager {
 
   // Save a named preset
   async savePreset(name) {
-    const state = this.captureState();
+    // the desktop on show through THE ONE CAPTURE (desktop-manager.js captureBuilt): a preset saved on a phone carries the
+    // held arrangement, never the phone's own z / full-screen boxes (phone-arrangement-verify F4); captureState = no manager
+    const dm = this.app.desktopManager;
+    const state = dm?.presetState ? dm.presetState() : this.captureState();
     try {
       await fetch(`/api/layouts/${encodeURIComponent(name)}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },

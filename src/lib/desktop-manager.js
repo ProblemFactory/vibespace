@@ -2,7 +2,7 @@ import { cssVarDefault, showContextMenu, showInputDialog, showToast, uiScale } f
 import { startPointerDrag } from './drag-feed.js'; // THE feed for every drag door (lane-drag-release verify r2 census)
 import { t } from './i18n.js';
 import { stageRefusalSentence } from './stage-rules.js'; // inc-muly2izg-cks3: the Stage's move refusal, in words (PURE)
-import { mergeDesktopRecord, windowIds } from './desktop-record.js'; // userW inc-mun7qjmw-iksh: a held record is a VIEW — every write merges (PURE)
+import { mergeDesktopRecord, windowIds, captureForViewport, VIEWPORT_CHROME } from './desktop-record.js'; // userW inc-mun7qjmw-iksh: a held record is a VIEW — every write merges (PURE)
 
 /** A window this page tried to build (a desktop's first visit, the boot restore) and that is still absent this long
  *  after is one it cannot build: the record drops it, and says so to the server's belt ('unbuilt'). Before that it is
@@ -252,12 +252,38 @@ export class DesktopManager {
     });
     const unbuilt = this._unbuilt(desktopId, held);
     lm.dropUnbuiltMembers?.(unbuilt); // a chain waiting for a window the page could not build is rebuilt without it
-    const rec = mergeDesktopRecord({ record: held, built: lm.captureWindows(desktopId), remove: [...unbuilt, ...elsewhere] });
+    // a PHONE writes membership, never arrangement (§6b guard 10): the boxes, z, maximize / minimize / snap of the windows
+    // it built — and the sidebar / grid chrome — are the held record's, verbatim (PURE captureForViewport)
+    const viewport = this.app.isMobile ? 'phone' : 'desktop';
+    const built = this.captureBuilt(desktopId, held);
+    const rec = mergeDesktopRecord({ record: held, built, remove: [...unbuilt, ...elsewhere] });
     const { grid, ...chrome } = lm.captureChrome();
+    if (viewport === 'phone') for (const k of VIEWPORT_CHROME) delete chrome[k];
     Object.assign(rec, chrome);
-    if (desktopId === this._activeId) rec.grid = grid;
+    if (desktopId === this._activeId && viewport !== 'phone') rec.grid = grid;
     delete rec.updatedAt; // the server's stamp on the record it holds — it stamps every write itself
+    delete rec.viewport; // …and so is the writer's viewport (the layout-sync's own `viewport`, never a held copy's)
     return rec;
+  }
+
+  /** THE ONE CAPTURE (§6b guard 10, phone-arrangement-fixes): every record this page builds from its OWN windows — the
+   *  autosave's recordFor, a refused save's merge, a move's target, a named preset — captures them here, never through
+   *  layout.js captureWindows / captureWin / captureState directly (test-phone-desktop-sync ⑭ CENSUS: a new site is RED).
+   *  A phone's capture keeps `held`'s arrangement verbatim (PURE captureForViewport); a desktop's is the page's own.
+   *  `ids` = only those windows (a move), else every window the page built on `desktopId`. */
+  captureBuilt(desktopId, held, ids = null) {
+    const lm = this.app.layoutManager;
+    const built = ids ? ids.map((id) => this.app.wm.windows.get(id)).filter(Boolean).map((w) => lm.captureWin(w, w.id)).filter(Boolean) : lm.captureWindows(desktopId);
+    return captureForViewport({ held, built, viewport: this.app.isMobile ? 'phone' : 'desktop' });
+  }
+
+  /** A named preset of the desktop on show (layout.js savePreset): its windows through THE ONE CAPTURE, the page's chrome
+   *  — a phone's sidebar / grid are the held record's (its own are an overlay and the full screen), as recordFor's. */
+  presetState() {
+    const held = this._savedStates.get(this._activeId) || { windows: [] };
+    const state = { windows: this.captureBuilt(this._activeId, held), ...this.app.layoutManager.captureChrome() };
+    if (this.app.isMobile) for (const k of VIEWPORT_CHROME) { if (k in held) state[k] = held[k]; else delete state[k]; }
+    return state;
   }
 
   /** A remote record for the desktop ON SHOW was applied (layout.js _handleRemoteSync): it is the view's base now —
@@ -336,7 +362,9 @@ export class DesktopManager {
     const lm = this.app.layoutManager;
     const rec = msg.state && typeof msg.state === 'object' ? msg.state : { windows: [] };
     for (const id of msg.unexplained || []) { this._buildAttempts.delete(String(id)); this._departed.delete(String(id)); }
-    this._setRecord(d, mergeDesktopRecord({ record: rec, built: lm.captureWindows(d), remove: lm.heldCloseIds?.() || [] }));
+    // the windows this page built there through THE ONE CAPTURE: a phone's re-send carries the kept record's arrangement,
+    // never its own z (phone-arrangement-verify F2: the reconciled re-send wrote the phone's z, a desktop's reload restacked)
+    this._setRecord(d, mergeDesktopRecord({ record: rec, built: this.captureBuilt(d, rec), remove: lm.heldCloseIds?.() || [] }));
     this.noteWire(d, rec);
     let opened = 0;
     if (d === this._activeId && !this.app.stage?.isActive) opened = this._replayMissing(d, this._savedStates.get(d));
@@ -631,8 +659,10 @@ export class DesktopManager {
    *  here or not. The SOURCE: the moved windows leave it. A desktop not on show is marked dirty: the next autosave
    *  sends its HELD record (never a list derived from the page). The moves are evidence for the server's belt. */
   _updateCachedDesktop(desktopId, { from = null, ids = [], replaces = [] } = {}) {
-    const lm = this.app.layoutManager;
-    const moved = ids.map((id) => this.app.wm.windows.get(id)).filter(Boolean).map((w) => lm.captureWin(w, w.id)).filter(Boolean);
+    // the moved windows through THE ONE CAPTURE: on a phone each keeps the arrangement the record it LEAVES holds (one
+    // born on the phone: no box, on top of both) — never the phone's own z / full-screen box (phone-arrangement-verify F3)
+    const src = (from && this._savedStates.get(from)) || { windows: [] }, dst = this._savedStates.get(desktopId) || { windows: [] };
+    const moved = this.captureBuilt(desktopId, { windows: [...(src.windows || []), ...(dst.windows || [])] }, ids);
     this._setRecord(desktopId, mergeDesktopRecord({ record: this._savedStates.get(desktopId) || { windows: [] }, add: moved, remove: replaces }));
     if (from && from !== desktopId && this._savedStates.has(from)) this._setRecord(from, mergeDesktopRecord({ record: this._savedStates.get(from), remove: ids }));
     for (const d of [desktopId, from]) if (d && d !== this._activeId && d !== '__stage__') this._dirtyDesks.add(d);
@@ -704,7 +734,7 @@ export class DesktopManager {
     if (desktopId === '__stage__') return; // stage state never enters desktop records
     if (!this._desktops.some((d) => d.id === desktopId)) return; // a desktop deleted meanwhile: its record is nobody's to write (verify r2 ④ — the switch off it wrote an orphan record on the server)
     const sentAt = Date.now();
-    this.app.ws.send({ type: 'layout-sync', state, desktopId, evidence: this.evidence(), sentAt });
+    this.app.ws.send({ type: 'layout-sync', state, desktopId, evidence: this.evidence(), sentAt, viewport: this.app.isMobile ? 'phone' : 'desktop' });
     this.app.layoutManager?.noteLayoutSent?.([desktopId], sentAt); // this record carries every close made on that desktop (inc-mukeyzpt-lpou) — released once the server READ it (verify r5 ⑤)
     this.noteSent(desktopId, state);
   }

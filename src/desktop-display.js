@@ -1363,8 +1363,10 @@ async function appA11yBus({ user = null, address = null, env = process.env, time
 }
 /** Start the companion bus of `plan` (PURE desktop-apps portalPlan): its dirs (0700) and files, then ONE detached
  *  `dbus-daemon --nofork` with the plan's env over `env` (every service it activates inherits that env — the app's
- *  display, the private config/data/runtime dirs), resolved once its socket exists. Rejects by name. */
+ *  display, the private config/data/runtime dirs), resolved once its socket exists. Rejects by name — a refused plan
+ *  ({ ok:false, why }) with its why, before any dir (lane secrets-chrome-skip: it has none). */
 async function startPortalBus({ plan, env, logFd = 'ignore', deadlineMs = 5000, now = Date.now, stepMs = 50 } = {}) {
+  if (!plan || !plan.ok) throw namedError('portal-bus', `no portal plan: ${(plan && plan.why) || 'none'}`);
   for (const d of plan.dirs) { fs.mkdirSync(d, { recursive: true, mode: 0o700 }); fs.chmodSync(d, 0o700); }
   for (const f of plan.files) fs.writeFileSync(f.file, f.text, { mode: 0o600 });
   const sock = plan.address.replace(/^unix:path=/, '');

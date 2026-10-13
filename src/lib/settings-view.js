@@ -124,7 +124,8 @@ export function settingsViewModel(schema, { categories = [], query = '', showAdv
   for (const [path, row] of Object.entries(schema || {})) {
     const sec = byCategory[row && row.category];
     if (!sec) continue;
-    if (q && !((row.label || '') + ' ' + (row.description || '') + ' ' + path).toLowerCase().includes(q)) continue;
+    // lane attention-policy: a block's head words find its rows too (typing 需关注 / attention finds 「需关注 · 怎么判断」)
+    if (q && !((row.label || '') + ' ' + (row.description || '') + ' ' + path + ' ' + (row.blockTitle || '')).toLowerCase().includes(q)) continue;
     const why = whyHidden(row, ctx, t);
     const advanced = row.tier === 'advanced';
     const modified = !!isModified(path);

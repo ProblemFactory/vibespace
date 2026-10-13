@@ -38,13 +38,17 @@ function create({ app, server, rootDir, HOST, PORT, BUFFERS_DIR, PERMISSION_MODE
 // ── Mounts (rclone S3 mounts + share minting — collaboration P1) ──
 // ── Plugins (2.140.0, B-2d44): host-level capabilities with persistent state ──
 const { PluginManager } = require('../plugins');
-let voicePlugin = { peek: () => ({}), update: () => {} }; // Dropline voice input (q-029 P0): the plugin hands its record reader back here
+let voicePlugin = { peek: () => ({}), update: () => {}, settings: () => ({}), writeSettings: () => {} }; // Dropline voice input (q-029 P0): the plugin hands its record reader back here
 // THE DECISION ENGINE (lane decision-core): the ONE decisions-API caller — the plugin row attaches its switches, the
 // registry row `decision-api` gives the key, its Test runner is the engine's own one-question judgment
 const decisionEngine = require('./decision-engine.js').create({ dataDir: path.join(rootDir, 'data'), integrations, serverNotice });
 try { if (integrations && typeof integrations.registerTest === 'function') integrations.registerTest('decision-api', decisionEngine.testRunner); } catch (e) { console.warn('[decision] Test runner not registered:', e.message); }
+if (userTodos) decisionEngine.attachInbox(userTodos); // lane inbox-decision-group: use ④ — the For-you tray's two sections (a 60 s tick, a pass every 5 min, off every wake path)
 const plugins = new PluginManager({
-  dataDir: path.join(rootDir, 'data'), integrations: () => integrations, voiceBind: (v) => { voicePlugin = v; }, droplineConnected: () => !!(dropline && dropline.connected()), decisionEngine,
+  dataDir: path.join(rootDir, 'data'), integrations: () => integrations,
+  // lane plugin-settings-p0: THE settings store — every plugin configuration row is read / written here (one truth)
+  settings: { read: () => (persistenceRouter && persistenceRouter.readSettings ? persistenceRouter.readSettings() : {}), patch: (p) => persistenceRouter.patchSettings(p) },
+  voiceBind: (v) => { voicePlugin = v; }, droplineConnected: () => !!(dropline && dropline.connected()), decisionEngine,
   broadcast: (msg) => {
     const json = JSON.stringify(msg);
     wss.clients.forEach(c => { if (c.readyState === WS_OPEN) { try { c.send(json); } catch {} } });
@@ -63,8 +67,8 @@ var dropline = require('./dropline-client.js').create({ integrations: () => inte
 try { integrations?.registerTest('dropline', dropline.testRunner); } catch (e) { console.warn('[voice] the dropline Test runner was not registered:', e.message); }
 const droplineOAuth = droplineOAuthMod.create({ client: dropline, flows: require('../oauth-loopback.js').createOAuthLoopback({}), integrations: () => integrations, instanceUrl: () => { try { return instanceUrl?.url?.() || ''; } catch { return ''; } }, tokens: droplineTokens });
 require('./oauth-doors.js').register('dropline', { landing: droplineOAuth.landing, page: droplineOAuth.page });
-droplineTeach = require('./voice-teach-engine.js').create({ client: dropline, plugin: { peek: () => voicePlugin.peek(), update: (fn) => voicePlugin.update(fn) }, userTodos });
-app.use(require('../routes/voice.js').create({ client: dropline, prefs: () => voicePlugin.peek(), oauth: droplineOAuth, teach: droplineTeach }));
+droplineTeach = require('./voice-teach-engine.js').create({ client: dropline, plugin: { peek: () => voicePlugin.peek(), update: (fn) => voicePlugin.update(fn), settings: () => voicePlugin.settings(), writeSettings: (p) => voicePlugin.writeSettings(p) }, userTodos });
+app.use(require('../routes/voice.js').create({ client: dropline, prefs: () => ({ ...voicePlugin.peek(), config: voicePlugin.settings() }), oauth: droplineOAuth, teach: droplineTeach }));
 setTimeout(() => { try { plugins.bootReplay(); } catch (e) { console.warn('[plugins] boot replay:', e.message); } }, 5000);
 // CS data-plane deps for hosts.device(id) (2.146.0) — wired SYNCHRONOUSLY.
 // (Was a setTimeout(1000); a device dialing in during that window ran mount

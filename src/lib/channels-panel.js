@@ -42,7 +42,7 @@
 // same shape core's session-card / window / gear menus use — registered by the
 // module that OWNS the feature, so gear-menu.js stays byte-identical to its
 // pinned legacy row list.
-import { fetchJson, showContextMenu, showToast, createModalShell, showConfirmDialog, escHtml } from './utils.js';
+import { fetchJson, showContextMenu, showToast, createModalShell, showConfirmDialog, escHtml, createPopover } from './utils.js';
 import { t, deviceLocale } from './i18n.js';
 import { registerMenuItem, menuItems } from './contributions.js';
 import { registerWindowType } from './window-types.js';
@@ -70,7 +70,7 @@ import { groupListRows, foldsFrom, GROUP_ADAPTER_ID, firstScreen, statusTag, fil
 import { accountFold, accountFoldDefault, accountFoldKey, accountMatches, foldsToWrite, needsYou } from './channel-groups-view.js';   // lane channels-fold-default
 // design 008 (B-3cf8): the rows this panel HOLDS — the first read + every page read, keyed (PURE)
 import { createRowStore, applyFirst, applyPage, applyBroadcast, listRows, focusRowsOf, ensureList, pageQueryOf, accountList } from './channel-rows.js';
-import { afterCursor, PAGE_MAX, listRowModel } from '../channel-focus.js';
+import { afterCursor, PAGE_MAX, listRowModel, attentionPolicy, ATTENTION_RULES } from '../channel-focus.js';
 import { chipMode, titleMinText } from './title-chips.js'; // int214: a row's freshness pill folds (lane G), never cuts
 import { clearedText } from './record-clear-ui.js'; // "Clear content…" (2026-09-28): a group row's cleared last line
 import { showGroupMembersDialog, showGroupDetail, renameGroup, archiveGroup } from './channel-group-dialogs.js';
@@ -1166,6 +1166,23 @@ export function renderChannelsPanel(app, c) {
   // the glyph carries the button where the label cannot fit (MEASURED: the
   // 260px sidebar leaves 172px for the bar; the summary + the word do not both fit)
   outboxBtn.append(icon('outbox', 12), outboxLabel);
+  // lane attention-policy (owner 2026-10-13): THE DOOR to how "needs attention" is decided — the Settings window's own
+  // block of rows (settings-ui renderBlock, never a copy): a popover on a desk, a sheet on a phone. A switch flipped
+  // there redraws this list at once (`attnPolicy` is read per draw; the server's first read holds every rule's rows).
+  const attnBtn = btn('', () => openAttentionDoor(app, attnBtn), 'chan-attn-door');
+  attnBtn.dataset.attentionDoor = '1';
+  attnBtn.title = t('How "needs attention" is decided');
+  attnBtn.setAttribute('aria-label', attnBtn.title);
+  const attnGlyph = document.createElement('span');
+  attnGlyph.className = 'chan-attn-door-glyph';
+  attnGlyph.textContent = '\u2699\uFE0E';
+  const attnLabel = document.createElement('span');
+  attnLabel.className = 'chan-attn-door-label';
+  attnLabel.textContent = t('How it is decided');
+  attnBtn.append(attnGlyph, attnLabel);
+  const attnPolicy = () => (app.settings ? attentionPolicy((k) => app.settings.get(k)) : null);
+  const onPolicy = () => { if (c.isConnected && groups !== null) draw(); };
+  for (const code of ATTENTION_RULES) app.settings?.on?.(`channels.attention.rule.${code}`, onPolicy);
   // R3 (§23): THE HEADER IS THE VIEW SWITCH — "{n} need attention" | "All {n}"
   // (a `chan-seg`, the Outbox window's Awaiting | All grammar) in the summary's
   // place; a click redraws from the digest already in hand (no fetch)
@@ -1189,7 +1206,7 @@ export function renderChannelsPanel(app, c) {
   // the second row: the filter, then the two actions (New group, Outbox) — the switch
   // above gets the WHOLE width (measured: beside the two buttons at the 188 px rail it
   // cut "1 需关注" to "1 需…" and "全部 8" to "全…")
-  find.append(newBtn, outboxBtn);
+  find.append(newBtn, outboxBtn, attnBtn);
   const root = document.createElement('div');
   root.className = 'chan-list';
   c.append(bar, find, root);
@@ -1415,7 +1432,7 @@ export function renderChannelsPanel(app, c) {
     // R3 (§23): the ATTENTION list by default — what matters, one tag each (PURE firstScreen / statusTag)
     const q = findInput.value || '';
     const now = Date.now();
-    const fs = firstScreen(rows, { view: VIEW, q, now });
+    const fs = firstScreen(rows, { view: VIEW, q, now, policy: attnPolicy() });
     // design 008: THE COUNTS are the server's (kept facts) — the attention rows past the first read's cut and every row
     //  of All are not on this client; All draws its own paged list (`search` under a query), groups interleaved by
     //  activity down to the list's edge (a group older than the last row read waits for the next page)
@@ -1644,7 +1661,7 @@ export function renderChannelsPanel(app, c) {
     return box;
   }
   function groupRow(r, now = Date.now()) {
-    const st = r.kind === 'conv' ? statusTag(r, now) : null;
+    const st = r.kind === 'conv' ? (statusTag(r, now, attnPolicy()) || statusTag(r, now)) : null;   // lane attention-policy: the tag that listed it, else its fact
     const tag = statusTagParts(st, { now });
     const sig = JSON.stringify(['g', r.kind, r.id, r.adapterId, r.title, r.lastAt, r.unread, r.archived, r.pair, r.memberCount, r.sourceLabel, r.lastText, !!(r.group && r.group.lastCleared), r.conv ? r.conv.kind : '', rowTime(r.lastAt), st && st.code, tag, r.account, isInternal(r)]);   // r.group.lastCleared: the last line drawn as the cleared sentence ("Clear content…", the merge onto master's signature census)
     return memoRow('g:' + r.key, sig, r, (cur) => groupRowBuild(r, now, cur, st, tag));
@@ -2154,7 +2171,10 @@ export function renderChannelsPanel(app, c) {
   const foldListener = { c, draw };
   FOLD_LISTENERS.add(foldListener);
   refresh().catch(() => {});
-  return () => { FOLD_LISTENERS.delete(foldListener); try { app.ws.offGlobal(onBroadcast); } catch {} try { app.ws.offStateChange?.(onState); } catch {} };
+  return () => {
+    FOLD_LISTENERS.delete(foldListener); try { app.ws.offGlobal(onBroadcast); } catch {} try { app.ws.offStateChange?.(onState); } catch {}
+    for (const code of ATTENTION_RULES) app.settings?.off?.(`channels.attention.rule.${code}`, onPolicy);
+  };
 }
 
 // RECONCILE a parent's children with `out` IN PLACE (verify round 4, 2026-09-27): a node not wanted leaves first,
@@ -2175,6 +2195,25 @@ function adoptHandlers(keptNode, freshNode) {
   const a = keptNode.childNodes, b = freshNode.childNodes;
   for (let i = 0; i < a.length && i < b.length; i++) if (a[i].nodeType === 1 && b[i].nodeType === 1) adoptHandlers(a[i], b[i]);
 }
+/** lane attention-policy: THE DOOR — the Settings block 'attention' (settings-ui renderBlock: the SAME rows the Settings
+ *  window draws) as a popover under the ⚙ on a desk, as a sheet on a phone; "Open in Settings" opens the window on it. */
+function openAttentionDoor(app, anchor) {
+  const ui = app._settingsUI;
+  if (!ui || typeof ui.renderBlock !== 'function') return;
+  const block = ui.renderBlock('attention');
+  let close = () => { };
+  const more = btn(t('Open in Settings'), () => { close(); ui.open({ search: t('Needs attention · how it is decided') }); }, 'chan-attn-more');
+  if (app.isMobile) {
+    const shell = createModalShell({ id: 'chan-attn-sheet', title: t('How "needs attention" is decided'), dialogClass: 'chan-dialog chan-attn-sheet', escapeToClose: true });
+    shell.body.append(block, more);
+    close = shell.close;
+  } else {
+    const pop = createPopover(anchor, 'chan-attn-pop');
+    pop.append(block, more);
+    close = () => pop.remove();
+  }
+}
+
 export function reconcile(parent, out) {
   const want = new Set(out);
   const kids = parent.childNodes;

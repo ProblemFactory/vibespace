@@ -558,15 +558,17 @@ try {
   {
     const filesId = await evalJs(`[...app.wm.windows.values()].find((w) => w.type === 'files')?.id`);
     check('the desktop client mirrors the phone\'s explorer', await desk.waitFor(`app.wm.windows.has(${JSON.stringify(filesId)})`, 15000));
-    // make it the phone's ACTIVE window, so the phone has to show something else once it is minimized
-    await evalJs(`app.wm.focusWindow(${JSON.stringify(filesId)}); true`); await sleep(300);
+    // the phone shows ANOTHER window (§6b guard 10: a record never takes the phone's window on show off its screen —
+    // scripts/test-phone-desktop-sync ④ is that leg); the explorer is minimized by the desktop behind it
+    const otherId = await evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w.type !== 'files' && !w.isMinimized && !(w._tabChain && w._tabChain.tabs[0] !== w.id)); if (w) app.wm.focusWindow(w.id); return w?.id || null; })()`); await sleep(300);
     await settle(desk);
     await desk.userInput();
     const dmin = await desk.evalJs(`(() => { app.wm.minimize(${JSON.stringify(filesId)}); const w = app.wm.windows.get(${JSON.stringify(filesId)}); return { min: w.isMinimized, display: w.element.style.display }; })()`);
     check('desktop A/B: minimize on the desktop client hides the window and marks it minimized (unchanged)', dmin.min === true && dmin.display === 'none', dmin);
     const pm = await waitFor(`app.wm.windows.get(${JSON.stringify(filesId)})?.isMinimized === true`, 15000);
     const ps = await evalJs(`(() => { const w = app.wm.windows.get(${JSON.stringify(filesId)}); const a = app.wm.windows.get(app.wm.activeWindowId); return { min: w?.isMinimized, display: w ? getComputedStyle(w.element).display : null, activeIsIt: app.wm.activeWindowId === ${JSON.stringify(filesId)}, activeType: a?.type, activeShown: a ? getComputedStyle(a.element).display : 'none' }; })()`);
-    check(`the phone applies the synced minimize as TRUTH (isMinimized true), hides it locally (computed ${ps.display}) and shows another window instead (${ps.activeType}: ${ps.activeShown})`, pm && ps.min === true && ps.display === 'none' && !ps.activeIsIt && ps.activeShown !== 'none', ps);
+    const activeNow = await evalJs('app.wm.activeWindowId');
+    check(`the phone applies the synced minimize as TRUTH (isMinimized true), hides it locally (computed ${ps.display}) and keeps ITS window on show (${ps.activeType}: ${ps.activeShown})`, pm && ps.min === true && ps.display === 'none' && !ps.activeIsIt && ps.activeShown !== 'none' && !!otherId && activeNow === otherId, { ps, otherId, activeNow });
     await tap('#mobile-nav-title'); await sleep(300);
     const swm = await evalJs(`(() => { const p = document.querySelector('.mobile-win-switcher'); return { head: !!p?.querySelector('.mobile-win-minimized-head'), minRows: [...(p?.querySelectorAll('.mobile-win-row.mobile-win-minimized') || [])].map((r) => r.textContent.trim().slice(0, 30)), plain: p?.querySelectorAll('.mobile-win-row:not(.mobile-win-minimized)').length }; })()`);
     check(`the switcher lists it under Minimized (${swm.minRows.join(' | ')}) beside ${swm.plain} plain rows`, swm.head && swm.minRows.length === 1 && swm.plain >= 1, swm);
@@ -577,13 +579,14 @@ try {
     await sleep(800);
     const dAfter = await desk.evalJs(`(() => { const w = app.wm.windows.get(${JSON.stringify(filesId)}); return { min: w?.isMinimized, display: w?.element.style.display }; })()`);
     check(`the phone's save arrives on the desktop (seq ${dseq} → later) and the desktop's window STAYS minimized (r1 restored it: min:false rode the phone's save)`, arrived && dAfter.min === true && dAfter.display === 'none', { arrived, dAfter });
-    // the user's own restore is intent — it travels
+    // the phone's restore is ITS view (§6b guard 10, lane phone-arrangement-local): shown here, never written into the desktop's record
     await tap('#mobile-nav-title'); await sleep(300);
     const rowGeo = await evalJs(`(() => { const p = document.querySelector('.mobile-win-switcher'); const r = p?.querySelector('.mobile-win-row.mobile-win-minimized'); if (!p || !r) return null; const pr = p.getBoundingClientRect(), rr = r.getBoundingClientRect(); return { popBottom: Math.round(pr.bottom), rowTop: Math.round(rr.top), rowBottom: Math.round(rr.bottom), ih: innerHeight }; })()`);
     await tap('.mobile-win-switcher .mobile-win-row.mobile-win-minimized');
     const pr = await evalJs(`(() => { const w = app.wm.windows.get(${JSON.stringify(filesId)}); return { min: w.isMinimized, display: getComputedStyle(w.element).display, active: app.wm.activeWindowId === ${JSON.stringify(filesId)} }; })()`);
     check(`a tap on the Minimized row (scrolled into the sheet's view first: row ${rowGeo?.rowTop}–${rowGeo?.rowBottom}, sheet bottom ${rowGeo?.popBottom}) restores it on the phone (shown, active)`, pr.min === false && pr.display !== 'none' && pr.active, { pr, rowGeo });
-    check('…and the restore reaches the desktop (intent travels; the display does not)', await desk.waitFor(`(() => { const w = app.wm.windows.get(${JSON.stringify(filesId)}); return !!w && w.isMinimized === false && w.element.style.display !== 'none'; })()`, 15000));
+    await sleep(2500); // the restore tap's save (if its record differs at all) has landed by now
+    check('…and the desktop keeps it MINIMIZED (guard 10: a phone writes membership, never arrangement — 2.369.125 r2 sent the phone\'s restore to every desktop)', await desk.evalJs(`(() => { const w = app.wm.windows.get(${JSON.stringify(filesId)}); return !!w && w.isMinimized === true && w.element.style.display === 'none'; })()`));
   }
 
   // ── measured defect: the settings nav strip wraps ──

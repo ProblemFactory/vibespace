@@ -6,6 +6,9 @@
 // prompt / a restart keeps the items (sealed file round-trip) / Forget all (bus and file) / no secret or key in a log,
 // the store or any argv — and its RED controls: the setting off ⇒ ServiceUnknown; a service that logs a secret ⇒ red.
 // Fixtures only: a scratch HOME + runtime dir + data dir, a bogus DISPLAY (nothing here draws), never the owner's bus.
+// lane mirror-263-reds: a FAST suite never requires a machine capability — the plan's shape is proven over a FIXTURE
+// binary table (+ the empty-table refusal as its RED control); ③ is the ONE real-binary road and SKIPs with the reason
+// on a box without the portal binaries / python3-gi (the CI runner has no xdg-desktop-portal).
 import { createRequire } from 'module';
 import fs from 'fs';
 import os from 'os';
@@ -39,6 +42,12 @@ const schema = require(path.join(ROOT, 'src/lib/settings-schema.js'));
 const SS = schema.SETTINGS_SCHEMA || schema.SCHEMA || schema.default || schema;
 const row = SS['desktop.appSecrets'] || (Array.isArray(SS) ? SS.find((r) => r.key === 'desktop.appSecrets') : null);
 check('Settings desktop.appSecrets on|off, default on', !!row && row.default === 'on' && row.options.map((o) => o.value).join() === 'on,off');
+const BINS0 = { 'dbus-daemon': '/x/bin/dbus-daemon', 'xdg-desktop-portal': '/x/libexec/xdg-desktop-portal', 'xdg-desktop-portal-gtk': '/x/libexec/xdg-desktop-portal-gtk' };
+const planF = M.portalPlan({ dir: '/x/da-f1', display: ':199', authFile: null, bins: BINS0, why: 'browser' });
+const onF = M.secretServicePlan({ plan: planF, facts: facts0 });
+check('portalPlan over a FIXTURE binary table: the bus, its services dir, the portal + gtk service files; the secrets file lands in that dir', planF.ok && planF.address === 'unix:path=/x/da-f1/portal/bus' && planF.dirs[0] === '/x/da-f1/portal' && planF.files.some((f) => f.file === '/x/da-f1/portal/services/org.freedesktop.portal.Desktop.service' && f.text.includes('Exec=/x/libexec/xdg-desktop-portal\n')) && onF.secrets === 'on' && onF.file.file === '/x/da-f1/portal/services/org.freedesktop.secrets.service', JSON.stringify(planF.why || planF.files && planF.files.map((f) => f.file)));
+const plan00 = M.portalPlan({ dir: '/x/da-f1', display: ':199', authFile: null, bins: {}, why: 'browser' });
+check('RED control: an EMPTY binary table ⇒ the plan refuses and names every missing binary (and the secrets plan says no bus)', plan00.ok === false && plan00.why === 'dbus-daemon, xdg-desktop-portal, xdg-desktop-portal-gtk not found on this machine' && M.secretServicePlan({ plan: plan00, facts: facts0 }).secrets === 'unavailable: no private bus', JSON.stringify(plan00));
 
 console.log('② secret-box: the keyed cipher is the boxes\' cipher (same bytes both ways)');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-adsec-t-'));
@@ -49,11 +58,37 @@ check('encWith(key) ⇒ box.dec', box.dec(SB.encWith(k, 'wörld')) === 'wörld')
 let threw = ''; try { SB.decWith(crypto.randomBytes(32), box.enc('x')); } catch (e) { threw = e.code; }
 check('another key ⇒ bad-ciphertext', threw === 'bad-ciphertext');
 
+console.log('②b a REFUSED plan ({ ok:false, why }) in every product consumer: its why, never its dirs (lane secrets-chrome-skip)');
+const srcOf = (f) => fs.readFileSync(path.join(ROOT, 'src', f), 'utf8');
+const srcFiles = fs.readdirSync(path.join(ROOT, 'src')).filter((f) => f.endsWith('.js'));
+const users = srcFiles.filter((f) => /\bportalPlan\(|\bplan\.dirs\b/.test(srcOf(f).replace(/^\s*(\/\/|\*).*$/gm, ''))).sort();
+console.log(`  census (src/*.js naming portalPlan( or plan.dirs in code): ${users.join(', ')}`);
+check('the census is the three known consumers (a new one ⇒ red until it reads plan.ok here)', users.join() === 'desktop-apps.js,desktop-display.js,desktop-serve.js', users.join());
+const refused = { ok: false, why: 'xdg-desktop-portal, xdg-desktop-portal-gtk not found on this machine' };
+check('desktop-serve: the bring-up reads plan.ok and records the why (no secrets plan on a refused plan)', /secrets = plan\.ok && /.test(srcOf('desktop-serve.js')) && /if \(!plan\.ok\) rec\.portal = `unavailable: \$\{plan\.why\}`/.test(srcOf('desktop-serve.js')));
+check('desktop-apps secretServicePlan: a refused plan ⇒ unavailable: no private bus', M.secretServicePlan({ plan: refused, facts: { python: '/p', service: '/s', node: '/n', sealer: '/x', keyHex: 'a'.repeat(64) } }).secrets === 'unavailable: no private bus');
+const rej = async (fn) => { try { await fn(); return null; } catch (e) { return e; } };
+const eBus = await rej(() => D.startPortalBus({ plan: refused, env: {} }));
+check('desktop-display startPortalBus: a refused plan REJECTS by name with the plan\'s why', !!eBus && eBus.code === 'portal-bus' && eBus.message === `no portal plan: ${refused.why}`, eBus && `${eBus.code} ${eBus.message}`);
+const busSrc = (srcOf('desktop-display.js').match(/async function startPortalBus\([\s\S]*?\n\}\n/) || [''])[0];
+const guard = busSrc.split('\n').find((l) => /if \(!plan \|\| !plan\.ok\) throw/.test(l)) || '';
+const unguarded = new Function('fs', 'namedError', `return (${busSrc.replace(guard + '\n', '')})`)(fs, (c, m) => Object.assign(new Error(m), { code: c }));
+const eRed = await rej(() => unguarded({ plan: refused, env: {} }));
+check('RED control: the same function WITHOUT the check throws the runner\'s TypeError (plan.dirs is not iterable)', !!guard && eRed instanceof TypeError && /plan\.dirs is not iterable/.test(eRed.message), eRed && eRed.message);
+
 console.log('③ the real plan\'s bus + libsecret');
 const dataDir = path.join(tmp, 'data'), appDir = path.join(dataDir, 'desktop-apps', 'da-sec1'), home = path.join(tmp, 'home'), run = path.join(tmp, 'run');
 for (const d of [appDir, home, run]) fs.mkdirSync(d, { recursive: true, mode: 0o700 });
 const env = { PATH: process.env.PATH, HOME: home, XDG_RUNTIME_DIR: run };
 const facts = await D.appSecretsFacts({ env, mode: 'on', dataDir, id: 'da-sec1' });
+const realPlan = M.portalPlan({ dir: appDir, display: ':199', authFile: null, bins: D.portalBins({ env }), why: 'browser' });
+const capWhy = !realPlan.ok ? `portalPlan: ${realPlan.why}` : /^python3 /.test(facts.why || '') ? `appSecretsFacts: ${facts.why}` : null;
+if (capWhy) { // a machine capability, never a red: the plan's shape is proven in ① over the fixture table
+  console.log(`  SKIP: ${capWhy} — ③ the real bus + libsecret road runs only where they exist`);
+  fs.rmSync(tmp, { recursive: true, force: true });
+  console.log(`\n${pass} passed, ${fail} failed, 1 skipped (${Date.now() - t0} ms)`);
+  process.exit(fail ? 1 : 0);
+}
 check('facts: python3 + gi + service + sealer + a 32-byte per-display key', !facts.why && /^[0-9a-f]{64}$/.test(facts.keyHex || ''), JSON.stringify(facts.why || ''));
 const facts2 = await D.appSecretsFacts({ env, mode: 'on', dataDir, id: 'da-sec2' });
 check('the key is PER DISPLAY (another id ⇒ another key), the master is minted 0600', facts2.keyHex !== facts.keyHex && (fs.statSync(path.join(dataDir, '.app-secrets-key')).mode & 0o777) === 0o600);

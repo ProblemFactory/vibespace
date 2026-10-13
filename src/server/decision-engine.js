@@ -21,6 +21,13 @@
  *      USD, dialect, model, outcome — no key, no text).
  * The input is bounded by the use's plan and asserted again here. A judgment opens no turn: no SPEND_REASONS
  * (design §2.11); a wake caused by a hit rides the turn ceiling where D3 wakes it.
+ *
+ * USE ④ — THE FOR-YOU PASS (lane inbox-decision-group): `attachInbox(store)` (the user-todos manager) arms a 60 s
+ * tick, never a wake path: a moved switch redraws the tray (the store's own broadcast), and every 5 minutes ≤ 10
+ * eligible items (PURE `inboxEligible`: open, normal urgency, no options / buttons, no reply, ≥ 1 min old, not scored
+ * under this level table) are scored ONE item a call through `judge('inbox', …)` — the same memo, reserve / settle and
+ * journal as every use. The verdict lands beside the item (`store.setJudged`: `judged {group, p, at, v}`); the item's
+ * urgency is never written.
  */
 const fs = require('fs');
 const path = require('path');
@@ -28,7 +35,7 @@ const crypto = require('crypto');
 const M = require('../decision-model.js');
 
 const ROW_ID = 'decision-api';
-const FEATURE_OF = Object.freeze({ attention: 'attention', rule: 'rules', routing: 'routing', foryou: 'attention', webhook: 'rules', test: null });
+const FEATURE_OF = Object.freeze({ attention: 'attention', rule: 'rules', routing: 'routing', inbox: 'inbox', webhook: 'rules', test: null });
 const JOURNAL_MAX = 5000;
 const JOURNAL_DAYS = 30;
 const QUIET_MS = 5 * 60 * 1000;
@@ -65,7 +72,8 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
   const attachPlugin = (h) => { plugin = h && typeof h.peek === 'function' ? h : null; };
   function settings() {
     const rec = plugin ? plugin.peek() || {} : {};
-    const c = rec.config || {};
+    // lane plugin-settings-p0: the values are the plugin's settings rows (h.settings via the plugin), never rec.config
+    const c = plugin && typeof plugin.settings === 'function' ? plugin.settings() || {} : {};
     return {
       pluginOn: !!rec.enabled,
       features: Object.fromEntries(M.FEATURES.map((f) => [f, c[f] === true])),
@@ -211,8 +219,14 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
     }
     const answers = M.normalizeAnswers(cred.provider, json, qs);
     if (key) memoPut(key, answers);
+    const hits = use === 'attention' ? M.attentionHits(n > 1 ? M.unbatchAnswers(answers, n) : [answers], s.threshold) : undefined;
+    if (hits) {   // the card's 「命中 m 条」: verdicts at or above the threshold today (a memo answer is not a new judgment)
+      const d = today(); const x = d.byUse[use] || (d.byUse[use] = { calls: 0, inputTokens: 0, outputTokens: 0, usd: 0 });
+      x.hits = (x.hits || 0) + hits;
+      try { writeJsonAtomic(F.usage, d); } catch (e) { log.warn?.(`[decision] usage not saved: ${e.message}`); }
+    }
     lastOutcome = { at: now(), use, outcome: 'ok' };
-    journal({ ...base, outcome: 'ok', status, inputTokens: u.inputTokens, outputTokens: u.outputTokens, usd });
+    journal({ ...base, outcome: 'ok', status, inputTokens: u.inputTokens, outputTokens: u.outputTokens, usd, hits });
     return { ok: true, memo: false, answers: n > 1 ? M.unbatchAnswers(answers, n) : answers, usage: u, usd };
   }
 
@@ -237,7 +251,52 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
     };
   }
 
-  return { judge, testRunner, status, attachPlugin, settings, memoSize: () => memo.size, files: F, ROW_ID };
+  // ── use ④: the For-you pass (lane inbox-decision-group) ───────────────────
+  let inbox = null, inboxTimer = null, inboxBusy = false, inboxOnWas = null, inboxLastPass = 0;
+  const inboxOn = () => { const s = settings(); return !!(s.pluginOn && s.features.inbox); };
+  /** What the tray draws its section head from (the store puts it in its snapshot): null = the switch is off ⇒
+   *  today's layout, byte for byte. `today` = the inbox use's paid calls of the instance's day. */
+  function grouping() {
+    if (!inboxOn()) return null;
+    const x = today().byUse.inbox;
+    return { on: true, today: x ? x.calls : 0, v: M.INBOX.version };
+  }
+  /** The switch moved ⇒ ONE broadcast of the store (the tray redraws with or without its sections). */
+  function inboxSwitched() {
+    const on = inboxOn();
+    if (on === inboxOnWas) return;
+    inboxOnWas = on;
+    try { if (inbox && typeof inbox.notify === 'function') inbox.notify(); } catch { }
+  }
+  /** ONE pass: ≤ `max` eligible items, one call each (refused ⇒ the pass stops; the next one retries). */
+  async function inboxPass({ max = M.inputPlan('inbox').perPass } = {}) {
+    if (!inbox || inboxBusy || !inboxOn()) return { ran: false, judged: 0 };
+    inboxBusy = true; inboxLastPass = now();
+    let judged = 0;
+    try {
+      const t = now();
+      const items = inbox.openItems().filter((i) => M.inboxEligible(i, t) === true).slice(0, max);
+      for (const it of items) {
+        const r = await judge('inbox', M.inboxScoreInput(it), { questions: [M.INBOX_QUESTION], memo: M.inboxMemoOf(it, sha) });
+        if (!r.ok) break;
+        const v = M.inboxVerdict(r.answers[0]);
+        if (inbox.setJudged(it.id, { group: v ? v.group : null, p: v ? v.p : null, at: now(), v: M.INBOX.version })) judged++;
+      }
+    } finally { inboxBusy = false; }
+    return { ran: true, judged };
+  }
+  function attachInbox(store, { tickMs = 60 * 1000 } = {}) {
+    inbox = store && typeof store.setJudged === 'function' && typeof store.openItems === 'function' ? store : null;
+    if (!inbox) return;
+    if (typeof inbox.setGrouping === 'function') inbox.setGrouping(grouping);
+    inboxOnWas = inboxOn();
+    if (tickMs > 0 && !inboxTimer) {
+      inboxTimer = setInterval(() => { inboxSwitched(); if (now() - inboxLastPass >= M.INBOX.passMs) inboxPass().catch(() => { }); }, tickMs);
+      if (inboxTimer.unref) inboxTimer.unref();
+    }
+  }
+
+  return { judge, testRunner, status, attachPlugin, settings, memoSize: () => memo.size, files: F, ROW_ID, attachInbox, inboxPass, inboxSwitched, grouping };
 }
 
 module.exports = { create, ROW_ID, FEATURE_OF, TEST_SENTENCE };

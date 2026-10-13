@@ -1,8 +1,9 @@
 'use strict';
 // PURE: the TEACH schedule of Dropline voice input (design q-029 §4 + §8 OWNER RULINGS 2026-10-12; lane
 // voice-p1-oauth-teach). Nothing is ever written to the person's Dropline without their press:
-//   · `teach` (default OFF) ⇒ PROPOSALS only — per conversation at most once an hour; a proposal's terms go to
-//     POST /v1/terms only when the person presses 加入词库 (exactly the ticked ones); 忽略 remembers them 30 days.
+//   · `teach` (default OFF) ⇒ PROPOSALS only — per conversation at most once an hour, ≤ 12 words a person would say
+//     (lane voice-teach-candidates); a proposal's terms go to POST /v1/terms only when the person presses 加入所选
+//     (exactly the selected ones); 忽略这批 remembers them 30 days.
 //   · the per-PROJECT tier (an explicit opt-in per working directory) sends that project's file names + identifiers
 //     without a card — still ≤ 50 terms an hour, still journaled.
 //   · `context` (/v1/context, its OWN switch, default OFF): the FIRST send per conversation is a PREVIEW the person
@@ -11,7 +12,7 @@
 // The engine (src/server/voice-teach-engine.js) holds the state in the plugin record and calls the vendor module.
 const TEACH_LIMITS = Object.freeze({
   proposalEveryMs: 3600e3, ignoreMs: 30 * 24 * 3600e3, contextEveryMs: 600e3, hourMs: 3600e3,
-  termsPerHour: 6, contextPerHour: 6, autoTermsPerHour: 50, termsPerCall: 50, journalMax: 50, proposalsMax: 20, projectsMax: 50, convsMax: 300,
+  termsPerHour: 6, contextPerHour: 6, autoTermsPerHour: 50, termsPerCall: 50, proposePerCard: 12, journalMax: 50, proposalsMax: 20, projectsMax: 50, convsMax: 300,
 });
 const AUTO_KINDS = Object.freeze(['file', 'ident']);
 const obj = (x) => (x && typeof x === 'object' && !Array.isArray(x) ? x : {});
@@ -26,7 +27,7 @@ function stateOf(raw) {
   const r = obj(raw);
   const calls = obj(r.calls);
   return {
-    ignored: { ...obj(r.ignored) }, lastProposal: { ...obj(r.lastProposal) }, ctxSent: { ...obj(r.ctxSent) },
+    ignored: { ...obj(r.ignored) }, lastProposal: { ...obj(r.lastProposal) }, ctxSent: { ...obj(r.ctxSent) }, held: { ...obj(r.held) },
     calls: { terms: arr(calls.terms).filter(Number.isFinite), context: arr(calls.context).filter(Number.isFinite) },
     autoSent: arr(r.autoSent).filter((x) => x && Number.isFinite(x.at) && Number.isFinite(x.n)),
     journal: arr(r.journal).slice(-TEACH_LIMITS.journalMax), proposals: arr(r.proposals).slice(-TEACH_LIMITS.proposalsMax),
@@ -39,7 +40,7 @@ function prune(state, now) {
   s.calls.terms = s.calls.terms.filter((at) => now - at < TEACH_LIMITS.hourMs);
   s.calls.context = s.calls.context.filter((at) => now - at < TEACH_LIMITS.hourMs);
   s.autoSent = s.autoSent.filter((x) => now - x.at < TEACH_LIMITS.hourMs);
-  for (const k of ['lastProposal', 'ctxSent']) {
+  for (const k of ['lastProposal', 'ctxSent', 'held']) {
     const keys = Object.keys(s[k]);
     if (keys.length > TEACH_LIMITS.convsMax) for (const c of keys.slice(0, keys.length - TEACH_LIMITS.convsMax)) delete s[k][c];
   }
@@ -56,25 +57,41 @@ const ignoredNow = (state, term, now) => obj(obj(state).ignored)[term] > now;
 /** a conversation's fresh terms → `{auto, propose, why}`: `auto` = the project's file names + identifiers (only when
  *  the person opted this cwd in; ≤ 50/h and a terms call left) that `autoFrom` names — voice-model's autoSourcesOf:
  *  project files, agent-named paths, agent code-span identifiers, never the person's own words (voice-verify F2) —
- *  `propose` = a card's terms (once an hour per conversation). `kindOf(term)` = voice-model's termKind. Teach OFF ⇒
- *  both empty. */
-function proposalVerdict(state, { conv, cwd = '', terms = [], now, settings, kindOf, autoFrom = [] }) {
+ *  `propose` = a card's terms (once an hour per conversation): the top `proposePerCard` of `candidates` (voice-model's
+ *  proposalCandidates, ranked — lane voice-teach-candidates), `pick` = the preselected ones, `below` = [term, seen] cut
+ *  under the line: held, offered again only when seen more often (`hold`). `kindOf(term)` = voice-model's termKind.
+ *  Teach OFF ⇒ all empty. */
+function proposalVerdict(state, { conv, cwd = '', terms = [], candidates = null, now, settings, kindOf, autoFrom = [] }) {
   const set = settingsOf(settings);
-  if (!settings || settings.teach !== true) return { auto: [], propose: [], why: 'teach-off' };
+  const none = { auto: [], propose: [], pick: [], below: [] };
+  if (!settings || settings.teach !== true) return { ...none, why: 'teach-off' };
   const fresh = arr(terms).filter((t) => typeof t === 'string' && t && !ignoredNow(state, t, now));
-  if (!fresh.length) return { auto: [], propose: [], why: 'nothing-new' };
+  const cands = (candidates ? arr(candidates) : fresh.map((t) => ({ term: t, seen: 1, pick: true })))
+    .filter((c) => c && typeof c.term === 'string' && c.term && !ignoredNow(state, c.term, now));
+  if (!fresh.length && !cands.length) return { ...none, why: 'nothing-new' };
   const projectOn = !!cwd && arr(settings.autoProjects).includes(cwd) && set.autoProjects.includes(cwd);
-  let auto = [], rest = fresh;
+  let auto = [], eligible = [];
   if (projectOn) {
     const from = new Set(arr(autoFrom));
-    const eligible = fresh.filter((t) => AUTO_KINDS.includes(kindOf(t)) && from.has(t));
-    rest = fresh.filter((t) => !eligible.includes(t));
+    eligible = fresh.filter((t) => AUTO_KINDS.includes(kindOf(t)) && from.has(t));
     if (capLeft(state, 'terms', now) > 0) auto = eligible.slice(0, Math.min(autoRoom(state, now), TEACH_LIMITS.termsPerCall));
   }
+  const held = obj(obj(obj(state).held)[conv]);
+  const rest = cands.filter((c) => !eligible.includes(c.term) && !(held[c.term] >= (Number(c.seen) || 0)));
   const last = obj(obj(state).lastProposal)[conv];
-  if (!rest.length) return { auto, propose: [], why: auto.length ? null : 'nothing-new' };
-  if (Number.isFinite(last) && now - last < TEACH_LIMITS.proposalEveryMs) return { auto, propose: [], why: 'hourly' };
-  return { auto, propose: rest.slice(0, TEACH_LIMITS.termsPerCall), why: null };
+  if (!rest.length) return { ...none, auto, why: auto.length ? null : 'nothing-new' };
+  if (Number.isFinite(last) && now - last < TEACH_LIMITS.proposalEveryMs) return { ...none, auto, why: 'hourly' };
+  const top = rest.slice(0, TEACH_LIMITS.proposePerCard);
+  return { auto, propose: top.map((c) => c.term), pick: top.filter((c) => c.pick).map((c) => c.term), below: rest.slice(top.length).map((c) => [c.term, Number(c.seen) || 0]), why: null };
+}
+/** a card was filed in `conv`: its terms leave the held list, the words cut under its line wait there with their count */
+function hold(state, conv, below, proposed = []) {
+  const s = stateOf(state);
+  const h = { ...obj(s.held[conv]) };
+  for (const t of arr(proposed)) delete h[t];
+  for (const [t, n] of arr(below)) h[t] = n;
+  s.held[conv] = Object.fromEntries(Object.entries(h).slice(-200));
+  return s;
 }
 /** the context verdict for a conversation: `preview` (its FIRST send, or after a 不发) | `send` | `none` (+ why) */
 function contextVerdict(state, { conv, hash, now, settings }) {
@@ -107,4 +124,4 @@ function teachWords(lang, key, params = {}) {
   return String(L[key] || TEACH_WORDS.en[key] || '').replace(/\{(\w+)\}/g, (_, k) => (params[k] == null ? '' : String(params[k])));
 }
 
-module.exports = { TEACH_LIMITS, AUTO_KINDS, TEACH_WORDS, settingsOf, stateOf, prune, capLeft, proposalVerdict, contextVerdict, recordCall, recordAuto, ignore, journalAdd, teachWords };
+module.exports = { TEACH_LIMITS, AUTO_KINDS, TEACH_WORDS, settingsOf, stateOf, prune, capLeft, proposalVerdict, hold, contextVerdict, recordCall, recordAuto, ignore, journalAdd, teachWords };

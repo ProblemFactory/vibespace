@@ -299,14 +299,14 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     res.json({ success: true, customGrids: data.customGrids });
   });
 
+  // (the phone's own `autoSaveMobile` slot is gone — lane phone-arrangement-local, §6b guard 10: nobody posted it, a phone
+  // writes membership into the desktop's record over layout-sync and keeps its window on show locally; a stored slot is
+  // simply never read, and the next write of layouts.json drops it below)
   router.post('/api/layouts-autosave', (req, res) => {
     const data = readLayouts();
-    const deviceType = req.body.deviceType || 'desktop';
-    if (deviceType === 'mobile') {
-      data.autoSaveMobile = { ...req.body, updatedAt: Date.now() };
-    } else {
-      data.autoSave = { ...req.body, updatedAt: Date.now() };
-    }
+    if (req.body?.deviceType === 'mobile') return res.status(410).json({ error: 'no mobile slot: a phone saves over layout-sync' });
+    data.autoSave = { ...req.body, updatedAt: Date.now() };
+    delete data.autoSaveMobile;
     writeLayouts(data);
     res.json({ success: true });
   });

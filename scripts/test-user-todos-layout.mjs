@@ -817,5 +817,51 @@ console.log('lane-pairing naive-user N-ask: an exit ask\'s Allow / Deny are thei
   finally { for (const [k, v] of Object.entries(had)) { if (v === undefined) delete globalThis[k]; else globalThis[k] = v; } }
 }
 
+console.log("㉑ THE DECISION API'S TRAY SECTIONS (lane inbox-decision-group) — PURE sections + chip, the panel's wiring, off = today's DOM");
+{
+  const L = await import(path.join(ROOT, 'src/lib/user-todos-layout.js'));
+  const it = (id, o = {}) => ({ id, sessionKey: o.sk || 'claude:a', urgency: 'normal', status: 'open', createdAt: 1, ...o });
+  const J = (group, p = 0.8) => ({ judged: { group, p, at: 1, v: 1 } });
+  // inbox-verify F3/F4: an item that asks for a decision (options / buttons) is never 'can wait', and a normal item the
+  // judge has not scored yet stands in 「待判断」 — not judged is not 'can wait'
+  const table = [[it('a'), 'pending'], [it('b', { urgency: 'high' }), 'now'], [it('c', { urgency: 'urgent' }), 'now'], [it('d', J('now')), 'now'], [it('e', J('later')), 'later'],
+    [it('f', { urgency: 'low', ...J('now') }), 'later'], [it('g', { options: ['A', 'B'], ...J('now') }), 'now'], [it('h', { action: { type: 'x' }, ...J('now') }), 'now'], [it('i', { judged: { group: null, v: 1 } }), 'pending'],
+    [it('g2', { options: ['Allow', 'Deny'] }), 'now'], [it('h2', { action: { type: 'x' }, ...J('later') }), 'now'], [it('l'), 'pending'], [it('m', { urgency: 'low' }), 'later'], [it('r', { reply: { text: 'ok' } }), 'later']];
+  const bad = table.filter(([i, want]) => L.inboxSectionOf(i) !== want);
+  ok(!bad.length, 'inboxSectionOf: urgent / high and every item with options / buttons in 「现在要你」; a NORMAL option-less item by its verdict, 「待判断」 until one exists; low / answered wait', bad.map(([i, w]) => [i.id, w, L.inboxSectionOf(i)]));
+  {   // RED CONTROL (F3/F4): the base rule (5a9119e99) drew an Allow item and an unscored item in 「可以等」 — this table reads it red
+    const src = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-layout.js'), 'utf8');
+    const fixed = "  if ((Array.isArray(item.options) && item.options.length) || item.action) return 'now';\n  const c = inboxChip(item);\n  if (c) return c.group;\n  return u === 'normal' && !item.reply ? 'pending' : 'later';";
+    const pre = src.replace(fixed, "  const c = inboxChip(item);\n  return c && c.group === 'now' ? 'now' : 'later';");
+    ok(pre !== src, 'CONTROL (F3/F4): the base rule patches in');
+    const { pathToFileURL } = await import('node:url');
+    const { mutantCopies } = await import(path.join(ROOT, 'scripts/mutant-copy.mjs'));
+    const MB = mutantCopies('ut-sec', ROOT);
+    const Lb = await import(pathToFileURL(MB.write('src/lib/user-todos-layout.js', pre, 'basef3')).href);
+    const badB = table.filter(([i, want]) => Lb.inboxSectionOf(i) !== want).map(([i]) => i.id);
+    ok(['a', 'g', 'g2', 'h2', 'l'].every((x) => badB.includes(x)), 'CONTROL (F3/F4): the base rule puts an Allow / option item and an unscored item in 「可以等」 — the legs above go red on it', badB);
+  }
+  ok(L.inboxChip(it('d', J('now', 0.91))).group === 'now' && L.inboxChip(it('b', { urgency: 'high', ...J('now') })) === null && L.inboxChip(it('a')) === null, 'inboxChip: only a judged normal option-less item carries one');
+  const rows = [['claude:a', [{ item: it('a1'), resolved: false }, { item: it('a2', J('now')), resolved: false }, { item: it('a3', { urgency: 'high' }), resolved: true }]], ['claude:b', [{ item: it('b1', { sk: 'claude:b' }), resolved: false }]]];
+  const held = new Map();
+  const s1 = L.inboxSections(rows, { prev: held });
+  eq(s1.now.map(([k, e, n]) => [k, e.map((x) => x.item.id), n]), [['claude:a', ['a2', 'a3'], 1]], 'inboxSections: 「现在要你」 keeps the layout order, openCount recounted');
+  eq(s1.pending.map(([k, e, n]) => [k, e.map((x) => x.item.id), n]), [['claude:a', ['a1'], 1], ['claude:b', ['b1'], 1]], 'inboxSections: 「待判断」 (not scored yet) — a session group may stand in more than one section');
+  eq(s1.later, [], 'inboxSections: 「可以等」 holds only what a verdict (or low / answered) put there');
+  const rows2 = [['claude:a', [{ item: it('a1', J('now')), resolved: false }, ...rows[0][1].slice(1)]], rows[1]];
+  const s2 = L.inboxSections(rows2, { prev: held });
+  ok(s2.pending.some(([, e]) => e.some((x) => x.item.id === 'a1')), 'THE SLOT LAW: a row judged while the popup is open stays in the section it was first drawn in (held per open)');
+  ok(L.inboxSections(rows2).now.some(([, e]) => e.some((x) => x.item.id === 'a1')), '…and the next open (a fresh hold) draws it in 「现在要你」');
+  const panel = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-panel.js'), 'utf8');
+  ok(/const sections = todos\.grouping \? inboxSections\(rows, \{ prev: secHeld \}\) : null;/.test(panel) && /else drawGroups\(root\.querySelector\(':scope > \.ut-groups'\), rows, ''\);/.test(panel), 'wiring: the panel draws sections ONLY while the snapshot carries `grouping`; off ⇒ the one .ut-groups pass of today');
+  ok(/if \(!sections\) \{ for \(const el of \[nowHead, pendHead, pending, laterHead, later\]\) if \(el\) el\.remove\(\); return null; \}/.test(panel), 'wiring: the switch going off removes every section node (today\'s DOM, node for node)');
+  ok((panel.match(/gEl\.dataset\.fk \|\| gEl\.dataset\.key/g) || []).length === 2 && /groupOpen\.set\(pre \+ key, openIds\)/.test(panel), 'wiring: a 「可以等」 group\'s Mark all seen / fold are keyed apart (later|<key>) — never the 「现在要你」 twin\'s ids');
+  const row = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-row.js'), 'utf8');
+  ok(/const c = ctx && ctx\.grouping \? inboxChip\(i\) : null;/.test(row) && /rowCtx\.grouping = !!todos\.grouping;/.test(panel), 'the chip is drawn only while the sections are (ctx.grouping from the snapshot)');
+  // the RED control: a panel that sections without asking the switch fails the wiring pin above
+  const mut = panel.replace('const sections = todos.grouping ? inboxSections(rows, { prev: secHeld }) : null;', 'const sections = inboxSections(rows, { prev: secHeld });');
+  ok(mut !== panel && !/const sections = todos\.grouping \? inboxSections/.test(mut), 'CONTROL: a panel that always sections is caught by the wiring pin (off would not be today\'s layout)');
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

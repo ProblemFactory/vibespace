@@ -69,6 +69,7 @@ Settings → 插件卡 → 「教给 Dropline 的内容」：开关、常用词�
 
 ## 8 Owner 决定（2026-10-12）
 - D1：做 H0，Tailscale 证书（lane https-tailscale）。D2：教 Dropline 默认关 —— 并加码：`/v1/terms`、`/v1/context` 永不自动写；开着时只提议、用户逐批确认（卡片「加入词库 / 忽略」），显式第三档「本项目的文件名/标识符自动加入」按项目 opt-in；`/v1/context` 单独开关 + 首次预览 + journal。读 `/v1/vocabulary` 不需确认。P0 不写。
+- **as built（2026-10-13，lane voice-teach-candidates，userW：一张卡列了约 70 个全勾的 API 字段名）**：提议 = 人会**说出口**的词。来源只取人的句子 + agent 的散文（代码块、反引号、URL 先剪掉 —— 那是本项目自动档的地盘）；`SHAPE_EXCLUSIONS` 普查剔除 id / 占位符 / API 字段名 / 两个以上下划线 / 数字结尾 / ≤ 3 个大写字母 / 密钥形 / 人从没写过的 snake_case·camelCase；排序 = 形状（有已知扩展名的文件名、PascalCase 名字）≫ 次数（人写的算两次，至少 2）> 能读出来；每批 ≤ 12，切在线下的词只有再次出现才进下一批；只预选人写过的、或出现 ≥ 2 次的文件名 / PascalCase 名字；卡片 = 词 chip +「加入所选 (n)」/「忽略这批」，无「显示更多」。本项目自动档（`autoSourcesOf`）不变。
 
 ## 9 as built — P0 voice-p0-key（2026-10-12，lane voice-p0-key，2.369.260）
 - **建了**：登记行 `dropline`（key 档；`dl_` 校验；Test = GET /v1/me，卡上「已连接：<name> · <team>」）· 插件 `voice-input`（`provides:['dictation']`；无 key 时开关被拒、默认关；语言 auto|zh|en；钥匙不进 plugins.json）· 唯一供应商面 `src/server/dropline-client.js`（vendor census 行 max 6，gates pluginOn/credentialOf）· hub 代理 `src/routes/voice.js`（`GET /api/voice/status` + `POST /api/voice/dictate`，multer 内存 8 MB）· 输入框麦克风 `src/lib/voice-input.js` + 插件卡 `src/lib/voice-plugin-card.js` · PURE `src/voice-model.js`。

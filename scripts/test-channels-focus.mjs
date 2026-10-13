@@ -457,7 +457,7 @@ console.log('⑤ negative controls (patched copies in this run\'s scratch dir)')
   const reds = (F) => FIXTURE.filter(([r, want]) => { const g = F.statusTag({ kind: 'conv', conv: r }, NOW); return (g ? g.code : null) !== want; }).map(([r]) => r.id);
   const inclusive = await load('inclusive-edge', 'return a > 0 && now - a < win;', 'return a > 0 && now - a <= win;');
   ok(reds(inclusive).includes('read-edge-out') && reds(inclusive).includes('replied-edge-out'), `CONTROL: an INCLUSIVE 24 h edge keeps a read exactly a day old — the edge rows redden (${reds(inclusive).join(', ')})`);
-  const readFirst = await load('read-first', "  const a = c.assignment;\n  if (a && a.principal && (a.principal.id || a.principal.name)) {", "  const rd0 = touch && touch.read;\n  if (rd0 && within(rd0.at, now, FOCUS_WINDOW_MS)) return { code: 'read', name: rd0.name || '', at: num(rd0.at) };\n  const a = c.assignment;\n  if (a && a.principal && (a.principal.id || a.principal.name)) {");
+  const readFirst = await load('read-first', "  const a = c.assignment;\n  if (a && a.principal && (a.principal.id || a.principal.name) && on('assigned')) {", "  const rd0 = touch && touch.read;\n  if (rd0 && within(rd0.at, now, FOCUS_WINDOW_MS)) return { code: 'read', name: rd0.name || '', at: num(rd0.at) };\n  const a = c.assignment;\n  if (a && a.principal && (a.principal.id || a.principal.name) && on('assigned')) {");
   const pr = readFirst.statusTag(row('both', { assignment: principal('Alpha'), touch: { read: { name: 'Gamma', at: NOW - H, upTo: NOW } } }), NOW);
   ok(pr.code === 'read', 'CONTROL: "read" ranked above "assigned" answers read for an assigned row — the priority table reddens on it');
   // D4 (2026-09-27): the GRAIN check removed — every conversation of a handed-over account / rule is back on the first screen
@@ -468,7 +468,7 @@ console.log('⑤ negative controls (patched copies in this run\'s scratch dir)')
   ok(Fo.firstScreen(SPEC.rows, { now: SPEC.clock }).focus === 9 && grainless.firstScreen(SPEC.rows, { now: SPEC.clock }).focus === 50, `CONTROL: …and on ②'s real rows the first screen is the whole account again — 50, not 9 (the owner's 824 threads)`);
   const windowless = await load('wake-window-dropped', "w.lane !== 'none' && within(w.at, now, FOCUS_WINDOW_MS)", "w.lane !== 'none'");
   ok(reds(windowless).includes('account-woke-25h') && reds(windowless).includes('pattern-woke-25h') && windowless.firstScreen(SPEC.rows, { now: SPEC.clock + 25 * H }).focus === 6, 'CONTROL: a delivered wake with NO window keeps a woken scope row for ever — the 25 h rows redden, ②\'s day-later list stays 6, not 4');
-  const keepAll = await load('keep-all', "return (rows || []).filter((r) => r && (r.kind === 'group' && r.group ? !r.archived : !!statusTag(r, now)));", 'return (rows || []).slice();');
+  const keepAll = await load('keep-all', "return (rows || []).filter((r) => r && (r.kind === 'group' && r.group ? !r.archived : !!statusTag(r, now, policy)));", 'return (rows || []).slice();');
   const { rows } = V.groupListRows({ groups: [], conversations: FIXTURE.map(([r]) => r), adapters: ADAPTERS });
   ok(keepAll.focusRows(rows, NOW).length === FIXTURE.length && Fo.focusRows(rows, NOW).length < FIXTURE.length, 'CONTROL: a focus list that keeps every row is the old first screen — the membership table reddens on it');
   // an engine that stamps BEFORE the reach check
@@ -489,7 +489,7 @@ console.log('⑥ wiring pins');
 {
   const P = fs.readFileSync(path.join(REPO, 'src/lib/channels-panel.js'), 'utf-8');
   const A = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf-8');
-  ok(/const fs = firstScreen\(rows, \{ view: VIEW, q, now \}\);/.test(P) && /const st = r\.kind === 'conv' \? statusTag\(r, now\) : null;/.test(P) && /const tag = statusTagParts\(st, \{ now \}\);/.test(P), 'PIN: the first screen is firstScreen(view, filter); each row asks statusTag and words it with statusTagParts');
+  ok(/const fs = firstScreen\(rows, \{ view: VIEW, q, now, policy: attnPolicy\(\) \}\);/.test(P) && /const st = r\.kind === 'conv' \? \(statusTag\(r, now, attnPolicy\(\)\) \|\| statusTag\(r, now\)\) : null;/.test(P) && /const tag = statusTagParts\(st, \{ now \}\);/.test(P), 'PIN: the first screen is firstScreen(view, filter); each row asks statusTag and words it with statusTagParts');
   ok(/chanEl\('span', `chan-grow-tag chan-tag-\$\{tag\.tone\}`\)/.test(P) && /chanEl\('span', 'chan-tag-who', tag\.who\)/.test(P), 'PIN: the tag is built with channel-chrome\'s el() — the name in its own `.chan-tag-who` (a data path), no innerHTML');
   ok(/let VIEW = 'focus';/.test(P) && /segFocus\.dataset\.view = 'focus'/.test(P) && /segAll\.dataset\.view = 'all'/.test(P) && /input\.dataset\.channelFilter = '1';/.test(P) && /const \{ row: find, input: findInput \} = filterBox\(\(\) => \{ draw\(\); queueSearch\(\); \}\);/.test(P), 'PIN: the default view is the attention list; the header is the two-way switch; the filter box (design 008: the attention rows filter at once, the server answers for All 250 ms after the last keystroke)');
   ok((ENGINE_SRC.match(/stampAgentRead\(/g) || []).length === 2 && /stampAgentRead\(en\.key, ctx, upTo\);/.test(ENGINE_SRC) && /eng\.readFor\(channelPrincipal\(s, id\)/.test(A), 'PIN: the stamp has ONE door — readFor, the agent route\'s read — and one definition');
@@ -635,6 +635,66 @@ console.log('⑧ the judged tag: a verdict on THIS message, p ≥ the threshold,
   const cut = E.match(/tagged\.sort\(\(a, b\) => ([^;]+)\);/);
   const sorted = rows.slice().sort(new Function('FO', `return (a, b) => ${cut ? cut[1] : '0'};`)(Fo));
   ok(cut && sorted.map((x) => x.v.key).join() === 'h,b,c,a', 'the first read\'s cut keeps TAG_ORDER first, then judged rows by p (0.93 › 0.81 › 0.75), then the newest — the engine\'s own comparator, read off its source', sorted.map((x) => x.v.key).join());
+}
+
+// ── lane attention-policy (owner 2026-10-13: "应该允许禁用原来的固定规则，或者直接加个配置选项可以改怎么判断需关注"): THE FIRST
+// SCREEN IS THE OWNER'S POLICY — each fixed rule a switch, the judge's switch beside them; a rule switched off never lands
+// its row (the row answers with its next rule that is on, or leaves for All); no policy = today, byte for byte ──
+console.log('⑬ the attention POLICY (lane attention-policy): every rule a switch, presets set the switches, default = today');
+{
+  const { ATTENTION_RULES: RULES, ATTENTION_PRESETS: PRESETS, attentionPolicy, presetOf, presetSwitches } = Fo;
+  const conv = (r) => ({ kind: 'conv', conv: r });
+  const lastAt = NOW - 5 * 60e3;
+  const judgedRow = row('judged-90', { judged: { p: 0.9, clauses: ['asks you'], threshold: 0.7, lastAt } });
+  const multi = row('dm-awaiting', { kind: 'dm', unread: 2, lastAt: NOW - H, outbox: { awaiting: 1, unknown: 0 } });
+  const ROWS = [...FIXTURE.map(([r]) => r), judgedRow, multi];
+  const tagOf = (F, r, pol) => { const g = F.statusTag(conv(r), NOW, pol); return g ? g.code : null; };
+  const ruleOfTag = (code) => (code === 'new-since-read' ? 'read' : code);
+  const keysOf = (F, pol, view = 'focus') => F.firstScreen(ROWS.map(conv), { view, now: NOW, policy: pol }).shown.map((x) => x.conv.key).join();
+  ok(RULES.length === 7 && RULES.every((c) => Fo.TAG_ORDER.includes(c)) && !RULES.includes('judged') && !RULES.includes('new-since-read'), 'seven fixed rules, each a tag of the table (read covers new-since-read; judged is the judge\'s switch)', RULES.join());
+  // DEFAULT = TODAY, byte for byte: no policy, an empty reader, and every switch written on
+  const allOn = attentionPolicy((k) => (k.startsWith('channels.attention.rule.') ? true : undefined), true);
+  const same = ROWS.every((r) => JSON.stringify(Fo.statusTag(conv(r), NOW)) === JSON.stringify(Fo.statusTag(conv(r), NOW, attentionPolicy())) && JSON.stringify(Fo.statusTag(conv(r), NOW)) === JSON.stringify(Fo.statusTag(conv(r), NOW, allOn)));
+  ok(same && keysOf(Fo, null) === keysOf(Fo, attentionPolicy()) && keysOf(Fo, null) === keysOf(Fo, allOn), `the default policy is today's first screen, byte for byte (${ROWS.length} rows, ${keysOf(Fo, null).split(',').length} listed)`);
+  // EACH RULE OFF: its rows leave the first screen unless another rule that is on claims them — and stay in All
+  const ruleOff = (code) => attentionPolicy((k) => (k === `channels.attention.rule.${code}` ? false : undefined));
+  const offRed = [];
+  for (const code of RULES) {
+    const pol = ruleOff(code);
+    const mine = ROWS.filter((r) => { const d = tagOf(Fo, r, null); return d && ruleOfTag(d) === code; });
+    const focusKeys = new Set(keysOf(Fo, pol).split(','));
+    const allKeys = new Set(keysOf(Fo, pol, 'all').split(','));
+    for (const r of mine) {
+      const g = tagOf(Fo, r, pol);
+      if ((g && ruleOfTag(g) === code) || (!g && focusKeys.has(r.key)) || !allKeys.has(r.key)) offRed.push(`${code}:${r.id}`);
+    }
+    if (!mine.length) offRed.push(`${code}: no fixture row`);
+  }
+  ok(!offRed.length, 'each rule switched off: every row it listed leaves the first screen (or answers with another rule that is on) and stays under All', offRed.join(' '));
+  ok(tagOf(Fo, multi, null) === 'awaiting' && tagOf(Fo, multi, ruleOff('awaiting')) === 'direct' && tagOf(Fo, multi, attentionPolicy((k) => !/awaiting|direct/.test(k) && undefined)) === null,
+    'a row with two reasons keeps the other: awaiting off ⇒ "direct"; both off ⇒ no tag', [tagOf(Fo, multi, ruleOff('awaiting'))]);
+  // ALL FIXED RULES OFF + THE JUDGE ON ⇒ only judged rows; the judge off too ⇒ nothing
+  const sw = presetSwitches('judge');
+  const judgeOnly = attentionPolicy((k) => sw.settings[k], sw.judge);
+  const listed = Fo.firstScreen(ROWS.map(conv), { now: NOW, policy: judgeOnly }).shown.map((x) => x.conv.id);
+  ok(listed.join() === 'judged-90', 'only the judge (every fixed rule off, the judge on) ⇒ only the judged row is listed', listed.join());
+  ok(Fo.firstScreen(ROWS.map(conv), { now: NOW, policy: attentionPolicy((k) => sw.settings[k], false) }).focus === 0, 'every rule and the judge off ⇒ the first screen is empty (All still has every row)');
+  const dmNew = row('dm-new', { kind: 'dm', unread: 1, lastAt: NOW - 60e3 });
+  ok(Fo.judgeCandidate(conv(dmNew), NOW) === false && Fo.judgeCandidate(conv(dmNew), NOW, judgeOnly) === true, 'the judge may see a row whose fact rule is switched off (only the judge judges an unread direct chat); with the rules on the fact still claims it');
+  // THE PRESETS set exactly the switches they claim, and read back as themselves
+  const pre = Object.keys(PRESETS).map((name) => {
+    const s = presetSwitches(name);
+    const keys = Object.keys(s.settings);
+    const exact = keys.length === RULES.length && RULES.every((c) => s.settings[`channels.attention.rule.${c}`] === PRESETS[name].rules) && s.judge === PRESETS[name].judge;
+    return exact && presetOf(attentionPolicy((k) => s.settings[k], s.judge)) === name ? null : name;
+  }).filter(Boolean);
+  ok(!pre.length && Object.keys(PRESETS).join() === 'both,judge,rules', 'the three presets (both / judge / rules) write every rule switch + the judge\'s and read back as themselves', pre.join());
+  ok(presetOf(ruleOff('replied')) === null && presetOf(attentionPolicy()) === 'both' && presetSwitches('nope') === null, 'a mix of switches is no preset; the default is "both"; an unknown preset writes nothing');
+  // RED CONTROL: "a policy that is ignored" — a copy whose statusTag never asks the switches lists the switched-off rows
+  const IGN = "  const on = (code) => ruleOn(policy, code);";
+  ok(FOCUS_SRC.includes(IGN), 'the policy\'s patch site is in channel-focus.js');
+  const Fi = await import(pathToFileURL(MUT.write('src/channel-focus.js', FOCUS_SRC.replace(IGN, '  const on = () => true;'), 'policy-ignored')).href);
+  ok(keysOf(Fi, ruleOff('direct')).split(',').includes('lark/direct') && keysOf(Fi, null) === keysOf(Fo, null), 'CONTROL: a copy that ignores the policy keeps the switched-off "direct" row on the first screen (and equals today) ⇒ the leg above reddens on it');
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

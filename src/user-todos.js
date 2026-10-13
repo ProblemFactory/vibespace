@@ -324,8 +324,30 @@ class UserTodoManager {
       .slice(0, RESOLVED_SNAPSHOT_MAX);
     // a resolved item's detail rides as a PREVIEW (previewOf): the tail is history, and
     // 250 × 8 000 chars per broadcast is not a price every client pays for it
+    // lane inbox-decision-group: the Decision API's tray sections ride the snapshot ONLY while its switch is on
+    // (the engine's `grouping()`), so a switched-off tray receives today's payload byte for byte
+    let grouping = null;
+    try { grouping = this._grouping ? this._grouping() : null; } catch { grouping = null; }
+    if (grouping) return { open, resolved: resolved.map(previewOf), grouping };
     return { open, resolved: resolved.map(previewOf) };
   }
+
+  /** USE ④ (lane inbox-decision-group): the Decision API's door. `setGrouping(fn)` — what the snapshot says about the
+   *  tray's sections (null = off); `openItems()` — the open items (copies); `setJudged(id, judged)` — writes the judge's
+   *  verdict BESIDE an open item (`judged: {group: 'now'|'later'|null, p, at, v}`) and nothing else: the item's
+   *  urgency is the agent's declaration and is never written here. → true when it wrote. */
+  setGrouping(fn) { this._grouping = typeof fn === 'function' ? fn : null; }
+  openItems() { return this._state.items.filter((i) => i.status === 'open').map((i) => ({ ...i })); }
+  setJudged(id, judged) {
+    const it = this.get(id);
+    if (!it || it.status !== 'open' || !judged || typeof judged !== 'object') return false;
+    const group = judged.group === 'now' || judged.group === 'later' ? judged.group : null;
+    const p = typeof judged.p === 'number' && Number.isFinite(judged.p) ? judged.p : null;
+    it.judged = { group, p, at: Number(judged.at) || Date.now(), v: Number(judged.v) || 1 };
+    this._save(); this._notify();
+    return true;
+  }
+  notify() { this._notify(); }
 
   forSession(keys) {
     const set = new Set(Array.isArray(keys) ? keys : [keys]);
@@ -412,13 +434,14 @@ class UserTodoManager {
         // (the old one is past — kept, it would expire the item on the next sweep)
         existing.expiresAt = expiresAt;
         existing.reply = null; // a re-filed ask is a NEW question: the last reply answered the old filing
+        delete existing.judged; // inbox-verify F2: …and the judge's verdict judged the old filing
         changed = true;
       } else if (expiresAt && existing.expiresAt != null && expiresAt > existing.expiresAt) {
         // an OPEN item merges to the LATER end; one with no expiresAt is lasting
         // (it never expires) and a re-file never shortens that
         existing.expiresAt = expiresAt; changed = true;
       }
-      if (detail && detail !== existing.detail) { existing.detail = detail; changed = true; }
+      if (detail && detail !== existing.detail) { existing.detail = detail; delete existing.judged; changed = true; } // F2: new words, no old verdict
       if (urgency && urgency !== existing.urgency) { existing.urgency = urgency; changed = true; }
       if (kind && kind !== existing.kind) { existing.kind = kind; changed = true; }
       if (i18n && JSON.stringify(i18n) !== JSON.stringify(existing.i18n || null)) { existing.i18n = i18n; changed = true; }
@@ -500,7 +523,7 @@ class UserTodoManager {
     const wasOpen = item.status === 'open';
     item.status = status;
     // a reopen is the user saying it still matters: it no longer expires
-    if (status === 'open') { item.resolvedAt = null; item.resolvedBy = null; item.expiresAt = null; }
+    if (status === 'open') { item.resolvedAt = null; item.resolvedBy = null; item.expiresAt = null; if (!wasOpen) delete item.judged; } // F2: a reopen is judged again
     else { item.resolvedAt = Date.now(); item.resolvedBy = by; }
     this._save(); this._notify();
     if (wasOpen && status !== 'open') this._emitStatus([item], by);
@@ -527,7 +550,7 @@ class UserTodoManager {
       if (!item) { unknown.push(id); continue; }
       const wasOpen = item.status === 'open';
       item.status = status;
-      if (status === 'open') { item.resolvedAt = null; item.resolvedBy = null; item.expiresAt = null; }
+      if (status === 'open') { item.resolvedAt = null; item.resolvedBy = null; item.expiresAt = null; if (!wasOpen) delete item.judged; } // F2: a reopen is judged again
       else { item.resolvedAt = now; item.resolvedBy = by; }
       changed.push(id);
       if (wasOpen && status !== 'open') went.push(item);

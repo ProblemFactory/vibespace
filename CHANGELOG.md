@@ -2,6 +2,20 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.264 — 2026-10-13
+
+### Added
+- Choose what the Channels first screen lists: each fixed rule and the Decision API judge is a switch — under ⚙ How it is decided, or in Settings.
+- An agent that reads Lark, Slack or Gmail with its own script now gets a note on its card: no channel card or read marker — vibespace-channels read gives them.
+- With the Decision API on, the For-you tray can sort itself into “Needs you now” and “Can wait” — a switch in All Settings › Plugins, off by default.
+
+### Changed
+- Dropline's dictionary suggestions now offer at most 12 words you would actually say, as chips you tap to pick — no more lists of code identifiers and ids.
+- Plugins are a plain list now — status, an on/off switch and ⚙, which opens the plugin's own section in All Settings (searchable).
+
+### Fixed
+- Switching or restoring windows on your phone no longer rearranges the windows on your computer, and a window opened on the phone opens at a normal size there.
+
 ## 2.369.263 — 2026-10-13
 
 ### Added

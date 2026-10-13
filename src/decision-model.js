@@ -47,7 +47,7 @@ const BACKOFF_MS = Object.freeze([60 * 1000, 5 * 60 * 1000, 15 * 60 * 1000]);   
 const RETRY_AFTER_MAX_MS = 60 * 60 * 1000;   // a 429's Retry-After is honoured up to an hour
 const RATE_MIN_CALLS = 20;                   // recorded-cost calls before the row's own average prices the estimate
 const MEMO_MAX = 5000;
-const FEATURES = Object.freeze(['attention', 'rules', 'routing']);
+const FEATURES = Object.freeze(['attention', 'rules', 'routing', 'inbox']);   // inbox = use ④, the For-you tray's two sections (lane inbox-decision-group)
 const WHY = Object.freeze(['plugin-off', 'feature-off', 'no-key', 'account-never', 'reconnect', 'backoff', 'daily-budget', 'per-hour']);
 
 const DIALECTS = Object.freeze({
@@ -229,8 +229,8 @@ function cleanPart(raw, max, kind = 'block') {
 }
 
 // The plans — DATA (design §2.10's table): `fixed` parts first, `variable` (per record) last; caps in characters
-// per part, ceilings in estTokens. `batch` = records per call — ONE for attention and every wake-path use (foryou's 10
-// is the design's, unmeasured — a later use; the probe's lesson applies before it ships): the probe (2026-10-12, 20 records,
+// per part, ceilings in estTokens. `batch` = records per call — ONE for attention, inbox and every wake-path use (the
+// design's 10 For-you items a call became ONE item a call, ≤ 10 calls a pass — `perPass`; the probe's lesson): the probe (2026-10-12, 20 records,
 // openai/gpt-6-luna-decisions) measured batch-of-5 at 1 608 vs single 1 761 input tokens a record (9 % saved) but a
 // needs_now agreement of only 12/20 at 0.7 (mean |Δp| 0.383) — batching changes verdicts, so the attention scan judges
 // one record per call (many questions per record stay: batchQuestions); `memo` = what the memo key is made of.
@@ -239,7 +239,7 @@ const PLANS = Object.freeze({
   attention: Object.freeze({ fixed: [PART('rubric', 2400), PART('userBlock', 1500), PART('examples', 12 * 220, { each: 200, count: 12 })], variable: [PART('title', 200, { kind: 'line' }), PART('source', 200, { kind: 'line' }), PART('sender', 200, { kind: 'line' }), PART('body', 2048)], fixedCeiling: 1700, recordCeiling: 800, batch: 1, wakePath: false, memo: ['use', 'id', 'lastAt', 'rubric', 'userBlock', 'examples'] }),
   rule: Object.freeze({ fixed: [PART('condition', 500), PART('choices', 8 * 130, { each: 120, count: 8 })], variable: [PART('body', 2048), PART('thread', 3 * 320, { each: 300, count: 3 })], fixedCeiling: 500, recordCeiling: 1000, batch: 1, wakePath: true, memo: ['use', 'id', 'rule'] }),
   routing: Object.freeze({ fixed: [PART('condition', 500), PART('choices', 9 * 210, { each: 200, count: 9 })], variable: [PART('body', 2048), PART('thread', 3 * 320, { each: 300, count: 3 })], fixedCeiling: 800, recordCeiling: 1000, batch: 1, wakePath: true, memo: ['use', 'id', 'rule', 'groups'] }),
-  foryou: Object.freeze({ fixed: [PART('levels', 600)], variable: [PART('text', 400), PART('detail', 800), PART('session', 200, { kind: 'line' })], fixedCeiling: 200, recordCeiling: 400, batch: 10, wakePath: false, memo: ['use', 'id', 'levels'] }),
+  inbox: Object.freeze({ fixed: [PART('levels', 600)], variable: [PART('text', 400), PART('detail', 800), PART('session', 200, { kind: 'line' })], fixedCeiling: 200, recordCeiling: 400, batch: 1, perPass: 10, wakePath: false, memo: ['use', 'id', 'levels', 'digest'] }),
   webhook: Object.freeze({ fixed: [PART('condition', 500)], variable: [PART('payload', 4096, { json: true })], fixedCeiling: 200, recordCeiling: 1400, batch: 1, wakePath: true, memo: ['use', 'id', 'rule'] }),
   test: Object.freeze({ fixed: [], variable: [PART('body', 200)], fixedCeiling: 0, recordCeiling: 120, batch: 1, wakePath: false, memo: ['use', 'id'] }),
 });
@@ -298,7 +298,7 @@ function safeJson(s) { try { return JSON.parse(s); } catch { return str(s); } }
 function memoMaterial(use, m = {}) {
   const plan = PLANS[use];
   if (!plan) throw new Error(`unknown decision use '${use}'`);
-  return JSON.stringify(plan.memo.map((k) => (k === 'use' ? use : k === 'rubric' ? `v${RUBRIC.version}` : m[k] === undefined ? null : m[k])));
+  return JSON.stringify(plan.memo.map((k) => (k === 'use' ? use : k === 'rubric' ? `v${RUBRIC.version}` : k === 'levels' ? `v${INBOX.version}` : m[k] === undefined ? null : m[k])));
 }
 const memoKey = (use, m, sha) => sha(memoMaterial(use, m));
 /** Batch questions: record i's question `name` becomes `r<i>_<name>`; `unbatchAnswers` splits them back. */
@@ -370,7 +370,7 @@ const isWall = (status) => status === 429 || (status >= 500 && status <= 599) ||
 const isKeyRefused = (status) => status === 401 || status === 403;
 
 /** A journal line: a fixed field list (no key, no text of anyone's) — the key only as its 6-character fingerprint. */
-const JOURNAL_FIELDS = Object.freeze(['at', 'use', 'memo', 'dialect', 'model', 'outcome', 'why', 'status', 'inputTokens', 'outputTokens', 'reserved', 'usd', 'est', 'truncated', 'n', 'keyFp', 'rubric']);
+const JOURNAL_FIELDS = Object.freeze(['at', 'use', 'memo', 'dialect', 'model', 'outcome', 'why', 'status', 'inputTokens', 'outputTokens', 'reserved', 'usd', 'est', 'truncated', 'n', 'keyFp', 'rubric', 'hits']);
 function journalRow(o = {}) {
   const row = {};
   for (const k of JOURNAL_FIELDS) {
@@ -471,6 +471,11 @@ function attentionRecord(view, tail = []) {
 }
 /** The verdict a row keeps: {p, clauses: [name], rubricV, lastAt, source} — threshold-free (the row's tag applies
  *  the CURRENT setting); null when needs_now was refused or missing. */
+/** HITS (lane plugins-panel-grammar — the card's 「命中 m 条」): how many of one attention call's records the verdict
+ *  marks "needs you now" at the row's threshold. `perRecord` = one answers list per record (a batch unbatched). */
+function attentionHits(perRecord, threshold = THRESHOLD_DEFAULT) {
+  return (Array.isArray(perRecord) ? perRecord : []).reduce((m, a) => m + (attentionVerdict(a, attentionThreshold(threshold)).judged ? 1 : 0), 0);
+}
 function judgedOf(answers, lastAt) {
   const v = attentionVerdict(answers, 1);
   return v.p === null ? null : { p: v.p, clauses: v.clauses.map((c) => c.name), rubricV: RUBRIC.version, lastAt: Number(lastAt) || 0, source: 'judge' };
@@ -491,9 +496,58 @@ const examplesForInput = (list, n = EXAMPLES_SENT) => (Array.isArray(list) ? lis
 /** The catalogue as questions (the "draft from my decisions" button asks them of each example). */
 const criteriaQuestions = () => CRITERIA_CATALOGUE.map((c) => ({ type: 'predicate', name: c.name, instructions: c.instructions }));
 
+// ── use ④: the For-you tray's two sections (lane inbox-decision-group, design §2.6 row 「For-you 托盘分组」 + §2.10 ④) ──
+// THE LEVEL TABLE v1 — one score question, two levels (low → high). The judge only ever SORTS an item into a section:
+// the item's own urgency is the agent's declaration and is never written (the tray draws urgent / high in 「现在要你」
+// by that urgency alone). `word` = OUR words for the clause (the chip's title), never the vendor's.
+const INBOX = Object.freeze({
+  version: 1,
+  minAgeMs: 60 * 1000,                 // the For-you rule: an ask nobody answered in a minute
+  passMs: 5 * 60 * 1000,               // a pass every 5 minutes, off every wake path
+  levels: Object.freeze([
+    Object.freeze({ label: 'later', word: 'can wait: a notice, a finished report, nothing to do', description: 'Can wait: a notice, a status or completion report, or nothing the reader has to do.' }),
+    Object.freeze({ label: 'now', word: 'needs you now: an agent waits on your decision, a deadline, money or someone waiting on your reply', description: 'Needs the reader now: an agent cannot continue without their decision, there is a deadline, money is involved, or someone is waiting on their reply.' }),
+  ]),
+});
+const INBOX_QUESTION = Object.freeze({ type: 'score', name: 'needs_now', instructions: 'How soon does the reader have to act on this item an agent filed for them?', levels: INBOX.levels.map((l) => ({ label: l.label, description: l.description })) });
+const inboxLevelsText = () => `Levels v${INBOX.version}. Sort the For-you item below. ${INBOX.levels.map((l, i) => `${i} ${l.label}: ${l.description}`).join(' ')}`;
+/** May the judge score this item? An OPEN action item of NORMAL urgency (a missing urgency is normal) with no option
+ *  chips and no producer buttons (an item that carries its answers is a decision already), no reply yet, filed at
+ *  least a minute ago, and never scored under this level table. → true | the reason it is not (a word). */
+function inboxEligible(item, now = 0) {
+  const i = item || {};
+  if (i.status !== 'open') return 'not-open';
+  if (i.kind === 'notice') return 'notice';
+  if ((i.urgency || 'normal') !== 'normal') return 'urgency';
+  if ((Array.isArray(i.options) && i.options.length) || i.action) return 'answers';
+  if (i.reply) return 'answered';
+  if (!(Number(now) - (Number(i.createdAt) || 0) >= INBOX.minAgeMs)) return 'young';
+  if (i.judged && i.judged.v === INBOX.version) return 'scored';
+  return true;
+}
+/** THE INPUT of one item — the never-list by construction: ONLY its words (text, detail) and the conversation's name;
+ *  never its artifacts, its reply, its action / card, nor any other item. */
+/** THE MEMO MATERIAL of one item (inbox-verify F2): its id + a DIGEST (16 hex of `sha`) of the words the judge reads —
+ *  text + detail, cleaned and cut as the input cuts them — so a re-file / reopen / edit with new words is a new key. */
+function inboxMemoOf(item, sha) {
+  const [t, d] = PLANS.inbox.variable;
+  return { id: str(item && item.id), digest: String(sha(JSON.stringify([cleanPart(item && item.text, t.max), cleanPart(item && item.detail, d.max)]))).slice(0, 16) };
+}
+const inboxScoreInput = (item) => ({ levels: inboxLevelsText(), text: str(item && item.text), detail: str(item && item.detail), session: str(item && item.sessionName) });
+/** The section an answer puts an item in: {group: 'now' | 'later', p} — p = the judge's probability of `now` (else
+ *  the score itself); a refused / missing answer is no verdict (null). */
+function inboxVerdict(answer) {
+  const a = answer || {};
+  if (a.refused || typeof a.score !== 'number' || !Number.isFinite(a.score)) return null;
+  const pr = a.probabilities || {};
+  const p = prob(pr.now) !== null ? pr.now : prob(pr['1']) !== null ? pr['1'] : Math.max(0, Math.min(1, a.score));
+  return { group: p >= 0.5 ? 'now' : 'later', p: Math.round(p * 1000) / 1000 };
+}
+
 module.exports = {
+  INBOX, INBOX_QUESTION, inboxLevelsText, inboxEligible, inboxScoreInput, inboxVerdict, inboxMemoOf,   // lane inbox-decision-group (use ④)
   ATTENTION_THRESHOLD_RANGE, USER_BLOCK_MAX, EXAMPLES_KEPT, EXAMPLES_SENT, EXAMPLE_DIGEST_MAX, VERDICTS,   // lane decision-attention
-  attentionThreshold, userBlockOf, attentionRecord, judgedOf, exampleOf, addExample, examplesForInput, criteriaQuestions,
+  attentionThreshold, attentionHits, userBlockOf, attentionRecord, judgedOf, exampleOf, addExample, examplesForInput, criteriaQuestions,
   QUESTION_TYPES, PROVIDERS, PROVIDER_LABEL, DEFAULT_MODEL, PRICE_PER_MTOK_USD, DAILY_BUDGET_CENTS_DEFAULT, THRESHOLD_DEFAULT, THRESHOLD_RANGE,
   BACKOFF_MS, RETRY_AFTER_MAX_MS, RATE_MIN_CALLS, MEMO_MAX, FEATURES, WHY, DIALECTS, USES, PLANS, NEVER, JOURNAL_FIELDS, RUBRIC, GOLDEN, CRITERIA_CATALOGUE,
   dialectOf, urlOf, questionError, buildRequest, normalizeAnswers, usageOf, estimateUsd, usdOf, estTokens, questionTokens,

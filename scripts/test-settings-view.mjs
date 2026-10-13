@@ -149,7 +149,7 @@ console.log('§4 the shipped schema');
 console.log('§5 wiring pins');
 {
   const ui = read('src/lib/settings-ui.js');
-  ok(/settingsViewModel\(SETTINGS_SCHEMA, \{ categories: SETTINGS_CATEGORIES, query, showAdvanced: this\._showAdvanced, ctx: this\._viewCtx\(\)/.test(ui) && /for \(const cat of SETTINGS_CATEGORIES\) grouped\[cat\] = vm\.byCategory\[cat\];/.test(ui), '_renderContent draws the view model\'s answer, still walking SETTINGS_CATEGORIES (§44\'s coupling)');
+  ok(/settingsViewModel\(SETTINGS_SCHEMA, \{ categories: SETTINGS_CATEGORIES, query, showAdvanced: this\._showAdvanced, ctx: this\._viewCtx\(\)/.test(ui) && /for \(const cat of SETTINGS_CATEGORIES\) grouped\[cat\] = this\._onlyCategory && cat !== this\._onlyCategory \? \{ \.\.\.vm\.byCategory\[cat\], show: false \} : vm\.byCategory\[cat\];/.test(ui), '_renderContent draws the view model\'s answer, still walking SETTINGS_CATEGORIES (§44\'s coupling)');
   ok(/localStorage\.getItem\(SHOW_ADVANCED_KEY\) === '1'/.test(ui) && /localStorage\.setItem\(SHOW_ADVANCED_KEY/.test(ui) && V.SHOW_ADVANCED_KEY === 'vibespace.settingsAdvanced', 'the ONE header switch is persisted per device under vibespace.settingsAdvanced');
   ok(/if \(sec\.hiddenAdvanced\) section\.appendChild\(this\._hiddenAdvancedLine\(/.test(ui) && /this\._setShowAdvanced\(true\); this\._rerenderKeepingPlace\(/.test(ui), 'each category ends with the hidden-count line; its Show turns the switch on and keeps the category in place');
   ok(/if \(asksChannel\) \{\s*Promise\.resolve\(fetchJson\('\/api\/channels\/adapters'\)\)/.test(ui) && !/setInterval|setTimeout\(\(\) => this\._buildFacts/.test(ui), 'the accounts fact = ONE GET /api/channels/adapters per open, only when some row asks about a vendor; never on a timer');
@@ -213,7 +213,7 @@ console.log('§7 the per-vendor channel rows (B-df40 part 3), derived from src/c
   const missing = words.filter((k) => !zh[k] || !ja[k]);
   ok(!missing.length && tZh('Read by the Channels engine · {vendor}', { vendor: 'Lark' }) === '由频道引擎读取 · Lark' && SCHEMA['channels.reactionsPerMin'].description === words[4], 'the block title, its note, the chip and the vendor name are in BOTH dictionaries; the reactions row no longer points at a budget "above" (the vendor rows moved below)', missing);
   const ui = read('src/lib/settings-ui.js');
-  ok(/const vendorRows = items\.filter\(\(it\) => it\.schema\.channel\);/.test(ui) && /if \(!schema\.channel\) section\.appendChild\(this\._renderSetting\(path, schema, chips\)\);/.test(ui) && /st\.dataset\.channelBlock = 'vendor'; st\.textContent = t\('Per vendor'\);/.test(ui),
+  ok(/const vendorRows = items\.filter\(\(it\) => it\.schema\.channel\);/.test(ui) && /if \(schema\.channel\) continue;/.test(ui) && /section\.appendChild\(this\._renderSetting\(path, schema, chips\)\);/.test(ui) && /st\.dataset\.channelBlock = 'vendor'; st\.textContent = t\('Per vendor'\);/.test(ui),
     'the window draws the category\'s own rows first, then ONE "Per vendor" sub-block with the derived rows');
   ok(/else if \(schema\.channel\) this\._renderChannelChip\(info, schema\);/.test(ui) && /t\('Read by the Channels engine · \{vendor\}', \{ vendor: channelVendorName\(schema\.channel\) \}\)/.test(ui) && /kind === 'channel' \? channelVendorName\(id\) : null/.test(ui),
     'a derived vendor row\'s apply-chip slot says "Read by the Channels engine · Lark"; the hidden-reason names the vendor through channelVendorName');
@@ -256,10 +256,40 @@ console.log('§9 the Decision API rows (lane decision-attention, D2): the person
   const SCHEMA = S.SETTINGS_SCHEMA;
   const b = SCHEMA['decision.attentionBlock'], th = SCHEMA['decision.threshold'];
   ok(b && b.type === 'text' && b.multiline === true && b.maxLength === 1500 && b.draft === 'decision' && b.default === '' && !b.tier && !b.when && b.liveApply === true, '"What matters to me": a multiline text of at most 1 500 characters, everyday (no tier, no when), with the draft button', b && { type: b.type, multiline: b.multiline, maxLength: b.maxLength, draft: b.draft, tier: b.tier });
-  ok(th && th.type === 'number' && th.default === 0.7 && th.min === 0.5 && th.max === 0.9 && th.step === 0.05 && th.tier === 'advanced', 'the threshold: a number 0.50–0.90, default 0.70, step 0.05, advanced', th && { d: th.default, min: th.min, max: th.max, tier: th.tier });
+  ok(th && th.type === 'number' && th.default === 0.7 && th.min === 0.5 && th.max === 0.9 && th.step === 0.05 && th.tier === 'advanced' && !th.block && th.alsoBlock === 'attention', 'the threshold: a number 0.50–0.90, default 0.70, step 0.05 — ONE row in 插件 › Decision API (tier advanced, plugin-settings-p0) that the 「需关注 · 怎么判断」 block draws too (int263 seam b); was: a slider in the 「需关注 · 怎么判断」 block, out of Advanced (lane attention-policy)', th && { d: th.default, min: th.min, max: th.max, tier: th.tier });
   ok(b.category === th.category && zh[b.label] && zh[th.label] && zh[b.description] && zh[th.description], 'both rows sit in the Channels category, their label and description worded in zh');
   const UI = fs.readFileSync(path.join(REPO, 'src/lib/settings-ui.js'), 'utf8');
   ok(/schema\.type === 'text' && schema\.multiline/.test(UI) && /'\/api\/channels\/decision\/draft'/.test(UI) && !/draft[\s\S]{0,400}this\.settings\.set\(path, r\.text/.test(UI), 'the UI draws the multiline row as a textarea, its draft button asks /api/channels/decision/draft, and the proposal is NEVER saved by itself (only Save / an edit saves)');
+}
+
+console.log('§10 「需关注 · 怎么判断」 (lane attention-policy): one block of rows — the rule switches, the preset, the judge\'s switch, its dials');
+{
+  const SCHEMA = S.SETTINGS_SCHEMA, CATS = S.SETTINGS_CATEGORIES;
+  const FO = await import('../src/channel-focus.js');
+  const block = Object.entries(SCHEMA).filter(([, r]) => r.block === 'attention' || r.alsoBlock === 'attention').map(([p]) => p);   // int263 seam b: + the plugin's two rows the block draws too
+  const rules = FO.ATTENTION_RULES.map((c) => `channels.attention.rule.${c}`);
+  ok(block.join() === ['channels.attention.preset', ...rules, 'channels.attention.judge', 'decision.threshold', 'decision.attentionBlock'].join(), 'the block, in order: the preset, the seven rule switches, the judge\'s switch, its threshold, "what matters to me"', block.join());
+  const rows = block.map((p) => SCHEMA[p]);
+  ok(rows.filter((r) => r.block).every((r) => r.category === SCHEMA['channels.offHoursTz'].category && r.liveApply === true && !r.tier && !r.when && r.blockTitle === rows[0].blockTitle), 'every row: category Channels, liveApply, everyday (no tier / when), the block\'s one head');
+  ok(rules.every((p) => SCHEMA[p].type === 'boolean' && SCHEMA[p].default === true && !SCHEMA[p].store), 'each fixed rule: a boolean, default ON (today\'s first screen), stored in settings');
+  const pre = SCHEMA['channels.attention.preset'], jr = SCHEMA['channels.attention.judge'];
+  ok(pre.type === 'enum' && pre.radio === true && pre.store === 'derived' && pre.default === 'both' && pre.options.map((o) => o.value).join() === Object.keys(FO.ATTENTION_PRESETS).join(), 'the preset: a radio over the PURE presets, derived (it stores nothing — it sets the switches)', pre.options.map((o) => o.value).join());
+  ok(jr.type === 'boolean' && jr.store && jr.store.plugin === 'decision-api' && jr.store.feature === 'attention' && jr.fact === 'attention-today', 'the judge\'s switch IS the Decision API plugin\'s `attention` feature (one store) with the today readout beside it');
+  const words = [rows[0].blockTitle, ...rows.flatMap((r) => [r.label, r.description]), ...pre.options.map((o) => o.label), 'Today: judged {n} · {m} needed you', 'How it is decided', 'Open in Settings', 'How "needs attention" is decided'];
+  const miss = words.filter((w) => !zh[w] || !ja[w]);
+  ok(!miss.length, `every word of the block in zh and ja (${words.length} strings)`, miss.join(' | '));
+  ok(zh[rows[0].blockTitle] === '需关注 · 怎么判断' && zh[SCHEMA['channels.attention.rule.direct'].label] === '有人直接发给我、我还没读的' && zh[jr.label] === '让判断模型挑出需要我的（Decision API）', 'the owner\'s words: 「需关注 · 怎么判断」, 「有人直接发给我、我还没读的」, 「让判断模型挑出需要我的（Decision API）」');
+  // THE SETTINGS SEARCH finds the block by its head (typing 需关注 in zh / attention in en)
+  const zhSchema = Object.fromEntries(Object.entries(SCHEMA).map(([p, r]) => [p, { ...r, label: zh[r.label] || r.label, description: zh[r.description] || r.description, blockTitle: r.blockTitle && (zh[r.blockTitle] || r.blockTitle) }]));
+  const find = (schema, q) => V.settingsViewModel(schema, { categories: CATS, query: q, ctx: { get: (k) => (SCHEMA[k] ? SCHEMA[k].default : undefined), facts: {}, nameOf: () => null }, t: tEn }).sections.flatMap((s) => s.rows.map((r) => r.path));
+  const hitZh = find(zhSchema, '需关注'), hitEn = find(SCHEMA, 'attention');
+  const own = block.filter((p) => SCHEMA[p].block);   // int263 seam b: the plugin's two rows are found in 插件 › Decision API
+  ok(own.every((p) => hitZh.includes(p)) && own.every((p) => hitEn.includes(p)), `the Settings search finds every row of the block: 需关注 (${hitZh.filter((p) => own.includes(p)).length}/${own.length}) · attention (${hitEn.filter((p) => own.includes(p)).length}/${own.length})`);
+  const noHead = Object.fromEntries(Object.entries(zhSchema).map(([p, r]) => [p, { ...r, blockTitle: undefined }]));
+  ok(!find(noHead, '需关注').includes('channels.attention.rule.replied'), 'CONTROL: without the head in the search words, 需关注 misses 「我 24 小时内回过的」 ⇒ the leg above is the head\'s doing');
+  const UI = fs.readFileSync(path.join(REPO, 'src/lib/settings-ui.js'), 'utf8');
+  ok(/if \(schema\.store\) return this\._createStoredElsewhere\(path, schema, row\);/.test(UI) && /\/api\/plugins\/\$\{encodeURIComponent\(id\)\}\/config/.test(UI) && !UI.slice(UI.indexOf('  _createStoredElsewhere(path, schema, row) {'), UI.indexOf('  _createSlider(path, schema, row, value) {')).includes('this.settings.set(path'), 'a stored-elsewhere row never writes settings: the judge\'s switch writes through the plugin\'s own config door');
+  ok(/if \(schema\.slider\) return this\._createSlider/.test(UI) && /input\.type = 'range'/.test(UI) && /renderBlock\(block, \{ items = null \} = \{\}\)/.test(UI), 'the threshold draws as a range; ONE renderBlock serves the Settings window and the Channels door');
 }
 
 console.log(`\ntest-settings-view: ${pass} passed, ${fail} failed`);

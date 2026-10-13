@@ -49,7 +49,7 @@ function world(name, { Engine = DE, provider = 'openai', cents = 100, answer = (
   };
   w.eng = Engine.create({ dataDir, fetchImpl: fakeFetch, now: () => w.T, tzOffset: () => 0, log: quiet,
     integrations: { resolveIntegration: () => ({ values: { provider, apiKey: w.key, model: '' }, source: 'user' }) } });
-  w.eng.attachPlugin({ peek: () => ({ enabled: true, config: { rules: true, dailyBudgetCents: w.cents } }) });
+  w.eng.attachPlugin({ peek: () => ({ enabled: true }), settings: () => ({ rules: true, dailyBudgetCents: w.cents }) }); // lane plugin-settings-p0: the settings rows
   w.judge = (opts = {}) => w.eng.judge('rule', { body: BODY, thread: [] }, { questions: Q, ...opts });
   w.journal = () => fs.readFileSync(w.eng.files.journal, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
   return w;

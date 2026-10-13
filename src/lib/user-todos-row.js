@@ -32,6 +32,7 @@ import { escHtml } from './utils.js';
 import { UI_ICONS } from './icons.js';
 import { getFileIcon } from './file-types.js';
 import { linkedHtml, segmentText } from './foryou-links.js'; // PURE (lane foryou-attachments): THE links in an item's words — one grammar with the chat
+import { inboxChip } from './user-todos-layout.js'; // PURE (lane inbox-decision-group): a judged item's chip
 import { cardWords, progressWords } from './app-card-model.js'; // design 009: THE words of an app install's one card (PURE)
 
 /** "3min ago" / "2h ago" / a date — words by the caller's t(). */
@@ -193,7 +194,7 @@ function partsOf(entry, ctx) {
   } else {
     const exp = notice ? expiresText(i.expiresAt, t) : '';
     meta = (notice ? `<span class="ut-sess">${escHtml(ctx.nameFor(i.sessionKey, [i]))}</span> · ` : '')
-      + escHtml(agoText(i.createdAt, t)) + (exp ? ' · ' + escHtml(exp) : '');
+      + escHtml(agoText(i.createdAt, t)) + (exp ? ' · ' + escHtml(exp) : '') + judgedChipHtml(i, t, ctx);
   }
   const body = `<div class="ut-text">${card ? escHtml(words) : linkedHtml(words, { escape: escHtml })}</div>${askChipsHtml(i, t)}${card ? appCardHtml(i, t, { lang, resolved }) : !resolved ? exitAskHtml(i, t) + proposalAskHtml(i, t, detail) + appAskHtml(i, t) : ''}${card ? '' : detailFold}${opts}<div class="ut-meta">${meta}</div>`;
   // ⤢ = THE For-you window ON this item (design-user-inbox-reply §9: long text at full width, reply / done there)
@@ -211,6 +212,16 @@ function partsOf(entry, ctx) {
 
 /** The reply box (design-user-inbox-reply D3b): Enter sends, Shift+Enter is a
  *  newline, Esc folds — the panel owns those keys; this only builds it. */
+/** lane inbox-decision-group: a JUDGED item's chip (现在 / 可等) while the tray draws the Decision API's sections —
+ *  the clause in OUR words in its title (never the vendor's), the judge's p beside it. Nothing when off. */
+export function judgedChipHtml(i, t, ctx) {
+  const c = ctx && ctx.grouping ? inboxChip(i) : null;
+  if (!c) return '';
+  const word = c.group === 'now' ? t('needs you now: an agent waits on your decision, a deadline, money or someone waiting on your reply') : t('can wait: a notice, a finished report, nothing to do');
+  const title = t('Sorted by the Decision API — {why}', { why: word }) + (c.p !== null ? ` (p ${c.p.toFixed(2)})` : '');
+  return ` · <span class="ut-judged" data-group="${c.group}" title="${escHtml(title)}">${escHtml(c.group === 'now' ? t('now') : t('can wait'))}</span>`;
+}
+
 /** lane foryou-attachments: an ask's --artifact CHIPS under the question — an SVG kind icon + the name (+ the host when it
  *  is not this box). Addressed by INDEX (data-ai): a click reads the item's own row, never a path back off an attribute. */
 const askArts = (i) => (i && !i.clearedAt && Array.isArray(i.artifacts) ? i.artifacts : []); // a CLEARED item shows none (SHAPES todo drops them)

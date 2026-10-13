@@ -29,7 +29,7 @@ export const FAMILIES = {
   channel: { ids: ['lark', 'slack', 'gmail', 'fake', 'agents'], owners: [{ dir: 'src/channels/' }] },
   display: { ids: ['xpra', 'vnc', 'desktop-singleton', 'x11vnc'], owners: [{ file: 'src/desktop-backends.js', table: /^const DISPLAY_BACKENDS\s*=/m }] },
   browser: { ids: ['cloak', 'chromium', 'agent-browser'], owners: [{ file: 'src/browser-switch.js' }, { file: 'src/browser-profiles.js', table: /^const PROVIDERS\s*=/m }] },
-  plugin: { ids: ['tailscale', 'frp'], owners: [{ dir: 'src/plugins/' }] },   // lane dc-plugins: a member = src/plugins/<id>.js + one index line
+  plugin: { ids: ['tailscale', 'frp'], owners: [{ dir: 'src/plugins/' }, { file: 'src/plugin-settings.js', table: /^const PLUGIN_SETTINGS\s*=/m }] },   // lane dc-plugins: a member = src/plugins/<id>.js + one index line
   // lane dc-apps-rows (2026-10-04, rv-desktop-apps F-A1): an app KIND is its own file in src/app-kinds/ + one index line (lane dc-app-kinds; the generic words
   // source / remove / search / move are kinds too, but every other family's code says them — only the kind-only ids count)
   appkind: { ids: ['apt', 'deb', 'appimage', 'uv-tool', 'npm', 'installer'], owners: [{ dir: 'src/app-kinds/' }] },

@@ -6,6 +6,11 @@ import { UI_ICONS, FILE_ICONS } from './icons.js';
 import { getCommand, runCommand } from './contributions.js';
 import { openDesktopPicker } from './desktop-picker.js';
 
+const SHOWN_KEY = 'vibespace.phoneShown'; // { [desktopId]: winId } — this tab's window on show per desktop (§6b guard 10)
+function readShown() {
+  try { const v = JSON.parse(sessionStorage.getItem(SHOWN_KEY) || '{}'); return v && typeof v === 'object' && !Array.isArray(v) ? v : {}; } catch { return {}; }
+}
+
 /** lane phone-chip (B-e5ff): a switcher row's billing pill takes the widest form that leaves the window's title
  *  readable — lane G's `chipMode` over MEASURED widths (the title and the pill share the row, as on a desktop title
  *  bar); a row not laid out keeps its full form. */
@@ -43,6 +48,10 @@ export class MobileNav {
   constructor(app) {
     this.app = app;
     this._titleEl = document.getElementById('mobile-nav-title');
+    // THE PHONE'S WINDOW ON SHOW IS ITS OWN (§6b guard 10): per tab, per desktop (sessionStorage), read once before the
+    // boot's restore focuses anything — a reload shows the same window; a record from another client never changes it
+    this._shown = readShown();
+    this._shownBooted = false;
 
     document.getElementById('mobile-nav-menu').onclick = () => app.sidebar.toggle(true);
     const newBtn = document.getElementById('mobile-nav-new');
@@ -122,7 +131,32 @@ export class MobileNav {
     ]);
   }
 
+  /** The window on show, noted for this tab once the boot's restore is over (every window change ends here). */
+  _noteShown() {
+    const desk = this.app.desktopManager?.activeDesktopId || '', id = this.app.wm.activeWindowId;
+    if (!this._shownBooted || !id || this._shown[desk] === id) return;
+    this._shown[desk] = id;
+    try { sessionStorage.setItem(SHOWN_KEY, JSON.stringify(this._shown)); } catch { }
+  }
+
+  /** After the boot's restore (layout.js loadAutoSave): show the window this tab showed before the reload, once it is
+   *  built (a lazy replay lands later) — unless the person picked another one meanwhile. */
+  restoreShown() {
+    const desk = this.app.desktopManager?.activeDesktopId || '', want = this._shown[desk], wm = this.app.wm;
+    const since = this.app.layoutManager?._lastUserInputAt || 0;
+    let tries = 0;
+    const go = () => {
+      if (want && (this.app.layoutManager?._lastUserInputAt || 0) === since && wm.windows.has(want)) {
+        if (wm.activeWindowId !== want) wm.focusWindow(want);
+      } else if (want && (this.app.layoutManager?._lastUserInputAt || 0) === since && ++tries < 24) { setTimeout(go, 250); return; }
+      this._shownBooted = true;
+      this._noteShown();
+    };
+    go();
+  }
+
   updateTitle() {
+    this._noteShown();
     if (!this._titleEl) return;
     const wm = this.app.wm;
     const win = wm.windows.get(wm.activeWindowId);

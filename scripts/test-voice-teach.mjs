@@ -82,7 +82,7 @@ console.log('① the PURE schedule');
 // ── ② THE ENGINE over a fake client + plugin record + For-you store ──
 const MSGS = [
   { role: 'user', content: [{ type: 'text', text: 'please fix commentsBatches in doc-window-ui.js' }] },
-  { role: 'assistant', content: [{ type: 'text', text: 'Done: `commentsBatches` now packs notes; see src/doc-model.js and dictation_context.' }, { type: 'tool_use', name: 'Edit', input: { file_path: '/secret/tool_only_name.js' } }] },
+  { role: 'assistant', content: [{ type: 'text', text: 'Done: `commentsBatches` now packs notes; see src/doc-model.js and dictation_context. doc-model.js keeps the batches.' }, { type: 'tool_use', name: 'Edit', input: { file_path: '/secret/tool_only_name.js' } }] },
 ];
 function rig(enginePath = ENGINE, { settings = {}, model = null } = {}) {
   const calls = [];
@@ -94,7 +94,7 @@ function rig(enginePath = ENGINE, { settings = {}, model = null } = {}) {
     context: async (b) => { calls.push(['context', b]); return { ok: true }; },
   };
   const rec = { enabled: true, config: { ...settings } };
-  const plugin = { peek: () => rec, update: (fn) => fn(rec) };
+  const plugin = { peek: () => rec, update: (fn) => fn(rec), settings: () => rec.config || {}, writeSettings: (p) => { rec.config = { ...(rec.config || {}), ...p }; } }; // lane plugin-settings-p0: the switches are settings rows (this suite's store = rec.config)
   const items = [], listeners = [];
   const userTodos = {
     add: (key, it) => { const x = { id: 'ut' + items.length, sessionKey: key, status: 'open', reply: null, ...it }; items.push(x); return x; },
@@ -142,13 +142,13 @@ let proposalCheck, previewCheck;
   const out = await r.E.seen(seenArgs({ uiLang: 'en' }));
   r.userTodos.reply(out.proposal.itemId, 'Add to dictionary');
   await new Promise((res) => setTimeout(res, 20));
-  ok('the For-you chip IS the press: "Add to dictionary" ⇒ ONE /v1/terms with the whole shown list', r.writes().length === 1 && r.writes()[0][1].join() === out.proposal.terms.join(), r.writes());
+  ok('the For-you chip IS the press: "Add to dictionary" ⇒ ONE /v1/terms with the preselected words it shows', r.writes().length === 1 && r.writes()[0][1].join() === out.proposal.pick.join() && r.items[0].text.endsWith(out.proposal.pick.join(', ')), r.writes());
 }
 {
   const r = rig(ENGINE, { settings: { teach: true, autoProjects: ['/w/vibespace'] } });
   const out = await r.E.seen(seenArgs());
   const w = r.writes();
-  ok('the per-project tier ⇒ the agent\'s code-span identifier + named path go WITHOUT a card, journaled as this project; the person\'s file name and agent prose still ask (voice-verify F2)', w.length === 1 && w[0][1].join() === 'commentsBatches,doc-model.js' && out.proposal && out.proposal.terms.join() === 'doc-window-ui.js,dictation_context' && r.E.view().journal[0].auto === true, { w, out });
+  ok('the per-project tier ⇒ the agent\'s code-span identifier + named path go WITHOUT a card, journaled as this project; the person\'s file name still asks (voice-verify F2); an identifier only the agent wrote is no proposal (voice-teach-candidates)', w.length === 1 && w[0][1].join() === 'commentsBatches,doc-model.js' && out.proposal && out.proposal.terms.join() === 'doc-window-ui.js' && r.E.view().journal[0].auto === true, { w, out });
   const r2 = rig(ENGINE, { settings: { teach: true, autoProjects: ['/w/vibespace'] } });
   await r2.E.seen(seenArgs({ cwd: '/w/other' }));
   ok('…another project still asks (no write)', r2.writes().length === 0);
@@ -157,7 +157,7 @@ let proposalCheck, previewCheck;
   const r3 = rig(ENGINE, { settings: { teach: true, autoProjects: ['/w/vibespace'] } });
   const out3 = await r3.E.seen(seenArgs({ messages: [{ role: 'user', content: [{ type: 'text', text: 'tell jane.doe my_private_plan99 about it' }] }, { role: 'assistant', content: [{ type: 'text', text: 'Sure — see `src/lib/foo.ts`.' }] }] }));
   const w3 = r3.writes();
-  ok('the person\'s own words never auto-send (jane.doe, my_private_plan99 ⇒ the card); the agent\'s code-span path does (foo.ts)', w3.length === 1 && w3[0][1].join() === 'foo.ts' && !!out3.proposal && out3.proposal.terms.includes('jane.doe') && out3.proposal.terms.includes('my_private_plan99'), { w3, p: out3.proposal && out3.proposal.terms });
+  ok('the person\'s own words never auto-send (jane.doe ⇒ the card; my_private_plan99 is an id shape ⇒ neither); the agent\'s code-span path does (foo.ts)', w3.length === 1 && w3[0][1].join() === 'foo.ts' && !!out3.proposal && out3.proposal.terms.includes('jane.doe') && !out3.proposal.terms.includes('my_private_plan99'), { w3, p: out3.proposal && out3.proposal.terms });
 }
 {
   const r = rig(ENGINE, { settings: { context: true } });
@@ -180,15 +180,33 @@ let proposalCheck, previewCheck;
   ok('不发 ⇒ nothing leaves', r2.writes().length === 0);
 }
 
+console.log('②b the card\'s batch (lane voice-teach-candidates): ≤ 12, preselection, the words under the line wait for a recurrence');
+{
+  const ON = { teach: true };
+  const cands = Array.from({ length: 15 }, (_, i) => ({ term: `Word${String.fromCharCode(65 + i)}x`, seen: 2, pick: i % 2 === 0 }));
+  const v = T.proposalVerdict(T.stateOf({}), { conv: 'c1', terms: [], candidates: cands, now: 1e12, settings: ON, kindOf: VM.termKind });
+  ok('proposePerCard = 12: a batch is the top 12 by rank, `pick` = the preselected of them, 3 cut under the line', T.TEACH_LIMITS.proposePerCard === 12 && v.propose.length === 12 && v.propose[0] === 'WordAx' && v.pick.join() === cands.slice(0, 12).filter((c) => c.pick).map((c) => c.term).join() && v.below.length === 3, v);
+  const s1 = T.hold(Object.assign(T.stateOf({}), { lastProposal: { c1: 1e12 } }), 'c1', v.below, v.propose);
+  const rest = cands.slice(12);
+  const later = 1e12 + 61 * MIN;
+  ok('…an hour later the cut words do NOT come back unless seen again', T.proposalVerdict(s1, { conv: 'c1', candidates: rest, now: later, settings: ON, kindOf: VM.termKind }).why === 'nothing-new');
+  const again = T.proposalVerdict(s1, { conv: 'c1', candidates: [{ ...rest[0], seen: 3 }, rest[1]], now: later, settings: ON, kindOf: VM.termKind });
+  ok('…a cut word seen again (2 → 3) is offered in the next batch, the others still wait', again.propose.join() === rest[0].term, again);
+  ok('…a batch with no candidate files no card', T.proposalVerdict(T.stateOf({}), { conv: 'c2', candidates: [], now: 1e12, settings: ON, kindOf: VM.termKind }).propose.length === 0);
+  const r = rig(ENGINE, { settings: { teach: true } });
+  const out = await r.E.seen(seenArgs({ messages: [{ role: 'assistant', content: [{ type: 'text', text: 'Open Settings, then Settings again.' }] }] }));
+  ok('…a card with nothing preselected files NO For-you item (its chip would add nothing); the card waits in Settings', out.proposal && out.proposal.terms.join() === 'Settings' && !out.proposal.pick.length && r.items.length === 0 && r.writes().length === 0, out.proposal);
+}
+
 console.log('③ RED controls (schedule copies)');
 {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-voice-teach-'));
   try {
     const src = fs.readFileSync(path.join(REPO, 'src/voice-teach.js'), 'utf8');
-    const a1 = "  return { auto, propose: rest.slice(0, TEACH_LIMITS.termsPerCall), why: null };";
+    const a1 = "  return { auto, propose: top.map((c) => c.term), pick: top.filter((c) => c.pick).map((c) => c.term), below: rest.slice(top.length).map((c) => [c.term, Number(c.seen) || 0]), why: null };";
     const a2 = "  if (!last || last.declined) return { act: 'preview', why: null };";
     ok('CONTROL anchors apply once each', src.split(a1).length === 2 && src.split(a2).length === 2);
-    fs.writeFileSync(path.join(dir, 'm1.js'), src.replace(a1, "  return { auto: [...auto, ...rest], propose: [], why: null };"));
+    fs.writeFileSync(path.join(dir, 'm1.js'), src.replace(a1, "  return { ...none, auto: [...auto, ...top.map((c) => c.term)], why: null };"));
     fs.writeFileSync(path.join(dir, 'm2.js'), src.replace(a2, "  if (!last || last.declined) return { act: 'send', why: null };"));
     const m1 = require(path.join(dir, 'm1.js')), m2 = require(path.join(dir, 'm2.js'));
     const r1 = rig(ENGINE, { settings: { teach: true }, model: m1 });

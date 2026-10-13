@@ -7,6 +7,9 @@
 //      never reach a context — and the same check is RED on a mutant that lets them through (the control)
 //   ③ voiceWords: every code has words, an i18n key in zh AND ja, and the closed action set
 //   ④ the vendor contract: multipart part ORDER request → context → audio, locale / language mapping, the answer shape
+//   ⑦ proposalCandidates (lane voice-teach-candidates, userW 2026-10-13): the screenshot's Lark conversation proposes
+//      ≤ 12 words a person says (RED control = the base's proposal source termsOf, ≥ 40 incl. six ids / field names),
+//      the SHAPE_EXCLUSIONS census (each row's term + a copy without that row lets it through), the preselection rule
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -189,6 +192,55 @@ console.log('④ the vendor contract');
     const MM = require(path.join(dir, 'vm.js'));
     ok('CONTROL: a copy with the never-list scrub removed leaks the key into the context AND the terms ⇒ the two checks above are RED on it', src.split(anchor).length === 2 && LEAK_RE.test(MM.teachContextOf({ title: 't', messages: MS }).text));
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+}
+
+console.log('⑦ proposalCandidates — words a person SAYS (lane voice-teach-candidates)');
+{
+  const VM = require(path.join(REPO, 'src/voice-model.js'));
+  const B = '`', F = '```';
+  const user = (text) => ({ role: 'user', content: [{ type: 'text', text }] });
+  const agent = (text) => ({ role: 'assistant', content: [{ type: 'text', text }, { type: 'tool_use', name: 'Bash', input: { command: 'python3 lark_tool.py --chat oc_xxx' } }] });
+  // the screenshot's card (userW: ~70 ticked terms) — the same words, in the shapes a Lark tool-heavy conversation has them
+  const LARK = [
+    user('用 lark_tool.py 查一下 Lark 群里昨天的消息，LarkClient 那个类要不要改？'),
+    agent(`I read lark_tool.py: it builds a LarkClient from load_config and asks for a tenant_access_token (or a user_access_token with offline_access). Messages come back with ${B}om_id${B}, ${B}chat_id${B}, ${B}open_id${B}, ${B}union_id${B} and ${B}sender_type${B}; P2P chats use ${B}receive_id_type${B}=open_id.`),
+    agent(`The thread walk: thread_id → thread_replies → threads_found; sorting is ${B}ByActiveTimeDesc${B}. The doc side lives in lark_bot.py and lark_docx_media.py: docx_token, obj_type, sheetId, blockInfo, blockToken, base_app_token, table_id, get_node.\n${F}\npython3 lark_tool.py send --as user send_as_user ou_7565 message_id cli_aa97b369e938ded2\n${F}`),
+    user('Lark 的图片上传也顺便看看，lark_tool.py 里 replace_image 那段'),
+    agent('Uploads: image_key from upload_prepare → upload_part → upload_finish (upload_all wraps them); a docx_image needs parent_type + parent_node, block_type 27, then update_text_elements; replace_image / replace_file swap a docx_file; drive_route_token for the drive route. Placeholders in the doc: oc_xxx, ou_xxx, om_xxx. batch_get_id resolves ids. LarkClient keeps the token; cli_aa97b369e938ded2 is the app id.'),
+  ];
+  const BAD6 = ['cli_aa97b369e938ded2', 'user_access_token', 'tenant_access_token', 'ou_7565', 'oc_xxx', 'receive_id_type'];
+  const c = VM.proposalCandidates({ messages: LARK, cwd: '/w/lark' });
+  const terms = c.map((x) => x.term);
+  console.log(`    proposed (${terms.length}): ${c.map((x) => `${x.term} [${x.why} ${x.seen}/${x.byPerson}${x.pick ? ' ✓' : ''}]`).join(', ')}`);
+  ok('the screenshot\'s conversation ⇒ ≤ 12 candidates, none of the six ids / field names', terms.length > 0 && terms.length <= 12 && !BAD6.some((b) => terms.includes(b)), terms);
+  ok('…lark_tool.py and LarkClient rank in the top 3 (file / class names first), "Lark" (the person wrote it) is there too', terms.slice(0, 3).includes('lark_tool.py') && terms.slice(0, 3).includes('LarkClient') && terms.includes('Lark'), terms);
+  ok('…no field name, code-span word or placeholder of the list survives', !terms.some((t) => /_(?:id|token|type|key)$|^(?:sheetId|blockInfo|blockToken|ByActiveTimeDesc|P2P|thread_replies|upload_part|om_xxx)$/.test(t)), terms);
+  const base = VM.termsOf({ messages: LARK, cwd: '/w/lark' });
+  ok(`RED CONTROL: the base's proposal source (termsOf — now the per-project tier's input only) on the same conversation ⇒ ${base.length} terms incl. all six`, base.length >= 40 && BAD6.every((b) => base.includes(b)), base.length);
+  // the census: every row with a term only it rejects; a copy of voice-model.js without that row lets the term through
+  const ROWS = { 'id-prefix': 'ou_abcdef', placeholder: 'oc_xxx', 'field-tail': 'chat_id', 'two-underscores': 'update_text_elements', 'digit-tail': 'item_42',
+    'short-caps': 'P2P', host: 'feishu.cn', secret: 'dl_dummyfghijklmnopq', 'code-only': 'thread_replies' };
+  ok('census: one row per SHAPE_EXCLUSIONS entry, no row without a term', VM.SHAPE_EXCLUSIONS.map(([r]) => r).join() === Object.keys(ROWS).join(), VM.SHAPE_EXCLUSIONS.map(([r]) => r));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-voice-cands-'));
+  try {
+    fs.copyFileSync(path.join(REPO, 'src/assistant-note.js'), path.join(dir, 'assistant-note.js')); // voice-model requires it (PURE → PURE)
+    const src = fs.readFileSync(path.join(REPO, 'src/voice-model.js'), 'utf8');
+    const said = (w) => w === 'thread_replies' ? { messages: [agent(`we walk ${w} first, then ${w} again`)] }       // the agent's prose twice
+      : w.startsWith('dl_') ? { messages: [], groupName: w } : { messages: [user(`look at ${w} please`), agent(`yes, ${w} it is`)] };
+    for (const [row, w] of Object.entries(ROWS)) {
+      const anchor = `['${row}', (w`;
+      const f = path.join(dir, `m-${row}.js`);
+      fs.writeFileSync(f, src.replace(anchor, `['${row}', () => false, (w`));
+      const M = require(f);
+      const has = (V) => V.proposalCandidates(said(w)).some((x) => x.term === w);
+      ok(`census ${row}: rejects ${w} (first row to match) — RED on a copy without the row`, src.split(anchor).length === 2 && VM.exclusionOf(w, { byPerson: w === 'thread_replies' ? 0 : 1 }) === row && !has(VM) && has(M));
+    }
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  // preselection: the person's words, and files / PascalCase names seen twice; a Capitalized word only the agent used waits unticked
+  const P = VM.proposalCandidates({ messages: [user('ask jane.doe about the plan'), agent('Open Settings → Plugins; then Settings again. TeachEngine reads voice-model.js; voice-model.js and TeachEngine stay.')] });
+  const pk = Object.fromEntries(P.map((x) => [x.term, x.pick]));
+  ok('preselection: byPerson (jane.doe) and seen ≥ 2 file / PascalCase (voice-model.js, TeachEngine) start selected; an agent-only Capitalized word (Settings) does not', pk['jane.doe'] === true && pk['voice-model.js'] === true && pk.TeachEngine === true && pk.Settings === false, P);
+  ok('…a word seen once and not by the person is no candidate at all (Plugins); the dictionary drops a known word', !('Plugins' in pk) && !VM.proposalCandidates({ messages: [user('ask jane.doe')], known: ['JANE.DOE'] }).length);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

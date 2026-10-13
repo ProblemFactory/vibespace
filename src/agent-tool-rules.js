@@ -713,7 +713,32 @@ function describeAgentCommand(command) {
   return { browser: !others.length && tools.size === 1 && tools.has('vibespace-browser'), tools: [...tools], steps, others, scope };
 }
 
+/** bypass-witness-hint (owner 2026-10-13: "这个怎么没显示成读取过 channel 的卡片？" — the agent read a Lark group
+ *  through its OWN larkhelp.py): a shell call that talks to an IM vendor DIRECTLY — its host, its SDK, its CLI — and
+ *  not through `vibespace-channels`. The product cannot witness what it did not do, but the card can SAY so. One row
+ *  per signature, each with the sample its RED control runs (test-agent-tool-rules census); read from the command
+ *  TEXT only, heredoc bodies included. A word in prose ("lark") is not a signature. Display only — nothing is blocked. */
+const VENDOR_BYPASS = [
+  { vendor: 'lark', word: 'Lark', why: 'host', re: /\bopen\.(?:feishu\.cn|larksuite\.com)\b/i, sample: 'curl -s https://open.feishu.cn/open-apis/im/v1/messages?container_id=oc_1' },
+  { vendor: 'lark', word: 'Lark', why: 'sdk', re: /\b(?:lark_oapi|larkhelp|lark_tool|LarkClient)\b/, sample: "cd /tmp && python3 - <<'EOF'\nimport larkhelp as lh\nprint(lh.text_of(lh.children('oc_1')))\nEOF" },
+  { vendor: 'lark', word: 'Lark', why: 'cli', re: /(?:^|[\s;&|(/])lark-cli\s/, sample: 'lark-cli im messages list --chat oc_1' },
+  { vendor: 'slack', word: 'Slack', why: 'host', re: /\bslack\.com\/api\//i, sample: 'curl -H "Authorization: Bearer $T" https://slack.com/api/conversations.history?channel=C1' },
+  { vendor: 'slack', word: 'Slack', why: 'sdk', re: /\b(?:slack_sdk|slack_bolt)\b|@slack\/web-api\b|\bWebClient\s*\(/, sample: "python3 -c 'from slack_sdk import WebClient; print(WebClient(token=t).conversations_history(channel=\"C1\"))'" },
+  { vendor: 'slack', word: 'Slack', why: 'cli', re: /(?:^|[\s;&|(/])slack-cli\s/, sample: 'slack-cli chat history C1' },
+  { vendor: 'gmail', word: 'Gmail', why: 'host', re: /\bgmail\.googleapis\.com\b/i, sample: 'curl -s https://gmail.googleapis.com/gmail/v1/users/me/messages' },
+  { vendor: 'gmail', word: 'Gmail', why: 'sdk', re: /\bgoogleapiclient\b[\s\S]{0,2000}?\bbuild\(\s*['"]gmail['"]/, sample: "python3 - <<'EOF'\nfrom googleapiclient.discovery import build\nsvc = build('gmail', 'v1', credentials=c)\nEOF" },
+  { vendor: 'microsoft', word: 'Microsoft 365', why: 'host', re: /\bgraph\.microsoft\.com\b/i, sample: 'curl https://graph.microsoft.com/v1.0/me/messages' },
+];
+/** A shell line → null | {vendor, word, why}: the first table row whose signature the text carries. */
+function vendorBypassOf(command) {
+  const s = typeof command === 'string' ? command : '';
+  if (!s) return null;
+  const row = VENDOR_BYPASS.find((r) => r.re.test(s));
+  return row ? { vendor: row.vendor, word: row.word, why: row.why } : null; // word = the vendor's proper name on the card (not translated)
+}
+
 module.exports = {
+  VENDOR_BYPASS, vendorBypassOf,
   AGENT_TOOL_RULES, HELD_TOOLS, JOB_VERBS, PAGE_VERBS, DESIGN_VERBS, APP_VERBS, CODEX_NOTE, SCOPE_CLOSE_ALL, WITHHELD_ASK, WITHHELD_HELD, SAFE_ENV,
   claudeAllowRules, claudeAskRules, ASK_RULE_MODES, spawnPermissionMode, claudeAskRulesFor, parseRule, ruleMatchesCommand, coveredByAgentToolRules,
   widenSuggestions, alwaysAllowFor, rulesText, splitShell, describeAgentCommand, agentCommandText,

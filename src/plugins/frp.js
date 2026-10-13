@@ -42,19 +42,20 @@ module.exports = {
       fs.writeFileSync(f, pw, { mode: 0o600 });
       return pw;
     };
-    // Effective relay config: USER override (data/plugins.json config) wins over
-    // the cluster-injected ENV defaults (user directive: the fleet auto-injects
-    // VIBESPACE_FRPS_* as defaults + enables the plugin; the user can change any
-    // of it in the plugin UI).
+    // Effective relay config: USER override wins over the cluster-injected ENV defaults (user directive: the fleet
+    // auto-injects VIBESPACE_FRPS_* as defaults + enables the plugin; the user can change any of it). The address /
+    // port / subdomain host are SETTINGS rows (All Settings › Plugins › Public URLs — lane plugin-settings-p0); the
+    // relay token is a secret the plugin holds itself (data/plugins.json config.token), never a setting.
     const frpCfg = () => {
       const c = h.peek().config || {};
+      const v = h.settings();
       return {
-        serverAddr: c.serverAddr || FRPS_ADDR,
-        serverPort: Number(c.serverPort || FRPS_PORT),
+        serverAddr: v.serverAddr || FRPS_ADDR,
+        serverPort: Number(v.serverPort || FRPS_PORT),
         token: c.token || FRPS_TOKEN,
-        subDomainHost: c.subDomainHost || process.env.VIBESPACE_FRPS_SUBDOMAIN_HOST || '',
-        portMin: Number(c.portMin || FRP_PORT_MIN),
-        portMax: Number(c.portMax || FRP_PORT_MAX),
+        subDomainHost: v.subDomainHost || process.env.VIBESPACE_FRPS_SUBDOMAIN_HOST || '',
+        portMin: Number(FRP_PORT_MIN),
+        portMax: Number(FRP_PORT_MAX),
         fromEnv: !!(FRPS_ADDR && FRPS_TOKEN),   // was the RELAY provided by the cluster?
       };
     };
@@ -117,19 +118,28 @@ module.exports = {
 
     const verbs = {
       config(patch) {
-        // user override of the cluster-injected relay defaults (empty string ⇒
-        // clear the override → fall back to env). Restart if running to apply.
+        // the relay TOKEN (a secret, the Settings section's "Relay token" row asks for it): empty string ⇒ clear the
+        // override → the cluster's. The address / port / subdomain host are settings rows; this old door still takes
+        // them (an agent / a script) and writes them through the settings store. Restart if running to apply.
         const rec = h.rec();
-        const c = rec.config = rec.config || {};
-        const set = (k, v, max = 200) => { if (v === undefined) return; const s = String(v).trim().slice(0, max); if (s) c[k] = s; else delete c[k]; };
-        set('serverAddr', patch.serverAddr);
-        if (patch.serverPort !== undefined) { const n = Number(patch.serverPort); if (n > 0 && n < 65536) c.serverPort = n; else delete c.serverPort; }
-        set('token', patch.token, 200);
-        set('subDomainHost', patch.subDomainHost);
-        h.save();
-        if (frpDaemonPid()) { try { verbs.stop(); } catch { } setTimeout(() => { try { verbs.start(); } catch { } }, 800); }
+        if (patch.token !== undefined) {
+          const c = rec.config = rec.config || {};
+          const s = String(patch.token).trim().slice(0, 200);
+          if (s) c.token = s; else delete c.token;
+          if (!Object.keys(c).length) delete rec.config;
+          h.save();
+        }
+        const w = {};
+        for (const k of ['serverAddr', 'subDomainHost']) if (patch[k] !== undefined) w[k] = String(patch[k]).trim().slice(0, 200);
+        if (patch.serverPort !== undefined) { const n = Number(patch.serverPort); w.serverPort = n > 0 && n < 65536 ? n : 0; }
+        if (Object.keys(w).length) h.writeSettings(w);
+        verbs.applySettings();
         h.notify();
         return verbs.status().config;
+      },
+      /** a relay row changed (the settings store's write hook): a running relay restarts into it */
+      applySettings() {
+        if (frpDaemonPid()) { try { verbs.stop(); } catch { } setTimeout(() => { try { verbs.start(); } catch { } }, 800); }
       },
 
       // The cluster injects the relay env + wants it default-ON, so frp replays

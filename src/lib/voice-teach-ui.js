@@ -1,7 +1,7 @@
 // Dropline voice input P1 (lane voice-p1-oauth-teach): the plugin card's ACCOUNT row (Connect with Fish Audio in a new
 // tab / 已连接 / Disconnect) and its TEACH section (owner 2026-10-12: nothing leaves without the person's press) — the
-// switches (teach, context; both default off) with the privacy sentence, the proposal cards (ticked words, 加入词库 /
-// 忽略, the per-project tier), the per-project list, the journal + the dropline.fish.audio/app link; and the context
+// switches (teach, context; both default off) with the privacy sentence, the proposal cards (≤ 12 word chips, 加入所选 (n) /
+// 忽略这批, the per-project tier), the per-project list, the journal + the dropline.fish.audio/app link; and the context
 // PREVIEW dialog the microphone opens after the first dictation of a conversation (发送 / 不发).
 import { fetchJson, showToast } from './utils.js';
 import { t } from './i18n.js';
@@ -59,6 +59,9 @@ export function renderAccountRow(box, st, rerender) {
 }
 
 const fmtTime = (at) => { const d = new Date(at); return `${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`; };
+// a chip's title: why this word is here (proposalCandidates' why + counts)
+const whyWords = (w) => (!w ? '' : w.byPerson > 1 ? t('You wrote this {n} times', { n: w.byPerson }) : w.byPerson === 1 ? t('You wrote this once')
+  : w.why === 'file' ? t('A file name') : t('Seen {n} times here', { n: w.seen }));
 const projectName = (cwd) => String(cwd || '').replace(/\/+$/, '').split('/').pop() || cwd;
 
 /** the teach section (shown once connected): switches + sentence, proposals, projects, journal */
@@ -67,39 +70,35 @@ export async function renderTeachSection(box, rerender) {
   box.appendChild(sec);
   let v;
   try { v = await voiceApi('/api/voice/teach'); } catch (e) { sec.appendChild(el('div', 'plugin-detail plugin-cfg-warn', e.message)); return; }
-  // one switch row: the switch left, its words right, the explanatory sentence under them in the secondary colour
-  const sw = (cls, on, label, key, why, whyCls = '') => {
-    const l = el('label', `voice-switch ${cls}`);
-    const cb = el('input', 'voice-sw'); cb.type = 'checkbox'; cb.setAttribute('role', 'switch'); cb.checked = !!on;
-    cb.onchange = () => voiceApi('/api/voice/teach/settings', { [key]: cb.checked }).then(() => rerender()).catch((e) => { cb.checked = !!on; showToast(e.message, { type: 'error' }); });
-    const words = el('span', 'voice-switch-text');
-    words.append(el('span', 'voice-switch-words', label), el('span', `plugin-detail voice-switch-why ${whyCls}`.trim(), why));
-    l.append(cb, words);
-    return l;
-  };
+  // the teach / context switches are settings rows (All Settings › Plugins › Voice input · Dropline — lane plugin-settings-p0)
   sec.append(
     el('div', 'voice-teach-head', t('Teach Dropline')),
-    sw('voice-teach-toggle', v.settings.teach, t('Suggest words for my Dropline dictionary (I confirm each batch)'), 'teach',
-      t('Sends the names, terms and file names in the current conversation to Dropline (Fish Audio) — only what you confirm. Credentials, attachments and other conversations are never sent.'), 'voice-teach-why'),
-    sw('voice-context-toggle', v.settings.context, t("Send the conversation to Dropline's two-week memory (shows the text the first time)"), 'context',
-      t('Dropline keeps it for two weeks to spell your words right. Later updates of this conversation go without asking while the switch is on.')),
+    el('div', 'plugin-detail voice-teach-why', t('Sends the names, terms and file names in the current conversation to Dropline (Fish Audio) — only what you confirm. Credentials, attachments and other conversations are never sent.')),
   );
+  if (!v.settings.teach) sec.appendChild(el('div', 'plugin-detail plugin-cfg-hint voice-teach-off', t('Suggesting words is off — turn it on in All Settings › Plugins › Voice input · Dropline.')));
   for (const p of v.proposals) {
     const card = el('div', 'voice-proposal');
     card.dataset.id = p.id;
-    card.appendChild(el('div', 'voice-proposal-title', t('Dropline suggests adding to your dictionary:') + (p.title ? ` — ${p.title}` : '')));
+    card.appendChild(el('div', 'voice-proposal-title', t('Dropline suggests adding to your dictionary') + (p.title ? ` — ${p.title}` : '')));
+    card.appendChild(el('div', 'plugin-detail voice-proposal-why', t("Words this conversation used twice or more (yours count twice) that you'd likely say — identifiers in code are not here")));
+    // ≤ 12 chips (lane voice-teach-candidates): a press toggles one; only the plausible words start selected; the count is live
+    const picked = new Set(Array.isArray(p.pick) ? p.pick : []);
     const terms = el('div', 'voice-proposal-terms');
+    const add = el('button', 'mounts-btn mounts-btn-primary voice-proposal-add');
+    const chosen = () => [...terms.querySelectorAll('.voice-term[aria-pressed="true"]')].map((x) => x.dataset.term);
+    const count = () => { const n = chosen().length; add.textContent = t('Add selected ({n})', { n }); add.disabled = !n; };
     for (const term of p.terms) {
-      const l = el('label', 'voice-term');
-      const cb = el('input'); cb.type = 'checkbox'; cb.checked = true; cb.value = term;
-      l.append(cb, document.createTextNode(' ' + term));
-      terms.appendChild(l);
+      const chip = el('button', 'voice-term', term);
+      chip.type = 'button'; chip.dataset.term = term; chip.title = whyWords((p.why || {})[term]);
+      chip.setAttribute('aria-pressed', String(picked.has(term)));
+      chip.onclick = () => { chip.setAttribute('aria-pressed', String(chip.getAttribute('aria-pressed') !== 'true')); count(); };
+      terms.appendChild(chip);
     }
-    const add = el('button', 'mounts-btn mounts-btn-primary voice-proposal-add', t('Add to dictionary'));
-    const skip = el('button', 'mounts-btn voice-proposal-ignore', t('Ignore'));
+    count();
+    const skip = el('button', 'mounts-btn voice-proposal-ignore', t('Ignore this batch'));
     add.onclick = async () => {
-      const pick = [...terms.querySelectorAll('input:checked')].map((x) => x.value);
-      if (!pick.length) { showToast(t('Tick at least one word'), { type: 'error' }); return; }
+      const pick = chosen();
+      if (!pick.length) return;
       add.disabled = skip.disabled = true;
       try { const r = await voiceApi(`/api/voice/teach/proposal/${encodeURIComponent(p.id)}`, { verb: 'add', terms: pick }); showToast(t('Added {n} · skipped {m}', { n: r.added.length, m: r.skipped.length })); rerender(); } catch (e) { showToast(e.message, { type: 'error' }); add.disabled = skip.disabled = false; }
     };

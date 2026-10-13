@@ -49,11 +49,35 @@ const probeLog = require('./server/usage-probe-log.js'); // the raw /usage probe
 // the probe's one vendor call is the panel. One spelling: the spawn and the log.
 const PANEL_PROBE_ARGS = Object.freeze(['-p', '/usage', '--strict-mcp-config']);
 // THE ONE PANEL SPAWN: the auto-cli rung below and the long-lived token mint's
-// second look (src/server/oat-mint.js, oat-verify F1) — one site, one argv.
-function spawnPanelProbe(bin, { env, cwd }, done) {
+// second look (src/server/oat-mint.js, oat-verify F1) — one site, one argv, and
+// ONE ISOLATION (B-855a c1). A caller passes the isolated config dir it proves
+// (`root`) and the identity env (the secret store, or the minted token); the
+// CLI's org context (CLAUDE_CONFIG_DIR = root) and its working directory (the
+// empty dir inside root) are derived HERE and nowhere else. mirror-263 §19: when
+// the mint made this spawn shared, each caller handed in its own env + cwd and
+// the isolation left the site. No root = the machine login's own probe
+// (__global__): no account dir to isolate into.
+function spawnPanelProbe(bin, { root, env: identityEnv }, done) {
   const { execFile } = require('child_process');
-  return execFile(bin, [...PANEL_PROBE_ARGS], { env, cwd, timeout: 60000, maxBuffer: 1024 * 1024 }, done);
+  const probeConfigDir = root || null;
+  const env = { ...identityEnv };
+  if (probeConfigDir) env.CLAUDE_CONFIG_DIR = probeConfigDir;
+  const probeCwd = probeCwdOf(probeConfigDir);
+  // THE WORKING DIRECTORY IS ISOLATED TOO (owner 2026-09-17 "确保 config dir 和
+  // working directory 都用新的路径"): the CLI keys per-project state by cwd
+  // (`projects/<encoded cwd>` under the config dir, the trust record, any
+  // CLAUDE.md / .claude/ it finds there). A shared os.tmpdir() made every
+  // account's probe one "project" on a directory anyone can write into; an
+  // empty dir INSIDE the probe's config keeps that state per account and out of
+  // reach (the mint's PTY cwd is its scratch root, never this dir). Measured
+  // 2026-09-17 21:41Z: the real CLI fetches and prints under it and creates
+  // `projects/-…-cwd` in the isolated config dir.
+  if (probeConfigDir) fs.mkdirSync(probeCwd, { recursive: true, mode: 0o700 });
+  return execFile(bin, [...PANEL_PROBE_ARGS], { env, cwd: probeCwd, timeout: 60000, maxBuffer: 1024 * 1024 }, done);
 }
+/** The probe's working directory: an empty dir INSIDE the isolated config dir
+ *  (no config dir = the machine login's own probe, in the shared tmpdir). */
+function probeCwdOf(probeConfigDir) { return probeConfigDir ? path.join(probeConfigDir, 'cwd') : os.tmpdir(); }
 function setupUsage({ app, accounts, hosts, usageHistory, activeSessions, serverSetting, ensureDir, USAGE_CACHE_FILE, USAGE_CACHE_DIR, CODEX_SESSIONS_DIR, META_DIR, AVAILABLE_MODELS, BUFFERS_DIR, apiDerivedWindow, establishedWindows, repairIdentityAnchors, probeUsageForAccountKey, onMemberReadingFresh, CLAUDE_CMD }) {
 const https = require('https');
 function readUsageCache() {
@@ -519,18 +543,8 @@ function seedProbeConfigDir(credsDir, probeConfigDir) {
   } catch { }
   fs.mkdirSync(probeConfigDir, { recursive: true, mode: 0o700 });
   fs.writeFileSync(path.join(probeConfigDir, '.claude.json'), JSON.stringify(seed), { mode: 0o600 });
-  // THE WORKING DIRECTORY IS ISOLATED TOO (owner 2026-09-17 "确保 config dir 和
-  // working directory 都用新的路径"): the CLI keys per-project state by cwd
-  // (`projects/<encoded cwd>` under the config dir, the trust record, any
-  // CLAUDE.md / .claude/ it finds there). A shared os.tmpdir() made every
-  // account's probe one "project" on a directory anyone can write into; an
-  // empty dir INSIDE the account's probe config keeps that state per account
-  // and out of reach. Measured 2026-09-17 21:41Z: the real CLI fetches and
-  // prints under it and creates `projects/-…-cwd` in the isolated config dir.
-  fs.mkdirSync(probeCwdOf(probeConfigDir), { recursive: true, mode: 0o700 });
+  // the empty working dir inside it is spawnPanelProbe's (the one isolation site)
 }
-/** The probe's working directory: an empty dir INSIDE the isolated config dir. */
-function probeCwdOf(probeConfigDir) { return path.join(probeConfigDir, 'cwd'); }
 /** The identity verdict on one parsed panel. `expected` = the account's own
  *  login identity, `before`/`after` = the isolated config dir's oauthAccount
  *  around the spawn, `apiWin` = the account's API-derived window. */
@@ -595,7 +609,7 @@ async function refreshViaCliPanel(key) {
   // (a) the isolated org context: a scratch dir UNDER the creds dir (one
   // derivation — from credsDir, never a second subDir lookup), re-seeded now
   const probeConfigDir = credsDir ? path.join(credsDir, '.probe-config') : null;
-  const probeCwd = probeConfigDir ? probeCwdOf(probeConfigDir) : os.tmpdir(); // the machine login's own probe (__global__) has no account dir to isolate into
+  const probeCwd = probeCwdOf(probeConfigDir); // where spawnPanelProbe runs it (recorded, never passed): __global__ has no account dir to isolate into
   const expected = credsDir ? probeLog.machineOauthAccount(credsDir) : probeLog.machineOauthAccount();
   const probeRec = { rung: 'panel', key, name: isGlobal ? '__global__' : (acctMeta.name || key), credsDir, configDir: probeConfigDir, cwd: probeCwd, argv: null, machineOrgBefore: probeLog.machineOauthAccount(), machineOrgAfter: null, configOrgBefore: null, configOrgAfter: null, exitCode: null, ms: null, rawStdout: null, rawStderr: null, parsed: null, identity: null, identityVerified: null, outcome: null, why: null };
   const logProbe = (outcome, extra) => { try { probeLog.appendProbeLog(path.dirname(USAGE_CACHE_DIR), { ...probeRec, outcome, ...(extra || {}) }); } catch { } };
@@ -613,15 +627,15 @@ async function refreshViaCliPanel(key) {
     try {
       const env = { ...process.env };
       delete env.ANTHROPIC_API_KEY; delete env.CLAUDE_CODE_OAUTH_TOKEN; delete env.CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR;
-      // the secret store relocates (session-spawn parity) AND the org context
-      // is isolated (B-855a): the token is the identity, and the CLI must read
-      // THIS account's oauthAccount for it — never the machine-wide file
+      // the secret store relocates (session-spawn parity); the org context and
+      // the cwd are isolated by spawnPanelProbe from the root (B-855a): the
+      // token is the identity, and the CLI must read THIS account's
+      // oauthAccount for it — never the machine-wide file
       if (credsDir) env.CLAUDE_SECURESTORAGE_CONFIG_DIR = credsDir;
-      if (probeConfigDir) env.CLAUDE_CONFIG_DIR = probeConfigDir;
       const bin = CLAUDE_CMD || 'claude';
       probeRec.argv = [bin, ...PANEL_PROBE_ARGS];
       const t0 = Date.now();
-      spawnPanelProbe(bin, { env, cwd: probeCwd }, (err, stdout, stderr) => {
+      spawnPanelProbe(bin, { root: probeConfigDir, env }, (err, stdout, stderr) => {
         probeRec.ms = Date.now() - t0;
         probeRec.exitCode = err ? (typeof err.code === 'number' ? err.code : (err.killed ? 'killed' : String(err.code || err.signal || 'error'))) : 0;
         probeRec.rawStdout = stdout == null ? '' : String(stdout);

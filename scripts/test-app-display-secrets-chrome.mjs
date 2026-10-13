@@ -4,6 +4,8 @@
 // restart; the RED control — the setting off, no service — is Chrome's basic store ("v10"). The window's ⋯ ▸ Stored
 // logins row is the REAL showContextMenu (esbuild iife of src/lib/utils.js + style.css) with the store's own count
 // → PNG (VS_SECRETS_PNG). Fixtures only: scratch Xvfb (pinned high), HOME, runtime dir, profile; never the owner's bus.
+// lane secrets-chrome-skip: a machine without the portal binaries (the CI runner) or python3-gi is a SKIP with the
+// plan's / the facts' why (rc 0) BEFORE any plan.dirs use — test-desktop-app-rung-chrome's pattern for xpra.
 import { createRequire } from 'module';
 import fs from 'fs'; import os from 'os'; import path from 'path'; import http from 'http';
 import { spawn, spawnSync } from 'child_process';
@@ -17,7 +19,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-adsec-h-')), kids = [];
 const env = { PATH: process.env.PATH, HOME: path.join(tmp, 'home'), XDG_RUNTIME_DIR: path.join(tmp, 'run') };
 for (const d of [env.HOME, env.XDG_RUNTIME_DIR]) fs.mkdirSync(d, { recursive: true, mode: 0o700 });
-const DISP = `:${[188, 189, 191, 193].find((n) => !fs.existsSync(`/tmp/.X11-unix/X${n}`))}`;
+// a display nobody holds: neither a socket nor a lock (a killed Xvfb leaves both — 188..193 were all stale on the hub)
+const DISP = `:${Array.from({ length: 24 }, (_, i) => 188 + i).find((n) => !fs.existsSync(`/tmp/.X11-unix/X${n}`) && !fs.existsSync(`/tmp/.X${n}-lock`))}`;
+const pre = M.portalPlan({ dir: path.join(tmp, 'pre'), display: DISP, authFile: null, bins: D.portalBins({ env }), why: 'browser' });
+const preFacts = pre.ok ? await D.appSecretsFacts({ env, mode: 'on', dataDir: path.join(tmp, 'pre-data'), id: 'da-pre' }) : null;
+const skipWhy = !pre.ok ? `portalPlan: ${pre.why}` : /^python3 /.test((preFacts && preFacts.why) || '') ? `appSecretsFacts: ${preFacts.why}` : null;
+if (skipWhy) { console.log(`SKIP: ${skipWhy}`); fs.rmSync(tmp, { recursive: true, force: true }); process.exit(0); }
 const srv = http.createServer((q, s) => { s.writeHead(200, { 'Set-Cookie': 'sid=kept-across-restart; Max-Age=86400', 'Content-Type': 'text/html' }); s.end('<title>login</title><p>hi'); });
 await new Promise((r) => srv.listen(0, '127.0.0.1', r));
 const URL0 = `http://127.0.0.1:${srv.address().port}/`;

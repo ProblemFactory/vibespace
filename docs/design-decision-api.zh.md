@@ -62,6 +62,7 @@ owner 2026-10-12 提出；设计台（Fable）2026-10-12，**修订 r1**（同�
 - **问什么**（一次调用多题，输入付一次）：`needs_now`（总判）+ 7 条款 predicate：`to_me`（直接对我说）/ `asks_me`（问我或要我做）/ `decision`（要我拍板或批准）/ `deadline_money`（截止或钱）/ `waiting`（有人在等我）/ `escalation`（升级、投诉、出事）/ `matters`（命中「我在乎什么」）。输入 = 标题、来源、发信人显示名、最新消息正文 ≤ 2 KB（新在前）、用户段、例子；每段经 `inertFrames` 并加引号（channel-filter 的框架法）。
 - **答案 → 标签**：`needs_now ≥ 阈值`（默认 0.7，设置里 0.5–0.9）⇒ 行戴 `judged` 标签（`TAG_ORDER` 插在 `held` 后、`direct` 前——事实标签永远在前），芯片「需要你 · 0.82 · 问你、有截止」，**理由 = 条款名**（我们的词表，三语），厂商没有一字进 UI 或 agent 上下文；模拟来源加「估计」。行上两个小按钮「需要 / 不需要」= 样本 + 立刻改标签。
 - **不动的**：规则标签的行；agent 的 wake 不因 `judged` 而发（它只是第一屏的排序；要叫醒走 §2.5 的规则）。
+- **as-built（lane attention-policy，owner 2026-10-13「应该允许禁用原来的固定规则…」）**：第一屏是 owner 的策略——每条固定规则一个开关（`channels.attention.rule.<code>`，默认开，大白话写明意思），判断模型的开关就是插件自己的 `attention`（一个存储，经 POST /api/plugins/decision-api/config 写），阈值出了 Advanced（滑块），「我在乎什么」在其下，预设单选只设开关；关掉的规则不让行进第一屏，判断模型可判它（`judgeCandidate(v, now, policy)`）；判断模型关时 `judgedFor` 为 null。同一块「需关注 · 怎么判断」在设置窗口与第一屏 ⚙ 怎么判断 里（settings-ui `renderBlock`）。
 
 ### 2.5 用途 ②：规则种类 `decision`
 - 行形：`{kind:'decision', condition(≤500 字符), question:'predicate'|'choice', choices?[≤8 个 {value, description}], threshold(0.5–0.95，默认 0.7), perHour(默认 20)}`；`validateRule` 一个 case；`ruleWhy` = `decision: <condition> (p=0.82)` / `(choice=billing 0.71)`；范围 = watcher 自己的 grain。
@@ -76,7 +77,7 @@ owner 2026-10-12 提出；设计台（Fable）2026-10-12，**修订 r1**（同�
 |---|---|---|---|
 | 入站记录路由到 Task Group / agent | 高（≥2 个组时）| = `decision` 的 choice 形，0 新面 | **做（随 D3）** |
 | webhook 原始载荷的「事实 / 要叫醒 / 忽略」 | 中 | `decision` 规则 + `scope:'raw'`（载荷 ≤ 4 KB 进输入）| 做，v2（rel249 L2 之后；owner 问题 3 决定原始载荷可否离开实例）|
-| For-you 托盘分组（对 `normal` 且无选项的条目打 score 紧急度）| 低–中 | 一卡一调 | 后做（托盘本来就短，agent 已自己标紧急度）|
+| For-you 托盘分组（对 `normal` 且无选项的条目打 score 紧急度）| 低–中 | 一条一调，≤ 10 条/次 | **做（lane inbox-decision-group，owner 2026-10-13「做吧」）**：托盘分「现在要你 / 可以等」两段；判官只**分组**，条目的 urgency 从不改写；自己的开关（默认关），见 §6「④ as built」|
 | 浏览器页面判定第二意见（登录墙 / 验证码 / 错误页）| 低 | 每次翻页一调、页面文本离开实例 | **不做**（正则钉是量过的事实；概率意见不能改 agent 的动作）|
 | 未知记录分类（「drift 普查」）| — | — | **不做**（树里的 drift 是索引写入漂移，不是语义问题）|
 | backlog 合并提议 | 低 | — | **不做**（8 条，人读）|
@@ -106,7 +107,7 @@ owner 2026-10-12 提出；设计台（Fable）2026-10-12，**修订 r1**（同�
 | ① 需关注 | 评分表 v1（≈350）→ 用户段 ≤ 1 500 字符 → 例子 ≤ 12 条 × ≤ 200 字符 → 记录：标题、来源、发信人显示名（≤ 200 字符）、最新消息正文 ≤ 2 KB（新在前，agent 的回复带「agent:」标） | 固定 ≤ 1 700 + 可变 ≤ 800 = **2 500/记录** | use+conv+lastAt+rubric v+段 hash+例子 hash | ~~设计值 5 条/次~~ → **1 条/次**（as built r2，探针 2026-10-12：批 5 = 1 608 vs 单条 1 761 输入 tokens/条，只省 9 %，但 needs_now 在 0.7 的一致率只有 12/20、平均 \|Δp\| 0.383 ⇒ 批改变判定，按本节⑤的规则退回单条；一条记录多题照旧）；每小时一扫 | 附件、图片、地址、已戴事实标签的行、owner 自己的最新一条 |
 | ② 规则 `decision`（predicate / choice） | 条件 ≤ 500 字符（+ choice 的选项 ≤ 8 × 120 字符）→ 记录正文 ≤ 2 KB → 线程摘要：最近 3 轮 × ≤ 300 字符（发信人显示名 + 文本） | **1 500/记录** | use+记录 id+规则 hash | **不批**（wake 路）；同一记录多条规则 ⇒ 一次调用多题 | 同上；其它账号的记录 |
 | ③ 路由（② 的 choice 形） | 条件 → 组/agent 名与描述 ≤ 8 × 200 字符 + `none` → 记录正文 ≤ 2 KB → 线程摘要 3 轮 | **1 800/记录** | use+记录 id+规则 hash+组表 hash | 不批 | 同上 |
-| ④ For-you 分组（后做，score） | 紧急度级别表 → 条目 text ≤ 400 + detail ≤ 800 字符 + 会话名 | **600/条** | use+条目 id+级别表 v | **≤ 10 条/次**（不在 wake 路） | 条目的 artifacts、回复文本 |
+| ④ For-you 分组（**做**，score；as built：一次一条、一轮 ≤ 10 次调用） | 紧急度级别表 → 条目 text ≤ 400 + detail ≤ 800 字符 + 会话名 | **600/条** | use+条目 id+级别表 v | **1 条/次、≤ 10 次/轮**（不在 wake 路；探针的批法教训） | 条目的 artifacts、回复文本、action / card、其它条目 |
 | ⑤ webhook 事实（后做） | 规则条件 → 原始载荷 ≤ 4 KB（JSON 只留键与 ≤ 200 字符的字符串值）+ 路径声明的字段 | **1 600/记录** | use+记录 id+规则 hash | 不批 | 签名头、token 字段（按键名 `*token*|*secret*|*key*|authorization` 抹掉）|
 | ⑥ 页面判定（**不做**，计划留档） | 规则 → URL 主机 + 标题 + 可见文本 ≤ 2 KB head+tail | 900/页 | use+URL+文本 hash | 不批 | 表单值、cookie、截图、URL 查询串 |
 
@@ -184,3 +185,12 @@ owner 2026-10-12 提出；设计台（Fable）2026-10-12，**修订 r1**（同�
 - **估算与费用行**：`estimate` 对带 decision 规则的过滤器多给 `decision: {rules, judgedPerDay, hitsUnknown}`；`decisionCost` = 每天要判的记录（受每小时上限）× D1 `inputPlan(use).ceiling` × 价格，对比插件日预算（命中率「跑起来才知道」）。
 - **编辑器 / CLI**：Notify… 的规则行（条件框、是否 / 其中一项、选项 + 路由到有访问权的组或 agent、阈值滑块、每小时、费用行；插件关 / 没钥匙 / 开关关在行内说明并给「打开插件」，从不置灰）；`vibespace-channels watch … --kind decision --condition "…" [--choice a,b] [--threshold 0.7] [--per-hour 20]`（服务器端解析，src/channel-watch-spec.js）。
 - 门：test-channel-filter ⑲（真值表 + 拒绝 + 阈值控制）、test-channel-watch-spec、test-channel-agent-watch ⑩、test-decision-model ⑫、test-record-clear-census（`decisionTail` 的门）、新 test-decision-rule（重：假提供方 + 真 channels 引擎 + D1 引擎；Chrome 规则行 desk/phone）。
+
+### ④ as built（lane inbox-decision-group，rides .264）——For-you 托盘的两段
+- **用途名 `inbox`**（D1 的占位 `foryou` 改名；`FEATURES` 加 `inbox`，`FEATURE_OF.inbox = 'inbox'` = 自己的开关，默认关，在插件卡上是第 4 个开关「For-you 托盘：把需要我现在处理的排到前面」+ 例句行）。计划 `PLANS.inbox`：固定 = 级别表 v1（≤ 600 字符，ceiling 200）、每条 = text ≤ 400 + detail ≤ 800 + 会话名 ≤ 200（ceiling 400）⇒ 600/条；**batch 1**（设计的「10 条/次」改为一次一条——D1 探针：批法改变判定），`perPass 10`；备忘键 = use + 条目 id + 级别表 v。
+- **PURE**（src/decision-model.js）：`INBOX`（v1 两级 later → now，我们的词）、`INBOX_QUESTION`（一题 score）、`inboxEligible(item, now)`（open · urgency normal（缺省 = normal）· 无 options · 无 action 按钮 · 无 reply · 已 ≥ 1 分钟 · 本表版本没判过；notice 不判——它们在自己的「通知」段）、`inboxScoreInput(item)`（**只**取 text / detail / sessionName——构造即排除 artifacts、reply、action、card、其它条目）、`inboxVerdict(answer)` → `{group, p}`（p = now 的概率，≥ 0.5 ⇒ now）。
+- **ORCH**（src/server/decision-engine.js）：`attachInbox(store)`（mounts-plugins-wiring 一行）= 60 s 的 tick：开关变了 ⇒ 店里广播一次；每 5 分钟一轮 `inboxPass` ≤ 10 条，每条一次 `judge('inbox', …)`——同一份备忘、reserve / settle、journal（use = inbox）；被拒（预算、退避、没钥匙…）⇒ 本轮停。**不在任何 wake 路**（tick 是引擎自己的；test-decision-inbox ③ 普查）。
+- **结果在条目旁**：`store.setJudged(id, {group, p, at, v})` 只写 `judged`；**urgency 从不改写**（RED 控制：一个把判定写进 urgency 的店 ⇒ 红）。快照只在开关开着时带 `grouping: {on, today, v}`（today = 当天 inbox 用途的付费调用数）；关 ⇒ 快照与今天逐字节一致。
+- **托盘**（src/lib/user-todos-panel.js + PURE `inboxSections` / `inboxSectionOf` / `inboxChip`）：开 ⇒「现在要你」（urgent / high 按它自己的 urgency + 判为 now 的）与「可以等」（其余）两段，各段内仍按会话分组（一个会话可同时出现在两段），段头「由 Decision API 分组 · 今天判断了 N 条」；被判过的行 meta 上有芯片「现在 / 可等」，title = 我们的条款词 + p；一行的段在本次打开内固定（滑位法）；「可以等」里的组的「全部已读」与折叠以 `later|<key>` 分开记。关 ⇒ 弹窗 DOM 与 fa4ffd88b 逐节点一致（PNG 车道的 off 证明 + 控制）。手机 = 同一个弹窗。
+- **与设计的出入**：一次一条（不是 10 条一批）；notice 与带按钮（action）的条目不判；「在托盘读时也跑一轮」没做（tick 已足够：条目 ≥ 1 分钟才合格，最迟 ~6 分钟分好组）；与 lane plugin-settings-p0 的接缝：那条车道把 attention / rules / routing 搬进 settings-schema 行，`inbox` 需要同样一行 + 迁移名单里加 `inbox`（集成者）。
+

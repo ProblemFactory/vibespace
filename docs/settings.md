@@ -302,8 +302,15 @@ A linked Lark or Gmail account is an aggregated IM (2026-09-26, docs/design-comm
 | `channels.offHoursTz` | string | `''` | **Outbox: working-hours time zone (empty = the off-hours guard is off)** — An IANA zone such as Asia/Shanghai or America/Los_Angeles. Outside working hours every proposal goes to review. Leave empty and nothing is guessed: a wrong zone would silently send everything (or nothing) to review. |
 | `channels.offHoursStart` | string | `09:00` | **Outbox: working hours start (HH:MM)** — Only used when the time zone above is set. Mon–Fri. |
 | `channels.offHoursEnd` | string | `18:00` | **Outbox: working hours end (HH:MM)** — Only used when the time zone above is set. |
-| `decision.attentionBlock` | text | `''` | **What matters to me (Decision API)** — With the Decision API plugin on, the Channels first screen also lists conversations the judge thinks need you now. Say in your own words what matters to you (at most 1,500 characters) — it goes to the judge as written. "Draft from my recent decisions" proposes lines from your ✓ / ✗ answers for you to edit; nothing is saved until you save it. |
-| `decision.threshold` | number | `0.7` | **Needs-attention threshold (Decision API)** — How sure the judge must be (0.50–0.90) before a conversation joins the first screen. Higher = fewer, surer rows. |
+| `channels.attention.preset` | enum | `both` | **How "needs attention" is decided** — A shortcut that sets the switches below. Change any switch and this shows the mix you have. |
+| `channels.attention.rule.direct` | boolean | `true` | **Someone wrote to me directly and I have not read it** — A one-to-one chat with unread messages from the last 24 hours (an app or bot never counts). |
+| `channels.attention.rule.awaiting` | boolean | `true` | **A message waiting for my approval to send** — A draft or a reply sitting in the Outbox until you approve it. |
+| `channels.attention.rule.assigned` | boolean | `true` | **Handed to an agent or a group, and it acted on it** — A conversation you handed over; a whole-account or pattern hand-over lists it once the agent was woken for it in the last 24 hours. |
+| `channels.attention.rule.read` | boolean | `true` | **An agent read it (or new messages came after it read)** — An agent read the conversation in the last 24 hours. |
+| `channels.attention.rule.held` | boolean | `true` | **A wake held for me** — An agent was not woken for new messages here (refused, or no lane to reach it) in the last 7 days. |
+| `channels.attention.rule.unknown` | boolean | `true` | **A send whose delivery is unknown** — A message went out but the service never said whether it arrived. |
+| `channels.attention.rule.replied` | boolean | `true` | **I replied in the last 24 hours** — A conversation where your own message is from the last 24 hours. |
+| `channels.attention.judge` | boolean | `false` | **Let the judge pick what needs me (Decision API)** — The Decision API plugin's own switch, shown here too. It judges the rows no switch above lists; with the plugin turned off nothing is judged. |
 | `channels.senderHonestyLine` | boolean | `false` | **Outbox: append a "drafted by &lt;agent>" line to messages an agent drafted** — OFF (recommended): a message goes out exactly as you approved it. ON: an agent-drafted message ends with one line naming the drafting agent. Your own drafts never get one. Each channel can override this in the Channels panel. Either way the approval card and the receipt say who the recipient will see. |
 | `channels.budgetLarkPerMin` | number | `60` | **Lark: requests per minute per account** — Lark allows 1000 requests a minute per API for the whole app across every instance and user that shares it. When an account reaches this budget its refreshes wait for the next minute, and the account card says so. |
 | `channels.larkRequestsPerSec` | number | `5` | **Lark: requests per second per account** — Requests are spread evenly: at most this many a second, and never faster than the per-minute budget above allows. Lark allows 50 a second per API for the whole app across every instance and user that shares it. |
@@ -425,6 +432,50 @@ now fails the build if a category ever goes unlisted again.
 | `desktop.agentWindowsFront` | boolean | `false` | **Agent-opened windows come to the front** — OFF (the default): a window an agent opens — its own browser, an app it starts, a second window of that app, its live view — is placed beside the agent's chat (or on that chat's desktop), behind what you are doing, and its taskbar entry pulses; it never takes your focus or switches your desktop. ON: it comes to the front and takes the focus, as before. |
 | `desktop.backendPrefs` | string | `''` | **Desktop app display backend order** — Comma-separated rung ids that reorder the picture-backend ladder for NEW desktop apps on this instance, e.g. "vnc-display, xpra" to keep the whole-display rung first. Empty = installed order (xpra > vnc-display > desktop-singleton). Unknown ids are ignored; a running app keeps the backend it started with. |
 | `window.realDesktopTargets` | boolean | `false` | **⚠ Let agents address windows on your real desktop (tier 3)** — OFF (default): an agent may act only in windows VibeSpace started on its own private displays; your own desktop is never listed. ON: every application on this machine’s accessibility bus becomes a window target an agent can read (its accessibility tree contains the text on your screen) and act in through the actions a node itself declares — including the window you are typing in. Nothing is ever injected on this class (no chords, no point clicks); every such row is marked “your desktop”; you can pause an agent per window (Desktop apps → Agents on your real desktop); turning this OFF drops every such lease at once. |
+<!-- /settings-table -->
+
+### Plugin: Decision API
+
+<!-- settings-table: Plugin: Decision API -->
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `plugin.decision-api.attention` | boolean | `false` | **Channels home: pick out the messages that need me** — Example: a colleague asks “Can you get back to me today?” — it gets marked “needs you · asks you” and moves to the top of Channels home; tap ✓ / ✗ to teach it. |
+| `plugin.decision-api.rules` | boolean | `false` | **Notification rules can use a sentence as the condition** — Example: the rule “Notify me when someone chases me for a payment” — the model checks whether each message fits. Set it up in Notify… by adding a rule. |
+| `plugin.decision-api.routing` | boolean | `false` | **Hand messages to a task group or agent by what they say** — Example: “expense claims go to the Finance task group, server alerts go to the ops agent”. Set it up in a rule's “One of a list” option. |
+| `plugin.decision-api.inbox` | boolean | `false` | **For-you tray: put what needs me now first** — E.g. an agent asking you "which expense process?" goes to the top; a "task finished" notice goes further down. |
+| `plugin.decision-api.dailyBudgetUsd` | number | `1` | **Spend at most per day (USD)** — Once a day's calls have cost this much, nothing more is sent to the model until midnight. The Plugins list shows today's count on the Decision API row. |
+| `decision.threshold` | number | `0.7` | **Needs-attention threshold (Decision API)** — How sure the judge must be (0.50–0.90) before a conversation joins the first screen. Higher = fewer, surer rows. |
+| `decision.attentionBlock` | text | `''` | **What matters to me (Decision API)** — With the Decision API plugin on, the Channels first screen also lists conversations the judge thinks need you now. Say in your own words what matters to you (at most 1,500 characters) — it goes to the judge as written. "Draft from my recent decisions" proposes lines from your ✓ / ✗ answers for you to edit; nothing is saved until you save it. |
+<!-- /settings-table -->
+
+### Plugin: Voice input · Dropline
+
+<!-- settings-table: Plugin: Voice input · Dropline -->
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `plugin.voice-input.language` | enum | `auto` | **Dictation language** — The language Dropline listens for when you click the microphone in the chat box. “Any language” lets it decide per recording. |
+| `plugin.voice-input.teach` | boolean | `false` | **Suggest words for my Dropline dictionary (I confirm each batch)** — Example: you keep saying “LarkClient” — it is proposed for your dictionary; the Voice row in the Plugins list shows “{n} waiting” until you add or ignore the batch. Only what you confirm is sent. |
+| `plugin.voice-input.context` | boolean | `false` | **Send the conversation to Dropline's two-week memory (shows the text the first time)** — Dropline then knows the names and terms of the conversation you dictate into. The first time, the exact text is shown before anything is sent. |
+| `plugin.voice-input.autoProjects` | json | `[]` | **Projects whose file names go without asking** — Folders (absolute paths) whose file names and identifiers are proposed to Dropline without asking — at most 50 an hour, journaled. A proposal card adds its project here with one tick. |
+<!-- /settings-table -->
+
+### Plugin: Public URLs (frp)
+
+<!-- settings-table: Plugin: Public URLs (frp) -->
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `plugin.frp.serverAddr` | string | `''` | **Relay address** — The frps host public URLs go through. Empty = the cluster's (VIBESPACE_FRPS_ADDR). A change restarts the relay if it is running. |
+| `plugin.frp.serverPort` | number | `0` | **Relay port** — 0 = the cluster's port (VIBESPACE_FRPS_PORT, else 7000). |
+| `plugin.frp.subDomainHost` | string | `''` | **Subdomain host (optional)** — example.com → https://&lt;random>.example.com |
+<!-- /settings-table -->
+
+### Plugin: Tailscale
+
+<!-- settings-table: Plugin: Tailscale -->
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `plugin.tailscale.mode` | enum | `auto` | **Networking** — Auto uses the kernel tunnel when /dev/net/tun is usable, else userspace (reach tailnet hosts through SOCKS5). A change reconnects a running Tailscale; the login persists. |
+| `plugin.tailscale.upFlags` | string | `''` | **tailscale up flags** — Extra `tailscale up` flags — applied on the next Log in / mode change. Reachability flags we manage (--socket/--tun/--accept-routes/proxy) are ignored. |
 <!-- /settings-table -->
 
 <!-- settings-reference:end -->

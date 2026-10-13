@@ -1405,6 +1405,12 @@ body.wm-dragging .window iframe, body.wm-dragging .window canvas, body.wm-draggi
 .ut-detail-exp[open] > summary::before { content: '▾ '; content: '▾ ' / ""; }
 .ut-detail-exp > summary:hover { color: var(--accent); }
 .ut-meta { font-size: 9px; color: var(--text-dim); margin-top: 2px; }
+/* lane inbox-decision-group: the Decision API's tray sections (+ 待判断, inbox-verify F4) + a judged row's chip (+ the switch's example line) */
+.plugin-cfg-example { flex-basis: 100%; font-size: 11px; color: var(--text-dim); margin: 2px 0 0 22px; }
+.ut-sec-head { font-size: 11px; font-weight: 600; color: var(--text); margin: 8px 0 2px; display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px; }
+.ut-sec-pending, .ut-sec-later { color: var(--text-dim); border-top: 1px solid var(--border); padding-top: 6px; }
+.ut-judged { display: inline-block; padding: 0 5px; border: 1px solid var(--border); border-radius: 8px; font-size: 9px; line-height: 13px; }
+.ut-judged[data-group="now"] { border-color: var(--accent); color: var(--accent); }
 .ut-actions { float: right; margin: 0 0 2px 8px; display: flex; gap: 2px; align-items: flex-start; opacity: 0.35; } /* floated inside .ut-body: the words wrap beside the buttons, then use the full width (2.369.175) */
 .ut-item:hover .ut-actions { opacity: 1; }
 .ut-act {
@@ -1746,6 +1752,20 @@ body.wm-dragging .window iframe, body.wm-dragging .window canvas, body.wm-draggi
 .settings-https-copy:hover, .settings-https-recheck:hover { border-color: var(--border-active); }
 .settings-https-recheck:disabled { opacity: 0.6; cursor: default; }
 .settings-https-probe { flex: 1 1 100%; font-size: 11px; color: var(--text-secondary); opacity: 0.85; overflow-wrap: anywhere; } /* lane tls-pass-retry: the last failed tailscale call */
+/* lane attention-policy: a block of rows under its own head (the Settings window and the Channels ⚙ door draw the same one) */
+.settings-block { display: block; }
+.settings-radio-group { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+/* out-ranks `.dialog-body label` (a column flex): the phone sheet is a dialog */
+.dialog-body label.settings-radio, .settings-radio { display: inline-flex; flex-direction: row; align-items: center; gap: 4px; margin: 0; cursor: pointer; white-space: nowrap; }
+.settings-radio input[type=radio] { width: auto; min-width: 0; margin: 0; flex: none; }
+.settings-slider { display: inline-flex; align-items: center; gap: 6px; }
+.settings-input-range { width: 120px; }
+.settings-slider-value { font-size: 12px; font-variant-numeric: tabular-nums; min-width: 2.6em; }
+.chan-attn-door { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; margin: 0; }
+.chan-attn-door-glyph { font-size: 13px; line-height: 1; }
+.chan-attn-pop { width: min(440px, calc(100vw - 16px)); max-height: min(70vh, 640px); overflow: auto; padding: 4px 12px 10px; background: var(--bg-dialog); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35); }
+.chan-attn-pop .settings-row-path, .chan-attn-sheet .settings-row-path { display: none; }
+.chan-attn-more { margin-top: 8px; }
 .settings-row-fact { margin-top: 5px; padding: 3px 8px; border-left: 2px solid var(--border); font-size: 11px; line-height: 1.4; color: var(--text-secondary); } /* lane headless-fallback: this machine's display beside the headed preference */
 .settings-cli-dim { color: var(--text-dim); }
 .settings-link-btn { margin-top: 4px; background: none; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--accent); font-size: 11px; padding: 2px 8px; cursor: pointer; }
@@ -4215,12 +4235,42 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
 .plugin-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-dim); flex-shrink: 0; }
 .plugin-dot.ok { background: var(--green, #3fb950); }
 .plugin-dot.warn { background: var(--yellow, #e5c07b); }
-.plugin-desc { font-size: 11px; color: var(--text-secondary); }
 .plugin-detail { font-size: 10px; color: var(--text-dim); }
 .plugin-detail code { color: var(--text-secondary); }
 .plugin-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.plugin-boot { font-size: 10px; color: var(--text-secondary); display: inline-flex; align-items: center; gap: 4px; margin-left: auto; cursor: pointer; }
 .plugin-auth-url { display: flex; align-items: center; gap: 6px; font-size: 11px; overflow-wrap: anywhere; padding: 6px 8px; background: color-mix(in srgb, var(--accent) 8%, transparent); border-radius: var(--radius-sm); }
+
+/* ── The Plugins LIST (lane plugin-settings-p0, the VS Code plugin model): one row per plugin — dot · name +
+   description · status chip · switch · [install] · ⚙; configuration lives in All Settings ── */
+.plugin-list { display: flex; flex-direction: column; gap: 2px; margin-bottom: 10px; }
+.plugin-row { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto auto; grid-template-areas: "dot main sw gear" ". chip inst inst"; align-items: center; column-gap: 8px; row-gap: 4px; padding: 8px; border-radius: var(--radius); border: 1px solid transparent; }
+.plugin-row:hover { background: var(--bg-hover, color-mix(in srgb, var(--text) 5%, transparent)); }
+.plugin-row > .plugin-dot { grid-area: dot; }
+.plugin-row-main { grid-area: main; min-width: 0; }
+.plugin-row-name { font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
+.plugin-row-desc { font-size: 10px; color: var(--text-secondary); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.plugin-row > .plugin-sw { grid-area: sw; }
+.plugin-row > .plugin-gear { grid-area: gear; }
+.plugin-row > .plugin-chip { grid-area: chip; justify-self: start; }
+.plugin-row > .plugin-install { grid-area: inst; justify-self: end; }
+.plugin-manifests-head { flex-wrap: wrap; }
+.plugin-chip { max-width: 100%; font-size: 10px; padding: 1px 7px; border-radius: 999px; border: none; color: var(--text-secondary); background: color-mix(in srgb, var(--text-secondary) 12%, transparent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: inherit; }
+button.plugin-chip { cursor: pointer; }
+button.plugin-chip:hover { background: color-mix(in srgb, var(--text-secondary) 22%, transparent); }
+.plugin-chip-ok { color: var(--green, #3fb950); background: color-mix(in srgb, var(--green, #3fb950) 14%, transparent); }
+.plugin-chip-warn { color: var(--warn-text, #e5c07b); background: color-mix(in srgb, var(--yellow, #e5c07b) 16%, transparent); }
+.plugin-chip-err { color: var(--red, #e55); background: color-mix(in srgb, var(--red, #e55) 14%, transparent); }
+.plugin-sw { position: relative; display: inline-flex; flex-shrink: 0; width: 36px; height: 24px; align-items: center; cursor: pointer; }
+.plugin-sw input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; }
+.plugin-sw-track { width: 30px; height: 16px; margin: 0 auto; border-radius: 999px; background: color-mix(in srgb, var(--text-secondary) 35%, transparent); position: relative; transition: background .15s; pointer-events: none; }
+.plugin-sw-track::after { content: ''; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: #fff; transition: transform .15s; }
+.plugin-sw input:checked + .plugin-sw-track { background: var(--accent); }
+.plugin-sw input:checked + .plugin-sw-track::after { transform: translateX(14px); }
+.plugin-sw input:disabled + .plugin-sw-track { opacity: .45; }
+.plugin-sw input:focus-visible + .plugin-sw-track { outline: 2px solid var(--accent); outline-offset: 2px; }
+.plugin-gear { min-width: 28px; padding: 2px 6px; }
+@media (pointer: coarse) { .plugin-sw { width: 44px; height: 36px; } .plugin-gear { min-width: 36px; min-height: 36px; } }
+.settings-link-row .settings-row-control { display: flex; gap: 6px; align-items: center; }
 
 /* ── Plugin config rows (2.141.2: tailscale mode + up-flags) ── */
 .plugin-config { display: flex; flex-direction: column; gap: 6px; margin-top: 2px; }
@@ -5134,6 +5184,7 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
    the word cannot share the line (the 260px default sidebar = 172px of bar) */
 @container chan-panel (max-width: 200px) {
   .chan-outbox-label { display: none; }
+  .chan-attn-door-label { display: none; }   /* lane attention-policy: the ⚙ alone at the rail */
   /* channel-polish: at the default rail the account's NAME was cut to "Lark / …" by the chips beside it — the
      client chip (its words are in Edit and in the tooltip) and the count (the health line says it) step aside */
   .chan-sec-head .chan-sec-name { min-width: min(3em, 22%); }
@@ -6242,6 +6293,7 @@ label.chan-cap-row { cursor: default; }
 /* §26 (B-099e): the channel witness's rows on a tool card — one per conversation the call read or drafted */
 .chat-channel-touches { margin: 4px 0 2px; display: flex; flex-direction: column; gap: 2px; }
 .chat-channel-touches[hidden] { display: none; }
+.chat-vendor-bypass { margin: 4px 0 2px; font-size: 11px; line-height: 1.4; }
 /* B-2198 THE RAW-API CARD (chat · Outbox · For you · API access…) + the API access dialog — lane channel-api-chrome: drawn
    for the first time in a browser; every request string wraps (a long path / body never runs off a 390 px screen) */
 .chat-api-cards { display: flex; flex-direction: column; gap: 6px; margin: 4px 0; min-width: 0; }

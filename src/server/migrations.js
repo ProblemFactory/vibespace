@@ -44,7 +44,7 @@ const RUNAWAY_VOID_TEXT = 'stopped by the old resource guard (a per-process RSS 
 // pool reshape goes THROUGH it (`migrateManualPools`) — a file written beside it
 // would be overwritten by its next save. Without one the migration FAILS (and is
 // retried next boot) rather than writing beside a store it cannot see.
-function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null, userTodos = null, desktopKeeper = null, browserKeeper = null, hosts = null, accounts = null }) {
+function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null, userTodos = null, desktopKeeper = null, browserKeeper = null, hosts = null, accounts = null, plugins = null }) {
   const dataDir = path.join(rootDir, 'data');
   const archiveDir = path.join(dataDir, 'archive');
 
@@ -638,6 +638,17 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
             serverNotice?.('codex-fork-replays-archived', `Usage bookkeeping repaired: ${rep.archived} Codex ledger row(s) counted a request twice (a forked conversation replays its parent's usage records) and were archived to data/archive/ with a reason each. The Usage window and the quota estimator re-derive from the cleaned ledger.`, { level: 'info' });
           } catch { }
         }
+        return rep;
+      },
+    },
+    {
+      id: '2026-10-plugin-config-to-settings',
+      note: "the VS Code plugin model (lane plugin-settings-p0, docs/design-plugin-settings.zh.md): a built-in plugin's configuration rows live in data/settings.json (src/plugin-settings.js tables) — each value data/plugins.json held (the Decision API switches + budget, the Voice language + teach switches, the frp relay fields, the Tailscale up flags) moves there once unless settings already holds one, and leaves plugins.json; decision-api's config.threshold (read by nobody — decision.threshold is the one truth) is dropped. Goes THROUGH the live PluginManager (it holds plugins.json in memory).",
+      run() {
+        const pm = typeof plugins === 'function' ? plugins() : plugins;
+        if (!pm || typeof pm.migrateConfigToSettings !== 'function') return { skipped: 'no plugin manager' };
+        const rep = pm.migrateConfigToSettings();
+        console.log('[migrate] plugin-config-to-settings:', JSON.stringify(rep));
         return rep;
       },
     },

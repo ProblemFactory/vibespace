@@ -925,8 +925,9 @@ if (tracked.length) {
   const dv = store.publicView('decision-api');
   ok(dv.setup && dv.setup.title === 'How to use it' && dv.setup.ordered === true && dv.setup.prerequisites.length === 3 && /Test connection/.test(dv.setup.prerequisites[1]) && dv.choiceWords && dv.choiceWords.cluster === 'Use the key the cluster set up' && dv.choiceWords.own === 'Use a key of my own', 'decision-api: the view carries its own title, three ordered steps (the second names the Test button) and its radios\' words', JSON.stringify([dv.setup, dv.choiceWords]));
   ok(R.ROWS.every((r) => r.id === 'decision-api' || (!(r.setup && (r.setup.title || r.setup.ordered)) && !r.choiceWords)) && store.publicView('cloak').choiceWords === null && store.publicView('cloak').setup === null, 'every other row keeps the shared words (no title / ordered / choiceWords; the view says null)');
-  const featSrc = (readRepo('src/lib/plugins-ui.js').match(/const decisionFeatures = \(\) => \[([\s\S]*?)\n\];/) || [])[1] || '';
-  const feats = [...featSrc.matchAll(/t\('((?:[^'\\]|\\.)*)'/g)].map((m) => m[1]).filter((s) => !/^(needs you|asks you|Notify)/.test(s));
+  // lane plugin-settings-p0: the three switches are settings rows now (src/plugin-settings.js decision-api) — label + example hint
+  const featRows = require(path.join(REPO, 'src/plugin-settings.js')).PLUGIN_SETTINGS['decision-api'].rows.filter((r) => ['attention', 'rules', 'routing'].includes(r.key));
+  const feats = featRows.flatMap((r) => [r.label, Array.isArray(r.description) ? r.description[0] : r.description]);
   ok(feats.length === 6 && feats.filter((s) => /^Example: /.test(s)).length === 3, `the three switches each carry ONE example hint (${feats.length} strings)`);
   const shown = [dv.setup.title, ...dv.setup.prerequisites, dv.choiceWords.cluster, dv.choiceWords.own, dv.testDescribe, dv.testCaveat, dv.usedBy, require(path.join(REPO, 'src/plugins/decision-api.js')).description, ...feats];
   ok(shown.every((s) => typeof s === 'string' && s && !ENGINE.test(s)), `no engine word on the card (${shown.length} strings)`, shown.filter((s) => ENGINE.test(s)).join(' | '));

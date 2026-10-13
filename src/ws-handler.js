@@ -1576,6 +1576,12 @@ function registerWsHandler(wss, ctx) {
               break;
             }
           }
+          // THE WRITER'S VIEWPORT (§6b guard 10): the sync's own stamp — 'phone' | 'desktop' — is stored on the record and
+          // rebroadcast; a desktop applies a phone's record as membership only. A stamp a record carries INSIDE its state is a
+          // held copy's, never this writer's: replaced by the sync's (an unstamped write = an old sender = a desktop's, as before)
+          const viewport = data.viewport === 'phone' || data.viewport === 'desktop' ? data.viewport : null;
+          if (data.state && typeof data.state === 'object') { delete data.state.viewport; if (viewport) data.state.viewport = viewport; }
+          delete layoutData.autoSaveMobile; // the retired phone slot (guard 10) — never read; this write drops it
           if (desktopId) {
             // Per-desktop save
             if (!layoutData.desktops) layoutData.desktops = {};
@@ -1588,7 +1594,7 @@ function registerWsHandler(wss, ctx) {
           }
           writeLayouts(layoutData);
           // Broadcast to other clients (sender excluded) — include desktopMeta
-          const syncMsg = JSON.stringify({ type: 'layout-sync', seq: ++layoutSyncSeqRef.value, desktopId, state: data.state, desktopMeta: layoutData.desktopMeta || [] });
+          const syncMsg = JSON.stringify({ type: 'layout-sync', seq: ++layoutSyncSeqRef.value, desktopId, state: data.state, desktopMeta: layoutData.desktopMeta || [], ...(viewport ? { viewport } : {}) });
           wss.clients.forEach(client => {
             if (client !== ws && client.readyState === WS_OPEN) { try { client.send(syncMsg); } catch {} }
           });

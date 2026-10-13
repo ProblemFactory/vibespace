@@ -485,6 +485,7 @@ function create(deps = {}) {
   // lane decision-attention (D2): the first screen's JUDGED rows — the scan, the examples, the draft; a verdict is patched
   // in by one partial broadcast of its row. The body it reads = the conversation's newest records (the store's tail).
   const attention = require('./channels-attention.js').create({ dataDir, decision: decisionEngine, serverSetting, now, log, notify: (keys) => notify(keys),
+    policy: () => FO.attentionPolicy((k) => serverSetting(k)),   // lane attention-policy: the owner's switches (the judge sees what they let go)
     viewNow: (key) => { const en = store.index.live()[key]; const rec = en && !en.unlistedAt && adapterRecords().adapters.find((r) => r.id === en.adapterId); return rec ? rowView(rec, en) : null; },
     accountNever: (id) => { const r = adapterRecords().adapters.find((x) => x.id === id); return !!(r && r.judge === 'never'); },
     tailOf: (v) => attentionTail(v) });

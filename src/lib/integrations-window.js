@@ -349,18 +349,6 @@ function renderCard(app, v, { refresh, focus }) {
 }
 
 /** Open (or focus) THE window; `focus` scrolls to and highlights one card. */
-/** ONE registry row's card mounted inside another surface (lane decision-core: the Decision API plugin card) — the
- *  same renderCard over the same routes, so a plugin never draws a second key box. */
-export async function mountIntegrationCard(app, host, id) {
-  const draw = async () => {
-    const r = await fetchJson(`/api/integrations/${encodeURIComponent(id)}`);
-    host.textContent = '';
-    if (!r || !r.integration) { host.appendChild(el('div', 'plugin-detail plugin-cfg-warn', storeErrorText(r) || t('Could not load the provider card — the server did not answer.'))); return; }
-    host.appendChild(renderCard(app, r.integration, { refresh: () => draw(), focus: null }));
-  };
-  await draw();
-}
-
 export function openIntegrationsWindow(app, opts = {}) {
   const focus = opts.focus || null;
   for (const [, w] of app.wm.windows) {

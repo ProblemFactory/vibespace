@@ -18,7 +18,11 @@
 import { t } from './i18n.js';
 import { HARNESS_SETTINGS, settingPath, checkTable, rowsOfKind } from '../harness-settings.js'; // PURE (CJS): the descriptor-declared per-harness tables — the Claude/Codex/OpenCode sections are DERIVED from them (docs/design-harness-settings.zh.md §4)
 import { whenClauses } from './settings-view.js'; // PURE: the tier / when rules (WHEN_KINDS) — re-exported below
-import { CHANNEL_SETTINGS, settingPath as channelSettingPath } from '../channel-settings.js'; // PURE (CJS): the per-vendor channel rows — the Channels "Per vendor" block is DERIVED from them (B-df40 part 3)
+import { CHANNEL_SETTINGS, settingPath as channelSettingPath } from '../channel-settings.js';
+import { PLUGIN_SETTINGS, checkPluginRows, manifestRows, rowPath as pluginRowPath, linksOf as pluginLinksOf } from '../plugin-settings.js'; // PURE (CJS): one table per built-in plugin — the 「插件 › <名>」 sections are DERIVED from it (docs/design-plugin-settings.zh.md); manifest rows share its validator // PURE (CJS): the per-vendor channel rows — the Channels "Per vendor" block is DERIVED from them (B-df40 part 3)
+
+// lane attention-policy: the 「需关注 · 怎么判断」 block's shared fields (its rows, its head, the Settings search's words)
+const ATTENTION_BLOCK = Object.freeze({ block: 'attention', blockTitle: t('Needs attention · how it is decided'), category: t('Channels'), liveApply: true });
 
 const SETTINGS_SCHEMA = {
   // ── Toolbar & Layout ──
@@ -1284,21 +1288,64 @@ const SETTINGS_SCHEMA = {
   //    OFF by default. The message goes out as the user's own words; who the
   //    other side will see is said on the approval card and in the receipt.
   //    Each adapter row can override this default (Channels panel).
-  // lane decision-attention (D2 of docs/design-decision-api.zh.md §2.3 / §2.4): read SERVER-side by the first screen's
-  // judge (src/server/channels-attention.js via serverSetting) — your own words go to the judge as written, never rewritten
-  'decision.attentionBlock': {
-    type: 'text', multiline: true, maxLength: 1500, draft: 'decision', default: '',
-    label: t('What matters to me (Decision API)'),
-    description: t('With the Decision API plugin on, the Channels first screen also lists conversations the judge thinks need you now. Say in your own words what matters to you (at most 1,500 characters) — it goes to the judge as written. "Draft from my recent decisions" proposes lines from your ✓ / ✗ answers for you to edit; nothing is saved until you save it.'),
-    category: t('Channels'), liveApply: true,
+  // lane attention-policy (owner 2026-10-13: "应该允许禁用原来的固定规则，或者直接加个配置选项可以改怎么判断需关注"): WHAT
+  // LANDS ON THE FIRST SCREEN IS THE OWNER'S POLICY (src/channel-focus.js attentionPolicy) — ONE block (`block:
+  // 'attention'`), drawn by the Settings window under its own head AND by the Channels first screen's ⚙ door with the
+  // SAME row renderer (settings-ui renderBlock). Two rows store nothing here: the preset SETS the rule rows + the
+  // judge's switch (`store: 'derived'`), and the judge's row IS the Decision API plugin's `attention` feature (`store:
+  // {plugin, feature}` — read from GET /api/plugins, written through the plugin's own config door; never a second flag).
+  'channels.attention.preset': {
+    type: 'enum', radio: true, store: 'derived', default: 'both', ...ATTENTION_BLOCK,
+    options: [
+      { value: 'both', label: t('Fixed rules + the judge (default)') },
+      { value: 'judge', label: t('Only the judge') },
+      { value: 'rules', label: t('Only the fixed rules') },
+    ],
+    label: t('How "needs attention" is decided'),
+    description: t('A shortcut that sets the switches below. Change any switch and this shows the mix you have.'),
   },
-  'decision.threshold': {
-    type: 'number', default: 0.7, min: 0.5, max: 0.9, step: 0.05,
-    label: t('Needs-attention threshold (Decision API)'),
-    description: t('How sure the judge must be (0.50–0.90) before a conversation joins the first screen. Higher = fewer, surer rows.'),
-    tier: 'advanced',
-    category: t('Channels'), liveApply: true,
+  'channels.attention.rule.direct': {
+    type: 'boolean', default: true, ...ATTENTION_BLOCK,
+    label: t('Someone wrote to me directly and I have not read it'),
+    description: t('A one-to-one chat with unread messages from the last 24 hours (an app or bot never counts).'),
   },
+  'channels.attention.rule.awaiting': {
+    type: 'boolean', default: true, ...ATTENTION_BLOCK,
+    label: t('A message waiting for my approval to send'),
+    description: t('A draft or a reply sitting in the Outbox until you approve it.'),
+  },
+  'channels.attention.rule.assigned': {
+    type: 'boolean', default: true, ...ATTENTION_BLOCK,
+    label: t('Handed to an agent or a group, and it acted on it'),
+    description: t('A conversation you handed over; a whole-account or pattern hand-over lists it once the agent was woken for it in the last 24 hours.'),
+  },
+  'channels.attention.rule.read': {
+    type: 'boolean', default: true, ...ATTENTION_BLOCK,
+    label: t('An agent read it (or new messages came after it read)'),
+    description: t('An agent read the conversation in the last 24 hours.'),
+  },
+  'channels.attention.rule.held': {
+    type: 'boolean', default: true, ...ATTENTION_BLOCK,
+    label: t('A wake held for me'),
+    description: t('An agent was not woken for new messages here (refused, or no lane to reach it) in the last 7 days.'),
+  },
+  'channels.attention.rule.unknown': {
+    type: 'boolean', default: true, ...ATTENTION_BLOCK,
+    label: t('A send whose delivery is unknown'),
+    description: t('A message went out but the service never said whether it arrived.'),
+  },
+  'channels.attention.rule.replied': {
+    type: 'boolean', default: true, ...ATTENTION_BLOCK,
+    label: t('I replied in the last 24 hours'),
+    description: t('A conversation where your own message is from the last 24 hours.'),
+  },
+  'channels.attention.judge': {
+    type: 'boolean', default: false, store: { plugin: 'decision-api', feature: 'attention' }, fact: 'attention-today', ...ATTENTION_BLOCK,
+    label: t('Let the judge pick what needs me (Decision API)'),
+    description: t('The Decision API plugin\'s own switch, shown here too. It judges the rows no switch above lists; with the plugin turned off nothing is judged.'),
+  },
+  // decision.attentionBlock / decision.threshold: DERIVED from src/plugin-settings.js (the decision-api table, `path`
+  // keeps the legacy spelling — zero migration); read SERVER-side by src/server/channels-attention.js via serverSetting
   'channels.senderHonestyLine': {
     type: 'boolean', default: false,
     label: t('Outbox: append a "drafted by <agent>" line to messages an agent drafted'),
@@ -1663,28 +1710,46 @@ const SETTINGS_CATEGORIES = [
 // schema object or the category list directly.
 const PLUGIN_SETTING_OWNERS = new Map(); // pluginId → { category, paths[] }
 export function pluginSettingPath(pluginId, key) { return `plugin.${pluginId}.${key}`; }
-export function registerPluginSettings(pluginId, label, items) {
-  unregisterPluginSettings(pluginId);
+// lane plugin-settings-p0: a row (built-in table or a manifest's normalised contributes.settings[]) → its schema entry
+const tx = (x) => (Array.isArray(x) ? t(x[0], Object.fromEntries(Object.entries(x[1] || {}).map(([k, v]) => [k, tx(v)]))) : t(x));
+function derivePluginRow(pluginId, category, r) {
+  const entry = { label: tx(r.label), description: r.description === undefined ? '' : tx(r.description), category, liveApply: true, plugin: pluginId, type: r.type, default: r.default };
+  if (r.type === 'number') Object.assign(entry, { min: r.min, max: r.max, step: r.step });
+  if (r.options) entry.options = r.options.map((o) => ({ value: o.value, label: tx(o.label) }));
+  for (const k of ['multiline', 'maxLength', 'draft', 'tier']) if (r[k] !== undefined) entry[k] = r[k];
+  if (r.apply !== undefined) entry.pluginApply = r.apply;
+  return entry;
+}
+function derivePluginTable(pluginId, label, rows) {
   const category = t('Plugin: {name}', { name: label || pluginId });
   const paths = [];
-  for (const s of Array.isArray(items) ? items : []) {
-    if (!s || typeof s.key !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/.test(s.key)) continue;
-    const path = pluginSettingPath(pluginId, s.key);
-    const entry = { label: String(s.label || s.key), description: String(s.description || ''), category, liveApply: true, plugin: pluginId };
-    if (s.type === 'boolean') Object.assign(entry, { type: 'boolean', default: !!s.default });
-    else if (s.type === 'number') Object.assign(entry, { type: 'number', default: Number.isFinite(Number(s.default)) ? Number(s.default) : 0, min: s.min, max: s.max, step: s.step });
-    else if (s.type === 'select') Object.assign(entry, { type: 'enum', default: String(s.default ?? ''), options: (Array.isArray(s.options) ? s.options : []).map((o) => (typeof o === 'string' ? { value: o, label: o } : { value: String(o?.value ?? ''), label: String(o?.label ?? o?.value ?? '') })) });
-    else Object.assign(entry, { type: 'string', default: String(s.default ?? '') });
-    SETTINGS_SCHEMA[path] = entry;
-    paths.push(path);
-  }
+  for (const r of rows) { const path = pluginRowPath(pluginId, r); SETTINGS_SCHEMA[path] = derivePluginRow(pluginId, category, r); paths.push(path); }
   if (paths.length && !SETTINGS_CATEGORIES.includes(category)) SETTINGS_CATEGORIES.push(category);
-  PLUGIN_SETTING_OWNERS.set(pluginId, { category, paths });
+  PLUGIN_SETTING_OWNERS.set(pluginId, { category, paths, builtin: Object.prototype.hasOwnProperty.call(PLUGIN_SETTINGS, pluginId) });
   return paths;
+}
+for (const [id, tbl] of Object.entries(PLUGIN_SETTINGS)) derivePluginTable(id, tbl.label, tbl.rows);
+// int263 seam (b): the judge's threshold and "what matters to me" are ONE row each — plugin-settings-p0's 「插件 › Decision API」
+// rows (the threshold keeps tier advanced) — and the 「需关注 · 怎么判断」 block (the Channels ⚙ door) renders the SAME rows: one row, two doors
+for (const p of ['decision.threshold', 'decision.attentionBlock']) SETTINGS_SCHEMA[p].alsoBlock = 'attention';
+/** A built-in plugin's section facts for the Settings window: its id and link rows (null for any other category). */
+export function pluginSectionFor(category) {
+  for (const [id, own] of PLUGIN_SETTING_OWNERS) if (own.builtin && own.category === category) return { id, links: pluginLinksOf(id) };
+  return null;
+}
+/** The category a plugin's rows live under (null when it has none) — the Plugins list's ⚙ opens it. */
+export function pluginCategoryOf(pluginId) { const own = PLUGIN_SETTING_OWNERS.get(pluginId); return own ? own.category : null; }
+/** A MANIFEST plugin's `contributes.settings[]` (an enabled plugin, plugin-client.js): normalised, each row through
+ *  the ONE validator (checkPluginRows — a broken or secret-shaped row is dropped by itself), derived like a built-in. */
+export function registerPluginSettings(pluginId, label, items) {
+  if (Object.prototype.hasOwnProperty.call(PLUGIN_SETTINGS, pluginId)) throw new Error(`plugin '${pluginId}' is built-in; its settings are its table`);
+  unregisterPluginSettings(pluginId);
+  const rows = manifestRows(items).filter((r) => !checkPluginRows([r]).length);
+  return derivePluginTable(pluginId, label, rows);
 }
 export function unregisterPluginSettings(pluginId) {
   const own = PLUGIN_SETTING_OWNERS.get(pluginId);
-  if (!own) return false;
+  if (!own || own.builtin) return false; // a built-in table's rows are permanent (its on-switch is not a setting)
   for (const p of own.paths) delete SETTINGS_SCHEMA[p];
   PLUGIN_SETTING_OWNERS.delete(pluginId);
   if (![...PLUGIN_SETTING_OWNERS.values()].some((o) => o.category === own.category)) {

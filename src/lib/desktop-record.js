@@ -26,6 +26,14 @@
 //     others still loses 3. `recent` = the ids ANOTHER client added to the record lately: an unexplained drop of ONE
 //     of them is refused (verify r1 — the client wrote from a base older than the arrival); named in `arrived`.
 //
+//   captureForViewport({held, built, viewport}) — ARRANGEMENT IS THE VIEWPORT'S, MEMBERSHIP IS THE WORKSPACE'S (lane
+//     phone-arrangement-local, owner 2026-10-13 "不能根治吗"): a phone's switcher tap raised the tapped window's z on the
+//     phone, its save carried that z (and a phone-born window's full-screen box) into the desktop's record and every
+//     desktop restacked. A `phone` client's capture keeps the ARRANGEMENT fields of each window it built exactly as the
+//     held record has them (a window the record does not hold — born on the phone — gets no box: every desktop that
+//     builds it places it by its own default, on top: z = max(held z) + 1, neither maximized nor minimized); everything
+//     else (openSpec, title, chain…) is the page's. A `desktop` client's capture is returned as it is.
+//
 //   desktopChanges(prev, next) — the rollback point's "what changed next" (routes/persistence.js LAYOUT ROLLBACK
 //     POINTS): per desktop whose window set changed, [name, before, after] — "HR 3 → 1".
 'use strict';
@@ -97,6 +105,33 @@ function shrinkVerdict({ prev = [], next = [], evidence = [], alive = () => true
 
 /** Per desktop whose window SET differs between two layouts.json documents: [name, before, after] (a desktop only in
  *  one of them counts 0 on the other side). Names come from `desktopMeta` (next's first, a deleted one from prev's). */
+/** The arrangement fields of a window entry (legacy spellings too) — the desktop viewport's, never a phone's. */
+const ARRANGEMENT = ['zIndex', 'z', 'gridBounds', 'isMaximized', 'isMinimized', 'min', 'isSnapped', 'snap', 'preSnapBounds', 'snapBounds'];
+/** The record's viewport chrome a phone carries from the held record (its sidebar is an overlay; it never sets a grid). */
+const VIEWPORT_CHROME = ['sidebarOpen', 'grid'];
+
+function captureForViewport({ held = null, built = [], viewport = 'desktop' } = {}) {
+  if (viewport !== 'phone') return listOf(built);
+  const heldBy = new Map();
+  let top = 0;
+  for (const w of listOf(held && held.windows)) {
+    const id = idOf(w);
+    if (id && !heldBy.has(id)) heldBy.set(id, w);
+    const z = Number(w && (w.zIndex != null ? w.zIndex : w.z)) || 0;
+    if (z > top) top = z;
+  }
+  return listOf(built).map((w) => {
+    const id = idOf(w);
+    if (!id) return w;
+    const out = {};
+    for (const k of Object.keys(w)) if (!ARRANGEMENT.includes(k)) out[k] = w[k];
+    const h = heldBy.get(id);
+    if (h) { for (const k of ARRANGEMENT) if (k in h) out[k] = h[k]; return out; }
+    out.zIndex = ++top; out.isMaximized = false; out.isMinimized = false;
+    return out;
+  });
+}
+
 function desktopChanges(prev, next) {
   const recs = (d) => { const m = new Map(); for (const [k, v] of Object.entries((d && d.desktops) || {})) m.set(k, windowIds((v && v.autoSave) || null)); return m; };
   const a = recs(prev), b = recs(next);
@@ -116,4 +151,4 @@ function desktopChanges(prev, next) {
   return out;
 }
 
-module.exports = { mergeDesktopRecord, shrinkVerdict, desktopChanges, windowIds, idOf };
+module.exports = { mergeDesktopRecord, shrinkVerdict, desktopChanges, windowIds, idOf, captureForViewport, ARRANGEMENT, VIEWPORT_CHROME };

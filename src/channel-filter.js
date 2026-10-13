@@ -1630,7 +1630,8 @@ function renderScopeDigestBlock({ adapterLabel = 'channel', scopeLabel = '', gro
   if (scopeLabel) lines.push(`you are watching ${safeInline(scopeLabel, 160)}`);
   const ol = othersLine(others);
   if (ol) lines.push(ol.replace('also on this conversation', 'also on these conversations'));
-  const tail = 'Read more: vibespace-channels read <conv>   ·   reply: vibespace-channels reply <conv> "…" (this PROPOSES)';
+  // bypass-witness-hint (owner 2026-10-13): the read door says why it is THE door — an agent's own SDK read leaves no trace
+  const tail = 'Read more: vibespace-channels read <conv> (never your own SDK or script: no card, read marker or budget)   ·   reply: vibespace-channels reply <conv> "…" (this PROPOSES)';
   let out = lines.join('\n');
   let shown = 0;
   for (const g of list) {

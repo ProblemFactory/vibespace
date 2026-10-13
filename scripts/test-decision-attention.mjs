@@ -81,7 +81,7 @@ const settings = { 'decision.attentionBlock': 'Invoices and contracts matter to 
 let plug = { enabled: true, config: { attention: true } };
 function decisionEngine(dataDir) {
   const d = DE.create({ dataDir, integrations: { resolveIntegration: () => ({ values: { provider: 'openai', apiKey: 'sk-dummy-SECRET-123456', model: '' }, source: 'user' }) }, fetchImpl: fakeFetch, now, log: quiet });
-  d.attachPlugin({ peek: () => plug });
+  d.attachPlugin({ peek: () => plug, settings: () => plug.config || {} }); // lane plugin-settings-p0: the engine reads the settings rows
   return d;
 }
 async function engines(name, W, engineMod = ENG, fresh = true) {

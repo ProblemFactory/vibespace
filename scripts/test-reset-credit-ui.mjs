@@ -1589,7 +1589,14 @@ console.log('\n§4e the revived press — two pushes, a SENT press revived, the 
   const eng = read('src/server/usage-pool-engine.js');
   ok('ONE writer: the auto rung and the manual use both call writeResetCredit with the CREDIT\'S identity (the verb is spelled once in the engine; verify r8 T0: only the manual use asks for the read first)', /const wr = writeResetCredit\(session, \{ resetsAtSec: R, lane, origin: 'auto', now, key \}\);/.test(eng) && /const wr = writeResetCredit\(session, \{ resetsAtSec: p\.resetsAtSec \|\| 0, lane: null, origin: 'user', now, key: p\.key, readFirst: !afterRead \}\);/.test(eng) && (eng.match(/type: 'codex-reset-credit', idempotencyKey: idemKey, \.\.\.\(rf \? \{ readFirst: true \} : \{\}\) \}\)/g) || []).length === 1 && (eng.match(/type: 'codex-reset-credit'[,'\s]/g) || []).length === 1);
   ok('the carrier is picked by CAPABILITY (capsOf(s.backend).resetCredit), never a backend id', /capsOf\(s\.backend\)\.resetCredit === true && ids\.has\(liveQuotaKeyFor\(s\)\)/.test(eng) && !/function resetCreditCarriers[\s\S]{0,400}backend === 'codex'/.test(eng));
-  ok('the route is wired where the accounts routes live, and server.js hands the engine both functions', /require\('\.\.\/routes\/reset-credit\.js'\)\.registerResetCreditRoutes\(app, \{ engine \}\);/.test(read('src/server/account-usage-routes.js')) && /engine: \{ clearSealedOrders, resetCreditPreview, consumeResetCreditFor(, claimColdRestarts)?(, \w+)* \}/.test(read('server.js')));
+  // lane mirror-263-reds: ORDER-FREE — the setupUsage engine object (the one that hands clearSealedOrders) must NAME both
+  // functions; oat-verify-fixes slotted establishedWindows in between and the old exact-sequence regex went red on a right wiring
+  const engineKeys = (src) => { const objs = [...src.matchAll(/engine: \{ ([\w, ]+) \}/g)].map((m) => ({ text: m[0], keys: m[1].split(', ') })).filter((o) => o.keys.includes('clearSealedOrders')); return objs.length === 1 ? objs[0] : null; };
+  const handsBoth = (src) => { const o = engineKeys(src); return !!o && o.keys.includes('resetCreditPreview') && o.keys.includes('consumeResetCreditFor'); };
+  const srv = read('server.js'), eo = engineKeys(srv);
+  ok('the route is wired where the accounts routes live, and server.js hands the engine both functions (by name, any order)', /require\('\.\.\/routes\/reset-credit\.js'\)\.registerResetCreditRoutes\(app, \{ engine \}\);/.test(read('src/server/account-usage-routes.js')) && handsBoth(srv), JSON.stringify(eo && eo.keys));
+  const dropped = !eo ? [] : ['resetCreditPreview', 'consumeResetCreditFor'].map((k) => handsBoth(srv.replace(eo.text, eo.text.replace(new RegExp(`\\b${k}, |, ${k}\\b`), ''))));
+  ok('MUTANT: server.js stops handing resetCreditPreview (or consumeResetCreditFor) ⇒ the wiring pin goes RED', eo && dropped.join() === 'false,false', JSON.stringify(dropped));
 }
 
 console.log('\n§4 THE three entry points open ONE dialog');

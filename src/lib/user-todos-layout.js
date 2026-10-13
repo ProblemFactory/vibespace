@@ -41,6 +41,13 @@
  *   noticeFilterFor(filter, notices) — the filter IN FORCE: `filter` while its origin has a notice, else `all`
  *                                    (the panel HOLDS this value — r2: never re-derives a stored choice)
  *   tabCounts(open, history, seenTs) — {inbox:{action, notice, urgency}, history:{unread}}
+ *
+ * lane inbox-decision-group (the Decision API's use ④, its tray switch on — the snapshot carries `grouping`):
+ *   inboxChip(item)                — {group, p} of a JUDGED normal option-less item (its chip), else null
+ *   inboxSectionOf(item)           — 'now' (urgent / high, an item carrying options / buttons, or judged now) |
+ *                                    'pending' (a normal item the judge has not scored yet) | 'later'
+ *   inboxSections(rows, {prev})    — the action rows split into {now, pending, later}; `prev` (id → section, held while
+ *                                    the popup is open) keeps a row in the section it was first drawn in
  */
 import { replyVerdict, REPLY_HIDDEN_CODES } from '../inbox-reply.js';
 import { INBOX_ORIGINS, ORIGIN_LABELS } from '../inbox-origin.js';
@@ -111,6 +118,45 @@ export function restoreDetails(next, fullById) {
   const ids = new Set([...todos.open, ...todos.resolved].map((i) => i && i.id));
   for (const id of [...out.keys()]) if (!ids.has(id)) out.delete(id);
   return { todos, fullById: out };
+}
+
+/** THE TRAY'S TWO SECTIONS (lane inbox-decision-group). The judge only SORTS: an item's urgency is the agent's
+ *  declaration and is never rewritten — urgent / high stand in 「现在要你」 by it alone, and so does every item that
+ *  asks for a decision (option chips / producer buttons — inbox-verify F3: never 'can wait'; the judge never scores
+ *  it); a NORMAL item joins them when the judge put it in `now`, waits in 「可以等」 when it put it in `later`, and
+ *  stands in 「待判断」 until a verdict exists (F4: not judged is not 'can wait'); low / answered items wait. */
+export const INBOX_SECTIONS = Object.freeze(['now', 'pending', 'later']);
+export function inboxChip(item) {
+  const j = item && item.judged;
+  if (!j || (j.group !== 'now' && j.group !== 'later')) return null;
+  if ((item.urgency || 'normal') !== 'normal' || (Array.isArray(item.options) && item.options.length) || item.action) return null;
+  return { group: j.group, p: typeof j.p === 'number' && Number.isFinite(j.p) ? j.p : null };
+}
+export function inboxSectionOf(item) {
+  const u = (item && item.urgency) || 'normal';
+  if (u === 'urgent' || u === 'high') return 'now';
+  if ((Array.isArray(item.options) && item.options.length) || item.action) return 'now';
+  const c = inboxChip(item);
+  if (c) return c.group;
+  return u === 'normal' && !item.reply ? 'pending' : 'later';
+}
+/** rows = renderPanel's action rows [[key, entries, openCount]] in layout order → {now, pending, later, held}: each session
+ *  group appears in the section(s) its rows belong to, the order kept, openCount recounted per section. `prev` is
+ *  the panel's Map (mutated: a row's section is decided once per open — the slot law of this module). */
+export function inboxSections(rows, { prev = null } = {}) {
+  const held = prev instanceof Map ? prev : new Map();
+  const out = { now: [], pending: [], later: [] };
+  for (const [key, entries] of rows || []) {
+    const by = { now: [], pending: [], later: [] };
+    for (const e of entries || []) {
+      const id = e && e.item && e.item.id;
+      const sec = held.get(id) || inboxSectionOf(e && e.item);
+      held.set(id, sec);
+      by[sec].push(e);
+    }
+    for (const s of INBOX_SECTIONS) if (by[s].length) out[s].push([key, by[s], by[s].filter((e) => !e.resolved).length]);
+  }
+  return { now: out.now, pending: out.pending, later: out.later, held };
 }
 
 /** @param {Array<[string, Array<{id:string}>]>} sortedGroups */

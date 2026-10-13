@@ -563,6 +563,15 @@
 - (2026-10-13) A MINTED TOKEN WAS SAVED UNDER WHICHEVER ACCOUNT THE DIALOG WAS OPEN FOR (oat-verify F1) — 不变量 = a credential is written only under the identity it proves (in-process, or the one approved /usage read) or the owner names; a child that signs in gets an allowlist env
 - (2026-10-13) THE JUDGE SAW A RECORD'S SECRETS (inbox-verify F1, shipped in .261) — 不变量 = no vendor-bound text leaves without the ONE secret scrub, applied before any cut; every part-building site is censused
 - (2026-10-13) THE PHONE BAR FOLDED THE IDENTITY CHIP ON THE RUNNER'S FONTS (mirror-262 red, green on the hub) — 不变量 = a chip that names who pays never folds; it goes compact then icon; a fold is measured on the runner's fonts, not the hub's
+- (2026-10-13) THE DICTIONARY CARD OFFERED SEVENTY API FIELD NAMES, ALL TICKED (userW) — 不变量 = a dictation dictionary holds words a person SAYS; a proposal is ranked by that, capped per batch, code identifiers and ids never reach the card
+- (2026-10-13) THE FIRST SCREEN'S RULES WERE FIXED AND THE JUDGE'S DIALS HIDDEN (owner) — 不变量 = what lands on the attention list is the owner's policy: every rule a switch with its meaning, the judge's dials beside them, one store, a door where the list is
+- (2026-10-13) AN AGENT READ LARK WITH ITS OWN SCRIPT AND THE CHAT SHOWED A BARE BASH CARD (owner) — 不变量 = what the product did not witness it says it did not: a direct vendor read is named on its card, with the door that would have witnessed it
+- (2026-10-13) A PHONE'S WINDOW SWITCH RESTACKED EVERY DESKTOP (owner: 不能根治吗) — 不变量 = arrangement is the viewport's, membership the workspace's: a phone never writes z/bounds/maximize/minimize; a desktop applies a phone-stamped record as membership only
+- (2026-10-13) A PHONE STAMP WAS READ AS 'IGNORE THE ARRANGEMENT' AND TWO BACK DOORS STILL WROTE THE PHONE'S Z (phone-arrangement-verify F1–F4) — 不变量 = the stamp names the writer, a re-read takes the record whole; a phone page captures through ONE choke point
+- (2026-10-13) THE FOR-YOU TRAY LISTED EVERYTHING IN ONE ORDER (owner: 做吧) — 不变量 = a judged item is grouped, never re-urgenced; the judge scores only normal option-less items, ≤ 10 a pass, off the wake path, under the one caller's budget
+- (2026-10-13) SIX PLUGINS DREW THEIR OWN SETTINGS CARDS AND ONE VALUE HAD TWO TRUTHS (owner: VS Code model) — 不变量 = a plugin's configuration is one PURE table derived into All Settings; the sidebar lists, toggles, installs and opens settings; values live in settings.json only
+- (2026-10-13) A RE-FILED ITEM KEPT ITS OLD VERDICT AND AN ITEM WITH BUTTONS WAITED IN 可以等 (inbox-verify F2/F3) — 不变量 = a verdict is keyed by the text it judged; an item that asks for a decision is never 'can wait'
+- (2026-10-13) A SHARED PROBE SPAWNER LOST THE PANEL PROBE'S ISOLATION (mirror-263 §19, B-855a) — 不变量 = the panel probe has ONE spawn site that derives the isolated config dir and the empty cwd from the root its caller proves; callers pass a root + their identity env, never a config dir or a cwd
 
 ## A RECALLED LARK MESSAGE STAYED UNMARKED (owner 2026-10-13, userW's recall; lane channel-record-revisions, .262)
 
@@ -5484,3 +5493,11 @@ userW's pod: one conversation's hidden-window browser drew Mercury's payments da
 **Invariant.** The first screen's judge (src/server/channels-attention.js) sends a row only when no fact tag claims it — asked when the row is queued AND again, on the row as it is NOW, right before its call (a hand-over can land in between); a row whose call is in flight is never queued again; a redraw never re-bills (D1's memo, per record). The vendor's text never reaches the UI: the chip is p + our clause words.
 
 **Gates:** test-decision-attention (fast: the candidate-set census + the bypassed-filter and stale-snapshot controls, the mid-flight re-read leg), test-decision-attention-ui (heavy: four rows ⇒ four calls, a reload ⇒ none).
+
+## A PHONE'S WINDOW SWITCH RESTACKED EVERY DESKTOP (2026-10-13, owner: 「手机端切窗口会影响电脑端布局…不能根治吗」)
+
+**Mechanism.** A phone was a plain layout-sync client of the same per-desktop record: a switcher tap raised the tapped window's z on the phone, the tap armed the save, the phone's captures (z, maximize / minimize, a phone-born window's full-screen box) replaced the desktop's record and every desktop restacked (base tree: 4 taps restacked D; a phone-born window landed at [0,0,1,1]).
+
+**Invariant.** Arrangement is the desktop viewport's, membership the workspace's: a phone carries the held record's arrangement verbatim (PURE captureForViewport) and stamps its syncs `viewport:'phone'`; a desktop applies a phone-stamped record as membership only; the phone's window on show is local. Essay: kb-design-lessons §6b guard 10.
+
+**Gates:** test-phone-desktop-sync (heavy: desktop + iPhone, real touch, each belt alone, base-tree RED controls), test-desktop-record, test-mobile-gaps.

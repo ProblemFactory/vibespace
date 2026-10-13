@@ -7,15 +7,14 @@
 //   ① Connect with Fish Audio ⇒ the consent page in a NEW TAB (Allow + the mailed 6-digit code) ⇒ the hub's own
 //     https callback ⇒ the card says 已连接：Ana · Fish Lab
 //   ② teach OFF (the default) ⇒ a full dictation writes NOTHING (only /v1/dictate)
-//   ③ teach ON ⇒ a proposal card (+ a For-you item); tick two, 加入词库 ⇒ ONE POST /v1/terms with exactly those two
+//   ③ teach ON ⇒ a proposal card of word chips (+ a For-you item); select two, 加入所选 ⇒ ONE POST /v1/terms with exactly those two
 //   ④ 忽略 ⇒ no write
 //   ⑤ the context switch ⇒ the first dictation opens the PREVIEW; 发送 ⇒ ONE POST /v1/context with the previewed text
 //   ⑥ the per-project tier ⇒ a later identifier goes without a card and lands in the journal
 //   ⑦ phone 390
-//   ⑧ the card's grammar (lane voice-card-polish): the header's title + status chip + the card's own switch, the 账号 /
-//     语言 grid, the key behind 或粘贴 key ▸, Test only after Save, every control 32 px; phone 390 stacks
-// PNGs: VIBESPACE_VOICE_PNG_DIR (default: the scratch dir) → connect, proposal, preview, journal, phone, card-fold,
-//   card-key, card-phone .png
+//   ⑧ RETIRED (int263 seam c3): the polished card body it judged was deleted by plugin-settings-p0 (the Plugins list row)
+// PNGs: VIBESPACE_VOICE_PNG_DIR (default: the scratch dir) → connect, proposal, preview, journal, phone
+//   (card-fold / card-key / card-phone retired with ⑧)
 import fs from 'node:fs';
 import http from 'node:http';
 import https from 'node:https';
@@ -109,10 +108,11 @@ let teach = null;
 const client = require(path.join(REPO, 'src/server/dropline-client.js')).create({ integrations: () => store, pluginOn: () => rec.enabled, tokens, base: FAKE, oauthBase: FAKE, authorizeUrl: `${FAKE}/oauth/authorize`, teachCap: (k) => teach.capOk(k), log: quiet });
 const oauth = DO.create({ client, flows: require(path.join(REPO, 'src/oauth-loopback.js')).createOAuthLoopback({ log: quiet }), integrations: () => store, instanceUrl: () => HUB, tokens, log: quiet });
 require(path.join(REPO, 'src/server/oauth-doors.js')).register('dropline', { landing: oauth.landing, page: oauth.page });
-teach = require(path.join(REPO, 'src/server/voice-teach-engine.js')).create({ client, plugin: { peek: () => rec, update: (fn) => fn(rec) }, userTodos, log: quiet });
+// lane plugin-settings-p0: the teach / context switches are SETTINGS rows — this harness's settings store is rec.config
+teach = require(path.join(REPO, 'src/server/voice-teach-engine.js')).create({ client, plugin: { peek: () => rec, update: (fn) => fn(rec), settings: () => rec.config || {}, writeSettings: (p) => { rec.config = { ...(rec.config || {}), ...p }; } }, userTodos, log: quiet });
 const esbuild = require(path.join(REPO, 'node_modules/esbuild'));
 const entry = `import { ChatInput } from ${JSON.stringify(path.join(REPO, 'src/lib/chat-input.js'))};
-import { renderDictationCard } from ${JSON.stringify(path.join(REPO, 'src/lib/voice-plugin-card.js'))};
+import { renderVoiceSheet } from ${JSON.stringify(path.join(REPO, 'src/lib/voice-plugin-card.js'))};
 const ws = { send() {}, on() {}, off() {}, onMessage() {}, isConnected: () => true };
 window.__cwd = '/home/u/projects/vibespace';
 window.__facts = { conv: 'conv-0', title: 'Doc comments', messages: [
@@ -123,15 +123,10 @@ window.__render = async () => {
   const card = document.getElementById('card');
   const st = await (await fetch('/api/voice/status')).json();
   card.innerHTML = '';
-  const head = document.createElement('div'), actions = document.createElement('div'), cfgBox = document.createElement('div');
-  head.className = 'plugin-head'; // the Plugins panel's own header (plugins-ui.js): the card puts its chip + switch here
-  head.innerHTML = '<div class="plugin-name"><span class="plugin-dot"></span>Voice input · Dropline</div><div class="plugin-state"></div>';
-  actions.className = 'plugin-actions';
-  card.append(head, actions, cfgBox);
-  const api = async (tail, o) => { (window.__api = window.__api || []).push([tail, o && o.body]); return {}; };
-  renderDictationCard({ p: { configured: st.connected, enabled: st.enabled, language: st.language }, head, actions, cfgBox, api, rerender: () => window.__render() });
+  renderVoiceSheet(card, () => window.__render()); // the Plugins list's Voice chip sheet (lane plugin-settings-p0)
   return true;
 };
+window.__set = (patch) => fetch('/api/voice/teach/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) }).then((r) => r.ok); // the settings rows' door (All Settings writes the same rows)
 window.__mount = () => {
   const ci = new ChatInput(ws, 'sess-teach', { onSend() {}, onInterrupt() {}, getCwd: () => window.__cwd, getHost: () => null, getUploadDir: () => '',
     isTouch: () => window.innerWidth < 600, getTouchEnterSends: () => false, getEnterSends: () => true, getVoiceFacts: () => window.__facts, openPlugins: () => {} });
@@ -249,30 +244,40 @@ try {
   const connected = await p.until('(document.querySelector(".voice-account-words")||{}).textContent === "已连接：Ana · Fish Lab"', 12000);
   ok('the card says 已连接：Ana · Fish Lab with 断开 (GET /v1/me with the OAuth token)', connected && await p.ev('!!document.querySelector(".voice-disconnect")') && calls.some((c) => c.p === '/v1/me' && /^at_chrome_/.test(c.auth)), await p.ev('document.querySelector("#card").innerText.slice(0, 300)'));
   ok('the client_id was registered once and written to the row; the pair is on the hub only', /^cid_chrome_/.test(row.clientId || '') && !!tokens.read().access && !(await p.ev('document.documentElement.outerHTML')).includes(tokens.read().access));
-  await p.until('!!document.querySelector(".voice-teach-toggle")');
+  await p.until('!!document.querySelector(".voice-teach")');
   await p.shot('connect.png');
 
   console.log('② teach OFF (default) ⇒ a full dictation writes nothing');
   const before = calls.length;
-  ok('teach and context are OFF by default', await p.ev('!document.querySelector(".voice-teach-toggle input").checked && !document.querySelector(".voice-context-toggle input").checked'));
+  ok('teach and context are OFF by default (settings rows; the sheet says where to turn teaching on)', await p.ev('!!document.querySelector(".voice-teach-off")') && !(rec.config && (rec.config.teach || rec.config.context)));
   const d0 = await dictate(p, 'conv-0');
   ok('a full dictation with teach OFF ⇒ ONLY /v1/dictate reached Dropline (no vocabulary, no terms, no context)', d0 && calls.slice(before).every((c) => c.p === '/v1/dictate') && calls.slice(before).length === 1, calls.slice(before).map((c) => c.p));
 
-  console.log('③ teach ON ⇒ a proposal; tick two, 加入词库 ⇒ ONE POST /v1/terms with exactly those two');
-  await p.clickSel('.voice-teach-toggle input');
-  await p.until('document.querySelector(".voice-teach-toggle input") && document.querySelector(".voice-teach-toggle input").checked');
-  ok('the switch carries the privacy sentence', (await p.ev('document.querySelector(".voice-teach-why").textContent')).startsWith('会把当前对话里的名字、术语与文件名发给 Dropline（Fish Audio）'));
+  console.log('③ teach ON ⇒ a proposal of chips; select two, 加入所选 ⇒ ONE POST /v1/terms with exactly those two');
+  await p.ev('window.__set({ teach: true })');
+  await p.ev('window.__render()'); await p.until('!document.querySelector(".voice-teach-off") && !!document.querySelector(".voice-teach-why")');
+  ok('the teach section carries the privacy sentence', (await p.ev('document.querySelector(".voice-teach-why").textContent')).startsWith('会把当前对话里的名字、术语与文件名发给 Dropline（Fish Audio）'));
   await dictate(p, 'conv-1');
   const hasCard = await rerender(p, '.voice-proposal');
-  const terms = await p.ev('[...document.querySelectorAll(".voice-proposal .voice-term input")].map((x) => x.value)');
+  const terms = await p.ev('[...document.querySelectorAll(".voice-proposal .voice-term")].map((x) => x.dataset.term)');
   ok('the dictation made a PROPOSAL card (no write) + a For-you item 加入词库 / 忽略', hasCard && terms.includes('commentsBatches') && terms.includes('doc-window-ui.js') && !terms.includes('VibeSpace') && writes().length === 0 && items.length === 1 && items[0].options.join() === '加入词库,忽略', { terms, items, w: writes() });
   await p.shot('proposal.png');
-  await p.ev(`(() => { for (const x of document.querySelectorAll('.voice-proposal .voice-term input')) if (!['commentsBatches', 'doc-window-ui.js'].includes(x.value)) x.click(); return true; })()`);
+  // the chips (lane voice-teach-candidates): words the person wrote start selected, a press toggles one, the count is live
+  const chips = () => p.ev('({ on: [...document.querySelectorAll(".voice-proposal .voice-term")].filter((x) => x.getAttribute("aria-pressed") === "true").map((x) => x.dataset.term), add: document.querySelector(".voice-proposal-add").textContent, off: document.querySelector(".voice-proposal-add").disabled, tag: document.querySelector(".voice-proposal .voice-term").tagName })');
+  const c0 = await chips();
+  ok('the card is word CHIPS (buttons, no checkbox), the words the person wrote preselected, 加入所选 (3)', c0.tag === 'BUTTON' && c0.on.join() === terms.join() && terms.length === 3 && c0.add === '加入所选 (3)' && !c0.off && !(await p.ev('!!document.querySelector(".voice-proposal-terms input")')), c0);
+  await p.clickSel('.voice-proposal .voice-term[data-term="voice-teach.js"]');
+  const c1 = await chips();
+  ok('a press on a chip unselects it and the count follows: 加入所选 (2)', c1.on.slice().sort().join() === 'commentsBatches,doc-window-ui.js' && c1.add === '加入所选 (2)', c1);
+  await p.ev('(() => { for (const x of document.querySelectorAll(".voice-proposal .voice-term[aria-pressed=true]")) x.click(); return true; })()');
+  const c2 = await chips();
+  ok('nothing selected ⇒ 加入所选 (0) is disabled', !c2.on.length && c2.add === '加入所选 (0)' && c2.off, c2);
+  await p.ev('(() => { for (const t of ["commentsBatches", "doc-window-ui.js"]) document.querySelector(`.voice-proposal .voice-term[data-term="${t}"]`).click(); return true; })()');
   await p.clickSel('.voice-proposal-add');
   await p.until('!document.querySelector(".voice-proposal")');
   await sleep(300);
   const w1 = writes();
-  ok('加入词库 ⇒ the fake Dropline saw ONE POST /v1/terms with EXACTLY the two ticked words', w1.length === 1 && w1[0].p === '/v1/terms' && JSON.stringify(w1[0].body) === JSON.stringify({ terms: [{ term: 'commentsBatches' }, { term: 'doc-window-ui.js' }] }), w1);
+  ok('加入所选 ⇒ the fake Dropline saw ONE POST /v1/terms with EXACTLY the two selected words', w1.length === 1 && w1[0].p === '/v1/terms' && w1[0].body.terms.map((x) => x.term).sort().join() === 'commentsBatches,doc-window-ui.js' && w1[0].body.terms.length === 2, w1);
 
   console.log('④ 忽略 ⇒ none');
   await dictate(p, 'conv-2');
@@ -282,9 +287,7 @@ try {
   ok('忽略 ⇒ no write, the card gone', writes().length === 1);
 
   console.log('⑤ the context switch ⇒ the first-time preview; 发送 ⇒ ONE POST /v1/context with the previewed text');
-  await rerender(p, '.voice-context-toggle input');
-  await p.clickSel('.voice-context-toggle input');
-  await p.until('document.querySelector(".voice-context-toggle input") && document.querySelector(".voice-context-toggle input").checked');
+  await p.ev('window.__set({ context: true })');
   await dictate(p, 'conv-3');
   const dlg = await p.until('!!document.querySelector(".voice-preview")', 8000);
   const shown = dlg ? await p.ev('document.querySelector(".voice-preview-text").textContent') : '';
@@ -297,9 +300,7 @@ try {
   ok('发送 ⇒ ONE POST /v1/context with exactly the previewed text, title + source VibeSpace', cx.length === 1 && cx[0].body.text === shown && cx[0].body.source === 'VibeSpace' && cx[0].body.title === 'Doc comments', cx);
 
   console.log('⑥ the per-project tier ⇒ a later identifier goes without a card and lands in the journal');
-  await rerender(p, '.voice-context-toggle input');
-  await p.clickSel('.voice-context-toggle input');   // ⑤ proved the preview; off now, so no dialog covers the next clicks
-  await p.until('document.querySelector(".voice-context-toggle input") && !document.querySelector(".voice-context-toggle input").checked');
+  await p.ev('window.__set({ context: false })');   // ⑤ proved the preview; off now, so no dialog covers the next clicks
   await dictate(p, 'conv-5', [{ role: 'user', content: [{ type: 'text', text: 'rename freshIdentOne in zeta_notes.md' }] }]);   // ④ ignored the earlier words: new ones
   await rerender(p, '.voice-project-auto input');
   await p.clickSel('.voice-project-auto input');
@@ -322,45 +323,14 @@ try {
   await ph.until('!!document.querySelector(".voice-proposal-add")');
   const geo = await ph.ev(`(() => { const r = (s) => document.querySelector(s).getBoundingClientRect(); const a = r('.voice-proposal-add'), card = r('#card'); return { h: a.height, right: a.right, cw: card.right, overflow: document.documentElement.scrollWidth > innerWidth }; })()`);
   ok('phone 390: the proposal buttons are ≥ 36 px tall and nothing overflows sideways', geo.h >= 36 && geo.right <= geo.cw + 1 && !geo.overflow, geo);
+  const chipH = await ph.ev('[...document.querySelectorAll(".voice-proposal .voice-term")].map((x) => Math.round(x.getBoundingClientRect().height))');
+  ok('phone 390: every word chip is a ≥ 36 px tap target', chipH.length > 0 && chipH.every((h) => h >= 36), chipH);
   await ph.shot('phone.png');
   ph.close();
 
-  console.log('⑧ the card\'s grammar: header chip + switch, 账号 / 语言 grid, the key folded, Test only after Save');
-  tokens.clear();
-  const k = await page(1100, 860);
-  await k.until('!!document.querySelector(".voice-connect") && !!document.querySelector(".voice-key-fold")');
-  const shape = await k.ev(`(() => { const q = (s) => document.querySelector(s); const head = q('#card .plugin-head');
-    return { title: head.querySelector('.plugin-name').textContent.trim(), chip: (head.querySelector('.voice-state') || {}).textContent, sw: !!head.querySelector('input.voice-toggle[role=switch]'), floating: !!q('.plugin-actions input'),
-      labels: [...document.querySelectorAll('.voice-row:not([hidden]) .voice-row-label')].map((x) => x.textContent), primary: q('.voice-connect').classList.contains('mounts-btn-primary'),
-      keyHidden: q('.voice-key-cell').hidden, lang: !!q('.voice-lang select.voice-lang-select'), labelled: [...document.querySelectorAll('.voice-cfg label[for]')].every((l) => !!document.getElementById(l.htmlFor)) }; })()`);
-  ok('header = 语音输入 · Dropline + the 未连接 chip + the card\'s own switch (no floating checkbox); rows 账号 / 语言; Connect is THE primary; the key folded', shape.title === '语音输入 · Dropline' && shape.chip === '未连接' && shape.sw && !shape.floating && shape.labels.join('|') === '账号|语言' && shape.primary && shape.keyHidden && shape.lang && shape.labelled, shape);
-  await k.clickSel('.voice-key-fold');
-  const opened = await k.ev(`(() => { const q = (s) => document.querySelector(s); return { shown: !q('.voice-key-cell').hidden, label: q('.voice-key-cell .voice-row-label').textContent, forKey: q('.voice-key-cell label').htmlFor === q('.voice-key').id, testOff: q('.voice-key-test').disabled, swOff: q('.voice-toggle').disabled, exp: q('.voice-key-fold').getAttribute('aria-expanded') }; })()`);
-  ok('或粘贴 key ▸ unfolds the labelled Dropline 密钥 row; before a save Test is disabled and so is the switch', opened.shown && opened.label === 'Dropline 密钥' && opened.forKey && opened.testOff && opened.swOff && opened.exp === 'true', opened);
-  const hs = await k.ev('[...document.querySelectorAll(".voice-cfg .mounts-btn, .voice-cfg .plugin-cfg-input")].filter((b) => b.offsetParent).map((b) => Math.round(b.getBoundingClientRect().height))');
-  ok('desk: every button and field on the card is 32 px tall', hs.length >= 5 && hs.every((h) => h === 32), hs);
-  await k.shot('card-fold.png');
-  await k.ev('document.querySelector(".voice-key").value = "dl_chrome_card_key_0001"');
-  await k.clickSel('.voice-key-save');
-  const saved = await k.until('!!document.querySelector(".voice-key-test") && !document.querySelector(".voice-key-test").disabled && (document.querySelector(".voice-state") || {}).textContent === "key 已保存"', 8000);
-  ok('Save ⇒ the key reached the store; after the rerender Test is enabled, the chip says key 已保存 and the key row stays open', saved && row.apiKey === 'dl_chrome_card_key_0001' && await k.ev('!document.querySelector(".voice-key-cell").hidden'), { row: Object.keys(row), chip: await k.ev('(document.querySelector(".voice-state") || {}).textContent') });
-  await k.clickSel('.voice-key-test');
-  ok('Test ⇒ 已连接：Ana · Fish Lab under the key row', await k.until('(document.querySelector(".voice-verdict.voice-ok") || {}).textContent === "已连接：Ana · Fish Lab"', 8000), await k.ev('document.querySelector(".voice-verdict").textContent'));
-  await k.until('!document.querySelector(".voice-toggle").disabled');
-  const was = await k.ev('document.querySelector(".voice-toggle").checked');
-  await k.ev('window.__api = []');
-  await k.clickSel('.plugin-head .voice-toggle');
-  await k.until('(window.__api || []).length > 0');
-  ok('the header switch toggles the plugin (POST …/enabled with the flipped value)', JSON.stringify(await k.ev('window.__api')) === JSON.stringify([['enabled', JSON.stringify({ enabled: !was })]]), await k.ev('window.__api'));
-  await k.shot('card-key.png');
-  k.close();
-  const kp = await page(390, 844);
-  await kp.until('!!document.querySelector(".voice-key-cell") && !document.querySelector(".voice-key-cell").hidden');
-  const pg = await kp.ev(`(() => { const r = (s) => document.querySelector(s).getBoundingClientRect(); const l = r('.voice-key-cell .voice-row-label'), line = r('.voice-key-line'), key = r('.voice-key'), sv = r('.voice-key-save'), te = r('.voice-key-test'), ctl = r('.voice-key-cell .voice-row-ctl');
-    return { stacked: l.bottom <= line.top + 1, keyFull: Math.abs(key.width - ctl.width) < 2, btnsFull: Math.abs(te.right - ctl.right) < 2 && Math.abs(sv.left - ctl.left) < 2, h: [sv.height, te.height], overflow: document.documentElement.scrollWidth > innerWidth }; })()`);
-  ok('phone 390: the label sits above its control, the key field and Save + Test span the card, 36 px, nothing overflows', pg.stacked && pg.keyFull && pg.btnsFull && pg.h.every((h) => h === 36) && !pg.overflow, pg);
-  await kp.shot('card-phone.png');
-  kp.close();
+  // ⑧ (lane voice-card-polish, rel262: the card's header chip + switch, 账号 / 语言 grid, the folded key) RETIRED by int263 seam (c3):
+  // plugin-settings-p0 deleted the card body — the Voice row of the Plugins list (chip · switch · ⚙) is judged by
+  // test-plugin-settings / test-plugins-grammar, the key lives in Integrations, language + teach are All Settings rows
 } catch (e) { fail++; console.log('  ✗ threw: ' + (e && e.stack || e)); }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 end(fail ? 1 : 0);

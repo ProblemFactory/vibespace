@@ -13,7 +13,7 @@ const ITEM_KEY = 'voice-input';   // the For-you items' session key (one produce
 function create({ client, plugin, userTodos = null, now = Date.now, log = console, model = T }) {
   let vocab = { at: 0, terms: [] };
   const previews = new Map();     // preview id → {conv, title, source, text, hash} (the exact text the dialog showed)
-  const settings = () => model.settingsOf(((plugin.peek() || {}).config) || {});
+  const settings = () => model.settingsOf(typeof plugin.settings === 'function' ? plugin.settings() : {}); // the settings rows (src/plugin-settings.js voice-input), never rec.config
   const state = () => model.prune((plugin.peek() || {}).teach, now());
   const save = (st) => plugin.update((rec) => { rec.teach = st; });
   const httpErr = (status, code, message) => Object.assign(new Error(message), { status, code });
@@ -31,7 +31,7 @@ function create({ client, plugin, userTodos = null, now = Date.now, log = consol
   function fileItem(p) {
     if (!userTodos) return null;
     try {
-      const r = userTodos.add(ITEM_KEY, { text: model.teachWords(p.lang, 'proposal', { terms: p.terms.join(', ') }), detail: model.teachWords(p.lang, 'detail'), options: [model.teachWords(p.lang, 'add'), model.teachWords(p.lang, 'ignore')], origin: 'server', kind: 'action', urgency: 'normal', by: 'agent', sessionName: 'Voice input · Dropline' });
+      const r = userTodos.add(ITEM_KEY, { text: model.teachWords(p.lang, 'proposal', { terms: p.pick.join(', ') }), detail: model.teachWords(p.lang, 'detail'), options: [model.teachWords(p.lang, 'add'), model.teachWords(p.lang, 'ignore')], origin: 'server', kind: 'action', urgency: 'normal', by: 'agent', sessionName: 'Voice input · Dropline' });
       return (r && r.id) || null;
     } catch (e) { log.warn?.(`[voice] the proposal's For-you item was not filed: ${e && e.message}`); return null; }
   }
@@ -45,8 +45,10 @@ function create({ client, plugin, userTodos = null, now = Date.now, log = consol
     let st = state();
     const at = now();
     if (set.teach) {
-      const terms = VM.termsOf({ messages, files, cwd, groupName, known: await known() });
-      const v = model.proposalVerdict(st, { conv, cwd, terms, now: at, settings: set, kindOf: VM.termKind, autoFrom: VM.autoSourcesOf({ messages, files, cwd }) });
+      const kn = await known();
+      const terms = VM.termsOf({ messages, files, cwd, groupName, known: kn });            // the per-project tier's input
+      const candidates = VM.proposalCandidates({ messages, files, cwd, groupName, known: kn }); // the card's: words a person says
+      const v = model.proposalVerdict(st, { conv, cwd, terms, candidates, now: at, settings: set, kindOf: VM.termKind, autoFrom: VM.autoSourcesOf({ messages, files, cwd }) });
       if (v.auto.length) {
         try {
           const r = await client.terms(v.auto);
@@ -55,8 +57,10 @@ function create({ client, plugin, userTodos = null, now = Date.now, log = consol
         } catch (e) { log.warn?.(`[voice] the project's terms were not sent: ${e && e.message}`); }
       }
       if (v.propose.length) {
-        const p = { id: 'vp' + crypto.randomBytes(5).toString('hex'), conv, cwd, title: String(title).slice(0, 200), terms: v.propose, at, lang: ['zh', 'ja'].includes(uiLang) ? uiLang : 'en' };
-        p.itemId = fileItem(p);
+        const why = Object.fromEntries(candidates.filter((c) => v.propose.includes(c.term)).map((c) => [c.term, { why: c.why, seen: c.seen, byPerson: c.byPerson }]));
+        const p = { id: 'vp' + crypto.randomBytes(5).toString('hex'), conv, cwd, title: String(title).slice(0, 200), terms: v.propose, pick: v.pick, why, at, lang: ['zh', 'ja'].includes(uiLang) ? uiLang : 'en' };
+        p.itemId = v.pick.length ? fileItem(p) : null;   // the For-you chip adds the preselected words — none ⇒ only the card
+        st = model.hold(st, conv, v.below, v.propose);
         st.proposals = [...st.proposals.filter((x) => x.conv !== conv), p].slice(-model.TEACH_LIMITS.proposalsMax);
         st.lastProposal[conv] = at;
         out.proposal = p;
@@ -129,30 +133,29 @@ function create({ client, plugin, userTodos = null, now = Date.now, log = consol
   }
   /** the switches: teach, context, and a project's auto tier ({autoProject: {cwd, on}}) */
   function setSettings(patch = {}) {
-    plugin.update((rec) => {
-      rec.config = rec.config || {};
-      if (typeof patch.teach === 'boolean') rec.config.teach = patch.teach;
-      if (typeof patch.context === 'boolean') rec.config.context = patch.context;
-      const ap = patch.autoProject;
-      if (ap && typeof ap.cwd === 'string' && ap.cwd.startsWith('/')) {
-        const cur = model.settingsOf(rec.config).autoProjects.filter((c) => c !== ap.cwd);
-        rec.config.autoProjects = ap.on ? [...cur, ap.cwd.slice(0, 4096)].slice(-model.TEACH_LIMITS.projectsMax) : cur;
-      }
-    });
+    const w = {};
+    if (typeof patch.teach === 'boolean') w.teach = patch.teach;
+    if (typeof patch.context === 'boolean') w.context = patch.context;
+    const ap = patch.autoProject;
+    if (ap && typeof ap.cwd === 'string' && ap.cwd.startsWith('/')) {
+      const cur = settings().autoProjects.filter((c) => c !== ap.cwd);
+      w.autoProjects = ap.on ? [...cur, ap.cwd.slice(0, 4096)].slice(-model.TEACH_LIMITS.projectsMax) : cur;
+    }
+    if (Object.keys(w).length) plugin.writeSettings(w); // through the ONE settings writer (settings-updated reaches every tab)
     return view();
   }
   function view() {
     const st = state();
-    return { settings: settings(), proposals: st.proposals.map(({ id, conv, cwd, title, terms, at }) => ({ id, conv, cwd, title, terms, at })), journal: st.journal.slice().reverse(), caps: { terms: model.capLeft(st, 'terms', now()), context: model.capLeft(st, 'context', now()) } };
+    return { settings: settings(), proposals: st.proposals.map(({ id, conv, cwd, title, terms, pick, why, at }) => ({ id, conv, cwd, title, terms, pick: pick || [], why: why || {}, at })), journal: st.journal.slice().reverse(), caps: { terms: model.capLeft(st, 'terms', now()), context: model.capLeft(st, 'context', now()) } };
   }
-  // the For-you chip IS the press: 加入词库 adds the whole shown list, 忽略 ignores it
+  // the For-you chip IS the press: 加入词库 adds the preselected words it shows, 忽略 ignores the batch
   if (userTodos && typeof userTodos.onStatus === 'function') {
     userTodos.onStatus((it) => {
       const reply = it && it.reply && it.reply.text;
       if (!reply || it.sessionKey !== ITEM_KEY) return;
       const p = state().proposals.find((x) => x.itemId === it.id);
       if (!p) return;
-      if (reply === model.teachWords(p.lang, 'add')) confirm(p.id, p.terms).catch((e) => log.warn?.(`[voice] the For-you 加入词库 failed: ${e && e.message}`));
+      if (reply === model.teachWords(p.lang, 'add')) confirm(p.id, p.pick || p.terms).catch((e) => log.warn?.(`[voice] the For-you 加入词库 failed: ${e && e.message}`));
       else if (reply === model.teachWords(p.lang, 'ignore')) { try { ignore(p.id); } catch { } }
     });
   }

@@ -5,60 +5,42 @@
 import { createModalShell, fetchJson, showToast, showConfirmDialog, showContextMenu, escHtml, copyText } from './utils.js';
 import { BACKEND_META } from './agent-meta.js';
 import { t } from './i18n.js';
-import { renderDictationCard } from './voice-plugin-card.js';
-// lane decision-core: the Decision API card shows the registry row's own card (provider / model / key) — one key box
-import { mountIntegrationCard } from './integrations-window.js';
+import { renderVoiceSheet } from './voice-plugin-card.js'; // the Voice row's 「待处理 N」 sheet: Connect + the proposal cards
+import { pluginCategoryOf } from './settings-schema.js';
 
-/** The Decision API card's body (provides 'decision'): the feature toggles, the daily budget (stored in cents, shown
- *  as USD), today's counter per use, the pause line. The switch is the card's own button; the key is the registry's. */
-// lane decision-card-words: each switch = what you get + ONE example (its hint) + where it shows up
-const decisionFeatures = () => [
-  ['attention', t('Channels home: pick out the messages that need me'), t('Example: a colleague asks “Can you get back to me today?” — it gets marked “{label}” and moves to the top of Channels home; tap ✓ / ✗ to teach it.', { label: t('needs you · {p}', { p: t('asks you') }) })],
-  ['rules', t('Notification rules can use a sentence as the condition'), t('Example: the rule “Notify me when someone chases me for a payment” — the model checks whether each message fits. Set it up in {notify} by adding a rule.', { notify: t('Notify…') })],
-  ['routing', t('Hand messages to a task group or agent by what they say'), t('Example: “expense claims go to the Finance task group, server alerts go to the ops agent”. Set it up in a rule\'s “One of a list” option.')],
-];
-const decisionUseWord = (use) => ({ attention: t('Channels home'), rule: t('Notification rules'), routing: t('Handing out by content'), foryou: t('For you sorting'), webhook: t('webhook facts'), test: t('Test') }[use] || use);
+// lane plugin-settings-p0 (owner 2026-10-13, the VS Code plugin model — docs/design-plugin-settings.zh.md): the
+// Plugins sidebar is a plain LIST — one row per plugin: name · one-line description · status chip · on/off switch ·
+// [install / uninstall] · ⚙ (opens All Settings at the plugin's section). Every configuration row lives in All
+// Settings (src/plugin-settings.js); keys stay in Services › Integrations. A chip that has something waiting (Voice
+// proposals, a Tailscale sign-in, a manifest plugin's windows) opens it — an action door, never settings.
 const usd = (n) => '$' + (Number(n) || 0).toFixed(n && n < 0.01 ? 6 : 2);
-function decisionCard(app, p, { actions, cfgBox, api, render }) {
-  const d = p.decision || {};
-  const sw = document.createElement('button');
-  sw.className = 'mounts-btn' + (p.enabled ? '' : ' mounts-btn-primary'); sw.dataset.decisionSwitch = p.enabled ? 'on' : 'off';
-  sw.textContent = p.enabled ? t('Turn off') : t('Turn on');
-  sw.onclick = async () => { sw.disabled = true; try { await api('enabled', { body: JSON.stringify({ enabled: !p.enabled }) }); } catch (e) { showToast(e.message, { type: 'error' }); } sw.disabled = false; render(); };
-  actions.appendChild(sw);
-  const integ = document.createElement('div'); integ.className = 'decision-integ';
-  cfgBox.appendChild(integ);
-  mountIntegrationCard(app, integ, 'decision-api');
-  for (const [key, label, hint] of decisionFeatures()) {
-    const r = document.createElement('label'); r.className = 'plugin-cfg-row';
-    const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = d[key] === true; cb.dataset.decisionFeature = key;
-    cb.onchange = () => api('config', { body: JSON.stringify({ [key]: cb.checked }) }).catch((e) => { cb.checked = !cb.checked; showToast(e.message, { type: 'error' }); });
-    r.append(cb, document.createTextNode(' ' + label));
-    cfgBox.append(r, Object.assign(document.createElement('div'), { className: 'plugin-detail plugin-cfg-hint decision-feature-hint', textContent: hint }));
-  }
-  const br = document.createElement('div'); br.className = 'plugin-cfg-row';
-  const inp = document.createElement('input'); inp.className = 'plugin-cfg-flags decision-budget'; inp.type = 'number'; inp.min = '0'; inp.step = '0.01';
-  inp.value = ((Number(d.dailyBudgetCents) || 0) / 100).toFixed(2);
-  const save = document.createElement('button'); save.className = 'mounts-btn'; save.textContent = t('Save');
-  save.onclick = async () => {
-    const cents = Math.round(Number(inp.value) * 100);
-    try { await api('config', { body: JSON.stringify({ dailyBudgetCents: cents }) }); showToast(t('Daily budget saved')); } catch (e) { showToast(e.message, { type: 'error' }); }
-  };
-  br.append(Object.assign(document.createElement('span'), { className: 'plugin-cfg-label', textContent: t('Spend at most per day (USD)') }), inp, save);
-  cfgBox.appendChild(br);
-  const tot = (d.today && d.today.total) || { calls: 0, inputTokens: 0, usd: 0 };   // usd = settled; + the calls in flight's reservations
-  const cnt = document.createElement('div'); cnt.className = 'plugin-detail decision-counter';
-  cnt.textContent = t('Today: {n} checked · {spent} spent (limit {cap})', { n: tot.calls, spent: usd((Number(tot.usd) || 0) + (Number(d.today && d.today.reserved) || 0)), cap: usd((Number(d.dailyBudgetCents) || 0) / 100) });
-  cnt.title = t('{tokens} input tokens', { tokens: tot.inputTokens });
-  cfgBox.appendChild(cnt);
-  for (const [use, x] of Object.entries((d.today && d.today.byUse) || {})) {
-    const u = document.createElement('div'); u.className = 'plugin-detail plugin-cfg-hint decision-use'; u.dataset.use = use;
-    u.textContent = t('{use}: {n} checked · {spent}', { use: decisionUseWord(use), n: x.calls, spent: usd(x.usd) });
-    u.title = t('{tokens} input tokens', { tokens: x.inputTokens });
-    cfgBox.appendChild(u);
-  }
-  if (d.reconnect) cfgBox.appendChild(Object.assign(document.createElement('div'), { className: 'plugin-detail plugin-cfg-warn decision-reconnect', textContent: t('Reconnect: the provider refused this key (HTTP {status}). No calls until you save a new key above.', { status: d.reconnect.status }) }));
-  if (d.backoffUntil) cfgBox.appendChild(Object.assign(document.createElement('div'), { className: 'plugin-detail plugin-cfg-warn', textContent: t('Paused until {time}: the provider said it is busy (it is not retried before then).', { time: new Date(d.backoffUntil).toLocaleTimeString() }) }));
+/** the on/off switch (role=switch over a checkbox): the row's one toggle */
+function makeSwitch(on, { disabled = false, label, onChange }) {
+  const l = document.createElement('label');
+  l.className = 'plugin-sw';
+  const cb = document.createElement('input');
+  cb.type = 'checkbox'; cb.setAttribute('role', 'switch'); cb.checked = !!on; cb.disabled = !!disabled;
+  cb.setAttribute('aria-label', label);
+  cb.onchange = () => onChange(cb.checked, cb);
+  l.append(cb, Object.assign(document.createElement('span'), { className: 'plugin-sw-track' }));
+  l.title = label;
+  return l;
+}
+/** one list row: icon dot · name + description · chip · switch · [install] · ⚙ */
+function pluginRow({ id, label, description, tone, chip, chipTitle, onChip, sw, install, gear }) {
+  const row = document.createElement('div');
+  row.className = 'plugin-row'; row.dataset.plugin = id;
+  const main = document.createElement('div'); main.className = 'plugin-row-main';
+  main.append(Object.assign(document.createElement('div'), { className: 'plugin-row-name', textContent: label }), Object.assign(document.createElement('div'), { className: 'plugin-row-desc', textContent: description || '' }));
+  main.title = description || '';
+  const c = document.createElement(onChip ? 'button' : 'span');
+  c.className = 'plugin-chip' + (tone ? ' plugin-chip-' + tone : ''); c.textContent = chip; c.title = chipTitle ? `${chip} · ${chipTitle}` : chip; // the narrow rail clips the chip — its whole word on hover
+  if (onChip) c.onclick = onChip;
+  const dot = Object.assign(document.createElement('span'), { className: 'plugin-dot' + (tone === 'ok' ? ' ok' : tone === 'warn' ? ' warn' : tone === 'err' ? ' err' : '') });
+  row.append(dot, main, c, sw);
+  if (install) row.appendChild(install);
+  row.appendChild(gear);
+  return row;
 }
 
 // How long we wait for a just-enabled background service to answer before we
@@ -86,8 +68,6 @@ export function installPluginsUI(App) {
     if (container) container.classList.add('mounts-dialog-body');
     const { body, close } = shell;
     body.innerHTML = `<div class="empty-hint">${escHtml(t('Loading…'))}</div>`;
-    let pollTimer = null;
-    const cleanup = () => { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } };
 
     const render = async () => {
       const r = await fetchJson('/api/plugins');
@@ -102,242 +82,83 @@ export function installPluginsUI(App) {
         return;
       }
       body.innerHTML = '';
+      const list = document.createElement('div'); list.className = 'plugin-list';
+      body.appendChild(list);
       for (const p of r.plugins) {
-        const card = document.createElement('div');
-        card.className = 'plugin-card';
+        // the row follows the plugin's DECLARED capability (src/plugins/<id>.js `provides`), never its id
         const running = !!p.running;
-        // the card's sections follow the plugin's DECLARED capability (src/plugins/<id>.js `provides`), never its id
         const isRelay = provides(p, 'relay');
-        const isServe = provides(p, 'serve');
-        const isTunnel = provides(p, 'tunnel');
-        const isDictation = provides(p, 'dictation'); // Dropline voice input (q-029 P0): src/lib/voice-plugin-card.js draws its card
-        const isDecision = provides(p, 'decision');
-        const stateTxt = isDictation ? '' // the voice card draws its own status chip + switch in this header
-          : isDecision ? (!p.enabled ? t('turned off') : p.configured ? t('on · {provider}', { provider: p.decision?.providerLabel || '' }) : t('on — no provider key yet'))
-          : isServe
-          ? (!p.installed ? t('the opencode CLI is not installed')
+        const isServe = provides(p, 'serve'), isTunnel = provides(p, 'tunnel'), isDictation = provides(p, 'dictation'), isDecision = provides(p, 'decision');
+        const api = (pathTail, opts) => fetchJson(`/api/plugins/${p.id}/${pathTail}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, ...opts })
+          .then((x) => { if (!x) throw new Error(t('Server unreachable — nothing was changed')); if (x.error) throw new Error(x.error); return x; });
+        const act = async (fn) => { try { await fn(); } catch (e) { showToast(e.message || t('Failed'), { type: 'error' }); } render(); };
+        let chip, tone = '', chipTitle = '', onChip = null, swOn = !!p.enabled, swDisabled = false, onSwitch, install = null;
+        if (isDecision) {
+          const d = p.decision || {};
+          const tot = (d.today && d.today.total) || { calls: 0, usd: 0 };
+          const hits = (d.today && d.today.byUse && d.today.byUse.attention && d.today.byUse.attention.hits) || 0;
+          chip = !p.enabled ? t('turned off') : p.configured ? t('on · {provider}', { provider: d.providerLabel || '' }) : t('on — no provider key yet');
+          tone = p.enabled && p.configured ? 'ok' : p.enabled ? 'warn' : '';
+          chipTitle = t('Today: judged {n} · {m} needed you', { n: tot.calls, m: hits }) + ' · ' + t('{spent} spent (limit {cap})', { spent: usd((Number(tot.usd) || 0) + (Number(d.today && d.today.reserved) || 0)), cap: usd((Number(d.dailyBudgetCents) || 0) / 100) })
+            + (d.reconnect ? ' · ' + t('Reconnect: the provider refused this key (HTTP {status}).', { status: d.reconnect.status }) : '');
+          onSwitch = (on) => act(() => api('enabled', { body: JSON.stringify({ enabled: on }) }));
+        } else if (isDictation) {
+          let waiting = 0;
+          if (p.configured) { const v = await fetchJson('/api/voice/teach'); waiting = (v && Array.isArray(v.proposals)) ? v.proposals.length : 0; }
+          chip = !p.configured ? t('no Dropline key yet') : waiting ? t('{n} waiting', { n: waiting }) : p.enabled ? t('on') : t('turned off');
+          tone = waiting ? 'warn' : p.running ? 'ok' : '';
+          onChip = () => this._voiceSheet(p, render);
+          swDisabled = !p.configured;
+          onSwitch = (on) => act(() => api('enabled', { body: JSON.stringify({ enabled: on }) }));
+        } else if (isServe) {
+          chip = !p.installed ? t('the opencode CLI is not installed')
             : p.parkedKind === 'runaway' ? t('stopped as a runaway')
               : p.parkedKind === 'blocked' ? t('blocked by a serve we could not identify')
                 : p.parked ? t('parked after repeated crashes')
-                : running ? t('running on 127.0.0.1:{port}', { port: p.port || '?' })
-                  : p.starting ? t('starting…') : t('turned off'))
-          : isRelay
-            ? (p.configured === false ? t('relay not configured on this instance')
-              : running ? t('connected') : p.installed ? t('stopped') : t('not installed'))
-            : p.mode === 'system' ? t('managed by the system (outside VibeSpace)')
-              : running ? (p.backendState === 'Running' ? t('connected') : (p.backendState || t('starting…')))
-                : p.installed ? t('stopped') : t('not installed');
-        const dot = `<span class="plugin-dot ${isDictation ? (p.running ? 'ok' : '') : isDecision ? (p.enabled && p.configured ? 'ok' : p.enabled ? 'warn' : '') : isServe ? (running ? 'ok' : p.parked ? 'err' : p.starting ? 'warn' : '')
-          : isRelay ? (running ? 'ok' : '')
-            : (running && p.backendState === 'Running' ? 'ok' : running ? 'warn' : '')}"></span>`;
-        let detail = '';
-        // the privacy sentence (design §2.8): what leaves the instance, to whom — beside the switch, always
-        if (isDecision) detail += `<div class="plugin-detail decision-privacy">${escHtml(t('The text of your channel records is sent to {provider} to be judged; attachments, images and raw webhook payloads never are.', { provider: p.decision?.providerLabel || t('the provider you choose') }))}</div>`;
-        if (isServe) {
-          if (p.envForced === true) detail += `<div class="plugin-detail plugin-cfg-hint">${escHtml(t('Forced ON by the environment (VIBESPACE_OPENCODE_SERVE=1) — the switch below is ignored on this instance.'))}</div>`;
-          if (p.envForced === false) detail += `<div class="plugin-detail plugin-cfg-warn">${escHtml(t('Forced OFF by the environment (VIBESPACE_OPENCODE_SERVE=0) — the switch below is ignored on this instance.'))}</div>`;
-          if (!p.installed) detail += `<div class="plugin-detail plugin-cfg-warn">${escHtml(t('The `opencode` CLI was not found on PATH. Install OpenCode (https://opencode.ai) — VibeSpace runs YOUR copy, it never downloads one.'))}</div>`;
-          if (running) detail += `<div class="plugin-detail">${escHtml(t('opencode {version} · pid {pid} · {source}', { version: p.version || '?', pid: p.pid || '?', source: p.source === 'reused' ? t('adopted an already-running serve') : t('started by VibeSpace') }))}${p.rssMb ? ' · ' + escHtml(t('{mb} MB', { mb: p.rssMb })) : ''}${p.cpuPct != null ? ' · ' + escHtml(t('{pct}% CPU', { pct: p.cpuPct })) : ''}</div>`;
-          if (!running && p.reason) detail += `<div class="plugin-detail plugin-cfg-warn">${escHtml(p.reason)}</div>`;
-        }
-        if (isRelay && p.configured) detail += `<div class="plugin-detail">${escHtml(t('Relay'))}: <code>${escHtml(p.server || '')}</code> · ${escHtml(t('publishes forwarded ports to {host}', { host: p.publicHost }))}</div>`;
-        if (isRelay && p.configured === false) {
-          // Name the MISSING field (2.227.10) — "not configured" alone sent a
-          // user in circles while only the token was blank.
-          const miss = (p.missing || []).map((k) => ({ serverAddr: t('relay address'), token: t('relay token') }[k] || k));
-          const why = miss.length ? t('Missing: {fields} — fill it in below (or set VIBESPACE_FRPS_ADDR/_PORT/_TOKEN).', { fields: miss.join(', ') })
-            : t('Set VIBESPACE_FRPS_ADDR / _PORT / _TOKEN (the shared relay) to enable public URLs.');
-          detail += `<div class="plugin-detail plugin-cfg-warn">${escHtml(why)}</div>`;
-        }
-        if (p.self?.ips?.length) detail += `<div class="plugin-detail">${escHtml(t('Tailnet address'))}: <code>${escHtml(p.self.ips[0])}</code>${p.self.dnsName ? ` · ${escHtml(p.self.dnsName.replace(/\.$/, ''))}` : ''}${p.peers ? ` · ${escHtml(t('{n} peers', { n: p.peers }))}` : ''}</div>`;
-        if (running && p.mode === 'userspace') detail += `<div class="plugin-detail">${escHtml(t('Userspace mode — reach tailnet hosts through SOCKS5 localhost:{port} (no tun device in this container)', { port: p.socksPort }))}</div>`;
-        if (running && p.mode === 'kernel') detail += `<div class="plugin-detail">${escHtml(t('Kernel mode — full tunnel, tailnet hosts reachable directly'))}</div>`;
-        card.innerHTML = `
-          <div class="plugin-head">
-            <div class="plugin-name">${dot}${escHtml(p.label)}</div>
-            <div class="plugin-state">${escHtml(stateTxt)}</div>
-          </div>
-          <div class="plugin-desc">${escHtml(t(p.description))}</div>
-          ${detail}
-          <div class="plugin-actions"></div>
-          <div class="plugin-auth"></div>
-          <div class="plugin-config"></div>`;
-        const actions = card.querySelector('.plugin-actions');
-        const authBox = card.querySelector('.plugin-auth');
-        const cfgBox = card.querySelector('.plugin-config');
-        const btn = (label, cls, fn, { rerender = true } = {}) => {
-          const b = document.createElement('button');
-          b.className = 'mounts-btn' + (cls ? ' ' + cls : '');
-          b.textContent = label;
-          b.onclick = async () => {
-            b.disabled = true;
-            try { await fn(); } catch (e) { showToast(e.message || t('Failed'), { type: 'error' }); }
-            b.disabled = false;
-            if (rerender) render(); // login skips this — a re-render wipes the auth-URL box it just filled
-          };
-          actions.appendChild(b);
-          return b;
-        };
-        // fetchJson resolves NULL on a network failure / non-JSON error page —
-        // an `x?.error` check alone passed that through as SUCCESS, so clicking
-        // Install against an unreachable server toasted "Installed" with
-        // nothing installed (Start/Stop/boot-toggle silently no-op'd the same
-        // way, and the re-render just showed the unchanged state).
-        const api = (pathTail, opts) => fetchJson(`/api/plugins/${p.id}/${pathTail}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, ...opts })
-          .then((x) => { if (!x) throw new Error(t('Server unreachable — nothing was changed')); if (x.error) throw new Error(x.error); return x; });
-
-        // frp: no login/mode/flags. The relay config fields (below) always
-        // show so the user can enter/override the relay; install/start appear
-        // only once a relay is configured (env default or user-entered).
-        if (isDictation) {
-          renderDictationCard({ p, head: card.querySelector('.plugin-head'), actions, cfgBox, api, rerender: render });
-        } else if (isDecision) {
-          decisionCard(this, p, { actions, cfgBox, api, render });
-        } else if (isServe) {
-          // The OpenCode service has nothing to install (it runs the user's own
-          // CLI) and nothing to configure — Start / Stop and one deliberate
-          // on-switch. The env override, when set, WINS: say so and disable the
-          // controls rather than offering a button that can only fail.
-          const locked = p.envForced !== null && p.envForced !== undefined;
-          if (p.installed && !locked) {
-            if (running || p.starting) btn(t('Stop'), '', () => api('stop'));
-            else btn(p.parked ? t('Start again') : t('Enable & start'), 'mounts-btn-primary', () => api('start'));
-          }
-          // ONE switch, in lockstep with Start/Stop above (the server keeps
-          // enabled and desiredUp together): ticking it starts the service now
-          // AND on every boot; unticking it stops the daemon. A checkbox that
-          // only wrote a boot flag would be a visible no-op.
-          const lbl = document.createElement('label');
-          lbl.className = 'plugin-boot';
-          const cb = document.createElement('input');
-          cb.type = 'checkbox'; cb.checked = !!p.enabled; cb.disabled = locked || !p.installed;
-          cb.onchange = () => api('enabled', { body: JSON.stringify({ enabled: cb.checked }) })
-            .catch((e) => { cb.checked = !!p.enabled; showToast(e.message, { type: 'error' }); });
-          lbl.append(cb, document.createTextNode(' ' + t('Run this service whenever VibeSpace runs')));
-          actions.appendChild(lbl);
-        } else if (p.mode !== 'system') {
-          if (isRelay && !p.configured) {
-            // no relay yet — show only the config fields (added after actions)
-          } else if (!p.installed) {
-            btn(t('Install'), 'mounts-btn-primary', async () => {
-              showToast(t('Downloading {name}…', { name: p.label }));
-              await api('install');
-              showToast(t('Installed'));
-            });
-          } else if (!running) {
-            btn(t('Start'), 'mounts-btn-primary', () => api('start'));
-          } else {
-            if (isTunnel && p.backendState !== 'Running') {
-              const loginBtn = btn(t('Log in…'), 'mounts-btn-primary', async () => {
-                const res = await api('login');
-                if (res.done) { showToast(t('Already connected')); render(); return; }
-                if (res.pending) { loginBtn.textContent = t('Waiting for the sign-in page…'); return; }
-                if (res.authUrl) {
-                  authBox.innerHTML = `<div class="mounts-field-hint">${escHtml(t('Open this link, approve the device, then come back — the status updates by itself:'))}</div>
-                    <div class="plugin-auth-url"><a href="${escHtml(res.authUrl)}" target="_blank" rel="noopener">${escHtml(res.authUrl)}</a>
-                    <button class="mounts-btn plugin-copy">${escHtml(t('Copy'))}</button></div>`;
-                  authBox.querySelector('.plugin-copy').onclick = () => copyText(res.authUrl).then(() => showToast(t('Copied')));
-                  if (!pollTimer) pollTimer = setInterval(async () => {
-                    if (!body.isConnected) { cleanup(); return; } // dialog closed — stop polling
-                    const st = await fetchJson(`/api/plugins/${p.id}/status`);
-                    if (st?.backendState === 'Running') { cleanup(); showToast(t('Connected to the tailnet')); render(); }
-                  }, 3000);
-                }
-              }, { rerender: false });
-            }
-            btn(t('Stop'), '', async () => {
-              // verify-r6 D1: an OPTIONS OBJECT — the two positional strings this passed rendered a blank "Confirm / OK"
-              // dialog (showConfirmDialog destructures its first argument), and OK stopped frp / Tailscale unsaid
+                  : running ? t('running on 127.0.0.1:{port}', { port: p.port || '?' }) : p.starting ? t('starting…') : t('turned off');
+          tone = running ? 'ok' : p.parked ? 'err' : p.starting ? 'warn' : '';
+          chipTitle = p.envForced === true ? t('Forced ON by the environment (VIBESPACE_OPENCODE_SERVE=1) — the switch below is ignored on this instance.')
+            : p.envForced === false ? t('Forced OFF by the environment (VIBESPACE_OPENCODE_SERVE=0) — the switch below is ignored on this instance.') : (p.reason || '');
+          swDisabled = (p.envForced !== null && p.envForced !== undefined) || !p.installed;
+          // ONE switch: the server keeps enabled and desiredUp together (on = start now AND on every boot)
+          onSwitch = (on) => act(() => api('enabled', { body: JSON.stringify({ enabled: on }) }));
+        } else {
+          // relay (frp) / tunnel (Tailscale): on = start now + at boot; off = stop (said first) + not at boot
+          const loginNeeded = isTunnel && running && p.backendState !== 'Running';
+          chip = p.mode === 'system' ? t('managed by the system (outside VibeSpace)')
+            : isRelay && p.configured === false ? t('relay not configured on this instance')
+              : loginNeeded ? t('Log in…') : running ? t('connected') : p.installed ? t('stopped') : t('not installed');
+          tone = running && !loginNeeded ? 'ok' : loginNeeded ? 'warn' : '';
+          if (isRelay && p.configured === false) {
+            const miss = (p.missing || []).map((k) => ({ serverAddr: t('relay address'), token: t('relay token') }[k] || k));
+            chipTitle = miss.length ? t('Missing: {fields} — set it in the plugin\'s settings (⚙), or set VIBESPACE_FRPS_ADDR/_PORT/_TOKEN.', { fields: miss.join(', ') }) : t('Set VIBESPACE_FRPS_ADDR / _PORT / _TOKEN (the shared relay) to enable public URLs.');
+            onChip = () => this._openPluginSettings(p.id);
+          } else if (isRelay && p.configured) chipTitle = t('publishes forwarded ports to {host}', { host: p.publicHost || '' });
+          if (loginNeeded) onChip = () => this._tailscaleLogin(p, api, render);
+          if (p.self?.ips?.length) chipTitle = `${t('Tailnet address')}: ${p.self.ips[0]}`;
+          swOn = !!p.enabled || running; swDisabled = p.mode === 'system' || !p.installed || (isRelay && p.configured === false);
+          onSwitch = async (on, cb) => {
+            if (!on) {
+              // verify-r6 D1: an OPTIONS OBJECT (two positional strings rendered a blank "Confirm / OK" dialog)
               const ok = await showConfirmDialog({
                 title: t('Stop {name}?', { name: p.label }),
-                message: isRelay
-                  ? t('Public URLs from this instance will stop working until you start it again.')
-                  : t('Tailnet connections from this instance will drop. The login persists — starting again reconnects without re-auth.'),
+                message: isRelay ? t('Public URLs from this instance will stop working until you start it again.') : t('Tailnet connections from this instance will drop. The login persists — starting again reconnects without re-auth.'),
                 confirmText: t('Stop'),
                 danger: true,
               });
-              if (ok) await api('stop');
-            });
-          }
-          // enable-at-boot toggle
-          const lbl = document.createElement('label');
-          lbl.className = 'plugin-boot';
-          const cb = document.createElement('input');
-          cb.type = 'checkbox'; cb.checked = !!p.enabled;
-          // a failed save must not leave the box showing a setting the server
-          // never took — put it back where it was and say why
-          cb.onchange = () => api('enabled', { body: JSON.stringify({ enabled: cb.checked }) })
-            .catch((e) => { cb.checked = !!p.enabled; showToast(e.message, { type: 'error' }); });
-          lbl.append(cb, document.createTextNode(' ' + t('Start automatically with the server')));
-          actions.appendChild(lbl);
-
-          // ── frp relay config (editable — the cluster injects defaults, the
-          //    user can override any of it) ──
-          if (isRelay) {
-            const cfg = p.config || {};
-            const row = (label, key, val, ph, isPw) => {
-              const r = document.createElement('div'); r.className = 'plugin-cfg-row';
-              const inp = document.createElement('input'); inp.className = 'plugin-cfg-flags'; inp.type = isPw ? 'password' : 'text';
-              inp.value = val || ''; inp.placeholder = ph || ''; inp.dataset.key = key;
-              r.append(Object.assign(document.createElement('span'), { className: 'plugin-cfg-label', textContent: label }), inp);
-              cfgBox.appendChild(r); return inp;
-            };
-            const iAddr = row(t('Relay address'), 'serverAddr', cfg.serverAddr, t('relay host'));
-            const iPort = row(t('Relay port'), 'serverPort', cfg.serverPort, '7000');
-            const iTok = row(t('Relay token'), 'token', cfg.hasToken ? '••••••••' : '', t('shared secret'), true);
-            const iSub = row(t('Subdomain host (optional)'), 'subDomainHost', cfg.subDomainHost, t('example.com → https://<random>.example.com'));
-            const saveRow = document.createElement('div'); saveRow.className = 'plugin-cfg-row';
-            const save = document.createElement('button'); save.className = 'mounts-btn'; save.textContent = t('Save config');
-            save.onclick = async () => {
-              const body = { serverAddr: iAddr.value, serverPort: iPort.value, subDomainHost: iSub.value };
-              // untouched mask = keep the stored override; anything else —
-              // including an EMPTIED field — is sent verbatim ('' clears the
-              // override back to the cluster env default, same as the other
-              // fields; the mask-only guard made the token unclearable)
-              if (iTok.value !== '••••••••') body.token = iTok.value;
-              try { await api('config', { body: JSON.stringify(body) }); showToast(t('Saved')); render(); } catch (e) { showToast(e.message, { type: 'error' }); }
-            };
-            saveRow.appendChild(save);
-            if (p.fromEnv) saveRow.append(Object.assign(document.createElement('span'), { className: 'plugin-cfg-hint', textContent: t('defaults come from the cluster — edit to override') }));
-            cfgBox.appendChild(saveRow);
-          }
-
-          // ── Networking mode + extra flags (advanced config) — tailscale only ──
-          if (isTunnel && p.installed) {
-            const modes = [
-              ['auto', t('Auto')],
-              ['kernel', t('Kernel (full tunnel)')],
-              ['userspace', t('Userspace (proxy only)')],
-            ];
-            const modeRow = document.createElement('div');
-            modeRow.className = 'plugin-cfg-row';
-            const modeSel = document.createElement('select');
-            modeSel.className = 'plugin-cfg-select';
-            for (const [v, l] of modes) { const o = document.createElement('option'); o.value = v; o.textContent = l; if (v === (p.modePref || 'auto')) o.selected = true; modeSel.appendChild(o); }
-            modeSel.onchange = async () => {
-              try { await api('mode', { body: JSON.stringify({ mode: modeSel.value }) }); showToast(running ? t('Switching mode — reconnecting…') : t('Mode saved')); setTimeout(render, running ? 2500 : 0); }
-              catch (e) { showToast(e.message, { type: 'error' }); }
-            };
-            modeRow.append(Object.assign(document.createElement('span'), { className: 'plugin-cfg-label', textContent: t('Networking') }), modeSel);
-            if (p.modePref === 'kernel' && !p.tunUsable) modeRow.append(Object.assign(document.createElement('span'), { className: 'plugin-cfg-warn', textContent: t('no usable /dev/net/tun — will fail') }));
-            else if ((p.modePref || 'auto') === 'auto') modeRow.append(Object.assign(document.createElement('span'), { className: 'plugin-cfg-hint', textContent: p.tunUsable ? t('→ kernel (tun available)') : t('→ userspace (no tun)') }));
-            cfgBox.appendChild(modeRow);
-
-            const flagRow = document.createElement('div');
-            flagRow.className = 'plugin-cfg-row';
-            const flagInput = document.createElement('input');
-            flagInput.className = 'plugin-cfg-flags';
-            flagInput.placeholder = '--advertise-routes=10.0.0.0/24 --hostname=my-instance --ssh';
-            flagInput.value = p.upFlags || '';
-            flagInput.title = t('Extra `tailscale up` flags — applied on the next Log in / mode change. Reachability flags we manage (--socket/--tun/--accept-routes/proxy) are ignored.');
-            const flagSave = document.createElement('button');
-            flagSave.className = 'mounts-btn'; flagSave.textContent = t('Save flags');
-            flagSave.onclick = async () => { try { await api('config', { body: JSON.stringify({ upFlags: flagInput.value }) }); showToast(t('Flags saved — re-run Log in to apply')); } catch (e) { showToast(e.message, { type: 'error' }); } };
-            flagRow.append(Object.assign(document.createElement('span'), { className: 'plugin-cfg-label', textContent: t('tailscale up flags') }), flagInput, flagSave);
-            cfgBox.appendChild(flagRow);
+              if (!ok) { cb.checked = true; return; }
+              return act(async () => { await api('enabled', { body: JSON.stringify({ enabled: false }) }); if (running) await api('stop'); });
+            }
+            return act(async () => { await api('enabled', { body: JSON.stringify({ enabled: true }) }); if (!running) await api('start'); });
+          };
+          if (!p.installed && p.mode !== 'system' && !(isRelay && p.configured === false)) {
+            install = document.createElement('button'); install.className = 'mounts-btn plugin-install'; install.textContent = t('Install');
+            install.onclick = () => act(async () => { showToast(t('Downloading {name}…', { name: p.label })); await api('install'); showToast(t('Installed')); });
           }
         }
-        body.appendChild(card);
+        list.appendChild(pluginRow({ id: p.id, label: p.label, description: t(p.description), tone, chip, chipTitle, onChip,
+          sw: makeSwitch(swOn, { disabled: swDisabled, label: t('Turn {name} on or off', { name: p.label }), onChange: (on, cb) => onSwitch(on, cb) }),
+          install, gear: this._pluginGear(p.id, p.label) }));
       }
       await renderManifestPlugins(body);
     };
@@ -371,47 +192,18 @@ export function installPluginsUI(App) {
         empty.className = 'empty-hint'; empty.textContent = t('No plugins installed. Use Install plugin… (a folder, a git URL, a .vsp file or a GitHub release) — docs/examples/hello-plugin is the smallest complete one.');
         sec.appendChild(empty);
       }
+      const rows = document.createElement('div'); rows.className = 'plugin-list';
+      sec.appendChild(rows);
       for (const p of list) {
-        const card = document.createElement('div');
-        card.className = 'plugin-card plugin-manifest-card';
-        const stateTxt = !p.valid ? t('invalid') : !p.enabled ? t('disabled') : p.server ? ({ running: t('running'), starting: t('starting…'), crashed: t('crashed — restarting'), parked: t('parked after repeated crashes'), stopped: t('stopped'), error: t('error') }[p.state] || p.state) : t('enabled');
-        const dot = `<span class="plugin-dot ${!p.valid ? 'err' : (p.enabled ? (p.state === 'running' || !p.server ? 'ok' : 'warn') : '')}"></span>`;
-        const tier = p.client === 'module' ? (p.trusted ? t('trusted client module') : t('client module — needs your consent')) : p.client === 'iframe' ? t('sandboxed UI') : '';
-        const badges = [tier, p.server ? t('server process') : '', p.needsConsent && !p.trusted ? t('needs consent') : (p.trusted ? '✓ ' + t('trusted') : '')].filter(Boolean).map((x) => `<span class="plugin-cfg-hint">${escHtml(x)}</span>`).join(' · ');
-        const wins = (p.contributes?.windows || []).map((w) => `<button class="mounts-btn plugin-open-win" data-plugin="${escHtml(p.id)}" data-win="${escHtml(w.id)}"${p.enabled ? '' : ' disabled'}>${escHtml(w.title)}</button>`).join(' ');
-        const tools = (p.contributes?.agentTools || []).map((tl) => `<code>vibespace-tool-${escHtml(p.id)}-${escHtml(tl.name)}</code>`).join(' ');
-        const contrib = [(p.contributes?.settings || []).length ? t('{n} settings', { n: p.contributes.settings.length }) : '', (p.contributes?.themes || []).length ? t('{n} themes', { n: p.contributes.themes.length }) : ''].filter(Boolean).join(' · ');
         const clientErr = this.pluginClient?.errors?.get?.(p.id) || null;
-        card.innerHTML = `
-          <div class="plugin-head">${dot}<b>${escHtml(p.label && p.label !== p.id ? `${p.label} (${p.id})` : p.id)}</b> <span class="plugin-ver">${escHtml(p.version || '')}</span> <span class="plugin-state">${escHtml(stateTxt)}</span></div>
-          ${badges ? `<div class="plugin-detail">${badges}</div>` : ''}
-          ${p.description ? `<div class="plugin-detail">${escHtml(p.description)}</div>` : ''}
-          ${p.notice ? `<div class="plugin-detail plugin-cfg-warn">${escHtml(p.notice)}</div>` : ''}
-          ${p.errors?.length ? `<div class="plugin-detail plugin-cfg-warn">${escHtml(p.errors.join(' · '))}</div>` : ''}
-          ${p.warnings?.length ? `<div class="plugin-detail plugin-cfg-hint">${escHtml(p.warnings.join(' · '))}</div>` : ''}
-          ${p.lastError ? `<div class="plugin-detail plugin-cfg-warn">${escHtml(p.lastError)}</div>` : ''}
-          ${clientErr ? `<div class="plugin-detail plugin-cfg-warn">${escHtml(t('Client module error: {error}', { error: clientErr }))}</div>` : ''}
-          ${tools ? `<div class="plugin-detail">${escHtml(t('Agent tools'))}: ${tools}</div>` : ''}
-          ${contrib ? `<div class="plugin-detail plugin-cfg-hint">${escHtml(contrib)}</div>` : ''}
-          ${p.install ? `<div class="plugin-detail plugin-cfg-hint">${escHtml(t('Installed from {source}: {value}', { source: p.install.source, value: p.install.value || '' }))}</div>` : ''}
-          <div class="plugin-detail plugin-manifest-actions">${wins}</div>`;
-        const actions = card.querySelector('.plugin-manifest-actions');
-        const toggle = document.createElement('button');
-        toggle.className = 'mounts-btn'; toggle.disabled = !p.valid;
-        toggle.textContent = p.enabled ? t('Disable') : (p.consentRequired ? t('Enable (trusted)…') : t('Enable'));
-        toggle.onclick = async () => {
-          if (!p.enabled) { if (p.consentRequired) { const okc = await this._pluginConsentDialog(p); if (!okc) return; return enablePlugin(p, { trusted: true }); } return enablePlugin(p); }
-          const rr = await fetchJson(`/api/plugins/manifests/${encodeURIComponent(p.id)}/enabled`, { method: 'POST', body: JSON.stringify({ enabled: false }) });
-          if (rr?.error) { showToast(rr.error, { type: 'error' }); return; }
-          showToast(t('Plugin disabled'));
-          this.pluginClient?.refresh?.();
-          render();
-        };
-        const more = document.createElement('button');
-        more.className = 'mounts-btn'; more.textContent = '⋯'; more.title = t('More');
-        more.onclick = (ev) => {
-          const rect = more.getBoundingClientRect();
+        const chip = !p.valid ? t('invalid') : !p.enabled ? t('disabled') : p.server ? ({ running: t('running'), starting: t('starting…'), crashed: t('crashed — restarting'), parked: t('parked after repeated crashes') }[p.state] || p.state || '') : t('enabled');
+        const tone = !p.valid ? 'err' : p.enabled ? (p.state === 'running' || !p.server ? 'ok' : 'warn') : '';
+        const why = [...(p.errors || []), p.lastError, p.notice, clientErr ? t('Client module error: {error}', { error: clientErr }) : ''].filter(Boolean).join(' · ');
+        // the chip opens what the plugin offers (its windows, what it may do, an update) — actions, never settings
+        const onChip = (ev) => {
+          const rect = ev.currentTarget.getBoundingClientRect();
           showContextMenu(rect.left, rect.bottom + 2, [
+            ...(p.contributes?.windows || []).map((w) => ({ label: t('Open {name}', { name: w.title }), disabled: !p.enabled, action: () => { this.pluginClient?.open?.(p.id, w.id); close(); } })),
             { label: t('Show capabilities…'), action: () => this._pluginConsentDialog(p, null, { readOnly: true }) },
             { label: t('Update'), disabled: !p.install || p.install.source === 'zip', action: async () => {
               showToast(t('Updating {id}…', { id: p.id }));
@@ -420,25 +212,76 @@ export function installPluginsUI(App) {
               showToast(t('Updated {id} to {version}', { id: p.id, version: rr.plugin?.version || '' }));
               this.pluginClient?.refresh?.(); render();
             } },
-            { separator: true },
-            { label: t('Uninstall…'), style: 'danger', action: async () => {
-              const okd = await showConfirmDialog({ title: t('Uninstall plugin'), message: t('Uninstall "{name}"? Its folder and data move to data/plugins-trash (nothing is deleted).', { name: p.label || p.id }), confirmText: t('Uninstall'), danger: true });
-              if (!okd) return;
-              const rr = await fetchJson(`/api/plugins/manifests/${encodeURIComponent(p.id)}`, { method: 'DELETE' });
-              if (rr?.error) { showToast(rr.error, { type: 'error' }); return; }
-              showToast(t('Uninstalled {id} (moved to trash)', { id: p.id }));
-              this.pluginClient?.refresh?.(); render();
-            } },
           ]);
           ev.stopPropagation();
         };
-        actions.prepend(toggle, more);
-        for (const b of card.querySelectorAll('.plugin-open-win')) b.onclick = () => { this.pluginClient?.open?.(b.dataset.plugin, b.dataset.win); close(); };
-        sec.appendChild(card);
+        const sw = makeSwitch(p.enabled, { disabled: !p.valid, label: t('Turn {name} on or off', { name: p.label || p.id }), onChange: async (on, cb) => {
+          if (on) {
+            if (p.consentRequired) { const okc = await this._pluginConsentDialog(p); if (!okc) { cb.checked = false; return; } return enablePlugin(p, { trusted: true }); }
+            return enablePlugin(p);
+          }
+          const rr = await fetchJson(`/api/plugins/manifests/${encodeURIComponent(p.id)}/enabled`, { method: 'POST', body: JSON.stringify({ enabled: false }) });
+          if (rr?.error) { showToast(rr.error, { type: 'error' }); cb.checked = true; return; }
+          showToast(t('Plugin disabled'));
+          this.pluginClient?.refresh?.();
+          render();
+        } });
+        const uninstall = document.createElement('button');
+        uninstall.className = 'mounts-btn plugin-install plugin-uninstall'; uninstall.textContent = t('Uninstall…');
+        uninstall.onclick = async () => {
+          const okd = await showConfirmDialog({ title: t('Uninstall plugin'), message: t('Uninstall "{name}"? Its folder and data move to data/plugins-trash (nothing is deleted).', { name: p.label || p.id }), confirmText: t('Uninstall'), danger: true });
+          if (!okd) return;
+          const rr = await fetchJson(`/api/plugins/manifests/${encodeURIComponent(p.id)}`, { method: 'DELETE' });
+          if (rr?.error) { showToast(rr.error, { type: 'error' }); return; }
+          showToast(t('Uninstalled {id} (moved to trash)', { id: p.id }));
+          this.pluginClient?.refresh?.(); render();
+        };
+        rows.appendChild(pluginRow({ id: p.id, label: p.label && p.label !== p.id ? `${p.label} (${p.id})` : p.id, description: p.description || '', tone, chip, chipTitle: [p.version, why].filter(Boolean).join(' · '), onChip,
+          sw, install: uninstall, gear: this._pluginGear(p.id, p.label || p.id) }));
       }
       parent.appendChild(sec);
     };
     await render();
+  },
+
+  /** the row's ⚙: All Settings at the plugin's section (tree node selected; the phone shows that section alone).
+   *  A plugin with no configuration says so instead of opening an empty place. */
+  _pluginGear(id, label) {
+    const b = document.createElement('button');
+    b.className = 'mounts-btn plugin-gear'; b.textContent = '⚙';
+    const cat = pluginCategoryOf(id);
+    b.disabled = !cat;
+    b.title = cat ? t('Open settings') : t('{name} has nothing to configure', { name: label });
+    b.setAttribute('aria-label', b.title);
+    b.onclick = () => this._openPluginSettings(id);
+    return b;
+  },
+  _openPluginSettings(id) {
+    const category = pluginCategoryOf(id);
+    if (category) this._settingsUI?.open({ category });
+  },
+  /** the Voice row's chip: Connect with Fish Audio + the proposal cards (an action surface, not settings) */
+  _voiceSheet(p, rerender) {
+    const { body, close } = createModalShell({ id: 'voice-sheet', title: p.label, bodyClass: 'mounts-dialog-body', escapeToClose: true });
+    renderVoiceSheet(body, () => { close(); rerender(); this._voiceSheet(p, rerender); });
+  },
+  /** the Tailscale row's 「Log in…」 chip: the guided sign-in (the server captures the auth URL; we poll until Running) */
+  async _tailscaleLogin(p, api, rerender) {
+    const res = await api('login').catch((e) => { showToast(e.message, { type: 'error' }); return null; });
+    if (!res) return;
+    if (res.done) { showToast(t('Already connected')); rerender(); return; }
+    if (res.pending) { showToast(t('Waiting for the sign-in page…')); return; }
+    if (!res.authUrl) return;
+    const { body, close } = createModalShell({ id: 'tailscale-login', title: t('Log in…'), escapeToClose: true });
+    body.innerHTML = `<div class="mounts-field-hint">${escHtml(t('Open this link, approve the device, then come back — the status updates by itself:'))}</div>
+      <div class="plugin-auth-url"><a href="${escHtml(res.authUrl)}" target="_blank" rel="noopener">${escHtml(res.authUrl)}</a>
+      <button class="mounts-btn plugin-copy">${escHtml(t('Copy'))}</button></div>`;
+    body.querySelector('.plugin-copy').onclick = () => copyText(res.authUrl).then(() => showToast(t('Copied')));
+    const timer = setInterval(async () => {
+      if (!body.isConnected) { clearInterval(timer); return; }
+      const st = await fetchJson(`/api/plugins/${p.id}/status`);
+      if (st?.backendState === 'Running') { clearInterval(timer); close(); showToast(t('Connected to the tailnet')); rerender(); }
+    }, 3000);
   },
 
   /** Consent dialog (Plugin Ph4): the plugin's declared capabilities in plain

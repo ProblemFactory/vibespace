@@ -1,4 +1,4 @@
-import { SETTINGS_SCHEMA, SETTINGS_CATEGORIES, harnessSectionFor, harnessFileRel, harnessCategory, channelVendorName, orderedCategories, settingsGroupOf, settingsGroups, clampToSchema } from './settings-schema.js';
+import { SETTINGS_SCHEMA, SETTINGS_CATEGORIES, pluginSectionFor, harnessSectionFor, harnessFileRel, harnessCategory, channelVendorName, orderedCategories, settingsGroupOf, settingsGroups, clampToSchema } from './settings-schema.js';
 import { settingsViewModel, hiddenAdvancedText, whenClauses, clauseKind, SHOW_ADVANCED_KEY } from './settings-view.js'; // PURE: what is drawn — tiers, `when`, search, modified (B-df40 part 2)
 import { showConfirmDialog, fetchJson, showToast, copyText } from './utils.js';
 import { receiptLine, offLine, applyHead, refusalLine, recoveredLine } from './cli-config-chips.js';
@@ -7,6 +7,23 @@ import { t } from './i18n.js';
 import { escHtml } from './utils.js';
 import { UI_ICONS } from './icons.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
+import { ATTENTION_RULES, attentionPolicy, presetOf, presetSwitches } from './channel-focus.js';   // lane attention-policy
+
+// lane attention-policy: A PLUGIN'S FEATURE SWITCH shown as a settings row (`store: {plugin, feature}`) — read from GET
+// /api/plugins (the plugin row's own `decision` / `config` answer), written through POST /api/plugins/<id>/config, the
+// plugin's own door: ONE store, never a copy in settings. null = the plugin is not on this instance.
+const pluginFeatureListeners = new Set();
+async function readPluginFeature(id, feature) {
+  try {
+    const p = (((await fetchJson('/api/plugins')) || {}).plugins || []).find((x) => x && x.id === id);
+    return p ? (p.decision || p.config || {})[feature] === true : null;
+  } catch { return null; }
+}
+async function writePluginFeature(id, feature, on) {
+  const r = await fetchJson(`/api/plugins/${encodeURIComponent(id)}/config`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ [feature]: on }) });
+  if (r && r.error) throw new Error(r.error);
+  for (const f of [...pluginFeatureListeners]) f();
+}
 
 /**
  * SettingsUI — VS Code-style settings page.
@@ -59,13 +76,17 @@ class SettingsUI {
     if (this._advInput) this._advInput.checked = this._showAdvanced;
   }
 
-  open({ syncId, search } = {}) {
+  open({ syncId, search, category } = {}) {
     // Non-blocking: Settings is a normal same-level WINDOW (not a modal overlay)
     // so you can tweak a setting and watch the effect on the workspace live.
     // Singleton — focus an already-open settings window instead of stacking.
     // `search` (the switch dialog's "Set location in Settings…", 2026-09-27): the search box is filled with it and the
     // filter applied before the first render — the rows that match are the ones on screen (there is no category focus).
     const want = typeof search === 'string' && search ? search : null;
+    // `category` (lane plugin-settings-p0 — a Plugins list row's ⚙): the section's tree node selected and scrolled to;
+    // on the phone (one column, no tree) the list shows that section alone until the search box is used
+    const cat = typeof category === 'string' && SETTINGS_CATEGORIES.includes(category) ? category : null;
+    this._onlyCategory = cat && this.app.isMobile ? cat : null;
     const existing = [...this.app.wm.windows.values()].find(w => w.type === 'settings');
     if (existing) {
       this.app.wm.revealWindow(existing.id, { replay: !!syncId }); // its own tab, restored, raised (a replay only raises)
@@ -75,6 +96,7 @@ class SettingsUI {
         const content = existing.content.querySelector('.settings-content'), nav = existing.content.querySelector('.settings-nav');
         if (content && nav) this._renderContent(content, nav);
       }
+      if (cat) { const content = existing.content.querySelector('.settings-content'), nav = existing.content.querySelector('.settings-nav'); if (content && nav) { this._renderContent(content, nav); this._showCategory(content, nav, cat); } return; }
       inp?.focus();
       return;
     }
@@ -130,7 +152,7 @@ class SettingsUI {
     searchInput.placeholder = t('Search settings...');
     this._search = want ? want.toLowerCase() : ''; // clear filter on open (or the caller's search)
     if (want) searchInput.value = want;
-    searchInput.oninput = () => { this._search = searchInput.value.toLowerCase(); this._renderContent(content, nav); };
+    searchInput.oninput = () => { this._search = searchInput.value.toLowerCase(); this._onlyCategory = null; this._renderContent(content, nav); };
     searchWrap.appendChild(searchInput);
 
     // Body: nav + content
@@ -149,7 +171,42 @@ class SettingsUI {
     this._content = content; this._nav = nav;
     this._governors = new Set(Object.values(SETTINGS_SCHEMA).flatMap((r) => whenClauses(r.when)).filter((c) => clauseKind(c) === 'setting').map((c) => c.setting));
     this._renderContent(content, nav);
-    searchInput.focus();
+    if (cat) this._showCategory(content, nav, cat);
+    else searchInput.focus();
+  }
+  /** the ⚙ door's landing: the category's section scrolled to the top and its nav node marked */
+  _showCategory(content, nav, cat) {
+    const section = [...content.querySelectorAll('.settings-section')].find((x) => x.dataset.category === cat);
+    if (section) section.scrollIntoView({ block: 'start' });
+    nav.querySelectorAll('.settings-nav-item').forEach((n) => n.classList.toggle('active', n.textContent === cat));
+    nav.querySelector('.settings-nav-item.active')?.scrollIntoView({ block: 'nearest' });
+  }
+  /** a plugin section's LINK row (src/plugin-settings.js linksOf — no value, never in settings.json): the on-switch's
+   *  place (the Plugins list), the key's place (Services › Integrations) or a plugin-held secret (written to the
+   *  plugin itself, never shown again) */
+  _pluginLinkRow(l) {
+    const row = document.createElement('div');
+    row.className = 'settings-row settings-link-row'; row.dataset.link = l.to.kind;
+    const info = document.createElement('div'); info.className = 'settings-row-info';
+    info.append(Object.assign(document.createElement('div'), { className: 'settings-row-label', textContent: t(l.label) }), Object.assign(document.createElement('div'), { className: 'settings-row-desc', textContent: t(l.description || '') }));
+    const ctl = document.createElement('div'); ctl.className = 'settings-row-control';
+    const b = document.createElement('button'); b.className = 'settings-link-btn';
+    if (l.to.kind === 'plugin-secret') {
+      const inp = document.createElement('input'); inp.type = 'password'; inp.className = 'settings-input-text'; inp.autocomplete = 'off'; inp.placeholder = '••••••••';
+      b.textContent = t('Save');
+      b.onclick = async () => {
+        const r = await fetchJson(`/api/plugins/${encodeURIComponent(l.to.id)}/config`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ [l.to.key]: inp.value }) });
+        if (!r || r.error) { showToast((r && r.error) || t('Server unreachable — nothing was changed'), { type: 'error' }); return; }
+        inp.value = ''; showToast(t('Saved'));
+      };
+      ctl.append(inp, b);
+    } else {
+      b.textContent = l.to.kind === 'integration' ? t('Show in Integrations') : t('Open the Plugins list');
+      b.onclick = () => { if (l.to.kind === 'integration') this.app.openIntegration?.(l.to.id); else this.app.openPluginsDialog?.(); };
+      ctl.appendChild(b);
+    }
+    row.append(info, ctl);
+    return row;
   }
 
   _renderContent(content, nav) {
@@ -169,7 +226,7 @@ class SettingsUI {
     // a category with nothing to draw is not drawn — nor its nav item.
     const vm = settingsViewModel(SETTINGS_SCHEMA, { categories: SETTINGS_CATEGORIES, query, showAdvanced: this._showAdvanced, ctx: this._viewCtx(), isModified: (p) => this.settings.isModified(p), t });
     const grouped = {};
-    for (const cat of SETTINGS_CATEGORIES) grouped[cat] = vm.byCategory[cat];
+    for (const cat of SETTINGS_CATEGORIES) grouped[cat] = this._onlyCategory && cat !== this._onlyCategory ? { ...vm.byCategory[cat], show: false } : vm.byCategory[cat];
 
     // THE NAV IS A TREE (2.369.132, owner "设置分级"): one head per group, the
     // categories under it. Desktop heads fold (persisted per device); a search
@@ -256,8 +313,14 @@ class SettingsUI {
       // the per-VENDOR rows (derived from src/channel-settings.js, B-df40 part 3) draw after the category's own rows,
       // in one "Per vendor" sub-block — the way a harness section has its blocks
       const vendorRows = items.filter((it) => it.schema.channel);
+      const blocksDrawn = new Set();   // lane attention-policy: a block's rows draw together under its head (renderBlock)
       for (const { path, schema, chips } of items) {
-        if (!schema.channel) section.appendChild(this._renderSetting(path, schema, chips));
+        if (schema.channel) continue;
+        if (schema.block) {
+          if (!blocksDrawn.has(schema.block)) { blocksDrawn.add(schema.block); section.appendChild(this.renderBlock(schema.block, { items: items.filter((it) => it.schema.block === schema.block) })); }
+          continue;
+        }
+        section.appendChild(this._renderSetting(path, schema, chips));
       }
       if (vendorRows.length) {
         const st = document.createElement('div'); st.className = 'settings-subsection-title'; st.dataset.channelBlock = 'vendor'; st.textContent = t('Per vendor');
@@ -266,6 +329,9 @@ class SettingsUI {
         for (const { path, schema, chips } of vendorRows) section.appendChild(this._renderSetting(path, schema, chips));
       }
       if (sec.hiddenAdvanced) section.appendChild(this._hiddenAdvancedLine(sec.hiddenAdvanced, content, nav));
+      // a built-in plugin's section ends with its LINK rows (src/plugin-settings.js linksOf — lane plugin-settings-p0)
+      const ps = pluginSectionFor(cat);
+      if (ps) for (const l of ps.links) section.appendChild(this._pluginLinkRow(l));
 
       content.appendChild(section);
     }
@@ -353,6 +419,7 @@ class SettingsUI {
     if (schema.apply) this._renderApplyChip(info, path, schema);
     else if (schema.channel) this._renderChannelChip(info, schema);
     if (schema.fact === 'browser-display') this._renderDisplayFact(info);
+    if (schema.fact === 'attention-today') this._renderAttentionToday(info);
     if (schema.fact === 'https-address') { row.classList.add('has-wide-fact'); this._renderHttpsFact(row); } // the full row's width (a phone's label column is too narrow for an address)
 
     const controlWrap = document.createElement('div');
@@ -379,6 +446,124 @@ class SettingsUI {
   /** lane headless-fallback (2026-09-28): the FACT beside the headed PREFERENCE — this machine's display right now, read
    *  only (GET /api/browser/display: a readdir + a few local socket connects, asked when the row draws, never on a timer).
    *  A window asked of a machine with no desktop session runs headless instead of failing; the line says which it is. */
+  /** lane attention-policy: ONE BLOCK of rows (`schema.block`) under its own head. The Settings window draws it in its
+   *  category; the Channels first screen's ⚙ door draws the SAME element — this renderer, never a copy. `items` = the
+   *  view model's rows (a search keeps its matches); absent = every row of the block. A preset re-fills the block. */
+  renderBlock(block, { items = null } = {}) {
+    const box = document.createElement('div');
+    box.className = 'settings-block';
+    box.dataset.settingsBlock = block;
+    const fill = () => {
+      const list = items || Object.entries(SETTINGS_SCHEMA).filter(([, s]) => s.block === block || s.alsoBlock === block).map(([path, schema]) => ({ path, schema, chips: null }));
+      const head = document.createElement('div');
+      head.className = 'settings-subsection-title';
+      head.textContent = (list[0] && list[0].schema.blockTitle) || '';
+      box.replaceChildren(head, ...list.map(({ path, schema, chips }) => this._renderSetting(path, schema, chips)));
+    };
+    box._fill = fill;
+    fill();
+    return box;
+  }
+
+  /** lane attention-policy: the judge's readout under its switch — "Today: judged N · M needed you" (GET
+   *  /api/channels/attention, asked when the row draws, never on a timer). */
+  _renderAttentionToday(info) {
+    const line = document.createElement('div');
+    line.className = 'settings-row-fact';
+    line.dataset.attentionToday = '1';
+    line.textContent = t('checking…');
+    info.appendChild(line);
+    fetchJson('/api/channels/attention').then((r) => {
+      const d = (r && r.today) || {};
+      line.textContent = r && r.on ? t('Today: judged {n} · {m} needed you', { n: Number(d.judged) || 0, m: Number(d.hits) || 0 }) : t('The judge is off — nothing is judged');
+    }).catch(() => { line.textContent = ''; });
+  }
+
+  /** lane attention-policy: a row that stores NOTHING in settings — the judge's switch (`store: {plugin, feature}`, the
+   *  plugin's own config) or the preset (`store: 'derived'`, which SETS the block's rule rows + the judge's switch). */
+  _createStoredElsewhere(path, schema, row) {
+    if (schema.store === 'derived') return this._createPreset(path, schema, row);
+    const { plugin, feature } = schema.store;
+    const toggle = document.createElement('label');
+    toggle.className = 'settings-toggle';
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.disabled = true;
+    input.dataset.pluginFeature = `${plugin}.${feature}`;
+    readPluginFeature(plugin, feature).then((v) => { input.checked = v === true; input.disabled = v === null; });
+    input.onchange = async () => {
+      const want = input.checked;
+      try { await writePluginFeature(plugin, feature, want); } catch (e) { input.checked = !want; showToast(e.message, { type: 'error' }); }
+    };
+    const slider = document.createElement('span');
+    slider.className = 'settings-toggle-slider';
+    toggle.append(input, slider);
+    return toggle;
+  }
+
+  /** The preset radio: shows which mix the switches are (PURE presetOf), and a pick SETS them (presetSwitches). */
+  _createPreset(path, schema, row) {
+    const wrap = document.createElement('div');
+    wrap.className = 'settings-radio-group';
+    wrap.setAttribute('role', 'radiogroup');
+    const name = 'settings-radio-' + path.replace(/[^a-z0-9]+/gi, '-');
+    const judgeRow = Object.values(SETTINGS_SCHEMA).find((s) => s.block === schema.block && s.store && s.store.plugin);
+    const inputs = schema.options.map((opt) => {
+      const l = document.createElement('label');
+      l.className = 'settings-radio';
+      const i = document.createElement('input');
+      i.type = 'radio'; i.name = name; i.value = opt.value;
+      l.append(i, document.createTextNode(' ' + opt.label));
+      wrap.appendChild(l);
+      return i;
+    });
+    let judge;
+    const show = () => { const cur = presetOf(attentionPolicy((k) => this.settings.get(k), judge)); for (const i of inputs) i.checked = i.value === cur; };
+    const reread = () => (judgeRow ? readPluginFeature(judgeRow.store.plugin, judgeRow.store.feature) : Promise.resolve(null)).then((v) => { judge = v === null ? undefined : v; show(); });
+    const keys = ATTENTION_RULES.map((c) => `channels.attention.rule.${c}`);
+    // a rule's switch or the judge's moved: say the mix again (each listener leaves once its row is gone)
+    const onRule = () => { if (!wrap.isConnected) { off(); return; } show(); };
+    const onJudge = () => { if (!wrap.isConnected) { off(); return; } reread(); };
+    const off = () => { for (const k of keys) this.settings.off(k, onRule); pluginFeatureListeners.delete(onJudge); };
+    for (const k of keys) this.settings.on(k, onRule);
+    pluginFeatureListeners.add(onJudge);
+    show();
+    reread();
+    for (const i of inputs) i.onchange = async () => {
+      if (!i.checked) return;
+      const sw = presetSwitches(i.value);
+      if (!sw) return;
+      for (const [k, v] of Object.entries(sw.settings)) this.settings.set(k, v);
+      if (judgeRow) { try { await writePluginFeature(judgeRow.store.plugin, judgeRow.store.feature, sw.judge); } catch (e) { showToast(e.message, { type: 'error' }); } }
+      const box = row.closest('[data-settings-block]');
+      if (box && box._fill) box._fill();
+    };
+    return wrap;
+  }
+
+  /** `slider: true` on a number row: a range with its value beside it (lane attention-policy: the judge's threshold). */
+  _createSlider(path, schema, row, value) {
+    const wrap = document.createElement('div');
+    wrap.className = 'settings-slider';
+    const input = document.createElement('input');
+    input.type = 'range';
+    input.className = 'settings-input-range';
+    input.min = schema.min; input.max = schema.max; input.step = schema.step; input.value = value;
+    const out = document.createElement('output');
+    out.className = 'settings-slider-value';
+    const fmt = (v) => Number(v).toFixed(2);
+    out.textContent = fmt(value);
+    input.oninput = () => { out.textContent = fmt(input.value); };
+    input.onchange = () => {
+      const c = clampToSchema(schema, parseFloat(input.value));
+      this.settings.set(path, c.value);
+      out.textContent = fmt(c.value);
+      row.classList.toggle('modified', this.settings.isModified(path));
+    };
+    wrap.append(input, out);
+    return wrap;
+  }
+
   _renderDisplayFact(info) {
     const line = document.createElement('div');
     line.className = 'settings-row-fact';
@@ -542,6 +727,7 @@ class SettingsUI {
   }
 
   _createControl(path, schema, row) {
+    if (schema.store) return this._createStoredElsewhere(path, schema, row);   // lane attention-policy
     const value = this.settings.get(path);
 
     if (schema.type === 'boolean') {
@@ -572,6 +758,7 @@ class SettingsUI {
     }
 
     if (schema.type === 'number') {
+      if (schema.slider) return this._createSlider(path, schema, row, value);
       const input = document.createElement('input');
       input.type = 'number';
       input.className = 'settings-input-number';

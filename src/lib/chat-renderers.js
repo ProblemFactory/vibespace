@@ -12,7 +12,7 @@ import { renderCodeBlock, rehighlightCodeBlock, stripAnsi, getHljsLanguages } fr
 import { UI_ICONS } from './icons.js';
 import { commandDrivesBrowser, toolCommandText } from '../browser-trace.js'; // agent browser P5 (§4.5 / D35): which shell calls carry an action trace
 import { commandTouchesChannels } from '../channel-touch.js'; // §26 (B-099e): a shell call running vibespace-channels carries the witness's box
-import { describeAgentCommand, agentCommandText, alwaysOfferFor, updatesText, rulesText } from '../agent-tool-rules.js'; // lane L: VibeSpace's own tools in plain words + the widened (or narrowed / withheld) Always Allow; r6: the ONE offer the server also sends (F6) + every update in words (F5)
+import { describeAgentCommand, agentCommandText, vendorBypassOf, alwaysOfferFor, updatesText, rulesText } from '../agent-tool-rules.js'; // lane L: VibeSpace's own tools in plain words + the widened (or narrowed / withheld) Always Allow; r6: the ONE offer the server also sends (F6) + every update in words (F5)
 import { isAgentMemoryPath, backendFeatureCaps, initHealthIssues, initHealthLabel, initFrameOf } from './agent-meta.js';
 import { createBackendIconHtml, getBackendMeta } from './agent-meta.js';
 import { t } from './i18n.js';
@@ -130,7 +130,17 @@ export function browserTraceHolderHtml(block, msg) {
  */
 export function channelTouchHolderHtml(block) {
   const cmd = toolCommandText(block && block.input);
-  return cmd && commandTouchesChannels(cmd) ? '<div class="chat-channel-touches" hidden></div>' : '';
+  return cmd && commandTouchesChannels(cmd) ? '<div class="chat-channel-touches" hidden></div>' : vendorBypassHintHtml(cmd);
+}
+
+/**
+ * bypass-witness-hint: a shell call that read an IM vendor DIRECTLY (its own Lark / Slack / Gmail client — the
+ * classifier src/agent-tool-rules.js vendorBypassOf) has no witness box; it gets ONE muted line saying so and naming
+ * the door that would have witnessed it. Display only; the vendor word comes from our own table, never the wire.
+ */
+export function vendorBypassHintHtml(cmd) {
+  const b = cmd ? vendorBypassOf(cmd) : null;
+  return b ? `<div class="chat-vendor-bypass chat-status-dim">${escHtml(t('This read {vendor} directly, not through VibeSpace channels — no channel card, read marker or budget record; vibespace-channels read would have them.', { vendor: b.word }))}</div>` : '';
 }
 
 /**

@@ -67,7 +67,8 @@ function create({ accounts, claudeCmd = 'claude', broadcastAll = () => { }, spaw
   const readLocalUrl = (m) => {
     try { const u = fs.readFileSync(path.join(m.dir, 'browser-url'), 'utf8').trim().split('\n')[0]; return /^https?:\/\/\S+$/.test(u) ? u : null; } catch { return null; }
   };
-  const childEnv = (dir) => mintEnvOf(agentEnv(env), { home: dir, configDir: path.join(dir, 'config'), browser: path.join(dir, 'open-url') });
+  const configOf = (dir) => path.join(dir, 'config'); // the mint's isolated config dir (the CLI's and the probe's root)
+  const childEnv = (dir) => mintEnvOf(agentEnv(env), { home: dir, configDir: configOf(dir), browser: path.join(dir, 'open-url') });
   const nameOf = (id) => { const a = accounts.get(id); return (a && a.name) || String(id); };
   const note = (m, outcome, extra = {}) => { try { journal({ mint: m.id, accountId: m.accountId, name: nameOf(m.accountId), outcome, ...extra }); } catch { } };
   const save = (m, token, how) => {
@@ -124,7 +125,7 @@ function create({ accounts, claudeCmd = 'claude', broadcastAll = () => { }, spaw
     if (iv === 'mismatch') return refuse(m, `this token belongs to ${who.email || who.orgName || 'another account'}, not ${nameOf(m.accountId)} — not saved`, { on: 'sign-in identity' });
     if (!probePanel || !m.dir) return ask(m, token, 'no sign-in identity in the scratch config');
     let panel = null;
-    try { panel = await probePanel({ env: { ...childEnv(m.dir), CLAUDE_CODE_OAUTH_TOKEN: token }, cwd: m.dir }); } catch { panel = null; }
+    try { panel = await probePanel({ root: configOf(m.dir), env: { ...childEnv(m.dir), CLAUDE_CODE_OAUTH_TOKEN: token } }); } catch { panel = null; }
     if (!live(m)) return; // cancelled or timed out during the read
     const pv = panel ? panelVerdict(m.accountId, panel) : { verdict: 'none', why: 'the /usage read failed' };
     if (pv.verdict === 'match') return save(m, token, 'fingerprint-proven');
@@ -261,11 +262,12 @@ function create({ accounts, claudeCmd = 'claude', broadcastAll = () => { }, spaw
 }
 
 /** The production `probePanel`: ONE /usage panel read through the auto-cli
- *  rung's own spawn (usage-routes spawnPanelProbe — the one allowlisted site)
- *  and its parser; any failure is null (⇒ the pick, never a silent save). */
+ *  rung's own spawn (usage-routes spawnPanelProbe — the one allowlisted site,
+ *  which derives the config dir + the empty cwd from `root`) and its parser;
+ *  any failure is null (⇒ the pick, never a silent save). */
 function panelProbeVia(spawnOnce, parse) {
-  return ({ env, cwd }) => new Promise((resolve) => {
-    try { spawnOnce({ env, cwd }, (err, stdout) => { if (err) return resolve(null); try { resolve(parse(String(stdout || '')) || null); } catch { resolve(null); } }); } catch { resolve(null); }
+  return ({ root, env }) => new Promise((resolve) => {
+    try { spawnOnce({ root, env }, (err, stdout) => { if (err) return resolve(null); try { resolve(parse(String(stdout || '')) || null); } catch { resolve(null); } }); } catch { resolve(null); }
   });
 }
 

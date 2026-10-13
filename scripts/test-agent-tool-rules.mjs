@@ -478,5 +478,32 @@ console.log('⑭ r6 — what you approve is what runs (F4 inert tails · F5 ever
   ok(/const alwaysLines = updatesText\(always\)\.map\(lineOf\);/.test(rendSrc6) && /<div class="chat-permission-always-what">/.test(rendSrc6) && /\$\{alwaysWhatHtml\}\$\{withheldHtml\}/.test(rendSrc6) && /\.\.\.updatesText\(always\)\.filter\(/.test(rendSrc6), 'F5 WIRING PIN: every update Always Allow sends is a VISIBLE line on the card (not only the title), spelled by updatesText — and the tooltip names every non-rule update too');
 }
 
+// ⑮ bypass-witness-hint (owner 2026-10-13: a Lark read through the agent's own larkhelp.py showed a bare Bash card):
+// vendorBypassOf names a DIRECT vendor read from the command text — the census: every row's sample classifies as that
+// row, every row is load-bearing (RED: the table without it misses its sample), and words / our own door are null.
+{
+  console.log('\n⑮ vendorBypassOf — a direct IM vendor read is named on its card');
+  const T = R.VENDOR_BYPASS;
+  ok(Array.isArray(T) && T.length === 9 && eq([...new Set(T.map((r) => r.vendor))].sort(), ['gmail', 'lark', 'microsoft', 'slack']), 'the census: 9 rows over lark / slack / gmail / microsoft (a new row moves this pin)', T && T.map((r) => r.vendor + ':' + r.why));
+  for (const r of T) {
+    const got = R.vendorBypassOf(r.sample);
+    ok(!!got && got.vendor === r.vendor && got.why === r.why && got.word === r.word && /^[A-Z]/.test(r.word), `${r.vendor}/${r.why}: its sample is named (${r.word})`, got);
+    ok(!T.filter((x) => x !== r).some((x) => x.re.test(r.sample)), `${r.vendor}/${r.why} RED CONTROL: the table without this row misses its sample — the row is load-bearing`);
+  }
+  // the owner's measured shape: a heredoc whose BODY carries the SDK (the head is plain python3)
+  const owner = "cd /tmp && python3 - <<'EOF'\nimport sys; sys.path.insert(0, '/home/u/bin')\nfrom larkhelp import call, children, text_of\nfor m in children('oc_e53d'): print(text_of(m))\nEOF";
+  ok(eq(R.vendorBypassOf(owner), { vendor: 'lark', word: 'Lark', why: 'sdk' }), 'HEREDOC: the owner\'s `python3 - <<EOF … from larkhelp import …` is a Lark read (the body counts)');
+  ok(eq(R.vendorBypassOf('python3 lark_tool.py read oc_1'), { vendor: 'lark', word: 'Lark', why: 'sdk' }) && R.vendorBypassOf("node -e \"new LarkClient({appId}).im.message.list()\"").vendor === 'lark', 'the other user\'s lark_tool.py / LarkClient (the dictionary card\'s identifiers) are Lark reads');
+  for (const neg of ['vibespace-channels read lark/oc_e53d --limit 20', 'vibespace-channels list', 'curl -s https://example.com/api/messages', 'echo "remember to check lark and slack later"', 'grep -rn lark src/channels/ | head', 'git log --grep=gmail', 'cat docs/lark-cli-notes.md', 'ls ~/slack-cli-old', 'python3 -c "print(1)"', '']) {
+    ok(R.vendorBypassOf(neg) === null, `NEGATIVE: ${JSON.stringify(neg.slice(0, 50))} ⇒ null (our door / an unrelated host / a word in prose)`);
+  }
+  ok(R.vendorBypassOf(null) === null && R.vendorBypassOf(undefined) === null && R.vendorBypassOf(42) === null, 'NEGATIVE: a non-string ⇒ null');
+  // WIRING PINS: the hint takes the witness holder's EMPTY branch (a vibespace-channels call keeps the box), once
+  const rend = fs.readFileSync(path.join(REPO, 'src/lib/chat-renderers.js'), 'utf-8');
+  ok(/commandTouchesChannels\(cmd\) \? '<div class="chat-channel-touches" hidden><\/div>' : vendorBypassHintHtml\(cmd\);/.test(rend) && (rend.match(/vendorBypassOf\(/g) || []).length === 1, 'the renderer draws the hint ONLY where no witness box is drawn (channelTouchHolderHtml\'s else-branch), from the ONE classifier');
+  const dig = fs.readFileSync(path.join(REPO, 'src/channel-filter.js'), 'utf-8');
+  ok(/'Read more: vibespace-channels read <conv> \(never your own SDK or script: no card, read marker or budget\)/.test(dig), 'the channel digest\'s read line (the injection that teaches reading a channel) tells the agent: never its own SDK or script');
+}
+
 console.log(`\n${fail ? fail + ' FAILED (' + pass + ' passed' + (skipped ? ', ' + skipped + ' skipped' : '') + ')' : 'ALL PASS (' + pass + (skipped ? ', ' + skipped + ' skipped' : '') + ')'}`);
 process.exit(fail ? 1 : 0);

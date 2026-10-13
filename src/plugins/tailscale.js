@@ -70,29 +70,31 @@ module.exports = {
     // tokens starting with '-' or their following values are kept, and a small
     // denylist blocks flags we own (--socket/--tun/--socks5-server/up itself).
     const upFlags = () => {
-      const raw = h.rec().upFlags;
+      const raw = h.setting('upFlags'); // a settings row (lane plugin-settings-p0)
       if (!raw) return [];
       const OWNED = /^--(socket|tun|socks5-server|outbound-http-proxy-listen|accept-routes)(=|$)/;
       return String(raw).split(/\s+/).filter(Boolean).filter((tok) => !OWNED.test(tok));
     };
 
     const verbs = {
+      // the networking mode is a SETTINGS row (All Settings › Plugins › Tailscale); this old door writes it there and
+      // the settings write hook (applySettings) reconnects a running Tailscale into it
       mode(mode) {
         if (!['auto', 'kernel', 'userspace'].includes(mode)) throw new Error('mode must be auto|kernel|userspace');
-        h.rec().mode = mode;
-        h.save();
-        // if running, restart into the new mode (login persists in the statedir)
-        if (tsOurDaemonPid()) { try { verbs.stop(); } catch { } setTimeout(() => { try { verbs.start(); } catch { } }, 1500); }
+        h.writeSettings({ mode });
         h.notify();
         return { mode };
       },
+      applySettings() {
+        // if running, restart into the new mode (login persists in the statedir)
+        if (tsOurDaemonPid()) { try { verbs.stop(); } catch { } setTimeout(() => { try { verbs.start(); } catch { } }, 1500); }
+        h.notify();
+      },
 
       config(patch) {
-        const rec = h.rec();
-        if (patch.upFlags !== undefined) rec.upFlags = String(patch.upFlags || '').slice(0, 500);
-        h.save();
+        if (patch.upFlags !== undefined) h.writeSettings({ upFlags: String(patch.upFlags || '').slice(0, 500) });
         h.notify();
-        return { upFlags: rec.upFlags || '' };
+        return { upFlags: h.setting('upFlags') || '' };
       },
 
       async install() {
@@ -138,7 +140,7 @@ module.exports = {
         // Mode preference (user-settable): 'auto' (default — kernel if a usable tun
         // exists, else userspace), 'kernel' (force full-tunnel; errors if no tun),
         // 'userspace' (force proxy-only — never touches the pod's routing table).
-        const pref = h.rec().mode || 'auto';
+        const pref = h.setting('mode') || 'auto';
         if (pref === 'kernel' && !tunUsable()) throw new Error('kernel mode needs /dev/net/tun + NET_ADMIN (or sudo) — none available; use auto or userspace');
         const kernel = pref === 'kernel' || (pref === 'auto' && tunUsable());
         const args = [
@@ -186,8 +188,8 @@ module.exports = {
           tunUsable: tunUsable(),
           sudo: sudoAvailable(),
           desiredUp: !!rec.desiredUp,
-          modePref: rec.mode || 'auto',
-          upFlags: rec.upFlags || '',
+          modePref: h.setting('mode') || 'auto',
+          upFlags: h.setting('upFlags') || '',
           socksPort: SOCKS_PORT,
         };
         const cli = tsBin('tailscale');

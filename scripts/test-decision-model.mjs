@@ -170,6 +170,8 @@ console.log('⑧ the rubric v1 — the reason = the clauses the decision selecte
   const v = M.attentionVerdict([{ name: 'needs_now', probability: 0.71 }, { name: 'asks_me', probability: 0.6 }, { name: 'waiting', probability: 0.59 }, { name: 'decision', refused: true }], 0.7);
   ok(v.judged && v.p === 0.71 && eq(v.clauses.map((c) => c.name), ['asks_me']), 'a clause at its threshold counts, below does not, a refused one never');
   ok(M.attentionVerdict([{ name: 'needs_now', refused: true }]).judged === false && M.attentionVerdict([]).why === 'no-answer', 'no needs_now answer ⇒ no verdict');
+  // lane plugins-panel-grammar: the card's 「命中 m 条」 = the records one attention call judged at or above the threshold
+  ok(M.attentionHits([[{ name: 'needs_now', probability: 0.71 }], [{ name: 'needs_now', probability: 0.69 }], [{ name: 'needs_now', refused: true }]], 0.7) === 1 && M.attentionHits([], 0.7) === 0, 'attentionHits counts the verdicts at or above the threshold (refused / below = none)');
 }
 
 console.log('⑨ criteriaProposal — proposes the separating clauses, never applies');
@@ -250,7 +252,7 @@ console.log('the ONE scrub (inbox-verify F1)');
   // the PEM header line is the shape's NAME (R1 keeps it, the body goes); the address keeps its domain (maskAddresses — addressing, not a secret)
   const leaks = (t) => Object.entries(SIX).filter(([k, v]) => k !== 'pem' && t.includes(k === 'urlTok' ? 'tok_9f8e7d6c5b4a' : v)).map(([k]) => k);
   const PER = { attention: { rubric: M.rubricText(), records: [{ title: VTEXT, source: SIX.urlTok, sender: SIX.mail, body: VDETAIL }] }, rule: { condition: 'deploys', records: [{ body: LINES, thread: [VTEXT, VDETAIL] }] },
-    routing: { condition: 'deploys', records: [{ body: LINES, thread: [{ title: VTEXT, snippet: VDETAIL }] }] }, foryou: { levels: 'now / can wait', records: [{ text: VTEXT, detail: VDETAIL, session: SIX.gh }, { text: LINES, detail: LINES }] },
+    routing: { condition: 'deploys', records: [{ body: LINES, thread: [{ title: VTEXT, snippet: VDETAIL }] }] }, inbox: { levels: 'now / can wait', records: [{ text: VTEXT, detail: VDETAIL, session: SIX.gh }, { text: LINES, detail: LINES }] },
     webhook: { condition: 'deploys', records: [{ payload: { note: VTEXT, nested: { lines: LINES, list: [VDETAIL] }, url: SIX.urlTok } }] } };
   for (const [use, parts] of Object.entries(PER)) {
     const t = M.buildInput(use, parts, { batch: parts.records.length }).text;

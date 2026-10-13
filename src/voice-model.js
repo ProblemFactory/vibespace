@@ -249,6 +249,66 @@ function autoSourcesOf({ messages = [], files = [], cwd = '' } = {}) {
   }
   return [...out];
 }
+// ── the proposal's candidates (lane voice-teach-candidates; userW 2026-10-13: a card of ~70 ticked API field names) ──
+// A dictation dictionary holds words a person SAYS — names of products, projects, people, files, terms of art — never an
+// API field name, an id, a placeholder or a code token. SOURCE = the person's sentences + the agent's PROSE (code spans,
+// fenced blocks and URLs are cut first: code is the per-project tier's domain, never a card's); SHAPE_EXCLUSIONS = the
+// census test-voice-model ⑦ pins row by row; SCORE = shape tier (a file name with a known extension, a PascalCase /
+// Capitalized name) ≫ weight (seen + byPerson — the person's own words count double; a candidate needs weight ≥ 2) >
+// pronounceable; `pick` (preselected) = the person wrote it, or it was seen ≥ 2 times as a file / PascalCase name.
+const KNOWN_EXT_RE = /\.(?:py|js|mjs|cjs|ts|tsx|jsx|json|md|txt|csv|ya?ml|toml|sh|css|html|go|rs|java|kt|rb|php|c|h|cpp|swift|sql|ipynb|pdf|docx|xlsx|pptx|png|jpg|svg)$/i;
+const SNAKE_OR_CAMEL_RE = /^(?:[a-z0-9]+(?:_[a-z0-9]+)+|[a-z]+(?:[A-Z][a-z0-9]*)+)$/;
+const SHAPE_EXCLUSIONS = Object.freeze([                         // [row, rejects(term, {byPerson})] — first match names the row
+  ['id-prefix', (w) => /^(?:cli|ou|oc|om|app|cfg|usr|tenant)_[0-9a-z]{4,}$/i.test(w)],
+  ['placeholder', (w) => /(?:^|_)x{3,}(?:_|$)/i.test(w)],
+  ['field-tail', (w) => /_(?:id|token|key|secret|type|ts|at)$/i.test(w) || /^[a-z][a-z0-9]*(?:Id|Token|Key|Secret|Type)$/.test(w)],
+  ['two-underscores', (w) => termKind(w) !== 'file' && (w.match(/_/g) || []).length >= 2],
+  ['digit-tail', (w) => /\d$/.test(w)],                          // also every word_123 (ou_7565 is an id-prefix first)
+  ['short-caps', (w) => !/[a-z]/.test(w) && (w.match(/[A-Z]/g) || []).length <= 3],
+  ['host', (w) => /^[\w-]+\.[a-z]{2,4}$/i.test(w) && NOT_A_FILE_RE.test(w)],
+  ['secret', (w) => scrubSecrets(w) !== w],
+  ['code-only', (w, c) => !(c && c.byPerson > 0) && SNAKE_OR_CAMEL_RE.test(w)], // snake_case / camelCase the person never wrote
+]);
+const exclusionOf = (term, c = {}) => { for (const [row, rejects] of SHAPE_EXCLUSIONS) if (rejects(str(term), c)) return row; return null; };
+const NAME_RE = /\b[A-Z][a-z]{2,}\b/g;
+const sentenceStart = (text, i) => { const pre = text.slice(Math.max(0, i - 4), i); return (i === pre.length && /^\s*$/.test(pre)) || /(?:[.!?。！？:：*#>•-]|\n)\s*$/.test(pre); };
+/** PURE `proposalCandidates` — the words worth a card, ranked: [{term, score, why, seen, byPerson, kind, pick}] (why =
+ *  person | file | name | seen; kind = file | name | ident); minus `known` (case-insensitive); every term ≥ weight 2. */
+function proposalCandidates({ messages = [], files = [], cwd = '', known = [], groupName = '' } = {}) {
+  const have = new Set((Array.isArray(known) ? known : []).map((k) => str(k).toLowerCase()));
+  const root = str(cwd).replace(/[\\/]+$/, '');
+  const ownFiles = new Set((Array.isArray(files) ? files : []).map(str).filter((f) => root && f.startsWith(root + '/')).map(baseName));
+  const prose = dictationMessagesOf(messages).map((m) => ({ role: m.role, text: scrubSecrets(m.text.replace(CODE_SPAN_RE, ' ').replace(/\bhttps?:\/\/\S+/g, ' ')) }));
+  const lower = new Set();
+  for (const m of prose) for (const w of m.text.match(/\b[a-z]{3,}\b/g) || []) lower.add(w);
+  const tally = new Map();                                       // term → {seen, byPerson, first}
+  const count = (w, byPerson) => {
+    if (w.length < 3 || w.length > TERM_MAX || /^\d/.test(w) || /^(?:e\.g|i\.e|etc)\b/i.test(w)) return;
+    const c = tally.get(w) || { seen: 0, byPerson: 0, first: tally.size };
+    c.seen += 1; if (byPerson) c.byPerson += 1;
+    tally.set(w, c);
+  };
+  for (const m of prose) {
+    const mine = m.role === 'user';
+    for (const x of m.text.match(IDENT_RE) || []) count(x.includes('/') ? x.slice(x.lastIndexOf('/') + 1) : x, mine);
+    for (const x of m.text.matchAll(NAME_RE)) if (!sentenceStart(m.text, x.index) && !lower.has(x[0].toLowerCase())) count(x[0], mine);
+  }
+  const group = head(str(groupName).replace(/\s+/g, ' ').trim(), TERM_MAX);
+  if (group.length >= 3 && !tally.has(group)) tally.set(group, { seen: 1, byPerson: 1, first: tally.size }); // the person named their Task Group
+  const out = [];
+  for (const [term, c] of tally) {
+    if (c.seen + c.byPerson < 2 || have.has(term.toLowerCase()) || exclusionOf(term, c)) continue;
+    const k = termKind(term);
+    const kind = k === 'file' ? 'file' : (k === 'name' || /^[A-Z]/.test(term)) ? 'name' : 'ident';
+    const stem = term.replace(/\.[a-z0-9]+$/i, '');
+    const letters = (stem.match(/[A-Za-z]/g) || []).length;
+    const sayable = /[aeiouy]/i.test(stem) && stem.length >= 4 && stem.length <= 24 && letters >= 0.7 * stem.length;
+    const tier = (kind === 'file' && (KNOWN_EXT_RE.test(term) || ownFiles.has(term))) || (kind === 'name' && /[a-z][A-Z]/.test(term)) ? 2 : kind === 'ident' ? 0 : 1;
+    const why = c.byPerson ? 'person' : kind === 'file' ? 'file' : kind === 'name' ? 'name' : 'seen';
+    out.push({ term, score: tier * 1000 + Math.min(c.seen + c.byPerson, 99) * 10 + (sayable ? 1 : 0), why, seen: c.seen, byPerson: c.byPerson, kind, pick: c.byPerson > 0 || (c.seen >= 2 && tier === 2), first: c.first });
+  }
+  return out.sort((a, b) => b.score - a.score || a.first - b.first).map(({ first, ...c }) => c);
+}
 /** PURE `teachContextOf` — the /v1/context body: title = the conversation title (≤ 200), source = VibeSpace, text = the
  *  last agent message + the person's last 3 + the working directory + its file names (≤ 6 000) — the never-list holds:
  *  text blocks of THIS conversation only (no tool rows, attachments, other sessions), frames stripped, secrets cut. */
@@ -270,5 +330,5 @@ module.exports = {
   VOICE_LIMITS, LANGUAGES, DICTATE_PART_ORDER, RECORDER_MIME, RETRY_ONCE, VOICE_WORDS, VOICE_CODES,
   stripFrames, scrubSecrets, dictationMessagesOf, identifiersOf, contextText, beforeOf, contextBytes, dictationContext,
   contextFromClient, localeOf, languageOf, dictateRequestOf, dictateAnswerOf, failureCodeOf, voiceWords,
-  TEACH_TEXT_MAX, termKind, termsOf, autoSourcesOf, teachContextOf,
+  TEACH_TEXT_MAX, termKind, termsOf, autoSourcesOf, teachContextOf, SHAPE_EXCLUSIONS, exclusionOf, proposalCandidates,
 };

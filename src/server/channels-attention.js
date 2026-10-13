@@ -40,7 +40,7 @@ const STOP = Object.freeze(['plugin-off', 'feature-off', 'no-key', 'daily-budget
 const hash16 = (s) => crypto.createHash('sha256').update(String(s)).digest('hex').slice(0, 16);
 
 function create({ dataDir, decision = null, serverSetting = () => undefined, now = () => Date.now(), tailOf = () => [], notify = () => { },
-  accountNever = () => false, viewNow = null, log = console } = {}) {
+  accountNever = () => false, viewNow = null, log = console, policy = () => null } = {}) {
   const FILE = path.join(dataDir, 'decision-examples.json');
   let examples = readExamples();
   const verdicts = new Map();   // row key → {p, clauses, rubricV, lastAt, source, mk}
@@ -48,6 +48,11 @@ function create({ dataDir, decision = null, serverSetting = () => undefined, now
   const flying = new Set();     // row keys whose call is in flight (a read meanwhile must not queue them again — one call per row)
   let inFlight = 0, timer = null, lastWhy = null;
   const stats = { calls: 0, memo: 0, refused: 0 };
+  // lane attention-policy: the owner's readout — "today: judged N · M needed you" (the local day, counted where a verdict lands)
+  let today = { day: null, judged: 0, hits: 0 };
+  const todayNow = () => { const day = M.dayOf(now(), new Date(now()).getTimezoneOffset()); if (today.day !== day) today = { day, judged: 0, hits: 0 }; return today; };
+  // lane attention-policy: a fact whose rule the owner switched off claims nothing — the judge may see that row
+  const pol = () => { try { return policy() || null; } catch { return null; } };
 
   function readExamples() {
     try {
@@ -73,6 +78,7 @@ function create({ dataDir, decision = null, serverSetting = () => undefined, now
   /** The row's `judged` view (null: nothing to say) — the verdict on THIS message, the current threshold, the label. */
   function judgedFor(en, rec = null) {
     if (!en || !en.key || (rec ? rec.judge === 'never' : accountNever(en.adapterId))) return null;
+    if (!decision || !on()) return null;   // lane attention-policy: the judge's switch off (「只用固定规则」) ⇒ no judged row stays listed
     const lastAt = Number(en.lastAt) || 0;
     const label = labelOf(en.key, lastAt);
     const v = verdicts.get(en.key);
@@ -89,7 +95,7 @@ function create({ dataDir, decision = null, serverSetting = () => undefined, now
     let n = 0;
     for (const v of Array.isArray(views) ? views : []) {
       if (!v || !v.key || queue.has(v.key) || flying.has(v.key) || queue.size >= QUEUE_MAX) continue;
-      if (accountNever(v.adapterId) || !FO.judgeCandidate(v, t)) continue;
+      if (accountNever(v.adapterId) || !FO.judgeCandidate(v, t, pol())) continue;
       const lastAt = Number(v.lastAt) || 0;
       if (labelOf(v.key, lastAt)) continue;
       const have = verdicts.get(v.key);
@@ -112,7 +118,7 @@ function create({ dataDir, decision = null, serverSetting = () => undefined, now
     // handed to an agent, answered by the owner or labeled (the census caught a hand-over landing between the two)
     const v = typeof viewNow === 'function' ? viewNow(queued.key) : queued;
     const lastAt = Number(v && v.lastAt) || 0;
-    if (!v || accountNever(v.adapterId) || !FO.judgeCandidate(v, now()) || labelOf(v.key, lastAt)) return;
+    if (!v || accountNever(v.adapterId) || !FO.judgeCandidate(v, now(), pol()) || labelOf(v.key, lastAt)) return;
     const mp = memoParts(v.key, lastAt);
     let tail = [];
     try { tail = tailOf(v) || []; } catch { tail = []; }
@@ -125,7 +131,9 @@ function create({ dataDir, decision = null, serverSetting = () => undefined, now
     verdicts.delete(v.key);
     verdicts.set(v.key, { ...(j || { p: null, clauses: [], rubricV: M.RUBRIC.version, lastAt, source: 'judge' }), mk: M.memoMaterial('attention', mp) });
     while (verdicts.size > VERDICTS_MAX) verdicts.delete(verdicts.keys().next().value);
-    if (j && FO.judgedTag({ ...j, threshold: threshold() }, lastAt)) notify([v.key]);
+    const hit = !!(j && FO.judgedTag({ ...j, threshold: threshold() }, lastAt));
+    const d = todayNow(); d.judged++; if (hit) d.hits++;
+    if (hit) notify([v.key]);
   }
 
   /** "Needs" / "Not" on a judged row: a labeled example (the ONE write), the row re-drawn at once. */
@@ -166,7 +174,7 @@ function create({ dataDir, decision = null, serverSetting = () => undefined, now
     return { ok: true, read: used.length, calls, lines: p.lines, text: p.text, applied: false, ...(p.why ? { why: p.why } : {}), ...(stopped ? { stopped } : {}) };
   }
 
-  const status = () => ({ on: !!decision && on(), queued: queue.size, inFlight, ...stats, why: lastWhy, examples: examples.length, threshold: threshold() });
+  const status = () => ({ on: !!decision && on(), queued: queue.size, inFlight, ...stats, why: lastWhy, examples: examples.length, threshold: threshold(), today: { ...todayNow() } });
   return { note, viewOf, judgedFor, label, draft, status, on: () => !!decision && on(), examples: () => examples.slice(), idle: () => !queue.size && !inFlight && !timer, file: FILE };
 }
 

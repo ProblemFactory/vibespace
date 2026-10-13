@@ -380,6 +380,8 @@ console.log('§5 F1 — a token is saved only under the account it PROVES');
   ok(r.m.phase === 'saved' && am.getOat(sub) === TOKEN && r.js.some((j) => j.outcome === 'fingerprint-proven'), "the panel's window = the row's own anchor (no one else's) ⇒ saved, journaled fingerprint-proven", { m: r.m, js: r.js });
   ok(pf.length === 1 && pf[0].argv.join(' ') === '-p /usage --strict-mcp-config' && pf[0].tokenIsTheMinted && !pf[0].tokenInArgv && pf[0].config.startsWith(scratchRoot) && !pf[0].apiKey,
     'ONE probe: argv = PANEL_PROBE_ARGS (never a prompt), the NEW token in its env (never argv), the mint\'s scratch config, no hub key', pf);
+  ok(pf[0].config === path.join(pf[0].home, 'config') && pf[0].cwd === path.join(pf[0].config, 'cwd') && pf[0].cwd !== pf[0].home && pf[0].cwd !== fs.realpathSync(os.tmpdir()),
+    '… with the panel probe\'s own isolation (spawnPanelProbe from the root): cwd = the empty dir inside the scratch config — never the PTY cwd, never os.tmpdir() (mirror-263 §19)', pf[0] && { home: pf[0].home, config: pf[0].config, cwd: pf[0].cwd });
   ok(!pf[0].envKeys.some((k) => k in PLANTED && k !== 'CLAUDE_CODE_OAUTH_TOKEN' && k !== 'CLAUDE_CONFIG_DIR'), '… and the probe child carries none of the 28 planted names either', pf[0].envKeys);
   am.clearOat(sub);
   r = await runMint(O, sub, { ident: null, probe: true, panel: PANEL_B, windows: () => anchors });

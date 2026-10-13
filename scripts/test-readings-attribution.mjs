@@ -4021,8 +4021,14 @@ esac
   {
     const ur = read('src/usage-routes.js');
     const body = ur.slice(ur.indexOf('async function refreshViaCliPanel'), ur.indexOf("app.post('/api/usage/refresh'"));
+    const spawnBody = ur.slice(ur.indexOf('function spawnPanelProbe('), ur.indexOf('function setupUsage('));
     ok('§19 ⓪ the panel spawn sets CLAUDE_CONFIG_DIR to the account\'s isolated probe dir, derived from the ONE creds dir (never a second subDir lookup)',
-      /const probeConfigDir = credsDir \? path\.join\(credsDir, '\.probe-config'\) : null;/.test(body) && /if \(probeConfigDir\) env\.CLAUDE_CONFIG_DIR = probeConfigDir;/.test(body) && (body.match(/accounts\.subDir\(/g) || []).length === 1);
+      /const probeConfigDir = credsDir \? path\.join\(credsDir, '\.probe-config'\) : null;/.test(body) && /spawnPanelProbe\(bin, \{ root: probeConfigDir, env \}/.test(body) && /if \(probeConfigDir\) env\.CLAUDE_CONFIG_DIR = probeConfigDir;/.test(spawnBody) && (body.match(/accounts\.subDir\(/g) || []).length === 1);
+    // mirror-263 §19: the mint's second look made the spawn shared and each caller brought its own env + cwd — the isolation left the site
+    const om = read('src/server/oat-mint.js');
+    ok('§19 ⓪ …ONE spawn site owns the isolation: spawnPanelProbe derives the config dir AND the empty cwd from the root its caller proves; no caller sets CLAUDE_CONFIG_DIR or a cwd for it (the panel refresher and the token mint\'s probe rung pass a root)',
+      /function spawnPanelProbe\(bin, \{ root, env: identityEnv \}, done\)/.test(spawnBody) && /const probeCwd = probeCwdOf\(probeConfigDir\);/.test(spawnBody) && /fs\.mkdirSync\(probeCwd, /.test(spawnBody)
+      && !/env\.CLAUDE_CONFIG_DIR/.test(body) && /probePanel\(\{ root: configOf\(m\.dir\), env: /.test(om) && !/probePanel\(\{[^\n]*cwd:/.test(om) && /spawnOnce\(\{ root, env \}/.test(om));
     ok('§19 ⓪ …the measurement that justifies it is recorded beside the code (the CLI version and which file each env var moves)', /2\.1\.274/.test(ur) && /CLAUDE_CONFIG_DIR \|\| \$HOME/.test(ur));
     ok('§19 ⓪ …and the identity gate runs BEFORE the write and returns false on a refusal', body.indexOf('if (idv.refused) {') > 0 && body.indexOf('if (idv.refused) {') < body.indexOf('usageWrite.writeCacheObject({ cacheDir: USAGE_CACHE_DIR, key, obj: merged') && /if \(idv\.refused\) \{[\s\S]{0,1600}?return false;/.test(body));
   }
@@ -4257,7 +4263,7 @@ esac
   {
     const w2 = mkProbeWorld();
     const src = read('src/usage-routes.js');
-    const ISO = "      if (probeConfigDir) env.CLAUDE_CONFIG_DIR = probeConfigDir;\n";
+    const ISO = "  if (probeConfigDir) env.CLAUDE_CONFIG_DIR = probeConfigDir;\n"; // in spawnPanelProbe, the one isolation site (mirror-263 §19)
     const GATE = "  if (idv.refused) {";
     const STAMP = "      if (idv && idv.verified && (w.sevenDay || w.fiveHour || Object.keys(w.scoped).length)) {";
     const CWD = "{ env, cwd: probeCwd, timeout: 60000, maxBuffer: 1024 * 1024 }"; // the isolated working directory (owner 2026-09-17) — the pre-fix copy spawns in the shared tmpdir

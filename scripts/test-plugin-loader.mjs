@@ -130,7 +130,9 @@ ok(/, activeSessions,$/m.test(read('server.js')) && /pluginLoader,$/m.test(read(
 ok(/'src\/plugin-manifest\.js'/.test(read('scripts/test-architecture.mjs')), 'the manifest validator is in the PURE tier');
 const pui = read('src/lib/plugins-ui.js');
 ok(/fetchJson\('\/api\/plugins\/manifests'\)/.test(pui) && /\/api\/plugins\/manifests\/\$\{encodeURIComponent\(p\.id\)\}\/enabled/.test(pui) && /manifests\/reload/.test(pui) && /this\.pluginClient\?\.open\?\./.test(pui), 'the Plugins panel lists manifest plugins with enable/disable, rescan and open-window actions');
-ok(/escHtml\(p\.errors\.join/.test(pui) && /escHtml\(p\.id\)/.test(pui), 'manifest fields are escHtml-ed in the panel (ids/errors come from disk, never trusted HTML)');
+// lane plugin-settings-p0: a manifest plugin is a LIST row — ids / errors reach the DOM as textContent / title (pluginRow has no innerHTML)
+const rowFnL = pui.slice(pui.indexOf('function pluginRow('), pui.indexOf('\n}\n', pui.indexOf('function pluginRow(')));
+ok(rowFnL.length > 100 && !/innerHTML/.test(rowFnL) && /\.\.\.\(p\.errors \|\| \[\]\), p\.lastError/.test(pui) && /pluginRow\(\{ id: p\.id, label: p\.label && p\.label !== p\.id/.test(pui), 'manifest fields reach the panel as text (ids/errors come from disk, never trusted HTML — pluginRow: textContent / title)');
 for (const dict of ['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js']) ok(['Installed plugins', 'Rescan', 'Plugin enabled', 'parked after repeated crashes'].every((k) => read(dict).includes(JSON.stringify(k) + ':')), `${dict} carries the new panel strings`);
 ok(/\/api\/agent\/plugin-tool\//.test(read('src/server/plugin-loader.js')) && /res\.status\(401\)/.test(read('src/server/plugin-loader.js')), 'the tool route lives under the cookie-exempt /api/agent/ prefix and enforces the bearer itself');
 

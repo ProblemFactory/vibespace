@@ -538,6 +538,15 @@ router.post('/api/channels/decision/label', (req, res) => {
     res.json(r);
   } catch (e) { fail(res, e); }
 });
+/** lane attention-policy: the judge's readout for the 「需关注 · 怎么判断」 block — `{on, today: {day, judged, hits}, threshold,
+ *  queued, …}` (channels-attention status; counters only, never a row or a word of a message). Owner-only. */
+router.get('/api/channels/attention', (req, res) => {
+  try {
+    forHost(req);
+    if (refuseAgentBearer(req, res, DECISION_IS_OWNERS)) return;
+    res.json({ ok: true, ...engine().attention.status() });
+  } catch (e) { fail(res, e); }
+});
 router.post('/api/channels/decision/draft', async (req, res) => {
   try {
     forHost(req);

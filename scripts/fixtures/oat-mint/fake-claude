@@ -25,7 +25,7 @@ const token = process.env.FAKE_OAT_TOKEN || (['sk', '-ant-oat01-FAKE'].join('') 
 const out = (s) => process.stdout.write(s.replace(/\n/g, '\r\r\n'));
 const sp = (s) => s.split(' ').join('\x1b[1C');
 const record = (o) => { if (process.env.FAKE_OAT_RECORD) fs.appendFileSync(process.env.FAKE_OAT_RECORD, JSON.stringify(o) + '\n'); };
-const facts = { pid: process.pid, argv: process.argv.slice(2), home: process.env.HOME, config: process.env.CLAUDE_CONFIG_DIR,
+const facts = { pid: process.pid, argv: process.argv.slice(2), home: process.env.HOME, config: process.env.CLAUDE_CONFIG_DIR, cwd: process.cwd(),
   apiKey: !!process.env.ANTHROPIC_API_KEY, oauthEnv: !!process.env.CLAUDE_CODE_OAUTH_TOKEN, vibespaceVars: Object.keys(process.env).filter((k) => k.startsWith('VIBESPACE_')), browser: !!process.env.BROWSER,
   envKeys: Object.keys(process.env) };
 if (process.argv[2] === '-p' && process.argv[3] === '/usage') {

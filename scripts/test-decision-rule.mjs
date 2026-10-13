@@ -66,10 +66,11 @@ fs.mkdirSync(ROOT, { recursive: true });
 const quiet = { log() {}, warn() {}, error() {} };
 const DDIR = path.join(ROOT, 'decision'); fs.mkdirSync(DDIR, { recursive: true });
 const SECRET = 'sk-dummy-decision-rule-0001';
+let sObj = {}; // lane plugin-settings-p0: the plugin's switches are settings rows — one settings store that outlives a "restart" (data/settings.json does)
 function decisionSide() {
   const store = S.create({ dataDir: DDIR, env: {}, log: quiet });
   const eng = DE.create({ dataDir: DDIR, integrations: store, baseUrlFor: BASE, log: quiet });
-  const pm = new PluginManager({ dataDir: DDIR, plugins: [DP], decisionEngine: eng });
+  const pm = new PluginManager({ dataDir: DDIR, plugins: [DP], decisionEngine: eng, settings: { read: () => sObj, patch: (p) => { sObj = { ...sObj, ...p }; for (const [k, v] of Object.entries(sObj)) if (v === null) delete sObj[k]; } } });
   return { store, eng, pm };
 }
 let D = decisionSide();

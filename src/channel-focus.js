@@ -58,6 +58,47 @@ const HELD_WINDOW_MS = 7 * 86400e3;
 /** The tag codes, in priority order (the table the suite pins). */
 const TAG_ORDER = Object.freeze(['awaiting', 'unknown', 'assigned', 'read', 'new-since-read', 'held', 'judged', 'direct', 'replied']);
 
+// lane attention-policy (owner 2026-10-13: "应该允许禁用原来的固定规则，或者直接加个配置选项可以改怎么判断需关注"): THE FIRST
+// SCREEN IS THE OWNER'S POLICY. Each fixed rule is a switch — the setting `channels.attention.rule.<code>`, default on
+// (`read` covers read + new-since-read) — and the judge's switch is the Decision API plugin's own `attention` feature
+// (ONE store: the plugin's config, never a flag here). A rule switched off never lands its row: `statusTag` skips it
+// and asks the next rule that is on, so the row keeps any other reason it has and otherwise stays under All with its
+// facts. No policy, or every switch on = the table above, byte for byte. A preset SETS the switches (a convenience
+// over the same rows, never a third store).
+/** The fixed rules a policy switches, in the order the settings rows list them. */
+const ATTENTION_RULES = Object.freeze(['direct', 'awaiting', 'assigned', 'read', 'held', 'unknown', 'replied']);
+/** The presets — what each one sets: every fixed rule (`rules`) and the judge's switch (`judge`). */
+const ATTENTION_PRESETS = Object.freeze({
+  both: Object.freeze({ rules: true, judge: true }),
+  judge: Object.freeze({ rules: false, judge: true }),
+  rules: Object.freeze({ rules: true, judge: false }),
+});
+const ruleKey = (code) => `channels.attention.rule.${code}`;
+/** The policy from a settings reader `get(key)` (unset = on) and the judge's switch (unknown = on). */
+function attentionPolicy(get = () => undefined, judge) {
+  const rules = {};
+  for (const code of ATTENTION_RULES) { let v; try { v = get(ruleKey(code)); } catch { v = undefined; } rules[code] = v !== false; }
+  return { rules, judge: judge !== false };
+}
+/** May tag `code` land under `policy`? (no policy = yes; `new-since-read` is the `read` rule; `judged` the judge's switch) */
+function ruleOn(policy, code) {
+  if (!policy) return true;
+  if (code === 'judged') return policy.judge !== false;
+  return (policy.rules || {})[code === 'new-since-read' ? 'read' : code] !== false;
+}
+/** Which preset a policy is (null = a mix of switches). */
+function presetOf(policy) {
+  const on = ATTENTION_RULES.map((c) => ruleOn(policy, c));
+  const all = on.every(Boolean), none = !on.some(Boolean), judge = ruleOn(policy, 'judged');
+  for (const [name, s] of Object.entries(ATTENTION_PRESETS)) if (s.judge === judge && (s.rules ? all : none)) return name;
+  return null;
+}
+/** What preset `name` writes: `{settings: {<rule key>: bool}, judge: bool}` (null = no such preset). */
+function presetSwitches(name) {
+  const s = Object.prototype.hasOwnProperty.call(ATTENTION_PRESETS, name) ? ATTENTION_PRESETS[name] : null;
+  return s ? { settings: Object.fromEntries(ATTENTION_RULES.map((c) => [ruleKey(c), s.rules])), judge: s.judge } : null;
+}
+
 const num = (x) => (Number.isFinite(Number(x)) ? Number(x) : 0);
 
 // lane channel-self-unread (userW inc-muxekkry-clfb 2026-10-07 "发消息在 channel 里面也会被视为一个未读" + B-c91b):
@@ -152,9 +193,10 @@ function heldOf(touch, now = Date.now(), watchers = []) {
 /**
  * THE ONE TAG a first-screen row wears, or `null` (the row does not matter).
  * `row` = a `groupListRows` row (`{kind:'conv', conv}`) or a digest row
- * itself. Returns structure: `{code, name?, kind?, grain?, held?, n?, at?}`.
+ * itself. Returns structure: `{code, name?, kind?, grain?, held?, n?, at?}`. `policy` (lane attention-policy,
+ * `attentionPolicy`): a rule switched off is skipped — the row answers with the next rule that is on, or null.
  */
-function statusTag(row, now = Date.now()) {
+function statusTag(row, now = Date.now(), policy = null) {
   if (!row) return null;
   // an AGENT GROUP row of the first screen (`groupListRows`' kind 'group' carries its `group`) wears no tag;
   // a digest row's own `kind` is the conversation's ('group' chat / dm / thread) and never means that
@@ -162,11 +204,12 @@ function statusTag(row, now = Date.now()) {
   const c = row.conv || row;
   const touch = c.touch || null;
   const ob = c.outbox || {};
-  if (num(ob.awaiting) > 0) return { code: 'awaiting', n: num(ob.awaiting) };
-  if (num(ob.unknown) > 0) return { code: 'unknown', n: num(ob.unknown) };
+  const on = (code) => ruleOn(policy, code);
+  if (num(ob.awaiting) > 0 && on('awaiting')) return { code: 'awaiting', n: num(ob.awaiting) };
+  if (num(ob.unknown) > 0 && on('unknown')) return { code: 'unknown', n: num(ob.unknown) };
   const held = heldOf(touch, now, c.watchers);
   const a = c.assignment;
-  if (a && a.principal && (a.principal.id || a.principal.name)) {
+  if (a && a.principal && (a.principal.id || a.principal.name) && on('assigned')) {
     const grain = a.source || 'conversation';
     // D4 (2026-09-27): a pattern / account grain lists a conversation only once it ACTED on it — a wake
     // DELIVERED to the agent within the window, or a held one; never merely because the scope covers it
@@ -176,7 +219,7 @@ function statusTag(row, now = Date.now()) {
     if (grain === 'conversation' || held || woken) return { code: 'assigned', name: a.principal.name || '', kind: a.principal.kind || 'agent', grain, held };
   }
   const rd = touch && touch.read;
-  if (rd && within(rd.at, now, FOCUS_WINDOW_MS)) {
+  if (rd && within(rd.at, now, FOCUS_WINDOW_MS) && on('read')) {
     const name = rd.name || '';   // never the raw session id (r-verify): the words say "an agent" for a nameless reader
     const kind = rd.kind || 'agent';
     // lane channel-self-unread: the owner's OWN newest message (`touch.selfAt`) is never news — a row whose newest
@@ -184,21 +227,21 @@ function statusTag(row, now = Date.now()) {
     const newsAt = num(c.lastAt) > num(touch.selfAt) ? num(c.lastAt) : 0;
     return newsAt > num(rd.upTo) ? { code: 'new-since-read', name, kind, at: num(rd.at) } : { code: 'read', name, kind, at: num(rd.at) };
   }
-  if (held) return { code: 'held', n: heldPending(touch, now, c.watchers) };
-  const jt = judgedTag(c.judged, c.lastAt);
+  if (held && on('held')) return { code: 'held', n: heldPending(touch, now, c.watchers) };
+  const jt = on('judged') ? judgedTag(c.judged, c.lastAt) : null;
   if (jt) return jt;
   // lane lark-search-poll (owner decision 1): a single chat somebody wrote in and the owner has not read
   // design 012 (Slack S1): an APP's DM (a bot, an integration) is never "somebody wrote to you"
-  if (c.kind === 'dm' && !c.app && num(c.unread) > 0 && within(c.lastAt, now, FOCUS_WINDOW_MS)) return { code: 'direct', n: num(c.unread) };
-  if (touch && within(touch.selfAt, now, FOCUS_WINDOW_MS)) return { code: 'replied', at: num(touch.selfAt) };
+  if (c.kind === 'dm' && !c.app && num(c.unread) > 0 && within(c.lastAt, now, FOCUS_WINDOW_MS) && on('direct')) return { code: 'direct', n: num(c.unread) };
+  if (touch && within(touch.selfAt, now, FOCUS_WINDOW_MS) && on('replied')) return { code: 'replied', at: num(touch.selfAt) };
   return null;
 }
 
 /** THE ATTENTION LIST: every non-archived agent group + every conversation
  *  row that wears a tag. The order is the input's (`groupListRows` sorts by
  *  activity) — the IM order the owner reads, the same in both views. */
-function focusRows(rows, now = Date.now()) {
-  return (rows || []).filter((r) => r && (r.kind === 'group' && r.group ? !r.archived : !!statusTag(r, now)));
+function focusRows(rows, now = Date.now(), policy = null) {
+  return (rows || []).filter((r) => r && (r.kind === 'group' && r.group ? !r.archived : !!statusTag(r, now, policy)));
 }
 
 /** The filter box: a case-insensitive substring over what the row SHOWS
@@ -216,9 +259,9 @@ function filterRows(rows, q) {
  * to draw, `moreInAll` how many rows OUTSIDE the attention list match the
  * query (the focused view offers them: "{n} more in All").
  */
-function firstScreen(rows, { view = 'focus', q = '', now = Date.now() } = {}) {
+function firstScreen(rows, { view = 'focus', q = '', now = Date.now(), policy = null } = {}) {
   const all = rows || [];
-  const focus = focusRows(all, now);
+  const focus = focusRows(all, now, policy);
   const v = view === 'all' ? 'all' : 'focus';
   const shown = filterRows(v === 'all' ? all : focus, q);
   const moreInAll = v === 'focus' && String(q || '').trim() ? filterRows(all, q).length - shown.length : 0;
@@ -282,13 +325,14 @@ function candidateOf(en, ob, now = Date.now(), judged = null) {
  * claims (`statusTag` null when its own verdict is left out — a fact is free and stronger), whose newest message is
  * inside the 24 h window and is not the owner's own (`touch.selfAt`), not VibeSpace's own talk. The scan sends
  * nothing else — the candidate-set census (test-decision-attention) pins it: a fact-tagged row is never sent.
+ * `policy` (lane attention-policy): a fact whose rule is switched off claims nothing — "只用判断模型" judges every row.
  */
-function judgeCandidate(v, now = Date.now()) {
+function judgeCandidate(v, now = Date.now(), policy = null) {
   if (!v || typeof v !== 'object' || (v.kind === 'group' && v.group) || isInternal(v) || v.unlisted) return false;
   const c = v.conv || v;
   if (!within(c.lastAt, now, FOCUS_WINDOW_MS)) return false;
   if (c.touch && num(c.touch.selfAt) >= num(c.lastAt)) return false;
-  return !statusTag({ ...c, judged: null }, now);
+  return !statusTag({ ...c, judged: null }, now, policy);
 }
 
 /** THE ORDER every page and every list keeps: newest first (`lastAt` desc), then `key` — total, so a cursor is exact. */
@@ -416,7 +460,9 @@ function listRowModel(conv) {
 
 module.exports = {
   LIST_LAST_MAX, listRowModel,
-  FOCUS_WINDOW_MS, HELD_WINDOW_MS, TAG_ORDER, heldPending, heldOf, statusTag, focusRows, filterRows, firstScreen,
+  FOCUS_WINDOW_MS, HELD_WINDOW_MS, TAG_ORDER, heldPending,
+  ATTENTION_RULES, ATTENTION_PRESETS, attentionPolicy, ruleOn, presetOf, presetSwitches,   // lane attention-policy
+  heldOf, statusTag, focusRows, filterRows, firstScreen,
   ATTENTION_MAX, HEAD_ROWS, PAGE_ROWS, PAGE_MAX, QUERY_MAX, candidateOf, judgedTag, judgeCandidate,   // + judgedTag / judgeCandidate: lane decision-attention
   pageOrder, pageCursor, afterCursor, selectPage, queryOf, textMatches,
   isInternal, needsOwner, internalBlock,

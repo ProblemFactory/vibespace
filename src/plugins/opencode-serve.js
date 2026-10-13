@@ -14,6 +14,7 @@
 module.exports = {
   id: 'opencode-serve',
   label: 'OpenCode background service',
+  noSettings: 'it binds a free port on 127.0.0.1 and runs your own opencode CLI — only on / off', // no settings table (src/plugin-settings.js)
   description: 'Lists, opens, resumes and forks STOPPED OpenCode conversations. OpenCode keeps its sessions in its own database rather than in files, so VibeSpace runs `opencode serve` on 127.0.0.1 to read them. Off by default; it stops when you disable it.',
   provides: ['serve'],
   create(h) {

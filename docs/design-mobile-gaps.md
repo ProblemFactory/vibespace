@@ -69,7 +69,7 @@ Status key: **A** available · **P** partial · **M** missing · **N** not appli
 | 56 | Theme editor | gear ✎ | P (floating ~50-var panel, no mobile CSS) | theme-editor.css | sheet layout | M |
 | 57 | Incident report | gear | A | gear-menu.js:81 | — | – |
 | 58 | Stage manager | setting | N | stage-manager.js:50 | — | – |
-| 59 | Multi-client layout sync | ws | P (own `autoSaveMobile` slot but remote `layout-sync` applied unguarded — code-read only) | persistence.js:263-267; layout.js:92-99 | ignore desktop-shaped state on mobile | S |
+| 59 | Multi-client layout sync | ws | A (2026-10-13, lane phone-arrangement-local, kb-design-lessons §6b guard 10: a phone writes membership, never arrangement; a desktop applies a phone-stamped record as membership only; the phone's window on show is local; the dead `autoSaveMobile` slot is retired — heavy test-phone-desktop-sync) | persistence.js:263-267; layout.js:92-99 | ignore desktop-shaped state on mobile | S |
 
 ## Counts
 Available **31** · Partial **16** · Missing **9** (Channels panel, For-you inbox, browser entry, Desktop/VNC entry, System panel, desktop CRUD, move-to-desktop, minimize/restore, chat search, terminal touch copy, explorer multi-select — several rows carry two items; row-wise 9) · Not applicable **12**.
