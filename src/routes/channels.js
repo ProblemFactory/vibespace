@@ -22,6 +22,7 @@
  * failure of a user action.
  */
 const fs = require('fs');
+const OAUTH_DOORS = require('../server/oauth-doors.js'); // lane voice-p1-oauth-teach: non-channel consent landings
 const express = require('express');
 const { contentDisposition } = require('../file-disposition.js');   // lane-raw-filename: THE Content-Disposition builder
 const router = express.Router();
@@ -245,7 +246,9 @@ router.get('/api/channels/oauth/cb/:kind', async (req, res) => {
   const q = req.query || {};
   const one = (v) => (typeof v === 'string' ? v.slice(0, 2048) : null);
   const kind = String(req.params.kind || '').slice(0, 20);
-  const pageOf = () => { try { return engine().consentLandingOf(kind); } catch { return null; } };
+  // lane voice-p1-oauth-teach: a NON-channel kind (Dropline voice input) lands through its registered door
+  const door = OAUTH_DOORS.doorOf(kind);
+  const pageOf = () => { if (door) return door.page; try { return engine().consentLandingOf(kind); } catch { return null; } };
   // the door limit judges the ADDRESS before anything else is looked at; its page is :kind's own (the refused words for
   // 'too-many' — wait a minute, reload), a kind with no landing row answers JSON
   if (!landingAllowed(req.socket.remoteAddress || '?')) { const p = pageOf(); return p ? res.status(429).set(LANDING_HEADERS).send(p({ ok: false, why: 'too-many' })) : res.status(429).json({ error: 'too many sign-in landings from this address in the last minute — wait a minute', code: 'too-many' }); }
@@ -254,7 +257,7 @@ router.get('/api/channels/oauth/cb/:kind', async (req, res) => {
     forHost(req);
     if (refuseAgentBearer(req, res, SIGNIN_IS_OWNERS)) return;
     page = pageOf();
-    if (page) r = await engine().oauthLanding({ kind, code: one(q.code), state: one(q.state), error: one(q.error) });
+    if (page) r = await (door ? door.landing({ code: one(q.code), state: one(q.state), error: one(q.error) }) : engine().oauthLanding({ kind, code: one(q.code), state: one(q.state), error: one(q.error) }));
   } catch { r = { ok: false, why: 'failed', user: null, error: null }; }
   page = page || pageOf();
   if (!page) return res.status(404).json({ error: `no consent lands here for "${kind}" — that account type declares no consent landing`, code: 'no-landing' });

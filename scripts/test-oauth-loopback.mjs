@@ -603,5 +603,31 @@ console.log('design 018: public mode');
   ol.stopAll();
 }
 
+// ── lane voice-p1-oauth-teach: a `public` flow of KIND dropline (src/server/dropline-oauth.js) — the state is this
+//    boot's HMAC over {u, f, t, k:'dropline'}; the PKCE verifier lives in the flow record's exchange closure only ──
+{
+  const DO = require(path.join(REPO, 'src/server/dropline-oauth.js'));
+  const ol = OL.createOAuthLoopback({ log: { warn() {}, log() {} } });
+  const key = crypto.randomBytes(32);
+  const sign = (c) => crypto.createHmac('sha256', key).update(c).digest('base64url');
+  const { verifier, challenge } = DO.pkcePair();
+  let seenVerifier = null;
+  const st = await ol.begin({
+    id: 'dropline', mode: 'public', redirectUri: 'https://hub.example.ts.net/api/channels/oauth/cb/dropline',
+    stateFor: ({ flowId, issuedAt }) => DO.stateOf({ origin: 'https://hub.example.ts.net', flowId, issuedAt }, sign),
+    buildConsentUrl: ({ redirectUri, state }) => `https://auth.example.test/authorize?redirect_uri=${encodeURIComponent(redirectUri)}&state=${encodeURIComponent(state)}&code_challenge=${challenge}&code_challenge_method=S256`,
+    exchange: async ({ code }) => { seenVerifier = verifier; return { user: { name: 'n' }, code }; },
+  });
+  const state = new URL(st.consentUrl).searchParams.get('state');
+  const v = DO.stateVerdict(state, { sign });
+  ok(v.ok && v.parts.flowId === st.flowId && JSON.parse(Buffer.from(state.split('.')[1], 'base64url').toString()).k === 'dropline', 'dropline public flow: the state is this boot\'s HMAC over {u, f, t, k:dropline} and names the running flow');
+  const otherBoot = (c) => crypto.createHmac('sha256', 'another-boot').update(c).digest('base64url');
+  ok(DO.stateVerdict(state, { sign: otherBoot }).why === 'bad-hmac' && DO.stateVerdict(state, { sign, kind: 'slack' }).why === 'wrong-kind' && DO.stateVerdict(state, { sign, now: Date.now() + DO.STATE_TTL_MS + 120e3 }).why === 'expired', 'dropline state: another boot\'s HMAC, another kind, an old state — each refused by name');
+  ok(!JSON.stringify(ol.status(st.flowId)).includes(verifier) && !st.consentUrl.includes(verifier) && st.consentUrl.includes(challenge), 'the verifier is in no status answer and not in the consent URL (only its S256 challenge is)');
+  const r = await ol.finishByState(state, 'code_12345678');
+  ok(r.ok && seenVerifier === verifier && (await ol.finishByState(state, 'code_12345678')).why === 'used', 'finishByState exchanges ONCE through the closure that holds the verifier; a second landing is `used`');
+  ol.stopAll();
+}
+
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

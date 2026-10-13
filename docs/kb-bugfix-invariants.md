@@ -540,6 +540,12 @@
 - SLACK HAD NO SEARCH ROW (owner 2026-10-12): the adapter never declared the vendor's own search though the app held search:read — 不变量 = a capability the vendor offers and the scope holds is a declared row, never an undeclared not-supported
 - (2026-10-12) THE MAC'S SIGN-IN WAS TYPED AND NOTHING HAPPENED (owner; http ⇒ no WebCrypto ⇒ noVNC's ARD AES threw, 连接中… stayed) — 不变量 = a feature is verified at the user's ADDRESS (an insecure origin), never only on loopback; a step the person completed never leaves the status at the one before
 - (2026-10-12) THE OWNER'S EIGHTEEN COMMENTS WERE ON ANOTHER COMPUTER (comment drafts lived in one browser's localStorage) — 不变量 = a draft the person typed is the server's, synced live to every client; a browser's storage is a cache with a one-time migration, never the record
+- (2026-10-12) A SECOND AGENT ON THE OWNER'S MAC WAS REFUSED EVERY 30 S FOR A DAY AND ONLY THE LOG KNEW (B-6136) — 不变量 = a refusal that repeats names its cause on the thing's own row and once in For-you; the log is never the only reader
+- (2026-10-12) THE HUB WAS HTTP-ONLY, SO EVERY SECURE-CONTEXT API DIED OFF-LOOPBACK (the Mac's ARD sign-in, the microphone to come) — 不变量 = the hub owns an https address (tailscale cert, same port); a feature that needs a secure context names that address
+- (2026-10-12) THE ONE-PORT TLS DEMUX MADE THE APPS LIST STALE AFTER ADD (bare net front = Nagle on: the late answer body landed after the witness push) — 不变量 = a demux before a listener is transparent: the same requests, upgrades and pushes as plain listen; its test drives a push after a request
+- (2026-10-12) TWO HEAVY SUITES WERE RED ON MASTER FOR A TIMER EDGE AND FOR LOAD (B-1542) — 不变量 = a timing bound is derived from the clock it measures and names its terms; a control's premise is waited for on the page's own frames, never a fixed sleep or a literal
+- (2026-10-12) EVERY HOP OF A PAIRED MACHINE'S PICTURE PATH KEPT NAGLE ON (owner '延迟更低'; the demux fix's mechanism, generalised) — 不变量 = a socket that carries a person's picture or input is noDelay at both ends; the census in test-architecture names every net hop
+- (2026-10-13) THE VOICE CONTEXT CARRIED COMPACTION SUMMARIES AND THE AUTO TIER SENT THE PERSON'S OWN WORDS (voice-verify F1/F2) — 不变量 = what leaves for a vendor is named by source (agent code spans, project paths), never by shape; a never-list shares the UI's own predicate
 
 ## THE SPLIT BUTTON MOVED THE RIGHT TAB TO THE LEFT PANE (owner 2026-10-12, inc-mv4q1u6b-ksyh, lane split-keeps-sides)
 

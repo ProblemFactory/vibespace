@@ -252,7 +252,10 @@ class Auth {
   /** Issue a login token + set the cookie (shared by password + Clerk login). */
   _grantSession(req, res) {
     const token = this.issueToken(req.headers['user-agent']);
-    const secure = req.secure || req.headers['x-forwarded-proto'] === 'https' ? ' Secure;' : '';
+    // Secure only behind an https INGRESS (no http door to that host): the hub's own https (src/server/tls.js) shares ONE
+    // port + host with http, and a Secure cookie set over it would lock the http origin out (Chrome: an insecure origin
+    // never reads or overwrites a Secure cookie) — lane https-tailscale, cookies as before (req.secure was never true)
+    const secure = req.headers['x-forwarded-proto'] === 'https' ? ' Secure;' : '';
     res.setHeader('Set-Cookie', `${TOKEN_COOKIE}=${token}; HttpOnly; Path=/; Max-Age=${Math.floor(TOKEN_TTL_MS / 1000)}; SameSite=Lax;${secure}`);
     return token;
   }
@@ -341,7 +344,7 @@ class Auth {
       this.setPassword(pw, { userSet: true });
       this.revokeAllTokens();
       const token = this.issueToken(req.headers['user-agent']);
-      const secure = req.secure || req.headers['x-forwarded-proto'] === 'https' ? ' Secure;' : '';
+      const secure = req.headers['x-forwarded-proto'] === 'https' ? ' Secure;' : ''; // ingress only — the hub's own https shares the host with http (above)
       res.setHeader('Set-Cookie', `${TOKEN_COOKIE}=${token}; HttpOnly; Path=/; Max-Age=${Math.floor(TOKEN_TTL_MS / 1000)}; SameSite=Lax;${secure}`);
       res.json({ success: true, enabled: true });
     });

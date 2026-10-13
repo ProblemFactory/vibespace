@@ -59,16 +59,19 @@ function userNoteOf(m) {
 
 const COMPACT_PREVIEW = 'Context compacted';
 const COMPACT_HEAD = 'This session is being continued from a previous conversation';
+// THE compaction-summary rule: the chat draws such a user record as a system card (chat-renderers re-exports it) and
+// the voice context's never-list drops it (voice-model, voice-verify F1) — one definition, never a copy
+const isCompactSummaryText = (text) => String(text || '').trimStart().startsWith(COMPACT_HEAD);
 function turnPreviewOf(m, max = 60) {
   const raw = textOf(m).trim();
   if (!raw) return null;
   const note = userNoteOf(m);
   if (note) return { preview: '', note: note.what };
-  if (raw.startsWith(COMPACT_HEAD)) return { preview: COMPACT_PREVIEW, isCompact: true };
+  if (isCompactSummaryText(raw)) return { preview: COMPACT_PREVIEW, isCompact: true };
   const s = raw.replace(/\s+/g, ' ');
   if (s.length <= max) return { preview: s };
   const cut = s.lastIndexOf(' ', max);
   return { preview: (cut > max / 2 ? s.slice(0, cut) : s.slice(0, max)) + '…' };
 }
 
-module.exports = { NOTE_MARKER, NOTE_TAGS, COMPACT_PREVIEW, noteKindOfText, userNoteOf, turnPreviewOf };
+module.exports = { NOTE_MARKER, NOTE_TAGS, COMPACT_PREVIEW, noteKindOfText, userNoteOf, turnPreviewOf, isCompactSummaryText };

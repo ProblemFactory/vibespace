@@ -42,7 +42,7 @@ function writeJsonAtomic(file, obj) {
   fs.renameSync(file + '.tmp', file);
 }
 
-function create({ dataDir, plugins, port, serverSetting, authEnabled = () => true, broadcast = () => { }, log = () => { } }) {
+function create({ dataDir, plugins, port, serverSetting, httpsUrl = () => null, authEnabled = () => true, broadcast = () => { }, log = () => { } }) {
   const file = path.join(dataDir, 'instance-url.json');
   let state = { desired: false, auto: false, sub: null, url: null, proto: null, at: null, error: null };
   try { Object.assign(state, JSON.parse(fs.readFileSync(file, 'utf-8')) || {}); } catch { }
@@ -61,6 +61,10 @@ function create({ dataDir, plugins, port, serverSetting, authEnabled = () => tru
     if (s) return { url: s.replace(/\/+$/, ''), source: 'setting' };
     const e = envUrl();
     if (e) return { url: e.replace(/\/+$/, ''), source: 'env' };
+    // lane https-tailscale: the hub's own https address (src/server/tls.js) while its certificate is live — after
+    // everything the operator declared, before an auto publish; the auto-graduation gate does not count it (server.js)
+    const h = (() => { try { return httpsUrl() || null; } catch { return null; } })();
+    if (h) return { url: h.replace(/\/+$/, ''), source: 'https' };
     if (state.url) return { url: state.url.replace(/\/+$/, ''), source: 'frp-auto' };
     return { url: null, source: null };
   }
@@ -75,7 +79,7 @@ function create({ dataDir, plugins, port, serverSetting, authEnabled = () => tru
       published: !!state.url, desired: !!state.desired, auto: !!state.auto,
       url: state.url || null, sub: state.sub || f.selfDialSub || null, at: state.at || null, error: state.error || null,
       settingUrl: settingUrl(), envUrl: envUrl(),
-      effectiveUrl: eff.url, source: eff.source,
+      effectiveUrl: eff.url, source: eff.source, httpsUrl: (() => { try { return httpsUrl() || null; } catch { return null; } })(),
     };
   }
 

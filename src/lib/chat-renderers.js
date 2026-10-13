@@ -288,8 +288,7 @@ export function isImagePath(fp) { return !!fp && IMAGE_EXT_RE.test(String(fp)); 
 // rebuild or a page-in resolves the cards whose record precedes it in TIME
 // (a card that came AFTER a compaction is about the context being full again
 // and must keep its button — the rule is pure so that edge is tested).
-const COMPACT_SUMMARY_PREFIX = 'This session is being continued from a previous conversation';
-export function isCompactSummaryText(text) { return String(text || '').trimStart().startsWith(COMPACT_SUMMARY_PREFIX); }
+export { isCompactSummaryText } from '../assistant-note.js'; // THE rule (PURE) — the voice context's never-list reads the same one (voice-verify F1)
 /** PURE: which cards to resolve. `cards` = [{ts, resolved}] in DOM order; a
  *  card with no ts (a legacy element) resolves only when NO bound is given
  *  (the live frame) — time-bounding a card whose time is unknown would guess. */

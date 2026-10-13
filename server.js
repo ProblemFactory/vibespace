@@ -108,7 +108,7 @@ setInterval(refreshAvailableModels, 3600000); // refresh hourly
 const HOST = process.env.HOST || '0.0.0.0';
 
 const app = express();
-const server = http.createServer(app);
+const server = http.createServer(app); const hub = require('./src/server/tls.js').create({ app, httpServer: server, dataDir: path.join(__dirname, 'data'), port: PORT, serverSetting: (k) => serverSetting(k), getUserTodos: () => userTodos, log: console, tailscaleBin: throwawayRoot && !process.env.VIBESPACE_TAILSCALE_BIN ? null : undefined }); // lane https-tailscale: ONE port, two servers — hub.front peeks each connection's first byte (TLS → https, else http), every listener reaches both through hub.attachToServers (test-architecture §89); a throwaway root never asks the real tailscale ⇒ src/server/tls.js
 
 // ── Optional password auth (VIBESPACE_PASSWORD env / data/auth.json) +
 //    optional Clerk SSO (VIBESPACE_CLERK_PUBLISHABLE_KEY — src/clerk-auth.js) ──
@@ -307,7 +307,7 @@ const { CHAT_WRAPPER, agentdDialDevices, agentdDials,
   getMounts: () => { try { return mounts; } catch { return null; } },
   getMachineMounts: () => { try { return machineMounts; } catch { return null; } },
   getPortForwards: () => { try { return portForwards; } catch { return null; } },
-  getExitProxy: () => { try { return exitProxy; } catch { return null; } },
+  getExitProxy: () => { try { return exitProxy; } catch { return null; } }, getDialHealth: () => { try { return dialHealthWatch; } catch { return null; } },
 });
 // ── Cached webuiPids (PIDs managed by webui dtach sessions) ──
 // childPid from the pty-wrapper meta file + that wrapper's children from /proc
@@ -1270,7 +1270,7 @@ hosts.onUsageEvents = (hostId, text) => {
       if (!hostId || serverSetting('agentd.autoGraduate') === false) return;
       const h = hosts.get(hostId);
       if (!h || h.transport === 'dial' || h.deviceId || h.autoGraduate === false) return; // already graduated / opted out
-      if (!instanceUrl.url()) return;                                  // nothing to dial back to (was agentdDeps.publicUrl — a ghost binding since the split; auto-graduation silently never fired)
+      if (!instanceUrl.url() || instanceUrl.effective().source === 'https') return; // nothing OPERATOR-DECLARED to dial back to (the hub's own https address is not) (was agentdDeps.publicUrl — a ghost binding since the split; auto-graduation silently never fired)
       const last = gradTried.get(hostId) || 0;
       if (Date.now() - last < 6 * 60 * 60 * 1000) return;               // one attempt per machine per 6h
       gradTried.set(hostId, Date.now());
@@ -1359,10 +1359,10 @@ const portForwards = new PortForwardManager({
 });
 jobsWiring.jm.d.getPorts = () => portForwards; // late singleton — lazy getter, never a Proxy
 setTimeout(() => { portForwards.restore().catch(() => {}); }, 5500);
-const instanceUrl = require('./src/server/instance-url.js').create({ dataDir: path.join(__dirname, 'data'), port: PORT, serverSetting, log: (...a) => console.log(...a), authEnabled: () => auth.enabled, broadcast: (m) => bcastAll(m), plugins: { status: (id) => plugins.status(id), frpPublish: (...a) => plugins.frpPublish(...a), frpUnpublish: (...a) => plugins.frpUnpublish(...a), setSelfDialSub: (...a) => plugins.setSelfDialSub?.(...a) } }); // ONE resolver for "this instance's URL" (frp mapping layered OVER agentd.publicUrl, never written into it) + the ONLY publisher of the 'vibespace-instance' proxy; plugins arrives later so its accessors are lazy ⇒ src/server/instance-url.js
+const instanceUrl = require('./src/server/instance-url.js').create({ dataDir: path.join(__dirname, 'data'), port: PORT, serverSetting, httpsUrl: () => hub.url(), log: (...a) => console.log(...a), authEnabled: () => auth.enabled, broadcast: (m) => bcastAll(m), plugins: { status: (id) => plugins.status(id), frpPublish: (...a) => plugins.frpPublish(...a), frpUnpublish: (...a) => plugins.frpUnpublish(...a), setSelfDialSub: (...a) => plugins.setSelfDialSub?.(...a) } }); // ONE resolver for "this instance's URL" (frp mapping layered OVER agentd.publicUrl, never written into it) + the ONLY publisher of the 'vibespace-instance' proxy; plugins arrives later so its accessors are lazy ⇒ src/server/instance-url.js
 const autoResume = require('./src/server/auto-resume.js').create({ dataDir: path.join(__dirname, 'data'), activeSessions, serverSetting, beforeFire: (id, s) => { try { return beforeAutoResumeFire(id, s); } catch (e) { console.warn('[auto-resume] pre-fire gate threw — refusing the continue (fail closed):', e && e.message); return false; } }, fireIdentity: (id, s) => { try { return fireIdentityFor(s); } catch { return null; } }, authorizeSpend: (id, s, identity, o) => spendGuard.authorize({ reason: 'auto-resume', session: s, sessionId: id, sessionName: s && s.name, identity, hold: !!(o && o.hold) }), noteSpend: (id, s, identity, hold) => spendGuard.note({ reason: 'auto-resume', session: s, identity, hold }), releaseSpend: (id, s, hold) => spendGuard.release({ hold }), log: (...a) => console.log(...a), broadcast: (id, m) => { const s = activeSessions.get(id); if (s) broadcastToSession(s, id, m); }, notify: (id, s, text, extra) => { try { feedPeerCard(s, { fromName: 'VibeSpace', kind: 'notification', text, ...(extra && extra.resetCredit ? { resetCredit: extra.resetCredit } : {}) }); } catch { } }, resetCreditOffer: (id, s) => { try { return resetCreditOffer(s); } catch { return null; } }, sendToSession: (id, s, text, carried) => { try { const ad = adapterRegistry.get(s.backend); if (!ad || !s.pty || s.mode !== 'chat') return false; const { stdinPayload, userMsg } = ad.formatChatInput(text, Date.now() + '-auto'); s._isStreaming = true; s._machineInputAt = Date.now(); /* a turn nobody typed — prompt-context withholds next-turn group reports from it (§22) */ s.pty.write(stdinPayload + '\n'); if (userMsg) { userMsg.originKind = 'auto-resume'; if (userMsg.payload) userMsg.payload.webui_origin = 'auto-resume'; const note = carried && typeof carried.note === 'string' && carried.note ? carried.note.slice(0, 200) : null; if (note) { userMsg.originNote = note; if (userMsg.payload) userMsg.payload.webui_origin_note = note; } s.buffer = (s.buffer + JSON.stringify(userMsg) + '\n').slice(-500000); feedLive(s, userMsg); } return true; } catch (e) { console.warn('[auto-resume] send failed:', e.message); return false; } } }); // continue a limited session when its quota resets ⇒ src/server/auto-resume.js
 autoResume.start();
-const permissionRules = require('./src/server/permission-rules.js').create({ activeSessions, adapterRegistry, accounts, agentEnv: (...a) => require('./src/ws-handler').agentEnv(...a), buffersDir: BUFFERS_DIR, codexCmdRef: () => CODEX_CMD, telemetry: { record: (e) => { try { telemetry.record(e); } catch { } } } }); permissionRules.registerRoutes(app); instanceUrl.registerRoutes(app); instanceUrl.restore(); Object.defineProperty(app.locals, 'instancePublicUrl', { get: () => { try { return instanceUrl.url(); } catch { return null; } } }); app.get('/api/port-forwards', (req, res) => res.json({ forwards: portForwards.list() })); // permissionRules = the READ-ONLY "where does this rule come from" view (owner ruling 10) + the human-triggered zero-network local oracles (ruling 6) ⇒ src/server/permission-rules.js
+const permissionRules = require('./src/server/permission-rules.js').create({ activeSessions, adapterRegistry, accounts, agentEnv: (...a) => require('./src/ws-handler').agentEnv(...a), buffersDir: BUFFERS_DIR, codexCmdRef: () => CODEX_CMD, telemetry: { record: (e) => { try { telemetry.record(e); } catch { } } } }); permissionRules.registerRoutes(app); instanceUrl.registerRoutes(app); hub.registerRoutes(app); instanceUrl.restore(); Object.defineProperty(app.locals, 'instancePublicUrl', { get: () => { try { return instanceUrl.url(); } catch { return null; } } }); app.get('/api/port-forwards', (req, res) => res.json({ forwards: portForwards.list() })); // permissionRules = the READ-ONLY "where does this rule come from" view (owner ruling 10) + the human-triggered zero-network local oracles (ruling 6) ⇒ src/server/permission-rules.js
 app.get('/api/hosts/:id/ports', async (req, res) => {
   // the UI path probes protocols (http/https/tcp chip); the watch sweep doesn't
   try { res.json({ ports: await portForwards.detect(req.params.id, { probe: true }) }); } catch (e) { res.status(400).json({ error: e.message }); }
@@ -1414,9 +1414,9 @@ app.post('/api/ports/kill-orphan', (req, res) => {
 // On-demand EXIT (task #164): let an agent borrow a machine's network / run a command on it for ONE command.
 // Who may, per machine: two lists (lane-pairing ⑥, PURE src/exit-reach.js) — the routes are src/server/exit-routes.js.
 const { ExitProxyManager } = require('./src/exit-proxy');
-// lane device-upgrade-stuck: an agent upgrade the hub gave up on reaches the user — ONE For-you item per (machine, version) + the row's line, gone at that version (every transport's door)
+// lane device-upgrade-stuck: an agent upgrade the hub gave up on reaches the user — ONE For-you item per (machine, version) + the row's line, gone at that version (every transport's door); lane host-stale-dialer (B-6136): a second agent with an old token — its row's line, ONE For-you item per episode, a 10-min journal line (src/server/dial-health-watch.js)
 const deviceUpgradeWatch = require('./src/server/device-upgrade-watch.js').create({ userTodos, dataDir: path.join(__dirname, 'data'), log: (...a) => console.log(...a), bcast: () => { try { bcastAll({ type: 'hosts-updated' }); } catch { } } });
-hosts.onAgentUpgrade = (event, facts) => deviceUpgradeWatch.onAgentUpgrade(event, facts); hosts.agentUpgradeOf = (id) => deviceUpgradeWatch.rowOf(id);
+hosts.onAgentUpgrade = (event, facts) => deviceUpgradeWatch.onAgentUpgrade(event, facts); hosts.agentUpgradeOf = (id) => deviceUpgradeWatch.rowOf(id); const dialHealthWatch = require('./src/server/dial-health-watch.js').create({ userTodos, hosts, dataDir: path.join(__dirname, 'data'), log: (...a) => console.log(...a), bcast: () => { try { bcastAll({ type: 'hosts-updated' }); } catch { } } });
 const exitProxy = new ExitProxyManager({ hosts, log: (m) => console.log('[exit]', m), dataDir: path.join(__dirname, 'data'), userTodos, settingOf: (k) => serverSetting(k), sessionsMap: () => activeSessions, bcastAll: (...a) => bcastAll(...a),
   emitCard: (s, card) => feedPeerCard(s, { ...card, belongsTo: require('./src/exit-call.js').cardMatcher(card) }), groupsOf: (s, id) => tasks.groupsForSession({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, initialGroupId: s._initialGroupId }).map((g) => g.id) });
 hosts.onReachChange = (why) => exitProxy.rejudgeAll(`hosts-${why}`); // verify-r3 A-r3a: an import / a removal / a reshape of hosts.json re-judges every lent machine (the PATCH was the only writer that did)
@@ -1442,7 +1442,7 @@ const integrationsWiring = require('./src/server/integrations-wiring.js').create
 // ── Mounts + plugins + dial-session wiring (src/server/mounts-plugins-wiring.js, decomposition #12) ──
 const { mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages, browserKeeper, bootBrowserKeeper, browserStream, browserHandback, browserTrace, browserKeys, browserDialogs, pluginLoader,
 } = require('./src/server/mounts-plugins-wiring.js').create({
-  app, server, rootDir: __dirname, HOST, PORT, BUFFERS_DIR, PERMISSION_MODES, integrations: integrationsWiring.store, getJobs: () => jobsWiring.getJobs(), // + lane jobs-browser: a job browses as its owner conversation // + agent browser P4 second half (§7.5): the key consumer's store
+  app, server: hub, rootDir: __dirname, HOST, PORT, BUFFERS_DIR, PERMISSION_MODES, integrations: integrationsWiring.store, getJobs: () => jobsWiring.getJobs(), // + lane jobs-browser: a job browses as its owner conversation // + agent browser P4 second half (§7.5): the key consumer's store
   auth, wss, WS_OPEN,
   bcastAll: (...a) => bcastAll(...a), serverNotice: (...a) => serverNotice(...a), // + agent browser P1: the keeper's runaway/ceiling notices
   serverSetting: (...a) => serverSetting(...a),
@@ -1632,7 +1632,7 @@ const agentdDialWss = new WebSocketServer({ noServer: true }); // Transport B di
 // ── Start Server ──
 // THE single WebSocket upgrade dispatcher: /ws (main app), /proxy/ (unblocker
 // site WebSockets), /api/vnc + /api/desktop/<id>/stream (the desktop bridge). Everything else is destroyed.
-server.on('upgrade', (req, socket, head) => {
+hub.attachToServers('upgrade', (req, socket, head) => { // BOTH servers (http + the https one, src/server/tls.js) — never server.on (§89)
   const pathname = (req.url || '').split('?')[0];
   const deny = () => { socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n'); socket.destroy(); };
   if (pathname === '/ws') {
@@ -1750,9 +1750,9 @@ if (METRICS_PORT > 0) {
   }).listen(METRICS_PORT, () => console.log(`  metrics exporter on :${METRICS_PORT}`));
 }
 
-server.listen(PORT, HOST, () => {
+hub.listen(PORT, HOST, () => { // the one-port demux (src/server/tls.js) — listen errors / EADDRINUSE as before
   const ver = require('./package.json').version;
-  console.log(`\n  VibeSpace v${ver} running at http://localhost:${PORT}`);
+  console.log(`\n  VibeSpace v${ver} running at http://localhost:${PORT}${hub.bootSuffix()}`); hub.start(); // + " and https://<domain>:PORT" while a certificate is live; start = the boot pass + hourly
   // PID file for the supervised-restart path (scripts/update.sh in a container:
   // no systemd — the entrypoint respawn loop restarts us when update.sh kills
   // this pid; dtach sessions live in the same PID namespace and survive).

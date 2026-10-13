@@ -1,13 +1,16 @@
 // THE SLACK RELAY PAGE (VibeSpace design 018) — a STATIC page on an https host (the project's GitHub Pages, or a
 // fleet's admin host) that Slack redirects a member to after Allow. It holds no key, verifies nothing, calls nobody and
 // stores nothing: it reads the CLEAR part of `state` (`v1.<base64url {u, f, t}>.<sig>` — `u` = the VibeSpace the member
-// started from) and sends the browser back to `<u>/api/channels/oauth/cb/slack?<the query verbatim>` ONLY when `u` is
+// started from; `k` = the account kind, absent = slack — lane voice-p1-oauth-teach: `dropline`) and sends the browser back
+// to `<u>/api/channels/oauth/cb/<k>?<the query verbatim>` ONLY when `u` is
 // on a private network (or an https host under this page's `data-allow` suffixes); otherwise it shows the code to paste
 // back. The instance checks the signature. The rule below is src/channels/slack-manifest.js `relayTargetVerdict`, kept
 // equal to it by scripts/test-slack-relay.mjs (one table, both functions).
 (function (root) {
   'use strict';
   var CALLBACK_PATH = '/api/channels/oauth/cb/slack';
+  var CALLBACK_BASE = '/api/channels/oauth/cb/';
+  var KIND_RE = /^[a-z][a-z0-9-]{1,19}$/;
   var PRIVATE_SUFFIXES = ['.local', '.lan', '.home', '.localhost'];
   function originOf(o) {
     if (typeof o !== 'string' || !o || o.length > 300) return null;
@@ -41,28 +44,36 @@
     }
     return 'show-code';
   }
-  /** The `u` of a state's clear part, or null (any other shape). */
-  function stateOrigin(state) {
+  /** A state's clear part as an object, or null (any other shape). */
+  function stateClear(state) {
     var m = /^v1\.([A-Za-z0-9_-]{8,800})\.([A-Za-z0-9_-]{16,128})$/.exec(String(state || ''));
     if (!m) return null;
     try {
       var b = m[1].replace(/-/g, '+').replace(/_/g, '/');
       while (b.length % 4) b += '=';
       var j = JSON.parse(atob(b));
-      return j && typeof j.u === 'string' && j.u ? j.u : null;
+      return j && typeof j === 'object' ? j : null;
     } catch (e) { return null; }
+  }
+  /** The `u` of a state's clear part, or null (any other shape). */
+  function stateOrigin(state) { var j = stateClear(state); return j && typeof j.u === 'string' && j.u ? j.u : null; }
+  /** The `k` (account kind) of a state: absent = 'slack'; a malformed one = null (the page never builds a path from it). */
+  function stateKind(state) {
+    var j = stateClear(state);
+    if (!j || j.k === undefined) return 'slack';
+    return typeof j.k === 'string' && KIND_RE.test(j.k) ? j.k : null;
   }
   /** What the page does with a query: `{act:'redirect', to}` | `{act:'show-code', code}` | `{act:'denied'}` | `{act:'nothing'}`. */
   function decide(search, allow) {
     var s = String(search || '');
     var q = new URLSearchParams(s);
     var code = q.get('code'), error = q.get('error');
-    var u = stateOrigin(q.get('state'));
-    if (u && (code || error) && relayTargetVerdict(u, { allow: allow || [] }) === 'redirect') return { act: 'redirect', to: originOf(u) + CALLBACK_PATH + (s.charAt(0) === '?' ? s : '?' + s) };
+    var u = stateOrigin(q.get('state')), k = stateKind(q.get('state'));
+    if (u && k && (code || error) && relayTargetVerdict(u, { allow: allow || [] }) === 'redirect') return { act: 'redirect', to: originOf(u) + CALLBACK_BASE + k + (s.charAt(0) === '?' ? s : '?' + s) };
     if (code && /^[A-Za-z0-9._-]{8,300}$/.test(code)) return { act: 'show-code', code: code };
     return { act: error ? 'denied' : 'nothing' };
   }
-  root.VibeSpaceRelay = { CALLBACK_PATH: CALLBACK_PATH, PRIVATE_SUFFIXES: PRIVATE_SUFFIXES, originOf: originOf, privateHost: privateHost, relayTargetVerdict: relayTargetVerdict, stateOrigin: stateOrigin, decide: decide };
+  root.VibeSpaceRelay = { CALLBACK_PATH: CALLBACK_PATH, PRIVATE_SUFFIXES: PRIVATE_SUFFIXES, originOf: originOf, privateHost: privateHost, relayTargetVerdict: relayTargetVerdict, stateOrigin: stateOrigin, stateKind: stateKind, decide: decide };
   if (typeof document === 'undefined' || !root.location) return;
   var allow = String(document.documentElement.getAttribute('data-allow') || '').split(/\s+/).filter(Boolean);
   var d = decide(root.location.search, allow);

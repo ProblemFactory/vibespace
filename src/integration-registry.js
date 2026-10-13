@@ -311,6 +311,34 @@ const ROWS = Object.freeze([
     consumers: ['src/server/browser-backend.js'],
     docs: 'docs/design-agent-browser-v2.md',
   },
+  {
+    // Dropline voice input (design q-029 §1, P0 = the key tier; P1 adds OAuth): the voice-input plugin's credential
+    id: 'dropline',
+    label: i18nKey('Dropline (voice input)'),
+    fields: [
+      { key: 'apiKey', label: i18nKey('Dropline key'), secret: true, required: true, placeholder: 'dl_…',
+        help: i18nKey('Create one at dropline.fish.audio/app → API keys (it is shown once). It stays on this hub; the browser never sees it.'),
+        validate: (v) => (/^dl_[A-Za-z0-9_-]{8,}$/.test(String(v)) ? { ok: true } : { ok: false, why: i18nKey('A Dropline key starts with dl_') }) },
+      // P1 (lane voice-p1-oauth-teach) THE OAUTH TIER (design D4): ONE client per deployment — a cluster preset's
+      // client_id + relay page (VIBESPACE_INTEGRATION_DROPLINE_CLIENTID / _RELAYURL), else the hub's own registration
+      // (written here on the first Connect). Not secrets: a public client has none; the token pair is never a field.
+      { key: 'clientId', label: i18nKey('Fish Audio client id (OAuth)'), secret: false, required: false, placeholder: '',
+        help: i18nKey('Filled by Connect with Fish Audio (or the cluster). Leave empty unless your admin gave you one.'),
+        validate: (v) => (/^[A-Za-z0-9_-]{8,128}$/.test(String(v)) ? { ok: true } : { ok: false, why: i18nKey('A client id is 8–128 letters, digits, - or _') }) },
+      { key: 'relayUrl', label: i18nKey('Sign-in relay page (https)'), secret: false, required: false, placeholder: 'https://…/relay/',
+        help: i18nKey('Where Fish Audio sends the browser back when this hub has no https address of its own.'),
+        validate: (v) => (/^https:\/\/[^\s?#]+$/.test(String(v)) ? { ok: true } : { ok: false, why: i18nKey('The relay page must be an https address') }) },
+    ],
+    clusterEnv: { json: 'VIBESPACE_INTEGRATIONS', prefix: 'VIBESPACE_INTEGRATION_DROPLINE_' },
+    setup: null,
+    test: {
+      kind: 'credential-exchange',
+      describe: i18nKey('One read-only request to api.dropline.fish.audio (/v1/me) with this key; dictates nothing.'),
+      caveat: i18nKey('Proves Dropline accepts the key and names its account — not that this page may use a microphone.'),
+    },
+    consumers: ['src/server/dropline-client.js'],
+    docs: 'docs/design-dropline-voice.zh.md',
+  },
 ]);
 
 const byId = new Map(ROWS.map((r) => [r.id, r]));

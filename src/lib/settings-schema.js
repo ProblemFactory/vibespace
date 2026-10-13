@@ -920,6 +920,18 @@ const SETTINGS_SCHEMA = {
     description: t('The design system a new design follows when none is named: its tokens.css is copied into the design and the check warns on colours and font sizes outside it. The name of a design system (the Design window\'s home lists them). Empty = none.'),
     category: t('Chat'), liveApply: true,
   },
+  // lane https-tailscale (2026-10-12): the hub ALSO answers https on its own port (src/server/tls.js — one port, a
+  // first-byte demux); `auto` fetches + renews a Tailscale certificate itself, `files` = VIBESPACE_TLS_CERT/_KEY. The
+  // row's fact line (settings-ui _renderHttpsFact) is the live address with a Copy button, or the owner's step.
+  'server.https': {
+    type: 'enum', default: 'auto', options: [
+      { value: 'auto', label: t('Automatic (a Tailscale certificate)') },
+      { value: 'files', label: t('My own certificate files') },
+      { value: 'off', label: t('Off (http only)') },
+    ], label: t('Secure address (https)'),
+    description: t('VibeSpace also answers https on its own port. Automatic: on a Tailscale network with HTTPS Certificates on, it fetches and renews a certificate for <machine>.<tailnet>.ts.net itself. My own certificate files: VIBESPACE_TLS_CERT + VIBESPACE_TLS_KEY. The microphone, a Mac\'s sign-in and other secure-only features need this address on every device but this one.'),
+    category: t('Session'), liveApply: true, fact: 'https-address',
+  },
   'agentd.publicUrl': {
     type: 'string', default: '',
     label: t('This instance\'s public address (for reverse mounts)'),

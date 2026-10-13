@@ -172,5 +172,32 @@ console.log('④ CONTROL: the pre-fix id dispatch restored in a copy of src/plug
 }
 for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 2, label: 'mutant-copy (builtin-plugins): ' })) ok(r.name, r.pass, r.detail);
 
+// ④ Dropline voice input (q-029 P0): the voice-input row — ONE line in the list, `dictation` declared, OFF by default,
+// refused ON until the `dropline` integration row holds a key, the language preference closed to auto | zh | en
+{
+  const { PluginManager } = require(path.join(REPO, 'src/plugins.js'));
+  const list = fs.readFileSync(path.join(REPO, 'src/plugins/index.js'), 'utf8');
+  ok('voice-input: ONE line in src/plugins/index.js', list.split("require('./voice-input.js')").length === 2);
+  let key = '';
+  let bound = null;
+  const store = { resolveIntegration: (id) => (id === 'dropline' && key ? { source: 'user', values: { apiKey: key } } : { source: 'none', values: {}, why: 'nothing configured' }) };
+  const pm = new PluginManager({ dataDir: fs.mkdtempSync(path.join(tmp, 'voice-')), opencodeServe: FAKE_SERVE, integrations: () => store, voiceBind: (v) => { bound = v; } });
+  const row = (pm.list?.() || []).find?.((p) => p.id === 'voice-input') || null;
+  const st0 = pm.status('voice-input');
+  ok('voice-input: declares dictation, default OFF, not configured without a key', pm.defs()['voice-input']?.provides?.join() === 'dictation' && st0.enabled === false && st0.configured === false && st0.language === 'auto', { st0, row: !!row });
+  let refused = null; try { pm.setEnabled('voice-input', true); } catch (e) { refused = e.message; }
+  ok('voice-input: turning it ON without a key is refused by name', /Dropline key/.test(refused || '') && !pm.status('voice-input').enabled, refused);
+  key = 'dl_test_0123456789';
+  pm.setEnabled('voice-input', true);
+  ok('voice-input: with a key its toggle turns it ON (and the wiring\'s voiceBind reads the record)', pm.status('voice-input').enabled === true && bound && bound.peek().enabled === true);
+  let bad = null; try { pm.setConfig('voice-input', { language: 'fr' }); } catch (e) { bad = e.message; }
+  pm.setConfig('voice-input', { language: 'zh' });
+  ok('voice-input: language ∈ auto|zh|en (fr refused), zh kept', /auto \| zh \| en/.test(bad || '') && pm.status('voice-input').language === 'zh', bad);
+  const recText = JSON.stringify(bound.peek());
+  ok('voice-input: the key never lands in the plugin record (data/plugins.json)', !recText.includes('dl_test'), recText);
+  pm.setEnabled('voice-input', false);
+  ok('voice-input: its toggle turns it OFF', pm.status('voice-input').enabled === false);
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

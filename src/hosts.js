@@ -140,11 +140,13 @@ class HostManager {
     // lane device-upgrade-stuck: `agentUpgrade` = the agent's failed update (src/server/device-upgrade-watch.js rowOf) —
     // the row's line until the device reports the version
     const up = (h) => { const u = this.agentUpgradeOf?.(h.id); return u ? { agentUpgrade: u } : {}; };
+    // lane host-stale-dialer (B-6136): `dialHealth` = a second agent with an old token knocking while the device is in (src/dial-health.js)
+    const dh = (h) => { const v = h.deviceId ? this.dialHealthOf?.(h) : null; return v ? { dialHealth: v } : {}; };
     return this._state.hosts.map(h => (h.transport === 'dial'
-      ? { ...h, dialTokenHash: undefined, online: !!this.dialOnline?.(h.deviceId), ...up(h) }
+      ? { ...h, dialTokenHash: undefined, online: !!this.dialOnline?.(h.deviceId), ...up(h), ...dh(h) }
       // graduated ssh machine (B-6640): expose the upgrade + live-dial state
       // (hash stays redacted like pure-dial records)
-      : { ...h, dialTokenHash: undefined, ...(h.deviceId ? { graduated: true, dialLive: !!this.dialOnline?.(h.deviceId) } : {}), ...up(h) }));
+      : { ...h, dialTokenHash: undefined, ...(h.deviceId ? { graduated: true, dialLive: !!this.dialOnline?.(h.deviceId) } : {}), ...up(h), ...dh(h) }));
   }
 
   get(id) {
@@ -317,7 +319,9 @@ class HostManager {
       urgent = true;
     } else if (event === 'refused') {
       const prev = d.lastRefusal && d.lastRefusal.code;
-      d.lastRefusal = { code: String(facts.code || 'token-mismatch').slice(0, 40), at, ...hint(false) }; // verify-r5 C2: no token ⇒ no statement kept
+      // lane host-stale-dialer: `since` = when this run of refusals began (the same code, no gap past 10 min) — the row says it
+      const run = prev && prev === String(facts.code || 'token-mismatch') && at - (Number(d.lastRefusal.at) || 0) <= 10 * 60 * 1000 ? (Number(d.lastRefusal.since) || Number(d.lastRefusal.at) || at) : at;
+      d.lastRefusal = { code: String(facts.code || 'token-mismatch').slice(0, 40), at, since: run, ...hint(false) }; // verify-r5 C2: no token ⇒ no statement kept
       urgent = prev !== d.lastRefusal.code;
     } else if (event === 'accepted') {
       d.lastAccept = { at, ...hint() };

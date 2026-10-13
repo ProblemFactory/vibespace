@@ -38,8 +38,9 @@ function create({ app, server, rootDir, HOST, PORT, BUFFERS_DIR, PERMISSION_MODE
 // ── Mounts (rclone S3 mounts + share minting — collaboration P1) ──
 // ── Plugins (2.140.0, B-2d44): host-level capabilities with persistent state ──
 const { PluginManager } = require('../plugins');
+let voicePlugin = { peek: () => ({}), update: () => {} }; // Dropline voice input (q-029 P0): the plugin hands its record reader back here
 const plugins = new PluginManager({
-  dataDir: path.join(rootDir, 'data'),
+  dataDir: path.join(rootDir, 'data'), integrations: () => integrations, voiceBind: (v) => { voicePlugin = v; }, droplineConnected: () => !!(dropline && dropline.connected()),
   broadcast: (msg) => {
     const json = JSON.stringify(msg);
     wss.clients.forEach(c => { if (c.readyState === WS_OPEN) { try { c.send(json); } catch {} } });
@@ -47,6 +48,19 @@ const plugins = new PluginManager({
 });
 // port-forward can publish a forward publicly via the frp plugin (B-0b60)
 portForwards.plugins = plugins;
+// Dropline voice input (q-029 P0): THE vendor module (src/server/dropline-client.js) + the hub proxy /api/voice/*;
+// the `dropline` row's Test = one GET /v1/me through the same module
+// P1 (lane voice-p1-oauth-teach): the OAuth tier (a `public` consent flow; the pair in data/dropline-oauth.json, 0600;
+// its landing door on /api/channels/oauth/cb/dropline) + the teach engine (proposals / per-project tier / context preview)
+const droplineOAuthMod = require('./dropline-oauth.js');
+const droplineTokens = droplineOAuthMod.tokenFile(path.join(rootDir, 'data', 'dropline-oauth.json'));
+let droplineTeach = null;
+var dropline = require('./dropline-client.js').create({ integrations: () => integrations, pluginOn: () => !!voicePlugin.peek().enabled, tokens: droplineTokens, teachCap: (k) => !!droplineTeach && droplineTeach.capOk(k) });
+try { integrations?.registerTest('dropline', dropline.testRunner); } catch (e) { console.warn('[voice] the dropline Test runner was not registered:', e.message); }
+const droplineOAuth = droplineOAuthMod.create({ client: dropline, flows: require('../oauth-loopback.js').createOAuthLoopback({}), integrations: () => integrations, instanceUrl: () => { try { return instanceUrl?.url?.() || ''; } catch { return ''; } }, tokens: droplineTokens });
+require('./oauth-doors.js').register('dropline', { landing: droplineOAuth.landing, page: droplineOAuth.page });
+droplineTeach = require('./voice-teach-engine.js').create({ client: dropline, plugin: { peek: () => voicePlugin.peek(), update: (fn) => voicePlugin.update(fn) }, userTodos });
+app.use(require('../routes/voice.js').create({ client: dropline, prefs: () => voicePlugin.peek(), oauth: droplineOAuth, teach: droplineTeach }));
 setTimeout(() => { try { plugins.bootReplay(); } catch (e) { console.warn('[plugins] boot replay:', e.message); } }, 5000);
 // CS data-plane deps for hosts.device(id) (2.146.0) — wired SYNCHRONOUSLY.
 // (Was a setTimeout(1000); a device dialing in during that window ran mount

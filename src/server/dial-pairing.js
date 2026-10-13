@@ -13,7 +13,7 @@ const DF = require('../dial-facts.js');
 const PT = require('../pairing-token.js'); // verify-r3: THE ONE DOOR of a pairing token (mint, hash, compare)
 
 function create({ rootDir, AGENTD_DIR, agentdHostToken, getHosts, getMounts,
-  getMachineMounts, getPortForwards, getExitProxy, bcastAll = () => { } }) {
+  getMachineMounts, getPortForwards, getExitProxy, getDialHealth = () => null, bcastAll = () => { } }) {
   const hosts = mk(getHosts);
   const mounts = mk(getMounts);
   const machineMounts = mk(getMachineMounts);
@@ -143,6 +143,13 @@ function gateDialUpgrade(req, socket) {
     // and per window whatever the addresses
     // the name is the stranger's own bytes: a control character (%0A) would forge a journal line of its own
     const shownId = String(deviceId || '?').replace(/[\u0000-\u001f\u007f\u2028\u2029]/g, '?');
+    // lane host-stale-dialer (B-6136): a refusal WHILE the device is in = a second agent with an old token — its row and
+    // For you name it (src/server/dial-health-watch.js); the journal says it once per 10 min, never every 30 s
+    const health = why === 'token-mismatch' ? (() => { try { return getDialHealth()?.byDevice(deviceId); } catch { return null; } })() : null;
+    if (health && health.v.kind === 'second-dialer-stale-token') {
+      if (getDialHealth().shouldLog(health.h.id, health.v)) console.log(`[device] dial REJECTED for '${shownId}' — token mismatch while '${shownId}' is connected: a SECOND agent with an old token (from ${facts.from || '?'}); its row and For you say so — this line repeats once per 10 min while it knocks`);
+      return null;
+    }
     logRefusal(facts, why === 'token-mismatch' ? deviceId : '', `[device] dial REJECTED for '${shownId}' — ${why === 'no-device-id' ? 'no device id' : why === 'no-pairing' ? 'no pairing on record (answered as token-mismatch)' : 'token mismatch'}${hints.probe ? ' (a --dial-check probe)' : ''} (attempt ${hints.attempt}${hints.last ? `, previous failure ${hints.last.code}` : ''}${hints.daemon ? `, daemon ${hints.daemon}` : ''}, from ${facts.from || '?'})`);
     return null;
   }

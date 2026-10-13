@@ -201,7 +201,7 @@ store.registerTest(CARD, shapeRunner);
 {
   const r0 = await get('/api/integrations');
   const cards = R.ROWS.filter((r) => !r.bindsPerAccount).map((r) => r.id);
-  ok(r0.status === 200 && Array.isArray(r0.json.integrations) && r0.json.integrations.map((x) => x.id).join() === cards.join() && cards.length === 6, `GET /api/integrations lists the six browser key rows ONLY (${r0.json.integrations.map((x) => x.id).join(', ')})`);
+  ok(r0.status === 200 && Array.isArray(r0.json.integrations) && r0.json.integrations.map((x) => x.id).join() === cards.join() && cards.length === 7 && cards[6] === 'dropline', `GET /api/integrations lists the six browser key rows + the Dropline voice key row ONLY (${r0.json.integrations.map((x) => x.id).join(', ')})`);
   ok(['fake', 'lark', 'gmail'].every((id) => !r0.json.integrations.some((x) => x.id === id)) && ['fake', 'lark', 'gmail'].every((id) => R.rowById(id).bindsPerAccount === true), 'r4: the account-bound rows (fake / lark / gmail) are NOT cards — absent from the list');
   // every card verb on an account-bound row: 404 BY NAME
   for (const id of ['fake', 'lark', 'gmail']) {
@@ -912,6 +912,8 @@ if (tracked.length) {
   // the same wiring mounts-plugins-wiring runs, over this suite's real store
   const bb = require(path.join(REPO, 'src/server/browser-backend.js')).create({ integrations: store, log: { warn() {} } });
   const registered = bb.registerTests();
+  // Dropline voice input (q-029 P0): the wiring registers the `dropline` row's Test (GET /v1/me) from THE vendor module
+  store.registerTest('dropline', require(path.join(REPO, 'src/server/dropline-client.js')).create({ integrations: () => store }).testRunner);
   ok(registered.length === 6 && registered.includes('cloak') && registered.includes('cloud:agentcore'), `browser-backend registered its six rows' runners through the real store (${registered.join(', ')})`);
   for (const row of R.ROWS) {
     if (row.wiredIn) continue;
@@ -941,6 +943,19 @@ server.close();
 // dir now (scripts/mutant-copy.mjs).
 console.log('\ntree: the patched copies never touch the tree');
 for (const r of copiesCensus(MUTI.files, MUTI.dir, REPO, { minCopies: 3 })) ok(r.pass, 'tree: ' + r.name, r.pass ? undefined : r.detail);
+
+// lane voice-p1-oauth-teach: the `dropline` row's OAUTH TIER fields — ONE client per deployment (design D4): the key
+// stays the one secret; clientId + relayUrl are NOT secrets (a public client has none) and come from the cluster as
+// VIBESPACE_INTEGRATION_DROPLINE_CLIENTID / _RELAYURL; the token pair is never a field (data/dropline-oauth.json)
+{
+  const dl = R.rowById('dropline');
+  const shape = dl.fields.map((f) => `${f.key}:${f.secret ? 's' : 'p'}${f.required ? 'R' : 'o'}`).join();
+  ok(shape === 'apiKey:sR,clientId:po,relayUrl:po' && !R.checkRow(dl).length, `dropline fields = the key (secret, required) + clientId + relayUrl (public, optional); no token field (${shape})`);
+  ok(dl.fields.map((f) => storeMod.envFieldName('dropline', f.key)).join() === 'VIBESPACE_INTEGRATION_DROPLINE_APIKEY,VIBESPACE_INTEGRATION_DROPLINE_CLIENTID,VIBESPACE_INTEGRATION_DROPLINE_RELAYURL' && dl.clusterEnv.prefix === 'VIBESPACE_INTEGRATION_DROPLINE_', 'dropline cluster env names: _APIKEY, _CLIENTID, _RELAYURL under the declared prefix');
+  const v = R.validateValues(dl, { clientId: 'cid_abc12345', relayUrl: 'https://admin.example.test/relay/' });
+  const b = R.validateValues(dl, { relayUrl: 'http://x.lan/relay', clientId: 'a b' });
+  ok(v.ok && !b.ok && b.errors.relayUrl && b.errors.clientId, 'clientId / relayUrl validate (an http relay page or a spaced id is refused by name)', JSON.stringify(b.errors));
+}
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

@@ -185,6 +185,7 @@ function bridgeOf(ctx) {
     const openTcp = () => {
       if (sock || cutDone || ws.readyState !== 1) return;
       sock = net.connect(port, '127.0.0.1');
+      sock.setNoDelay(true); // a key's release no longer waits ~40 ms behind its press for the delayed ACK (Nagle)
       log.log?.(`[desktop-stream] ${id}: bridge opened → 127.0.0.1:${port}${viewerId ? ` (viewer ${viewerId})` : ''}`);
       sock.on('data', (d) => {
         if (ws.readyState !== 1) return;

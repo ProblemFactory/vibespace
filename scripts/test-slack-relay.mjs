@@ -44,6 +44,19 @@ const TABLE = [
 ];
 const diff = TABLE.filter(([o, allow]) => RV.relayTargetVerdict(o, { allow }) !== M.relayTargetVerdict(o, { allow }));
 ok(!diff.length && TABLE.some(([o, a]) => M.relayTargetVerdict(o, { allow: a }) === 'redirect') && TABLE.some(([o, a]) => M.relayTargetVerdict(o, { allow: a }) === 'show-code') && RV.CALLBACK_PATH === M.CALLBACK_PATH && RV.PRIVATE_SUFFIXES.join() === M.PRIVATE_SUFFIXES.join(), `① relay.js and slack-manifest.js answer one table alike (${TABLE.length} rows), with the same callback path and private suffixes`, JSON.stringify(diff));
+// lane voice-p1-oauth-teach: the state's `k` (account kind) — absent = slack; dropline lands on its own door; a malformed
+// kind never builds a path (the code is shown instead)
+{
+  const sg = (c) => crypto.createHmac('sha256', 'k').update(c).digest('base64url');
+  const DO = require(path.join(repo, 'src/server/dropline-oauth.js'));
+  const sd = DO.stateOf({ origin: 'http://192.168.1.20:3456', flowId: '0123456789abcdef', issuedAt: Date.now() }, sg);
+  const ss = M.stateOf({ origin: 'http://192.168.1.20:3456', flowId: '0123456789abcdef', issuedAt: Date.now() }, sg);
+  const clear = (o) => `v1.${Buffer.from(JSON.stringify(o)).toString('base64url')}.${'A'.repeat(43)}`;
+  const d1 = RV.decide(`?code=abcd.efgh.1234&state=${encodeURIComponent(sd)}`, []);
+  const d2 = RV.decide(`?code=abcd.efgh.1234&state=${encodeURIComponent(ss)}`, []);
+  const d3 = RV.decide(`?code=abcd.efgh.1234&state=${encodeURIComponent(clear({ u: 'http://192.168.1.20:3456', f: '0123456789abcdef', t: 1, k: '../../api/x' }))}`, []);
+  ok(d1.act === 'redirect' && d1.to.startsWith('http://192.168.1.20:3456/api/channels/oauth/cb/dropline?code=') && d2.to.startsWith('http://192.168.1.20:3456/api/channels/oauth/cb/slack?') && d3.act === 'show-code' && RV.stateKind(ss) === 'slack' && RV.stateKind(sd) === 'dropline', 'k: a dropline state goes back to /cb/dropline, a Slack state (no k) to /cb/slack, a malformed k shows the code (never a built path)', JSON.stringify({ d1, d2, d3 }));
+}
 const mut = fs.readFileSync(path.join(DIR, 'relay.js'), 'utf-8').replace("(o[0] === 192 && o[1] === 168)", "(o[0] === 192)");
 const mctx = { URL, URLSearchParams, atob }; mctx.globalThis = mctx; vm.createContext(mctx); vm.runInContext(mut, mctx);
 ok(TABLE.some(([o, allow]) => mctx.VibeSpaceRelay.relayTargetVerdict(o, { allow }) !== M.relayTargetVerdict(o, { allow })) || mctx.VibeSpaceRelay.relayTargetVerdict('http://192.169.1.1', {}) !== M.relayTargetVerdict('http://192.169.1.1', {}), '① CONTROL: a relay copy whose 192.168/16 rule widened to 192/8 disagrees with the server');
@@ -96,6 +109,13 @@ const foreign = requests.filter((u) => !/\/favicon\.ico$/.test(u)).filter((u) =>
 const own = [...new Set(served.map((p) => p.replace(/^\/allow/, '')))].sort().join();
 const stor = await ev("JSON.stringify([Object.keys(localStorage).filter(function (k) { return k !== 'vs-onboarded'; }).length, sessionStorage.length, document.cookie])");
 ok(!foreign.length && own === '/,/relay.js' && stor === '[0,0,""]', `④ CDP census over ${requests.length} requests: the page asks only for itself and relay.js (and the one navigation back); nothing stored`, JSON.stringify({ foreign, own, stor }));
+// ⑤ lane voice-p1-oauth-teach: a dropline state (k) in a real browser lands on the instance's /cb/dropline
+{
+  const DO = require(path.join(repo, 'src/server/dropline-oauth.js'));
+  const qd = `?code=2222.3333.abcdef&state=${encodeURIComponent(DO.stateOf({ origin: INST, flowId: '0123456789abcdef', issuedAt: Date.now() }, sign))}`;
+  const atd = await open(PAGE + qd);
+  ok(atd === `${INST}/api/channels/oauth/cb/dropline${qd}` && landed[landed.length - 1] === `/api/channels/oauth/cb/dropline${qd}`, '⑤ a dropline state (k=dropline) in Chrome: the page sends the browser to the instance\'s /api/channels/oauth/cb/dropline, the query verbatim', atd);
+}
 pageSrv.close(); instSrv.close(); ws.close();
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

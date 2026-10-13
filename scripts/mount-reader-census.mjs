@@ -108,6 +108,7 @@ export const ROWS = [
   ['src/server/design-engine.js', 'user-path', 6, 'DOOR\\.blocked\\(', 'the design watch relist: refused by name, never read'],
   ['src/server/desktop-app-keeper.js', 'own-tree', 1, null, DATA],
   ['src/server/device-upgrade-watch.js', 'own-tree', 1, null, DATA],
+  ['src/server/dial-health-watch.js', 'own-tree', 1, null, DATA], // lane host-stale-dialer: data/dial-health.json (the For-you ledger)
   ['src/server/dial-pairing.js', 'own-tree', 1, null, DATA],
   ['src/server/exit-routes.js', 'own-tree', 1, null, DATA],
   ['src/server/fd-gauge.js', 'own-tree', 4, null, PROC],
@@ -134,6 +135,7 @@ export const ROWS = [
   ['src/server/session-stdout.js', 'own-tree', 13, null, PROC],
   ['src/server/spend-guard.js', 'own-tree', 1, null, DATA],
   ['src/server/stash-handover.js', 'own-tree', 1, null, DATA],
+  ['src/server/tls.js', 'exempt', 5, null, 'data/tls (its own store: state.json, the Tailscale certificate) + the operator’s VIBESPACE_TLS_CERT / _KEY files — boot config, never a mount'],
   ['src/server/unexpected-exit.js', 'own-tree', 1, null, CLI],
   ['src/server/usage-index.js', 'own-tree', 1, null, CLI],
   ['src/server/usage-pool-engine.js', 'own-tree', 26, null, CLI],

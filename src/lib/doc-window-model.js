@@ -203,3 +203,31 @@ export function rawCommentTarget(blocks, c) {
   const near = (xs) => xs.reduce((m, x) => (!m || Math.abs(x.line - r.line) < Math.abs(m.line - r.line) ? x : m), null);
   return (q && near(list.filter((x) => oneLine(x.source).includes(q)))) || list.find((x) => x.pos === r.pos) || list.find((x) => x.line === r.line) || null;
 }
+
+// ── THE SEND'S WORDS (lane doc-comments-ui, B-8199 — owner 2026-10-12 with eighteen comments on the strip: "请问我现在该干啥")
+//    — `t` is handed in (this file imports nothing); src/lib/doc-window-ui.js paints them, scripts/test-doc-comment-send.mjs gates them.
+/** Send all's label: the send's shape BEFORE the press — `plan` = M.commentsBatches(path, rows) run in the page (the server
+ *  packs the same way): more than one message ⇒ "Send all (18 → 3 messages)", else "Send all (3)"; while the ONE POST is out
+ *  ⇒ "Sending 18 comments…" (the server sends the batches — no per-batch progress is claimed). */
+export function sendAllLabel(t, { n = 0, plan = null, sending = false } = {}) {
+  if (sending) return n === 1 ? t('Sending 1 comment…') : t('Sending {n} comments…', { n });
+  const m = plan && plan.ok && Array.isArray(plan.batches) ? plan.batches.length : 1;
+  return m > 1 ? t('Send all ({n} → {m} messages)', { n, m }) : t('Send all ({n})', { n });
+}
+/** An answer of POST /api/doc/comments said by what happened (`n` = the rows this press sent): 'sent' ⇒ "Sent …" (in m
+ *  messages); 'stashed' ⇒ "Stashed …" with when they arrive — never "Sent"; a part-way failure ⇒ the rest are still here;
+ *  clipped notes said. → { words, kind: 'sent'|'stashed'|'partial'|'failed' } | null (no_owner: the strip's owner line says it) */
+export function sendWords(t, r, n) {
+  if (r && r.ok) {
+    const c = Number.isInteger(r.count) && r.count > 0 ? r.count : n;
+    const stashed = r.delivered === 'stashed';
+    let words = stashed
+      ? (c === 1 ? t('Stashed 1 comment — the conversation is not running; it is delivered when its next turn starts') : t('Stashed {n} comments — the conversation is not running; they are delivered when its next turn starts', { n: c }))
+      : r.messages > 1 ? t('Sent {n} comments in {m} messages', { n: c, m: r.messages }) : c === 1 ? t('Sent 1 comment') : t('Sent {n} comments', { n: c });
+    if (r.clipped > 0) words += ' ' + (r.clipped === 1 ? t('+ 1 note was shortened to fit') : t('+ {k} notes were shortened to fit', { k: r.clipped }));
+    return { words, kind: stashed ? 'stashed' : 'sent' };
+  }
+  if (r && r.code === 'no_owner') return null;
+  if (r && Number.isInteger(r.sent) && r.sent > 0) return { words: t('Sent {sent} of {n} — the rest are still here', { sent: r.sent, n }), kind: 'partial' };
+  return { words: t('Could not send the comments: {why}', { why: (r && r.error) || t('the server did not answer') }), kind: 'failed' };
+}

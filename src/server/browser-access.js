@@ -115,6 +115,7 @@ function create({ hosts = null, env = () => ({}), homeDir = undefined, local = n
       await deviceOf(hostId); // fail loud NOW so the caller can say "device offline"
       const sockets = new Set();
       const server = net.createServer({ allowHalfOpen: true }, async (sock) => {
+        sock.setNoDelay(true); // the browser view's screencast and input: never behind Nagle (the desktop forward's twin)
         sockets.add(sock);
         sock.on('close', () => sockets.delete(sock));
         sock.on('error', () => { try { sock.destroy(); } catch { /* gone */ } });

@@ -1820,6 +1820,7 @@ const I_RECV = {
   'src/server/channels-engine.js|p.choice.fromMount': ['mount', 'a storage mount\'s name'], 'src/server/channels-engine.js|p': ['outbox proposal', 'a proposal\'s reason'], 'src/server/channels-engine.js|rec': ['channel', 'an account / adapter label'],
   'src/server/channels-engine.js|row': ['integration', 'an integration row label'], 'src/server/channels-engine.js|r': ['outbox proposal', 'a decision reason'], 'src/server/channels-engine.js|src': ['mount', 'a storage label'],
   'src/server/memory-pressure-watch.js|it': ['words', 'the memory-pressure For-you item\'s own words (PURE src/memory-pressure.js pressureItem: percent, GB, who started each process group, /tmp usage) — the source of a new For-you record, never a copy of one (lane browser-resource-care)'],
+  'src/server/tls.js|p': ['words', 'the https plan\'s own words (PURE src/tls-plan.js: the owner\'s step — the tailnet\'s HTTPS certificates, the operator right) — the source of a new For-you record, never a copy of one (lane https-tailscale)'],
   'src/server/mount-health-watch.js|it': ['words', 'the wedged-mount For-you item\'s own words (PURE src/mount-health.js canaryItem: the mountpoint, the strikes, who presses it, what the server paused) — the source of a new For-you record, never a copy of one (lane fuse-canary-notice)'],
   'src/server/hooks-late.js|item': ['words', 'the late-hooks For-you line\'s own words (PURE src/hooks-late.js forYouItem: VibeSpace\'s sentence + the names of the running sessions it lists) — the source of a new For-you record, never a copy of one (lane hooks-create)'], 'src/server/hooks-late.js|h': ['words', 'a harness descriptor\'s constant label (Claude Code / Codex) in the journal line — never a record (lane hooks-create)'],
   'src/server/fd-gauge.js|w': ['words', 'the fd gauge\'s own sentence (handle counts by kind, the busiest folders) — never a record (lane-dead-bridge)'], 'src/server/fd-gauge.js|b': ['words', 'the EMFILE blame sentence (who ran out: this server / a mount\'s FUSE daemon / the machine) — never a record (lane-dead-bridge)'],
@@ -1908,6 +1909,9 @@ const I_RECV = {
   'src/routes/design.js|b': ['design comment', 'the USER\'s own comment text handed to the engine (it becomes the user\'s message) — lane design-core, no record of the five kinds'],
   // ── lane device-upgrade-stuck ──
   'src/server/device-upgrade-watch.js|w': ['host', 'the stuck-upgrade item\'s words — a machine name and two agent versions (itemOf), the machine\'s own record'],
+  // ── lane host-stale-dialer (B-6136) ──
+  'src/server/dial-health-watch.js|w': ['host', 'the second-dialer item\'s words — a machine name, an address, a time (itemOf), the machine\'s own record'],
+  'src/server/dial-health-watch.js|v': ['host', 'the verdict\'s refusing address (secondDialerVerdict) in the journal line — the machine\'s own dial record'],
   // ── verify r9: the receivers of the one-level alias pass (a field copied into a local, then handed to a sink) ──
   'src/agent-routes/status.js|req.body||{}': ['status', 'the caller\'s OWN status write (the owner\'s route / the agent\'s vibespace-status), destructured — the record itself'],
   'src/install-slot.js|s': ['desktop app', 'an install spec\'s label (packageInstallPlan, moved from desktop-apps.js — lane dc-apps-rows)'], 'src/lib/browser-switcher.js|st.view?.profile': ['browser profile', 'a profile label'],

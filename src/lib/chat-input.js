@@ -6,6 +6,7 @@ import { startPointerDrag } from './drag-feed.js'; // THE feed for every drag do
 import { isNotificationQueueItem } from '../notification-senders.js';
 import { keyboardOwned, keyboardYielded, onKeyboardChange } from './keyboard-owner.js'; // lane J r2: a driven live view owns the keyboard — focus() stands down; lane takeover-keyboard: …unless the user pressed this box (the line above it says so)
 import { EnterGuard, imeOwnsKey, IME_HINT_MS, sendKeyName } from './chat-enter-keys.js'; // lane chat-enter-ime: an Enter meant for the input method never sends
+import { createVoiceInput } from './voice-input.js'; // Dropline voice input (q-029 P0): the microphone beside attach
 import { createStashStrip } from './stash-strip.js'; // 2026-09-27: what waits for this agent's next turn + Hand over now
 
 /**
@@ -22,12 +23,14 @@ export class ChatInput {
    * @param {function} opts.getStateSync - returns StateSync instance
    * @param {function} opts.onInterrupt - called when user clicks Stop
    */
-  constructor(ws, sessionId, { onSend, onInterrupt, getCwd, getHost, getUploadDir, isTouch, getTouchEnterSends, getEnterSends, onQueueOp, onSteerChord, onSteerSend }) {
+  constructor(ws, sessionId, { onSend, onInterrupt, getCwd, getHost, getVoiceFacts, openPlugins, getUploadDir, isTouch, getTouchEnterSends, getEnterSends, onQueueOp, onSteerChord, onSteerSend }) {
     this._ws = ws;
     this._sessionId = sessionId;
     this._onSend = onSend;
     this._onInterrupt = onInterrupt;
     this._getCwd = getCwd || (() => null);
+    this._getVoiceFacts = getVoiceFacts || (() => ({}));
+    this._openPlugins = openPlugins || (() => {});
     this._getHost = getHost || (() => null);
     this._getUploadDir = getUploadDir || (() => '');
     this._isTouch = isTouch || (() => false);
@@ -328,6 +331,8 @@ export class ChatInput {
     attachInput.multiple = true;
     attachInput.style.display = 'none';
     attachBtn.onclick = () => attachInput.click();
+    // the microphone (desk + phone): click to record, click to stop — the text lands at the cursor (src/lib/voice-input.js)
+    this._voice = createVoiceInput({ textarea: this._textarea, getFacts: () => this._getVoiceFacts(), getCwd: () => this._getCwd(), openPlugins: () => this._openPlugins() });
     attachInput.onchange = () => {
       for (const file of attachInput.files) this._addImageAttachment(file);
       attachInput.value = '';
@@ -355,7 +360,7 @@ export class ChatInput {
       ]);
     };
 
-    inputWrap.append(attachBtn, attachInput, uploadBtn, fileInput, dirInput, this._textarea, expandBtn, this._slashDropdown);
+    inputWrap.append(attachBtn, attachInput, this._voice.btn, uploadBtn, fileInput, dirInput, this._textarea, expandBtn, this._slashDropdown, this._voice.chip);
 
     // TOUCH FACE OF THE CHORD (≤768px): a phone has no Alt key, so the same
     // verb gets a button beside Send. Visibility is split in two: JS owns the

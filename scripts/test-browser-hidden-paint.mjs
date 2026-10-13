@@ -6,7 +6,10 @@
 // that never stops drawing (a 60 fps chart + a WebGL cube; every rAF instant kept in the page). The keeper's own tick
 // (5 s) runs the sweep; `browser.idlePaintFreeze` ON:
 //   a  no viewer, no verb for 30 s ⇒ the keeper's journal says the browser stopped drawing and the GPU process's ticks
-//      over 5 s ≈ 0 (Chrome's own pids — SystemInfo.getProcessInfo);
+//      over 5 s ≈ 0 (Chrome's own pids — SystemInfo.getProcessInfo); WHEN is judged on the clocks the freeze runs on
+//      (B-1542): from the dialog watch's own last verb, at the FIRST keeper sweep past the window — every sweep seen
+//      through idlePaintVerdict, the window and the tick read from the code (never a literal 29 s);
+//   a2 RED CONTROL — the window shortened to two ticks: the stop moves with it (and the old literal bound is red on it);
 //   b  the next `vibespace-browser screenshot` thaws BEFORE it runs: its picture is not blank (pixel census) and the page's
 //      first frame lands within ONE frame of the verb's /resolve answer (no frame at all while frozen);
 //   c  a live view attaching thaws (the bridge's viewer count → the keeper): frames reach the view;
@@ -30,6 +33,25 @@ const { WebSocket } = require('ws');
 const K = require('../src/server/browser-keeper.js'), Ff = require('../src/browser-facts.js'), D = require('../src/server/browser-dialogs.js');
 const R = require('../src/routes/browser.js'), S = require('../src/browser-stream.js'), VP = require('../src/server/browser-viewport.js');
 const WIN = require('../src/browser-windows.js'), BI = require('../src/browser-idle.js');
+
+// B-1542: the keeper's sweeps as they happen — it reads idlePaintVerdict off this module object at every sweep: each call's
+// `now` (the tick's clock), its last verb and its verdict kept; `idleCtl` = a SHORTER window for the a2 RED control
+const sweeps = []; let idleCtl = null;
+const verdict0 = BI.idlePaintVerdict;
+BI.idlePaintVerdict = (o = {}) => { const v = verdict0(idleCtl ? { ...o, idleMs: idleCtl } : o); sweeps.push({ t: Number(o.now) || 0, last: Math.max(Number(o.lastVerbAt) || 0, Number(o.lastViewerAt) || 0), act: v.act, why: v.why }); return v; };
+const sec = (ms) => Math.round(ms / 100) / 10;
+/** B-1542: a freeze judged on the clocks it runs on — `last` = the dialog watch's last verb (the verdict's own input), `idle`
+ *  = the window in force, `at` = the journal's freeze line. The sweep that froze is the FIRST past the window (the one
+ *  before it was inside it), so the stop lands at last + idle + (≤ one sweep gap, MEASURED here) + the freeze's own work. */
+const freezeTerms = (last, idle, at) => {
+  const after = sweeps.filter((x) => x.t >= last);
+  const i = after.findIndex((x) => x.t - x.last >= idle);
+  const first = i >= 0 ? after[i] : null, prev = i > 0 ? after[i - 1] : null, next = i >= 0 ? after[i + 1] || null : null;
+  const origin = first ? first.last : last; // what the verdict measured from: the last verb (or a later viewer)
+  return { last, origin, idle, at, since: at - origin, sweeps: after.length, tickMs: K.TICK_MS, first: first && { t: first.t, act: first.act, why: first.why }, toFirst: first ? first.t - origin - idle : null, prevSince: prev ? prev.t - prev.last : null, gap: prev && first ? first.t - prev.t : null, work: first ? at - first.t : null, next: next ? next.t : null };
+};
+const judged = (x) => !!x.first && x.first.act === 'freeze' && x.origin >= x.last && x.since >= x.idle && x.work >= 0 && x.prevSince != null && x.prevSince < x.idle && (x.next == null || x.at <= x.next);
+const termsText = (x) => x.first ? `the window ${sec(x.idle)} s + ${sec(x.toFirst)} s to the first sweep past it (sweeps ${sec(x.gap)} s apart in this run, TICK_MS ${x.tickMs}; the one before at ${sec(x.prevSince)} s) + ${x.work} ms of freeze work` : `no sweep past the ${sec(x.idle)} s window among the ${x.sweeps} seen since the last verb`;
 
 let pass = 0, fail = 0, skipped = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1200) : '')); } return !!c; };
@@ -176,11 +198,12 @@ try {
 
   // ── a ──
   console.log('— a: no viewer, no verb for 30 s');
-  const tIdle = Date.now();
+  const tIdle = Date.now(), lastA = facts() ? facts().lastVerbAt : 0; // the watch's last verb: B's `tab list`, BEFORE the 5 s GPU sample
   const fz1 = await waitFrozen(1);
   const fz1At = fz1 ? frozenLines()[0].at : 0;
   const g1 = fz1 ? await gpuPct(spy, 5) : { pct: NaN };
-  ok(!!fz1 && fz1At - tIdle >= BI.IDLE_PAINT_MS - 1000 && g1.pct <= 3 && busy.pct >= 20, `a: the keeper's journal says it stopped drawing ${Math.round((fz1At - tIdle) / 100) / 10} s after the last verb; the GPU process over 5 s: ${g1.pct} % (was ${busy.pct} %)`, { journal: journal.slice(-4), facts: facts() });
+  const ta = freezeTerms(lastA, BI.IDLE_PAINT_MS, fz1At);
+  ok(!!fz1 && judged(ta) && g1.pct <= 3 && busy.pct >= 20, `a: the keeper's journal says it stopped drawing ${sec(ta.since)} s after the last verb = ${termsText(ta)} (the GPU sample's own clock started ${sec(tIdle - lastA)} s late); the GPU process over 5 s: ${g1.pct} % (was ${busy.pct} %)`, { terms: ta, journal: journal.slice(-4), facts: facts() });
 
   // ── b ──
   console.log('— b: the next verb (a screenshot) thaws before it runs');
@@ -237,6 +260,21 @@ try {
   ok(ids(p1) === ids(p0) && WIN.multiWindowHolders(census).length === 0 && census.A && census.B, `e: no stray — Chrome's page targets are the very same ${p0.length} before and after the thaws (the keeper's own blank tabs included), one window per holder`, { census, p0: p0.map((t) => t.url), p1: p1.map((t) => t.url) });
   const visB = tB ? await vis(tB) : null;
   ok(JSON.stringify(tabsA1) === JSON.stringify(tabsA0) && JSON.stringify(tabsB1) === JSON.stringify(tabsB0) && tb.code === 0 && /HP-B ledger/.test(tb.out) && visB === 'visible', `e: each conversation's own \`tab list\` is what it was before the thaws; B's next verb runs on B's page and shows it again in B's window (${visB})`, { tabsA0, tabsA1, tabsB0, tabsB1, tb: tb.out.slice(-200) + tb.err.slice(-200), warn: journal.filter((x) => /thaw's blank/.test(x.m)) });
+
+  // ── a2 ── B-1542 RED CONTROL: the window shortened (two ticks) — the measured stop moves with the window it is derived from
+  const CTL_IDLE = 2 * K.TICK_MS;
+  console.log(`— a2: RED CONTROL — the idle window shortened to ${sec(CTL_IDLE)} s: the stop moves with it`);
+  idleCtl = CTL_IDLE;
+  const nA2 = frozenLines().length;
+  await A(['get', 'title']); // the last verb
+  const lastA2 = facts() ? facts().lastVerbAt : 0;
+  const fzA2 = await until(() => frozenLines().length > nA2 && facts() && facts().frozen, CTL_IDLE + 4 * K.TICK_MS, 200);
+  const atA2 = fzA2 ? frozenLines()[nA2].at : 0;
+  await sleep(K.TICK_MS + 500); // the sweep after it seen (the line came from the first sweep past the window, not a later one)
+  idleCtl = null;
+  const tA2 = freezeTerms(lastA2, CTL_IDLE, atA2);
+  const literal = tA2.since >= BI.IDLE_PAINT_MS - 1000; // the old literal bound (30 s − 1 s), judged on the same numbers
+  ok(!!fzA2 && judged(tA2) && tA2.since < BI.IDLE_PAINT_MS && !literal, `a2: RED CONTROL — with the window at ${sec(CTL_IDLE)} s it stopped drawing ${sec(tA2.since)} s after the last verb = ${termsText(tA2)}; the old literal "≥ ${sec(BI.IDLE_PAINT_MS - 1000)} s" is ${literal ? 'GREEN (it would not see the change)' : 'RED'} on these numbers`, tA2);
 
   // ── f ──
   console.log('— f: CONTROL — the switch OFF on the same browser');

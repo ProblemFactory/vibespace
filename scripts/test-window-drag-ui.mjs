@@ -233,15 +233,26 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
   await cdp('Emulation.setDeviceMetricsOverride', { width: 1600, height: 900, deviceScaleFactor: 1, mobile: false });
   const ev = async (expr) => { const r = await cdp('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error('page threw: ' + (r.exceptionDetails.exception?.description || r.exceptionDetails.text)); return r.result.value; };
   const mouse = (type, x, y, extra = {}) => cdp('Input.dispatchMouseEvent', { type, x: Math.round(x), y: Math.round(y), button: 'left', buttons: type === 'mouseReleased' ? 0 : 1, clickCount: 1, ...extra });
+  /** B-1542: n of the PAGE's animation frames. A drag's follow is rAF-coalesced: two frames after the last move it is drawn
+   *  where that move put it — on an idle machine or one at load 30 alike. A fixed sleep was a guess at the frame rate. */
+  const frames = (n = 2) => ev(`new Promise((r) => { const f = (k) => (k ? requestAnimationFrame(() => f(k - 1)) : r(true)); f(${n}); })`);
+  /** B-1542: wait — frame by frame, bounded — until the page holds what a gesture's premise needs (`pred` → a value). */
+  const premise = (pred, ms = 5000) => until(async () => { await frames(2); return pred(); }, ms, 0);
+  /** B-1542: a press point (`expr` → {x, y}) once the page hit-tests it ON window `id` — else the point as read (the leg's
+   *  own `underPress` then says what took the press). */
+  const pressPt = async (expr, id) => (await premise(async () => { const p = await ev(expr); return p && (await ev(`window.__drj.inWin(${p.x}, ${p.y}, ${J(id)})`)) ? p : null; })) || ev(expr);
   /** A press at (x0,y0), moves to (x1,y1), the window given a frame to catch up, then the release — at (x1,y1) or
    *  elsewhere (`releaseAt`: the fast drop's release lands where the title bar has not been drawn yet). */
-  const dragTo = async (x0, y0, x1, y1, { releaseAt = null, steps = 16, beforeRelease = null } = {}) => {
+  const dragTo = async (x0, y0, x1, y1, { releaseAt = null, steps = 16, beforeRelease = null, clearOf = null } = {}) => {
     await mouse('mouseMoved', x0, y0, { buttons: 0 }); await mouse('mousePressed', x0, y0); await sleep(60);
     for (let i = 1; i <= steps; i++) { await mouse('mouseMoved', x0 + (x1 - x0) * i / steps, y0 + (y1 - y0) * i / steps); await sleep(30); }
-    await sleep(150);
     const r = releaseAt || { x: x1, y: y1 };
+    // B-1542: the window drawn where the last move put it (its frames, not 150 ms); `clearOf` = the dragged window the
+    // release must land OUTSIDE of (the gesture's premise — a release on the dragged window itself is heard on any tree)
+    const clear = clearOf ? await premise(() => ev(`!window.__drj.inWin(${r.x}, ${r.y}, ${J(clearOf)})`)) : await frames(2);
     if (beforeRelease) await beforeRelease();
     await mouse('mouseReleased', r.x, r.y);
+    return { clear: !!clear };
   };
   /** The page at a UI scale (the per-device pref, applied at boot) and a device pixel ratio. */
   const bootAt = async ({ scale = 100, dpr = 1 } = {}) => {
@@ -263,6 +274,8 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
       place: (id, idx) => { app.wm.focusWindow(id); app.wm.snapActiveToCell(idx); return true; },
       under: (x, y) => { const e = document.elementFromPoint(x, y); return e ? (e.tagName.toLowerCase() + (e.className && typeof e.className === 'string' ? '.' + e.className.trim().split(/\\s+/).join('.') : '')) : null; },
       // verify r1 — the tab tear-off and the icon drag (tab-group.js)
+      tabHit: (hostId, id) => { const p = window.__drj.tabPt(hostId, id); if (!p) return null; const e = document.elementFromPoint(p.x, p.y); return e && e.closest('.tab-item[data-win-id="' + id + '"]') ? p : null; },
+      inWin: (x, y, id) => { const e = document.elementFromPoint(x, y), w = app.wm.windows.get(id); return !!(e && w && w.element.contains(e)); },
       tabPt: (hostId, id) => { const h = app.wm.windows.get(hostId); const t = h && h.titleBar.querySelector('.tab-item[data-win-id="' + id + '"]'); if (!t) return null; const r = t.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; },
       iconPt: (id) => { const w = app.wm.windows.get(id); const el = w && (w.iconWrap || w.iconSpan || w.titleBar.querySelector('.window-icon-stack')); if (!el) return null; const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; },
       merge: (hostId, guestId) => { const h = app.wm.windows.get(hostId), g = app.wm.windows.get(guestId); if (!h || !g) return false; const r = h.titleBar.getBoundingClientRect(); app.wm._mergeDrop(h, g, { x: r.left + 40, y: r.top + 10, from: app.wm._rectSnap(g) }); return !!(h._tabChain && h._tabChain.tabs.includes(guestId)); },
@@ -348,11 +361,12 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
   const dropLeg = async (viewer, row, expectFixed, tag) => {
     const facts0 = {};
     const cell = await ev(`window.__drj.cellBox(${row.cell})`);
-    const tp = await ev(`window.__drj.titlePt(${J(viewer)})`);
+    const tp = await pressPt(`window.__drj.titlePt(${J(viewer)})`, viewer);
     const pr = await ev(`window.__drj.rect(${J(row.id)}, ${J(row.sel)})`);
     if (!pr) { ok(false, `${tag} ${row.kind}: the pane element is there`); return null; }
     const underPress = await ev(`window.__drj.under(${tp.x}, ${tp.y})`);
-    await dragTo(tp.x, tp.y, pr.x, pr.y + 60, { releaseAt: { x: pr.x, y: pr.y }, beforeRelease: async () => { facts0.underRelease = await ev(`window.__drj.under(${pr.x}, ${pr.y})`); } });
+    const dr = await dragTo(tp.x, tp.y, pr.x, pr.y + 60, { releaseAt: { x: pr.x, y: pr.y }, clearOf: viewer, beforeRelease: async () => { facts0.underRelease = await ev(`window.__drj.under(${pr.x}, ${pr.y})`); } });
+    ok(dr.clear, `${tag} ${row.kind}: the premise — the viewer drawn where the last move put it, the release point in the pane (not on the viewer)`, { underRelease: facts0.underRelease });
     await sleep(450);
     const s1 = await state(viewer);
     const underRelease = facts0.underRelease;
@@ -374,8 +388,8 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
   /** THE RESIZE: the pane's window raised above the viewer; the viewer's SE corner dragged to the pane's centre and
    *  released there (the 12 px handle is under the pane). */
   const resizeLeg = async (viewer, row, expectFixed, tag) => {
-    await ev(`app.wm.focusWindow(${J(row.id)}); true`); await sleep(150);
-    const se = await ev(`window.__drj.sePt(${J(viewer)})`);
+    await ev(`app.wm.focusWindow(${J(row.id)}); true`); await frames(2);
+    const se = await pressPt(`window.__drj.sePt(${J(viewer)})`, viewer);
     const pr = await ev(`window.__drj.rect(${J(row.id)}, ${J(row.sel)})`);
     if (!pr) { ok(false, `${tag} ${row.kind}: the pane element is there`); return null; }
     const b0 = await ev(`window.__drj.box(${J(viewer)})`);
@@ -411,7 +425,7 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
     await ev(`(() => { const w = app.wm.windows.get(${J(id)}); app.wm.focusWindow(w.id); w.element.style.left = '40px'; w.element.style.top = '40px'; w.element.style.width = '1000px'; w.element.style.height = '700px'; if (w.onResize) w.onResize(); return true; })()`);
     await sleep(300);
     const b0 = await ev(`window.__drj.box(${J(id)})`);
-    const se = await ev(`window.__drj.sePt(${J(id)})`);
+    const se = await pressPt(`window.__drj.sePt(${J(id)})`, id);
     const dx = -((1000 - 320) + 60) * scale, dy = -((700 - 180) + 60) * scale; // past the floor by 60 layout px: the clamp decides, not the pointer
     const underPress = await ev(`window.__drj.under(${se.x}, ${se.y})`);
     const facts0 = {};
@@ -445,14 +459,18 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
     if (!ok(!!B, `${tag} ${row.kind} tab: viewer B opened`)) return null;
     const merged = await ev(`window.__drj.merge(${J(viewer)}, ${J(B)})`); await sleep(300);
     if (!ok(merged, `${tag} ${row.kind} tab: B is a guest tab of the viewer's group`)) { await closeB(B); return null; }
-    const tp = await ev(`window.__drj.tabPt(${J(viewer)}, ${J(B)})`);
+    // B-1542: the press lands ON B's tab — the merged strip laid out and hit-testable at the tab's centre (a fixed 300 ms
+    // read the tab at 0,0 under load: the press missed it, no drag began, and the control read "ended")
+    const tp = await premise(() => ev(`window.__drj.tabHit(${J(viewer)}, ${J(B)})`));
     const pr = await ev(`window.__drj.rect(${J(row.id)}, ${J(row.sel)})`);
-    if (!ok(!!(tp && pr), `${tag} ${row.kind} tab: the tab and the pane are there`)) { await closeB(B); return null; }
+    if (!ok(!!(tp && pr), `${tag} ${row.kind} tab: the tab takes the press at its centre (waited on the page's frames) and the pane is there`, { tab: await ev(`window.__drj.tabPt(${J(viewer)}, ${J(B)})`) })) { await closeB(B); return null; }
     await mouse('mouseMoved', tp.x, tp.y, { buttons: 0 }); await mouse('mousePressed', tp.x, tp.y); await sleep(60);
     for (let i = 1; i <= 6; i++) { await mouse('mouseMoved', tp.x, tp.y + 10 * i); await sleep(30); }
     for (let i = 1; i <= 10; i++) { await mouse('mouseMoved', tp.x + (pr.x - tp.x) * i / 10, tp.y + 60 + (pr.y + 60 - tp.y - 60) * i / 10); await sleep(30); }
-    await sleep(150);
+    // B-1542: the torn-off window drawn where the last move put it — the release lands ABOVE it, in the pane (frames, not 150 ms)
+    const clear = await premise(() => ev(`!window.__drj.inWin(${pr.x}, ${pr.y}, ${J(B)})`));
     const underRelease = await ev(`window.__drj.under(${pr.x}, ${pr.y})`);
+    ok(!!clear, `${tag} ${row.kind} tab: the premise — the release point in the pane, not on the torn-off window`, { underRelease });
     await mouse('mouseReleased', pr.x, pr.y); await sleep(400);
     const s1 = await ev(`window.__drj.tfacts(${J(B)})`);
     const f = await freePt(); await mouse('mouseMoved', f.x, f.y, { buttons: 0 }); await sleep(200);
@@ -475,14 +493,14 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
     const B = await openViewerB();
     if (!ok(!!B, `${tag} ${row.kind} icon: viewer B opened`)) return null;
     await place(B, 3);
-    await ev(`app.wm.focusWindow(${J(row.id)}); true`); await sleep(150); // the pane's window above everything: the release lands in the pane, never on a viewer left over it
-    const ip = await ev(`window.__drj.iconPt(${J(B)})`);
+    await ev(`app.wm.focusWindow(${J(row.id)}); true`); await frames(2); // the pane's window above everything: the release lands in the pane, never on a viewer left over it
+    const ip = await pressPt(`window.__drj.iconPt(${J(B)})`, B);
     const pr = await ev(`window.__drj.rect(${J(row.id)}, ${J(row.sel)})`);
     if (!ok(!!(ip && pr), `${tag} ${row.kind} icon: the icon and the pane are there`)) { await closeB(B); return null; }
     const underBefore = await ev(`window.__drj.under(${pr.x}, ${pr.y})`);
     await mouse('mouseMoved', ip.x, ip.y, { buttons: 0 }); await mouse('mousePressed', ip.x, ip.y); await sleep(60);
     for (let i = 1; i <= 16; i++) { await mouse('mouseMoved', ip.x + (pr.x - ip.x) * i / 16, ip.y + (pr.y - ip.y) * i / 16); await sleep(30); }
-    await sleep(150);
+    await frames(2); // B-1542: the drag's follow drawn (frames, not 150 ms)
     const mid = await ev(`window.__drj.tfacts(${J(B)})`);
     const underRelease = await ev(`window.__drj.under(${pr.x}, ${pr.y})`);
     await mouse('mouseReleased', pr.x, pr.y); await sleep(400);

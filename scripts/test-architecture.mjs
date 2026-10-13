@@ -60,7 +60,7 @@ const resolveRel = (from, spec) => {
 };
 
 // ── Tier membership (path-based; NEW files inherit their directory's tier) ──
-const PURE = new Set(['src/app-witness.js' /* lane apps-launcher-witness: what is installed OUTSIDE the door, by witness — the flatpak / desktop-entry readers, the seen.* group rule, the refresh rule, THE install-place words; imports only app-manifest (PURE → PURE) */, 'src/webhook-pair.js' /* lane webhook-l3-cli-pair: the instance pairing — the code, the hook URL verdict, the completion verdict before the one write, the pending memo, the canonical peer payload — imports webhook-auth only */, 'src/webhook-auth.js' /* lane webhook-l1-server: the inbound door's verdicts ①–⑫ + its bounded memos, the crypto handed in — imports nothing */, 'src/webhook-record.js' /* lane webhook-l1-server: a webhook call as a channel record (the mapping + its bounds) — imports only channel-record */, 'src/webhook-reply.js' /* lane webhook-l1-server: who a webhook reply goes to — imports channel-policy + webhook-record */, 'src/vfs-cache-place.js' /* lane vfs-cache-local (B-4997): where a mount's VFS cache lives + the PARSED dirty witnesses (a move only when clean) — imports nothing */, 'src/cache-bounds.js' /* lane server-memory-residency (B-9428): every big cache's ceiling + name — the ledger window, the cold columns, the byte LRU, the census row; imports nothing */, 'src/mount-argv.js' /* lane mount-argv-dir-cache: THE rclone mount argv — the hub mount and the device pull mount build it from a row (dirCache, s3, rc socket rule); imports nothing */, 'src/mount-liveness.js' /* lane mount-liveness: the health sweep's verdict table (two questions: the daemon's liveness, the backend's readiness) */, 'src/memory-census.js' /* lane server-memory-census (B-9428): the server memory census — main heap, each worker isolate, external, native = anon − the rest; the sampler, the System window and the suite share it; imports nothing */, 'src/browser-orphans.js' /* lane daemon-orphan-end: a daemon nobody holds — the verdict, imports nothing */, 'src/mount-health.js' /* lane fuse-canary-notice (B-b327): the wedged-mount episode, who presses it, the words, the pause verdict per kind — imports only memory-pressure (PURE → PURE, the ONE attribution) */, 'src/memory-pressure.js' /* lane browser-resource-care (B-afeb): the memory-pressure episode + who started each process group — imports nothing; PURE since lane fuse-canary-notice shares its attribute() */, 'src/timed-sync.js' /* design 011 lane 1 (store-timing): the store-write clock — performance.now + counters, imports nothing; §72 */, 'src/channel-search.js' /* design 010 (B-c9be): the vendor snippet's ONE reader, the merge, the full-search refusal table, the dialog's coverage / status words — the store, the engine, the adapters and the dialog share them; imports only channel-record (PURE → PURE) */, 'src/channel-focus.js' /* design 008 (B-3cf8): the first screen's predicate (statusTag) + the first read's candidate test + the page rules — the engine's first read and the panel's keyed store share them; imports nothing */, 'src/app-recipes.js' /* design 009: the recipes table — imports nothing */, 'src/app-card.js' /* design 009: THE one card of an app install — its view + the digest of what it showed, shared by the engine and the client; imports nothing */, 'src/record-lateness.js' /* lane-hot-switch: a late record is not a live fact — the stream clock + the look-ahead, imports nothing */, 'src/hidden-chars.js', 'src/encoded-command.js' /* lane machine-card-fold: a PowerShell -EncodedCommand decoded for display (imports only hidden-chars) */, 'src/exit-call.js' /* lane exit-calls-in-history: a vibespace-exit Bash call + its result read as the machine call it is, and the card it draws — the server's live pairing and the bundle share it; imports only exit-reach + hidden-chars (PURE → PURE) */, 'src/assistant-note.js' /* B-40f8: text addressed to the assistant — the note rule + THE turn preview, server builders and client alike; imports nothing */, 'src/window-desktop.js', 'src/plugin-manifest.js', 'src/account-pool-auto.js', 'src/model-family.js', 'src/task-color-seq.js', 'src/ssh-key-format.js', 'src/session-schema.js', 'src/otel-truth.js', 'src/msg-acl.js', 'src/backend-caps.js',
+const PURE = new Set(['src/voice-model.js' /* Dropline voice input q-029 P0: dictationContext + voiceWords, shared by the bundle and the hub */, 'src/voice-teach.js' /* q-029 P1 (lane voice-p1-oauth-teach): the teach schedule (proposals, ignore, per-project tier, context cadence, caps) */, 'src/dial-health.js' /* lane host-stale-dialer (B-6136): a second agent with an old token — the verdict, the row's facts, the stop recipes, the journal / For-you clocks; imports nothing */, 'src/app-witness.js' /* lane apps-launcher-witness: what is installed OUTSIDE the door, by witness — the flatpak / desktop-entry readers, the seen.* group rule, the refresh rule, THE install-place words; imports only app-manifest (PURE → PURE) */, 'src/webhook-pair.js' /* lane webhook-l3-cli-pair: the instance pairing — the code, the hook URL verdict, the completion verdict before the one write, the pending memo, the canonical peer payload — imports webhook-auth only */, 'src/webhook-auth.js' /* lane webhook-l1-server: the inbound door's verdicts ①–⑫ + its bounded memos, the crypto handed in — imports nothing */, 'src/webhook-record.js' /* lane webhook-l1-server: a webhook call as a channel record (the mapping + its bounds) — imports only channel-record */, 'src/webhook-reply.js' /* lane webhook-l1-server: who a webhook reply goes to — imports channel-policy + webhook-record */, 'src/vfs-cache-place.js' /* lane vfs-cache-local (B-4997): where a mount's VFS cache lives + the PARSED dirty witnesses (a move only when clean) — imports nothing */, 'src/cache-bounds.js' /* lane server-memory-residency (B-9428): every big cache's ceiling + name — the ledger window, the cold columns, the byte LRU, the census row; imports nothing */, 'src/mount-argv.js' /* lane mount-argv-dir-cache: THE rclone mount argv — the hub mount and the device pull mount build it from a row (dirCache, s3, rc socket rule); imports nothing */, 'src/mount-liveness.js' /* lane mount-liveness: the health sweep's verdict table (two questions: the daemon's liveness, the backend's readiness) */, 'src/memory-census.js' /* lane server-memory-census (B-9428): the server memory census — main heap, each worker isolate, external, native = anon − the rest; the sampler, the System window and the suite share it; imports nothing */, 'src/browser-orphans.js' /* lane daemon-orphan-end: a daemon nobody holds — the verdict, imports nothing */, 'src/mount-health.js' /* lane fuse-canary-notice (B-b327): the wedged-mount episode, who presses it, the words, the pause verdict per kind — imports only memory-pressure (PURE → PURE, the ONE attribution) */, 'src/memory-pressure.js' /* lane browser-resource-care (B-afeb): the memory-pressure episode + who started each process group — imports nothing; PURE since lane fuse-canary-notice shares its attribute() */, 'src/timed-sync.js' /* design 011 lane 1 (store-timing): the store-write clock — performance.now + counters, imports nothing; §72 */, 'src/channel-search.js' /* design 010 (B-c9be): the vendor snippet's ONE reader, the merge, the full-search refusal table, the dialog's coverage / status words — the store, the engine, the adapters and the dialog share them; imports only channel-record (PURE → PURE) */, 'src/channel-focus.js' /* design 008 (B-3cf8): the first screen's predicate (statusTag) + the first read's candidate test + the page rules — the engine's first read and the panel's keyed store share them; imports nothing */, 'src/app-recipes.js' /* design 009: the recipes table — imports nothing */, 'src/app-card.js' /* design 009: THE one card of an app install — its view + the digest of what it showed, shared by the engine and the client; imports nothing */, 'src/record-lateness.js' /* lane-hot-switch: a late record is not a live fact — the stream clock + the look-ahead, imports nothing */, 'src/hidden-chars.js', 'src/encoded-command.js' /* lane machine-card-fold: a PowerShell -EncodedCommand decoded for display (imports only hidden-chars) */, 'src/exit-call.js' /* lane exit-calls-in-history: a vibespace-exit Bash call + its result read as the machine call it is, and the card it draws — the server's live pairing and the bundle share it; imports only exit-reach + hidden-chars (PURE → PURE) */, 'src/assistant-note.js' /* B-40f8: text addressed to the assistant — the note rule + THE turn preview, server builders and client alike; imports nothing */, 'src/window-desktop.js', 'src/plugin-manifest.js', 'src/account-pool-auto.js', 'src/model-family.js', 'src/task-color-seq.js', 'src/ssh-key-format.js', 'src/session-schema.js', 'src/otel-truth.js', 'src/msg-acl.js', 'src/backend-caps.js',
   // AGENT BROWSER (design-agent-browser-v2 §3.6): the identity/spawn-env decisions, the
   // registry + lease model and the keeper's verdicts — imports nothing (P0/P1); and the ONE
   // constants home every process keeper counts and bounds by (src/keeper-limits.js)
@@ -4745,6 +4745,93 @@ console.log('\n§84 a suite ends what it made (B-60d2)');
     ['the projection to the client', hits88("      id: rec.id, builtin: !!rec.builtin,\n").length > 0, false],
   ];
   ok(c88.every(([, got, want]) => got === want), `§88 CONTROLS: ${c88.map(([n, got, want]) => `${n} (${got === want ? (want ? 'RED' : 'quiet') : 'WRONG'})`).join(', ')}`);
+}
+// §89 EVERY HUB LISTENER REACHES BOTH SERVERS (lane https-tailscale, 2026-10-12). The hub answers http AND https on ONE
+// port (src/server/tls.js: a first-byte demux in front of two servers); a listener attached to the http server alone
+// would silently die for every https visitor (the WebSockets: the app, the desktop bridge, the device dial). The
+// census, grep-derived over server.js + src/server/*.js: a `.on('upgrade'` / `<x>server.on(` / `handleUpgrade(` site
+// is either (a) in server.js INSIDE the one `hub.attachToServers('upgrade', …)` dispatcher, or (b) a counted row of a
+// file that owns its OWN listener or a dispatcher target (a new site there is RED until its row moves), or (c) the
+// helper itself (tls.js). Controls: a `server.on('upgrade'` added to server.js and a new upgrade site in a module are RED.
+{
+  const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, '')).replace(/(^|[^:\\'"`])\/\/.*$/gm, '$1');
+  const SITE = /\.on\(\s*['"]upgrade['"]|\b\w*[sS]erver\.on\(|\bhandleUpgrade\(/;
+  const OWN89 = {
+    'src/server/tls.js': 3, // attachToServers: the http server now, the https one now or at birth (its replay loop)
+    'src/server/cdp-mediator.js': 3, // its OWN loopback listener (127.0.0.1:0) — not the hub's port
+    'src/server/egress-proxy.js': 2, // its OWN proxy listener — not the hub's port
+    'src/server/browser-stream.js': 2, // a dispatcher target: handleUpgrade (+ its wss) reached only through server.js's dispatcher
+    'src/server/desktop-stream.js': 2, // a dispatcher target
+    'src/server/path-mounts.js': 1, // a dispatcher target
+  };
+  const sites = (text) => strip(text).split('\n').map((l, i) => [i + 1, l]).filter(([, l]) => SITE.test(l));
+  const judge89 = (serverJs, files) => {
+    const red = [];
+    const lines = strip(serverJs).split('\n');
+    const open = lines.map((l, i) => [i, l]).filter(([, l]) => /\bhub\.attachToServers\(\s*'upgrade'/.test(l)).map(([i]) => i);
+    if (open.length !== 1) red.push(`server.js: ${open.length} hub.attachToServers('upgrade' dispatchers (want 1)`);
+    let close = -1;
+    if (open.length === 1) { for (let i = open[0] + 1; i < lines.length; i++) if (/^\}\);/.test(lines[i])) { close = i; break; } }
+    for (const [n, l] of sites(serverJs)) {
+      const i = n - 1;
+      const inside = open.length === 1 && i > open[0] && i < close && /\bhandleUpgrade\(/.test(l) && !/\.on\(\s*['"]upgrade['"]|\b\w*[sS]erver\.on\(/.test(l);
+      if (!inside) red.push(`server.js:${n} ${l.trim().slice(0, 90)}`);
+    }
+    for (const [f, text] of Object.entries(files)) {
+      const got = sites(text).length;
+      const want = OWN89[f] || 0;
+      if (got !== want) red.push(`${f}: ${got} upgrade/server.on sites (row says ${want})${want ? '' : ' — attach through hub.attachToServers in server.js, or add a row naming its own listener'}`);
+    }
+    return red;
+  };
+  const files89 = Object.fromEntries(fs.readdirSync(path.join(REPO, 'src/server')).filter((f) => f.endsWith('.js')).map((f) => [`src/server/${f}`, read(`src/server/${f}`)]));
+  const red89 = judge89(read('server.js'), files89);
+  ok(red89.length === 0 && Object.keys(files89).length >= 100, `§89 every hub upgrade listener reaches BOTH servers through hub.attachToServers (${Object.keys(files89).length} src/server files, ${Object.keys(OWN89).length} counted rows)${red89.length ? ' — RED: ' + red89.join(' | ') : ''}`);
+  const sj = read('server.js');
+  const c89 = [
+    ['a server.on(\'upgrade\' added to server.js', judge89(sj.replace(/\n\/\/ ── Start Server ──\n/, "\n// ── Start Server ──\nserver.on('upgrade', (req, socket, head) => socket.destroy());\n"), files89).length > 0, true],
+    ['a new upgrade site in a module', judge89(sj, { ...files89, 'src/server/x-new.js': "module.exports = (srv) => srv.on('upgrade', () => {});\n" }).length > 0, true],
+    ['the tree as it is', red89.length > 0, false],
+  ];
+  ok(c89.every(([, got, want]) => got === want), `§89 CONTROLS: ${c89.map(([n, got, want]) => `${n} (${got === want ? (want ? 'RED' : 'quiet') : 'WRONG'})`).join(', ')}`);
+}
+// §90 EVERY NET HOP OF A PERSON'S PICTURE OR INPUT IS noDelay (lane picture-path-nodelay, owner "延迟更低"). Node keeps
+// Nagle ON for a `net` socket: a small write behind an un-ACKed one waits for the peer's delayed ACK (~40 ms) — a key's
+// release behind its press measured 42 ms through the paired-machine path (test-picture-path-nagle), the demux front's
+// late body before it. The census, grep-derived: every `net.connect(` / `createConnection(` / `net.createServer(` in the
+// picture path's files (the desktop / device / stream-relay / browser-access server files and the whole daemon) is
+// followed within two lines by `.setNoDelay(true)` or carries `// nagle: ok — <reason>` on its line. Controls: a planted
+// bare connect, a bare accept and a reason-less ok are RED; the fixed shape and a commented-out connect are quiet.
+{
+  const files90 = [
+    ...fs.readdirSync(path.join(REPO, 'src/server')).filter((f) => /^(desktop-|device-|stream-relay-)[\w-]*\.js$|^browser-access\.js$/.test(f)).map((f) => `src/server/${f}`),
+    'src/agentd/agentd.js',
+  ];
+  const HOP = /\bnet\.(?:connect|createConnection|createServer)\(|(?<![\w.])createConnection\(/;
+  const hops90 = (text) => {
+    const lines = text.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, '')).split('\n');
+    const code = (l) => l.replace(/(^|[^:\\'"`])\/\/.*$/, '$1');
+    const out = [];
+    lines.forEach((l, i) => {
+      if (!HOP.test(code(l))) return;
+      const fine = /\/\/ nagle: ok — \S.{2,}/.test(l) || lines.slice(i, i + 3).some((n) => /\.setNoDelay\(true\)/.test(code(n)));
+      out.push({ line: i + 1, fine, text: l.trim().slice(0, 100) });
+    });
+    return out;
+  };
+  const all90 = files90.flatMap((f) => hops90(read(f)).map((h) => ({ f, ...h })));
+  const red90 = all90.filter((h) => !h.fine).map((h) => `${h.f}:${h.line} ${h.text}`);
+  const kept90 = all90.filter((h) => h.fine && !/nagle: ok/.test(h.text)).length;
+  ok(files90.length >= 6 && kept90 >= 4 && red90.length === 0, `§90 every net hop in the picture path's ${files90.length} files is noDelay or says why not (${all90.length} hops, ${kept90} noDelay)${red90.length ? ' — RED: ' + red90.join(' | ') : ''}`);
+  const red = (t) => hops90(t).some((h) => !h.fine);
+  const c90 = [
+    ['a planted bare connect', red("    const s = net.connect({ host, port });\n    s.on('data', onData);\n"), true],
+    ['a bare accept', red("  const srv = net.createServer((sock) => {\n    sock.pipe(up);\n    up.pipe(sock);\n"), true],
+    ['an ok without a reason', red("        up = net.connect({ host, port }); // nagle: ok\n"), true],
+    ['the fixed shape', red("      sock = net.connect(port, '127.0.0.1');\n      sock.setNoDelay(true);\n"), false],
+    ['a commented-out connect', red("  // const s = net.connect(port);\n"), false],
+  ];
+  ok(c90.every(([, got, want]) => got === want), `§90 CONTROLS: ${c90.map(([n, got, want]) => `${n} (${got === want ? (want ? 'RED' : 'quiet') : 'WRONG'})`).join(', ')}`);
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

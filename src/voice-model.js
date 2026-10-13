@@ -1,0 +1,274 @@
+'use strict';
+// PURE (imports only the PURE note module's compaction-summary rule; CJS so the bundle and the server share it) — Dropline voice input, P0 (design q-029,
+// docs/design-dropline-voice: §3 the per-dictation context, §5 the words, D5 the gesture's numbers).
+//   dictationContext(parts) → the `context` part of ONE dictation (≤ 4 KB, used for that dictation only). Owner
+//     2026-10-12 override of §3 `text`: the LAST ≤ 6 user + agent TEXT messages in order (agent head-clipped to
+//     400 chars, user whole up to 300), then the working directory's name, then ≤ 20 file names / identifiers seen
+//     in those messages — one line each, the whole `text` ≤ 1 500 chars.
+//   NEVER in a context: tool calls / tool results / thinking / system cards / hook frames (dictationMessagesOf keeps
+//     TEXT blocks of user + assistant rows only, stripFrames drops <system-reminder>-style frames), compaction
+//     summaries (the user record the chat draws as a system card — THE chat's own isCompactSummaryText), credentials and
+//     env assignments, e-mail addresses (scrubSecrets), other conversations (only the messages handed in).
+//   voiceWords(code) → the ONE sentence a failure (or the chip) says; English is the i18n key, zh/ja live in
+//     src/lib/i18n-{zh,ja}.js. dictateRequestOf / DICTATE_PART_ORDER = the vendor's multipart contract.
+
+const { isCompactSummaryText } = require('./assistant-note.js'); // PURE → PURE (voice-verify F1): the chat's own summary rule
+
+const VOICE_LIMITS = Object.freeze({
+  maxBytes: 8 * 1024 * 1024, maxSeconds: 180, autoStopSeconds: 170, perMinute: 20, bitsPerSecond: 32000,
+  contextBytes: 4096, textChars: 1500, titleChars: 200, beforeChars: 1000, afterChars: 500, selectedChars: 2000,
+  agentChars: 400, userChars: 300, messages: 6, idents: 20, chipMs: 5000, keepBlobMs: 60000,
+});
+const LANGUAGES = Object.freeze(['auto', 'zh', 'en']);
+const DICTATE_PART_ORDER = Object.freeze(['request', 'context', 'audio']); // the documented order (§4.1)
+const RECORDER_MIME = 'audio/webm;codecs=opus';
+
+const str = (v) => (typeof v === 'string' ? v : v == null ? '' : String(v));
+const head = (s, n) => (s.length > n ? s.slice(0, n) : s);
+const tail = (s, n) => (s.length > n ? s.slice(s.length - n) : s);
+
+// <system-reminder>…</system-reminder>, <vibespace-task-context>…, <command-name>…, <local-command-stdout>… — any
+// hyphenated tag pair a harness or a hook wraps around text it injected; an unclosed opener drops to the end.
+const FRAME_RE = /<((?:[a-z]+-)+[a-z]+)\b[^>]*>[\s\S]*?(?:<\/\1>|$)/gi;
+function stripFrames(text) {
+  let s = str(text), prev;
+  do { prev = s; s = s.replace(FRAME_RE, ''); } while (s !== prev);
+  return s.replace(/\n{3,}/g, '\n\n'); // never trimmed here: a trailing space before the cursor is context
+}
+
+const SECRET_RES = [                                                // order matters: whole assignments first
+  /\b[A-Z][A-Z0-9_]{2,}=\S*/g,                                       // KEY=value env assignments
+  /\b(?:api[_-]?key|token|secret|password|passwd)\s*[:=]\s*\S+/gi,   // key: value spellings
+  /\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/gi,                             // auth headers
+  /\b(?:dl|sk|pk|rk|ghp|gho|xox[abpr]|AKIA|AIza)[_-]?[A-Za-z0-9_-]{12,}/g, // vendor key shapes
+  /\bgithub_pat_[A-Za-z0-9_]{20,}|\beyJ[\w-]{8,}\.[\w-]{8,}\.[\w-]*/g,     // a fine-grained GitHub token, a JWT (voice-verify F8)
+  /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g,                                   // e-mail addresses
+];
+function scrubSecrets(text) {
+  let s = str(text);
+  for (const re of SECRET_RES) s = s.replace(re, '');
+  return s;
+}
+
+/** The conversation's normalized messages → [{role:'user'|'agent', text}] — TEXT blocks of user/assistant rows
+ *  only (a tool call, a tool result, thinking, an image, a system card carries no text block of its own); a compaction
+ *  summary is a user TEXT block the chat draws as a system card — dropped by the chat's own rule. */
+function dictationMessagesOf(messages) {
+  const out = [];
+  for (const m of Array.isArray(messages) ? messages : []) {
+    if (!m || (m.role !== 'user' && m.role !== 'assistant' && m.role !== 'agent')) continue;
+    const blocks = Array.isArray(m.content) ? m.content : (typeof m.text === 'string' ? [{ type: 'text', text: m.text }] : []);
+    const raw = blocks.filter((b) => b && b.type === 'text' && typeof b.text === 'string').map((b) => b.text).join('\n');
+    if (m.role === 'user' && isCompactSummaryText(raw)) continue;
+    const text = stripFrames(raw).trim();
+    if (text) out.push({ role: m.role === 'user' ? 'user' : 'agent', text });
+  }
+  return out;
+}
+
+const IDENT_RE = /\b(?:[\w.-]+\/)*[\w-]+\.(?:[a-z][a-z0-9]{0,4})\b|\b[a-z]+(?:[A-Z][a-z0-9]*)+\b|\b[A-Z][a-z0-9]+(?:[A-Z][a-z0-9]*)+\b|\b[a-z0-9]+(?:_[a-z0-9]+)+\b/g;
+/** ≤ `max` distinct file names / identifiers (camelCase, PascalCase, snake_case, name.ext) in order of first sight. */
+function identifiersOf(texts, max = VOICE_LIMITS.idents) {
+  const seen = new Set();
+  for (const t of texts) {
+    for (const m of str(t).match(IDENT_RE) || []) {
+      const w = m.includes('/') ? m.slice(m.lastIndexOf('/') + 1) : m;
+      if (w.length < 3 || /^\d/.test(w) || /^(?:e\.g|i\.e|etc)\b/i.test(w)) continue;
+      seen.add(w);
+      if (seen.size >= max) return [...seen];
+    }
+  }
+  return [...seen];
+}
+
+const baseName = (cwd) => { const s = str(cwd).replace(/[\\/]+$/, ''); return s.slice(Math.max(s.lastIndexOf('/'), s.lastIndexOf('\\')) + 1); };
+
+/** `text` = the last ≤ 6 messages (one line each, newest kept first when the 1 500 budget binds), the cwd name,
+ *  the identifiers line. */
+function contextText({ messages = [], cwd = '' } = {}) {
+  const L = VOICE_LIMITS;
+  const msgs = dictationMessagesOf(messages).slice(-L.messages).map((m) => ({
+    role: m.role,
+    text: scrubSecrets(m.role === 'agent' ? head(m.text, L.agentChars) : head(m.text, L.userChars)).replace(/\s+/g, ' ').trim(),
+  })).filter((m) => m.text);
+  const dir = scrubSecrets(baseName(cwd));
+  const ids = identifiersOf(msgs.map((m) => m.text)).join(' ');
+  const tailLines = [dir, ids].filter(Boolean).map((l) => head(l, 400));
+  let room = L.textChars - tailLines.reduce((n, l) => n + l.length + 1, 0);
+  const lines = [];
+  for (let i = msgs.length - 1; i >= 0 && room > 0; i--) {
+    let line = `${msgs[i].role === 'user' ? 'user' : 'agent'}: ${msgs[i].text}`;
+    if (line.length + 1 > room) line = head(line, room - 1);
+    if (!line) break;
+    lines.unshift(line);
+    room -= line.length + 1;
+  }
+  return [...lines, ...tailLines].join('\n').slice(0, L.textChars);
+}
+
+/** the text before the cursor: its last 1 000 chars, cut forward to a sentence boundary when one is near. */
+function beforeOf(text) {
+  const s = str(text);
+  if (s.length <= VOICE_LIMITS.beforeChars) return s;
+  const t = tail(s, VOICE_LIMITS.beforeChars);
+  const m = /[.!?。！？\n]\s*/.exec(t.slice(0, 200));
+  return m ? t.slice(m.index + m[0].length) : t;
+}
+
+const utf8Bytes = (s) => { let n = 0; for (const ch of s) { const c = ch.codePointAt(0); n += c < 0x80 ? 1 : c < 0x800 ? 2 : c < 0x10000 ? 3 : 4; } return n; };
+const contextBytes = (ctx) => utf8Bytes(JSON.stringify(ctx));
+
+/** THE per-dictation context (§3 + the owner's `text` override). PURE; the hub runs it again on what a browser sent. */
+function dictationContext({ title, before, after, selected, messages, cwd, text } = {}) {
+  const L = VOICE_LIMITS;
+  const ctx = { app: 'VibeSpace' };
+  const put = (k, v) => { const s = scrubSecrets(stripFrames(v)); if (s) ctx[k] = s; };
+  put('title', head(str(title), L.titleChars));
+  put('before', beforeOf(before));
+  put('after', head(str(after), L.afterChars));
+  put('selected', head(str(selected), L.selectedChars));
+  const t = text != null && messages == null ? head(scrubSecrets(stripFrames(text)), L.textChars) : contextText({ messages, cwd });
+  if (t) ctx.text = t;
+  // the 4 KB whole: shrink the longest shrinkable field by a fifth until it fits (CJK = 3 bytes a char)
+  for (let guard = 0; contextBytes(ctx) > L.contextBytes && guard < 200; guard++) {
+    const k = ['text', 'before', 'selected', 'after', 'title'].filter((f) => ctx[f]).sort((a, b) => ctx[b].length - ctx[a].length)[0];
+    if (!k) break;
+    const keep = Math.floor(ctx[k].length * 0.8);
+    ctx[k] = k === 'before' ? tail(ctx[k], keep) : head(ctx[k], keep);
+    if (!ctx[k]) delete ctx[k];
+  }
+  return ctx;
+}
+
+/** The hub's re-cut of whatever a browser sent as `ctx` (a string or an object): only the §3 keys survive, each
+ *  through the same clip rules; anything unparseable is no context at all. */
+function contextFromClient(raw) {
+  let o = raw;
+  if (typeof raw === 'string') { try { o = JSON.parse(raw); } catch { return { app: 'VibeSpace' }; } }
+  if (!o || typeof o !== 'object' || Array.isArray(o)) return { app: 'VibeSpace' };
+  return dictationContext({ title: o.title, before: o.before, after: o.after, selected: o.selected, text: str(o.text) });
+}
+
+const localeOf = (uiLang) => ({ zh: 'zh-CN', ja: 'ja-JP' }[str(uiLang).slice(0, 2).toLowerCase()] || 'en-US');
+const languageOf = (pref) => (LANGUAGES.includes(pref) ? pref : 'auto');
+/** the `request` part (§4.1): P0 = dictate into the chat box — a multi-line field. */
+const dictateRequestOf = ({ language, uiLang } = {}) => ({ mode: 'dictate', language: languageOf(language), locale: localeOf(uiLang), single_line: false });
+
+/** the vendor's answer → what the hub hands the browser: {text, rewrite, language, request_id}. */
+function dictateAnswerOf(body) {
+  const b = body && typeof body === 'object' ? body : {};
+  return {
+    text: str(b.final_text),
+    rewrite: { status: str(b.rewrite && b.rewrite.status) || null, reason: (b.rewrite && b.rewrite.reason) || null },
+    language: (b.transcript && b.transcript.language) || null,
+    request_id: str(b.request_id) || null,
+  };
+}
+
+const RETRY_ONCE = Object.freeze([502, 503, 504]);
+/** an HTTP status (+ the vendor's error code) → the words code the browser shows. */
+function failureCodeOf(status, vendorCode) {
+  if (status === 401 || status === 403) return 'reconnect';
+  if (status === 413) return 'too-long';
+  if (status === 422 && vendorCode === 'audio_invalid') return 'audio-invalid';
+  if (status === 429) return 'rate-limited';
+  return 'failed';
+}
+
+// §5 — every sentence a press can end in. `action`: what the chip's button does (null = none).
+const VOICE_WORDS = Object.freeze({
+  insecure: { words: 'This page is not https, so the browser gives it no microphone — open it over https, or on this computer at {url}', action: 'copy-url' },
+  denied: { words: 'The browser refused the microphone — allow it in the site permissions in the address bar', action: null },
+  'no-mic': { words: 'No microphone was found on this device', action: null },
+  'not-connected': { words: 'Connect your Dropline first', action: 'open-plugin' },
+  'plugin-off': { words: 'Voice input is turned off — turn it on in Plugins', action: 'open-plugin' },
+  reconnect: { words: 'Your Dropline sign-in has expired — connect it again', action: 'open-plugin' },
+  'rate-limited': { words: 'Dropline is rate limiting — try again in {n} s', action: null },
+  'too-long': { words: 'A recording can be at most 180 seconds and 8 MB', action: null },
+  'auto-stopped': { words: 'Stopped at 170 seconds — a recording can be at most 180 seconds', action: null },
+  'audio-invalid': { words: 'The recording could not be read — try again', action: null },
+  failed: { words: 'Recognition failed this time — try again', action: null },
+  offline: { words: 'It was not sent — the recording is kept, press again to resend', action: 'resend' },
+  inserted: { words: 'Inserted', action: 'undo' },
+  'raw-inserted': { words: 'Inserted as spoken (Dropline did not rewrite it)', action: 'undo' },
+  listening: { words: 'Listening…', action: null },
+  waiting: { words: 'Recognizing…', action: null },
+});
+const VOICE_CODES = Object.freeze(Object.keys(VOICE_WORDS));
+function voiceWords(code, params = {}) {
+  const row = VOICE_WORDS[code] || VOICE_WORDS.failed;
+  return { code: VOICE_WORDS[code] ? code : 'failed', words: row.words, action: row.action, params };
+}
+
+// ── P1 teach (lane voice-p1-oauth-teach; owner 2026-10-12: nothing is written to Dropline without the person's press) ──
+const TEACH_TEXT_MAX = 6000;                                       // /v1/context text (design §4)
+const TERM_MAX = 60;
+const NOT_A_FILE_RE = /\.(?:com|org|net|io|dev|app|ai|cn|jp|co|me|us|uk|de|fish)$/i; // host names are not file names
+/** a term's kind: `file` (name.ext) | `ident` (camelCase / PascalCase / snake_case) | `name` (anything else, e.g. a
+ *  Task Group name) — the per-project tier sends only `file` + `ident` without a card */
+function termKind(term) {
+  const w = str(term);
+  if (/^[\w-]+\.[a-z][a-z0-9]{0,4}$/.test(w) && !NOT_A_FILE_RE.test(w)) return 'file';
+  if (/^(?:[a-z]+(?:[A-Z][a-z0-9]*)+|[A-Z][a-z0-9]+(?:[A-Z][a-z0-9]*)+|[a-z0-9]+(?:_[a-z0-9]+)+)$/.test(w)) return 'ident';
+  return 'name';
+}
+/** PURE `termsOf` — the words worth proposing for the person's Dropline dictionary from THIS conversation: its text
+ *  messages (frames stripped, secrets / e-mails scrubbed — the never-list), the file names it names (`files`), the
+ *  Task Group name; minus `known` (the dictionary, GET /v1/vocabulary — case-insensitive), distinct, ≤ `max`. */
+function termsOf({ messages = [], files = [], cwd = '', known = [], groupName = '', max = 50 } = {}) {
+  const texts = dictationMessagesOf(messages).map((m) => scrubSecrets(m.text));
+  const have = new Set((Array.isArray(known) ? known : []).map((k) => str(k).toLowerCase()));
+  const out = [];
+  const take = (w) => {
+    const t = scrubSecrets(str(w)).trim();
+    if (!t || t.length < 3 || t.length > TERM_MAX || /[\s/\\?=&]/.test(t) && termKind(t) !== 'name') return;
+    if (/^https?:|[?=&@]/.test(t) || (/^[\w-]+\.[a-z]{2,4}$/.test(t) && NOT_A_FILE_RE.test(t))) return;
+    if (have.has(t.toLowerCase()) || out.some((x) => x.toLowerCase() === t.toLowerCase())) return;
+    out.push(t);
+  };
+  for (const f of Array.isArray(files) ? files : []) take(baseName(f));
+  for (const w of identifiersOf(texts, 200)) { if (termKind(w) !== 'name') take(w); }
+  if (groupName) take(head(str(groupName).replace(/\s+/g, ' '), TERM_MAX));
+  return out.slice(0, max);
+}
+const CODE_SPAN_RE = /```[^\n]*\n?([\s\S]*?)(?:```|$)|`([^`\n]+)`/g;
+const PATH_RE = /(?:[\w.-]+\/)+[\w-]+\.[a-z][a-z0-9]{0,4}\b/g;
+/** PURE `autoSourcesOf` — what the per-project tier may send WITHOUT a card, named by SOURCE (voice-verify F2), never by
+ *  shape: the base names of `files` under `cwd`, the paths an AGENT message names, the identifiers inside an AGENT
+ *  message's code spans (`…` / fenced). A word from the person's own sentences is never here — it stays a proposal. */
+function autoSourcesOf({ messages = [], files = [], cwd = '' } = {}) {
+  const out = new Set();
+  const root = str(cwd).replace(/[\\/]+$/, '');
+  for (const f of Array.isArray(files) ? files : []) { const p = str(f); if (root && p.startsWith(root + '/') && !p.split('/').includes('..')) out.add(baseName(p)); }
+  for (const m of dictationMessagesOf(messages)) {
+    if (m.role !== 'agent') continue;
+    const text = scrubSecrets(m.text), spans = [];
+    for (const c of text.matchAll(CODE_SPAN_RE)) spans.push(c[1] != null ? c[1] : c[2]);
+    for (const w of identifiersOf(spans, 200)) out.add(w);
+    for (const p of text.match(PATH_RE) || []) out.add(baseName(p));
+  }
+  return [...out];
+}
+/** PURE `teachContextOf` — the /v1/context body: title = the conversation title (≤ 200), source = VibeSpace, text = the
+ *  last agent message + the person's last 3 + the working directory + its file names (≤ 6 000) — the never-list holds:
+ *  text blocks of THIS conversation only (no tool rows, attachments, other sessions), frames stripped, secrets cut. */
+function teachContextOf({ title = '', messages = [], cwd = '', files = [] } = {}) {
+  const msgs = dictationMessagesOf(messages);
+  const lastAgent = [...msgs].reverse().find((m) => m.role === 'agent');
+  const users = msgs.filter((m) => m.role === 'user').slice(-3);
+  const fileNames = [...new Set([...(Array.isArray(files) ? files : []).map(baseName), ...identifiersOf(msgs.map((m) => m.text), 200).filter((w) => termKind(w) === 'file')])].slice(0, 40);
+  const lines = [
+    ...users.map((m) => `user: ${scrubSecrets(head(m.text, 1200)).replace(/\s+/g, ' ').trim()}`),
+    ...(lastAgent ? [`agent: ${scrubSecrets(head(lastAgent.text, 3000)).replace(/\s+/g, ' ').trim()}`] : []),
+    ...(cwd ? [`Working directory: ${scrubSecrets(baseName(cwd))}`] : []),
+    ...(fileNames.length ? [`Files: ${scrubSecrets(fileNames.join(', '))}`] : []),
+  ].filter((l) => !/^(?:user|agent): $/.test(l));
+  return { title: head(scrubSecrets(str(title)).trim() || 'VibeSpace', 200), source: 'VibeSpace', text: head(lines.join('\n'), TEACH_TEXT_MAX) };
+}
+
+module.exports = {
+  VOICE_LIMITS, LANGUAGES, DICTATE_PART_ORDER, RECORDER_MIME, RETRY_ONCE, VOICE_WORDS, VOICE_CODES,
+  stripFrames, scrubSecrets, dictationMessagesOf, identifiersOf, contextText, beforeOf, contextBytes, dictationContext,
+  contextFromClient, localeOf, languageOf, dictateRequestOf, dictateAnswerOf, failureCodeOf, voiceWords,
+  TEACH_TEXT_MAX, termKind, termsOf, autoSourcesOf, teachContextOf,
+};

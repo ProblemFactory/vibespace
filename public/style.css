@@ -1738,6 +1738,12 @@ body.wm-dragging .window iframe, body.wm-dragging .window canvas, body.wm-draggi
 .settings-row-apply-target { font-family: 'SF Mono','Fira Code',monospace; font-size: 10px; color: var(--text); margin-top: 2px; }
 .settings-cli-receipts { margin-top: 3px; display: flex; flex-direction: column; gap: 2px; }
 .settings-cli-receipt { font-size: 11px; line-height: 1.4; }
+.settings-row.has-wide-fact { flex-wrap: wrap; row-gap: 0; } /* lane https-tailscale: the Secure address line spans the row (wraps on a phone) */
+.settings-https-fact { order: 3; flex: 1 1 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.settings-https-fact .settings-https-text { flex: 1 1 220px; min-width: 0; overflow-wrap: break-word; }
+.settings-https-fact.is-live { border-left-color: var(--accent); color: var(--text); }
+.settings-https-copy { flex: none; padding: 2px 10px; font-size: 11px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text); cursor: pointer; }
+.settings-https-copy:hover { border-color: var(--border-active); }
 .settings-row-fact { margin-top: 5px; padding: 3px 8px; border-left: 2px solid var(--border); font-size: 11px; line-height: 1.4; color: var(--text-secondary); } /* lane headless-fallback: this machine's display beside the headed preference */
 .settings-cli-dim { color: var(--text-dim); }
 .settings-link-btn { margin-top: 4px; background: none; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--accent); font-size: 11px; padding: 2px 8px; cursor: pointer; }
@@ -6641,6 +6647,11 @@ label.chan-cap-row { cursor: default; }
 .mounts-host-top > .mounts-name { flex: 1 1 auto; min-width: 3em; }
 .mounts-host-top > .mounts-row-actions { flex: 0 1 auto; flex-wrap: wrap; margin-left: auto; min-width: 0; }
 .mounts-exit-line { white-space: normal; overflow-wrap: anywhere; display: block; }
+/* lane host-stale-dialer (B-6136): a second agent with an old token — the warning line + its Copy (theme vars only) */
+.mounts-second-dialer { color: var(--warn-text); }
+.mounts-second-dialer-glyph { display: inline-flex; vertical-align: -2px; margin-right: 4px; color: var(--yellow); }
+.mounts-second-dialer-copy { margin-left: 6px; padding: 0 6px; font: inherit; color: var(--text-secondary); background: none; border: 1px solid var(--border); border-radius: 4px; cursor: pointer; }
+.mounts-second-dialer-copy:hover { color: var(--warn-text); }
 /* lane exit-see-whole: the last-run line is a button — it opens the machine's command list */
 button.mounts-exit-last { width: 100%; box-sizing: border-box; margin: 0; padding-top: 0; padding-right: 0; padding-bottom: 0; border: 0; background: none; font-family: inherit; line-height: inherit; text-align: left; cursor: pointer; }
 button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: underline; }

@@ -5,4 +5,5 @@ module.exports = [
   require('./tailscale.js'),
   require('./frp.js'),
   require('./opencode-serve.js'),
+  require('./voice-input.js'),
 ];

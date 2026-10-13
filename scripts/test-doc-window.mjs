@@ -47,6 +47,10 @@
 //      the server (no localStorage key); a page with 3 rows under the OLD key ⇒ the server holds 3, the key gone; a second
 //      browser's stale copy only adds; Send all on A ⇒ B's strip empties; the phone sheet. PNGs desk-a.png / desk-b.png /
 //      phone.png into $VS_DOC_SYNC_SHOTS (else $VS_DOC_WINDOW_SHOTS). VS_DOC_WINDOW_ONLY=synced runs §15 alone.
+//      ⑪–⑮ (lane doc-comments-ui, B-8199 — owner 2026-10-12 with eighteen comments: "请问我现在该干啥"): 18 rows ⇒ the button
+//      reads "Send all (18 → 3 messages)"; row 7's ➤ ⇒ ONE POST of ONE item, row 7 gone, 17 stay, page B follows; the phone
+//      sheet's glyphs fit their rows; a stopped owner ⇒ "Sending 17 comments…" (rows held) then the STASHED words. PNGs
+//      desk.png / phone.png into $VS_DOC_SEND_SHOTS (else the §15 folder).
 // Run: node scripts/test-doc-window.mjs   (SKIPs with evidence when google-chrome is absent; ~1 min)
 import fs from 'node:fs';
 import path from 'node:path';
@@ -900,6 +904,58 @@ try {
   const sent15 = await until15(() => { const t = stdinTexts().slice(before15).filter((x) => x.startsWith('[Doc comments] ' + SY)); return t.length ? t : null; });
   const emptyB = await until15(async () => { const n = await notesOn(evB, SY); return n && n.length === 0 ? true : null; });
   ok(!!sendA && !!sent15 && sent15[0].includes('name the second step') && !!emptyB && !(await recOf(SY)), '⑦ Send all on A ⇒ the chat gets the message, the server\'s record is gone and B\'s strip empties (no reload)', { sendA, sent15, emptyB });
+  // ⑪–⑮ THE SEND SAYS WHAT IT WILL DO AND WHAT IT DID (lane doc-comments-ui, B-8199): 18 rows the packer makes 3 messages of
+  const DSHOTS = process.env.VS_DOC_SEND_SHOTS || SSHOTS;
+  const shotTo = async (c, name) => { if (!DSHOTS) return null; await c('Page.bringToFront'); await sleep(400); const r = await c('Page.captureScreenshot', { format: 'png' }); const f = path.join(DSHOTS, name); fs.writeFileSync(f, Buffer.from(r.data, 'base64')); return f; };
+  const SD = path.join(fs.realpathSync(PROJ), 'docs', 'SEND.md');
+  fs.writeFileSync(SD, '# Send plan\n\n' + Array.from({ length: 18 }, (_, i) => `Step ${i + 1} of the plan.`).join('\n\n') + '\n');
+  const ROWS = Array.from({ length: 18 }, (_, i) => ({ id: 'sd' + (i + 1), quote: `Step ${i + 1} of the plan.`, line: 3 + 2 * i, note: `note ${i + 1} `.padEnd(500, 'x') }));
+  const PLAN = require('./src/doc-model.js').commentsBatches(SD, ROWS);
+  // page A's fetch: every POST /api/doc/comments body recorded; `__docStash` set ⇒ answered with it after 1.5 s (⑭)
+  await ev(`localStorage.setItem(${S(oldKeyOf(SD))}, ${S(S(ROWS))}); window.__docPosts = []; if (!window.__docFetch) { window.__docFetch = window.fetch; window.fetch = (u, o) => { if (!String(u).includes('/api/doc/comments')) return window.__docFetch(u, o); window.__docPosts.push(JSON.parse(o.body)); if (window.__docStash) { const a = window.__docStash; return new Promise((r) => setTimeout(() => r(new Response(JSON.stringify(a), { status: 200, headers: { 'Content-Type': 'application/json' } })), 1500)); } return window.__docFetch(u, o); }; } return true;`);
+  await openOn(ev, SD, 'SEND.md', chatA2); await stripOpen(ev, SD);
+  const label = (E) => E(`const w = ${DW(SD)}; const b = w && w.content.querySelector('.doc-send'); return b && !b.hidden ? b.textContent : null;`);
+  const up18 = await until15(async () => { const r = await recOf(SD); return r && r.length === 18 ? r : null; });
+  const lab18 = await until15(async () => { const l = await label(ev); return l && l.includes('18') ? l : null; });
+  ok(PLAN.ok && PLAN.batches.length === 3 && !!up18 && lab18 === 'Send all (18 → 3 messages)', '⑪ 18 rows (the packer makes 3 messages of them) ⇒ the button reads "Send all (18 → 3 messages)" before any press', { lab18, n: up18 && up18.length, plan: PLAN.batches && PLAN.batches.map((b) => b.count) });
+  await openOn(evB, SD, 'SEND.md'); await stripOpen(evB, SD);
+  const b18 = await until15(async () => { const n = await notesOn(evB, SD); return n && n.length === 18 ? n : null; });
+  const deskSend = await shotTo(call, 'desk.png');
+  await call('Page.bringToFront'); await sleep(300); await openOn(ev, SD, 'SEND.md', chatA2); await stripOpen(ev, SD);
+  // ⑫ row 7's ➤ (a real click) ⇒ ONE POST with ONE item, ONE message with row 7 alone; row 7 leaves, 17 stay; the toast
+  const before16 = stdinTexts().length;
+  await ev(`window.__docPosts = []; return true;`);
+  const r7 = await until15(() => ev(`const w = ${DW(SD)}; const row = w.content.querySelectorAll('.doc-cmt')[6]; const b = row && row.querySelector('.doc-cmt-send'); if (!b || !b.offsetParent) return null; b.scrollIntoView({ block: 'center' }); const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, note: row.querySelector('.doc-cmt-n').textContent.slice(0, 7), tip: b.title };`));
+  if (r7) await click(r7);
+  const sent7 = await until15(() => { const t = stdinTexts().slice(before16).filter((x) => x.startsWith('[Doc comments] ' + SD)); return t.length ? t : null; });
+  const left17 = await until15(async () => { const n = await notesOn(ev, SD); return n && n.length === 17 ? n : null; });
+  const posts7 = await ev(`return window.__docPosts;`);
+  const toast7 = await until15(() => ev(`return [...document.querySelectorAll('[class*="toast"]')].map((e) => e.textContent).find((x) => x.includes('Sent 1 comment')) || null;`));
+  ok(!!r7 && r7.note === 'note 7 ' && r7.tip === 'Send this one' && posts7.length === 1 && posts7[0].items.length === 1 && posts7[0].items[0].note.startsWith('note 7 ') && !!sent7 && sent7.length === 1 && sent7[0].includes('note 7 x') && !sent7[0].includes('note 6 x') && !sent7[0].includes('note 8 x') && !!left17 && !left17.some((n) => n.startsWith('note 7 ')), '⑫ the ➤ ("Send this one") on row 7 ⇒ ONE POST with ONE item, ONE message carrying row 7 alone; row 7 gone, 17 stay', { r7, posts: posts7.map((p) => p.items.length), sent7: sent7 && sent7.map((x) => x.slice(0, 160)), left: left17 && left17.length });
+  ok(!!toast7 && !!(await until15(async () => { const l = await label(ev); return l === 'Send all (17 → 3 messages)' ? l : null; })), '⑫ …the toast says "Sent 1 comment" and the button now reads "Send all (17 → 3 messages)"', { toast7, label: await label(ev) });
+  const b17 = await until15(async () => { const n = await notesOn(evB, SD); return n && n.length === 17 ? n : null; });
+  ok(!!b18 && !!b17 && !b17.some((n) => n.startsWith('note 7 ')), '⑬ page B showed the 18, then the 17 without a reload (row 7 gone there too)', { b18: b18 && b18.length, b17: b17 && b17.length });
+  // ⑬b the phone: B at 390 — the sheet's ➤ / ✕ are 36 px targets inside their row, clear of the note; the label wraps in its button
+  await bootB(390, 844, true);
+  await openOn(evB, SD, 'SEND.md'); await stripOpen(evB, SD);
+  const ph = await until15(() => evB(`const w = ${DW(SD)}; const s = w.content.querySelector('.doc-strip'); const rows = [...s.querySelectorAll('.doc-cmt')]; if (s.hidden || rows.length !== 17) return null; const b = s.querySelector('.doc-send'); const geo = rows.slice(0, 4).map((row) => { const r = row.getBoundingClientRect(), n = row.querySelector('.doc-cmt-n').getBoundingClientRect(), g = [...row.querySelectorAll('.doc-cmt-acts button')].map((x) => x.getBoundingClientRect()); return { inRow: g.every((x) => x.left >= r.left && x.right <= r.right + 0.5 && x.top >= r.top - 0.5), big: g.every((x) => x.width >= 36 && x.height >= 36), clear: g.every((x) => x.left >= n.right - 0.5), n: g.length }; }); const br = b.getBoundingClientRect(); return { phone: !!w.content.querySelector('.doc-phone'), geo, label: b.textContent, fits: b.scrollWidth <= b.clientWidth + 1 && br.right <= innerWidth, ws: getComputedStyle(b).whiteSpace, sheetW: Math.round(s.getBoundingClientRect().width) };`));
+  const phoneSend = await shotTo(callB, 'phone.png');
+  ok(!!ph && ph.geo.every((g) => g.n === 2 && g.inRow && g.big && g.clear) && ph.label === 'Send all (17 → 3 messages)' && ph.fits && ph.ws === 'normal' && ph.sheetW <= 390, '⑬b on a phone (390) each row\'s ➤ and ✕ are 36 px targets inside the row, clear of its note; the button label wraps (no overflow)', ph);
+  // ⑭ the owning conversation is not running: the page gets THE ENGINE'S stash answer for its 17 rows (the rig's stub chat
+  //    cannot be stopped and still own the file — a killed session leaves no owner: no_owner), held 1.5 s ⇒ the in-flight state
+  await call('Page.bringToFront'); await sleep(1500); await openOn(ev, SD, 'SEND.md', chatA2); await stripOpen(ev, SD);
+  const rows17 = await recOf(SD);
+  const stashAns = require('./src/server/doc-engine.js').create({ activeSessions: new Map([['w1', { mode: 'chat', backend: 'claude', claudeSessionId: 'conv-1' }]]), getDeliver: () => ({ stashFor: () => ({ stored: true }) }), sendUserInput: () => ({ ok: false, code: 'not_chat', error: 'not a live chat session' }), artifacts: null, now: () => 7 }).comments({ path: SD, from: 'w1', items: rows17 || [] });
+  await ev(`window.__docStash = ${S(stashAns)}; window.__docPosts = []; return true;`);
+  const sendAll = await rectIn('.doc-send', SD); if (sendAll) await click(sendAll);
+  const flight = await until(() => ev(`const w = ${DW(SD)}; const b = w.content.querySelector('.doc-send'); const g = [...w.content.querySelectorAll('.doc-cmt-acts button')]; return b.disabled ? { label: b.textContent, held: g.length === 34 && g.every((x) => x.disabled) } : null;`), 3000, 50);
+  ok(!!flight && flight.label === 'Sending 17 comments…' && flight.held, '⑭ while the ONE POST is out the button is disabled and reads "Sending 17 comments…"; every row\'s ➤ / ✕ is held', flight);
+  const stashSaid = await until15(() => ev(`const w = ${DW(SD)}; const c = w.content.querySelector('.doc-chip'); return c && !c.hidden && /^Stashed/.test(c.textContent) ? c.textContent : null;`));
+  const toastS = await ev(`return [...document.querySelectorAll('[class*="toast"]')].map((e) => e.textContent).find((x) => x.includes('Stashed 17')) || null;`);
+  const gone = await until15(async () => ((await notesOn(ev, SD)) || [1]).length === 0 && !(await recOf(SD)) ? true : null);
+  ok(stashAns.delivered === 'stashed' && (await ev(`return window.__docPosts.length;`)) === 1 && stashSaid === 'Stashed 17 comments — the conversation is not running; they are delivered when its next turn starts' && !!toastS && !/Sent/.test(stashSaid + toastS) && !!gone, '⑮ a stopped owner (the engine stashes) ⇒ the strip and the toast say "Stashed 17 comments — … delivered when its next turn starts", never "Sent"; the rows leave the record', { stashSaid, toastS, gone, delivered: stashAns.delivered });
+  await ev(`window.__docStash = null; return true;`);
+  if (DSHOTS) ok([deskSend, phoneSend].every((f) => f && fs.statSync(f).size > 5000), `⑮ PNGs for the owner: ${deskSend}, ${phoneSend}`);
   // ⑧ the phone: B at 390 shows the migrated document's four rows in its bottom sheet
   await bootB(390, 844, true);
   await openOn(evB, SY2, 'OLD.md');

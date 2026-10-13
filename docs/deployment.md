@@ -23,6 +23,16 @@ Auth is **off by default** (local single-user use). Enable it by giving the serv
 - **Changing (or setting) the password in-app logs out every other device** — only the browser that made the change keeps a fresh token. Changing it requires the current password; removing it (⚙ → Change password… → Remove) disables auth entirely.
 - **Precedence:** a password set (or removed) in-app is marked user-set and always wins — `VIBESPACE_PASSWORD` / `VIBESPACE_GENERATE_PASSWORD` only apply while the state was never touched from inside the app. Delete `data/auth.json` to reset everything.
 
+## HTTPS on the same port (Tailscale)
+
+Browsers give a page at `http://<LAN address or 100.x>:3456` no *secure context*: the microphone, a Mac's desktop sign-in (WebCrypto) and WebAuthn only work at `localhost` or over https. VibeSpace therefore also answers **https on the same port** (`PORT`, 3456 by default) — one listener tells a TLS handshake from plain http by its first byte, so `http://…:3456` keeps working unchanged.
+
+- **Tailscale (automatic):** on a machine in a tailnet, VibeSpace fetches a certificate for `<machine>.<tailnet>.ts.net` with `tailscale cert` at startup and checks hourly (renewing within 14 days of expiry, no restart). Two one-time steps may be needed: turn on **HTTPS Certificates** in the Tailscale admin console → DNS; and if the server's user is not root, `sudo tailscale set --operator=<user>` once. VibeSpace says which one in Settings and once in For you. Then open `https://<machine>.<tailnet>.ts.net:3456`.
+- **Your own certificate:** `VIBESPACE_TLS_CERT=/path/fullchain.pem VIBESPACE_TLS_KEY=/path/key.pem PORT=3456 node server.js` (re-read hourly).
+- **Off:** Settings → Session → Secure address (https) → Off (`server.https`), or run behind your own https proxy as before (`X-Forwarded-Proto: https` keeps the Secure cookie).
+
+Settings → Session → **Secure address (https)** shows the live address with a Copy button.
+
 ## Config export / import
 
 ⚙ menu → **Backup & migrate…** (Export tab) produces a single JSON file for backup or migration to another instance (e.g. a freshly provisioned container — the onboarding wizard has an "Import a config file" entry). Pick what to include:

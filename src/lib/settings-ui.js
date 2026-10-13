@@ -1,6 +1,6 @@
 import { SETTINGS_SCHEMA, SETTINGS_CATEGORIES, harnessSectionFor, harnessFileRel, harnessCategory, channelVendorName, orderedCategories, settingsGroupOf, settingsGroups, clampToSchema } from './settings-schema.js';
 import { settingsViewModel, hiddenAdvancedText, whenClauses, clauseKind, SHOW_ADVANCED_KEY } from './settings-view.js'; // PURE: what is drawn — tiers, `when`, search, modified (B-df40 part 2)
-import { showConfirmDialog, fetchJson, showToast } from './utils.js';
+import { showConfirmDialog, fetchJson, showToast, copyText } from './utils.js';
 import { receiptLine, offLine, applyHead, refusalLine, recoveredLine } from './cli-config-chips.js';
 import { machineDisplayText } from './browser-display-words.js'; // lane headless-fallback: the display fact beside the headed preference
 import { t } from './i18n.js';
@@ -353,6 +353,7 @@ class SettingsUI {
     if (schema.apply) this._renderApplyChip(info, path, schema);
     else if (schema.channel) this._renderChannelChip(info, schema);
     if (schema.fact === 'browser-display') this._renderDisplayFact(info);
+    if (schema.fact === 'https-address') { row.classList.add('has-wide-fact'); this._renderHttpsFact(row); } // the full row's width (a phone's label column is too narrow for an address)
 
     const controlWrap = document.createElement('div');
     controlWrap.className = 'settings-row-control';
@@ -384,6 +385,30 @@ class SettingsUI {
     line.textContent = t('checking…');
     info.appendChild(line);
     fetchJson('/api/browser/display').then((r) => { if (line.isConnected || line.parentNode) line.textContent = machineDisplayText(r); });
+  }
+
+  /** lane https-tailscale: the hub's https address (GET /api/tls — the plan src/server/tls.js holds, no probe on render):
+   *  "Secure address: https://<domain>:<port> — …" with a Copy button, or the plan's `off` words (the owner's step). */
+  _renderHttpsFact(host) {
+    const line = document.createElement('div');
+    line.className = 'settings-row-fact settings-https-fact';
+    const text = document.createElement('span');
+    text.className = 'settings-https-text';
+    text.textContent = t('checking…');
+    line.appendChild(text);
+    host.appendChild(line);
+    fetchJson('/api/tls').then((r) => {
+      if (!r || !r.i18n) { text.textContent = r && r.words ? r.words : t('checking…'); return; }
+      text.textContent = t(r.i18n.key, r.i18n.params || {});
+      line.classList.toggle('is-live', !!r.serving);
+      if (r.serving && r.url) {
+        const btn = document.createElement('button');
+        btn.className = 'settings-https-copy';
+        btn.textContent = t('Copy');
+        btn.onclick = () => { copyText(r.url); btn.textContent = t('Copied'); setTimeout(() => { btn.textContent = t('Copy'); }, 1500); };
+        line.appendChild(btn);
+      }
+    }).catch(() => { text.textContent = t('checking…'); });
   }
 
   /** The apply-chip slot of a DERIVED per-vendor channel row (B-df40 part 3): who reads the value — the Channels

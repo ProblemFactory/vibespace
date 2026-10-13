@@ -5,6 +5,7 @@
 import { createModalShell, fetchJson, showToast, showConfirmDialog, showContextMenu, escHtml, copyText } from './utils.js';
 import { BACKEND_META } from './agent-meta.js';
 import { t } from './i18n.js';
+import { renderDictationCard } from './voice-plugin-card.js';
 
 // How long we wait for a just-enabled background service to answer before we
 // hand the pending user action back anyway (the keeper's own boot budget is
@@ -55,7 +56,9 @@ export function installPluginsUI(App) {
         const isRelay = provides(p, 'relay');
         const isServe = provides(p, 'serve');
         const isTunnel = provides(p, 'tunnel');
-        const stateTxt = isServe
+        const isDictation = provides(p, 'dictation'); // Dropline voice input (q-029 P0): src/lib/voice-plugin-card.js draws its card
+        const stateTxt = isDictation ? (!p.configured ? t('no Dropline key yet') : p.enabled ? t('on') : t('turned off'))
+          : isServe
           ? (!p.installed ? t('the opencode CLI is not installed')
             : p.parkedKind === 'runaway' ? t('stopped as a runaway')
               : p.parkedKind === 'blocked' ? t('blocked by a serve we could not identify')
@@ -68,7 +71,7 @@ export function installPluginsUI(App) {
             : p.mode === 'system' ? t('managed by the system (outside VibeSpace)')
               : running ? (p.backendState === 'Running' ? t('connected') : (p.backendState || t('starting…')))
                 : p.installed ? t('stopped') : t('not installed');
-        const dot = `<span class="plugin-dot ${isServe ? (running ? 'ok' : p.parked ? 'err' : p.starting ? 'warn' : '')
+        const dot = `<span class="plugin-dot ${isDictation ? (p.running ? 'ok' : '') : isServe ? (running ? 'ok' : p.parked ? 'err' : p.starting ? 'warn' : '')
           : isRelay ? (running ? 'ok' : '')
             : (running && p.backendState === 'Running' ? 'ok' : running ? 'warn' : '')}"></span>`;
         let detail = '';
@@ -128,7 +131,9 @@ export function installPluginsUI(App) {
         // frp: no login/mode/flags. The relay config fields (below) always
         // show so the user can enter/override the relay; install/start appear
         // only once a relay is configured (env default or user-entered).
-        if (isServe) {
+        if (isDictation) {
+          renderDictationCard({ p, actions, cfgBox, api, rerender: render });
+        } else if (isServe) {
           // The OpenCode service has nothing to install (it runs the user's own
           // CLI) and nothing to configure — Start / Stop and one deliberate
           // on-switch. The env override, when set, WINS: say so and disable the

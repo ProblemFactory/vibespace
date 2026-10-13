@@ -981,6 +981,9 @@ class ChatView {
       onInterrupt: () => this.ws.send({ type: 'interrupt', sessionId: this.sessionId }),
       getCwd: () => this._getSessionIds().cwd,
       getHost: () => this._getSessionIds().host || null,
+      // Dropline voice input (q-029 P0): the conversation's title + messages the PURE dictationContext reads (text blocks only)
+      getVoiceFacts: () => ({ conv: String(this.sessionId || ''), title: String(this.winInfo?.name || ''), messages: this._messages.slice(-40) }),
+      openPlugins: () => this.app?.openPluginsDialog?.(),
       getUploadDir: () => (this.app?.settings?.get('chat.uploadDir') || '').trim(),
       // Touch devices: soft keyboards have no Shift+Enter — the enter key is
       // the ONLY way to type a newline, so it must insert one, not send

@@ -1424,9 +1424,9 @@ function producerCensus(src) {
 {
   // ── 6. THE BOOT: the stores load synchronously at create, before the server listens and before any session is restored ──
   const sj = read('server.js');
-  const iDeliver = sj.indexOf("const deliver = require('./src/server/conversation-deliver.js').create("), iView = sj.indexOf("const stashView = require('./src/server/stash-handover.js').create("), iListen = sj.indexOf('server.listen(PORT, HOST'), iRestore = sj.indexOf('restoreSessions();', iListen);
+  const iDeliver = sj.indexOf("const deliver = require('./src/server/conversation-deliver.js').create("), iView = sj.indexOf("const stashView = require('./src/server/stash-handover.js').create("), iListen = sj.indexOf('hub.listen(PORT, HOST'), iRestore = sj.indexOf('restoreSessions();', iListen);
   ok(iDeliver > 0 && iView > iDeliver && iListen > iView && iRestore > iListen && /const file = dataDir \? path\.join\(dataDir, DELIVERED_FILE\) : null;\n  if \(file\) \{\n    let raw = null;\n    try \{ raw = fs\.readFileSync\(file, 'utf-8'\); \}/.test(read('src/server/stash-handover.js')) && /try \{ stash = JSON\.parse\(fs\.readFileSync\(stashFile, 'utf-8'\)\) \|\| \{\}; \} catch \{ \}/.test(read('src/server/conversation-deliver.js')),
-    'THE BOOT ORDER: the ladder\'s stash and the hand-over memory are read synchronously at create, both before server.listen, and restoreSessions runs inside the listen callback — a first prompt at boot+1 s finds either a restored session (drained once, persisted synchronously) or no session (401, nothing touched)');
+    'THE BOOT ORDER: the ladder\'s stash and the hand-over memory are read synchronously at create, both before hub.listen (the one-port front, lane https-tailscale), and restoreSessions runs inside the listen callback — a first prompt at boot+1 s finds either a restored session (drained once, persisted synchronously) or no session (401, nothing touched)');
   // a restored session: the stash on disk from a previous process, the first prompt drains it ONCE, the second carries nothing
   const H = rigR7({ groups: 1, n: 5 });
   try {

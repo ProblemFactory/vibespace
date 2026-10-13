@@ -128,6 +128,9 @@ const ALLOW = {
   'src/server/ops-routes.js|raw.githubusercontent.com': 'the update check (the public repo\'s package.json + CHANGELOG) behind ⚙ → Update VibeSpace — a human\'s click',
   'src/channels/fake.js|img.example.invalid': 'lane channel-rich: a REMOTE picture inside the fake world\'s mail HTML (a string the fake serves as a mail body, never a request this file makes) — the heavy leg proves the browser does not ask for it before Show pictures; `.invalid` never resolves',
   'src/server/mounts-plugins-wiring.js|nodejs.org': 'the node runtime tarball relayed to a paired device that cannot reach nodejs.org itself (corporate egress) — an operator\'s pairing action',
+  'src/server/dropline-client.js|api.dropline.fish.audio': 'Dropline voice input (q-029 P0): THE vendor module — /v1/dictate only when the person clicks the microphone and stops (the voice-input plugin ON + the dropline key), /v1/me only on the card\'s Test; audio + key never logged',
+  'src/server/dropline-client.js|api.fish.audio': 'Dropline voice input P1 (lane voice-p1-oauth-teach): the OAuth tier — /oauth/register ONCE per deployment on the owner\'s first Connect press, /oauth/token for the code the person\'s own consent landed and for the single-flight refresh of that grant; nothing else',
+  'src/server/dropline-client.js|fish.audio': 'Dropline voice input P1: the consent page /oauth/authorize — the hub only BUILDS the address; the owner\'s browser opens it in a new tab after their Connect press (no hub request)',
   'data/bin/vibespace-exit|ifconfig.me': 'a help-text EXAMPLE the agent runs by hand through a borrowed exit (`curl https://ifconfig.me`); the tool\'s own fetch targets the VibeSpace API only',
 };
 

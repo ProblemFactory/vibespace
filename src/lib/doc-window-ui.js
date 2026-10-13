@@ -8,7 +8,9 @@
 //     edits ⇒ the bar "Reload | Keep editing"; after Keep editing the save asks ONCE before overwriting.
 //   · COMMENTS: a selection ⇒ a floating Comment button (the house popover, living exactly as long as its selection —
 //     commentOffer below) ⇒ a note box; the strip on the right
-//     (a bottom sheet on a phone); Send all = ONE POST /api/doc/comments. The strip's rows are VibeSpace's, not a
+//     (a bottom sheet on a phone); Send all = ONE POST /api/doc/comments, a row's ➤ = ONE POST of that row (lane doc-comments-ui:
+//     the button previews "18 → 3 messages", says Sending… while out, the answer is said by `delivered` — a stash is never
+//     "Sent"; doc-window-model.js sendAllLabel / sendWords). The strip's rows are VibeSpace's, not a
 //     browser's (lane doc-comments-synced): the server's `drafts` SyncStore row `doc:<host>\u0001<path>`, live on every
 //     client; a browser's old localStorage copy is folded in once (adoptRecord) and removed.
 //   · THE FRAME (design 020, lane doc-editor-ui, 2.369.223 — docs/design-doc-editor-wheel.md § UI): ONE folding bar of glyph
@@ -27,7 +29,7 @@ import { Plugin, NodeSelection } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import M from '../doc-model.js';
 import { schema, extensions, loadDoc, saveDoc, sourceLine, docFidelity, safeHref, safeImageSrc } from './doc-markdown.js';
-import { WIDTH_KEY, widthChoice, nextWidth, columnRule, TABLE_CSS, downloadHref, exportName, localImagePath, exportDocument, readingHtml, rawReading, colsBand, rawCommentAnchor, rawCommentTarget, RAW_KIND_WORD } from './doc-window-model.js';
+import { WIDTH_KEY, widthChoice, nextWidth, columnRule, TABLE_CSS, downloadHref, exportName, localImagePath, exportDocument, readingHtml, rawReading, colsBand, rawCommentAnchor, rawCommentTarget, RAW_KIND_WORD, sendAllLabel, sendWords } from './doc-window-model.js';
 
 const POLL_MS = 2000;
 const SHEET_BELOW = 640;   // px of window width: below it the comments strip is a bottom sheet
@@ -137,15 +139,20 @@ ${TABLE_CSS}
 .doc-strip-head{padding:8px 10px;font-size:12px;font-weight:600;display:flex;align-items:center;gap:6px}
 .doc-strip-list{flex:1;overflow:auto;padding:0 8px}
 .doc-strip button,.doc-note button{background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:var(--radius-sm);padding:3px 10px;cursor:pointer;font:inherit;font-size:12px}
-.doc-cmt{position:relative;background:var(--bg-window);border:1px solid var(--border);border-radius:var(--radius);padding:6px 26px 6px 8px;margin-bottom:6px;font-size:12px}
+.doc-cmt{position:relative;background:var(--bg-window);border:1px solid var(--border);border-radius:var(--radius);padding:6px 52px 6px 8px;margin-bottom:6px;font-size:12px}
 .doc-cmt-q{color:var(--text-dim);border-left:2px solid var(--accent-dim);padding-left:6px;margin-bottom:4px;overflow-wrap:anywhere}
 .doc-cmt-n{white-space:pre-wrap;overflow-wrap:anywhere}
-.doc-cmt-x{position:absolute;top:2px;right:2px;border:none!important;background:none!important;padding:2px 6px!important;color:var(--text-dim)!important}
+.doc-cmt-acts{position:absolute;top:2px;right:2px;display:flex;align-items:center}
+.doc-cmt-acts button{border:none!important;background:none!important;padding:2px 6px!important;color:var(--text-dim)!important;display:inline-flex;align-items:center;justify-content:center}
+.doc-cmt-acts button:hover:not(:disabled){color:var(--text)!important}
+.doc-cmt-acts button:disabled{opacity:.4;cursor:default}
+.doc-cmt-send svg{width:13px;height:13px}
 .doc-cmt-raw{cursor:pointer}
 .doc-cmt-raw:hover{border-color:var(--accent-dim)}
 .doc-cmt-k{font-size:11px;color:var(--text-dim);margin-bottom:2px}
 .doc-strip-foot{padding:8px 10px;border-top:1px solid var(--border);font-size:12px;display:flex;flex-direction:column;gap:6px}
-.doc-strip-foot .doc-send{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+.doc-strip-foot .doc-send{background:var(--accent);color:var(--accent-fg);border-color:var(--accent);white-space:normal;height:auto;min-height:28px;overflow-wrap:anywhere}
+.doc-strip-foot .doc-send:disabled{opacity:.7;cursor:progress}
 .doc-strip-empty{color:var(--text-dim);font-size:12px;padding:4px 2px}
 .doc-cpop{background:var(--bg-dialog);border:1px solid var(--border);border-radius:var(--radius);padding:4px;box-shadow:var(--shadow-window)}
 .doc-cpop button{background:var(--accent);color:var(--accent-fg);border:none;border-radius:var(--radius-sm);padding:4px 10px;cursor:pointer;font:inherit;font-size:12px}
@@ -160,6 +167,8 @@ ${TABLE_CSS}
 .doc-window.doc-phone .doc-status{height:42px}
 .doc-window.doc-phone .doc-pill,.doc-window.doc-phone .doc-save-btn{height:36px}
 .doc-window.doc-phone button:not(.doc-grip){min-height:36px}
+.doc-phone .doc-cmt{padding-right:80px}
+.doc-phone .doc-cmt-acts button{min-width:36px}
 .doc-window.doc-phone .doc-page{padding:18px 12px 80px}
 .doc-window.doc-phone .doc-page .ProseMirror h1{font-size:23px}
 .doc-window.doc-phone .doc-page .ProseMirror h2{font-size:18px}
@@ -854,9 +863,12 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
         if (c.quote || (c.line && !c.raw)) el.appendChild(mk('div', 'doc-cmt-q', (c.line && !c.raw ? 'L' + c.line + ' ' : '') + (c.quote || '')));
         el.appendChild(mk('div', 'doc-cmt-n', c.note));
         const x = mk('button', 'doc-cmt-x', '×'); x.title = t('Remove'); x.setAttribute('aria-label', t('Remove'));
-        x.addEventListener('click', (e) => { e.stopPropagation(); comments = comments.filter((y) => y.id !== c.id); saveComments(); renderStrip(); });
+        x.addEventListener('click', (e) => { e.stopPropagation(); if (S.sending) return; comments = comments.filter((y) => y.id !== c.id); saveComments(); renderStrip(); });
+        // lane doc-comments-ui: THIS row alone — ONE POST of one item; it leaves the strip, the others stay
+        const one = mk('button', 'doc-cmt-send'); one.type = 'button'; one.title = t('Send this one'); one.setAttribute('aria-label', one.title); one.appendChild(glyph(I.send));
+        one.addEventListener('click', (e) => { e.stopPropagation(); const row = comments.find((y) => y.id === c.id); if (row) send([row]); }, { signal });
         if (c.raw) el.addEventListener('click', () => showRawComment(c), { signal }); // its block: selected + scrolled into view
-        el.appendChild(x);
+        const acts = mk('div', 'doc-cmt-acts'); acts.append(one, x); el.appendChild(acts);
       }
       return el;
     });
@@ -864,30 +876,35 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
     want.forEach((el, i) => { if (list.children[i] !== el) list.insertBefore(el, list.children[i] || null); });
     if (!comments.length && !list.querySelector('.doc-strip-empty')) list.appendChild(mk('div', 'doc-strip-empty', t('Select text in the document, then press Add comment.')));
     if (comments.length) list.querySelector('.doc-strip-empty')?.remove();
-    btnSend.hidden = !comments.length;
+    btnSend.hidden = !comments.length; renderSend();
     ownerLine.textContent = S.owner ? '' : t('Open this document from a chat to send comments to it');
     ownerLine.hidden = !!S.owner;
     renderStatus();
   }
   btnStrip.addEventListener('click', () => setStrip(!S.stripOpen), { signal });
   cmtsChip.addEventListener('click', () => setStrip(!S.stripOpen), { signal });
-  btnSend.addEventListener('click', async () => {
-    if (S.sending || !comments.length) return;
-    S.sending = true; btnSend.textContent = t('Sending…');
-    const batch = comments.slice(); // this send's rows — another client may add or remove one while it is out
+  /** Send all's label (the preview of the send's shape, or what is going while it is out) + the rows held still meanwhile. */
+  function renderSend() {
+    btnSend.textContent = sendAllLabel(t, S.sending ? { n: S.sendingN, sending: true } : { n: comments.length, plan: comments.length ? M.commentsBatches(path, comments) : null });
+    btnSend.disabled = S.sending; strip.classList.toggle('doc-strip-busy', S.sending);
+    for (const b of list.querySelectorAll('.doc-cmt-acts button')) b.disabled = S.sending;
+  }
+  btnSend.addEventListener('click', () => send(comments.slice()), { signal });
+  /** ONE POST of `batch` (every row, or a row's ➤): what went out leaves the strip, said by `delivered` (sendWords). */
+  async function send(batch) {
+    if (S.sending || !batch.length) return;
+    S.sending = true; S.sendingN = batch.length; renderSend(); // this send's rows — another client may add or remove one while it is out
     const drop = (rows) => { const gone = new Set(rows.map((c) => c.id)); comments = comments.filter((c) => !gone.has(c.id)); saveComments(true); renderStrip(); };
     const r = await fetchJson('/api/doc/comments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ host, path, from: S.from, items: batch.map((c) => ({ quote: c.quote, ...(c.line ? { line: c.line } : {}), note: c.note })) }) });
-    S.sending = false; btnSend.textContent = t('Send all');
-    if (r && r.ok) {
-      drop(batch);
-      showToast(r.delivered === 'stashed' ? t('Comments wait for the chat\'s next turn') : t('Comments sent to the chat'), { type: 'success' });
-      say(r.messages > 1 ? t('Sent {n} comments in {m} messages', { n: r.count, m: r.messages }) : t('Sent {n} comments', { n: r.count }));
-    } else if (r && r.code === 'no_owner') { S.owner = null; renderStrip(); }
-    else if (r && Number.isInteger(r.sent) && r.sent > 0) {   // part-way: what went out leaves the strip, the rest stays
-      drop(batch.slice(0, r.sent));
-      say(t('Sent {sent} of {n} — the rest are still here', { sent: r.sent, n: batch.length }));
-    } else say(t('Could not send the comments: {why}', { why: (r && r.error) || t('the server did not answer') }));
-  }, { signal });
+    S.sending = false; S.sendingN = 0; renderSend();
+    const w = sendWords(t, r, batch.length);
+    if (r && r.ok) drop(batch);
+    else if (r && r.code === 'no_owner') { S.owner = null; renderStrip(); }
+    else if (w && w.kind === 'partial') drop(batch.slice(0, r.sent)); // part-way: what went out leaves the strip, the rest stays
+    if (!w) return;
+    say(w.words);
+    if (r && r.ok) showToast(w.words, { type: w.kind === 'stashed' ? 'info' : 'success' });
+  }
   async function resolveOwner() {
     const r = await fetchJson('/api/doc/owner?' + q(host, path) + (S.from ? '&from=' + encodeURIComponent(S.from) : ''));
     S.owner = r && r.owner ? r.owner : null; renderStrip();

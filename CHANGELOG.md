@@ -2,6 +2,20 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.260 — 2026-10-12
+
+### Added
+- Voice input: paste your Dropline key in the new Voice input plugin and dictate into the chat box — the text lands at your cursor, spelled by your Dropline.
+- Voice input: connect your Fish Audio account instead of pasting a key, and let VibeSpace suggest Dropline dictionary words — nothing is added until you say so
+- VibeSpace also answers at https://<your machine>.ts.net:3456 once Tailscale HTTPS certificates are on — the microphone and a Mac's sign-in work from any device.
+
+### Changed
+- A document's comment strip can send one comment at a time, shows how many messages Send all will take, and says when comments wait for the chat's next turn
+- A paired machine's desktop responds faster to your typing and clicks — 42→0.7 ms round trip on the test path.
+
+### Fixed
+- A paired machine that still runs an old VibeSpace agent is told so on its row, with the command to stop it.
+
 ## 2.369.259 — 2026-10-12
 
 ### Added

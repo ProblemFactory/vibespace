@@ -1131,7 +1131,7 @@ function reverseListen(mux, msg) {
   const want = Number(msg.port) || 0;
   const existing = want ? reverseListeners.get(want) : null;
   if (existing) { existing.owner = mux; existing.disownedAt = null; mux.control({ op: 'listen-open', id: msg.id, port: want }); return; }
-  const srv = net.createServer((tsock) => {
+  const srv = net.createServer((tsock) => { // nagle: ok — a reverse tunnel (a session's dial-back, a mount), never a picture
     const L = reverseListeners.get(srv._vsPort);
     const owner = L && L.owner;
     if (!owner || owner._dead) { tsock.destroy(); return; }
@@ -1263,7 +1263,7 @@ function unpinWindow(rec) {
 function serveSocks(mux, msg) {
   const net = require('net');
   const REPLY = (code) => Buffer.from([0x05, code, 0x00, 0x01, 0, 0, 0, 0, 0, 0]);
-  const srv = net.createServer((c) => {
+  const srv = net.createServer((c) => { // nagle: ok — the exit SOCKS egress, never a picture
     c.on('error', () => { try { c.destroy(); } catch { } });
     let stage = 0; let buf = Buffer.alloc(0); let up = null;
     const onData = (chunk) => {
@@ -1293,7 +1293,7 @@ function serveSocks(mux, msg) {
         c.removeListener('data', onData);
         // connect to host:port ON THIS DEVICE — the egress. A domain resolves
         // via the device's own resolver (socks5h semantics).
-        up = net.connect({ host, port });
+        up = net.connect({ host, port }); // nagle: ok — the exit SOCKS egress, never a picture
         up.on('connect', () => {
           try { c.write(REPLY(0x00)); } catch { }
           if (buf.length) { try { up.write(buf); } catch { } buf = Buffer.alloc(0); }
@@ -2306,6 +2306,7 @@ function serveConnection(sock) {
           // is chosen per-forward by the machine's owner, not a general proxy.
           const host = (msg.host && /^[A-Za-z0-9._:-]{1,255}$/.test(String(msg.host))) ? String(msg.host) : '127.0.0.1';
           const tsock = net.connect({ host, port });
+          tsock.setNoDelay(true); // the picture's input hop (VNC / xpra): a small write never waits ~40 ms for the server's delayed ACK
           const chanT = msg.chan;
           tsock.on('connect', () => mux.control({ op: 'tcp-open', id: msg.id, chan: chanT }));
           tsock.on('data', (d) => { try { if (!mux.data(chanT, d)) tsock.pause(); } catch { } });
@@ -2434,7 +2435,7 @@ function serveConnection(sock) {
   });
   mux._tcpChans = tcpChans; // reverse-forward accepts push sockets into the owner's map
 }
-const server = net.createServer(serveConnection);
+const server = net.createServer(serveConnection); // nagle: ok — the daemon's unix socket (no TCP, no Nagle)
 // THE SOCKET RUNG (lane-pairing ④): nothing fits the platform's sun_path ⇒ say
 // every rung's bytes and exit 7 (launchd / systemd restart us and the log says
 // WHY every time, instead of `listen EINVAL`); a picked short directory is made

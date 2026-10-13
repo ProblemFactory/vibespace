@@ -4,11 +4,12 @@
 // r4 §2.5 / §3 / §8.1, chunk 3; gate row `test-integrations-ui`, heavy tier —
 // a real worktree server and headless chrome at 375×667).
 //
-// Since r4 the Integrations window holds ONLY the six agent-browser key rows
+// Since r4 the Integrations window holds ONLY the rows the registry does not bind per account (the six
+// agent-browser key rows, and since the voice train the Dropline row)
 // (a Lark / Gmail OAuth client is chosen where the ACCOUNT is added, exactly
 // like a storage mount's), so ①–⑨ drive the browser rows and ⑩ drives the
 // account card and its dialogs. What is measured:
-//   ⓪ the window draws EXACTLY the six browser cards — no Lark / Gmail / fake
+//   ⓪ the window draws EXACTLY the registry's census (every row not `bindsPerAccount`) — no Lark / Gmail / fake
 //      card, and a deep link to a retired id opens nothing new
 //   ① a browser row's SOURCE CHIP walks none → your own (PUT) → cluster
 //      default (env injected + "use cluster") → none WITH A REASON (env
@@ -113,6 +114,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const R = require(path.join(repo, 'src/integration-registry.js'));
 const LARK_CB = require(path.join(repo, 'src/channels/lark/manifest.js')).LARK_CALLBACK_URL;
 const BROWSER_ROWS = ['cloak', 'cloud:browserbase', 'cloud:browserless', 'cloud:kernel', 'cloud:browseruse', 'cloud:agentcore'];
+// int260 (voice P0's dropline row = a 7th card): the window's cards are THE REGISTRY'S OWN CENSUS — every row that is not
+// `bindsPerAccount` (an account-bound row's OAuth client is chosen where the account is added) — never a literal count;
+// ①–⑨ still drive BROWSER_ROWS, which the census must hold.
+const WINDOW_ROWS = R.rowIds().filter((id) => !R.bindsPerAccount(id));
+const sameSet = (a, b) => JSON.stringify(a.slice().sort()) === JSON.stringify(b.slice().sort());
 const SECRET40 = 'sk-' + 'Q7f3'.repeat(8) + 'ZZZ99';   // 40 chars
 const PRESETS = JSON.stringify([
   { key: 'org1', label: 'Org 1', clientId: 'org1.apps.googleusercontent.com', clientSecret: 'org1-secret-000000' },
@@ -266,7 +272,7 @@ for (let i = 0; i < 120; i++) { try { await (await fetch(`http://127.0.0.1:${CDP
 const OPEN = (id) => `(async () => {
   window.app.openIntegration(${JSON.stringify(id)});
   for (let i = 0; i < 80; i++) {
-    if (document.querySelectorAll('.integ-card').length >= ${BROWSER_ROWS.length}) return true;
+    if (document.querySelectorAll('.integ-card').length >= ${WINDOW_ROWS.length}) return true;
     await new Promise((r) => setTimeout(r, 100));
   }
   return false;
@@ -286,14 +292,16 @@ const BB = 'cloud:browserbase', BL = 'cloud:browserless';
 const p1 = await newPage();
 ok(await p1.load(), 'page 1 loaded the app at 375×667');
 
-// ── ⓪ the window keeps ONLY the six browser rows ──
+// ── ⓪ the window keeps ONLY the registry's census (every row not bound per account) ──
 {
   const g = await api('GET', '/api/integrations');
   const ids = ((g.json && g.json.integrations) || []).map((x) => x.id).sort();
-  ok(JSON.stringify(ids) === JSON.stringify(BROWSER_ROWS.slice().sort()), `GET /api/integrations lists exactly the six browser rows (${ids.join(', ')})`);
+  ok(BROWSER_ROWS.every((id) => WINDOW_ROWS.includes(id)) && WINDOW_ROWS.length > 0 && R.rowIds().some((id) => R.bindsPerAccount(id) && !WINDOW_ROWS.includes(id)), `the census (${WINDOW_ROWS.join(', ')}) holds every browser row the legs below drive and leaves the account-bound rows out`);
+  ok(sameSet(ids, WINDOW_ROWS), `GET /api/integrations lists exactly the registry's census (${ids.join(', ')})`);
   ok(await p1.evaljs(OPEN(BB)), 'app.openIntegration(<a browser row>) opened the window');
   const cards = await p1.evaljs(`[...document.querySelectorAll('.integ-card')].map((c) => c.dataset.integ).sort()`);
-  ok(JSON.stringify(cards) === JSON.stringify(BROWSER_ROWS.slice().sort()), `the window draws exactly the six browser cards — no Lark / Gmail / fake card (${cards.join(', ')})`);
+  ok(sameSet(cards, WINDOW_ROWS), `the window draws exactly the census's cards — no Lark / Gmail / fake card (${cards.join(', ')})`);
+  ok(!sameSet([...cards, 'lark'], WINDOW_ROWS) && !sameSet(cards.slice(0, -1), WINDOW_ROWS), 'CONTROL: the card check is not vacuous — a leaked account-bound card (lark) and one registry row missing each fail it');
   ok(await p1.evaljs(`!document.querySelector('.integ-card[data-integ="lark"], .integ-card[data-integ="gmail"], .integ-card[data-integ="fake"]')`), 'no retired OAuth-client card anywhere on the page');
 }
 
@@ -400,7 +408,7 @@ ok(await p1.load(), 'page 1 loaded the app at 375×667');
     const wins = [...window.app.wm.windows.values()].filter((w) => w.type === 'integrations').length;
     return { before, after: focused(), threw: out.threw || null, wins, cards: document.querySelectorAll('.integ-card').length };
   })()`);
-  ok(gone.wins === 1 && gone.threw === null && gone.after === gone.before && gone.cards === BROWSER_ROWS.length, `a focus id that is retired (lark / gmail) or unknown opens nothing new, highlights nothing new and throws nothing (${JSON.stringify(gone)})`);
+  ok(gone.wins === 1 && gone.threw === null && gone.after === gone.before && gone.cards === WINDOW_ROWS.length, `a focus id that is retired (lark / gmail) or unknown opens nothing new, highlights nothing new and throws nothing (${JSON.stringify(gone)})`);
 }
 
 // ── ⑨ 375×667: every control inside the viewport ──
@@ -415,7 +423,7 @@ ok(await p1.load(), 'page 1 loaded the app at 375×667');
     const cards = [...document.querySelectorAll('.integ-card')].map((c) => Math.round(c.getBoundingClientRect().width));
     return { bad, cards, n: document.querySelectorAll('.integ-card').length };
   })()`);
-  ok(out.n === BROWSER_ROWS.length && !out.bad.length, `375×667: all ${out.n} cards, every control inside the viewport (offenders: ${out.bad.join(', ') || 'none'}; card widths ${out.cards.join('/')})`);
+  ok(out.n === WINDOW_ROWS.length && !out.bad.length, `375×667: all ${out.n} cards, every control inside the viewport (offenders: ${out.bad.join(', ') || 'none'}; card widths ${out.cards.join('/')})`);
   ok(out.cards.every((w) => w <= 375), 'single column — no card wider than the viewport');
 }
 

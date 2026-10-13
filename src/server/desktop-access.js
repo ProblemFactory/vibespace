@@ -134,6 +134,7 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
       await deviceOf(hostId); // fail loud NOW so the caller can say "device offline"
       const sockets = new Set();
       const server = net.createServer({ allowHalfOpen: true }, async (sock) => {
+        sock.setNoDelay(true); // a person's input and picture: never behind Nagle (a small write waited ~40 ms for the bridge's delayed ACK)
         sockets.add(sock);
         sock.on('close', () => sockets.delete(sock));
         sock.on('error', () => { try { sock.destroy(); } catch { /* gone */ } });

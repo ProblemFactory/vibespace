@@ -38,7 +38,7 @@ const VENDOR = /api\.anthropic\.com|platform\.claude\.com|console\.anthropic\.co
 // The CONSTRUCTION census also counts OpenAI hosts (dc-pool-quota verify r1): the codex live quota read moved into
 // src/harnesses/codex-quota.js and rides the official client's app-server — a raw fetch to ChatGPT/OpenAI beside it
 // was invisible here. Only the census widens: whole-file VENDOR reads (permission-rules' comments name chatgpt.com) keep theirs
-const CONSTRUCT_HOSTS = new RegExp(VENDOR.source + '|chatgpt\\.com|openai\\.com');
+const CONSTRUCT_HOSTS = new RegExp(VENDOR.source + '|chatgpt\\.com|openai\\.com|fish\\.audio'); // + Dropline voice input (q-029): api.dropline.fish.audio | api.fish.audio | fish.audio
 const REQUESTY = /https?\.request\s*\(|\bfetch\s*\(|axios|got\s*\(/;
 
 // ── collect every server-side JS file (the browser bundle never holds tokens) ──
@@ -85,6 +85,10 @@ const ALLOW = {
   // refreshAvailableModels' v1/models fetch (both auth types) — lived in
   // server.js until the 2.325.0 decomposition moved the CLI environment out
   'src/server/cli-env.js': { max: 4, gates: ['usagePollingEnabled'] },
+  // Dropline voice input (q-029 P0): THE one vendor module — /v1/me (the plugin card's Test) + /v1/dictate (the hub
+  // proxy); every request gated by the plugin's switch and the `dropline` row's key; P1 (lane voice-p1-oauth-teach):
+  // the OAuth tier (register / token exchange / single-flight refresh) + the teach writes behind teachCap — same 6 sites
+  'src/server/dropline-client.js': { max: 6, gates: ['pluginOn', 'credentialOf', 'teachCap', 'refreshing'] },
 };
 for (const [rel, n] of Object.entries(constructions)) {
   const a = ALLOW[rel];
@@ -98,6 +102,36 @@ for (const [rel, n] of Object.entries(constructions)) {
   const cq = fs.readFileSync(path.join(REPO, 'src/harnesses/codex-quota.js'), 'utf-8');
   const planted = cq.replace('function settleLive(', "async function peekUsage() { return fetch('https://chatgpt.com/backend-api/wham/usage'); }\nfunction settleLive(");
   ok(!ALLOW['src/harnesses/codex-quota.js'] && constructionsIn(cq) === 0 && planted !== cq && constructionsIn(planted) === 1, 'CONTROL: a raw ChatGPT fetch planted beside the codex live read is a construction outside the allowlist (RED)', String(constructionsIn(planted)));
+}
+// CONTROL (q-029): a COPY of the Dropline dictation request planted in the hub route (src/routes/voice.js) is a
+// construction outside the allowlist — the one-module rule for api.dropline.fish.audio goes RED on it
+{
+  const constructionsIn = (text) => { const L = text.split('\n'); let n = 0; for (let i = 0; i < L.length; i++) if (CONSTRUCT_HOSTS.test(L[i]) && REQUESTY.test(L.slice(Math.max(0, i - 4), i + 5).join('\n'))) n++; return n; };
+  const vr = fs.readFileSync(path.join(REPO, 'src/routes/voice.js'), 'utf-8');
+  const anchor = '  router.get(\'/api/voice/status\'';
+  const planted = vr.replace(anchor, "  const direct = (buf) => fetch('https://api.dropline.fish.audio/v1/dictate', { method: 'POST', body: buf });\n" + anchor);
+  ok(!ALLOW['src/routes/voice.js'] && constructionsIn(vr) === 0 && planted !== vr && constructionsIn(planted) === 1 && (constructions['src/server/dropline-client.js'] || 0) >= 2, 'CONTROL: a Dropline request planted in the hub route is a construction outside the allowlist (RED); the vendor module holds /v1/me + /v1/dictate', String(constructionsIn(planted)));
+}
+// voice-verify F4: the census also follows a vendor module's EXPORTED URL constants — a request built from
+// `require('./dropline-client.js').DROPLINE_BASE` elsewhere has no host literal near its fetch(, so the count above never
+// sees it. Derived from the module: every exported string naming a vendor host; outside that module no server file that
+// requires it may name one (a reader of the base is a construction the host census cannot see)
+{
+  const VENDOR_MODULES = ['src/server/dropline-client.js'];
+  const urlExportsOf = (rel) => { const M = require(path.join(REPO, rel)); return Object.keys(M).filter((k) => typeof M[k] === 'string' && CONSTRUCT_HOSTS.test(M[k])); };
+  const baseReaders = (texts) => VENDOR_MODULES.flatMap((vm) => {
+    const NAME = new RegExp(`\\b(?:${urlExportsOf(vm).join('|')})\\b`), stem = path.basename(vm, '.js');
+    return Object.entries(texts).filter(([rel, t]) => rel !== vm && t.includes(stem) && NAME.test(t)).map(([rel]) => `${rel} ← ${vm}`);
+  });
+  const texts = Object.fromEntries(files.map((f) => { try { return [path.relative(REPO, f), fs.readFileSync(f, 'utf-8')]; } catch { return [path.relative(REPO, f), '']; } }));
+  const names = urlExportsOf('src/server/dropline-client.js');
+  ok(['DROPLINE_BASE', 'OAUTH_BASE', 'AUTHORIZE_URL'].every((n) => names.includes(n)), `the vendor module's exported URL constants are derived (${names.join(', ')})`, names.join());
+  const readers = baseReaders(texts);
+  ok(readers.length === 0, 'no server file outside the vendor module reads its exported URL constants', readers.join('; '));
+  const rel = 'src/server/voice-teach-engine.js', t = texts[rel] || '';
+  const planted = t.replace("'use strict';\n", "'use strict';\nconst sneak = (body) => fetch(require('./dropline-client.js').DROPLINE_BASE + '/v1/terms', { method: 'POST', body });\n");
+  const hostLines = (s) => s.split('\n').filter((l) => CONSTRUCT_HOSTS.test(l)).length;
+  ok(planted !== t && hostLines(planted) === hostLines(t) && baseReaders({ ...texts, [rel]: planted }).includes(`${rel} ← src/server/dropline-client.js`), 'CONTROL (voice-verify m2): a fetch in the teach engine built from the exported DROPLINE_BASE adds no host literal (the count above stays green) but is RED here');
 }
 for (const [rel, a] of Object.entries(ALLOW)) {
   ok(constructions[rel] > 0, `${rel} still holds its allowlisted vendor call (moved/renamed ⇒ update the allowlist)`);
