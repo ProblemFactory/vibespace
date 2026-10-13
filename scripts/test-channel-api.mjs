@@ -60,8 +60,22 @@ const ROWS = [
     mutant: [`if (req.method === 'POST' && v && v.readByPost.some((re) => re.test(req.path))) return 'read';`, ``] },
   { name: 'DELETE is SENSITIVE ⇒ a proposal even under write-auto (never auto-run)', judge: (M, K = C) => { const req = { method: 'DELETE', path: '/open-apis/im/v1/messages/om_1', headers: {}, body: null }; const s = M.sensitiveOf(K.lark, req); return s === 'delete' && M.verdict({ tier: 'write-auto', cls: 'write', sensitive: s }).action === 'propose'; },
     mutant: [`  if (req.method === 'DELETE') return 'delete';`, ``] },
+  // 完全信任 (2026-10-13, lane api-tier-write-all): THE VERDICT TABLE — every tier × class × sensitive, printed; the old
+  // table (sensitive ⇒ propose under every tier) is the RED control
+  { name: 'THE VERDICT TABLE: none ✗ · read R/✗/P · write-ask R/P/P · write-auto R/R/P · write-all R/R/R (a sensitive call RUNS only under 完全信任, why write-all)', judge: (M) => {
+      const cell = (v) => (!v.ok ? 'X' : v.action === 'run' ? 'R' : 'P');
+      const got = ['none', 'read', 'write-ask', 'write-auto', 'write-all'].map((tier) => `${tier}:${[['read', null], ['write', null], ['write', 'delete']].map(([cls, sensitive]) => cell(M.verdict({ tier, cls, sensitive }))).join('')}`).join(' ');
+      console.log(`    table: ${got}`);
+      return got === 'none:XXX read:RXP write-ask:RPP write-auto:RRP write-all:RRR' && M.verdict({ tier: 'write-all', cls: 'write', sensitive: 'path' }).why === 'write-all' && M.verdict({ tier: 'write-all', cls: 'read', sensitive: null }).why === 'read' && M.TIERS.join() === 'none,read,write-ask,write-auto,write-all'; },
+    mutant: [`  if (sensitive) return t === 'write-all' ? { ok: true, action: 'run', why: 'write-all' } : `, `  if (sensitive) return `] },
+  { name: 'only ONE named agent may hold 完全信任: apiGrant refuses write-all for everyone (even with the "every agent writes" tick) and for a Task Group, by name write_all_named_only; a named agent gets it', judge: (M) => {
+      const why = (principal) => { try { M.apiGrant({ principal, cred: 'L', tier: 'write-all', allWrite: true }); } catch (e) { return e.message; } return null; };
+      return [{ kind: 'everyone', id: '*' }, { kind: 'group', id: 'T-1', name: 'Team' }].every((p) => /^channel-api\.apiGrant: write_all_named_only — Full trust/.test(String(why(p)))) && M.apiGrant({ principal: { kind: 'agent', id: 'c1', name: 'Ops' }, cred: 'L', tier: 'write-all' }).api === 'write-all'; },
+    mutant: [`  if (tier === ACL.API_NAMED_ONLY && !(principal && principal.kind === 'agent')) throw`, `  if (tier === ACL.API_NAMED_ONLY && principal && principal.kind === 'everyone') throw`] },
+  { name: 'the tier as an agent reads it names every tier, and 完全信任 says what it lets through (sensitive runs, still logged + capped)', judge: (M) => M.TIERS.filter((x) => x !== 'none').every((x) => M.TIER_SAYS[x] && M.TIER_SAYS[x].includes(`(${x})`)) && /sensitive calls .* run without asking; still logged, still under the daily cap/.test(M.TIER_SAYS['write-all']) && /Read \(read\)/.test(M.verdict({ tier: 'read', cls: 'write' }).error),
+    mutant: [`your tier on this credential is \${TIER_SAYS.read} — `, `your grant on this credential is read-only — `] },
   { name: 'a sensitive path (Lark /permission, Google /permissions) asks; "always allow" is never offered for it', judge: (M, K = C) => { const r1 = { method: 'POST', path: '/open-apis/drive/v1/permissions/x/members', headers: {}, body: null }; const r2 = { method: 'POST', path: '/drive/v3/files/1/permissions', headers: {}, body: null }; const s = M.sensitiveOf(K.lark, r1); return s === 'path' && M.sensitiveOf(K.google, r2) === 'path' && M.offersAlways({ cls: 'write', sensitive: s }) === false && M.verdict({ tier: 'write-ask', cls: 'write', sensitive: s, shape: 'X', shapes: ['X'] }).action === 'propose'; },
-    mutant: [`  if (sensitive) return { ok: true, action: 'propose', why: \`sensitive:\${sensitive}\` };`, ``] },
+    mutant: [`  if (sensitive) return t === 'write-all' ? { ok: true, action: 'run', why: 'write-all' } : { ok: true, action: 'propose', why: \`sensitive:\${sensitive}\` };`, ``] },
   { name: 'a body over 256 KiB and an upload are sensitive', judge: (M, K = C) => M.sensitiveOf(K.lark, { method: 'POST', path: '/open-apis/x', headers: {}, body: Buffer.alloc(M.SENSITIVE_BODY + 1) }) === 'large-body' && M.sensitiveOf(K.lark, { method: 'POST', path: '/open-apis/im/v1/files', headers: { 'content-type': 'multipart/form-data; boundary=x' }, body: Buffer.alloc(10) }) === 'upload',
     mutant: [`if (req.body && req.body.length > SENSITIVE_BODY) return 'large-body';`, ``] },
   { name: 'tier none ⇒ api_not_granted (the next step named); read tier + a write ⇒ api_tier_read', judge: (M, K = C) => { const a = M.verdict({ tier: 'none', cls: 'read' }); const b = M.verdict({ tier: 'read', cls: 'write' }); return a.code === 'api_not_granted' && /API access/.test(a.error) && b.code === 'api_tier_read'; },
@@ -144,6 +158,24 @@ function fakeEngine() {
 const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-chapi-'));
 const A = { kind: 'agent', id: 'conv-A', name: 'Agent A', groups: [] };
 const B = { kind: 'agent', id: 'conv-B', name: 'Agent B', groups: [] };
+{
+  // the credential's API log says every tier change the owner must see (tier-verify L1/L2) — RED = c53bffc3b: no pin, no lowered line, the group grant ran
+  const eng = fakeEngine();
+  const api = mkOrch(ORCH, eng, fs.mkdtempSync(path.join(tmpRoot, 'd-')));
+  const P = { kind: 'agent', id: 'conv-A', name: 'Agent A' };
+  const said = (v) => api.auditTail('lark-1').filter((l) => l.verdict === v);
+  await api.setTiers('lark-1', [{ principal: P, tier: 'write-all' }]);
+  await api.setTiers('lark-1', [{ principal: P, tier: 'write-all' }]);
+  const g = said('granted');
+  ok(g.length === 1 && g[0].principal.id === 'conv-A' && g[0].tier === 'write-all' && g[0].by === 'user' && said('lowered').length === 0, 'L1: a NEW 完全信任 writes ONE granted line in the API log (who, tier, by you); a re-save writes none', api.auditTail('lark-1'));
+  await api.setTiers('lark-1', [{ principal: P, tier: 'write-auto' }]);
+  await api.setTiers('lark-1', [{ principal: P, tier: 'write-auto' }]);
+  await api.setTiers('lark-1', []);
+  const lo = said('lowered');
+  ok(lo.length === 2 && lo[0].tier === 'write-auto' && lo[0].from === 'write-all' && lo[1].tier === 'none' && lo[1].from === 'write-auto' && lo.every((l) => l.by === 'user' && l.principal.id === 'conv-A' && l.method === null), 'L2: every step DOWN writes ONE lowered line of the grant line\'s shape (from → to, who, by you); a re-save writes none, a removal says none', api.auditTail('lark-1'));
+  const r = await api.setTiers('lark-1', [{ principal: { kind: 'group', id: 'T-1', name: 'Team' }, tier: 'write-all' }]);
+  ok(r.ok === false && r.code === 'write_all_named_only' && eng.apiGrants().length === 0 && said('granted').length === 1, 'M1: 完全信任 for a Task Group is refused by name (write_all_named_only); nothing written, no grant line', r);
+}
 {
   const eng = fakeEngine();
   const dataDir = fs.mkdtempSync(path.join(tmpRoot, 'd-'));
@@ -325,7 +357,7 @@ console.log('⑤ verify r1: shapes vs a downgrade, the pending wall, the card di
       return r.code === 'api_not_granted' && !r.status && l.verdict === 'withheld' && l.status === 200; },
   };
   const R1 = [
-    ['shapes', 'an always-allowed shape ends when the tier drops below "Read + write" — a re-widen asks again (M1)', ["state.shapes = state.shapes.filter((s) => s.cred !== cred || ['write-ask', 'write-auto'].includes(tierNow(shapeCtx(s), cred).tier));", 'void 0;']],
+    ['shapes', 'an always-allowed shape ends when the tier drops below "Read + write" — a re-widen asks again (M1)', ["state.shapes = state.shapes.filter((s) => s.cred !== cred || ['write-ask', 'write-auto', 'write-all'].includes(tierNow(shapeCtx(s), cred).tier));", 'void 0;']],
     ['pending', `one conversation keeps at most ${F.PENDING_MAX} proposals waiting on a credential; the next is api_budget (M2)`, ['if (waiting >= F.PENDING_MAX)', 'if (false)']],
     ['digest', 'Approve carries the card\'s digest: a record rewritten on disk (digest recomputed) + a restart runs NOTHING (M3)', ['if (!digest || digest !== (p.frozen && p.frozen.digest))', 'if (false)']],
     ['refresh', 'a Google mount\'s refresh is single-flight (5 concurrent calls ⇒ 1) and paced after a refusal (4 calls ⇒ 1) (M4)', ['if (fl && fl.then) return fl;\n    if (fl && fl.failedUntil > now())', 'if (false) return fl;\n    if (false)']],
@@ -413,7 +445,7 @@ module.exports = { ...adapter, consent: Object.freeze({ mode: 'ephemeral', landi
   ok(r.ok && r.status === 200, 'acme: its declared read-by-POST (an anchored string) reads — no proposal under "ask each"', r.code);
   r = await api.call(A, { cred: 'acme-1', method: 'POST', path: '/v1/admin/users', body: '{}' });
   const card = r.proposal ? CARD.cardModel(api.ownerView().proposals.find((p) => p.id === r.proposal.id)) : null;
-  ok(r.code === 'api_pending' && r.proposal.sensitive === 'path' && r.proposal.offersAlways === false && card && card.head.params.cred === 'Acme (test)' && card.head.params.call === 'POST /v1/admin/users', 'acme: its declared sensitive path is a proposal, never "always allow"; the owner\'s card draws it', { code: r.code, card: card && card.head });
+  ok(r.code === 'api_pending' && r.proposal.sensitive === 'path' && r.proposal.offersAlways === false && card && card.head.what.key === 'call the {vendor} API ({call})' && card.head.what.params.vendor === 'Acme (test)' && card.head.what.params.call === 'POST users' && card.request.path === '/v1/admin/users' && card.sensitive && card.sensitive.key === 'Sensitive path · always asks', 'acme: its declared sensitive path is a proposal, never "always allow"; the owner\'s card draws it (an unknown vendor call: the account + METHOD + last segment; the full path in the fold; the policy chip)', { code: r.code, card: card && card.head });
   const dv = api.docs(A, 'acme-1');
   ok(dv.ok && dv.vendor === 'Acme' && dv.docs[0] === 'https://docs.acme.test/api' && dv.hosts.join(',') === 'api.acme.test,eu.acme.test' && dv.fence.readByPost[0] === String(/^\/v1\/search$/), 'acme: docs answers the DECLARED label, docs, hosts and fence lists', dv);
   // the CLI against a loopback agent surface over this ORCH

@@ -9,6 +9,10 @@
 //      (PowerShell 5's lone row as an object) fixture, readDisplayFacts with a fixture execFile, the agent / client / route wiring
 //   §4 the noVNC patch: both anchors apply once on the bundled 1.7 rfb.js, ≤ 20 added lines, a drifted anchor is MISSING (the
 //      build fails — never silently unpatched), the built public/novnc.js carries it
+//   §5 lane win-desktop-cursor-hdr (owner 2026-10-13 "鼠标如此巨大，而且 HDR 特别白"): cursorPlan (a 96 px pointer at scale 0.5 ⇒
+//      48 px, the hotspot halved; scale 1 untouched; the 16 px floor and the 64 px cap; past 128 px ⇒ the machine paints it),
+//      scaleRgba (2×2 averages, alpha-weighted), the display-facts hdr field (script + parser), hdrShown (true only on a
+//      measured hdr: true — false / unknown say nothing) and the three cursor anchors in the built bundle
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -86,13 +90,42 @@ ok(/router\.get\('\/api\/desktop\/machine-desktop\/displays', async \(req, res\)
 console.log('§4 the noVNC patch');
 const rfbSrc = read('node_modules/@novnc/novnc/core/rfb.js');
 const pr = P.patchRfb(rfbSrc);
-ok(pr.ok && pr.applied.join() === 'crop,screens' && P.ADDED_LINES <= 20, `both anchors apply exactly once on the bundled noVNC; ${P.ADDED_LINES} added lines (≤ 20)`, pr.missing);
+ok(pr.ok && pr.applied.join() === 'crop,screens,cursor,cursor-scale,server-cursor' && P.ADDED_LINES <= 20, `every anchor applies exactly once on the bundled noVNC; ${P.ADDED_LINES} added lines (≤ 20)`, pr.missing);
 ok(/Disable viewport clipping if we are scaling/.test(rfbSrc) && /if \(i === 0\) \{\n\s+this\._screenID = this\._sock\.rQshift32\(\);/.test(rfbSrc) && /typeof urlOrChannel === "string"/.test(rfbSrc), 'the measured 1.7 facts the patch answers: clip is dropped while scaling; ExtendedDesktopSize keeps only screen 0; RFB takes a channel object');
 const drift = P.patchRfb(rfbSrc.replace('const firstUpdate = !this._supportsSetDesktopSize;', 'const firstUpdate = !this._supportsSetDesktopSize ;'));
 ok(!drift.ok && drift.missing.join() === 'screens', 'a drifted anchor is MISSING by name (scripts/build-novnc.mjs then fails the build)', drift);
 ok(!P.patchRfb(pr.text).ok, 'applied twice: the anchors are gone (no double patch)');
 const built = fs.existsSync(path.join(REPO, 'public/novnc.js')) ? read('public/novnc.js') : '';
 ok(/vsCrop/.test(built) && /vsscreens/.test(built) && /node scripts\/build-novnc\.mjs/.test(read('package.json')), 'the built public/novnc.js carries the patch (the build script makes it)', built.length);
+
+
+console.log('§5 the pointer at the picture\'s scale + the HDR fact');
+const cp = (w, h, hx, hy, s) => { const p = S.cursorPlan({ w, h, hotx: hx, hoty: hy }, s); return `${p.path} ${p.w}x${p.h}@${p.hotx},${p.hoty}`; };
+ok(cp(96, 96, 24, 12, 0.5) === 'scaled 48x48@12,6', 'a 96 px pointer (Windows at 200 %) over a picture at 0.5 ⇒ 48 px, the hotspot halved (24,12 → 12,6)', cp(96, 96, 24, 12, 0.5));
+ok(cp(96, 96, 24, 12, 1) === 'native 96x96@24,12' && cp(32, 32, 0, 0, 1.004) === 'native 32x32@0,0', 'scale 1 ⇒ untouched (noVNC draws it as before)', [cp(96, 96, 24, 12, 1), cp(32, 32, 0, 0, 1.004)]);
+ok(cp(32, 32, 4, 4, 0.25) === 'scaled 16x16@2,2' && cp(12, 12, 1, 1, 0.5) === 'native 12x12@1,1', 'the floor: never under 16 px (a pointer already smaller keeps its size)', [cp(32, 32, 4, 4, 0.25), cp(12, 12, 1, 1, 0.5)]);
+ok(cp(96, 96, 95, 95, 0.9) === 'scaled 64x64@63,63' && cp(48, 48, 0, 0, 2) === 'scaled 64x64@0,0', 'the cap: never over 64 css px (the hotspot stays inside the image)', [cp(96, 96, 95, 95, 0.9), cp(48, 48, 0, 0, 2)]);
+ok(cp(256, 256, 10, 10, 0.5) === 'server 256x256@10,10' && cp(129, 20, 0, 0, 1) === 'server 129x20@0,0' && cp(128, 128, 0, 0, 0.5) === 'scaled 64x64@0,0', 'past 128 px ⇒ the machine paints it (Chrome refuses a custom cursor that big); 128 still drawn here', [cp(256, 256, 10, 10, 0.5), cp(129, 20, 0, 0, 1)]);
+ok(cp(0, 0, 0, 0, 0.5) === 'native 0x0@0,0' && cp(64, 32, 0, 0, NaN) === 'native 64x32@0,0', 'no image / no scale ⇒ native (nothing invented)');
+const px4 = Uint8ClampedArray.from([255, 0, 0, 255, 0, 0, 255, 255, 0, 255, 0, 0, 0, 0, 0, 0]); // red, blue / transparent-green, transparent
+const sc1 = S.scaleRgba(px4, 2, 2, 1, 1);
+ok(sc1.length === 4 && sc1[0] === 128 && sc1[1] === 0 && sc1[2] === 128 && sc1[3] === 128, 'scaleRgba: a 2×2 block averages to one pixel, alpha-weighted (the transparent green adds no colour)', [...sc1]);
+const up = S.scaleRgba(Uint8ClampedArray.from([9, 8, 7, 255]), 1, 1, 2, 2);
+ok(up.length === 16 && up[12] === 9 && up[15] === 255, 'scaleRgba upscales by the nearest pixel', [...up]);
+const ws = MW.winDisplaysScript();
+ok(/QueryDisplayConfig\(2, ref np, P, ref nm, M, IntPtr\.Zero\)/.test(ws) && /Marshal\.WriteInt32\(B, 0, 9\)/.test(ws) && /\(v & 2\) != 0 && \(v & 4\) == 0/.test(ws) && /hdr = \$h \}/.test(ws) && /\} catch \{ \}/.test(ws), 'the Windows script reads each screen\'s HDR state through the DisplayConfig API (advanced-colour info: enabled and not the SDR wide-colour mode); a failure leaves it unknown');
+const wf = MW.parseDisplayFacts('win32', JSON.stringify({ t: 'displays', origin: 'top-left', rows: [{ id: '\\\\.\\DISPLAY1', name: '\\\\.\\DISPLAY1', x: 0, y: 0, w: 1920, h: 1080, scale: 1, primary: 1, hdr: 0 }, { id: '\\\\.\\DISPLAY2', name: '\\\\.\\DISPLAY2', x: 1920, y: 0, w: 1920, h: 1080, scale: 1, primary: 0, hdr: 1 }, { id: '\\\\.\\DISPLAY3', name: 'X', x: 3840, y: 0, w: 800, h: 600, scale: 1, primary: 0, hdr: -1 }] }));
+ok(wf.ok && wf.displays.map((d) => d.hdr).join() === 'false,true,', 'parseDisplayFacts: hdr 1 → true, 0 → false, -1 (no reading) → null', wf.displays.map((d) => d.hdr));
+const fb3 = { w: 4640, h: 1080 };
+const map3 = S.screenMap({ fb: fb3, screens: wf.displays });
+ok(map3.state === 'map' && map3.displays.map((d) => d.hdr).join() === 'false,true,', 'the screen map carries each display\'s hdr', map3.displays.map((d) => d.hdr));
+const keys = map3.displays.map((d) => d.key);
+ok(S.hdrShown({ screens: wf.displays, map: map3, key: keys[1] }) === true && S.hdrShown({ screens: wf.displays, map: map3, key: keys[0] }) === false && S.hdrShown({ screens: wf.displays, map: map3, key: keys[2] }) === false && S.hdrShown({ screens: wf.displays, map: map3, key: null }) === true,
+  'hdrShown: the HDR display ⇒ the chip; the SDR one and the unknown one ⇒ nothing; 全部 with an HDR screen in it ⇒ the chip', keys);
+ok(S.hdrShown({ screens: wf.displays.map((d) => ({ ...d, hdr: d.hdr === true ? null : d.hdr })), map: null, key: null }) === false && S.hdrShown({}) === false, 'no measured hdr: true anywhere (an old agent, a Mac) ⇒ nothing');
+ok(/vsCursor/.test(built) && /vsServerCursor/.test(built) && /_vsCursorAt/.test(built), 'the built public/novnc.js carries the pointer patch (vsCursor, the redraw on a new scale, vsServerCursor)');
+const vv = read('src/lib/vnc-view.js');
+ok(/rfb\.vsServerCursor = serverCursor;/.test(vv) && /cursorPlan\(img, scale\)/.test(vv) && /mine\._sendEncodings\(\)/.test(vv) && /get cursor\(\) \{ return cursorNow; \}/.test(vv), 'vnc-view answers vsCursor with the plan, re-sends SetEncodings once the machine must paint it, and keeps that choice for every reconnect');
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

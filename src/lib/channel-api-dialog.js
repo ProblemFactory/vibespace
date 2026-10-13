@@ -10,13 +10,19 @@ import { renderApiCard } from './channel-api-card-view.js';   // B-2198 part 2: 
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
 const button = (label, onClick, cls = 'mounts-btn') => { const b = el('button', cls, label); b.type = 'button'; b.addEventListener('click', onClick); return b; };
-const TIER_WORDS = () => [['read', t('Read')], ['write-ask', t('Read + write, ask each')], ['write-auto', t('Read + write, auto (sensitive still asks)')]];
+const TIER_WORDS = () => [['read', t('Read')], ['write-ask', t('Read + write, ask each')], ['write-auto', t('Read + write, auto (sensitive still asks)')], ['write-all', t('Full trust — writes and deletes never ask you')]];
 const clock = (at) => new Date(Number(at) || 0).toLocaleString();
 // the vendor's sensitive list as a person reads it (lane channel-api-chrome: the dialog printed the regex sources) —
 // `^\/api\/admin\.` ⇒ "/api/admin.…", `\.(delete|remove)$` ⇒ "….(delete|remove)"
 export const sensitiveWords = (src) => { const s = String(src || ''); return `${s.startsWith('^') ? '' : '…'}${s.replace(/^\^/, '').replace(/\$$/, '').replace(/\\(.)/g, '$1')}${s.endsWith('$') ? '' : '…'}`; };
 // the API log's verdict as a word (the audit line keeps its id)
 const VERDICT_WORD = { ok: 'ran', proposed: 'asked you', approved: 'approved by you', rejected: 'rejected', refused: 'refused', withheld: 'withheld' };
+// one API log line as a person reads it: a call, or the grant of 完全信任 (who holds it, by whom)
+export const logWords = (l, clock) => l.verdict === 'granted'
+  ? `${clock(l.at)} · ${(l.principal && (l.principal.name || l.principal.id)) || ''} · ${t('Full trust granted by you')}`
+  : l.verdict === 'lowered'
+  ? `${clock(l.at)} · ${t('You changed the tier of {who} to {tier}', { who: (l.principal && (l.principal.name || l.principal.id)) || '', tier: (TIER_WORDS().find(([v]) => v === l.tier) || [null, t('No API access')])[1] })}`
+  : `${clock(l.at)} · ${(l.principal && l.principal.name) || ''} · ${l.method} ${l.path} · ${l.status || '—'} · ${VERDICT_WORD[l.verdict] ? t(VERDICT_WORD[l.verdict]) : l.verdict}${l.code ? ` ${l.code}` : ''}${l.trust === 'write-all' ? ` · ${t('Full trust · sensitive')}` : ''}`;
 
 /** Open the dialog on one credential (`cred` = an account id or `mount:<id>`). */
 export async function showApiAccessDialog(app, cred) {
@@ -45,12 +51,18 @@ export async function showApiAccessDialog(app, cred) {
         const roster = rosterFromApp(app).find((x) => x.key === r.key);
         const name = el('span', 'chan-api-who', r.key === 'everyone:*' ? t('All agents') : (roster && roster.name) || r.principal.name || r.principal.id);
         const sel = el('select', 'chan-api-tier'); sel.setAttribute('aria-label', t('API access'));
-        for (const [v, w] of TIER_WORDS()) { const o = el('option', '', w); o.value = v; if (v === r.tier) o.selected = true; sel.appendChild(o); }
-        sel.addEventListener('change', () => { r.tier = sel.value; if (r.key === 'everyone:*') { r.allWrite = false; drawRows(); } });
+        for (const [v, w] of TIER_WORDS()) {
+          // 完全信任 names ONE agent (src/channel-acl.js API_NAMED_ONLY) — on a group / All row the option stays, refused, saying why
+          const never = v === 'write-all' && !String(r.key).startsWith('agent:');
+          const o = el('option', '', never ? t('Full trust goes to one agent or conversation only; groups, rules and All agents go up to "Read + write, auto"') : w); o.value = v; o.disabled = never; if (v === r.tier && !never) o.selected = true; sel.appendChild(o);
+        }
+        if (r.tier === 'write-all') sel.classList.add('chan-api-trust');
+        sel.addEventListener('change', () => { const was = r.tier; r.tier = sel.value; if (r.key === 'everyone:*') { r.allWrite = false; drawRows(); } else if ((was === 'write-all') !== (r.tier === 'write-all')) drawRows(); });
         const cap = el('input', 'chan-api-cap'); cap.type = 'number'; cap.min = '1'; cap.placeholder = '1000'; cap.value = r.perDay ? String(r.perDay) : ''; cap.title = t('Calls a day'); cap.setAttribute('aria-label', t('Calls a day'));
         cap.addEventListener('change', () => { r.perDay = Number(cap.value) > 0 ? Number(cap.value) : null; });
         row.append(name, sel, cap);
         list.appendChild(row);
+        if (r.tier === 'write-all') list.appendChild(el('div', 'chan-api-trust-note chan-api-trust', t('Only for an agent you fully trust; still logged, daily cap unchanged')));
         // ALL AGENTS: Read at most by default (src/channel-api.js EVERYONE_TIER) — a write tier for everyone is its own tick
         if (r.key === 'everyone:*' && r.tier !== 'read') {
           const lab = el('label', 'chan-api-allwrite'); const tick = el('input'); tick.type = 'checkbox'; tick.checked = !!r.allWrite;
@@ -93,7 +105,7 @@ export async function showApiAccessDialog(app, cred) {
     fetchJson(`/api/channels/api/${encodeURIComponent(cur.id)}/log?n=20`).then((j) => {
       const lines = (j && j.lines) || [];
       if (!lines.length) logEl.appendChild(el('div', 'chat-status-dim', t('No calls yet')));
-      for (const l of lines.slice().reverse()) { const r = el('div', 'chan-api-logrow'); r.dataset.key = `${l.at}|${l.proposal || ''}|${l.path}`; r.textContent = `${clock(l.at)} · ${(l.principal && l.principal.name) || ''} · ${l.method} ${l.path} · ${l.status || '—'} · ${VERDICT_WORD[l.verdict] ? t(VERDICT_WORD[l.verdict]) : l.verdict}${l.code ? ` ${l.code}` : ''}`; logEl.appendChild(r); }
+      for (const l of lines.slice().reverse()) { const r = el('div', 'chan-api-logrow'); r.dataset.key = `${l.at}|${l.proposal || ''}|${l.path}`; r.textContent = logWords(l, clock); if (l.verdict === 'granted' || l.trust === 'write-all') r.classList.add('chan-api-trust'); logEl.appendChild(r); }
     }).catch(() => {});
     const foot = el('div', 'dialog-footer');
     foot.append(button(t('Cancel'), () => close()), button(t('Save'), async () => {

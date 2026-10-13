@@ -80,7 +80,7 @@ export async function renderTeachSection(box, rerender) {
     const card = el('div', 'voice-proposal');
     card.dataset.id = p.id;
     card.appendChild(el('div', 'voice-proposal-title', t('Dropline suggests adding to your dictionary') + (p.title ? ` — ${p.title}` : '')));
-    card.appendChild(el('div', 'plugin-detail voice-proposal-why', t("Words this conversation used twice or more (yours count twice) that you'd likely say — identifiers in code are not here")));
+    card.appendChild(el('div', 'plugin-detail voice-proposal-why', t("Names and identifiers this conversation used twice or more (the words dictation gets wrong most) — secrets and placeholders are not here")));
     // ≤ 12 chips (lane voice-teach-candidates): a press toggles one; only the plausible words start selected; the count is live
     const picked = new Set(Array.isArray(p.pick) ? p.pick : []);
     const terms = el('div', 'voice-proposal-terms');

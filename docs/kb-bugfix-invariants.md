@@ -563,7 +563,7 @@
 - (2026-10-13) A MINTED TOKEN WAS SAVED UNDER WHICHEVER ACCOUNT THE DIALOG WAS OPEN FOR (oat-verify F1) — 不变量 = a credential is written only under the identity it proves (in-process, or the one approved /usage read) or the owner names; a child that signs in gets an allowlist env
 - (2026-10-13) THE JUDGE SAW A RECORD'S SECRETS (inbox-verify F1, shipped in .261) — 不变量 = no vendor-bound text leaves without the ONE secret scrub, applied before any cut; every part-building site is censused
 - (2026-10-13) THE PHONE BAR FOLDED THE IDENTITY CHIP ON THE RUNNER'S FONTS (mirror-262 red, green on the hub) — 不变量 = a chip that names who pays never folds; it goes compact then icon; a fold is measured on the runner's fonts, not the hub's
-- (2026-10-13) THE DICTIONARY CARD OFFERED SEVENTY API FIELD NAMES, ALL TICKED (userW) — 不变量 = a dictation dictionary holds words a person SAYS; a proposal is ranked by that, capped per batch, code identifiers and ids never reach the card
+- (2026-10-13) THE DICTIONARY CARD OFFERED SEVENTY API FIELD NAMES, ALL TICKED (userW) — 不变量 = a proposal is ranked and capped; secret-shaped values, placeholders and opaque vendor ids never reach the card — identifiers do, they are what dictation gets wrong
 - (2026-10-13) THE FIRST SCREEN'S RULES WERE FIXED AND THE JUDGE'S DIALS HIDDEN (owner) — 不变量 = what lands on the attention list is the owner's policy: every rule a switch with its meaning, the judge's dials beside them, one store, a door where the list is
 - (2026-10-13) AN AGENT READ LARK WITH ITS OWN SCRIPT AND THE CHAT SHOWED A BARE BASH CARD (owner) — 不变量 = what the product did not witness it says it did not: a direct vendor read is named on its card, with the door that would have witnessed it
 - (2026-10-13) A PHONE'S WINDOW SWITCH RESTACKED EVERY DESKTOP (owner: 不能根治吗) — 不变量 = arrangement is the viewport's, membership the workspace's: a phone never writes z/bounds/maximize/minimize; a desktop applies a phone-stamped record as membership only
@@ -572,6 +572,12 @@
 - (2026-10-13) SIX PLUGINS DREW THEIR OWN SETTINGS CARDS AND ONE VALUE HAD TWO TRUTHS (owner: VS Code model) — 不变量 = a plugin's configuration is one PURE table derived into All Settings; the sidebar lists, toggles, installs and opens settings; values live in settings.json only
 - (2026-10-13) A RE-FILED ITEM KEPT ITS OLD VERDICT AND AN ITEM WITH BUTTONS WAITED IN 可以等 (inbox-verify F2/F3) — 不变量 = a verdict is keyed by the text it judged; an item that asks for a decision is never 'can wait'
 - (2026-10-13) A SHARED PROBE SPAWNER LOST THE PANEL PROBE'S ISOLATION (mirror-263 §19, B-855a) — 不变量 = the panel probe has ONE spawn site that derives the isolated config dir and the empty cwd from the root its caller proves; callers pass a root + their identity env, never a config dir or a cwd
+- (2026-10-13) AN APPROVAL CARD LED WITH A RAW URL, A HASH AND A LOG SENTENCE (owner: 好丑陋) — 不变量 = a card says who does what to which named thing; raw strings live under one fold; policy is a chip; the grammar is a census
+- (2026-10-13) A HAND-WRITTEN WORDS TABLE CANNOT NAME A VENDOR'S LONG TAIL (owner: 不 scalable) — 不变量 = the long tail is generated from the vendor's own catalogue at build; hand rows only read counts; the title describes the request, never the agent's claim
+- (2026-10-13) THE WINDOWS DESKTOP'S CURSOR WAS DRAWN AT NATIVE SIZE OVER A SHRUNK SCREEN AND HDR CAME OUT WHITE (owner) — 不变量 = a local cursor scales with the view or the server paints it; a fact the capture cannot fix (HDR) is said on the bar with the remedy
+- (2026-10-13) THE OWNER COULD NOT FULLY TRUST THEIR OWN AGENT'S API USE (every delete asked) — 不变量 = a fourth tier 完全信任 runs sensitive calls for a NAMED principal only, journaled and capped; everyone stays read at most
+- (2026-10-13) A ROW WITH A LIVE LONG-LIVED TOKEN WAS CALLED DEAD WHEN ITS OAUTH LOGIN EXPIRED (owner) — 不变量 = login and token are two facts; a row lives by the better one; only the quota refresh needs the login, and the chip says exactly that
+- (2026-10-13) FULL TRUST COULD BE GRANTED TO A WHOLE TASK GROUP (tier-verify M1) — 不变量 = the top tier names ONE principal; a grant and a downgrade each write a log line pinned by a fast test
 
 ## A RECALLED LARK MESSAGE STAYED UNMARKED (owner 2026-10-13, userW's recall; lane channel-record-revisions, .262)
 
@@ -5501,3 +5507,9 @@ userW's pod: one conversation's hidden-window browser drew Mercury's payments da
 **Invariant.** Arrangement is the desktop viewport's, membership the workspace's: a phone carries the held record's arrangement verbatim (PURE captureForViewport) and stamps its syncs `viewport:'phone'`; a desktop applies a phone-stamped record as membership only; the phone's window on show is local. Essay: kb-design-lessons §6b guard 10.
 
 **Gates:** test-phone-desktop-sync (heavy: desktop + iPhone, real touch, each belt alone, base-tree RED controls), test-desktop-record, test-mobile-gaps.
+
+## AN APPROVAL CARD LED WITH A RAW URL, A HASH AND A LOG SENTENCE (lane api-call-card-words, .265 — owner 2026-10-13 「这什么破 UI 好丑陋」)
+**Symptom.** The Outbox's raw-API card titled itself 「杂活 想调用 Lark / 飞书 · DELETE /open-apis/docx/v1/documents/…/children/batch_delete」, twice (row + card). Under it came the URL, `content-type`, 「请求体 · 38 B · sha256 5144…」, the JSON body, 「敏感操作 —— 总是会问你（delete）」 and a full-width reason box beside 批准 / 拒绝. Nothing said what the agent was doing to what.
+**Cause.** The card model's only words were the frozen request itself. No layer turned a vendor call into a phrase, and the renderer drew every field at the top level.
+**Fix.** A PURE words table (src/api-call-words.js) turns a call into actor + verb + NAMED object (the channel index names chats, the agent's `--why` can name a document, else an 8-char id chip). Raw strings go under ONE collapsed 技术细节 fold. The policy is a chip, and Reject's reason is a popover.
+**不变量 / Gates.** kb-patterns «The card grammar» (seven rules). scripts/test-card-grammar.mjs is the census (RED = the .263 card's words, and the real card with its fold mark stripped); its printed exception list is the backlog for the other cards. scripts/test-api-call-words.mjs has a fixture + a RED control per table row.

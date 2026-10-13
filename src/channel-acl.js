@@ -46,8 +46,13 @@ const GRANT_ORIGINS = Object.freeze(['user', 'access', 'request', 'assignment', 
 /** THE RAW API TIER (B-2198, docs/design-channel-raw-api.md): a SEPARATE axis on the same row shape — `api` on a row
  *  of origin `api` (level `hidden`: it widens no reach), scope = the credential (an account id, or `mount:<id>`).
  *  Widen-only like the levels: the effective tier is the MAX over every applicable row. Default `none`. */
-const API_TIERS = Object.freeze(['none', 'read', 'write-ask', 'write-auto']);
-const API_RANK = Object.freeze({ none: 0, read: 1, 'write-ask': 2, 'write-auto': 3 });
+const API_TIERS = Object.freeze(['none', 'read', 'write-ask', 'write-auto', 'write-all']);
+const API_RANK = Object.freeze({ none: 0, read: 1, 'write-ask': 2, 'write-auto': 3, 'write-all': 4 });
+/** 完全信任 (`write-all`) names ONE principal the owner fully trusts — one agent (a conversation), never a group (its
+ *  members join by cwd, so a group row reaches conversations nobody named — tier-verify M1) and never every agent: any
+ *  other row is refused here (`write_all_named_only`), and one already stored (a hand edit, an old import) answers as
+ *  write-auto at most. */
+const API_NAMED_ONLY = 'write-all';
 const PRINCIPAL_KINDS = Object.freeze(['agent', 'group', 'everyone']);
 /** THE everyone principal's ONE id (the picker's `EVERYONE_ID`; every list model spells it so). */
 const EVERYONE_ID = '*';
@@ -102,6 +107,7 @@ function validateGrant(input = {}) {
     ...(g.api !== undefined && API_TIERS.includes(g.api) && Number(g.perDay) > 0 ? { perDay: Math.min(100000, Math.floor(Number(g.perDay))) } : {}),
   };
   if (g.api !== undefined && !API_TIERS.includes(g.api)) return { ok: false, error: `api must be ${API_TIERS.join('|')}` };
+  if (g.api === API_NAMED_ONLY && p.kind !== 'agent') return { ok: false, error: 'write_all_named_only: api write-all (Full trust) names ONE agent or conversation — a group or All agents go up to write-auto' };
   return { ok: true, grant, id: grantId(grant) };
 }
 
@@ -144,7 +150,8 @@ function effectiveApi(ctx, cred, grants) {
   let tier = 'none', winner = null;
   for (const g of Array.isArray(grants) ? grants : []) {
     if (!g || !API_TIERS.includes(g.api) || !principalApplies(ctx, g) || !g.scope || g.scope.kind !== 'adapter' || g.scope.id !== cred) continue;
-    if (API_RANK[g.api] > API_RANK[tier]) { tier = g.api; winner = g; }   // widen only
+    const api = g.api === API_NAMED_ONLY && g.principal.kind !== 'agent' ? 'write-auto' : g.api;   // only a NAMED agent holds Full trust
+    if (API_RANK[api] > API_RANK[tier]) { tier = api; winner = g; }   // widen only
   }
   return { tier, grantId: winner ? grantId(winner) : null, perDay: winner && Number(winner.perDay) > 0 ? Number(winner.perDay) : null };
 }
@@ -226,6 +233,6 @@ module.exports = {
   LEVELS, RANK, GRANT_ORIGINS, PRINCIPAL_KINDS, EVERYONE_ID, SCOPE_KINDS, NOT_FOUND_TEXT,
   notFound, canSee, canRequest, widen, fromMsgLevel, grantId, validateGrant, principalApplies, scopeApplies,
   effective, applyGrant, removeGrant, approveRequest, grantsFor,
-  API_TIERS, API_RANK, effectiveApi,
+  API_TIERS, API_RANK, API_NAMED_ONLY, effectiveApi,
   accountGrant, patternGrant, grantsForConversation,
 };

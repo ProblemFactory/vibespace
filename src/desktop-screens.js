@@ -17,6 +17,11 @@
  *                                        moment the update it asked for is drawn) and the dynamic fps (updates in the last second);
  *                                        lane desktop-v2-latency: `received(at, n)` adds the link rate (kbps over updates of ≥ 32 KB,
  *                                        timed from their first byte) and the picture's changes (answers to incremental requests)
+ *   cursorPlan(image, scale)             lane win-desktop-cursor-hdr (owner 2026-10-13 "鼠标如此巨大"): the machine's pointer image
+ *                                        at the picture's scale → 'native' | 'scaled' (16–64 css px, the hotspot scaled too) |
+ *                                        'server' (wider than 128 px: the machine paints it into the picture); scaleRgba draws it
+ *   hdrShown({screens, map, key})        the shown display (or, showing all, any display) is in Windows HDR — TightVNC captures
+ *                                        it without tone mapping, so the bar says so (true only on a measured `hdr: true`)
  */
 
 /** Slack (fb px) when a union's bbox is compared with the framebuffer (a 1.5 scale rounds by a pixel). */
@@ -63,7 +68,7 @@ function osScreens(screens) {
     const x = num(s.x), y = num(s.y), w = num(s.w), h = num(s.h);
     if (x == null || y == null || !(w > 0) || !(h > 0)) continue;
     const scale = num(s.scale);
-    out.push({ id: s.id == null ? null : text(s.id, 60), name: text(s.name), primary: !!s.primary, x, y, w, h, scale: scale > 0 ? scale : 1 });
+    out.push({ id: s.id == null ? null : text(s.id, 60), name: text(s.name), primary: !!s.primary, x, y, w, h, scale: scale > 0 ? scale : 1, hdr: s.hdr === true ? true : s.hdr === false ? false : null });
   }
   return out;
 }
@@ -96,7 +101,7 @@ function screenMap({ fb, screens = null, rfb = null, dpr = null } = {}) {
   const rt = Array.isArray(rfb) ? rfb.filter((r) => r && r.w > 0 && r.h > 0).slice(0, MAX_SCREENS) : [];
   const rfbFit = rt.length >= 2 && fitsFb(bboxOf(rt), F) && bboxOf(rt).x0 === 0 && bboxOf(rt).y0 === 0 ? rt : null;
   const shape = (rows, source, why) => {
-    const ds = rows.map((s) => ({ id: s.id == null ? null : String(s.id), name: s.name || '', primary: !!s.primary, rect: clampRect(s.rect, F) })).sort(byPlace);
+    const ds = rows.map((s) => ({ id: s.id == null ? null : String(s.id), name: s.name || '', primary: !!s.primary, hdr: s.hdr === true ? true : s.hdr === false ? false : null, rect: clampRect(s.rect, F) })).sort(byPlace);
     ds.forEach((d, i) => { d.n = i + 1; d.key = d.id || String(i + 1); });
     return { state: ds.length > 1 ? 'map' : 'single', why, source, displays: ds };
   };
@@ -214,4 +219,52 @@ function updateTimer({ keep = 30, idleMs = IDLE_TRIP_MS, rateKeep = 5 } = {}) {
   };
 }
 
-module.exports = { FIT_TOL, MAX_SCREENS, IDLE_TRIP_MS, RATE_MIN_BYTES, STATES, ROW_STATES, rfbScreens, osScreens, screenMap, rowState, pickerRows, recentChoice, clientMessages, clientCuts, updateTimer };
+// ── lane win-desktop-cursor-hdr: THE MACHINE'S POINTER AT THE PICTURE'S SCALE ───────────────────────────────────────
+// noVNC draws the Cursor pseudo-encoding's image as a CSS cursor at its own pixel size; the framebuffer under it is scaled to
+// fit. So (at any scale but 1) the image is scaled by the same factor (css px = fb px × scale — the browser already draws a CSS cursor at the
+// device-pixel ratio), floored at 16 px (never smaller than a usable pointer) and capped at 64 css px; an image wider than
+// 128 px (Chrome refuses a custom cursor past 128 px) is left to the machine, which paints it into the picture.
+const CURSOR_MIN = 16, CURSOR_MAX = 64, CURSOR_SERVER_OVER = 128;
+/** image = {w, h, hotx, hoty} (fb px), scale = the view's → { path: 'native'|'scaled'|'server', w, h, hotx, hoty, factor }. */
+function cursorPlan(image, scale) {
+  const w = num(image && image.w) || 0, h = num(image && image.h) || 0;
+  const hx = num(image && image.hotx) || 0, hy = num(image && image.hoty) || 0;
+  const side = Math.max(w, h);
+  const keep = (path) => ({ path, w, h, hotx: hx, hoty: hy, factor: 1 });
+  if (!(w > 0 && h > 0)) return keep('native');
+  if (side > CURSOR_SERVER_OVER) return keep('server');
+  const s = num(scale) > 0 ? num(scale) : 1;
+  if (Math.abs(s - 1) < 0.01) return keep('native'); // a picture at its own size: the pointer as the machine drew it
+  const target = Math.min(CURSOR_MAX, Math.max(Math.min(CURSOR_MIN, side), side * s));
+  const factor = target / side;
+  const W = Math.max(1, Math.round(w * factor)), H = Math.max(1, Math.round(h * factor));
+  if (W === w && H === h) return keep('native');
+  return { path: 'scaled', w: W, h: H, hotx: Math.min(W - 1, Math.round(hx * factor)), hoty: Math.min(H - 1, Math.round(hy * factor)), factor };
+}
+/** RGBA w×h → RGBA W×H: each target pixel averages the source pixels whose centres fall in its box (alpha-weighted, so a
+ *  transparent edge never darkens the outline); upscaling takes the nearest. → Uint8ClampedArray(W·H·4). */
+function scaleRgba(src, w, h, W, H) {
+  const out = new Uint8ClampedArray(W * H * 4);
+  for (let y = 0; y < H; y++) {
+    const y0 = Math.floor((y * h) / H), y1 = Math.max(y0 + 1, Math.floor(((y + 1) * h) / H));
+    for (let x = 0; x < W; x++) {
+      const x0 = Math.floor((x * w) / W), x1 = Math.max(x0 + 1, Math.floor(((x + 1) * w) / W));
+      let r = 0, g = 0, b = 0, a = 0, n = 0;
+      for (let sy = y0; sy < y1; sy++) for (let sx = x0; sx < x1; sx++) { const i = (sy * w + sx) * 4, al = src[i + 3]; r += src[i] * al; g += src[i + 1] * al; b += src[i + 2] * al; a += al; n++; }
+      const o = (y * W + x) * 4;
+      if (a > 0) { out[o] = r / a; out[o + 1] = g / a; out[o + 2] = b / a; }
+      out[o + 3] = a / n;
+    }
+  }
+  return out;
+}
+
+/** lane win-desktop-cursor-hdr: the shown display (key) is in Windows HDR — or, with no display picked (全部 / one screen), any
+ *  of the machine's screens is. Only a measured `hdr: true` says yes (false / unknown say nothing). */
+function hdrShown({ screens = null, map = null, key = null } = {}) {
+  const d = key != null && map && Array.isArray(map.displays) ? map.displays.find((x) => x.key === key) : null;
+  if (d) return d.hdr === true;
+  return osScreens(screens).some((s) => s.hdr === true);
+}
+
+module.exports = { FIT_TOL, MAX_SCREENS, IDLE_TRIP_MS, RATE_MIN_BYTES, STATES, ROW_STATES, CURSOR_MIN, CURSOR_MAX, CURSOR_SERVER_OVER, rfbScreens, osScreens, screenMap, rowState, pickerRows, recentChoice, clientMessages, clientCuts, updateTimer, cursorPlan, scaleRgba, hdrShown };

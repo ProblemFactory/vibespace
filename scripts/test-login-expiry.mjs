@@ -900,7 +900,7 @@ console.log('— §5 wiring');
   ck('quotaVerdictFor cannot answer "usable" through a dead login', /loginUsable\(li\)/.test(eng) && /re-login needed/.test(eng));
   ck('the auth-failure notice branches on the login STATE (loginWallPhrase) and quotes the deadline only once it has passed (keeping the old wording otherwise)', /\$\{loginWallPhrase\(li\)\}/.test(eng) && /li\.msLeft <= 0 && li\.refreshExpiresAt\)/.test(eng) && /is failing authentication/.test(eng));
   ck('NEGATIVE CONTROL: the rung-branched sentence that narrated a future deadline as a past expiry is gone from the engine', !/login session expired \(refresh token expired at/.test(eng));
-  ck('the switch notice names the current member\'s login STATE too (a signed-out login is not "expired")', /\$\{nameOf\(currentId\)\}'s \$\{\(\(\) => \{ try \{ const l = accounts\.loginStateOf\(currentId\); return l \? loginWallPhrase\(l\)/.test(eng));
+  ck('the switch notice names the current member\'s login STATE too (a signed-out login is not "expired")', /\$\{nameOf\(currentId\)\}'s \$\{\(\(\) => \{ try \{ const l = accounts\.loginStateOf\(currentId, Date\.now\(\), \{ slot: true \}\); return l \? loginWallPhrase\(l\)/.test(eng)); // the SLOT reading (2026-10-13): a pooled member's token never reaches the pool
   ck('the "nowhere to go" notice reaches the pool-blocked branch for the login wall too', /d\.reason === 'all-logins-expired'\) \{/.test(eng));
   // ROUND 3: the sentence itself moved into the PURE module so §3d can assert
   // the STRING (it was composed inline here, so no test ever read it — and it
@@ -1732,5 +1732,177 @@ console.log('— §9 the account rows at the owner\'s PHONE width (215 / 180 px,
   }
 }
 
+// §10 LOGIN × LONG-LIVED TOKEN — two facts (2026-10-13, owner: "都绑定长期token了，怎么还提示过期").
+// The owner's row: an OAuth login whose refresh deadline passed 3 days ago, and a long-lived token
+// minted 5 days ago (valid ~360 days more). The base verdict called it 'expired' (red chip "every
+// session on this account fails", For-you urgent) while its sessions could run on the token.
+// A row lives by the better fact; only the quota refresh needs the login; a POOL slot reads the file.
+console.log('— §10 login × long-lived token (oat-only)');
+{
+  const D = 86400e3, TTL = 365 * D;
+  const OWNER = creds({ ...LIVE, refreshTokenExpiresAt: NOW - 3 * D });            // tokens present, deadline past
+  const WIPED = creds({ accessToken: '', refreshToken: '', refreshTokenExpiresAt: NOW - 9 * H, scopes: ['user:inference'] });
+  const oatOf = (mintedAgo) => ({ present: true, validUntil: NOW - mintedAgo + TTL });
+  const o1 = loginState(OWNER, NOW, { oat: oatOf(5 * D) });
+  ck('owner shape (expired login + oat minted 5 d ago) ⇒ oat-only, msLeft = the TOKEN\'s time left', o1.state === 'oat-only' && o1.login === 'expired' && o1.oatValidUntil === NOW - 5 * D + TTL && o1.msLeft === TTL - 5 * D && o1.refreshExpiresAt === NOW - 3 * D);
+  ck('...not in DEAD_STATES: usable, a switch target, ranked below an equal ok (1), no block reason', !LE.DEAD_STATES.includes('oat-only') && loginUsable(o1) && loginSwitchTarget(o1) && loginRank(o1) === 1 && loginBlockReason(o1) === null);
+  const o2 = loginState(WIPED, NOW, { oat: oatOf(5 * D) });
+  ck('logged-out (wiped) + valid oat ⇒ oat-only (login: logged-out)', o2.state === 'oat-only' && o2.login === 'logged-out');
+  const o3 = loginState(OWNER, NOW, { oat: oatOf(TTL + 2 * H) });
+  ck('expired login + EXPIRED oat ⇒ the old dead state, carrying oatExpired + the token\'s end', o3.state === 'expired' && o3.oatExpired === true && o3.oatValidUntil === NOW - 2 * H && !loginUsable(o3));
+  ck('live login + oat ⇒ the login speaks (ok); no oat / absent present ⇒ unchanged', loginState(creds({ ...LIVE, refreshTokenExpiresAt: NOW + 9 * D }), NOW, { oat: oatOf(D) }).state === 'ok'
+    && loginState(OWNER, NOW).state === 'expired' && loginState(OWNER, NOW, { oat: { present: false, validUntil: NOW + D } }).state === 'expired');
+  // the TOKEN's ladder: the same 24h / 1h / expired rungs, plus the LOW 'oat-only' rung first
+  const at = (ms) => loginState(OWNER, NOW, { oat: { present: true, validUntil: NOW + ms } });
+  ck('ladder: 300 d left ⇒ oat-only rung · 20 h ⇒ 24h · 40 min ⇒ 1h · gone ⇒ expired', warnStageFor(at(300 * D)) === 'oat-only' && warnStageFor(at(20 * H)) === '24h' && warnStageFor(at(40 * MIN)) === '1h' && warnStageFor(o3) === 'expired');
+  ck('WARN_STAGES = oat-only, 24h, 1h, expired (most lenient first)', LE.WARN_STAGES.join() === 'oat-only,24h,1h,expired');
+  ck('ledgerExp: oat-only counts the token; both dead ⇒ the LATER death; a plain login ⇒ its own deadline', LE.ledgerExp(o1) === o1.oatValidUntil && LE.ledgerExp(o3) === NOW - 2 * H
+    && LE.ledgerExp(loginState(OWNER, NOW)) === NOW - 3 * D && LE.ledgerExp(loginState(OWNER, NOW, { oat: { present: true, validUntil: NOW - 9 * D } })) === NOW - 3 * D);
+  const rw = reviewWarnings(o3, { exp: o1.oatValidUntil === o3.oatValidUntil ? o3.oatValidUntil : NOW - 2 * H, sent: ['oat-only', '24h', '1h'] }, NOW, { watchingSince: NOW - 30 * D });
+  ck('the token dying NOW behind a login dead for days is news, not "pre-existing" (keyed by the token)', rw.emit === 'expired' && !rw.suppressed);
+
+  // THE ROW (accounts.loginStateOf) vs THE SLOT ({ slot: true }) — the REAL method on a stub `this`
+  const { AccountManager } = R('src/accounts.js');
+  const AM = AccountManager.prototype;
+  const recs = { 'sub-o': { id: 'sub-o', name: 'LuMax', type: 'subscription', backend: 'claude', oatEnc: 'x', oatMintedAt: NOW - 5 * D }, 'sub-n': { id: 'sub-n', name: 'Plain', type: 'subscription', backend: 'claude' } };
+  const files = { 'sub-o': OWNER, 'sub-n': OWNER };
+  const fake = { OAT_TTL_MS: TTL, get: (id) => recs[id], _acctBackend: (a) => a.backend, _acctType: (a) => a.type, _acctDir: (be, id) => id,
+    _credsOf: () => ({ longLivedToken: true, loginState: (dir, t) => loginState(files[dir], t) }), _oatFact: AM._oatFact, poolLoginState: () => null };
+  const row = AM.loginStateOf.call(fake, 'sub-o', NOW), slot = AM.loginStateOf.call(fake, 'sub-o', NOW, { slot: true });
+  ck('accounts.loginStateOf (the ROW): owner shape ⇒ oat-only; { slot: true } ⇒ expired (a pooled CLI reads the file)', row.state === 'oat-only' && slot.state === 'expired');
+  ck('...a row with no token keeps its dead verdict', AM.loginStateOf.call(fake, 'sub-n', NOW).state === 'expired');
+  const src = (p) => fs.readFileSync(path.join(REPO, p), 'utf8');
+  // CENSUS: every loginStateOf( call in src/ is either a ROW reader (listed) or passes { slot: true }
+  const ROW_READERS = { 'src/accounts.js': 1, 'src/server/login-expiry-watch.js': 1 }; // list()'s roster row · the For-you watch
+  const rows = [];
+  const walk = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const p = d + '/' + e.name; if (e.isDirectory()) walk(p); else if (/\.(c?js|mjs)$/.test(e.name)) { const t = src(p); const re = /\.loginStateOf\(([^)]*)\)/g; let m; while ((m = re.exec(t))) { if (/^\s*id, now = Date\.now\(\), opts/.test(m[1])) continue; rows.push({ p, slot: /\{ slot: true \}/.test(t.slice(m.index, m.index + 120)) }); } } } };
+  walk('src');
+  const unslot = rows.filter((r) => !r.slot).reduce((o, r) => ((o[r.p] = (o[r.p] || 0) + 1), o), {});
+  console.log('    loginStateOf sites: ' + rows.length + ' (slot ' + rows.filter((r) => r.slot).length + '); row readers ' + JSON.stringify(unslot));
+  ck('CENSUS: loginStateOf without { slot: true } only in the ROW readers (roster list + For-you watch); every pool reader passes it', JSON.stringify(unslot) === JSON.stringify(ROW_READERS) && rows.filter((r) => r.slot).length >= 6);
+  const pp = await import(path.join(REPO, 'src/lib/pool-priority-model.js'));
+  ck('pool editor (memberState): an oat-only member is login-expired there (the pool cannot use the token)', pp.memberState({ loginState: { state: 'oat-only' } }).code === 'login-expired');
+
+  // SPAWN: a dead dir login + a valid token spawns ON THE TOKEN (the chip's promise is true)
+  const spawnFake = { ...fake, _state: {}, _credsOf: () => ({ longLivedToken: true, spawnForm: 'securestorage', spawnEnvVar: 'CLAUDE_SECURESTORAGE_CONFIG_DIR', loginState: (dir, t) => loginState(files[dir], t) }),
+    readSubCreds: () => ({ loggedIn: true }), getOat: () => 'oat-value-fixture', _remoteCreds: () => null, loginStateOf: AM.loginStateOf };
+  const sp = AM.resolveForSpawn.call(spawnFake, 'sub-o');
+  ck('resolveForSpawn: expired dir login (still parses loggedIn) + valid oat ⇒ oatOnly on the token', sp && sp.oatOnly === true && sp.localEnv.CLAUDE_CODE_OAUTH_TOKEN === 'oat-value-fixture');
+  files['sub-o'] = creds({ ...LIVE, refreshTokenExpiresAt: Date.now() + 9 * D }); // resolveForSpawn reads the REAL clock
+  const sp2 = AM.resolveForSpawn.call(spawnFake, 'sub-o');
+  ck('...a LIVE dir login keeps the dir (hot-swap + full capability), the token only as the remote secret', sp2 && !sp2.oatOnly && sp2.localEnv.CLAUDE_SECURESTORAGE_CONFIG_DIR === 'sub-o' && sp2.secret?.value === 'oat-value-fixture');
+  files['sub-o'] = OWNER;
+  ck('authFor (the no-host rung): a dead dir login with a valid token says how: oat', /const dirDead = loggedIn && hasOat && !loginUsable\(this\.loginStateOf\(a\.id, Date\.now\(\), \{ slot: true \}\)\);\n    if \(!hostFacts\) \{\n      if \(loggedIn && !dirDead\) return/.test(src('src/accounts.js')));
+
+  // THE QUOTA REFRESH DOOR: an oat-only row is refused by name, before any probe spawn
+  const ur = src('src/usage-routes.js');
+  const fnAt = ur.indexOf('async function refreshViaCliPanel('), refuse = ur.indexOf("acctMeta.loginState.state === 'oat-only'", fnAt), spawnAt = ur.indexOf('spawnPanelProbe(bin', fnAt);
+  ck('⟳ / auto-cli door: refreshViaCliPanel refuses an oat-only row (code login) BEFORE the probe spawn', fnAt > 0 && refuse > fnAt && spawnAt > refuse);
+  ck('...the route answers loginNeeded and stops (no token ladder); the probe env strips the token anyway', /pv\.code === 'login'\) return res\.json\(\{ error: 'needs re-login to refresh usage — ' \+ pv\.why, loginNeeded: true/.test(ur) && /delete env\.CLAUDE_CODE_OAUTH_TOKEN;/.test(ur));
+  const probeCallers = [];
+  for (const p of ['src/usage-routes.js', 'src/server/account-usage-routes.js', 'src/server/auto-cli-loop.js', 'server.js']) { const n = (src(p).match(/spawnPanelProbe\(/g) || []).length; if (n) probeCallers.push(p + ':' + n); }
+  console.log('    panel-probe sites: ' + probeCallers.join(' '));
+  ck('CENSUS: the panel probe spawns from refreshViaCliPanel (row ⟳ + auto-cli) and the OAT mint flow only', probeCallers.join() === 'src/usage-routes.js:2,src/server/account-usage-routes.js:1');
+  ck('...both client ⟳ doors say the words for loginNeeded', /r\?\.loginNeeded \? t\('Needs re-login to refresh usage'\)/.test(src('src/lib/manage-agents.js')) && /r\.loginNeeded \? t\('Needs re-login to refresh usage'\)/.test(src('src/lib/usage-meter.js')));
+
+  // THE FOR-YOU WATCH: the owner's sequence on a fake clock
+  const watch = R('src/server/login-expiry-watch.js');
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-lew-oat-'));
+  let clock = NOW, oat = null;
+  const filed = [], store = new Map();
+  const DIED = creds({ ...LIVE, refreshTokenExpiresAt: NOW - 2 * H }); // died 2 h before the first sweep: inside the stale grace, so it is news
+  const accounts = { list: () => ({ accounts: [{ id: 'sub-o', name: 'LuMax', type: 'subscription', backend: 'claude' }] }),
+    loginStateOf: (id, t) => loginState(DIED, t || clock, { oat }) };
+  let seq = 0;
+  const userTodos = { add: (key, item) => { const it = { id: 'td' + (++seq), sessionKey: key, status: 'open', ...item }; filed.push(it); store.set(it.id, it); return it; }, get: (id) => store.get(id), setStatus: (id, s) => { store.get(id).status = s; } };
+  const w = watch.create({ accounts, userTodos, dataDir, now: () => clock, log: () => {} });
+  w.sweep();
+  ck('watch: the login died with no token ⇒ ONE urgent item', filed.length === 1 && filed[0].urgency === 'urgent');
+  oat = { present: true, validUntil: NOW - 5 * D + TTL }; clock += 10 * MIN; w.sweep();
+  ck('...a token now carries the row ⇒ ONE LOW item ("keep running … only the usage refresh") and the urgent one retracted', filed.length === 2 && filed[1].urgency === 'low' && /keep running on the long-lived token/.test(filed[1].text) && /usage refresh/.test(filed[1].text) && store.get(filed[0].id).status === 'done');
+  clock += 2 * H; w.sweep(); w.sweep();
+  ck('...ONCE: more sweeps file nothing', filed.length === 2);
+  clock = oat.validUntil - 20 * H; w.sweep();
+  ck('the TOKEN\'s 24 h rung: normal, names the token and re-mint', filed.length === 3 && filed[2].urgency === 'normal' && /long-lived token for "LuMax" ends in/.test(filed[2].text) && /re-mint/.test(filed[2].text));
+  clock = oat.validUntil - 40 * MIN; w.sweep();
+  ck('the TOKEN\'s 1 h rung: high', filed.length === 4 && filed[3].urgency === 'high');
+  clock = oat.validUntil + 5 * MIN; w.sweep();
+  ck('both dead ⇒ urgent "both ended" (not suppressed as pre-existing — the token died now)', filed.length === 5 && filed[4].urgency === 'urgent' && /both ended/.test(filed[4].text));
+  ck('the oat-only item\'s detail says the two facts and that a pool cannot use the token', /Long-lived token valid until/.test(filed[1].detail) && /a POOL cannot use the token/.test(filed[1].detail));
+
+  // THE CHIP (real manage-agents.js, real style.css) — words, colour, the pool line; PNGs
+  const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
+  if (!CHROME) console.log('  SKIP: no chrome binary on this machine (the chip legs need headless chrome)');
+  else {
+    const { spawn } = await import('node:child_process');
+    const esbuild = require(path.join(REPO, 'node_modules/esbuild'));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-loat-'));
+    const stubBV = { name: 'stub-bv', setup(b) { b.onResolve({ filter: /build-version\.js$/ }, () => ({ path: 'bv', namespace: 'stub' })); b.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({ contents: "export const BUILD_VERSION = 'test';", loader: 'js' })); } };
+    await esbuild.build({ entryPoints: [path.join(REPO, 'src/lib/manage-agents.js')], bundle: true, format: 'iife', globalName: 'MA', platform: 'browser', target: 'es2022', outfile: path.join(dir, 'ma.js'), logLevel: 'silent', loader: { '.css': 'text' }, plugins: [stubBV] });
+    fs.copyFileSync(path.join(REPO, 'public/style.css'), path.join(dir, 'style.css'));
+    const NOWB = Date.now();
+    const lsRow = JSON.stringify({ ...loginState(OWNER, NOW, { oat: oatOf(5 * D) }), refreshExpiresAt: NOWB - 3 * D, oatValidUntil: NOWB - 5 * D + TTL });
+    const lsNear = JSON.stringify({ state: 'oat-only', msLeft: 20 * H, refreshExpiresAt: NOWB - 3 * D, oatValidUntil: NOWB + 20 * H });
+    const lsPool = JSON.stringify({ state: 'logged-out', msLeft: -9 * H, refreshExpiresAt: NOWB - 9 * H, worstId: 'sub-o', worstName: 'LuMax', worstOatValidUntil: NOWB + 300 * D });
+    const lsOld = JSON.stringify(loginState(OWNER, NOW)); // what the BASE verdict gave the owner's row
+    const rowH = (name, chip) => '<div class="acct-key-row"><span class="acct-type-icon"></span><span class="acct-key-main"><span class="acct-key-name">' + name + '</span><span class="acct-key-tail">you@example.com &middot; max</span><span class="acct-key-extra">\' + ' + chip + ' + \'</span></span><span class="acct-key-actions"><button class="acct-icon"></button></span></div>';
+    const page = (lang) => '<!doctype html><html data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="./style.css"></head>\n'
+      + '<body><script>' + "localStorage.setItem('vibespace.lang','" + (lang || 'en') + "');" + '<' + '/script><div id="mount" class="acct-list" style="width:420px"></div><script src="./ma.js"></script><script>\n'
+      + "const A = (id, name, ls, type) => ({ id, name, type: type || 'subscription', loginState: ls });\n"
+      + 'window.chips = { row: MA.loginExpiryChipHtml(A("sub-o", "LuMax", ' + lsRow + ')), near: MA.loginExpiryChipHtml(A("sub-o", "LuMax", ' + lsNear + ')), host: MA.loginExpiryChipHtml(A("sub-o", "LuMax", ' + lsRow + '), { local: false }),'
+      + ' pool: MA.loginExpiryChipHtml(A("pool-1", "Pool", ' + lsPool + ', "pooled")), old: MA.loginExpiryChipHtml(A("sub-o", "LuMax", ' + lsOld + ')) };\n'
+      + "document.getElementById('mount').innerHTML = '" + rowH('LuMax', 'window.chips.row') + "' + '" + rowH('Pool', 'window.chips.pool') + "' + '" + rowH('LuMax (base verdict)', 'window.chips.old') + "';\n"
+      + '<' + '/script></body></html>';
+    fs.writeFileSync(path.join(dir, 'en.html'), page('')); fs.writeFileSync(path.join(dir, 'zh.html'), page('zh'));
+    const CDP_PORT = await freePort();
+    const chrome = spawn(CHROME, ['--headless=new', '--remote-debugging-port=' + CDP_PORT, '--no-first-run', '--disable-gpu', '--window-size=900,700', '--user-data-dir=' + path.join(dir, 'chrome'), 'about:blank'], { stdio: 'ignore' });
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    try {
+      const WS = require(path.join(REPO, 'node_modules/ws'));
+      const race = (pr, ms, what) => Promise.race([pr, new Promise((_, rej) => { const t = setTimeout(() => rej(new Error(what + ' timed out')), ms); if (t.unref) t.unref(); })]);
+      let target = null;
+      for (let i = 0; i < 60 && !target; i++) { try { const l = await (await fetch('http://127.0.0.1:' + CDP_PORT + '/json')).json(); target = l.find((t) => t.type === 'page'); } catch { await sleep(200); } }
+      if (!target) throw new Error('chrome never came up');
+      const sock = new WS(target.webSocketDebuggerUrl);
+      await race(new Promise((res, rej) => { sock.on('open', res); sock.on('error', rej); }), 15000, 'devtools socket');
+      let sq = 0; const pend = new Map();
+      sock.on('message', (d) => { const m = JSON.parse(d); if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); } });
+      const cdp = (method, params = {}) => race(new Promise((res, rej) => { const id = ++sq; pend.set(id, (m) => (m.error ? rej(new Error(m.error.message)) : res(m.result))); sock.send(JSON.stringify({ id, method, params })); }), 30000, 'CDP ' + method);
+      const ev = async (e) => { const rr = await cdp('Runtime.evaluate', { expression: e, awaitPromise: true, returnByValue: true }); if (rr.exceptionDetails) throw new Error(rr.exceptionDetails.exception?.description || 'threw'); return rr.result.value; };
+      await cdp('Page.enable'); await cdp('Runtime.enable');
+      await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });
+      const look = async (lang) => {
+        await cdp('Page.navigate', { url: 'file://' + path.join(dir, lang + '.html') }); await sleep(1200);
+        return ev(`(() => { const sp = [...document.querySelectorAll('.acct-login-chip')]; const r = document.getElementById('mount').getBoundingClientRect();
+          const ref = document.createElement('span'); ref.className = 'acct-blocked-hint'; document.body.appendChild(ref);
+          return { yellow: getComputedStyle(ref).color, chips: window.chips, rows: sp.map((s) => ({ text: s.textContent, color: getComputedStyle(s).color, title: s.title, relogin: s.dataset.relogin })), clip: { x: 0, y: 0, width: Math.ceil(r.right) + 8, height: Math.ceil(r.bottom) + 8 } }; })()`);
+      };
+      const en = await look('en');
+      const [rowC, poolC, oldC] = en.rows;
+      const YELLOW = en.yellow; // the class default = the theme's warning colour
+      console.log('    en row: ' + rowC.text + ' | ' + rowC.color + '\n    en pool: ' + poolC.text + ' | ' + poolC.color + '\n    base verdict row: ' + oldC.text + ' | ' + oldC.color);
+      ck('BROWSER: the owner\'s row draws the WARNING chip (yellow, not the dead red) with the two-fact words + the re-login door', /login expired · sessions use the long-lived token; usage refresh needs re-login/.test(rowC.text) && rowC.color === YELLOW && rowC.relogin === 'sub-o' && /sessions keep running on its long-lived token \(valid until/.test(rowC.title) && /only the quota refresh/.test(rowC.title));
+      ck('BROWSER: RED control — the BASE verdict for the same row draws the red "login expired … — re-login" chip', /login expired .* — re-login/.test(oldC.text) && oldC.color !== YELLOW && /every session on this account fails/.test(oldC.title));
+      ck('BROWSER: the token\'s last day counts the TOKEN down; a host section hides an oat-only row', /long-lived token ends in 20 h/.test(en.chips.near) && en.chips.host === '');
+      ck('BROWSER: the pool row keeps the slot truth (red) and says the pool cannot use the member\'s token', /LuMax: login signed out — re-login · the pool can’t use its long-lived token/.test(poolC.text) && poolC.color !== YELLOW && /a pooled session reads the login file/.test(poolC.title));
+      const zh = await look('zh');
+      console.log('    zh row: ' + zh.rows[0].text + '\n    zh pool: ' + zh.rows[1].text);
+      ck('BROWSER zh: 登录已过期 · 会话用长期 token；用量刷新需重新登录 (warning colour) + the pool line', zh.rows[0].text.includes('登录已过期 · 会话用长期 token；用量刷新需重新登录') && zh.rows[0].color === YELLOW && zh.rows[1].text.includes('池用不了它的长期 token'));
+      // LOGIN_OAT_SHOTS=<dir> writes row-oat-only-<lang>.png (the owner's row) and pool-row-<lang>.png
+      if (process.env.LOGIN_OAT_SHOTS) {
+        for (const lang of ['en', 'zh']) {
+          await look(lang);
+          const rects = await ev(`[...document.querySelectorAll('.acct-key-row')].slice(0, 2).map((r) => { const b = r.getBoundingClientRect(); return { x: b.x, y: b.y, width: Math.ceil(b.width), height: Math.ceil(b.height) + 2 }; })`);
+          for (const [i, name] of [[0, 'row-oat-only'], [1, 'pool-row']]) {
+            const shot = await cdp('Page.captureScreenshot', { format: 'png', clip: { ...rects[i], scale: 2 } });
+            fs.writeFileSync(path.join(process.env.LOGIN_OAT_SHOTS, name + '-' + lang + '.png'), Buffer.from(shot.data, 'base64'));
+          }
+        }
+      }
+      sock.close();
+    } catch (e) { ck('BROWSER §10 ran: ' + e.message, false); }
+    finally { try { chrome.kill('SIGKILL'); } catch { } }
+  }
+}
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

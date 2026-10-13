@@ -17,6 +17,10 @@
 //   ⑥ "Run and always allow <shape>" ⇒ the next same-shape call runs without a card; the dialog lists the shape + Revoke
 //   ⑦ 390 px: nothing of the card is off-screen, its action row wraps
 //   ⑧ CONTROL: a bundle whose card answers WITHOUT the frozen digest ⇒ Approve answers 409, nothing runs
+//   ⑨ 完全信任 (lane api-tier-write-all): All agents at write-all is refused by name; a named agent at write-all writes
+//      a grant line in the API log; its sensitive call (chat.delete) RUNS with no card, its log line + chat row say
+//      完全信任 · 敏感; the dialog row in the warning colour + its note; the All row's option refused, saying why
+//      (PNGs dialog-desk.png / dialog-phone.png)
 // PNGs (for the owner): $API_CHROME_SHOTS (default: the scratch dir) api-dialog-zh.png, api-card-chat-zh.png,
 // api-card-phone-zh.png. Run: node scripts/test-channel-api-chrome.mjs
 import { execSync, spawn } from 'node:child_process';
@@ -180,7 +184,7 @@ async function newPage({ lang = 'zh', width = 1400, height = 1000, control = fal
 }
 const CHAT = (sidSel) => `[...document.querySelectorAll('.chat-api-cards')].filter((b) => b.closest(${JSON.stringify(sidSel)}))`;
 const openChat = (p) => p.evaljs(`(async () => { for (let i = 0; i < 80; i++) { const s = (app.sidebar._webuiSessions || []).find((x) => x.id === ${JSON.stringify(sessionId)}); if (s) { app.attachSession(s.id, s.name, s.cwd, { mode: 'chat', backend: 'claude' }); return true; } await new Promise((r) => setTimeout(r, 250)); } return false; })()`);
-const chatCards = (p) => p.evaljs(`[...document.querySelectorAll('.chat-api-cards .chan-api-card')].map((c) => ({ id: c.dataset.key, fate: c.dataset.fate, text: c.innerText, always: !!c.querySelector('.chan-api-always'), approve: !!c.querySelector('.chan-api-approve'), underCall: !!(c.closest('.chat-api-cards') && c.closest('.chat-api-cards').previousElementSibling && c.closest('.chat-api-cards').previousElementSibling.classList.contains('chat-channel-touches')) }))`);
+const chatCards = (p) => p.evaljs(`[...document.querySelectorAll('.chat-api-cards .chan-api-card')].map((c) => ({ id: c.dataset.key, fate: c.dataset.fate, text: c.innerText, always: !!c.querySelector('.chan-api-always'), alwaysText: (c.querySelector('.chan-api-always') || {}).textContent || '', tech: (c.querySelector('.chan-api-tech') || {}).textContent || '', approve: !!c.querySelector('.chan-api-approve'), underCall: !!(c.closest('.chat-api-cards') && c.closest('.chat-api-cards').previousElementSibling && c.closest('.chat-api-cards').previousElementSibling.classList.contains('chat-channel-touches')) }))`);
 const outboxRows = (p) => p.evaljs(`[...document.querySelectorAll('.chan-api-outbox .chan-api-orow')].map((r) => ({ id: r.dataset.key, fate: r.dataset.fate, text: r.innerText }))`);
 const forYou = (p) => p.evaljs(`(async () => { try { const r = await fetch('/api/user-todos'); const j = await r.json(); const s = j.todos; const list = Array.isArray(s) ? s : [].concat(...Object.values(s || {}).filter(Array.isArray)); return list.filter((i) => i && i.action && i.action.type === 'channel-api-proposal').map((i) => ({ id: i.action.id, status: i.status, state: i.state, resolved: !!(i.resolvedAt || i.doneAt || i.status === 'done' || i.status === 'resolved'), outcome: i.outcome || i.resolution || null, title: i.title })); } catch (e) { return String(e); } })()`);
 
@@ -198,7 +202,7 @@ ok(seen1 && seen1.cc[0].id === pid1 && seen1.cc[0].fate === 'pending' && seen1.c
 ok(seen1 && seen1.ob.length === 1 && seen1.ob[0].fate === 'pending', 'ONE Outbox "API calls" row for it (pending)', seen1 && seen1.ob);
 const fy1 = await until(async () => { const f = await forYou(p1); return Array.isArray(f) && f.filter((i) => i.id === pid1).length === 1 ? f : null; });
 ok(fy1, 'ONE For-you item names the proposal', await forYou(p1));
-ok(seen1 && seen1.cc[0].always && /chat\.postMessage/.test(seen1.cc[0].text), 'a non-sensitive write card offers "Run and always allow <shape>" and shows the frozen request', seen1 && seen1.cc[0]);
+ok(seen1 && seen1.cc[0].always && /以后不再问|never ask again/.test(seen1.cc[0].alwaysText) && !/chat\.postMessage|POST /.test(seen1.cc[0].alwaysText) && /chat\.postMessage/.test(seen1.cc[0].tech) && /以后放行|Allowed from then on/.test(seen1.cc[0].tech), 'a non-sensitive write card offers "Run and never ask again (<phrase>)"; the shape it allows + the frozen request sit in the 技术细节 fold', seen1 && seen1.cc[0]);
 ok(await p1.shot('api-card-chat-zh.png', '.chat-api-cards'), 'api-card-chat-zh.png');
 
 // ③ Approve in the chat ⇒ the Outbox row and the For-you item resolve in place
@@ -292,6 +296,47 @@ await p4.evaljs(`(() => { document.querySelector('.chat-api-cards .chan-api-card
 const real = await until(() => p4.evaljs('window.__answers.find((a) => /approve/.test(a.u))'), 10000);
 ok(real && real.status === 200, '…and the real bundle\'s Approve on the same card answers 200', real);
 p4.close();
+
+// ⑨ 完全信任 (write-all)
+const noAll = await api('PUT', `/api/channels/api/${encodeURIComponent(credId)}/grants`, { grants: [{ principal: { kind: 'everyone', id: '*' }, tier: 'write-all', allWrite: true }] });
+ok(noAll.status >= 400 && noAll.json.code === 'write_all_named_only', 'All agents at 完全信任 is REFUSED by name, even with the "every agent writes" tick', noAll);
+const noGroup = await api('PUT', `/api/channels/api/${encodeURIComponent(credId)}/grants`, { grants: [{ principal: { kind: 'group', id: 'T-x', name: 'Team' }, tier: 'write-all' }] });
+ok(noGroup.status === 400 && noGroup.json.code === 'write_all_named_only', 'a Task Group at 完全信任 is REFUSED by name (tier-verify M1: its members join by cwd)', noGroup);
+const full = await api('PUT', `/api/channels/api/${encodeURIComponent(credId)}/grants`, { grants: [{ principal: { kind: 'agent', id: sid, name: 'api-agent' }, tier: 'write-all' }, { principal: { kind: 'everyone', id: '*' }, tier: 'read' }] });
+ok(full.status === 200, 'the named agent is granted 完全信任 (write-all); All agents stay at Read', full);
+const logOf = async () => ((await api('GET', `/api/channels/api/${encodeURIComponent(credId)}/log?n=50`)).json || {}).lines || [];
+const gl = (await logOf()).filter((l) => l.verdict === 'granted');
+ok(gl.length === 1 && gl[0].tier === 'write-all' && gl[0].principal.id === sid && gl[0].by === 'user' && gl[0].at > 0 && gl[0].cred === credId, 'the grant writes ONE audit line: who holds it, when, by whom, on which credential', gl);
+const nCards = (await cards()).length;
+const c9 = await agentCalls('POST', '/api/chat.delete', { channel: 'C0VIBE', ts: '1.9' });
+ok(c9.json && c9.json.code !== 'api_pending' && !(c9.json && c9.json.proposal) && (await cards()).length === nCards, 'a SENSITIVE call (chat.delete) under 完全信任 RUNS — no proposal, no card', c9.raw);
+const tl = (await logOf()).filter((l) => l.path === '/api/chat.delete' && l.trust === 'write-all');
+ok(tl.length === 1 && tl[0].sensitive && tl[0].verdict !== 'proposed', `its API log line says it ran under 完全信任 (sensitive: ${tl[0] && tl[0].sensitive}, ${tl[0] && tl[0].verdict})`, (await logOf()).slice(-3));
+const p9 = await newPage({ lang: 'zh' });
+await openChat(p9);
+const row9 = await until(() => p9.evaljs(`(() => { const r = [...document.querySelectorAll('.chat-channel-touches .chat-channel-touch')].find((x) => /完全信任 · 敏感/.test(x.innerText)); return r ? r.innerText : null; })()`), 15000);
+ok(row9, 'the chat\'s API call row says 完全信任 · 敏感', row9);
+const dialogOf = (p) => until(() => p.evaljs(`(async () => {
+  if (!document.getElementById('chan-api-dialog')) { const row = document.querySelector('.chat-channel-touches .chat-channel-touch'); if (row) row.click(); return null; }
+  const d = document.getElementById('chan-api-dialog'); if (![...d.querySelectorAll('.chan-api-logrow')].some((r) => /你授予了完全信任/.test(r.innerText))) return null;
+  const rows = [...d.querySelectorAll('.chan-api-row')].map((r) => { const s = r.querySelector('.chan-api-tier'); const o = [...s.options].find((x) => x.value === 'write-all'); return { key: r.dataset.key, tier: s.value, warn: s.classList.contains('chan-api-trust'), color: getComputedStyle(s).color, opt: o && o.textContent, disabled: o && o.disabled }; });
+  const note = d.querySelector('.chan-api-trust-note'); const nb = note && note.getBoundingClientRect();
+  return { rows, note: note && note.innerText, noteColor: note && getComputedStyle(note).color, noteRight: nb && nb.right, vw: innerWidth, logs: [...d.querySelectorAll('.chan-api-logrow.chan-api-trust')].map((r) => r.innerText) };
+})()`), 20000);
+const d9 = await dialogOf(p9);
+const me = d9 && d9.rows.find((r) => r.key === `agent:${sid}`), all = d9 && d9.rows.find((r) => r.key === 'everyone:*');
+ok(me && me.tier === 'write-all' && me.opt === '完全信任 — 写和删除等敏感操作都不再问你' && me.warn && me.color !== (all && all.color), `the dialog: the agent's row at 「${me && me.opt}」 in the warning colour (${me && me.color})`, d9);
+ok(d9 && d9.note === '只给你完全信任的 agent；仍会记日志，每日上限照旧' && d9.noteColor === (me && me.color), 'the dialog: its second line says who it is for, that it is still logged and capped', d9 && d9.note);
+ok(all && all.tier === 'read' && all.disabled === true && all.opt === '完全信任只能给单个 agent 或对话；岗位、规则和“所有 agent”最高到“读 + 写，自动”', `the dialog: the All agents row's 完全信任 is refused, saying why — one agent only (tier-verify M1) (「${all && all.opt}」)`, all);
+ok(d9 && d9.logs.some((l) => /你授予了完全信任/.test(l)) && d9.logs.some((l) => /chat\.delete[\s\S]*完全信任 · 敏感/.test(l)), 'the dialog\'s API log: the grant line + the sensitive call that ran, in the warning colour', d9 && d9.logs);
+ok(await p9.shot('dialog-desk.png', '#chan-api-dialog .modal-content, #chan-api-dialog > *'), 'dialog-desk.png');
+p9.close();
+const p10 = await newPage({ lang: 'zh', width: 390, height: 844 });
+await openChat(p10);
+const d10 = await dialogOf(p10);
+ok(d10 && d10.note && d10.noteRight <= d10.vw + 0.5, `390 px: the 完全信任 row and its note fit (note right ${d10 && Math.round(d10.noteRight)} ≤ ${d10 && d10.vw})`, d10);
+ok(await p10.shot('dialog-phone.png', '#chan-api-dialog .modal-content, #chan-api-dialog > *'), 'dialog-phone.png');
+p10.close();
 ok(!fs.readFileSync(path.join(STUB, 'calls.ndjson'), 'utf-8').split('\n').filter(Boolean).some((l) => !/"host":"slack.com"/.test(l)), 'every intercepted vendor call went to the stub (slack.com only)');
 
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass} passed${fail ? `, ${fail} failed` : ''})`);

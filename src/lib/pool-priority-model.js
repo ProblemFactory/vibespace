@@ -24,7 +24,9 @@ const i18nKey = (s) => s;
 export function memberState({ loggedIn = true, loginState = null, usage = null, serve = null, nowSec = Date.now() / 1000 } = {}) {
   if (!loggedIn) return { code: 'signed-out', key: i18nKey('not signed in'), params: {} };
   const st = loginState && typeof loginState === 'object' ? loginState.state : null;
-  if (st === 'expired' || st === 'logged-out') return { code: 'login-expired', key: i18nKey('login expired'), params: {} };
+  // 'oat-only' is the ROW's verdict (its own sessions run on the long-lived token); a POOLED
+  // session reads the member's credential file and can never be handed the token ⇒ dead here
+  if (st === 'expired' || st === 'logged-out' || st === 'oat-only') return { code: 'login-expired', key: i18nKey('login expired'), params: {} };
   if (serve && typeof serve === 'object' && serve.state === 'lapsed') return { code: 'lapsed', key: i18nKey('skipped — subscription inactive'), params: {} };
   let v = null;
   try { v = usage ? quotaVerdict(usage, nowSec, { tier: 'hard' }) : null; } catch { v = null; }

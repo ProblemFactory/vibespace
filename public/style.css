@@ -6301,19 +6301,37 @@ label.chan-cap-row { cursor: default; }
 .chan-api-card.chan-api-fate-pending { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
 .chan-api-card .chan-api-head { font-weight: 600; color: var(--text); }
 .chan-api-card .chan-api-outcome { color: var(--text-secondary); }
-.chan-api-card .chan-api-req code { word-break: break-all; }
-.chan-api-card .chan-api-hdr { font-size: 11px; }
-.chan-api-card .chan-api-body pre { margin: 4px 0 0; max-height: 14em; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; }
-.chan-api-card .chan-api-body summary { cursor: pointer; color: var(--text-secondary); }
+/* the card grammar (kb-patterns «Card grammar»): title · the agent's quoted why · chips · ONE 技术细节 fold · actions */
+.chan-api-card .chan-api-head { font-size: 13px; line-height: 1.4; }
+.chan-api-card .chan-api-obj { font-weight: 600; }
+.chan-api-card a.chan-api-obj { color: var(--accent); text-decoration: none; }
+.chan-api-card a.chan-api-obj:hover { text-decoration: underline; }
+.chan-api-objid { display: inline-block; padding: 0 5px; border-radius: 4px; background: color-mix(in srgb, var(--text) 8%, transparent); font-family: monospace; font-size: 11px; font-weight: 500; vertical-align: 1px; }
+.chan-api-card .chan-api-note { color: var(--text-secondary); font-style: italic; }
+.chan-api-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+.chan-api-chip { display: inline-flex; align-items: center; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border); font-size: 11px; line-height: 16px; color: var(--text-secondary); white-space: nowrap; }
+.chan-api-chip-warn { border-color: color-mix(in srgb, var(--attn-text) 50%, var(--border)); color: var(--attn-text); background: color-mix(in srgb, var(--attn-text) 8%, transparent); }
+.chan-api-chip[hidden] { display: none; }
+.chan-api-card .chan-api-tech summary { cursor: pointer; color: var(--text-secondary); font-size: 11px; }
+.chan-api-card .chan-api-tech { display: flex; flex-direction: column; gap: 2px; }
+.chan-api-card .chan-api-tech .chan-api-url { word-break: break-all; font-size: 11px; margin-top: 4px; }
+.chan-api-card .chan-api-hdr, .chan-api-card .chan-api-bodyline { font-size: 11px; }
+.chan-api-card .chan-api-body { margin: 2px 0 0; max-height: 14em; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; }
 .chan-api-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 2px; }
 .chan-api-actions .mounts-btn { white-space: normal; text-align: left; max-width: 100%; }
-.chan-api-actions .chan-api-why { flex: 1 1 10em; min-width: 0; box-sizing: border-box; }
+.chan-api-reject-pop { flex: 1 1 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-dialog); box-shadow: 0 4px 14px color-mix(in srgb, #000 18%, transparent); }
+.chan-api-reject-pop .chan-api-why { flex: 1 1 12em; min-width: 0; box-sizing: border-box; }
+@media (max-width: 600px) { .chan-api-actions > .mounts-btn { flex: 1 1 auto; text-align: center; } .chan-api-reject-pop .chan-api-why { flex-basis: 100%; } }
 .chan-api-outbox-list { display: flex; flex-direction: column; gap: 4px; }
-.chan-api-orow { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; min-width: 0; text-align: left; overflow-wrap: anywhere; }
+.chan-api-orow { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; min-width: 0; text-align: left; overflow-wrap: anywhere; width: 100%; background: none; color: var(--text); font: inherit; }
+.chan-api-orow .chan-api-orow-head { font-size: 13px; }
 .chan-api-dialog .chan-api-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 4px 0; }
 .chan-api-dialog .chan-api-row .chan-api-who { flex: 1 1 8em; min-width: 0; overflow-wrap: anywhere; }
 .chan-api-dialog .chan-api-row .chan-api-tier { flex: 1 1 12em; min-width: 0; }
 .chan-api-dialog .chan-api-row .chan-api-cap { width: 7em; }
+/* 完全信任 (write-all): the tier, its note and its log lines in the warning colour */
+.chan-api-dialog .chan-api-trust { color: var(--warning, #b7791f); }
+.chan-api-dialog .chan-api-trust-note { font-size: 12px; margin: -2px 0 6px; }
 .chan-api-dialog .chan-api-allwrite { display: flex; gap: 6px; align-items: baseline; margin: 0 0 6px; font-size: 12px; color: var(--warning, var(--accent)); }
 .chan-api-dialog .chan-api-sensitive, .chan-api-dialog .chan-api-shape, .chan-api-dialog .chan-api-logrow { overflow-wrap: anywhere; }
 .chan-api-dialog .chan-api-shape { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; margin: 2px 0; }
@@ -7178,6 +7196,8 @@ button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: u
 .desktop-strip-rung, .desktop-strip-slow { flex: 0 0 auto; padding: 1px 7px; border-radius: 9px; background: var(--bg-input); color: var(--text-secondary); }
 .desktop-strip-rung[data-rung="sharp"], .desktop-strip-rung[data-rung="balanced"] { color: var(--text); }
 .desktop-strip-slow { background: var(--warning, #d9822b); color: #fff; }
+/* lane win-desktop-cursor-hdr: a display in Windows HDR comes out washed white — said on the bar, the remedy in its title */
+.desktop-strip-hdr { flex: 0 0 auto; padding: 1px 7px; border-radius: 9px; background: var(--bg-input); color: var(--text); border: 1px solid var(--warning, #d9822b); cursor: help; }
 .desktop-strip-compare { flex: 0 0 auto; display: flex; flex-direction: column; gap: 2px; padding: 4px 10px; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
 .desktop-strip-compare[hidden] { display: none; }
 .desktop-machine-content:fullscreen { background: var(--bg-window, #1e1e1e); }

@@ -28,7 +28,7 @@ import { t } from './i18n.js';
 import { showToast, COUNTER_ZOOM } from './utils.js';
 import { createPictureShell, RECONNECT_LADDER, streamUrl, pageIsSecure, closeWordsKey } from './picture-shell.js';
 import { installSubtleFallback } from './aes-fallback.js';
-import { clientCuts, updateTimer, rfbScreens } from '../desktop-screens.js'; // lane desktop-v2-entry: the stats' timing table + the -308 skimmer
+import { clientCuts, updateTimer, rfbScreens, cursorPlan, scaleRgba } from '../desktop-screens.js'; // lane desktop-v2-entry: the stats' timing table + the -308 skimmer
 import { qualityPlan, pictureChanging, sentInput, refreshRequest, pasteChord, pasteText, STILL_MS } from '../desktop-quality.js'; // lane desktop-v2-latency
 
 // noVNC uses top-level await, which can't live inside our IIFE bundle — it's
@@ -93,6 +93,9 @@ export function createVncView(host, { url, before = null, labels = {}, autoRecon
   const { container, bar, mount, status, pasteBtn, reBtn, labels: L, setStatus, addControl, emit } = shell;
 
   let rfb = null;
+  // lane win-desktop-cursor-hdr: the pointer's path now ({path, factor, side} — the stats row says it) and, once a pointer was
+  // too big to draw here, the machine paints it for the rest of this view (every reconnect leaves the pseudo-encodings out)
+  let cursorNow = null, serverCursor = false;
   let refused = null; // design 014 D1: the RFB whose sign-in was refused / cancelled (its words stay, no retry)
   let rfbLive = false; // K2: noVNC logs "Tried changing state of a disconnected RFB object" for a disconnect() on a dead RFB — never ask
   let mode = 'active'; // x5
@@ -170,6 +173,23 @@ export function createVncView(host, { url, before = null, labels = {}, autoRecon
     rfb.resizeSession = true;   // ask the server to match the window (RandR)
     if (!resizeSession) rfb.resizeSession = false; // design 014 D1: never a machine's whole PHYSICAL desktop — its picture is scaled
     if (crop) { try { rfb.vsCrop = crop; } catch { /* an unpatched noVNC: the whole screen */ } }
+    // lane win-desktop-cursor-hdr (owner 2026-10-13 "鼠标如此巨大"): the machine's pointer at the picture's scale (the patched
+    // noVNC asks vsCursor for each image and again when the scale changes); one past 128 px → the machine paints it (a
+    // second SetEncodings without the pointer pseudo-encodings, sent after the message being read) and a dot marks ours
+    rfb.vsServerCursor = serverCursor;
+    rfb.vsCursor = (img, scale) => {
+      const dot = mine.constructor.cursors && mine.constructor.cursors.dot;
+      if (serverCursor) return dot || null;
+      const p = cursorPlan(img, scale);
+      if (!(img && img.w > 0 && img.h > 0)) return null;
+      cursorNow = { path: p.path, factor: p.factor, side: Math.max(img.w, img.h) };
+      if (p.path === 'server') {
+        serverCursor = true; mine.vsServerCursor = true;
+        queueMicrotask(() => { try { if (mine === rfb && rfbLive) mine._sendEncodings(); } catch { /* gone */ } });
+        return dot || null;
+      }
+      return p.path === 'scaled' ? { rgbaPixels: scaleRgba(img.rgbaPixels, img.w, img.h, p.w, p.h), hotx: p.hotx, hoty: p.hoty, w: p.w, h: p.h } : null;
+    };
     // lane desktop-v2-latency: the first rung rides noVNC's own first SetEncodings (written before 'connect', nothing extra is sent)
     if (ladder) { clearTimeout(stillT); stillT = null; lastActive = null; quality = qualityPlan({ slow: slowLink }); try { rfb.qualityLevel = quality.qualityLevel; rfb.compressionLevel = quality.compressionLevel; } catch { /* noVNC's defaults */ } if (onQuality) { try { onQuality(quality); } catch { /* the observer's own */ } } }
     if (onScreens) rfb.addEventListener('vsscreens', (e) => { if (mine !== rfb) return; const sc = rfbScreens(e.detail && e.detail.bytes); if (sc) { try { onScreens(sc); } catch { /* the observer's own */ } } });
@@ -300,5 +320,5 @@ export function createVncView(host, { url, before = null, labels = {}, autoRecon
   const setCrop = (r) => { crop = r && r.w > 0 && r.h > 0 ? { x: r.x, y: r.y, w: r.w, h: r.h } : null; try { if (rfb) rfb.vsCrop = crop; } catch { /* unpatched */ } };
   const fbSize = () => { try { return rfb && rfb._fbWidth > 0 ? { w: rfb._fbWidth, h: rfb._fbHeight } : null; } catch { return null; } };
   const stats = () => timer.stats(performance.now());
-  return { setCrop, fbSize, stats, get crop() { return crop; }, get quality() { return quality; }, container, bar, mount, status, copyChip: shell.copyChip, connect, disconnect, setStatus, addControl, focus, dispose, setMode, get mode() { return mode; }, get rfb() { return rfb; }, get state() { return shell.state; }, get wanted() { return shell.wanted; }, get pasteOpen() { return shell.pasteOpen; }, get copiedText() { return shell.copiedText; } };
+  return { setCrop, fbSize, stats, get cursor() { return cursorNow; }, get crop() { return crop; }, get quality() { return quality; }, container, bar, mount, status, copyChip: shell.copyChip, connect, disconnect, setStatus, addControl, focus, dispose, setMode, get mode() { return mode; }, get rfb() { return rfb; }, get state() { return shell.state; }, get wanted() { return shell.wanted; }, get pasteOpen() { return shell.pasteOpen; }, get copiedText() { return shell.copiedText; } };
 }

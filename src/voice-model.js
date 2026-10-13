@@ -250,24 +250,21 @@ function autoSourcesOf({ messages = [], files = [], cwd = '' } = {}) {
   return [...out];
 }
 // ── the proposal's candidates (lane voice-teach-candidates; userW 2026-10-13: a card of ~70 ticked API field names) ──
-// A dictation dictionary holds words a person SAYS — names of products, projects, people, files, terms of art — never an
-// API field name, an id, a placeholder or a code token. SOURCE = the person's sentences + the agent's PROSE (code spans,
-// fenced blocks and URLs are cut first: code is the per-project tier's domain, never a card's); SHAPE_EXCLUSIONS = the
-// census test-voice-model ⑦ pins row by row; SCORE = shape tier (a file name with a known extension, a PascalCase /
-// Capitalized name) ≫ weight (seen + byPerson — the person's own words count double; a candidate needs weight ≥ 2) >
-// pronounceable; `pick` (preselected) = the person wrote it, or it was seen ≥ 2 times as a file / PascalCase name.
+// lane voice-teach-ids-allowed (owner 2026-10-13: 没必要把 id 啥的从词库排除吧，毕竟 id 这种是最容易识别错的): a dictation dictionary
+// is for words dictation gets WRONG — identifiers are its best case. SOURCE = the person's sentences + the agent's PROSE,
+// inline `code` spans included (an id named in a sentence is a word someone will say); fenced blocks and URLs are cut
+// (a command / code block is the per-project tier's domain). SHAPE_EXCLUSIONS = only what nobody dictates — the census
+// test-voice-model ⑦ pins row by row: a secret-shaped VALUE, a placeholder, a vendor's opaque id VALUE, a URL / host / e-mail /
+// digit run. SCORE = shape tier (a file name with a known extension, a PascalCase name) ≫ weight (seen + byPerson — the
+// person's own words count double; a candidate needs weight ≥ 2) > pronounceable; `pick` (preselected) = the person wrote
+// it, or it was seen ≥ 2 times as a file / PascalCase name / identifier (an agent-only plain word waits unticked).
 const KNOWN_EXT_RE = /\.(?:py|js|mjs|cjs|ts|tsx|jsx|json|md|txt|csv|ya?ml|toml|sh|css|html|go|rs|java|kt|rb|php|c|h|cpp|swift|sql|ipynb|pdf|docx|xlsx|pptx|png|jpg|svg)$/i;
-const SNAKE_OR_CAMEL_RE = /^(?:[a-z0-9]+(?:_[a-z0-9]+)+|[a-z]+(?:[A-Z][a-z0-9]*)+)$/;
+const VENDOR_ID_RE = /^(?:cli|ou|oc|om|on|app|cfg|usr|tenant)_(?:(?=[0-9a-z]*\d)[0-9a-z]{4,}|[0-9a-z]{8,})$/i; // ou_7565, cli_<hex> — not om_id
 const SHAPE_EXCLUSIONS = Object.freeze([                         // [row, rejects(term, {byPerson})] — first match names the row
-  ['id-prefix', (w) => /^(?:cli|ou|oc|om|app|cfg|usr|tenant)_[0-9a-z]{4,}$/i.test(w)],
-  ['placeholder', (w) => /(?:^|_)x{3,}(?:_|$)/i.test(w)],
-  ['field-tail', (w) => /_(?:id|token|key|secret|type|ts|at)$/i.test(w) || /^[a-z][a-z0-9]*(?:Id|Token|Key|Secret|Type)$/.test(w)],
-  ['two-underscores', (w) => termKind(w) !== 'file' && (w.match(/_/g) || []).length >= 2],
-  ['digit-tail', (w) => /\d$/.test(w)],                          // also every word_123 (ou_7565 is an id-prefix first)
-  ['short-caps', (w) => !/[a-z]/.test(w) && (w.match(/[A-Z]/g) || []).length <= 3],
-  ['host', (w) => /^[\w-]+\.[a-z]{2,4}$/i.test(w) && NOT_A_FILE_RE.test(w)],
-  ['secret', (w) => scrubSecrets(w) !== w],
-  ['code-only', (w, c) => !(c && c.byPerson > 0) && SNAKE_OR_CAMEL_RE.test(w)], // snake_case / camelCase the person never wrote
+  ['secret', (w) => scrubSecrets(w) !== w || (/^[\w+/=-]{16,}$/.test(w) && /\d/.test(w) && !/[aeiou]/i.test(w))], // + a vowel-less key run
+  ['placeholder', (w) => /(?:^|_)x{3,}(?:_|$)/i.test(w) || /^<[^<>]*>$/.test(w)],
+  ['vendor-id', (w) => VENDOR_ID_RE.test(w)],
+  ['url-email-digits', (w) => /^(?:https?:|www\.)|@/i.test(w) || /^\d+$/.test(w) || (/^[\w-]+\.[a-z]{2,4}$/i.test(w) && NOT_A_FILE_RE.test(w))],
 ]);
 const exclusionOf = (term, c = {}) => { for (const [row, rejects] of SHAPE_EXCLUSIONS) if (rejects(str(term), c)) return row; return null; };
 const NAME_RE = /\b[A-Z][a-z]{2,}\b/g;
@@ -278,7 +275,8 @@ function proposalCandidates({ messages = [], files = [], cwd = '', known = [], g
   const have = new Set((Array.isArray(known) ? known : []).map((k) => str(k).toLowerCase()));
   const root = str(cwd).replace(/[\\/]+$/, '');
   const ownFiles = new Set((Array.isArray(files) ? files : []).map(str).filter((f) => root && f.startsWith(root + '/')).map(baseName));
-  const prose = dictationMessagesOf(messages).map((m) => ({ role: m.role, text: scrubSecrets(m.text.replace(CODE_SPAN_RE, ' ').replace(/\bhttps?:\/\/\S+/g, ' ')) }));
+  const unfence = (t) => t.replace(CODE_SPAN_RE, (all, fenced, inline) => (inline != null ? ` ${inline} ` : ' ')); // inline spans stay words
+  const prose = dictationMessagesOf(messages).map((m) => ({ role: m.role, text: scrubSecrets(unfence(m.text).replace(/\bhttps?:\/\/\S+/g, ' ')) }));
   const lower = new Set();
   for (const m of prose) for (const w of m.text.match(/\b[a-z]{3,}\b/g) || []) lower.add(w);
   const tally = new Map();                                       // term → {seen, byPerson, first}
@@ -305,7 +303,7 @@ function proposalCandidates({ messages = [], files = [], cwd = '', known = [], g
     const sayable = /[aeiouy]/i.test(stem) && stem.length >= 4 && stem.length <= 24 && letters >= 0.7 * stem.length;
     const tier = (kind === 'file' && (KNOWN_EXT_RE.test(term) || ownFiles.has(term))) || (kind === 'name' && /[a-z][A-Z]/.test(term)) ? 2 : kind === 'ident' ? 0 : 1;
     const why = c.byPerson ? 'person' : kind === 'file' ? 'file' : kind === 'name' ? 'name' : 'seen';
-    out.push({ term, score: tier * 1000 + Math.min(c.seen + c.byPerson, 99) * 10 + (sayable ? 1 : 0), why, seen: c.seen, byPerson: c.byPerson, kind, pick: c.byPerson > 0 || (c.seen >= 2 && tier === 2), first: c.first });
+    out.push({ term, score: tier * 1000 + Math.min(c.seen + c.byPerson, 99) * 10 + (sayable ? 1 : 0), why, seen: c.seen, byPerson: c.byPerson, kind, pick: c.byPerson > 0 || (c.seen >= 2 && (tier === 2 || kind === 'ident')), first: c.first });
   }
   return out.sort((a, b) => b.score - a.score || a.first - b.first).map(({ first, ...c }) => c);
 }

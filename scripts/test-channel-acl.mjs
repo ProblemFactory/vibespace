@@ -74,6 +74,34 @@ console.log('§1 channel-acl (PURE)');
   ok(ACL.grantsFor(target, g2).every((g) => g.id && g.origin) && ACL.grantsFor({ key: 'gmail/z', adapterId: 'gmail' }, g2).length === 0, 'grantsFor lists this target\'s rows with ids and origins');
 }
 
+// ── §1c 完全信任 (lane api-tier-write-all, 2026-10-13): the API tier is widen-only up to write-all; everyone NEVER holds it ──
+console.log('§1c the API tier: widen-only none → read → write-ask → write-auto → write-all; All agents never hold write-all');
+{
+  const { Module } = require('module');
+  const SRC = fs.readFileSync(path.join(REPO, 'src/channel-acl.js'), 'utf8');
+  const load = (src) => { const f = path.join(REPO, 'src/channel-acl.js'); const m = new Module(f); m.filename = f; m.paths = Module._nodeModulePaths(path.dirname(f)); m._compile(src, f); return m.exports; };
+  const mutate = (src, a, b) => { if (!src.includes(a)) throw new Error(`mutant anchor missing: ${a.slice(0, 80)}`); return src.replace(a, b); };
+  const row = (kind, id, api) => ({ principal: { kind, id, name: kind === 'everyone' ? null : id }, scope: { kind: 'adapter', id: 'L' }, level: 'hidden', origin: 'api', at: 1, by: 'user', api });
+  const legs = [
+    ['the order is none < read < write-ask < write-auto < write-all, and the MAX over the rows wins (agent write-all beats its group\'s read)', (A) => A.API_TIERS.join() === 'none,read,write-ask,write-auto,write-all' && A.effectiveApi({ kind: 'agent', id: 'c1', groups: ['g1'] }, 'L', [row('group', 'g1', 'read'), row('agent', 'c1', 'write-all')]).tier === 'write-all' && A.effectiveApi({ kind: 'agent', id: 'c1', groups: ['g1'] }, 'L', [row('agent', 'c1', 'write-all'), row('group', 'g1', 'write-ask')]).tier === 'write-all',
+      ["const API_RANK = Object.freeze({ none: 0, read: 1, 'write-ask': 2, 'write-auto': 3, 'write-all': 4 });", "const API_RANK = Object.freeze({ none: 0, read: 1, 'write-ask': 2, 'write-auto': 3, 'write-all': 0 });"]],
+    ['a row giving write-all to All agents is refused by name write_all_named_only (validateGrant); one agent (a conversation) is accepted', (A) => { const v = A.validateGrant(row('everyone', '*', 'write-all')); return v.ok === false && /^write_all_named_only:/.test(v.error) && A.validateGrant(row('agent', 'c1', 'write-all')).ok === true; },
+      ["  if (g.api === API_NAMED_ONLY && p.kind !== 'agent') return", "  if (false) return"]],
+    // tier-verify M1: a group's members join by cwd, so a group row reaches conversations nobody named — RED = c53bffc3b's everyone-only check
+    ['a row giving write-all to a Task Group is refused by name write_all_named_only (validateGrant); a rule (pattern) is no principal at all', (A) => { const v = A.validateGrant(row('group', 'T-1', 'write-all')); return v.ok === false && /^write_all_named_only:/.test(v.error) && A.validateGrant(row('group', 'T-1', 'write-auto')).ok === true && A.validateGrant(row('pattern', 'p1', 'write-all')).ok === false; },
+      ["  if (g.api === API_NAMED_ONLY && p.kind !== 'agent') return", "  if (g.api === API_NAMED_ONLY && p.kind === 'everyone') return"]],
+    ['a STORED everyone write-all row (a hand edit, an old import) answers write-auto at most — a sensitive call still asks', (A) => A.effectiveApi({ kind: 'agent', id: 'c9' }, 'L', [{ ...row('everyone', '*', 'write-auto'), api: 'write-all' }]).tier === 'write-auto',
+      ["const api = g.api === API_NAMED_ONLY && g.principal.kind !== 'agent' ? 'write-auto' : g.api;", "const api = g.api;"]],
+    ['a STORED Task Group write-all row answers write-auto at most to every member; a named agent row keeps write-all', (A) => A.effectiveApi({ kind: 'agent', id: 'c9', groups: ['T-1'] }, 'L', [{ ...row('group', 'T-1', 'write-auto'), api: 'write-all' }]).tier === 'write-auto' && A.effectiveApi({ kind: 'agent', id: 'c1', groups: ['T-1'] }, 'L', [{ ...row('group', 'T-1', 'write-auto'), api: 'write-all' }, row('agent', 'c1', 'write-all')]).tier === 'write-all',
+      ["const api = g.api === API_NAMED_ONLY && g.principal.kind !== 'agent' ? 'write-auto' : g.api;", "const api = g.api === API_NAMED_ONLY && g.principal.kind === 'everyone' ? 'write-auto' : g.api;"]],
+  ];
+  for (const [name, judge, [a, b]] of legs) {
+    ok(judge(ACL), name);
+    let red; try { red = !judge(load(mutate(SRC, a, b))); } catch (e) { red = `threw: ${e.message}`; }
+    ok(red === true, `CONTROL: ${name} — without its rule the leg goes red`, red);
+  }
+}
+
 console.log('§1b the three homes of a grant (2026-09-26: account + pattern scopes)');
 {
   const ctx = { kind: 'agent', id: 'a1', groups: ['g1'] };

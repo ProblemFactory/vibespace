@@ -38,7 +38,7 @@
 // keeps the same deadline as a re-login (see `reloggedIn`).
 const fs = require('fs');
 const path = require('path');
-const { loginAgeText, reviewWarnings, reloggedIn, shortSession, WARN_STAGES } = require('../login-expiry.js');
+const { loginAgeText, reviewWarnings, reloggedIn, shortSession, WARN_STAGES, ledgerExp, OAT_ONLY } = require('../login-expiry.js');
 
 // 5 min: the 1 h rung needs a cadence well under an hour, and a file stat +
 // JSON.parse per subscription is cheap enough that this never shows up next
@@ -51,7 +51,9 @@ const BOOT_DELAY_MS = 25 * 1000; // after the account store + user-todos exist a
 // the INSTANCE, and the panel's jump lands on Manage Agents (the same shape
 // the 'jobs' bucket uses for job-borne items).
 const INBOX_KEY = 'accounts';
-const URGENCY = { '24h': 'normal', '1h': 'high', expired: 'urgent' };
+// 'oat-only' is LOW (2026-10-13): the row still serves on its long-lived token —
+// only the usage refresh needs a re-login, so it is a note, never "sessions fail".
+const URGENCY = { [OAT_ONLY]: 'low', '24h': 'normal', '1h': 'high', expired: 'urgent' };
 // Who resolved it, for the panel's "recently resolved" tail. Not 'user' (the
 // user did not tick it) and not 'agent' (no agent did anything) — the watch
 // retracted its own claim, and the panel says "automatically".
@@ -87,6 +89,13 @@ function fmtWhen(ms) {
  *  state — and it is still quoted here when it is genuinely in the past. */
 function itemTextFor(stage, name, info, opts = {}) {
   const when = fmtWhen(info.refreshExpiresAt);
+  // LOGIN and TOKEN are two facts: an oat-only row speaks about the token it lives on
+  if (info?.state === OAT_ONLY) {
+    const until = fmtWhen(info.oatValidUntil);
+    if (stage === OAT_ONLY) return `Claude login for "${name}" ended ${when} — its sessions keep running on the long-lived token (valid until ${until}); only the usage refresh (⟳) needs a re-login in Manage Agents`;
+    return `The long-lived token for "${name}" ends in ${loginAgeText(info.msLeft)} (${until}) and its login already ended — re-mint the token or re-login in Manage Agents`;
+  }
+  if (info?.oatExpired) return `Claude login and the long-lived token for "${name}" have both ended (token ${fmtWhen(info.oatValidUntil)}) — every session on it fails; re-mint the token or re-login in Manage Agents`;
   if (info?.state === 'logged-out') {
     const ended = typeof info.msLeft === 'number' && info.msLeft <= 0 ? ` (its login session ended ${when})` : '';
     return `Claude login for "${name}" is signed out — the CLI cleared its tokens${ended}; re-login it in Manage Agents`;
@@ -281,12 +290,21 @@ function create({ accounts, userTodos, dataDir, log = () => {}, now = () => Date
       }
       // Item ids belong to the deadline they were filed for; a new deadline
       // starts an empty list (the old one was just retracted above).
-      const sameLedger = !!prev && (prev.exp ?? null) === exp;
+      // The LEDGER's deadline (login-expiry ledgerExp): an oat-only row counts its token down.
+      const lexp = ledgerExp(info);
+      // A dead login that is now carried by a valid token: the items filed for the dead login
+      // ("every session fails") are no longer true — retract them before the token's ledger starts.
+      if (prev && info.state === OAT_ONLY && (prev.exp ?? null) !== lexp && Array.isArray(prev.items) && prev.items.length) {
+        const { n, remaining } = resolveFiled(prev);
+        prev = { ...prev, items: remaining };
+        if (n) { resolved.push({ id: a.id, n }); log(`[login-expiry] ${name}: login ended but a long-lived token carries it — ${n} warning${n === 1 ? '' : 's'} cleared`); }
+      }
+      const sameLedger = !!prev && (prev.exp ?? null) === lexp;
       const carryItems = sameLedger && Array.isArray(prev.items) ? prev.items : [];
       const { emit, entry, suppressed } = reviewWarnings(info, prev, t, { watchingSince: since });
       // The warning row stays only while it still carries something we have
       // SAID: rungs already fired, or item ids not yet retracted.
-      if (entry || carryItems.length) ledger[a.id] = { exp, sent: [], ...(entry || {}), items: carryItems };
+      if (entry || carryItems.length) ledger[a.id] = { exp: lexp, sent: [], ...(entry || {}), items: carryItems };
       else delete ledger[a.id];
       if (suppressed) log(`[login-expiry] ${name}: login already dead before this ledger existed (ended ${fmtWhen(info.refreshExpiresAt)}) — recorded, not filed`);
       if (!emit) continue;
@@ -300,7 +318,12 @@ function create({ accounts, userTodos, dataDir, log = () => {}, now = () => Date
           sessionName: 'Manage Agents',
           // Same tense rule as the text: a deadline in the past "ended", one
           // in the future "ends" — a wiped record can carry either.
-          detail: `Account: ${a.name || a.id}\nLogin session ${typeof info.msLeft === 'number' && info.msLeft <= 0 ? 'ended' : 'ends'}: ${fmtWhen(info.refreshExpiresAt)}\nState: ${info.state}\n\n`
+          detail: info.state === OAT_ONLY
+            ? `Account: ${a.name || a.id}\nLogin session ended: ${fmtWhen(info.refreshExpiresAt)}\nLong-lived token valid until: ${fmtWhen(info.oatValidUntil)}\nState: ${info.state}\n\n`
+              + 'This account\'s OAuth login and its long-lived token are two separate facts. Its own sessions start on the token, so they keep running; '
+              + 'the usage refresh (⟳) reads the usage panel, which needs the OAuth login (the token is inference-only), and a POOL cannot use the token '
+              + '(a pooled session reads the login file). Re-login from Manage Agents → the account\'s ⋯ menu → Re-login on this machine.'
+            : `Account: ${a.name || a.id}\nLogin session ${typeof info.msLeft === 'number' && info.msLeft <= 0 ? 'ended' : 'ends'}: ${fmtWhen(info.refreshExpiresAt)}\nState: ${info.state}\n\n`
             + 'A Claude subscription login has its own absolute lifetime — refreshing the access token does NOT extend it. '
             + 'When it runs out the CLI cannot refresh, every turn on this account fails, and VibeSpace can only route around it '
             + '(pooled sessions) or stop (everything else). Re-login from Manage Agents → the account\'s ⋯ menu → Re-login on this machine.',

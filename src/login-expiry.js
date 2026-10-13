@@ -28,6 +28,14 @@
  *   expired     the deadline has passed; the CLI's next refresh will fail
  *   logged-out  the CLI already wiped the tokens (the shape above)
  *   unknown     no deadline readable — never 'ok', never a reason to block
+ *   oat-only    the login is dead (expired / logged-out) but the account
+ *               holds a VALID long-lived token (B-211a): its own sessions
+ *               spawn on the token, only the quota refresh needs the login
+ *               (2026-10-13 owner: "都绑定长期token了，怎么还提示过期").
+ *               LOGIN and TOKEN are two facts; a row lives by the better one.
+ *               Only ever produced when the caller passes `opts.oat` — a pool
+ *               SLOT reads the credential FILE through a symlink and can
+ *               never be handed the token, so slot callers never pass it.
  */
 
 // The chip / first inbox warning: a login with less than a day left is worth
@@ -50,7 +58,11 @@ const NEAR_MS = 30 * 60e3;
 const SHORT_SESSION_MS = 36 * 3600e3;
 // Warning ladder, most-lenient first. 'expired' is the terminal rung (it
 // fires once, when the login actually dies).
-const WARN_STAGES = Object.freeze(['24h', '1h', 'expired']);
+// 'oat-only' is the most lenient rung (a LOW notice: the row still serves,
+// only the usage refresh needs a re-login); on an oat-only row the 24h / 1h
+// rungs count down the TOKEN's own end, and 'expired' fires when both died.
+const OAT_ONLY = 'oat-only';
+const WARN_STAGES = Object.freeze([OAT_ONLY, '24h', '1h', 'expired']);
 const STAGE_MS = Object.freeze({ '24h': EXPIRING_MS, '1h': 3600e3 });
 const DEAD_STATES = Object.freeze(['expired', 'logged-out']);
 
@@ -72,10 +84,31 @@ const finite = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 const UNKNOWN = Object.freeze({ state: 'unknown', refreshExpiresAt: null, accessExpiresAt: null, msLeft: null });
 
 /**
- * loginState(creds, now) → { state, refreshExpiresAt, accessExpiresAt, msLeft }
- * The ONE reading of a credential file's login lifetime. Never throws.
+ * withOat(info, oat, now) — fold the account's LONG-LIVED TOKEN into a login
+ * verdict. `oat` = { present, validUntil } (validUntil = minted + OAT_TTL_MS)
+ * or null. A live / unknown login speaks for itself (the token adds nothing to
+ * "will a session start"); a DEAD login with a valid token is 'oat-only'
+ * (msLeft = the TOKEN's time left, so the switch / ladder rules count it
+ * down); a dead login whose token ALSO ended stays dead and says so
+ * (oatExpired — 'oat-expired' stays the spawn reason).
  */
-function loginState(creds, now = Date.now()) {
+function withOat(info, oat, now = Date.now()) {
+  if (!info || !DEAD_STATES.includes(info.state)) return info;
+  const validUntil = oat && oat.present ? finite(oat.validUntil) : null;
+  if (validUntil == null) return info;
+  if (validUntil > now) return { ...info, state: OAT_ONLY, login: info.state, oatValidUntil: validUntil, msLeft: validUntil - now };
+  return { ...info, oatValidUntil: validUntil, oatExpired: true };
+}
+
+/**
+ * loginState(creds, now, { oat }) → { state, refreshExpiresAt, accessExpiresAt, msLeft }
+ * The ONE reading of a credential file's login lifetime. Never throws.
+ * `opts.oat` folds the account's long-lived token in (withOat above).
+ */
+function loginState(creds, now = Date.now(), opts = {}) {
+  return withOat(loginFileState(creds, now), opts && opts.oat, now);
+}
+function loginFileState(creds, now) {
   const o = oauthOf(creds);
   if (!o) return { ...UNKNOWN };
   const refreshExpiresAt = finite(o.refreshTokenExpiresAt);
@@ -115,7 +148,9 @@ function loginSwitchTarget(info) {
 function loginRank(info) {
   if (!loginUsable(info)) return 3;
   if (!loginSwitchTarget(info)) return 2;
-  return info?.state === 'expiring' ? 1 : 0;
+  // an oat-only row serves, but ranks below an EQUAL healthy one (its quota
+  // cannot be refreshed and its token is the last channel left)
+  return info?.state === 'expiring' || info?.state === OAT_ONLY ? 1 : 0;
 }
 
 /** The named bucket a blocked decision must SPEAK (null when nothing to say). */
@@ -143,6 +178,7 @@ function loginBucketLabel(info) {
     case 'expired': return 'login expired';
     case 'logged-out': return 'login signed out';
     case 'expiring': return `login expires in ${loginAgeText(info.msLeft)}`;
+    case OAT_ONLY: return `login expired · long-lived token ends in ${loginAgeText(info.msLeft)}`;
     default: return 'login';
   }
 }
@@ -155,6 +191,7 @@ function loginBlockedPhrase(m) {
   if (m?.state === 'expired') return 'login expired';
   if (m?.state === 'logged-out') return 'signed out';
   const ms = m?.msLeft;
+  if (m?.state === OAT_ONLY) return typeof ms === 'number' && ms > 0 ? `long-lived token ends in ${loginAgeText(ms)}` : 'long-lived token ending';
   if (typeof ms === 'number' && ms > 0) return `login expires in ${loginAgeText(ms)}`;
   return 'login expiring';
 }
@@ -226,7 +263,20 @@ function warnStageFor(info) {
   if (typeof ms !== 'number') return null;
   if (ms < STAGE_MS['1h']) return '1h';
   if (ms < STAGE_MS['24h']) return '24h';
-  return null;
+  return info?.state === OAT_ONLY ? OAT_ONLY : null;
+}
+
+/** The deadline a warning LEDGER is keyed by. A login's own deadline, except:
+ *  an oat-only row counts down its TOKEN (a new ledger, so the LOW rung and
+ *  the token's 24h / 1h rungs fire after the login's own rungs were spent),
+ *  and a row whose token also ended died at the LATER of the two instants —
+ *  the pre-existing gate must date the death by the token, or a token that
+ *  died NOW behind a login that died months ago would be filed as old news. */
+function ledgerExp(info) {
+  if (info?.state === OAT_ONLY) return finite(info.oatValidUntil);
+  const exp = info?.refreshExpiresAt ?? null;
+  const oat = info?.oatExpired ? finite(info.oatValidUntil) : null;
+  return oat != null && (exp == null || oat > exp) ? oat : exp;
 }
 
 /**
@@ -265,7 +315,7 @@ function warnStageFor(info) {
 // horizon EXPIRING_MS already uses for "worth interrupting the user".
 const STALE_GRACE_MS = EXPIRING_MS;
 function reviewWarnings(info, entry, now = Date.now(), opts = {}) {
-  const exp = info?.refreshExpiresAt ?? null;
+  const exp = ledgerExp(info);
   const sameLedger = !!entry && (entry.exp ?? null) === exp;
   const sent = sameLedger && Array.isArray(entry.sent) ? entry.sent.filter((s) => WARN_STAGES.includes(s)) : [];
   const stage = warnStageFor(info, now);
@@ -281,8 +331,8 @@ function reviewWarnings(info, entry, now = Date.now(), opts = {}) {
 }
 
 module.exports = {
-  EXPIRING_MS, NEAR_MS, WARN_STAGES, STAGE_MS, DEAD_STATES, STALE_GRACE_MS, SHORT_SESSION_MS,
-  loginState, loginUsable, loginSwitchTarget, loginRank, loginBlockReason,
+  EXPIRING_MS, NEAR_MS, WARN_STAGES, STAGE_MS, DEAD_STATES, STALE_GRACE_MS, SHORT_SESSION_MS, OAT_ONLY,
+  loginState, withOat, ledgerExp, loginUsable, loginSwitchTarget, loginRank, loginBlockReason,
   loginAgeText, loginBucketLabel, loginBlockedPhrase, loginBlockedText, loginWallPhrase,
   warnStageFor, reviewWarnings, reloggedIn, shortSession,
 };

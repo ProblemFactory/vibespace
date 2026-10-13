@@ -188,7 +188,7 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
       id: p.id, status: p.status, cred: p.cred, credLabel: p.credLabel, at: p.at, conv: p.conv, principal: agent ? undefined : p.principal,
       method: f.method, host: f.host, path: f.path, query: f.query, digest: f.digest, sensitive: p.sensitive, offersAlways: p.offersAlways,
       body: body ? toAgentText(body.toString('utf8').slice(0, F.SHOWN_BODY_MAX), { max: F.SHOWN_BODY_MAX }) : null, bodyBytes: body ? body.length : 0,
-      decidedAt: p.decidedAt || null, decidedBy: agent ? undefined : p.decidedBy || null, reason: p.reason || null, result: p.result || null,
+      decidedAt: p.decidedAt || null, decidedBy: agent ? undefined : p.decidedBy || null, reason: p.reason || null, result: p.result || null, note: p.note || null,
     };
   }
   const pending = () => Object.values(state.proposals).filter((p) => p.status === 'pending');
@@ -198,7 +198,7 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
   /** The credentials this conversation may use (tier ≠ none). */
   function creds(ctx) {
     const list = allCreds().map((c) => ({ ...c, ...tierNow(ctx, c.id) })).filter((c) => c.tier !== 'none');
-    return { ok: true, creds: list.map((c) => ({ id: c.id, kind: c.kind, label: c.label, source: c.source, tier: c.tier, perDay: c.perDay || F.BUDGET_DEFAULT.perDay, perMin: F.BUDGET_DEFAULT.perMin })) };
+    return { ok: true, creds: list.map((c) => ({ id: c.id, kind: c.kind, label: c.label, source: c.source, tier: c.tier, tierSays: F.TIER_SAYS[c.tier] || c.tier, perDay: c.perDay || F.BUDGET_DEFAULT.perDay, perMin: F.BUDGET_DEFAULT.perMin })) };
   }
   /** The vendor's OWN docs + the fence summary — nothing else is "known" by VibeSpace. */
   function docs(ctx, cred) {
@@ -206,7 +206,7 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
     const c = tr.tier !== 'none' && allCreds().some((x) => x.id === cred) ? credentialOf(cred) : null;
     const v = F.vendorRowOf(c);
     if (!v) return NOT_GRANTED();
-    return { ok: true, cred, vendor: v.label, docs: v.docs, hosts: v.hosts, tier: tr.tier, fence: { readByPost: v.readByPost.map(String), sensitive: v.sensitive.map(String), sensitiveAlso: ['DELETE', `a body over ${F.SENSITIVE_BODY / 1024} KiB`, 'an upload'], budget: { perMin: F.BUDGET_DEFAULT.perMin, perDay: tr.perDay || F.BUDGET_DEFAULT.perDay }, bodyMax: F.BODY_MAX, responseMax: F.RESPONSE_MAX } };
+    return { ok: true, cred, vendor: v.label, docs: v.docs, hosts: v.hosts, tier: tr.tier, tierSays: F.TIER_SAYS[tr.tier] || tr.tier, fence: { readByPost: v.readByPost.map(String), sensitive: v.sensitive.map(String), sensitiveAlso: ['DELETE', `a body over ${F.SENSITIVE_BODY / 1024} KiB`, 'an upload'], budget: { perMin: F.BUDGET_DEFAULT.perMin, perDay: tr.perDay || F.BUDGET_DEFAULT.perDay }, bodyMax: F.BODY_MAX, responseMax: F.RESPONSE_MAX } };
   }
   /** THE CALL. → the answer, `api_pending` (a proposal filed), or a refusal by name. `touch` = the chat's call row. */
   async function call(ctx, input = {}) {
@@ -231,20 +231,21 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
       if (waiting >= F.PENDING_MAX) { line(req, { verdict: 'refused', code: 'api_budget' }); return { ok: false, code: 'api_budget', error: `${waiting} of your API proposals on this credential wait for the user already — \`vibespace-channels api wait <id>\` until one is decided`, touch }; }
       stamps.set(`${cred}|${ctx.id}`, [...bs.stamps, now()]);
       const id = `api-${crypto.randomBytes(6).toString('hex')}`;
-      state.proposals[id] = { id, status: 'pending', cred, credLabel: c.label, kind: c.kind, at: now(), conv: ctx.id, principal: { kind: ctx.kind, id: ctx.id, name: ctx.name || null, groups: ctx.groups || [] }, frozen: F.freeze(req), sensitive, offersAlways: F.offersAlways({ cls, sensitive }), why: vd.why };
+      state.proposals[id] = { id, status: 'pending', cred, credLabel: c.label, kind: c.kind, at: now(), conv: ctx.id, principal: { kind: ctx.kind, id: ctx.id, name: ctx.name || null, groups: ctx.groups || [] }, frozen: F.freeze(req), sensitive, offersAlways: F.offersAlways({ cls, sensitive }), note: typeof input.why === 'string' && input.why.trim() ? input.why.trim().slice(0, 200) : null, why: vd.why };
       const keep = Object.values(state.proposals).sort((a, b) => b.at - a.at).slice(PROPOSALS_KEEP).filter((p) => p.status !== 'pending');
       for (const p of keep) delete state.proposals[p.id];
       save(); notifyOwner([id]);
       line(req, { verdict: 'proposed', proposal: id, bodySha: req.body ? crypto.createHash('sha256').update(req.body).digest('hex') : null });
-      return { ok: false, code: 'api_pending', error: `this call waits for the user's approval (${sensitive ? `sensitive: ${sensitive}` : 'a write under "ask each"'}) — proposal ${id}; \`vibespace-channels api wait ${id}\` prints the outcome`, proposal: proposalView(state.proposals[id], { agent: true }), touch: { ...touch, proposalId: id } };
+      return { ok: false, code: 'api_pending', error: `this call waits for the user's approval (${sensitive ? `sensitive: ${sensitive}; your tier is ${F.TIER_SAYS[tr.tier] || tr.tier} — only Full trust (write-all) runs a sensitive call without asking` : 'a write under "ask each"'}) — proposal ${id}; \`vibespace-channels api wait ${id}\` prints the outcome`, proposal: proposalView(state.proposals[id], { agent: true }), touch: { ...touch, proposalId: id } };
     }
     const g = c.gate();
     if (g) { line(req, { verdict: 'refused', code: 'api_budget' }); return { ...g, code: 'api_budget', touch }; }
     stamps.set(`${cred}|${ctx.id}`, [...bs.stamps, now()]);
     const r = await run(ctx, cred, c, req);
-    line(req, { verdict: r.ok ? 'ok' : r.withheld ? 'withheld' : 'refused', code: r.ok ? null : r.code, status: r.status || null, bytes: r.bytes || 0, ms: r.ms || 0, bodySha: req.body ? crypto.createHash('sha256').update(req.body).digest('hex') : null });
+    const trusted = vd.why === 'write-all' && sensitive ? { trust: 'write-all', sensitive } : {};   // 完全信任 · 敏感 on the log line and the chat row
+    line(req, { verdict: r.ok ? 'ok' : r.withheld ? 'withheld' : 'refused', code: r.ok ? null : r.code, status: r.status || null, bytes: r.bytes || 0, ms: r.ms || 0, bodySha: req.body ? crypto.createHash('sha256').update(req.body).digest('hex') : null, ...trusted });
     if (tierNow(ctx, cred).tier === 'none') return NOT_GRANTED();
-    return { ...r, touch: { ...touch, count: r.status || 0 } };
+    return { ...r, touch: { ...touch, count: r.status || 0, ...(trusted.trust ? { trust: 'write-all' } : {}) } };
   }
   /** One of the caller's OWN proposals (its outcome, for `wait`); another's = the uniform not-found. */
   function proposalFor(ctx, id) {
@@ -270,12 +271,19 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
     if (!allCreds().some((c) => c.id === cred)) return { ok: false, code: 'not-found', error: 'no such credential' };
     let rows;
     try { rows = (Array.isArray(list) ? list : []).filter((r) => r && r.tier && r.tier !== 'none').map((r) => F.apiGrant({ principal: r.principal, cred, tier: r.tier, perDay: r.perDay, at: now(), by, allWrite: r.allWrite === true })); }
-    catch (err) { return { ok: false, code: 'bad-request', error: err.message }; }
+    catch (err) { return { ok: false, code: /write_all_named_only/.test(err.message) ? 'write_all_named_only' : 'bad-request', error: err.message }; }
+    const pk = (g) => `${g.principal.kind}:${g.principal.id}`;
+    const was = new Map((typeof e.apiGrants === 'function' ? e.apiGrants() : []).filter((g) => g && g.scope && g.scope.id === cred && F.TIERS.includes(g.api)).map((g) => [pk(g), g]));
+    const before = new Set([...was].filter(([, g]) => g.api === 'write-all').map(([k]) => k));
     const r = await e.setApiGrants(cred, rows, { by });
+    // a NEW 完全信任 writes its own line in the credential's API log: who holds it, when, by whom (the dialog shows it)
+    if (r.ok) for (const g of rows) if (g.api === 'write-all' && !before.has(`${g.principal.kind}:${g.principal.id}`)) audit(cred, { at: now(), cred, principal: { kind: g.principal.kind, id: g.principal.id, name: g.principal.name || null }, conv: null, method: null, host: null, path: null, verdict: 'granted', tier: 'write-all', by: String(by).slice(0, 64) });
+    // …and lowering one (any step down, a removal = none) writes the same-shaped `lowered` line (tier-verify L2)
+    if (r.ok) for (const [k, g] of was) { const to = (rows.find((x) => pk(x) === k) || { api: 'none' }).api; if (F.TIERS.indexOf(to) < F.TIERS.indexOf(g.api)) audit(cred, { at: now(), cred, principal: { kind: g.principal.kind, id: g.principal.id, name: g.principal.name || null }, conv: null, method: null, host: null, path: null, verdict: 'lowered', tier: to, from: g.api, by: String(by).slice(0, 64) }); }
     // a tier below "Read + write" ends that principal's always-allowed shapes — a later re-widen starts asking again (verify r1 M1)
     if (r.ok) {
       const n = state.shapes.length;
-      state.shapes = state.shapes.filter((s) => s.cred !== cred || ['write-ask', 'write-auto'].includes(tierNow(shapeCtx(s), cred).tier));
+      state.shapes = state.shapes.filter((s) => s.cred !== cred || ['write-ask', 'write-auto', 'write-all'].includes(tierNow(shapeCtx(s), cred).tier));
       if (state.shapes.length !== n) save();
       notifyOwner([]);
     }

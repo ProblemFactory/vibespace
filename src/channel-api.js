@@ -132,13 +132,21 @@ function shapeOf(req) {
 function verdict({ tier, cls, sensitive, shape = null, shapes = [] }) {
   const t = TIERS.includes(tier) ? tier : 'none';
   if (t === 'none') return refuse('api_not_granted', 'this conversation has no API access to that credential — ask the user to grant it in Channels → the account → API access…');
-  if (sensitive) return { ok: true, action: 'propose', why: `sensitive:${sensitive}` };
+  // 完全信任: a sensitive call RUNS for the principal the owner named (journaled as `write-all`, still under the budget)
+  if (sensitive) return t === 'write-all' ? { ok: true, action: 'run', why: 'write-all' } : { ok: true, action: 'propose', why: `sensitive:${sensitive}` };
   if (cls === 'read') return { ok: true, action: 'run', why: 'read' };
-  if (t === 'read') return refuse('api_tier_read', 'your grant on this credential is read-only — a write needs the user to widen it to "Read + write" in API access…');
-  if (t === 'write-auto') return { ok: true, action: 'run', why: 'write-auto' };
+  if (t === 'read') return refuse('api_tier_read', `your tier on this credential is ${TIER_SAYS.read} — a write needs the user to widen it to "Read + write" in API access…`);
+  if (t === 'write-auto' || t === 'write-all') return { ok: true, action: 'run', why: t };
   if (shape && Array.isArray(shapes) && shapes.includes(shape)) return { ok: true, action: 'run', why: 'always-allowed' };
   return { ok: true, action: 'propose', why: 'write-ask' };
 }
+/** THE TIER AS AN AGENT READS IT (`api creds` / `api docs` / the refusals) — by name, with what it lets through. */
+const TIER_SAYS = Object.freeze({
+  read: 'Read (read) — reads run; a write is refused',
+  'write-ask': 'Read + write, ask each (write-ask) — every write waits for the user',
+  'write-auto': 'Read + write, auto (write-auto) — writes run; a sensitive call (DELETE, a recall, …) still waits for the user',
+  'write-all': 'Full trust / 完全信任 (write-all) — writes AND sensitive calls (DELETE, a recall, …) run without asking; still logged, still under the daily cap',
+});
 /** May a card offer "Run and always allow this call shape"? Never for a sensitive call, never for a read. */
 const offersAlways = ({ cls, sensitive }) => cls === 'write' && !sensitive;
 
@@ -192,13 +200,15 @@ function budgetCheck(stamps, now, caps = BUDGET_DEFAULT) {
 }
 
 /** THE AUDIT LINE — who, what, how it went; the query's KEYS only and NEVER a body (a body's size + sha256 at most). */
-function auditLine({ at, principal, conv, cred, req, status = null, bytes = 0, ms = 0, verdict: vd, code = null, proposal = null, by = null, bodySha = null }) {
+function auditLine({ at, principal, conv, cred, req, status = null, bytes = 0, ms = 0, verdict: vd, code = null, proposal = null, by = null, bodySha = null, trust = null, sensitive = null }) {
   return {
     at, cred, principal: principal ? { kind: principal.kind, id: String(principal.id || '').slice(0, 256), name: principal.name ? String(principal.name).slice(0, 200) : null } : null,
     conv: conv ? String(conv).slice(0, 128) : null,
     method: req ? req.method : null, host: req ? req.host : null, path: req ? String(req.path).slice(0, PATH_MAX) : null,
     queryKeys: req ? [...new Set((req.query || []).map(([k]) => String(k).slice(0, 80)))] : [],
     status, bytes, ms, verdict: vd, code, proposal, by, bodySha,
+    // a sensitive call that ran under 完全信任 says so on its line (the owner sees what ran without a card)
+    ...(trust === 'write-all' ? { trust, sensitive: sensitive ? String(sensitive).slice(0, 40) : null } : {}),
   };
 }
 
@@ -210,6 +220,7 @@ const EVERYONE_TIER = 'read';
 function apiGrant({ principal, cred, tier, perDay = null, at = null, by = 'user', allWrite = false }) {
   if (/^agent:/.test(String(by))) throw new Error('channel-api.apiGrant: a tier is the user\'s to set — an agent cannot widen its own');
   if (!TIERS.includes(tier)) throw new Error(`channel-api.apiGrant: tier must be ${TIERS.join('|')}`);
+  if (tier === ACL.API_NAMED_ONLY && !(principal && principal.kind === 'agent')) throw new Error('channel-api.apiGrant: write_all_named_only — Full trust (write-all) names ONE agent or conversation; a group or All agents go up to Read + write, auto');
   if (principal && principal.kind === 'everyone' && TIERS.indexOf(tier) > TIERS.indexOf(EVERYONE_TIER) && allWrite !== true) throw new Error('channel-api.apiGrant: All agents stay at Read unless you tick "Let every agent write through this account" — a write tier for everyone needs its own click');
   const v = ACL.validateGrant({ principal, scope: { kind: 'adapter', id: cred }, level: 'hidden', origin: 'api', at, by, api: tier });
   if (!v.ok) throw new Error(`channel-api.apiGrant: ${v.error}`);
@@ -218,7 +229,7 @@ function apiGrant({ principal, cred, tier, perDay = null, at = null, by = 'user'
 
 module.exports = {
   METHODS, READ_METHODS, BODY_MAX, RESPONSE_MAX, SENSITIVE_BODY, PATH_MAX, TIMEOUT_MS, REDIRECTS_MAX, BUDGET_DEFAULT, SHOWN_BODY_MAX, PENDING_MAX,
-  HEADER_ALLOW, HEADER_REFUSED, RESPONSE_HEADER_ALLOW, TIERS, EVERYONE_TIER,
+  HEADER_ALLOW, HEADER_REFUSED, RESPONSE_HEADER_ALLOW, TIERS, EVERYONE_TIER, TIER_SAYS,
   vendorRowOf, validateRequest, classOf, sensitiveOf, shapeOf, verdict, offersAlways, freeze, thaw, digestOf, urlOf,
   redirectTarget, boundResponse, responseHeaders, budgetCheck, auditLine, apiGrant,
 };

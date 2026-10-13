@@ -27,7 +27,7 @@ import { keyboardLockGate, NAGLE_REFERENCE, SLOW_KBPS, STILL_MS } from '../deskt
 import { desktopRunPlan, desktopRunPresets, rememberRun, machineDesktopId } from '../machine-desktop-model.js';
 import { namesGuiApp } from '../machine-window.js';
 import { openMachineApp } from './machine-app.js'; // lane machine-app-crop: one app of the machine as its own window
-import { screenMap } from '../desktop-screens.js'; // lane desktop-v2-entry: the OS table + the RFB table → the displays in fb pixels
+import { screenMap, hdrShown } from '../desktop-screens.js'; // lane desktop-v2-entry: the OS table + the RFB table → the displays in fb pixels
 import { openDesktopPicker, rememberDesktop, rememberDisplays, readRecent } from './desktop-picker.js';
 
 const RUNS_KEY = 'vibespace.machineDesktopRuns'; // { [hostId]: [line…] } — the owner's latest lines per machine (≤ 3)
@@ -140,11 +140,15 @@ export function openMachineDesktop(app, m, { display } = {}) {
   // the ladder's rung (流畅 / 清晰 …) and the slow-link chip; the status chip opens the comparison row (today · the reference)
   const rungEl = el('span'); rungEl.className = 'desktop-strip-rung'; rungEl.hidden = true;
   const slowEl = el('span'); slowEl.className = 'desktop-strip-slow'; slowEl.hidden = true; slowEl.textContent = t('Slow link');
+  // lane win-desktop-cursor-hdr (owner 2026-10-13 "HDR 特别白"): a display in Windows HDR is captured as it is (TightVNC does no
+  // tone mapping, we do not transcode) — the bar says so with the remedy; only a measured `hdr: true` shows it
+  const hdrEl = el('span'); hdrEl.className = 'desktop-strip-hdr'; hdrEl.hidden = true; hdrEl.textContent = t('HDR on · the picture looks washed out');
+  hdrEl.title = t('Windows HDR is captured by TightVNC as it is, with no tone mapping; while you work remotely, turn off "Use HDR" in Windows Settings › Display (or press Win+Alt+B)');
   chip.setAttribute('role', 'button'); chip.tabIndex = 0;
   const cmp = el('div'); cmp.className = 'desktop-strip-compare'; cmp.hidden = true;
   chip.onclick = () => { cmp.hidden = !cmp.hidden; drawChip(); };
   chip.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); chip.onclick(); } };
-  strip.append(hostBtn, seg, fullBtn, keysBtn, chip, rungEl, slowEl);
+  strip.append(hostBtn, seg, fullBtn, keysBtn, chip, rungEl, slowEl, hdrEl);
   c.append(strip, cmp);
   const pane = el('div', 'position:relative;flex:1 1 auto;min-height:0'); c.append(pane);
   // the displays: the machine's own table (display-facts, once per window) + the server's -308 rects → the PURE screenMap
@@ -160,7 +164,7 @@ export function openMachineDesktop(app, m, { display } = {}) {
     seg.replaceChildren(...map.displays.map((d) => segBtn(String(d.n), d.key, d.name ? `${d.n} · ${d.name}` : t('Display {n}', { n: d.n }))), segBtn(t('All'), null, t('All')));
     seg.hidden = false;
   };
-  const apply = () => { const d = shown(); view.setCrop(d ? d.rect : null); drawSeg(); };
+  const apply = () => { const d = shown(); view.setCrop(d ? d.rect : null); drawSeg(); hdrEl.hidden = !hdrShown({ screens: facts && facts.ok ? facts.displays : null, map, key: d ? d.key : null }); };
   const pick = (key) => { want = key; rememberDesktop(m.hostId, key); apply(); };
   const remap = () => {
     const fb = view.fbSize(); if (!fb) return;
@@ -180,6 +184,14 @@ export function openMachineDesktop(app, m, { display } = {}) {
     slowEl.hidden = !q.slow || view.state !== 'connected';
     slowEl.title = t('This link measured {kbps} kbps — under {bound} kbps the picture is one step leaner', { kbps: st.kbps == null ? '—' : st.kbps, bound: SLOW_KBPS });
   };
+  // lane win-desktop-cursor-hdr: which path draws the machine's pointer (the stats row and the chip's title say it)
+  const cursorWords = () => {
+    const c = view.cursor;
+    if (!c) return '';
+    if (c.path === 'server') return t('Pointer: painted by the machine into the picture — its {px} px pointer is too big to draw here', { px: c.side });
+    if (c.path === 'scaled') return t('Pointer: drawn here at {pct} % of its {px} px, with the picture', { pct: Math.round(c.factor * 100), px: c.side });
+    return t('Pointer: drawn here at its own {px} px', { px: c.side });
+  };
   const drawChip = () => {
     drawRung();
     if (view.state !== 'connected') { chip.textContent = ''; chip.title = scope; cmp.hidden = true; return; }
@@ -187,11 +199,12 @@ export function openMachineDesktop(app, m, { display } = {}) {
     const ms = link && link.hub != null ? link.hub + (link.device || 0) : null;
     chip.textContent = t('Connected · {ms} ms · {fps} fps', { ms: ms == null ? '—' : ms, fps: st.fps });
     chip.title = [scope, t('Browser ⇄ hub {a} ms · hub ⇄ machine {b} ms · update round trip {c} ms · {fps} fps', { a: link && link.hub != null ? link.hub : '—', b: link && link.device != null ? link.device : '—', c: st.roundTripMs == null ? '—' : st.roundTripMs, fps: st.fps }),
-      map && map.state === 'unknown' && facts && facts.ok && facts.displays.length > 1 ? t('The layout of its displays could not be read — the whole screen is shown') : ''].filter(Boolean).join('\n');
+      map && map.state === 'unknown' && facts && facts.ok && facts.displays.length > 1 ? t('The layout of its displays could not be read — the whole screen is shown') : '', cursorWords()].filter(Boolean).join('\n');
     if (!cmp.hidden) {
       cmp.replaceChildren(
         el('div', null, t('Now: browser ⇄ hub {a} ms · hub ⇄ machine {b} ms · update round trip {c} ms · {fps} fps · {kbps} kbps', { a: link && link.hub != null ? link.hub : '—', b: link && link.device != null ? link.device : '—', c: st.roundTripMs == null ? '—' : st.roundTripMs, fps: st.fps, kbps: st.kbps == null ? '—' : st.kbps })),
-        el('div', null, t('Recorded reference: a key press through the same hops took {before} ms before the no-delay fix and {after} ms after (median)', { before: NAGLE_REFERENCE.beforeMs.toFixed(1), after: NAGLE_REFERENCE.afterMs.toFixed(2) })));
+        el('div', null, t('Recorded reference: a key press through the same hops took {before} ms before the no-delay fix and {after} ms after (median)', { before: NAGLE_REFERENCE.beforeMs.toFixed(1), after: NAGLE_REFERENCE.afterMs.toFixed(2) })),
+        ...(cursorWords() ? [el('div', null, cursorWords())] : []));
     }
   };
   const measure = async () => { const t0 = performance.now(); const r = await fetchJson(`/api/desktop/machine-desktop/link?host=${encodeURIComponent(m.hostId)}`); if (!r || r.error) return; link = { hub: Math.max(0, Math.round(performance.now() - t0 - (r.took || 0))), device: r.device }; drawChip(); };

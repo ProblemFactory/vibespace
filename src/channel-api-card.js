@@ -9,8 +9,14 @@
  * the same words on the other two. Words are i18n keys + params (the caller's `t` renders them; zh/ja in i18n-*.js).
  */
 
+const W = require('./api-call-words.js');
+
 const TTL_MS = 24 * 60 * 60 * 1000;     // a pending proposal expires after 24 h unanswered (said on the card and to the agent)
-const BODY_SHOWN = 400;                 // the card shows the body's first 400 chars, its size and its sha256
+const BODY_SHOWN = 2048;                // the card's 技术细节 fold shows the body (pretty-printed) up to 2 KB, then 「…」
+const NOTE_MAX = 200;                   // the agent's own `--why`, quoted under the title
+const WHO_MAX = 24;
+/** THE POLICY'S WORD as a chip (card grammar ③) — why it always asks, never a sentence. */
+const SENSITIVE_CHIP = Object.freeze({ delete: 'Delete · always asks', path: 'Sensitive path · always asks', 'large-body': 'Large body · always asks', upload: 'Upload · always asks' });
 const FATES = Object.freeze(['pending', 'running', 'ran', 'failed', 'rejected', 'expired', 'withdrawn']);
 /** `decidedBy` words the sweeper stamps through the orchestrator's own reject (status stays `rejected`, the fate is named). */
 const SWEEP_BY = Object.freeze({ expired: 'expired', withdrawn: 'withdrawn' });
@@ -28,6 +34,23 @@ function sizeText(n) {
   return `${(b / 1024 / 1024).toFixed(1)} MB`;
 }
 const whoOf = (p) => (p && p.principal && (p.principal.name || p.principal.id)) || '';
+const prettyBody = (b) => { const s = String(b); try { const j = JSON.parse(s); return j && typeof j === 'object' ? JSON.stringify(j, null, 2) : s; } catch { return s; } };
+const noteOf = (p) => { const s = p && typeof p.note === 'string' ? p.note.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim() : ''; return s ? s.slice(0, NOTE_MAX) : null; };
+
+/** THE TITLE (card grammar ①②): actor + verb + NAMED object — `{name} wants to {what}`, `what` from the PURE words
+ *  table (src/api-call-words.js); `object` = the named thing (the record's resolved name / conversation, else the id
+ *  shortened to 8 chars). Never the raw path. */
+/** The always-allow button's phrase: the title's verb + object, or "call the <vendor> API" (no method, no path). */
+function alwaysWhat(p) {
+  const w = W.wordsOf(p);
+  return w.row ? { key: w.key, params: w.params, text: w.text || null } : { key: 'call the {vendor} API', params: { vendor: w.params.vendor } };
+}
+function titleOf(p) {
+  const w = W.wordsOf(p);
+  const who = String(whoOf(p)); const name = who.length > WHO_MAX ? `${who.slice(0, WHO_MAX - 1)}…` : who;
+  return { key: '{name} wants to {what}', params: { name }, what: { key: w.key, params: w.params, text: w.text || null }, row: w.row,
+    object: W.objectView(w.object, { name: p.objectName || null, conv: p.objectConv || null }) };
+}
 
 /** The outcome line — the SAME words on the card, the Outbox row, the resolved For-you row. `{key, params}`. */
 function outcomeOf(p, { now = Date.now() } = {}) {
@@ -46,21 +69,22 @@ function outcomeOf(p, { now = Date.now() } = {}) {
 function cardModel(p, { now = Date.now() } = {}) {
   const fate = fateOf(p);
   const q = (p.query || []).map(([k, v]) => `${k}=${v}`).join('&');
-  const body = p.body == null ? null : String(p.body).slice(0, BODY_SHOWN);
+  const body = p.body == null ? null : String(prettyBody(p.body)).slice(0, BODY_SHOWN);
   const m = {
     id: p.id, fate, actionable: fate === 'pending', conv: p.conv || null,
-    head: { key: '{name} wants to call {cred} · {call}', params: { name: whoOf(p), cred: p.credLabel || p.cred, call: `${p.method} ${p.path}` } },
+    head: titleOf(p), note: noteOf(p), cred: p.credLabel || p.cred || null,
     request: { method: p.method, host: p.host, path: p.path, query: q },
     headers: Object.entries(p.headers || {}).map(([k, v]) => `${k}: ${v}`),
-    body, bodyMore: p.body != null && String(p.body).length > BODY_SHOWN, bodyBytes: Number(p.bodyBytes) || 0, bodySha: p.bodySha || null,
+    body, bodyMore: p.body != null && String(prettyBody(p.body)).length > BODY_SHOWN, bodyBytes: Number(p.bodyBytes) || 0, bodySha: p.bodySha || null,
     tier: p.tier || null,
-    sensitive: p.sensitive ? { key: 'Sensitive — always asks ({why})', params: { why: p.sensitive } } : null,
-    // D2: "always allow" only for a non-sensitive write — and its words NAME the shape it will allow
-    always: p.offersAlways && !p.sensitive && p.shape ? { key: 'Run and always allow {shape}', params: { shape: p.shape } } : null,
+    sensitive: p.sensitive ? { key: SENSITIVE_CHIP[p.sensitive] || 'Sensitive · always asks', params: {} } : null,
+    // D2: "always allow" only for a non-sensitive write. Its BUTTON says the plain phrase (the words table's, or "call the
+    // <vendor> API" for an unknown call); the exact shape it will allow is drawn in the 技术细节 fold (card grammar ④)
+    always: p.offersAlways && !p.sensitive && p.shape ? { key: 'Run and never ask again ({what})', params: { shape: p.shape }, what: alwaysWhat(p) } : null,
     expiresAt: (p.at || 0) + TTL_MS,
     outcome: outcomeOf(p, { now }),
   };
-  m.sig = JSON.stringify([m.fate, m.head, m.request, m.headers, m.body, m.bodyBytes, m.bodySha, m.tier, m.sensitive, m.always, m.outcome]);
+  m.sig = JSON.stringify([m.fate, m.head, m.note, m.request, m.headers, m.body, m.bodyBytes, m.bodySha, m.tier, m.sensitive, m.always, m.outcome]);
   return m;
 }
 
@@ -108,4 +132,4 @@ function sweepVerdicts(list, { now = Date.now(), live = () => null } = {}) {
   return out;
 }
 
-module.exports = { TTL_MS, BODY_SHOWN, FATES, SWEEP_BY, fateOf, sizeText, outcomeOf, cardModel, forYouOf, resolvedFactOf, receiptText, sweepVerdicts };
+module.exports = { TTL_MS, BODY_SHOWN, NOTE_MAX, SENSITIVE_CHIP, FATES, SWEEP_BY, fateOf, sizeText, outcomeOf, titleOf, cardModel, forYouOf, resolvedFactOf, receiptText, sweepVerdicts };

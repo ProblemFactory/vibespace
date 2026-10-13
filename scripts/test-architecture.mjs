@@ -1937,7 +1937,9 @@ for (const [edge] of EXCEPTIONS) {
 // path.dirname(rel))`, or a variable assigned one of those — <the checkout> =
 // a name bound from `import.meta.url` + '..'. The two generated build
 // artifacts a bare run stands in for (src/lib/build-version.js,
-// src/agentd/version.js) are the declared exceptions. And .gitignore carries
+// src/agentd/version.js) and the committed generated words table
+// (src/api-call-words.generated.js ⇐ scripts/gen-api-call-words.mjs, whose
+// --check is test-api-call-words) are the declared exceptions. And .gitignore carries
 // no wildcard `.js` pattern that could apply under src/ — a stray copy must be
 // VISIBLE, never hidden.
 console.log('§51 no suite writes a patched copy into the tree');
@@ -1980,7 +1982,7 @@ console.log('§51 no suite writes a patched copy into the tree');
       const direct = new RegExp('^' + inTree.source).test(call) || (/^path\.join\(\s*(\w+)\s*,/.test(a) && vars.has(/^path\.join\(\s*(\w+)/.exec(a)[1]));
       if (!(direct || vars.has(a))) continue;
       const line = src.slice(0, m.index).split('\n').length;
-      if (/build-version\.js|agentd\/version\.js/.test(a + ' ' + (vars.get(a) || ''))) continue;   // the generated build artifacts (declared exceptions)
+      if (/build-version\.js|agentd\/version\.js|api-call-words\.generated\.js/.test(a + ' ' + (vars.get(a) || ''))) continue;   // the generated build artifacts (declared exceptions)
       hits.push(`${line}: ${a.slice(0, 70)}`);
     }
     return hits;

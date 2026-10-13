@@ -67,7 +67,7 @@ try {
   ok(a.fut === a.now + HOUR, 'a future expiresAt is stored as given', a);
   ok(a.past === null && a.nan === null && a.str === null, 'a past, NaN or string expiresAt is IGNORED (null) — never an item dead on arrival, never a throw', a);
   ok(a.none === null, 'no expiresAt ⇒ null (a lasting item)', a);
-  const aCtl = addLeg(mutant('src/user-todos.js', [["    expiresAt = validExpiry(expiresAt);\n", "    expiresAt = expiresAt == null ? null : expiresAt;\n"]]));
+  const aCtl = addLeg(mutant('src/user-todos.js', [["    expiresAt = validExpiry(expiresAt, this._now());\n", "    expiresAt = expiresAt == null ? null : expiresAt;\n"]]));
   ok(!(aCtl.past === null && aCtl.nan === null && aCtl.str === null), 'CONTROL: without validExpiry the past/NaN/string values reach the store (the validation leg fails on it)', aCtl);
   const aPre = addLeg(mutant('src/user-todos.js', [['      expiresAt, // ms epoch', '      // expiresAt dropped (pre-fix) // ms epoch']]));
   ok(aPre.fut !== aPre.now + HOUR, 'CONTROL: a store that never records the field (the pre-fix shape) loses the stamp', aPre);

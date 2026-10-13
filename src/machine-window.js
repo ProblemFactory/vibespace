@@ -418,13 +418,48 @@ const MAC_DISPLAYS_JXA = [
   '  }',
   "  return JSON.stringify({ t: 'displays', origin: 'bottom-left', rows });",
   '}'].join('\n');
+// lane win-desktop-cursor-hdr (owner 2026-10-13 "HDR 特别白"): each screen's Windows HDR state — WMI has none, so the
+// DisplayConfig API: QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS) → per active path the source's GDI name (DisplayConfigGetDeviceInfo
+// type 1, \\.\DISPLAYn = Screen.DeviceName) and the target's advanced-colour info (type 9: bit 1 advancedColorEnabled, bit 2
+// wideColorEnforced = the SDR wide-colour mode, not HDR). Raw offsets of DISPLAYCONFIG_PATH_INFO (72 bytes: source LUID @0, id @8;
+// target LUID @20, id @28). Any failure = no row (hdr unknown — the bar says nothing).
+const WIN_HDR_CS = [
+  "Add-Type -TypeDefinition @'",
+  'using System; using System.Text; using System.Runtime.InteropServices;',
+  'public static class VsHdr {',
+  '  [DllImport("user32.dll")] static extern int GetDisplayConfigBufferSizes(uint f, out uint np, out uint nm);',
+  '  [DllImport("user32.dll")] static extern int QueryDisplayConfig(uint f, ref uint np, IntPtr p, ref uint nm, IntPtr m, IntPtr t);',
+  '  [DllImport("user32.dll")] static extern int DisplayConfigGetDeviceInfo(IntPtr q);',
+  '  public static string Read() {',
+  '    uint np, nm; var sb = new StringBuilder();',
+  '    if (GetDisplayConfigBufferSizes(2, out np, out nm) != 0) return "";',
+  '    IntPtr P = Marshal.AllocHGlobal((int)np * 72), M = Marshal.AllocHGlobal((int)nm * 64), B = Marshal.AllocHGlobal(96);',
+  '    try {',
+  '      if (QueryDisplayConfig(2, ref np, P, ref nm, M, IntPtr.Zero) != 0) return "";',
+  '      for (int i = 0; i < (int)np; i++) {',
+  '        IntPtr p = new IntPtr(P.ToInt64() + i * 72);',
+  '        Marshal.WriteInt32(B, 0, 1); Marshal.WriteInt32(B, 4, 84); Marshal.WriteInt64(B, 8, Marshal.ReadInt64(p, 0)); Marshal.WriteInt32(B, 16, Marshal.ReadInt32(p, 8));',
+  '        if (DisplayConfigGetDeviceInfo(B) != 0) continue;',
+  '        string name = Marshal.PtrToStringUni(new IntPtr(B.ToInt64() + 20));',
+  '        Marshal.WriteInt32(B, 0, 9); Marshal.WriteInt32(B, 4, 32); Marshal.WriteInt64(B, 8, Marshal.ReadInt64(p, 20)); Marshal.WriteInt32(B, 16, Marshal.ReadInt32(p, 28));',
+  '        if (DisplayConfigGetDeviceInfo(B) != 0) continue;',
+  '        int v = Marshal.ReadInt32(B, 20);',
+  "        sb.Append(name).Append('=').Append((v & 2) != 0 && (v & 4) == 0 ? 1 : 0).Append(';');",
+  '      }',
+  '    } finally { Marshal.FreeHGlobal(P); Marshal.FreeHGlobal(M); Marshal.FreeHGlobal(B); }',
+  '    return sb.ToString();',
+  '  }',
+  '}',
+  "'@"];
 function winDisplaysScript() {
   return ["$ErrorActionPreference = 'Stop'", ...WIN_TYPES,
     '$aware = 0; try { $aware = [int][VsWin]::SetProcessDPIAware() } catch { }',
     'Add-Type -AssemblyName System.Windows.Forms',
     '$dpi = 96; try { $dpi = [int][VsWin]::GetDpiForSystem() } catch { }',
+    '$hdr = @{}',
+    'try {', ...WIN_HDR_CS, "  foreach ($kv in ([VsHdr]::Read()).Split(';')) { $p = $kv.Split('='); if ($p.Length -eq 2) { $hdr[$p[0]] = [int]$p[1] } }", '} catch { }',
     '$rows = @()',
-    'foreach ($s in [System.Windows.Forms.Screen]::AllScreens) { $b = $s.Bounds; $rows += @{ id = $s.DeviceName; name = $s.DeviceName; x = $b.X; y = $b.Y; w = $b.Width; h = $b.Height; scale = [math]::Round($dpi / 96, 3); primary = [int]$s.Primary } }',
+    'foreach ($s in [System.Windows.Forms.Screen]::AllScreens) { $b = $s.Bounds; $h = -1; if ($hdr.ContainsKey($s.DeviceName)) { $h = $hdr[$s.DeviceName] }; $rows += @{ id = $s.DeviceName; name = $s.DeviceName; x = $b.X; y = $b.Y; w = $b.Width; h = $b.Height; scale = [math]::Round($dpi / 96, 3); primary = [int]$s.Primary; hdr = $h } }',
     "[Console]::Out.WriteLine((ConvertTo-Json -InputObject @{ t = 'displays'; origin = 'top-left'; aware = $aware; rows = $rows } -Compress -Depth 4))"].join('\n');
 }
 /** The op's argv for this platform. → { ok, argv } | { ok:false, code } */
@@ -433,7 +468,7 @@ function displaysArgv(platform) {
   if (platform === 'darwin') return { ok: true, argv: [OSA, '-l', 'JavaScript', '-e', MAC_DISPLAYS_JXA] };
   return { ok: false, code: 'not_desktop_machine', error: `the display table is for Windows and macOS machines (this one runs ${platform || 'an unknown system'})` };
 }
-/** The script's one line → { ok, displays: [{id, name, x, y, w, h, scale, primary}] } in a TOP-LEFT origin (a Mac's y flipped
+/** The script's one line → { ok, displays: [{id, name, x, y, w, h, scale, primary, hdr}] } in a TOP-LEFT origin (a Mac's y flipped
  *  against its primary screen), or { ok:false, code:'bad_output' }. PURE. */
 function parseDisplayFacts(platform, stdout) {
   let o = null;
@@ -448,7 +483,7 @@ function parseDisplayFacts(platform, stdout) {
   for (const r of rows.slice(0, 16)) {
     const x = num(r && r.x), y = num(r && r.y), w = num(r && r.w), h = num(r && r.h);
     if (x == null || y == null || !(w > 0) || !(h > 0)) continue;
-    out.push({ id: clean(r.id).slice(0, 60) || String(out.length + 1), name: clean(String(r.name || '').replace(/^\\\\\.\\/, '')).slice(0, 80), x, y: flip ? H0 - (y + h) : y, w, h, scale: num(r.scale) > 0 ? num(r.scale) : 1, primary: !!Number(r.primary) });
+    out.push({ id: clean(r.id).slice(0, 60) || String(out.length + 1), name: clean(String(r.name || '').replace(/^\\\\\.\\/, '')).slice(0, 80), x, y: flip ? H0 - (y + h) : y, w, h, scale: num(r.scale) > 0 ? num(r.scale) : 1, primary: !!Number(r.primary), hdr: r.hdr === 1 || r.hdr === true ? true : r.hdr === 0 || r.hdr === false ? false : null });
   }
   return out.length ? { ok: true, platform, displays: out } : { ok: false, code: 'bad_output', error: 'the machine printed no usable screen' };
 }

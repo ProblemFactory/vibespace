@@ -8,7 +8,13 @@
  *     offset is added there, so a click lands on the machine where it was seen. Switching the rect never reconnects.
  *   ② 1.7's _handleExtendedDesktopSize keeps only the FIRST screen's id/flags and skips every rect — the patch hands the
  *     payload (4 + 16·n bytes) to the page as a `vsscreens` event first (src/desktop-screens.js rfbScreens reads it).
- * The added code calls rfb.js's own methods _updateClip(), _updateScale() and _setClippingViewport() (defined there, not here).
+ *   ③ lane win-desktop-cursor-hdr (owner 2026-10-13 "鼠标如此巨大"): 1.7 draws the machine's pointer (the Cursor pseudo-encoding)
+ *     at its own pixel size while the picture is scaled to fit — a 96 px Windows pointer at 200 % DPI over a screen shrunk to
+ *     half. The patch hands each pointer image and the view's scale to `vsCursor(image, scale)` (the page answers a scaled
+ *     image, src/desktop-screens.js cursorPlan), redraws it when the scale changes, and `vsServerCursor` (true) leaves both
+ *     pointer pseudo-encodings out of SetEncodings — the machine then paints its pointer INTO the picture.
+ * The added code calls rfb.js's own methods _updateClip(), _updateScale(), _setClippingViewport(), _refreshCursor(),
+ * _shouldShowDotCursor() and _fixScrollbars() (defined there, not here; the last two are the anchors' own text).
  * Each anchor must match exactly once, else the build FAILS (an upstream change is read, never silently unpatched).
  * PURE: scripts/build-novnc.mjs applies it; scripts/test-screen-map.mjs pins it; the chrome suite builds a copy without it (the
  * mutant: the crop leg goes red).
@@ -39,6 +45,21 @@ const PATCHES = Object.freeze([
     name: 'screens',
     anchor: '        const firstUpdate = !this._supportsSetDesktopSize;',
     text: '        this.dispatchEvent(new CustomEvent("vsscreens", { detail: { bytes: this._sock.rQpeekBytes(bytes) } }));\n        const firstUpdate = !this._supportsSetDesktopSize;',
+  },
+  {
+    name: 'cursor',
+    anchor: '        const image = this._shouldShowDotCursor() ? RFB.cursors.dot : this._cursorImage;\n',
+    text: '        let image = this._shouldShowDotCursor() ? RFB.cursors.dot : this._cursorImage;\n        if (this.vsCursor) image = this.vsCursor(image, this._display.scale) || image;\n',
+  },
+  {
+    name: 'cursor-scale',
+    anchor: '            this._display.autoscale(size.w, size.h);\n        }\n        this._fixScrollbars();',
+    text: '            this._display.autoscale(size.w, size.h);\n        }\n        this._fixScrollbars();\n        if (this.vsCursor && this._vsCursorAt !== this._display.scale) { this._vsCursorAt = this._display.scale; this._refreshCursor(); }',
+  },
+  {
+    name: 'server-cursor',
+    anchor: '        if (this._fbDepth == 24) {\n            encs.push(encodings.pseudoEncodingVMwareCursor);',
+    text: '        if (this._fbDepth == 24 && !this.vsServerCursor) {\n            encs.push(encodings.pseudoEncodingVMwareCursor);',
   },
 ]);
 /** The added lines (the ≤ 20-line budget the design set). */

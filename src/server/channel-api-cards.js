@@ -16,11 +16,12 @@ const path = require('path');
 const crypto = require('crypto');
 const C = require('../channel-api-card.js');
 const F = require('../channel-api.js');
+const W = require('../api-call-words.js');
 
 const INBOX_KEY = 'channels';          // the channels engine's For-you key (src/server/channels-engine.js INBOX_KEY)
 const SWEEP_EVERY_MS = 60 * 1000;
 
-function create({ dataDir, api, userTodos = null, deliver = null, now = () => Date.now(), log = console, timer = true } = {}) {
+function create({ dataDir, api, userTodos = null, deliver = null, names = null, now = () => Date.now(), log = console, timer = true } = {}) {
   if (!dataDir) throw new Error('channel-api-cards: dataDir is required');
   const A = () => (typeof api === 'function' ? api() : api);
   const dir = path.join(dataDir, 'channels');
@@ -30,6 +31,14 @@ function create({ dataDir, api, userTodos = null, deliver = null, now = () => Da
   const save = () => { try { fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(stateFile + '.tmp', JSON.stringify(state)); fs.renameSync(stateFile + '.tmp', stateFile); } catch (e) { log.warn('[channel-api-cards] state write failed:', e && e.message); } };
   const frozenOf = () => { try { return JSON.parse(fs.readFileSync(frozenFile, 'utf8')).proposals || {}; } catch { return {}; } };
   const ctxOf = (p) => ({ kind: p.principal.kind, id: p.principal.id, name: p.principal.name, groups: p.principal.groups || [] });
+  /** The call's chat NAMED from what the channel store knows (card grammar ②) — and the conversation it opens; else nothing (the card shows the id chip). */
+  const objectOf = (p) => {
+    const o = W.wordsOf(p).object;
+    if (!o || o.kind !== 'chat' || !o.id || typeof names !== 'function') return {};
+    let n = null;
+    try { n = names(p.cred, o.id); } catch {}
+    return n ? { objectName: String(n), objectConv: { adapterId: p.cred, convId: o.id } } : {};
+  };
 
   /** THE RECORDS — one per proposal the owner view holds (newest first); every surface draws from these. */
   function records() {
@@ -43,7 +52,7 @@ function create({ dataDir, api, userTodos = null, deliver = null, now = () => Da
       return {
         ...p, headers: f ? f.headers || {} : {}, bodySha: f && f.body ? crypto.createHash('sha256').update(Buffer.from(f.body, 'base64')).digest('hex') : null,
         tier: g ? g.tier : null, shape: p.offersAlways ? F.shapeOf({ method: p.method, host: p.host, path: p.path }) : null,
-        todoId: (state.items[p.id] || {}).todoId || null, receipt: (state.items[p.id] || {}).receipt || null,
+        todoId: (state.items[p.id] || {}).todoId || null, receipt: (state.items[p.id] || {}).receipt || null, ...objectOf(p),
       };
     });
   }

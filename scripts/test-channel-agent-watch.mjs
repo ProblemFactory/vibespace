@@ -86,13 +86,13 @@ const AG = { kind: 'agent', id: 'agent-1', name: 'Worker', groups: [], msgLevelF
 function dayStartClock() { const t0 = Date.now(); const day0 = Math.floor(t0 / 86400e3) * 86400e3 + 60e3; let skew = 0; const f = () => day0 + (Date.now() - t0) + skew; f.advance = (ms) => { skew += ms; }; return f; }
 function mkEngine(name, { ENGM = ENG, live = null, sendHook = null } = {}) {
   const dataDir = path.join(ROOT, name);
-  const userTodos = new UserTodoManager({ dataDir });
+  const clock = dayStartClock();
+  const userTodos = new UserTodoManager({ dataDir, now: clock });
   const delivered = [], stashed = [];
   const deliver = {
     deliverToConversation: async (cid, text, o) => { delivered.push({ cid, text, o }); return { ok: true, lane: 'message' }; },
     stashFor: (cid, e) => { stashed.push({ cid, ...e }); return { stored: true }; },
   };
-  const clock = dayStartClock();
   // the fake world follows THIS clock (a later pass sees the day's later records — new messages)
   const registry = createChannelRegistry();
   const fk = FAKE.makeFakeAdapter({ kind: 'fake-poll', receive: 'poll', sendAs: ['user'], now: clock });

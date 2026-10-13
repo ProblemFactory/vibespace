@@ -157,7 +157,7 @@ let proposalCheck, previewCheck;
   const r3 = rig(ENGINE, { settings: { teach: true, autoProjects: ['/w/vibespace'] } });
   const out3 = await r3.E.seen(seenArgs({ messages: [{ role: 'user', content: [{ type: 'text', text: 'tell jane.doe my_private_plan99 about it' }] }, { role: 'assistant', content: [{ type: 'text', text: 'Sure — see `src/lib/foo.ts`.' }] }] }));
   const w3 = r3.writes();
-  ok('the person\'s own words never auto-send (jane.doe ⇒ the card; my_private_plan99 is an id shape ⇒ neither); the agent\'s code-span path does (foo.ts)', w3.length === 1 && w3[0][1].join() === 'foo.ts' && !!out3.proposal && out3.proposal.terms.includes('jane.doe') && !out3.proposal.terms.includes('my_private_plan99'), { w3, p: out3.proposal && out3.proposal.terms });
+  ok('the person\'s own words never auto-send (jane.doe and the identifier my_private_plan99 ⇒ the card — ids are what dictation gets wrong, lane voice-teach-ids-allowed); the agent\'s code-span path does (foo.ts)', w3.length === 1 && w3[0][1].join() === 'foo.ts' && !!out3.proposal && out3.proposal.terms.includes('jane.doe') && out3.proposal.terms.includes('my_private_plan99'), { w3, p: out3.proposal && out3.proposal.terms });
 }
 {
   const r = rig(ENGINE, { settings: { context: true } });

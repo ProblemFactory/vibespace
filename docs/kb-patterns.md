@@ -45,3 +45,15 @@ Moved VERBATIM out of CLAUDE.md (tier-2 pass).
 
 ### The phone composer rule (lane phone-chat-composer, 2026-10-13)
 On a phone the text box owns its row: attachments go behind ONE leading door (a sheet), the microphone lives inside the field, and the composer + status bar are one bottom panel (one surface, one top border, the 8-px rhythm). Build the phone face from the SAME nodes the desk uses (re-parent at the 768 px query, restore when it widens) and gate every phone CSS rule; prove the desk is untouched with a desk render whose PNG equals the one with the phone block stripped. A bar that cannot fit folds behind ⋯ in bar order — never a horizontal scroller.
+
+### The card grammar (lane api-call-card-words, 2026-10-13 — the owner on the .263 API-call card: 「这什么破 UI 好丑陋」)
+A proposal / approval / notice card speaks in the person's words. Seven rules; scripts/test-card-grammar.mjs is the census (every decision-card renderer in src/lib is rendered there or sits on its printed exception list).
+1. **Title = actor + verb + NAMED object** — "杂活 想删除文档《周报》里的 3 个块（第 1–3 个）". The verb comes from a PURE words table (src/api-call-words.js for raw-API calls; one fixture + a RED control per row). An unknown call says "调用 Lark API（POST users）": the vendor + the method + the last meaningful path segment, never the whole path.
+2. **The object is named** from what the store or the request itself knows (the channel index's name for a chat, the title in a create call's body), else its id shortened to 8 chars in a chip — never from the agent's `--why` (a claim, shown as a quote). Link it when we can open it (`app.openChannel`).
+3. **The policy is a chip** ("删除 · 总是询问", the tier word), never a sentence like "敏感操作 —— 总是会问你（delete）".
+4. **ONE fold for raw strings**: a collapsed 技术细节 (`data-fold="tech"`) holds the method + full URL + query, the headers, the body (pretty-printed, ≤ 2 KB then …), the sha256 and the byte count. Nothing raw outside it, buttons included. The always-allow button says the plain phrase 「执行，并以后不再问（在 产品群 发消息）」 (「…（调用 Lark API）」 for an unknown call), and the exact shape it grants is a fold line 「以后放行：POST …/im/*/messages」 (verify r1 H2: the shape is still named, just inside the fold).
+5. **Said once**: a list row carries the short title + the chip + the outcome. The card that opens under it repeats none of them.
+6. **Actions**: Approve is primary and needs no reason. Reject is secondary and asks for its reason in a popover when pressed. The agent's own `--why` is a quoted line under the title.
+7. **Phone**: the same card, stacked (full-width buttons, the reason box on its own line).
+Words for a vendor's long tail are generated from the vendor's catalogue (scripts/gen-api-call-words.mjs); the hand table reads counts; the agent's claim is a quote (lane api-call-words-from-spec).
+The census tells: a URL / sha / byte count / an id of 16+ chars with a digit outside the fold, a "—— " sentence or a chip holding a dash, a title over 90 chars, a button label holding a URL or a method + path.

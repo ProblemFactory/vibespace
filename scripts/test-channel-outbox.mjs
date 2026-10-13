@@ -146,9 +146,9 @@ function mkEngine(opts = {}) {
     stashPeek(cid) { return (held.get(cid) || []).map((e) => ({ ...e })); },
     forget(cid) { held.delete(cid); },
   };
-  const userTodos = opts.userTodos === null ? null : (opts.userTodos || new UserTodoManager({ dataDir }));
   let offset = 0;
   const now = () => Date.now() + offset;
+  const userTodos = opts.userTodos === null ? null : (opts.userTodos || new UserTodoManager({ dataDir, now }));
   const e = (opts.engine || ENG).create({
     dataDir, env: { VIBESPACE_CHANNELS_FAKE: '1' }, registry: opts.registry, broadcast: (m) => events.push(m),
     userTodos, deliver, now, serverSetting: (k) => (opts.settings || {})[k], log: { log() {}, warn() {}, error() {} },
@@ -836,11 +836,12 @@ function mkReal(opts = {}) {
     if (a && typeof a.reconcile === 'function') { const r0 = a.reconcile; a.reconcile = async (...args) => { send.reconciles++; await sleep(15); return r0(...args); }; }
     return a;
   };
-  const userTodos = new UserTodoManager({ dataDir });
   let offset = 0;
+  const now = () => Date.now() + offset;
+  const userTodos = new UserTodoManager({ dataDir, now });
   const e = (opts.engine || ENG).create({
     dataDir, env: { VIBESPACE_CHANNELS_FAKE: '1' }, registry: reg, broadcast: (m) => events.push(m),
-    userTodos, deliver: ladder, now: () => Date.now() + offset, serverSetting: () => undefined, log: { log() {}, warn() {}, error() {} },
+    userTodos, deliver: ladder, now, serverSetting: () => undefined, log: { log() {}, warn() {}, error() {} },
     liveSessions: () => [{ cid: 'agent-1', name: 'Worker', groups: ['g1'] }],
   });
   return { eng: e, events, delivered, userTodos, ladder, real, send, advance: (ms) => { offset += ms; }, dataDir };

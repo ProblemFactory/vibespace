@@ -1063,7 +1063,8 @@ console.log('§FS-G design 010 S6: Gmail\'s search requests live in its search /
   //   THE SECRET  `.secret()` is read once, inside that call's arguments — never kept in a variable.
   const census13 = (slackText, texts) => {
     const S = strip(slackText), rows = [];
-    const where = []; for (const [rel, text] of Object.entries(texts)) { const n = (strip(text).replace(/i18nKey\('(?:[^'\\]|\\.)*'\)/g, '').match(/oauth\.v2\.access/g) || []).length; if (n) where.push(`${rel}:${n}`); }
+    // the generated card-words table (src/api-call-words.generated.js ⇐ the vendors' catalogues) NAMES every Slack method as words — it calls none
+    const where = []; for (const [rel, text] of Object.entries(texts)) { if (rel === 'src/api-call-words.generated.js') continue; const n = (strip(text).replace(/i18nKey\('(?:[^'\\]|\\.)*'\)/g, '').match(/oauth\.v2\.access/g) || []).length; if (n) where.push(`${rel}:${n}`); }
     rows.push(['ONE SITE: the method name `oauth.v2.access` appears once in the server tree — slack-manifest.js\'s EXCHANGE_METHOD', where.join() === 'src/channels/slack-manifest.js:1', where.join()]);
     const ex = bodyOf(S, '  async function exchangeCode(code, redirectUri, cancelled) {');
     rows.push(['ONE SITE: exchangeCode posts the code with the consent\'s redirect_uri, the app authenticated by HTTP Basic', (S.match(/Manifest\.EXCHANGE_METHOD/g) || []).length === 1 && /callSlack\(fetchFn, Manifest\.EXCHANGE_METHOD, \{ code: String\(code\), \.\.\.\(redirectUri \? \{ redirect_uri: redirectUri \} : \{\}\) \}, \{ basic: \{ id: c\.clientId, secret: c\.secret\(\) \} \}\)/.test(ex), '']);

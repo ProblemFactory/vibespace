@@ -18,7 +18,15 @@
 //   ⑧ the Apps dialog's machine: "打开它的桌面 → 桌面" shows the window at once and becomes the picker's recent choice
 //   ⑨ people only: the displays / link routes and the bridge refuse an agent token by name (human_only)
 //   ⑩ phone 390: the picker is a bottom sheet; the window's strip is ONE row                               phone.png
-//   ⑪ RED CONTROL: noVNC built WITHOUT the patch (scripts/build-novnc.mjs --unpatched) ⇒ ③'s crop predicate fails
+//   ⑫ lane win-desktop-cursor-hdr (owner 2026-10-13 "鼠标如此巨大"), DPR 2: the stub sends a 96 px pointer (Cursor
+//      pseudo-encoding, hotspot 24,12) over display 2 at view scale 0.5 ⇒ the canvas's CSS cursor image decodes to 48×48 with
+//      the hotspot 12 6; a smaller window (scale 0.375) redraws it at 36; the stats row names the path   cursor-after.png
+//   ⑬ a 256 px pointer ⇒ the machine paints it: a second SetEncodings without -239 / VMware on the SAME session, a 3 px dot
+//      here, the stats row says so — and the reconnect's first SetEncodings leaves them out too
+//   ⑭ HDR (the fixture's DISPLAY2 hdr 1, DISPLAY1 hdr 0): 「HDR 已开 · 画面会偏白」 with the remedy title on 2 and on 全部,
+//      nothing on 1                                                                                       hdr-chip.png
+//   ⑪ RED CONTROL: noVNC built WITHOUT the patch (scripts/build-novnc.mjs --unpatched) ⇒ ③'s crop predicate fails, and the
+//      96 px pointer stays 96 px at scale 0.5 (DPR 2)                                                    cursor-before.png
 // PNGs when `--shots <dir>`.
 import fs from 'node:fs';
 import net from 'node:net';
@@ -57,7 +65,7 @@ const cleanup = () => {
 process.on('exit', cleanup);
 for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => { cleanup(); process.exit(143); });
 // the fixture "PowerShell": the display-facts script answered the way the real one prints (one JSON line, DeviceName ids)
-const FACTS = { t: 'displays', origin: 'top-left', aware: 1, rows: [{ id: '\\\\.\\DISPLAY1', name: 'DELL P2419H', x: 0, y: 0, w: 1280, h: 800, scale: 1, primary: 1 }, { id: '\\\\.\\DISPLAY2', name: 'LG 27UL', x: 1280, y: 0, w: 1280, h: 800, scale: 1, primary: 0 }] };
+const FACTS = { t: 'displays', origin: 'top-left', aware: 1, rows: [{ id: '\\\\.\\DISPLAY1', name: 'DELL P2419H', x: 0, y: 0, w: 1280, h: 800, scale: 1, primary: 1, hdr: 0 }, { id: '\\\\.\\DISPLAY2', name: 'LG 27UL', x: 1280, y: 0, w: 1280, h: 800, scale: 1, primary: 0, hdr: 1 }] };
 const FAKE_PS = `#!${process.execPath}
 const a = process.argv.slice(2); const s = Buffer.from(a[a.length - 1] || '', 'base64').toString('utf16le');
 if (/AllScreens/.test(s)) { process.stdout.write(${JSON.stringify(JSON.stringify(FACTS))} + '\\r\\n'); process.exit(0); }
@@ -91,8 +99,8 @@ const frame = (() => {
   return px;
 })();
 function stubVnc() {
-  const seen = { pointers: [], sessions: 0, authed: 0 };
-  const st = { delayMs: 40 };
+  const seen = { pointers: [], sessions: 0, authed: 0, encs: [] };
+  const st = { delayMs: 40, cursor: null }; // cursor: {side, hx, hy} — sent once per change to a session that offered -239
   const u16 = (n) => Buffer.from([(n >> 8) & 255, n & 255]);
   const u32 = (n) => { const b = Buffer.alloc(4); b.writeUInt32BE(n >>> 0); return b; };
   const s32 = (n) => { const b = Buffer.alloc(4); b.writeInt32BE(n); return b; };
@@ -104,10 +112,26 @@ function stubVnc() {
     rs.push(Buffer.concat([rect(0, 0, FW, FH, 0), frame]));
     c.sock.write(Buffer.concat([Buffer.from([0, 0]), u16(rs.length), ...rs]));
   };
-  const tick = (c) => c.sock.write(Buffer.concat([Buffer.from([0, 0]), u16(1), rect(0, 0, 1, 1, 0), Buffer.from([...C1, 0])]));
+  // lane win-desktop-cursor-hdr: the Cursor pseudo-encoding (-239): w·h RGBX pixels + the 1-bit mask; an arrow, black edge, white
+  const cursorRect = (c) => {
+    const k = st.cursor;
+    if (!k || c.cursorSent === k || !(c.encs || []).includes(-239)) return null;
+    c.cursorSent = k;
+    const n = k.side, pix = Buffer.alloc(n * n * 4), mask = Buffer.alloc(Math.ceil(n / 8) * n);
+    const inside = (x, y) => y < n * 0.9 && x <= y * 0.62;
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+      if (!inside(x, y)) continue;
+      const edge = !inside(x - 3, y) || !inside(x + 3, y) || !inside(x, y + 3) || !inside(x, y - 3);
+      pix.fill(edge ? 0 : 255, (y * n + x) * 4, (y * n + x) * 4 + 3);
+      mask[y * Math.ceil(n / 8) + (x >> 3)] |= 0x80 >> (x & 7);
+    }
+    return Buffer.concat([rect(k.hx, k.hy, n, n, -239), pix, mask]);
+  };
+  const tick = (c) => { const cr = cursorRect(c); c.sock.write(Buffer.concat([Buffer.from([0, 0]), u16(cr ? 2 : 1), rect(0, 0, 1, 1, 0), Buffer.from([...C1, 0]), ...(cr ? [cr] : [])])); };
+  const conns = new Set();
   const server = net.createServer((sock) => {
     const c = { sock, stage: 0, buf: Buffer.alloc(0), ext: false, full: false, timer: null };
-    sock.on('error', () => { }); sock.on('close', () => clearTimeout(c.timer));
+    conns.add(c); sock.on('error', () => { }); sock.on('close', () => { clearTimeout(c.timer); conns.delete(c); });
     sock.write('RFB 003.008\n');
     sock.on('data', (d) => {
       c.buf = Buffer.concat([c.buf, d]);
@@ -121,14 +145,14 @@ function stubVnc() {
         const t = b[0];
         const need = t === 0 ? 20 : t === 2 ? (b.length >= 4 ? 4 + 4 * b.readUInt16BE(2) : 1e9) : t === 3 ? 10 : t === 4 ? 8 : t === 5 ? 6 : t === 6 ? (b.length >= 8 ? 8 + Math.abs(b.readInt32BE(4)) : 1e9) : t === 150 ? 10 : t === 251 ? (b.length >= 8 ? 8 + 16 * b[6] : 1e9) : 1;
         if (b.length < need) return;
-        if (t === 2) for (let i = 0; i < b.readUInt16BE(2); i++) if (b.readInt32BE(4 + 4 * i) === -308) c.ext = true;
+        if (t === 2) { c.encs = []; for (let i = 0; i < b.readUInt16BE(2); i++) { c.encs.push(b.readInt32BE(4 + 4 * i)); if (b.readInt32BE(4 + 4 * i) === -308) c.ext = true; } seen.encs.push({ session: seen.sessions, cursor: c.encs.includes(-239), vmware: c.encs.includes(0x574d5664) }); }
         if (t === 5) seen.pointers.push({ mask: b[1], x: b.readUInt16BE(2), y: b.readUInt16BE(4), at: Date.now() });
         if (t === 3) { if (!b[1] || !c.full) { c.full = true; full(c); } else if (!c.timer) c.timer = setTimeout(() => { c.timer = null; if (!sock.destroyed) tick(c); }, st.delayMs); }
         c.buf = b.subarray(need);
       }
     });
   });
-  return new Promise((r) => server.listen(0, '127.0.0.1', () => r({ server, port: server.address().port, seen, st })));
+  return new Promise((r) => server.listen(0, '127.0.0.1', () => r({ server, port: server.address().port, seen, st, drop: () => { for (const c of conns) c.sock.destroy(); } })));
 }
 vnc = await stubVnc();
 
@@ -160,7 +184,8 @@ const app = { wm, _vncAvailable: true, _vncSeat: null, localOpened: 0, openDeskt
 window.__app = app;
 window.__picker = (o) => openDesktopPicker(app, o || {});
 window.__dialog = (m) => showMachineDesktopDialog(app, m, { recheck: async () => m });
-window.__closeAll = () => { for (const id of [...wm.windows.keys()]) wm.closeWindow(id); };`;
+window.__closeAll = () => { for (const id of [...wm.windows.keys()]) wm.closeWindow(id); };
+window.__desktopView = () => [...wm.windows.values()].map((w) => w._desktopView).find(Boolean) || null;`;
 await esbuild.build({ stdin: { contents: entry, resolveDir: REPO, loader: 'js' }, bundle: true, format: 'iife', platform: 'browser', target: 'es2020', outfile: path.join(root, 'page.js'), loader: { '.css': 'empty' }, logLevel: 'error' });
 // the mutant: noVNC built without the patch (the shipped build script's own --unpatched switch)
 const MUTANT = path.join(root, 'novnc-unpatched.js');
@@ -185,7 +210,7 @@ const cenv = { ...process.env, HOME: chromeHome, XDG_RUNTIME_DIR: chromeRun }; d
 chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--hide-scrollbars', '--font-render-hinting=none', `--user-data-dir=${path.join(root, 'chrome-profile')}`, 'about:blank'], { stdio: 'ignore', env: cenv });
 const WebSocket = require(path.join(REPO, 'node_modules/ws'));
 for (let i = 0; i < 120; i++) { try { await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json(); break; } catch { await sleep(250); } }
-async function page(w, h, winCss) {
+async function page(w, h, winCss, dpr = 1) {
   const tg = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/new?about:blank`, { method: 'PUT' })).json();
   const ws = new WebSocket(tg.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
   await new Promise((r) => ws.on('open', r));
@@ -196,7 +221,7 @@ async function page(w, h, winCss) {
   await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });
   await cdp('Page.addScriptToEvaluateOnNewDocument', { source: `try { localStorage.setItem('vibespace.lang', 'zh'); } catch {} window.__winCss = ${JSON.stringify(winCss)};` });
   await cdp('Emulation.setFocusEmulationEnabled', { enabled: true }); // a background target's first press would only focus the page
-  await cdp('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 1, mobile: w < 600 });
+  await cdp('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: dpr, mobile: w < 600 });
   const ev = async (expr) => { const r = await cdp('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.result?.exceptionDetails) throw new Error('page threw: ' + JSON.stringify(r.result.exceptionDetails).slice(0, 600)); return r.result?.result?.value; };
   const until = async (expr, ms = 20000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await ev(expr).catch(() => false)) return true; await sleep(100); } return false; };
   const load = async () => { await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` }); await sleep(300); await until('typeof window.__picker === "function"', 10000); };
@@ -240,7 +265,7 @@ console.log('① – ⑨ desk 1280 px');
   await p.ev(`document.querySelector('.desktop-picker-row[data-group="remote"]').click()`);
   const asked = await signIn(p);
   const up = await connected(p);
-  const strip = await p.ev(`[...document.querySelector('${WIN} .desktop-strip').children].filter((e) => !e.hidden).map((e) => e.classList.contains('desktop-strip-displays') ? [...e.children].map((b) => b.textContent).join(' · ') : e.classList.contains('desktop-strip-status') ? e.textContent.replace(/\\d+|—/g, 'N') : e.textContent)`);
+  const strip = await p.ev(`[...document.querySelector('${WIN} .desktop-strip').children].filter((e) => !e.hidden && !e.classList.contains('desktop-strip-hdr')).map((e) => e.classList.contains('desktop-strip-displays') ? [...e.children].map((b) => b.textContent).join(' · ') : e.classList.contains('desktop-strip-status') ? e.textContent.replace(/\\d+|—/g, 'N') : e.textContent)`);
   ok(asked && up && vnc.seen.authed === 1 && vnc.seen.sessions === 1 && JSON.stringify(strip) === JSON.stringify(['WIN-DESK1 ▾', '1 · 2 · 全部', '⤢ 全屏', '⌨ 捕获快捷键', '已连接 · N ms · N fps', '清晰']), '② the press opens the window: the sign-in asked; the strip [WIN-DESK1 ▾] [1 · 2 · 全部] [⤢ 全屏] [⌨ 捕获快捷键] [已连接 · N ms · N fps] [清晰] (P1 added ⌨ + the rung)', { asked, up, seen: { a: vnc.seen.authed, s: vnc.seen.sessions }, strip });
   const titles = await p.ev(`[...document.querySelectorAll('${WIN} .desktop-strip-seg')].map((b) => b.title)`);
   ok(titles.join('|') === '1 · DELL P2419H|2 · LG 27UL|全部', '② the displays carry the machine\'s own names (the OS table agreed with the -308 rects)', titles);
@@ -326,10 +351,77 @@ console.log('⑩ phone 390');
   await p.shot('phone.png');
   p.close();
 }
+// lane win-desktop-cursor-hdr: the canvas's CSS cursor (what Chrome draws for the machine's pointer) decoded in the page
+const CURSOR = `(async () => { const cv = document.querySelector('${WIN} canvas'); if (!cv) return null; const cs = getComputedStyle(cv).cursor; const m = /url\\("?(data:[^")]+)"?\\)\\s*(\\d+)\\s+(\\d+)/.exec(cs); if (!m) return { css: cs.slice(0, 60) }; const im = new Image(); im.src = m[1]; await im.decode(); const v = window.__desktopView && window.__desktopView(); return { w: im.naturalWidth, h: im.naturalHeight, hot: m[2] + ' ' + m[3], scale: Math.round(v.rfb._display.scale * 1000) / 1000, dpr: devicePixelRatio, url: m[1] }; })()`;
+// the window sized so display 2 (1280×800) is drawn at `pw` px wide (scale pw / 1280)
+const sizeWin = (p, pw) => p.ev(`(() => { const w = document.querySelector('${WIN}'); w.style.width = '${pw + 2}px'; w.style.height = '${Math.round(pw * 0.625) + 230}px'; return true; })()`);
+const cursorIs = (p, side) => p.until(`(async () => { const r = await ${CURSOR}; return !!r && r.w === ${side}; })()`, 8000);
+// a headless screenshot has no mouse: the CSS cursor image is laid where the pointer would be (its hotspot on the picture's centre)
+const showPointer = (p, r) => p.ev(`(() => { const b = document.querySelector('${WIN} canvas').getBoundingClientRect(); const i = document.createElement('img'); i.id = 'shot-pointer'; i.src = ${JSON.stringify((r && r.url) || '')}; const [hx, hy] = ${JSON.stringify(((r && r.hot) || '0 0').split(' ').map(Number))}; i.style.cssText = 'position:fixed;z-index:99999;pointer-events:none;left:' + (b.left + b.width / 2 - hx) + 'px;top:' + (b.top + b.height / 2 - hy) + 'px;width:${(r && r.w) || 0}px;height:${(r && r.h) || 0}px'; document.body.append(i); return true; })()`);
+const CURSOR_DESK = DESK.replace('width:1100px;height:600px', 'width:642px;height:630px');
+console.log('⑫ – ⑭ the pointer at the picture\'s scale (DPR 2) + the HDR chip');
+{
+  vnc.st.cursor = null; vnc.st.delayMs = 40;
+  const p = await page(1280, 800, CURSOR_DESK, 2);
+  await p.ev('window.__picker()');
+  await p.until(`!!document.querySelector('.desktop-picker-row[data-group="remote"]')`, 15000);
+  await p.ev(`document.querySelector('.desktop-picker-row[data-group="remote"]').click()`);
+  await signIn(p);
+  await connected(p);
+  await seg(p, '2');
+  await sizeWin(p, 640);
+  const sess = vnc.seen.sessions;
+  vnc.st.cursor = { side: 96, hx: 24, hy: 12 };
+  await cursorIs(p, 48);
+  const c12 = await p.ev(CURSOR);
+  await p.ev(`document.querySelector('${WIN} .desktop-strip-status').click()`);
+  await sleep(1200);
+  const words = await p.ev(`(() => { const s = document.querySelector('${WIN} .desktop-strip-status'); const c = document.querySelector('${WIN} .desktop-strip-compare'); return { title: s.title, row: c.hidden ? '' : c.textContent }; })()`);
+  ok(c12 && c12.w === 48 && c12.h === 48 && c12.hot === '12 6' && Math.abs(c12.scale - 0.5) < 0.005 && c12.dpr === 2 && /指针：在这里随画面缩放绘制，为原 96 px 的 50%/.test(words.title) && /指针：在这里随画面缩放绘制/.test(words.row),
+    `⑫ a 96 px pointer (hotspot 24,12) over display 2 at scale ${c12 && c12.scale}, DPR 2 ⇒ the CSS cursor image is ${c12 && c12.w}×${c12 && c12.h}, hotspot ${c12 && c12.hot}; the stats row names the path`, { c12: c12 && { ...c12, url: undefined }, words });
+  await p.ev(`document.querySelector('${WIN} .desktop-strip-status').click()`);
+  await showPointer(p, c12);
+  await p.shot('cursor-after.png', WIN);
+  await p.ev(`document.getElementById('shot-pointer').remove()`);
+  await sizeWin(p, 480);
+  await cursorIs(p, 36);
+  const c12b = await p.ev(CURSOR);
+  ok(c12b && c12b.w === 36 && c12b.hot === '9 5' && Math.abs(c12b.scale - 0.375) < 0.005, `⑫ a smaller window (scale ${c12b && c12b.scale}) redraws the same pointer at ${c12b && c12b.w} px — no new image from the machine`, c12b && { ...c12b, url: undefined });
+  // ⑬ a 256 px pointer: the machine paints it
+  const before13 = vnc.seen.encs.length;
+  vnc.st.cursor = { side: 256, hx: 8, hy: 8 };
+  const again = await p.until(`(() => { const c = document.querySelector('${WIN} .desktop-strip-status'); return /由机器画进画面/.test(c.title); })()`, 8000);
+  await sleep(600);
+  const resent = vnc.seen.encs.slice(before13);
+  const c13 = await p.ev(CURSOR);
+  const title13 = await p.ev(`document.querySelector('${WIN} .desktop-strip-status').title`);
+  ok(again && resent.length >= 1 && resent.every((e) => e.session === sess && !e.cursor && !e.vmware) && vnc.seen.sessions === sess && c13 && c13.w === 3 && /指针：由机器画进画面 —— 它的 256 px 指针太大，这里画不了/.test(title13),
+    '⑬ a 256 px pointer ⇒ SetEncodings again on the same session, without the pointer pseudo-encodings (the machine paints it; the ladder\'s later rungs keep them out), a 3 px dot here, the stats row says so', { again, resent, sessions: vnc.seen.sessions, sess, c13: c13 && { w: c13.w, css: c13.css } });
+  const enc0 = vnc.seen.encs.length;
+  vnc.drop();
+  const asked13 = await signIn(p);
+  const up13 = await connected(p);
+  const first = vnc.seen.encs.slice(enc0)[0];
+  ok(asked13 && up13 && vnc.seen.sessions === sess + 1 && first && !first.cursor && !first.vmware, '⑬ the reconnect\'s first SetEncodings leaves the pointer pseudo-encodings out too (the choice lasts the window)', { up13, first, sessions: vnc.seen.sessions });
+  // ⑭ the HDR chip
+  await sizeWin(p, 1000);
+  const hdr = async () => p.ev(`(() => { const h = document.querySelector('${WIN} .desktop-strip-hdr'); return h ? { shown: !h.hidden && h.getBoundingClientRect().width > 0, text: h.textContent, title: h.title } : null; })()`);
+  await seg(p, '2'); await sleep(300);
+  const h2 = await hdr();
+  await p.shot('hdr-chip.png', `${WIN} .desktop-strip`);
+  await seg(p, '1'); await sleep(300);
+  const h1 = await hdr();
+  await seg(p, '全部'); await sleep(300);
+  const hAll = await hdr();
+  ok(h2 && h2.shown && h2.text === 'HDR 已开 · 画面会偏白' && h2.title === 'Windows 的 HDR 画面被 TightVNC 原样抓取、没有色调映射；远程期间在 Windows 设置 › 显示 关闭"使用 HDR"（或按 Win+Alt+B 切换）' && h1 && !h1.shown && hAll && hAll.shown,
+    '⑭ HDR: display 2 (hdr 1) shows 「HDR 已开 · 画面会偏白」 with the remedy; display 1 (hdr 0) nothing; 全部 (an HDR screen in it) shows it', { h2, h1, hAll });
+  vnc.st.cursor = null;
+  p.close();
+}
 console.log('⑪ RED CONTROL: noVNC without the patch');
 {
   novncFile = MUTANT;
-  const p = await page(1280, 800, DESK);
+  const p = await page(1280, 800, DESK, 2);
   await p.ev('window.__picker()');
   await p.until(`!!document.querySelector('.desktop-picker-row[data-group="remote"]')`, 15000);
   await p.ev(`document.querySelector('.desktop-picker-row[data-group="remote"]').click()`);
@@ -338,6 +430,15 @@ console.log('⑪ RED CONTROL: noVNC without the patch');
   await seg(p, '2');
   const m = await cropOk(p);
   ok(!m.ok && m.r && m.r.W === 2560, '⑪ RED CONTROL: with noVNC built WITHOUT the patch the crop leg goes red (the canvas stays the whole 2560 px framebuffer)', m.r);
+  // the whole 2560 px framebuffer in a window 1282 px wide = scale 0.5, as ⑫'s display 2 in 642
+  await p.ev(`(() => { const w = document.querySelector('${WIN}'); w.style.width = '1282px'; w.style.height = '520px'; w.style.left = '0px'; return true; })()`);
+  vnc.st.cursor = { side: 96, hx: 24, hy: 12 };
+  await cursorIs(p, 96);
+  const cm = await p.ev(CURSOR);
+  ok(cm && cm.w === 96 && cm.hot === '24 12' && Math.abs(cm.scale - 0.5) < 0.005, `⑪ RED CONTROL: unpatched, the same 96 px pointer stays ${cm && cm.w} px at scale ${cm && cm.scale} (the owner's "鼠标如此巨大")`, cm && { ...cm, url: undefined });
+  await showPointer(p, cm);
+  await p.shot('cursor-before.png', WIN);
+  vnc.st.cursor = null;
   p.close();
   novncFile = NOVNC;
 }

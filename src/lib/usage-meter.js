@@ -169,7 +169,7 @@ export function installUsageMeter(App, ctx = {}) {
     const { target } = this._claudeSelResolved();
     if (btn) btn.classList.add('usage-refresh-spin');
     const r = await fetchJson('/api/usage/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ account: target }) });
-    if (r?.error && !silent) showToast(r.error, { type: 'error' });
+    if (r?.error && !silent) showToast(r.loginNeeded ? t('Needs re-login to refresh usage') : r.error, { type: 'error' });
     // B-855a: the answer names the RUNG (own /usage panel vs a live session)
     // and whether the reading's identity was verified — an unverified one is
     // still recorded, so say so rather than let the number look proven

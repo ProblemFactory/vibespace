@@ -597,6 +597,13 @@ async function refreshViaCliPanel(key) {
   if (!isGlobal) {
     acctMeta = (accounts.list().accounts || []).find((x) => x.id === key && x.type === 'subscription');
     if (!acctMeta) return false;
+    // OAT-ONLY (2026-10-13): the OAuth login ended and the row lives on its long-lived token —
+    // which is inference-only and can never read the usage panel (the probe strips it from the env
+    // anyway). The ONE door for ⟳ and auto-cli alike: no spawn, a named refusal, re-login is the fix.
+    if (acctMeta.loginState && acctMeta.loginState.state === 'oat-only') {
+      _panelVerdict[key] = { at: Date.now(), outcome: 'login-needed', code: 'login', identityVerified: false, why: 'the OAuth login ended — the long-lived token cannot read the usage panel; re-login to refresh usage', rung: 'panel' };
+      return false;
+    }
   }
   // THE RAW LOG (2.369.109, owner): what was sent, what came back verbatim,
   // what the parser made of it and what the write did — one line per probe in
@@ -1064,6 +1071,7 @@ app.post('/api/usage/refresh', async (req, res) => {
   const t0 = Date.now();
   const cliOk = await refreshViaCliPanel(key);
   const pv = panelVerdictFor(key);
+  if (!cliOk && pv && pv.at >= t0 && pv.code === 'login') return res.json({ error: 'needs re-login to refresh usage — ' + pv.why, loginNeeded: true, rung: 'panel', identityVerified: false, why: pv.why, skipped });
   // A LAPSED SUBSCRIPTION (2026-10-08) is re-admitted only by the panel's own answer: when the panel did not answer,
   // the token ladder below is NOT tried for it — a reading that is not the CLI serving must never count as the renewal
   // …and the answer SAYS which (verify r1 ③): the CLI answered but its reading was refused as another account's window, or it did not answer

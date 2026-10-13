@@ -92,7 +92,8 @@ function world(name, { Engine = DE, Store = UserTodoManager, cents = 100, inboxO
   // int263 seam (a): plugin-settings-p0's engine reads the switches from the plugin's settings rows (h.settings via the
   // plugin's cfg), never plugins.json config — the plant is a settings plant
   w.eng.attachPlugin({ peek: () => ({ enabled: true }), settings: () => ({ ...w.cfg }) });
-  w.store = new Store({ dataDir: dir, expirySweepMs: 0, onChange: () => { w.changes++; } });
+  // lane decision-inbox-clock: the store stamps on the engine's clock — a filing's createdAt and the pass's `now` agree
+  w.store = new Store({ dataDir: dir, expirySweepMs: 0, now: () => w.T, onChange: () => { w.changes++; } });
   w.journal = () => { try { return fs.readFileSync(w.eng.files.journal, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
   return w;
 }
@@ -118,7 +119,7 @@ console.log('② THE PASS — the REAL engine + the REAL For-you store, a fake v
 {
   const off = world('off', { inboxOn: false });
   seed(off); off.store.flush();
-  const bare = new UserTodoManager({ dataDir: off.dir, expirySweepMs: 0 });
+  const bare = new UserTodoManager({ dataDir: off.dir, expirySweepMs: 0, now: () => off.T });
   const before = JSON.stringify(bare.snapshot());
   off.eng.attachInbox(off.store, { tickMs: 0 });
   const r0 = await off.eng.inboxPass();
@@ -202,7 +203,7 @@ console.log('④ RED CONTROLS — scratch copies with ONE named edit');
   ok(w.fetches === 13, `CONTROL: the pass without its cap ⇒ ${w.fetches} calls in one pass — ② would be red`);
   w.store.stop();
   const sSrc = fs.readFileSync(path.join(REPO, 'src/user-todos.js'), 'utf8');
-  const a3 = '    it.judged = { group, p, at: Number(judged.at) || Date.now(), v: Number(judged.v) || 1 };\n';
+  const a3 = '    it.judged = { group, p, at: Number(judged.at) || this._now(), v: Number(judged.v) || 1 };\n';
   ok(sSrc.split(a3).length === 2, 'ANCHOR: the store writes the verdict beside the item');
   const { UserTodoManager: ReUrg } = MUT.load('src/user-todos.js', sSrc.replace(a3, a3 + "    if (group === 'now') it.urgency = 'high';\n"), 're-urgence');
   const w2 = world('ctl-urg', { Store: ReUrg });
@@ -220,7 +221,7 @@ async function refileRun(name, opts = {}) {
   const sk = 'claude:rf', text = 'Task 9 finished — the report is in the folder.';
   const add = (o = {}) => w.store.add(sk, { by: 'agent', origin: 'agent', sessionName: 'Ops agent', text, urgency: 'normal', ...o });
   const id = add().id;
-  w.store.reshapeItems((it) => { if (it.id !== id) return false; it.createdAt = w.T - 5 * 60e3; return true; });
+  w.T += 5 * 60e3; // the first pass comes 5 min after the filing (the store stamped it on this clock)
   w.eng.attachInbox(w.store, { tickMs: 0 });
   await w.eng.inboxPass();
   const o = { first: w.store.get(id).judged && w.store.get(id).judged.group, calls1: w.fetches };
@@ -257,6 +258,37 @@ async function refileRun(name, opts = {}) {
   const IdOnly = MUT.load('src/server/decision-engine.js', eSrc.replace(a2, 'memo: { id: it.id } });'), 'memo-id-only');
   const m = await refileRun('ctl-refile-memo', { Engine: IdOnly });
   ok(m.cleared && m.second === 'later' && m.calls2 === 1, 'CONTROL: the base memo key (item id only) ⇒ judged cleared but the memo answers the OLD verdict — RED', m);
+}
+
+console.log('⑥ ONE CLOCK (lane decision-inbox-clock) — the store reads only its injected clock, so ⑤ holds at any wall-clock time');
+{
+  const sSrc = fs.readFileSync(path.join(REPO, 'src/user-todos.js'), 'utf8');
+  /** every wall-clock read in UserTodoManager's body but the constructor's default (`now = () => Date.now()`) */
+  const bareClock = (src) => {
+    const a = src.indexOf('class UserTodoManager {'), b = src.indexOf('\n}\n', a);
+    return src.slice(a, b).split('\n').filter((l) => /\bDate\.now\b|new Date\(\)/.test(l) && !l.includes(', now = () => Date.now() }) {'));
+  };
+  const lines = bareClock(sSrc);
+  ok(sSrc.includes('class UserTodoManager {') && lines.length === 0, 'CENSUS: no Date.now / new Date() in UserTodoManager but the constructor default', lines);
+  const a4 = '        existing.createdAt = this._now();\n';
+  ok(sSrc.split(a4).length === 2, 'ANCHOR: the re-file stamps createdAt on the store clock');
+  const planted = sSrc.replace(a4, '        existing.createdAt = Date.now();\n');
+  ok(bareClock(planted).length === 1, 'CONTROL: a planted Date.now() at the re-file ⇒ the census names it — RED', bareClock(planted));
+  /** refileRun with the PROCESS clock (Date.now) moved to T0 + skew — the engine and the store run on w.T either way */
+  const skewed = async (name, skew, opts) => {
+    const real = Date.now, t0 = real();
+    Date.now = () => T0 + skew + (real() - t0);
+    try { return await refileRun(name, opts); } finally { Date.now = real; }
+  };
+  const ref = await refileRun('clock-ref');
+  for (const [tag, skew] of [['T0 − 1 year', -365 * 864e5], ['T0 + 1 year', 365 * 864e5]]) {
+    const r = await skewed('clock-' + (skew < 0 ? 'behind' : 'ahead'), skew);
+    ok(r.third === 'now' && r.calls3 === 2 && JSON.stringify(r) === JSON.stringify(ref), `the process clock at ${tag}: ⑤ unchanged (the re-filed item judged by the digest, 0 calls)`, { r, ref });
+  }
+  const MUT = mutantCopies('decision-clock', REPO);
+  const { UserTodoManager: WallClock } = MUT.load('src/user-todos.js', planted, 'wall-clock-refile');
+  const wc = await skewed('ctl-clock-ahead', 365 * 864e5, { Store: WallClock });
+  ok(wc.clearedRefile && !wc.third && wc.calls3 === 2, 'CONTROL: the base re-file stamp (Date.now) with the clock a year ahead ⇒ the re-filed item is young for ever, never judged — ⑤ RED', wc);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

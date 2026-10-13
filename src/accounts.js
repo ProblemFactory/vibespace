@@ -20,7 +20,7 @@ const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 const { capsOf } = require('./backend-caps.js'); // PURE registry: per-backend hot-switch verdict rides list() so the UI never offers a dead toggle
-const { loginRank } = require('./login-expiry.js'); // PURE: which login is the WORST of a pool's members
+const { loginRank, loginUsable, withOat } = require('./login-expiry.js'); // PURE: which login is the WORST of a pool's members
 // "no claim" — the shape every non-declaring harness / non-subscription record
 // answers with. Never 'ok': an unreadable deadline is ignorance, not health.
 const LOGIN_UNKNOWN = () => ({ state: 'unknown', refreshExpiresAt: null, accessExpiresAt: null, msLeft: null });
@@ -88,7 +88,13 @@ class AccountManager {
    *  — a harness whose credential format carries no deadline simply does not
    *  declare it and gets 'unknown', i.e. NO CLAIM (never 'ok': claiming health
    *  we cannot read is what made the old behaviour surprise people). */
-  loginStateOf(id, now = Date.now()) {
+  //  THE ROW, NOT THE SLOT (2026-10-13, owner: "都绑定长期token了，怎么还提示过期"):
+  //  login and long-lived token are two facts and a row lives by the better
+  //  one, so a dead login with a VALID token reads 'oat-only' (its own
+  //  sessions spawn on the token — resolveForSpawn). `opts.slot` asks the
+  //  credential FILE alone: a POOLED session reads the file through its
+  //  symlink and can never be handed the token, so every pool reader passes it.
+  loginStateOf(id, now = Date.now(), opts = {}) {
     try {
       const a = this.get(id);
       if (!a) return LOGIN_UNKNOWN(now);
@@ -99,8 +105,15 @@ class AccountManager {
       if (type !== 'subscription') return LOGIN_UNKNOWN(now); // API keys / oat records have no OAuth login session
       const fn = this._credsOf(be)?.loginState;
       if (typeof fn !== 'function') return LOGIN_UNKNOWN(now);
-      return fn(this._acctDir(be, id), now);
+      const info = fn(this._acctDir(be, id), now);
+      return opts && opts.slot ? info : withOat(info, this._oatFact(a), now);
     } catch { return LOGIN_UNKNOWN(now); }
+  }
+  /** The long-lived token as a LOGIN-VERDICT input ({ present, validUntil }) —
+   *  no decryption: only the mint time matters. null = none / not this harness. */
+  _oatFact(a) {
+    if (!a || !a.oatEnc || !this._credsOf(this._acctBackend(a))?.longLivedToken) return null;
+    return { present: true, validUntil: (Number(a.oatMintedAt) || 0) + this.OAT_TTL_MS };
   }
   /** A pool's row summarises its MEMBERS: the worst state among the candidate
    *  members (the accounts it can actually route to), plus the member that
@@ -113,12 +126,17 @@ class AccountManager {
     if (!members.length) return out;
     let worst = null;
     for (const m of members) {
-      const st = this.loginStateOf(m.id, now);
+      // the SLOT's verdict: a pooled session reads the member's credential file
+      // (the token cannot reach it), so the pool's row tells the slot truth —
+      // and names the member's token, so the chip can say why it does not help
+      const st = this.loginStateOf(m.id, now, { slot: true });
+      const oat = !loginUsable(st) ? this._oatFact(this.get(m.id)) : null;
+      if (oat && oat.validUntil > now) st.oatValidUntil = oat.validUntil;
       out.members.push({ id: m.id, name: m.name, state: st.state, refreshExpiresAt: st.refreshExpiresAt, msLeft: st.msLeft });
       if (!worst || loginRank(st) > loginRank(worst.st) || (loginRank(st) === loginRank(worst.st) && (st.msLeft ?? Infinity) < (worst.st.msLeft ?? Infinity))) worst = { m, st };
     }
     if (!worst) return out;
-    return { ...worst.st, worstId: worst.m.id, worstName: worst.m.name, members: out.members };
+    return { ...worst.st, worstId: worst.m.id, worstName: worst.m.name, ...(worst.st.oatValidUntil ? { worstOatValidUntil: worst.st.oatValidUntil } : {}), members: out.members };
   }
   /** Pool members for the LOGIN summary — MEMBERSHIP IS NOT ONE QUESTION
    *  (round-2 verifier, reproduced against this instance's own store):
@@ -884,8 +902,12 @@ class AccountManager {
     // ship explanation.
     const hasOat = this._credsOf(backend).longLivedToken && !!a.oatEnc && (a.oatMintedAt || 0) + this.OAT_TTL_MS > Date.now();
     const oatExpired = this._credsOf(backend).longLivedToken && !!a.oatEnc && !hasOat;
+    // A DEAD dir login (refresh deadline passed — the tokens are only blanked at
+    // the CLI's next failed refresh, so it still parses loggedIn) with a VALID
+    // token spawns on the token, exactly like a wiped one (resolveForSpawn).
+    const dirDead = loggedIn && hasOat && !loginUsable(this.loginStateOf(a.id, Date.now(), { slot: true }));
     if (!hostFacts) {
-      if (loggedIn) return { usable: true, how: 'local-env', reason: null, linked: false, held: false, heldVerified: false };
+      if (loggedIn && !dirDead) return { usable: true, how: 'local-env', reason: null, linked: false, held: false, heldVerified: false };
       // no local login but a long-lived token → spawns via the env token
       if (hasOat) return { usable: true, how: 'oat', reason: null, linked: false, held: false, heldVerified: false };
       if (oatExpired) return { usable: false, how: null, reason: 'oat-expired', linked: false, held: false, heldVerified: false };
@@ -1418,7 +1440,7 @@ class AccountManager {
         // self-heal happily re-points onto a login that fails the first turn.
         // A STABLE ordering, never a filter — every member being expired must
         // still start the session (and then say so) rather than throw here.
-        alive.sort((x, y) => loginRank(this.loginStateOf(x)) - loginRank(this.loginStateOf(y)));
+        alive.sort((x, y) => loginRank(this.loginStateOf(x, Date.now(), { slot: true })) - loginRank(this.loginStateOf(y, Date.now(), { slot: true })));
         let pick = null;
         // (the chooser is TOLD which pool it decides for — the one this spawn resolved — and that this is the POOL's
         // default it is placing, not one conversation: a conversation's pin must never become the pool default, verify r2)
@@ -1504,7 +1526,11 @@ class AccountManager {
       const oatExpired = a.oatEnc && (a.oatMintedAt || 0) + this.OAT_TTL_MS < Date.now();
       const oat = oatExpired ? null : this.getOat(id);
       const oatSecret = oat ? { var: 'CLAUDE_CODE_OAUTH_TOKEN', value: oat } : null;
-      if (!info.loggedIn && oat) {
+      // …and so does a DEAD dir login (2026-10-13): an 'expired' login still
+      // parses loggedIn, and spawning on it fails the first refresh while the
+      // row's chip says the token keeps it running — the token IS the spawn.
+      const dirDead = !!oat && info.loggedIn && !loginUsable(this.loginStateOf(id, Date.now(), { slot: true }));
+      if ((!info.loggedIn || dirDead) && oat) {
         return { id: a.id, name: a.name, kind: 'subscription', oatOnly: true, localEnv: { CLAUDE_CODE_OAUTH_TOKEN: oat }, secret: oatSecret };
       }
       // Expired oat: fail the CREATE with the real reason instead of letting

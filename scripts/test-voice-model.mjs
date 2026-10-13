@@ -9,7 +9,9 @@
 //   ④ the vendor contract: multipart part ORDER request → context → audio, locale / language mapping, the answer shape
 //   ⑦ proposalCandidates (lane voice-teach-candidates, userW 2026-10-13): the screenshot's Lark conversation proposes
 //      ≤ 12 words a person says (RED control = the base's proposal source termsOf, ≥ 40 incl. six ids / field names),
-//      the SHAPE_EXCLUSIONS census (each row's term + a copy without that row lets it through), the preselection rule
+//      the SHAPE_EXCLUSIONS census (each row's term + a copy without that row lets it through), the preselection rule;
+//      lane voice-teach-ids-allowed (owner 2026-10-13: ids are what dictation gets wrong): identifier NAMES are candidates
+//      again (RED = a copy with the old field-tail row), the census is four rows, a secret VALUE is never proposed
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -206,40 +208,50 @@ console.log('⑦ proposalCandidates — words a person SAYS (lane voice-teach-ca
     agent(`I read lark_tool.py: it builds a LarkClient from load_config and asks for a tenant_access_token (or a user_access_token with offline_access). Messages come back with ${B}om_id${B}, ${B}chat_id${B}, ${B}open_id${B}, ${B}union_id${B} and ${B}sender_type${B}; P2P chats use ${B}receive_id_type${B}=open_id.`),
     agent(`The thread walk: thread_id → thread_replies → threads_found; sorting is ${B}ByActiveTimeDesc${B}. The doc side lives in lark_bot.py and lark_docx_media.py: docx_token, obj_type, sheetId, blockInfo, blockToken, base_app_token, table_id, get_node.\n${F}\npython3 lark_tool.py send --as user send_as_user ou_7565 message_id cli_aa97b369e938ded2\n${F}`),
     user('Lark 的图片上传也顺便看看，lark_tool.py 里 replace_image 那段'),
+    agent('To sum up: a message is om_id + chat_id, the doc is its docx_token; replying as you needs the user_access_token, the bot uses the tenant_access_token; load_config reads both.'),
     agent('Uploads: image_key from upload_prepare → upload_part → upload_finish (upload_all wraps them); a docx_image needs parent_type + parent_node, block_type 27, then update_text_elements; replace_image / replace_file swap a docx_file; drive_route_token for the drive route. Placeholders in the doc: oc_xxx, ou_xxx, om_xxx. batch_get_id resolves ids. LarkClient keeps the token; cli_aa97b369e938ded2 is the app id.'),
   ];
   const BAD6 = ['cli_aa97b369e938ded2', 'user_access_token', 'tenant_access_token', 'ou_7565', 'oc_xxx', 'receive_id_type'];
   const c = VM.proposalCandidates({ messages: LARK, cwd: '/w/lark' });
   const terms = c.map((x) => x.term);
   console.log(`    proposed (${terms.length}): ${c.map((x) => `${x.term} [${x.why} ${x.seen}/${x.byPerson}${x.pick ? ' ✓' : ''}]`).join(', ')}`);
-  ok('the screenshot\'s conversation ⇒ ≤ 12 candidates, none of the six ids / field names', terms.length > 0 && terms.length <= 12 && !BAD6.some((b) => terms.includes(b)), terms);
-  ok('…lark_tool.py and LarkClient rank in the top 3 (file / class names first), "Lark" (the person wrote it) is there too', terms.slice(0, 3).includes('lark_tool.py') && terms.slice(0, 3).includes('LarkClient') && terms.includes('Lark'), terms);
-  ok('…no field name, code-span word or placeholder of the list survives', !terms.some((t) => /_(?:id|token|type|key)$|^(?:sheetId|blockInfo|blockToken|ByActiveTimeDesc|P2P|thread_replies|upload_part|om_xxx)$/.test(t)), terms);
+  const OUT = ['cli_aa97b369e938ded2', ['ou', '7565'].join('_'), 'oc_xxx', 'ou_xxx', 'om_xxx'];
+  const top = terms.slice(0, 12);
+  ok('the screenshot\'s conversation ⇒ the top-12 chips carry the names AND the identifiers (lark_tool.py, LarkClient, om_id, docx_token, user_access_token — a NAME, not a value)', ['lark_tool.py', 'LarkClient', 'om_id', 'docx_token', 'user_access_token'].every((w) => top.includes(w)), top);
+  ok('…none of the opaque ids / placeholders (cli_aa97…, ou_7565, oc_xxx, ou_xxx, om_xxx); lark_tool.py and LarkClient still rank in the top 3', !OUT.some((b) => terms.includes(b)) && terms.slice(0, 3).includes('lark_tool.py') && terms.slice(0, 3).includes('LarkClient') && terms.includes('Lark'), terms);
   const base = VM.termsOf({ messages: LARK, cwd: '/w/lark' });
-  ok(`RED CONTROL: the base's proposal source (termsOf — now the per-project tier's input only) on the same conversation ⇒ ${base.length} terms incl. all six`, base.length >= 40 && BAD6.every((b) => base.includes(b)), base.length);
+  ok(`the per-project tier's input (termsOf) is untouched: ${base.length} terms incl. all six`, base.length >= 40 && BAD6.every((b) => base.includes(b)), base.length);
   // the census: every row with a term only it rejects; a copy of voice-model.js without that row lets the term through
-  const ROWS = { 'id-prefix': 'ou_abcdef', placeholder: 'oc_xxx', 'field-tail': 'chat_id', 'two-underscores': 'update_text_elements', 'digit-tail': 'item_42',
-    'short-caps': 'P2P', host: 'feishu.cn', secret: 'dl_dummyfghijklmnopq', 'code-only': 'thread_replies' };
-  ok('census: one row per SHAPE_EXCLUSIONS entry, no row without a term', VM.SHAPE_EXCLUSIONS.map(([r]) => r).join() === Object.keys(ROWS).join(), VM.SHAPE_EXCLUSIONS.map(([r]) => r));
+  const SK = ['sk', 'ant', 'api03', 'Qh7Kd9mZ2pX4vB8nL1wR6yT3'].join('-');           // built at runtime (no literal key in the tree)
+  const ROWS = { secret: SK, placeholder: 'oc_xxx', 'vendor-id': ['ou', '7565'].join('_'), 'url-email-digits': 'feishu.cn' };
+  ok('census: one row per SHAPE_EXCLUSIONS entry (four: secret, placeholder, vendor-id, url-email-digits), no row without a term', VM.SHAPE_EXCLUSIONS.map(([r]) => r).join() === Object.keys(ROWS).join(), VM.SHAPE_EXCLUSIONS.map(([r]) => r));
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-voice-cands-'));
   try {
     fs.copyFileSync(path.join(REPO, 'src/assistant-note.js'), path.join(dir, 'assistant-note.js')); // voice-model requires it (PURE → PURE)
     const src = fs.readFileSync(path.join(REPO, 'src/voice-model.js'), 'utf8');
-    const said = (w) => w === 'thread_replies' ? { messages: [agent(`we walk ${w} first, then ${w} again`)] }       // the agent's prose twice
-      : w.startsWith('dl_') ? { messages: [], groupName: w } : { messages: [user(`look at ${w} please`), agent(`yes, ${w} it is`)] };
+    const said = (w) => w === SK ? { messages: [], groupName: w } : { messages: [user(`look at ${w} please`), agent(`yes, ${w} it is`)] }; // prose scrubs a key: only a group name reaches the row
     for (const [row, w] of Object.entries(ROWS)) {
       const anchor = `['${row}', (w`;
       const f = path.join(dir, `m-${row}.js`);
       fs.writeFileSync(f, src.replace(anchor, `['${row}', () => false, (w`));
       const M = require(f);
       const has = (V) => V.proposalCandidates(said(w)).some((x) => x.term === w);
-      ok(`census ${row}: rejects ${w} (first row to match) — RED on a copy without the row`, src.split(anchor).length === 2 && VM.exclusionOf(w, { byPerson: w === 'thread_replies' ? 0 : 1 }) === row && !has(VM) && has(M));
+      ok(`census ${row}: rejects ${row === 'secret' ? 'an sk-ant-… key' : w} (first row to match) — RED on a copy without the row`, src.split(anchor).length === 2 && VM.exclusionOf(w) === row && !has(VM) && has(M));
     }
+    // ids allowed: the old field-tail row put back (a copy) drops every *_id / *_token NAME the owner wants proposed
+    const f = path.join(dir, 'm-field-tail.js');
+    fs.writeFileSync(f, src.replace("['secret', (w", "['field-tail', (w) => /_(?:id|token|key|secret|type|ts|at)$/i.test(w)],\n  ['secret', (w"));
+    const old = require(f).proposalCandidates({ messages: LARK, cwd: '/w/lark' }).map((x) => x.term);
+    ok('RED CONTROL: a copy with the old field-tail row proposes none of om_id / docx_token / user_access_token', !['om_id', 'docx_token', 'user_access_token'].some((w) => old.includes(w)) && old.length < terms.length, old);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  // a secret VALUE never reaches the card: an sk-ant-… key and a PEM block, twice each, in the person's own text and the group name
+  const PEM = ['-----BEGIN', 'RSA', 'PRIVATE', 'KEY-----'].join(' ') + '\nMIIEowIBAAKCAQEAx9Zb4qLmNoPrStUvWxYz0123456789AbCdEf\n' + ['-----END', 'RSA', 'PRIVATE', 'KEY-----'].join(' ');
+  const S = VM.proposalCandidates({ messages: [user(`my key is ${SK}, again ${SK}`), user(`${PEM}\n${PEM}`), agent(`never paste ${SK} here`)], groupName: SK }).map((x) => x.term);
+  ok('a secret VALUE (an sk-ant-… key, a PEM block) is never proposed — not from the person\'s text, not as a group name', !S.some((t) => /sk-ant|MIIE|BEGIN|PRIVATE|Qh7Kd9/.test(t)), S);
   // preselection: the person's words, and files / PascalCase names seen twice; a Capitalized word only the agent used waits unticked
-  const P = VM.proposalCandidates({ messages: [user('ask jane.doe about the plan'), agent('Open Settings → Plugins; then Settings again. TeachEngine reads voice-model.js; voice-model.js and TeachEngine stay.')] });
+  const P = VM.proposalCandidates({ messages: [user('ask jane.doe about the plan'), agent('Open Settings → Plugins; then Settings again. TeachEngine reads voice-model.js and thread_id; voice-model.js, thread_id and TeachEngine stay.')] });
   const pk = Object.fromEntries(P.map((x) => [x.term, x.pick]));
-  ok('preselection: byPerson (jane.doe) and seen ≥ 2 file / PascalCase (voice-model.js, TeachEngine) start selected; an agent-only Capitalized word (Settings) does not', pk['jane.doe'] === true && pk['voice-model.js'] === true && pk.TeachEngine === true && pk.Settings === false, P);
+  ok('preselection: byPerson (jane.doe) and seen ≥ 2 file / PascalCase / identifier (voice-model.js, TeachEngine, thread_id — ids included) start selected; an agent-only Capitalized word (Settings) does not', pk['jane.doe'] === true && pk['voice-model.js'] === true && pk.TeachEngine === true && pk.thread_id === true && pk.Settings === false, P);
   ok('…a word seen once and not by the person is no candidate at all (Plugins); the dictionary drops a known word', !('Plugins' in pk) && !VM.proposalCandidates({ messages: [user('ask jane.doe')], known: ['JANE.DOE'] }).length);
 }
 

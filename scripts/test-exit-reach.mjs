@@ -220,7 +220,7 @@ function world({ Mgr = ExitProxyManager, Todos = UserTodoManager } = {}) {
   };
   const dataDir = path.join(SCR, 'w' + Math.random().toString(36).slice(2, 8));
   fs.mkdirSync(dataDir, { recursive: true });
-  const todos = new Todos({ dataDir, expirySweepMs: 0 });
+  const todos = new Todos({ dataDir, expirySweepMs: 0, now: () => clock });
   const sessions = new Map([
     ['wa', { name: 'SECRET-NAME', backend: 'claude', claudeSessionId: 'A', cwd: '/w/a' }],
     ['wb', { name: 'Bee', backend: 'claude', claudeSessionId: 'B', cwd: '/w/b' }],

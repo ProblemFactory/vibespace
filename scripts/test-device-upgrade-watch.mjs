@@ -103,7 +103,7 @@ console.log('— lane win-upgrade-pipe: a device that never dials back after its
 {
   let clock = 1_000_000;
   const gw = (Watch = DW, dir = fs.mkdtempSync(path.join(SCR, 'g-'))) => {
-    const todos = new UserTodoManager({ dataDir: dir });
+    const todos = new UserTodoManager({ dataDir: dir, now: () => clock });
     const lines = [];
     const w = Watch.create({ userTodos: todos, dataDir: dir, log: (l) => lines.push(l), now: () => clock, tickMs: 0 });
     const open = () => todos._state.items.filter((t) => t.status === 'open' && t.sessionKey === 'machines');

@@ -123,6 +123,7 @@ function normalizeTouch(x) {
     kind: str(x.kind, 40) || null,
     ...(GLYPHS.includes(x.icon) ? { icon: x.icon } : {}),
     count: Math.max(0, Math.floor(num(x.count))),
+    ...(op === 'api' && x.trust === 'write-all' ? { trust: 'write-all' } : {}),   // a sensitive call that ran under 完全信任
     // lane channel-threads: the emoji a `react` touch proposed (a glyph ≤ 16 units, or `:key:`) — the row says it
     ...(op === 'react' && x.glyph ? { glyph: str(x.glyph, 70) } : {}),
     // 2026-09-28: where a drafted reply lands (a value outside the closed set is dropped, never printed)
@@ -242,6 +243,7 @@ function foldTouches(touches) {
       if (t.account) r.account = t.account;
       if (t.kind) r.kind = t.kind;
       if (t.proposalId) r.proposalId = t.proposalId;
+      if (t.op === 'api') { if (t.trust) r.trust = t.trust; else delete r.trust; }
       if (t.glyph) r.glyph = t.glyph;
       if (t.placement) r.placement = t.placement;
     } else {
@@ -299,7 +301,7 @@ function rowWords(row, t) {
   if (o.refresh) out.push(t('refreshed'));
   if (o.request) out.push(t('asked for access'));
   if (o.status) out.push(t('checked its draft'));
-  if (o.api) out.push(row.proposalId ? t('API call {call} · awaiting you', { call: row.title }) : t('API call {call}', { call: row.title }));
+  if (o.api) out.push(row.proposalId ? t('API call {call} · awaiting you', { call: row.title }) : row.trust === 'write-all' ? t('API call {call} · Full trust · sensitive', { call: row.title }) : t('API call {call}', { call: row.title }));
   return out.join(' · ');
 }
 

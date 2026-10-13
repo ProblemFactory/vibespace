@@ -181,8 +181,14 @@ function validExpiry(x, now = Date.now()) {
 
 class UserTodoManager {
   /** @param expirySweepMs how often expireDue() runs (0 = never on a timer —
-   *  a migration or a suite that builds a private manager must not leave one) */
-  constructor({ dataDir, onChange, expirySweepMs = EXPIRY_SWEEP_MS, onWriteError = null }) {
+   *  a migration or a suite that builds a private manager must not leave one)
+   *  @param now THE store's clock (lane decision-inbox-clock): every stamp and every
+   *  "has it passed" below reads `this._now()` — a suite hands the clock its
+   *  engine runs on, so a filing's createdAt and the engine's `now` agree at any
+   *  wall-clock time (test-decision-inbox's ONE CLOCK census: no other wall-clock read in the class);
+   *  the default reads the global per call, so a suite that swaps it still steers the store */
+  constructor({ dataDir, onChange, expirySweepMs = EXPIRY_SWEEP_MS, onWriteError = null, now = () => Date.now() }) {
+    this._now = now;
     this._file = path.join(dataDir, 'user-todos.json');
     this._onChange = onChange || (() => {});
     this._onWriteError = typeof onWriteError === 'function' ? onWriteError : null; // lane-dead-bridge: session-status's twin — a failed background write is named, never a crash
@@ -236,7 +242,7 @@ class UserTodoManager {
    *  item WITHOUT `expiresAt` is never touched: expiry is a producer's
    *  declaration, never inferred from age or text. ONE save + ONE broadcast
    *  per sweep however many items went. @returns the count resolved */
-  expireDue(now = Date.now()) {
+  expireDue(now = this._now()) {
     let n = 0;
     const went = [];
     for (const it of this._state.items) {
@@ -255,7 +261,7 @@ class UserTodoManager {
    *  server.js built it — a second writer on data/user-todos.json would be
    *  overwritten by this manager's next save. ONE save + ONE broadcast.
    *  @returns the number of items `fn` changed */
-  reshapeItems(fn, now = Date.now()) {
+  reshapeItems(fn, now = this._now()) {
     let n = 0;
     for (const it of this._state.items) { if (fn(it, now)) n++; }
     if (n) { this._save(); this._notify(); }
@@ -317,7 +323,7 @@ class UserTodoManager {
     // still in the snapshot (nextLayout drops ids the store no longer lists) —
     // with a flat 15, "Mark all seen" on a 30-ask group made 15 struck rows
     // vanish from under the pointer (test-inbox-reply-ui ⑮ caught it).
-    const now = Date.now();
+    const now = this._now();
     const resolved = this._state.items.filter((i) => i.status !== 'open')
       .sort((a, b) => (b.resolvedAt || 0) - (a.resolvedAt || 0))
       .filter((i, k) => k < RESOLVED_TAIL || (now - (i.resolvedAt || 0)) < RESOLVED_RECENT_MS)
@@ -343,7 +349,7 @@ class UserTodoManager {
     if (!it || it.status !== 'open' || !judged || typeof judged !== 'object') return false;
     const group = judged.group === 'now' || judged.group === 'later' ? judged.group : null;
     const p = typeof judged.p === 'number' && Number.isFinite(judged.p) ? judged.p : null;
-    it.judged = { group, p, at: Number(judged.at) || Date.now(), v: Number(judged.v) || 1 };
+    it.judged = { group, p, at: Number(judged.at) || this._now(), v: Number(judged.v) || 1 };
     this._save(); this._notify();
     return true;
   }
@@ -361,7 +367,7 @@ class UserTodoManager {
     text = rawText.slice(0, TEXT_MAX);
     const textCut = rawText.length > TEXT_MAX ? TEXT_MAX : 0; // the cap it hit, named on the return
     // EXPIRY (2.369.152): optional; only a future ms epoch counts (validExpiry)
-    expiresAt = validExpiry(expiresAt);
+    expiresAt = validExpiry(expiresAt, this._now());
     if (!text) throw new Error('text required');
     // WORDS AS STRUCTURE (a3 i18n, 2026-09-21): a server-side producer may
     // file, beside its English `text`/`detail` (the dedupe key and the agent
@@ -429,7 +435,7 @@ class UserTodoManager {
       if (existing.status !== 'open') {
         if (openCount >= MAX_OPEN_PER_SESSION) throw new Error(`this session already has ${openCount} open items — resolve some before adding more`);
         existing.status = 'open'; existing.resolvedAt = null; existing.resolvedBy = null;
-        existing.createdAt = Date.now();
+        existing.createdAt = this._now();
         // a re-file of a resolved item is a NEW filing: its own expiry or none
         // (the old one is past — kept, it would expire the item on the next sweep)
         existing.expiresAt = expiresAt;
@@ -475,7 +481,7 @@ class UserTodoManager {
       ...(cwd ? { cwd } : {}), ...(hostId ? { hostId } : {}), // where its words' paths resolve (the asker's cwd on its host)
       reply: null, // {text, at} once the user replied from the inbox (resolveByReply)
       origin, // the PRODUCER (B-328d): spend|login|pool|jobs|channels|browser|agent — REQUIRED (r2), the Notices area groups by it
-      createdAt: Date.now(), resolvedAt: null, resolvedBy: null,
+      createdAt: this._now(), resolvedAt: null, resolvedBy: null,
     };
     this._state.items.push(item);
     this._save(); this._notify();
@@ -495,7 +501,7 @@ class UserTodoManager {
       // the ask is told apart by its words — a CLEARED item has none (verify r3: an answered / expired /
       // withdrawn panel must still close the job's cleared ask item, else it stays open with the sentence)
       if (onlyAsk && !it.clearedAt && !/needs your input/.test(it.text)) continue;
-      it.status = 'done'; it.resolvedAt = Date.now(); it.resolvedBy = 'agent';
+      it.status = 'done'; it.resolvedAt = this._now(); it.resolvedBy = 'agent';
       n++; went.push(it);
     }
     if (n) { this._save(); this._notify(); this._emitStatus(went, 'agent'); }
@@ -524,7 +530,7 @@ class UserTodoManager {
     item.status = status;
     // a reopen is the user saying it still matters: it no longer expires
     if (status === 'open') { item.resolvedAt = null; item.resolvedBy = null; item.expiresAt = null; if (!wasOpen) delete item.judged; } // F2: a reopen is judged again
-    else { item.resolvedAt = Date.now(); item.resolvedBy = by; }
+    else { item.resolvedAt = this._now(); item.resolvedBy = by; }
     this._save(); this._notify();
     if (wasOpen && status !== 'open') this._emitStatus([item], by);
     // verify-r6 W2: a REOPEN is said too — a producer whose question is over (an exit ask answered / expired) closes it
@@ -544,7 +550,7 @@ class UserTodoManager {
   setStatusMany(ids, status, by = 'user') {
     if (!STATUSES.includes(status)) throw new Error(`status must be one of ${STATUSES.join('/')}`);
     const changed = [], unknown = [], went = [];
-    const now = Date.now();
+    const now = this._now();
     for (const id of new Set(Array.isArray(ids) ? ids : [])) {
       const item = this._state.items.find((i) => i.id === id);
       if (!item) { unknown.push(id); continue; }
@@ -565,7 +571,7 @@ class UserTodoManager {
    *  exactly as it is. ONE save + ONE broadcast; the status listeners hear it as they hear setStatus.
    *  @returns the ids resolved */
   resolveAnswered(ids, by, fact = null) {
-    const went = [], now = Date.now();
+    const went = [], now = this._now();
     for (const id of new Set(Array.isArray(ids) ? ids : [])) {
       const item = this._state.items.find((i) => i.id === id);
       if (!item || item.status !== 'open') continue;
@@ -583,7 +589,7 @@ class UserTodoManager {
    *  already resolved or dismissed keeps its status and `resolvedBy` (a reply
    *  is refused for delivery reasons only, never bookkeeping) — either way the
    *  reply is kept on it as `{text ≤4000, at}`. ONE save + ONE broadcast. */
-  resolveByReply(id, text, now = Date.now()) {
+  resolveByReply(id, text, now = this._now()) {
     const item = this._state.items.find((i) => i.id === id);
     if (!item) throw new Error('item not found');
     item.reply = { text: String(text == null ? '' : text).slice(0, REPLY_MAX), at: now };
@@ -642,7 +648,7 @@ class UserTodoManager {
    * `detailTruncated`, which a cleared item never is). Returns
    * {cleared: [ids], already: [ids], unknown: [ids], refused: [{id, code, why, status}]}.
    */
-  clearItems(ids, { by = 'owner', at = Date.now(), allow = null } = {}) {
+  clearItems(ids, { by = 'owner', at = this._now(), allow = null } = {}) {
     const out = { cleared: [], already: [], unknown: [], refused: [] };
     for (const id of new Set(Array.isArray(ids) ? ids : [ids])) {
       const item = this._state.items.find((i) => i.id === id);

@@ -443,7 +443,7 @@ async function recheckCell(Mgr, Todos) {
   const dm = { runCmd: async (cmd, args) => { runs.push(args[1]); return { code: 0, stdout: '', stderr: '', timedOut: false, signal: null }; }, serveSocks: async () => ({ port: 1 }), tcpForward: async () => ({ write() { }, close() { } }), unserveSocks: async () => { } };
   const hosts = { list: () => recs.map((h) => ({ ...h, online: true })), get: (id) => recs.find((x) => x.id === id), setExitAccess: (id, exit) => { const h = recs.find((x) => x.id === id); h.exit = { ...exit }; }, setLastRun: () => { }, deviceBounded: async () => dm };
   const dataDir = fs.mkdtempSync(path.join(SCR, 'r-'));
-  const todos = new Todos({ dataDir, expirySweepMs: 0 });
+  const todos = new Todos({ dataDir, expirySweepMs: 0, now: () => clock });
   const sessions = new Map([['wa', { name: 'ops', backend: 'claude', claudeSessionId: 'A', cwd: '/w' }]]);
   const mgr = new Mgr({ hosts, log: () => { }, dataDir, userTodos: todos, sessionsMap: () => sessions, bcastAll: () => { }, now: () => clock, timers: T, emitCard: () => true, groupsOf: () => [] });
   await mgr.setAccess('host-dial-M', { run: { mode: 'only', who: [{ kind: 'session', id: 'claude:A' }], ask: true } });

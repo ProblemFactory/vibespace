@@ -2,6 +2,20 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.265 — 2026-10-13
+
+### Added
+- API access has a fourth level, Full trust: an agent you name runs deletes without asking you — still logged and capped, never for All agents
+
+### Changed
+- An agent's API-call approval card now says what it will do to which document or chat; the raw request is folded under Technical details
+- API-call cards now name hundreds more Lark, Slack and Gmail actions in plain words, taken from each service's own published list of calls
+- Dropline's dictionary suggestions include identifiers again (like `chat_id`, `docx_token`) — dictation mishears them most; keys and placeholders stay out.
+
+### Fixed
+- A remote Windows or Mac desktop shown smaller no longer has a giant mouse pointer; a Windows screen with HDR on now says why it looks washed out
+- An account with a valid long-lived token no longer shows a red "login expired" — its sessions keep running; only the usage refresh asks you to sign in again
+
 ## 2.369.264 — 2026-10-13
 
 ### Added

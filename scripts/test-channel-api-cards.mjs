@@ -21,7 +21,7 @@ function pureRows(C, tag = '') {
   const m = C.cardModel(base(), { now: T0 + H });
   R.pending = m.fate === 'pending' && m.actionable && m.outcome.key === 'Waiting for you · expires in {h} h' && m.outcome.params.h === 23;
   R.frozen = m.request.method === 'POST' && m.request.host === 'open.feishu.cn' && m.request.query === 'receive_id_type=chat_id' && m.headers[0] === 'Content-Type: application/json' && m.bodySha === 'e'.repeat(64) && m.bodyBytes === 7 && m.tier === 'write-ask';
-  R.body400 = C.cardModel(base({ body: 'y'.repeat(5000), bodyBytes: 5000 })).body.length === 400 && C.cardModel(base({ body: 'y'.repeat(5000) })).bodyMore === true;
+  R.body400 = C.cardModel(base({ body: 'y'.repeat(5000), bodyBytes: 5000 })).body.length === 2048 && C.cardModel(base({ body: '{"a":1}' })).body === '{\n  "a": 1\n}' && C.cardModel(base({ body: 'y'.repeat(5000) })).bodyMore === true;
   R.alwaysNames = !!m.always && m.always.params.shape === 'POST open.feishu.cn/open-apis/im/v1/messages';
   R.sensitiveNoAlways = C.cardModel(base({ sensitive: 'DELETE', offersAlways: true })).always === null && !!C.cardModel(base({ sensitive: 'DELETE' })).sensitive;
   R.ran = C.cardModel(base({ status: 'ran', result: { status: 200, bytes: 1229 } })).outcome.key === 'Ran · {status} · {size}' && C.outcomeOf(base({ status: 'ran', result: { status: 200, bytes: 1229 } })).params.size === '1.2 KB';
@@ -37,7 +37,7 @@ function pureRows(C, tag = '') {
   R.sameWords = (() => { const p = base({ status: 'ran', result: { status: 200, bytes: 1229 } }); const f = C.resolvedFactOf(p).apiOutcome, o = C.cardModel(p).outcome; return f.key === o.key && JSON.stringify(f.params) === JSON.stringify(o.params); })();
   return R;
 }
-const WORDS = { pending: 'a pending card: Approve-able, says when it expires', frozen: 'the card shows the FROZEN request (method, host, path, query, headers, body size + sha256, tier)', body400: 'the body shows its first 400 chars and says there is more', alwaysNames: '"always allow" names the shape it will allow (D2)', sensitiveNoAlways: 'a sensitive card has NO always-allow button, says why', ran: 'Ran · 200 · 1.2 KB', rejected: 'Rejected by you', expiredFate: 'the sweep\'s fates are named (expired / withdrawn)', decidedNotActionable: 'a decided card answers nothing', sig: 'the keyed sig changes iff a drawn word changes', sweep: 'sweep: 24 h unanswered ⇒ expired; account gone ⇒ withdrawn by name; decided untouched', forYou: 'ONE For-you item (origin channels): Approve names the proposal + its digest', receipts: 'the next-turn receipt says ran / rejected (by whom) / expired / withdrawn', sameWords: 'the resolved For-you row and the card say the SAME outcome' };
+const WORDS = { pending: 'a pending card: Approve-able, says when it expires', frozen: 'the card shows the FROZEN request (method, host, path, query, headers, body size + sha256, tier)', body400: 'the 技术细节 fold shows the body pretty-printed up to 2 KB and says there is more', alwaysNames: '"always allow" names the shape it will allow (D2)', sensitiveNoAlways: 'a sensitive card has NO always-allow button, says why', ran: 'Ran · 200 · 1.2 KB', rejected: 'Rejected by you', expiredFate: 'the sweep\'s fates are named (expired / withdrawn)', decidedNotActionable: 'a decided card answers nothing', sig: 'the keyed sig changes iff a drawn word changes', sweep: 'sweep: 24 h unanswered ⇒ expired; account gone ⇒ withdrawn by name; decided untouched', forYou: 'ONE For-you item (origin channels): Approve names the proposal + its digest', receipts: 'the next-turn receipt says ran / rejected (by whom) / expired / withdrawn', sameWords: 'the resolved For-you row and the card say the SAME outcome' };
 
 console.log('① PURE card model (src/channel-api-card.js)');
 const C = require(path.join(ROOT, 'src/channel-api-card.js'));
@@ -63,7 +63,8 @@ function harness(cardsPath = path.join(ROOT, 'src/server/channel-api-cards.js'))
   const delivered = [], stash = []; let refuse = false;
   const deliver = { deliverToConversation: async (cid, text, opts) => { delivered.push({ cid, text, opts }); return refuse ? { ok: false } : { ok: true }; }, stashFor: (cid, env) => { stash.push({ cid, env }); } };
   const { create } = require(cardsPath);
-  const cards = create({ dataDir: dir, api, userTodos, deliver, now: () => clock, timer: false, log: { warn() {}, log() {} } });
+  const names = (adapterId, convId) => (adapterId === 'lark-1' && convId === 'oc_known' ? 'Product room' : null);   // the channel store's name ladder
+  const cards = create({ dataDir: dir, api, userTodos, deliver, names, now: () => clock, timer: false, log: { warn() {}, log() {} } });
   const add = (o) => { const p = base({ bodySha: undefined, headers: undefined, tier: undefined, shape: undefined, ...o }); props[p.id] = p; writeFrozen(); return p; };
   return { dir, api, cards, add, todos, answered, delivered, stash, creds, granted, setClock: (t) => { clock = t; }, refuse: (v) => { refuse = v; } };
 }
@@ -87,10 +88,14 @@ async function orchRows(h) {
   const v = h.api.ownerView().proposals;
   R.withdrawnTier = v.find((p) => p.id === 'api-3').decidedBy === 'withdrawn' && /withdrawn/.test(v.find((p) => p.id === 'api-3').reason) && h.delivered.some((d) => /api-3.*WITHDRAWN/s.test(d.text));
   R.withdrawnAccount = v.find((p) => p.id === 'api-4').reason === 'the account was removed';
+  h.add({ id: 'api-5', at: T0, body: '{"receive_id":"oc_known","msg_type":"text"}' }); h.add({ id: 'api-6', at: T0, body: '{"receive_id":"oc_unknown","msg_type":"text"}' });
+  const r5 = h.cards.records().find((r) => r.id === 'api-5'), r6 = h.cards.records().find((r) => r.id === 'api-6');
+  R.objectNamed = !!r5 && r5.objectName === 'Product room' && !!r5.objectConv && r5.objectConv.adapterId === 'lark-1' && r5.objectConv.convId === 'oc_known' && !!r6 && !('objectName' in r6)
+    && C.cardModel(r5).head.object.name === 'Product room' && C.cardModel(r6).head.object.short === 'oc_unkno…';
   R.persisted = (() => { const j = JSON.parse(fs.readFileSync(path.join(h.dir, 'channels/api-cards.json'), 'utf8')); return j.items['api-1'].todoId === 't-1' && j.items['api-1'].receipt.how === 'delivered'; })();
   return R;
 }
-const OWORDS = { oneItem: 'a pending proposal files ONE For-you item (key/origin channels), never twice', record: 'the record carries the frozen headers, the body sha256, the tier, the shape', decisionResolves: 'a decision answers the For-you item WITH the outcome (one record, three surfaces)', receipt: 'the agent is told on its next turn — no wake, spendReason channel-receipt', receiptOnce: 'the receipt is handed once', expired: '24 h unanswered ⇒ expired: nothing ran, item answered, the receipt stashed when the ladder refuses', withdrawnTier: 'the tier withdrawn ⇒ withdrawn by name, the agent told', withdrawnAccount: 'the account removed ⇒ withdrawn "the account was removed"', persisted: 'the item / receipt bookkeeping survives a restart (api-cards.json)' };
+const OWORDS = { objectNamed: 'a call\'s chat is NAMED from the channel store (+ the conversation it opens); an unknown one keeps its 8-char id chip', oneItem: 'a pending proposal files ONE For-you item (key/origin channels), never twice', record: 'the record carries the frozen headers, the body sha256, the tier, the shape', decisionResolves: 'a decision answers the For-you item WITH the outcome (one record, three surfaces)', receipt: 'the agent is told on its next turn — no wake, spendReason channel-receipt', receiptOnce: 'the receipt is handed once', expired: '24 h unanswered ⇒ expired: nothing ran, item answered, the receipt stashed when the ladder refuses', withdrawnTier: 'the tier withdrawn ⇒ withdrawn by name, the agent told', withdrawnAccount: 'the account removed ⇒ withdrawn "the account was removed"', persisted: 'the item / receipt bookkeeping survives a restart (api-cards.json)' };
 console.log('② ORCH over fakes (src/server/channel-api-cards.js)');
 const O = await orchRows(harness());
 for (const k of Object.keys(OWORDS)) ok(O[k], OWORDS[k], O);
@@ -103,19 +108,21 @@ function mutant(rel, from, to) {
   const src = fs.readFileSync(path.join(ROOT, rel), 'utf8');
   if (!src.includes(from)) return null;
   const d = path.join(tmp, `m${++mutN}`, path.dirname(rel)); fs.mkdirSync(d, { recursive: true });
-  let s = src.replace(from, to).replace(/require\('\.\.\/channel-api(-card)?\.js'\)/g, (m0, g) => `require(${JSON.stringify(path.join(ROOT, `src/channel-api${g || ''}.js`))})`);
+  let s = src.replace(from, to).replace(/require\('\.\.\/channel-api(-card)?\.js'\)/g, (m0, g) => `require(${JSON.stringify(path.join(ROOT, `src/channel-api${g || ''}.js`))})`)
+    .replace(/require\('\.{1,2}\/api-call-words\.js'\)/g, () => `require(${JSON.stringify(path.join(ROOT, 'src/api-call-words.js'))})`);
   const f = path.join(d, path.basename(rel)); fs.writeFileSync(f, s); return f;
 }
 const pm = (from, to, row) => { const f = mutant('src/channel-api-card.js', from, to); ok(!!f && pureRows(require(f))[row] === false, `CONTROL: ${row} red without its rule`); };
 pm("now - (Number(p.at) || 0) >= TTL_MS", 'false', 'sweep');
 pm('p.offersAlways && !p.sensitive && p.shape', 'p.offersAlways && p.shape', 'sensitiveNoAlways');
-pm("String(p.body).slice(0, BODY_SHOWN)", 'String(p.body)', 'body400');
+pm("String(prettyBody(p.body)).slice(0, BODY_SHOWN)", 'String(prettyBody(p.body))', 'body400');
 pm("shown: p.digest || null", 'shown: null', 'forYou');
 const om = async (from, to, row) => { const f = mutant('src/server/channel-api-cards.js', from, to); ok(!!f && (await orchRows(harness(f)))[row] === false, `CONTROL: ${row} red without its rule`); };
 await om("userTodos.resolveAnswered([st.todoId], 'channel-api', C.resolvedFactOf(p));", '', 'decisionResolves');
 await om("if (st.todoId || !userTodos", 'if (!userTodos', 'oneItem');
 await om("{ await receiptFor(p, st); dirty = true; }", '{ dirty = true; }', 'receipt');
 await om("try { deliver.stashFor(p.conv,", 'try { if (0) deliver.stashFor(p.conv,', 'expired');
+await om("todoId: (state.items[p.id] || {}).todoId || null, receipt: (state.items[p.id] || {}).receipt || null, ...objectOf(p),", 'todoId: (state.items[p.id] || {}).todoId || null, receipt: (state.items[p.id] || {}).receipt || null,', 'objectNamed');
 
 console.log(fail ? `FAILED: ${fail} of ${pass + fail}` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

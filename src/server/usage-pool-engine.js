@@ -509,7 +509,7 @@ function poolReadLogin() {
   return (id) => {
     if (!memo.has(id)) {
       let st = null;
-      try { st = accounts.loginStateOf(id); } catch { st = null; }
+      try { st = accounts.loginStateOf(id, Date.now(), { slot: true }); } catch { st = null; } // the SLOT: a pooled CLI reads the file, never the token
       // EITHER reader saying "unusable" is enough. Only ever a DOWNGRADE: a
       // file verdict never resurrects a login the deadline reader buried.
       try {
@@ -5845,7 +5845,7 @@ function notePoolAuthFailure(session, sid, info = {}) {
     // refreshed") is about an unrecoverable login, not a transient API error —
     // saying "failing authentication" there sends the user to check the
     // network. Any other shape keeps today's wording verbatim.
-    const li = (() => { try { return accounts.loginStateOf(memberId); } catch { return null; } })();
+    const li = (() => { try { return accounts.loginStateOf(memberId, Date.now(), { slot: true }); } catch { return null; } })();
     const loginDead = li && !loginUsable(li);
     // STATE-branched (round-3 verifier's last low): a wiped ('logged-out') file
     // whose deadline is still ahead must not be narrated as an expiry in the
@@ -6821,7 +6821,7 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
       : d.reason === 'subscription-lapsed'
       ? `Pool "${a.name}" switched to ${d.toName} — ${nameOf(currentId)}'s subscription is inactive; it rejoins by itself once it answers again${hot ? '' : ' (restarting its conversations)'}${scraps}`
       : d.reason === 'login-expired'
-      ? `Pool "${a.name}" switched to ${d.toName} — ${nameOf(currentId)}'s ${(() => { try { const l = accounts.loginStateOf(currentId); return l ? loginWallPhrase(l) : 'login session expired'; } catch { return 'login session expired'; } })()}; re-login it in Manage Agents${hot ? '' : ' (restarting its conversations)'}${scraps}`
+      ? `Pool "${a.name}" switched to ${d.toName} — ${nameOf(currentId)}'s ${(() => { try { const l = accounts.loginStateOf(currentId, Date.now(), { slot: true }); return l ? loginWallPhrase(l) : 'login session expired'; } catch { return 'login session expired'; } })()}; re-login it in Manage Agents${hot ? '' : ' (restarting its conversations)'}${scraps}`
       : `Pool "${a.name}" auto-switched to ${d.toName}${d.priorityRank ? ` (priority #${d.priorityRank})` : ''} (previous account ${dEarly ? `will be down to ${fromPct}% within ${Math.round(PROJECTION_LEAD_SEC / 60)} min — moved early, ${dEarly}` : `down to ${fromPct}% remaining`})${hot ? '' : ' — restarting its conversations'}${scraps}`);
     console.log(`[pool] auto-switch ${poolId}: ${currentId} → ${d.to} (${d.reason}, from ${fromPct}% left${dEarly ? `; ${dEarly}` : ''}, hot=${hot}, affected=${affected.length})`);
     if (!hot && affected.length) {

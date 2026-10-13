@@ -2231,7 +2231,7 @@ app.post('/api/agent/channels/api', async (req, res) => {
   if (typeof b.bodyBase64 === 'string') body = Buffer.from(b.bodyBase64, 'base64');
   else if (typeof b.body === 'string') body = b.body;
   let r;
-  try { r = await api.call(channelPrincipal(s, id), { cred: b.cred, method: b.method, host: b.host, path: b.path, query: b.query, headers: b.headers, body }); }
+  try { r = await api.call(channelPrincipal(s, id), { cred: b.cred, method: b.method, host: b.host, path: b.path, query: b.query, headers: b.headers, body, why: typeof b.why === 'string' ? b.why : null }); }
   catch (e) { return res.status(500).json({ error: e.message }); }
   if (r && r.touch) touchChannel(id, [r.touch]);
   apiAnswer(res, r);

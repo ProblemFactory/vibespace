@@ -102,6 +102,18 @@ const loginWhenText = (ms) => { try { return new Date(ms).toLocaleString(undefin
 export function loginExpiryChipHtml(a, { local = true } = {}) {
   const ls = a && a.loginState;
   if (!ls || typeof ls !== 'object') return '';
+  // OAT-ONLY (2026-10-13, owner: "都绑定长期token了，怎么还提示过期"): the OAuth login ended but the
+  // row's long-lived token is valid — sessions keep running, only the quota ⟳ needs a re-login.
+  // WARNING colour (the class default), never the dead red; same re-login door. In its last day
+  // the chip counts the TOKEN down (the oat chip beside it says re-mint).
+  if (ls.state === 'oat-only') {
+    if (!local) return ''; // a host section shows the DEAD state only (and the token rides to hosts)
+    const near = local && typeof ls.msLeft === 'number' && ls.msLeft < 24 * 3600e3;
+    const label = near ? t('login expired · long-lived token ends in {left}', { left: escHtml(loginLeftText(ls.msLeft)) })
+      : t('login expired · sessions use the long-lived token; usage refresh needs re-login');
+    const title = t('This account’s OAuth login ended {when}; sessions keep running on its long-lived token (valid until {date}); only the quota refresh (⟳) needs you to sign in again.', { when: escHtml(loginWhenText(ls.refreshExpiresAt)), date: escHtml(loginWhenText(ls.oatValidUntil)) });
+    return ` <span class="acct-blocked-hint acct-login-chip acct-login-oat" role="button" tabindex="0" data-relogin="${escHtml(a.id)}" title="${title}">${ROSTER_ICONS.CLOCK}${label}</span>`;
+  }
   const dead = ls.state === 'expired' || ls.state === 'logged-out';
   if (!dead && !(local && ls.state === 'expiring')) return '';
   const target = ls.worstId || a.id;           // pool ⇒ the member that earned the state
@@ -110,13 +122,19 @@ export function loginExpiryChipHtml(a, { local = true } = {}) {
   const label = ls.state === 'logged-out' ? t('login signed out — re-login')
     : ls.state === 'expired' ? t('login expired {when} — re-login', { when: escHtml(when) })
     : t('login expires in {left}', { left: escHtml(loginLeftText(ls.msLeft)) });
-  const title = ls.state === 'logged-out'
+  // a POOL row whose dead member holds a valid long-lived token: the token runs that member's OWN
+  // sessions, but a pooled session reads the login file — say why the token does not help here
+  const poolOat = !!(ls.worstName && ls.worstOatValidUntil);
+  const poolOatNote = poolOat ? ' · ' + t('the pool can’t use its long-lived token') : '';
+  const title = poolOat
+    ? t('{name}’s OAuth login ended. Its long-lived token (valid until {date}) keeps its own sessions running, but a pooled session reads the login file, so this pool cannot use the token — re-login to bring it back. Click to re-login.', { name: escHtml(ls.worstName), date: escHtml(loginWhenText(ls.worstOatValidUntil)) })
+    : ls.state === 'logged-out'
     ? t('This account’s login session ran out and the CLI cleared its tokens — every session on it fails until you sign in again. Click to re-login.')
     : ls.state === 'expired'
     ? t('This account’s login session ended {when}. Refreshing the access token does NOT extend it, so the CLI can no longer authenticate — every session on this account fails. Click to re-login.', { when: escHtml(when) })
     : t('This account’s login session ends {when} — that deadline does NOT move when the access token refreshes. Re-login before then or sessions on it will start failing. Click to re-login.', { when: escHtml(when) });
   return ` <span class="acct-blocked-hint acct-login-chip" role="button" tabindex="0" data-relogin="${escHtml(target)}"`
-    + `${dead ? ' style="color:var(--red,#e55)"' : ''} title="${title}">${ROSTER_ICONS.CLOCK}${who}${label}</span>`;
+    + `${dead ? ' style="color:var(--red,#e55)"' : ''} title="${title}">${ROSTER_ICONS.CLOCK}${who}${label}${poolOatNote}</span>`;
 }
 
 /** The row's extras line (2.369.212, owner: "这个登陆过期提示会被备注抢占位置导致看不到"):
@@ -1300,7 +1318,7 @@ export function installManageAgents(App, ctx = {}) {
         try {
           r = await fetchJson('/api/usage/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(tg.body) });
         } catch {}
-        const msgOf = () => (r?.error ? String(r.error)
+        const msgOf = () => (r?.loginNeeded ? t('Needs re-login to refresh usage') : r?.error ? String(r.error)
           : r?.throttled ? t('Refreshed less than a minute ago — try again shortly')
           : !r ? t('Refresh failed') : null);
         const row = rowOf(tg);
