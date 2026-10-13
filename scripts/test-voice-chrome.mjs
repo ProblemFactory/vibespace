@@ -206,8 +206,8 @@ console.log('① desk 1280 — record, stop, insert at the cursor, Ctrl+Z, a sel
 console.log('② phone 390 — the same button records and inserts');
 {
   const p = await page(390, 800, `http://127.0.0.1:${PORT}`);
-  const vis = await p.ev(`(() => { const m = document.querySelector(${JSON.stringify(MIC)}).getBoundingClientRect(); const t = ${TA}.getBoundingClientRect(); return { w: m.width, h: m.height, right: m.right, inRow: m.bottom <= t.bottom + 2 && m.right <= t.left + 1, vw: innerWidth }; })()`);
-  ok('the microphone is on the phone too (≥ 36 px target, before the textarea)', vis.w >= 36 && vis.h >= 36 && vis.inRow, vis);
+  const vis = await p.ev(`(() => { const m = document.querySelector(${JSON.stringify(MIC)}).getBoundingClientRect(); const t = ${TA}.getBoundingClientRect(); return { w: m.width, h: m.height, right: m.right, inField: m.left >= t.left - 1 && m.right <= t.right + 1 && m.top >= t.top - 1 && m.bottom <= t.bottom + 1, vw: innerWidth }; })()`);
+  ok('the microphone is on the phone too — inside the field\'s trailing edge (≥ 32 px glyph; lane phone-chat-composer)', vis.w >= 32 && vis.h >= 32 && vis.inField, vis);
   await setText(p, '', 0, 0);
   answers.push({ text: '手机上的口述' });
   await p.clickSel(MIC); await p.until(`document.querySelector(${JSON.stringify(MIC)}).classList.contains('recording')`); await sleep(1100);

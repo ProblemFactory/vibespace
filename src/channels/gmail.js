@@ -317,6 +317,7 @@ const caps = Object.freeze({
   // thread's newest message, `quote` a named one (In-Reply-To / References); nothing is a separate thread
   threads: Object.freeze({ read: 'none', replyInto: false, listing: 'none', placements: Object.freeze(['chat', 'quote']), rootReply: 'quote' }),
   reactions: Object.freeze({ read: 'none', add: false, remove: 'none', vocabulary: 'names', custom: 'none', perMessageMax: null }),
+  revisions: Object.freeze({ recall: false, edit: false, how: 'none' }),   // lane channel-record-revisions: nothing is ever rechecked
   // design 010 S6 (B-c9be, lane channels-followups): THE OWNER'S FULL SEARCH over the WHOLE mailbox — `messages.list` with
   // the words as `q` (all mail but spam and trash: also the threads outside the synced scope, F3's second gap), on a
   // person's press only; per hit the person will be SHOWN (not held here, inside the caller's reach) ONE

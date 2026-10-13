@@ -178,7 +178,10 @@ const caps = Object.freeze({
   budget: { unit: 'request', metered: true, ...budgetOf(MANIFEST.settings) },
   pace: { ...paceOf(MANIFEST.settings), cost: { fetch: 1, discover: 1 } },
   vendorName: i18nKey('Slack'),
-  facts: Object.freeze(['via', 'edited']),
+  facts: Object.freeze(['via', 'edited', 'recalled']),
+  // lane channel-record-revisions: Slack keeps no recall flag — a deleted message VANISHES from history (a tombstone
+  // when it had replies), so a stored message re-read around its ts and ABSENT is recalled; `edited.ts` = a version
+  revisions: Object.freeze({ recall: true, edit: true, how: 'absent' }),
   // F3: Slack's thread object (`thread_ts`), replies listed separately (`conversations.replies`), a reply in the
   // thread or in the thread AND the channel (`reply_broadcast`); the norm for answering a message is its thread
   threads: Object.freeze({ read: 'vendor', replyInto: true, listing: 'separate', placements: Object.freeze(['chat', 'thread', 'thread+chat']), rootReply: 'thread' }),
@@ -894,6 +897,20 @@ function create(record = {}, deps = {}) {
       const { msgs } = await page('conversations.history', convId, { limit: size });
       const ctx = await ctxFor(msgs);
       return { records: msgs.slice(0, size).reverse().map((m) => toRecord(adapterId, convId, m, ctx)) };
+    },
+    /** lane channel-record-revisions: ONE stored message re-read around its ts (`oldest = latest = ts`, inclusive) — the
+     *  channel's history, or the thread's replies for a reply. Absent or a tombstone = recalled; `edited.ts` = a version. */
+    async revisionOf(convId, { messageId = null, threadKey = null } = {}) {
+      const ts = String(messageId || '');
+      if (!TS_RE.test(ts)) throw new ChannelError('not-found', 'slack: a message is named by its timestamp', { retryable: false });
+      const tk = threadKey && TS_RE.test(String(threadKey)) && String(threadKey) !== ts ? String(threadKey) : null;
+      const { msgs } = await page(tk ? 'conversations.replies' : 'conversations.history', convId, { ...(tk ? { ts: tk } : {}), oldest: ts, latest: ts, inclusive: 'true', limit: tk ? 2 : 1 });
+      const m = msgs.find((x) => String(x.ts) === ts);
+      if (!m || m.subtype === 'tombstone') return { state: 'recalled' };
+      const ed = m.edited && tsMs(m.edited.ts);
+      if (!ed) return { state: 'same' };
+      const rec = toRecord(adapterId, convId, m, await ctxFor([m]));
+      return { state: 'edited', editedAt: ed, text: rec.text, blocks: rec.blocks || null };
     },
     /**
      * THE OWNER'S FULL SEARCH, ONE PAGE (design 010; lane slack-search): `search.messages` with the words as Slack's

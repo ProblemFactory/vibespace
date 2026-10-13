@@ -127,7 +127,7 @@ console.log('§3 the fold and the compaction');
   const c = CF.compactFactLines([fx2, fx1, { k: 'rx', msg: 'v', at: 3 }]);
   ok(c.length === 1 && c[0].at === 20 && J(c[0].facts.map((x) => x.k)) === J(['cc', 'subject']) && c[0].facts[1].v === 'second', 'the side log\'s compaction folds a message\'s fx lines into ONE line at the newest instant', J(c));
   const store = fs.readFileSync(path.join(REPO, 'src/channel-store.js'), 'utf-8');
-  ok(/compactSide\(byMsg\.get\(k\)\)\.concat\(compactFactLines\(byMsg\.get\(k\)\)\)/.test(store) && /\(\?:rx\|th\|pl\|fx\)/.test(store), 'the store\'s trim keeps the folded fx line and its reader\'s head match knows `fx`');
+  ok(/compactSide\(byMsg\.get\(k\)\)\.concat\(compactFactLines\(byMsg\.get\(k\)\)\)/.test(store) && /\(\?:rx\|th\|pl\|fx\|rv\)/.test(store), 'the store\'s trim keeps the folded fx line and its reader\'s head match knows `fx` (+ `rv`, lane channel-record-revisions)');
 }
 
 // ── §4 THE WORDS ───────────────────────────────────────────────────────────────────────────────────────────

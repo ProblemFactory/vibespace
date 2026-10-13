@@ -349,6 +349,9 @@ const caps = Object.freeze({
   // already reads — the app a message came through (`sender_type: app`), a merged forward, an edit (`updated` + its
   // `update_time`), a recall (`deleted`); the contract suite holds every emit to this list. No `factsOf`: nothing to backfill
   facts: Object.freeze(['via', 'forwarded-from', 'edited', 'recalled']),
+  // lane channel-record-revisions (owner 2026-10-13, userW's recall): a stored message re-read BY ID (`GET
+  // im/v1/messages/:id` — `deleted` = 撤回, `updated` + `update_time` + the new body = an edit); the search feed only names NEW
+  revisions: Object.freeze({ recall: true, edit: true, how: 'byid' }),
   threads: Object.freeze({ read: 'vendor', replyInto: true, listing: 'separate', placements: Object.freeze(['chat', 'quote', 'thread']), rootReply: 'quote' }),
   reactions: Object.freeze({ read: 'list', add: true, remove: 'own', vocabulary: 'names', custom: 'none', perMessageMax: null }),
   // lane lark-search-poll (B-5aab, design §1.3): THE CHANGE FEED — `im/v1/messages/search` with an EMPTY query and a
@@ -887,6 +890,8 @@ const CODE_AUTH = new Set([99991661, 99991663, 99991664, 99991665, 99991667, 999
 const CODE_RATE = new Set([99991400, 99991401, 99991402, 99991403, 11232, 230020]);
 const CODE_FORBIDDEN = new Set([99991672, 99991679, 230002, 230006, 230011, 230013, 230014]);
 const CODE_NOT_FOUND = new Set([230001, 230003, 230026]);
+/** lane channel-record-revisions: a message read by id answered with one of these WAS recalled / deleted by its sender. */
+const RECALL_CODES = new Set([230011, 230110]);
 function typedFailure(status, body, what, retryAfterSec = null) {
   const code = body && Number(body.code);
   const msg = (body && (body.msg || body.error_description || body.error)) || `HTTP ${status}`;
@@ -1658,6 +1663,23 @@ function create(record = {}, deps = {}) {
     const selfId = selfOpenId();
     return { kind: v.kind, record: toRecord(adapterId, convId, v.item, { names, selfId, selfTenant: selfTenant() }), rootPatch: v.rootPatch, threadKey: v.threadKey };
   }
+  /** lane channel-record-revisions: ONE stored message re-read by its id — `deleted` ⇒ recalled; `updated` at a readable
+   *  `update_time` ⇒ edited, with the body `toRecord` reads (the poll's own normalizer); anything else the same / unknown. */
+  async function revisionOfImpl(convId, { messageId } = {}) {
+    if (!byIdOk(messageId)) throw new ChannelError('not-found', 'lark: a message recheck needs its id', { retryable: false });
+    let d;
+    // the vendor answers a recalled / deleted message by its CODE (230011 "recalled", 230110 "deleted" — the error-code list;
+    // test-channels-lark-shape A4's om_gone), or an item with `deleted: true` — both are the recall
+    try { d = await api(`/im/v1/messages/${encodeURIComponent(String(messageId))}`, { what: 'lark message recheck' }); } catch (err) { if (err && err.code === 'rate-limited') throw err; if (err && err.detail && RECALL_CODES.has(Number(err.detail.code))) return { state: 'recalled' }; throw err; }
+    const v = readByIdAnswer((d && d.data) || null, { messageId, convId });
+    if (v.kind === 'deleted') return { state: 'recalled' };
+    if (!v.item) return { state: 'unknown' };
+    const ed = factsOfItem(v.item).find((f) => f.k === 'edited');
+    if (!ed) return { state: 'same' };
+    const names = await allNamesFor(convId, [v.item]);
+    const rec = toRecord(adapterId, convId, v.item, { names, selfId: selfOpenId(), selfTenant: selfTenant() });
+    return { state: 'edited', editedAt: ed.v, text: rec.text, blocks: rec.blocks || null };
+  }
   /** ONE message's reactions (L8): the vendor's list, paged to `has_more === false` but at most REACTION_PAGES_MAX
    *  pages (150); grouped by emoji_type with the reactors' open ids and their reaction ids aligned (the engine keeps
    *  OUR ids for an unreact and never serves them). `truncated` when the vendor held more. */
@@ -2006,6 +2028,7 @@ function create(record = {}, deps = {}) {
     // lane lark-threads: the recent-roots recheck's page (A2) and one message by its id (A4)
     recentRoots: recentRootsImpl,
     messageById: messageByIdImpl,
+    revisionOf: revisionOfImpl,
     reactions: reactionsImpl,
     react: reactImpl,
     unreact: unreactImpl,

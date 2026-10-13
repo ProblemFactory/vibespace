@@ -1089,7 +1089,7 @@ if (!CHROME) {
         w: chip.getBoundingClientRect().width, left: chip.getBoundingClientRect().left,
         text: chip.textContent.replace(/\s+/g, ' ').trim(),
         clipped: chip.scrollWidth > chip.clientWidth + 1,
-        shrink: ccs.flexShrink, barWrap: bcs.flexWrap, barOverflowX: bcs.overflowX,
+        shrink: ccs.flexShrink, barWrap: bcs.flexWrap, barOverflowX: bcs.overflowX, fold: !!bar.querySelector('.chat-status-more'),
         // reachable = fully on screen now, or scrollable into view by a swipe
         onScreen: chip.getBoundingClientRect().right <= innerWidth + 1,
         barScrollable: bar.scrollWidth > bar.clientWidth,
@@ -1103,7 +1103,7 @@ if (!CHROME) {
     ok(`375×667: the summary is a WRAPPING row, and at this width it does not overflow its own box (flex-wrap ${m.before.sumWrap}, scrollWidth ${m.before.sumScrollW} ≤ ${m.before.sumClientW}, height ${Math.round(m.before.sumH)}px) — a longer style name or a bigger count wraps to a second line instead of clipping`,
       m.before.sumWrap === 'wrap' && m.before.sumScrollW <= m.before.sumClientW + 1, m.before);
     ok(`375×667: the health chip keeps its FULL label on the narrow bar (${m.chip && Math.round(m.chip.w)}px, text "${m.chip && m.chip.text}", not clipped by its own box) and never shrinks away — the ≤768px bar is a single swipeable nowrap row (flex-wrap ${m.chip && m.chip.barWrap}, overflow-x ${m.chip && m.chip.barOverflowX}) so it is reachable ${m.chip && m.chip.onScreen ? 'without scrolling' : 'by a horizontal swipe'}`,
-      !!m.chip && m.chip.w > 0 && !m.chip.clipped && m.chip.shrink === '0' && m.chip.barWrap === 'nowrap' && m.chip.barOverflowX === 'auto'
+      !!m.chip && m.chip.w > 0 && !m.chip.clipped && m.chip.shrink === '0' && m.chip.barWrap === 'nowrap' && (m.chip.barOverflowX === 'auto' || (m.chip.fold && m.chip.barOverflowX === 'hidden'))
       && (m.chip.onScreen || m.chip.barScrollable), m.chip);
     ok(`375×667: it sits near the FRONT of the bar (child ${m.chip && m.chip.index} of ${m.chip && m.chip.children}) — a warning parked behind eight chips on a 375px row is a warning nobody swipes to`,
       !!m.chip && m.chip.index >= 0 && m.chip.index <= 2, m.chip);
@@ -1197,6 +1197,9 @@ if (!CHROME) {
       bar.setModel('claude-fable-5');
       bar.setPermMode('default');
       ${extra}
+      // lane phone-chat-composer: on a phone these chips sit behind ⋯ — open it, as the person does, and keep the census's
+      // one-row geometry (chips past the right edge are what the clamp exists for; the open phone bar wraps them instead)
+      bar._foldOpen = true; bar.render(); bar.element.style.flexWrap = 'nowrap'; bar.element.style.overflowX = 'auto';
       bar.render();
       window.__bar = bar;
       return true;

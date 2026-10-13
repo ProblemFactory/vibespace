@@ -20,6 +20,7 @@ import { registerCommand, registerMenuItem, menuItems, runCommand, hasCommand } 
 import { showContextMenu, fetchJson } from './utils.js';
 import { t } from './i18n.js';
 import { UI_ICONS } from './icons.js';
+import { openDesktopPicker } from './desktop-picker.js'; // lane desktop-v2-entry: the Desktop button is a picker
 import { TOOLBAR_ITEMS, TOOLBAR_COMPACT, TITLE_MIN_PX, toolbarSpec, overflowRows, compactTitle } from './toolbar-fold-model.js';
 
 export const TOOLBAR_MENU = 'toolbar-overflow';
@@ -44,7 +45,7 @@ async function openTerminalFrom(app, anchor) {
  *  names them). Registered at module load, like command-mode's. */
 export function registerToolbarCommands() {
   if (!hasCommand('toolbar.terminal')) registerCommand({ id: 'toolbar.terminal', title: 'Terminal', run: (c) => openTerminalFrom(c.app, c.anchor) });
-  if (!hasCommand('desktop.open')) registerCommand({ id: 'desktop.open', title: 'Desktop', run: (c) => c.app.openDesktop() });
+  if (!hasCommand('desktop.open')) registerCommand({ id: 'desktop.open', title: 'Desktop', run: (c) => openDesktopPicker(c.app, { anchor: c.anchor }) }); // lane desktop-v2-entry: recent / local / remote
   if (!hasCommand('layout.savedPresets')) registerCommand({ id: 'layout.savedPresets', title: 'Saved presets', run: (c) => c.app._showPresetsDialog() });
 }
 registerToolbarCommands();

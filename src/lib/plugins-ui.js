@@ -105,7 +105,7 @@ export function installPluginsUI(App) {
         const isTunnel = provides(p, 'tunnel');
         const isDictation = provides(p, 'dictation'); // Dropline voice input (q-029 P0): src/lib/voice-plugin-card.js draws its card
         const isDecision = provides(p, 'decision');
-        const stateTxt = isDictation ? (!p.configured ? t('no Dropline key yet') : p.enabled ? t('on') : t('turned off'))
+        const stateTxt = isDictation ? '' // the voice card draws its own status chip + switch in this header
           : isDecision ? (!p.enabled ? t('turned off') : p.configured ? t('on · {provider}', { provider: p.decision?.providerLabel || '' }) : t('on — no provider key yet'))
           : isServe
           ? (!p.installed ? t('the opencode CLI is not installed')
@@ -183,7 +183,7 @@ export function installPluginsUI(App) {
         // show so the user can enter/override the relay; install/start appear
         // only once a relay is configured (env default or user-entered).
         if (isDictation) {
-          renderDictationCard({ p, actions, cfgBox, api, rerender: render });
+          renderDictationCard({ p, head: card.querySelector('.plugin-head'), actions, cfgBox, api, rerender: render });
         } else if (isDecision) {
           decisionCard(this, p, { actions, cfgBox, api, render });
         } else if (isServe) {

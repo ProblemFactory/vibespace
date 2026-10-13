@@ -28,6 +28,8 @@ import { t } from './i18n.js';
 import { showToast, COUNTER_ZOOM } from './utils.js';
 import { createPictureShell, RECONNECT_LADDER, streamUrl, pageIsSecure, closeWordsKey } from './picture-shell.js';
 import { installSubtleFallback } from './aes-fallback.js';
+import { clientCuts, updateTimer, rfbScreens } from '../desktop-screens.js'; // lane desktop-v2-entry: the stats' timing table + the -308 skimmer
+import { qualityPlan, pictureChanging, sentInput, refreshRequest, pasteChord, pasteText, STILL_MS } from '../desktop-quality.js'; // lane desktop-v2-latency
 
 // noVNC uses top-level await, which can't live inside our IIFE bundle — it's
 // built as a SEPARATE ESM file (public/novnc.js, see the build script) and
@@ -74,12 +76,19 @@ export const SIGNIN_BOUND_MS = 20000;
  *   onStatus      — optional (state, detail) observer: 'starting' | 'connecting'
  *                   | 'connected' | 'disconnected' | 'error'
  *   loadRFB       — injectable loader (the node suite hands a fake RFB)
+ *   channel       — lane desktop-v2-entry: true = this view opens the WebSocket itself and hands it to noVNC (1.7 takes a
+ *                   channel); every FramebufferUpdateRequest it sends is timed (`stats()` — the update round trip + fps)
+ *   onScreens     — optional (screens[]) observer: the server's ExtendedDesktopSize screen rects (the patched noVNC's
+ *                   `vsscreens`, read by the PURE rfbScreens); `setCrop(rect|null)` shows one rect of the framebuffer, scaled
+ *   ladder        — lane desktop-v2-latency (needs `channel`): THE QUALITY LADDER — the PURE qualityPlan re-asked at every input
+ *                   and every update request; a new rung = ONE SetEncodings; `onQuality(plan)` observes it; `quality` reads it
+ *   pasteKeys     — lane desktop-v2-latency: Ctrl/⌘+V in the picture sends the page's clipboard text (ClientCutText), then the V
  *   lastClose     — optional async () => {code} | null: the bridge's own record of the stream's last close (the singleton:
  *                   GET /api/vnc/last-close) — worded into the status chip on a disconnect (lane desktop-keepalive K3)
  * Returns { container, bar, mount, status, connect, disconnect, setStatus,
  *           addControl, focus, get rfb(), dispose }.
  */
-export function createVncView(host, { url, before = null, labels = {}, autoReconnect = false, onStatus = null, loadRFB: loader = loadRFB, lastClose = null, credentials = null, resizeSession = true } = {}) {
+export function createVncView(host, { url, before = null, labels = {}, autoReconnect = false, onStatus = null, loadRFB: loader = loadRFB, lastClose = null, credentials = null, resizeSession = true, channel = false, onScreens = null, ladder = false, onQuality = null, pasteKeys = false } = {}) {
   const shell = createPictureShell(host, { labels, autoReconnect, onStatus, focus: () => focus(), ladderWords: true }); // K3: the ladder rung + the bridge's words in the chip
   const { container, bar, mount, status, pasteBtn, reBtn, labels: L, setStatus, addControl, emit } = shell;
 
@@ -87,6 +96,10 @@ export function createVncView(host, { url, before = null, labels = {}, autoRecon
   let refused = null; // design 014 D1: the RFB whose sign-in was refused / cancelled (its words stay, no retry)
   let rfbLive = false; // K2: noVNC logs "Tried changing state of a disconnected RFB object" for a disconnect() on a dead RFB — never ask
   let mode = 'active'; // x5
+  let timer = updateTimer(); // lane desktop-v2-entry: FramebufferUpdateRequest out → the next one (a fresh table per connect)
+  let crop = null; // the rect of the framebuffer shown (null = all of it) — kept across reconnects
+  // lane desktop-v2-latency: the applied rung, the last input / picture change, the link's slow verdict, the settle timer, our socket
+  let quality = null, lastActive = null, slowLink = false, stillT = null, liveCh = null;
   // lane mac-ard-signin (owner 2026-10-12: the Mac's name + password typed, then 连接中… for 268 s): the sign-in handed to
   // noVNC and not answered yet — { rfb, timer, off }. It ends at 'connect', at a refusal, or as a NAMED failure: noVNC's
   // async auth rejecting (it has no error event — the rejection is unhandled, so this view listens for one from noVNC's
@@ -129,13 +142,37 @@ export function createVncView(host, { url, before = null, labels = {}, autoRecon
     // lane mac-ard-signin: a Mac's ARD sign-in encrypts with WebCrypto, which an http page (not a secure context) lacks —
     // the PURE AES stands in as an own `crypto.subtle` there (src/lib/aes-fallback.js); a secure context never sees it
     if (credentials) installSubtleFallback(globalThis.crypto);
-    rfb = new RFB(mount, typeof url === 'function' ? url() : url);
+    const u = typeof url === 'function' ? url() : url;
+    let ch = null;
+    if (channel) {
+      // lane desktop-v2-entry: our own socket, handed to noVNC — its sends are read (types only) for the timing table
+      const t0 = timer = updateTimer();
+      ch = new WebSocket(u);
+      const send0 = ch.send.bind(ch);
+      // lane desktop-v2-latency: the request's incremental flag (a full refresh is not a change) and the person's input (the ladder)
+      ch.send = (d) => {
+        let asked = false, changed = false, input = false;
+        try { const b = d instanceof Uint8Array ? d : new Uint8Array(d); const now = performance.now(); for (const m of clientCuts(b)) { if (m.type === 3) { if (t0.request(now, b[m.at + 1] !== 0)) changed = true; asked = true; } else if (sentInput(m.type, b, m.at)) input = true; } } catch { /* never in the way of the bytes */ }
+        const r = send0(d);
+        // after the send: noVNC's flush() resets its send queue only once this returns — a quality write in here would
+        // append SetEncodings to the queue being sent and send the input's bytes twice (measured in test-desktop-v2-latency)
+        if (input || asked) queueMicrotask(() => judge(input ? 'input' : changed ? 'change' : 'request'));
+        return r;
+      };
+      ch.addEventListener('message', (e) => { try { t0.received(performance.now(), (e.data && (e.data.byteLength || e.data.size)) || 0); } catch { /* the bytes are noVNC's */ } });
+      liveCh = ch;
+    }
+    rfb = new RFB(mount, ch || u);
     rfbLive = true;
     const mine = rfb;
     if (mode !== 'active') { try { rfb.viewOnly = true; } catch {} } // x5: only the active pane drives the display (set BEFORE resizeSession asks)
     rfb.scaleViewport = true;   // fit when the server can't resize
     rfb.resizeSession = true;   // ask the server to match the window (RandR)
     if (!resizeSession) rfb.resizeSession = false; // design 014 D1: never a machine's whole PHYSICAL desktop — its picture is scaled
+    if (crop) { try { rfb.vsCrop = crop; } catch { /* an unpatched noVNC: the whole screen */ } }
+    // lane desktop-v2-latency: the first rung rides noVNC's own first SetEncodings (written before 'connect', nothing extra is sent)
+    if (ladder) { clearTimeout(stillT); stillT = null; lastActive = null; quality = qualityPlan({ slow: slowLink }); try { rfb.qualityLevel = quality.qualityLevel; rfb.compressionLevel = quality.compressionLevel; } catch { /* noVNC's defaults */ } if (onQuality) { try { onQuality(quality); } catch { /* the observer's own */ } } }
+    if (onScreens) rfb.addEventListener('vsscreens', (e) => { if (mine !== rfb) return; const sc = rfbScreens(e.detail && e.detail.bytes); if (sc) { try { onScreens(sc); } catch { /* the observer's own */ } } });
     // design 014 D1: a server that asks for a sign-in (a Mac's Screen Sharing, a TightVNC service) — the page asks the
     // person (`credentials(types)`) and hands the answer to noVNC ONLY; a refused sign-in stops the ladder (no retry loop)
     if (credentials) {
@@ -177,6 +214,58 @@ export function createVncView(host, { url, before = null, labels = {}, autoRecon
     });
   };
 
+  // lane desktop-v2-latency (design q-030 §4): THE QUALITY LADDER. An input or an update request re-asks the PURE plan (a request
+  // that closed a change counts the picture as moving when the timing table says so — never our own refresh, which would
+  // re-read the last second's changes and flip back to fluid once); a still screen is re-asked by a timer STILL_MS after the
+  // last activity. A new rung = ONE SetEncodings: noVNC re-sends them on each quality / compression write, so the compression
+  // rides the quality write. Becoming still also asks ONCE for the shown display again (non-incremental): a still screen sends
+  // nothing, so what was drawn on the fluid rung would stay blurry.
+  const judge = (cause, now = performance.now()) => {
+    if (!ladder || !rfb || shell.state !== 'connected') return;
+    const st = timer.stats(now);
+    const moving = cause === 'input' || (cause === 'change' && pictureChanging(st));
+    if (moving) lastActive = now;
+    const p = qualityPlan({ moving, idleMs: lastActive == null ? null : now - lastActive, kbps: st.kbps, slow: slowLink });
+    slowLink = p.slow;
+    clearTimeout(stillT); stillT = null;
+    if (!p.still) stillT = setTimeout(() => { stillT = null; judge('timer'); }, Math.max(20, STILL_MS - (now - lastActive)) + 5);
+    const was = quality;
+    quality = p;
+    if (was && was.rung === p.rung) { if (onQuality && (was.why !== p.why || was.slow !== p.slow)) { try { onQuality(p); } catch { /* the observer's own */ } } return; }
+    try {
+      if (rfb.qualityLevel !== p.qualityLevel) { rfb._compressionLevel = p.compressionLevel; rfb.qualityLevel = p.qualityLevel; }
+      else if (rfb.compressionLevel !== p.compressionLevel) rfb.compressionLevel = p.compressionLevel;
+    } catch { /* noVNC refused a level */ }
+    if (p.still && was && !was.still && liveCh && liveCh.readyState === 1) {
+      const fb = fbSize(); const area = crop || (fb && { x: 0, y: 0, w: fb.w, h: fb.h });
+      if (area) { try { liveCh.send(refreshRequest(area)); } catch { /* the socket is closing */ } }
+    }
+    if (onQuality) { try { onQuality(p); } catch { /* the observer's own */ } }
+  };
+  // lane desktop-v2-latency (design q-030 §4): local → remote. Ctrl/⌘+V in the picture is kept from noVNC (its keydown handler
+  // cancels the key, and a cancelled key raises no `paste` — measured in Chrome 154); the browser's own paste then lands on the
+  // focused canvas: its text/plain goes as ClientCutText, then the V (the machine pastes what it now holds; the Ctrl/⌘ noVNC sent
+  // is still down there). Nothing to paste ⇒ the V alone. Text only; a secret pasted is the person's own act — no guard, no log.
+  if (pasteKeys) {
+    let chord = null, chordT = null;
+    const pressV = (k) => { try { if (rfb && !rfb.viewOnly) rfb.sendKey(k.keysym, k.code); } catch { /* not connected */ } };
+    mount.addEventListener('keydown', (e) => {
+      const k = pasteChord(e);
+      if (!k || !rfb || rfb.viewOnly || shell.state !== 'connected') return;
+      e.stopPropagation(); // noVNC never sees it — and no preventDefault: the browser's paste must still happen
+      chord = k; clearTimeout(chordT);
+      chordT = setTimeout(() => { const c = chord; chord = null; if (c) pressV(c); }, 80);
+    }, true);
+    mount.addEventListener('paste', (e) => {
+      if (!rfb || rfb.viewOnly) return;
+      e.preventDefault();
+      const text = pasteText(e.clipboardData ? e.clipboardData.getData('text/plain') : null);
+      if (text) { try { rfb.clipboardPasteFrom(text); } catch { /* not connected */ } }
+      const c = chord; chord = null; clearTimeout(chordT);
+      if (c) pressV(c);
+    });
+  }
+
   // browser → desktop: the shell's Paste flow (2.369.136: a dead view says so,
   // a refused / empty / API-less clipboard opens the paste box, every send
   // hands the focus back to the desktop)
@@ -196,7 +285,7 @@ export function createVncView(host, { url, before = null, labels = {}, autoRecon
   });
   reBtn.onclick = () => { shell.resetLadder(); connect(); };
 
-  const disconnect = () => { endSignIn(); shell.unwant(); try { rfb?.disconnect(); } catch {} rfb = null; };
+  const disconnect = () => { endSignIn(); clearTimeout(stillT); stillT = null; shell.unwant(); try { rfb?.disconnect(); } catch {} rfb = null; };
   const dispose = () => { shell.close(); disconnect(); };
   const focus = () => { try { rfb?.focus(); } catch {} };
   /** x5: 'active' drives the display (and re-asks for this pane's size), 'watch' / 'blocked' are view-only. */
@@ -207,5 +296,9 @@ export function createVncView(host, { url, before = null, labels = {}, autoRecon
     try { if (rfb) { rfb.viewOnly = mode !== 'active'; if (mode === 'active') rfb.resizeSession = resizeSession; } } catch {}
   };
 
-  return { container, bar, mount, status, copyChip: shell.copyChip, connect, disconnect, setStatus, addControl, focus, dispose, setMode, get mode() { return mode; }, get rfb() { return rfb; }, get state() { return shell.state; }, get wanted() { return shell.wanted; }, get pasteOpen() { return shell.pasteOpen; }, get copiedText() { return shell.copiedText; } };
+  /** lane desktop-v2-entry: show ONE rect of the framebuffer (fb pixels), scaled to the pane — or all of it (null). Never reconnects. */
+  const setCrop = (r) => { crop = r && r.w > 0 && r.h > 0 ? { x: r.x, y: r.y, w: r.w, h: r.h } : null; try { if (rfb) rfb.vsCrop = crop; } catch { /* unpatched */ } };
+  const fbSize = () => { try { return rfb && rfb._fbWidth > 0 ? { w: rfb._fbWidth, h: rfb._fbHeight } : null; } catch { return null; } };
+  const stats = () => timer.stats(performance.now());
+  return { setCrop, fbSize, stats, get crop() { return crop; }, get quality() { return quality; }, container, bar, mount, status, copyChip: shell.copyChip, connect, disconnect, setStatus, addControl, focus, dispose, setMode, get mode() { return mode; }, get rfb() { return rfb; }, get state() { return shell.state; }, get wanted() { return shell.wanted; }, get pasteOpen() { return shell.pasteOpen; }, get copiedText() { return shell.copiedText; } };
 }

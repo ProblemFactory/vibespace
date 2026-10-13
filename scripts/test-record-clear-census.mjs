@@ -177,6 +177,9 @@ const CHANNELS_GATES = {
   msgHeld: { callers: ['fetchMissing', 'recheckOne'] },
   fetchMissing: 'store.index.peek(',
   recheckOne: 'store.index.peek(',
+  // lane channel-record-revisions: the recheck BY ID of the account's own stored messages — only conversations with an
+  // index row (store.index.live() first); the redrawn row rides the owner's broadcast (withView), never an agent's
+  revisionsPass: 'store.index.live()',
   // lane channel-avatars (int212): "is this person in OUR stored conversations" — a boolean, never a served record; the
   // tail is read only for a conversation with an index row (store.index.live() first)
   authorIsOurs: 'store.index',
@@ -752,6 +755,8 @@ const STORAGE = {
   'src/lib/doc-window-ui.js|localStorage|WIDTH_KEY': ['pref', 'lane doc-window-width-export: the Doc window\'s page width on this device (fit | comfortable — doc-window-model widthChoice)'],
   'src/lib/doc-window-ui.js|localStorage|oldKey': ['owner', 'lane doc-window → lane doc-comments-synced: the Doc window\'s OLD device copy of a comments strip per (host, path) — read once, folded into the server\'s drafts record, removed (only rows past the 200 cap are written back, waiting for room); the owner\'s own notes on a markdown file, each with the quote of the text it is about; never a store record of the five kinds'],
   'src/lib/sidebar-state.js|localStorage|\'sessionCustomNames\'': ['owner', 'the names the owner typed for sessions (never a store record)'],
+  'src/lib/desktop-picker.js|localStorage|RECENT_KEY': ['pref', 'lane desktop-v2-entry: this browser\'s last Desktop choice — a host id + a display key (the picker\'s first row); no words of any record'],
+  'src/lib/desktop-picker.js|localStorage|DISPLAYS_KEY': ['pref', 'lane desktop-v2-entry: per machine, the displays its window mapped last (key, number, the OS display name) — the picker\'s chips; no words of any record'],
   'src/lib/machine-desktop.js|localStorage|RUNS_KEY': ['owner', 'design 014 D1: the owner\'s own last 3 "Run on its desktop…" lines per machine (typed by the owner, re-judged by desktopRunPlan before they are offered; never an agent\'s, never a record)'],
   'src/lib/sidebar-state.js|localStorage|\'sessionModes\'': ['ids', 'terminal | chat per session id'],
   'src/lib/sidebar-state.js|localStorage|\'sessionConfigs\'': ['pref', 'per-session model / effort / permission overrides'],

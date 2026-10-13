@@ -753,7 +753,12 @@ const CUSTOM_IMAGE_RE = /^emoji:[A-Za-z0-9_+\-:.]{1,64}$/;
 // lane message-facts (B-f066): `fx` = a message's FACTS learned after it was stored (design 007 — the "edit" occupant named
 // above: a backfilled envelope, a vendor-flagged edit) — `facts` judged by `validateFacts`, folded at read by
 // src/channel-facts.js `foldFacts` (per kind the later one wins; a flag never un-happens); an empty list = "asked, none"
-const SIDE_KINDS = Object.freeze(['rx', 'th', 'pl', 'fx']);
+// lane channel-record-revisions (owner 2026-10-13): `rv` = ONE VERSION of an edited message, learned by a recheck — the
+// body as the vendor answered it at `editedAt` (the stored record stays the ORIGINAL; the newest version is the current
+// body, folded at read by src/channel-revisions.js `foldVersions`); a recall is the `fx` line's `recalled` flag
+const SIDE_KINDS = Object.freeze(['rx', 'th', 'pl', 'fx', 'rv']);
+/** A version's text bound in the side line (the line is ≤ SIDE_LINE_MAX_BYTES; past it the tail is cut, `truncated`). */
+const REVISION_TEXT_MAX = 6000;
 const SIDE_FORMS = Object.freeze(['delta', 'snapshot']);
 const SIDE_OPS = Object.freeze(['add', 'remove']);
 // lane lark-threads: + `walk` (a thread walk's repeated root), `byid` (a message read by its id), `recheck` (the
@@ -826,6 +831,8 @@ function validateReactions(list) {
  *   {k:'th', msg, at, src, count, lastAt, replyUsers:[ids]}
  *   {k:'pl', msg, at, src, threadKey|null, root|null}   (lane lark-threads: a place patch — at least one id, ≤ 512 each,
  *                                                        no control character; a root equal to `msg` is no root)
+ *   {k:'rv', msg, at, src, editedAt, text, blocks?, truncated?}  (lane channel-record-revisions: one version; the line bound
+ *                                                        drops the tree first, then cuts the text — `bad-version`)
  *   {k:'fx', msg, at, src, facts:[…]}                    (lane message-facts: `validateFacts`; a list past the line bound
  *                                                        gives up party tails (`more`), never the record; `bad-facts`)
  * A snapshot past the bounds (> REACTIONS_MAX keys, > REACTION_BY_MAX ids per
@@ -843,7 +850,17 @@ function validateSide(input) {
   if (!Number.isFinite(at) || at <= 0) return no('bad-at', 'at must be an epoch ms');
   if (!SIDE_SOURCES.includes(s.src)) return no('bad-source', `src must be one of ${SIDE_SOURCES.join('|')}`);
   let out;
-  if (s.k === 'fx') {
+  if (s.k === 'rv') {
+    const ea = Number(s.editedAt);
+    if (!Number.isFinite(ea) || ea <= 0) return no('bad-at', 'a version names the instant it was written (editedAt, epoch ms)');
+    if (typeof s.text !== 'string') return no('bad-version', 'a version carries its text');
+    out = { k: 'rv', msg: s.msg, at, src: s.src, editedAt: ea, text: peerText(s.text, REVISION_TEXT_MAX) };
+    if (s.truncated === true || s.text.length > REVISION_TEXT_MAX) out.truncated = true;
+    if (Array.isArray(s.blocks) && s.blocks.length) out.blocks = s.blocks;
+    const bytes = (x) => new TextEncoder().encode(JSON.stringify(x)).length;
+    if (out.blocks && bytes(out) > SIDE_LINE_MAX_BYTES - 64) delete out.blocks;   // the tree first — the text draws it
+    while (bytes(out) > SIDE_LINE_MAX_BYTES - 64 && out.text.length) { out.text = [...out.text].slice(0, Math.floor([...out.text].length * 0.8)).join(''); out.truncated = true; }
+  } else if (s.k === 'fx') {
     const v = validateFacts(s.facts);
     if (!v.ok) return no('bad-facts', 'an fx side record carries a facts list');
     out = { k: 'fx', msg: s.msg, at, src: s.src, facts: v.facts };
@@ -907,7 +924,8 @@ function sideKey(s) {
   const x = s || {};
   if (x.k === 'th') return ['th', x.msg, x.at].join(':');
   if (x.k === 'pl') return ['pl', x.msg, x.threadKey || '', x.root || ''].join(':');   // a replayed widening is a no-op, whenever it came
-  if (x.k === 'fx') return ['fx', x.msg, x.at, x.src].join(':');   // lane message-facts: one learning per instant and source
+  if (x.k === 'fx') return ['fx', x.msg, x.at, x.src].join(':');
+  if (x.k === 'rv') return ['rv', x.msg, x.editedAt].join(':');   // lane channel-record-revisions: one version per instant, whoever learned it   // lane message-facts: one learning per instant and source
   if (x.form === 'snapshot') return ['rx', 'snapshot', x.msg, x.at].join(':');
   if (x.rid) return ['rx', 'delta', x.rid].join(':');
   return ['rx', 'delta', x.msg, x.key, (x.actor && x.actor.id) || '', x.op, x.at].join(':');
@@ -943,7 +961,7 @@ module.exports = {
   safeHref, validateBlocks,
   // lane channel-threads (2026-09-28): reactions + the side log's schema and bounds
   REACTIONS_MAX, REACTION_BY_MAX, REACTION_KEY_MAX, REACTION_KEY_RE, REACTION_GLYPH_MAX, REACTION_LABEL_MAX, REACTION_COUNT_MAX,
-  CUSTOM_IMAGE_MAX, SIDE_KINDS, SIDE_FORMS, SIDE_OPS, SIDE_SOURCES, SIDE_LINE_MAX_BYTES,
+  CUSTOM_IMAGE_MAX, SIDE_KINDS, REVISION_TEXT_MAX, SIDE_FORMS, SIDE_OPS, SIDE_SOURCES, SIDE_LINE_MAX_BYTES,
   isReactionKey, isReactionGlyph, validateReactions, validateSide, sideKey,
   // lane message-facts (B-f066): a message's facts — the closed types, the kinds' schema, the bounds, the validator
   FACT_TYPES, FACT_SCHEMA, FACT_KIND_NAMES, FACT_LIMITS, validateFacts,

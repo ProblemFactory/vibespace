@@ -423,6 +423,22 @@ router.get('/api/desktop/machine-desktop/apps', async (req, res) => {
   if (!ctx.access || typeof ctx.access.installedApps !== 'function') return noAccess(res);
   try { res.json(await ctx.access.installedApps(host, { why: req.query.fresh === '1' ? 'recheck' : 'open' })); } catch (e) { fail(res, e); }
 });
+/** lane desktop-v2-entry: the machine's own screen table (the display picker; 200 with `code` when it cannot say — an old agent,
+ *  offline, a failed look — the window then offers the whole screen only). People only, like the picture. */
+router.get('/api/desktop/machine-desktop/displays', async (req, res) => {
+  if (humanOnly(req, res)) return;
+  const host = hostParam(req, res); if (!host) return;
+  if (!ctx.access || typeof ctx.access.displayFacts !== 'function') return noAccess(res);
+  try { res.json(await ctx.access.displayFacts(host)); } catch (e) { if (e && (e.code === 'host_needs_daemon' || e.code === 'host_unavailable')) return res.json({ ok: false, code: e.code, error: String(e.message) }); fail(res, e); }
+});
+/** The stats strip's link numbers: the hub ⇄ machine round trip now (the page times this request itself for browser ⇄ hub). */
+router.get('/api/desktop/machine-desktop/link', async (req, res) => {
+  if (humanOnly(req, res)) return;
+  const host = hostParam(req, res); if (!host) return;
+  if (!ctx.access || typeof ctx.access.linkPing !== 'function') return noAccess(res);
+  const t0 = Date.now();
+  try { const r = await ctx.access.linkPing(host); res.json({ device: r.ms, took: Date.now() - t0 }); } catch (e) { fail(res, e); }
+});
 /** The bridge's own record of a machine desktop's last close (the window words it — "<machine> went offline"). */
 router.get('/api/desktop/machine-desktop/last-close', (req, res) => {
   if (humanOnly(req, res)) return;
@@ -649,7 +665,9 @@ router.post('/api/desktop/apps/:id/reach/request', async (req, res) => {
 
 // the singleton desktop (src/vnc.js) — answers unchanged from server.js
 router.get('/api/vnc/status', async (req, res) => {
-  try { res.json(await ctx.vnc.status()); } catch (e) { res.status(500).json({ error: e.message }); }
+  // lane desktop-v2-entry (D4): `seat` = 'wayland' when the hub runs in a Wayland session — the Desktop picker's local row says why
+  // this host's own screen is not offered (only the VibeSpace virtual desktop is)
+  try { res.json({ ...(await ctx.vnc.status()), seat: process.env.WAYLAND_DISPLAY || process.env.XDG_SESSION_TYPE === 'wayland' ? 'wayland' : null }); } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // lane desktop-keepalive K3: the singleton stream's LAST close as the bridge named it ({why, code, at, afterS} | null) — the
 // Desktop window words `code` in its status chip ("Connection lost — the desktop server closed the stream")

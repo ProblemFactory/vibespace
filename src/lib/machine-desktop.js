@@ -22,9 +22,13 @@ import { t } from './i18n.js';
 import { createModalShell, fetchJson, showToast } from './utils.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { createVncView, streamUrl } from './vnc-view.js';
+import { pageIsSecure } from './picture-shell.js';
+import { keyboardLockGate, NAGLE_REFERENCE, SLOW_KBPS, STILL_MS } from '../desktop-quality.js'; // lane desktop-v2-latency
 import { desktopRunPlan, desktopRunPresets, rememberRun, machineDesktopId } from '../machine-desktop-model.js';
 import { namesGuiApp } from '../machine-window.js';
 import { openMachineApp } from './machine-app.js'; // lane machine-app-crop: one app of the machine as its own window
+import { screenMap } from '../desktop-screens.js'; // lane desktop-v2-entry: the OS table + the RFB table → the displays in fb pixels
+import { openDesktopPicker, rememberDesktop, rememberDisplays, readRecent } from './desktop-picker.js';
 
 const RUNS_KEY = 'vibespace.machineDesktopRuns'; // { [hostId]: [line…] } — the owner's latest lines per machine (≤ 3)
 function readRuns() { try { const o = JSON.parse(localStorage.getItem(RUNS_KEY) || '{}'); return o && typeof o === 'object' && !Array.isArray(o) ? o : {}; } catch { return {}; } }
@@ -82,26 +86,138 @@ function askCredentials(m, types, auth) {
   });
 }
 
-/** THE WINDOW: one per machine in this page (a second open reveals it); the picture through the ONE bridge. */
-export function openMachineDesktop(app, m) {
+/** THE WINDOW: one per machine in this page (a second open reveals it); the picture through the ONE bridge. `display` = the
+ *  display key to show (lane desktop-v2-entry; undefined = the one this browser chose last for the machine, null = all). */
+export function openMachineDesktop(app, m, { display } = {}) {
   const id = machineDesktopId(m && m.hostId);
   if (!id) return null;
-  for (const [wid, win] of app.wm.windows) if (win._machineDesktop === m.hostId) { app.wm.revealWindow(wid); return win; }
+  for (const [wid, win] of app.wm.windows) if (win._machineDesktop === m.hostId) { app.wm.revealWindow(wid); if (display !== undefined) win._pickDisplay?.(display); return win; }
   app._hideWelcome?.();
   const machine = nameOf(m);
   const winInfo = app.wm.createWindow({ title: t('{machine} — its desktop', { machine }), type: 'machine-desktop' });
   winInfo._machineDesktop = m.hostId;
   const c = winInfo.content;
   c.style.display = 'flex'; c.style.flexDirection = 'column';
-  c.append(el('div', 'flex:0 0 auto;padding:3px 10px;font-size:12px;color:var(--text-secondary);border-bottom:1px solid var(--border)', t('This window shows everything on {machine}’s screen, and what you type here goes to it.', { machine })));
+  // lane desktop-v2-entry (design q-030 §3): THE SWITCH STRIP replaces the line that said what the window is (its words are the
+  // status chip's title now): [machine ▾] [display 1 · 2 · All] [⤢ Full screen] [Connected · 48 ms · 12 fps]; one row that
+  // scrolls sideways on a phone
+  const strip = el('div'); strip.className = 'desktop-strip';
+  const hostBtn = btn('desktop-strip-btn desktop-strip-host', `${machine} ▾`, () => openDesktopPicker(app, { anchor: hostBtn, focusHost: m.hostId }));
+  hostBtn.title = t('Switch machine');
+  const seg = el('div'); seg.className = 'desktop-strip-displays'; seg.setAttribute('role', 'group'); seg.hidden = true;
+  // lane desktop-v2-latency (design q-030 §4): full screen = the window's CONTENT (the strip + the picture); there, on a secure
+  // page, navigator.keyboard.lock() hands Esc / Alt+Tab / the Windows key / ⌘ … to the machine while the ⌨ toggle is on
+  c.classList.add('desktop-machine-content');
+  const fullBtn = btn('desktop-strip-btn', '⤢ ' + t('Full screen'), () => { try { const p = document.fullscreenElement ? document.exitFullscreen() : c.requestFullscreen(); if (p && p.catch) p.catch(() => { }); } catch { /* no fullscreen here */ } });
+  const hasLock = () => !!(typeof navigator !== 'undefined' && navigator.keyboard && typeof navigator.keyboard.lock === 'function');
+  let wantKeys = true, locked = false;
+  const keysBtn = btn('desktop-strip-btn desktop-strip-keys', '⌨ ' + t('Capture shortcuts'), () => {
+    const g = keyboardLockGate({ secure: pageIsSecure(), api: hasLock(), fullscreen: true, want: true });
+    if (g.why === 'insecure') { showToast(t('Capturing shortcuts needs VibeSpace opened at an https address — this page is http'), { type: 'warn' }); return; }
+    if (g.why === 'no_api') { showToast(t('This browser cannot capture shortcuts — Chrome and Edge can'), { type: 'warn' }); return; }
+    wantKeys = !wantKeys; lockKeys();
+  });
+  const drawKeys = () => {
+    const g = keyboardLockGate({ secure: pageIsSecure(), api: hasLock(), fullscreen: true, want: wantKeys });
+    keysBtn.setAttribute('aria-pressed', String(g.lock));
+    keysBtn.classList.toggle('is-locked', locked);
+    keysBtn.title = g.why === 'insecure' ? t('Capturing shortcuts needs VibeSpace opened at an https address — this page is http')
+      : g.why === 'no_api' ? t('This browser cannot capture shortcuts — Chrome and Edge can')
+        : t('In full screen, Esc, Alt+Tab, the Windows key / ⌘ and other shortcuts go to the machine; hold Esc for 2 s to leave full screen') + (g.lock ? '' : '\n' + t('Off — shortcuts stay with this computer'));
+  };
+  const lockKeys = () => {
+    const g = keyboardLockGate({ secure: pageIsSecure(), api: hasLock(), fullscreen: document.fullscreenElement === c, want: wantKeys });
+    if (g.lock && !locked) { locked = true; navigator.keyboard.lock().catch(() => { locked = false; drawKeys(); }); }
+    else if (!g.lock && locked) { locked = false; try { navigator.keyboard.unlock(); } catch { /* gone with the page */ } }
+    drawKeys();
+  };
+  const onFull = () => { lockKeys(); if (document.fullscreenElement === c) view.focus(); };
+  document.addEventListener('fullscreenchange', onFull);
+  drawKeys();
+  const chip = el('span'); chip.className = 'desktop-strip-status';
+  const scope = t('This window shows everything on {machine}’s screen, and what you type here goes to it.', { machine });
+  chip.title = scope;
+  // the ladder's rung (流畅 / 清晰 …) and the slow-link chip; the status chip opens the comparison row (today · the reference)
+  const rungEl = el('span'); rungEl.className = 'desktop-strip-rung'; rungEl.hidden = true;
+  const slowEl = el('span'); slowEl.className = 'desktop-strip-slow'; slowEl.hidden = true; slowEl.textContent = t('Slow link');
+  chip.setAttribute('role', 'button'); chip.tabIndex = 0;
+  const cmp = el('div'); cmp.className = 'desktop-strip-compare'; cmp.hidden = true;
+  chip.onclick = () => { cmp.hidden = !cmp.hidden; drawChip(); };
+  chip.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); chip.onclick(); } };
+  strip.append(hostBtn, seg, fullBtn, keysBtn, chip, rungEl, slowEl);
+  c.append(strip, cmp);
   const pane = el('div', 'position:relative;flex:1 1 auto;min-height:0'); c.append(pane);
+  // the displays: the machine's own table (display-facts, once per window) + the server's -308 rects → the PURE screenMap
+  const last = readRecent();
+  let want = display !== undefined ? display : last && last.hostId === m.hostId ? last.display : null;
+  rememberDesktop(m.hostId, want); // the Desktop picker's first row from now on (whichever door opened it)
+  let facts = null, rfbTable = null, map = null, asked = false, link = null;
+  const shown = () => (map && map.state === 'map' && want != null ? map.displays.find((d) => d.key === want) || null : null);
+  const drawSeg = () => {
+    if (!map || map.state !== 'map') { seg.hidden = true; seg.replaceChildren(); return; }
+    const cur = shown();
+    const segBtn = (label, key, title) => { const b = btn('desktop-strip-seg', label, () => pick(key)); b.title = title; b.dataset.key = key == null ? '' : key; b.setAttribute('aria-pressed', String((cur ? cur.key : null) === key)); return b; };
+    seg.replaceChildren(...map.displays.map((d) => segBtn(String(d.n), d.key, d.name ? `${d.n} · ${d.name}` : t('Display {n}', { n: d.n }))), segBtn(t('All'), null, t('All')));
+    seg.hidden = false;
+  };
+  const apply = () => { const d = shown(); view.setCrop(d ? d.rect : null); drawSeg(); };
+  const pick = (key) => { want = key; rememberDesktop(m.hostId, key); apply(); };
+  const remap = () => {
+    const fb = view.fbSize(); if (!fb) return;
+    map = screenMap({ fb, screens: facts && facts.ok ? facts.displays : null, rfb: rfbTable });
+    if (map.state === 'map') rememberDisplays(m.hostId, map.displays);
+    apply(); drawChip();
+  };
+  const RUNG_WORDS = { sharp: () => t('Sharp'), balanced: () => t('Balanced'), fluid: () => t('Fluid'), lean: () => t('Lean') };
+  const drawRung = () => {
+    const q = view.quality, st = view.stats();
+    rungEl.hidden = !q || view.state !== 'connected';
+    if (!q) { slowEl.hidden = true; return; }
+    rungEl.textContent = RUNG_WORDS[q.rung]();
+    rungEl.dataset.rung = q.rung;
+    rungEl.title = [q.still ? t('Sharp while nothing moves; fluid again the moment you work in it') : t('Fluid while you work or the picture moves; sharp {ms} ms after it stops', { ms: STILL_MS }),
+      t('Picture quality {q} · compression {c}', { q: q.qualityLevel, c: q.compressionLevel })].join('\n');
+    slowEl.hidden = !q.slow || view.state !== 'connected';
+    slowEl.title = t('This link measured {kbps} kbps — under {bound} kbps the picture is one step leaner', { kbps: st.kbps == null ? '—' : st.kbps, bound: SLOW_KBPS });
+  };
+  const drawChip = () => {
+    drawRung();
+    if (view.state !== 'connected') { chip.textContent = ''; chip.title = scope; cmp.hidden = true; return; }
+    const st = view.stats();
+    const ms = link && link.hub != null ? link.hub + (link.device || 0) : null;
+    chip.textContent = t('Connected · {ms} ms · {fps} fps', { ms: ms == null ? '—' : ms, fps: st.fps });
+    chip.title = [scope, t('Browser ⇄ hub {a} ms · hub ⇄ machine {b} ms · update round trip {c} ms · {fps} fps', { a: link && link.hub != null ? link.hub : '—', b: link && link.device != null ? link.device : '—', c: st.roundTripMs == null ? '—' : st.roundTripMs, fps: st.fps }),
+      map && map.state === 'unknown' && facts && facts.ok && facts.displays.length > 1 ? t('The layout of its displays could not be read — the whole screen is shown') : ''].filter(Boolean).join('\n');
+    if (!cmp.hidden) {
+      cmp.replaceChildren(
+        el('div', null, t('Now: browser ⇄ hub {a} ms · hub ⇄ machine {b} ms · update round trip {c} ms · {fps} fps · {kbps} kbps', { a: link && link.hub != null ? link.hub : '—', b: link && link.device != null ? link.device : '—', c: st.roundTripMs == null ? '—' : st.roundTripMs, fps: st.fps, kbps: st.kbps == null ? '—' : st.kbps })),
+        el('div', null, t('Recorded reference: a key press through the same hops took {before} ms before the no-delay fix and {after} ms after (median)', { before: NAGLE_REFERENCE.beforeMs.toFixed(1), after: NAGLE_REFERENCE.afterMs.toFixed(2) })));
+    }
+  };
+  const measure = async () => { const t0 = performance.now(); const r = await fetchJson(`/api/desktop/machine-desktop/link?host=${encodeURIComponent(m.hostId)}`); if (!r || r.error) return; link = { hub: Math.max(0, Math.round(performance.now() - t0 - (r.took || 0))), device: r.device }; drawChip(); };
+  let tick = null, n = 0;
   const view = createVncView(pane, {
     url: streamUrl(`/api/desktop/${id}/stream`),
     autoReconnect: true,
     resizeSession: false,
+    channel: true,
+    ladder: true, // lane desktop-v2-latency: fluid while moving, sharp when still
+    pasteKeys: true, // lane desktop-v2-latency: Ctrl/⌘+V sends this computer's clipboard text, then the V
+    onQuality: () => drawRung(),
+    onScreens: (sc) => { rfbTable = sc; remap(); },
+    onStatus: (state) => {
+      if (state === 'connected') {
+        if (!asked) { asked = true; fetchJson(`/api/desktop/machine-desktop/displays?host=${encodeURIComponent(m.hostId)}`).then((r) => { facts = r || null; remap(); }); }
+        remap();
+        if (!tick) tick = setInterval(() => { drawChip(); if (++n % 3 === 1) measure(); }, 1000);
+      } else { clearInterval(tick); tick = null; }
+      drawChip();
+    },
     ...machineViewOpts(m),
   });
-  winInfo.onClose = () => view.dispose();
+  winInfo._pickDisplay = (key) => pick(key);
+  winInfo._desktopView = view;
+  winInfo.onClose = () => { clearInterval(tick); document.removeEventListener('fullscreenchange', onFull); if (locked) { locked = false; try { navigator.keyboard.unlock(); } catch { /* gone */ } } view.dispose(); };
   view.connect();
   return winInfo;
 }
@@ -252,7 +368,10 @@ export function showMachineDesktopDialog(app, m0, { install = null, recheck = nu
     state.textContent = desktopStateText(m);
     state.style.color = m.code === 'desktop_ready' ? '' : 'var(--warning, #d9822b)';
     acts.replaceChildren();
-    if (m.code === 'desktop_ready') acts.append(btn('btn-create', t('Open its desktop'), () => { toWindow(); openMachineDesktop(app, m); }));
+    // lane desktop-v2-entry (design q-030 D1): a machine's whole desktop lives under the Desktop button now — this dialog keeps
+    // launching apps, and its link says where the desktop lives; a press still shows the window at once (inc-mv51w0ow-crw3)
+    // and makes it the Desktop picker's recent choice
+    if (m.code === 'desktop_ready') acts.append(btn('desktop-open-link', t('Open its desktop → Desktop'), () => { toWindow(); openMachineDesktop(app, m); }));
     if (m.code === 'no_vnc' && m.setup === 'win32' && install) acts.append(btn('btn-create', t('Install TightVNC Server…'), () => install(m, { what: 'tightvnc', onDone: () => check() })));
     if (m.code !== 'offline' && recheck) acts.append(btn('file-tool-btn', t('Check again'), () => check()));
     const offline = m.code === 'offline';

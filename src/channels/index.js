@@ -258,6 +258,14 @@ const NO_THREADS = Object.freeze({ read: 'none', replyInto: false, listing: 'non
 const NO_REACTIONS = Object.freeze({ read: 'none', add: false, remove: 'none', vocabulary: 'names', custom: 'none', perMessageMax: null });
 const threadsOf = (c) => (c && c.threads && typeof c.threads === 'object' ? c.threads : NO_THREADS);
 const reactionsOf = (c) => (c && c.reactions && typeof c.reactions === 'object' ? c.reactions : NO_REACTIONS);
+// lane channel-record-revisions (owner 2026-10-13, userW's recall): what a STORED message can still learn — a recall, an
+// edit — and how: `byid` (the vendor answers a message by its id: deleted / updated + its body), `absent` (a deleted
+// message simply vanishes from the vendor's history — absence IS the recall), `none` (nothing is ever rechecked). The
+// engine gates on this row, never on an adapter id; `revisionOf(convId, {messageId, threadKey})` is declared by it.
+const REVISION_HOW = Object.freeze(['byid', 'absent', 'none']);
+const NO_REVISIONS = Object.freeze({ recall: false, edit: false, how: 'none' });
+const revisionsOf = (c) => (c && c.revisions && typeof c.revisions === 'object' ? c.revisions : NO_REVISIONS);
+const REVISION_STATES = Object.freeze(['recalled', 'edited', 'same', 'unknown']);
 /** The six methods the two rows declare (spec §2.1) — checked when an adapter is INSTANTIATED (its methods live
  *  on the instance): a declared one missing, or one present without its declaration, is refused by name. */
 // lane lark-threads (A2): + `recentRoots(convId, {limit})` — the chat's newest page with NO anchor stop (the recent-roots
@@ -334,6 +342,8 @@ const METHOD_GATES = Object.freeze({
   changes: (c) => !!(c.changeFeed && typeof c.changeFeed === 'object'),
   describe: (c) => !!(c.changeFeed && typeof c.changeFeed === 'object' && c.changeFeed.describes === true),
   messageById: (c) => !!(c.changeFeed && typeof c.changeFeed === 'object') && threadsOf(c).listing === 'separate',
+  // lane channel-record-revisions: a stored message re-read for its later facts (a recall, an edit)
+  revisionOf: (c) => revisionsOf(c).how !== 'none',
   // design 010: the vendor's own search (a person's press) and a hit read in context — declared by `caps.search`
   search: (c) => !!searchRowOf(c),
   around: (c) => !!searchRowOf(c) && !!searchRowOf(c).context,
@@ -480,6 +490,14 @@ function validateCaps(kind, caps, { channelSettings } = {}) {
     if (r.add && r.read === 'none') bad("caps.reactions.add with read 'none' — a control whose result can never be shown");
     if (r.remove === 'own' && !r.add) bad("caps.reactions.remove 'own' without add");
   }
+  if (c.revisions !== undefined) {   // lane channel-record-revisions
+    const r = c.revisions;
+    if (!r || typeof r !== 'object') bad('caps.revisions must be an object {recall, edit, how}');
+    if (typeof r.recall !== 'boolean' || typeof r.edit !== 'boolean') bad('caps.revisions.recall / edit must be booleans');
+    if (!REVISION_HOW.includes(r.how)) bad(`caps.revisions.how must be one of ${REVISION_HOW.join('|')}`);
+    if (r.how === 'none' && (r.recall || r.edit)) bad("caps.revisions how 'none' with recall / edit — a fact that can never be learned");
+    if (r.how !== 'none' && !r.recall && !r.edit) bad(`caps.revisions how '${r.how}' learns nothing (recall and edit both false)`);
+  }
   // lane lark-search-poll: the change feed row, every number bounded and every refusal named
   if (c.changeFeed !== undefined) {
     const f = c.changeFeed;
@@ -594,6 +612,7 @@ function validateMethods(kind, caps, mod) {
     if (THREAD_REACTION_METHODS.includes(name) && !declared(caps) && has) throw new Error(`channel adapter '${kind}': ${name} is implemented but its capability row does not declare it`);
     // lane lark-search-poll: a feed method present that `caps.changeFeed` does not declare is refused too
     if (FEED_METHODS.includes(name) && !declared(caps) && has) throw new Error(`channel adapter '${kind}': ${name} is implemented but caps.changeFeed does not declare it`);
+    if (name === 'revisionOf' && !declared(caps) && has) throw new Error(`channel adapter '${kind}': revisionOf is implemented but caps.revisions does not declare it`);
     // lane message-facts: `factsOf` declared ⇔ implemented
     if (name === 'factsOf' && !declared(caps) && has) throw new Error(`channel adapter '${kind}': factsOf is implemented but caps.factsOf / caps.facts do not declare it`);
     // design 010: a search method present that `caps.search` does not declare is refused too
@@ -982,6 +1001,17 @@ function createChannelRegistry({ channelSettings } = {}) {
         const rp = r.rootPatch && typeof r.rootPatch === 'object' && idOk(r.rootPatch.vendorId) && idOk(r.rootPatch.threadKey) ? { vendorId: r.rootPatch.vendorId, threadKey: r.rootPatch.threadKey } : null;
         return { kind: k === 'reply' && !record ? 'foreign' : k, record, rootPatch: (k === 'reply' || k === 'root') ? rp : null, threadKey: idOk(r.threadKey) ? r.threadKey : null };
       },
+      /** lane channel-record-revisions: ONE stored message re-read — the state from the CLOSED set, a time only when
+       *  finite, the new body bounded (an edit with no words is no edit); never a record of another message. */
+      async revisionOf(convId, opts = {}) {
+        const r = (await gated('revisionOf', impl.revisionOf && impl.revisionOf.bind(impl))(convId, opts)) || {};
+        const st = REVISION_STATES.includes(r.state) ? r.state : 'unknown';
+        const rv = revisionsOf(caps);
+        if (st === 'recalled') return rv.recall ? { state: st } : { state: 'unknown' };
+        const at = Number(r.editedAt);
+        if (st !== 'edited' || !rv.edit || typeof r.text !== 'string' || !(Number.isFinite(at) && at > 0)) return { state: st === 'edited' ? 'unknown' : st };
+        return { state: st, editedAt: at, text: r.text.slice(0, 64 * 1024), blocks: Array.isArray(r.blocks) ? r.blocks : null };
+      },
       reactions: gated('reactions', impl.reactions && impl.reactions.bind(impl)),
       react: gated('react', impl.react && impl.react.bind(impl)),
       unreact: gated('unreact', impl.unreact && impl.unreact.bind(impl)),
@@ -1126,7 +1156,7 @@ module.exports = {
   CHANNEL_ERROR_CODES, RETENTION_MODES, AUDIENCE_KINDS, RECEIVE_MODES, SCAN_SOURCES, HISTORY_MODES, SEND_IDENTITIES, IDENTITY_MARKING, TOS_RISK, METHOD_GATES, OLDER_HISTORY, BUDGET_UNITS, PACE_COSTS, RENDER_MODES, GLYPHS, TITLE_FORMS, FEED_METHODS, BY_ID_KINDS,
   SEARCH_METHODS, SEARCH_HIT_FIELDS, searchRowOf,
   peerName,
-  THREAD_READ, THREAD_LISTING, REACTION_READ, REACTION_REMOVE, REACTION_VOCABULARY, REACTION_CUSTOM, NO_THREADS, NO_REACTIONS, THREAD_REACTION_METHODS, threadsOf, reactionsOf,
+  THREAD_READ, THREAD_LISTING, REACTION_READ, REACTION_REMOVE, REACTION_VOCABULARY, REACTION_CUSTOM, NO_THREADS, NO_REACTIONS, THREAD_REACTION_METHODS, threadsOf, reactionsOf, REVISION_HOW, REVISION_STATES, NO_REVISIONS, revisionsOf,
   retryAfterSeconds, sentSecrets, withoutSent, bearerOf, SENT_SECRET_FIELDS,
   // lane dc-channels-consent: the consent row's ONE schema
   validateConsent, CONSENT_MODES, CONSENT_ROW_KEYS,

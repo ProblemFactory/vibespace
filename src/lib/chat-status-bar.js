@@ -7,6 +7,8 @@ import { pagesChipGroups, pageOfDesign } from './pages-chip-model.js'; // PURE (
 import { BACKEND_META, getBackendMeta, backendFeatureCaps, autoResumeCapsFor, effortDisplay, effortLabel, effortOptions, noteModelCatalog, responseStyleLabel, responseStyleCaps, styleAppliesLive, initHealthLabel, uiRow, billingRow } from './agent-meta.js';
 import { t } from './i18n.js';
 import { shortWorkflowName } from '../workflow-name.js';
+// THE PHONE BAR (lane phone-chat-composer): ≤ 768 px the bar is ONE 40-px row — see _fold
+const PHONE_MQ = typeof window !== 'undefined' && window.matchMedia ? window.matchMedia('(max-width: 768px)') : null;
 import { waitingChip } from '../helper-ask.js'; // PURE (lane S1): the waiting chip names who waits
 import { billingAuthKey, placementNote } from './pool-priority-model.js'; // PURE: THE ONE billing re-render key + the placement note (the title chip's twin)
 import { chipText as channelChipText, rowName as channelRowName, rowWords as channelRowWords, glyphFor as channelGlyphFor } from '../channel-touch.js'; // PURE (§26, B-099e): the channels chip's words
@@ -147,6 +149,9 @@ export class ChatStatusBar {
     this._element.addEventListener('click', (e) => {
       this._onClick(e);
     });
+    this._foldOpen = false;
+    PHONE_MQ?.addEventListener?.('change', () => this.render());
+    if (PHONE_MQ && typeof ResizeObserver !== 'undefined') new ResizeObserver(() => this._fold()).observe(this._element);
   }
 
   /** The .chat-status-bar element */
@@ -975,8 +980,10 @@ export class ChatStatusBar {
       chip('cost', '', '', `$${this._statusCost.toFixed(2)}`, { style: `color:${costColor}` });
     }
 
+    if (PHONE_MQ?.matches) chip('more', `chat-status-more chat-status-clickable${this._foldOpen ? ' active' : ''}`, this._foldOpen ? t('Close') : t('More'), this._foldOpen ? '\u2715' : '\u22EF');
     this._reconcile(chips);
     this._fitBilling();
+    this._fold();
   }
 
   /** lane phone-chip (B-e5ff): the billing pill takes the widest form that fits ONE LINE of this wrapping bar
@@ -1050,6 +1057,32 @@ export class ChatStatusBar {
       if (seen.has(key)) continue;
       rec.el.remove();
       this._chipEls.delete(key);
+    }
+  }
+
+  /** THE PHONE BAR (lane phone-chat-composer, owner 2026-10-13 "状态栏又很稀疏"): on a phone the bar is ONE row —
+   *  the chips that fit stay in bar order, everything past the width folds behind ⋯ (a tap opens the bar in place,
+   *  wrapped, so every chip keeps its own menu); effort + style always fold (the model chip's sheet carries them).
+   *  The desk bar is never touched (no ⋯ chip, no class written). */
+  _fold() {
+    const bar = this._element, phone = !!PHONE_MQ?.matches, open = phone && this._foldOpen;
+    if (!phone && !this._phoneFolded) return; // the desk bar: nothing read, nothing written
+    this._phoneFolded = phone; // one desk pass after the phone face clears what it wrote
+    if (bar.classList.contains('chat-status-open') !== open) bar.classList.toggle('chat-status-open', open);
+    for (const el of bar.querySelectorAll(':scope > .chat-status-folded')) el.classList.remove('chat-status-folded');
+    if (!PHONE_MQ?.matches || open) return;
+    const more = this._chipEls.get('more')?.el;
+    const cs = getComputedStyle(bar), gap = parseFloat(cs.columnGap) || 0;
+    let room = bar.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) - (more ? more.offsetWidth + gap : 0);
+    let full = false;
+    for (const el of bar.children) {
+      if (el === more) continue;
+      const key = el.getAttribute('data-chip');
+      const w = el.offsetWidth;
+      // search · model · a turn waiting on the person · a broken-setup alert never fold (they lead the bar order)
+      const keep = key === 'search' || key === 'model' || key === 'turnstate' || key === 'health';
+      if (!keep && (full || key === 'effort' || key === 'style' || w > room)) { el.classList.add('chat-status-folded'); if (w > room) full = true; continue; }
+      if (w) room -= w + gap; // 0 = a chip this face never shows
     }
   }
 
@@ -1231,6 +1264,7 @@ export class ChatStatusBar {
   }
 
   _onClick(e) {
+    if (e.target.closest('.chat-status-more')) { e.stopPropagation(); this._foldOpen = !this._foldOpen; this.render(); return; }
     if (e.target.closest('.chat-status-search')) { e.stopPropagation(); this._onSearch?.(); return; }
     if (e.target.closest('.chat-status-turnstate.chat-status-clickable')) { e.stopPropagation(); this._onJumpToAsk?.(); return; } // lane S1: go to the card that waits
     const wfChip = e.target.closest('.chat-status-wf');
@@ -1794,6 +1828,16 @@ export class ChatStatusBar {
       e.stopPropagation();
       const dropdown = showDropdown(modelEl);
       if (!dropdown) return;
+      // the phone bar folds effort + style: their rows lead the model chip's sheet (a tap opens the bar, then the chip's own menu)
+      if (PHONE_MQ?.matches) for (const [k, label] of [['effort', t('Effort')], ['style', t('Output style')]]) {
+        const chipEl = this._chipEls.get(k)?.el;
+        if (!chipEl) continue;
+        const row = document.createElement('div');
+        row.className = 'chat-status-dropdown-item chat-status-fold-row';
+        row.textContent = `${label} · ${chipEl.textContent.trim()} \u203A`;
+        row.onclick = (ev) => { ev.stopPropagation(); dropdown.remove(); this._foldOpen = true; this.render(); chipEl.click(); };
+        dropdown.appendChild(row);
+      }
       const backend = this._backend || 'claude'; // the real id — META/model lists are per backend since P4
       const pick = (model) => {
         this._ws.send({ type: 'set-model', sessionId: this._sessionId, model });

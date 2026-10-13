@@ -166,6 +166,7 @@ const Thr = require('./channel-thread.js');
 const { compactSide } = require('./channel-reactions.js');
 // lane message-facts (B-f066): a message's `fx` lines (facts learned after it was stored) compact into ONE folded line
 const { compactFactLines } = require('./channel-facts.js');
+const { compactVersionLines } = require('./channel-revisions.js');   // PURE: a message's versions through the trim (lane channel-record-revisions)
 
 /** Side-log dedup set bound per conversation (rebuilt from the whole side log on demand). */
 const SIDE_DEDUP_MAX = 20000;
@@ -1355,7 +1356,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   }
   /** The `"msg":"<id>"` of a side line, read off its head without parsing the body (the line begins
    *  `{"k":"rx","msg":` — `validateSide` builds it in that order). Linear: one bounded string match. */
-  const SIDE_HEAD_RE = /^\{"k":"(?:rx|th|pl|fx)","msg":("(?:[^"\\]|\\.){1,1100}")/;   // + fx (lane message-facts)
+  const SIDE_HEAD_RE = /^\{"k":"(?:rx|th|pl|fx|rv)","msg":("(?:[^"\\]|\\.){1,1100}")/;   // + fx (lane message-facts); + rv (lane channel-record-revisions)
   /**
    * The side records naming `msgs` (a Set of vendorIds), in FILE order (append order), at most `limit` — the
    * newest are kept when there are more. A line naming another message is skipped WITHOUT parsing its body.
@@ -1401,7 +1402,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
       last.set(k, i);
     });
     const order = [...byMsg.keys()].sort((a, b) => last.get(a) - last.get(b));
-    const groups = order.map((k) => compactSide(byMsg.get(k)).concat(compactFactLines(byMsg.get(k))).map((x) => JSON.stringify(x)));   // + a message's facts, folded (lane message-facts)
+    const groups = order.map((k) => compactSide(byMsg.get(k)).concat(compactFactLines(byMsg.get(k))).concat(compactVersionLines(byMsg.get(k))).map((x) => JSON.stringify(x)));   // + a message's facts, folded (lane message-facts)
     // the newest groups first, until the bound (one group is always kept — a single message's lines are ≤ 8 KiB each)
     let from = groups.length, bytes = 0;
     for (let i = groups.length - 1; i >= 0; i--) {

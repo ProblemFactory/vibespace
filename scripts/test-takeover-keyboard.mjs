@@ -1506,6 +1506,8 @@ const CENSUS = [
   ['doc-window-ui.js', 'tabindex', 'none', 'the print frame\'s tabIndex -1 (never a Tab stop)'],
   ['machine-desktop.js', 'input', 'text', 'design 014 D1: "Run on its desktop…"\'s command box + the sign-in\'s name / password fields (a page dialog — the picture is not focused while they are)'],
   ['desktop-app-window.js', 'tabindex', 'control', 'the scale chip (role=button)'],
+  ['desktop-picker.js', 'tabindex', 'widget', 'lane desktop-v2-entry: the Desktop picker popover (role=menu, -1; ↑ ↓ / Enter pick a row — its keys stay the page\'s)'],
+  ['machine-desktop.js', 'tabindex', 'control', 'lanes desktop-v2-entry / -latency: the strip\'s status chip (role=button, 0; Enter / Space open the comparison row)'],
   ['dial-address-picker.js', 'input', 'text+control', 'the pairing sheet\'s address radios; the custom address (lane-pairing)'],
   ['docx-viewer.js', 'iframe', 'frame', 'an altChunk (sandboxed)'],
   ['exit-access-dialog.js', 'input', 'control', 'exit access "Who can use it" radios; the ask checkbox (lane-pairing)'],

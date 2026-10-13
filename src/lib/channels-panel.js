@@ -2007,7 +2007,7 @@ export function renderChannelsPanel(app, c) {
     //  row) — a second principal granted access, or the second watcher's cadence, never reached the row until an
     //  unrelated field moved (reproduced: "Access: Alpha" after "Access: [Alpha, Beta]" was saved). The fast census
     //  (test-channels-groups-ui §3) reads every `conv.<field>` the builder and its helpers touch against this list.
-    const sig = JSON.stringify(['r', child, conv.adapterId, conv.id, conv.title, conv.kind, conv.unread, conv.freshness, conv.participants, conv.outbox && conv.outbox.awaiting, conv.peer, conv.lastAt, conv.lastText, conv.lastWho, rowTime(conv.lastAt), curBadges.get(conv.adapterId) || null, conv.assignment, conv.access, conv.watchers, conv.held]);
+    const sig = JSON.stringify(['r', child, conv.adapterId, conv.id, conv.title, conv.kind, conv.unread, conv.freshness, conv.participants, conv.outbox && conv.outbox.awaiting, conv.peer, conv.lastAt, conv.lastText, conv.lastRecalled, conv.lastWho, rowTime(conv.lastAt), curBadges.get(conv.adapterId) || null, conv.assignment, conv.access, conv.watchers, conv.held]);
     return memoRow(`${child ? 'c' : 'r'}:${conv.adapterId}/${conv.id}`, sig, conv, (cur) => rowBuild(conv, child, cur));
   }
   function rowBuild(conv, child, cur) {
@@ -2041,7 +2041,8 @@ export function renderChannelsPanel(app, c) {
     const who = document.createElement('span');
     who.className = 'chan-row-who chan-row-last';
     if (m.who) who.appendChild(chanEl('span', 'chan-row-lastwho', (m.who.self ? t('You') : m.who.name) + ': '));
-    who.appendChild(document.createTextNode(m.last || conv.participants || ''));
+    who.appendChild(document.createTextNode(m.recalled ? t('recalled a message') : (m.last || conv.participants || '')));
+    if (m.recalled) who.classList.add('chan-row-recalled');
     sub.appendChild(who);
     sub.appendChild(chip(conv.freshness));
     const awaiting = conv.outbox && conv.outbox.awaiting ? Number(conv.outbox.awaiting) : 0;

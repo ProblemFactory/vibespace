@@ -250,7 +250,7 @@ async function openAndAsk(p) {
   await p.ev('window.__openApps(), window.__open(' + JSON.stringify(M) + '), true');
   await p.until(`!!document.querySelector('#machine-desktop-dialog')`);
   const before = await p.ev(`[document.querySelectorAll('.dialog-overlay').length, !!document.getElementById('desktop-launch-dialog'), !!document.getElementById('machine-desktop-dialog')]`);
-  const pressed = await p.ev(press(Z('Open its desktop')));
+  const pressed = await p.ev(press(Z('Open its desktop → Desktop'))); // lane desktop-v2-entry: the dialog's link to the Desktop (it still opens the window at once)
   const after = await p.ev(`[document.querySelectorAll('.dialog-overlay').length, !!document.getElementById('desktop-launch-dialog'), !!document.getElementById('machine-desktop-dialog'), document.querySelectorAll('.vs-win[data-type="machine-desktop"]').length]`);
   await p.ev(WATCH);
   const asked = await p.until(`!!document.querySelector('#machine-desktop-signin form input[type=password]')`, 15000);
@@ -268,7 +268,7 @@ console.log('§1 Open its desktop closes the dialog it was pressed in AND the Ap
 {
   const r = await openAndAsk(desk);
   ok(r.before[0] === 2 && r.before[1] && r.before[2], 'before: two dialogs — the Apps dialog and the machine\'s dialog over it', r.before);
-  ok(r.pressed && r.after[0] === 0 && !r.after[1] && !r.after[2] && r.after[3] === 1, `pressing ${Z('Open its desktop')} closes BOTH dialogs and opens the machine's window`, r.after);
+  ok(r.pressed && r.after[0] === 0 && !r.after[1] && !r.after[2] && r.after[3] === 1, `pressing ${Z('Open its desktop → Desktop')} closes BOTH dialogs and opens the machine's window`, r.after);
   ok(r.asked && await desk.ev(`document.querySelectorAll('.dialog-overlay').length === 1 && !!document.querySelector('#machine-desktop-signin input[type=text]')`), 'the Mac asks its user name + password — the only dialog left on the page');
   await desk.shot('signin.png');
 }

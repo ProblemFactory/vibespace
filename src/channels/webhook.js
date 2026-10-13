@@ -43,6 +43,7 @@ const caps = {
   idempotency: 'key',
   threads: { read: 'none', replyInto: false, listing: 'none', placements: ['chat', 'quote'], rootReply: 'quote' },
   reactions: { read: 'none', add: false, remove: 'none', vocabulary: 'names', custom: 'none', perMessageMax: null },
+  revisions: Object.freeze({ recall: false, edit: false, how: 'none' }),   // lane channel-record-revisions: nothing is ever rechecked
   attachments: 'none', sendAttachments: null, sendAttachmentsWhy: 'a webhook reply carries text only (phase 2: attachments by URL + sha256)',
   avatars: null, avatarsWhy: 'a caller is a system; it has no picture',
   facts: ['sender', 'subject', 'event', 'fields'],   // the per-path declared keys ride ONE `fields` fact (a party per key)

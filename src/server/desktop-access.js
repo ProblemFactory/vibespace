@@ -559,12 +559,30 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
   /** §7.9: is this machine reachable RIGHT NOW without starting a connect ladder (this machine, or a paired machine
    *  whose agent handle is already connected)? The explorer's menu asks it so a right-click never bootstraps an ssh
    *  machine's agent — the click on "Open with LibreOffice" (an explicit act) is what connects. */
+  /** lane desktop-v2-entry (design q-030 §3): the machine's OWN screen table through its agent (the `display-facts` op) — the
+   *  display picker maps it onto the framebuffer. A machine whose agent predates the op answers `host_needs_daemon` (named). */
+  async function displayFacts(hostId) {
+    if (isLocal(hostId)) throw named('not_desktop_machine', 'this machine\'s own desktop is the Desktop window');
+    const dm = await deviceOf(hostId);
+    const platform = platformOfHandle(dm);
+    if (!M.DESKTOP_PLATFORMS.includes(platform)) throw notDesktop(hostId, platform);
+    if (typeof dm.displayFacts !== 'function') throw named('host_needs_daemon', `${hostId}: its agent cannot list its displays`);
+    return dm.displayFacts();
+  }
+  /** The hub ⇄ machine link's round trip now (one mux PING) — the stats strip's second number. → { ms } | { ms: null } */
+  async function linkPing(hostId) {
+    if (isLocal(hostId)) return { ms: 0 };
+    const dm = await deviceOf(hostId);
+    const t0 = Date.now();
+    const okPing = typeof dm.ping === 'function' ? await dm.ping(1500) : false;
+    return { ms: okPing ? Date.now() - t0 : null };
+  }
   function connectedNow(hostId) {
     if (isLocal(hostId)) return true;
     try { return !!(hosts && typeof hosts.connectedDevice === 'function' && hosts.connectedDevice(hostId)); } catch { return false; }
   }
 
-  const layer = { call, forwardPort, closeForward, forwards: listForwards, hostKnown, isLocal, shutdown, machines, installPlan, installXpra, installPackage, installBusy, runArgv, readFile, connectedNow, setAppPlanner, planDigest, probeDesktop, openMachineDesktop, machineDesktopTarget, machineDesktopGone, runOnDesktop, installedApps, installedNow, deviceOf };
+  const layer = { call, forwardPort, closeForward, forwards: listForwards, hostKnown, isLocal, shutdown, machines, installPlan, installXpra, installPackage, installBusy, runArgv, readFile, connectedNow, setAppPlanner, planDigest, probeDesktop, openMachineDesktop, machineDesktopTarget, machineDesktopGone, runOnDesktop, installedApps, installedNow, deviceOf, displayFacts, linkPing };
   if (install) installed = layer;
   return layer;
 }

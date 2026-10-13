@@ -1853,6 +1853,10 @@ console.log('\n⑮ lane lark-threads: the recent-roots page and the by-id read (
       if (id === 'om_reply') return jsonRes({ code: 0, data: { items: [item('om_reply', 2500, { thread: 'omt_193d36', root: 'om_post', parent: 'om_post', text: 'a reply in the topic' })] } });
       if (id === 'om_plain') return jsonRes({ code: 0, data: { items: [item('om_plain', 2600)] } });
       if (id === 'om_gone') return jsonRes({ code: 230110, msg: 'the message was deleted' }, 400);
+      // lane channel-record-revisions: a recall answered by its code, a recall answered as an item, an edit with its new body
+      if (id === 'om_recalled') return jsonRes({ code: 230011, msg: 'The message was recalled' }, 400);
+      if (id === 'om_delflag') return jsonRes({ code: 0, data: { items: [{ ...item('om_delflag', 2700), deleted: true }] } });
+      if (id === 'om_edited') return jsonRes({ code: 0, data: { items: [{ ...item('om_edited', 2800, { text: 'the second words' }), updated: true, update_time: '2900' }] } });
       return jsonRes({ code: 230001, msg: 'no such message' }, 400);
     }
     return jsonRes({ code: 404, msg: `unrouted ${u.pathname}` }, 404);
@@ -1898,6 +1902,19 @@ console.log('\n⑮ lane lark-threads: the recent-roots page and the by-id read (
   let refused = null; try { await a.messageById(C, { messageId: 'om_gone' }); } catch (e) { refused = e; }
   let missing = null; try { await a.messageById(C, { messageId: 'om_nope' }); } catch (e) { missing = e; }
   ok(refused && refused.code === 'vendor-error' && missing && missing.code === 'not-found', 'A4: the vendor\'s refusals are typed (230110 deleted, 230001 not found) — the engine counts and remembers them, never retries per tick', JSON.stringify([refused && refused.code, missing && missing.code]));
+  // lane channel-record-revisions: THE RECHECK BY ID — one GET per message; 230011 / 230110 / `deleted: true` = recalled,
+  // `updated` + a readable `update_time` = an edit with the poll's own body; a plain item = the same; not found throws
+  ok(JSON.stringify(lark.adapter.caps.revisions) === JSON.stringify({ recall: true, edit: true, how: 'byid' }), 'revisions row: recall + edit, by id');
+  calls.length = 0;
+  const rv1 = await a.revisionOf(C, { messageId: 'om_recalled' });
+  const rv2 = await a.revisionOf(C, { messageId: 'om_delflag' });
+  const rv3 = await a.revisionOf(C, { messageId: 'om_edited' });
+  const rv4 = await a.revisionOf(C, { messageId: 'om_plain' });
+  const rv5 = await a.revisionOf(C, { messageId: 'om_gone' });
+  let rv6 = null; try { await a.revisionOf(C, { messageId: 'om_nope' }); } catch (e) { rv6 = e; }
+  ok(calls.filter((c) => /^\/open-apis\/im\/v1\/messages\/[^/]+$/.test(c.path)).length === 6, 'revisionOf: ONE GET by id per message', JSON.stringify(calls.map((c) => c.path)));
+  ok(rv1.state === 'recalled' && rv2.state === 'recalled' && rv5.state === 'recalled', 'revisionOf: 230011 recalled, 230110 deleted and an item with deleted:true are each a RECALL', JSON.stringify([rv1, rv2, rv5]));
+  ok(rv3.state === 'edited' && rv3.editedAt === 2900 && /the second words/.test(rv3.text) && rv4.state === 'same' && rv6 && rv6.code === 'not-found', 'revisionOf: updated + update_time = an edit with its new body (the poll\'s toRecord); a plain item is the same; a missing message throws not-found', JSON.stringify([rv3, rv4, rv6 && rv6.code]));
   // THE VERDICT TABLE (PURE readByIdAnswer)
   const R = (items, id = 'om_m') => lark.readByIdAnswer({ items }, { messageId: id, convId: C });
   const rows = [

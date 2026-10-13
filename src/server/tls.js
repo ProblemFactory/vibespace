@@ -9,11 +9,16 @@
 //     the browser's delayed ACK and the Apps list answered after the witness push it should precede (the push lost).
 //   · BOTH servers get every listener: server.js attaches its upgrade dispatcher through attachToServers() — the https
 //     server is born later (the first live certificate) and replays them (test-architecture §89 = the census).
-//   · THE PASS (at boot, hourly, and when the setting moves): `tailscale status --json` as a CHILD (10 s, never sync),
+//   · THE PASS (at boot, then on TP.nextPassMs — a boot miss retries at 60 s / 5 min, else hourly —, when the setting moves,
+//     and on POST /api/tls/recheck, the Settings row's Check again): `tailscale status --json` as a CHILD (10 s, never sync),
 //     the plan, and when it says renew: `tailscale cert --cert-file … --key-file … <domain>` (a child, 90 s, ONE in
 //     flight) into data/tls/. A new certificate = `setSecureContext` — no restart.
 //   · THE OWNER'S STEP (https-not-enabled / operator-needed): ONE For-you item per state, persisted in
 //     data/tls/state.json so a restart never repeats it; it resolves itself when the state changes.
+//   · A FAILED CALL IS LOGGED RAW (lane tls-pass-retry, owner on .260 "怎么用不了https地址"): code, ms, stdout bytes, the first
+//     stderr line — and the row shows it. Measured: at boot the loop was held (canary 7450 ms) past execFile's 10 s
+//     `timeout`, whose kill destroys the UNREAD stdout first — an answer the child had given in ms came back as
+//     `code 0, out ''` ⇒ "Tailscale is not running". runChild keeps its own timer and never discards an answer.
 const fs = require('fs');
 const path = require('path');
 const net = require('net');
@@ -25,7 +30,7 @@ const TP = require('../tls-plan.js');
 
 const STATUS_TIMEOUT_MS = 10000;
 const CERT_TIMEOUT_MS = 90000;
-const PASS_MS = 3600000;
+const PASS_MS = TP.PASS_MS;
 const FIRST_BYTE_MS = 120000; // a connection that never says anything is dropped (the servers' own timeouts start at routing)
 const INBOX_KEY = 'tls';
 
@@ -37,12 +42,18 @@ function acceptAs(server, socket) {
   if (server.keepAlive) socket.setKeepAlive(true, server.keepAliveInitialDelay || 0);
 }
 
-/** A child process, never sync: { code, out, err } — code 'ENOENT' when the binary is missing. */
+/** A child process, never sync: { code, out, err, ms } — code 'ENOENT' when the binary is missing, 'TIMEOUT' when OUR
+ *  bound killed it. Not execFile's `timeout`: its kill destroys the unread stdout, so a bound that fires late on a held
+ *  loop threw away an answer the child had already given (code 0, out ''). A child that exited first keeps its answer. */
 function runChild(bin, args, timeout) {
   return new Promise((resolve) => {
-    execFile(bin, args, { timeout, maxBuffer: 4 * 1024 * 1024 }, (e, out, err) => {
-      resolve({ code: e ? (e.code === 'ENOENT' ? 'ENOENT' : e.killed ? 'TIMEOUT' : e.code || 1) : 0, out: String(out || ''), err: String(err || (e && e.message) || '') });
+    const t0 = Date.now();
+    let timer = null, timedOut = false;
+    const child = execFile(bin, args, { maxBuffer: 4 * 1024 * 1024 }, (e, out, err) => {
+      clearTimeout(timer);
+      resolve({ code: e ? (e.code === 'ENOENT' ? 'ENOENT' : timedOut && e.signal ? 'TIMEOUT' : e.code || e.signal || 1) : 0, out: String(out || ''), err: String(err || (e && e.message) || ''), ms: Date.now() - t0 });
     });
+    timer = setTimeout(() => { timedOut = true; try { child.kill(); } catch { } }, timeout);
   });
 }
 
@@ -63,7 +74,8 @@ async function readPair(certFile, keyFile) {
 }
 
 function create({ app, httpServer, dataDir, port, serverSetting = () => undefined, getUserTodos = () => null, log = console, env = process.env,
-  tailscaleBin: binArg, run = runChild, now = () => Date.now(), user = (() => { try { return os.userInfo().username; } catch { return 'vibespace'; } })() } = {}) {
+  tailscaleBin: binArg, run = runChild, now = () => Date.now(), user = (() => { try { return os.userInfo().username; } catch { return 'vibespace'; } })(),
+  statusTimeoutMs = STATUS_TIMEOUT_MS, timers = { setTimeout, clearTimeout } } = {}) {
   const tailscaleBin = binArg === null ? null : binArg || env.VIBESPACE_TAILSCALE_BIN || 'tailscale';
   const dir = path.join(dataDir, 'tls');
   const stateFile = path.join(dir, 'state.json');
@@ -73,6 +85,8 @@ function create({ app, httpServer, dataDir, port, serverSetting = () => undefine
   const setting = () => { try { return serverSetting('server.https') || 'auto'; } catch { return 'auto'; } };
 
   let httpsServer = null, liveFp = null, plan = null, lastLine = null, inFlight = null, timer = null, planSetting = null;
+  let started = false, liveOnce = false, misses = 0, nextMs = null, lastProbe = null; // the pass cadence + the last failed call's raw outcome
+  const failed = (cmd, r, bound) => { lastProbe = TP.probeLine(cmd, r, bound); log.warn?.(`[tls] ${lastProbe.line}`); };
   const listeners = []; // [event, fn] — replayed on the https server when it is born
   const serving = () => !!(plan && plan.serving && liveFp && setting() !== 'off');
 
@@ -145,14 +159,17 @@ function create({ app, httpServer, dataDir, port, serverSetting = () => undefine
       const f = env.VIBESPACE_TLS_CERT && env.VIBESPACE_TLS_KEY ? await readPair(env.VIBESPACE_TLS_CERT, env.VIBESPACE_TLS_KEY) : { pem: null };
       return { args: { ...base, files: { envReadable: !!f.pem, envNames: f.names || [], envNotAfter: f.notAfter } }, pem: f.pem };
     }
-    const r = tailscaleBin ? await run(tailscaleBin, ['status', '--json'], STATUS_TIMEOUT_MS) : { code: 'ENOENT' }; // null = a throwaway root: never the real tailscale
-    let status = null, error = null;
+    const r = tailscaleBin ? await run(tailscaleBin, ['status', '--json'], statusTimeoutMs) : { code: 'ENOENT' }; // null = a throwaway root: never the real tailscale
+    let status = null, error = null, unreadable = false;
     if (r.code === 'ENOENT') error = 'ENOENT';
-    else { try { status = JSON.parse(r.out); } catch { error = (r.err || r.out || 'tailscale status answered nothing').trim(); } }
+    else { try { status = JSON.parse(r.out); } catch { } }
+    // no JSON: timed out, said "ok" with nothing / half a JSON (unreadable), or the CLI's own error words (no-tailscale / socket)
+    if (!status && r.code !== 'ENOENT') { unreadable = r.code === 'TIMEOUT' || r.code === 0 || /^\s*[{[]/.test(r.out || ''); if (!unreadable) error = (r.err || r.out || String(r.code)).trim(); }
+    if (status) lastProbe = null; else failed('status', r, statusTimeoutMs);
     const domain = status ? TP.domainOf(status) : null;
     if (domain && domain !== state.domain) { state.domain = domain; state.certAnswer = null; saveState(); }
     const f = domain ? await readPair(path.join(dir, domain + '.crt'), path.join(dir, domain + '.key')) : {};
-    return { args: { ...base, tailscale: { status, error, certAnswer: state.certAnswer }, files: { cert: !!f.cert, key: !!f.key, notAfter: f.notAfter } }, pem: f.pem || null };
+    return { args: { ...base, tailscale: { status, error, unreadable, certAnswer: state.certAnswer }, files: { cert: !!f.cert, key: !!f.key, notAfter: f.notAfter } }, pem: f.pem || null };
   }
   async function passOnce() {
     let { args, pem } = await facts();
@@ -162,17 +179,25 @@ function create({ app, httpServer, dataDir, port, serverSetting = () => undefine
       const r = await run(tailscaleBin, ['cert', '--cert-file', path.join(dir, p.domain + '.crt'), '--key-file', path.join(dir, p.domain + '.key'), p.domain], CERT_TIMEOUT_MS);
       const answer = r.code === 0 ? null : (r.err || r.out || String(r.code)).trim().slice(0, 500);
       if (answer !== state.certAnswer) { state.certAnswer = answer; saveState(); }
-      if (answer) log.warn?.(`[tls] tailscale cert ${p.domain} failed (${r.code}): ${answer.split('\n')[0]}`);
+      if (answer) failed('cert', r, CERT_TIMEOUT_MS);
       ({ args, pem } = await facts());
       p = TP.tlsPlan(args);
     }
     applyPlan(p, pem);
+    if (p.serving) liveOnce = true;
+    misses = TP.isMiss(p) ? misses + 1 : 0;
     return p;
   }
-  /** One pass at a time — a second caller shares the one in flight. */
+  /** One pass at a time — a second caller shares the one in flight. Every pass that ends sets the next automatic one. */
   function pass() {
-    if (!inFlight) inFlight = passOnce().catch((e) => { log.warn?.(`[tls] pass failed — ${e && e.message}`); return plan; }).finally(() => { inFlight = null; });
+    if (!inFlight) inFlight = passOnce().catch((e) => { log.warn?.(`[tls] pass failed — ${e && e.message}`); return plan; }).finally(() => { inFlight = null; schedule(); });
     return inFlight;
+  }
+  function schedule() {
+    if (!started) return;
+    if (timer) timers.clearTimeout(timer);
+    nextMs = TP.nextPassMs({ plan, liveOnce, misses });
+    timer = timers.setTimeout(pass, nextMs); timer.unref?.();
   }
 
   /** Boot, before listen: the last certificate on disk is served at once (no child process on the boot path). */
@@ -193,27 +218,31 @@ function create({ app, httpServer, dataDir, port, serverSetting = () => undefine
   }
   loadSync();
 
-  function start() {
-    pass();
-    if (!timer) { timer = setInterval(pass, PASS_MS); timer.unref?.(); }
-  }
-  function stop() { if (timer) clearInterval(timer); timer = null; }
+  function start() { started = true; pass(); }
+  function stop() { started = false; if (timer) timers.clearTimeout(timer); timer = null; }
   /** The live https address (null while none is served). */
   const url = () => (serving() ? plan.url : null);
   /** The boot line's tail: " and https://<domain>:<port>" while a certificate is live. */
   const bootSuffix = () => (url() ? ` and ${url()}` : '');
   function status() {
     const p = plan || { mode: 'off', why: 'starting', words: '', i18n: null };
-    return { mode: p.mode, setting: setting(), serving: serving(), url: url(), domain: p.domain || null, why: p.why, words: p.words, i18n: p.i18n, notAfter: p.notAfter || null, port };
+    const probe = lastProbe && p.mode === 'off' ? { cmd: lastProbe.cmd, code: lastProbe.code, ms: lastProbe.ms, bytes: lastProbe.bytes, err: lastProbe.err, bound: lastProbe.cmd === 'cert' ? CERT_TIMEOUT_MS : statusTimeoutMs } : null;
+    return { mode: p.mode, setting: setting(), serving: serving(), url: url(), domain: p.domain || null, why: p.why, words: p.words, i18n: p.i18n, notAfter: p.notAfter || null, port, probe, nextPassMs: started ? nextMs : null };
   }
   function registerRoutes(a) {
     a.get('/api/tls', (req, res) => {
       if (planSetting !== null && setting() !== planSetting) pass(); // the Settings row moved: re-plan now, answer with what is live
       res.json(status());
     });
+    // the Settings row's Check again: a pass NOW (the person never waits for the timer). People only — an agent token is refused by name.
+    a.post('/api/tls/recheck', async (req, res) => {
+      if (/^Bearer\s+(vsst_|jbt_)/i.test(String((req.headers && req.headers.authorization) || ''))) return res.status(403).json({ error: 'the https re-check is the person\'s door — an agent token may not press it', code: 'agent-forbidden' });
+      await pass();
+      res.json(status());
+    });
   }
   return { front, attachToServers, listen: (...a) => front.listen(...a), address: () => front.address(), start, stop, pass, url, bootSuffix, status, registerRoutes,
-    _https: () => httpsServer, _state: () => ({ ...state }), INBOX_KEY };
+    _https: () => httpsServer, _state: () => ({ ...state }), _cadence: () => ({ started, liveOnce, misses, nextMs }), INBOX_KEY };
 }
 
 module.exports = { create, acceptAs, runChild, readPair, INBOX_KEY, STATUS_TIMEOUT_MS, CERT_TIMEOUT_MS, PASS_MS };

@@ -154,7 +154,7 @@ const USAGE = `vibespace-channels — read connected channels, PROPOSE replies (
   vibespace-channels list [--all]                  ← conversations visible to you (+ send/policy chips), the newest 200 —
                                                      past that it says how many more (find them with search);
                                                      --all also lists the titles you may REQUEST (where the user allows it)
-  vibespace-channels read <conv> [--limit N] [--since <ms>] [--fresh] [--thread <msg id>] [--around <msg id>]
+  vibespace-channels read <conv> [--limit N] [--since <ms>] [--fresh] [--thread <msg id>] [--around <msg id>] [--versions]
                                                    ← --fresh = refresh first (floor + budget apply); --thread = that thread only (no vendor call)
                                                    ← --around = the vendor's messages around a message --full found (two requests, your share, one per account per 20 s; not saved)
   vibespace-channels attachment <conv> <msg id> <attachment id> [--out <path>] [--force]
@@ -366,6 +366,11 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
       const pl = m.placeText || {};
       console.log(`[${when(m.at)}] ${(m.author && (m.author.name || m.author.id)) || '?'}: ${String(m.text || '').replace(/\n/g, '\n    ')}${m.vendorId ? `  (id ${m.vendorId})` : ''}${pl.tag ? `  ${pl.tag}` : ''}`);
       if (pl.line) console.log(`    ${pl.line}`);
+      // lane channel-record-revisions: a recalled message is marked over its KEPT content, an edited one says its versions
+      // (the server's words); --versions prints every version with its time (oldest first, the original first)
+      if (m.revisionText) console.log(`    ${m.revisionText}`);
+      const vs = args.includes('--versions') && Array.isArray(m.versions) ? m.versions : [];
+      for (let i = 0; i < vs.length; i++) { const v = vs[i] || {}; console.log(`    v${i + 1}${v.original ? ' (original)' : ''} [${v.at ? when(v.at) : '?'}]: ${String(v.text || '').replace(/\n/g, '\n      ')}`); }
       // lane message-facts (B-f066): the message's facts as ONE line — `to: … · cc: … · reply-to: … · list: … · importance: …` (the server's words)
       if (m.factsText) console.log(`    ${m.factsText}`);
       if (m.heldText) console.log(`    ${m.heldText}`);

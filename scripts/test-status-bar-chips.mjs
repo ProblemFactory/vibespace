@@ -218,7 +218,7 @@ console.log('— ⑤ wiring');
 {
   const src = read('src/lib/chat-status-bar.js');
   const renderBody = src.slice(src.indexOf('\n  render() {'), src.indexOf('\n  _reconcile(chips) {'));
-  ok(renderBody.length > 0 && /\n    this\._reconcile\(chips\);\n(?:    this\._fitBilling\(\);\n)?  \}\s*$/.test(renderBody.replace(/\n  \/\*\*[\s\S]*$/, '\n')), '⑤ render() ends in this._reconcile(chips) (then lane phone-chip\'s _fitBilling(), which measures the drawn pill)');
+  ok(renderBody.length > 0 && /\n    this\._reconcile\(chips\);\n(?:    this\._fitBilling\(\);\n)?(?:    this\._fold\(\);\n)?  \}\s*$/.test(renderBody.replace(/\n  \/\*\*[\s\S]*$/, '\n')), '⑤ render() ends in this._reconcile(chips) (then lane phone-chip\'s _fitBilling(), which measures the drawn pill, then lane phone-chat-composer\'s phone-only _fold())');
   ok(!/this\._element\.innerHTML\s*=/.test(src), '⑤ the file never assigns this._element.innerHTML (the whole-bar rebuild is gone)');
   ok(!/\bparts\.push\(|parts\.join\(/.test(src), '⑤ no parts.push / parts.join left');
   ok((src.match(/\n\s*(?:if \([^)]*\) )?chip\('/g) || []).length >= 22, `⑤ every chip site goes through chip(key, …) (${(src.match(/\n\s*(?:if \([^)]*\) )?chip\('/g) || []).length} sites)`);

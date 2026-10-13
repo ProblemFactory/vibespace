@@ -67,18 +67,22 @@ export async function renderTeachSection(box, rerender) {
   box.appendChild(sec);
   let v;
   try { v = await voiceApi('/api/voice/teach'); } catch (e) { sec.appendChild(el('div', 'plugin-detail plugin-cfg-warn', e.message)); return; }
-  const sw = (cls, on, label, key) => {
+  // one switch row: the switch left, its words right, the explanatory sentence under them in the secondary colour
+  const sw = (cls, on, label, key, why, whyCls = '') => {
     const l = el('label', `voice-switch ${cls}`);
-    const cb = el('input'); cb.type = 'checkbox'; cb.checked = !!on;
+    const cb = el('input', 'voice-sw'); cb.type = 'checkbox'; cb.setAttribute('role', 'switch'); cb.checked = !!on;
     cb.onchange = () => voiceApi('/api/voice/teach/settings', { [key]: cb.checked }).then(() => rerender()).catch((e) => { cb.checked = !!on; showToast(e.message, { type: 'error' }); });
-    l.append(cb, document.createTextNode(' ' + label));
+    const words = el('span', 'voice-switch-text');
+    words.append(el('span', 'voice-switch-words', label), el('span', `plugin-detail voice-switch-why ${whyCls}`.trim(), why));
+    l.append(cb, words);
     return l;
   };
   sec.append(
     el('div', 'voice-teach-head', t('Teach Dropline')),
-    sw('voice-teach-toggle', v.settings.teach, t('Suggest words for my Dropline dictionary (I confirm each batch)'), 'teach'),
-    el('div', 'plugin-detail voice-teach-why', t('Sends the names, terms and file names in the current conversation to Dropline (Fish Audio) — only what you confirm. Credentials, attachments and other conversations are never sent.')),
-    sw('voice-context-toggle', v.settings.context, t("Send the conversation to Dropline's two-week memory (shows the text the first time)"), 'context'),
+    sw('voice-teach-toggle', v.settings.teach, t('Suggest words for my Dropline dictionary (I confirm each batch)'), 'teach',
+      t('Sends the names, terms and file names in the current conversation to Dropline (Fish Audio) — only what you confirm. Credentials, attachments and other conversations are never sent.'), 'voice-teach-why'),
+    sw('voice-context-toggle', v.settings.context, t("Send the conversation to Dropline's two-week memory (shows the text the first time)"), 'context',
+      t('Dropline keeps it for two weeks to spell your words right. Later updates of this conversation go without asking while the switch is on.')),
   );
   for (const p of v.proposals) {
     const card = el('div', 'voice-proposal');

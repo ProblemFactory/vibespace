@@ -2138,6 +2138,7 @@ class App {
       // probe (retry), not as "server says unavailable".
       if (d == null) throw new Error('probe failed');
       this._vncAvailable = !!d.available;
+      this._vncSeat = d.seat || null; // lane desktop-v2-entry (D4): the Desktop picker's local row says a Wayland seat's words
       const b = document.getElementById('btn-desktop');
       if (b) b.style.display = (this._vncAvailable && this.settings.get('toolbar.showDesktopButton') !== false) ? '' : 'none';
     }).catch(() => {

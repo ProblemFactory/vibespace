@@ -1608,5 +1608,129 @@ console.log('— §8 the LAPSED chip at the owner\'s width (1000 px panel, zh, h
   }
 }
 
+console.log('— §9 the account rows at the owner\'s PHONE width (215 / 180 px, headless chrome; lane accounts-rows-narrow 2026-10-13)');
+{
+  // The owner's phone: a ~215 px rail panel drew every name as ONE character and the login chip one character per line
+  // (the fixed cells kept their width, .acct-key-main {flex: 1 1 0} shrank to ~7 px). Below the 280 px rung the row
+  // STACKS (style.css "BELOW THE PILL RUNG THE ROW STACKS"). Seven rows built from the REAL helpers (usage pill, credits
+  // chip, reset chip, login chips incl. a pool's dead member) + the real style.css; the CONTROL is the same page with the
+  // rung's block cut out (the base). ≥ 340 px must stay pixel-identical (screenshots compared byte for byte).
+  // ACCT_ROWS_SHOTS=<dir> writes before-/after-<w>.png at 180/215/260/340/420.
+  const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
+  if (!CHROME) {
+    console.log('  SKIP: no chrome binary on this machine (looked in /usr/bin/google-chrome{,-stable}, /usr/bin/chromium{,-browser})');
+  } else {
+    const { spawn } = await import('node:child_process');
+    const esbuild = require(path.join(REPO, 'node_modules/esbuild'));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-acctrows-'));
+    const stubBuildVersion = { name: 'stub-build-version', setup(b) { b.onResolve({ filter: /build-version\.js$/ }, () => ({ path: 'build-version', namespace: 'stub' })); b.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({ contents: "export const BUILD_VERSION = 'test';", loader: 'js' })); } };
+    await esbuild.build({ entryPoints: [path.join(REPO, 'src/lib/manage-agents.js')], bundle: true, format: 'iife', globalName: 'MA', platform: 'browser', target: 'es2022', outfile: path.join(dir, 'ma.js'), logLevel: 'silent', loader: { '.css': 'text' }, plugins: [stubBuildVersion] });
+    const cssSrc = fs.readFileSync(path.join(REPO, 'public/style.css'), 'utf8');
+    const cssBase = cssSrc.replace(/\n\/\* BELOW THE PILL RUNG THE ROW STACKS[\s\S]*?\n@container \(max-width: 280px\) \{[\s\S]*?\n\}\n/, '\n');
+    ck('§9 the control cut the stacked-row rung out of style.css (' + (cssSrc.length - cssBase.length) + ' chars)', cssBase.length < cssSrc.length - 1000 && !/@container \(max-width: 280px\)/.test(cssBase));
+    fs.writeFileSync(path.join(dir, 'style-after.css'), cssSrc); fs.writeFileSync(path.join(dir, 'style-before.css'), cssBase);
+    function pageMain() { // runs IN the page (Date.now frozen by an earlier script: the pill's countdown token is stable)
+      const H = 3600e3, NOW = Date.now(), I = MA.ROSTER_ICONS;
+      class Host {} MA.installManageAgents(Host); const app = new Host();
+      const u = (a, b) => ({ fetchedAt: NOW, fiveHour: { utilization: a, resetsAt: Math.round((NOW + 2 * H) / 1000) }, sevenDay: { utilization: b, resetsAt: Math.round((NOW + 50 * H) / 1000) } });
+      const slot = (uu) => { const s = document.createElement('span'); s.className = 'acct-credits-slot'; MA.patchCreditsSlot(s, MA.creditsChipFor(uu)); return s.outerHTML; };
+      const row = (o) => '<div class="acct-key-row" data-id="' + o.id + '"><span class="acct-type-icon">' + o.icon + '</span>'
+        + '<span class="acct-key-main"><span class="acct-key-line"><span class="acct-key-name">' + o.name + '</span><span class="acct-key-tail">' + o.ident + '</span>'
+        + (o.usage ? slot(o.usage) : '') + (o.reset ? '<span class="acct-reset-slot">' + o.reset + '</span>' : '') + '</span>' + (o.extras || '') + '</span>'
+        + '<span class="acct-usage-cell">' + (o.usage ? app._acctUsageHtml(o.usage) : '') + '</span>'
+        + '<span class="acct-key-actions"><button class="acct-icon acct-def">' + I.STAR_O + '</button><button class="acct-icon acct-menu">' + I.DOTS + '</button></span></div>';
+      const pool = { id: 'pool-1', loginState: { state: 'logged-out', worstId: 's7', worstName: 'LuMax' } };
+      const exp = { id: 's3', loginState: { state: 'expiring', msLeft: 12 * H, refreshExpiresAt: NOW + 12 * H } };
+      const credit = { ...u(0.62, 0.4), overage: { inUse: true, asOf: NOW } };
+      const rows = [ // every name is 12 characters
+        { id: '__global__', icon: I.GLOBE, name: 'CLI login 01', ident: 'owner@example.com', usage: u(0.2, 0.1) },
+        { id: 'pool-1', icon: I.POOL, name: 'All accounts', ident: '→ Personal Max', usage: u(0.45, 0.3), extras: MA.acctExtrasHtml({ login: MA.loginExpiryChipHtml(pool) }) },
+        { id: 's3', icon: I.CROWN, name: 'Personal Max', ident: 'personal.max@example.com · max', usage: credit, reset: MA.resetChipHtml({ count: 2, canUse: false }, { key: 's3', disabledWhy: 'only /limit-reset' }), extras: MA.acctExtrasHtml({ login: MA.loginExpiryChipHtml(exp) }) },
+        { id: 's4', icon: I.CROWN, name: 'Team Billing', ident: 'team.billing@example.com · team', usage: { ...u(0.5, 1), sevenDay: { utilization: 1, resetsAt: Math.round((NOW + 167 * H) / 1000) } }, reset: MA.resetChipHtml({ count: 1, canUse: true }, { key: 's4' }) },
+        { id: 's5', icon: I.CROWN, name: 'Backup Pro 2', ident: 'backup2@example.com · pro', usage: { ...u(0.05, 0.02), fiveHour: { utilization: 1, resetsAt: Math.round((NOW + 119 * 60e3) / 1000) } } },
+        { id: 's7', icon: I.CROWN, name: 'LuMax Studio', ident: 'lumax@example.com · max', extras: MA.acctExtrasHtml({ login: MA.loginExpiryChipHtml({ id: 's7', loginState: { state: 'logged-out' } }) }) },
+        { id: 'k1', icon: I.KEY, name: 'Anthropic AP', ident: 'sk-ant-…a1b2' },
+      ];
+      document.getElementById('mount').innerHTML = rows.map(row).join('');
+      window.clicks = [];
+      document.addEventListener('click', (e) => { const hit = e.target.closest('.acct-def, .acct-menu, [data-relogin]'); window.clicks.push((e.target.closest('.acct-key-row')?.dataset.id || '-') + ':' + (hit ? (hit.dataset.relogin ? 'relogin=' + hit.dataset.relogin : hit.classList.contains('acct-def') ? 'star' : 'menu') : '-')); });
+    }
+    const page = (k, w) => '<!doctype html><html data-theme="dark"><head><meta charset="utf-8"><link rel="stylesheet" href="./style-' + k + '.css"></head>'
+      + '<body style="margin:0"><div class="rail-panel"><div id="panel" class="ob-backend acct-section acct-roster" style="width:max-content"><div style="flex:1; width:' + w + 'px"><div id="mount" class="acct-list"></div></div></div></div>'
+      + '<script>Date.now = () => 1791860000000;</' + 'script><script src="./ma.js"></script><script>(' + pageMain + ')();</' + 'script></body></html>';
+    const CDP_PORT = await freePort();
+    const chrome = spawn(CHROME, ['--headless=new', '--remote-debugging-port=' + CDP_PORT, '--no-first-run', '--disable-gpu', '--hide-scrollbars', '--user-data-dir=' + path.join(dir, 'chrome'), 'about:blank'], { stdio: 'ignore' });
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    try {
+      const WS = require(path.join(REPO, 'node_modules/ws'));
+      const race = (pr, ms, what) => Promise.race([pr, new Promise((_, rej) => { const t = setTimeout(() => rej(new Error(what + ' timed out after ' + ms + 'ms')), ms); if (t.unref) t.unref(); })]);
+      let target = null;
+      for (let i = 0; i < 60 && !target; i++) { try { const l = await (await fetch('http://127.0.0.1:' + CDP_PORT + '/json')).json(); target = l.find((t) => t.type === 'page'); } catch { await sleep(200); } }
+      if (!target) throw new Error('chrome never came up on the devtools port');
+      const sock = new WS(target.webSocketDebuggerUrl);
+      await race(new Promise((res, rej) => { sock.on('open', res); sock.on('error', rej); }), 15000, 'devtools socket');
+      let seq = 0; const pend = new Map(); const jsErrors = [];
+      sock.on('message', (d) => { const m = JSON.parse(d);
+        if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); return; }
+        if (m.method === 'Runtime.exceptionThrown') jsErrors.push(m.params?.exceptionDetails?.exception?.description || 'exception'); });
+      const cdp = (method, params = {}) => race(new Promise((res, rej) => { const id = ++seq; pend.set(id, (m) => (m.error ? rej(new Error(m.error.message)) : res(m.result))); sock.send(JSON.stringify({ id, method, params })); }), 30000, 'CDP ' + method);
+      const evalJs = async (e) => { const rr = await cdp('Runtime.evaluate', { expression: e, awaitPromise: true, returnByValue: true }); if (rr.exceptionDetails) throw new Error(rr.exceptionDetails.exception?.description || 'threw'); return rr.result.value; };
+      await cdp('Page.enable'); await cdp('Runtime.enable');
+      await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });
+      await cdp('Emulation.setDeviceMetricsOverride', { width: 600, height: 1700, deviceScaleFactor: 2, mobile: false });
+      const render = async (k, w) => {
+        fs.writeFileSync(path.join(dir, 'p.html'), page(k, w));
+        await cdp('Page.navigate', { url: 'file://' + path.join(dir, 'p.html') });
+        for (let i = 0; i < 50 && !(await evalJs('!!window.clicks').catch(() => false)); i++) await sleep(100);
+        await sleep(150);
+        const m = await evalJs(`(() => {
+          const list = document.querySelector('.acct-list'), p = document.getElementById('panel').getBoundingClientRect();
+          const rows = [...document.querySelectorAll('.acct-key-row')].map((r) => {
+            const nm = r.querySelector('.acct-key-name'), tn = nm.firstChild, lim = nm.getBoundingClientRect().left + nm.clientWidth; let vis = 0;
+            for (let i = 0; i < tn.length; i++) { const rg = document.createRange(); rg.setStart(tn, i); rg.setEnd(tn, i + 1); if (rg.getBoundingClientRect().right <= lim + 0.5) vis++; }
+            const chip = r.querySelector('.acct-login-chip'); let lineH = 0;
+            if (chip) for (const n of chip.childNodes) if (n.nodeType === 3 && n.textContent.trim()) { const rg = document.createRange(); rg.selectNodeContents(n); lineH = Math.max(lineH, rg.getClientRects()[0]?.height || 0); }
+            const c = (el) => { if (!el) return null; const b = el.getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]; };
+            return { id: r.dataset.id, nameW: nm.clientWidth, vis, len: tn.length, chipH: chip ? chip.getBoundingClientRect().height : null, lineH,
+              star: c(r.querySelector('.acct-def')), menu: c(r.querySelector('.acct-menu')), chip: c(chip), relogin: chip?.dataset.relogin || null };
+          });
+          return { listW: list.clientWidth, scrollW: list.scrollWidth, rows, clip: { x: 0, y: 0, width: Math.ceil(p.right), height: Math.ceil(p.bottom) } };
+        })()`);
+        const shot = (await cdp('Page.captureScreenshot', { format: 'png', clip: { ...m.clip, scale: 1 } })).data;
+        if (process.env.ACCT_ROWS_SHOTS) fs.writeFileSync(path.join(process.env.ACCT_ROWS_SHOTS, k + '-' + w + '.png'), Buffer.from(shot, 'base64'));
+        return { ...m, shot };
+      };
+      const click = async ([x, y]) => { for (const type of ['mousePressed', 'mouseReleased']) await cdp('Input.dispatchMouseEvent', { type, x, y, button: 'left', clickCount: 1 }); };
+      const sum = (m) => m.rows.map((r) => r.id + ' ' + r.nameW + 'px/' + r.vis + 'ch' + (r.chipH != null ? ' chip ' + Math.round(r.chipH) + 'px' : '')).join(', ');
+      for (const w of [215, 180]) {
+        const a = await render('after', w);
+        ck('BROWSER §9 @' + w + ': every name keeps ≥ 60 px and ≥ 6 of its 12 characters (' + sum(a) + ')', a.rows.length === 7 && a.rows.every((r) => r.len === 12 && r.nameW >= 60 && r.vis >= 6));
+        const chips = a.rows.filter((r) => r.chipH != null);
+        ck('BROWSER §9 @' + w + ': each login chip wraps at words — ≤ 2 lines tall (' + chips.map((r) => Math.round(r.chipH) + '/' + Math.round(r.lineH)).join(', ') + ' px chip/line)', chips.length === 3 && chips.every((r) => r.lineH > 0 && r.chipH <= 2 * r.lineH + 1));
+        ck('BROWSER §9 @' + w + ': no horizontal overflow (.acct-list scroll ' + a.scrollW + ' ≤ client ' + a.listW + ')', a.scrollW <= a.listW && a.listW === w);
+        await evalJs('window.clicks = []');
+        const want = [];
+        for (const r of a.rows) { await click(r.star); want.push(r.id + ':star'); await click(r.menu); want.push(r.id + ':menu'); if (r.chip) { await click(r.chip); want.push(r.id + ':relogin=' + r.relogin); } }
+        const got = await evalJs('window.clicks');
+        ck('BROWSER §9 @' + w + ': the star / ⋯ / re-login chip clicks land on their own row (' + got.length + ' clicks)', JSON.stringify(got) === JSON.stringify(want) || console.error('    got ' + JSON.stringify(got) + '\n    want ' + JSON.stringify(want)));
+        const b = await render('before', w);
+        ck('BROWSER §9 CONTROL @' + w + ': the BASE squeezes the name column (min ' + Math.min(...b.rows.map((r) => r.nameW)) + ' px, ' + Math.min(...b.rows.map((r) => r.vis)) + ' ch) and draws a chip per character (max ' + Math.round(Math.max(...b.rows.map((r) => r.chipH || 0))) + ' px) — ' + sum(b), b.rows.some((r) => r.nameW < 60 || r.vis < 6) && b.rows.some((r) => (r.chipH || 0) > 2 * (r.lineH || 99)));
+      }
+      for (const w of [420, 340]) {
+        const a = await render('after', w), b = await render('before', w);
+        ck('BROWSER §9 @' + w + ': at/above the pill rung the panel is PIXEL-IDENTICAL to the base (' + a.clip.width + 'x' + a.clip.height + ' png, ' + a.shot.length + ' b64 chars)', a.shot === b.shot && a.clip.height === b.clip.height);
+      }
+      if (process.env.ACCT_ROWS_SHOTS) for (const w of [260]) { await render('after', w); await render('before', w); }
+      ck('BROWSER §9: no JS error while rendering', jsErrors.length === 0 || console.error('    ' + jsErrors.join('\n    ')));
+      try { sock.close(); } catch { }
+    } catch (e) {
+      fail++; console.error('  x BROWSER §9: the narrow-row measurement could not run - ' + e.message);
+    } finally {
+      try { chrome.kill('SIGKILL'); } catch { }
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch { }
+    }
+  }
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

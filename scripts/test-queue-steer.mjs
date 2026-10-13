@@ -1768,7 +1768,7 @@ console.log('— ⑨e the chord in a REAL browser (trusted keystrokes) + the 375
       ok(`375×667: the bolt button IS shown (${m.btnDisplay}) and the keyboard hint is not (${m.hintDisplay}) — a phone has no Alt key`, m.btnDisplay !== 'none' && m.hintDisplay === 'none', m);
       ok(`…and it sits BESIDE Send, on the same row (btn ${m.btn.x}..${m.btn.right} @y${m.btn.y}, send @${m.send.x} y${m.send.y})`, m.btn.right <= m.send.x + 2 && Math.abs(m.btn.bottom - m.send.bottom) <= 24, m);
       ok(`…the button is a real touch target (${m.btn.w}×${m.btn.h} ≥ 32×32)`, m.btn.w >= 32 && m.btn.h >= 32, m.btn);
-      ok(`…the textarea still shows ≥2 rows (${m.rows} rows, ${m.ta.h}px at line-height ${m.lh})`, m.ta.h >= 2 * m.lh - 1, m);
+      ok(`…the textarea still shows a full line at its 44-px phone minimum (${m.rows} rows, ${m.ta.h}px at line-height ${m.lh}; lane phone-chat-composer: one line, grows to six)`, m.ta.h >= 44 - 1 && m.rows >= 1.5, m);
       ok(`…and NOTHING overflows: the input area does not scroll sideways (${m.areaScrollW} ≤ ${m.areaClientW}) and neither does the page (${m.docScrollW} ≤ ${m.vw})`, m.areaScrollW <= m.areaClientW + 1 && m.docScrollW <= m.vw + 1, m);
       ok(`…everything stays inside the viewport (send right edge ${m.send.right} ≤ ${m.vw})`, m.send.right <= m.vw && m.btn.x >= 0 && m.area.bottom <= m.vh + 1, m);
       // the button runs the SAME verb

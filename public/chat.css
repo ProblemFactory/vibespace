@@ -1782,13 +1782,50 @@ body.hide-empty-thinking .chat-compact .chat-msg.chat-empty-thinking { display: 
   .af-c-kind, .af-c-helper, .af-c-edits, .af-c-path { display: none; }
 }
 /* Dropline voice input P1 (lane voice-p1-oauth-teach): the plugin card's account row + teach section, the context preview */
-.voice-account { align-items: center; gap: 8px; }
-.voice-switch { display: flex; align-items: flex-start; gap: 6px; font-size: 12px; color: var(--text); cursor: pointer; }
-.voice-switch input { margin-top: 2px; flex: none; }
-.voice-account-words { overflow-wrap: anywhere; }
-.voice-teach { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+/* the card's grammar (lane voice-card-polish): the header holds the status chip + the card's own switch; a labelled grid
+   (96 px label column, stacked when the card is narrow — the phone, the rail); 12 px between blocks, 8 px between
+   rows, every button and field 32 px on the radius token (36 on a phone) */
+.voice-head { align-items: center; }
+.voice-head-end { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.voice-state { font-size: 11px; line-height: 18px; padding: 0 8px; border: 1px solid var(--border); border-radius: 9px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 240px; }
+.voice-state.voice-ok { border-color: color-mix(in srgb, var(--green) 45%, transparent); }
+.voice-sw { appearance: none; -webkit-appearance: none; flex: none; position: relative; width: 32px; height: 18px; margin: 0; border-radius: 9px; background: var(--border); cursor: pointer; transition: background .15s; }
+.voice-sw::before { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--text-secondary); transition: transform .15s, background .15s; }
+.voice-sw:checked { background: var(--accent); }
+.voice-sw:checked::before { transform: translateX(14px); background: var(--accent-fg); }
+.voice-sw:disabled { opacity: .45; cursor: default; }
+.voice-sw:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.voice-cfg { container-type: inline-size; display: flex; flex-direction: column; gap: 12px; }
+.voice-grid { display: flex; flex-direction: column; gap: 8px; }
+.voice-row { display: grid; grid-template-columns: 96px minmax(0, 1fr); column-gap: 12px; row-gap: 4px; align-items: start; }
+.voice-row[hidden] { display: none; }
+.voice-row-label { font-size: 12px; line-height: 32px; color: var(--text-secondary); }
+.voice-row-ctl { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.voice-cfg .mounts-btn { height: 32px; padding: 0 12px; font-size: 12px; border-radius: var(--radius-sm); }
+.voice-cfg .plugin-cfg-input { height: 32px; box-sizing: border-box; padding: 0 8px; font-size: 12px; color: var(--text); background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.voice-key-line { flex-wrap: nowrap; gap: 8px; }
+.voice-key-line .voice-key { flex: 1 1 auto; min-width: 0; }
+.voice-lang-select { width: 100%; }
+.voice-account { align-items: center; gap: 12px; min-height: 32px; }
+.voice-key-fold { background: none; border: none; padding: 0; color: var(--accent); font-size: 12px; cursor: pointer; }
+.voice-key-fold:hover { text-decoration: underline; }
+.voice-account-box > .voice-account-words { line-height: 32px; }
+.voice-switch { display: flex; align-items: flex-start; gap: 10px; font-size: 12px; color: var(--text); cursor: pointer; }
+.voice-switch > .voice-sw { margin-top: 1px; }
+.voice-switch-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.voice-switch-why { font-size: 11px; color: var(--text-secondary); }
+.voice-account-words { font-size: 12px; overflow-wrap: anywhere; }
+.voice-teach { display: flex; flex-direction: column; gap: 8px; padding-top: 12px; border-top: 1px solid var(--border); }
 .voice-teach-head { font-weight: 600; color: var(--text); font-size: 12px; }
-.voice-teach-why { color: var(--text-dim); }
+@container (max-width: 440px) {
+  .voice-row { grid-template-columns: minmax(0, 1fr); }
+  .voice-row-label { line-height: 1.4; }
+  .voice-key-line { flex-wrap: wrap; }
+  .voice-key-line .voice-key { flex: 1 1 100%; }
+  .voice-key-line .mounts-btn { flex: 1 1 0; }
+  .voice-account { flex-wrap: wrap; gap: 8px; }
+  .voice-connect, .voice-disconnect { flex: 1 1 100%; }
+}
 .voice-proposal { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px; display: flex; flex-direction: column; gap: 6px; background: var(--bg-input); }
 .voice-proposal-title { color: var(--text); font-size: 12px; overflow-wrap: anywhere; }
 .voice-proposal-terms { display: flex; flex-wrap: wrap; gap: 4px 12px; }
@@ -1805,6 +1842,37 @@ body.hide-empty-thinking .chat-compact .chat-msg.chat-empty-thinking { display: 
 .voice-preview-text { margin: 0; flex: 1; min-height: 80px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px; }
 @media (max-width: 600px) {
   .voice-proposal-actions .mounts-btn, .voice-preview .mounts-btn { min-height: 36px; flex: 1; }
-  .voice-connect, .voice-disconnect, .voice-project-off { min-height: 36px; }
+  .voice-cfg .mounts-btn, .voice-cfg .plugin-cfg-input { height: 36px; }
+  .voice-project-off { min-height: 36px; }
   .voice-term { min-height: 36px; }
 }
+
+/* ── THE PHONE COMPOSER (lane phone-chat-composer, owner 2026-10-13 "输入框非常窄。下面状态栏又很稀疏"): on a phone the
+   text box owns its row — [+] [ field … mic ] [send] — and the composer + the status bar under it read as ONE bottom
+   panel: one surface (--bg-titlebar), one top border (the composer's), the 8-px rhythm, the gesture-bar inset under
+   the bar. Everything below is phone-gated; test-phone-composer-chrome renders the desk with this block stripped and
+   gets the same PNG. ── */
+.chat-plus-btn { display: none; }
+@media (max-width: 768px) {
+  .chat-view .chat-input-area { padding: 8px 12px; gap: 8px; }
+  .chat-input-area > .chat-todo-display, .chat-input-area > .chat-stream-status { padding: 0; white-space: nowrap; overflow: hidden; }
+  .chat-input-wrap.chat-input-phone { gap: 8px; }
+  .chat-plus-btn { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 36px; height: 36px; margin-bottom: 4px; padding: 0; border-radius: 50%; border: 1px solid var(--border); background: var(--bg-input); color: var(--text-dim); cursor: pointer; }
+  .chat-plus-btn:active { background: var(--bg-hover); color: var(--text); }
+  .chat-plus-btn svg { display: block; }
+  .chat-input-field { position: relative; flex: 1; min-width: 0; display: flex; }
+  .chat-input-field .chat-input { min-height: 44px; max-height: 164px; padding: 10px 44px 10px 12px; border-radius: 22px; line-height: 24px; }
+  .chat-input-field .chat-voice-btn { position: absolute; right: 6px; bottom: 6px; min-width: 32px; min-height: 32px; height: 32px; padding: 0 8px; }
+  .chat-input-field .chat-expand-btn { display: none; top: 6px; right: 12px; bottom: auto; }
+  .chat-input-field.chat-input-tall .chat-expand-btn { display: flex; }
+  .chat-input-area .chat-send-btn { width: 40px; height: 40px; margin-bottom: 2px; }
+  .chat-input-area .chat-shortcut-hint { display: none; }
+  .chat-view .chat-status-bar { flex-wrap: nowrap; overflow: hidden; gap: 8px; min-height: 40px; padding: 0 12px env(safe-area-inset-bottom, 0px); border-top: none; background: var(--bg-titlebar); font-size: 12px; }
+  .chat-view .chat-status-bar .chat-status-clickable { padding: 0 4px; }
+  .chat-view .chat-status-bar .chat-status-model { font-size: 12px; padding: 0 8px; letter-spacing: 0; border: solid transparent; border-width: 4px 0; background-clip: padding-box; border-radius: var(--radius); }
+  .chat-status-bar > .chat-status-folded { display: none !important; }
+  .chat-view .chat-status-bar > .chat-status-more { min-width: 36px; justify-content: center; font-size: 16px; }
+  .chat-view .chat-status-bar.chat-status-open { flex-wrap: wrap; }
+  .chat-view .chat-status-bar.chat-status-open > .chat-status-browser { position: static; box-shadow: none; }
+}
+/* ── end THE PHONE COMPOSER ── */

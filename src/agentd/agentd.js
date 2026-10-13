@@ -1522,7 +1522,7 @@ function serveConnection(sock) {
           // per-op capability gating (three-tier design): consumers check the
           // capability, NEVER parse daemonVersion — unknown ops on an old
           // daemon get no reply and hang the request until its timeout
-          capabilities: ['probe', 'transcript-op', 'usage-scan', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events', 'pool-orders', 'sysinfo', 'design-fs', 'session-events', 'proc-list', 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'browser-end-daemon', 'desktop-serve', 'window-track', 'window-pin', 'dial-status', 'run-shell', 'app-install', 'fs-portable', 'fs-write-stream', 'desktop-apps-list'],
+          capabilities: ['probe', 'transcript-op', 'usage-scan', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events', 'pool-orders', 'sysinfo', 'design-fs', 'session-events', 'proc-list', 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'browser-end-daemon', 'desktop-serve', 'window-track', 'window-pin', 'dial-status', 'run-shell', 'app-install', 'fs-portable', 'fs-write-stream', 'desktop-apps-list', 'display-facts'],
         }));
         return;
       }
@@ -2101,6 +2101,12 @@ function serveConnection(sock) {
           onAnswer: (a, first) => { rec.last = a; try { mux.control(first ? { op: 'window-track-result', id: msg.id, result: a } : { op: 'window-rect', wid, result: a }); } catch { } },
           onEnd: () => { if (wid && windowWatches.get(wid) === rec) windowWatches.delete(wid); if (rec.pinned) unpinWindow(rec); } });
         if (wid && !rec.h.stopped) windowWatches.set(wid, rec);
+        return;
+      }
+      // lane desktop-v2-entry: THIS machine's screen table (NSScreen / Screen.AllScreens) for the display picker — one bounded look
+      if (msg.op === 'display-facts') {
+        require('./../machine-window.js').readDisplayFacts({ platform: process.platform, execFile: require('child_process').execFile, env: spawnEnv() })
+          .then((r) => mux.control({ op: 'display-facts-result', id: msg.id, result: r }), (e) => mux.control({ op: 'display-facts-result', id: msg.id, error: String((e && e.message) || e) }));
         return;
       }
       if (msg.op === 'window-untrack') { const rec = windowWatches.get(String(msg.wid || '')); if (rec) rec.h.stop(); mux.control({ op: 'window-untrack-result', id: msg.id, stopped: !!rec }); return; }

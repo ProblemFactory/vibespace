@@ -400,4 +400,69 @@ function pinWindow({ platform, hwnd, pid, on, execFile, env }) {
   });
 }
 
-module.exports = { namesGuiApp, TRACK_WAIT_MS, TRACK_POLL_MS, WATCH_POLL_MS, PUSH_MIN_MS, MIN_SIDE, LAUNCH_TAG, STATES, parseLaunchReport, trackRequest, winTrackScript, winPinScript, MAC_TRACK_JXA, MAC_PIN_JXA, trackArgv, pinArgv, dumpReader, parseDumps, screenOf, rectOf, pickTrackedWindow, windowAnswer, targetOf, sameAnswer, cropLayout, paneToMachine, clampToBox, runWindowTrack, pinWindow };
+// ── lane desktop-v2-entry (design q-030 §3): THE MACHINE'S OWN SCREEN TABLE — the `display-facts` device op ─────────────
+// The same two shells as the look above: a Mac's JXA over NSScreen.screens (frames in POINTS, the primary's bottom-left
+// origin, y up; backingScaleFactor), Windows' PowerShell over Screen.AllScreens (Bounds in physical pixels once the
+// process is DPI-aware; the primary at 0,0, a secondary left of it negative). One answer, bounded; the page maps it onto the
+// framebuffer (src/desktop-screens.js screenMap — never a guess when the union is not the framebuffer).
+const DISPLAYS_MS = 10000;
+const MAC_DISPLAYS_JXA = [
+  "ObjC.import('Cocoa');",
+  'function run() {',
+  '  const ss = $.NSScreen.screens, rows = [];',
+  '  for (let i = 0; i < ss.count; i++) {',
+  '    const s = ss.objectAtIndex(i), f = s.frame;',
+  "    let name = ''; try { const n = s.localizedName; name = n && !n.isNil() ? ObjC.unwrap(n) : ''; } catch (e) { name = ''; }",
+  "    let id = i + 1; try { const d = s.deviceDescription.objectForKey('NSScreenNumber'); if (d && !d.isNil()) id = d.intValue; } catch (e) { }",
+  '    rows.push({ id, name, x: f.origin.x, y: f.origin.y, w: f.size.width, h: f.size.height, scale: s.backingScaleFactor, primary: i === 0 ? 1 : 0 });',
+  '  }',
+  "  return JSON.stringify({ t: 'displays', origin: 'bottom-left', rows });",
+  '}'].join('\n');
+function winDisplaysScript() {
+  return ["$ErrorActionPreference = 'Stop'", ...WIN_TYPES,
+    '$aware = 0; try { $aware = [int][VsWin]::SetProcessDPIAware() } catch { }',
+    'Add-Type -AssemblyName System.Windows.Forms',
+    '$dpi = 96; try { $dpi = [int][VsWin]::GetDpiForSystem() } catch { }',
+    '$rows = @()',
+    'foreach ($s in [System.Windows.Forms.Screen]::AllScreens) { $b = $s.Bounds; $rows += @{ id = $s.DeviceName; name = $s.DeviceName; x = $b.X; y = $b.Y; w = $b.Width; h = $b.Height; scale = [math]::Round($dpi / 96, 3); primary = [int]$s.Primary } }',
+    "[Console]::Out.WriteLine((ConvertTo-Json -InputObject @{ t = 'displays'; origin = 'top-left'; aware = $aware; rows = $rows } -Compress -Depth 4))"].join('\n');
+}
+/** The op's argv for this platform. → { ok, argv } | { ok:false, code } */
+function displaysArgv(platform) {
+  if (platform === 'win32') return { ok: true, argv: [...MD.PS_ARGV, MD.psEncoded(winDisplaysScript())] };
+  if (platform === 'darwin') return { ok: true, argv: [OSA, '-l', 'JavaScript', '-e', MAC_DISPLAYS_JXA] };
+  return { ok: false, code: 'not_desktop_machine', error: `the display table is for Windows and macOS machines (this one runs ${platform || 'an unknown system'})` };
+}
+/** The script's one line → { ok, displays: [{id, name, x, y, w, h, scale, primary}] } in a TOP-LEFT origin (a Mac's y flipped
+ *  against its primary screen), or { ok:false, code:'bad_output' }. PURE. */
+function parseDisplayFacts(platform, stdout) {
+  let o = null;
+  for (const line of String(stdout || '').split(/\r?\n/)) { const l = line.trim(); if (!l.startsWith('{')) continue; try { const v = JSON.parse(l); if (v && v.t === 'displays') { o = v; break; } } catch { /* not ours */ } }
+  const rows = o && Array.isArray(o.rows) ? o.rows : o && o.rows && typeof o.rows === 'object' ? [o.rows] : null; // PowerShell 5 writes a lone row as an object
+  if (!rows || !rows.length) return { ok: false, code: 'bad_output', error: 'the machine did not print its screen table' };
+  const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : null);
+  const flip = o.origin === 'bottom-left';
+  const prim = rows.find((r) => r && Number(r.primary)) || rows[0];
+  const H0 = num(prim && prim.h) || 0;
+  const out = [];
+  for (const r of rows.slice(0, 16)) {
+    const x = num(r && r.x), y = num(r && r.y), w = num(r && r.w), h = num(r && r.h);
+    if (x == null || y == null || !(w > 0) || !(h > 0)) continue;
+    out.push({ id: clean(r.id).slice(0, 60) || String(out.length + 1), name: clean(String(r.name || '').replace(/^\\\\\.\\/, '')).slice(0, 80), x, y: flip ? H0 - (y + h) : y, w, h, scale: num(r.scale) > 0 ? num(r.scale) : 1, primary: !!Number(r.primary) });
+  }
+  return out.length ? { ok: true, platform, displays: out } : { ok: false, code: 'bad_output', error: 'the machine printed no usable screen' };
+}
+/** RUN the op where the screens are (the daemon hands its execFile). → { ok, platform, displays } | { ok:false, code, error } */
+function readDisplayFacts({ platform, execFile, env }) {
+  const how = displaysArgv(platform);
+  if (!how.ok) return Promise.resolve({ ok: false, code: how.code, error: how.error });
+  return new Promise((resolve) => {
+    execFile(how.argv[0], how.argv.slice(1), { env, windowsHide: true, timeout: DISPLAYS_MS, maxBuffer: 64 * 1024, encoding: 'utf8' }, (err, stdout, stderr) => {
+      const r = parseDisplayFacts(platform, stdout);
+      if (r.ok) return resolve(r);
+      resolve({ ok: false, code: err ? 'displays_failed' : r.code, error: (String(stderr || '').trim().split('\n')[0] || (err && err.message) || r.error).slice(0, 200) });
+    });
+  });
+}
+
+module.exports = { namesGuiApp, TRACK_WAIT_MS, TRACK_POLL_MS, WATCH_POLL_MS, PUSH_MIN_MS, MIN_SIDE, LAUNCH_TAG, STATES, parseLaunchReport, trackRequest, winTrackScript, winPinScript, MAC_TRACK_JXA, MAC_PIN_JXA, trackArgv, pinArgv, dumpReader, parseDumps, screenOf, rectOf, pickTrackedWindow, windowAnswer, targetOf, sameAnswer, cropLayout, paneToMachine, clampToBox, runWindowTrack, pinWindow, DISPLAYS_MS, MAC_DISPLAYS_JXA, winDisplaysScript, displaysArgv, parseDisplayFacts, readDisplayFacts };

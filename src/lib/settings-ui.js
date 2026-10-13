@@ -388,27 +388,46 @@ class SettingsUI {
   }
 
   /** lane https-tailscale: the hub's https address (GET /api/tls — the plan src/server/tls.js holds, no probe on render):
-   *  "Secure address: https://<domain>:<port> — …" with a Copy button, or the plan's `off` words (the owner's step). */
+   *  "Secure address: https://<domain>:<port> — …" with a Copy button, or the plan's `off` words (the owner's step).
+   *  lane tls-pass-retry: Check again = POST /api/tls/recheck (a pass now); while off, the last failed call in small text. */
   _renderHttpsFact(host) {
     const line = document.createElement('div');
     line.className = 'settings-row-fact settings-https-fact';
     const text = document.createElement('span');
     text.className = 'settings-https-text';
     text.textContent = t('checking…');
-    line.appendChild(text);
+    let copy = null;
+    const again = document.createElement('button');
+    again.className = 'settings-https-recheck';
+    again.textContent = t('Check again');
+    const probe = document.createElement('div');
+    probe.className = 'settings-https-probe';
+    line.append(text, again, probe);
     host.appendChild(line);
-    fetchJson('/api/tls').then((r) => {
+    const paint = (r) => {
       if (!r || !r.i18n) { text.textContent = r && r.words ? r.words : t('checking…'); return; }
       text.textContent = t(r.i18n.key, r.i18n.params || {});
       line.classList.toggle('is-live', !!r.serving);
+      if (copy) { copy.remove(); copy = null; }
       if (r.serving && r.url) {
-        const btn = document.createElement('button');
+        const btn = copy = document.createElement('button');
         btn.className = 'settings-https-copy';
         btn.textContent = t('Copy');
         btn.onclick = () => { copyText(r.url); btn.textContent = t('Copied'); setTimeout(() => { btn.textContent = t('Copy'); }, 1500); };
-        line.appendChild(btn);
+        line.insertBefore(btn, again);
       }
-    }).catch(() => { text.textContent = t('checking…'); });
+      const p = r.probe;
+      probe.hidden = !p;
+      probe.textContent = !p ? '' : t('Last check: {what}', { what: p.code === 'TIMEOUT' ? t('tailscale {cmd} timed out after {s} s', { cmd: p.cmd, s: Math.round(p.bound / 1000) })
+        : p.code === 0 ? t('tailscale {cmd} answered {bytes} bytes that are not a status', { cmd: p.cmd, bytes: p.bytes })
+        : t('tailscale {cmd} failed ({code}): {err}', { cmd: p.cmd, code: p.code, err: p.err || '' }) });
+    };
+    probe.hidden = true;
+    again.onclick = () => {
+      again.disabled = true; text.textContent = t('checking…');
+      fetchJson('/api/tls/recheck', { method: 'POST' }).then(paint).finally(() => { again.disabled = false; });
+    };
+    fetchJson('/api/tls').then(paint).catch(() => { text.textContent = t('checking…'); });
   }
 
   /** The apply-chip slot of a DERIVED per-vendor channel row (B-df40 part 3): who reads the value — the Channels

@@ -81,7 +81,7 @@ console.log('⓪ the module');
   ok(c.policyModes.join() === 'review' && c.prepareSend === true && c.retention === 'purge-on-remove', 'policyModes [review] (no "send directly"), prepareSend, purge-on-remove');
   ok(JSON.stringify(c.threads) === JSON.stringify({ read: 'vendor', replyInto: true, listing: 'separate', placements: ['chat', 'thread', 'thread+chat'], rootReply: 'thread' }), 'threads: vendor, listed separately, chat / thread / thread+chat, a reply\'s norm is the thread (F3)');
   ok(c.reactions.read === 'list' && c.reactions.add === true && c.reactions.remove === 'own' && c.reactions.vocabulary === 'names', 'reactions: a per-message list (an inline read would drop them — F4), add, remove own, names');
-  ok(c.facts.join() === 'via,edited' && c.budget.settingKey === 'channels.budgetSlackPerMin' && c.budget.default === 40, 'facts via + edited; the budget row is the slack table\'s (40 a minute)');
+  ok(c.facts.join() === 'via,edited,recalled' && c.revisions.how === 'absent' && c.budget.settingKey === 'channels.budgetSlackPerMin' && c.budget.default === 40, 'facts via + edited + recalled (a recheck learns it: absent = recalled); the budget row is the slack table\'s (40 a minute)');
   ok(slack.EGRESS.join() === 'slack.com,files.slack.com,avatars.slack-edge.com' && Manifest.EGRESS.join() === 'api.slack.com,slack.com,problemfactory.github.io', 'egress: the Web API host, the files host and the uploaded-avatar host (lane channel-avatars; the manifest link\'s host and design 018\'s consent page are the person\'s browser pages)');
   const src = fs.readFileSync(path.join(REPO, 'src/channels/slack.js'), 'utf-8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
   ok(!/process\.env/.test(src), 'it never reads process.env');
@@ -232,6 +232,20 @@ console.log('③ list, convCaps, older, reactions');
   ok(gone.read === 'no' && gone.sendAs.length === 0, 'a channel Slack does not answer: read no');
   const old = await a.older('C0GENERAL', { before: { vendorId: ts(5), at: 0 }, limit: 3 });
   ok(old.records.map((r) => r.vendorId).join() === `${ts(2)},${ts(3)},${ts(4)}` && v.calls.some((c) => c.method === 'conversations.history' && c.params.latest === ts(5) && c.params.inclusive === 'false'), 'older(): `latest` = the boundary ts, exclusive');
+  // lane channel-record-revisions: THE RECHECK AROUND ITS TS — `oldest = latest = ts`, inclusive, ONE history call; the
+  // recorded edited message (edited.ts) is a version with its body, an unedited one the same, a ts the history no longer
+  // holds RECALLED (Slack keeps no flag: a deleted message vanishes), a reply asks conversations.replies under its root
+  v.calls.length = 0;
+  const rvE = await a.revisionOf('C0GENERAL', { messageId: '1700000003.000103' });
+  const rvC = v.calls.filter((c) => c.method === 'conversations.history');
+  ok(rvC.length === 1 && rvC[0].params.oldest === '1700000003.000103' && rvC[0].params.latest === '1700000003.000103' && rvC[0].params.inclusive === 'true', 'revisionOf: ONE conversations.history, oldest = latest = the ts, inclusive', JSON.stringify(rvC.map((c) => c.params)));
+  ok(rvE.state === 'edited' && rvE.editedAt === 1700000030000 && /my own message/.test(rvE.text), 'revisionOf: edited.ts = an edit at that instant with the body toRecord reads', JSON.stringify(rvE));
+  const rvS = await a.revisionOf('C0GENERAL', { messageId: ts(4) });
+  const rvG = await a.revisionOf('C0GENERAL', { messageId: '1700000003.999999' });
+  ok(rvS.state === 'same' && rvG.state === 'recalled', 'revisionOf: an unedited message is the same; ABSENT from the history = recalled', JSON.stringify([rvS, rvG]));
+  v.calls.length = 0;
+  try { await a.revisionOf('C0GENERAL', { messageId: '1700000003.999999', threadKey: ts(4) }); } catch { /* the fixture holds no such thread (thread_not_found): typed, asked again in an hour — never a recall */ }
+  ok(v.calls.length === 1 && v.calls[0].method === 'conversations.replies' && v.calls[0].params.ts === ts(4), 'revisionOf: a reply is re-read under its root (conversations.replies ts = the root)', JSON.stringify(v.calls.map((c) => [c.method, c.params])));
   await a.history('C0GENERAL', { limit: 50 });
   const before = v.calls.length;
   const rx = await a.reactions('C0GENERAL', { messageId: ts(12) });

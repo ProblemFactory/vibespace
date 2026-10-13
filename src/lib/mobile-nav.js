@@ -4,6 +4,7 @@ import { escHtml, onOutsidePress, showContextMenu } from './utils.js';
 import { showWindowContextMenu } from './taskbar.js';
 import { UI_ICONS, FILE_ICONS } from './icons.js';
 import { getCommand, runCommand } from './contributions.js';
+import { openDesktopPicker } from './desktop-picker.js';
 
 /** lane phone-chip (B-e5ff): a switcher row's billing pill takes the widest form that leaves the window's title
  *  readable — lane G's `chipMode` over MEASURED widths (the title and the pill share the row, as on a desktop title
@@ -90,7 +91,7 @@ export class MobileNav {
       row(UI_ICONS.globe, t('Web view'), () => app.openBrowser()),
     ];
     // gated exactly like the toolbar button (app._vncAvailable = /api/vnc/status)
-    if (app._vncAvailable) items.push(row(UI_ICONS.monitor, t('Desktop'), () => app.openDesktop()));
+    if (app._vncAvailable) items.push(row(UI_ICONS.monitor, t('Desktop'), () => openDesktopPicker(app))); // lane desktop-v2-entry: recent / local / remote
     // THE THREE BROWSER FACES on the phone (design-browser-faces direction B, D5):
     // the web view above, then the desktop-app launcher (gated like its ⚙ row on
     // the /api/desktop/apps probe; the ONE command, its own icon) and the AGENT

@@ -362,6 +362,41 @@ export class ChatInput {
 
     inputWrap.append(attachBtn, attachInput, this._voice.btn, uploadBtn, fileInput, dirInput, this._textarea, expandBtn, this._slashDropdown, this._voice.chip);
 
+    // THE PHONE COMPOSER (lane phone-chat-composer, owner 2026-10-13 "输入框非常窄"): on a phone the text box owns its
+    // row — ONE leading "+" door (a sheet: image / file / folder — the three inputs above) instead of three icon
+    // buttons beside it, and the microphone INSIDE the field's trailing edge (its recording capsule replaces it in
+    // place). The desk row above is never touched: the phone face re-parents the same nodes while the viewport is
+    // ≤ 768 px and puts the desk order back when it widens.
+    const plusBtn = document.createElement('button');
+    plusBtn.type = 'button';
+    plusBtn.className = 'chat-plus-btn';
+    plusBtn.title = t('Add attachment');
+    plusBtn.setAttribute('aria-label', t('Add attachment'));
+    plusBtn.innerHTML = '<svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg>';
+    plusBtn.onclick = (e) => {
+      e.preventDefault();
+      const r = plusBtn.getBoundingClientRect();
+      showContextMenu(r.left, r.top, [
+        { label: t('Image'), action: () => attachInput.click() },
+        { label: t('File'), action: () => fileInput.click() },
+        { label: t('Folder'), action: () => dirInput.click() },
+      ]);
+    };
+    const field = document.createElement('div');
+    field.className = 'chat-input-field';
+    const deskKids = [...inputWrap.childNodes];
+    // the ⤢ glyph shows inside the phone field only past two lines (the mic owns the trailing edge under it)
+    const tall = () => field.classList.toggle('chat-input-tall', this._textarea.scrollHeight > 72);
+    const phoneFace = (on) => {
+      if (on === inputWrap.classList.contains('chat-input-phone')) return;
+      if (on) { field.append(this._textarea, this._voice.btn, expandBtn); inputWrap.replaceChildren(plusBtn, attachInput, fileInput, dirInput, field, this._slashDropdown, this._voice.chip); tall(); }
+      else inputWrap.replaceChildren(...deskKids);
+      inputWrap.classList.toggle('chat-input-phone', on);
+    };
+    const phoneMq = typeof window !== 'undefined' && window.matchMedia ? window.matchMedia('(max-width: 768px)') : null;
+    if (phoneMq) { phoneFace(phoneMq.matches); phoneMq.addEventListener?.('change', (e) => phoneFace(e.matches)); }
+    this._textarea.addEventListener('input', tall);
+
     // TOUCH FACE OF THE CHORD (≤768px): a phone has no Alt key, so the same
     // verb gets a button beside Send. Visibility is split in two: JS owns the
     // CAPABILITY (`.hidden` — can this session steer right now), CSS owns the

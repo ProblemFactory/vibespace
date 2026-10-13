@@ -2,6 +2,21 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.262 — 2026-10-13
+
+### Added
+- The Desktop button now offers your recent, local and paired-machine desktops; a Mac or Windows machine with several displays can be shown one display at a time
+- A paired machine's desktop stays fluid while you move and turns sharp when you stop; fullscreen captures your shortcuts; paste reaches the machine
+- A message someone recalls is marked and folded (its content stays); an edited message keeps its edit history behind an expander
+
+### Changed
+- On a phone the message box is wide again — one + button for attachments, the microphone inside the box, and a compact status bar underneath
+- The Voice input plugin card is tidier: one switch, one Connect button, the key behind a fold
+
+### Fixed
+- The https address recovers by itself after a slow start, and Settings has a Check again button for it
+- On a phone the Agents panel's account names are readable again — the email, usage and sign-in notice move to lines below instead of wrapping one letter per line
+
 ## 2.369.261 — 2026-10-12
 
 ### Added

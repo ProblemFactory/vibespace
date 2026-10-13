@@ -719,6 +719,7 @@ const JUDGED_DOORS = {   // door → [file, a pin on its belt call]
   peerName: ['src/channel-record.js', /const s = inertFrameLine\(peerText\(/],
   agentPlaceLine: ['src/channel-thread.js', /out\.line = inertFrameLine\(`↳ \$\{verb\} \$\{q\.author \|\| 'someone'\}: "\$\{words\}"/],
   agentReactionsLine: ['src/channel-reactions.js', /return R\.inertFrameLine\('reactions: '/],
+  agentRevisionLine: ['src/channel-revisions.js', /return R\.inertFrameLine\(bits\.join\(' '\)\)/],   // lane channel-record-revisions
   // lane message-facts (B-f066): a message's facts in the agent's copy — names through peerName, addresses and lines through the
   // belt as line pieces (agentFacts, the engine's door); the CLI's one line composed of THOSE under the line rule (agentFactLines)
   agentFacts: ['src/server/channels-engine.js', /const agentFacts = \(list\) => Facts\.mapFactStrings\(list, \{ name: \(v\) => peerName\(v, 200\) \|\| '', id: \(v\) => agentText\(v, \{ kind: 'line', max: 320 \}\), line: \(v\) => agentText\(v, \{ kind: 'line', max: 200 \}\) \}\)/],
@@ -835,7 +836,7 @@ const PRINTS = {
     'j.appended': `${V}:a count`, 'j.joined': `${V}:a flag`, 'j.retryAfterSec': `${V}:a wait`, 'j.code': `${V}:a refusal code`, 'j.why': `${V}:a why code`,
     'j.error': `${V}:the channels engine's refusal sentence (its words and the caller's own values — no title or name rides one: the derived census in §5)`,
     'm.at': `${V}:an instant`, 'm.author': 'judged:peerName — the author\'s name (agentCopy), else its id (agentId)', 'm.author.id': 'judged:agentId — an author id as a line piece (agentCopy; verify r3 F6: printed when the author has no name)', 'm.author.name': 'judged:peerName with the line rule (agentCopy)',
-    'm.key': 'judged:agentId — a search hit\'s conversation key (searchFor; verify r3 F6)', 'm.reactionsText': 'judged:agentReactionsLine — our catalog\'s words and counts under the line rule', 'm.factsText': 'judged:agentFactLines — the message\'s facts (agentFacts: names by peerName, addresses and lines by the belt) as one line under the line rule', 'm.text': 'judged:agentCopy / searchFor — the belt as a block', 'm.title': 'judged:agentTitle (searchFor\'s visible map)', 'm.vendorId': 'judged:agentId — the message id the agent hands back, a no-op on a real id (agentCopy / searchFor; verify r3 F6)',
+    'm.key': 'judged:agentId — a search hit\'s conversation key (searchFor; verify r3 F6)', 'm.reactionsText': 'judged:agentReactionsLine — our catalog\'s words and counts under the line rule', 'm.revisionText': 'judged:agentRevisionLine — our words and the recall instant under the line rule (lane channel-record-revisions)', 'm.versions': `${V}:the version rows (v.* — rows)`, 'i': `${V}:a loop index (the version's number)`, 'v.original': `${V}:a flag`, 'v.at': `${V}:an instant`, 'v.text': 'judged:agentCopy — a version\'s text, the belt as a block (revisionView, agent copy)', 'm.factsText': 'judged:agentFactLines — the message\'s facts (agentFacts: names by peerName, addresses and lines by the belt) as one line under the line rule', 'm.text': 'judged:agentCopy / searchFor — the belt as a block', 'm.title': 'judged:agentTitle (searchFor\'s visible map)', 'm.vendorId': 'judged:agentId — the message id the agent hands back, a no-op on a real id (agentCopy / searchFor; verify r3 F6)',
     'p.adapterId': `${V}:an adapter id`, 'p.at': `${V}:an instant`, 'p.updatedAt': `${V}:an instant`, 'p.ttlAt': `${V}:an instant`,
     'p.compose': `${O}:the agent's own compose`, 'p.compose.cc': `${O}:its own cc`, 'p.compose.to': `${O}:its own recipients`, 'p.compose.subject': `${O}:its own subject`,
     'p.convId': 'judged:agentId — the proposal\'s target conversation id (agentIdsOf; verify r3 F6)', 'p.id': `${V}:a proposal id we mint`, 'p.identity.marking': `${V}:an enum`, 'p.identity.text': `${V}:the identity-marking sentence`,
@@ -2178,6 +2179,7 @@ console.log('§6 the shared-store census (words another principal wrote into a s
     'DOC_EDIT_FROM': 'a constant of ours (src/server/artifact-registry.js — the note that the user saved a file the conversation owns: the Doc window or the code editor)',
     'DOC_COMMENT_FROM': 'a constant of ours (src/server/doc-engine.js — the user\'s Doc window comments waiting in the stash)',
     'RX_DIGEST_FROM': 'a constant of ours (channels)',
+    'REV_NOTE_FROM': 'a constant of ours (channels — lane channel-record-revisions\' recall note)',
     "'VibeSpace'": 'ours (auto-resume / the pool engine)', "'You · via Channels'": 'ours', "'Channels · Outbox'": 'ours', "'Channels · API'": 'ours (B-2198 part 2: the raw-API receipt)',
     "'Background Work · ' + (job.name || job.id)": 'a job name is a slug (resolveName)',
     "'Background Work · ' + (e.jobName || e.jobId)": 'a client card of a slug',

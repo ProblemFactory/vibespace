@@ -12,7 +12,10 @@
 //   ⑤ the context switch ⇒ the first dictation opens the PREVIEW; 发送 ⇒ ONE POST /v1/context with the previewed text
 //   ⑥ the per-project tier ⇒ a later identifier goes without a card and lands in the journal
 //   ⑦ phone 390
-// PNGs: VIBESPACE_VOICE_PNG_DIR (default: the scratch dir) → connect, proposal, preview, journal, phone .png
+//   ⑧ the card's grammar (lane voice-card-polish): the header's title + status chip + the card's own switch, the 账号 /
+//     语言 grid, the key behind 或粘贴 key ▸, Test only after Save, every control 32 px; phone 390 stacks
+// PNGs: VIBESPACE_VOICE_PNG_DIR (default: the scratch dir) → connect, proposal, preview, journal, phone, card-fold,
+//   card-key, card-phone .png
 import fs from 'node:fs';
 import http from 'node:http';
 import https from 'node:https';
@@ -120,9 +123,13 @@ window.__render = async () => {
   const card = document.getElementById('card');
   const st = await (await fetch('/api/voice/status')).json();
   card.innerHTML = '';
-  const actions = document.createElement('div'), cfgBox = document.createElement('div');
-  card.append(actions, cfgBox);
-  renderDictationCard({ p: { configured: st.connected, enabled: st.enabled, language: st.language }, actions, cfgBox, api: async () => ({}), rerender: () => window.__render() });
+  const head = document.createElement('div'), actions = document.createElement('div'), cfgBox = document.createElement('div');
+  head.className = 'plugin-head'; // the Plugins panel's own header (plugins-ui.js): the card puts its chip + switch here
+  head.innerHTML = '<div class="plugin-name"><span class="plugin-dot"></span>Voice input · Dropline</div><div class="plugin-state"></div>';
+  actions.className = 'plugin-actions';
+  card.append(head, actions, cfgBox);
+  const api = async (tail, o) => { (window.__api = window.__api || []).push([tail, o && o.body]); return {}; };
+  renderDictationCard({ p: { configured: st.connected, enabled: st.enabled, language: st.language }, head, actions, cfgBox, api, rerender: () => window.__render() });
   return true;
 };
 window.__mount = () => {
@@ -136,6 +143,12 @@ const app = express();
 app.use(express.json({ limit: '1mb' }));
 app.use(require(path.join(REPO, 'src/routes/voice.js')).create({ client, prefs: () => rec, oauth, teach, log: quiet }));
 const chan = require(path.join(REPO, 'src/routes/channels.js')); chan.setup({}); app.use(chan.router);
+// the key tier's two doors (the integrations routes in the product): Save writes the store row, Test = ONE GET /v1/me
+app.put('/api/integrations/dropline', (q, s) => { store.setIntegration('dropline', q.body.values); fake.access.add(q.body.values.apiKey); s.json({ ok: true }); }); // the fake knows the key
+app.post('/api/integrations/dropline/test', async (q, s) => {
+  const me = await fetch(`${FAKE}/v1/me`, { headers: { Authorization: `Bearer ${row.apiKey}` } }).then((r) => r.json()).catch(() => null);
+  s.json(me && me.user ? { ok: true, detail: `${me.user.name} · ${me.team.name}` } : { ok: false, error: 'no answer' });
+});
 const CSS = ['style', 'chat', 'fonts'].filter((n) => fs.existsSync(path.join(REPO, `public/${n}.css`)));
 for (const n of CSS) app.get(`/${n}.css`, (q, s) => s.type('text/css').send(fs.readFileSync(path.join(REPO, `public/${n}.css`))));
 app.get('/page.js', (q, s) => s.type('text/javascript').send(fs.readFileSync(path.join(root, 'page.js'))));
@@ -311,6 +324,43 @@ try {
   ok('phone 390: the proposal buttons are ≥ 36 px tall and nothing overflows sideways', geo.h >= 36 && geo.right <= geo.cw + 1 && !geo.overflow, geo);
   await ph.shot('phone.png');
   ph.close();
+
+  console.log('⑧ the card\'s grammar: header chip + switch, 账号 / 语言 grid, the key folded, Test only after Save');
+  tokens.clear();
+  const k = await page(1100, 860);
+  await k.until('!!document.querySelector(".voice-connect") && !!document.querySelector(".voice-key-fold")');
+  const shape = await k.ev(`(() => { const q = (s) => document.querySelector(s); const head = q('#card .plugin-head');
+    return { title: head.querySelector('.plugin-name').textContent.trim(), chip: (head.querySelector('.voice-state') || {}).textContent, sw: !!head.querySelector('input.voice-toggle[role=switch]'), floating: !!q('.plugin-actions input'),
+      labels: [...document.querySelectorAll('.voice-row:not([hidden]) .voice-row-label')].map((x) => x.textContent), primary: q('.voice-connect').classList.contains('mounts-btn-primary'),
+      keyHidden: q('.voice-key-cell').hidden, lang: !!q('.voice-lang select.voice-lang-select'), labelled: [...document.querySelectorAll('.voice-cfg label[for]')].every((l) => !!document.getElementById(l.htmlFor)) }; })()`);
+  ok('header = 语音输入 · Dropline + the 未连接 chip + the card\'s own switch (no floating checkbox); rows 账号 / 语言; Connect is THE primary; the key folded', shape.title === '语音输入 · Dropline' && shape.chip === '未连接' && shape.sw && !shape.floating && shape.labels.join('|') === '账号|语言' && shape.primary && shape.keyHidden && shape.lang && shape.labelled, shape);
+  await k.clickSel('.voice-key-fold');
+  const opened = await k.ev(`(() => { const q = (s) => document.querySelector(s); return { shown: !q('.voice-key-cell').hidden, label: q('.voice-key-cell .voice-row-label').textContent, forKey: q('.voice-key-cell label').htmlFor === q('.voice-key').id, testOff: q('.voice-key-test').disabled, swOff: q('.voice-toggle').disabled, exp: q('.voice-key-fold').getAttribute('aria-expanded') }; })()`);
+  ok('或粘贴 key ▸ unfolds the labelled Dropline 密钥 row; before a save Test is disabled and so is the switch', opened.shown && opened.label === 'Dropline 密钥' && opened.forKey && opened.testOff && opened.swOff && opened.exp === 'true', opened);
+  const hs = await k.ev('[...document.querySelectorAll(".voice-cfg .mounts-btn, .voice-cfg .plugin-cfg-input")].filter((b) => b.offsetParent).map((b) => Math.round(b.getBoundingClientRect().height))');
+  ok('desk: every button and field on the card is 32 px tall', hs.length >= 5 && hs.every((h) => h === 32), hs);
+  await k.shot('card-fold.png');
+  await k.ev('document.querySelector(".voice-key").value = "dl_chrome_card_key_0001"');
+  await k.clickSel('.voice-key-save');
+  const saved = await k.until('!!document.querySelector(".voice-key-test") && !document.querySelector(".voice-key-test").disabled && (document.querySelector(".voice-state") || {}).textContent === "key 已保存"', 8000);
+  ok('Save ⇒ the key reached the store; after the rerender Test is enabled, the chip says key 已保存 and the key row stays open', saved && row.apiKey === 'dl_chrome_card_key_0001' && await k.ev('!document.querySelector(".voice-key-cell").hidden'), { row: Object.keys(row), chip: await k.ev('(document.querySelector(".voice-state") || {}).textContent') });
+  await k.clickSel('.voice-key-test');
+  ok('Test ⇒ 已连接：Ana · Fish Lab under the key row', await k.until('(document.querySelector(".voice-verdict.voice-ok") || {}).textContent === "已连接：Ana · Fish Lab"', 8000), await k.ev('document.querySelector(".voice-verdict").textContent'));
+  await k.until('!document.querySelector(".voice-toggle").disabled');
+  const was = await k.ev('document.querySelector(".voice-toggle").checked');
+  await k.ev('window.__api = []');
+  await k.clickSel('.plugin-head .voice-toggle');
+  await k.until('(window.__api || []).length > 0');
+  ok('the header switch toggles the plugin (POST …/enabled with the flipped value)', JSON.stringify(await k.ev('window.__api')) === JSON.stringify([['enabled', JSON.stringify({ enabled: !was })]]), await k.ev('window.__api'));
+  await k.shot('card-key.png');
+  k.close();
+  const kp = await page(390, 844);
+  await kp.until('!!document.querySelector(".voice-key-cell") && !document.querySelector(".voice-key-cell").hidden');
+  const pg = await kp.ev(`(() => { const r = (s) => document.querySelector(s).getBoundingClientRect(); const l = r('.voice-key-cell .voice-row-label'), line = r('.voice-key-line'), key = r('.voice-key'), sv = r('.voice-key-save'), te = r('.voice-key-test'), ctl = r('.voice-key-cell .voice-row-ctl');
+    return { stacked: l.bottom <= line.top + 1, keyFull: Math.abs(key.width - ctl.width) < 2, btnsFull: Math.abs(te.right - ctl.right) < 2 && Math.abs(sv.left - ctl.left) < 2, h: [sv.height, te.height], overflow: document.documentElement.scrollWidth > innerWidth }; })()`);
+  ok('phone 390: the label sits above its control, the key field and Save + Test span the card, 36 px, nothing overflows', pg.stacked && pg.keyFull && pg.btnsFull && pg.h.every((h) => h === 36) && !pg.overflow, pg);
+  await kp.shot('card-phone.png');
+  kp.close();
 } catch (e) { fail++; console.log('  ✗ threw: ' + (e && e.stack || e)); }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 end(fail ? 1 : 0);

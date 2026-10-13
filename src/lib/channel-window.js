@@ -491,8 +491,64 @@ function authorTitle(a) {
  *  on hover in the avatar's gutter). `base` = the conversation's route prefix
  *  (its attachments load through it). `folds` = the window's memory of which
  *  quotes the person opened. */
+/** lane channel-record-revisions (owner 2026-10-13): a RECALLED message folds to ONE line — "{name} recalled a message ·
+ *  {time}" with ▸ Show — and the KEPT content (dimmed, under "Recalled {time}") opens in place: the row keeps its spot
+ *  in the conversation; nothing a peer does erases our copy. */
+function renderRecalled(rec, opts) {
+  const row = el('div', 'chanmsg chanmsg-recalled');
+  row.dataset.at = String(rec.at || 0);
+  row.dataset.author = authorKey(rec);
+  row.dataset.vid = rec.vendorId || '';
+  const au = rec.author || {};
+  const line = el('div', 'chanmsg-recall-line');
+  line.appendChild(icon('eraser', 12, 'chanmsg-recall-ic'));
+  const words = el('span', 'chanmsg-recall-words', t('{name} recalled a message · {time}', { name: au.display || au.name || au.id || t('(no sender)'), time: stamp(rec.recalledAt) }));
+  words.title = fullStamp(rec.recalledAt);
+  line.appendChild(words);
+  const tog = el('button', 'chanmsg-recall-tog');
+  tog.type = 'button';
+  const kept = renderRecord({ ...rec, recalledAt: null }, { ...opts, cont: true });
+  kept.className = 'chanmsg-kept';
+  for (const k of ['vid', 'at', 'author']) delete kept.dataset[k];
+  kept.prepend(el('div', 'chanmsg-kept-note', t('Recalled {time} — VibeSpace keeps the content', { time: fullStamp(rec.recalledAt) })));
+  const set = (open) => {
+    kept.hidden = !open;
+    tog.textContent = '';
+    tog.append(icon(open ? 'chevronDown' : 'chevronRight', 10), document.createTextNode(open ? t('Collapse') : t('Expand')));
+    tog.setAttribute('aria-expanded', String(open));
+  };
+  set(false);
+  tog.addEventListener('click', (ev) => { ev.stopPropagation(); set(kept.hidden); });
+  line.appendChild(tog);
+  row.append(line, kept);
+  return row;
+}
+/** An EDITED message: the newest body is the row's; "Edited · {time} ▸ See {n} versions" lists every version with its
+ *  time (oldest first, the original first — plain text, no diff). */
+function versionsLine(vs) {
+  const box = el('div', 'chanmsg-versions');
+  const tog = el('button', 'chanmsg-versions-tog');
+  tog.type = 'button';
+  const list = el('ol', 'chanmsg-versions-list');
+  vs.forEach((v, i) => {
+    const li = el('li', 'chanmsg-version' + (i === vs.length - 1 ? ' chanmsg-version-cur' : ''));
+    li.append(el('div', 'chanmsg-version-at', `${v.original ? t('Original') : t('Version {n}', { n: i + 1 })} · ${fullStamp(v.at)}`), el('div', 'chanmsg-version-text', v.text || ''));
+    list.appendChild(li);
+  });
+  const set = (open) => {
+    list.hidden = !open;
+    tog.textContent = '';
+    tog.append(icon('pencil', 10), document.createTextNode(`${t('Edited · {time}', { time: stamp(vs[vs.length - 1].at) })} `), icon(open ? 'chevronDown' : 'chevronRight', 10), document.createTextNode(open ? t('Hide versions') : t('See {n} versions', { n: vs.length })));
+    tog.setAttribute('aria-expanded', String(open));
+  };
+  set(false);
+  tog.addEventListener('click', (ev) => { ev.stopPropagation(); set(list.hidden); });
+  box.append(tog, list);
+  return box;
+}
 function renderRecord(rec, { cont = false, base = null, folds = null, mail = null, ctx = null, unsaved = false } = {}) {
   const sys = isSysRow(rec);
+  if (rec.recalledAt && !sys) return renderRecalled(rec, { cont, base, folds, mail, ctx, unsaved });
   const self = !!(rec.author && rec.author.isSelf);
   const row = el('div', 'chanmsg' + (sys ? ' chanmsg-sysrow' : cont ? ' chanmsg-cont' : '') + (rec.author && rec.author.isBot ? ' chanmsg-agent' : '') + (self && !sys ? ' chanmsg-self' : ''));
   row.dataset.at = String(rec.at || 0);
@@ -585,6 +641,7 @@ function renderRecord(rec, { cont = false, base = null, folds = null, mail = nul
     },
   });
   row.appendChild(body);
+  if (Array.isArray(rec.versions) && rec.versions.length > 1) row.appendChild(versionsLine(rec.versions));   // lane channel-record-revisions
   // D2 (lane channel-rich): a mail's formatted body — the sandboxed frame's slot (the text body stays for Plain text)
   // — ABOVE the text body (naive-user verify 2026-09-28: appended after it, the Formatted | Plain text bar sat
   // above the frame but UNDER the text once Plain text was pressed — the control jumped away from the pointer)
@@ -1321,6 +1378,14 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
     if (!r || r.error) return;
     for (const [vid, l] of Object.entries(r.reactions || {})) applyReactions(vid, l);
   }
+  function applyRevised(map) {
+    for (const [vid, r] of Object.entries(map || {})) {
+      const row = list.querySelector(`.chanmsg[data-vid="${CSS.escape(vid)}"]`);
+      if (!row || !r) continue;
+      const fresh = renderRecord(r, { cont: row.classList.contains('chanmsg-cont'), base, folds, mail, ctx: rowCtx });
+      row.replaceWith(fresh);
+    }
+  }
   /** A `threads` broadcast: each root's chip re-spelled in place (a chip born where there was none), the pane's count. */
   function applyThreads(map) {
     for (const [tk, st] of Object.entries(map || {})) {
@@ -1688,6 +1753,9 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
     if (msg.patches && msg.patches[key]) { for (const [vid, p] of Object.entries(msg.patches[key])) applyReactions(vid, (p && p.reactions) || []); sideOnly = true; }
     if (Array.isArray(msg.rereadReactions) && msg.rereadReactions.includes(key)) { rereadReactions().catch(() => {}); sideOnly = true; }
     if (msg.threads && msg.threads[key]) { applyThreads(msg.threads[key]); sideOnly = true; }
+    // lane channel-record-revisions: a recheck learned a recall / an edit — the drawn row is redrawn IN PLACE from the
+    // server's read shape (the same row at the same spot: a recall folds, an edit shows its newest body + its versions)
+    if (msg.revised && msg.revised[key]) { applyRevised(msg.revised[key]); sideOnly = true; }
     if (sideOnly) return;
     if (pane && pane.isOpen() && (!msg.partial || (Array.isArray(msg.changedKeys) && msg.changedKeys.includes(key)))) pane.onConversation();
     if (msg.partial) { if (!Array.isArray(msg.changedKeys) || !msg.changedKeys.includes(key)) return; }

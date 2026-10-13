@@ -11,9 +11,12 @@
 //   ④ a stubbed `tailscale` (VIBESPACE_TAILSCALE_BIN — a throwaway root never runs the real one): status JSON with
 //     DNSName + CertDomains, `cert` writes the fixture files ⇒ the server acquires at boot and logs the https line;
 //     the next boot's banner says "running at http://localhost:<port> and https://<domain>:<port>"
+//   ⑥ lane tls-pass-retry: the stub's status answers half a JSON at boot ⇒ the raw log line + status-unreadable (never
+//     "not running"); the row shows "Last check: …" + Check again; the press after the stub flips to Running ⇒ the row turns
+//     to the secure address in the SAME process (no restart) — row-before.png / row.png
 //   ⑤ the stub answering "not enabled" (CertDomains null) ⇒ the For-you item ONCE across two boots; then "cert access
 //     denied" ⇒ ONE operator-needed item naming `sudo tailscale set --operator=`
-// PNGs (when `--shots <dir>`): settings.png (desk), settings-phone.png (390).
+// PNGs (when `--shots <dir>`): settings.png (desk), settings-phone.png (390), row-before.png + row.png (⑥).
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -63,6 +66,7 @@ const fs = require('fs');
 const a = process.argv.slice(2);
 const mode = fs.readFileSync(${JSON.stringify(path.join(fx, 'mode'))}, 'utf8').trim();
 fs.appendFileSync(${JSON.stringify(path.join(fx, 'calls'))}, a.join(' ') + '\\n');
+if (a[0] === 'status' && mode === 'half') { process.stdout.write('{"BackendState":"Run'); process.exit(0); }
 if (a[0] === 'status') { process.stdout.write(JSON.stringify({ BackendState: 'Running', Self: { DNSName: ${JSON.stringify(DOMAIN + '.')} }, MagicDNSSuffix: 'tail0000.ts.net', CertDomains: mode === 'not-enabled' ? null : [${JSON.stringify(DOMAIN)}] })); process.exit(0); }
 if (a[0] === 'cert') {
   if (mode === 'denied') { process.stderr.write("Access denied: cert access denied.\\nUse 'sudo tailscale cert ${DOMAIN}'.\\n"); process.exit(1); }
@@ -215,6 +219,25 @@ try {
   await sleep(500);
   const it2 = await items();
   check('"cert access denied" ⇒ ONE operator-needed item (sudo tailscale set --operator=…), the old one resolved', it2.filter((t) => /sudo tailscale set --operator=/.test(t.text)).length === 1 && it2.filter((t) => t.status === 'open').length === 1, it2.map((t) => [t.status, t.text.slice(0, 60)]));
+
+  console.log('⑥ lane tls-pass-retry: an unreadable boot answer, then Check again');
+  setMode('half');
+  await boot('half', { VIBESPACE_TAILSCALE_BIN: STUB }, path.join(fx, 'data-half'));
+  check('the boot pass logs the raw answer and says status-unreadable (never "not running")', await waitLog(/\[tls\] https off — status-unreadable/) && /\[tls\] tailscale status: exit 0 but no readable JSON \(\d+ ms, 20 bytes out\)/.test(log()) && !/no-tailscale/.test(log()), log().split('\n').filter((l) => /\[tls\]/.test(l)));
+  const HTTP6 = `http://${IP}:${PORT}`;
+  await go(HTTP6 + '/login'); if (/\/login/.test(await evalJs('location.pathname'))) await signIn();
+  await go(HTTP6 + '/'); await waitFor(APP_UP, 30000);
+  await evalJs(`app._settingsUI.open({ search: 'server.https' })`);
+  const ROW6 = `(() => { const f = document.querySelector('.settings-https-fact'); if (!f) return null; const p = f.querySelector('.settings-https-probe'); return { text: f.querySelector('.settings-https-text').textContent, probe: p && !p.hidden ? p.textContent : null, again: !!f.querySelector('.settings-https-recheck'), copy: !!f.querySelector('.settings-https-copy'), live: f.classList.contains('is-live') }; })()`;
+  const r6 = (await waitFor(`!!((${ROW6}) || {}).probe`, 15000)) && await evalJs(ROW6);
+  check('the row: the unreadable words + "Last check: …" in small text + Check again, no Copy', !!r6 && r6.text.startsWith('No secure address yet: Tailscale gave no readable status answer') && r6.probe === 'Last check: tailscale status answered 20 bytes that are not a status' && r6.again && !r6.copy && !r6.live, r6);
+  await shot('row-before.png');
+  setMode('ok');
+  await evalJs(`document.querySelector('.settings-https-recheck').click()`);
+  const r7 = (await waitFor(`!!((${ROW6}) || {}).live`, 30000)) && await evalJs(ROW6);
+  check('Check again after the stub flips to Running ⇒ the secure address + Copy, the raw reason gone', !!r7 && r7.text === `Secure address: https://${DOMAIN}:${PORT} — microphone, a Mac's sign-in and other secure-only features need it` && r7.copy && r7.probe === null, r7);
+  check('… in the SAME server process (one "running at" line in this boot\'s log)', log().split('\n').filter((l) => /running at/.test(l)).length === 1 && (await api('/api/tls')).serving === true, log().split('\n').filter((l) => /running at|\[tls\]/.test(l)));
+  await shot('row.png');
 } catch (e) { check('the suite ran without throwing', false, e && e.stack); }
 console.log(failed ? `\n${failed} FAILED (${passed} passed)` : `\nALL PASS (${passed})`);
 process.exit(failed ? 1 : 0);

@@ -57,6 +57,7 @@ const caps = {
   // 2026-09-28 (reply PLACEMENTS): the ladder delivers a message; it cannot answer a specific one — `chat` only
   threads: Object.freeze({ read: 'none', replyInto: false, listing: 'none', placements: Object.freeze(['chat']) }),
   reactions: Object.freeze({ read: 'none', add: false, remove: 'none', vocabulary: 'names', custom: 'none', perMessageMax: null }),
+  revisions: Object.freeze({ recall: false, edit: false, how: 'none' }),   // lane channel-record-revisions: nothing is ever rechecked
 };
 
 function create(record = {}, deps = {}) {

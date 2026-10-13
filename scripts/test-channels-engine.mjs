@@ -4234,7 +4234,7 @@ async function stashRevokeRun(EM, DM, tag, { revoke = true } = {}) {
   ok(noGate.read === 'not-found' && noGate.leaks(noGate.injected) && /launch code is 0417/.test(noGate.injected), 'CONTROL: a ladder that never asks the gate hands the revoked agent the message text, the title and the vendor id (the reproduction) — the asserts above would be red', JSON.stringify(noGate.injected).slice(0, 300));
   const esrc = engineSource(REPO);
   const aboutSites = esrc.match(/, about: stashAbout\(/g) || [];
-  ok(aboutSites.length === 5, `CONTROL setup: the five channel producers file \`about\` (${aboutSites.length}) — lane channel-agent-watch added the next-turn notification`);
+  ok(aboutSites.length === 6, `CONTROL setup: the six channel producers file \`about\` (${aboutSites.length}) — lane channel-agent-watch added the next-turn notification, lane channel-record-revisions the recall / edit note`);
   const noAbout = await stashRevokeRun(MUTE.load('src/server/channels-engine.js', esrc.replace(/, about: stashAbout\(\{[^)]*\}\)/g, ''), 'no-about'), DLV, 'noabout');
   ok(noAbout.leaks(noAbout.injected), 'CONTROL: producers that file no `about` leave the gate nothing to judge — the revoked agent reads it all', JSON.stringify(noAbout.injected).slice(0, 300));
   // THE CENSUS: every stashFor producer in the engine files `about`

@@ -1269,6 +1269,8 @@ console.log('— §6c every kill door is declared: an actor marked before the ki
     'src/machine-window.js': [1, "device: the window look's child (window-track's PowerShell / osascript follow loop, run by the daemon) — ended when the watch stops or its first look never answers (machine-app-crop)"],
     // the 2.369.256 integration — lane app-display-portal's own session bus for a sandboxed app (startPortalBus)
     'src/desktop-display.js': [1, "not a conversation: desktop apps — a sandboxed app's own portal bus (dbus-daemon) that never listened within its deadline, SIGKILLed through our own spawn handle (app-display-portal)"],
+    // the 2.369.262 integration — lane tls-pass-retry's runChild: execFile WITHOUT its timeout + our own bound
+    'src/server/tls.js': [1, "not a conversation: a tailscale status / cert child past its own bound, killed by runChild's timer so the answer it already wrote is kept (tls-pass-retry)"],
   };
   // the actor pins: the mark is set BEFORE the kill it names (the teardown reads it; the kill case deletes the session late)
   const ACTOR_PINS = [

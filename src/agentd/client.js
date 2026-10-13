@@ -329,7 +329,7 @@ class DeviceManager {
             mux.onWritable = (chan) => { sessions.get(chan)?.onWritable?.(); };
             const prevControl = mux.onControl;
             mux.onControl = (m) => {
-              if (m.op === 'fs-result' || m.op === 'discovery-result' || m.op === 'discovery-watching' || m.op === 'usage-events-watching' || m.op === 'session-events-watching' || m.op === 'cmd-result' || m.op === 'probe-result' || m.op === 'secret-result' || m.op === 'quota-result' || m.op === 'sysinfo-result' || m.op === 'desktop-apps-list-result' || m.op === 'design-fs-result' || m.op === 'dial-status-result' || m.op === 'proc-list-result' || m.op === 'opencode-serve-result' || m.op === 'browser-serve-result' || m.op === 'desktop-serve-result' || m.op === 'window-track-result' || m.op === 'window-untrack-result' || m.op === 'window-pin-result' || m.op === 'peer-post-result' || m.op === 'pool-orders-ok' || m.op === 'tcp-open' || m.op === 'listen-open' || m.op === 'serve-folder-result' || m.op === 'serve-socks-result') {
+              if (m.op === 'fs-result' || m.op === 'discovery-result' || m.op === 'discovery-watching' || m.op === 'usage-events-watching' || m.op === 'session-events-watching' || m.op === 'cmd-result' || m.op === 'probe-result' || m.op === 'secret-result' || m.op === 'quota-result' || m.op === 'sysinfo-result' || m.op === 'desktop-apps-list-result' || m.op === 'design-fs-result' || m.op === 'dial-status-result' || m.op === 'proc-list-result' || m.op === 'opencode-serve-result' || m.op === 'browser-serve-result' || m.op === 'desktop-serve-result' || m.op === 'window-track-result' || m.op === 'window-untrack-result' || m.op === 'window-pin-result' || m.op === 'display-facts-result' || m.op === 'peer-post-result' || m.op === 'pool-orders-ok' || m.op === 'tcp-open' || m.op === 'listen-open' || m.op === 'serve-folder-result' || m.op === 'serve-socks-result') {
                 const r = pending.get(m.id); if (r) { pending.delete(m.id); r(m); }
                 if (m.op === 'tcp-open' && !m.error) return; // channel stays live
                 return;
@@ -948,6 +948,15 @@ class DeviceManager {
     if (!conn.info?.capabilities?.includes?.('window-track')) return { stopped: false };
     const r = await this._request({ op: 'window-untrack', wid, timeoutMs: 15000 });
     return { stopped: !!(r && r.stopped), wasPinned: !!(w && w.pinned) };
+  }
+  /** lane desktop-v2-entry: the machine's own screen table (the display picker). Capability-gated (an old agent never hears
+   *  an op it would not answer). → { ok, platform, displays } | { ok:false, code, error } */
+  async displayFacts({ timeoutMs = 15000 } = {}) {
+    const conn = await this.connect();
+    if (!conn.info?.capabilities?.includes?.('display-facts')) { const e = new Error('daemon lacks display-facts (capabilities gate) -- upgrade the agent on this machine'); e.code = 'host_needs_daemon'; throw e; }
+    const r = await this._request({ op: 'display-facts', timeoutMs });
+    if (r.error) throw new Error(r.error);
+    return r.result || { ok: false, code: 'displays_failed', error: 'no answer' };
   }
   /** lane machine-app-crop: keep a followed window on top (`on`) or not — Windows' topmost; a Mac activates the app instead.
    *  Capability-gated like windowTrack. → { ok, pinned, state?, note? } */

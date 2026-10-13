@@ -3,6 +3,8 @@
 // port (files / tailscale / off), when it fetches a new one, and the owner's words for each `off`. The table: the
 // trailing-dot strip, the CLI's exact "not enabled" and "cert access denied" answers, the renew window at 13 / 15 days,
 // files over Tailscale, the setting's off, every word in zh + ja. CONTROL: a copy without the trailing-dot strip is RED.
+// lane tls-pass-retry (2026-10-13): status-unreadable, the pass cadence (boot miss → 60 s → 300 s → 3600 s; a miss after a
+// served pass → 3600 s) and the raw probe line; CONTROL: a cadence that ignores "served since boot" is RED.
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
@@ -80,6 +82,44 @@ console.log('§5 the words in zh + ja');
   const zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8');
   ok(zh.includes('"Tailscale 的 HTTPS 证书功能没开：在 Tailscale 管理台 → DNS → HTTPS Certificates 打开后，VibeSpace 会在一小时内自动取证书"'), 'the owner\'s zh admin-step sentence, verbatim');
   ok(zh.includes('sudo tailscale set --operator={user}（{user} = 运行 VibeSpace 的用户）'), 'the owner\'s zh operator sentence');
+}
+console.log('§7 lane tls-pass-retry — status-unreadable, the cadence, the probe line');
+{
+  const u = plan({ tailscale: { unreadable: true } });
+  ok(u.mode === 'off' && u.why === 'status-unreadable' && !/not running/i.test(u.words) && u.notice === false, `an unreadable status answer is its own reason, never "not running": ${u.why}`);
+  ok(plan({ tailscale: { error: 'Failed to connect to local Tailscale daemon; it doesn\'t appear to be running' } }).why === 'no-tailscale', 'the CLI\'s own "not running" words still say no-tailscale');
+  const off = (why) => ({ mode: 'off', why }), on = { mode: 'tailscale', why: 'tailscale', serving: true };
+  const rows = [
+    ['boot miss #1', { plan: off('status-unreadable'), misses: 1 }, 60000],
+    ['boot miss #2', { plan: off('no-tailscale'), misses: 2 }, 300000],
+    ['boot miss #3', { plan: off('no-tailscale'), misses: 3 }, 3600000],
+    ['boot miss #9', { plan: off('https-not-enabled'), misses: 9 }, 3600000],
+    ['a served pass, then a miss', { plan: off('status-unreadable'), misses: 1, liveOnce: true }, 3600000],
+    ['serving', { plan: on, misses: 0, liveOnce: true }, 3600000],
+    ['fetching (not a miss)', { plan: { mode: 'tailscale', why: 'fetching' }, misses: 0 }, 3600000],
+    ['the setting\'s off', { plan: off('disabled'), misses: 1 }, 3600000],
+    ['files missing', { plan: off('files-missing'), misses: 1 }, 3600000],
+  ];
+  for (const [name, args, want] of rows) { const got = TP.nextPassMs(args); ok(got === want, `cadence · ${name} → ${got / 1000} s (want ${want / 1000} s)`); }
+  const t = TP.probeLine('status', { code: 'TIMEOUT', out: '{"Backend', err: 'Command failed: tailscale status --json\nmore', ms: 10004 }, 10000);
+  ok(t.line === 'tailscale status: timed out after 10000 ms (10004 ms, 9 bytes out) — Command failed: tailscale status --json' && t.bytes === 9 && t.code === 'TIMEOUT', `the probe line: ${t.line}`);
+  ok(TP.probeLine('status', { code: 0, out: '', err: '', ms: 801 }).line === 'tailscale status: exit 0 but no readable JSON (801 ms, 0 bytes out)', 'an empty "ok" answer says so');
+  const zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
+  for (const k of [TP.WORDS.statusUnreadable, 'Check again', 'Last check: {what}', 'tailscale {cmd} timed out after {s} s', 'tailscale {cmd} answered {bytes} bytes that are not a status', 'tailscale {cmd} failed ({code}): {err}'])
+    ok(zh.includes(JSON.stringify(k) + ':') && ja.includes(JSON.stringify(k) + ':'), `zh + ja: ${k.slice(0, 50)}`);
+}
+console.log('§7b CONTROL — a cadence that forgets "served since boot"');
+{
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-tlsplan-'));
+  try {
+    const src = fs.readFileSync(path.join(REPO, 'src/tls-plan.js'), 'utf8');
+    const from = 'if (!isMiss(plan) || liveOnce) return PASS_MS;';
+    ok(src.includes(from), 'the control\'s anchor is in the module');
+    fs.writeFileSync(path.join(dir, 'tls-plan.js'), src.replace(from, 'if (!isMiss(plan)) return PASS_MS;'));
+    const M = require(path.join(dir, 'tls-plan.js'));
+    const got = M.nextPassMs({ plan: { mode: 'off', why: 'no-tailscale' }, misses: 1, liveOnce: true });
+    ok(got !== 3600000, `CONTROL: a served-then-miss pass retries at ${got / 1000} s instead of the hourly cadence — RED`);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
 console.log('§6 CONTROL');
 {

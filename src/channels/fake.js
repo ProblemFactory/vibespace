@@ -416,7 +416,15 @@ function readFakeTopics(file) {
   if (!file) return {};
   try { const j = JSON.parse(fs.readFileSync(file, 'utf8')); return j && j.topics && typeof j.topics === 'object' ? j.topics : {}; } catch { return {}; }
 }
-function makeFakeAdapter({ kind, receive, sendAs = ['user'], now = () => Date.now(), feed = false, topicsFile = null, search = false }) {
+/** lane channel-record-revisions: the NAMED seam `VIBESPACE_CHANNELS_FAKE_REVISIONS=<file>` (read at module load for the
+ *  declaration, its CONTENTS at every call) turns fake-poll into a vendor that answers a stored message BY ID:
+ *  `{revisions: {[vendorId]: {state: 'recalled'} | {state: 'edited', editedAt, text}}}` — a message not named is the same.
+ *  A suite writes the file mid-run to recall / edit a stored message (the chrome legs of the recheck). */
+function readFakeRevisions(file) {
+  if (!file) return {};
+  try { const j = JSON.parse(fs.readFileSync(file, 'utf8')); return j && j.revisions && typeof j.revisions === 'object' ? j.revisions : {}; } catch { return {}; }
+}
+function makeFakeAdapter({ kind, receive, sendAs = ['user'], now = () => Date.now(), feed = false, topicsFile = null, search = false, revisionsFile = null }) {
   const caps = {
     receive,
     pushTransport: receive === 'push' ? 'ws-long-conn' : null,
@@ -450,6 +458,7 @@ function makeFakeAdapter({ kind, receive, sendAs = ['user'], now = () => Date.no
     compose: receive === 'poll' && sendAs.length > 0,
     ...fakeR5Caps(receive),
     ...(feed ? { changeFeed: FAKE_FEED } : {}),
+    ...(revisionsFile && receive === 'poll' ? { revisions: Object.freeze({ recall: true, edit: true, how: 'byid' }) } : {}),
     ...(search ? { search: FAKE_SEARCH } : {}),
     // lane channel-threads (spec §2.2 / §7.2): the conformance driver implements EVERY row so the chrome legs and
     // the contract suite have a vendor-free leg — vendor threads whose replies ride the listing (`inline`), a reply
@@ -526,7 +535,15 @@ function makeFakeAdapter({ kind, receive, sendAs = ['user'], now = () => Date.no
     // — the Adapters row flips, not only the Integrations card (§14.3).
     const resolveIntegration = typeof deps.resolveIntegration === 'function' ? deps.resolveIntegration : null;
 
+    const revisionOf = async (convId, { messageId = null } = {}) => {
+      const x = readFakeRevisions(revisionsFile)[String(messageId || '')];
+      if (!x || typeof x !== 'object') return { state: 'same' };
+      if (x.state === 'recalled') return { state: 'recalled' };
+      if (x.state === 'edited' && typeof x.text === 'string') return { state: 'edited', editedAt: Number(x.editedAt) || clock(), text: x.text };
+      return { state: 'same' };
+    };
     return {
+      ...(revisionsFile && receive === 'poll' ? { revisionOf } : {}),
       auth: {
         async state() {
           if (resolveIntegration) {
@@ -895,7 +912,7 @@ function makeFakeAdapter({ kind, receive, sendAs = ['user'], now = () => Date.no
 }
 
 /** The three modules P0 registers. `fake-push` is deliberately READ-ONLY. */
-const fakePoll = makeFakeAdapter({ kind: 'fake-poll', receive: 'poll', sendAs: ['user'], feed: String(process.env.VIBESPACE_CHANNELS_FAKE_FEED || '') === '1', topicsFile: String(process.env.VIBESPACE_CHANNELS_FAKE_TOPICS || '') || null, search: String(process.env.VIBESPACE_CHANNELS_FAKE_SEARCH || '') === '1' });
+const fakePoll = makeFakeAdapter({ kind: 'fake-poll', receive: 'poll', sendAs: ['user'], feed: String(process.env.VIBESPACE_CHANNELS_FAKE_FEED || '') === '1', topicsFile: String(process.env.VIBESPACE_CHANNELS_FAKE_TOPICS || '') || null, search: String(process.env.VIBESPACE_CHANNELS_FAKE_SEARCH || '') === '1', revisionsFile: String(process.env.VIBESPACE_CHANNELS_FAKE_REVISIONS || '') || null });
 /** design 010: the fake vendor's ARCHIVE — messages its history pages never served (invented words, 400+ days old). */
 function fakeArchive(kind, t, env) {
   const n = Math.min(500, Math.max(0, Number(env && env.VIBESPACE_CHANNELS_FAKE_SEARCH_N) || 30));

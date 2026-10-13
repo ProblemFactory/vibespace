@@ -550,6 +550,20 @@
 - (2026-10-13) THE DECISION BUDGET GATED ON AN ESTIMATE AND RACED ITS OWN WRITE (decision-verify F1–F5) — 不变量 = a billed cap reserves before the call in one step and settles to the recorded cost; a reply without usage still costs; a 401 stops the row
 - (2026-10-13) INSTALL AN APP… DID NOT OPEN ON THE RUNNER (mirror-259/260) — 不变量 = a door shows only once nothing above it can still grow (the catalog landed late and slid the group under the press); a chrome suite prints the page's own errors on any red; the late-catalog shape runs on the hub
 - (2026-10-13) THE PASSKEY HOOK'S RE-ARM TRUSTED A SOURCE-STRING MARK (passkey-verify lens ②) — 不变量 = a privileged binding is handed to a function known by OBJECT identity held in our own closure, with a key minted per arm; text is never identity
+- (2026-10-13) HTTPS SAID 'TAILSCALE IS NOT RUNNING' ON A BOX WHERE IT RAN, AND WAITED AN HOUR (owner on .260) — 不变量 = a probe's raw failure is logged with its code and timing; a boot-time miss retries soon; every automatic plan has a door the person presses to re-run it now
+- (2026-10-13) THE PHONE COMPOSER WAS A THIRD OF THE ROW AND THE STATUS BAR A SPARSE SCROLL — 不变量 = on a phone the text box owns its row (one leading door, the mic inside the field) and the bottom panel is one surface on one rhythm; a desktop control never leaks into the phone layout nor the reverse
+- (2026-10-13) A RECALLED LARK MESSAGE STAYED UNMARKED (owner; userW's recall) — 不变量 = a stored message keeps learning its later facts by id (recall, edit); a recall is marked and folded, never erased; an edit keeps every version behind an expander
+- (2026-10-13) AN ACCOUNT ROW AT 215 PX SHOWED ONE CHARACTER PER LINE (owner's phone) — 不变量 = a row's fixed cells never squeeze its name below a readable width; below the pill rung the row stacks into lines, the chip wraps at words
+
+## A RECALLED LARK MESSAGE STAYED UNMARKED (owner 2026-10-13, userW's recall; lane channel-record-revisions, .262)
+
+**What happened.** userW recalled a Lark message minutes after VibeSpace had stored it; nothing changed in VibeSpace. The record already had the words (`edited` / `recalled` facts, Lark's `deleted` / `updated`), but the poll is a SEARCH feed that only names NEW messages — a stored message was never read again, so a later recall or edit could not arrive. Slack's history drops a deleted message silently, the same blind spot.
+
+**Fix.** The capability row `caps.revisions = {recall, edit, how: byid|absent|none}`; after each good pass the engine re-reads stored messages younger than 24 h (and the ones a wake fired on, 7 d) BY ID — ≤ 1 request per message per hour, ≤ 12 a pass, ≤ 240 an account-hour (src/channel-revisions.js `planRecheck`; the owner's Refresh re-asks that conversation after 5 s). Lark: GET im/v1/messages/:id (230011 / 230110 / `deleted:true` = recalled; `updated` + `update_time` = an edit with its body). Slack: history/replies at `oldest = latest = ts` — absent or a tombstone = recalled. A recall = an `fx` flag (the content stays); an edit = an `rv` side line per `editedAt` (the record stays the ORIGINAL). The window folds a recalled row ("{name} 撤回了一条消息 · {time} ▸ 展开") and lists versions behind "已编辑 · {time} ▸ 查看 N 个版本", live in every client (`revised` broadcast); the list preview says 撤回; the agent read prints `[recalled at …]` / `[edited: vN of N]` (`--versions`); a conversation a wake fired on gets ONE next-turn note when that message is recalled.
+
+**Invariant.** A stored message keeps learning its later facts by id; nothing a peer does erases our copy.
+
+**Gates:** test-channel-revisions (fast, PURE + RED controls), test-channels-lark-shape / test-channels-slack-shape (revisionOf legs), test-channel-store (the store's side head regex knew only rx|th|pl|fx — an `rv` line was written and never read back), test-peer-text-census, test-record-clear-census, test-channel-revisions-ui (heavy: desk 1100 ×2 tabs + phone 390, PNGs).
 
 ## THE SPLIT BUTTON MOVED THE RIGHT TAB TO THE LEFT PANE (owner 2026-10-12, inc-mv4q1u6b-ksyh, lane split-keeps-sides)
 

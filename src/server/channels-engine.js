@@ -142,6 +142,7 @@ const Rx = require('../channel-reactions.js');
 // lane message-facts (B-f066, design 007): a message's FACTS — the fold of the record's own list and its `fx` side lines,
 // the agent's line (PURE; the schema + bounds are channel-record's)
 const Facts = require('../channel-facts.js');
+const Rev = require('../channel-revisions.js');   // lane channel-record-revisions: the versions fold + the recheck plan (PURE)
 const { validateSide, inertFrames, inertFrameLine, peerName } = require('../channel-record.js');   // verify r2: peerName = THE ONE door for a NAME
 const { toAgentText: agentText } = require('../peer-text.js');   // lane peer-census: THE belt on every record's text as it leaves the store toward an agent (read / thread / search)
 // verify r1 F2: a conversation TITLE the index holds (written by discovery through peerName — before the line rule for a
@@ -162,7 +163,7 @@ const agentEnvelope = (e) => (e && typeof e === 'object' ? { ...e, anchorId: age
 // list id, a subject): every name through the name door, every address as a line piece, every line through the belt; a
 // count keeps its number only (the reactions rule — counts, never who). The CLI prints `Facts.agentFactLines` of THIS.
 const agentFacts = (list) => Facts.mapFactStrings(list, { name: (v) => peerName(v, 200) || '', id: (v) => agentText(v, { kind: 'line', max: 320 }), line: (v) => agentText(v, { kind: 'line', max: 200 }) });
-const { threadsOf: threadsRow, reactionsOf: reactionsRow, METHOD_GATES } = require('../channels/index.js');   // + lane message-facts: `factsOf` is declared by its gate
+const { threadsOf: threadsRow, reactionsOf: reactionsRow, revisionsOf: revisionsRow, METHOD_GATES } = require('../channels/index.js');   // + lane message-facts: `factsOf` is declared by its gate
 const { searchRowOf } = require('../channels/index.js');   // design 010: the vendor's own search row (never a vendor name here)
 const SR = require('../channel-search.js');   // design 010 (PURE): the merge, the refusal table, the snippet bound
 // lane dc-channels-seams (rv-channels-core C11): the three families `create()` composes over ONE context object (the composition root)
@@ -2430,6 +2431,7 @@ function create(deps = {}) {
         retractUnsaved(rec);   // verify r6: that write landed the whole file — the sign-in is on disk
         retryHotConvCaps(rec);   // lane gmail-reply-known: an open window's refused send row asks again now
         notify(changed.filter((k) => !early.has(k)), { full: false });
+        try { await revisionsPass(rec, e); } catch (err) { log.warn(`[channels] ${rec.id}: the revisions recheck failed (the next pass asks again): ${(err && err.message) || err}`); }   // lane channel-record-revisions
         return { ok: true, changed, results };
       } catch (err) {
         // something OUTSIDE a vendor call threw (the store, a bug): the pass fails like any failure, and every taken waiter hears it
@@ -3350,6 +3352,7 @@ function create(deps = {}) {
     return {
       key: en.key, id: en.id, adapterId: en.adapterId, adapterLabel: rec.label || rec.id, title: humanNameOf(rec, en), kind: en.kind, ...(en.app ? { app: true } : {}), ...picOf(rec, en, c),   // B-c127: THE NAME LADDER (null = nothing known; the client's ③)
       participants: en.participants, lastAt: en.lastAt, lastText: en.lastText || '', ...lastWhoOf(rec, en), unread: en.unread || 0,
+      ...(en.lastRecalled && Number(en.lastRecalled.at) >= (Number(en.lastAt) || 0) ? { lastRecalled: true } : {}),   // lane channel-record-revisions
       unlisted: !!en.unlistedAt,
       refresh: en.refresh && typeof en.refresh === 'object' ? { every: en.refresh.every, by: en.refresh.by || null } : null,
       cadence: { seconds: cadence.seconds, tier: cadence.tier, source: cadence.source, paused: !!cadence.paused },
@@ -3858,9 +3861,10 @@ function create(deps = {}) {
       const d = digest(partial ? { keys: uniq } : { scope: 'first' });
       // lane channel-threads: a SIDE change (reactions) / a thread's stats ride the SAME message as the RESULT —
       // `patches: {[convKey]: {[vendorId]: {reactions}}}`, `threads: {[convKey]: {[threadKey]: {count, lastAt}}}`,
-      // `rereadReactions: [convKey]` past the patch bound — the window applies them IN PLACE (no new message type)
+      // `rereadReactions: [convKey]` past the patch bound — the window applies them IN PLACE (no new message type);
+      // `revised: {[convKey]: {[vendorId]: <the row's read shape>}}` (lane channel-record-revisions) — a recall / an edit redrawn in place
       const more = extra && typeof extra === 'object' ? extra : {};
-      broadcast({ type: 'channels-updated', changed: uniq.map((k) => liveIx[k] ? liveIx[k].id : k.slice(k.indexOf('/') + 1)), changedKeys: uniq, partial, digest: d, ...(more.patches ? { patches: more.patches } : {}), ...(more.threads ? { threads: more.threads } : {}), ...(more.rereadReactions && more.rereadReactions.length ? { rereadReactions: more.rereadReactions } : {}), ...(more.authors ? { authors: more.authors } : {}) });
+      broadcast({ type: 'channels-updated', changed: uniq.map((k) => liveIx[k] ? liveIx[k].id : k.slice(k.indexOf('/') + 1)), changedKeys: uniq, partial, digest: d, ...(more.patches ? { patches: more.patches } : {}), ...(more.revised ? { revised: more.revised } : {}), ...(more.threads ? { threads: more.threads } : {}), ...(more.rereadReactions && more.rereadReactions.length ? { rereadReactions: more.rereadReactions } : {}), ...(more.authors ? { authors: more.authors } : {}) });
     } catch (err) { console.warn('[channels] broadcast failed:', err && err.message); }
   }
 
@@ -4207,6 +4211,7 @@ function create(deps = {}) {
     if (!rec || !known(adapterId, convId)) return { ok: false, code: 'not-found', error: 'No such conversation' };
     if (rec.enabled === false) return { ok: false, code: 'disabled', error: `${rec.label || rec.id} is disabled` };
     olderChanged(adapterFor(rec), convId);   // rule 19: the owner's Refresh forgets the "nothing older" memory
+    if (origin === 'refresh') revAsked.set(`${adapterId}/${convId}`, now());   // lane channel-record-revisions: the owner's press re-asks this conversation's stored messages sooner
     return requestRefresh(rec, adapterFor(rec), `${adapterId}/${convId}`, { origin });
   }
   /** Is the account inside the back-off a failed pass set (`e.nextAt`)? */
@@ -4931,10 +4936,15 @@ function create(deps = {}) {
     const factsOn = Array.isArray(c.facts) && c.facts.length > 0;
     const canAsk = !agent && METHOD_GATES.factsOf(c);
     const sidesFx = new Map();
+    // lane channel-record-revisions: an adapter whose stored messages can still learn a recall / an edit folds its `rv` and
+    // `fx` lines into `recalledAt` + `versions` (the current body = the newest version; the record stays the original)
+    const revOn = revisionsRow(c).how !== 'none';
+    const sidesRv = new Map();
     try { if (th.read !== 'none') ix = threadIxOf(rec.id, cid, base); } catch (err) { log.warn(`[channels] ${rec.id}/${cid}: thread index failed: ${(err && err.message) || err}`); }
     try {
       // ONE side read per page (verify r1): the reactions and the thread stats come off the same lines
-      const sides = (rxr.read !== 'none' || th.read !== 'none' || factsOn) ? store.readSide(rec.id, cid, { msgs: new Set(base.map((r) => r && String(r.vendorId))) }) : [];
+      const sides = (rxr.read !== 'none' || th.read !== 'none' || factsOn || revOn) ? store.readSide(rec.id, cid, { msgs: new Set(base.map((r) => r && String(r.vendorId))) }) : [];
+      if (revOn) for (const x of sides) if (x.k === 'rv' || x.k === 'fx') { const k = String(x.msg); if (!sidesRv.has(k)) sidesRv.set(k, []); sidesRv.get(k).push(x); }
       if (factsOn) for (const x of sides) if (x.k === 'fx') { const k = String(x.msg); if (!sidesFx.has(k)) sidesFx.set(k, []); sidesFx.get(k).push(x); }
       if (rxr.read !== 'none') rx = reactionsFor(rec, cid, base.map((r) => r && r.vendorId), { sides });
       if (th.read !== 'none') for (const x of sides) if (x.k === 'th') sidesTh.set(String(x.msg), x);
@@ -4966,6 +4976,7 @@ function create(deps = {}) {
         if (agent && out.facts) { const w = Facts.agentFactLines(out.facts); if (w) out.factsText = w; }
         if (canAsk && !Array.isArray(r.facts) && !fx.length) out.factsAsk = true;
       }
+      if (revOn) Object.assign(out, revisionView(r, sidesRv.get(String(r.vendorId)) || [], { agent }));
       return out;
     });
   }
@@ -5400,6 +5411,134 @@ function create(deps = {}) {
       if (spec.nested) for (const [ck, m] of maps) if (!m.size) top.delete(ck);
     }
     if (sweep) e.memSweptAt = t;
+  }
+  // ── lane channel-record-revisions: A STORED MESSAGE KEEPS LEARNING (owner 2026-10-13, userW's recall) ──
+  /** The read shape's revision fields for ONE record: `recalledAt` (when the recall was learned — the content stays),
+   *  `versions` (oldest → newest, the original first) and the CURRENT body (the newest version's text / tree). */
+  function revisionView(r, xs, { agent = false } = {}) {
+    const o = {};
+    if (!xs.length) return o;
+    const ra = Rev.recalledAtOf(xs);
+    if (ra) o.recalledAt = ra;
+    const vs = Rev.foldVersions(r, xs);
+    if (vs.length > 1) {
+      const cur = vs[vs.length - 1];
+      o.versions = vs.map((v) => ({ at: v.at, text: agent ? agentText(v.text, { kind: 'block' }) : v.text, ...(v.original ? { original: true } : {}), ...(v.truncated ? { truncated: true } : {}) }));
+      o.text = agent ? agentText(cur.text, { kind: 'block' }) : cur.text;
+      if (!agent) {
+        let b = null;
+        try { const v = Array.isArray(cur.blocks) ? Blocks.validateBlocks(cur.blocks) : null; b = v && v.ok && v.blocks.length ? v.blocks : null; } catch { b = null; }
+        o.blocks = b || undefined;   // no tree for the newest body = the generic rung draws its text
+      }
+    }
+    if (agent) { const w = Rev.agentRevisionLine({ recalledAt: o.recalledAt || null, versions: o.versions || null }); if (w) o.revisionText = w; }
+    return o;
+  }
+  const revLast = new Map();    // `${accountId}\n${convId}\n${vendorId}` → the last recheck's ms (Infinity = recalled: done)
+  const revSpent = new Map();   // accountId → the recheck instants of the sliding hour
+  const revAsked = new Map();   // `${accountId}/${convId}` → the owner's last Refresh of it (the re-ask door)
+  /** V3 (src/channel-revisions.js): after a good pass, the account's stored messages younger than 24 h — and the ones a
+   *  wake fired on, for 7 d — re-read BY ID within the plan's budget; a recall lands as an `fx` flag (+ the ONE note to
+   *  the conversations a wake fired on), an edit as an `rv` version; each changed row is pushed to every client. */
+  async function revisionsPass(rec, e) {
+    const c = registry.capsOf(rec.kind);
+    if (revisionsRow(c).how === 'none' || !e || !e.adapter || typeof e.adapter.revisionOf !== 'function') return { asked: 0 };
+    const t = now();
+    const ix = store.index.live();
+    const items = [], recs = new Map();
+    for (const [k, en] of Object.entries(ix)) {
+      if (!k.startsWith(`${rec.id}/`) || !en) continue;
+      const convId = k.slice(rec.id.length + 1);
+      const woke = Array.isArray(en.wokeFor) ? en.wokeFor.filter((w) => w && Number(w.at) > t - Rev.RECHECK_WOKE_MS) : [];
+      if (!(Number(en.lastAt) > t - Rev.RECHECK_FRESH_MS) && !woke.length) continue;
+      let tail = [];
+      try { tail = store.readTail(rec.id, convId, { limit: 40 }) || []; } catch { tail = []; }
+      for (const r of tail) if (r && r.vendorId && Number(r.at) > t - Rev.RECHECK_FRESH_MS && r.kind !== 'system') { const key = `${convId}\n${r.vendorId}`; recs.set(key, r); items.push({ key, at: r.at }); }
+      for (const w of woke) { const key = `${convId}\n${w.vid}`; items.unshift({ key, at: Number(w.msgAt) || 0, wokeAt: w.at }); if (!recs.has(key)) recs.set(key, { vendorId: String(w.vid), convId, at: Number(w.msgAt) || null, threadKey: w.tk || null }); }
+    }
+    const last = new Map();
+    for (const it of items) { const l = revLast.get(`${rec.id}\n${it.key}`); if (l !== undefined) last.set(it.key, l); }
+    for (const it of items) if (last.get(it.key) === Infinity) it.recalled = true;
+    const spent = (revSpent.get(rec.id) || []).filter((x) => x > t - 3600e3);
+    // the owner's Refresh of a conversation (in the last 2 min) re-asks ITS messages after a minute, inside the hour's cap
+    const pressed = (it) => (Number(revAsked.get(`${rec.id}/${it.key.slice(0, it.key.indexOf('\n'))}`)) || 0) > t - 120e3;
+    const plan = [...new Set([...Rev.planRecheck({ now: t, items: items.filter(pressed), last, spent, forced: true }), ...Rev.planRecheck({ now: t, items, last, spent })])].slice(0, Rev.RECHECK_PER_PASS);
+    const revised = {};
+    const changedKeys = new Set();
+    const states = {};
+    let asked = 0;
+    for (const key of plan) {
+      if (!affordable(rec, e)) break;   // the pass's own budget first — a recheck never starves the reads
+      const i = key.indexOf('\n');
+      const convId = key.slice(0, i), vid = key.slice(i + 1);
+      const r0 = recs.get(key) || { vendorId: vid, convId };
+      let ans = null;
+      spent.push(t); asked++;
+      revLast.set(`${rec.id}\n${key}`, now());
+      try { ans = await vendor(rec, e, () => e.adapter.revisionOf(convId, { messageId: vid, threadKey: r0.threadKey || null })); } catch (err) { log.warn(`[channels] ${rec.id}/${convId}: a recheck by id failed (${(err && err.code) || 'error'}) — asked again in an hour`); if (err && (err.code === 'rate-limited' || err.code === 'vendor-budget')) break; continue; }
+      const st = (ans && ans.state) || 'unknown'; states[st] = (states[st] || 0) + 1;
+      const sides = store.readSide(rec.id, convId, { msgs: new Set([vid]) }).filter((x) => x && (x.k === 'rv' || x.k === 'fx'));
+      let add = [];
+      if (ans && ans.state === 'recalled') {
+        revLast.set(`${rec.id}\n${key}`, Infinity);
+        if (!Rev.recalledAtOf(sides)) add = [{ k: 'fx', msg: vid, at: now(), src: 'recheck', facts: Rev.recallFacts() }];
+      } else if (ans && ans.state === 'edited') {
+        const vs = Rev.foldVersions(r0, sides);
+        if (vs[vs.length - 1].text !== ans.text && !sides.some((x) => x.k === 'rv' && Number(x.editedAt) === ans.editedAt)) {
+          add = [{ k: 'rv', msg: vid, at: now(), src: 'recheck', editedAt: ans.editedAt, text: ans.text, blocks: ans.blocks }];
+          if (Rev.editedAtOf(Facts.foldFacts(r0.facts, sides.filter((x) => x.k === 'fx'))) < ans.editedAt) add.push({ k: 'fx', msg: vid, at: now(), src: 'recheck', facts: Rev.editFacts(ans.editedAt) });
+        }
+      }
+      if (!add.length) continue;
+      const w = appendSides(rec, convId, add);
+      if (!w.appended) continue;
+      if (add[0].k === 'fx') {
+        if (Number(r0.at) > 0) await store.index.update(() => { const en = store.index.entry(rec.id, convId, { create: false }); if (en && Number(r0.at) >= (Number(en.lastAt) || 0)) en.lastRecalled = { vid: String(vid).slice(0, 512), at: Number(r0.at) }; });
+        await noteRecall(rec, convId, vid);
+        changedKeys.add(`${rec.id}/${convId}`);
+      }
+      const k = `${rec.id}/${convId}`;
+      if (r0.text !== undefined) { try { const v = withView(rec, [r0], { convId })[0]; if (v) (revised[k] || (revised[k] = {}))[vid] = v; } catch (err) { log.warn(`[channels] ${k}: the revised row could not be drawn: ${(err && err.message) || err}`); } }
+    }
+    revSpent.set(rec.id, spent.slice(-Rev.RECHECK_PER_HOUR));
+    if (asked) log.log(`[channels] ${rec.id}: the recheck re-read ${asked} stored message(s) by id — ${Object.keys(revised).length + changedKeys.size ? 'a recall / an edit learned' : 'nothing changed'} (${Object.entries(states).map(([k, n]) => `${k} ${n}`).join(', ')})`);
+    const keys = [...new Set([...Object.keys(revised), ...changedKeys])];
+    if (keys.length) notify(keys, { full: false, extra: { revised } });
+    return { asked, revised: keys.length };
+  }
+  /** The WOKEN-FOR ledger (bounded, on the index entry): which message a delivered wake carried, to whom — the 7-day
+   *  recheck window and the recall note read it. */
+  const WOKE_FOR_MAX = 40;
+  function noteWoken(en, hits, cid, t) {
+    if (!en || !cid) return;
+    const prev = Array.isArray(en.wokeFor) ? en.wokeFor.filter((w) => w && Number(w.at) > t - Rev.RECHECK_WOKE_MS) : [];
+    for (const h of hits || []) {
+      const r = h && h.record;
+      if (!r || !r.vendorId) continue;
+      prev.push({ vid: String(r.vendorId).slice(0, 512), cid: String(cid).slice(0, 128), at: t, msgAt: Number(r.at) || null, tk: r.threadKey ? String(r.threadKey).slice(0, 512) : null });
+    }
+    en.wokeFor = prev.slice(-WOKE_FOR_MAX);
+  }
+  const REV_NOTE_FROM = 'Channels · recalls';
+  /** ONE next-turn note per (message, conversation a wake carried it to) when the message is recalled — the free lane
+   *  (`stashFor`, never a wake: a recall never opens a turn); our words + the time only, through the belt. */
+  async function noteRecall(rec, convId, vid) {
+    if (!deliver || typeof deliver.stashFor !== 'function') return;
+    const due = [];
+    await store.index.update(() => {
+      const en = store.index.entry(rec.id, convId, { create: false });
+      if (!en || !Array.isArray(en.wokeFor)) return;
+      for (const w of en.wokeFor) if (w && String(w.vid) === String(vid) && !w.noted) { w.noted = true; due.push({ cid: w.cid, at: w.at }); }
+    });
+    const en = store.index.live()[`${rec.id}/${convId}`];
+    // REACH FIRST (the reaction digest's rule): the note is news FROM the conversation — an agent whose access the owner
+    // removed since the wake hears nothing more from here
+    const mayHear = (cid) => { try { return ACL.canSee(reachFor({ kind: 'agent', id: cid, name: null, groups: groupsOfSession(cid), msgLevelFor: () => 'none' }, rec, en).level); } catch { return false; } };
+    for (const d of due) {
+      if (!mayHear(d.cid)) continue;
+      const text = Rev.recallNoteText({ account: peerName(String(rec.label || rec.id), 80) || '', conversation: peerName(String((en && en.title) || convId), 120) || '', at: d.at });
+      try { deliver.stashFor(d.cid, { source: 'channel', kind: 'notification', fromName: REV_NOTE_FROM, text: inertFrames(text), about: stashAbout({ keys: [`${rec.id}/${convId}`], cid: d.cid }) }); } catch (err) { log.warn(`[channels] ${rec.id}/${convId}: the recall note was not stashed: ${(err && err.message) || err}`); }
+    }
   }
   /** Append side records (each judged by `validateSide` first — bound before parse), then the ONE broadcast. */
   function appendSides(rec, convId, sides) {
@@ -7250,6 +7389,7 @@ function create(deps = {}) {
       healP2(e2);
       e2.stats.wakes.push({ ...wk, id: resId });
       e2.stats.wakes = F.pruneLedger(e2.stats.wakes, t);
+      if (ok || stashed) noteWoken(e2, hits, target.cid, t);   // lane channel-record-revisions: the woken-for ledger
       e2.stats.lastRefusal = null;
       const own = watcherRef(ix, rec, e2, item);
       if (own) finalizeRow(own, resId, wk, t);

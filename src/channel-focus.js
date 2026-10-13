@@ -410,7 +410,8 @@ function listRowModel(conv) {
   const w = c.lastWho && typeof c.lastWho === 'object' ? c.lastWho : null;
   const who = !first || !w ? null : w.self ? { self: true } : (typeof w.name === 'string' && w.name.trim() ? { name: w.name.trim().slice(0, 80) } : null);
   const own = !!(c.assignment && c.assignment.source === 'conversation');
-  return { last: first, who, at: Number(c.lastAt) || 0, unread: Math.max(0, Number(c.unread) || 0), grainLine: own };
+  // lane channel-record-revisions: the newest message was RECALLED — the row says so (its words stay in the window, folded)
+  return { last: first, who, at: Number(c.lastAt) || 0, unread: Math.max(0, Number(c.unread) || 0), grainLine: own, recalled: !!(c.lastRecalled && first) };
 }
 
 module.exports = {

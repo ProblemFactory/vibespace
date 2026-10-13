@@ -1742,8 +1742,10 @@ body.wm-dragging .window iframe, body.wm-dragging .window canvas, body.wm-draggi
 .settings-https-fact { order: 3; flex: 1 1 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
 .settings-https-fact .settings-https-text { flex: 1 1 220px; min-width: 0; overflow-wrap: break-word; }
 .settings-https-fact.is-live { border-left-color: var(--accent); color: var(--text); }
-.settings-https-copy { flex: none; padding: 2px 10px; font-size: 11px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text); cursor: pointer; }
-.settings-https-copy:hover { border-color: var(--border-active); }
+.settings-https-copy, .settings-https-recheck { flex: none; padding: 2px 10px; font-size: 11px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text); cursor: pointer; }
+.settings-https-copy:hover, .settings-https-recheck:hover { border-color: var(--border-active); }
+.settings-https-recheck:disabled { opacity: 0.6; cursor: default; }
+.settings-https-probe { flex: 1 1 100%; font-size: 11px; color: var(--text-secondary); opacity: 0.85; overflow-wrap: anywhere; } /* lane tls-pass-retry: the last failed tailscale call */
 .settings-row-fact { margin-top: 5px; padding: 3px 8px; border-left: 2px solid var(--border); font-size: 11px; line-height: 1.4; color: var(--text-secondary); } /* lane headless-fallback: this machine's display beside the headed preference */
 .settings-cli-dim { color: var(--text-dim); }
 .settings-link-btn { margin-top: 4px; background: none; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--accent); font-size: 11px; padding: 2px 8px; cursor: pointer; }
@@ -4455,6 +4457,39 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
   .acct-key-row .credits-chip { padding: 0 3px; }
 }
 
+/* BELOW THE PILL RUNG THE ROW STACKS (2026-10-13, owner's phone: a ~215 px Agents panel
+   drew every name as ONE character and the login chip one character per line — the
+   fixed cells kept their width and .acct-key-main {flex: 1 1 0} shrank to ~7 px).
+   THE LAW: a row's fixed cells (type icon · usage pill · star · ⋯ ≈ 98 px + the pill)
+   never squeeze its name below a readable width (~96 px ≈ 6 ch + the tail). MEASURED
+   (lane accounts-rows-narrow): with the widest pill ("5h 100% · 120m" ≈ 80 px) the main
+   column drops under 96 px at a 274 px container, so at ≤ 280 px the row is a grid of
+   LINES instead of one squeezed line:
+     1  icon · name (ellipsis) ··················· star ⋯
+     2  tail (ellipsis) ············ credits · pill     (the pill flush right: one column)
+     3  the reset slot (its count yields first, the Use… button stays)
+     4  the login chip / extras, full width, wrapping at WORDS (CJK between characters)
+   .acct-key-main and .acct-key-line become display:contents, so their children ARE the
+   row's grid items — no markup change, every roster row (pool, CLI login, Codex) follows.
+   The pill spans the actions column (its extra width lands in the spare track, so line 1's
+   name never pays for the pill); gaps ride the cells' margins, so an empty slot adds none.
+   Child-combinator chains outrank the two-line .acct-key-line placements above/below. */
+@container (max-width: 280px) {
+  .acct-list > .acct-key-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto auto; grid-template-areas: "icon name name name act" "tail tail cred pill pill" "reset reset reset reset reset" "extra extra extra extra extra"; gap: 0; align-items: center; }
+  .acct-list > .acct-key-row > .acct-key-main,
+  .acct-list > .acct-key-row > .acct-key-main > .acct-key-line { display: contents; }
+  .acct-list > .acct-key-row > .acct-type-icon { grid-area: icon; margin-right: 6px; }
+  .acct-list > .acct-key-row > .acct-key-main > .acct-key-line > .acct-key-name { grid-area: name; }
+  .acct-list > .acct-key-row > .acct-key-actions { grid-area: act; margin-left: 6px; justify-self: end; }
+  .acct-list > .acct-key-row > .acct-key-main > .acct-key-line > .acct-key-tail { grid-area: tail; max-width: none; }
+  .acct-list > .acct-key-row > .acct-key-main > .acct-key-line > .acct-credits-slot { grid-area: cred; margin-left: 6px; justify-self: end; }
+  .acct-list > .acct-key-row > .acct-usage-cell { grid-area: pill; justify-self: end; margin-left: 0; }
+  .acct-list > .acct-key-row > .acct-usage-cell:not(:empty) { margin-left: 6px; }
+  .acct-list > .acct-key-row > .acct-key-main > .acct-key-line > .acct-reset-slot { grid-area: reset; justify-self: end; max-width: 100%; margin-left: 0; }
+  .acct-list > .acct-key-row > .acct-key-main > .acct-key-extra { grid-area: extra; }
+  .acct-list > .acct-key-row > .acct-key-main > .acct-key-extra > .acct-blocked-hint { overflow-wrap: normal; word-break: normal; }
+}
+
 /* intrinsic-width breakers (2.179.1 screenshot audit): nowrap name/email and
    the roster title set the row's min-content ~312px and clipped every narrower
    panel — flex-basis 0 + min-width 0 makes them SHRINK, inner ellipsis takes
@@ -5406,6 +5441,20 @@ a.chanmsg-file:hover .chanmsg-att-dl { color: var(--accent); }
 .chanwin-rx-note-x { margin-left: auto; width: 20px; height: 20px; }
 .chanmsg-placeline { display: flex; align-items: center; gap: 6px; min-width: 0; flex-wrap: wrap; }
 /* lane message-facts (B-f066): a message's FACTS — the dim summary line (a button), its chips, the details list */
+/* lane channel-record-revisions: a recalled message (ONE folded line, the kept copy dimmed behind Show) and an edit's versions */
+.chanmsg-recall-line { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; line-height: 1.6; color: var(--text-dim); }
+.chanmsg-recall-words { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chanmsg-recall-tog, .chanmsg-versions-tog { display: inline-flex; align-items: center; gap: 3px; flex-shrink: 0; font: inherit; font-size: 11px; line-height: 1.5; color: var(--text-dim); background: transparent; border: none; padding: 0; cursor: pointer; }
+.chanmsg-recall-tog:hover, .chanmsg-versions-tog:hover { color: var(--accent); }
+.chanmsg-kept { opacity: 0.6; border-left: 2px solid var(--border); padding-left: 8px; margin: 2px 0 4px; }
+.chanmsg-kept-note { font-size: 11px; color: var(--text-dim); }
+.chanmsg-versions { margin: 2px 0 0; }
+.chanmsg-versions-list { list-style: none; margin: 4px 0 0; padding: 0 0 0 8px; border-left: 2px solid var(--border); display: flex; flex-direction: column; gap: 6px; }
+.chanmsg-versions-list[hidden], .chanmsg-kept[hidden] { display: none; }
+.chanmsg-version-at { font-size: 11px; color: var(--text-dim); }
+.chanmsg-version-cur .chanmsg-version-at { color: var(--accent); }
+.chanmsg-version-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
+.chan-row-recalled { font-style: italic; color: var(--text-dim); }
 .chanmsg-facts { display: flex; align-items: center; gap: 6px; min-width: 0; flex-wrap: wrap; }
 .chanmsg-facts-sum, .chanmsg-facts-ask { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; min-width: 0; font: inherit; font-size: 11px; line-height: 1.5; color: var(--text-dim); background: transparent; border: none; padding: 0; cursor: pointer; text-align: left; }
 .chanmsg-facts-sum:hover, .chanmsg-facts-ask:hover { color: var(--accent); }
@@ -7027,3 +7076,35 @@ button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: u
 .bprof-pk-in-sheet .bprof-pk-seg { flex: 1 1 0; min-height: 36px; font-size: 12px; }
 .bprof-pk-in-sheet .bprof-pk-switch { min-height: 36px; }
 .chat-browser-pk-actions, .ut-passkey-answer, .browser-live-passkey-ask { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* lane desktop-v2-entry (design q-030 D1/§3): the Desktop picker popover + a machine desktop's switch strip */
+.desktop-picker { position: fixed; z-index: 10050; width: 320px; max-height: 70vh; overflow-y: auto; padding: 6px; background: var(--bg-window); color: var(--text); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28); outline: none; }
+.desktop-picker.desktop-picker-sheet { left: 0; right: 0; bottom: 0; top: auto; width: auto; max-height: 75vh; border-radius: 12px 12px 0 0; padding: 8px 8px calc(8px + env(safe-area-inset-bottom)); }
+.desktop-picker-group { padding: 6px 8px 2px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-secondary); }
+.desktop-picker-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; width: 100%; padding: 7px 8px; border: 0; border-radius: 6px; background: none; color: inherit; font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.desktop-picker-row:hover, .desktop-picker-row:focus { background: var(--bg-hover, rgba(127, 127, 127, 0.14)); outline: none; }
+.desktop-picker-row[disabled] { opacity: 0.55; cursor: default; }
+.desktop-picker-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desktop-picker-state { flex: 0 0 auto; font-size: 12px; color: var(--text-secondary); }
+.desktop-picker-row[data-state="setup"] .desktop-picker-state { color: var(--warning, #d9822b); }
+.desktop-picker-chips, .desktop-picker-row .desktop-picker-note { flex: 1 0 100%; font-size: 12px; color: var(--text-secondary); }
+.desktop-picker > .desktop-picker-note { padding: 6px 8px; font-size: 12px; color: var(--text-secondary); }
+.desktop-strip { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; padding: 3px 8px; border-bottom: 1px solid var(--border); font-size: 12px; overflow-x: auto; white-space: nowrap; scrollbar-width: thin; }
+.desktop-strip-btn, .desktop-strip-seg, .desktop-open-link { flex: 0 0 auto; height: 24px; padding: 0 8px; border: 1px solid var(--border); border-radius: 6px; background: none; color: var(--text); font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; }
+.desktop-strip-displays { display: inline-flex; flex: 0 0 auto; }
+.desktop-strip-displays .desktop-strip-seg { border-radius: 0; margin-left: -1px; min-width: 30px; }
+.desktop-strip-displays .desktop-strip-seg:first-child { border-radius: 6px 0 0 6px; margin-left: 0; }
+.desktop-strip-displays .desktop-strip-seg:last-child { border-radius: 0 6px 6px 0; }
+.desktop-strip-seg[aria-pressed="true"] { background: var(--accent, #3b82f6); border-color: var(--accent, #3b82f6); color: #fff; }
+.desktop-strip-status { flex: 0 0 auto; margin-left: auto; padding-left: 8px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+/* lane desktop-v2-latency: the ⌨ toggle, the ladder's rung, the slow-link chip, the comparison row (the status chip opens it), full screen */
+.desktop-strip-keys[aria-pressed="true"] { border-color: var(--accent, #3b82f6); color: var(--accent, #3b82f6); }
+.desktop-strip-keys.is-locked { background: var(--accent, #3b82f6); color: #fff; }
+.desktop-strip-status[role="button"] { cursor: pointer; }
+.desktop-strip-rung, .desktop-strip-slow { flex: 0 0 auto; padding: 1px 7px; border-radius: 9px; background: var(--bg-input); color: var(--text-secondary); }
+.desktop-strip-rung[data-rung="sharp"], .desktop-strip-rung[data-rung="balanced"] { color: var(--text); }
+.desktop-strip-slow { background: var(--warning, #d9822b); color: #fff; }
+.desktop-strip-compare { flex: 0 0 auto; display: flex; flex-direction: column; gap: 2px; padding: 4px 10px; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.desktop-strip-compare[hidden] { display: none; }
+.desktop-machine-content:fullscreen { background: var(--bg-window, #1e1e1e); }
+.desktop-open-link { border-style: dashed; }
