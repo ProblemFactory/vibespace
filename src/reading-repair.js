@@ -538,7 +538,14 @@ function findJournal(dataDir) {
 // phase, which would make every genuinely re-filable entry ambiguous.
 const MIN_OWN_READINGS = 5;   // fewer than this is a coincidence, not a window
 const OWN_DOMINANCE = 0.9;    // a stream whose own panel readings disagree with themselves establishes nothing
-const { weeklyNear, weeklyPhase, windowOf, windowFingerprint, windowSidecarName, apiWindowSidecarName, decideReadingTarget } = require('./reading-lag.js');
+const { weeklyNear, weeklyPhase, windowOf, windowFingerprint, apiWindowSidecarName, decideReadingTarget } = require('./reading-lag.js');
+// THE `.window-` SIDECAR is written ONLY through its owner's ONE writer, producer mandatory (lane oat-identity-fix-r3,
+// verify r3 F-R2: this file's own atomic write stamped it with no producer — hourly, on every row — and the census that
+// listed writers by hand never saw it). The writer carries the row's identity a non-login stamp replaces.
+const windowStamp = require('./window-stamp.js');
+const { stampProducer } = require('./oat-identity-model.js');
+/** `repair:<source>` — the producer of the stamp the repair AGREED with (the phase is that stamp's, re-dated) */
+function repairSourceOf(sc) { const c = stampProducer(sc); return 'repair:' + (c === 'login' ? 'login' : c === 'token' ? (/^oat:(\d+|\?)$/.test(sc.producer) ? sc.producer : 'oat:?') : (c || 'legacy')); }
 // The identity a usage-cache FILE belongs to, and the slug its anchor stream is
 // named with — both taken from the producer rather than re-spelled here (r5).
 const { identityKeyFor, anchorSlug } = require('./usage-anchors.js');
@@ -1039,7 +1046,8 @@ function repairCachesByWindow({ cacheDir, archiveDir, windows, accounts = null, 
     // next statusline render — which is the defect this migration exists to
     // repair the data for. Any legacy in-snapshot copy is stripped in passing.
     delete next.ownWindow;
-    _writeAtomic(path.join(cacheDir, windowSidecarName(acct)), JSON.stringify({ ...w.window, at: now, source: 'on-demand', seededBy: id }));
+    // the window was derived from the account's own panel readings, which never said login or token: nobody can tell (null)
+    windowStamp.writeWindowStamp(cacheDir, acct, { ...w.window, at: now, source: 'on-demand', seededBy: id }, null);
     res.seeded++;
     _writeCacheAtomic(cacheDir, acct, next);
   }
@@ -1297,8 +1305,7 @@ function repairSidecarsByApiPhase({ dataDir, roster = null, accounts = null, id 
     row.apiPhase = ev.top.phase; row.resetsAt = api; row.n = ev.top.n;
     const cacheFile = _usageWrite.cacheFileFor(cacheDir, key);
     const cur = _readJson(cacheFile);
-    const sidecarPath = path.join(cacheDir, windowSidecarName(key));
-    const sc = _readJson(sidecarPath);
+    const sc = windowStamp.readWindowStamp(cacheDir, key);
     // every scoped bucket this account is known to hold is judged on the 7d phase
     const names = new Set();
     for (const n of Object.keys((sc && sc.scoped) || {})) names.add(String(n).toLowerCase());
@@ -1308,13 +1315,16 @@ function repairSidecarsByApiPhase({ dataDir, roster = null, accounts = null, id 
     // ① THE SIDECAR — the identity anchor the live guard trusts
     row.sidecarWas = sc && Number(sc.sevenDay) > 0 ? weeklyPhase(sc.sevenDay) : null;
     const stamp = { ...apiWindow, at: now, source: 'api', verifiedAt: now, verifiedBy: 'rate-limit-events', scopedRule: 'same-phase-as-7d', n: ev.top.n, of: ev.total, seededBy: id };
-    if (!sc || !(Number(sc.sevenDay) > 0)) { _writeAtomic(sidecarPath, JSON.stringify(stamp)); row.sidecar = 'stamped'; report.counts.stamped++; }
+    // WHO PRODUCED IT (fix r3 F-R2): the evidence rows (usage anchors, archived readings) name no producer, so a stamp or a
+    // re-stamp is `null` — nobody can tell; agreeing with a stamp keeps that stamp's producer as `repair:<it>`. The ONE
+    // writer carries the identity the stamp it replaces held: a repair never demotes a row's proven identity.
+    if (!sc || !(Number(sc.sevenDay) > 0)) { windowStamp.writeWindowStamp(cacheDir, key, stamp, null); row.sidecar = 'stamped'; report.counts.stamped++; }
     else if (weeklyNear(sc.sevenDay, api) === false) {
       archived.push({ migration: id, at: now, store: 'window-sidecar', key, action: 'restamped',
         reason: `the established-window sidecar of ${nameOf(key)} carried weekly phase ${weeklyPhase(sc.sevenDay)} (${windowFingerprint(sc)}, source ${sc.source || 'unknown'}) — not this account's API-derived phase ${ev.top.phase} (${windowFingerprint(apiWindow)}; ${ev.top.n} of ${ev.total} slot-verified rate-limit readings); the /usage panel that stamped it answered for another account`,
         entry: sc });
-      _writeAtomic(sidecarPath, JSON.stringify(stamp)); row.sidecar = 'restamped'; report.counts.restamped++;
-    } else if (sc.source !== 'api' || !sc.verifiedAt) { _writeAtomic(sidecarPath, JSON.stringify(stamp)); row.sidecar = 'confirmed'; report.counts.confirmed++; }
+      windowStamp.writeWindowStamp(cacheDir, key, stamp, null); row.sidecar = 'restamped'; report.counts.restamped++;
+    } else if (sc.source !== 'api' || !sc.verifiedAt) { windowStamp.writeWindowStamp(cacheDir, key, stamp, repairSourceOf(sc)); row.sidecar = 'confirmed'; report.counts.confirmed++; }
     else { row.sidecar = 'kept'; report.counts.kept++; }
     // …and c1's live witness, so the panel gate is armed from this boot on
     if (!apiwin || !(Number(apiwin.sevenDay) > 0) || weeklyNear(apiwin.sevenDay, api) === false) {

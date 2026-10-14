@@ -107,6 +107,11 @@ const LONG_ID = 'ut-10a9000001', A2_ID = 'ut-10a9000002', A3_ID = 'ut-10a9000003
 // the verify round (2026-09-27): a ~6 000-char RESOLVED item (the wire carries 300 chars of it — the window
 // loads the rest), a ~6 000-char OPEN item another client resolves while it is read, and the link vectors
 const BIG_RESOLVED_ID = 'ut-b19000000a', BIG_OPEN_ID = 'ut-b19000000b', LINKS_ID = 'ut-11nk0000001';
+// lane browser-probe-transient (B-0b8c): the browser keeper's could-not-read-the-version notice — the product's own words
+// (PURE floorNotice / floorNoticeDetail over an exhausted ladder), its Check again door (⑭)
+const FLOOR_ID = 'ut-f100r00001';
+const BPF = require('../src/browser-profiles.js'), BFF = require('../src/browser-facts.js');
+const FLOOR_V = BPF.floorVerdict('', BPF.FLOOR_VERSION, { ok: false, exhausted: true, attempts: 6, at: 834e3, since: 1e3, why: 'timed out after 8 s' });
 const MARK_BIG_R = 'MARK-END-of-the-big-resolved', MARK_BIG_O = 'MARK-END-of-the-big-open';
 const BIG = (mark) => Array.from({ length: 24 }, (_, k) => para(k + 1)).join('\n\n') + '\n\n' + mark;
 if (BIG('x').length < 5000 || BIG('x').length > 8000) throw new Error(`the big fixture is ${BIG('x').length} chars — the legs want 5 000–8 000`);
@@ -123,7 +128,18 @@ const SEEDED = [
   seed(BIG_RESOLVED_ID, 'claude:' + OTHER_SID, { text: 'A long item handled yesterday', detail: BIG(MARK_BIG_R), status: 'done', resolvedBy: 'user', resolvedAt: now - 86400e3, createdAt: now - 90000e3 }),
   seed(BIG_OPEN_ID, LIVE_KEY, { text: 'A long open item that gets resolved elsewhere', detail: BIG(MARK_BIG_O), createdAt: now - 50e3 }),
   seed(LINKS_ID, 'claude:' + OTHER_SID, { text: 'Links in an item', detail: LINKS_DETAIL, createdAt: now - 85e3 }),
+  seed(FLOOR_ID, 'browser', { kind: 'notice', origin: 'browser', sessionName: 'Agent browser', text: BPF.floorNotice(FLOOR_V), detail: BPF.floorNoticeDetail(FLOOR_V, { retryMs: BFF.PROBE_RETRY_MS, timeoutMs: BFF.PROBE_TIMEOUT_MS }), action: { type: 'browser-floor-check' }, createdAt: now - 75e3 }),
 ];
+// ⑭'s browser CLI: its --version fails while <state>/fail exists (so the keeper's boot probe misses and the seeded notice
+// stands), then answers 0.38.1 — paths baked in (agentEnv strips unknown env), first on the server's PATH
+const AB_DIR = path.join(stubDir, 'ab'), AB_STATE = path.join(stubDir, 'ab-state');
+fs.mkdirSync(AB_DIR, { recursive: true }); fs.mkdirSync(AB_STATE, { recursive: true });
+fs.writeFileSync(path.join(AB_STATE, 'fail'), '');
+fs.writeFileSync(path.join(AB_DIR, 'agent-browser'), `#!${process.execPath}
+const fs = require('fs');
+if (process.argv[2] === '--version' && !fs.existsSync(${JSON.stringify(path.join(AB_STATE, 'fail'))})) { console.log('agent-browser 0.38.1'); process.exit(0); }
+process.stderr.write('fake: no answer\\n'); process.exit(1);
+`, { mode: 0o755 });
 
 // ── throwaway server in a worktree (overlays the built public/ + the working src/) ──
 try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
@@ -164,7 +180,8 @@ process.stdin.on('data', (d) => {
 });
 process.stdin.on('end', () => process.exit(0));
 `, { mode: 0o755 });
-const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: 'ignore' });
+const SRV_PATH = AB_DIR + ':' + (process.env.PATH || ''); // ⑭'s browser CLI first
+const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PATH: SRV_PATH, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: 'ignore' });
 const chromeDir = `${wt}-chrome`;
 const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu',
   '--no-sandbox', '--disable-dev-shm-usage', '--disable-background-timer-throttling', `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore' });
@@ -536,6 +553,26 @@ try {
   check('‹ back returns to the list', await realClick(P1, `${IW} .iw-back`) && await waitFor(`document.querySelector('${IW}').dataset.view === 'list' && getComputedStyle(document.querySelector('${IW} .iw-list')).display !== 'none'`, 3000));
   await evalJs(`(() => { const w = ${WIN}; w.element.style.width = '920px'; w.element.style.height = '640px'; w.onResize && w.onResize(); return true; })()`);
   check('widened again ⇒ two panes', await waitFor(`${ST}?.mode === 'split' && getComputedStyle(document.querySelector('${IW} .iw-pane')).display !== 'none' && getComputedStyle(document.querySelector('${IW} .iw-list')).display !== 'none'`, 3000));
+
+  // ── ⑭ lane browser-probe-transient (B-0b8c): the browser-version notice — Check again, first; an answer withdraws it ──
+  console.log('⑭ the browser-version notice (filed when the probe ladder gave up): Check again, first — the answer withdraws it');
+  check('a REAL click on the Notices tab, then on the notice', await realClick(P1, `${IW} .iw-tab[data-tab="notices"]`) && await waitFor(`${ST}?.tab === 'notices' && !!document.querySelector(${JSON.stringify(rowSel(FLOOR_ID))})`, 4000)
+    && await realClick(P1, rowSel(FLOOR_ID)) && await waitFor(`${ST}?.selected === ${JSON.stringify(FLOOR_ID)} && !!document.querySelector('${IW} .iw-item[data-id=${JSON.stringify(FLOOR_ID)}]')`, 3000));
+  const x13 = await evalJs(`(() => { const it = document.querySelector('${IW} .iw-item[data-id=${JSON.stringify(FLOOR_ID)}]'); return { acts: [...it.querySelectorAll('.iw-act')].map((b) => ({ act: b.dataset.act, text: b.textContent.trim(), title: b.title || b.getAttribute('aria-label') || '' })), text: it.textContent }; })()`);
+  check(`Check again is its FIRST action (${x13.acts.map((a) => a.act).join(', ')}), titled with what it does`, x13.acts[0]?.act === 'browser-floor-check' && x13.acts[0].text === 'Check again' && /once more now/.test(x13.acts[0].title), x13.acts);
+  check('the pane carries the notice\'s words: the tries, the span, why — and the ladder in its detail', /after 6 tries over 14 minutes \(timed out after 8 s\)/.test(x13.text) && /5 s, 15 s, 45 s, 2 min and 10 min/.test(x13.text), x13.text.slice(0, 400));
+  await shot(P1, 'inbox-window-floor-notice', '.window:has(.iw)');
+  // the press is timed off the keeper's OWN facts (GET /api/browser/floor): never within 2.5 s of a waiting rung, so the
+  // answer the toast reports is the press's own probe (a rung would withdraw the notice by itself — also right, not this leg)
+  let floor13 = null, clear13 = false;
+  for (let i = 0; i < 100 && !clear13; i++) { floor13 = await (await fetch(`http://127.0.0.1:${PORT}/api/browser/floor`)).json(); const n = floor13 && floor13.lastProbe && floor13.lastProbe.nextAt; clear13 = !!floor13 && floor13.floor?.state === 'unknown' && (!n || n - Date.now() > 2500); if (!clear13) await sleep(250); }
+  check('(the keeper\'s facts API: the CLI still does not answer — unknown, NOT settled — and no rung is due within 2.5 s)', clear13 && floor13.floor.settled === false && floor13.lastProbe.ok === false, floor13);
+  fs.rmSync(path.join(AB_STATE, 'fail'), { force: true });
+  check('a REAL click on Check again', await realClick(P1, `${IW} .iw-item[data-id=${JSON.stringify(FLOOR_ID)}] .iw-act[data-act="browser-floor-check"]`));
+  check('a toast says the version reads again (0.38.1)', await waitFor(`[...document.querySelectorAll('.global-toast')].some((e) => e.textContent.includes('The browser version reads again: 0.38.1'))`, 6000));
+  check('the store says the notice is done — WITHDRAWN by the answer (resolved by the keeper, not by a Mark done)', await (async () => { for (let i = 0; i < 20; i++) { const it = ((await storeNow()).resolved || []).find((x) => x.id === FLOOR_ID); if (it) return it.status === 'done' && it.resolvedBy === 'agent'; await sleep(200); } return false; })());
+  await shot(P1, 'inbox-window-floor-checked', '.window:has(.iw)');
+  await realClick(P1, `${IW} .iw-tab[data-tab="actions"]`);
 
   // ── ⑫ negative control for ② ──
   console.log('⑫ negative control');

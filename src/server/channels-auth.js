@@ -11,7 +11,7 @@
 
 const crypto = require('crypto');
 const { ChannelError } = require('../channels/index.js');
-const { cancelledSentence, identityOf, namelessSentence, heldIdentity, identityMismatch, mismatchSentence } = require('../channel-identity.js');
+const { cancelledSentence, identityOf, namelessSentence, heldIdentity, identityMismatch, mismatchSentence, stampIdentity } = require('../channel-identity.js');
 const caps = require('../channel-caps.js');
 const { OWN_KEY, CLUSTER_PREFIX } = require('./integration-store.js');
 const R = require('../integration-registry.js');
@@ -492,13 +492,18 @@ function create(engineCtx) {
       if (!engineCtx.stopped) notify([]);
       return;
     }
+    let learned = null;
     await store.adapters.update(() => {
       rec.credentialKey = p.choice.credentialKey;
       if (p.choice.credential) rec.credential = p.choice.credential; else delete rec.credential;
       rec.auth = { ...(rec.auth || {}), tokenEnc: p.tokenEnc, expiresAt: p.tokenMeta.expiresAt, scopes: p.tokenMeta.scopes, user: p.tokenMeta.user || (rec.auth && rec.auth.user) || null, updatedAt: now(), scopesAt: now(), refusedScopes: p.tokenMeta.refusedScopes || [] };
-      if (p.identity && Object.keys(p.identity).length) rec.identity = { ...(rec.identity || {}), ...p.identity };
+      // lane slack-grid-identity: the one stamp rule, as at the token door — an organisation the consent names is learned once
+      const st = stampIdentity(rec.identity, p.identity);
+      if (st.changed) rec.identity = st.identity;
+      if (st.learned) { learned = st.learned; rec.lastAuthNote = { code: 'enterprise-learned', at: now() }; } else delete rec.lastAuthNote;
       rec.lastAuthError = null; rec.lastAuthAt = now();
     });
+    if (learned) log.log(`[channels] ${rec.id}: the sign-in names the organisation ${learned} the account's identity did not — the same account; its identity learned it`);
     dropLive(rec.id, 'client switched');
     log.log(`[channels] ${rec.id}: re-authorized under ${rec.credentialKey}${rec.auth.user ? ` as ${rec.auth.user}` : ''}`);
     const e = adapterFor(rec);

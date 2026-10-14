@@ -505,6 +505,7 @@ const base = { adapterId: 'a', convId: 'c', vendorId: 'v1', at: 1700000000000, t
     ['src/channel-thread.js', "name: String(a.display || a.name || '')", 'a stored record\'s author — makeRecord\'s door (lane lark-threads: `display` = channel-authors\' view, built from door outputs and the owner\'s alias through the door)'],
     ['src/channels/gmail.js', 'name: String(p.filename', 'an attachment of a record makeRecord builds — the door'],
     ['src/channels/fake.js', "name: String((r.author && r.author.name) || 'Ada')", 'lane lark-threads: the fake topics seam\'s reply author — a record makeRecord builds (the door)'],
+    ['src/channels/fake.js', "name: String(f.name || '')", 'lane composer-file-only-send: the files seam\'s echo of a sent file — an attachment of a record makeRecord builds (the door)'],
     ['src/channels/lark.js', "name: String((m && m.name) || '')", 'a record\'s mentions — makeRecord\'s door'],
     ['src/channels/lark.js', "names.set(String(m.member_id), String(m.name || ''))", 'the members\' names map — read only into makeRecord\'s author and a tree\'s @ (both doors)'],
     ['src/channels/lark.js', "name: String(appName || '')", 'lane message-facts-lark: the `via` fact\'s app name — a record makeRecord builds (validateFacts\' party door)'],

@@ -161,7 +161,7 @@ const caps = Object.freeze({
   // URL (files.slack.com) → `files.completeUploadExternal` into the conversation; the text rides as the FIRST file's
   // `initial_comment`. Needs `files:write` on the user token (refused by name when not held). Gmail's bounds (Slack's own
   // per-file ceiling is 1 GB)
-  sendAttachments: Object.freeze({ maxCount: 10, maxTotalBytes: 25e6, withText: true }),
+  sendAttachments: Object.freeze({ maxCount: 10, maxTotalBytes: 25e6, withText: true, alone: true }),   // lane composer-file-only-send: a file by itself is a message
   sendAttachmentsWhy: null,
   identityMarking: 'unknown',       // the probe `sendMarker`: whether a message sent with the person's token carries an app marker
   identityMarkingWhere: null,

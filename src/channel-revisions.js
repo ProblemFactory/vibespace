@@ -12,6 +12,8 @@
  *     RECHECK_WOKE_MS, is re-read BY ID at most once per RECHECK_EVERY_MS, at most RECHECK_PER_PASS per account pass and
  *     RECHECK_PER_HOUR per account per sliding hour — woken-for first, then the newest; a recalled one is done. The
  *     owner's own Refresh (a forced pass) re-asks after RECHECK_FORCED_MS, inside the same hourly cap.
+ *  V4 THE WOKEN-FOR LEDGER (lane channel-recall-ledger): `wokeKeyOf` = a row's key (the id the recheck asks with),
+ *     `capWokeRows` = its fair bound (the conversation holding the most rows loses its oldest).
  */
 const R = require('./channel-record.js');
 
@@ -94,13 +96,38 @@ function agentRevisionLine({ recalledAt = null, versions = null } = {}, { iso = 
   if (Array.isArray(versions) && versions.length > 1) bits.push(`[edited: v${versions.length} of ${versions.length}; --versions shows all]`);
   return R.inertFrameLine(bits.join(' '));
 }
-/** The ONE next-turn note to a conversation a wake fired on, when that message is recalled (no peer words). */
+/** The ONE next-turn note to a conversation a message was DELIVERED to (any road — a wake, a digest, the free next-turn
+ *  stash), when that message is recalled (no peer words). "delivered", never "woken for" (lane boot-flush-next-turn: a
+ *  next-turn watch is never woken, and its note said it was). */
 function recallNoteText({ account = '', conversation = '', at = null } = {}, { iso = (ms) => new Date(ms).toISOString() } = {}) {
   const where = [account, conversation].filter(Boolean).join(' / ');
-  return R.inertFrameLine(`The channel message you were woken for${at ? ` at ${iso(at)}` : ''}${where ? ` (${where})` : ''} was recalled by its sender. VibeSpace keeps its content (vibespace-channels read shows it marked).`);
+  return R.inertFrameLine(`The channel message delivered to you${at ? ` at ${iso(at)}` : ''}${where ? ` (${where})` : ''} was recalled by its sender. VibeSpace keeps its content (vibespace-channels read shows it marked).`);
+}
+
+/** THE WOKEN-FOR LEDGER'S KEY (lane channel-recall-ledger): a row is keyed by the message's REVISION key — the vendor
+ *  id the by-id recheck asks with, the same for every version of the message (never the store's record id) — so a
+ *  recall finds every conversation that holds any version of it. The engine's door writes it; the note looks it up. */
+const WOKE_KEY_MAX = 512;
+function wokeKeyOf(vid) { return vid === null || vid === undefined || vid === '' ? null : String(vid).slice(0, WOKE_KEY_MAX); }
+/** The ledger's bound, FAIR (lane channel-recall-ledger): over `max` rows, the conversation holding the most rows loses
+ *  its oldest first — a chatty next-turn watch never pushes another conversation's rows out (was: the newest `max`
+ *  rows, whoever they named). Ties go to the conversation whose rows came first. */
+function capWokeRows(rows, max) {
+  const out = (Array.isArray(rows) ? rows : []).filter(Boolean);
+  while (out.length > Math.max(0, max)) {
+    const n = new Map();
+    for (const w of out) n.set(w.cid, (n.get(w.cid) || 0) + 1);
+    let top = null;
+    for (const [cid, k] of n) if (top === null || k > n.get(top)) top = cid;
+    let i = -1;
+    for (let j = 0; j < out.length; j++) if (out[j].cid === top && (i < 0 || Number(out[j].at) < Number(out[i].at))) i = j;
+    out.splice(i, 1);
+  }
+  return out;
 }
 
 module.exports = {
   RECHECK_FRESH_MS, RECHECK_WOKE_MS, RECHECK_EVERY_MS, RECHECK_FORCED_MS, RECHECK_PER_PASS, RECHECK_PER_HOUR, VERSIONS_KEPT,
   foldVersions, recalledAtOf, recallFacts, editFacts, editedAtOf, compactVersionLines, planRecheck, agentRevisionLine, recallNoteText,
+  wokeKeyOf, capWokeRows,
 };

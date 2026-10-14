@@ -12,7 +12,7 @@
 //      command's output is never live), the spawn_failed card / sentence / CLI line, runRecord, runRow, outputPreview
 //   §2b PURE src/secret-shapes.js (verify r1 F1) — THE SECRET SHAPES the stored heads redact: a PEM block, a
 //      secret-named `KEY=value` (env / JSON / YAML / --flag), a bearer / basic, a known token prefix, `password <x>`;
-//      what stays (a certificate, an exit code, "Basic Latin"); idempotent; the input bound; the clock ratio
+//      what stays (a certificate, an exit code, "Basic Latin"); idempotent; the input bound; linear by the COUNT
 //   §3 the REAL ExitProxyManager over fake daemons: a daemon WITH the `run-shell` capability gets `{shell}` and never
 //      `sh -lc`; one WITHOUT it gets `sh -lc` (the old form); a spawnError reply ⇒ `spawn_failed` — the audit line,
 //      the row's last run, the card say WHY; exit 1 + stderr ⇒ the heads on the audit line and the card; a 10 KiB
@@ -36,9 +36,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
-import { execFile, execFileSync, spawn } from 'node:child_process';
+import { execFile, execFileSync, spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+import { judgeInChild } from './work-meter.mjs';
 import { scratch, stampScratchRun } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
@@ -184,6 +185,14 @@ await section('§2 PURE exit-reach: the heads, the spawn_failed words, the rows'
 
 // ── §2b ──
 const SS = require(path.join(REPO, 'src/secret-shapes.js'));
+// LINEAR BY THE COUNT (lane cpu-ratio-controls, B-923c): redactSecrets' WORK at n and factor × n — every block of
+// secret-shapes.js, every scan, and every step a regex BACKTRACKS inside one exec (scripts/work-meter.mjs's backtrack charge:
+// V8's own counter, read in a child) — linear reads the size factor, ×4 / ×8 to the step; quadratic its square. A count: a
+// loaded box reads the same verdict (the clock ratios it replaces read red 1 in 5 beside 32 spinners; verify r1 ran at load
+// 150). mk(0) is the empty text (the meter subtracts its work as the call's constant part)
+const SS_FILE = path.join(REPO, 'src/secret-shapes.js');
+const stepsOf = (mk, n, factor, { module = SS_FILE, runs = false, backtracks = true } = {}) => judgeInChild({ module, run: `(M, x) => M.redactSecrets(x${runs ? ', { runs: true }' : ''})`, mk: `(n) => n === 0 ? '' : (${String(mk)})(n)`, n, kind: 'linear', backtracks, opts: { factor } });
+const stepsLine = (v) => (v.err ? `the child failed: ${v.err.slice(0, 300)}` : `${v.w1} → ${v.w2} steps, ×${v.r.toFixed(2)} (bound ×${v.bound})`);
 // each row: [name, text, a fragment that must NOT survive | null = nothing may change] — module-scoped: §7's per-rule
 // controls (verify r2 W6) run the same table over a copy with ONE rule removed
 const ROWS = [
@@ -269,11 +278,9 @@ await section('§2b PURE secret-shapes: what a stored head never keeps (verify r
   ok(SS.redactSecrets(null).text === '' && SS.redactSecrets(42).text === '42', 'null ⇒ empty, a number ⇒ text');
   // the input bound: judged to INPUT_MAX, never parsed whole past it
   ok(SS.redactSecrets('x'.repeat(256 * 1024)).text.length === SS.INPUT_MAX, `the input is bounded at ${SS.INPUT_MAX} before any pass`);
-  // the clock ratio at 16 → 64 KiB (×4 input: linear ≈ 4, quadratic ≈ 16; bound 8) over adversarial shapes, best of 5 — a wall
-  // clock under load is the clock class (verify r1 ran at load 150): the bound separates the two orders with room, never a fact about the box
+  // LINEAR at 16 → 64 KiB (×4 input: linear reads ×4, quadratic ×16; bound ×4.4) over adversarial shapes, by the count (stepsOf)
   const shapes = { quoteNoClose: (n) => 'token="' + 'x'.repeat(n), kvStorm: (n) => 'a=b '.repeat(n / 4), pwStorm: (n) => 'password '.repeat(n / 9), eyJ: (n) => 'eyJ'.repeat(n / 3), bearer: (n) => 'Bearer '.repeat(n / 7), colon: (n) => ':'.repeat(n), spaces: (n) => 'a: ' + ' '.repeat(n) };
-  const best = (mk, n) => { let b = Infinity; for (let i = 0; i < 5; i++) { const t = mk(n); const t0 = process.hrtime.bigint(); SS.redactSecrets(t); b = Math.min(b, Number(process.hrtime.bigint() - t0) / 1e6); } return b; };
-  for (const [k, mk] of Object.entries(shapes)) { const a = best(mk, 16384), b = best(mk, 65536); ok(b <= 1000 && (a < 0.5 || b / a <= 8), `linear on ${k}: ${a.toFixed(2)} ms → ${b.toFixed(2)} ms (×4 input)`); }
+  for (const [k, mk] of Object.entries(shapes)) { const v = stepsOf(mk, 16384, 4); ok(v.ok, `linear on ${k} by the count: ${stepsLine(v)} at ×4 input`, v); }
   // R7 / R8 (inbox-verify F1, 2026-10-13 — the LLM plugin's judge read a record's token query values and its key material verbatim)
   const R7A = ['https://hooks.example.com/cb?to', 'ken=tok_9f8e7d6c5b4a&sig=ab12'].join(''), R7B = 'see https://x.io/a?access_token=AT-99zz&api_key=K-77yy&x=1#key=frag-55';
   const qa = SS.redactSecrets(R7A).text, qb = SS.redactSecrets(R7B).text;
@@ -283,8 +290,7 @@ await section('§2b PURE secret-shapes: what a stored head never keeps (verify r
   for (const [k, v] of Object.entries(RUNS)) { const on = SS.redactSecrets(`x ${v} y`, { runs: true }).text, off = SS.redactSecrets(`x ${v} y`).text; ok(on === 'x «redacted» y' && off.includes(v) && SS.redactSecrets(on, { runs: true }).text === on, `R8 (${k}): key material with no name goes when asked ({ runs: true } — the judge's input), stays in a stored head (a sha is diagnosis)`, [on, off]); }
   const KEEP = ['/var/tmp/vibespace-lanes/wt-decision-input-scrub/src/decision-model.js', 'phone-arrangement-verify-r1-NO-GO-2026Oct12', 'AIWorkspaceVibespaceDecisionModelScrubLane', 'sha 9e2852896 short', 'a'.repeat(40)];
   ok(KEEP.every((t) => SS.redactSecrets(t, { runs: true }).redacted === 0), 'R8 NEGATIVE: a path, a slug, an identifier with no digit, a short sha, one repeated letter stay');
-  const bestRuns = (mk, n) => { let b = Infinity; for (let i = 0; i < 5; i++) { const t = mk(n); const t0 = process.hrtime.bigint(); SS.redactSecrets(t, { runs: true }); b = Math.min(b, Number(process.hrtime.bigint() - t0) / 1e6); } return b; };
-  for (const [k, mk] of Object.entries({ queryStorm: (n) => ['?to', 'ken='].join('').repeat(n / 7), queryName: (n) => '?' + 'a'.repeat(n), runStorm: (n) => ('aB1' + 'x'.repeat(27) + ' ').repeat(n / 31), runWhole: (n) => 'aB1/'.repeat(n / 4) })) { const a = bestRuns(mk, 16384), b = bestRuns(mk, 65536); ok(b <= 1000 && (a < 0.5 || b / a <= 8), `R7 / R8 linear on ${k}: ${a.toFixed(2)} ms → ${b.toFixed(2)} ms (×4 input)`); }
+  for (const [k, mk] of Object.entries({ queryStorm: (n) => ['?to', 'ken='].join('').repeat(n / 7), queryName: (n) => '?' + 'a'.repeat(n), runStorm: (n) => ('aB1' + 'x'.repeat(27) + ' ').repeat(n / 31), runWhole: (n) => 'aB1/'.repeat(n / 4) })) { const v = stepsOf(mk, 16384, 4, { runs: true }); ok(v.ok, `R7 / R8 linear on ${k} by the count: ${stepsLine(v)} at ×4 input`, v); }
   // RED CONTROL: the table without R7 / R8 (a patched copy) keeps the query value and the run — the legs above can fail
   const src78 = fs.readFileSync(path.join(REPO, 'src/secret-shapes.js'), 'utf8');
   const cut78 = src78.split('\n').filter((l) => !/text = text\.replace\(URL_QUERY_RE|if \(runs\) text = text\.replace\(RUN_RE/.test(l)).join('\n');
@@ -298,13 +304,11 @@ await section('§2b PURE secret-shapes: what a stored head never keeps (verify r
 // ── §2c verify r3: what r2 ADDED, attacked (the fold-first order, the value extent, the continuation rule, the marks, the id) ──
 // verify r4 F4's WORK witness: the `\n` searches one call makes (a cached memchr is invisible to the clock)
 const countNl = (fn, t) => { const orig = String.prototype.indexOf; let c = 0; String.prototype.indexOf = function (q, ...r) { if (q === '\n') c++; return orig.call(this, q, ...r); }; try { fn(t); } finally { String.prototype.indexOf = orig; } return c; };
-// a CONTROL takes its ×8 side ONCE (k = 1): noise only ever adds time there, which can only make a quadratic copy read MORE
-// quadratic — the best-of-3 matters on the small side and on the legs that must read linear (lane fast-budget: 3 × ~1.5 s per control)
-const bestOf = (fn, mk, n, k = 3) => { let b = Infinity; for (let i = 0; i < k; i++) { const t = mk(n); const t0 = process.hrtime.bigint(); fn(t); b = Math.min(b, Number(process.hrtime.bigint() - t0) / 1e6); } return b; };
-// the clock at ×8 input (linear ≈ 8, quadratic ≈ 64; bound 16): the work meter (scripts/work-meter.mjs) is the wrong witness for
-// this module both ways — it charges `exec` / `test` the receiver's LENGTH per call (a global-regex replace on a patched
-// prototype takes the spec's slow path and calls exec per match ⇒ every regex pass reads quadratic by construction: measured
-// r=4.00 on `x.replace(/a/g, 'b')`), and it cannot see the backtracking INSIDE one exec (keyRun read r=2.00 at 711 ms)
+// the ×8 legs (§2c, §2d) are counts too (stepsOf): 8 → 64 KiB, linear ×8, quadratic ×64, bound ×8.8. Until lane cpu-ratio-controls
+// they were the clock (best of 3, bound 16), the work meter being the wrong witness both ways: it charged `exec` / `test` the
+// receiver's LENGTH per call (every regex pass read quadratic — the span it walks since .209, a sticky miss one place since this
+// lane) and it could not see the backtracking INSIDE one exec (keyRun read r=2.00 at 711 ms) — its backtrack charge reads V8's
+// own counter now (a mutant (j) reads ×58 by the count where the meter without the charge read ×8.00)
 const R3_SHAPES = {
   keyRun: (n) => 'key'.repeat(n / 3), regLine: (n) => ('key' + 'x'.repeat(20)).repeat(n / 23),   // F1: R6's `\S*(?:word)\S*`
   // F2: the continuation pre-check's `[ \t]*(?:…)?[ \t]*` — two runs of one class around an optional group (100 ms per 8 KiB head,
@@ -317,7 +321,7 @@ const R3_SHAPES = {
 await section('§2c verify r3: the r2 additions attacked — order, extent, continuation, marks, id', async () => {
   // F1: a spaceless 64 KiB line of secret words took 1.7 s in R6 (12 ms per 4 KiB stored head ⇒ 0.6 s for the owner's 50-row list,
   // 2.5 s at the agent's 200): the name is ONE `\S+` token now, its word judged in code
-  for (const [k, mk] of Object.entries(R3_SHAPES)) { const a = bestOf(SS.redactSecrets, mk, 8192), b = bestOf(SS.redactSecrets, mk, 65536); ok(b <= 1000 && (a < 0.5 || b / a <= 16), `verify r3: linear on ${k}: ${a.toFixed(2)} ms → ${b.toFixed(2)} ms (×8 input)`); }
+  for (const [k, mk] of Object.entries(R3_SHAPES)) { const v = stepsOf(mk, 8192, 8); ok(v.ok, `verify r3: linear on ${k} by the count: ${stepsLine(v)} at ×8 input`, v); }
   ok(SS.redactSecrets('    ApiToken    REG_EXPAND_SZ    abc\n  x  REG_SZ  y').text === '    ApiToken    REG_EXPAND_SZ    «redacted»\n  x  REG_SZ  y', 'F1: R6 still hides the secret-named row\'s value and keeps a plain row');
   // F5 (X2: a Windows CRLF continuation): the PURE rule missed it — CONT_HEAD's `.` stops at `\r`; the product path folds CRLF first
   // so the stored head was right, a direct caller's was not (and the failed `$` cost a quadratic backtrack: 36 → 182 ms at ×2)
@@ -371,12 +375,12 @@ await section('§2c verify r3: the r2 additions attacked — order, extent, cont
   ok(SS.redactSecrets('\u{1F468}\u200D\u{1F469}\u200D\u{1F467} ok\n').text === '\u{1F468}\u200D\u{1F469}\u200D\u{1F467} ok\n' && SS.redactSecrets('می\u200Cخواهم\n').text === 'می\u200Cخواهم\n', 'F3: an emoji ZWJ sequence and a ZWNJ inside a Persian word stay (a joiner between two ASCII word characters is the only one folded)');
 });
 
-// ── §2d verify r4: a regex CENSUS of src/secret-shapes.js BY CONSTRUCTION — every regex, its worst input, the ×8 clock (8 → 64 KiB; bound 16) ──
+// ── §2d verify r4: a regex CENSUS of src/secret-shapes.js BY CONSTRUCTION — every regex, its worst input, the ×8 count (8 → 64 KiB; bound ×8.8) ──
 // The quadratic signature = two adjacent quantified pieces over one class, or a quantified run before a piece that can FAIL after it
 // (the run is then backtracked at every start). The census (verify-r4 report Z1): PEM_BEGIN / PEM_END (`[A-Z0-9 ]*PRIVATE KEY[A-Z0-9 ]*`
 // — the label class holds the literal's own letters), `/\s+$/` (the trim), PREFIX_RE's JWT alternative (`\b` re-opened by the `-` of its
 // own run class), KV's `\n` search per head — each rewritten as a linear scan in code; the others carry one unbounded run each, judged
-// linear by construction and here by the clock
+// linear by construction and here by the count
 const R4_SHAPES = {
   trimNbspBare: (n) => 'token=' + '\u00a0'.repeat(n - 7) + 'x', trimNbspQuoted: (n) => 'token="' + '\u00a0'.repeat(n - 8) + 'x', trimIdeographic: (n) => 'token=' + '\u3000'.repeat(n - 7) + 'x',   // F1
   jwtDashStorm: (n) => '-eyJ'.repeat(n / 4), jwtDotStorm: (n) => '-eyJ' + 'a'.repeat(8) + '.'.repeat(1) + ('-eyJ' + 'a'.repeat(8) + '.').repeat(n / 13),   // F3: `\b` re-opened by the run's own `-`
@@ -386,7 +390,7 @@ const R4_SHAPES = {
 // (the exec loop alone reads ×6 at ×8, the rope of parts drifts it to ×13 — the clock class), and a cached 64 KiB memchr is invisible to the clock either way
 const R4_WORK = { kvQuotedLine: (n) => 'token="a" '.repeat(n / 10) };
 await section('§2d verify r4: the regex census — every regex of secret-shapes.js at ×8 input', async () => {
-  for (const [k, mk] of Object.entries(R4_SHAPES)) { const a = bestOf(SS.redactSecrets, mk, 8192), b = bestOf(SS.redactSecrets, mk, 65536); ok(b <= 1000 && (a < 0.5 || b / a <= 16), `verify r4: linear on ${k}: ${a.toFixed(2)} ms → ${b.toFixed(2)} ms (×8 input)`); }
+  for (const [k, mk] of Object.entries(R4_SHAPES)) { const v = stepsOf(mk, 8192, 8); ok(v.ok, `verify r4: linear on ${k} by the count: ${stepsLine(v)} at ×8 input`, v); }
   // F1: the trailing blanks of a value are `\s`'s set (trimEnd — a backward scan; the same set as the regex over every code point), kept after the marker
   ok(SS.redactSecrets('token=abc\u00a0\u3000\t \u2028\n').text === 'token=«redacted»\u00a0\u3000\t \u2028\n', 'F1: the blanks after a value (NBSP, U+3000, tab, space, U+2028) stay after the marker — trimEnd is the regex\'s set');
   // Z2 (decided, pinned): THE STORED HEAD IS THE FOLDED HEAD — a joiner between two ASCII word characters is dropped from what the reader sees
@@ -913,16 +917,26 @@ await section('§7 controls (patched copies)', async () => {
     const reds = ROWS.filter(([, text, frag]) => { const r = SSr.redactSecrets(text); return frag ? (r.text.includes(frag) || !r.text.includes(SSr.REDACTED)) : r.text !== text; }).map(([name]) => name);
     ok(reds.length >= 1, `CONTROL (i) ${rule} removed: ${reds.length} row(s) of the §2b table go red — ${reds.slice(0, 3).join(' · ')}${reds.length > 3 ? ' …' : ''}`);
   }
+  // the six BACKTRACKING controls below (j k n q r s) are the same count over the planted copy, at 512 B → 4 KiB: a mutant's
+  // count there already reads ×20–62 (×26–63 at 1 → 8 KiB), and at the legs' 64 KiB its backtracks pass V8's 2^30 limit
+  // (~15 s of unoptimized backtracking per control, measured) — the leg's own bound ×8.8 goes red at any of these sizes
   // (j) verify r3 F1: the backtracking R6 regex restored (`\S*(?:word)\S*`) — the §2c keyRun / regLine legs go red (×45 / ×54 at ×8)
   const ssMutJ = ssSrc.replace('const REG_RE = /^([ \\t]*)(\\S+)([ \\t]{2,}REG_', 'const REG_RE = /^([ \\t]*)(\\S*(?:password|passwd|secret|token|key|cred|auth|cookie|session)\\S*)([ \\t]{2,}REG_');
   ok(ssMutJ !== ssSrc, '(j) the patch applies');
-  const SSj = M.load('src/secret-shapes.js', ssMutJ, 'regback');
-  { const a = bestOf(SSj.redactSecrets, R3_SHAPES.keyRun, 8192), b = bestOf(SSj.redactSecrets, R3_SHAPES.keyRun, 65536, 1); ok(b / Math.max(0.05, a) >= 12, `CONTROL (j): the backtracking R6 reads quadratic — ${a.toFixed(1)} ms → ${b.toFixed(1)} ms at ×8 input (the §2c leg goes red)`); }
+  const fJ = M.write('src/secret-shapes.js', ssMutJ, 'regback');
+  { const v = stepsOf(R3_SHAPES.keyRun, 512, 8, { module: fJ }); ok(!v.err && !v.ok, `CONTROL (j): the backtracking R6 reads quadratic by the count — ${stepsLine(v)} at ×8 input (the §2c leg goes red)`, v); }
+  // THE CHARGE IS THE WITNESS (lane cpu-ratio-controls): the same copy under the meter WITHOUT the backtrack charge reads linear —
+  // its blocks and scans are; the backtracking is inside one exec — and the count is a fact of the code: two children agree to the step
+  { const v = stepsOf(R3_SHAPES.keyRun, 512, 8, { module: fJ, backtracks: false }), d1 = stepsOf(R3_SHAPES.keyRun, 8192, 8), d2 = stepsOf(R3_SHAPES.keyRun, 8192, 8);
+    ok(!v.err && v.ok && !d1.err && d1.w1 === d2.w1 && d1.w2 === d2.w2, `CONTROL (j) without the backtrack charge: ${stepsLine(v)} — the meter alone is blind to it; the real keyRun leg read twice: ${d1.w1} → ${d1.w2} and ${d2.w1} → ${d2.w2} steps (the same to the step)`, { v, d1, d2 }); }
+  // the charge refuses a process without its flags (a reading under V8's optimized greedy loop would miss the run's steps)
+  { const r = spawnSync(process.execPath, ['--input-type=module', '-e', `import(${JSON.stringify(path.join(REPO, 'scripts/work-meter.mjs'))}).then((m) => { try { m.startWorkMeter({ backtracks: true }); console.log('STARTED'); } catch (e) { console.log(e.message); } })`], { encoding: 'utf8', timeout: 60000 });
+    ok(/needs a process started with --allow-natives-syntax --no-regexp-optimization --no-regexp-tier-up/.test(r.stdout) && !/STARTED/.test(r.stdout), 'the backtrack charge refuses a process started without its three flags', r.stdout + r.stderr); }
   // (k) verify r3 F2: the pre-check with its two blank runs restored — the §2c colonSpacesX leg goes red (×28 at ×8)
   const ssMutK = ssSrc.replace('const CONT_ANY_RE = /[:=][ \\t]*(?:[|>][+-]?\\d*[ \\t]*|["\'][^\\n]*)?(?:\\r?\\n|$)/;', 'const CONT_ANY_RE = /[:=][ \\t]*(?:[|>][+-]?\\d*|["\'][^\\n]*)?[ \\t]*(?:\\r?\\n|$)/;');
   ok(ssMutK !== ssSrc, '(k) the patch applies');
-  const SSk = M.load('src/secret-shapes.js', ssMutK, 'precheckback');
-  { const a = bestOf(SSk.redactSecrets, R3_SHAPES.colonSpacesX, 8192), b = bestOf(SSk.redactSecrets, R3_SHAPES.colonSpacesX, 65536, 1); ok(b / Math.max(0.05, a) >= 12, `CONTROL (k): the two-run pre-check reads quadratic — ${a.toFixed(1)} ms → ${b.toFixed(1)} ms at ×8 input (the §2c leg goes red)`); }
+  const fK = M.write('src/secret-shapes.js', ssMutK, 'precheckback');
+  { const v = stepsOf(R3_SHAPES.colonSpacesX, 512, 8, { module: fK }); ok(!v.err && !v.ok, `CONTROL (k): the two-run pre-check reads quadratic by the count — ${stepsLine(v)} at ×8 input (the §2c leg goes red)`, v); }
   // (l) verify r3 F3: the joiner fold removed — a joiner inside a secret name keeps its value (the §2c JOINED rows go red)
   const ssMutL = ssSrc.replace("  if (text.includes('\\u200C') || text.includes('\\u200D')) text = text.replace(JOINER_IN_WORD_RE, '');", '');
   ok(ssMutL !== ssSrc, '(l) the patch applies');
@@ -936,8 +950,8 @@ await section('§7 controls (patched copies)', async () => {
   // (n) verify r3 F5: CONT_HEAD's `.*` restored — the CRLF rows go red and contCR reads quadratic
   const ssMutN = ssSrc.replace("\\3[ \\t]*[:=][ \\t]*([^\\n]*)$/;", '\\3[ \\t]*[:=][ \\t]*(.*)$/;');
   ok(ssMutN !== ssSrc, '(n) the patch applies');
-  const SSn = M.load('src/secret-shapes.js', ssMutN, 'contdot');
-  { const a = bestOf(SSn.redactSecrets, R3_SHAPES.contCR, 8192), b = bestOf(SSn.redactSecrets, R3_SHAPES.contCR, 65536, 1); ok(/hunter2/.test(SSn.redactSecrets('password:\r\n  hunter2\r\n').text) && b / Math.max(0.05, a) >= 12, `CONTROL (n): with \`.*\` the CRLF continuation keeps hunter2 and contCR reads quadratic — ${a.toFixed(1)} ms → ${b.toFixed(1)} ms at ×8 (the §2c rows go red)`); }
+  const fN = M.write('src/secret-shapes.js', ssMutN, 'contdot'), SSn = require(fN);
+  { const v = stepsOf(R3_SHAPES.contCR, 512, 8, { module: fN }); ok(/hunter2/.test(SSn.redactSecrets('password:\r\n  hunter2\r\n').text) && !v.err && !v.ok, `CONTROL (n): with \`.*\` the CRLF continuation keeps hunter2 and contCR reads quadratic by the count — ${stepsLine(v)} at ×8 (the §2c rows go red)`, v); }
   // (o) verify r3 F6: the indent compared by characters again — the tab row goes red
   const ssMutO = ssSrc.replace('      if (indentCols(l) <= indent) break;', '      if (indentChars(l) <= indentChars(lines[i])) break;');
   ok(ssMutO !== ssSrc, '(o) the patch applies');
@@ -951,18 +965,18 @@ await section('§7 controls (patched copies)', async () => {
   // (q) verify r4 F1: the `/\s+$/` trim restored — the §2d trim legs go red (×85–150 at ×8)
   const ssMutQ = ssSrc.replace('    const trimmed = val.trimEnd();', "    const trimmed = val.replace(/\\s+$/, '');");
   ok(ssMutQ !== ssSrc, '(q) the patch applies');
-  const SSq = M.load('src/secret-shapes.js', ssMutQ, 'trimre');
-  { const a = bestOf(SSq.redactSecrets, R4_SHAPES.trimNbspBare, 8192), b = bestOf(SSq.redactSecrets, R4_SHAPES.trimNbspBare, 65536, 1); ok(b / Math.max(0.05, a) >= 12, `CONTROL (q): the regex trim reads quadratic — ${a.toFixed(1)} ms → ${b.toFixed(1)} ms at ×8 input (the §2d trim legs go red)`); }
+  const fQ = M.write('src/secret-shapes.js', ssMutQ, 'trimre');
+  { const v = stepsOf(R4_SHAPES.trimNbspBare, 512, 8, { module: fQ }); ok(!v.err && !v.ok, `CONTROL (q): the regex trim reads quadratic by the count — ${stepsLine(v)} at ×8 input (the §2d trim legs go red)`, v); }
   // (r) verify r4 F2: the PEM label regexes restored — the §2d pem legs go red (×70–100 at ×8)
   const ssMutR = ssSrc.replace("function pemLine(line, word) {\n", "const PEM_RES = { BEGIN: /^\\s*-----BEGIN [A-Z0-9 ]*PRIVATE KEY[A-Z0-9 ]*-----\\s*$/, END: /^\\s*-----END [A-Z0-9 ]*PRIVATE KEY[A-Z0-9 ]*-----\\s*$/ };\nfunction pemLine(line, word) {\n  return PEM_RES[word].test(line);\n");
   ok(ssMutR !== ssSrc, '(r) the patch applies');
-  const SSr = M.load('src/secret-shapes.js', ssMutR, 'pemre');
-  { const a = bestOf(SSr.redactSecrets, R4_SHAPES.pemBeginStorm, 8192), b = bestOf(SSr.redactSecrets, R4_SHAPES.pemBeginStorm, 65536, 1); ok(b / Math.max(0.05, a) >= 12 && !/MIIEpAIBAAKCAQEA/.test(SSr.redactSecrets('-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA\n-----END RSA PRIVATE KEY-----').text), `CONTROL (r): the label regex reads quadratic — ${a.toFixed(1)} ms → ${b.toFixed(1)} ms at ×8 input, the plain block still hidden (the §2d pem legs go red)`); }
+  const fR = M.write('src/secret-shapes.js', ssMutR, 'pemre'), SSr = require(fR);
+  { const v = stepsOf(R4_SHAPES.pemBeginStorm, 512, 8, { module: fR }); ok(!v.err && !v.ok && !/MIIEpAIBAAKCAQEA/.test(SSr.redactSecrets('-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA\n-----END RSA PRIVATE KEY-----').text), `CONTROL (r): the label regex reads quadratic by the count — ${stepsLine(v)} at ×8 input, the plain block still hidden (the §2d pem legs go red)`, v); }
   // (s) verify r4 F3: the JWT alternative restored into PREFIX_RE, the scan removed — the §2d jwt legs go red (×65 at ×8)
   const ssMutS = ssSrc.replace("|jbt_[A-Za-z0-9_\\-]{8,255})(?![A-Za-z0-9_\\-])/g;", "|jbt_[A-Za-z0-9_\\-]{8,255}|eyJ[A-Za-z0-9_\\-]{8,65536}\\.eyJ[A-Za-z0-9_\\-]{8,65536}\\.[A-Za-z0-9_\\-]{8,65536})(?![A-Za-z0-9_\\-])/g;").replace("    const jwt = redactJwt(text); text = jwt.text; n += jwt.n;", '').replace("|vsmt_|vswh_|vswp_|jbt_)/;", "|vsmt_|vswh_|vswp_|jbt_|eyJ)/;");
   ok(ssMutS !== ssSrc && ssMutS.includes('eyJ[A-Za-z0-9_') && !ssMutS.includes('const jwt = redactJwt(text)'), '(s) the patch applies');
-  const SSs = M.load('src/secret-shapes.js', ssMutS, 'jwtre');
-  { const a = bestOf(SSs.redactSecrets, R4_SHAPES.jwtDashStorm, 8192), b = bestOf(SSs.redactSecrets, R4_SHAPES.jwtDashStorm, 65536, 1); ok(b / Math.max(0.05, a) >= 12 && SSs.redactSecrets('x-eyJaaaaaaaa.eyJbbbbbbbb.cccccccc y').text === 'x-eyJ«redacted» y', `CONTROL (s): the JWT alternative reads quadratic — ${a.toFixed(1)} ms → ${b.toFixed(1)} ms at ×8 input, the plain token still hidden (the §2d jwt legs go red)`); }
+  const fS = M.write('src/secret-shapes.js', ssMutS, 'jwtre'), SSs = require(fS);
+  { const v = stepsOf(R4_SHAPES.jwtDashStorm, 512, 8, { module: fS }); ok(!v.err && !v.ok && SSs.redactSecrets('x-eyJaaaaaaaa.eyJbbbbbbbb.cccccccc y').text === 'x-eyJ«redacted» y', `CONTROL (s): the JWT alternative reads quadratic by the count — ${stepsLine(v)} at ×8 input, the plain token still hidden (the §2d jwt legs go red)`, v); }
   // (t) verify r4 F4: the per-head line-end search restored — the §2d work witness goes red (6 553 searches for one line)
   const ssMutT = ssSrc.replace("    if (headEnd > lineEnd) { const nl = text.indexOf('\\n', headEnd); lineEnd = nl < 0 ? text.length : nl; }", "    { const nl = text.indexOf('\\n', headEnd); lineEnd = nl < 0 ? text.length : nl; }");
   ok(ssMutT !== ssSrc, '(t) the patch applies');

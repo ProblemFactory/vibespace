@@ -207,11 +207,13 @@ function mailRoom(kind, { now, n, span }) {
  *  the two base ones — every third record of a synthetic room carries an
  *  attachment (an image or a text file), so the reader surface (thumbnails,
  *  downloads) has something real to fetch; the base rooms are unchanged. */
-function worldFor(kind, { now = Date.now(), days = 1, convs: extra = 0, mail = 0, mailDir = '', big = 0 } = {}) {
+function worldFor(kind, { now = Date.now(), days = 1, convs: extra = 0, mail = 0, mailDir = '', big = 0, botRoom = false } = {}) {
   const convs = [
     { id: `${kind}-ops`, title: 'Ops room', kind: 'group', participants: 'Ada, Brook, Cass', readable: true, sendable: true },
     { id: `${kind}-announce`, title: 'Announcements', kind: 'group', participants: 'Ada', readable: true, sendable: false, why: 'read-only-mailbox' },
   ];
+  // lane composer-file-only-send: the FILES seam's room where only the bot identity sends (the composer's PROPOSE mode)
+  if (botRoom) convs.push({ id: `${kind}-bot-room`, title: 'Bot room', kind: 'group', participants: 'Ada, Brook', readable: true, sendable: true, botOnly: true });
   const n = Math.max(0, Math.min(5000, Math.floor(Number(extra) || 0)));
   for (let i = 1; i <= n; i++) convs.push({ id: `${kind}-room-${i}`, title: `Room ${i}`, kind: i % 5 === 0 ? 'dm' : 'group', participants: 'Ada, Cass', readable: true, sendable: true, synthetic: true });
   const out = new Map();
@@ -424,7 +426,7 @@ function readFakeRevisions(file) {
   if (!file) return {};
   try { const j = JSON.parse(fs.readFileSync(file, 'utf8')); return j && j.revisions && typeof j.revisions === 'object' ? j.revisions : {}; } catch { return {}; }
 }
-function makeFakeAdapter({ kind, receive, sendAs = ['user'], now = () => Date.now(), feed = false, topicsFile = null, search = false, revisionsFile = null }) {
+function makeFakeAdapter({ kind, receive, sendAs = ['user'], now = () => Date.now(), feed = false, topicsFile = null, search = false, revisionsFile = null, files = false }) {
   const caps = {
     receive,
     pushTransport: receive === 'push' ? 'ws-long-conn' : null,
@@ -460,6 +462,9 @@ function makeFakeAdapter({ kind, receive, sendAs = ['user'], now = () => Date.no
     ...(feed ? { changeFeed: FAKE_FEED } : {}),
     ...(revisionsFile && receive === 'poll' ? { revisions: Object.freeze({ recall: true, edit: true, how: 'byid' }) } : {}),
     ...(search ? { search: FAKE_SEARCH } : {}),
+    // lane composer-file-only-send: the NAMED files seam (`VIBESPACE_CHANNELS_FAKE_FILES=1`) — the poll fake takes files
+    // (Gmail's bounds; a file by itself is a message) and sends as a bot too, in its one bot-only room
+    ...(files ? { sendAttachments: Object.freeze({ maxCount: 10, maxTotalBytes: 25e6, withText: true, alone: true }), sendAttachmentsWhy: null } : {}),
     // lane channel-threads (spec §2.2 / §7.2): the conformance driver implements EVERY row so the chrome legs and
     // the contract suite have a vendor-free leg — vendor threads whose replies ride the listing (`inline`), a reply
     // INTO a thread where the adapter can send (fake-push is read-only: validateCaps refuses replyInto there), a
@@ -494,7 +499,7 @@ function makeFakeAdapter({ kind, receive, sendAs = ['user'], now = () => Date.no
     };
     const getWorld = () => {
       if (world) return world;
-      world = worldFor(kind, { now: clock(), convs: extraConvs, mail: mailN, mailDir, big: bigRoom });
+      world = worldFor(kind, { now: clock(), convs: extraConvs, mail: mailN, mailDir, big: bigRoom, botRoom: !!caps.sendAttachments && caps.sendAs.includes('bot') });
       // lane lark-search-poll: a feed-declaring fake also holds three single chats the LISTING never names (Lark's
       // `im/v1/chats` lists groups only) — only its change feed finds them
       if (caps.changeFeed) for (const d of FAKE_DMS) {
@@ -577,6 +582,7 @@ function makeFakeAdapter({ kind, receive, sendAs = ['user'], now = () => Date.no
         const thRow = (ok, why) => ({ replyInto: ok && caps.threads.replyInto, mode: caps.threads.read === 'none' ? null : 'thread', why: ok && caps.threads.replyInto ? null : (why || 'thread-reply-not-declared') });
         if (!c) return { read: 'no', sendAs: [], why: 'not-a-member', at: clock(), threads: { replyInto: false, mode: null, why: 'not-a-member' }, ...(rxRow ? { reactions: { read: false, add: false, why: 'not-a-member' } } : {}) };
         if (!c.meta.sendable) return { read: 'yes', sendAs: [], why: c.meta.why || 'read-only-mailbox', at: clock(), threads: thRow(false, c.meta.why || 'read-only-mailbox'), ...(rxRow ? { reactions: rxRow(false, c.meta.why || 'read-only-mailbox') } : {}) };
+        if (c.meta.botOnly) return { read: 'yes', sendAs: ['bot'], why: 'not-declared-for-this-identity', at: clock(), threads: thRow(true, null), ...(rxRow ? { reactions: rxRow(true, null) } : {}) };
         return { read: 'yes', sendAs: caps.sendAs.slice(), why: null, at: clock(), threads: thRow(caps.sendAs.length > 0, null), ...(rxRow ? { reactions: rxRow(true, null) } : {}) };
       },
       /** The account's own user id (the fold's `mine`). */
@@ -703,6 +709,7 @@ function makeFakeAdapter({ kind, receive, sendAs = ['user'], now = () => Date.no
         // R3 (§23): the fake vendor's two refusals — for good, and only the first time
         if (/-gone$/.test(a.id)) { const { ChannelError } = require('./index.js'); throw new ChannelError('forbidden', `fake: the vendor refuses ${a.id}`, { retryable: false }); }
         if (/-flaky$/.test(a.id) && !refusedOnce.has(a.id)) { refusedOnce.add(a.id); const { ChannelError } = require('./index.js'); throw new ChannelError('rate-limited', `fake: rate limited on ${a.id}`, { retryable: true, detail: { retryAfterSec: 2 } }); }
+        if (Buffer.isBuffer(a.data)) return { data: a.data, mime: a.mime || 'application/octet-stream', name: a.name };   // a file the fake was SENT
         if (/^image\//.test(a.mime || '')) return { data: fixturePng(a.id), mime: 'image/png', name: a.name };
         if (a.role === 'body') {
           // the attack corpus (security verify r2): the file's bytes verbatim
@@ -850,7 +857,7 @@ function makeFakeAdapter({ kind, receive, sendAs = ['user'], now = () => Date.no
       // (the vendor's `sentAs` is the truth the receipt carries). The vendor
       // id is a function of (conversation, idempotency key, text) — a second
       // send with the same key is the same message, as the key promises.
-      send: sendAs.length ? async (convId, { text, idemKey, as, replyTo = null, inThread = false, placement = null }) => {
+      send: sendAs.length ? async (convId, { text, idemKey, as, replyTo = null, inThread = false, placement = null, attachments = null }) => {
         const s = String(text == null ? '' : text);
         if (/\[\[fake:throw\]\]/.test(s)) throw new Error('fake: socket hung up mid-send');
         if (/\[\[fake:lost\]\]/.test(s)) return { ok: false, code: 'transport', retryable: true, detail: { lost: true, message: 'fake: the request left and the answer never came' } };
@@ -877,6 +884,13 @@ function makeFakeAdapter({ kind, receive, sendAs = ['user'], now = () => Date.no
           // answers, no thread id (Lark: parent_id without reply_in_thread); a plain message is still not echoed
           const c = getWorld().get(convId);
           if (c && !c.records.some((x) => x.vendorId === vendorMessageId)) c.records.push({ vendorId: vendorMessageId, at, author: { id: FAKE_SELF, name: 'Me' }, text: s, replyTo });
+        }
+        // lane composer-file-only-send: FILES (the files seam) are ECHOED as the vendor lists them — the message with its
+        // files (the bytes kept: a fetch serves what was sent) and the text it carried, '' for a file sent by itself
+        const sentFiles = Array.isArray(attachments) ? attachments.filter((a) => a && Buffer.isBuffer(a.data)) : [];
+        if (sentFiles.length) {
+          const c = getWorld().get(convId);
+          if (c && !c.records.some((x) => x.vendorId === vendorMessageId)) c.records.push({ vendorId: vendorMessageId, at, author: { id: FAKE_SELF, name: 'Me' }, text: s, attachments: sentFiles.map((f, i) => ({ id: `${vendorMessageId}-a${i}`, name: String(f.name || ''), bytes: f.data.length, mime: f.mime || null, data: f.data })), ...(replyTo ? { replyTo } : {}), ...(threadKey ? { threadKey } : {}) });
         }
         // 2026-09-28: the PLACEMENT the registry handed down rides back as the vendor's word (a `thread+chat` reply is
         // the thread reply above, which a Slack-like vendor also shows in the channel — `alsoInChat`)
@@ -912,7 +926,8 @@ function makeFakeAdapter({ kind, receive, sendAs = ['user'], now = () => Date.no
 }
 
 /** The three modules P0 registers. `fake-push` is deliberately READ-ONLY. */
-const fakePoll = makeFakeAdapter({ kind: 'fake-poll', receive: 'poll', sendAs: ['user'], feed: String(process.env.VIBESPACE_CHANNELS_FAKE_FEED || '') === '1', topicsFile: String(process.env.VIBESPACE_CHANNELS_FAKE_TOPICS || '') || null, search: String(process.env.VIBESPACE_CHANNELS_FAKE_SEARCH || '') === '1', revisionsFile: String(process.env.VIBESPACE_CHANNELS_FAKE_REVISIONS || '') || null });
+const FAKE_FILES = String(process.env.VIBESPACE_CHANNELS_FAKE_FILES || '') === '1';
+const fakePoll = makeFakeAdapter({ kind: 'fake-poll', receive: 'poll', sendAs: FAKE_FILES ? ['user', 'bot'] : ['user'], files: FAKE_FILES, feed: String(process.env.VIBESPACE_CHANNELS_FAKE_FEED || '') === '1', topicsFile: String(process.env.VIBESPACE_CHANNELS_FAKE_TOPICS || '') || null, search: String(process.env.VIBESPACE_CHANNELS_FAKE_SEARCH || '') === '1', revisionsFile: String(process.env.VIBESPACE_CHANNELS_FAKE_REVISIONS || '') || null });
 /** design 010: the fake vendor's ARCHIVE — messages its history pages never served (invented words, 400+ days old). */
 function fakeArchive(kind, t, env) {
   const n = Math.min(500, Math.max(0, Number(env && env.VIBESPACE_CHANNELS_FAKE_SEARCH_N) || 30));

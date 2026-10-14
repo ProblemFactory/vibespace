@@ -21,6 +21,7 @@ const os = require('os');
 const crypto = require('crypto');
 const { capsOf } = require('./backend-caps.js'); // PURE registry: per-backend hot-switch verdict rides list() so the UI never offers a dead toggle
 const { loginRank, loginUsable, withOat, oatFileOurs, credsRestOf, oatFileMerge, oatFileCurrent, oatShapeOf, oatFileBody, materializeVerdict } = require('./login-expiry.js'); // PURE: which login is the WORST of a pool's members; the materialized long-lived token's verdict
+const { identityRowState } = require('./oat-identity-model.js'); // PURE: what the roster says of a row's token identity (lane oat-identity-fix)
 const cliCaps = require('./cli-caps.js'); // PURE: oatInFile(version, fixture) — a measured CLI version gates the materialized token
 const { lawfulKey } = require('./secret-box.js'); // THE KEY-FILE LAW (src/key-file.js, lane key-file-law-stores): mint only when ABSENT with no ciphertext (tmp + link(2)); else a named refusal
 // why a row's long-lived token is NOT in its folder — the row's door names each (pool-oat-materialize + verify r1)
@@ -558,7 +559,9 @@ class AccountManager {
       if (rec.type === 'subscription' || !this._credsOf(be).supportsApiKeys) a.type = 'subscription';
       if (rec.key && /^sk-ant-/.test(rec.key)) { a.keyEnc = this._enc(String(rec.key)); a.tail = String(rec.key).slice(-8); }
       else if (rec.tail) a.tail = rec.tail;
-      if (rec.oat && /^sk-ant-oat\d{2}-/.test(String(rec.oat))) { a.oatEnc = this._enc(String(rec.oat)); a.oatMintedAt = Number(rec.oatMintedAt) || Date.now(); const sh = oatShapeOf(rec.oatShape); if (sh) a.oatShape = sh; }
+      // an imported token is CHECKED like a saved one (lane oat-identity-fix-r3, verify r3 L-R2): its post-check armed with
+      // its generation (the mint instant spawns carry), this instance's first-token instant = the import
+      if (rec.oat && /^sk-ant-oat\d{2}-/.test(String(rec.oat))) { this._oatSaveIdentity(a, Date.now()); a.oatEnc = this._enc(String(rec.oat)); a.oatMintedAt = Number(rec.oatMintedAt) || Date.now(); const sh = oatShapeOf(rec.oatShape); if (sh) a.oatShape = sh; a.oatCheck = { state: 'pending', since: Date.now(), gen: a.oatMintedAt }; }
       if (rec.files && typeof rec.files === 'object' && a.type === 'subscription') {
         const dir = this._acctDir(be, a.id);
         fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -660,12 +663,17 @@ class AccountManager {
     } catch { /* best-effort file consolidation */ }
     if (from.hostLogins) into.hostLogins = { ...(from.hostLogins), ...(into.hostLogins || {}) };
     if (!into.email && from.email) into.email = from.email;
-    if (!into.oatEnc && from.oatEnc) { into.oatEnc = from.oatEnc; into.oatMintedAt = from.oatMintedAt; if (!into.oatShape && from.oatShape) into.oatShape = from.oatShape; } // long-lived token survives the fold (B-211a)
+    // long-lived token survives the fold (B-211a) — and is CHECKED on the survivor like a re-bind (lane oat-identity-fix-r3,
+    // verify r3 L-R1): its post-check armed with the token's generation, the survivor's first-token instant kept; the folded
+    // row's check goes with the row, what it filed resolved (below, once saved)
+    const foldedCheck = from.oatCheck || null;
+    if (!into.oatEnc && from.oatEnc) { this._oatSaveIdentity(into, Date.now()); into.oatEnc = from.oatEnc; into.oatMintedAt = from.oatMintedAt; if (!into.oatShape && from.oatShape) into.oatShape = from.oatShape; into.oatCheck = { state: 'pending', since: Date.now(), gen: into.oatMintedAt }; }
     if (!into.note && from.note) into.note = from.note;
     if (this._state.defaultAccountId === fromId) this._state.defaultAccountId = intoId;
     this._state.accounts = this._state.accounts.filter((x) => x.id !== fromId);
     this._oatFileFacts.delete(fromId);
     this._save();
+    this._oatCheckReplaced(fromId, foldedCheck, 'the row was folded into ' + (into.name || intoId));
     if (into.oatEnc) this.syncOatFile(intoId).catch(() => { }); // ours is re-derived on the survivor
     this._notify();
     return this.list().accounts.find((x) => x.id === intoId) || null;
@@ -732,6 +740,87 @@ class AccountManager {
     this._save();
     this._notify();
     return a.serve ? { ...a.serve } : null;
+  }
+  /** THE LONG-LIVED TOKEN'S IDENTITY (lane oat-identity-postcheck, B-3102 (a)(b)) — two facts ON the account
+   *  record, through the one atomic writer (`_save`), never a sidecar. `oatCheck` = the passive post-check of the
+   *  CURRENT token: {state: 'pending'|'confirmed'|'mismatch', since (= the token's save), at, why, fp, others,
+   *  todoId} — armed by every save (setOat / moveOat), dropped with the token (clearOat). `oatAnchor` = the window
+   *  an owner-confirmed pick stated for this row's token (src/oat-identity-model.js
+   *  anchorFromProbe) — read by the mint's ladder and the post-check, NEVER by the reading guard (the `.window-`
+   *  sidecar stays the slot's). The PURE verdict is src/oat-identity-model.js; the ONE orchestrator is
+   *  src/server/oat-identity.js. `_oatCheckHook(id, prevCheck, why)` = that orchestrator, told when a save or a
+   *  removal replaces a check (it resolves the notice the old one filed). */
+  oatCheckOf(id) {
+    const a = this._state.accounts.find((x) => x.id === id);
+    return a && a.oatEnc && a.oatCheck && typeof a.oatCheck === 'object' ? { ...a.oatCheck } : null;
+  }
+  /** is ANY row's token check armed (pending)? — the engine's turn-end stamp asks this before it reads a token file */
+  oatArmed() { return this._state.accounts.some((a) => a && a.oatEnc && a.oatCheck && a.oatCheck.state === 'pending'); }
+  setOatCheck(id, check) {
+    const a = this._state.accounts.find((x) => x.id === id);
+    if (!a) throw new Error('unknown account');
+    if (!a.oatEnc) throw new Error('no long-lived token on this account');
+    if (!check || !['pending', 'confirmed', 'mismatch'].includes(check.state) || !(Number(check.since) > 0)) throw new Error('oatCheck needs a state and the token\'s save instant');
+    const str = (v, n) => (typeof v === 'string' && v ? v.slice(0, n) : null);
+    const c = { state: check.state, since: Number(check.since) };
+    for (const k of ['at', 'gen', 'armedAt']) if (Number(check[k]) > 0) c[k] = Number(check[k]);
+    for (const [k, n] of [['why', 300], ['fp', 400], ['via', 40], ['on', 20], ['todoId', 80], ['anchorFp', 400]]) if (str(check[k], n)) c[k] = str(check[k], n);
+    if (Array.isArray(check.others) && check.others.length) c.others = check.others.filter((x) => typeof x === 'string' && x).slice(0, 8);
+    // lane oat-identity-fix (verify r1): weekly windows only ({sevenDay, scoped}) — the K-run's suspects, the mark's own
+    // window and the anchor it was judged by (F2 / F5), and ONE open ask (F4 hint / F6 anchor) with the window it names
+    const wk = (w) => { if (!w || typeof w !== 'object') return null; const sc = {}; for (const [k, v] of Object.entries(w.scoped || {})) if (Number(v) > 0) sc[String(k).toLowerCase().slice(0, 60)] = Number(v); const sd = Number(w.sevenDay) > 0 ? Number(w.sevenDay) : null; return sd || Object.keys(sc).length || str(w.orgUuid, 80) ? { sevenDay: sd, scoped: sc, ...(str(w.orgUuid, 80) ? { orgUuid: str(w.orgUuid, 80) } : {}), ...(Number(w.at) > 0 ? { at: Number(w.at) } : {}) } : null; };
+    if (Array.isArray(check.run) && check.run.length) { const run = check.run.map(wk).filter(Boolean).slice(-4); if (run.length) c.run = run; }
+    for (const k of ['win', 'anchorWin']) { const w = wk(check[k]); if (w) c[k] = w; }
+    if (check.ask && typeof check.ask === 'object' && ['hint', 'anchor'].includes(check.ask.kind)) {
+      c.ask = { kind: check.ask.kind, ...(str(check.ask.todoId, 80) ? { todoId: str(check.ask.todoId, 80) } : {}), others: (Array.isArray(check.ask.others) ? check.ask.others : []).filter((x) => typeof x === 'string' && x).slice(0, 8), ...(wk(check.ask.win) ? { win: wk(check.ask.win) } : {}), ...(Number(check.ask.at) > 0 ? { at: Number(check.ask.at) } : {}), ...(check.ask.lost === true && check.ask.kind === 'anchor' ? { lost: true } : {}) };
+    }
+    // lane oat-identity-fix-r3: a conversation whose road is unknown read the token (judged nothing) — the roster says so
+    if (check.unknownRoad && typeof check.unknownRoad === 'object' && Number(check.unknownRoad.at) > 0) c.unknownRoad = { at: Number(check.unknownRoad.at), ...(str(check.unknownRoad.sid, 80) ? { sid: str(check.unknownRoad.sid, 80) } : {}) };
+    a.oatCheck = c;
+    this._save();
+    this._notify();
+    return { ...c };
+  }
+  oatAnchorOf(id) {
+    const a = this._state.accounts.find((x) => x.id === id);
+    return a && a.oatAnchor && typeof a.oatAnchor === 'object' ? { ...a.oatAnchor, scoped: { ...(a.oatAnchor.scoped || {}) } } : null;
+  }
+  /** every row's token anchor, {id: anchor} (the post-check names whose window a token's reading carries) */
+  oatAnchors() {
+    const out = {};
+    for (const a of this._state.accounts) if (a && a.oatAnchor && typeof a.oatAnchor === 'object') out[a.id] = { ...a.oatAnchor, scoped: { ...(a.oatAnchor.scoped || {}) } };
+    return out;
+  }
+  setOatAnchor(id, anchor) {
+    const a = this._state.accounts.find((x) => x.id === id);
+    if (!a) throw new Error('unknown account');
+    if (anchor == null) { if (!a.oatAnchor) return null; delete a.oatAnchor; }
+    else {
+      const sevenDay = Number(anchor.sevenDay) > 0 ? Number(anchor.sevenDay) : null;
+      const scoped = {};
+      for (const [k, v] of Object.entries(anchor.scoped || {})) if (Number(v) > 0) scoped[String(k).toLowerCase().slice(0, 60)] = Number(v);
+      if (!sevenDay && !Object.keys(scoped).length) throw new Error('an anchor needs a weekly window');
+      if (anchor.how !== 'owner-confirmed') throw new Error(`unknown anchor proof: ${anchor.how}`);
+      a.oatAnchor = { sevenDay, scoped, how: anchor.how, at: Number(anchor.at) || Date.now(), ...(typeof anchor.orgUuid === 'string' && anchor.orgUuid ? { orgUuid: anchor.orgUuid.slice(0, 80) } : {}), ...(typeof anchor.fp === 'string' && anchor.fp ? { fp: anchor.fp.slice(0, 400) } : {}), ...(typeof anchor.mint === 'string' && anchor.mint ? { mint: anchor.mint.slice(0, 40) } : {}), ...(typeof anchor.followed === 'string' && anchor.followed ? { followed: anchor.followed.slice(0, 40) } : {}) };
+    }
+    this._save();
+    this._notify();
+    return a.oatAnchor ? { ...a.oatAnchor } : null;
+  }
+  _oatCheckReplaced(id, prev, why) { if (prev && typeof this._oatCheckHook === 'function') { try { this._oatCheckHook(id, prev, why); } catch { } } }
+  /** The first instant this row held a long-lived token (lane oat-identity-fix-r2): a `.window-` stamp written before
+   *  stamps named their producer is the row's identity only when it is older (null = the row never held one). */
+  oatFirstAtOf(id) {
+    const a = this._state.accounts.find((x) => x.id === id);
+    if (!a) return null;
+    return Number(a.oatFirstAt) > 0 ? Number(a.oatFirstAt) : (Number(a.oatMintedAt) > 0 ? Number(a.oatMintedAt) : null);
+  }
+  /** a save on row `a` (setOat / moveOat's target): the first-token instant kept (set once), and the previous token's
+   *  MINT-PROBE anchor RETIRED — it was that token's own reading (`self`), never this row's identity; an anchor the
+   *  owner answered (or one that followed a re-anchor proven without the token) stays (verify r2 F-A / A3) */
+  _oatSaveIdentity(a, now) {
+    if (!(Number(a.oatFirstAt) > 0)) a.oatFirstAt = Number(a.oatMintedAt) > 0 ? Math.min(Number(a.oatMintedAt), now) : now;
+    if (a.oatAnchor && a.oatAnchor.mint && !a.oatAnchor.followed) delete a.oatAnchor;
   }
 
   setNote(id, note) {
@@ -1033,9 +1122,16 @@ class AccountManager {
     // sk-ant-oat01-… today; tolerate future oat revisions, refuse everything
     // else (an API key or a pasted access token here would mis-bill silently)
     if (!/^sk-ant-oat\d{2}-[\w-]{20,600}$/.test(token)) throw new Error('that does not look like a long-lived token (expected sk-ant-oat01-…, from `claude setup-token`)');
+    const now = Date.now(); // ONE instant: the token's mint time and (on a row's first token) its first-token instant
+    this._oatSaveIdentity(a, now);
     a.oatEnc = this._enc(token);
-    a.oatMintedAt = Date.now();
+    a.oatMintedAt = now;
+    // every save ARMS the token's identity post-check (lane oat-identity-postcheck): its first reading is compared
+    // with the row's known identity — the check the previous token held is replaced, its notice resolved
+    const prevCheck = a.oatCheck || null;
+    a.oatCheck = { state: 'pending', since: a.oatMintedAt, gen: a.oatMintedAt };
     this._save();
+    this._oatCheckReplaced(id, prevCheck, 'a new token was saved');
     // THE SAME TRANSACTION, off the loop's back: the store first (the token's authority — a failed file
     // write leaves today's env spawn working), then the file through the ONE queue. `mint` = record the
     // subscription SHAPE off this member's own login file now (CLI 2.1.296's setup-token leaves nothing on
@@ -1050,9 +1146,40 @@ class AccountManager {
     const a = this.get(id);
     if (!a) throw new Error('unknown account: ' + id);
     delete a.oatEnc; delete a.oatMintedAt;
+    // the token's identity goes with it: its check (the notice resolved) and the anchor its pick confirmed
+    const prevCheck = a.oatCheck || null;
+    delete a.oatCheck; delete a.oatAnchor;
     this._save();
+    this._oatCheckReplaced(id, prevCheck, 'the token was removed');
     this.syncOatFile(id).catch(() => { }); // no token ⇒ 'none' ⇒ our file (only ours — the mark names this row) goes
     this._notify();
+  }
+
+  /** RE-BIND (改绑, lane oat-identity-postcheck): the owner moves a row's long-lived token to the account it
+   *  belongs to. The SEALED blob moves as it is (never decrypted here), with its mint instant (the token's real
+   *  year), onto a Claude subscription row that holds no live token of its own; the target's post-check is armed
+   *  (its first reading judges it again), the source's check + anchor go (its notice resolved). Both credential
+   *  files follow through the one queue. */
+  moveOat(fromId, toId) {
+    const a = this.get(fromId), b = this.get(toId);
+    if (!a || !b) throw new Error('unknown account: ' + (!a ? fromId : toId));
+    if (fromId === toId) throw new Error('pick another account');
+    if (!a.oatEnc) throw new Error('this account holds no long-lived token');
+    if (!this._credsOf(this._acctBackend(b)).longLivedToken || this._acctType(b) !== 'subscription' || b.pooled) throw new Error('long-lived tokens apply to Claude subscription accounts only');
+    if (b.oatEnc && (b.oatMintedAt || 0) + this.OAT_TTL_MS > Date.now()) throw Object.assign(new Error('that account already holds a long-lived token of its own — remove it there first'), { code: 'target_has_token' });
+    const prevA = a.oatCheck || null, prevB = b.oatCheck || null;
+    this._oatSaveIdentity(b, Date.now());
+    b.oatEnc = a.oatEnc; b.oatMintedAt = a.oatMintedAt || Date.now();
+    delete b.oatShape;
+    b.oatCheck = { state: 'pending', since: Date.now(), gen: b.oatMintedAt };
+    delete a.oatEnc; delete a.oatMintedAt; delete a.oatCheck; delete a.oatAnchor;
+    this._save();
+    this._oatCheckReplaced(fromId, prevA, 'the token was moved to ' + (b.name || toId));
+    this._oatCheckReplaced(toId, prevB, 'another token was moved here');
+    this.syncOatFile(fromId).catch(() => { });
+    this.syncOatFile(toId, { mint: true }).catch(() => { });
+    this._notify();
+    return { from: fromId, to: toId, mintedAt: b.oatMintedAt };
   }
 
   // ── THE MATERIALIZED LONG-LIVED TOKEN (lane pool-oat-materialize, design q-035 A) ──
@@ -1209,7 +1336,15 @@ class AccountManager {
   _oatMeta(a) {
     if (!a?.oatEnc) return {};
     const expiresAt = (a.oatMintedAt || 0) + this.OAT_TTL_MS;
-    return { oat: true, oatMintedAt: a.oatMintedAt || null, oatDaysLeft: Math.floor((expiresAt - Date.now()) / 86400000) };
+    // the post-check's verdict rides the row only once it SAID something (lane oat-identity-postcheck): a
+    // mismatch names the rows whose window the token's reading carried (names, never ids or windows)
+    // lane oat-identity-fix: an open ASK (a hint naming the row its window matches, an anchor that moved) and a token
+    // no reading judged for a day ('unverified', F8) ride the row too — the roster's words, never a notice
+    const st = identityRowState(a.oatCheck, Date.now());
+    const named = st === 'mismatch' ? a.oatCheck.others : (st === 'hint' ? a.oatCheck.ask?.others : null);
+    const rows = Array.isArray(named) ? named.map((x) => this.get(x)).filter(Boolean) : [];
+    const other = rows.map((x) => x.name || x.id).join(', ');
+    return { oat: true, oatMintedAt: a.oatMintedAt || null, oatDaysLeft: Math.floor((expiresAt - Date.now()) / 86400000), ...(st ? { oatIdentity: st } : {}), ...(other ? { oatIdentityOther: other.slice(0, 120), oatIdentityOtherIds: rows.map((x) => x.id) } : {}) };
   }
 
   // ── Pooled pseudo-account (B-6217) ──────────────────────────────────────
@@ -1258,6 +1393,9 @@ class AccountManager {
     const info = this._readAuthFor(be, id);
     if (!info.loggedIn) return false;
     if (!info.oatFile) return true;
+    // the post-check found this token to be ANOTHER account's (lane oat-identity-postcheck): the sessions already
+    // linked keep running on it (the F5 ruling), nothing new is placed where the pool would spend it
+    if (this.oatCheckOf(id)?.state === 'mismatch') return false;
     const c = this.oatFileCaps();
     return !(c.known && !c.ok);
   }
@@ -1658,6 +1796,9 @@ class AccountManager {
           // every member left holds only our long-lived-token file and the hub's CLI is a known UNMEASURED one:
           // the conversations already on them keep running; a new one waits for a measured CLI (or a sign-in)
           const held = this._poolLoginCandidates(id).filter((m) => this.readSubCreds(m.id).oatFile).length;
+          // …or every such token is ANOTHER account's (the identity post-check, lane oat-identity-postcheck): said by name
+          const foreign = this._poolLoginCandidates(id).filter((m) => this.readSubCreds(m.id).oatFile && this.oatCheckOf(m.id)?.state === 'mismatch').map((m) => m.name || m.id);
+          if (held && foreign.length === held) throw Object.assign(new Error(`pool "${a.name}" can't start a conversation: the long-lived token${foreign.length === 1 ? '' : 's'} its member${foreign.length === 1 ? '' : 's'} ${foreign.join(', ')} ${foreign.length === 1 ? 'holds belongs' : 'hold belong'} to another account — conversations already running continue; re-mint or re-bind the token in Manage Agents`), { code: 'oat-identity-mismatch' });
           if (held) throw Object.assign(new Error(`pool "${a.name}" can't start a conversation: its members hold only long-lived tokens and the claude CLI ${this.oatFileCaps().cli || ''} was never measured with one in a member's folder — conversations already running continue; sign a member in, or wait for a measured CLI`), { code: 'oat-cli-unmeasured' });
           throw new Error(`every member of pool "${a.name}" is signed out — re-login one in Manage Agents (the pool cannot route around a fully signed-out member set)`);
         }
@@ -1759,7 +1900,7 @@ class AccountManager {
       // road defaults the model to sonnet: oat-in-file.json's oat-env). Remote
       // spawns keep the secret channel (no creds dir is ever shipped for it).
       if (oat && info.oatFile && info.accessToken === oat && this.oatFileCaps().ok) {
-        return { id: a.id, name: a.name, kind: 'subscription', oatOnly: true, oatFile: true, localEnv: { [this._credsOf('claude').spawnEnvVar]: this._acctDir('claude', id) }, secret: oatSecret };
+        return { id: a.id, name: a.name, kind: 'subscription', oatOnly: true, oatFile: true, oatGen: a.oatMintedAt || null, localEnv: { [this._credsOf('claude').spawnEnvVar]: this._acctDir('claude', id) }, secret: oatSecret };
       }
       // our token file is not a LOGIN: without the above it spawns on the env
       // road, or (its token ended) is refused by name like a missing login
@@ -1769,7 +1910,7 @@ class AccountManager {
       // row's chip says the token keeps it running — the token IS the spawn.
       const dirDead = !!oat && loginInDir && !loginUsable(this.loginStateOf(id, Date.now(), { slot: true }));
       if ((!loginInDir || dirDead) && oat) {
-        return { id: a.id, name: a.name, kind: 'subscription', oatOnly: true, localEnv: { CLAUDE_CODE_OAUTH_TOKEN: oat }, secret: oatSecret };
+        return { id: a.id, name: a.name, kind: 'subscription', oatOnly: true, oatGen: a.oatMintedAt || null, localEnv: { CLAUDE_CODE_OAUTH_TOKEN: oat }, secret: oatSecret };
       }
       // Expired oat: fail the CREATE with the real reason instead of letting
       // the CLI 401 opaquely mid-session (a long-lived 401 has no self-heal).
@@ -1778,7 +1919,7 @@ class AccountManager {
       if (!loginInDir && a.oatEnc && oatExpired) throw new Error(`the long-lived token for ${a.name} has expired — re-mint it in Manage agents (⋯ → Long-lived token)`);
       if (!loginInDir) throw new Error('subscription not logged in: ' + a.name);
       return {
-        id: a.id, name: a.name, kind: 'subscription', oatExpired: oatExpired || undefined,
+        id: a.id, name: a.name, kind: 'subscription', oatExpired: oatExpired || undefined, ...(oatSecret ? { oatGen: a.oatMintedAt || null } : {}),
         localEnv: { [this._credsOf('claude').spawnEnvVar]: this._acctDir('claude', id) }, secret: oatSecret,
         // REMOTE: ship the creds dir to the host so the remote CLI reads THIS
         // account's login (securestorage relocated; config stays ~/.claude).

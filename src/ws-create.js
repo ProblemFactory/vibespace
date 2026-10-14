@@ -932,6 +932,10 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             const pa = spawnAccount && !data.hostId && accounts ? accounts.get(spawnAccount.id) : null;
             if (pa && pa.type === 'pooled' && capsOf(backend).hotSwitch !== 'verified') heldPoolMember = spawnAccount.pinnedMember || accounts.poolCurrent(pa.id) || null; // a pinned codex spawn HOLDS its pin (2026-09-28)
           } catch { heldPoolMember = null; }
+          // WHICH LONG-LIVED TOKEN this process carries (lane oat-identity-fix, verify r1 F1): the ENV road holds the
+          // generation it spawned with for life; a LOCAL creds dir is the FILE road (the engine reads the token file's
+          // generation per turn); a remote creds dir is not ours to read — no road, so its readings never judge a token
+          const oatEnvRoad = !!spawnAccount && !spawnAccount._hostSubReady && (data.hostId ? spawnAccount.secret?.var === 'CLAUDE_CODE_OAUTH_TOKEN' : !!spawnAccount.localEnv?.CLAUDE_CODE_OAUTH_TOKEN);
           const session = {
             mode: sessionMode,
             pty: null, clients: new Map([[ws, { cols: data.cols || 120, rows: data.rows || 30 }]]),
@@ -954,6 +958,8 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             // account — keep its identity (2.241.0)
             _accountId: spawnAccount?.id || linkedAccountId || null,
             _heldPoolMember: heldPoolMember, // the pool member this (non-hot) process bills for its life — src/server/usage-pool-engine.js heldPoolMemberFor
+            _oatRoad: oatEnvRoad ? 'env' : (spawnAccount && !data.hostId ? 'file' : null), // src/server/usage-pool-engine.js tokenGenOf
+            _oatGen: oatEnvRoad && Number(spawnAccount.oatGen) > 0 ? Number(spawnAccount.oatGen) : null,
             _poolPin: (data._poolPin && spawnAccount && spawnAccount.id === data._poolPinPool) ? data._poolPin : null, // THE CONVERSATION'S PIN (2026-09-28): carried by a resume, never by a fork — for the pool the spawn bills (resumePoolPin)
             // HOW the billing resolved (B-f531): rides the created reply so
             // the client persists/displays the POST-FACTO truth, never the
@@ -1586,6 +1592,10 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             agentToken: session.agentToken || null,
             taskId: session._initialGroupId || null, // group spawned into (meta key kept for back-compat)
             accountId: session._accountId || null, // billing identity (badge restore across server restarts)
+            // THE READING'S ROAD IS A FACT OF THE SESSION (lane oat-identity-fix-r3, verify r3 F-R1): HOW it billed, WHICH road
+            // its long-lived token rides and its GENERATION survive a restart — boot-restore's sessionFromMeta restores them, so a
+            // restored conversation's readings are never guessed to be the login's (src/server/usage-pool-engine.js readingRoad)
+            billingHow: session._billingHow || undefined, oatRoad: session._oatRoad || undefined, oatGen: session._oatGen || undefined,
             heldPoolMember: session._heldPoolMember || undefined, // the member a non-hot pool process holds — survives a server restart with the process it describes
             poolPin: session._poolPin || undefined, // THE CONVERSATION'S PIN (2026-09-28) — survives a server restart (boot-restore's three sites read it back)
             authAtSpawn: session._authAtSpawn || null,

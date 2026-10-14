@@ -356,6 +356,12 @@ const ROWS = [
     c: [decl('the keeper\'s leases and the user\'s own browsing move freely — both are what (b) re-reads at the press; an agent token is refused (THE one guard, RESTART_IS_USERS)')],
     d: [decl('the banner\'s words are PURE stuckWords (textContent); the page\'s own text passes pageText (frame-inert, bounded)')],
     gate: [['scripts/test-browser-stuck.mjs', 'token stops and restarts'], ['scripts/test-browser-human.mjs', 'THE TAB-RELEASE CENSUS (the .197 integration)']] },
+  // lane browser-probe-transient (B-0b8c): the browser-version notice's Check again — a probe, not an approval
+  { id: 'browser-floor-check', surface: 'lane browser-probe-transient — the For-you notice «Could not read the agent-browser version after N tries…» and its Check again',
+    doors: [['A', 'src/server/browser-keeper.js', /^browser-floor-check$/]],
+    a: [decl('the press runs ONE version probe of the binary the keeper already reads (POST /api/browser/floor/check) — nothing the item displays is executed; the item carries its type and no other field')],
+    b: [decl('the probe IS the re-check: an answer withdraws the item, a miss leaves it standing')], c: [decl('—')], d: [decl('the words are the keeper\'s own (PURE floorNotice), no peer text')],
+    gate: [['scripts/test-browser-probe-ladder.mjs', 'Check again once it answers']] },
   { id: 'browse-yourself-end', surface: 'BROWSE YOURSELF — Close (his tab) / Quit the whole browser (a confirm names who else uses it)',
     doors: [['C', 'src/lib/browser-live-window.js', /\/browse\/.*\/(close|quit)$/], ['S', 'src/routes/browser.js', /^\/api\/browser\/browse\/:key\/(close|quit)$/]],
     a: [pin('src/routes/browser.js', /const key = humanKeyOr400\(req, res\); if \(!key\) return;/, 'the press names HIS key (the window holds it); nothing a client describes is executed')],

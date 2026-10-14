@@ -24,6 +24,14 @@
 // anchor, a shared window, the read failed) ⇒ `confirm`: the token waits in
 // memory and the person picks the account — journaled owner-confirmed.
 // A hub that dies mid-mint leaves its scratch dir: swept by age at boot (F3).
+// THE ANCHOR (lane oat-identity-postcheck, B-3102 (a)): when the probe DID state
+// a weekly window and the owner picked the row, that window becomes the row's
+// token anchor (accounts.setOatAnchor, journaled `anchor: owner-confirmed`) —
+// one of "every row's anchor" for the next mint, and what the token's passive
+// post-check (src/server/oat-identity.js) judges against when the row has no
+// established window of its own. A row whose anchor the probe disagrees with
+// keeps it (journaled `anchor: kept`), and a LATER probe that disagrees with an
+// owner-confirmed anchor is refused (`anchor_mismatch`) — never a silent overwrite.
 //
 // THE SECRET'S ONE ROAD: PTY chunk → mintStep's `token` step → setOat. It is
 // never a field of a mint, never logged, never in a broadcast / GET answer /
@@ -38,6 +46,7 @@ const { agentEnv } = require('../agent-env.js');
 const { mintStep, initialMintParse, publicMint, codeVerdict, identityVerdict, mintEnvOf, MINT_DONE } = require('../oat-mint-model.js');
 const { machineOauthAccount } = require('./usage-probe-log.js');
 const readingLag = require('../reading-lag.js');
+const { anchorFromProbe, anchorWriteVerdict, probeAgainstAnchor, identityWindows, isIdentityAnchor } = require('../oat-identity-model.js');
 
 const MINT_TTL_MS = 10 * 60e3;
 const SCRATCH_PREFIX = 'vs-oat-mint-';
@@ -94,21 +103,30 @@ function create({ accounts, claudeCmd = 'claude', broadcastAll = () => { }, spaw
   // what the CLI wrote at sign-in into the scratch config — read here, in
   // process, never logged or sent (only its email is ever shown)
   const signedIn = (m) => { for (const d of [path.join(m.dir, 'config'), m.dir]) { const o = machineOauthAccount(d); if (o && (o.email || o.orgUuid)) return o; } return null; };
+  // every row's IDENTITY window (lane oat-identity-fix-r2, verify r2 F-A): evidence no generation of THAT row's token
+  // produced — never a window its token's readings stamped, never a previous token's mint-probe anchor
+  const firstAtOf = (id) => { try { return typeof accounts.oatFirstAtOf === 'function' ? accounts.oatFirstAtOf(id) : null; } catch { return null; } };
+  const idWindows = (oa) => { let ws = {}; try { ws = windows() || {}; } catch { } return identityWindows({ windows: ws, anchors: oa || {}, firstAt: firstAtOf }); };
   // the panel's weekly window against every row's anchor (reading-lag's own verdicts)
   const panelVerdict = (accountId, panel) => {
     const win = readingLag.windowOf(panel);
     if (!win.sevenDay && !Object.keys(win.scoped).length) return { verdict: 'none', why: 'the panel states no weekly window' };
-    let ws = {}; try { ws = windows() || {}; } catch { }
+    // (a) every row's anchor: its identity — its established window, or the window an owner answered for its token
+    let oa = {}; try { oa = (typeof accounts.oatAnchors === 'function' && accounts.oatAnchors()) || {}; } catch { }
+    const ws = idWindows(oa);
+    // …and a LATER probe that disagrees with the window the OWNER confirmed for THIS row is a new mismatch (B-3102 (a)) —
+    // a previous token's mint-probe anchor is that token's own reading: it never refuses the re-mint (fix r2 F-A)
+    if (probeAgainstAnchor(win, isIdentityAnchor(oa[accountId]) ? oa[accountId] : null) === 'differ') return { verdict: 'mismatch', fp: readingLag.windowFingerprint(win), others: [], own: true, win };
     const own = ws[accountId] ? readingLag.compareWindows(win, ws[accountId]) : 'unknown';
     const others = Object.keys(ws).filter((id) => id !== accountId && readingLag.compareWindows(win, ws[id]) === 'agree');
     const fp = readingLag.windowFingerprint(win);
-    if (own === 'agree' && !others.length) return { verdict: 'match', fp };
-    if (own !== 'agree' && others.length) return { verdict: 'mismatch', fp, others };
-    return { verdict: 'none', fp, why: own === 'agree' ? `the window is shared with ${others.length} other account(s)` : (own === 'unknown' ? 'the row has no anchor yet' : 'the window matches no account') };
+    if (own === 'agree' && !others.length) return { verdict: 'match', fp, win };
+    if (own !== 'agree' && others.length) return { verdict: 'mismatch', fp, others, win };
+    return { verdict: 'none', fp, win, why: own === 'agree' ? `the window is shared with ${others.length} other account(s)` : (own === 'unknown' ? 'the row has no anchor yet' : 'the window matches no account') };
   };
   // the rows a person may pick: subscriptions whose creds row declares a long-lived token (setOat's own check)
   const canHoldOat = (id) => { try { const a = accounts.get(id); return !!(a && accounts._credsOf(accounts._acctBackend(a)).longLivedToken); } catch { return false; } };
-  const refuse = (m, sentence, extra) => { m.verdict = 'identity_mismatch'; note(m, 'identity_mismatch', extra); end(m, 'failed', sentence); };
+  const refuse = (m, sentence, extra, verdict = 'identity_mismatch') => { m.verdict = verdict; note(m, verdict, extra); end(m, 'failed', sentence); };
   const ask = (m, token, why) => {
     held.set(m.id, token); kill(m); wipe(m);
     m.phase = 'confirm'; m.verdict = 'unproven';
@@ -129,7 +147,9 @@ function create({ accounts, claudeCmd = 'claude', broadcastAll = () => { }, spaw
     if (!live(m)) return; // cancelled or timed out during the read
     const pv = panel ? panelVerdict(m.accountId, panel) : { verdict: 'none', why: 'the /usage read failed' };
     if (pv.verdict === 'match') return save(m, token, 'fingerprint-proven');
+    if (pv.verdict === 'mismatch' && pv.own) return refuse(m, `this token's usage window differs from the one confirmed for ${nameOf(m.accountId)}'s token — not saved (remove that token first to confirm another account)`, { on: 'confirmed anchor', fp: pv.fp }, 'anchor_mismatch');
     if (pv.verdict === 'mismatch') { m.other = pv.others.map(nameOf).join(', '); return refuse(m, `this token's usage window matches ${m.other}, not ${nameOf(m.accountId)} — not saved`, { on: 'usage window', fp: pv.fp }); }
+    m.probe = pv.win ? { win: pv.win, orgUuid: (panel && typeof panel.orgUuid === 'string' && panel.orgUuid) || null } : null; // (a): what the pick may anchor — memory only
     return ask(m, token, pv.why);
   };
   const feed = (m, chunk, opts) => {
@@ -218,8 +238,8 @@ function create({ accounts, claudeCmd = 'claude', broadcastAll = () => { }, spaw
     const m = mints.get(mid);
     if (!m) return { ok: false, status: 404, error: 'no such sign-in', code: 'unknown_mint' };
     if (m.phase !== 'confirm' || !held.has(m.id)) {
-      const theirs = m.verdict === 'identity_mismatch';
-      return { ok: false, status: 409, error: theirs ? (m.error || 'this token belongs to another account — not saved') : 'this sign-in is not waiting for a confirmation', code: theirs ? 'identity_mismatch' : 'not_confirming', mint: publicMint(m) };
+      const theirs = m.verdict === 'identity_mismatch' || m.verdict === 'anchor_mismatch';
+      return { ok: false, status: 409, error: theirs ? (m.error || 'this token belongs to another account — not saved') : 'this sign-in is not waiting for a confirmation', code: theirs ? m.verdict : 'not_confirming', mint: publicMint(m) };
     }
     if (!yes) { note(m, 'owner-declined'); end(m, 'cancelled'); return { ok: true, mint: publicMint(m) }; }
     const to = accountId || m.accountId;
@@ -229,7 +249,17 @@ function create({ accounts, claudeCmd = 'claude', broadcastAll = () => { }, spaw
     // sign-in's email) — only on this yes, never from a mint on its own
     if (m.signedInAs && !rowIdentity(to)) { try { accounts.setEmail(to, m.signedInAs); } catch { } }
     m.accountId = to;
+    const probe = m.probe; m.probe = null;
     save(m, token, 'owner-confirmed');
+    // (a) THE ANCHOR: the probe's window becomes the picked row's token anchor — unless the row already holds an
+    // anchor the probe DISAGREES with (kept: the token's post-check will say the mismatch, never a silent overwrite)
+    if (m.phase === 'saved' && probe) {
+      let est = null; try { est = idWindows({})[to] || null; } catch { } // the row's stamp IDENTITY (fix r2 F-A) — its anchor is read beside it
+      const av = anchorWriteVerdict({ probeWindow: probe.win, established: est, oatAnchor: typeof accounts.oatAnchorOf === 'function' ? accounts.oatAnchorOf(to) : null });
+      const anchor = av.verdict === 'write' ? anchorFromProbe(probe.win, { orgUuid: probe.orgUuid, at: now(), how: 'owner-confirmed', mint: m.id }) : null;
+      if (anchor) { try { accounts.setOatAnchor(to, anchor); note(m, 'anchor', { anchor: 'owner-confirmed', fp: anchor.fp }); } catch { } }
+      else if (av.verdict === 'keep') note(m, 'anchor', { anchor: 'kept', why: av.why });
+    }
     return { ok: true, mint: publicMint(m) };
   }
 

@@ -93,6 +93,12 @@ function sessionFromMeta(meta, transportFacts) {
     claudeSessionId: meta.claudeSessionId || null,
     agentToken: meta.agentToken || null, // vibespace-status auth survives restarts
     _accountId: meta.accountId || null, // billing identity the session was spawned with (badge only — env lives in the surviving process)
+    // …and the ROAD its readings came by (lane oat-identity-fix-r3, verify r3 F-R1): how it billed, which road its long-lived
+    // token rides, its generation — a meta older than the stamp restores none, and the engine then treats the road as
+    // UNKNOWN (no witness's producer, judges nothing), never as the login
+    _billingHow: typeof meta.billingHow === 'string' && meta.billingHow ? meta.billingHow : null,
+    _oatRoad: meta.oatRoad === 'env' || meta.oatRoad === 'file' ? meta.oatRoad : null,
+    _oatGen: Number(meta.oatGen) > 0 ? Number(meta.oatGen) : null,
     // Permission mode isn't recoverable from the JSONL (init records are
     // stdout-only) — restore what the session was launched with
     _permissionMode: meta.permissionMode || null,

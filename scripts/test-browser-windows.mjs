@@ -592,6 +592,12 @@ console.log('— ④ verify r2 T1: the opener rule\'s own table — the real kee
   const [a, b] = argv;
   fs.appendFileSync(path.join(st, 'cmds.log'), JSON.stringify({ ns, sess, argv: raw }) + '\\n');
   if (a === '--version') { console.log('agent-browser 0.38.1'); process.exit(0); }
+  // int272: ONE invocation at a time per namespace (the real binary's daemon serialises a session's commands). Two holders'
+  // concurrent tab new on one profile raced this read-modify-write: the second rename hit ENOENT (its .part already moved)
+  // or one holder's tab was lost — c31v red on the hosted runner 2/2 and on BASE 39c57b070 in the runner shape
+  const lk = f + '.lock', l0 = Date.now();
+  for (;;) { try { fs.mkdirSync(lk); break; } catch (e) { if (e.code !== 'EEXIST' || Date.now() - l0 > 15000) throw e; Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5); } }
+  process.on('exit', () => { try { fs.rmdirSync(lk); } catch { } });
   let s = read();
   const live = !!(s && alive(s.pid));
   if (a === 'session' && b === 'info') { out({ success: true, data: { active: live, namespace: ns, pid: live ? s.pid : null, session: sess, socketDir: path.join(st, 'run') } }); process.exit(0); }

@@ -6,7 +6,7 @@ import { isTransientWindowType } from './window-types.js';
 import { legacyIdFor } from './agent-meta.js';
 import { wordlessTitleOf } from '../record-clear.js'; // PURE: the title a layout RECORD keeps for a window drawn from a record's words (lane-redact verify r7)
 import { chainSyncKey, ratioDiffers, heldRatio, releaseRatio, withoutMembers, restoreVerdict } from './chain-layout.js'; // agent browser P7 (§4.6): the sync key carries the layout; the ratio applies in place (unless a local divider drag holds it — v2 verify r1 ①)
-import { writerClass, deferKey, deferKeysOf, releaseNext, noteApplied } from './layout-model.js'; // B-4767: the deferred records — one slot per desktop AND writer class, released in arrival order (PURE)
+import { writerClass, deferKey, deferKeysOf, releaseNext, noteApplied, chromeToApply, TAKEN_WHOLE } from './layout-model.js'; // B-4767: the deferred records — one slot per desktop AND writer class, released in arrival order (PURE)
 
 // The MEMBERS of a chain (host first) — NOT a sync key (chainSyncKey is): two
 // records with the same members differ only in layout and are applied in place.
@@ -339,7 +339,7 @@ class LayoutManager {
     // newer acts are kept by the held-act witnesses (phone-arrangement-verify F1: the re-read dropped another desktop's
     // drag and this page's next save wrote its stale boxes over it, on disk and on that desktop)
     const membershipOnly = writerClass(msg) === 'phone' && !this.app.isMobile; // THE ONE writer predicate — the deferred slot's too (layout-model.js)
-    this._applyRemoteState(msg.state, { closeOnlyWired: !!msg.resync, receivedAt, membershipOnly });
+    this._applyRemoteState(msg.state, { closeOnlyWired: !!msg.resync, receivedAt, membershipOnly, from: msg });
     if (dm && msg.desktopId) {
       dm.noteWire(msg.desktopId, msg.state); // the record this desktop was last seen as on the wire
       // …and the held record of the desktop on show follows it (the view's base: the next save merges the page's
@@ -350,8 +350,9 @@ class LayoutManager {
   }
 
   // Apply remote state: diff against local windows, update only what changed
-  _applyRemoteState(state, { closeOnlyWired = false, receivedAt = Date.now(), membershipOnly = false } = {}) {
+  _applyRemoteState(state, { closeOnlyWired = false, receivedAt = Date.now(), membershipOnly = false, from = null } = {}) {
     if (!state) return;
+    const chrome = chromeToApply(this._viewport(), from); // §6b guard 10's READ half: a phone applies no record's sidebar / grid (inc-mv8l2frb-xkqm)
     this._restoring = true;
     this._applying = true;
     let heldKept = false; // a local divider drag kept over the record (v2 verify r1 ①) — re-sent once below
@@ -364,14 +365,14 @@ class LayoutManager {
     const chainHeld = (tabs) => Array.isArray(tabs) && tabs.some((id) => heldChain.has(String(id)));
     try {
       // Grid
-      if (state.grid && !membershipOnly) {
+      if (state.grid && chrome.grid) {
         const cur = this.app.wm.grid;
         if (!cur || cur.rows !== state.grid.rows || cur.cols !== state.grid.cols) {
           this.app.wm.setGrid(state.grid.rows, state.grid.cols);
         }
       }
       // Sidebar
-      if (state.sidebarOpen !== undefined && !membershipOnly && state.sidebarOpen !== this.app.sidebar.isOpen) {
+      if (state.sidebarOpen !== undefined && chrome.sidebarOpen && state.sidebarOpen !== this.app.sidebar.isOpen) {
         this.app.sidebar.toggle(state.sidebarOpen);
       }
       // Taskbar height
@@ -1121,8 +1122,9 @@ class LayoutManager {
       this.app.themeManager.apply(state.theme);
     }
 
-    // Restore grid
-    if (state.grid) {
+    // Restore grid — the record on disk taken whole, its chrome only where this viewport class applies it (a phone: none)
+    const chrome = chromeToApply(this._viewport(), TAKEN_WHOLE);
+    if (state.grid && chrome.grid) {
       this.app.wm.setGrid(state.grid.rows, state.grid.cols);
     }
 
@@ -1132,8 +1134,8 @@ class LayoutManager {
     }
     this._applyToolbarState(state); // incl. explicit-null reset — a stale localStorage must not resurrect an erased scale at boot
 
-    // Restore sidebar
-    if (state.sidebarOpen !== undefined) {
+    // Restore sidebar (a phone's stays as this page has it: closed at boot)
+    if (state.sidebarOpen !== undefined && chrome.sidebarOpen) {
       this.app.sidebar.toggle(state.sidebarOpen);
     }
 
@@ -1629,15 +1631,16 @@ class LayoutManager {
       }
     }
 
-    // Restore grid
-    if (preset.grid) {
+    // Restore grid — a preset is a record taken whole: a phone applies none of its chrome (§6b guard 10's read half)
+    const chrome = chromeToApply(this._viewport(), TAKEN_WHOLE);
+    if (preset.grid && chrome.grid) {
       this.app.wm.setGrid(preset.grid.rows, preset.grid.cols);
-    } else {
+    } else if (chrome.grid) {
       this.app.wm.setGrid(null);
     }
 
     // Restore sidebar
-    if (preset.sidebarOpen !== undefined) {
+    if (preset.sidebarOpen !== undefined && chrome.sidebarOpen) {
       this.app.sidebar.toggle(preset.sidebarOpen);
     }
 

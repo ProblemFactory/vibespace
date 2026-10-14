@@ -120,6 +120,9 @@ const PURE = new Set(['src/key-file.js' /* lane key-file-law-stores: THE KEY-FIL
   // mirror of its core block (a checkout-less host cannot require src/), and a
   // rule with an import is a rule that cannot be mirrored.
   'src/reading-lag.js',
+  // WHOSE IS A LONG-LIVED TOKEN AFTER THE MINT (lane oat-identity-postcheck, B-3102): the post-check's verdict +
+  // the owner-confirmed anchor's rules — imports only reading-lag + record-lateness (PURE → PURE)
+  'src/oat-identity-model.js',
   // THE SPEND CEILING (design-account-hardening §4.4c / P9): the decision every
   // producer of a turn nobody typed passes through, plus `overageState` — the
   // ONE reader of the overage record, asked by the authorizer, by the pool's
@@ -2192,7 +2195,8 @@ console.log('§51 no suite writes a patched copy into the tree');
     if (!fs.existsSync(bundle)) console.log('  - §52b r2 the agentd bundle is not built in this tree (npm run build:agentd) — its sources are scanned above');
     else {
       const BP = require('../src/browser-profiles.js');
-      const rendered = [BP.floorNotice({ state: 'too-old', installed: '0.1.0', floor: '0.32.0' }), BP.floorNotice({ state: 'unknown' })].filter(Boolean);
+      // B-0b8c: an 'unknown' speaks only once its probe ladder is exhausted (`settled`) — the rendered sample is that one
+      const rendered = [BP.floorNotice({ state: 'too-old', installed: '0.1.0', floor: '0.32.0' }), BP.floorNotice({ state: 'unknown', settled: true, attempts: 6, spanMs: 833e3, why: 'timed out after 8 s' })].filter(Boolean);
       const bHits = literalsOf(fs.readFileSync(bundle, 'utf8')).filter((l) => count(l));
       const foreign = bHits.filter((h) => !rendered.some((r) => r.includes(h)));
       ok(rendered.length === 2 && foreign.length === 0, `§52b r2 the agentd bundle names the hidden CLI only inside floorNotice's user notice (${bHits.length} fragment(s); foreign: ${foreign.map((h) => JSON.stringify(h.slice(0, 60))).join(', ') || 'none'})`);

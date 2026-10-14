@@ -7,6 +7,12 @@
 // revisions file = the vendor's answer by id), a deliver stub, an injected clock — a message a wake carried is recalled
 // ⇒ ONE stashed note; again / after a restart ⇒ nothing; a recall nobody was woken for ⇒ nothing; a message carried
 // twice ⇒ still one; a SCOPE DIGEST writes the woken-for rows of every conversation it carried. Patched-copy controls.
+// ⑦h (lane stash-pending-live) the CARRY: a group's hit parked while nobody ran, carried to the first member back, is on
+// the ledger ONCE — its recall is noted ONCE. ⑦d–⑦g (lane channel-recall-ledger, B-70d2) EVERY ROAD writes the ledger: a refused wake stashed, the FREE next-turn
+// stash (was: no row — its recall told nobody), one message reaching two conversations by two roads, a chatty
+// next-turn watch beside an older wake (the fair bound keeps the wake's row). ⑧ THE LEDGER DOOR CENSUS (acorn): every
+// delivery call of the engine (families inlined) and src/server/channel*.js names `noteDelivered(` after it, or a
+// NOT_A_ROAD row says why it carries no inbound message; one door, the only `wokeFor` writer. ⑨ the key + the fair cap.
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
@@ -84,7 +90,7 @@ console.log('⑥ the agent\'s words');
 const line = Rev.agentRevisionLine({ recalledAt: T, versions: [{}, {}, {}] }, { iso: () => 'T' });
 ok(line === '[recalled at T — the content below is the kept copy] [edited: v3 of 3; --versions shows all]' && Rev.agentRevisionLine({}) === '', 'recalled over the kept content; edited with the --versions hint; nothing learned = no line', line);
 const note = Rev.recallNoteText({ account: 'Lark', conversation: 'Ops', at: T }, { iso: () => 'T' });
-ok(/woken for at T \(Lark \/ Ops\) was recalled/.test(note) && !/\n/.test(note), 'the ONE next-turn note: our words, the time, the place — one line', note);
+ok(/delivered to you at T \(Lark \/ Ops\) was recalled/.test(note) && !/woken/.test(note) && !/\n/.test(note), 'the ONE next-turn note: our words, the time, the place — one line; "delivered", never "woken for" (every road)', note);
 
 
 console.log('⑦ the ENGINE leg (B-e8e1): the woken-for recall note over the REAL engine and the fake adapter');
@@ -100,13 +106,14 @@ const NOTE_FROM = 'Channels · recalls';
 function dayStartClock() { const t0 = Date.now(); const day0 = Math.floor(t0 / 86400e3) * 86400e3 + 60e3; let skew = 0; const f = () => day0 + (Date.now() - t0) + skew; f.advance = (ms) => { skew += ms; }; return f; }
 /** One engine over `dataDir` (a restart = a second one over the same dir, the same clock): the fake answers a stored
  *  message by id from its revisions file; every by-id ask is counted; the stub ladder delivers, the stub stash keeps. */
-function mkEngine(ENGM, dataDir, { clock = dayStartClock() } = {}) {
+function mkEngine(ENGM, dataDir, { clock = dayStartClock(), refuse = false, roster = null } = {}) {
   fs.mkdirSync(dataDir, { recursive: true });
   const REVS = path.join(dataDir, 'revisions.json');
   if (!fs.existsSync(REVS)) fs.writeFileSync(REVS, J({ revisions: {} }));
-  const delivered = [], stashed = [], asked = [];
+  const delivered = [], stashed = [], asked = [], refused = [];
   const deliver = {
-    deliverToConversation: async (cid, text, o) => { delivered.push({ cid, text, o }); return { ok: true, lane: 'message' }; },
+    // `refuse`: the ladder says no (the spend cap) — the engine stashes the refused block for the next turn
+    deliverToConversation: async (cid, text, o) => { if (refuse) { refused.push({ cid, text, o }); return { ok: false, reason: 'the spend cap is reached', refused: 'cap' }; } delivered.push({ cid, text, o }); return { ok: true, lane: 'message' }; },
     stashFor: (cid, e) => { stashed.push({ cid, ...e }); return { stored: true }; },
   };
   const registry = CH.createChannelRegistry();
@@ -114,16 +121,17 @@ function mkEngine(ENGM, dataDir, { clock = dayStartClock() } = {}) {
   const mk0 = fk.create;
   fk.create = (record, deps) => { const a = mk0(record, deps); const by = a.revisionOf; a.revisionOf = (convId, o) => { asked.push(o && o.messageId); return by(convId, o); }; return a; };
   registry.register(fk);
-  const eng = ENGM.create({ dataDir, env: { VIBESPACE_CHANNELS_FAKE: '1' }, registry, broadcast: () => {}, userTodos: new UserTodoManager({ dataDir, now: clock }), deliver, now: clock, log: { log() {}, warn() {}, error() {} }, liveSessions: () => [{ cid: 'agent-1', name: 'Worker', groups: [] }, { cid: 'agent-2', name: 'Other', groups: [] }] });
+  const eng = ENGM.create({ dataDir, env: { VIBESPACE_CHANNELS_FAKE: '1' }, registry, broadcast: () => {}, userTodos: new UserTodoManager({ dataDir, now: clock }), deliver, now: clock, log: { log() {}, warn() {}, error() {} }, liveSessions: () => (roster ? roster() : [{ cid: 'agent-1', name: 'Worker', groups: [] }, { cid: 'agent-2', name: 'Other', groups: [] }]) });
   const recall = (...vids) => { const j = JSON.parse(fs.readFileSync(REVS, 'utf8')); for (const v of vids) j.revisions[v] = { state: 'recalled' }; fs.writeFileSync(REVS, J(j)); };
   const tail = (c) => { const m = eng.messages(A, c, { limit: 5 }); return m.records || m; };
   const recOf = () => eng.adapterRecords().adapters.find((r) => r.id === A);
   const woke = (c) => ((eng.store.index.live()[`${A}/${c}`] || {}).wokeFor || []);
   const recalled = (c, vid) => !!Rev.recalledAtOf(eng.store.readSide(A, c, { msgs: new Set([vid]) }).filter((x) => x && x.k === 'fx'));
   const notes = () => stashed.filter((x) => x.fromName === NOTE_FROM);
+  const blocks = () => stashed.filter((x) => x.fromName !== NOTE_FROM);   // the message blocks themselves (a stashed refusal, the free stash)
   // the cadence is one by-id ask per message per hour: the next pass an hour on re-reads what a wake carried
   const hourLater = async () => { clock.advance(61 * 60e3); return eng.pass(A, { force: true }); };
-  return { eng, clock, delivered, stashed, asked, recall, tail, recOf, woke, recalled, notes, hourLater };
+  return { eng, clock, delivered, refused, stashed, asked, recall, tail, recOf, woke, recalled, notes, blocks, hourLater };
 }
 const iso = (ms) => new Date(ms).toISOString();
 
@@ -217,10 +225,252 @@ ok(J(g1.rows) === J(g1.want), 'the woken-for ledger of EVERY conversation the di
 ok(g1.notes.length === 2 && g1.notes.every(([cid]) => cid === 'agent-1') && g1.notes.some(([, x]) => /Ops room/.test(x)) && g1.notes.some(([, x]) => /Announcements/.test(x)), 'both recalls after the digest: ONE note each, to the conversation the digest woke, naming its room', J(g1.notes));
 {
   const src = engineSource(REPO);
-  const line = '          noteWoken(e2, h.carried.hits, target.cid, t);';
+  const line = '          noteDelivered(e2, h.carried.hits, target.cid, t);';
   const cut = src.split('\n').filter((l) => !l.startsWith(line)).join('\n');
   const c3 = await digestLeg(MUT.load('src/server/channels-engine.js', cut, 'no-digest-ledger'), 'digest-c');
   ok(cut !== src && c3.delivered === 1 && c3.rows.every((r) => r === '') && c3.notes.length === 0, 'CONTROL: the digest without its ledger rows (the .262 engine) — delivered, recalled, and NOT ONE note', J({ rows: c3.rows, notes: c3.notes.length }));
+}
+
+// ⑦d–⑦g (lane channel-recall-ledger, B-70d2): THE LEDGER DOOR ON EVERY ROAD — a message that reached a conversation
+// is remembered there whichever road carried it, so its recall is noted there once
+const AGENT2 = { kind: 'agent', id: 'agent-2', name: 'Other' };
+const rowsOf = (w, c) => w.woke(c).map((x) => `${x.vid}>${x.cid}`);
+const legTable = [];
+
+// ⑦d the wake ROAD refused (the spend cap): the block is stashed for the next turn — a delivery all the same
+async function refusedLeg(ENGM, tag) {
+  const w = mkEngine(ENGM, path.join(ROOT, tag), { refuse: true });
+  await w.eng.pass(A, { force: true });
+  await w.eng.setGrain(A, { kind: 'conversation', convId: OPS }, { access: [acc(AGENT)], watchers: [{ principal: AGENT }] });
+  const m8 = w.tail(OPS).slice(-1)[0];
+  await w.eng.onFresh(w.recOf(), OPS, [m8], { origin: 'test' });
+  const rows = rowsOf(w, OPS);
+  w.recall(m8.vendorId);
+  await w.hourLater();
+  await w.hourLater();
+  const out = { refused: w.refused.map((x) => x.cid), delivered: w.delivered.length, blocks: w.blocks().map((x) => x.cid), rows, want: [`${m8.vendorId}>agent-1`], notes: w.notes().map((x) => x.cid) };
+  await w.eng.stop();
+  return out;
+}
+const r1 = await refusedLeg(ENG, 'refused');
+ok(J(r1.refused) === J(['agent-1']) && r1.delivered === 0 && J(r1.blocks) === J(['agent-1']) && J(r1.rows) === J(r1.want), 'a REFUSED wake (the spend cap) whose block was stashed: the ledger names the message and the conversation it reached', J(r1));
+ok(J(r1.notes) === J(['agent-1']), 'its recall: ONE note to that conversation, two passes on', J(r1.notes));
+legTable.push(['a refused wake, stashed (wakeNow)', r1.notes.length]);
+
+// ⑦e the FREE next-turn stash (a next-turn watch — the agent's own default): no billed turn, and now a ledger row
+async function nextTurnLeg(ENGM, tag) {
+  const dataDir = path.join(ROOT, tag);
+  const w = mkEngine(ENGM, dataDir);
+  await w.eng.pass(A, { force: true });
+  await w.eng.setGrain(A, { kind: 'conversation', convId: OPS }, { access: [acc(AGENT)], watchers: [{ principal: AGENT, delivery: 'next-turn' }] });
+  const [m6, m7, m8] = w.tail(OPS).slice(-3);
+  await w.eng.onFresh(w.recOf(), OPS, [m7, m8], { origin: 'test' });
+  const rows = rowsOf(w, OPS);
+  w.recall(m7.vendorId, m6.vendorId);
+  await w.hourLater();
+  const first = w.notes().map((x) => ({ cid: x.cid, text: x.text }));
+  const marked = [w.recalled(OPS, m7.vendorId), w.recalled(OPS, m6.vendorId)];
+  await w.hourLater();
+  const second = w.notes().length;
+  const out = { billed: w.delivered.length, blocks: w.blocks().map((x) => x.cid), rows, want: [`${m7.vendorId}>agent-1`, `${m8.vendorId}>agent-1`], first, marked, second };
+  await w.eng.stop();
+  const w2 = mkEngine(ENGM, dataDir, { clock: w.clock });
+  await w2.hourLater();
+  out.restart = { asked: w2.asked.includes(m7.vendorId), notes: w2.notes().length };
+  await w2.eng.stop();
+  return out;
+}
+const e1 = await nextTurnLeg(ENG, 'next-turn');
+ok(e1.billed === 0 && J(e1.blocks) === J(['agent-1']) && J(e1.rows) === J(e1.want), 'the FREE next-turn stash: no billed turn, ONE stashed block — and the ledger names both messages it handed (was: no row)', J(e1));
+ok(e1.first.length === 1 && e1.first[0].cid === 'agent-1' && /was recalled by its sender/.test(e1.first[0].text) && /Ops room/.test(e1.first[0].text) && e1.marked.every(Boolean), 'its recall: exactly ONE note to the conversation the stash reached; the recall nobody was handed is marked and adds nothing', J({ first: e1.first, marked: e1.marked }));
+ok(e1.second === 1 && e1.restart.asked && e1.restart.notes === 0, 'a re-check an hour on and a restart (the 7 d row re-asks it): still ONE note', J({ second: e1.second, restart: e1.restart }));
+legTable.push(['the free next-turn stash (stashHits)', e1.first.length]);
+{ // RED CONTROL: the free stash without its door (= f57d1cbe9) — no row, so the recall tells nobody
+  const src = engineSource(REPO);
+  const cut = src.replace('if (e2) noteDelivered(e2, fresh, target.cid, now());', 'if (e2) void e2;');
+  const c4 = await nextTurnLeg(MUT.load('src/server/channels-engine.js', cut, 'no-stash-door'), 'next-turn-c');
+  ok(cut !== src && J(c4.blocks) === J(['agent-1']) && c4.rows.length === 0 && c4.first.length === 0 && c4.marked[0], 'CONTROL: the free stash without the ledger door (the base engine) — handed, recalled, marked, and NOT ONE note', J({ rows: c4.rows, notes: c4.first.length }));
+}
+
+// ⑦f ONE message reaching TWO conversations by two roads (agent-1's next-turn watch, agent-2's wake) — and one nobody got
+async function mixedLeg(ENGM, tag) {
+  const w = mkEngine(ENGM, path.join(ROOT, tag));
+  await w.eng.pass(A, { force: true });
+  await w.eng.setGrain(A, { kind: 'conversation', convId: OPS }, { access: [acc(AGENT), acc(AGENT2)], watchers: [{ principal: AGENT, delivery: 'next-turn' }, { principal: AGENT2 }] });
+  const [m6, m8] = [w.tail(OPS).slice(-3)[0], w.tail(OPS).slice(-1)[0]];
+  await w.eng.onFresh(w.recOf(), OPS, [m8], { origin: 'test' });
+  const rows = rowsOf(w, OPS).sort();
+  w.recall(m8.vendorId, m6.vendorId);
+  await w.hourLater();
+  await w.hourLater();
+  const out = { billed: w.delivered.map((x) => x.cid), blocks: w.blocks().map((x) => x.cid), rows, want: [`${m8.vendorId}>agent-1`, `${m8.vendorId}>agent-2`], notes: w.notes().map((x) => x.cid).sort() };
+  await w.eng.stop();
+  return out;
+}
+const x1 = await mixedLeg(ENG, 'mixed');
+ok(J(x1.billed) === J(['agent-2']) && J(x1.blocks) === J(['agent-1']) && J(x1.rows) === J(x1.want), 'one message, two roads: agent-2 woken (billed), agent-1 handed it on its next turn (free) — one ledger row per conversation it reached', J(x1));
+ok(J(x1.notes) === J(['agent-1', 'agent-2']), 'its recall: ONE note to EACH conversation that holds it, whichever road; the recall nobody got adds nothing', J(x1.notes));
+
+// ⑦g a CHATTY next-turn watch beside an older wake: 45 handed to agent-2 after one wake of agent-1 — the bound (40)
+// is fair, so agent-1's row stays and its recall is still noted (the newest-40 bound pushed it out)
+async function capLeg(ENGM, tag) {
+  const w = mkEngine(ENGM, path.join(ROOT, tag));
+  await w.eng.pass(A, { force: true });
+  const access = [acc(AGENT), acc(AGENT2)];
+  await w.eng.setGrain(A, { kind: 'conversation', convId: OPS }, { access, watchers: [{ principal: AGENT }] });
+  const m8 = w.tail(OPS).slice(-1)[0];
+  await w.eng.onFresh(w.recOf(), OPS, [m8], { origin: 'test' });
+  await w.eng.setGrain(A, { kind: 'conversation', convId: OPS }, { access, watchers: [{ principal: AGENT2, delivery: 'next-turn' }] });
+  const flood = Array.from({ length: 45 }, (_, i) => ({ ...m8, id: `${m8.id}-f${i}`, vendorId: `${m8.vendorId}-f${i}`, at: Number(m8.at) - (i + 1) * 60e3 }));
+  await w.eng.onFresh(w.recOf(), OPS, flood, { origin: 'test' });
+  const rows = w.woke(OPS);
+  const per = { a1: rows.filter((x) => x.cid === 'agent-1').length, a2: rows.filter((x) => x.cid === 'agent-2').length, kept: rows.some((x) => x.vid === m8.vendorId && x.cid === 'agent-1') };
+  w.recall(m8.vendorId);
+  // ≤ 12 by-id asks a pass, never-checked first: the 39 handed rows go before m8 (asked at the first pass) — 4 passes
+  for (let i = 0; i < 5; i++) await w.hourLater();
+  const out = { blocks: w.blocks().map((x) => x.cid), n: rows.length, per, notes: w.notes().map((x) => x.cid) };
+  await w.eng.stop();
+  return out;
+}
+const k1 = await capLeg(ENG, 'cap');
+ok(J(k1.blocks) === J(['agent-2']) && k1.n === 40 && k1.per.a1 === 1 && k1.per.a2 === 39 && k1.per.kept, 'a chatty next-turn watch (45 handed) beside one older wake: the ledger holds 40 — the chatty conversation lost its oldest, the wake\'s row stayed', J(k1));
+ok(J(k1.notes) === J(['agent-1']), 'and the recall of the waking message is still noted to the conversation it woke', J(k1.notes));
+{ // RED CONTROL: the newest-40 bound (the base door) pushes the wake's row out — its recall tells nobody
+  const src = engineSource(REPO);
+  const cut = src.replace('    en.wokeFor = Rev.capWokeRows(prev, WOKE_FOR_MAX);\n', '    en.wokeFor = prev.slice(-WOKE_FOR_MAX);\n');
+  const c5 = await capLeg(MUT.load('src/server/channels-engine.js', cut, 'newest-40'), 'cap-c');
+  ok(cut !== src && !c5.per.kept && c5.notes.length === 0, 'CONTROL: the newest-40 bound drops the older wake\'s row under the chatty watch — and its recall adds NO note', J({ per: c5.per, notes: c5.notes }));
+}
+// ⑦h lane stash-pending-live: THE CARRY — a group's hit parked while none of its members ran (no road reached anyone, so
+// no row) is carried to the first member that comes back, by its next hit or by its own turn (`carryParked`); the
+// ledger door takes the carried message ONCE for that member (two asks in one tick hand it over once), so its recall
+// is noted ONCE. The control is the engine without the hit's carry (d035f7cfa): the parked message reaches nobody
+// before a boot — no row, and its recall is noted to no one.
+const GRP = { kind: 'group', id: 'g-team', name: 'Team' };
+async function carryLeg(ENGM, tag, how) {
+  let live = [];
+  const w = mkEngine(ENGM, path.join(ROOT, tag), { roster: () => live });
+  await w.eng.pass(A, { force: true });
+  await w.eng.setGrain(A, { kind: 'conversation', convId: OPS }, { access: [acc(GRP)], watchers: [{ principal: GRP, delivery: 'next-turn' }] });
+  const [m7, m8] = w.tail(OPS).slice(-2);
+  await w.eng.onFresh(w.recOf(), OPS, [m7], { origin: 'test' });   // nobody live ⇒ parked on the next-turn road
+  const parked = ((w.eng.store.index.live()[`${A}/${OPS}`] || {}).pending || []).length;
+  const rows0 = rowsOf(w, OPS);
+  live = [{ cid: 'member-1', name: 'Member', groups: ['g-team'] }];   // the first member comes back
+  if (how === 'hit') await w.eng.onFresh(w.recOf(), OPS, [m8], { origin: 'test' });
+  else { w.eng.carryParked('member-1'); w.eng.carryParked('member-1'); }   // SessionStart + a prompt, one tick
+  await w.eng.settleWakes();
+  const rows = rowsOf(w, OPS);
+  w.recall(m7.vendorId);
+  await w.hourLater();
+  await w.hourLater();
+  const out = { parked, rows0, rows, want: [`${m7.vendorId}>member-1`, ...(how === 'hit' ? [`${m8.vendorId}>member-1`] : [])], billed: w.delivered.length, blocks: w.blocks().map((x) => x.cid), notes: w.notes().map((x) => x.cid) };
+  await w.eng.stop();
+  return out;
+}
+const h1 = await carryLeg(ENG, 'carry-hit', 'hit');
+ok(h1.parked === 1 && h1.rows0.length === 0 && h1.billed === 0 && J(h1.blocks) === J(['member-1']) && J(h1.rows) === J(h1.want), 'the CARRY by a hit: parked (no row), then ONE block hands the parked + the fresh message to the member back — a ledger row for each, billed 0', J(h1));
+ok(J(h1.notes) === J(['member-1']), 'the carried message recalled: ONE note to the member it was carried to', J(h1.notes));
+const h2 = await carryLeg(ENG, 'carry-turn', 'turn');
+ok(h2.parked === 1 && h2.billed === 0 && J(h2.blocks) === J(['member-1']) && J(h2.rows) === J(h2.want), 'the CARRY by the member\'s own turn (asked twice in one tick): ONE block, ONE ledger row, billed 0', J(h2));
+ok(J(h2.notes) === J(['member-1']), '…and its recall: ONE note', J(h2.notes));
+legTable.push(['a parked hit carried by the next hit (stashHits carry)', h1.notes.length], ['a parked hit carried by the member\'s turn (carryParked)', h2.notes.length]);
+{ // RED CONTROL: the engine without the hit's carry (d035f7cfa) — the parked message reached nobody, so no note
+  const src = engineSource(REPO);
+  const DEFER = "    if (!fromPending && !carry && !stopped && parkedNextTurn(en, w, pk)) return billedWake({ conv: `${rec.id}/${convId}` }, () => stashHits(rec, convId, hits, { item, pk, batch, carry: true, prefer }));\n";
+  const cut = src.replace(DEFER, '');
+  const c6 = await carryLeg(MUT.load('src/server/channels-engine.js', cut, 'no-carry'), 'carry-hit-c', 'hit');
+  ok(cut !== src && J(c6.rows) === J([`${c6.want[1].split('>')[0]}>member-1`]) && c6.notes.length === 0, 'CONTROL: without the carry the parked message reaches nobody before a boot — no ledger row, and its recall is noted to NO ONE', J({ rows: c6.rows, notes: c6.notes }));
+}
+legTable.unshift(['a billed wake (wakeNow)', d1.first.length], ['a scope digest\'s carried hits (flushScopeNow), per conversation', g1.notes.length / 2]);
+console.log('  the leg table — road → notes for one recalled message it carried:');
+for (const [road, n] of legTable) console.log(`    ${road} → ${n}`);
+ok(legTable.length === 6 && legTable.every(([, n]) => n === 1), 'every road the ledger door serves gives exactly ONE note per (message, conversation)', J(legTable));
+
+console.log('⑧ THE LEDGER DOOR CENSUS (B-70d2): every delivery call names the ONE door after its hand-over');
+const acorn = require('acorn');
+const DOOR = 'noteDelivered';
+const ROAD_CALLS = new Set(['stashFor', 'deliverToConversation']);
+const ARRAY_WRITES = new Set(['push', 'unshift', 'splice', 'pop', 'shift', 'fill', 'sort', 'reverse', 'copyWithin']);
+/** `<file> › <function>` of a call that hands a conversation something that is NOT an inbound message — the only
+ *  delivery calls without the door (each row must still name a call: a dead row is RED). */
+const NOT_A_ROAD = {
+  'channels-engine.js › reactionDigest': 'a reaction line on a message the AGENT sent — no inbound message reaches anyone',
+  'channels-engine.js › noteRecall': 'the recall note itself — news about a message the ledger already holds',
+  'channels-outbound.js › receiptNow': 'the Outbox receipt of a send from here — no inbound message',
+  'channel-api-cards.js › receiptFor': 'a raw-API proposal\'s receipt to the conversation that drafted it — no inbound message',
+};
+const ENGINE_SRC = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf8');
+/** The engine + every src/server/channel*.js beside it (its families included, each under its own name). */
+function censusFiles(engine = ENGINE_SRC) {
+  const files = [{ name: 'channels-engine.js', src: engine }];
+  for (const f of fs.readdirSync(path.join(REPO, 'src/server')).sort()) if (/^channels?-.*\.js$/.test(f) && f !== 'channels-engine.js') files.push({ name: f, src: fs.readFileSync(path.join(REPO, 'src/server', f), 'utf8') });
+  return files;
+}
+/** Every delivery call (`.stashFor(` / `.deliverToConversation(`, any receiver) by its enclosing NAMED function. */
+function ledgerCensus(files, notARoad = NOT_A_ROAD) {
+  const roads = [], doors = [], writers = [], defs = [];
+  for (const f of files) {
+    const lineAt = (i) => f.src.slice(0, i).split('\n').length;
+    const walk = (node, fn) => {
+      if (Array.isArray(node)) { for (const x of node) walk(x, fn); return; }
+      if (!node || typeof node.type !== 'string') return;
+      let here = fn;
+      if ((node.type === 'FunctionDeclaration' || node.type === 'FunctionExpression') && node.id) { here = node.id.name; if (here === DOOR) defs.push(f.name); }
+      if (node.type === 'VariableDeclarator' && node.id && node.id.type === 'Identifier' && node.init && /Function/.test(node.init.type)) { if (node.id.name === DOOR) defs.push(f.name); walk(node.init.params, node.id.name); walk(node.init.body, node.id.name); return; }
+      if (node.type === 'CallExpression') {
+        const c = node.callee.type === 'ChainExpression' ? node.callee.expression : node.callee;
+        const name = c.type === 'Identifier' ? c.name : (c.type === 'MemberExpression' && !c.computed && c.property.type === 'Identifier') ? c.property.name : null;
+        if (ROAD_CALLS.has(name)) roads.push({ file: f.name, fn: here, via: name, at: node.start, line: lineAt(node.start) });
+        if (name === DOOR && c.type === 'Identifier') doors.push({ file: f.name, fn: here, at: node.start });
+        const o = c.type === 'MemberExpression' ? c.object : null;
+        if (o && o.type === 'MemberExpression' && !o.computed && o.property.name === 'wokeFor' && ARRAY_WRITES.has(name)) writers.push({ file: f.name, fn: here, line: lineAt(node.start) });
+      }
+      if (node.type === 'AssignmentExpression' && node.left.type === 'MemberExpression' && ((!node.left.computed && node.left.property.name === 'wokeFor') || (node.left.property.type === 'Literal' && node.left.property.value === 'wokeFor'))) writers.push({ file: f.name, fn: here, line: lineAt(node.start) });
+      for (const k in node) { const v = node[k]; if (v && typeof v === 'object') walk(v, here); }
+    };
+    walk(acorn.parse(f.src, { ecmaVersion: 'latest', sourceType: 'script', allowReturnOutsideFunction: true, allowHashBang: true }), null);
+  }
+  const red = [];
+  const road = (r) => !Object.hasOwn(notARoad, `${r.file} › ${r.fn}`);
+  for (const r of roads.filter(road)) if (!doors.some((d) => d.file === r.file && d.fn === r.fn && d.at > r.at)) red.push(`${r.file}:${r.line} ${r.fn || '(top level)'} hands over by ${r.via}( with no ${DOOR}( after it`);
+  for (const k of Object.keys(notARoad)) if (!roads.some((r) => `${r.file} › ${r.fn}` === k)) red.push(`NOT_A_ROAD ${k} names no delivery call (a dead row)`);
+  for (const w of writers) if (w.fn !== DOOR) red.push(`${w.file}:${w.line} ${w.fn || '(top level)'} writes wokeFor — only ${DOOR} may`);
+  if (defs.length !== 1) red.push(`${DOOR} is defined ${defs.length} time(s), want 1`);
+  return { red, roads: roads.filter(road), fns: [...new Set(roads.filter(road).map((r) => r.fn))].sort(), exempt: roads.filter((r) => !road(r)), writers };
+}
+const C0 = ledgerCensus(censusFiles());
+console.log(`  census: ${C0.roads.length} delivery calls in ${C0.fns.length} roads (${C0.fns.join(', ')}) name ${DOOR}; ${C0.exempt.length} calls in ${Object.keys(NOT_A_ROAD).length} NOT_A_ROAD functions; ${C0.writers.length} wokeFor writer`);
+ok(!C0.red.length && C0.fns.includes('stashHits') && C0.fns.includes('wakeNow') && C0.fns.includes('flushScopeNow') && C0.writers.length === 1, 'every delivery road (a billed / refused-and-stashed wake, the free stash, a scope digest) calls the ONE ledger door after its hand-over; the door is the only wokeFor writer', J({ red: C0.red, fns: C0.fns, writers: C0.writers }));
+{ // RED CONTROLS: a planted road, the base free stash (no door), a dead NOT_A_ROAD row, a second wokeFor writer
+  const src = ENGINE_SRC;
+  const planted = src.replace('  async function stashHits(', "  async function plantedRoad(cid, hits) { deliver.stashFor(cid, { source: 'channel', kind: 'notification', fromName: 'Channels · planted', text: String(hits.length) }); }\n  async function stashHits(");
+  const p1 = ledgerCensus(censusFiles(planted));
+  ok(planted !== src && p1.red.length === 1 && /plantedRoad hands over by stashFor/.test(p1.red[0]), 'CONTROL: a PLANTED road (a new stashFor with no door) is RED by name', J(p1.red));
+  const base = src.replace('if (e2) noteDelivered(e2, fresh, target.cid, now());', 'if (e2) void e2;');
+  const p2 = ledgerCensus(censusFiles(base));
+  ok(base !== src && p2.red.length === 1 && /stashHits hands over by stashFor/.test(p2.red[0]), 'CONTROL: the base engine\'s free stash (f57d1cbe9 — no door) is RED', J(p2.red));
+  const p3 = ledgerCensus(censusFiles(), { ...NOT_A_ROAD, 'channels-engine.js › goneRoad': 'a road that no longer exists' });
+  ok(p3.red.length === 1 && /goneRoad .*dead row/.test(p3.red[0]), 'CONTROL: a NOT_A_ROAD row naming no call is RED (a dead row)', J(p3.red));
+  const second = src.replace('      if (!en || !Array.isArray(en.wokeFor)) return;\n', '      if (!en || !Array.isArray(en.wokeFor)) return;\n      en.wokeFor = en.wokeFor.filter(Boolean);\n');
+  const p4 = ledgerCensus(censusFiles(second));
+  ok(second !== src && p4.red.length === 1 && /noteRecall writes wokeFor/.test(p4.red[0]), 'CONTROL: a second wokeFor writer is RED', J(p4.red));
+}
+
+console.log('⑨ the ledger\'s key and its FAIR bound (PURE)');
+ok(Rev.wokeKeyOf('om_1') === 'om_1' && Rev.wokeKeyOf(42) === '42' && Rev.wokeKeyOf('') === null && Rev.wokeKeyOf(null) === null && Rev.wokeKeyOf(undefined) === null && Rev.wokeKeyOf('x'.repeat(600)).length === 512, 'the key = the id the by-id recheck asks with, bounded; no id ⇒ no row', '');
+{
+  const row = (cid, at) => ({ vid: `${cid}-${at}`, cid, at });
+  const one = [row('a1', 1), ...Array.from({ length: 45 }, (_, i) => row('a2', 10 + i))];
+  const k = Rev.capWokeRows(one, 40);
+  ok(k.length === 40 && k.filter((x) => x.cid === 'a1').length === 1 && k.filter((x) => x.cid === 'a2').map((x) => x.at)[0] === 16 && k[0].cid === 'a1', 'over the bound the conversation with the most rows loses its OLDEST; the lone wake row stays, the order is kept', J(k.slice(0, 3)));
+  const halves = [...Array.from({ length: 30 }, (_, i) => row('a1', i)), ...Array.from({ length: 30 }, (_, i) => row('a2', 100 + i))];
+  const h = Rev.capWokeRows(halves, 40);
+  ok(h.filter((x) => x.cid === 'a1').length === 20 && h.filter((x) => x.cid === 'a2').length === 20 && h.every((x) => x.cid === 'a2' ? x.at >= 110 : x.at >= 10), 'two conversations over the bound share it evenly, each keeping its newest', J(h.map((x) => x.at)));
+  const small = [row('a1', 1), row('a2', 2)];
+  ok(J(Rev.capWokeRows(small, 40)) === J(small) && Rev.capWokeRows(null, 40).length === 0, 'under the bound: unchanged', '');
+  // RED control: the newest-N bound (the base door) loses the lone wake row
+  ok(!one.slice(-40).some((x) => x.cid === 'a1'), 'CONTROL: the newest-40 bound drops the lone wake row the fair bound keeps', '');
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

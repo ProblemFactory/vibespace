@@ -152,8 +152,8 @@ function resolveModelCapLane({ cacheDir, key, ev, hint = null }) {
   const resetsAt = ev.modelCap ? ev.resetsAt : (ev.windows.modelCap.resetsAt || null);
   let scoped = null, limits = [];
   if (cacheDir && key) {
-    const readingLag = require('./reading-lag.js');
-    try { const sc = JSON.parse(fs.readFileSync(path.join(cacheDir, readingLag.windowSidecarName(key)), 'utf-8')); scoped = sc && typeof sc.scoped === 'object' ? sc.scoped : null; } catch { scoped = null; }
+    const sc = require('./window-stamp.js').readWindowStamp(cacheDir, key); // the `.window-` sidecar's ONE reader (lane oat-identity-fix-r3)
+    scoped = sc && sc.scoped && typeof sc.scoped === 'object' ? sc.scoped : null;
     try {
       const usageWrite = usageWriteMod();
       const obj = usageWrite.readCacheObject(cacheDir, key);

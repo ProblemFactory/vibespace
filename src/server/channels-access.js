@@ -103,14 +103,15 @@ function create(engineCtx) {
   /** Pending hits by WATCHER (R4): every entry names the principal it waits
    *  for (`for`); an entry from before the split (no `for`) and the untagged
    *  elided count belong to the FIRST watcher in effect — the one that was
-   *  the only assignment when it was held. */
+   *  the only assignment when it was held. `roads` = the roads its rows were parked on (`null` = a row from before
+   *  the field) — the engine's `pendingRoadOf` reads it (lane boot-flush-next-turn). */
   function pendingOf(en, pk, eff) {
     const firstPk = eff && eff.watchers[0] ? pkOf(eff.watchers[0].watcher.principal) : null;
     const mine = (p) => p && (p.for ? p.for === pk : pk === firstPk);
     const list = (Array.isArray(en && en.pending) ? en.pending : []).filter(mine);
     const elidedTagged = Number(en && en.pendingElidedBy && en.pendingElidedBy[pk]) || 0;
     const elidedUntagged = pk === firstPk ? (Number(en && en.pendingElided) || 0) : 0;
-    return { hits: list.map((p) => ({ record: p.record, why: p.why || [], ...(p.sent ? { sent: p.sent } : {}) })), ids: new Set(list.map((p) => p.record && p.record.id).filter(Boolean)), elidedTagged, elidedUntagged, elided: elidedTagged + elidedUntagged };
+    return { hits: list.map((p) => ({ record: p.record, why: p.why || [], ...(p.sent ? { sent: p.sent } : {}) })), ids: new Set(list.map((p) => p.record && p.record.id).filter(Boolean)), roads: [...new Set(list.map((p) => p.road || null))], elidedTagged, elidedUntagged, elided: elidedTagged + elidedUntagged };
   }
   /** Drop what one delivery CARRIED (and nothing else) from `pending`. */
   function clearCarried(e2, pk, eff, carried) {

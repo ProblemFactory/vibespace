@@ -536,7 +536,8 @@ function create(engineCtx) {
     if (!who.as) return { ok: false, code: 'send-not-available', error: `sending is not available on this conversation (${who.why}${askAt ? `; asked again at ${new Date(askAt).toISOString()}` : ''})`, why: who.why, ...(askAt ? { retryAt: askAt } : {}) };
     const own = !!(input && input.direct === true) && (!ctx || ctx.kind === 'user');
     if (own && who.as !== 'user') return { ok: false, code: 'send-not-available', error: `sending as you is not available on this conversation (${who.userWhy || 'unknown'})`, why: who.userWhy || 'unknown' };
-    const v = P.validateProposal(input);
+    // lane composer-file-only-send (B-dce6): a file alone is a message where THIS adapter's capability row carries one
+    const v = P.validateProposal(input, { sendAttachments: (registry.capsOf(rec.kind) || {}).sendAttachments || null });
     if (!v.ok) return { ok: false, code: 'bad-proposal', error: v.error, ...(v.why ? { why: v.why } : {}) };
     const att = attachPrepare(rec, v.proposal, ctx, enNow ? effectiveConvCaps(rec, enNow) : null);
     if (!att.ok) return att.answer;

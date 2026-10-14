@@ -434,6 +434,9 @@ export function renderProposalCard(app, p, { compact = false, line = false, onLi
   let hiddenMarks = [];
   if (reaction) body.textContent = reactionCardText(p);
   else hiddenMarks = revealInto(body, p.text || '');
+  // lane composer-file-only-send (B-dce6): a proposal that is ONLY its files draws no empty text line — the file rows
+  // below are the message; the node stays (hidden) for the Edit to replace
+  if (!reaction && !String(p.text || '').trim() && P.storedAttachments(p).length) { body.hidden = true; body.dataset.fileOnly = '1'; }
   card.appendChild(body);
   if (hiddenMarks.length) {
     const hw = el('div', 'chan-prop-idwarn chan-prop-hiddenwarn');
@@ -837,10 +840,10 @@ export function rowWhoWhere(p) {
   const e = (p && p.replyEnvelope) || null;
   return { who: e && e.to ? String(e.to) : '', where: convNameOf(p || {}) };
 }
-/** B-f467: the first line of what would be sent (a reaction: its sentence). */
+/** B-f467: the first line of what would be sent (a reaction: its sentence; a file sent by itself: its names). */
 export function rowFirstLine(p) {
   if (p && p.kind === 'reaction' && p.reaction) return reactionCardText(p);
-  return String((p && p.text) || '').split('\n').map((s) => s.trim()).find(Boolean) || '';
+  return String((p && p.text) || '').split('\n').map((s) => s.trim()).find(Boolean) || (p ? P.storedAttachments(p).map((a) => String(a.name || '')).filter(Boolean).join(', ') : '');
 }
 /**
  * B-f467: ONE ROW FOR ONE PROPOSAL (the Outbox window). `badge` = its account's (channel-avatar.js accountBadges);

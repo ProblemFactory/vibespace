@@ -448,7 +448,11 @@ console.log('\n⑤ the version floor (D1)');
   ok(outs['too-old'].state === 'too-old' && outs['too-old'].sharedProfiles === false, 'below the floor ⇒ too-old, capability OFF');
   ok(outs.absent.state === 'absent' && B.floorNotice(outs.absent) === null, 'no binary ⇒ absent and SILENT (never nag about a tool nobody uses)');
   ok(outs.unknown.state === 'unknown' && outs.unknown.sharedProfiles === false, 'a binary that will not state its version fails CLOSED on the capability…');
-  ok(/Could not read the installed agent-browser version/.test(B.floorNotice(outs.unknown)), '…and says so in its own words rather than claiming a version');
+  // B-0b8c (lane browser-probe-transient): …but ONE failed probe never decides for ever — an 'unknown' is NOT YET KNOWN (no
+  // notice) until the owner's probe ladder is exhausted; then it says so in its own words, naming its tries and why
+  ok(B.floorNotice(outs.unknown) === null && outs.unknown.settled === false, '…and while nobody has finished asking it is NOT YET KNOWN — no notice (one failed probe never decides for ever)');
+  ok(/^Could not read the agent-browser version after 6 tries over 14 minutes \(timed out after 8 s\)/.test(B.floorNotice(B.floorVerdict('weird build', B.FLOOR_VERSION, { ok: false, exhausted: true, attempts: 6, at: 834e3, since: 1e3, why: 'timed out after 8 s' })) || ''),
+    '…and once the ladder is exhausted it says so in its own words — the tries, the span, the last why — rather than claiming a version');
   const n = B.floorNotice(outs['too-old']);
   ok(/too old for shared profiles/.test(n), 'the sentence is the design\'s: "your agent-browser is too old for shared profiles"');
   ok(/0\.32\.0/.test(n) && /0\.37\.1/.test(n), 'it names the installed version AND the floor');

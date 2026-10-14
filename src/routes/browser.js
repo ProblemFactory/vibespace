@@ -395,6 +395,22 @@ router.get('/api/browser/display', async (req, res) => {
   const k = keeperOr503(res); if (!k) return;
   try { res.json({ display: typeof k.machineDisplay === 'function' ? await k.machineDisplay() : null, mode: typeof k.noDisplayMode === 'function' ? k.noDisplayMode() : 'auto', preference: typeof k.headedSetting === 'function' ? k.headedSetting() : null }); } catch (e) { fail(res, e); } // H5: `preference` = browser.headed as stored (null = unset) — Settings' line says what an UNSET one does here
 });
+/** B-0b8c (lane browser-probe-transient): THE FLOOR FACTS — the browser CLI version the keeper's act reads, its floor
+ *  verdict (an 'unknown' says whether the probe ladder still asks: `settled`) and the last probe's state `{at, ok, why,
+ *  attempts, since, nextAt, exhausted}`; POST …/check = the For-you notice's Check again: ONE probe now (the single flight
+ *  a waiting rung shares) — an answer withdraws the notice. A probe changes nothing but a fact, so any caller may ask. */
+router.get('/api/browser/floor', (req, res) => {
+  if (refuseHost(req, res)) return;
+  const k = keeperOr503(res); if (!k) return;
+  if (typeof k.floorFacts !== 'function') return res.status(503).json({ error: 'this keeper cannot read the browser version', code: 'unavailable' });
+  try { res.json(k.floorFacts()); } catch (e) { fail(res, e); }
+});
+router.post('/api/browser/floor/check', async (req, res) => {
+  if (refuseHost(req, res)) return;
+  const k = keeperOr503(res); if (!k) return;
+  if (typeof k.checkFloorNow !== 'function') return res.status(503).json({ error: 'this keeper cannot read the browser version', code: 'unavailable' });
+  try { res.json(await k.checkFloorNow()); } catch (e) { fail(res, e); }
+});
 router.get('/api/browser/profiles', (req, res) => {
   if (refuseHost(req, res)) return;
   const k = keeperOr503(res); if (!k) return;

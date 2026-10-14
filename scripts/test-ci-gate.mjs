@@ -251,6 +251,10 @@ console.log('\n§2e no fast suite asserts a wall-clock bound on its own run');
   ok(suites.length === nFast && nFast > 300, `the census read every fast suite (${suites.length} of ${nFast})`);
   ok(!v.problems.length, `no literal wall-clock bound under ${WC.LITERAL_FLOOR_MS} ms in a fast suite; the ≥ ${WC.LITERAL_FLOOR_MS} ms ones are the ratchet's (${held.length} in ${Object.keys(baseline).length} suites, only falling)${v.problems.length ? ' — ' + v.problems.join(' | ') : ''}`);
   ok(!held.length && !Object.keys(baseline).length, `THE RATCHET IS AT 0 (lane wall-clock-ratchet-down): no literal wall-clock bound held in any fast suite, the baseline empty — the next one is a NEW one, RED (${held.length} held, ${Object.keys(baseline).length} baseline rows)`);
+  // THE RATIO (lane cpu-ratio-controls): no fast suite judges a growth on the clock — one measurement at two input sizes compared
+  // through a factor (test-channel-facts' CPU-time growth legs were the last; test-exit-run's hrtime family is heavy, planted below)
+  const growthRatios = suites.flatMap((x) => x.findings.filter((f) => f.kind === 'RATIO').map((f) => `${x.name}:${f.line} ${f.text}`));
+  ok(!growthRatios.length && (by.RATIO || 0) === 0, `NO GROWTH RATIO ON THE CLOCK in a fast suite (lane cpu-ratio-controls): a complexity claim is a COUNT (scripts/work-meter.mjs; its backtrack charge for a regex) — ${growthRatios.length} found, the next one is RED${growthRatios.length ? ': ' + growthRatios.join(' | ') : ''}`);
   // PLANTS: every spelling of the class is LITERAL; every legitimate form is classified out of it
   const kinds = (src) => WC.wallClockFindings(src).map((f) => f.kind).join(',');
   // two spans measured in the run: a control and the thing judged against it
@@ -310,7 +314,32 @@ console.log('\n§2e no fast suite asserts a wall-clock bound on its own run');
   const outWrong = Object.entries(OUT).filter(([, [src, want]]) => kinds(src) !== want).map(([n, [src, want]]) => `${n} → ${kinds(src) || 'not seen'} (want ${want})`);
   ok(!redWrong.length, `PLANTS: ${Object.keys(RED).length} spellings of an absolute wall-clock bound are each LITERAL${redWrong.length ? ' — WRONG: ' + redWrong.join(' | ') : ''}`);
   ok(!outWrong.length, `PLANTS: ${Object.keys(OUT).length} legitimate forms are classified out of it (wait / lower / control / guard)${outWrong.length ? ' — WRONG: ' + outWrong.join(' | ') : ''}`);
-  ok(kinds("const t = performance.now(); a(); const x = performance.now() - t; const u = performance.now(); b(); const y = performance.now() - u; ok(y / x <= 2.5);") === '', 'a RATIO of two spans is dimensionless — no finding (relative by construction)');
+  ok(kinds("const t = performance.now(); a(); const x = performance.now() - t; const u = performance.now(); b(); const y = performance.now() - u; ok(y / x <= 2.5);") === '', 'a ratio of two DIFFERENT measurements (a fix against its control) is dimensionless — no finding (relative by construction; one measurement at two sizes is THE RATIO below)');
+  // THE RATIO (lane cpu-ratio-controls): every spelling of a growth judged on the clock is RATIO — the bestOf family's
+  // `b / a <= 16`, a literal multiplier, a quadratic control's lower bound behind a noise floor, a named ratio, an if-test,
+  // cost-ratio.mjs's growth() on CPU time; a ratio of two different measurements, the same call twice, a COUNT are not
+  const HR = 'const timeOf = (n, k = 1) => { let b = Infinity; for (let i = 0; i < k; i++) { const t0 = process.hrtime.bigint(); run(n); b = Math.min(b, Number(process.hrtime.bigint() - t0) / 1e6); } return b; }; ';
+  const PN = 'const timeOf = (x) => { const t = performance.now(); run(x); return performance.now() - t; }; ';
+  const RATIO_RED = {
+    "the bestOf family (test-exit-run before .273: `b / a <= 16` at ×8 input)": HR + 'const a = timeOf(8192, 3), b = timeOf(65536, 3); ok(b <= 1e9 || b / a <= 16);',
+    'a literal multiplier (`b < 16 * a`)': PN + 'const a = timeOf(1024), b = timeOf(8192); ok(b < 16 * a);',
+    "a quadratic CONTROL's lower bound behind a noise floor (`b / Math.max(0.05, a) >= 12`)": HR + 'const a = timeOf(8192, 3), b = timeOf(65536); ok(b / Math.max(0.05, a) >= 12);',
+    'a floor and a scale on the small side (test-channel-thread before .209)': HR + 'const a = timeOf(64 * 1024), b = timeOf(512 * 1024); ok(b < Math.max(5, a) * 16);',
+    'a ratio bound to a name': PN + 'const small = timeOf(4096), big = timeOf(32768); const r = big / small; ok(r <= 8.5);',
+    'a ratio in an if-test failure': PN + "const a = timeOf(4096), b = timeOf(32768); if (b / a > 10) bad.push('superlinear');",
+    "cost-ratio.mjs's growth() on CPU time (test-channel-facts before .273)": "import { growth } from './cost-ratio.mjs'; const g = growth((x) => run(x), small, big, { inner: 50 }); ok(g.ratio <= 24);",
+    "growth()'s ratio as a quadratic control's lower bound": "import { growth } from './cost-ratio.mjs'; const gQ = growth(q, small, big, { inner: 1 }); ok(gQ.ratio > 24 && other);",
+  };
+  const RATIO_OUT = {
+    'one helper over two DIFFERENT inputs at one size (a hostile text against a plain one)': [PN + 'const a = timeOf(plain), b = timeOf(hostile); ok(b <= 40 * a);', 'control'],
+    'the same call twice (a determinism read)': [PN + 'const a = timeOf(8192), b = timeOf(8192); ok(b <= 2 * a);', 'control'],
+    'a COUNT at two sizes (the work meter in a child)': ["const v = judgeInChild({ module, run, mk, n: 8192, kind: 'linear', backtracks: true, opts: { factor: 8 } }); ok(v.ok && v.r <= 8.8);", ''],
+    "growth()'s other fields (a printed cost)": ["import { growth } from './cost-ratio.mjs'; const g = growth(f, small, big); console.log(g.smallMs, g.bigMs); ok(typeof g.bigMs === 'number');", ''],
+  };
+  const ratioWrong = Object.entries(RATIO_RED).filter(([, src]) => !kinds(src).split(',').includes('RATIO')).map(([n, src]) => `${n} → ${kinds(src) || 'not seen'}`);
+  const ratioOutWrong = Object.entries(RATIO_OUT).filter(([, [src, want]]) => kinds(src) !== want).map(([n, [src, want]]) => `${n} → ${kinds(src) || 'not seen'} (want ${want || 'no finding'})`);
+  ok(!ratioWrong.length, `PLANTS: ${Object.keys(RATIO_RED).length} spellings of a growth judged on the clock are each RATIO${ratioWrong.length ? ' — WRONG: ' + ratioWrong.join(' | ') : ''}`);
+  ok(!ratioOutWrong.length, `PLANTS: ${Object.keys(RATIO_OUT).length} look-alikes are not (two different measurements, the same call twice, a count, growth()'s printed fields)${ratioOutWrong.length ? ' — WRONG: ' + ratioOutWrong.join(' | ') : ''}`);
   ok(kinds("const t0 = performance.now(); await sweep(); const took = performance.now() - t0; const until = performance.now() + took; while (performance.now() < until) await tick();") === '', 'a mark plus a span is a DEADLINE (a control loop as long as the sweep), not a span — no finding');
   // THE PRODUCT'S CLOCK (lane wall-clock-ratchet-down): a duration the product module the suite LOADS fills from a clock
   // (`ms: Date.now() - t0`, `{ fsMs, loopMs }` off a worker), or a child script prints (python `time.monotonic()`), is a
@@ -349,6 +378,9 @@ console.log('\n§2e no fast suite asserts a wall-clock bound on its own run');
   const pGone = WC.ratchetVerdict(suites, { ...baseline, 'test-no-such-suite': 1 }).problems;
   ok(pNew.some((p) => p.startsWith('test-lazy') && /a NEW one/.test(p)) && pSub.some((p) => /test-lazy:\d+ asserts .* under 1000 ms/.test(p)) && pHigh.some((p) => p.startsWith('test-lazy') && /lower it/.test(p)) && pGone.some((p) => /test-no-such-suite/.test(p)),
     'CONTROLS: a 4 s bound planted in test-lazy is a NEW one, a 200 ms one is RED by the floor, a baseline above the truth and a baseline name that is no fast suite say "lower it" — all RED');
+  // …and a GROWTH RATIO planted in the same copy is RED by the census (lane cpu-ratio-controls): no baseline holds one
+  const pRatio = WC.ratchetVerdict(plantSuite('test-lazy', lazySrc + "\nconst tR = (n) => { const t0 = performance.now(); for (let i = 0; i < n; i++); return performance.now() - t0; }; const rA = tR(1e5), rB = tR(8e5); ok(rB / rA <= 16, 'planted');\n"), baseline).problems;
+  ok(pRatio.some((p) => /^test-lazy:\d+ judges rB \/ rA <= 16 — one measurement at two input sizes/.test(p)), `CONTROL: a growth ratio planted in test-lazy (\`rB / rA <= 16\` over one timer at two sizes) is RED (${pRatio.filter((p) => p.startsWith('test-lazy')).length} problem)`, pRatio);
   // THE 30 THEMSELVES: rel270's copy of every suite the ratchet held reads RED against today's empty baseline (a
   // depth-1 checkout has no 25cd69aef: SKIP, said) — and its fs-canary / tls-pass / app-display-secrets (the product's
   // clock, unseen before) read RED with them
@@ -396,6 +428,22 @@ console.log('\n§2e no fast suite asserts a wall-clock bound on its own run');
     const pS = WC.ratchetVerdict([...suites, { name: 'test-reconnect-storm', findings: WC.wallClockFindings(storm270, { fields: STORM_FIELDS }) }], baseline).problems.filter((p) => p.startsWith('test-reconnect-storm'));
     ok(pS.length === 3 && [/F\.loopMax <= C\.loopMax \+ lband/, /F\.gapMax <= Math\.max\(C\.gapMax \+ band, 50\)/, /F\.visP95 <= C\.visP95 \+ 50/].every((re) => pS.some((p) => re.test(p) && /under 1000 ms/.test(p))),
       `CONTROL: 25cd69aef's test-reconnect-storm, planted, reads RED on (d)'s loop-delay and srv-loop-gap-ms bands and on (b)'s \`+ 50\` (${pS.length} problems)`);
+  }
+  // THE FOURTH AND FIFTH (lane cpu-ratio-controls, B-923c + B-e83c): rel271's test-exit-run — HEAVY, so planted — judged the
+  // secret-shape regexes by hrtime ratios at ×4 / ×8 input (red 1 in 5 beside 32 spinners), and rel271's test-channel-facts its
+  // decoder and V1 by CPU-time growth (its quadratic control read 17 × for 64 × beside a 12-wide fast tier): both read RED on
+  // every growth leg here; today's copies hold none (a COUNT each)
+  const exitNow = WC.wallClockFindings(fs.readFileSync(path.join(REPO, 'scripts', 'test-exit-run.mjs'), 'utf-8'));
+  ok(!exitNow.some((f) => f.kind === 'RATIO'), `today's test-exit-run, planted, holds no growth ratio — its legs are counts (${exitNow.filter((f) => f.kind === 'RATIO').length} RATIO)`);
+  let rel271 = null;
+  try { rel271 = { exit: git(REPO, ['show', 'f57d1cbe9:scripts/test-exit-run.mjs']), facts: git(REPO, ['show', 'f57d1cbe9:scripts/test-channel-facts.mjs']) }; } catch { rel271 = null; }
+  if (rel271 === null) console.log('    SKIP: f57d1cbe9 is not in this checkout (a depth-1 clone) — the clock-ratio controls need rel271');
+  else {
+    const pE = WC.ratchetVerdict([...suites, { name: 'test-exit-run', findings: WC.wallClockFindings(rel271.exit) }], baseline).problems.filter((p) => p.startsWith('test-exit-run:') && /a growth ratio/.test(p));
+    const pF = WC.ratchetVerdict(plantSuite('test-channel-facts', rel271.facts), baseline).problems.filter((p) => p.startsWith('test-channel-facts:'));
+    ok(pE.length === 10 && pE.filter((p) => /b \/ a <= (?:8|16)\b/.test(p)).length === 4 && pE.filter((p) => /b \/ Math\.max\(0\.05, a\) >= 12/.test(p)).length === 6
+      && pF.length === 5 && ['gB.ratio <= 4', 'gWalk.ratio > 4', 'gW1.ratio <= 24', 'gW2.ratio <= 24', 'gQ.ratio > 24'].every((t) => pF.some((p) => p.includes(t))),
+      `CONTROL: f57d1cbe9's test-exit-run, planted, reads RATIO on its 4 linear legs and 6 quadratic controls (${pE.length}); its test-channel-facts on V1 and the decoder's 5 growth reads (${pF.length})`);
   }
 }
 

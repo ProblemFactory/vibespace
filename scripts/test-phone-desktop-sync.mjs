@@ -39,7 +39,16 @@
 //      desktop) counts as desktop; ⑮d a phone record landing in the 300 ms after the release, while DW's still waits, joins
 //      it. RED controls on patched copies of THIS source (printed): the pre-fix slot line restored (a, c, d red; b holds),
 //      a record arriving while others wait applied at once (d red: the drain then drops DW's older record)
-// PDSYNC_ONLY=1,2,… runs a subset (the base control is ⑧; ⑩–⑬ and ⑮ carry their own).
+//   ⑯ lane phone-sidebar-chrome (owner inc-mv8l2frb-xkqm, the READ half of guard 10 — layout-model.js chromeToApply): on a
+//      record whose desk chrome holds the sidebar OPEN and a 1×3 grid (the owner's shape) ⑯a P's reload ⇒ P's sidebar
+//      CLOSED and no grid set, again after P's own save made the record the phone's; ⑯b P's socket drops and it re-reads on
+//      reconnect (the return-from-background path) ⇒ CLOSED, and a live desk record opening the sidebar ⇒ CLOSED; ⑯c P's
+//      person opens its sidebar, the desk's record closes then opens its own ⇒ P's stays as its person left it, and every
+//      save P sends carries the DESK's sidebarOpen byte-identical; ⑯d the desk still follows a desk record's sidebarOpen,
+//      ignores a live phone record's, and its reload on the record the phone wrote last keeps its sidebar and grid (taken
+//      whole). RED control on a patched copy of THIS source (printed): every chromeToApply asks as a desk ('desktop') ⇒ the
+//      pre-fix apply — P's sidebar pops open at reload and at the re-read. PDSYNC_PNG_DIR=<dir> keeps ⑯'s PNGs.
+// PDSYNC_ONLY=1,2,… runs a subset (the base control is ⑧; ⑩–⑬, ⑮ and ⑯ carry their own).
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
@@ -484,6 +493,106 @@ else await (async () => {
     }
   };
 
+  // ── ⑯ (lane phone-sidebar-chrome): a phone never applies another viewport's chrome ──
+  const PNG_DIR = process.env.PDSYNC_PNG_DIR || '';
+  if (PNG_DIR) fs.mkdirSync(PNG_DIR, { recursive: true });
+  /** the owner's record shape (layouts.json, 2026-10-14): the desk's chrome — sidebar open, a 1×3 grid — on the desktop's record */
+  const fixtureSB = () => { const f = fixture(); Object.assign(f.desktops[DESK].autoSave, { sidebarOpen: true, grid: { rows: 1, cols: 3 }, viewport: 'desktop' }); return f; };
+  const SBSTATE = `(() => { const el = document.getElementById('sidebar'), r = el.getBoundingClientRect(), cs = getComputedStyle(el); return { open: !!app.sidebar.isOpen, cls: el.classList.contains('open'), wrap: document.getElementById('main-wrapper').classList.contains('sidebar-open'), onScreen: r.width > 0 && r.right > 4 && r.left < innerWidth - 4 && cs.display !== 'none' && cs.visibility !== 'hidden', grid: app.wm.grid ? [app.wm.grid.rows, app.wm.grid.cols] : null }; })()`;
+  const sbClosed = (s) => !!s && !s.open && !s.cls && !s.wrap && !s.onScreen;
+  const sbOpen = (s) => !!s && s.open && s.cls && s.onScreen;
+  const sbLegs = async (S, D, P, red) => {
+    const tag = red ? 'RED COPY ' : '';
+    const judge = (c, n, extra) => (red ? ok(!c, `RED CONTROL ${n} — FAILS when the phone asks as a desk (the pre-fix apply)`, extra) : ok(c, n, extra));
+    const png = async (Pg, name) => { if (!PNG_DIR) return; const r = await Pg.cdp('Page.captureScreenshot', { format: 'png' }); const f = path.join(PNG_DIR, (red ? 'red-' : '') + name); fs.writeFileSync(f, Buffer.from(r.data, 'base64')); console.log('    PNG ' + f); };
+    const chromeOf = (r) => J({ sidebarOpen: r.sidebarOpen, grid: r.grid, viewport: r.viewport });
+    const closeP = async () => { if ((await P.ev(SBSTATE)).open) { await P.tap(`document.getElementById('sidebar-close')`); await sleep(500); } };
+    // a live record from another client (a raw socket): the record on disk with its sidebarOpen set, stamped `viewport`
+    const live = async (sidebarOpen, viewport = 'desktop') => {
+      const rec = S.disk(), s = await rawSock(S.PORT), gP = P.got.length, gD = D.got.length;
+      s.send(J({ type: 'layout-sync', desktopId: DESK, state: { ...rec, sidebarOpen, updatedAt: undefined }, evidence: [], sentAt: Date.now(), viewport }));
+      const seen = (Pg, from) => Pg.got.slice(from).some((m) => m.type === 'layout-sync' && m.viewport === viewport && m.state && m.state.sidebarOpen === sidebarOpen);
+      const got = await until(() => seen(P, gP) && seen(D, gD), 8000); await sleep(1200); s.close();
+      return got;
+    };
+    const pSave = async (title) => { const n = P.sent.length; await switchTo(P, title); const sent = await until(() => P.sent.length > n && S.disk().viewport === 'phone', 6000); await sleep(800); return sent ? P.sent.slice(n) : []; };
+    const carried = (sends, want) => sends.length > 0 && sends.every((m) => m.state && m.state.sidebarOpen === want && J(m.state.grid) === J({ rows: 1, cols: 3 }));
+
+    ok(await D.boot(S.PORT) && await P.boot(S.PORT), `${tag}⑯: D and P booted on a record whose desk chrome holds the sidebar OPEN and a 1×3 grid`);
+    const d0 = await D.ev(SBSTATE), p0 = await P.ev(SBSTATE);
+    console.log(`    ${tag}⑯a: disk ${chromeOf(S.disk())}; D ${J(d0)}; P ${J(p0)}`);
+    ok(sbOpen(d0) && J(d0.grid) === '[1,3]', `${tag}⑯ the setup is real — D (a desk) follows the record at boot: its sidebar open, a 1×3 grid`, J(d0));
+    judge(sbClosed(p0), `${tag}⑯a: P's reload on the desk's record (sidebarOpen true) ⇒ P's sidebar CLOSED`, J(p0));
+    judge(p0.grid === null, `${tag}⑯a: …and P set no grid from it (a phone never sets one)`, J(p0));
+    await png(P, 'phone-390-after-reload.png'); await png(D, 'desk-1440-unchanged.png');
+    await closeP();
+
+    console.log(`— ${tag}⑯a P saves (the record becomes the phone's — the owner's shape), then reloads on it`);
+    const s1 = await pSave('pd-bravo'), r1 = S.disk();
+    console.log(`    ${tag}⑯a: P sent ${s1.length}; disk ${chromeOf(r1)}`);
+    ok(s1.length >= 1 && r1.viewport === 'phone' && r1.sidebarOpen === true && J(r1.grid) === J({ rows: 1, cols: 3 }), `${tag}⑯a: P's switcher tap saved — the record is the phone's now, the desk's sidebarOpen true and 1×3 grid carried (the .264 carry)`, J(r1));
+    await P.boot(S.PORT);
+    const p1 = await P.ev(SBSTATE);
+    console.log(`    ${tag}⑯a: P after the reload on the phone's record: ${J(p1)}`);
+    judge(sbClosed(p1) && p1.grid === null, `${tag}⑯a: P's reload on the record it wrote itself (viewport 'phone', sidebarOpen true — the owner's record) ⇒ CLOSED, no grid`, J(p1));
+    await closeP();
+
+    console.log(`— ${tag}⑯b P comes back from the background: its socket drops, it reconnects and re-reads the layouts`);
+    await P.ev(`(() => { if (window.__sbWrapped) return; window.__sbWrapped = 1; const lm = app.layoutManager, f = lm._resyncFromServer.bind(lm); window.__sbResync = 0; lm._resyncFromServer = (...a) => { if (!a[0]) window.__sbResync++; return f(...a); }; })()`);
+    const r0 = await P.ev('window.__sbResync'); await P.ev('app.ws.ws.close()');
+    const reread = await until(async () => (await P.ev('window.__sbResync')) > r0, 15000);
+    await until(async () => !(await P.ev('app.layoutManager._resyncing')), 8000); await sleep(2500);
+    const p2 = await P.ev(SBSTATE);
+    console.log(`    ${tag}⑯b: re-read ${reread}; disk ${chromeOf(S.disk())}; P ${J(p2)}`);
+    ok(reread, `${tag}⑯b: the setup is real — P's socket dropped and P re-read /api/layouts on reconnect (state-resync → layout-resync)`);
+    judge(sbClosed(p2), `${tag}⑯b: after the re-read P's sidebar is still CLOSED`, J(p2));
+    await png(P, 'phone-390-after-resync.png');
+    await closeP();
+    const g0 = await live(true), p2b = await P.ev(SBSTATE);
+    ok(g0, `${tag}⑯b: the setup is real — a live DESK record (sidebarOpen true) reached P and D`);
+    judge(sbClosed(p2b), `${tag}⑯b: a live desk record holding the sidebar open leaves P's CLOSED`, J(p2b));
+    await closeP();
+
+    console.log(`— ${tag}⑯c P's person opens its sidebar; the desk's record closes, then opens, its own`);
+    await P.tap(`document.getElementById('mobile-nav-menu')`); await sleep(600);
+    const p3 = await P.ev(SBSTATE), nB = P.sent.length;
+    ok(sbOpen(p3), `${tag}⑯c: P's person opened its sidebar (a real tap on ☰)`, J(p3));
+    const g1 = await live(false), p4 = await P.ev(SBSTATE), d4 = await D.ev(SBSTATE);
+    console.log(`    ${tag}⑯c: after the desk record closing its sidebar: P ${J(p4)}; D ${J(d4)}`);
+    ok(g1, `${tag}⑯c: the setup is real — the desk record (sidebarOpen false) reached P and D`);
+    judge(sbOpen(p4), `${tag}⑯c: the desk's record closing its sidebar leaves P's OPEN — as P's person left it`, J(p4));
+    await png(P, 'phone-390-own-open-kept.png');
+    ok(!d4.open && !d4.cls && !d4.wrap, `${tag}⑯d: D follows the desk record's sidebarOpen false (its sidebar closed)`, J(d4));
+    // P saves WHILE its own sidebar is open over a desk record holding false: a real tap on the sidebar's title arms the save
+    // (guard 2), the save is asked for as any change asks it — the record P holds differs from P's last send, so it goes out
+    if ((await P.ev(SBSTATE)).open) {
+      const n = P.sent.length;
+      await P.tap(`document.querySelector('#sidebar .sidebar-title')`); await P.ev('void app.layoutManager.scheduleAutoSave()');
+      await until(() => P.sent.length > n, 6000); await sleep(600);
+    }
+    const sendsB = P.sent.slice(nB);
+    await closeP();
+    const p5 = await P.ev(SBSTATE);
+    ok(sbClosed(p5), `${tag}⑯c: P's person closed its sidebar (a real tap on ✕)`, J(p5));
+    const g2 = await live(true), p6 = await P.ev(SBSTATE), d6 = await D.ev(SBSTATE);
+    console.log(`    ${tag}⑯c: after the desk record opening its sidebar: P ${J(p6)}; D ${J(d6)}`);
+    ok(g2, `${tag}⑯c: the setup is real — the desk record (sidebarOpen true) reached P and D`);
+    judge(sbClosed(p6), `${tag}⑯c: the desk's record opening its sidebar leaves P's CLOSED — as P's person left it`, J(p6));
+    ok(sbOpen(d6), `${tag}⑯d: D follows the desk record's sidebarOpen true (its sidebar open)`, J(d6));
+    await closeP();
+    const s3 = await pSave('pd-charlie'), r3 = S.disk();
+    console.log(`    ${tag}⑯c: P's sends while its sidebar was open over a desk record holding false: ${J(sendsB.map((m) => m.state && m.state.sidebarOpen))}; P's save now (its own closed, the desk's open): ${J(s3.map((m) => m.state && m.state.sidebarOpen))}; disk ${chromeOf(r3)}`);
+    ok(carried(s3, true) && r3.sidebarOpen === true && r3.viewport === 'phone' && (red || sendsB.length >= 1) && sendsB.every((m) => m.state && m.state.sidebarOpen === false), `${tag}⑯c: every save P sends carries the DESK's sidebarOpen byte-identical (true while P's own is closed; false while P's own was open) — never P's own`, J({ s3: s3.length, sendsB: sendsB.length, r3 }));
+
+    console.log(`— ${tag}⑯d the desk's own legs`);
+    await D.boot(S.PORT);
+    const d7 = await D.ev(SBSTATE);
+    console.log(`    ${tag}⑯d: D after a reload on the record the phone wrote last (${chromeOf(S.disk())}): ${J(d7)}`);
+    ok(S.disk().viewport === 'phone' && sbOpen(d7) && J(d7.grid) === '[1,3]', `${tag}⑯d: D's reload on the record the phone wrote last takes it whole — D keeps its sidebar open and its 1×3 grid (belt 1 carried them)`, J(d7));
+    const g3 = await live(false, 'phone'), d8 = await D.ev(SBSTATE);
+    ok(g3 && sbOpen(d8), `${tag}⑯d: a live PHONE-stamped record holding sidebarOpen false leaves D's sidebar open (membership + content only — by class)`, J({ g3, d8 }));
+  };
+
   const D = await mkPage('desk', false), P = await mkPage('phone', true);
   if (!ok(!!D && !!P, 'two chromes exposed a CDP page target each (D 1440×900, P iPhone 390×844)')) return;
   try {
@@ -703,6 +812,20 @@ else await (async () => {
           }
         }
       } finally { DW?.close(); }
+    }
+    // ── ⑯ lane phone-sidebar-chrome: this source, then the RED copy (every chromeToApply asks as a desk) ──
+    if (want(16)) {
+      await S.stop();
+      const SB = await startServer(fixedTree, 'sb', fixtureSB);
+      if (ok(SB.up, '⑯: the fixed-tree server re-booted on the desk-chrome record', SB.journal.slice(-600))) await sbLegs(SB, D, P, false);
+      await SB.stop();
+      const LSRC = fs.readFileSync(path.join(repo, 'src', 'lib', 'layout.js'), 'utf8'), ASK = 'chromeToApply(this._viewport(), ';
+      console.log('— ⑯ RED control: this source with every chromeToApply asking as a desk (the phone applies the record\'s chrome again)');
+      if (ok(LSRC.split(ASK).length - 1 === 3, `⑯ RED: the three asks exist in src/lib/layout.js (the control judges this source)`)) {
+        const SR = await startServer(mkTree('sb-red', 'HEAD', true, (t) => t.split(ASK).join("chromeToApply('desktop', ")), 'sb-red', fixtureSB);
+        if (ok(SR.up, '⑯ RED: its server booted', SR.journal.slice(-600))) await sbLegs(SR, D, P, true);
+        await SR.stop();
+      }
     }
   } finally {
     D.close(); P.close();

@@ -14,6 +14,8 @@
 //   ⑤ the receipt says what landed and what did not (channel-policy receiptFor / renderReceiptBlock);
 //   ⑥ the vendor-response census over lark.js (429 class) stays green;
 //   ⑧ verify r1: a lost text answer reconciled names the files that never left (F1); Slack thread+chat + a file refused (F4);
+//   ⑨b ⑨c lane composer-file-only-send: a file BY ITSELF — the vendor gets the file and no text message; propose mode
+//      holds it, Approve sends it alone, Reject drops it (control: an empty text message posted beside it);
 //   ⑦ PATCHED-COPY CONTROLS: a copy sending the key / the upload URL as text, and a copy dropping a refusal, go red.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -302,6 +304,74 @@ async function ownerJudge(ENGm) {
 console.log('⑨ the owner\'s own send (POST …/send) carries files through the same path');
 const own = await ownerJudge(ENG);
 ok(own.length === 0, `the owner's send with 2 files: out at once as the owner, the record keeps name/size/sha256, a refused upload "partly sent" + ONE For-you item, a changed file refused attachment-changed${own.length ? ` — ${own.join('; ')}` : ''}`);
+
+// ⑨b ⑨c lane composer-file-only-send (B-dce6): A FILE BY ITSELF over the REAL Lark adapter on a stub vendor — the owner's
+// direct send with no text uploads the file and posts ONE file message and NO text message (the vendor receives the file
+// with an empty body); the owner's PROPOSE-mode reply holds its file in the proposal (no vendor call), Approve sends the
+// file alone, Reject drops the file with the proposal (nothing uploaded, the stored copy gone)
+async function aloneOwnerJudge(ENGm, larkMod = lark) {
+  const out = [];
+  const fake = require(path.join(REPO, 'src/channels/fake.js'));
+  const OF = require(path.join(REPO, 'src/channel-outbox-files.js'));
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-send-files-alone-'));
+  const calls = [];
+  const fetchFn = async (url, init = {}) => {
+    let body = null; try { body = typeof init.body === 'string' ? JSON.parse(init.body) : null; } catch { body = null; }
+    const c = { url: String(url), method: init.method || 'GET', form: init.body instanceof FormData, msgType: body && body.msg_type ? String(body.msg_type) : null, content: body && body.content ? String(body.content) : null }; calls.push(c);
+    if (c.method === 'GET') return jsonRes(200, { code: 0, data: { items: [], has_more: false } });
+    if (c.form) return jsonRes(200, c.url.includes('/im/v1/images') ? LF.answers.image : LF.answers.file);
+    return jsonRes(200, LF.answers.message);
+  };
+  const A = larkMod.create({ id: 'l', options: {} }, { resolveIntegration: () => CRED, fetch: fetchFn, now: () => T0, tokens: tokens({ access_token: 'u-fixture-user-token', expiresAt: T0 + 3600e3, refresh_token: 'r', refreshExpiresAt: T0 + 30 * 86400e3, scopes: ['im:message', 'im:message.send_as_user', 'im:resource'] }) });
+  const mod = { kind: 'lark-alone', caps: { ...fake.fakePoll.caps, idempotency: lark.caps.idempotency, sendAttachments: lark.caps.sendAttachments, sendAttachmentsWhy: null, budget: undefined, pace: undefined },
+    create(record, deps) { return Object.assign(Object.create(fake.fakePoll.create(record, { ...deps })), { send: (c, o) => A.send(c, o) }); } };
+  const registry = CH.createChannelRegistry(); registry.register(mod);
+  fs.mkdirSync(path.join(dataDir, 'channels'), { recursive: true });
+  fs.writeFileSync(path.join(dataDir, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: [{ id: 'la', kind: 'lark-alone', label: 'la', enabled: true, auth: { tokenEnc: null, expiresAt: null, scopes: [] }, lastPass: null, consecutiveFailures: 0, push: { enabled: false }, options: {} }] }));
+  const posts = (from) => calls.slice(from).filter((c) => c.method === 'POST' && !c.form);
+  try {
+    const eng = ENGm.create({ dataDir, registry, env: {}, now: () => T0, broadcast: () => {}, serverSetting: (k) => ({ 'channels.guardAttachmentsReview': true })[k], liveSessions: () => [], userTodos: { add: () => ({ id: 't' }) }, log: { log() {}, warn() {}, error() {} } });
+    await eng.pass('la', { force: true });
+    const conv = Object.keys(eng.store.index.live()).find((k) => k.startsWith('la/')).slice(3);
+    const pdf = () => [{ name: 'b.pdf', data: PDF.toString('base64') }];
+    // ⑨b the owner's direct send, no text
+    const c0 = calls.length;
+    const d = await eng.propose({ kind: 'user' }, 'la', conv, { direct: true, text: '', attachments: pdf() });
+    const dq = d.ok ? eng.store.outbox.snapshot().proposals[d.proposal.id] : null;
+    const dp = posts(c0);
+    if (!(dq && dq.state === 'sent' && dq.text === '' && dq.reason === null)) out.push(`direct: the file alone was not sent whole (${dq ? `${dq.state}, ${dq.reason}` : JSON.stringify(d).slice(0, 140)})`);
+    if (!(calls.slice(c0).filter((c) => c.form).length === 1 && dp.length === 1 && dp[0].msgType === 'file' && !dp.some((c) => c.msgType === 'text'))) out.push(`direct: the vendor did not get ONE file message and no text message (${JSON.stringify(dp.map((c) => c.msgType))})`);
+    if (!(dq && dq.result && Array.isArray(dq.result.parts) && dq.result.parts.map((x) => `${x.part}:${x.name || ''}:${x.ok}`).join() === 'attachment:b.pdf:true')) out.push(`direct: the parts do not name the one file (${JSON.stringify(dq && dq.result && dq.result.parts)})`);
+    // ⑨c PROPOSE mode: held with its file, nothing sent; Approve sends the file alone
+    const c1 = calls.length;
+    const pr = await eng.propose({ kind: 'user' }, 'la', conv, { text: '', attachments: [{ name: 'a.png', data: PNG.toString('base64') }] });
+    const pq = pr.ok ? eng.store.outbox.snapshot().proposals[pr.proposal.id] : null;
+    if (!(pq && pq.state === 'awaiting-approval' && pq.text === '' && pq.attachments.length === 1 && pq.attachments[0].kind === 'image' && OF.fileOf(eng.store.dir, pq.id, 0) && calls.slice(c1).every((c) => c.method === 'GET'))) out.push(`propose: the reply with its file is not held in the outbox untouched (${pq ? pq.state : JSON.stringify(pr).slice(0, 140)})`);
+    if (pq) {
+      const c2 = calls.length;
+      await eng.approve(pq.id, { shown: P.shownDigest((eng.outboxView().proposals || []).find((p) => p.id === pq.id)) });
+      const aq = eng.store.outbox.snapshot().proposals[pq.id];
+      const ap = posts(c2);
+      if (!(aq.state === 'sent' && calls.slice(c2).filter((c) => c.form && c.url.includes('/im/v1/images')).length === 1 && ap.length === 1 && ap[0].msgType === 'image' && !ap.some((c) => c.msgType === 'text'))) out.push(`propose: Approve did not send the picture alone (${aq.state}, ${JSON.stringify(ap.map((c) => c.msgType))})`);
+    }
+    // ⑨c Reject: the file goes with the proposal
+    const c3 = calls.length;
+    const rj = await eng.propose({ kind: 'user' }, 'la', conv, { text: '', attachments: pdf() });
+    const rid = rj.ok ? rj.proposal.id : null;
+    const kept = rid ? !!OF.fileOf(eng.store.dir, rid, 0) : false;
+    if (rid) await eng.reject(rid, { reason: 'not this one' });
+    const rq = rid ? eng.store.outbox.snapshot().proposals[rid] : null;
+    if (!(kept && rq && rq.state === 'rejected' && !OF.fileOf(eng.store.dir, rid, 0) && calls.slice(c3).every((c) => c.method === 'GET'))) out.push(`reject: the file was not dropped with the proposal (${rq && rq.state}, kept before ${kept}, after ${rid ? !!OF.fileOf(eng.store.dir, rid, 0) : '?'})`);
+  } finally { fs.rmSync(dataDir, { recursive: true, force: true }); }
+  return out;
+}
+console.log('⑨b ⑨c a file by itself (lane composer-file-only-send): the vendor gets the file, no text message; propose mode holds it, Approve sends it alone, Reject drops it');
+const alo = await aloneOwnerJudge(ENG);
+ok(alo.length === 0, `Lark on a stub vendor: the owner's file alone ⇒ ONE upload + ONE msg_type file message, no text message, parts name only the file; a propose-mode reply with a picture held (nothing sent), Approve ⇒ one image message alone; Reject ⇒ the stored file removed, nothing uploaded${alo.length ? ` — ${alo.join('; ')}` : ''}`);
+{ const LS = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf8');
+  const from = "const pieces = [...(hasText ? [{ part: 'text' }] : []), ...files.map(";
+  const red = LS.includes(from) ? await aloneOwnerJudge(ENG, require(MC.write('src/channels/lark.js', LS.replace(from, "const pieces = [{ part: 'text' }, ...files.map("), 'lark-empty-text'))) : null;
+  ok(Array.isArray(red) && red.length > 0, `control — lark posts an EMPTY text message beside the file: red (${red === null ? 'the patch site is gone' : red.length ? red[0].slice(0, 120) : 'GREEN — the judge missed it'})`); }
 
 console.log('⑦ patched-copy controls');
 const keep = setInterval(() => {}, 1000);   // a send-gap wait inside a copy is an unref'd timer

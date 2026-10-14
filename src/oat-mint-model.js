@@ -118,7 +118,7 @@ const MINT_DONE = Object.freeze(['saved', 'failed', 'cancelled']);
 // why a mint stopped short of a save: the token proved to be ANOTHER account's
 // (its sign-in identity, or its /usage window matching another row's) / nothing
 // proved whose it is (the `confirm` pick)
-const MINT_REASONS = Object.freeze(['identity_mismatch', 'unproven']);
+const MINT_REASONS = Object.freeze(['identity_mismatch', 'unproven', 'anchor_mismatch']); // anchor_mismatch: a later probe disagrees with the window confirmed for the row's token (lane oat-identity-postcheck)
 
 /** What leaves the server about a mint (GET + the WS `oat-mint` broadcast):
  *  a whitelist — the token is never a field of a mint, and nothing else is

@@ -117,6 +117,9 @@ import { enterSubmits, imeOwnsKey } from './chat-enter-keys.js';
 // `sendAttachments` row and the account's `send-attachment` offer — a file past a limit is refused AT ITS CHIP by name,
 // a file this account cannot carry says so with the Re-authorize door and never LOOKS attached. Only the accepted bytes
 // ride the send (base64, the agents' `--attach` shape), through the same outbox store and adapter upload path.
+// Lane composer-file-only-send (B-dce6): files ALONE are a message where the channel's capability row carries one (its
+// `alone` cell — the verdict's `needsText` says it does not: the box keeps the files and its note says so, the Send
+// stays live), and the box carries files in PROPOSE mode too (they ride the proposal: POST …/propose, the agents' road).
 const COMPOSE_READ_MAX = P.ATTACH_MAX_TOTAL;
 function bytesToBase64(u8) {
   let s = '';
@@ -154,7 +157,7 @@ function createComposeFiles({ app, comp, ta, row, caps, offer, account }) {
   clip.title = t('Attach files or pictures');
   clip.setAttribute('aria-label', clip.title);
   clip.dataset.channelAttach = '1';
-  let verdict = { chips: [], send: [], blocked: null, shape: false };
+  let verdict = { chips: [], send: [], blocked: null, shape: false, needsText: false };
   const draw = () => {
     verdict = P.composeFilesVerdict(caps, offer, picks.map((p) => ({ name: p.name, bytes: p.bytes, kind: p.kind })), { hasText: !!ta.value.trim() });
     box.textContent = '';
@@ -198,6 +201,11 @@ function createComposeFiles({ app, comp, ta, row, caps, offer, account }) {
       fix.dataset.channelReauth = account.id;
       note.appendChild(fix);
       box.appendChild(note);
+    }
+    if (verdict.needsText) {
+      const alone = el('div', 'chanwin-file-note', t('This channel cannot send a file by itself — write a line to go with it'));
+      alone.dataset.filesAlone = 'no';
+      box.appendChild(alone);
     }
     box.hidden = !picks.length;
   };
@@ -246,6 +254,8 @@ function createComposeFiles({ app, comp, ta, row, caps, offer, account }) {
     /** what the Send carries: the accepted files only (never a blocked or refused one) */
     sending: () => verdict.send.map((n) => ({ name: picks[n].name, data: picks[n].data })),
     shape: () => verdict.shape,
+    /** files are ready but this channel sends no file alone (the row's `alone` cell): a line must go with them */
+    needsText: () => verdict.needsText,
     clear: () => { for (const p of picks) if (p.url) spent.push(p.url); picks.length = 0; draw(); },
     /** the composer goes (a footer rebuild, the window closed): every URL it minted is revoked */
     destroy: () => { for (const p of picks) forget(p); for (const u of spent.splice(0)) URL.revokeObjectURL(u); },
@@ -899,8 +909,9 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
       ta.value = typed;
       autosizeEditor(ta, { minRows: 2 });   // a held draft opens at its size (the empty box keeps its two rows)
       const row = el('div', 'chanwin-composer-row');
-      // lane owner-composer-attach: the owner's own send carries files where the adapter declares them (never a proposal's)
-      const cf = direct && ad0.sendAttachments && c.offers && c.offers.sendAttachment && (c.offers.sendAttachment.offered || c.offers.sendAttachment.why === 'attachments-not-sendable')
+      // lane owner-composer-attach: the owner's own send carries files where the adapter declares them — lane
+      // composer-file-only-send: in PROPOSE mode too (the files ride the proposal, the same store as an agent's --attach)
+      const cf = ad0.sendAttachments && c.offers && c.offers.sendAttachment && (c.offers.sendAttachment.offered || c.offers.sendAttachment.why === 'attachments-not-sendable')
         ? createComposeFiles({ app, comp, ta, row, caps: ad0.sendAttachments, offer: c.offers.sendAttachment, account: { id: ad0.id || adapterId, label: ad0.label || null } }) : null;
       liveFiles = cf;
       // §25 (the owner: the footer was "a long sentence"): ONE SHORT LINE — how
@@ -942,7 +953,11 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
       sendBtn.onclick = async () => {
         const text = ta.value.trim();
         const files = cf ? cf.sending() : [];
-        if (!text) { if (cf && cf.count()) showToast(t('Write a line to go with the files'), { type: 'warn' }); return; }
+        // lane composer-file-only-send: files alone go where the channel carries a file by itself (else the box said so)
+        if (!text && (!files.length || cf.needsText())) {
+          if (cf && cf.count()) showToast(files.length ? t('Write a line to go with the files') : t('None of these files can be sent here — each one says why'), { type: 'warn' });
+          return;
+        }
         if (cf && cf.shape()) { showToast(t('Here a file is its own message — send the text first, then the files'), { type: 'warn' }); return; }
         sendBtn.disabled = true;
         // lane reaction-hover: a QUOTE picked from a message's action bar rides as the reply's placement (the engine's

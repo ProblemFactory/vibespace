@@ -618,11 +618,39 @@ console.log('lane webhook-l2-ui: no clip where the row offers no files');
   const fsx = require('node:fs');
   const eng = fsx.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
   const win = fsx.readFileSync(path.join(REPO, 'src/lib/channel-window.js'), 'utf-8');
-  ok(eng.includes('      sendAttachments: c.sendAttachments || null,') && win.includes('const cf = direct && ad0.sendAttachments && c.offers && c.offers.sendAttachment'), 'the clip is built only from the account view\'s sendAttachments row (null here) AND the conversation\'s offer — the composer never asks a kind');
+  ok(eng.includes('      sendAttachments: c.sendAttachments || null,') && win.includes('const cf = ad0.sendAttachments && c.offers && c.offers.sendAttachment'), 'the clip is built only from the account view\'s sendAttachments row (null here) AND the conversation\'s offer — the composer never asks a kind');
   const kindGate = /kind\s*===\s*'webhook'|adapterId\s*===\s*'webhook'|\.kind\s*!==\s*'webhook'/;
   const files = ['src/lib/channel-window.js', 'src/lib/channels-panel.js', 'src/lib/channel-webhook.js', 'src/lib/webhook-view.js', 'src/lib/channel-filter-editor.js'];
   const hits = files.filter((f) => kindGate.test(fsx.readFileSync(path.join(REPO, f), 'utf-8')));
   ok(hits.length === 0 && kindGate.test("if (a.kind === 'webhook') x();"), 'the owner surface gates on the capability row (pushTransport http-inbound) — no client file tests the kind (control: the pattern catches one)', hits);
+}
+
+// ── lane composer-file-only-send (B-dce6): THE `alone` CELL of `sendAttachments` — a file by itself is a message where the
+// ROW says so (absent = it is not; a `withText: false` group always is) — declared by the three vendors that carry one ──
+console.log('lane composer-file-only-send: the sendAttachments row\'s `alone` cell');
+{
+  const P = require(path.join(REPO, 'src/channel-policy.js'));
+  const CH = require(path.join(REPO, 'src/channels/index.js'));
+  const fake = require(path.join(REPO, 'src/channels/fake.js'));
+  const rows = ['lark', 'gmail', 'slack', 'webhook'].map((k) => [k, require(path.join(REPO, `src/channels/${k}.js`)).caps.sendAttachments]);
+  ok(rows.every(([k, r]) => (k === 'webhook' ? r === null : r && r.alone === true && r.withText === true)) && rows.slice(0, 3).every(([, r]) => P.fileAloneOf(r)) && !P.fileAloneOf(rows[3][1]), 'Lark, Gmail and Slack declare `alone: true` beside `withText: true` (text + files in one send, OR a file by itself); the webhook row (null) carries none', JSON.stringify(rows));
+  const ROW = { maxCount: 10, maxTotalBytes: 25e6, withText: true };
+  const SPLIT = { images: { maxCount: 1, maxBytes: 1e7, withText: false }, files: { maxCount: 2, maxBytes: 3e7, withText: true } };
+  const table = [
+    ['the row says alone', P.fileAloneOf({ ...ROW, alone: true }), true],
+    ['the cell absent ⇒ no file alone', P.fileAloneOf(ROW), false],
+    ['alone: false', P.fileAloneOf({ ...ROW, alone: false }), false],
+    ['withText: false ⇒ a file is its own message', P.fileAloneOf({ ...ROW, withText: false }), true],
+    ['a split row: its picture group (withText false)', P.fileAloneOf(SPLIT, 'image'), true],
+    ['a split row: its file group (no cell)', P.fileAloneOf(SPLIT, 'file'), false],
+    ['a split row, any group', P.fileAloneOf(SPLIT), true],
+    ['no row', P.fileAloneOf(null), false],
+  ].filter(([, got, want]) => got !== want);
+  ok(table.length === 0, 'PURE fileAloneOf reads the ROW only: the cell, a withText:false group, a split row per kind, absent / null ⇒ no', JSON.stringify(table));
+  const reg = (row) => { try { CH.createChannelRegistry().register({ ...fake.fakePoll, kind: 'fx-alone', caps: { ...fake.fakePoll.caps, sendAttachments: row } }); return null; } catch (e) { return String(e.message); } };
+  const accepted = [{ ...ROW, alone: true }, ROW, { ...ROW, alone: false }, { ...ROW, withText: false, alone: true }, { images: { ...SPLIT.images, alone: true }, files: { ...SPLIT.files, alone: false } }].map(reg);
+  const refused = [{ ...ROW, alone: 'yes' }, { ...ROW, withText: false, alone: false }, { images: { ...SPLIT.images, alone: 1 } }].map(reg);
+  ok(accepted.every((x) => x === null) && refused.every((x) => x && /alone/.test(x)), 'the registry contract: `alone` is a boolean on the row or a group (absent allowed); a non-boolean, or alone:false on a withText:false group (it could carry nothing), is refused by name', JSON.stringify({ accepted, refused }));
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

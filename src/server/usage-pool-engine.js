@@ -1081,6 +1081,74 @@ app.locals.usageIdentityAccountIds = usageIdentityAccountIds;
 app.locals.memberServeLapsed = memberServeLapsed; // the ⟳ route: a lapsed member skips the token ladder; a verified panel is evidence
 app.locals.reanchorLapsedMember = reanchorLapsedMember; // the panel's renewal rung (verify r1 ③)
 app.locals.noteMemberServeFailure = (id, info) => noteMemberServeFailure(id, info, { source: 'a usage check' }); // the panel probe's failed answer (usage-routes refreshViaCliPanel)
+// THE LONG-LIVED TOKEN'S IDENTITY POST-CHECK (lane oat-identity-postcheck, B-3102 (b)): ONE orchestrator over the PURE
+// verdict (src/oat-identity-model.js), handed each claude reading's SLOT + window by the producer below — read-only
+const windowStamp = require('../window-stamp.js'); // THE `.window-` sidecar's ONE writer (producer mandatory, the carry inside) + ONE reader (lane oat-identity-fix-r3)
+const oatIdentity = require('./oat-identity.js').create({ accounts: () => accounts, todos: () => getUserTodos(), windows: () => establishedWindows(),
+  groups: (id) => usageIdentityAccountIds(id), k: () => API_WITNESS_K, // verify r1 F3 (one identity group = one account) + F2 (the K-run = the witness ring's K)
+  journal: (rec) => { try { probeLog.appendProbeLog(path.join(rootDir, 'data'), { rung: 'oat-identity', ...rec }); } catch { } } });
+/** Does slot `key` spend its row's long-lived token? An env-token spawn of that row (`_billingHow` 'oat'), or a member
+ *  folder holding OUR token file (pool-oat-materialize). A reading of the row's own login says nothing about the token. */
+const oatIdentityAttach = () => oatIdentity.attach();          // the account routes wire the store's hook once the store exists
+const oatRebind = (fromId, toId) => oatIdentity.rebind(fromId, toId); // 改绑 — the re-bind route's one door
+function tokenSpentBy(session, key) {
+  if (session && session._accountId === key && session._billingHow === 'oat') return true;
+  try { return !!accounts.readSubCreds(key)?.oatFile; } catch { return false; }
+}
+const oatAnswer = (id, ans) => oatIdentity.answer(id, ans); // the owner's answer to a hint / an anchor ask / a mark — the human-only route's one door
+/** WHICH TOKEN a reading on slot `key` was produced with — its GENERATION (the mint instant), or null when it cannot
+ *  be vouched for (lane oat-identity-fix, verify r1 F1: a conversation still running on the PREVIOUS token re-marked a
+ *  healthy re-mint and confirmed a wrong one). ENV road (the token rides CLAUDE_CODE_OAUTH_TOKEN for the process's
+ *  life): the generation ws-create stamped at spawn. FILE road (a pooled CLI, or a row whose folder holds our token
+ *  file): the CLI reads its credential at a turn's start (the hot-switch measurement: a re-point reaches it on its
+ *  next turn), so the reading's generation is the file mark's — but only when the file the previous turn end saw is
+ *  the file there now (rewritten inside the turn ⇒ unknown).
+ *  THE ROAD IS A FACT OF THE SESSION (lane oat-identity-fix-r3, verify r3 F-R1): ws-create stamps `_oatRoad` /
+ *  `_billingHow` / `_oatGen` at spawn, the session meta persists them and boot-restore's sessionFromMeta restores them —
+ *  never guessed. A pool never spawns on the env road (a pooled conversation older than the stamp is 'file'); a spawn that
+ *  recorded HOW it billed but no token road (a remote creds dir — the login shipped, the host's own — or the machine's
+ *  login) is 'login': no long-lived token rides it; nothing recorded (a conversation restored from a meta older than the
+ *  stamp) is null — UNKNOWN: it vouches for nothing and witnesses nothing. */
+function oatRoadOf(session) {
+  if (!session) return null;
+  if (session._oatRoad) return session._oatRoad;
+  try { if (accounts.get(session._accountId)?.type === 'pooled') return 'file'; } catch { return null; } // a pool never spawns on the env road (resolveForSpawn: secret null)
+  return session._billingHow ? 'login' : null;
+}
+function oatFileGenOf(key) { try { const i = accounts.readSubCreds(key); return i && i.oatFile && Number(i.oatFileGen) > 0 ? Number(i.oatFileGen) : null; } catch { return null; } }
+function tokenGenOf(session, key) {
+  const road = oatRoadOf(session);
+  if (road === 'env') return session._accountId === key && Number(session._oatGen) > 0 ? Number(session._oatGen) : null;
+  if (road !== 'file') return null;
+  const seen = session._oatFileGen, gen = oatFileGenOf(key);
+  return seen && seen.key === key && gen != null && seen.gen === gen ? gen : null;
+}
+/** WHO PRODUCED a reading on slot `key` — ONE answer for the witness ring AND the identity post-check (lane
+ *  oat-identity-fix-r2 F-A; r3 F-R1: the two read a restored conversation differently — the check "not the token", the
+ *  ring "the login" — and K such readings made the token's phase the row's identity, so the token confirmed itself).
+ *  → { producer, viaToken, gen }: 'login' / false — the slot spent the row's own sign-in · `oat:<gen>` / true — a
+ *  generation of its long-lived token (the one the conversation carries, else the token file's, else '?'), `gen` = the
+ *  one vouched for (tokenGenOf) · null / null — the conversation's ROAD is unknown (oatRoadOf): no witness's producer,
+ *  and it judges nothing. A row that never held a token (and is no env-token spawn of it) is its login without a file
+ *  read; a 'login' road never spends a token. */
+function readingRoad(session, key) {
+  const LOGIN = { producer: 'login', viaToken: false, gen: null };
+  const envTok = !!(session && session._accountId === key && session._billingHow === 'oat');
+  if (!envTok && !accounts.get(key)?.oatEnc && (typeof accounts.oatFirstAtOf === 'function' ? accounts.oatFirstAtOf(key) : null) == null) return LOGIN;
+  const road = oatRoadOf(session);
+  if (!envTok && road == null) return { producer: null, viaToken: null, gen: null };
+  if (!envTok && road === 'login') return LOGIN;
+  if (!tokenSpentBy(session, key)) return LOGIN;
+  const gen = tokenGenOf(session, key);
+  return { producer: 'oat:' + (gen || (envTok ? Number(session._oatGen) || null : oatFileGenOf(key)) || '?'), viaToken: true, gen };
+}
+/** noteTurnEnd's stamp: the generation of the slot's token FILE the next turn starts on (only while a check is armed) */
+function noteOatFileGen(session) {
+  if (oatRoadOf(session) !== 'file') return;
+  if (!accounts.oatArmed()) { session._oatFileGen = null; return; }
+  const key = wallSlotFor(session).key;
+  session._oatFileGen = key ? { key, gen: oatFileGenOf(key), at: Date.now() } : null;
+}
 
 // ── THE ESTABLISHED WINDOW of every account we could file a reading on ──────
 // It is STAMPED AT THE WRITE by the ONE producer whose key and whose credential
@@ -1119,7 +1187,7 @@ function establishedWindows() {
   for (const fn of files) {
     const key = fn.slice(0, -5);
     try {
-      const w = JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, readingLag.windowSidecarName(key)), 'utf-8'));
+      const w = windowStamp.readWindowStamp(USAGE_CACHE_DIR, key);
       if (w && (w.sevenDay || w.fiveHour || (w.scoped && Object.keys(w.scoped).length))) out[key] = w;
     } catch { }
   }
@@ -1187,7 +1255,7 @@ function apiDerivedWindow(key, { witness = false } = {}) {
  *  `outcome` = what the guard did with the reading (write / archived /
  *  refiled). Returns `{run, k, established, moved}`, or null when the reading
  *  is not weekly or the sidecar could not be written. */
-function noteApiDerivedWindow(key, ev, session, { outcome = 'write' } = {}) {
+function noteApiDerivedWindow(key, ev, session, { outcome = 'write', producer = null } = {}) {
   try {
     if (!key || !ev || !(Number(ev.resetsAt) > 0)) return null;
     if (ev.kind !== 'sevenDay' && !(ev.kind === 'scoped' && ev.scopedName)) return null; // a 5h window names a TIME, never an account (reading-lag r2)
@@ -1198,7 +1266,7 @@ function noteApiDerivedWindow(key, ev, session, { outcome = 'write' } = {}) {
     if (ev.kind === 'scoped' && String(ev.scopedName).toLowerCase() === String(quotaModel.MODEL_CAP_PLACEHOLDER.name).toLowerCase()) return null;
     const raw = readApiWitnessFile(key) || {};
     const ring = (Array.isArray(raw.ring) ? raw.ring.filter((e) => e && Number(e.resetsAt) > 0) : []).slice(-(API_WITNESS_RING - 1));
-    const entry = { resetsAt: Number(ev.resetsAt), kind: ev.kind, name: ev.kind === 'scoped' ? String(ev.scopedName).toLowerCase() : null, at: Date.now(), sid: session?._webuiId || null, outcome };
+    const entry = { resetsAt: Number(ev.resetsAt), kind: ev.kind, name: ev.kind === 'scoped' ? String(ev.scopedName).toLowerCase() : null, at: Date.now(), sid: session?._webuiId || null, outcome, ...(producer ? { producer } : {}) };
     ring.push(entry);
     let run = 0;
     for (let i = ring.length - 1; i >= 0 && readingLag.weeklyNear(ring[i].resetsAt, entry.resetsAt) === true; i--) run++;
@@ -1216,9 +1284,20 @@ function noteApiDerivedWindow(key, ev, session, { outcome = 'write' } = {}) {
       for (const e of agreeing) { if (e.kind === 'sevenDay') w.sevenDay = e.resetsAt; else if (e.name) w.scoped[e.name] = e.resetsAt; }
       next.sevenDay = w.sevenDay; next.scoped = w.scoped; next.at = entry.at; next.sessionId = entry.sid; next.source = 'rate-limit-events'; next.n = run;
       res.established = true; res.moved = moved;
+      // WHO PRODUCED THE RUN (lane oat-identity-fix-r2, verify r2 F-A): the newest K candidates all the login's ⇒ 'login'
+      // (the row's own sign-in proved the phase); else any candidate a token spent ⇒ that token's `oat:<gen>`; else (a
+      // candidate whose road is unknown, or older than the field) null — nobody can tell (fix r3)
+      const loginK = ring.slice(-API_WITNESS_K).every((e) => e.producer === 'login');
+      const tokenRun = agreeing.filter((e) => (typeof e.producer === 'string' && e.producer.startsWith('oat:')) || e.oat === true);
+      const runProducer = loginK ? 'login' : tokenRun.length ? (tokenRun[tokenRun.length - 1].producer || 'oat:?') : null;
+      // the row's LOGIN proving the window a token's readings (or a legacy writer) stamped — same phase, the producer
+      // upgraded, so the row has an identity its token did not write (only on a row that ever held a token)
+      const proven = !!anchor && !moved && runProducer === 'login' && anchor.producer !== 'login' && accounts.oatFirstAtOf(key) != null;
       // …AND THE GUARD'S ANCHOR: stamped when ABSENT, re-stamped when the run
-      // CONTRADICTS it (the window moved) — never touched by a run that agrees
-      if (!anchor || moved) {
+      // CONTRADICTS it (the window moved) or the login proves it — never touched by any other run that agrees
+      if (!anchor || moved || proven) {
+        // THE ONE WRITER names the run's producer (null = a run of readings whose road is unknown, fix r3 F-R1) and a stamp
+        // the login did not write CARRIES the row's identity it replaces (the guard reads only the window)
         const stamp = { sevenDay: w.sevenDay, fiveHour: null, scoped: { ...w.scoped }, at: entry.at, source: 'api', verifiedAt: entry.at, verifiedBy: 'rate-limit-events', n: run, sessionId: entry.sid };
         if (moved) {
           const was = readingLag.windowFingerprint(anchor || { sevenDay: Number(raw.sevenDay) || null, fiveHour: null, scoped: raw.scoped || {} });
@@ -1231,8 +1310,10 @@ function noteApiDerivedWindow(key, ev, session, { outcome = 'write' } = {}) {
             fs.appendFileSync(f, JSON.stringify({ migration: 'window-moved', at: entry.at, store: 'window-sidecar', key, action: 'moved', reason: `${nameOf(key)}'s weekly window moved from ${was} to ${isNow}: ${run} consecutive slot-verified rate-limit readings agreed on the new phase (guard outcomes ${agreeing.map((e) => e.outcome).join('/')})`, entry: anchor || null, apiwin: { sevenDay: Number(raw.sevenDay) || null, scoped: raw.scoped || {} } }) + '\n');
           } catch { }
         }
-        usageWrite.writeSidecar(USAGE_CACHE_DIR, readingLag.windowSidecarName(key), stamp);
+        windowStamp.writeWindowStamp(USAGE_CACHE_DIR, key, stamp, runProducer);
         _ownWin = null; _ownWinAt = 0;
+        // the row's long-lived-token anchor follows a move proven WITHOUT the token (lane oat-identity-fix, verify r1 F6)
+        if (moved) { try { oatIdentity.onReanchor(key, { window: stamp, source: 'window-moved', independent: runProducer === 'login' }); } catch { } }
       }
     }
     const ok = usageWrite.writeSidecar(USAGE_CACHE_DIR, readingLag.apiWindowSidecarName(key), next);
@@ -2427,6 +2508,7 @@ function noteTurnEnd(session, rec = null) {
     session._turnWallSigs = []; session._turnWorkAfterSig = 0;
     session._turnLaneDefer = null; session._turnBannerLane = null;
     session._turnReadingSlot = null; session._turnWallRefile = null; session._turnWallRefuted = null;
+    session._oatFileGen = null; // lane oat-identity-fix: a backlog's turn end says nothing about which token file the CLI holds
     return;
   }
   const sigs = session._turnWallSigs || [];
@@ -2444,6 +2526,7 @@ function noteTurnEnd(session, rec = null) {
   // pin does: a re-point reaches the running CLI on its next request, so the
   // next turn is the first one it can be true for (readingSlotFor)
   session._turnReadingSlot = null;
+  try { noteOatFileGen(session); } catch { } // …and the token FILE the next turn starts on (lane oat-identity-fix, verify r1 F1)
   // …and so does the proven re-file this turn's rejection records established —
   // but only AFTER the demotion below, which is its LAST READER: the turn-end
   // pass asks the same proof for every signal that carries no window of its
@@ -3250,15 +3333,25 @@ function recordRateLimitEventNow(session, msg) {
     // fresh member poisoned its witness for good)
     const slotKey = key;
     const witness = win ? apiWitnessEligibility(session, slot, key) : null;
+    let roadOf = null; // ONE answer per reading for the ring AND the check (fix r3 F-R1): the slot's login, which generation of its token, or null (the road unknown)
+    const road = () => roadOf || (roadOf = (() => { try { return readingRoad(session, slotKey); } catch { return { producer: null, viaToken: null, gen: null }; } })());
+    const producer = () => road().producer;
+    // THE TOKEN'S IDENTITY POST-CHECK (lane oat-identity-postcheck, B-3102 (b)): the slot's first reading produced ON a
+    // freshly saved long-lived token is compared with the row's identity. READ-ONLY: it is handed the slot and the window,
+    // this producer uses nothing it answers, and the reading is filed exactly as before (attribution stays by slot). It
+    // runs AFTER the guard and the witness ring (lane oat-identity-fix-r2, verify r2 F-C): a K-run that re-anchors the
+    // row's window is seen by the check of the same reading — ONE call, three exits (archived, re-filed, written)
+    const postCheck = () => { if (win) { try { oatIdentity.onReading(slotKey, { window: win, at: Date.now() - (Number(liveFactVerdict(session, msg).lateMs) || 0), viaToken: () => road().viaToken, gen: () => road().gen, eligible: witness, sid: session._webuiId || null }); } catch { } } };
     if (win) {
       const target = guardReadingTarget(key, win, { session, what: 'rate-limit-event:' + ev.kind, entry: { ev, slot, witness } });
       if (!target) {                             // archived with a reason — never written where it provably does not belong
-        if (witness && witness.ok) noteApiDerivedWindow(slotKey, witnessEv, session, { outcome: 'archived' });
+        if (witness && witness.ok) noteApiDerivedWindow(slotKey, witnessEv, session, { outcome: 'archived', producer: producer() });
+        postCheck();
         return;
       }
       if (target !== key) {
         key = target; refiled = true;
-        if (witness && witness.ok) noteApiDerivedWindow(slotKey, witnessEv, session, { outcome: 'refiled' });
+        if (witness && witness.ok) noteApiDerivedWindow(slotKey, witnessEv, session, { outcome: 'refiled', producer: producer() });
         // the window is better evidence than the pin that produced the wrong
         // answer, so the REST of the turn follows it too (the 06:10:46Z shape:
         // a pin held from before three re-points filed one member's fresh
@@ -3309,7 +3402,7 @@ function recordRateLimitEventNow(session, msg) {
     // the lane is named on the key it LANDS on (the guard may have moved it)
     if (writeKey !== preKey && (ev.modelCap || (ev.windows && ev.windows.modelCap))) ev = nameCap(writeKey);
     const r = captureRateLimitEvent({ cacheDir: USAGE_CACHE_DIR, key: writeKey, identityIds: usageIdentityAccountIds(writeKey), ev, hint: capHint });
-    if (r.unknownType) { global.__vsEvent?.('rate-limit-event-unknown-type', r.unknownType); return; }
+    if (r.unknownType) { global.__vsEvent?.('rate-limit-event-unknown-type', r.unknownType); postCheck(); return; }
     // THE LANE DECISION IS SAID, like resolveTurnLane says its own: a model-cap
     // rejection names the cap it marked (or the placeholder) and which rung
     // decided, so the journal can be read back against the pool's next move.
@@ -3323,7 +3416,8 @@ function recordRateLimitEventNow(session, msg) {
     // filed on a slot-VALIDATED link, not re-filed by the guard and eligible
     // as a witness, is ONE candidate for the ring the panel probe is checked
     // against — K agreeing candidates make it the witness.
-    if (r.wroteReading && ev.status !== 'rejected' && win && !refiled && witness && witness.ok) noteApiDerivedWindow(writeKey, witnessEv, session, { outcome: 'write' });
+    if (r.wroteReading && ev.status !== 'rejected' && win && !refiled && witness && witness.ok) noteApiDerivedWindow(writeKey, witnessEv, session, { outcome: 'write', producer: producer() });
+    postCheck();
     // a reading busts the estimator memo via fetchedAt and becomes an anchor
     // at the next sweep; exhaustion acts NOW (banner parity)
     if (r.dead) {
@@ -5757,10 +5851,13 @@ function reanchorLapsedMember(key, idv) {
     for (const [n, r] of Object.entries(pw.scoped || {})) if (Number(r) > 0) scoped[String(n).toLowerCase()] = Number(r);
     if (!sevenDay && !Object.keys(scoped).length) return false;
     const now = Date.now();
+    // WHO ANSWERED (lane oat-identity-fix-r2): the folder's login, or our token file in it
+    const producer = (() => { try { const i = accounts.readSubCreds(key); return i && i.oatFile ? 'oat:' + (Number(i.oatFileGen) > 0 ? Number(i.oatFileGen) : '?') : 'login'; } catch { return null; } })();
     const stamp = { sevenDay, fiveHour: null, scoped, at: now, source: 'api', verifiedAt: now, verifiedBy: 'renewal-panel', n: 1, sessionId: null };
-    if (!usageWrite.writeSidecar(USAGE_CACHE_DIR, readingLag.windowSidecarName(key), stamp)) return false;
+    if (!windowStamp.writeWindowStamp(USAGE_CACHE_DIR, key, stamp, producer)) return false; // the ONE writer (null = the folder could not be read: nobody can tell)
     usageWrite.writeSidecar(USAGE_CACHE_DIR, readingLag.apiWindowSidecarName(key), { sevenDay, scoped, at: now, sessionId: null, source: 'renewal-panel', n: 1, ring: [], ringAt: now });
     _ownWin = null; _ownWinAt = 0;
+    try { oatIdentity.onReanchor(key, { window: stamp, source: 'renewal-panel', independent: producer === 'login' }); } catch { } // lane oat-identity-fix (verify r1 F6)
     console.log(`[usage] window re-anchored: ${nameOf(key)} was lapsed and its /usage panel answered with a NEW weekly window ${readingLag.windowFingerprint(stamp)} (was ${readingLag.windowFingerprint(idv.apiWindow || { sevenDay: null, fiveHour: null, scoped: {} })}) that no other account holds — a renewal; both window sidecars re-anchored on it`);
     try { global.__vsEvent?.('usage-window-reanchored-renewal', key); } catch { }
     return true;
@@ -6906,6 +7003,7 @@ function maybeStopOnFallback(session, id, from, to) {
     overageState, readRawUsageCache, reserveFloorPct, overageMemberIds, creditsMemberIds, spendGuard, // the ONE overage reader, the two voluntary-move bars (D2/D3) and THE SPEND CEILING (§4.4c)
     apiDerivedWindow, noteApiDerivedWindow, apiWitnessEligibility, API_WITNESS_K, establishedWindows, inLagShadow, recentRepointRow, lastRepointRow, // B-855a: the two identity witnesses the panel probe is checked against (the API one a ring of K eligible readings) + the ⟳ control-rung eligibility test
     repairIdentityAnchors, // B-855a c2: the STANDING identity repair (boot + POST /api/usage/repair-identity)
+    oatIdentity, oatIdentityAttach, oatRebind, oatAnswer, tokenSpentBy, tokenGenOf, readingRoad, oatRoadOf, // lane oat-identity-postcheck: the long-lived token's identity post-check (the account routes wire its store hook + the re-bind door + the owner's answer); tokenGenOf = WHICH token a reading was produced with (lane oat-identity-fix)
     sessionBillingMember, wallKeyFor, rejectionSlotFor, readingSlotFor, memberLoginState, accountCredentialState, healthyPoolMembers, switchCandidates, poolReadLogin, slotTransitions, nearArmVeto, armCauseFor, fireIdentityFor, demoteWalledAccount, wallCount, sessionWalledMembers,
     _wallRing, _sessionWalls, WALL_RING_MS, SESSION_WALL_MS, // wall-ground-truth + token-slot + session-wall seams (test-auto-resume §11, test-auto-resume-loop)
     _poolAutoLast, _poolSwitchAt, // the eval gate (10s) + dwell belt (180s) are WALL-CLOCK: a suite winds them back instead of sleeping through them

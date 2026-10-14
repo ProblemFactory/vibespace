@@ -391,7 +391,7 @@ class UserTodoManager {
 
   get(id) { return this._state.items.find((i) => i.id === id) || null; }
 
-  add(sessionKey, { text, detail, urgency, by = 'agent', sessionName = null, jobId = null, kind = null, i18n = null, expiresAt = null, action = null, options = null, origin = null, card = null, artifacts = null, cwd = null, hostId = null } = {}) {
+  add(sessionKey, { text, detail, urgency, by = 'agent', sessionName = null, jobId = null, kind = null, i18n = null, expiresAt = null, action = null, options = null, origin = null, card = null, artifacts = null, cwd = null, hostId = null, openCap = null } = {}) {
     const rawText = typeof text === 'string' ? text.trim() : '';
     text = rawText.slice(0, TEXT_MAX);
     const textCut = rawText.length > TEXT_MAX ? TEXT_MAX : 0; // the cap it hit, named on the return
@@ -459,6 +459,9 @@ class UserTodoManager {
     };
     const existing = this._state.items.find((i) => i.sessionKey === sessionKey && i.text === text && sameFiling(i) && !i.clearedAt);
     const openCount = this._state.items.filter((i) => i.sessionKey === sessionKey && i.status === 'open').length;
+    // a SERVER producer whose open items its own domain bounds (one per account row) may raise the per-key cap; the agent
+    // route never passes it (lane oat-identity-fix-r2, L1)
+    const maxOpen = Number(openCap) > MAX_OPEN_PER_SESSION ? Math.min(Number(openCap), MAX_ITEMS) : MAX_OPEN_PER_SESSION;
     if (existing) {
       let changed = false;
       // lane decision-inbox-rank: an agent filing the SAME words (text, and the same detail or none) of an item still open
@@ -466,7 +469,7 @@ class UserTodoManager {
       // words are an edit (F2 below), and a server producer's periodic re-file is not an ask
       const reask = existing.status === 'open' && origin === 'agent' && (!detail || detail === existing.detail);
       if (existing.status !== 'open') {
-        if (openCount >= MAX_OPEN_PER_SESSION) throw new Error(`this session already has ${openCount} open items — resolve some before adding more`);
+        if (openCount >= maxOpen) throw new Error(`this session already has ${openCount} open items — resolve some before adding more`);
         existing.status = 'open'; existing.resolvedAt = null; existing.resolvedBy = null;
         existing.createdAt = this._now();
         // a re-file of a resolved item is a NEW filing: its own expiry or none
@@ -498,7 +501,7 @@ class UserTodoManager {
       if (changed) { this._save(); this._notify(); }
       return cut({ ...existing, existing: true });
     }
-    if (openCount >= MAX_OPEN_PER_SESSION) throw new Error(`this session already has ${openCount} open items — resolve some before adding more`);
+    if (openCount >= maxOpen) throw new Error(`this session already has ${openCount} open items — resolve some before adding more`);
     const item = {
       id: 'ut-' + crypto.randomBytes(5).toString('hex'),
       sessionKey, text, detail,

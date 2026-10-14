@@ -223,6 +223,14 @@ export function inboxModel(app) {
       showToast((r && r.error) || t('Could not restart the browser'), { type: 'error' });
       return false;
     }
+    if (rec && rec.action && rec.action.type === 'browser-floor-check') {
+      // B-0b8c (lane browser-probe-transient): the browser-version notice's Check again — ONE probe now (cookie route); an
+      // answer withdraws the item server-side, a miss is said and the item stays
+      const r = await fetchJson('/api/browser/floor/check', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      if (r && r.floor && r.floor.state !== 'unknown') { showToast(t('The browser version reads again: {version}', { version: String(r.version || t('not installed')) })); return true; }
+      showToast((r && r.error) || t('Still no answer: {why}', { why: String((r && r.lastProbe && r.lastProbe.why) || t('no answer')) }), { type: 'error' });
+      return false;
+    }
     if (rec && rec.action && rec.action.type === 'exit-run-ask') {
       // lane-pairing ⑥: THE person's answer to an agent's command on a machine (cookie route; an agent's bearer is
       // refused human_only). The server resolves the item; a failure is said, never swallowed.

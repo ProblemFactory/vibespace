@@ -2561,6 +2561,256 @@ console.log('\n§10b the pool\'s placement acts start no turn');
   ok('§10b CONTROL: a pin writer that nudged auto-resume is caught', TURN.test(bodyOf(ctl, 'function setConversationPin(')));
 }
 
+// ── §10c A NEXT-TURN WATCH IS NEVER BILLED: STORED HITS KEEP THEIR ROAD (lane boot-flush-next-turn) ──
+// Found by lane channel-recall-ledger: a GROUP watch on the free next-turn road with no member live parks its hits as
+// pending; the next boot's flush (`scheduleBootPending` → `flushPending` → `wakeNow`) delivered them as a BILLED wake
+// (spendReason 'channel-message') on a watch that asked never to be woken. Now a pending row carries its `road`, and
+// every door that starts a delivery from stored hits asks the engine's `pendingRoadOf` first. (1) THE ROAD CENSUS —
+// grep-derived over the engine + its families: every reader of stored hits (`pendingOf(`) that STARTS a delivery calls
+// `pendingRoadOf(` after it in the same function; the one that only CARRIES them (a direct wake started by fresh hits)
+// is a named row; every pending-row writer names its road; the next-turn door parks on the next-turn road. Planted
+// controls are RED. (2) THE PROBE as legs over the REAL engine (restart = a new engine over the same data dir; the boot
+// flush is driven by the window the boot armed), each with a patched copy of the engine as its RED control. (3) THE CARRY
+// (lane stash-pending-live): a hit parked while nobody was live reaches a member when it COMES LIVE — carried by the next
+// hit or by the member's own turn (the hook's stash drain), once, on the conversation's chain, never billed.
+console.log('\n§10c a next-turn watch\'s stored hits ride the free stash at boot — never a billed wake');
+{
+  const { engineSource } = await import('./channels-engine-src.mjs');
+  const STARTS = ['flushPending', 'flushScopeNow', 'scheduleBootPending', 'parkedNextTurn'];   // parkedNextTurn: the carry's one read (lane stash-pending-live)
+  const CARRIES = { wakeNow: 'a direct wake started by FRESH hits carries what is stored along (no turn of its own; a next-turn watch never reaches wakeNow — onFresh hands it to stashHits)' };
+  function roadCensus(src) {
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' ')).split('\n').map((l) => (/^\s*\/\//.test(l) ? '' : l.replace(/ \/\/ .*$/, '')));
+    const fns = [];
+    code.forEach((l, i) => { const m = l.match(/^  (?:async )?function (\w+)\(/); if (m) fns.push({ name: m[1], a: i, b: code.findIndex((x, j) => j > i && /^  }\s*$/.test(x)) }); });
+    const fnOf = (i) => { let f = null; for (const x of fns) if (x.a <= i && x.b >= i) f = x; return f; };
+    const rows = [], violations = [];
+    code.forEach((l, i) => {
+      if (/\bpendingOf\(/.test(l) && !/function pendingOf\(/.test(l)) {
+        const f = fnOf(i), name = f ? f.name : '?';
+        if (CARRIES[name]) { rows.push({ kind: 'carries', fn: name, line: i + 1 }); return; }
+        const j = f ? code.findIndex((x, k) => k > i && k <= f.b && /\bpendingRoadOf\(/.test(x)) : -1;
+        rows.push({ kind: 'starts', fn: name, line: i + 1, road: j > 0 ? j + 1 : null });
+        if (j < 0) violations.push(`stored hits read in ${name}() at line ${i + 1} start a delivery with no road check`);
+      }
+      if (/\.pending\.push\(/.test(l)) { const f = fnOf(i); rows.push({ kind: 'writer', fn: f ? f.name : '?', line: i + 1 }); if (!/\broad\b/.test(l)) violations.push(`a pending row written in ${f ? f.name : '?'}() at line ${i + 1} names no road`); }
+      if (/\bkeepPending\(/.test(l) && !/function keepPending\(/.test(l)) { const f = fnOf(i); if (f && f.name === 'stashHits') { rows.push({ kind: 'next-turn-park', line: i + 1 }); if (!/'next-turn'\)/.test(l)) violations.push(`stashHits parks hits at line ${i + 1} without the next-turn road`); } }
+    });
+    const sp = fns.find((x) => x.name === 'stashPending');
+    if (!sp) violations.push('no stashPending (the flush\'s next-turn road)');
+    else if (code.slice(sp.a, sp.b + 1).some((l) => /deliverToConversation\(|billedWake\(|wakeNow\(/.test(l))) violations.push('stashPending reaches the ladder');
+    return { rows, violations };
+  }
+  const esrc = engineSource(REPO);
+  const c = roadCensus(esrc);
+  const starts = c.rows.filter((r) => r.kind === 'starts');
+  console.log('    road census rows: ' + c.rows.map((r) => `${r.kind}:${r.fn || ''}@${r.line}${r.road ? '→road@' + r.road : ''}`).join(' · '));
+  ok('§10c the census finds the four readers that start a delivery from stored hits (the boot flush, the scope digest, the boot scheduler, the carry), each asking the road after its read', JSON.stringify(starts.map((r) => r.fn).sort()) === JSON.stringify([...STARTS].sort()) && starts.every((r) => r.road), JSON.stringify(starts));
+  ok('§10c the one reader that only CARRIES stored hits is the named row (wakeNow)', c.rows.filter((r) => r.kind === 'carries').map((r) => r.fn).join() === Object.keys(CARRIES).join());
+  ok('§10c every pending-row writer names its road (keepPending, wakeNow\'s re-hold), and the next-turn door parks on the next-turn road (2 sites)', c.rows.filter((r) => r.kind === 'writer').length === 2 && c.rows.filter((r) => r.kind === 'next-turn-park').length === 2);
+  ok('§10c THE CENSUS: no stored hit starts a delivery without its road', c.violations.length === 0, JSON.stringify(c.violations));
+  const ROAD_LINE = "        if (pendingRoadOf(item.watcher, pend) === 'next-turn') { results.push(await stashPending(rec, convId, item, p, pend)); continue; }\n";
+  const SCOPE_ROAD = "        if (pendingRoadOf(item.watcher, pend) !== 'wake') continue;";
+  const BOOT_ROAD = " && pendingRoadOf(item.watcher, pend) === 'wake') {";
+  const WAKE_PUSH = "e2.pending.push({ record: h.record, why: h.why || [], at: t, road: 'wake', for: pk });";
+  const STASH_PARK = "if (!fromPending) await keepPending(rec, convId, hits, 0, pk, 'next-turn');";
+  ok('§10c the controls\' anchors are present once each', [ROAD_LINE, SCOPE_ROAD, BOOT_ROAD, WAKE_PUSH, STASH_PARK].every((a) => esrc.split(a).length === 2));
+  const red = (mut, re, what) => { const v = roadCensus(mut).violations; ok(`§10c CONTROL: ${what} is RED (${v.join('; ')})`, v.some((x) => re.test(x))); };
+  red(esrc.replace(ROAD_LINE, ''), /in flushPending\(\) .* no road check/, 'the boot flush without its road check');
+  red(esrc.replace(SCOPE_ROAD, ''), /in flushScopeNow\(\) .* no road check/, 'the scope digest without its road check');
+  red(esrc.replace(BOOT_ROAD, ') {'), /in scheduleBootPending\(\) .* no road check/, 'the boot scheduler without its road check');
+  red(esrc.replace('  function tick() {', "  async function flushAgain(rec, convId, pk) {\n    const en = store.index.peek(`${rec.id}/${convId}`), eff = wakeEffOf(en), pend = pendingOf(en, pk, eff);\n    return billedWake({ conv: `${rec.id}/${convId}` }, () => wakeNow(rec, convId, pend.hits, { fromPending: pend, pk }));\n  }\n  function tick() {"), /in flushAgain\(\) .* no road check/, 'a planted second door that bills stored hits');
+  red(esrc.replace(WAKE_PUSH, "e2.pending.push({ record: h.record, why: h.why || [], at: t, for: pk });"), /names no road/, 'a pending row written without its road');
+  red(esrc.replace(STASH_PARK, 'if (!fromPending) await keepPending(rec, convId, hits, 0, pk);'), /without the next-turn road/, 'the next-turn door parking on the default (wake) road');
+  const CARRY_ROAD = "    return pendingRoadOf(w, pend) === 'next-turn' ? pend : null;";
+  ok('§10c the carry\'s road anchor is present once', esrc.split(CARRY_ROAD).length === 2);
+  red(esrc.replace(CARRY_ROAD, '    return pend;'), /in parkedNextTurn\(\) .* no road check/, 'the carry reading parked hits without its road check');
+
+  // (2) THE PROBE, as legs over the real engine (lane channel-recall-ledger's probe/group-next-turn.mjs, copied)
+  const FAKE = require(path.join(REPO, 'src/channels/fake.js'));
+  const CH = require(path.join(REPO, 'src/channels/index.js'));
+  const { UserTodoManager } = require(path.join(REPO, 'src/user-todos.js'));
+  const ENG = require(path.join(REPO, 'src/server/channels-engine.js'));
+  const RA = 'fake-poll', ROPS = 'fake-poll-ops', RG = { kind: 'group', id: 'g-team', name: 'Team' };
+  const MEMBER = { cid: 'member-1', name: 'Member', groups: ['g-team'] };
+  async function bootLeg(ENGM, { grain = 'conversation', delivery = 'next-turn', notify = null, legacy = false, switchTo = null, liveAtBoot = true } = {}) {
+    const dataDir = tmpdir('vs-spend-road-');
+    let live = [];
+    const billed = [], stashed = [];
+    const mk = () => { const reg = CH.createChannelRegistry(); reg.register(FAKE.makeFakeAdapter({ kind: 'fake-poll', receive: 'poll', sendAs: ['user'] }));
+      return ENGM.create({ dataDir, env: { VIBESPACE_CHANNELS_FAKE: '1' }, registry: reg, broadcast: () => {}, userTodos: new UserTodoManager({ dataDir }), log: { log() {}, warn() {}, error() {} }, liveSessions: () => live,
+        deliver: { deliverToConversation: async (cid, text, o) => { billed.push({ cid, reason: o && o.spendReason }); return { ok: true, lane: 'message' }; }, stashFor: (cid, e) => { stashed.push({ cid, text: e.text }); return { stored: true }; } } }); };
+    let eng = mk();
+    await eng.pass(RA, { force: true });
+    const site = grain === 'account' ? { kind: 'account' } : { kind: 'conversation', convId: ROPS };
+    const watcher = { principal: RG, delivery, ...(notify ? { notify, digestMinutes: 30 } : {}) };
+    await eng.setGrain(RA, site, { access: [{ principal: RG, authority: 'draft' }], watchers: [watcher] });
+    const m = eng.messages(RA, ROPS, { limit: 3 }); const recs = (m.records || m).slice(-1);
+    await eng.onFresh(eng.adapterRecords().adapters.find((r) => r.id === RA), ROPS, recs, { origin: 'test' });
+    await eng.settleWakes();
+    const pendNow = () => ((eng.store.index.live()[`${RA}/${ROPS}`] || {}).pending || []);
+    const parked = { billed: billed.length, stashed: stashed.length, roads: pendNow().map((p) => (p.road === undefined ? null : p.road)) };
+    if (legacy) await eng.store.index.update(() => { const e2 = eng.store.index.entry(RA, ROPS, { create: false }); for (const p of e2.pending) delete p.road; });   // a row an older version wrote
+    if (switchTo) await eng.setGrain(RA, site, { access: [{ principal: RG, authority: 'draft' }], watchers: [{ ...watcher, delivery: switchTo }] });
+    await eng.stop();
+    live = liveAtBoot ? [MEMBER] : [];
+    eng = mk();
+    eng.start();
+    const windows = eng.pendingWindows().filter((w) => w.kind === 'boot');
+    // what each boot timer does (BOOT_PENDING_DELAY_MS later), now
+    for (const w of windows) await (w.key.startsWith('scope:') ? eng.flushScope(RA, 'account', null, w.principal) : eng.flushPending(RA, ROPS, { kind: 'boot', pk: w.principal }));
+    await eng.settleWakes();
+    const out = { parked, windows: windows.map((w) => (w.key.startsWith('scope:') ? 'scope' : 'conversation')), billed: billed.length, reasons: billed.map((b) => b.reason), stashed: stashed.length, to: stashed.map((x) => x.cid), pending: pendNow().length };
+    await eng.stop();
+    return out;
+  }
+  const J = (x) => JSON.stringify(x);
+  const p1 = await bootLeg(ENG);
+  ok('§10c the probe: a next-turn GROUP watch with nobody live parks its hit on the next-turn road — nothing billed, nothing stashed', p1.parked.billed === 0 && p1.parked.stashed === 0 && J(p1.parked.roads) === '["next-turn"]', J(p1));
+  ok('§10c …after a restart with a member live the boot flush STASHES it for that member: billed 0, stashed 1, pending 0', p1.billed === 0 && p1.stashed === 1 && p1.to[0] === MEMBER.cid && p1.pending === 0 && J(p1.windows) === '["conversation"]', J(p1));
+  const p2 = await bootLeg(ENG, { liveAtBoot: false });
+  ok('§10c nobody live at the boot flush either ⇒ the hit stays pending as it was (not re-parked, not billed)', p2.billed === 0 && p2.stashed === 0 && p2.pending === 1, J(p2));
+  const p3 = await bootLeg(ENG, { legacy: true });
+  ok('§10c a row an older version wrote (no road) on a next-turn watch is read by the watch\'s CURRENT mode ⇒ stashed, never billed', p3.billed === 0 && p3.stashed === 1 && p3.pending === 0, J(p3));
+  const p4 = await bootLeg(ENG, { delivery: 'wake', legacy: true });
+  ok('§10c POSITIVE: a WAKE watch\'s held hit (an old row, no road) is still woken at boot — billed 1, as it always was', J(p4.parked.roads) === '["wake"]' && p4.billed === 1 && J(p4.reasons) === '["channel-message"]' && p4.stashed === 0 && p4.pending === 0, J(p4));
+  const p5 = await bootLeg(ENG, { switchTo: 'wake' });
+  ok('§10c parked on the next-turn road, the watch then switched to wake ⇒ the stored hit still rides the free stash', p5.billed === 0 && p5.stashed === 1, J(p5));
+  const p6 = await bootLeg(ENG, { delivery: 'wake', switchTo: 'next-turn' });
+  ok('§10c held on the wake road, the watch then switched to next-turn ⇒ never billed (the mode NOW is the stricter)', p6.billed === 0 && p6.stashed === 1, J(p6));
+  const p7 = await bootLeg(ENG, { grain: 'account', notify: 'digest' });
+  ok('§10c a whole-account next-turn watch stored with a digest: the boot arms the conversation\'s flush, never a scope digest ⇒ stashed, billed 0', J(p7.parked.roads) === '["next-turn"]' && J(p7.windows) === '["conversation"]' && p7.billed === 0 && p7.stashed === 1, J(p7));
+  // RED CONTROLS: patched copies of the engine without the road (the f57d1cbe9 behaviour)
+  const noRoad = mutantModule('src/server/channels-engine.js', [[ROAD_LINE, '']]);
+  const m1 = noRoad.mod ? await bootLeg(noRoad.mod) : null;
+  ok('§10c CONTROL: the engine without the flush\'s road check BILLS the probe\'s hit at boot (billed 1 — the bug)', m1 && m1.billed === 1 && J(m1.reasons) === '["channel-message"]' && m1.stashed === 0, noRoad.err || J(m1));
+  const noScope = mutantModule('src/server/channels-engine.js', [[SCOPE_ROAD + '   // THE ROAD (lane boot-flush-next-turn): next-turn hits wait for the boot flush\'s free stash, never a billed digest', ''], [BOOT_ROAD, ') {']]);
+  const m7 = noScope.mod ? await bootLeg(noScope.mod, { grain: 'account', notify: 'digest' }) : null;
+  ok('§10c CONTROL: without the scheduler\'s and the scope digest\'s road checks the whole-account leg arms a scope digest and BILLS it', m7 && J(m7.windows) === '["scope"]' && m7.billed === 1, noScope.err || J(m7));
+
+  // (3) lane stash-pending-live: THE CARRY. Lane boot-flush-next-turn's probe/live-later.mjs (copied): a member comes live
+  // WITHOUT a restart and a second hit arrives ⇒ on d035f7cfa `stashed 1, pending still 1` — the second hit alone, the
+  // parked one waiting for a boot. Now the next hand-over to a live member carries what its watcher parked: a fresh hit
+  // (ONE block, the parked first — the shape a wake carries held hits in), or the member's own turn with no hit at all
+  // (`carryParked`, asked by the hook's stash drain). Read on the conversation's chain: one parked row is handed over ONCE
+  // however many doors move in one tick. Nothing is billed on any leg.
+  const M2 = { cid: 'member-2', name: 'Member 2', groups: ['g-team'] };
+  const STRANGER = { cid: 'stranger-9', name: 'Stranger', groups: ['g-other'] };
+  const linesOf = (text) => String(text).split('\n').filter((l) => /^from /.test(l));
+  async function liveLeg(ENGM, { then = 'hit', delivery = 'next-turn', liveNow = [MEMBER], turnOf = MEMBER.cid, failStash = false } = {}) {
+    const dataDir = tmpdir('vs-spend-carry-');
+    let live = [], failing = false;
+    const billed = [], stashed = [];
+    const reg = CH.createChannelRegistry(); reg.register(FAKE.makeFakeAdapter({ kind: 'fake-poll', receive: 'poll', sendAs: ['user'] }));
+    const eng = ENGM.create({ dataDir, env: { VIBESPACE_CHANNELS_FAKE: '1' }, registry: reg, broadcast: () => {}, userTodos: new UserTodoManager({ dataDir }), log: { log() {}, warn() {}, error() {} }, liveSessions: () => live,
+      deliver: { deliverToConversation: async (cid, text, o) => { billed.push({ cid, reason: o && o.spendReason }); return { ok: true, lane: 'message' }; }, stashFor: (cid, e) => { if (failing) throw new Error('ENOSPC: no space left on device'); stashed.push({ cid, lines: linesOf(e.text) }); return { stored: true }; } } });
+    await eng.pass(RA, { force: true });
+    await eng.setGrain(RA, { kind: 'conversation', convId: ROPS }, { access: [{ principal: RG, authority: 'draft' }], watchers: [{ principal: RG, delivery }] });
+    const m = eng.messages(RA, ROPS, { limit: 3 }); const recs = (m.records || m);
+    const [older, newer] = recs.slice(-2);
+    const who = (r) => `from ${r.author && r.author.name} at`;
+    const rec = eng.adapterRecords().adapters.find((r) => r.id === RA);
+    await eng.onFresh(rec, ROPS, [older], { origin: 'test' });
+    await eng.settleWakes();
+    const pendNow = () => ((eng.store.index.live()[`${RA}/${ROPS}`] || {}).pending || []);
+    const parked = { n: pendNow().length, billed: billed.length, stashed: stashed.length };
+    live = liveNow; failing = failStash;
+    let queued = null;
+    if (then === 'hit') await eng.onFresh(rec, ROPS, [newer], { origin: 'test' });
+    else if (then === 'turn') queued = eng.carryParked(turnOf);
+    else if (then === 'turn-twice') queued = eng.carryParked(turnOf) + eng.carryParked(turnOf);
+    else if (then === 'all-at-once') {   // the boot flush, a fresh hit and the member's turn, in one tick
+      const a = eng.flushPending(RA, ROPS, { kind: 'boot' });
+      const b = eng.onFresh(rec, ROPS, [newer], { origin: 'test' });
+      queued = eng.carryParked(turnOf);
+      await Promise.all([a, b]);
+    }
+    await eng.settleWakes();
+    const all = stashed.flatMap((x) => x.lines);
+    const out = { distinct: who(older) !== who(newer), parked, queued, billed: billed.length, stashed: stashed.length, to: stashed.map((x) => x.cid),
+      blocks: stashed.map((x) => x.lines.map((l) => (l.startsWith(who(older)) ? 'P' : l.startsWith(who(newer)) ? 'F' : '?')).join('')),
+      parkedOut: all.filter((l) => l.startsWith(who(older))).length, freshOut: all.filter((l) => l.startsWith(who(newer))).length,
+      pending: pendNow().length, pendingIds: pendNow().map((p) => p.record && p.record.id), again: then === 'turn' ? eng.carryParked(turnOf) : null };
+    await eng.stop();
+    return out;
+  }
+  const c1 = await liveLeg(ENG);
+  ok('§10c THE PROBE (live-later): parked while nobody was live, a member comes live and a second hit arrives ⇒ ONE block carries both, the parked first; pending 0, billed 0', c1.distinct && c1.parked.n === 1 && c1.parked.stashed === 0 && c1.stashed === 1 && c1.to[0] === MEMBER.cid && J(c1.blocks) === '["PF"]' && c1.pending === 0 && c1.billed === 0, J(c1));
+  const c2 = await liveLeg(ENG, { then: 'turn' });
+  ok('§10c no new hit: the member\'s OWN TURN carries it (carryParked queues 1) ⇒ stashed for that member, pending 0, billed 0; a second turn finds nothing', c2.queued === 1 && c2.stashed === 1 && c2.to[0] === MEMBER.cid && J(c2.blocks) === '["P"]' && c2.pending === 0 && c2.billed === 0 && c2.again === 0, J(c2));
+  const c3 = await liveLeg(ENG, { then: 'turn-twice' });
+  ok('§10c two turns asking in ONE tick (SessionStart + a prompt) ⇒ handed over ONCE (the second carry reads the chain after the first cleared it)', c3.queued === 2 && c3.stashed === 1 && c3.parkedOut === 1 && c3.pending === 0 && c3.billed === 0, J(c3));
+  const c4 = await liveLeg(ENG, { then: 'all-at-once' });
+  ok('§10c the boot flush, a fresh hit and the member\'s turn in ONE tick ⇒ the parked message is handed over ONCE, the fresh once; pending 0, billed 0', c4.parkedOut === 1 && c4.freshOut === 1 && c4.pending === 0 && c4.billed === 0, J(c4));
+  const c5 = await liveLeg(ENG, { then: 'turn', liveNow: [MEMBER, STRANGER], turnOf: STRANGER.cid });
+  ok('§10c the turn of a live session OUTSIDE the group carries nothing (nothing queued, the hit stays parked)', c5.queued === 0 && c5.stashed === 0 && c5.pending === 1 && c5.billed === 0, J(c5));
+  const c6 = await liveLeg(ENG, { then: 'turn', liveNow: [], turnOf: MEMBER.cid });
+  ok('§10c a turn of a member that is not live (not in the roster) carries nothing', c6.queued === 0 && c6.stashed === 0 && c6.pending === 1, J(c6));
+  const c7 = await liveLeg(ENG, { then: 'turn', liveNow: [MEMBER, M2], turnOf: M2.cid });
+  ok('§10c two members live: the carry goes to the member whose turn asked (member-2), not the round-robin\'s pick', c7.queued === 1 && c7.stashed === 1 && J(c7.to) === J([M2.cid]) && c7.pending === 0, J(c7));
+  const c8 = await liveLeg(ENG, { then: 'turn', delivery: 'wake' });
+  ok('§10c POSITIVE: a WAKE watch\'s held hit is no carry\'s — the member\'s turn queues nothing and it waits for its own wake (the road judge)', c8.parked.n === 1 && c8.queued === 0 && c8.stashed === 0 && c8.pending === 1 && c8.billed === 0, J(c8));
+  const c9 = await liveLeg(ENG, { failStash: true });
+  ok('§10c the stash refuses the carry (ENOSPC) ⇒ the parked row stays and the fresh hit is parked ONCE beside it (no duplicate), billed 0', c9.stashed === 0 && c9.pending === 2 && new Set(c9.pendingIds).size === 2 && c9.billed === 0, J(c9));
+  // RED CONTROLS (patched copies of the engine)
+  const CARRY_DEFER = "    if (!fromPending && !carry && !stopped && parkedNextTurn(en, w, pk)) return billedWake({ conv: `${rec.id}/${convId}` }, () => stashHits(rec, convId, hits, { item, pk, batch, carry: true, prefer }));\n";
+  const noCarry = mutantModule('src/server/channels-engine.js', [[CARRY_DEFER, '']]);
+  const k1 = noCarry.mod ? await liveLeg(noCarry.mod) : null;
+  ok('§10c CONTROL: without the hit\'s carry the probe answers as on d035f7cfa — the second hit alone, the parked one still pending', k1 && k1.stashed === 1 && J(k1.blocks) === '["F"]' && k1.pending === 1, noCarry.err || J(k1));
+  const CARRY_QUEUE = "        track(billedWake({ conv: key }, () => stashHits(rec, en.id, [], { item, pk, carry: true, prefer: cid })));";
+  const offChain = mutantModule('src/server/channels-engine.js', [[CARRY_QUEUE, "        track(stashHits(rec, en.id, [], { item, pk, carry: true, prefer: cid }));"]]);
+  const k3 = offChain.mod ? await liveLeg(offChain.mod, { then: 'turn-twice' }) : null;
+  ok('§10c CONTROL: the turn\'s carry read OFF the conversation\'s chain hands the parked message over TWICE on two asks in one tick', k3 && k3.stashed === 2 && k3.parkedOut === 2, offChain.err || J(k3));
+
+  // THROUGH THE REAL HOOK ROUTES: the member's SessionStart (task-context) asks; its first prompt (prompt-context) drains it
+  const { TaskGroupManager } = require(path.join(REPO, 'src/task-groups.js'));
+  const AR_ROUTES = require(path.join(REPO, 'src/agent-routes.js'));
+  async function turnLeg(routesMod, { backend = 'claude' } = {}) {
+    const dir = tmpdir('vs-spend-turn-');
+    const CID = 'c0ffee00-0000-4000-8000-0000000000f6';   // a real conversation id's shape (the roster's cid = the stash key = the hook caller's)
+    let live = [];
+    const billed = [];
+    const s = { agentToken: 'vsst_m1', backend, cwd: dir, name: 'member', backendSessionId: CID, claudeSessionId: CID, mode: 'chat' };
+    const sessions = new Map([['m1', s]]);
+    const ladder = deliverMod.create({ dataDir: dir, activeSessions: sessions, serverSetting: () => undefined, peerMsg: { findPeer: () => null, postToPeer: async () => ({ ok: false }), postChannelEvent: async () => ({ ok: false }) }, emitPeerCard: () => {}, log: () => {} });
+    const reg = CH.createChannelRegistry(); reg.register(FAKE.makeFakeAdapter({ kind: 'fake-poll', receive: 'poll', sendAs: ['user'] }));
+    const eng = ENG.create({ dataDir: dir, env: { VIBESPACE_CHANNELS_FAKE: '1' }, registry: reg, broadcast: () => {}, userTodos: new UserTodoManager({ dataDir: dir }), log: { log() {}, warn() {}, error() {} }, liveSessions: () => live,
+      deliver: { deliverToConversation: async (cid, text, o) => { billed.push({ cid, reason: o && o.spendReason }); return { ok: true, lane: 'message' }; }, stashFor: (cid, e) => ladder.stashFor(cid, e) } });
+    const routes = {};
+    const app = { get: (p, h) => { routes[`GET ${p}`] = h; }, post: (p, h) => { routes[`POST ${p}`] = h; } };
+    routesMod.setupAgentRoutes({ app, activeSessions: sessions, tasks: new TaskGroupManager({ dataDir: dir, onChange: () => {}, getSetting: () => undefined }), deliver: ladder, getJobs: () => null, getChannels: () => eng,
+      sessionStatus: { snapshot: () => ({}), get: () => null, consumeNotice: () => null, consumeNotices: () => [], pendingNotices: () => [], dropNotices: () => [], rekey: () => {}, clear: () => null, setByUser: () => null, setByAgent: () => null, history: () => [] },
+      SessionStatusManager: { renderNotice: () => '', renderNotices: () => '' },
+      userTodos: { rekey: () => {}, forSession: () => [], resolveByAgent: () => null, add: () => ({}) },
+      sessionStatusKey: () => `${backend}:${CID}`, serverSetting: () => undefined, scheduleCtxSync: () => {}, remoteCtxBaseFor: () => null });
+    const get = (p) => { let out; const res = { json: (o) => { out = o; return res; }, status: () => res }; const cl = console.log; console.log = () => {}; try { routes[`GET ${p}`]({ headers: { authorization: 'Bearer vsst_m1' }, query: {}, body: {} }, res); } finally { console.log = cl; } return (out && out.context) || ''; };
+    await eng.pass(RA, { force: true });
+    await eng.setGrain(RA, { kind: 'conversation', convId: ROPS }, { access: [{ principal: RG, authority: 'draft' }], watchers: [{ principal: RG, delivery: 'next-turn' }] });
+    const m = eng.messages(RA, ROPS, { limit: 3 }); const older = (m.records || m).slice(-2, -1)[0];
+    await eng.onFresh(eng.adapterRecords().adapters.find((r) => r.id === RA), ROPS, [older], { origin: 'test' });
+    await eng.settleWakes();
+    const pendNow = () => ((eng.store.index.live()[`${RA}/${ROPS}`] || {}).pending || []).length;
+    const parked = pendNow();
+    live = [{ cid: CID, name: 'member', groups: ['g-team'] }];   // the member comes live: its session starts
+    const needle = `from ${older.author && older.author.name} at`;
+    const ctx = [];
+    ctx.push(get('/api/agent/task-context'));   // SessionStart (codex: the door answers '' before any drain)
+    await eng.settleWakes();
+    ctx.push(get('/api/agent/prompt-context'));
+    await eng.settleWakes();
+    ctx.push(get('/api/agent/prompt-context'));
+    const out = { parked, inCtx: ctx.map((c) => c.split(needle).length - 1), pending: pendNow(), billed: billed.length, stashLeft: ladder.stashCount(CID) };
+    await eng.stop();
+    return out;
+  }
+  const t1 = await turnLeg(AR_ROUTES);
+  ok('§10c THE MEMBER\'S TURN through the REAL hook routes: SessionStart asks, the FIRST prompt carries the parked message once, the next carries nothing; pending 0, billed 0', t1.parked === 1 && J(t1.inCtx) === '[0,1,0]' && t1.pending === 0 && t1.billed === 0 && t1.stashLeft === 0, J(t1));
+  const t2 = await turnLeg(AR_ROUTES, { backend: 'codex' });
+  ok('§10c …a harness without SessionStart (codex): its first prompt asks, the carry lands in the stash and rides the NEXT prompt (never lost, never billed)', t2.parked === 1 && J(t2.inCtx) === '[0,0,1]' && t2.pending === 0 && t2.billed === 0, J(t2));
+  const noAsk = mutantModule('src/agent-routes.js', [['        carryParkedFor(caller2.conversationId);\n', '']]);
+  const k4 = noAsk.mod ? await turnLeg(noAsk.mod) : null;
+  ok('§10c CONTROL: the hook routes without the ask ⇒ the member\'s turns carry nothing and the hit stays parked (the d035f7cfa behaviour: it waits for a boot)', k4 && J(k4.inCtx) === '[0,0,0]' && k4.pending === 1, noAsk.err || J(k4));
+}
+
 // ── §11 THE TREE IS NEVER WRITTEN (B-59b8 r1 / B-0220) ──────────────────────
 // Measured HERE, while every patched copy this run made still exists (the exit
 // handler removes them — a census taken after exit passes on the pre-fix

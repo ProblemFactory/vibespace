@@ -583,22 +583,49 @@ app.post('/api/accounts/:id/oat', async (req, res) => {
   try { f = await accounts.oatFileSettled(r.id); } catch { }
   res.json({ success: true, ...r, ...(f ? { oatFile: f.verdict } : {}) });
 });
+// The spawn channel left 0600 working copies (~/.vibespace/<id>.key) on
+// hosts — sweep them best-effort like account delete does (the still-valid
+// 1-year token must not outlive its removal — or its move — where we can reach).
+const sweepHostTokenCopies = (rid) => {
+  if (/^sub-[a-f0-9]+$/.test(rid) && hosts) {
+    const { execFile } = require('child_process');
+    for (const h of hosts.list() || []) {
+      try { execFile('ssh', [...hosts.sshArgs(h), '--', `rm -f "$HOME/.vibespace/${rid}.key"`], { timeout: 15000 }, () => {}); } catch { }
+    }
+  }
+};
 app.delete('/api/accounts/:id/oat', (req, res) => {
   try {
     accounts.clearOat(req.params.id);
-    // The spawn channel left 0600 working copies (~/.vibespace/<id>.key) on
-    // hosts — sweep them best-effort like account delete does (the still-valid
-    // 1-year token must not outlive its removal where we can reach).
-    const rid = req.params.id;
-    if (/^sub-[a-f0-9]+$/.test(rid) && hosts) {
-      const { execFile } = require('child_process');
-      for (const h of hosts.list() || []) {
-        try { execFile('ssh', [...hosts.sshArgs(h), '--', `rm -f "$HOME/.vibespace/${rid}.key"`], { timeout: 15000 }, () => {}); } catch { }
-      }
-    }
+    sweepHostTokenCopies(req.params.id);
     res.json({ success: true });
   }
   catch (e) { res.status(400).json({ error: e.message }); }
+});
+// 改绑 — RE-BIND (lane oat-identity-postcheck, B-3102 (b)): the identity post-check found a row's long-lived token to
+// be ANOTHER account's; the owner moves it to the row it belongs to. Human-only (an agent's session / job token is
+// refused by name); the sealed token moves as it is, its mint time kept, and is checked again on its new row.
+app.post('/api/accounts/:id/oat/rebind', async (req, res) => {
+  if (isAgentBearer(req)) return res.status(403).json({ error: 'human-triggered only', code: 'agent_forbidden' });
+  const to = typeof req.body?.to === 'string' ? req.body.to : '';
+  let r;
+  try { r = typeof engine.oatRebind === 'function' ? engine.oatRebind(req.params.id, to) : accounts.moveOat(req.params.id, to); }
+  catch (e) { return res.status(e.code === 'target_has_token' ? 409 : 400).json({ error: e.message, ...(e.code ? { code: e.code } : {}) }); }
+  sweepHostTokenCopies(req.params.id);
+  let f = null;
+  try { f = await accounts.oatFileSettled(to); } catch { }
+  res.json({ success: true, ...r, ...(f ? { oatFile: f.verdict } : {}) });
+});
+// THE OWNER'S ANSWER (lane oat-identity-fix, verify r1 F4/F6): the identity check ASKED (a token whose window is another
+// row's while this row has none of its own; an anchor the token's own readings moved) or MARKED it. 'mine' ⇒ the window
+// the token's readings stated becomes this row's owner-confirmed anchor (confirmed); 'not-mine' ⇒ the mark (the pool
+// places nothing new where it would spend the token). Human-only, like the re-bind door.
+app.post('/api/accounts/:id/oat/identity', (req, res) => {
+  if (isAgentBearer(req)) return res.status(403).json({ error: 'human-triggered only', code: 'agent_forbidden' });
+  if (typeof engine.oatAnswer !== 'function') return res.status(503).json({ error: 'the token identity check is not running', code: 'unavailable' });
+  const answer = typeof req.body?.answer === 'string' ? req.body.answer : '';
+  try { res.json({ success: true, ...engine.oatAnswer(req.params.id, answer) }); }
+  catch (e) { res.status(e.code === 'no_check' ? 404 : (e.code === 'already_marked' || e.code === 'nothing_to_confirm') ? 409 : 400).json({ error: e.message, ...(e.code ? { code: e.code } : {}) }); }
 });
 
 // THE MINT (lane oat-mint-flow, owner 2026-10-13): the dialog drives
@@ -615,6 +642,9 @@ const oatMint = require('./oat-mint.js').create({ accounts, claudeCmd: CLAUDE_CM
   windows: () => (typeof engine.establishedWindows === 'function' ? engine.establishedWindows() : {}),
   journal: (rec) => { try { require('./usage-probe-log.js').appendProbeLog(accounts.dataDir, { rung: 'oat-mint', ...rec }); } catch { } } });
 require('./oat-mint.js').registerMintRoutes(app, { mint: oatMint, isAgentBearer });
+// the token's identity post-check (lane oat-identity-postcheck) is told when a save / a removal / a move replaces a
+// check — it resolves the For-you notice the old one filed (the account store exists by now)
+if (typeof engine.oatIdentityAttach === 'function') engine.oatIdentityAttach();
 
 app.post('/api/accounts/subscription', (req, res) => {
   try {

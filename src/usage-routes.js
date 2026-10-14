@@ -774,10 +774,15 @@ async function refreshViaCliPanel(key) {
     // API-derived stamp (`source:'api'`) comes from the engine and the standing
     // repair, and when the two disagree the panel was refused above already.
     try {
-      const { windowOf, windowSidecarName } = require('./reading-lag.js');
+      const { windowOf } = require('./reading-lag.js');
+      const windowStamp = require('./window-stamp.js'); // the `.window-` sidecar's ONE writer + reader (lane oat-identity-fix-r3)
       const w = windowOf(merged);
+      // WHO ANSWERED (lane oat-identity-fix-r2, verify r2 F-A): the folder's login, or our long-lived token file in it —
+      // the stamp names it, so a token's answer never becomes the identity its next generation is judged by (null = the
+      // folder could not be read: nobody can tell — the ONE writer then carries the row's identity, fix r3)
+      const producer = (() => { try { const i = accounts.readSubCreds(key); return i && i.oatFile ? 'oat:' + (Number(i.oatFileGen) > 0 ? Number(i.oatFileGen) : '?') : 'login'; } catch { return null; } })();
       if (idv && idv.verified && (w.sevenDay || w.fiveHour || Object.keys(w.scoped).length)) {
-        usageWrite.writeSidecar(USAGE_CACHE_DIR, windowSidecarName(key), { ...w, at: Date.now(), source: 'on-demand', verifiedAt: Date.now(), verifiedBy: idv.org === 'agree' ? 'cli-org' : 'api-phase' });
+        windowStamp.writeWindowStamp(USAGE_CACHE_DIR, key, { ...w, at: Date.now(), source: 'on-demand', verifiedAt: Date.now(), verifiedBy: idv.org === 'agree' ? 'cli-org' : 'api-phase' }, producer);
         probeRec.sidecar = 'stamped';
       } else if (w.sevenDay || Object.keys(w.scoped).length) {
         // …UNLESS THE ONLY ANCHOR IS A LEGACY STAMP (inc-mu6djxxt-8166): with no
@@ -786,8 +791,7 @@ async function refreshViaCliPanel(key) {
         // panel (the creds dir IS the account under CLAUDE_CONFIG_DIR isolation)
         // establishes, re-anchors or upgrades it; a verified anchor and an API
         // witness are never touched here (PURE: reading-lag isolatedPanelAnchorVerdict).
-        let anchor = null;
-        try { anchor = JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, windowSidecarName(key)), 'utf-8')); } catch { anchor = null; }
+        const anchor = windowStamp.readWindowStamp(USAGE_CACHE_DIR, key);
         const { isolatedPanelAnchorVerdict, windowFingerprint } = require('./reading-lag.js');
         const v = (idv && !idv.refused) ? isolatedPanelAnchorVerdict({ anchor, panelWindow: w, apiWindow: idv.apiWindow || null }) : { action: 'keep', reason: 'refused' };
         if (v.action === 'stamp' || v.action === 'reanchor' || v.action === 'upgrade') {
@@ -798,10 +802,10 @@ async function refreshViaCliPanel(key) {
             try {
               const f = path.join(path.dirname(USAGE_CACHE_DIR), 'archive', 'readings-foreign-usage-cache.ndjson');
               fs.mkdirSync(path.dirname(f), { recursive: true });
-              fs.appendFileSync(f, JSON.stringify({ migration: 'legacy-anchor-reanchored', at: Date.now(), store: 'window-sidecar', key, action: 'reanchored', reason: v.reason, was: anchor, now: stamp }) + '\n');
+              fs.appendFileSync(f, JSON.stringify({ migration: 'legacy-anchor-reanchored', at: Date.now(), store: 'window-sidecar', key, action: 'reanchored', reason: v.reason, was: anchor, now: { ...stamp, producer } }) + '\n');
             } catch { }
           }
-          usageWrite.writeSidecar(USAGE_CACHE_DIR, windowSidecarName(key), stamp);
+          windowStamp.writeWindowStamp(USAGE_CACHE_DIR, key, stamp, producer);
           probeRec.sidecar = `${v.action} (${v.reason})`;
         } else {
           probeRec.sidecar = `not-stamped (identity unverified; ${v.reason})`;

@@ -320,6 +320,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
     'channel-reauth': () => actBtn('channel-reauth', UI_ICONS.check, t('Re-authorize'), t('Re-authorize'), 'iw-act-primary'), // lane channel-names-readable: the account's Re-authorize dialog
     'desktop-app-show': () => actBtn('desktop-app-show', UI_ICONS.check, t('Show window'), t('Show the app’s window'), 'iw-act-primary'), // lane app-display-notify-sink
     'browser-restart': () => actBtn('browser-restart', UI_ICONS.check, t('Restart'), t('Restart the browser that stopped answering — logins stay in the profile, its tabs are re-opened'), 'iw-act-primary'), // lane browser-unresponsive
+    'browser-floor-check': () => actBtn('browser-floor-check', UI_ICONS.refresh, t('Check again'), t('Ask for the browser version once more now — this notice goes away by itself once it reads'), 'iw-act-primary'), // B-0b8c
     'exit-allow': () => actBtn('exit-allow', UI_ICONS.check, t('Allow'), t('Allow'), 'iw-act-primary iw-act-exit'),
     'exit-deny': () => actBtn('exit-deny', UI_ICONS.close, t('Deny'), t('Deny'), 'iw-act-exit'),
     // lane browser-propose: the agent's browser proposal — ONE primary Approve (runs exactly what the item says), a quiet Reject
@@ -627,6 +628,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
     if (a === 'channel-reauth') { await model.runAction(it); return; } // lane channel-names-readable: the dialog opens; the engine resolves the item
     if (a === 'desktop-app-show') { if (await model.runAction(it)) advance(id); return; } // lane app-display-notify-sink: the window raised resolves the item
     if (a === 'browser-restart') { if (await model.runAction(it)) advance(id); return; } // lane browser-unresponsive: THE model's verb (the server resolves the item)
+    if (a === 'browser-floor-check') { if (await model.runAction(it)) advance(id); return; } // B-0b8c: one probe now — an answer withdraws the item server-side
     if (a === 'app-reject') { if (await model.runAction(it, 'reject')) advance(id); return; }
     if (a === 'clear') { model.clearContent(id); return; } // the store's broadcast repaints the pane (and drops this button)
     if (a === 'proposal-approve' || a === 'proposal-reject') {

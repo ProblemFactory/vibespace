@@ -233,6 +233,33 @@ export function subIdentHtml(a, { email = '', hostSub = false, hostTag = '', loc
     : `<span class="ob-warn">${t('not logged in')}</span>`;
 }
 
+/** The identity post-check said this row's token is ANOTHER account's (lane oat-identity-postcheck, B-3102 (b)). */
+export const oatForeign = (a) => !!(a && a.oat && a.oatIdentity === 'mismatch');
+const oatForeignTitle = (a) => t('Its first usage reading carried another account’s weekly window, so it bills that account, not this one. Conversations already running on it continue; pools place nothing new on it. Fix it in ⋯ → Long-lived token.')
+  + (a.oatIdentityOther ? ' ' + t('Its usage matches {other}.', { other: a.oatIdentityOther }) : '');
+/** The identity check ASKED the owner (lane oat-identity-fix, verify r1 F4 / F6): 'hint' — the row has no window of its
+ *  own and the token's reading carried another row's; 'anchor' — the row's window moved by the token's own readings;
+ *  'lost' — (fix r3) the row's window can no longer say whose it is: 「身份未验证」 with the one anchor ask.
+ *  None is a mark: the pool keeps using the token until the owner answers. */
+export const oatIdentityAsk = (a) => !!(a && a.oat && (a.oatIdentity === 'hint' || a.oatIdentity === 'anchor' || a.oatIdentity === 'lost'));
+/** F8: armed for over a day and no reading has judged it — said on the row, never filed */
+export const oatUnverified = (a) => !!(a && a.oat && a.oatIdentity === 'unverified');
+/** fix r3 (verify r3 F-R1): a conversation whose road is unknown read the token — it judged nothing; its next start records
+ *  the road. Said on the row, never filed. */
+export const oatUnknownRoad = (a) => !!(a && a.oat && a.oatIdentity === 'unknown-road');
+const oatUnknownRoadWords = () => t('This conversation’s token road is unknown — it takes no part in the identity check');
+const oatUnknownRoadTitle = () => t('A conversation restored after a restart from a record older than this version cannot say whether it runs on this long-lived token or on the sign-in, so its usage readings never judge the token. Its next start (a resume or a new conversation) records the road.');
+const oatAskWords = (a) => (a.oatIdentity === 'hint'
+  ? t('This long-lived token looks like {other}’s — confirm or re-bind it', { other: a.oatIdentityOther || '?' })
+  : a.oatIdentity === 'lost'
+  ? t('Identity unverified — the usage window can no longer say whose this token is: confirm or re-bind it')
+  : t('Its usage window moved away from the one this token was confirmed with — confirm or re-bind it'));
+const oatAskTitle = (a) => (a.oatIdentity === 'hint'
+  ? t('This row has no usage window of its own, and the token’s first reading carried {other}’s weekly window. Two accounts can share a reset hour by chance, so nothing was marked and pools keep using it. Answer in ⋯ → Long-lived token.', { other: a.oatIdentityOther || '?' })
+  : a.oatIdentity === 'lost'
+  ? t('This row’s usage window was last written by a step that could not tell this account’s sign-in from its long-lived token, so nothing proves whose the token is. Nothing was marked and pools keep using it. Answer in ⋯ → Long-lived token.')
+  : t('The account’s usage window moved by this token’s own readings, so the move cannot vouch for the token. Nothing was marked and pools keep using it. Answer in ⋯ → Long-lived token.'));
+
 /** Long-lived token state: quiet while healthy, amber under 30 days,
  *  red once expired (a 401 on an expired oat has no self-heal). A host
  *  section (`local: false`) shows only the dead one. The healthy green tag
@@ -244,6 +271,17 @@ export function oatTagHtml(a, { local = true } = {}) {
   if (!local && !oatDead) return '';
   return a.oatDaysLeft <= 0
     ? ` <span class="acct-blocked-hint" style="color:var(--red,#e55)" title="${t('The long-lived token EXPIRED — sessions using it fail until you re-mint one (⋯ → Long-lived token).')}">${t('· long-lived token expired')}</span>`
+    // the identity post-check (lane oat-identity-postcheck): its first reading carried ANOTHER account's window
+    : oatForeign(a)
+    ? ` <span class="acct-blocked-hint acct-oat-foreign" style="color:var(--red,#e55)" title="${escHtml(oatForeignTitle(a))}">· ${t('This long-lived token belongs to another account — re-mint or re-bind it')}</span>`
+    // …it ASKED (lane oat-identity-fix): amber, no mark — the owner's answer decides
+    : oatIdentityAsk(a)
+    ? ` <span class="acct-blocked-hint acct-oat-ask" style="color:var(--warn-text)" title="${escHtml(oatAskTitle(a))}">· ${escHtml(oatAskWords(a))}</span>`
+    // …or a conversation whose road is unknown read it (fix r3): it judged nothing
+    : oatUnknownRoad(a)
+    ? ` <span class="acct-blocked-hint acct-oat-unknown-road" title="${escHtml(oatUnknownRoadTitle())}">· ${escHtml(oatUnknownRoadWords())}</span>`
+    : oatUnverified(a)
+    ? ` <span class="acct-blocked-hint acct-oat-unverified" title="${escHtml(t('No usage reading has checked this long-lived token against the account since it was saved over a day ago. Re-bind it, or re-mint it while signed in as this account, in ⋯ → Long-lived token.'))}">· ${t('Identity unverified')}</span>`
     : a.oatDaysLeft <= 30
     ? ` <span class="acct-blocked-hint" title="${t('Long-lived token (used for remote machines) expires in {n} days — re-mint it in ⋯ → Long-lived token.', { n: a.oatDaysLeft })}">${t('· long-lived token · {n}d left', { n: a.oatDaysLeft })}</span>`
     : oatOnlyChipShown(a, { local }) ? ''
@@ -667,9 +705,27 @@ export function installManageAgents(App, ctx = {}) {
     let mint = null, closeTimer = null, gone = false;
     const { overlay, body, close: shut } = createModalShell({ id: 'oat-dialog', title: t('Long-lived token — {name}', { name }), minWidth: 'min(460px, 92vw)', onClose: () => { gone = true; off?.(); clearTimeout(closeTimer); } });
     const live = () => mint && !['saved', 'failed', 'cancelled'].includes(mint.phase);
+    // 改绑 (lane oat-identity-postcheck): the rows the token may move to — Claude subscriptions holding no live token
+    const rebindTo = (oatForeign(a) || oatIdentityAsk(a) || oatUnverified(a)) ? (this._accounts?.accounts || []).filter((x) => x && x.id !== id && x.type === 'subscription' && !x.pooled && (x.backend || 'claude') === (a.backend || 'claude') && !(x.oat && x.oatDaysLeft > 0)) : [];
+    const rebindPick = (a?.oatIdentityOtherIds || []).find((x) => rebindTo.some((r) => r.id === x)) || '';
     const status = a?.oat
       ? (a.oatDaysLeft <= 0
         ? `<div class="usage-warn">${t('The stored token has EXPIRED — sessions using it fail until you paste a fresh one.')}</div>`
+        : oatForeign(a)
+        ? `<div class="usage-warn oat-foreign">${t('This long-lived token belongs to another account — re-mint or re-bind it')}${a.oatIdentityOther ? ' · ' + t('Its usage matches {other}.', { other: escHtml(a.oatIdentityOther) }) : ''}</div>`
+          + (rebindTo.length
+            ? `<div class="oat-row oat-rebind-row"><select id="oat-rebind-pick" class="settings-input-text" aria-label="${escHtml(t('Re-bind to'))}">${rebindTo.map((x) => `<option value="${escHtml(x.id)}"${x.id === rebindPick ? ' selected' : ''}>${escHtml(x.name || x.id)}</option>`).join('')}</select><button class="btn-create" id="oat-rebind">${t('Re-bind')}</button></div>`
+            : `<div class="usage-note">${t('No other subscription row can take it — add the account it belongs to first, or re-mint it below.')}</div>`)
+        // lane oat-identity-fix: an ASK (the owner's answer decides) / a token no reading has judged — confirm, re-bind
+        : (oatIdentityAsk(a) || oatUnverified(a))
+        ? (oatIdentityAsk(a)
+          ? `<div class="usage-warn oat-ask">${escHtml(oatAskWords(a))}</div><div class="oat-row oat-answer-row"><button class="btn-create" id="oat-mine">${escHtml(t('It is {name}’s', { name }))}</button><button class="btn-create danger" id="oat-not-mine">${escHtml(t('Not {name}’s', { name }))}</button></div>`
+          : `<div class="usage-note oat-unverified">${t('Identity unverified')} — ${t('No usage reading has checked this long-lived token against the account since it was saved over a day ago. Re-bind it, or re-mint it while signed in as this account, in ⋯ → Long-lived token.')}</div>`)
+          + (rebindTo.length
+            ? `<div class="oat-row oat-rebind-row"><select id="oat-rebind-pick" class="settings-input-text" aria-label="${escHtml(t('Re-bind to'))}">${rebindTo.map((x) => `<option value="${escHtml(x.id)}"${x.id === rebindPick ? ' selected' : ''}>${escHtml(x.name || x.id)}</option>`).join('')}</select><button class="btn-create" id="oat-rebind">${t('Re-bind')}</button></div>`
+            : '')
+        : oatUnknownRoad(a)
+        ? `<div class="usage-note oat-unknown-road">${escHtml(oatUnknownRoadWords())} — ${escHtml(oatUnknownRoadTitle())}</div>`
         : `<div class="usage-note" id="oat-active">${t('Active — renews in {n} days.', { n: a.oatDaysLeft })}</div>`)
       : '';
     body.innerHTML = `
@@ -726,7 +782,9 @@ export function installManageAgents(App, ctx = {}) {
       } else if (ph === 'failed') {
         // another account's token (its sign-in identity, or its /usage window
         // matching another row's) — said with display names only, nothing saved
-        const said = mint.reason === 'identity_mismatch'
+        const said = mint.reason === 'anchor_mismatch'
+          ? t('This token’s usage window differs from the one confirmed for {name} — not saved. Remove {name}’s token first to confirm another account.', { name: escHtml(name) })
+          : mint.reason === 'identity_mismatch'
           ? (mint.other ? t('This token’s usage window matches {other}, not {name} — not saved.', { other: escHtml(mint.other), name: escHtml(name) })
             : t('This token belongs to {email}, not {name} — not saved.', { email: escHtml(mint.signedInAs || '?'), name: escHtml(name) }))
           : escHtml(mint.error || t('The sign-in did not finish.'));
@@ -822,6 +880,25 @@ export function installManageAgents(App, ctx = {}) {
         shut(); refresh?.();
       } catch (e) { showToast(e?.message || t('Save failed'), { type: 'error' }); }
     };
+    const rb = body.querySelector('#oat-rebind');
+    if (rb) rb.onclick = async () => {
+      const to = body.querySelector('#oat-rebind-pick')?.value || '';
+      const toName = rebindTo.find((x) => x.id === to)?.name || to;
+      rb.disabled = true;
+      const r = await fetchJson(`/api/accounts/${enc}/oat/rebind`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ to }) }).catch(() => null);
+      if (!r?.success) { rb.disabled = false; showToast(r?.error || t('Re-bind failed'), { type: 'error' }); return; }
+      showToast(t('Token moved to {name}', { name: toName })); shut(); refresh?.();
+    };
+    // the owner's ANSWER to an identity ask (lane oat-identity-fix): mine ⇒ confirmed (its window anchors the row) · not mine ⇒ marked
+    for (const [sel, answer, said] of [['#oat-mine', 'mine', () => t('Confirmed: the token is {name}’s', { name })], ['#oat-not-mine', 'not-mine', () => t('Marked: the token is not {name}’s', { name })]]) {
+      const btn = body.querySelector(sel);
+      if (btn) btn.onclick = async () => {
+        btn.disabled = true;
+        const r = await fetchJson(`/api/accounts/${enc}/oat/identity`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ answer }) }).catch(() => null);
+        if (!r?.success) { btn.disabled = false; showToast(r?.error || t('Could not save the answer'), { type: 'error' }); return; }
+        showToast(said()); shut(); refresh?.();
+      };
+    }
     const rm = body.querySelector('#oat-remove');
     if (rm) rm.onclick = async () => {
       if (!(await showConfirmDialog({ title: t('Remove token'), message: t('Remove the long-lived token from “{name}”? Machines relying on it lose access at their next spawn (running sessions keep working).', { name }) }))) return;
@@ -2671,7 +2748,7 @@ export function installManageAgents(App, ctx = {}) {
       // visible BEFORE a turn dies on it. Pools show their members' worst.
       // (+ a LAPSED subscription's chip, 2026-10-08 — the same hard slot: a member the pool skips is said beside its login)
       const loginTag = ((isSub || a.pooled) ? loginExpiryChipHtml(a, { local: !selectedHost }) : '') + (isSub && !selectedHost ? serveLapsedChipHtml(a, { mode: this.settings?.get?.('accounts.onDemandQuotaRefresh') || 'manual', pooled: a.inPools !== false }) : '');
-      const extrasTag = acctExtrasHtml({ login: loginTag, oat: oatTag, oatWarn: !!oatTag && a.oatDaysLeft <= 30, prov: provTag, note: noteTag });
+      const extrasTag = acctExtrasHtml({ login: loginTag, oat: oatTag, oatWarn: !!oatTag && (a.oatDaysLeft <= 30 || oatForeign(a) || oatIdentityAsk(a)), prov: provTag, note: noteTag });
       const isPool = !!a.pooled;
       // ONE usage snapshot per row (the cell below and the credits tag read the
       // same one). Usage source follows the VERDICT's how (2.245.0): a linked

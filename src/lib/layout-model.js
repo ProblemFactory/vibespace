@@ -1,6 +1,7 @@
 'use strict';
-// THE DEFERRED RECORDS — PURE (imports nothing; CJS so the fast suite requires it and esbuild bundles it into the
-// client). docs/kb-design-lessons.md §6b guard 3 (defer-while-interacting) + guard 10 (arrangement is the viewport's).
+// THE DEFERRED RECORDS + THE CHROME A RECORD MAY SET HERE — PURE (imports only desktop-record's VIEWPORT_CHROME, PURE →
+// PURE; CJS so the fast suite requires it and esbuild bundles it into the client). docs/kb-design-lessons.md §6b guard 3
+// (defer-while-interacting) + guard 10 (arrangement is the viewport's).
 //
 // A layout-sync that lands while this page's pointer is down, or inside an apply's / the boot's `_restoring`, WAITS
 // (LayoutManager._pendingRemote) and is applied once the gate opens — never dropped. A desktop's record is WHOLE, so
@@ -21,7 +22,21 @@
 //                      first. A record whose seq is not newer than the newest one already APPLIED for its desktop
 //                      (`applied`, a Map desktop → seq) is dropped — never applied backwards.
 //   noteApplied(applied, msg)  after an apply: the newest applied seq of the record's desktop
+//
+//   chromeToApply(viewport, msg) → { sidebarOpen, grid } — THE READ HALF OF GUARD 10 (owner inc-mv8l2frb-xkqm,
+//                      2026-10-14: "every reopen of the page on the phone pops the sidebar"): which of a record's
+//                      VIEWPORT_CHROME this page applies. Since .264 the phone no longer writes its own `sidebarOpen`
+//                      (it carries the held record's, verbatim), so the record keeps the DESK's open sidebar — and the
+//                      phone's apply still opened its full-screen overlay at every boot and every reconnect re-read.
+//                      A `phone` page applies NONE of it from any record (its sidebar is a modal it opens itself; it
+//                      never sets a grid). A `desktop` page applies a record of the desktop class only (writerClass: a
+//                      phone record is membership + content here — the apply's membershipOnly law, by class, not by
+//                      trust); a re-read is the record on disk taken whole ⇒ desktop.
+//   TAKEN_WHOLE        the record a boot restores and a preset the person loads — the record on disk taken whole, like
+//                      the reconnect's re-read (a desktop booting on a record the phone wrote last keeps its own grid
+//                      and sidebar: belt 1 carried them verbatim)
 
+const { VIEWPORT_CHROME } = require('./desktop-record.js');
 const desktopOf = (msg) => (msg && msg.desktopId) || '';
 const seqOf = (msg) => Number(msg && msg.seq) || 0;
 
@@ -54,4 +69,11 @@ function noteApplied(applied, msg) {
   if (seq > (Number(applied.get(d)) || 0)) applied.set(d, seq);
 }
 
-module.exports = { writerClass, deferKey, deferKeysOf, releaseNext, noteApplied, PHONE_SLOT };
+const TAKEN_WHOLE = Object.freeze({ resync: true });
+
+function chromeToApply(viewport, msg) {
+  const on = viewport !== 'phone' && writerClass(msg) === 'desktop';
+  return Object.fromEntries(VIEWPORT_CHROME.map((k) => [k, on]));
+}
+
+module.exports = { writerClass, deferKey, deferKeysOf, releaseNext, noteApplied, chromeToApply, TAKEN_WHOLE, PHONE_SLOT };

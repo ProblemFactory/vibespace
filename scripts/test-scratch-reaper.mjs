@@ -499,13 +499,21 @@ async function twoSweeps(modPath, tag, { victimIgnoresTerm }) {
 console.log('\n§5b a victim is signalled only while its pid still carries the starttime it was judged by');
 async function recycledPid(modPath, tag) {
   const m = await import(pathToFileURL(modPath).href);
-  const victim = spawn(process.execPath, ['-e', "process.on('SIGTERM', () => { }); setInterval(() => { }, 1000)"], { cwd: QUIET_CWD, env: QUIET_ENV, stdio: 'ignore' });
+  // the victim IGNORES SIGTERM only once its handler is installed: a fresh node takes tens of ms (seconds on a busy runner)
+  // to get there, and a TERM before that kills it like any process (measured: 17/20 dead at 20 ms after spawn) — so it
+  // says READY after installing the handler and the sweep starts only then (int272: the sweep's judgment beat node's start)
+  const ready = path.join(MAIN, `recycle-${tag}.ready`); fs.rmSync(ready, { force: true });
+  const victim = spawn(process.execPath, ['-e', "process.on('SIGTERM', () => { }); require('fs').writeFileSync(process.argv[1], '1'); setInterval(() => { }, 1000)", ready], { cwd: QUIET_CWD, env: QUIET_ENV, stdio: 'ignore' });
   plant(victim.pid); for (let i = 0; i < 100 && !procStat(victim.pid); i++) sleepSync(10);
+  for (let i = 0; i < 4000 && !fs.existsSync(ready); i++) await sleep(5);
   const P = fakeProc('recycle-' + tag);
   P.mk(victim.pid, { name: 'node', argv: ['node', 'leaked-server.js'], cwd: sib('gone-recycle-' + tag), born: OLD, starttime: 12345 });
   const statFile = path.join(P.root, String(victim.pid), 'stat');
   const lines = []; const sweep = m.reapScratchOrphansAsync({ procRoot: P.root, now: NOW, self: 999999, lockPath: path.join(MAIN, `recycle-${tag}.lock`), graceMs: 1500, log: (x) => lines.push(x) });
-  await sleep(300);   // judged, SIGTERMed (ignored), in the grace
+  // judged, SIGTERMed (ignored), in the grace — SEEN, never slept (int272): the sweep logs the victim's line and sends the
+  // TERM in one synchronous run, then waits on 100 ms timers; this poll's 5 ms timer is due first, so the starttime changes
+  // hands after the judgment and before the SIGKILL pass's re-check under any load (a 300 ms sleep stood in for it)
+  for (let i = 0; i < 4000 && !lines.some((l) => l.includes(`pid ${victim.pid} `)); i++) await sleep(5);
   fs.writeFileSync(statFile, fs.readFileSync(statFile, 'utf8').replace(' 12345 0 0', ' 99999 0 0'));   // the number is another process's now
   const list = await sweep;
   await sleep(200);

@@ -29,7 +29,18 @@ const MYV = process.env.FAKE_AB_VERSION || '0.38.1';
 fs.appendFileSync(path.join(st, 'calls.log'), JSON.stringify({ ns, session: process.env.AGENT_BROWSER_SESSION || null, verb: argv.slice(0, 2).join(' '), exe: prefix.exe, v: MYV }) + '\\n');
 const [a, b] = argv;
 const cfgOf = () => { const p = process.env.AGENT_BROWSER_CONFIG; if (!p) return null; try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return { unreadable: p }; } };
-if (a === '--version') { console.log('agent-browser ' + MYV); process.exit(0); }
+// B-0b8c (lane browser-probe-transient): a --version that does not answer. <state>/version-hang = how many probes HANG (a
+// count, decremented per probe) or 'always' — ended by the caller's timeout, like the .268 boot's (each hung pid is named in
+// <state>/hung-pids for the suite's reaper); version-fail = how many exit 1 at once with no version ('always' too);
+// version-hold = every probe WAITS (polling) until <state>/version-release exists, then answers
+const once = (name) => { let h = null; try { h = fs.readFileSync(path.join(st, name), 'utf8').trim(); } catch { } if (h === 'always') return true; if (Number(h) > 0) { fs.writeFileSync(path.join(st, name), String(Number(h) - 1)); return true; } return false; };
+if (a === '--version') {
+  const nap = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  if (once('version-hang')) { fs.appendFileSync(path.join(st, 'hung-pids'), process.pid + '\\n'); nap(); }
+  if (once('version-fail')) { process.stderr.write('fake: no version today\\n'); process.exit(1); }
+  if (fs.existsSync(path.join(st, 'version-hold'))) { fs.appendFileSync(path.join(st, 'hung-pids'), process.pid + '\\n'); fs.appendFileSync(path.join(st, 'held.log'), process.pid + '\\n'); while (!fs.existsSync(path.join(st, 'version-release'))) nap(10); }
+  console.log('agent-browser ' + MYV); process.exit(0);
+}
 if (a === 'session' && b === 'info') { const s = read(); const act = !!(s && alive(s.pid)); out({ success: true, data: { active: act, namespace: ns, pid: act ? s.pid : null, session: process.env.AGENT_BROWSER_SESSION || null, socketDir: path.join(st, ns, 'run'), version: act ? (s.version || '0.38.1') : null } }); process.exit(0); }
 { const s = read(); if (s && alive(s.pid) && s.version && s.version !== MYV) { process.stderr.write('⚠ Daemon version mismatch detected, restarting...\\n'); try { process.kill(s.pid, 'SIGKILL'); } catch { } const c = spawn('sleep', ['600'], { detached: true, stdio: 'ignore' }); c.unref(); fs.appendFileSync(path.join(st, 'restarts.log'), JSON.stringify({ ns, from: s.version, to: MYV, oldPid: s.pid, pid: c.pid }) + '\\n'); fs.appendFileSync(path.join(st, 'launches.log'), JSON.stringify({ ns, ...s, pid: c.pid, version: MYV, restart: true }) + '\\n'); fs.writeFileSync(f, JSON.stringify({ ...s, pid: c.pid, version: MYV })); } }
 const tabNew = a === 'tab' && b === 'new';

@@ -604,6 +604,7 @@ app.get('/api/agent/task-context', (req, res) => {
     try {
       if (deliver) {
         const caller2 = jobsCaller(s, id);
+        carryParkedFor(caller2.conversationId);
         const pmText = drainStashUnderCap(deliver, caller2.conversationId, Buffer.byteLength(context || '', 'utf-8'));
         if (pmText) context = context ? context + '\n\n' + pmText : pmText;
       }
@@ -928,6 +929,7 @@ app.get('/api/agent/prompt-context', (req, res) => {
     try {
       if (deliver) {
         const caller2 = jobsCaller(s, id);
+        carryParkedFor(caller2.conversationId);
         const pmText = drainStashUnderCap(deliver, caller2.conversationId, aheadOfDrains());
         if (pmText) parts.push(pmText);
       }
@@ -1839,6 +1841,10 @@ function channelPrincipal(s, id) {
   };
 }
 const channelsEngine = () => { try { const c = getChannels(); return c && typeof c.listFor === 'function' ? c : null; } catch { return null; } };
+// lane stash-pending-live: a member's OWN TURN carries what its channel watchers parked while none of the group ran (the
+// free road only: the engine queues each carry on the conversation's chain, into this session's stash — it rides this
+// member's next injection; at SessionStart that is its first prompt). Asked at the stash drain; never a timer.
+const carryParkedFor = (cid) => { try { const c = channelsEngine(); if (c && cid && typeof c.carryParked === 'function') c.carryParked(cid); } catch { } };
 const splitConvKey = (v) => { const k = String(v || ''); const i = k.indexOf('/'); return i > 0 ? { adapterId: k.slice(0, i), convId: k.slice(i + 1) } : null; };
 // THE WITNESS (§26, B-099e — the owner: "那就按照这个做吧", plan A, passive): every handler below that touches a
 // conversation records WHAT it touched on the calling session AFTER an answer the agent was allowed to see (a refused or

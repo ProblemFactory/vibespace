@@ -17,6 +17,10 @@
 //      create's credentials in NO file of the data dir, log line, frame or answer (a planted copy as the control);
 //      secret-scan finds a setup token and its refresh token (the refresh token unseen by the base's scanner); a wrong
 //      box answers 400 with its closed why
+//   ⑩ THE GRID UPGRADE (lane slack-grid-identity): a legacy record re-authorized while auth.test names the org —
+//      accepted, the identity learns the org once (one log line, the card's note), the next sign-in writes nothing new,
+//      a sign-in without the org keeps it, another person of the org refused with the unchanged sentence, the same
+//      learn through the preset's rebind door
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -436,6 +440,69 @@ console.log('⑨ the workspace app through the engine');
   const sh = await W11.eng.startOAuth({ kind: 'slack', clientPreset: 'acme', origin: 'https://pod-7.example.test' });
   const cu = await W11.eng.startOAuth({ kind: 'slack', clientPreset: 'custom', clientId: WS_CLIENT_ID, clientSecret: WS_CLIENT_SECRET, origin: ORIGIN });
   ok(np.flow.mode === 'paste' && np.credentialKey === null && nh && nh.detail && nh.detail.why === 'no-https' && new URL(sh.url).searchParams.get('redirect_uri') === 'https://pod-7.example.test/api/channels/oauth/cb/slack' && cu.credentialKey === 'custom' && new URL(cu.url).searchParams.get('redirect_uri') === 'https://problemfactory.github.io/vibespace/slack/', 'no preset → the paste steps; a preset without a relay: an http instance refused by name (no-https), an https one uses its own callback; a custom client → the relay page setting\'s default', JSON.stringify({ np: np.flow.mode, nh: nh && nh.detail, sh: sh.url && new URL(sh.url).searchParams.get('redirect_uri'), cu: cu.url && new URL(cu.url).searchParams.get('redirect_uri') }));
+}
+
+// ── ⑩ THE GRID UPGRADE through the engine (lane slack-grid-identity, 2026-10-14 — owner + userW: the workspace moved
+//      into an Enterprise organisation, the old token was revoked, every re-authorize was refused as another account).
+//      A LEGACY record (its stamp = the joined `t…/u…` only, as on the fleet) re-authorized by paste while auth.test
+//      now answers `enterprise_id`: ACCEPTED through the record's own door, the identity LEARNS the org once (one log
+//      line, the card's `lastAuthNote`), the next sign-in writes no second identity and clears the note; a later
+//      sign-in without the org keeps it; ANOTHER person of the org is refused with the unchanged sentence; the same
+//      learn through the preset's REBIND door (applyRebind) ──
+console.log('⑩ the grid upgrade: the same person named with the org re-authorizes; the identity learns it once');
+{
+  const ID = require(path.join(REPO, 'src/channel-identity.js'));
+  const ENT = ['E0C', 'FX', 'ORG001'].join('');   // the SHAPE of a real org id, never a real one
+  const tk = (w) => TOKEN.replace('fixture', w);   // same length, same user-token shape
+  const T2 = tk('gridone'), T3 = tk('gridtwo'), T4 = tk('nogrid1'), T5 = tk('gridyou');
+  const whoami = { [T2]: { enterprise_id: ENT }, [T3]: { enterprise_id: ENT }, [T4]: {}, [T5]: { enterprise_id: ENT, user_id: 'U0AFXYOU02', user: 'kim' } };
+  const G = await connected('grid', { mode: { extraTokens: [T2, T3, T4, T5], whoami } });
+  const { eng, root } = G;
+  const recOf = () => JSON.parse(fs.readFileSync(filesUnder(root).find((f) => f.endsWith('adapters.json')), 'utf-8')).adapters.find((a) => a.id === G.id);
+  await eng.store.adapters.update((a) => { a.adapters.find((x) => x.id === G.id).identity = { userId: 't0acme001/u0self001' }; });   // the fleet's legacy stamp
+  ok(JSON.stringify(recOf().identity) === JSON.stringify({ userId: 't0acme001/u0self001' }), 'the record holds a LEGACY stamp (the joined `t…/u…` only — every Slack record on the fleet)');
+  const from = logLines.length;
+  const learnLines = () => logLines.slice(from).filter((l) => /names the organisation .* the account's identity did not/.test(l));
+  // 1) the grid re-authorize: the same person, auth.test now naming the org
+  const r1 = await eng.reauthorize(G.id, {});
+  const f1 = await eng.finishAuth(G.id, T2);
+  const id1 = recOf().identity, v1 = eng.digest().adapters.find((a) => a.id === G.id);
+  const ent = ENT.toLowerCase();
+  ok(r1.flow && r1.flow.mode === 'paste' && f1.ok === true && !f1.error, `the re-authorize after the upgrade is ACCEPTED (${JSON.stringify(f1)})`);
+  ok(id1.userId === `${ent}/t0acme001/u0self001` && id1.orgId === ent && id1.teamId === 't0acme001' && id1.memberId === 'u0self001', 'the identity LEARNED the org: rewritten to the richer form (`e…/t…/u…`, orgId)', JSON.stringify(id1));
+  ok(v1 && v1.lastAuthNote && v1.lastAuthNote.code === 'enterprise-learned' && !v1.lastAuthError && v1.auth.state === 'connected', 'the account view carries the card\'s note (`enterprise-learned`), no error, connected');
+  ok(learnLines().length === 1 && learnLines()[0].includes(ent), 'ONE log line says what was learned', JSON.stringify(learnLines()));
+  // 2) the next sign-in naming the same org: nothing new — no second identity write, the note cleared
+  await eng.reauthorize(G.id, {});
+  const f2 = await eng.finishAuth(G.id, T3);
+  const v2 = eng.digest().adapters.find((a) => a.id === G.id);
+  ok(f2.ok === true && JSON.stringify(recOf().identity) === JSON.stringify(id1) && learnLines().length === 1 && v2.lastAuthNote === null, 'the next sign-in: accepted, the identity unchanged (no second write), still one log line, the card\'s note cleared');
+  // 3) a later sign-in WITHOUT the org (impossible on Grid — the control): matches by user + workspace, the org kept
+  await eng.reauthorize(G.id, {});
+  const f3 = await eng.finishAuth(G.id, T4);
+  ok(f3.ok === true && JSON.stringify(recOf().identity) === JSON.stringify(id1), 'a sign-in without the org matches by user + workspace; the learned org is KEPT');
+  // 4) ANOTHER person of the org: refused, the sentence unchanged, nothing written
+  const held = JSON.stringify(recOf().auth);
+  await eng.reauthorize(G.id, {});
+  const f4 = await eng.finishAuth(G.id, T5);
+  const said4 = String((f4 && f4.error) || '');
+  const want4 = ID.mismatchSentence(recOf().label || G.id, { held: `${ent}/t0acme001/u0self001`, offered: `${ent}/t0acme001/u0afxyou02` });
+  ok(f4.ok === false && said4.includes(want4) && JSON.stringify(recOf().auth) === held && JSON.stringify(recOf().identity) === JSON.stringify(id1), `ANOTHER person of the org is refused with the unchanged sentence; the token and identity untouched (${said4.slice(0, 140)}…)`);
+  // 5) THE REBIND DOOR: a paste account re-pointed onto a workspace preset by the same person, now named with the org
+  const { WS_CLIENT_ID, WS_CLIENT_SECRET, WS_TOKEN } = require(path.join(REPO, 'scripts/fixtures/slack-vendor.cjs'));
+  const ORIGIN = 'http://192.168.1.9:3000', RELAY_URL = 'https://relay.example.test/slack/';
+  const preset = (extra = {}) => ({ VIBESPACE_INTEGRATIONS: JSON.stringify([{ id: 'slack', key: 'acme', label: 'Acme', values: { clientId: WS_CLIENT_ID, clientSecret: WS_CLIENT_SECRET, relayUrl: RELAY_URL, teamDomain: 'acme', ...extra } }]) });   // ⑨'s preset
+  const Wr = await mkEngine('grid-rebind', { storeEnv: preset(), mode: { whoami: { [WS_TOKEN]: { enterprise_id: ENT } } } });
+  const sp = await Wr.eng.startOAuth({ kind: 'slack', clientPreset: 'paste' });
+  await Wr.eng.oauthCallback({ flowId: sp.flowId, url: TOKEN });
+  const cp = await Wr.eng.connect('slack', { flowId: sp.flowId, clientPreset: 'paste' });
+  await Wr.eng.store.adapters.update((a) => { a.adapters.find((x) => x.id === cp.adapter.id).identity = { userId: 't0acme001/u0self001' }; });
+  const rr = await Wr.eng.reauthorize(cp.adapter.id, { clientPreset: 'acme', origin: ORIGIN });
+  const back = new URL(Wr.v.allow(rr.flow.consentUrl, { token: WS_TOKEN }));
+  const lr = await Wr.eng.oauthLanding({ kind: 'slack', code: back.searchParams.get('code'), state: back.searchParams.get('state') });
+  const recR = JSON.parse(fs.readFileSync(filesUnder(Wr.root).find((f) => f.endsWith('adapters.json')), 'utf-8')).adapters.find((a) => a.id === cp.adapter.id);
+  const vR = Wr.eng.digest().adapters.find((a) => a.id === cp.adapter.id);
+  ok(rr.rebind === true && lr.ok === true && recR.credentialKey === 'cluster:acme' && recR.identity.userId === `${ent}/t0acme001/u0self001` && recR.identity.orgId === ent && vR.lastAuthNote && vR.lastAuthNote.code === 'enterprise-learned', `THE REBIND DOOR: the same person re-pointed onto the preset, now named with the org — accepted, re-bound, the org learned (${JSON.stringify(recR.identity)})`);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

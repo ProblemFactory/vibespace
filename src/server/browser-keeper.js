@@ -141,6 +141,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   jobRunning = () => false,
   jobName = () => null, // accept-fixes-strip F8: a Background Work job's name (the live view names a job's tab by it)
   facts = null, runtime = null, limits = LIMITS, log = console, now = Date.now, tickMs = TICK_MS, guardSampleMs = null, install = true, answerAskMs = null, /* lane browser-unresponsive: the gate's bound of one ask */
+  probeLadder = null, // B-0b8c (lane browser-probe-transient): the gate's `{retryMs, timeoutMs, timers}` for the version probe's ladder (production: F.PROBE_RETRY_MS / F.PROBE_TIMEOUT_MS)
   // lane H: how long a verb waits for the lease seam's listeners (the recorder ARMING its tap) before it runs
   armWaitMs = ARM_WAIT_MS,
   daemonTable = null, endIdentity = null, orphanScanMs = O.SCAN_MS, /* lane daemon-orphan-end: the gate's process table (rows) + ending seam */
@@ -205,7 +206,10 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   // keeper's in-memory answer, `cliPinPath`; never an fs read per call), else PATH; `bfPath` = the PATH binary alone (the
   // panel's "on PATH" fact)
   const pinnedCli = () => { try { return cliPinPath(); } catch { return null; } };
-  const bf = facts || F.createBrowserFacts({ env: rtEnv, pinned: pinnedCli });
+  // B-0b8c: THESE facts decide the act (pinTab, the installs page, the digest), so THEY carry the retry ladder — one failed
+  // probe is a state that asks again (5 s → 15 s → 45 s → 2 min → 10 min), never a verdict (`bfPath` stays one-shot)
+  const ladderOf = { retryMs: F.PROBE_RETRY_MS, timeoutMs: F.PROBE_TIMEOUT_MS, ...(probeLadder || {}) };
+  const bf = facts || F.createBrowserFacts({ env: rtEnv, pinned: pinnedCli, retryMs: ladderOf.retryMs, timeoutMs: ladderOf.timeoutMs, timers: ladderOf.timers || null });
   const bfPath = F.createBrowserFacts({ env: rtEnv });
   // lane browser-resource-care: the daemon's TMPDIR = data/browser-env/tmp (browser-env.js TMP_DIR — the same verdict: the
   // keeper requires nothing of that module), so its ephemeral profiles and Xvfb auth files stay off the RAM-backed /tmp
@@ -399,6 +403,48 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   // lane browser-disk-sample (B-5fab): every named profile's folder size on THIS machine — one bounded `du` child at a time
   // off the event loop (src/server/browser-disk-run.js), at its browser's start / stop too; REPORTED, never a stop
   const disk = require('./browser-disk-run.js').createDiskSampler({ profiles: () => { ensureLoaded(); return named(); }, userTodos, limits, log, now });
+  // ── B-0b8c (lane browser-probe-transient): THE FLOOR NOTICE — ONE ATTEMPT NEVER DECIDES FOR EVER ──
+  // The .268 boot's one probe timed out under boot I/O and a loud 「shared profiles stay off」 notice was filed for a
+  // transient the memo healed minutes later. The floor now reads 'unknown' (not yet known — fail CLOSED for the act, no
+  // shared profile opens) while `bf`'s ladder still asks; the ONE For-you item (origin browser) is filed only when the
+  // ladder is EXHAUSTED, naming its tries + the last why, with a Check again door (`checkFloorNow`: one probe now, the
+  // single flight a rung shares) — and the first answer after it WITHDRAWS it (a version read negates "could not read",
+  // a too-old one included: that is browser-env's own notice). A restart ADOPTS an open item, never files a second.
+  let floorItemId = null; // the open item, action browser-floor-check
+  /** The facts API (GET /api/browser/floor, the digest's `floor`): the version the act reads, its verdict, the probe state. */
+  function floorFacts() {
+    const lv = bf.lastVersion();
+    const probe = typeof bf.lastProbe === 'function' ? bf.lastProbe() : null;
+    return { version: lv === undefined ? null : lv, floor: lv === undefined ? null : B.floorVerdict(lv, B.FLOOR_VERSION, probe), lastProbe: probe };
+  }
+  function openFloorItem() {
+    if (!userTodos) return null;
+    if (floorItemId) { try { const it = typeof userTodos.get === 'function' ? userTodos.get(floorItemId) : null; if (it && it.status === 'open') return it; } catch { /* gone */ } floorItemId = null; }
+    try { const open = typeof userTodos.forSession === 'function' ? userTodos.forSession('browser') : []; const had = (open || []).find((i) => i && i.status === 'open' && i.action && i.action.type === 'browser-floor-check'); if (had) { floorItemId = had.id; return had; } } catch { /* the add below */ }
+    return null;
+  }
+  function judgeFloor() {
+    const v = floorFacts().floor;
+    if (!v) return;
+    if (v.state !== 'unknown') { // it answered: "could not read" is no longer true
+      const it = openFloorItem();
+      if (it) { try { userTodos.setStatus(it.id, 'done', 'agent'); log.log?.(`[browser] the browser version reads again (${v.state}${v.installed ? ' ' + v.installed : ''}) — its "could not read" notice is withdrawn`); } catch { /* gone already */ } }
+      floorItemId = null;
+      return;
+    }
+    if (!v.settled || openFloorItem()) return; // not yet known (the ladder still asks) / already filed (one item, adopted after a restart)
+    const text = B.floorNotice(v);
+    if (!text) return;
+    if (!userTodos || typeof userTodos.add !== 'function') { log.warn?.(`[browser] ${text} (no For-you store is wired, so only this journal says so)`); return; }
+    try {
+      const it = userTodos.add('browser', { origin: 'browser', kind: 'notice', urgency: 'normal', by: 'agent', text, detail: B.floorNoticeDetail(v, { retryMs: ladderOf.retryMs, timeoutMs: ladderOf.timeoutMs }), sessionName: 'Agent browser', action: { type: 'browser-floor-check' } });
+      floorItemId = it && typeof it.id === 'string' ? it.id : null;
+      log.warn?.(`[browser] ${text}`);
+    } catch (e) { log.warn?.(`[browser] the browser-version notice was not filed (${e && e.message}) — filed on the next miss`); }
+  }
+  if (typeof bf.onProbe === 'function') bf.onProbe(() => judgeFloor());
+  /** The For-you item's Check again (POST /api/browser/floor/check): ONE probe now — an answer withdraws the notice. */
+  async function checkFloorNow() { try { await bf.probeVersion({ fresh: true }); } catch { /* the state says it */ } return floorFacts(); }
   onLease((ev) => { if (ev && ev.profileId && ev.local && (ev.kind === 'browser-ready' || ev.kind === 'browser-stopped')) disk.event(ev.profileId, ev.kind === 'browser-stopped' ? 'stop' : 'start'); });
   function addDigest(fn) { digestExtras.add(fn); return () => digestExtras.delete(fn); }
   function digestExtra() { const out = {}; for (const fn of digestExtras) { try { Object.assign(out, fn() || {}); } catch (e) { log.warn?.(`[browser] digest extra failed: ${e && e.message}`); } } return out; }
@@ -686,7 +732,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const browsers = {};
     for (const [id, r] of Object.entries(reg.browsers)) browsers[id] = browserView(r);
     const running = Object.values(reg.browsers).filter(B.isLiveBrowser).length + othersNow().length;
-    const lv = bf.lastVersion();
+    const ff = floorFacts(); // B-0b8c: the version, its verdict, the probe's state — one read
     return {
       // takeover C3: a managed ephemeral record is NOT a profile (no picker,
       // no handle, no label to resolve) — it rides `ephemerals`, and the
@@ -705,7 +751,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       windowLeaks: { count: windowLeaks.count, last: windowLeaks.last ? { ...windowLeaks.last } : null }, // verify r3 T2 ①: rung-2 tabs that landed in another holder's window, closed at once — COUNTED (this run)
       // owner ruling A (2): who DRIVES each shared profile's browser right now (profileId → {browserKey, since, at}) — a
       // browser key, never a name (this digest also reaches agents); the client names it from its own session rows
-      floor: lv === undefined ? null : B.floorVerdict(lv, B.FLOOR_VERSION),
+      floor: ff.floor, lastProbe: ff.lastProbe, // B-0b8c: + the probe's state (an 'unknown' says whether the ladder still asks)
       // P4 (§7.1): the provider rows with their capability cells + the local
       // verdict — a control the digest's consumers disable WITH its reason
       providers: B.providerRows({ desktopConsent: desktopConsent() }),
@@ -4006,9 +4052,10 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     }
     // The floor decides whether the wrapper form may pass `--pin-tab` (§3.4),
     // and this keeper's facts instance is the only one that answers for it —
-    // ws-create's floor notice probes ITS OWN. Probe once (cached per TTL,
+    // ws-create's too-old notice probes ITS OWN. Probe once (cached per TTL,
     // including the negative answer); a probe that cannot run leaves the
-    // answer 'unknown' and pinTab false, never a throw out of an attach.
+    // answer 'unknown' and pinTab false, never a throw out of an attach
+    // (B-0b8c: and its ladder asks again — the boot probe below started it).
     if (bf.lastVersion() === undefined) { try { await bf.probeVersion(); } catch { /* floorVerdict spells it */ } }
     // MULTIVIEW D4: attaching a browser this conversation does not already count
     // (not live, or live only for others) adds one to ITS cap
@@ -6146,6 +6193,8 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     commit();
     if (Object.values(reg.browsers).some(B.isLiveBrowser) || reg.leases.length || humans.size || orphanPending) startTimer();
     disk.start(); // lane browser-disk-sample: the minute clock of the disk sample (unref'd; stopped profiles are measured too)
+    // B-0b8c: the act's version, asked once at boot (not awaited) — a miss starts THE ladder; the notice waits for its end
+    if (bf.lastVersion() === undefined) { try { bf.probeVersion().catch(() => { }); } catch { /* the state says it */ } }
     return { droppedLeases: r.dropped.length, browsers: Object.values(reg.browsers).filter(B.isLiveBrowser).length, humans: humans.size };
   }
 
@@ -6238,7 +6287,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   }
   function stopTimer() { if (timer) clearInterval(timer); timer = null; }
   /** Timers only — the browsers SURVIVE a VibeSpace exit by design (adopted next boot). */
-  function shutdown() { stopTimer(); disk.stop(); if (dirty) save(); installs.shutdown(); /* lane chrome-builds-download: an in-process download ends with its keeper (the marker stays: the next keeper judges it) — lane dc-browser-installs: the running row's own shutdown */ try { keptStore()?.shutdown?.(); } catch { /* lane browser-resume: the kept store's throttled tab list is flushed with its feeder */ } try { mediator?.shutdown?.(); } catch { /* P6: the proxy is this keeper's to end */ } try { const pxs = [...cloakProxies.values()]; cloakProxies.clear(); for (const px of pxs) px.close().catch(() => {}); } catch { /* lane-cloak: the egress proxies are this keeper's to end */ } }
+  function shutdown() { stopTimer(); disk.stop(); try { bf.stop?.(); } catch { /* B-0b8c: the version ladder's rung is this keeper's to end */ } if (dirty) save(); installs.shutdown(); /* lane chrome-builds-download: an in-process download ends with its keeper (the marker stays: the next keeper judges it) — lane dc-browser-installs: the running row's own shutdown */ try { keptStore()?.shutdown?.(); } catch { /* lane browser-resume: the kept store's throttled tab list is flushed with its feeder */ } try { mediator?.shutdown?.(); } catch { /* P6: the proxy is this keeper's to end */ } try { const pxs = [...cloakProxies.values()]; cloakProxies.clear(); for (const px of pxs) px.close().catch(() => {}); } catch { /* lane-cloak: the egress proxies are this keeper's to end */ } }
   const ensureTimer = () => { if (Object.values(reg.browsers).some(B.isLiveBrowser) || reg.leases.length || inputs.size || pending.size || humans.size) startTimer(); };
   const attachTimed = async (a) => { const r = await attach(a); ensureTimer(); return r; };
 
@@ -6631,6 +6680,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // P6 (§6.2 / §6.5): is `sharing:"instance"` a value here; the proxy (the routes ask it nothing directly)
     mediationOn, isMediated, mediator: () => (mediationOn() ? mediator : null),
     storeFile, STORE_FILE, uid, _reg: () => reg, _facts: bf, _runtime: rt,
+    floorFacts, checkFloorNow, // B-0b8c (lane browser-probe-transient): the facts API + the For-you notice's Check again
     lineageKeyOf, moveDirLineage, // verify r8 (T2 ②): the product's own move of a directory (a Forget) carries its lineage
 
     // lane browser-resume (§3.9): the relay's tab list of a conversation's own browser, the CDP read at a stop, the store

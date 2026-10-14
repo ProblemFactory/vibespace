@@ -2,6 +2,23 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.273 — 2026-10-14
+
+### Added
+- In Channels you can now send a file by itself, with no text, and attach files when your reply goes out as a proposal.
+- A long-lived token that turns out to belong to a different account than its row says is now reported in For you and on the row, never silently used as that row.
+
+### Fixed
+- A channel message handed to an agent without waking it is now remembered as delivered, so a later recall of it is noted in that conversation too.
+- A group's agent that reads channel messages on its next turn is no longer woken and billed for ones that arrived while nobody ran; they wait for that turn.
+- A channel message that arrived while none of a group's agents was running now reaches the first one that comes back, without waiting for a restart.
+- On a phone the sidebar no longer pops open by itself when you reopen the page or come back to it; the computer's open sidebar stays the computer's.
+- After your Slack workspace moves into an Enterprise organisation, re-authorizing the same account works again instead of being refused as another account.
+- A slow start no longer turns off shared browser profiles with a loud notice: the version check tries again by itself and says how many times it tried.
+
+### Security
+- On an instance that signs in through SSO, someone who is not signed in can no longer set a password and take the instance over.
+
 ## 2.369.272 — 2026-10-14
 
 ### Added

@@ -40,7 +40,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { SUITES, machineGlobalFixtures } from './ci.mjs';
+import { SUITES, SERIAL, machineGlobalFixtures } from './ci.mjs';
 import { gitEnvFrom } from './git-env.mjs';
 import { stampScratchRun } from './scratch-run.mjs';
 
@@ -508,10 +508,12 @@ try {
     // (1e2) THE DESKTOP BATCH'S LANES (lane ci-aidev-desktop-batch): --serial-overlap=1 starts the serial lane beside the
     //       last parallel suite instead of after it (CONTROL: without it, after), and VIBESPACE_CI_LANE_ROOT gives each
     //       lane its own HOME / XDG_RUNTIME_DIR (0700) / session bus and no DISPLAY. A stub parallel suite that runs 4 s
-    //       and the real SERIAL row test-exit-run as a stub that stamps when it starts.
+    //       and the first real SERIAL row as a stub that stamps when it starts (ci.mjs SERIAL, read — not a name: lane
+    //       cpu-ratio-controls took test-exit-run off the clock and out of the serial lane, int272).
     {
-      const PAR = (SUITES.find((x) => x.tier === 'heavy' && x.name !== SLICE && x.name !== 'test-exit-run') || {}).name;
-      const SER = 'test-exit-run';
+      const SER = (SERIAL.find((x) => SUITES.some((y) => y.name === x.name && y.tier === 'heavy')) || {}).name;
+      ok(!!SER, `a heavy SERIAL row to stand in for (${SER})`);
+      const PAR = (SUITES.find((x) => x.tier === 'heavy' && x.name !== SLICE && x.name !== SER) || {}).name;
       const stamp = (who) => `fs.appendFileSync(process.env.VS_OVERLAP_LOG, JSON.stringify({ who: ${JSON.stringify(who)}, at: Date.now(), home: process.env.HOME, run: process.env.XDG_RUNTIME_DIR, display: process.env.DISPLAY || null, bus: process.env.DBUS_SESSION_BUS_ADDRESS || null }) + '\\n');\n`;
       const IMP = "import fs from 'node:fs';\n";
       const arm = (extra, laneRoot) => {
@@ -539,7 +541,7 @@ try {
         `…and its own session bus, started for the lanes and ended after them (${haveDbus ? p.bus : 'SKIP: no dbus-daemon on this box'})`);
       fs.rmSync(LR, { recursive: true, force: true });
       const ctl = arm([], null);
-      ok(ctl.status === 0 && ctl.ser && ctl.parEnd && ctl.ser >= ctl.parEnd && /parallel lanes drained in \d+s — serial lane: test-exit-run/.test(ctl.out),
+      ok(ctl.status === 0 && ctl.ser && ctl.parEnd && ctl.ser >= ctl.parEnd && new RegExp(`parallel lanes drained in \\d+s — serial lane: ${SER}`).test(ctl.out),
         'CONTROL: without --serial-overlap the serial lane runs AFTER the parallel lanes drain (alone, as measured)');
       ok((ctl.rows.find((x) => x.who === 'par') || {}).display === ':77', 'CONTROL: with no lane root the suite inherits the caller\'s env (DISPLAY :77 here)');
     }

@@ -446,10 +446,16 @@ function validateCaps(kind, caps, { channelSettings } = {}) {
   if (c.vendorName !== undefined && !(typeof c.vendorName === 'string' && c.vendorName.trim() && c.vendorName.length <= 40)) bad('caps.vendorName must be a non-empty string of at most 40 characters (the vendor as the card names it)');
   // design 005 §2.B (B-fd1f): WHAT AN AGENT MAY ATTACH — absent / null ⇒ nothing (`attachments-not-offered`, with
   // `sendAttachmentsWhy` as the reason); ONE row `{maxCount, maxTotalBytes, withText}` (text and files in one message) or
-  // TWO `{images?, files?}` each `{maxCount, maxBytes, withText}` (a vendor that sends pictures and files differently)
+  // TWO `{images?, files?}` each `{maxCount, maxBytes, withText}` (a vendor that sends pictures and files differently);
+  // lane composer-file-only-send (B-dce6): each may say `alone` (boolean — a file goes with NO text; absent = it does not,
+  // a `withText: false` group always does, so `alone: false` there is a row that carries nothing)
   if (c.sendAttachments !== undefined && c.sendAttachments !== null) {
     const a = c.sendAttachments;
     const posInt = (v) => Number.isInteger(v) && v > 0;
+    const aloneCell = (g, at) => {
+      if (g.alone !== undefined && typeof g.alone !== 'boolean') bad(`${at}.alone must be a boolean (a file goes with no text)`);
+      if (g.alone === false && g.withText === false) bad(`${at} says withText: false AND alone: false — a file there could go neither with text nor without`);
+    };
     if (typeof a !== 'object') bad('caps.sendAttachments must be an object, or null (none)');
     if (!(c.sendAs || []).length) bad('caps.sendAttachments on a read-only adapter (caps.sendAs is empty) — an attachment rides a sent message');
     if (a.images !== undefined || a.files !== undefined) {
@@ -457,8 +463,10 @@ function validateCaps(kind, caps, { channelSettings } = {}) {
         const g = a[k];
         if (g === undefined || g === null) continue;
         if (typeof g !== 'object' || !posInt(g.maxCount) || !(Number(g.maxBytes) > 0) || typeof g.withText !== 'boolean') bad(`caps.sendAttachments.${k} must be {maxCount: a positive integer, maxBytes > 0, withText: boolean}`);
+        aloneCell(g, `caps.sendAttachments.${k}`);
       }
     } else if (!posInt(a.maxCount) || !(Number(a.maxTotalBytes) > 0) || typeof a.withText !== 'boolean') bad('caps.sendAttachments must be {maxCount: a positive integer, maxTotalBytes > 0, withText: boolean}, or {images?, files?}');
+    else aloneCell(a, 'caps.sendAttachments');
   }
   if (c.sendAttachmentsWhy !== undefined && c.sendAttachmentsWhy !== null && !(typeof c.sendAttachmentsWhy === 'string' && c.sendAttachmentsWhy.trim() && c.sendAttachmentsWhy.length <= 300)) bad('caps.sendAttachmentsWhy must be a non-empty string of at most 300 characters (why this adapter takes no attachments)');
   // lane channel-threads (spec §2.1): the two rows, each an UPPER BOUND with its refusals named

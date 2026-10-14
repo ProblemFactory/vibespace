@@ -369,6 +369,9 @@ function accountLines(app, a, kinds) {
     out.push(healthLine(a, t('Not connected — sign in to fetch its conversations.'), { verbs: [btn(t('Connect'), reauth, 'mounts-btn-primary')] }));
   }
   if (a.lastAuthError && !(a.flow && a.flow.running)) out.push(noteLine('chan-sec-note', t('Last connect failed: {error}', { error: a.lastAuthError }), { warn: true }));
+  // lane slack-grid-identity: an ACCEPTED sign-in whose vendor now names the organisation the workspace joined says so —
+  // the same account, its identity learned the organisation (the engine's `lastAuthNote`; the next sign-in clears it)
+  if (!a.lastAuthError && auth.state === 'connected' && a.lastAuthNote && a.lastAuthNote.code === 'enterprise-learned') { const n = noteLine('chan-sec-note', t('Re-authorized (the workspace is now in an Enterprise organisation)')); n.dataset.chanAuthNote = a.id; out.push(n); }
   if (a.consecutiveFailures >= 3 && a.lastPass && auth.state === 'connected') {
     const s = t('{n} failed passes ({code})', { n: a.consecutiveFailures, code: chanCaps.errorCodeText((a.lastPass && a.lastPass.code) || 'failed', { t }) });
     const retry = a.lastPass.ok === false ? chanCaps.passStateText(a, { t, now: Date.now() }).note : '';

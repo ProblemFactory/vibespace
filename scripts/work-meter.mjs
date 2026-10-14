@@ -18,6 +18,18 @@
 //     elements moved; a string walker: the receiver's length; slice: the cut; JSON.stringify: the bytes; a
 //     Set/Map op: 1; an iterator's next: 1 — `for…of`, spread and `new Set(list)` go through it once patched).
 //     A quadratic `order.includes(key)` per delta reads ×4 through the scan count exactly as its clock would.
+//   · BACKTRACKS (lane cpu-ratio-controls, 2.369.273) — the steps a regex takes INSIDE one exec, read off V8's own
+//     backtrack counter: `startWorkMeter({ backtracks: true })` in a process started with BACKTRACK_FLAGS charges every
+//     exec its backtracks on top of its span. Release V8 has no counter to read, but it has a LIMIT: a regex made by
+//     `%NewRegExpWithBacktrackLimit(source, flags, n)` returns null from an exec that would backtrack more than n times.
+//     The exec's TWIN (the same source and flags, `(?:source)|()(?![\s\S])` — it matches at the end of the text when the
+//     source never does, so null means only "over the limit") is run from the same lastIndex under a grid of limits
+//     (2^(k/16): a reading within 4.4 % above the count) until it answers; the original exec's result is the caller's.
+//     `--no-regexp-optimization` makes the counter see every step: V8's optimized greedy loop backs off a run without
+//     counting (measured: `/x*y/` on 'x' × n read ×8 at ×8 input optimized — and its clock ×68 — ×64 unoptimized).
+//     The backtracking the counter sees is V8's own, an upper bound of what the optimized code does (the optimizations
+//     skip steps, they never add them). Exact and load-free like the rest: test-exit-run's ×8 legs and its six
+//     backtracking controls were clock ratios until this charge (B-923c: red 1/5 beside 32 spinners).
 //   · `measure(fn)` → { blocks, native, total } for one call; `linear(mk, run, n)` → the verdict for a parser over
 //     mk(n) vs mk(2n) with the constant part (mk(0)'s work) subtracted: ratio ≤ LINEAR_BOUND (2.2 — a linear parser
 //     reads 2.0, a quadratic 4.0; an n·log n sort of already-ordered keys reads ~2.0 as V8's TimSort walks it once).
@@ -32,14 +44,23 @@ import { fileURLToPath } from 'node:url';
 
 export const LINEAR_BOUND = 2.2;
 export const BOUNDED_RATIO = 1.25;
+// the backtrack charge's process: the limit native, and the counter fed by every step (V8 reads both at compile time)
+export const BACKTRACK_FLAGS = Object.freeze(['--allow-natives-syntax', '--no-regexp-optimization', '--no-regexp-tier-up']);
 
 let session = null;
 let started = false;
 const post = (method, params) => { let out, err; session.post(method, params || {}, (e, r) => { err = e; out = r; }); if (err) throw err; return out; };
 
-/** Start precise block coverage — BEFORE the measured modules are required. Idempotent. */
-export function startWorkMeter({ scan = 'honest' } = {}) {
+/** Start precise block coverage — BEFORE the measured modules are required. Idempotent. `backtracks: true` adds the
+ *  backtrack charge (a process started with BACKTRACK_FLAGS — `judgeInChild({ backtracks: true, … })` starts one). */
+export function startWorkMeter({ scan = 'honest', backtracks = false } = {}) {
   WHOLE_SCAN = scan === 'whole';
+  if (backtracks && !TWIN) {
+    const missing = BACKTRACK_FLAGS.filter((f) => !process.execArgv.includes(f));
+    if (missing.length) throw new Error(`work-meter: the backtrack charge needs a process started with ${missing.join(' ')} (judgeInChild({ backtracks: true }) starts one)`);
+    // compiled here, never parsed in a process without the native syntax (this module is imported by suites that have none)
+    TWIN = new Function('p', 'f', 'n', 'return %NewRegExpWithBacktrackLimit(p, f, n);');
+  }
   if (started) return;
   // THE OPTIMIZER PIN (lane mirror-green): an optimized (TurboFan or Maglev) frame skips the invocation-count bump a
   // function's coverage count is read from, so a hot callee's calls VANISH from a take once it tiers up — and WHEN
@@ -74,7 +95,22 @@ let W = 0;
 // gate whose bounds were calibrated against it (test-channels-index-scale ⑨'s "< 2 % of the old list")
 let WHOLE_SCAN = false;
 const saved = [];
-const ORIG = { indexOf: Array.prototype.indexOf, keys: Object.keys, sIndexOf: String.prototype.indexOf };
+const ORIG = { indexOf: Array.prototype.indexOf, keys: Object.keys, sIndexOf: String.prototype.indexOf, rxExec: RegExp.prototype.exec };
+// ── the backtrack charge: the twin regexes per source + flags + limit (a null-prototype object: the meter patches Map) ──
+let TWIN = null;
+const TWINS = Object.create(null);
+// the limit grid 2^(k/16), whole numbers, strictly rising, under V8's Smi bound (a heap number crashes the native)
+const LIMITS = (() => { const xs = []; for (let k = 0; k < 480; k++) { const v = Math.min(2 ** 30 - 1, Math.round(2 ** (k / 16))); if (!xs.length || v > xs[xs.length - 1]) xs.push(v); } return xs; })();
+/** the backtracks of `rx.exec(s)` from `at`, read by its twin under rising limits: galloping ×2, then a binary search */
+function backtracksOf(rx, s, at) {
+  const sticky = rx.sticky, key = rx.flags + '/' + rx.source;
+  const per = TWINS[key] || (TWINS[key] = { src: sticky ? '(?:' + rx.source + ')|()' : '(?:' + rx.source + ')|()(?![\\s\\S])', at: Object.create(null) });
+  const fits = (k) => { const t = per.at[k] || (per.at[k] = TWIN(per.src, rx.flags, LIMITS[k] | 0)); t.lastIndex = at; return ORIG.rxExec.call(t, s) !== null; };
+  let lo = -1, hi = 0;
+  while (!fits(hi)) { lo = hi; if (hi === LIMITS.length - 1) return LIMITS[hi]; hi = Math.min(LIMITS.length - 1, hi + 16); }
+  while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (fits(mid)) hi = mid; else lo = mid; }
+  return LIMITS[hi];
+}
 const patch = (obj, name, mk) => { const orig = obj[name]; if (typeof orig !== 'function') return; saved.push([obj, name, orig]); obj[name] = mk(orig); };
 const cbCounting = (orig) => function (cb, thisArg) { let k = 0; const r = orig.call(this, function (...a) { k++; return cb.apply(this, a); }, thisArg); W += k; return r; };
 const lengthOfThis = (orig) => function (...a) { W += this.length; return orig.apply(this, a); };
@@ -101,8 +137,11 @@ function patchAll() {
   // a global / sticky regex from its lastIndex to the match's end — a tag loop `while ((m = RE.exec(s)))` or a newline
   // walk `s.indexOf('\n', i + 1)` then reads n over the whole string, as it runs; charging every call the whole
   // receiver read such a loop quadratic by construction. A non-global regex and a miss are charged the rest of the
-  // string. What no charge can see is the BACKTRACKING inside one exec: V8 release builds expose no regexp step
-  // counter (--trace-regexp-bytecodes is debug-only), so a backtracking claim stays a clock deadline (ci.mjs CLOCK_JUDGES).
+  // string — a STICKY miss one place (lane cpu-ratio-controls: it tries only at its lastIndex; charged the rest of the
+  // string, the split slow path's exec per position read every regex split quadratic by construction — `'aB1/' × n`
+  // split on /[/_\-+=]+/ read ×16 at ×4 input). The BACKTRACKING inside one exec is no span: V8 release builds expose no regexp step counter
+  // (--trace-regexp-bytecodes is debug-only), only a backtrack LIMIT — read through it by the backtrack charge
+  // (`backtracks: true`, above: lane cpu-ratio-controls), else a backtracking claim stays a deadline in a child.
   if (WHOLE_SCAN) {
     for (const m of ['indexOf', 'includes', 'lastIndexOf', 'startsWith', 'endsWith', 'trim', 'trimStart', 'trimEnd']) patch(SP, m, lengthOfThis);
     for (const m of ['test', 'exec']) patch(RegExp.prototype, m, (orig) => function (s) { W += String(s).length; return orig.call(this, s); });
@@ -115,9 +154,9 @@ function patchAll() {
   // a trim walks the whitespace it drops (V8 slices the rest without a copy): a megabyte of words trims in O(1)
   for (const m of ['trim', 'trimStart', 'trimEnd']) patch(SP, m, (orig) => function () { const s = String(this), r = orig.call(s); W += s.length - r.length + 1; return r; });
   patch(SP, 'lastIndexOf', (orig) => function (q, f) { const s = String(this), i = orig.call(s, q, f); W += i >= 0 ? s.length - i : s.length; return i; });
-  const rxSpan = (orig) => function (str) { const s = String(str), g = this.global || this.sticky, a = g ? Math.min(s.length, this.lastIndex) : 0; const m = orig.call(this, s); W += Math.max(1, (m ? (g ? this.lastIndex : m.index + m[0].length) : s.length) - a); return m; };
+  const rxSpan = (orig) => function (str) { const s = String(str), g = this.global || this.sticky, a = g ? Math.min(s.length, this.lastIndex) : 0; const m = orig.call(this, s); W += Math.max(1, (m ? (g ? this.lastIndex : m.index + m[0].length) : this.sticky ? a + 1 : s.length) - a) + (TWIN ? backtracksOf(this, s, a) : 0); return m; };
   patch(RegExp.prototype, 'exec', rxSpan);
-  patch(RegExp.prototype, 'test', (orig) => function (str) { const s = String(str), g = this.global || this.sticky, a = g ? Math.min(s.length, this.lastIndex) : 0; const r = orig.call(this, s); W += Math.max(1, (r && g ? this.lastIndex : s.length) - a); return r; });
+  patch(RegExp.prototype, 'test', (orig) => function (str) { const s = String(str), g = this.global || this.sticky, a = g ? Math.min(s.length, this.lastIndex) : 0; const r = orig.call(this, s); W += Math.max(1, (r && g ? this.lastIndex : !r && this.sticky ? a + 1 : s.length) - a); return r; });
   }
   patch(JSON, 'stringify', (orig) => function (...a) { const r = orig(...a); W += typeof r === 'string' ? r.length : 1; return r; });
   patch(JSON, 'parse', (orig) => function (s, ...rest) { W += String(s).length; return orig(s, ...rest); });
@@ -167,14 +206,15 @@ function steady(run, x, files) { measure(() => run(x), files); return measure(()
 /** The work of ONE call in its steady state (measured twice, the second reading — see `steady`). */
 export function work(fn, files) { measure(fn, files); return measure(fn, files).total; }
 
-/** THE LINEAR VERDICT: ops(2n) ≤ LINEAR_BOUND · ops(n) after the constant part (mk(0)) is subtracted. */
-export function linear(mk, run, n, files, { bound = LINEAR_BOUND } = {}) {
-  const x0 = mk(0), x1 = mk(n), x2 = mk(2 * n);
+/** THE LINEAR VERDICT: ops(2n) ≤ LINEAR_BOUND · ops(n) after the constant part (mk(0)) is subtracted. `factor` = the
+ *  size step (default 2): ops(factor · n) ≤ factor · LINEAR_BOUND / 2 · ops(n) — ×8 input reads ×8 linear, ×64 quadratic. */
+export function linear(mk, run, n, files, { factor = 2, bound = LINEAR_BOUND * factor / 2 } = {}) {
+  const x0 = mk(0), x1 = mk(n), x2 = mk(factor * n);
   const c = steady(run, x0, files);
   const w1 = Math.max(1, steady(run, x1, files) - c);
   const w2 = Math.max(1, steady(run, x2, files) - c);
   const r = w2 / w1;
-  return { n, c, w1, w2, r, ok: r <= bound, bound };
+  return { n, factor, c, w1, w2, r, ok: r <= bound, bound };
 }
 
 /** "BOUNDED BEFORE THE WORK": an oversize input twice as large costs no more (a cut precedes the walk). */
@@ -198,17 +238,18 @@ export function deterministic(fn, files) {
  * suite whose OTHER legs judge a deadline (a megabyte refused in time, a budget per hostile shape) cannot start the
  * meter itself without slowing those legs several-fold. `judgeInChild` runs ONE verdict in a fresh `node` that starts
  * the meter, then requires `module` (the real file or a patched copy's path) and evaluates `mk` / `run` there:
- *   { module, run: '(M, x) => …', mk: '(n) => …', n, kind: 'linear' | 'bounded', files?: [url suffixes], opts? }
+ *   { module, run: '(M, x) => …', mk: '(n) => …', n, kind: 'linear' | 'bounded', files?: [url suffixes], opts?,
+ *     backtracks?: true (the child starts with BACKTRACK_FLAGS and the backtrack charge) }
  * → the verdict of `linear` / `bounded` (+ `err` when the child failed). `files` defaults to the module itself.
  */
 export function judgeInChild(spec, { timeout = 120000 } = {}) {
-  const r = spawnSync(process.execPath, [fileURLToPath(import.meta.url), '--judge', JSON.stringify(spec)], { encoding: 'utf8', timeout, maxBuffer: 1 << 24 });
+  const r = spawnSync(process.execPath, [...(spec.backtracks ? BACKTRACK_FLAGS : []), fileURLToPath(import.meta.url), '--judge', JSON.stringify(spec)], { encoding: 'utf8', timeout, maxBuffer: 1 << 24 });
   const line = String(r.stdout || '').trim().split('\n').pop();
   try { return JSON.parse(line); } catch { return { ok: false, err: `child: ${r.error ? r.error.message : `exit ${r.status} ${r.signal || ''}`} ${String(r.stderr || '').slice(-400)}` }; }
 }
 if (process.argv[1] === fileURLToPath(import.meta.url) && process.argv[2] === '--judge') {
   const spec = JSON.parse(process.argv[3]);
-  startWorkMeter();
+  startWorkMeter({ backtracks: !!spec.backtracks });
   const M = createRequire(import.meta.url)(spec.module);
   const run = (0, eval)(spec.run), mk = (0, eval)(spec.mk);
   const v = (spec.kind === 'bounded' ? bounded : linear)(mk, (x) => run(M, x), spec.n, spec.files || [spec.module], spec.opts || {});

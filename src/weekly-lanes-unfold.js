@@ -126,9 +126,8 @@ function weeklyOnly(ev) {
  *  the plan week, else its first scoped window (the two share a reset on
  *  every account measured). null = no established window. */
 function establishedWeekly(cacheDir, key) {
-  let sc = null;
-  try { sc = JSON.parse(fs.readFileSync(path.join(cacheDir, readingLag.windowSidecarName(key)), 'utf8')); } catch { return null; }
-  if (!sc || typeof sc !== 'object') return null;
+  const sc = require('./window-stamp.js').readWindowStamp(cacheDir, key); // the sidecar's ONE reader (lane oat-identity-fix-r3)
+  if (!sc) return null;
   if (Number(sc.sevenDay) > 0) return Number(sc.sevenDay);
   const first = Object.values(sc.scoped && typeof sc.scoped === 'object' ? sc.scoped : {}).map(Number).find((n) => n > 0);
   return first || null;

@@ -25,7 +25,9 @@
 //            MS SCALED BY A FACTOR THAT CARRIES NO UNIT (`250 * slack` with slack off the environment, `50 * rows.length`)
 //            — RED under 1 s always; at ≥ 1 s held by the per-suite ratchet in scripts/fixtures/wall-clock-baseline.json,
 //            which only FALLS: a suite with more is RED (a new literal bound), a suite with fewer is RED until the
-//            baseline is lowered in the same commit (`node scripts/wall-clock-census.mjs --lower`).
+//            baseline is lowered in the same commit (`node scripts/wall-clock-census.mjs --lower`);
+//   RATIO    ONE MEASUREMENT AT TWO INPUT SIZES compared on the clock — a complexity claim (`b / a <= 16`, `b < 16 * a`,
+//            `b / Math.max(0.05, a) >= 12`, cost-ratio.mjs's `growth(…).ratio <= 24`) — RED always (see THE RATIO below).
 // Lane wall-clock-ratchet-down (2.369.271) read what this header used to call BLIND: a span inside a TUPLE
 // (`fns.map((fn) => [fn.name, msOf(fn)])`, then `([, ms]) => ms > B`, `for (const [n, ms] of rows)`), a span handed to
 // a helper's PARAMETER (`fast(Date.now() - t0)` ⇒ `(ms) => ok(ms < 500)`), a Map / Set of spans (`m.set(k, span)` ⇒
@@ -41,6 +43,16 @@
 // name `…Ms` / `…_MS`, a mechanism constant the suite also uses, a module's `DP.CONST`, an import or a parameter);
 // `k × control` is a ratio, `mechanism + literal` (`2 * DP.DUP_PROBE_MS + 500`) stays the mechanism's slack and a
 // timestamp + a number (`T0 + 1000`, T0 = NOW - 3 days) a deadline.
+// Lane cpu-ratio-controls (2.369.273) read THE RATIO: a span measured at two input sizes and compared through a factor
+// is a complexity claim judged by the clock — test-exit-run's `bestOf` family (`b / a <= 16` at ×8 input, six quadratic
+// controls `b / Math.max(0.05, a) >= 12`) read red 1 in 5 beside 32 spinners, test-channel-facts' decoder control (CPU
+// time, scripts/cost-ratio.mjs's growth) read 17 × for a 64 × quadratic beside a 12-wide fast tier. The two spans'
+// PRODUCERS are calls of one callee whose arguments differ only in numbers (`bestOf(f, mk, 8192)` / `bestOf(f, mk,
+// 65536, 1)`); either spelling, either polarity (a linear leg's upper bound, a quadratic control's lower one), and
+// growth()'s `.ratio`, which is that claim on CPU time. A ratio of two DIFFERENT measurements (a fix against its
+// control, `k × ctl`) stays control, as lane reconnect-storm-band ruled. The count that replaces it: scripts/work-meter.mjs
+// (blocks + scans + — for a regex — the backtrack charge, V8's own counter). A growth ratio through a helper that returns
+// it under another name, or measured inline without a producer call (`t1 - t0` twice), is not read.
 // STILL UNREADABLE (each said; none compared in the tier today): a PRODUCT duration whose field is not named in ms
 // (`took`, `elapsed` — the house names a duration by its unit, and a string built from a span is no duration), one
 // renamed on the way through a module the suite does not load (`{ lagMs: r.fsMs }`), one measured deeper than the
@@ -94,6 +106,7 @@ function visit(n, f) {
 }
 const CLOCK_TEXT = /\b(?:Date\.now|performance\.now|hrtime)\b|new\s+Date\s*\(\s*\)/;
 const CLOCK_FN_TEXT = /\btime\.(?:monotonic|time|perf_counter)(?:_ns)?\(\)/;   // a child's clock (python) in the suite's text
+const GROWTH_TEXT = /\bgrowth\s*\(/;   // scripts/cost-ratio.mjs's growth(): a ratio on CPU time with no clock word in the suite
 const anyNode = (n, pred) => { let hit = false; visit(n, (m) => { if (!hit && pred(m)) hit = true; }); return hit; };
 
 const parse = (src) => acorn.parse(src, { ecmaVersion: 'latest', sourceType: 'module', locations: true, allowHashBang: true, allowAwaitOutsideFunction: true });
@@ -318,7 +331,7 @@ function moduleSpanFields(file, src, seed, injected) {
 export function wallClockFindings(src, { fields = [], ast = null } = {}) {
   // every span starts at a clock read IN THIS FILE or in a field the product / a child fills from its clock, so a
   // source with neither has no finding — exact, and it spares the parse of most of the tier
-  if (!CLOCK_TEXT.test(src) && !CLOCK_FN_TEXT.test(src) && ![...fields].some((f) => new RegExp(`\\b${f}\\b`).test(src))) return [];
+  if (!CLOCK_TEXT.test(src) && !CLOCK_FN_TEXT.test(src) && !GROWTH_TEXT.test(src) && ![...fields].some((f) => new RegExp(`\\b${f}\\b`).test(src))) return [];
   let all, isSpan;
   try { ({ all, isSpan } = flow(src, { seed: fields, ast })); }
   catch (e) { return [{ line: 0, kind: 'PARSE', text: e.message, boundMs: null }]; }
@@ -412,8 +425,62 @@ export function wallClockFindings(src, { fields = [], ast = null } = {}) {
     }
     return NONE;
   };
-  const out = [];
+  // THE RATIO (lane cpu-ratio-controls): ONE measurement at two sizes. A span's PRODUCER is the call it was bound to
+  // (`const a = bestOf(f, mk, 8192)`); two producers of one callee whose arguments differ only in numbers are one
+  // measurement at two sizes. `core` looks through a noise floor (`Math.max(0.05, a)`) and a literal scale (`16 * a`).
+  // A name resolves to its NEAREST enclosing declaration (test-exit-run declares `a` / `b` afresh in every block)
+  const callOf = (x) => { x = un(x); if (x && x.type === 'AwaitExpression') x = un(x.argument); return x && x.type === 'CallExpression' ? x : null; };
+  const declsOf = new Map();
+  for (const n of all) if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && n.init) declsOf.set(n.id.name, [...(declsOf.get(n.id.name) || []), n]);
+  const scopeOf = (d) => { let q = d._p; while (q && !/^(?:BlockStatement|Program|StaticBlock|ForStatement|ForOfStatement|ForInStatement)$/.test(q.type) && !fnOf(q)) q = q._p; return q; };
+  const declAt = (id) => {
+    const ds = declsOf.get(id.name);
+    if (!ds) return null;
+    const depth = new Map();
+    let k = 0;
+    for (let q = id; q; q = q._p) depth.set(q, k++);
+    let best = null, bd = Infinity;
+    for (const d of ds) { const at = depth.get(scopeOf(d)); if (at !== undefined && at < bd) { bd = at; best = d; } }
+    return best;
+  };
+  const core = (x) => {
+    x = un(x);
+    if (x && x.type === 'CallExpression' && /^Math\.(?:max|min)$/.test(dotted(x.callee))) { const v = x.arguments.filter((a) => !numbersOnly(a)); return v.length === 1 ? core(v[0]) : x; }
+    if (x && x.type === 'BinaryExpression' && x.operator === '*') { if (numbersOnly(x.left)) return core(x.right); if (numbersOnly(x.right)) return core(x.left); }
+    return x;
+  };
+  const producerOf = (x) => { x = un(x); if (!x) return null; if (x.type !== 'Identifier') return callOf(x); const d = declAt(x); return d ? callOf(d.init) : null; };
+  const twoSizes = (x, y) => {
+    const p = producerOf(core(x)), q = producerOf(core(y));
+    if (!p || !q || p === q || text(p.callee) !== text(q.callee)) return false;
+    let differ = false;
+    for (let i = 0; i < Math.max(p.arguments.length, q.arguments.length); i++) {
+      const u = p.arguments[i], v = q.arguments[i];
+      if (!u || !v) { if (!numbersOnly(u || v)) return false; differ = true; continue; }
+      if (text(u) === text(v)) continue;
+      if (numbersOnly(u) && numbersOnly(v)) { differ = true; continue; }
+      return false;
+    }
+    return differ;
+  };
+  // a growth RATIO: span ÷ span of one measurement, a name bound to one, growth()'s `.ratio` (cost-ratio.mjs, CPU time)
+  const isGrowthCall = (c) => !!c && /^(?:\w+\.)?growth$/.test(dotted(c.callee));
+  const ratioOf = (x, seen = new Set()) => {
+    x = un(x);
+    if (!x) return false;
+    if (x.type === 'BinaryExpression' && x.operator === '/') return isSpan(core(x.left)) && isSpan(core(x.right)) && twoSizes(x.left, x.right);
+    if (x.type === 'MemberExpression' && !x.computed && x.property.name === 'ratio') return isGrowthCall(producerOf(x.object));
+    if (x.type === 'Identifier') { const d = declAt(x); return !!d && !seen.has(x.name) && ratioOf(d.init, new Set([...seen, x.name])); }
+    if (x.type === 'CallExpression' && /^(?:Number|parseFloat|Math\.\w+)$/.test(dotted(x.callee))) return x.arguments.some((a) => ratioOf(a, seen));
+    if (x.type === 'CallExpression' && un(x.callee).type === 'MemberExpression' && un(x.callee).property.name === 'toFixed') return ratioOf(un(x.callee).object, seen);
+    if (x.type === 'UnaryExpression' && x.operator === '+') return ratioOf(x.argument, seen);
+    return false;
+  };
+  const ratios = new Set(all.filter((n) => n.type === 'BinaryExpression' && ['<', '<=', '>', '>='].includes(n.operator)
+    && ((ratioOf(n.left) && numbersOnly(n.right)) || (ratioOf(n.right) && numbersOnly(n.left)) || (isSpan(core(n.left)) && isSpan(core(n.right)) && twoSizes(n.left, n.right)))));
+  const out = [...ratios].map((n) => ({ line: n.loc.start.line, kind: 'RATIO', boundMs: null, text: text(n).slice(0, 140) }));
   for (const n of comparisons) {
+    if (ratios.has(n)) continue;
     // both sides measured (`ctl + 25 >= fix`): the side carrying the band is the bound
     const spanLeft = isSpan(n.left) && !(isSpan(n.right) && bandOf(n.left).lit != null && bandOf(n.right).lit == null);
     const bound = spanLeft ? n.right : n.left;
@@ -532,7 +599,7 @@ export function censusOver(rows, readSource = (name) => fs.readFileSync(path.joi
     try { src = readSource(r.name); } catch { continue; }
     // one parse per suite, shared by the product read and the flow (a suite with no clock and no duration name skips both)
     let ast = null;
-    if (CLOCK_TEXT.test(src) || CLOCK_FN_TEXT.test(src) || DURATION_CMP.test(src)) { try { ast = parse(src); } catch (e) { suites.push({ name: r.name, findings: [{ line: 0, kind: 'PARSE', text: e.message, boundMs: null }] }); continue; } }
+    if (CLOCK_TEXT.test(src) || CLOCK_FN_TEXT.test(src) || GROWTH_TEXT.test(src) || DURATION_CMP.test(src)) { try { ast = parse(src); } catch (e) { suites.push({ name: r.name, findings: [{ line: 0, kind: 'PARSE', text: e.message, boundMs: null }] }); continue; } }
     const fields = ast ? productSpanFields(src, readFile, ast) : [];
     suites.push({ name: r.name, findings: ast ? wallClockFindings(src, { fields, ast }) : [] });
   }
@@ -546,6 +613,7 @@ export function ratchetVerdict(suites, baseline) {
     const lit = s.findings.filter((f) => f.kind === 'LITERAL');
     for (const f of lit) if (!(f.boundMs >= LITERAL_FLOOR_MS)) problems.push(`${s.name}:${f.line} asserts ${f.text} — a literal wall-clock bound under ${LITERAL_FLOOR_MS} ms (a census of the work, a control measured in the run, or the mechanism's constant × a stated slack)`);
     for (const f of s.findings) if (f.kind === 'PARSE') problems.push(`${s.name}: the census could not parse it (${f.text})`);
+    for (const f of s.findings) if (f.kind === 'RATIO') problems.push(`${s.name}:${f.line} judges ${f.text} — one measurement at two input sizes compared on the clock (a growth ratio): count the work instead (scripts/work-meter.mjs — its backtrack charge reads a regex's steps)`);
     const held = lit.filter((f) => f.boundMs >= LITERAL_FLOOR_MS).length;
     if (held) counts[s.name] = held;
     const allowed = baseline[s.name] || 0;
@@ -561,7 +629,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
   const suites = censusOver(SUITES);
   const by = {};
   for (const s of suites) for (const f of s.findings) by[f.kind] = (by[f.kind] || 0) + 1;
-  for (const s of suites) for (const f of s.findings) if (f.kind === 'LITERAL' || process.argv.includes('--all')) console.log(`  ${f.kind.padEnd(8)} ${(s.name + ':' + f.line).padEnd(44)} ${String(f.boundMs ?? '').padEnd(7)} ${f.text}`);
+  for (const s of suites) for (const f of s.findings) if (f.kind === 'LITERAL' || f.kind === 'RATIO' || process.argv.includes('--all')) console.log(`  ${f.kind.padEnd(8)} ${(s.name + ':' + f.line).padEnd(44)} ${String(f.boundMs ?? '').padEnd(7)} ${f.text}`);
   const baseline = JSON.parse(fs.readFileSync(BASELINE, 'utf8'));
   const v = ratchetVerdict(suites, baseline);
   console.log(`= ${suites.length} fast suites · ${Object.entries(by).map(([k, n]) => `${n} ${k}`).join(' · ')}`);

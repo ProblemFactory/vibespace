@@ -327,7 +327,11 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
     lastFloor = v;
     if (floorAnnounced) return v;
     const text = B.floorNotice(v);
-    if (!text) { floorAnnounced = true; return v; }   // ok / absent: nothing to say, and nothing to re-ask
+    // ok / absent: nothing to say, and nothing to re-ask. B-0b8c (lane browser-probe-transient): an 'unknown' is NOT YET
+    // KNOWN — this one-shot probe never settles it, so nothing is said here and nothing is latched (the next connection
+    // re-reads: a cached probe inside the TTL); a binary that never answers is the keeper's ONE For-you notice, filed when
+    // ITS retry ladder is exhausted (src/server/browser-keeper.js judgeFloor) — one failed probe never decides for ever
+    if (!text) { if (v.state !== 'unknown') floorAnnounced = true; return v; }
     let delivered = 0;
     try { delivered = Number(serverNotice?.('agent-browser-floor', text, { level: 'warn' })) || 0; } catch { }
     floorAnnounced = delivered > 0;

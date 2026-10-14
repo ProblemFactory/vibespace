@@ -562,7 +562,7 @@ function placementRefusalText(r, { t = defaultT } = {}) {
 const ATTACH_MAX_COUNT = 10;
 const ATTACH_MAX_TOTAL = 25e6;
 const ATTACH_NAME_MAX = 200;
-const ATTACH_CODES = Object.freeze(['attachment-count', 'attachment-too-large', 'attachment-empty', 'attachment-name', 'attachment-data', 'attachments-not-offered', 'attachment-shape', 'attachment-changed', 'attachments-held']);
+const ATTACH_CODES = Object.freeze(['attachment-count', 'attachment-too-large', 'attachment-empty', 'attachment-name', 'attachment-data', 'attachments-not-offered', 'attachment-shape', 'attachment-changed', 'attachments-held', 'attachment-alone']);
 /** the four raster types a card may draw inline (the owner's read route serves the same set inline) */
 const INLINE_RASTER = Object.freeze(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
 const B64_RE = /^[A-Za-z0-9+/]*={0,2}$/;
@@ -675,6 +675,17 @@ function attachmentKind(name, mime) {
  *  short name, never the mime literal; null = no name (the client says "plain text" / "unknown data"). PURE. */
 const FORMAT_NAMES = Object.freeze({ 'image/png': 'PNG', 'image/jpeg': 'JPEG', 'image/gif': 'GIF', 'image/webp': 'WebP', 'image/svg+xml': 'SVG', 'application/pdf': 'PDF', 'application/zip': 'ZIP', 'application/gzip': 'GZIP', 'text/html': 'HTML' });
 const attachmentFormat = (mime) => FORMAT_NAMES[String(mime || '').toLowerCase()] || null;
+/** lane composer-file-only-send (B-dce6): MAY A FILE GO WITH NO TEXT HERE — the capability row's `alone` cell (a group
+ *  whose files never carry text, `withText: false`, is a file on its own by definition). `kind` picks a split row's
+ *  group ('image' ⇒ `images`, else `files`); null = any of its groups. Read off the ROW only, never an adapter id. PURE. */
+function fileAloneOf(row, kind = null) {
+  const r = row && typeof row === 'object' ? row : null;
+  if (!r) return false;
+  const one = (g) => !!(g && typeof g === 'object' && (g.alone === true || g.withText === false));
+  if (r.images === undefined && r.files === undefined) return one(r);
+  if (kind === null) return one(r.images) || one(r.files);
+  return one(kind === 'image' ? r.images : r.files);
+}
 /** May THIS channel carry these files (`[{kind, bytes}]`)? Over the adapter's row: absent / null ⇒ `attachments-not-offered`
  *  (with the row's reason); one row `{maxCount, maxTotalBytes, withText}`, or `{images, files}` each `{maxCount, maxBytes,
  *  withText}` — pictures and files never share a message there, and a group without text refuses text (`attachment-shape`). */
@@ -692,6 +703,7 @@ function attachVerdict(row, list, { hasText = true, channel = 'this channel', wh
     const g = pics.length ? r.images : r.files;
     if (!g) return no('attachments-not-offered', `${ch} does not take ${pics.length ? 'pictures' : 'files'} from an agent${why ? ` (${why})` : ''}`);
     if (hasText && g.withText === false) return no('attachment-shape', `on ${ch} a file is its own message — send the text as another reply`);
+    if (!hasText && !fileAloneOf(g)) return no('attachment-alone', `on ${ch} a ${pics.length ? 'picture' : 'file'} does not go without text — write a line to go with it`);
     if (files.length > g.maxCount) return no('attachment-count', `${ch} takes at most ${g.maxCount} ${pics.length ? 'pictures' : 'files'} in one message`);
     const big = files.find((f) => Number(f.bytes) > g.maxBytes);
     if (big) return no('attachment-too-large', `${ch} takes at most ${mb(g.maxBytes)} per ${pics.length ? 'picture' : 'file'} (${JSON.stringify(String(big.name || '').slice(0, 80))} is ${mb(big.bytes)})`);
@@ -701,13 +713,14 @@ function attachVerdict(row, list, { hasText = true, channel = 'this channel', wh
   const total = files.reduce((n, f) => n + (Number(f && f.bytes) || 0), 0);
   if (total > r.maxTotalBytes) return no('attachment-too-large', `${ch} takes at most ${mb(r.maxTotalBytes)} of attachments in one message (these are ${mb(total)})`);
   if (hasText && r.withText === false) return no('attachment-shape', `on ${ch} attachments go without text — send the text as another reply`);
+  if (!hasText && !fileAloneOf(r)) return no('attachment-alone', `on ${ch} attachments do not go without text — write a line to go with them`);
   return { ok: true };
 }
 /** lane owner-composer-attach: THE OWNER'S COMPOSER CHIPS — every file the person picks, drops or pastes is judged HERE,
  *  BEFORE the send, over the same facts the engine's `attachVerdict` + the account's `send-attachment` offer read: `row` =
  *  the adapter's `sendAttachments`, `offer` = the conversation's `{offered, why, requiredScopes}`, `files` = `[{name,
  *  bytes, kind}]` in the order picked (`kind` sniffed from the bytes; null when too large to read). Answers `{chips:
- *  [{n, state:'ok'|'refused'|'blocked', why, limit?}], send: [n…], blocked: {requiredScopes} | null, shape}` — a file
+ *  [{n, state:'ok'|'refused'|'blocked', why, limit?}], send: [n…], blocked: {requiredScopes} | null, shape, needsText}` — a file
  *  this account cannot carry is `blocked` (never LOOKS attached), one past a limit `refused` by name; only `ok` ones ride
  *  the send. PURE. */
 function composeFilesVerdict(row, offer, files, { hasText = false } = {}) {
@@ -741,7 +754,9 @@ function composeFilesVerdict(row, offer, files, { hasText = false } = {}) {
     chips.push({ n, state: 'ok', why: null });
   }
   const g0 = r && ok.length ? (r.images !== undefined || r.files !== undefined ? (ok[0].kind === 'image' ? r.images : r.files) : r) : null;
-  return { chips, send: ok.map((m) => m.n), blocked, shape: !!(g0 && hasText && g0.withText === false) };
+  // lane composer-file-only-send: `needsText` = files are ready but this channel carries no file ALONE (the row's `alone`
+  // cell) — the box keeps them and says so; a line typed beside them sends them
+  return { chips, send: ok.map((m) => m.n), blocked, shape: !!(g0 && hasText && g0.withText === false), needsText: !!(g0 && !hasText && !fileAloneOf(g0)) };
 }
 /** lane channel-send-files: a send's PARTS as the adapter answered them (Lark: the text + one message per file; Slack:
  *  one chain per file) — bounded, the fields the receipt reads; null when the send was one message. PURE. */
@@ -825,11 +840,18 @@ function attachHeldVerdict(proposals, drafter, list) {
   return { ok: false, why: 'attachments-held', held, error: `your proposals still awaiting the user already hold ${Math.round(held / 1e6)} MB of attachments (at most ${ATTACH_HELD_MAX / 1e6} MB together) — wait for the user's decision, or withdraw one (vibespace-channels withdraw <proposalId>); nothing was created` };
 }
 
-/** A proposal's shape, validated. */
-function validateProposal(input = {}) {
+/** A proposal's shape, validated. `sendAttachments` = the channel's capability row (the caller's adapter; none ⇒ a text
+ *  is required): lane composer-file-only-send (B-dce6) — A FILE ALONE IS A MESSAGE where that row's `alone` cell says so
+ *  (`fileAloneOf`): an empty text with at least one attachment is accepted (its text stored as ''), else refused by name
+ *  (`why: 'attachment-alone'`); the per-kind verdict over the same cell is `attachVerdict`'s. */
+function validateProposal(input = {}, { sendAttachments = null } = {}) {
   const p = input && typeof input === 'object' ? input : {};
-  const text = typeof p.text === 'string' ? p.text : '';
-  if (!text.trim()) return { ok: false, error: 'text is required' };
+  let text = typeof p.text === 'string' ? p.text : '';
+  if (!text.trim()) {
+    if (!(Array.isArray(p.attachments) && p.attachments.length)) return { ok: false, error: 'text is required' };
+    if (!fileAloneOf(sendAttachments)) return { ok: false, why: 'attachment-alone', error: 'text is required here — this channel does not send a file by itself; write a line to go with it' };
+    text = '';
+  }
   if (Buffer.byteLength(text, 'utf-8') > TEXT_MAX_BYTES) return { ok: false, error: `text is larger than ${TEXT_MAX_BYTES / 1024}KB` };
   const replyTo = p.replyTo === undefined || p.replyTo === null || !String(p.replyTo).trim() ? null : String(p.replyTo).trim().slice(0, 200);
   // O1: a message id never carries an invisible character — one that does is refused by name
@@ -1552,5 +1574,5 @@ module.exports = {
   replyAnchorVerdict, anchorView, envelopeVerdict, ENVELOPE_HEADER_MAX, envelopeAddresses, withAddedCc, addressesOf, shownFields, shownDigest, ARM_MS, armVerdict, rearmVerdict,
   hiddenCharsOf, revealSegments,
   // design 005 §2.B (B-fd1f): an agent's attachments — bounds, the name rule, the sniffed type, the adapter's row
-  ATTACH_MAX_COUNT, ATTACH_MAX_TOTAL, ATTACH_NAME_MAX, ATTACH_CODES, INLINE_RASTER, attachmentUrlFor, base64Bytes, safeAttachmentName, attachmentsOf, sniffType, nameTypeMismatch, attachmentKind, attachmentFormat, composeFilesVerdict, sendParts, reconciledParts, partsWords, attachVerdict, storedAttachments, attachmentSize, ATTACH_HELD_MAX, attachHeldVerdict,
+  ATTACH_MAX_COUNT, ATTACH_MAX_TOTAL, ATTACH_NAME_MAX, ATTACH_CODES, INLINE_RASTER, fileAloneOf, attachmentUrlFor, base64Bytes, safeAttachmentName, attachmentsOf, sniffType, nameTypeMismatch, attachmentKind, attachmentFormat, composeFilesVerdict, sendParts, reconciledParts, partsWords, attachVerdict, storedAttachments, attachmentSize, ATTACH_HELD_MAX, attachHeldVerdict,
 };

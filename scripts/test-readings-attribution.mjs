@@ -40,6 +40,8 @@
 //       ⑦ (c2) the sidecar is stamped only by a VERIFIED panel, the API stamps it first, the repair route
 //   §20 THE IDENTITY ANCHOR IS DERIVED FROM THE API (B-855a c2): the standing repair on a fixture shaped like
 //       this instance's stores — a sidecar re-stamped, a cache replaced, own readings re-admitted, controls, idempotent
+//   §22 THE LONG-LIVED TOKEN'S IDENTITY POST-CHECK RIDES THE SLOT, READ-ONLY (lane oat-identity-postcheck): confirmed /
+//       mismatch / a login reading never judges, on the real producer; the slot law as a with/without differential + a re-keying RED control
 //      its spawn was given — already true, now pinned.
 //   §8 UI honesty: the pure panel rules + the wiring.
 //   §9 source pins: no caller may key on the observation again.
@@ -1921,11 +1923,13 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
     // (inc-mubu23bd-5vxi: the capture READS the sidecar — the naming ladder asks
     // its `scoped` map which model a cap window is — and must never WRITE it)
     ok('§15 SOURCE PIN: the ONLY producer that writes the window sidecar is the panel refresh — the one whose key and credential dir are the same decision (rate-limit-capture may only READ it, for the model-cap naming ladder)',
-      /windowSidecarName\(key\)/.test(ur) && /source: 'on-demand'/.test(ur)
-      && !/writeSidecar|writeFileSync\([^)]*windowSidecarName|renameSync\([^)]*windowSidecarName/.test(code('src/rate-limit-capture.js'))
-      && /readFileSync\(path\.join\(cacheDir, readingLag\.windowSidecarName\(key\)\)/.test(code('src/rate-limit-capture.js')), '');
+      // lane oat-identity-fix-r3: every `.window-` write goes through its owner's ONE writer (src/window-stamp.js — the census of
+      // WHO writes is test-oat-identity §9a, derived from the source), every read through its ONE reader
+      /windowStamp\.writeWindowStamp\(USAGE_CACHE_DIR, key, \{ \.\.\.w, at: Date\.now\(\), source: 'on-demand'/.test(ur)
+      && !/writeSidecar|writeWindowStamp|writeFileSync\([^)]*windowSidecarName|renameSync\([^)]*windowSidecarName/.test(code('src/rate-limit-capture.js'))
+      && /require\('\.\/window-stamp\.js'\)\.readWindowStamp\(cacheDir, key\)/.test(code('src/rate-limit-capture.js')), '');
     ok('§15 …and it is never READ BACK from `sevenDay.resetsAt` (the field a mis-filed reading overwrites — that would let one bad write redefine the account)',
-      /readingLag\.windowSidecarName\(key\)/.test(code('src/server/usage-pool-engine.js')) && !/ownWindow = .*sevenDay\.resetsAt/.test(code('src/server/usage-pool-engine.js')));
+      /windowStamp\.readWindowStamp\(USAGE_CACHE_DIR, key\)/.test(code('src/server/usage-pool-engine.js')) && !/ownWindow = .*sevenDay\.resetsAt/.test(code('src/server/usage-pool-engine.js'))); // the sidecar's ONE reader (lane oat-identity-fix-r3)
   }
 
   // ── THE CLOBBER (r2, reproduced). The window used to be a FIELD of the
@@ -2812,7 +2816,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
     };
     ok('§16c SOURCE PIN: that IS how the live guard is keyed — the engine reads `.window-<cache file name>`, so an identity with two files needs two sidecars',
       /files = fs\.readdirSync\(USAGE_CACHE_DIR\)\.filter\(\(f\) => f\.endsWith\('\.json'\) && !f\.startsWith\('__models__'\)\);/.test(read('src/server/usage-pool-engine.js'))
-      && /const key = fn\.slice\(0, -5\);[\s\S]{0,200}readingLag\.windowSidecarName\(key\)/.test(read('src/server/usage-pool-engine.js')), '');
+      && /const key = fn\.slice\(0, -5\);[\s\S]{0,200}windowStamp\.readWindowStamp\(USAGE_CACHE_DIR, key\)/.test(read('src/server/usage-pool-engine.js')), ''); // the sidecar's ONE reader (lane oat-identity-fix-r3) names it `.window-<key>`
     const dir = path.join(dataDir, 'usage-cache');
     const stranger = { kind: 'sevenDay', resetsAt: WB };   // a reading that is provably B's
     const groupOf = (id) => (id === '__global__' || id === A ? A : id);
@@ -4414,6 +4418,86 @@ esac
     (() => { const sv = read('server.js'); const i = sv.indexOf("repairIdentityAnchors('boot'); usage.reloadRateLimitCache?.();"); return i > 0 && i > sv.indexOf('.runLocalMigrations();'); })() && /repairIdentityAnchors, \/\/ B-855a c2/.test(read('src/server/usage-pool-engine.js')) && /repairSidecarsByApiPhase\(\{ dataDir: path\.join\(rootDir, 'data'\), accounts: list, id: 'identity-repair:' \+ why \}\)/.test(read('src/server/usage-pool-engine.js')));
   ok('§20 …the human-triggered route exists and hands the engine\'s entry point to setupUsage',
     /app\.post\('\/api\/usage\/repair-identity'/.test(read('src/usage-routes.js')) && /repairIdentityAnchors\('manual'\)/.test(read('src/usage-routes.js')) && /establishedWindows, repairIdentityAnchors, probeUsageForAccountKey/.test(read('server.js')));
+}
+
+// ── §22 THE LONG-LIVED TOKEN'S IDENTITY POST-CHECK RIDES THE SLOT, READ-ONLY (lane oat-identity-postcheck, B-3102 (b)) ──
+// The real rate_limit_event producer hands the check (src/server/oat-identity.js over the PURE
+// src/oat-identity-model.js) the SLOT it attributed the reading to and the reading's window — nothing else.
+// Driven on the real engine over fake readings: an oat-only row whose first token reading agrees with the
+// window it established BEFORE the token (confirmed), one whose first token reading carries the window an
+// owner confirmed for ANOTHER row's token (mismatch: token kept), and the pooled member whose folder holds
+// its own LOGIN (its reading says nothing about its token — the check stays armed). THE SLOT LAW: the same
+// readings through the same engine with the hook line cut out file every number in the same place (a
+// differential over every cache + the guard's archive); RED control = a copy whose hook files the reading
+// on the row the check named. Lane oat-identity-fix (verify r1): every conversation carries its token's GENERATION
+// (ws-create's spawn stamp) and a mark takes K = API_WITNESS_K eligible readings, one per turn — a conversation on
+// ANOTHER generation of the row's token never judges it.
+console.log('\n§22 the long-lived token\'s identity post-check: the real producer hands it the slot, every reading is filed as before');
+{
+  const ENG_SRC = read('src/server/usage-pool-engine.js');
+  const K22 = Number((ENG_SRC.match(/^const API_WITNESS_K = (\d+);/m) || [])[1]);
+  const HOOK = /    const postCheck = \(\) => \{ if \(win\) \{ try \{ oatIdentity\.onReading\(slotKey, [^\n]*\n/; // fix r2 F-C: ONE call, run after the guard + the ring
+  const tokOf = (tag) => ['sk', '-ant-oat01-'].join('') + 'R22fake' + tag + '_' + 'a1B2c3D4e5F6g7H8'.repeat(3) + '-zz';
+  const nowS = Math.floor(Date.now() / 1000);
+  const W_A = nowS + 4 * 86400 + 5 * 3600, W_B = nowS + 5 * 86400 + 9 * 3600, W_C = nowS + 6 * 86400 + 1 * 3600;
+  const engArgs = (w) => ({
+    app: { get() { }, post() { }, put() { }, delete() { }, use() { }, locals: {} }, rootDir: w.root, USAGE_CACHE_DIR: w.cacheDir, activeSessions: w.sessions,
+    wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { }, serverNotice() { }, serverSetting: () => undefined, getAccounts: () => w.am, getHosts: () => null,
+    getUsageHistory: () => null, recordUsageAttribution() { }, adapterRegistry: { get() { return null; } }, getAutoResume: () => null, getQuotaProbe: () => null,
+  });
+  const ev = (resetsAt, u) => ({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed', rateLimitType: 'seven_day', utilization: u, resets_at: resetsAt, resetsAt } });
+  /** one scenario through engine module `mod` (null = the shipped one) → what the stores say afterwards */
+  const run = (mod) => {
+    const w = mkWorld();
+    const am = w.am;
+    const O1 = am.createSubscription({ name: 'Token One' }).id, O2 = am.createSubscription({ name: 'Token Two' }).id, OT = am.createSubscription({ name: 'Token Other' }).id, O3 = am.createSubscription({ name: 'Token Three' }).id;
+    // the rows' identities, established BEFORE their tokens were saved (LINK's too) — beside a cache file each, which is
+    // what establishedWindows() keys off (a sidecar with no cache is a removed account's)
+    for (const [id, r] of [[O1, W_A], [O2, W_B], [O3, W_A]]) w.writeCache(id, { fetchedAt: Date.now() - 60000, source: 'cli-usage', sevenDay: { utilization: 0.1, resetsAt: r } });
+    w.stampWindow(O1, { sevenDay: W_A, fiveHour: null, scoped: {} });
+    w.stampWindow(O2, { sevenDay: W_B, fiveHour: null, scoped: {} });
+    w.stampWindow(O3, { sevenDay: W_A, fiveHour: null, scoped: {} });
+    w.stampWindow(w.LINK, { sevenDay: w.R7, fiveHour: null, scoped: {} });
+    am.setOat(O1, tokOf('1')); am.setOat(O2, tokOf('2')); am.setOat(OT, tokOf('T')); am.setOat(w.LINK, tokOf('L')); am.setOat(O3, tokOf('3'));
+    am.setOatAnchor(OT, { sevenDay: W_C, scoped: {}, how: 'owner-confirmed', at: Date.now() }); // the window an owner confirmed for Token Other's token (no `.window-` sidecar: the guard never sees it)
+    const eng = (mod || engMod).create(engArgs(w)); // built AFTER the stamps: establishedWindows() is memoised for 5 s per engine
+    const st0 = (id) => (am.oatCheckOf(id) || {}).state || null;
+    // a conversation as ws-create spawns it on the env road: it carries the GENERATION of the token it spawned with
+    const sess = (id, n, gen = am.get(id).oatMintedAt) => { const s = { backend: 'claude', mode: 'chat', host: null, _webuiId: 'sess-oat-' + n, claudeSessionId: 'cid-oat-' + n, _accountId: id, _billingHow: 'oat', _oatRoad: 'env', _oatGen: gen, _servedModel: 'claude-fable-5', _servedModelAt: Date.now(), pty: { write() { } }, name: 'oat' + n }; w.sessions.set(s._webuiId, s); return s; };
+    const s1 = sess(O1, 1), s2 = sess(O2, 2), s3 = sess(O3, 3, am.get(O3).oatMintedAt - 86400e3); // s3: a conversation on Token Three's PREVIOUS token
+    eng.recordRateLimitEvent(s1, ev(W_A, 0.21));
+    const after = [];
+    for (let i = 0; i < K22; i++) { eng.recordRateLimitEvent(s2, ev(W_C, 0.37 + i / 100)); after.push(st0(O2)); eng.noteTurnEnd(s2); } // one turn each: a foreign turn's later readings follow the guard's re-file
+    for (let i = 0; i < K22; i++) { eng.recordRateLimitEvent(s3, ev(W_B, 0.5 + i / 100)); eng.noteTurnEnd(s3); }
+    eng.recordRateLimitEvent(w.session, ev(w.R7, 0.42)); // the pooled conversation on LINK — its folder holds LINK's own login
+    const pick = (c) => (c ? { u: c.sevenDay ? c.sevenDay.utilization : null, r: c.sevenDay ? c.sevenDay.resetsAt : null } : null);
+    const caches = {}; for (const [k, id] of Object.entries({ O1, O2, OT, O3, LINK: w.LINK, FISH: w.FISH, SPARE: w.SPARE })) caches[k] = pick(w.readCache(id));
+    let archived = [];
+    try { const d = path.join(w.root, 'data', 'archive'); for (const f of fs.readdirSync(d)) archived.push(...fs.readFileSync(path.join(d, f), 'utf8').trim().split('\n').filter(Boolean).map((l) => { const j = JSON.parse(l); return `${f}:${j.key === O1 ? 'O1' : j.key === O2 ? 'O2' : j.key === OT ? 'OT' : j.key === O3 ? 'O3' : j.key === w.LINK ? 'LINK' : j.key}:${j.what || j.migration || ''}`; })); } catch { }
+    const st = (id) => (am.oatCheckOf(id) || {}).state || null;
+    return { caches, archived: archived.sort(), checks: { O1: st(O1), O2: st(O2), OT: st(OT), O3: st(O3), LINK: st(w.LINK) }, others: (am.oatCheckOf(O2) || {}).others || [], OT_id: OT, after,
+      kept: am.getOat(O2) === tokOf('2'), seven: (w.readCache(O1) || {}).sevenDay };
+  };
+  const lane = run(null);
+  ok('§22 an oat-only row\'s FIRST token reading agrees with the window it established before the token ⇒ confirmed', lane.checks.O1 === 'confirmed', JSON.stringify(lane.checks));
+  ok(`§22 …a token whose readings carry the window an owner confirmed for ANOTHER row's token: ${K22 - 1} turn(s) are suspects, turn #${K22}'s reading ⇒ mismatch naming that row, the token KEPT (the K-run, verify r1 F2)`,
+    K22 >= 2 && JSON.stringify(lane.after) === JSON.stringify([...Array(K22 - 1).fill('pending'), 'mismatch']) && lane.checks.O2 === 'mismatch' && JSON.stringify(lane.others) === JSON.stringify([lane.OT_id]) && lane.kept, JSON.stringify(lane));
+  ok('§22 …a conversation still on a row\'s PREVIOUS token never judges the token saved now (verify r1 F1) — however many turns', lane.checks.O3 === 'pending', JSON.stringify(lane.checks));
+  ok('§22 …the pooled member whose folder holds its OWN login: its reading says nothing about its token — the check stays armed', lane.checks.LINK === 'pending' && lane.checks.OT === 'pending', JSON.stringify(lane.checks));
+  const baseSrc = ENG_SRC.replace(HOOK, '    const postCheck = () => { };\n');
+  ok('§22 the control applies (the engine with the hook line cut out)', baseSrc !== ENG_SRC && !/oatIdentity\.onReading\(/.test(baseSrc));
+  const base = run(MUT.load('src/server/usage-pool-engine.js', baseSrc, '22base'));
+  ok('§22 …the base engine judges nothing (the checks are still armed) — the verdicts above are the hook\'s', base.checks.O1 === 'pending' && base.checks.O2 === 'pending' && base.checks.O3 === 'pending', JSON.stringify(base.checks));
+  ok('§22 THE SLOT LAW: with and without the check, every reading lands in the SAME caches with the SAME numbers, and the guard archives the same records',
+    JSON.stringify(lane.caches) === JSON.stringify(base.caches) && JSON.stringify(lane.archived) === JSON.stringify(base.archived) && lane.seven && lane.seven.resetsAt === W_A,
+    JSON.stringify({ lane: lane.caches, base: base.caches, la: lane.archived, ba: base.archived }));
+  // the RED control: a check consulted BEFORE the guard whose answer re-keys the reading (the hook itself runs after the
+  // write since fix r2 — a re-key there would be inert, so the plant puts the consultation where it could move a number)
+  const rekey = ENG_SRC.replace('    if (win) {\n      const target = guardReadingTarget(key, win, ', "    if (win) { try { const v22 = oatIdentity.onReading(slotKey, { window: win, at: Date.now(), viaToken: () => tokenSpentBy(session, slotKey), gen: () => tokenGenOf(session, slotKey), eligible: witness, sid: session._webuiId || null }); if (v22 && v22.verdict === 'mismatch' && (v22.others || [])[0]) key = v22.others[0]; } catch { } }\n    if (win) {\n      const target = guardReadingTarget(key, win, ");
+  ok('§22 the RED control applies (a check whose answer files the reading on the row it named)', rekey !== ENG_SRC && /key = v22\.others\[0\]/.test(rekey));
+  const red = run(MUT.load('src/server/usage-pool-engine.js', rekey, '22rekey'));
+  console.log(`    RED control (a reading re-attributed by the check): Token Other's cache ${JSON.stringify(red.caches.OT)} vs ${JSON.stringify(base.caches.OT)} without it`);
+  ok('§22 RED control: re-attributing by the check moves the reading — the differential catches it', JSON.stringify(red.caches) !== JSON.stringify(base.caches), JSON.stringify({ red: red.caches, base: base.caches }));
 }
 
 // ── §21 THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ────────────

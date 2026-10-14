@@ -12,7 +12,7 @@
 //   §5 THE PAPER TEST — Slack-, Telegram- and Outlook-shaped messages mapped onto the kinds by mappers that live HERE:
 //      every value maps onto an existing type; the rows each would add are printed
 //   §6 Gmail: full-format headers → each of the ten kinds (RFC 2047, groups, a quoted comma, a 20 KB To ⇒ cut, Bcc only on
-//      own sent mail, Sender = From ⇒ none), bounded time on a 1 MB Cc
+//      own sent mail, Sender = From ⇒ none), bounded work on a 1 MB Cc
 //   §7 the adapter contract: caps.facts ⊇ every emit; every declared kind exercised; factsOf declared ⇔ implemented
 //   §8 the engine + route: a side hit is free; a miss is ONE vendor call for the whole thread (single-flight); refusals
 //      by name; the fold reaches the window's page and the agent's copy (through agentFacts); a foreign id is never
@@ -25,7 +25,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { growth } from './cost-ratio.mjs';
 import { engineSource } from './channels-engine-src.mjs';   // lane dc-channels-seams: the engine + its three family files as one text
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
@@ -244,18 +243,28 @@ const gmailFixtures = [
   ok(huge.length > 20000 && J(cut) === J([{ k: 'to', v: [], cut: true }]), 'a 20 KB To ⇒ the fact with no parties and `cut: true` (never clipped into another set of recipients)', J(cut).slice(0, 200));
   const mb = '"' + 'A'.repeat(1024 * 1024) + '" <a@x>';
   const big = G.factsFromHeaders(H({ From: 'a@x', Cc: mb, To: '<'.repeat(1024 * 1024) }), {});
-  // "bounded" and "linear" are SHAPES, measured RELATIVE in this run (lane mirror-flake-hardening: `ms < 100` / `< 50`
-  // judged the machine): two runs of one process, a slower runner stretches both
-  const hdrs = (n) => H({ From: 'a@x', Cc: '"' + 'A'.repeat(n) + '" <a@x>', To: '<'.repeat(n) });
-  const gB = growth((h) => G.factsFromHeaders(h, {}), hdrs(64 * 1024), hdrs(1024 * 1024), { inner: 20 });
-  const gWalk = growth((h) => h.reduce((a, x) => a + x.value.split('<').length, 0), hdrs(64 * 1024), hdrs(1024 * 1024), { inner: 2 });
-  ok(big.every((f) => f.cut === true) && gB.ratio <= 4 && gWalk.ratio > 4, `V1: a 1 MB Cc and a 1 MB To of "<" are refused by their length — ${gB.ratio.toFixed(2)} × the cost of 64 KB ones (≤ 4 ×; CONTROL a reader that walks them: ${gWalk.ratio.toFixed(1)} ×) — bounded before any parse`, J({ gB, gWalk }));
+  // "bounded" and "linear" are COUNTS (lane cpu-ratio-controls, B-e83c — the CPU-time growth that judged them here read its
+  // quadratic control 17 × for 64 × beside a 12-wide fast tier, one red in 387): scripts/work-meter.mjs counts ONE call's work
+  // in a child — every block of gmail.js, every scan, every step a regex backtracks inside one exec (its backtrack charge) —
+  // the same count on any box. Each CONTROL is a planted copy of gmail.js with the fix removed, read by the same count
+  const { judgeInChild } = await import('./work-meter.mjs');
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const GM = path.join(REPO, 'src/channels/gmail.js'), gmSrc = fs.readFileSync(GM, 'utf-8'), MG = mutantCopies('chan-facts-cost', REPO);
+  const HDRS = '(n) => [{ name: "From", value: "a@x" }, { name: "Cc", value: "\\"" + "A".repeat(n) + "\\" <a@x>" }, { name: "To", value: "<".repeat(n) }]';
+  const factsWork = (module) => judgeInChild({ module, run: '(G, h) => G.factsFromHeaders(h, {})', mk: HDRS, n: 64 * 1024, kind: 'bounded', backtracks: true });
+  const CUT = '  if (s.length > ADDRESS_LIST_MAX) return null;\n';
+  const gB = factsWork(GM), gWalk = factsWork(MG.write('src/channels/gmail.js', gmSrc.replace(CUT, ''), 'nocut'));
+  ok(gmSrc.split(CUT).length === 2 && big.every((f) => f.cut === true) && gB.ok && !gWalk.err && !gWalk.ok, `V1: a 1 MB Cc and a 1 MB To of "<" are refused by their length — by the count 128 KB ones cost ${gB.w2} steps, 64 KB ones ${gB.w1} (bounded: ≤ ×${gB.ratio} + 256); CONTROL a copy whose addressList walks before its cut: ${gWalk.w1} → ${gWalk.w2} (×${(gWalk.r || 0).toFixed(2)}) — bounded before any parse`, J({ gB, gWalk }));
   const w1 = G.decodeWords('=?UTF-8?B?' + 'A'.repeat(8000) + '?= '.repeat(1));
-  const gW1 = growth((x) => G.decodeWords(x), '=?UTF-8?B?' + 'A'.repeat(1000) + '?= ', '=?UTF-8?B?' + 'A'.repeat(8000) + '?= ', { inner: 50 });
-  const gW2 = growth((x) => G.decodeWords(x), '=?x?Q?'.repeat(338), '=?x?Q?'.repeat(2700), { inner: 50 });
-  // CONTROL: a quadratic reader of the same name (a search to its end from every opener for a byte it lacks) grows ~64 × on 8 × the input
-  const gQ = growth((x) => { let n = 0; for (let i = 0; i < x.length; i += 6) for (let j = i; j < x.length && x.charCodeAt(j) !== 10; j++) n++; return n; }, '=?x?Q?'.repeat(338), '=?x?Q?'.repeat(2700), { inner: 1 });
-  ok(gW1.ratio <= 24 && gW2.ratio <= 24 && gQ.ratio > 24 && typeof w1 === 'string', `the encoded-word decoder is linear on a 16 KB hostile name: 8 × the input costs ${gW1.ratio.toFixed(1)} / ${gW2.ratio.toFixed(1)} × (≤ 24 ×; CONTROL a quadratic reader: ${gQ.ratio.toFixed(0)} ×)`, J({ gW1, gW2, gQ }));
+  // ×8 input: the B-word past the decoder's own 1000-character bound at BOTH sizes (2 → 16 KB; at 1 KB it still decodes — another
+  // path, ×12 by the count), the Q-storm of openers; CONTROL a copy whose payload run crosses `?` unbounded and must END at a
+  // blank (RFC 2047 read strictly): every opener walks to the end of the name and back — at 1 → 8 KB (×62 there too; its
+  // 16 KB side alone is 50 M backtracks, a second of the tier)
+  const wordsWork = (module, mk, n) => judgeInChild({ module, run: '(G, x) => G.decodeWords(x)', mk, n, kind: 'linear', backtracks: true, opts: { factor: 8 } });
+  const WB = "(n) => '=?UTF-8?B?' + 'A'.repeat(n) + '?= '", WQ = "(n) => '=?x?Q?'.repeat(Math.round(n / 6))";
+  const ENC = '([^?\\s]{0,1000})\\?=/g;';
+  const gW1 = wordsWork(GM, WB, 2000), gW2 = wordsWork(GM, WQ, 2028), gQ = wordsWork(MG.write('src/channels/gmail.js', gmSrc.replace(ENC, '([^\\s]*)\\?=(?=\\s|$)/g;'), 'blankafter'), WQ, 1014);
+  ok(gmSrc.split(ENC).length === 2 && gW1.ok && gW2.ok && !gQ.err && !gQ.ok && typeof w1 === 'string', `the encoded-word decoder is linear on a 16 KB hostile name by the count: 8 × the input costs ×${(gW1.r || 0).toFixed(2)} / ×${(gW2.r || 0).toFixed(2)} the steps (bound ×${gW1.bound}; CONTROL a payload run that crosses \`?\` and must end at a blank: ×${(gQ.r || 0).toFixed(1)})`, J({ gW1, gW2, gQ }));
   ok(G.decodeWords('=?ISO-8859-1?Q?Andr=E9?= =?UTF-8?Q?_Li?=') === 'André Li' && G.decodeWords('=?nonsense-cs?B?QUJD?=') === '=?nonsense-cs?B?QUJD?=', 'two encoded-words join (the space between them dropped); an unknown charset stays as written');
   // toRecord: full-format fixture → the record's facts; the record without fact headers is byte-identical in shape
   const m = { id: 'm1', threadId: 't1', internalDate: '1700000000000', labelIds: ['INBOX'], payload: { mimeType: 'text/plain', headers: gmailFixtures[0].headers, body: { data: Buffer.from('hello').toString('base64url') } } };

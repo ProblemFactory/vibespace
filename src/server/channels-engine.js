@@ -97,7 +97,7 @@ const crypto = require('crypto');
 const { AsyncLocalStorage } = require('async_hooks');
 const { createChannelStore } = require('../channel-store.js');
 const { createChannelRegistry, ChannelError } = require('../channels/index.js');
-const { identityOf, identityMismatch, heldIdentity, mismatchSentence, namelessSentence, cancelledSentence } = require('../channel-identity.js');   // verify r5: whose account a consent may land on; r6: the held identity read off the token it holds, a nameless consent; r7: a cancelled consent
+const { identityOf, identityMismatch, heldIdentity, mismatchSentence, namelessSentence, cancelledSentence, stampIdentity } = require('../channel-identity.js');   // verify r5: whose account a consent may land on; r6: the held identity read off the token it holds, a nameless consent; r7: a cancelled consent; lane slack-grid-identity: the one stamp rule
 const caps = require('../channel-caps.js');
 const fake = require('../channels/fake.js');
 const { secretBox, holdsCiphertext } = require('../secret-box.js');
@@ -720,13 +720,20 @@ function create(deps = {}) {
             // owner ruling (2026-09-28): a CONSENT carries what it dropped (the sign-in's one narrowing retry — the vendor
             // refused an optional scope on its page); a refresh keeps the evidence of the consent it renews
             if (consent) rec.auth.refusedScopes = refusedScopesOf(meta.refusedScopes);
-            if (Object.keys(offered).length) rec.identity = { ...(rec.identity || {}), ...offered };
+            // lane slack-grid-identity: THE ONE STAMP RULE (src/channel-identity.js `stampIdentity`) — a fact the vendor
+            // names later (the organisation a workspace joined) is LEARNED once, never a different person; an unchanged
+            // identity is not rewritten. A consent's card line says what it learned (`lastAuthNote`), the next one clears it.
+            const st = stampIdentity(rec.identity, offered);
+            if (st.changed) rec.identity = st.identity;
+            if (consent) { if (st.learned) rec.lastAuthNote = { code: 'enterprise-learned', at: now() }; else delete rec.lastAuthNote; }
+            if (st.learned) verdict.learned = st.learned;
           });
         } catch (err) { speakUnsaved(rec, err); throw err; }
         if (verdict.mismatch) throw new ChannelError('forbidden', mismatchSentence(rec.label || rec.id, verdict.mismatch), { retryable: false, detail: { identityMismatch: verdict.mismatch } });
         if (verdict.nameless) throw new ChannelError('forbidden', namelessSentence(rec.label || rec.id, 'the sign-in named no account'), { retryable: false, detail: { nameless: true } });
         if (verdict.cancelled) throw new ChannelError('auth-expired', cancelledSentence(rec.label || rec.id, verdict.cancelled, verdict.held), { retryable: false, detail: { cancelled: verdict.cancelled } });
         if (verdict.written) retractUnsaved(rec);
+        if (verdict.learned) log.log(`[channels] ${rec.id}: the sign-in names the organisation ${verdict.learned} the account's identity did not — the same account; its identity learned it`);
         return verdict;
       },
       async clear() {
@@ -3679,6 +3686,7 @@ function create(deps = {}) {
       credentialDefault: mod ? defaultCredentialKey(mod.integration) : null,
       flow: safeFlow(flows.runningFor(rec.id)),
       lastAuthError: rec.lastAuthError || null, lastAuthAt: rec.lastAuthAt || null,
+      lastAuthNote: rec.lastAuthNote && rec.lastAuthNote.code ? { code: String(rec.lastAuthNote.code), at: rec.lastAuthNote.at || null } : null,   // lane slack-grid-identity: what the last sign-in learned (a code the card words)
       failureItem: rec.failureItem ? { id: rec.failureItem.id, code: rec.failureItem.code, at: rec.failureItem.at } : null,
       // P1b: the push lane's public half (null = no push lane); the panel
       // composes the sentence with `pushLaneText` in the device's language.
@@ -5536,18 +5544,25 @@ function create(deps = {}) {
     if (keys.length) notify(keys, { full: false, extra: { revised } });
     return { asked, revised: keys.length };
   }
-  /** The WOKEN-FOR ledger (bounded, on the index entry): which message a delivered wake carried, to whom — the 7-day
-   *  recheck window and the recall note read it. */
+  /** The WOKEN-FOR ledger (bounded, on the index entry): which message reached which conversation, when — the 7-day
+   *  recheck window and the recall note read it.
+   *  THE LEDGER DOOR (lane channel-recall-ledger, B-70d2): `noteDelivered` is its ONE writer, called by EVERY road a
+   *  message reaches a conversation by, once the hand-over took — a billed wake and a refused wake stashed (`wakeNow`),
+   *  the free next-turn stash (`stashHits` — was: no row, so a recall of what it handed told nobody), a scope digest's
+   *  carried hits (`flushScopeNow`: one row per message on each conversation it carried, never a row for the digest).
+   *  A row is keyed by the message's revision key (`Rev.wokeKeyOf` — the id the by-id recheck asks with, the same for
+   *  every version); the bound is fair (`Rev.capWokeRows`). Census: scripts/test-channel-revisions.mjs ⑧. */
   const WOKE_FOR_MAX = 40;
-  function noteWoken(en, hits, cid, t) {
+  function noteDelivered(en, hits, cid, t) {
     if (!en || !cid) return;
     const prev = Array.isArray(en.wokeFor) ? en.wokeFor.filter((w) => w && Number(w.at) > t - Rev.RECHECK_WOKE_MS) : [];
     for (const h of hits || []) {
       const r = h && h.record;
-      if (!r || !r.vendorId) continue;
-      prev.push({ vid: String(r.vendorId).slice(0, 512), cid: String(cid).slice(0, 128), at: t, msgAt: Number(r.at) || null, tk: r.threadKey ? String(r.threadKey).slice(0, 512) : null });
+      const vid = r ? Rev.wokeKeyOf(r.vendorId) : null;
+      if (!vid) continue;
+      prev.push({ vid, cid: String(cid).slice(0, 128), at: t, msgAt: Number(r.at) || null, tk: r.threadKey ? String(r.threadKey).slice(0, 512) : null });
     }
-    en.wokeFor = prev.slice(-WOKE_FOR_MAX);
+    en.wokeFor = Rev.capWokeRows(prev, WOKE_FOR_MAX);
   }
   const REV_NOTE_FROM = 'Channels · recalls';
   /** ONE next-turn note per (message, conversation a wake carried it to) when the message is recalled — the free lane
@@ -5560,7 +5575,8 @@ function create(deps = {}) {
       if (!en || !Array.isArray(en.wokeFor)) return;
       // ONE note per conversation (lane channel-recall-engine-leg): a message carried to it twice (a re-delivery, a scope
       // digest beside a wake) has two rows here — both are marked, the conversation hears it once (the first wake's time)
-      for (const w of en.wokeFor) if (w && String(w.vid) === String(vid) && !w.noted) { w.noted = true; if (!due.some((d) => d.cid === w.cid)) due.push({ cid: w.cid, at: w.at }); }
+      const key = Rev.wokeKeyOf(vid);   // the door's key (lane channel-recall-ledger)
+      for (const w of en.wokeFor) if (w && String(w.vid) === key && !w.noted) { w.noted = true; if (!due.some((d) => d.cid === w.cid)) due.push({ cid: w.cid, at: w.at }); }
     });
     const en = store.index.live()[`${rec.id}/${convId}`];
     // REACH FIRST (the reaction digest's rule): the note is news FROM the conversation — an agent whose access the owner
@@ -6719,6 +6735,7 @@ function create(deps = {}) {
   const settleWakes = async () => { while (inflight.size) await Promise.all([...inflight]); };
 
   const wakeTimers = new Map();   // `${adapterId}/${convId}` → { timer, kind:'coalesce'|'digest', startedAt }
+  const parkedKeys = new Set();   // lane stash-pending-live: `${adapterId}/${convId}` a pending row was written to (carryParked's list; pruned when empty)
   function clearWakeTimer(key) { const w = wakeTimers.get(key); if (w) { clearTimeout(w.timer); wakeTimers.delete(key); } }
 
   /** The coalescing window in SECONDS (fence 12) — the setting, bounded;
@@ -6924,8 +6941,9 @@ function create(deps = {}) {
       const w = item.watcher;
       const pk = pkOf(w.principal);
       // lane channel-agent-watch W5: a NEXT-TURN watcher is never woken — its hits ride its next turn (the ladder's
-      // durable stash, drained at the next injection): no billed turn, no cap spent, no ledger row (F.deliveryModeOf
-      // is the ONE reader; a row written before the choice existed reads `wake`, as it always behaved)
+      // durable stash, drained at the next injection): no billed turn, no cap spent, no wake row — the woken-for
+      // ledger still takes its rows (lane channel-recall-ledger) (F.deliveryModeOf is the ONE reader; a row written
+      // before the choice existed reads `wake`, as it always behaved)
       if (F.deliveryModeOf(w) === 'next-turn') { runs.push(stashHits(rec, convId, hits, { item, pk, batch })); continue; }
       if (w.notify === 'digest') {
         // an INHERITED digest delivers ONCE per window for its whole scope (§7.3)
@@ -6947,33 +6965,57 @@ function create(deps = {}) {
   /**
    * lane channel-agent-watch W5: A NEXT-TURN WATCHER'S HITS — the same block a wake carries, handed to the ladder's
    * durable stash for the watcher's conversation (drained into its next turn's context); never the ladder itself, so
-   * never a billed turn. A group picks its member like a wake does; nobody live ⇒ the hits wait as pending (the next
-   * wake or turn of that watcher carries them). One batch never hands one session the same hit twice.
+   * never a billed turn. A group picks its member like a wake does; nobody live ⇒ the hits wait as pending on the
+   * NEXT-TURN road (`road: 'next-turn'` — the next boot's flush stashes them, never wakes; lane boot-flush-next-turn).
+   * THE CARRY (lane stash-pending-live): what this watcher parked rides the NEXT hand-over to a live member, the way a
+   * wake carries held hits — ONE block, the parked hits first, the fresh after; the ledger door takes every carried
+   * message; the carried rows are cleared (`clearCarried`). Started by a fresh hit (here) or by a member's own turn
+   * (`carryParked`), and read on the conversation's CHAIN (the boot flush and every wake read `pending` there), so two
+   * doors never hand one parked row over twice. Nobody live ⇒ the parked rows stay as they are.
+   * `fromPending` = a flush handing over STORED hits (`stashPending`): they are already pending, so a hold never
+   * re-parks them. One batch never hands one session the same hit twice.
    */
-  async function stashHits(rec, convId, hits, { item, pk, batch = null } = {}) {
+  async function stashHits(rec, convId, hits, { item, pk, batch = null, fromPending = null, carry = false, prefer = null } = {}) {
     const en = store.index.peek(`${rec.id}/${convId}`);
-    if (!en || stopped) return { ok: false, why: stopped ? 'stopped' : 'gone' };
+    if (!en) return { ok: false, why: 'gone' };
     const w = item.watcher;
+    // a fresh hit whose watcher holds parked hits goes onto the conversation's chain, where the carry reads them
+    if (!fromPending && !carry && !stopped && parkedNextTurn(en, w, pk)) return billedWake({ conv: `${rec.id}/${convId}` }, () => stashHits(rec, convId, hits, { item, pk, batch, carry: true, prefer }));
+    const parked = carry ? parkedNextTurn(en, w, pk) : null;
+    if (carry && !parked && !hits.length) return { ok: true, n: 0, why: 'nothing-parked' };
     // THE GATE (§65): the watcher is still in effect for this principal NOW — its access (here or above) may have gone
     // since the batch was matched; a watcher no longer in effect hands nothing
     const still = stillInEffect(rec, convId, pk);
     if (!still || !still.watched) { log.log(`[channels] ${rec.id}/${convId}: ${pk} no longer watches — the next-turn notification is dropped`); return { ok: false, why: 'not-watching' }; }
-    const target = resolveTarget(w, batch);
-    if (!target.cid || !deliver || typeof deliver.stashFor !== 'function') { await keepPending(rec, convId, hits, 0, pk); return { ok: false, held: true, why: target.why || 'no stash wired' }; }
+    // a stop while this waited on the chain HOLDS the fresh hits (the boot flush stashes them) — never drops them
+    const target = stopped ? { cid: null, why: 'stopped' } : resolveTarget(w, batch, prefer);
+    if (!target.cid || !deliver || typeof deliver.stashFor !== 'function') { if (!fromPending) await keepPending(rec, convId, hits, 0, pk, 'next-turn'); return { ok: false, held: true, why: target.why || 'no stash wired' }; }
     const seen = batch && batch.got ? batch.got.get(target.cid) : null;
-    const fresh = seen ? hits.filter((h) => !(h.record && seen.has(h.record.id))) : hits;
-    if (!fresh.length) return { ok: true, deduped: true, cid: target.cid, n: 0 };
+    // the carried rows first (oldest first, as a wake carries held hits); a fresh hit that is also parked rides once
+    const all = parked ? [...parked.hits, ...hits.filter((h) => !(h.record && parked.ids.has(h.record.id)))] : hits;
+    const fresh = seen ? all.filter((h) => !(h.record && seen.has(h.record.id))) : all;
+    const carriedNow = fromPending || parked;
+    if (!fresh.length && !(parked && parked.elided)) {
+      if (parked) await store.index.update(() => { const e2 = store.index.entry(rec.id, convId, { create: false }); if (!e2) return; healP2(e2); clearCarried(e2, pk, wakeEffOf(e2), parked); });   // this batch already handed them to that session
+      return { ok: true, deduped: true, cid: target.cid, n: 0 };
+    }
     const label = rec.label || rec.id;
     const title = humanNameOf(rec, en) || convId;   // B-c127 THE NAME LADDER (lane channel-agent-watch's next-turn wake, composed at the 2.369.202 integration)
     const inherited = item.source === 'conversation' ? null : { kind: item.source, label: item.source === 'pattern' ? F.patternSummary((patternById(item.patternId) || {}).pattern || { rules: [] }) : null };
-    const text = F.renderWakeBlock({ adapterLabel: label, title, convId, hits: fresh, elided: 0, inherited, others: othersFor(wakeEffOf(en), pk), factLine: wakeFactLineOf(rec) });
+    const text = F.renderWakeBlock({ adapterLabel: label, title, convId, hits: fresh, elided: carriedNow ? carriedNow.elided : 0, inherited, others: othersFor(wakeEffOf(en), pk), factLine: wakeFactLineOf(rec) });
     let st = null;
     const fromName = `Channels · ${label}`;
     try { st = deliver.stashFor(target.cid, { source: 'channel', kind: 'notification', fromName, text, about: stashAbout({ keys: [`${rec.id}/${convId}`], cid: target.cid }) }); }
-    catch (err) { log.warn(`[channels] ${rec.id}/${convId}: the next-turn notification for ${pk} could not be stashed: ${(err && err.message) || err}`); await keepPending(rec, convId, fresh, 0, pk); return { ok: false, held: true, why: 'stash-failed' }; }
+    catch (err) { log.warn(`[channels] ${rec.id}/${convId}: the next-turn notification for ${pk} could not be stashed: ${(err && err.message) || err}`); if (!fromPending) await keepPending(rec, convId, fresh.filter((h) => !parked || !parked.hits.includes(h)), 0, pk, 'next-turn'); return { ok: false, held: true, why: 'stash-failed' }; }
     if (batch && batch.got) { const g0 = batch.got.get(target.cid) || new Set(); for (const h of fresh) if (h.record && h.record.id) g0.add(h.record.id); batch.got.set(target.cid, g0); }
-    log.log(`[channels] ${rec.id}/${convId}: ${fresh.length} hit(s) for ${pk} ride its next turn (next-turn notification, no wake)`);
-    return { ok: true, stashed: true, next: true, cid: target.cid, n: fresh.length, stored: st && st.stored };
+    // the carried rows were handed over — clear those and only those (still on the chain: the next reader sees them gone)
+    if (parked) { await store.index.update(() => { const e2 = store.index.entry(rec.id, convId, { create: false }); if (!e2) return; healP2(e2); clearCarried(e2, pk, wakeEffOf(e2), parked); }); notify([convId]); }
+    // THE LEDGER DOOR — the free stash road (lane channel-recall-ledger, B-70d2): the hits reached this conversation, so a
+    // later recall of one of them is noted here too (was: no row — a next-turn watch, the agent's default, heard nothing)
+    try { await store.index.update(() => { const e2 = store.index.entry(rec.id, convId, { create: false }); if (e2) noteDelivered(e2, fresh, target.cid, now()); }); }
+    catch (err) { log.warn(`[channels] ${rec.id}/${convId}: the woken-for ledger could not take the next-turn delivery for ${pk}: ${(err && err.message) || err}`); }
+    log.log(`[channels] ${rec.id}/${convId}: ${fresh.length} hit(s) for ${pk} ride its next turn (next-turn notification, no wake)${parked ? ` — ${parked.hits.length} parked while nobody was live carried along` : ''}`);
+    return { ok: true, stashed: true, next: true, cid: target.cid, n: fresh.length, ...(parked ? { carried: parked.hits.length } : {}), stored: st && st.stored };
   }
   /** Persist hits as PENDING (bounded, elided counted, tagged with the
    *  watcher they wait for) and arm ONE timer per (conversation, watcher)
@@ -6991,12 +7033,13 @@ function create(deps = {}) {
     if (timer.unref) timer.unref();
     wakeTimers.set(key, { timer, kind, startedAt });
   }
-  async function keepPending(rec, convId, hits, elided = 0, pk = null) {
+  async function keepPending(rec, convId, hits, elided = 0, pk = null, road = 'wake') {
     await store.index.update(() => {
       const e2 = store.index.entry(rec.id, convId, { create: false });
       if (!e2) return;
       healP2(e2);
-      for (const h of hits) e2.pending.push({ record: h.record, why: h.why || [], ...(h.sent ? { sent: h.sent } : {}), at: now(), ...(pk ? { for: pk } : {}) });
+      if (hits.length) parkedKeys.add(`${rec.id}/${convId}`);
+      for (const h of hits) e2.pending.push({ record: h.record, why: h.why || [], ...(h.sent ? { sent: h.sent } : {}), at: now(), road, ...(pk ? { for: pk } : {}) });
       if (!pk) { e2.pendingElided += Number(elided) || 0; return; }
       if (Number(elided) > 0) e2.pendingElidedBy[pk] = (Number(e2.pendingElidedBy[pk]) || 0) + Number(elided);
       // PENDING_CAP per (conversation, watcher): the oldest of THIS watcher's go
@@ -7008,6 +7051,67 @@ function create(deps = {}) {
         e2.pending = e2.pending.filter((_, i) => !drop.has(i));
       }
     });
+  }
+  /** THE ROAD OF STORED HITS (lane boot-flush-next-turn, MONEY): a pending row remembers the road it was parked on
+   *  (`road: 'next-turn'` from `stashHits` — nobody was live; `'wake'` from a held wake / a window). A door may start a
+   *  BILLED wake from stored hits only when BOTH say wake: the watch's delivery mode NOW (`F.deliveryModeOf`) and the
+   *  road of what it carries — every row parked on the next-turn road ⇒ the free stash. A row written before the field
+   *  (no `road`) is read by the watch's CURRENT mode, never defaulted to a wake (was: the boot flush billed a next-turn
+   *  watch whose hits waited while nobody was live). Every door that starts a delivery from stored hits asks here
+   *  first — `flushPending`, `flushScopeNow`, `scheduleBootPending` (census: scripts/test-spend-paths.mjs §10c). */
+  function pendingRoadOf(w, pend) {
+    if (F.deliveryModeOf(w) === 'next-turn') return 'next-turn';
+    const roads = (pend && pend.roads) || [];
+    return roads.length && roads.every((r) => r === 'next-turn') ? 'next-turn' : 'wake';
+  }
+  /** A flush's NEXT-TURN road: the stored hits go to the free stash (`stashHits`, the next-turn door) and are cleared
+   *  once it took them; nobody live ⇒ they stay pending as they are. Never the ladder, never a wake row. */
+  async function stashPending(rec, convId, item, pk, pend) {
+    const r = await stashHits(rec, convId, pend.hits, { item, pk, fromPending: pend });
+    if (!r || !r.ok) return r;
+    await store.index.update(() => { const e2 = store.index.entry(rec.id, convId, { create: false }); if (!e2) return; healP2(e2); clearCarried(e2, pk, wakeEffOf(e2), pend); });
+    notify([convId]);
+    return r;
+  }
+  /** WHAT WATCHER `pk` PARKED THAT RIDES THE FREE ROAD NOW (lane stash-pending-live): its stored hits when the ONE road
+   *  judge (`pendingRoadOf`) says next-turn, else null — a wake road's rows wait for their own flush. The carry's only
+   *  read of stored hits (`stashHits` on the conversation's chain, `carryParked` to choose what to queue). */
+  function parkedNextTurn(en, w, pk, eff = null) {
+    if (!en || ((!Array.isArray(en.pending) || !en.pending.length) && !elidedTotal(en))) return null;
+    const pend = pendingOf(en, pk, eff || wakeEffOf(en));
+    if (!pend.hits.length && !pend.elided) return null;
+    return pendingRoadOf(w, pend) === 'next-turn' ? pend : null;
+  }
+  /** A MEMBER'S OWN TURN CARRIES WHAT ITS WATCHERS PARKED (lane stash-pending-live): a hit parked while nobody was live
+   *  used to wait for the next hit or the next BOOT. The hook injection that drains the stash (agent-routes task-context
+   *  / prompt-context) asks here first: every parked conversation whose watcher reaches `cid` (a member of its group,
+   *  the agent named) queues a carry onto that conversation's chain — `stashHits` hands the parked hits to `cid`'s
+   *  stash (free; never a wake, never a timer) and they ride this member's next injection. `parkedKeys` = the
+   *  conversations a pending row was written to (keepPending, a wake's re-hold, the boot scan), pruned here when empty.
+   *  Answers how many carries it queued. */
+  function carryParked(cid) {
+    if (stopped || !cid || !parkedKeys.size) return 0;
+    let live = [];
+    try { live = liveSessions() || []; } catch { live = []; }
+    if (!live.some((x) => x && x.cid === cid)) return 0;   // a session not on the roster is nobody's target
+    const rows0 = store.index.live();
+    let n = 0;
+    for (const key of parkedKeys) {
+      const en = rows0[key];
+      if (!en || ((!Array.isArray(en.pending) || !en.pending.length) && !elidedTotal(en))) { parkedKeys.delete(key); continue; }
+      const rec = adapterRecords().adapters.find((r) => r.id === en.adapterId);
+      const eff = rec ? wakeEffOf(en) : null;
+      if (!eff) continue;
+      for (const item of eff.watchers) {
+        const pk = pkOf(item.watcher.principal);
+        if (!parkedNextTurn(en, item.watcher, pk, eff)) continue;
+        const t = resolveTarget(item.watcher, null, cid);
+        if (t.cid !== cid || !t.live) continue;
+        n++;
+        track(billedWake({ conv: key }, () => stashHits(rec, en.id, [], { item, pk, carry: true, prefer: cid })));
+      }
+    }
+    return n;
   }
   /** AN INHERITED DIGEST (account / pattern grain, §7.3): the hits wait on
    *  their own conversation (persisted, bounded — the same `pending`, tagged
@@ -7064,6 +7168,7 @@ function create(deps = {}) {
         if (!item || item.source !== source || (source === 'pattern' && item.patternId !== patternId)) continue;
         const pend = pendingOf(en, pk, eff);
         if (!pend.hits.length && !pend.elided) continue;
+        if (pendingRoadOf(item.watcher, pend) !== 'wake') continue;   // THE ROAD (lane boot-flush-next-turn): next-turn hits wait for the boot flush's free stash, never a billed digest
         if (!others) others = othersFor(eff, pk);
         groups.push({ title: humanNameOf(rec, en) || en.id, convId: en.id, hits: pend.hits, elided: pend.elided });   // B-c127: the ladder
         held.push({ key: en.key, id: en.id, eff, carried: pend });
@@ -7119,7 +7224,7 @@ function create(deps = {}) {
           clearCarried(e2, pk, h.eff, h.carried);
           e2.stats.wakes.push({ ...wk, n: h.carried.ids.size + h.carried.elided });
           e2.stats.wakes = F.pruneLedger(e2.stats.wakes, t);
-          noteWoken(e2, h.carried.hits, target.cid, t);   // lane channel-recall-engine-leg: the woken-for ledger of EVERY conversation the digest carried (was: single-conversation wakes only — a recall after a digest said nothing)
+          noteDelivered(e2, h.carried.hits, target.cid, t);   // THE LEDGER DOOR — the digest road (lane channel-recall-engine-leg): EVERY conversation the digest carried (was: single-conversation wakes only — a recall after a digest said nothing)
         }
       }); } catch (err) { log.warn(`[channels] scope digest ${sKey}: the ledger could not take the outcome — the reservation stays counted: ${(err && err.message) || err}`); }
       log.log(`[channels] scope digest ${sKey} → ${target.name || target.cid}: ${groups.length} conversation(s), ${n} hit(s) — ${ok ? `delivered via ${r.lane || 'message'}` : `${stashed ? 'stashed for the next turn' : 'held'}: ${(r && r.reason) || 'refused'}`}`);
@@ -7149,6 +7254,9 @@ function create(deps = {}) {
         if (!en || !item) continue;
         const pend = pendingOf(en, p, eff);
         if (!pend.hits.length && !pend.elided) continue;
+        // THE ROAD (lane boot-flush-next-turn, MONEY): hits a next-turn watch parked while nobody was live ride the free
+        // stash — the boot flush used to bill them as a wake (`spendReason: channel-message`) on a watch that asked never to be woken
+        if (pendingRoadOf(item.watcher, pend) === 'next-turn') { results.push(await stashPending(rec, convId, item, p, pend)); continue; }
         const n = pend.hits.length + pend.elided;
         const seconds = startedAt ? (now() - startedAt) / 1000 : 0;
         results.push(await billedWake({ scopeOf: () => scopeFor(rec, convId, p) }, () => wakeNow(rec, convId, pend.hits, {
@@ -7167,7 +7275,7 @@ function create(deps = {}) {
    *  "keep for the next turn", NEVER "wake them all". `batch` (R4) = the
    *  sessions THIS batch already reached (`got`: cid → record ids): a group
    *  prefers a member the batch has not reached yet. */
-  function resolveTarget(w, batch = null) {
+  function resolveTarget(w, batch = null, prefer = null) {
     let live = [];
     try { live = liveSessions() || []; } catch (err) { log.warn(`[channels] liveSessions threw: ${(err && err.message) || err}`); }
     if (w.principal.kind === 'agent') {
@@ -7186,6 +7294,7 @@ function create(deps = {}) {
     const mt = F.fanTargetOf(w.principal);
     if (mt) { const s = live.find((x) => x && x.cid === mt); return { cid: mt, name: (s && s.name) || w.principal.member || mt, via: 'group', live: !!s, cursor: null }; }
     const all = live.filter((x) => x && Array.isArray(x.groups) && x.groups.includes(w.principal.id)).map((x) => x.cid);
+    if (prefer && all.includes(prefer)) { const s = live.find((x) => x.cid === prefer); return { cid: prefer, name: (s && s.name) || prefer, via: 'group', live: true, cursor: null }; }   // lane stash-pending-live: the member whose turn carries
     const got = batch && batch.got ? batch.got : null;
     const fresh = got ? all.filter((c) => !got.has(c)) : all;
     const members = fresh.length ? fresh : all;
@@ -7459,7 +7568,7 @@ function create(deps = {}) {
       healP2(e2);
       e2.stats.wakes.push({ ...wk, id: resId });
       e2.stats.wakes = F.pruneLedger(e2.stats.wakes, t);
-      if (ok || stashed) noteWoken(e2, hits, target.cid, t);   // lane channel-record-revisions: the woken-for ledger
+      if (ok || stashed) noteDelivered(e2, hits, target.cid, t);   // THE LEDGER DOOR — the wake road: billed, or refused and stashed (lane channel-record-revisions)
       e2.stats.lastRefusal = null;
       const own = watcherRef(ix, rec, e2, item);
       if (own) finalizeRow(own, resId, wk, t);
@@ -7469,7 +7578,8 @@ function create(deps = {}) {
       if (ok || stashed) clearCarried(e2, pk, eff, carried);
       else if (!stillWatched) clearCarried(e2, pk, eff, carried);   // nobody waits for them any more (prunePending would drop them next)
       else if (!fromPending) {
-        for (const h of freshHits) e2.pending.push({ record: h.record, why: h.why || [], at: t, for: pk });
+        for (const h of freshHits) e2.pending.push({ record: h.record, why: h.why || [], at: t, road: 'wake', for: pk });
+        if (freshHits.length) parkedKeys.add(`${rec.id}/${convId}`);
         if (Number(newElided) > 0) e2.pendingElidedBy[pk] = (Number(e2.pendingElidedBy[pk]) || 0) + Number(newElided);
       }
       if (target.via === 'group' && target.cursor !== null) rotationsOf(ix)[w.principal.id] = target.cursor;
@@ -7547,6 +7657,7 @@ function create(deps = {}) {
     for (const k of Object.keys(live)) {
       const en0 = live[k];
       if (!en0 || !Array.isArray(en0.pending) || (!en0.pending.length && !elidedTotal(en0))) continue;
+      parkedKeys.add(k);   // lane stash-pending-live: what nobody live takes at the boot flush, a member's turn carries later
       const en = store.index.peek(k);   // B-f32b: the rows holding hits are copied, never the index
       const eff = wakeEffOf(en);
       if (!eff || !eff.watchers.length) continue;
@@ -7556,8 +7667,8 @@ function create(deps = {}) {
         const pk = pkOf(item.watcher.principal);
         const pend = pendingOf(en, pk, eff);
         if (!pend.hits.length && !pend.elided) continue;
-        if (item.source !== 'conversation' && item.watcher.notify === 'digest') {
-          // an inherited digest's leftovers go out as ONE scope digest
+        if (item.source !== 'conversation' && item.watcher.notify === 'digest' && pendingRoadOf(item.watcher, pend) === 'wake') {
+          // an inherited digest's leftovers go out as ONE scope digest (a next-turn road's go to flushPending ⇒ the free stash)
           const sk = `scope:${scopeKeyOf(item, rec)}`;
           if (wakeTimers.has(sk)) continue;
           const timer = setTimeout(() => { wakeTimers.delete(sk); track(flushScope(rec, item.source, item.patternId, pk, {})); }, BOOT_PENDING_DELAY_MS);
@@ -7889,6 +8000,7 @@ function create(deps = {}) {
     agentWatch, agentUnwatch, agentWatchesFor, setAgentDirectory, directoryLists,   // lane channel-agent-watch
     attention, setJudge, labelJudged,   // lane decision-attention: the judged rows' scan, the account's "never judge", a label
     onFresh,   // lane channel-agent-watch: the hit dispatch, driven by test-channel-agent-watch ⑤ with records the store already holds
+    carryParked,   // lane stash-pending-live: a member's own turn (the hook's stash drain) carries what its watchers parked
     listFor, readFor, statusFor,
     flushPending: (adapterId, convId, opts) => { const rec = adapterRecords().adapters.find((r) => r.id === adapterId); return rec ? flushPending(rec, convId, opts || {}) : Promise.resolve({ ok: false, why: 'no-such-adapter' }); },
     // R4: a window is per (conversation | scope, WATCHER) — `key` names the conversation (or `scope:acct:<id>` / `scope:pat:<id>`), `principal` the watcher

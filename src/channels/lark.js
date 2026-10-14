@@ -303,7 +303,7 @@ const caps = Object.freeze({
   // per attachment as the user (`msg_type: image|file` + the key). Lark has NO mixed message as a user: the text goes
   // FIRST as its own message, the files follow under the same proposal; the receipt names each part that landed or not.
   // Gmail's bounds (Lark's own per-file ceilings are higher; a picture over 10 MB goes as a file)
-  sendAttachments: Object.freeze({ maxCount: 10, maxTotalBytes: 25e6, withText: true }),
+  sendAttachments: Object.freeze({ maxCount: 10, maxTotalBytes: 25e6, withText: true, alone: true }),   // lane composer-file-only-send: a file by itself is a message
   sendAttachmentsWhy: null,
   identityMarking: 'unknown',      // UNVERIFIED until one real send's `sender.sender_type` is read (§21 item 3) — treated as `marked`
   identityMarkingWhere: null,

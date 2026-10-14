@@ -298,7 +298,7 @@ const caps = Object.freeze({
   factsOf: true,
   // design 005 §2.B (B-fd1f): an agent's files ride ONE mail (multipart/mixed) with its text — 25 MB together (the
   // design's bound; Gmail's own limit on the encoded message answers by name if it is lower)
-  sendAttachments: Object.freeze({ maxCount: 10, maxTotalBytes: 25e6, withText: true }),
+  sendAttachments: Object.freeze({ maxCount: 10, maxTotalBytes: 25e6, withText: true, alone: true }),   // lane composer-file-only-send: a file by itself is a message
   olderHistory: 'none',
   budget: { unit: 'quota-unit', metered: true, ...budgetOf(MANIFEST.settings) },
   // lane R5 (2026-09-26, the owner: "gmail一直被限速 你可能要控制下gmail默认的读

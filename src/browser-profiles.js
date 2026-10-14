@@ -3335,18 +3335,27 @@ function parseVersion(v) {
  *   too-old     — installed and below the floor; ONE notice, capability off
  *   absent      — no binary; say nothing (an agent that never browses should
  *                 not be nagged about a tool it does not use)
- *   unknown     — a binary that would not state its version; treated like
- *                 too-old for CAPABILITY (fail closed on the feature) but it
- *                 says so in its own words rather than claiming a version
+ *   unknown     — a binary that would not state its version (or one never
+ *                 asked yet); treated like too-old for CAPABILITY (fail closed
+ *                 on the feature) but NOT YET KNOWN for the notice (B-0b8c):
+ *                 `settled` only once the owner's probe ladder is exhausted —
+ *                 one failed probe never decides for ever
  */
-function floorVerdict(installed, floor = FLOOR_VERSION) {
-  // `null`/`undefined` = THERE IS NO BINARY. `''` = there is one and it would
-  // not state a version — a different fact, and only one of them deserves a
-  // sentence, so they may not collapse into the same answer.
-  if (installed === null || installed === undefined) return { state: 'absent', installed: null, floor, sharedProfiles: false };
-  if (installed === '') return { state: 'unknown', installed: '', floor, sharedProfiles: false };
-  const c = cmpVersion(installed, floor);
-  if (c === null) return { state: 'unknown', installed: String(installed), floor, sharedProfiles: false };
+function floorVerdict(installed, floor = FLOOR_VERSION, probe = null) {
+  // `null` = THERE IS NO BINARY. `''` = there is one and it would not state a
+  // version — a different fact, and only one of them deserves a sentence, so
+  // they may not collapse into the same answer. B-0b8c: `undefined` = NEVER
+  // ASKED — not yet known (it read 'absent', a fact nobody had measured).
+  if (installed === undefined) return { state: 'unknown', installed: null, floor, sharedProfiles: false, settled: false };
+  if (installed === null) return { state: 'absent', installed: null, floor, sharedProfiles: false };
+  const c = installed === '' ? null : cmpVersion(installed, floor);
+  if (c === null) {
+    // B-0b8c: the probe's STATE rides the verdict — `settled` (the ladder is exhausted: the notice may be filed), the tries,
+    // why the last one gave no version and the span they covered; without a probe (a one-shot reader) it never settles
+    const p = probe && typeof probe === 'object' && probe.ok === false ? probe : null;
+    return { state: 'unknown', installed: String(installed), floor, sharedProfiles: false, settled: !!(p && p.exhausted),
+      ...(p ? { attempts: Number(p.attempts) || 1, why: p.why || null, spanMs: Math.max(0, Number(p.at) - Number(p.since)) || 0 } : {}) };
+  }
   if (c < 0) return { state: 'too-old', installed: String(installed), floor, sharedProfiles: false };
   return { state: 'ok', installed: String(installed), floor, sharedProfiles: true };
 }
@@ -3360,8 +3369,29 @@ function floorNotice(v) {
     return `Your agent-browser is too old for shared profiles — ${v.installed} is installed, ${v.floor} or newer is needed. `
       + `Per-session isolation is on and working; profiles several sessions can share stay off until you upgrade (npm install -g agent-browser@${v.floor}).`;
   }
-  return `Could not read the installed agent-browser version, so shared profiles stay off. `
-    + `Per-session isolation is on and working. \`npm ls -g agent-browser\` shows what is installed.`;
+  // B-0b8c: 'unknown' is NOT YET KNOWN until the owner's ladder is exhausted — nothing is said while it still asks
+  if (!v.settled) return null;
+  const n = Number(v.attempts) || 1;
+  return `Could not read the agent-browser version after ${n} ${n === 1 ? 'try' : 'tries'} over ${probeSpanWords(v.spanMs)}${v.why ? ` (${v.why})` : ''}: shared profiles stay off until it answers. `
+    + `Per-session isolation is on and working; \`npm ls -g agent-browser\` shows what is installed.`;
+}
+/** B-0b8c: the span a probe ladder covered, in words ("8 seconds", "14 minutes"). */
+function probeSpanWords(ms) {
+  const s = Math.max(1, Math.round((Number(ms) || 0) / 1000));
+  if (s < 90) return `${s} second${s === 1 ? '' : 's'}`;
+  const m = Math.round(s / 60);
+  return `${m} minute${m === 1 ? '' : 's'}`;
+}
+/** B-0b8c: the For-you notice's detail (the settled 'unknown' — `floorNotice` is its text): when it asked, how long each
+ *  try waited, what Check again does, and that the notice withdraws itself. `retryMs` / `timeoutMs` = the ladder's. */
+function floorNoticeDetail(v, { retryMs = [], timeoutMs = 0 } = {}) {
+  if (!v || v.state !== 'unknown' || !v.settled) return null;
+  const w = (ms) => (ms < 1000 ? `${ms} ms` : ms < 60e3 ? `${Math.round(ms / 1000)} s` : `${Math.round(ms / 60e3)} min`);
+  const rungs = (retryMs || []).map(w);
+  const asked = rungs.length ? `VibeSpace asked, then asked again ${rungs.length > 1 ? rungs.slice(0, -1).join(', ') + ' and ' + rungs[rungs.length - 1] : rungs[0]} after each miss` : 'VibeSpace asked once';
+  return `${asked}${timeoutMs > 0 ? `, each time waiting up to ${w(timeoutMs)} for an answer` : ''}. `
+    + 'Each conversation\'s own browser keeps working meanwhile; only profiles several conversations share wait for the answer. '
+    + 'Check again asks once more now — this notice goes away by itself the moment the version reads.';
 }
 
 module.exports = {
@@ -3378,7 +3408,7 @@ module.exports = {
   PIN_APPLIES_FROM, pinResolution, generatedConfig, generatedConfigParts,
   EPHEMERAL_DENY, deniedKeys, configFence, pinFenceConflict,
   PIN_ORIGINS, P0_PIN_ORIGINS, pinPick, pinForCreate, pinApplyNotice,
-  FLOOR_VERSION, cmpVersion, parseVersion, floorVerdict, floorNotice,
+  FLOOR_VERSION, cmpVersion, parseVersion, floorVerdict, floorNotice, floorNoticeDetail, // B-0b8c: + the settled-unknown notice's detail
   // P1 (§3.3–§3.5): the registry, the lease and the keeper's verdicts
   PROFILE_ID_RE, mintProfileId, isProfileId, profileDirName, PROVIDERS, OWNER_KINDS, LABEL_MAX, cleanLabel,
   normalizeProxy, proxyPublicView, validateProfileInput, newProfileRecord, normalizeRegistry, findProfile, publicProfileView,

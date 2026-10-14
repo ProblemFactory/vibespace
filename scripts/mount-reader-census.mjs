@@ -66,7 +66,7 @@ export const ROWS = [
   ['src/proc-identity.js', 'own-tree', 7, null, PROC],
   ['src/proc-listen.js', 'own-tree', 4, null, PROC],
   ['src/quota-model-migrate.js', 'own-tree', 2, null, CLI],
-  ['src/rate-limit-capture.js', 'own-tree', 3, null, CLI],
+  ['src/rate-limit-capture.js', 'own-tree', 2, null, CLI], // lane oat-identity-fix-r3 −1: the `.window-` sidecar read moved to its ONE reader (src/window-stamp.js)
   ['src/reading-repair.js', 'own-tree', 14, null, CLI], // B-1319: +4 = prefetchAnchorRows (readdir / stat / readFile through fs.promises) + the size+mtime check before its rows are taken
   ['src/remote-fs.js', 'own-tree', 1, null, DATA],
   ['src/routes/apps.js', 'own-tree', 4, null, DATA],
@@ -144,7 +144,7 @@ export const ROWS = [
   ['src/server/tls.js', 'exempt', 5, null, 'data/tls (its own store: state.json, the Tailscale certificate) + the operator’s VIBESPACE_TLS_CERT / _KEY files — boot config, never a mount'],
   ['src/server/unexpected-exit.js', 'own-tree', 1, null, CLI],
   ['src/server/usage-index.js', 'own-tree', 1, null, CLI],
-  ['src/server/usage-pool-engine.js', 'own-tree', 26, null, CLI],
+  ['src/server/usage-pool-engine.js', 'own-tree', 25, null, CLI], // lane oat-identity-fix-r3 −1: the `.window-` sidecar read moved to its ONE reader (src/window-stamp.js)
   ['src/server/usage-probe-log.js', 'own-tree', 3, null, CLI],
   ['src/server/window-targets-engine.js', 'own-tree', 4, null, DATA],
   ['src/server/wrapper-files.js', 'own-tree', 4, null, PROC],
@@ -166,12 +166,13 @@ export const ROWS = [
   ['src/usage-cold-walk.js', 'own-tree', 3, null, CLI], // r3: + the sync one-line read (a hash hit's string compare) // B-9428 r2: the ledger's cold rows at their (shard, offset) — the worker's fold, aggregate()/rows(), the popup's one line
   ['src/usage-index-worker.js', 'own-tree', 6, null, CLI],
   ['src/usage-origin-backfill.js', 'own-tree', 10, null, CLI],
-  ['src/usage-routes.js', 'own-tree', 24, null, CLI],
+  ['src/usage-routes.js', 'own-tree', 23, null, CLI], // lane oat-identity-fix-r3 −1: the `.window-` sidecar read moved to its ONE reader (src/window-stamp.js)
   ['src/usage-walker.js', 'user-path', 12, 'DOOR\\.blocked\\(', 'the usage walk: a blocked project folder skipped this pass, said once'],
   ['src/user-todos.js', 'own-tree', 1, null, DATA],
   ['src/vnc.js', 'own-tree', 3, null, PROC],
   ['src/webdav.js', 'user-path', 16, 'DOOR\\.blocked\\(', 'a WebDAV share root: 503 by name'],
-  ['src/weekly-lanes-unfold.js', 'own-tree', 9, null, CLI],
+  ['src/weekly-lanes-unfold.js', 'own-tree', 8, null, CLI], // lane oat-identity-fix-r3 −1: the `.window-` sidecar read moved to its ONE reader (src/window-stamp.js)
+  ['src/window-stamp.js', 'own-tree', 1, null, DATA], // lane oat-identity-fix-r3: the `.window-` sidecar's ONE reader (data/usage-cache)
   ['src/window-targets.js', 'own-tree', 2, null, PROC],
   ['src/workflow-usage-tailer.js', 'own-tree', 4, null, CLI],
   ['src/ws-create.js', 'own-tree', 4, null, CLI],

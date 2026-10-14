@@ -91,6 +91,7 @@
   "/api/browser/cli",
   "/api/browser/clone-sources",
   "/api/browser/display",
+  "/api/browser/floor",
   "/api/browser/housekeeping",
   "/api/browser/install",
   "/api/browser/kept",

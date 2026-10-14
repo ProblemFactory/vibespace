@@ -30,6 +30,17 @@
  * never an id) and stamped from it at boot (`stampIdentities`); a legacy
  * record disconnected before it was stamped holds no evidence and takes the
  * next consent (said in the kb).
+ *
+ * lane slack-grid-identity (2026-10-14, owner + userW: the fleet's Slack workspace moved into an Enterprise Grid; every
+ * workspace token died and every re-authorize was REFUSED as another account): A SLACK ACCOUNT IS JUDGED BY ITS PARTS.
+ * `auth.test` names the person (`user_id`), the workspace (`team_id`) and, once the workspace is in an Enterprise
+ * organisation, the org (`enterprise_id`); the record's `userId` is only their JOINED display string (`[E…/]T…/U…`,
+ * design D11), and comparing that string refused the same person the day Slack added the org to the name. The parts
+ * (`memberId` / `teamId` / `orgId` — vendor-neutral keys: a shared channel file spells no vendor id, test-architecture
+ * §83) are read off the stamp, else parsed from the joined string — a legacy
+ * record (every record on the fleet) needs no migration. The same account = the same user AND (the same workspace OR
+ * the same org, both naming one). The org a later sign-in names is LEARNED by the one stamp rule (`stampIdentity`):
+ * the record's identity is rewritten once to the richer form, and a sign-in that does not name it keeps it.
  */
 const IDENTITY_KEYS = Object.freeze(['email', 'openId', 'unionId', 'userId']);
 /** verify r7: an `email` key is an identity only when it LOOKS LIKE AN ADDRESS — a profile answering whitespace or a
@@ -37,6 +48,25 @@ const IDENTITY_KEYS = Object.freeze(['email', 'openId', 'unionId', 'userId']);
  *  an off-contract vendor), and a Lark DISPLAY NAME containing '@' ("Alice @ Sales") was stamped at boot as an email. */
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 function looksLikeEmail(s) { return typeof s === 'string' && EMAIL_RE.test(s.trim()); }
+/** lane slack-grid-identity: Slack's id shapes (lowercased, as every identity value is): the org `E…`, the workspace
+ *  `T…`, the person `U…` / `W…` (an org-wide user). The parts are never IDENTITY_KEYS — a shared workspace is not a
+ *  shared person (the generic rule is "one common key equal"). */
+const SLACK_JOINED_RE = /^(?:(e[a-z0-9_]{1,40})\/)?(t[a-z0-9_]{1,40})\/([uw][a-z0-9_]{1,40})$/;
+/** The Slack parts an identity names — its stamped `memberId` / `teamId` / `orgId`, else its joined `userId` parsed — or null (not Slack). */
+function slackPartsOf(idn) {
+  if (!idn || typeof idn !== 'object') return null;
+  const s = (k) => (idn[k] == null ? '' : String(idn[k]).trim().toLowerCase());
+  const joined = s('memberId') && s('teamId') ? `${s('orgId') ? `${s('orgId')}/` : ''}${s('teamId')}/${s('memberId')}` : s('userId');
+  const m = SLACK_JOINED_RE.exec(joined);
+  return m ? { user: m[3], team: m[2], enterprise: m[1] || null } : null;
+}
+function joinedSlack(p) { return `${p.enterprise ? `${p.enterprise}/` : ''}${p.team}/${p.user}`; }
+/** THE SLACK RULE: the same person AND (the same workspace OR the same org, both naming one) — a workspace that joined
+ *  an org keeps its team id and its people keep their user ids; user ids are org-wide, so a move between two of the
+ *  org's workspaces is the same person too. */
+function sameSlackAccount(a, b) {
+  return !!a && !!b && a.user === b.user && (a.team === b.team || (!!a.enterprise && a.enterprise === b.enterprise));
+}
 
 /** The identity a token record names: `{email}` (Gmail) / `{openId, unionId, userId}` (Lark), only the keys present. */
 function identityOf(token) {
@@ -47,6 +77,8 @@ function identityOf(token) {
     if (k === 'email' && !looksLikeEmail(String(v))) continue;   // verify r7: a non-address names nobody
     out[k] = String(v).trim().toLowerCase();
   }
+  const sp = slackPartsOf(token);   // lane slack-grid-identity: a Slack identity carries its parts beside the joined `userId`
+  if (sp) { out.memberId = sp.user; out.teamId = sp.team; if (sp.enterprise) out.orgId = sp.enterprise; }
   return out;
 }
 /** The identity the record holds: its stamped `identity`, else the token it HOLDS (`storedToken`, decrypted by the
@@ -75,6 +107,10 @@ function namelessSentence(vendor, why) {
 /** `null` = the same person (or nothing to judge); else `{key, held, offered}` naming the first differing common key. */
 function identityMismatch(held, offered) {
   const h = identityOf(held), o = identityOf(offered);
+  // lane slack-grid-identity: two Slack identities are judged by their PARTS, never by the joined string (the refusal
+  // names both joined strings — the sentence a real other account reads is unchanged)
+  const hs = slackPartsOf(h), os = slackPartsOf(o);
+  if (hs && os) return sameSlackAccount(hs, os) ? null : { key: 'userId', held: joinedSlack(hs), offered: joinedSlack(os) };
   const common = IDENTITY_KEYS.filter((k) => h[k] && o[k]);
   if (!common.length) return null;
   if (common.some((k) => h[k] === o[k])) return null;
@@ -85,5 +121,28 @@ function identityMismatch(held, offered) {
 function mismatchSentence(label, mm) {
   return `${label} is connected as ${mm.held}; this sign-in is ${mm.offered} — a re-authorize must be the same account (to read another account, add it as a new account, or remove this one first)`;
 }
+/** lane slack-grid-identity: THE ONE STAMP RULE — the identity a record holds after an ACCEPTED write (the caller judged
+ *  `identityMismatch` first): the offered keys over the stamp (Lark's new app id replaces the old, as before), and a
+ *  Slack identity in its richest form — an org the sign-in names is LEARNED (`learned` = its id, when the stamp named
+ *  none or another), an org it does not name is KEPT while the workspace is the same (a fact the vendor added is never
+ *  forgotten by a sign-in that omits it). `changed` = whether the record's identity must be rewritten (an unchanged
+ *  identity is not — the second sign-in after the upgrade writes nothing new). */
+function stampIdentity(stamp, offered) {
+  const cur = stamp && typeof stamp === 'object' ? stamp : {};
+  const o = identityOf(offered);
+  if (!Object.keys(o).length) return { identity: cur, changed: false, learned: null };
+  const next = { ...cur, ...o };
+  const cs = slackPartsOf(identityOf(cur)), os = slackPartsOf(o);
+  let learned = null;
+  if (os) {
+    const enterprise = os.enterprise || (cs && cs.user === os.user && cs.team === os.team ? cs.enterprise : null);
+    if (cs && os.enterprise && cs.enterprise !== os.enterprise) learned = os.enterprise;
+    const p = { user: os.user, team: os.team, enterprise };
+    next.userId = joinedSlack(p); next.memberId = p.user; next.teamId = p.team;
+    if (enterprise) next.orgId = enterprise; else delete next.orgId;
+  }
+  const canon = (x) => JSON.stringify(Object.keys(x).sort().map((k) => [k, x[k]]));
+  return { identity: next, changed: canon(next) !== canon(cur), learned };
+}
 
-module.exports = { IDENTITY_KEYS, EMAIL_RE, looksLikeEmail, identityOf, heldIdentity, identityMismatch, mismatchSentence, namelessSentence, cancelledSentence };
+module.exports = { IDENTITY_KEYS, EMAIL_RE, looksLikeEmail, identityOf, heldIdentity, identityMismatch, mismatchSentence, namelessSentence, cancelledSentence, slackPartsOf, sameSlackAccount, stampIdentity };

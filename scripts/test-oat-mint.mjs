@@ -374,7 +374,7 @@ console.log('§5 F1 — a token is saved only under the account it PROVES');
   r = await runMint(O, sub, { ident: null }); r.mint.cancel(r.id);
   ok(r.mint._held.size === 0 && r.mint.get(r.id).phase === 'cancelled', 'cancel during the pick drops the held token');
   // THE SECOND LOOK (owner ruling): ONE /usage panel read with the NEW token, its window vs every row's anchor
-  const anchors = { [sub]: winOf(PANEL_A), [sub2]: winOf(PANEL_B) };
+  const anchors = { [sub]: { ...winOf(PANEL_A), producer: 'login' }, [sub2]: { ...winOf(PANEL_B), producer: 'login' } }; // the ⟳ panel's stamps name their producer (lane oat-identity-fix-r2)
   ok(anchors[sub].sevenDay && anchors[sub2].sevenDay && anchors[sub].sevenDay !== anchors[sub2].sevenDay, 'fixture: two rows with distinct weekly anchors');
   const probeFacts0 = readRec().filter((x) => x.probe).length;
   r = await runMint(O, sub, { ident: null, probe: true, panel: PANEL_A, windows: () => anchors });
@@ -710,7 +710,7 @@ console.log('§8 the materialized file — the token\'s ONE place on disk + the 
   ok(c.actFnsMissing.length === 0, `⑦ the ${OAT_ACT_FNS.length} oat functions the closure starts from all exist in accounts.js (a rename would empty the seed silently)`, c.actFnsMissing);
   ok(actOk(c), `⑦ the oat acts reach exactly ${Object.keys(ACT_MODULES).length} modules (account-material's named doors, secret-box's key mint, four PURE modules with none) and only ${ACT_EXT.join(' / ')} — no dynamic require`, { mods: c.act.mods, ext: c.act.ext, dyn: c.act.dyn, doors: Object.fromEntries(Object.entries(c.act.doors).filter(([rel, d]) => JSON.stringify(d) !== JSON.stringify((ACT_MODULES[rel] || ['(unnamed)']).slice().sort()))) });
   // ⑧ every module edge accounts.js has, by function — a NEW one (a module a function reaches) is judged here first
-  const ACC_EDGES = ['(top) ./backend-caps.js', '(top) ./cli-caps.js', '(top) ./harnesses', '(top) ./login-expiry.js', '(top) ./login-state.js', '(top) ./secret-box.js', '(top) ./slot-transitions.js', '(top) crypto', '(top) fs', '(top) os', '(top) path', '_healPoolsAfterRemoval ./account-material.js', '_syncOatFileNow ./account-material.js', 'ensureSessionPoolLink ./account-material.js', 'importBundle ./account-material.js', 'mergeSubscription ./account-material.js', 'setPoolTarget ./account-material.js'];
+  const ACC_EDGES = ['(top) ./backend-caps.js', '(top) ./cli-caps.js', '(top) ./harnesses', '(top) ./login-expiry.js', '(top) ./login-state.js', '(top) ./oat-identity-model.js', '(top) ./secret-box.js', '(top) ./slot-transitions.js', '(top) crypto', '(top) fs', '(top) os', '(top) path', '_healPoolsAfterRemoval ./account-material.js', '_syncOatFileNow ./account-material.js', 'ensureSessionPoolLink ./account-material.js', 'importBundle ./account-material.js', 'mergeSubscription ./account-material.js', 'setPoolTarget ./account-material.js'];
   ok(JSON.stringify(c.accEdges) === JSON.stringify(ACC_EDGES), `⑧ accounts.js requires exactly its ${ACC_EDGES.length} named module edges, by function (verify r2 F1: an inline require in an act was a door nobody counted)`, c.accEdges.filter((x) => !ACC_EDGES.includes(x)).concat(ACC_EDGES.filter((x) => !c.accEdges.includes(x)).map((x) => '-' + x)));
   const planted = accSrc.replace("    a.oatEnc = this._enc(token);\n", "    a.oatEnc = this._enc(token);\n    fs.writeFileSync(this.subCredsPath(id), JSON.stringify({ claudeAiOauth: { accessToken: token } }), { mode: 0o600 });\n");
   const cp = planted !== accSrc ? census({ 'src/accounts.js': planted }) : null;

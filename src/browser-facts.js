@@ -118,9 +118,63 @@ function versionFromProbe({ err = null, stdout = '', stderr = '' } = {}) {
   const v = named(so) || named(se) || B.parseVersion(so) || (!err && B.parseVersion(se)) || null; // a CLI naming itself on stderr is still the CLI (a crash's stack trace never names it)
   return v ? v.join('.') : '';
 }
-function createBrowserFacts({ cmd = 'agent-browser', execFileImpl = execFile, now = () => Date.now(), ttlMs = VERSION_TTL_MS, env = process.env, pinned = null } = {}) {
+
+/**
+ * B-0b8c (lane browser-probe-transient) — ONE FAILED PROBE NEVER DECIDES FOR EVER. On the .268 boot the pinned binary
+ * (data/browser-tools, on the NFS mount) did not answer `--version` within 8 s under boot I/O: the ONE probe answered
+ * '' ("it ran and would not say"), a loud 「shared profiles stay off」 notice was filed, and the 10-min memo healed it
+ * minutes later — a notice a later tick silently reversed. A failed probe is now a STATE (`lastProbe()` →
+ * `{at, ok, why, attempts, since, nextAt, exhausted}`), and the owner that opts in (`retryMs` — the keeper, whose facts
+ * decide the act) asks again on THE LADDER: PROBE_RETRY_MS after each miss (5 s → 15 s → 45 s → 2 min → 10 min),
+ * stopped by the first answer, bounded — a miss after the last rung is `exhausted`, the ONE state a notice may be filed
+ * on. The ladder's probe, a reader's and the Check-again door's are the same single flight. Its timer is unref'd and
+ * ended by the owner's `stop()` (no timer outlives its owner). `ok` = a definite answer: a version, or "there is no
+ * binary" (a FACT, never retried).
+ */
+const PROBE_TIMEOUT_MS = 8000;
+const PROBE_RETRY_MS = Object.freeze([5e3, 15e3, 45e3, 120e3, 600e3]);
+/** Why a probe gave no version, in words (the notice and the facts API name it); null when it answered. */
+function probeWhy({ err = null, version = '', timeoutMs = PROBE_TIMEOUT_MS } = {}) {
+  if (version !== '') return null;
+  if (err && err.killed) return `timed out after ${timeoutMs < 1000 ? timeoutMs + ' ms' : Math.round(timeoutMs / 1000) + ' s'}`;
+  if (err && err.signal) return `ended by ${err.signal}`;
+  if (err && Number.isInteger(err.code)) return `exited ${err.code} without a version`;
+  if (err && err.code) return `could not run (${err.code})`;
+  if (err) return String(err.message || 'failed').slice(0, 120);
+  return 'answered without a version';
+}
+function createBrowserFacts({ cmd = 'agent-browser', execFileImpl = execFile, now = () => Date.now(), ttlMs = VERSION_TTL_MS, env = process.env, pinned = null,
+  timeoutMs = PROBE_TIMEOUT_MS, retryMs = null, timers = null } = {}) {
   let cached = null;          // { version: string|null, at: number, raw: string }
   let inFlight = null;
+  // B-0b8c: the probe STATE + the owner's ladder (`retryMs` null = no ladder: a one-shot reader, nothing is ever `exhausted`)
+  const ladder = Array.isArray(retryMs) ? retryMs.filter((ms) => Number.isFinite(ms) && ms >= 0) : null;
+  const T = timers || { set: (fn, ms) => { const h = setTimeout(fn, ms); if (h && h.unref) h.unref(); return h; }, clear: (h) => clearTimeout(h) };
+  let probe = null, misses = 0, since = null, rung = 0, retryTimer = null, stopped = false;
+  const listeners = new Set();
+  function noteProbe(version, why, startedAt) {
+    const at = now();
+    if (version !== '') { // an answer — a version, or the fact that there is no binary: the ladder ends here
+      const attempts = misses + 1;
+      misses = 0; since = null; rung = 0;
+      if (retryTimer) { T.clear(retryTimer); retryTimer = null; }
+      probe = { at, ok: true, why: null, attempts, since: startedAt, nextAt: null, exhausted: false };
+    } else {
+      if (!misses) since = startedAt;
+      misses++;
+      let nextAt = null, exhausted = false;
+      if (ladder && !stopped) {
+        if (retryTimer) nextAt = probe ? probe.nextAt : null; // a reader's miss while a rung waits: the rung stands
+        else if (rung < ladder.length) {
+          const ms = ladder[rung++];
+          nextAt = at + ms;
+          retryTimer = T.set(() => { retryTimer = null; probeVersion({ fresh: true }).catch(() => { }); }, ms);
+        } else exhausted = true;
+      }
+      probe = { at, ok: false, why, attempts: misses, since, nextAt, exhausted };
+    }
+    for (const fn of [...listeners]) { try { fn({ version, probe: { ...probe } }); } catch { /* a listener never breaks a probe */ } }
+  }
   const probeEnv = sanitizeProbeEnv(env);
   const binOf = execFileImpl === execFile ? binaryResolver(cmd, env, { ttlMs, now, pinned }) : () => cmd;
   let cachedBin = null; // lane browser-admin 2b: the version answer belongs to ONE binary — a pin change re-asks at once
@@ -128,25 +182,30 @@ function createBrowserFacts({ cmd = 'agent-browser', execFileImpl = execFile, no
   /** The installed version, or null when the binary is absent/unrunnable.
    *  NEVER throws: a probe that throws on a machine without the tool would turn
    *  "this user does not browse" into a spawn failure. */
-  function probeVersion() {
+  function probeVersion({ fresh = false } = {}) {
     const t = now();
     let binNow = null; try { binNow = binOf(); } catch { binNow = null; }
-    if (cached && t - cached.at < ttlMs && cachedBin === binNow) return Promise.resolve(cached.version);
+    // `fresh` (the ladder's rung, the Check-again door): past the memo — still the ONE flight a reader shares
+    if (!fresh && cached && t - cached.at < ttlMs && cachedBin === binNow) return Promise.resolve(cached.version);
     if (inFlight) return inFlight;
-    inFlight = new Promise((resolve) => {
+    // B-0b8c: the flight is cleared by ITS answer only — and an answer that came synchronously (a fake execFile) is never
+    // left standing as the flight (it would answer every later `fresh` probe with the stale value)
+    let flight = null, answered = false;
+    flight = new Promise((resolve) => {
       let done = false;
-      const finish = (version, raw) => {
-        if (done) return; done = true;
+      const finish = (version, raw, why = null) => {
+        if (done) return; done = true; answered = true;
         cached = { version, at: now(), raw: String(raw || '').slice(0, 200) };
         cachedBin = binNow;
-        inFlight = null;
+        if (inFlight === flight) inFlight = null;
+        noteProbe(version, why, t);
         resolve(version);
       };
       const bin = binOf();
       // absent (or only the shim on PATH) = "there is no binary", the cached FACT
       if (!bin) return finish(null, 'binary_absent: no browser CLI on PATH beside the shim');
       try {
-        execFileImpl(bin, ['--version'], { timeout: 8000, encoding: 'utf8', env: probeEnv }, (err, stdout, stderr) => {
+        execFileImpl(bin, ['--version'], { timeout: timeoutMs, encoding: 'utf8', env: probeEnv }, (err, stdout, stderr) => {
           // ENOENT = not installed. Any other failure is "we asked and could not
           // tell", which floorVerdict spells 'unknown' — deliberately NOT the
           // same answer as 'absent', because one of them deserves a sentence.
@@ -154,29 +213,38 @@ function createBrowserFacts({ cmd = 'agent-browser', execFileImpl = execFile, no
           const txt = String(stdout || '') + String(stderr || '');
           // verify r1 ⑦ + r2 ⑥ (lane browser-windows): ONE probe table, `versionFromProbe` — the keeper's pin probe reads
           // the same. `''` = it ran and would not say. Deliberately NOT `null`, which means "there is no binary" — see floorVerdict.
-          finish(versionFromProbe({ err, stdout, stderr }), txt);
+          const version = versionFromProbe({ err, stdout, stderr });
+          finish(version, txt, probeWhy({ err, version, timeoutMs }));
         });
       } catch (e) { finish(null, e && e.message); }
     });
-    return inFlight;
+    if (!answered) inFlight = flight;
+    return flight;
   }
 
-  /** The PURE verdict over the probed version (D1's three-plus-one outcomes). */
+  /** The PURE verdict over the probed version (D1's three-plus-one outcomes) — with the probe's state (B-0b8c: an
+   *  'unknown' is `settled` only once THIS facts' ladder is exhausted; a one-shot reader's never is). */
   async function floor(floorVersion = B.FLOOR_VERSION) {
     const v = await probeVersion();
-    return B.floorVerdict(v, floorVersion);
+    return B.floorVerdict(v, floorVersion, lastProbe());
   }
 
   /** The last answer without paying for a probe — for a render or a log line
    *  that must not fork. `undefined` = never probed. */
   function lastVersion() { return cached ? cached.version : undefined; }
   function lastRaw() { return cached ? cached.raw : ''; }
-  function _reset() { cached = null; inFlight = null; }
+  /** B-0b8c: the last probe's STATE (null = never asked) — the facts API, the floor verdict and the notice read it. */
+  function lastProbe() { return probe ? { ...probe } : null; }
+  /** B-0b8c: told after EVERY probe settles (`{version, probe}`) — the keeper's floor judge (notice filed / withdrawn). */
+  function onProbe(fn) { listeners.add(fn); return () => listeners.delete(fn); }
+  /** B-0b8c: the owner's end — a pending rung is cleared and none is scheduled again. */
+  function stop() { stopped = true; if (retryTimer) { T.clear(retryTimer); retryTimer = null; } if (probe) probe = { ...probe, nextAt: null }; }
+  function _reset() { cached = null; inFlight = null; probe = null; misses = 0; since = null; rung = 0; if (retryTimer) { T.clear(retryTimer); retryTimer = null; } }
 
   /** lane browser-admin: WHERE the real CLI this probe asks lives (the resolver's answer, never the shim); null = absent.
    *  The "add a Chrome build" sentence names it — in an agent's shell the bare name is the shim. */
   function binPath() { try { return binOf() || null; } catch { return null; } }
-  return { probeVersion, floor, lastVersion, lastRaw, _reset, binPath, VERSION_TTL_MS: ttlMs };
+  return { probeVersion, floor, lastVersion, lastRaw, lastProbe, onProbe, stop, _reset, binPath, VERSION_TTL_MS: ttlMs };
 }
 
 // ═══ P1 — WHICH BROWSERS ARE RUNNING, AND THE CLI THAT DRIVES ONE (§3.5) ═══
@@ -663,7 +731,7 @@ function makeBrowserTmpDir({ dataDir, log = null, mountinfo = null, shortBase = 
   return v.dir;
 }
 
-module.exports = { makeBrowserTmpDir, daemonRows, versionFromProbe, cliPinReader, createBrowserFacts, binaryResolver, sanitizeProbeEnv, VERSION_TTL_MS, createBrowserRuntime, pidAlive, procStart, sameProcess, treeUsage,
+module.exports = { makeBrowserTmpDir, daemonRows, versionFromProbe, probeWhy, PROBE_TIMEOUT_MS, PROBE_RETRY_MS, cliPinReader, createBrowserFacts, binaryResolver, sanitizeProbeEnv, VERSION_TTL_MS, createBrowserRuntime, pidAlive, procStart, sameProcess, treeUsage,
   // lane headless-fallback: the display this machine has now (probed at every launch where the browser runs)
   probeDisplay,
   // lane H verify r2 (M1): the browser a daemon launched, and who holds a profile directory's lock

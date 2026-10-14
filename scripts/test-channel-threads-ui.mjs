@@ -47,6 +47,10 @@
 //       (the row grows by its strip) → a tap takes it back (the row closes up exactly)
 //   (k) A LATE STRIP NEVER MOVES THE READER'S ROW (B-59ff): a reaction landing on a row above the view after a real scroll —
 //       the first row wholly in view holds ±1 px at 1280 and 390 px; the browser's own anchoring measured as the control
+//   (u) A FILE BY ITSELF + A FILE ON A PROPOSAL (lane composer-file-only-send, B-dce6; the fake's files seam
+//       `VIBESPACE_CHANNELS_FAKE_FILES`): a real file input, no words ⇒ one ready chip, the Send live, sent (text '' + the
+//       file in the outbox); the bot-only room PROPOSES with the clip, the card shows the file row and no empty text
+//       line, Approve sends it as the bot; desk + phone PNGs u-*.png
 //   (h) zh + ja at 360 px, DejaVu Sans: the thread chip, the `in thread` tag, the pane bar's words and the pane composer's
 //       line (naive-user ⑥ — it was cut to "…あなたとしてす…"; control: the pre-fix nowrap rule injected cuts it) drawn WHOLE
 //       (the pill rule)
@@ -120,7 +124,7 @@ const NOW = Date.now(), MIN = 60e3;
 
 const boot = () => spawn(process.execPath, ['server.js'], {
   cwd: wt, stdio: 'ignore',
-  env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '', VIBESPACE_CHANNELS_FAKE: '1', VIBESPACE_CHANNELS_FAKE_BIG: '120' },
+  env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '', VIBESPACE_CHANNELS_FAKE: '1', VIBESPACE_CHANNELS_FAKE_BIG: '120', VIBESPACE_CHANNELS_FAKE_FILES: '1' },
 });
 const srv = boot();
 const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu',
@@ -1108,6 +1112,115 @@ for (const geo of [{ tag: 'desk', opt: { lang: 'zh' } }, { tag: 'phone', opt: { 
   ok(Math.abs(ctl.moved - 260) <= 1, `(k ${geo.tag}) CONTROL: the same growth in a node the row anchor does not observe (a planted unrouted writer) moves the reader's row ${ctl.moved} px`, J(ctl));
   await pk.shot(`k-${geo.tag}-mailframe.png`);
   pk.close();
+}
+
+// ── (u) lane composer-file-only-send (B-dce6): A FILE BY ITSELF, AND A FILE ON A PROPOSAL — the fake's NAMED files seam
+//    (`VIBESPACE_CHANNELS_FAKE_FILES=1`: fake-poll takes files, its row says `alone: true`, and sends as a bot in its one
+//    bot-only room, where the reply box PROPOSES). A REAL file input (CDP DOM.setFileInputFiles), no words typed ⇒ ONE
+//    ready chip, no "cannot send a file by itself" note, the Send live; a press sends it (the receipt; the server's outbox
+//    holds text '' + the file, sent). The bot room: the clip is there in PROPOSE mode, the picture rides the proposal —
+//    its card shows the file row and NO empty text line; Approve (desk) sends it. Desk 1280 + phone 360: u-*.png ──
+console.log('(u) a file by itself from the reply box; a proposal carrying a file');
+{
+  const FX = scratch('chanthreads-files');
+  fs.mkdirSync(FX, { recursive: true });
+  const e0 = p1.errors.length;
+  const PDF_P = path.join(FX, 'q3-notes.pdf'), PNG_P = path.join(FX, 'q3-chart.png');
+  fs.writeFileSync(PDF_P, '%PDF-1.4\n%fixture\n');
+  // a picture worth a thumbnail (a small bar chart, drawn by the page's own canvas)
+  const chart = await p1.evaljs("(() => { const c = document.createElement('canvas'); c.width = 240; c.height = 150; const x = c.getContext('2d'); x.fillStyle = '#f4f6fb'; x.fillRect(0, 0, 240, 150); [40, 70, 55, 95, 80].forEach((h, i) => { x.fillStyle = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'][i]; x.fillRect(22 + i * 42, 130 - h, 30, h); }); x.fillStyle = '#334155'; x.fillRect(14, 130, 212, 2); return c.toDataURL('image/png'); })()");
+  fs.writeFileSync(PNG_P, Buffer.from(String(chart).split(',')[1] || '', 'base64'));
+  const STATE = (tag) => `(() => {
+    const foot = window.__w[${J(tag)}].content.querySelector('.chanwin-main .chanwin-foot');
+    const ta = foot && foot.querySelector('textarea'), send = foot && foot.querySelector('[data-channel-direct], [data-channel-propose]');
+    const r = send ? send.getBoundingClientRect() : null, rc = foot && foot.querySelector('[data-channel-receipt]');
+    return { clip: !!(foot && foot.querySelector('[data-channel-attach]')), chips: [...(foot ? foot.querySelectorAll('[data-channel-file-chip]') : [])].map((c) => c.dataset.channelFileChip + ':' + ((c.querySelector('.chanwin-file-name') || {}).textContent || '')),
+      alone: !!(foot && foot.querySelector('[data-files-alone]')), text: ta ? ta.value : null, mode: send ? (send.dataset.channelDirect ? 'direct' : 'propose') : null, disabled: send ? send.disabled : null,
+      x: r ? Math.round(r.left + r.width / 2) : 0, y: r ? Math.round(r.top + r.height / 2) : 0, receipt: rc ? rc.dataset.channelReceipt : null, receiptText: rc ? rc.textContent : null };
+  })()`;
+  const seen = [];   // the cards an earlier page's leg drew (the same picture's name)
+  const CARD = (tag) => `(() => {
+    const c = [...window.__w[${J(tag)}].content.querySelectorAll('.chan-prop')].find((x) => !${J(seen)}.includes(x.dataset.proposal) && [...x.querySelectorAll('.chan-prop-file-name')].some((n) => n.textContent.includes('q3-chart.png')));
+    if (!c) return null;
+    const body = c.querySelector('.chan-prop-text'), ap = c.querySelector('[data-approve]'), r = ap ? ap.getBoundingClientRect() : null;
+    return { id: c.dataset.proposal, state: [...c.classList].find((k) => /^chan-prop-(awaiting|sent|sending|failed)/.test(k)) || null, files: [...c.querySelectorAll('.chan-prop-file-name')].map((n) => n.textContent), thumb: !!c.querySelector('.chan-prop-file-thumb'),
+      bodyHidden: body ? body.hidden : null, fileOnly: body ? body.dataset.fileOnly || null : null, ax: r ? Math.round(r.left + r.width / 2) : 0, ay: r ? Math.round(r.top + r.height / 2) : 0 };
+  })()`;
+  const pick = async (pg, tag, file) => {
+    const r = await pg.cdp('Runtime.evaluate', { expression: `window.__w[${J(tag)}].content.querySelector('.chanwin-main .chanwin-foot input[data-channel-file-input]')` });
+    const oid = r.result && r.result.result && r.result.result.objectId;
+    if (!oid) return false;
+    await pg.cdp('DOM.enable');
+    const s = await pg.cdp('DOM.setFileInputFiles', { files: [file], objectId: oid });
+    return !s.error;
+  };
+  const until = async (pg, expr, fn, n = 80) => { let v = null; for (let i = 0; i < n; i++) { v = await pg.evaljs(expr); if (fn(v)) break; await sleep(100); } return v; };
+  const legs = async (pg, label, press, { approve = false, maximize = false } = {}) => {
+    // ① the ops room (send as you): a file by itself
+    const tf = `files-${label}`;
+    const o = await pg.evaljs(OPEN('fake-poll', 'fake-poll-ops', tf, { min: 3, maximize }));
+    const s0 = await pg.evaljs(STATE(tf));
+    const picked = await pick(pg, tf, PDF_P);
+    const s1 = await until(pg, STATE(tf), (v) => v.chips.length > 0, 50);
+    ok(o.rows >= 3 && s0.clip && s0.mode === 'direct' && picked && s1.chips.join() === 'ok:q3-notes.pdf' && !s1.alone && s1.text === '' && s1.disabled === false, `(u ${label}) a file in the REAL file input, no words: ONE ready chip, no "cannot send a file by itself" note, the Send live`, J({ o, s0, s1 }));
+    await sleep(300);
+    await pg.shot(`u-${label}-file-alone.png`);
+    await press(s1.x, s1.y);
+    const s2 = await until(pg, STATE(tf), (v) => !!v.receipt);
+    const ob = await api('GET', '/api/channels/outbox?limit=200');
+    const mine = (ob.json.proposals || []).filter((p) => p.convId === 'fake-poll-ops' && p.text === '' && (p.attachments || []).some((a) => a.name === 'q3-notes.pdf'));
+    const last = mine[0] || null;
+    ok(s2.receipt === 'sent' && s2.chips.length === 0 && last && last.state === 'sent' && last.draftedBy && last.draftedBy.kind === 'user' && last.attachments.length === 1, `(u ${label}) a press sends it: the receipt ("${s2.receiptText}"), the box empty; the server's outbox holds the owner's send — text '', the one file, sent`, J({ s2, last: last && { state: last.state, text: last.text, files: last.attachments.map((a) => a.name) } }));
+    // ② the bot room (only the bot identity sends): the reply box PROPOSES and carries the picture
+    const tb = `bot-${label}`;
+    const ob0 = await pg.evaljs(OPEN('fake-poll', 'fake-poll-bot-room', tb, { min: 3, maximize }));
+    const b0 = await pg.evaljs(STATE(tb));
+    const picked2 = await pick(pg, tb, PNG_P);
+    const b1 = await until(pg, STATE(tb), (v) => v.chips.length > 0, 50);
+    ok(ob0.rows >= 3 && b0.mode === 'propose' && b0.clip && picked2 && b1.chips.join() === 'ok:q3-chart.png' && !b1.alone && b1.disabled === false, `(u ${label}) PROPOSE mode (the bot room — sending as you is not offered): the clip is there, the picture's chip ready, the Propose live`, J({ ob0, b0, b1 }));
+    await press(b1.x, b1.y);
+    const card = await until(pg, CARD(tb), (v) => !!(v && v.files.length));
+    if (card) seen.push(card.id);
+    ok(card && card.files.join() === 'q3-chart.png' && card.thumb && card.bodyHidden === true && card.fileOnly === '1' && /awaiting/.test(card.state || ''), `(u ${label}) the proposal card carries the file: its file row with a thumbnail, NO empty text line (the body hidden, data-file-only), awaiting approval`, J(card));
+    if (card) await pg.evaljs(`(() => { const c = window.__w[${J(tb)}].content.querySelector('.chan-prop[data-proposal=${J(card.id)}]'); if (c) c.scrollIntoView({ block: 'center' }); return 1; })()`);
+    await sleep(600);
+    await pg.shot(`u-${label}-proposal-file.png`);
+    if (approve && card) {
+      // the button where the pointer finds it: in view, still, armed (r6 F6 — a card is armed a moment after it is drawn
+      // or moved), and the element under its centre IS the button
+      // (the card was centred for the shot; the receipts' toasts sit over the box's corner — gone before the press)
+      for (let i = 0; i < 100; i++) { if (!(await pg.evaljs("document.querySelectorAll('.global-toast').length"))) break; await sleep(100); }
+      // the button inside the LIST's own view (a late row can push the card under the composer), held still ≥ 0.8 s
+      const c2 = await pg.evaljs(`(async () => {
+        const w = window.__w[${J(tb)}], b = w.content.querySelector('.chan-prop[data-proposal=${J(card.id)}] [data-approve]'), l = w.content.querySelector('.chanwin-main .chanwin-list');
+        if (!b || !l) return null;
+        const at = () => { const r = b.getBoundingClientRect(); return Math.round(r.top) + '/' + Math.round(l.scrollTop); };
+        let last = '', still = 0;
+        for (let i = 0; i < 60 && still < 800; i++) {
+          const r = b.getBoundingClientRect(), lr = l.getBoundingClientRect();
+          if (r.bottom > lr.bottom - 8) l.scrollTop += r.bottom - lr.bottom + 24; else if (r.top < lr.top + 8) l.scrollTop -= lr.top - r.top + 24;
+          await new Promise((res) => setTimeout(res, 100));
+          const now = at(); if (now === last) still += 100; else { still = 0; last = now; }
+        }
+        const r = b.getBoundingClientRect(), x = Math.round(r.left + r.width / 2), y = Math.round(r.top + r.height / 2), e = document.elementFromPoint(x, y);
+        return { ax: x, ay: y, still, hit: !!(e && e.closest('[data-approve]')) };
+      })()`);
+      await sleep(1200);   // r6 F6: a card that moved is armed again a moment later
+      const hit = !!(c2 && c2.hit);
+      if (c2) await press(c2.ax, c2.ay);
+      let q = null;
+      for (let i = 0; i < 80; i++) { const r = await api('GET', '/api/channels/outbox?limit=200'); q = (r.json.proposals || []).find((p) => p.id === card.id); if (q && q.state === 'sent') break; await sleep(100); }
+      const toasts = await pg.evaljs("[...document.querySelectorAll('.global-toast')].map((x) => x.textContent).slice(-4)");
+      ok(hit && q && q.state === 'sent' && q.text === '' && q.sendAs === 'bot' && (q.attachments || []).map((a) => a.name).join() === 'q3-chart.png', `(u ${label}) a real press on Approve sends the picture alone, as the bot`, J({ hit, c2, toasts, q: q && { state: q.state, sendAs: q.sendAs, text: q.text, files: (q.attachments || []).map((a) => a.name), reason: q.reason } }));
+    }
+  };
+  await legs(p1, 'desk', (x, y) => p1.click(x, y), { approve: true, maximize: true });
+  const pu = await newPage({ lang: 'zh', phone: true });
+  ok(pu.ready, '(u) the phone page loaded (zh, 360 × 740, touch)');
+  await legs(pu, 'phone', (x, y) => pu.touch(x, y, 60));
+  ok(p1.errors.length === e0 && !pu.errors.length, '(u) no page threw', J([...p1.errors.slice(e0), ...pu.errors]));
+  pu.close();
+  try { fs.rmSync(FX, { recursive: true, force: true }); } catch {}
 }
 
 p1.close();

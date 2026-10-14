@@ -24,6 +24,9 @@
 //     byte for byte); ON appends exactly one line naming the drafting agent,
 //     the card says so BEFORE the approval, the receipt after; a USER draft
 //     never gets one; the per-adapter override beats the instance setting
+//   · ⑧ lane slack-grid-identity: a Slack account judged by its PARTS (user +
+//     workspace | org), the measured grid upgrade accepted, a RED control
+//     (the joined-string compare restored refuses it), the learn step once
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -307,7 +310,69 @@ console.log('⑦ the receipt block neuters every vendor-controlled field');
   ok(held.userId === 't0acme001/u0self001' && !ID.identityMismatch(held, same), 'design 012: the same person in the same workspace is the same identity');
   const mm = ID.identityMismatch(held, other);
   ok(!!mm, 'design 012: T2/U1 ≠ T1/U1 — a token of ANOTHER workspace (same user id) is a mismatch, refused by name', JSON.stringify(mm));
-  ok(!!ID.identityMismatch(ID.identityOf({ userId: 'E0ORG0001/T0ACME001/U0SELF001' }), held), '…and an Enterprise Grid org prefix (`E…/`) is part of the identity');
+  // lane slack-grid-identity (2026-10-14): the org prefix is a PART, not a different person — base pinned the opposite
+  ok(!ID.identityMismatch(ID.identityOf({ userId: 'E0ORG0001/T0ACME001/U0SELF001' }), held), '…and an Enterprise Grid org prefix (`E…/`) on the same person in the same workspace is the SAME account (the parts, ⑧)');
+}
+
+// ── ⑧ lane slack-grid-identity (2026-10-14, owner + userW): the fleet's Slack workspace moved into an Enterprise Grid;
+// every re-authorize was refused as another account because `userId` (`[E…/]T…/U…`) was compared as a string. A Slack
+// identity is judged by its PARTS — the same user AND (the same workspace OR the same org, both naming one) — a legacy
+// stamp is parsed (no migration), and the org a sign-in names is LEARNED once by the one stamp rule ──
+console.log('⑧ a Slack account by its parts (user + workspace | org); the org a sign-in names is learned once');
+{
+  const { mutantCopies, copiesCensus } = await import('./mutant-copy.mjs');
+  const ID = require(path.join(REPO, 'src/channel-identity.js'));
+  // the SHAPES of real ids (org E0C…, workspace T07…, people U08… / U0A…), built at runtime — never the fleet's ids
+  const id = (...xs) => xs.join('');
+  const E1 = id('E0C', '8FX', 'ORG1'), E2 = id('E0C', '9FX', 'ORG2'), T1 = id('T07', 'FXWS', '0001'), T2 = id('T07', 'FXWS', '0002');
+  const U1 = id('U08', 'FX', 'ME0001'), U2 = id('U0A', 'FX', 'YOU002');
+  /** the token connectUserToken (src/channels/slack.js) writes: the parts and their joined `userId` */
+  const tok = (ent, team, user) => ({ user, team, ...(ent ? { enterprise: ent } : {}), userId: [...(ent ? [ent] : []), team, user].join('/') });
+  const legacy = (team, user) => ({ userId: [team, user].join('/').toLowerCase() });   // what every fleet record holds: the lowercased joined string only
+  const T = [
+    [tok(null, T1, U1), tok(null, T1, U1), null, 'the same user in the same workspace'],
+    [legacy(T1, U1), tok(E1, T1, U1), null, 'THE GRID UPGRADE: a legacy stamp (`t…/u…`) vs the same person now named with the org (`e…/t…/u…`)'],
+    [tok(E1, T1, U1), tok(E1, T2, U1), null, 'the same user in another workspace of the same org (user ids are org-wide)'],
+    [tok(E1, T1, U1), tok(null, T1, U1), null, 'a later sign-in WITHOUT the org (impossible on Grid — the control) still matches by user + workspace'],
+    [tok(E1, T1, U1), tok(E1, T1, U2), 'userId', 'another person in the same workspace and org'],
+    [legacy(T1, U1), tok(E1, T1, U2), 'userId', 'another person of the org vs a legacy stamp'],
+    [tok(null, T1, U1), tok(null, T2, U1), 'userId', 'the same user id in another workspace, no org on either side (design 012 D11, unchanged)'],
+    [tok(null, T1, U1), tok(E1, T2, U1), 'userId', 'the held side names no org: another workspace is another account'],
+    [tok(E1, T1, U1), tok(E2, T2, U1), 'userId', 'another org AND another workspace'],
+  ];
+  const bad = T.filter(([h, o, k]) => { const m = ID.identityMismatch(ID.identityOf(h), ID.identityOf(o)); return k === null ? m !== null : !(m && m.key === k); });
+  ok(bad.length === 0, `the PARTS table: ${T.length} rows — ${bad.length} wrong`, JSON.stringify(bad.map((r) => r[3])));
+  const parts = ID.identityOf(tok(E1, T1, U1));
+  ok(parts.memberId === U1.toLowerCase() && parts.teamId === T1.toLowerCase() && parts.orgId === E1.toLowerCase() && parts.userId === [E1, T1, U1].join('/').toLowerCase() && !('orgId' in ID.identityOf(legacy(T1, U1))) && ID.identityOf(legacy(T1, U1)).teamId === T1.toLowerCase(), 'identityOf: a Slack identity carries its parts (memberId / teamId / orgId) beside the joined display key; a legacy joined string is parsed into them');
+  ok(Object.keys(ID.identityOf({ openId: 'ou1', unionId: 'on1', userId: 'u1' })).join() === 'openId,unionId,userId' && Object.keys(ID.identityOf({ email: 'A@x.com' })).join() === 'email', 'Lark / Gmail identities grow no parts (a Lark `userId` is no joined Slack string) — their rules untouched');
+  // the incident's refusal sentence for a REAL other account is unchanged: both joined strings, held then offered
+  const mmO = ID.identityMismatch(ID.identityOf(legacy(T1, U1)), ID.identityOf(tok(E1, T1, U2)));
+  ok(ID.mismatchSentence('acct-slack-1', mmO) === `acct-slack-1 is connected as ${[T1, U1].join('/').toLowerCase()}; this sign-in is ${[E1, T1, U2].join('/').toLowerCase()} — a re-authorize must be the same account (to read another account, add it as a new account, or remove this one first)`, 'a REAL other account is refused with the unchanged sentence (both joined strings)');
+  // the two measured instances, in their SHAPE: userW's pod (U08… person) and the owner's hub (U0A… person), each a legacy stamp re-authorized with the org
+  const pod = ID.identityMismatch(legacy(T1, U1), ID.identityOf(tok(E1, T1, U1))), hub = ID.identityMismatch(legacy(T1, U2), ID.identityOf(tok(E1, T1, U2)));
+  ok(pod === null && hub === null, 'the two measured instances (a legacy `t…/u…` stamp vs `e…/t…/u…`) re-authorize — accepted');
+  // RED CONTROL: the joined-string compare restored (the parts branch cut) refuses the grid re-authorize with the incident's words
+  const SRC = fs.readFileSync(path.join(REPO, 'src/channel-identity.js'), 'utf-8');
+  const BRANCH = "  if (hs && os) return sameSlackAccount(hs, os) ? null : { key: 'userId', held: joinedSlack(hs), offered: joinedSlack(os) };\n";
+  const MC = mutantCopies('chan-identity', REPO);
+  const MUT = require(MC.write('src/channel-identity.js', SRC.replace(BRANCH, ''), 'stringcompare'));
+  const mmR = MUT.identityMismatch(MUT.identityOf(legacy(T1, U1)), MUT.identityOf(tok(E1, T1, U1)));
+  ok(SRC.includes(BRANCH) && !!mmR && mmR.key === 'userId' && /is connected as t07\w+\/u08\w+; this sign-in is e0c\w+\/t07\w+\/u08\w+ — a re-authorize must be the same account/.test(MUT.mismatchSentence('acct-slack-1', mmR)), 'RED CONTROL: with the joined-string compare restored the grid re-authorize is REFUSED as another account — the incident\'s sentence');
+  // THE LEARN STEP — the one stamp rule
+  const s1 = ID.stampIdentity(legacy(T1, U1), ID.identityOf(tok(E1, T1, U1)));
+  ok(s1.changed === true && s1.learned === E1.toLowerCase() && s1.identity.userId === [E1, T1, U1].join('/').toLowerCase() && s1.identity.orgId === E1.toLowerCase() && s1.identity.memberId === U1.toLowerCase() && s1.identity.teamId === T1.toLowerCase(), 'LEARN: the first accepted sign-in naming the org rewrites the stamp to the richer form (`e…/t…/u…`, orgId) and says what it learned');
+  const s2 = ID.stampIdentity(s1.identity, ID.identityOf(tok(E1, T1, U1)));
+  ok(s2.changed === false && s2.learned === null, '…ONCE: the next sign-in naming the same org changes nothing (no second write, nothing learned)');
+  const s3 = ID.stampIdentity(s1.identity, ID.identityOf(tok(null, T1, U1)));
+  ok(s3.changed === false && s3.learned === null && s3.identity.orgId === E1.toLowerCase() && !ID.identityMismatch(s3.identity, ID.identityOf(tok(null, T1, U1))), '…a later sign-in WITHOUT the org (the control) matches by user + workspace and the learned org is KEPT (never forgotten)');
+  const s4 = ID.stampIdentity(s1.identity, ID.identityOf(tok(E1, T2, U1)));
+  ok(s4.changed === true && s4.learned === null && s4.identity.teamId === T2.toLowerCase() && s4.identity.userId === [E1, T2, U1].join('/').toLowerCase(), '…a move to another workspace of the org re-stamps the workspace (nothing learned: the org is the same)');
+  const f0 = ID.stampIdentity(null, ID.identityOf(tok(E1, T1, U1)));
+  ok(f0.changed === true && f0.learned === null && f0.identity.orgId === E1.toLowerCase(), '…a FIRST stamp that names an org learned nothing (there was no other identity)');
+  const lk = ID.stampIdentity({ openId: 'ou1', unionId: 'on1' }, { openId: 'ou2', unionId: 'on1', userId: 'u1' });
+  const gm = ID.stampIdentity({ email: 'a@x.com' }, { email: 'A@x.com' });
+  ok(JSON.stringify(lk.identity) === JSON.stringify({ openId: 'ou2', unionId: 'on1', userId: 'u1' }) && lk.learned === null && gm.changed === false && JSON.stringify(gm.identity) === JSON.stringify({ email: 'a@x.com' }), 'Lark / Gmail stamps keep the base merge (the offered keys over the stamp: a new app\'s open_id replaces the old)');
+  for (const r of copiesCensus(MC.files, MC.dir, REPO, { label: '⑧ ' })) ok(r.pass, r.name, r.detail);   // the patched copy lives outside the tree
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

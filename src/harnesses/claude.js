@@ -67,8 +67,9 @@ function parseClaudeAuth(dir) {
       } catch { }
     }
     // oatFile: the file is the long-lived token VibeSpace MATERIALIZED (lane pool-oat-materialize) —
-    // the CLI reads it like a login, but there is no OAuth login in it (no refresh token)
-    return { loggedIn: true, subscriptionType: o.subscriptionType || null, email, org, accessToken: valid ? o.accessToken : null, expiresAt: o.expiresAt || null, ...(oatFileOf(raw) ? { oatFile: true } : {}) };
+    // the CLI reads it like a login, but there is no OAuth login in it (no refresh token). `oatFileGen` = WHICH token
+    // (our mark's mint instant — lane oat-identity-fix: a reading judges only the generation the CLI read)
+    return { loggedIn: true, subscriptionType: o.subscriptionType || null, email, org, accessToken: valid ? o.accessToken : null, expiresAt: o.expiresAt || null, ...(oatFileOf(raw) ? { oatFile: true, oatFileGen: Number(raw.vibespaceOat && raw.vibespaceOat.mintedAt) || null } : {}) };
   } catch { return { loggedIn: false }; }
 }
 

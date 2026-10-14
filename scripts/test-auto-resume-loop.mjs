@@ -1150,8 +1150,11 @@ if (!probe) {
   // wallSlotFor is the FRESH reading; it now has exactly THREE readers —
   // wallKeyFor, the rejection pin's no-signal fallback, and the reading pin's
   // (readingSlotFor, added 2026-09-07). A new producer that asks fresh, per
-  // record, goes red here.
-  ok('WIRING: NOTHING resolves the slot per RECORD any more — wallSlotFor has exactly three readers (wallKeyFor + the two turn pins\' fallbacks)', (eng.match(/wallSlotFor\(session\)/g) || []).length === 4 && /function wallKeyFor\(session\) \{ return wallSlotFor\(session\)\.key; \}/.test(eng) && /if \(first\) return \{ key: first\.key, slotOk: !!first\.slot, slotReason: 'turn-pinned' \};[\s\S]{0,60}return wallSlotFor\(session\);/.test(eng) && /const fresh = wallSlotFor\(session\);/.test(eng), 'wallSlotFor(session) refs: ' + (eng.match(/wallSlotFor\(session\)/g) || []).length);
+  // record, goes red here. A FOURTH reader since lane oat-identity-fix (verify r1
+  // F1, int272): noteOatFileGen stamps the token FILE generation the NEXT turn
+  // starts on — once per turn, its only caller inside noteTurnEnd (pinned below).
+  const turnEndBody = (() => { const i = eng.indexOf('function noteTurnEnd(session'); const j = i < 0 ? -1 : eng.indexOf('\nfunction ', i + 1); return i < 0 ? '' : eng.slice(i, j < 0 ? undefined : j); })();
+  ok('WIRING: NOTHING resolves the slot per RECORD any more — wallSlotFor has exactly four readers (wallKeyFor + the two turn pins\' fallbacks + the oat turn-end stamp noteOatFileGen, called only from noteTurnEnd)', (eng.match(/wallSlotFor\(session\)/g) || []).length === 5 && /function noteOatFileGen\(session\) \{[\s\S]{0,200}const key = wallSlotFor\(session\)\.key;/.test(eng) && (eng.match(/noteOatFileGen\(session\)/g) || []).length === 2 && /\bnoteOatFileGen\(session\)/.test(turnEndBody) && /function wallKeyFor\(session\) \{ return wallSlotFor\(session\)\.key; \}/.test(eng) && /if \(first\) return \{ key: first\.key, slotOk: !!first\.slot, slotReason: 'turn-pinned' \};[\s\S]{0,60}return wallSlotFor\(session\);/.test(eng) && /const fresh = wallSlotFor\(session\);/.test(eng), 'wallSlotFor(session) refs: ' + (eng.match(/wallSlotFor\(session\)/g) || []).length);
   ok('WIRING: the READING pin dies with the turn, exactly like the rejection pin', /session\._turnWallSigs = \[\]; session\._turnWorkAfterSig = 0;[\s\S]{0,400}session\._turnReadingSlot = null;/.test(eng));
   // THE MECHANISM, NOT THE COUNT (r2). This used to require EXACTLY TWO call
   // sites carrying `slot:`, which froze HOW MANY claude rejection paths exist

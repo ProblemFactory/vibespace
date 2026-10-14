@@ -314,13 +314,20 @@ class Auth {
       res.json({ success: true });
     });
 
-    // In-app password management. When auth is enabled the request already
-    // passed the auth middleware AND must still present the current password
-    // (defense against an unlocked screen). When disabled, setting a password
-    // is open — that's how a local instance opts INTO auth.
+    // In-app password management. A configured password must be presented
+    // again (defense against an unlocked screen); an SSO-only instance needs a
+    // signed-in request (the route's own check — see below). When auth is
+    // disabled, setting a password is open — that's how a local instance opts
+    // INTO auth.
     // Changing/setting revokes every other device's token (that's usually the
     // point); the caller gets a fresh token so they stay logged in.
     app.post('/api/auth/set-password', express_json_lite, (req, res) => {
+      // WHO MAY SET A PASSWORD is judged HERE, by the instance's state — server.js registers these routes BEFORE the
+      // cookie gate, so no middleware ever stood in front of this one (lane owner-write-origin: on a Clerk-only
+      // instance an anonymous POST set a password, revoked every token and handed the caller a session):
+      //   a password configured ⇒ the current password (below) · SSO and no password ⇒ a signed-in request only ·
+      //   neither ⇒ open — that is how a local instance opts INTO auth (first-run onboarding)
+      if (this.enabled && !this.passwordEnabled && !this.requestAuthed(req)) return res.status(401).json({ error: 'unauthorized' });
       const ip = req.socket.remoteAddress || '?';
       if (!this._rateCheck(ip)) return res.status(429).json({ error: 'Too many attempts — wait a minute' });
       const { current, newPassword, remove } = req.body || {};
