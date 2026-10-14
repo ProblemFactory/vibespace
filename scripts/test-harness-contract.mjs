@@ -972,6 +972,132 @@ console.log('\n— the Artifacts sentence (lane artifacts-prompt-hint)');
   ok(turns.filter(Boolean).length >= 1 && turns.every((t) => !t.includes(MARK)), `…and the per-turn reminder never carries it (${turns.filter(Boolean).length} non-empty turn contexts read)`);
 }
 
+// ── credential env: ONE derived list, TWO doors (B-6be2, lane jobenv-strip-census, 2.369.270) ──
+// A Background Work job inherited codex's CODEX_HOME because src/jobs.js typed its strip by hand
+// (ANTHROPIC_API_KEY + CLAUDE_SECURESTORAGE_CONFIG_DIR). src/harness-env.js derives the list from
+// the descriptors: the job door strips it whole; the agent door strips every declared name but a
+// harness's homeEnvVar (the machine login a no-account spawn rides). Each judge runs on the live
+// door AND on the base's shape (the hand list / the drop-less filter), which must be RED.
+console.log('\ncredential env: one derived list (src/harness-env.js), two doors');
+{
+  const HE = require(path.join(REPO, 'src/harness-env.js'));
+  const { list: harnessList } = require(path.join(REPO, 'src/harnesses/index.js'));
+  const { jobEnv } = require(path.join(REPO, 'src/jobs.js'));
+  const { agentEnv } = require(path.join(REPO, 'src/ws-handler.js'));
+  const AE = require(path.join(REPO, 'src/agent-env.js'));
+  const live = () => harnessList();
+  const all = () => HE.credentialEnvNames(live());
+  const agentNames = () => HE.agentCredentialEnvNames(live());
+  const homes = () => new Set(live().flatMap((d) => HE.declaredEnvOf(d).filter((x) => x.field === 'homeEnvVar').map((x) => x.name)));
+  // 1. the descriptor contract: every harness with an account roster says its home and its keys
+  for (const id of chatHarnessIds()) {
+    const c = HARNESSES[id].creds;
+    if (!c) continue;
+    ok(typeof c.homeEnvVar === 'string' && Array.isArray(c.keyEnvVars) && c.keyEnvVars.every((k) => typeof k === 'string'), `${id}: creds declares homeEnvVar + keyEnvVars (${c.homeEnvVar}; [${(c.keyEnvVars || []).join(', ')}])`);
+    const declared = [...new Set(HE.declaredEnvOf(HARNESSES[id]).map((x) => x.name))];
+    const missing = declared.filter((n) => !all().includes(n));
+    ok(declared.length >= 1 && !missing.length, `${id}: every creds.*EnvVar(s) is in the one list (${declared.join(', ')})`, missing.join(','));
+  }
+  ok(HE.VENDOR_CREDENTIAL_ENV.every((n) => all().includes(n)) && ['CODEX_HOME', 'CLAUDE_SECURESTORAGE_CONFIG_DIR', 'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'CLAUDE_CONFIG_DIR'].every((n) => all().includes(n)), `the one list = vendor names ∪ descriptor names (${all().length}: ${all().join(' ')})`);
+  // 2. the judges — a door over a base env holding every name of the list + bystanders
+  const baseOf = (names) => ({ PATH: '/usr/bin', HOME: '/home/u', SOME_FUTURE_TOOL_TOKEN: 'ft', ...Object.fromEntries(names.map((n) => [n, 'ambient-' + n])) });
+  const judgeJob = (door, names = all()) => {
+    const out = door({}, baseOf(names));
+    const leaked = names.filter((n) => n in out);
+    return { pass: !leaked.length && out.PATH === '/usr/bin' && out.SOME_FUTURE_TOOL_TOKEN === 'ft', leaked };
+  };
+  const judgeAgent = (door, names = all()) => {
+    const out = door(baseOf(names));
+    const leaked = agentNames().filter((n) => n in out);
+    const lostHome = [...homes()].filter((n) => names.includes(n) && out[n] !== 'ambient-' + n);
+    return { pass: !leaked.length && !lostHome.length && out.SOME_FUTURE_TOOL_TOKEN === 'ft', leaked, lostHome };
+  };
+  const trio = ['CODEX_HOME', 'CLAUDE_SECURESTORAGE_CONFIG_DIR', 'ANTHROPIC_API_KEY'];
+  const j3 = jobEnv({}, baseOf(trio));
+  ok(trio.every((n) => !(n in j3)) && j3.PATH === '/usr/bin', 'job door: CODEX_HOME / CLAUDE_SECURESTORAGE_CONFIG_DIR / ANTHROPIC_API_KEY — none survive (B-6be2)', JSON.stringify(j3));
+  const jl = judgeJob(jobEnv);
+  ok(jl.pass, `job door: every name of the one list stripped (${all().length}), bystanders pass`, jl.leaked.join(','));
+  ok(jobEnv({ OPENAI_API_KEY: 'the-jobs-own' }, baseOf(all())).OPENAI_API_KEY === 'the-jobs-own', "job door: a job's OWN env / secret is laid on after the strip and wins");
+  const al = judgeAgent(agentEnv);
+  ok(al.pass, `agent door (ws-handler agentEnv): strips ${agentNames().join(' ')}; keeps every homeEnvVar (${[...homes()].join(' ')})`, JSON.stringify(al));
+  ok(agentEnv(baseOf(all())).OPENAI_API_KEY === 'ambient-OPENAI_API_KEY', 'agent door: a vendor name no descriptor writes (OPENAI_API_KEY) stays — an OpenCode/ACP agent may hold its own login that way');
+  const dl = judgeAgent((b) => AE.daemonEnv(b, { drop: agentNames() }));
+  ok(dl.pass, 'daemon door (daemonEnv + the derived drop): the same agent rule', JSON.stringify(dl));
+  // 3. RED controls — the base's shapes
+  const jobsSrc = fs.readFileSync(path.join(REPO, 'src/jobs.js'), 'utf8');
+  const derivedLine = "['PORT', 'HOST', 'NODE_ENV', 'NODE_OPTIONS'].includes(k) || credentials.has(k)";
+  const handLine = "['PORT', 'HOST', 'NODE_ENV', 'NODE_OPTIONS', 'ANTHROPIC_API_KEY', 'CLAUDE_SECURESTORAGE_CONFIG_DIR'].includes(k)";
+  const handJobs = jobsSrc.includes(derivedLine) ? MUTH.load('src/jobs.js', jobsSrc.replace(derivedLine, handLine), 'hand-list').jobEnv : null;
+  const jh = handJobs ? judgeJob(handJobs) : { pass: true, leaked: [] };
+  ok(handJobs && !jh.pass && jh.leaked.includes('CODEX_HOME'), `RED control: the base's hand list fails the job judge (leaks ${jh.leaked.join(' ')})`);
+  const ab = judgeAgent((b) => AE.agentEnv(b));
+  ok(!ab.pass && ab.leaked.includes('CLAUDE_SECURESTORAGE_CONFIG_DIR'), `RED control: the base's drop-less agentEnv fails the agent judge (leaks ${ab.leaked.join(' ')})`);
+  // 4. the plant: a descriptor GAINING a creds.*EnvVar joins both doors with no edit anywhere else
+  const pc = HARNESSES.codex.creds;
+  pc.plantEnvVar = 'VS_PLANT_CRED'; pc.plantEnvVars = ['VS_PLANT_LIST'];
+  try {
+    const plants = ['VS_PLANT_CRED', 'VS_PLANT_LIST'];
+    ok(plants.every((n) => all().includes(n) && agentNames().includes(n)), 'plant: creds.plantEnvVar + creds.plantEnvVars auto-join the one list and the agent share');
+    const jp = judgeJob(jobEnv, plants), ap = judgeAgent(agentEnv, plants);
+    ok(jp.pass && ap.pass, 'plant: the live job door and agent door both drop the planted names', JSON.stringify({ jp, ap }));
+    const hp = handJobs ? judgeJob(handJobs, plants) : { pass: true };
+    ok(handJobs && !hp.pass, 'plant RED control: the hand list lets the planted names through');
+  } finally { delete pc.plantEnvVar; delete pc.plantEnvVars; }
+  ok(!all().includes('VS_PLANT_CRED'), 'plant removed: the registry answers without it again');
+  // 5. the account resolver writes nothing the agent door does not know (localEnv / secret.var literals)
+  const accSrc = fs.readFileSync(path.join(REPO, 'src/accounts.js'), 'utf8');
+  const written = [...new Set([...accSrc.matchAll(/localEnv: \{ ([A-Z][A-Z0-9_]+):/g), ...accSrc.matchAll(/\bvar: '([A-Z][A-Z0-9_]+)'/g)].map((m) => m[1]))];
+  const unknownWrites = written.filter((n) => !agentNames().includes(n));
+  ok(written.length >= 2 && !unknownWrites.length, `accounts.js: every literal localEnv / secret.var name is an agent-door name (${written.join(', ')})`, unknownWrites.join(','));
+  // 6. no hand list regrows in jobEnv
+  const jobBody = (/function jobEnv\([\s\S]*?\n\}/.exec(jobsSrc) || [''])[0];
+  const typed = all().filter((n) => jobBody.includes(n));
+  ok(jobBody && /credentialEnvNames\(harnessList\(\)\)/.test(jobBody) && !typed.length, 'jobEnv derives its credential strip (credentialEnvNames over the registry) and types no credential name', typed.join(','));
+  // 7. wiring census: every src/ module that requires agent-env.js hands the derived drop to every call
+  //    (a new importer is RED until it does or is classified here with its reason)
+  const EXEMPT = {
+    'src/agentd/agentd.js': 'the daemon bundle: no registry inside; it is BORN without the names (src/agentd/client.js), and its children merge over that env',
+    'src/server/oat-mint.js': 'MINT_ENV_ALLOW is an allowlist laid over it (checked below: no credential name in it)',
+  };
+  const srcFiles = [];
+  const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else if (e.name.endsWith('.js')) srcFiles.push(p); } };
+  walk(path.join(REPO, 'src'));
+  const callsOf = (s) => {
+    const m = /const \{([^}]*)\} = require\('[./]*agent-env\.js'\)/.exec(s);
+    if (!m) return null;
+    const aliases = m[1].split(',').map((x) => x.trim()).filter((x) => /^(agentEnv|daemonEnv)\b/.test(x)).map((x) => (x.split(':')[1] || x).trim());
+    const calls = [];
+    for (const a of aliases) {
+      const re = new RegExp('(?<![\\w$])' + a + '\\(', 'g');
+      let c;
+      while ((c = re.exec(s))) {
+        const before = s.slice(Math.max(0, c.index - 9), c.index);
+        if (/function\s+$/.test(before) || /(^|[^.])\.$/.test(before)) continue; // a definition / a method `x.name(` — a spread `...name(` is a call
+        let i = c.index + a.length, depth = 0;
+        for (; i < s.length; i++) { if (s[i] === '(') depth++; else if (s[i] === ')' && --depth === 0) break; }
+        calls.push(s.slice(c.index, i + 1));
+      }
+    }
+    return calls;
+  };
+  const bareOf = (calls) => calls.filter((c) => !/\bdrop:\s*agentCredentialEnvNames\(/.test(c) && !/\bdrop:\s*require\('\.\.\/harness-env\.js'\)\.agentCredentialEnvNames\(/.test(c));
+  const importers = [];
+  for (const f of srcFiles) {
+    const calls = callsOf(fs.readFileSync(f, 'utf8'));
+    if (calls) importers.push({ rel: path.relative(REPO, f), calls });
+  }
+  ok(importers.length >= 5, `wiring: agent-env.js importers found (${importers.map((x) => x.rel).join(', ')})`);
+  for (const { rel, calls } of importers) {
+    if (EXEMPT[rel]) { ok(true, `wiring: ${rel} — exempt: ${EXEMPT[rel]}`); continue; }
+    const bare = bareOf(calls);
+    ok(calls.length >= 1 && !bare.length, `wiring: ${rel} — every agentEnv/daemonEnv call hands the derived drop (${calls.length})`, bare.join(' | ').slice(0, 300));
+  }
+  const baseShape = "const { agentEnv: sanitizedSpawnEnv } = require('../agent-env.js');\n  const env = { ...sanitizedSpawnEnv(process.env), [h.envVar]: h.home };";
+  ok(bareOf(callsOf(baseShape)).length === 1, "wiring RED control: the base's usage-pool helper call (no drop) is caught");
+  const { MINT_ENV_ALLOW } = require(path.join(REPO, 'src/oat-mint-model.js'));
+  ok(Array.isArray(MINT_ENV_ALLOW) && !MINT_ENV_ALLOW.some((n) => all().includes(n)), 'wiring: oat-mint allowlist holds no credential name');
+}
+
 // ── tree: THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──
 // Measured HERE, while every patched copy this run made still exists (the exit
 // handlers remove them — a census taken after exit passes on the pre-fix

@@ -14,6 +14,8 @@
  *              src/egress-fence.js), `poll` (the caller's bounded queue), `none` (refused by name)
  *   callers  = data/channels/webhook/callers.json (0600, written atomically): a Bearer caller keeps only `tokenHash`, an
  *              HMAC caller the secret-box ciphertext `tokenEnc`; `generation` moves on every rotate / revoke
+ *   pending  = data/channels/webhook/pair-pending.json (0600, atomic; lane webhook-pair-join): the pairing codes A minted
+ *              and their deadlines — each token as a secret-box `tokenEnc`, never the code itself (pairPendingDoor)
  *
  * Declared facts the engine reads instead of a `builtin` branch: `removable: false`, `consent: null`, `reach: 'grants'`
  * (AgentReach rows, like any vendor), `listed: true` (the first screen and the lists count it), `seed: true` (the engine
@@ -53,6 +55,7 @@ const caps = {
 };
 
 const CALLERS_FILE = 'callers.json';
+const PENDING_FILE = 'pair-pending.json';
 const POLL_MAX = 200;
 const POLL_TTL_MS = 7 * 86400 * 1000;
 const NAME_MAX = 80;
@@ -68,6 +71,26 @@ function writeJsonAtomic(file, obj) {
   fs.renameSync(tmp, file);
 }
 const cleanName = (s, max = NAME_MAX) => String(s == null ? '' : s).replace(/[\u0000-\u001f\u007f\u2028\u2029\u202a-\u202e\u2066-\u2069]+/g, ' ').trim().slice(0, max);
+
+/** THE PENDING PAIR CODES' STORE DOOR (lane webhook-pair-join, B-5ee0 b) — what webhook-pair's createPending binds:
+ *  `read()` opens each sealed token (a row whose token will not open is dropped: its code is void, the owner mints a
+ *  new one); `write(rows)` seals each token and writes the file atomically at 0600. Never a GET, never a broadcast. */
+function pairPendingDoor(dir, { secrets }) {
+  const file = path.join(dir, PENDING_FILE);
+  return {
+    file,
+    read() {
+      let d; try { d = JSON.parse(fs.readFileSync(file, 'utf-8')); } catch { return []; }
+      return (d && Array.isArray(d.rows) ? d.rows : []).map((r) => {
+        if (!r || typeof r !== 'object' || typeof r.tokenEnc !== 'string') return null;
+        let token = null; try { token = secrets.open(r.tokenEnc); } catch { token = null; }
+        const { tokenEnc, ...rest } = r;
+        return token ? { ...rest, token } : null;
+      }).filter(Boolean);
+    },
+    write(rows) { writeJsonAtomic(file, { v: 1, rows: rows.map(({ token, ...r }) => ({ ...r, tokenEnc: secrets.seal(token) })) }); },
+  };
+}
 
 /** A caller as anybody may SEE it — never a hash, a ciphertext or a token. */
 function callerView(c) {
@@ -392,5 +415,5 @@ const EGRESS = Object.freeze([]);
 module.exports = {
   kind: KIND, caps, create, label: 'Webhook', policyDefault: 'direct', sendStartsTurn: false, EGRESS,
   removable: false, consent: null, reach: 'grants', listed: true, seed: true,
-  callersStore, callerView, deliveryVerdict, pollAnswer, cursorOf, cursorSeq, queueAppend, hmacHex, POLL_MAX, POLL_TTL_MS, REPLY_NAME_DEFAULT,
+  callersStore, callerView, deliveryVerdict, pollAnswer, cursorOf, cursorSeq, queueAppend, hmacHex, POLL_MAX, POLL_TTL_MS, REPLY_NAME_DEFAULT, pairPendingDoor, PENDING_FILE,
 };

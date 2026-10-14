@@ -10,7 +10,7 @@ const { createWsHeartbeat } = require('./server/ws-heartbeat');
 const { listCodexThreads } = require('./codex-session-store');
 const { findCodexSessionJsonlPath, extractCodexThreadMeta } = require('./adapters/codex');
 const { cwdToProjectDir, findSessionJsonlPath } = require('./session-store');
-const { get: harnessOf, spawnOf } = require('./harnesses'); // S3: store.warmTranscript per harness (claude parse-cache warm / codex thread/read fallback)
+const { get: harnessOf, spawnOf, list: harnessList } = require('./harnesses'); // S3: store.warmTranscript per harness (claude parse-cache warm / codex thread/read fallback)
 const { capsOf } = require('./backend-caps');      // inputModes.queueVerbs / review / renameWriteback gates (never a backend-id branch)
 const { reconcileAttachStreaming } = require('./turn-state'); // §2.5: ONE attach-time streaming decision, shared with the live consumer
 const { pidsMatchingCmdline } = require('./cli-identity'); // THE process reader: the kill path's `pgrep -f` without the fork
@@ -111,8 +111,11 @@ function noteUnknownWsType(telemetry, type) {
 // One filter, two processes: this module re-exports it under the name every
 // consumer already requires from here. `agentEnv()` with no argument keeps
 // its `process.env` default — the PURE module never reads the process.
+// B-6be2: the descriptors' account-selector names ride every call (src/harness-env.js — the job door strips
+// the same list whole), so a harness registered later is stripped by the next spawn.
 const { agentEnv: agentEnvPure } = require('./agent-env.js');
-function agentEnv(base = process.env) { return agentEnvPure(base); }
+const { agentCredentialEnvNames } = require('./harness-env.js');
+function agentEnv(base = process.env) { return agentEnvPure(base, { drop: agentCredentialEnvNames(harnessList()) }); }
 
 
 function getSessionKey(session = {}) {

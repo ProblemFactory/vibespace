@@ -78,7 +78,7 @@ import { showGroupMembersDialog, showGroupDetail, renameGroup, archiveGroup } fr
 // the grain menu, and the one-line summary a row draws.
 import { showGrantAccessDialog, showNotifyDialog, showGrainMenu, assignmentSummary } from './channel-filter-editor.js';
 import { offersPaths, accountSectionOrder } from './webhook-view.js';   // lane webhook-l2-ui: an inbound door's account (its capability row)
-import { showNewPathDialog } from './channel-webhook.js';
+import { showNewPathDialog, showJoinDialog } from './channel-webhook.js';
 import { grainSummaryText } from './channel-words.js';
 // P3: the reach/policy dialog (row menu) and the Outbox window (header button).
 import { showReachDialog, showAccountReachDialog } from './channel-reach-editor.js';
@@ -879,6 +879,8 @@ export function registerChannelAdapterMenu() {
   const convCount = (c) => (Number.isFinite(c.count) ? c.count : (c.convs || []).length);
   // lane webhook-section-place: an inbound door's New path… heads its menu (the head-row button's glyph-only form keeps the word here)
   registerMenuItem({ menu: M, group: '1_rows', order: 1, when: (c) => offersPaths(A(c)), label: () => t('New path…'), run: (c) => showNewPathDialog(c.app, { adapterId: A(c).id }) });
+  // lane webhook-pair-join (B-5ee0 a): the JOIN door — paste a pairing code another VibeSpace's owner gave you
+  registerMenuItem({ menu: M, group: '1_rows', order: 2, when: (c) => offersPaths(A(c)), label: () => t('Join with a pairing code…'), run: (c) => showJoinDialog(c.app) });
   registerMenuItem({ menu: M, group: '1_rows', order: 5, when: (c) => acct(c) && convCount(c) > 0, label: () => t('Open conversation window'), run: (c) => openConversationOf(c.app, c.convs) });
   registerMenuItem({ menu: M, group: '1_rows', order: 8, when: (c) => !A(c).builtin && convCount(c) > 0, label: () => t('Search messages…'), run: (c) => showSearchDialog(c.app, A(c)) });
   // R4 (2026-09-27, design §7.3): TWO OPERATIONS, ACCESS FIRST — who may see

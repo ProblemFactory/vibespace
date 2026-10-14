@@ -9,8 +9,8 @@
 //   ③ THE CENSUS (grep-derived): every src/server/*-stream.js requires ../ws-keepalive.js and arms it, and no bridge pings
 //      by hand (`.ping(` outside the module); CONTROL: a planted bridge without it is red by name;
 //   ④ THE REAL BRIDGE (src/server/browser-stream.js over a fake upstream, real `ws` clients, keepaliveMs 200): a viewer
-//      that never answers pings (autoPong:false — what a half-open peer is to the server) is dropped within 2 × 200 ms
-//      (+ slack), the viewer count falls to 1 (the other viewer is told), ONE named close line is logged, the other
+//      that never answers pings (autoPong:false — what a half-open peer is to the server) is dropped at the round after its
+//      one unanswered ping (two rounds of 200 ms — the count judged, never the clock), the viewer count falls to 1 (the other viewer is told), ONE named close line is logged, the other
 //      viewer keeps its picture; the client's reconnect ladder treats any close alike (pinned).
 //   ⑤ OUR OWN STALL IS NOT THE PEER'S DEATH (verify r1 T1①, the 2.369.16 rule): the PURE stall table (a 60 s stall after
 //      a ping, the blind band — tick on time, the gauge saw the gap —, the next clean round, the 7-round bound, a 4 s
@@ -121,7 +121,8 @@ console.log('④ the real browser bridge: a half-open viewer is dropped, the oth
   await new Promise((r) => srv.listen(PORT, '127.0.0.1', r));
   const viewer = (opts = {}) => {
     const ws = new WebSocket(`ws://127.0.0.1:${PORT}/api/browser/stream?session=sess-1`, { headers: { Cookie: 'vs=1' }, ...opts });
-    const v = { ws, frames: 0, msgs: [], closed: null };
+    const v = { ws, frames: 0, msgs: [], closed: null, pings: 0 };
+    ws.on('ping', () => { v.pings++; });
     ws.on('message', (d) => { try { const m = JSON.parse(d); if (m.type === 'frame') v.frames++; else v.msgs.push(m); } catch { } });
     ws.on('close', (c) => { v.closed = c; }); ws.on('error', () => {});
     return v;
@@ -133,7 +134,9 @@ console.log('④ the real browser bridge: a half-open viewer is dropped, the oth
   const t0 = Date.now();
   const gone = await until(() => bridge.viewerCount('sess-1') === 1, 3000);
   const took = Date.now() - t0;
-  ok(two === 2 && gone && took <= 2 * 200 + 400, `the silent viewer is dropped within 2 × 200 ms (+ slack): ${took} ms, the count 2 → ${bridge.viewerCount('sess-1')}`, JSON.stringify({ two, took }));
+  // the drop is judged by the MECHANISM'S COUNT, never a stopwatch (lane mirror-flake-hardening: `took <= 800` judged the
+  // runner's timers): ONE ping went unanswered and the next round dropped it — two rounds of 200 ms, whatever the clock read
+  ok(two === 2 && gone && b.pings === 1, `the silent viewer is dropped at the round after its ONE unanswered ping (pings ${b.pings}; ${took} ms here, information), the count 2 → ${bridge.viewerCount('sess-1')}`, JSON.stringify({ two, took, pings: b.pings }));
   const named = lines.filter((l) => /\[browser-stream\] .*: viewer \d+ closed \(no pong for 400 ms and nothing acknowledged\) after \d+s, code 1006/.test(l));
   ok(named.length === 1, 'ONE named close line: "viewer N closed (no pong for 400 ms and nothing acknowledged) after Ns, code 1006"', lines.join(' | '));
   await sleep(700);

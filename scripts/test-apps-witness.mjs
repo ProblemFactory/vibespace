@@ -216,7 +216,9 @@ console.log('§7 lane apps-dialog-fast — the open never waits; "outside the do
   let t0 = Date.now();
   const v0 = await a7.refreshWitness({ reason: 'open' });
   const openMs = Date.now() - t0;
-  ok(openMs < 100 && v0.listing === true && v0.count === 0 && pushed.length === 0, `a due open with a 600 ms walk answers in ${openMs} ms — the last list (nothing yet), "listing…", nothing pushed yet`, v0);
+  // the evidence it did not wait for the walk is the walk's own state — still listing, nothing pushed — never a stopwatch
+  // (lane mirror-flake-hardening: the old `openMs < 100` judged the machine; the ms are information)
+  ok(v0.listing === true && v0.count === 0 && pushed.length === 0, `a due open with a 600 ms walk answers BEFORE the walk lands (${openMs} ms) — the last list (nothing yet), "listing…", nothing pushed yet`, v0);
   await a7.refreshWitness({ reason: 'open' });
   ok(c7.filter((c) => c.startsWith('flatpak')).length <= 2, 'a second open while the walk runs starts no second walk', c7);
   await a7.witnessSettled(); await new Promise((r) => setTimeout(r, 5));

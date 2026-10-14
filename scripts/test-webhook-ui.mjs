@@ -8,6 +8,9 @@
 //   §6 the reply line and the send outcomes; §7 every new literal has zh + ja;
 //   §8 (lane webhook-section-place) the built-in door's section sorts LAST (PURE accountSectionOrder + RED mutants) and its
 //   New path… lives on the head row (source laws; the chrome twin is test-webhook-section-place).
+//   §9 (lane webhook-pair-join, B-5ee0) THE PAIRING DOORS: the code law (a pair-code answer's code reaches showPairCodeOnce
+//   alone — census + RED control), the join box keeps no state, every refusal the routes can name has words (a drift census
+//   over the server's codes + a RED control), the words themselves, the menu row and the mint door.
 // Heavy twin: test-webhook-ui-e2e (a real server + Chrome). Run: node scripts/test-webhook-ui.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -40,8 +43,12 @@ function tokenCensus(src) {
   const lines = src.split('\n');
   const start = lines.findIndex((l) => l.startsWith('export function showTokenOnce('));
   let end = start + 1; while (end < lines.length && !/^}/.test(lines[end])) end++;
+  // lane webhook-pair-join: the pairing code's own shown-once dialog draws ITS secret the same way (the code law, §9)
+  const cStart = lines.findIndex((l) => l.startsWith('export function showPairCodeOnce('));
+  let cEnd = cStart + 1; while (cStart >= 0 && cEnd < lines.length && !/^}/.test(lines[cEnd])) cEnd++;
   lines.forEach((l, i) => {
     if (i >= start && i <= end) return;   // the one dialog that draws it
+    if (cStart >= 0 && i >= cStart && i <= cEnd) return;
     for (const m of l.matchAll(/\.token\b/g)) { const at = l.slice(0, m.index); if (!/showTokenOnce\(\{ caller: a\.caller, $/.test(at.slice(-40)) && !/token: a$/.test(at.slice(-8))) bad.push(`${i + 1}: ${l.trim().slice(0, 120)}`); }
     if (/\bsecret\b/.test(l)) bad.push(`${i + 1}: ${l.trim().slice(0, 120)}`);
     if (/(localStorage|sessionStorage)\b/.test(l)) bad.push(`${i + 1}: ${l.trim().slice(0, 120)}`);
@@ -118,6 +125,45 @@ console.log('§8 the Webhook section: last in Accounts, its New path… on the h
   ok(PANEL.includes("registerMenuItem({ menu: M, group: '1_rows', order: 1, when: (c) => offersPaths(A(c)), label: () => t('New path…'), run: (c) => showNewPathDialog(c.app, { adapterId: A(c).id }) });"), 'the head\'s ⋯ / right-click menu (one menu) gains New path… as its first row, for an inbound door only');
   const CSS = read('public/style.css');
   ok(CSS.includes('@container chan-panel (max-width: 300px) { .chan-wh-new-label { display: none; }') && CSS.includes('@media (max-width: 480px) { .chan-wh-new-label { display: none; }'), 'narrow (a phone, a ≤ 300 px panel) the button keeps its glyph alone');
+}
+
+console.log('§9 the pairing doors (lane webhook-pair-join, B-5ee0)');
+{
+  /** every `.code` read in channel-webhook.js — the ONE allowed is the hand-off of the pair-code answer to showPairCodeOnce */
+  const codeCensus = (src) => src.split('\n').flatMap((l, i) => [...l.matchAll(/\.code\b/g)].filter((m) => !/showPairCodeOnce\(\{ code: a$/.test(l.slice(0, m.index).slice(-30))).map(() => `${i + 1}: ${l.trim().slice(0, 120)}`));
+  const codeHand = (WSRC.match(/showPairCodeOnce\(\{ code: a\.code, expiresAt: a\.expiresAt/g) || []).length;
+  ok(codeHand === 1 && codeCensus(WSRC).length === 0, 'THE CODE LAW: a pair-code answer\'s code is read ONLY as the hand-off to showPairCodeOnce (1); a refusal is worded by webhook-view.js, never read here', codeCensus(WSRC));
+  const CMUT = WSRC.replace("  showPairCodeOnce({ code: a.code, expiresAt: a.expiresAt, path: title || slug });", "  showToast(a.code);\n  showPairCodeOnce({ code: a.code, expiresAt: a.expiresAt, path: title || slug });");
+  ok(CMUT !== WSRC && codeCensus(CMUT).length === 1, 'RED CONTROL: a mutant that also toasts the code is caught by the code census');
+  const pc = WSRC.slice(WSRC.indexOf('export function showPairCodeOnce('), WSRC.indexOf('export function showJoinDialog('));
+  ok(/closeOnBackdrop: false/.test(pc) && /onClose: \(\) => \{ secret = ''; if \(tick\) clearInterval\(tick\); tick = null; \}/.test(pc) && /secret = ''; shown\.textContent = '—'; copy\.disabled = true;/.test(pc) && /t\('Expired — make a new code'\)/.test(pc),
+    'the shown-once code: no backdrop close; closing drops it and stops its clock; at the deadline the box drops it and says "Expired — make a new code"');
+  const jd = WSRC.slice(WSRC.indexOf('export function showJoinDialog('));
+  ok(/onClose: \(\) => \{ box\.value = ''; seq\+\+; clearTimeout\(timer\); \}/.test(jd) && !/^(let|var) /m.test(WSRC) && /check: true/.test(jd) && (jd.match(/post\('\/api\/channels\/webhook\/join'/g) || []).length === 2,
+    'the join box: the pasted code lives in the box alone (no module-level state; closing empties it); one read (`check: true`) and one join, both the existing route');
+  // every refusal the two routes can NAME has words here — a drift census over the server's own codes
+  const WPS = read('src/webhook-pair.js'), RT = read('src/routes/webhook.js');
+  const joinSrc = RT.slice(RT.indexOf('function joinRefusal('));
+  const named = new Set([...['decodeCode', 'hookUrlVerdict'].flatMap((fn) => { const b = WPS.slice(WPS.indexOf(`function ${fn}(`)); return [...b.slice(0, b.indexOf('\n}\n')).matchAll(/no\('([a-z-]+)'/g)].map((m) => m[1]); }),
+    ...[...joinSrc.matchAll(/code: '([a-z-]+)'/g)].map((m) => m[1]), ...[...joinSrc.matchAll(/'(no-instance-url)'\)/g)].map((m) => m[1])]);
+  const unworded = [...named].filter((c) => !V.PAIR_REFUSALS.includes(c));
+  ok(named.size >= 9 && unworded.length === 0, `every refusal the join / pair-code routes name has words in webhook-view.js (${[...named].join(', ')})`, unworded);
+  const drift = WPS.replace("return no('caller-token',", "return no('code-shape',");
+  const named2 = [...drift.slice(drift.indexOf('function decodeCode(')).slice(0, 900).matchAll(/no\('([a-z-]+)'/g)].map((m) => m[1]).filter((c) => !V.PAIR_REFUSALS.includes(c));
+  ok(drift !== WPS && named2.length === 1, 'RED CONTROL: a server refusal renamed without words (a mutant) is caught by the drift census', named2);
+  const whys = V.PAIR_REFUSALS.map((c) => V.joinWhyText({ code: c, error: 'HTTP 500' }, { from: 'Hub A', t }));
+  ok(new Set(whys).size === V.PAIR_REFUSALS.length && whys.every((w) => w && !/\{/.test(w)) && /^Hub A says this code was already used/.test(V.joinWhyText({ code: 'code-used' }, { from: 'Hub A', t })) && /^Hub A does not know this code/.test(V.joinWhyText({ code: 'code-unknown' }, { from: 'Hub A', t }))
+    && /^The other side says/.test(V.joinWhyText({ code: 'code-used' }, { t })) && /caller token, not a pairing code/.test(V.joinWhyText({ code: 'caller-token' }, { t })) && /has expired/.test(V.joinWhyText({ code: 'expired' }, { t })) && V.joinWhyText({ code: 'pair-refused', error: 'HTTP 502' }, { t }) === 'The pairing did not complete: HTTP 502' && /no answer/.test(V.joinWhyText(null, { t })),
+    'each refusal BY NAME — one distinct sentence per code; "Hub A says … already used" / "Hub A does not know this code" name who refused (else "The other side"); the rest in the server\'s words', whys);
+  const NOW9 = 1_800_000_000_000, ck = { from: 'Hub A', host: 'a.example', theirPath: 'ci', slug: 'ci', exists: false, repair: false, expiresAt: NOW9 + 8 * 60e3 + 5e3 };
+  ok(V.joinPreviewText(ck, { t, now: NOW9 }) === 'Hub A offers its path ci (a.example) — this code works once, for 9 more min' && V.joinPathText(ck, 'hub-a', { t }) === "A new path hub-a is made here for Hub A's calls"
+    && /already exists here — Hub A joins it as one more caller/.test(V.joinPathText({ ...ck, exists: true }, 'ci', { t })) && /already paired with Hub A on ci — this code renews/.test(V.joinPathText({ ...ck, exists: true, repair: true }, 'ci', { t })),
+    'the paste box\'s read: who offers which path where and for how long; then what joining does here (a new path / joins one / renews)');
+  ok(V.joinDoneText({ path: { slug: 'hub-a' }, repaired: false }, { from: 'Hub A', t }) === 'Paired with Hub A — its calls land in path hub-a, and your replies go back to it' && /^Pairing with Hub A renewed on path hub-a/.test(V.joinDoneText({ path: { slug: 'hub-a' }, repaired: true }, { from: 'Hub A', t }))
+    && V.codeClockText(NOW9 + 599e3, { t, now: NOW9 }) === 'Works once · expires in 9:59' && V.codeClockText(NOW9, { t, now: NOW9 }) === null, 'the finished join says what it did; the shown code\'s clock counts down m:ss and is null at the deadline');
+  ok(PANEL.includes("registerMenuItem({ menu: M, group: '1_rows', order: 2, when: (c) => offersPaths(A(c)), label: () => t('Join with a pairing code…'), run: (c) => showJoinDialog(c.app) });") && zh.includes('"Join with a pairing code…":') && ja.includes('"Join with a pairing code…":'),
+    'the Webhook section\'s ⋯ (by the capability row): "Join with a pairing code…" right under New path… — zh + ja');
+  ok(/const pair = btn\(t\('Pair with another VibeSpace…'\), \(\) => mintPairCode\(slug, title\), 'chan-wh-add'\);/.test(WSRC) && /pair\.dataset\.whPairOpen = slug;/.test(WSRC), 'a path\'s caller panel: "Pair with another VibeSpace…" beside Register a caller (the mint door)');
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

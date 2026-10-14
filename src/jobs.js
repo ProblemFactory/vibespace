@@ -16,6 +16,8 @@ const { withoutNoticeHead } = require('./notification-senders.js'); // lane noti
 const textDigest = (t) => crypto.createHash('sha256').update(String(t)).digest('hex'); // a flood floor's memory of a text (verify r9)
 const { spawn, execFile } = require('child_process');
 const M = require('./job-model.js');
+const { credentialEnvNames } = require('./harness-env.js'); // PURE: B-6be2 — the job door's credential strip, derived from the descriptors
+const { list: harnessList } = require('./harnesses');
 const { timedSync } = require('./timed-sync.js'); // PURE: the store-write clock (design 011 lane 1, store-timing)
 const { applyClear, CLEARED_TEXT } = require('./record-clear.js'); // PURE: "Clear content…" (2026-09-28) — this engine holds the door (clearJobs)
 
@@ -52,13 +54,17 @@ function capUnclaimedNotifs(q) {
 function readStarttime(pid) { return PI.starttimeOf(pid) || 0; } // B-1cc6: the ONE reader is src/proc-identity.js
 const LISTEN_READ_MS = 30_000; // lane artifacts-services: a running job's listening ports, re-read at most this often (the sweep's tick)
 function bootId() { return PI.bootIdOf(); }
-// mirror of ws-handler's agentEnv drops (jobs must never inherit ambient vendor
-// credentials or server config — §ban-safety structural leg)
-function jobEnv(extra = {}) {
-  const env = { ...process.env };
+// jobs must never inherit ambient vendor credentials or server config
+// (§ban-safety structural leg). B-6be2: the credential half is DERIVED — every
+// harness descriptor's `creds.*EnvVar(s)` + the vendor CLIs' own login names
+// (src/harness-env.js credentialEnvNames, the one list the agent door shares),
+// never typed here; a job's own env/secrets (`extra`) are laid on after and win.
+function jobEnv(extra = {}, base = process.env) {
+  const env = { ...base };
+  const credentials = new Set(credentialEnvNames(harnessList()));
   for (const k of Object.keys(env)) {
     if (/^(VIBESPACE_|npm_|CLAUDE_CODE_)/.test(k)) delete env[k];
-    if (['PORT', 'HOST', 'NODE_ENV', 'NODE_OPTIONS', 'ANTHROPIC_API_KEY', 'CLAUDE_SECURESTORAGE_CONFIG_DIR'].includes(k)) delete env[k];
+    if (['PORT', 'HOST', 'NODE_ENV', 'NODE_OPTIONS'].includes(k) || credentials.has(k)) delete env[k];
   }
   return { ...env, ...extra };
 }
@@ -1592,4 +1598,4 @@ class JobManager {
   _hum(ms) { const m = Math.round(Math.abs(ms) / 60000); return m < 60 ? m + 'm' : m < 1440 ? Math.round(m / 60) + 'h' : Math.round(m / 1440) + 'd'; }
 }
 
-module.exports = { JobManager, ARCHIVE_CAP, ARCHIVE_SWEEP_MS };
+module.exports = { JobManager, ARCHIVE_CAP, ARCHIVE_SWEEP_MS, jobEnv };

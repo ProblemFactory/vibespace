@@ -13,9 +13,11 @@
  *                                                      like /hook; refused before a byte is read unless a code A minted is
  *                                                      pending for (slug, X-Webhook-Caller); src/webhook-pair.js judges the
  *                                                      frame BEFORE the one write (a peer caller row); the code is then spent
- *   POST /api/channels/webhook/paths/<slug>/pair-code  OWNER (A): mint the one-time code (10 min) — shown in that answer only
+ *   POST /api/channels/webhook/paths/<slug>/pair-code  OWNER (A): mint the one-time code (10 min) — shown in that answer only;
+ *                                                      its pending half sealed in pair-pending.json (a restart keeps it)
  *   POST /api/channels/webhook/join                    OWNER (B): paste A's code — B posts the completion frame to A and, on
- *                                                      A's 200 only, writes its path + the `peer` caller for A
+ *                                                      A's 200 only, writes its path + the `peer` caller for A; `check: true`
+ *                                                      = the paste box's read of the code (who, where, which path) — no post
  *   /api/channels/webhook/paths…                       the OWNER's verbs (cookie; an agent bearer ⇒ 403 agent-forbidden):
  *                                                      list, create / update a path, register a caller (the token is shown
  *                                                      ONCE, in that answer only), rotate, revoke, delivery
@@ -49,7 +51,7 @@ const memos = WA.createCallerMemos();
 /** What the door did — the suites read it (`stats()`): per-step refusals and how many bodies were READ (⑦). */
 const STATS = { refusals: {}, bodyReads: 0, accepted: 0, last: null };
 
-function setup(deps) { D = { now: Date.now, serverSetting: () => undefined, ...deps }; }
+function setup(deps) { D = { now: Date.now, serverSetting: () => undefined, ...deps }; bindPending(); }
 const engine = () => (D && typeof D.getEngine === 'function' ? D.getEngine() : null);
 function store() {
   const e = engine();
@@ -182,6 +184,28 @@ router.get('/api/channels/webhook/:slug/replies', async (req, res) => {
 });
 // ── THE INSTANCE PAIRING (lane webhook-l3-cli-pair; §12, fence 7) ───────────────────────────────────────────────────────
 const pending = WP.createPending();
+/** lane webhook-pair-join (B-5ee0 b): the pending codes live in data/channels/webhook/pair-pending.json (sealed tokens,
+ *  0600) — reloaded here at boot, the expired swept; a timer sweeps each row at its deadline. No secret box ⇒ memory. */
+let sweepTimer = null;
+function armSweep() {
+  if (sweepTimer) clearTimeout(sweepTimer);
+  sweepTimer = null;
+  const x = pending.nextExp();
+  if (x === null) return;
+  sweepTimer = setTimeout(() => { sweepTimer = null; pending.sweep(D.now()); armSweep(); }, Math.max(0, Math.min(x - D.now(), WP.CODE_TTL_MS)) + 1000);
+  if (sweepTimer.unref) sweepTimer.unref();
+}
+function bindPending() {
+  const e = engine();
+  try {
+    if (!e || !e.secrets || !D.dataDir) pending.bind(null, D.now());
+    else {
+      const door = WH.pairPendingDoor(path.join(D.dataDir, 'channels', ADAPTER_ID), { secrets: e.secrets });
+      pending.bind({ read: door.read, write: (rows) => { door.write(rows); armSweep(); } }, D.now());
+    }
+  } catch (err) { console.warn('[webhook] pair-pending reload:', err && err.message); }
+  armSweep();
+}
 const pairParser = express.raw({ type: () => true, limit: `${WP.FRAME_MAX}b` });
 const allowPrivate = () => D.serverSetting('webhook.allowPrivateReplyUrl') === true;
 /** This instance's own URL (instanceUrl — the frp mapping layered over agentd.publicUrl), no trailing slash, or null. */
@@ -208,8 +232,9 @@ router.post('/api/channels/webhook/:slug/pair', async (req, res) => {
   try {
     const v = WP.complete({ slug, headers: req.headers, body: rb.body, now: D.now(), pending: p, allowPrivate: allowPrivate() },
       { hmacHex: WH.hmacHex, safeEqual, write: (f) => st.pair(slug, { id: callerId, name: f.name, token: p.token, outToken: f.token, outCaller: f.caller, replyUrl: f.hookUrl }) });
+    if (!v.ok && v.answer === 'spent') return res.status(409).set('Cache-Control', 'no-store').json({ ok: false, code: 'code-used', error: 'this pairing code was already used — ask for a new one' });
     if (!v.ok) return v.answer === 'unauthorized' ? answer(res, 'unauthorized') : res.status(400).set('Cache-Control', 'no-store').json({ ok: false, code: v.why, error: v.error });
-    pending.spend(slug, callerId);
+    try { pending.spend(slug, callerId, D.now()); } catch (e) { console.warn('[webhook] pair-pending spend:', e && e.message); }
     memos.forget(callerId);
     await syncRow(slug, null);
     res.set('Cache-Control', 'no-store').json({ ok: true, v: 1 });
@@ -319,7 +344,8 @@ router.post('/api/channels/webhook/paths/:slug/callers/:id/:verb', json, async (
 });
 /** THE PAIRING CODE (A's owner, §12): ONE code, 10 min, single use — A's hook URL (instanceUrl), the caller id kept for the
  *  other side (fresh, or `callerId` = a live peer ⇒ re-pairing rotates it in place), the token issued to it. The code is
- *  in THIS answer and nowhere else (the pending half lives in memory: a restart voids it). */
+ *  in THIS answer and nowhere else; its pending half is written (sealed) BEFORE it is shown — a restart inside the 10
+ *  minutes keeps it valid (lane webhook-pair-join). */
 router.post('/api/channels/webhook/paths/:slug/pair-code', json, (req, res) => {
   if (!owner(req, res)) return;
   try {
@@ -338,14 +364,24 @@ router.post('/api/channels/webhook/paths/:slug/pair-code', json, (req, res) => {
     } else callerId = st.freshId(slug);
     const t = D.now();
     const token = PT.mintToken('webhook');
-    const row = pending.put({ slug, callerId, token, nonce: crypto.randomBytes(16).toString('hex'), repair: b.callerId !== undefined }, t);
-    const code = WP.encodeCode({ hook: hv.url, caller: callerId, token, nonce: row.nonce, exp: row.exp, name: b.name || st.path(slug).replyName });
+    const row = pending.put({ slug, callerId, token, nonce: crypto.randomBytes(16).toString('hex'), repair: b.callerId !== undefined, name: String(b.name || st.path(slug).replyName).slice(0, 80) }, t);
+    const code = WP.encodeCode({ hook: hv.url, caller: callerId, token, nonce: row.nonce, exp: row.exp, name: row.name });
     res.set('Cache-Control', 'no-store').json({ ok: true, code, callerId, hookUrl: hv.url, expiresAt: row.exp, repair: row.repair, shownOnce: true });
   } catch (e) { bad(res, 500, (e && e.message) || 'failed', 'failed'); }
 });
+/** lane webhook-pair-join: A's refusal of the completion frame, said BY NAME on B. A tells an unproven frame nothing — its
+ *  same-shape 401 reads "does not know this code" here; "already used" is A's 409 to a frame that proved the code. */
+function joinRefusal(r, from) {
+  let named = null; try { named = r.body ? JSON.parse(r.body).code : null; } catch { named = null; }
+  if (r.status === 409 && named === 'code-used') return { code: 'code-used', error: `${from} says this code was already used — nothing was written; ask for a new code` };
+  if (r.status === 401) return { code: 'code-unknown', error: `${from} does not know this code (expired there, replaced by a newer code, or altered) — nothing was written; ask for a new code` };
+  if (r.status === 429) return { code: 'rate-limited', error: `${from} is refusing calls from this address for now — try again in a few minutes` };
+  return { code: 'pair-refused', error: `the other side refused the pairing (${r.status ? `HTTP ${r.status}` : r.error || r.code || 'unreachable'}) — nothing was written; ask for a new code` };
+}
 /** JOIN (B's owner, §12): paste A's code — judged here, the token B issues to A minted, the completion frame POSTed to A's
  *  pair endpoint through the egress fence; ONLY on A's 200 does B write its path (made if missing) + the `peer` caller for
- *  A. The same A pasted again (a re-pair code) rotates that row in place. No token in the answer. */
+ *  A. The same A pasted again (a re-pair code) rotates that row in place. No token in the answer. lane webhook-pair-join:
+ *  `check: true` stops after the reads — who offers the code, its host, its path, the path here — nothing posted. */
 router.post('/api/channels/webhook/join', json, async (req, res) => {
   if (!owner(req, res)) return;
   try {
@@ -364,11 +400,12 @@ router.post('/api/channels/webhook/join', json, async (req, res) => {
     if (!mine.ok) return bad(res, 409, mine.error, mine.why);
     const had = st.path(slug);
     const existing = had ? st.callersRaw(slug).find((c) => c.kind === 'peer' && !c.revokedAt && c.delivery && c.delivery.replyUrl === av.url) : null;
+    if (b.check === true) return res.set('Cache-Control', 'no-store').json({ ok: true, check: true, from: cv.name, host: new URL(av.url).host, theirPath: av.slug, slug, exists: !!had, repair: !!existing, expiresAt: cv.exp });
     const myId = existing ? existing.id : had ? st.freshId(slug) : `c-${crypto.randomBytes(4).toString('hex')}`;
     const token = PT.mintToken('webhook');
     const body = WP.frameOf({ nonce: cv.nonce, hookUrl: mine.url, caller: myId, token, name: b.name || (had ? had.replyName : WH.REPLY_NAME_DEFAULT) });
     const r = await EF.fenceFetch(av.pairUrl, { method: 'POST', body, headers: WP.frameHeaders({ slug: av.slug, callerId: cv.caller, token: cv.token, body, now: t }, { hmacHex: WH.hmacHex }), allowPrivate: allowPrivate() });
-    if (!r.ok) return bad(res, 502, `the other side refused the pairing (${r.status ? `HTTP ${r.status}` : r.error || r.code || 'unreachable'}) — nothing was written; ask for a new code`, 'pair-refused');
+    if (!r.ok) { const no = joinRefusal(r, cv.name); return bad(res, 502, no.error, no.code); }
     if (!had) { const ov = pathOptions({}); st.putPath(slug, { title: String(b.title || cv.name || slug), replyName: ov.options.replyName, disabled: false, ipAllow: [] }); await syncRow(slug, ov.options); }
     const caller = st.pair(slug, { id: myId, name: cv.name, token, outToken: cv.token, outCaller: cv.caller, replyUrl: av.url });
     memos.forget(myId);

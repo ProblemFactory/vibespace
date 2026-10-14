@@ -189,6 +189,10 @@ module.exports = {
     authFile: 'auth.json',
     ledgerType: 'codex-subscription',          // the usage ledger's account type for EVERY codex account (server.js resolveAccount)
     spawnEnvVar: 'CODEX_HOME',
+    // B-6be2 (src/harness-env.js): the account's home IS the CLI's home — agents keep an ambient one
+    // (the machine login; sharedHome() reads it), jobs drop it. No key: codex accounts are logins only.
+    homeEnvVar: 'CODEX_HOME',
+    keyEnvVars: [],
     loginLabel: 'ChatGPT',
     defaultIdField: 'defaultCodexAccountId',
     spawnForm: 'isolated-home',                // accounts.resolveForSpawn: spawnEnvVar = the account's own dir (a pool = its symlink); no API keys, no oat

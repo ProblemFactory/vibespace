@@ -5163,6 +5163,11 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .chan-wh-pick { align-items: baseline; flex-wrap: wrap; }
 .chan-wh-pick-off { color: var(--text-dim); }
 .chan-wh-why { flex-basis: 100%; padding-left: 22px; font-size: 11px; color: var(--warn-text); }
+/* lane webhook-pair-join: the join box (a pasted pairing code wraps anywhere) + what a finished join did */
+.chan-wh-paste { width: 100%; box-sizing: border-box; font-family: var(--font-mono, monospace); font-size: 12px; word-break: break-all; resize: vertical; min-height: 64px; }
+.chan-wh-join-done { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.chan-wh-join-done .chan-wh-at { font-size: 11px; }
+@media (max-width: 480px) { .chan-wh-dialog .dialog-footer .mounts-btn { min-height: 36px; padding-left: 14px; padding-right: 14px; } }
 .chanwin-wh { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; margin-top: 3px; }
 .chanwin-wh-btn { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 1px 8px; }
 .chanwin-wh-budget { font-size: 11px; color: var(--text-dim); min-width: 0; }

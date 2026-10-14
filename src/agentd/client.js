@@ -199,7 +199,9 @@ class DeviceManager {
     // daemon tier itself reads on top of the agent set.
     const child = spawn(process.execPath, [path.join(this._root, 'current', 'agentd.js')], {
       detached: true, stdio: 'ignore',
-      env: { ...daemonEnv(process.env), ...(this._nodeModules ? { VIBESPACE_NODE_MODULES: this._nodeModules } : {}) },
+      // B-6be2: born without an ambient account selector too — a daemon child's env is the server's laid over
+      // the daemon's OWN, so a name the server deleted would come back from here (src/harness-env.js).
+      env: { ...daemonEnv(process.env, { drop: require('../harness-env.js').agentCredentialEnvNames(require('../harnesses').list()) }), ...(this._nodeModules ? { VIBESPACE_NODE_MODULES: this._nodeModules } : {}) },
     });
     child.unref();
     this._log(`[agentd] spawned local daemon pid=${child.pid}`);

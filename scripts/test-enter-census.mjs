@@ -21,6 +21,8 @@
 //      guard, a verdict call, a container that builds an input) are RED, their guarded twins green, a role=button row
 //      exempt; the base rel268's two reject-box handlers (channel-outbox.js) are RED (git show, SKIP without the sha).
 // The reject box's real Enter under CDP Input.imeSetComposition: test-channels-e2e ⑩ (heavy).
+// Its COST is a census of what it parses + a CPU ratio against one module's bare parse in the same process — never a
+// millisecond bound (lane mirror-flake-hardening: the old `< 3 s` read 4335 ms on ubuntu-latest and stopped the fast tier).
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -53,6 +55,7 @@ function walk(n, p, f) {
     else if (v && typeof v.type === 'string') walk(v, n, f);
   }
 }
+const PARSE_OPTS = { ecmaVersion: 'latest', sourceType: 'module', locations: true, allowHashBang: true };
 const isFn = (n) => !!n && /Function/.test(n.type);
 const lit = (n) => (n && n.type === 'Literal' ? n.value : n && n.type === 'TemplateLiteral' && !n.expressions.length ? n.quasis[0].value.cooked : undefined);
 const unchain = (n) => (n && n.type === 'ChainExpression' ? n.expression : n);
@@ -65,7 +68,7 @@ const literalTags = (n) => { n = unchain(n); if (!n) return []; const v = lit(n)
 /** The markup that makes a selector, searched in `srcs` order: `<tag … class="… c …">`, `el('tag', '… c …')`,
  *  `x.className = '… c …'` / `x.classList.add('c')` beside `x = createElement('tag')`, `id="x"` — the tag + its
  *  role / tabindex / type / contenteditable. */
-function markupTag(sel, srcs) {
+function markupTag(sel, srcs, cost = null) {
   const last = String(sel).trim().split(/[\s>+~]+/).pop() || '';
   const m = /^([a-z][a-z0-9]*)?((?:[.#][\w-]+|\[[^\]]+\]|:[\w-]+(?:\([^)]*\))?)*)$/i.exec(last);
   if (!m) return null;
@@ -87,6 +90,7 @@ function markupTag(sel, srcs) {
     return f;
   };
   for (const { name, src } of srcs) {
+    if (cost) { cost.markupScans++; cost.markupBytes += src.length; }
     const a = reMarkup.exec(src);
     if (a) return { tag: a[1].toLowerCase(), facts: attrFacts(a[2] + ' ' + a[3]), from: name };
     const b = reEl && reEl.exec(src);
@@ -118,15 +122,16 @@ const GUARD_RANK = { helper: 3, inline: 3, partial: 1 };
 const best = (a, b) => ((GUARD_RANK[a] || 0) >= (GUARD_RANK[b] || 0) ? a : b) || null;
 const worst = (a, b) => ((GUARD_RANK[a] || 0) <= (GUARD_RANK[b] || 0) ? a : b) || null;
 
-/** census(files, { extraMarkup }) → rows: one per Enter test inside a key handler, one per PURE verdict, one per a
+/** census(files, { extraMarkup, cost }) → rows: one per Enter test inside a key handler, one per PURE verdict, one per a
  *  verdict's call inside a handler. */
-function census(files, { extraMarkup = [] } = {}) {
+function census(files, { extraMarkup = [], cost = null } = {}) {
   const rows = [], A = new Map();
   for (const { name, src } of files) {
     let ast;
-    try { ast = acorn.parse(src, { ecmaVersion: 'latest', sourceType: 'module', locations: true, allowHashBang: true }); }
+    try { ast = acorn.parse(src, PARSE_OPTS); }
     catch (e) { rows.push({ file: name, line: 0, how: '-', ev: '-', recv: '-', kind: 'PARSE', why: e.message, guard: null, narrow: null, verdict: 'RED' }); continue; }
     const all = []; walk(ast, null, (n) => all.push(n));
+    if (cost) { cost.files++; cost.bytes += Buffer.byteLength(src); cost.nodes += all.length; cost.perFile.push({ name, src, nodes: all.length }); }
     A.set(name, analyze({ name, src, all }));
   }
   const verdicts = [];
@@ -205,7 +210,7 @@ function census(files, { extraMarkup = [] } = {}) {
       return null;
     };
     const fromSelector = (sel, more = {}) => {
-      const m = markupTag(sel, markupSrcs());
+      const m = markupTag(sel, markupSrcs(), cost);
       if (!m) return { kind: 'unknown', why: `${sel}: no markup found` };
       const k = kindOf(m.tag, { ...m.facts, ...more });
       return { kind: k.kind, why: `${sel} → ${k.why}${m.from !== file && m.from !== 'selector' ? ' (' + m.from + ')' : ''}` };
@@ -476,12 +481,41 @@ function census(files, { extraMarkup = [] } = {}) {
 
 const libFiles = (root) => fs.readdirSync(path.join(root, 'src/lib')).filter((f) => f.endsWith('.js')).sort().map((f) => ({ name: f, src: fs.readFileSync(path.join(root, 'src/lib', f), 'utf8') }));
 const INDEX_HTML = { name: 'public/index.html', src: fs.readFileSync(path.join(REPO, 'public/index.html'), 'utf8') };
-const t0 = Date.now();
-const rows = census(libFiles(REPO), { extraMarkup: [INDEX_HTML] });
-const ms = Date.now() - t0;
+// THE COST IS A CENSUS, NEVER A STOPWATCH (lane mirror-flake-hardening: rel269's mirror run 38549333465 measured the
+// old `< 3 s` at 4335 ms on ubuntu-latest and stopped the whole fast tier — a fixed wall-clock bound judges the MACHINE).
+// What the census costs is what it SCANS — the files, bytes and AST nodes it parses, the source bytes its selector
+// searches read — held to a budget declared from src/lib at a base; how fast it ran is judged only RELATIVE to a
+// control measured in this same process (the bare parse + walk of ONE reference module, scaled to every node the
+// census parsed), on CPU time, so a slower or busier runner moves both sides. The milliseconds printed are information.
+const COST_BASE = { at: 'd419156bd', files: 226, bytes: 9305042, nodes: 932197, markupPerByte: 6.4 };
+const COST_GROWTH = 1.5;      // src/lib may grow by half past the base before it is re-declared (re-measure the ratio then)
+const COST_RATIO_MAX = 15;    // the census's CPU ≤ this × the reference parse scaled to its nodes (measured 4.6–5.5 × on node 24 and 22, idle or beside two busy loops)
+const cpuMsOf = (u) => (u.user + u.system) / 1000;
+/** PURE: the cost law over one run's tally `{ files, bytes, nodes, markupBytes, cpuMs, refCpuMs, refNodes }`. */
+function costVerdict(c) {
+  const problems = [];
+  for (const k of ['files', 'bytes', 'nodes']) if (!(c[k] <= COST_GROWTH * COST_BASE[k])) problems.push(`${k} ${c[k]} > ${COST_GROWTH} × ${COST_BASE[k]} (base ${COST_BASE.at})`);
+  const markupPerByte = c.markupBytes / c.bytes;
+  if (!(markupPerByte <= COST_GROWTH * COST_BASE.markupPerByte)) problems.push(`the selector searches read ${markupPerByte.toFixed(2)} B per parsed byte > ${COST_GROWTH} × ${COST_BASE.markupPerByte}`);
+  const linearMs = c.refCpuMs * (c.nodes / c.refNodes);
+  const ratio = c.cpuMs / linearMs;
+  if (!(ratio <= COST_RATIO_MAX)) problems.push(`the census cost ${ratio.toFixed(1)} × a bare parse of what it read > ${COST_RATIO_MAX} ×`);
+  return { markupPerByte, linearMs, ratio, problems };
+}
+const parseWalk = (src) => { let n = 0; walk(acorn.parse(src, PARSE_OPTS), null, () => n++); return n; };
+const cost = { files: 0, bytes: 0, nodes: 0, markupScans: 0, markupBytes: 0, perFile: [] };
+const cpu0 = process.cpuUsage(), t0 = performance.now();
+const rows = census(libFiles(REPO), { extraMarkup: [INDEX_HTML], cost });
+cost.cpuMs = cpuMsOf(process.cpuUsage(cpu0));
+const ms = performance.now() - t0;
+// the control: the module with the most AST nodes, parsed + walked bare five times in this process — the fastest counts
+const ref = cost.perFile.reduce((a, f) => (f.nodes > a.nodes ? f : a));
+cost.refNodes = ref.nodes; cost.refCpuMs = Infinity; let refWallMs = Infinity;
+for (let i = 0; i < 5; i++) { const c0 = process.cpuUsage(), w0 = performance.now(); parseWalk(ref.src); cost.refCpuMs = Math.min(cost.refCpuMs, cpuMsOf(process.cpuUsage(c0))); refWallMs = Math.min(refWallMs, performance.now() - w0); }
+const CV = costVerdict(cost);
 
 // §1 the table
-console.log('§1 the Enter census over src/lib (' + rows.length + ' sites, ' + ms + ' ms)');
+console.log('§1 the Enter census over src/lib (' + rows.length + ' sites; cost: ' + cost.files + ' files, ' + cost.bytes + ' B, ' + cost.nodes + ' nodes, ' + cost.markupScans + ' selector searches reading ' + cost.markupBytes + ' B; CPU ' + cost.cpuMs.toFixed(0) + ' ms = ' + CV.ratio.toFixed(2) + ' × the bare parse of ' + ref.name + ' (' + ref.nodes + ' nodes, ' + cost.refCpuMs.toFixed(2) + ' ms CPU) scaled to ' + cost.nodes + ' nodes; wall ' + ms.toFixed(0) + ' ms = ' + (ms / (refWallMs * cost.nodes / ref.nodes)).toFixed(2) + ' × — information only)');
 const pad = (s, n) => String(s).padEnd(n).slice(0, n);
 for (const r of rows) console.log(`  ${pad(r.verdict, 6)} ${pad(r.file + ':' + r.line, 34)} ${pad(r.how, 22)} ${pad(r.kind, 14)} ${pad(r.guard || '-', 7)} ${pad(r.recv, 22)} ${r.why}${r.narrow ? ' · narrowed: ' + r.narrow : ''}`);
 const by = (v) => rows.filter((r) => r.verdict === v);
@@ -494,7 +528,8 @@ ok('the census sees the class: ≥ 25 guarded text-box sites and ≥ 25 exempt r
 ok('an unresolvable receiver is never assumed a button: unknown-kind rows are guarded, or exempt only by a narrowing of the event target', !rows.some((r) => r.kind === 'unknown' && r.verdict !== 'OK' && !r.narrow), rows.filter((r) => r.kind === 'unknown').map((r) => `${r.file}:${r.line} ${r.why} ${r.verdict}`));
 const rj = rows.filter((r) => r.file === 'channel-outbox.js' && /chan-opt-input|el\(input\)/.test(r.why) && r.kind === 'text');
 ok('the incident\'s reject boxes (channel-outbox.js, input.chan-opt-input) are text-box rows and guarded', rj.length === 2 && rj.every((r) => r.verdict === 'OK'), rj);
-ok('the census runs fast (< 3 s over all of src/lib)', ms < 3000, ms);
+ok(`the census's cost is a census over what it scans: ${cost.files} files / ${cost.bytes} B / ${cost.nodes} AST nodes, its selector searches ${CV.markupPerByte.toFixed(2)} B read per parsed byte — each within ${COST_GROWTH} × the base declared at ${COST_BASE.at}`, !CV.problems.some((p) => !/bare parse/.test(p)), CV.problems);
+ok(`its time is RELATIVE: CPU ${CV.ratio.toFixed(2)} × the bare parse + walk of ${ref.name} measured in this process, scaled to every node parsed (≤ ${COST_RATIO_MAX} ×) — no absolute millisecond bound`, CV.ratio <= COST_RATIO_MAX, CV.problems);
 
 // §3 controls
 const one = (src) => census([{ name: 'plant.js', src }]);
@@ -533,6 +568,21 @@ ok('a container narrowed TO its text box is RED (the narrowing reads the element
 ok('exempt BY KIND: a role=button row, a checkbox', V.row === 'EXEMPT' && V.checkbox === 'EXEMPT', [V.row, V.checkbox]);
 ok('a for-of over [user, pass], a querySelector resolved through the markup are text boxes (RED bare)', V.forOf === 'RED' && V.selector === 'RED', [V.forOf, V.selector]);
 ok('an unresolvable receiver (a parameter not named like an input) is RED, never assumed a button', V.unknownParam === 'RED', V.unknownParam);
+
+// the cost law's controls: the tally counts what was parsed; a slower machine is green; a costlier census is RED
+{
+  const plants = [PLANT.bareInput, PLANT.named, PLANT.selector].map((src, i) => ({ name: `p${i}.js`, src }));
+  const c = { files: 0, bytes: 0, nodes: 0, markupScans: 0, markupBytes: 0, perFile: [] };
+  census(plants, { cost: c });
+  ok('the tally counts what the census parsed: files, bytes and AST nodes equal an independent count of the same three plants, and a selector search read markup', c.files === 3 && c.bytes === plants.reduce((a, p) => a + Buffer.byteLength(p.src), 0) && c.nodes === plants.reduce((a, p) => a + parseWalk(p.src), 0) && c.markupScans > 0 && c.markupBytes > 0, c);
+  const slow = { ...cost, cpuMs: cost.cpuMs * 4, refCpuMs: cost.refCpuMs * 4 };
+  ok(`a machine 4 × slower (both sides × 4) stays green — the wall clock would read ${(ms * 4).toFixed(0)} ms there (the runner read 4335 ms against the old fixed 3 s)`, !costVerdict(slow).problems.length, costVerdict(slow).problems);
+  const costlier = { ...cost, cpuMs: CV.linearMs * (COST_RATIO_MAX + 1) };
+  ok(`RED control: a census ${COST_RATIO_MAX + 1} × a bare parse of what it read, on the same machine, is RED`, costVerdict(costlier).problems.some((p) => /bare parse/.test(p)), costVerdict(costlier).problems);
+  const grown = { ...cost, files: Math.ceil(COST_BASE.files * COST_GROWTH) + 1, markupBytes: cost.bytes * COST_BASE.markupPerByte * COST_GROWTH * 1.1 };
+  const gp = costVerdict(grown).problems;
+  ok(`RED control: src/lib past ${COST_GROWTH} × the base's files, selector searches past ${COST_GROWTH} × its bytes read per parsed byte — both RED (re-declare the base, re-measure the ratio)`, gp.some((p) => /^files/.test(p)) && gp.some((p) => /selector searches/.test(p)), gp);
+}
 
 // the base rel268: the incident's two reject boxes are RED there
 const BASE = '5e9530069';

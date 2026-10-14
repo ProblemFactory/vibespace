@@ -883,7 +883,7 @@ if (tracked.length) {
   ok(!('VIBESPACE_INTEGRATIONS' in a) && !('VIBESPACE_INTEGRATION_LARK_APPSECRET' in a) && !('VIBESPACE_GDRIVE_CLIENTS' in a) && !('VIBESPACE_PASSWORD' in a) && !('CLAUDE_CODE_OAUTH_TOKEN' in a) && !('npm_config_x' in a) && !('NODE_ENV' in a) && a.HOME === '/h' && a.VIBESPACE_API === 'http://x' && a.VIBESPACE_AGENTD_ROOT === '/r' && !('VIBESPACE_NODE_MODULES' in a), 'agentEnv drops both cluster env forms, the drive presets, the password, the ambient oauth token, npm_* and NODE_ENV — keeps HOME/PATH and the agent keep set');
   ok(!('VIBESPACE_INTEGRATIONS' in d) && !('VIBESPACE_GDRIVE_CLIENTS' in d) && d.VIBESPACE_NODE_MODULES === '/nm' && d.VIBESPACE_AGENTD_ROOT === '/r', 'daemonEnv is the same rule plus the daemon tier\'s own names');
   ok([...AGENT_ENV_KEEP].every((n) => DAEMON_ENV_KEEP.has(n)) && [...DAEMON_ENV_KEEP].filter((n) => !AGENT_ENV_KEEP.has(n)).sort().join() === 'VIBESPACE_AGENTD_VERSION,VIBESPACE_NODE_MODULES', 'DAEMON_ENV_KEEP ⊇ AGENT_ENV_KEEP + exactly {VIBESPACE_AGENTD_VERSION, VIBESPACE_NODE_MODULES} (derived from the daemon tier\'s reads in test-agentd-session)');
-  ok(/agentEnvPure\(base\)/.test(readRepo('src/ws-handler.js')) && !/function agentEnv\(base = process\.env\) \{\s*const out = \{\}/.test(readRepo('src/ws-handler.js')), 'WIRING: ws-handler\'s agentEnv is the PURE rule re-exported, not a second copy');
+  ok(/agentEnvPure\(base[,)]/.test(readRepo('src/ws-handler.js')) && !/function agentEnv\(base = process\.env\) \{\s*const out = \{\}/.test(readRepo('src/ws-handler.js')), 'WIRING: ws-handler\'s agentEnv is the PURE rule re-exported, not a second copy');
 }
 
 // (c) CONSUMERS: every named consumer exists AND calls resolveIntegration('<id>'[, {credentialKey}])

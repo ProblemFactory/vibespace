@@ -573,7 +573,7 @@ async function pasteLeg(BSmod, { mediated = false, text = 'hello world', failAt 
   ok(!a2pre.retried && a2pre.after && a2pre.after.state === 'unavailable', 'NEGATIVE CONTROL: a held size remembered as a failure keeps the page "could not resize" after the handback (FIT_RETRY_MS — the verifier\'s stuck chip)');
   ok(b.takeMs < FIT.FIT_DEBOUNCE_MS, `B: a takeover fits the driver's window AT ONCE (${b.takeMs} ms — never the ${FIT.FIT_DEBOUNCE_MS} ms debounce that put the resize under the first press)`);
   ok(!b.duringDrag && b.stillHeld, 'B: the driver\'s window changing size while a button is held does NOT resize the page mid-drag');
-  ok(b.upMs < 200, `B: …the held resize runs at the release (${b.upMs} ms after it)`);
+  ok(b.upMs < FIT.FIT_DEBOUNCE_MS, `B: …the held resize runs at the release (${b.upMs} ms after it — never the ${FIT.FIT_DEBOUNCE_MS} ms debounce; the mechanism's constant, not a literal: lane mirror-flake-hardening)`);
   ok(b.heldAgain && b.freed, 'B: a release that happened outside the picture (never forwarded) ends the hold at the next buttonless move');
   ok(bpre.duringDrag && bpre.takeMs >= FIT.FIT_DEBOUNCE_MS, `NEGATIVE CONTROL: without the hold the page is resized MID-DRAG, and the takeover's fit waits ${bpre.takeMs} ms (the verifier's y=232 → y=361 jump)`);
   // PURE: the button table

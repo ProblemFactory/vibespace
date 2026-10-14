@@ -273,7 +273,8 @@ if (!fs.existsSync('/proc/self/environ')) {
   // wiring pins: the three daemon birth sites + the child base name the sanitizer, and no raw process.env env literal survives in the daemon tier
   const clientSrc = fs.readFileSync(path.join(repo, 'src/agentd/client.js'), 'utf8').replace(/^\s*\/\/.*$/gm, '');
   const daemonSrc = fs.readFileSync(path.join(repo, 'src/agentd/agentd.js'), 'utf8').replace(/^\s*\/\/.*$/gm, '');
-  check('WIRING: _spawnLocal spawns the daemon from daemonEnv(process.env)', /env:\s*\{\s*\.\.\.daemonEnv\(process\.env\)/.test(clientSrc));
+  // B-6be2 (lane jobenv-strip-census): the daemon birth also drops the harness credential names — `daemonEnv(process.env, { drop: … })`
+  check('WIRING: _spawnLocal spawns the daemon from daemonEnv(process.env[, { drop }])', /env:\s*\{\s*\.\.\.daemonEnv\(process\.env(?:\)|,\s*\{\s*drop:)/.test(clientSrc));
   check('WIRING: spawnEnv() merges over daemonEnv(process.env), and the --stdio bridge + the upgrade re-exec are born from it too', daemonSrc.includes(ANCHOR) && (daemonSrc.match(/daemonEnv\(process\.env\)/g) || []).length >= 3);
   const RAW = /env:\s*(?:process\.env\b|\{\s*\.\.\.process\.env\b)/;
   check('WIRING: no `env: process.env` / `env: { ...process.env` literal survives in src/agentd/{client,agentd}.js', !RAW.test(clientSrc) && !RAW.test(daemonSrc));

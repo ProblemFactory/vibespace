@@ -82,7 +82,7 @@ function stubGateRepo(tag, { ciSource, suites, commits = 1 }) {
   fs.writeFileSync(path.join(root, 'scripts', 'ci.mjs'), ciSource);
   fs.copyFileSync(path.join(REPO, 'scripts', 'git-env.mjs'), path.join(root, 'scripts', 'git-env.mjs'));
   fs.copyFileSync(path.join(REPO, 'scripts', 'scratch-run.mjs'), path.join(root, 'scripts', 'scratch-run.mjs')); // ci.mjs's other sibling (B-1d08: the run record its reaper reads)
-  for (const f of ['scripts/scratch-sweep.mjs', 'scripts/scratch.mjs', 'src/fixture-guard.js', 'scripts/affected-model.mjs', 'scripts/i18n-extract.mjs']) { fs.mkdirSync(path.dirname(path.join(root, f)), { recursive: true }); fs.copyFileSync(path.join(REPO, f), path.join(root, f)); } // B-60d2: the dir sweep's siblings (as test-ci-gate's stub)
+  for (const f of ['scripts/scratch-sweep.mjs', 'scripts/scratch.mjs', 'src/fixture-guard.js', 'scripts/affected-model.mjs', 'scripts/i18n-extract.mjs', 'scripts/reach-model.mjs']) { fs.mkdirSync(path.dirname(path.join(root, f)), { recursive: true }); fs.copyFileSync(path.join(REPO, f), path.join(root, f)); } // B-60d2: the dir sweep's siblings (as test-ci-gate's stub)
   fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ name: 'x', version: '0.0.0', private: true, scripts: { build: 'node -e "0"' } }) + '\n');
   for (const [name, src] of Object.entries(suites)) fs.writeFileSync(path.join(root, 'scripts', name + '.mjs'), src);
   const genv = { ...GIT_ENV, ...GIT_ID };
@@ -494,7 +494,54 @@ try {
       const marker = (() => { try { return JSON.parse(fs.readFileSync(path.join(root, 'data', 'ci-heavy', `${sha}.green`), 'utf-8')); } catch { return null; } })();
       ok(!!marker && r.status === 0, `…and a pass on the second try is a GREEN verdict, not a red (exit ${r.status})`);
       ok(!!marker && (marker.flaky || []).includes(SLOW), `…recorded as FLAKY, never laundered into a plain green (${marker && JSON.stringify(marker.flaky)})`);
+      // THE RERUN LEDGER + THE LOAD STAMP (lane ci-aidev-desktop-batch, q-038 ④): the rerun is one ledger line beside the
+      // markers (both outcomes, both loads, the first run's ✗ lines) and said in the log; every suite line carries its load
+      const ledger = (() => { try { return fs.readFileSync(path.join(root, 'data', 'ci-heavy', 'reruns.jsonl'), 'utf-8').trim().split('\n').map((l) => JSON.parse(l)); } catch { return []; } })();
+      ok(ledger.length === 1 && ledger[0].suite === SLOW && ledger[0].again.ok === true && Array.isArray(ledger[0].first.load) && ledger[0].first.load.length === 2 && ledger[0].sha === sha,
+        `…and ONE line in data/ci-heavy/reruns.jsonl: the suite, red → green, both loads (${JSON.stringify(ledger[0] || null).slice(0, 160)})`);
+      ok(new RegExp(`RERUN LEDGER ${SLOW}: red \\(load [\\d.]+→[\\d.]+\\) → GREEN — FLAKY, counted`).test(out), '…said in the log, never silent');
+      ok(new RegExp(`✓ ${SLOW} \\(\\d+ms\\) \\[lane \\w+\\] load [\\d.]+→[\\d.]+ — ALL PASS`).test(out) && new RegExp(`✗ ${SLOW} FAILED \\(\\d+ms\\) \\[lane \\w+\\] load [\\d.]+→[\\d.]+`).test(out),
+        'every suite line (✓ and ✗) carries the box\'s 1-min loadavg at its start → end');
       try { fs.rmSync(root, { recursive: true, force: true }); } catch { }
+    }
+
+    // (1e2) THE DESKTOP BATCH'S LANES (lane ci-aidev-desktop-batch): --serial-overlap=1 starts the serial lane beside the
+    //       last parallel suite instead of after it (CONTROL: without it, after), and VIBESPACE_CI_LANE_ROOT gives each
+    //       lane its own HOME / XDG_RUNTIME_DIR (0700) / session bus and no DISPLAY. A stub parallel suite that runs 4 s
+    //       and the real SERIAL row test-exit-run as a stub that stamps when it starts.
+    {
+      const PAR = (SUITES.find((x) => x.tier === 'heavy' && x.name !== SLICE && x.name !== 'test-exit-run') || {}).name;
+      const SER = 'test-exit-run';
+      const stamp = (who) => `fs.appendFileSync(process.env.VS_OVERLAP_LOG, JSON.stringify({ who: ${JSON.stringify(who)}, at: Date.now(), home: process.env.HOME, run: process.env.XDG_RUNTIME_DIR, display: process.env.DISPLAY || null, bus: process.env.DBUS_SESSION_BUS_ADDRESS || null }) + '\\n');\n`;
+      const IMP = "import fs from 'node:fs';\n";
+      const arm = (extra, laneRoot) => {
+        const s = stubGateRepo('overlap', { ciSource: fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf-8'),
+          suites: { [PAR]: IMP + stamp('par') + `await new Promise((r) => setTimeout(r, 4000));\n` + stamp('par-end') + "console.log('ALL PASS (1)');\n", [SER]: IMP + stamp('ser') + "console.log('ALL PASS (1)');\n" } });
+        const log = path.join(s.root, 'overlap.jsonl');
+        const r = spawnSync(process.execPath, [path.join(s.root, 'scripts', 'ci.mjs'), '--heavy', '--sha=' + s.sha, '--isolate', '--only=' + PAR + ',' + SER, '--lock=' + s.lock, '--lock-wait-ms=20000', ...extra],
+          { cwd: s.root, encoding: 'utf-8', env: { ...GIT_ENV, VS_OVERLAP_LOG: log, VIBESPACE_CI_LANES: '2', DISPLAY: ':77', ...(laneRoot ? { VIBESPACE_CI_LANE_ROOT: laneRoot } : {}) }, timeout: 120000 });
+        const rows = (() => { try { return fs.readFileSync(log, 'utf-8').trim().split('\n').map((l) => JSON.parse(l)); } catch { return []; } })();
+        const at = (w) => (rows.find((x) => x.who === w) || {}).at;
+        const out = { status: r.status, out: (r.stdout || '') + (r.stderr || ''), rows, ser: at('ser'), parEnd: at('par-end') };
+        try { fs.rmSync(s.root, { recursive: true, force: true }); } catch { }
+        return out;
+      };
+      const LR = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ci-lanes-'));
+      const ov = arm(['--serial-overlap=1'], LR);
+      ok(ov.status === 0 && ov.ser && ov.parEnd && ov.ser < ov.parEnd && /serial lane starts at \d+s beside 1 parallel suite\(s\) still in flight \(--serial-overlap=1\)/.test(ov.out),
+        `--serial-overlap=1: the serial lane (${SER}) started BESIDE the last parallel suite, ${ov.parEnd && ov.ser ? ov.parEnd - ov.ser : '?'} ms before it ended — and says so`);
+      const p = ov.rows.find((x) => x.who === 'par') || {}, sr = ov.rows.find((x) => x.who === 'ser') || {};
+      let mode = 0; try { mode = fs.statSync(p.run).mode & 0o777; } catch { }
+      ok(p.home === path.join(LR, 'lane-1', 'home') && p.run === path.join(LR, 'lane-1', 'run') && mode === 0o700 && p.display === null && sr.home === path.join(LR, 'lane-S', 'home'),
+        `VIBESPACE_CI_LANE_ROOT: each lane's suites run with its own HOME + XDG_RUNTIME_DIR (0700) and no DISPLAY (lane 1: ${p.home}; the serial lane: ${sr.home})`);
+      const haveDbus = spawnSync('sh', ['-c', 'command -v dbus-daemon'], { encoding: 'utf-8' }).status === 0;
+      ok(!haveDbus || (p.bus === 'unix:path=' + path.join(LR, 'lane-1', 'run', 'bus') && /lane env: a private HOME \+ XDG_RUNTIME_DIR \+ session bus per lane under .* \(2 of 2 buses up\)/.test(ov.out)),
+        `…and its own session bus, started for the lanes and ended after them (${haveDbus ? p.bus : 'SKIP: no dbus-daemon on this box'})`);
+      fs.rmSync(LR, { recursive: true, force: true });
+      const ctl = arm([], null);
+      ok(ctl.status === 0 && ctl.ser && ctl.parEnd && ctl.ser >= ctl.parEnd && /parallel lanes drained in \d+s — serial lane: test-exit-run/.test(ctl.out),
+        'CONTROL: without --serial-overlap the serial lane runs AFTER the parallel lanes drain (alone, as measured)');
+      ok((ctl.rows.find((x) => x.who === 'par') || {}).display === ':77', 'CONTROL: with no lane root the suite inherits the caller\'s env (DISPLAY :77 here)');
     }
 
     // (1f) A SUITE THAT CRASHES IS A VERDICT, NOT A SUPERSESSION (round 4).

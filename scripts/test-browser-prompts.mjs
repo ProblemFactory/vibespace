@@ -240,9 +240,13 @@ ok((await w3.setPermission(pl.t, { kind: 'camera', setting: 'allow', origin: 'ch
 // the verb-wake seam
 const tW = Date.now(); const pw = w3.waitForOpen(pl.t, 5000, { prompt: true }); const plain = w3.waitForOpen(pl.t, 300, {});
 await sleep(30); pl.ch.emit('Fetch.authRequired', AUTH_P, pl.ch.sidOf('T1'));
+// "within one tick" is EVIDENCE (lane mirror-flake-hardening): the verb answers on the event itself, before the loop
+// turns again (via: event), never by its own poll or its 5 s bound — no wall-clock bound
+const onEvent = await Promise.race([pw.then(() => true), new Promise((res) => setImmediate(() => res(false)))]);
+const plainNow = await Promise.race([plain.then(() => true), new Promise((res) => setImmediate(() => res(false)))]);
 const hit = await pw;
-ok(hit && hit.prompt && hit.prompt.type === 'http-auth' && hit.via === 'event' && Date.now() - tW < 400, `authRequired ⇒ the waiting verb answers within one tick (${Date.now() - tW} ms incl. the 30 ms lead)`, hit);
-ok((await plain) === null, '…a long-poll that did not ask for prompts is not woken by one');
+ok(hit && hit.prompt && hit.prompt.type === 'http-auth' && hit.via === 'event' && onEvent, `authRequired ⇒ the waiting verb answers on the event, before the loop turned (${Date.now() - tW} ms incl. the 30 ms lead)`, hit);
+ok((await plain) === null && plainNow === false, '…a long-poll that did not ask for prompts is not woken by one (CONTROL: it had not settled when the loop turned — it ran out its own 300 ms)');
 const again = await w3.waitForOpen(pl.t, 2000, { prompt: true });
 ok(again && again.via === 'already-waiting' && again.prompt.realm === 'Lane Realm', '…and a verb that starts while the sign-in stands is answered at once');
 w3.shutdown(); await pl.ch.close();

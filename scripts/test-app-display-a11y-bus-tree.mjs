@@ -13,7 +13,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { scratchDir } from './scratch.mjs';
+import { scratchDir, gtkRow } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const M = require('../src/desktop-apps.js');
 const D = require('../src/desktop-display.js');
@@ -67,11 +67,14 @@ try {
   await sleep(400);
   const env1 = WT.treeEnvOf(on.rec, pod);
   let r = null;
-  for (let i = 0; i < 10; i++) { r = await WT.snapshotTarget({ pids: [on.pid], budget: 300, env: env1 }); if (r.ok && names(r.snapshot.nodes).includes('button:Count')) break; await sleep(300); }
+  // the push button's role is the name THIS box's AT-SPI gives it (B-4260 — scripts/fixtures/gtk-rows.json: "button"
+  // on the hub's at-spi2-core 2.60, "push button" on AIDev's 2.52), never one box's spelling
+  const PB = gtkRow().pushButtonRole;
+  for (let i = 0; i < 10; i++) { r = await WT.snapshotTarget({ pids: [on.pid], budget: 300, env: env1 }); if (r.ok && names(r.snapshot.nodes).includes(`${PB}:Count`)) break; await sleep(300); }
   const seen = r && r.ok ? names(r.snapshot.nodes) : [];
-  ok(seen.includes('button:Count') && seen.includes('label:count 0'), `the tree reader on the app's bus names its widgets: ${seen.slice(0, 5).join(', ')} (${r && r.ok ? r.snapshot.nodes.length : 0} nodes)`);
+  ok(seen.includes(`${PB}:Count`) && seen.includes('label:count 0'), `the tree reader on the app's bus names its widgets: ${seen.slice(0, 5).join(', ')} (${r && r.ok ? r.snapshot.nodes.length : 0} nodes)`);
   ok(!/Error retrieving accessibility bus address/.test(on.err()), 'the app found its a11y bus (no "Error retrieving accessibility bus address" warning)');
-  const btn = r && r.ok ? r.snapshot.nodes.find((n) => n.role === 'button' && n.name === 'Count') : null;
+  const btn = r && r.ok ? r.snapshot.nodes.find((n) => n.role === PB && n.name === 'Count') : null;
   const entry = btn ? { pid: btn.pid ?? on.pid, path: btn.path, role: btn.role, name: btn.name } : null;
   const pick = btn ? WT.pickAction(btn.actions, null) : { ok: false };
   const a = entry && pick.ok ? await WT.actOnNode({ entry, verb: 'do_action', action: pick.index, env: env1 }) : { ok: false, why: `no Count node (${btn ? Object.keys(btn).join(',') : 'none'})` };

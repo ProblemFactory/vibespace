@@ -12,6 +12,9 @@
  *   ③ A judges the frame (completionVerdict — BEFORE any write; `complete` holds that order), stores B as a `peer`
  *      caller (delivery reply-url = B's hook URL) and the code is spent. A code minted for an existing peer re-pairs:
  *      both rows rotate IN PLACE (same id, generation + 1) and the old tokens stop working.
+ *   lane webhook-pair-join (B-5ee0 a/b): the pending half OUTLIVES a restart — createPending binds a store door (the
+ *      routes' sealed 0600 file), reloads it at boot and sweeps a row at its deadline; a spent code stays a TOMBSTONE
+ *      until then, so a frame that PROVES the code (its signature) hears "already used" by name — never an unproven one.
  * A peer's payload is the canonical record JSON `{ text, threadKey, inReplyTo, attachments: [{name, url, sha256}],
  * from: { name } }` with `X-VibeSpace-Peer-Version: 1` — read without configuration (peerRecordValue; phase 1: the
  * attachment URLs are links in the text, the artifact hand-over is phase 2).
@@ -56,6 +59,8 @@ function encodeCode({ hook, caller, token, nonce, exp, name }) {
 function decodeCode(code, now) {
   const s = String(code == null ? '' : code).trim();
   const bad = no('bad-code', 'that is not a VibeSpace pairing code (it starts vswp_ — copy the whole code again)');
+  // lane webhook-pair-join: the WRONG SECRET pasted — a caller's token is not a pairing code (said by name)
+  if (/^vswh_/.test(s)) return no('caller-token', 'that is a caller token (vswh_…), not a pairing code — ask the other side for a pairing code (vswp_…)');
   if (!s.startsWith(CODE_PREFIX) || s.length > CODE_MAX) return bad;
   let o; try { o = JSON.parse(Buffer.from(s.slice(CODE_PREFIX.length), 'base64url').toString('utf-8')); } catch { return bad; }
   if (!o || o.v !== 1 || typeof o.u !== 'string' || !TOKEN_RE.test(String(o.t)) || !CALLER_RE.test(String(o.c)) || !NONCE_RE.test(String(o.n)) || !Number.isFinite(o.e)) return bad;
@@ -76,6 +81,8 @@ function frameHeaders({ slug, callerId, token, body, now }, { hmacHex }) {
  * A's VERDICT on a completion frame — PURE, before anything is written. `pending` = the code A minted for (slug, the
  * frame's X-Webhook-Caller), or null. Every failure before the signature holds is the same-shape 401 (`unauthorized`);
  * a signed frame with a bad hook URL / token is a 400 by name. → `{ok:true, frame:{hookUrl, slug, caller, token, name}}`.
+ * lane webhook-pair-join: a SPENT code is judged after the signature and the nonce — only a frame that proves the code
+ * hears `spent` (answer 'spent', the route's 409 "already used"); any other frame on it stays the same-shape 401.
  */
 function completionVerdict(input = {}, deps = {}) {
   const { slug = '', headers = {}, body = null, now = 0, pending = null, allowPrivate = false } = input;
@@ -83,7 +90,6 @@ function completionVerdict(input = {}, deps = {}) {
   const callerId = String(headers[HEADERS.caller] || '');
   if (!SLUG_RE.test(String(slug)) || !CALLER_RE.test(callerId)) return unauth('unknown');
   if (!pending || pending.slug !== slug || pending.callerId !== callerId) return unauth('unknown');
-  if (pending.spent === true) return unauth('spent');
   if (!(Number(now) <= Number(pending.exp))) return unauth('expired');
   const ts = String(headers[HEADERS.ts] || ''), sig = String(headers[HEADERS.sig] || '');
   if (!/^[0-9]{1,12}$/.test(ts) || Math.abs(Number(now) / 1000 - Number(ts)) > SKEW_S) return unauth('stale');
@@ -93,6 +99,7 @@ function completionVerdict(input = {}, deps = {}) {
   if (!deps.safeEqual(want, sig)) return unauth('signature');
   let f; try { f = JSON.parse(text); } catch { return unauth('parse'); }
   if (!f || typeof f !== 'object' || f.v !== 1 || f.nonce !== pending.nonce) return unauth('nonce');
+  if (pending.spent === true) return { ok: false, why: 'spent', answer: 'spent' };
   const hv = hookUrlVerdict(f.hook, { allowPrivate });
   if (!hv.ok) return hv;
   if (!TOKEN_RE.test(String(f.token)) || !CALLER_RE.test(String(f.caller))) return no('bad-frame', 'the completion frame names no caller id / token of the expected shape');
@@ -106,25 +113,57 @@ function complete(input, deps) {
   return v;
 }
 
-/** The codes A minted and nobody has spent yet — bounded, in memory (a restart voids them: mint a new one). */
+/** A pending row as a store door hands it back — the shape judged, else null (a damaged row is dropped, never trusted). */
+function pendingRowOf(r) {
+  if (!r || typeof r !== 'object' || !SLUG_RE.test(String(r.slug)) || !CALLER_RE.test(String(r.callerId)) || !TOKEN_RE.test(String(r.token)) || !NONCE_RE.test(String(r.nonce)) || !Number.isFinite(r.exp)) return null;
+  return { slug: r.slug, callerId: r.callerId, token: r.token, nonce: r.nonce, name: r.name ? cleanName(r.name) : null, repair: r.repair === true, mintedAt: Number.isFinite(r.mintedAt) ? r.mintedAt : null, exp: r.exp, spent: r.spent === true, spentAt: Number.isFinite(r.spentAt) ? r.spentAt : null };
+}
+/**
+ * The codes A minted — bounded (oldest out). A row lives until its deadline: spent, it stays a TOMBSTONE (so a frame that
+ * proves the code hears "already used"); past the deadline it is swept. lane webhook-pair-join: `bind(door, t)` hangs
+ * the memo on a store door `{read() → rows, write(rows)}` — the rows are reloaded at once (a restart inside the 10
+ * minutes keeps a code valid; the expired swept) and every change after is written through it. No door ⇒ memory only.
+ */
 function createPending({ max = PENDING_MAX, ttl = CODE_TTL_MS } = {}) {
   const m = new Map();
+  let door = null;
   const k = (slug, id) => `${slug}\n${id}`;
-  const prune = (t) => { for (const [key, e] of m) if (!(t <= e.exp)) m.delete(key); };
-  return {
+  const rows = () => [...m.values()].map((r) => ({ ...r }));
+  const changed = () => { if (door) door.write(rows()); };
+  // a sweep's write is nobody's request to fail: the row is gone from memory; the next write (or the boot) sweeps the file
+  const swept = () => { try { changed(); } catch { /* see above */ } };
+  const prune = (t) => { let n = 0; for (const [key, e] of m) if (!(t <= e.exp)) { m.delete(key); n++; } return n; };
+  const P = {
     put(e, t) {
       prune(t);
       m.delete(k(e.slug, e.callerId));
       while (m.size >= max) m.delete(m.keys().next().value);
-      const row = { slug: e.slug, callerId: e.callerId, token: e.token, nonce: e.nonce, name: e.name || null, repair: e.repair === true, exp: t + ttl, spent: false };
+      const row = { slug: e.slug, callerId: e.callerId, token: e.token, nonce: e.nonce, name: e.name || null, repair: e.repair === true, mintedAt: t, exp: t + ttl, spent: false, spentAt: null };
       m.set(k(e.slug, e.callerId), row);
+      changed();
       return row;
     },
-    get(slug, id, t) { prune(t); return m.get(k(slug, id)) || null; },
-    spend(slug, id) { m.delete(k(slug, id)); },
+    get(slug, id, t) { if (prune(t)) swept(); return m.get(k(slug, id)) || null; },
+    /** the code is used: its row stays (spent) until its deadline, then the sweep takes it */
+    spend(slug, id, t = Date.now()) { const r = m.get(k(slug, id)); if (r && !r.spent) { r.spent = true; r.spentAt = t; changed(); } },
+    /** the deadline passed → swept (and written); → how many went */
+    sweep(t) { const n = prune(t); if (n) swept(); return n; },
+    /** the earliest deadline still held (the routes time their sweep by it), or null */
+    nextExp() { let x = null; for (const r of m.values()) if (x === null || r.exp < x) x = r.exp; return x; },
+    bind(next, t) {
+      door = null;
+      m.clear();
+      let had = 0;
+      if (next && typeof next.read === 'function') for (const r of next.read() || []) { had++; const row = pendingRowOf(r); if (row && t <= row.exp && m.size < max) m.set(k(row.slug, row.callerId), row); }
+      door = next || null;
+      if (had !== m.size) swept();
+      return m.size;
+    },
+    rows,
     size() { return m.size; },
-    clear() { m.clear(); },
+    clear() { m.clear(); changed(); },
   };
+  return P;
 }
 
 /** THE CANONICAL PEER PAYLOAD → what the record reader maps (PEER_MAPPING): the text with each attachment as a LINK
@@ -144,5 +183,5 @@ function peerBody({ text, threadKey = null, inReplyTo = null, name }) {
 
 module.exports = {
   CODE_PREFIX, CODE_TTL_MS, FRAME_MAX, SKEW_S, PENDING_MAX, PEER_VERSION, PEER_HEADER, PEER_MAPPING, TOKEN_RE, CALLER_RE, NONCE_RE,
-  hookUrlVerdict, encodeCode, decodeCode, frameOf, frameHeaders, pairPathOf, completionVerdict, complete, createPending, peerRecordValue, peerBody,
+  hookUrlVerdict, encodeCode, decodeCode, frameOf, frameHeaders, pairPathOf, completionVerdict, complete, createPending, pendingRowOf, peerRecordValue, peerBody,
 };

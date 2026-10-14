@@ -199,8 +199,11 @@ try {
       return { seen: seen.join(','), ms, body, half, conns: s.conns() };
     }
     const plain = await order(null), hub = await order(TLS);
-    ok(plain.seen === 'answer,push,answer,push,answer,push' && Math.max(...plain.ms) < 20, `plain listen: the answer (its body after its head) arrives, THEN the push (${plain.seen}; ${plain.ms.join('/')} ms)`);
-    ok(hub.seen === plain.seen && hub.body === 'headbody' && Math.max(...hub.ms) < 20, `through the demux the same — no Nagle wait on the body, the push never overtakes the answer (${hub.seen}; ${hub.ms.join('/')} ms)`);
+    // the order is the evidence (lane oat-loop-gap-bound, .270 — a `< 20 ms` on each answer judged this run's clock): the
+    // push leaves 15 ms after the answer's finish, a body held for the delayed ACK (~40 ms) lets it overtake the answer —
+    // the bare-front CONTROL below reads exactly that (push first, ≥ 30 ms); the ms are printed, never judged
+    ok(plain.seen === 'answer,push,answer,push,answer,push', `plain listen: the answer (its body after its head) arrives, THEN the push (${plain.seen}; ${plain.ms.join('/')} ms)`);
+    ok(hub.seen === plain.seen && hub.body === 'headbody', `through the demux the same — no Nagle wait on the body, the push never overtakes the answer (${hub.seen}; ${hub.ms.join('/')} ms)`);
     ok(hub.half === plain.half && hub.half === 'true', `the handed socket is half-open like the http server's own accept (${hub.half})`);
     ok(hub.conns === plain.conns && hub.conns === 2, `keep-alive: seven requests ride ONE socket beside the WebSocket's (${hub.conns} connections, plain ${plain.conns})`);
     const s = shape(TLS), port = await s.listen();

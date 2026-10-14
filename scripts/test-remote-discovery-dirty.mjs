@@ -63,9 +63,13 @@ ok(/onDiscoveryDirty[\s\S]{0,700}wss\.clients\.size/.test(srv), 'no computation 
   h2._state.hosts.push({ id: 'hX', name: 'X' });
   h2._persistedDisc['hX'] = { at: Date.now() - 3600e3, sessions: [{ sessionId: 'aaa', status: 'remote-running' }] };
   let kicked = null; h2.onDiscoveryDirty = (id) => { kicked = id; };
+  // "instantly" is EVIDENCE (lane mirror-flake-hardening): the call settles before the event loop turns — no scan, no
+  // round trip stood in front of the persisted list — never a wall-clock bound
   const t0 = Date.now();
-  const r = await h2.discoverSessions('hX', {});
-  ok(Date.now() - t0 < 200 && r.length === 1 && r[0].stale === true, 'cold call serves the persisted list instantly, stale-marked');
+  const pr = h2.discoverSessions('hX', {});
+  const now = await Promise.race([pr.then(() => true, () => true), new Promise((res) => setImmediate(() => res(false)))]);
+  const r = await pr;
+  ok(now && r.length === 1 && r[0].stale === true, `cold call serves the persisted list instantly — before the loop turned (${Date.now() - t0} ms) — stale-marked`);
   ok(kicked === 'hX', 'and kicks the background refresh through the dirty channel');
   // ttlMs 0 must NOT serve stale (the ⟳ contract) — it runs the real ladder,
   // which for a fake host fails into the stale-cache rung of the ladder

@@ -212,14 +212,26 @@ console.log('— ④ async listing keeps the main thread free (2000 rollouts)');
     const tid = `${(i + 0x10000000).toString(16).padStart(8, '0')}-0000-4000-8000-${String(i).padStart(12, '0')}`;
     fs.writeFileSync(path.join(bigDir, `rollout-2026-09-06T00-00-00-${tid}.jsonl`), rollout(tid, `/w/${i}`, `question ${i}`, 1));
   }
+  // WORK, not the clock (lane oat-loop-gap-bound, .270 — the old `worst < 250` judged this run's clock): the main
+  // thread's synchronous fs calls under the tree while the worker lists it — none — against the same walk ON the loop
+  // (the sync listing over the same tree = transcriptWorkerCall's inline fallback), counted right after; the worst tick
+  // gap is printed, never judged
+  const under = path.join(home, '.codex', 'sessions') + path.sep;
+  const walkCalls = async (fn) => {
+    const SPY = ['readdirSync', 'statSync', 'lstatSync', 'readFileSync', 'openSync', 'existsSync'], keep = {};
+    let n = 0;
+    for (const k of SPY) { keep[k] = fs[k]; fs[k] = function (p, ...r) { if (String(p).startsWith(under)) n++; return keep[k].call(this, p, ...r); }; }
+    try { return { out: await fn(), n }; } finally { for (const k of SPY) fs[k] = keep[k]; }
+  };
   const gaps = []; let last = Date.now(); const ticker = setInterval(() => { const now = Date.now(); gaps.push(now - last); last = now; }, 5);
   const t0 = Date.now();
-  const list = await CS.listCodexThreadsAsync({ activeSessions: new Map() });
+  const { out: list, n: onLoop } = await walkCalls(() => CS.listCodexThreadsAsync({ activeSessions: new Map() }));
   const wall = Date.now() - t0;
   clearInterval(ticker);
   const worst = Math.max(...gaps, 0);
+  const { out: cold, n: inline } = await walkCalls(() => CS.listCodexThreads({ activeSessions: new Map() }));
   ok(list.length === 2002, `listCodexThreadsAsync lists every thread (${list.length}) in ${wall}ms`);
-  ok(worst < 250, `the main thread never stalled while the worker walked the tree (worst tick gap ${worst}ms over ${gaps.length} ticks)`);
+  ok(onLoop === 0 && cold.length === list.length && inline >= 2000, `the main thread never walked the tree while the worker did: ${onLoop} sync fs calls under it on the loop (the same walk ON the loop — the sync listing, the no-worker fallback — makes ${inline}); worst tick gap ${worst}ms over ${gaps.length} ticks, printed`);
   const t1 = Date.now(); await CS.listCodexThreadsAsync({ activeSessions: new Map() }); const wall2 = Date.now() - t1;
   await sleep(2100); // the worker holds its own dir cache; exercise the cache INLINE after the 2s settle window
   CS.collectCodexThreadMetas(); const before = CS.dirCacheStats().hits; CS.collectCodexThreadMetas();

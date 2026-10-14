@@ -106,7 +106,18 @@
 //                                        never the tier's verdict; --dry-run
 //                                        lists the slice (no lock, no build);
 //                                        with --only / --affected: exit 2
-//   node scripts/ci.mjs --list-affected --range=<old>..<new> [--shard <i>/<n>]
+//   node scripts/ci.mjs --heavy --host=<desktop|binary|self|hosted> [--shard <i>/<n>]
+//                                        the heavy suites ONE RUNNER runs (HOSTS —
+//                                        derived from the programs a suite's code
+//                                        names): `self` = desktop + binary, the
+//                                        self-hosted DESKTOP batch (ci-remote.mjs
+//                                        --batch desktop on AIDev); `hosted` = the
+//                                        Actions matrix (its --shard split is LPT
+//                                        over scripts/fixtures/ci-shard-timings.json)
+//   node scripts/ci.mjs --hosts          the partition: every self-hosted suite with
+//                                        the program it names, the sums, and the diff
+//                                        against the design's census (q-038)
+//   node scripts/ci.mjs --list-affected --range=<old>..<new> [--shard <i>/<n>] [--host=<h>]
 //                                        the heavy suites that range selects (one
 //                                        slice of them with --shard), comma-joined
 //                                        for --only; scripts/ci-remote.mjs runs
@@ -114,7 +125,11 @@
 //                                        --why (here and on --heavy --affected):
 //                                        per SHARED file the rule used
 //                                        (scripts/affected-model.mjs) + the
-//                                        suites it dropped against the old rule
+//                                        suites it dropped against the old rule;
+//                                        per product file its static-reach
+//                                        attribution (◇), per suite ✓ selected
+//                                        and why / ✗ dropped by the reach and
+//                                        the reach it lacks (scripts/reach-model.mjs)
 //   node scripts/ci.mjs --check-heavy    exit 1 if a red heavy blocks a push
 //   node scripts/ci.mjs --status         last heavy result per sha
 //   node scripts/ci.mjs --census         the tier census self-test
@@ -130,7 +145,16 @@
 // --lock=<file> + --lock-wait-ms=<n> (the machine lock — a test drives its own
 // so it never contends with, or waits for, a real heavy run).
 // VIBESPACE_CI_LANES=<n> overrides the heavy tier's parallel lane count (1 = the
-// pre-2026-09-15 strictly sequential tier — what a test that asserts ORDER wants).
+// pre-2026-09-15 strictly sequential tier — what a test that asserts ORDER wants);
+// ON THE HUB never above HUB_MAX_LANES (4 — the hub's LOAD RULE, q-038): only a
+// second machine's run (ci-remote.mjs stamps VIBESPACE_CI_REMOTE_RUN) goes past it.
+// --allow-hub-full: a FULL heavy tier on the hub by day (07:00–24:00 local) is
+// refused without it (hubFullRefusal; the halves run elsewhere). --serial-overlap=<n>:
+// the serial lane starts once the parallel queue is dispatched and ≤ n parallel suites
+// are still in flight (the desktop batch passes 1; default: after the lanes drain).
+// VIBESPACE_CI_LANE_ROOT=<dir>: every lane runs its suites with a PRIVATE HOME,
+// XDG_RUNTIME_DIR (0700) and session bus (<dir>/lane-<k>/{home,run,run/bus}) and
+// no inherited DISPLAY (laneEnv — the desktop batch's lanes).
 // Exit codes: 0 green · 1 red · 2 refused (dirty tree / bad --only) · 3 the
 // tier did not run (never got the machine lock) · 4 ABORTED (superseded, the
 // lock taken, or terminated from outside — it stopped mid-tier). 0 and 1 are
@@ -149,6 +173,7 @@ import { procStat, procBootMs, procBornMs, machineBootId, readRunRecord, runOwne
 import { sweepScratchDirs } from './scratch-sweep.mjs';
 import { WORK_ROOT } from './scratch.mjs';
 import { MODELED, KEPT, parseHunks, changeOf, ruleSelect } from './affected-model.mjs';
+import * as RM from './reach-model.mjs';
 
 const HERE = fileURLToPath(import.meta.url);
 const repo = path.resolve(path.dirname(HERE), '..');
@@ -197,8 +222,9 @@ const GIT_ENV = gitEnvFrom(process.env);
 //       three fast runs, written in the `why` after the kind: `PURE · 40 ms`).
 // Everything else is HEAVY — and nothing is lost by that: the heavy tier runs
 // DETACHED after every push, IMPACT-SCOPED to the suites whose inputs the push
-// touched (a suite that boots the product is selected by every product
-// change; the boot smokes are `always`), in FULL at least once per 24 h; a red
+// touched (a suite that only BOOTS the product is selected by a product change
+// its static reach meets — scripts/reach-model.mjs; the boot sentinel and the
+// boot smokes are `always`), in FULL at least once per 24 h; a red
 // heavy verdict blocks the NEXT push; and the Actions mirror runs the full
 // heavy tier on every push. A suite that MIXES a PURE half with a boot half
 // moves whole; if the PURE half guards a money / credential / kill /
@@ -275,7 +301,7 @@ export const SUITES = [
   { name: 'test-app-display-a11y-bus', tier: 'fast', why: 'in-process + dbus children · 230 ms (the plan\'s private bus activating at-spi-bus-launcher — lane app-display-a11y-bus)' }, // B-4a59 piece 3: an app on its own display has an a11y bus where the user has none; the engine's tree calls run on it (census + RED mutant)
   { name: 'test-claude-hot-switch', tier: 'heavy', why: 'a REAL claude binary in a loopback-only netns (sudo) — re-measures capsOf(claude).hotSwitch on the installed CLI · ~40 s' }, // lane-hot-switch: the switching verdict is a measurement (test-architecture §67)
   { name: 'test-cli-caps', tier: 'fast', why: 'in-process · 130 ms (lane pool-oat-measure, q-035 gate 5: oatInFile(version, fixture) truth table + RED control, 4 patched readers, the one-spelling census, --no-netns refuses a binary / the vendor install path before it runs)' },
-  { name: 'test-oat-materialize', tier: 'fast', why: 'in-process · 700 ms (lane pool-oat-materialize, q-035 A: the verdict table, archive-then-write / keep-login / cleanup-only-ours over the real AccountManager, the pool slot + the slot-law pins, the spawn from the file, the doors, oat-file-sync; a RED mutant per invariant; verify r1 + r2 (lane oat-census-closure): the key-file law, rename-aside, the merge keeping the survivor\'s keys, each with its RED control)' },
+  { name: 'test-oat-materialize', tier: 'fast', why: 'in-process · 1.4 s (lane pool-oat-materialize, q-035 A: the verdict table, archive-then-write / keep-login / cleanup-only-ours over the real AccountManager, the pool slot + the slot-law pins, the spawn from the file, the doors, oat-file-sync; a RED mutant per invariant; verify r1 + r2 (lane oat-census-closure): the key-file law, rename-aside, the merge keeping the survivor\'s keys, each with its RED control; F13 since .270 (lane oat-loop-gap-bound): rows started per loop turn counted, the stall judged against a control loop as long as the sweeps — 200-row sweeps × 3 mutants)' },
   { name: 'test-oat-measure-fake', tier: 'heavy', why: 'binary — strace: the oat variants of measure-claude-cred-read --no-netns over a FAKE claude (good ⇒ six PASS + fixture, rewrite-on-401 / stale reader ⇒ RED; five client misbehaviours ⇒ events, never a crash; its handlers stubbed ⇒ the run dies); no real CLI, no sudo · 12 s' },
   { name: 'test-hot-switch-incident', tier: 'fast', why: 'in-process · 250 ms' }, // lane-hot-switch (2026-09-30): a stalled bridge's backlog is not taken as live (the real parse + engine + pool over real symlinks, patched-copy controls per mechanism)
   { name: 'test-record-lateness', tier: 'fast', why: 'PURE · 300 ms' }, // lane reset-path verify r7: THE LATE-RECORD RULE\'S SHAPE TABLE — arrival × delay × magnitude × follow (288 cells) judged by the real module against a hand-written truth; the dead-bridge shapes never declare, a true skew declares at 60 s and is never un-declared by its own records; r7 F1 (one out-of-band record poisoned the run for good) + T2's attacks pinned; seven patched-copy controls (one per rule) + the engine's hold/replay wiring
@@ -347,7 +373,7 @@ export const SUITES = [
   { name: 'test-browser-profile-clone', tier: 'fast', why: 'in-process + a loopback express + a scratch sleep · 3.4 s' }, // LANE BROWSER-PROFILE-CLONE (B-9669): New profile… → "Copy logins from" — the PURE clone verdict + both exclusion tables as censuses (SingletonLock / lock MUTANT and leased MUTANT red), the atomic copy (a throw mid-copy / at the rename leaves nothing), the words en/zh/ja, the routes over the REAL keeper (file set, clonedFrom, a running source stopped first, a leased one refused by name)
   { name: 'test-browser-builds', tier: 'fast', why: 'in-process · 5.0 s (lane fast-budget: was 13 s — the fake daemon\'s pid was this suite\'s own, so `stop` sat out its 8 s grace)' }, // LANE BROWSER-ADMIN 2a (the owner: "不能pin指定版本"): WHICH CHROME BUILD a profile runs — PURE src/browser-builds.js (the machine's listing of ~/.agent-browser/browsers/chrome-<v>/chrome, the choice shapes, THE verdict's order: well-formed · the user's · chromium · listed · runnable · the version ladder), the REAL keeper over the shared fake binary (the executable on EVERY launching call of the session, the default on none, a vanished build refused BY NAME with ONE For-you item, Change build… restarting a running browser and TELLING every conversation on it first, an older major refused), the browser-serve `builds` op + the start's view file a paired machine keeps, the client capability gate (`browser-builds`: zero requests to an older agent), the client words in en/zh/ja, wiring pins, three patched-copy controls; scratch HOME, port 0, no real binary
   { name: 'test-browser-build-download', tier: 'fast', why: 'in-process · 5.3 s' }, // LANE CHROME-BUILDS-DOWNLOAD (design 004, B-80c1): "Download another build…" — the REAL keeper on a scratch HOME against a loopback fake Chrome for Testing (the `chromeBuildsResolve` seam; the egress verdict on the name): the lists, the whole path, integrity, the zip's shape before `unzip -q` (a spy unzip), the egress, the ONE slot, a restart mid-download, removal; three patched-copy controls
-  { name: 'test-browser-switch', tier: 'fast', why: 'in-process · 0.1 s' }, // lane browser-propose (the rest of the PURE switch model is test-browser-backend's): step 3's PROPOSAL — proposalInstall, THE PLAN TABLE (remote / install-unavailable / other-machine / already-cloak / the in-place switch the ladder admits, its one confirmation / a NEWER directory ⇒ a new profile / not-switchable / ephemeral), the frozen record and its digest (moving with every frozen field, never with the live state), claimVerdict (the same card / an untold rejection / open again), EVERY transition (agent_forbidden, proposal_changed, approve again after a failure, told once), allowlistWith (only the host), the For-you item's words = the card's line for line; step 2's SIGN-IN REFUSAL HINT — SIGNIN_REFUSAL_ROWS (dated, sourced, Google's /signin/rejected + deniedsigninrejected + the refusal title in en/zh/ja; Microsoft's failed sign-in deliberately absent), signinRefusalOf / navHint over the navigate result's final url + title (exact host, look-alikes refused, bounded at 4 KiB), the 403/429 rung unchanged, the shipped CLI's navFacts (text + --json forms, measured on 0.38.1) and the audit route's wiring; a patched-copy control (any host)
+  { name: 'test-browser-switch', tier: 'fast', why: 'in-process · 0.2 s (two work-meter children)' }, // lane browser-propose (the rest of the PURE switch model is test-browser-backend's): step 3's PROPOSAL — proposalInstall, THE PLAN TABLE (remote / install-unavailable / other-machine / already-cloak / the in-place switch the ladder admits, its one confirmation / a NEWER directory ⇒ a new profile / not-switchable / ephemeral), the frozen record and its digest (moving with every frozen field, never with the live state), claimVerdict (the same card / an untold rejection / open again), EVERY transition (agent_forbidden, proposal_changed, approve again after a failure, told once), allowlistWith (only the host), the For-you item's words = the card's line for line; step 2's SIGN-IN REFUSAL HINT — SIGNIN_REFUSAL_ROWS (dated, sourced, Google's /signin/rejected + deniedsigninrejected + the refusal title in en/zh/ja; Microsoft's failed sign-in deliberately absent), signinRefusalOf / navHint over the navigate result's final url + title (exact host, look-alikes refused, bounded at 4 KiB), the 403/429 rung unchanged, the shipped CLI's navFacts (text + --json forms, measured on 0.38.1) and the audit route's wiring; a patched-copy control (any host)
   { name: 'test-browser-propose', tier: 'fast', why: 'in-process · 1.4 s' }, // lane browser-propose step 3 (the owner 2026-09-30: the agent PROPOSES the switch, the user approves with one click; D31 stands): the REAL keeper over a fake agent-browser, the REAL routes on port 0, the REAL proposal runner with a FAKE install runner, the REAL handback tell over a fake ladder, a REAL For-you store + a REAL normalizer per conversation, the shipped CLI — ONE card + ONE item per claim (a second claim = the same card), the owner-only doors (an agent bearer 403, a wrong digest 409, no /api/agent twin), Approve = exactly the frozen fields (the install with its progress on the card, ONLY the host added, a new CloakBrowser profile pinned + attached + the page reopened, or the in-place switch; the agent told with noWake — stashed or steered, never a wake), a newer directory never downgraded, Reject told once at the next navigation, a failed install + Approve again, nothing to offer on another machine, a rebuild placing the card by id; the CLI's proposal line, the sign-in hint end to end, the rejection note once; six patched-copy controls. Scratch dirs only, no real browser
   { name: 'test-browser-site-reset', tier: 'heavy', why: 'slow — 12.5 s measured at verify r4 (8.5 s at r1 under the fast law; r2–r4 added ~50 rows: the shipped CLI spawned ~70 times, the measured loop replayed ×8 / ×32, a 300 ms quiet rule, the stop retries): the REAL keeper over a fake agent-browser + a fake CDP endpoint, the real routes / watch / proposal runner / shipped CLI — moved out of the fast tier by THE TIER RULE (≥ 10 s); a pre-push pin of this lane\'s PURE parts would need a split suite' }, // LANE SITE-RESET (2026-09-30, userW's pod: a stale login looped a bank's sign-in page, every verb timed out): the REAL keeper over a fake agent-browser whose browsers are a fake CDP endpoint (tabs, a cookie jar, storage calls shaped as measured), the REAL dialog watch, routes, proposal runner (+ this lane's site-reset kind) and clearer, the shipped CLI — ① the MEASURED loop replayed ⇒ the verb in flight answered BY THE EVENT, the live view's banner keyed + patched in place; ② a page-waiting verb answers the loop without spawning the browser CLI, `stop` / a bare `tab close` / `screenshot` go DIRECT, [no_picture] by name; ③ `site-reset` in the own browser clears exactly the cookies that reach the host + its origins' storage on a page's session; ④ on a shared profile ONE proposal, owner-only doors, Approve runs exactly the frozen pair (the browser started first), the agent told free; ⑤ Reject told once, proposal_stale; ⑥ SIX patched-copy controls
   { name: 'test-browser-trace', tier: 'fast', why: 'in-process · 190 ms' }, // THE PAGE-SIZE FOLD (lane trace-fits, 2026-10-01 — the owner: every resize / move of the live view was counted as an action, the Actions list was all `view fit` rows): the PURE coalesce verdict (a fit within 10 s of the previous fit of the same browser + scope REPLACES it, another action between ⇒ a new run, another browser ⇒ never) + the merge (first at / id / before frame, last geometry / after frame, n, lastAt), the PURE fold every list draws (consecutive fits = ONE dim row; expand = the toggle) and the counts that exclude fits (traceSummary / scopeDigest / pairSessions), THE FLOOD through the REAL recorder over a fake bridge (157 agent actions + 37 fits in 10 storms ⇒ 10 fit rows, every superseded after frame unlinked at once, the append-only index folded at reload), the size plan dropping page-size frames FIRST + usage / housekeeping reporting fit bytes beside, four patched-copy controls (one per rule), the wiring pins (the three surfaces, the route\'s summary, the F4 bridge debounce pinned, zh / ja, the toggle\'s label). Scratch dirs only, no browser
@@ -434,7 +460,7 @@ export const SUITES = [
   { name: 'test-stage-visibility', tier: 'fast', why: 'in-process · 640 ms' }, // inc-munl8jkl-gaih + inc-munbksgs-k3yz (userW, 2026-09-30: a conversation brought onto the Stage from another desktop came up as an EMPTY BOX that ignored clicks — the desktop wrote content-visibility:hidden, the Stage\'s show cleared only visibility + pointer-events): §1 PURE view-visibility windowMarks over all 32 reason sets × 3 window types (the Stage\'s hero = no reason = nothing marked); §2 the real WindowManager / DesktopManager / StageManager / ChatView over fake elements — a plain desktop switch (control), on Fin → Stage → go to a Scra window, leave + re-enter, leave to its home, a Stage-parked chat suspended + unrendered, a group hero (its guest\'s view runs; the hand-back hides the whole frame), a promoted host, a torn-off guest, a drag\'s lent visibility; §3 THE CENSUS — every writer of the two hider flags and of content-visibility / aria-hidden on a window element is the ONE door (WindowManager.setWindowHidden) or the ONE derivation, named by file:line; §4 five patched-copy controls (the Stage\'s pre-fix show + borrow ⇒ the re-borrowed hero blank; the desktop\'s and the tab-group\'s hand-written marks ⇒ the census red by name; the PURE rule without aria-hidden / without the Stage reason)
   { name: 'test-design-canvas', tier: 'fast', why: 'in-process · 160 ms' }, // THE DESIGN CANVAS (lane design-window L2): src/lib/design-canvas-model.js tabled — the view (zoom ladder, zoomAt keeps the anchor, pinch, fit, fit-width focus), framesOf (= the hub's validateManifest + layoutOf, imported), pages / notes / launch, normalizeRead (every read spelling, every failure loud), THE PICK FENCE (closed kinds, bounded fields, routeMessage = the source IS one of the canvas's frames), the frame documents (picker first in a bounded head window, print @page); wiring pins (sandbox allow-scripts only, no allow-same-origin anywhere, one message listener on the signal); a patched copy per rule goes red
   { name: 'test-doc-stopped-owner', tier: 'fast', why: 'in-process · 0.1 s (a STOPPED owner is an addressee: the doc engine over the REAL conversation-deliver + drainStashUnderCap — stashed in order, the doc-owners memo across a restart, no_owner words, the edit note, 2 RED patched engines)' }, // lane doc-comments-stopped-owner
-  { name: 'test-doc-model', tier: 'fast', why: 'in-process · 0.13 s (PURE: the Doc window\'s fidelity corpus over prosemirror-markdown, the comments message, the edit summary, the conflict table, the hub over stub senders, six patched copies)' }, // lane doc-window
+  { name: 'test-doc-model', tier: 'fast', why: 'in-process · 0.2 s (PURE: the Doc window\'s fidelity corpus over prosemirror-markdown, the comments message, the edit summary, the conflict table, the hub over stub senders, six patched copies)' }, // lane doc-window
   { name: 'test-doc-comments-sync', tier: 'fast', why: 'in-process · 0.1 s (the Doc window\'s comment drafts through the REAL drafts SyncStore behind the cut-verbatim state-set / state-resync cases and two cut-verbatim client StateSyncs: a doc: key round-trips and broadcasts, removal / emptying, one init load, a reconnect; two controls)' }, // lane doc-comments-synced
   { name: 'test-doc-window-width', tier: 'fast', why: 'in-process · 0.06 s (the Doc window\'s width + leaving rules, PURE: Fit default / Comfortable / phone, the RED patched-measure copy, the table wrapper rule, /api/download reuse, the ONE self-contained export + print sheet + belt; window pins)' }, // lane doc-window-width-export
   { name: 'test-doc-wheel', tier: 'fast', why: 'in-process · 0.19 s (the Doc window\'s wheel: 30 fixtures through Tiptap v3 + block patching — untouched lines byte-identical, nothing dropped, reformats printed; PURE patchBlocks; rawReasons + WHY; the licence census printed; three patched copies)' }, // lane doc-editor-wheel
@@ -473,7 +499,7 @@ export const SUITES = [
   { name: 'test-stop-nudge', tier: 'fast', why: 'LAW money · in-process · 150 ms' }, // A TURN THAT BOOKKEPT ITSELF STOPS FREE (B-a8f0, lane stop-nudge-free): the PURE stop verdict table (every why, the first rule first, no turn start ⇒ the time rule; control = the first rule cut), the stop-check route over a real express app (claude + codex sessions, a free stop never asks the spend authorizer), and the census of every bookkeeping write route stamping s._bookkeptAt
   { name: 'test-backlog-nudge', tier: 'fast', why: 'in-process · 332 ms' }, // THE BACKLOG CLEANUP NUDGE (2026-09-22): a session holding ≥ tasks.backlogNudgeAt (default 20, 0 = off) open items it claimed or parked is asked in ONE ≤500 B paragraph to finish / drop / merge — PURE ownedOpen/backlogNudge/nudgeText, the REAL route (add/edit/claim nudge, done/drop/unclaim/show never, the threshold through serverSetting), _backlogNoteLines, EVERY TURN through the REAL task-context + prompt-context (r2), ONE paragraph for N groups + 2/3 groups × 60 CJK items ≤ 9600 B untrimmed + task-context capped inline (r2), the REAL CLI's `note:` line, the setting row + zh/ja, each leg with a patched-copy control
   { name: 'test-chat-enter-ime', tier: 'fast', why: 'PURE · 90 ms' }, // AN ENTER MEANT FOR THE INPUT METHOD MUST NOT SEND (lane chat-enter-ime, inc-muukd9oq-qyc3): the EnterGuard table over keydown/composition sequences, the recorder\'s S-/c:1/ime words, the enterSends hint, patched-copy controls
-  { name: 'test-enter-census', tier: 'fast', why: 'PURE · acorn over every src/lib module + public/index.html · 1.2 s' }, // AN ENTER THAT COMMITS A WORD IN AN INPUT METHOD NEVER SUBMITS A TEXT BOX (lane channel-enter-ime, inc-mv7mdv6b-emxq): every key handler that tests Enter, classified by its target\'s kind (creation / role / markup) — text-box sites through enterSubmits(e) or the full guard, buttons/rows/menus exempt by kind; planted + base-rel268 RED controls
+  { name: 'test-enter-census', tier: 'fast', why: 'PURE · acorn over every src/lib module + public/index.html · 1.3 s (its cost a census + a CPU ratio against one module\'s bare parse — lane mirror-flake-hardening)' }, // AN ENTER THAT COMMITS A WORD IN AN INPUT METHOD NEVER SUBMITS A TEXT BOX (lane channel-enter-ime, inc-mv7mdv6b-emxq): every key handler that tests Enter, classified by its target\'s kind (creation / role / markup) — text-box sites through enterSubmits(e) or the full guard, buttons/rows/menus exempt by kind; planted + base-rel268 RED controls
   { name: 'test-press-select', tier: 'fast', why: 'in-process · 146 ms' }, // A LONG PRESS ON SELECTABLE TEXT IS A SELECTION, NEVER A MENU (lane mobile-select: a phone long press on chat text opened the message menu over the words the platform was selecting): the PURE press-target × device table, the REAL door (utils.js installLongPressContextMenu) under a dispatch model + fake clock, the touch selection closer, the grep-derived user-select opt-in census + the chrome rule, wiring pins, three patched-copy controls; verify r1: three layout pins (code/table blocks clear the float, the bubble-mode host, the touch-tablet hover buttons)
   { name: 'test-outside-press', tier: 'fast', why: 'in-process · 68 ms' }, // THE ONE OUTSIDE-PRESS CLOSER (lane M, inc-muhms5kt-0ejl: no floating menu closed on a press into an app's picture — the pane cancels pointerdown, so no mousedown): the PURE verdicts (inside / anchor / the picture / nested popover / ignore / root gone; mouse at down, touch+pen only as a TAP) + the REAL utils.js onOutsidePress under a fake document and a browser dispatch model (capture passive arming, the xpra-like pane and the noVNC-like canvas close, the press never cancelled or stopped, persistent / signal / root-gone / attachPopoverClose) + CONTROLS: the pre-lane closer verbatim stays open over the pane, two mutant copies (the helper on mousedown; in the bubble phase behind a stopping pane) stay open. ~0.2 s
   { name: 'test-window-drag', tier: 'fast', why: 'in-process · 2.4 s' }, // A RELEASE OVER A PANE THE PAGE CANNOT HEAR (lane-drag-release, userW's inc-muq7uk0f-e59s / inc-muq7wwfq-rruz): the PURE end-door table (src/lib/drag-end.js), the REAL WindowManager's title-bar drag + handle resize under a fake DOM with pointer capture modelled (a release over a swallowing pane ends the drag ONCE, the highlight gone, the drop applied; every end kind; the occupied-cell drop; the D5 shrink table at uiScale × DPR), patched-copy controls per rule + the pre-capture feed, the CSS shield / touch-action pins
@@ -491,10 +517,10 @@ export const SUITES = [
   // fake adapter talks to nothing.
   { name: 'test-channel-search', tier: 'fast', why: 'in-process · 600 ms' }, // design 010 (B-c9be): the snippet reader, the merge, the refusal table, the store's newest-first cut, the engine's press / floor / back-off / around / agent --full over the fake vendor's search, patched-copy controls
   { name: 'test-channel-record', tier: 'fast', why: 'in-process · 59 ms' }, // the ONE normalized record: the dedup key, `@_user_N` ordinals, and an external body carrying our own frame markers coming out INERT (§25: + ④e every string of the render tree comes out inert)
-  { name: 'test-mail-frame', tier: 'fast', why: 'in-process · 4 s (⑪ spawns its child controls, cut at the budget)' }, // lane channel-rich D2 (the owner: "gmail 这种富文本 html 内容似乎完全没有按照 html 渲染"): PURE src/mail-frame.js — the allowlist re-serializer over a 58-mail HOSTILE CORPUS (script in every syntax, meta refresh, base, form, object/embed/iframe, srcdoc, </iframe> + </style> breakouts, javascript:/data:text in every attribute + entity/tab spellings, SVG onload, MathML mXSS, CSS url()/@import/image-set/expression, target=_top, attribute breakouts, comments/CDATA) — no script, handler, dangerous element, load from the attacker, and a FIXED POINT; a 10 MB body refused by name, 1 000 pictures capped + counted, 20 000 nested divs bounded; remote pictures blocked until Show pictures (https only), the CSP exact + FIRST, ONE nonce'd script, per-sender memory, the parent's message verdict (source + token + clamp + href), lazy frames ≤ LIVE_FRAME_CAP; wiring pins (the ONE srcdoc, sandbox allow-scripts only, step order); three patched-copy controls RED; ⑪ (security verify) 8 quadratic shapes at MAX_HTML_BYTES < 1 500 ms, five old-loop copies OVER the same budget in a child
+  { name: 'test-mail-frame', tier: 'fast', why: 'in-process · 5.1 s (⑪ spawns its child controls — a pre-fix copy still running after the 3 s wait is cut; a benign 2 MB mail is the CPU yardstick)' }, // lane channel-rich D2 (the owner: "gmail 这种富文本 html 内容似乎完全没有按照 html 渲染"): PURE src/mail-frame.js — the allowlist re-serializer over a 58-mail HOSTILE CORPUS (script in every syntax, meta refresh, base, form, object/embed/iframe, srcdoc, </iframe> + </style> breakouts, javascript:/data:text in every attribute + entity/tab spellings, SVG onload, MathML mXSS, CSS url()/@import/image-set/expression, target=_top, attribute breakouts, comments/CDATA) — no script, handler, dangerous element, load from the attacker, and a FIXED POINT; a 10 MB body refused by name, 1 000 pictures capped + counted, 20 000 nested divs bounded; remote pictures blocked until Show pictures (https only), the CSP exact + FIRST, ONE nonce'd script, per-sender memory, the parent's message verdict (source + token + clamp + href), lazy frames ≤ LIVE_FRAME_CAP; wiring pins (the ONE srcdoc, sandbox allow-scripts only, step order); three patched-copy controls RED; ⑪ (security verify) 8 quadratic shapes at MAX_HTML_BYTES < 1 500 ms, five old-loop copies OVER the same budget in a child
   { name: 'test-channel-thread', tier: 'fast', why: 'PURE · 2.2 s (a 2 s hang control)' }, // lane channel-threads (2026-09-28, the owner: "你似乎不支持 lark 的内嵌回复 (thread)"): src/channel-thread.js — the §1.3 mapping table over invented real-shape fixtures per vendor (Lark through the REAL normalizer incl. an omt_ topic whose root is absent + reply_in_thread; Slack parent/replies/thread_broadcast/a parent stored before its first reply; Telegram one-level reply_to_message, external_reply, a forum topic as a conversation; Gmail = kind conversation), T1–T8 (chains keyed by the topmost ancestor, the root by identity / named / earliest-without-parent, distinct counts, a thread of one, the vendor count merged as the max with the root line never read — attack 14, the hop bound + a cycle keyed by the smaller id — attack 1, placeOf quote/loaded/external, agentPlaceLine frame-inert, paneMode, threadView paging), the census shape 251/23/9/1 as a seeded corpus + roots recovered for pre-`root` records, bound-before-parse (512-char ids, a linear quote path); four patched-copy controls (root counted as a reply, no cycle guard, no guard at all = a 2 s hang read RED, stats off the root's line)
   { name: 'test-webhook-token-sinks', tier: 'fast', why: 'in-process · 0.2 s (the real engine + the real routes on loopback; the minted tokens searched in every file, log, broadcast, wake text, reply POST and answer)' }, // lane webhook-l1-server
-  { name: 'test-webhook-ui', tier: 'fast', why: 'in-process · 0.1 s (the owner surface\'s DOM-free words + source laws: the shared slug rule, the token-once census + a RED mutant, the picker\'s reason, the budget row)' }, // lane webhook-l2-ui
+  { name: 'test-webhook-ui', tier: 'fast', why: 'in-process · 0.1 s (the owner surface\'s DOM-free words + source laws: the shared slug rule, the token-once census + a RED mutant, the picker\'s reason, the budget row; + the pairing doors: the code law + RED, every named refusal worded + RED)' }, // lane webhook-l2-ui + webhook-pair-join
   { name: 'test-webhook-auth', tier: 'fast', why: 'in-process · 0.1 s (the PURE steps ①–⑫ + the bounded memos, then the REAL route on a loopback server over a stub engine — 0 bytes read on a refusal)' }, // lane webhook-l1-server
   { name: 'test-decision-model', tier: 'fast', why: 'in-process · 1.2 s (PURE: both dialects × three question types, every use\'s input plan — cut / frames / secrets / ceiling, the memo key, budgetVerdict\'s table, journalRow, the rubric\'s golden set, criteriaProposal; + lane judge-one-shot-body: the judge over a loopback fake — 421 ×1 / ×2, 307, reset, hang ⇒ ONE request, body intact, RED controls)' }, // lane decision-core
   { name: 'test-decision-inbox', tier: 'fast', why: 'in-process · 0.2 s (lane inbox-decision-group — use ④, the For-you tray sorted by the judge: the inbox plan + never-list, eligibility, ≤ 10 calls a pass through the REAL engine + REAL store over a fake fetch, no urgency written, memo across a restart, the budget stop, off the wake path; 3 RED controls)' },
@@ -510,7 +536,7 @@ export const SUITES = [
   { name: 'test-decision-rule', tier: 'heavy', why: 'chrome · ~20 s (lane decision-rule: the `decision` rule over the REAL channels engine + D1\'s REAL decision engine + a fake provider — one call per record with both questions, the route to group B only, the memo across a restart, the hour cap, plugin / routing off; then the Notify… decision row desk + phone in headless Chrome)' },
   { name: 'test-webhook-record', tier: 'fast', why: 'PURE · 60 ms (the mapping, its bounds, the belt, raw 8 KiB, the fact rule truth table)' }, // lane webhook-l1-server
   { name: 'test-webhook-reply', tier: 'fast', why: 'in-process · 80 ms (PURE + the adapter over a scratch callers file: reply --to / ambiguous / revoked / all / none)' }, // lane webhook-l1-server
-  { name: 'test-webhook-pair', tier: 'fast', why: 'in-process · 0.2 s (PURE pairing verdicts + RED mutant, then two real engines and two copies of the real routes on loopback: code, join, spent, expired, http, a frame on /hook, re-pair)' }, // lane webhook-l3-cli-pair
+  { name: 'test-webhook-pair', tier: 'fast', why: 'in-process · 0.2 s (PURE pairing verdicts + RED mutant, then two real engines and two copies of the real routes on loopback: code, join, spent, expired, http, a frame on /hook, re-pair; + the pending code across a restart, the join\'s named refusals, the GET / broadcast / file census, 4 RED controls)' }, // lane webhook-l3-cli-pair + webhook-pair-join
   { name: 'test-webhook-verify-r1', tier: 'fast', why: 'in-process · 0.3 s (the credential-class verify r1 rulings on rel249, each a leg + a RED in-memory mutant: opaque replyId, vswp_ / decoded credentials at the door + withheld at the read, one client address + allow-list everywhere, the stranger gate, commit-after-persist, /hook one shape, raw belted, budget words, IPv6 families, no ghost, card words)' }, // int248 r2
   { name: 'test-webhook-cli', tier: 'fast', why: 'in-process · 0.7 s (the real vibespace-channels against a stub server: reply --to, ambiguous rows, compose --caller, read callers header; the no-mint verb census and the vswh_ output door, RED controls)' }, // lane webhook-l3-cli-pair
   { name: 'test-egress-fence', tier: 'fast', why: 'in-process · 0.5 s (loopback stub servers only; every address class, a rebinding resolver asked once, 3xx never followed, lost vs refused, 64 KiB)' }, // lane webhook-l1-server
@@ -518,9 +544,9 @@ export const SUITES = [
   { name: 'test-channel-quote-topic', tier: 'fast', why: 'in-process · 0.5 s (the real engine over a Lark-shaped scripted adapter + the fake accounts, no vendor call; five patched copies)' }, // lane channel-threads, the QUOTE-vs-TOPIC round (owner 2026-09-28, both rulings "是"): a Lark reply without a thread id is a QUOTE, never a thread — ONE PURE classifier (src/channel-thread.js placeKindOf: plain / quote / topic-root / topic-reply / topic-quote) read by the render (strip / chip / tag), the agent's words ("quotes …"), the engine's placement default + its thread read + its walk (not-a-thread, zero vendor calls); the table over the naive pass's real-shape fixtures through the REAL Lark normalizer + the fake-poll rooms (shot 03); zh 话题 never 线程 over every channels surface (a grep-derived key census + a named non-channel list), ja ONE word スレッド, the i18n check; controls: a chain-is-topic classifier, the pre-fix render pair (the shot reproduced) with each layer alone holding, the engine's own parent rule, the walk without its refusal, planted 线程 / トピック
   { name: 'test-channel-threads-naive', tier: 'fast', why: 'in-process · 0.4 s (the real engine over fake / Lark-shaped rows, no vendor call; one patched copy per finding)' }, // lane channel-threads, the NAIVE-USER pass (2026-09-28): each finding a fresh-eyes user proved in a real browser, pinned with its patched-copy control — ① a disabled account's refusal in the device's language (the thread pane / Refresh drew the engine's English "Lark / 飞书 is disabled" on a zh page); ② no dead ↩ "reply to this message" in a thread pane that cannot be answered (the REAL pane over a fake DOM); ③ who reacted in NAMES only — "You" for the owner, a nameless reactor counted, never an id (the REAL fold + the client words); ④ a reaction digest waits as "a reaction notice", never "a channel message", and carries no reply hint (the REAL engine files it, the real summary + injection render it); ⑤ a placement refusal tells the agent the FLAGS for what is offered (the shipped CLI against a stub answering the PURE verdict); ⑥ the pane composer line wraps, never cut (the rule over the REAL pane; measured in test-channel-threads-ui (h))
   { name: 'test-channel-reactions', tier: 'fast', why: 'PURE · 5 s (the meter pins the V8 optimizers off — lane mirror-green; the parser census COUNTS the work of every scaling parser at n and 2n — scripts/work-meter.mjs, never the clock; a 2 s hang control)' }, // lane channel-threads: src/channel-reactions.js + the record's reaction/side schema — validateReactions refusals by name (64 KiB key, alphabet, prose glyph, a vendor URL as a custom image, 65 keys, 21 reactors, byTruncated recomputed), validateSide bound-before-parse (attack 2) + truncation + the 8 KiB line + sideKey, the fold F1–F6 with attacks 3/4/5 (replay once, a delete on nothing floors at 0, 150 reactors − one outside the kept 20 = 149 / byTruncated 129, mine via our newer delta), first-appearance order, the vocabulary (emojiOf case rule, u… unicode keys, the Lark table == the vendor page's 182 names in scripts/fixtures/lark-emoji-types.json), identity (forAgent / agentReactionsLine / reactionDigestLine never name a reactor — attack 12); ⑥ THE PARSER CENSUS (verify r1): every export of channel-reactions.js + channel-thread.js has a row — its size cap asserted with an oversize input, and for a scaling parser the linear pin (the parser alone, a small cache-resident input repeated, n / 2n interleaved, median of 9 ≤ 2.5, ≤ 3 attempts) — or a stated reason; a new export with no row is RED; five controls (no F2, order by count, an agent line printing by, a key judge that hangs — killed at 2 s, the pre-fix quadratic compactSide read ×4 by the census's own measurement + its 146 KB snapshot line)
-  { name: 'test-channel-facts', tier: 'fast', why: 'PURE + the engine in-process · 400 ms' }, // lane message-facts (B-f066, design 007): a message's FACTS — the table ⇔ the schema ⇔ zh/ja words, validateFacts (closed kinds/types, bounds, frames + hidden characters in every string, unknown kind dropped by name, byte-identical without facts, the fx side record), the fold + compaction, the summary at 1/4/60, details, chips, the agent line (V2 the line rule), THE PAPER TEST (Slack/Telegram/Outlook mappers → no new type; the rows they would add printed), Gmail's ten kinds from full-format headers (RFC 2047, groups, a quoted comma, 20 KB To ⇒ cut, Bcc only on own sent mail, Sender = From ⇒ none, a 1 MB Cc bounded), the contract (caps.facts ⊇ emits, factsOf declared ⇔ implemented), the engine's backfill (20 clicks = 1 vendor call, side hit free, refusals by name, foreign id never written, the fold in the window page + the agent copy) and the route's agent refusal
-  { name: 'test-channel-revisions', tier: 'fast', why: 'PURE · 120 ms' }, // lane channel-record-revisions: a stored message keeps learning — the versions fold (never overwrite), the rv line bound, the recheck plan (cadence, budget, 24 h / 7 d windows, woken-for first), the revisions row per adapter (none legs), the wrapper, the agent words; RED controls
-  { name: 'test-channel-blocks', tier: 'fast', why: 'in-process · 4 s' }, // THE RENDER LAYER (§25, 2026-09-27, the owner: "设计一个不同 connector 的 raw message to HTML 的接口"): the CLOSED block schema (refusals by name, bounds, inertFrames over every string, an unsafe href demoted to text); safeHref + the linkify table (bare/www/mailto/e-mail, `[text](url)`, `<url>`, trailing punctuation incl. CJK, every hostile scheme, a phishing label shows the target); the generic rung; the MAIL rung over invented fixtures in the real shapes (EN wrapped "On … wrote:", zh 写道, Outlook header block, Original Message, forwarded, `>`-only, ticket banner, `-- ` + mobile signatures, no quote); cleanSubject; the REAL Lark + Gmail toRecord → blocks (an image is the picture, no "[image]"; `text` unchanged) + the stored-record rung; the registry's render/titleForm/blocksOf/sendGrant; the REAL engine in-process (a stored record served WITH a tree, a subject title cleaned, sendForm/sendGrant, the preview; zero vendor calls); THE RENDERER over a minimal DOM (validated links, chips, the fold rule + memory, pictures in place, zero innerHTML); wiring pins; eight patched-copy controls; ⑭ (channel-polish) the avatar rule — initials, a stable hue, the palette's 108 pairs ≥ 4.5 : 1 computed from style.css's theme blocks with a control, pins; verify round 2: the inline regex compiled once per rung call (21 K paragraphs × 256 names), cleanSubject bounded, controls (o) (p); verify round 3: the frame regex linear on a whitespace run (1.7 s per record before: ingest + every page read + every client) with control (q) + the same matches on every shape, a label-less link's href counts, a site-shaped label held to its host; ⑮ THE UPWARD PAGE'S VERDICT (src/lib/channel-paging.js: a scroll event pages only on the person's input, a wheel / a pull at the top asks directly, refusals by name, atTail; pins; the clamp control)
+  { name: 'test-channel-facts', tier: 'fast', why: 'PURE + the engine in-process · 600 ms' }, // lane message-facts (B-f066, design 007): a message's FACTS — the table ⇔ the schema ⇔ zh/ja words, validateFacts (closed kinds/types, bounds, frames + hidden characters in every string, unknown kind dropped by name, byte-identical without facts, the fx side record), the fold + compaction, the summary at 1/4/60, details, chips, the agent line (V2 the line rule), THE PAPER TEST (Slack/Telegram/Outlook mappers → no new type; the rows they would add printed), Gmail's ten kinds from full-format headers (RFC 2047, groups, a quoted comma, 20 KB To ⇒ cut, Bcc only on own sent mail, Sender = From ⇒ none, a 1 MB Cc bounded), the contract (caps.facts ⊇ emits, factsOf declared ⇔ implemented), the engine's backfill (20 clicks = 1 vendor call, side hit free, refusals by name, foreign id never written, the fold in the window page + the agent copy) and the route's agent refusal
+  { name: 'test-channel-revisions', tier: 'fast', why: 'in-process · 240 ms' }, // lane channel-record-revisions: a stored message keeps learning — the versions fold (never overwrite), the rv line bound, the recheck plan (cadence, budget, 24 h / 7 d windows, woken-for first), the revisions row per adapter (none legs), the wrapper, the agent words; RED controls · ⑦ (lane channel-recall-engine-leg, B-e8e1) the ENGINE leg over the fake adapter: a recalled message a wake carried ⇒ ONE stashed note (again / after a restart / nobody woken ⇒ none; carried twice ⇒ one), a SCOPE DIGEST writes the woken-for rows of every conversation it carried; three patched-copy controls
+  { name: 'test-channel-blocks', tier: 'fast', why: 'in-process · 4.7 s' }, // THE RENDER LAYER (§25, 2026-09-27, the owner: "设计一个不同 connector 的 raw message to HTML 的接口"): the CLOSED block schema (refusals by name, bounds, inertFrames over every string, an unsafe href demoted to text); safeHref + the linkify table (bare/www/mailto/e-mail, `[text](url)`, `<url>`, trailing punctuation incl. CJK, every hostile scheme, a phishing label shows the target); the generic rung; the MAIL rung over invented fixtures in the real shapes (EN wrapped "On … wrote:", zh 写道, Outlook header block, Original Message, forwarded, `>`-only, ticket banner, `-- ` + mobile signatures, no quote); cleanSubject; the REAL Lark + Gmail toRecord → blocks (an image is the picture, no "[image]"; `text` unchanged) + the stored-record rung; the registry's render/titleForm/blocksOf/sendGrant; the REAL engine in-process (a stored record served WITH a tree, a subject title cleaned, sendForm/sendGrant, the preview; zero vendor calls); THE RENDERER over a minimal DOM (validated links, chips, the fold rule + memory, pictures in place, zero innerHTML); wiring pins; eight patched-copy controls; ⑭ (channel-polish) the avatar rule — initials, a stable hue, the palette's 108 pairs ≥ 4.5 : 1 computed from style.css's theme blocks with a control, pins; verify round 2: the inline regex compiled once per rung call (21 K paragraphs × 256 names), cleanSubject bounded, controls (o) (p); verify round 3: the frame regex linear on a whitespace run (1.7 s per record before: ingest + every page read + every client) with control (q) + the same matches on every shape, a label-less link's href counts, a site-shaped label held to its host; ⑮ THE UPWARD PAGE'S VERDICT (src/lib/channel-paging.js: a scroll event pages only on the person's input, a wheel / a pull at the top asks directly, refusals by name, atTail; pins; the clamp control)
   { name: 'test-channel-feed', tier: 'fast', why: 'PURE · 0.3 s' }, // lane lark-search-poll (B-5aab, 2026-09-28, the owner: "从 lark pull 消息可以通过搜索空格+时间范围来搜索最近所有新消息吧"): src/channel-feed.js — the change feed's window (overlap ≥ 30 s, the 1-h clamp ⇒ a single-chat catch-up, a lagged-index simulation finds every message), the page verdict (an ignored time range parks after ONE page, the declared unit — never guessed from the magnitude), the fold (owed marks, U6 both marks, births of single chats, group hints), owedSatisfied / birthFacts, the snippet census (module + registry + the engine's feedPage), the measurement (promote ≥ 200 ≤ 2 %, demote > 2 % over ≥ 20), the sliding minute; four patched-copy controls
   { name: 'test-channel-authors', tier: 'fast', why: 'PURE · 420 ms' }, // lane lark-threads PART B (2026-10-01): src/channel-authors.js — the owner\'s own name for an author wins, else the vendor\'s way (nickname, then (department) / (job title) per channels.larkNameField), the vendor name never rewritten, external by tenant, every string bounded; three patched-copy controls
   { name: 'test-peer-parsers', tier: 'fast', why: 'in-process · 5.7 s (a deadline census: 99 parsers × their adversarial shapes, each ONCE at its cap ≤ 1 MiB in a child under max(2 s, the row\'s own ms) — never a ratio of two clocks, so parallel since .242: 13 s at 32 spinners, 5/5 green; 8.2 s as a ratio judge, red 5/5 under load)' }, // THE PEER-BYTE PARSER CENSUS (security verify r2, 2026-09-28): every exported function of src/mail-frame.js, src/channel-blocks.js, src/channel-record.js, src/channels/gmail.js and src/channels/lark.js is a ROW (a size cap proven by an input over it + linearity t(2n) ≤ 2.5 × t(n) on its own adversarial shapes) or EXCLUDED with a reason — a new export goes red until placed; CONTROLS = round 1's per-quote newline scan in the mail sanitizer, round 2's regex-chain stripHtml and lazy parseAddress restored in patched copies, all ×4 under the same judge. Born of the two parsers round 1's hand-written census missed: Gmail's stripHtml (64 KB of `<` = 1.2 s at ingest, no cap) and parseAddress (a 64 KB From = 1.4 s)
@@ -571,7 +597,7 @@ export const SUITES = [
   { name: 'test-mounts-oauth', tier: 'fast', why: 'in-process · 300 ms' }, // lane cluster-presets: MountManager.drivePresets from the presets directory (Drive _driveClient, gmail-sync _client, a live rotation, a withdrawn client), the env + legacy pair as the fallback; control = the env-only reader
   { name: 'test-fleet-image-seed', tier: 'fast', why: 'in-process · 0.5 s (git over a throwaway origin + clone, a stub npm)' }, // lane cluster-presets P6 ("ff pull failed — realigning" on every fleet deploy): the tracked files a build rewrites, DERIVED from package.json's build scripts ∩ git ls-files + npm's lockfile == src/server/auto-update.js BUILD_REWRITTEN_TRACKED == the Dockerfile seed step's resets (+ its clean-porcelain assertion, in order) == scripts/update.sh's resets before the pull AND after the build; every untracked build output gitignored; the REAL module over a throwaway repo with an npm-10-shaped stub — the pre-fix copy leaves M package-lock.json and the next pull aborts (control), the fix ends clean twice in a row, heals the dirty pod, names an unlisted rewrite in one line, skips a failed install
   { name: 'test-oauth-field-parity', tier: 'fast', why: 'in-process · 616 ms' }, // design-integrations-per-account §4/§8.1 #12 (D1–D8): the storage + channel account dialogs are ONE component (src/lib/mounts-dialog.js) — its exports, no second renderer on either side, every SHARED spelling asserted on BOTH sides, every re-authorize = reauthDialog, switching the client = re-authorize on both sides (D2), each side's Edit button order (the channel's = the r4 mockup's), Remove… in Edit, D8's sentence, the design's §4 i18n key list parsed from the design doc (drawn as built + zh + ja), each rule with a patched in-memory control (0.1s)
-  { name: 'test-channels-lark-shape', tier: 'fast', why: 'in-process · 591 ms (verify-r6 O1 ⑧: a reply anchor elsewhere refused before any request + control)' }, // design §6.3/§12.1/§13 (P1): the Lark READ adapter over RECORDED fixtures — auth.state's four-valued ladder (the resolver's answer is an INPUT), the FIXED-mode consent flow on a FREE port, PAGING TO THE ANCHOR across pages (both continuation spellings), every msg_type to plain text, `@_user_N` ordinals, typed failures, the refresh + invalid_grant, the credential-exchange Test runner; P4 ⑧ (84): send = ONE documented request with `uuid` = the idempotency key (hashed past 50), a reply hits the reply endpoint, convCaps NARROWS to [] with `send-scope-not-granted` until BOTH dotted send scopes are held, a transport failure after the request left is `detail.lost` while a 403 is a plain refusal, reconcile = found-in-chat / the SAME uuid re-issued inside the hour / landed:false only on a COMPLETE scan past it / unknown otherwise; zero vendor calls
+  { name: 'test-channels-lark-shape', tier: 'fast', why: 'in-process · 650 ms (verify-r6 O1 ⑧: a reply anchor elsewhere refused before any request + control)' }, // design §6.3/§12.1/§13 (P1): the Lark READ adapter over RECORDED fixtures — auth.state's four-valued ladder (the resolver's answer is an INPUT), the FIXED-mode consent flow on a FREE port, PAGING TO THE ANCHOR across pages (both continuation spellings), every msg_type to plain text, `@_user_N` ordinals, typed failures, the refresh + invalid_grant, the credential-exchange Test runner; P4 ⑧ (84): send = ONE documented request with `uuid` = the idempotency key (hashed past 50), a reply hits the reply endpoint, convCaps NARROWS to [] with `send-scope-not-granted` until BOTH dotted send scopes are held, a transport failure after the request left is `detail.lost` while a 403 is a plain refusal, reconcile = found-in-chat / the SAME uuid re-issued inside the hour / landed:false only on a COMPLETE scan past it / unknown otherwise; zero vendor calls
   { name: 'test-channels-gmail-shape', tier: 'fast', why: 'in-process · 855 ms (verify-r6 O2 ⑧: recipients fixed at propose, a late stranger\'s message ignored + control)' }, // design §6.3/§12.2/§14.2 (P1): the Gmail READ adapter over RECORDED fixtures — the DELEGATING row resolved through the REAL integration store on a TWO-PRESET env (org1 + channels, no 'default') and connected END TO END through the REAL engine on the EPHEMERAL loopback, threads as conversations under the include query, history.list incremental (nothing changed = one request; 404 = reseed; a dead thread = skip), the MIME tree to plain text, the shape-only Test; P4 ⑧ (90): the TWO-PHASE send (one anchor read → drafts.create → `onHandle` BETWEEN the phases → drafts.send; the MIME chains In-Reply-To/References on the anchor's Message-ID), a phase-2 transport failure is LOST with the handle while a phase-1 one is a refusal, reconcile = draft still exists ⇒ never sent + discarded / draft gone + our SENT message in the thread ⇒ landed / no evidence ⇒ unknown, the handle-less drafts.list fallback; zero vendor calls
   { name: 'test-channels-slack-shape', tier: 'fast', why: 'in-process · 203 ms (design 012 S1: the paste sign-in, every Slack message shape, the per-method buckets, files only on files.slack.com + 6 controls)' }, // design 012 (B-ff09): the Slack adapter over RECORDED answers (scripts/fixtures/slack/recorded.json) — no live call
   { name: 'test-channels-slack-send', tier: 'fast', why: 'in-process · 369 ms (design 012 S1: connect by paste through the engine, the token on no disk, prepareSend decided once, review only, purge on remove + controls)' }, // design 012 (B-ff09): sending as the person only through the Outbox — the REAL engine over the fake Slack
@@ -633,9 +659,10 @@ export const SUITES = [
   { name: 'test-plugin-loader', tier: 'fast', why: 'in-process · 295 ms' }, // Plugin Ph2: manifest validator matrix + a real fixture plugin (iframe assets w/ sandbox CSP, forked server process, proxied routes, agent-tool shim, enable/disable lifecycle) + client wiring pins
   { name: 'test-codex-p2-client', tier: 'fast', why: 'in-process · 354 ms' }, // codex P2 client rows: fork via thread/fork (real wrapper vs stub), onboarding per-backend readiness, switcher codex quota, permission-mode seeds
   { name: 'test-wrapper-files', tier: 'fast', why: 'in-process · 346 ms' },
-  { name: 'test-ci-remote', tier: 'fast', why: 'in-process · 6 s (scripts/ci-remote.mjs, the second heavy runner: argv refusals, the box\'s LOAD RULE, the slices partition an affected selection = ci.mjs --list-affected\'s cut, the remote run script\'s private dirs + run id; the teardown for real over /proc with a bystander + a CONTROL)' }, // lane heavy-runner-aidev
+  { name: 'test-ci-remote', tier: 'fast', why: 'in-process · 6.7 s (scripts/ci-remote.mjs, the second heavy runner: argv refusals, the box\'s LOAD RULE, the slices partition an affected selection = ci.mjs --list-affected\'s cut, the remote run script\'s private dirs + run id; the teardown for real over /proc with a bystander + a CONTROL; ⑦ the desktop batch: --batch refusals, its LOAD RULE, the tree\'s self-hosted set, the per-lane env in its run script, the GTK-row verdict)' }, // lane heavy-runner-aidev; ⑦ lane ci-aidev-desktop-batch
   { name: 'test-affected-model', tier: 'fast', why: 'in-process · 1.4 s (scripts/affected-model.mjs, the shared tables\' impact rules — the dictionaries, the settings schema\'s display words, style.css selectors: the diff readers + their refusals, the rules over stub suites with the brief\'s controls + a self-filter mutant, the wiring over a real git repository, the census over the real table)' }, // lane affected-heavy-deps (B-165f)
-  { name: 'test-ci-gate', tier: 'fast', why: 'LAW architecture · 5.6 s — the gate\'s own gate — the census, THIS rule, the block rule over real commits, the real hook end to end, the launcher once for real (§10, a stub repository)', allow: ['checkout'] },
+  { name: 'test-reach-model', tier: 'fast', why: 'in-process · 2.1 s (scripts/reach-model.mjs, the static reach of the affected tier — the token derivation over three real suites, the attribution over real files, the meet rule, the hubs with a no-hub RED control, the rails over a stub repository with an emptied-reach RED control, the declaration census, the sentinel\'s GET census over the tree + its judges; --table prints the three train ranges old → new)' }, // lane affected-static-reach (q-036 P0)
+  { name: 'test-ci-gate', tier: 'fast', why: 'LAW architecture · 6.8 s (5.6 s + §2e\'s wall-clock census — an A/B against d419156bd read 14.0 → 17.0 s at load 6, scaled) — the gate\'s own gate — the census, THIS rule, the block rule over real commits, the real hook end to end, the launcher once for real (§10, a stub repository)', allow: ['checkout'] },
   { name: 'test-usage-ledger-perf', tier: 'fast', why: 'in-process · 551 ms' }, // inc-mtox23xw: the estimator's per-pair ledger walk is O(log n + k) + interval-memoized (it blocked the loop 10-59s); parity vs brute force + timing pins
   { name: 'test-usage-index-parity', tier: 'fast', why: 'in-process · 2.3 s' }, // design 011 lane 3, the usage index SHADOW: the REAL worker on a scratch HOME answers the Usage window's aggregate exactly as memory (duplicate rids whose rows differ in account, a torn line, an empty shard, every dimension / filter / pivot, local hour + weekday, a St_Johns DST child, a remote harvest into an old month, a missed push, a repair rewrite); READ-YOUR-WRITES with a tail-only control worker; L0's cursor writer (write on change, dead keys only on proof)
   { name: 'test-usage-index-owner', tier: 'fast', why: 'in-process · 7.4 s' }, // …the owner: kill -9 mid-build / mid-push → parity from the shard marks; a deleted / newer / older / not-a-database usage.db rebuilt; a second opener refused by name; a deadline 503 that keeps the worker; SIGTERM bounded with a wedged worker (control: process.exit() joins it forever); SQLITE_FULL / no node:sqlite / a dead worker off by name; the ci.mjs index-dir sweep
@@ -755,7 +782,7 @@ export const SUITES = [
   { name: 'test-group-admin', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (99ms)' }, // Route-level smoke for /api/agent/group-admin (2.132.0, issue #21 — manager agent delegation). Fake express + real TaskGroupManager in a temp dir. Asserts the DOUBLE…
   { name: 'test-prompt-context', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (119ms) — cli' }, // Route-level smoke for /api/agent/prompt-context — the diff-update delivery (2.113.0). Drives setupAgentRoutes with a fake express app + a real TaskGroupManager in a…
   { name: 'test-agentd-reexec-argv', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (154ms) — server' }, // Self-upgrade re-exec must PRESERVE the original argv (2.185.2, real owner↔Mac dial outage). The dial transport reads `--dial <url> --dial-token <t>` from…
-  { name: 'test-helm-render', tier: 'heavy', reads: ['deploy/helm/vibespace-user/'], why: 'binary: helm template (read-only, offline — a real external program, so HEAVY by the tier rule) · 0.9 s' }, // lane cluster-presets P2: the chart's company-presets volume over four value shapes (a release with the blocks / an override / no block = inherit / the legacy single client), presets.volume=false byte-identical to the 2.369.199 chart (history permitting), the pod template independent of the preset values (an override change never rolls the pod); 3 chart-copy controls (subPath, a required source, an env beside the volume); SKIPs loudly without helm
+  { name: 'test-helm-render', tier: 'heavy', reach: [], reads: ['deploy/helm/vibespace-user/'], why: 'binary: helm template (read-only, offline — a real external program, so HEAVY by the tier rule) · 0.9 s' }, // lane cluster-presets P2: the chart's company-presets volume over four value shapes (a release with the blocks / an override / no block = inherit / the legacy single client), presets.volume=false byte-identical to the 2.369.199 chart (history permitting), the pod template independent of the preset values (an override change never rolls the pod); 3 chart-copy controls (subPath, a required source, an env beside the volume); SKIPs loudly without helm
   { name: 'test-node-bootstrap', tier: 'heavy', reads: ['scripts/vibespace-agentd-install.sh'], why: 'adopted 2026-09-07, was in NO runner (226ms) — server' }, // Node-free pairing: the installer's node RESOLUTION + PROVISIONING contract (2.246.0). Hermetic — a local HTTP fixture stands in for nodejs.org/dist, so
   { name: 'test-gmail-sync', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (324ms)' }, // Offline e2e for the Gmail sync engine (2.134.0): a mock Gmail API served on 127.0.0.1 + a patched API base exercises seed sync, filename shape (RFC2047
   { name: 'test-mux', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (425ms) — server' }, // Unit test for src/agentd/mux.js — framing round-trip, chan-0 JSON control, byte-channel data, and CREDIT flow control (a fat transfer must not starve a
@@ -769,14 +796,14 @@ export const SUITES = [
   { name: 'test-agentd-devicemount', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (1221ms) — server' }, // device-folder-mount CHAIN acceptance (2.150.0): the daemon serves a folder over WEBDAV on 127.0.0.1 (serve-folder), the server reaches it through the mux via…
   { name: 'test-transcript-worker', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (1268ms)' }, // Transcript worker contract + main-thread-block regression (2.235.0, the userL degradation follow-up). Generates a >34MB JSONL (forces the bounded tail path + line…
   { name: 'test-machine-probes', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (1270ms) — server' }, // R1 — machine fact probes, one implementation for every machine (docs/design-three-tier.md `probe.*`). The same facts existed three ways: the local backend-status…
-  { name: 'test-attach-ack', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (1788ms) — server' }, // attach-ack proof-of-life contract (2.234.1, userL mass false-death incident): EVERY ws attach — real, sub-, or nonexistent id — must get a synchronous attach-ack…
+  { name: 'test-attach-ack', tier: 'heavy', reach: ['mod:src/ws-handler.js', 'mod:src/session-schema.js'], why: 'adopted 2026-09-07, was in NO runner (1788ms) — server' }, // attach-ack proof-of-life contract (2.234.1, userL mass false-death incident): EVERY ws attach — real, sub-, or nonexistent id — must get a synchronous attach-ack…
   { name: 'test-oat-mint-ui', tier: 'heavy', why: 'chrome — the fast tier never launches a browser (~12 s here)' }, // THE MINT IN THE DIALOG (lane oat-mint-flow): the REAL _oatDialog (esbuild of manage-agents.js) × the REAL mint routes + ORCH over the fake claude + the REAL AccountManager, two pages on the WS `oat-mint` broadcast: link + stays open, second page live, code → 已保存 on both, Active line, zero-copy navigate, Esc confirm → cancelled, phone 390; PNGs (OAT_PNG_DIR)
   { name: 'test-login-expiry', tier: 'heavy', why: 'chrome — the fast tier never launches a browser (1934ms here; a browser leg\'s cost follows machine load)' }, // a subscription's LOGIN SESSION has its own absolute deadline: pure reading (incl. the CLI-wiped shape), pool gates (dead ⇒ never usable, near ⇒ never a switch target), the once-per-threshold inbox ladder on a fake clock (restart-survival + re-login reset), the STRING every blocked/inbox surface prints (a login is never a spent quota bucket; a wiped file is never "expired" at a future date), wiring pins
   { name: 'test-agentd', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (3068ms) — server' }, // M0 e2e for vibespace-agentd (docs/design-remote-cs.md "= the local config"). Builds the daemon bundle into a temp install root, then via DeviceManager:
   { name: 'test-agentd-tunnel', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (3417ms) — server' }, // REVERSE-FORWARD (tunnel) acceptance (2.148.0, "互挂云盘去公网化"): the daemon binds 127.0.0.1:<port> ON THE DEVICE and pushes every accepted connection back over the mux to…
   { name: 'test-remote-lasterror', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (3724ms)' }, // meta.remote.lastError contract (2.228.1, the userL "host reconnecting (9) with no reason" report): when the remote transport child dies, the wrapper must record the…
   { name: 'test-agentd-dial', tier: 'heavy', why: 'server — REAL daemons: ~70 s (lane-pairing: + a wrong host, a wrong token then the right one against the REAL dial gate, the dial-status op + a no-capability control bundle, a 120-byte root on a short socket rung read by the hub; verify-r1 C1/C3 a never-converging pinned daemon twice (real + a no-flag mutant), B9 two real daemons on one pairing (real, a no-boot-id copy refused all the same — verify-r2 B9-r2a — and the same copy under a patched r1-rule server as the control), B8-r2 a rotation cuts the holder + the new device admitted (+ a no-lockout control copy): ~110 s in all)' }, // Transport B e2e (dial-out, M4-lite): a daemon behind "NAT" dials OUT to the server over websocket (hand-rolled zero-dep client in the bundle); the server speaks the…
-  { name: 'test-webhook-ui-e2e', tier: 'heavy', why: 'a worktree server + a dtach stub agent + a loopback reply URL + headless Chrome (desk 1100, a second client, phone 390) — the owner surface: section, wizard, token once, callers live, fact rule + budget row, Quote ⇒ signed POST, Send a message… → All' }, // lane webhook-l2-ui
+  { name: 'test-webhook-ui-e2e', tier: 'heavy', why: 'a worktree server + a dtach stub agent + a loopback reply URL + headless Chrome (desk 1100, a second client, phone 390) — the owner surface: section, wizard, token once, callers live, fact rule + budget row, Quote ⇒ signed POST, Send a message… → All; the pairing doors against a loopback fake peer (the join box by name, the mint code once + Expired, phone zh)' }, // lane webhook-l2-ui + webhook-pair-join
   { name: 'test-webhook-section-place', tier: 'heavy', why: 'chrome: an esbuild iife of the REAL Channels panel over a stub HTTP server (the internal-look harness, no product server) — the Webhook section LAST after two user accounts, New path… on its head row (rects + a real press that does not fold, the menu\'s first row), desk 1100 + phone 390 + two CONTROL bundles (~4 s; SKIPs without chrome)' }, // lane webhook-section-place
   { name: 'test-webhook-routes', tier: 'heavy', why: 'a worktree server (sign-in ON) + a dtach stub agent + a loopback reply URL — 10 s measured (the auth.js / JSON-skip pins proven, agent bearers refused, opaque receipts, revoke ends a long-poll, call ⇒ fact rule ⇒ one wake ⇒ reply --to ⇒ a signed POST, a flood held to the budget)' }, // lane webhook-l1-server
   { name: 'test-webhook-pair-e2e', tier: 'heavy', why: 'two worktree servers (sign-in ON) + two dtach stub agents on loopback — 7 s measured (code, join, compose --caller and reply --to through the real CLIs, re-pair rotates, the old token 401)' }, // lane webhook-l3-cli-pair
@@ -793,12 +820,12 @@ export const SUITES = [
   { name: 'test-port-forward', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (5242ms) — server' }, // Unit test for PortForwardManager (B-0b60 tunnel path): detect() parsing + end-to-end piping through a MOCK device (tcpForward → a real loopback echo server standing…
   { name: 'test-usage-events-push', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (5276ms) — server' }, // usage-events PUSH stream (R4 finale) against a REAL daemon: transcript growth → walker child → batched chan-0 push → server ack commits the device-side cursor…
   { name: 'test-usage-scan-op', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (5940ms) — cli' }, // R4 step 1 — the daemon's `usage-scan` op, end to end against a REAL daemon (docs/design-three-tier.md `usage.scan`). WHAT IT PINS: (1) the op's events match the…
-  { name: 'test-sidebar-scroll', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (6336ms) — chrome' }, // Sidebar lazy-folder scroll preservation (2.228.3, recurring user report: "scroll down, click a card's expand arrow → the list jumps back to the top"). Mechanism…
+  { name: 'test-sidebar-scroll', tier: 'heavy', reach: ['mod:src/lib/sidebar.js', 'mod:src/lib/sidebar-render.js', 'mod:src/lib/sidebar-tasks.js'], why: 'adopted 2026-09-07, was in NO runner (6336ms) — chrome' }, // Sidebar lazy-folder scroll preservation (2.228.3, recurring user report: "scroll down, click a card's expand arrow → the list jumps back to the top"). Mechanism…
   { name: 'test-terminal-zoom-select', tier: 'heavy', why: 'headless chrome: real xterm from node_modules under body zoom 1.25/0.8, CDP mouse drags — the un-fixed page selects row 20×scale, the counter-zoomed page selects row 20 (~6s)' }, // 2.369.118, userW inc-mu92zsgw-6c9y
   { name: 'test-window-drag-ui', tier: 'heavy', why: 'headless chrome at 1600×900 on a worktree server (own data/) with a real Xtigervnc Desktop, a fake agent-browser live view (dtach fake claude), the REAL xpra rung (xterm) and a Web view iframe on a 2×3 grid: real CDP drops / resizes released over each pane, the PDF viewer shrunk over its own frame at uiScale 90 % × DPR 2.2, the base commit\'s window.js as the control (~4 min; legs SKIP without their binaries)' }, // lane-drag-release
   { name: 'test-desktop-move', tier: 'heavy', why: 'chrome — headless chrome at 1571×905 on a worktree server with its own data/ (layouts installed through the restore path), real CDP title-bar drags, a right-click menu, a shell session (resume placement, SKIPs without dtach), two raw sockets forging layout-syncs, a second chrome for the two-page legs G/H/J/K/L (258 s measured 2026-09-30; SKIPs without chrome); verify r3: + leg N (a click-to-focus vs another page\'s move of that window, two pages; + ~25 s); verify r4: + leg O (a command-mode snap and a □ maximize under another client\'s cooldown, two pages + a raw socket; 346 s measured 2026-09-30)' }, // inc-mun7qjmw-iksh (userW, 2026-09-29): moving a window onto a desktop the page has not opened keeps that desktop\'s windows — A the incident\'s gesture (Fin 1 + HR 3, boot on Fin, a title-bar drop on HR\'s preview): the preview draws 4, the page\'s OUTGOING layout-sync carries HR with 4 (CDP webSocketFrameSent), the server\'s HR = 4 before any switch, HR shows 4 after a click, after an autosave and after a reload, the rollback points read HR 3 → 4 / Fin 1 → 0 and none HR shrinking; B the visited-first control; C the window menu Move to Desktop ▸ HR (real right-click, hover, click); D resume placement (a shell session placed on HR replacing its old never-opened entry: 3 + the new one); E THE SERVER BELT: a forged shrinking sync ⇒ layout-sync-refused WITH the kept record, nothing written or broadcast, the journal names it; CONTROL the same shrink with a close per window is accepted; F the 2.369.198 cache rebuild re-installed on the live page ⇒ the belt refuses, the page reconciles (4 shown, a toast), the server\'s HR never below 3; verify r1 (a SECOND chrome): G page B holds a drag on HR while page A moves a window there — B keeps it on its save, shows it, A keeps it, no refusal, then B moves it back under A\'s eyes and A shows it (a remote move applied as a move); H B\'s socket cut while A opens a window on HR — B reconnects, re-reads, keeps A\'s window; E+ a window one socket added is refused as another socket\'s ONE unexplained drop (`arrived`)
   { name: 'test-phone-desktop-sync', tier: 'heavy', why: 'chrome — two headless chromes (a 1440×900 desktop + an iPhone 390×844 with touch) on a worktree server of this source AND one of the base tree (§6b guard 10: a phone never writes arrangement; base-tree RED controls), real touch sequences' },
-  { name: 'test-desktop-drop', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (6696ms) — chrome' }, // Desktop-preview drop resolves the target desktop by the preview's OWN id, NOT by DOM index (task #165, real report: dropping a window on a preview landed it on the…
+  { name: 'test-desktop-drop', tier: 'heavy', reach: ['mod:src/lib/desktop-manager.js', 'mod:src/lib/stage-manager.js'], why: 'adopted 2026-09-07, was in NO runner (6696ms) — chrome' }, // Desktop-preview drop resolves the target desktop by the preview's OWN id, NOT by DOM index (task #165, real report: dropping a window on a preview landed it on the…
   { name: 'test-ghost-host-heal', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (7202ms) — chrome' }, // GHOST-HOST SELF-HEAL (2.334.1, real fleet report): a persisted Recent/History host selection whose host record was REMOVED left the switcher <select> rendering…
   { name: 'test-auto-resume-loop', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (7458ms; ~14s since B-0220 — it runs a HELD test-new-member-wake beside itself, the pair a 2026-09-22 integration hit by chance) — cli' }, // THE AUTO-RESUME FIRE LOOP (2026-09-07 incident; owner decision ut-1c6c15a2db ①④). What happened, from the frozen journal (last 6h of the production server):
   { name: 'test-harness-honesty', tier: 'heavy', why: 'chrome — the fast tier never launches a browser (7631ms here; a browser leg\'s cost follows machine load)' }, // the 2026-09-07 survey's four defects: codex personality is the USER's choice (unset ⇒ key absent; thread/settings/update applies it live), one explicit reply shape per ServerRequest method (+ MCP elicitation as a question card, unsupported ⇒ JSON-RPC error not a hang), the ACP unknown-sessionUpdate breadcrumb, and image_gen/sleep shape-equal across all THREE producers (live wrapper / rollout / thread-read) with a headless-chrome leg proving the image really draws
@@ -806,15 +833,15 @@ export const SUITES = [
   { name: 'test-codex-remote-wrapper', tier: 'heavy', reads: ['data/bin/codex-chat-wrapper.js'], why: 'adopted 2026-09-07, was in NO runner (8128ms) — server' }, // E2E for codex-chat-wrapper's REMOTE MODE (2.139.0, B-0588): a minimal JSON-RPC app-server stub runs under the REAL vibespace-remote-keeper; the wrapper attaches…
   { name: 'test-agentd-adopt', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (8362ms) — server' }, // Pipe-session ADOPTION across a daemon restart (the 2026-07-17 userL outage): a remote chat child is spawned as `sh -lc '… exec … <cli>'`, so after the execs its…
   { name: 'test-agentd-wired', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (8902ms) — server' }, // M2 WIRED-CHAIN e2e: the full production pipeline with the agentd path ON — chat-wrapper (remote mode) → agentd-attach bridge → standing daemon → persistent pipe…
-  { name: 'test-run-collapse-fold', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (9004ms) — chrome' }, // CDP smoke: a Skill card folds, and a newly appended foldable card is folded BEFORE it can paint (no flash) — 2.227.9.
+  { name: 'test-run-collapse-fold', tier: 'heavy', reach: ['win:chat', 'mod:src/lib/chat-view.js', 'mod:src/lib/chat-run-summary.js', 'mod:src/lib/chat-renderers.js'], why: 'adopted 2026-09-07, was in NO runner (9004ms) — chrome' }, // CDP smoke: a Skill card folds, and a newly appended foldable card is folded BEFORE it can paint (no flash) — 2.227.9.
   { name: 'test-queue-steer', tier: 'heavy', why: 'chrome — the fast tier never launches a browser (9.2s → 46.9s measured after the ⑭ restart leg: three worktree-server boots, a real dtach wrapper and a browser; a browser leg\'s cost follows machine load)' }, // QUEUED vs STEERED input (owner ask): the backend-caps inputModes row + client META twin, the formatQueueOp adapter verb (refusals name the reason), the ws 'queue-op' caps gate + coded refusal, the normalizer's queue meta op + bubble chips + multi-queue semantics, a DOM-free render of the queue strip from the REAL ChatInput (incl. XSS), and the REAL wrapper against a REAL `codex app-server` (no turn — evidence-SKIP without the binary; a renamed queue method fails there), and (⑬/⑭) the queue across a RESTART: the rebuilt normalizer's `queue: []` is a GUESS (`queueKnown`), the wrapper re-states it on demand (`queue-resync`), proven end to end against a worktree server + a real dtach wrapper + a headless browser
   { name: 'test-agentd-workers', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (10s) — server' }, // R2 — daemon worker isolation (docs/design-three-tier.md). THE INVARIANT: a hung filesystem path (dead FUSE mount class) may starve a WORKER — which the pool then…
   { name: 'test-local-discovery-device', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (11s) — cli' }, // B-47e2 — the local discovery sweep's FS facts from device #0, flag-gated. PARITY: with a synthetic HOME (locks + transcripts + a resumed session's tail-id case)…
-  { name: 'test-stage-overlap', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (11s) — chrome' }, // Stage pile-at-slot regression smoke (userW's 超级重叠, 2.209.0): BUG: Stage → normal desktop → Stage round trip revealed EVERY slot-parked ex-hero at identical slot…
+  { name: 'test-stage-overlap', tier: 'heavy', reach: ['win:stage-placeholder', 'mod:src/lib/stage-manager.js', 'mod:src/lib/desktop-manager.js'], why: 'adopted 2026-09-07, was in NO runner (11s) — chrome' }, // Stage pile-at-slot regression smoke (userW's 超级重叠, 2.209.0): BUG: Stage → normal desktop → Stage round trip revealed EVERY slot-parked ex-hero at identical slot…
   { name: 'test-minimap-jump', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (12s) — chrome' }, // INDEX-mode minimap jump landing (inc-msnyti7z-c5sb: "minimap 跳转又不准" on a tool-heavy 4.4MB remote session). The incident trace showed the exact failure: jumpToIndex…
   { name: 'test-session-brain-dark', tier: 'heavy', why: 'slow, server (13s)' }, // SESSION-BRAIN STEP 2 (dark double-feed) against a REAL daemon. Pins: (1) the daemon's device-side normalizer stream emits ops for a live pipe session's stdout; (2)…
   { name: 'test-fold-ux', tier: 'heavy', why: 'chrome — the fast tier never launches a browser (14s here; a browser leg\'s cost follows machine load)' }, // run-fold honesty (ToolSearch = tool lookups, never MCP; pure summary composer) + expanded-run legibility (rail/floating bar/footer) — node unit + headless-chrome fixture (SKIPs the chrome half without chrome)
-  { name: 'test-resume-breaker', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (14s) — server' }, // transcript EXISTS under the fake HOME (the "known" case)
+  { name: 'test-resume-breaker', tier: 'heavy', reach: ['mod:src/ws-create.js', 'mod:src/ws-handler.js'], why: 'adopted 2026-09-07, was in NO runner (14s) — server' }, // transcript EXISTS under the fake HOME (the "known" case)
   { name: 'test-agentd-robustness', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (14s) — server' }, // M2 ROBUSTNESS e2e (docs/design-remote-cs.md M2): adversarial verification of the ssh-bridge + persistent pipe-session model under real-world stress — 1.…
   { name: 'test-sidebar-rail', tier: 'heavy', why: 'chrome — the fast tier never launches a browser (15s here; a browser leg\'s cost follows machine load)' }, // rail panels + process manager CDP battery (was manual-only and went silently stale — the 9-item assert was red for 12 releases; no rebuild: overlays the gate's own build; SKIPs without chrome)
   { name: 'test-sealed-orders', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (17s) — server' }, // SEALED-ORDERS emergency reflex (design §Pool management) vs a REAL daemon: the device executes a LOCAL pool fallback switch ONLY under the double condition (limit…
@@ -822,14 +849,14 @@ export const SUITES = [
   { name: 'test-gear-menu', tier: 'heavy', why: 'chrome — the ⚙ menu tree in both modes (~40s; SKIPs without chrome)' }, // ⚙ menu hierarchy (docs/design-gear-menu-hierarchy.md): desktop 1280×800 = top-level row budget, hover-intent flyout on screen, ArrowDown/ArrowLeft/Enter drive a stubbed action, Esc closes ONE layer then the popover, outside mousedown closes, the Appearance panel keeps the popover open; phone 390×844 with touch + hover:none = inline accordion, every row ≥ 44 px, a tap runs the action, no hover dispatched
   { name: 'test-boot-loop-hold', tier: 'heavy', why: 'server — three real boots of a scratch worktree server over 625 MB of production-shaped stores + 13 restored dtach sessions (34 s here)' }, // B-1319: from the first loop turn to the ledger warm's end no gap ≥ 250 ms (the suite's own 10 ms clock); RED control = VIBESPACE_BOOT_TRACE_SYNC=1 (the warm in one tick), named by /api/boot-trace
   { name: 'test-boot-reload-ready', tier: 'heavy', why: 'chrome — one worktree server restarted three times with a slow boot on purpose + headless chrome + one esbuild of a patched bundle (~56 s here)' }, // B-0ece: a page opened mid-boot says "VibeSpace is starting…" and loads by itself once /api/boot is ready; ⚙ → Update reloads only after the new server is ready (self-update answered by CDP Fetch, a REAL restart onto VIBESPACE_TEST_BOOT_HOLD_MS); a /api/layouts that never answers climbs the ladder into the reason + Reload and one boot-stuck event; a pre-fix bundle control goes red
-  { name: 'test-update-dialog', tier: 'heavy', why: 'chrome — the fast tier never launches a browser (11.5 s here: one worktree server + headless chrome, five legs; SKIPs without chrome)' }, // ⚙ → Update VibeSpace… seen: the changelog in the device's language (zh / en at 1280 px and 390 px touch, ja at 1280 px) over a fixture canonical built from the real CHANGELOG files (VIBESPACE_CHANGELOG_FIXTURE_DIR — never the network) — `v<version> — <date>`, sections as small headings, bullets as DOM lists with the file's counts, an untranslated entry in English (lang="en"), an old-format entry as paragraphs, never a <pre>, the dialog fits a phone; screenshots in the suite's shots dir
+  { name: 'test-update-dialog', tier: 'heavy', reach: ['api:changelog-diff', 'mod:src/lib/app.js', 'mod:src/lib/gear-menu.js', 'mod:src/server/ops-routes.js'], why: 'chrome — the fast tier never launches a browser (11.5 s here: one worktree server + headless chrome, five legs; SKIPs without chrome)' }, // ⚙ → Update VibeSpace… seen: the changelog in the device's language (zh / en at 1280 px and 390 px touch, ja at 1280 px) over a fixture canonical built from the real CHANGELOG files (VIBESPACE_CHANGELOG_FIXTURE_DIR — never the network) — `v<version> — <date>`, sections as small headings, bullets as DOM lists with the file's counts, an untranslated entry in English (lang="en"), an old-format entry as paragraphs, never a <pre>, the dialog fits a phone; screenshots in the suite's shots dir
   { name: 'test-taskbar-group-ui', tier: 'heavy', why: 'chrome with a real mouse on a worktree server — three File Explorer windows, a tab group, CDP mouse / pen / touch / keys, two rebuilt control bundles, two reloads, one leg at CPU ×20 (~90 s; SKIPs without chrome)' }, // A GROUPED TASKBAR BUTTON end to end (lane K): (a) click behind ⇒ the group's active tab focused + raised, no chooser even when the pointer rests; (b) click in front ⇒ the pinned chooser above the button, a row switches the tab, Esc / a click elsewhere close it; (c) hover ≥ the intent on the PAGE clock ⇒ the non-modal chooser (focus untouched), across the gap onto a lit row, gone after the leave grace (pixels in its box change), a 150 ms cross-over never opens; (d) a real title-bar drag over the button never opens; (e) touch taps: activate, then the chooser; (f) Enter / ArrowUp / ArrowDown / Esc; (g) the single button unchanged (click focuses, again minimizes); (h) right-click = the window menu; (j) verify r1: 30 hover open/leave cycles with no click leave the document's mousedown / keydown listener counts unchanged; (k) a rebuild under an open chooser re-anchors it (aria-expanded, Esc focus, a click on the rebuilt button keeps the SAME chooser); (l) a pen hovers — attributed to its own TYPED enter (scripts/pen-hover-judge.mjs), Chrome's post-open mouse re-target waited for, the pre-fix last-enter slot red on the same record; (l2) the same at CPU ×20; (o) a rebuild under a RESTING pointer (after a click / an Esc-dismissed hover) grows nothing, a return after a rebuild-window leave still hovers; (m) right-click on a chooser row = that tab's window menu, the chooser pinned beneath, its Close closes THAT tab; (n) a reload shows a restored group as ONE grouped button with no input; CONTROL: the scratch bundle rebuilt with the old always-chooser click ⇒ (a) red; CONTROL 2: the r1 disposer + the four low fixes reverted ⇒ (j) +30, (k) focus on body, (l) no open, (m) no menu, (n) SSS, (o) a chooser under the clicked pointer (hoverStep's enter row reverted)
   { name: 'test-ui-scale', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (24s) — chrome' }, // UI scale (DPI) + UI font scale + locked-model-badge restyle smoke (2.257.0). - locked badge: SVG lock in currentColor on the accent pill (no more orange
   { name: 'test-remote-keeper', tier: 'heavy', reads: ['data/bin/vibespace-remote-keeper'], why: 'adopted 2026-09-07, was in NO runner (27s) — server' }, // E2E test for data/bin/vibespace-remote-keeper — the remote-side persistence layer for remote chat sessions (2.124.0). Simulates the local chat-wrapper's
   { name: 'test-codex-p2-wrapper', tier: 'heavy', why: 'slow (28s)' }, // codex P2 wrapper: queue-while-busy, slash commands + real compact, live MCP/web/image/compaction records — real wrapper vs stub app-server
   { name: 'test-opencode-plugin', tier: 'heavy', why: 'chrome — the fast tier never launches a browser (29s here; a browser leg\'s cost follows machine load)' }, // the OpenCode background service is a PLUGIN, default OFF (owner 2026-09-07): fresh instance spawns nothing, enable/replay/disable over HTTP on a real server, env override, and the first-use dialog in headless chrome (asked once, Enable resumes the pending action)
   { name: 'test-acp-harness', tier: 'heavy', why: 'slow, binary (33s)' }, // S8 generic ACP v1 harness: the REAL acp-wrapper against a mock ACP agent (initialize → session/new → prompt → tool_call → request_permission → cancel → load) + normalizer shapes + stdout consumer + wiring pins
-  { name: 'test-toolbar-resize', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (36s) — chrome' }, // Toolbar-resize persistence smoke (2.252.1 — the 2.250.1 snap-back rootfix). The bug: cssDefault()/def read the COMPUTED --toolbar-height, which the drag
+  { name: 'test-toolbar-resize', tier: 'heavy', reach: ['mod:src/lib/themes.js', 'mod:src/lib/layout.js', 'mod:src/lib/desktop-manager.js', 'mod:src/lib/customize-mode.js'], why: 'adopted 2026-09-07, was in NO runner (36s) — chrome' }, // Toolbar-resize persistence smoke (2.252.1 — the 2.250.1 snap-back rootfix). The bug: cssDefault()/def read the COMPUTED --toolbar-height, which the drag
   { name: 'test-writer-sweep', tier: 'heavy', why: 'slow, binary (40s)' }, // ONE writer sweep, any machine (CS separation, 2.276.0). Before this, the sweep existed three times — ssh, dial, and NOT AT ALL for local — so a local resume of a…
   { name: 'test-chat-paging', tier: 'heavy', why: 'chrome — three fixtures incl. the 48 MB huge compact-mode one (§1c, inc-mubvu3a4-x8sb) driven by real CDP wheel gestures on the fix AND on a pre-fix control copy (two bundle builds, two worktree servers; ~4-5 min)' }, // Chat virtual-scroll paging stability (2026-07-30 user report: "翻页过程中会 往上跳一大截，往回翻也会意外跳跃"). Drives a REAL view-only ChatView over a synthetic 700-record transcript… §4b the fold-dominated window (2.369.129); §4c/§4d the huge compact-mode session: the per-gesture rules of scripts/paging-gesture-rules.mjs (no jump back > 1.5 viewports · no pin / bottom landing before the window reaches the tail · blank ≤ 25 % · the ring never empty after a page) + the pre-fix control that must reproduce the incident
   { name: 'test-chat-send-landing', tier: 'heavy', why: 'chrome + one live chat session (real chat-wrapper, stub claude) over a 40 MB §1c transcript, four times (the fix and three scratch copies with one fix reverted each)' }, // B-172e (inc-mt1zrvj3-wsr4): a send from a window paged out of the tail, from a teleported seek slab, and across an in-flight extend lands on the sent message — real wheel + typed Enter; each control fails its own row
@@ -863,7 +890,12 @@ export const SUITES = [
   { name: 'test-desktop-app-keeper', tier: 'heavy', why: 'launches a real X server + x11vnc + an app per leg, SIGKILLs a keeper process and re-adopts, waits out an idle timeout and a CPU-burner runaway (~40s); SKIPs with its reason when Xvfb/x11vnc are absent' }, // docs/design-desktop-apps §6 row 3: launch → port listens → RFB handshake → record on disk → SIGKILL + rebuild ⇒ adopted → stop clean (/proc census equal, no orphan X); the ws bridge (auth 401 / 404 / an unknown kind 501 / rfb AND xpra relayed / bytes + input reports / the window-live policy PER PACKET on xpra) + §12 the real xpra rung (incl. a crashed xpra's Xvfb reaped, keeper up and keeper down) + §13 the fit belt's fork counts and the WM-frame leg (VIBESPACE_TEST_WM_DIR) + §14/§15/§16 a Watch viewer on the real xpra (lifecycle cut; the keymap and display-size fences + their takeover replay, "abc" typed into a real xterm, the holder's display size standing) + §13 (b2) the rfb twin on the real Xvnc; routes incl. a host with no access layer refused 503 host_unavailable (lane C2; v1's 400 retired) + §18 B-bfe6 a browser's OWN profile (0700, argv, removed at stop / app-exit / boot, kept on request, refusals by name, a no-retire control)
   { name: 'test-desktop-app-window', tier: 'heavy', why: 'chrome + a worktree server + a dtach stub agent (§E share legs, 2.369.195) + real Xvfb/x11vnc: launch from the dialog → window → canvas not black → a second client → SIGKILL + reboot ⇒ adopted + reconnects → Stop ⇒ exited (~90s); SKIPs without chrome or Xvfb' }, // docs/design-desktop-apps §6 row 4
   { name: 'test-app-display-a11y-bus-tree', tier: 'heavy', budgetMs: 120000, why: 'binary — a scratch Xvfb + the plan\'s private bus + at-spi-bus-launcher + the GTK fixture, no user bus (~5 s): the agent reads and presses the app by its tree on the app\'s own a11y bus; RED without the launcher; PNG via VS_A11Y_PNG' }, // lane app-display-a11y-bus (B-4a59 piece 3)
-  { name: 'test-desktop-xpra-window', tier: 'heavy', budgetMs: 2100000, why: 'chrome + a worktree server + the REAL xpra rung (xpra 6.5.3 + Xvfb + xterm): the seamless window filling the pane at two sizes with the pixels measured, the app\'s own title, typed text read back from the app, the clipboard both ways at the X level (xclip) on the loopback (secure) and the plain-http hostname (insecure) pages incl. REAL pastes on plain http (Ctrl+V on the pane, the Paste chip\'s box + Send), a third size under the UI scale (net zoom 1 measured, the X pointer at the same coordinates via xdotool), §4 the belt on the real rung (xterm resizing/moving itself fitted back, a second top-level at +2000+1500 placed inside, GNOME Calculator\'s mode switch keeping ≥ 95 % — SKIP without gnome-calculator), §6 HiDPI at DPR 2 (the canvas IS the screen pixel for pixel, the app\'s minimum clamping the window, phones) and §7 the r2 findings (DPR 1.5 pixel identity, the phone\'s lower rows + corner, a DPR-1 takeover, the 1.5× xterm cell) each against a patched-copy control server, §8 B-bfe6 a REAL browser launched from the dialog\'s Browsers section with an Open URL (window maps, the URL landed, the page title in the title bar, the keeper\'s 0700 profile, Stop removes it; a snap or absent browser SKIPPED with its reason), §12 LANE B seamless (a CSD calculator loses our bars, its header-bar drag moves our window, hover / Alt reveal, the pauses and the hatches, a forced-false control copy), §13 LANE C2 the main legs with host=<a scratch daemon PAIRED to the worktree server> (the picker, the device\'s ladder, the launch there, the window through the hub forward, the pane covered, the title naming the machine, keys into the device\'s file, Stop), §15 LANE D (a) the scale geometry (GNOME Calculator at DPR 2 and 1 through the window\'s own Scale ▸ rows auto → 1 → 1.5 → 2 → auto → 1 + a resize: the picture covers the pane, the window follows the scale, the column ∝ the true scale, every map at its final size), §16 real Chrome under seamless, one control copy for both, §17 lane M the ⚙ menu / a window context menu / the ⋯ Scale ▸ menu / a createPopover each CLOSE on a trusted click into a live GNOME Calculator picture while the calculator takes the digit, against a mutant-copy server whose closer is the pre-lane bubble mousedown (each stays open) (~1000 s + ~540 s — its own budget); SKIPs with evidence without chrome / xpra / xauth / xterm' }, // docs/design-desktop-apps §7 P8-2 chunk x2 (D21 (c) (b)) — the exit conditions of the chunk, measured on this box
+  { name: 'test-desktop-xpra-window-open', tier: 'heavy', budgetMs: 474000, why: 'chrome + a worktree server + the REAL xpra rung, booted ONCE by scripts/xpra-window-boot.mjs · 237 s alone on the hub (private display, 2026-10-14, load 3–5) — §1–§4 the window fills the pane at two sizes (pixels measured), its own title, typed + IME text read back, the clipboard both ways at the X level on the secure and the plain-http pages, a second top-level inside the pane, net zoom 1 under the UI scale, the belt; §5 x5 one active viewer (two pages, Resume here, an agent\'s lease ⇒ Watch; a pre-x5 copy as the control); Stop; §8 a REAL browser from the dialog\'s Browsers section; §9 the plain-http gesture copy (needs §2\'s one-time hint); §13 an app on a PAIRED scratch device; §18 an app\'s second top-level opens its own window' }, // the xpra window family (q-038 ②, lane xpra-window-split) — booted by scripts/xpra-window-boot.mjs
+  { name: 'test-desktop-xpra-window-hidpi', tier: 'heavy', budgetMs: 410000, why: 'chrome + a worktree server + the REAL xpra rung, booted ONCE by scripts/xpra-window-boot.mjs · 205 s alone on the hub (private display, 2026-10-14, load 3–5) — §6 HiDPI + the app\'s minimum at DPR 2 (xterm + GNOME Calculator, phones) against a pre-fix control copy; §11 the scale derived from dpr × UI scale and the ⋯ Scale ▸ relaunch on two clients against a pre-A3 control copy' }, // the xpra window family (q-038 ②, lane xpra-window-split) — booted by scripts/xpra-window-boot.mjs
+  { name: 'test-desktop-xpra-window-hidpi-r2', tier: 'heavy', budgetMs: 562000, why: 'chrome + a worktree server + the REAL xpra rung, booted ONCE by scripts/xpra-window-boot.mjs · 281 s alone on the hub (private display, 2026-10-14, load 3–5) — §7 the r2 findings — DPR 1.5 drawn 1:1, the phone\'s lower rows + corner, a DPR-1 takeover, the 1.5× xterm cell — each against the r1 control copy' }, // the xpra window family (q-038 ②, lane xpra-window-split) — booted by scripts/xpra-window-boot.mjs
+  { name: 'test-desktop-xpra-window-close', tier: 'heavy', budgetMs: 322000, why: 'chrome + a worktree server + the REAL xpra rung, booted ONCE by scripts/xpra-window-boot.mjs · 161 s alone on the hub (private display, 2026-10-14, load 3–5) — §10 A2 — the app\'s exit closes the window on every client, the outer ✕ asks the app, twice = Stop, a dead record opens nothing, against a pre-A2 control copy' }, // the xpra window family (q-038 ②, lane xpra-window-split) — booted by scripts/xpra-window-boot.mjs
+  { name: 'test-desktop-xpra-window-scale', tier: 'heavy', budgetMs: 568000, why: 'chrome + a worktree server + the REAL xpra rung, booted ONCE by scripts/xpra-window-boot.mjs · 284 s alone on the hub (private display, 2026-10-14, load 3–5) — §14 the per-app default scale from the launch card + the clickable chip (a lane-D-less control copy); §15 the scale geometry at DPR 2 and 1 through the Scale ▸ rows + a resize; §16 real Chrome under seamless — one control copy for §15/§16' }, // the xpra window family (q-038 ②, lane xpra-window-split) — booted by scripts/xpra-window-boot.mjs
+  { name: 'test-desktop-xpra-window-seamless', tier: 'heavy', budgetMs: 380000, why: 'chrome + a worktree server + the REAL xpra rung, booted ONCE by scripts/xpra-window-boot.mjs · 190 s alone on the hub (private display, 2026-10-14, load 3–5) — §12 lane B seamless (a CSD calculator loses our bars, its header-bar drag moves our window, hover / Alt reveal, the pauses and the hatches; a forced-false control copy); §17 lane M a press into the picture closes the ⚙ menu / window menu / ⋯ Scale ▸ / window list / For-you popup (a pre-lane-closer control copy)' }, // the xpra window family (q-038 ②, lane xpra-window-split) — booted by scripts/xpra-window-boot.mjs
   { name: 'test-window-dialog', tier: 'heavy', why: 'a scratch xpra 6.5.4 + Xvfb + xpra\'s python client + zenity + a GTK 3 fixture on a private bus (~25 s, run at 1 lane): an app\'s DIALOG is part of its window for the agent — zenity\'s dialog planned + lit + named first; GTK "Save as…" opened through the tree with NO viewer (the owner\'s JASP shape, 2026-10-11): the unmapped corral measured (1 member), mapped ⇒ 2 members composed bottom→top, the snapshot head, type without a ref into its Name entry, key Escape into its X window closes it' },
   { name: 'test-agent-window-chrome', tier: 'heavy', budgetMs: 300000, why: 'a worktree server (private HOME, fake claude: two live chats) + headless Chrome desk 1100 / phone 390: an agent\'s desktop-app-opened is placed behind the person\'s editor (active window, caret, elementFromPoint), a chat on desk 2 never switches the desk, the taskbar entry pulses, the setting ON is today\'s front + focus' }, // LANE agent-window-no-steal
   { name: 'test-desktop-app-rung-chrome', tier: 'heavy', budgetMs: 900000, why: 'a worktree server (private HOME + runtime dir + its own dbus-run-session) + the REAL xpra rung: a stub agent launches a REAL chromium-family browser through `vibespace-browser new --backend desktop-app` — the lease + opener grant in the API, a window snapshot reads the page, `get url` is no_cdp_on_this_backend, beside the chat on the showing client / its own window on a 390 px phone, D6 (the session ends ⇒ stopped, the throwaway profile removed, --keep-profile kept) (lane e2a r2)' },
@@ -923,6 +955,7 @@ export const SUITES = [
   { name: 'test-codex-sandbox-net', tier: 'heavy', why: 'cli — 0.2 s here: the REAL `codex sandbox` loopback A/B runs whenever codex is on PATH (the fast-tier rule: a real agent CLI is heavy)' }, // codex sandbox keeps loopback open for the vibespace-* tools: real `codex sandbox` A/B (evidence-SKIP without the binary) + wrapper/adapter/probe pins
   { name: 'test-harness-settings', tier: 'heavy', why: 'cli — 0.3 s here: the REAL codex `features list` load leg runs whenever codex is on PATH (the fast-tier rule: a real agent CLI is heavy)' }, // docs/design-harness-settings.zh.md §8: checkTable refusals, derived schema rows field-equal to the 2.369.120 snapshot, harnessSetting coercion, the plan (off ⇒ not written), applyConfigPlan/readConfigPlan on a scratch HOME (JSON + the comment-preserving TOML setter's fixtures: replace/append/dotted/refusals/idempotence/CRLF; r7: symlinked configs written THROUGH + modes kept + a dangling link refused, the duplicate-key shapes, the REAL codex loading every produced file — evidence-SKIP without the binary — and the rel re-check), the closed enum vocabulary, registerHarnessSettings prefix rules, the receipt wording, the live-verb fan-out
   { name: 'test-restore-smoke', tier: 'heavy', always: true, why: 'server — 7.2 s: the end-to-end boot + session lifecycle + 29-route GET battery on a worktree server (the lost-export class only shows at boot) — always, like the other boot smokes' }, // the end-to-end boot + session-lifecycle + 29-route GET battery (the lost-export class only shows at boot or route-run time). 8.9s measured: the most expensive thing the fast tier is willing to pay for
+  { name: 'test-boot-sentinel', tier: 'heavy', always: true, why: 'server + chrome — THE BOOT SENTINEL (q-036 P0): a real scratch boot, every GET route of the census (scripts/fixtures/boot-sentinel-gets.json) non-5xx / JSON / ≤ 2 s, every registered window type opened once with no console error and no uncaught — always, so a static-reach selection never loses a boot break (30 s measured here: the boot 0.5 s, 244 GETs 0.8 s, 28 window types 23 s; SKIPs the window half without chrome)' }, // lane affected-static-reach: the affected tier narrows a BOOT dependency by static reach (scripts/reach-model.mjs); what grep cannot see — a route built at run time, a window that dies on open — is this suite's, on every push
   { name: 'test-agentd-session', tier: 'heavy', why: 'binary — 7.3 s: the agentd bundle built with esbuild + real dtach sessions that survive a dropped connection' },
   { name: 'test-browser-profiles', tier: 'heavy', why: 'binary — 7.3 s: the REAL agent-browser (--version / --help / session info) whenever it is installed, beside the PURE environment half' }, // AGENT BROWSER P0 (design-agent-browser-v2 §3.2/§9): the ENVIRONMENT half — the four spawn variables for local AND remote, the RESOLVED user-data-dir (§9 says assert the directory, because the two env strings pass on variant B, the broken one), the (D)→(C)→(N)→none ladder with its journalled reasons (the design's A/B are MEASURED rejects — r3), the browserKey continuity ladder, the D1 floor probe's outcomes over a fake binary, the pin indirection's no-restart property read back off the FILE, r3's three legs (the CLI's project-level `./agent-browser.json` layered with two patched-copy pre-fix controls, the host-decided remote fragment driven under every shell on the box + its `-L` sweep control, and 0600/0700 modes with a umask-independent control), and r4's: a FENCED config never lands on rung C (⑰, two patched-copy controls + the C rung's cwd record for the pin), the PURE predicate and the shipped fragment's awk driven over ONE "names a profile" table under every shell × every awk with round 3's grep as the control (⑭), the socket-root rule (⑱, an owned 0700 dir under the suite's OWN scratch base, a planted symlink refused) and its launch-free real-binary pair (⑨: `session info --json` + the argument-check refusal). ~4s, no ports, no fixed /tmp path, never the production /tmp/vs-ab-<uid>; the real-binary legs SKIP with evidence
   { name: 'test-cli-cmd-refresh', tier: 'heavy', why: 'server — 9.4 s: a scratch worktree server whose fake claude is renamed between spawns (dtach required)' }, // B-a18e: the agent-CLI path re-resolved at SPAWN time when the boot answer went stale (the installer-window restart) — the helper over injected facts, the wiring pins, and a scratch server whose fake claude is renamed A → B → A between spawns (each spawn runs it where it NOW is, no restart; gone everywhere ⇒ the old error path + one line). ~8 s, dtach required (SKIP names it)
@@ -1092,7 +1125,8 @@ export function machineGlobalFixtures(source) {
 // the budget is generous for the browser suites only, never removed. The
 // heavy tier is unattended, so it can afford to wait longer than the fast one.
 // A row may name its OWN budget (`budgetMs`) when its measured wall is known to exceed its class's — stated on the row,
-// never a blanket raise (lane D (a), 2026-09-25: test-desktop-xpra-window measured 718–774 s before its §15/§16 legs).
+// never a blanket raise (lane D (a), 2026-09-25: test-desktop-xpra-window measured 718–774 s before its §15/§16 legs; since
+// lane xpra-window-split its parts each carry 2× their own measured wall — test-ci-gate §8d).
 const budgetFor = (s) => (Number(s.budgetMs) > 0 ? Number(s.budgetMs) : s.tier === 'fast' ? 300000 : /chrome/.test(s.why || '') ? 900000 : 600000);
 
 // ONE runner for both tiers. `root` is the checkout the suite runs in — the
@@ -1783,17 +1817,51 @@ export function reapByHand({ dryRun = false, log = console.log, ...opts } = {}) 
 // telling our own kill from a supersede's. Resolves on 'exit' (+ a short grace
 // for buffered output) rather than 'close': a suite that leaks a server holding
 // our pipes would otherwise hold the lane until its budget.
+// A LANE'S PRIVATE ENV (lane ci-aidev-desktop-batch): with VIBESPACE_CI_LANE_ROOT set (the desktop batch — eight lanes on
+// one box), lane <k>'s suites run with their own HOME, XDG_RUNTIME_DIR (0700) and session bus (<root>/lane-<k>/run/bus,
+// started by ci-remote.mjs; no bus there ⇒ none inherited) and no DISPLAY: what one suite writes to a HOME, a runtime
+// dir or a bus is never what the next lane's suite reads. Unset ⇒ the env as it was.
+export function laneEnv(lane, { root = process.env.VIBESPACE_CI_LANE_ROOT, env = GIT_ENV, mkdir = true } = {}) {
+  if (!root) return env;
+  const d = path.join(root, `lane-${lane}`), home = path.join(d, 'home'), run = path.join(d, 'run');
+  if (mkdir) { fs.mkdirSync(home, { recursive: true }); fs.mkdirSync(run, { recursive: true, mode: 0o700 }); fs.chmodSync(run, 0o700); }
+  const out = { ...env, HOME: home, XDG_RUNTIME_DIR: run };
+  delete out.DISPLAY; delete out.WAYLAND_DISPLAY;
+  if (fs.existsSync(path.join(run, 'bus'))) out.DBUS_SESSION_BUS_ADDRESS = 'unix:path=' + path.join(run, 'bus'); else delete out.DBUS_SESSION_BUS_ADDRESS;
+  return out;
+}
+// …and its session bus: one dbus-daemon per lane, started before the lanes run and ended after them (a box without
+// dbus-daemon runs its lanes bus-less — laneEnv then hands no bus, never the caller's); said once, with the count up.
+export function startLaneBuses(lanes, { root = process.env.VIBESPACE_CI_LANE_ROOT, log = console.log, waitMs = 3000 } = {}) {
+  if (!root) return [];
+  const procs = [];
+  for (const lane of lanes) {
+    const run = path.join(root, `lane-${lane}`, 'run'), bus = path.join(run, 'bus');
+    fs.mkdirSync(run, { recursive: true, mode: 0o700 }); fs.chmodSync(run, 0o700);
+    try { fs.unlinkSync(bus); } catch { }
+    try {
+      const p = spawn('dbus-daemon', ['--session', '--nofork', '--nopidfile', `--address=unix:path=${bus}`], { stdio: 'ignore', env: GIT_ENV });
+      p.on('error', () => { });
+      procs.push({ lane, p, bus });
+    } catch { }
+  }
+  const until = Date.now() + waitMs;
+  while (Date.now() < until && procs.some((x) => !fs.existsSync(x.bus))) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+  log(`[ci:heavy] lane env: a private HOME + XDG_RUNTIME_DIR + session bus per lane under ${root} (${procs.filter((x) => fs.existsSync(x.bus)).length} of ${lanes.length} buses up), no DISPLAY inherited`);
+  return procs;
+}
+const load1 = () => Math.round(os.loadavg()[0] * 10) / 10;
 function runSuiteAsync(s, { root = repo, absentIsSkip = false, sha = '', lane = 1, inflight = new Set() } = {}) {
   return new Promise((resolve) => {
     if (absentIsSkip && !fs.existsSync(path.join(root, 'scripts', s.name + '.mjs'))) {
       resolve({ ok: true, ms: 0, absent: true, lines: [`  ⊘ ${s.name} — SKIPPED: not present at ${shortSha(sha)} (this gate's table names it; the commit being gated does not contain it, so this run says nothing about it)`] });
       return;
     }
-    const t = Date.now();
+    const t = Date.now(), l0 = load1();
     const tag = `[lane ${lane}]`;
     let child;
     try {
-      child = spawn(process.execPath, [path.join(root, 'scripts', s.name + '.mjs')], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: GIT_ENV });
+      child = spawn(process.execPath, [path.join(root, 'scripts', s.name + '.mjs')], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: laneEnv(lane) });
     } catch (e) {
       resolve({ ok: false, ms: 0, killedFromOutside: false, lines: [`\n✗ ${s.name} FAILED (0ms, ${e.code || e.message}) ${tag}`] });
       return;
@@ -1810,10 +1878,13 @@ function runSuiteAsync(s, { root = repo, absentIsSkip = false, sha = '', lane = 
       clearTimeout(budget);
       inflight.delete(child);
       const ms = Date.now() - t;
-      if (status === 0) { resolve({ ok: true, ms, lines: [`  ✓ ${s.name} (${ms}ms) ${tag} — ${(stdout.trim().split('\n').pop() || 'ok').slice(0, 80)}`] }); return; }
+      // the box's 1-min loadavg when the suite started → when it ended, on EVERY suite line (q-038 ④: a red under load
+      // carries its load as evidence — a timing leg's verdict is read beside it, never instead of it)
+      const load = [l0, load1()], ld = `load ${load[0]}→${load[1]}`;
+      if (status === 0) { resolve({ ok: true, ms, load, lines: [`  ✓ ${s.name} (${ms}ms) ${tag} ${ld} — ${(stdout.trim().split('\n').pop() || 'ok').slice(0, 80)}`] }); return; }
       const r = { status, signal, error };
-      resolve({ ok: false, ms, killedFromOutside: killedFromOutside(r), lines: [
-        `\n✗ ${s.name} FAILED (${ms}ms${error ? ', ' + error.code : ''}${signal ? ', ' + signal : ''}) ${tag}`,
+      resolve({ ok: false, ms, load, killedFromOutside: killedFromOutside(r), full: stdout + (stderr ? '\n── stderr ──\n' + stderr : ''), lines: [
+        `\n✗ ${s.name} FAILED (${ms}ms${error ? ', ' + error.code : ''}${signal ? ', ' + signal : ''}) ${tag} ${ld}`,
         stdout.split('\n').slice(-40).join('\n'),
         stderr || ''] });
     };
@@ -1880,10 +1951,24 @@ export const SERIAL = [
   // parallel lanes with the rest; the serial lane was 444 s of a ~16 min tier
   // and moving them is what brought the wall under 15 min.
 ];
+// THE HUB'S LOAD RULE (q-038, lane ci-aidev-desktop-batch): the hub is the owner's production machine — 4 lanes at
+// most, forced or not (boot-loop-hold's clock drifted 148 → 373 ms beside three); more lanes only on a second machine.
+export const HUB_MAX_LANES = 4;
 export function laneCount({ cpus = os.cpus().length, env = process.env } = {}) {
   const forced = Number(env.VIBESPACE_CI_LANES);
-  if (Number.isInteger(forced) && forced >= 1) return forced;
-  return Math.max(2, Math.min(4, Math.floor(cpus / 8)));
+  if (Number.isInteger(forced) && forced >= 1) return env.VIBESPACE_CI_REMOTE_RUN ? forced : Math.min(forced, HUB_MAX_LANES);
+  return Math.max(2, Math.min(HUB_MAX_LANES, Math.floor(cpus / 8)));
+}
+// THE HUB BY DAY (q-038 r1.4 ②, owner 2026-10-14: the hub runs at most 4 lanes and no full heavy by day): a FULL tier
+// (no --only / --shard / --host / --affected) on the hub between HUB_DAY.from and HUB_DAY.to local time is refused unless
+// --allow-hub-full; the halves run on the self-hosted batch box and the Actions mirror. A second machine
+// (VIBESPACE_CI_REMOTE_RUN) and a hosted runner (GITHUB_ACTIONS) are not the hub. PURE over its inputs.
+export const HUB_DAY = Object.freeze({ from: 7, to: 24 });
+export function hubFullRefusal({ full = false, allow = false, env = process.env, now = new Date() } = {}) {
+  if (!full || allow || env.VIBESPACE_CI_REMOTE_RUN || env.GITHUB_ACTIONS) return null;
+  const h = now.getHours();
+  if (h < HUB_DAY.from || h >= HUB_DAY.to) return null;
+  return `a FULL heavy tier on the hub by day (${String(h).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')} local; the hub runs none from ${String(HUB_DAY.from).padStart(2, '0')}:00 to ${HUB_DAY.to}:00) — run the two halves instead (node scripts/ci-remote.mjs --host aidev --batch desktop … ‖ the mirror's --host=hosted shards), or scope it (--affected / --only / --shard / --host), or pass --allow-hub-full`;
 }
 // PURE: split the tier into the parallel queue and the serial queue, each
 // longest-first. `timings` = name→ms from the previous markers; a suite with no
@@ -1951,11 +2036,36 @@ export function shardHash(name) {
   return h;
 }
 // PURE: n slices of `suites`, plus the serial group's names (all in slice 0).
-export function shardPlan(suites, n, { serial = SERIAL, fixtures = machineGlobalFixtures, sourceOf = () => '' } = {}) {
+// With `timings` (name → ms — the CHECKED-IN runner measurements, shardTimings(); never a marker, which differs per
+// runner) the measured suites are packed LONGEST-FIRST onto the least-loaded slice (LPT; ties → the lower slice, equal
+// times → by name), the serial group counting `lanes`× in slice 1 (it runs alone after the slice's lanes drain); an
+// UNMEASURED suite keeps its FNV slot, so a new suite still moves no other. Still a function of the names, the
+// checked-in times and n alone — every matrix job computes the same split (lane ci-aidev-desktop-batch: the 6 hosted
+// shards measured 14.0 min each by LPT vs 6.1–18.6 by FNV, Actions run 38504978786's per-suite times).
+export function shardPlan(suites, n, { serial = SERIAL, fixtures = machineGlobalFixtures, sourceOf = () => '', timings = null, lanes = 2 } = {}) {
   const serialNames = scheduleLanes(suites, { serial, fixtures, sourceOf, keepOrder: true }).serial.map((s) => s.name);
   const shards = Array.from({ length: n }, () => []);
-  for (const s of suites) shards[serialNames.includes(s.name) ? 0 : shardHash(s.name) % n].push(s);
-  return { shards, serial: serialNames };
+  if (!timings) {
+    for (const s of suites) shards[serialNames.includes(s.name) ? 0 : shardHash(s.name) % n].push(s);
+    return { shards, serial: serialNames };
+  }
+  const ms = (s) => (typeof timings[s.name] === 'number' ? timings[s.name] : null);
+  const loads = Array(n).fill(0);
+  for (const s of suites) if (serialNames.includes(s.name)) { shards[0].push(s); loads[0] += (ms(s) || 0) * lanes; }
+  const measured = suites.filter((s) => !serialNames.includes(s.name) && ms(s) !== null).sort((a, b) => (ms(b) - ms(a)) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  for (const s of measured) { const k = loads.indexOf(Math.min(...loads)); shards[k].push(s); loads[k] += ms(s); }
+  for (const s of suites) if (!serialNames.includes(s.name) && ms(s) === null) shards[shardHash(s.name) % n].push(s);
+  return { shards, serial: serialNames, loads };
+}
+// The checked-in per-suite runner times the hosted shards are packed by (scripts/fixtures/ci-shard-timings.json —
+// refreshed from an Actions run's heavy logs with `ci.mjs --shard-timings <log>…`); null when the tree has none.
+export function shardTimings(root = repo) {
+  try { const j = JSON.parse(fs.readFileSync(path.join(root, 'scripts', 'fixtures', 'ci-shard-timings.json'), 'utf-8')); return j && typeof j.ms === 'object' ? j.ms : null; } catch { return null; }
+}
+// The same file's `desktop` block (lane xpra-window-split): self-hosted suites' walls measured ALONE on the hub under a
+// private display — the order ci-remote --batch falls back to for a suite the box has no marker time for; null when none.
+export function batchTimings(root = repo) {
+  try { const j = JSON.parse(fs.readFileSync(path.join(root, 'scripts', 'fixtures', 'ci-shard-timings.json'), 'utf-8')); return j && j.desktop && typeof j.desktop.ms === 'object' ? j.desktop.ms : null; } catch { return null; }
 }
 // PURE: what is wrong with a split — [] when every suite is in exactly one shard
 // and the serial group shares one.
@@ -1974,6 +2084,92 @@ export function shardCensus(suites, shards, serial = []) {
   return problems;
 }
 
+// ── HOSTS (lane ci-aidev-desktop-batch, design q-038 step ①, 2026-10-14) ─────────
+// The heavy tier runs on TWO runners and the hub runs none of it by day: the Actions mirror's hosted jobs run what a
+// hosted runner CAN run (`hosted`), and the self-hosted DESKTOP batch box (AIDev — scripts/ci-provision-aidev.sh;
+// `ci-remote.mjs --host aidev --batch desktop`, 8 lanes) runs the rest — the suites that drive xpra / Xvfb / x11vnc /
+// LibreOffice (`desktop`) or a real binary the hosted image lacks (`binary`). THE SPLIT IS DERIVED, never a hand list:
+// a suite's host is read off the programs its CODE names (comments stripped — "no xpra here" in a comment is not an
+// xpra suite): a desktop program by its word, a binary by the way THE TIER RULE's `binary` disqualifier reads a run (a
+// literal command, a `command -v` / `which` probe, a `cmd:` field, a path literal ending in it; FUSE by /dev/fuse).
+// NOT rows — the hosted image has them (measured on Actions run 38504978786): claude (ci.yml installs it — helper-ask,
+// claude-hot-switch… run it there), helm (test-helm-render ALL PASS 32), strace (test-oat-measure-fake 17), dtach
+// (ci.yml installs it), google-chrome, agent-browser. A row may DECLARE `host: 'desktop' | 'binary'` with a `hostWhy`
+// — toward the self-hosted side ONLY (a program reached through the product, never named); a row that says 'hosted'
+// over a derived self-hosted verdict is a problem, never a move. test-ci-gate §8c holds the two sets to a PARTITION of
+// the tier, every self-hosted suite to the program it names, scripts/ci-provision-aidev.sh to a row per program, and
+// PRINTS the derivation against the design's census (scripts/fixtures/ci-hosts-q038.txt) with a computed reason per
+// differing name.
+export const HOSTS = Object.freeze(['desktop', 'binary', 'hosted']);
+const RUNS = (p, extra = '') => new RegExp(`\\b(?:spawn|spawnSync|execFile|execFileSync|exec|execSync|fork)\\(\\s*['"\`](?:/usr/(?:local/)?bin/)?(?:${p})['"\`\\s]|(?:command -v|\\bwhich)\\s+['"]?(?:${p})\\b|\\bcmd\\s*:\\s*['"\`](?:${p})['"\`]|['"\`][\\w./-]*/(?:${p})['"\`]${extra}`);
+export const HOST_PROGRAMS = Object.freeze([
+  { program: 'xpra', host: 'desktop', re: /\bxpra\b/ },
+  { program: 'Xvfb', host: 'desktop', re: /\bXvfb\b|\bstartXServer\(/ },
+  { program: 'x11vnc', host: 'desktop', re: /\b(?:x11vnc|Xvnc|Xtigervnc)\b/ },
+  { program: 'libreoffice', host: 'desktop', re: /\b(?:libreoffice|soffice)\b/ },
+  { program: 'codex', host: 'binary', re: RUNS('codex') },
+  { program: 'opencode', host: 'binary', re: RUNS('opencode') },
+  { program: 'bwrap', host: 'binary', re: RUNS('bwrap') },
+  { program: 'unshare', host: 'binary', re: RUNS('unshare') },
+  { program: 'rclone', host: 'binary', re: RUNS('rclone', `|['"\`]/dev/fuse['"\`]`) },
+]);
+export const isSelfHosted = (host) => host === 'desktop' || host === 'binary';
+/** PURE over one row + its suite source: { host, derived, declared, programs, mentions, problems }. */
+export function hostOf(row, source) {
+  const raw = source || '', code = stripComments(raw);
+  const hits = HOST_PROGRAMS.filter((p) => p.re.test(code));
+  const derived = hits.some((p) => p.host === 'desktop') ? 'desktop' : hits.length ? 'binary' : 'hosted';
+  const declared = row && row.host !== undefined ? row.host : null;
+  const problems = [];
+  if (declared !== null && !HOSTS.includes(declared)) problems.push(`host '${declared}' is none of ${HOSTS.join(' / ')}`);
+  else if (declared === 'hosted' && derived !== 'hosted') problems.push(`declares host 'hosted' over its derived '${derived}' (${hits.map((p) => p.program).join(', ')}) — a declaration moves a suite toward the self-hosted side only`);
+  else if (declared !== null && !(row.hostWhy && String(row.hostWhy).trim())) problems.push(`declares host '${declared}' without a hostWhy (what it reaches, through what)`);
+  // what the text MENTIONS but the code does not run — the design census's extra names, read back as a reason
+  const mentions = HOST_PROGRAMS.filter((p) => !hits.includes(p) && new RegExp(`\\b(?:${p.program === 'x11vnc' ? 'x11vnc|Xvnc|Xtigervnc' : p.program === 'libreoffice' ? 'libreoffice|soffice' : p.program})\\b`).test(raw)).map((p) => p.program);
+  const host = problems.length || declared === null ? derived : declared;
+  return { host, derived, declared, why: declared !== null ? String(row.hostWhy || '') : '', programs: hits.map((p) => p.program), mentions, problems };
+}
+/** PURE: the heavy tier cut by host — { desktop, binary, hosted, self, verdicts: Map(name → hostOf), problems }. */
+export function hostPlan(suites, { sourceOf = () => '' } = {}) {
+  const out = { desktop: [], binary: [], hosted: [], self: [], verdicts: new Map(), problems: [] };
+  for (const s of suites) {
+    const v = hostOf(s, sourceOf(s.name));
+    out.verdicts.set(s.name, v);
+    out[v.host].push(s);
+    if (isSelfHosted(v.host)) out.self.push(s);
+    for (const p of v.problems) out.problems.push(`${s.name}: ${p}`);
+  }
+  return out;
+}
+/** PURE: the derivation against a named list (the design's census) — each differing name with its computed reason. A
+ *  listed name that is no suite any more but whose FAMILY is (`<name>-<part>` — q-038 ② split the giant by §, lane
+ *  xpra-window-split) is read as split, its parts as that name's; a family part off the self-hosted side is still named. */
+export function hostDesignDiff(plan, names) {
+  const want = new Set(names), self = new Set(plan.self.map((s) => s.name));
+  const familyOf = (name) => [...plan.verdicts.keys()].filter((n) => n.startsWith(name + '-')).sort();
+  const splitOf = new Map(); // part → the design's name
+  for (const name of want) if (!plan.verdicts.has(name)) for (const p of familyOf(name)) splitOf.set(p, name);
+  const only = [...want].filter((n) => !self.has(n)).sort().map((name) => {
+    const v = plan.verdicts.get(name);
+    const fam = v ? [] : familyOf(name);
+    if (fam.length) { const off = fam.filter((p) => !self.has(p)); return off.length ? { name, why: `split into ${fam.length} parts, ${off.join(', ')} NOT self-hosted` } : null; }
+    if (!v) return { name, why: 'not a heavy suite in this tree' };
+    return { name, why: v.mentions.length ? `its text names ${v.mentions.join(' / ')} but its code never runs it (a comment, a harness id, a stub, a TERM value)` : 'its text names no self-hosted program' };
+  }).filter(Boolean);
+  const extra = [...self].filter((n) => !want.has(n) && !splitOf.has(n)).sort().map((name) => {
+    const v = plan.verdicts.get(name);
+    return { name, why: v.declared ? `declared host '${v.declared}' — ${v.why}` : `runs ${v.programs.join(' / ')} (not in the design's census — a newer suite, or one it read as hosted)` };
+  });
+  return { onlyThere: only, onlyHere: extra, split: [...new Set(splitOf.values())].sort().map((name) => ({ name, parts: familyOf(name) })) };
+}
+const HOST_ARG = ['desktop', 'binary', 'hosted', 'self'];
+/** The suites of `suites` one runner runs: 'desktop' | 'binary' | 'hosted' | 'self' (= desktop + binary). */
+export function hostFilter(suites, want, { sourceOf = () => '' } = {}) {
+  if (!HOST_ARG.includes(want)) throw new Error(`--host wants ${HOST_ARG.join(' | ')} (got '${want}')`);
+  const keep = new Set(hostPlan(suites, { sourceOf })[want].map((s) => s.name));
+  return suites.filter((s) => keep.has(s.name));
+}
+
 // ── IMPACT SCOPE (2026-09-15) ────────────────────────────────────────────────
 // The push-time tier runs only the suites whose INPUTS the pushed range
 // touches: the suite file plus everything it requires/imports transitively
@@ -1981,8 +2177,16 @@ export function shardCensus(suites, shards, serial = []) {
 // repo-relative files it names as fixtures, plus a declared `reads:` list per
 // row where a path is built from segments, plus the product itself for a suite
 // that BOOTS it (server.js / npm run build / a worktree) — and every row that
-// says `always: true` (the restore/boot smokes). A dependency bump is a global
-// input. A range whose files cannot be listed selects EVERYTHING and says why:
+// says `always: true` (the restore/boot smokes, the boot sentinel). A dependency
+// bump is a global input. THE STATIC REACH (q-036 P0, lane affected-static-reach,
+// 2026-10-14): a dependency that is ONLY the boot — the boot prefixes, or the graph
+// behind a composition root the suite names — selects the suite iff its reach (the
+// windows / routes / modules / programs / classes its own code spells, or its row's
+// `reach:`) meets the changed file's attribution (scripts/reach-model.mjs; reachContext
+// below); server.js and a program the product spawns keep every boot, a hub or a
+// shared table reaches every browser suite, and scripts/test-boot-sentinel.mjs
+// (always) boots for real, smokes every GET route and opens every window type.
+// A range whose files cannot be listed selects EVERYTHING and says why:
 // "could not tell" must never read as "nothing changed" (the hook's round-4
 // rule, one layer down). A FULL run is still owed once per 24 h — the launcher
 // decides which to start (fullTierDue) and `ci:status` says which comes next.
@@ -2029,7 +2233,7 @@ function resolveLocal(fromRel, spec, root) {
  *  tier). Only valid while the tree is unchanged, so a memo lives for ONE
  *  computation (affectedSuites makes its own; a caller that walks the table
  *  itself passes one). The replay keeps the first-reason-wins order exactly. */
-export function suiteInputs(s, { root = repo, memo = null } = {}) {
+export function suiteInputs(s, { root = repo, memo = null, leaves = null } = {}) {
   const files = new Set(), prefixes = new Set(), seen = new Set();
   // HOW each input got in (the first reason wins), so a selection can say
   // "boots the product" instead of "reads src/lib/i18n-ja.js" for a suite that
@@ -2042,6 +2246,7 @@ export function suiteInputs(s, { root = repo, memo = null } = {}) {
     const rel = queue.shift();
     if (seen.has(rel)) continue;
     seen.add(rel); files.add(rel);
+    if (leaves && leaves.has(rel)) continue; // a composition root, named, not walked (the suite's OWN closure — reachContext)
     for (const op of fileExpansion(root, rel, memo)) {
       if (op[0] === 'enq') enq(op[1], op[2]);
       else if (op[0] === 'prefix') { prefixes.add(op[1]); if (!via.has(op[1])) via.set(op[1], 'literal'); }
@@ -2094,6 +2299,83 @@ function productSources(root) {
   const r = spawnSync('git', ['-C', root, 'ls-files', '-z', '--', 'src', 'public'], { encoding: 'utf-8', env: GIT_ENV, maxBuffer: 64 * 1024 * 1024 });
   return r.status === 0 ? r.stdout.split('\0').filter((f) => /\.(?:m?js|cjs|html)$/.test(f)).sort() : null; // null = could not tell
 }
+/** STATIC REACH (q-036 P0, lane affected-static-reach — scripts/reach-model.mjs is the PURE half): the reads behind
+ *  the rule that narrows a BOOT dependency. The composition roots — server.js, the bundle's entry (package.json's
+ *  `esbuild <entry> … --outfile=public/bundle.js`) and every module importing ≥ ROOT_MIN src modules (src/lib/app.js)
+ *  — are LEAVES of a suite's OWN closure: a suite that names one boots that half, and the graph behind it is the
+ *  boot's (a suite spelling 'server.js' walked the whole server graph as "loads"; one pinning app.js's text, the
+ *  whole client).
+ *  One context per computation (the memo's lifetime): the tree's src/ files and their import edges (the walk's own
+ *  fileExpansion), the hubs, the composition roots, the shared classes, the window registry, and per suite — lazily —
+ *  its own closure, its derived tokens (the closure's scripts/ code minus the harness ≥ HARNESS_MIN heavy suites load,
+ *  minus the gate's tooling, minus the PROBE routes ≥ PROBE_MIN booting suites spell), its row's declaration and
+ *  whether it drives a browser (the §47 passport ONBOARDED_SOURCE or a --headless launch in its own code). */
+export function reachContext({ suites, root = repo, memo = new Map() } = {}) {
+  const key = 'reach\0' + root + '\0' + suites.map((s) => s.name).join(',');
+  if (memo.has(key)) return memo.get(key);
+  let pkg = ''; try { pkg = fs.readFileSync(path.join(root, 'package.json'), 'utf-8'); } catch { }
+  const entries = ['server.js', (/\besbuild\s+(\S+)[^&"]*?--outfile=public\/bundle\.js/.exec(pkg) || [])[1] || 'src/client.js'];
+  const listed = spawnSync('git', ['-C', root, 'ls-files', '-z', '--', 'src', 'data/bin'], { encoding: 'utf-8', env: GIT_ENV, maxBuffer: 64 * 1024 * 1024 });
+  const walk = (dir) => { const out = []; let ents = []; try { ents = fs.readdirSync(path.join(root, dir), { withFileTypes: true }); } catch { } for (const e of ents) { const rel = `${dir}/${e.name}`; if (e.isDirectory()) { if (e.name !== 'node_modules') out.push(...walk(rel)); } else out.push(rel); } return out; };
+  const tracked = listed.status === 0 ? listed.stdout.split('\0').filter(Boolean) : [...walk('src'), ...walk('data/bin')]; // a tree git cannot list (a stub) is walked
+  const srcFiles = tracked.filter((f) => f.startsWith('src/') && /\.(?:m?js|cjs)$/.test(f));
+  const bins = tracked.filter((f) => /^data\/bin\/[^/]{6,}$/.test(f)).map((f) => f.slice('data/bin/'.length));
+  const texts = new Map();
+  const textOf = (rel) => { if (!texts.has(rel)) { let t = ''; try { t = fs.readFileSync(path.join(root, rel), 'utf-8'); } catch { } texts.set(rel, t); } return texts.get(rel); };
+  const imports = new Map(), importers = new Map();
+  for (const f of [...srcFiles, 'server.js']) {
+    const out = new Set();
+    for (const op of fileExpansion(root, f, memo)) if (op[0] === 'enq' && op[1] !== f && (op[1].startsWith('src/') || op[1] === 'server.js')) out.add(op[1]);
+    imports.set(f, out);
+    for (const d of out) { if (!importers.has(d)) importers.set(d, new Set()); importers.get(d).add(f); }
+  }
+  const hubs = RM.hubModules(importers, imports);
+  const roots = RM.compositionRoots(imports, { entries });
+  const leaves = roots; // a composition root a suite names is walked no further: the graph behind it is the boot's
+  const lib = srcFiles.filter((f) => f.startsWith('src/lib/'));
+  const registry = RM.windowRegistry(lib.map((f) => [f, textOf(f)]));
+  const draws = new Map(lib.map((f) => [f, new Set([...RM.ownTokens(f, textOf(f), registry)].filter((k) => k.startsWith('cls:')))]));
+  const sharedCls = RM.sharedClasses(draws);
+  const tokenCtx = RM.tokenContext({ ...registry, bins });
+  const inputs = new Map(), owns = new Map();
+  const inputsOf = (s) => { if (!inputs.has(s.name)) inputs.set(s.name, suiteInputs(s, { root, memo })); return inputs.get(s.name); };
+  const ownOf = (s) => { if (!owns.has(s.name)) owns.set(s.name, suiteInputs(s, { root, memo, leaves })); return owns.get(s.name); };
+  const boots = (s) => inputsOf(s).via.get('src/') === 'boot';
+  const pop = new Map();
+  for (const s of suites) for (const f of inputsOf(s).files) if (f.startsWith('scripts/') && !/^scripts\/test-/.test(f)) pop.set(f, (pop.get(f) || 0) + 1);
+  const harness = new Set([...pop].filter(([, n]) => n >= RM.HARNESS_MIN).map(([f]) => f));
+  const fileTokens = new Map();
+  const tokensOfFile = (f) => { if (!fileTokens.has(f)) fileTokens.set(f, RM.suiteTokens(textOf(f), tokenCtx)); return fileTokens.get(f); };
+  const codeOf = (s) => [...ownOf(s).files].filter((f) => f.startsWith('scripts/') && /\.(?:m?js|cjs)$/.test(f) && !harness.has(f) && !RM.TOOLING.includes(f));
+  const rawDerived = new Map();
+  const rawOf = (s) => { if (!rawDerived.has(s.name)) { const out = new Set(); for (const f of codeOf(s)) for (const k of tokensOfFile(f)) out.add(k); rawDerived.set(s.name, out); } return rawDerived.get(s.name); };
+  const freq = new Map();
+  for (const s of suites) if (!s.always && boots(s)) for (const k of RM.reachCore(rawOf(s))) freq.set(k, (freq.get(k) || 0) + 1);
+  const probe = new Set([...freq].filter(([k, n]) => k.startsWith('api:') && n >= RM.PROBE_MIN).map(([k]) => k));
+  const chrome = FAST_DISQUALIFIERS.find((d) => d.key === 'chrome').re;
+  const facts = new Map();
+  const suite = (s) => {
+    if (!facts.has(s.name)) {
+      const derived = new Set([...rawOf(s)].filter((k) => !probe.has(k)));
+      facts.set(s.name, { boots: boots(s), derived, declared: s.reach, reach: RM.effectiveReach(s.reach, derived), browser: codeOf(s).some((f) => chrome.test(stripComments(textOf(f)))) });
+    }
+    return facts.get(s.name);
+  };
+  const attrs = new Map();
+  const spawned = RM.spawnedPrograms(bins, [...srcFiles.filter((f) => !f.startsWith('src/lib/')), 'server.js'].map((f) => [f, textOf(f)]));
+  const tables = Object.fromEntries(Object.entries(MODELED).map(([f, m]) => [f, m.rule]));
+  const actx = { textOf, importersOf: (f) => [...(importers.get(f) || [])], hubs, types: registry.types, roots, sharedCls, spawned, tables };
+  const attr = (f) => { if (!attrs.has(f)) attrs.set(f, RM.attribution(f, actx)); return attrs.get(f); };
+  /** Does `s` depend on `f` through its OWN closure (it loads, names or declares it — never only by booting)? */
+  const own = (s, f) => {
+    const { files, prefixes, via } = ownOf(s);
+    if (files.has(f) && via.get(f) !== 'boot') return true;
+    return [...prefixes].some((p) => f.startsWith(p) && via.get(p) !== 'boot');
+  };
+  const ctx = { entries, hubs, roots, sharedCls, registry, harness, probe, bins, spawned, suite, attr, own, verdict: (s, f) => RM.reachVerdict(suite(s), f, attr(f)) };
+  memo.set(key, ctx);
+  return ctx;
+}
 /** THE SHARED TABLES (lane affected-heavy-deps, B-165f): the range's changed files that scripts/affected-model.mjs
  *  MODELS (the dictionaries, the settings schema, style.css), each with its rule's verdict over the range's diff —
  *  Map file → { rule, attributable, why, picks: Map name → reason }. A file whose diff git cannot show, a lone-sha
@@ -2135,7 +2417,7 @@ export function sharedTableRules({ range, files, suites, root = repo, gitRoot = 
  *  A MODELED shared file (scripts/affected-model.mjs) selects by its rule when the rule can attribute the edit, by
  *  the old rule otherwise; the summary says which, per file, and what the rule dropped / added against the old rule
  *  (`why` lists the names). */
-export function affectedSuites({ range, suites, root = repo, gitRoot = root, changed, memo = new Map(), env = process.env, why: whyNames = false } = {}) {
+export function affectedSuites({ range, suites, root = repo, gitRoot = root, changed, memo = new Map(), env = process.env, why: whyNames = false, reach: useReach = true } = {}) {
   const ch = Array.isArray(changed) ? { files: changed } : changedFiles(range, gitRoot);
   const why = new Map();
   const pick = (s, reason) => { if (!why.has(s.name)) why.set(s.name, reason); };
@@ -2150,19 +2432,30 @@ export function affectedSuites({ range, suites, root = repo, gitRoot = root, cha
   };
   const global = ch.files === null ? [] : ch.files.filter((f) => GLOBAL_INPUTS.includes(f));
   const tables = ch.files === null || global.length ? new Map() : sharedTableRules({ range, files: ch.files, suites: suites.filter((s) => !s.always), root, gitRoot, memo, env });
+  // STATIC REACH (reachContext): a dependency that is only the BOOT (the boot prefixes, or the graph behind a boot
+  // entry) selects a suite iff its reach meets the file's attribution — AFTER the table rules, never adding a suite
+  const rc = ch.files === null || global.length || !useReach ? null : reachContext({ suites, root, memo });
+  const dropped = new Map(); // name → why the reach rule dropped a suite the old rule selects (the ✗ lines)
   if (ch.files === null) for (const s of suites) pick(s, `the changed files could not be listed (${ch.error}) — everything runs`);
   else {
     for (const s of suites) {
-      if (s.always) { pick(s, 'always: true (a boot/restore smoke runs on every push)'); continue; }
+      if (s.always) { pick(s, s.name === RM.SENTINEL ? 'always (the boot sentinel: a real boot, every GET route, every window type)' : 'always: true (a boot/restore smoke runs on every push)'); continue; }
       if (global.length) { pick(s, `${global[0]} changed (a global input — dependencies)`); continue; }
       for (const f of ch.files) {
         const t = tables.get(f);
         // a rule only NARROWS: the old reach is its ceiling (a suite that never loads the file cannot be changed by it)
-        if (t && t.attributable) { if (t.picks.has(s.name) && oldHow(s, f)) { pick(s, t.picks.get(s.name)); break; } continue; }
-        const how = oldHow(s, f);
-        if (how) { pick(s, how); break; }
+        let how;
+        if (t && t.attributable) { if (!(t.picks.has(s.name) && oldHow(s, f))) continue; how = t.picks.get(s.name); }
+        else if (!(how = oldHow(s, f))) continue;
+        if (rc && !rc.own(s, f)) {
+          const v = rc.verdict(s, f);
+          if (!v.hit) { if (!dropped.has(s.name)) dropped.set(s.name, v.why); continue; }
+          how += ` — ${v.why}`;
+        }
+        pick(s, how); break;
       }
     }
+    for (const n of why.keys()) dropped.delete(n);
   }
   const selected = suites.filter((s) => why.has(s.name));
   const head = ch.files === null
@@ -2179,8 +2472,22 @@ export function affectedSuites({ range, suites, root = repo, gitRoot = root, cha
   const tableLines = rules.map((r) => `    ◇ ${r.file} — ${r.rule}: ${r.attributable ? `${r.why} ⇒ ${r.now} of the ${r.old} suites the old rule selects (dropped ${r.dropped.length}, added 0${r.outside.length ? `; ${r.outside.length} more it names never load the file` : ''})` : `the OLD rule (${r.old} suites) — ${r.why}`}`
     + (whyNames && r.dropped.length ? `\n        dropped: ${r.dropped.join(' ')}` : '') + (whyNames && r.outside.length ? `\n        named, never load it: ${r.outside.join(' ')}` : ''));
   const kept = ch.files === null ? [] : ch.files.filter((f) => KEPT[f]).map((f) => `    ◇ ${f} — kept: ${KEPT[f]}`);
-  const summary = [head, ...tableLines, ...kept, ...selected.map((s) => `    · ${s.name} ← ${why.get(s.name)}`)].join('\n');
-  return { selected, why, changed: ch.files, error: ch.error || null, summary, rules };
+  // THE REACH, said (--why): one ◇ line per changed product file — its attribution and the booting suites it reaches
+  // alone — then one line per suite: ✓ selected (and why), ✗ dropped by the reach rule (the reach it lacks)
+  const reachLines = [];
+  if (rc && whyNames) {
+    const booting = suites.filter((s) => !s.always && rc.suite(s).boots);
+    for (const f of ch.files.filter((x) => BOOT_INPUTS.some((p) => (p.endsWith('/') ? x.startsWith(p) : x === p)))) {
+      const a = rc.attr(f);
+      const n = booting.filter((s) => !rc.own(s, f) && oldHow(s, f) && rc.verdict(s, f).hit).length;
+      reachLines.push(`    ◇ ${f} — reach: ${a.all ? `${a.all} (${a.why})` : `{${RM.reachCore(a.tokens).slice(0, 8).join(', ')}${RM.reachCore(a.tokens).length > 8 ? ', …' : ''}} ${a.why}`} ⇒ ${n} of ${booting.length} booting suites`);
+    }
+  }
+  const lines = whyNames && rc ? [...selected.map((s) => `    ✓ ${s.name} ← ${why.get(s.name)}`), ...[...dropped].map(([n, w]) => `    ✗ ${n} — ${w}`)]
+    : selected.map((s) => `    · ${s.name} ← ${why.get(s.name)}`);
+  const reachHead = rc && dropped.size ? [`[ci:heavy] static reach: ${dropped.size} booting suite(s) the old rule selects are outside every changed file's attribution (not run — --why lists them)`] : [];
+  const summary = [head, ...reachHead, ...tableLines, ...kept, ...reachLines, ...lines].join('\n');
+  return { selected, why, changed: ch.files, error: ch.error || null, summary, rules, dropped };
 }
 /** Is a FULL heavy run owed? The 24 h safety net behind the affected tier is a
  *  full (not partial, not affected) green that JUDGED EVERY SUITE IT NAMED
@@ -2443,15 +2750,13 @@ function removeScratchWorktree(wt) {
 // test-fixture-isolation is LAST: it sweeps for the litter any suite left.
 export const FAST_MAX_LANES = 4;
 export const FAST_SERIAL = [
-  { name: 'test-peer-text-census', why: 'clock: a megabyte of openers through the belt is judged < 100 ms' },
+  { name: 'test-peer-text-census', why: 'clock: CPU-time ratios against in-run controls (the belt, the engine, every site — scripts/cost-ratio.mjs)' },
   { name: 'test-fs-canary', why: 'clock: the canary\'s stat and loop are judged in ms (< 100 / < 300 / ≥ 1200)' },
-  { name: 'test-dial-link-kept', why: 'clock: a refused dial / a known boot id is judged "at once" (< 100 / < 200 ms)' },
-  { name: 'test-mail-frame', why: 'clock: the quadratic hostile shapes at MAX_HTML_BYTES are judged < 1 500 ms, the old loops over it' },
-  { name: 'test-channel-blocks', why: 'clock: ⑬ judges every hostile shape under an 800 ms budget and its controls past it; ⑱ a 1 MB post under 250 ms (its linear pin + control are WORK since .209)' },
-  { name: 'test-auto-cli-tick-reads', why: 'clock: the tick\'s synchronous hold of the loop is judged in ms (and its control > 1 s)' },
-  { name: 'test-channel-facts', why: 'clock: a 1 MB Cc / To refused by its length in < 100 ms' },
-  { name: 'test-remote-discovery-dirty', why: 'clock: a cold read answers stale in < 200 ms' },
-  { name: 'test-browser-switch', why: 'clock: a 200 KB url + title judged at its bound in < 200 ms' },
+  { name: 'test-mail-frame', why: 'clock: the hostile shapes at MAX_HTML_BYTES are judged ≤ 5 × a benign mail\'s CPU time, the old loops in children' },
+  { name: 'test-channel-blocks', why: 'clock: ⑬ ⑯ judge every hostile shape ≤ 150 × the rung\'s benign walk (CPU) and its controls past it; ⑱ a 1 MB post ≤ 8 × the post at the bound (its linear pin + control are WORK since .209)' },
+  { name: 'test-auto-cli-tick-reads', why: 'clock: the tick\'s synchronous hold of the loop is judged ≤ 1/5 of the reverted tick\'s in the same run (and that control > 1 s)' },
+  { name: 'test-oat-materialize', why: 'clock: F13 judges the oat sweep\'s longest event-loop stall ≤ 3 × a control loop\'s as long as the sweeps (wall time in one process — lane oat-loop-gap-bound: the old `< 50 ms` read 59.4 ms in a parallel lane on the runner)' },
+  { name: 'test-channel-facts', why: 'clock: CPU-time growth — a 1 MB Cc / To ≤ 4 × a 64 KB one, the decoder ≤ 24 × on 8 × the input' },
   { name: 'test-raw-filename', why: 'clock: a refused remote download answers 502 in < 1 000 ms' },
   { name: 'test-fixture-isolation', last: true, why: 'LAST ON PURPOSE: the standing sweep for fixture litter in the real ~/.claude/projects runs after every suite that could write one' },
 ];
@@ -2468,7 +2773,8 @@ export const FAST_SERIAL = [
 // test-architecture reds a suite found and not listed (a NEW
 // clock-ratio judge: convert it to the meter, or list it with a reason) and a listed suite no longer found.
 export const CLOCK_WINDOW = 6;
-const CLOCK_READ = /process\.hrtime|performance\.now\(\)|Date\.now\(\)\s*-\s*[A-Za-z_$]/;
+// (+ scripts/cost-ratio.mjs's bestMs / growth — lane mirror-flake-hardening: a CPU-time ratio is still a clock judge, listed)
+const CLOCK_READ = /process\.hrtime|performance\.now\(\)|Date\.now\(\)\s*-\s*[A-Za-z_$]|\b(?:bestMs|growth)\(/;
 const COMPLEXITY_WORD = /[Ll]inear|LINEAR|[Qq]uadratic|\bratio|[A-Za-z]Ratio|RATIO|\bO\(n/;
 /** PURE: the 1-based lines of `src` where a clock read sits within CLOCK_WINDOW lines of an `ok(` and a complexity word. */
 export function clockJudgeLines(src) {
@@ -2479,13 +2785,14 @@ export function clockJudgeLines(src) {
   return out;
 }
 export const CLOCK_JUDGES = [
-  { name: 'test-channel-blocks', why: 'deadlines: ⑬ every hostile shape under BUDGET_MS (800 ms, ~10× the slowest) and its controls past it in a child — the lazy tag regex / fence regex BACKTRACK inside one exec; ⑱ a 1 MB post under 250 ms (its JSON.parse precedes the cut, which bounded() would charge)' },
-  { name: 'test-channel-facts', why: 'deadlines: a 1 MB Cc / To refused by its length < 100 ms; the encoded-word decoder on a 16 KB hostile name < 50 ms (a regex — backtracking is invisible to the meter)' },
+  { name: 'test-channel-blocks', why: 'relative, never a deadline (lane mirror-flake-hardening): ⑬ every hostile shape ≤ 150 × the rung\'s benign walk at the text bound, ⑯ ≤ 150 × the reader\'s (its pre-fix copies read 1 000–2 800 × in their children), ⑱ a 1 MB post ≤ 8 × the same post at the bound — CPU-time ratios in one process (scripts/cost-ratio.mjs): the lazy tag / fence regexes BACKTRACK inside one exec, which the meter cannot see' },
+  { name: 'test-channel-facts', why: 'relative, never a deadline (lane mirror-flake-hardening): a 1 MB Cc / To ≤ 4 × a 64 KB one (a reader that walks them: 16 ×); the encoded-word decoder on 8 × the input ≤ 24 × (a quadratic control: 64 ×) — CPU-time growth (scripts/cost-ratio.mjs); a regex — backtracking is invisible to the meter' },
   { name: 'test-channel-reactions', why: 'not a judge: an informational print of compactSide\'s ms, never asserted (its linear pin is WORK)' },
   { name: 'test-artifacts-list-model', why: 'not a judge: an informational print of listPlan\'s ms at 500 rows, never asserted (its linear pin is WORK since int238 — the old `median < 5 ms` read 7.63 ms on the runner)' },
   { name: 'test-exit-run', why: 'regex BACKTRACKING: redactSecrets at ×4 / ×8 input judged ≤ ×8 / ×16 time, best of 5 — the work meter cannot see the backtracking inside one exec (its §2c comment); wide bounds, a quadratic reads ×16 / ×64' },
-  { name: 'test-mail-frame', why: 'deadlines: the hostile shapes at MAX_HTML_BYTES under 1 500 ms and the old regex loops past it in a child (backtracking inside one exec)' },
-  { name: 'test-peer-text-census', why: 'deadlines: two 64 KiB records through read + search + thread < 1 500 ms; 64 KiB of openers through the line belt < 100 ms (regex passes)' },
+  { name: 'test-mail-frame', why: 'relative, never a deadline (lane mirror-flake-hardening): every hostile shape at MAX_HTML_BYTES ≤ 5 × a benign mail at the bound — CPU time in one process, here and in each child; the pre-fix copies are still running when their child is cut (a wait, never a verdict) — backtracking inside one exec' },
+  { name: 'test-peer-text-census', why: 'relative, never a deadline (lane mirror-flake-hardening): each site\'s hostile shapes ≤ 40 × the site on 64 KiB of plain words, two hostile records ≤ 8 × two plain ones through the engine, the line belt ≤ 40 × plain lines — CPU-time ratios (scripts/cost-ratio.mjs; regex passes)' },
+  { name: 'test-ci-gate', why: 'not a judge: §2e\'s PLANTS are source TEXT that scripts/wall-clock-census.mjs classifies, never run' },
 ];
 export function fastLaneCount({ cpus = typeof os.availableParallelism === 'function' ? os.availableParallelism() : os.cpus().length, env = process.env } = {}) {
   const forced = Number(env.VIBESPACE_CI_FAST_LANES);
@@ -2620,7 +2927,7 @@ function writeGreenMarker() {
   } catch (e) { console.log('[ci] green marker not written: ' + e.message); }
 }
 
-async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lockWaitMs, pidFile, range, shard, why = false }) {
+async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lockWaitMs, pidFile, range, shard, why = false, host = null, allowHubFull = false, serialOverlap = null }) {
   const t0 = Date.now();
   markCiRun('heavy');
   const all = SUITES.filter((s) => s.tier === 'heavy');
@@ -2664,6 +2971,9 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
     console.error('    node scripts/ci.mjs --heavy --dirty-ok   runs it against this tree, NO verdict written\n');
     return 2;
   }
+  // THE HUB BY DAY — refused at t=0 like the dirty tree, before a lock or a build is spent (hubFullRefusal)
+  const dayNo = hubFullRefusal({ full: !only && !shard && !host && !range, allow: allowHubFull });
+  if (dayNo) { console.error(`\n[ci:heavy] REFUSED — ${dayNo}.\n`); return 2; }
   let runRoot = repo, wt = null;
   console.log(`release gate — HEAVY tier${scoped ? '' : `: ${shard ? `shard ${shard.i}/${shard.n} of ` : ''}${heavy.length} suites`} for ${shortSha(sha)}${isolate ? ' (isolated worktree)' : ''}${scoped ? ` — impact scope ${range}: the suites are selected from the sources AT ${shortSha(sha)}, after checkout` : ''}`);
   if (dirtyAtStart) console.log('[ci:heavy] --dirty-ok: this tree is dirty ⇒ NO VERDICT will be written for ' + shortSha(sha) + ' (said now, not in sixteen minutes)');
@@ -2772,13 +3082,26 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
       console.log(`[ci:heavy] ${heavy.length} suites for ${shortSha(sha)}${scope === 'affected' ? ` — AFFECTED scope (${all.length - heavy.length} of ${all.length} unaffected by ${range})` : ` — the selection is the whole tier (a FULL run)`}`);
       console.log(impact.summary);
     }
+    let tier = all;
+    if (host) {
+      // HOSTS: the suites ONE runner runs, read off the sources that RUN (hostOf); an --only name of another host is loud
+      const srcAt = (name) => { try { return fs.readFileSync(path.join(runRoot, 'scripts', name + '.mjs'), 'utf-8'); } catch { return ''; } };
+      tier = hostFilter(all, host, { sourceOf: srcAt });
+      const mine = new Set(tier.map((s) => s.name));
+      const other = heavy.filter((s) => !mine.has(s.name));
+      if (only && other.length) { console.error(`✗ --only names ${other.map((s) => s.name).join(', ')} — not a --host=${host} suite`); return 2; }
+      heavy = heavy.filter((s) => mine.has(s.name));
+      console.log(`[ci:heavy] --host=${host}: ${heavy.length} of ${all.length} heavy suites run on this runner (HOSTS — ${all.length - tier.length} are the other runner's)`);
+      if (!heavy.length) { console.error(`✗ --host=${host} selects no suite — an empty run judges nothing`); return 2; }
+    }
     if (shard) {
       // SHARDS: one slice of the tier, cut from the sources that RUN (the
-      // serial group is read off them, as scheduleLanes reads it below)
+      // serial group is read off them, as scheduleLanes reads it below) — LPT
+      // over the checked-in runner times when the tree carries them
       const srcAt = (name) => { try { return fs.readFileSync(path.join(runRoot, 'scripts', name + '.mjs'), 'utf-8'); } catch { return ''; } };
-      const cut = shardPlan(all, shard.n, { sourceOf: srcAt });
+      const cut = shardPlan(tier, shard.n, { sourceOf: srcAt, timings: shardTimings(runRoot) });
       heavy = cut.shards[shard.i - 1];
-      console.log(`[ci:heavy] shard ${shard.i}/${shard.n}: ${heavy.length} of ${all.length} heavy suites${cut.serial.length ? ` — the serial group (${cut.serial.join(', ')}) is shard 1's` : ''}`);
+      console.log(`[ci:heavy] shard ${shard.i}/${shard.n}: ${heavy.length} of ${tier.length} heavy suites${cut.loads ? ` (LPT by the checked-in runner times: ${Math.round(cut.loads[shard.i - 1] / 1000)} s of suites here)` : ''}${cut.serial.length ? ` — the serial group (${cut.serial.join(', ')}) is shard 1's` : ''}`);
       if (!heavy.length) { console.error(`✗ shard ${shard.i}/${shard.n} holds no suite — an empty slice judges nothing`); return 2; }
     }
     // Ask BEFORE the build too: a signal that landed during `git worktree add`
@@ -2806,14 +3129,32 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
       console.log(`\n[ci:heavy] stopping: ${why}`);
       for (const c of inflight) { try { c.kill('SIGTERM'); } catch { } }
     };
+    // A FAILED RUN'S WHOLE OUTPUT (lane ci-aidev-desktop-batch): the log above keeps a red suite's last 40 lines, and a
+    // suite's own diagnostics print long before its verdict (on a second machine nothing else is left to read) — so
+    // every failed run is kept whole in <markers>/fail-logs/<sha9>.<suite>.<try>.log, said on its own line
+    const keepFailLog = (s, r, attempt) => {
+      if (r.ok || r.absent || !r.full) return;
+      try {
+        const f = path.join(d, 'fail-logs', `${shortSha(sha)}.${s.name}.${attempt}.log`);
+        fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, r.full);
+        console.log(`  [ci:heavy] the whole output of ${s.name} (try ${attempt}): ${f}`);
+      } catch (e) { console.log(`  · fail log not kept: ${e && e.message}`); }
+    };
+    // the parallel lanes' in-flight count, for --serial-overlap (the serial lane may start beside the last ≤ n of them)
+    let parInFlight = 0, parQueue = null, overlapGo = () => {};
+    const overlapReady = new Promise((res) => { overlapGo = res; });
+    const overlapCheck = () => { if (parQueue && !parQueue.length && parInFlight <= (serialOverlap || 0)) overlapGo(); };
     const laneWorker = async (queue, lane) => {
       for (;;) {
         abandonedWhy = abandonedWhy || abandoned();
         if (abandonedWhy) { stop(abandonedWhy); break; }
         const s = queue.shift();
         if (!s) break;
+        const par = queue === parQueue;
+        if (par) { parInFlight++; overlapCheck(); }
         let r = noteChildResult(await runSuiteAsync(s, { root: runRoot, absentIsSkip: !!isolate, sha, lane, inflight }));
         console.log(r.lines.join('\n'));
+        keepFailLog(s, r, 1);
         // a suite may not leave a daemon behind (2.369.104) — the lanes sweep
         // after every suite exactly as the sync runner does, without blocking
         try { await reapScratchOrphansAsync({}); } catch (e) { console.log(`  · scratch reaper skipped: ${e && e.message}`); }
@@ -2822,7 +3163,7 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
         // Absent at the commit being gated (round 6): not run, not judged, and
         // not counted in `timings` — a marker that named 97 suites when 42 of
         // them do not exist at that sha is a claim nobody made.
-        if (r.absent) { absent.push(s.name); continue; }
+        if (r.absent) { absent.push(s.name); if (par) { parInFlight--; overlapCheck(); } continue; }
         if (!r.ok) {
           // …BUT NEVER RETRY A SUITE WE OURSELVES KILLED. Supersession SIGTERMs
           // the process GROUP, so the suite in flight dies with the runner's
@@ -2846,11 +3187,19 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
           // outcomes are in the log and in the marker, so the flakiness is
           // visible instead of being laundered into a green.
           console.log(`  … ${s.name} failed — retrying once before calling it red`);
+          const first = r;
           const again = noteChildResult(await runSuiteAsync(s, { root: runRoot, lane, inflight }));
           console.log(again.lines.join('\n'));
+          keepFailLog(s, again, 2);
           if (again.ok) { flaky.push(s.name); r = again; } else { failed.push(s.name); }
+          // THE RERUN LEDGER (q-038 ④): one rerun, ONE line per rerun in <markers>/reruns.jsonl — the suite, both
+          // outcomes, both loads, the first run's last lines — so a flake is counted across runs, never laundered
+          const line = { at: Date.now(), sha, host: os.hostname(), suite: s.name, lane: String(lane), first: { ms: first.ms, load: first.load, tail: [first.lines[1] || '', first.lines[2] || ''].join('\n').split('\n').filter((x) => /^\s*✗ /.test(x)).slice(0, 3).map((x) => x.trim().slice(0, 200)) }, again: { ok: again.ok, ms: again.ms, load: again.load } };
+          try { fs.mkdirSync(d, { recursive: true }); fs.appendFileSync(path.join(d, 'reruns.jsonl'), JSON.stringify(line) + '\n'); } catch (e) { console.log(`  · rerun ledger not written: ${e && e.message}`); }
+          console.log(`  [ci:heavy] RERUN LEDGER ${s.name}: red (load ${(first.load || []).join('→')}) → ${again.ok ? 'GREEN — FLAKY, counted' : 'red again'} (load ${(again.load || []).join('→')}) — ${path.join(d, 'reruns.jsonl')}`);
         }
-        timings.push({ name: s.name, ms: r.ms, ok: r.ok, lane: String(lane) });
+        timings.push({ name: s.name, ms: r.ms, ok: r.ok, lane: String(lane), load: r.load });
+        if (par) { parInFlight--; overlapCheck(); }
       }
     };
     if (!build.ok && !abandonedWhy) failed.push('npm run build');
@@ -2861,15 +3210,30 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
       serialNames = plan.serial.map((s) => s.name);
       console.log(`[ci:heavy] ${laneN} parallel lane(s) over ${plan.parallel.length} suites (longest first), then 1 serial lane over ${plan.serial.length}${plan.serial.length ? ': ' + plan.serial.map((s) => `${s.name} (${s.serialWhy.split(/[—;]/)[0].trim()})`).join(', ') : ''}`);
       const parallelQ = [...plan.parallel];
+      parQueue = parallelQ;
       const tPar = Date.now();
-      await Promise.all(Array.from({ length: Math.max(1, Math.min(laneN, parallelQ.length)) }, (_, i) => laneWorker(parallelQ, i + 1)));
+      // --serial-overlap=<n> (the desktop batch: 1): the serial lane starts once the parallel queue is dispatched and at
+      // most n parallel suites are still in flight — beside the batch's floor suite instead of after it; said, with names
+      const overlapped = serialOverlap && plan.serial.length ? overlapReady.then(() => {
+        if (abandonedWhy) return null;
+        console.log(`[ci:heavy] serial lane starts at ${Math.round((Date.now() - tPar) / 1000)}s beside ${parInFlight} parallel suite(s) still in flight (--serial-overlap=${serialOverlap}): ${plan.serial.map((s) => s.name).join(', ')}`);
+        return laneWorker([...plan.serial], 'S');
+      }) : null;
+      overlapCheck();
+      const busLanes = Array.from({ length: Math.max(1, Math.min(laneN, parallelQ.length)) }, (_, i) => i + 1);
+      const buses = startLaneBuses(plan.serial.length ? [...busLanes, 'S'] : busLanes);
+      const endBuses = () => { for (const b of buses) { try { b.p.kill('SIGTERM'); } catch { } } };
+      process.once('exit', endBuses);
+      await Promise.all(busLanes.map((k) => laneWorker(parallelQ, k)));
       const parMs = Date.now() - tPar;
-      if (plan.serial.length && !abandonedWhy) {
+      if (overlapped) { overlapGo(); await overlapped; }
+      else if (plan.serial.length && !abandonedWhy) {
         console.log(`[ci:heavy] parallel lanes drained in ${Math.round(parMs / 1000)}s — serial lane: ${plan.serial.map((s) => s.name).join(', ')}`);
         await laneWorker([...plan.serial], 'S');
       }
+      endBuses();
       const sum = timings.reduce((a, t) => a + t.ms, 0);
-      if (!abandonedWhy) console.log(`[ci:heavy] lanes: ${laneN} parallel (${Math.round(parMs / 1000)}s) + serial (${Math.round((Date.now() - tPar - parMs) / 1000)}s); suites summed ${Math.round(sum / 1000)}s = what a sequential tier would have taken`);
+      if (!abandonedWhy) console.log(`[ci:heavy] lanes: ${laneN} parallel (${Math.round(parMs / 1000)}s) + serial (${overlapped ? `overlapped, ${Math.round((Date.now() - tPar) / 1000)}s wall in all` : `${Math.round((Date.now() - tPar - parMs) / 1000)}s`}); suites summed ${Math.round(sum / 1000)}s = what a sequential tier would have taken`);
     }
     const rec = {
       sha, result: failed.length ? 'red' : 'green', failed,
@@ -2881,8 +3245,9 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
       // the Diagnostics report can say what the verdict is about rather than
       // implying all `suites` of them ran.
       absent: absent.length ? absent : undefined,
-      partial: only ? only.slice() : (shard ? heavy.map((s) => s.name) : undefined),
+      partial: only ? only.slice() : ((shard || host) ? heavy.map((s) => s.name) : undefined),
       shard: shard ? `${shard.i}/${shard.n}` : undefined,
+      hosts: host || undefined,
       unlocked: held.ok ? undefined : true,
       // 2026-09-15: the scope ('full' | 'affected'), what selected it, the lane
       // count, which suites ran serially, and EVERY suite's timing (the next
@@ -2910,7 +3275,7 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
     // old ref that predates them would otherwise earn a GREEN marker for a run
     // of zero suites — the vacuous green `--only` already refuses on a typo.
     else if (absent.length && absent.length === heavy.length) noVerdict = `every suite in this run is absent at ${shortSha(sha)} — nothing ran, so nothing is claimed`;
-    else if ((only || shard) && existing) noVerdict = `partial run — keeping the existing FULL ${existing.kind.toUpperCase()} marker for ${shortSha(sha)}`;
+    else if ((only || shard || host) && existing) noVerdict = `partial run — keeping the existing FULL ${existing.kind.toUpperCase()} marker for ${shortSha(sha)}`;
     if (noVerdict) {
       console.log('\n[ci:heavy] ' + noVerdict);
     } else {
@@ -3045,7 +3410,12 @@ function heavyLaunch(sha, { dir, only, lock, lockWaitMs, range } = {}) {
   // affected run needs a range, and a full run is owed when the newest FULL
   // green is older than FULL_EVERY_MS (or there is none).
   const due = fullTierDue(dir, Date.now(), { sha });
-  const scope = range && !only && !due.due ? 'affected' : 'full';
+  let scope = range && !only && !due.due ? 'affected' : 'full';
+  // THE HUB BY DAY (hubFullRefusal): a FULL tier owed by the 24 h clock is not started here by day — the push's
+  // AFFECTED tier runs instead (the full is the self-hosted batch's + the mirror's); with no range, nothing is launched
+  const dayNo = scope === 'full' && !only ? hubFullRefusal({ full: true }) : null;
+  if (dayNo && range) { scope = 'affected'; console.error(`[ci:heavy] a FULL tier is owed (${due.why || 'no FULL green on record'}) — but not on the hub by day: launching the AFFECTED tier for ${shortSha(sha)}`); }
+  else if (dayNo) { console.error(`[ci:heavy] not launching: ${dayNo}`); return 0; }
   // ALREADY GREEN? (B-3ccf, see heavyAlreadyGreen) — asked AFTER supersession
   // on purpose: a run for an ancestor is still superseded (this sha's green
   // subsumes it and the machine is freed), only OUR run is not started.
@@ -3106,6 +3476,9 @@ function checkHeavy({ dir, head } = {}) {
   // a door that only opens from the other side (round 2 finding).
   console.error('     Fix it, COMMIT, then earn a green heavy verdict on the new commit:');
   console.error('       npm run ci:heavy        (the whole tier in an isolated worktree at HEAD, ~17 min; writes the marker that clears this)');
+  // …and by day the hub refuses that whole tier (hubFullRefusal): the AFFECTED tier clears the block too when it reruns
+  // every suite that failed (coversRed) — said here, so the door this message names is one that opens now
+  if (hubFullRefusal({ full: true })) console.error(`       by day the hub runs no FULL tier — instead: node scripts/ci.mjs --heavy --isolate --affected --range=${shortSha(blocker.sha)}..HEAD\n         (clears it when it reruns ${(blocker.failed || []).join(', ') || 'the failed suites'}), or npm run ci:heavy -- --allow-hub-full`);
   console.error('     Emergency bypass: VIBESPACE_SKIP_CI=1 git push\n');
   return 1;
 }
@@ -3163,12 +3536,13 @@ function status({ dir, head: wantHead } = {}) {
 // `--heavy --shard i/n --dry-run`: the slice one matrix job runs, from THIS
 // tree's table and sources — no lock, no build, no suite. Exit 1 when the split
 // fails its census (then no listing can be trusted).
-function shardDryRun({ i, n }) {
-  const all = SUITES.filter((s) => s.tier === 'heavy');
+function shardDryRun({ i, n }, { host = null } = {}) {
   const sourceOf = (name) => { try { return fs.readFileSync(path.join(repo, 'scripts', name + '.mjs'), 'utf-8'); } catch { return ''; } };
-  const { shards, serial } = shardPlan(all, n, { sourceOf });
+  const heavyAll = SUITES.filter((s) => s.tier === 'heavy');
+  const all = host ? hostFilter(heavyAll, host, { sourceOf }) : heavyAll;
+  const { shards, serial, loads } = shardPlan(all, n, { sourceOf, timings: shardTimings(repo) });
   const problems = shardCensus(all, shards, serial);
-  console.log(`heavy shard ${i}/${n}: ${shards[i - 1].length} of ${all.length} heavy suites${serial.length ? ` — the serial group (${serial.join(', ')}) is shard 1's` : ''}`);
+  console.log(`heavy shard ${i}/${n}: ${shards[i - 1].length} of ${all.length} heavy suites${host ? ` (--host=${host})` : ''}${loads ? ` — LPT: ${Math.round(loads[i - 1] / 1000)} s of suites` : ''}${serial.length ? ` — the serial group (${serial.join(', ')}) is shard 1's` : ''}`);
   for (const s of shards[i - 1]) console.log('  ' + s.name);
   for (const p of problems) console.error('  ✗ ' + p);
   return problems.length ? 1 : 0;
@@ -3189,10 +3563,65 @@ function census() {
     const r = fastRuleFindings(s, src);
     if (r.problems.length) problems.push(`fast row ${s.name} breaks THE TIER RULE: ${r.problems.join('; ')}`);
   }
+  // THE REACH (lane affected-static-reach): a declared `reach:` holds every non-class token grep derives, only a booting
+  // non-always row declares one; the booting suites that derive nothing and declare nothing run on every product change
+  const heavy = SUITES.filter((x) => x.tier === 'heavy');
+  const rc = reachContext({ suites: heavy });
+  for (const s of heavy) {
+    const r = rc.suite(s);
+    if (s.reach !== undefined && (s.always || !r.boots)) problems.push(`${s.name} declares reach: but ${s.always ? 'runs always' : 'never boots the product'} — the declaration narrows nothing`);
+    for (const p of RM.declarationFindings(s.reach, r.derived, { reads: s.reads })) problems.push(`${s.name} reach: ${p}`);
+  }
+  const booting = heavy.filter((s) => !s.always && rc.suite(s).boots), sizes = booting.map((s) => RM.reachCore(rc.suite(s).reach.tokens).length).sort((a, b) => a - b);
+  const undeclaredAll = booting.filter((s) => s.reach === undefined && rc.suite(s).reach.all).map((s) => s.name);
+  console.log(`reach: ${booting.length} booting suites (${booting.filter((s) => rc.suite(s).browser).length} drive a browser) — ${booting.filter((s) => s.reach !== undefined).length} declare reach:, ${undeclaredAll.length} derive nothing and run on every product change${undeclaredAll.length ? ` (${undeclaredAll.join(' ')})` : ''}; tokens per suite median ${sizes[sizes.length >> 1]} · p90 ${sizes[Math.floor(sizes.length * 0.9)]} · max ${sizes[sizes.length - 1]}`);
+  console.log(`  hubs ${[...rc.hubs.keys()].length} (${[...rc.hubs].filter(([, w]) => /importers/.test(w)).map(([f]) => f.replace(/^src\/lib\//, '')).join(' ')} + what they import) · roots ${[...rc.roots].join(' ')} · probe ${[...rc.probe].join(' ') || 'none'} · ${rc.spawned.size} spawned programs keep the old rule`);
   console.log(`census: ${f.counted.disk} suites on disk = ${f.counted.fast} fast + ${f.counted.heavy} heavy + ${f.counted.excluded} excluded`);
   for (const p of problems) console.error('  ✗ ' + p);
-  if (!problems.length) console.log('  ✓ every scripts/test-*.mjs is in exactly one tier or excluded with a reason, and every fast row obeys THE TIER RULE');
+  if (!problems.length) console.log('  ✓ every scripts/test-*.mjs is in exactly one tier or excluded with a reason, every fast row obeys THE TIER RULE, and every reach: declaration holds its derivation');
   return problems.length ? 1 : 0;
+}
+
+// `--hosts` (lane ci-aidev-desktop-batch): the HOSTS partition of this tree — every self-hosted suite with the program
+// its code names, the two sets' sizes (+ their suite-minutes by the checked-in runner times), and the derivation
+// against the design's census (scripts/fixtures/ci-hosts-q038.txt) with a computed reason per differing name.
+// Exit 1 when a row's declaration is refused (hostOf's problems) — the same judge test-ci-gate §8c asserts.
+function hostsReport() {
+  const heavy = SUITES.filter((s) => s.tier === 'heavy');
+  const sourceOf = (name) => { try { return fs.readFileSync(path.join(repo, 'scripts', name + '.mjs'), 'utf-8'); } catch { return ''; } };
+  const plan = hostPlan(heavy, { sourceOf });
+  const t = shardTimings(repo) || {};
+  const min = (list) => Math.round(list.reduce((a, s) => a + (t[s.name] || 0), 0) / 6000) / 10;
+  console.log(`hosts: ${heavy.length} heavy suites = ${plan.desktop.length} desktop + ${plan.binary.length} binary (self-hosted: ${plan.self.length}) + ${plan.hosted.length} hosted`);
+  console.log(`  hosted runner times (scripts/fixtures/ci-shard-timings.json): self-hosted ${min(plan.self)} min · hosted ${min(plan.hosted)} min`);
+  for (const s of plan.self) { const v = plan.verdicts.get(s.name); console.log(`  ${v.host.padEnd(7)} ${s.name}  ← ${v.declared ? `declared: ${v.why}` : v.programs.join(', ')}`); }
+  let names = [];
+  try { names = fs.readFileSync(path.join(repo, 'scripts', 'fixtures', 'ci-hosts-q038.txt'), 'utf-8').split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#')); } catch { }
+  if (names.length) {
+    const diff = hostDesignDiff(plan, names);
+    console.log(`the design's census (q-038, ${names.length} names) vs the derivation: ${diff.onlyThere.length} there only, ${diff.onlyHere.length} here only`);
+    for (const x of diff.onlyThere) console.log(`  − ${x.name}: ${x.why}`);
+    for (const x of diff.onlyHere) console.log(`  + ${x.name}: ${x.why}`);
+    for (const x of diff.split) console.log(`  = ${x.name}: split by § into ${x.parts.join(', ')}`);
+  }
+  for (const p of plan.problems) console.error('  ✗ ' + p);
+  return plan.problems.length ? 1 : 0;
+}
+// `--shard-timings <log>…`: rewrite scripts/fixtures/ci-shard-timings.json from Actions heavy-shard logs (`gh run view
+// <id> --log`): every `✓ / ✗ <suite> (<n>ms)` line, the newest log first per suite. The split is a function of this file.
+function writeShardTimings(logs) {
+  const ms = {}, sources = [];
+  for (const f of logs) {
+    const txt = fs.readFileSync(f, 'utf-8'); sources.push(path.basename(f));
+    for (const m of txt.matchAll(/[✓✗] (test-[\w.-]+)(?: FAILED)? \((\d+)ms/g)) if (!(m[1] in ms)) ms[m[1]] = Number(m[2]);
+  }
+  const heavy = new Set(SUITES.filter((s) => s.tier === 'heavy').map((s) => s.name));
+  const kept = Object.fromEntries(Object.keys(ms).filter((n) => heavy.has(n)).sort().map((n) => [n, ms[n]]));
+  const out = path.join(repo, 'scripts', 'fixtures', 'ci-shard-timings.json');
+  let desktop; try { desktop = JSON.parse(fs.readFileSync(out, 'utf-8')).desktop; } catch {} // the batch's hub-measured block is not a runner log's: kept
+  fs.writeFileSync(out, JSON.stringify({ about: 'per-suite wall ms on the hosted Actions runner (2 lanes, 4 cpus) — the LPT split of `ci.mjs --heavy --shard i/n` reads ONLY this file (shardPlan); refresh with `node scripts/ci.mjs --shard-timings <gh run view --log output>…`', sources, ms: kept, ...(desktop ? { desktop } : {}) }, null, 1) + '\n');
+  console.log(`${out}: ${Object.keys(kept).length} heavy suites timed from ${sources.join(', ')}`);
+  return 0;
 }
 
 // `--list-affected --range=<old>..<new> [--shard <i>/<n>]` (lane heavy-runner-aidev, 2026-10-13): the heavy suites
@@ -3202,10 +3631,15 @@ function census() {
 // list for a tree (its selectSlice — test-ci-remote pins the two equal), so the hub half
 // `--heavy --only=$(node scripts/ci.mjs --list-affected --range=… --shard 1/2)` and the second machine's
 // `ci-remote.mjs --shard 2/2` split one selection with no suite in both and none in neither.
-export function listAffected({ range, shard = null, dir, root = repo, changed, why = false } = {}) {
+export function listAffected({ range, shard = null, dir, root = repo, changed, why = false, host = null } = {}) {
   const all = SUITES.filter((s) => s.tier === 'heavy');
   const a = range ? affectedSuites({ range, suites: all, root, changed, why }) : { selected: all, summary: `[ci:heavy] the full tier: ${all.length} heavy suites` };
   let picked = a.selected, summary = a.summary;
+  if (host) {
+    const before = picked.length;
+    picked = hostFilter(picked, host, { sourceOf: (name) => { try { return fs.readFileSync(path.join(root, 'scripts', name + '.mjs'), 'utf-8'); } catch { return ''; } } });
+    summary += `\n[ci:heavy] --host=${host}: ${picked.length} of ${before}`;
+  }
   if (shard) {
     const sourceOf = (name) => { try { return fs.readFileSync(path.join(root, 'scripts', name + '.mjs'), 'utf-8'); } catch { return ''; } };
     const plan = shardPlan(picked, shard.n, { sourceOf });
@@ -3241,8 +3675,16 @@ function main(argv) {
   const shard = shardArg === null ? null : parseShard(shardArg);
   if (shardArg !== null && !shard) { console.error(`✗ --shard wants <i>/<n> with 1 ≤ i ≤ n (got '${shardArg}')`); process.exit(2); }
   if (arg('reap')) { process.exit(reapByHand({ dryRun: !!arg('dry-run') })); }
+  // --host=<desktop|binary|hosted|self>: the suites ONE runner runs (HOSTS); a bad name is a loud exit 2
+  const host = str('host');
+  if (arg('host') !== undefined && !HOST_ARG.includes(host)) { console.error(`✗ --host wants ${HOST_ARG.join(' | ')} (got '${host === null ? '' : host}')`); process.exit(2); }
+  const overlapArg = str('serial-overlap');
+  const serialOverlap = overlapArg === null ? null : Number(overlapArg);
+  if (overlapArg !== null && !(Number.isInteger(serialOverlap) && serialOverlap >= 0)) { console.error(`✗ --serial-overlap wants an integer ≥ 0 (got '${overlapArg}')`); process.exit(2); }
   if (arg('census')) process.exit(census());
-  if (arg('list-affected')) { const l = listAffected({ range: rangeArg || null, shard, dir, why: !!arg('why') }); console.error(l.summary); console.log(l.names.join(',')); process.exit(0); }
+  if (arg('hosts')) process.exit(hostsReport());
+  if (arg('shard-timings') !== undefined) process.exit(writeShardTimings(argv.filter((a) => !a.startsWith('--'))));
+  if (arg('list-affected')) { const l = listAffected({ range: rangeArg || null, shard, dir, why: !!arg('why'), host }); console.error(l.summary); console.log(l.names.join(',')); process.exit(0); }
   if (arg('status')) process.exit(status({ dir, head }));
   if (arg('check-heavy')) process.exit(checkHeavy({ dir, head }));
   if (arg('heavy-launch') !== undefined) process.exit(heavyLaunch(str('heavy-launch') || argv[argv.indexOf('--heavy-launch') + 1], { dir, only, lock, lockWaitMs, range: rangeArg || undefined }));
@@ -3250,8 +3692,8 @@ function main(argv) {
     const affected = !!arg('affected') || !!arg('heavy-affected');
     if (affected && !rangeArg) { console.error('✗ --affected needs --range=<old>..<new> (or --range=<sha> for its whole unpublished range)'); process.exit(2); }
     if (shard && (only || affected)) { console.error('✗ --shard slices the FULL tier — it does not combine with --only or --affected'); process.exit(2); }
-    if (shard && arg('dry-run')) process.exit(shardDryRun(shard));
-    heavyGate({ sha: str('sha'), isolate: !!arg('isolate'), dir, only, dirtyOk: !!arg('dirty-ok'), lock, lockWaitMs, pidFile: str('pid-file') || undefined, range: affected ? rangeArg : undefined, shard, why: !!arg('why') })
+    if (shard && arg('dry-run')) process.exit(shardDryRun(shard, { host }));
+    heavyGate({ sha: str('sha'), isolate: !!arg('isolate'), dir, only, dirtyOk: !!arg('dirty-ok'), lock, lockWaitMs, pidFile: str('pid-file') || undefined, range: affected ? rangeArg : undefined, shard, why: !!arg('why'), host, allowHubFull: !!arg('allow-hub-full'), serialOverlap })
       .then((code) => process.exit(code), (e) => { console.error('[ci:heavy] crashed: ' + (e && e.stack || e)); process.exit(1); });
     return;
   }

@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+import { judgeInChild } from './work-meter.mjs';
 const require = createRequire(import.meta.url);
 const REPO = new URL('..', import.meta.url).pathname;
 const SW = require('../src/browser-switch.js');
@@ -45,8 +46,15 @@ console.log('— the sign-in refusal HINT (PURE table, navigate result url + tit
   for (const [url, title, what] of NOT) ok(SW.navHint({ url, title }) === null, `no hint: ${what}`);
   ok(SW.navHint({ url: 'https://example.com/x', status: 403 }).why === 'HTTP 403' && SW.navHint(429).source === 'http-status' && SW.navHint(200) === null, 'the 403/429 rung is unchanged (a number, or a status in the facts)');
   const long = 'https://accounts.google.com/v3/signin/identifier?x=' + 'a'.repeat(200000);
-  const t0 = Date.now(); const hl = SW.navHint({ url: long, title: 'z'.repeat(200000) });
-  ok(hl === null && Date.now() - t0 < 200, 'a 200 KB url + title is judged at its 4 KiB bound (no hint, fast)', Date.now() - t0);
+  const hl = SW.navHint({ url: long, title: 'z'.repeat(200000) });
+  // "judged at its 4 KiB bound" is judged by WORK (lane mirror-flake-hardening: the old `< 200 ms` judged the machine):
+  // the work meter (scripts/work-meter.mjs, in a child) reads the same work at 200 KB and 400 KB; a judge that reads the
+  // whole url + title doubles it (the CONTROL)
+  const MK = "(n) => ({ url: 'https://accounts.google.com/v3/signin/identifier?x=' + 'a'.repeat(n), title: 'z'.repeat(n) })";
+  const g = judgeInChild({ module: path.join(REPO, 'src/browser-switch.js'), run: '(M, x) => M.navHint(x)', mk: MK, n: 200000, kind: 'bounded' });
+  const gAll = judgeInChild({ module: path.join(REPO, 'src/browser-switch.js'), run: "(M, x) => x.url.toLowerCase().includes('signin') || x.title.toLowerCase().includes('signin')", mk: MK, n: 200000, kind: 'bounded' });
+  ok(hl === null && g.ok === true, `a 200 KB url + title is judged at its 4 KiB bound (no hint): WORK ×${g.r} from 200 to 400 KB (≤ ${g.ratio})`, g);
+  ok(gAll.ok === false && gAll.r > 1.5, `CONTROL: a judge that reads the whole url + title is NOT bounded (WORK ×${gAll.r}) — the meter separates a bound from a scan`, gAll);
 }
 
 // the CLI half: THE shipped CLI's reader of a navigation's result (the function itself, lifted out of the file — the

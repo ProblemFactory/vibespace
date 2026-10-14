@@ -1,0 +1,65 @@
+{
+ "about": "THE GTK ROWS (B-4260, lane ci-aidev-desktop-batch 2026-10-14): what each box's desktop stack draws the pixel suites' GNOME Calculator as, MEASURED by scripts/ci-provision-aidev.sh's gtk-row step INSIDE a private xpra server, as the suites run it (no client attached): calcSize2x = the window's size at GDK_SCALE=2; calcMinFirst2x / calcMin2x = its WM_NORMAL_HINTS minimum when first announced / once it holds 2 s; calcButtonBound = the 1× minimum is unchanged under Xft.dpi 144 (calcMin1x vs calcMin1xDpi144); pushButtonRole = the role AT-SPI names a push button. Keyed by the GTK 4 major.minor; scripts/scratch.mjs gtkRow() hands the running box's row to the suites (test-desktop-xpra-window, test-window-target, test-app-display-a11y-bus-tree) and THROWS for a GTK with no row — never a skip. ci-remote.mjs --batch refuses a box whose measured row is not this file's. controlRatio15: test-desktop-xpra-window §15 CONTROL's measured column ratio on that box (the pre-lane-D rule halves a button-bound calculator: 0.5).",
+ "rows": {
+  "4.22": {
+   "box": "the hub (Ubuntu 26.04.1)",
+   "gtk": "4.22.4",
+   "calculator": "50.0",
+   "atspi": "2.60.4",
+   "calcSize2x": [
+    720,
+    1232
+   ],
+   "calcMinFirst2x": [
+    720,
+    1232
+   ],
+   "calcMin2x": [
+    720,
+    1232
+   ],
+   "calcButtonBound": true,
+   "calcMin1x": [
+    360,
+    616
+   ],
+   "calcMin1xDpi144": [
+    360,
+    616
+   ],
+   "pushButtonRole": "button",
+   "controlRatio15": 0.5,
+   "measured": "2026-10-14 gtk-row inside xpra 6.5.4"
+  },
+  "4.14": {
+   "box": "AIDev (Ubuntu 24.04.3)",
+   "gtk": "4.14.5",
+   "calculator": "46.3",
+   "atspi": "2.52.0",
+   "calcSize2x": [
+    720,
+    1004
+   ],
+   "calcMinFirst2x": [
+    694,
+    1004
+   ],
+   "calcMin2x": [
+    694,
+    980
+   ],
+   "calcButtonBound": false,
+   "calcMin1x": [
+    346,
+    492
+   ],
+   "calcMin1xDpi144": [
+    380,
+    518
+   ],
+   "pushButtonRole": "push button",
+   "controlRatio15": 0.759,
+   "measured": "2026-10-14 gtk-row inside xpra 6.5.4 (the first minimum 694x1004 lasts ~0.2 s before 694x980 — read by a 0.2 s poll; the gtk-row step caught it settled); controlRatio15 from test-desktop-xpra-window §15 on AIDev at d5f352538"
+  }
+ }
+}

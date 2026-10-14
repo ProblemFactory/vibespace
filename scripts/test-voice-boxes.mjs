@@ -55,6 +55,7 @@ const ROWS = [
   ['task-log.js', 'const addDetail', 'a new backlog item\'s detail (a record field)', 1],
   ['task-detail.js', 'task-detail-objective', 'a task\'s stored objective (a record field)', 1],
   ['sidebar-mounts.js', 'mounts-key-paste', 'an SSH private key paste', 1],
+  ['channel-webhook.js', 'chan-wh-paste', 'a pairing code paste (a credential — lane webhook-pair-join)', 1],
   ['sidebar-mounts.js', 'k.publicKey', 'a read-only public key to copy', 1],
   ['sidebar-mounts.js', 'device-pair-cmd', 'a read-only pairing command to copy', 1],
   ['sidebar-mounts.js', '[gdrive]', 'an rclone.conf paste', 1],

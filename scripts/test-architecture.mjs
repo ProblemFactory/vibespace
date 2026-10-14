@@ -1787,6 +1787,10 @@ for (const [edge] of EXCEPTIONS) {
 //     literals are CDP MESSAGES driven through the agent-browser mediation
 //     proxy (P6 — a real chrome, never VibeSpace's page, so there is no wizard
 //     to skip) declares `// cdp-protocol-under-test` and is exempt likewise.
+//     A suite that BOOTS through a scripts/ module (the xpra window family's
+//     parts → scripts/xpra-window-boot.mjs, lane xpra-window-split) is read
+//     with that module's text first — where its page opener lived when it was
+//     one file — so the module's import + addScript precede the part's navs.
 {
   const scope = fs.readdirSync('scripts').filter((f) => /^test-.*\.mjs$/.test(f)).map((f) => 'scripts/' + f).filter((f) => fs.readFileSync(f, 'utf8').includes("'Page.navigate'"));
   const judge = (s) => {
@@ -1797,8 +1801,14 @@ for (const [edge] of EXCEPTIONS) {
     for (const at of navs) if (!sets.some((i) => i < at)) return 'a Page.navigate with no ONBOARDED_SOURCE addScript before it';
     return null;
   };
-  const bad = scope.map((f) => [f, judge(fs.readFileSync(f, 'utf8'))]).filter(([, why]) => why);
+  const bootMods = (s) => [...s.matchAll(/\bimport\s*\{[^}]*\}\s*from\s*'\.\/((?!scratch\.mjs')(?!test-)[\w.-]+\.mjs)'/g)].map((m) => { try { return fs.readFileSync('scripts/' + m[1], 'utf8'); } catch { return ''; } });
+  const asRead = (s) => [...bootMods(s), s].join('\n');
+  const bad = scope.map((f) => [f, judge(asRead(fs.readFileSync(f, 'utf8')))]).filter(([, why]) => why);
   ok(scope.length >= 30, `§47 census scope is non-vacuous (${scope.length} chrome suites navigate a page)`);
+  const part47 = fs.readFileSync('scripts/test-desktop-xpra-window-seamless.mjs', 'utf8'), boot47 = fs.readFileSync('scripts/xpra-window-boot.mjs', 'utf8');
+  ok(part47.includes("'Page.navigate'") && judge(part47) !== null && judge(asRead(part47)) === null
+    && judge([boot47.replace(/addScriptToEvaluateOnNewDocument'/g, 'addScriptNowhere\''), part47].join('\n')) !== null,
+    '§47 the xpra window part navigates and passes ONLY through the module it boots in (alone it is red; a boot module that never adds the script is red)');
   ok(bad.length === 0, `every chrome suite pre-sets 'vs-onboarded' through ONBOARDED_SOURCE before every Page.navigate${bad.length ? ' — ' + bad.map(([f, w]) => f + ': ' + w).join('; ') : ''}`);
   ok(judge("import { scratch } from './scratch.mjs';\nawait cdp('Page.navigate', { url: U });") !== null && judge("import { scratch, ONBOARDED_SOURCE } from './scratch.mjs';\nawait cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await cdp('Page.navigate', { url: U });") === null && judge("// onboarding-under-test\nawait cdp('Page.navigate', { url: U });") === null, 'NEGATIVE CONTROL: a bare navigate is caught, the shared idiom passes, the declared exemption passes');
 }
@@ -2524,7 +2534,7 @@ console.log('§57 every suite that spawns server.js hands it per-run singleton-D
     'test-channel-threads-ui.mjs', 'test-channel-window-render.mjs', 'test-channels-aggregate-ui.mjs', 'test-channels-e2e.mjs', 'test-channels-groups-e2e.mjs', 'test-channels-panel-redraw.mjs',
     'test-chat-e2e.mjs', 'test-chat-hygiene-ui.mjs', 'test-chat-paging.mjs', 'test-cli-cmd-refresh.mjs', 'test-client-boot.mjs', 'test-collab-live-counter.mjs',
     'test-cwd-recreate.mjs', 'test-desktop-app-snap.mjs', 'test-desktop-app-window.mjs', 'test-desktop-drop.mjs', 'test-desktop-reorder.mjs', 'test-desktop-resume-paging.mjs',
-    'test-desktop-vnc-fit.mjs', 'test-desktop-xpra-window.mjs', 'test-desktop-xpra.mjs', 'test-fold-ux.mjs', 'test-fork-restore.mjs', 'test-gear-menu.mjs',
+    'test-desktop-vnc-fit.mjs', 'test-desktop-xpra.mjs', 'test-fold-ux.mjs', 'test-fork-restore.mjs', 'test-gear-menu.mjs',
     'test-ghost-host-heal.mjs', 'test-graduate-dial.mjs', 'test-group-report-card.mjs', 'test-harness-honesty.mjs', 'test-helper-ask-ui.mjs', 'test-inbox-reply-ui.mjs',
     'test-incident.mjs', 'test-integration-toggle.mjs', 'test-integrations-ui.mjs', 'test-jobs-panel.mjs', 'test-minimap-jump.mjs', 'test-mobile-gaps.mjs',
     'test-new-session-dialog.mjs', 'test-office-desktop.mjs', 'test-opencode-plugin.mjs', 'test-opencode-s9.mjs', 'test-permission-rules.mjs', 'test-profile-blindness-chip.mjs',
@@ -3926,7 +3936,10 @@ console.log('\nclock-judge census: every clock read beside a complexity claim is
 // 2026-10-04 08:55Z, a loaded rerun of test-desktop-xpra-window). Every script that starts a dbus-run-session or resolves a
 // real GTK app / builds a GTK window as a fixture hands its children a private XDG_RUNTIME_DIR (an `XDG_RUNTIME_DIR: <expr>`
 // entry that is not the inherited process.env one). DERIVED over every scripts/*.{mjs,js,cjs} on disk (untracked included);
-// NEGATIVE CONTROLS: a patched copy of a passing private-bus suite and of a passing GTK-fixture suite, the entry stripped.
+// the entry is read in the script AND the scripts/ modules it imports (one level: the xpra window family's parts resolve
+// GNOME Calculator while their server — and so every app it launches — gets the private dir in scripts/xpra-window-boot.mjs,
+// lane xpra-window-split). NEGATIVE CONTROLS: a patched copy of a passing private-bus suite and of a passing GTK-fixture
+// suite, the entry stripped (from the suite and from what it imports); the part passes through its import only.
 // §DB1 A DISPLAY BACKEND IS ONE ROW (lane dc-desktop-caps, 2026-10-04 — rv-desktop F-B1/F-B2/F-B3, rv-client F2). The rungs
 // declare CAPABILITY CELLS on DISPLAY_BACKENDS (src/desktop-apps.js CAP_KEYS); every reader asks `capsOf(rec)` (server) or
 // the record's served `caps` (client). The census: a comparison / case on a rung id or a stream kind (DERIVED from the
@@ -3960,13 +3973,16 @@ console.log('§76 every private-bus / GTK-fixture script gives its children a pr
   const GTK = /(?:bin|binOnPath)\(\s*['"](?:gnome-calculator|gnome-text-editor|gedit|zenity)['"]|Gtk\.(?:Window|ApplicationWindow|Dialog)\(/;
   const PRIV = /XDG_RUNTIME_DIR\s*:\s*(?!process\.env|undefined\b|null\b|''|"")[\w$`'"(]/;
   const fixture = (t) => DBUS.test(t) || GTK.test(t);
-  const unsafe = (t) => fixture(t) && !PRIV.test(t);
+  const imported = (t) => [...t.matchAll(/\bfrom\s+['"]\.\/([\w.-]+\.(?:mjs|js|cjs))['"]/g)].map((m) => { try { return read('scripts/' + m[1]); } catch { return ''; } });
+  const unsafe = (t, mods = imported(t)) => fixture(t) && !PRIV.test(t) && !mods.some((m) => PRIV.test(m));
   const files = fs.readdirSync(path.join(REPO, 'scripts')).filter((f) => /\.(mjs|js|cjs)$/.test(f) && f !== 'test-architecture.mjs');
   const fixtures = files.filter((f) => fixture(read('scripts/' + f)));
   const bad = fixtures.filter((f) => unsafe(read('scripts/' + f)));
   ok(fixtures.length >= 6 && bad.length === 0, `§76: ${fixtures.length} private-bus / GTK-fixture scripts (${fixtures.join(', ')}), each hands its children a private XDG_RUNTIME_DIR${bad.length ? ' — MISSING in: ' + bad.join(', ') : ''}`);
   const strip = (t) => t.replace(/XDG_RUNTIME_DIR\s*:\s*(?!process\.env)[^,}]+,?/g, '');
-  const ctl = [['test-desktop-app-snap.mjs', 'private bus'], ['test-desktop-xpra-window.mjs', 'GTK fixture']].map(([f, k]) => { const t = read('scripts/' + f); return { f, k, asWritten: unsafe(t), patched: unsafe(strip(t)) }; });
+  const ctl = [['test-desktop-app-snap.mjs', 'private bus'], ['test-desktop-xpra-window-close.mjs', 'GTK fixture']].map(([f, k]) => { const t = read('scripts/' + f); return { f, k, asWritten: unsafe(t), patched: unsafe(strip(t), imported(t).map(strip)) }; });
+  const part = read('scripts/test-desktop-xpra-window-close.mjs');
+  ok(fixture(part) && !PRIV.test(part) && imported(part).some((m) => PRIV.test(m)), `§76 the xpra window part test-desktop-xpra-window-close resolves a GTK app and passes through the module it boots in (scripts/xpra-window-boot.mjs), not by an entry of its own`);
   ok(ctl.every((c) => !c.asWritten && c.patched), `§76 NEGATIVE CONTROLS: ${ctl.map((c) => `${c.f} (${c.k}) passes as written and is caught with its XDG_RUNTIME_DIR entries stripped`).join('; ')}${ctl.some((c) => c.asWritten || !c.patched) ? ' — ' + JSON.stringify(ctl) : ''}`);
 }
 

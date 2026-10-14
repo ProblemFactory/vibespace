@@ -42,12 +42,19 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+import { bestMs } from './cost-ratio.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + String(e).slice(0, 600) : '')); } };
 const J = JSON.stringify;
 const MF = require(path.join(REPO, 'src/mail-frame.js'));
+// THE COST YARDSTICK (lane mirror-flake-hardening): a BENIGN mail at MAX_HTML_BYTES (tags, a link, words) — the walk a real
+// mail costs. A hostile shape is judged as a multiple of its CPU time measured in the same process, never in milliseconds
+// (the old 1 500 ms deadlines judged the machine); memoized — one measurement serves every leg.
+const BENIGN_MAIL = () => { const u = '<p>hello <b>world</b> and <a href="https://x.example/">a link</a></p>'; return u.repeat(Math.floor((MF.MAX_HTML_BYTES - 64) / u.length)); };
+let mailCalMs = null;
+const mailCal = () => (mailCalMs ??= bestMs(() => MF.sanitizeMailHtml(BENIGN_MAIL()), { reps: 1 }));
 
 const EVIL = 'http://evil.example';
 const EVIL_S = 'https://evil.example';
@@ -148,19 +155,17 @@ const runCorpus = (mf, opts = {}) => {
   ok(!badPics.filter((b) => !/70\.png/.test(b)).length, 'the same with Show pictures pressed — only an https picture\'s own src may appear (the http tracker never)', badPics.join('\n    '));
   const withPics = MF.sanitizeMailHtml(`<img src="${EVIL_S}/70.png"><img src="${EVIL}/69.gif">`, { pictures: true });
   ok(/src="https:\/\/evil\.example\/70\.png"/.test(withPics.html) && !/69\.gif/.test(withPics.html), 'Show pictures: an https picture gets its src, an http one never (the CSP would not load it either)', withPics.html);
-  const t0 = Date.now();
-  const huge = MF.sanitizeMailHtml('<p>' + 'x'.repeat(10 * 1024 * 1024) + '</p>');
-  ok(huge.ok === false && huge.code === 'too-large' && Date.now() - t0 < 1500, `a 10 MB body is REFUSED BY NAME (too-large — the plain text is shown), in ${Date.now() - t0} ms`, JSON.stringify({ ok: huge.ok, code: huge.code }));
-  const t1 = Date.now();
-  const many = MF.sanitizeMailHtml(Array.from({ length: 1000 }, (_, i) => `<img src="data:image/png;base64,AAAA${i % 10}" alt="p${i}">`).join(''));
+  // each costs at most 5 × a benign mail at the bound (measured 0.03–0.24 × idle and loaded) — CPU, this process
+  const costX = (x) => { let r = null; const ms = bestMs(() => { r = MF.sanitizeMailHtml(x); }, { reps: 1 }); return { r, x: ms / mailCal() }; };
+  const { r: huge, x: x0 } = costX('<p>' + 'x'.repeat(10 * 1024 * 1024) + '</p>');
+  ok(huge.ok === false && huge.code === 'too-large' && x0 <= 5, `a 10 MB body is REFUSED BY NAME (too-large — the plain text is shown), at ${x0.toFixed(2)} × a benign mail's cost`, JSON.stringify({ ok: huge.ok, code: huge.code, x: x0 }));
+  const { r: many, x: x1 } = costX(Array.from({ length: 1000 }, (_, i) => `<img src="data:image/png;base64,AAAA${i % 10}" alt="p${i}">`).join(''));
   const srcs = (many.html.match(/<img[^>]*\ssrc=/g) || []).length;
-  ok(many.ok && srcs === MF.MAX_IMAGES && many.droppedImages === 1000 - MF.MAX_IMAGES && Date.now() - t1 < 1500, `1 000 pictures: ${srcs} kept (MAX_IMAGES), ${many.droppedImages} dropped and COUNTED, in ${Date.now() - t1} ms`);
-  const t2 = Date.now();
-  const deep = MF.sanitizeMailHtml('<div>'.repeat(20000) + 'deep' + '</div>'.repeat(20000));
-  ok(deep.ok && (deep.html.match(/<div>/g) || []).length <= 512 && /deep/.test(deep.html) && Date.now() - t2 < 1500, `20 000 nested divs: the element stack is bounded (≤ 512 written), the words kept, in ${Date.now() - t2} ms`);
-  const t3 = Date.now();
-  const lt = MF.sanitizeMailHtml('<'.repeat(200000) + 'a' + ' x="'.repeat(20000));
-  ok(lt.ok && !/<[a-z]/i.test(lt.html) && Date.now() - t3 < 1500, `200 000 bare "<" and an unterminated attribute run: text, linear (${Date.now() - t3} ms)`);
+  ok(many.ok && srcs === MF.MAX_IMAGES && many.droppedImages === 1000 - MF.MAX_IMAGES && x1 <= 5, `1 000 pictures: ${srcs} kept (MAX_IMAGES), ${many.droppedImages} dropped and COUNTED, at ${x1.toFixed(2)} × a benign mail's cost`);
+  const { r: deep, x: x2 } = costX('<div>'.repeat(20000) + 'deep' + '</div>'.repeat(20000));
+  ok(deep.ok && (deep.html.match(/<div>/g) || []).length <= 512 && /deep/.test(deep.html) && x2 <= 5, `20 000 nested divs: the element stack is bounded (≤ 512 written), the words kept, at ${x2.toFixed(2)} × a benign mail's cost`);
+  const { r: lt, x: x3 } = costX('<'.repeat(200000) + 'a' + ' x="'.repeat(20000));
+  ok(lt.ok && !/<[a-z]/i.test(lt.html) && x3 <= 5, `200 000 bare "<" and an unterminated attribute run: text, linear (${x3.toFixed(2)} × a benign mail's cost)`);
 }
 
 // ── ② the mail still reads ───────────────────────────────────────────────
@@ -362,11 +367,18 @@ console.log('⑩ quoted history folded once (the outermost), a wide mail fitted'
 }
 
 // ── ⑪ bounded work: the sanitizer is linear at its own bound ─────────────
-console.log('⑪ bounded work: every quadratic shape at MAX_HTML_BYTES inside the budget (+ controls in a child)');
+console.log('⑪ bounded work: every quadratic shape at MAX_HTML_BYTES costs what a benign mail at the bound costs (+ controls in a child)');
 {
   const { spawn } = await import('node:child_process');
   const N = MF.MAX_HTML_BYTES - 64;
-  const BUDGET_MS = 1500;
+  // RELATIVE, never a deadline (lane mirror-flake-hardening: the old 1 500 ms budget judged the machine): a hostile shape's
+  // CPU time ÷ a BENIGN mail's at the same bound (CAL: tags, a link and words up to MAX_HTML_BYTES — the walk a real mail
+  // costs), both measured in one process, here and in each child — a slower or busier runner stretches both
+  const BENIGN = `() => { const u = '<p>hello <b>world</b> and <a href="https://x.example/">a link</a></p>'; return u.repeat(Math.floor(${N} / u.length)); }`;
+  const CAL_SRC = `(M, x) => { const cpu = () => { const u = process.cpuUsage(); return (u.user + u.system) / 1000; }; M.sanitizeMailHtml(x); const t = cpu(); M.sanitizeMailHtml(x); return cpu() - t; }`;
+  // measured 0.02–1.5 × here (idle and beside two busy loops on one CPU); every pre-fix copy still running when its
+  // child is cut; the bound is 5 ×
+  const BOUND_X = 5;
   /** name → a zero-argument SOURCE (the child builds the same bytes) — every one is a mail at the size bound */
   const SHAPES = [
     ['a tag with no ">" to the end', `() => '<a '.repeat(${Math.floor(N / 3)})`],
@@ -379,21 +391,24 @@ console.log('⑪ bounded work: every quadratic shape at MAX_HTML_BYTES inside th
     ['CSS "@font-face{" with no "}"', `() => '<style>' + '@font-face{'.repeat(${Math.floor(N / 11) - 2}) + '</style>'`],
   ];
   const build = (src) => new Function(`return (${src})()`)();
+  const CAL = mailCal();
   for (const [name, src] of SHAPES) {
     const x = build(src);
-    const t = process.hrtime.bigint();
-    const r = MF.sanitizeMailHtml(x);
-    const ms = Number(process.hrtime.bigint() - t) / 1e6;
-    ok(r.ok && ms < BUDGET_MS && !/<(?!\/?(style|p)\b)[a-z]/i.test(r.html.slice(0, 4096)), `${name} at ${(x.length / 1048576).toFixed(2)} MB: ${ms.toFixed(0)} ms (budget ${BUDGET_MS})`, `ok=${r.ok} ms=${ms}`);
+    let r = null;
+    const ms = bestMs(() => { r = MF.sanitizeMailHtml(x); }, { reps: 1 });
+    ok(r.ok && ms / CAL <= BOUND_X && !/<(?!\/?(style|p)\b)[a-z]/i.test(r.html.slice(0, 4096)), `${name} at ${(x.length / 1048576).toFixed(2)} MB: ${(ms / CAL).toFixed(2)} × a benign mail at the bound (≤ ${BOUND_X} ×; ${CAL.toFixed(0)} ms CPU here)`, `ok=${r.ok} x=${ms / CAL}`);
   }
-  /** THE SAME JUDGE in a child: require `file`, build the shape, time sanitizeMailHtml; cut at the budget. */
-  const inChild = (file, src) => new Promise((res) => {
-    const code = `const M=require(${JSON.stringify(file)});const x=(${src})();const t=process.hrtime.bigint();M.sanitizeMailHtml(x);process.stdout.write(String(Number(process.hrtime.bigint()-t)/1e6));`;
+  /** THE SAME JUDGE in a child: require `file`, CAL on the benign mail, then the shape — both CPU, one process. A MUTANT
+   *  is cut after CONTROL_WAIT_MS (a wait, never a verdict on speed: a cut copy is over by construction); the REAL
+   *  module is never cut. */
+  const CONTROL_WAIT_MS = 3000;
+  const inChild = (file, src, { cut: mayCut = true } = {}) => new Promise((res) => {
+    const code = `const M=require(${JSON.stringify(file)});const cal=(${CAL_SRC})(M,(${BENIGN})());const x=(${src})();const u0=process.cpuUsage();M.sanitizeMailHtml(x);const u=process.cpuUsage(u0);process.stdout.write(JSON.stringify({cal,ms:(u.user+u.system)/1000}));`;
     const c = spawn(process.execPath, ['-e', code], { stdio: ['ignore', 'pipe', 'ignore'] });
     let out = '';
     c.stdout.on('data', (d) => { out += d; });
-    const cut = setTimeout(() => c.kill('SIGKILL'), BUDGET_MS + 1500);
-    c.on('exit', (_code, sig) => { clearTimeout(cut); const ms = out ? Number(out) : null; res({ ms, killed: !!sig, over: !!sig || !(ms < BUDGET_MS) }); });
+    const cut = mayCut ? setTimeout(() => c.kill('SIGKILL'), CONTROL_WAIT_MS) : null;
+    c.on('exit', (_code, sig) => { clearTimeout(cut); let r = null; try { r = JSON.parse(out); } catch { } const x = r ? r.ms / r.cal : null; res({ x, cal: r && r.cal, killed: !!sig, over: !!sig || !(x <= BOUND_X) }); });
   });
   const M = mutantCopies('mail-frame-linear', REPO);
   const src = fs.readFileSync(path.join(REPO, 'src/mail-frame.js'), 'utf-8');
@@ -409,10 +424,10 @@ console.log('⑪ bounded work: every quadratic shape at MAX_HTML_BYTES inside th
     const patched = src.replace(from, to);
     if (patched === src) { ok(false, `CONTROL setup: ${what} — the fixed line is present`, from); continue; }
     const file = M.write('src/mail-frame.js', patched, `linear-${shape}`);
-    runs.push(inChild(file, SHAPES[shape][1]).then((r) => ok(r.over, `CONTROL: a copy with ${what} is OVER the budget on "${SHAPES[shape][0]}" (${r.killed ? 'cut at the budget' : `${Math.round(r.ms)} ms`})`, JSON.stringify(r))));
+    runs.push(inChild(file, SHAPES[shape][1]).then((r) => ok(r.over, `CONTROL: a copy with ${what} is OVER the bound on "${SHAPES[shape][0]}" (${r.killed ? `still running after the ${CONTROL_WAIT_MS} ms wait — cut` : `${r.x.toFixed(1)} × a benign mail`})`, JSON.stringify(r))));
   }
   // the judge itself: the REAL module in the same child harness is under the budget (the harness is not what fails)
-  runs.push(inChild(path.join(REPO, 'src/mail-frame.js'), SHAPES[0][1]).then((r) => ok(!r.over, `the child harness on the REAL module: under the budget (${r.ms == null ? 'no answer' : Math.round(r.ms) + ' ms'})`, JSON.stringify(r))));
+  runs.push(inChild(path.join(REPO, 'src/mail-frame.js'), SHAPES[0][1], { cut: false }).then((r) => ok(!r.over, `the child harness on the REAL module: under the bound (${r.x == null ? 'no answer' : r.x.toFixed(2) + ' × a benign mail'}; never cut)`, JSON.stringify(r))));
   await Promise.all(runs);
   // (round 1's Content-Length wiring pin moved into ⑫: the header rung lives in readBounded, the bytes decide)
   for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 5 })) ok(c.pass, c.name, c.detail);
@@ -536,10 +551,11 @@ console.log('⑬ a mail does not animate its row: keyframes stripped, the parent
   ok(mintAt > 0 && askAt > 0 && applyAt > askAt && /if \(v\.act === 'height'\) applyHeight\(s, v\.h\);/.test(dom) && /if \(hv\.act === 'frozen' && !s\.frozenSaid\) \{ s\.frozenSaid = true; s\.box\.dataset\.frozen = '1'; \}/.test(dom) && !/s\.h = v\.h;/.test(dom), 'WIRING: a budget per live frame (minted with the token), the listener hands every height to applyHeight, the verdict is asked there, only an `apply` reaches the row; a freeze is marked on the box (data-frozen)');
   ok(/if \(hv\.act === 'hold' && hv\.retryAt !== undefined && !s\.trail\) \{/.test(dom) && /s\.trail = setTimeout\(\(\) => \{ s\.trail = 0; const p = MF\.heightPending\(b\); if \(p !== null && s\.frame && s\.budget === b\) applyHeight\(s, p\); \}, Math\.max\(0, hv\.retryAt - Date\.now\(\)\) \+ 5\);/.test(dom) && /if \(s\.trail\) \{ clearTimeout\(s\.trail\); s\.trail = 0; \}/.test(dom), 'WIRING: a hold with retryAt arms ONE timer per frame that re-judges heightPending of THAT budget (a rebuilt frame\'s new budget is never fed an old height); dropping the frame clears it');
   // the animation shape at the bound stays linear (⑪'s judge)
-  const N = MF.MAX_HTML_BYTES - 64; const t = process.hrtime.bigint();
-  const r = MF.sanitizeMailHtml('<style>' + '@keyframes x{'.repeat(Math.floor(N / 13) - 2) + '</style>');
-  const ms = Number(process.hrtime.bigint() - t) / 1e6;
-  ok(r.ok && ms < 1500 && !/keyframes/.test(r.html), `"@keyframes x{" with no "}" at the bound: ${ms.toFixed(0)} ms (linear)`);
+  const N = MF.MAX_HTML_BYTES - 64;
+  const kx = '<style>' + '@keyframes x{'.repeat(Math.floor(N / 13) - 2) + '</style>';
+  let r = null;
+  const kxX = bestMs(() => { r = MF.sanitizeMailHtml(kx); }, { reps: 1 }) / mailCal();
+  ok(r.ok && kxX <= 5 && !/keyframes/.test(r.html), `"@keyframes x{" with no "}" at the bound: ${kxX.toFixed(2)} × a benign mail's cost (≤ 5 ×, linear — ⑪'s judge)`);
   // CONTROLS
   const M = mutantCopies('mail-frame-anim', REPO);
   const src = fs.readFileSync(path.join(REPO, 'src/mail-frame.js'), 'utf-8');

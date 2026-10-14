@@ -246,7 +246,7 @@ async function runTick(w, eng, loopMod, { midTick = null } = {}) {
 }
 
 // ── §4 the WORK and the LOOP ──
-console.log('§4 work linear in conversations and members, the loop under 250 ms at 150 µs per fs call');
+console.log('§4 work linear in conversations and members, the loop ≤ 1/5 of the reverted tick at 150 µs per fs call');
 const FS_CALLS = ['readFileSync', 'statSync', 'lstatSync', 'readlinkSync', 'existsSync', 'readdirSync', 'realpathSync', 'openSync'];
 async function measureTick(shape, { slowUs = 0, pre = false } = {}) {
   const w = mkWorld({ ...shape, engine: pre ? PRE_ENGINE : engMod });
@@ -286,7 +286,11 @@ async function measureTick(shape, { slowUs = 0, pre = false } = {}) {
   const slow = await measureTick({ members: 13, pooled: 25 }, { slowUs: 150 });
   const preSlow = await measureTick({ members: 13, pooled: 25 }, { slowUs: 150, pre: true });
   console.log(`    150 µs per fs call — fixed: sync ${slow.syncMs} ms, longest loop gap ${slow.gap} ms; reverted: sync ${preSlow.syncMs} ms, gap ${preSlow.gap} ms`);
-  ok(`§4 LOOP: every fs call 150 µs (the NFS-backed data dir) — the tick holds the loop ${slow.syncMs} ms synchronously, longest gap ${slow.gap} ms (bound 250)`, slow.syncMs < 250 && slow.gap < 250, JSON.stringify(slow));
+  // RELATIVE, never a wall-clock literal (lane mirror-flake-hardening: `< 250` judged the machine — the busy-waited
+  // 150 µs per call and the tick's own work scale together on a slower runner): the fixed tick holds the loop at most a
+  // fifth of what the reverted tick holds it in this same run (measured 79 vs 1768 ms here, 22 ×; the WORK census above
+  // is the absolute half — calls, not milliseconds)
+  ok(`§4 LOOP: every fs call 150 µs (the NFS-backed data dir) — the tick holds the loop ${slow.syncMs} ms synchronously, longest gap ${slow.gap} ms: ≤ 1/5 of the reverted tick in this run (${preSlow.syncMs} / ${preSlow.gap} ms)`, slow.syncMs * 5 <= preSlow.syncMs && slow.gap * 5 <= preSlow.gap, JSON.stringify({ slow, preSlow }));
   ok(`§4 LOOP control: the reverted tick holds it ${preSlow.syncMs} ms (> 1 s — production's stall, scaled)`, preSlow.syncMs > 1000 && preSlow.gap > 1000, JSON.stringify(preSlow));
 }
 

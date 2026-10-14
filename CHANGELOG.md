@@ -2,6 +2,20 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.270 — 2026-10-14
+
+### Added
+- Pair two VibeSpaces from the Channels panel: Callers… on a path makes a one-time code; on the other one, Webhook ⋯ → “Join with a pairing code…” takes it.
+
+### Changed
+- A pairing code still works if VibeSpace restarts within its 10 minutes, and a refused code says why (expired, already used, not a pairing code).
+
+### Fixed
+- An agent told about a channel message in a digest now hears once when the sender recalls it; a message it got twice brings one recall note.
+
+### Security
+- Background Work jobs never inherit an agent's login from the environment VibeSpace was started in, whatever kind of agent it is.
+
 ## 2.369.269 — 2026-10-14
 
 ### Added

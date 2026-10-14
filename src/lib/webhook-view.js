@@ -92,3 +92,51 @@ export function sendOutcomes(r, callers, { t = tDevice } = {}) {
     return { type: 'error', text: t('{name}: {why}', { name: c.name, why: (p.proposal && p.proposal.reason) || p.error || st || '?' }) };
   });
 }
+
+/* ── lane webhook-pair-join (B-5ee0 a): THE PAIRING DOORS' WORDS — the join box's read of a code (the route's `check`), each
+ *  refusal BY NAME (the route's code worded here, so zh / ja say it too), what a finished pairing did, and the shown-once
+ *  code's clock. Card grammar: who + verb + what; the caller id and the hook URL stay under Technical details. ── */
+const fromOf = (from, t) => String(from || '').trim() || t('The other side');
+/** what the paste box says once the server read the code (`check: true`): who offers it, their path, how long it lives */
+export function joinPreviewText(ck, { t = tDevice, now = Date.now() } = {}) {
+  const n = Math.max(1, Math.ceil((Number(ck && ck.expiresAt) - now) / 60000));
+  return t('{from} offers its path {path} ({host}) — this code works once, for {n} more min', { from: fromOf(ck && ck.from, t), path: String((ck && ck.theirPath) || ''), host: String((ck && ck.host) || ''), n });
+}
+/** what joining does to the path here (made / joined / renewed) */
+export function joinPathText(ck, slug, { t = tDevice } = {}) {
+  const from = fromOf(ck && ck.from, t), path = String(slug || '');
+  if (ck && ck.repair) return t('You are already paired with {from} on {path} — this code renews that pairing', { from, path });
+  if (ck && ck.exists) return t('{path} already exists here — {from} joins it as one more caller', { from, path });
+  return t('A new path {path} is made here for {from}\'s calls', { from, path });
+}
+/** THE NAMED REFUSALS — the route's `code` → one sentence (an unknown code: the server's own words) */
+export const PAIR_REFUSALS = Object.freeze(['bad-code', 'caller-token', 'expired', 'https-required', 'bad-url', 'no-instance-url', 'code-used', 'code-unknown', 'rate-limited', 'pair-refused']);
+export function joinWhyText(r, { from = '', t = tDevice } = {}) {
+  const who = fromOf(from, t);
+  switch (r && r.code) {
+    case 'bad-code': return t('That is not a VibeSpace pairing code — copy the whole code again (it starts vswp_)');
+    case 'caller-token': return t('That is a caller token, not a pairing code — ask the other side for a pairing code (it starts vswp_)');
+    case 'expired': return t('This code has expired — a code lives 10 minutes; ask for a new one');
+    case 'https-required': return t('The code points at a plain http address — pairing needs https (or allow private reply URLs in Settings)');
+    case 'bad-url': return t('The code carries an address VibeSpace cannot use — ask for a new code');
+    case 'no-instance-url': return t('This VibeSpace has no public address yet — the other side needs one to call back; set the instance URL first');
+    case 'code-used': return t('{from} says this code was already used — ask {from} for a new one', { from: who });
+    case 'code-unknown': return t('{from} does not know this code — it expired there, a newer code replaced it, or it was altered; ask for a new one', { from: who });
+    case 'rate-limited': return t('{from} is refusing calls from this address for now — try again in a few minutes', { from: who });
+    default: return t('The pairing did not complete: {why}', { why: (r && r.error) || t('no answer') });
+  }
+}
+/** the mint door's refusal (no instance URL, an http one…): a named code worded, else the server's own words */
+export function mintWhyText(r, { t = tDevice } = {}) { return PAIR_REFUSALS.includes(r && r.code) ? joinWhyText(r, { t }) : String((r && r.error) || t('no answer')); }
+/** what a finished join did — the path, who calls it, where replies go */
+export function joinDoneText(r, { from = '', t = tDevice } = {}) {
+  const who = fromOf(from, t), path = String((r && r.path && r.path.slug) || '');
+  return r && r.repaired ? t('Pairing with {from} renewed on path {path} — the old tokens no longer work', { from: who, path })
+    : t('Paired with {from} — its calls land in path {path}, and your replies go back to it', { from: who, path });
+}
+/** the shown-once code's clock: "Works once · expires in 9:41", then "Expired — make a new code" (null) */
+export function codeClockText(expiresAt, { t = tDevice, now = Date.now() } = {}) {
+  const left = Math.ceil((Number(expiresAt) - now) / 1000);
+  if (!(left > 0)) return null;
+  return t('Works once · expires in {time}', { time: `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}` });
+}

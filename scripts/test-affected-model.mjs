@@ -16,10 +16,12 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import * as M from './affected-model.mjs';
-import { SUITES, affectedSuites, suiteInputs, listAffected } from './ci.mjs';
+import { SUITES, affectedSuites, suiteInputs, listAffected, reachContext } from './ci.mjs';
 import { gitEnvFrom } from './git-env.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+// the §47 passport word, built from parts: a stub suite that drives a page says it, and THE TIER RULE reads this file too
+const PASSPORT = ['ONBOARDED', 'SOURCE'].join('_');
 const GIT_ENV = gitEnvFrom(process.env);
 let pass = 0, fail = 0;
 const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } };
@@ -212,10 +214,12 @@ console.log('\n§3 the wiring (ci.mjs affectedSuites, real git)');
   w('src/lib/widget.js', "import { t } from './i18n.js';\nel.className = 'w-box'; inner.className = 'w-chip';\n");
   w('public/style.css', CSS);
   w('public/index.html', '<div id="shell"></div>\n');
-  w('scripts/test-zh.mjs', "spawn(process.execPath, ['server.js']);\nlocalStorage.setItem('vibespace.lang', 'zh');\n");
-  w('scripts/test-en.mjs', "spawn(process.execPath, ['server.js']);\n");
-  w('scripts/test-widget.mjs', "spawn(process.execPath, ['server.js']);\ndocument.querySelector('.w-chip');\n");
-  w('scripts/test-window.mjs', "spawn(process.execPath, ['server.js']);\nclick('.settings-window');\n");
+  // the page suites carry the §47 passport (ONBOARDED_SOURCE): lane affected-static-reach's rule lets a client file or a
+  // shared table reach only a suite that drives a browser, and these four stand for page suites
+  w('scripts/test-zh.mjs', `spawn(process.execPath, ['server.js']);\naddScript(${PASSPORT});\nlocalStorage.setItem('vibespace.lang', 'zh');\n`);
+  w('scripts/test-en.mjs', `spawn(process.execPath, ['server.js']);\naddScript(${PASSPORT});\n`);
+  w('scripts/test-widget.mjs', `spawn(process.execPath, ['server.js']);\naddScript(${PASSPORT});\ndocument.querySelector('.w-chip');\n`);
+  w('scripts/test-window.mjs', `spawn(process.execPath, ['server.js']);\naddScript(${PASSPORT});\nclick('.settings-window');\n`);
   w('scripts/test-import.mjs', "import w from '../src/lib/widget.js';\nconsole.log(w);\n");
   const S = ['test-zh', 'test-en', 'test-widget', 'test-window', 'test-import'].map((name) => ({ name }));
   const c0 = commitAll('base');
@@ -237,6 +241,13 @@ console.log('\n§3 the wiring (ci.mjs affectedSuites, real git)');
   const c2 = commitAll('a code line in the dictionary');
   ok(sel(run(`${c1}..${c2}`)) === 'test-en,test-import,test-widget,test-window,test-zh' && /the OLD rule \(5 suites\) — not a dictionary entry/.test(run(`${c1}..${c2}`).summary),
     'CONTROL: a code line in the dictionary ⇒ the old rule (all 5), and the summary says why');
+  // lane affected-static-reach: the old rule's fallback then meets the reach rule — a shared table is read only on a page
+  w('scripts/test-srv.mjs', "spawn(process.execPath, ['server.js']);\nawait fetch('/api/sessions');\n");
+  const SS = [...S, { name: 'test-srv' }];
+  ok(sel(affectedSuites({ range: `${c1}..${c2}`, suites: SS, root: repo, env: { LANG: 'C.UTF-8' } })) === 'test-en,test-import,test-widget,test-window,test-zh'
+    && sel(affectedSuites({ range: `${c1}..${c2}`, suites: SS, root: repo, env: { LANG: 'C.UTF-8' }, reach: false })).includes('test-srv'),
+    'a server-only booting suite (no browser) is dropped for a dictionary fallback — the old rule (reach: false) selects it');
+  fs.rmSync(path.join(repo, 'scripts/test-srv.mjs'));
 
   w('public/style.css', edit(CSS, '.w-chip { color: red; }', '.w-chip { color: green; }'));
   const c3 = commitAll('a .w-chip rule');
@@ -246,7 +257,7 @@ console.log('\n§3 the wiring (ci.mjs affectedSuites, real git)');
     `a .w-chip edit selects the suite naming it; the importer of the module that draws it never loads style.css — named, NOT added (${sel(a3)}; outside ${r3.outside.join()})`);
   // a BUILD OUTPUT draws every class but is no source (B: a built tree selected 127 suites for the .266 edit, not 98)
   w('public/bundle.js', "a.className = 'w-chip'; b.className = 'w-box';\n");
-  w('scripts/test-bundle.mjs', "spawn(process.execPath, ['server.js']);\nload('/bundle.js');\n");
+  w('scripts/test-bundle.mjs', `spawn(process.execPath, ['server.js']);\naddScript(${PASSPORT});\nload('/bundle.js');\n`);
   const SB = [...S, { name: 'test-bundle' }];
   const bsel = () => sel(affectedSuites({ range: `${c2}..${c3}`, suites: SB, root: repo, env: { LANG: 'C.UTF-8' } }));
   ok(bsel() === 'test-widget', 'an UNTRACKED build output (public/bundle.js drawing .w-chip) is no drawer: the suite naming it is not selected');
@@ -271,13 +282,15 @@ console.log('\n§3 the wiring (ci.mjs affectedSuites, real git)');
 
   w('src/lib/widget.js', "import { t } from './i18n.js';\nel.className = 'w-box'; inner.className = 'w-chip big';\n");
   const c7 = commitAll('widget.js');
-  ok(sel(run(`${c6}..${c7}`)) === 'test-en,test-import,test-widget,test-window,test-zh', 'any other product file keeps the old rule (src/ boots every booting suite)');
+  ok(sel(run(`${c6}..${c7}`)) === 'test-en,test-import,test-widget,test-window,test-zh', 'any other product file is no table: its importer loads it, the suite naming .w-chip meets its reach, the three that derive no reach run on it (reach \'all\')');
+  ok(sel(run(`${c6}..${c7}`, { reach: false })) === 'test-en,test-import,test-widget,test-window,test-zh', '…the same five as the old rule here (reach: false)');
   w('src/lib/i18n-zh.js', edit(fs.readFileSync(path.join(repo, 'src/lib/i18n-zh.js'), 'utf-8'), '"再见"', '"拜拜"'));
   w('public/style.css', edit(fs.readFileSync(path.join(repo, 'public/style.css'), 'utf-8'), '.w-chip { color: red; }', '.w-chip { color: teal; }'));
   const c8 = commitAll('a zh entry + a .w-chip rule');
   ok(sel(run(`${c7}..${c8}`)) === 'test-widget,test-zh', `one range, two tables: the union of each file's verdict (${sel(run(`${c7}..${c8}`))})`);
   const ciSrc = fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf-8');
-  ok(/listAffected\(\{ range: rangeArg \|\| null, shard, dir, why: !!arg\('why'\) \}\)/.test(ciSrc) && /affectedSuites\(\{ range, suites: all, root: runRoot, gitRoot: repo, why \}\)/.test(ciSrc),
+  // `, host` (lane ci-aidev-desktop-batch): --list-affected also takes the --host cut
+  ok(/listAffected\(\{ range: rangeArg \|\| null, shard, dir, why: !!arg\('why'\)(?:, host)? \}\)/.test(ciSrc) && /affectedSuites\(\{ range, suites: all, root: runRoot, gitRoot: repo, why \}\)/.test(ciSrc),
     'WIRING: --why reaches --list-affected and the heavy gate\'s selection');
 }
 
@@ -293,9 +306,14 @@ console.log('\n§4 the census (the real table)');
   ok(heavy.every((s) => inputs.get(s.name).files.has(`scripts/${s.name}.mjs`)), 'every heavy suite is selected by its own file');
   for (const f of Object.keys(M.MODELED)) {
     const reach = heavy.filter((s) => { if (s.always) return false; const { files, prefixes } = inputs.get(s.name); return files.has(f) || [...prefixes].some((p) => f.startsWith(p)); }).map((s) => s.name).sort();
-    const fb = affectedSuites({ range: 'nope..nope', suites: heavy, root: REPO, changed: [f], memo, env: { LANG: 'C.UTF-8' } });
+    const fb = affectedSuites({ range: 'nope..nope', suites: heavy, root: REPO, changed: [f], memo, env: { LANG: 'C.UTF-8' }, reach: false });
     const got = fb.selected.filter((s) => !s.always).map((s) => s.name).sort();
-    ok(reach.length > 100 && got.join() === reach.join() && /the OLD rule/.test(fb.summary), `${f}: an edit the rule cannot attribute (here: no diff) keeps the old reach exactly (${got.length} = ${reach.length})`);
+    ok(reach.length > 100 && got.join() === reach.join() && /the OLD rule/.test(fb.summary), `${f}: an edit the rule cannot attribute (here: no diff) keeps the old reach exactly (${got.length} = ${reach.length}; reach: false)`);
+    // …and the static reach (lane affected-static-reach) then keeps exactly the suites that drive a browser or load the table themselves
+    const rc = reachContext({ suites: heavy, root: REPO, memo });
+    const want = reach.filter((n) => { const s = heavy.find((x) => x.name === n); return rc.own(s, f) || rc.suite(s).browser; });
+    const now = affectedSuites({ range: 'nope..nope', suites: heavy, root: REPO, changed: [f], memo, env: { LANG: 'C.UTF-8' } }).selected.filter((s) => !s.always).map((s) => s.name).sort();
+    ok(now.length < got.length && now.join() === want.join(), `${f}: with the static reach, a shared table read on every page keeps the old reach's browser suites + its own loaders (${now.length} of ${got.length})`);
   }
   const full = listAffected({ dir: mktmp('markers') }).names.sort();
   ok(full.join() === heavy.map((s) => s.name).sort().join(), `the FULL heavy tier is the table (${full.length} suites) — the rules touch only the affected selection`);

@@ -1527,7 +1527,7 @@ console.log('\n⑬ the change feed: the search page, the declared unit, the desc
   const t0big = Date.now();
   const eBig = await threw(() => a.changes({ from, to }));
   st.bigPage = 0;
-  ok(eBig && eBig.code === 'vendor-error' && eBig.detail && eBig.detail.contract === 'page-size' && Date.now() - t0big < 500, `a page of 10 000 items for a page size of 30 is refused as the page contract (the feed parks by name) in ${Date.now() - t0big} ms — never cut to 30 with 9 970 hits dropped`, JSON.stringify(eBig && { code: eBig.code, detail: eBig.detail }));
+  ok(eBig && eBig.code === 'vendor-error' && eBig.detail && eBig.detail.contract === 'page-size', `a page of 10 000 items for a page size of 30 is refused as the page contract (the feed parks by name — the contract named is the evidence; ${Date.now() - t0big} ms, information) — never cut to 30 with 9 970 hits dropped`, JSON.stringify(eBig && { code: eBig.code, detail: eBig.detail }));
   // verify r2 (the revert table: the adapter's own page-size throw was a belt no gate noticed — the registry's page
   // contract refuses the same page): the adapter refuses BEFORE it reads a single item, so a refused page teaches it
   // nothing. Its single-chat memory (5 000 ids, oldest first — describe()'s and convCaps' evidence that a chat is a DM)
@@ -1804,7 +1804,6 @@ console.log('\n⑬ the change feed: the search page, the declared unit, the desc
     // THE HIT READER IS BOUNDED BEFORE PARSE: a megabyte create_time / chat id, a meta_data that is an array, an item that
     // is a string — each malformed by name in well under the budget; the snippet is never touched
     const big = 'x'.repeat(1 << 20);
-    const t0 = Date.now();
     const rs = [
       lark.readSearchHit({ id: 'om_1', meta_data: { chat_id: 'oc_1', create_time: `2026-09-30T00:00:00+08:00${big}`, message_id: 'om_1' } }, { now: T0 }),
       lark.readSearchHit({ id: 'om_1', meta_data: { chat_id: big, create_time: isoAt(T0 - 1000), message_id: 'om_1' } }, { now: T0 }),
@@ -1813,8 +1812,11 @@ console.log('\n⑬ the change feed: the search page, the declared unit, the desc
       lark.readSearchHit({ meta_data: { chat_id: 'oc_1', create_time: '2026-02-30T00:00:00Z', message_id: 'om_1' } }, { now: T0 + 100 * 86400e3 * 30 }),
       lark.readSearchHit({ display_info: { toString() { throw new Error('the snippet was read'); } }, id: 'om_ok', meta_data: { chat_id: 'oc_1', create_time: isoAt(T0 - 1000), is_p2p_chat: 'true' } }, { now: T0 }),
     ];
-    const ms = Date.now() - t0;
-    ok(JSON.stringify(rs.slice(0, 5).map((r) => r.fields)) === JSON.stringify([['meta_data.create_time'], ['meta_data.chat_id'], ['meta_data'], ['item'], ['meta_data.create_time']]) && rs[5].ok && rs[5].hit.vendorId === 'om_ok' && rs[5].hit.isP2p === true && ms < 200, `lark-p2p: the ONE reader is bounded before parse (${ms} ms): an over-long time or id, an array for meta_data, a non-object item, a calendar date that does not exist (Feb 30) — each malformed by name; the snippet is never read; the id from \`id\`, the p2p flag from its string`, JSON.stringify(rs.map((r) => r.fields || r.hit)));
+    // "bounded before parse" is judged by WORK (lane mirror-flake-hardening: `ms < 200` judged the machine): the work
+    // meter (started above) reads the same work for two megabyte fields as for two 2 MiB ones — scripts/work-meter.mjs
+    const twoBig = (n) => { const x = 'x'.repeat(n); return [{ id: 'om_1', meta_data: { chat_id: 'oc_1', create_time: `2026-09-30T00:00:00+08:00${x}`, message_id: 'om_1' } }, { id: 'om_1', meta_data: { chat_id: x, create_time: isoAt(T0 - 1000), message_id: 'om_1' } }]; };
+    const gHit = bounded(twoBig, (hs) => hs.map((h) => lark.readSearchHit(h, { now: T0 })), 1 << 20, ['src/channels/lark.js']);
+    ok(JSON.stringify(rs.slice(0, 5).map((r) => r.fields)) === JSON.stringify([['meta_data.create_time'], ['meta_data.chat_id'], ['meta_data'], ['item'], ['meta_data.create_time']]) && rs[5].ok && rs[5].hit.vendorId === 'om_ok' && rs[5].hit.isP2p === true && gHit.ok, `lark-p2p: the ONE reader is bounded before parse (WORK ×${(+gHit.r).toFixed(2)} from 1 to 2 MiB fields, ≤ ${gHit.ratio}): an over-long time or id, an array for meta_data, a non-object item, a calendar date that does not exist (Feb 30) — each malformed by name; the snippet is never read; the id from \`id\`, the p2p flag from its string`, JSON.stringify(rs.map((r) => r.fields || r.hit)));
   }
   for (const c of copiesCensus(MP.files, MP.dir, REPO, { minCopies: 2, label: 'chan-lark-p2p: ' })) ok(c.pass, c.name, c.pass ? undefined : c.detail);
 }

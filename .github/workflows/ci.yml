@@ -15,7 +15,9 @@
 name: ci
 on:
   push:
-    branches: [master]
+    # ci/** (lane ci-aidev-desktop-batch, q-038): a train or a lane pushed to a
+    # ci/<name> branch gets the same mirror before it reaches master
+    branches: [master, 'ci/**']
   pull_request:
 jobs:
   fast:
@@ -35,7 +37,7 @@ jobs:
         with:
           node-version: 22
       - name: Install dtach (session persistence layer the boot smoke needs)
-        run: sudo apt-get update && sudo apt-get install -y dtach
+        run: bash scripts/ci-apt.sh dtach
       - name: Install claude CLI (chat E2E; subscription oat auth is the
           officially documented CI channel — docs/en/github-actions)
         run: npm i -g @anthropic-ai/claude-code
@@ -44,6 +46,17 @@ jobs:
         env:
           # claude setup-token secret; absent on fork PRs → chat E2E SKIPs
           VIBESPACE_CI_OAT: ${{ secrets.VIBESPACE_CI_OAT }}
+  # HOSTED HALF ONLY (lane ci-aidev-desktop-batch, design q-038 step ①,
+  # 2026-10-14): `--host=hosted` runs the heavy suites a hosted runner CAN run
+  # (scripts/ci.mjs HOSTS — derived from the programs each suite's code names);
+  # the self-hosted half (xpra / Xvfb / x11vnc / LibreOffice / codex / opencode /
+  # bwrap / FUSE — 48 suites that only SKIPPED here) is the desktop batch on
+  # AIDev (`node scripts/ci-remote.mjs --host aidev --batch desktop --lanes 8`).
+  # SIX shards, packed LONGEST-FIRST (LPT) by this runner's own per-suite times
+  # checked in at scripts/fixtures/ci-shard-timings.json (Actions runs
+  # 38504978786 + 38459476258): 1683 s of suites each ≈ 14 min over two lanes,
+  # vs 6.1–18.6 min by the name hash. test-ci-gate §8b/§8c hold the matrix to
+  # every slice and the two halves to a partition of the tier.
   # SHARDED (lane mirror-green r2, 2026-10-03): ONE heavy job hit its 60-min
   # timeout on .199/.200 — 216 suites over the runner's two lanes (4 cpus) had
   # drained in 2611–2950 s already on .196–.198. `--shard i/4` runs one slice
@@ -56,12 +69,12 @@ jobs:
   # must not cancel the others (the tier reports ALL the damage). `heavy`
   # below is the ONE status that reads green/red for the whole tier.
   heavy-shards:
-    name: heavy ${{ matrix.shard }}/4
+    name: heavy ${{ matrix.shard }}/6
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6]
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -69,7 +82,7 @@ jobs:
         with:
           node-version: 22
       - name: Install dtach (session persistence layer the boot smokes need)
-        run: sudo apt-get update && sudo apt-get install -y dtach
+        run: bash scripts/ci-apt.sh dtach
       # CJK fonts (lane-mirror-197, 2.369.198): the runner image ships DejaVu +
       # Liberation and NO CJK family, so every zh / ja glyph the chrome suites
       # measure was DejaVu's fallback box — narrower than the glyph a Chinese or
@@ -80,7 +93,7 @@ jobs:
       # alone. Users have CJK fonts; the runner gets the same family. The
       # controls stay font-independent regardless (test-channel-threads-ui ⑥).
       - name: Install CJK fonts (the runner measures zh / ja text as users see it)
-        run: sudo apt-get install -y fonts-noto-cjk
+        run: bash scripts/ci-apt.sh --no-update fonts-noto-cjk
       - name: Install claude CLI
         run: npm i -g @anthropic-ai/claude-code
       - run: npm ci
@@ -100,7 +113,7 @@ jobs:
       # kernel OOM killer is SIGKILL) is a RED here, not a supersession — that
       # confusion is what once showed this job a green tick for a tier that
       # crashed and then ran nothing.
-      - run: node scripts/ci.mjs --heavy --dirty-ok --shard ${{ matrix.shard }}/4
+      - run: node scripts/ci.mjs --heavy --dirty-ok --host=hosted --shard ${{ matrix.shard }}/6
         env:
           VIBESPACE_CI_OAT: ${{ secrets.VIBESPACE_CI_OAT }}
       # A chrome suite that goes red HERE and green locally (2.369.125's

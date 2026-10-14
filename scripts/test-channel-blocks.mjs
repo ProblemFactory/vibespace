@@ -64,6 +64,7 @@ import { pathToFileURL } from 'node:url';
 import { scratch } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { judgeInChild, LINEAR_BOUND } from './work-meter.mjs';
+import { bestMs } from './cost-ratio.mjs';
 import { engineSource } from './channels-engine-src.mjs';   // lane dc-channels-seams: the engine + its three family files as one text
 
 const require = createRequire(import.meta.url);
@@ -565,10 +566,13 @@ const msOf = (fn) => { const t = process.hrtime.bigint(); fn(); return Number(pr
 const K = 1024;
 const MANY_NAMES = Array.from({ length: 256 }, (_, i) => ({ id: String(i), name: 'x'.repeat(200 - (i % 50)) }));
 /** THE LINEARITY TABLE: every input that made a rung quadratic, and the bound
- *  each must hold to. The bound is the mechanism's own cost × a stated slack:
- *  measured 3–73 ms here after the fix (2 280 / 11 394 / 1 074 ms before), the
- *  bound is 800 ms = ~10× the slowest, so a loaded runner passes and the
- *  quadratic rung (seconds, minutes at 1 MiB) never does. */
+ *  each must hold to — RELATIVE, never a deadline (lane mirror-flake-hardening:
+ *  the old 800 ms judged the machine): each input's CPU time (best of 2) ÷ the
+ *  CPU time of the rung's own benign walk at the record's text bound, measured
+ *  in this process (CAL — a slower or busier runner stretches both; CPU time is
+ *  never charged for a preemption). Measured ≤ 32 × here, idle and beside three
+ *  busy loops on one CPU; the quadratic rungs read 450–4 700 × (1 074 / 2 280 /
+ *  11 394 ms before the fix); the bound is 150 ×. */
 const LINEAR = [
   ['a 64 KiB word (the e-mail alternative backtracked over it at every position)', () => B.textToBlocks('b'.repeat(64 * K))],
   ['64 KiB of "b." (the domain-label loop)', () => B.textToBlocks('b.'.repeat(32 * K))],
@@ -601,11 +605,12 @@ const LINEAR = [
   ['the same through the mail rung', () => B.emailToBlocks('```x\n'.repeat(13107))],
   ['6 553 lines of "```  abcd " (an info string with spaces: an opener the closer rule never matches)', () => B.textToBlocks('```  abcd \n'.repeat(6553))],
 ];
-const LINEAR_BOUND_MS = 800;
+const LINEAR_BOUND_X = 150;
 {
-  const times = LINEAR.map(([name, fn]) => [name, msOf(fn)]);
-  const slow = times.filter(([, ms]) => ms > LINEAR_BOUND_MS);
-  ok(!slow.length, `every pathological input runs in < ${LINEAR_BOUND_MS} ms (${times.map(([, ms]) => Math.round(ms)).join(' / ')} ms)`, slow.map(([n, ms]) => `${Math.round(ms)} ms: ${n}`).join('\n    '));
+  const CAL = bestMs(() => B.textToBlocks('Hello world, a plain paragraph with words.\n\n'.repeat(1490)));
+  const times = LINEAR.map(([name, fn]) => [name, bestMs(fn, { reps: 2 }) / CAL]);
+  const slow = times.filter(([, x]) => x > LINEAR_BOUND_X);
+  ok(!slow.length, `every pathological input costs ≤ ${LINEAR_BOUND_X} × the rung's benign walk at the text bound (${CAL.toFixed(1)} ms CPU here): ${times.map(([, x]) => x.toFixed(1)).join(' / ')} ×`, slow.map(([n, x]) => `${x.toFixed(0)} ×: ${n}`).join('\n    '));
   // the rung's INPUT is bounded to the record's text bound: a 1 MiB body yields a tree of ≤ 64 KiB, never a walk of the whole
   const big = B.emailToBlocks('b'.repeat(1024 * K) + '\n\nOn x wrote:\n> q');
   const total = B.blockStrings(big).reduce((n, s) => n + s.length, 0);
@@ -1110,8 +1115,13 @@ console.log('⑮ the upward page: a scroll event pages only on the person\'s inp
 console.log('⑯ the markup reader: linear at its bound, never deeper than the record allows (+ controls)');
 {
   const { spawn } = await import('node:child_process');
-  const BUDGET_MS = 250;
+  // RELATIVE, never a deadline (lane mirror-flake-hardening: the old 250 ms budget judged the machine): a shape's CPU time
+  // ÷ the reader's own benign walk at the same bound (CAL, best of 3), in the same process — here and in each child
+  // measured 0.7–39 × here (the fence shapes the most), the pre-fix copies 1 066–2 428 × in their children; the bound is 150 ×
+  const BOUND_X = 150;
   const N = REC.BLOCK_LIMITS.text;
+  const BENIGN = `() => ({ message_id: 'om_x', msg_type: 'text', create_time: '1', sender: { id: 'ou_x', sender_type: 'user' }, body: { content: JSON.stringify({ text: 'plain words and more words '.repeat(${Math.floor(N / 27)}) }) } })`;
+  const CAL_SRC = `(M, x) => { const cpu = () => { const u = process.cpuUsage(); return (u.user + u.system) / 1000; }; M.larkToBlocks(x); let b = Infinity; for (let i = 0; i < 3; i++) { const t = cpu(); M.larkToBlocks(x); b = Math.min(b, cpu() - t); } return b; }`;
   const item = (type, content) => `({ message_id: 'om_x', msg_type: ${JSON.stringify(type)}, create_time: '1', sender: { id: 'ou_x', sender_type: 'user' }, body: { content: JSON.stringify(${content}) } })`;
   /** [what, the reader fn name, a zero-argument SOURCE of its argument] — the child builds the same input */
   const SHAPES = [
@@ -1121,13 +1131,12 @@ console.log('⑯ the markup reader: linear at its bound, never deeper than the r
     ['a card whose markdown is 10 000 unclosed fences (larkToBlocks)', 'larkToBlocks', `() => ${item('interactive', `{ elements: [{ tag: 'markdown', content: '\`\`\`js\\n'.repeat(${Math.floor(N / 6)}) }] }`)}`],
   ];
   const build = (src) => new Function(`return (${src})()`)();
+  const CAL = new Function(`return (${CAL_SRC})`)()(LB, build(BENIGN));
   for (const [what, fn, src] of SHAPES) {
     const x = build(src);
-    const t = process.hrtime.bigint();
     let threw = null;
-    try { LB[fn](x); } catch (e) { threw = e; }
-    const ms = Number(process.hrtime.bigint() - t) / 1e6;
-    ok(!threw && ms < BUDGET_MS, `${what}: ${ms.toFixed(1)} ms (budget ${BUDGET_MS})`, threw ? String(threw) : `ms=${ms}`);
+    const ms = bestMs(() => { try { LB[fn](x); } catch (e) { threw = e; } }, { reps: 1 });
+    ok(!threw && ms / CAL <= BOUND_X, `${what}: ${(ms / CAL).toFixed(1)} × the reader's benign walk at its bound (≤ ${BOUND_X} ×; ${CAL.toFixed(1)} ms CPU here)`, threw ? String(threw) : `x=${ms / CAL}`);
   }
   // THE NESTING BOUND: a tree never deeper than the record allows, never a throw
   const depthOf = (bl, d = 0) => (Array.isArray(bl) ? bl.reduce((m, b) => Math.max(m, b && Array.isArray(b.blocks) ? depthOf(b.blocks, d + 1) : d), d) : d);
@@ -1142,13 +1151,16 @@ console.log('⑯ the markup reader: linear at its bound, never deeper than the r
   ok(!e && hasQuote(r3) && depthOf(r3) <= REC.BLOCK_LIMITS.depth && /deep words/.test(JSON.stringify(r3)), `20 000 "> " levels of Lark markdown: quotes kept, ${depthOf(r3)} deep, the words at the bottom unquoted`, e ? String(e) : JSON.stringify(r3).slice(0, 200));
   ok(!e && r4.length === 1 && r4[0].k === 'card' && depthOf(r4) <= REC.BLOCK_LIMITS.depth && /deep words/.test(JSON.stringify(r4)) && /card words/.test(JSON.stringify(r4)), `a card holding both: its inner quotes counted from the card's level (${depthOf(r4)} deep) — a valid tree, both texts kept`, e ? String(e) : JSON.stringify(r4).slice(0, 200));
   // CONTROLS
-  const inChild = (file, fn, src) => new Promise((res) => {
-    const code = `const M=require(${JSON.stringify(file)});const x=(${src})();const t=process.hrtime.bigint();M[${JSON.stringify(fn)}](x);process.stdout.write(String(Number(process.hrtime.bigint()-t)/1e6));`;
+  // the same judge in a child: CAL and the shape, both CPU, in ONE process; a MUTANT is cut after CONTROL_WAIT_MS (a wait,
+  // never a verdict on speed — a cut copy is over by construction; the REAL module is never cut)
+  const CONTROL_WAIT_MS = 3000;
+  const inChild = (file, fn, src, { cut: mayCut = true } = {}) => new Promise((res) => {
+    const code = `const M=require(${JSON.stringify(file)});const cal=(${CAL_SRC})(M,(${BENIGN})());const x=(${src})();const u0=process.cpuUsage();M[${JSON.stringify(fn)}](x);const u=process.cpuUsage(u0);process.stdout.write(JSON.stringify({cal,ms:(u.user+u.system)/1000}));`;
     const c = spawn(process.execPath, ['-e', code], { stdio: ['ignore', 'pipe', 'ignore'] });
     let out = '';
     c.stdout.on('data', (d) => { out += d; });
-    const cut = setTimeout(() => c.kill('SIGKILL'), BUDGET_MS + 1500);
-    c.on('exit', (_code, sig) => { clearTimeout(cut); const ms = out ? Number(out) : null; res({ ms, killed: !!sig, over: !!sig || !(ms < BUDGET_MS) }); });
+    const cut = mayCut ? setTimeout(() => c.kill('SIGKILL'), CONTROL_WAIT_MS) : null;
+    c.on('exit', (_code, sig) => { clearTimeout(cut); let r = null; try { r = JSON.parse(out); } catch { } const x = r ? r.ms / r.cal : null; res({ x, cal: r && r.cal, killed: !!sig, over: !!sig || !(x <= BOUND_X) }); });
   });
   const M = mutantCopies('chan-blocks-linear', REPO);
   const src = fs.readFileSync(path.join(REPO, 'src/channels/lark/blocks.js'), 'utf-8');
@@ -1161,9 +1173,9 @@ console.log('⑯ the markup reader: linear at its bound, never deeper than the r
     const patched = src.replace(from, to);
     if (patched === src) { ok(false, `CONTROL setup: ${what} — the fixed line is present once`, from); continue; }
     const file = M.write('src/channels/lark/blocks.js', patched, `linear-${shape}`);
-    runs.push(inChild(file, SHAPES[shape][1], SHAPES[shape][2]).then((r) => ok(r.over, `CONTROL: a copy with ${what} is OVER the budget on "${SHAPES[shape][0]}" (${r.killed ? 'cut at the budget' : `${Math.round(r.ms)} ms`})`, JSON.stringify(r))));
+    runs.push(inChild(file, SHAPES[shape][1], SHAPES[shape][2]).then((r) => ok(r.over, `CONTROL: a copy with ${what} is OVER the bound on "${SHAPES[shape][0]}" (${r.killed ? `still running after the ${CONTROL_WAIT_MS} ms wait — cut` : `${Math.round(r.x)} × its benign walk`})`, JSON.stringify(r))));
   }
-  runs.push(inChild(path.join(REPO, 'src/channels/lark/blocks.js'), SHAPES[0][1], SHAPES[0][2]).then((r) => ok(!r.over, `the child harness on the REAL module: under the budget (${r.ms == null ? 'no answer' : r.ms.toFixed(1) + ' ms'})`, JSON.stringify(r))));
+  runs.push(inChild(path.join(REPO, 'src/channels/lark/blocks.js'), SHAPES[0][1], SHAPES[0][2], { cut: false }).then((r) => ok(!r.over, `the child harness on the REAL module: under the bound (${r.x == null ? 'no answer' : r.x.toFixed(1) + ' × its benign walk'}; never cut)`, JSON.stringify(r))));
   await Promise.all(runs);
   const NEW_Q = "      if (open) { flush(); if (baseDepth + stack.length + 1 > MAX_DEPTH) overQuote++; else stack.push({ blocks: [] }); continue; }";
   const NEW_MD = "      if (depth + 1 > MAX_DEPTH) {";
@@ -1232,17 +1244,18 @@ console.log('⑰ an unclosed drop tag is a word, never a drop to the end of the 
 // 8 to 16 KB on every shape, the re-reading copy ×4 (each `/\n$/.test` charged the run it scans).
 console.log('⑱ the inline reader is linear on <li> / <br> / <td> (the tail character tracked, the post element bounded)');
 {
-  const hr = () => Number(process.hrtime.bigint()) / 1e6;
-  const best = (fn, x) => { let b = Infinity; for (let r = 0; r < 5; r++) { const t = hr(); fn(x); b = Math.min(b, hr() - t); } return b; };
   const post = (text) => ({ message_id: 'om_li', msg_type: 'post', create_time: '1', chat_id: 'oc', sender: { id: 'ou_x', sender_type: 'user' }, body: { content: JSON.stringify({ title: '', content: [[{ tag: 'text', text }]] }) } });
   const judge = (file, label, shape) => { const v = judgeInChild({ module: file, run: "(M, x) => M.markupRead(x, { mode: 'inline' })", mk: shape, n: 8 * 1024, kind: 'linear' }); return { label, w1: v.w1, w2: v.w2, ratio: +(v.r || 0).toFixed(2), ok: v.ok === true, err: v.err }; };
   const SHAPES = [['<li>', "(n) => '<li>'.repeat(n / 4)"], ['<br>', "(n) => '<br>'.repeat(n / 4)"], ['<td>x', "(n) => '<td>x'.repeat(n / 5)"], ['<p>x</p>', "(n) => '<p>x</p>'.repeat(n / 8)"]];
   const got = SHAPES.map(([l, sh]) => judge(path.join(REPO, 'src/channels/lark/blocks.js'), l, sh));
   ok(got.every((g) => g.ok), `inline markupRead: linear in WORK from 8 to 16 KB on ${SHAPES.map((x) => x[0]).join(' / ')} (${got.map((g) => `${g.label} ×${g.ratio}`).join('; ')}, bound ${LINEAR_BOUND})`, J(got));
-  const big = best((x) => LB.larkToBlocks(post(x)), '<li>'.repeat(256 * 1024));
-  // a DEADLINE, not a ratio (ci.mjs CLOCK_JUDGES): the megabyte's JSON.parse precedes the cut, so the meter's bounded()
-  // would charge the parse; 250 ms is ~10× the reading here — it tells "cut, then linear" from half a minute
-  ok(big < 250, `a 1 MB post element of <li> through larkToBlocks: ${big.toFixed(0)} ms (bounded to BLOCK_LIMITS.text, then linear)`);
+  // RELATIVE, never a deadline (lane mirror-flake-hardening: `< 250 ms` judged the machine; the meter's bounded() would
+  // charge the megabyte's JSON.parse, which precedes the cut): a megabyte of <li> costs about what the same post AT the
+  // bound costs (BLOCK_LIMITS.text of <li>) — the megabyte is cut there, then read linearly — CPU time, best of 5, in this
+  // process; an element read whole costs ≥ the size ratio (16 ×), and it was half a minute before the fix
+  const liPost = post('<li>'.repeat(256 * 1024)), atBound = post('<li>'.repeat(Math.floor(REC.BLOCK_LIMITS.text / 4)));
+  const big = bestMs(() => LB.larkToBlocks(liPost), { reps: 5 }), bound = bestMs(() => LB.larkToBlocks(atBound), { reps: 5 });
+  ok(big / bound <= 8, `a 1 MB post element of <li> through larkToBlocks: ${(big / bound).toFixed(2)} × the same post at BLOCK_LIMITS.text (≤ 8 × for 16 × the bytes — measured 1.9–2.8 × idle and loaded: cut to the bound, then linear)`);
   ok(eq(LB.markupRead('a<br>b<li>c<li>d<table><tr><td>e</td><td>f</td></tr></table><p>g</p>', { mode: 'inline' }), [{ k: 't', text: 'a\nb\n• c\n• d\ne  f\ng\n' }]), 'the inline shape is unchanged: a break once, a bullet per item, two spaces between cells, a block boundary a newline');
   const src = read('src/channels/lark/blocks.js');
   ok(/const t = bounded\(String\(el\.text \|\| ''\)\);/.test(src) && /if \(mode === 'inline'\) \{ if \(runs\.length && tail !== '\\n'\) pushRun/.test(src) && !/\/\\n\$\/\.test\(last\.text\)/.test(src.replace(/^\s*\/\/.*$/gm, '')), 'WIRING: the post text element is bounded(); brk() reads the tracked tail, never the run (the comment naming the old test aside)');

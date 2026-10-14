@@ -12,6 +12,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+import { judgeInChild } from './work-meter.mjs';
 
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
@@ -168,9 +169,12 @@ const SUM = [
 ];
 for (const [a, b, want] of SUM) { const got = M.editSummary(a, b); ok(got === want, `summary: ${want}`, got); }
 ok(M.editSummary(B, B) === '+0 −0 lines', 'no change ⇒ +0 −0 and no sections');
-const bigA = Array.from({ length: 3000 }, (_, i) => 'l' + i).join('\n'), bigB = Array.from({ length: 3000 }, (_, i) => (i % 2 ? 'm' : 'l') + i).join('\n');
-const t0 = Date.now(); const bs = M.editSummary(bigA, bigB);
-ok(bs.startsWith('+1500 −1500 lines') && Date.now() - t0 < 2000, `a 3000-line rewrite past the LCS budget counts by multiset, fast (${Date.now() - t0} ms)`, bs);
+const rewrite = (n) => [Array.from({ length: n }, (_, i) => 'l' + i).join('\n'), Array.from({ length: n }, (_, i) => (i % 2 ? 'm' : 'l') + i).join('\n')];
+const bs = M.editSummary(...rewrite(3000));
+// "fast" is judged by WORK (lane mirror-flake-hardening: `< 2000 ms` judged the machine): past the LCS budget the count
+// is a multiset — the work meter (scripts/work-meter.mjs, in a child) reads ×2 work for ×2 lines (an LCS reads ×4)
+const gRw = judgeInChild({ module: path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src', 'doc-model.js'), run: '(M, x) => M.editSummary(x[0], x[1])', mk: "(n) => [Array.from({ length: n }, (_, i) => 'l' + i).join('\\n'), Array.from({ length: n }, (_, i) => (i % 2 ? 'm' : 'l') + i).join('\\n')]", n: 3000, kind: 'linear' });
+ok(bs.startsWith('+1500 −1500 lines') && gRw.ok === true, `a 3000-line rewrite past the LCS budget counts by multiset — linear in WORK: ×${gRw.r && gRw.r.toFixed(2)} from 3000 to 6000 lines (≤ ${gRw.bound})`, JSON.stringify(gRw).slice(0, 300));
 
 // ── §5 the conflict table ──
 console.log('§5 the conflict table');

@@ -68,6 +68,7 @@ const resetCredit = require('../reset-credit.js'); // PURE: is a stored reset cr
 const codexResetHelper = require('../codex-reset-helper.js'); // lane reset-path: ONE bounded app-server child carries a PERSON's press when no conversation can
 const { wrapperCaps } = require('./wrapper-files.js'); // the running wrapper's own advert (resetCreditKey: it sends the key AND reports the send)
 const { agentEnv: sanitizedSpawnEnv } = require('../agent-env.js'); // the helper child gets the agent env, never raw process.env
+const { agentCredentialEnvNames } = require('../harness-env.js'); // B-6be2: …minus every account selector the descriptors declare
 const { feedPeerCard } = require('../normalizers'); // the rebuild-gated chat-card writer (the wall card that names the credits)
 // THE ONE READER of `cache.overage` (design §1.4: it was written by
 // rate-limit-capture and read by nobody). PURE; the spend authorizer and
@@ -4248,7 +4249,7 @@ function writeResetCreditViaHelper(key, { resetsAtSec = 0, now = Date.now() } = 
   if (av && av.ok === false) { console.log(`[codex] reset credit refused for the helper on ${nameOf(key)} (spend budget: ${av.why})`); return { ok: false, why: av.why || 'refused', detail: av.detail || null }; }
   const idemKey = crypto.randomUUID();
   const t = openResetCreditTry({ key, sid: null, via: 'helper', origin: 'user', resetsAtSec, lane: null, now, idemKey, av, creditsAt: resetCreditsLeft(null, key), reportsSent: true, window: spentWindowOf(readRawUsageCache(key)) });
-  const env = { ...sanitizedSpawnEnv(process.env), [h.envVar]: h.home };
+  const env = { ...sanitizedSpawnEnv(process.env, { drop: agentCredentialEnvNames(harnesses.list()) }), [h.envVar]: h.home };
   // verify r1: an UNSETTLED earlier attempt rides as `prior` — the helper reads first and consumes only if no
   // unsettled attempt remains on this identity (landed ⇒ the credit was used then; a reading that cannot tell
   // ⇒ nothing spent either — never a second key on a guess)

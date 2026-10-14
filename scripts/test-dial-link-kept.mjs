@@ -32,6 +32,9 @@ const srv = net.createServer((sock) => {
 await new Promise((r) => srv.listen(0, '127.0.0.1', r));
 const port = srv.address().port;
 const dialIn = () => new Promise((res, rej) => { const s = net.connect(port, '127.0.0.1'); s.on('connect', () => res(s)); s.on('error', rej); });
+// "at once" is EVIDENCE, never a stopwatch (lane mirror-flake-hardening): the answer settles before the event loop
+// turns — no hello round trip, no probe, no timer stood between the ask and the refusal. The ms are information.
+const inTurn = (p) => Promise.race([p.then(() => true, () => true), new Promise((res) => setImmediate(() => res(false)))]);
 const closed = (s) => new Promise((res) => { if (s.destroyed) return res(true); s.once('close', () => res(true)); setTimeout(() => res(false), 800); });
 
 console.log('— the real DeviceManager over a stream transport: auth-fail rejects fast and KEEPS the stream —');
@@ -58,14 +61,15 @@ console.log('— deviceForDial (the real one): the refused stream is remembered 
   const stream1 = await dialIn();
   DP.agentdDials.set('devK', stream1);
   DP.noteDialEvent('devK', 'accepted', { at: Date.now() });
-  let e1 = null; try { await DP.deviceForDial('devK'); } catch (e) { e1 = e; }
+  let e1 = null; const p1 = DP.deviceForDial('devK').catch((e) => { e1 = e; }); const now1 = await inTurn(p1); await p1;
   ok(e1 && e1.code === 'auth_failed', 'the first op: auth_failed (one hello)', e1 && e1.message);
+  ok(now1 === false, 'CONTROL: that first op waited on its hello round trip — it had NOT settled when the loop turned (what "before the loop turned" rules out below)');
   const DF = require('../src/dial-facts.js');
   const row = () => H.list().find((h) => h.deviceId === 'devK');
   ok(DF.dialRowState(row()).state === 'auth-fail', `THE ROW reads auth-fail while the device stays dialed in (${DF.dialRowState(row()).state})`);
   const t1 = Date.now();
-  let e2 = null; try { await DP.deviceForDial('devK'); } catch (e) { e2 = e; }
-  ok(e2 && e2.code === 'auth_failed' && hellos === 1 && Date.now() - t1 < 200, `a second op on the SAME stream is refused at once with NO second hello (hellos=${hellos}, ${Date.now() - t1} ms) and names the way out`, e2 && e2.message);
+  let e2 = null; const p2 = DP.deviceForDial('devK').catch((e) => { e2 = e; }); const now2 = await inTurn(p2); await p2;
+  ok(e2 && e2.code === 'auth_failed' && hellos === 1 && now2, `a second op on the SAME stream is refused at once — before the loop turned — with NO second hello (hellos=${hellos}, ${Date.now() - t1} ms) and names the way out`, e2 && e2.message);
   ok(/generate a new command/.test(String(e2 && e2.message)), '…the sentence says: generate a new command and run it there');
   ok(!stream1.destroyed && DP.agentdDials.get('devK') === stream1, 'the link is still the same live stream (never destroyed by the refusal)');
   // a FRESH stream (the device re-dialed after the user ran the new command) is asked again
@@ -135,8 +139,8 @@ console.log('— verify-r2 B9-r2a: admitDial — a header-less newcomer is refus
   sk = fakeSocket(); admit = await DP.admitDial('devA', { boot: BOOT_B }, sk);
   ok(admit === null && /duplicate-device/.test(sk.frame), 'a newcomer with another boot id is refused (r1)');
   // ③ the SAME boot id: replaced without a probe (the daemon re-dialing after its own drop)
-  sk = fakeSocket(); t0 = Date.now(); admit = await DP.admitDial('devA', { boot: BOOT_A }, sk);
-  ok(admit === true && sk.frame === '' && Date.now() - t0 < 100, 'the same boot id is admitted at once (no probe)');
+  sk = fakeSocket(); t0 = Date.now(); const pA = DP.admitDial('devA', { boot: BOOT_A }, sk); const nowA = await inTurn(pA); admit = await pA;
+  ok(admit === true && sk.frame === '' && nowA, `the same boot id is admitted at once — before the loop turned, no probe (${Date.now() - t0} ms)`);
   // ④ a hello IN FLIGHT: a fresh stream accepted, its hello answered after 700 ms, a newcomer arriving inside that
   //    window — r1 read `connected:false` as dead and let it evict the healthy device; now the probe JOINS the hello
   for (const d of DP.agentdDialDevices.values()) { try { d.stop(); } catch { } } DP.agentdDialDevices.clear();

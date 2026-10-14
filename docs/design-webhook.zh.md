@@ -230,3 +230,9 @@ caps = {
 - **「新建路径…」在节的标题行上**：原先它是标题行下面单独一行的按钮；现在建在标题行里——名字右侧、计数与 ⋯ 之前（同一个按钮、同一个 `data-wh-new-path`、同一个向导）；按下不折叠该节（`btn` 截住点击）。手机（屏宽 ≤ 480 px）或 Channels 面板 ≤ 300 px（与「新建群」同一阈值）时只留 + 图标，字在 tooltip 与 aria-label 里；标题行的 ⋯ / 右键菜单（同一个菜单）第一行也是「新建路径…」。
 - **内置入站门排在账号列表最后**：选「最后」而不是「顶部」——用户自己加的账号在前。唯一规则 = PURE `accountSectionOrder`（src/lib/webhook-view.js，按能力行 `pushTransport: 'http-inbound'` 判，不看 kind）：用户账号按原顺序，然后每个入站门按原顺序；Accounts 部分只调用它一次。agents 观察者仍在它自己的部分。
 - **门禁**：test-webhook-ui §8（快：顺序表 + 两个 RED 变体、标题行源码律、菜单行）；test-webhook-section-place（重，chrome：真实面板 iife + 桩 HTTP，桌面 1100 / 手机 390 的矩形、真实按下不折叠、菜单首行，两个 CONTROL 包）。
+
+## 19. As-built — 互联二期的两扇门（2.369.270，lane webhook-pair-join，B-5ee0 (a)(b)）
+
+- **铸码门**：路径的「调用方…」里「与另一个 VibeSpace 配对…」——码只显示一次（Copy、m:ss 倒计时，到期说「已过期——请生成新码」并丢掉码）；码只交给 `showPairCodeOnce`（码律，与 token 律并列）。
+- **加入门**：Webhook 节 ⋯ →「用配对码加入…」——粘贴即读（`join {check: true}`：谁、哪条路径、主机、还剩几分钟、本地会新建 / 加入 / 更新），再按「配对」。每个拒绝都有名字：不是配对码、贴的是调用方 token（错的秘密）、已过期、已用过（对方对**证明了码**的帧答 409）、对方不认识（同形 401——那边过期、被新码取代或被改动）、限速。
+- **§16 的偏离已收回**：待用码写入 `data/channels/webhook/pair-pending.json`（0600，token 经 secret box 封存，码本身不落盘），启动时重载、过期即扫；用过的码留墓碑到期限，使「已用过」可被说出——但只对签名与 nonce 都对的帧。

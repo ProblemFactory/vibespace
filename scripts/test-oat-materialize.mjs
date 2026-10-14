@@ -692,6 +692,24 @@ console.log('§7 VERIFY R1 — each finding of pool-oat-verify (4c1be7e0e REFUTE
   ok(!!r12m && r12m.a1.length === 0, 'RED control (F12): the r1 merge destroys them with the dir — the leg above catches it', r12m);
 
   // ── F13: the sweep never blocks the loop — fs.promises, one row per loop turn, no sync fs on a member path ──
+  // (lane oat-loop-gap-bound, .270: the old `maxGap < 50` read 59.4 ms on ubuntu-latest — an absolute wall-clock bound
+  // judges the runner, never the sweep.) ONE ROW PER LOOP TURN is a WORK count: the rows the sweep STARTS between two
+  // turns of a ticker loop (≤ 1 — a sweep that starts them together reads N). The stall is RELATIVE: a CONTROL loop of
+  // the same length in this process — as long as the two sweeps took, turns that do nothing but `await setImmediate`,
+  // each half ending in the store's own roster broadcast (_notify → list(): the ONE synchronous O(rows) read a sweep
+  // that moved something makes, ~2.5 ms at 200 written rows here against ~0.5 ms for the longest act turn) — and the
+  // sweep's longest stall ≤ 3 × the control's. It runs right AFTER the sweeps, under the same spy, so its broadcast reads
+  // the same written rows at the same cost, and a loaded runner's preemption gets the same window to land in (a control
+  // of N turns is ~1 % of the sweeps' wall: 2 hogs on one CPU read the sweep 3.2 × it). A do-nothing control alone reads
+  // ~0.1 ms — no K holds against it. A slower runner scales both.
+  const loopMeter = () => {
+    let maxGap = 0, turns = 0, last = performance.now(), on = true;
+    const mark = () => { const t = performance.now(); maxGap = Math.max(maxGap, t - last); last = t; };
+    const tick = () => { mark(); turns++; if (on) setImmediate(tick); };
+    setImmediate(tick);
+    // stop() closes the open turn: a sweep that never yields reads its whole length
+    return { turn: () => turns, stop: () => { on = false; mark(); return { maxGap, turns }; } };
+  };
   const f13 = async (M, N = 200) => {
     const am13 = mk(M); await nv(am13, '2.1.296');
     const ids = [];
@@ -703,23 +721,45 @@ console.log('§7 VERIFY R1 — each finding of pool-oat-verify (4c1be7e0e REFUTE
     const SYNC = ['readFileSync', 'writeFileSync', 'openSync', 'renameSync', 'unlinkSync', 'fsyncSync', 'statSync', 'lstatSync', 'existsSync', 'chmodSync', 'mkdirSync', 'readdirSync'];
     const keep = {};
     // (the ONE roster rebuild a sweep that moved something broadcasts — list(), the store's existing _notify path for
-    // every change — reads the rows synchronously; it is outside the sweep's acts, and inside the loop-gap figure)
-    for (const k of SYNC) { keep[k] = fs[k]; fs[k] = function (p, ...r) { if (String(p).startsWith(subs) && !/AccountManager\.list \(/.test(String(new Error().stack))) syncHits.push(k); return keep[k].call(this, p, ...r); }; }
-    let maxGap = 0, last = performance.now(), on = true;
-    const tick = () => { const t = performance.now(); maxGap = Math.max(maxGap, t - last); last = t; if (on) setImmediate(tick); };
-    setImmediate(tick);
-    let first, steady;
-    try { first = await am13.syncOatFiles(); steady = await am13.syncOatFiles(); } finally { on = false; for (const k of SYNC) fs[k] = keep[k]; }
+    // every change — reads the rows synchronously; it is outside the sweep's acts, and inside both stall figures)
+    let inList = 0;
+    am13.list = function (...a) { inList++; try { return Object.getPrototypeOf(this).list.apply(this, a); } finally { inList--; } };
+    for (const k of SYNC) { keep[k] = fs[k]; fs[k] = function (p, ...r) { if (!inList && String(p).startsWith(subs)) syncHits.push(k); return keep[k].call(this, p, ...r); }; }
+    const meter = loopMeter(), starts = [];
+    am13.syncOatFile = function (...a) { starts.push(meter.turn()); return Object.getPrototypeOf(this).syncOatFile.apply(this, a); };
+    let first, steady, run, ctl;
+    try {
+      const t0 = performance.now();
+      first = await am13.syncOatFiles(); steady = await am13.syncOatFiles(); run = meter.stop();
+      const took = performance.now() - t0;
+      // the CONTROL: as long as the sweeps, their one broadcast each, not one act — over the rows they wrote
+      const c = loopMeter();
+      for (let k = 0; k < 2; k++) { const until = performance.now() + took / 2; do await new Promise((res) => setImmediate(res)); while (performance.now() < until); am13._notify(); }
+      ctl = c.stop();
+    } finally { if (!run) meter.stop(); delete am13.syncOatFile; delete am13.list; for (const k of SYNC) fs[k] = keep[k]; }
     const counts = {}; for (const v of Object.values(first)) counts[v] = (counts[v] || 0) + 1;
-    return { N, maxGap: +maxGap.toFixed(1), counts, steady: [...new Set(Object.values(steady))], syncHits: [...new Set(syncHits)] };
+    const perTurn = {}; for (const t of starts) perTurn[t] = (perTurn[t] || 0) + 1;
+    return { N, maxGap: +run.maxGap.toFixed(2), ctlGap: +ctl.maxGap.toFixed(2), turns: run.turns, starts: starts.length, rowsPerTurn: Math.max(0, ...Object.values(perTurn)), counts, steady: [...new Set(Object.values(steady))], syncHits: [...new Set(syncHits)] };
   };
   const r13 = await f13();
   ok(r13.counts.materialize === 200 && r13.steady.join() === 'written', 'F13: 200 fake rows — the first sweep materializes every one (archive + write), the next finds every one written', r13.counts);
-  ok(r13.maxGap < 50, `F13: the event loop's longest stall across both sweeps is ${r13.maxGap} ms (< 50 ms) — one row per loop turn`, r13);
+  ok(r13.starts === 400 && r13.rowsPerTurn === 1, `F13: ONE row per loop turn — the two sweeps start ${r13.starts} row acts over ${r13.turns} turns of the loop, never more than ${r13.rowsPerTurn} between two turns`, r13);
+  ok(r13.maxGap <= 3 * r13.ctlGap, `F13: the event loop's longest stall across both sweeps is ${r13.maxGap} ms ≤ 3 × the control's ${r13.ctlGap} ms (as long as the sweeps, no act, each half ending in the store's own roster broadcast over the rows they wrote — measured right after, in this process)`, r13);
   ok(r13.syncHits.length === 0, 'F13: not one synchronous fs call on a member path from the sweep\'s acts (every read / write / rename / fsync is fs.promises; the one roster broadcast after it is the store\'s existing list())', r13.syncHits);
   const mF13 = mutantStore({ mat: [['    await fh.sync();\n', '    require(\'fs\').fsyncSync(fh.fd);\n    require(\'fs\').statSync(dest + \'.never\', { throwIfNoEntry: false });\n']] });
   const r13m = mF13 ? await f13(mF13, 20) : null;
   ok(!!r13m && r13m.syncHits.length > 0, 'RED control (F13): a writer that goes synchronous on the member path is seen by the spy', r13m && r13m.syncHits);
+  // a sweep that starts every row in one turn (no queue): the work count reads N — the stall cannot see it (each row's
+  // start is a few µs; the longest turn is still the broadcast)
+  const mF13b = mutantStore({ acc: [['      for (const id of ids) {\n        let r = null;\n', '      await Promise.all(ids.map(async (id) => {\n        let r = null;\n'], ['        await new Promise((res) => setImmediate(res));\n      }\n      if (moved) this._notify();\n', '        await new Promise((res) => setImmediate(res));\n      }));\n      if (moved) this._notify();\n']] });
+  const r13b = mF13b ? await f13(mF13b) : null;
+  ok(!!r13b && r13b.counts.materialize === 200 && r13b.rowsPerTurn === 200, `RED control (F13): a sweep that starts all ${r13b && r13b.N} rows in one turn reads ${r13b && r13b.rowsPerTurn} rows between two turns of the loop`, r13b);
+  // the r1 shape (pool-oat-verify F13): every act ON the loop — account-material's fs.promises answered by the sync
+  // calls, no turn between rows — both sweeps run in ONE turn: the stall passes 3 × the control, the count reads 2 × N
+  const R1_FSP = "const fsp = (() => { const h = (fd) => ({ fd, chmod: async (m) => fs.fchmodSync(fd, m), close: async () => fs.closeSync(fd), readFile: async (o) => fs.readFileSync(fd, o), stat: async () => fs.fstatSync(fd), sync: async () => fs.fsyncSync(fd), writeFile: async (b) => fs.writeFileSync(fd, b) }); return { open: async (...a) => h(fs.openSync(...a)), chmod: async (...a) => fs.chmodSync(...a), link: async (...a) => fs.linkSync(...a), lstat: async (...a) => fs.lstatSync(...a), mkdir: async (...a) => fs.mkdirSync(...a), rename: async (...a) => fs.renameSync(...a), unlink: async (...a) => fs.unlinkSync(...a) }; })();\n";
+  const mF13c = mutantStore({ mat: [['const fsp = fs.promises;\n', R1_FSP]], acc: [['        await new Promise((res) => setImmediate(res));\n      }\n      if (moved) this._notify();\n', '      }\n      if (moved) this._notify();\n']] });
+  const r13c = mF13c ? await f13(mF13c) : null;
+  ok(!!r13c && r13c.counts.materialize === 200 && r13c.maxGap > 3 * r13c.ctlGap && r13c.rowsPerTurn === 400, `RED control (F13): the r1 sweep (every act on the loop) stalls it ${r13c && r13c.maxGap} ms — past 3 × its control's ${r13c && r13c.ctlGap} ms; ${r13c && r13c.rowsPerTurn} rows in one turn`, r13c);
 }
 
 console.log('§8 VERIFY R2 (lane oat-census-closure, pool-oat-verify-r2 REFUTED c9fea70ad) — O1 the key-file law, F2 rename-aside, F3 the merge keeps the survivor\'s keys, the two lows');

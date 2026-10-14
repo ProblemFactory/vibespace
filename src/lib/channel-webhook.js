@@ -5,6 +5,8 @@
 //
 // THE TOKEN LAW (§9): a register / rotate answer's token goes to showTokenOnce and NOWHERE else — no list row, no
 // module state, no re-render; closing that dialog drops the last reference (test-webhook-ui's census + RED control).
+// THE CODE LAW (lane webhook-pair-join, B-5ee0): the same for a pairing code — the pair-code answer's code goes to
+// showPairCodeOnce alone; a pasted code lives in the join box alone (no module state; closing empties it).
 import { fetchJson, showToast, createModalShell, showConfirmDialog, copyText } from './utils.js';
 import { t } from './i18n.js';
 import { icon, el, btn } from './channel-chrome.js';
@@ -261,7 +263,11 @@ export function showCallersDialog(app, slug, { adapterId = 'webhook', title = ''
   form.style.display = register ? '' : 'none';
   const open = btn(t('Register a caller'), () => { form.style.display = ''; name.focus(); }, 'chan-wh-add');
   open.prepend(icon('plus', 11));
-  m.body.append(open, form);
+  // lane webhook-pair-join: THE MINT DOOR — another VibeSpace becomes a `peer` caller of this path
+  const pair = btn(t('Pair with another VibeSpace…'), () => mintPairCode(slug, title), 'chan-wh-add');
+  pair.prepend(icon('link', 11)); pair.dataset.whPairOpen = slug;
+  const doors = el('div', 'chan-wh-acts'); doors.append(open, pair);
+  m.body.append(doors, form);
   footer(m, btn(t('Close'), () => m.close()));
   // MULTI-CLIENT: a broadcast naming this path (a caller registered / rotated / revoked on another client) re-reads it
   const key = `${adapterId}/${slug}`;
@@ -269,6 +275,122 @@ export function showCallersDialog(app, slug, { adapterId = 'webhook', title = ''
     ? app.ws.onGlobal((msg) => { if (msg && msg.type === 'channels-updated' && (!msg.partial || (Array.isArray(msg.changedKeys) && msg.changedKeys.includes(key)))) load(); }) : null;
   load();
   if (register) setTimeout(() => name.focus(), 0);
+}
+
+/** lane webhook-pair-join (B-5ee0; the owner via 主开发 2026-10-14: "a code that can only come from curl is no door"): the
+ *  server mints ONE code (10 min, single use) — its answer goes to showPairCodeOnce and nowhere else (THE CODE LAW). */
+async function mintPairCode(slug, title = '') {
+  const a = await post(`${BASE}/${enc(slug)}/pair-code`, {});
+  if (!a || !a.ok) { showToast(t('No code: {why}', { why: V.mintWhyText(a, { t }) }), { type: 'error' }); return; }
+  showPairCodeOnce({ code: a.code, expiresAt: a.expiresAt, path: title || slug });
+}
+/** THE PAIRING CODE, SHOWN ONCE — Copy, where to paste it, its clock; at the deadline the box says so and drops the code;
+ *  closing drops it too. */
+export function showPairCodeOnce({ code, expiresAt, path = '' }) {
+  let secret = String(code || ''), tick = null;
+  const m = createModalShell({ id: 'chan-wh-paircode', title: t('Pairing code for {path}', { path }), dialogClass: 'chan-wh-dialog', closeOnBackdrop: false, escapeToClose: true,
+    onClose: () => { secret = ''; if (tick) clearInterval(tick); tick = null; } });
+  m.dialog.dataset.whPairCodeOnce = '1';
+  m.body.appendChild(whNote(t('Shown once — paste it on the other VibeSpace: Channels → Webhook ⋯ → Join with a pairing code…'), true));
+  const shown = el('code', 'chan-wh-token', secret);
+  shown.dataset.whPairCode = '1';
+  const copy = btn(t('Copy'), () => { if (secret) copyText(secret).then(() => showToast(t('Code copied'))); }, 'chan-wh-copy');
+  copy.prepend(icon('copy', 11));
+  const r = el('div', 'chan-wh-url'); r.append(shown, copy);
+  m.body.appendChild(r);
+  const clock = whNote('');
+  clock.dataset.whPairClock = 'running';
+  m.body.appendChild(clock);
+  m.body.appendChild(whNote(t('Anyone holding this code can pair with this path — send it only to the other VibeSpace\'s owner.')));
+  const draw = () => {
+    const w = V.codeClockText(expiresAt, { t });
+    if (w) { clock.textContent = w; return; }
+    secret = ''; shown.textContent = '—'; copy.disabled = true;
+    clock.textContent = t('Expired — make a new code'); clock.classList.add('chan-warn'); clock.dataset.whPairClock = 'expired';
+    if (tick) clearInterval(tick); tick = null;
+  };
+  draw();
+  if (secret) tick = setInterval(draw, 1000);
+  footer(m, btn(t('Done'), () => m.close(), 'mounts-btn-primary'));
+}
+
+/** THE JOIN BOX (lane webhook-pair-join, B-5ee0 a) — the Webhook section's "Join with a pairing code…": paste the code
+ *  another VibeSpace's owner gave you. The server reads it as it lands (`check: true`: who offers it, their path, the path
+ *  here — nothing posted); Pair runs the same join route; every refusal is said BY NAME (webhook-view.js words it). */
+export function showJoinDialog(app) {
+  let seq = 0, ck = null, slugTouched = false, timer = null;
+  const box = el('textarea', 'chan-opt-input chan-wh-paste');
+  box.rows = 3; box.spellcheck = false; box.autocapitalize = 'off'; box.placeholder = 'vswp_…'; box.setAttribute('autocomplete', 'off');
+  box.dataset.whJoinCode = '1';
+  const m = createModalShell({ id: 'chan-wh-join', title: t('Join another VibeSpace'), dialogClass: 'chan-wh-dialog', escapeToClose: true, onClose: () => { box.value = ''; seq++; clearTimeout(timer); } });
+  m.dialog.dataset.whJoin = '1';
+  const intro = whNote(t('Paste the pairing code the other VibeSpace\'s owner gave you. It starts vswp_, works once and lives 10 minutes.'));
+  m.body.appendChild(intro);
+  const codeField = field(t('Pairing code'), box);
+  m.body.appendChild(codeField);
+  // `display`, never `hidden`: .chan-wh-field / a note set their own display, which beats the attribute
+  const show = (x, on) => { x.style.display = on ? '' : 'none'; };
+  const said = whNote('');
+  said.dataset.whJoinSaid = ''; said.setAttribute('aria-live', 'polite'); show(said, false);
+  m.body.appendChild(said);
+  const slug = whInput('', t('path name here'));
+  slug.dataset.whJoinSlug = '1';
+  const slugNote = whNote('');
+  slugNote.dataset.whJoinSlugNote = '1';
+  const slugField = field(t('Path here'), slug, slugNote);
+  show(slugField, false);
+  m.body.appendChild(slugField);
+  const done = el('div', 'chan-wh-join-done');
+  done.dataset.whJoinDone = '1'; show(done, false);
+  m.body.appendChild(done);
+  const say = (text, kind) => { show(said, !!text); said.textContent = text || ''; said.classList.toggle('chan-warn', kind === 'refused'); said.dataset.whJoinSaid = kind || ''; };
+  const pasted = () => box.value.trim();
+  async function read() {
+    const mine = ++seq;
+    ck = null; go.disabled = true;
+    if (!pasted()) { say('', ''); show(slugField, false); return; }
+    const sv = slugTouched ? slug.value.trim() : '';
+    if (sv && V.slugText(sv, { t })) return;
+    say(t('Reading the code…'), 'reading');
+    const r = await post('/api/channels/webhook/join', { code: pasted(), check: true, ...(sv ? { slug: sv } : {}) });
+    if (mine !== seq) return;
+    if (!r || !r.ok) { say(V.joinWhyText(r, { t }), 'refused'); if (!slugTouched) show(slugField, false); return; }
+    ck = r;
+    say(V.joinPreviewText(r, { t }), 'read');
+    if (!slugTouched) slug.value = r.slug;
+    slugNote.textContent = V.joinPathText(r, r.slug, { t });
+    show(slugField, true);
+    go.disabled = false;
+  }
+  const soon = () => { clearTimeout(timer); timer = setTimeout(read, 250); };
+  box.addEventListener('input', soon);
+  slug.addEventListener('input', () => {
+    slugTouched = true; ck = null; go.disabled = true;
+    const p = V.slugText(slug.value.trim(), { t });
+    slugNote.textContent = p || '';
+    if (!p) soon();
+  });
+  const go = btn(t('Pair'), async () => {
+    if (!ck) return;
+    const from = ck.from;
+    go.disabled = true;
+    const r = await post('/api/channels/webhook/join', { code: pasted(), slug: slug.value.trim() || ck.slug });
+    if (!r || !r.ok) { say(V.joinWhyText(r, { from, t }), 'refused'); show(slugField, false); return; }
+    seq++; box.value = '';
+    show(intro, false); show(codeField, false); show(slugField, false); say('', '');
+    done.append(whNote(V.joinDoneText(r, { from, t })));
+    const tech = el('details', 'chan-api-tech');
+    tech.appendChild(el('summary', '', t('Technical details')));
+    tech.appendChild(el('code', 'chan-wh-at', `${(r.caller && r.caller.id) || ''} · ${(r.caller && r.caller.delivery && r.caller.delivery.replyUrl) || ''}`));
+    done.appendChild(tech);
+    show(done, true);
+    show(go, false); cancel.textContent = t('Done');
+    showToast(V.joinDoneText(r, { from, t }));
+  }, 'mounts-btn-primary');
+  go.disabled = true; go.dataset.whJoinGo = '1';
+  const cancel = btn(t('Cancel'), () => m.close());
+  footer(m, cancel, go);
+  setTimeout(() => box.focus(), 0);
 }
 
 /** "SEND A MESSAGE…" — the caller picker (All + one box per live caller; delivery none DISABLED WITH ITS REASON beside

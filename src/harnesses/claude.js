@@ -231,6 +231,11 @@ module.exports = {
     // honest "this harness makes no claim".
     loginState: claudeLoginState,
     spawnEnvVar: 'CLAUDE_SECURESTORAGE_CONFIG_DIR',
+    // B-6be2 (src/harness-env.js): the CLI's whole config dir — the machine login a no-account spawn
+    // rides, so agents keep it and jobs drop it — and the key/token names the account resolver writes
+    // (accounts.resolveForSpawn localEnv). Every `creds.*EnvVar(s)` joins the job door's strip.
+    homeEnvVar: 'CLAUDE_CONFIG_DIR',
+    keyEnvVars: ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'],
     loginLabel: 'Claude',
     defaultIdField: 'defaultAccountId',
     spawnForm: 'securestorage',                // accounts.resolveForSpawn: subscription (pool link / oat) or API key; spawnEnvVar relocates the secret store

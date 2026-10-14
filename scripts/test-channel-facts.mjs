@@ -25,6 +25,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { growth } from './cost-ratio.mjs';
 import { engineSource } from './channels-engine-src.mjs';   // lane dc-channels-seams: the engine + its three family files as one text
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
@@ -242,13 +243,19 @@ const gmailFixtures = [
   const cut = G.factsFromHeaders(H({ From: 'a@x', To: huge }), { selfEmail: SELF });
   ok(huge.length > 20000 && J(cut) === J([{ k: 'to', v: [], cut: true }]), 'a 20 KB To ⇒ the fact with no parties and `cut: true` (never clipped into another set of recipients)', J(cut).slice(0, 200));
   const mb = '"' + 'A'.repeat(1024 * 1024) + '" <a@x>';
-  let t0 = process.hrtime.bigint();
   const big = G.factsFromHeaders(H({ From: 'a@x', Cc: mb, To: '<'.repeat(1024 * 1024) }), {});
-  const ms = Number(process.hrtime.bigint() - t0) / 1e6;
-  ok(ms < 100 && big.every((f) => f.cut === true), `V1: a 1 MB Cc and a 1 MB To of "<" are refused by their length in ${ms.toFixed(1)} ms (bounded before any parse)`);
-  t0 = process.hrtime.bigint(); const w1 = G.decodeWords('=?UTF-8?B?' + 'A'.repeat(8000) + '?= '.repeat(1)); const d1 = Number(process.hrtime.bigint() - t0) / 1e6;
-  const s16 = '=?x?Q?'.repeat(2700); t0 = process.hrtime.bigint(); G.decodeWords(s16); const d2 = Number(process.hrtime.bigint() - t0) / 1e6;
-  ok(d1 < 50 && d2 < 50 && typeof w1 === 'string', `the encoded-word decoder is linear on a 16 KB hostile name (${d1.toFixed(1)} / ${d2.toFixed(1)} ms)`);
+  // "bounded" and "linear" are SHAPES, measured RELATIVE in this run (lane mirror-flake-hardening: `ms < 100` / `< 50`
+  // judged the machine): two runs of one process, a slower runner stretches both
+  const hdrs = (n) => H({ From: 'a@x', Cc: '"' + 'A'.repeat(n) + '" <a@x>', To: '<'.repeat(n) });
+  const gB = growth((h) => G.factsFromHeaders(h, {}), hdrs(64 * 1024), hdrs(1024 * 1024), { inner: 20 });
+  const gWalk = growth((h) => h.reduce((a, x) => a + x.value.split('<').length, 0), hdrs(64 * 1024), hdrs(1024 * 1024), { inner: 2 });
+  ok(big.every((f) => f.cut === true) && gB.ratio <= 4 && gWalk.ratio > 4, `V1: a 1 MB Cc and a 1 MB To of "<" are refused by their length — ${gB.ratio.toFixed(2)} × the cost of 64 KB ones (≤ 4 ×; CONTROL a reader that walks them: ${gWalk.ratio.toFixed(1)} ×) — bounded before any parse`, J({ gB, gWalk }));
+  const w1 = G.decodeWords('=?UTF-8?B?' + 'A'.repeat(8000) + '?= '.repeat(1));
+  const gW1 = growth((x) => G.decodeWords(x), '=?UTF-8?B?' + 'A'.repeat(1000) + '?= ', '=?UTF-8?B?' + 'A'.repeat(8000) + '?= ', { inner: 50 });
+  const gW2 = growth((x) => G.decodeWords(x), '=?x?Q?'.repeat(338), '=?x?Q?'.repeat(2700), { inner: 50 });
+  // CONTROL: a quadratic reader of the same name (a search to its end from every opener for a byte it lacks) grows ~64 × on 8 × the input
+  const gQ = growth((x) => { let n = 0; for (let i = 0; i < x.length; i += 6) for (let j = i; j < x.length && x.charCodeAt(j) !== 10; j++) n++; return n; }, '=?x?Q?'.repeat(338), '=?x?Q?'.repeat(2700), { inner: 1 });
+  ok(gW1.ratio <= 24 && gW2.ratio <= 24 && gQ.ratio > 24 && typeof w1 === 'string', `the encoded-word decoder is linear on a 16 KB hostile name: 8 × the input costs ${gW1.ratio.toFixed(1)} / ${gW2.ratio.toFixed(1)} × (≤ 24 ×; CONTROL a quadratic reader: ${gQ.ratio.toFixed(0)} ×)`, J({ gW1, gW2, gQ }));
   ok(G.decodeWords('=?ISO-8859-1?Q?Andr=E9?= =?UTF-8?Q?_Li?=') === 'André Li' && G.decodeWords('=?nonsense-cs?B?QUJD?=') === '=?nonsense-cs?B?QUJD?=', 'two encoded-words join (the space between them dropped); an unknown charset stays as written');
   // toRecord: full-format fixture → the record's facts; the record without fact headers is byte-identical in shape
   const m = { id: 'm1', threadId: 't1', internalDate: '1700000000000', labelIds: ['INBOX'], payload: { mimeType: 'text/plain', headers: gmailFixtures[0].headers, body: { data: Buffer.from('hello').toString('base64url') } } };

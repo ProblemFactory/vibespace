@@ -5558,7 +5558,9 @@ function create(deps = {}) {
     await store.index.update(() => {
       const en = store.index.entry(rec.id, convId, { create: false });
       if (!en || !Array.isArray(en.wokeFor)) return;
-      for (const w of en.wokeFor) if (w && String(w.vid) === String(vid) && !w.noted) { w.noted = true; due.push({ cid: w.cid, at: w.at }); }
+      // ONE note per conversation (lane channel-recall-engine-leg): a message carried to it twice (a re-delivery, a scope
+      // digest beside a wake) has two rows here — both are marked, the conversation hears it once (the first wake's time)
+      for (const w of en.wokeFor) if (w && String(w.vid) === String(vid) && !w.noted) { w.noted = true; if (!due.some((d) => d.cid === w.cid)) due.push({ cid: w.cid, at: w.at }); }
     });
     const en = store.index.live()[`${rec.id}/${convId}`];
     // REACH FIRST (the reaction digest's rule): the note is news FROM the conversation — an agent whose access the owner
@@ -7117,6 +7119,7 @@ function create(deps = {}) {
           clearCarried(e2, pk, h.eff, h.carried);
           e2.stats.wakes.push({ ...wk, n: h.carried.ids.size + h.carried.elided });
           e2.stats.wakes = F.pruneLedger(e2.stats.wakes, t);
+          noteWoken(e2, h.carried.hits, target.cid, t);   // lane channel-recall-engine-leg: the woken-for ledger of EVERY conversation the digest carried (was: single-conversation wakes only — a recall after a digest said nothing)
         }
       }); } catch (err) { log.warn(`[channels] scope digest ${sKey}: the ledger could not take the outcome — the reservation stays counted: ${(err && err.message) || err}`); }
       log.log(`[channels] scope digest ${sKey} → ${target.name || target.cid}: ${groups.length} conversation(s), ${n} hit(s) — ${ok ? `delivered via ${r.lane || 'message'}` : `${stashed ? 'stashed for the next turn' : 'held'}: ${(r && r.reason) || 'refused'}`}`);

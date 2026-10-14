@@ -84,7 +84,8 @@ function stubGateRepo(tag) {
   fs.copyFileSync(path.join(REPO, 'scripts', 'scratch-run.mjs'), path.join(root, 'scripts', 'scratch-run.mjs')); // ci.mjs's other sibling (B-1d08: the run record its reaper reads)
   // B-60d2: the directory sweep (scratch-sweep.mjs) and the unit declarations it reads (scratch.mjs ← src/fixture-guard.js)
   // lane affected-heavy-deps: the shared tables' rules (affected-model.mjs ← i18n-extract.mjs's one dictionary parser)
-  for (const f of ['scripts/scratch-sweep.mjs', 'scripts/scratch.mjs', 'src/fixture-guard.js', 'scripts/affected-model.mjs', 'scripts/i18n-extract.mjs']) { fs.mkdirSync(path.dirname(path.join(root, f)), { recursive: true }); fs.copyFileSync(path.join(REPO, f), path.join(root, f)); }
+  // lane affected-static-reach: the static reach (reach-model.mjs, PURE)
+  for (const f of ['scripts/scratch-sweep.mjs', 'scripts/scratch.mjs', 'src/fixture-guard.js', 'scripts/affected-model.mjs', 'scripts/i18n-extract.mjs', 'scripts/reach-model.mjs']) { fs.mkdirSync(path.dirname(path.join(root, f)), { recursive: true }); fs.copyFileSync(path.join(REPO, f), path.join(root, f)); }
   fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ name: 'x', version: '0.0.0', private: true, scripts: { build: 'node -e "0"' } }) + '\n');
   fs.writeFileSync(path.join(root, 'scripts', STUB_SLICE + '.mjs'), "console.log('ALL PASS (1)');\n");
   git(root, ['init', '-q', '-b', 'main']);
@@ -224,6 +225,121 @@ console.log('\n§2 tier hygiene');
   // (round 2: the manual path used to run 16 minutes and then refuse silently).
   ok(/"ci:heavy"\s*:\s*"[^"]*--isolate/.test(pkg), 'ci:heavy runs ISOLATED, so the recovery command always earns a marker');
   ok(read('.gitignore').includes('data/ci-heavy'), 'the marker directory is gitignored');
+}
+
+// ── §2e NO FAST SUITE ASSERTS A WALL-CLOCK BOUND ON ITS OWN RUN (lane mirror-flake-hardening, 2.369.270) ──
+// rel269's mirror (run 38549333465) went red on test-enter-census's `< 3 s` — 4335 ms on ubuntu-latest — and the fast
+// tier stopped on it. scripts/wall-clock-census.mjs reads every fast suite with acorn and classifies each comparison of a
+// measured span (wait / lower / guard / control / LITERAL): a LITERAL upper bound under 1 s is RED; one of ≥ 1 s is held
+// only by the per-suite ratchet scripts/fixtures/wall-clock-baseline.json, which only falls. A cost claim is a census of
+// the work or a ratio against a control in the same run (scripts/cost-ratio.mjs — CPU time); a wait is the mechanism's
+// constant or the evidence it ended for its reason.
+console.log('\n§2e no fast suite asserts a wall-clock bound on its own run');
+{
+  const WC = await import('./wall-clock-census.mjs');
+  const suites = WC.censusOver(SUITES);
+  const baseline = JSON.parse(fs.readFileSync(WC.BASELINE, 'utf-8'));
+  const v = WC.ratchetVerdict(suites, baseline);
+  const by = {};
+  for (const x of suites) for (const f of x.findings) by[f.kind] = (by[f.kind] || 0) + 1;
+  const held = suites.flatMap((x) => x.findings.filter((f) => f.kind === 'LITERAL').map((f) => `${x.name}:${f.line} ${f.text}`));
+  console.log(`    ${suites.length} fast suites · ${Object.entries(by).map(([k, n]) => `${n} ${k}`).join(' · ')}`);
+  for (const h of held) console.log('      held by the ratchet: ' + h);
+  const nFast = SUITES.filter((r) => r.tier === 'fast').length;
+  ok(suites.length === nFast && nFast > 300, `the census read every fast suite (${suites.length} of ${nFast})`);
+  ok(!v.problems.length, `no literal wall-clock bound under ${WC.LITERAL_FLOOR_MS} ms in a fast suite; the ≥ ${WC.LITERAL_FLOOR_MS} ms ones are the ratchet's (${held.length} in ${Object.keys(baseline).length} suites, only falling)${v.problems.length ? ' — ' + v.problems.join(' | ') : ''}`);
+  // PLANTS: every spelling of the class is LITERAL; every legitimate form is classified out of it
+  const kinds = (src) => WC.wallClockFindings(src).map((f) => f.kind).join(',');
+  const RED = {
+    'Date.now() delta': "const t0 = Date.now(); run(); ok('fast', Date.now() - t0 < 3000);",
+    'performance.now() span variable': "const t = performance.now(); run(); const ms = performance.now() - t; ok('fast', ms < 500);",
+    'hrtime.bigint span': "const t = process.hrtime.bigint(); run(); const ms = Number(process.hrtime.bigint() - t) / 1e6; ok(ms < 100);",
+    'an if-test failure (`if (ms > N) bad`)': "const t = performance.now(); run(); const ms = performance.now() - t; if (ms > 1500) bad.push('slow');",
+    'a const used only as the bound': "const BUDGET_MS = 250; const t = Date.now(); run(); ok(Date.now() - t < BUDGET_MS);",
+    'a const handed only to a watchdog timer': "const BUDGET_MS = 250; setTimeout(kill, BUDGET_MS + 1500); const t = Date.now(); run(); ok(Date.now() - t < BUDGET_MS);",
+    'an object field': "const t0 = Date.now(); const r = { ms: Date.now() - t0 }; ok(r.ms < 50);",
+    'a helper that returns a span': "const timeIt = (fn) => { const t = performance.now(); fn(); return performance.now() - t; }; ok(timeIt(run) < 100);",
+    'a negated flag (`!(ms < B)`)': "const t = Date.now(); run(); const over = !(Date.now() - t < 1500); ok(!over);",
+    'a .filter of violators': "const t = performance.now(); const times = [performance.now() - t]; const slow = times.filter((ms) => ms > 800); ok(!slow.length);",
+    // lane oat-loop-gap-bound (.270): the spellings test-oat-materialize F13's `r13.maxGap < 50` hid behind
+    "a helper's coerced field (F13: `maxGap: +maxGap.toFixed(1)`)": "const f13 = async () => { let maxGap = 0, last = performance.now(); const tick = () => { const t = performance.now(); maxGap = Math.max(maxGap, t - last); last = t; }; tick(); return { maxGap: +maxGap.toFixed(1) }; }; const r13 = await f13(); ok(r13.maxGap < 50, 'stall');",
+    'a sum across a loop (`total += span`)': "let total = 0; for (const x of xs) { const t = performance.now(); run(x); total += performance.now() - t; } ok(total < 500);",
+    'the max of spans pushed across a loop (`Math.max(...gaps)`)': "const gaps = []; let last = Date.now(); const iv = setInterval(() => { const now = Date.now(); gaps.push(now - last); last = now; }, 5); await work(); clearInterval(iv); const worst = Math.max(...gaps, 0); ok(worst < 250);",
+    'an element of a sorted span array': "const ms = []; for (const x of xs) { const t = Date.now(); run(x); ms.push(Date.now() - t); } ms.sort((a, b) => a - b); ok(ms[ms.length - 1] < 300);",
+    'a destructured span field': "const timed = () => { const t = Date.now(); run(); return { ms: Date.now() - t }; }; const { ms } = timed(); ok(ms < 200);",
+    "process.hrtime(t0)'s [s, ns]": "const t = process.hrtime(); run(); const [s, ns] = process.hrtime(t); ok(s * 1e3 + ns / 1e6 < 100);",
+  };
+  const OUT = {
+    wait: ["const t0 = Date.now(); while (Date.now() - t0 < 5000 && !done()) await sleep(50);", 'wait'],
+    'a poll deadline in a timer callback': ["const t0 = Date.now(); const iv = setInterval(() => { if (Date.now() - t0 > 20000) { clearInterval(iv); reject(new Error('timeout')); } }, 50);", 'wait'],
+    'a lower bound': ["const t0 = Date.now(); await hold(); ok(Date.now() - t0 >= 600);", 'lower'],
+    "the mechanism's constant × slack": ["const t0 = Date.now(); await probe(); ok(Date.now() - t0 < 2 * DP.DUP_PROBE_MS + 500);", 'control'],
+    'a const the suite hands the fake': ["const HOLD = 300; fake.holdMs = HOLD; const t0 = Date.now(); await fake.run(); ok(Date.now() - t0 < 3 * HOLD);", 'control'],
+    'a control measured in the run': ["const t = performance.now(); a(); const ta = performance.now() - t; const u = performance.now(); b(); const tb = performance.now() - u; ok(tb < 4 * ta);", 'control'],
+    'a noise-floor conjunct': ["const t = performance.now(); a(); const ta = performance.now() - t; if (ta > 10 && other > 2.5) bad.push('x');", 'guard'],
+    "F13's form since .270 (a stall against a control loop of the same length)": ["const f13 = async () => { let maxGap = 0, last = performance.now(); const tick = () => { const t = performance.now(); maxGap = Math.max(maxGap, t - last); last = t; }; tick(); const ctl = performance.now() - last; return { maxGap: +maxGap.toFixed(1), ctlGap: +ctl.toFixed(1) }; }; const r13 = await f13(); ok(r13.maxGap <= 3 * r13.ctlGap);", 'control'],
+  };
+  const redWrong = Object.entries(RED).filter(([, src]) => kinds(src) !== 'LITERAL').map(([n, src]) => `${n} → ${kinds(src) || 'not seen'}`);
+  const outWrong = Object.entries(OUT).filter(([, [src, want]]) => kinds(src) !== want).map(([n, [src, want]]) => `${n} → ${kinds(src) || 'not seen'} (want ${want})`);
+  ok(!redWrong.length, `PLANTS: ${Object.keys(RED).length} spellings of an absolute wall-clock bound are each LITERAL${redWrong.length ? ' — WRONG: ' + redWrong.join(' | ') : ''}`);
+  ok(!outWrong.length, `PLANTS: ${Object.keys(OUT).length} legitimate forms are classified out of it (wait / lower / control / guard)${outWrong.length ? ' — WRONG: ' + outWrong.join(' | ') : ''}`);
+  ok(kinds("const t = performance.now(); a(); const x = performance.now() - t; const u = performance.now(); b(); const y = performance.now() - u; ok(y / x <= 2.5);") === '', 'a RATIO of two spans is dimensionless — no finding (relative by construction)');
+  ok(kinds("const t0 = performance.now(); await sweep(); const took = performance.now() - t0; const until = performance.now() + took; while (performance.now() < until) await tick();") === '', 'a mark plus a span is a DEADLINE (a control loop as long as the sweep), not a span — no finding');
+  // THE RATCHET: a new literal bound in a held suite, a sub-second one anywhere, a baseline above the truth, a name
+  // that is no fast suite — each RED
+  const plantSuite = (name, src) => [...suites.filter((x) => x.name !== name), { name, findings: WC.wallClockFindings(src) }];
+  const someHeld = Object.keys(baseline)[0];
+  const heldSrc = fs.readFileSync(path.join(REPO, 'scripts', someHeld + '.mjs'), 'utf-8');
+  const pNew = WC.ratchetVerdict(plantSuite(someHeld, heldSrc + "\nconst tP = Date.now(); ok(Date.now() - tP < 4000, 'planted');\n"), baseline).problems;
+  const pSub = WC.ratchetVerdict(plantSuite('test-lazy', fs.readFileSync(path.join(REPO, 'scripts', 'test-lazy.mjs'), 'utf-8') + "\nconst tP = Date.now(); ok(Date.now() - tP < 200, 'planted');\n"), baseline).problems;
+  const pHigh = WC.ratchetVerdict(suites, { ...baseline, [someHeld]: baseline[someHeld] + 1 }).problems;
+  const pGone = WC.ratchetVerdict(suites, { ...baseline, 'test-no-such-suite': 1 }).problems;
+  ok(pNew.some((p) => p.startsWith(someHeld) && /a NEW one/.test(p)) && pSub.some((p) => /test-lazy:\d+ asserts .* under 1000 ms/.test(p)) && pHigh.some((p) => p.startsWith(someHeld) && /lower it/.test(p)) && pGone.some((p) => /test-no-such-suite/.test(p)),
+    `CONTROLS: a 4 s bound planted in ${someHeld} is a NEW one, a 200 ms one in test-lazy is RED by the floor, a baseline above the truth and a baseline name that is no fast suite say "lower it" — all RED`);
+  // THE INCIDENT ITSELF: rel269's test-enter-census reads RED here (a depth-1 checkout has no d419156bd: SKIP, said)
+  let rel269 = null;
+  try { rel269 = git(REPO, ['show', 'd419156bd:scripts/test-enter-census.mjs']); } catch { rel269 = null; }
+  if (rel269 === null) console.log('    SKIP: d419156bd is not in this checkout (a depth-1 clone) — the incident control needs rel269');
+  else {
+    const pInc = WC.ratchetVerdict(plantSuite('test-enter-census', rel269), baseline).problems;
+    ok(pInc.some((p) => p.startsWith('test-enter-census') && /ms < 3000/.test(p)), `CONTROL: rel269's test-enter-census (\`ms < 3000\`, the mirror's 4335 ms red) reads RED here (${pInc.filter((p) => p.startsWith('test-enter-census')).length} problem)`);
+  }
+  // THE SECOND INCIDENT (lane oat-loop-gap-bound): .270's candidate (run 38560509611) went red on test-oat-materialize
+  // F13's `r13.maxGap < 50` — 59.4 ms on ubuntu-latest — a span this census could not see through the helper's
+  // `maxGap: +maxGap.toFixed(1)`; that suite at a7321ff0e reads RED here, today's (a stall against a control) does not
+  let a7321 = null;
+  try { a7321 = git(REPO, ['show', 'a7321ff0e:scripts/test-oat-materialize.mjs']); } catch { a7321 = null; }
+  if (a7321 === null) console.log('    SKIP: a7321ff0e is not in this checkout (a depth-1 clone) — the F13 incident control needs it');
+  else {
+    const pF13 = WC.ratchetVerdict(plantSuite('test-oat-materialize', a7321), baseline).problems.filter((p) => p.startsWith('test-oat-materialize'));
+    ok(pF13.length === 1 && /r13\.maxGap < 50/.test(pF13[0]), `CONTROL: a7321ff0e's test-oat-materialize (\`r13.maxGap < 50\`, the 59.4 ms red) reads RED here (${pF13.length} problem${pF13.length === 1 ? '' : 's'})`);
+  }
+}
+
+// ── §2f THE MIRROR'S ONE APT DOOR (lane mirror-flake-hardening: rel269's heavy 2/4 died in `apt-get update`, exit 100,
+// on packages.microsoft.com — a repository the runner ships and we never install from — answering only over IPv6) ──
+console.log('\n§2f ci.yml installs through scripts/ci-apt.sh (a repository we do not need never fails a job)');
+{
+  const wf = fs.readFileSync(path.join(REPO, '.github', 'workflows', 'ci.yml'), 'utf-8');
+  const runs = wf.split('\n').filter((l) => /^\s*run:/.test(l));
+  const bare = runs.filter((l) => /\bapt(?:-get)?\b/.test(l) && !/scripts\/ci-apt\.sh/.test(l));
+  const door = runs.filter((l) => /scripts\/ci-apt\.sh/.test(l));
+  ok(!bare.length && door.length >= 3, `every apt step in ci.yml goes through scripts/ci-apt.sh (${door.length} steps${bare.length ? '; BARE: ' + bare.map((l) => l.trim()).join(' | ') : ''})`);
+  const sh = fs.readFileSync(path.join(REPO, 'scripts', 'ci-apt.sh'), 'utf-8');
+  ok(/Acquire::ForceIPv4=true/.test(sh) && /--no-install-recommends/.test(sh), 'the door speaks IPv4 and installs only the packages named');
+  // the selection over a fixture sources.list.d: the runner's microsoft lists moved aside (printed), ubuntu.sources kept
+  const dir = path.join(mktmp('apt'), 'sources.list.d');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'ubuntu.sources'), 'Types: deb\nURIs: mirror+file:/etc/apt/apt-mirrors.txt\nSuites: noble noble-updates\nComponents: main universe\n');
+  fs.writeFileSync(path.join(dir, 'microsoft-prod.list'), 'deb [arch=amd64,armhf,arm64] https://packages.microsoft.com/ubuntu/24.04/prod noble main\n');
+  fs.writeFileSync(path.join(dir, 'azure-cli.sources'), 'Types: deb\nURIs: https://packages.microsoft.com/repos/azure-cli/\nSuites: noble\n');
+  const r = spawnSync('bash', [path.join(REPO, 'scripts', 'ci-apt.sh'), 'dtach'], { encoding: 'utf-8', env: { PATH: process.env.PATH, CI_APT_SOURCES_DIR: dir, CI_APT_SUDO: '', CI_APT_ECHO: '1' } });
+  const left = fs.readdirSync(dir).sort().join(), aside = fs.existsSync(dir + '.off') ? fs.readdirSync(dir + '.off').sort().join() : '';
+  ok(r.status === 0 && left === 'ubuntu.sources' && aside === 'azure-cli.sources,microsoft-prod.list' && /moved aside microsoft-prod\.list — https:\/\/packages\.microsoft\.com/.test(r.stdout) && /kept ubuntu\.sources/.test(r.stdout),
+    `the runner's packages.microsoft.com lists are moved aside BY NAME, the Ubuntu archive kept (left: ${left}; aside: ${aside})`);
+  ok(/apt-get -o Acquire::ForceIPv4=true -o Acquire::Retries=3 update\n/.test(r.stdout) && /install -y --no-install-recommends dtach\n?$/.test(r.stdout), 'then update + install of exactly the named package, IPv4 forced', r.stdout);
+  const noUpd = spawnSync('bash', [path.join(REPO, 'scripts', 'ci-apt.sh'), '--no-update', 'fonts-noto-cjk'], { encoding: 'utf-8', env: { PATH: process.env.PATH, CI_APT_SOURCES_DIR: dir, CI_APT_SUDO: '', CI_APT_ECHO: '1' } });
+  ok(noUpd.status === 0 && !/ update\n/.test(noUpd.stdout) && /install -y --no-install-recommends fonts-noto-cjk/.test(noUpd.stdout), '--no-update installs on the index the first step fetched');
 }
 
 // ── §3 THE BLOCK RULE, OVER REAL COMMITS ─────────────────────────────────
@@ -1230,6 +1346,15 @@ console.log('\n§8 lanes, the serial table, the impact scope, the full-tier cloc
     `each selection says HOW the suite depends on the change, never a bare "reads" for a file it never opens (${how.get('test-a')} · ${how.get('test-boot')})`);
   ok(sel(['src/r/q.js']) === 'test-always,test-boot,test-r', 'a declared reads: prefix selects the suite whose path is built from segments');
   ok(sel(['README.md']) === 'test-always', 'a file nothing reads selects only the always rows');
+  // lane affected-static-reach (q-036 P0): the BOOT reason narrows by static reach — a booting suite that derives no
+  // reach runs on every product change ('all', said), the reach: false switch is the old rule, and THE BOOT SENTINEL is
+  // ONE heavy row with always: true (every affected run carries it; it is in no other tier and not excluded)
+  const rw = affectedSuites({ suites: S, root, changed: ['src/b.js'], range: 'x..y', why: true }).summary;
+  ok(/✓ test-boot ← boots the product \(src\/b\.js changed under src\/\) — reach 'all' \(undeclared, derived empty\) ∩ src\/b\.js/.test(rw) && sel(['src/b.js']) === affectedSuites({ suites: S, root, changed: ['src/b.js'], range: 'x..y', reach: false }).selected.map((s) => s.name).sort().join(','),
+    'a booting suite that derives no reach runs on every product change and --why says so; here the reach selects what the old rule does');
+  const sentinelRows = SUITES.filter((s) => s.name === 'test-boot-sentinel');
+  ok(sentinelRows.length === 1 && sentinelRows[0].tier === 'heavy' && sentinelRows[0].always === true && !EXCLUDED.some((e) => e.name === 'test-boot-sentinel') && fs.existsSync(path.join(REPO, 'scripts/test-boot-sentinel.mjs')),
+    'THE BOOT SENTINEL is in exactly one tier — heavy, always: true — and not excluded');
   ok(sel(['package-lock.json']) === S.map((s) => s.name).sort().join(','), 'a dependency bump is a global input: everything runs');
   const unknown = affectedSuites({ suites: S, root, changed: null, range: 'x..y' });
   ok(unknown.selected.length === S.length && /could not be listed/.test(unknown.summary), '"could not tell" selects EVERYTHING and says so (never "nothing changed")');
@@ -1254,9 +1379,10 @@ console.log('\n§8 lanes, the serial table, the impact scope, the full-tier cloc
   // the 24 h full tier. Non-vacuity: the same predicate over a stub row that
   // reads nothing says so.
   const realHeavy = SUITES.filter((s) => s.tier === 'heavy');
+  const realMemo = new Map(); // ONE walk + ONE reach context for the four real-table selections (an unchanged tree)
   for (const [changedFile, suite] of [['src/conversation-index.js', 'test-conversation-index'], ['src/normalizers.js', 'test-session-brain-dark'], ['src/machine-probes.js', 'test-machine-probes'], ['src/routes/persistence.js', 'test-layout-history']]) {
     if (!realHeavy.some((s) => s.name === suite)) continue; // the row may leave the tier; the stub legs above pin the shapes
-    const why = affectedSuites({ suites: realHeavy, changed: [changedFile], range: 'x..y' }).why.get(suite);
+    const why = affectedSuites({ suites: realHeavy, changed: [changedFile], range: 'x..y', memo: realMemo }).why.get(suite);
     ok(!!why && /^loads /.test(why), `${changedFile} selects ${suite} (${why || 'MISSED — the measured defect'})`);
   }
   const isProduct = (p) => p === 'server.js' || p.startsWith('src/') || p.startsWith('data/bin/');
@@ -1406,6 +1532,201 @@ console.log('\n§8b shards — every heavy suite in exactly one slice, the seria
   const short = wf.replace(/shard:\s*\[[\d,\s]+\]/, 'shard: [1, 2, 3]');
   const sm = /shard:\s*\[([\d,\s]+)\]/.exec(short)[1].split(',').map((x) => Number(x.trim()));
   ok(!(sm.length === Number(den ? den[1] : 0)), 'CONTROL: a matrix of [1, 2, 3] under --shard …/4 fails the matrix census');
+}
+
+// ── §8c HOSTS: the heavy tier on two runners (lane ci-aidev-desktop-batch, design q-038 step ①, 2026-10-14) ──
+// The hosted Actions shards run what a hosted runner can; the self-hosted DESKTOP batch (AIDev, ci-remote.mjs --batch
+// desktop) runs the suites that drive xpra / Xvfb / x11vnc / LibreOffice or a real binary the hosted image lacks. The
+// split is DERIVED from each suite's code (ci.mjs hostOf) — this section holds it to a partition, every self-hosted
+// suite to the program that put it there, the provision script to a row per program, the 6 hosted shards to an LPT
+// balance over the checked-in runner times, the hub to its LOAD RULE (4 lanes; no full tier by day), the lanes to their
+// private env; and PRINTS the derivation against the design's census with a computed reason per differing name.
+console.log('\n§8c hosts — the self-hosted desktop batch + the 6 hosted shards partition the tier; the hub\'s LOAD RULE');
+{
+  const C = await import('./ci.mjs');
+  const heavy = SUITES.filter((s) => s.tier === 'heavy');
+  const srcOf = (name) => { try { return fs.readFileSync(path.join(REPO, 'scripts', name + '.mjs'), 'utf-8'); } catch { return ''; } };
+  const readR = (f) => { try { return fs.readFileSync(path.join(REPO, f), 'utf-8'); } catch { return ''; } };
+  const names = (l) => l.map((s) => s.name);
+  const plan = C.hostPlan(heavy, { sourceOf: srcOf });
+  const three = [...names(plan.desktop), ...names(plan.binary), ...names(plan.hosted)];
+  ok(three.length === heavy.length && new Set(three).size === heavy.length && heavy.every((s) => three.includes(s.name)) && plan.self.length === plan.desktop.length + plan.binary.length,
+    `the hosts PARTITION the heavy tier: ${plan.desktop.length} desktop + ${plan.binary.length} binary (self-hosted ${plan.self.length}) + ${plan.hosted.length} hosted = ${heavy.length}, each once`);
+  ok(plan.desktop.length >= 25 && plan.binary.length >= 5 && plan.hosted.length >= 200 && names(plan.desktop).filter((n) => /^test-desktop-xpra-window-/.test(n)).length >= 4 && names(plan.binary).includes('test-opencode-s9'),
+    'non-vacuous: the xpra giant\'s parts are desktop, the real opencode serve is binary, most of the tier is hosted');
+  ok(!plan.problems.length, `no row's host declaration is refused (${plan.problems.join(' | ') || 'none declared wrong'})`);
+  const unnamed = plan.self.filter((s) => { const v = plan.verdicts.get(s.name); return v.declared ? !v.why : !v.programs.length; });
+  ok(!unnamed.length, `every self-hosted suite names the program that puts it there (or declares what it reaches) — ${unnamed.map((s) => s.name).join(', ') || plan.self.length + ' suites'}`);
+  // the provision script: a PROGRAMS row for every program the self-hosted set runs
+  const prov = readR('scripts/ci-provision-aidev.sh');
+  const rowsOf = (txt) => { const m = /PROGRAMS='([^']*)'/.exec(txt); return m ? m[1].split('\n').map((l) => l.trim().split(/\s+/)[0]).filter(Boolean) : []; };
+  const needed = [...new Set(plan.self.flatMap((s) => plan.verdicts.get(s.name).programs))].sort();
+  ok(needed.length >= 6 && needed.every((p) => rowsOf(prov).includes(p)), `scripts/ci-provision-aidev.sh has a PROGRAMS row for every program the self-hosted set runs (${needed.join(', ')}${needed.filter((p) => !rowsOf(prov).includes(p)).length ? ' — MISSING ' + needed.filter((p) => !rowsOf(prov).includes(p)).join(', ') : ''})`);
+  const XP = ['xp', 'ra'].join('');
+  const cut = prov.replace(new RegExp(`(PROGRAMS='|\\n)${XP} ${XP}\\n`), '$1');
+  ok(rowsOf(cut).length > 5 && needed.filter((p) => !rowsOf(cut).includes(p)).join() === XP, `CONTROL: the provision list without its ${XP} row is red for ${XP} alone`);
+  ok(/apparmor_restrict_unprivileged_userns = 0/.test(prov) && /\/etc\/sysctl\.d\//.test(prov) && /apt-mark hold/.test(prov) && /fonts-noto-core/.test(prov),
+    'the provision persists the ONE sysctl (B-4260 userns), pins + holds xpra, installs the hub\'s default sans (fonts-noto-core)');
+  // the design's census, printed with a computed reason per differing name
+  const q = readR('scripts/fixtures/ci-hosts-q038.txt').split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
+  const diff = C.hostDesignDiff(plan, q);
+  for (const x of diff.onlyThere) console.log(`    − ${x.name}: ${x.why}`);
+  for (const x of diff.onlyHere) console.log(`    + ${x.name}: ${x.why}`);
+  for (const x of diff.split) console.log(`    = ${x.name}: split by § into ${x.parts.join(', ')}`);
+  ok(q.length === 67 && [...diff.onlyThere, ...diff.onlyHere].every((x) => x.why && !/not a heavy suite/.test(x.why)),
+    `the design's census (${q.length}) vs the derivation: ${diff.onlyThere.length} there only, ${diff.onlyHere.length} here only — each with its computed reason (printed above)`);
+  const xw = diff.split.find((x) => x.name === 'test-desktop-xpra-window');
+  ok(!!xw && xw.parts.length >= 4 && xw.parts.every((p) => names(plan.desktop).includes(p)) && !diff.onlyHere.some((x) => xw.parts.includes(x.name)),
+    `the design's xpra giant reads as SPLIT (q-038 ②): ${xw ? xw.parts.length + ' parts, each desktop, none listed as a newer suite' : 'NOT FOUND'}`);
+  const gone = C.hostDesignDiff(plan, [...q, 'test-not-a-suite-anywhere']).onlyThere.find((x) => x.name === 'test-not-a-suite-anywhere');
+  const offSide = C.hostDesignDiff({ ...plan, self: plan.self.filter((s) => s.name !== (xw && xw.parts[0])) }, q).onlyThere.find((x) => x.name === 'test-desktop-xpra-window');
+  ok(!!gone && /not a heavy suite/.test(gone.why) && !!offSide && /NOT self-hosted/.test(offSide.why),
+    'CONTROL: a listed name with no suite and no family is still "not a heavy suite"; a family part off the self-hosted side is named');
+  // the rule through its own shapes — ASSEMBLED, so this file's text runs none of them (THE TIER RULE reads it too)
+  const P_ = { cx: ['co', 'dex'].join(''), oc: ['open', 'code'].join(''), bw: ['bw', 'rap'].join(''), rc: ['rcl', 'one'].join(''), fz: '/dev/' + 'fuse', cv: ['command', '-v'].join(' '), xs: ['startX', 'Server'].join('') };
+  const H = (code, row = {}) => C.hostOf(row, code);
+  ok(H(`const p = spawn('${XP}', ['start', ':9']);`).host === 'desktop' && H(`await D.${P_.xs}({ bin: 'X' });`).host === 'desktop',
+    'NEG: a suite whose code names a desktop program (or starts an X server through desktop-display) is desktop');
+  ok(H(`execSync('${P_.cv} ${P_.cx}');`).programs.join() === P_.cx && H(`spawn('${P_.oc}', ['serve']);`).programs.join() === P_.oc && H(`dm.open({ cmd: '${P_.bw}' });`).programs.join() === P_.bw
+    && H(`const R = path.join(repo, 'data/bin/${P_.rc}');`).programs.join() === P_.rc && H(`fs.existsSync('${P_.fz}')`).programs.join() === P_.rc && H(`execSync('${P_.cv} ${P_.cx}');`).host === 'binary',
+    'NEG: a binary by a probe, a literal command, a cmd: field, a path ending in it, /dev/fuse — binary');
+  const cmt = H(`// no ${XP} on this box\nconst a = 1;`);
+  ok(cmt.host === 'hosted' && cmt.mentions.includes(XP) && H(`effortDisplay('${P_.cx}', 'ultra'); const m = { backend: '${P_.oc}' };`).host === 'hosted',
+    'NON-HITS: a program named only in a comment, a harness id, a backend name — hosted (the design census\'s over-reads)');
+  ok(H('', { host: 'desktop', hostWhy: 'reaches it through src/desktop-display.js' }).host === 'desktop'
+    && /toward the self-hosted side only/.test(H(`spawn('${XP}');`, { host: 'hosted' }).problems.join()) && H(`spawn('${XP}');`, { host: 'hosted' }).host === 'desktop'
+    && /without a hostWhy/.test(H('', { host: 'binary' }).problems.join()) && /none of/.test(H('', { host: 'laptop', hostWhy: 'x' }).problems.join()),
+    'a DECLARED host moves a suite toward the self-hosted side only; \'hosted\' over a derived verdict, a reasonless or unknown host is a problem (and moves nothing)');
+  for (const [n, h] of [['test-desktop-xpra-window-open', 'desktop'], ['test-opencode-s9', 'binary'], ['test-node-bootstrap', 'binary'], ['test-channels-i18n', 'hosted'], ['test-toast-pass-through', 'hosted']]) {
+    ok(plan.verdicts.get(n) && plan.verdicts.get(n).host === h, `CONTROL: ${n} is ${h} (${plan.verdicts.get(n) && (plan.verdicts.get(n).programs.join(',') || 'names none it runs')})`);
+  }
+  // the hosted half: 6 shards, LPT over the checked-in runner times
+  const tm = C.shardTimings(REPO);
+  const hosted = plan.hosted;
+  ok(tm && hosted.filter((s) => s.name in tm).length >= hosted.length * 0.9, `scripts/fixtures/ci-shard-timings.json times the hosted set (${tm ? hosted.filter((s) => s.name in tm).length : 0} of ${hosted.length})`);
+  const lp = C.shardPlan(hosted, 6, { sourceOf: srcOf, timings: tm || {} });
+  const fnv = C.shardPlan(hosted, 6, { sourceOf: srcOf });
+  const loadOf = (sh) => sh.reduce((a, s) => a + (tm && tm[s.name] || 0), 0);
+  ok(!C.shardCensus(hosted, lp.shards, lp.serial).length && lp.serial.every((n) => lp.shards[0].some((s) => s.name === n)) && lp.shards.every((x) => x.length),
+    `6 hosted shards (LPT): ${lp.shards.map((x) => x.length).join(' + ')} = ${hosted.length}, each once, the serial group (${lp.serial.join(', ')}) whole in shard 1`);
+  ok(Math.max(...lp.loads) / Math.min(...lp.loads) < 1.1, `LPT balances them: ${lp.loads.map((x) => Math.round(x / 1000)).join(' / ')} s of suites (max/min < 1.1)`);
+  ok(Math.max(...fnv.shards.map(loadOf)) > Math.max(...lp.loads), `CONTROL: the name-hash split of the same set is worse (max ${Math.round(Math.max(...fnv.shards.map(loadOf)) / 1000)} s vs ${Math.round(Math.max(...lp.loads) / 1000)} s)`);
+  const sp = (p) => p.shards.map((x) => x.map((y) => y.name).sort().join()).join('|');
+  ok(sp(C.shardPlan([...hosted].reverse(), 6, { sourceOf: srcOf, timings: tm || {} })) === sp(lp), 'the SAME table and times give the SAME split (every matrix job agrees) — not a function of the table order');
+  const grown = C.shardPlan([...hosted, { name: 'test-zz-added-suite', tier: 'heavy' }], 6, { sourceOf: srcOf, timings: tm || {} });
+  ok(grown.shards.every((x, k) => lp.shards[k].every((y) => x.some((z) => z.name === y.name))), 'an UNMEASURED new suite takes its name-hash slot and moves no measured one');
+  // the two runners together: the hosted shards + the self-hosted batch = the tier, each suite once
+  const together = [...lp.shards.flat().map((s) => s.name), ...names(plan.self)];
+  ok(together.length === heavy.length && new Set(together).size === heavy.length, `the 6 hosted shards + the desktop batch run ${together.length} = the ${heavy.length} heavy suites, each exactly once`);
+  const wf = readR('.github/workflows/ci.yml');
+  const hostedRun = /node scripts\/ci\.mjs --heavy --dirty-ok --host=hosted --shard \$\{\{ matrix\.shard \}\}\/6/;
+  ok(hostedRun.test(wf) && /shard:\s*\[1, 2, 3, 4, 5, 6\]/.test(wf) && /branches: \[master, 'ci\/\*\*'\]/.test(wf), 'ci.yml runs the HOSTED half as 6 shards (and a ci/** push gets the same mirror)');
+  ok(!hostedRun.test(wf.replace('--host=hosted ', '')), 'CONTROL: a workflow without --host=hosted fails that census (it would rerun the self-hosted suites as skips)');
+  // the hub's LOAD RULE: 4 lanes, forced or not; only a second machine's run goes past it
+  ok(C.HUB_MAX_LANES === 4 && C.laneCount({ cpus: 32, env: { VIBESPACE_CI_LANES: '8' } }) === 4 && C.laneCount({ cpus: 128, env: {} }) === 4
+    && C.laneCount({ cpus: 32, env: { VIBESPACE_CI_LANES: '3' } }) === 3 && C.laneCount({ cpus: 32, env: { VIBESPACE_CI_LANES: '8', VIBESPACE_CI_REMOTE_RUN: 'r1' } }) === 8,
+    'the hub\'s LOAD RULE: at most 4 lanes even when VIBESPACE_CI_LANES asks 8; a second machine\'s run (VIBESPACE_CI_REMOTE_RUN) takes its 8');
+  const at = (h) => new Date(2026, 9, 14, h, 30);
+  ok(/--allow-hub-full/.test(C.hubFullRefusal({ full: true, env: {}, now: at(13) }) || '') && C.hubFullRefusal({ full: true, env: {}, now: at(7) }) !== null
+    && C.hubFullRefusal({ full: true, env: {}, now: at(23) }) !== null && C.hubFullRefusal({ full: true, env: {}, now: at(6) }) === null && C.hubFullRefusal({ full: true, env: {}, now: at(0) }) === null,
+    'a FULL tier on the hub by day (07:00–24:00 local) is refused, naming --allow-hub-full; at night it runs');
+  ok([C.hubFullRefusal({ full: false, env: {}, now: at(13) }), C.hubFullRefusal({ full: true, allow: true, env: {}, now: at(13) }), C.hubFullRefusal({ full: true, env: { VIBESPACE_CI_REMOTE_RUN: 'r' }, now: at(13) }), C.hubFullRefusal({ full: true, env: { GITHUB_ACTIONS: 'true' }, now: at(13) })].every((x) => x === null),
+    'NON-HITS: a scoped run, --allow-hub-full, a second machine\'s run, a hosted runner');
+  const ciSrc = readR('scripts/ci.mjs');
+  const gateAt = ciSrc.indexOf('hubFullRefusal({ full: !only && !shard && !host && !range'), lockAt = ciSrc.indexOf('const held = acquireMachineLock(lockPath');
+  ok(gateAt > 0 && lockAt > gateAt && /if \(dayNo && range\) \{ scope = 'affected'/.test(ciSrc),
+    'the gate refuses at t=0 (before the machine lock / a build); the push launcher runs the AFFECTED tier by day instead of a due FULL one');
+  // a lane's private env (the desktop batch's VIBESPACE_CI_LANE_ROOT)
+  const LR = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ci-gate-lane-'));
+  try {
+    const base = { PATH: '/bin', HOME: '/home/real', DISPLAY: ':0', WAYLAND_DISPLAY: 'w-0', DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1000/bus', XDG_RUNTIME_DIR: '/run/user/1000' };
+    const e = C.laneEnv(3, { root: LR, env: base });
+    ok(e.HOME === path.join(LR, 'lane-3', 'home') && e.XDG_RUNTIME_DIR === path.join(LR, 'lane-3', 'run') && (fs.statSync(e.XDG_RUNTIME_DIR).mode & 0o777) === 0o700
+      && !('DISPLAY' in e) && !('WAYLAND_DISPLAY' in e) && !('DBUS_SESSION_BUS_ADDRESS' in e) && e.PATH === '/bin',
+      'a lane\'s env: its own HOME + XDG_RUNTIME_DIR (0700), no DISPLAY, and never the caller\'s session bus when its own is not up');
+    fs.writeFileSync(path.join(LR, 'lane-3', 'run', 'bus'), '');
+    ok(C.laneEnv(3, { root: LR, env: base }).DBUS_SESSION_BUS_ADDRESS === 'unix:path=' + path.join(LR, 'lane-3', 'run', 'bus') && C.laneEnv(1, { root: '', env: base }) === base,
+      '…its own bus once up; with no lane root the env is the caller\'s, untouched');
+  } finally { fs.rmSync(LR, { recursive: true, force: true }); }
+  // the CLI: --hosts prints the partition + the diff; a bad --host is a loud exit 2 (never a run of nothing)
+  const cli = (args) => spawnSync(process.execPath, [path.join(REPO, 'scripts', 'ci.mjs'), ...args], { cwd: REPO, encoding: 'utf-8', env: { ...process.env, ...GIT_ENV } });
+  const hr = cli(['--hosts']);
+  ok(hr.status === 0 && new RegExp(`hosts: ${heavy.length} heavy suites = ${plan.desktop.length} desktop \\+ ${plan.binary.length} binary`).test(hr.stdout) && /the design's census \(q-038, 67 names\)/.test(hr.stdout),
+    '`ci.mjs --hosts` prints the partition and the design diff (exit 0)');
+  ok(cli(['--heavy', '--host=laptop', '--shard', '1/6', '--dry-run']).status === 2, '--host=laptop is a loud exit 2');
+  // ONE slice through the CLI is enough to hold it to the in-process split above (the partition is asserted there)
+  const d4 = cli(['--heavy', '--host=hosted', '--shard', '4/6', '--dry-run']);
+  const listed4 = d4.status === 0 ? d4.stdout.split('\n').filter((l) => /^  test-/.test(l)).map((l) => l.trim()) : [];
+  ok(listed4.length > 20 && listed4.slice().sort().join() === names(lp.shards[3]).sort().join() && /\(--host=hosted\) — LPT: \d+ s of suites/.test(d4.stdout),
+    `--heavy --host=hosted --shard 4/6 --dry-run lists exactly LPT slice 4 (${listed4.length} suites) — the matrix job and this gate cut the same split`);
+}
+
+// ── §8d THE XPRA WINDOW FAMILY (lane xpra-window-split, design q-038 step ②, 2026-10-14) ──
+// test-desktop-xpra-window (3 207 lines; 1 385 s alone on the hub, 1 481–1 500 s on AIDev) was the desktop batch's FLOOR:
+// no lane count moved the batch's wall below it. It is a FAMILY now — heavy parts split by §, each ≤ 8 min measured alone on
+// the hub under a private display, on ONE boot (scripts/xpra-window-boot.mjs). Held here: every part is a heavy desktop row
+// whose budget is 2× and whose why carries its wall from the checked-in batch table (ci-shard-timings.json `desktop`, ≤ 8 min);
+// every part boots through the helper exactly once under its own name and re-implements none of the boot; every § marker of
+// the giant is in exactly one part; the giant's name is gone. CONTROLS: each planted fault is named.
+console.log('\n§8d the xpra window family — parts ≤ 8 min on one boot, every § in exactly one part');
+{
+  const C = await import('./ci.mjs');
+  const readR = (f) => { try { return fs.readFileSync(path.join(REPO, f), 'utf-8'); } catch { return ''; } };
+  const PART_MAX_MS = 8 * 60 * 1000;
+  // the giant's § markers at its last sha (051622351): `// ── (n)`, `// ── §n`, `console.log('§n` — (2) never had one
+  const GIANT = [1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18];
+  const marks = (t) => new Set([...t.matchAll(/(?:\/\/ ── \(|\/\/ ── §|console\.log\('§)(\d+)\b/g)].map((m) => Number(m[1])));
+  const familyFaults = (parts, tm, { helper = '' } = {}) => {
+    const out = [];
+    if (parts.length < 4) out.push(`only ${parts.length} parts`);
+    for (const p of parts) {
+      const ms = tm[p.name];
+      if (!p.row || p.row.tier !== 'heavy') out.push(`${p.name}: not a heavy row`);
+      else if (typeof ms !== 'number') out.push(`${p.name}: no measured time in the batch table`);
+      else {
+        if (ms > PART_MAX_MS) out.push(`${p.name}: ${Math.round(ms / 1000)} s — over 8 min (split it again)`);
+        if (Math.abs(Number(p.row.budgetMs) - 2 * ms) > 1000) out.push(`${p.name}: budgetMs ${p.row.budgetMs} is not 2× its measured ${ms} ms`);
+        if (!new RegExp(`\\b${Math.round(ms / 1000)} s\\b`).test(p.row.why || '')) out.push(`${p.name}: its why does not carry its measured ${Math.round(ms / 1000)} s`);
+      }
+      if (!/^import \{ bootXpraWindow \} from '\.\/xpra-window-boot\.mjs';$/m.test(p.text)) out.push(`${p.name}: does not import the boot helper`);
+      const boots = [...p.text.matchAll(/\bbootXpraWindow\(\s*'([^']*)'\s*\)/g)];
+      if (boots.length !== 1 || boots[0][1] !== p.name) out.push(`${p.name}: boots ${boots.length}× (${boots.map((b) => b[1]).join(', ')}) — once, under its own name`);
+      for (const [re, what] of [[/--remote-debugging-port/, 'launches its own chrome'], [/scratch\('deskxpra-smoke'\)/, 'makes its own main worktree'], [/process\.on\('exit'/, 'tears down by itself']]) if (re.test(p.text)) out.push(`${p.name}: ${what} — the boot is the helper's`);
+    }
+    const where = new Map();
+    for (const p of parts) for (const n of marks(p.text)) where.set(n, [...(where.get(n) || []), p.name]);
+    for (const n of GIANT) { const w = where.get(n) || []; if (w.length !== 1) out.push(`§${n} is in ${w.length} parts${w.length ? ' (' + w.join(', ') + ')' : ''}`); }
+    for (const n of where.keys()) if (!GIANT.includes(n)) out.push(`§${n} is no § of the giant`);
+    if (!/^export async function bootXpraWindow\(/m.test(helper) || !/\bendRootedProcesses\(/.test(helper)) out.push('the helper exports no bootXpraWindow or never ends what its servers started (§57b)');
+    return out;
+  };
+  const table = C.batchTimings(REPO) || {};
+  const helper = readR('scripts/xpra-window-boot.mjs');
+  const parts = SUITES.filter((s) => /^test-desktop-xpra-window-/.test(s.name)).map((row) => ({ name: row.name, row, text: readR(`scripts/${row.name}.mjs`) }));
+  const disk = fs.readdirSync(path.join(REPO, 'scripts')).filter((f) => /^test-desktop-xpra-window-.*\.mjs$/.test(f)).map((f) => f.replace(/\.mjs$/, '')).sort();
+  const faults = familyFaults(parts, table, { helper });
+  ok(parts.length >= 4 && disk.join() === parts.map((p) => p.name).sort().join() && !faults.length,
+    `the family: ${parts.length} heavy parts (${parts.map((p) => `${p.name.replace('test-desktop-xpra-window-', '')} ${Math.round((table[p.name] || 0) / 1000)} s`).join(', ')}), every § of the giant in exactly one, one boot each${faults.length ? ' — ' + faults.join(' | ') : ''}`);
+  const longest = Math.max(...parts.map((p) => table[p.name] || 0));
+  ok(longest > 60000 && longest <= PART_MAX_MS, `the family's floor: the longest part measured ${Math.round(longest / 1000)} s alone (≤ 480 s)`);
+  ok(!SUITES.some((s) => s.name === 'test-desktop-xpra-window') && !fs.existsSync(path.join(REPO, 'scripts', 'test-desktop-xpra-window.mjs')),
+    'the giant is gone: no row, no file (a runner would be a test-*.mjs the census must tier — and any tier runs the family twice)');
+  ok(parts.every((p) => C.hostOf(p.row, p.text).host === 'desktop'), 'every part is DERIVED desktop from its own code (its ladder check names xpra) — the batch runs all of them');
+  // CONTROLS: each planted fault is named
+  if (parts.length >= 2) {
+    const [a, b] = parts;
+    const n0 = [...marks(a.text)][0];
+    const dup = familyFaults([a, { ...b, text: b.text + `\n  // ── §${n0} a copy\n` }, ...parts.slice(2)], table, { helper });
+    const own = familyFaults([{ ...a, text: a.text + "\nspawn(CHROME, ['--headless=new', '--remote-debugging-port=1']);\n" }, ...parts.slice(1)], table, { helper });
+    const two = familyFaults([{ ...a, text: a.text.replace(/^import \{ bootXpraWindow \} from '\.\/xpra-window-boot\.mjs';$/m, '') }, ...parts.slice(1)], table, { helper });
+    const over = familyFaults(parts, { ...table, [a.name]: 500000 }, { helper });
+    const budget = familyFaults([{ ...a, row: { ...a.row, budgetMs: 3 * table[a.name] } }, ...parts.slice(1)], table, { helper });
+    const lost = familyFaults(parts.slice(1), table, { helper });
+    const noEnd = familyFaults(parts, table, { helper: helper.replace(/\bendRootedProcesses\(/g, 'endNothing(') });
+    ok(dup.some((f) => new RegExp(`§${n0} is in 2 parts`).test(f)) && own.some((f) => /launches its own chrome/.test(f)) && two.some((f) => /does not import the boot helper/.test(f))
+      && over.some((f) => /over 8 min/.test(f)) && budget.some((f) => /not 2×/.test(f)) && lost.some((f) => /is in 0 parts/.test(f)) && noEnd.some((f) => /§57b/.test(f)),
+      'CONTROLS: a § in two parts, a part launching its own chrome, a part without the helper, a part over 8 min, a budget not 2×, a lost part\'s §§, a helper that ends nothing — each named');
+  }
 }
 
 // ── §9 THE SCRATCH-ORPHAN REAPER (2.369.104) — decided over a FAKE proc root ──

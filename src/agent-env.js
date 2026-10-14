@@ -65,13 +65,17 @@ const DAEMON_ENV_KEEP = Object.freeze(new Set([...AGENT_ENV_KEEP, 'VIBESPACE_NOD
 
 /**
  * The sanitized copy of `base`: every `VIBESPACE_*` not in `keep` is dropped
- * (secrets + server config), so is every `npm_*` (nested-npm hazard) and
- * every name in AGENT_ENV_DROP. Pure over its inputs; never mutates `base`.
+ * (secrets + server config), so is every `npm_*` (nested-npm hazard), every
+ * name in AGENT_ENV_DROP and every name in `drop` — the harness credential
+ * names the caller derives from the descriptors (src/harness-env.js
+ * agentCredentialEnvNames; this module imports nothing, so the server-side
+ * callers hand them in). Pure over its inputs; never mutates `base`.
  */
-function agentEnv(base, { keep = AGENT_ENV_KEEP } = {}) {
+function agentEnv(base, { keep = AGENT_ENV_KEEP, drop = [] } = {}) {
   const out = {};
+  const dropped = new Set(drop);
   for (const [k, v] of Object.entries(base || {})) {
-    if (AGENT_ENV_DROP.has(k)) continue;
+    if (AGENT_ENV_DROP.has(k) || dropped.has(k)) continue;
     if (k.startsWith('npm_')) continue;
     // AGENT BROWSER (P0): the browser environment of a session comes from
     // VibeSpace (the `env K=v` prefix on the spawn line) or from that machine's
@@ -89,6 +93,6 @@ function agentEnv(base, { keep = AGENT_ENV_KEEP } = {}) {
 
 /** The env a DAEMON process is born with, and the base every daemon child
  *  spawn is merged over: the agent rule plus the daemon tier's own names. */
-function daemonEnv(base) { return agentEnv(base, { keep: DAEMON_ENV_KEEP }); }
+function daemonEnv(base, { drop = [] } = {}) { return agentEnv(base, { keep: DAEMON_ENV_KEEP, drop }); }
 
 module.exports = { AGENT_ENV_KEEP, AGENT_ENV_DROP, DAEMON_ENV_KEEP, agentEnv, daemonEnv };
