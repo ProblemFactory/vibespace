@@ -56,6 +56,7 @@ const J = (x) => JSON.stringify(x);
 const repo = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const zhDict = (await import('../src/lib/i18n-zh.js')).default;
 const jaDict = (await import('../src/lib/i18n-ja.js')).default;
+const CC = require('../src/cdp-census.js'); // lane mediation-chrome-155: the Stable row's census chip is read off THE census
 const tr = (lang, k, p) => { let s = (lang === 'zh' ? zhDict[k] : lang === 'ja' ? jaDict[k] : null) || k; if (p) s = s.replace(/\{(\w+)\}/g, (m, x) => (p[x] !== undefined ? String(p[x]) : m)); return s; };
 
 const ROOT = scratch('badm');
@@ -466,7 +467,7 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
     await click('#browser-build-dialog .bbuild-download');
     const pk = await until(() => ev(`(() => { const d = document.querySelector('#browser-build-dialog'); const rows = [...d.querySelectorAll('.bdl-row')]; if (!rows.length) return null; const st = rows.find((x) => x.dataset.version === ${J(STABLE)}); return { intro: d.querySelector('.bdl-intro').textContent, n: rows.length, head: st && st.querySelector('.bwho-answer-head').textContent, chips: st ? [...st.querySelectorAll('.bdl-chip')].map((x) => x.textContent) : [], rowsHidden: getComputedStyle(d.querySelector('.bbuild-rows')).display === 'none', free: (d.querySelector('.bdl-free') || {}).textContent || '' }; })()`), 20000, 150);
     ok(pk && pk.n === 4 && pk.rowsHidden && pk.intro === tr(lang, "Chrome for Testing builds, from Google. Once a profile is opened by a Chrome version, every older major is refused for it. Canary and Dev change weekly; Stable is what the browser CLI's own install picks.") && pk.head === `Stable · ${STABLE}` && cftHits.filter((h) => h.includes('last-known-good')).length === lists0 + 1
-      && pk.chips.includes(tr(lang, 'Newer than the census ({census}): what it adds is refused by name while you drive the browser; everything else works', { census: '154.0.8037.57' })) && pk.chips.includes(tr(lang, "A profile opened with it can't switch to CloakBrowser later (Free {free} / Pro {pro}): switching down is refused", { free: 146, pro: 151 })),
+      && pk.chips.includes(((r) => (r === 'newer' ? tr(lang, 'Newer than the census ({census}): what it adds is refused by name while you drive the browser; everything else works', { census: CC.CENSUS_CHROME }) : tr(lang, 'Older than the census: a few methods it lacks are listed harmlessly')))(CC.chromeRelation(STABLE))) && pk.chips.includes(tr(lang, "A profile opened with it can't switch to CloakBrowser later (Free {free} / Pro {pro}): switching down is refused", { free: 146, pro: 151 })),
       `${lang}: the picker opens IN the dialog (the rows step aside), reads the channel list once, four rows; Stable's chips say the census and CloakBrowser in the device's words`, pk);
     await shot(`3b-picker-${lang}`);
     await click(`#browser-build-dialog .bdl-row[data-version="${STABLE}"]`);

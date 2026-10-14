@@ -5,7 +5,8 @@
 // The family: -open (§1–§4, §5, Stop, §8, §9, §13, §18) · -hidpi (§6, §11) · -hidpi-r2 (§7) · -close (§10) ·
 // -scale (§14, §15, §16) · -seamless (§12, §17).
 //   • §10 (round 3, A2 — §3.2) THE CLOSE: the calculator's own ✕ ⇒ the VibeSpace
-//     window gone on TWO clients within 2 s with a toast; the outer ✕ ⇒
+//     window gone on TWO clients with a toast, ON the keeper's exited broadcast
+//     (≤ EXIT_CENSUS_MS after the app's exit — lane exit-close-cadence); the outer ✕ ⇒
 //     close-window ⇒ the app process gone; an app that answers with its own
 //     dialog keeps everything, a second ✕ within 5 s = Stop; a blocked pane's ✕
 //     never asks the app; a dead record replayed from the layout never paints;
@@ -33,7 +34,10 @@ try {
 
   // ── §10 ROUND 3, LANE A2 (docs/design-desktop-apps-seamless §3.2): THE APP'S EXIT CLOSES THE WINDOW; THE OUTER ✕ IS THE
   // APP'S OWN CLOSE. Two clients on the real rung (GNOME Calculator on xpra): the calculator's OWN ✕ (its CSD header bar,
-  // clicked through the pane) ⇒ the VibeSpace window is gone on BOTH pages within 2 s, each with a "<app> exited" toast;
+  // clicked through the pane) ⇒ the VibeSpace window is gone on BOTH pages, each with a "<app> exited" toast — on the EVENT
+  // chain (lane exit-close-cadence, B-8778): the app process gone → the keeper's exited broadcast on each page within
+  // EXIT_CENSUS_MS (its census the only wait — it used to wait out the teardown: 4 s when GLib had autolaunched a bus) →
+  // each window closed ON that broadcast;
   // the OUTER ✕ (the title bar's, a trusted click) ⇒ close-window to the app ⇒ the calculator process is gone and both
   // windows with it; a Tk app that answers WM_DELETE_WINDOW with its own "Save?" dialog ⇒ the window STAYS (a dialog is
   // not the app), the dialog closing is not the app exiting, a SECOND ✕ within 5 s ⇒ Stop ⇒ gone on both; a dead record
@@ -72,6 +76,18 @@ try {
       }
       return out;
     };
+    // lane exit-close-cadence (B-8778): the EVENT chain of an app's exit, never an absolute bound — each page stamps the
+    // FIRST desktop-apps-updated carrying the record exited (the keeper's commit) and whether its window was still there one
+    // task later; this process stamps the app process gone (the keeper's exit event: the server reaps its child)
+    const { EXIT_CENSUS_MS } = (await import('../src/desktop-serve.js')).default;
+    const armExitCast = (P, id) => P.evalJs(`(() => { const id = ${JSON.stringify(id)}; const seen = (window.__vsExitCast = window.__vsExitCast || {}); const off = app.ws.onGlobal((m) => { const r = m.type === 'desktop-apps-updated' && (m.apps || []).find((a) => a.id === id); if (!r || r.state !== 'exited' || seen[id]) return; seen[id] = { at: Date.now() }; off(); setTimeout(() => { seen[id].leftAfter = !![...app.wm.windows.values()].find((w) => w._desktopAppId === id); }, 0); }); return true; })()`);
+    const pidGoneAt = (pid, ms = 6000) => until(() => (!D.pidAlive(pid) ? Date.now() : null), ms, 10);
+    const exitChain = async (id, exitAt) => {
+      const [a, b] = [await A.p.evalJs(`(window.__vsExitCast || {})[${JSON.stringify(id)}] || null`), await B.p.evalJs(`(window.__vsExitCast || {})[${JSON.stringify(id)}] || null`)];
+      const ms = (c) => (c && exitAt ? c.at - exitAt : null);
+      return { ok: !!exitAt && !!a && !!b && ms(a) <= EXIT_CENSUS_MS && ms(b) <= EXIT_CENSUS_MS && a.leftAfter === false && b.leftAfter === false, castA: ms(a), castB: ms(b), leftA: a && a.leftAfter, leftB: b && b.leftAfter, EXIT_CENSUS_MS };
+    };
+    const chainSay = (c) => `the exited broadcast on A ${c.castA} ms / B ${c.castB} ms after the app's exit (≤ EXIT_CENSUS_MS ${c.EXIT_CENSUS_MS}), each window closed ON it (still there one task later: A ${c.leftA}, B ${c.leftB})`;
     const titleClose = async (P, id) => { await revealBars(P, id); const r = await P.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(id)}); app.wm.focusWindow(w.id); const b = w.element.querySelector('.win-close').getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; })()`); await trustedClickAt(P, r.x, r.y); };
     const ids10 = [];
     try {
@@ -86,13 +102,17 @@ try {
         await sleep(1200);
         const v = await A.p.evalJs(R2(r1.id));
         const cx = v.pane.x + (v.main.x + v.main.w) / v.ratio - 22, cy = v.pane.y + v.main.y / v.ratio + 22;
+        await armExitCast(A.p, r1.id); await armExitCast(B.p, r1.id);
         const t0 = Date.now();
+        const exitP = pidGoneAt(r1.pids.app);
         await trustedClickAt(A.p, cx, cy);
-        const g = await goneTimes(r1.id, t0);
+        const [g, exitAt] = await Promise.all([goneTimes(r1.id, t0), exitP]);
+        const ch1 = await exitChain(r1.id, exitAt);
         const recEnd = await A.p.evalJs(`fetch('/api/desktop/apps/${r1.id}').then((r) => r.json())`);
         const tA = await toasts(A.p), tB = await toasts(B.p);
-        console.log(`  §10 (1): the calculator's own ✕ ⇒ the VibeSpace window gone on A after ${g.a} ms, on B after ${g.b} ms; record ${recEnd.state} (code ${recEnd.exitCode}, windowsAtExit ${recEnd.windowsAtExit}); toasts A ${JSON.stringify(tA)} B ${JSON.stringify(tB)}`);
-        check(`§10 (1): the calculator's OWN ✕ ⇒ the record exited with no window left (windowsAtExit ${recEnd.windowsAtExit}) and the VibeSpace window is GONE on BOTH clients within 2 s (A ${g.a} ms, B ${g.b} ms)`, recEnd.state === 'exited' && recEnd.windowsAtExit === 0 && g.a !== null && g.b !== null && g.a <= 2000 && g.b <= 2000, { g, recEnd: { state: recEnd.state, windowsAtExit: recEnd.windowsAtExit, lastError: recEnd.lastError } });
+        console.log(`  §10 (1): the calculator's own ✕ ⇒ the app process gone after ${exitAt ? exitAt - t0 : null} ms; ${chainSay(ch1)}; the VibeSpace window gone on A after ${g.a} ms, on B after ${g.b} ms; record ${recEnd.state} (code ${recEnd.exitCode}, windowsAtExit ${recEnd.windowsAtExit}); toasts A ${JSON.stringify(tA)} B ${JSON.stringify(tB)}`);
+        check(`§10 (1): the calculator's OWN ✕ ⇒ the record exited with no window left (windowsAtExit ${recEnd.windowsAtExit}) and the VibeSpace window is GONE on BOTH clients (A ${g.a} ms, B ${g.b} ms)`, recEnd.state === 'exited' && recEnd.windowsAtExit === 0 && g.a !== null && g.b !== null, { g, recEnd: { state: recEnd.state, windowsAtExit: recEnd.windowsAtExit, lastError: recEnd.lastError } });
+        check(`§10 (1): …on the EVENT chain — ${chainSay(ch1)}`, ch1.ok, ch1);
         check('§10 (1): …each client said why in a toast ("Calculator exited")', tA.some((x) => /Calculator exited/.test(x)) && tB.some((x) => /Calculator exited/.test(x)), { tA, tB });
       }
       // (2) the OUTER ✕ (the title bar's, a trusted click on the ACTIVE pane) ⇒ close-window ⇒ the calculator quits ⇒ gone on both
@@ -103,15 +123,18 @@ try {
         await openOnBoth(r2.id);
         await sleep(1200);
         await revealBars(A.p, r2.id); // lane B: the calculator is seamless — the ✕ is revealed first; the clock starts at the click
+        await armExitCast(A.p, r2.id); await armExitCast(B.p, r2.id);
         const t0 = Date.now();
+        const exitP = pidGoneAt(r2.pids.app);
         await titleClose(A.p, r2.id);
         const vd = await verdictOf(A.p, r2.id, '_desktopCloseVerdict');
-        const g = await goneTimes(r2.id, t0);
-        const appGone = await until(() => (!D.pidAlive(r2.pids.app) ? Date.now() - t0 : null), 5000, 25);
+        const [g, exitAt] = await Promise.all([goneTimes(r2.id, t0), exitP]);
+        const appGone = exitAt ? exitAt - t0 : null;
+        const ch2 = await exitChain(r2.id, exitAt);
         const recEnd = await A.p.evalJs(`fetch('/api/desktop/apps/${r2.id}').then((r) => r.json())`);
-        console.log(`  §10 (2): the outer ✕ ⇒ verdict ${JSON.stringify(vd)}; the calculator process (pid ${r2.pids.app}) gone after ${appGone} ms; the window gone on A after ${g.a} ms, on B after ${g.b} ms; record ${recEnd.state}, stoppedBy ${recEnd.stoppedBy || '-'}`);
+        console.log(`  §10 (2): the outer ✕ ⇒ verdict ${JSON.stringify(vd)}; the calculator process (pid ${r2.pids.app}) gone after ${appGone} ms; ${chainSay(ch2)}; the window gone on A after ${g.a} ms, on B after ${g.b} ms; record ${recEnd.state}, stoppedBy ${recEnd.stoppedBy || '-'}`);
         check(`§10 (2): the OUTER ✕ on the active pane ASKS the app (verdict ask-app, the window did not close itself at the click) and the calculator PROCESS is gone (${appGone} ms) — an app exit, not a Stop (stoppedBy ${recEnd.stoppedBy || 'none'})`, (vd === 'gone' || (vd && vd.act === 'ask-app')) && appGone !== null && recEnd.state === 'exited' && !recEnd.stoppedBy && recEnd.windowsAtExit === 0, { vd, recEnd: { state: recEnd.state, stoppedBy: recEnd.stoppedBy, windowsAtExit: recEnd.windowsAtExit } });
-        check(`§10 (2): …and the window is gone on BOTH clients within 2 s of the ✕ (A ${g.a} ms, B ${g.b} ms)`, g.a !== null && g.b !== null && g.a <= 2000 && g.b <= 2000, g);
+        check(`§10 (2): …and the window is gone on BOTH clients (A ${g.a} ms, B ${g.b} ms after the ✕) on the EVENT chain — ${chainSay(ch2)}`, g.a !== null && g.b !== null && ch2.ok, { g, ch2 });
       }
       // (3) an app that answers WM_DELETE_WINDOW with its OWN dialog (Tk: `wm protocol . WM_DELETE_WINDOW` opens "Save?",
       // which closes itself after 1 s): the first ✕ keeps everything, the dialog closing is not the app exiting, a second ✕

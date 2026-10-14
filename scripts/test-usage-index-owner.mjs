@@ -227,7 +227,9 @@ setTimeout(() => { parentPort.postMessage({ ev: 'progress' }); require('fs').ope
   const [ex, ex2, ex3] = await Promise.all([w, ctl, real].map((c) => Promise.race([c.done, sleep(c === ctl ? 1500 : 8000).then(() => null)])));
   ok(ex && ex.at - t < BOUND + 2500 && ex.signal === 'SIGTERM', `with the worker wedged, SIGTERM ends the process in ${ex ? ex.at - t : '>8000'} ms (bound ${BOUND} ms; re-raised: ${ex && ex.signal})`);
   ok(ex2 === null, 'CONTROL: without the exit hook the same SIGTERM leaves process.exit() joining the wedged worker — still alive after 1.5 s (twice the bound)');
-  ok(ex3 && ex3.code === 0 && ex3.at - t < 3000, `the real worker closes on SIGTERM and the server exits 0 (${ex3 ? ex3.at - t : '>8000'} ms)`);
+  // (lane wall-clock-ratchet-down: the old `< 3000 ms` judged the machine — exit 0 with no signal IS the close: the
+  // bound's exit hook re-raises SIGTERM, as the wedged child above shows)
+  ok(ex3 && ex3.code === 0 && !ex3.signal, `the real worker closes on SIGTERM and the server exits 0 (${ex3 ? ex3.at - t : '>8000'} ms)`);
   for (const c of [w, ctl, real]) await killAndWait(c);
   const uh = L.uh(); const ix = mkOwner(uh, L.home); ix.start(); await readyOf(ix);
   const st = await ix.workerStats();

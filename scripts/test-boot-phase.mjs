@@ -71,9 +71,10 @@ async function ladderLegs(L, tag = '') {
   ok('ladderWait: 1 → 2 → 5 → 10 s, then give up', JSON.stringify([1, 2, 3, 4, 5].map((n) => L.ladderWait(n))) === JSON.stringify([1000, 2000, 5000, 10000, null]));
   const waits = []; const sleep = async (ms) => { waits.push(ms); };
   const never = () => new Promise(() => { });
-  const t0 = Date.now();
+  // "not a hang" is the ladder's own count (lane wall-clock-ratchet-down: `< 2000 ms` judged the machine): every try
+  // ended on the stall timer (why: stall), the waits are the ladder's, the fifth gives up — the await returned
   const g = await L.ladderJson('/api/layouts', { fetchImpl: never, sleep, stallMs: 30 });
-  ok('a request that never answers: stalls at the bound, climbs the whole ladder, gives up after 5 tries (not a hang)', g.gaveUp && g.gaveUp.tries === 5 && g.gaveUp.fail.why === 'stall' && JSON.stringify(waits) === '[1000,2000,5000,10000]' && Date.now() - t0 < 2000, { g, waits });
+  ok('a request that never answers: stalls at the bound, climbs the whole ladder, gives up after 5 tries (not a hang)', g.gaveUp && g.gaveUp.tries === 5 && g.gaveUp.fail.why === 'stall' && JSON.stringify(waits) === '[1000,2000,5000,10000]', { g, waits });
   waits.length = 0; let n = 0;
   const flaky = async () => (++n < 3 ? { ok: false, status: 502 } : { ok: true, status: 200, json: async () => ({ saved: {} }) });
   const r = await L.ladderJson('/api/layouts', { fetchImpl: flaky, sleep, stallMs: 30 });

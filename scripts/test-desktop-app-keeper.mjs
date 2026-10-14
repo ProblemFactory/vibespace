@@ -2044,18 +2044,23 @@ console.log('§19 round 3 A2 (docs/design-desktop-apps-seamless §3.2) — an ap
       const a = await runExit(k, { exec: XT, args: ['-T', 'vs-a2-exit', '-geometry', '40x10', '-e', 'sh', '-c', `sleep ${(M.QUICK_EXIT_MS + 1500) / 1000}`], label: 'a2-exit' }, 'exit');
       ok(a.r1.state === 'ready' && a.r1.backend === rung, `§19 ${rung}: the app reaches ready on the ${rung} rung`, a.r1);
       if (a.rec) {
-        console.log(`  §19 ${rung} (a): the record flipped to exited, the broadcast carrying it arrived ${a.castAt && a.flipAt ? a.castAt - a.flipAt : '?'} ms later (the census + the teardown); windowsAtExit ${a.rec.windowsAtExit}`);
+        console.log(`  §19 ${rung} (a): the record flipped to exited, the broadcast carrying it arrived ${a.castAt && a.flipAt ? a.castAt - a.flipAt : '?'} ms later (the census only — lane exit-close-cadence commits it before the teardown); windowsAtExit ${a.rec.windowsAtExit}`);
         ok(a.rec.state === 'exited' && a.rec.exitCode === 0 && !a.rec.stoppedBy && a.rec.windowsAtExit === 0, `§19 ${rung} (a): an app that EXITS ⇒ exited (code 0), no stoppedBy, windowsAtExit 0 on the record (${a.rec.windowsAtExit})`, { state: a.rec.state, exitCode: a.rec.exitCode, windowsAtExit: a.rec.windowsAtExit, lastError: a.rec.lastError });
         ok(!!a.cast && a.cast.windowsAtExit === 0 && a.castAt - a.flipAt < 2000, `§19 ${rung} (a): the desktop-apps-updated broadcast carries the exited record WITH windowsAtExit 0, within 2 s of the exit (${a.castAt - a.flipAt} ms)`, a.cast && { state: a.cast.state, windowsAtExit: a.cast.windowsAtExit });
         ok(M.exitCloseVerdict(a.cast).close === true, `§19 ${rung} (a): …and the PURE client verdict over that broadcast closes the window (${JSON.stringify(M.exitCloseVerdict(a.cast))})`);
-        ok([a.r1.pids.x, a.r1.pids.server, a.r1.pids.app].filter(Boolean).every((p) => !alive(p)) && markerPids(a.id).length === 0, `§19 ${rung} (a): the teardown still ran after the census — nothing of the session left`, markerPids(a.id));
+        // lane exit-close-cadence commits the exit BEFORE the teardown: the broadcast no longer waits for it, so the session
+        // goes AFTER the broadcast — wait for the teardown (the 10 s the broadcast itself had before) instead of judging the
+        // broadcast's moment
+        const aGone = await until(() => ([a.r1.pids.x, a.r1.pids.server, a.r1.pids.app].filter(Boolean).every((p) => !alive(p)) && markerPids(a.id).length === 0 ? true : null), 10000, 50);
+        ok(!!aGone, `§19 ${rung} (a): the teardown still ran after the census — nothing of the session left`, markerPids(a.id));
       }
       // (b) a FORKING launcher: the shell exits 0 after 3 s while the xterm it started keeps its window ⇒ the census counts it
       const b = await runExit(k, { exec: '/bin/sh', args: ['-c', `${XT} -T vs-a2-child -geometry 40x10 & sleep 3; exit 0`], label: 'a2-fork' }, 'fork');
       if (b.rec) {
         ok(b.rec.state === 'exited' && b.rec.windowsAtExit >= 1, `§19 ${rung} (b): a forking launcher exits while its child still shows a window ⇒ windowsAtExit ${b.rec.windowsAtExit} (≥ 1) — "the app exited" is not claimed for a window that is still there`, { windowsAtExit: b.rec.windowsAtExit, lastError: b.rec.lastError });
         ok(M.exitCloseVerdict(b.rec).close === false && M.exitCloseVerdict(b.rec).why === 'windows-left', `§19 ${rung} (b): …the client verdict keeps that window with its sentence (${JSON.stringify(M.exitCloseVerdict(b.rec))})`);
-        ok(markerPids(b.id).length === 0, `§19 ${rung} (b): the teardown reaps the child too (the marker census is empty)`, markerPids(b.id));
+        const bGone = await until(() => (markerPids(b.id).length === 0 ? true : null), 10000, 50); // the teardown follows the broadcast (lane exit-close-cadence)
+        ok(!!bGone, `§19 ${rung} (b): the teardown reaps the child too (the marker census is empty)`, markerPids(b.id));
       } else ok(false, `§19 ${rung} (b): the forking launcher reached ready`, b.r1);
       // (c) Stop: a stop is not an exit — no census, stoppedBy names it (the client closes on that)
       const c0 = await k.launch({ exec: XT, args: ['-T', 'vs-a2-stop', '-geometry', '40x10'], label: 'a2-stop' });

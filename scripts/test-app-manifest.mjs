@@ -411,9 +411,11 @@ console.log('§8d verify-r1 H2 — ONE read of a user-owned file: root\'s grab()
   fs.symlinkSync(real, path.join(d, 'link.deb'));
   const H = crypto.createHash('sha256').update(fs.readFileSync(real)).digest('hex');
   const grabSh = (src, extra = '') => `set -eu\nT=${d}\n${['say', 'refuse', 'grab'].map((n) => fnOf2(A.APP_SCRIPT, n)).join('\n')}\n${extra}grab "${src}" "$T/in.deb" no-deb\n[ "$(sha256sum "$T/in.deb" | cut -d" " -f1)" = "${H}" ] || refuse deb-changed\nsay ok`;
+  // "at once" is the script's own exit (lane wall-clock-ratchet-down: `< 8000 ms` judged the machine): grab returned and
+  // the hash refused — exit 125 with no signal; spawnSync's 10 s cut of a hung read ends with SIGTERM and no status
   const t0 = Date.now();
   const g1 = spawnSync('sh', ['-c', grabSh(fifo)], { encoding: 'utf8', timeout: 10000 });
-  ok(g1.status === 125 && /= refused deb-changed/.test(g1.stdout) && Date.now() - t0 < 8000, `root's grab of a FIFO (the staged .deb swapped for one) returns at once (${Date.now() - t0} ms) and the hash refuses it — the slot is never hung`, { code: g1.status, out: g1.stdout, signal: g1.signal });
+  ok(g1.status === 125 && g1.signal === null && /= refused deb-changed/.test(g1.stdout), `root's grab of a FIFO (the staged .deb swapped for one) returns on its own (${Date.now() - t0} ms) and the hash refuses it — the slot is never hung`, { code: g1.status, out: g1.stdout, signal: g1.signal });
   const g2 = spawnSync('sh', ['-c', grabSh(path.join(d, 'link.deb'))], { encoding: 'utf8', timeout: 10000 });
   ok(g2.status === 125 && /= refused no-deb/.test(g2.stdout), 'a symbolic link is never followed (refused no-deb)', g2.stdout);
   const g3 = spawnSync('sh', ['-c', grabSh(real)], { encoding: 'utf8', timeout: 10000 });
@@ -423,10 +425,12 @@ console.log('§8d verify-r1 H2 — ONE read of a user-owned file: root\'s grab()
   const c1 = spawnSync('cp', [fifo, path.join(d, 'cp.deb')], { encoding: 'utf8', timeout: 2000 });
   ok(c1.signal === 'SIGTERM' || c1.error, 'CONTROL: the pre-fix `cp` of a FIFO blocks until killed — what hung the slot', { signal: c1.signal, status: c1.status });
   const AS0 = require('../src/app-serve.js');
+  // the ANSWER is the evidence (lane wall-clock-ratchet-down: `< 3000 ms` judged the machine): nobody writes the FIFO
+  // until the control below, so a read that parked in open() would never settle — bad_name comes from the fd's type
   const t1 = Date.now();
   let rh = null;
   try { await AS0.readHashed(fifo, path.join(d, 'o1.deb'), 1e9); rh = 'resolved'; } catch (e) { rh = e.code; }
-  ok(rh === 'bad_name' && Date.now() - t1 < 3000, `the machine half's readHashed of a FIFO answers bad_name at once (${Date.now() - t1} ms) — its type judged on the open fd, no libuv thread parked`, rh);
+  ok(rh === 'bad_name', `the machine half's readHashed of a FIFO answers bad_name with no writer ever there (${Date.now() - t1} ms) — its type judged on the open fd, no libuv thread parked`, rh);
   const okh = await AS0.readHashed(real, path.join(d, 'o2.deb'), 1e9);
   ok(okh.sha256 === H && okh.size === 300000 && crypto.createHash('sha256').update(fs.readFileSync(path.join(d, 'o2.deb'))).digest('hex') === H, 'a regular file: the hash is of exactly the bytes staged (one read)');
   // CONTROL: the pre-fix copy (fsp.copyFile) of the same FIFO has not settled after 1 s — a libuv thread sits in open()

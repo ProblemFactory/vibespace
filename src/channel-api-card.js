@@ -52,6 +52,17 @@ function titleOf(p) {
     object: W.objectView(w.object, { name: p.objectName || null, conv: p.objectConv || null }) };
 }
 
+/** THE TITLE AS PLAIN TEXT — the card's tooltip / Outbox row (src/lib/channel-api-card-view.js titleText), the For-you
+ *  row's sentence (src/lib/user-todos-actions.js wordsOf) and the agent's English item text: `{object}` = its name, else
+ *  its id shortened. `t` = the surface's translator (the default fills the English key), `lang` picks a generated row's
+ *  own phrase. PURE. */
+const fill = (s, params = {}) => String(s).replace(/\{(\w+)\}/g, (m, k) => (params[k] !== undefined ? String(params[k]) : m));
+function titleWords(h, { t = fill, lang = 'en' } = {}) {
+  const o = h.object;
+  const what = t(h.what.text ? h.what.text[lang] || h.what.text.en : h.what.key, { ...h.what.params, object: o ? o.name || o.short || '' : '' });
+  return t(h.key, { ...h.params, what });
+}
+
 /** The outcome line — the SAME words on the card, the Outbox row, the resolved For-you row. `{key, params}`. */
 function outcomeOf(p, { now = Date.now() } = {}) {
   const f = fateOf(p);
@@ -88,18 +99,25 @@ function cardModel(p, { now = Date.now() } = {}) {
   return m;
 }
 
-/** THE FOR-YOU ITEM (origin `channels`) — one per proposal (ACTION_IDENTITY `id`); its Approve names the frozen digest. */
+/** THE FOR-YOU ITEM (origin `channels`) — one per proposal (ACTION_IDENTITY `id`); its Approve names the frozen digest.
+ *  Card grammar (lane card-grammar-exceptions): its sentence is the CARD's title — `card.head`, worded on each device
+ *  (titleWords) —, its plan line the account + the expiry, its policy a chip (`card.chip`); the raw call (method + URL,
+ *  the body's size + sha256) rides `card.tech`, drawn under ONE collapsed 技术细节 fold. `text` / `detail` are the
+ *  agent's English (the store's dedupe key); `i18n.text` the fallback of a device that cannot word the card. */
 function forYouOf(p) {
-  const who = whoOf(p), call = `${p.method} ${p.host}${p.path}`, cred = p.credLabel || p.cred;
+  const call = `${p.method} ${p.host}${p.path}`, cred = p.credLabel || p.cred;
+  const head = titleOf(p), m = cardModel(p);
+  const url = `${p.method} https://${p.host}${p.path}${m.request.query ? `?${m.request.query}` : ''}`;
   return {
     origin: 'channels', urgency: 'normal', by: 'agent', sessionName: 'Channels',
-    text: `${who} wants to call ${cred}'s API: ${p.method} ${p.path}`,
+    text: titleWords(head),
     detail: `${call}${p.bodyBytes ? ` · body ${sizeText(p.bodyBytes)}` : ''}${p.sensitive ? ` · sensitive: ${p.sensitive}` : ''} — expires 24 h after it was asked`,
     i18n: {
-      text: { key: "{name} wants to call {cred}'s API: {call}", params: { name: who, cred, call: `${p.method} ${p.path}` } },
-      detail: [{ key: '{call} — expires 24 h after it was asked', params: { call } }],
+      text: { key: head.key, params: { ...head.params, what: titleWords({ ...head, key: '{what}', params: {} }) } },
+      detail: [{ key: '{cred} · expires 24 h after it was asked', params: { cred } }],
       source: { key: 'Channels' },
     },
+    card: { kind: 'api-call', head, chip: m.sensitive, tech: [url.slice(0, 2000), ...(m.bodyBytes || m.bodySha ? [`body ${sizeText(m.bodyBytes)}${m.bodySha ? ` · sha256 ${m.bodySha}` : ''}`] : [])] },
     action: { type: 'channel-api-proposal', id: String(p.id), shown: p.digest || null },
   };
 }
@@ -132,4 +150,4 @@ function sweepVerdicts(list, { now = Date.now(), live = () => null } = {}) {
   return out;
 }
 
-module.exports = { TTL_MS, BODY_SHOWN, NOTE_MAX, SENSITIVE_CHIP, FATES, SWEEP_BY, fateOf, sizeText, outcomeOf, titleOf, cardModel, forYouOf, resolvedFactOf, receiptText, sweepVerdicts };
+module.exports = { TTL_MS, BODY_SHOWN, NOTE_MAX, SENSITIVE_CHIP, FATES, SWEEP_BY, fateOf, sizeText, outcomeOf, titleOf, titleWords, cardModel, forYouOf, resolvedFactOf, receiptText, sweepVerdicts };

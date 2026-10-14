@@ -106,7 +106,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   const pks = passkeys && typeof passkeys.read === 'function' && typeof passkeys.write === 'function' && passkeys.cipher ? passkeys : null;
   let pkCache = null;
   const pkIds = new Map(), pkAsks = new Map(), pkGrants = new Map();
-  const pkIdsFor = (pid) => { if (!pkIds.has(pid)) pkIds.set(pid, { slot: 'vs' + crypto.randomBytes(16).toString('hex') }); return pkIds.get(pid); };
+  const pkIdsFor = (pid) => { if (!pkIds.has(pid)) pkIds.set(pid, { slot: 'vs' + crypto.randomBytes(16).toString('hex'), world: 'vspw' + crypto.randomBytes(10).toString('hex'), chan: 'vspc' + crypto.randomBytes(16).toString('hex') }); return pkIds.get(pid); }; // lane passkey-binding-isolated: + the hook's ISOLATED WORLD name + the SECRET CustomEvent channel (128-bit: the page can neither enter the world nor forge a report)
   const pkDisplacedAt = new Map(); // lane passkey-prewrap-fix: profileId → the episodes a page replaced the credentials API (the Passkeys card's line)
   const sayOnce = new Set();
   const say = (key, line) => { if (sayOnce.has(key)) return; sayOnce.add(key); try { log.warn?.(`[browser-dialog] ${line}`); } catch { /* */ } };
@@ -127,7 +127,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   // ── the socket ──
   function newWatch(profileId, url) {
     const w = { profileId, url, holds: true, ws: null, state: 'connecting', id: 0, waiting: new Map(), sessions: new Map(), targets: new Map(), open: new Map(), pendingBy: new Map(), answered: [], seq: 0, readyP: null, commands: [],
-      pkSlot: pkIdsFor(profileId).slot, pkForYou: new Map(), headed: null, bornAt: now(), // lane browser-passkey
+      pkSlot: pkIdsFor(profileId).slot, pkWorld: pkIdsFor(profileId).world, pkChan: pkIdsFor(profileId).chan, pkForYou: new Map(), headed: null, bornAt: now(), // lane browser-passkey; lane passkey-binding-isolated: the isolated world + the secret channel, kept across sockets
       prompts: new Map(), authReq: new Map(), promptNotes: [], promptTimers: new Map(), promptForYou: new Map(), // lane browser-ui-prompts (authReq: prompt id → the paused request — never in a record)
       permCtx: new Map(), grants: new Map(), printing: new Set() }; // lane browser-ui-prompts-r2: contexts decided ahead (ctx → the decision's promise), the agent's per-origin flips, previews being released
     let readyResolve;
@@ -197,7 +197,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     const known = w.targets.get(tid);
     if (known) { known.url = String(info.url || known.url || ''); known.title = String(info.title || known.title || ''); return known.enabling || Promise.resolve(); }
     const e = { targetId: tid, url: String(info.url || ''), title: String(info.title || ''), sid: null, enabled: false, heldAt: 0, enabling: null, reEnable: null, hops: [], loop: null, req: null, hopStart: null, quiet: null,
-      seenAt: w.state === 'open' && w.readySeen ? now() : 0, agentHopAt: 0, owner: null, opener: info.openerId ? String(info.openerId) : null, pk: { armed: false, records: [], binding: '', key: '', ctxs: new Set(), ctl: new Map(), seen: new Set() } }; // lane site-reset: a tab that appeared while watched (the agent's `tab new`), the last browser-initiated hop on it
+      seenAt: w.state === 'open' && w.readySeen ? now() : 0, agentHopAt: 0, owner: null, opener: info.openerId ? String(info.openerId) : null, pk: { armed: false, records: [], binding: '', key: '', ctxs: new Set(), ctl: new Map(), seen: new Set(), frameOf: new Map(), mainCtxOf: new Map() } }; // lane site-reset: a tab that appeared while watched (the agent's `tab new`), the last browser-initiated hop on it
     // verify r2: the ONE conversation whose verb was in flight when it appeared (null = nobody / unclear) — verify r3 #1: only for
     // a tab born of NO page (the CLI's `tab new`, the page it gets on attach: measured, no `openerId`); a tab a PAGE opened
     // (`window.open`, a `target=_blank` link — `openerId` set even under `noopener`, measured) is its OPENER's, whoever's verb
@@ -288,8 +288,12 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       // lane browser-passkey: the hook's report; a document that went ends its pending ceremonies (the page no longer waits)
       case 'Runtime.bindingCalled': {
         const e = tabOf(w, m); if (!e || !e.pk.binding || p.name !== e.pk.binding) return; // lane passkey-prewrap-fix: this arm's binding
+        // lane passkey-binding-isolated: the report comes from the document's ISOLATED-WORLD reporter — key the record by the
+        // document's MAIN-world context (where `ctl` lives, so cancel / hold reach it), resolved by frame.
+        const fid = e.pk.frameOf.get(Number(p.executionContextId));
+        const ctx = fid != null && e.pk.mainCtxOf.has(fid) ? e.pk.mainCtxOf.get(fid) : Number(p.executionContextId);
         const ev = PK.parseEvent(p.payload);
-        const rec = ev && PK.applyEvent(e.pk.records, ev, { tab: e.targetId, ctx: p.executionContextId, now: now() });
+        const rec = ev && PK.applyEvent(e.pk.records, ev, { tab: e.targetId, ctx, now: now() });
         if (!rec) return;
         passkeyChanged(w, e, ev.ev === 'start');
         if (pks) (ev.ev === 'start' ? pkGate(w, e, rec).catch((err) => pkFailed(w, e, rec, err)) : pkEnd(w, e, rec).catch((err) => say('pk-flow:' + (err && err.message), `${w.profileId}: a passkey ceremony step failed — ${err && err.message}`))); // lane passkey-store-core // key-file-law-fix: a failed gate releases
@@ -297,9 +301,9 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       }
       case 'WebAuthn.credentialAdded': case 'WebAuthn.credentialAsserted': { const e = tabOf(w, m); if (e && pks) { try { pkHarvest(w, e, m.method, p); } catch (err) { pkFailed(w, e, null, err); } } return; } // lane passkey-store-core: the harvest
       // lane passkey-prewrap-fix: the main-world documents a (re-)arm reaches by identity
-      case 'Runtime.executionContextCreated': { const e = tabOf(w, m); const c = p.context; if (e && c && c.auxData && c.auxData.isDefault) e.pk.ctxs.add(Number(c.id)); return; }
-      case 'Runtime.executionContextDestroyed': { const e = tabOf(w, m); if (e) { e.pk.ctxs.delete(Number(p.executionContextId)); e.pk.ctl.delete(Number(p.executionContextId)); } if (e && PK.endPending(e.pk.records, { now: now(), ctx: Number(p.executionContextId) }).length) passkeyChanged(w, e); return; }
-      case 'Runtime.executionContextsCleared': { const e = tabOf(w, m); if (e) { e.pk.ctxs.clear(); e.pk.ctl.clear(); } if (e && PK.endPending(e.pk.records, { now: now() }).length) passkeyChanged(w, e); return; }
+      case 'Runtime.executionContextCreated': { const e = tabOf(w, m); const c = p.context; if (e && c) { const fid = c.auxData && c.auxData.frameId ? String(c.auxData.frameId) : ''; e.pk.frameOf.set(Number(c.id), fid); if (c.auxData && c.auxData.isDefault) { e.pk.ctxs.add(Number(c.id)); if (fid) e.pk.mainCtxOf.set(fid, Number(c.id)); } } return; } // lane passkey-binding-isolated: every context's frame (an isolated reporter's report maps back to the main world by it)
+      case 'Runtime.executionContextDestroyed': { const e = tabOf(w, m); if (e) { const id = Number(p.executionContextId); e.pk.ctxs.delete(id); e.pk.ctl.delete(id); const fid = e.pk.frameOf.get(id); e.pk.frameOf.delete(id); if (fid != null && e.pk.mainCtxOf.get(fid) === id) e.pk.mainCtxOf.delete(fid); } if (e && PK.endPending(e.pk.records, { now: now(), ctx: Number(p.executionContextId) }).length) passkeyChanged(w, e); return; }
+      case 'Runtime.executionContextsCleared': { const e = tabOf(w, m); if (e) { e.pk.ctxs.clear(); e.pk.ctl.clear(); e.pk.frameOf.clear(); e.pk.mainCtxOf.clear(); } if (e && PK.endPending(e.pk.records, { now: now() }).length) passkeyChanged(w, e); return; }
       default: return;
     }
   }
@@ -1085,16 +1089,21 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   // lane passkey-prewrap-fix (passkey-verify lens ②): a binding + a key minted for THIS arm (never the profile's); new
   // documents get the hook from the script, the documents already here are reached by identity (pkReach) — never
   // `runImmediately`, which ran the hook over whatever the page had put in the slot by then
-  const pkSource = (w, e) => PK.hookSource({ binding: e.pk.binding, key: e.pk.key, slot: w.pkSlot, hold: !!pks });
+  const pkSource = (w, e) => PK.hookSource({ chan: w.pkChan, key: e.pk.key, slot: w.pkSlot, hold: !!pks });
+  const pkReporter = (w, e) => PK.reporterSource({ binding: e.pk.binding, chan: w.pkChan }); // lane passkey-binding-isolated: the isolated-world forwarder (holds the binding)
   async function armHook(w, e, sid) {
     e.pk.binding = 'vs' + crypto.randomBytes(12).toString('hex'); e.pk.key = crypto.randomBytes(16).toString('hex'); e.pk.ctl.clear();
-    const r1 = await call(w, 'Runtime.addBinding', { name: e.pk.binding }, sid);
+    // lane passkey-binding-isolated (B-7c9a): the binding is armed with `executionContextName` so it lands ONLY in the hook's
+    // isolated world (never the page's main-world global); the main-world hook reports through the secret-named CustomEvent,
+    // and the isolated-world reporter (a second script in the same world) holds the binding and forwards each report.
+    const r1 = await call(w, 'Runtime.addBinding', { name: e.pk.binding, executionContextName: w.pkWorld }, sid);
     const r2 = r1 && r1.result ? await call(w, 'Page.addScriptToEvaluateOnNewDocument', { source: pkSource(w, e) }, sid) : null;
-    const r3 = r2 && r2.result ? await call(w, 'Runtime.enable', {}, sid) : null; // the documents that go (a navigation ends its ceremonies) + the ones here
+    const rr = r2 && r2.result ? await call(w, 'Page.addScriptToEvaluateOnNewDocument', { source: pkReporter(w, e), worldName: w.pkWorld }, sid) : null;
+    const r3 = rr && rr.result ? await call(w, 'Runtime.enable', {}, sid) : null; // the documents that go (a navigation ends its ceremonies) + the ones here
     e.pk.armed = !!(r3 && r3.result) && e.sid === sid;
     if (e.pk.armed) for (const ctx of [...e.pk.ctxs]) await pkReach(w, e, ctx, { arm: true });
     if (e.pk.armed && pks) e.pk.auth = await pairAuthenticator(w, e, sid); // lane passkey-store-core: the tab's EMPTY authenticator, re-paired on every attach
-    if (!e.pk.armed) say('pk-arm:' + w.profileId, `${w.profileId}: the passkey hook did not arm on a tab — its passkey requests read as unknown (${(r1 && r1.error && r1.error.message) || (r2 && r2.error && r2.error.message) || (r3 && r3.error && r3.error.message) || 'no answer'})`);
+    if (!e.pk.armed) say('pk-arm:' + w.profileId, `${w.profileId}: the passkey hook did not arm on a tab — its passkey requests read as unknown (${(r1 && r1.error && r1.error.message) || (r2 && r2.error && r2.error.message) || (rr && rr.error && rr.error.message) || (r3 && r3.error && r3.error.message) || 'no answer'})`);
   }
   /** lane browser-passkey-chrome (MEASURED on 0.38.1): Chrome draws its passkey dialog TAB-MODAL in the browser's own window —
    *  on this computer's desktop only when that window is. The hidden-window rung's window is on the CLI's own Xvfb, which
@@ -1181,6 +1190,16 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     const hit = ((g && g.result && g.result.privateProperties) || []).filter((x) => x && x.name === '#' + w.pkSlot && x.value && x.value.objectId);
     return { n: hit.length, ctl: hit.length === 1 ? String(hit[0].value.objectId) : null };
   }
+  /** lane passkey-binding-isolated: (re)install the ISOLATED-WORLD reporter for the document whose main-world context is
+   *  `ctx` — a live document armed on this socket (new documents get it at document start from the worldName script). The
+   *  world is (re)created; the binding (armed with executionContextName) lands in it and the reporter grabs it. */
+  async function pkArmReporter(w, e, ctx, sid) {
+    const fid = e.pk.frameOf.get(Number(ctx));
+    if (!sid || !fid) return;
+    const iso = await call(w, 'Page.createIsolatedWorld', { frameId: fid, worldName: w.pkWorld }, sid);
+    const isoCtx = iso && iso.result && iso.result.executionContextId;
+    if (isoCtx) await call(w, 'Runtime.evaluate', { expression: pkReporter(w, e), contextId: Number(isoCtx) }, sid);
+  }
   async function pkReach(w, e, ctx, { arm = false } = {}) {
     const sid = e.sid;
     if (!sid || !Number.isFinite(Number(ctx))) return null;
@@ -1190,16 +1209,16 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       const r = await call(w, 'Runtime.evaluate', { expression: pkSource(w, e), contextId: ctx, returnByValue: true }, sid);
       f = r && r.result && r.result.result && r.result.result.value === true ? await pkFind(w, sid, ctx) : { n: 0, ctl: null };
     } else if (arm && f.n === 1) {
-      const r = await call(w, 'Runtime.callFunctionOn', { objectId: f.ctl, functionDeclaration: PK.REARM_FN, arguments: [{ value: e.pk.binding }, { value: e.pk.key }], returnByValue: true }, sid);
+      const r = await call(w, 'Runtime.callFunctionOn', { objectId: f.ctl, functionDeclaration: PK.REARM_FN, arguments: [{ value: e.pk.key }], returnByValue: true }, sid);
       const v = r && r.result && r.result.result ? r.result.result.value : null;
       if (v && Array.isArray(v.displaced) && v.displaced.length) pkDisplaced(w, e, ctx, v);
     }
     if (f.n !== 1) {
-      if (arm) await call(w, 'Runtime.evaluate', { expression: PK.dropExpression(e.pk.binding), contextId: ctx }, sid);
       if (f.n > 1) say('pk-twin:' + w.profileId, `${w.profileId}: two passkey hooks answered in one document — neither was armed`);
       return null;
     }
     e.pk.ctl.set(ctx, f.ctl);
+    if (arm) await pkArmReporter(w, e, ctx, sid); // lane passkey-binding-isolated: the live document's isolated-world reporter (this arm's binding)
     return f.ctl;
   }
   async function pkCall(w, e, ctx, verb, id = 0) {

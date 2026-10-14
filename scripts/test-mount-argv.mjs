@@ -162,7 +162,9 @@ try {
       ok(st.stats?.bytes === 7 && st.queue?.queue?.[0]?.name === 'a.txt', '⑦ core/stats + vfs/queue parsed', JSON.stringify(st));
       process.env.FAKE_HANG = '1';
       const t1 = Date.now(), h = await mgr._rcStats(mgr._get('od'), 300);
-      ok(/no answer in 300 ms/.test(h.error || '') && Date.now() - t1 < 2500, '⑦ a daemon that does not answer ⇒ {error} within the bound', `${h.error} ${Date.now() - t1} ms`);
+      // the bound's own word (lane wall-clock-ratchet-down: `< 2500 ms` judged the machine): the 300 ms kill answered —
+      // the fake left to run would print its stats after 5 s, no error; the ms are information
+      ok(/no answer in 300 ms/.test(h.error || '') && !h.stats, '⑦ a daemon that does not answer ⇒ {error} from the bound\'s own kill', `${h.error} ${Date.now() - t1} ms`);
       delete process.env.FAKE_HANG;
     } finally { srv.close(); }
   } finally { if (env0 === undefined) delete process.env.XDG_RUNTIME_DIR; else process.env.XDG_RUNTIME_DIR = env0; }

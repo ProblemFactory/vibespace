@@ -1095,6 +1095,13 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
       const handles = children.get(id);
       (async () => {
         rec.windowsAtExit = await windowsLeftAtExit(rec);
+        // lane exit-close-cadence (B-8778): the exit + its census ARE the verdict — committed (saved + broadcast) HERE, so
+        // every client closes its window at the app's exit; the teardown is the keeper's own and commits again. Committed
+        // only AFTER it, every window closed late by whatever outlived SIGTERM in the app's session — measured: an env
+        // with no session bus makes GLib autolaunch one (`dbus-launch --autolaunch`, a member of the app's session) whose
+        // babysitter dies 3.0 s after a SIGTERM (it ends its bus, then sleeps 3 s), so the close landed 3.1 s after the
+        // exit. A crash in between leaves an exited record with live leftovers: boot adoption reaps them (rule 7).
+        commit();
         await teardown(rec, handles);
         commit();
         if (rec.quickExit) { try { H.onQuickExit?.(view(rec)); } catch (e) { log.warn?.(`[desktop] ${id}: quick-exit hook failed: ${e.message}`); } } // the hub's notice
@@ -1208,7 +1215,9 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
    *  session marker (rule 10 — the members the sid table lost). Every
    *  terminal path passes here (stop, an app that exited, a failed bring-up,
    *  boot adoption), so `exited`/`failed` mean "nothing of this session's
-   *  runs" on every one of them. Returns true when nothing survived. */
+   *  runs" on every one of them once it returns — an app's own exit commits
+   *  its verdict BEFORE this pass (lane exit-close-cadence), the teardown's
+   *  commit follows. Returns true when nothing survived. */
   async function teardown(rec, handles) {
     const own = M.capsOf(rec, backends).ownsDisplay;
     let clean = true;

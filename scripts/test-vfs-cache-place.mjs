@@ -192,7 +192,9 @@ try {
     await g._placeCache(S.m); await g._placeCache(S.m);
     const w1 = walks;
     g._cacheWalkFailed.set('M', Date.now() - MM.CACHE_WALK_RETRY_MS - 60e3);
-    await g._placeCache(S.m); const rearmed = Date.now() - g._cacheWalkFailed.get('M') < 60e3; await g._placeCache(S.m);
+    // re-armed = stamped by THIS timeout (lane wall-clock-ratchet-down: `< 60e3` of the wall judged the machine): the
+    // stamp is no older than the call — the one it replaced was set past the retry window
+    const tRe = Date.now(); await g._placeCache(S.m); const rearmed = g._cacheWalkFailed.get('M') >= tRe; await g._placeCache(S.m);
     const w2 = walks;
     g._cacheWalkFailed.set('M', Date.now() - MM.CACHE_WALK_RETRY_MS - 60e3); mode = 'real';
     const to = await g._placeCache(S.m);

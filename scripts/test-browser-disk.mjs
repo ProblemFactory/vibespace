@@ -209,9 +209,12 @@ console.log('§6 a paired machine\'s row, a timeout, a real kill');
   clock += 60 * MIN; s.pass(); await s.settled();
   ok(warns.length === 2, '…and again after the hour');
   // a REAL child that does not answer is killed by the call's own timeout + SIGKILL
-  const real = RUN.createDiskSampler({ profiles: () => [], timeoutMs: 150, execFileImpl: (cmd, args, opts, cb) => execFile('sleep', ['5'], opts, cb) });
+  // "killed" is the child's OWN end (lane wall-clock-ratchet-down: `< 3000 ms` judged the machine): execFile's timeout
+  // killed it with SIGKILL — a `sleep 5` left to run out ends with code 0 and no signal; the ms are information
+  let ended = null;
+  const real = RUN.createDiskSampler({ profiles: () => [], timeoutMs: 150, execFileImpl: (cmd, args, opts, cb) => execFile('sleep', ['5'], opts, (e, so, se) => { ended = { killed: !!(e && e.killed), signal: (e && e.signal) || null }; cb(e, so, se); }) });
   const t0 = Date.now(); const rr = await real.sampleDir({ dir: SCR });
-  ok(rr.state === 'unknown' && Date.now() - t0 < 3000, `a real child past its timeout is killed (${Date.now() - t0} ms) ⇒ unknown`);
+  ok(rr.state === 'unknown' && ended && ended.killed === true && ended.signal === 'SIGKILL', `a real child past its timeout is killed by the call's own timeout (${JSON.stringify(ended)}, ${Date.now() - t0} ms) ⇒ unknown`);
 }
 
 // ── §7 the panel row ──

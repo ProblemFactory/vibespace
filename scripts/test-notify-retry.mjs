@@ -69,7 +69,9 @@ const serveSock = (p) => { if (fs.existsSync(p)) return; const s = net.createSer
   // (a) a swallowing inbox: accepts, reads, never closes — the CLI's own shape (no ack on success)
   const frames = []; const s = await stub('swallow', (c) => readLines(c, frames));
   const t0 = Date.now(); const r = await PM.postToPeer(peerOf(s), 'job done', { timeoutMs: 2000 }); const dt = Date.now() - t0;
-  ok(r.ok === true && r.phase === 'written' && dt < 1000, '(a) a socket that swallows: ok, phase written, settled by the flush + a short grace, never the 2 s timer', JSON.stringify(r) + ' ' + dt + ' ms');
+  // (lane wall-clock-ratchet-down: the old `dt < 1000` judged the machine — ok + phase `written` IS the flush's settle:
+  // the 2 s timer's verdict is a `timeout`, and past the flush no timeout is ever judged)
+  ok(r.ok === true && r.phase === 'written' && !r.reason, '(a) a socket that swallows: ok, phase written, settled by the flush + a short grace, never the 2 s timer', JSON.stringify(r) + ' ' + dt + ' ms');
   await sleep(20);
   ok(frames.length === 2 && frames[0].type === 'auth' && frames[1].type === 'user' && frames[1].message.content === 'job done', '(a) …both frames intact, in order');
   ok(Number.isFinite(r.elapsedMs) && r.elapsedMs >= 0, '(a) …the result carries elapsedMs');
@@ -748,11 +750,14 @@ function jobsRig(name) {
   await R.advance(70_000);
   R.setAnswer(async () => ({ ok: true, phase: 'written', elapsedMs: 120 }));
   R.session._isStreaming = false;
+  const tLand = Date.now();
   await R.deliver.noteTurnEnd(R.session);
+  const tLanded = Date.now();
   const l2 = R.job.notifyLog[R.job.notifyLog.length - 1];
   ok(l2 && l2.lane === 'message' && l2.ok === true && l2.retries === 3 && l2.deliveredAt === R.now() && l2.parkedFor === 100_000 && l2.via === 'message' && l2.to === 'Owner', 'the delivered line: lane message ok, retries 3 (the timer at +30 s and +90 s, then the turn end at +100 s), deliveredAt, parkedFor, via message', JSON.stringify(l2));
   ok(R.job.lastNotify.lane === 'message' && R.job.lastNotify.ok === true && R.job.lastNotify.retries === 3, 'lastNotify says delivered after 3 retries', JSON.stringify(R.job.lastNotify));
-  ok(R.jm._notifyRate.get(R.cid).ts > floorBefore && Date.now() - R.jm._notifyRate.get(R.cid).ts < 2000 && R.jm._notifyRate.get(R.cid).h === l1.h, 'R5: the 30 s floor is re-stamped by the delivery that LANDED (the engine\'s clock), with the raw text\'s digest', JSON.stringify(R.jm._notifyRate.get(R.cid)));
+  // (lane wall-clock-ratchet-down: `< 2000` of the wall judged the machine — the stamp lies inside the landing call)
+  ok(R.jm._notifyRate.get(R.cid).ts > floorBefore && R.jm._notifyRate.get(R.cid).ts >= tLand && R.jm._notifyRate.get(R.cid).ts <= tLanded && R.jm._notifyRate.get(R.cid).h === l1.h, 'R5: the 30 s floor is re-stamped by the delivery that LANDED (the engine\'s clock), with the raw text\'s digest', JSON.stringify(R.jm._notifyRate.get(R.cid)));
   ok(JM_MODEL.ackState({ ...R.job, state: 'done', finishedAt: R.now() - 200_000, kind: 'task' }, R.now()).acked === true || true, 'ackState reads the delivered line (lane message ok:true)');
   ok(R.ledger.length === 1 && R.authorized.length === 1 && R.releases.length === 0, 'ONE wake billed for the whole episode: the hold taken at the first miss (t0) was still live at the turn end (+100 s < its 3-min TTL) — never asked twice', JSON.stringify({ l: R.ledger, a: R.authorized, r: R.releases }));
 }

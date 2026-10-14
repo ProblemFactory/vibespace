@@ -655,6 +655,26 @@ function nameTypeMismatch(name, mime) {
   const said = m ? EXT_TYPES[m[1].toLowerCase()] : null;
   return said && said !== mime ? { ext: m[1].toLowerCase(), said } : null;
 }
+/** card grammar (lane card-grammar-exceptions): an attachment row says WHAT the file is in a word — its kind (the client
+ *  words it: 图片 · PDF · 文档 …) beside its size; the mime literal and the sha256 stay in the card's 技术细节 fold. By the
+ *  sniffed type, the name deciding only inside a zip (an office file IS a zip). PURE. */
+const OFFICE_KINDS = Object.freeze({ docx: 'document', odt: 'document', xlsx: 'spreadsheet', ods: 'spreadsheet', pptx: 'slides', odp: 'slides' });
+function attachmentKind(name, mime) {
+  const m = String(mime || '').toLowerCase(), ext = ((/\.([a-z0-9]{1,8})$/i.exec(String(name || '')) || [])[1] || '').toLowerCase();
+  if (m.startsWith('image/')) return 'image';
+  if (m.startsWith('audio/')) return 'audio';
+  if (m.startsWith('video/')) return 'video';
+  if (m === 'application/pdf') return 'pdf';
+  if (m === 'text/html') return 'page';
+  if (m.startsWith('text/')) return 'text';
+  if (m === 'application/zip' && OFFICE_KINDS[ext]) return OFFICE_KINDS[ext];
+  if (m === 'application/zip' || m === 'application/gzip') return 'archive';
+  return 'file';
+}
+/** The FORMAT a sniffed type is called by (the name / type mismatch chip: "named .png, but its bytes are HTML") — a
+ *  short name, never the mime literal; null = no name (the client says "plain text" / "unknown data"). PURE. */
+const FORMAT_NAMES = Object.freeze({ 'image/png': 'PNG', 'image/jpeg': 'JPEG', 'image/gif': 'GIF', 'image/webp': 'WebP', 'image/svg+xml': 'SVG', 'application/pdf': 'PDF', 'application/zip': 'ZIP', 'application/gzip': 'GZIP', 'text/html': 'HTML' });
+const attachmentFormat = (mime) => FORMAT_NAMES[String(mime || '').toLowerCase()] || null;
 /** May THIS channel carry these files (`[{kind, bytes}]`)? Over the adapter's row: absent / null ⇒ `attachments-not-offered`
  *  (with the row's reason); one row `{maxCount, maxTotalBytes, withText}`, or `{images, files}` each `{maxCount, maxBytes,
  *  withText}` — pictures and files never share a message there, and a group without text refuses text (`attachment-shape`). */
@@ -1532,5 +1552,5 @@ module.exports = {
   replyAnchorVerdict, anchorView, envelopeVerdict, ENVELOPE_HEADER_MAX, envelopeAddresses, withAddedCc, addressesOf, shownFields, shownDigest, ARM_MS, armVerdict, rearmVerdict,
   hiddenCharsOf, revealSegments,
   // design 005 §2.B (B-fd1f): an agent's attachments — bounds, the name rule, the sniffed type, the adapter's row
-  ATTACH_MAX_COUNT, ATTACH_MAX_TOTAL, ATTACH_NAME_MAX, ATTACH_CODES, INLINE_RASTER, attachmentUrlFor, base64Bytes, safeAttachmentName, attachmentsOf, sniffType, nameTypeMismatch, composeFilesVerdict, sendParts, reconciledParts, partsWords, attachVerdict, storedAttachments, attachmentSize, ATTACH_HELD_MAX, attachHeldVerdict,
+  ATTACH_MAX_COUNT, ATTACH_MAX_TOTAL, ATTACH_NAME_MAX, ATTACH_CODES, INLINE_RASTER, attachmentUrlFor, base64Bytes, safeAttachmentName, attachmentsOf, sniffType, nameTypeMismatch, attachmentKind, attachmentFormat, composeFilesVerdict, sendParts, reconciledParts, partsWords, attachVerdict, storedAttachments, attachmentSize, ATTACH_HELD_MAX, attachHeldVerdict,
 };

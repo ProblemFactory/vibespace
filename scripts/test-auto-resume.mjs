@@ -473,10 +473,14 @@ const T0 = Date.now();   // the module refuses waits >26h out, so the clock must
       ok('single wall on an account that is NOT this session\'s credential slot: the cache is untouched (the 2.368.34 guard is intact)', readCache(C).fiveHour.utilization === 0.15 && readCache(C).source === 'cli-usage', JSON.stringify(readCache(C)));
       ok("…the hold is journaled + telemetered ('wall-demote-held'), never silent", journal.some((l) => /\[wall\] w1: single wall on Member P \(not this session's credential slot\) — holding the demotion/.test(l)) && events.some(([n]) => n === 'wall-demote-held'), journal.join(' | '));
       // (a2) …and a SECOND wall on it inside 120s still demotes (that rung stands)
+      // "fetchedAt now" = stamped by THIS demotion (lane wall-clock-ratchet-down: `< 5000` of the wall judged the
+      // machine): between the instants before and after the second wall
+      const tWall = Date.now();
       eng.noteWallSignal(s1, { resetsAtMs: RESET_5H * 1000, bucket: 'fiveHour', key: C });
       eng.noteTurnEnd(s1);
+      const tWalled = Date.now();
       const cC0 = readCache(C);
-      ok("two walls in 120s on a non-slot account: demoted with the SIGNAL's resetsAt, source 'wall', fetchedAt now", cC0.fiveHour.utilization === 1 && cC0.fiveHour.status === 'limited' && cC0.fiveHour.resetsAt === RESET_5H && cC0.source === 'wall' && Date.now() - cC0.fetchedAt < 5000, JSON.stringify(cC0));
+      ok("two walls in 120s on a non-slot account: demoted with the SIGNAL's resetsAt, source 'wall', fetchedAt now", cC0.fiveHour.utilization === 1 && cC0.fiveHour.status === 'limited' && cC0.fiveHour.resetsAt === RESET_5H && cC0.source === 'wall' && cC0.fetchedAt >= tWall && cC0.fetchedAt <= tWalled, JSON.stringify(cC0));
       ok("…journaled '(2 walls / 2-walls)' — the rung that authorised it is named", journal.some((l) => /\[wall\] demoted Member P 5h until \d{4}-\d\d-\d\dT\S+ \(2 walls \/ 2-walls\)$/.test(l)), journal.filter((l) => /demoted/.test(l)).join(' | '));
       ok("…telemetry 'wall-demote' carries the same rung", events.some(([n, d]) => n === 'wall-demote' && /:5h:2-walls$/.test(d)), JSON.stringify(events.filter(([n]) => /wall/.test(n))));
       // (b) THE SESSION'S OWN SLOT is authority by itself — one wall, demoted,

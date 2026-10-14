@@ -298,9 +298,17 @@ console.log('— ② the probe (SHARED src/browser-facts.js probeDisplay) over r
   fs.writeFileSync(path.join(R2, 'x', 'Xvfb'), 'not executable', { mode: 0o644 });
   const vx = await F.probeDisplay({ env: { PATH: `${path.join(R2, 'x')}:${xb}` } }), vn = await F.probeDisplay({ env: { PATH: path.join(R2, 'x') } });
   ok(vx.xvfb === true && vn.xvfb === false, 'the probe answers Xvfb: an EXECUTABLE Xvfb on the env\'s PATH (the one the browser launches with), a non-executable file is not one', { vx: vx.xvfb, vn: vn.xvfb });
-  const t0 = Date.now();
   v = await F.probeDisplay({ env: { DISPLAY: ':8' }, x11Dir: path.join(R2, 'x') });
-  ok(v.kind === 'none' && Date.now() - t0 < 2000, 'DISPLAY names a display with no socket ⇒ none, bounded', { v, ms: Date.now() - t0 });
+  ok(v.kind === 'none', 'DISPLAY names a display with no socket ⇒ none', v);
+  // "bounded" is the probe's OWN connect timer (lane wall-clock-ratchet-down: `< 2000 ms` judged the machine): a socket
+  // file whose server never answers (a net whose connect neither connects nor fails) is cut by connectMs — every
+  // socket the probe opened is destroyed by it, and the verdict is none
+  await listenAt(path.join(R2, 'x', 'X7'));
+  const hung = [];
+  const netHung = { createConnection: () => { const s = { destroyed: false, once() { return s; }, destroy() { s.destroyed = true; } }; hung.push(s); return s; } };
+  const t0 = Date.now();
+  v = await F.probeDisplay({ env: { DISPLAY: ':7' }, x11Dir: path.join(R2, 'x'), netImpl: netHung, connectMs: 60 });
+  ok(v.kind === 'none' && hung.length >= 1 && hung.every((s) => s.destroyed), `a display socket that never answers ⇒ none, every connect cut by the probe's own timer (${hung.length} cut, ${Date.now() - t0} ms)`, { v, hung: hung.length });
 }
 
 // ═══ ③ the keeper + routes + the shipped CLI over a fake 0.38.1 ══════════════

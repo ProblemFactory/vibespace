@@ -139,6 +139,7 @@ function scenarios(mod) {
   { // ③ the restart at 40 s: the rebuilt card, the clock from the ASK's instant
     const R = rig(mod); const s1 = R.mk('sess-f'); const t0 = Date.now();
     feed(s1, tool(TU, 'Bash', BASH), ask(RID, TU, 'Bash', BASH));
+    const tFed = Date.now();
     const stamped = R.persisted.get('sess-f')?.[RID];
     const R2 = rig(mod, { persisted: R.persisted }); R2.todos._state.items = R.todos._state.items; // the same store across the restart
     const s2 = { _webuiId: 'sess-f', name: 'docusign', backend: 'claude', _historyLoaded: true };
@@ -147,7 +148,9 @@ function scenarios(mod) {
     mod.sync(s2, t0 + 40_000); const at40 = R2.items('sess-f').length;
     mod.sync(s2, t0 + 60_500); const at60 = R2.items('sess-f', 'open').length;
     mod.sync(s2, t0 + 90_000);
-    out.restart40 = { stamped: Math.abs((stamped || 0) - t0) < 5000, at40, at60, all: R2.items('sess-f').length };
+    // the ASK's instant (lane wall-clock-ratchet-down: `|stamped − t0| < 5000` judged the machine): the stamp lies
+    // between the instants before and after the ask was fed
+    out.restart40 = { stamped: stamped >= t0 && stamped <= tFed, at40, at60, all: R2.items('sess-f').length };
   }
   { // an item filed BEFORE a restart + the conversation renamed meanwhile ⇒ still ONE item (keyed by the ask)
     const R = rig(mod); const s1 = R.mk('sess-g'); const t0 = Date.now();

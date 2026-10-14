@@ -26,6 +26,12 @@
 //   ⑤ the lock fact: display.profileLockFact over the private HOME — a SingletonLock to a live pid of THIS host ⇒ live + its
 //      session id; a dead pid ⇒ live false; another host's ⇒ null; no lock ⇒ null — and list() names the record whose app
 //      process holds a browser row's default profile (row.lock.recordId), which the card's verdict then attaches to.
+//   ⑦ lane exit-close-cadence (B-8778): an app whose session keeps a member that outlives SIGTERM (the stand-in for the
+//      `dbus-launch --autolaunch` babysitter GLib starts when the env names no session bus: it dies 3.0 s after a SIGTERM)
+//      ⇒ the exited record (windowsAtExit 0) is COMMITTED — the broadcast every client closes its window on — within
+//      EXIT_CENSUS_MS of the exit while that member still runs; the teardown then reaps it (SIGKILL after STOP_GRACE_MS, the
+//      keeper's clock moved) and commits again, clean. RED CONTROL: the pre-lane order (an in-memory copy of desktop-serve
+//      committing only after the teardown) holds the verdict behind the member until the grace runs out.
 // ~3 s.
 import fs from 'node:fs';
 import os from 'node:os';
@@ -58,6 +64,7 @@ const SINGLE = script('single-app', 'L="$HOME/.single.lock"\nif [ -f "$L" ] && k
 const GATE = script('gate-app', `while [ ! -e "${root}/gate-open" ]; do sleep 0.05; done\nexit 0`);
 const GATE_ASKED = script('gate-asked-app', `while [ ! -e "${root}/gate-asked-open" ]; do sleep 0.05; done\nexit 0`); // ⑥
 const GATE_UNASKED = script('gate-unasked-app', `while [ ! -e "${root}/gate-unasked-open" ]; do sleep 0.05; done\nexit 0`); // ⑥ RED CONTROL
+const HELPER = script('helper-app', `(trap '' TERM; exec sleep 600) &\necho $! > "${root}/helper-member"\nwhile [ ! -e "${root}/helper-open" ]; do sleep 0.05; done\nexit 0`); // ⑦
 const CHROME = script('google-chrome-stable', `printf '%s\\n' "$@" > "${root}/chrome-argv"\nexec sleep 600`);
 const FAKE_DISPLAY = ':4093'; // nothing listens there; no X call reaches it (the fakes below answer for X)
 const kids = [];
@@ -239,6 +246,53 @@ await leg('④⑤', async () => {
   ok(cr2 && cr2.lock && cr2.lock.live && cr2.lock.recordId === null, 'a holder outside every record is named without a record', cr2 && cr2.lock);
   await ds.stop(c1.id, { why: 'user' });
   ds.shutdown?.();
+});
+await leg('⑦', async () => {
+  console.log('⑦ lane exit-close-cadence — the exit + its census are the verdict: committed at the exit, never behind a session member that outlives SIGTERM');
+  const ROW = { id: 'helper', label: 'Helper App', exec: HELPER, args: [], category: 'app' };
+  const noApps = { catalogRows: () => [], refreshCatalog: async () => {}, witnessRows: () => [] };
+  /** one app exit on `mod` (desktop-serve or its pre-lane copy): the casts (onCommit: state + windowsAtExit + the
+   *  keeper's clock + is the TERM-proof member alive at that instant), the record, the member pid */
+  const run = async (mod, tag, between) => {
+    const casts = [];
+    let ds = null, id = null;
+    ds = mod.install({ dataDir: path.join(root, `ds-${tag}`), env, display: fakeDisplay, backends: BACKENDS, registryRows: [ROW], log, now, tickMs: 3600e3, apps: noApps,
+      hooks: { onCommit: () => { const r = id && ds.get(id); if (r) casts.push({ state: r.state, windowsAtExit: r.windowsAtExit, at: now(), memberAlive: member ? D.pidAlive(member) : null }); } } });
+    let member = null;
+    for (const f of ['helper-open', 'helper-member']) fs.rmSync(path.join(root, f), { force: true });
+    id = (await ds.launch({ appId: 'helper' }, {})).id;
+    await until(() => ds.get(id) && ds.get(id).state === 'ready');
+    member = Number(await until(() => { try { return fs.readFileSync(path.join(root, 'helper-member'), 'utf8').trim(); } catch { return null; } }));
+    fs.writeFileSync(path.join(root, 'helper-open'), '1');
+    const rec = await until(() => { const r = ds.get(id); return r && r.state === 'exited' && r.endedAt ? r : null; });
+    await between({ ds, id, casts, member, rec });
+    skew += DS.STOP_GRACE_MS; // the grace runs out on the keeper's clock ⇒ SIGKILL
+    const gone = await until(() => !D.pidAlive(member), 5000);
+    const last = await until(() => { const c = casts.filter((x) => x.state === 'exited'); return c.length && !casts[casts.length - 1].memberAlive ? c : null; }, 5000);
+    ds.shutdown?.();
+    return { ds, id, casts, member, rec: ds.get(id), gone, last };
+  };
+  const a = await run(DS, 'fixed', async ({ casts, rec, member }) => {
+    const first = await until(() => casts.find((c) => c.state === 'exited'), 3000);
+    console.log(`  the exit at ${rec.endedAt}; the exited commit ${first ? first.at - rec.endedAt : '?'} ms later, member ${member} alive then: ${first && first.memberAlive}`);
+    ok(first && first.at - rec.endedAt <= DS.EXIT_CENSUS_MS, `the exited record is committed (broadcast) ${first && first.at - rec.endedAt} ms after the exit — within EXIT_CENSUS_MS (${DS.EXIT_CENSUS_MS}), the census its only wait`, first);
+    ok(first && first.memberAlive === true && first.windowsAtExit === 0, 'it carries windowsAtExit 0 and lands while the TERM-proof member still runs (the teardown has not ended)', first);
+    ok(first && M.exitCloseVerdict(first, { leased: false }).close === true, 'every client closes its window on it (exitCloseVerdict close)', first && M.exitCloseVerdict(first, { leased: false }));
+  });
+  ok(a.gone && a.last && a.rec.state === 'exited' && !/survived/.test(a.rec.lastError || ''), 'the teardown still reaps the member (SIGKILL after STOP_GRACE_MS) and commits again — clean, still exited', { gone: !!a.gone, state: a.rec.state, lastError: a.rec.lastError, casts: a.casts.length });
+
+  console.log('⑦ RED CONTROL — the pre-lane order (commit only after the teardown) holds the verdict behind the member');
+  const file = path.join(repo, 'src/desktop-serve.js');
+  const src = fs.readFileSync(file, 'utf8'), from = '        commit();\n        await teardown(rec, handles);\n        commit();';
+  if (src.split(from).length !== 2) throw new Error('⑦ control anchor gone in src/desktop-serve.js');
+  const Mod = require('module'), fn = file.replace(/\.js$/, '.pre-lane.js'), m = new Mod(fn, null);
+  m.filename = fn; m.paths = Mod._nodeModulePaths(path.dirname(file)); m._compile(src.replace(from, '        await teardown(rec, handles);\n        commit();'), fn);
+  const b = await run(m.exports, 'pre', async ({ casts, member }) => {
+    await sleep(400);
+    ok(!casts.some((c) => c.state === 'exited') && D.pidAlive(member), 'CONTROL: 400 ms after the exit no exited commit has been sent — the member still holds the teardown', casts);
+  });
+  const bFirst = b.casts.find((c) => c.state === 'exited');
+  ok(bFirst && bFirst.at - b.rec.endedAt >= DS.STOP_GRACE_MS && bFirst.memberAlive === false, `CONTROL: its exited commit came only after the grace ran out (${bFirst && bFirst.at - b.rec.endedAt} ms on the keeper's clock ≥ STOP_GRACE_MS) — the window closed that late`, bFirst);
 });
 } catch (e) {
   ok(false, 'the suite ran to its end', e && e.stack);

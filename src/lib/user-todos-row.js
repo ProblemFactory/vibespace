@@ -119,8 +119,15 @@ const passkeyAskHtml = (i, t, detail) => {
   return `<div class="ut-proposal-plan">${escHtml(detail || '')}</div>`
     + (cs.length ? `<div class="ut-exit-answer ut-proposal-answer ut-passkey-answer">${cs.map((c, k) => `<button type="button" class="ut-act ut-action-proposal ${k === 0 ? 'ut-proposal-approve' : 'ut-proposal-reject'} ut-passkey-${c}" data-answer="pk:${c}">${escHtml(pkChoiceWord(c, t))}</button>`).join('')}</div>` : '');
 };
+/** card grammar (lane card-grammar-exceptions): a raw-API proposal's CARD (src/channel-api-card.js forYouOf) — its
+ *  policy a chip on the plan line, its raw call (method + URL, the body's size + sha256) under ONE collapsed 技术细节
+ *  fold above Approve; the row's sentence is the card's title (wordsOf). Nothing raw outside the fold. */
+const apiCardOf = (i) => (i && i.action && i.action.type === 'channel-api-proposal' && i.card && i.card.kind === 'api-call' ? i.card : null);
+const apiChipHtml = (c, t) => (c && c.chip && c.chip.key ? `<span class="ut-api-chip">${escHtml(t(c.chip.key, c.chip.params || {}))}</span> ` : '');
+const apiTechHtml = (c, t) => (c && Array.isArray(c.tech) && c.tech.length
+  ? `<details class="ut-detail-exp ut-api-tech" data-fold="tech"><summary>${escHtml(t('Technical details'))}</summary><div class="ut-detail">${c.tech.map((l) => escHtml(String(l))).join('\n')}</div></details>` : '');
 const proposalAskHtml = (i, t, detail) => (i && i.action && i.action.type === 'browser-proposal' && /^pk-[0-9a-f]{8}$/.test(String(i.action.id || '')) ? passkeyAskHtml(i, t, detail) : i && i.action && PROPOSAL_ACTIONS.includes(i.action.type)
-  ? `<div class="ut-proposal-plan">${escHtml(detail || '')}</div>`
+  ? `<div class="ut-proposal-plan">${apiChipHtml(apiCardOf(i), t)}${escHtml(detail || '')}</div>${apiTechHtml(apiCardOf(i), t)}`
     + (i.action.id ? `<div class="ut-exit-answer ut-proposal-answer"><button type="button" class="ut-act ut-action-proposal ut-proposal-approve" data-answer="approve" title="${escHtml(t('Runs exactly what this card says'))}">${escHtml(t('Approve'))}</button><button type="button" class="ut-act ut-action-proposal ut-proposal-reject" data-answer="reject">${escHtml(t('Reject'))}</button></div>` : '') : '');
 
 /** Layer 0 apps (docs/design-app-persistence.zh.md §3.1): an agent's install PROPOSAL, answered where it appears — Install…

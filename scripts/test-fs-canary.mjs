@@ -43,7 +43,9 @@ const H = harness(createFsCanary);
 {
   const r0 = await H.c.tick(); // spawns the worker
   const r = await H.c.tick();
-  ok(r0 && r && r.where === 'worker' && !r.timedOut && r.fsMs < 100 && r.loopMs < 100, `timed in its own worker: fs ${r && r.fsMs} ms, loop ${r && r.loopMs} ms`);
+  // (lane wall-clock-ratchet-down: the old `fsMs < 100 && loopMs < 100` judged the machine with the canary's own
+  // slowMs — "healthy" is the canary's verdict: no strike, and the next line: nothing recorded)
+  ok(r0 && r && r.where === 'worker' && !r.timedOut && r.strike === 0, `timed in its own worker: fs ${r && r.fsMs} ms, loop ${r && r.loopMs} ms`);
   ok(H.recs.length === 0 && H.lines.length === 0, 'a healthy probe records and says nothing (anomalies only)');
 }
 
@@ -52,7 +54,9 @@ console.log('§2 a blocked loop is not a slow mount');
   const p = H.c.tick(); // posted now; the worker answers while the main thread spins
   spin(1500);
   const r = await p;
-  ok(r && r.fsMs < 300 && r.loopMs >= 1200 && r.strike === 0, `the stat ${r && r.fsMs} ms (worker clock), the loop held its answer ${r && r.loopMs} ms, no strike`);
+  // the stat's time is a SMALL PART of the hold (lane wall-clock-ratchet-down: `fsMs < 300` judged the machine): the
+  // worker's clock reads under a quarter of what the main loop held — §5's main-clock copy reads the stat ≥ the hold
+  ok(r && r.fsMs * 4 < r.loopMs && r.loopMs >= 1200 && r.strike === 0, `the stat ${r && r.fsMs} ms (worker clock), the loop held its answer ${r && r.loopMs} ms, no strike`);
   ok(JSON.stringify(H.names()) === '["srv-loop-canary-ms"]' && H.recs[0].value >= 1200 && H.c.counts.slowLoop === 1 && H.c.counts.slowFs === 0,
     `counted as the loop's fact only (${JSON.stringify(H.recs)})`);
   ok(H.lines.length === 1 && /main loop held the probe's answer \d+ms .*not a slow mount/.test(H.lines[0]), `said by name: ${H.lines[0]}`);
@@ -66,12 +70,18 @@ console.log('§2 a blocked loop is not a slow mount');
 
 console.log('§3 a slow pool is still seen');
 {
-  H.recs.length = 0; H.lines.length = 0;
+  // its own canary, its deadline far past the saturation (lane wall-clock-ratchet-down: H's 1 s deadline is §2's
+  // subject, W's below — here the leg is WHICH fact a slow pool's stat is counted as; on a starved box the pool's wait
+  // outran 1 s and read as a timeout)
+  const P = harness(createFsCanary, { deadlineMs: 60e3 });
+  await P.c.tick(); // spawns its worker
   const busy = saturate(12, 120);
-  const r = await H.c.tick();
+  const r = await P.c.tick();
   await busy;
-  ok(r && r.fsMs >= 100 && r.loopMs < 100 && !r.timedOut, `the stat waited for the shared pool: fs ${r && r.fsMs} ms, loop ${r && r.loopMs} ms`);
-  ok(H.names().join() === 'srv-fs-canary-ms' && H.c.counts.slowFs === 1 && /took \d+ms off the main thread/.test(H.lines[0] || ''), `counted as the fs fact (${JSON.stringify(H.recs)}; ${H.lines[0]})`);
+  // the loop's part is SMALL against the stat's wait (lane wall-clock-ratchet-down: `loopMs < 100` judged the machine)
+  ok(r && r.fsMs >= 100 && r.loopMs * 4 < r.fsMs && !r.timedOut, `the stat waited for the shared pool: fs ${r && r.fsMs} ms, loop ${r && r.loopMs} ms`);
+  ok(P.names().join() === 'srv-fs-canary-ms' && P.c.counts.slowFs === 1 && /took \d+ms off the main thread/.test(P.lines[0] || ''), `counted as the fs fact (${JSON.stringify(P.recs)}; ${P.lines[0]})`);
+  P.c.close();
   const W = harness(createFsCanary, { deadlineMs: 60 });
   await W.c.tick();
   const strikes = [];

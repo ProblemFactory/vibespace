@@ -587,6 +587,13 @@
 - (2026-10-14) A CONVERSATION'S CLI WAS FOUND BY A PID NUMBER: AFTER THE REBOOT A REUSED PID'S STALE RECORD WON (owner: 联系不上这个 agent) — 不变量 = a registration is its process identity (pid + /proc start time + a served socket); every record of the session is judged, the newest live one wins
 - (2026-10-14) A SHIFT THAT TYPED 「）」 AND A SHIFT+ENTER LET GO EARLY READ THE SAME IN THE RING (inc-mv7mdv6b-emxq, enter-recorder-keyup) — 不变量 = the ring says THAT a shifted character was typed (S-·, never which) and WHEN a modifier was let go; intent is read from those times
 - (2026-10-14) THE OUTBOX'S REJECT BOX SENT THE OWNER'S REJECTION MID-WORD (inc-mv7mdv6b-emxq) — 不变量 = an Enter the input method owns never submits a text box: every such handler goes through enterSubmits(e); the class's second incident ⇒ a source census
+- (2026-10-14) AN APP'S WINDOW CLOSED 4 S AFTER THE APP QUIT (B-8778, exit-close-cadence) — 不变量 = the exit + its census are the verdict, committed before the teardown; nothing a session member does on SIGTERM holds a client's window (kb-bugfix-invariants)
+
+## AN APP'S WINDOW CLOSED FOUR SECONDS AFTER THE APP QUIT (B-8778, 2026-10-14; lane exit-close-cadence, .271)
+**Symptom.** test-desktop-xpra-window §10 (1)/(2) on the hub under a private XDG_RUNTIME_DIR: the calculator's own ✕ / the outer ✕ ⇒ the window gone on both clients after 4 054 / 3 728 ms, the same to the millisecond in every run (green on AIDev).
+**Cause.** The keeper broadcast the exit only after the session teardown. The env named no session bus, so GLib autolaunched one over X11: `dbus-launch --autolaunch` lives in the app's session and answers a SIGTERM by ending its bus and sleeping 3 s. The teardown's SIGTERM → STOP_GRACE_MS wait (3 s) → SIGKILL put ~3.1 s between the app's exit (+12 ms) and the commit (+3 171 ms). AIDev's runs have a private session bus, so no dbus-launch member.
+**Fix.** onPartExit commits the verdict (exited + windowsAtExit) right after the census, then tears down and commits again; boot adoption reaps what a crash in between leaves (reapTerminalLeftovers).
+**不变量 / Gates.** A process exit is an event: what the keeper does after it (reaping helpers, unmounting, retiring a profile) never sits between that event and the client. Gates: test-app-launch-once ⑦ (a TERM-proof member + a pre-lane in-memory copy as the RED control), test-desktop-xpra-window §10 event-chain legs (base 3 152 ms ✗, fixed ≤ 96 ms).
 
 ## THE OUTBOX'S REJECT BOX SENT THE OWNER'S REJECTION MID-WORD — THE SECOND ENTER OF ITS CLASS (inc-mv7mdv6b-emxq, 2026-10-14; lane channel-enter-ime, .269)
 

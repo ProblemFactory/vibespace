@@ -13,6 +13,10 @@
 //   ④ the 154 step, row by row: the 4 new methods' classes and their words through the REAL judge (the two whole-
 //      browser setters method_refused on every lease naming the measurement, the two reads forwarded while the user
 //      drives), the 7 removed ones keep their classes (the judge is VERSION-INDEPENDENT — a 153 still ships them);
+//   ④b the 155 step (lane mediation-chrome-155, 2026-10-14 — the runner's ubuntu-latest moved to Chrome 155 and the
+//      mirror's heavy leg went red on 3 methods): DOM.setTextMarker a VIEW act (refused while the user drives),
+//      DOM.clearTextMarkers harmless and DOM.getImplicitAnchorCandidates a read (forwarded), each row carrying its
+//      measurement; the step's one parameter change (Emulation.setDeviceMetricsOverride +viewportMeta?) moves no class;
 //   ⑤ the unknown rule on ANY Chrome: a method no row names is refused BY NAME while the user drives whatever the
 //      installed version (newer, older — the fleet's Debian chromium 150 —, between, unparsable), the words naming
 //      every censused Chrome; `chromeRelation` over the four relations;
@@ -21,7 +25,9 @@
 //   CONTROLS (scripts/mutant-copy.mjs): (a) Browser.addMockCamera's row removed ⇒ the 154 fixture is no longer
 //      covered (unclassified names it) AND a mediation copy bound to that census FORWARDS the camera call on a free
 //      lease; (b) a removed row's `until` dropped ⇒ 154 reports it stale; (c) a surviving row marked `until` 154 ⇒ 154
-//      reports it misdated; (d) a new row's `chrome` dropped ⇒ 153 reports it stale.
+//      reports it misdated; (d) a new row's `chrome` dropped ⇒ 153 reports it stale; (e) DOM.setTextMarker's row
+//      removed ⇒ 155 is no longer covered and a paused lease's marker is refused only as `unclassified`; (f)
+//      DOM.setTextMarker classed read ⇒ a paused lease's marker is FORWARDED (the class is what refuses it).
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -39,6 +45,7 @@ const fixtureOf = (v) => JSON.parse(fs.readFileSync(path.join(FIX, `cdp-protocol
 const versionOf = (f) => (/Chrome\/(\d+\.\d+\.\d+\.\d+)/.exec(String(f && f.browser || '')) || [])[1] || null;
 const name = (r) => r.domain + '.' + r.method;
 const C154 = '154.0.8037.57';
+const C155 = '155.0.8059.39';
 
 // a judge scope: tab T-A attached as session S-A (the shape test-browser-mediation ⑥ judges every row on)
 const scope = () => { const sc = M.newScope({ targets: ['T-A'] }); M.admitReply({ id: 1, result: { sessionId: 'S-A' } }, { method: 'Target.attachToTarget', params: { targetId: 'T-A' } }, sc); return sc; };
@@ -55,7 +62,7 @@ for (const v of C.CENSUS_CHROMES) {
   fixtures[v] = fixtureOf(v);
   ok(versionOf(fixtures[v]) === v && fixtures[v].protocolVersion === '1.3', `① Chrome ${v}: the fixture names the Chrome it was read from (${fixtures[v].browser}, protocol ${fixtures[v].protocolVersion})`);
 }
-ok(C.CENSUS_CHROME === C.CENSUS_CHROMES[C.CENSUS_CHROMES.length - 1] && C.CENSUS_CHROME === C154, `① CENSUS_CHROME is the newest censused Chrome (${C.CENSUS_CHROME})`);
+ok(C.CENSUS_CHROME === C.CENSUS_CHROMES[C.CENSUS_CHROMES.length - 1] && C.CENSUS_CHROME === C155, `① CENSUS_CHROME is the newest censused Chrome (${C.CENSUS_CHROME})`);
 
 // ═══ ② each censused Chrome ⇔ the table ═════════════════════════════════════
 console.log('— ② on EACH censused Chrome the table names exactly its methods');
@@ -103,13 +110,32 @@ const GONE = { 'Storage.getSharedStorageMetadata': 'read', 'Storage.getSharedSto
 const goneWrong = Object.entries(GONE).filter(([m, cls]) => { const r = C.rowOf(m); const want = cls === 'page-mutation' ? 'browser_interrupted:page-mutation' : 'forward'; return !r || r.cls !== cls || r.until !== C154 || r.chrome !== C.CENSUS_CHROMES[0] || verdict(M, m, { paused: true }) !== want || verdict(M, m, {}) !== 'forward'; });
 ok(goneWrong.length === 0, `④ the ${Object.keys(GONE).length} Shared Storage methods Chrome 154 dropped keep their rows and classes (marked until ${C154}) and the judge still reads them — a 153 ships them, and the judge never asks which Chrome is installed`, goneWrong.join(', '));
 
+// ═══ ④b the 155 step, row by row ════════════════════════════════════════════
+console.log('— ④b Chrome 155\'s three new DOM methods: their classes and their measured words through the real judge');
+const NEW155 = { 'DOM.setTextMarker': 'view', 'DOM.clearTextMarkers': 'harmless', 'DOM.getImplicitAnchorCandidates': 'read' };
+for (const [m, cls] of Object.entries(NEW155)) {
+  const r = C.rowOf(m);
+  ok(r && r.cls === cls && r.chrome === C155 && r.until === null && r.since === '2026-10-14' && r.fence === 'mediator' && typeof r.why === 'string' && r.why.includes(`measured on Chrome ${C155}`), `④b ${m}: class ${cls}, first listed on ${C155}, dated 2026-10-14, the measurement written on the row`);
+}
+const mk = M.judge({ id: 40, method: 'DOM.setTextMarker', params: { nodeId: 5, type: 'spelling', start: 0, end: 7 }, sessionId: 'S-A' }, scope(), { paused: true });
+ok(mk.kind === 'refuse' && mk.why === 'view' && M.refusalCodeOf(mk.reply) === 'browser_interrupted' && verdict(M, 'DOM.setTextMarker', {}) === 'forward', '④b DOM.setTextMarker: a VIEW act (a squiggle painted under the user\'s text) — browser_interrupted while the user drives, forwarded when the agent does', JSON.stringify(mk.reply));
+for (const m of ['DOM.clearTextMarkers', 'DOM.getImplicitAnchorCandidates']) ok(verdict(M, m, { paused: true }) === 'forward' && verdict(M, m, {}) === 'forward', `④b ${m}: ${NEW155[m]} — forwarded while the user drives and while the agent does`);
+ok(/no event, no DOM mutation, the value unchanged/.test(C.rowOf('DOM.setTextMarker').why) && /LOOKING AT/.test(C.rowOf('DOM.setTextMarker').why) && /THIS DevTools session/.test(C.rowOf('DOM.clearTextMarkers').why) && /another session or connection/.test(C.rowOf('DOM.clearTextMarkers').why) && /DOM\.disable \(harmless\)/.test(C.rowOf('DOM.clearTextMarkers').why) && /popover stays closed/.test(C.rowOf('DOM.getImplicitAnchorCandidates').why), '④b each row names what was measured (the marker: the picture changes, the page sees nothing; the clear: only this session\'s markers, as DOM.disable does; the read: the popover stays closed)');
+if (fixtures[C154] && fixtures[C155]) {
+  const d45 = diffListings(fixtures[C154], fixtures[C155]);
+  const pc = d45.params && d45.params.changed;
+  ok(d45.unrecorded.length === 0 && d45.methods.added.join() === Object.keys(NEW155).sort().join() && d45.methods.removed.length === 0 && d45.methods.reflagged.length === 0 && d45.domains.added.length + d45.domains.removed.length === 0
+    && pc.length === 1 && pc[0].method === 'Emulation.setDeviceMetricsOverride' && pc[0].added.join() === 'viewportMeta?' && pc[0].removed.length === 0 && C.classOf('Emulation.setDeviceMetricsOverride') === 'view'
+    && d45.events.added.length + d45.events.removed.length + d45.events.changed.length === 0, `④b ${C154} → ${C155} (both sides recorded): +3 −0 methods, the one parameter change Emulation.setDeviceMetricsOverride +viewportMeta? (still view), no event changed`, JSON.stringify({ methods: d45.methods, params: pc, events: d45.events }));
+}
+
 // ═══ ⑤ the unknown rule on ANY Chrome ═══════════════════════════════════════
 console.log('— ⑤ a method no row names is refused BY NAME while the user drives — on every Chrome, older or newer than the census');
-ok(C.chromeRelation('153.0.8010.47') === 'censused' && C.chromeRelation(C154) === 'censused' && C.chromeRelation('150.0.7871.124') === 'older' && C.chromeRelation('153.0.8010.60') === 'between' && C.chromeRelation('155.0.8100.1') === 'newer' && C.chromeRelation('chromium') === 'unknown' && C.chromeRelation('') === 'unknown', '⑤ chromeRelation: censused / older (the fleet\'s Debian chromium 150) / between / newer / unknown');
+ok(C.chromeRelation('153.0.8010.47') === 'censused' && C.chromeRelation(C154) === 'censused' && C.chromeRelation(C155) === 'censused' && C.chromeRelation('154.0.8037.92') === 'between' && C.chromeRelation('150.0.7871.124') === 'older' && C.chromeRelation('153.0.8010.60') === 'between' && C.chromeRelation('155.0.8100.1') === 'newer' && C.chromeRelation('chromium') === 'unknown' && C.chromeRelation('') === 'unknown', '⑤ chromeRelation: censused / older (the fleet\'s Debian chromium 150) / between / newer / unknown');
 // an OLDER Chrome's extra (measured 2026-09-28: Chrome for Testing 149.0.7827.55, 151.0.7922.34 and Google Chrome
 // 152.0.7977.82 list Network.setRequestInterception, which 153 dropped) and a NEWER Chrome's (a synthetic name)
 const older = { domains: [...fixtures['153.0.8010.47'].domains.map((d) => (d.domain === 'Network' ? { ...d, commands: [...d.commands, { name: 'setRequestInterception' }] } : d))] };
-const newer = { domains: [...fixtures[C154].domains, { domain: 'Zzz', commands: [{ name: 'futureMethod' }] }] };
+const newer = { domains: [...fixtures[C155].domains, { domain: 'Zzz', commands: [{ name: 'futureMethod' }] }] };
 const cOld = C.compare(older, { chrome: '150.0.7871.124' }), cNew = C.compare(newer, { chrome: '155.0.8100.1' });
 ok(cOld.chrome === null && cOld.relation === 'older' && cOld.unclassified.join() === 'Network.setRequestInterception' && cNew.relation === 'newer' && cNew.unclassified.join() === 'Zzz.futureMethod' && cNew.misdated.length === 0, '⑤ compare on an uncensused Chrome: the extra method is UNCLASSIFIED (older and newer alike), nothing is judged misdated');
 for (const m of ['Network.setRequestInterception', 'Zzz.futureMethod', 'Page.zzzFutureMethod']) {
@@ -134,6 +160,7 @@ for (const [v, f] of Object.entries(fixtures)) {
 ok(shapeBad.length === 0, '⑥ every fixture is a names-only listing: domain / command / event objects with closed keys, parameter NAMES as plain strings (an optional one ends in ?) — no types, schemas or descriptions', shapeBad.slice(0, 5).join('\n    '));
 const f154 = fixtures[C154];
 ok(f154 && f154.domains.some((d) => Array.isArray(d.events) && d.events.length) && f154.domains.every((d) => d.commands.every((c) => Array.isArray(c.params))), `⑥ the ${C154} fixture records every command's parameter names and the events (the next Chrome's diff can say what changed)`);
+ok(fixtures[C155] && fixtures[C155].domains.some((d) => Array.isArray(d.events) && d.events.length) && fixtures[C155].domains.every((d) => d.commands.every((c) => Array.isArray(c.params))), `⑥ the ${C155} fixture records every command's parameter names and the events too`);
 const d34 = diffListings(fixtures['153.0.8010.47'], f154);
 ok(d34.params === null && d34.events === null && d34.unrecorded.join() === 'older: parameter names,older: events', '⑥ 153 → 154: the 153 fixture recorded names only, so the diff says the parameter / event parts are UNRECORDED on that side (never an empty change list)', JSON.stringify(d34.unrecorded));
 const d44 = diffListings(f154, f154);
@@ -151,8 +178,9 @@ console.log('— CONTROLS: patched census copies — a new row removed, an until
   const src = fs.readFileSync(path.join(REPO, 'src/cdp-census.js'), 'utf8');
   const medSrc = fs.readFileSync(path.join(REPO, 'src/browser-mediation.js'), 'utf8');
   const rowRe = /^ {4}addMockCamera: \{ cls: 'refused'.*\n/m;
+  const markRe = /^ {4}setTextMarker: \{ cls: 'view'.*\n/m, markA = "setTextMarker: { cls: 'view',";
   const untilA = "setSharedStorageTracking: { cls: 'harmless', until: C154 },", evalA = "evaluate: 'page-mutation',", chromeA = "getAdScripts: { cls: 'read', since: '2026-09-28', chrome: C154, ";
-  ok((src.match(new RegExp(rowRe.source, 'gm')) || []).length === 1 && src.split(untilA).length === 2 && src.split(evalA).length === 2 && src.split(chromeA).length === 2 && medSrc.split("require('./cdp-census.js')").length === 2, 'control setup: each anchor is spelled once');
+  ok((src.match(new RegExp(rowRe.source, 'gm')) || []).length === 1 && (src.match(new RegExp(markRe.source, 'gm')) || []).length === 1 && src.split(markA).length === 2 && src.split(untilA).length === 2 && src.split(evalA).length === 2 && src.split(chromeA).length === 2 && medSrc.split("require('./cdp-census.js')").length === 2, 'control setup: each anchor is spelled once');
   // (a) Browser.addMockCamera's row removed
   const noRow = MUT.write('src/cdp-census.js', src.replace(rowRe, ''), 'no-mock-camera-row');
   const Ca = require(noRow);
@@ -168,6 +196,16 @@ console.log('— CONTROLS: patched census copies — a new row removed, an until
   // (d) a new row's chrome mark dropped
   const d = require(MUT.write('src/cdp-census.js', src.replace(chromeA, "getAdScripts: { cls: 'read', since: '2026-09-28', "), 'no-chrome')).compare(fixtures['153.0.8010.47'], { chrome: '153.0.8010.47' });
   ok(!d.sameSet && d.stale.join() === 'Ads.getAdScripts', 'CONTROL (d) Ads.getAdScripts\' chrome mark dropped: Chrome 153.0.8010.47 reports it STALE (a 154 method claimed for 153)');
+  // (e) Chrome 155's DOM.setTextMarker row removed
+  const noMark = MUT.write('src/cdp-census.js', src.replace(markRe, ''), 'no-text-marker-row');
+  const e = require(noMark).compare(fixtures[C155], { chrome: C155 });
+  const Me = MUT.load('src/browser-mediation.js', medSrc.replace("require('./cdp-census.js')", `require(${JSON.stringify(noMark)})`), 'no-text-marker-row');
+  const ve = Me.judge({ id: 41, method: 'DOM.setTextMarker', params: {}, sessionId: 'S-A' }, scope(), { paused: true });
+  ok(!e.sameSet && e.unclassified.join() === 'DOM.setTextMarker' && ve.why === 'unclassified' && verdict(M, 'DOM.setTextMarker', { paused: true }) === 'browser_interrupted:view', `CONTROL (e) DOM.setTextMarker's row removed: Chrome ${C155} is no longer covered (unclassified: ${e.unclassified.join()}) and the paused lease's marker is refused only as \`${ve.why}\` — the row is what says it is a view act`);
+  // (f) DOM.setTextMarker classed read
+  const asRead = MUT.write('src/cdp-census.js', src.replace(markA, "setTextMarker: { cls: 'read',"), 'text-marker-read');
+  const Mf = MUT.load('src/browser-mediation.js', medSrc.replace("require('./cdp-census.js')", `require(${JSON.stringify(asRead)})`), 'text-marker-read');
+  ok(require(asRead).compare(fixtures[C155], { chrome: C155 }).sameSet && verdict(Mf, 'DOM.setTextMarker', { paused: true }) === 'forward', `CONTROL (f) DOM.setTextMarker classed read: Chrome ${C155} is still "covered", yet a paused lease's marker is FORWARDED onto the page the user drives — the class is what refuses it`);
   for (const r of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 5, label: 'CONTROL ' })) ok(r.pass, r.name, r.detail);
 }
 

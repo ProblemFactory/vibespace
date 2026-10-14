@@ -61,6 +61,12 @@
 //      the two whole-browser setters are method_refused with the agent driving —
 //      the mock camera's effect counted from another tab, the RAW endpoint's own
 //      mock camera the positive control. Every line names the Chrome it ran on.
+//      lane mediation-chrome-155 (2026-10-14): on 155+ the forced spelling /
+//      grammar marker (DOM.setTextMarker, a view act) is refused while paused and
+//      the marked paragraph's PICTURE is unchanged, the popover-invoker read and
+//      the session's own marker release answer; handed back the marker CHANGES the
+//      picture (the positive control) with the page's DOM untouched, and the
+//      release puts it back byte-identical.
 // SKIPs with evidence when no chrome / no agent-browser / a launch fails.
 // cdp-protocol-under-test — every 'Page.navigate' here is a CDP message judged
 // by the proxy against a real chrome, never a navigation of VibeSpace's page.
@@ -257,7 +263,7 @@ else {
   const rs = (await raw.call('Target.attachToTarget', { targetId: A, flatten: true })).result.sessionId;
   const oracle = async (expr) => { const r = await raw.call('Runtime.evaluate', { expression: expr, returnByValue: true }, rs); return r.result && r.result.result ? r.result.result.value : undefined; };
   const codeOf = (r) => M.refusalCodeOf(r);
-  await c6.call('Page.navigate', { url: 'data:text/html,<title>census</title><input id=i autofocus><script>window.k=0;addEventListener("keydown",()=>{window.k++});</script>' }, s6);
+  await c6.call('Page.navigate', { url: 'data:text/html,<title>census</title><input id=i autofocus><p id=mk style="font:24px sans-serif">speling here</p><div id=pop popover>pop</div><button id=pb popovertarget=pop>open</button><script>window.k=0;addEventListener("keydown",()=>{window.k++});</script>' }, s6);
   await sleep(400);
   const KEY = { type: 'keyDown', key: 'a', code: 'KeyA', windowsVirtualKeyCode: 65, text: 'a' };
   ok((await c6.call('Input.dispatchKeyEvent', KEY, s6)).result !== undefined && (await oracle('window.k')) === 1, '⑥ not paused: the agent\'s Input.dispatchKeyEvent reaches the page (the oracle counts 1 keydown)');
@@ -296,6 +302,30 @@ else {
     const gpc = await c6.call('Browser.getGlobalPrivacyControl', {});
     ok(codeOf(ads) === null && ads.result && Array.isArray(ads.result.newScripts) && codeOf(gpc) === null && ((gpc.result && typeof gpc.result.gpc === 'boolean') || (gpc.error && /Global Privacy Control/.test(gpc.error.message))), `⑥ PAUSED · read (Chrome ${cv}): Ads.getAdScripts answers (${ads.result ? ads.result.newScripts.length : '?'} scripts) and Browser.getGlobalPrivacyControl is FORWARDED (Chrome's own answer: ${JSON.stringify(gpc.result || gpc.error).slice(0, 80)})`);
   } else skip(`⑥ Chrome ${cv} lists no Ads.getAdScripts / Browser.getGlobalPrivacyControl — the Chrome 154 read legs need 154+`);
+  // lane mediation-chrome-155: Chrome 155's three DOM methods on the paused lease — the forced spelling / grammar marker
+  // (a VIEW act: measured, it changes the picture and the page sees nothing) is refused and the marked paragraph's
+  // PICTURE is unchanged (a PNG clip read through the raw endpoint); the popover-invoker read and the release of the
+  // session's own markers answer (forwarded — Chrome's own answer)
+  let mk155 = null;
+  if (lists('DOM.setTextMarker') && lists('DOM.clearTextMarkers') && lists('DOM.getImplicitAnchorCandidates')) {
+    const root = (await c6.call('DOM.getDocument', { depth: 0 }, s6)).result.root.nodeId;
+    const sel = async (q) => ((await c6.call('DOM.querySelector', { nodeId: root, selector: q }, s6)).result || {}).nodeId;
+    const [P, POP, PB] = [await sel('#mk'), await sel('#pop'), await sel('#pb')];
+    const pic = async () => {
+      const bm = (await c6.call('DOM.getBoxModel', { nodeId: P }, s6)).result; const q = bm && bm.model.border;
+      const r = q ? await raw.call('Page.captureScreenshot', { format: 'png', clip: { x: q[0], y: q[1], width: q[2] - q[0], height: q[5] - q[1], scale: 1 } }, rs) : null;
+      return r && r.result ? r.result.data : `no picture (${JSON.stringify(bm || r).slice(0, 120)})`;
+    };
+    mk155 = { P, pic };
+    const p0 = await pic();
+    const sm = await c6.call('DOM.setTextMarker', { nodeId: P, type: 'spelling', start: 0, end: 7 }, s6);
+    await sleep(150);
+    ok(p0.length > 100 && codeOf(sm) === 'browser_interrupted' && (await pic()) === p0, `⑥ PAUSED · view (Chrome ${cv}): DOM.setTextMarker is browser_interrupted and the marked paragraph's picture is unchanged (a PNG clip through the raw endpoint)`, JSON.stringify(sm).slice(0, 200));
+    const btnB = ((await c6.call('DOM.describeNode', { nodeId: PB }, s6)).result || { node: {} }).node.backendNodeId;
+    const ia = await c6.call('DOM.getImplicitAnchorCandidates', { nodeId: POP }, s6);
+    const cl = await c6.call('DOM.clearTextMarkers', {}, s6);
+    ok(codeOf(ia) === null && ia.result && String(ia.result.backendNodeIds) === String(btnB) && codeOf(cl) === null && cl.result !== undefined && (await oracle('document.getElementById("pop").matches(":popover-open")')) === false, `⑥ PAUSED · read + harmless (Chrome ${cv}): DOM.getImplicitAnchorCandidates answers with the popover's button (backend node ${btnB}) and the popover stays closed; DOM.clearTextMarkers is FORWARDED (Chrome's own answer)`, JSON.stringify({ ia, cl }).slice(0, 240));
+  } else skip(`⑥ Chrome ${cv} lists no DOM.setTextMarker / clearTextMarkers / getImplicitAnchorCandidates — the Chrome 155 legs need 155+`);
   ok(codeOf(await c6.call('Network.setCookie', { name: 'vs6', value: '1', url: 'https://example.invalid/' }, s6)) === 'browser_interrupted' && codeOf(await c6.call('DOM.setOuterHTML', { nodeId: 1, outerHTML: '<html></html>' }, s6)) === 'browser_interrupted' && (await oracle('document.title')) === 'census', '⑥ PAUSED · page-mutation: Network.setCookie and DOM.setOuterHTML are browser_interrupted too (the whole class) — the page unchanged');
   const shot2 = await c6.call('Page.captureScreenshot', { format: 'jpeg', quality: 30 }, s6);
   ok(shot2.result && typeof shot2.result.data === 'string' && (await c6.call('Runtime.getHeapUsage', {}, s6)).result !== undefined, '⑥ PAUSED · a read (Page.captureScreenshot, Runtime.getHeapUsage) still answers');
@@ -344,6 +374,20 @@ else {
     try { await raw.call('Target.closeTarget', { targetId: camT }); } catch { /* gone */ }
     camSrv.close();
   } else skip(`⑥ Chrome ${cv} lists no Browser.addMockCamera / setGlobalPrivacyControl — the Chrome 154 setter legs need 154+`);
+  // lane mediation-chrome-155: handed back, the marker goes through and the picture CHANGES (the oracle sees a marker when
+  // one is set — the paused leg's positive control) while the page's own DOM stays as it was (a view act, never a page
+  // mutation); the lease's release of its own markers puts the picture back byte-identical
+  if (mk155) {
+    const p0 = await mk155.pic();
+    const html0 = await oracle('document.body.innerHTML');
+    const sm2 = await c6.call('DOM.setTextMarker', { nodeId: mk155.P, type: 'spelling', start: 0, end: 7 }, s6);
+    await sleep(150);
+    const p1 = await mk155.pic();
+    ok(codeOf(sm2) === null && sm2.result !== undefined && p0.length > 100 && p1 !== p0 && (await oracle('document.body.innerHTML')) === html0, `⑥ handed back (Chrome ${cv}): DOM.setTextMarker goes through — the paragraph's picture CHANGES (the oracle sees a marker when one is set) and the page's DOM is unchanged (a view act, never a page mutation)`, JSON.stringify(sm2).slice(0, 200));
+    const cl2 = await c6.call('DOM.clearTextMarkers', {}, s6);
+    await sleep(150);
+    ok(cl2.result !== undefined && (await mk155.pic()) === p0, `⑥ handed back (Chrome ${cv}): the lease's DOM.clearTextMarkers puts the picture back byte-identical`, JSON.stringify(cl2).slice(0, 160));
+  }
   try { await raw.call('Target.detachFromTarget', { sessionId: rs }); } catch { /* gone */ }
   c6.ws.close();
 }

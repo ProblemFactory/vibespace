@@ -2,6 +2,17 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.271 — 2026-10-14
+
+### Changed
+- Attached files and pictures read in plain words (“Image · 2 KB”), and an API request in For you says what it will do; the details sit under one fold.
+
+### Fixed
+- A desktop app's window now closes the moment the app quits, instead of about three seconds later on some machines.
+
+### Security
+- A web page in an Agent browser can no longer fake a passkey request or forge its record, even for the moment VibeSpace is reconnecting to the page.
+
 ## 2.369.270 — 2026-10-14
 
 ### Added

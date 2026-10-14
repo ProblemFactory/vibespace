@@ -142,9 +142,11 @@ console.log('— the ledger across rebuilt instances (a fake never-converging da
     ok(r2.upgrades === 0 && matchCalls.length === 4 && matchCalls.every((v) => v === '9.9.9') && stuckCalls.length === 1, `DUS-H2: a hello AT the expected version calls onVersionMatch (the watch resolves its item) and never onUpgradeStuck (${JSON.stringify(matchCalls)})`);
     helloVersion = '0.0.1';
     const fm = { onControl: () => {}, data: () => {}, control: (m) => { if (m.op === 'upgrade') setTimeout(() => fm.onControl({ op: 'upgrade-failed', version: m.version, error: 'EPERM: operation not permitted, rename' }), 5); } };
+    // "NOW" is the daemon's own answer ending the attempt (lane wall-clock-ratchet-down: `< 2000 ms` judged the machine):
+    // the rejection carries its reason — the 30 s timer's ends `upgrade timeout` (the CONTROL below); the ms are information
     const t0 = Date.now();
     const u = await new DeviceManager({ dataDir: t2, bundlePath: bundle, version: '1.1.1', log: () => {} })._upgrade(fm).then(() => 'done', (e) => e.message);
-    ok(/could not land the upgrade — EPERM: operation not permitted, rename/.test(u) && Date.now() - t0 < 2000, `DUS-H3: a daemon's \`upgrade-failed\` ends the attempt NOW with its reason — never a silent 30 s timeout (${u}, ${Date.now() - t0} ms)`);
+    ok(/could not land the upgrade — EPERM: operation not permitted, rename/.test(u) && u !== 'upgrade timeout', `DUS-H3: a daemon's \`upgrade-failed\` ends the attempt NOW with its reason — never a silent 30 s timeout (${u}, ${Date.now() - t0} ms)`);
     // CONTROL: the `upgrade-failed` branch removed (the 30 s cap shortened to 300 ms so the control is quick) — the attempt
     // ends on the TIMEOUT with no reason: DUS-H3 goes red
     {

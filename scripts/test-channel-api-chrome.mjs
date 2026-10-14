@@ -12,7 +12,8 @@
 //      always-allowed shapes with Revoke, the API log (zh; en + ja words)
 //   ② a write-ask call ⇒ ONE card under the chat's call row + ONE Outbox "API calls" row + ONE For-you item
 //   ③ Approve in the chat ⇒ the Outbox row and the For-you item resolve IN PLACE (ran · 200)
-//   ④ Reject from the For-you tray ⇒ the chat card says "Rejected by you"
+//   ④ Reject from the For-you tray ⇒ the chat card says "Rejected by you" (the row: the card's title, the call in ONE
+//      collapsed 技术细节 fold above Approve — lane card-grammar-exceptions)
 //   ⑤ a sensitive card has NO "Run and always allow" button
 //   ⑥ "Run and always allow <shape>" ⇒ the next same-shape call runs without a card; the dialog lists the shape + Revoke
 //   ⑦ 390 px: nothing of the card is off-screen, its action row wraps
@@ -22,7 +23,7 @@
 //      完全信任 · 敏感; the dialog row in the warning colour + its note; the All row's option refused, saying why
 //      (PNGs dialog-desk.png / dialog-phone.png)
 // PNGs (for the owner): $API_CHROME_SHOTS (default: the scratch dir) api-dialog-zh.png, api-card-chat-zh.png,
-// api-card-phone-zh.png. Run: node scripts/test-channel-api-chrome.mjs
+// api-card-phone-zh.png, foryou-api-row-zh.png (the For-you row: the card's title, the call folded). Run: node scripts/test-channel-api-chrome.mjs
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -217,8 +218,14 @@ ok(fs.readFileSync(path.join(STUB, 'calls.ndjson'), 'utf-8').split('\n').some((l
 const c2 = await agentCalls('POST', '/api/chat.postMessage', { channel: 'C0VIBE', text: 'second' });
 const pid2 = c2.json && c2.json.proposal && c2.json.proposal.id;
 await until(async () => (await chatCards(p1)).some((c) => c.id === pid2));
-const tray = await p1.evaljs(`(async () => { const tb = document.getElementById('taskbar-user-todos'); if (tb && !(document.getElementById('user-todos-popup') || {}).offsetWidth) tb.click(); for (let i = 0; i < 60; i++) { const it = [...document.querySelectorAll('.ut-item')].find((r) => /second|chat\\.postMessage/.test(r.innerText) && [...r.querySelectorAll('button')].some((b) => /拒绝|Reject/.test(b.textContent))); if (it) { [...it.querySelectorAll('button')].find((b) => /拒绝|Reject/.test(b.textContent)).click(); return true; } await new Promise((r) => setTimeout(r, 250)); } return [...document.querySelectorAll('.ut-item')].map((r) => r.innerText.slice(0, 120)); })()`);
-ok(tray === true, 'the For-you tray shows the item with a Reject button, pressed', tray);
+// card grammar (lane card-grammar-exceptions): the row says the CARD's title (the object C0VIBE named — never the method or
+// the path), the call itself sits in ONE collapsed 技术细节 fold above Approve; the row is found by its words, then pressed
+const tray = await p1.evaljs(`(async () => { const tb = document.getElementById('taskbar-user-todos'); if (tb && !(document.getElementById('user-todos-popup') || {}).offsetWidth) tb.click(); for (let i = 0; i < 60; i++) { const it = [...document.querySelectorAll('.ut-item')].find((r) => /C0VIBE/.test(r.innerText) && [...r.querySelectorAll('button')].some((b) => /拒绝|Reject/.test(b.textContent))); if (it) { const f = [...it.querySelectorAll('[data-fold="tech"]')], ap = it.querySelector('.ut-proposal-approve'); return { id: it.dataset.id, text: it.innerText, folds: f.length, open: f.length ? f[0].open : null, tech: f.length ? f[0].textContent : '', above: f.length && ap ? !!(f[0].compareDocumentPosition(ap) & Node.DOCUMENT_POSITION_FOLLOWING) : false }; } await new Promise((r) => setTimeout(r, 250)); } return [...document.querySelectorAll('.ut-item')].map((r) => r.innerText.slice(0, 120)); })()`);
+ok(tray && tray.id && !/chat\.postMessage|https?:\/\/|sha256|\/api\//.test(tray.text) && tray.folds === 1 && tray.open === false && tray.above && /POST https:\/\/slack\.com\/api\/chat\.postMessage/.test(tray.tech) && /sha256 [0-9a-f]{64}/.test(tray.tech),
+  'the For-you row says the card\'s title (no method, path or sha256 on its face); the call + its sha256 sit in ONE collapsed 技术细节 fold above Approve', tray);
+ok(await p1.shot('foryou-api-row-zh.png', `.ut-item[data-id=${JSON.stringify(String((tray && tray.id) || 'none'))}]`), 'foryou-api-row-zh.png');
+const pressed = tray && tray.id ? await p1.evaljs(`(() => { const it = document.querySelector('.ut-item[data-id=${JSON.stringify(String(tray.id))}]'); const b = it && [...it.querySelectorAll('button')].find((x) => /拒绝|Reject/.test(x.textContent)); if (!b) return false; b.click(); return true; })()`) : false;
+ok(pressed === true, 'the For-you tray shows the item with a Reject button, pressed', tray);
 const rej = await until(async () => (await chatCards(p1)).find((c) => c.id === pid2 && c.fate === 'rejected'), 15000);
 ok(rej && /被你拒绝|Rejected by you/.test(rej.text), 'the chat card says it was rejected by you (zh)', rej || await chatCards(p1));
 

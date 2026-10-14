@@ -262,10 +262,16 @@ function forYouItem(b, { label = '' } = {}) {
  *    own function there (ours back; `hook-displaced`). The key is minted per arm — an old one is refused after a re-arm. */
 function installHook(G, cfg) {
   'use strict';
-  const send = G[cfg.binding];
-  try { delete G[cfg.binding]; } catch (e) { /* a binding that cannot go stays named by a random word */ }
-  if (typeof send !== 'function' || !G.CredentialsContainer || !G.AbortController) return false;
+  // lane passkey-binding-isolated (B-7c9a): the hook NEVER holds a privileged global binding — on a live-document re-arm a
+  // page polling global names grabbed the arm binding and could forge trace / card events (§2.8 residual). It reports by
+  // dispatching a per-profile SECRET-named CustomEvent on `document` (natives captured here, before any page script); the
+  // real `Runtime.addBinding` binding lives only in an ISOLATED WORLD (installReporter), off the page's main-world global
+  // for good, and that reporter forwards the event's detail to it.
+  if (!G.CredentialsContainer || !G.AbortController || !G.CustomEvent || !G.document || !G.EventTarget) return false;
   const proto = G.CredentialsContainer.prototype;
+  const CE = G.CustomEvent, doc = G.document, dispatch = G.EventTarget.prototype.dispatchEvent, chan = String(cfg.chan || '');
+  if (typeof dispatch !== 'function' || !chan) return false;
+  const send = (payload) => { try { dispatch.call(doc, new CE(chan, { detail: payload, bubbles: false })); } catch (e) { /* the reporter's world went */ } };
   // taken here — in a new document before any page script — so `retake` and the reports never use what a page replaced later
   const gopd = G.Object.getOwnPropertyDescriptor, defp = G.Object.defineProperty, enc = G.JSON.stringify;
   const AC = G.AbortController, AS = G.AbortSignal;
@@ -320,7 +326,7 @@ function installHook(G, cfg) {
   /** THE CONTROL — reachable only through the private field (the watch's CDP call; `this` there = this function). `rebind`
    *  = a re-arm: the new binding + the new key (reaching `ctl` IS the proof — the old key is not needed and dies here). */
   const ctl = function (k, verb, a, b) {
-    if (verb === 'rebind') { if (typeof a === 'function') tell = a; if (typeof b === 'string' && b) key = b; return retake(); }
+    if (verb === 'rebind') { if (typeof b === 'string' && b) key = b; return retake(); } // lane passkey-binding-isolated: send is a stable CustomEvent dispatch; a re-arm only re-keys + retakes
     if (typeof k !== 'string' || !k || k !== key) return -2;
     return control(String(verb), a);
   };
@@ -388,15 +394,30 @@ function installHook(G, cfg) {
 const SLOT_MARK = '#vsPasskeyCtl';
 const slotName = (slot) => (/^[A-Za-z][A-Za-z0-9_]{7,63}$/.test(str(slot)) ? '#' + str(slot) : SLOT_MARK);
 /** The script the watch injects (one per arm; the same text evaluated into a document that has no hook of ours yet). */
-function hookSource({ binding, key, slot = '', hold = false, holdMs = HOOK_HOLD_MS }) { return `;(${installHook.toString().split(SLOT_MARK).join(slotName(slot))})(globalThis, ${JSON.stringify({ binding: str(binding), key: str(key), ...(hold ? { hold: true, holdMs: Number(holdMs) || HOOK_HOLD_MS } : {}) })});`; }
+function hookSource({ chan, key, slot = '', hold = false, holdMs = HOOK_HOLD_MS }) { return `;(${installHook.toString().split(SLOT_MARK).join(slotName(slot))})(globalThis, ${JSON.stringify({ chan: str(chan), key: str(key), ...(hold ? { hold: true, holdMs: Number(holdMs) || HOOK_HOLD_MS } : {}) })});`; }
+/** lane passkey-binding-isolated: the ISOLATED-WORLD reporter — it, not the page's main world, holds the real
+ *  `Runtime.addBinding` binding (armed with `executionContextName`, so the name never lands on the page's global). It
+ *  grabs the binding from its own world's global, drops the name, and forwards the hook's secret-named CustomEvent detail
+ *  to it. Runs in the named world — new documents via addScriptToEvaluateOnNewDocument({worldName}), a live document on a
+ *  re-arm via createIsolatedWorld + evaluate. A page can neither enter this world nor guess the channel, so it can no
+ *  longer see the binding name nor forge trace / card events. */
+function installReporter(G, cfg) {
+  'use strict';
+  const send = G[cfg.binding];
+  try { delete G[cfg.binding]; } catch (e) { /* this world is page-unreachable; a name left here is harmless */ }
+  if (typeof send !== 'function' || !G.document || !G.EventTarget) return false;
+  const add = G.EventTarget.prototype.addEventListener, chan = String(cfg.chan || '');
+  if (typeof add !== 'function' || !chan) return false;
+  try { add.call(G.document, chan, function (e) { try { send(e && e.detail); } catch (x) { /* */ } }); } catch (e) { return false; }
+  return true;
+}
+function reporterSource({ binding, chan }) { return `;(${installReporter.toString()})(globalThis, ${JSON.stringify({ binding: str(binding), chan: str(chan) })});`; }
 /** lane passkey-prewrap-fix: the watch's calls on the `ctl` it found by identity (`Runtime.callFunctionOn`, `this` = ctl) — a
  *  direct call (never `Function.prototype.call`, the page's to replace). CTL = a verb with this arm's key: `cancel`, the
  *  verdict on a held ceremony (`release` | `refuse` | `wait` — the ask's heartbeat), `drained` (the authenticator is empty
  *  again). REARM = this arm's binding taken off the global in the same step + the new key; answers `retake`'s {displaced, kept}. */
 const CTL_FN = 'function (k, v, a) { return this(k, v, a); }';
-const REARM_FN = 'function (b, k) { var g = (function () { return this; })(), s = null; try { s = g[b]; delete g[b]; } catch (e) { s = null; } return this("", "rebind", typeof s === "function" ? s : null, k); }';
-/** The binding of an arm that reached no hook in a document leaves its global (a page never keeps it). */
-function dropExpression(binding) { return `(function(){var g=(function(){return this})();try{delete g[${JSON.stringify(str(binding))}]}catch(e){}return 0})()`; }
+const REARM_FN = 'function (k) { return this("", "rebind", null, k); }'; // lane passkey-binding-isolated: the binding is isolated-world; a re-arm hands the main-world ctl only the fresh key
 /** The hook's in-page deadline (P0 ④: after the watch's socket goes the native get hangs past the page's own timeout). */
 const HOOK_HOLD_MS = 1500;
 
@@ -405,5 +426,5 @@ module.exports = {
   PASSKEY_OPEN_CODE, PASSKEY_ASK_CODE, REFUSED_SAID_MS, HOOK_HOLD_MS, KINDS, OUTCOMES, PENDING_SAID_MS, FOR_YOU_AFTER_MS, RECORDS_KEEP, PASSKEY_PASS_VERBS, PASSKEY_READ_VERBS,
   NONE_TEXT, UNKNOWN_TEXT, FOR_YOU_WORDS,
   rpWord, parseEvent, recordOf, applyEvent, endPending, passkeyVerdict, passkeyText, passkeyBlock, passkeyPasses, passkeyReads,
-  loopVerdict, cancelText, passkeyWords, forYouItem, keyForYouItem, installHook, hookSource, SLOT_MARK, CTL_FN, REARM_FN, dropExpression, askText, refusedText, registerText, // lane passkey-prewrap-fix: − the slot-road expressions
+  loopVerdict, cancelText, passkeyWords, forYouItem, keyForYouItem, installHook, hookSource, installReporter, reporterSource, SLOT_MARK, CTL_FN, REARM_FN, askText, refusedText, registerText, // lane passkey-binding-isolated: + the isolated-world reporter; − dropExpression (no main-world binding to drop)
 };

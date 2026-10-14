@@ -42,8 +42,10 @@ console.log('— the real DeviceManager over a stream transport: auth-fail rejec
   const stream = await dialIn();
   const dm = new DeviceManager({ dataDir: tmp, bundlePath: path.join(tmp, 'none.js'), version: '1.0.0', log: () => {}, transport: { kind: 'stream', hostToken: 'vsht_wrong', getStream: () => stream } });
   const t0 = Date.now();
-  let err = null; try { await dm.connect(); } catch (e) { err = e; }
-  ok(err && err.code === 'auth_failed' && /auth failed/.test(err.message) && Date.now() - t0 < 2000, `connect() rejects auth_failed at once (${Date.now() - t0} ms) — no minute of retries`, err && err.message);
+  // "at once" is the retry COUNT at the rejection (lane wall-clock-ratchet-down: `< 2000 ms` judged the machine): the
+  // first refusal rejects — one hello sent when connect() settles, no retry stood between; the ms are information
+  let err = null, hellosAtReject = null; try { await dm.connect(); } catch (e) { err = e; hellosAtReject = hellos; }
+  ok(err && err.code === 'auth_failed' && /auth failed/.test(err.message) && hellosAtReject === 1, `connect() rejects auth_failed on the first refusal (${hellosAtReject} hello sent when it settled, ${Date.now() - t0} ms) — no minute of retries`, err && err.message);
   ok(!(await closed(stream)) && !stream.destroyed, 'the stream is KEPT open (the device stays dialed in; no re-dial loop)');
   ok(hellos === 1, `one hello was sent (${hellos})`);
   dm.stop(); stream.destroy();

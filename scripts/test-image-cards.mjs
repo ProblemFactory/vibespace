@@ -44,7 +44,7 @@ const readImg = (fp, extra = {}) => block({ toolName: 'Read', input: { file_path
   ok('Read(image) renders an OPEN media block (owner: 展开直接看到)', /<details class="chat-diff chat-media" open>/.test(html), html);
   ok('…thumbnail is the FILE from disk via /api/file/raw, lazy, in the standard zoom class', /<img class="chat-img chat-tool-img" loading="lazy" src="\/api\/file\/raw\?path=%2Fw%2Fshots%2Fa%20b\.png"/.test(html), html);
   ok("…no stray quotes in the URL (the 2.369.35 `''` typo)", !/\.png''/.test(html) && !/raw\?path=[^"]*'/.test(html), html);
-  ok('…summary carries an SVG icon + basename + type/size chip (never emoji)', /<summary class="chat-diff-summary"><svg[\s\S]*?<\/svg> a b\.png <span class="chat-media-meta">image\/png · 12 KB<\/span><\/summary>/.test(html), html);
+  ok('…summary carries an SVG icon + basename + format/size chip (never emoji, never the mime literal — the card grammar)', /<summary class="chat-diff-summary"><svg[\s\S]*?<\/svg> a b\.png <span class="chat-media-meta" data-chip="size">PNG · 12 KB<\/span><\/summary>/.test(html), html);
   ok('…the honest fallback line is present (shown by the error delegate, no inline JS)', /<span class="chat-media-missing">Image not available on this machine<\/span>/.test(html) && !/onerror=/.test(html), html);
   ok('…no base64 anywhere in the card', !/base64/.test(html));
   // THE LIFTED BLOCKS DECIDE, NEVER THE EXTENSION. Real fleet shape (claude
@@ -78,7 +78,7 @@ const readImg = (fp, extra = {}) => block({ toolName: 'Read', input: { file_path
   const grep = r.renderToolResult(block({ toolName: 'Grep', input: { pattern: 'x' }, output: 'a\nb' }), {});
   ok('a generic tool without images has no media/thumbnail markup at all', !/chat-media|chat-tool-images|chat-tool-img/.test(grep) && /<summary class="chat-diff-summary">Input<\/summary>/.test(grep), grep);
   const mcpShot = r.renderToolResult(block({ toolName: 'mcp__chrome__screenshot', input: { full: true }, output: '[image image/jpeg · 88 KB]', images: [{ mediaType: 'image/jpeg', bytes: 90000 }] }), {});
-  ok('an image with NO path on disk (MCP screenshot) stays a size chip — nothing drawable, no <img>', /<span class="chat-tool-image-chip">image\/jpeg · 88 KB<\/span>/.test(mcpShot) && !/<img/.test(mcpShot), mcpShot);
+  ok('an image with NO path on disk (MCP screenshot) stays a size chip — nothing drawable, no <img>', /<span class="chat-tool-image-chip" data-chip="size">JPEG · 88 KB<\/span>/.test(mcpShot) && !/<img/.test(mcpShot), mcpShot);
   const genericFile = r.renderToolResult(block({ toolName: 'mcp__fs__read', input: { file_path: '/w/pic.webp' }, output: '[image image/webp · 5 KB]', images: [{ mediaType: 'image/webp', bytes: 5000 }] }), {});
   ok('a generic tool whose input names an image file draws it (media block inside .chat-tool-images)', /<div class="chat-tool-images"><details class="chat-diff chat-media" open>/.test(genericFile) && /path=%2Fw%2Fpic\.webp/.test(genericFile), genericFile);
   const tiff = r.renderToolResult(block({ toolName: 'Read', input: { file_path: '/w/scan.tiff' }, output: 'binary' }), {});
@@ -87,9 +87,9 @@ const readImg = (fp, extra = {}) => block({ toolName: 'Read', input: { file_path
   // cannot decode, the card is honest: the chip/size line, never an <img>
   // that can only break
   const tiffImg = r.renderToolResult(block({ toolName: 'Read', input: { file_path: '/w/scan.tiff' }, output: '[image image/tiff · 2.0 MB]', images: [{ mediaType: 'image/tiff', bytes: 2097152 }] }), {});
-  ok('a tiff/heic Read WITH lifted image blocks is an image card with the type/size chip and NO <img> (unrenderable ≠ broken thumbnail)', /Read/.test(tiffImg) && /<span class="chat-tool-image-chip">image\/tiff · 2\.0 MB<\/span>/.test(tiffImg) && !/<img/.test(tiffImg) && !/chat-media-missing/.test(tiffImg), tiffImg);
+  ok('a tiff/heic Read WITH lifted image blocks is an image card with the type/size chip and NO <img> (unrenderable ≠ broken thumbnail)', /Read/.test(tiffImg) && /<span class="chat-tool-image-chip" data-chip="size">TIFF · 2\.0 MB<\/span>/.test(tiffImg) && !/<img/.test(tiffImg) && !/chat-media-missing/.test(tiffImg), tiffImg);
   const heic = r.renderToolResult(block({ toolName: 'Read', input: { file_path: '/w/IMG.HEIC' }, output: '[image image/heic · 3.0 MB]', images: [{ mediaType: 'image/heic', bytes: 3145728 }] }), {});
-  ok('…same for .heic', /<span class="chat-tool-image-chip">image\/heic · 3\.0 MB<\/span>/.test(heic) && !/<img/.test(heic), heic);
+  ok('…same for .heic', /<span class="chat-tool-image-chip" data-chip="size">HEIC · 3\.0 MB<\/span>/.test(heic) && !/<img/.test(heic), heic);
 }
 
 // ── ④ codex view_image ──
@@ -116,7 +116,7 @@ const readImg = (fp, extra = {}) => block({ toolName: 'Read', input: { file_path
   ok('…complete, image fold kind, input merged from the twins, path kept', cards[0]?.status === 'complete' && cards[0]?.collapseKind === 'image' && c.input?.path === '/tmp/shot.png' && c.input?.detail === 'original', c.input);
   ok('…the rollout input_image output is LIFTED to {mediaType, bytes}; no base64 in the card', Array.isArray(c.images) && c.images[0]?.mediaType === 'image/png' && c.images[0]?.bytes === 6000 && !/base64|AAAA/.test(JSON.stringify(cards[0])) && /\[image image\/png · 6 KB\]/.test(c.output), c);
   const html2 = mk().renderToolResult(c, cards[0]);
-  ok('…and renders as the media card with the lifted size chip', /chat-media/.test(html2) && /image\/png · 6 KB/.test(html2), html2);
+  ok('…and renders as the media card with the lifted size chip', /chat-media/.test(html2) && /PNG · 6 KB/.test(html2), html2);
   const only = new CodexMessageManager('cx2').convertHistory([{ type: 'event_msg', payload: { type: 'view_image_tool_call', call_id: 'call_9', path: '/tmp/only.png' } }]).filter((m) => m.role === 'tool');
   ok('an event_msg WITHOUT the function_call pair still yields one complete view_image card (history without the wrapper stub)', only.length === 1 && only[0].status === 'complete' && only[0].collapseKind === 'image' && only[0].content[0].input.path === '/tmp/only.png', only);
   // live order (event first, pair later) also converges on one card
@@ -145,10 +145,10 @@ const readImg = (fp, extra = {}) => block({ toolName: 'Read', input: { file_path
 // ── ⑥ inline image blocks (ACP/claude user attachments) keep the data: URL inside the wrapper ──
 {
   const html = R.imageMediaHtml({ dataUrl: 'data:image/png;base64,AAAA', mediaType: 'image/png', name: 'Image' });
-  ok('imageMediaHtml(dataUrl) → media block with the data: URL thumbnail + zoom class', /<details class="chat-diff chat-media" open><summary class="chat-diff-summary"><svg[\s\S]*?<\/svg> Image <span class="chat-media-meta">image\/png<\/span><\/summary><div class="chat-media-body"><img class="chat-img chat-tool-img" loading="lazy" src="data:image\/png;base64,AAAA" alt="Image">/.test(html), html);
+  ok('imageMediaHtml(dataUrl) → media block with the data: URL thumbnail + zoom class', /<details class="chat-diff chat-media" open><summary class="chat-diff-summary"><svg[\s\S]*?<\/svg> Image <span class="chat-media-meta" data-chip="size">PNG<\/span><\/summary><div class="chat-media-body"><img class="chat-img chat-tool-img" loading="lazy" src="data:image\/png;base64,AAAA" alt="Image">/.test(html), html);
   const cr = read('src/lib/chat-renderers.js');
   ok('renderUserMsg routes image blocks (ACP + claude user attachments) through imageMediaHtml', /if \(b\.type === 'image'\) return imageMediaHtml\(\{ dataUrl: `data:\$\{b\.mediaType \|\| 'image\/png'\};base64,\$\{b\.data\}`/.test(cr));
-  ok('no drawable source → size chip, never an empty <img>', /^<span class="chat-tool-image-chip">image\/gif · 2 KB<\/span>$/.test(R.imageMediaHtml({ mediaType: 'image/gif', bytes: 2048 })));
+  ok('no drawable source → size chip, never an empty <img>', /^<span class="chat-tool-image-chip" data-chip="size">GIF · 2 KB<\/span>$/.test(R.imageMediaHtml({ mediaType: 'image/gif', bytes: 2048 })));
   ok('isImagePath covers the browser-renderable set only', R.isImagePath('/a/b.PNG') && R.isImagePath('x.avif') && !R.isImagePath('/a/b.tiff') && !R.isImagePath('/a/b.md') && !R.isImagePath(''));
 }
 

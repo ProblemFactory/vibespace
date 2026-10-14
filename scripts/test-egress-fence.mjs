@@ -51,7 +51,9 @@ try {
   ok(!r4.ok && r4.code === 'redirect' && r4.status === 302 && !hits.some((h) => h.port === P(second)), 'a 3xx is answered as `redirect` and NEVER followed (the second server got nothing)', r4);
   const t0 = Date.now();
   const r5 = await EF.fenceFetch(`http://127.0.0.1:${P(silent)}/`, { allowPrivate: true, timeoutMs: 400, body: 'x' });
-  ok(!r5.ok && r5.code === 'lost' && r5.sent === true && Date.now() - t0 < 3000, 'a request that LEFT and got no answer is `lost` (sent: true — the receiver may have acted: the outbox says unknown)', r5);
+  // the 400 ms handed ended it (lane wall-clock-ratchet-down: `< 3000 ms` judged the machine): the timer's own sentence
+  // rounds the bound it was given — `within 0 s`, where the 10 s default says `within 10 s`; the ms are information
+  ok(!r5.ok && r5.code === 'lost' && r5.sent === true && /no answer within 0 s/.test(r5.error || ''), `a request that LEFT and got no answer is \`lost\` (sent: true — the receiver may have acted: the outbox says unknown) — ended by the timer handed (${Date.now() - t0} ms)`, r5);
   const dead = http.createServer(); await new Promise((r) => dead.listen(0, '127.0.0.1', r)); const dp = P(dead); await new Promise((r) => dead.close(r));
   const r6 = await EF.fenceFetch(`http://127.0.0.1:${dp}/`, { allowPrivate: true, body: 'x' });
   ok(!r6.ok && r6.code === 'refused' && r6.sent === false, 'a connection refused is `refused` (sent: false — nothing left: the outbox says failed)', r6);

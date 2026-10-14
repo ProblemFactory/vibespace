@@ -7,7 +7,7 @@
 // This census reads every FAST suite with acorn and classifies each comparison of a measured wall-clock SPAN:
 //   span     `<clock> - x` / `x - <mark>` (Date.now(), performance.now(), process.hrtime[.bigint](), new Date()), a
 //            variable or an object field (`{ ms: Date.now() - t0 }`, `r.ms = …`) assigned one — data flow inside the
-//            suite file by name (a duration the PRODUCT measures and returns is out of its sight — see BLIND below);
+//            suite file by name (a duration the PRODUCT measures and returns: THE PRODUCT'S CLOCK, below);
 //            through a coercion (`+ms.toFixed(1)`, `-ms`, `~~ms`, `ms | 0`), a sum (`a + ms`, `total += ms`), a
 //            destructured field (`const { ms } = r`), `process.hrtime(t0)`'s [s, ns] tuple, and an ARRAY of spans
 //            (`gaps.push(t - last)` across a loop, then `Math.max(...gaps)`, `gaps[i]`, `gaps.at(-1)`, `r.gaps` of a
@@ -23,8 +23,18 @@
 //            under 1 s always; at ≥ 1 s held by the per-suite ratchet in scripts/fixtures/wall-clock-baseline.json,
 //            which only FALLS: a suite with more is RED (a new literal bound), a suite with fewer is RED until the
 //            baseline is lowered in the same commit (`node scripts/wall-clock-census.mjs --lower`).
-// BLIND: a duration measured outside the suite file (a product-returned `ms`, a child's JSON), a span inside a tuple
-// (`times.map(([n, fn]) => [n, msOf(fn)])`), a span threaded through a helper's parameter, a span in a Map / Set.
+// Lane wall-clock-ratchet-down (2.369.271) read what this header used to call BLIND: a span inside a TUPLE
+// (`fns.map((fn) => [fn.name, msOf(fn)])`, then `([, ms]) => ms > B`, `for (const [n, ms] of rows)`), a span handed to
+// a helper's PARAMETER (`fast(Date.now() - t0)` ⇒ `(ms) => ok(ms < 500)`), a Map / Set of spans (`m.set(k, span)` ⇒
+// `m.get(k)`, `s.add(span)` ⇒ `Math.max(...s)`), a for-of over an array of spans, a CLOCK FUNCTION (`const now = () =>
+// Date.now()`), and a duration the PRODUCT measured and returned or a CHILD printed (see THE PRODUCT'S CLOCK below:
+// test-fs-canary's `r.fsMs < 100`, test-tls-pass's `t.ms < 5000`, test-app-display-secrets' `r.store.ms < 3000`).
+// THE RATCHET IS AT 0 since that lane: the baseline is empty, so any literal bound is a NEW one.
+// STILL UNREADABLE (each said; none compared in the tier today): a PRODUCT duration whose field is not named in ms
+// (`took`, `elapsed` — the house names a duration by its unit, and a string built from a span is no duration), one
+// renamed on the way through a module the suite does not load (`{ lagMs: r.fsMs }`), one measured deeper than the
+// modules the suite LOADS and the siblings they name (the whole require graph would put most of src/ through acorn on
+// every run — measured ~2 s more), and a shell child's clock (`date +%s%N`).
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -72,25 +82,47 @@ function visit(n, f) {
   }
 }
 const CLOCK_TEXT = /\b(?:Date\.now|performance\.now|hrtime)\b|new\s+Date\s*\(\s*\)/;
+const CLOCK_FN_TEXT = /\btime\.(?:monotonic|time|perf_counter)(?:_ns)?\(\)/;   // a child's clock (python) in the suite's text
 const anyNode = (n, pred) => { let hit = false; visit(n, (m) => { if (!hit && pred(m)) hit = true; }); return hit; };
 
-/** PURE: every comparison of a measured wall-clock span in one suite's source, classified (see the header). */
-export function wallClockFindings(src) {
-  // every span starts at a clock read IN THIS FILE (the data flow is the file's own), so a source with none has no
-  // finding — exact, and it spares the parse of most of the tier
-  if (!CLOCK_TEXT.test(src)) return [];
-  let ast;
-  try { ast = acorn.parse(src, { ecmaVersion: 'latest', sourceType: 'module', locations: true, allowHashBang: true, allowAwaitOutsideFunction: true }); }
-  catch (e) { return [{ line: 0, kind: 'PARSE', text: e.message, boundMs: null }]; }
+const parse = (src) => acorn.parse(src, { ecmaVersion: 'latest', sourceType: 'module', locations: true, allowHashBang: true, allowAwaitOutsideFunction: true });
+const fnOf = (n) => !!n && /Function/.test(n.type);
+
+/** the data flow of one source — a suite, or a product module it loads — to a fixed point: marks, spans, span fields,
+ *  helpers that return a span, arrays / tuples / Maps of spans. `seed` = field names already known to carry a span
+ *  (a product's `{ ms }`, a child's JSON `ms`); `injected` = clock parameters the suite hands the product (a module's
+ *  `now = () => Date.now()` default is no clock when the suite passes its own `now`). Throws on a parse error. */
+function flow(src, { seed = [], injected = new Set(), ast = null } = {}) {
+  ast = ast || parse(src);
   const all = [];
   walk(ast, null, (n) => all.push(n));
-  const text = (n) => src.slice(n.start, n.end).replace(/\s+/g, ' ');
+  // each function's own `return` arguments, once (a body is never re-walked inside the fixed point)
+  const returnsOf = new Map();
+  for (const n of all) if (n.type === 'ReturnStatement' && n.argument) { let o = n._p; while (o && !fnOf(o)) o = o._p; if (o) returnsOf.set(o, [...(returnsOf.get(o) || []), n.argument]); }
+  // a PRODUCT field (seeded) is a span only on what the code got back from a call — `(await TLS.runChild(…)).ms`,
+  // `JSON.parse(line).ms` — never on an object the file built itself (a fake timer's `{ fn, ms }`)
+  const productFields = new Set(seed), callBound = new Set();
+  const ARRAY_OPS = /^(?:find|findLast|filter|at|pop|shift|slice|map|flatMap|reduce|sort|toSorted|concat|reverse|get|values|entries|keys)$/;
+  const isCallResult = (n) => { n = un(n); if (n && n.type === 'AwaitExpression') n = un(n.argument); return !!n && n.type === 'CallExpression' && !(un(n.callee).type === 'MemberExpression' && !un(n.callee).computed && ARRAY_OPS.test(un(n.callee).property.name)); };
+  // (by name, as the rest of the flow — but a callback's own parameter `(c) => c.ms` shadows a `const c = await …`)
+  const binds = (p, name) => !!p && (p.type === 'Identifier' ? p.name === name : p.type === 'AssignmentPattern' ? binds(p.left, name) : p.type === 'RestElement' ? binds(p.argument, name)
+    : p.type === 'ArrayPattern' ? p.elements.some((e) => binds(e, name)) : p.type === 'ObjectPattern' ? p.properties.some((q) => binds(q.type === 'RestElement' ? q : q.value, name)) : false);
+  const isParam = (n) => { for (let q = n._p; q; q = q._p) if (fnOf(q) && q.params.some((p) => binds(p, n.name))) return true; return false; };
+  const fromCall = (n) => { n = un(n); if (!n) return false; if (n.type === 'Identifier') return callBound.has(n.name) && !isParam(n); if (n.type === 'MemberExpression') return fromCall(n.object); return isCallResult(n); };
   const marks = new Set(), spans = new Set(), spanFields = new Set(), spanFns = new Set(), spanArrays = new Set(), spanArrayFields = new Set();
-  const isMark = (n) => { n = un(n); return isClockRead(n) || (!!n && n.type === 'Identifier' && marks.has(n.name)); };
+  const clockFns = new Set(), spanMaps = new Set(), tupleArrays = new Map();
+  // a CLOCK FUNCTION — `const now = () => Date.now()`, a product's injectable default `{ now = () => Date.now() }`,
+  // `function now() { return Date.now(); }`: its calls read the wall clock
+  const isClock = (n) => { n = un(n); return isClockRead(n) || (!!n && n.type === 'CallExpression' && un(n.callee).type === 'Identifier' && clockFns.has(un(n.callee).name)); };
+  const returnsClock = (f) => (f.expression ? isClock(f.body) : f.body.body.length === 1 && f.body.body[0].type === 'ReturnStatement' && isClock(f.body.body[0].argument));
+  const isMark = (n) => { n = un(n); return isClock(n) || (!!n && n.type === 'Identifier' && marks.has(n.name)); };
+  // `anyNode(left, isClock)` per `-`, memoized while the clock functions stand still
+  const clockIn = new Map();
+  const hasClock = (n) => { const c = clockIn.get(n); if (c && c[0] === clockFns.size) return c[1]; const v = anyNode(n, isClock); clockIn.set(n, [clockFns.size, v]); return v; };
   const isSpanExpr = (n) => {
     n = un(n);
     if (!n) return false;
-    if (n.type === 'BinaryExpression' && n.operator === '-') return isMark(n.left) || anyNode(n.left, isClockRead) || (un(n.right).type === 'Identifier' && marks.has(un(n.right).name));
+    if (n.type === 'BinaryExpression' && n.operator === '-') return isMark(n.left) || hasClock(n.left) || (un(n.right).type === 'Identifier' && marks.has(un(n.right).name));
     // a SUM of spans (a mark + a number is a deadline, not a span), a span truncated (`ms | 0`), coerced or negated
     // (`+ms.toFixed(1)` — F13's helper returned `maxGap: +maxGap.toFixed(1)`, and its `< 50` went unseen)
     if (n.type === 'BinaryExpression' && (n.operator === '+' || n.operator === '|')) return (isSpan(n.left) || isSpan(n.right)) && !isMark(n.left) && !isMark(n.right);
@@ -98,6 +130,8 @@ export function wallClockFindings(src) {
     // one element (or a fold) of an array of spans: `gaps[i]`, `gaps.at(-1)`, `gaps.reduce(…)`, `gaps.pop()`
     if (n.type === 'MemberExpression' && n.computed) return isSpanArray(n.object);
     if (n.type === 'CallExpression' && un(n.callee).type === 'MemberExpression' && !un(n.callee).computed && /^(?:at|reduce|pop|shift)$/.test(un(n.callee).property.name)) return isSpanArray(un(n.callee).object);
+    // `m.get(k)` of a Map of spans (`m.set(k, span)`)
+    if (n.type === 'CallExpression' && un(n.callee).type === 'MemberExpression' && !un(n.callee).computed && un(n.callee).property.name === 'get' && un(un(n.callee).object).type === 'Identifier') return spanMaps.has(un(un(n.callee).object).name);
     // span ÷ a number is a span; span ÷ span is a RATIO (dimensionless — relative to a control by construction)
     if (n.type === 'BinaryExpression' && n.operator === '/') return isSpan(n.left) && !isSpan(n.right);
     if (n.type === 'BinaryExpression' && n.operator === '*') return isSpan(n.left) || isSpan(n.right);
@@ -111,18 +145,13 @@ export function wallClockFindings(src) {
     if (!n) return false;
     if (isSpanExpr(n)) return true;
     if (n.type === 'Identifier') return spans.has(n.name);
-    if (n.type === 'MemberExpression' && !n.computed) return spanFields.has(n.property.name);
+    if (n.type === 'MemberExpression' && !n.computed) return spanFields.has(n.property.name) || (productFields.has(n.property.name) && fromCall(n.object));
     if ((n.type === 'CallExpression' || n.type === 'AwaitExpression') && n.type === 'AwaitExpression') return isSpan(n.argument);
     if (n.type === 'CallExpression' && un(n.callee).type === 'Identifier') return spanFns.has(un(n.callee).name);
     return false;
   };
   // a helper that RETURNS a span (`const timeIt = (fn) => { …; return best; }`, `msOf`) makes its calls spans
-  const returnsSpan = (f) => {
-    if (f.expression) return isSpan(f.body);
-    let hit = false;
-    visit(f.body, (m) => { if (!hit && m.type === 'ReturnStatement' && m.argument) { let o = m._p; while (o && !/Function/.test(o.type)) o = o._p; if (o === f && isSpan(m.argument)) hit = true; } });
-    return hit;
-  };
+  const returnsSpan = (f) => (f.expression ? isSpan(f.body) : (returnsOf.get(f) || []).some((a) => isSpan(a)));
   // the data flow, to a fixed point: marks (t0 = Date.now()), spans (ms = Date.now() - t0), span fields ({ ms: … })
   // an ARRAY of spans (`[span, …]`, `xs.map((x) => span)`): its .filter / .some / .every / .find / .forEach callbacks'
   // first parameter is a span (`times.filter((ms) => ms > 800)`)
@@ -137,12 +166,72 @@ export function wallClockFindings(src) {
     // a copy, a sort, a slice of one is one
     if (n.type === 'CallExpression' && un(n.callee).type === 'MemberExpression' && !un(n.callee).computed && /^(?:sort|toSorted|slice|filter|concat|reverse|toReversed)$/.test(un(n.callee).property.name)) return isSpanArray(un(n.callee).object);
     if (n.type === 'CallExpression' && un(n.callee).type === 'MemberExpression' && un(n.callee).property.name === 'map') { const cb = n.arguments[0]; return !!cb && /Function/.test(cb.type) && returnsSpan(cb); }
+    // a Map's values (`[...m.values()]`)
+    if (n.type === 'CallExpression' && un(n.callee).type === 'MemberExpression' && !un(n.callee).computed && un(n.callee).property.name === 'values' && un(un(n.callee).object).type === 'Identifier') return spanMaps.has(un(un(n.callee).object).name);
     return false;
   };
-  const sizeOf = () => marks.size + spans.size + spanFields.size + spanFns.size + spanArrays.size + spanArrayFields.size;
+  // a TUPLE that carries a span (`[n, msOf(fn)]`) and an array of them (`xs.map((x) => [x, span])`): the index set of
+  // the span elements — a destructured element there is a span (`.filter(([, ms]) => ms > B)`, `for (const [n, ms] of rows)`)
+  const tupleIdx = (n) => { n = un(n); const s = new Set(); if (n && n.type === 'ArrayExpression') n.elements.forEach((e, i) => { if (e && e.type !== 'SpreadElement' && isSpan(e)) s.add(i); }); return s; };
+  const returnedTuples = (f) => {
+    if (f.expression) return tupleIdx(f.body);
+    const s = new Set();
+    for (const a of returnsOf.get(f) || []) for (const i of tupleIdx(a)) s.add(i);
+    return s;
+  };
+  const tupleArrayIdx = (n) => {
+    n = un(n);
+    const s = new Set();
+    if (!n) return s;
+    if (n.type === 'Identifier') return tupleArrays.get(n.name) || s;
+    if (n.type === 'ArrayExpression') { for (const e of n.elements) if (e && e.type !== 'SpreadElement') for (const i of tupleIdx(e)) s.add(i); return s; }
+    if (n.type === 'CallExpression' && un(n.callee).type === 'MemberExpression' && !un(n.callee).computed) {
+      const m = un(n.callee).property.name;
+      if (/^(?:map|flatMap)$/.test(m) && fnOf(n.arguments[0])) return returnedTuples(n.arguments[0]);
+      if (/^(?:sort|toSorted|slice|filter|concat|reverse|toReversed)$/.test(m)) return tupleArrayIdx(un(n.callee).object);
+    }
+    return s;
+  };
+  const addTuples = (name, idx) => { if (!idx.size) return; const t = tupleArrays.get(name) || new Set(); for (const i of idx) t.add(i); tupleArrays.set(name, t); };
+  const spanAt = (pat, idx) => { if (pat && pat.type === 'ArrayPattern') pat.elements.forEach((e, i) => { const v = e && e.type === 'AssignmentPattern' ? e.left : e; if (v && v.type === 'Identifier' && idx.has(i)) spans.add(v.name); }); };
+  // the helpers by name — a span handed to one makes its parameter at that position a span
+  const fnDefs = new Map();
+  for (const n of all) {
+    if (n.type === 'FunctionDeclaration' && n.id) fnDefs.set(n.id.name, [...(fnDefs.get(n.id.name) || []), n]);
+    if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && fnOf(n.init)) fnDefs.set(n.id.name, [...(fnDefs.get(n.id.name) || []), n.init]);
+  }
+  const sizeOf = () => marks.size + spans.size + spanFields.size + spanFns.size + spanArrays.size + spanArrayFields.size + clockFns.size + spanMaps.size + [...tupleArrays.values()].reduce((a, t) => a + t.size, 0);
   for (let size = -1; size !== sizeOf();) {
     size = sizeOf();
     for (const n of all) {
+      if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && fnOf(n.init) && returnsClock(n.init)) clockFns.add(n.id.name);
+      if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && n.init && isCallResult(n.init)) callBound.add(n.id.name);
+      if (n.type === 'AssignmentExpression' && n.operator === '=' && un(n.left).type === 'Identifier' && isCallResult(n.right)) callBound.add(un(n.left).name);
+      if (n.type === 'FunctionDeclaration' && n.id && returnsClock(n)) clockFns.add(n.id.name);
+      if (n.type === 'AssignmentPattern' && n.left.type === 'Identifier' && fnOf(n.right) && returnsClock(n.right) && !injected.has(n.left.name)) clockFns.add(n.left.name);
+      // `m.set(k, span)`: a Map of spans; `s.add(span)`: a Set of them (an array, spread)
+      if (n.type === 'CallExpression' && un(n.callee).type === 'MemberExpression' && !un(n.callee).computed && un(un(n.callee).object).type === 'Identifier') {
+        const m = un(n.callee).property.name, o = un(un(n.callee).object).name;
+        if (m === 'set' && n.arguments.length === 2 && isSpan(n.arguments[1])) spanMaps.add(o);
+        if (m === 'add' && n.arguments.length === 1 && isSpan(n.arguments[0])) spanArrays.add(o);
+      }
+      // tuples: `const rows = xs.map((x) => [x, span])`, then their destructured span elements
+      if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && n.init) addTuples(n.id.name, tupleArrayIdx(n.init));
+      if (n.type === 'AssignmentExpression' && n.operator === '=' && un(n.left).type === 'Identifier') addTuples(un(n.left).name, tupleArrayIdx(n.right));
+      if (n.type === 'VariableDeclarator' && n.id.type === 'ArrayPattern' && n.init) spanAt(n.id, un(n.init).type === 'MemberExpression' && un(n.init).computed ? tupleArrayIdx(un(n.init).object) : tupleIdx(n.init));
+      if (n.type === 'CallExpression' && un(n.callee).type === 'MemberExpression' && !un(n.callee).computed && /^(?:filter|some|every|find|findIndex|findLast|forEach|map|flatMap)$/.test(un(n.callee).property.name) && fnOf(n.arguments[0])) spanAt(n.arguments[0].params[0], tupleArrayIdx(un(n.callee).object));
+      if (n.type === 'ForOfStatement' && n.left.type === 'VariableDeclaration' && n.left.declarations[0]) {
+        const id = n.left.declarations[0].id;
+        if (id.type === 'ArrayPattern') spanAt(id, tupleArrayIdx(n.right));
+        else if (id.type === 'Identifier' && isSpanArray(n.right)) spans.add(id.name);
+      }
+      // a span handed to a helper by name: `check(Date.now() - t0, 'x')` ⇒ check's parameter 0 is a span
+      if (n.type === 'CallExpression' && un(n.callee).type === 'Identifier' && fnDefs.has(un(n.callee).name)) {
+        n.arguments.forEach((a, i) => {
+          if (a.type === 'SpreadElement' || !isSpan(a)) return;
+          for (const f of fnDefs.get(un(n.callee).name)) { const p = f.params[i]; const v = p && p.type === 'AssignmentPattern' ? p.left : p; if (v && v.type === 'Identifier') spans.add(v.name); }
+        });
+      }
       if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && n.init && isSpanArray(n.init)) spanArrays.add(n.id.name);
       if (n.type === 'AssignmentExpression' && n.operator === '=' && un(n.left).type === 'Identifier' && isSpanArray(n.right)) spanArrays.add(un(n.left).name);
       // `const [s, ns] = process.hrtime(t0)`, `const [worst] = gaps.sort(…)`: each element of an array of spans
@@ -162,7 +251,13 @@ export function wallClockFindings(src) {
       if (n.type === 'Property' && !n.computed && n.key && n._p && n._p.type === 'ObjectPattern') {
         const k = n.key.type === 'Identifier' ? n.key.name : n.key.value;
         const v = n.value && n.value.type === 'AssignmentPattern' ? n.value.left : n.value;
-        if (typeof k === 'string' && v && v.type === 'Identifier') { if (spanFields.has(k)) spans.add(v.name); if (spanArrayFields.has(k)) spanArrays.add(v.name); }
+        if (typeof k === 'string' && v && v.type === 'Identifier') {
+          if (spanFields.has(k)) spans.add(v.name);
+          if (spanArrayFields.has(k)) spanArrays.add(v.name);
+          // `const { ms } = await probe()`: a product field off a call result
+          const decl = n._p._p;
+          if (productFields.has(k) && decl && decl.type === 'VariableDeclarator' && decl.id === n._p && isCallResult(decl.init)) spans.add(v.name);
+        }
       }
       if (n.type === 'CallExpression' && un(n.callee).type === 'MemberExpression' && /^(?:filter|some|every|find|findIndex|findLast|forEach)$/.test(un(n.callee).property.name) && isSpanArray(un(n.callee).object)) {
         const cb = n.arguments[0];
@@ -172,7 +267,7 @@ export function wallClockFindings(src) {
       if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && n.init && /Function/.test(n.init.type) && returnsSpan(n.init)) spanFns.add(n.id.name);
       const bind = (id, v) => {
         if (!v || !id || id.type !== 'Identifier') return;
-        if (isClockRead(v) || (un(v).type === 'Identifier' && marks.has(un(v).name))) marks.add(id.name);
+        if (isClock(v) || (un(v).type === 'Identifier' && marks.has(un(v).name))) marks.add(id.name);
         if (isSpan(v)) spans.add(id.name);
       };
       if (n.type === 'VariableDeclarator') bind(n.id, n.init);
@@ -187,6 +282,36 @@ export function wallClockFindings(src) {
       }
     }
   }
+  return { all, isSpan, spanFields };
+}
+
+/** the DURATION fields one product module fills with a wall-clock span — memoized per file, the seeded fields it
+ *  READS (`.fsMs`) and the injected clocks it defaults; one parse per file */
+const fieldMemo = new Map(), modMemo = new Map();
+function moduleSpanFields(file, src, seed, injected) {
+  if (!modMemo.has(file)) {
+    let ast = null;
+    try { ast = parse(src); } catch { /* unparseable: no fields */ }
+    modMemo.set(file, { ast, reads: new Set([...src.matchAll(/\.(\w+)\b/g)].map((m) => m[1]).filter((f) => DURATION_NAME.test(f))), defaults: [...src.matchAll(/\b(\w+)\s*=\s*\(\)\s*=>/g)].map((m) => m[1]) });
+  }
+  const m = modMemo.get(file);
+  if (!m.ast) return new Set();
+  const use = [...seed].filter((f) => m.reads.has(f)).sort(), inj = m.defaults.filter((n) => injected.has(n)).sort();
+  const key = `${file}\0${use.join(',')}\0${inj.join(',')}`;
+  if (!fieldMemo.has(key)) fieldMemo.set(key, new Set([...flow(src, { seed: use, injected: new Set(inj), ast: m.ast }).spanFields].filter((f) => DURATION_NAME.test(f))));
+  return fieldMemo.get(key);
+}
+
+/** PURE: every comparison of a measured wall-clock span in one suite's source, classified (see the header).
+ *  `fields` = the field names the product (or a child) fills with a span — productSpanFields() of the suite. */
+export function wallClockFindings(src, { fields = [], ast = null } = {}) {
+  // every span starts at a clock read IN THIS FILE or in a field the product / a child fills from its clock, so a
+  // source with neither has no finding — exact, and it spares the parse of most of the tier
+  if (!CLOCK_TEXT.test(src) && !CLOCK_FN_TEXT.test(src) && ![...fields].some((f) => new RegExp(`\\b${f}\\b`).test(src))) return [];
+  let all, isSpan;
+  try { ({ all, isSpan } = flow(src, { seed: fields, ast })); }
+  catch (e) { return [{ line: 0, kind: 'PARSE', text: e.message, boundMs: null }]; }
+  const text = (n) => src.slice(n.start, n.end).replace(/\s+/g, ' ');
   // a literal const = declared once with a numbers-only init; a MECHANISM const = one the suite also uses outside
   // a wall-clock bound and outside a message (a template literal) — it reaches the product or a fake
   const decl = new Map();
@@ -270,14 +395,76 @@ export function wallClockFindings(src) {
   return out;
 }
 
-/** every FAST row's suite file → its findings; `rows` = ci.mjs SUITES (or a planted list) */
-export function censusOver(rows, readSource = (name) => fs.readFileSync(path.join(REPO, 'scripts', name + '.mjs'), 'utf8')) {
+// THE PRODUCT'S CLOCK (lane wall-clock-ratchet-down, 2.369.271): a duration the PRODUCT measures and returns
+// (tls.js runChild's `ms: Date.now() - t0`, the fs canary's `{ fsMs, loopMs }`) or a CHILD prints (secret-probe.py's
+// `out['ms'] = … time.monotonic() - t`) is a span the suite never measured itself. The census reads the src modules
+// the suite names (a string `src/….js`) and the sibling files those name (`'fs-canary-worker.js'`), runs the same data
+// flow over each (a module's `now = () => Date.now()` default is its clock — unless the suite hands it a `now` of its
+// own), and seeds the suite's flow with the DURATION fields they fill from a clock (`ms`, `…Ms`: the house names a
+// duration by its unit; a string built from a span is no duration); a child script the suite names
+// (scripts/fixtures/*.py) or carries inline is read for python clock fields.
+const SRC_REF = /(['"`])(?:\.\.\/)?(src\/[\w./-]+?\.c?js)\1/g;
+const LOADS = /(?:\b(?:require|import)\s*\((?:\s*[\w.]+\s*\()*\s*(?:\w+\s*,\s*)?|\bfrom\s+|\.load\(\s*)$/;
+const SIB_REF = /(['"`])([\w.-]+\.c?js)\1/g;
+const CHILD_REF = /(['"`])(?:\.\.\/)?(scripts\/fixtures\/[\w./-]+?\.py)\1/g;
+const CHILD_FIELD = /\[\s*['"](\w+)['"]\s*\]\s*=[^\n]*\btime\.(?:monotonic|time|perf_counter)(?:_ns)?\(\)\s*-|['"](\w+)['"]\s*:[^\n]*\btime\.(?:monotonic|time|perf_counter)(?:_ns)?\(\)\s*-/g;
+export const DURATION_NAME = /^(?:ms|\w*Ms|\w*_ms)$/;
+const childFields = (text) => [...text.matchAll(CHILD_FIELD)].map((m) => m[1] || m[2]);
+const readMemo = new Map(), sibMemo = new Map();
+const siblingsOf = (rel, t) => { if (!sibMemo.has(rel)) sibMemo.set(rel, [...new Set([...t.matchAll(SIB_REF)].map((x) => path.posix.join(path.posix.dirname(rel), x[2])))]); return sibMemo.get(rel); };
+const readRepo = (rel) => { if (!readMemo.has(rel)) { let t = null; try { t = fs.readFileSync(path.join(REPO, rel), 'utf8'); } catch { /* none */ } readMemo.set(rel, t); } return readMemo.get(rel); };
+// the duration NAMES one source compares (`r.fsMs < 100`, `({ ms }) => ms > 800`) — off the AST, so a comment or a
+// message that quotes `ms < 100` names nothing
+const DURATION_CMP = /(?<![=<>])[<>]=?\s*[\w.?]*\b(?:ms|\w*Ms|\w*_ms)\b|\b(?:ms|\w*Ms|\w*_ms)\s*[<>]/;   // a cheap gate before the parse
+const comparedNames = (ast) => {
+  const out = new Set();
+  visit(ast, (n) => { if (n.type === 'BinaryExpression' && ['<', '<=', '>', '>='].includes(n.operator)) for (const x of [un(n.left), un(n.right)]) { const nm = x && (x.type === 'Identifier' ? x.name : x.type === 'MemberExpression' && !x.computed ? x.property.name : null); if (nm && DURATION_NAME.test(nm)) out.add(nm); } });
+  return out;
+};
+/** the clock-filled DURATION fields of what one suite loads; `readFile` = repo-relative path → text (or null) */
+export function productSpanFields(src, readFile = readRepo, ast = null) {
+  const fields = new Set(childFields(src));
+  for (const m of src.matchAll(CHILD_REF)) { const t = readFile(m[2]); if (t) for (const f of childFields(t)) fields.add(f); }
+  // only a module that names a duration the suite COMPARES can fill it (`r.fsMs < 100` ⇒ the modules naming fsMs)
+  let compared;
+  try { compared = comparedNames(ast || parse(src)); } catch { return fields; }
+  if (!compared.size) return fields;
+  // the clock parameters the suite hands the product (`now: () => clock`, `{ now }`): those defaults are not its clock
+  const injected = new Set([...src.matchAll(/\b(now|clock|nowMs)\s*[:,}]/g)].map((m) => m[1]));
+  const mods = new Map();
+  for (const m of src.matchAll(SRC_REF)) {
+    if (!LOADS.test(src.slice(Math.max(0, m.index - 80), m.index))) continue;
+    const rel = path.posix.normalize(m[2]);
+    if (mods.has(rel)) continue;
+    const t = readFile(rel);
+    mods.set(rel, t);
+    if (t) for (const c of siblingsOf(rel, t)) if (!mods.has(c)) { const ct = readFile(c); if (ct !== null) mods.set(c, ct); }
+  }
+  // …and FILLS it: `fsMs: …`, `r.fsMs = …`, `{ fsMs, loopMs }`
+  const alt = [...compared].join('|');
+  const fills = new RegExp(`\\b(?:${alt})\\s*:(?!:)|\\.(?:${alt})\\s*=(?!=)|[{,]\\s*(?:${alt})\\s*(?=[,}])`);
+  const clocked = [...mods].filter(([, t]) => t && fills.test(t) && CLOCK_TEXT.test(t));
+  // to a fixed point: a module that READS a field another fills (`r.fsMs` from the worker) is read again, seeded
+  for (let size = -1; size !== fields.size;) {
+    size = fields.size;
+    for (const [rel, t] of clocked) for (const f of moduleSpanFields(rel, t, fields, injected)) fields.add(f);
+  }
+  return fields;
+}
+
+/** every FAST row's suite file → its findings; `rows` = ci.mjs SUITES (or a planted list); `readFile` reads the
+ *  product modules / child scripts a suite names (repo-relative) */
+export function censusOver(rows, readSource = (name) => fs.readFileSync(path.join(REPO, 'scripts', name + '.mjs'), 'utf8'), readFile = undefined) {
   const suites = [];
   for (const r of rows) {
     if (r.tier !== 'fast') continue;
     let src;
     try { src = readSource(r.name); } catch { continue; }
-    suites.push({ name: r.name, findings: wallClockFindings(src) });
+    // one parse per suite, shared by the product read and the flow (a suite with no clock and no duration name skips both)
+    let ast = null;
+    if (CLOCK_TEXT.test(src) || CLOCK_FN_TEXT.test(src) || DURATION_CMP.test(src)) { try { ast = parse(src); } catch (e) { suites.push({ name: r.name, findings: [{ line: 0, kind: 'PARSE', text: e.message, boundMs: null }] }); continue; } }
+    const fields = ast ? productSpanFields(src, readFile, ast) : [];
+    suites.push({ name: r.name, findings: ast ? wallClockFindings(src, { fields, ast }) : [] });
   }
   return suites;
 }

@@ -27,6 +27,7 @@ import { openResetCreditDialog } from './reset-credit-dialog.js'; // THE one res
 import { showReauthAccountDialog } from './channel-account-dialogs.js'; // lane channel-names-readable: a `channel-reauth` item's verb = THE account's Re-authorize dialog
 import { askArtifactRow, askArtifactProbe, linkTarget } from './foryou-links.js'; // PURE (lane foryou-attachments): an ask's chip → its artifact row + the open-time probe; a link in the words → its target
 import { clearRecords, isCleared, clearedText } from './record-clear-ui.js'; // "Clear content…" (2026-09-28): THE confirm dialog + request path; a cleared item's words
+import { titleWords } from '../channel-api-card.js'; // PURE (lane card-grammar-exceptions): a raw-API proposal's item says its card's title
 
 /** The badge's tiers — ONE spelling shared by the taskbar / nav button, the
  *  popup's Inbox tab and the window's Actions tab (B-328d: "same words as the badge"). */
@@ -69,7 +70,9 @@ export function inboxModel(app) {
   // (an agent's ask). The English `text` stays the store's dedupe key.
   // A CLEARED item (clearedAt — "Clear content…", 2026-09-28) reads the cleared sentence in this
   // device's language and has no detail: the store dropped its words, its i18n and its detail
-  const wordsOf = (i) => (isCleared(i) ? clearedText() : i && i.i18n && i.i18n.text ? t(i.i18n.text.key, i.i18n.text.params || {}) : (i && i.text) || '');
+  // card grammar (lane card-grammar-exceptions): a raw-API proposal says its CARD's title (`card.head`, the words the
+  // chat card and the Outbox row say — never the raw path), worded here like the card does
+  const wordsOf = (i) => (isCleared(i) ? clearedText() : i && i.card && i.card.kind === 'api-call' && i.card.head ? titleWords(i.card.head, { t, lang: resolveLang() }) : i && i.i18n && i.i18n.text ? t(i.i18n.text.key, i.i18n.text.params || {}) : (i && i.text) || '');
   const detailOf = (i) => (isCleared(i) ? '' : i && i.i18n && Array.isArray(i.i18n.detail) && i.i18n.detail.length ? i.i18n.detail.map((l) => t(l.key, l.params || {})).join('\n') : (i && i.detail) || '');
   const nameFor = (key, items) => {
     const s = sessionFor(key);

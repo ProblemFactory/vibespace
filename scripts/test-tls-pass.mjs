@@ -53,7 +53,9 @@ try {
     const r = await held(TLS.runChild);
     ok(r.code === 0 && JSON.parse(r.out).Self.DNSName === DNS + '.' && r.ms >= 700, `the answer survives a 700 ms hold over a 200 ms bound (code ${r.code}, ${r.out.length} bytes, ${r.ms} ms)`);
     const t = await TLS.runChild(stub, ['status', '--json'], 50000);
-    ok(t.code === 0 && t.ms < 5000, `a free loop: ${t.ms} ms`);
+    // (lane wall-clock-ratchet-down: the old `t.ms < 5000` judged the machine — the free loop's answer is the child's
+    // own exit 0 and its whole status; the ms are information)
+    ok(t.code === 0 && JSON.parse(t.out).Self.DNSName === DNS + '.', `a free loop: ${t.ms} ms`);
     // CONTROL: the base runChild (execFile's own timeout) — the same hold throws the answer away
     const base = path.join(dir, 'base'); fs.mkdirSync(path.join(base, 'server'), { recursive: true });
     let baseSrc = null;

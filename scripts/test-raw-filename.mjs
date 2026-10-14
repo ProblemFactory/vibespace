@@ -354,7 +354,9 @@ try {
     for (const g of FIXTURES) {
       const r = await get(srv.base, '/api/download', path.join(DIR, g.name), { host });
       const fb = formsOf(r.cd).ascii;
-      ok(attachOk(r, g.star, (x) => x.equals(g.bytes)) && fb === g.ascii && r.ms < 5000, `remote (${label}) /api/download ${JSON.stringify(g.name)}: answered 200, attachment; filename="${g.ascii}"; filename*= the name, the bytes`, { status: r.status, cd: r.cd, ms: r.ms });
+      // (lane wall-clock-ratchet-down: the old `r.ms < 5000` judged the machine — the 200 with every byte IS the answer;
+      // a hang reads `no answer` at the helper's cut; the ms are information)
+      ok(attachOk(r, g.star, (x) => x.equals(g.bytes)) && fb === g.ascii, `remote (${label}) /api/download ${JSON.stringify(g.name)}: answered 200, attachment; filename="${g.ascii}"; filename*= the name, the bytes`, { status: r.status, cd: r.cd, ms: r.ms });
     }
     const z = await get(srv.base, '/api/download-zip', ZIPDIR, { host });
     ok(attachOk(z, '报告 2026.zip', isZip('报告 2026/说明.txt')) && formsOf(z.cd).ascii === '__ 2026.zip', `remote (${label}) /api/download-zip "报告 2026": answered 200, attachment; filename="__ 2026.zip"; filename*="报告 2026.zip", a real zip`, { status: z.status, cd: z.cd, bytes: z.body.length });
@@ -384,7 +386,9 @@ try {
       'control: the pre-r2 attachment spelling over files.js WITHOUT the belt ⇒ the CJK remote Download (ssh + dial) and Download as Zip are NEVER ANSWERED, each an unhandled ERR_INVALID_CHAR — userW\'s hang, reproduced', { h1: h1.status, h2: h2.status, h3: h3.status, thrown });
     const b1 = await get(preBeltSsh.base, '/api/download', path.join(DIR, g.name), { host: 'box', timeoutMs: 2000 });
     const b2 = await get(preBeltSsh.base, '/api/download-zip', ZIPDIR, { host: 'box', timeoutMs: 2000 });
-    ok(b1.status === 502 && b2.status === 502 && b1.cd === null && b1.ms < 1000 && !attachOk(b1, g.star, () => true),
+    // (lane wall-clock-ratchet-down: the old `b1.ms < 1000` judged the machine — a 502 is an ANSWER, where the copies
+    // above read `no answer` at the same 2 s cut)
+    ok(b1.status === 502 && b2.status === 502 && b1.cd === null && !attachOk(b1, g.star, () => true),
       'control: …the same copy over the REAL files.js ⇒ answered at once (502, no name) by the remoteStream belt — and still red: the belt makes a throw an answer, the both-form spelling makes the download work', { b1: [b1.status, b1.cd, b1.ms], b2: [b2.status, b2.cd] });
     const a1 = await get(preHangSsh.base, '/api/download', path.join(DIR, FIXTURES[0].name), { host: 'box', timeoutMs: 2000 });
     ok(a1.status === 200 && a1.cd === 'attachment; filename="photo.png"', 'control sanity: the pre-r2 copy still downloads an ASCII name (only a name above U+00FF threw)', [a1.status, a1.cd]);

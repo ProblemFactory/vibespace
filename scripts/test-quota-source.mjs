@@ -365,7 +365,9 @@ const cxSess = mkCodex('w-cx', 'cxs-1', (m, s) => {
   const silent = mkCodex('w-cx2', 'cxs-2', null); // app-server never answers
   const t0 = Date.now();
   const r = await eng.probeQuotaForKey('cxs-2', { session: silent, timeoutMs: 60 });
-  ok('an unanswered rateLimits/read times out honestly (bounded wait, waiter dropped)', r.ok === false && /no rate_limits_updated within 60ms/.test(r.reason) && Date.now() - t0 < 2000 && (silent._codexLimitsWaiters || []).length === 0, r);
+  // the bound's own word (lane wall-clock-ratchet-down: `< 2000 ms` judged the machine): the 60 ms timer answered and
+  // dropped its waiter; the ms are information
+  ok(`an unanswered rateLimits/read times out honestly (bounded wait, waiter dropped — ${Date.now() - t0} ms)`, r.ok === false && /no rate_limits_updated within 60ms/.test(r.reason) && (silent._codexLimitsWaiters || []).length === 0, r);
   const failing = mkCodex('w-cx3', 'cxs-3', (m, s) => { if (m.type === 'codex-read-limits') setTimeout(() => eng.recordCodexQuotaSignal(s, { type: 'rate_limits_updated', error: 'app-server: request timed out', onDemand: true }), 5); });
   const r2 = await eng.probeQuotaForKey('cxs-3', { session: failing });
   ok('a FAILED on-demand read settles the probe with the wrapper\'s error (never hangs to the timeout)', r2.ok === false && /request timed out/.test(r2.reason), r2);

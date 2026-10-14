@@ -4,8 +4,8 @@
  * docs/design-agent-browser-v2.md §6.2.1 (verify S2 r4, 2026-09-26).
  *
  * Every method the installed Chrome's own protocol lists (scripts/fixtures/cdp-protocol-<version>/ — the pinned
- * GET /json/protocol; 58 domains, 664 methods on 153.0.8010.47, 661 on 154.0.8037.57 — 4 added, 7 removed, see
- * CENSUS_CHROMES below) has ONE row here, classed by what it can do to the
+ * GET /json/protocol; 58 domains, 664 methods on 153.0.8010.47, 661 on 154.0.8037.57 — 4 added, 7 removed —, 664 on
+ * 155.0.8059.39 — 3 added; see CENSUS_CHROMES below) has ONE row here, classed by what it can do to the
  * tab the user is driving through the live view. Three verify rounds (r1 CRITICAL, r2 MAJOR, r3 MEDIUM ×2) each found
  * the takeover fence ONE METHOD SHORT because the fence was a hand-written LIST (Input.* + a navigation family, then
  * + setIgnoreInputEvents, then + DOM.focus): a list names what somebody thought of; a census names what the vendor
@@ -22,7 +22,8 @@
  *                  close / activate / open a window), the page (navigate / reload / stop / history / document / dialogs),
  *                  the viewport / scale / screen / emulated media / vision / dark mode / scrollbars, a frozen page
  *                  (Debugger pause + breakpoints, virtual time, script execution off, lifecycle state, throttling),
- *                  overlays painted on the page, casting — refused (browser_interrupted)
+ *                  overlays painted on the page (since Chrome 155 a forced spelling / grammar squiggle on its text),
+ *                  casting — refused (browser_interrupted)
  *   page-mutation  changes the page's CONTENT, its SCRIPT environment, or the STATE it reads: script evaluation, DOM /
  *                  CSS / animation edits, cookies / storage / cache / permissions / service workers / WebAuthn /
  *                  request interception / headers / UA / geolocation / timezone / sensor overrides — refused
@@ -62,7 +63,8 @@
  * its class whatever Chrome is installed (a row outliving its method costs nothing — the browser answers -32601), and
  * a method with no row is refused by name while the user drives on EVERY version — an older Chrome than the census
  * (the fleet's Debian chromium 150: measured 149–152 list 6–12 methods no row names, none a whole-browser act) and a
- * newer one alike.
+ * newer one alike. Chrome 155.0.8059.39 is the third (lane mediation-chrome-155, 2026-10-14: the Actions runner's
+ * ubuntu-latest image moved to it and the mirror's heavy leg went red on its 3 new DOM methods — +3, −0).
  *
  * The gates: test-cdp-census (fast — every censused fixture ⇔ the table, the version marks ⇔ the fixtures' diff, the
  * rows' own words; patched-copy controls) + test-browser-mediation ⑥ (every row's verdicts; the unknown rule; controls)
@@ -73,11 +75,13 @@
 const SINCE = '2026-09-26';
 /** The Chromes whose protocols this table was censused against, OLDEST FIRST — each has its names-only fixture
  *  scripts/fixtures/cdp-protocol-<version>/protocol.json (scripts/cdp-protocol-fetch.mjs writes it). */
-const CENSUS_CHROMES = Object.freeze(['153.0.8010.47', '154.0.8037.57']);
+const CENSUS_CHROMES = Object.freeze(['153.0.8010.47', '154.0.8037.57', '155.0.8059.39']);
 /** The NEWEST censused Chrome (the refusal words name every censused one). */
 const CENSUS_CHROME = CENSUS_CHROMES[CENSUS_CHROMES.length - 1];
 /** The Chrome of the 2026-09-28 census step (the rows it added carry `chrome`, the rows it removed `until`). */
 const C154 = '154.0.8037.57';
+/** The Chrome of the 2026-10-14 census step (the 3 rows it added carry `chrome`; it removed none). */
+const C155 = '155.0.8059.39';
 const CLASSES = Object.freeze(['input', 'view', 'page-mutation', 'read', 'session', 'harmless', 'refused']);
 /** What the paused fence does with a class: 'refuse' (input / view / page-mutation — the owner's ruling of 2026-09-27;
  *  the r4 'switch' rule and its setting are retired), 'allow' (read / session / harmless); 'refused' rows never reach the fence. */
@@ -162,6 +166,13 @@ const ROWS = Object.freeze({
     setNodeName: 'page-mutation', setNodeValue: 'page-mutation', setOuterHTML: 'page-mutation', undo: 'page-mutation', getFrameOwner: 'read',
     getContainerForNode: 'read', getQueryingDescendantsForContainer: 'read', getAnchorElement: 'read', forceShowPopover: 'page-mutation',
     forceShowInterest: 'page-mutation',
+    // Chrome 155 (lane mediation-chrome-155, 2026-10-14). All three MEASURED on 155.0.8059.39 (Chrome for Testing, a
+    // scratch headless Chrome, a data: page logging every input / selection / focus / context-menu event and every DOM
+    // mutation, the marked text's picture read as a PNG clip): a marker changes the PICTURE only; it belongs to the
+    // DevTools session that set it.
+    setTextMarker: { cls: 'view', since: '2026-10-14', chrome: C155, why: "paints a spelling or grammar squiggle under a range of the page's text or of a text field's value — measured on Chrome 155.0.8059.39: the picture changes and the page sees nothing (no event, no DOM mutation, the value unchanged), so it changes what the user is LOOKING AT, like an overlay painted on the page" },
+    clearTextMarkers: { cls: 'harmless', since: '2026-10-14', chrome: C155, why: "removes only the markers THIS DevTools session set — measured on Chrome 155.0.8059.39: another session or connection on the same tab cannot clear them, the picture returns byte-identical, and DOM.disable (harmless) or the session's end removes them too — a release" },
+    getImplicitAnchorCandidates: { cls: 'read', since: '2026-10-14', chrome: C155, why: "lists the elements that can open a popover — measured on Chrome 155.0.8059.39: the popover's button, 'Node is not a popover' otherwise; the popover stays closed and nothing on the page moves" },
   },
   DOMDebugger: {
     getEventListeners: 'read', removeDOMBreakpoint: 'harmless', removeEventListenerBreakpoint: 'harmless', removeInstrumentationBreakpoint: 'harmless',

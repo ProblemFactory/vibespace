@@ -233,7 +233,9 @@ console.log('\n§2 tier hygiene');
 // measured span (wait / lower / guard / control / LITERAL): a LITERAL upper bound under 1 s is RED; one of ≥ 1 s is held
 // only by the per-suite ratchet scripts/fixtures/wall-clock-baseline.json, which only falls. A cost claim is a census of
 // the work or a ratio against a control in the same run (scripts/cost-ratio.mjs — CPU time); a wait is the mechanism's
-// constant or the evidence it ended for its reason.
+// constant or the evidence it ended for its reason. Lane wall-clock-ratchet-down (2.369.271): THE RATCHET IS AT 0 — the
+// 30 held bounds became evidence / stamps read between two marks / relative bounds, and the census also reads a span
+// the PRODUCT (or a child script) measured and returned, through a tuple, a helper's parameter, a Map / Set.
 console.log('\n§2e no fast suite asserts a wall-clock bound on its own run');
 {
   const WC = await import('./wall-clock-census.mjs');
@@ -248,6 +250,7 @@ console.log('\n§2e no fast suite asserts a wall-clock bound on its own run');
   const nFast = SUITES.filter((r) => r.tier === 'fast').length;
   ok(suites.length === nFast && nFast > 300, `the census read every fast suite (${suites.length} of ${nFast})`);
   ok(!v.problems.length, `no literal wall-clock bound under ${WC.LITERAL_FLOOR_MS} ms in a fast suite; the ≥ ${WC.LITERAL_FLOOR_MS} ms ones are the ratchet's (${held.length} in ${Object.keys(baseline).length} suites, only falling)${v.problems.length ? ' — ' + v.problems.join(' | ') : ''}`);
+  ok(!held.length && !Object.keys(baseline).length, `THE RATCHET IS AT 0 (lane wall-clock-ratchet-down): no literal wall-clock bound held in any fast suite, the baseline empty — the next one is a NEW one, RED (${held.length} held, ${Object.keys(baseline).length} baseline rows)`);
   // PLANTS: every spelling of the class is LITERAL; every legitimate form is classified out of it
   const kinds = (src) => WC.wallClockFindings(src).map((f) => f.kind).join(',');
   const RED = {
@@ -268,6 +271,13 @@ console.log('\n§2e no fast suite asserts a wall-clock bound on its own run');
     'an element of a sorted span array': "const ms = []; for (const x of xs) { const t = Date.now(); run(x); ms.push(Date.now() - t); } ms.sort((a, b) => a - b); ok(ms[ms.length - 1] < 300);",
     'a destructured span field': "const timed = () => { const t = Date.now(); run(); return { ms: Date.now() - t }; }; const { ms } = timed(); ok(ms < 200);",
     "process.hrtime(t0)'s [s, ns]": "const t = process.hrtime(); run(); const [s, ns] = process.hrtime(t); ok(s * 1e3 + ns / 1e6 < 100);",
+    // lane wall-clock-ratchet-down (.271): the BLIND spellings the census header named
+    'a span inside a tuple (`[n, msOf(fn)]`)': "const msOf = (fn) => { const t = performance.now(); fn(); return performance.now() - t; }; const rows = fns.map((fn) => [fn.name, msOf(fn)]); ok(!rows.filter(([, ms]) => ms > 800).length);",
+    "a span handed to a helper's parameter": "const fast = (ms, what) => ok(ms < 500, what); const t = Date.now(); run(); fast(Date.now() - t, 'run');",
+    'a span in a Map (`m.set(k, span)`, `m.get(k)`)': "const by = new Map(); const t = Date.now(); run(); by.set('run', Date.now() - t); ok(by.get('run') < 300);",
+    'a span in a Set, spread': "const s = new Set(); const t = Date.now(); run(); s.add(Date.now() - t); ok(Math.max(...s) < 300);",
+    'a clock function (`const now = () => Date.now()`)': "const now = () => Date.now(); const t0 = now(); run(); ok(now() - t0 < 300);",
+    'a for-of over an array of spans': "const times = []; for (const x of xs) { const t = Date.now(); run(x); times.push(Date.now() - t); } for (const ms of times) ok(ms < 300);",
   };
   const OUT = {
     wait: ["const t0 = Date.now(); while (Date.now() - t0 < 5000 && !done()) await sleep(50);", 'wait'],
@@ -285,17 +295,57 @@ console.log('\n§2e no fast suite asserts a wall-clock bound on its own run');
   ok(!outWrong.length, `PLANTS: ${Object.keys(OUT).length} legitimate forms are classified out of it (wait / lower / control / guard)${outWrong.length ? ' — WRONG: ' + outWrong.join(' | ') : ''}`);
   ok(kinds("const t = performance.now(); a(); const x = performance.now() - t; const u = performance.now(); b(); const y = performance.now() - u; ok(y / x <= 2.5);") === '', 'a RATIO of two spans is dimensionless — no finding (relative by construction)');
   ok(kinds("const t0 = performance.now(); await sweep(); const took = performance.now() - t0; const until = performance.now() + took; while (performance.now() < until) await tick();") === '', 'a mark plus a span is a DEADLINE (a control loop as long as the sweep), not a span — no finding');
-  // THE RATCHET: a new literal bound in a held suite, a sub-second one anywhere, a baseline above the truth, a name
-  // that is no fast suite — each RED
-  const plantSuite = (name, src) => [...suites.filter((x) => x.name !== name), { name, findings: WC.wallClockFindings(src) }];
-  const someHeld = Object.keys(baseline)[0];
-  const heldSrc = fs.readFileSync(path.join(REPO, 'scripts', someHeld + '.mjs'), 'utf-8');
-  const pNew = WC.ratchetVerdict(plantSuite(someHeld, heldSrc + "\nconst tP = Date.now(); ok(Date.now() - tP < 4000, 'planted');\n"), baseline).problems;
-  const pSub = WC.ratchetVerdict(plantSuite('test-lazy', fs.readFileSync(path.join(REPO, 'scripts', 'test-lazy.mjs'), 'utf-8') + "\nconst tP = Date.now(); ok(Date.now() - tP < 200, 'planted');\n"), baseline).problems;
-  const pHigh = WC.ratchetVerdict(suites, { ...baseline, [someHeld]: baseline[someHeld] + 1 }).problems;
+  // THE PRODUCT'S CLOCK (lane wall-clock-ratchet-down): a duration the product module the suite LOADS fills from a clock
+  // (`ms: Date.now() - t0`, `{ fsMs, loopMs }` off a worker), or a child script prints (python `time.monotonic()`), is a
+  // span on what the suite got back from a call — and only there: a module the suite hands its own `now`, an object the
+  // suite built itself (a fake timer's `{ fn, ms }`), a module it reads as TEXT for a pin, are no source
+  const MODS = {
+    'src/server/tls.js': "function runChild(cmd) { const t0 = Date.now(); return new Promise((r) => r({ code: 0, ms: Date.now() - t0 })); } module.exports = { runChild };",
+    'src/server/canary.js': "function create({ now = () => Date.now() } = {}) { return { async tick() { const sentAt = now(); const r = await post(); const gotAt = now(); const fsMs = Math.max(0, r.fsMs); const loopMs = gotAt - r.doneAt; return { fsMs, loopMs }; } }; } const w = 'canary-worker.js';",
+    'src/server/canary-worker.js': "const startAt = Date.now(); const doneAt = Date.now(); post({ startAt, doneAt, fsMs: doneAt - startAt });",
+    'scripts/fixtures/probe.py': "t = time.monotonic()\nout['ms'] = round((time.monotonic() - t) * 1000)\n",
+  };
+  const readPlant = (rel) => (rel in MODS ? MODS[rel] : null);
+  const pkinds = (src) => WC.wallClockFindings(src, { fields: WC.productSpanFields(src, readPlant) }).map((f) => f.kind).join(',');
+  const PRED = {
+    "a product-returned field (tls.js runChild's `ms`)": "const TLS = require('../src/server/tls.js'); const t = await TLS.runChild('x'); ok(t.code === 0 && t.ms < 5000);",
+    "a product field forwarded off its worker (the canary's `fsMs`)": "const C = require(path.join(REPO, 'src/server/canary.js')); const r = await C.create().tick(); ok(r.fsMs < 100);",
+    "the product's own clock default (`now = () => Date.now()`)": "const C = require(path.join(REPO, 'src/server/canary.js')); const r = await C.create().tick(); ok(r.loopMs < 100);",
+    "a child's JSON (secret-probe.py's `ms`)": "const PROBE = path.join(ROOT, 'scripts/fixtures/probe.py'); const r = JSON.parse(spawnSync('python3', [PROBE]).stdout); ok(r.ms < 3000);",
+  };
+  const POUT = {
+    'a module the suite hands its own clock': "const C = require(path.join(REPO, 'src/server/canary.js')); let clock = 0; const r = await C.create({ now: () => clock }).tick(); ok(r.loopMs < 100);",
+    "the suite's own object with the field's name (a fake timer)": "const TLS = require('../src/server/tls.js'); const caught = []; global.setTimeout = (fn, ms) => { caught.push({ fn, ms }); }; const t = await TLS.runChild('x'); ok(caught.filter((c) => c.ms > 60e3).length === 0);",
+    'a module read as TEXT for a pin': "const src = read('src/server/tls.js'); const t = parse(src); ok(t.ms < 5000);",
+  };
+  const pWrong = Object.entries(PRED).filter(([, src]) => pkinds(src) !== 'LITERAL').map(([n, src]) => `${n} → ${pkinds(src) || 'not seen'}`);
+  const poWrong = Object.entries(POUT).filter(([, src]) => pkinds(src) !== '').map(([n, src]) => `${n} → ${pkinds(src)}`);
+  ok(!pWrong.length, `PLANTS: ${Object.keys(PRED).length} durations the PRODUCT or a child measured are each LITERAL${pWrong.length ? ' — WRONG: ' + pWrong.join(' | ') : ''}`);
+  ok(!poWrong.length, `PLANTS: ${Object.keys(POUT).length} look-alikes are no finding (the suite's own clock handed in, its own fake-timer object, a module read as text)${poWrong.length ? ' — WRONG: ' + poWrong.join(' | ') : ''}`);
+  // THE RATCHET AT 0: a ≥ 1 s literal bound anywhere is a NEW one, a sub-second one is RED by the floor, a baseline
+  // above the truth and a baseline name that is no fast suite say "lower it" — each RED
+  const plantSuite = (name, src) => [...suites.filter((x) => x.name !== name), { name, findings: WC.wallClockFindings(src, { fields: WC.productSpanFields(src) }) }];
+  const lazySrc = fs.readFileSync(path.join(REPO, 'scripts', 'test-lazy.mjs'), 'utf-8');
+  const pNew = WC.ratchetVerdict(plantSuite('test-lazy', lazySrc + "\nconst tP = Date.now(); ok(Date.now() - tP < 4000, 'planted');\n"), baseline).problems;
+  const pSub = WC.ratchetVerdict(plantSuite('test-lazy', lazySrc + "\nconst tP = Date.now(); ok(Date.now() - tP < 200, 'planted');\n"), baseline).problems;
+  const pHigh = WC.ratchetVerdict(suites, { ...baseline, 'test-lazy': 1 }).problems;
   const pGone = WC.ratchetVerdict(suites, { ...baseline, 'test-no-such-suite': 1 }).problems;
-  ok(pNew.some((p) => p.startsWith(someHeld) && /a NEW one/.test(p)) && pSub.some((p) => /test-lazy:\d+ asserts .* under 1000 ms/.test(p)) && pHigh.some((p) => p.startsWith(someHeld) && /lower it/.test(p)) && pGone.some((p) => /test-no-such-suite/.test(p)),
-    `CONTROLS: a 4 s bound planted in ${someHeld} is a NEW one, a 200 ms one in test-lazy is RED by the floor, a baseline above the truth and a baseline name that is no fast suite say "lower it" — all RED`);
+  ok(pNew.some((p) => p.startsWith('test-lazy') && /a NEW one/.test(p)) && pSub.some((p) => /test-lazy:\d+ asserts .* under 1000 ms/.test(p)) && pHigh.some((p) => p.startsWith('test-lazy') && /lower it/.test(p)) && pGone.some((p) => /test-no-such-suite/.test(p)),
+    'CONTROLS: a 4 s bound planted in test-lazy is a NEW one, a 200 ms one is RED by the floor, a baseline above the truth and a baseline name that is no fast suite say "lower it" — all RED');
+  // THE 30 THEMSELVES: rel270's copy of every suite the ratchet held reads RED against today's empty baseline (a
+  // depth-1 checkout has no 25cd69aef: SKIP, said) — and its fs-canary / tls-pass / app-display-secrets (the product's
+  // clock, unseen before) read RED with them
+  const HELD270 = ['test-agentd-upgrade-loop', 'test-app-display-secrets', 'test-app-display-session-census', 'test-app-manifest', 'test-auto-resume', 'test-boot-phase', 'test-browser-disk', 'test-browser-display', 'test-browser-passkey', 'test-ci-gate', 'test-codex-0153', 'test-codex-pool', 'test-design-routes', 'test-dial-link-kept', 'test-egress-fence', 'test-key-file-law', 'test-mount-argv', 'test-notify-retry', 'test-opencode-serve', 'test-parked-ask-inbox', 'test-quota-source', 'test-raw-filename', 'test-usage-index-owner', 'test-vfs-cache-place', 'test-window-binding-model'];
+  let rel270 = null;
+  try { rel270 = Object.fromEntries([...HELD270, 'test-fs-canary', 'test-tls-pass'].map((n) => [n, git(REPO, ['show', `25cd69aef:scripts/${n}.mjs`])])); } catch { rel270 = null; }
+  if (rel270 === null) console.log('    SKIP: 25cd69aef is not in this checkout (a depth-1 clone) — the ratchet-at-0 control needs rel270');
+  else {
+    const red = (n) => WC.ratchetVerdict(plantSuite(n, rel270[n]), baseline).problems.filter((p) => p.startsWith(n));
+    const notRed = HELD270.filter((n) => !red(n).some((p) => /a NEW one/.test(p)));
+    const canary = red('test-fs-canary'), tls = red('test-tls-pass');
+    ok(!notRed.length && canary.length === 4 && canary.every((p) => /r\.(?:fs|loop)Ms < \d+/.test(p)) && tls.some((p) => /t\.ms < 5000/.test(p)),
+      `CONTROL: rel270's copies read RED here — every one of the ${HELD270.length} suites the ratchet held (a NEW one each), test-fs-canary's 4 bounds on the canary's own fsMs / loopMs, test-tls-pass's \`t.ms < 5000\`${notRed.length ? ' — NOT RED: ' + notRed.join(', ') : ''} (${canary.length} + ${tls.length})`);
+  }
   // THE INCIDENT ITSELF: rel269's test-enter-census reads RED here (a depth-1 checkout has no d419156bd: SKIP, said)
   let rel269 = null;
   try { rel269 = git(REPO, ['show', 'd419156bd:scripts/test-enter-census.mjs']); } catch { rel269 = null; }
@@ -1125,7 +1175,9 @@ console.log('\n§6 machine-global fixtures + no-verdict honesty');
       { cwd: REPO, encoding: 'utf-8', env: GIT_ENV, timeout: 120000 });
     const rout = (refused.stdout || '') + (refused.stderr || '');
     ok(refused.status === 2 && /REFUSED/.test(rout), `a dirty in-place heavy run is REFUSED (exit ${refused.status})`);
-    ok(Date.now() - t0 < 15000, `…UP FRONT, before the build and the suites (${Date.now() - t0}ms — the whole point)`);
+    // UP FRONT is the run's FIRST word (lane wall-clock-ratchet-down: `< 15000 ms` judged the machine): nothing precedes
+    // the refusal in its output — no build, no suite line; the ms are information
+    ok(rout.trim().startsWith('[ci:heavy] REFUSED'), `…UP FRONT, before the build and the suites — the refusal is the first line it says (${Date.now() - t0}ms — the whole point)`);
     ok(!/npm run build/.test(rout), '…so it does not spend a build first');
     ok(/--isolate|ci:heavy/.test(rout), '…and the refusal names the way to get a real verdict');
     ok(!fs.readdirSync(mdir).length, '…and writes no marker');

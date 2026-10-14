@@ -789,8 +789,12 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
     const { w } = run();
     ok('R14d the default switch leaves out the conversation whose restart is in flight — ONE request, cx2 only', w.current() === w.B && w.sentWs.length === 1 && JSON.stringify(w.sentWs[0].affected.map((x) => x.serverId)) === '["cx2"]', JSON.stringify(w.sentWs.map((x) => x.affected.map((y) => y.serverId))));
     const s3 = w.mk(3);
+    // "stamped" = by THIS claim (lane wall-clock-ratchet-down: `< 5000` of the wall judged the machine): the stamp lies
+    // between the instants before and after the call (cx3 held none before)
+    const tClaim = Date.now();
     const claimed = w.eng.claimColdRestarts([{ serverId: 'cx1' }, { serverId: 'cx2' }, { serverId: 'cx3' }]);
-    ok('R14d the manual routes\' claim: the two just asked are left out, a fresh one is handed over AND stamped', JSON.stringify(claimed.map((x) => x.serverId)) === '["cx3"]' && Date.now() - s3._heldRestartAskedAt < 5000, JSON.stringify(claimed));
+    const tClaimed = Date.now();
+    ok('R14d the manual routes\' claim: the two just asked are left out, a fresh one is handed over AND stamped', JSON.stringify(claimed.map((x) => x.serverId)) === '["cx3"]' && s3._heldRestartAskedAt >= tClaim && s3._heldRestartAskedAt <= tClaimed, JSON.stringify(claimed));
     const pre = patchedEngine('noInFlightFilter', [['  const fresh = all.filter((t) => !restartInFlight(activeSessions.get(t.serverId), now));\n', '  const fresh = all;\n']]);
     ok('R14d NEGATIVE CONTROL: the patch hit the product source', !!pre);
     if (pre) { const c = run(pre); ok('R14d NEGATIVE CONTROL: without the filter the switch re-names the in-flight conversation — the leg sees it', c.w.sentWs.length === 1 && c.w.sentWs[0].affected.some((x) => x.serverId === 'cx1')); }

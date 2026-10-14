@@ -335,7 +335,9 @@ console.log('— ⑤ thread/read fallback for a thread with NO rollout (0.153 pa
   fs.writeFileSync(dead, `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} -e "setInterval(()=>{},1e3)"\n`, { mode: 0o755 });
   const t0 = Date.now();
   const err = await TR.readThreadViaAppServer(OTHER, { codexCmd: dead, timeoutMs: 800 }).then(() => null, (e) => e.message);
-  ok(/timed out/.test(err || '') && Date.now() - t0 < 5000, `a silent app-server is killed on the timeout bound (${err})`);
+  // the bound's own word (lane wall-clock-ratchet-down: `< 5000 ms` judged the machine): the 800 ms timer handed is
+  // the one that fired; the ms are information
+  ok(/thread\/read timed out after 800ms/.test(err || ''), `a silent app-server is killed on the timeout bound (${err}, ${Date.now() - t0} ms)`);
   fs.rmSync(dir, { recursive: true, force: true });
   TR._resetForTests();
   // (c) wiring pins — consumers reach the hook through the DESCRIPTOR (no claude ternary left)

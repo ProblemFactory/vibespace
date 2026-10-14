@@ -496,7 +496,9 @@ console.log('— ⑧ A SAVE WAITS FOR THE DROP (stage-blank verify r5: a tab tor
       await tick(260);
       leg(lm.sent.length === 0, '⑧ …nor in the 250 ms after the release (the drop\'s own capture runs then)', J({ sent: lm.sent.length }));
       await tick(700);
-      leg(lm.sent.length === 1 && lm.sent[0].t - tUp >= 250 && lm.sent[0].t - tUp < 1200, `⑧ …one save leaves after the drop's capture (${lm.sent.length ? lm.sent[0].t - tUp : '—'} ms after the release) — the dirty bit untouched by the wait`, J({ sent: lm.sent.length, dirty: lm._userDirty, since: t0 }));
+      // (lane wall-clock-ratchet-down: the old `< 1200` judged the machine — the ONE save is in before this tick, whose
+      // timer was armed after the save's; the ≥ 250 says it waited for the drop's capture)
+      leg(lm.sent.length === 1 && lm.sent[0].t - tUp >= 250, `⑧ …one save leaves after the drop's capture (${lm.sent.length ? lm.sent[0].t - tUp : '—'} ms after the release) — the dirty bit untouched by the wait`, J({ sent: lm.sent.length, dirty: lm._userDirty, since: t0 }));
       leg(!lm._saveWaitsForDrop, '⑧ …and the wait is spent');
     }
     // the pointer RELEASED just before the debounce fired (the T3 shape: the detach at 189 ms, the release at ~540 ms, the save at

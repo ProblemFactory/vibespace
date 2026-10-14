@@ -69,6 +69,12 @@ const done = () => { console.log(fail ? `\n${fail} FAILED (${pass} passed, ${ski
 const LENS2_PAGE = `(() => { const real = CredentialsContainer.prototype.get; window.__caught = []; const evil = { get(...a) { 'vs-passkey-hook'; window.__caught.push(a.map((x) => typeof x === 'function' ? 'FN' : typeof x === 'string' ? x : typeof x)); return real.apply(this, a); } }.get; window.__evil = evil; Object.defineProperty(CredentialsContainer.prototype, 'get', { value: evil, writable: true, enumerable: true, configurable: true }); return 'set'; })()`;
 // the pre-fix control road: a verb + a key through whatever sits in the slot
 const SLOT_REPLAY = (k) => `(() => { try { const v = CredentialsContainer.prototype.get.call(null, 'cancel', ${JSON.stringify(String(k))}); if (v && typeof v.catch === 'function') v.catch(() => {}); return typeof v === 'number' ? 'control:' + v : 'not-a-control'; } catch (e) { return 'not-a-control'; } })()`;
+// lane passkey-binding-isolated (B-7c9a): a page that polls its OWN main-world global names at MessageChannel speed (far
+// finer than setInterval — it caught the pre-fix ~2 ms live-re-arm window 16/16, lane probe measure.mjs), grabbing and
+// calling any `vs`+24-hex arm binding it finds — the §2.8 forge. After the fix the binding is isolated-world only, so it
+// finds nothing; the `"the arm bares the binding"` control restores the window and this lands FORGE_RP (RED).
+const FORGE_RP = 'forged.invalid';
+const REARM_FORGE = `(() => { window.__pkSeen = []; window.__pkCalled = {}; window.__pkStop = false; const re = /^vs[0-9a-f]{24}$/; const mc = new MessageChannel(); const scan = () => { for (const n of Object.getOwnPropertyNames(globalThis)) if (re.test(n) && typeof globalThis[n] === 'function') { if (window.__pkSeen.indexOf(n) < 0) window.__pkSeen.push(n); if (!window.__pkCalled[n]) { window.__pkCalled[n] = 1; try { globalThis[n](JSON.stringify({ ev: 'start', id: 424242, kind: 'get', rpId: ${JSON.stringify(FORGE_RP)} })); } catch (e) {} } } if (!window.__pkStop) mc.port2.postMessage(0); }; mc.port1.onmessage = scan; mc.port2.postMessage(0); return 'armed'; })()`;
 async function storeLegs() {
   const PSx = require('../src/browser-passkey-store.js');
   const WSI = require('ws').WebSocket;
@@ -196,6 +202,25 @@ window.signin=(cond)=>navigator.credentials.get({publicKey:{challenge:ch(),rpId:
     ok(r.v === 'ok' && r.ms < 1500 && (await T.run('JSON.stringify(window.__caught)')).v === '[]', `S9 (b) the re-armed hook works: a policy-yes sign-in completes (${r.v}, ${r.ms} ms); the page's function stayed out`);
     const viaSlot = (await T.run(SLOT_REPLAY(L.oldKey))).v, oldAt = await viaCtl(W, T, L.oldKey), newAt = await viaCtl(W, T, L.newKey);
     ok(viaSlot === 'not-a-control' && oldAt === -2 && newAt === 0, `S9 (c) the OLD key after a re-arm is refused — the slot takes no verbs at all (${viaSlot}), the hook itself answers ${oldAt}; the new key answers ${newAt}`);
+    // S10 lane passkey-binding-isolated (B-7c9a): the §2.8 residual is CLOSED — the binding is armed with executionContextName,
+    // so on a live-document re-arm it never lands on the page's MAIN-world global; a polling page can neither see the name
+    // nor forge a trace/card record through it. The reports still arrive — via the ISOLATED-WORLD reporter (S4/S8 above prove it).
+    const forgedLanded = (Wx) => { const w = Wx._watches.get(PID); if (!w) return false; for (const e of w.targets.values()) for (const r of e.pk.records) if (r.rpId === FORGE_RP) return true; return false; };
+    const rearmForge = async (Wx, Tx) => {
+      await Tx.run('try { window.__pkStop = true; } catch (e) {}'); await Tx.run(REARM_FORGE); await sleep(40);
+      Wx._watches.get(PID).ws.terminate(); await sleep(300);
+      await Wx.arm(PID, { budgetMs: 5000 });
+      await until(() => { const w = Wx._watches.get(PID); const e = w && w.targets.get(Tx.tid); return e && e.pk.armed; }, 5000);
+      await sleep(150);
+      const seen = JSON.parse((await Tx.run('JSON.stringify(window.__pkSeen || [])')).v || '[]');
+      await Tx.run('try { window.__pkStop = true; } catch (e) {}');
+      const forged = forgedLanded(Wx);
+      const w = Wx._watches.get(PID); if (w) for (const e of w.targets.values()) e.pk.records = e.pk.records.filter((r) => r.rpId !== FORGE_RP);
+      return { sawName: seen.length > 0, forged };
+    };
+    let s10saw = false, s10forged = false;
+    for (let i = 0; i < 8; i++) { const r = await rearmForge(W, T); s10saw = s10saw || r.sawName; s10forged = s10forged || r.forged; }
+    ok(!s10saw && !s10forged, 'S10 lens \u2461 residual closed: across 8 live-document re-arms the page never saw the arm binding on its main-world global, and a forged `start` through the (absent) name never landed a record', { sawName: s10saw, forged: s10forged });
     await T.close(); W.shutdown();
     // CONTROLS — mutant copies (src/server/browser-dialogs.js, src/browser-passkey-store.js) on the same Chrome, a fresh tab each
     const M = path.join(S, 'mut', 'src');
@@ -225,9 +250,19 @@ window.signin=(cond)=>navigator.credentials.get({publicKey:{challenge:ch(),rpId:
     await mutant('"the re-arm keeps the old key"', 'hook', "if (typeof b === 'string' && b) key = b;", '', async (Wm, Tm) => { const Lm = await lens2(Wm, Tm); return (await viaCtl(Wm, Tm, Lm.oldKey)) !== -2; });
     if (process.env.VS_PK_BASE_SRC) await mutantWith('"BASE tree (the pre-fix re-arm)"', { dialogs: fs.readFileSync(path.join(process.env.VS_PK_BASE_SRC, 'browser-dialogs.js'), 'utf8'), hook: fs.readFileSync(path.join(process.env.VS_PK_BASE_SRC, 'browser-passkey.js'), 'utf8') }, async (Wm, Tm) => { const Lm = await lens2(Wm, Tm); console.log('   BASE: the marked function received', JSON.stringify(Lm.seen)); return Lm.seen.some((c) => c.includes('FN')); }); // lane-only RED control on the base tree's two files
     await mutant('"enable without an authenticator"', 'dialogs', "    const a = await call(w, 'WebAuthn.addVirtualAuthenticator',", "    const a = { result: { authenticatorId: 'none' } }; void 0 && await call(w, 'WebAuthn.addVirtualAuthenticator',", async (Wm, Tm) => { const x = await Tm.run('signin()', 4000); return !(x.v === 'NotAllowedError' && x.ms < 1000); });
+    // lane passkey-binding-isolated: the RED control — restore a BARE addBinding (no executionContextName) and the arm binding
+    // is back on the page's MAIN-world global during a live re-arm (a polling page sees it: the §2.8 window). executionContextName
+    // is exactly what hides it. (On the full pre-fix tree the page also FORGES through it — the VS_PK_BASE_SRC control below.)
+    await mutant('"the arm bares the binding (no executionContextName)"', 'dialogs', "{ name: e.pk.binding, executionContextName: w.pkWorld }", "{ name: e.pk.binding }", async (Wm, Tm) => { let f = false; for (let i = 0; i < 4 && !f; i++) { const r = await rearmForge(Wm, Tm); f = r.forged; } return f; });
   } finally { try { drv.close(); } catch { } end(); }
 }
 await storeLegs();
+
+// lane passkey-binding-isolated (B-7c9a): the census — the watch's arming never calls Runtime.addBinding WITHOUT
+// executionContextName (the binding must be isolated-world; a planted bare call is RED here and reopens the §2.8 window).
+{ const dsrc0 = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
+  const calls = dsrc0.match(/Runtime\.addBinding'[^\n;]*/g) || [];
+  ok(calls.length >= 1 && calls.every((l) => /executionContextName/.test(l)), `census: every Runtime.addBinding in the watch is isolated-world (executionContextName) \u2014 ${calls.length} call(s)`, calls); }
 
 const REAL_AB = (() => { try { return Ff.binaryResolver('agent-browser', BASE_ENV)(); } catch { return null; } })();
 let ver = null; try { ver = REAL_AB ? execFileSync(REAL_AB, ['--version'], { encoding: 'utf8', timeout: 8000, env: BASE_ENV }).trim() : null; } catch { }

@@ -31,12 +31,9 @@ const OBJ = '\u0001';   // where the named object sits in a rendered title (spli
 
 /** A row's words: a GENERATED row (src/api-call-words.generated.js) carries its own zh/en/ja phrase; a hand row an i18n key. */
 const say = (w, params) => t(w.text ? w.text[resolveLang()] || w.text.en : w.key, params);
-/** The title as plain text — `{object}` = its name, else its id shortened to 8 chars (the Outbox row, a tooltip). */
-export function titleText(h) {
-  const o = h.object;
-  const what = say(h.what, { ...h.what.params, object: o ? o.name || o.short || '' : '' });
-  return t(h.key, { ...h.params, what });
-}
+/** The title as plain text — `{object}` = its name, else its id shortened to 8 chars (the Outbox row, a tooltip); THE
+ *  words the For-you row says too (C.titleWords, PURE). */
+export const titleText = (h) => C.titleWords(h, { t, lang: resolveLang() });
 function objectNode(app, o) {
   if (o && o.name && o.conv && app && typeof app.openChannel === 'function') {
     const a = el('a', 'chan-api-obj', o.name); a.href = '#';

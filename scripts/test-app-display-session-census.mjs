@@ -107,7 +107,10 @@ print("closed-signal", got)'`,
   ok(/closed-signal \[\(\d+, 3\)\]/.test(r.out) && closedLine && j.filter((x) => !x.closed).length === 2, 'CloseNotification ⇒ NotificationClosed(id, 3) on the bus + a closed line in the journal');
   const pOff = writePlan(path.join(S, 'off'), null);
   const c = inSession(pOff, 'timeout 3 notify-send -u critical -a JASP "Export finished" body; echo "send-rc=$?"');
-  ok(!/send-rc=0/.test(c.out) && /not provided by any \.service files|ServiceUnknown/.test(c.out) && c.ms < 3000 + 2000, `RED CONTROL: the same bus WITHOUT the sink ⇒ notify-send fails (${(c.out.match(/[^\n]*(?:ServiceUnknown|not provided)[^\n]*/) || [''])[0].slice(0, 110)}) in ${c.ms} ms`);
+  // the failure is the BUS's answer, not the `timeout 3` cut (lane wall-clock-ratchet-down: `c.ms < 5000` judged the
+  // machine): notify-send exits non-zero with ServiceUnknown — a cut would exit 124
+  const cRc = Number((c.out.match(/send-rc=(\d+)/) || [])[1]);
+  ok(cRc > 0 && cRc !== 124 && /not provided by any \.service files|ServiceUnknown/.test(c.out), `RED CONTROL: the same bus WITHOUT the sink ⇒ notify-send fails, exit ${cRc} (${(c.out.match(/[^\n]*(?:ServiceUnknown|not provided)[^\n]*/) || [''])[0].slice(0, 110)}) in ${c.ms} ms`);
 
   console.log('③ the REAL plan bus (D.startPortalBus — its path socket in the app\'s 0700 dir)');
   const pr = writePlan(path.join(S, 'real'), facts);

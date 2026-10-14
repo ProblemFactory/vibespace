@@ -66,7 +66,8 @@ console.log('— ① client over the mock serve');
   ok('fork → POST /session/:id/fork?directory= → the new Session', forked.id === 'ses_a2_fork1' && /fork #1/.test(forked.title) && mock.state.requests.includes('POST /session/ses_a2/fork?directory=%2Fwork%2Falpha%2Fsub'));
   mock.state.hang = true;
   const t0 = Date.now(); let et = null; try { await c.listSessions({ timeoutMs: 300 }); } catch (e) { et = e; }
-  ok('a hung serve → code timeout at the budget', et?.code === 'timeout' && Date.now() - t0 < 1500, et?.message);
+  // the budget's own word (lane wall-clock-ratchet-down: `< 1500 ms` judged the machine): the 300 ms abort answered
+  ok(`a hung serve → code timeout at the budget (${Date.now() - t0} ms)`, et?.code === 'timeout' && /timed out after 300ms/.test(et?.message || ''), et?.message);
   mock.state.hang = false;
   const dead = new serve.OpencodeServeClient('http://127.0.0.1:1');
   let ec = null; try { await dead.health({ timeoutMs: 500 }); } catch (e) { ec = e; }
@@ -154,7 +155,9 @@ console.log('— ③ facts.discover / readConversation / forkSession');
   ok('negative cache: no request for 10s after a failure', mock.state.requests.length === rc);
   now += 6000; mock.state.fail = false; mock.state.hang = true;
   const t0 = Date.now(); const e4 = await facts.discover({}); const dt = Date.now() - t0;
-  ok(`a HUNG serve: discover resolves within 2s (${dt}ms) with the last good list — the poll never stalls`, dt < 2000 && e4.length === 4);
+  // the poll's own budget answered (lane wall-clock-ratchet-down: `dt < 2000` judged the machine): the list request
+  // timed out on the client's timer and the last good list came back with that error said
+  ok(`a HUNG serve: discover resolves with the last good list (${dt}ms) — the poll never stalls`, e4.length === 4 && /timed out after \d+ms/.test(facts.state().lastError || ''), facts.state().lastError);
   mock.state.hang = false;
   now += 11000;
   const conv = await facts.readConversation('ses_a1');
@@ -236,7 +239,10 @@ console.log('— ④ locator / keeper');
   const loc2 = serve.createServeLocator({ dataDir: dir2, command: () => 'opencode', log: null, spawnImpl: spawnMock, env: () => ({ MOCK_OPENCODE_NO_FORK: '1', MOCK_OPENCODE_BOOT_DELAY_MS: '400' }), bootTimeoutMs: 15000, onCaps: (c) => { caps2 = c; } });
   const t0 = Date.now();
   const c2 = await loc2.client({ budgetMs: 100 });
-  ok('client({budgetMs}) NEVER waits past its budget while the serve boots (returns null, boot continues)', c2 === null && Date.now() - t0 < 1000);
+  // (lane wall-clock-ratchet-down: the old `< 1000 ms` judged the machine — null IS the budget: the boot answers
+  // healthy after 400 ms, so a client() that waited for it would have returned the client; ensure() below adopts the
+  // SAME spawn, so the boot went on)
+  ok(`client({budgetMs}) NEVER waits past its budget while the serve boots (returns null, boot continues — ${Date.now() - t0} ms)`, c2 === null);
   const c3 = await loc2.ensure();
   ok('a dead record → spawn `<cmd> serve --port <free> --hostname 127.0.0.1` → adopted once healthy', !!c3 && loc2.state().source === 'spawned' && loc2.state().pid > 0 && (await c3.health()).healthy === true, loc2.state());
   // THE 2.369.42 SPAWN-CWD RULE — OpenCode resolves its default project from

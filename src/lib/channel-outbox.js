@@ -170,6 +170,11 @@ export function openComposePick(app, p) {
   if (!p.url && p.file) p.url = URL.createObjectURL(p.file);
   return p.url ? openAttachment(app, { url: p.url, name: p.name, mime: p.mime }) : 'download';
 }
+/** card grammar (lane card-grammar-exceptions): a file's KIND in the reader's words (P.attachmentKind) — the row's size
+ *  chip reads 「图片 · 2 KB」; the FORMAT a sniffed type is called by (the name / type mismatch chip) — never a mime literal. */
+const KIND_WORDS = { image: () => t('Image'), pdf: () => 'PDF', document: () => t('Document'), spreadsheet: () => t('Spreadsheet'), slides: () => t('Presentation'), text: () => t('Text'), page: () => t('Web page'), archive: () => t('Compressed file'), audio: () => t('Audio'), video: () => t('Video') };
+const kindWord = (a) => (KIND_WORDS[P.attachmentKind(a.name, a.mime)] || (() => t('File')))();
+const formatWord = (mime) => P.attachmentFormat(mime) || (mime === 'text/plain' ? t('plain text') : t('unknown data'));
 /** design 005 §2.B: the attachment rows (keyed by the card — a changed record redraws the card). lane
  *  outbox-attachment-preview: a click on the thumb or the name OPENS (openAttachment); the ⤓ beside it downloads. */
 function appendAttachments(card, p, app = null) {
@@ -207,7 +212,9 @@ function appendAttachments(card, p, app = null) {
     }
     revealInto(name, a.name);
     row.appendChild(name);
-    row.appendChild(el('span', 'chan-prop-file-meta', `${P.attachmentSize(a.bytes)} · ${a.mime} · sha256 ${String(a.sha256).slice(0, 12)}…`));
+    const meta = el('span', 'chan-prop-file-meta', `${kindWord(a)} · ${P.attachmentSize(a.bytes)}`);   // card grammar: the kind + the size, a size chip
+    meta.dataset.chip = 'size';
+    row.appendChild(meta);
     if (!gone) {
       const dl = document.createElement('a');
       dl.className = 'chan-prop-file-dl'; dl.href = url; dl.setAttribute('download', '');
@@ -217,7 +224,7 @@ function appendAttachments(card, p, app = null) {
     }
     if (blocked) { row.classList.add('chan-prop-file-blocked'); row.appendChild(el('span', 'chan-prop-file-chip chan-warn', t('will NOT be sent'))); }
     const mm = P.nameTypeMismatch(a.name, a.mime);
-    if (mm) row.appendChild(el('span', 'chan-prop-file-chip chan-warn', t('named .{ext}, but its bytes are {type}', { ext: mm.ext, type: a.mime })));
+    if (mm) row.appendChild(el('span', 'chan-prop-file-chip chan-warn', t('named .{ext}, but its bytes are {type}', { ext: mm.ext, type: formatWord(a.mime) })));
     box.appendChild(row);
   }
   if (blocked) {
@@ -226,6 +233,13 @@ function appendAttachments(card, p, app = null) {
     if (w.dataset.filesBlocked) w.title = t('Needs one of: {scopes}', { scopes: (p.filesBlocked.requiredScopes || []).join(', ') });
     box.appendChild(w);
   } else box.appendChild(el('div', 'chan-prop-file-note', gone ? t('The files are no longer kept — the card keeps their names, sizes and checksums.') : t('Exactly these bytes are sent; if a file changes, the send is refused.')));
+  // card grammar ④: the raw facts of every file — the type its bytes sniffed as, the exact byte count, the whole sha256
+  // (what "exactly these bytes" is checked against) — under ONE collapsed 技术细节 fold, never on the row
+  const tech = el('details', 'chan-prop-files-tech');
+  tech.dataset.fold = 'tech';
+  tech.appendChild(el('summary', '', t('Technical details')));
+  for (const a of files) tech.appendChild(el('div', 'chan-prop-files-tech-line', `${a.name} · ${a.mime} · ${Number(a.bytes) || 0} B · sha256 ${a.sha256}`));
+  box.appendChild(tech);
   card.appendChild(box);
 }
 /** F4 (r6 verify): ONE envelope fact per line — its label, then its value, wrapping, never clipped. */
@@ -437,7 +451,7 @@ export function renderProposalCard(app, p, { compact = false, line = false, onLi
   }
   // ── design 005 §2.B (B-fd1f): WHAT LEAVES WITH IT — one row per attachment: a thumbnail for a picture the server
   //    SNIFFED as one of the four raster types (served by the owner-only route; anything else is never drawn), the name,
-  //    the size, the sniffed type (a chip when the name's extension says another), the sha256 shortened; a row downloads ──
+  //    its kind + size (a chip when the name's extension says another type); the raw facts in ONE fold; a row downloads ──
   appendAttachments(card, p, app);
   // ── ONE meta line: why · the policy verdict · the identity · expiry · the sender line ──
   const meta = el('div', 'chan-prop-meta');

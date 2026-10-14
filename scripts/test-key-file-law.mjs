@@ -571,7 +571,7 @@ console.log('④ the passkey doors — a key refusal is a VALUE: nothing thrown 
   // the CDP answers of scripts/test-browser-passkey.mjs ④ (the hook's private-field anchor answered, every other call {})
   const answer = (m, st) => {
     const R = { 'Target.getTargets': { targetInfos: [{ targetId: 'T1', type: 'page', url: 'https://github.com/login', title: 'Sign in' }] }, 'Target.attachToTarget': { sessionId: 'S1' }, 'Browser.getVersion': { userAgent: 'Mozilla/5.0 Chrome/154.0.0.0' }, 'Runtime.evaluate': { result: { type: 'string', value: 'complete' } }, 'WebAuthn.addVirtualAuthenticator': { authenticatorId: 'A1' } };
-    if (m.method === 'Page.addScriptToEvaluateOnNewDocument') st.slot = (String(m.params.source).match(/#(vs[0-9a-f]{32})\b/) || [])[1] || null;
+    if (m.method === 'Page.addScriptToEvaluateOnNewDocument' && !m.params.worldName) st.slot = (String(m.params.source).match(/#(vs[0-9a-f]{32})\b/) || [])[1] || null; // lane passkey-binding-isolated: the slot rides the main-world hook, never the isolated-world reporter
     if (m.method === 'Runtime.getProperties') R['Runtime.getProperties'] = { result: [], privateProperties: st.slot ? [{ name: '#' + st.slot, value: { type: 'function', objectId: 'CTL-1' } }] : [] };
     if (m.method === 'Runtime.callFunctionOn') R['Runtime.callFunctionOn'] = { result: { type: 'number', value: 1 } };
     if (m.method === 'Runtime.evaluate' && m.params && m.params.contextId === 7 && m.params.expression === 'CredentialsContainer.prototype') R['Runtime.evaluate'] = { result: { type: 'object', objectId: 'CCP-7' } }; // the ceremony's document (ctx 7)
@@ -620,7 +620,9 @@ console.log('④ the passkey doors — a key refusal is a VALUE: nothing thrown 
   const verbOf = (x) => x.method === 'Runtime.callFunctionOn' && x.params && x.params.arguments ? x.params.arguments[1].value : null;
   const n0 = P.f.log.length, s0 = Date.now(); const t2 = P.start(1); await until(() => P.f.log.slice(n0).some((x) => verbOf(x) === 'release'));
   const sent = P.f.log.slice(n0).map((x) => x.method + (verbOf(x) ? `(${verbOf(x)})` : ''));
-  ok(!t2 && sent.includes('Runtime.callFunctionOn(release)') && !sent.includes('WebAuthn.addCredential') && P.items.length === 1 && Date.now() - s0 < 1000, `gate: a modal get over the refused key ⇒ RELEASED at once (${sent.join(', ')}), nothing loaded, no second line — the base's hang (nothing sent after the start) closed`, JSON.stringify(sent));
+  // "at once" is the ANSWER to the start (lane wall-clock-ratchet-down: `< 1000 ms` judged the machine): the release is
+  // what the start brought — the fake clock never moved, so no hold of the product's ran out; the base sent nothing
+  ok(!t2 && sent.includes('Runtime.callFunctionOn(release)') && !sent.includes('WebAuthn.addCredential') && P.items.length === 1, `gate: a modal get over the refused key ⇒ RELEASED at once (${sent.join(', ')}; ${Date.now() - s0} ms), nothing loaded, no second line — the base's hang (nothing sent after the start) closed`, JSON.stringify(sent));
   P.step(PKm.PENDING_SAID_MS + 50);
   const v = P.D.passkeyIn('bp-1', null);
   ok(v.state === 'passkey_open' && v.text.includes("VibeSpace's saved passkeys are locked: browser-passkeys.key is missing — restore it from a backup"), "…while the page still waits, the agent's sentence carries the restore words", JSON.stringify(v).slice(0, 400));

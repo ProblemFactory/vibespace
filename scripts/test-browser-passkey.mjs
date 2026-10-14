@@ -117,20 +117,25 @@ function fakeRealm({ any = true } = {}) {
   } })[kind];
   for (const k of ['get', 'create', 'store']) Object.defineProperty(CredentialsContainer.prototype, k, { value: native(k), writable: true, enumerable: true, configurable: true });
   const AS = any ? AbortSignal : new Proxy(AbortSignal, { get: (t, p) => (p === 'any' ? undefined : Reflect.get(t, p)) });
-  const G = { CredentialsContainer, AbortController, AbortSignal: AS, location: { hostname: 'vercel.com' }, JSON, Promise, Object, Reflect, Map, String, Date };
+  // lane passkey-binding-isolated: the main world reports through a SECRET-named CustomEvent on `document`; the real binding
+  // lives in the ISOLATED-WORLD reporter (a separate global sharing this document). Here: one EventTarget shared by both halves.
+  const doc = new EventTarget();
+  const binding = 'vs' + 'b'.repeat(24), chan = 'vspc' + 'c'.repeat(32);
+  const G = { CredentialsContainer, AbortController, AbortSignal: AS, CustomEvent, EventTarget, document: doc, location: { hostname: 'vercel.com' }, JSON, Promise, Object, Reflect, Map, String, Date };
   const box = {}; // lane passkey-prewrap-fix: the hook's ctl (the watch reaches it through the private field; here: cfg.expose)
-  const cfg = { binding: 'vs' + 'b'.repeat(24), key: 'k'.repeat(32), expose: (c) => { box.ctl = c; } };
-  G[cfg.binding] = (s) => sent.push(JSON.parse(s));
-  return { G, cfg, calls, sent, nav: new CredentialsContainer(), box };
+  const cfg = { chan, key: 'k'.repeat(32), expose: (c) => { box.ctl = c; } };
+  const RG = { document: doc, EventTarget, [binding]: (s) => sent.push(JSON.parse(s)) }; // the isolated-world reporter half: its own global, the same document
+  PK.installReporter(RG, { binding, chan });
+  return { G, cfg, calls, sent, nav: new CredentialsContainer(), box, doc, binding, chan, RG };
 }
 const tick = () => new Promise((r) => setTimeout(r, 5));
 for (const any of [true, false]) {
-  const { G, cfg, calls, sent, nav, box } = fakeRealm({ any });
-  const before = Object.getOwnPropertyNames(G).filter((n) => n !== cfg.binding).sort().join(',');
+  const { G, cfg, calls, sent, nav, box, binding } = fakeRealm({ any });
+  const before = Object.getOwnPropertyNames(G).sort().join(',');
   const descBefore = JSON.stringify(Object.getOwnPropertyNames(G.CredentialsContainer.prototype).map((k) => { const d = Object.getOwnPropertyDescriptor(G.CredentialsContainer.prototype, k); return [k, d.writable, d.enumerable, d.configurable]; }));
   ok(PK.installHook(G, cfg) === true, `(${any ? 'AbortSignal.any' : 'the relay, no AbortSignal.any'}) the hook installs`);
   const descAfter = JSON.stringify(Object.getOwnPropertyNames(G.CredentialsContainer.prototype).map((k) => { const d = Object.getOwnPropertyDescriptor(G.CredentialsContainer.prototype, k); return [k, d.writable, d.enumerable, d.configurable]; }));
-  ok(Object.getOwnPropertyNames(G).sort().join(',') === before && !(cfg.binding in G) && Object.getOwnPropertySymbols(G).length === 0, 'nothing on the global: the binding captured and deleted, no new name, no symbol');
+  ok(Object.getOwnPropertyNames(G).sort().join(',') === before && !(cfg.chan in G) && !(binding in G) && Object.getOwnPropertySymbols(G).length === 0, 'lane passkey-binding-isolated: nothing on the page\'s main-world global — the hook reports through the secret channel, no binding name, no new name, no symbol');
   ok(descAfter === descBefore && Object.getOwnPropertyNames(nav.get).sort().join(',') === 'length,name' && nav.get.name === 'get' && nav.get.length === 0, 'the prototype keeps its keys and native flags; the hooked function carries nothing but length + name');
   // pass-through
   const pwOpts = { password: true };
@@ -143,7 +148,7 @@ for (const any of [true, false]) {
   const p1 = nav.get(opts, 'second');
   const c = calls[2];
   ok(c.self === nav && c.rest[0] === 'second' && c.opts.publicKey === opts.publicKey && c.opts.extra === 7 && Object.getPrototypeOf(c.opts) === opts && c.opts.signal !== own.signal, 'a publicKey ceremony: this + every argument pass through; the options are read through to the caller\'s own (only the signal is ours)');
-  ok(sent.length === 1 && sent[0].ev === 'start' && sent[0].kind === 'get' && sent[0].rpId === 'vercel.com', 'start reported through the ONE binding', sent);
+  ok(sent.length === 1 && sent[0].ev === 'start' && sent[0].kind === 'get' && sent[0].rpId === 'vercel.com', 'start reported through the secret channel to the isolated-world reporter', sent);
   own.abort();
   const e1 = await p1.catch((e) => e);
   await tick();
@@ -186,7 +191,7 @@ for (const any of [true, false]) {
   const c1 = priv.length === 1 ? await ins.post('Runtime.callFunctionOn', { objectId: priv[0].value.objectId, functionDeclaration: PK.CTL_FN, arguments: [{ value: cfg.key }, { value: 'cancel' }, { value: 0 }], returnByValue: true }) : null;
   const n = c1 && c1.result.value;
   const e = await pr.catch((x) => x);
-  ok(n === 1 && e && e.name === 'AbortError' && !(cfg.binding in G) && sent[0].ev === 'start' && !/vsPasskeyCtl|vs-passkey-hook/.test(own), 'hookSource is self-contained (runs in another realm); its ctl is reached by IDENTITY (privateProperties + callFunctionOn), invisible to the page\'s reflection', { n, own });
+  ok(n === 1 && e && e.name === 'AbortError' && !(cfg.chan in G) && sent[0].ev === 'start' && !/vsPasskeyCtl|vs-passkey-hook/.test(own), 'hookSource is self-contained (runs in another realm); its ctl is reached by IDENTITY (privateProperties + callFunctionOn), invisible to the page\'s reflection', { n, own });
   ok(src.includes('#' + slot) && !src.includes('#vsPasskeyCtl') && !src.includes('vs-passkey-hook') && !String(vm.runInContext('CredentialsContainer.prototype.get', ctx)).includes(cfg.key), 'hookSource writes the profile\'s slot name over the mark; no source-string mark; the wrapper\'s text carries no key');
   ins.disconnect(); delete globalThis.__pkProto;
 }
@@ -204,7 +209,7 @@ function fakeWs({ addBinding = true } = {}) {
       const m = JSON.parse(raw); log.push(m);
       const R = { 'Target.getTargets': { targetInfos: [{ targetId: 'T1', type: 'page', url: 'https://vercel.com/login', title: 'Use Your Passkey' }] }, 'Target.attachToTarget': { sessionId: 'S1' }, 'Browser.getVersion': { userAgent: 'Mozilla/5.0 Chrome/154.0.0.0' }, 'Runtime.evaluate': { result: { type: 'number', value: 1 } } };
       // lane passkey-prewrap-fix: the identity road — the prototype, its private field under the injected slot name, ctl's answer
-      if (m.method === 'Page.addScriptToEvaluateOnNewDocument') slotOf = (String(m.params.source).match(/#(vs[0-9a-f]{32})\b/) || [])[1] || null;
+      if (m.method === 'Page.addScriptToEvaluateOnNewDocument' && !m.params.worldName) slotOf = (String(m.params.source).match(/#(vs[0-9a-f]{32})\b/) || [])[1] || null; // lane passkey-binding-isolated: the slot rides the main-world hook, never the reporter
       if (m.method === 'Runtime.evaluate' && m.params.expression === 'CredentialsContainer.prototype') R['Runtime.evaluate'] = { result: { type: 'object', objectId: 'P-' + m.params.contextId } };
       if (m.method === 'Runtime.getProperties') R['Runtime.getProperties'] = { result: [], privateProperties: slotOf ? [{ name: '#' + slotOf, value: { type: 'function', objectId: 'CTL-' + String(m.params.objectId).slice(2) } }] : [] };
       if (m.method === 'Runtime.callFunctionOn') R['Runtime.callFunctionOn'] = { result: { type: 'number', value: 1 } };
@@ -232,8 +237,8 @@ async function watchOver(modPath, o = {}) {
   try { armed = await D.arm('bp-1'); } catch (e) { armed = { error: String(e && e.message) }; }
   // lane mirror-green-222: read at once — `arm` resolves once the hook is armed (a wait for Runtime.enable to be SENT raced its answer)
   const m = (name) => f.log.find((x) => x.method === name);
-  const bind = m('Runtime.addBinding'), scr = m('Page.addScriptToEvaluateOnNewDocument');
-  ok(armed && bind && bind.sessionId === 'S1' && scr && scr.sessionId === 'S1' && scr.params.runImmediately === undefined && !scr.params.worldName && scr.params.source.includes(bind.params.name) && /#vs[0-9a-f]{32}\b/.test(scr.params.source) && !scr.params.source.includes('vs-passkey-hook') && m('Runtime.enable'), 'armed: Runtime.addBinding (a random name) + the hook in the MAIN world of NEW documents (no worldName, never runImmediately — lane passkey-prewrap-fix) under the profile\'s private slot name + Runtime.enable, on the tab\'s own session', { armed, methods: f.log.map((x) => x.method) });
+  const bind = m('Runtime.addBinding'), scr = f.log.find((x) => x.method === 'Page.addScriptToEvaluateOnNewDocument' && !x.params.worldName), rep = f.log.find((x) => x.method === 'Page.addScriptToEvaluateOnNewDocument' && x.params.worldName);
+  ok(armed && bind && bind.sessionId === 'S1' && bind.params.executionContextName && scr && scr.sessionId === 'S1' && scr.params.runImmediately === undefined && !scr.params.worldName && !scr.params.source.includes(bind.params.name) && /#vs[0-9a-f]{32}\b/.test(scr.params.source) && !scr.params.source.includes('vs-passkey-hook') && rep && rep.params.worldName === bind.params.executionContextName && rep.params.source.includes(bind.params.name) && m('Runtime.enable'), 'armed (lane passkey-binding-isolated): Runtime.addBinding in an ISOLATED WORLD (executionContextName) + the MAIN-world hook (the private slot, NOT the binding name) + the reporter script in that world (holds the binding) + Runtime.enable, on the tab\'s own session', { armed, bind, methods: f.log.map((x) => x.method) });
   const t = { profileId: 'bp-1', browserKey: 'k1', sessionId: 's1', ephemeral: true };
   ok(D.passkeyIn('bp-1', null).state === 'none', 'no ceremony ⇒ none');
   f.push({ method: 'Runtime.bindingCalled', sessionId: 'S1', params: { name: bind.params.name, executionContextId: 7, payload: JSON.stringify({ ev: 'start', id: 1, kind: 'get', rpId: 'vercel.com' }) } });
@@ -369,9 +374,14 @@ console.log('⑦ lane passkey-store-core: THE GATE (§2.3, one example per row),
   ok(ctl(r, 'release', r.sent[0].id) === 1 && (await p).v && r.calls.length === 1 && r.sent.some((x) => x.ev === 'end' && x.outcome === 'ok'), 'release ⇒ the native call runs, the page gets its credential, end ok');
   r = realm(); p = settle(r.nav.create({ publicKey: { challenge: 1, rp: { id: 'github.com' }, user: { name: 'alice', displayName: 'A' } } })); await tick();
   ok(r.sent[0].user && r.sent[0].user.name === 'alice' && ctl(r, 'refuse', r.sent[0].id) === 1 && (await p).e === 'NotAllowedError' && r.calls.length === 0 && r.sent.some((x) => x.ev === 'end' && x.outcome === 'refused'), 'refuse ⇒ NotAllowedError in-page, the native create NEVER called, end refused');
-  r = realm(); const t0 = Date.now(); p = settle(r.nav.get({ publicKey: { challenge: 1 } }));
-  const res = await p;
-  ok(res.e === 'NotAllowedError' && Date.now() - t0 >= 100 && Date.now() - t0 < 1000 && r.calls.length === 0, `no verdict in holdMs (the watch's socket went — P0 ④) ⇒ rejected IN-PAGE (${Date.now() - t0} ms), the native get never called`);
+  // "in holdMs" is the HOLD TIMER's own act (lane wall-clock-ratchet-down: `< 1000 ms` judged the machine): the one
+  // timer armed at holdMs fired, its `end error` is what the watch heard, no verdict and no native call came first
+  const armed = [], realST = globalThis.setTimeout;
+  globalThis.setTimeout = (fn, ms, ...a) => { const tm = { ms, fired: false }; armed.push(tm); return realST(() => { tm.fired = true; fn(...a); }, ms); };
+  let res, t0;
+  try { r = realm(); t0 = Date.now(); p = settle(r.nav.get({ publicKey: { challenge: 1 } })); res = await p; } finally { globalThis.setTimeout = realST; }
+  const holds = armed.filter((tm) => tm.ms === r.cfg.holdMs);
+  ok(res.e === 'NotAllowedError' && Date.now() - t0 >= 100 && holds.length === 1 && holds[0].fired && r.sent.some((x) => x.ev === 'end' && x.outcome === 'error') && r.calls.length === 0, `no verdict in holdMs (the watch's socket went — P0 ④) ⇒ rejected IN-PAGE by the hold timer (${Date.now() - t0} ms), the native get never called`, { armed, sent: r.sent });
   r = realm(); p = settle(r.nav.get({ publicKey: { challenge: 1, answer: true } })); await tick();
   for (let i = 0; i < 3; i++) { await new Promise((z) => setTimeout(z, 80)); ctl(r, 'wait', r.sent[0].id); }
   ok(r.calls.length === 0 && ctl(r, 'release', r.sent[0].id) === 1, 'the ask\'s heartbeat (`wait`) keeps a held ceremony past holdMs');
@@ -384,11 +394,12 @@ console.log('⑦ lane passkey-store-core: THE GATE (§2.3, one example per row),
   ok(!!s2, '`drained` ⇒ the queued ceremony starts'); ctl(r, 'release', s2 && s2.id); ok(!!(await p2).v, '… and is decided on its own');
   // lane passkey-prewrap-fix (lens ②): a RE-ARM = the watch's `rebind` on the ctl it found by identity — the new binding +
   // a NEW key, never a second wrapper; the old key dies
-  r = realm(); const desc = Object.getOwnPropertyDescriptor(r.G.CredentialsContainer.prototype, 'get').value; const sent2 = []; const oldKey = r.cfg.key;
-  const back = r.box.ctl('', 'rebind', (s) => sent2.push(JSON.parse(s)), 'n'.repeat(32));
-  ok(back && back.displaced.length === 0 && Object.getOwnPropertyDescriptor(r.G.CredentialsContainer.prototype, 'get').value === desc, 'a RE-ARM rebinds the closure already there (never a second wrapper); nothing displaced');
+  r = realm(); const desc = Object.getOwnPropertyDescriptor(r.G.CredentialsContainer.prototype, 'get').value; const oldKey = r.cfg.key; const base = r.sent.length;
+  const back = r.box.ctl('', 'rebind', null, 'n'.repeat(32));
+  ok(back && back.displaced.length === 0 && Object.getOwnPropertyDescriptor(r.G.CredentialsContainer.prototype, 'get').value === desc, 'a RE-ARM rebinds the closure already there (never a second wrapper); nothing displaced — lane passkey-binding-isolated: only the key is handed over, the report path is the stable secret channel');
   p = settle(r.nav.get({ publicKey: { challenge: 1, answer: true } })); await tick();
-  ok(sent2.length === 1 && sent2[0].ev === 'start' && r.box.ctl(oldKey, 'release', sent2[0].id) === -2 && r.box.ctl('n'.repeat(32), 'release', sent2[0].id) === 1 && !!(await p).v, '… its events reach the NEW binding; the OLD key is refused (-2), the new one releases');
+  const rs = r.sent[base];
+  ok(rs && rs.ev === 'start' && r.box.ctl(oldKey, 'release', rs.id) === -2 && r.box.ctl('n'.repeat(32), 'release', rs.id) === 1 && !!(await p).v, '… its events still reach the reporter; the OLD key is refused (-2), the NEW one releases');
   // the page's MARKED function in the slot before the re-arm: never called; ours back; said displaced
   r = realm(); const ours = Object.getOwnPropertyDescriptor(r.G.CredentialsContainer.prototype, 'get').value; const caught = [];
   const evil = { get(...a) { 'vs-passkey-hook'; caught.push(a); return ours.apply(this, a); } }.get;

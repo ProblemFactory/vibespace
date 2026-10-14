@@ -161,11 +161,12 @@ console.log('§1 the registry');
   ok(byConv.length === 1 && byConv[0].dir === DIR && both.length === 1 && (await W.call('GET', '/api/designs?conversationId=conv-other')).body.designs.length === 0, 'GET /api/designs?conversationId= (alone, or beside a resumed session\'s new id) finds the conversation\'s design; another conversation\'s finds none');
   // the registry's bound: the least recently opened row leaves, the one just added always stays
   const WB = await world('bound');
-  const t0 = Date.now();
+  // (lane wall-clock-ratchet-down: the old `< 60000 ms` over the 1001 registers judged the machine — the leg is which
+  // row leaves, never how fast)
   WB.design.register({ dir: '/bound/first', sessionId: 'w1' });
   for (let i = 0; i < 1000; i++) WB.design.register({ dir: `/bound/d${i}`, sessionId: 'w1' });
   const rows = WB.design.list({});
-  ok(rows.length === 1000 && !rows.some((r) => r.dir === '/bound/first') && rows.some((r) => r.dir === '/bound/d999') && Date.now() - t0 < 60000, 'the registry keeps 1000 rows: the 1001st register drops the least recently opened (ties on the clock: the older row), never the one just added');
+  ok(rows.length === 1000 && !rows.some((r) => r.dir === '/bound/first') && rows.some((r) => r.dir === '/bound/d999'), 'the registry keeps 1000 rows: the 1001st register drops the least recently opened (ties on the clock: the older row), never the one just added');
   await WB.design.flush();
   await WB.close();
 }

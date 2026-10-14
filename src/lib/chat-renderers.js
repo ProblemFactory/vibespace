@@ -318,11 +318,15 @@ export function imageRawUrl(fp, host) {
   return `/api/file/raw?path=${encodeURIComponent(fp)}${host ? `&host=${encodeURIComponent(host)}` : ''}`;
 }
 const fmtBytes = (n) => (n >= 1024 * 1024 ? `${(n / (1024 * 1024)).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
+// card grammar (lane card-grammar-exceptions): the card names its picture's FORMAT in a word (「PNG · 12 KB」), never the
+// mime literal; a type with no common name is just an image
+const IMAGE_FORMATS = { png: 'PNG', jpeg: 'JPEG', jpg: 'JPEG', gif: 'GIF', webp: 'WebP', 'svg+xml': 'SVG', bmp: 'BMP', avif: 'AVIF', heic: 'HEIC', tiff: 'TIFF', 'x-icon': 'ICO' };
+const imageFormatWord = (mediaType) => { const m = /^image\/([\w.+-]+)$/i.exec(String(mediaType || '')); return m ? IMAGE_FORMATS[m[1].toLowerCase()] || t('Image') : ''; };
 /**
  * @param {object} o
  * @param {string} [o.path]      absolute file path (drawn from disk via /api/file/raw)
  * @param {string} [o.host]      hostId for remote sessions (null/'' = this machine)
- * @param {string} [o.mediaType] e.g. image/png (summary chip)
+ * @param {string} [o.mediaType] e.g. image/png (its format word on the summary chip)
  * @param {number} [o.bytes]     decoded size (summary chip)
  * @param {string} [o.dataUrl]   inline data: URL (harness-supplied small image)
  * @param {string} [o.name]      summary label (default: basename of path)
@@ -331,10 +335,10 @@ const fmtBytes = (n) => (n >= 1024 * 1024 ? `${(n / (1024 * 1024)).toFixed(1)} M
  */
 export function imageMediaHtml({ path = '', host = null, mediaType = '', bytes = 0, dataUrl = null, name = '', open = true } = {}) {
   const label = name || (path ? String(path).split('/').pop() : '') || t('Image');
-  const meta = [mediaType, bytes > 0 ? fmtBytes(bytes) : ''].filter(Boolean).join(' · ');
+  const meta = [imageFormatWord(mediaType), bytes > 0 ? fmtBytes(bytes) : ''].filter(Boolean).join(' · ');
   const src = dataUrl || (path ? imageRawUrl(path, host) : '');
-  if (!src) return `<span class="chat-tool-image-chip">${escHtml(meta || t('Image'))}</span>`;
-  const metaHtml = meta ? ` <span class="chat-media-meta">${escHtml(meta)}</span>` : '';
+  if (!src) return `<span class="chat-tool-image-chip" data-chip="size">${escHtml(meta || t('Image'))}</span>`;
+  const metaHtml = meta ? ` <span class="chat-media-meta" data-chip="size">${escHtml(meta)}</span>` : '';
   // the "missing" line is display:none until the <img> fires error (ChatView's
   // capture-phase listener flags .chat-media-broken — no inline handlers)
   return `<details class="chat-diff chat-media"${open ? ' open' : ''}><summary class="chat-diff-summary">${UI_ICONS.image} ${escHtml(label)}${metaHtml}</summary><div class="chat-media-body"><img class="chat-img chat-tool-img" loading="lazy" src="${escHtml(src)}" alt="${escHtml(label)}"><span class="chat-media-missing">${escHtml(t('Image not available on this machine'))}</span></div></details>`;

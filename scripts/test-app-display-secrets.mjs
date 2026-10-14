@@ -163,12 +163,16 @@ try {
   // RED control: no service on the bus (the setting off) ⇒ libsecret's ServiceUnknown, bounded
   let b = await startBus('off');
   let r = probe(b.plan, 'store');
-  check('RED control: setting off ⇒ libsecret fails "not provided by any .service files" (no hang)', r.store && !r.store.ok && /org\.freedesktop\.secrets was not provided/.test(r.store.error) && r.store.ms < 2000, JSON.stringify(r.store));
+  // (lane wall-clock-ratchet-down: the probe's own `r.store.ms < 2000` judged the machine — "no hang" is the BUS's
+  // answer, ServiceUnknown by name, where a hang reads a timeout)
+  check('RED control: setting off ⇒ libsecret fails "not provided by any .service files" (no hang)', r.store && !r.store.ok && /org\.freedesktop\.secrets was not provided/.test(r.store.error), JSON.stringify(r.store));
   await stopBus(b);
   b = await startBus('on');
   check('rec.secrets fact = on', b.ss.secrets === 'on');
   r = probe(b.plan, 'all', 'pw-one-s3cr3t');
-  check('store (activates the service, ≤ 3 s)', r.store && r.store.ok && r.store.ms < 3000, JSON.stringify(r.store));
+  // (lane wall-clock-ratchet-down: the old `r.store.ms < 3000` judged the machine — the store answered ok through the
+  // service the bus activated; the ms are information)
+  check('store (activates the service)', r.store && r.store.ok, JSON.stringify(r.store));
   check('a second item', r.store2 && r.store2.ok);
   check('lookup by attributes', r.lookup && r.lookup.value === 'pw-one-s3cr3t');
   check('search by attributes finds both', r.search && JSON.stringify(r.search.value) === '["ann at a","bob at a"]' && JSON.stringify(r['search-secrets'].value) === '["pw-one-s3cr3t","pw-two"]');
@@ -196,10 +200,10 @@ try {
   await stopBus(bRed);
   // a service started with NO key file refuses BY NAME (its log), and libsecret is answered, never left hanging
   const bNo = await startBus('on', null, { dropKey: true });
-  const t1 = Date.now();
+  // "never a hang" is libsecret's ERROR, not a timeout (lane wall-clock-ratchet-down: `< 3000 ms` judged the machine)
   const rNo = probe(bNo.plan, 'store', 'pw-nokey');
   const logNo = fs.readFileSync(path.join(appDir, 'app.log'), 'utf8');
-  check('no key file ⇒ the service refuses BY NAME and says what to do; libsecret gets an error in ≤ 3 s, never a hang', /\[secrets\] no per-display key: the key file is gone \(secrets\.key ENOENT\) — it is handed over once, when the display starts/.test(logNo) && rNo.store && !rNo.store.ok && Date.now() - t1 < 3000, JSON.stringify(rNo.store));
+  check('no key file ⇒ the service refuses BY NAME and says what to do; libsecret gets an error, never a hang', /\[secrets\] no per-display key: the key file is gone \(secrets\.key ENOENT\) — it is handed over once, when the display starts/.test(logNo) && rNo.store && !rNo.store.ok && !/[Tt]imeout|NoReply|timed out/.test(rNo.store.error || ''), JSON.stringify(rNo.store));
   await stopBus(bNo);
   b = await startBus('on');
   probe(b.plan, 'store', 'pw-one-s3cr3t');
