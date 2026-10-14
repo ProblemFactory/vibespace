@@ -431,6 +431,9 @@ class SettingsUI {
 
     const control = this._createControl(path, schema, row);
     controlWrap.appendChild(control);
+    // lane settings-multiline-row (owner 2026-10-14): a multi-line box STACKS — the words above it across the row, the box
+    // under them across the row (style.css "settings rows never squeeze their words"); read off the control, so every textarea row does
+    if (control.tagName === 'TEXTAREA' || control.querySelector('textarea')) row.classList.add('settings-row-stack');
     if (this._governors?.has(path)) controlWrap.addEventListener('change', () => setTimeout(() => { if (this._content?.isConnected) this._rerenderKeepingPlace(this._content, this._nav); }, 0));
 
     // Reset button (only shown when modified)

@@ -9,6 +9,14 @@ import { renderVoiceSheet } from './voice-plugin-card.js'; // the Voice row's �
 import { pluginCategoryOf } from './settings-schema.js';
 import { decisionLineOf, paintDecisionLine, liveDecisionLine } from './decision-readout.js'; // lane decision-spend-readout: the judge's money as the row's second line
 
+// lane decision-vendor-hygiene: the Decision API row's STOPS (decision-model rowStopOf — no call until the key or the
+// model changes): the chip says which, its title says what to do. `s` = the engine's status().stop {why, status, at}.
+const DECISION_STOP_WORDS = Object.freeze({
+  reconnect: (s) => [t('stopped — key refused'), t('Reconnect: the provider refused this key (HTTP {status}).', { status: s.status })],
+  plan: () => [t('stopped — plan refused'), t('The Decision API stopped: the provider says the plan does not allow this model (HTTP 402). Change the model or the key in ⚙ → System → Integrations & keys.')],
+  shape: () => [t('stopped — model refused'), t('The Decision API stopped: the model refused the request shape (HTTP 400). Change the model or the key in ⚙ → System → Integrations & keys.')],
+});
+
 // lane plugin-settings-p0 (owner 2026-10-13, the VS Code plugin model — docs/design-plugin-settings.zh.md): the
 // Plugins sidebar is a plain LIST — one row per plugin: name · one-line description · status chip · on/off switch ·
 // [install / uninstall] · ⚙ (opens All Settings at the plugin's section). Every configuration row lives in All
@@ -98,10 +106,10 @@ export function installPluginsUI(App) {
         if (isDecision) {
           const d = p.decision || {};
           const L = decisionLineOf(p);   // ONE PURE line (decision-model decisionTodayLine): the money is drawn, not hidden in a title
-          chip = !p.enabled ? t('turned off') : p.configured ? t('on · {provider}', { provider: d.providerLabel || '' }) : t('on — no provider key yet');
-          tone = p.enabled && p.configured ? 'ok' : p.enabled ? 'warn' : '';
-          chipTitle = L.text
-            + (d.reconnect ? ' · ' + t('Reconnect: the provider refused this key (HTTP {status}).', { status: d.reconnect.status }) : '');
+          const stopW = p.enabled && d.stop && DECISION_STOP_WORDS[d.stop.why] ? DECISION_STOP_WORDS[d.stop.why](d.stop) : null;   // [chip, title]
+          chip = !p.enabled ? t('turned off') : stopW ? stopW[0] : p.configured ? t('on · {provider}', { provider: d.providerLabel || '' }) : t('on — no provider key yet');
+          tone = stopW ? 'warn' : p.enabled && p.configured ? 'ok' : p.enabled ? 'warn' : '';
+          chipTitle = L.text + (stopW ? ' · ' + stopW[1] : '');
           onSwitch = (on) => act(() => api('enabled', { body: JSON.stringify({ enabled: on }) }));
           fact = Object.assign(document.createElement('div'), { className: 'plugin-row-fact' }); fact.dataset.decisionToday = '1';
           liveDecisionLine(fact, (x) => paintDecisionLine(fact, x, 'short'), { first: p });   // patched in place every 60 s while drawn

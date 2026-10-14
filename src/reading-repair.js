@@ -203,12 +203,37 @@ function _cacheFromAnchor(anchor, prev, window = null) {
   return out;
 }
 
+// THE ANCHORS READ OFF THE LOOP (B-1319): the boot's identity repair read the 22 anchor files (34 MB on production)
+// and parsed them in the listen callback — 133 ms in a lane, 0.27–1.5 s in production boots. prefetchAnchorRows reads
+// them through fs.promises, one file parsed per tick; the next _readAnchorFiles of that folder takes them ONCE, and only
+// while every file is still the size + mtime it was read at (else it reads the folder itself, as before).
+let _prefetched = null;
+async function prefetchAnchorRows(anchorsDir, { next = () => new Promise((r) => setImmediate(r)) } = {}) {
+  const files = [];
+  let names = [];
+  try { names = (await fs.promises.readdir(anchorsDir)).filter((f) => /^anchors-.*\.ndjson$/.test(f)); } catch { _prefetched = null; return 0; }
+  for (const fn of names) {
+    const fp = path.join(anchorsDir, fn);
+    let st, txt; try { st = await fs.promises.stat(fp); txt = await fs.promises.readFile(fp, 'utf-8'); } catch { continue; }
+    const rows = [];
+    for (const line of txt.split('\n')) { if (!line) continue; let r; try { r = JSON.parse(line); } catch { continue; } rows.push(r); }
+    files.push({ file: fp, name: fn, rows, size: st.size, mtimeMs: st.mtimeMs });
+    await next();
+  }
+  _prefetched = { dir: anchorsDir, names, files };
+  return files.length;
+}
 /** Every anchor record across every anchors-*.ndjson (used both for the repair
  *  and to find a surviving reading to restore a cache from). */
 function _readAnchorFiles(anchorsDir) {
   const files = [];
   let names = [];
   try { names = fs.readdirSync(anchorsDir).filter((f) => /^anchors-.*\.ndjson$/.test(f)); } catch { return files; }
+  const pre = _prefetched; _prefetched = null;
+  if (pre && pre.dir === anchorsDir && pre.files.length === names.length && names.every((n, i) => n === pre.names[i])
+    && pre.files.every((f) => { try { const st = fs.statSync(f.file); return st.size === f.size && st.mtimeMs === f.mtimeMs; } catch { return false; } })) {
+    return pre.files.map(({ file, name, rows }) => ({ file, name, rows }));
+  }
   for (const fn of names) {
     const fp = path.join(anchorsDir, fn);
     let txt = ''; try { txt = fs.readFileSync(fp, 'utf-8'); } catch { continue; }
@@ -1369,4 +1394,4 @@ function repairSidecarsByApiPhase({ dataDir, roster = null, accounts = null, id 
   return report;
 }
 
-module.exports = { repairReadings, deathMarkers, isForeign, backfillFromJournal, findJournal, repairUsageCaches, repairAnchors, repairAttribution, sessionKeysFor, _sessionKeyMap, repairByWindow, establishedWindows, identityCacheKeys, repairAnchorsByWindow, repairCachesByWindow, repairGlobalFile, _cacheFromAnchor, _recordAgreesWholly, _primaryDrops, MIN_OWN_READINGS, OWN_DOMINANCE, repairSidecarsByApiPhase, apiPhaseFor, API_PHASE_MIN_ROWS, API_PHASE_DOMINANCE, API_PHASE_HORIZON_MS, READMIT_HORIZON_MS, ORG_FIELDS };
+module.exports = { prefetchAnchorRows, repairReadings, deathMarkers, isForeign, backfillFromJournal, findJournal, repairUsageCaches, repairAnchors, repairAttribution, sessionKeysFor, _sessionKeyMap, repairByWindow, establishedWindows, identityCacheKeys, repairAnchorsByWindow, repairCachesByWindow, repairGlobalFile, _cacheFromAnchor, _recordAgreesWholly, _primaryDrops, MIN_OWN_READINGS, OWN_DOMINANCE, repairSidecarsByApiPhase, apiPhaseFor, API_PHASE_MIN_ROWS, API_PHASE_DOMINANCE, API_PHASE_HORIZON_MS, READMIT_HORIZON_MS, ORG_FIELDS };

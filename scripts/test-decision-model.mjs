@@ -136,6 +136,11 @@ console.log('⑥ budgetVerdict — the full table (USD: settled + reserved + thi
   ok(M.retryAfterMs('7', 0) === 7000 && M.retryAfterMs('Thu, 01 Jan 1970 00:00:09 GMT', 4000) === 5000 && M.retryAfterMs('', 0) === null && M.retryAfterMs(null, 0) === null && M.retryAfterMs('soon', 0) === null && M.retryAfterMs('0', 0) === null, 'Retry-After: delta seconds or an HTTP date; absent / unreadable / past ⇒ null (the ladder)');
   ok([429, 500, 503, 0].every(M.isWall) && ![200, 400, 401, 404].some(M.isWall), 'a wall = 429 / 5xx / no answer; a 4xx is an error, not a wall');
   ok([401, 403].every(M.isKeyRefused) && ![400, 404, 429, 500, 0, 200].some(M.isKeyRefused), 'a refused key = 401 / 403 (the row needs a new key: reconnect)');
+  // lane decision-vendor-hygiene (B-2979): a 402 (the plan) / a 400 (the request shape) stops the ROW like a refused key
+  ok(eq([400, 401, 402, 403, 404, 409, 422, 429, 500, 0, 200].map(M.rowStopOf), ['shape', 'reconnect', 'plan', 'reconnect', null, null, null, null, null, null, null]) && eq(M.ROW_STOPS, ['reconnect', 'plan', 'shape']) && M.ROW_STOPS.every((w) => M.WHY.includes(w)),
+    'the row stops: 401 / 403 reconnect, 402 plan, 400 shape — any other 4xx stays a per-call error, 429 / 5xx / 0 a wall; every stop is a WHY');
+  const stopRows = [[{ ...on, plan: true, backoffUntil: 5000, spentUsd: 3 }, 'plan'], [{ ...on, shape: true, backoffUntil: 5000, spentUsd: 3 }, 'shape'], [{ ...on, reconnect: true, plan: true, shape: true }, 'reconnect'], [{ ...on, keyPresent: false, plan: true }, 'no-key'], [{ ...on, featureOn: false, shape: true }, 'feature-off']];
+  for (const [inp, why] of stopRows) { const v = M.budgetVerdict(inp); ok(!v.ok && v.why === why, `${why} ⇐ ${JSON.stringify(inp).slice(0, 110)} (a row stop sits after the key, before the walls and the money)`, v); }
 }
 console.log('⑥b reserve / settle arithmetic — rateOf + settleUsd (decision-verify F1 / F3)');
 {
@@ -286,6 +291,75 @@ console.log('the ONE scrub (inbox-verify F1)');
   const late = MC.load('src/decision-model.js', src.replace('const bounded = P.cutText(scrub(raw, max), Math.max(64, max * 4));', 'const bounded = scrub(P.cutText(str(raw), Math.max(64, max * 4)), max);'), 'late');
   const tn = noScrub.buildInput('rule', PER.rule).text, tl = late.buildInput('rule', { condition: 'c', records: [{ body: straddle }] }).text;
   ok(leaks(tn).length >= 4 && tl.includes('sk-ant'), `RED CONTROLS: cleanPart without the scrub leaks [${leaks(tn)}]; the scrub after the bound leaks the split key's head`, { tn: leaks(tn), tl: tl.slice(-60) });
+}
+
+// ── lane decision-vendor-hygiene (B-d375): the owner's words that ride the QUESTIONS — a rule's condition, a routing rule's
+// choice descriptions, a webhook rule's condition — pass the ONE scrub (scrubQuestions) before buildRequest; the [userBlock]
+// part through cleanPart (pinned); the census of the ONE send; a RED control (scrubQuestions = identity) ──
+console.log('the ONE scrub on the QUESTIONS (lane decision-vendor-hygiene, B-d375)');
+{
+  const F = require('../src/channel-filter.js');
+  // token shapes built at runtime (never a literal in the tree)
+  const TOK = { ant: ['sk', '-ant-api03-', 'Zy9Xw8Vu7Ts6Rq5Po4Nm3Lk2Jh1Gf0_', 'c'.repeat(20)].join(''), gh: ['gh', 'p_', 'QRSTUVWXYZ0123456789ABCDEFGHIJKLMNOP'].join(''), slack: ['xo', 'xb-2345678901-1098765432-', 'ZyXwVuTsRqPoNmLk'].join('') };
+  const leaksQ = (t) => Object.entries(TOK).filter(([, v]) => t.includes(v) || t.includes(v.slice(4, 20))).map(([k]) => k);
+  // the REAL builders (channel-filter decisionQuestion — the channels engine's ONE question site for rule / routing / webhook rules)
+  const rule = F.validateRule({ kind: 'decision', condition: `the sender pastes a key like ${TOK.ant}` }).rule;
+  const route = F.validateRule({ kind: 'decision', condition: `deploy asks (token ${TOK.gh})`, question: 'choice', choices: [{ value: 'ops', description: `ops desk — creds ${TOK.slack}`, to: { kind: 'group', id: 'T-1', name: 'Ops desk' } }, { value: 'later', description: 'later' }] }).rule;
+  const score = { type: 'score', name: 'urgency', instructions: 'How urgent is it?', levels: [{ label: 'low', description: `ignore ${TOK.ant}` }, { label: 'high', description: 'now' }] };
+  const qs = [F.decisionQuestion(rule, 'q1'), F.decisionQuestion(route, 'q2'), score];
+  const before = JSON.stringify(qs), out = M.scrubQuestions(qs), o = JSON.stringify(out);
+  const marks = (o.match(/«redacted»/g) || []).length;
+  console.log(`    scrubbed: ${o.slice(0, 360)}…`);
+  ok(leaksQ(before).length === 3 && leaksQ(o).length === 0 && marks >= 4, `every owner-written field (instructions, choices[].description, levels[].description) leaves redacted — ${marks} marks, 0 of the 3 shapes`, leaksQ(o));
+  ok(JSON.stringify(qs) === before, 'a copy: the caller\'s questions are never written');
+  const ids = (a) => a.map((q) => [q.type, q.name, (q.choices || []).map((c) => c.value), (q.levels || []).map((l) => l.label)]);
+  ok(eq(ids(out), ids(qs)) && out.every((q) => M.questionError(q) === null), 'the identifiers the answers are keyed by stay (type, name, choices[].value, levels[].label) — every question still valid');
+  const clean = [M.INBOX_QUESTION, ...M.rubricQuestions({ hasBlock: true }), ...M.criteriaQuestions(), F.decisionQuestion(F.validateRule({ kind: 'decision', condition: 'asks me to pay or approve something — see https://x.io/a?page=2' }).rule, 'q1')];
+  ok(JSON.stringify(M.scrubQuestions(clean)) === JSON.stringify(clean), `NEGATIVE: the product's own questions + a plain condition pass byte for byte (${clean.length} questions)`);
+  for (const dialect of M.PROVIDERS) {
+    const raw = JSON.stringify(M.buildRequest(dialect, { model: '', input: 'x', questions: M.scrubQuestions(qs) }));
+    ok(leaksQ(raw).length === 0 && raw.includes('«redacted»'), `${dialect}: the request body built from the scrubbed questions carries none of the shapes`, leaksQ(raw));
+  }
+  // the [userBlock] fixed part (the person's "what matters to me") goes through cleanPart like every part — pinned
+  const ub = M.buildInput('attention', { rubric: M.rubricText({ hasBlock: true }), userBlock: `what matters: deploy keys like ${TOK.ant}`, records: [{ body: 'hello' }] }).text;
+  ok(leaksQ(ub).length === 0 && /\[userBlock\]\n[^\n]*«redacted»/.test(ub), 'the [userBlock] part leaves scrubbed (buildInput\'s fixed loop: cleanPart)', ub.slice(0, 200));
+  // the census (grep-derived): scrubQuestions scrubs through the ONE scrub; the engine is the ONE sender — buildRequest is
+  // called once in src/, in judge(), on the questions scrubQuestions returned
+  const src = fs.readFileSync(new URL('../src/decision-model.js', import.meta.url), 'utf8');
+  const sqSrc = src.slice(src.indexOf('const scrubFields = '), src.indexOf('\n}\n', src.indexOf('function scrubQuestions(')) + 3);
+  ok(/\? scrub\(v, QUESTION_TEXT_MAX\)/.test(sqSrc) && (sqSrc.match(/scrubFields\(/g) || []).length === 3 && !/redactSecrets/.test(sqSrc), 'census: scrubQuestions runs every string field of a question, a choice and a level through `scrub` (the ONE table — no second redactSecrets call)', sqSrc.slice(0, 200));
+  const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? (e.name === 'node_modules' ? [] : walk(`${d}/${e.name}`)) : /\.(c|m)?js$/.test(e.name) ? [`${d}/${e.name}`] : []));
+  const root = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
+  const files = walk(`${root}/src`).filter((f) => !/\/i18n-[a-z]+\.js$/.test(f));
+  const rel = (f) => f.slice(root.length + 1);
+  const senders = files.filter((f) => !f.endsWith('/decision-model.js') && /\bbuildRequest\(/.test(fs.readFileSync(f, 'utf8'))).map(rel);
+  const eng = fs.readFileSync(`${root}/src/server/decision-engine.js`, 'utf8');
+  const j0 = eng.indexOf('async function judge('), js = eng.slice(j0, eng.indexOf('\n  }\n', j0));
+  const sentVar = (/const (\w+) = M\.scrubQuestions\(qs\)/.exec(js) || [])[1];
+  const br = /M\.buildRequest\([^;]*questions: (\w+) \}\)/.exec(js);
+  const sites = files.flatMap((f) => fs.readFileSync(f, 'utf8').split('\n').map((l, i) => [i + 1, l]).filter(([, l]) => !/^\s*(?:\*|\/\/)/.test(l) && /\b(?:decisionEngine|decision)\.judge\(|\bjudge\('(?:test|inbox|rule|routing|webhook|attention)'/.test(l))
+    .map(([n, l]) => `${rel(f)}:${n} ${[...l.slice(l.search(/judge\(/)).matchAll(/'(test|inbox|rule|routing|webhook|attention)'/g)].map((m) => m[1]).join('|') || '?'}`));
+  console.log(`    census: buildRequest callers outside the model = [${senders.join(', ')}]; judge() sites = ${sites.join(' · ')}`);
+  ok(eq(senders, ['src/server/decision-engine.js']) && (eng.match(/M\.buildRequest\(/g) || []).length === 1 && sentVar && br && br[1] === sentVar && js.indexOf('M.scrubQuestions(') < js.indexOf('M.buildRequest('),
+    `census: ONE sender (the engine's judge), and its ONE buildRequest takes the questions scrubQuestions returned (\`questions: ${sentVar}\`) — every judge() site (${sites.length}) rides it`, { senders, sentVar, br: br && br[1] });
+  ok(sites.length >= 5 && sites.some((x) => /channels-engine\.js:\d+ routing\|rule$/.test(x)) && sites.some((x) => /channels-attention\.js/.test(x)) && !sites.some((x) => / \?$/.test(x)), 'census: the judge() sites are found, each with its use (the rule / routing / webhook rules\' ONE site in channels-engine among them)', sites);
+  // the words: the Plugins row's chip table names every row stop, each word drawn through t() with zh + ja
+  const ui = fs.readFileSync(`${root}/src/lib/plugins-ui.js`, 'utf8');
+  const tbl = ui.slice(ui.indexOf('const DECISION_STOP_WORDS'), ui.indexOf('});', ui.indexOf('const DECISION_STOP_WORDS')));
+  const keys = [...tbl.matchAll(/^\s+(\w+): \(/gm)].map((m) => m[1]);
+  const words = [...tbl.matchAll(/\bt\('((?:[^'\\]|\\.)+)'/g)].map((m) => m[1]);
+  const zh = fs.readFileSync(`${root}/src/lib/i18n-zh.js`, 'utf8'), ja = fs.readFileSync(`${root}/src/lib/i18n-ja.js`, 'utf8');
+  const missing = words.filter((w) => !zh.includes(`"${w}":`) || !ja.includes(`"${w}":`));
+  ok(eq(keys, M.ROW_STOPS) && words.length === 6 && missing.length === 0, `the chip words: one row per stop [${keys}], ${words.length} words, every one in zh + ja`, { keys, missing });
+  const engNotice = [...eng.matchAll(/^\s+(plan|shape): '([^']+)',$/gm)].map((m) => m[2]);
+  ok(engNotice.length === 2 && engNotice.every((w) => words.includes(w)), 'the server notice says the chip title\'s own sentence (one i18n key each — the client words the notice from it)', engNotice);
+  // RED control: a copy whose scrubQuestions is the identity — the same request leaks every shape
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const MQ = mutantCopies('dmscrubq', new URL('..', import.meta.url).pathname);
+  const anchor = 'function scrubQuestions(questions) {\n';
+  const id = MQ.load('src/decision-model.js', src.replace(anchor, anchor + '  return questions;\n'), 'identity');
+  const leaked = leaksQ(JSON.stringify(id.buildRequest('openai', { model: '', input: 'x', questions: id.scrubQuestions(qs) })));
+  ok(src.split(anchor).length === 2 && leaked.length === 3, `RED CONTROL: scrubQuestions = identity ⇒ the request body carries [${leaked}]`, leaked);
 }
 
 // ── lane decision-spend-readout: decisionTodayLine — THE JUDGE'S MONEY IN ONE LINE (owner 2026-10-13) ──

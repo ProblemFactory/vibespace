@@ -1782,8 +1782,8 @@ html:not(.voice-absent) .voice-field-grip > textarea { padding-right: 44px; }
 .settings-slider { display: inline-flex; align-items: center; gap: 6px; }
 .settings-input-range { width: 120px; }
 .settings-slider-value { font-size: 12px; font-variant-numeric: tabular-nums; min-width: 2.6em; }
-.chan-attn-door { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; margin: 0; }
-.chan-attn-door-glyph { font-size: 13px; line-height: 1; }
+/* lane chan-attn-door-icon: the door is the cog ALONE — a 24 px square (the filter box's height) at every panel width */
+.chan-attn-door { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; box-sizing: border-box; width: 24px; height: 24px; margin: 0; padding: 0; }
 .chan-attn-pop { width: min(440px, calc(100vw - 16px)); max-height: min(70vh, 640px); overflow: auto; padding: 4px 12px 10px; background: var(--bg-dialog); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35); }
 .chan-attn-pop .settings-row-path, .chan-attn-sheet .settings-row-path { display: none; }
 .chan-attn-more { margin-top: 8px; }
@@ -1858,6 +1858,22 @@ html:not(.voice-absent) .voice-field-grip > textarea { padding-right: 44px; }
 .settings-combobox { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .settings-combobox .settings-select { flex-shrink: 0; }
 .settings-combobox .settings-input-text { flex: 1; min-width: 180px; }
+/* SETTINGS ROWS NEVER SQUEEZE THEIR WORDS (lane settings-multiline-row, owner 2026-10-14: 「我在乎什么」's box kept its width and
+   left its words an 80 px sliver in a 760 px window). THE RAIL: the words keep ≥ 40 % of the row — a control that would leave
+   them less wraps onto its own line under them, at the right (a row with room lays out exactly as before: the words still
+   take the free space). THE STACK: a row whose control holds a textarea (settings-ui adds settings-row-stack) puts the words
+   on top across the row, the box under them across the row, its buttons on one line under the box at the right. */
+.settings-row { flex-wrap: wrap; }
+.settings-row-info { min-width: 40%; }
+.settings-row-control { margin-left: auto; }
+.settings-row.settings-row-stack { flex-direction: column; align-items: stretch; row-gap: 8px; }
+.settings-row-stack > .settings-row-control { flex-shrink: 1; min-width: 0; margin-left: 0; align-items: flex-start; }
+.settings-row-stack > .settings-row-control > :first-child { flex: 1 1 0%; min-width: 0; }
+.settings-row-stack .settings-json { width: 100%; min-width: 0; min-height: 4.5em; resize: vertical; }
+.settings-multiline { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 6px; }
+.settings-multiline > .settings-multiline-text { flex: 1 1 100%; }
+.settings-multiline > .settings-link-btn { margin-top: 0; }
+/* end: settings rows never squeeze their words */
 .btn-create {
   padding: 5px 14px; background: var(--accent); border: 1px solid var(--accent);
   color: var(--accent-fg, #fff); border-radius: var(--radius-sm); cursor: pointer; font-size: 12px; font-weight: 500;
@@ -5211,7 +5227,6 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
    the word cannot share the line (the 260px default sidebar = 172px of bar) */
 @container chan-panel (max-width: 200px) {
   .chan-outbox-label { display: none; }
-  .chan-attn-door-label { display: none; }   /* lane attention-policy: the ⚙ alone at the rail */
   /* channel-polish: at the default rail the account's NAME was cut to "Lark / …" by the chips beside it — the
      client chip (its words are in Edit and in the tooltip) and the count (the health line says it) step aside */
   .chan-sec-head .chan-sec-name { min-width: min(3em, 22%); }
@@ -6013,6 +6028,7 @@ label.chan-cap-row { cursor: default; }
   .chanmsg > .chanmsg-av { --av-size: 32px; }
   a.chanmsg-file { min-height: 44px; }
   .chan-find-input, .chan-find .mounts-btn, .chan-view-seg .chan-view-btn, .chan-sec-verb, .chan-connect-btn, .chan-more-btn { min-height: 36px; }
+  .chan-find .chan-attn-door { width: 36px; }   /* lane chan-attn-door-icon: the cog's square at the touch size */
   .chan-sec-edit, .chan-window .mounts-icon-btn { min-width: 36px; min-height: 36px; }
   /* the principal picker on a phone: every row, chip, the box and the trigger ≥ 36 px */
   .pp-row { min-height: 40px; }

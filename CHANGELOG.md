@@ -2,6 +2,25 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.267 — 2026-10-13
+
+### Added
+- ⚙ → Diagnostics report shows the longest pauses of this server's start and what each one was.
+
+### Changed
+- A block the Doc window shows read-only now says what it is: “Markdown block · shown as its content · edit source”.
+
+### Fixed
+- The Decision API stops and tells you once when its provider refuses your plan or the request, instead of calling again for every message.
+- After a restart VibeSpace no longer freezes for seconds while it loads the usage history and reconnects sessions; pages and paired devices keep answering.
+- A table in a Markdown document opens as a table you can edit in the Doc window, even when a cell holds a placeholder in angle brackets.
+- In Channels, the button that shows how “needs attention” is decided is a gear icon at every width, no longer a wide button with words.
+- In All Settings a multi-line box, like “What matters to me” in Plugins › Decision API, now sits under its setting's name and description, across the window.
+- A setting whose control is too wide for the window shows it under the name and description instead of squeezing them into a narrow column.
+
+### Security
+- Keys and passwords in a rule's condition or option text are hidden before the Decision API sends them, like those in the messages it reads.
+
 ## 2.369.266 — 2026-10-13
 
 ### Added

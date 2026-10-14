@@ -45,7 +45,8 @@ module.exports = {
       status: () => {
         const on = !!h.peek().enabled;
         const s = eng ? eng.status() : null;
-        return { installed: true, running: on, enabled: on, configured: !!(s && s.configured), decision: { ...(s || {}), ...cfg() } };
+        // lane decision-vendor-hygiene: `why` names the row stop that holds (reconnect | plan | shape) — null while calls may go out
+        return { installed: true, running: on, enabled: on, configured: !!(s && s.configured), why: s && s.stop ? s.stop.why : null, decision: { ...(s || {}), ...cfg() } };
       },
       // the old /config door (an agent or a script): validated, then written through the settings rows
       config: (patch = {}) => {

@@ -67,7 +67,7 @@ export const ROWS = [
   ['src/proc-listen.js', 'own-tree', 4, null, PROC],
   ['src/quota-model-migrate.js', 'own-tree', 2, null, CLI],
   ['src/rate-limit-capture.js', 'own-tree', 3, null, CLI],
-  ['src/reading-repair.js', 'own-tree', 10, null, CLI],
+  ['src/reading-repair.js', 'own-tree', 14, null, CLI], // B-1319: +4 = prefetchAnchorRows (readdir / stat / readFile through fs.promises) + the size+mtime check before its rows are taken
   ['src/remote-fs.js', 'own-tree', 1, null, DATA],
   ['src/routes/apps.js', 'own-tree', 4, null, DATA],
   ['src/routes/browser-trace.js', 'own-tree', 2, null, DATA],
@@ -86,7 +86,7 @@ export const ROWS = [
   ['src/server/apps-engine.js', 'own-tree', 1, null, DATA],
   ['src/server/auto-cli-loop.js', 'own-tree', 2, null, CLI],
   ['src/server/auto-resume.js', 'own-tree', 1, null, CLI],
-  ['src/server/boot-restore.js', 'own-tree', 13, null, DATA],
+  ['src/server/boot-restore.js', 'own-tree', 14, null, DATA], // B-1319: +1 = probeSockets' readdir of the sockets folder (the restore's probes, before listen)
   ['src/server/bridge-watch.js', 'own-tree', 6, null, PROC],
   ['src/server/browser-bindings.js', 'own-tree', 2, null, DATA],
   ['src/server/browser-builds-keeper.js', 'own-tree', 8, null, DATA],
@@ -132,7 +132,7 @@ export const ROWS = [
   ['src/server/mounts-plugins-wiring.js', 'own-tree', 10, null, DATA], // lane passkey-store-core: +3 — data/browser-passkeys.json + its key file (own data dir)
   ['src/server/oat-mint.js', 'own-tree', 3, null, 'its own 0700 scratch dir per mint (the $BROWSER URL file) + the boot sweep of its own orphaned vs-oat-mint-* dirs (readdir + lstat of tmpRoot)'],
   ['src/server/ops-routes.js', 'own-tree', 10, null, DATA],
-  ['src/server/otel-ingest.js', 'own-tree', 4, null, CLI],
+  ['src/server/otel-ingest.js', 'own-tree', 5, null, CLI], // B-1319: +1 = the stash replay's fs.promises read (the sync read stays, for a reader before the replay is done)
   ['src/server/permission-rules.js', 'own-tree', 3, null, CLI],
   ['src/server/plugin-install.js', 'own-tree', 16, null, DATA],
   ['src/server/plugin-loader.js', 'own-tree', 16, null, DATA],
@@ -162,7 +162,7 @@ export const ROWS = [
   ['src/usage-anchors.js', 'own-tree', 1, null, CLI],
   ['src/usage-cache-write.js', 'own-tree', 2, null, CLI],
   ['src/usage-estimator.js', 'own-tree', 3, null, CLI],
-  ['src/usage-history.js', 'own-tree', 17, null, CLI], // r3: +1 = the append-only proof (probeHolds: the old tail at its old offset) // B-9428 r2: the cold rows are read by usage-cold-walk.js (its own row)
+  ['src/usage-history.js', 'own-tree', 18, null, CLI], // B-1319: +1 = readBytesSync (a stepped slice's append-proof bytes before the slice) // r3: +1 = the append-only proof (probeHolds: the old tail at its old offset) // B-9428 r2: the cold rows are read by usage-cold-walk.js (its own row)
   ['src/usage-cold-walk.js', 'own-tree', 3, null, CLI], // r3: + the sync one-line read (a hash hit's string compare) // B-9428 r2: the ledger's cold rows at their (shard, offset) — the worker's fold, aggregate()/rows(), the popup's one line
   ['src/usage-index-worker.js', 'own-tree', 6, null, CLI],
   ['src/usage-origin-backfill.js', 'own-tree', 10, null, CLI],

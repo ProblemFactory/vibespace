@@ -12,8 +12,12 @@
  *      the hour: a QUIET named refusal (journalled once per reason per 5 min; the day's budget stop says ONE server
  *      notice) — and on a pass the estimate is reserved IN THE SAME synchronous step (`reserve`), so N judgments in
  *      flight with room for one make exactly one call;
- *   4. ONE fetch to the dialect's URL — 429 ⇒ its Retry-After (else the ladder), 5xx / a network failure ⇒ backoff
- *      1 → 5 → 15 min, 401 / 403 ⇒ the row needs a new key (`reconnect`: no call until the key changes), NEVER a retry;
+ *   4. ONE fetch to the dialect's URL (every question's owner-written text through `M.scrubQuestions` first — the ONE
+ *      scrub, B-d375) — 429 ⇒ its Retry-After (else the ladder), 5xx / a network failure ⇒ backoff 1 → 5 → 15 min;
+ *      a ROW STOP (`M.rowStopOf`, lane decision-vendor-hygiene): 401 / 403 ⇒ the row needs a new key (`reconnect`),
+ *      402 ⇒ the plan does not allow the model (`plan`), 400 ⇒ the model refused the request shape (`shape`) — no
+ *      call until the key, the provider or the model changes (the owner's Test still calls; its 200 lifts the stop),
+ *      `plan` / `shape` say ONE server notice; NEVER a retry, never one call a record;
  *   5. SETTLE: the reservation is replaced by `settleUsd` (the vendor's recorded usage.cost, else the reservation —
  *      never 0 for a 200; an answered 4xx / 5xx costs 0) in the counter per day per use (data/decision-usage.json,
  *      tmp + rename; it also keeps the row's recorded cost per token, which prices the next estimates), and a journal
@@ -67,8 +71,9 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
   let backoff = { step: 0, until: 0 };
   const open = new Map();                              // reservation id → {use, usd}: estimates of the calls in flight
   let openSeq = 0;
-  let refused = null;                                  // {keySha, status, at}: the provider refused THIS key (401 / 403)
-  let state = 'ok';                                    // ok | backoff | reconnect — logged once per change
+  let stop = null;                                     // {sig, why, status, at}: the provider refused THIS key + model (a row stop)
+  let state = 'ok';                                    // ok | backoff | reconnect | plan | shape — logged once per change
+  let noticedStop = null;                              // the row stop whose notice reached a client (one per stop)
   let lastOutcome = null;
   const quietAt = new Map();                           // why → last journalled at
   let noticedDay = null;
@@ -104,6 +109,9 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
   const totalOf = (u) => Object.values(u.byUse).reduce((s, x) => ({ calls: s.calls + x.calls, inputTokens: s.inputTokens + x.inputTokens, outputTokens: s.outputTokens + x.outputTokens, usd: s.usd + x.usd }), { calls: 0, inputTokens: 0, outputTokens: 0, usd: 0 });
   const reservedUsd = () => [...open.values()].reduce((a, r) => a + r.usd, 0);
   const rateKey = (cred) => `${cred.provider} ${cred.model}`;
+  /** A row stop holds while the credential is the one refused: the same key, provider and model (a change of any lifts it). */
+  const credSig = (cred) => sha(`${cred.provider}\n${cred.model}\n${cred.key}`);
+  const stopOf = (cred) => (stop && cred && stop.sig === credSig(cred) ? stop.why : null);
   function say(next, line) { if (next !== state) { state = next; log.warn?.(`[decision] ${line}`); } }
   /** RESERVE — the verdict and the write in ONE synchronous step (no await between them): the ceiling sees every
    *  call in flight. → {v, id?}. */
@@ -112,9 +120,10 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
     const rate = cred ? M.rateOf((usage.rate || {})[rateKey(cred)], M.PRICE_PER_MTOK_USD[cred.provider]) : 0;
     const estUsd = est * rate;
     while (hourCalls.length && hourCalls[0] <= t - 3600e3) hourCalls.shift();
+    const held = use === 'test' ? null : stopOf(cred);   // the owner's Test always calls: it is how a fixed plan is seen
     const v = M.budgetVerdict({
       pluginOn: use === 'test' || s.pluginOn, featureOn: feature === null || s.features[feature] === true, keyPresent: !!cred, accountNever,
-      reconnect: use !== 'test' && !!(refused && cred && refused.keySha === sha(cred.key)), backoffUntil: backoff.until, now: t,
+      reconnect: held === 'reconnect', plan: held === 'plan', shape: held === 'shape', backoffUntil: backoff.until, now: t,
       spentUsd: totalOf(today()).usd + reservedUsd(), estUsd, ceilingCents: s.dailyBudgetCents, hourCount: hourCalls.length, perHour,
     });
     if (!v.ok) return { v };
@@ -154,8 +163,21 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
     while (memo.size > M.MEMO_MAX) memo.delete(memo.keys().next().value);
     try { writeJsonAtomic(F.memo, { entries: [...memo.entries()] }); } catch (e) { log.warn?.(`[decision] memo not saved: ${e.message}`); }
   }
+  // lane decision-vendor-hygiene: a row stop the owner must act on (the plan, the request shape) says ONE server notice — the
+  // client words it from the i18n key, `text` stays the English; a notice no client received is said again at the next refusal
+  const STOP_NOTICE = Object.freeze({
+    plan: 'The Decision API stopped: the provider says the plan does not allow this model (HTTP 402). Change the model or the key in ⚙ → System → Integrations & keys.',
+    shape: 'The Decision API stopped: the model refused the request shape (HTTP 400). Change the model or the key in ⚙ → System → Integrations & keys.',
+  });
+  function stopNotice(why) {
+    if (!stop || !STOP_NOTICE[why]) return;
+    const key = `decision-stop:${why}:${stop.sig.slice(0, 12)}`;
+    if (noticedStop === key) return;
+    try { const d = serverNotice?.(key, STOP_NOTICE[why], { level: 'warn', i18n: { key: STOP_NOTICE[why] } }); if (d !== 0) noticedStop = key; } catch { }
+  }
   function quiet(use, why, extra = {}) {
     lastOutcome = { at: now(), use, outcome: 'refused', why };
+    if (why === 'plan' || why === 'shape') stopNotice(why);
     const k = `${use}:${why}`;
     if (!(now() - (quietAt.get(k) || 0) < QUIET_MS)) { quietAt.set(k, now()); journal({ use, outcome: 'refused', why, ...extra }); }
     if (why === 'daily-budget' && noticedDay !== usage.day) {
@@ -174,14 +196,15 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
     if (key && memo.has(key)) { const a = memo.get(key); memo.delete(key); memo.set(key, a); return { ok: true, memo: true, answers: n > 1 ? M.unbatchAnswers(a, n) : a }; }
     const s = settings();
     const cred = credential(resolved);
-    if (refused && cred && refused.keySha !== sha(cred.key)) { refused = null; say('ok', 'a new key is saved: calls resume'); }
+    if (stop && cred && stop.sig !== credSig(cred)) { stop = null; say('ok', 'a new key or model is saved: calls resume'); }
     const input = M.buildInput(use, parts);
     if (input.est > input.ceiling) return quiet(use, 'over-ceiling');            // the plan and the builder disagree — never sent
     const est = input.est + M.questionTokens(qs);
     const t = now();
     const { v, id, estUsd } = reserve(use, { s, cred, accountNever, est, perHour, t });   // budgetVerdict + the reservation, one step
     if (!v.ok) return quiet(use, v.why, v.retryAt ? { retryAt: v.retryAt } : {});
-    const body = M.buildRequest(cred.provider, { model: cred.model, input: input.text, questions: qs });
+    const sent = M.scrubQuestions(qs);   // B-d375: a rule's condition / a choice's description are the owner's words — the ONE scrub
+    const body = M.buildRequest(cred.provider, { model: cred.model, input: input.text, questions: sent });
     const url = M.urlOf(cred.provider, baseUrlFor && baseUrlFor[cred.provider]);
     const reserved = Math.round(estUsd * 1e8) / 1e8;
     const base = { use, memo: key, dialect: cred.provider, model: cred.model, est, reserved, truncated: input.truncated, n, keyFp: sha(cred.key).slice(0, 6) };
@@ -199,12 +222,15 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
     const usd = M.settleUsd({ status, usage: json ? u : null, reservedUsd: estUsd, pricePerMtok: M.PRICE_PER_MTOK_USD[cred.provider] });
     settle(id, use, u, usd, est);
     const spent = { inputTokens: u.inputTokens || undefined, usd };
-    if (M.isKeyRefused(status)) {
-      refused = { keySha: sha(cred.key), status, at: now() };
-      say('reconnect', `the provider refused the key (HTTP ${status}): no call until a new key is saved`);
-      lastOutcome = { at: now(), use, outcome: 'reconnect', status };
-      journal({ ...base, ...spent, outcome: 'reconnect', status });
-      return { ok: false, why: 'reconnect', status };
+    const halt = M.rowStopOf(status);   // B-2979: 401 / 403 the key, 402 the plan, 400 the shape — the ROW stops, not this record
+    if (halt) {
+      stop = { sig: credSig(cred), why: halt, status, at: now() };
+      say(halt, halt === 'reconnect' ? `the provider refused the key (HTTP ${status}): no call until a new key is saved`
+        : `${halt === 'plan' ? 'the provider says the plan does not allow' : 'the model refused the request shape of'} ${cred.model} (HTTP ${status}): no call until the key or the model changes`);
+      stopNotice(halt);
+      lastOutcome = { at: now(), use, outcome: halt, status };
+      journal({ ...base, ...spent, outcome: halt, status });
+      return { ok: false, why: halt, status };
     }
     if (M.isWall(status)) {
       backoff = M.nextBackoff(backoff, now(), 'wall', { retryAfter });
@@ -215,7 +241,7 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
     }
     if (!json) { lastOutcome = { at: now(), use, outcome: 'error', status }; journal({ ...base, ...spent, outcome: 'error', status }); return { ok: false, why: 'vendor-error', status }; }
     backoff = M.nextBackoff(backoff, now(), 'ok');
-    if (refused) refused = null;
+    if (stop) stop = null;
     say('ok', 'the provider answers again');
     if (u.costUsd !== null && u.inputTokens > 0) {   // the row's recorded cost per token (prices the next estimates)
       const d = today(); const rk = rateKey(cred);
@@ -270,12 +296,14 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
     const s = settings();
     const cred = credential();
     const d = today();
+    const held = stopOf(cred);
     return {
       configured: !!cred, provider: cred ? cred.provider : null, providerLabel: cred ? M.PROVIDER_LABEL[cred.provider] : null, model: cred ? cred.model : null, keySource: cred ? cred.source : null,
       features: s.features, dailyBudgetCents: s.dailyBudgetCents, threshold: s.threshold,
       today: { day: d.day, byUse: d.byUse, total: totalOf(d), reserved: Math.round(reservedUsd() * 1e8) / 1e8, inFlight: open.size },
       month: monthSoFar(),
-      backoffUntil: backoff.until > now() ? backoff.until : 0, reconnect: refused && cred && refused.keySha === sha(cred.key) ? { status: refused.status, at: refused.at } : null, last: lastOutcome,
+      backoffUntil: backoff.until > now() ? backoff.until : 0, reconnect: held === 'reconnect' ? { status: stop.status, at: stop.at } : null, last: lastOutcome,
+      stop: held ? { why: held, status: stop.status, at: stop.at } : null,   // lane decision-vendor-hygiene: the row stop that holds (reconnect | plan | shape)
       inbox: inboxLast,   // lane decision-inbox-rank: the For-you tray's last pass {at, judged, placed, stopped} — a stopped pass is said
     };
   }

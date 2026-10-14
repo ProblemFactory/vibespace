@@ -19,6 +19,10 @@
  *    flight + this call's estimate (input tokens × `rateOf`), the day = the instance's local day, the default
  *    ceiling = 100 cents (owner 2026-10-12: 1 USD a day); `settleUsd` — what a call finally costs (the vendor's
  *    recorded cost, else the reservation; an answered 4xx / 5xx costs 0); `nextBackoff` — a wall is never retried;
+ *  · `rowStopOf` — the answers that stop the ROW until the owner changes the key or the model (401 / 403 the key,
+ *    402 the plan, 400 the request's shape — lane decision-vendor-hygiene), never a call a record;
+ *  · `scrubQuestions` — the owner's words that ride the QUESTIONS (a rule's condition, a choice's description) pass
+ *    the ONE scrub too, before buildRequest (lane decision-vendor-hygiene);
  *  · `journalRow` — what a call leaves behind: never the key, never a text the vendor or a peer wrote;
  *  · RUBRIC v2 (needs_now + the seven clauses; `matters` only when the person's block is non-empty) — the REASON of a
  *    verdict is the clauses the decision itself selected (predicate ≥ the clause threshold), named through OUR word
@@ -53,7 +57,7 @@ const RETRY_AFTER_MAX_MS = 60 * 60 * 1000;   // a 429's Retry-After is honoured 
 const RATE_MIN_CALLS = 20;                   // recorded-cost calls before the row's own average prices the estimate
 const MEMO_MAX = 5000;
 const FEATURES = Object.freeze(['attention', 'rules', 'routing', 'inbox']);   // inbox = use ④, the For-you tray's two sections (lane inbox-decision-group)
-const WHY = Object.freeze(['plugin-off', 'feature-off', 'no-key', 'account-never', 'reconnect', 'backoff', 'daily-budget', 'per-hour']);
+const WHY = Object.freeze(['plugin-off', 'feature-off', 'no-key', 'account-never', 'reconnect', 'plan', 'shape', 'backoff', 'daily-budget', 'per-hour']);
 
 const DIALECTS = Object.freeze({
   openai: { baseUrl: 'https://api.openai.com', path: '/v1/decisions' },
@@ -232,6 +236,25 @@ function cleanPart(raw, max, kind = 'block') {
   const bounded = P.cutText(scrub(raw, max), Math.max(64, max * 4));
   return cutHeadTail(maskAddresses(P.toAgentText(bounded, { max: Math.max(64, max * 4), kind })), max);
 }
+/** THE ONE SCRUB on the QUESTIONS (lane decision-vendor-hygiene, B-d375): a rule's condition, a routing rule's choice
+ *  descriptions and a webhook rule's condition are the OWNER's words and ride `questions[]`, not the input — buildInput
+ *  never sees them, so the engine passes every question through here before buildRequest. Every string field of a
+ *  question, of its choices and of its levels goes through the same `scrub` as every input part, EXCEPT the identifiers
+ *  the answers are keyed by (`type`, `name`, `choices[].value`, `levels[].label` — questionError holds a value to a
+ *  slug). Nothing is cut (the bound is 4× QUESTION_TEXT_MAX); a copy — the caller's question is never written. */
+const QUESTION_TEXT_MAX = 1000;
+const QUESTION_IDS = Object.freeze({ question: ['type', 'name'], choice: ['value'], level: ['label'] });
+const scrubFields = (o, ids) => (o && typeof o === 'object' && !Array.isArray(o)
+  ? Object.fromEntries(Object.entries(o).map(([k, v]) => [k, typeof v === 'string' && !ids.includes(k) ? scrub(v, QUESTION_TEXT_MAX) : v])) : o);
+function scrubQuestions(questions) {
+  return (Array.isArray(questions) ? questions : []).map((q) => {
+    const o = scrubFields(q, QUESTION_IDS.question);
+    if (!o || typeof o !== 'object' || Array.isArray(o)) return o;
+    if (Array.isArray(o.choices)) o.choices = o.choices.map((c) => scrubFields(c, QUESTION_IDS.choice));
+    if (Array.isArray(o.levels)) o.levels = o.levels.map((l) => scrubFields(l, QUESTION_IDS.level));
+    return o;
+  });
+}
 
 // The plans — DATA (design §2.10's table): `fixed` parts first, `variable` (per record) last; caps in characters
 // per part, ceilings in estTokens. `batch` = records per call — ONE for attention, inbox and every wake-path use (the
@@ -330,8 +353,9 @@ function rateOf(stats, pricePerMtok = PRICE_PER_MTOK_USD.openai) {
  *  call's estimate (`estUsd`) against the ceiling in cents. The engine reserves `estUsd` in the same synchronous
  *  step as this verdict, so N calls in flight can never all pass one ceiling (decision-verify F2).
  *  → {ok:true, ceilingUsd} | {ok:false, why ∈ WHY, retryAt?}. Order: the switches, the key, the account, a key the
- *  provider refused, then the walls (a backoff names its end), then the money, then the hour. */
-function budgetVerdict({ pluginOn = false, featureOn = false, keyPresent = false, accountNever = false, reconnect = false, backoffUntil = 0, now = 0,
+ *  provider refused, the plan / the request shape it refused (the row stops — lane decision-vendor-hygiene), then the
+ *  walls (a backoff names its end), then the money, then the hour. */
+function budgetVerdict({ pluginOn = false, featureOn = false, keyPresent = false, accountNever = false, reconnect = false, plan = false, shape = false, backoffUntil = 0, now = 0,
   spentUsd = 0, estUsd = 0, ceilingCents = undefined, ceilingUsd = undefined, hourCount = 0, perHour = Infinity } = {}) {
   const cents = ceilingCents !== undefined ? Number(ceilingCents) : ceilingUsd !== undefined ? Number(ceilingUsd) * 100 : DAILY_BUDGET_CENTS_DEFAULT;
   const ceiling = (Number.isFinite(cents) && cents >= 0 ? cents : DAILY_BUDGET_CENTS_DEFAULT) / 100;
@@ -340,6 +364,8 @@ function budgetVerdict({ pluginOn = false, featureOn = false, keyPresent = false
   if (!keyPresent) return { ok: false, why: 'no-key' };
   if (accountNever) return { ok: false, why: 'account-never' };
   if (reconnect) return { ok: false, why: 'reconnect' };
+  if (plan) return { ok: false, why: 'plan' };
+  if (shape) return { ok: false, why: 'shape' };
   if (Number(backoffUntil) > Number(now)) return { ok: false, why: 'backoff', retryAt: Number(backoffUntil) };
   if (microUsd(spentUsd) + microUsd(estUsd) > microUsd(ceiling)) return { ok: false, why: 'daily-budget', ceilingUsd: ceiling };
   if ((Number(hourCount) || 0) >= perHour) return { ok: false, why: 'per-hour' };
@@ -373,6 +399,13 @@ function nextBackoff(prev = {}, now = 0, outcome = 'wall', { retryAfter = null }
 const isWall = (status) => status === 429 || (status >= 500 && status <= 599) || status === 0;
 /** The provider refused the KEY: the row needs a new one (the card says Reconnect) — no call until the key changes. */
 const isKeyRefused = (status) => status === 401 || status === 403;
+/** A ROW STOP (lane decision-vendor-hygiene, B-2979): an answer that would be the same for every record until the owner
+ *  changes the key or the model — 401 / 403 the key (`reconnect`), 402 the plan (`plan`: payment required — the plan
+ *  does not allow this model), 400 the request's shape (`shape`: the model refused it; measured 2026-10-12, two models
+ *  answered 400 to every call). The engine makes no call until the key, the provider or the model changes (or the
+ *  owner's Test answers 200) — never one call a record. Any other 4xx stays a per-call error. → why ∈ ROW_STOPS | null. */
+const ROW_STOPS = Object.freeze(['reconnect', 'plan', 'shape']);
+const rowStopOf = (status) => (isKeyRefused(status) ? 'reconnect' : status === 402 ? 'plan' : status === 400 ? 'shape' : null);
 
 /** A journal line: a fixed field list (no key, no text of anyone's) — the key only as its 6-character fingerprint. */
 // + `p` (lane decision-attention-facts): an attention call's needs_now, 2 decimals — the next quality check needs no memo join
@@ -917,7 +950,7 @@ module.exports = {
   QUESTION_TYPES, PROVIDERS, PROVIDER_LABEL, DEFAULT_MODEL, PRICE_PER_MTOK_USD, DAILY_BUDGET_CENTS_DEFAULT, THRESHOLD_DEFAULT, THRESHOLD_RANGE,
   BACKOFF_MS, RETRY_AFTER_MAX_MS, RATE_MIN_CALLS, MEMO_MAX, FEATURES, WHY, DIALECTS, USES, PLANS, NEVER, JOURNAL_FIELDS, RUBRIC, GOLDEN, CRITERIA_CATALOGUE,
   dialectOf, urlOf, questionError, buildRequest, normalizeAnswers, usageOf, estimateUsd, usdOf, estTokens, questionTokens,
-  cutHeadTail, fitTokens, maskAddresses, eraseSecrets, scrub, cleanPart, inputPlan, buildInput, memoMaterial, memoKey, batchQuestions, unbatchAnswers,
+  cutHeadTail, fitTokens, maskAddresses, eraseSecrets, scrub, cleanPart, scrubQuestions, inputPlan, buildInput, memoMaterial, memoKey, batchQuestions, unbatchAnswers,
   READOUT_WARN_AT, READOUT_USES, moneyText, decisionTodayLine, monthSpend,   // lane decision-spend-readout
-  dayOf, rateOf, budgetVerdict, settleUsd, retryAfterMs, nextBackoff, isWall, isKeyRefused, journalRow, rubricQuestions, rubricText, attentionVerdict, criteriaProposal,
+  dayOf, rateOf, budgetVerdict, settleUsd, retryAfterMs, nextBackoff, isWall, isKeyRefused, ROW_STOPS, rowStopOf, journalRow, rubricQuestions, rubricText, attentionVerdict, criteriaProposal,
 };

@@ -490,7 +490,7 @@ console.log('§13–§19 r3: no loop fold, worker death / deadline / missing sha
     const mig = fl['src/server/migrations.js'] || '', srv = fl['server.js'] || '';
     const reloads = /usageHistory\.reloadEvents\?\.\(\)/.test(srv);
     for (const [f, txt] of Object.entries(fl)) {
-      if (!(f.startsWith('src/') || (f.startsWith('scripts/') && !/^scripts\/test-/.test(f))) || f === 'src/usage-history.js' || !writes(txt)) continue; // scripts/test-* write their own fixture ledgers
+      if (!(f.startsWith('src/') || (f.startsWith('scripts/') && !/^scripts\/test-/.test(f))) || f === 'src/usage-history.js' || f === 'scripts/boot-shape.mjs' || !writes(txt)) continue; // scripts/test-* write their own fixture ledgers (and boot-shape.mjs the boot gate's, into a scratch tree — B-1319)
       if (/usage-index|telemetry|otel|usage-routes|usage-index-model|usage-cold/.test(f)) continue; // read or own other files
       const base = path.basename(f, '.js');
       if (!(mig.includes(base) && reloads)) bad.push(`${f} rewrites ledger shards outside the ONE invalidation (a migration + server.js reloadEvents)`);
@@ -499,7 +499,7 @@ console.log('§13–§19 r3: no loop fold, worker death / deadline / missing sha
   };
   const scriptFiles = Object.fromEntries(fs.readdirSync(path.join(REPO, 'scripts')).filter((f) => /\.(m?js|cjs)$/.test(f)).map((f) => ['scripts/' + f, fs.readFileSync(path.join(REPO, 'scripts', f), 'utf8')]));
   const allFiles = { ...files, ...scriptFiles };
-  const writerRows = Object.keys(allFiles).filter((f) => (f.startsWith('src/') || (f.startsWith('scripts/') && !/^scripts\/test-/.test(f))) && writes(allFiles[f]));
+  const writerRows = Object.keys(allFiles).filter((f) => (f.startsWith('src/') || (f.startsWith('scripts/') && !/^scripts\/test-/.test(f))) && f !== 'scripts/boot-shape.mjs' && writes(allFiles[f]));
   console.log('     shard writers (src/ + scripts/, every write door): ' + writerRows.join(', '));
   eq(writerCensus(allFiles), [], '§32 (verify #7) every shard writer over src/ AND scripts/, through EVERY write door, is a migration the server follows with reloadEvents()');
   ok(writerCensus({ ...allFiles, 'scripts/rogue-fix.mjs': "await fs.promises.writeFile(path.join(historyDir, 'events-2026-01.ndjson'), x)" }).length === 1, 'control: a scripts/ writer through fs.promises.writeFile ⇒ RED');
@@ -634,6 +634,35 @@ console.log('§25–§31 r4: the person is told, stuck workers, the whole-line h
   ok(ok5 === 120000, `§30 a ${Math.round(fs.statSync(path.join(t5.dir, shardOf(base5))).size / 1048576)} MB month under a 30 MB soft cap, 5 000-row chunks: ${ok5}`);
   t5.coldRowBudget = 1e9; const bad5 = await t5.aggregateAsync({ to: NOW - 101 * DAY }).then(() => 'answered', (e) => e);
   ok(bad5 && bad5.code === 'FOLD_TOO_BIG' && /retrying will not help/.test(bad5.message) && !/retry$/.test(bad5.message), `control (the whole-group read): "${bad5.message && bad5.message.slice(0, 70)}…" ⇒ RED, and it does not say retry`);
+}
+// §31 THE STEPPED BOOT WARM (B-1319): server.js warms the ledger with warmStepped — a MiB per tick, its window slide a
+// batch per tick, the cold columns settled a set per tick — instead of warm()'s one 3.5 s tick. It must END where warm()
+// ends, field for field (the rows, their places + hashes, the id sets, the shard marks and their append-proofs, the cold
+// columns + indexes, the sorted view), on a mixed ledger with a ceiling small enough that the slide moves rows; and a
+// reader during it (_loadEvents) finishes the pass itself. Control: a stepped pass whose slice never widens past a line
+// longer than itself (the shard would stop there) is caught by the same comparison.
+{
+  const realNow = Date.now, T31 = realNow(); Date.now = () => T31; // one clock: the cutoff = now − window
+  try {
+    const base31 = path.join(tmp, 'warm31', 'usage-history'); fs.mkdirSync(base31, { recursive: true });
+    const rows31 = []; for (let k = 0; k < 3000; k++) rows31.push(mkRow(NOW - Math.floor(rnd() * 120 * DAY)));
+    rows31[1500] = { ...rows31[1500], pad: 'x'.repeat(9000) }; // a line longer than a slice
+    writeRows(base31, rows31); writeRows(base31, [rows31[7], rows31[2100]]); // duplicate rids: the FIRST copy wins
+    fs.appendFileSync(path.join(base31, shardOf(NOW)), JSON.stringify(mkRow(NOW - 1000))); // an unterminated last line
+    const mk31 = () => { const u = new UsageHistory({ dataDir: path.dirname(base31), homeDir: tmp }); u.ledgerWindowMs = 40 * DAY; u.ledgerHotMaxBytes = 60 * 1024; return u; };
+    const snap31 = (uh) => { const c = uh._evCache; return JSON.stringify({ ev: c.events, sizes: c.sizes, locs: c.locs, hrh: c.hrh, hot: c.hotBytes, cut: c.cutoff, shards: c.shards, sorted: c.sorted && c.sorted.map((e) => e.rid), rids: [...c.rids].sort(), mids: [...c.mids].sort(), wm: [...c.srcWm], cons: [...c.consumed], marks: [...c.marks].map(([k, m]) => [k, m.ino, m.mtimeMs, m.probe.toString('hex')]), cold: c.cold },
+      (k, v) => (ArrayBuffer.isView(v) ? Array.from(v.subarray(0, c.cold.cap)) : v instanceof Map ? [...v] : v instanceof Set ? [...v].sort() : v)); };
+    const sync31 = mk31(); sync31.warm(); const want31 = snap31(sync31);
+    const step31 = mk31(); let trims31 = 0; const ts31 = step31._trimSteps.bind(step31); step31._trimSteps = function* (b) { for (const _ of ts31(b)) { trims31++; yield; } };
+    const r31 = await step31.warmStepped({ chunkBytes: 4096, trimBatch: 50 });
+    ok(snap31(step31) === want31 && r31.slices > 50 && trims31 > 5 && sync31._evCache.cold.n > 100, `§31 warmStepped (4 KB slices, the slide 50 rows a step: ${r31.slices} steps, ${trims31} trim yields) ends where warm() ends, field for field (${want31.length} B of state, ${sync31._evCache.cold.n} rows cold)`);
+    const mid31 = mk31(); let n31 = 0, rows31mid = -1;
+    await mid31.warmStepped({ chunkBytes: 4096, trimBatch: 50, next: (fn) => { if (++n31 === 3) rows31mid = mid31._loadEvents().length; setImmediate(fn); } });
+    ok(snap31(mid31) === want31 && rows31mid === sync31._evCache.events.length && !mid31._evCache.pending, `§31 a reader at the 3rd step finishes the pass itself (${rows31mid} hot rows = the whole load), the warm then ends`);
+    const bad31 = mk31(); const cr31 = bad31._consumeRange.bind(bad31); bad31._consumeRange = (c, fn, fp, st, from, to, passFrom, pass) => (to - from > 4096 ? from : cr31(c, fn, fp, st, from, to, passFrom, pass));
+    await bad31.warmStepped({ chunkBytes: 4096, trimBatch: 50 });
+    ok(snap31(bad31) !== want31, 'control (a slice that never widens past a line longer than itself — the shard stops there): the same comparison is red');
+  } finally { Date.now = realNow; }
 }
 fs.rmSync(tmp, { recursive: true, force: true });
 

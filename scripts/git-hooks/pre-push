@@ -15,16 +15,17 @@
 #                     history and no newer green has cleared it
 #
 # The global repo-guard pre-push (secret scan) CHAINS to this hook, so both
-# always run. Installed into .git/hooks by scripts/install-git-hooks.mjs (npm
-# postinstall). Escape hatches:
+# always run — and this hook FIRST runs the repo's own scripts/secret-scan.mjs
+# over what the push publishes (B-89da, see SECRET SCAN below). Installed into
+# .git/hooks by scripts/install-git-hooks.mjs (npm postinstall). Escape hatches:
 #   docs-only pushes (every PUBLISHED path is documentation the gate does not
 #     READ — see is_code_path) skip the FAST tier; the heavy verdict is still
 #     asked, because a red ancestor is red whether or not this push carries code
-#   VIBESPACE_SKIP_CI=1 git push       — emergency bypass, use sparingly
+#   VIBESPACE_SKIP_CI=1 git push       — emergency bypass, use sparingly (the
+#     tiers only: the secret scan still runs — GitHub refuses those shapes
+#     whatever we skip)
 set -uo pipefail
 cd "$(git rev-parse --show-toplevel)"
-
-[ "${VIBESPACE_SKIP_CI:-}" = "1" ] && { echo "[ci] VIBESPACE_SKIP_CI=1 — gate bypassed" >&2; exit 0; }
 
 # read ref updates (also keeps stdin drained for chained callers)
 mapfile -t REFS || true
@@ -173,6 +174,35 @@ range_for_sha() {
   done
   echo ""
 }
+
+# ── SECRET SCAN (B-89da, 2026-10-13) ─────────────────────────────────────
+# GitHub push protection refused 2.369.263's first cut (GH013) for a literal
+# Slack-token fixture that every local scan had MATCHED and then dropped: an
+# allow row matched ANOTHER part of the same line. scripts/secret-scan.mjs is
+# THE ONE TABLE — its partner rows are a superset of GitHub's partner patterns
+# and no allow row silences them — and `--range` reads what each ref
+# publishes: every commit's added lines + the full text of every file the
+# range touches, so a token added and removed again inside one push is still
+# refused (GitHub reads every commit). It runs BEFORE VIBESPACE_SKIP_CI is
+# honoured: GitHub refuses the push whether or not the gate was skipped, and
+# the scan costs a second. The same file is what scripts/ci.mjs's fast tier
+# and the Actions secret-scan workflow run (`--tree`); test-secret-scan holds
+# the three callers to it.
+[ -f scripts/secret-scan.mjs ] || { echo "[ci] scripts/secret-scan.mjs is missing from this checkout — nothing can say what this push publishes is clean; push blocked" >&2; exit 1; }
+for sha in "${PUSHED_SHAS[@]:-}"; do
+  [ -z "$sha" ] && continue
+  node scripts/secret-scan.mjs --range="$(range_for_sha "$sha")" --quiet
+  scan_rc=$?
+  [ "$scan_rc" = "0" ] && continue
+  if [ "$scan_rc" = "1" ]; then
+    echo "[ci] SECRET SCAN RED — the push of $(ref_for_sha "$sha") is blocked: GitHub push protection refuses these shapes (GH013) and no allow row passes them — build token shapes at runtime by concatenation, split inside the vendor prefix (['xo', 'xb-…'].join(''))" >&2
+  else
+    echo "[ci] the secret scan could not read what $(ref_for_sha "$sha") publishes (exit $scan_rc) — that is not a clean verdict; push blocked" >&2
+  fi
+  exit 1
+done
+
+[ "${VIBESPACE_SKIP_CI:-}" = "1" ] && { echo "[ci] VIBESPACE_SKIP_CI=1 — gate bypassed" >&2; exit 0; }
 
 # ── HEAVY-TIER VERDICT FIRST (2026-09-07) ─────────────────────────────────
 # A heavy run that went RED on a commit that is an ANCESTOR of what we are

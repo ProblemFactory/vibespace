@@ -464,10 +464,11 @@ export function installSetupFlows(App) {
   },
 
     async _openDiagnostics() {
-    const [d, c, ci] = await Promise.all([
+    const [d, c, ci, bt] = await Promise.all([
       fetchJson('/api/telemetry/summary?days=14'),
       fetchJson('/api/telemetry/central-summary?days=14'),
       fetchJson('/api/ci-heavy'),
+      fetchJson('/api/boot-trace'),
     ]);
     if (!d) { showToast(t('Could not load diagnostics'), { type: 'error' }); return; }
     const esc = escHtml;
@@ -497,6 +498,17 @@ export function installSetupFlows(App) {
       if (!names.length) return `<p class="dim">${esc(t('No metrics yet — they accumulate as the app runs.'))}</p>`;
       const row = (n) => `<tr><td>${esc(n)}</td><td class="n">${m[n].count}</td><td class="n">${m[n].p50}</td><td class="n">${m[n].p95}</td><td class="n">${m[n].max}</td><td class="n"><b>${m[n].last}</b></td></tr>`;
       return `<table><tr><td class="dim">${esc(t('metric'))}</td><td class="n dim">n</td><td class="n dim">p50</td><td class="n dim">p95</td><td class="n dim">max</td><td class="n dim">${esc(t('latest'))}</td></tr>${names.map(row).join('')}</table>`;
+    })()}
+    ${(() => {
+      // THE BOOT HOLDS (B-1319): this server's start — the longest times its main loop was held (pages, paired
+      // devices, the keeper and every timer waited), each named by the boot step it ran in; the top 5. Loading the
+      // code is said apart (the port is not open yet, nothing waits). Absent on a server older than the route.
+      if (!bt || !Array.isArray(bt.holds)) return '';
+      const rows = bt.holds.slice(0, 5).map((h) => `<tr><td class="n">${h.at} ms</td><td class="n"><b>${h.ms} ms</b></td><td>${esc(h.name || '?')}${(h.sites || []).map((x) => `<div class="dim">${x.ms} ms · ${esc(x.what)}</div>`).join('')}</td></tr>`).join('');
+      return `<h2>${esc(t('Server start — the longest holds'))}</h2>
+      <p class="dim">${esc(t('How long the server\'s main loop was held while it started — pages, paired devices and timers waited that long. Start it with VIBESPACE_BOOT_TRACE=1 to name the file read or command behind each.'))}</p>
+      <p>${esc(t('Code loaded in {ms} ms; longest hold since: {max} ms.', { ms: bt.mainMs ?? '?', max: bt.maxHoldMs ?? 0 }))}</p>
+      ${rows ? `<table><tr><td class="n dim">${esc(t('after start'))}</td><td class="n dim">${esc(t('duration'))}</td><td class="dim">${esc(t('detail'))}</td></tr>${rows}</table>` : `<p class="dim">${esc(t('No hold of 100 ms or more since this server started.'))}</p>`}`;
     })()}
     <h2>${esc(t('Events per day'))}</h2><div class="chart">${bars || `<span class="dim">${esc(t('No data'))}</span>`}</div>
     ${(() => {

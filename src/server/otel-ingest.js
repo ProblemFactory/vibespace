@@ -64,6 +64,8 @@ const { spawnOf } = require('../harnesses'); // the spawn.otelExport row: whose 
 const MAX_TRUTH = 60000;      // in-memory rid map cap (~a week of heavy storms)
 const FILE_MAX = 12 * 1024 * 1024; // boot-time trim threshold for the stash
 const KEEP_MS = 30 * 86400e3; // trim horizon
+const REPLAY_SLICE = 20000; // boot-replay lines per tick (B-1319: ~20 ms here)
+const NL = Buffer.from('\n');
 
 function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, serverSetting }) {
   // PERSISTED token (review-caught): dtach/pipe sessions survive server
@@ -106,24 +108,52 @@ function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, 
 
   // Boot replay: the stash IS the persistence — bake-time overrides must
   // survive restarts or a reboot mid-race re-bakes with link-intent again.
-  try {
-    if (fs.existsSync(file)) {
-      const cutoff = Date.now() - KEEP_MS;
-      const lines = timedSync('otel-truth.read', () => fs.readFileSync(file, 'utf-8')).split('\n').filter(Boolean);
-      const kept = [];
-      for (const l of lines) {
-        try {
-          const r = JSON.parse(l);
-          if (!r.rid || (r.ts || 0) < cutoff) continue;
-          kept.push(l);
-          if (r.acctKnown) { truth.set(r.rid, r.acct ?? null); order.push(r.rid); }
-        } catch { }
-      }
-      if (fs.statSync(file).size > FILE_MAX) {
-        timedSync('otel-truth.write', () => { fs.writeFileSync(file + '.tmp', kept.join('\n') + (kept.length ? '\n' : '')); fs.renameSync(file + '.tmp', file); });
-      }
+  // OFF THE LOOP SINCE B-1319 (measured 2026-10-13: production's stash is 163 MB — every boot read it, parsed 353 k
+  // lines and REWROTE it whole in main-module evaluation, the rewrite firing on size alone with nothing to trim; 0.5 s
+  // in a lane on local disk): the bytes come through fs.promises, REPLAY_SLICE lines are taken per tick, the trim rewrite
+  // is written off the loop and only when it changes the file. A reader before the replay is done (ingest's dedupe,
+  // observedOrgForRid) finishes it in its own tick — the map is never answered half-replayed.
+  const replay = { buf: null, at: 0, cutoff: Date.now() - KEEP_MS, kept: [], keptBytes: 0, done: false };
+  const replayTake = (lines) => { // the next `lines` lines; true when the stash is read to its end
+    const b = replay.buf;
+    for (let n = 0; n < lines && replay.at < b.length; n++) {
+      let nl = b.indexOf(10, replay.at); if (nl < 0) nl = b.length;
+      const a = replay.at; replay.at = nl + 1;
+      if (nl === a) continue;
+      try {
+        const r = JSON.parse(b.toString('utf8', a, nl));
+        if (!r.rid || (r.ts || 0) < replay.cutoff) continue;
+        replay.kept.push(a, nl); replay.keptBytes += nl - a + 1;
+        if (r.acctKnown) { truth.set(r.rid, r.acct ?? null); order.push(r.rid); }
+      } catch { }
     }
-  } catch (e) { console.warn('[otel] truth stash load failed:', e.message); }
+    return replay.at >= b.length;
+  };
+  const replayEnd = () => { // the trim: over FILE_MAX and the kept lines are not the file as it is ⇒ rewrite, off the loop
+    replay.done = true;
+    const b = replay.buf, kept = replay.kept;
+    replay.buf = null; replay.kept = [];
+    if (b.length <= FILE_MAX || replay.keptBytes === b.length) return;
+    const parts = []; for (let k = 0; k < kept.length; k += 2) parts.push(b.subarray(kept[k], kept[k + 1]), NL);
+    fs.promises.writeFile(file + '.tmp', Buffer.concat(parts)).then(() => {
+      let grew = true; try { grew = fs.statSync(file).size !== b.length; } catch { }
+      if (grew) { fs.promises.unlink(file + '.tmp').catch(() => { }); return; } // an export appended meanwhile: the next boot trims
+      timedSync('otel-truth.write', () => fs.renameSync(file + '.tmp', file)); // the same tick as the size check — no append between
+    }).catch((e) => console.warn('[otel] truth stash trim failed:', e.message));
+  };
+  const finishReplay = () => {
+    if (replay.done) return;
+    if (!replay.buf) { try { replay.buf = fs.existsSync(file) ? timedSync('otel-truth.read', () => fs.readFileSync(file)) : Buffer.alloc(0); } catch (e) { replay.buf = Buffer.alloc(0); console.warn('[otel] truth stash load failed:', e.message); } }
+    replayTake(Infinity); replayEnd();
+  };
+  const replayed = (async () => {
+    let b = Buffer.alloc(0);
+    try { b = await fs.promises.readFile(file); } catch (e) { if (e.code !== 'ENOENT') console.warn('[otel] truth stash load failed:', e.message); }
+    if (replay.done) return;
+    if (!replay.buf) replay.buf = b;
+    while (!replay.done && !replayTake(REPLAY_SLICE)) await new Promise((r) => setImmediate(r));
+    if (!replay.done) replayEnd();
+  })();
 
   // organization.id → VibeSpace account id. Prefer a NAMED sub over the
   // '__global__' pseudo-id (survives machine-login switches); email fallback
@@ -159,6 +189,7 @@ function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, 
   }
 
   function ingest(payload) {
+    finishReplay(); // the dedupe below reads the replayed map
     const { records, seen } = parseOtlpLogs(payload);
     let disagreements = 0;
     for (const rec of records) {
@@ -264,7 +295,9 @@ function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, 
      *  that a caller re-introducing the old wiring has to say the new name,
      *  and so the source pin in scripts/test-readings-attribution.mjs can
      *  assert nobody passes it to a bake path. */
-    observedOrgForRid(rid) { return rid && truth.has(rid) ? truth.get(rid) : undefined; },
+    observedOrgForRid(rid) { finishReplay(); return rid && truth.has(rid) ? truth.get(rid) : undefined; },
+    /** The boot replay off the loop (B-1319): resolves when the stash is read (by it, or by a reader that finished it). */
+    replayed,
     /** The newest api_request instant (ms) this conversation's CLI exported, or null (lane-dead-bridge's witness). */
     lastApiRequestAt(sid) { return (sid && lastApi.get(sid)) || null; },
     stats() { return { rids: truth.size, unknownOrgs: [...unknownOrgs.entries()], ...arrivals }; },

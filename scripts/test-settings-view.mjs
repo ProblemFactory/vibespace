@@ -16,6 +16,9 @@
 //   §6 patched copies of settings-view.js, one per rule, each turns its own judge red (scripts/mutant-copy.mjs)
 //   §7 (B-df40 part 3) the per-VENDOR rows derived from src/channel-settings.js: advanced, `when: {channel}`,
 //      hidden without that vendor's account, the "Per vendor" block + its chip with one; a patched schema copy
+//   §11 (lane settings-multiline-row) a textarea row STACKS (the renderer's line off the control it drew, the two textarea
+//      branches) and THE RAIL keeps a row's words ≥ 40 % — the style.css block's rules + its place; the chrome half
+//      (600 / 760 / 1200 / phone 390, the pre-fix control) is test-settings-row-layout (heavy)
 // In-process, no DOM, no server.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -275,7 +278,7 @@ console.log('§10 「需关注 · 怎么判断」 (lane attention-policy): one b
   const pre = SCHEMA['channels.attention.preset'], jr = SCHEMA['channels.attention.judge'];
   ok(pre.type === 'enum' && pre.radio === true && pre.store === 'derived' && pre.default === 'both' && pre.options.map((o) => o.value).join() === Object.keys(FO.ATTENTION_PRESETS).join(), 'the preset: a radio over the PURE presets, derived (it stores nothing — it sets the switches)', pre.options.map((o) => o.value).join());
   ok(jr.type === 'boolean' && jr.store && jr.store.plugin === 'decision-api' && jr.store.feature === 'attention' && jr.fact === 'attention-today', 'the judge\'s switch IS the Decision API plugin\'s `attention` feature (one store) with the today readout beside it');
-  const words = [rows[0].blockTitle, ...rows.flatMap((r) => [r.label, r.description]), ...pre.options.map((o) => o.label), 'Today: judged {n} · {m} needed you', 'How it is decided', 'Open in Settings', 'How "needs attention" is decided'];
+  const words = [rows[0].blockTitle, ...rows.flatMap((r) => [r.label, r.description]), ...pre.options.map((o) => o.label), 'Today: judged {n} · {m} needed you', 'Open in Settings', 'How "needs attention" is decided'];
   const miss = words.filter((w) => !zh[w] || !ja[w]);
   ok(!miss.length, `every word of the block in zh and ja (${words.length} strings)`, miss.join(' | '));
   ok(zh[rows[0].blockTitle] === '需关注 · 怎么判断' && zh[SCHEMA['channels.attention.rule.direct'].label] === '有人直接发给我、我还没读的' && zh[jr.label] === '让判断模型挑出需要我的（Decision API）', 'the owner\'s words: 「需关注 · 怎么判断」, 「有人直接发给我、我还没读的」, 「让判断模型挑出需要我的（Decision API）」');
@@ -316,6 +319,28 @@ console.log('§10 「需关注 · 怎么判断」 (lane attention-policy): one b
   const words = ['Today {spent} / {cap} · judged {n} · hits {m}', 'The Decision API is off — it spends nothing', 'Decision API · today {spent} / {cap} · this month {month}', 'Needs attention', 'For-you tray', 'Rules', 'Routing', 'Webhooks', 'Test', '{spent} spent (limit {cap})', 'Open settings'];
   const miss = words.filter((w) => !zh[w] || !ja[w]);
   ok(!miss.length, `every word of the readout in zh and ja (${words.length} strings)`, miss.join(' | '));
+}
+
+// ── lane settings-multiline-row (owner 2026-10-14 「这个地方布局有点问题」): a row never squeezes its words ──
+console.log('§11 a textarea row stacks; the rail keeps the words ≥ 40 % (the chrome half: test-settings-row-layout)');
+{
+  const UI = fs.readFileSync(path.join(REPO, 'src/lib/settings-ui.js'), 'utf8');
+  const CSS = fs.readFileSync(path.join(REPO, 'public/style.css'), 'utf8');
+  const STACK = "if (control.tagName === 'TEXTAREA' || control.querySelector('textarea')) row.classList.add('settings-row-stack');";
+  const render = UI.slice(UI.indexOf('  _renderSetting(path, schema, chips = null) {'), UI.indexOf('  renderBlock(block'));
+  ok(render.includes('const control = this._createControl(path, schema, row);\n    controlWrap.appendChild(control);\n') && render.includes(STACK), 'the row renderer stamps settings-row-stack off the control it drew — every textarea row, whichever branch made it');
+  const factory = UI.slice(UI.indexOf('  _createControl('), UI.indexOf('  _refreshControl('));
+  ok((factory.match(/createElement\('textarea'\)/g) || []).length === 2 && /schema\.type === 'json'/.test(factory) && /schema\.type === 'text' && schema\.multiline/.test(factory), 'the control factory makes a textarea in two branches (json, the multi-line text) — both reach the line above');
+  const block = (CSS.match(/\/\* SETTINGS ROWS NEVER SQUEEZE THEIR WORDS[\s\S]*?\/\* end: settings rows never squeeze their words \*\//) || [''])[0];
+  const rule = (sel) => { const m = block.match(new RegExp('\\n' + sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ' \\{([^}]*)\\}')); return m ? m[1] : ''; };
+  ok(/flex-direction: column/.test(rule('.settings-row.settings-row-stack')) && /align-items: stretch/.test(rule('.settings-row.settings-row-stack')), 'THE STACK: a stacked row is a column, the words and the control each across it');
+  const box = rule('.settings-row-stack .settings-json');
+  ok(/width: 100%/.test(box) && /min-width: 0/.test(box) && /min-height: 4\.5em/.test(box) && /resize: vertical/.test(box), 'its box spans the row (no 200 px floor), at least 4.5em tall, resized vertically');
+  ok(/justify-content: flex-end/.test(rule('.settings-multiline')) && /flex: 1 1 100%/.test(rule('.settings-multiline > .settings-multiline-text')), 'the box on a line of its own, its buttons on the next one at the right');
+  ok(/flex-wrap: wrap/.test(rule('.settings-row')) && /min-width: 40%/.test(rule('.settings-row-info')) && /margin-left: auto/.test(rule('.settings-row-control')), 'THE RAIL: a row wraps, its words keep ≥ 40 %, a wrapped control sits at the right');
+  const at = (s) => CSS.indexOf(s), start = at('/* SETTINGS ROWS NEVER SQUEEZE THEIR WORDS');
+  ok(start > 0 && ['.settings-row {\n', '.settings-row-info {', '.settings-row-control {', '.settings-json {\n', '.settings-link-btn {'].every((s) => at(s) >= 0 && at(s) < start), 'the block comes after the rules it overrides (a specificity tie goes to the later rule)');
+  ok(block && !/#[0-9a-fA-F]{3,8}\b|rgba?\(/.test(block), 'theme vars only — no literal colour in the block');
 }
 
 console.log(`\ntest-settings-view: ${pass} passed, ${fail} failed`);

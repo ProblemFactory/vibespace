@@ -168,12 +168,15 @@ const SUPERSEDED_DEFAULTS = {
 // behind a ledger scan again (a 200 MB catch-up used to hold the loop for the
 // whole walk).
 const SCAN_BUDGET_BYTES = 1024 * 1024;
+const WARM_SLICE_BYTES = SCAN_BUDGET_BYTES; // the boot warm's slice (B-1319): the same MiB a walk tick takes
+const TRIM_BATCH_ROWS = 16384; // …and its window slide, rows moved cold per step (~17 ms here)
 const PROBE_BYTES = 64; // the append-only proof: the last bytes before a shard's old end (B-9428 r3)
 function probeHolds(fp, at, probe) {
   if (!probe || !probe.length) return true;
   let fd; try { fd = fs.openSync(fp, 'r'); } catch { return false; }
   try { const b = Buffer.alloc(probe.length); return fs.readSync(fd, b, 0, b.length, at - probe.length) === b.length && b.equals(probe); } catch { return false; } finally { fs.closeSync(fd); }
 }
+function readBytesSync(fp, a, b) { const out = Buffer.alloc(Math.max(0, b - a)); let fd; try { fd = fs.openSync(fp, 'r'); fs.readSync(fd, out, 0, out.length, a); } catch { } finally { if (fd !== undefined) fs.closeSync(fd); } return out; }
 const COLD_WORKER_HEAP_MB = 1536;
 // Fold workers terminated but not exited (blocked in a sync read — the storage is not answering): r4, verify #2.
 // Process-wide: while one is stuck no fold worker starts (they would STACK, +40 MB each, nobody told).
@@ -832,6 +835,18 @@ class UsageHistory {
   // shards by (shard, offset) (usage-cold-walk.js). rids/mids = the hot rows' ids; the cold rows' ids live
   // in the slab's sorted hash indexes (r2: dedup and ledgerKnowsId regardless of ts).
   _loadEvents() {
+    // a reader during the stepped boot warm (B-1319, warmStepped): it takes the warm's pass over and finishes it HERE,
+    // in its own tick — a money reader never answers from half a ledger
+    const p = this._evCache && this._evCache.pending;
+    if (p) { this._evCache.pending = null; for (let r = p.next(); !r.done; r = p.next()); }
+    const steps = this._loadSteps(); for (let r = steps.next(); !r.done; r = steps.next()); // chunkBytes Infinity: never yields
+    return this._evCache.events;
+  }
+  /** THE LOAD PASS (one implementation, two drivers): `_loadEvents` runs it to the end in one call; `warmStepped` hands
+   *  the loop back at every `yield` — after each `chunkBytes` slice of a shard (each slice lands whole: its lines taken,
+   *  the shard's place + append-proof moved past them) and between the heavy settle / sort steps. */
+  *_loadSteps(chunkBytes = Infinity, trimBatch = TRIM_BATCH_ROWS) {
+    const stepped = chunkBytes !== Infinity;
     if (!this._evCache) this.ledgerGen = (this.ledgerGen || 0) + 1; // a rebuilt cache = a new generation (cost memos keyed on it, r4)
     if (!this._evCache) this._evCache = { consumed: new Map(), marks: new Map(), events: [], sizes: [], locs: [], hrh: [], hotBytes: 0, rids: new Set(), mids: new Set(), srcWm: new Map(), checkedAt: 0, cold: new CB.ColdSlab(), cutoff: -Infinity, walking: 0, shards: [], shardIx: new Map() };
     const c = this._evCache;
@@ -843,9 +858,9 @@ class UsageHistory {
     c.checkedAt = Date.now();
     let files = [];
     try { files = fs.readdirSync(this.dir).filter(f => /^events-\d{4}-\d{2}\.ndjson$/.test(f)).sort(); } catch {}
-    let seen = null, grew = false, cooled = false, added = 0;
+    const pass = { seen: null, grew: false, cooled: false, added: 0 };
     // r3 (verify #13): a shard the cache read that is GONE ⇒ rebuild (every place in it is stale)
-    if (c.consumed.size) { const have = new Set(files); for (const fn of c.consumed.keys()) if (!have.has(fn)) { this._evCache = null; return this._loadEvents(); } }
+    if (c.consumed.size) { const have = new Set(files); for (const fn of c.consumed.keys()) if (!have.has(fn)) { this._evCache = null; yield* this._loadSteps(chunkBytes, trimBatch); return; } }
     for (const fn of files) {
       const fp = path.join(this.dir, fn);
       let st; try { st = fs.statSync(fp); } catch { continue; }
@@ -856,48 +871,65 @@ class UsageHistory {
       // ⇒ rebuild from scratch. A shrink is a rewrite too (the 2026-09 rule).
       if (consumed && (st.size < consumed || (mark && (mark.ino !== st.ino || (st.size === consumed && mark.mtimeMs !== st.mtimeMs) || (st.size > consumed && !probeHolds(fp, consumed, mark.probe)))))) {
         this._evCache = null;
-        return this._loadEvents();
+        yield* this._loadSteps(chunkBytes, trimBatch); return;
       }
       if (st.size === consumed) continue;
-      if (!seen) { // the first new bytes of this pass: slide the window (hourly, never under a walk), order the id indexes
-        seen = new Set();
+      if (!pass.seen) { // the first new bytes of this pass: slide the window (hourly, never under a walk), order the id indexes
+        pass.seen = new Set();
         if (!c.walking && (c.cutoff === -Infinity || Date.now() - this._ledgerWindowMs() > c.cutoff + 3600e3)) this._trimHot();
         for (const k of Object.keys(c.cold.idx)) c.cold.idx[k].settle();
       }
-      let buf;
-      const fd = fs.openSync(fp, 'r');
-      try {
-        buf = Buffer.alloc(st.size - consumed);
-        fs.readSync(fd, buf, 0, buf.length, consumed);
-      } finally { fs.closeSync(fd); }
-      const lastNl = buf.lastIndexOf(10); // complete lines only — a concurrent append may be mid-write
-      if (lastNl < 0) continue;
-      let sh = c.shardIx.get(fn);
-      if (sh === undefined) { sh = c.shards.length; c.shards.push(fn); c.shardIx.set(fn, sh); }
-      for (let at = 0; at <= lastNl;) {
-        const nl = buf.indexOf(10, at);
-        if (nl > at) {
-          const line = buf.toString('utf8', at, nl);
-          let ev = null; try { ev = JSON.parse(line); } catch { }
-          if (ev) { const r = this._take(c, ev, sh, consumed + at, nl - at + 1, seen, CB.idHash(line)); if (r === 1) { grew = true; added++; } else if (r === 2) cooled = true; }
-        }
-        at = nl + 1;
+      // the shard's new bytes: the whole tail in ONE read on the sync path (as always); `chunkBytes` at a time on the
+      // stepped path — a slice with no whole line in it is widened (a line longer than the slice)
+      for (let from = consumed, span = chunkBytes; from < st.size;) {
+        const to = Math.min(st.size, from + span);
+        const end = this._consumeRange(c, fn, fp, st, from, to, consumed, pass);
+        if (end === from) { if (to >= st.size) break; span *= 2; continue; }
+        from = end; span = chunkBytes;
+        if (stepped) yield;
       }
-      c.consumed.set(fn, consumed + lastNl + 1);
-      c.marks.set(fn, { ino: st.ino, mtimeMs: st.mtimeMs, probe: Buffer.from(buf.subarray(Math.max(0, lastNl + 1 - PROBE_BYTES), lastNl + 1)) });
     }
-    if (grew && c.hotBytes > this._ledgerHotMaxBytes()) this._trimHot();
+    if (pass.grew && c.hotBytes > this._ledgerHotMaxBytes()) { if (stepped) { yield; yield* this._trimSteps(trimBatch); } else this._trimHot(); }
     // a pass that loaded many cold rows (a boot, a rebuild after a rewrite) orders them NOW, inside the same
     // long load, not in the next query's walk planning (r3: a 13 M-row settle measured 5 s in a 30-day query)
-    if (cooled && c.cold.n - c.cold.sortedN > Math.max(65536, c.cold.n >> 2)) { c.cold.settle(); for (const k of Object.keys(c.cold.idx)) c.cold.idx[k].settle(); }
-    if (added > 65536) this._sortedEvents(); // …and the hot rows' ts order (a 110 k-row sort measured 130 ms in the next query)
-    if ((cooled || grew) && !c.overWarned && c.cold.bytes() > this._coldMaxBytes()) { // the declared ceiling, said once (verify #2)
+    if (pass.cooled && c.cold.n - c.cold.sortedN > Math.max(65536, c.cold.n >> 2)) { if (stepped) yield; c.cold.settle(); for (const k of Object.keys(c.cold.idx)) { if (stepped) yield; c.cold.idx[k].settle(); } }
+    if (pass.added > 65536 && (!c.sorted || c.sortedLen !== c.events.length)) { if (stepped) yield; this._sortHot(c); } // …and the hot rows' ts order (a 110 k-row sort measured 130 ms in the next query)
+    if ((pass.cooled || pass.grew) && !c.overWarned && c.cold.bytes() > this._coldMaxBytes()) { // the declared ceiling, said once (verify #2)
       c.overWarned = true;
       try { global.__vsEvent?.('usage-cold-over-ceiling', String(Math.round(c.cold.bytes() / CB.MB))); } catch { }
       console.warn(`[usage] the ledger's cold columns passed their ${Math.round(this._coldMaxBytes() / CB.MB)} MB ceiling (${Math.round(c.cold.bytes() / CB.MB)} MB, ${c.cold.n} rows) — kept: the money readers' numbers never drop a row`);
     }
-    return c.events;
   }
+  /** One slice [from, to) of a shard's new bytes: its complete lines taken, the shard's place + append-proof moved past
+   *  them (the proof = the last PROBE_BYTES before the place, never reaching back before this pass's start — what one
+   *  whole-tail read would have kept). Returns the new place; `from` when the slice holds no complete line. */
+  _consumeRange(c, fn, fp, st, from, to, passFrom, pass) {
+    let buf;
+    const fd = fs.openSync(fp, 'r');
+    try {
+      buf = Buffer.alloc(to - from);
+      fs.readSync(fd, buf, 0, buf.length, from);
+    } finally { fs.closeSync(fd); }
+    const lastNl = buf.lastIndexOf(10); // complete lines only — a concurrent append may be mid-write
+    if (lastNl < 0) return from;
+    let sh = c.shardIx.get(fn);
+    if (sh === undefined) { sh = c.shards.length; c.shards.push(fn); c.shardIx.set(fn, sh); }
+    for (let at = 0; at <= lastNl;) {
+      const nl = buf.indexOf(10, at);
+      if (nl > at) {
+        const line = buf.toString('utf8', at, nl);
+        let ev = null; try { ev = JSON.parse(line); } catch { }
+        if (ev) { const r = this._take(c, ev, sh, from + at, nl - at + 1, pass.seen, CB.idHash(line)); if (r === 1) { pass.grew = true; pass.added++; } else if (r === 2) pass.cooled = true; }
+      }
+      at = nl + 1;
+    }
+    const end = from + lastNl + 1, p0 = Math.max(passFrom, end - PROBE_BYTES);
+    c.consumed.set(fn, end);
+    c.marks.set(fn, { ino: st.ino, mtimeMs: st.mtimeMs, probe: p0 >= from ? Buffer.from(buf.subarray(p0 - from, lastNl + 1)) : readBytesSync(fp, p0, end) });
+    return end;
+  }
+  /** The hot rows' ts order (stable on equal ts) — `_sortedEvents` and the load pass's eager sort. */
+  _sortHot(c) { c.sorted = c.events.slice().sort((a, b) => (a.ts || 0) - (b.ts || 0)); c.sortedLen = c.events.length; }
   /** One parsed line → hot (1), cold (2) or dropped (0, a duplicate rid — the FIRST copy wins, whatever its
    *  ts; r3 verify #4/#15: a cold hash hit is a candidate, the rid STRING at its place decides). */
   _take(c, ev, sh, off, size, seen, lineHash = NaN) {
@@ -928,18 +960,25 @@ class UsageHistory {
   _coldMaxBytes() { return this.coldMaxBytes || CB.COLD_COLUMNS_MAX_BYTES; }
   /** Slide the hot cutoff (the window, the byte ceiling) and move the rows it passed into the cold columns
    *  in ts order (the load order on equal ts). Never while a walk holds the cutoff it started on. */
-  _trimHot() {
+  _trimHot() { const steps = this._trimSteps(); for (let r = steps.next(); !r.done; r = steps.next()); }
+  /** …the same move, `batch` rows per step on the stepped warm (B-1319: one 209 k-row move measured 226 ms in a lane). Between
+   *  steps a moved row is in the cold columns (found by id) and still in `events` — no reader sees that: every reader of the
+   *  resident rows finishes the pass first (`_loadEvents`), the id join (`ledgerKnowsId`) finds the row in either place. */
+  *_trimSteps(batch = Infinity) {
     const c = this._evCache;
     if (!c || c.walking) return;
     const evs = c.events, tss = evs.map((e) => e.ts || 0);
     const cut = CB.ledgerCutoff({ nowMs: Date.now(), tss, sizes: c.sizes, windowMs: this._ledgerWindowMs(), maxBytes: this._ledgerHotMaxBytes(), prev: c.cutoff });
     c.cutoff = cut;
     const go = [];
-    for (let i = 0; i < evs.length; i++) if (tss[i] < cut && !Number.isNaN(c.locs[i]) && CB.coldable(evs[i], Math.floor(c.locs[i] / 4294967296), c.locs[i] % 4294967296)) go.push(i);
+    for (let i = 0; i < evs.length; i++) { if (i && i % (batch * 4) === 0) yield; if (tss[i] < cut && !Number.isNaN(c.locs[i]) && CB.coldable(evs[i], Math.floor(c.locs[i] / 4294967296), c.locs[i] % 4294967296)) go.push(i); }
     if (!go.length) return;
     go.sort((a, b) => (tss[a] - tss[b]) || (a - b));
     const drop = new Uint8Array(evs.length);
-    for (const i of go) { const ev = evs[i]; c.cold.push(ev, Math.floor(c.locs[i] / 4294967296), c.locs[i] % 4294967296, c.hrh[i]); drop[i] = 1; if (ev.rid) c.rids.delete(ev.rid); if (ev.mid) c.mids.delete(ev.mid); }
+    for (let k = 0; k < go.length; k++) {
+      if (k && k % batch === 0) yield;
+      const i = go[k], ev = evs[i]; c.cold.push(ev, Math.floor(c.locs[i] / 4294967296), c.locs[i] % 4294967296, c.hrh[i]); drop[i] = 1; if (ev.rid) c.rids.delete(ev.rid); if (ev.mid) c.mids.delete(ev.mid);
+    }
     const ne = [], ns = [], nl = [], nh = [];
     let hb = 0;
     for (let i = 0; i < evs.length; i++) if (!drop[i]) { ne.push(evs[i]); ns.push(c.sizes[i]); nl.push(c.locs[i]); nh.push(c.hrh[i]); hb += c.sizes[i]; }
@@ -1048,6 +1087,35 @@ class UsageHistory {
   // Pre-load the event cache (called once at boot so the first Usage window
   // open doesn't pay the full-ledger parse).
   warm() { try { this._loadEvents(); const c = this._evCache; c.cold.settle(); for (const k of Object.keys(c.cold.idx)) c.cold.idx[k].settle(); } catch {} } // B-9428: the cold columns ordered + right-sized now, not at the first query
+  /** THE BOOT WARM OFF THE LOOP (B-1319, measured 2026-10-13: warm() parsed the whole ledger in ONE tick — 3.5 s on a
+   *  production-shaped 400 MB ledger in a lane, the 7.45 s "main loop held" canary 8 s after a production boot). The same
+   *  load pass (`_loadSteps`), `chunkBytes` per tick, the cold columns settled after it a step at a time; `next` hands the
+   *  loop back between steps. A reader that comes during it (`_loadEvents`) finishes the pass itself, and a cache dropped
+   *  under it (a reload, a rewrite) ends it — the next reader loads afresh. Resolves {slices, rows}; never rejects. */
+  warmStepped({ chunkBytes = WARM_SLICE_BYTES, trimBatch = TRIM_BATCH_ROWS, next = (fn) => setImmediate(fn) } = {}) {
+    return new Promise((resolve) => {
+      let gen = null, cur = null, slices = 0, phase = 'load', keys = null;
+      const done = () => { if (cur && cur.pending === gen) cur.pending = null; const c = this._evCache; resolve({ slices, rows: c ? c.events.length + c.cold.n : 0 }); };
+      const step = () => {
+        try {
+          if (gen && this._evCache !== cur) { try { gen.return(); } catch { } return done(); }
+          if (phase === 'load') {
+            if (!gen) gen = this._loadSteps(chunkBytes, trimBatch);
+            if (cur) cur.pending = null;
+            const r = gen.next(); slices++;
+            cur = this._evCache;
+            if (!r.done) { cur.pending = gen; return next(step); }
+            if (cur.pending === gen) cur.pending = null;
+            phase = 'settle'; keys = ['', ...Object.keys(cur.cold.idx)]; return next(step); // warm()'s own settle, one column set per tick
+          }
+          const k = keys.shift(); slices++;
+          if (k === '') cur.cold.settle(); else cur.cold.idx[k].settle();
+          return keys.length ? next(step) : done();
+        } catch { return done(); }
+      };
+      step();
+    });
+  }
 
   /** Per-source (per-machine) newest-event-timestamp map: {local: ts, <hostId>: ts}.
    *  The offline-bias defense reads this to tell "idle" from "dark": a source
@@ -1107,7 +1175,7 @@ class UsageHistory {
   _sortedEvents() {
     const evs = this._loadEvents();
     const c = this._evCache;
-    if (!c.sorted || c.sortedLen !== evs.length) { c.sorted = evs.slice().sort((a, b) => (a.ts || 0) - (b.ts || 0)); c.sortedLen = evs.length; }
+    if (!c.sorted || c.sortedLen !== evs.length) this._sortHot(c);
     return c.sorted;
   }
   /** Number of cached events with ts <= t (binary search) — the memo VERSION

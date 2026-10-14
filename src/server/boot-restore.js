@@ -156,9 +156,42 @@ function armRestoredCapture(id, s) {
   });
 }
 
+// THE RESTORE'S PROBES, OFF THE LOOP (B-1319, measured 2026-10-13: one `fuser` per socket = 93 ms each in a lane and
+// 120–470 ms per session on production — 13–18 sessions held the listen tick 1.2–8 s; the live-conversation fd scan
+// adds ~3 s at 3 678 processes). The SAME questions as children, asked before the server listens (server.js waits for
+// this promise), four at a time: which sockets have an owner (fuser, else pgrep), which remote sockets are alive (fuser),
+// which conversations a live process holds (the batched fd scan). restoreSessions takes the answers once and asks
+// synchronously only what they do not hold (a socket or a conversation that appeared since).
+const dedupIdsOf = (metas) => [...new Set(metas.map(({ m }) => m.claudeSessionId).filter((s) => /^[\w-]+$/.test(s || '')))];
+const fdScanScript = (ids) => `${fdScanShellFns()}\nvs_fd_scan '/(${ids.join('|')})[.]jsonl' | cut -f2`;
+const liveConvosOf = (ids, out) => { const held = out.split('\n'), live = new Set(); for (const id of ids) if (held.some((t) => t.includes(`/${id}.jsonl`))) live.add(id); return live; };
+const sameIds = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
+let probed = null, probing = null;
+function probeSockets() {
+  if (probing) return probing;
+  const { runChild } = require('./tls.js');
+  const ownedP = async (sp, rung2) => { const r = await runChild('fuser', [sp], 2000); return r.code === 0 ? r.out.trim().length > 0 : !!rung2 && (await runChild('pgrep', ['-f', sp], 2000)).code === 0; }; // the sync rungs below, as children
+  const out = { dedupIds: [], liveConvos: null, fdScanError: null, alive: new Map(), remoteAlive: new Map() };
+  probing = (async () => {
+    let sockets = []; try { sockets = fs.readdirSync(SOCKETS_DIR).filter(f => f.startsWith('cw-')); } catch { }
+    const metas = [];
+    for (const sockFile of sockets) { let m; try { m = readSessionMeta(sockFile); } catch { continue; } if (ownsItsId(m)) metas.push({ sockFile, m }); }
+    out.dedupIds = dedupIdsOf(metas);
+    const asks = sockets.map((sockFile) => async () => out.alive.set(sockFile, await ownedP(path.join(SOCKETS_DIR, sockFile), true)));
+    for (const { sockFile, m } of metas) if (m.host) asks.push(async () => out.remoteAlive.set(sockFile, await ownedP(path.join(SOCKETS_DIR, sockFile), false)));
+    if (out.dedupIds.length) asks.unshift(async () => { const r = await runChild('sh', ['-c', fdScanScript(out.dedupIds)], 20000); if (r.code === 0) out.liveConvos = liveConvosOf(out.dedupIds, r.out); else out.fdScanError = r.err.split('\n')[0] || String(r.code); });
+    const drain = async () => { for (let a; (a = asks.shift());) { try { await a(); } catch { } } };
+    await Promise.all([drain(), drain(), drain(), drain()]);
+    probed = out;
+    return out;
+  })().catch(() => { probed = out; return out; }); // never rejects: server.js listens after it whatever happened (what it did not answer, the restore asks itself)
+  return probing;
+}
+
 function restoreSessions() {
   ensureDir(SOCKETS_DIR);
   ensureDir(BUFFERS_DIR);
+  const P = probed; probed = null; probing = null; // the probes answer THIS restore only
   const sockets = fs.readdirSync(SOCKETS_DIR).filter(f => f.startsWith('cw-'));
   if (!sockets.length) return;
 
@@ -222,8 +255,10 @@ function restoreSessions() {
   // performance fix. Backlog: give claudeAlive the registry, keyed with the
   // procStart counter-capture so pid reuse cannot fake it.
   let liveConvos = new Set();
-  const dedupIds = [...new Set(dedupMetas.map(({ m }) => m.claudeSessionId).filter((s) => /^[\w-]+$/.test(s || '')))];
-  if (dedupIds.length) {
+  const dedupIds = dedupIdsOf(dedupMetas);
+  if (dedupIds.length && P && sameIds(P.dedupIds, dedupIds) && (P.liveConvos || P.fdScanError)) {
+    if (P.liveConvos) liveConvos = P.liveConvos; else console.warn('[boot-restore] live-conversation fd scan failed:', P.fdScanError);
+  } else if (dedupIds.length) {
     try {
       const pat = `/(${dedupIds.join('|')})[.]jsonl`;
       const script = `${fdScanShellFns()}\nvs_fd_scan '${pat}' | cut -f2`;
@@ -245,6 +280,7 @@ function restoreSessions() {
   const remoteSockAlive = new Set();
   for (const { sockFile, m } of dedupMetas) {
     if (!m.host) continue;
+    if (P && P.remoteAlive.has(sockFile)) { if (P.remoteAlive.get(sockFile)) remoteSockAlive.add(sockFile); continue; }
     try {
       const out = execFileSync('fuser', [path.join(SOCKETS_DIR, sockFile)], { encoding: 'utf-8', timeout: 2000, stdio: ['pipe', 'pipe', 'pipe'] });
       if (out.trim().length > 0) remoteSockAlive.add(sockFile);
@@ -262,7 +298,8 @@ function restoreSessions() {
 
     // Verify socket is live — check if any process owns it
     let socketAlive = false;
-    try {
+    if (P && P.alive.has(sockFile)) socketAlive = P.alive.get(sockFile);
+    else try {
       const out = execFileSync('fuser', [socketPath], { encoding: 'utf-8', timeout: 2000, stdio: ['pipe', 'pipe', 'pipe'] });
       socketAlive = out.trim().length > 0;
     } catch {
@@ -704,6 +741,6 @@ async function readoptOrphanKeeperSessions() {
 }
 
   return { migrateLegacyHomeProjects, restoreSessions, restoreAgentdPipeSessions,
-    readoptOrphanKeeperSessions };
+    readoptOrphanKeeperSessions, probeSockets };
 }
 module.exports = { create, heldOriginOf, persistNoStart }; // r5: the two held-origin helpers are PURE over a meta + store (test-codex-pool §R17b)

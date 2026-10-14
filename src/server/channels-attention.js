@@ -49,8 +49,9 @@ const KICK_MS = 200;            // a burst of reads queues ONE drain
 const VERDICTS_MAX = 5000;
 const DRAFT_EXAMPLES = 30;
 const LEARN_EVERY_MS = 3600e3;   // the implicit-label pass, at most once an hour
-// a refusal no other row would escape — the queue is emptied, the next read queues again
-const STOP = Object.freeze(['plugin-off', 'feature-off', 'no-key', 'daily-budget', 'per-hour', 'backoff', 'over-ceiling']);
+// a refusal no other row would escape — the queue is emptied, the next read queues again (+ the row stops: a refused
+// key, plan or request shape — lane decision-vendor-hygiene)
+const STOP = Object.freeze(['plugin-off', 'feature-off', 'no-key', 'daily-budget', 'per-hour', 'backoff', 'over-ceiling', ...M.ROW_STOPS]);
 const hash16 = (s) => crypto.createHash('sha256').update(String(s)).digest('hex').slice(0, 16);
 
 function create({ dataDir, decision = null, serverSetting = () => undefined, now = () => Date.now(), tailOf = () => [], notify = () => { },

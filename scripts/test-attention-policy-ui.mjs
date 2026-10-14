@@ -11,8 +11,14 @@
 //   ④ the judge's switch writes through the plugin's own config door (never a settings key); the preset reads 只用固定规则;
 //   ⑤ phone 390 px: the door is a sheet with the same rows, nothing wider than the screen;
 //   ⑥ the Settings window (its own content renderer) searched for 需关注 finds the block;
-//   ⑦ CONTROL: a panel whose firstScreen ignores the policy keeps the direct chat after the same flip.
-// PNGs → ATTENTION_POLICY_PNG_DIR: door-desk.png, door-phone.png, settings.png.
+//   ⑦ CONTROL: a panel whose firstScreen ignores the policy keeps the direct chat after the same flip;
+//   ⑧ lane chan-attn-door-icon (fleet inc-mv7egwmp-u4ql, 2026-10-14: 「设置按钮应该本来只有个 icon 大小，现在占了过大的面积」): the door
+//     is the ⚙ System button's own cog ALONE — at the 188 px rail (zh), a 900 px Channels window (zh) and the reporter's
+//     shape (2327×1229, uiScale 0.9, dpr 2.2, en, a 520 px window) its box is 24–28 CSS px square (never wider than its
+//     height + 4), no words drawn, the words in title + aria-label, on the line of New group + Outbox, inside the panel;
+//     CONTROL: a door that draws its words again fails the same check.
+// PNGs → ATTENTION_POLICY_PNG_DIR: door-desk.png, door-phone.png, settings.png, door-rail.png, door-window-900.png,
+// door-reporter.png (+ door-shapes.json: the bar's rects at the three shapes).
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -135,6 +141,10 @@ const PANEL_SRC = fs.readFileSync(PANEL, 'utf8');
 const IGNORED = 'firstScreen(rows, { view: VIEW, q, now, policy: attnPolicy() })';
 const ctlPlugin = { name: 'policy-ignored', setup(b) { b.onLoad({ filter: /channels-panel\.js$/ }, () => ({ contents: PANEL_SRC.replace(IGNORED, 'firstScreen(rows, { view: VIEW, q, now })'), loader: 'js', resolveDir: path.dirname(PANEL) })); } };
 await esbuild.build({ stdin: { contents: entry, resolveDir: repo, loader: 'js' }, bundle: true, format: 'iife', platform: 'browser', target: 'es2020', outfile: path.join(dir, 'ctl.js'), loader: { '.css': 'empty' }, logLevel: 'error', plugins: [ctlPlugin] });
+// lane chan-attn-door-icon's CONTROL: the same panel whose door draws its words beside the cog again (the 2.369.266 shape)
+const COG_ONLY = "attnBtn.append(icon('cog', 14));";
+const wordsPlugin = { name: 'door-words', setup(b) { b.onLoad({ filter: /channels-panel\.js$/ }, () => ({ contents: PANEL_SRC.replace(COG_ONLY, "attnBtn.append(icon('cog', 14), Object.assign(document.createElement('span'), { textContent: attnBtn.title }));"), loader: 'js', resolveDir: path.dirname(PANEL) })); } };
+await esbuild.build({ stdin: { contents: entry, resolveDir: repo, loader: 'js' }, bundle: true, format: 'iife', platform: 'browser', target: 'es2020', outfile: path.join(dir, 'words.js'), loader: { '.css': 'empty' }, logLevel: 'error', plugins: [wordsPlugin] });
 
 // ── the page server: the REAL channels router + the bundles + style.css ──
 const app = express();
@@ -154,7 +164,10 @@ app.get('/api/channel-groups', (req, res) => res.json({ groups: [] }));
 app.all('/api/user-state', (req, res) => res.json(req.method === 'GET' ? { channelsPanelFolds: { internal: false, 'acct:im': false } } : { ok: true }));
 app.get('/style.css', (req, res) => res.type('css').send(fs.readFileSync(path.join(repo, 'public/style.css'))));
 app.get('/:b.js', (req, res) => res.type('js').send(fs.readFileSync(path.join(dir, req.params.b + '.js'))));
-app.get('/', (req, res) => res.type('html').send(`<!doctype html><html data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><link rel="stylesheet" href="/style.css"><style>body{margin:0;background:var(--bg-root)} #win{background:var(--bg-window);width:${req.query.w || '520px'};min-height:100vh;box-sizing:border-box;padding:10px 8px}</style><script>try{localStorage.setItem('vibespace.lang','zh')}catch{}</script></head><body><div id="win"><div id="host" class="rail-panel rail-panel-channels chan-window"></div></div><script src="/${req.query.b || 'panel'}.js"></script></body></html>`));
+// lane chan-attn-door-icon: ?lang= (zh by default) and ?zoom= (the app's uiScale — utils applyUiPrefs: body zoom + --ui-scale)
+const pageLang = (q) => (/^(zh|ja|en)$/.test(q.lang || '') ? q.lang : 'zh');
+const pageZoom = (q) => { const z = Number(q.zoom); return z >= 0.5 && z <= 2 && z !== 1 ? z : 0; };
+app.get('/', (req, res) => res.type('html').send(`<!doctype html><html data-theme="light"${pageZoom(req.query) ? ` style="--ui-scale:${pageZoom(req.query)}"` : ''}><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><link rel="stylesheet" href="/style.css"><style>body{margin:0;background:var(--bg-root)} #win{background:var(--bg-window);width:${req.query.w || '520px'};min-height:100vh;box-sizing:border-box;padding:10px 8px}</style><script>try{localStorage.setItem('vibespace.lang','${pageLang(req.query)}')}catch{}</script></head><body${pageZoom(req.query) ? ` style="zoom:${pageZoom(req.query)}"` : ''}><div id="win"><div id="host" class="rail-panel rail-panel-channels chan-window"></div></div><script src="/${req.query.b || 'panel'}.js"></script></body></html>`));
 const PORT = await freePort();
 const srv = await new Promise((r) => { const s = app.listen(PORT, '127.0.0.1', () => r(s)); });
 
@@ -165,7 +178,7 @@ const cleanup = () => { try { chrome.kill('SIGKILL'); } catch { } try { srv.clos
 process.on('exit', cleanup);
 for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => { cleanup(); process.exit(143); });
 for (let i = 0; i < 120; i++) { try { await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json(); break; } catch { await sleep(250); } }
-async function page(w, h, query) {
+async function page(w, h, query, dpr = 2) {
   const tg = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/new?about:blank`, { method: 'PUT' })).json();
   const ws = new WebSocket(tg.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
   await new Promise((r) => ws.on('open', r));
@@ -174,11 +187,11 @@ async function page(w, h, query) {
   const cdp = (method, params = {}) => new Promise((r) => { const id = ++seq; pend.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
   await cdp('Runtime.enable'); await cdp('Page.enable');
   await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });
-  await cdp('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 2, mobile: w < 600 });
+  await cdp('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: dpr, mobile: w < 600 });
   const ev = async (expr) => { const r = await cdp('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.result?.exceptionDetails) throw new Error('page threw: ' + JSON.stringify(r.result.exceptionDetails).slice(0, 600)); return r.result?.result?.value; };
   const p = { ev, fire: (m) => { ev(`window.__fire && window.__fire(${JSON.stringify(m)})`).catch(() => { }); }, close: () => { pages.delete(p); try { ws.close(); } catch { } } };
   p.go = async () => { await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/?${query}` }); };
-  p.shot = async (file) => { if (!SHOTS) return; fs.mkdirSync(SHOTS, { recursive: true }); const [ww, hh] = await ev(`(() => { const b = document.getElementById('win').getBoundingClientRect(); return [Math.ceil(b.width), Math.ceil(Math.min(b.height, 1400))]; })()`); const r = await cdp('Page.captureScreenshot', { format: 'png', clip: { x: 0, y: 0, width: ww, height: hh, scale: 1 } }); fs.writeFileSync(path.join(SHOTS, file), Buffer.from(r.result.data, 'base64')); };
+  p.shot = async (file, maxH = 1400) => { if (!SHOTS) return; fs.mkdirSync(SHOTS, { recursive: true }); const [ww, hh] = await ev(`(() => { const b = document.getElementById('win').getBoundingClientRect(); return [Math.ceil(b.width), Math.ceil(Math.min(b.height, ${maxH}))]; })()`); const r = await cdp('Page.captureScreenshot', { format: 'png', clip: { x: 0, y: 0, width: ww, height: hh, scale: 1 } }); fs.writeFileSync(path.join(SHOTS, file), Buffer.from(r.result.data, 'base64')); };
   pages.add(p);
   return p;
 }
@@ -293,6 +306,64 @@ const cr = await cp.ev(ROWS);
 ok(has(cr, 'im/c6'), 'CONTROL: the same flip on a panel whose firstScreen is never handed the policy leaves the direct chat listed ⇒ leg ② is the policy\'s doing (RED without it)', cr.map((r) => r.key));
 cp.close();
 d.close();
+
+console.log('⑧ lane chan-attn-door-icon: the door is the cog alone — the rail, a 900 px window, the reporter\'s shape');
+// the ⚙ System button's own cog (public/index.html #btn-global-settings): the door draws THAT path, nothing else
+const COG_D = (fs.readFileSync(path.join(repo, 'public/index.html'), 'utf8').match(/id="btn-global-settings"[^>]*><svg[^>]*><circle[^>]*\/><path d="([^"]+)"/) || [])[1] || '';
+const WORDS = { zh: '怎么判断需关注', en: 'How "needs attention" is decided' };
+const BAR = `(() => {
+  const d = document.querySelector('[data-attention-door]'); if (!d) return null;
+  const box = (e) => { if (!e) return null; const b = e.getBoundingClientRect(); return { x: +b.left.toFixed(1), y: +b.top.toFixed(1), w: +b.width.toFixed(1), h: +b.height.toFixed(1) }; };
+  const q = (sel) => box(document.querySelector(sel)), svg = d.querySelector('svg');
+  return { w: d.offsetWidth, h: d.offsetHeight, sw: d.scrollWidth, cw: d.clientWidth, text: d.textContent.trim(), title: d.title, aria: d.getAttribute('aria-label'),
+    svgs: d.querySelectorAll('svg').length, path: svg && svg.querySelector('path') ? svg.querySelector('path').getAttribute('d') : null, ic: svg ? [svg.getBoundingClientRect().width, svg.getBoundingClientRect().height].map((v) => +v.toFixed(1)) : null,
+    zoom: parseFloat(getComputedStyle(document.body).zoom) || 1, kids: [...d.parentElement.children].map((k) => k.dataset.attentionDoor ? 'door' : k.dataset.outboxButton ? 'outbox' : k.dataset.newGroup ? 'new' : k.tagName.toLowerCase()).join(),
+    door: box(d), focus: q('.chan-view-btn[data-view="focus"]'), all: q('.chan-view-btn[data-view="all"]'), outbox: q('[data-outbox-button]'), newGroup: q('[data-new-group]'), find: q('.chan-find-input'), host: q('#host') };
+})()`;
+/** what is wrong with the door at one shape ([] = right): a 24–28 px square of the cog alone, its words in title + aria-label */
+const doorFaults = (m, lang) => {
+  if (!m) return ['no door'];
+  const f = [], vis = (b) => b.w <= 28 * m.zoom + 0.5 && b.h <= 28 * m.zoom + 0.5, mid = (b) => b.y + b.h / 2;
+  if (!(m.w >= 24 && m.w <= 28 && m.h >= 24 && m.h <= 28 && m.w <= m.h + 4 && vis(m.door))) f.push(`box ${m.w}×${m.h} (drawn ${m.door.w}×${m.door.h})`);
+  if (m.text) f.push(`words drawn: ${m.text}`);
+  if (m.sw > m.cw + 1) f.push(`content spills: ${m.sw} > ${m.cw}`);
+  if (!(m.svgs === 1 && m.path === COG_D && COG_D)) f.push(`not the ⚙ cog (svgs ${m.svgs})`);
+  if (!(m.ic && Math.abs(m.ic[0] - 14 * m.zoom) <= 0.6 && Math.abs(m.ic[1] - 14 * m.zoom) <= 0.6)) f.push(`icon ${m.ic}`);
+  if (!(m.title === WORDS[lang] && m.aria === WORDS[lang])) f.push(`title/aria ${m.title} / ${m.aria}`);
+  if (m.kids !== 'input,new,outbox,door') f.push(`row ${m.kids}`);
+  if (!(Math.abs(mid(m.door) - mid(m.outbox)) <= 2 && Math.abs(mid(m.door) - mid(m.newGroup)) <= 2 && Math.abs(mid(m.door) - mid(m.find)) <= 2)) f.push('off the line of New group + Outbox');
+  if (!(m.door.x + m.door.w <= m.host.x + m.host.w + 0.5 && m.outbox.x + m.outbox.w <= m.door.x)) f.push('outside the panel / over Outbox');
+  return f;
+};
+const SHAPES = [
+  { name: 'rail', png: 'door-rail.png', w: 1100, h: 900, q: 'w=204px', lang: 'zh' },                                   // the rail's 188 px panel
+  { name: 'window-900', png: 'door-window-900.png', w: 1100, h: 900, q: 'w=900px', lang: 'zh' },
+  { name: 'reporter', png: 'door-reporter.png', w: 2327, h: 1229, q: 'w=520px&lang=en&zoom=0.9', lang: 'en', dpr: 2.2 },  // the fleet report: 2327×1229, uiScale 0.9, dpr 2.2, en
+];
+const measured = {};
+for (const sh of SHAPES) {
+  const p = await page(sh.w, sh.h, sh.q, sh.dpr);
+  await p.go();
+  await until(p, (rs) => has(rs, 'im/c1'));
+  await sleep(300);
+  const m = await p.ev(BAR);
+  measured[sh.name] = m;
+  const faults = doorFaults(m, sh.lang);
+  ok(!faults.length, `${sh.name}: the door is the ⚙ cog alone — ${m && m.w}×${m && m.h} CSS px (≤ 28, never wider than its height + 4), no words, 「${WORDS[sh.lang]}」 in title + aria-label, on the line of New group + Outbox`, { faults, m });
+  await p.shot(sh.png, 140);
+  p.close();
+}
+// the bar's other items: the view switch on its own row above, New group + Outbox before the door (the filter box takes the room)
+const r9 = measured['window-900'];
+ok(r9 && r9.focus && r9.all && r9.focus.y + r9.focus.h <= r9.find.y && r9.newGroup.x < r9.outbox.x, 'the view switch keeps its row above; New group, Outbox, then the door', r9 && { focus: r9.focus, find: r9.find });
+if (SHOTS) fs.writeFileSync(path.join(SHOTS, 'door-shapes.json'), JSON.stringify(measured, null, 1));
+const wp = await page(1100, 900, 'w=900px&b=words');
+await wp.go();
+await until(wp, (rs) => has(rs, 'im/c1'));
+await sleep(300);
+const wf = doorFaults(await wp.ev(BAR), 'zh');
+ok(wf.some((x) => /^words drawn/.test(x)) && wf.some((x) => /^content spills/.test(x)), 'CONTROL: a door that draws its words beside the cog again fails the same check (words drawn, content spills) ⇒ the legs above are the fix\'s doing', wf);
+wp.close();
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass} passed, 0 failed)`);
 process.exit(fail ? 1 : 0);

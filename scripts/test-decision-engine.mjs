@@ -6,7 +6,10 @@
 //   C one call per dialect: the body the provider received (dialect shape, no key / secret / frame in it), per-use
 //     accounting (tokens + USD: OpenAI = input × price, OpenRouter = its cost), the journal (no key, no text);
 //   D a memo hit makes NO call (and survives a restart);  E a 429 ⇒ 0 calls for 60 s, then one, a second wall ⇒ 5 min;
-//   F the day's budget stops calls with ONE server notice, the next local day resumes;  G the counter survives a restart.
+//   F the day's budget stops calls with ONE server notice, the next local day resumes;  G the counter survives a restart;
+//   H the ONE scrub on a record's text;  I a 402 (the plan) / a 400 (the request shape) stops the ROW like a 401: a pass of
+//     5 records = 1 call (before: 5), ONE notice, the status / plugin row say why, a new key / model (or the owner's Test)
+//     lifts it;  J the owner's words in the QUESTIONS reach the vendor scrubbed (+ a RED control: scrubQuestions = identity).
 // Then the plugins card in headless Chrome (desk 1100 + phone 390, the REAL plugins-ui + integrations card as an
 // esbuild iife over a stub HTTP server that mounts the REAL integrations router and the plugin routes): the switch
 // turns on, the registry card's fields are on the card, the budget field reads USD and saves cents, the counter shows
@@ -34,6 +37,7 @@ const SHOTS = process.env.DECISION_PNG_DIR || '';
 // ── the fake provider ─────────────────────────────────────────────────────
 const got = [];
 let walls = 0;
+let refuseWith = 0;   // lane decision-vendor-hygiene: the fake answers this status (402 / 400 / 401 / 422) while set
 const fake = http.createServer((req, res) => {
   let b = ''; req.on('data', (c) => { b += c; });
   req.on('end', () => {
@@ -41,6 +45,7 @@ const fake = http.createServer((req, res) => {
     got.push({ path: req.url, auth: req.headers.authorization || '', raw: b, body });
     const json = (code, o) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(o)); };
     if (walls > 0) { walls--; return json(429, { error: { message: 'rate limited' } }); }
+    if (refuseWith) return json(refuseWith, { error: { message: refuseWith === 402 ? 'payment required' : 'refused' } });
     const inTok = Math.ceil(b.length / 4);
     if (req.url === '/v1/decisions') {
       return json(200, { answers: body.questions.map((q) => q.type === 'predicate' ? { type: 'predicate', name: q.name, probability: 0.8 } : q.type === 'choice' ? { type: 'choice', name: q.name, choice: q.choices[0].value, probabilities: [{ value: q.choices[0].value, probability: 0.9 }], confidence: 0.9 } : { type: 'score', name: q.name, score: 1, probabilities: [] }), usage: { input_tokens: inTok } });
@@ -192,6 +197,87 @@ console.log('H the ONE scrub: a record\'s secret-shaped text never reaches the v
   ok(rr.ok && ra.ok && bodies.length === 2 && leaked.length === 0 && bodies.every((b) => b.includes('«redacted»')) && bodies[0].includes('…@example.com'), 'the six shapes (sk-ant, xoxb, a PEM body, a URL token query, a GitHub token, + the address cut to its domain) reach the fake vendor through NEITHER use ① attention nor ② rule — redacted, the names kept', { leaked, rr: rr.ok, ra: ra.ok });
 }
 
+console.log('I a 402 (the plan) / a 400 (the request shape) stops the ROW like a 401 — not one call a record (lane decision-vendor-hygiene, B-2979)');
+let eng3 = null;
+{
+  const dir3 = path.join(root, 'stops'); fs.mkdirSync(dir3, { recursive: true });
+  const store3 = S.create({ dataDir: dir3, env: {}, log: { warn() {}, log() {} } });
+  const notes3 = [];
+  eng3 = E.create({ dataDir: dir3, integrations: store3, baseUrlFor: BASE, now: () => T, tzOffset: () => 0, serverNotice: (id, text, o) => { notes3.push({ id, text, o }); return 1; }, log: { warn() {} } });
+  const pm3 = new PluginManager({ dataDir: dir3, plugins: [DP], decisionEngine: eng3 });
+  pm3.setEnabled('decision-api', true); pm3.setConfig('decision-api', { rules: true, routing: true });
+  store3.setIntegration('decision-api', { provider: 'openai', apiKey: SECRET });
+  const j3 = () => { try { return fs.readFileSync(path.join(dir3, 'decision-journal.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+  const said = (why) => notes3.filter((x) => x.id.startsWith(`decision-stop:${why}:`));
+  let seq = 0;
+  const pass5 = async () => { const n = got.length, rs = []; for (let i = 0; i < 5; i++) rs.push(await eng3.judge('rule', recordParts(100 + seq), { questions: RULE_Q, memo: { id: `stop-${seq++}`, rule: 'r1' } })); return { calls: got.length - n, rs }; };
+  // BEFORE (the RED reference): the old classification — only 401 / 403 stop the row — stubbed on the shared model
+  const before = {};
+  const realStop = M.rowStopOf;
+  for (const code of [402, 400]) {
+    M.rowStopOf = (st) => (M.isKeyRefused(st) ? 'reconnect' : null); refuseWith = code;
+    try { const b = await pass5(); before[code] = { calls: b.calls, why: [...new Set(b.rs.map((r) => r.why))].join(',') }; } finally { M.rowStopOf = realStop; }
+  }
+  ok(before[402].calls === 5 && before[400].calls === 5 && before[402].why === 'vendor-error' && eng3.status().stop === null, 'RED REFERENCE (the old classification): a 402 / a 400 = one call a record — 5 records, 5 calls each, every one a vendor-error', before);
+  refuseWith = 402;
+  const a = await pass5();
+  ok(a.calls === 1 && a.rs[0].why === 'plan' && a.rs[0].status === 402 && a.rs.slice(1).every((r) => !r.ok && r.why === 'plan' && r.status === undefined), `402: a pass of 5 records = ${a.calls} call (before: ${before[402].calls}) — the first answer stops the row (why plan), the next four are quiet refusals`, a.rs);
+  const n1 = said('plan');
+  ok(n1.length === 1 && /the plan does not allow this model \(HTTP 402\)\. Change the model or the key in ⚙ → System → Integrations & keys\./.test(n1[0].text) && n1[0].o && n1[0].o.i18n && n1[0].o.i18n.key === n1[0].text, 'ONE server notice, in the person\'s words (the client words it from its i18n key)', notes3);
+  const st = eng3.status(), row = pm3.list()[0];
+  ok(st.stop && st.stop.why === 'plan' && st.stop.status === 402 && st.reconnect === null && row.why === 'plan' && row.decision.stop.why === 'plan', 'the status says it: stop {why plan, status 402}; the plugin row\'s why = plan (the chip reads it); reconnect stays null', { stop: st.stop, why: row.why });
+  ok(j3().filter((x) => x.outcome === 'plan').length === 1 && j3().filter((x) => x.outcome === 'refused' && x.why === 'plan').length === 1 && !JSON.stringify(j3()).includes(SECRET), 'the journal: ONE row with outcome plan (the call) + ONE quiet refusal (per 5 min, not per record) — no key');
+  refuseWith = 0;   // the vendor would answer now — the same key + model stays stopped, and says nothing again
+  const still = await pass5();
+  ok(still.calls === 0 && still.rs.every((r) => r.why === 'plan') && said('plan').length === 1, 'the same key + model: 0 calls for 5 more records, no second notice', still.rs.map((r) => r.why));
+  const tr = await eng3.testRunner();   // the owner's Test always calls (it is how a raised plan is seen): its 200 lifts the stop
+  const up = await pass5();
+  ok(tr.ok && eng3.status().stop === null && pm3.list()[0].why === null && up.calls === 5 && up.rs.every((r) => r.ok), 'the owner\'s Test calls through the stop; its 200 lifts it — the next 5 records are 5 calls again', { tr, calls: up.calls });
+  refuseWith = 400;
+  const sh = await pass5();
+  ok(sh.calls === 1 && sh.rs.every((r) => r.why === 'shape') && sh.rs[0].status === 400 && said('shape').length === 1 && eng3.status().stop.why === 'shape' && pm3.list()[0].why === 'shape' && j3().filter((x) => x.outcome === 'shape').length === 1,
+    `400: a pass of 5 records = ${sh.calls} call (before: ${before[400].calls}) — why shape, ONE notice, the row's why = shape, ONE journal row`, sh.rs);
+  refuseWith = 0;
+  store3.setIntegration('decision-api', { model: 'gpt-6-luna-mini' });   // the clearing triggers: a new MODEL …
+  const m1 = await pass5();
+  ok(m1.calls === 5 && m1.rs.every((r) => r.ok) && eng3.status().stop === null && got[got.length - 1].body.model === 'gpt-6-luna-mini', 'a NEW MODEL lifts the stop: the next 5 records are 5 calls (on the new model)', m1.rs.map((r) => r.why));
+  refuseWith = 402;
+  const k0 = await pass5();
+  refuseWith = 0;
+  store3.setIntegration('decision-api', { apiKey: SECRET + '-2' });   // … and a new KEY
+  const k1 = await pass5();
+  ok(k0.calls === 1 && k1.calls === 5 && k1.rs.every((r) => r.ok) && said('plan').length === 2, 'a NEW KEY lifts it too — and a new stop says its own ONE notice (2 plan notices for 2 stops)', { k0: k0.calls, k1: k1.calls, plan: said('plan').length });
+  refuseWith = 401;
+  const r1 = await pass5();
+  ok(r1.calls === 1 && r1.rs.every((r) => r.why === 'reconnect') && eng3.status().reconnect && eng3.status().reconnect.status === 401 && eng3.status().stop.why === 'reconnect' && notes3.length === 3, 'a 401 is the same row stop (why reconnect, status().reconnect kept for the card) — no notice of its own (the card says Reconnect)', { calls: r1.calls, notes: notes3.length });
+  refuseWith = 422;
+  store3.setIntegration('decision-api', { apiKey: SECRET + '-3' });
+  const e1 = await pass5();
+  ok(e1.calls === 5 && e1.rs.every((r) => r.why === 'vendor-error') && eng3.status().stop === null, 'NEGATIVE: a 422 stays a per-call error (5 records = 5 calls) — only 400 / 401 / 402 / 403 stop the row', e1.rs.map((r) => r.why));
+  refuseWith = 0;
+  console.log(`    calls for a pass of 5 records — 402: before ${before[402].calls} → after ${a.calls}; 400: before ${before[400].calls} → after ${sh.calls}`);
+}
+
+console.log('J the owner\'s words in the QUESTIONS reach the vendor scrubbed (lane decision-vendor-hygiene, B-d375) + a RED control');
+{
+  const F = require(path.join(repo, 'src/channel-filter.js'));
+  const TOK = ['sk', '-ant-api03-', 'Zy9Xw8Vu7Ts6Rq5Po4Nm3Lk2Jh1Gf0_', 'c'.repeat(20)].join('');   // built at runtime, never a literal
+  const rule = F.validateRule({ kind: 'decision', condition: `the sender pastes a key like ${TOK}` }).rule;
+  const route = F.validateRule({ kind: 'decision', condition: 'a deploy asks for a decision', question: 'choice', choices: [{ value: 'ops', description: `ops — creds ${TOK}` }, { value: 'later', description: 'later' }] }).rule;
+  const qs = [F.decisionQuestion(rule, 'q1'), F.decisionQuestion(route, 'q2')];
+  const ask = (id) => eng3.judge('routing', { body: 'Deploy tonight?', thread: [] }, { questions: qs, memo: { id, rule: 'r1,r2', groups: 'r2' } });
+  const n = got.length;
+  const r = await ask('scrubq-1');
+  const sent = got.slice(n).map((g) => g.raw).join('\n');
+  console.log(`    the fake vendor received: ${JSON.stringify(((got[n] || {}).body || {}).questions || null).slice(0, 300)}`);
+  ok(r.ok && got.length === n + 1 && !sent.includes(TOK) && !sent.includes(TOK.slice(0, 20)) && (sent.match(/«redacted»/g) || []).length >= 2, 'a rule\'s condition + a routing option\'s description reach the fake vendor redacted (ONE call)', sent.slice(0, 300));
+  const realSQ = M.scrubQuestions;
+  M.scrubQuestions = (q) => q;   // RED control: scrubQuestions stubbed to identity on the shared model
+  const n2 = got.length;
+  try { await ask('scrubq-2'); } finally { M.scrubQuestions = realSQ; }
+  ok(got.length === n2 + 1 && got[n2].raw.includes(TOK), 'RED CONTROL: with scrubQuestions stubbed to identity the same leg sends the token (the leg is RED without the scrub)');
+}
+
 // ── the plugins card in headless Chrome ───────────────────────────────────
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
 if (!CHROME) { console.log('SKIP card leg: no chrome/chromium'); finish(); }
@@ -273,6 +359,24 @@ const ROW = `(() => {
   const P = await ph.ev(ROW);
   ok(P && P.sw2 <= P.vw + 1 && / · 今天：判断了 1 条 · 命中 0 条 · /.test(P.title) && P.inputs === 1, `phone 390 (zh): the row fits (scrollWidth ${P && P.sw2} ≤ ${P && P.vw}), the chip title counts in Chinese`, P);
   await ph.shot('phone.png');
+  ph.close();
+}
+// lane decision-vendor-hygiene: a row stop is ON the chip (the words table: reconnect | plan | shape), its title says what to do
+{
+  refuseWith = 402;
+  const r = await eng.judge('rule', recordParts(7), { questions: RULE_Q, memo: { id: 'chip-stop', rule: 'r1' } });
+  refuseWith = 0;
+  const pg = await page(1100, 900, 'en');
+  await pg.until(`/stopped/.test(document.querySelector('.plugin-row[data-plugin="decision-api"] .plugin-chip')?.textContent || '')`);
+  const S1 = await pg.ev(ROW), cls = await pg.ev(`document.querySelector('.plugin-row[data-plugin="decision-api"] .plugin-chip')?.className`);
+  ok(r.why === 'plan' && S1 && S1.chip === 'stopped — plan refused' && /the plan does not allow this model \(HTTP 402\)\. Change the model or the key in ⚙ → System → Integrations & keys\./.test(S1.title) && /plugin-chip-warn/.test(cls || ''), `desk: the row stop is ON the chip ("${S1 && S1.chip}", warn), its title says what to do`, { S1, cls });
+  await pg.shot('card-stop.png');
+  pg.close();
+  const ph = await page(390, 844, 'zh');
+  await ph.until(`/已停/.test(document.querySelector('.plugin-row[data-plugin="decision-api"] .plugin-chip')?.textContent || '')`);
+  const Z = await ph.ev(ROW);
+  ok(Z && Z.chip === '已停 — 套餐不支持' && /集成与密钥/.test(Z.title) && Z.sw2 <= Z.vw + 1, `phone 390 (zh): the stop chip in Chinese ("${Z && Z.chip}"), the row still fits`, Z);
+  await ph.shot('phone-stop.png');
   ph.close();
 }
 finish();

@@ -186,6 +186,21 @@ const PAYLOAD = (recs) => ({
   const ingest2 = require(REPO + '/src/server/otel-ingest.js').create({ dataDir: dir, PORT: 0, getUsageHistory: () => fakeUH, identityGroups: () => groups, listAccounts: () => [], serverSetting: () => undefined });
   ok(ingest2.observedOrgForRid('req_011TESTTRUTH000000000001') === 'sub-true', 'boot replay: stash → observation map survives restarts');
   ok(ingest2.envFor().OTEL_EXPORTER_OTLP_HEADERS === ingest.envFor().OTEL_EXPORTER_OTLP_HEADERS, 'token PERSISTED across boots (surviving sessions keep a valid truth stream)');
+  // B-1319: THE REPLAY RUNS OFF THE LOOP — a fresh instance has read nothing when create() returns; its `replayed`
+  // promise fills the map (no reader finished it); a stash over FILE_MAX is rewritten only when the trim drops a line,
+  // and off the loop
+  const mk3 = () => require(REPO + '/src/server/otel-ingest.js').create({ dataDir: dir, PORT: 0, getUsageHistory: () => fakeUH, identityGroups: () => groups, listAccounts: () => [], serverSetting: () => undefined });
+  const ingest3 = mk3();
+  ok(ingest3.stats().rids === 0 && typeof ingest3.replayed?.then === 'function', 'B-1319: create() reads no stash on the loop — the map is empty when it returns (the replay is a promise)');
+  await ingest3.replayed;
+  ok(ingest3.stats().rids > 0 && ingest3.observedOrgForRid('req_011TESTTRUTH000000000001') === 'sub-true', 'B-1319: …its replay fills the map by itself (stats, which never finishes it, sees the rows)');
+  const stash3 = path.join(dir, 'usage-history', 'otel-truth.ndjson'), big = JSON.stringify({ rid: 'req_pad', ts: Date.now(), acct: 'sub-true', acctKnown: true, pad: 'p'.repeat(2000) }) + '\n';
+  fs.appendFileSync(stash3, big.repeat(Math.ceil(12.2 * 1048576 / big.length)));
+  const st0 = fs.statSync(stash3); await mk3().replayed; await new Promise((r) => setTimeout(r, 200));
+  ok(fs.statSync(stash3).ino === st0.ino && fs.statSync(stash3).size === st0.size, 'B-1319: a 12 MB+ stash with nothing to trim is NOT rewritten (it used to be, whole, at every boot)');
+  fs.appendFileSync(stash3, JSON.stringify({ rid: 'req_old', ts: Date.now() - 40 * 86400e3, acct: 'sub-true', acctKnown: true }) + '\n');
+  await mk3().replayed; for (let k = 0; k < 50 && fs.statSync(stash3).ino === st0.ino; k++) await new Promise((r) => setTimeout(r, 50));
+  ok(fs.statSync(stash3).ino !== st0.ino && !fs.readFileSync(stash3, 'utf8').includes('req_old') && fs.readFileSync(stash3, 'utf8').includes('req_011TESTTRUTH000000000001'), 'B-1319: …one past the 30-day horizon is trimmed — the rewrite lands off the loop (a new file renamed in), the fresh rows kept');
   srv.close();
 }
 

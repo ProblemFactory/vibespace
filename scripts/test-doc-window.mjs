@@ -35,7 +35,16 @@
 //      <img onerror> never runs, a comment shows its source (the chip says why); arrows step over a raw block; the chip
 //      opens its source IN PLACE, Esc re-renders, Ctrl+S ⇒ only that block's lines change. PNGs <tag>.png (the table) +
 //      <tag>-raw.png + <tag>-raw-edit.png into $VS_DOC_RAW_SHOTS (tag = $VS_DOC_RAW_SHOT_TAG, else after).
-//      VS_DOC_WINDOW_ONLY=raw runs §12 alone.
+//      VS_DOC_WINDOW_ONLY=raw runs §12 alone. Since lane doc-table-native (2.369.267) fixture 31's second table (a bare
+//      STEP-<code>-nn) is a native table too: no raw block in that document.
+//      §17 (lane doc-table-native, 2.369.267 — owner 2026-10-14 「这下面不是标准的表格吗 为啥显示说是源码？」): at 1400×900 in zh
+//      the owner's SHAPE (scripts/fixtures/doc-wheel/32-…: a 10-column table whose cells hold a bare <absent>, code spans
+//      with underscores, a long quoted last column) opens as a NATIVE table — no chip, editable cells, both <absent> as text;
+//      the row height measured against each cell's content (the tall rows = the long quote columns); a letter typed after
+//      <absent> + Ctrl+S ⇒ that row's line only; what stays raw (a <details>, a comment) wears the new chip words
+//      「HTML 块 · 已按内容显示 · 点此编辑源码」 / 「… · 无法显示，给出源码 · 点此编辑」 and a `/p/<id>` paragraph is a paragraph.
+//      PNGs <tag>.png (the table) + <tag>-raw.png into $VS_DOC_TABLE_SHOTS (tag = $VS_DOC_TABLE_SHOT_TAG, else after;
+//      the PNGs are taken BEFORE the asserts, so a base tree gives the before pair). VS_DOC_WINDOW_ONLY=table runs §17 alone.
 //      §13 (lane doc-comment-raw-block, 2.369.258 — owner "这个html部分无法批注"): at 1100×900 in en a blog draft (front matter,
 //      a paragraph, an HTML comment block): a click on the block ⇒ Add comment, the quote = "HTML block: <!-- …", the strip's
 //      context line = its kind; a mouse drag inside its source box ⇒ the quote = the selected text (its own line); reload ⇒
@@ -634,7 +643,7 @@ try {
   }
   const b = await printOf(BP, 'lane-brief.md');
   const bl = b && b.lay;
-  console.log('    the brief ON SCREEN:', S(b && b.screen), '— each raw block holds a bare `/p/<id>`: CommonMark inline raw HTML (an unknown tag), carried as written for editing and READ rendered (§12)');
+  console.log('    the brief ON SCREEN:', S(b && b.screen), '— a bare `/p/<id>` is text in the editor since 2.369.267 (lane doc-table-native: a literal tag is text), so no raw block');
   ok(!!bl && bl.first === 'H1' && /^Lane pages-chip-groups — the chat's Pages chip/.test(bl.h1) && bl.h1.includes('/p/<id>') && bl.ol === 4 && bl.liInline === 4 && bl.raw === 0, '① the brief PRINTS as a document: the first line an <h1> (its /p/<id> kept as text), the numbered list an <ol> of 4 items with inline code + bold, NO raw block', bl && { first: bl.first, h1: bl.h1.slice(0, 80), ol: bl.ol, liInline: bl.liInline, raw: bl.raw });
   ok(!!bl && bl.nOver === 0 && bl.docW <= bl.W && bl.clip.length === 0 && bl.pre.every((x) => /^pre-wrap visible auto$/.test(x)) && bl.font === '14.6667px', '② nothing wider than the A4 page box (673 px) under print media, no clipping / scroll container, pre wraps and may break across pages, body 11 pt', bl && { W: bl.W, docW: bl.docW, over: bl.over, clip: bl.clip, pre: bl.pre, font: bl.font });
   const ends = BRIEF.split('\n').filter((l) => l.trim()).map((l) => (l.match(/[\p{L}\p{N}]+/gu) || []).slice(-3).join(''));
@@ -674,13 +683,13 @@ try {
   const own = await inR(OP, `const t = pm.querySelector('table'), step = t && [...t.querySelectorAll('code')].find((x) => x.textContent === 'STEP-nn');
     return { raw: pm.querySelectorAll('.doc-rawblock').length, rows: t ? t.rows.length : 0, code: t ? [...t.querySelectorAll('code')].map((c) => c.textContent) : [], kbd: t ? t.querySelectorAll('kbd').length : 0, sup: t ? t.querySelectorAll('sup').length : 0, br: t ? t.querySelectorAll('td br').length : 0,
       chip: step ? getComputedStyle(step).fontFamily + ' | ' + getComputedStyle(step).backgroundColor : null, mono: t && [...t.querySelectorAll('td')].some((td) => /mono/i.test(getComputedStyle(td).fontFamily)),
-      bare: (() => { const b = pm.querySelector('.doc-rawblock'), td = b && [...b.querySelectorAll('td')].find((x) => x.textContent.includes('names its step')); return td ? { rendered: b.dataset.rendered, table: !!b.querySelector('.tableWrapper > table'), code: td.querySelectorAll('code').length, mono: /mono/i.test(getComputedStyle(td).fontFamily), text: td.textContent.slice(0, 60), tail: getComputedStyle(td.lastChild.nodeType === 1 ? td.lastChild : td).fontFamily } : null; })() };`);
+      bare: (() => { const td = [...pm.querySelectorAll('td')].find((x) => x.textContent.includes('names its step')), b = td && td.closest('table'); return td ? { native: !td.closest('.doc-rawblock') && b !== t && td.isContentEditable, table: !!b.closest('.tableWrapper'), code: td.querySelectorAll('code').length, mono: /mono/i.test(getComputedStyle(td).fontFamily), text: td.textContent.slice(0, 60) } : null; })() };`);
   const ownShot = await rshot(`${RTAG}.png`);
-  ok(own.raw === 1 && own.rows === 4 && ['STEP-nn', 'ledger.review.read', 'replaces = prior id'].every((c) => own.code.includes(c)) && own.kbd === 2 && own.sup === 1 && own.br === 1 && /mono/i.test(own.chip || '') && !own.mono,
+  ok(own.raw === 0 && own.rows === 4 && ['STEP-nn', 'ledger.review.read', 'replaces = prior id'].every((c) => own.code.includes(c)) && own.kbd === 2 && own.sup === 1 && own.br === 1 && /mono/i.test(own.chip || '') && !own.mono,
     '② it opens as a TABLE (4 rows) with inline code chips — <code>STEP-nn</code> beside the backticked `replaces = prior id`, <kbd> ×2, <sup>, a <br> in its cell — no grey source block, the cells in the prose font', own);
-  await inR(OP, `pm.querySelector('.doc-rawblock').scrollIntoView({ block: 'center' }); return true;`); await sleep(300);
+  await inR(OP, `const t2 = pm.querySelectorAll('table')[1]; if (t2) t2.scrollIntoView({ block: 'center' }); return true;`); await sleep(300);
   await rshot(`${RTAG}-bare.png`);
-  ok(!!own.bare && own.bare.rendered === '1' && own.bare.table && own.bare.code === 0 && !own.bare.mono && own.bare.text.includes('STEP-<code>-nn until export'), '②b the second table (a cell with a BARE <code> placeholder) stays ONE raw block (rule 2) and READS as a table: STEP-<code>-nn shown as written, no <code> element opened, the cell in the prose font (r2)', own.bare);
+  ok(!!own.bare && own.bare.native && own.bare.table && own.bare.code === 0 && !own.bare.mono && own.bare.text.includes('STEP-<code>-nn until export'), '②b the second table (a cell with a BARE <code> placeholder) is a NATIVE table too (lane doc-table-native: a literal tag is text): STEP-<code>-nn shown as written in an editable cell, no <code> element opened, the prose font', own.bare);
   // ③ a cell is a real cell: the caret at the end of the 'Catalog digest' rule, a typed mark, Ctrl+S ⇒ that row's line only
   const cellP = await inR(OP, `const c = pm.querySelector('table tr:nth-child(3) td:nth-child(2) p') || pm.querySelector('table tr:nth-child(3) td:nth-child(2)'); c.scrollIntoView({ block: 'center' }); const r = R(c); return { x: r.right - 3, y: r.bottom - 8 };`);
   await click(cellP); await type('Ⓧ'); await sleep(150); await ctrlS();
@@ -693,9 +702,9 @@ try {
   await sleep(600);
   const rb = await inR(RP, `return { blocks: [...pm.querySelectorAll('.doc-rawblock')].map((b) => ({ rendered: b.dataset.rendered, head: (b.querySelector('.doc-raw-head') || {}).textContent || '', details: !!b.querySelector('details > summary'), src: (b.querySelector('.doc-raw-src') || {}).textContent || '', ce: b.getAttribute('contenteditable'), onerror: !!b.querySelector('[onerror]'), bold: !!b.querySelector('b'), pre: !!b.querySelector('pre') })), xss: window.__rawXss === 1 };`);
   const B = rb.blocks;
-  ok(B.length === 4 && B[0].rendered === '1' && B[0].details && B[0].head === 'HTML · 原样保留，点此改源码' && B[0].ce === 'false' && B[2].rendered === '1' && B[2].bold && !B[2].onerror && !rb.xss && !B.some((x) => x.pre),
-    '⑤ the <details> block and the <div> READ rendered (a <details> with its summary, bold words), read-only, the chip "HTML · 原样保留，点此改源码"; the <img onerror> carries no handler and never ran; no block drawn as a source <pre>', rb);
-  ok(B[1].rendered === '0' && B[1].src === '</details>' && B[3].rendered === '0' && B[3].src === '<!-- reviewer: keep the bag -->' && B[3].head === 'HTML · 无法渲染，显示源码 · 点此改源码', '⑥ a block that reads as nothing (the lone </details>, the comment) shows its SOURCE and its chip says it cannot be rendered', [B[1], B[3]]);
+  ok(B.length === 4 && B[0].rendered === '1' && B[0].details && B[0].head === 'HTML 块 · 已按内容显示 · 点此编辑源码' && B[0].ce === 'false' && B[2].rendered === '1' && B[2].bold && !B[2].onerror && !rb.xss && !B.some((x) => x.pre),
+    '⑤ the <details> block and the <div> READ rendered (a <details> with its summary, bold words), read-only, the chip "HTML 块 · 已按内容显示 · 点此编辑源码" (the words since lane doc-table-native); the <img onerror> carries no handler and never ran; no block drawn as a source <pre>', rb);
+  ok(B[1].rendered === '0' && B[1].src === '</details>' && B[3].rendered === '0' && B[3].src === '<!-- reviewer: keep the bag -->' && B[3].head === 'HTML 块 · 无法显示，给出源码 · 点此编辑', '⑥ a block that reads as nothing (the lone </details>, the comment) shows its SOURCE and its chip says it cannot be rendered', [B[1], B[3]]);
   await rshot(`${RTAG}-raw.png`);
   // ⑦ arrows step over a raw block as one unit
   const intro = await inR(RP, `const p = pm.querySelector('p'); const r = R(p); return { x: r.right - 3, y: r.top + r.height / 2 };`);
@@ -727,6 +736,60 @@ try {
   ok(tog1 && !tog2.ta && tog2.rendered === '1' && fs.readFileSync(RP, 'utf8') === want, '⑩b a second press on the chip closes the open box (no reopen), the block reads rendered again, nothing changed on disk', { tog1, tog2 });
   ok(!!(await until(() => (pageErrors.length === 0 ? true : null), 300)) || pageErrors.length === 0, '⑪ no page exception through §12', pageErrors.slice(0, 3));
   if (RSHOTS) ok(!!ownShot && fs.statSync(ownShot).size > 10000, `⑫ PNGs for the owner: ${path.join(RSHOTS, RTAG + '.png')} (+ -raw, -raw-edit)`);
+  }
+  if (ONLY === '' || ONLY === 'table') {
+  // ── §17 a standard table is a TABLE (lane doc-table-native, 2.369.267 — owner 2026-10-14 「这下面不是标准的表格吗 为啥显示说是源码？」:
+  //    an agent's report whose 10-column table held a bare <absent> in two cells drew as a raw block 「Markdown · 原样保留，点此改源码」)
+  section('§17 the owner\'s shape (a 10-column table whose cells hold a bare <absent>) opens as a NATIVE table at desk width; what stays raw says what it is');
+  const TSHOTS = process.env.VS_DOC_TABLE_SHOTS || SHOTS, TTAG = process.env.VS_DOC_TABLE_SHOT_TAG || 'after';
+  const tshot = async (n) => { if (!TSHOTS) return null; const r = await call('Page.captureScreenshot', { format: 'png' }); const f = path.join(TSHOTS, n); fs.writeFileSync(f, Buffer.from(r.data, 'base64')); return f; };
+  await call('Page.addScriptToEvaluateOnNewDocument', { source: `try { localStorage.setItem('vibespace.lang', 'zh'); localStorage.removeItem('vs-doc-width'); } catch {}` });
+  if (!ok(!!(await boot(1400, 900, false)), '§17 the client re-booted at 1400×900 in zh (the owner\'s desk)')) throw new Error('no app for §17');
+  const TD = path.join(fs.realpathSync(PROJ), 'tables'); fs.mkdirSync(TD, { recursive: true });
+  const F32 = fs.readFileSync(path.join(REPO, 'scripts/fixtures/doc-wheel/32-table-placeholder-cells.md'), 'utf8');
+  const TP = path.join(TD, 'adjudication.md'); fs.writeFileSync(TP, F32);
+  const RAWDOC = '# Notes\n\nOpen /p/<id> to read the published copy.\n\n<details>\n<summary>Why two rows</summary>\n\nThey differ in the year.\n\n</details>\n\n<!-- reviewer: keep both -->\n\nTail paragraph.\n';
+  const RP = path.join(TD, 'notes.md'); fs.writeFileSync(RP, RAWDOC);
+  const openT = async (p, nm) => {
+    await ev(`for (const w of [...app.wm.windows.values()]) app.wm.closeWindow(w.id); return true;`); await sleep(300);
+    await ev(`app.openFile(${S(p)}, ${S(nm)}, {}); return true;`);
+    const up = await until(() => ev(`const w = ${DW(p)}; const pm = w && w.content.offsetParent && w.content.querySelector('.doc-page .ProseMirror'); return pm && pm.childElementCount > 1 ? w.id : null;`), 20000, 200);
+    if (up) { await ev(`app.wm.toggleMaximize(${S(up)}); return true;`); await sleep(700); }
+    return up;
+  };
+  const inT = (p, js) => ev(`const w = ${DW(p)}; const pm = w.content.querySelector('.doc-page .ProseMirror'); const R = (e) => e.getBoundingClientRect(); ${js}`);
+  ok(!!(await openT(TP, 'adjudication.md')), '① the owner\'s shape (fixture 32) opened in the Doc window, maximized at 1400 px');
+  await inT(TP, `const h = [...pm.querySelectorAll('h2')].pop(); if (h) h.scrollIntoView({ block: 'start' }); return true;`); await sleep(400);
+  const shot = await tshot(`${TTAG}.png`);
+  const tv = await inT(TP, `const t = pm.querySelector('table'), raw = pm.querySelectorAll('.doc-rawblock').length, chip = !!pm.querySelector('.doc-raw-head');
+    if (!t) return { raw, chip, table: false, chipText: (pm.querySelector('.doc-raw-head') || {}).textContent || '' };
+    const tds = [...t.querySelectorAll('td')], abs = tds.filter((x) => x.textContent.trim() === '<absent>');
+    const tr = t.rows[1], pad = (td) => parseFloat(getComputedStyle(td).paddingTop) + parseFloat(getComputedStyle(td).paddingBottom);
+    const inner = [...tr.cells].map((td) => { const r = document.createRange(); r.selectNodeContents(td); return Math.round(r.getBoundingClientRect().height); });
+    const tallest = inner.indexOf(Math.max(...inner)), code = tr.cells[2];
+    return { raw, chip, table: true, wrapped: !!t.closest('.tableWrapper'), rows: t.rows.length, cols: t.rows[0].cells.length, absent: abs.length, absentEditable: abs.every((x) => x.isContentEditable), absentEl: abs.some((x) => x.querySelector('absent')),
+      codes: [...t.querySelectorAll('code')].map((c) => c.textContent), rowH: Math.round(R(tr).height), pad: pad(tr.cells[0]), inner, tallest, codeCell: Math.round(code.querySelector('code') ? R(code.querySelector('code')).height : 0),
+      tableW: Math.round(R(t).width), pageW: Math.round(R(pm).width), colW: [...t.rows[0].cells].map((c) => Math.round(R(c).width)) };`);
+  ok(tv.table && tv.raw === 0 && !tv.chip && tv.wrapped && tv.rows === 5 && tv.cols === 10, '② a NATIVE table (5 rows × 10 columns in its scrolling wrapper) — no raw block, no chip', tv);
+  ok(tv.absent === 2 && tv.absentEditable && !tv.absentEl && ['terms.deposit_months.count', 'fees.late_tiers[all#2]', 'term.survival_years', 'pricing.unit_price.amount'].every((c) => (tv.codes || []).includes(c)), '③ both <absent> cells read "<absent>" as text in editable cells (no element), the code spans with underscores drawn as inline code', tv);
+  ok(tv.table && tv.tallest >= 8 && tv.inner[tv.tallest] + tv.pad >= tv.rowH - 2 && tv.inner[2] <= tv.inner[tv.tallest] / 2, '④ the TALL ROW measured: the row is as tall as its tallest cell — a long quoted column (reason / deciding quote) — while the code-span cell holds one short line (its "tall blank" is the row, not the cell)', { rowH: tv.rowH, inner: tv.inner, tallest: tv.tallest, colW: tv.colW, tableW: tv.tableW, pageW: tv.pageW });
+  console.log(`    the tall row: row ${tv.rowH} px · each cell's content ${S(tv.inner)} · columns ${S(tv.colW)} (table ${tv.tableW} px in a ${tv.pageW} px page)`);
+  // ⑤ a letter typed after the first <absent> + Ctrl+S ⇒ that row's line only, the tag kept as written
+  const cellA = await inT(TP, `const td = [...pm.querySelectorAll('td')].find((x) => x.textContent.trim() === '<absent>'); td.scrollIntoView({ block: 'center' }); const r = document.createRange(); r.selectNodeContents(td.querySelector('p') || td); const b = r.getBoundingClientRect(); return { x: b.right - 1, y: b.top + b.height / 2 };`);
+  await click(cellA); await call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'End', code: 'End', windowsVirtualKeyCode: 35 }); await call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'End', code: 'End', windowsVirtualKeyCode: 35 }); await sleep(100);
+  await type('Ⓧ'); await sleep(150); await ctrlS();
+  const savedT = await until(() => { const t = fs.readFileSync(TP, 'utf8'); return t.includes('Ⓧ') ? t : null; }, 8000);
+  const tL = F32.split('\n'), sL = String(savedT || '').split('\n'), tdiff = tL.map((l, i) => (l === sL[i] ? null : i)).filter((x) => x !== null);
+  ok(!!savedT && tL.length === sL.length && tdiff.length === 1 && sL[tdiff[0]] === tL[tdiff[0]].replace('| <absent> |', '| <absent>Ⓧ |') && /^\| R007 \|/.test(tL[tdiff[0]]), '⑤ typing at the end of an <absent> cell + Ctrl+S ⇒ exactly that row\'s line changed (<absent>Ⓧ, the tag as written), every other line byte-identical', { tdiff, line: tdiff.length ? sL[tdiff[0]].slice(0, 120) : null });
+  fs.writeFileSync(TP, F32);
+  // ⑥ what stays raw says what it is; a /p/<id> paragraph is a paragraph
+  ok(!!(await openT(RP, 'notes.md')), '⑥ a document with a /p/<id> paragraph, a <details> block and an HTML comment opened');
+  await sleep(500);
+  const rawShot = await tshot(`${TTAG}-raw.png`);
+  const rv = await inT(RP, `return { heads: [...pm.querySelectorAll('.doc-rawblock .doc-raw-head')].map((h) => h.textContent), p: [...pm.querySelectorAll(':scope > p')].map((x) => x.textContent) };`);
+  ok(rv.heads.length === 3 && rv.heads[0] === 'HTML 块 · 已按内容显示 · 点此编辑源码' && rv.heads[1] === 'HTML 块 · 无法显示，给出源码 · 点此编辑' && rv.heads[2] === rv.heads[1] && rv.p.includes('Open /p/<id> to read the published copy.'), '⑦ the chip says what the block is: 「HTML 块 · 已按内容显示 · 点此编辑源码」 (the <details>, read rendered) / 「HTML 块 · 无法显示，给出源码 · 点此编辑」 (the lone </details>, the comment); the /p/<id> line is a paragraph, not a raw block', rv);
+  ok(pageErrors.length === 0, '⑧ no page exception through §17', pageErrors.slice(0, 3));
+  if (TSHOTS) ok(!!shot && fs.statSync(shot).size > 10000 && !!rawShot && fs.statSync(rawShot).size > 10000, `⑨ PNGs for the owner: ${path.join(TSHOTS, TTAG + '.png')} + ${TTAG}-raw.png`);
   }
   if (ONLY === '' || ONLY === 'rawcmt') {
   // ── §13 a raw block is commentable (lane doc-comment-raw-block, 2.369.258 — owner 2026-10-12 "这个html部分无法批注": a blog
@@ -760,7 +823,7 @@ try {
   if (!ok(!!(await boot(1100, 900, false)), '§13 the client re-booted at 1100×900 (en)')) throw new Error('no app for §13');
   ok(!!(await openDoc(true)), '① a blog draft with front matter, a paragraph and an HTML comment block opened, maximized at 1100 px');
   const kinds = await inC(`H.scrollIntoView({ block: 'center' }); return [...pm.querySelectorAll('.doc-rawblock')].map((b) => (b.querySelector('.doc-raw-head') || {}).textContent);`);
-  ok(kinds.length === 2 && /^front matter/.test(kinds[0]) && /^HTML · cannot be rendered/.test(kinds[1]), '② two raw blocks: the front matter and the HTML comment (its source shown, "cannot be rendered")', kinds);
+  ok(kinds.length === 2 && /^Front matter · shown as its content/.test(kinds[0]) && /^HTML block · cannot be shown, source below/.test(kinds[1]), '② two raw blocks: the front matter and the HTML comment (its source shown, "cannot be shown, source below")', kinds);
   await sleep(300);
   // ③ a click on the block (its NodeSelection) ⇒ Add comment; the quote = the block's kind + source
   const hb = await inC(`const s = H.querySelector('.doc-raw-src'); const r = R(s); return { x: r.right - 40, y: r.top + r.height / 2 };`);
@@ -1187,7 +1250,7 @@ try {
   const carry = turns.filter((x) => x.one > -1);
   ok(turns.every((x) => x.sid === CONV16) && carry.length === 1 && carry[0].doc && carry[0].one < carry[0].two && turns.indexOf(carry[0]) < turns.length - 1, '⑤ the resumed chat\'s next turn (its hook\'s REAL prompt-context) carries the [Doc comments] message, notes in order — once', turns);
   }
-  if (ONLY !== 'width' && ONLY !== 'print' && ONLY !== 'raw' && ONLY !== 'rawcmt' && ONLY !== 'link' && ONLY !== 'synced' && ONLY !== 'stopped') {
+  if (ONLY !== 'width' && ONLY !== 'print' && ONLY !== 'raw' && ONLY !== 'table' && ONLY !== 'rawcmt' && ONLY !== 'link' && ONLY !== 'synced' && ONLY !== 'stopped') {
 
   // ── §9 design 020 (lane doc-editor-ui, 2.369.223): the design desk's audit sample (every block kind) at 1280 / 390 ×
   //    dark / light × zh / en — the PNGs carry the audit's names with `after-` so the owner flips between before and after

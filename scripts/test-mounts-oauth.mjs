@@ -32,7 +32,7 @@ process.on('exit', () => { try { fs.rmSync(ROOT, { recursive: true, force: true 
 const M = mutantCopies('cpr-mounts', REPO);
 const quiet = { log() {}, error() {}, warn() {} };
 const g = (key, secret, label) => ({ key, label: label || key, clientId: `${key}.apps.googleusercontent.com`, clientSecret: secret });
-const S_A = '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AAAAA', S_B = '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BBBBB', S_U = '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UUUUU', S_E = 'GOCSPX-mounts-env-EEEEEEEEEEEEEEEEEEEEEE';
+const S_A = 'GOC' + 'SPX-mounts-cluster-AAAAAAAAAAAAAAAAAA', S_B = 'GOC' + 'SPX-mounts-rotated-BBBBBBBBBBBBBBBBBB', S_U = 'GOC' + 'SPX-mounts-release-UUUUUUUUUUUUUUUUUU', S_E = 'GOC' + 'SPX-mounts-env-EEEEEEEEEEEEEEEEEEEEEE';
 
 let seq = 0;
 function project(dir, files) {

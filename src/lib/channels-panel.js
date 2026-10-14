@@ -1173,13 +1173,10 @@ export function renderChannelsPanel(app, c) {
   attnBtn.dataset.attentionDoor = '1';
   attnBtn.title = t('How "needs attention" is decided');
   attnBtn.setAttribute('aria-label', attnBtn.title);
-  const attnGlyph = document.createElement('span');
-  attnGlyph.className = 'chan-attn-door-glyph';
-  attnGlyph.textContent = '\u2699\uFE0E';
-  const attnLabel = document.createElement('span');
-  attnLabel.className = 'chan-attn-door-label';
-  attnLabel.textContent = t('How it is decided');
-  attnBtn.append(attnGlyph, attnLabel);
+  // lane chan-attn-door-icon (fleet inc-mv7egwmp-u4ql, 2026-10-14): THE COG ALONE at every width — the ⚙ System button's
+  // own (UI_ICONS.cog, 14 px) in a 24 px square; the words ride title + aria-label (a label beside it made a long button
+  // in a wide panel / a Channels window: 「设置按钮应该本来只有个 icon 大小」)
+  attnBtn.append(icon('cog', 14));
   const attnPolicy = () => (app.settings ? attentionPolicy((k) => app.settings.get(k)) : null);
   const onPolicy = () => { if (c.isConnected && groups !== null) draw(); };
   for (const code of ATTENTION_RULES) app.settings?.on?.(`channels.attention.rule.${code}`, onPolicy);

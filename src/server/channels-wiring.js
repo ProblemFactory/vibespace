@@ -27,7 +27,8 @@ function livenessReader({ liveSessions = () => [], readUserState = () => ({}), c
   const fs = require('fs'), path = require('path'), os = require('os'), G = require('../channel-groups.js');
   const dirs = transcriptDirs || (() => [path.join(os.homedir(), '.claude', 'projects')]);
   const found = findTranscript || ((cid) => !!(require('../session-store.js').findSessionJsonlPath(cid) || require('../adapters/codex.js').findCodexSessionJsonlPath(cid)));
-  const archivedCids = () => { try { const st = readUserState() || {}; return new Set((st.archivedSessions || []).map((k) => { const v = String(k); return v.includes(':') ? v.slice(v.indexOf(':') + 1) : v; })); } catch { return new Set(); } };
+  let archOf = null, archSet = null; // B-1319: the set is rebuilt only when the user state is (a write replaces the array) — once per member was 123 ms of the listen tick (6 291 archived)
+  const archivedCids = () => { try { const st = readUserState() || {}; const arr = st.archivedSessions || []; if (arr === archOf && archSet) return archSet; archOf = arr; return (archSet = new Set(arr.map((k) => { const v = String(k); return v.includes(':') ? v.slice(v.indexOf(':') + 1) : v; }))); } catch { return new Set(); } };
   const transcriptOf = (cid) => { try { return !!found(cid); } catch { return true; } };
   const dirReadable = () => { try { for (const d of dirs()) fs.readdirSync(d); return true; } catch { return false; } };
   let metas = null, metasAt = 0;

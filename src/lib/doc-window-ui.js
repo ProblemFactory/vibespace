@@ -401,9 +401,10 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
     let cur = node, ta = null;
     const draw = () => {
       const r = rawReading(cur.attrs.source || '', { Marked, sanitize: sanitizeHtml });
-      const kind = r.kind === 'html' ? 'HTML' : r.kind === 'front' ? t('front matter') : 'Markdown';
+      // the chip says WHAT it is (lane doc-table-native, 2.369.267 — the owner read "原样保留，点此改源码" as "shown as source")
+      const kind = t(RAW_KIND_WORD[r.kind] || RAW_KIND_WORD.markdown);
       dom.dataset.rendered = r.rendered ? '1' : '0';
-      head.textContent = r.rendered ? t('{kind} · kept as written · edit source', { kind }) : t('{kind} · cannot be rendered · edit source', { kind });
+      head.textContent = r.rendered ? t('{kind} · shown as its content · edit source', { kind }) : t('{kind} · cannot be shown, source below · edit', { kind });
       if (!r.rendered) { body.className = 'doc-raw-src'; body.textContent = cur.attrs.source || ''; return; }
       const d = new DOMParser().parseFromString('<!doctype html><body>' + r.html + '</body>', 'text/html'); // an inert document: nothing in it runs
       wrapTables(d);

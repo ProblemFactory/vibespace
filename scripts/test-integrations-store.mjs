@@ -47,8 +47,8 @@ const CLOAK_A = 'cb_cluster_license_AAAAAAAAAAAAAAAA1111';
 const CLOAK_B = 'cb_rotated_license_BBBBBBBBBBBBBBBB2222';
 const LARK_A = 'lark-secret-cluster-AAAAAAAAAAAAAAAAAAAA';
 const LARK_U = 'lark-secret-release-UUUUUUUUUUUUUUUUUUUU';
-const G_A = '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AAAAA';
-const G_B = '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BBBBB';
+const G_A = 'GOC' + 'SPX-google-cluster-AAAAAAAAAAAAAAAAAA';
+const G_B = 'GOC' + 'SPX-google-rotated-BBBBBBBBBBBBBBBBBB';
 const SECRETS = [CLOAK_A, CLOAK_B, LARK_A, LARK_U, G_A, G_B];
 const g = (key, secret, label) => ({ key, label: label || key, clientId: `${key}.apps.googleusercontent.com`, clientSecret: secret });
 

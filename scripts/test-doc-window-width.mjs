@@ -24,9 +24,12 @@
 //      front matter, an unmatched tag) is drawn by rawReading (readingHtml: the house renderer + THE sanitizer), a block
 //      that reads as nothing (a comment) shows its source with the chip saying so; the window's node view wears it.
 //      r2 ruling: an UNPAIRED inline open tag (the owner's bare `PR-<code>-nn`) is TEXT in the reading — the fixture's second
-//      table shows `STEP-<code>-nn` as written, no <code> element opened (the editor keeps that table raw: rule 2 unchanged).
+//      table shows `STEP-<code>-nn` as written, no <code> element opened (the editor kept that table raw until lane
+//      doc-table-native, 2.369.267: a LITERAL TAG — a placeholder `<absent>` or an unpaired open tag — is TEXT in the editor
+//      too, ONE predicate `literalTag`; both tables of fixture 31 are tables; a `</name>` inside a code span closes nothing).
+//      The chip says what the block is: "{kind} · shown as its content · edit source" / "· cannot be shown, source below".
 //      RED CONTROLS: the editor's DOM exported (its raw blocks) ⇒ red; a rawReading that skips the sanitizer ⇒ red; the
-//      reader without its unpaired-tag rule ⇒ the cell's tail in code type ⇒ red.
+//      reader without its unpaired-tag rule ⇒ the cell's tail in code type ⇒ red; a close inside a code span counted ⇒ red.
 //   ⑦ (lane doc-comment-raw-block, 2.369.258 — owner 2026-10-12 "这个html部分无法批注"): every block of a document is
 //      commentable; what the person selected is the quote. rawCommentAnchor's table: a click on a raw block (its
 //      NodeSelection) ⇒ the block's anchor, the quote = its kind + its source (≤ 200); a DOM selection inside its body ⇒
@@ -151,7 +154,7 @@ const fromSpec = (spec, inner) => {
 const editorHtml = (n) => { if (n.isText) return n.marks.reduceRight((acc, m) => fromSpec(m.type.spec.toDOM(m, true), acc), escT(n.text)); let inner = ''; n.forEach((c) => { inner += editorHtml(c); }); return n.type.name === 'doc' ? inner : fromSpec(n.type.spec.toDOM(n), inner); };
 const viaEditor = M.exportDocument({ title: 'lane-brief.md', body: editorHtml(D.loadDoc(BRIEF).doc) });
 const redV = readingVerdicts(viaEditor);
-ok(redV.includes('a raw block') && redV.includes('the first line is not an <h1>'), 'RED CONTROL: the editor\'s DOM exported again ⇒ red (the heading, the list and TESTS: are raw blocks there — a bare /p/<id> is CommonMark raw HTML)', redV);
+ok(redV.length > 0 && !redV.includes('a raw block'), 'RED CONTROL: the editor\'s DOM exported again ⇒ red (its own markup, not the reading\'s) — no longer for raw blocks: since lane doc-table-native a bare /p/<id> is TEXT in the editor too (the heading, the list and TESTS: are native nodes there)', redV);
 ok(S(['<id>', '</sha>', '<my-el>', '<b>', '<br/>', '<details>', '<img src=x>'].map(M.placeholderHtml)) === S(['&lt;id&gt;', '&lt;/sha&gt;', '&lt;my-el&gt;', '<b>', '<br/>', '<details>', '<img src=x>']), 'placeholderHtml: a bare <word> naming no HTML element reads as TEXT; real tags go on to the sanitizer as written');
 ok((() => { try { M.readingHtml('# x', { Marked }); return false; } catch { return true; } })() && /^<pre><code>a: 1\n<\/code><\/pre>\n<h1>T<\/h1>/.test(M.readingHtml('---\na: 1\n---\n# T\n', { Marked, sanitize: (h) => h })), 'readingHtml fails CLOSED without the sanitizer; front matter reads as a plain block, not a rule + a heading');
 ok(S([0, 4, 5, 6, 7, 9, 10, 30].map(M.colsBand)) === S(['', '', 'm', 'm', 'l', 'l', 'xl', 'xl']) && /tb\.rows\[0\] \? tb\.rows\[0\]\.cells\.length : 0\); if \(band\) w\.dataset\.cols = band;/.test(UI), 'colsBand: ≤ 4 columns as written, 5–6 m (90 %), 7–9 l (80 %), 10+ xl (70 %) — the export wrapper carries it as data-cols');
@@ -198,7 +201,7 @@ ok(rawVerdicts(readMixed).length === 0, 'the reading export of the owner\'s shap
 const ownerDoc = D.loadDoc(OWNER), kinds = []; ownerDoc.doc.descendants((n) => { kinds.push(n.type.name); });
 const ownerEditor = editorHtml(ownerDoc.doc);
 const rawSrcs = ownerDoc.nodes.filter((n) => n.type.name === 'rawBlock').map((n) => n.attrs.source);
-ok(kinds.includes('table') && rawSrcs.length === 1 && rawSrcs[0].includes('STEP-<code>-nn') && /<table[^>]*>[^]*<code[^>]*>STEP-nn<\/code>[^]*<kbd>Ctrl<\/kbd>[^]*<\/table>/.test(ownerEditor) && (ownerEditor.match(/doc-rawblock/g) || []).length === 1, 'the owner\'s shape in the EDITOR: the paired-tag table is a real table (cells editable), its <code> / <kbd> marks drawn as code / kbd; the ONE raw block is the table whose cell holds the bare placeholder (the raw-block verdict census)', { kinds: [...new Set(kinds)], rawSrcs });
+ok(kinds.includes('table') && rawSrcs.length === 0 && /<table[^>]*>[^]*<code[^>]*>STEP-nn<\/code>[^]*<kbd>Ctrl<\/kbd>[^]*<\/table>/.test(ownerEditor) && !/doc-rawblock/.test(ownerEditor) && (ownerEditor.match(/<table/g) || []).length === 2 && ownerEditor.includes('STEP-&lt;code&gt;-nn until export'), 'the owner\'s shape in the EDITOR: both tables are real tables (cells editable) — the paired tags drawn as code / kbd, the bare STEP-<code>-nn as its text (lane doc-table-native: a literal tag is text in the editor as in the reading); no raw block', { kinds: [...new Set(kinds)], rawSrcs });
 // RED CONTROL: the editor's DOM exported (rel239's exportBody) — the <details> rides as a raw block there: its source comes back
 const viaEd = rawVerdicts(editorHtml(D.loadDoc(MIXED).doc));
 ok(viaEd.includes('a raw block shown as source') && viaEd.includes('the <details> block not rendered'), 'RED CONTROL: the editor\'s DOM exported instead of the reading render ⇒ red (the <details> block comes back as its source)', viaEd);
@@ -209,17 +212,24 @@ ok(!com.rendered && !lone.rendered && com.kind === 'html', 'rawReading: a block 
 ok(fm.rendered && fm.kind === 'front' && /<pre><code>title: x/.test(fm.html), 'rawReading: front matter reads as a plain block (kind front matter)', fm);
 ok((() => { try { M.rawReading('<b>x</b>', { Marked }); return false; } catch { return true; } })() && (() => { try { M.rawReading('<b>x</b>', { sanitize: SIGN }); return false; } catch { return true; } })(), 'rawReading fails CLOSED without the sanitizer (or the renderer)');
 const BARE = '| Mechanism | Rule |\n| --- | --- |\n| Lineage | the PR-<code>-nn label shifts |\n', bareDoc = D.loadDoc(BARE), bareR = RR(BARE);
-ok(bareDoc.nodes.some((n) => n.type.name === 'rawBlock') && bareR.rendered && /<table>/.test(bareR.html) && !/\| Mechanism \|/.test(bareR.html) && bareR.html.includes('the PR-&lt;code&gt;-nn label shifts') && !/<code\b/.test(bareR.html), 'an UNMATCHED tag (a bare <code> placeholder in a cell) stays a raw block — and READS as a table (rule 1) showing PR-<code>-nn as written, no <code> element opened (r2)', { raw: bareDoc.nodes.map((n) => n.type.name), html: bareR.html.slice(0, 200) });
+ok(bareDoc.nodes.length === 1 && bareDoc.nodes[0].type.name === 'table' && bareR.rendered && /<table>/.test(bareR.html) && !/\| Mechanism \|/.test(bareR.html) && bareR.html.includes('the PR-&lt;code&gt;-nn label shifts') && !/<code\b/.test(bareR.html), 'an UNMATCHED tag (a bare <code> placeholder in a cell): the editor carries the table NATIVELY, the tag its text (lane doc-table-native — the r2 raw block retired); its READING shows PR-<code>-nn as written, no <code> element opened (r2)', { raw: bareDoc.nodes.map((n) => n.type.name), html: bareR.html.slice(0, 200) });
 const UP = [['<code>-nn label', '<code>'], ['<b class="k">x y', '<b class="k">'], ['<code>x</code>', null], ['<CODE>x</code> y', null], ['<code>x</code', '<code>'], ['<br>', null], ['<img src="i.png">', null], ['<em/>', null], ['<id>', null], ['<sha> x </sha>', null], ['x <code>', null]];
 const upBad = UP.filter(([src, want]) => M.unpairedOpenTag(src) !== want).map(([src, want]) => `${src} ⇒ ${M.unpairedOpenTag(src)} (want ${want})`);
 ok(upBad.length === 0, 'unpairedOpenTag (PURE): an open tag whose close is not in the rest of its run ⇒ the tag (text); a paired one (any case), a void / self-closed one, a name that is no element (placeholderHtml\'s) ⇒ null', upBad);
+// lane doc-table-native (2.369.267 — owner 「这下面不是标准的表格吗 为啥显示说是源码？」: a table whose cells held a bare <absent>)
+const LT = [['<absent>', '<absent>'], ['</sha>', '</sha>'], ['<id/>', '<id/>'], ['<my-case> x', '<my-case>'], ['<code>-nn label', '<code>'], ['<b>x `</b>` y', '<b>'], ['<b>x ``a</b>`` y', '<b>'], ['<b>x `a` </b>', null],
+  ['<code>x</code>', null], ['<br>', null], ['<img src="i.png">', null], ['<b class="k">x</b>', null], ['<https://e.com/a>', null], ['<a@b.co>', null], ['x <absent>', null], ['</code>', null]];
+const ltBad = LT.filter(([src, want]) => M.literalTag(src) !== want).map(([src, want]) => `${src} ⇒ ${M.literalTag(src)} (want ${want})`);
+ok(ltBad.length === 0, 'literalTag (PURE — ONE predicate, the reading\'s LITERAL_TAG and the editor\'s tokenizer): a placeholder (<absent> </sha> <id/> <my-case>: no HTML element) or an unpaired open tag (a close inside a code span counts as none) ⇒ the tag as text; a paired / void / attributed-paired tag, an autolink, a stray real close ⇒ null', ltBad);
+const rCell = M.readingHtml('| a | b |\n|---|---|\n| 1 | <absent> |\n', { Marked, sanitize: (h) => h }), rSpan = M.readingHtml('a <b>x `</b>` y\n', { Marked, sanitize: (h) => h });
+ok(/<table>[^]*<td>&lt;absent&gt;<\/td>[^]*<\/table>/.test(rCell) && rSpan.includes('a &lt;b&gt;x <code>&lt;/b&gt;</code> y') && !/<b>/.test(rSpan), 'the READING: a bare <absent> in a cell is its text in a <table>; a <b> whose only close sits in a code span is text — no <b> element opened (a code span is literal)', { rCell: rCell.slice(0, 160), rSpan });
 ok(/const r = rawReading\(cur\.attrs\.source \|\| '', \{ Marked, sanitize: sanitizeHtml \}\);/.test(UI) && /e\.name === 'rawBlock' \? e\.extend\(\{ addNodeView: \(\) => \(\{ node, view, getPos \}\) => rawView\(node, view, getPos\) \}\)/.test(UI) && !/edit in Raw|'data-head'/.test(UI) && /dom\.contentEditable = 'false'/.test(UI),
   'the window: every raw block is the rawBlock node view drawing rawReading with THE sanitizer, read-only (contenteditable=false); the old source head (data-head "edit in Raw") is gone');
-ok(/head\.textContent = r\.rendered \? t\('\{kind\} · kept as written · edit source', \{ kind \}\) : t\('\{kind\} · cannot be rendered · edit source', \{ kind \}\);/.test(UI) && /head\.addEventListener\('click', \(\) => \(ta \? commit\(\) : open\(\)\), \{ signal \}\);/.test(UI) && /tr\.setNodeMarkup\(pos, null, \{ \.\.\.cur\.attrs, source: v \}\)/.test(UI),
-  'the chip says what it is ("kept as written · edit source" / "cannot be rendered") and is the one way in: a press opens the source in place, the edit lands as the node\'s attrs.source');
-for (const [lang, want] of [['zh', '"{kind} · kept as written · edit source": "{kind} · 原样保留，点此改源码"'], ['ja', '"{kind} · kept as written · edit source": "{kind} · 書かれたまま保持 · ソースを編集"']]) {
+ok(/const kind = t\(RAW_KIND_WORD\[r\.kind\] \|\| RAW_KIND_WORD\.markdown\);/.test(UI) && /head\.textContent = r\.rendered \? t\('\{kind\} · shown as its content · edit source', \{ kind \}\) : t\('\{kind\} · cannot be shown, source below · edit', \{ kind \}\);/.test(UI) && /head\.addEventListener\('click', \(\) => \(ta \? commit\(\) : open\(\)\), \{ signal \}\);/.test(UI) && /tr\.setNodeMarkup\(pos, null, \{ \.\.\.cur\.attrs, source: v \}\)/.test(UI),
+  'the chip says WHAT it is — the block\'s kind word ("Markdown block") + "shown as its content · edit source" / "cannot be shown, source below · edit" (lane doc-table-native: "kept as written" read as "shown as source") — and is the one way in: a press opens the source in place, the edit lands as the node\'s attrs.source');
+for (const [lang, want, cannot] of [['zh', '"{kind} · shown as its content · edit source": "{kind} · 已按内容显示 · 点此编辑源码"', '"{kind} · cannot be shown, source below · edit": "{kind} · 无法显示，给出源码 · 点此编辑"'], ['ja', '"{kind} · shown as its content · edit source": "{kind} · 内容のとおり表示 · ソースを編集"', '"{kind} · cannot be shown, source below · edit": "{kind} · 表示できないためソースを表示 · 編集"']]) {
   const Dd = rd(`src/lib/i18n-${lang}.js`);
-  ok(Dd.includes(want) && Dd.includes('"{kind} · cannot be rendered · edit source": ') && Dd.includes('"Source of this block": ') && !Dd.includes('edit in Raw'), `the chip's words are in i18n-${lang}.js (the retired "edit in Raw" key gone)`);
+  ok(Dd.includes(want) && Dd.includes(cannot) && Dd.includes('"Source of this block": ') && !Dd.includes('edit in Raw') && !Dd.includes('kept as written · edit source') && !Dd.includes('"front matter": '), `the chip's words are in i18n-${lang}.js (the retired "kept as written" / "cannot be rendered" / "front matter" keys gone)`);
 }
 // RED CONTROL: a rawReading that renders WITHOUT the sanitizer (a patched copy)
 const TMP6 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-docraw-'));
@@ -233,6 +243,11 @@ try {
   fs.writeFileSync(path.join(TMP6, 'u.mjs'), mut7);
   const v7 = rawVerdicts((await import(pathToFileURL(path.join(TMP6, 'u.mjs')).href)).readingHtml(MIXED, { Marked, sanitize: (h) => h }));
   ok(mut7 !== src6 && v7.includes('the bare placeholder opened an element (the cell\'s tail in code type)'), 'RED CONTROL: the reader without its unpaired-tag rule ⇒ red (a <code> element opened at STEP-<code>-nn, the rest of the cell in code type)', v7);
+  // RED CONTROL (lane doc-table-native): a close inside a code span counted ⇒ the <b> opens and the rest of the run reads bold
+  const mut8 = src6.replace(".test(s.slice(m[0].length).replace(CODE_SPANS, ''))", '.test(s.slice(m[0].length))');
+  fs.writeFileSync(path.join(TMP6, 'c.mjs'), mut8);
+  const m8 = await import(pathToFileURL(path.join(TMP6, 'c.mjs')).href), r8 = m8.readingHtml('a <b>x `</b>` y\n', { Marked, sanitize: (h) => h });
+  ok(mut8 !== src6 && m8.literalTag('<b>x `</b>` y') === null && /<b>/.test(r8), 'RED CONTROL: a close inside a code span counted ⇒ red (literalTag answers null, the reading opens a <b>)', r8);
 } finally { fs.rmSync(TMP6, { recursive: true, force: true }); }
 section('⑦ a raw block is commentable: rawCommentAnchor (PURE) — the selection → the anchor + the quote, or a refusal by name');
 {

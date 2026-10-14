@@ -10,11 +10,14 @@
 //   · INLINE HTML (lane doc-raw-blocks): the paired tags a document carries inside a paragraph / a list item / a table cell
 //     (`<code>` `<kbd>` `<sub>` `<sup>` `<b>` `<strong>` `<i>` `<em>`, and `<br>`) are LOSSLESS marks that write their own
 //     spelling back — so such a block is no longer a raw block (HTML_MARKS below).
+//   · A LITERAL TAG IS TEXT (lane doc-table-native, 2.369.267): a placeholder (`<absent>`, `<case>`, `/p/<id>`) or an unpaired
+//     open tag (`PR-<code>-nn`) — what the reading shows as written (doc-window-model `literalTag`, ONE predicate) — is text
+//     here too, so a table (a paragraph, an item) holding one is a native node, never a raw block (HtmlLiteral below).
 //   · SAVE = BLOCK PATCHING (doc-model `patchBlocks`): a block whose nodes are untouched keeps its lines byte-identical;
 //     an edited block is written by a LINE MERGE (each line the person did not change keeps its source text — the
 //     bullet, the `1)`, the `_em_`, the escapes — the changed span spliced in) verified by re-parsing, else by the
 //     serializer; a block that would not read back as the editor shows it refuses the save by its line.
-import { getSchema, Node as TNode, Mark as TMark } from '@tiptap/core';
+import { getSchema, Node as TNode, Mark as TMark, Extension } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
 import { MarkdownManager } from '@tiptap/markdown';
 import { Table, TableRow, TableHeader, TableCell } from '@tiptap/extension-table';
@@ -22,6 +25,7 @@ import { TaskList, TaskItem } from '@tiptap/extension-list';
 import Image from '@tiptap/extension-image';
 import Link from '@tiptap/extension-link';
 import M from '../doc-model.js';
+import { literalTag } from './doc-window-model.js';
 
 /** A link's href the rendered view may carry: http(s) / mailto / a relative or #fragment target — never javascript:,
  *  data:, vbscript: or any other scheme (re-validated at every render, the viewer's safe-html rule). */
@@ -58,26 +62,34 @@ export const RawBlock = TNode.create({
  *  `<br />` is a break writing its own spelling. A tag with attributes, a block-level tag (`<details>`, `<div>`), an
  *  unmatched or a same-tag-nested one stays inline raw HTML ⇒ the block stays a raw block (read rendered by the window). */
 export const HTML_MARKS = Object.freeze({ code: 'htmlCode', kbd: 'htmlKbd', sub: 'htmlSub', sup: 'htmlSup', b: 'htmlBold', strong: 'htmlBold', i: 'htmlItalic', em: 'htmlItalic' });
-const BR_TAG = /^<br\s*\/?>/i, OPEN_TAG = /^<([a-z]+)>/i, INLINE_START = /<(?:br\s*\/?|code|kbd|sub|sup|b|strong|i|em)>/i;
+const BR_TAG = /^<br\s*\/?>/i, OPEN_TAG = /^<([a-z]+)>/i, INLINE_START = /<\/?[A-Za-z]/;
 let scanning = false;
 /** marked's inline tokenizer for those tags (`lex` = the lexer's inlineTokens). At `<tag>` the close is the one MARKED
  *  reads: the rest of the paragraph lexed with this tokenizer off must show `</tag>` as a TOP-LEVEL token right after the
  *  content (no code span / link / emphasis runs across it); the content is then lexed as inline markdown (nested tags
  *  included). Content with a leading / trailing space stays raw (the serializer would move the space outside the tag).
- *  → { type: <mark name> | 'htmlBreak', raw, tag, tokens } or undefined (marked reads it as raw HTML). */
+ *  Any other tag that READS AS TEXT (doc-window-model `literalTag`: a placeholder, an unpaired open tag) is an
+ *  `htmlLiteral` token — text (lane doc-table-native, 2.369.267).
+ *  → { type: <mark name> | 'htmlBreak' | 'htmlLiteral', raw, tag | text, tokens } or undefined (marked reads it as raw HTML). */
 export function htmlInlineToken(src, lex) {
   if (scanning) return undefined;
   const br = BR_TAG.exec(src);
   if (br) return { type: 'htmlBreak', raw: br[0], tag: br[0], tokens: [] };
+  const mark = markToken(src, lex);
+  if (mark) return mark;
+  const lit = literalTag(src);
+  return lit ? { type: 'htmlLiteral', raw: lit, text: lit } : undefined;
+}
+function markToken(src, lex) {
   const m = OPEN_TAG.exec(src), type = m && HTML_MARKS[m[1].toLowerCase()];
-  if (!type) return undefined;
+  if (!type) return null;
   const close = '</' + m[1] + '>', rest = src.slice(m[0].length), at = rest.indexOf(close), inner = at > 0 ? rest.slice(0, at) : '';
-  if (!inner || /^\s|\s$/.test(inner)) return undefined;
+  if (!inner || /^\s|\s$/.test(inner)) return null;
   let top = null; scanning = true;
   try { top = lex(rest); } catch { top = null; } finally { scanning = false; }
   let got = '', i = 0;
   for (; top && i < top.length && got.length < inner.length; i++) got += top[i].raw;
-  if (!top || got !== inner || !top[i] || top[i].type !== 'html' || top[i].raw !== close) return undefined;
+  if (!top || got !== inner || !top[i] || top[i].type !== 'html' || top[i].raw !== close) return null;
   return { type, raw: m[0] + inner + close, tag: m[1], tokens: lex(inner) };
 }
 const htmlMark = (name, tags) => TMark.create({
@@ -100,6 +112,10 @@ export const HtmlBreak = TNode.create({
   parseMarkdown: (token, h) => h.createNode('htmlBreak', { tag: token.tag }),
   renderMarkdown: (node) => (node.attrs && node.attrs.tag) || '<br>',
 });
+/** A literal tag (a placeholder `<absent>`, an unpaired `<code>`) is TEXT: the reading shows it as written, so the editor
+ *  carries it as written — its token (htmlInlineToken) becomes a text node (lane doc-table-native, 2.369.267). An unedited
+ *  block keeps its bytes; an edited line keeps the tag through the line merge (a new one is written `&lt;…&gt;`). */
+export const HtmlLiteral = Extension.create({ name: 'htmlLiteral', markdownTokenName: 'htmlLiteral', parseMarkdown: (token, h) => h.createTextNode(token.text) });
 export const HtmlMarks = [htmlMark('htmlCode', ['code']), htmlMark('htmlKbd', ['kbd']), htmlMark('htmlSub', ['sub']), htmlMark('htmlSup', ['sup']), htmlMark('htmlBold', ['b', 'strong']), htmlMark('htmlItalic', ['i', 'em'])];
 const ALIGN = { left: ':---', center: ':---:', right: '---:' };
 /** A GFM table without padding (one row = one line, so an edited cell changes its own row only); `|` escaped in a cell. */
@@ -125,7 +141,7 @@ export const extensions = [
   // renderHTML carries, so `li[data-type=taskItem]` (the row rule) never matched and each checkbox sat on its own line
   TaskList, TaskItem.configure({ nested: true, HTMLAttributes: { 'data-type': 'taskItem' } }),
   Image.extend({ renderHTML({ HTMLAttributes: a }) { const src = safeImageSrc(a.src); return ['img', { ...(src ? { src } : {}), alt: a.alt || '', title: a.title || null }]; } }),
-  HtmlBreak, ...HtmlMarks,
+  HtmlBreak, HtmlLiteral, ...HtmlMarks,
   RawBlock,
 ];
 export const schema = getSchema(extensions);

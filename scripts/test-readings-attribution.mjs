@@ -4230,7 +4230,7 @@ esac
     ok('§19 ⑨ …from then on the account\'s own readings are WRITTEN (7d 8 % in the new window) and its own panel is verified and written (7 %) — the self-heal the panel alone could no longer provide',
       r9b === true && p9b && p9b.outcome === 'written' && p9b.identityVerified === true && w9.readCache(w9.LINK).sevenDay.resetsAt === MOVED_WIN && Math.abs(w9.readCache(w9.LINK).sevenDay.utilization - 0.07) < 1e-9,
       JSON.stringify({ p: p9b && { o: p9b.outcome, iv: p9b.identityVerified, why: p9b.why }, c: w9.readCache(w9.LINK).sevenDay }));
-    ok('§19 ⑨ …and the standing repair runs HOURLY too (server.js), quiet unless it changed something', /setInterval\(\(\) => \{ try \{ const rep = repairIdentityAnchors\('hourly'\)/.test(read('server.js')) && /if \(why !== 'hourly' \|\| changed\)/.test(read('src/server/usage-pool-engine.js')));
+    ok('§19 ⑨ …and the standing repair runs HOURLY too (server.js; its anchors read off the loop first since B-1319), quiet unless it changed something', /setInterval\(\(\) => \{ (?:require\('\.\/src\/reading-repair\.js'\)\.prefetchAnchorRows\(path\.join\(__dirname, 'data', 'usage-anchors'\)\)\.then\(\(\) => \{ )?try \{ const rep = repairIdentityAnchors\('hourly'\)/.test(read('server.js')) && /if \(why !== 'hourly' \|\| changed\)/.test(read('src/server/usage-pool-engine.js')));
   }
 
   // ⑩ A SHARED PHASE VERIFIES NOTHING (final verifier: four members on this

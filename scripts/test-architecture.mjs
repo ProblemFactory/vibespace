@@ -65,6 +65,7 @@ const PURE = new Set(['src/voice-model.js' /* Dropline voice input q-029 P0: dic
   // registry + lease model and the keeper's verdicts — imports nothing (P0/P1); and the ONE
   // constants home every process keeper counts and bounds by (src/keeper-limits.js)
   'src/browser-profiles.js', 'src/keeper-limits.js',
+  'src/cli-caps.js', // lane pool-oat-measure (q-035): oatInFile(version, fixture) — a measured CLI version gates a long-lived token in a pool member's creds file
   // lane dc-browser-backends: every browser backend file (and the folder's registration list) is PURE — the folder is
   // read, so a new backend adds no line here
   ...fs.readdirSync(path.join(REPO, 'src/browser-backends')).filter((f) => f.endsWith('.js')).map((f) => 'src/browser-backends/' + f),
@@ -570,7 +571,7 @@ for (const [edge] of EXCEPTIONS) {
     const called = new Set([...s9.matchAll(/this\.(_[a-zA-Z0-9]+)\(/g)].map((m) => m[1]));
     for (const name of called) {
       const woCalls = s9.replace(new RegExp(`this\\.${name}\\(`, 'g'), '');
-      const defined = new RegExp(`(^|\\s)${name}\\s*\\(`, 'm').test(woCalls) || new RegExp(`this\\.${name}\\s*=`).test(s9) || new RegExp(`${name}\\s*:`).test(s9)
+      const defined = new RegExp(`(^|\\s|\\*)${name}\\s*\\(`, 'm').test(woCalls) /* `*_x(` = a generator method (B-1319's load pass) */ || new RegExp(`this\\.${name}\\s*=`).test(s9) || new RegExp(`${name}\\s*:`).test(s9)
         || inherited.some((b) => new RegExp(`(^|\\s)${name}\\s*\\(`, 'm').test(b.replace(new RegExp(`this\\.${name}\\(`, 'g'), '')));
       if (!defined) broken.push(`${f}: this.${name}() called but never defined`);
     }
@@ -1499,6 +1500,7 @@ for (const [edge] of EXCEPTIONS) {
     { file: 'src/proc-identity.js', needle: "spawnSync('ps', ['-o', 'stat=', '-o', 'lstart=', '-p', String(Number(pid))]", why: 'NO-/proc FALLBACK ONLY (judge / identityOf on macOS: B-1cc6 a pid is never an identity) — ONE per recorded identity proven before its signal, never per poll on a procfs machine.' },
     { file: 'src/agentd/agentd.js', needle: "execFileSync('ps', ['-p', String(pid), '-o', 'command=']", why: 'NO-/proc FALLBACK ONLY (acquireSingleton), and ONCE per daemon start — /proc/<pid>/cmdline is the rung above it.' },
     { file: 'src/plugins/tailscale.js', needle: "execFileSync('pgrep', ['-x', 'tailscaled']", why: 'ONE per tailscale status read (a plugin card), never per session; the loop under it reads /proc cmdlines, not more spawns.' },
+    { file: 'src/server/boot-restore.js', needle: "const ownedP = async (sp, rung2) => { const r = await runChild('fuser', [sp], 2000);", why: 'BOOT ONLY (probeSockets, B-1319): the restore\'s two liveness rungs below (fuser, else pgrep) asked ONCE per surviving socket as children before the server listens — four at a time, never on the loop.' },
     { file: 'src/server/boot-restore.js', needle: "execFileSync('fuser', [path.join(SOCKETS_DIR, sockFile)]", why: 'BOOT ONLY (restoreSessions, once per surviving socket, before this server serves anybody) — "is this dtach socket still owned" has no /proc rung that does not re-implement fuser. Out of scope on purpose: the incident is create/kill/poll, and a boot pays this once.' },
     { file: 'src/server/boot-restore.js', needle: "execFileSync('fuser', [socketPath]", why: 'BOOT ONLY (same sweep, the per-socket branch).' },
     { file: 'src/server/boot-restore.js', needle: "execFileSync('pgrep', ['-f', socketPath], { encoding: 'utf-8', timeout: 2000 });", why: 'BOOT ONLY — the second rung of the same liveness question when `fuser` is absent.' },

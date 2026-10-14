@@ -68,21 +68,36 @@ export function placeholderHtml(h) {
   const m = /^<\/?([A-Za-z][A-Za-z0-9-]*)\s*\/?>$/.exec(s);
   return m && !HTML_TAGS.has(m[1].toLowerCase()) ? esc(s) : s;
 }
+/** The code spans of an inline run (a backtick string, content, the same string) — literal text, never a tag's close. */
+const CODE_SPANS = /(`+)(?!`)(?:[^`]|[^`][\s\S]*?[^`])\1(?!`)/g;
 const VOID_TAGS = new Set('area base br col embed hr img input link meta param source track wbr'.split(' '));
 /** An UNPAIRED open tag is TEXT (lane doc-raw-blocks r2 — the owner's `PR-<code>-nn` placeholder): an inline open tag of an
  *  element that needs a close, whose `</name>` is not in the rest of its own inline run (the paragraph, the table cell, the
  *  item) → the tag as written (to be shown escaped); else null. Void elements and self-closed tags are markup; a name that
- *  is no element is placeholderHtml's. Marked would open the element there and the rest of the cell read in its type. */
+ *  is no element is placeholderHtml's. Marked would open the element there and the rest of the cell read in its type.
+ *  A `</name>` inside a code span closes nothing (lane doc-table-native: a code span is literal). */
 export function unpairedOpenTag(src) {
   const s = String(src ?? ''), m = /^<([A-Za-z][A-Za-z0-9-]*)(?:\s[^<>]*)?>/.exec(s);
   if (!m || /\/>$/.test(m[0])) return null;
   const name = m[1].toLowerCase();
   if (VOID_TAGS.has(name) || !HTML_TAGS.has(name)) return null;
-  return new RegExp('</' + name + '\\s*>', 'i').test(s.slice(m[0].length)) ? null : m[0];
+  return new RegExp('</' + name + '\\s*>', 'i').test(s.slice(m[0].length).replace(CODE_SPANS, '')) ? null : m[0];
 }
-/** The reader's inline rule beside the html hook: it takes an unpaired open tag BEFORE marked's tag rule (which would also
- *  switch marked's raw-text state on for the rest of the run) and writes it as escaped text. */
-const LITERAL_TAG = { name: 'vsLiteralTag', level: 'inline', start: (src) => src.indexOf('<'), tokenizer(src) { const t = unpairedOpenTag(src); return t ? { type: 'vsLiteralTag', raw: t, text: t } : undefined; }, renderer: (tok) => esc(tok.text) };
+/** THE LITERAL TAG (lane doc-table-native, 2.369.267 — owner 2026-10-14 「这下面不是标准的表格吗 为啥显示说是源码？」: an
+ *  agent's 10-column table whose "paper value" cells held a bare `<absent>` drew as a raw block). The tag at the start of
+ *  `src` that READS AS TEXT — in the reading (LITERAL_TAG below) and in the editor (doc-markdown's inline tokenizer) alike,
+ *  ONE predicate: a PLACEHOLDER (`<absent>`, `</sha>`, `<id/>` — a name that is no HTML element, placeholderHtml's rule) or
+ *  an UNPAIRED open tag (unpairedOpenTag) → the tag as written; else null (markup: a paired / void / attributed real tag —
+ *  the reading renders it, the editor carries it as a mark or a raw block). A code span is literal: the tokenizers never
+ *  run inside one, and a `</name>` inside one closes nothing (CODE_SPANS). */
+export function literalTag(src) {
+  const s = String(src ?? ''), m = /^<\/?([A-Za-z][A-Za-z0-9-]*)\s*\/?>/.exec(s);
+  return m && !HTML_TAGS.has(m[1].toLowerCase()) ? m[0] : unpairedOpenTag(s);
+}
+/** The reader's inline rule beside the html hook: it takes a literal tag (literalTag: a placeholder or an unpaired open tag)
+ *  BEFORE marked's tag rule (which would also switch marked's raw-text state on for the rest of the run) and writes it as
+ *  escaped text — the editor carries the same tag as the same text. */
+const LITERAL_TAG = { name: 'vsLiteralTag', level: 'inline', start: (src) => src.indexOf('<'), tokenizer(src) { const t = literalTag(src); return t ? { type: 'vsLiteralTag', raw: t, text: t } : undefined; }, renderer: (tok) => esc(tok.text) };
 const FRONT = /^(---|\+\+\+)[ \t]*\n([\s\S]*?)\n\1[ \t]*(?:\n|$)/;
 const readers = new WeakMap();
 /** THE READING RENDER (Export HTML / Copy as HTML / Print): the markdown SOURCE (unsaved edits included — the caller's

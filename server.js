@@ -1,8 +1,8 @@
 // libuv threadpool headroom (default 4): a few fs ops stuck on a dying fuse
 // mount used to starve EVERY async fs/dns op server-wide (real outage — see
-// mounts.js hung-mount defense). Must be set before the pool first spins up,
-// i.e. before any require that performs async I/O.
+// mounts.js hung-mount defense). Must be set before the pool first spins up, i.e. before any require that performs async I/O.
 process.env.UV_THREADPOOL_SIZE = process.env.UV_THREADPOOL_SIZE || '32';
+const bootTrace = require('./src/server/boot-trace.js').start({ dataDir: require('path').join(__dirname, 'data') }); // THE BOOT HOLDS (B-1319): the boot's own loop clock from here — GET /api/boot-trace, data/boot-trace.json
 const express = require('express');
 const http = require('http');
 const { WebSocketServer } = require('ws');
@@ -462,7 +462,7 @@ const { setupSessionPty, attachToDtach, readSessionMeta, writeSessionMeta,
 // ── Boot restore (src/server/boot-restore.js, decomposition #7) ──
 // migrations + restoreSessions + R6 pipe re-open + keeper re-adoption.
 const { migrateLegacyHomeProjects, restoreSessions, restoreAgentdPipeSessions,
-  readoptOrphanKeeperSessions,
+  readoptOrphanKeeperSessions, probeSockets,
 } = require('./src/server/boot-restore.js').create({
   rootDir: __dirname, PORT, BUFFERS_DIR, META_DIR, SOCKETS_DIR, DTACH_CMD,
   ENV_CMD, NODE_CMD, CHAT_WRAPPER, activeSessions, sessionCounterRef,
@@ -473,7 +473,7 @@ const { migrateLegacyHomeProjects, restoreSessions, restoreAgentdPipeSessions,
   sbNoteServerOp: (...a) => sbNoteServerOp(...a),
   getHosts: () => { try { return hosts; } catch { return null; } },
   getDialBridge: () => { try { return dialBridge; } catch { return null; } },
-});
+}); bootTrace.span('restore-probes', probeSockets()); // B-1319: the restore's fuser / fd-scan questions start now, as children — the server listens once they answered (below)
 // ── Agent-tool generators + hook registration (src/server/agent-tool-generators.js) ──
 const hooksLate = require('./src/server/hooks-late.js').create({ activeSessions, getSessionStatus: () => sessionStatus, getUserTodos: () => userTodos, sessionStatusKey: (...a) => sessionStatusKey(...a), harnesses: require('./src/harnesses'), log: (...a) => console.log(...a), warn: (...a) => console.warn(...a) }); // lane hooks-create: a hook file CREATED by the registration ('dir-exists') is told to the conversations that predate it (one free note each + ONE For-you line); held until ready() after the boot restore; owns POST /api/cli-config/apply
 // lane browser-resource-care (B-afeb): memory pressure reaches the owner — ONE For-you item per episode naming who started each
@@ -1001,7 +1001,7 @@ const otelIngest = require('./src/server/otel-ingest.js').create({
   getUsageHistory: () => usageHistory, identityGroups: () => usageIdentityGroupsCached(),
   listAccounts: () => accounts.list().accounts || [],
 });
-otelIngest.registerRoutes(app);
+otelIngest.registerRoutes(app); bootTrace.span('otel-replay', otelIngest.replayed); bootTrace.register(app); // B-1319: the stash replay runs off the loop; GET /api/boot-trace
 const bridgeWatch = require('./src/server/bridge-watch.js').create({ activeSessions, BUFFERS_DIR, SOCKETS_DIR, reattachLocalPty, serverSetting, getOtelIngest: () => otelIngest, feedPeerCard, log: console }); // THE DEAD-BRIDGE WATCH (lane-dead-bridge): the attach-pty teardown shared by shutdown + crash, the orphan sweep, silence judged against the CLI's own witnesses (buffer file / OTel), the catch-up card
 // `usageHistory.setTruthLookup(otelIngest.…)` is DELIBERATELY UNWIRED since
 // 2026-09-07 — reasoning at the seam (usage-history.js) + otel-ingest's header.
@@ -1010,7 +1010,7 @@ const { recordUsageAttribution } = require('./src/server/usage-attribution.js').
 // rescanned on demand when the Usage window opens.
 // The walk YIELDS every MiB (perf ⑥): warm() reads the ledger only once the
 // boot walk has settled, and the metric is the walk's WALL time (settle − start).
-setTimeout(() => { try { usageHistory.scan(); usageHistory.scanSettled().then(() => { try { usageHistory.warm(); } catch {} }); } catch {} }, 8000);
+setTimeout(() => { try { usageHistory.scan(); usageHistory.scanSettled().then(() => { try { if (bootTrace.syncControl) bootTrace.step('usage-ledger-warm', () => usageHistory.warm()); else bootTrace.span('usage-ledger-warm', usageHistory.warmStepped(), (r) => r); } catch {} }); } catch {} }, 8000); // B-1319: the warm takes a MiB per tick (warmStepped)
 setInterval(() => { try {
   const t0 = Date.now();
   const r = usageHistory.scan();
@@ -1750,7 +1750,7 @@ if (METRICS_PORT > 0) {
   }).listen(METRICS_PORT, () => console.log(`  metrics exporter on :${METRICS_PORT}`));
 }
 
-hub.listen(PORT, HOST, () => { // the one-port demux (src/server/tls.js) — listen errors / EADDRINUSE as before
+probeSockets().finally(() => hub.listen(PORT, HOST, () => { bootTrace.listening(); // B-1319: after the restore's probes (boot-restore probeSockets) — the one-port demux (src/server/tls.js) — listen errors / EADDRINUSE as before
   const ver = require('./package.json').version;
   console.log(`\n  VibeSpace v${ver} running at http://localhost:${PORT}${hub.bootSuffix()}`); hub.start(); // + " and https://<domain>:PORT" while a certificate is live; start = the boot pass + hourly
   // PID file for the supervised-restart path (scripts/update.sh in a container:
@@ -1797,9 +1797,9 @@ hub.listen(PORT, HOST, () => { // the one-port demux (src/server/tls.js) — lis
   try { require('./src/server/migrations.js').create({ rootDir: __dirname, serverNotice, hosts /* lane-pairing ⑥: exit-access-lists reshapes THROUGH the live HostManager (it holds hosts.json and saves it whole) */, desktopKeeper, browserKeeper: () => browserKeeper /* 2026-09-25: the runaway-parks-void reshape goes THROUGH the live keepers */, channels: channelsWiring.channels /* 2026-09-22: adapters.json's ONE writer stamps the legacy credential keys */, userTodos /* 2.369.152: the LIVE inbox store — the spend-notices migration reshapes through it, never beside it */, accounts: () => accounts /* 2026-09-28: the pool manual-priority reshape goes THROUGH the live account store */, plugins /* lane plugin-settings-p0: plugins.json config → settings.json goes THROUGH the live PluginManager */ }).runLocalMigrations(); persistenceRouter.reloadSettings?.() /* settings-prune verify r1: settings-rows-retired rewrote settings.json after boot cached it */; usage.reloadRateLimitCache?.(); usageHistory.reloadCursors?.(); usageHistory.reloadEvents?.(); /* a repair may have unlinked data/usage-cache.json AFTER setupUsage loaded it (r6), or REWRITTEN the ledger shards in place (origin backfill) — the event cache reads only appended tails */ }
   catch (e) { console.warn('[migrate] local registry failed to run:', e.message); }
   // B-855a c2: the STANDING identity repair — every boot, AFTER the one-shot registry (it may have reshaped the stores this reads), idempotent; then the panel memory re-reads the repaired disk
-  try { repairIdentityAnchors('boot'); usage.reloadRateLimitCache?.(); } catch (e) { console.warn('[usage] boot identity repair failed:', e.message); }
+  bootTrace.span('identity-repair', require('./src/reading-repair.js').prefetchAnchorRows(path.join(__dirname, 'data', 'usage-anchors')).then(() => { try { repairIdentityAnchors('boot'); usage.reloadRateLimitCache?.(); } catch (e) { console.warn('[usage] boot identity repair failed:', e.message); } })); // B-1319: its anchors read off the loop first
   // …and STANDING (final verifier): a weekly window that moved between boots must not wait for the next boot — hourly, idempotent, quiet unless it changed something, the panel memory re-read only then
-  setInterval(() => { try { const rep = repairIdentityAnchors('hourly'); if (rep && rep.changed) usage.reloadRateLimitCache?.(); } catch (e) { console.warn('[usage] hourly identity repair failed:', e.message); } }, 3600e3).unref();
+  setInterval(() => { require('./src/reading-repair.js').prefetchAnchorRows(path.join(__dirname, 'data', 'usage-anchors')).then(() => { try { const rep = repairIdentityAnchors('hourly'); if (rep && rep.changed) usage.reloadRateLimitCache?.(); } catch (e) { console.warn('[usage] hourly identity repair failed:', e.message); } }); }, 3600e3).unref(); // …the hourly run too
   migrateLegacyHomeProjects();
   restoreSessions(); bootBrowserKeeper(); bootWindowLeases(); try { channelsWiring.groups.noteUserState(); } catch {} hooksLate.ready(); // hooksLate.ready() (lane hooks-create): the live-session set is final — a hook file the boot registration created is told to the sessions just restored. agent browser P1 (§3.5) + P9b window leases (the same rule: after the live-session set is final): leases reconciled + browsers adopted only AFTER the live-key set is final (async, logged, never blocks the boot — mounts-plugins-wiring)
   bootRestored(); require('./src/routes/sessions').warmSessions().catch((e) => console.warn('[boot] first sessions sweep failed:', e.message)).finally(bootSessionsIndexed); bootPhase.arm(); // B-0ece: pages reload onto `ready`, not onto `listening`
@@ -1867,7 +1867,7 @@ hub.listen(PORT, HOST, () => { // the one-port demux (src/server/tls.js) — lis
   }, 30000);
 
   console.log(`  Ready.\n`);
-});
+}));
 
 // On server shutdown: only kill the attach PTYs, NOT the dtach sessions
 // Claude processes in dtach survive the server restart
@@ -1903,4 +1903,4 @@ process.on('SIGINT', () => {
   console.log('\n  Shutting down (dtach sessions will keep running)...');
   shutdown();
 });
-process.on('SIGTERM', shutdown);
+process.on('SIGTERM', shutdown); bootTrace.mainEnd(); // B-1319: the main-module evaluation ends here (the boot clock's mainMs)

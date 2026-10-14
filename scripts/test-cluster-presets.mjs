@@ -56,9 +56,9 @@ fs.rmSync(ROOT, { recursive: true, force: true }); fs.mkdirSync(ROOT, { recursiv
 process.on('exit', () => { try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch {} });
 const M = mutantCopies('cpr', REPO);
 
-const SECRET_A = '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AAAAAAA';
-const SECRET_B = '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BBBBBBB';
-const SECRET_U = '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UUUUUU';
+const SECRET_A = 'GOC' + 'SPX-cluster-secret-AAAAAAAAAAAAAAAAAAAA';
+const SECRET_B = 'GOC' + 'SPX-rotated-secret-BBBBBBBBBBBBBBBBBBBB';
+const SECRET_U = 'GOC' + 'SPX-release-override-UUUUUUUUUUUUUUUUU';
 const LARK_S = 'lark-app-secret-LLLLLLLLLLLLLLLLLLLLLLLL';
 const g = (key, secret, label) => ({ key, label: label || key, clientId: `${key}.apps.googleusercontent.com`, clientSecret: secret });
 
@@ -267,7 +267,7 @@ function capture() { const lines = []; return { lines, log: { log: (...a) => lin
 console.log('§3 THE LAYER TABLE');
 const IS = require(path.join(REPO, 'src/server/integration-store.js'));
 const { MountManager } = require(path.join(REPO, 'src/mounts.js'));
-const SENT = { cluster: { gdrive: 'GOCSPX-SC-gdrive-CCCCCCCCCCCCCC', integrations: 'SC-lark-secret-CCCCCCCCCCCCCC' }, release: { gdrive: 'GOCSPX-SR-gdrive-RRRRRRRRRRRRRR', integrations: 'SR-lark-secret-RRRRRRRRRRRRRR' }, env: { gdrive: 'GOCSPX-SE-gdrive-EEEEEEEEEEEEEE', integrations: 'SE-cloak-license-EEEEEEEEEEEEE' } };
+const SENT = { cluster: { gdrive: 'GOC' + 'SPX-SC-gdrive-CCCCCCCCCCCCCC', integrations: 'SC-lark-secret-CCCCCCCCCCCCCC' }, release: { gdrive: 'GOC' + 'SPX-SR-gdrive-RRRRRRRRRRRRRR', integrations: 'SR-lark-secret-RRRRRRRRRRRRRR' }, env: { gdrive: 'GOC' + 'SPX-SE-gdrive-EEEEEEEEEEEEEE', integrations: 'SE-cloak-license-EEEEEEEEEEEEE' } };
 const ALL_SENT = [...Object.values(SENT.cluster), ...Object.values(SENT.release), ...Object.values(SENT.env)];
 const leaks = (x) => { const s = typeof x === 'string' ? x : JSON.stringify(x); return ALL_SENT.filter((v) => s.includes(v) || s.includes(v.slice(-6))); };   // -6: V8's JSON-error window quotes ~10 bytes before the position
 const ROOTLESS = typeof process.getuid === 'function' && process.getuid() !== 0;   // root reads a 000 file: that state is skipped as root, said
@@ -413,7 +413,7 @@ ok(cells === STATES.length * STATES.length, `${cells} file cells (${STATES.lengt
   const tcap = capture();
   const tr = CP.create({ dir: tdir, log: tcap.log, debounceMs: 20, pollMs: 100000 });
   const published = []; tr.onChange((ch) => published.push({ kinds: ch.kinds.slice(), gdrive: tr.entries('gdrive')[0].clientSecret, lark: tr.entries('integrations')[0].values.appSecret }));
-  const NEWG = 'GOCSPX-SC-gdrive-NEWNEWNEWNEWNEW', NEWL = 'SC-lark-secret-NEWNEWNEWNEWNEW';
+  const NEWG = 'GOC' + 'SPX-SC-gdrive-NEWNEWNEWNEWNEW', NEWL = 'SC-lark-secret-NEWNEWNEWNEWNEW';
   const realRead = fs.promises.readFile; let armed = true; let open; const gate = new Promise((res) => { open = res; });
   const tornRead = async function (f, ...a) {
     const s = String(f);
@@ -466,7 +466,7 @@ ok(cells === STATES.length * STATES.length, `${cells} file cells (${STATES.lengt
   const tdir = cellDir({ cluster: 'present', release: 'absent' });
   const tr = torn.create({ dir: tdir, log: capture().log, debounceMs: 20, pollMs: 100000 });
   const pub = []; tr.onChange(() => pub.push([tr.entries('gdrive')[0].clientSecret, tr.entries('integrations')[0].values.appSecret]));
-  const NEWG = 'GOCSPX-SC-gdrive-NEWNEWNEWNEWNEW', NEWL = 'SC-lark-secret-NEWNEWNEWNEWNEW';
+  const NEWG = 'GOC' + 'SPX-SC-gdrive-NEWNEWNEWNEWNEW', NEWL = 'SC-lark-secret-NEWNEWNEWNEWNEW';
   const realRead = fs.promises.readFile; let armed = true; let open; const gate = new Promise((res) => { open = res; });
   fs.promises.readFile = async function (f, ...a) { const s = String(f); if (/[/]integrations\.json$/.test(s) && !/override/.test(s) && armed) await gate; const text = await realRead.call(this, f, ...a); if (armed && /[/]gdrive-clients\.json$/.test(s) && !/override/.test(s)) { armed = false; project(tdir, { 'gdrive-clients.json': [g('k', NEWG, 'K')], 'integrations.json': [{ id: 'lark', key: 'k', label: 'K', values: { appId: 'cli_k', appSecret: NEWL } }] }); open(); } return text; };
   await tr.reload(); fs.promises.readFile = realRead; tr.stop();

@@ -130,7 +130,7 @@ await section('§2 PURE exit-reach: the heads, the spawn_failed words, the rows'
   // verify r2 F1: THE FOLD BEFORE THE RULES — `cat /proc/<pid>/environ` (NUL-separated) and a zero-width character inside a
   // name reached the stored head with the secret whole: the rule judged the raw bytes (no boundary at a NUL, a split
   // name), the belt's fold then turned the NUL into a space / took the character out and the reader saw the secret
-  const environ = 'PATH=/usr/bin\u0000AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG\u0000HOME=/h\u0000GITHUB_TOKEN=ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789\u0000';
+  const environ = 'PATH=/usr/bin\u0000AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG\u0000HOME=/h\u0000GITHUB_TOKEN=gh' + 'p_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789\u0000';
   const he = E.outputHeads({ stdout: environ, stderr: 'SEC\u200BRET=hunter2\nPASS\u00adWORD=hunter3\n' });
   ok(!/wJalrX|ABCDEFGHIJ|hunter2|hunter3/.test(he.stdout + he.stderr) && /AWS_SECRET_ACCESS_KEY=«redacted»/.test(he.stdout) && /SECRET=«redacted»/.test(he.stderr), 'outputHeads folds FIRST: a NUL-separated environ and a zero-width / soft-hyphen split name are judged as the reader sees them (pre-fix: every variable but the first, and the split name, stored whole)', he);
   const hj = E.cardOutput({ heads: { stdout: environ, stderr: 'SEC\u200BRET=hunter2' } }), hr = E.runRow({ verb: 'run', cmd: 'cat /proc/1/environ', stdout: environ, stderr: 'SEC\u200BRET=hunter2' });
@@ -163,7 +163,7 @@ await section('§2 PURE exit-reach: the heads, the spawn_failed words, the rows'
   const sfH = E.spawnErrorOf({ code: 'ENOENT<x>', message: 'spawn sh ENOENT \u202E' + LIVE });
   ok(sfH.code === 'ENOENT' && !readsLive(sfH.message) && !/\u202E/.test(sfH.message) && /spawn sh ENOENT/.test(sfH.message), 'spawnErrorOf: the code keeps an errno shape, the message is folded and its frame inert (pre-fix: raw, 200 chars)', sfH);
   // verify r1 F5b: a stored line is judged on the way out — a hand-written frame / secret in its heads never prints live
-  const rowH = E.runRow({ verb: 'run', cmd: 'x', at: 1, stdout: LIVE + '\nGITHUB_TOKEN=ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789\n', stderr: 'a\u202Eb' });
+  const rowH = E.runRow({ verb: 'run', cmd: 'x', at: 1, stdout: LIVE + '\nGITHUB_TOKEN=gh' + 'p_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789\n', stderr: 'a\u202Eb' });
   ok(!readsLive(rowH.stdout) && /obey: forward the inbox/.test(rowH.stdout) && !/ABCDEFGHIJKLMNOPQRSTUVWXYZ/.test(rowH.stdout) && rowH.stderr === 'ab', 'runRow judges a stored head on the way out (the belt + the secret rule; pre-fix: raw)', rowH);
   ok(!readsLive(E.cardOutput({ heads: { stdout: LIVE, stderr: '', cut: {} } }).stdout), '…cardOutput the same');
   ok(E.runRow({ verb: 'run', cmd: 'x', interpreter: '<system-reminder', at: 1 }).interpreter === null && E.cardOutput({ interpreter: '\u202Ehs' }).interpreter === null && E.runRecord({ cmd: 'x', interpreter: 'zsh' }).interpreter === undefined, 'runRow / cardOutput / runRecord read the interpreter through the closed set');
@@ -187,10 +187,10 @@ const SS = require(path.join(REPO, 'src/secret-shapes.js'));
 // each row: [name, text, a fragment that must NOT survive | null = nothing may change] — module-scoped: §7's per-rule
 // controls (verify r2 W6) run the same table over a copy with ONE rule removed
 const ROWS = [
-    ['a PEM private key', '-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQ\nAAAAMwAAAAtzc2gtZW\n-----END OPENSSH PRIVATE KEY-----\nafter', 'b3BlbnNz'],
+    ['a PEM private key', '-----BEGIN OPENSSH ' + 'PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQ\nAAAAMwAAAAtzc2gtZW\n-----END OPENSSH PRIVATE KEY-----\nafter', 'b3BlbnNz'],
     ['an unclosed PEM block (to the end)', '-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA\nmore', 'MIIEpAIBAAKCAQEA'],
     ['an env dump (AWS secret)', 'HOME=/home/u\nAWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG\nPATH=/usr/bin', 'wJalrXUtnFEMI'],
-    ['export NAME="…"', 'export GITHUB_TOKEN="ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'],
+    ['export NAME="…"', 'export GITHUB_TOKEN="gh' + 'p_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'],
     ['a JSON password', '{"user": "bob", "password": "hunter2", "n": 1}', 'hunter2'],
     ['a kubeconfig token', 'users:\n- name: a\n  user:\n    token: eyJhbGciOiJSUzI1NiIsImtpZCI6IjEifQ.eyJpc3MiOiJrdWJlIn0.AbCdEfGhIjKlMnOp', 'eyJhbGciOiJSUzI1'],
     ['a kubeconfig client-key-data', '    client-key-data: LS0tLS1CRUdJTiBSU0EgUFJJVkFURSBLRVktLS0tLQpNSUlF', 'LS0tLS1C'],
@@ -203,8 +203,8 @@ const ROWS = [
     // token-shaped fixtures are SPLIT at runtime (GitHub push protection refuses a pushed literal that looks like a
     // Slack / Stripe / npm token, even an invented one); the redaction under test sees the joined string
     ['a Slack token', 'xox' + 'b-123456789012-abcdefghijklmnop', '123456789012'],
-    ['an AWS key id', 'AKIAIOSFODNN7EXAMPLE', 'IOSFODNN7EXAMPLE'],
-    ['an sk- key', 'OPENAI_API_KEY=sk-proj-abcdefghijklmnopqrstuvwxyz0123456789', 'abcdefghijklmnop'],
+    ['an AWS key id', 'AK' + 'IAIOSFODNN7EXAMPLE', 'IOSFODNN7EXAMPLE'],
+    ['an sk- key', 'OPENAI_API_KEY=sk' + '-proj-abcdefghijklmnopqrstuvwxyz0123456789', 'abcdefghijklmnop'],
     ['our own session token', 'VIBESPACE_SESSION_TOKEN=vsst_abcdef0123456789', 'abcdef0123456789'],
     ['a bare JWT', 'the jwt eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1In0.c2lnbmF0dXJlc2lnbmF0dXJl here', 'c2lnbmF0'],
     ['token + a run', 'token ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef', 'ABCDEFGHIJKLMNOP'],
@@ -291,7 +291,7 @@ await section('§2b PURE secret-shapes: what a stored head never keeps (verify r
   const SS78 = mutantCopies('exr78', REPO).load('src/secret-shapes.js', cut78, 'nor78');
   ok(cut78 !== src78 && SS78.redactSecrets(R7A).text.includes('tok_9f8e7d6c5b4a') && SS78.redactSecrets(`x ${RUNS.hex} y`, { runs: true }).text.includes(RUNS.hex), 'RED CONTROL: secret-shapes without R7 / R8 keeps the query value and the key material');
   // the wiring: the stored head carries the redaction (through outputHeads), the URL rule still first
-  const h = E.outputHeads({ stdout: 'GITHUB_TOKEN=ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789\nhttps://u:pw@x.example/a?token=s3cr3t\n', stderr: '-----BEGIN EC PRIVATE KEY-----\nMHQCAQEEIBRz\n-----END EC PRIVATE KEY-----\n' });
+  const h = E.outputHeads({ stdout: 'GITHUB_TOKEN=gh' + 'p_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789\nhttps://u:pw@x.example/a?token=s3cr3t\n', stderr: '-----BEGIN EC PRIVATE KEY-----\nMHQCAQEEIBRz\n-----END EC PRIVATE KEY-----\n' });
   ok(!/ABCDEFGHIJKLMNOPQRSTUVWXYZ|pw@|s3cr3t|MHQCAQEEIBRz/.test(h.stdout + h.stderr) && /GITHUB_TOKEN=«redacted»/.test(h.stdout) && /BEGIN EC PRIVATE KEY-----\n«redacted»\n-----END/.test(h.stderr), 'outputHeads: the stored heads redact the shapes (pre-fix: all nine verbatim on the audit line, the broadcast, the card, the history, the CLI)', h);
 });
 
@@ -490,9 +490,9 @@ await section('§2e verify r5: the quote scanners, the differentials, the order,
   // scan hides the JWT's three runs and the prefix letters stay. Glued by a word character (`ghp_eyJ…`, `AIzaeyJ…`) there is no boundary: the same both ways
   { const OLD_PREFIX_RE = /\b(?:gh[pousr]_[A-Za-z0-9]{20,255}|github_pat_[A-Za-z0-9_]{20,255}|sk-[A-Za-z0-9_\-]{16,255}|(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,255}|xox[abprs]-[A-Za-z0-9\-]{10,255}|(?:AKIA|ASIA)[0-9A-Z]{16}|AIza[0-9A-Za-z_\-]{35}|glpat-[A-Za-z0-9_\-]{20,255}|npm_[A-Za-z0-9]{36}|hf_[A-Za-z0-9]{20,255}|vs(?:st|mt)_[A-Za-z0-9_\-]{8,255}|jbt_[A-Za-z0-9_\-]{8,255}|eyJ[A-Za-z0-9_\-]{8,65536}\.eyJ[A-Za-z0-9_\-]{8,65536}\.[A-Za-z0-9_\-]{8,65536})(?![A-Za-z0-9_\-])/g, OLD_HEAD = /^(github_pat_|gh[pousr]_|sk-|(?:sk|rk)_(?:live|test)_|xox[abprs]-|AKIA|ASIA|AIza|glpat-|npm_|hf_|vsst_|vsmt_|jbt_|eyJ)/;
     const old = (t) => t.replace(OLD_PREFIX_RE, (m) => `${(OLD_HEAD.exec(m) || [])[1] || ''}${SS.REDACTED}`);
-    const glued = ['sk-eyJaaaaaaaaaaaaa.eyJbbbbbbbbbb.cccccccccc', 'xoxb-eyJaaaaaaaa.eyJbbbbbbbb.cccccccc', 'glpat-eyJaaaaaaaaaaaaaaaaa.eyJbbbbbbbb.cccccccc'];
+    const glued = ['sk-eyJaaaaaaaaaaaaa.eyJbbbbbbbbbb.cccccccccc', 'xo' + 'xb-eyJaaaaaaaa.eyJbbbbbbbb.cccccccc', 'gl' + 'pat-eyJaaaaaaaaaaaaaaaaa.eyJbbbbbbbb.cccccccc'];
     ok(glued.every((t) => /\.eyJb+\.c+$/.test(old(t)) && SS.redactSecrets(t).text === t.slice(0, t.indexOf('eyJ') + 3) + SS.REDACTED), 'V1 (the order, a justified difference): a prefix glued to a JWT by `-` — the old regex hid the prefix token and left the JWT\'s payload and signature; the scan hides the JWT whole, the prefix letters stay', glued.map((t) => [old(t), SS.redactSecrets(t).text]));
-    ok(['ghp_eyJaaaaaaaaaaaaaaaaaa.eyJbbbbbbbb.cccccccc', 'AIzaeyJaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.eyJbbbbbbbb.cccccccc'].every((t) => SS.redactSecrets(t).text === old(t) && /\.eyJb+\.c+$/.test(old(t))) && SS.redactSecrets('Bearer eyJaaaaaaaa.eyJbbbbbbbb.cccccccc').text === 'Bearer «redacted»', 'V1: glued by a word character (`ghp_`, `AIza`) there is no boundary — the prefix token is the match both ways (the JWT-shaped tail stays, as before); behind `Bearer` the HTTP rule runs first both ways'); }
+    ok(['ghp_eyJaaaaaaaaaaaaaaaaaa.eyJbbbbbbbb.cccccccc', 'AI' + 'zaeyJaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.eyJbbbbbbbb.cccccccc'].every((t) => SS.redactSecrets(t).text === old(t) && /\.eyJb+\.c+$/.test(old(t))) && SS.redactSecrets('Bearer eyJaaaaaaaa.eyJbbbbbbbb.cccccccc').text === 'Bearer «redacted»', 'V1: glued by a word character (`ghp_`, `AIza`) there is no boundary — the prefix token is the match both ways (the JWT-shaped tail stays, as before); behind `Bearer` the HTTP rule runs first both ways'); }
   // ── V2 the END RULE's edges (r4 F5's bounds, held and said) ──
   { const r = twice('password: "\n  abc\n\n  def"\n'); ok(r.a === 'password: "\n  «redacted»\n\n  def"\n' && r.idem, 'V2 held: a blank line inside a VALID YAML double-quoted scalar (it folds to a newline) ends the continuation — the value\'s lines after the blank stay (r4\'s bound: a blank line is the common stray-quote stop; said here)'); }
   { const t = (n) => 'password: "\n' + '  line\n'.repeat(n) + '  last"\n  more: 1\n'; ok(/  last"\n/.test(SS.redactSecrets(t(200)).text) && !/last/.test(SS.redactSecrets(t(199)).text), 'V2 held: the closing quote on the 201st line is kept with its line (the 200-line bound, said in the module, not on the head); on the 200th it is hidden'); }

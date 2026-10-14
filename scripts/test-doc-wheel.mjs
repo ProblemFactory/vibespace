@@ -8,8 +8,14 @@
 // Lane doc-raw-blocks (2.369.246 — owner "这个会莫名其妙变成源码的问题还没修复"): THE INLINE-HTML MARK TABLE (8 tags ×
 // paragraph / list item / table cell ⇒ a mark carrying its tag, byte-identical; <br> spellings; attributes / block tags /
 // unmatched / same-tag nested ⇒ raw), fixture 31 (the owner's shape: a table whose cells hold <code>) ⇒ a table, its
-// second table (a cell with a BARE <code> placeholder, the r2 ruling) ⇒ the one raw block;
+// second table (a cell with a BARE <code> placeholder) ⇒ a table since lane doc-table-native (the r2 ruling's raw block retired);
 // a 4th control: a mark serialized as backticks ⇒ the table goes red.
+// Lane doc-table-native (2.369.267 — owner 2026-10-14 「这下面不是标准的表格吗 为啥显示说是源码？」): A LITERAL TAG IS TEXT —
+// a placeholder (`<absent>`, `</sha>`, `<id/>`) or an unpaired open tag (`PR-<code>-nn`) is a text node in a paragraph / an item
+// / a cell (doc-window-model literalTag, the reading's own predicate), so fixture 32 (the owner's SHAPE: a 10-column table
+// whose cells hold a bare <absent>) and fixture 31's second table are TABLES; the bisection legs (a)–(g) + the minimal
+// failing / passing pair; what the schema cannot carry (excess cells, an attributed tag) stays raw; a 5th control: the
+// literal rule stubbed ⇒ the trigger leg + fixture 32 go red.
 // Run: node scripts/test-doc-wheel.mjs
 import fs from 'node:fs'; import path from 'node:path'; import os from 'node:os'; import { fileURLToPath, pathToFileURL } from 'node:url';
 const { Transform } = await import('@tiptap/pm/transform');
@@ -104,8 +110,8 @@ function markTable(d) {
     if (!got.includes('br:' + br) || got.includes('RAW') || rt !== src.replace(/\n$/, '')) bad.push(`${br} in a ${ctx} ⇒ ${got.join(',')} ${JSON.stringify(rt)}`);
   }
   for (const [why, src] of [['attributes', 'a <code class="k">x</code> b\n'], ['a block tag', '<details>\n<summary>s</summary>\n</details>\n'], ['a div', 'a <div>x</div> b\n'], ['a span', 'a <span>x</span>\n'],
-    ['unmatched (a placeholder)', 'PR-<code>-nn number\n'], ['an unmatched close', 'a </b> b\n'], ['same-tag nested', '<b>a <b>b</b> c</b>\n'], ['spaced content', 'a <code> x </code>\n'], ['empty', 'a <b></b> b\n'],
-    ['a code span across the close', 'a <code>`x</code>` y\n'], ['emphasis across the close', '*a <b>b* c</b>\n'], ['mixed-case ends', 'a <b>x</B>\n'], ['a cell with an attribute tag', '| a |\n| --- |\n| <sup id="n">1</sup> |\n']])
+    ['an unmatched close', 'a </b> b\n'], ['same-tag nested', '<b>a <b>b</b> c</b>\n'], ['spaced content', 'a <code> x </code>\n'], ['empty', 'a <b></b> b\n'],
+    ['emphasis across the close', '*a <b>b* c</b>\n'], ['mixed-case ends', 'a <b>x</B>\n'], ['a cell with an attribute tag', '| a |\n| --- |\n| <sup id="n">1</sup> |\n']])
     if (!marksOf(d.loadDoc(src).doc).includes('RAW')) bad.push(`${why} is not a raw block`);
   // nested tags come back in the schema's mark order (`<b><code>` ⇒ `<code><b>`, as `**_x_**` does) — an unedited save keeps
   // the bytes, and an edit inside keeps the SOURCE order (the line merge splices only the typed span)
@@ -116,11 +122,69 @@ function markTable(d) {
   return bad;
 }
 const mt = markTable(D);
-ok(mt.length === 0, 'THE INLINE-HTML MARKS: 8 tags (+ upper case) × paragraph / list item / table cell ⇒ a mark carrying the tag as written, round trip + unedited save byte-identical; <br> <br/> <br /> kept; attributes / block tags / unmatched / same-tag nested / spaced / a code span or emphasis across the close ⇒ a raw block: ' + mt.slice(0, 4).join(' | '));
+ok(mt.length === 0, 'THE INLINE-HTML MARKS: 8 tags (+ upper case) × paragraph / list item / table cell ⇒ a mark carrying the tag as written, round trip + unedited save byte-identical; <br> <br/> <br /> kept; attributes / block tags / an unmatched close / same-tag nested / spaced / emphasis across the close ⇒ a raw block: ' + mt.slice(0, 4).join(' | '));
+const kindsOf = (doc) => { const out = []; doc.forEach((n) => out.push(n.type.name)); return out.join(','); };
+const textsOf = (doc) => { let t = ''; doc.descendants((n) => { if (n.isText) t += n.text + '¦'; }); return t; };
 {
-  const F31 = fs.readFileSync(path.join(FX, '31-table-inline-html.md'), 'utf8'), g = marksOf(D.loadDoc(F31).doc), bare = F31.split('\n').lastIndexOf('| Mechanism | Rule |') + 1;
-  ok(JSON.stringify(R.raw.filter((x) => x.startsWith('31'))) === JSON.stringify([`31:L${bare}`]) && g.filter((x) => x === 'TABLE').length === 1 && g.filter((x) => x === 'RAW').length === 1 && ['htmlCode:code', 'htmlKbd:kbd', 'htmlSup:sup', 'br:<br>', 'htmlBold:b', 'htmlSub:sub', 'htmlItalic:i', 'htmlItalic:em', 'htmlBold:strong', 'code:', 'bold:'].every((m) => g.includes(m)),
-    'fixture 31 (the owner\'s shape: a GFM table whose cells hold <code> / <kbd> / <sup> / <br> beside backticks and bold) ⇒ a TABLE in the editor; its second table (a cell with a BARE <code> placeholder) stays the ONE raw block (r2: rule 2 unchanged)', [...new Set(g)]);
+  const F31 = fs.readFileSync(path.join(FX, '31-table-inline-html.md'), 'utf8'), l31 = D.loadDoc(F31), g = marksOf(l31.doc);
+  ok(!R.raw.some((x) => x.startsWith('31')) && g.filter((x) => x === 'TABLE').length === 2 && !g.includes('RAW') && textsOf(l31.doc).includes('STEP-<code>-nn') && ['htmlCode:code', 'htmlKbd:kbd', 'htmlSup:sup', 'br:<br>', 'htmlBold:b', 'htmlSub:sub', 'htmlItalic:i', 'htmlItalic:em', 'htmlBold:strong', 'code:', 'bold:'].every((m) => g.includes(m)),
+    'fixture 31 (the owner\'s shape: a GFM table whose cells hold <code> / <kbd> / <sup> / <br> beside backticks and bold) ⇒ a TABLE in the editor; its second table (a cell with a BARE <code> placeholder) is a TABLE too — the unpaired tag is its text (lane doc-table-native; the r2 raw block retired)', [...new Set(g)]);
+}
+
+// ── A LITERAL TAG IS TEXT (lane doc-table-native, 2.369.267 — owner 2026-10-14 「这下面不是标准的表格吗 为啥显示说是源码？」: an
+//    agent's 10-column table whose "paper value" cells held a bare <absent> rode as a raw block — a chip and a read-only table) ──
+/** The literal-tag table's verdicts over a doc-markdown module (empty = every row holds). */
+function literalTable(d) {
+  const bad = [];
+  const LIT = [['a placeholder', '<absent>'], ['a closing placeholder', '</sha>'], ['a self-closed placeholder', '<id/>'], ['a hyphenated placeholder', '<my-case>'], ['an unpaired element tag', 'PR-<code>-nn'], ['a close inside a code span', '<b>x `</b>` y']];
+  const CTX = { paragraph: (x) => `Some ${x} here.\n`, 'list item': (x) => `- one ${x} two\n- three\n`, 'table cell': (x) => `| a | b |\n| --- | --- |\n| ${x} | y |\n`, heading: (x) => `## A ${x} title\n` };
+  for (const [why, x] of LIT) for (const [ctx, wrap] of Object.entries(CTX)) {
+    const src = wrap(x), ld = d.loadDoc(src), tag = /<\/?[A-Za-z][^>]*>/.exec(x)[0], sv = d.saveDoc(src, ld, ld.doc);
+    if (marksOf(ld.doc).includes('RAW')) { bad.push(`${why} in a ${ctx} ⇒ a raw block`); continue; }
+    if (!textsOf(ld.doc).includes(tag)) bad.push(`${why} in a ${ctx}: the text lacks ${tag}`);
+    if (!sv.ok || sv.text !== src) bad.push(`${why} in a ${ctx}: an unedited save`);
+    let at = -1; ld.doc.descendants((n, p) => { if (at < 0 && n.isText && n.text.includes(tag)) at = p + n.text.indexOf(tag) + tag.length; });
+    const ed = at < 0 ? null : d.saveDoc(src, ld, new Transform(ld.doc).insert(at, ld.doc.type.schema.text('Z')).doc);
+    if (!ed || !ed.ok || ed.text !== src.replace(tag, tag + 'Z')) bad.push(`${why} in a ${ctx}: an edit beside it ⇒ ${JSON.stringify(ed && (ed.text || ed.code))}`);
+  }
+  return bad;
+}
+const H10 = '| row | case | field | money | gold | value | readers | agreement | reason | quote |', A10 = '|---|---|---|---|---|---|---|---|---|---|';
+const row = (cells) => '| ' + cells.join(' | ') + ' |', T10 = (...rows) => [H10, A10, ...rows].join('\n') + '\n';
+const R10 = ['R1', 'harbor-lease', '`terms.deposit_months.count`', 'yes', '3', '2', '3/3', '1.0/0.9', 'the gold copied the draft', '§4 "two (2) months" (source.txt)'];
+const cellAt = (i, v) => row(R10.map((c, k) => (k === i ? v : c)));
+/** The bisection on the owner's SHAPE: [hypothesis, source, the editor's top-level nodes wanted]. */
+const BISECT = [
+  ['(a) a bare <case> in a code span in the paragraph before', 'Paths are `api/golden_cases/<case>/source.txt`.\n\n' + T10(row(R10)), 'paragraph,table'],
+  ['(a) the same, no blank line before the table', 'Paths are `api/golden_cases/<case>/source.txt`.\n' + T10(row(R10)), 'paragraph,table'],
+  ['(b) underscores in a code span in a cell', T10(cellAt(2, '`unsupported.money_bearing.length`')), 'table'],
+  ['(c) " § ( … $ in a cell', T10(cellAt(9, '§7.3 "A late fee of US $25.00 applies (after ten days)" … §7.4 "none"')), 'table'],
+  ['(d) 10 columns, no trailing pipe', T10(row(R10).replace(/ \|$/, '')), 'table'],
+  ['(e) alignment rows :-- :-: --:', [H10, '|:--|:-:|--:|---|:---|---:|:---:|---|---|---|', row(R10)].join('\n') + '\n', 'table'],
+  ['(f) a row with fewer cells than the header', T10(row(R10), row(['R2', 'short'])), 'table'],
+  ['(g) a bare <absent> in a cell — THE TRIGGER', T10(cellAt(5, '<absent>')), 'table'],
+];
+const STAYS_RAW = [['excess cells (GFM drops them: the editor would lose words)', T10(row([...R10, 'extra words']))], ['an attributed tag in a cell', T10(cellAt(5, '<span class="k">2</span>'))]];
+function bisect(d) {
+  const bad = [];
+  for (const [why, src, want] of BISECT) { const got = kindsOf(d.loadDoc(src).doc); if (got !== want) bad.push(`${why} ⇒ ${got}`); }
+  for (const [why, src] of STAYS_RAW) if (!marksOf(d.loadDoc(src).doc).includes('RAW')) bad.push(`${why} is not a raw block`);
+  return bad;
+}
+const F32 = fs.readFileSync(path.join(FX, '32-table-placeholder-cells.md'), 'utf8');
+{
+  const lt = literalTable(D);
+  ok(lt.length === 0, 'A LITERAL TAG IS TEXT: <absent> / </sha> / <id/> / <my-case> / an unpaired PR-<code>-nn / a <b> whose close sits in a code span × paragraph / list item / table cell / heading ⇒ the tag as text (no raw block), the unedited save byte-identical, a letter typed after it saves as `<tag>Z` (the tag as written): ' + lt.join('; '));
+  for (const [why, src] of BISECT) console.log(`[doc-wheel] bisect ${why} ⇒ ${kindsOf(D.loadDoc(src).doc)}`);
+  const bs = bisect(D);
+  ok(bs.length === 0, 'THE BISECTION on the owner\'s shape: (a) a <case> code span in the paragraph before (blank line or not), (b) underscores in a cell\'s code span, (c) quotes / § / ( / … / $, (d) 10 columns + no trailing pipe, (e) alignment rows, (f) a short row, (g) a bare <absent> in a cell ⇒ each a native table; excess cells / an attributed tag stay raw: ' + bs.join('; '));
+  const MIN_FAIL = '| a | b |\n|---|---|\n| 1 | <absent> |\n', MIN_PASS = '| a | b |\n|---|---|\n| 1 | `<absent>` |\n';
+  ok(kindsOf(D.loadDoc(MIN_FAIL).doc) === 'table' && kindsOf(D.loadDoc(MIN_PASS).doc) === 'table', 'the minimal pair: | 1 | <absent> | (a raw block before this lane) and | 1 | `<absent>` | ⇒ both a table');
+  const l32 = D.loadDoc(F32), k32 = kindsOf(l32.doc);
+  ok(k32 === 'heading,paragraph,heading,paragraph,table,paragraph' && !marksOf(l32.doc).includes('RAW') && (textsOf(l32.doc).match(/<absent>/g) || []).length === 2 && !R.raw.some((x) => x.startsWith('32')), 'fixture 32 (the owner\'s SHAPE: 10 columns, two cells holding a bare <absent>, code spans with underscores, a long quoted last column) ⇒ a native TABLE, both <absent> as text, no raw block', k32);
+  let at = -1; l32.doc.descendants((n, p) => { if (at < 0 && n.isText && n.text === '<absent>') at = p + n.nodeSize; });
+  const ed = D.saveDoc(F32, l32, new Transform(l32.doc).insert(at, l32.doc.type.schema.text('Ⓧ')).doc), a = F32.split('\n'), b = String(ed.text || '').split('\n'), diff = a.map((l, i) => (l === b[i] ? null : i)).filter((x) => x != null);
+  ok(ed.ok && a.length === b.length && diff.length === 1 && b[diff[0]] === a[diff[0]].replace('| <absent> |', '| <absent>Ⓧ |') && /^\| R007 \|/.test(a[diff[0]]), 'fixture 32: a letter typed after the first <absent> + save ⇒ exactly that row\'s line changes, the tag kept as written', { diff, line: diff.length ? b[diff[0]].slice(0, 120) : ed.code });
 }
 
 // ── patchBlocks tables (PURE) ──
@@ -157,7 +221,7 @@ const mutant = async (label, file, from, to, want) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dw-mut-'));
   fs.mkdirSync(path.join(dir, 'src/lib'), { recursive: true });
   fs.symlinkSync(path.join(ROOT, 'node_modules'), path.join(dir, 'node_modules'));
-  for (const f of ['src/doc-model.js', 'src/lib/doc-markdown.js']) { let t = fs.readFileSync(path.join(ROOT, f), 'utf8'); if (f === file) { ok(t.includes(from), `control "${label}": the needle is in ${f}`); t = t.replace(from, to); } fs.writeFileSync(path.join(dir, f), t); }
+  for (const f of ['src/doc-model.js', 'src/lib/doc-markdown.js', 'src/lib/doc-window-model.js']) { let t = fs.readFileSync(path.join(ROOT, f), 'utf8'); if (f === file) { ok(t.includes(from), `control "${label}": the needle is in ${f}`); t = t.replace(from, to); } fs.writeFileSync(path.join(dir, f), t); }
   try {
     const d = await import(pathToFileURL(path.join(dir, 'src/lib/doc-markdown.js')).href + '?m=' + label.length);
     const m = (await import(pathToFileURL(path.join(dir, 'src/doc-model.js')).href)).default;
@@ -167,6 +231,8 @@ const mutant = async (label, file, from, to, want) => {
 await mutant('whole-document rewrite', 'src/lib/doc-markdown.js', '  return M.patchBlocks(s, loaded.maps, plan);', '  return { ok: true, text: serializeMd(doc) + "\\n" };', async (d, m) => !verdicts(await measure(d, m))[0]);
 await mutant('a dropped construct', 'src/lib/doc-markdown.js', "if (tok.type !== 'front_matter' && tok.type !== 'html' && !hasHtml(tok)) {", "if (tok.type !== 'front_matter') { if (0) hasHtml(tok);", async (d, m) => !verdicts(await measure(d, m))[1]);
 await mutant('a mark serialized as backticks', 'src/lib/doc-markdown.js', 'return `<${tag}>${h.renderChildren(node)}</${tag}>`;', "return '`' + h.renderChildren(node) + '`';", async (d) => markTable(d).length > 0);
+await mutant('the literal rule stubbed', 'src/lib/doc-markdown.js', '  const lit = literalTag(src);', '  const lit = null;', async (d) => bisect(d).some((x) => x.startsWith('(g)')) && marksOf(d.loadDoc(F32).doc).includes('RAW'));
+await mutant('a close inside a code span counted', 'src/lib/doc-window-model.js', ".test(s.slice(m[0].length).replace(CODE_SPANS, ''))", '.test(s.slice(m[0].length))', async (d) => literalTable(d).some((x) => x.startsWith('a close inside a code span')));
 await mutant('a reason without a why', 'src/doc-model.js', "  crlf: 'it uses Windows", "  crlf_: 'it uses Windows", async (d, m) => !(typeof m.RAW_WHY.crlf === 'string' && m.RAW_WHY.crlf.length > 20));
 
 console.log(`\ntest-doc-wheel: ${pass} passed, ${fail} failed`);

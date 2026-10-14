@@ -1,5 +1,7 @@
 # repo-guard allowlist — regex or literal per line, # for comments.
-# Matches here are NOT flagged (line OR matched snippet).
+# Matches here are NOT flagged. scripts/secret-scan.mjs (B-89da): a row counts only where it matches the finding
+# itself or OVERLAPS it on its line, and NEVER for a partner shape (GitHub push protection refuses those whatever
+# this file says — build such fixtures at runtime by concatenation, never a row here).
 # UI placeholder for the SSH-key paste textarea (not a real key):
 placeholder.*BEGIN OPENSSH PRIVATE KEY
 # ceph fs authorize example placeholder in CLAUDE.md (rand token, not a real ceph client name):
@@ -65,14 +67,11 @@ fs-appa-secret-0001
 # test-browser-kept: a kept url's user:password is stripped — the fixture spells one on a reserved .test host (not a credential)
 https://user:secret@bank.test/a
 # 2.369.200 integration — test fixtures of the secret-shape redaction (lane exit-run-output: scripts/test-exit-run.mjs), all invented or documentation examples:
-ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789
 wJalrXUtnFEMI/K7MDENG
 user:hunter2@api\.example
 u:hunter2@x\.example
 eyJhbGciOiJSUzI1NiIsImtpZCI6IjEifQ\.eyJpc3MiOiJrdWJlIn0\.AbCdEfGhIjKlMnOp
 eyJhbGciOiJIUzI1NiJ9\.eyJzdWIiOiJ1In0\.c2lnbmF0dXJl
-AKIAIOSFODNN7EXAMPLE
-sk-proj-abcdefghijklmnopqrstuvwxyz0123456789
 VIBESPACE_SESSION_TOKEN=vsst_abcdef0123456789
 user:pa55word@db/app
 eyJa{8,}\.eyJb{8,}\.c{8,}
@@ -94,3 +93,7 @@ u-fixture-user-token
 fake_consent_key_0001
 # dc-mount-client (2.369.222): the storage rows' client cells name the Connect form's FIELD KEYS, not values:
 (clientSecretKey|clientSecret|secret): '(cloud|gmail|onedrive)ClientSecret'
+# lane prepush-partner-patterns (B-89da): a row now covers only the finding it overlaps — the SECOND token of these
+# fixture lines (dbg-comm-surfaces' expired refresh token, test-channels-lark-shape's echoed bearer), not real
+expired-refresh-token
+u-echo-bearer-000
