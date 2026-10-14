@@ -6,6 +6,7 @@ import { isTransientWindowType } from './window-types.js';
 import { legacyIdFor } from './agent-meta.js';
 import { wordlessTitleOf } from '../record-clear.js'; // PURE: the title a layout RECORD keeps for a window drawn from a record's words (lane-redact verify r7)
 import { chainSyncKey, ratioDiffers, heldRatio, releaseRatio, withoutMembers, restoreVerdict } from './chain-layout.js'; // agent browser P7 (§4.6): the sync key carries the layout; the ratio applies in place (unless a local divider drag holds it — v2 verify r1 ①)
+import { writerClass, deferKey, deferKeysOf, releaseNext, noteApplied } from './layout-model.js'; // B-4767: the deferred records — one slot per desktop AND writer class, released in arrival order (PURE)
 
 // The MEMBERS of a chain (host first) — NOT a sync key (chainSyncKey is): two
 // records with the same members differ only in layout and are applied in place.
@@ -118,7 +119,8 @@ class LayoutManager {
     // _pointerDown: while the user is mid-drag/resize, inbound remote state is
     //   deferred (the latest PER DESKTOP) and applied on pointerup — remote state
     //   can no longer yank a window out from under an in-progress drag.
-    // _pendingRemote: desktopId ('' = the legacy single record) → the latest record
+    // _pendingRemote: desktopId ('' = the legacy single record) → the latest record PER WRITER CLASS (B-4767: a phone's
+    //   record waits under 'phone:' + id beside the desktop record it used to REPLACE — layout-model.js deferKey)
     //   deferred under a gate (the pointer down, or `_restoring` — the apply's 1 s
     //   cooldown and the boot's 5 s). NEVER dropped (lane desktop-move verify r1,
     //   D4): a record dropped here left this client's base of that desktop stale,
@@ -128,6 +130,9 @@ class LayoutManager {
     this._lastRemoteSeq = 0;
     this._userDirty = false;
     this._pendingRemote = new Map();
+    // _appliedSeq: desktopId → the newest seq APPLIED for it — a deferred record not newer is dropped at release, never
+    //   applied backwards (layout-model.js releaseNext; cleared with `_lastRemoteSeq` on every reconnect)
+    this._appliedSeq = new Map();
     this._drainTimer = null;
     this._pointerDown = false;
     // _applying: the SYNCHRONOUS span of a remote apply (and the cached sweep's closes) — a close made inside it is
@@ -155,6 +160,7 @@ class LayoutManager {
     // a socket that DIED answers nothing more: the saves it carried are owed by nobody (their acts stay held — `_carried` is
     // untouched — and the re-send after the re-read carries them again); one queued while down (`at` null) has not left
     app.ws.onStateChange((connected) => { if (!connected) { this._lastSentJson = null; this._unacked = this._unacked.filter((s) => s.at == null); } if (connected) { this._clockTick(); this._lastRemoteSeq = 0; for (const s of this._unacked) if (s.at == null) s.at = Date.now(); if (this._connects++ > 0) setTimeout(() => this._resyncFromServer(), 250); } }); // a save queued while down LEAVES now (ws.js flushes right after the handlers): its no-ack clock starts here (verify r5 ⑤)
+    app.ws.onStateChange((connected) => { if (connected) this._appliedSeq.clear(); }); // the server's seq restarts with the socket (guard 1)
 
     // Listen for state sync from other clients
     app.ws.onGlobal((msg) => {
@@ -166,8 +172,10 @@ class LayoutManager {
         this._lastRemoteSeq = msg.seq;
       }
       msg.receivedAt = Date.now(); // a record knows nothing this page did after this instant (the held move, verify r2)
-      // under a gate: DEFERRED per desktop, applied once the gate opens — never dropped (§6b guard 3)
-      if (this._restoring || this._pointerDown) { this._deferRemote(msg); return; }
+      // under a gate: DEFERRED per desktop, applied once the gate opens — never dropped (§6b guard 3); and while records
+      // still wait (the drain after a pointerup), a new one joins them: applied after them, never before an older one
+      // (B-4767: a phone record applied live there made the desktop record still waiting older than the newest applied)
+      if (this._restoring || this._pointerDown || this._pendingRemote.size) { this._deferRemote(msg); return; }
       this._handleRemoteSync(msg);
     });
   }
@@ -179,25 +187,28 @@ class LayoutManager {
     if (this._pendingRemote.size) this._drainDeferred(300);
   }
 
-  /** A record that landed under a gate waits under its DESKTOP's key (the latest per desktop wins; a burst for
-   *  several desktops keeps one each). Under the apply / boot gate the drain polls until the gate opens; under
-   *  the pointer, the pointerup drains. */
+  /** A record that landed under a gate waits under its DESKTOP's key PER WRITER CLASS (the latest per desktop and class
+   *  wins; a burst for several desktops keeps one each; a phone record never replaces the desktop record before it —
+   *  B-4767). Under the apply / boot gate the drain polls until the gate opens; under the pointer, the pointerup
+   *  drains; a drain already armed is kept (a record joining the pointerup's 300 ms never shortens it). */
   _deferRemote(msg) {
-    this._pendingRemote.set(msg.desktopId || '', msg);
-    if (!this._pointerDown) this._drainDeferred(200);
+    this._pendingRemote.set(deferKey(msg), msg);
+    if (!this._pointerDown && !this._drainTimer) this._drainDeferred(200);
   }
 
   /** Apply the deferred records ONE per tick, lowest seq first, each only when neither gate is up (an apply of
-   *  the desktop on show raises `_restoring` for 1 s — the next record waits for it). */
+   *  the desktop on show raises `_restoring` for 1 s — the next record waits for it): a desktop record and the
+   *  phone record after it both apply, in arrival order, each under its own law; one not newer than what was
+   *  applied for its desktop meanwhile is dropped (layout-model.js releaseNext). */
   _drainDeferred(delayMs) {
     if (this._drainTimer) clearTimeout(this._drainTimer);
     this._drainTimer = setTimeout(() => {
       this._drainTimer = null;
       if (!this._pendingRemote.size || this._pointerDown) return; // the pointerup drains
       if (this._restoring) { this._drainDeferred(200); return; }
-      const [key, msg] = [...this._pendingRemote.entries()].sort((a, b) => (a[1].seq || 0) - (b[1].seq || 0))[0];
-      this._pendingRemote.delete(key);
-      this._handleRemoteSync(msg);
+      const { next, drop } = releaseNext(this._pendingRemote, this._appliedSeq);
+      for (const k of drop) this._pendingRemote.delete(k);
+      if (next) { this._pendingRemote.delete(next[0]); this._handleRemoteSync(next[1]); }
       if (this._pendingRemote.size) this._drainDeferred(200);
     }, delayMs);
   }
@@ -248,9 +259,13 @@ class LayoutManager {
     // A record still DEFERRED for the same desktop (verify r2 ⑤): one received before the read was asked is older
     // than the read — dropped, never applied after it (it used to drain a stale record over the fresh one); one
     // received while the read was in flight may be newer than what the read saw — it stays and supersedes the
-    // read's record for that desktop (a per-desktop record is whole).
+    // read's record for that desktop (a per-desktop record is whole). A PHONE record still deferred (B-4767) is not
+    // whole: one received before the read was asked is in the read — dropped; one received after stays and applies
+    // after the read's record (lower seq first: the read's has none).
     const take = (msg) => {
       const key = msg.desktopId || '';
+      const phoneKey = deferKeysOf(key)[1], phonePend = this._pendingRemote.get(phoneKey);
+      if (phonePend && (phonePend.receivedAt || 0) < startedAt) this._pendingRemote.delete(phoneKey);
       const pend = this._pendingRemote.get(key);
       if (pend && (pend.receivedAt || 0) >= startedAt) return;
       if (this._restoring || this._pointerDown) this._deferRemote(msg); // replaces the older deferred record
@@ -291,6 +306,7 @@ class LayoutManager {
   }
 
   _handleRemoteSync(msg) {
+    noteApplied(this._appliedSeq, msg); // the newest record applied for its desktop: an older one still deferred never lands after it (B-4767)
     this._clockTick(); // a record after a sleep: the held acts are re-armed BEFORE it is judged against them (verify r5 ①)
     const dm = this.app.desktopManager;
     // Bar heights are GLOBAL chrome riding PER-DESKTOP states — apply them
@@ -322,7 +338,7 @@ class LayoutManager {
     // RE-READ (the reconnect / outage resync, like the boot) takes it whole: it is the truth on disk and the page's own
     // newer acts are kept by the held-act witnesses (phone-arrangement-verify F1: the re-read dropped another desktop's
     // drag and this page's next save wrote its stale boxes over it, on disk and on that desktop)
-    const membershipOnly = !msg.resync && (msg.viewport ?? msg.state?.viewport) === 'phone' && !this.app.isMobile;
+    const membershipOnly = writerClass(msg) === 'phone' && !this.app.isMobile; // THE ONE writer predicate — the deferred slot's too (layout-model.js)
     this._applyRemoteState(msg.state, { closeOnlyWired: !!msg.resync, receivedAt, membershipOnly });
     if (dm && msg.desktopId) {
       dm.noteWire(msg.desktopId, msg.state); // the record this desktop was last seen as on the wire

@@ -82,6 +82,8 @@ import { registerCommand, registerMenuItem, runCommand } from './contributions.j
 import { setupDirAutocomplete } from './autocomplete.js';
 import { FILE_ICONS, UI_ICONS } from './icons.js';
 import { validateBrowserUrl } from '../desktop-browser-app.js';
+import { launchVerdict } from '../desktop-fit.js'; // lane app-launch-singleton: a running app is OPENED, never launched again (PURE)
+import { runningWhereText, quickExitText } from './desktop-app-words.js';
 import { SCALE_PREF_KEY, scaleKeyOf, scaleChoiceOf, setScaleChoice, launchScaleChoice, scaleDefaultMenuModel } from './desktop-app-scale.js';
 import { wireAppPrefs, appPrefs, appPrefsReady, onAppPrefs, saveAppPrefs } from './desktop-app-prefs.js';
 import { mountLaunchShareRow, launchKeyOf } from './window-share.js';
@@ -94,6 +96,22 @@ import { appPlanBlock, appSummaryBlock, appRefusalText, appDialogTitle, appGoLab
 const AGENT_BROWSER_ORIGIN = 'agent-browser'; // src/server/window-targets-engine.js AGENT_BROWSER_ORIGIN
 /** lane e2a r3 (verify r1 #11): a record the agent launched through its own door — the chip / the running row words. */
 export function agentBrowserText(rec) { return rec && rec.origin === AGENT_BROWSER_ORIGIN ? t('Agent browser ({name})', { name: (rec.by && rec.by.name) || t('an agent') }) : ''; }
+// lane app-launch-singleton: where an app runs / who started it / a quick exit — ONE set of words (src/lib/desktop-app-words.js)
+export { runningWhereText, quickExitText } from './desktop-app-words.js';
+/** How long the card keeps saying a quick exit (the person reopens Apps to see why the window went). */
+const QUICK_EXIT_SAID_MS = 10 * 60 * 1000;
+/** What the card says after a launch of row `row` on `host` ended as it started: the row's NEWEST record when it is such a
+ *  launch, within QUICK_EXIT_SAID_MS, and no instance of ours took it over (`quickExit.running` — that one is opened by the
+ *  card while it runs, and once it is gone the sentence no longer explains anything) — else null. */
+export function lastQuickExit(row, apps, host = 'local', now = Date.now()) {
+  let newest = null;
+  for (const r of Array.isArray(apps) ? apps : []) {
+    if (!r || r.appId !== row.id || (r.hostId || 'local') !== host) continue;
+    if (!newest || Number(r.startedAt) > Number(newest.startedAt)) newest = r;
+  }
+  if (!newest || !newest.quickExit || newest.quickExit.running) return null;
+  return now - Number(newest.endedAt || newest.startedAt || 0) <= QUICK_EXIT_SAID_MS ? newest : null;
+}
 
 export const COMMAND_ID = 'desktopApps.open';
 const RECENTS_KEY = 'desktopAppRecents';
@@ -921,6 +939,7 @@ export async function showLaunchDialog(app, opts = {}) {
     const r = await fetchJson('/api/desktop/apps', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...payload, dpr: launchDpr(), uiScale: launchUiScale(), ...(scaleChoice != null ? { scaleChoice } : {}), ...(host !== 'local' ? { host } : {}), ...(share ? { share } : {}) }) });
     runBtn.disabled = false;
     if (!r || r.error) { showToast(r?.error || t('Could not launch the application'), { type: 'error' }); return null; }
+    if (r.attached) { close(); app.openDesktopApp(r.id); showToast(t('It was already running — its window is open')); return r; } // lane app-launch-singleton: the keeper found it running
     shareRow.remember(shareKey, share);
     shareRow.announce(shareKey, share, r); // lane E verify: a launch that applied the app's REMEMBERED share says so
     if (r.reachError) showToast(t('The app started, but sharing it failed: {why}', { why: r.reachError.error || '' }), { type: 'error' });
@@ -977,17 +996,31 @@ export async function showLaunchDialog(app, opts = {}) {
   // an xterm card did nothing in 4 of 7 runs once the catalog grew; a broadcast now touches the Running rows only, and
   // only when an id / label / state / host / pending Stop / the slot count moved)
   let runKey = null;
+  // lane app-launch-singleton: the CARDS follow the instances too (an agent's start, an exit, a quick exit) — only when that SET
+  // moved (never on the 5 s tick alone), and never under a held press: a press in flight defers the rebuild to its release
+  // (the rebuild between pointerdown and pointerup is what ate a click — the rule renderRunning keeps for the catalog)
+  let cardKey = null, cardsOwed = false, pressing = false;
+  const cardSig = (apps) => JSON.stringify((apps || []).filter((a) => a && (['launching', 'ready', 'unknown-host-offline'].includes(a.state) || a.quickExit)).map((a) => [a.id, a.appId, a.state, a.hostId, a.display, !!a.quickExit]));
+  const cardsFollow = () => {
+    const k = cardSig(data && data.apps);
+    if (doc || k === cardKey) return;
+    if (pressing) { cardsOwed = true; return; }
+    render();
+  };
+  overlay.addEventListener('pointerdown', () => { pressing = true; }, true);
+  overlay.addEventListener('pointerup', () => { pressing = false; if (cardsOwed) { cardsOwed = false; setTimeout(() => { if (overlay.isConnected) cardsFollow(); }, 0); } }, true);
   const renderRunning = () => {
     const capUsed = data?.cap?.used ?? 0, cap = data?.cap?.cap ?? 0;
+    if (!doc && cardKey !== null && cardSig(data && data.apps) !== cardKey) { cardsFollow(); return; } // lane app-launch-singleton: the set moved — the cards (and these rows) follow
     const live = (data?.apps || []).filter((a) => a.state === 'ready' || a.state === 'launching' || a.state === 'unknown-host-offline'); // lane C2: an app whose machine is not answering is still listed
-    const key = JSON.stringify([live.map((a) => [a.id, a.label, a.exec, a.state, a.hostId, a.hostLabel, busy.has(a.id)]), cap, capUsed]);
+    const key = JSON.stringify([live.map((a) => [a.id, a.label, a.exec, a.state, a.hostId, a.hostLabel, a.display, a.launchedBy, busy.has(a.id)]), cap, capUsed]);
     if (key === runKey) return;
     runKey = key;
     runEl.innerHTML = '';
     for (const a of live) {
       const row = document.createElement('div'); row.className = 'desktop-launch-run-row';
       const ab = agentBrowserText(a); // lane e2a r3 (#11): the agent's own browser is marked in the running list
-      row.innerHTML = `<span class="desktop-app-row-label">${escHtml(a.label || a.exec)}${ab ? `<span class="desktop-launch-host-chip">${escHtml(ab)}</span>` : ''}${a.hostLabel && a.hostId !== 'local' ? `<span class="desktop-launch-host-chip">${escHtml(t('on {machine}', { machine: a.hostLabel }))}</span>` : ''}</span><span class="desktop-app-row-state">${escHtml(a.state === 'ready' ? t('running') : a.state === 'unknown-host-offline' ? t('machine not answering') : t('starting'))}</span>`;
+      row.innerHTML = `<span class="desktop-app-row-label">${escHtml(a.label || a.exec)}${ab ? `<span class="desktop-launch-host-chip">${escHtml(ab)}</span>` : ''}${a.hostLabel && a.hostId !== 'local' ? `<span class="desktop-launch-host-chip">${escHtml(t('on {machine}', { machine: a.hostLabel }))}</span>` : ''}</span><span class="desktop-app-row-state">${escHtml(a.state === 'ready' ? runningWhereText(a) : a.state === 'unknown-host-offline' ? t('machine not answering') : t('starting'))}</span>`;
       const open = document.createElement('button'); open.className = 'file-tool-btn'; open.style.cssText = 'width:auto;padding:0 8px;font-size:10px'; open.textContent = t('Open');
       open.onclick = () => { close(); app.openDesktopApp(a.id); };
       const stop = document.createElement('button'); stop.className = 'file-tool-btn desktop-app-stop'; stop.style.cssText = 'width:auto;padding:0 8px;font-size:10px'; stop.textContent = t('Stop');
@@ -1010,6 +1043,7 @@ export async function showLaunchDialog(app, opts = {}) {
   // "Show them" (the person's choice, user state)
   let showSystem = false, rechecking = false;
   const render = ({ seenOnly = false } = {}) => {
+    if (!seenOnly) cardKey = cardSig(data && data.apps); // lane app-launch-singleton: the instance set these cards show
     const mName = host === 'local' ? null : machineName(machineOf(host));
     availEl.textContent = listError ? machineErrorText(listError.code, mName || machineName(null), listError.error) : availabilityText(data && data.availability, mName);
     const availBad = !!listError || !!(data && data.availability && !data.availability.backend);
@@ -1030,7 +1064,7 @@ export async function showLaunchDialog(app, opts = {}) {
     for (const row of rows) {
       if (seenOnly && !row.witnessed) continue;
       if (row.witnessed && row.distro && !showSystem) continue;
-      const seenKey = row.witnessed ? JSON.stringify([row.id, row.label, row.exec, row.args, row.available, row.reason, row.source, row.distro, launching.has(row.id), dead, scales]) : null;
+      const seenKey = row.witnessed ? JSON.stringify([row.id, row.label, row.exec, row.args, row.available, row.reason, row.source, row.distro, launching.has(row.id), dead, scales, cardKey]) : null; // lane app-launch-singleton: + the instance set the card names
       if (seenKey && seenOld.has(seenKey)) { const w0 = seenOld.get(seenKey); w0.hidden = !launchFilterMatch(row, filterIn.value); seenWant.push(w0); continue; }
       // §7.9: an absent LibreOffice row in FILE MODE is not a dimmed card — ONE plain sentence + "Install LibreOffice on
       // <machine>…" (the owner's rule: never a greyed control with a hint)
@@ -1050,9 +1084,14 @@ export async function showLaunchDialog(app, opts = {}) {
       b.type = 'button';
       const isLaunching = launching.has(row.id);
       const unavailable = !row.available || !!row.parkedUntil;
-      b.className = 'desktop-launch-card' + (unavailable ? ' is-unavailable' : '') + (isLaunching ? ' is-launching' : '');
+      // lane app-launch-singleton: an instance that runs (an agent's too) is OPENED by the press and named on the card; a
+      // launch that ended as it started is said here until the person launches again
+      const lv = doc ? null : launchVerdict({ row, apps: data?.apps || [], host });
+      const running = !!lv && lv.act === 'attach', held = !!lv && lv.act === 'held';
+      const quick = !doc && !running && !isLaunching ? lastQuickExit(row, data?.apps, host) : null;
+      b.className = 'desktop-launch-card' + (unavailable ? ' is-unavailable' : '') + (isLaunching ? ' is-launching' : '') + (running ? ' is-running' : '') + (quick || held ? ' is-said' : '');
       // a dimmed BROWSER row says its verdict SHORT and translated (by the server's code); the sentence is its tooltip
-      const sub = isLaunching ? t('Launching…') : row.witnessed || row.registered ? witnessSubText(row) : row.available ? (row.reason || row.exec) : ((row.browser && browserReasonShort(row.reasonCode)) || (row.office && officeReasonShort(row.reasonCode)) || (row.app && appReasonShort(row.reasonCode)) || registryReasonShort(row) || row.reason || t('not on PATH'));
+      const sub = isLaunching ? t('Launching…') : running ? runningWhereText(lv.target) : held ? t('Already running outside VibeSpace (pid {pid}) — a second start would close at once', { pid: lv.lock.pid }) : quick ? quickExitText(quick, catalogLabel(row)) : row.witnessed || row.registered ? witnessSubText(row) : row.available ? (row.reason || row.exec) : ((row.browser && browserReasonShort(row.reasonCode)) || (row.office && officeReasonShort(row.reasonCode)) || (row.app && appReasonShort(row.reasonCode)) || registryReasonShort(row) || row.reason || t('not on PATH'));
       // faces B: a startable browser card names its face ("Browser app · chromium"); a dimmed one says only its short reason
       const docSub = doc && !isLaunching && !unavailable ? t('opens {file}', { file: doc.label || doc.path }) : null; // §7.9 FILE MODE: the card names the document it opens
       b.innerHTML = `<span class="desktop-launch-card-icon">${isLaunching ? UI_ICONS.refresh : cardIconFor(row.category, row.office)}</span><span class="desktop-launch-card-label">${escHtml(catalogLabel(row))}</span><span class="desktop-launch-card-sub">${docSub !== null ? escHtml(docSub) : escHtml(row.browser && !isLaunching && !unavailable ? `${t('Browser app')} · ${sub}` : sub)}</span>`;
@@ -1063,14 +1102,17 @@ export async function showLaunchDialog(app, opts = {}) {
         const ic = b.querySelector('.desktop-launch-card-icon'); if (ic) { ic.textContent = ''; ic.appendChild(img); }
       }
       if ((row.witnessed || row.registered) && !isLaunching) { const chip = document.createElement('span'); chip.className = 'desktop-launch-chip'; chip.textContent = witnessSourceText(row.source); b.querySelector('.desktop-launch-card-sub')?.prepend(chip, ' '); } // the source chip leads the command line (the card's grid keeps two rows)
-      b.disabled = unavailable || dead || isLaunching;
+      b.disabled = (unavailable && !running) || dead || isLaunching || held;
       b.setAttribute('aria-disabled', b.disabled ? 'true' : 'false');
       if (isLaunching) b.setAttribute('aria-busy', 'true');
       b.title = row.available ? (row.path || row.exec) : (row.reason || '');
       if (row.browser) b.title = `${b.title ? b.title + ' — ' : ''}${browserNote()}`;
+      if (running || held || quick) b.title = `${sub} — ${b.title}`;
       b.dataset.appId = row.id;
-      b.onclick = async () => {
-        if (b.disabled) return;
+      // `again` = the person asked for ANOTHER instance ("Open another"); the card's own press opens a running one — and asks the
+      // keeper to (ifRunning: 'attach'), so an instance this dialog has not heard of yet is opened rather than started twice
+      const press = async (again = false) => {
+        if (!again && running) { close(); app.openDesktopApp(lv.target.id); return; }
         let body = { appId: row.id };
         if (doc) body = { appId: row.id, file: doc.path, fileHost: doc.host || 'local' }; // §7.9: the document opens in it, where it lives
         if (row.browser) {
@@ -1078,10 +1120,12 @@ export async function showLaunchDialog(app, opts = {}) {
           if (bb.error) { showToast(t('Open URL must be an http:// or https:// address'), { type: 'error' }); focusQuiet(urlIn); return; }
           body = bb.body;
         }
+        if (!doc && !again) body = { ...body, ifRunning: 'attach' };
         launching.add(row.id); render();
         const r = await launch(body, null);
         if (!r) { launching.delete(row.id); render(); }
       };
+      b.onclick = async () => { if (!b.disabled) await press(false); };
       // lane D: the card + (on a scaling rung) its default-scale control, side by side — a control cannot live INSIDE
       // the card's button, so the grid item is a wrapper holding both
       const wrap = document.createElement('div'); wrap.className = 'desktop-launch-card-wrap';
@@ -1115,6 +1159,22 @@ export async function showLaunchDialog(app, opts = {}) {
         ib.onclick = (e) => { e.stopPropagation(); showInstallDialog(machineOf(host), { what: row.id, onDone: () => { if (overlay.isConnected) refresh(); } }); };
         wrap.appendChild(ib);
       }
+      if (running) { // lane app-launch-singleton (the reporter's addendum): EVERY live instance, an agent's too — where, who, Open, Close
+        const runs = document.createElement('div'); runs.className = 'desktop-launch-card-runs';
+        const btn = (cls, text, fn) => { const x = document.createElement('button'); x.type = 'button'; x.className = cls; x.textContent = text; x.onclick = (e) => { e.stopPropagation(); fn(x); }; return x; };
+        for (const a of lv.running) {
+          const line = document.createElement('div'); line.className = 'desktop-launch-card-run'; line.dataset.runId = a.id;
+          const words = document.createElement('span'); words.className = 'desktop-launch-card-run-text'; words.textContent = lv.running.length > 1 ? runningWhereText(a) : ''; words.title = runningWhereText(a); // one instance: the card's own line says it
+          const stop = btn('desktop-launch-card-run-stop', t('Close'), async (x) => { x.disabled = true; busy.add(a.id); await stopDesktopApp(a.id, { name: a.label || a.exec }); busy.delete(a.id); refresh(); });
+          stop.disabled = busy.has(a.id);
+          line.append(words, btn('desktop-launch-card-run-open', t('Open'), () => { close(); app.openDesktopApp(a.id); }), stop);
+          runs.appendChild(line);
+        }
+        if (lv.again && !unavailable && !dead) runs.appendChild(btn('desktop-launch-card-run-again', t('Open another'), () => press(true)));
+        wrap.classList.add('has-running');
+        wrap.appendChild(runs);
+      }
+      if (running || held || quick) wrap.classList.add('is-wide'); // lane app-launch-singleton: its words get the grid's whole row
       wrap.hidden = !doc && !launchFilterMatch(row, filterIn.value); // the filter box, across Apps and the witnessed group
       if (row.witnessed) { wrap.dataset.seenKey = seenKey; seenWant.push(wrap); } else (row.browser ? browsersEl : regEl).appendChild(wrap);
     }

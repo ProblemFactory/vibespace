@@ -163,6 +163,7 @@ import { paneState } from '../desktop-viewers.js';
 import { exitCloseVerdict, outerCloseVerdict, OUTER_CLOSE_AGAIN_MS, scaleKnobs, scaleMenuModel, renderOf, relaunchPaneCss, relaunchVerdict } from '../desktop-fit.js';
 import { memoryText } from '../runaway-guard.js';
 import { launchDpr, launchUiScale, explicitScaleLabel, stopDesktopApp, confirmDiscard, agentBrowserText } from './desktop-app-launcher.js';
+import { quickExitText } from './desktop-app-words.js'; // lane app-launch-singleton
 import { satelliteFocus, agentOpenedRecord } from './desktop-app-placement.js';
 import { startCenterVerdict } from '../office-open.js'; // B-04da ⑤ (PURE)
 import { PIN_CHOICES, pinOf, pinChipText } from '../desktop-pin.js'; // lane e2b (§E2.2): the pinned pixel size (PURE)
@@ -175,6 +176,8 @@ import { seamlessVerdict, windowSeamless, isCsd, isPaused, revealStep, revealIni
 import { SCALE_PREF_KEY, scaleChoiceOf, setScaleChoice, appDefaultModel } from './desktop-app-scale.js';
 import { wireAppPrefs, appPrefs, onAppPrefs, saveAppPrefs, SATELLITE_PREF_KEY, satellitePlacement, setSatelliteOffset } from './desktop-app-prefs.js';
 import { openShareDialog, openAskDialog, shareChipText } from './window-share.js';
+/** int267 seam: how long the outer ✕ waits for the hub's `close-asked` stamp before it sends close-window anyway. */
+const CLOSE_STAMP_WAIT_MS = 1500;
 
 const WATCH_HINT_EVERY_MS = 8000;
 /** The status's minimum on the strip (its ONE flexible item) — public/style.css `.desktop-bar > .desktop-status` min-width says the same (test-live-bar-layout pins the pair). */
@@ -329,6 +332,7 @@ export function endedText(rec) {
   if (!rec) return '';
   if (rec.state === 'failed') return rec.lastError ? t('Failed: {why}', { why: rec.lastError }) : t('Failed');
   if (rec.state === 'exited') {
+    if (rec.quickExit && !rec.stoppedBy) return quickExitText(rec); // lane app-launch-singleton: it ended as it started — say why it usually does
     if (rec.stoppedBy === 'user') return t('Stopped');
     if (rec.lastError) return t('Exited: {why}', { why: rec.lastError });
     return Number.isInteger(rec.exitCode) ? t('Exited (code {code})', { code: rec.exitCode }) : t('Exited');
@@ -725,8 +729,32 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
     if (rec.state === 'exited' || rec.state === 'failed') {
       if (!gone) { gone = true; view?.disconnect(); }
       view?.setStatus(endedText(rec), { error: rec.state === 'failed', reconnect: false });
+      if (rec.quickExit && !rec.stoppedBy) showQuickExit();
     }
     pokeSatellites(); // S2: their titles carry this window's name (and the agent / machine words)
+  };
+  /** lane app-launch-singleton (fleet inc-mv7hxc2n-2cvr): a launch whose app ended as it started (the keeper's `quickExit`) —
+   *  the window SAYS so over its empty pane (never a blank window that blinks shut) and, when the same app still runs,
+   *  offers THAT one (the attach door: its own window); "Close this window" is the person's. */
+  let quickPanel = null;
+  const showQuickExit = () => {
+    if (quickPanel || !rec || !rec.quickExit) return;
+    const q = rec.quickExit;
+    quickPanel = document.createElement('div'); quickPanel.className = 'desktop-app-quick-exit';
+    const said = document.createElement('p'); said.className = 'desktop-app-quick-exit-text'; said.textContent = quickExitText(rec, titleText());
+    const acts = document.createElement('div'); acts.className = 'desktop-app-quick-exit-acts';
+    if (q.running) {
+      const o = document.createElement('button'); o.type = 'button'; o.className = 'btn-create desktop-app-quick-exit-open';
+      o.textContent = q.runningDisplay ? t('Open the one running on {display}', { display: q.runningDisplay }) : t('Open the running one');
+      o.onclick = () => { app.openDesktopApp(q.running); app.wm.closeWindow(winInfo.id); };
+      acts.appendChild(o);
+    }
+    const c = document.createElement('button'); c.type = 'button'; c.className = 'desktop-app-quick-exit-close'; c.textContent = t('Close this window');
+    c.onclick = () => app.wm.closeWindow(winInfo.id);
+    acts.appendChild(c);
+    quickPanel.append(said, acts);
+    if (getComputedStyle(winInfo.content).position === 'static') winInfo.content.style.position = 'relative';
+    winInfo.content.appendChild(quickPanel);
   };
   /** S2: what a satellite of this window reads — its full title, the seamless context, the app key — and the poke. */
   const pokeSatellites = () => { for (const w of app.wm.windows.values()) if (w._desktopAppId === id && w._desktopSatelliteWid) w._desktopSatelliteRender?.(); };
@@ -789,9 +817,16 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
     if (v.act === 'close') return true;
     if (v.act === 'stop') { closeAskedAt = 0; stopApp(); return false; }
     if (v.act === 'ask-front') return !view.closeFront(); // S1c: the app's second window (WeChat's Moments) closes — the app and this window stay; a refused packet = today's pane-only close
-    if (!view.closeApp()) return true; // the socket refused the packet: today's pane-only close, never a dead button
+    // int267 seam (the guard-programmatic-not-the-press law): a person's own close is never a failed launch — the record is
+    // stamped `closeAskedAt` BEFORE close-window is sent (a bounded wait: a slow hub never holds the ✕), so the exit that
+    // answers it closes this window, with no "exited right after it started" sentence and no notice (quickExitVerdict asked)
     closeAskedAt = now;
-    showToast(t('Asked {app} to close — press ✕ again within {n} s to stop it', { app: titleText(), n: Math.round(OUTER_CLOSE_AGAIN_MS / 1000) }), { duration: OUTER_CLOSE_AGAIN_MS });
+    const stamped = fetchJson(`/api/desktop/apps/${encodeURIComponent(id)}/close-asked`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => null);
+    Promise.race([stamped, new Promise((r) => setTimeout(r, CLOSE_STAMP_WAIT_MS))]).then(() => {
+      if (closed) return;
+      if (!view || !view.closeApp()) { closeAskedAt = 0; closed = true; app.wm.closeWindow(winInfo.id); return; } // the socket refused the packet: today's pane-only close, never a dead button
+      showToast(t('Asked {app} to close — press ✕ again within {n} s to stop it', { app: titleText(), n: Math.round(OUTER_CLOSE_AGAIN_MS / 1000) }), { duration: OUTER_CLOSE_AGAIN_MS });
+    });
     return false;
   };
 

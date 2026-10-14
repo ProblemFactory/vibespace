@@ -10,6 +10,8 @@ import { t } from './i18n.js';
 import { fetchJson } from './utils.js';
 import { pickerRows, recentChoice } from '../desktop-screens.js';
 import { openMachineDesktop, showMachineDesktopDialog } from './machine-desktop.js';
+import { runningWhereText } from './desktop-app-words.js'; // lane app-launch-singleton: where it runs / who started it (a leaf)
+import { RUNNING_STATES } from '../desktop-fit.js';
 
 const RECENT_KEY = 'vibespace.desktopRecent';     // { hostId, display } — this browser's last Desktop choice
 const DISPLAYS_KEY = 'vibespace.desktopDisplays'; // { [hostId]: [{ key, n, name }] } — what each machine's window mapped last
@@ -54,6 +56,7 @@ export function openDesktopPicker(app, { anchor = null, focusHost = null } = {})
   if (phone) box.classList.add('desktop-picker-sheet');
   document.body.append(box);
   let machines = null, loading = true, rows = [], moved = false; // `moved`: the person moved the focus (arrows / a press) — keep it
+  let apps = []; // lane app-launch-singleton: every live desktop app (an agent-started one too) — GET /api/desktop/apps?records=1, then the broadcast
   const local = { available: app._vncAvailable !== false, seat: app._vncSeat || null };
   const draw = () => {
     rows = pickerRows({ local, machines: machines || [], recent: readRecent() });
@@ -75,6 +78,26 @@ export function openDesktopPicker(app, { anchor = null, focusHost = null } = {})
     }
     if (loading) kids.push(el('div', 'desktop-picker-note', t('Checking machines…')));
     else if (!rows.some((r) => r.group === 'remote')) kids.push(el('div', 'desktop-picker-note', t('No paired Windows or Mac machine yet')));
+    // lane app-launch-singleton (the reporter: 「那个 agent 说启动了 Chrome，我本来也找不到它启动的 Chrome 到底在哪儿」): EVERY running app
+    // window, whoever started it — where, who, Open (its window), Close
+    const live = apps.filter((a) => a && RUNNING_STATES.includes(a.state) && !a.replacedBy);
+    if (live.length) kids.push(el('div', 'desktop-picker-group', t('Running apps')));
+    for (const a of live) {
+      const line = el('div', 'desktop-picker-app');
+      const b = el('button', 'desktop-picker-row desktop-picker-app-open'); b.type = 'button'; b.setAttribute('role', 'menuitem');
+      b.dataset.group = 'apps'; b.dataset.host = a.id; b.dataset.state = a.state;
+      b.append(el('span', 'desktop-picker-name', String(a.appTitle || a.label || a.exec || a.id)), el('span', 'desktop-picker-state', runningWhereText(a)));
+      b.title = t('Open');
+      b.onclick = () => { close(); app.openDesktopApp(a.id); };
+      const o = el('button', 'desktop-picker-app-btn desktop-picker-app-go', t('Open')); o.type = 'button';
+      o.onclick = (e) => { e.stopPropagation(); close(); app.openDesktopApp(a.id); };
+      const s = el('button', 'desktop-picker-app-btn desktop-picker-app-stop', t('Close')); s.type = 'button';
+      s.title = t('Close {app}', { app: String(a.label || a.exec || a.id) });
+      // the ONE stop (LibreOffice asked first) — loaded when pressed: the launcher is the whole Apps dialog, this popover is not
+      s.onclick = async (e) => { e.stopPropagation(); s.disabled = true; const { stopDesktopApp } = await import('./desktop-app-launcher.js'); await stopDesktopApp(a.id, { name: a.label || a.exec }); };
+      line.append(b, o, s);
+      kids.push(line);
+    }
     const had = moved && box.contains(document.activeElement) ? document.activeElement.dataset.host + '|' + document.activeElement.dataset.group : null; // else the first row again (the recent one arrives with the machines)
     box.replaceChildren(...kids);
     const want = had ? [...box.querySelectorAll('.desktop-picker-row')].find((b) => b.dataset.host + '|' + b.dataset.group === had) : focusHost ? box.querySelector(`.desktop-picker-row[data-group="remote"][data-host="${CSS.escape(focusHost)}"]`) : null;
@@ -96,12 +119,14 @@ export function openDesktopPicker(app, { anchor = null, focusHost = null } = {})
     const i = bs.indexOf(document.activeElement);
     e.preventDefault(); moved = true; (bs[(i + (e.key === 'ArrowDown' ? 1 : bs.length - 1)) % bs.length] || box).focus();
   };
-  function close() { if (open !== api) return; open = null; box.remove(); document.removeEventListener('pointerdown', onDown, true); box.removeEventListener('keydown', onKey); }
+  const offApps = app.ws && typeof app.ws.onGlobal === 'function' ? app.ws.onGlobal((m) => { if (m.type === 'desktop-apps-updated' && open === api && Array.isArray(m.apps)) { apps = m.apps; draw(); place(); } }) : null;
+  function close() { if (open !== api) return; open = null; box.remove(); document.removeEventListener('pointerdown', onDown, true); box.removeEventListener('keydown', onKey); try { offApps?.(); } catch { /* gone */ } }
   document.addEventListener('pointerdown', onDown, true);
   box.addEventListener('keydown', onKey);
   const api = { el: box, close, rows: () => rows };
   open = api;
   draw(); place();
   fetchJson('/api/desktop/machines').then((r) => { if (open !== api) return; loading = false; machines = r && Array.isArray(r.machines) ? r.machines : []; draw(); place(); }).catch(() => { if (open !== api) return; loading = false; draw(); });
+  fetchJson('/api/desktop/apps?records=1').then((r) => { if (open !== api || !r || !Array.isArray(r.apps)) return; apps = r.apps; draw(); place(); }).catch(() => { /* the list says nothing then */ });
   return api;
 }

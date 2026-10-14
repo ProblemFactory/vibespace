@@ -38,6 +38,14 @@
 // seeded and asserted too. Plus the catalog-first redo: the intro line (also
 // in zh), a card click that launches with a visible launching state, the
 // Advanced disclosure closed by default and persisted open across a reload.
+// §S LANE APP-LAUNCH-SINGLETON (fleet inc-mv7hxc2n-2cvr, .268): two fixture apps WITNESSED in the scratch HOME (a .desktop
+// each — "Single Fixture", a singleton like Chrome: a second start hands over to the first through a lock file and exits 0;
+// "Blink Fixture", which exits 0 at once). An AGENT starts Single (its session token on the launch route) and leaves no
+// viewer ⇒ its card says "Running on :N · started by agent session …" and lists that instance with Open / Close (no "Open
+// another" — it runs once); the card's press OPENS it (no second record); the Desktop picker lists it under "Running apps";
+// a second start through the old door is handed over ⇒ its window stays with the sentence and "Open the one running on :N"
+// (which opens the first); Close on the card stops it; Blink launched from its card ⇒ its window says it ended as it
+// started (no door: nothing else runs it) and the card says it on the next open — en at 1400×900, zh at 390×844.
 // VS_UI_SHOTS_DIR=<dir> saves 2x PNGs of each measured state there.
 // §E DESKTOP LANE E (docs/design-desktop-apps-seamless §3.6): the ⋯ on the vnc-display rung carries "Share with
 // agent…" / "Ask an agent to take control…" (and no xpra-only rows), the share dialog lists the live agent + the Task
@@ -122,6 +130,16 @@ setInterval(() => {}, 1 << 30);
   }));
   execFileSync('dtach', ['-n', path.join(SOCK_DIR, LANE_E.sockName), '-E', '-z', process.execPath, LANE_E_STUB, LANE_E.cid, LANE_E.name], { env: { ...process.env, HOME: home } });
 }
+// §S's fixtures (lane app-launch-singleton): two apps WITNESSED in the scratch HOME — fake binaries in the scratch tree
+const FIX_BIN = path.join(wt, 'fixture-bin');
+fs.mkdirSync(FIX_BIN, { recursive: true });
+const fixApp = (name, body) => { const p = path.join(FIX_BIN, name); fs.writeFileSync(p, `#!/bin/sh\n${body}\n`, { mode: 0o755 }); return p; };
+const SINGLE_BIN = fixApp('vs-single-fixture', 'L="$HOME/.vs-single-fixture.lock"\nif [ -f "$L" ] && kill -0 "$(cat "$L")" 2>/dev/null; then echo "handed over to $(cat "$L")"; exit 0; fi\necho $$ > "$L"\nexec sleep 600');
+const BLINK_BIN = fixApp('vs-blink-fixture', 'exit 0');
+const APPS_DIR = path.join(home, '.local/share/applications');
+// written by §S itself (then "Check again"): the earlier legs measure the catalog as the box has it
+const writeFixtureEntries = () => { fs.mkdirSync(APPS_DIR, { recursive: true }); for (const [stem, name, exec] of [['vs-single-fixture', 'Single Fixture', SINGLE_BIN], ['vs-blink-fixture', 'Blink Fixture', BLINK_BIN]]) fs.writeFileSync(path.join(APPS_DIR, `${stem}.desktop`), `[Desktop Entry]\nType=Application\nName=${name}\nExec=${exec}\nCategories=Utility;\n`); };
+const AGENT_TOKEN = 'vsst_' + 'e2edeskappwindowlanee0000000001'; // LANE_E's session token (restored at boot when dtach is here)
 const srvEnv = { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: home, VIBESPACE_SKIP_AGENT_HOOKS: '1' };
 let srv = null;
 const bootServer = () => { srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: srvEnv, stdio: 'ignore' }); return srv; };
@@ -184,6 +202,9 @@ const trustedClick = async (p, selector) => {
   await p.cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: r.x, y: r.y, button: 'left', clickCount: 1 });
   return r;
 };
+// lane app-launch-singleton: a card whose app RUNS opens that instance — a NEW one (what a leg launching again wants) is the
+// card's "Open another" (offered for an app that runs twice, xterm); with nothing running it is the card itself
+const launchCardSel = async (p, id) => { const again = `#desktop-launch-dialog .desktop-launch-card-wrap:has(> .desktop-launch-card[data-app-id="${id}"]) .desktop-launch-card-run-again`; return (await p.evalJs(`!!document.querySelector(${JSON.stringify(again)})`)) ? again : `#desktop-launch-dialog .desktop-launch-card[data-app-id="${id}"]`; };
 // a FRESH open of the launch dialog: whatever is open goes, the toolbar button
 // is clicked, and the dialog has answered (registry rendered + the disclosure
 // decided + the 0 ms focus fired) before anyone measures it
@@ -372,6 +393,103 @@ try {
       await until(() => p1.evalJs(`fetch('/api/desktop/apps/${cwin.appId}').then((r) => r.json()).then((r) => (r.state === 'exited' || r.state === 'failed' ? r : null))`), 15000);
       await p1.evalJs(`app.wm.closeWindow(${JSON.stringify(cwin.id)}); true`);
       await sleep(300);
+    }
+  }
+
+  // ── §S lane app-launch-singleton (fleet inc-mv7hxc2n-2cvr): ONE PROGRAM, ONE INSTANCE — an app an agent started is listed
+  // and OPENED (never started twice), and a launch that ended as it started is SAID ──
+  console.log('§S an agent-started app is listed where a person looks and opened by its card; a launch that ended as it started is said');
+  {
+    const api = (p, o = {}) => fetch(`http://127.0.0.1:${PORT}${p}`, o).then((r) => r.json());
+    const recOf = (id) => api(`/api/desktop/apps/${id}`);
+    writeFixtureEntries();
+    await api('/api/desktop/apps?witness=recheck'); // the group's "Check again": the two entries are listed now
+    const fixtures = await until(async () => { const d = await api('/api/desktop/apps'); const s = (d.registry || []).find((r) => r.label === 'Single Fixture' && r.available); const b = (d.registry || []).find((r) => r.label === 'Blink Fixture' && r.available); return s && b ? { S: s.id, B: b.id, s } : null; }, 20000, 500);
+    check('the two fixture apps are listed (witnessed in the scratch HOME), Single runs once', !!fixtures && fixtures.s.runsTwice === false, fixtures);
+    if (fixtures) {
+      const { S, B } = fixtures;
+      const agentStart = () => api('/api/desktop/apps', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${AGENT_TOKEN}` }, body: JSON.stringify({ appId: S }) });
+      const a1 = await agentStart();
+      const r1 = a1 && a1.id ? await until(() => recOf(a1.id).then((r) => (r.state === 'ready' ? r : null)), 25000) : null;
+      check(`an AGENT's start of Single Fixture is ready on its own display and says who started it (${r1 && JSON.stringify(r1.launchedBy)})`, !!r1 && r1.launchedBy && r1.launchedBy.kind === 'agent' && (!HAVE_DTACH || r1.launchedBy.name === LANE_E.name), a1);
+      const CARD = (id) => `#desktop-launch-dialog .desktop-launch-card[data-app-id="${id}"]`;
+      const cardState = (id) => p1.evalJs(`(() => { const c = document.querySelector(${JSON.stringify(CARD(id))}); if (!c) return null; const w = c.closest('.desktop-launch-card-wrap'); const r = (el) => { const b = el.getBoundingClientRect(); return { x: b.x, r: b.right, y: b.y, b: b.bottom }; }; return { running: c.classList.contains('is-running'), said: c.classList.contains('is-said'), disabled: c.disabled, sub: c.querySelector('.desktop-launch-card-sub')?.textContent || '', runs: [...w.querySelectorAll('.desktop-launch-card-run')].map((l) => ({ id: l.dataset.runId, text: l.querySelector('.desktop-launch-card-run-text')?.textContent || '', open: !!l.querySelector('.desktop-launch-card-run-open'), close: !!l.querySelector('.desktop-launch-card-run-stop') })), again: !!w.querySelector('.desktop-launch-card-run-again'), wrap: r(w), card: r(c), dlg: r(document.querySelector('#desktop-launch-dialog .dialog')) }; })()`);
+      // the person opens Apps (the agent's viewer is gone — the incident's state)
+      await p1.cdp('Emulation.setDeviceMetricsOverride', { width: 1400, height: 900, deviceScaleFactor: 2, mobile: false });
+      await openDialog(p1);
+      await p1.evalJs(`(() => { const c = document.querySelector(${JSON.stringify(CARD(S))}); c?.scrollIntoView({ block: 'center' }); return true; })()`);
+      const c1 = r1 ? await cardState(S) : null;
+      check(`the Single card says where it runs and who started it ("${c1 && c1.sub}")`, !!c1 && c1.running && new RegExp(`Running on ${r1.display} · started by ${HAVE_DTACH ? `agent session ${LANE_E.name}` : 'an agent'}$`).test(c1.sub), c1);
+      check('…and lists that instance with Open and Close — no "Open another" for an app that runs once; inside the dialog', !!c1 && c1.runs.length === 1 && c1.runs[0].id === a1.id && c1.runs[0].open && c1.runs[0].close && !c1.again && c1.wrap.r <= c1.dlg.r + 0.5, c1);
+      await shot(p1, 'singleton-card-running-1400x900.png');
+      const nBefore = (await api('/api/desktop/apps')).apps.length;
+      await trustedClick(p1, CARD(S));
+      const w1 = await until(() => p1.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(a1.id)}); return w ? w.id : null; })()`), 10000, 100);
+      const nAfter = (await api('/api/desktop/apps')).apps.length;
+      check(`the card's press OPENS that instance's window (the dialog closed) — no second record (${nBefore} → ${nAfter})`, !!w1 && nAfter === nBefore && await p1.evalJs(`!document.getElementById('desktop-launch-dialog')`), { w1, nBefore, nAfter });
+      if (w1) await p1.evalJs(`app.wm.closeWindow(${JSON.stringify(w1)}); true`); // the viewer leaves — the app keeps running
+      // the Desktop button's list: every running app window, an agent's too
+      await sleep(300);
+      await p1.evalJs(`document.getElementById('btn-desktop').click(); true`);
+      const pick = await until(() => p1.evalJs(`(() => { const rows = [...document.querySelectorAll('.desktop-picker .desktop-picker-app')]; const row = rows.find((r) => r.querySelector('[data-host=${JSON.stringify(a1.id)}]')); return row ? { group: [...document.querySelectorAll('.desktop-picker-group')].map((g) => g.textContent), text: row.textContent, stop: !!row.querySelector('.desktop-picker-app-stop'), go: !!row.querySelector('.desktop-picker-app-go') } : null; })()`), 8000, 100);
+      check(`the Desktop list names it under "Running apps" with where / who, Open and Close ("${pick && pick.text}")`, !!pick && pick.group.includes('Running apps') && pick.text.includes('Single Fixture') && /Running on :\d+ · started by/.test(pick.text) && pick.stop && pick.go, pick);
+      await shot(p1, 'singleton-desktop-list-1400x900.png');
+      await p1.evalJs(`document.querySelector('.desktop-picker [data-host=${JSON.stringify(a1.id)}]')?.click(); true`);
+      const w1b = await until(() => p1.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(a1.id)}); return w ? w.id : null; })()`), 8000, 100);
+      check('…and its row opens that window', !!w1b);
+      if (w1b) await p1.evalJs(`app.wm.closeWindow(${JSON.stringify(w1b)}); true`);
+      // the old door (no ifRunning): the singleton hands the second start over — the record SAYS it, the window keeps it
+      const a2 = await agentStart();
+      const r2 = a2 && a2.id ? await until(() => recOf(a2.id).then((r) => (r.state === 'exited' || r.state === 'failed' ? r : null)), 15000) : null;
+      check(`a second start through the old door ends at once with quickExit naming the running one (${r2 && JSON.stringify(r2.quickExit)})`, !!r2 && r2.state === 'exited' && r2.quickExit && r2.quickExit.code === 0 && r2.quickExit.running === a1.id && r2.quickExit.runningDisplay === r1.display, r2 && { state: r2.state, q: r2.quickExit, err: r2.lastError });
+      await p1.evalJs(`app.openDesktopApp(${JSON.stringify(a2.id)}); true`);
+      const qw = await until(() => p1.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(a2.id)}); const q = w && w.content.querySelector('.desktop-app-quick-exit'); return q && q.getBoundingClientRect().width > 0 ? { id: w.id, text: q.querySelector('.desktop-app-quick-exit-text')?.textContent || '', open: q.querySelector('.desktop-app-quick-exit-open')?.textContent || null } : null; })()`), 10000, 100);
+      check(`its window STAYS and says it ("${qw && qw.text}") with the door "${qw && qw.open}"`, !!qw && /^Single Fixture exited right after it started \(code 0\) — usually the same program is already running on another display$/.test(qw.text) && qw.open === `Open the one running on ${r1.display}`, qw);
+      await shot(p1, 'singleton-window-quick-exit-1400x900.png');
+      if (qw) await p1.evalJs(`(() => { const w = app.wm.windows.get(${JSON.stringify(qw.id)}); w.content.querySelector('.desktop-app-quick-exit-open').click(); return true; })()`);
+      const swapped = await until(() => p1.evalJs(`(() => { const ws = [...app.wm.windows.values()]; return ws.some((w) => w._desktopAppId === ${JSON.stringify(a1.id)}) && !ws.some((w) => w._desktopAppId === ${JSON.stringify(a2.id)}) ? true : null; })()`), 8000, 100);
+      check('…and that door opens the running one in its place', !!swapped);
+      await p1.evalJs(`[...app.wm.windows.values()].filter((w) => w.type === 'desktop-app').forEach((w) => app.wm.closeWindow(w.id)); true`);
+      // Close on the card stops it (the person's stop)
+      await openDialog(p1);
+      await trustedClick(p1, `#desktop-launch-dialog .desktop-launch-card-run[data-run-id="${a1.id}"] .desktop-launch-card-run-stop`);
+      const stopped = await until(() => recOf(a1.id).then((r) => (r.state === 'exited' ? r : null)), 15000);
+      check('Close on the card stops that instance (a person\'s stop)', !!stopped && stopped.stoppedBy === 'user', stopped && { state: stopped.state, by: stopped.stoppedBy });
+      const c2 = await until(async () => { const s = await cardState(S); return s && !s.running ? s : null; }, 8000, 150);
+      check('…and the card goes back to launching it (no running words, no runs list)', !!c2 && c2.runs.length === 0 && !/Running on/.test(c2.sub), c2);
+      await p1.evalJs(`document.getElementById('desktop-launch-dialog')?.remove(); true`);
+      // Blink: launched from its card, it ends as it starts and nothing else runs it
+      await openDialog(p1);
+      await p1.evalJs(`(() => { const c = document.querySelector(${JSON.stringify(CARD(B))}); c?.scrollIntoView({ block: 'center' }); return true; })()`);
+      await trustedClick(p1, CARD(B));
+      const bw = await until(() => p1.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w.type === 'desktop-app' && w._desktopAppId && w._desktopAppId !== ${JSON.stringify(a1.id)} && w._desktopAppId !== ${JSON.stringify(a2.id)}); const q = w && w.content.querySelector('.desktop-app-quick-exit'); return q ? { id: w.id, appId: w._desktopAppId, text: q.querySelector('.desktop-app-quick-exit-text')?.textContent || '', open: !!q.querySelector('.desktop-app-quick-exit-open') } : null; })()`), 15000, 100);
+      check(`Blink's window does not blink shut: it stays and says it ("${bw && bw.text}"), no door (nothing else runs it)`, !!bw && /^Blink Fixture exited right after it started \(code 0\)/.test(bw.text) && !bw.open, bw);
+      await shot(p1, 'singleton-window-blink-1400x900.png');
+      if (bw) await p1.evalJs(`app.wm.closeWindow(${JSON.stringify(bw.id)}); true`);
+      await openDialog(p1);
+      await p1.evalJs(`(() => { const c = document.querySelector(${JSON.stringify(CARD(B))}); c?.scrollIntoView({ block: 'center' }); return true; })()`);
+      const c3 = await cardState(B);
+      check(`the Blink card says it on the next open ("${c3 && c3.sub}")`, !!c3 && c3.said && !c3.disabled && /Blink Fixture exited right after it started \(code 0\) — usually the same program is already running on another display$/.test(c3.sub), c3);
+      await shot(p1, 'singleton-card-quick-exit-1400x900.png');
+      await p1.evalJs(`document.getElementById('desktop-launch-dialog')?.remove(); true`);
+      // zh on a phone: an agent's Single again + Blink's sentence — both cards in the device language, nothing wider than the screen
+      const a3 = await agentStart();
+      await until(() => recOf(a3.id).then((r) => (r.state === 'ready' ? r : null)), 25000);
+      await p1.evalJs(`localStorage.setItem('vibespace.lang', 'zh'); true`);
+      await p1.cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+      await openPage(p1);
+      await openDialog(p1);
+      await p1.evalJs(`(() => { document.querySelector('#desktop-launch-dialog .desktop-launch-seen-sec')?.scrollIntoView({ block: 'start' }); return true; })()`);
+      const z = await cardState(S), zb = await cardState(B);
+      const vw = await p1.evalJs('innerWidth');
+      check(`zh at 390: the running card reads 「${z && z.sub}」 and its instance row fits the screen`, !!z && /正在 :\d+ 运行 · 由 agent/.test(z.sub) && z.runs.length === 1 && z.wrap.r <= vw + 0.5, z);
+      check(`zh at 390: the Blink card reads 「${zb && zb.sub}」`, !!zb && /Blink Fixture 刚启动就退出了（code 0）—— 通常是同一程序已在别的显示上运行$/.test(zb.sub), zb);
+      await shot(p1, 'singleton-cards-zh-390x844.png');
+      await p1.evalJs(`localStorage.removeItem('vibespace.lang'); document.getElementById('desktop-launch-dialog')?.remove(); true`);
+      await p1.cdp('Emulation.clearDeviceMetricsOverride');
+      await api(`/api/desktop/apps/${a3.id}/stop`, { method: 'POST' });
+      await until(() => recOf(a3.id).then((r) => (r.state === 'exited' ? r : null)), 15000);
+      await openPage(p1);
     }
   }
 
@@ -585,7 +703,7 @@ try {
       check(`the popover picks the Task Group and Pixels; the row says so ("${sum}")`, /Lane E group/.test(sum) && /Pixels/.test(sum), sum);
       await shot(p1, 'lane-e-launcher-popover.png');
       await p1.evalJs(`document.querySelector('.wshare-popover')?.remove(); true`);
-      await trustedClick(p1, `#desktop-launch-dialog .desktop-launch-card[data-app-id="${launchApp.id}"]`);
+      await trustedClick(p1, await launchCardSel(p1, launchApp.id)); // a NEW instance (lane app-launch-singleton: "Open another" while one runs)
       const nw = await until(() => p1.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w.type === 'desktop-app' && w._desktopAppId !== '${appId}'); return w ? w._desktopAppId : null; })()`), 15000, 200);
       const nr = nw ? await p1.evalJs(`fetch('/api/desktop/apps/${nw}/reach').then((r) => r.json())`) : null;
       check(`the launched ${launchApp.label} carries the share from the dialog (the Task Group, mode pixels)`, !!nr && nr.mode === 'pixels' && nr.rows.length === 1 && nr.rows[0].principal.kind === 'group' && nr.rows[0].principal.id === gid, nr || { launched: nw, toasts: await p1.evalJs(`[...document.querySelectorAll('#global-toasts > *')].map((e) => e.textContent)`), dialog: await p1.evalJs(`!!document.getElementById('desktop-launch-dialog')`), popover: await p1.evalJs(`document.querySelectorAll('.wshare-popover, .pp-pop').length`), active: await p1.evalJs(`document.activeElement ? document.activeElement.className : null`) });
@@ -602,7 +720,7 @@ try {
       check(`…and only that app's card carries a chip (${otherChip.chips} of ${otherChip.cards} other cards) — the memory is per app`, otherChip.chips === 0, otherChip);
       await shot(p1, 'lane-e-launcher-remembered.png');
       await p1.evalJs(`document.querySelectorAll('#global-toasts > *').forEach((e) => e.remove()); true`);
-      await trustedClick(p1, `#desktop-launch-dialog .desktop-launch-card[data-app-id="${launchApp.id}"]`);
+      await trustedClick(p1, await launchCardSel(p1, launchApp.id)); // a NEW instance (lane app-launch-singleton: "Open another" while one runs)
       const applied = await until(() => p1.evalJs(`[...document.querySelectorAll('#global-toasts > *')].map((e) => e.textContent).find((t) => /Started shared with/.test(t)) || null`), 10000, 150);
       check(`…and the launch that applied it says so in a toast ("${applied}")`, !!applied && /Lane E group/.test(applied) && /Pixels/.test(applied) && /window's ⋯/.test(applied), applied);
       const nw2 = await until(() => p1.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w.type === 'desktop-app' && w._desktopAppId !== '${appId}' && w._desktopAppId !== ${JSON.stringify(nw)}); return w ? w._desktopAppId : null; })()`), 15000, 200);
@@ -619,7 +737,7 @@ try {
       check(`the card of an app whose remembered group is gone says so ("${stale}")`, !!stale && /Lane E group \(not in the list now\)/.test(stale) && /Pixels/.test(stale), stale);
       await shot(p1, 'lane-e-launcher-group-gone.png');
       await p1.evalJs(`document.querySelectorAll('#global-toasts > *').forEach((e) => e.remove()); true`);
-      await trustedClick(p1, `#desktop-launch-dialog .desktop-launch-card[data-app-id="${launchApp.id}"]`);
+      await trustedClick(p1, await launchCardSel(p1, launchApp.id)); // a NEW instance (lane app-launch-singleton: "Open another" while one runs)
       const staleToast = await until(() => p1.evalJs(`[...document.querySelectorAll('#global-toasts > *')].map((e) => e.textContent).find((t) => /Started shared with/.test(t)) || null`), 10000, 150);
       check(`…and the launch toast says it too ("${staleToast}")`, !!staleToast && /Lane E group \(not in the list now\)/.test(staleToast), staleToast);
       const nw3 = await until(() => p1.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w.type === 'desktop-app' && ![${JSON.stringify(appId)}, ${JSON.stringify(nw)}, ${JSON.stringify(nw2)}].includes(w._desktopAppId)); return w ? w._desktopAppId : null; })()`), 15000, 200);

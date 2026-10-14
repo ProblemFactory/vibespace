@@ -5,17 +5,21 @@
 # — libsecret asks dh-ietf1024-sha256-aes128-cbc-pkcs7 first and falls back on NotSupported (measured); the bus is a
 # 0700 unix socket of the same user, so nothing is gained by encrypting the hop. At rest the items are ONE sealed JSON
 # file in the app's 0700 dir, sealed by src/app-secrets-seal.js (node: src/secret-box.js's aes-256-gcm under the
-# per-display key the hub derived — handed over in the bus env VS_APP_SECRETS_KEY, removed from this process's env
-# before any child starts, NEVER in argv or a log). Nothing about an item (label, attributes, value) is ever logged.
-# argv: <store file> <node> <sealer.js>.  Private: org.vibespace.AppSecrets.ForgetAll / Count (the window's ⋯ door).
-import json, os, subprocess, sys, time, base64, warnings
+# per-display key the hub derived). THE KEY (lane display-secret-fd, B-6c6d): handed over ONCE in a 0600 file under the
+# display's private runtime dir, which THIS process reads and UNLINKS before it owns its name — never the bus env (the
+# bus's env is the environ of dbus-daemon and of every service it activates), never argv, never a log. It reaches the
+# sealer over an inherited PIPE (VS_APP_SECRETS_FD = the fd number), so no child of ours carries it in its environ
+# either. Nothing about an item (label, attributes, value) is ever logged.
+# argv: <store file> <node> <sealer.js> <key file>.  Private: org.vibespace.AppSecrets.ForgetAll / Count (the ⋯ door).
+import errno, json, os, subprocess, sys, time, base64, warnings
 warnings.filterwarnings('ignore', category=DeprecationWarning)  # Gio.DBusConnection.register_object (PyGObject 3.50+) — still the API
 import gi
 gi.require_version('Gio', '2.0')
 from gi.repository import Gio, GLib
 
-STORE, NODE, SEALER = sys.argv[1], sys.argv[2], sys.argv[3]
-KEY = os.environ.pop('VS_APP_SECRETS_KEY', '')
+if len(sys.argv) < 5:  # an Exec= line from before lane display-secret-fd (a service file of a bus still running an older tree)
+    sys.stderr.write('[secrets] no per-display key: the Exec line names no key file — refusing to start\n'); sys.exit(1)
+STORE, NODE, SEALER, KEY_FILE = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 BASE = '/org/freedesktop/secrets'
 COL = BASE + '/collection/login'
 ALIAS = BASE + '/aliases/default'
@@ -61,9 +65,35 @@ IF = {i.name: i for i in INFO.interfaces}
 def say(line):  # the app's log (the bus's stderr) — event words only, never an item's label, attributes or value
     sys.stderr.write('[secrets] %s\n' % line); sys.stderr.flush()
 
+def take_key(path):
+    """The one-shot key file: read it, UNLINK it (the handover happens once, at the display's start), and say only the
+    STEP that failed — never a byte of it. → (key, why): a key of 64 hex, or '' with the why the log carries."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)  # never follow a link someone laid in its place
+    except OSError as e:
+        return '', 'the key file is gone (%s %s) — it is handed over once, when the display starts' % (os.path.basename(path), errno.errorcode.get(e.errno, 'error'))
+    try:
+        with os.fdopen(fd, 'rb') as f: raw = f.read(128)
+    except OSError as e:
+        return '', 'the key file could not be read (%s)' % errno.errorcode.get(e.errno, 'error')
+    finally:
+        try: os.unlink(path)
+        except OSError: pass  # a read-only dir: the hub removes it with the display
+    key = raw.decode('ascii', 'replace').strip()
+    return (key, '') if len(key) == 64 and all(c in '0123456789abcdef' for c in key) else ('', 'the key file is not 64 hex')
+
 def sealer(mode, data=None):
-    env = {'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'VS_APP_SECRETS_KEY': KEY}
-    return subprocess.run([NODE, SEALER, mode, STORE], input=data, capture_output=True, env=env, timeout=20)
+    # the key reaches the sealer over a PIPE (its fd number in VS_APP_SECRETS_FD), never that child's environ
+    r, w = os.pipe()
+    try:
+        os.write(w, KEY.encode('ascii'))
+    finally:
+        os.close(w)
+    env = {'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'VS_APP_SECRETS_FD': str(r)}
+    try:
+        return subprocess.run([NODE, SEALER, mode, STORE], input=data, capture_output=True, env=env, pass_fds=(r,), timeout=20)
+    finally:
+        os.close(r)
 
 class Store:
     def __init__(self):
@@ -84,6 +114,9 @@ class Store:
     def match(self, attrs):
         return [n for n, it in sorted(self.items.items()) if all(it['attributes'].get(k) == v for k, v in attrs.items())]
 
+KEY, KEY_WHY = take_key(KEY_FILE)
+if not KEY:
+    say('no per-display key: %s — refusing to start' % KEY_WHY); sys.exit(1)
 S = Store()
 SESSIONS = set()
 REG = {}  # path -> [registration ids]
@@ -187,7 +220,6 @@ def on_bus(conn, name):
     for p in (COL, ALIAS): conn.register_object(p, IF['org.freedesktop.Secret.Collection'], on_call, on_get, None)
     for n in sorted(S.items): register_item(conn, n)
 
-if not KEY: say('no per-display key in the bus env — refusing to start'); sys.exit(1)
 loop = GLib.MainLoop()
 Gio.bus_own_name(Gio.BusType.SESSION, 'org.freedesktop.secrets', Gio.BusNameOwnerFlags.NONE, on_bus, lambda *a: say('owns org.freedesktop.secrets (%d items)' % len(S.items)), lambda *a: loop.quit())
 loop.run()

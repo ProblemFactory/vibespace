@@ -458,6 +458,7 @@ function exitCloseVerdict(rec, { leased = false } = {}) {
   if (rec.state !== 'exited') return { close: false, why: 'live' };
   if (leased) return { close: false, why: 'lease' };
   if (rec.stoppedBy) return { close: true, why: 'stopped' };
+  if (rec.quickExit) return { close: false, why: 'quick-exit' }; // lane app-launch-singleton: it ended as it started — the window SAYS so, never blinks shut
   if (Number(rec.windowsAtExit) > 0) return { close: false, why: 'windows-left' };
   return { close: true, why: 'exited' };
 }
@@ -480,6 +481,44 @@ function outerCloseVerdict({ state, perWindow = false, seat, connected, mainWid,
   return { act: 'ask-app', why: 'close-window' };
 }
 
+// ── lane app-launch-singleton (fleet inc-mv7hxc2n-2cvr, .268): a RUNNING app is attached, never launched again ─────────
+// An agent's Chrome kept running on :2 after its viewer left; the person's three presses of the Chrome card each started a
+// second Chrome that the first one's singleton swallowed (exit 0 in a second — a window that blinked shut), and no card
+// said Chrome was running at all. The card now reads the machine's records: an instance that runs is OPENED (the
+// existing attach path) and named — where, who started it; a second instance is offered only for a row that can run twice.
+/** The record states in which an app counts as running for the card (an app whose machine is not answering still does). */
+const RUNNING_STATES = Object.freeze(['launching', 'ready', 'unknown-host-offline']);
+/** Is record `rec` an instance of catalog row `row` on machine `host`? A catalog launch carries its row id (`appId`); a
+ *  typed command (no appId) is the same app when it ran the row's own executable (`row.path`). */
+function sameAppRecord(rec, row, host = 'local') {
+  if (!rec || !row || !RUNNING_STATES.includes(rec.state) || rec.replacedBy) return false;
+  if ((rec.hostId || 'local') !== (host || 'local')) return false;
+  if (rec.appId != null) return rec.appId === row.id;
+  return !!row.path && rec.exec === row.path;
+}
+/**
+ * THE CARD'S VERDICT for catalog row `row` over the records `apps` → `{ act, target, running, again, lock }`:
+ *   'attach' — instances run (`running`, newest first; `target` = the newest ready one): the press OPENS it, the card
+ *              says where and who started it; `again` = "Open another" is offered — only for a row that runs twice
+ *              (`row.runsTwice`, the keeper's runsTwiceVerdict: a browser with its own profile, LibreOffice, a terminal)
+ *   'held'   — no record runs it, but its DEFAULT browser profile is held by a live process outside every VibeSpace
+ *              window (`row.lock`, the keeper's lock fact) and the row has no profile of its own: a launch would be
+ *              handed to that process and exit — refused before it starts
+ *   'launch' — nothing runs it (`lock` still names a foreign holder of the default profile, for the words)
+ * `row.lock.recordId` = a live record whose process holds the lock (a typed command, an older launch): an instance.
+ */
+function launchVerdict({ row, apps = [], host = 'local' } = {}) {
+  const list = Array.isArray(apps) ? apps : [];
+  const lk = row && row.lock && typeof row.lock === 'object' ? row.lock : null;
+  const lockRec = lk && lk.recordId ? list.find((r) => r && r.id === lk.recordId && RUNNING_STATES.includes(r.state) && !r.replacedBy) || null : null;
+  const running = list.filter((r) => sameAppRecord(r, row, host) || (lockRec && r === lockRec)).sort((a, b) => (Number(b.startedAt) || 0) - (Number(a.startedAt) || 0));
+  if (running.length) return { act: 'attach', target: running.find((r) => r.state === 'ready') || running[0], running, again: !!(row && row.runsTwice), lock: null };
+  const foreign = lk && lk.live && !lk.recordId ? { pid: lk.pid } : null;
+  if (foreign && !(row && row.runsTwice)) return { act: 'held', target: null, running: [], again: false, lock: foreign };
+  return { act: 'launch', target: null, running: [], again: false, lock: foreign };
+}
+
 module.exports = {
+  RUNNING_STATES, sameAppRecord, launchVerdict, // lane app-launch-singleton
   fitPolicyOf, keeperFits, topLevelWindows, appWindows, appFitPlan, appMainWindow, APP_TITLE_MAX, windowTitleOf, APP_SCALES, EXPLICIT_SCALES, SCALE_CHOICES, SCALE_ORIGINS, parseScaleChoice, SCALE_MAX, UI_SCALE_RANGE, normalizeDpr, normalizeUiScale, effectiveScale, appScaleFor, scalePick, normalizeScale, SCALE_RULES, round4, scaleKnobs, scaleRuleOf, renderOf, relaunchPaneCss, validateRelaunchRequest, relaunchLeaseVerdict, askCloseVerdict, relaunchVerdict, relaunchBodyOf, scaleMenuModel, OUTER_CLOSE_AGAIN_MS, windowsLeftCount, exitCloseVerdict, outerCloseVerdict,
 };

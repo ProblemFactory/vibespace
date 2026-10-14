@@ -16,7 +16,8 @@
 // the conversation that owns the job: list / read / send only — creating a
 // group or changing membership is refused locally, before any request.
 // Exit codes: 0 ok · 1 refused (the server's typed code + its remedy) ·
-// 2 not inside a session · 3 server unreachable. Full manual: vibespace-docs msg.
+// 2 not inside a session, or a stray word after the text (refused before any request) · 3 server unreachable.
+// Full manual: vibespace-docs msg.
 // DISPATCH (lane worker-dispatch, 2026-10-02): `dispatch <agent> --file brief.md` (or `send <agent> --wake
 // --compact-first "…"`) = a wake with the worker COMPACTED first when it is idle — POST /api/agent/msg/dispatch;
 // the answer says whether it compacted and why not. A conversation's verb: refused locally inside a job.
@@ -28,8 +29,27 @@ const TOKEN = SESS || JOBT;
 const AS_JOB = !SESS && !!JOBT;
 if (!API || !TOKEN) { console.error('vibespace-msg: not inside a VibeSpace session (VIBESPACE_API / token missing)'); process.exit(2); }
 
-const argv = process.argv.slice(2);
+// lane cli-one-text-arg (the owner 2026-10-14): ONE TEXT PER FREE-TEXT COMMAND — the rule the four agent CLIs share (PURE
+// src/agent-cli-text.js in a checkout; its boot-time copy agent-cli-text.js beside this file on a host). A stray word
+// after the text is refused by name (exit 2, nothing sent); --text-file <path> / --text - (stdin) carry long or quoted
+// text; the answer's `chars` is echoed as `sent: N characters`. Missing (a partial install) ⇒ a free-text verb refuses.
+const TX = (() => {   // the module by its literal name (test-peer-text-census walks it beside the CLIs)
+  try { return require('node:fs').existsSync(require('node:path').join(__dirname, '..', '..', 'server.js')) ? require('../../src/agent-cli-text.js') : require('./agent-cli-text.js'); } catch { }
+  try { return require('./agent-cli-text.js'); } catch { return null; }
+})();
+const TX_IO = { readFile: (p) => require('node:fs').readFileSync(p, 'utf8'), readStdin: () => require('node:fs').readFileSync(0, 'utf8'), stdinIsTTY: (() => { try { return require('node:fs').fstatSync(0).isCharacterDevice(); } catch { return false; } })() };
+const DOORS = TX ? TX.takeDoors(process.argv.slice(2), ['text']) : { argv: process.argv.slice(2), doors: {}, error: null };
+/** a free-text verb's ONE text (the argument or its door); a stray word, a door it cannot read ⇒ refused, exit 2, nothing sent */
+function oneText(tool, what, positional, strays) {
+  if (!TX) { console.error(`${tool}: refused — this CLI's text rule (agent-cli-text.js) is missing beside it, so stray words cannot be told apart; nothing was sent — ask the user to reinstall the agent tools (Manage agents → the machine → Install)`); process.exit(2); }
+  const one = TX.oneText({ tool, what, positional, strays, doors: DOORS, io: TX_IO });
+  if (one.error) { console.error(one.error); process.exit(TX.STRAY_EXIT); }
+  return one.text;
+}
+
+const argv = DOORS.argv;
 // flags anywhere: --context "…" --quiet --wake --yes --compact-first --before <ts> --limit <n> --file <path> --at <member> (repeatable)
+// (--text "…" / --text - / --text-file <path> are taken out above — DOORS)
 const flags = {};
 const args = [];
 const atRefs = [];
@@ -45,7 +65,7 @@ for (let i = 0; i < argv.length; i++) {
   else if (a === '--artifact') { // every path after it until the next flag (`--artifact <design> <report.md>`) once the text is in
     const take = (v) => handPaths.push(/^\/p\/[\w-]+\/?$/.test(v) || v.startsWith('/') ? v : require('node:path').resolve(v));
     if (argv[i + 1] !== undefined) take(argv[++i]);
-    while (args.length >= 3 && argv[i + 1] !== undefined && !argv[i + 1].startsWith('--')) take(argv[++i]);
+    while ((args.length >= 3 || DOORS.doors.text) && argv[i + 1] !== undefined && !argv[i + 1].startsWith('--')) take(argv[++i]);
   }
   else args.push(a);
 }
@@ -107,7 +127,9 @@ const USAGE = `vibespace-msg — message other agent sessions (groups; Task-Grou
           page it published) to the receiver: it shows in THEIR chat + Artifacts list (a design opens in the user's Design
           window). Nothing is copied — the receiver must run on the same machine. Into a group: name the receiver (@ / --at).
           Waking more than 5 at once is refused with the count until you add --yes; at most 8 wakes per minute are yours.
-  vibespace-msg dispatch <agent> --file brief.md | "text"   ← hand a WORKER its next brief: compacted first if idle, then woken (ONE billed turn)
+        ← long or quoted text: --text-file <path> or --text - (stdin, a heredoc) instead of "text"; the CLI refuses stray words
+          (a message is ONE argument: a word after it ⇒ exit 2, nothing sent) — at most 16 KB (the route's bound); it answers sent: N characters
+  vibespace-msg dispatch <agent> --file brief.md | --text - | "text"   ← hand a WORKER its next brief: compacted first if idle, then woken (ONE billed turn)
         = send <agent> --wake --compact-first "text". Waits for the compaction (≤ 3 min); says whether it compacted and why not.
           Compacts only a worker in a Task Group you both belong to, idle, with no owner input for 10 min; the compaction
           counts as an unattended turn beside the wake. A retry of the same brief within 10 min re-sends nothing.
@@ -181,7 +203,7 @@ const deliveryClause = (rows) => {
   if (verb === 'dispatch' || (verb === 'send' && flags.compactFirst)) {
     if (AS_JOB) { console.error('vibespace-msg: refused [job-token] — a dispatch is a conversation\'s verb; a job never compacts a conversation\n  → ' + REMEDY['job-token']); process.exit(1); }
     const to = args[1];
-    let text = args[2];
+    let text = oneText(verb === 'send' ? 'vibespace-msg send' : 'vibespace-msg dispatch', 'a brief', args[2], args.slice(3));   // lane cli-one-text-arg
     if (flags.file) {
       if (text) { console.error('vibespace-msg: give the brief as text OR --file, not both'); process.exit(1); }
       try { text = require('node:fs').readFileSync(flags.file, 'utf8'); }   // a node BUILTIN: a host has no checkout, it has node
@@ -199,6 +221,7 @@ const deliveryClause = (rows) => {
     // verify r1 ③: 'unknown' = no end record was observed (it may have finished); ②: a replay re-sent nothing
     const said = rec.compacted === true ? 'compacted' : rec.compacted === false ? 'NOT compacted' : rec.compacted === 'unknown' ? 'compaction outcome UNKNOWN' : r.replay ? 'ALREADY delivered' : 'no compaction';
     console.log(`dispatched to "${worker}" — ${said}: ${rec.why || ''}`);
+    console.log('  ' + TX.sentLine(r, text));   // lane cli-one-text-arg: the route's count
     if (rec.compactionCounted) console.log('  the compaction counts as one unattended turn (a model call nobody typed) on the same ceiling as the wake');
     const wk = rec.wake || {};
     if (r.replay) console.log(`  nothing re-sent, nobody woken (not billed)${wk.reason ? ' — ' + wk.reason : ''}`);
@@ -211,9 +234,10 @@ const deliveryClause = (rows) => {
   }
   if (verb === 'send') {
     const to = args[1];
-    const text = args[2] && handPaths.length ? `${args[2]}\n[artifacts handed over: ${handPaths.join(', ')}]` : args[2]; // lane artifacts-handover: the receiver's agent reads WHAT was handed over
-    if (!to || !text) { console.error('usage: vibespace-msg send <name|id|group> "text" [--wake]'); process.exit(1); }
     if (handPaths.length && args.length > 3) { console.error(`vibespace-msg: refused — ${args.slice(3).join(' ')}: an argument after the text that is not an --artifact path; nothing was sent (--artifact <path> <path>… after the text)`); process.exit(1); }
+    const typed = oneText('vibespace-msg send', 'a message', args[2], args.slice(3));   // lane cli-one-text-arg: ONE text, or refused (exit 2)
+    const text = typed && handPaths.length ? `${typed}\n[artifacts handed over: ${handPaths.join(', ')}]` : typed; // lane artifacts-handover: the receiver's agent reads WHAT was handed over
+    if (!to || !text) { console.error('usage: vibespace-msg send <name|id|group> "text" [--wake]   (or --text-file <path> / --text - for long or quoted text)'); process.exit(1); }
     const body = { to, text, wake: !!flags.wake };
     if (flags.await) body.await = true;   // B-eba8: the first reply wakes this conversation once
     if (atRefs.length) body.at = atRefs;
@@ -227,6 +251,7 @@ const deliveryClause = (rows) => {
     }
     if (r.posted) {
       console.log(`posted to ${r.group.pair ? 'your direct group' : 'group'} "${r.group.name}" (${r.group.id})${r.pairCreated ? ' — created just now' : ''}`);
+      console.log('  ' + TX.sentLine(r, text));   // lane cli-one-text-arg: the route's count — a cut is visible here
       const w = wokeLine(r);
       if (w) console.log('  ' + w);
       if (flags.await) console.log('  --await: will wake you once on the first reply (one billed turn, within 2 h)');
@@ -235,6 +260,7 @@ const deliveryClause = (rows) => {
     }
     // legacy direct delivery (a server without the groups engine)
     if (r.delivered) console.log(`delivered (${r.lane}${r.machine ? ' via ' + r.machine : ''}) to "${r.peerName || to}" — if they reply, it arrives as a peer message in this conversation`);
+    if (r.delivered || r.stashed) console.log('  ' + TX.sentLine(r, text));
     else console.log(`not delivered now (${r.reason}) — ${r.note || 'queued for their next turn'}`);
     return;
   }

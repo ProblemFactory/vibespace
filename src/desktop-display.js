@@ -203,6 +203,27 @@ function browserConfinement(binPath) {
   return out;
 }
 
+/**
+ * lane app-launch-singleton (fleet inc-mv7hxc2n-2cvr, .268) — WHO HOLDS A BROWSER'S DEFAULT PROFILE (a FACT; the PURE
+ * launchVerdict decides what it means). Chrome keeps `<home>/<dir>/SingletonLock` as a symlink to `<hostname>-<pid>`
+ * while a process runs on that profile (a second launch is handed to it and exits). → `{ dir, pid, sid, live }` (`sid` =
+ * the holder's session id, from /proc/<pid>/stat — a keeper app is its own session leader, so it names the record) |
+ * null (no lock, another host's lock, unreadable). Two reads per dir, async: a readlink and one /proc stat.
+ */
+async function profileLockFact({ home, dir, hostname = os.hostname() } = {}) {
+  if (typeof home !== 'string' || !home.startsWith('/') || typeof dir !== 'string' || !dir) return null;
+  const full = path.join(home, dir);
+  let target;
+  try { target = await fs.promises.readlink(path.join(full, 'SingletonLock')); } catch { return null; }
+  const f = require('./desktop-apps').singletonLockFact(target, { hostname });
+  if (!f || !f.here) return null;
+  let stat = null;
+  try { stat = await fs.promises.readFile(`/proc/${f.pid}/stat`, 'latin1'); } catch { stat = null; }
+  const tail = stat ? stat.slice(stat.lastIndexOf(')') + 2).split(' ') : null; // after "pid (comm) ": state ppid pgrp session …
+  const sid = tail && /^\d+$/.test(tail[3] || '') ? Number(tail[3]) : null;
+  return { dir: full, pid: f.pid, sid, live: !!stat };
+}
+
 /** `{ hostId, bins: { name: path|null }, xpra: { version, raw } | null, browsers: { name: { path, confinement } }, office, at }`.
  *  The browser families' binaries (B-bfe6) and LibreOffice's (§7.9) are probed beside the rung binaries; `browsers`
  *  names the present browsers, `office` = officeFacts (which binary, which modules). `fresh` (§7.9): a NO about
@@ -1397,7 +1418,7 @@ async function unmountUnder(dir, { env = process.env, mountinfo = '/proc/self/mo
 
 module.exports = {
   appSecretsFacts: (o) => require('./app-secrets').appSecretsFacts(o), appSecretsOf: (o) => require('./app-secrets').appSecretsOf(o), forgetAppSecrets: (o) => require('./app-secrets').forgetAppSecrets(o), // lane app-display-secrets (src/app-secrets.js)
-  assertLocal, binOnPath, resetBinMemo, forgetBin, assertExecutable, PROBE_BINS, probeBinsOf, BROWSER_BINS, browserConfinement, hostFacts, officeFacts, x11Env, NO_WAYLAND_DISPLAY, withoutWayland,
+  assertLocal, binOnPath, resetBinMemo, forgetBin, assertExecutable, PROBE_BINS, probeBinsOf, BROWSER_BINS, browserConfinement, profileLockFact /* lane app-launch-singleton */, hostFacts, officeFacts, x11Env, NO_WAYLAND_DISPLAY, withoutWayland,
   newCookie, writeXauthority, xauthEntry, freePort, rfbBanner, waitForRfb, httpProbe, waitForHttp, waitForListen, portAnswers, LISTEN_PROBES,
   listenerInode, pidHoldsInode, listenerHeldBy,
   spawnDetached, X_SERVER_ARGS, startXServer, startX11vnc, startWindowManager, startApp, applyXResources, waitForXftDpi, RECIPES,

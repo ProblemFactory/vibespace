@@ -25,9 +25,11 @@
 //
 // INVARIANTS:
 // - REGISTRY IS THE SOURCE OF TRUTH: a session is reachable iff a registry
-//   record with a live pid + a bindable socket path exists. Stale records
-//   (dead pid) are treated as absent, never cleaned up by us (the CLI owns
-//   that directory).
+//   record passes the PROCESS-IDENTITY check (registryIdentityOk: pid +
+//   /proc start time + a served socket — never a pid number alone) and the
+//   newest passing record of the session wins. Stale records (a dead pid, a
+//   REUSED pid, a socket gone) are treated as absent, never cleaned up by us
+//   (the CLI owns that directory).
 // - Local machine only: registry + sockets live on THIS machine. Remote
 //   conversations fall back to the stash lane (jobs.js) — parked with the
 //   rest of cross-machine Background Work.
@@ -38,6 +40,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const net = require('net');
+const PI = require('./proc-identity.js');   // SHARED: /proc/<pid>/stat field 22 — a pid is never an identity (B-1cc6)
 
 const REGISTRY_DIR = path.join(os.homedir(), '.claude', 'sessions');
 
@@ -45,28 +48,87 @@ function pidAlive(pid) {
   try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; }
 }
 
-// Scan the CLI's session registry for the record owning a backend session id.
-// Returns {pid, socketPath, key, name, version} or null. `dir` is injectable
-// for tests only.
-function findPeer(backendSessionId, dir = REGISTRY_DIR) {
-  if (!backendSessionId) return null;
+// THE IDENTITY RULE (lane peer-registry-identity, 2026-10-14 — the owner's 「现在交给它」 answered 「联系不上这个
+// agent」 on four conversations after the host's 10:26 hard freeze). The CLI never cleaned its records, so every resumed
+// conversation had TWO: the pre-freeze one and the live one. Pids restart low after a reboot, and four of the stale low
+// pids now named kernel threads or another user's processes — kill(pid, 0) answered EPERM, "alive", the readdir scan
+// (sorted: "15622.json" < "17654.json") took that record first, its socket did not exist, the post failed and the
+// notices stashed. A registration is LIVE iff ALL of:
+//   · its pid runs — and when the record carries `procStart` (the CLI writes /proc/<pid>/stat field 22, as a string)
+//     the pid's start time NOW equals it, so EPERM alone is never liveness there (a reused pid fails: pid-reused);
+//     no procStart (an older CLI) or no /proc (macOS) ⇒ the pid alone, and the verdict SAYS so (`identity`);
+//   · `messagingSocketPath` names a socket that exists (statSync isSocket); a Windows named pipe (`\\.\pipe\…`, the
+//     CLI's own form there) has no inode to stat, so it is not statted — its post judges it.
+// The same pid+starttime law as Background Work's job processes (kb-features «Background Work», src/proc-identity.js).
+// PURE: every fact comes from `probe` = { hasProc, starttime(pid) → Number|null, alive(pid), isSocket(path) }.
+// → { ok, reasons: subset of ['pid-gone', 'pid-reused', 'socket-absent'], identity }
+const WIN_PIPE = /^[\\/]{2}[.?][\\/]pipe[\\/]/;   // the CLI's own named-pipe test (2.1.296)
+function registryIdentityOk(rec, probe) {
+  const pid = Number(rec && rec.pid);
+  const sp = rec && rec.messagingSocketPath;
+  const sockOk = typeof sp === 'string' && sp !== '' && (WIN_PIPE.test(sp) || !!probe.isSocket(sp));
+  if (!rec || !Number.isInteger(pid) || pid <= 1) return { ok: false, reasons: ['pid-gone', ...(sockOk ? [] : ['socket-absent'])], identity: 'none' };
+  const want = rec.procStart != null && String(rec.procStart).trim() !== '' && Number.isFinite(Number(rec.procStart)) ? Number(rec.procStart) : null;
+  let identity, pidWhy = null;
+  if (want != null && probe.hasProc) {
+    identity = 'pid+start';
+    const cur = probe.starttime(pid);
+    if (cur == null) pidWhy = 'pid-gone';
+    else if (Number(cur) !== want) pidWhy = 'pid-reused';
+  } else {
+    identity = probe.hasProc ? 'pid-only (the record carries no procStart)' : 'pid-only (no /proc on this machine)';
+    if (!probe.alive(pid)) pidWhy = 'pid-gone';
+  }
+  const reasons = [...(pidWhy ? [pidWhy] : []), ...(sockOk ? [] : ['socket-absent'])];
+  return { ok: reasons.length === 0, reasons, identity };
+}
+function isSocket(p) {
+  try { return fs.statSync(p).isSocket(); } catch { return false; }
+}
+/** this machine's facts for registryIdentityOk (one per lookup) */
+function liveProbe() {
+  return { hasProc: PI.hasProc(), starttime: (pid) => PI.starttimeOf(pid), alive: pidAlive, isSocket };
+}
+
+// THE CHOICE RULE: EVERY record of the session id is judged. A conversation resumed after a crash or a reboot has more
+// than one record, and readdir order once handed the post to the stale one. The passing record with the newest
+// `startedAt` wins. A failing record is skipped and never cleaned (the CLI owns the directory).
+// → { peer, candidates, stale, why }: `why` = "candidates: n, stale: m (pid-reused: k, socket-absent: j)" for the
+// journal (each failing reason counted; a record can fail two); `peer` = {pid, socketPath, key, name, version, identity,
+// why} or null. `dir` and `probe` are injectable for tests only.
+function lookupPeer(backendSessionId, dir = REGISTRY_DIR, probe = null) {
+  if (!backendSessionId) return { peer: null, candidates: 0, stale: 0, why: 'candidates: 0, stale: 0' };
   let entries;
-  try { entries = fs.readdirSync(dir); } catch { return null; }
+  try { entries = fs.readdirSync(dir); } catch { return { peer: null, candidates: 0, stale: 0, why: 'candidates: 0, stale: 0 (no registry)' }; }
+  const pr = probe || liveProbe();
+  const counts = { 'pid-gone': 0, 'pid-reused': 0, 'socket-absent': 0 };
+  let candidates = 0, stale = 0, best = null;
+  const startedOf = (r) => Number(r.startedAt) || 0;
   for (const f of entries) {
     if (!/^\d+\.json$/.test(f)) continue;
     let rec;
     try { rec = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf-8')); } catch { continue; }
     if (!rec || rec.sessionId !== backendSessionId) continue;
-    if (!rec.messagingSocketPath || !pidAlive(rec.pid)) continue;
-    // auth key file: <pid>.<hash>.key beside the record (0600, same user)
-    let key = null;
-    try {
-      const kf = entries.find((e) => e.startsWith(rec.pid + '.') && e.endsWith('.key'));
-      if (kf) key = fs.readFileSync(path.join(dir, kf), 'utf-8').trim();
-    } catch { }
-    return { pid: rec.pid, socketPath: rec.messagingSocketPath, key, name: rec.name || null, version: rec.version || null };
+    candidates++;
+    const v = registryIdentityOk(rec, pr);
+    if (!v.ok) { stale++; for (const k of v.reasons) counts[k]++; continue; }
+    if (!best || startedOf(rec) > startedOf(best.rec)) best = { rec, identity: v.identity };
   }
-  return null;
+  const parts = Object.keys(counts).filter((k) => counts[k]).map((k) => `${k}: ${counts[k]}`);
+  const why = `candidates: ${candidates}, stale: ${stale}${parts.length ? ` (${parts.join(', ')})` : ''}`;
+  if (!best) return { peer: null, candidates, stale, why };
+  const rec = best.rec;
+  // auth key file: <pid>.<hash>.key beside the record (0600, same user)
+  let key = null;
+  try {
+    const kf = entries.find((e) => e.startsWith(rec.pid + '.') && e.endsWith('.key'));
+    if (kf) key = fs.readFileSync(path.join(dir, kf), 'utf-8').trim();
+  } catch { }
+  return { peer: { pid: rec.pid, socketPath: rec.messagingSocketPath, key, name: rec.name || null, version: rec.version || null, identity: best.identity, why }, candidates, stale, why };
+}
+// The record owning a backend session id → {pid, socketPath, key, name, version, identity, why} or null (lookupPeer's peer).
+function findPeer(backendSessionId, dir = REGISTRY_DIR, probe = null) {
+  return lookupPeer(backendSessionId, dir, probe).peer;
 }
 
 // Post one text message to a peer's inbox socket. Resolves {ok, reason?, phase, elapsedMs, transient?, late?, code?, closeError?}.
@@ -155,4 +217,4 @@ function postToPeer(peer, text, { timeoutMs = POST_TIMEOUT_MS } = {}) {
   });
 }
 
-module.exports = { findPeer, postToPeer, REGISTRY_DIR, TRANSIENT_CODES, pidAlive, POST_BOUND_MS };
+module.exports = { findPeer, lookupPeer, registryIdentityOk, postToPeer, REGISTRY_DIR, TRANSIENT_CODES, pidAlive, POST_BOUND_MS };

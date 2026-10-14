@@ -9,7 +9,30 @@ if (!api || !token) { console.error('vibespace-task: not running inside a VibeSp
 // --group <id> (also -g / --group=<id>) may appear anywhere; it targets a
 // specific Task Group when this session belongs to more than one. Optional —
 // with a single group the server infers it. Stripped before parsing the command.
-const rawArgs = process.argv.slice(2);
+// lane cli-one-text-arg (the owner 2026-10-14): ONE TEXT PER FREE-TEXT COMMAND — the rule the four agent CLIs share (PURE
+// src/agent-cli-text.js in a checkout; its boot-time copy agent-cli-text.js beside this file on a host). `progress` /
+// `backlog-add` take ONE text: a stray word after it is refused by name (exit 2, nothing recorded) — it used to be JOINED
+// in, which lost the quotes that closed early and hid the bug. --text "…" | --text - (stdin) | --text-file <path> give the
+// text (backlog-edit's new text too), --detail-file <path> (- = stdin) a long --detail; the answer's `chars` is echoed.
+const TX = (() => {   // the module by its literal name (test-peer-text-census walks it beside the CLIs)
+  try { return require('node:fs').existsSync(require('node:path').join(__dirname, '..', '..', 'server.js')) ? require('../../src/agent-cli-text.js') : require('./agent-cli-text.js'); } catch { }
+  try { return require('./agent-cli-text.js'); } catch { return null; }
+})();
+const TX_IO = { readFile: (p) => require('node:fs').readFileSync(p, 'utf8'), readStdin: () => require('node:fs').readFileSync(0, 'utf8'), stdinIsTTY: (() => { try { return require('node:fs').fstatSync(0).isCharacterDevice(); } catch { return false; } })() };
+const DOORS = TX ? TX.takeDoors(process.argv.slice(2), ['text', 'detail']) : { argv: process.argv.slice(2), doors: {}, error: null };
+/** a text: ONE argument or its door; a stray word, a door it cannot read ⇒ refused, exit 2, nothing recorded */
+function oneText(tool, what, positional, strays) {
+  if (!TX) { console.error(`${tool}: refused — this CLI's text rule (agent-cli-text.js) is missing beside it, so stray words cannot be told apart; nothing was recorded — ask the user to reinstall the agent tools (Manage agents → the machine → Install)`); process.exit(2); }
+  const one = TX.oneText({ tool, what, positional, strays, detail: true, doors: DOORS, io: TX_IO });
+  if (one.error) { console.error(one.error.replace(/nothing was sent$/, 'nothing was recorded')); process.exit(TX.STRAY_EXIT); }
+  return one.text;
+}
+/** a flag-text verb (group-create / group-update): a stray word — a --title / --objective whose quote closed early — ⇒ refused, exit 2 */
+function strayGuard(tool, what, strays) {
+  const no = TX ? TX.strayRefusal({ tool, what, strays, remedy: 'escape the inner quotes of --title / --objective (each value is ONE argument)' }) : null;
+  if (no) { console.error(no.replace(/nothing was sent$/, 'nothing was recorded')); process.exit(TX.STRAY_EXIT); }
+}
+const rawArgs = DOORS.argv;
 let group = '';
 let detail = '';
 let hasDetailFlag = false; // distinguish "no --detail" from "--detail ''" (edit clears detail)
@@ -42,13 +65,22 @@ for (let i = 0; i < rawArgs.length; i++) {
   argv.push(a);
 }
 const [cmd, ...rest] = argv;
-const arg = rest.join(' ').trim();
+const arg = rest.join(' ').trim();   // a REF (id / # / unique text) — a lookup, joined; the free texts are oneText()'s
+if (DOORS.error) { console.error('vibespace-task: refused — ' + DOORS.error + ' — nothing was recorded'); process.exit(TX.STRAY_EXIT); }
+if (DOORS.doors.detail) { // --detail-file <path> (- = stdin): the long --detail's door — never beside --detail
+  const d = TX.textOf(hasDetailFlag ? detail : undefined, DOORS.doors.detail, TX_IO, 'by --detail');
+  if (d.error) { console.error('vibespace-task: refused — ' + d.error.replace(/nothing was sent$/, 'nothing was recorded')); process.exit(TX.STRAY_EXIT); }
+  detail = d.text; hasDetailFlag = true;
+}
 const USAGE = [
   'usage (updates the Task Group / 岗位 this session belongs to):',
   '  vibespace-task show [--full]                 objective + open backlog + recent activity (--full includes details)',
   '  vibespace-task progress "one-line summary" [--detail "full context"]',
   '      append to the Activity log. The SUMMARY is what everyone sees inline — keep it one tight line;',
   '      put specifics (numbers, paths, caveats other agents may need) in --detail.',
+  '  long or quoted text: --text-file <path> or --text - (stdin, a heredoc) instead of "…", --detail-file <path> for --detail;',
+  '      the CLI refuses stray words (a text is ONE argument: a word after it ⇒ exit 2, nothing recorded) and answers sent: N characters',
+  '      (a summary keeps 2000 characters, an item\'s line 500, a detail 6000 — the route\'s bounds)',
   '  vibespace-task progress-redact <P-id>          CLEAR an Activity-log entry THIS session wrote: it keeps its time and',
   '      place, its text becomes "[cleared at the user\'s request]" (the id is printed after `progress` and by `show`;',
   '      the time in ms works too). Only your own entries — the user clears anything from the Task Group log window.',
@@ -155,10 +187,12 @@ async function main() {
   if (cmd === 'show') {
     await printShow();
   } else if (cmd === 'progress') {
+    const arg = String(oneText('vibespace-task progress', 'a summary', rest[0], rest.slice(1)) ?? '').trim();   // lane cli-one-text-arg: ONE text
     if (!arg) { console.error('vibespace-task: progress needs a summary, e.g. vibespace-task progress "fixed the parser" --detail "root cause was ..."'); process.exit(1); }
     const r = await call('POST', '/api/agent/task-progress', { note: arg, ...(detail ? { detail } : {}) });
     const pid = r && r.entry && r.entry.id ? ' as [' + r.entry.id + ']' : ''; // (an older server answers without the entry)
     console.log('progress recorded' + pid + (detail ? ' (with detail)' : ''));
+    console.log('  ' + TX.sentLine(r, arg, detail));   // lane cli-one-text-arg: the route's count — a cut is visible here
     // Same class as vibespace-ask's mirror reminder (2.111.21): real agents
     // logged a deliverable (URL, path, result) here and ended the turn with a
     // reply that never contained it — the activity log is invisible to the
@@ -187,6 +221,7 @@ async function main() {
     console.log('Open backlog (parked, NOT immediate — never start one unasked; claim with backlog-claim <id>; `!` high · `↓` low):');
     fmtBacklog(task.backlog, full, you);
   } else if (cmd === 'backlog-add') {
+    const arg = String(oneText('vibespace-task backlog-add', 'an item', rest[0], rest.slice(1)) ?? '').trim();   // lane cli-one-text-arg: ONE text
     if (!arg) { console.error('vibespace-task: backlog-add needs text, e.g. vibespace-task backlog-add "user will pick a DB later" --detail "options discussed: ..."'); process.exit(1); }
     const r = await call('POST', '/api/agent/task-backlog', { add: arg, ...(detail ? { detail } : {}), ...(priority !== undefined ? { priority } : {}) });
     // the echo is the STORED item the server found by identity — never the
@@ -200,6 +235,7 @@ async function main() {
     const mine = (r && r.item) || ((r && r.backlog) || []).find((b) => b && b.text === added && b.status === 'open') || null;
     if (!mine || !mine.id) { console.error('vibespace-task: the server did not store the item — nothing parked'); process.exit(1); }
     console.log('parked as [' + mine.id + ']' + (mine.priority && mine.priority !== 'normal' ? ' priority ' + mine.priority : '') + (detail ? ' (with detail)' : '') + ' — auto-claimed by you; it will be re-surfaced to you; do not start it unasked');
+    console.log('  ' + TX.sentLine(r, arg, detail));   // lane cli-one-text-arg: the route's count
     if (!priorityRecorded(mine)) printPriorityUnrecorded(mine.id);
     printNudge(r);
   } else if (cmd === 'backlog-claim' || cmd === 'backlog-unclaim') {
@@ -220,6 +256,11 @@ async function main() {
     // name WHICH item was resolved (the server echoes it by id) so a wrong hit is visible at once
     console.log((cmd === 'backlog-done' ? 'resolved' : 'dropped') + (item && item.id ? ' [' + item.id + '] ' + item.text : '') + '; ' + backlog.length + ' still open');
   } else if (cmd === 'backlog-edit') {
+    if (DOORS.doors.text) { // lane cli-one-text-arg: the new text — --text "…" | --text - (stdin) | --text-file <path>
+      const t = TX.textOf(undefined, DOORS.doors.text, TX_IO);
+      if (t.error) { console.error('vibespace-task backlog-edit: refused — ' + t.error.replace(/nothing was sent$/, 'nothing was recorded')); process.exit(TX.STRAY_EXIT); }
+      newText = t.text;
+    }
     if (!arg) { console.error('vibespace-task: backlog-edit needs an item id/number/text, then --text, --detail and/or --priority\n   e.g. vibespace-task backlog-edit B-1a2b --text "new summary" --detail "updated context" --priority high\n   (--detail "" clears the detail; the item id stays, so references survive)'); process.exit(1); }
     if (newText === undefined && !hasDetailFlag && priority === undefined) { console.error('vibespace-task: backlog-edit needs --text, --detail and/or --priority to change'); process.exit(1); }
     const body = { edit: arg };
@@ -234,6 +275,7 @@ async function main() {
     const prioOk = priorityRecorded(r.item); // the echoed item carries it, or the change is not claimed
     if (priority !== undefined && prioOk) changed.push('priority ' + priority);
     console.log('updated ' + id + changed.join(' + '));
+    if (newText !== undefined && TX) console.log('  ' + TX.sentLine(r, newText, hasDetailFlag ? detail : undefined));   // lane cli-one-text-arg (no rule on an old install: the edit still answers)
     if (!prioOk) printPriorityUnrecorded(r.item && r.item.id ? r.item.id : arg);
     printNudge(r);
   } else if (cmd === 'group-list') {
@@ -241,6 +283,7 @@ async function main() {
     if (!groups.length) { console.log('no Task Groups yet'); return; }
     for (const g of groups) console.log(`${g.id}  ${g.title}${g.archived ? '  (archived)' : ''}  — ${g.sessions} session(s)${g.contextDir ? '  ctx:' + g.contextDir : ''}`);
   } else if (cmd === 'group-create') {
+    strayGuard('vibespace-task group-create', '--title / --objective', rest);   // lane cli-one-text-arg: it takes no word of its own
     if (!gflags.title) { console.error('vibespace-task: group-create needs --title "..."'); process.exit(1); }
     const create = { title: gflags.title };
     if (gflags.objective !== undefined) create.objective = gflags.objective;
@@ -250,6 +293,7 @@ async function main() {
     const { group } = await call('POST', '/api/agent/group-admin', { create });
     console.log(`created ${group.id}  "${group.title}" — it appears on the user's board; bind sessions with: vibespace-task group-bind ${group.id} --session <backend:sessionId>`);
   } else if (cmd === 'group-update') {
+    strayGuard('vibespace-task group-update', 'the group id', rest.slice(1));   // lane cli-one-text-arg: a word after the id ⇒ refused
     if (!arg) { console.error('vibespace-task: group-update needs a group id'); process.exit(1); }
     const update = { id: arg.split(' ')[0] };
     if (gflags.title !== undefined) update.title = gflags.title;

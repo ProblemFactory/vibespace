@@ -61,6 +61,10 @@ async function stub(kind, handle) {
 }
 const readLines = (conn, into) => { let buf = ''; conn.on('data', (d) => { buf += d; let i; while ((i = buf.indexOf('\n')) >= 0) { into.push(JSON.parse(buf.slice(0, i))); buf = buf.slice(i + 1); } }); };
 const peerOf = (s) => ({ socketPath: s.sockPath, key: 'k'.repeat(64), name: 'stub' });
+/** the CLI stand-in SERVES its inbox socket (lane peer-registry-identity: a registration counts only while its socket
+ *  exists — src/peer-messaging.js registryIdentityOk): bound at once (a unix listen binds synchronously), unref'd, every
+ *  connection dropped — the posts here are scripted */
+const serveSock = (p) => { if (fs.existsSync(p)) return; const s = net.createServer((c) => c.destroy()); s.on('error', () => { }); s.listen(p); s.unref(); };
 {
   // (a) a swallowing inbox: accepts, reads, never closes — the CLI's own shape (no ack on success)
   const frames = []; const s = await stub('swallow', (c) => readLines(c, frames));
@@ -156,6 +160,7 @@ function rig(name, { dataDir = null, pid = process.pid, now0 = 1_700_000_000_000
   const cid = 'c0ffee00-0000-4000-8000-00000000' + String(seq++).padStart(4, '0');
   const sockPath = path.join(dir, 'inbox.sock');
   fs.writeFileSync(path.join(reg, `${pid}.json`), JSON.stringify({ pid, sessionId: cid, messagingSocketPath: sockPath, name: 'Owner', version: '2.1.281' }));
+  serveSock(sockPath);
   const posts = [], ledger = [], releases = [], authorized = [], cards = [], logs = [], events = [];
   let answer = () => ({ ok: false, reason: 'timeout', phase: 'connect', transient: true, elapsedMs: 5003 });
   const session = { claudeSessionId: cid, backendSessionId: cid, mode: 'chat', backend: 'claude', name: 'Owner', _isStreaming: true };
@@ -999,6 +1004,7 @@ function rigOver(CDx, name) {
   const cid = 'c0ffee00-0000-4000-8000-00000000' + String(seq++).padStart(4, '0');
   const sockPath = path.join(dir, 'inbox.sock');
   fs.writeFileSync(path.join(reg, `${process.pid}.json`), JSON.stringify({ pid: process.pid, sessionId: cid, messagingSocketPath: sockPath, name: 'Owner' }));
+  serveSock(sockPath);
   const posts = [], ledger = [], releases = [], authorized = [], logs = [], events = [];
   let answer = () => ({ ok: false, reason: 'timeout', phase: 'connect', transient: true, elapsedMs: 5003 });
   const session = { claudeSessionId: cid, backendSessionId: cid, mode: 'chat', backend: 'claude', name: 'Owner', _isStreaming: true };
@@ -1160,6 +1166,7 @@ function ownerRig(name, { dataDir = null, pid = process.pid, mode = 'chat' } = {
   const regFile = path.join(reg, `${pid}.json`);
   const sockPath = path.join(dir, 'inbox.sock');
   fs.writeFileSync(regFile, JSON.stringify({ pid, sessionId: cid, messagingSocketPath: sockPath, name: 'Owner', version: '2.1.281' }));
+  serveSock(sockPath);
   const R = { dir, reg, regFile, cid, cids: [cid], sockPath, posts: [], ledger: [], releases: [], authorized: [], cards: [], logs: [], events: [], foryou: [], broadcasts: [], calls: [], parkCalls: 0 };
   R.answers = new Map();   // text fragment → answer fn
   R.answer = (frag, fn) => R.answers.set(frag, fn);
@@ -1528,6 +1535,7 @@ scenarios.push(['S27', async () => {
   const R = ownerRig('s27');
   const cid2 = 'c0ffee00-0000-4000-8000-0000000000ff'; const sock2 = path.join(R.dir, 'inbox2.sock');
   fs.writeFileSync(path.join(R.reg, `${process.pid + 1}.json`), JSON.stringify({ pid: process.pid, sessionId: cid2, messagingSocketPath: sock2, name: 'Sub' }));
+  serveSock(sock2);
   const s2 = { claudeSessionId: cid2, backendSessionId: cid2, mode: 'chat', backend: 'claude', name: 'Sub', _isStreaming: true, _turnStateSeen: true };
   R.sessions.set('w2', s2); R.cids.push(cid2);
   R.job.subscribers = [{ conversationId: cid2 }];

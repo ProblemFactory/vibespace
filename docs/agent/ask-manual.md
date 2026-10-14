@@ -52,6 +52,20 @@ vibespace-ask clear <id>               # an item YOU filed: it stays in the tray
 - RESOLVE YOURSELF when the user answers anywhere (chat included). Leaving
   answered items open trains the user to ignore the inbox.
 
+## Long or quoted text (`--text-file` / `--text -`)
+
+Long or quoted text: `--text-file <path>` or `--text -` (stdin) for the question, `--detail-file <path>` (`-` = stdin)
+for `--detail`; the CLI refuses stray words. The question is ONE argument: a word after it (a quote that closed the
+shell string early, a `--detail` value that split) is REFUSED by name — exit 2, nothing filed. (It used to be joined
+in, which lost the quotes and hid the mistake.) A long detail from a QUOTED heredoc expands nothing:
+
+    vibespace-ask "Which plan?" --options "A|B" --detail-file - <<'EOF'
+    A: keeps "the old ids" … B: …
+    EOF
+
+The text is the file's bytes with ONE trailing newline trimmed; the tray keeps a question up to 500 characters and a
+detail up to 8000 (a longer one is CUT and said). The answer says `sent: N characters + --detail M` — the stored counts.
+
 ## What the user sees
 
 The For you button in the taskbar (bottom right by default) with per-urgency

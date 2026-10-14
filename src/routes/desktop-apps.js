@@ -170,6 +170,15 @@ function hostParam(req, res) {
 function bodyOf(req) { const b = { ...(req.body || {}) }; delete b.host; delete b.share; delete b.fileHost; return b; }
 /** Lane E: a share is the USER's act — an agent's session / job token is refused (the reset-credit / inbox-reply rule). */
 const isAgentBearer = (req) => /^Bearer\s+(vsst_|jbt_)/i.test(String((req.headers && req.headers.authorization) || ''));
+/** lane app-launch-singleton: WHO a launch request comes from — an agent's session token names its session (the window
+ *  engine's token table), a job token an unnamed agent; anything else is the person's own door. */
+function launchedByOfReq(req) {
+  if (!isAgentBearer(req)) return { kind: 'person' };
+  const token = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  let f = null;
+  try { f = ctx && ctx.windowEngine && typeof ctx.windowEngine.factsForToken === 'function' ? ctx.windowEngine.factsForToken(token) : null; } catch { f = null; }
+  return f ? { kind: 'agent', sessionId: f.sessionId, name: f.name || null } : { kind: 'agent' };
+}
 function fail(res, e) {
   const code = e?.code || null;
   const status = code === 'not-found' || code === 'file-missing' ? 404 : code === 'bad-request' || code === 'exec-not-found' || code === 'cwd-missing' || code === 'needs-wayland' || code === 'bad-url' || code === 'not-a-browser' || code === 'automation-flag' || code === 'profile-not-owned' || code === 'profile-is-users' || code === 'unsupported-host'
@@ -184,6 +193,9 @@ function fail(res, e) {
 const ID_RE = /^[A-Za-z0-9._-]{1,80}$/;
 
 router.get('/api/desktop/apps', async (req, res) => {
+  // lane app-launch-singleton: `?records=1` = the records alone (every machine's), no catalog read — the Desktop list's
+  // "Running apps" (an agent-started app included) asks it each time it opens
+  if (req.query.records === '1') { try { res.json({ apps: ctx.keeper.listApps() }); } catch (e) { fail(res, e); } return; }
   const host = hostParam(req, res); if (!host) return;
   const witness = req.query.witness === 'recheck' ? { witness: 'recheck' } : null; // lane apps-launcher-witness: the "Installed outside VibeSpace" group's Check again
   try { const r = host === 'local' ? await (witness ? ctx.keeper.list(witness) : ctx.keeper.list()) : await ctx.keeper.list({ host, ...witness }); res.json(appsEngine ? appsEngine.decorate(host, r) : r); } catch (e) { fail(res, e); }
@@ -217,9 +229,10 @@ router.post('/api/desktop/apps', async (req, res) => {
   }
   try {
     const lb = fill ? { ...bodyOf(req), appId: fill } : bodyOf(req);
-    const r = host === 'local' ? await ctx.keeper.launch(lb) : await ctx.keeper.launch(lb, { host });
+    const launchedBy = launchedByOfReq(req); // lane app-launch-singleton: the record says who started it
+    const r = host === 'local' ? await ctx.keeper.launch(lb, { launchedBy }) : await ctx.keeper.launch(lb, { host, launchedBy });
     let reach = null;
-    if (share != null && host === 'local' && ctx.windowEngine && typeof ctx.windowEngine.shareAtLaunch === 'function' && r && r.id) {
+    if (share != null && host === 'local' && ctx.windowEngine && typeof ctx.windowEngine.shareAtLaunch === 'function' && r && r.id && !r.attached) { // lane app-launch-singleton: an ATTACHED answer started nothing — the running window's exposure is not the launch row's to change
       try { reach = ctx.windowEngine.shareAtLaunch(r.id, share); } catch (e) { return res.json({ ...r, reach: null, reachError: { error: String(e.message || e), code: e.code || null } }); } // the app runs; the share's failure is said, never silent
     }
     res.json(reach ? { ...r, reach } : r);
@@ -480,6 +493,11 @@ router.post('/api/desktop/apps/:id/stop', async (req, res) => {
   if (!ID_RE.test(req.params.id)) return res.status(400).json({ error: 'bad id', code: 'bad-request' });
   // B-04da ④: `{force: true}` = the person confirmed "stop anyway" after an `app-asked` (LibreOffice's save prompt is up)
   try { res.json(await ctx.keeper.stop(req.params.id, { why: 'user', force: !!(req.body && req.body.force === true) })); } catch (e) { fail(res, e); }
+});
+router.post('/api/desktop/apps/:id/close-asked', async (req, res) => {
+  if (!ID_RE.test(req.params.id)) return res.status(400).json({ error: 'bad id', code: 'bad-request' });
+  // int267 seam: the window's outer ✕ stamps the person's ask BEFORE it sends close-window — a person's close is never a failed launch
+  try { res.json(await ctx.keeper.closeAsked(req.params.id)); } catch (e) { fail(res, e); }
 });
 router.post('/api/desktop/apps/:id/keep-alive', async (req, res) => {
   if (!ID_RE.test(req.params.id)) return res.status(400).json({ error: 'bad id', code: 'bad-request' });

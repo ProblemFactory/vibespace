@@ -42,7 +42,9 @@
 //      ToolsActivePort` (and a crafted `state load`) print what `get cdp-url`
 //      is refused for (the control); through vibespace-browser each is refused
 //      locally; the stdin batch (bare plain lines are the binary's own `Invalid
-//      JSON input`; through the CLI both forms run).
+//      JSON input`; through the CLI both forms run). .268 (B-a23c): each refusal is
+//      judged by its CODE against the PURE verdict, never stderr's first line — a
+//      CLI other than the flag table's version says `[flag_table_drift]` first.
 //   ⑥ verify S2 r4 (2026-09-27): the CDP CENSUS (src/cdp-census.js) compared against
 //      the launched Chrome's OWN /json/protocol (a newer Chrome's extra methods PRINT
 //      and fail until classified), then every class's representative methods against
@@ -648,18 +650,42 @@ if (AB && CHROME) {
     await sleep(500);
     const eu = (await bare(['get', 'url'])).text;
     ok(/^data:/m.test(eu.trim()) || eu.includes('data:text/html'), 'r4 (measured residual): an `eval` navigation from a web page to file:// is refused by the browser itself — the page stays on the web', eu.slice(0, 200));
-    // THROUGH vibespace-browser: every one refused locally, before /resolve; the page never leaves the web
+    // THROUGH vibespace-browser: every one refused locally, before /resolve; the page never leaves the web.
+    // B-a23c (.268): each refusal is judged by its CODE (the refusal line: the first un-indented line that is not a
+    // `note:`) against the PURE verdict of the same spelling (classify / stateFileVerdict) — never by stderr's FIRST
+    // line. A browser CLI other than the flag table's version (the hub's PATH 0.38.1 vs the 0.38.2 table since .250)
+    // says `note: … [flag_table_drift]` first on every spelling refused AFTER the binary lookup (`state load`: its file
+    // is read there); the first-line read was red on every hub run from .250 on, while the runner (no agent-browser at
+    // all) skipped this whole leg. The drift is a measured row (in the CLI's own words), never a skip.
+    const V4 = require('../src/browser-verbs.js');
+    const abVer = (await bare(['--version'])).text.trim().split('\n').pop();
+    const BATCH4 = JSON.stringify([['open', 'data:text/html,x'], ['open', `file://${portFile}`]]);
+    const pureCode = (v) => (v && (v.kind === undefined || v.kind === 'refused') ? v.code : null);
+    // the family's spelling table: argv (+ stdin), its PURE verdict, `late` = refused after the binary lookup
+    const spell4 = [
+      ...[['open', 'chrome://version'], ['open', `file://${portFile}`], ['open', `FILE:${portFile}`], ['tab', 'new', `file://${portFile}`], ['--', 'goto', 'about:version'], ['batch', 'open https://x', 'open chrome://version']].map((args) => ({ label: args.join(' '), args, pure: pureCode(V4.classify(args, { ours: true })), late: false })),
+      { label: 'state load <crafted>', args: ['state', 'load', SF], pure: pureCode(V4.stateFileVerdict(JSON.parse(fs.readFileSync(SF, 'utf8')))), late: true },
+      { label: 'batch <stdin JSON>', args: ['batch'], stdin: BATCH4, pure: pureCode(V4.classify(['batch'], { ours: true, stdin: BATCH4 })), late: false },
+    ];
     const n0 = calls4.length;
     const rows = [];
-    for (const args of [['open', 'chrome://version'], ['open', `file://${portFile}`], ['open', `FILE:${portFile}`], ['tab', 'new', `file://${portFile}`], ['--', 'goto', 'about:version'], ['batch', 'open https://x', 'open chrome://version']]) {
-      const r = await via(args); rows.push({ args: args.join(' '), code: r.code, se: r.se.trim().split('\n')[0] });
+    for (const sp of spell4) {
+      const r = await via(sp.args, sp.stdin);
+      const lines = r.se.trim().split('\n');
+      const refusal = lines.find((l) => l && !/^note: /.test(l) && !/^\s/.test(l)) || '';
+      rows.push({ args: sp.label, code: r.code, pure: sp.pure, said: (/\[([a-z_]+)\]$/.exec(refusal) || [])[1] || null, late: sp.late, notes: lines.filter((l) => /^note: /.test(l)), first: lines[0] || '' });
     }
-    const sl = await via(['state', 'load', SF]);
-    rows.push({ args: 'state load <crafted>', code: sl.code, se: sl.se.trim().split('\n')[0] });
-    const js = await via(['batch'], JSON.stringify([['open', 'data:text/html,x'], ['open', `file://${portFile}`]]));
-    rows.push({ args: 'batch <stdin JSON>', code: js.code, se: js.se.trim().split('\n')[0] });
     const after = (await bare(['get', 'url'])).text;
-    ok(rows.every((r) => r.code === 1 && /\[(local_scheme_refused|batch_line_refused)\]$/.test(r.se)) && calls4.length === n0 && !/chrome:|file:/.test(after), `r4: through vibespace-browser each of ${rows.length} spellings is refused locally (local_scheme_refused), no /resolve made, and the page never left the web (${after.trim().split('\n').pop()})`, JSON.stringify({ rows: rows.map((r) => ({ ...r, se: r.se.slice(-160) })), after: after.slice(0, 200) }));
+    ok(rows.every((r) => r.code === 1 && r.pure && r.said === r.pure) && calls4.length === n0 && !/chrome:|file:/.test(after), `r4: through vibespace-browser each of ${rows.length} spellings is refused locally with its PURE verdict's code (${[...new Set(rows.map((r) => r.pure))].join(' / ')}), no /resolve made, and the page never left the web (${after.trim().split('\n').pop()})`, JSON.stringify({ rows: rows.map((r) => ({ args: r.args.slice(0, 40), code: r.code, pure: r.pure, said: r.said })), after: after.slice(0, 200) }));
+    // the measured row: the CLI says which binary it runs only when it drifts — every note one `[flag_table_drift]`,
+    // on exactly the late spellings, naming one version that is not the table's; no drift ⇒ no note anywhere
+    const noted = rows.filter((r) => r.notes.length);
+    const named = [...new Set(noted.flatMap((r) => r.notes.map((n) => (/the browser CLI here is (\S+);/.exec(n) || [])[1] || '?')))];
+    const drifts = noted.length > 0;
+    ok(drifts ? rows.every((r) => (r.late ? r.notes.length === 1 && r.first === r.notes[0] && r.notes[0].endsWith('[flag_table_drift]') : r.notes.length === 0)) && named.length === 1 && named[0] !== V4.TABLE_VERSION && V4.versionDrift(named[0]) === named[0] : true, `r4 (measured row): ${drifts ? `the browser CLI vibespace-browser runs here is ${named.join('/')}, the flag table ${V4.TABLE_VERSION} — its \`[flag_table_drift]\` note leads exactly the ${noted.length} spelling(s) refused after the binary lookup (${noted.map((r) => r.args).join('; ')})` : `no drift: the CLI's binary is the flag table's ${V4.TABLE_VERSION}, no spelling carries a note`} (PATH's: ${abVer})`, JSON.stringify(rows.map((r) => ({ args: r.args.slice(0, 40), late: r.late, notes: r.notes }))));
+    // CONTROL — the pre-.268 read (stderr's FIRST line must end in the refusal tag): under drift it misreads exactly the late spellings
+    const firstRead = rows.filter((r) => !/\[(local_scheme_refused|batch_line_refused)\]$/.test(r.first)).map((r) => r.args);
+    ok(drifts ? firstRead.length > 0 && firstRead.every((a) => rows.find((r) => r.args === a).late) : firstRead.length === 0, `r4 CONTROL (the pre-.268 first-line read): ${drifts ? `under this drift it reads ${firstRead.length} refused spelling(s) as not refused (${firstRead.join('; ')}) — the hub's red from .250 to .267` : 'with no drift it agrees with the verdict read'}`, JSON.stringify(firstRead));
     const good = await via(['open', 'data:text/html,<title>still-web</title>']);
     ok(good.ok && calls4.includes('/api/agent/browser/resolve') && /still-web/.test((await bare(['get', 'title'])).text), 'r4 CONTROL: `vibespace-browser open data:…` reaches the real binary and navigates', JSON.stringify(good).slice(0, 300));
     // finding 3 — the stdin batch: bare plain lines are the binary's own `Invalid JSON input` (the control); through the CLI both forms run
@@ -685,7 +711,7 @@ if (AB && CHROME) {
       else {
         await bare(['open', 'data:text/html,<title>frame</title><h1>frame</h1>']);
         const r1 = await viaFile(path.join(REPO, 'data/bin/vibespace-browser'), ['pdf', './frame.pdf']);
-        ok(r1.ok && pdfAt(path.join(Bd, 'frame.pdf')) && !fs.existsSync(path.join(A, 'frame.pdf')), 'lane L r5 F1 (the REAL 0.38.1 daemon, started in A): `vibespace-browser pdf ./frame.pdf` from B writes B/frame.pdf — the path it judged — and nothing in A', JSON.stringify({ r1: [r1.ok, r1.so.slice(-200), r1.se.slice(-300)], inB: fs.existsSync(path.join(Bd, 'frame.pdf')), inA: fs.existsSync(path.join(A, 'frame.pdf')) }));
+        ok(r1.ok && pdfAt(path.join(Bd, 'frame.pdf')) && !fs.existsSync(path.join(A, 'frame.pdf')), 'lane L r5 F1 (the REAL ' + abVer + ' daemon, started in A): `vibespace-browser pdf ./frame.pdf` from B writes B/frame.pdf — the path it judged — and nothing in A', JSON.stringify({ r1: [r1.ok, r1.so.slice(-200), r1.se.slice(-300)], inB: fs.existsSync(path.join(Bd, 'frame.pdf')), inA: fs.existsSync(path.join(A, 'frame.pdf')) }));
         const src = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-browser'), 'utf8');
         const pre = src.replace("const argv = closeAllScoped ? framed.argv.filter((x) => x !== '--all') : [...framed.argv];", "const argv = closeAllScoped ? rest.filter((x) => x !== '--all') : [...rest];"); // the hand-over line since the 2.369.182 integration (lane H's close --all filter over the in-frame argv)
         const ctl = path.join(ROOT, 'ctl-frame', 'bin'); fs.mkdirSync(ctl, { recursive: true });
@@ -724,7 +750,11 @@ console.log('— ④ naive study 2: the real keeper + the real binary — two se
     // r5: the For-you store the keeper files its ONE unstable notice into (the product wires the real one)
     const notices4 = [];
     const inbox4 = { add: (key, item) => { notices4.push({ key, ...item }); return { id: 'ut-' + notices4.length, ...item }; } };
-    const kk = Kk.create({ dataDir: path.join(KR, 'data'), homeDir: KH, env: () => kenv, serverSetting: () => undefined, liveKeys: () => live4, runtime: Ff.createBrowserRuntime({ env: kenv }), facts: Ff.createBrowserFacts({ env: kenv }), log: quiet, install: false, userTodos: inbox4 });
+    // B-a23c (.268): the hand drives every tick here (`kk.tick()` at the instant each leg names) — the keeper's OWN 5 s
+    // timer (attach / start ⇒ ensureTimer) fired between a daemon's SIGKILL and the orphan read under load and ended the
+    // relaunched Chrome first: ④ r3 M1 `{"orphanB":[],"state":"stopped"}` (one tick injected in that window = the same
+    // red, every run). `tickMs: 3600e3`, as every hand-ticked keeper leg of test-browser-ephemeral.
+    const kk = Kk.create({ dataDir: path.join(KR, 'data'), homeDir: KH, env: () => kenv, serverSetting: () => undefined, liveKeys: () => live4, runtime: Ff.createBrowserRuntime({ env: kenv }), facts: Ff.createBrowserFacts({ env: kenv }), log: quiet, install: false, userTodos: inbox4, tickMs: 3600e3 });
     const mine = () => fs.readdirSync('/proc').filter((x) => /^\d+$/.test(x)).map(Number).filter((pid) => { try { return fs.readFileSync(`/proc/${pid}/environ`, 'utf8').includes(KR) || fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').includes(KR); } catch { return false; } });
     // Chrome rewrites its process title — /proc/<pid>/cmdline is then ONE space-joined string, not NUL-separated argv
     const chromesOn = (dir) => fs.readdirSync('/proc').filter((x) => /^\d+$/.test(x)).filter((pid) => { try { const c = ' ' + fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').replace(/\0/g, ' ') + ' '; return c.includes(` --user-data-dir=${dir} `) && !c.includes(' --type='); } catch { return false; } }).length;
@@ -778,8 +808,8 @@ console.log('— ④ naive study 2: the real keeper + the real binary — two se
       ok(!restartErr && kk.browserOf(bank.id).state === 'ready' && c2.length === 1 && c2[0] !== c1[0] && dt0 && dt1 && dt1 !== dt0 && portOf(kk.browserOf(bank.id).cdpUrl) === dt1 && kk.browserOf(bank.id).browser && kk.browserOf(bank.id).browser.pid === c2[0], `④ r2 M1: the next start launches on the directory — ONE new Chrome (${c2[0]}), a NEW DevToolsActivePort (${dt0} → ${dt1}, the record's cdp url follows), recorded again`, restartErr || JSON.stringify({ c2, dt0, dt1, cdp: kk.browserOf(bank.id).cdpUrl }));
       // LANE H VERIFY r3 MAJOR 1, ON THE REAL BINARY: when the daemon's Chrome dies (SIGTERM = the user closing a headed
       // window) the DAEMON LIVES and the next verb under the keeper's own session relaunches Chrome IN THE SAME DAEMON — a
-      // new pid, lock and DevToolsActivePort, its environ scrubbed of AGENT_BROWSER_* — so the record made at launch is
-      // stale and no namespace can witness it. The daemon is then SIGKILLed before anything judged it: the tick must end
+      // new pid, lock and DevToolsActivePort, its environ no witness (.268, B-a23c: NOT scrubbed — see the CONTROL) — so the
+      // record made at launch is stale and no namespace can witness it. The daemon is then SIGKILLed before anything judged it: the tick must end
       // the RELAUNCHED Chrome (the lock of the directory the keeper minted, no live daemon its parent) and the profile must
       // start again (r2 left it alive and answered profile_locked "it may be the user's own browser" forever).
       const ppidOf = (pid) => { try { const st = fs.readFileSync(`/proc/${pid}/stat`, 'utf8'); return Number(st.slice(st.lastIndexOf(')') + 2).split(' ')[1]); } catch { return null; } };
@@ -790,8 +820,16 @@ console.log('— ④ naive study 2: the real keeper + the real binary — two se
       await sleep(500);
       const daemonLived = Ff.pidAlive(recA.pid);
       const reo = await run(keeperPairs, ['open', 'about:blank'], cfgK);
-      const cB = chromePidsOn(bank.dir); const dtB = String(dtp() || '').split('\n')[0]; const envB = cB.length ? abEnvKeys(cB[0]) : null;
-      ok(cA.length === 1 && daemonLived && reo.ok && cB.length === 1 && cB[0] !== cA[0] && ppidOf(cB[0]) === recA.pid && Array.isArray(envB) && envB.length === 0, `④ r3 M1 CONTROL (the binary itself): its Chrome ${cA[0]} ended, the daemon ${recA.pid} LIVED, and the next verb under the keeper's session relaunched Chrome ${cB[0]} IN THE SAME DAEMON — its environment carries no AGENT_BROWSER_* (${JSON.stringify(envB)})`, JSON.stringify({ cA, cB, daemonLived, ppid: cB.map(ppidOf), reo: reo.out.slice(-300) }));
+      const cB = chromePidsOn(bank.dir); const dtB = String(dtp() || '').split('\n')[0];
+      // B-a23c (.268): /proc/<chrome>/environ is no witness, and r3 read it as a scrub. Measured on Chrome 154: with
+      // DBUS_SESSION_BUS_ADDRESS SET (any value — every desktop session, the heavy shape) Chrome's own process-title
+      // rewrite overwrites the region (its command line's tail + NULs); with it UNSET (a private-XDG gate shape, AIDev)
+      // the region is left as exec'd — the daemon's environment copied WHOLE, its AGENT_BROWSER_* too: the daemon
+      // scrubs nothing, at the first launch or this one. The reading is judged by the shape, both ways.
+      const envRead = (pid) => { let raw; try { raw = fs.readFileSync(`/proc/${pid}/environ`, 'utf8'); } catch { return { kind: 'unreadable' }; } const ch = raw.split('\0').filter(Boolean); return ch.some((e) => e.startsWith('HOME=')) && ch.some((e) => e.startsWith('PATH=')) ? { kind: 'environment', ab: ch.filter((e) => e.startsWith('AGENT_BROWSER_')).map((e) => e.split('=')[0]).sort() } : { kind: 'title', head: ch.join(' ').slice(0, 60) }; };
+      const eB = cB.length ? envRead(cB[0]) : null; const abD = (abEnvKeys(recA.pid) || []).sort(); const busSet = !!kenv.DBUS_SESSION_BUS_ADDRESS;
+      const envNoWitness = !!eB && (busSet ? eB.kind === 'title' : eB.kind === 'environment' && abD.length > 0 && JSON.stringify(eB.ab) === JSON.stringify(abD));
+      ok(cA.length === 1 && daemonLived && reo.ok && cB.length === 1 && cB[0] !== cA[0] && ppidOf(cB[0]) === recA.pid && envNoWitness, `④ r3 M1 CONTROL (the binary itself): its Chrome ${cA[0]} ended, the daemon ${recA.pid} LIVED, and the next verb under the keeper's session relaunched Chrome ${cB[0]} IN THE SAME DAEMON — its /proc environ is no witness (session bus ${busSet ? 'set ⇒ overwritten by Chrome\'s own title rewrite' : `unset ⇒ the daemon's environment copied whole, its ${abD.length} AGENT_BROWSER_* keys too`}; read: ${eB && eB.kind})`, JSON.stringify({ cA, cB, daemonLived, ppid: cB.map(ppidOf), env: eB, daemonAb: abD, reo: reo.out.slice(-300) }));
       try { process.kill(recA.pid, 'SIGKILL'); } catch { }
       for (let i = 0; i < 80 && Ff.pidAlive(recA.pid); i++) await sleep(50);
       await sleep(300);
@@ -864,7 +902,7 @@ console.log('— ④ naive study 2: the real keeper + the real binary — two se
         const left = chromePidsOn(storm.dir);
         const n = notices4.filter((x) => x.origin === 'browser');
         ok(relaunches >= 1 && relaunches <= Bp.HEAL_BUDGET && recS.closed && recS.closed.code === 'browser_unstable' && !recS.browser && left.length === 0 && eS && eS.code === 'browser_unstable' && n.length === 1 && n[0].key === 'browser' && n[0].text.includes('Storm') && n[0].text.includes(String(Bp.HEAL_BUDGET)),
-          `④ r5 MAJOR 1: a Chrome killed 2 s after every relaunch on the REAL 0.38.1 — ${relaunches} relaunches (≤ ${Bp.HEAL_BUDGET}), then \`${recS.closed && recS.closed.code}\` with ${left.length} Chromes left, the attach refused by name, ONE notice ("${n[0] ? n[0].text.slice(0, 80) : ''}") (${perTick.join(' ')})`, JSON.stringify({ perTick, relaunches, closed: recS.closed, left, err: eS && (eS.code + ' ' + eS.message), notices: n }));
+          `④ r5 MAJOR 1: a Chrome killed 2 s after every relaunch on the REAL ${ver4} — ${relaunches} relaunches (≤ ${Bp.HEAL_BUDGET}), then \`${recS.closed && recS.closed.code}\` with ${left.length} Chromes left, the attach refused by name, ONE notice ("${n[0] ? n[0].text.slice(0, 80) : ''}") (${perTick.join(' ')})`, JSON.stringify({ perTick, relaunches, closed: recS.closed, left, err: eS && (eS.code + ' ' + eS.message), notices: n }));
         // the user's Stop resets it: the next start runs with a fresh ledger
         await kk.stop(storm.id, { why: 'user' }).catch(() => { });
         let eS2 = null; try { await kk.attach({ profileId: storm.id, browserKey: KD4, sessionId: 'sess-d4' }); } catch (e) { eS2 = (e.code || '') + ' ' + e.message; }
@@ -911,7 +949,7 @@ console.log('— ④ naive study 2: the real keeper + the real binary — two se
         const LB = '    if (rec.browserLost) { const p = profile(profileId); return {';
         if (ksrc.includes(HB) && ksrc.includes(LB)) {
           const KkNo = Mh.load('src/server/browser-keeper.js', ksrc.replace(HB, HB + '    return Promise.resolve(null);\n').replace(LB, '    if (false) { const p = profile(profileId); return {'), 'no-heal');
-          const kc = KkNo.create({ dataDir: path.join(KR, 'data-ctl'), homeDir: KH, env: () => kenv, serverSetting: () => undefined, liveKeys: () => live4, runtime: Ff.createBrowserRuntime({ env: kenv }), facts: Ff.createBrowserFacts({ env: kenv }), log: quiet, install: false });
+          const kc = KkNo.create({ dataDir: path.join(KR, 'data-ctl'), homeDir: KH, env: () => kenv, serverSetting: () => undefined, liveKeys: () => live4, runtime: Ff.createBrowserRuntime({ env: kenv }), facts: Ff.createBrowserFacts({ env: kenv }), log: quiet, install: false, tickMs: 3600e3 });
           try {
             const b2 = kc.createProfile({ label: 'Bank ctl' }, { owner: { kind: 'instance', id: null } });
             await kc.attach({ profileId: b2.id, browserKey: KC4, sessionId: 'sess-c4' });

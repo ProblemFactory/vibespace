@@ -226,7 +226,8 @@ ok(Array.isArray(win.conn.info.posixShells) && win.conn.info.posixShells.length 
   ok(l.path === H && l.items[0].name === 'docs' && l.items[0].isDirectory && l.items.some((i) => i.name === 'a.txt' && i.size === 22), 'list("~") — the owner\'s GET /api/files: the agent resolves `~` and lists it, folders first', l);
   ok((await rf.list(ID, J2('docs'))).items.map((i) => i.name).join() === 'sub,note.md', 'list(<abs folder>)');
   const lmiss = await rejects(rf.list(ID, J2('nope')));
-  ok(lmiss && /ENOENT|no such file/i.test(lmiss.message) && !/127/.test(lmiss.message), 'a missing folder: the agent\'s own error, never a 127', lmiss && lmiss.message);
+  // \b127\b: the exit code as a word — the message names the scratch dir `vs-wdfs-<pid>`, and a pid like 1270751 is no 127
+  ok(lmiss && /ENOENT|no such file/i.test(lmiss.message) && !/\b127\b/.test(lmiss.message), 'a missing folder: the agent\'s own error, never a 127', lmiss && lmiss.message);
   const inf = await rf.info(ID, '~/a.txt'), infb = await rf.info(ID, J2('bin.dat'));
   ok(inf.size === 22 && inf.isBinary === false && !inf.isDirectory && infb.isBinary === true, 'info: size, text vs binary (a NUL in the head)', [inf, infb]);
   ok((await rf.readText(ID, '~/a.txt')).content === 'hello from the device\n', 'readText');

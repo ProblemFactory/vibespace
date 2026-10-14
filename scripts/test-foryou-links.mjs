@@ -155,9 +155,14 @@ console.log('§4 THE CLI — vibespace-ask --artifact against that route');
   ok(bad.status === 2 && errs.length === 3 && /missing\.md: no such file/.test(errs[0]) && /plain-dir: a folder without design\.json/.test(errs[1]) && errs[2] === 'nothing was filed — fix the attachment and run vibespace-ask again' && S.count() === n0, 'two bad attachments ⇒ exit 2, one line each (absolute against the shell\'s cwd), the last line says nothing was filed', { status: bad.status, errs });
   const good = await cli(['Please review', '--artifact', 'report.md', 'design-dir', '/p/pgaaaaaaaaaa', '--urgency', 'high']);
   ok(good.status === 0 && /attached: .*\/report\.md \(file\)/.test(good.stdout) && /attached: \/p\/pgaaaaaaaaaa \(page\)/.test(good.stdout) && S.count() === n0 + 1, 'fixed ⇒ filed ONCE: every path after the flag until the next flag, each attachment echoed', good.stdout);
-  const first = await cli(['--artifact', 'report.md', 'Is', 'this', 'right?']);
+  const first = await cli(['--artifact', 'report.md', 'Is this right?']);
   const it = S.todos.snapshot().open.find((i) => i.text === 'Is this right?');
   ok(first.status === 0 && it && it.artifacts && it.artifacts.length === 1 && it.artifacts[0].path === path.join(REPOX, 'report.md'), 'the flag BEFORE the question takes one path (vibespace-msg\'s rule) — the rest is the question', first.stderr || first.stdout);
+  // lane cli-one-text-arg (the owner 2026-10-14): the question is ONE argument — the same words loose are REFUSED by name
+  // (they used to be joined, which hid a quote that closed early), nothing filed
+  const nLoose = S.count();
+  const loose = await cli(['--artifact', 'report.md', 'Is', 'this', 'right?']);
+  ok(loose.status === 2 && /the question is ONE argument — 2 more words followed it \("this", …\)/.test(loose.stderr) && /nothing was filed/.test(loose.stderr) && S.count() === nLoose, 'lane cli-one-text-arg: the question in loose words is refused by name (exit 2), nothing filed', loose.stderr || loose.stdout);
   ok(/--artifact <path\|\/p\/id>…/.test((await cli(['--help'])).stdout), 'the usage names --artifact');
 }
 S.srv.close();

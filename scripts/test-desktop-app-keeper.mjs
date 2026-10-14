@@ -2038,8 +2038,10 @@ console.log('§19 round 3 A2 (docs/design-desktop-apps-seamless §3.2) — an ap
       if (!opts) { skip(`§19 ${rung}: the rung cannot be driven on this box`); continue; }
       const k = mk(`k19-${rung}`, opts);
       await k.adoptAll(); k.start();
-      // (a) the app exits by itself (xterm running a 2.5 s shell): the windows went with it ⇒ 0, and the broadcast says so
-      const a = await runExit(k, { exec: XT, args: ['-T', 'vs-a2-exit', '-geometry', '40x10', '-e', 'sh', '-c', 'sleep 2.5'], label: 'a2-exit' }, 'exit');
+      // (a) the app exits by itself (xterm running a shell that outlives the quick-exit bound — lane app-launch-singleton: an
+      // exit within M.QUICK_EXIT_MS of the spawn is a launch that FAILED and keeps its window): the windows went with it ⇒ 0,
+      // and the broadcast says so
+      const a = await runExit(k, { exec: XT, args: ['-T', 'vs-a2-exit', '-geometry', '40x10', '-e', 'sh', '-c', `sleep ${(M.QUICK_EXIT_MS + 1500) / 1000}`], label: 'a2-exit' }, 'exit');
       ok(a.r1.state === 'ready' && a.r1.backend === rung, `§19 ${rung}: the app reaches ready on the ${rung} rung`, a.r1);
       if (a.rec) {
         console.log(`  §19 ${rung} (a): the record flipped to exited, the broadcast carrying it arrived ${a.castAt && a.flipAt ? a.castAt - a.flipAt : '?'} ms later (the census + the teardown); windowsAtExit ${a.rec.windowsAtExit}`);

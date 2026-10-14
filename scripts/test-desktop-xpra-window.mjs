@@ -1286,7 +1286,9 @@ try {
     const [WEB_PORT] = await freePorts(1);
     await new Promise((r) => web.listen(WEB_PORT, '127.0.0.1', r));
     try {
-      const regB = await p1.evalJs(`fetch('/api/desktop/apps').then((r) => r.json()).then((d) => d.registry.filter((r) => r.browser))`);
+      // the CATALOG's browser rows (lane app-launch-singleton: an installed / witnessed browser of a known family is served with
+      // `browser` too, `browserBy: 'exec'` — e.g. this box's seen.d.google-chrome, filed under the witnessed section, not here)
+      const regB = await p1.evalJs(`fetch('/api/desktop/apps').then((r) => r.json()).then((d) => d.registry.filter((r) => r.browser && r.browserBy !== 'exec'))`);
       console.log(`  browser rows: ${regB.map((r) => `${r.id} → ${r.available ? `${r.exec} ${r.path}${r.confinement ? ' [' + r.confinement + ']' : ''}` : `UNAVAILABLE (${r.reason})`}`).join('; ')}`);
       check('the catalog serves the two browser families (chromium, firefox), each available or dimmed WITH a reason', same2(regB.map((r) => r.id).sort(), ['chromium', 'firefox']) && regB.every((r) => r.available || !!r.reason), regB);
       for (const row of regB) {

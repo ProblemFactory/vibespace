@@ -6,6 +6,9 @@
 // → PNG (VS_SECRETS_PNG). Fixtures only: scratch Xvfb (pinned high), HOME, runtime dir, profile; never the owner's bus.
 // lane secrets-chrome-skip: a machine without the portal binaries (the CI runner) or python3-gi is a SKIP with the
 // plan's / the facts' why (rc 0) BEFORE any plan.dirs use — test-desktop-app-rung-chrome's pattern for xpra.
+// lane display-secret-fd (B-6c6d): ①b is the finding's own measurement — WHILE the real Chrome runs on the private
+// bus, every readable /proc/<pid>/environ on this box is scanned for the per-display key: only a planted control
+// (the scan's own positive control) holds it — never dbus-daemon, never a service it activated, never the app.
 import { createRequire } from 'module';
 import fs from 'fs'; import os from 'os'; import path from 'path'; import http from 'http';
 import { spawn, spawnSync } from 'child_process';
@@ -32,10 +35,11 @@ async function cdp(prof) { // DevToolsActivePort → the browser target's websoc
   for (let i = 0; i < 100; i++) { try { const [port, p] = fs.readFileSync(path.join(prof, 'DevToolsActivePort'), 'utf8').split('\n'); const ws = new WebSocket(`ws://127.0.0.1:${port}${p}`); await new Promise((r, j) => { ws.onopen = r; ws.onerror = j; }); let n = 0; const wait = new Map(); ws.onmessage = (m) => { const o = JSON.parse(m.data); if (wait.has(o.id)) { wait.get(o.id)(o); wait.delete(o.id); } }; return { ws, send: (method, params = {}, sessionId) => new Promise((r) => { const id = ++n; wait.set(id, r); ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) })); }) }; } catch { await sleep(100); } }
   throw new Error('no DevToolsActivePort');
 }
+let chromeChild = null; // lane display-secret-fd: the running app, for the environ census
 async function chromeRun(appDir, plan, prof, fn) {
   try { fs.unlinkSync(path.join(prof, 'DevToolsActivePort')); } catch { /* first run */ }
   const c = spawn(CHROME, [`--user-data-dir=${prof}`, '--no-first-run', '--no-default-browser-check', '--remote-debugging-port=0', '--disable-features=ChromeWhatsNewUI', 'about:blank'], { env: { ...env, DISPLAY: DISP, DBUS_SESSION_BUS_ADDRESS: plan.address, XDG_CURRENT_DESKTOP: 'GNOME' }, stdio: 'ignore' });
-  kids.push(c);
+  kids.push(c); chromeChild = c;
   const b = await cdp(prof);
   const out = await fn(b);
   await b.send('Browser.close'); for (let i = 0; i < 100 && c.exitCode === null; i++) await sleep(100);
@@ -45,9 +49,22 @@ async function bus(appDir, mode) {
   const plan = M.portalPlan({ dir: appDir, display: DISP, authFile: null, bins: D.portalBins({ env }), why: 'browser' });
   const facts = mode === 'on' ? await D.appSecretsFacts({ env, mode, dataDir: path.join(tmp, 'data'), id: path.basename(appDir) }) : { off: true };
   const ss = M.secretServicePlan({ plan, facts });
-  if (ss.file) { plan.files.push(ss.file); Object.assign(plan.env, ss.env); }
+  if (ss.files.length) plan.files.push(...ss.files); // lane display-secret-fd: the service file + the one-shot key file; the key never rides the bus env
   const child = await D.startPortalBus({ plan, env, logFd: fs.openSync(path.join(appDir, 'app.log'), 'a') }); kids.push(child);
-  return { plan, ss, child };
+  return { plan, ss, child, facts };
+}
+// lane display-secret-fd: every process on this box whose environ holds `needle` — the agent's `cat /proc/*/environ`
+const commOf = (pid) => { try { return fs.readFileSync(`/proc/${pid}/comm`, 'utf8').trim(); } catch { return '?'; } };
+function procHolders(needle) {
+  const out = []; let read = 0;
+  for (const d of fs.readdirSync('/proc')) {
+    if (!/^[0-9]+$/.test(d)) continue;
+    let text = '';
+    try { text = fs.readFileSync(`/proc/${d}/environ`, 'utf8'); } catch { continue; } // another user's, or gone
+    read++;
+    if (text.includes(needle)) out.push(`${d} ${commOf(d)}`);
+  }
+  return { out, read };
 }
 const prefixes = (prof) => spawnSync('python3', ['-c', 'import sqlite3,sys; print(",".join(sorted({bytes(r[0][:3]).decode("latin1") for r in sqlite3.connect(sys.argv[1]).execute("select encrypted_value from cookies")})))', path.join(prof, 'Default', 'Cookies')], { encoding: 'utf8' }).stdout.trim();
 const visit = async (b) => { const { targetId } = (await b.send('Target.createTarget', { url: URL0 })).result; await sleep(1500); const all = (await b.send('Storage.getCookies')).result.cookies; await b.send('Target.closeTarget', { targetId }); return all; };
@@ -66,6 +83,18 @@ try {
   b1.child.kill('SIGTERM'); await sleep(800); b1 = await bus(appOn, 'on'); // the whole session restarts: a NEW bus + service reads the sealed file
   const c2 = await chromeRun(appOn, b1.plan, profOn, async (b) => (await b.send('Storage.getCookies')).result.cookies);
   check('after a browser + bus restart the cookie still decrypts (the key round-tripped through the sealed store)', c2.some((c) => c.name === 'sid' && c.value === 'kept-across-restart'), JSON.stringify(c2.map((c) => c.name)));
+  console.log('①b the environ census (lane display-secret-fd): the key is in NO process of this box but the planted control');
+  await chromeRun(appOn, b1.plan, profOn, async () => {
+    const keyHex = b1.facts.keyHex;
+    const planted = spawn('sleep', ['5'], { env: { PATH: process.env.PATH, VS_SECRETS_SCAN_CONTROL: keyHex }, stdio: 'ignore' }); kids.push(planted);
+    await sleep(300);
+    const session = spawnSync('ps', ['-s', String(b1.child.pid), '-o', 'pid=,comm='], { encoding: 'utf8' }).stdout.trim().split('\n').map((l) => l.trim()).join(' · ');
+    const { out, read } = procHolders(keyHex);
+    console.log(`  census: ${read} environs read · the bus's session: ${session} · the app: ${chromeChild.pid} chrome`);
+    check('ONLY the planted control holds the key — not dbus-daemon, not a service it activated, not the app (the scan proves itself on the control)', out.length === 1 && out[0] === `${planted.pid} sleep`, `${out.join(' · ')} (read ${read})`);
+    check('the key file of this bring-up is gone — the service took it at start', !fs.existsSync(b1.ss.keyFile), b1.ss.keyFile);
+    planted.kill('SIGKILL');
+  });
   const log = fs.readFileSync(path.join(appOn, 'app.log'), 'utf8');
   check('Chrome\'s libsecret opened a plain session; nothing it stored is in the log', /OpenSession plain/.test(log) && !/kept-across-restart/.test(log), log.split('\n').filter((l) => l.includes('[secrets]')).slice(0, 4).join(' / '));
   console.log('② RED control: the setting off (no service on the bus)');

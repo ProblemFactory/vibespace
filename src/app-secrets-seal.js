@@ -2,8 +2,9 @@
 'use strict';
 /**
  * The sealing half of src/secret-service.py (lane app-display-secrets, 2026-10-12, B-4a59 piece 4): ONE app display's
- * Secret Service items, sealed at rest with src/secret-box.js's cipher (aes-256-gcm) under the per-display key in
- * VS_APP_SECRETS_KEY (64 hex — the env only, never argv; the service hands it to this child alone).
+ * Secret Service items, sealed at rest with src/secret-box.js's cipher (aes-256-gcm) under the per-display key the
+ * service hands this child alone — over an inherited PIPE whose fd number is VS_APP_SECRETS_FD (lane
+ * display-secret-fd, B-6c6d: never an env value, never argv — this process's environ carries a number, not a key).
  *   open <file>  → stdout the items JSON (`[]` when the file does not exist); exit 3 = not decryptable with this key
  *   seal <file>  ← stdin the items JSON; writes `{ v, n, sealed }` (n = the item count, read by the window's ⋯ menu
  *                  without the key) to a 0600 temp file and renames it over <file> (atomic).
@@ -12,10 +13,12 @@
 const fs = require('fs');
 const { encWith, decWith } = require('./secret-box');
 
-const hex = String(process.env.VS_APP_SECRETS_KEY || '');
-delete process.env.VS_APP_SECRETS_KEY;
 const fail = (code, line) => { process.stderr.write(`app-secrets-seal: ${line}\n`); process.exit(code); };
-if (!/^[0-9a-f]{64}$/i.test(hex)) fail(2, 'no per-display key');
+const fd = Number(process.env.VS_APP_SECRETS_FD);
+delete process.env.VS_APP_SECRETS_FD;
+let hex = '';
+if (Number.isInteger(fd) && fd > 2) { try { hex = fs.readFileSync(fd, 'utf8').trim(); } catch (e) { fail(2, `the per-display key could not be read off fd ${fd} (${(e && e.code) || 'error'})`); } }
+if (!/^[0-9a-f]{64}$/i.test(hex)) fail(2, 'no per-display key on VS_APP_SECRETS_FD');
 const key = Buffer.from(hex, 'hex');
 const [mode, file] = process.argv.slice(2);
 if (!file) fail(2, 'usage: app-secrets-seal.js open|seal <file>');

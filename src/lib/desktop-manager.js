@@ -3,6 +3,7 @@ import { startPointerDrag } from './drag-feed.js'; // THE feed for every drag do
 import { t } from './i18n.js';
 import { stageRefusalSentence } from './stage-rules.js'; // inc-muly2izg-cks3: the Stage's move refusal, in words (PURE)
 import { mergeDesktopRecord, windowIds, captureForViewport, VIEWPORT_CHROME } from './desktop-record.js'; // userW inc-mun7qjmw-iksh: a held record is a VIEW — every write merges (PURE)
+import { deferKeysOf } from './layout-model.js'; // B-4767: a desktop's deferred records wait in one slot per writer class (PURE)
 
 /** A window this page tried to build (a desktop's first visit, the boot restore) and that is still absent this long
  *  after is one it cannot build: the record drops it, and says so to the server's belt ('unbuilt'). Before that it is
@@ -709,7 +710,7 @@ export class DesktopManager {
       }
       // the deleted desktops' held records, wire bases and deferred records go with them — never a ghost record a
       // late broadcast or the drain fills (verify r2 R1(b))
-      for (const id of gone) { this._savedStates.delete(id); this._wireIds.delete(id); this.app.layoutManager?._pendingRemote?.delete(id); }
+      for (const id of gone) { this._savedStates.delete(id); this._wireIds.delete(id); for (const k of deferKeysOf(id)) this.app.layoutManager?._pendingRemote?.delete(k); } // both writer classes' slots (B-4767)
 
       // If our active desktop was deleted, switch to where its windows went (else the first). While staged,
       // _activeId is '__stage__' (never in the meta) — the old check

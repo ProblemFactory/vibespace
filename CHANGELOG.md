@@ -2,6 +2,23 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.268 — 2026-10-14
+
+### Added
+- The Desktop button lists every app window that is running, with where it runs and who started it, and opens or closes each one.
+
+### Fixed
+- An app that is already running, even one an agent started, now shows on its card in Apps; pressing the card opens it instead of starting it again.
+- An app that closes right after it starts now says so in its window and on its card, and offers the copy that is already running.
+- A browser installed as an app now opens with a profile of its own, so it no longer closes at once when the same browser is already open.
+- A phone switching windows no longer makes the computer lose a window move it was about to apply.
+- An account that runs on its long-lived token says “long-lived token only” once in the account list, instead of three hints.
+- An agent's message to a person is never cut off silently when its quoting goes wrong: the message is refused and the agent is told why.
+- After the computer restarts, notices reach your conversations again and “Hand over now” delivers them, instead of saying the agent cannot be reached.
+
+### Security
+- The key to a desktop app's saved logins is handed only to its keyring, no longer readable by other programs running for that app's window.
+
 ## 2.369.267 — 2026-10-13
 
 ### Added

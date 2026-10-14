@@ -289,9 +289,17 @@ const namedError = (code, msg) => { const e = new Error(msg); e.code = code; ret
  *  `desktop-serve`; an unknown op here is refused by name). */
 /** lane e2a (design-agent-browser-v2 §E2): the record origin of a browser an agent launched through its own door. */
 const AGENT_BROWSER_ORIGIN = 'agent-browser';
+/** lane app-launch-singleton: WHO started a record — `{ kind: 'agent', sessionId, name }` (an agent's door: `vibespace-window
+ *  open`, the agent browser, a session token on the launch route) | `{ kind: 'person' }` (the person's own door) | null. */
+function launchedByOf(b) {
+  if (!b || typeof b !== 'object') return null;
+  if (b.kind === 'person') return { kind: 'person' };
+  if (b.kind !== 'agent') return null;
+  return { kind: 'agent', ...(b.sessionId ? { sessionId: String(b.sessionId).slice(0, 80) } : {}), ...(b.name ? { name: String(b.name).slice(0, 120) } : {}) };
+}
 /** lane e2a r3 (verify r1 #12): what an agent browser's ending says (rec.lastError — the exit toast words its own). */
 const AGENT_BROWSER_ENDING_WORDS = Object.freeze({ 'opener-ended': 'closed with the conversation that opened it', 'opener-gone': 'closed: the conversation that opened it ended while it started', 'opener-stopped': 'closed by the agent that opened it' });
-const DESKTOP_SERVE_OPS = Object.freeze(['facts', 'launch', 'stop', 'status', 'list', 'windows', 'fit', 'keep-alive', 'pin', 'relaunch', ...AS.APP_OPS]);
+const DESKTOP_SERVE_OPS = Object.freeze(['facts', 'launch', 'stop', 'status', 'list', 'windows', 'fit', 'keep-alive', 'pin', 'relaunch', 'close-asked', ...AS.APP_OPS]);
 /** The hub settings a machine's decisions read (the op carries them as `settings`; in-process they are the hub's own reader). */
 const SETTING_KEYS = Object.freeze(['desktop.backendPrefs', 'desktop.appScale', 'desktop.idleTimeoutMin', 'desktop.appPortal', 'desktop.appNotifications', 'desktop.appSecrets']);
 const settingsReader = (obj) => (key) => (obj && typeof obj === 'object' && SETTING_KEYS.includes(key) ? obj[key] : undefined);
@@ -440,7 +448,35 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
       if (row.office) return { ...O.officeRowFor(row, officeFactsOf(hostFacts, binOf)), args: [...(row.args || [])] }; // §7.9: presence = the binary AND the module's library
       const p = row.exec.includes('/') ? (fs.existsSync(row.exec) ? row.exec : null) : binOf(row.exec);
       return { ...row, args: [...row.args], available: !!p, path: p, reason: p ? null : `${row.exec} not on PATH` };
-    }).concat(appRows, seenRows);
+    }).concat(appRows, seenRows).map(launchFacts);
+  }
+  /** lane app-launch-singleton (fleet inc-mv7hxc2n-2cvr, .268): what a catalog row's LAUNCH is — an installed / witnessed /
+   *  registered browser of a known family gets that family (`browserBy: 'exec'`), so its launch takes browserArgv's own
+   *  profile dir like the catalog's browser row (DEFECT #0: `app.<entry>` with `Exec=/usr/bin/google-chrome-stable %U`
+   *  ran AS TYPED on the user's default profile); every row says whether a second instance can run beside a running one
+   *  (`runsTwice` — the card offers "Open another" only then). */
+  function launchFacts(row) {
+    let r = row;
+    if (!r.browser) { const bv = M.appBrowserVerdict(r); if (bv.browser) r = { ...r, browser: bv.browser, browserBy: 'exec' }; }
+    return { ...r, runsTwice: M.runsTwiceVerdict(r).twice };
+  }
+  /** lane app-launch-singleton: WHO HOLDS a browser row's DEFAULT profile (Chrome's SingletonLock — display.profileLockFact)
+   *  → `row.lock = { pid, live, recordId }` (`recordId` = the live record whose app process — or its session — holds it: an
+   *  instance of that browser the card names). Read for the browser rows the dialog lists, one read per profile dir. */
+  async function lockFacts(rows) {
+    if (typeof display.profileLockFact !== 'function') return rows;
+    const home = homeOf(), live = liveRecords(), seen = new Map();
+    for (const row of rows) {
+      if (!M.appBrowserVerdict(row).isBrowser) continue;
+      const dir = M.defaultProfileDirOf(row.path || row.exec);
+      if (!dir) continue;
+      if (!seen.has(dir)) { let f = null; try { f = await display.profileLockFact({ home, dir }); } catch { f = null; } seen.set(dir, f); }
+      const f = seen.get(dir);
+      if (!f) continue;
+      const rec = f.live ? live.find((r) => r.pids && Number.isInteger(r.pids.app) && (r.pids.app === f.pid || r.pids.app === f.sid)) : null;
+      row.lock = { pid: f.pid, live: f.live, recordId: rec ? rec.id : null };
+    }
+    return rows;
   }
   /** §7.9: the machine's LibreOffice facts — hostFacts carries them (desktop-display officeFacts); a facts object from an
    *  older display module (a suite's stand-in) is read from its bins alone: the binary known, the modules not. */
@@ -545,7 +581,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     let witness = null; // lane apps-launcher-witness: `opts.witness: 'recheck'` = the group's Check again (else the open rule)
     try { if (typeof apps.refreshWitness === 'function') witness = await apps.refreshWitness({ reason: opts.witness === 'recheck' ? 'recheck' : 'open' }); } catch { /* the last list */ }
     const resolved = resolve(f, undefined, serverSetting0);
-    return { apps: listApps(), registry: registry(f), witness, hostName: os.hostname(), availability: { backend: resolved.backend, via: resolved.via, recipe: resolved.recipe, stream: resolved.stream, caps: M.capsOf({ backend: resolved.backend }, backends), fallbackWhy: resolved.fallbackWhy, ladder: resolved.ladder, prefs: instancePrefs(serverSetting0), xpra: f.xpra, bins: f.bins }, cap: { used: liveRecords().length, cap: limits.CONCURRENT_CAP }, idleTimeoutMin: idleTimeoutMin(serverSetting0) };
+    return { apps: listApps(), registry: await lockFacts(registry(f)), witness, hostName: os.hostname(), availability: { backend: resolved.backend, via: resolved.via, recipe: resolved.recipe, stream: resolved.stream, caps: M.capsOf({ backend: resolved.backend }, backends), fallbackWhy: resolved.fallbackWhy, ladder: resolved.ladder, prefs: instancePrefs(serverSetting0), xpra: f.xpra, bins: f.bins }, cap: { used: liveRecords().length, cap: limits.CONCURRENT_CAP }, idleTimeoutMin: idleTimeoutMin(serverSetting0) };
   }
 
   function idleTimeoutMin(read = serverSetting) {
@@ -590,6 +626,18 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     const v = M.validateLaunchRequest(body || {}, reg);
     if (!v.ok) throw namedError(v.code || 'bad-request', v.error);
     let row = v.launch.row;
+    // lane app-launch-singleton: `ifRunning: 'attach'` (the Apps card's press, For you's Open) — a RUNNING instance of the
+    // row is answered (`attached: true`) instead of a second launch its singleton would swallow; a document always opens
+    const ifRunning = body && body.ifRunning !== undefined ? body.ifRunning : null;
+    if (ifRunning !== null && ifRunning !== 'attach') throw namedError('bad-request', 'ifRunning must be "attach"');
+    if (ifRunning === 'attach' && v.launch.source === 'registry' && !v.launch.file) {
+      const lv = M.launchVerdict({ row, apps: liveRecords().map(view), host: 'local' });
+      if (lv.act === 'attach') {
+        log.log?.(`[desktop] launch of ${row.id} attached to ${lv.target.id} (running on ${lv.target.display || 'its display'}) — no second instance started`);
+        return { ...lv.target, attached: true };
+      }
+    }
+    if (row.browserBy === 'exec') { const fam = M.browserFamilyOf(row.exec); if (fam) row = { ...row, browser: fam }; else { row = { ...row }; delete row.browser; delete row.browserBy; } } // a variant runs its own executable
     // §7.9: a DOCUMENT opens in its own module's row — THE open-with verdict again, here, with THIS machine's catalog
     // (the route ran the machine rule before asking; a request never skips a check by arriving another way)
     let doc = null;
@@ -680,6 +728,8 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
       if (typeof opts.label === 'string' && opts.label.trim()) rec.label = opts.label.trim().slice(0, 120); // r3 (#11): the agent's own label (the door cleaned it)
     }
     if (pinOf(opts.pin)) rec.pin = pinOf(opts.pin); // lane e2b (§E2.2): the pinned pixel size — the door's `--size`, or a relaunch carrying it
+    const lb = launchedByOf(opts.launchedBy || (rec.origin === AGENT_BROWSER_ORIGIN && rec.by ? { kind: 'agent', ...rec.by } : null));
+    if (lb) rec.launchedBy = lb; // lane app-launch-singleton: WHO started it — the card / the Desktop list say it ("started by agent session X")
     if (office) { rec.office = office.module; rec.profileDir = office.profileDir; } // §7.9
     if (doc) { rec.file = doc.file; rec.fileMtimeAtLaunch = doc.mtime; } // §7.9: the after-edit fact's baseline
     rec.recipe = resolved.recipe;
@@ -723,6 +773,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     // lane e2a r3 (verify r1 #2/#6): the agent's own browser stays the agent's through a Scale ▸ relaunch — its origin, opener
     // and label ride to the successor (keepProfile + url already ride the body); the engine carries the lease along replacedBy
     const lopts = { scaleChoice: rv.choice, replacing: id, ...(rec.origin === AGENT_BROWSER_ORIGIN ? { origin: rec.origin, by: rec.by, label: rec.label } : {}), ...(pinOf(rec.pin) ? { pin: rec.pin } : {}) }; // lane e2b: the pin rides the relaunch
+    if (rec.launchedBy) lopts.launchedBy = rec.launchedBy; // lane app-launch-singleton: and who started it
     if (settings) lopts.settings = settings;
     // §7.9: a LibreOffice session relaunches the same way — its document is LOCKED by the running instance
     // (.~lock.<name>#: a successor started beside it would open "Document in use"), and its profile goes with it
@@ -925,10 +976,12 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
         const plan = M.portalPlan({ dir, display: up.display, authFile: sessionAuth, bins: display.portalBins({ env: base }), a11y: await display.a11yBusAddress({ env: base }), why: rec.portalWhy, notify });
         if (gone()) return;
         // lane app-display-secrets (B-4a59 piece 4): the same bus activates the app's Secret Service — its service file
-        // and the per-display key (the BUS env only) are laid over the plan here; `rec.secrets` is said once the bus runs
+        // and (lane display-secret-fd, B-6c6d) its one-shot key FILE are laid over the plan here, written 0600 with the
+        // rest before the bus starts. NOTHING of the key goes into plan.env: that env is dbus-daemon's own environ and
+        // every service it activates inherits it. `rec.secrets` is said once the bus runs.
         const secrets = plan.ok && display.appSecretsFacts ? M.secretServicePlan({ plan, facts: await display.appSecretsFacts({ env: base, mode: serverSetting('desktop.appSecrets'), dataDir, id }) }) : null;
         if (gone()) return;
-        if (secrets && secrets.file) { plan.files.push(secrets.file); Object.assign(plan.env, secrets.env); }
+        if (secrets && secrets.files.length) plan.files.push(...secrets.files);
         if (!plan.ok) rec.portal = `unavailable: ${plan.why}`;
         else {
           try { const pc = await display.startPortalBus({ plan, env: ctx.x11Env(up.display), logFd }); ctx.onPart('portal', pc, {}); rec.portal = 'on'; rec.notify = plan.notify; portalEnv = plan.appEnv; drainNotes(rec); } // drainNotes: a launch announces from byte 0
@@ -975,6 +1028,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
         if (!sd.ok) log.warn?.(`[desktop] ${id}: the browser's own frame was not seeded (${sd.why}) — it keeps the system title bar and VibeSpace's`);
         if (gone()) return;
       }
+      rec.appAt = now(); // lane app-launch-singleton: the app's own start — a quick exit is measured from here
       const a = await display.startApp({ exec: rec.exec, args: rec.args, cwd: rec.cwd, env: appEnv, logFd });
       ctx.onPart('app', a, {});
       if (gone()) return;
@@ -1012,18 +1066,28 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     }
   }
 
-  function fail(rec, event, why) {
+  function fail(rec, event, why, tail = '') {
     const next = M.transition(rec.state, event);
     if (!next) return;
     rec.state = next; rec.lastError = why; rec.endedAt = now();
-    log.warn?.(`[desktop] ${rec.id} ${next}: ${why}`);
+    log.warn?.(`[desktop] ${rec.id} ${next}: ${why}${tail ? ` — ${tail}` : ''}`);
   }
   function onPartExit(id, part, code, signal) {
     const rec = store.apps[id];
     if (!rec || !M.isLiveState(rec.state) || stopping.has(id)) return;
     if (part === 'app') {
       rec.exitCode = code;
-      fail(rec, 'app-exit', signal ? `application ended by ${signal}` : `application exited (code ${code})`);
+      // lane app-launch-singleton (fleet inc-mv7hxc2n-2cvr): the journal line says WHEN (`… exited: application exited (code 0)
+      // — 0.8 s after ready`); an app that ends within QUICK_EXIT_MS of its start was no window at all — `quickExit` on the
+      // record (the window keeps the sentence, the card says it, the hub files a notice) naming a RUNNING instance of the same
+      // app when one exists (the usual cause: its singleton took the launch over)
+      const qv = M.quickExitVerdict(rec, now());
+      fail(rec, 'app-exit', signal ? `application ended by ${signal}` : `application exited (code ${code})`, qv.tail);
+      if (qv.quick) {
+        const other = liveRecords().find((r) => r.id !== id && M.sameAppRecord(r, { id: rec.appId, path: rec.exec }, r.hostId));
+        rec.quickExit = { afterMs: qv.afterMs, sinceReadyMs: qv.sinceReadyMs, code: signal ? null : code, signal: signal || null, running: other ? other.id : null, runningDisplay: other ? other.display || null : null };
+        log.warn?.(`[desktop] ${id}: the app ended ${qv.tail} — a launch that showed no window; ${other ? `the same app runs as ${other.id} on ${other.display}` : 'no other instance of it is recorded'}`);
+      }
       // round 3 A2 (docs/design-desktop-apps-seamless §3.2): the windows LEFT on the display at the exit — ONE census
       // while X is still up, BEFORE the teardown, recorded on the record the commit broadcasts. Every client decides
       // "the app exited ⇒ close my window" from this one fact (M.exitCloseVerdict): 0 = the app took its windows with it
@@ -1033,6 +1097,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
         rec.windowsAtExit = await windowsLeftAtExit(rec);
         await teardown(rec, handles);
         commit();
+        if (rec.quickExit) { try { H.onQuickExit?.(view(rec)); } catch (e) { log.warn?.(`[desktop] ${id}: quick-exit hook failed: ${e.message}`); } } // the hub's notice
       })().catch((e) => { log.warn?.(`[desktop] ${id}: app-exit teardown failed: ${e.message}`); commit(); });
       return;
     } else if (part === 'x') fail(rec, 'display-gone', `X display ${rec.display} exited (${signal || `code ${code}`})`);
@@ -1159,6 +1224,9 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
       if (!(await signalVerified(rec, 'session marker leftover', escaped, null))) clean = false;
     }
     if (rec.portal === 'on') { try { await display.unmountUnder(path.join(logRoot, rec.id, 'portal')); } catch (e) { log.warn?.(`[desktop] ${rec.id}: portal unmount failed: ${e.message}`); } } // the document portal's FUSE outlives a killed portal
+    // lane display-secret-fd: the key is handed over ONCE — the service unlinks it as it starts. An app that never asked
+    // its keyring leaves the file behind, so the display's teardown takes it with it (never at rest beside the store).
+    try { fs.unlinkSync(path.join(logRoot, rec.id, 'portal', M.SECRETS_KEY_FILE)); } catch { /* read by the service, or never written */ }
     children.delete(rec.id); sampledAt.delete(rec.id); samples.delete(rec.id); clearFit(rec.id); endNotes(rec.id);
     if (rec.file) await noteFileEnd(rec, { clean }); // §7.9: every part is gone — the document's mtime now vs at launch (the hub's file-changed); its lock, when this session wrote it
     try { H.onTeardown?.(rec.id); } catch (e) { log.warn?.(`[desktop] ${rec.id}: teardown hook failed: ${e.message}`); } // the hub's guard + live rows go with the session
@@ -1293,6 +1361,17 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     const rec = store.apps[id];
     if (!rec) throw namedError('not-found', `no desktop app ${id}`);
     rec.idleTimeoutMs = 0; rec.lastInputAt = now();
+    commit();
+    return view(rec);
+  }
+  /** int267 seam (the guard-programmatic-not-the-press law): the person's own close — the window's outer ✕ stamps the
+   *  record BEFORE it sends close-window, so the exit that answers it is an exit (`quickExitVerdict` asked ⇒ never a
+   *  quick exit: the window closes, no notice). A record no longer live is answered as it stands. */
+  function closeAsked(id) {
+    const rec = store.apps[id];
+    if (!rec) throw namedError('not-found', `no desktop app ${id}`);
+    if (!M.isLiveState(rec.state)) return view(rec);
+    rec.closeAskedAt = now(); rec.closeAskedBy = 'window';
     commit();
     return view(rec);
   }
@@ -1658,7 +1737,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
   const isStopping = (id) => stopping.has(id);
 
   load();
-  return { notifications, launch, relaunch, startDeferred, stop, reshapeStore, setPin, keepAlive, noteInput, noteDesktopSize, setWatchProbe, fitApp, get, list, listApps, liveRecords, streamTarget, x11EnvFor, windows, xpraWww, instancePrefs, facts, installFacts, installState, registry, adoptAll, start, shutdown, tick, sessionPids, apps,
+  return { notifications, launch, relaunch, startDeferred, stop, reshapeStore, setPin, keepAlive, closeAsked, noteInput, noteDesktopSize, setWatchProbe, fitApp, get, list, listApps, liveRecords, streamTarget, x11EnvFor, windows, xpraWww, instancePrefs, facts, installFacts, installState, registry, adoptAll, start, shutdown, tick, sessionPids, apps,
     machineView, commit, markDirty, latestSample, isStopping, backends,
     storeFile, logRoot, STORE_FILE, LOG_DIR, SESSION_ENV, _store: () => store };
 }
@@ -1721,6 +1800,7 @@ async function runDesktopServeOp(ds, action, params = {}) {
     if (op === 'status') return { ok: true, app: ds.get(id), sample: ds.latestSample(id) };
     if (op === 'stop') return { ok: true, app: await ds.stop(id, { why: STOP_WHYS.includes(p.why) ? p.why : 'user', force: p.force === true }) }; // B-04da ④: `force` = the person confirmed the loss
     if (op === 'keep-alive') return { ok: true, app: ds.keepAlive(id) };
+    if (op === 'close-asked') return { ok: true, app: ds.closeAsked(id) }; // int267 seam: the person's ✕ asked the app (never a quick exit)
     if (op === 'pin') { const v = parsePin(p.pin); return v.ok ? { ok: true, app: ds.setPin(id, v.pin) } : bad(v.error); } // lane e2b: a paired machine's window pinned by the hub's verdict
     if (op === 'windows') {
       const r = await ds.windows(id);

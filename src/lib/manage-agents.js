@@ -106,11 +106,14 @@ export function loginExpiryChipHtml(a, { local = true } = {}) {
   // row's long-lived token is valid — sessions keep running, only the quota ⟳ needs a re-login.
   // WARNING colour (the class default), never the dead red; same re-login door. In its last day
   // the chip counts the TOKEN down (the oat chip beside it says re-mint).
+  // ONE WORD (2026-10-14, owner: "这些提示有些多余，直接说仅长期 token 就行了"): the label is 「仅长期 token」 —
+  // the ident line and the healthy green token tag stop repeating it (oatOnlyChipShown); the tooltip
+  // keeps the whole sentence (login ended / token valid until / only ⟳ needs a re-login).
   if (ls.state === 'oat-only') {
     if (!local) return ''; // a host section shows the DEAD state only (and the token rides to hosts)
     const near = local && typeof ls.msLeft === 'number' && ls.msLeft < 24 * 3600e3;
-    const label = near ? t('login expired · long-lived token ends in {left}', { left: escHtml(loginLeftText(ls.msLeft)) })
-      : t('login expired · sessions use the long-lived token; usage refresh needs re-login');
+    const label = near ? t('long-lived token only · ends in {left}', { left: escHtml(loginLeftText(ls.msLeft)) })
+      : t('long-lived token only');
     const title = t('This account’s OAuth login ended {when}; sessions keep running on its long-lived token (valid until {date}); only the quota refresh (⟳) needs you to sign in again.', { when: escHtml(loginWhenText(ls.refreshExpiresAt)), date: escHtml(loginWhenText(ls.oatValidUntil)) });
     return ` <span class="acct-blocked-hint acct-login-chip acct-login-oat" role="button" tabindex="0" data-relogin="${escHtml(a.id)}" title="${title}">${ROSTER_ICONS.CLOCK}${label}</span>`;
   }
@@ -173,6 +176,43 @@ export function acctExtrasHtml({ login = '', oat = '', oatWarn = false, prov = '
   const soft = prov + (oatWarn ? '' : oat) + note;
   if (!hard && !soft) return '';
   return `<span class="acct-key-extra">${hard}${soft ? `<span class="acct-extra-soft">${soft}</span>` : ''}</span>`;
+}
+
+/** Does this row's login chip already say 「仅长期 token」 (loginExpiryChipHtml's oat-only branch —
+ *  local roster only)? Then the row says it ONCE (2026-10-14, owner: "这里为啥没有仅长期 token 的提示了" /
+ *  "直接说仅长期 token 就行了"): the ident line never repeats the word and the healthy green token tag
+ *  folds into it. An expired login still parses loggedIn, so this reads the chip's state, never loggedIn. */
+export const oatOnlyChipShown = (a, { local = true } = {}) => !!(local && a && a.loginState && a.loginState.state === 'oat-only');
+
+/** A subscription row's ident (the tail beside the name). `email` = the best-known address,
+ *  `hostTag` = the "· logged in on {host}" tag ('' when no machine holds its login). */
+export function subIdentHtml(a, { email = '', hostSub = false, hostTag = '', local = true } = {}) {
+  return a.loggedIn ? escHtml(email + (a.subscriptionType ? (email ? ' · ' : '') + a.subscriptionType : '')) || t('logged in')
+    // Host-held login + empty LOCAL dir: "not logged in" (which is
+    // about the local dir) next to "logged in on {host}" read as a
+    // contradiction (real report) — the host tag carries the state.
+    : hostSub ? escHtml(email)
+    : hostTag ? `${escHtml(email)}${email ? ' ' : ''}${hostTag}`
+    // a token row is never "not logged in"; when the chip says 「仅长期 token」 the ident is the e-mail or nothing
+    : a.oat ? (oatOnlyChipShown(a, { local }) ? escHtml(email) : `${escHtml(email)}${email ? ' ' : ''}<span class="acct-linked-hint">${t('long-lived token only')}</span>`)
+    : `<span class="ob-warn">${t('not logged in')}</span>`;
+}
+
+/** Long-lived token state: quiet while healthy, amber under 30 days,
+ *  red once expired (a 401 on an expired oat has no self-heal). A host
+ *  section (`local: false`) shows only the dead one. The healthy green tag
+ *  is not drawn beside the 「仅长期 token」 chip (the word already says there
+ *  is a token); a countdown or a death is another fact and stays. */
+export function oatTagHtml(a, { local = true } = {}) {
+  if (!a || a.type !== 'subscription' || !a.oat) return '';
+  const oatDead = a.oatDaysLeft <= 0;
+  if (!local && !oatDead) return '';
+  return a.oatDaysLeft <= 0
+    ? ` <span class="acct-blocked-hint" style="color:var(--red,#e55)" title="${t('The long-lived token EXPIRED — sessions using it fail until you re-mint one (⋯ → Long-lived token).')}">${t('· long-lived token expired')}</span>`
+    : a.oatDaysLeft <= 30
+    ? ` <span class="acct-blocked-hint" title="${t('Long-lived token (used for remote machines) expires in {n} days — re-mint it in ⋯ → Long-lived token.', { n: a.oatDaysLeft })}">${t('· long-lived token · {n}d left', { n: a.oatDaysLeft })}</span>`
+    : oatOnlyChipShown(a, { local }) ? ''
+    : ` <span class="acct-linked-hint" title="${t('Has a long-lived token: usable on any machine (incl. paired devices) without shipping the login. Renews in {n} days.', { n: a.oatDaysLeft })}">${t('· long-lived token')}</span>`;
 }
 
 function remoteClaudeSubscriptionLoginCommand(id) {
@@ -2569,14 +2609,7 @@ export function installManageAgents(App, ctx = {}) {
           : a.current ? escHtml('→ ' + (a.currentName || a.current) + (a.email ? ' · ' + a.email : ''))
           : `<span class="ob-warn">${t('no target — pick a subscription in ⋯')}</span>`)
         : isSub
-        ? (a.loggedIn ? escHtml((aEmail || '') + (a.subscriptionType ? (aEmail ? ' · ' : '') + a.subscriptionType : '')) || t('logged in')
-          // Host-held login + empty LOCAL dir: "not logged in" (which is
-          // about the local dir) next to "logged in on {host}" read as a
-          // contradiction (real report) — the host tag carries the state.
-          : hostSub ? escHtml(aEmail || '')
-          : hlNames.length ? `${escHtml(aEmail || '')}${aEmail ? ' ' : ''}${hlTag}`
-          : a.oat ? `${escHtml(aEmail || '')}${aEmail ? ' ' : ''}<span class="acct-linked-hint">${t('long-lived token only')}</span>`
-          : `<span class="ob-warn">${t('not logged in')}</span>`)
+        ? subIdentHtml(a, { email: aEmail || '', hostSub, hostTag: hlTag, local: !selectedHost })
         : `API …${escHtml(a.tail || '')} <span class="acct-master-hint" title="${t('VibeSpace holds the MASTER copy of this key; sessions get derived working copies on their machines (swept on removal). ⋯ → “Show key…” reveals the value.')}">${t('· master held by VibeSpace')}</span>`;
       // Some login flows leave the creds dir without an identity file — the
       // email is then unknowable from disk, which breaks same-account detection
@@ -2597,15 +2630,8 @@ export function installManageAgents(App, ctx = {}) {
         ? ` <span class="acct-linked-hint" title="${t('Imported from {host}’s Console login — an independent copy held in VibeSpace (not linked to {host}); usable on any machine.', { host: escHtml(a.originHost) })}">${t('· from {host}', { host: escHtml(a.originHost) })}</span>` : '';
       const noteTag = a.note
         ? ` <span class="acct-blocked-hint" title="${escHtml(a.note)}">· ${escHtml(String(a.note).slice(0, 24))}${a.note.length > 24 ? '…' : ''}</span>` : '';
-      // Long-lived token state: quiet while healthy, amber under 30 days,
-      // red once expired (a 401 on an expired oat has no self-heal).
-      const oatTag = (isSub && a.oat && (!selectedHost || oatDead))
-        ? (a.oatDaysLeft <= 0
-          ? ` <span class="acct-blocked-hint" style="color:var(--red,#e55)" title="${t('The long-lived token EXPIRED — sessions using it fail until you re-mint one (⋯ → Long-lived token).')}">${t('· long-lived token expired')}</span>`
-          : a.oatDaysLeft <= 30
-          ? ` <span class="acct-blocked-hint" title="${t('Long-lived token (used for remote machines) expires in {n} days — re-mint it in ⋯ → Long-lived token.', { n: a.oatDaysLeft })}">${t('· long-lived token · {n}d left', { n: a.oatDaysLeft })}</span>`
-          : ` <span class="acct-linked-hint" title="${t('Has a long-lived token: usable on any machine (incl. paired devices) without shipping the login. Renews in {n} days.', { n: a.oatDaysLeft })}">${t('· long-lived token')}</span>`)
-        : '';
+      // Long-lived token state (oatTagHtml): quiet while healthy, amber under 30 days, red once expired.
+      const oatTag = oatTagHtml(a, { local: !selectedHost });
       // LOGIN-SESSION expiry (2026-09-07): the chip that makes a dying login
       // visible BEFORE a turn dies on it. Pools show their members' worst.
       // (+ a LAPSED subscription's chip, 2026-10-08 — the same hard slot: a member the pool skips is said beside its login)

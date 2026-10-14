@@ -62,7 +62,7 @@ const journalOf = (f) => { try { return fs.readFileSync(f, 'utf8').split('\n').f
 /** A plan's files under `dir` (the bus's own dirs), returned with the plan. */
 const writePlan = (dir, notify) => {
   const p = M.portalPlan({ dir, display: ':0', bins: D.portalBins({ env: process.env }), why: 'row', notify });
-  const ss = M.secretServicePlan({ plan: p, facts: secretFacts }); if (ss.file) { p.files.push(ss.file); Object.assign(p.env, ss.env); } // lane app-display-secrets (desktop-serve lays it the same way)
+  const ss = M.secretServicePlan({ plan: p, facts: secretFacts }); if (ss.files.length) p.files.push(...ss.files); // lane app-display-secrets + display-secret-fd: the service file AND its one-shot key file, nothing over the env (desktop-serve lays it the same way)
   for (const d of p.dirs) fs.mkdirSync(d, { recursive: true, mode: 0o700 });
   for (const f of p.files) { fs.mkdirSync(path.dirname(f.file), { recursive: true }); fs.writeFileSync(f.file, f.text, { mode: 0o600 }); }
   return p;

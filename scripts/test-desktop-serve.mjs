@@ -151,7 +151,7 @@ const machine = (extra = {}) => DS.install({ dataDir: path.join(root, `m${++seq}
 console.log('§1 the census');
 const OPS = DS.DESKTOP_SERVE_OPS;
 const AS = require('../src/app-serve.js');
-ok(Array.isArray(OPS) && Object.isFrozen(OPS) && JSON.stringify(OPS) === JSON.stringify(['facts', 'launch', 'stop', 'status', 'list', 'windows', 'fit', 'keep-alive', 'pin' /* lane e2b: a paired machine's window pinned */, 'relaunch', ...AS.APP_OPS]) && JSON.stringify(AS.APP_OPS) === JSON.stringify(['app-status', 'app-plan', 'app-install', 'app-remove', 'app-refresh', 'app-adopt-drift', 'app-fetch', 'app-unstage', 'app-forget']), `the closed op set is the design's nine + lane e2b's pin + Layer 0's nine app ops (design 009: app-fetch, app-unstage; design 019: app-forget) (${OPS.join(' ')})`);
+ok(Array.isArray(OPS) && Object.isFrozen(OPS) && JSON.stringify(OPS) === JSON.stringify(['facts', 'launch', 'stop', 'status', 'list', 'windows', 'fit', 'keep-alive', 'pin' /* lane e2b: a paired machine's window pinned */, 'relaunch', 'close-asked' /* int267 seam: the person's ✕ asked the app — never a quick exit */, ...AS.APP_OPS]) && JSON.stringify(AS.APP_OPS) === JSON.stringify(['app-status', 'app-plan', 'app-install', 'app-remove', 'app-refresh', 'app-adopt-drift', 'app-fetch', 'app-unstage', 'app-forget']), `the closed op set is the design's nine + lane e2b's pin + int267's close-asked + Layer 0's nine app ops (design 009: app-fetch, app-unstage; design 019: app-forget) (${OPS.join(' ')})`);
 const serveSrc = read('src/desktop-serve.js');
 const runnerSrc = serveSrc.slice(serveSrc.indexOf('async function runDesktopServeOp('));
 const appRunnerSrc = read('src/app-serve.js').slice(read('src/app-serve.js').indexOf('async function runAppOp('));

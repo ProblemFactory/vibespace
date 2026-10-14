@@ -343,6 +343,20 @@ function createBrowserPasskeyCopy() {
   } catch (e) { console.warn('[tools] browser passkey words not copied beside vibespace-browser: ' + e.message); }
 }
 createBrowserPasskeyCopy();
+// lane cli-one-text-arg (the owner 2026-10-14): ONE TEXT PER FREE-TEXT COMMAND — the rule vibespace-msg / -channels / -ask /
+// -task share (PURE src/agent-cli-text.js: the stray-word refusal, the --text-file / --text - doors, the `sent: N` echo)
+// rides beside them the same way — `agent-cli-text.js` (its own name: the CLIs require it by that literal name), copied at
+// every boot, gitignored, in AGENT_TOOLS. A free-text
+// verb REFUSES without it (it could not tell a stray word), so every ship path must carry it.
+function createCliTextCopy() {
+  try {
+    const src = fs.readFileSync(path.join(rootDir, 'src', 'agent-cli-text.js'));
+    const dst = path.join(AGENT_BIN_DIR, 'agent-cli-text.js');
+    let cur = null; try { cur = fs.readFileSync(dst); } catch { cur = null; }
+    if (!cur || !cur.equals(src)) { ensureDir(AGENT_BIN_DIR); fs.writeFileSync(dst + '.tmp', src, { mode: 0o644 }); fs.renameSync(dst + '.tmp', dst); }
+  } catch (e) { console.warn('[tools] the agent CLIs\' text rule not copied beside them: ' + e.message); }
+}
+createCliTextCopy();
 
 // Idempotent, NON-DESTRUCTIVE hook registration for both harnesses: only our
 // own entry (matched by 'vibespace-hook.mjs') is ever added or updated; every

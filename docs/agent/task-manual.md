@@ -25,6 +25,14 @@ vibespace-task --group <id> progress "one-line summary" --detail "specifics othe
   clear only entries your own session wrote — the user clears anything from the
   Task Group log window (right-click → Clear content…, or Select… → Clear selected).
 
+### Long or quoted text (`--text-file` / `--text -`)
+
+Long or quoted text: `--text-file <path>` or `--text -` (stdin) for the summary / item / `backlog-edit` text,
+`--detail-file <path>` (`-` = stdin) for `--detail`; the CLI refuses stray words. `progress` and `backlog-add` take
+ONE text: a word after it (a quote that closed the shell string early) is REFUSED by name — exit 2, nothing recorded
+(it used to be joined in). The bounds are the route's: a summary keeps 2000 characters, an item's line 500, a detail
+6000. The answer says `sent: N characters` — the STORED count, so a cut is visible on the confirmation.
+
 ## Backlog — the parking lot (NON-immediate only)
 
 ```

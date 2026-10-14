@@ -14,7 +14,26 @@ const api = process.env.VIBESPACE_API;
 const token = process.env.VIBESPACE_SESSION_TOKEN;
 if (!api || !token) { console.error('vibespace-ask: not running inside a VibeSpace session (missing env)'); process.exit(2); }
 
-const rawArgs = process.argv.slice(2);
+// lane cli-one-text-arg (the owner 2026-10-14): ONE TEXT PER FREE-TEXT COMMAND — the rule the four agent CLIs share (PURE
+// src/agent-cli-text.js in a checkout; its boot-time copy agent-cli-text.js beside this file on a host). The question
+// is ONE argument: a stray word after it is refused by name (exit 2, nothing filed) — it used to be JOINED in, which lost
+// the quotes that closed early and hid the bug; --text-file <path> / --text - (stdin) carry a long or quoted question,
+// --detail-file <path> (- = stdin) a long --detail; the answer's `chars` is echoed as `sent: N characters`.
+const TX = (() => {   // the module by its literal name (test-peer-text-census walks it beside the CLIs)
+  try { return require('node:fs').existsSync(require('node:path').join(__dirname, '..', '..', 'server.js')) ? require('../../src/agent-cli-text.js') : require('./agent-cli-text.js'); } catch { }
+  try { return require('./agent-cli-text.js'); } catch { return null; }
+})();
+const TX_IO = { readFile: (p) => require('node:fs').readFileSync(p, 'utf8'), readStdin: () => require('node:fs').readFileSync(0, 'utf8'), stdinIsTTY: (() => { try { return require('node:fs').fstatSync(0).isCharacterDevice(); } catch { return false; } })() };
+const DOORS = TX ? TX.takeDoors(process.argv.slice(2), ['text', 'detail']) : { argv: process.argv.slice(2), doors: {}, error: null };
+/** the question: ONE argument or its door; a stray word, a door it cannot read ⇒ refused, exit 2, nothing filed */
+function oneText(tool, positional, strays) {
+  if (!TX) { console.error(`${tool}: refused — this CLI's text rule (agent-cli-text.js) is missing beside it, so stray words cannot be told apart; nothing was filed — ask the user to reinstall the agent tools (Manage agents → the machine → Install)`); process.exit(2); }
+  const one = TX.oneText({ tool, what: 'the question', positional, strays, detail: true, doors: DOORS, io: TX_IO });
+  if (one.error) { console.error(one.error.replace(/nothing was sent$/, 'nothing was filed')); process.exit(TX.STRAY_EXIT); }
+  return one.text;
+}
+
+const rawArgs = DOORS.argv;
 const opt = (name) => {
   const i = rawArgs.indexOf('--' + name);
   if (i >= 0 && rawArgs[i + 1] !== undefined) { const v = rawArgs[i + 1]; rawArgs.splice(i, 2); return v; }
@@ -25,7 +44,7 @@ const opt = (name) => {
 };
 const URGENCIES = ['low', 'normal', 'high', 'urgent'];
 const urgency = opt('urgency');
-const detail = opt('detail');
+let detail = opt('detail');
 // --options "A|B|C" (2.369.169, design-user-inbox-reply D3a): one-click answers
 // the user can pick in the inbox — the chip's reply IS the label. ≤6 labels of
 // ≤40 chars, distinct; the server refuses anything else by name.
@@ -57,6 +76,8 @@ const USAGE = [
   '                   fix the named attachment and run vibespace-ask again. Paths and links written in the question / --detail are clickable too',
   '      --options = up to 6 one-click answers (≤40 chars each) — the user\'s reply is then exactly one label',
   '      --notice = for their information only (no action needed): its own Notices section, grey count, never the red badge',
+  '      long or quoted text: --text-file <path> or --text - (stdin, a heredoc) for the question, --detail-file <path> for --detail;',
+  '                   the CLI refuses stray words (the question is ONE argument: a word after it ⇒ exit 2, nothing filed) and answers sent: N characters',
   '  vibespace-ask list                    print this session\'s open items',
   '  vibespace-ask resolve <id|text>       the user answered (in chat counts)? resolve it YOURSELF immediately',
   '  vibespace-ask show <id>               print one item of this session in full (any status, with the user\'s inbox reply)',
@@ -104,7 +125,7 @@ async function main() {
     if (cmd.startsWith('-') && cmd !== '-h' && cmd !== '--help') process.exit(1);
     return;
   }
-  if (!cmd) {
+  if (!cmd && !DOORS.doors.text) {
     console.log(USAGE + '\n\ncurrent open items:');
     printItems((await call({ list: true })).items || []);
     return;
@@ -130,22 +151,30 @@ async function main() {
     console.log('resolved: ' + item.text);
     return;
   }
-  if (cmd === 'add' && rest.length) { // tolerated alias: "vibespace-ask add ..." — agents guess it
-    return fileItem(rest.join(' ').trim());
+  if (cmd === 'add' && (rest.length || DOORS.doors.text)) { // tolerated alias: "vibespace-ask add ..." — agents guess it
+    return fileItem(oneText('vibespace-ask add', rest[0], rest.slice(1)));
   }
   if (urgency && !URGENCIES.includes(urgency)) {
     console.error('vibespace-ask: unknown urgency "' + urgency + '" (valid: ' + URGENCIES.join('/') + ')');
     process.exit(1);
   }
-  // Default form: the whole argv is the question text.
-  return fileItem(rawArgs.join(' ').trim());
+  // Default form: the question is ONE argument (lane cli-one-text-arg: never the whole argv joined — a stray word is refused)
+  return fileItem(oneText('vibespace-ask', rawArgs[0], rawArgs.slice(1)));
 }
-async function fileItem(text) {
+async function fileItem(typed) {
+  const text = String(typed == null ? '' : typed).trim();
   if (!text) { console.error(USAGE); process.exit(1); }
+  if (DOORS.doors.detail) { // --detail-file <path> (- = stdin): the long --detail's door — never beside --detail
+    const d = TX.textOf(detail, DOORS.doors.detail, TX_IO, 'by --detail');
+    if (d.error) { console.error('vibespace-ask: refused — ' + d.error.replace(/nothing was sent$/, 'nothing was filed')); process.exit(TX.STRAY_EXIT); }
+    detail = d.text;
+  }
   const body = { add: { text, detail, urgency, kind, options } };
   if (artifacts.length) body.add.artifacts = artifacts; // lane foryou-attachments: judged by the server — any that would not open ⇒ nothing filed
-  const { item } = await call(body);
+  const answer = await call(body);
+  const { item } = answer;
   console.log((item.existing ? 'already in the user\'s For you tray (refreshed): ' : 'added to the user\'s For you tray (bottom right of their screen): ') + item.text + '  (' + item.id + ')');
+  console.log('  ' + TX.sentLine(answer, text, detail));   // lane cli-one-text-arg: the route's count — a cut is visible here
   if (Array.isArray(item.options) && item.options.length) console.log('  options: ' + item.options.join(' | ') + '  (a chip reply arrives as exactly that label)');
   for (const a of Array.isArray(item.artifacts) ? item.artifacts : []) console.log('  attached: ' + (a.kind === 'page' ? a.url : a.path) + ' (' + a.kind + (a.host ? ' on ' + a.host : '') + ') — one press opens it from the item');
   if (item.artifactsCut) console.log('NOTE: only the first ' + item.artifactsCut + ' attachments were kept — attach the rest to a second item.');

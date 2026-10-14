@@ -20,6 +20,7 @@
 // backend-caps notificationDelivery({peerDelivery, inputModes}).
 import fs from 'node:fs';
 import os from 'node:os';
+import net from 'node:net';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { mutantCopies } from './mutant-copy.mjs';
@@ -338,6 +339,75 @@ ok('wrapperCaps surfaces peerMessage (stateless, negative verdicts never cached)
   const { ClaudeCodeAdapter: MutAdapter } = M.load('src/adapters/claude-code.js', ccSrc.replace(TUI, OLD_PUSH + TUI), 'channel-flags');
   const mutArgv = new MutAdapter({ claudeCmd: 'claude' }).buildSessionArgs({ cwd: '/tmp', mode: 'chat', vibespaceChannel: { script: '/x/vibespace-channel.js', sock: '/x/w.sock' } }).args;
   ok('NEGATIVE CONTROL: a patched adapter with the old flag push put back emits --dangerously-load-development-channels for the same options (the argv leg can go red)', ccSrc.split(TUI).length === 2 && mutArgv.includes('--dangerously-load-development-channels') && mutArgv.includes('--mcp-config'));
+}
+
+// ── rung 1 over the REAL registry rule (lane peer-registry-identity, 2026-10-14) ──
+// The hub after the 10:26 hard freeze: a resumed conversation has TWO registrations; the pre-freeze one's low pid now
+// names another process (EPERM ⇒ "alive"), sorts first, and its socket is gone. The ladder over the REAL lookup (an
+// injected registry dir) must post to the live record, and say "stale registration(s) only" when none passes.
+{
+  const PM = require(path.join(REPO, 'src/peer-messaging.js'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-peerid-'));
+  const reg = path.join(root, 'sessions'); fs.mkdirSync(reg);
+  const HCID = '5f4369df-0b7e-4c51-9d1a-2e8f6a7c3b10';
+  const st = fs.readFileSync('/proc/self/stat', 'utf8'); const REAL = st.slice(st.lastIndexOf(')') + 2).split(' ')[19];
+  const liveSock = path.join(root, 'live.sock'); const got = [];
+  const srv = net.createServer((c) => { let b = ''; c.on('data', (d) => { b += d; let i; while ((i = b.indexOf('\n')) >= 0) { got.push(JSON.parse(b.slice(0, i))); b = b.slice(i + 1); } }); });
+  await new Promise((r) => srv.listen(liveSock, r));
+  const stale = { pid: process.pid, sessionId: HCID, startedAt: 1791069101439, procStart: String(Number(REAL) + 113000), messagingSocketPath: path.join(root, 'pre-freeze.sock'), name: '企业助手', version: '2.1.296' };
+  const live = { ...stale, startedAt: 1791912553717, procStart: String(REAL), messagingSocketPath: liveSock };
+  const put = (files) => { for (const f of fs.readdirSync(reg)) fs.unlinkSync(path.join(reg, f)); for (const [f, r] of files) fs.writeFileSync(path.join(reg, f), JSON.stringify(r)); };
+  const mk = (peerMsg) => { const logs = []; const d = require(path.join(REPO, 'src/server/conversation-deliver.js')).create({ dataDir: fs.mkdtempSync(path.join(root, 'd-')), peerMsg, getHosts: () => null, getConvIndex: () => null, serverSetting: () => false, activeSessions: new Map(), emitPeerCard: () => true, log: (...a) => logs.push(a.join(' ')) }); return { d, logs }; };
+  const realPM = { findPeer: (c) => PM.findPeer(c, reg), lookupPeer: (c) => PM.lookupPeer(c, reg), postToPeer: PM.postToPeer };
+
+  put([[`${process.pid}.json`, stale], [`9${process.pid}.json`, live]]);   // the stale file sorts first
+  const A = mk(realPM);
+  const ra = await A.d.deliverToConversation(HCID, 'Message from session "B": 现在交给它', { fromName: 'B' });
+  await new Promise((r) => setTimeout(r, 100));
+  ok('the hub\'s shape (stale record sorts first, its pid alive with another start time): rung 1 delivers to the LIVE record', ra.ok === true && ra.lane === 'message' && got.some((f) => f.type === 'user' && /现在交给它/.test(f.message.content)), JSON.stringify(ra));
+  ok('…and the journal says nothing about stale registrations when one passed', !A.logs.some((l) => /stale registration/.test(l)), A.logs.join(' | '));
+
+  put([[`${process.pid}.json`, stale]]);
+  const B = mk(realPM); const nb = got.length;
+  const rb = await B.d.deliverToConversation(HCID, 'only a stale record', { fromName: 'B' });
+  const lb = B.logs.join('\n');
+  ok('stale registrations only: nothing is posted, the ladder ends not-running', rb.ok === false && rb.notRunning === true && got.length === nb, JSON.stringify(rb));
+  ok('…and the journal SAYS so: "stale registration(s) only — pid reused / socket absent" + the counts', lb.includes(`[deliver] ${HCID}: no live inbox on this machine — stale registration(s) only — pid reused / socket absent (candidates: 1, stale: 1 (pid-reused: 1, socket-absent: 1))`), lb);
+  ok('…never "the conversation is not running" for a registry that held records', !/conversation is not running/.test(lb), lb);
+
+  put([]);
+  const C = mk(realPM);
+  await C.d.deliverToConversation(HCID, 'no record at all', { fromName: 'B' });
+  ok('no record of the session at all: rung 1 is silent (a codex / remote / stopped conversation is not a stale one)', !C.logs.some((l) => /stale registration|local peer post/.test(l)), C.logs.join(' | '));
+
+  // a record that PASSED, then a final refusal: "not running" only when the re-judged registry has no passing record
+  put([[`9${process.pid}.json`, live]]);
+  const refuse = { ok: false, reason: 'socket error: connect ECONNREFUSED', code: 'ECONNREFUSED', phase: 'connect', transient: false };
+  const D = mk({ ...realPM, postToPeer: async () => refuse });
+  await D.d.deliverToConversation(HCID, 'refused by a live registration', { fromName: 'B' });
+  ok('a final refusal while the registration still passes: the line says the socket refused a LIVE registration — not "not running"', D.logs.some((l) => /local peer post to .*live\.sock failed: socket error: connect ECONNREFUSED .* — the socket refused the post, though a registration still passes its identity check \(pid \d+, pid\+start; candidates: 1, stale: 0\)/.test(l)) && !D.logs.some((l) => /not running/.test(l)), D.logs.join(' | '));
+  const E = mk({ ...realPM, postToPeer: async () => { put([]); return { ...refuse, reason: 'socket error: connect ENOENT', code: 'ENOENT' }; } });
+  await E.d.deliverToConversation(HCID, 'the CLI exited between the lookup and the post', { fromName: 'B' });
+  ok('…the CLI gone between the lookup and the post (no record passes now): "the socket is not served: the conversation is not running"', E.logs.some((l) => /failed: socket error: connect ENOENT .* — the socket is not served: the conversation is not running$/.test(l)), E.logs.join(' | '));
+  put([[`9${process.pid}.json`, live]]);
+  const F = mk({ ...realPM, postToPeer: async () => { put([[`${process.pid}.json`, stale]]); return { ...refuse, reason: 'socket error: connect ENOENT', code: 'ENOENT' }; } });
+  await F.d.deliverToConversation(HCID, 'only a stale record is left after the miss', { fromName: 'B' });
+  ok('…only stale records left after the miss: the line names them (stale registration(s) only + the counts)', F.logs.some((l) => /— the socket is not served: stale registration\(s\) only — pid reused \/ socket absent \(candidates: 1, stale: 1 \(pid-reused: 1, socket-absent: 1\)\)$/.test(l)), F.logs.join(' | '));
+
+  // RED CONTROL: the base's lookup (the FIRST record whose pid answers kill -0) behind the same ladder posts to the
+  // stale socket and stashes — the owner's 「联系不上这个 agent」
+  const src = read('src/peer-messaging.js');
+  const RULE = '    const v = registryIdentityOk(rec, pr);\n';
+  const CHOICE = '    if (!best || startedOf(rec) > startedOf(best.rec)) best = { rec, identity: v.identity };\n';
+  const M = mutantCopies('peerid-deliv', REPO);
+  const Old = M.load('src/peer-messaging.js', src.replace(RULE, "    const v = rec.messagingSocketPath && pidAlive(rec.pid) ? { ok: true, reasons: [], identity: 'pid-only' } : { ok: false, reasons: ['pid-gone'] };\n").replace(CHOICE, '    if (!best) best = { rec, identity: v.identity };\n'), 'pidonly');
+  put([[`${process.pid}.json`, stale], [`9${process.pid}.json`, live]]);
+  const n0 = got.length;
+  const G = mk({ findPeer: (c) => Old.findPeer(c, reg), postToPeer: PM.postToPeer });
+  const rg = await G.d.deliverToConversation(HCID, 'pid-only rule', { fromName: 'B' });
+  ok('RED CONTROL: the pid-only first-record lookup behind the same ladder posts to the STALE socket and fails not-running (the incident)', rg.ok === false && rg.notRunning === true && got.length === n0 && G.logs.some((l) => l.includes('pre-freeze.sock failed: socket error: connect ENOENT')), JSON.stringify(rg) + ' | ' + G.logs.join(' | '));
+  srv.close();
+  fs.rmSync(root, { recursive: true, force: true });
 }
 
 fs.rmSync(dataDir, { recursive: true, force: true });

@@ -287,8 +287,9 @@ export function inboxModel(app) {
         // design 009: Installed · Open — the app the install added, started like a card in Apps
         const row = openRowOf(rec.card);
         if (!row) return false;
-        const r = await fetchJson('/api/desktop/apps', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ appId: row, dpr: launchDpr(), uiScale: launchUiScale(), ...(host !== 'local' ? { host } : {}) }) });
+        const r = await fetchJson('/api/desktop/apps', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ appId: row, dpr: launchDpr(), uiScale: launchUiScale(), ifRunning: 'attach', ...(host !== 'local' ? { host } : {}) }) }); // lane app-launch-singleton: a running one is opened, never started twice
         if (!r || r.error) { showToast((r && r.error) || t('Could not launch the application'), { type: 'error' }); return false; }
+        if (r.attached) showToast(t('It was already running — its window is open'));
         app.openDesktopApp(r.id);
         return true;
       }

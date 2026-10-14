@@ -1058,7 +1058,7 @@ console.log('— §6 wiring: every door, the belt, the refusal route, the rollba
   ok(/if \(!v\.ok\) \{[\s\S]{0,1200}ws\.send\(JSON\.stringify\(\{ type: 'layout-sync-refused', desktopId, reason: v\.reason, unexplained: v\.unexplained, arrived: v\.arrived \|\| \[\], state: stored, sentAt: data\.sentAt \?\? null \}\)\);[\s\S]{0,40}break;/.test(WS), '§6 …a refusal tells the SENDER (with the record the server kept, and which drops were arrivals), writes nothing and broadcasts nothing (break)');
   const noteAt = WS.indexOf('noteArrivals(desktopId, windowIds(layoutData.desktops[desktopId].autoSave || null), windowIds(data.state.windows), ws);');
   ok(noteAt > beltAt && noteAt < writeAt && /layoutArrivals\.delete\(data\.desktopId\);/.test(WS) && /const ARRIVAL_TTL_MS = 10 \* 60 \* 1000;/.test(WS) && /if \(a\.by !== me\) out\.push\(id\);/.test(WS), '§6 verify r1: what a write ADDS is remembered per desktop against every OTHER socket for 10 min (the belt\'s `recent`), noted after the verdict and before the write; a deleted desktop forgets them');
-  ok(/if \(this\._restoring \|\| this\._pointerDown\) \{ this\._deferRemote\(msg\); return; \}/.test(L) && /this\._pendingRemote\.set\(msg\.desktopId \|\| '', msg\);/.test(L) && !/if \(msg\.type !== 'layout-sync' \|\| this\._restoring\) return;/.test(L), '§6 verify r1: a layout-sync under a gate is deferred PER DESKTOP (never dropped under `_restoring`, never one slot for all)');
+  ok(/if \(this\._restoring \|\| this\._pointerDown \|\| this\._pendingRemote\.size\) \{ this\._deferRemote\(msg\); return; \}/.test(L) && /this\._pendingRemote\.set\(deferKey\(msg\), msg\);/.test(L) && !/if \(msg\.type !== 'layout-sync' \|\| this\._restoring\) return;/.test(L), '§6 verify r1: a layout-sync under a gate is deferred PER DESKTOP (never dropped under `_restoring`, never one slot for all)');
   ok(/if \(this\._connects\+\+ > 0\) setTimeout\(\(\) => this\._resyncFromServer\(\), 250\);/.test(L) && /this\._applyRemoteState\(msg\.state, \{ closeOnlyWired: !!msg\.resync, receivedAt, membershipOnly \}\);/.test(L) && /if \(closeOnlyWired && !this\.app\.desktopManager\?\.wireListed\?\.\(activeDesk, id\)\) continue;/.test(L), '§6 verify r1: a reconnect re-reads /api/layouts through the ordinary inbound path, closing only what the wire listed');
   ok(/msg\.receivedAt = Date\.now\(\);/.test(L) && /const receivedAt = msg\.receivedAt \?\? Date\.now\(\);/.test(L) && (L.match(/if \(this\.actHeld\(win\._movedAt, receivedAt, win\)\) \{ heldMoved = true; continue; \}/g) || []).length === 2 && /if \(heldMoved\) setTimeout\(\(\) => this\._resendHeldMove\(\), 1000\);/.test(L) && /dm\.cacheRemoteState\(msg\.desktopId, msg\.state, \{ receivedAt \}\);/.test(L) && /&& !this\.app\.layoutManager\?\.actHeld\?\.\(w\._movedAt, receivedAt, w\)\)/.test(D) && /m\._movedAt = movedAt;/.test(D), '§6 verify r2: THE HELD MOVE — every inbound record is stamped when it lands, a move stamps its windows, the apply\'s update loop / close loop and the cached sweep skip a window moved after the record arrived, and the move is re-sent once');
   ok((W.match(/win\._boundsAt = Date\.now\(\);/g) || []).length === 2 && /const heldGeom = this\.actHeld\(win\._boundsAt, receivedAt, win\);/.test(L) && /if \(rw\.gridBounds && !heldGeom && !membershipOnly\) \{/.test(L) && /const t = Math\.max\(w\._movedAt \|\| 0, w\._boundsAt \|\| 0\);/.test(L), '§6 verify r2 ⑩: THE HELD GEOMETRY — window.js stamps the drag\'s and the resize\'s pointerup, the apply keeps the user\'s box / maximize / minimize over a record received before it, and the re-send carries it');
@@ -1115,7 +1115,7 @@ console.log('— §7 negative controls (patched copies, scripts/mutant-copy.mjs)
   const LSRC0 = read('src/lib/layout.js');
   // (g) verify r1: ONE slot for every desktop (the lane's ① / 2.369.198 guard 3)
   {
-    const find = "    this._pendingRemote.set(msg.desktopId || '', msg);";
+    const find = '    this._pendingRemote.set(deferKey(msg), msg);'; // B-4767: the slot keys per desktop AND writer class (layout-model.js)
     ok(LSRC0.includes(find), 'control one-slot: the patched line exists in layout.js');
     const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', LSRC0.replace(find, "    this._pendingRemote.clear(); this._pendingRemote.set('', msg);"), 'one-slot', { esm: true }))).LayoutManager, { quiet: true, legs: ['a', 'i'] });
     ok(f.some((n) => /pointerup applies BOTH/.test(n)) && !f.some((n) => /THE DROP onto an UNVISITED/.test(n)), `control one-slot: one slot for every desktop loses the target's record of a move (RED) (${f.length}: ${f.slice(0, 2).join(' | ').slice(0, 200)})`);
@@ -1206,9 +1206,9 @@ console.log('— §7 negative controls (patched copies, scripts/mutant-copy.mjs)
   }
   // (t) verify r2 R7: a drain in insertion order (no seq sort)
   {
-    const find = '      const [key, msg] = [...this._pendingRemote.entries()].sort((a, b) => (a[1].seq || 0) - (b[1].seq || 0))[0];';
+    const find = '      const { next, drop } = releaseNext(this._pendingRemote, this._appliedSeq);'; // B-4767: the order (and the drop) live in layout-model.js
     ok(LSRC0.includes(find), 'control drain-no-sort: the patched line exists in layout.js');
-    const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', LSRC0.replace(find, '      const [key, msg] = [...this._pendingRemote.entries()][0];'), 'drain-no-sort', { esm: true }))).LayoutManager, { quiet: true, legs: ['t'] });
+    const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', LSRC0.replace(find, '      const { next, drop } = { next: [...this._pendingRemote.entries()][0], drop: [] };'), 'drain-no-sort', { esm: true }))).LayoutManager, { quiet: true, legs: ['t'] });
     ok(f.some((n) => /BEFORE the source/.test(n)), `control drain-no-sort: the source drains first and closes the moved window — RED (${f.length})`);
   }
   // (u) verify r2 R7: the cached sweep without its adopt

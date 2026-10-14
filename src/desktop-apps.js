@@ -38,8 +38,8 @@ const { planLines, PKG_RE, APT_LOCK_WAIT_S, packageInstallPlan, installArgv, INS
 // rv-desktop-apps F-S1 (lane dc-seams-desktop, 2026-10-05): the ladder, the app's window (fit / scale / close), the browser
 // families and a machine's whole desktop live in their OWN files — this model re-exports each name, unchanged
 const { DISPLAY_BACKENDS, BACKEND_IDS, backendById, CAP_KEYS, capsOf, recipeFor, needsVerdict, resolveBackend, fallbackLogLine, parseBackendPrefs, streamKindOf } = require('./desktop-backends.js');
-const { BROWSER_KINDS, BROWSER_BINS, isForbiddenBrowserArg, browserRowFor, URL_MAX, validateBrowserUrl, within, REAL_BROWSER_ROOTS, profileDirVerdict, browserArgv, CHROMIUM_FRAME_MARKER, chromiumFramePrefs, BROWSER_A11Y_FLAG, BROWSER_A11Y_ENV, CHROMIUM_A11Y_ENV, firefoxUserJs } = require('./desktop-browser-app.js');
-const { fitPolicyOf, keeperFits, topLevelWindows, appWindows, appFitPlan, appMainWindow, APP_TITLE_MAX, windowTitleOf, APP_SCALES, EXPLICIT_SCALES, SCALE_CHOICES, SCALE_ORIGINS, parseScaleChoice, SCALE_MAX, UI_SCALE_RANGE, normalizeDpr, normalizeUiScale, effectiveScale, appScaleFor, scalePick, normalizeScale, SCALE_RULES, round4, scaleKnobs, scaleRuleOf, renderOf, relaunchPaneCss, validateRelaunchRequest, relaunchLeaseVerdict, askCloseVerdict, relaunchVerdict, relaunchBodyOf, scaleMenuModel, OUTER_CLOSE_AGAIN_MS, windowsLeftCount, exitCloseVerdict, outerCloseVerdict } = require('./desktop-fit.js');
+const { BROWSER_KINDS, BROWSER_BINS, isForbiddenBrowserArg, browserRowFor, URL_MAX, validateBrowserUrl, within, REAL_BROWSER_ROOTS, profileDirVerdict, browserArgv, CHROMIUM_FRAME_MARKER, chromiumFramePrefs, BROWSER_A11Y_FLAG, BROWSER_A11Y_ENV, CHROMIUM_A11Y_ENV, firefoxUserJs, browserFamilyOf, defaultProfileDirOf, singletonLockFact } = require('./desktop-browser-app.js');
+const { fitPolicyOf, keeperFits, topLevelWindows, appWindows, appFitPlan, appMainWindow, APP_TITLE_MAX, windowTitleOf, APP_SCALES, EXPLICIT_SCALES, SCALE_CHOICES, SCALE_ORIGINS, parseScaleChoice, SCALE_MAX, UI_SCALE_RANGE, normalizeDpr, normalizeUiScale, effectiveScale, appScaleFor, scalePick, normalizeScale, SCALE_RULES, round4, scaleKnobs, scaleRuleOf, renderOf, relaunchPaneCss, validateRelaunchRequest, relaunchLeaseVerdict, askCloseVerdict, relaunchVerdict, relaunchBodyOf, scaleMenuModel, OUTER_CLOSE_AGAIN_MS, windowsLeftCount, exitCloseVerdict, outerCloseVerdict, RUNNING_STATES, sameAppRecord, launchVerdict } = require('./desktop-fit.js');
 const { DESKTOP_PLATFORMS, MACHINE_DESKTOP_PORT, MACHINE_DESKTOP_PREFIX, machineDesktopId, machineDesktopHost, desktopPickRow, RUN_LINE_MAX, psQuote, psEncoded, desktopRunPlan, DESKTOP_RUN_PRESETS, RUN_REMEMBER_MAX, desktopRunPresets, rememberRun, TIGHTVNC, TIGHTVNC_NO_ADMIN_EXIT, tightvncInstallPlan, TIGHTVNC_INSTALL } = require('./machine-desktop-model.js');
 
 /** The fixed stream id of the pre-existing in-container desktop (src/vnc.js)
@@ -297,6 +297,92 @@ function capVerdict(live, limits = LIMITS) {
   if (live.length < cap) return null;
   const names = live.map((r) => `${r.label || r.exec || r.id} (${r.id})`);
   return { code: 'cap', cap, holders: live.map((r) => r.id), error: `desktop app ceiling reached (${live.length}/${cap} running: ${names.join(', ')}) — stop one first` };
+}
+
+// ── lane app-launch-singleton (fleet inc-mv7hxc2n-2cvr, .268): one program, one instance — unless it runs twice ──────
+/**
+ * Is catalog row `row` a web browser, and does its launch get a profile of its OWN? → { isBrowser, browser, ownProfile, why }
+ *   why 'catalog'        — the registry's browser row (B-bfe6: browserRowFor / browserArgv)
+ *   why 'exec'           — an installed / witnessed / registered row whose executable is a browser of a known family
+ *                          (google-chrome-stable, brave-browser, firefox-esr …): it gets that family's argv and its own
+ *                          profile dir like the catalog row — DEFECT #0 of the incident: the installed Chrome ran AS TYPED
+ *                          on the user's default profile
+ *   why 'app-id'         — a sandboxed browser (a flatpak export `com.google.Chrome`): its profile is the sandbox's own
+ *   why 'launcher'       — run through `flatpak run` / `snap run` / `env`: its profile switch would reach the launcher
+ *   why 'unknown-family' — a browser (by name or its .desktop category) whose profile switch is not known here
+ * Only 'catalog' / 'exec' have `ownProfile`: the others run on their default profile, ONE instance at a time.
+ */
+function appBrowserVerdict(row) {
+  if (!row || typeof row !== 'object') return { isBrowser: false, browser: null, ownProfile: false, why: null };
+  if (row.browser && BROWSER_KINDS[row.browser] && row.browserBy !== 'exec') return { isBrowser: true, browser: row.browser, ownProfile: true, why: 'catalog' };
+  const fam = browserFamilyOf(row.exec);
+  if (fam) return { isBrowser: true, browser: fam, ownProfile: true, why: 'exec' };
+  const bv = browserLaunchVerdict({ exec: row.exec, args: row.args });
+  if (bv.browser) return { isBrowser: true, browser: null, ownProfile: false, why: bv.by === 'launcher' ? 'launcher' : BROWSER_APP_ID_RE.test(baseOf(row.exec)) ? 'app-id' : 'unknown-family' };
+  if (row.category === 'browser') return { isBrowser: true, browser: null, ownProfile: false, why: 'unknown-family' };
+  return { isBrowser: false, browser: null, ownProfile: false, why: null };
+}
+/** Terminals that are one process per window (never a server another launch is handed to — gnome-terminal is). */
+const TERMINAL_TWICE_RE = /^(?:xterm|uxterm|urxvt|rxvt(?:-unicode)?|alacritty|kitty|st)$/;
+/**
+ * Can a SECOND instance of `row` run beside a running one (the card's "Open another")? → { twice, why }
+ *   own-profile  — a browser with its own profile dir, a LibreOffice session (its own -env:UserInstallation)
+ *   own-process  — a terminal that is one process per window (TERMINAL_TWICE_RE)
+ *   shared-profile — a browser on its default profile: the second launch is handed to the first and exits
+ *   single-instance — anything else may hand a second launch to the first over the session bus (GApplication,
+ *                  KUniqueApplication) and exit at once: not offered (the running one is opened instead)
+ */
+function runsTwiceVerdict(row) {
+  if (!row || typeof row !== 'object') return { twice: false, why: 'single-instance' };
+  if (row.office) return { twice: true, why: 'own-profile' };
+  const bv = appBrowserVerdict(row);
+  if (bv.isBrowser) return bv.ownProfile ? { twice: true, why: 'own-profile' } : { twice: false, why: 'shared-profile' };
+  const b = typeof row.exec === 'string' ? row.exec.split('/').pop() : '';
+  if (TERMINAL_TWICE_RE.test(b)) return { twice: true, why: 'own-process' };
+  return { twice: false, why: 'single-instance' };
+}
+/** `0.8 s` / `under 0.1 s` — the quick exit's timing words (never "0.0 s"). */
+const secondsText = (ms) => (ms < 100 ? 'under 0.1 s' : `${(ms / 1000).toFixed(1)} s`);
+/** An app process that ends sooner than this after it started was no window at all: the launch FAILED loudly (§ the
+ *  incident: Chrome's singleton handed the launch over and exited code 0 within a second). */
+const QUICK_EXIT_MS = 3000;
+/**
+ * The app process of `rec` ended at `at` (code / signal) → { quick, asked, afterMs, sinceReadyMs, tail }:
+ * `afterMs` from the app's own spawn (`rec.appAt`; the record's start when older), `sinceReadyMs` from `ready` (null
+ * before it), `tail` = the journal line's timing words (`0.8 s after ready` / `before ready, 0.4 s after it started`).
+ * `asked` (int267 seam, the guard-programmatic-not-the-press law): the record was stamped `closeAskedAt` since this
+ * spawn — the person's own close (the window's outer ✕ stamps it BEFORE close-window is sent) — so the exit ANSWERS
+ * that ask: never a failed launch, however soon it came (`quick` false: the window closes, no notice).
+ */
+function quickExitVerdict(rec, at, { quickMs = QUICK_EXIT_MS } = {}) {
+  const t = Number(at);
+  const from = Number(rec && (rec.appAt || rec.startedAt));
+  if (!rec || !Number.isFinite(t) || !Number.isFinite(from)) return { quick: false, asked: false, afterMs: null, sinceReadyMs: null, tail: '' };
+  const afterMs = Math.max(0, t - from);
+  const askedAt = Number(rec.closeAskedAt);
+  const asked = Number.isFinite(askedAt) && askedAt >= from && askedAt <= t;
+  const ready = Number(rec.readyAt);
+  const sinceReadyMs = Number.isFinite(ready) && ready > 0 ? Math.max(0, t - ready) : null;
+  const s = secondsText;
+  return { quick: afterMs < quickMs && !asked, asked, afterMs, sinceReadyMs, tail: sinceReadyMs !== null ? `${s(sinceReadyMs)} after ready` : `before ready, ${s(afterMs)} after it started` };
+}
+/** Who started a record, in the server's words (a notice): `agent session X` / `an agent` / `you` / '' (not recorded). */
+function launchedByText(rec) {
+  const b = rec && rec.launchedBy;
+  if (!b) return '';
+  if (b.kind === 'person') return 'you';
+  return b.name ? `agent session ${b.name}` : 'an agent';
+}
+/** The hub's ONE notice for a quick exit (`rec.quickExit`); `running` = the record of the instance that still runs, if any. */
+function quickExitNoticeText(rec, running = null) {
+  const q = (rec && rec.quickExit) || {};
+  const who = (rec && (rec.appTitle || rec.label || rec.appId || rec.id)) || 'The app';
+  const how = q.signal ? `ended by ${q.signal}` : `code ${q.code}`;
+  const when = Number.isFinite(q.afterMs) ? `, ${secondsText(q.afterMs)} after it started` : '';
+  const head = `${who} exited right after it started (${how}${when})`;
+  if (!running) return `${head} — usually the same program is already running elsewhere (on another display, or outside VibeSpace); nothing was left open.`;
+  const by = launchedByText(running);
+  return `${head} — the same program is already running on ${running.display || 'another display'}${by ? ` (started by ${by})` : ''}: open it from Apps.`;
 }
 
 // NO RESOURCE VERDICT AND NO PARK HERE (2026-09-25): src/runaway-guard.js is the
@@ -560,29 +646,38 @@ const xmlText = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').re
 // pkcs7 first and takes `plain` on NotSupported (measured) — the bus is a 0700 socket of the same user. Its items are ONE
 // sealed file in the plan's 0700 root, sealed by src/app-secrets-seal.js (secret-box's cipher) under a per-display key
 // the hub derives from data/.app-secrets-key (desktop-display appSecretsFacts) — handed over in the BUS env only
-// (VS_APP_SECRETS_KEY; never argv, a log, the record or the app's env — like the key file, the bus's starting env is
-// readable by the same user only). No env var is needed by the app: libsecret finds
-// the service by its name on DBUS_SESSION_BUS_ADDRESS. The passkey store (q-027) is a separate store — never merged.
+// (lane display-secret-fd, B-6c6d: NO LONGER the bus env — a 0600 FILE in the display's private runtime dir, read and
+// UNLINKED by the service at its start; the bus's env is the environ of dbus-daemon AND of every service it activates,
+// so a key laid there sat in `/proc/<pid>/environ` of five long-lived processes for the display's lifetime. MEASURED
+// 2026-10-13 (dbus 1.16.2): an activated service inherits the daemon's ENVIRONMENT but NOT its file descriptors (fd 3
+// of the daemon was gone in the child: dbus closes every fd above stderr before exec) — so a pipe, the handoff a
+// spawn would use, cannot reach a BUS-ACTIVATED service; the one-shot file is the handoff that can). No env var is
+// needed by the app: libsecret finds the service by its name on DBUS_SESSION_BUS_ADDRESS. The passkey store (q-027)
+// is a separate store — never merged.
 const APP_SECRETS_MODES = Object.freeze(['on', 'off']);
 const APP_SECRETS_DEFAULT = 'on'; // the owner's path-1 ruling (2026-10-12)
 const appSecretsMode = (v) => (APP_SECRETS_MODES.includes(v) ? v : APP_SECRETS_DEFAULT);
 const SECRETS_NAME = 'org.freedesktop.secrets';
 const SECRETS_STORE_FILE = 'secrets.json';
-/** PURE: the Secret Service's facts → what it adds to a started portalPlan (`plan`): its service file (pushed into
- *  plan.files) + the bus env (laid over plan.env) + `secrets` ('on' | 'off' | 'unavailable: <why>') + the store path.
+const SECRETS_KEY_FILE = 'run/secrets.key'; // the per-display key, handed over ONCE: 0600, under the plan's private XDG_RUNTIME_DIR
+/** PURE: the Secret Service's facts → what it adds to a started portalPlan (`plan`): the two FILES it needs (pushed
+ *  into plan.files — its service file and the one-shot key file, both written 0600 in the plan's 0700 dirs before the
+ *  bus starts) + `secrets` ('on' | 'off' | 'unavailable: <why>') + the store and key paths. NOTHING is laid over
+ *  plan.env: the bus's env is read by every service the bus activates (lane display-secret-fd, B-6c6d).
  *  `facts` = null / { off } (the setting), { why } (a missing piece — said, never a refusal to launch), or
  *  { python, service, node, sealer, keyHex }. */
 function secretServicePlan({ plan, facts } = {}) {
-  const none = (secrets) => ({ secrets, file: null, env: {}, store: null });
+  const none = (secrets) => ({ secrets, files: [], store: null, keyFile: null });
   if (!plan || !plan.ok || !Array.isArray(plan.dirs) || !plan.dirs[0]) return none('unavailable: no private bus');
   if (!facts || facts.off) return none('off');
   if (facts.why) return none(`unavailable: ${facts.why}`);
   if (!/^[0-9a-f]{64}$/.test(String(facts.keyHex || ''))) return none('unavailable: no per-display key');
-  const root = plan.dirs[0], store = `${root}/${SECRETS_STORE_FILE}`;
-  const argv = [facts.python, facts.service, store, facts.node, facts.sealer];
+  const root = plan.dirs[0], store = `${root}/${SECRETS_STORE_FILE}`, keyFile = `${root}/${SECRETS_KEY_FILE}`;
+  const argv = [facts.python, facts.service, store, facts.node, facts.sealer, keyFile];
   if (argv.some((a) => !a || /\s/.test(a))) return none('unavailable: a path has a space (a service Exec= line splits on it)');
-  return { secrets: 'on', store, env: { VS_APP_SECRETS_KEY: facts.keyHex },
-    file: { file: `${root}/services/${SECRETS_NAME}.service`, text: `[D-BUS Service]\nName=${SECRETS_NAME}\nExec=${argv.join(' ')}\n` } };
+  return { secrets: 'on', store, keyFile,
+    files: [{ file: `${root}/services/${SECRETS_NAME}.service`, text: `[D-BUS Service]\nName=${SECRETS_NAME}\nExec=${argv.join(' ')}\n` },
+      { file: keyFile, text: facts.keyHex }] };
 }
 /** PURE: the sealed store's text → how many logins it keeps (its plaintext `n`; null = none / not a store). */
 function secretsCountOf(raw) {
@@ -709,7 +804,7 @@ function sessionBusCensus({ universe = [], activatable = [], table = SESSION_BUS
 
 module.exports = {
   LIMITS, DESKTOP_SINGLETON_ID, APP_STATES, LIVE_STATES, DEFAULT_IDLE_TIMEOUT_MIN, KEEPER_ENV,
-  APP_SECRETS_MODES, APP_SECRETS_DEFAULT, appSecretsMode, SECRETS_NAME, SECRETS_STORE_FILE, secretServicePlan, secretsCountOf, // lane app-display-secrets
+  APP_SECRETS_MODES, APP_SECRETS_DEFAULT, appSecretsMode, SECRETS_NAME, SECRETS_STORE_FILE, SECRETS_KEY_FILE, secretServicePlan, secretsCountOf, // lane app-display-secrets (+ display-secret-fd: the key file)
   DISPLAY_BACKENDS, BACKEND_IDS, backendById, CAP_KEYS, capsOf, recipeFor, needsVerdict, resolveBackend, fallbackLogLine, parseBackendPrefs, streamKindOf,
   fitPolicyOf, keeperFits, topLevelWindows, appWindows, appFitPlan, appMainWindow, windowTitleOf, APP_TITLE_MAX,
   validateAppRow, validateLaunchRequest, DEFAULT_REGISTRY, APP_SCALES, normalizeDpr, appScaleFor, scaleKnobs, SCALE_RULES, scaleRuleOf, renderOf, relaunchPaneCss, // lane D (a)
@@ -717,6 +812,7 @@ module.exports = {
   SCALE_CHOICES, SCALE_MAX, UI_SCALE_RANGE, normalizeUiScale, normalizeScale, effectiveScale, scalePick, validateRelaunchRequest, relaunchVerdict, relaunchBodyOf, scaleMenuModel, askCloseVerdict, relaunchLeaseVerdict,
   EXPLICIT_SCALES, SCALE_ORIGINS, parseScaleChoice, scaleChoiceVerdict, // lane D: the per-app default scale + the widened explicit set
   OUTER_CLOSE_AGAIN_MS, windowsLeftCount, exitCloseVerdict, outerCloseVerdict,
+  RUNNING_STATES, sameAppRecord, launchVerdict, appBrowserVerdict, TERMINAL_TWICE_RE, runsTwiceVerdict, QUICK_EXIT_MS, quickExitVerdict, launchedByText, quickExitNoticeText, browserFamilyOf, defaultProfileDirOf, singletonLockFact, // lane app-launch-singleton
   BROWSER_KINDS, BROWSER_BINS, REAL_BROWSER_ROOTS, isForbiddenBrowserArg, browserRowFor, validateBrowserUrl, profileDirVerdict, browserArgv, firefoxUserJs, URL_MAX, BROWSER_A11Y_FLAG, BROWSER_A11Y_ENV, CHROMIUM_A11Y_ENV,
   CHROMIUM_FRAME_MARKER, chromiumFramePrefs, // lane D (a) item C
   TRANSITIONS, transition, isLiveState, isTerminalState,

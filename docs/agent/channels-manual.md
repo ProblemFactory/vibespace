@@ -310,6 +310,21 @@ The user gives you two DIFFERENT things, in this order:
 - The built-in Agents adapter's conversations are other agent sessions; the
   reach there is the same Task-Group ACL `vibespace-msg list` shows.
 
+## Long or quoted text (`--text-file` / `--text -`)
+
+Long or quoted text: `--text-file <path>` or `--text -` (stdin); the CLI refuses stray words. `reply`, `compose` and
+`request` take ONE text. A quote inside the text that closes the shell string early splits it into several words —
+the CLI used to send the first and drop the rest, and the person read a message cut mid-sentence. Now any word after
+the text is REFUSED by name (exit 2, the first stray word quoted, nothing sent). Text with quotes, newlines or `$`:
+
+    vibespace-channels reply lark/<conv> --to <msg id> --text - <<'EOF'
+    若对照"有源码权限的人 vs 人员名单"会对不上。
+    EOF
+
+(a QUOTED heredoc expands nothing). The text is the file's bytes with ONE trailing newline trimmed. The answer says
+`sent: N characters` — the route's count: check it against what you meant. `react` / `unreact` / `withdraw` / `search`
+refuse a stray word too (a `--why` or a query whose quote closed early) — give each value as ONE argument.
+
 ## Replying (READ THIS)
 
 - `reply` creates a PROPOSAL. It prints the policy verdict: `sends directly`

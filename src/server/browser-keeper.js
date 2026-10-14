@@ -2965,9 +2965,12 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     else log.log?.(`[browser] ${browserKey}${profileId ? ' on ' + profileId : ''}: the user's ${rec.kind} the handback already told the agent about did NOT run (${String(why || '').slice(0, 200)})`);
   }
   /** verify r3 T2 ①: ONE serial lock per browser for rung 2 — two holders' window-state cycles interleaved would hand one
-   *  holder's create to the other's window (the cycle moves Chrome's sticky create target; measured). Bounded by profiles. */
+   *  holder's create to the other's window (the cycle moves Chrome's sticky create target; measured). Bounded by profiles.
+   *  lane browser-windows-rung-race (B-81c6): the map holds the queue's TAIL while any rung 2 of the browser is queued or in
+   *  flight (r3 compared `cur`, never the stored value, so an entry outlived its rung 2 for good); a caller arriving while it is
+   *  HELD is told so through `onWait` — synchronously, before its wait, so its place in the queue is a fact, never a guess */
   const rung2Locks = new Map();
-  async function rung2Serialized(profileId, fn) { const k = String(profileId); const prev = rung2Locks.get(k) || Promise.resolve(); let done; const cur = new Promise((r) => { done = r; }); rung2Locks.set(k, prev.then(() => cur, () => cur)); await prev.catch(() => { }); try { return await fn(); } finally { done(); if (rung2Locks.get(k) === cur) rung2Locks.delete(k); } }
+  async function rung2Serialized(profileId, fn, onWait = null) { const k = String(profileId); const held = rung2Locks.get(k); const prev = held || Promise.resolve(); let done; const cur = new Promise((r) => { done = r; }); const tail = prev.then(() => cur, () => cur); rung2Locks.set(k, tail); if (held && typeof onWait === 'function') { try { onWait(); } catch { } } await prev.catch(() => { }); try { return await fn(); } finally { done(); if (rung2Locks.get(k) === tail) rung2Locks.delete(k); } }
   /** verify r3 T2 ①: THE LEAKS COUNTED — rung-2 tabs that landed in another holder's window and were closed at once (this run). */
   const windowLeaks = { count: 0, last: null };
   /** verify r4 T1 (the owner's invariant): does the USER drive ANY window of this browser right now — a takeover of any
@@ -3053,7 +3056,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
         // them got the cycle under its first frames. THE PLAN IS READ AT RUNG 2, after the last await before it (the lock)
         const planNow = () => WIN.rung2Plan(rec.display, { viewers: watchers.get(inputKey(holderKey, p.id)) || 0, driven: userDrivesAnyWindowOf(p.id) });
         let plan = null;
-        const viaActivate = (a) => rung2Serialized(p.id, () => { plan = planNow(); if (plan.run === false) return { ok: false, code: 'rung2_not_run', error: plan.why }; return open((x) => (typeof activateFn === 'function' ? activateFn(rec.cdpUrl, { anchorTargetId: x, windowId: wantWin, tries: WIN.RUNG2_TRIES, breaker: plan.breaker }) : VP().openTabByActivate(rec.cdpUrl, { anchorTargetId: x, windowId: wantWin, tries: WIN.RUNG2_TRIES, breaker: plan.breaker })), a); });
+        const viaActivate = (a) => rung2Serialized(p.id, () => { plan = planNow(); if (plan.run === false) return { ok: false, code: 'rung2_not_run', error: plan.why }; return open((x) => (typeof activateFn === 'function' ? activateFn(rec.cdpUrl, { anchorTargetId: x, windowId: wantWin, tries: WIN.RUNG2_TRIES, breaker: plan.breaker }) : VP().openTabByActivate(rec.cdpUrl, { anchorTargetId: x, windowId: wantWin, tries: WIN.RUNG2_TRIES, breaker: plan.breaker })), a); }, () => log.log?.(`[browser] ${holderKey} on ${p.id}: rung 2 waits for the browser's lock — another holder's rung 2 is in flight; the plan is read when the lock is granted`)); // B-81c6: the queue's place journaled
         const tried = [];
         // verify r2 T1 (reproduced on the fake target model, measured on Chrome 154): RUNG 1 = the opener rule from EACH live
         // anchor (≤ OPENER_ANCHORS_MAX — a dialog open, a crash, a navigation or a site hijacking window.open on ONE tab costs

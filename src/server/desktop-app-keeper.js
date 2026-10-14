@@ -135,7 +135,7 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
 
   // THE MACHINE KEEPER of device #0 — in-process, ONE store shared with this registry; the policy is handed in as hooks
   const machine = DS.install({ dataDir, env, serverSetting, singleton, display, limits, registryRows, backends, log, now, tickMs, guardSampleMs, geometry, hostId, fitSlowBeltMs,
-    hooks: { view, onCommit: () => { dirty = false; notify(); }, idle: idleVerdict, readyTick, onSample: reportSample, onTeardown, onWitness: notifyWitness, onNotify } });
+    hooks: { view, onCommit: () => { dirty = false; notify(); }, idle: idleVerdict, readyTick, onSample: reportSample, onTeardown, onWitness: notifyWitness, onNotify, onQuickExit } });
   /** The shared store, read through the machine (it owns load/save). */
   const store = { get apps() { return machine._store().apps; } };
 
@@ -411,6 +411,13 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
     if (!ro) return machine.keepAlive(id);
     return acc().call(ro.hostId, 'keep-alive', { id }).then((r) => { ingestOne(ro.hostId, r.app); return remoteGet(id) || r.app; });
   }
+  /** int267 seam: the person's outer ✕ asked the app — stamped where the app runs (a device older than the op answers
+   *  without the stamp: its record stands, the close is still sent). */
+  function closeAsked(id) {
+    const ro = store.apps[id] ? null : remoteOf(id);
+    if (!ro) return machine.closeAsked(id);
+    return acc().call(ro.hostId, 'close-asked', { id }).then((r) => { if (r && r.app) ingestOne(ro.hostId, r.app); return remoteGet(id) || (r && r.app) || null; }, () => remoteGet(id) || null);
+  }
   function noteInput(id) {
     const ro = store.apps[id] ? null : remoteOf(id);
     if (!ro) return machine.noteInput(id);
@@ -488,6 +495,13 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
   // or the app ends. A second notification while the item is open is the window's (toast + ⋯ ▸ Notifications), never a second item.
   const attention = new Map(); // id -> the open For-you item's id
   const NOTIFY_INBOX_KEY = 'desktop-app-notify';
+  /** lane app-launch-singleton (fleet inc-mv7hxc2n-2cvr): a launch whose app ended within QUICK_EXIT_MS of its start (the
+   *  machine's `quickExit` fact) — ONE server notice naming the instance that still runs (the window keeps the sentence and
+   *  the Apps card says it; this reaches a person whose window is elsewhere). */
+  function onQuickExit(rec) {
+    const run = rec && rec.quickExit && rec.quickExit.running ? machine.get(rec.quickExit.running) : null;
+    try { serverNotice?.(`desktop-app-quick-exit:${rec.id}`, M.quickExitNoticeText(rec, run), { level: 'warn' }); } catch (e) { log.warn?.(`[desktop] ${rec.id}: the quick-exit notice failed: ${e && e.message}`); }
+  }
   function onNotify(rec, note) {
     const s = viewerSets.get(rec.id);
     const v = M.notifyVerdict({ note, visible: !!(s && (s.active || s.entries.size)) });
@@ -753,7 +767,7 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
   function localOnly(k) { return Object.assign({}, k, { get: (id) => machine.get(id), listApps: () => machine.listApps() }); }
   loadRemote();
 
-  const keeper = { launch, relaunch, startDeferred: machine.startDeferred, stop, reshapeStore: machine.reshapeStore, setPin, keepAlive, noteInput, noteDesktopSize, setWatchProbe: machine.setWatchProbe, fitApp: machine.fitApp, get, list, listApps, liveRecords, streamTarget, x11EnvFor: machine.x11EnvFor, windows, xpraWww: machine.xpraWww, xpraWwwFor, instancePrefs: machine.instancePrefs, facts: machine.facts, registry: machine.registry, adoptAll, adoptRemote, syncHost, start, shutdown, tick, sessionPids: machine.sessionPids,
+  const keeper = { launch, relaunch, startDeferred: machine.startDeferred, stop, reshapeStore: machine.reshapeStore, setPin, keepAlive, closeAsked, noteInput, noteDesktopSize, setWatchProbe: machine.setWatchProbe, fitApp: machine.fitApp, get, list, listApps, liveRecords, streamTarget, x11EnvFor: machine.x11EnvFor, windows, xpraWww: machine.xpraWww, xpraWwwFor, instancePrefs: machine.instancePrefs, facts: machine.facts, registry: machine.registry, adoptAll, adoptRemote, syncHost, start, shutdown, tick, sessionPids: machine.sessionPids,
     viewerJoined, viewerLeft, takeoverViewer, activeViewer, viewersView, onViewers, refreshAppTitle, viewerGraceMs, carrySeat, relaunchSeatMs, // P8-2 x5 + A r1
     machine, // lane C1: device #0's machine keeper — src/server/desktop-access.js runs its local rung against THIS object (never a second keeper on the same store)
     storeFile: machine.storeFile, logRoot: machine.logRoot, STORE_FILE: DS.STORE_FILE, LOG_DIR: DS.LOG_DIR, SESSION_ENV: DS.SESSION_ENV, _store: machine._store,

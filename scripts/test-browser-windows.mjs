@@ -17,6 +17,8 @@
 //   lane live-watch-polish (B-93d7, design 006 G1–G5): ① the "▾+N" menu asks the chip's verdict (never a disabled row), the
 //      watch line names both tabs (en/zh/ja, a page title bounded), the watched chip never folds (+ CONTROL), a refusal is
 //      worded by its code; ② b a re-sent watch of the agent's current tab is answered, a capture's failure code reaches the view.
+//   lane browser-windows-rung-race (B-81c6): ⑦ c31 is ordered by EVENTS (B's rung-2 entry seen, A's place in the lock queue
+//      journaled by the keeper), never by sleeps; c31v + CONTROLS (q) (r5's slept harness on a slow runner) and (r).
 // ~8 s, no browser, no vendor call, port 0 / free ports, scratch dir only.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -628,7 +630,7 @@ console.log('— ④ verify r2 T1: the opener rule\'s own table — the real kee
   const live = new Set([KA, KB]);
   const jl = []; const jlog = { log: (x) => jl.push(String(x)), warn: (x) => jl.push(String(x)), error() { } };
   // ── THE MODEL ──
-  const model = { windows: new Map(), targets: new Map(), nextW: 100, nextT: 0, openWindowCalls: 0, inWindowCalls: 0, rung2Calls: 0, windowReadFails: 0, rung2Fails: false, elsewhereOnce: false, rung2LeakOnce: false, rung2Opts: null, active: new Map(), otherWindow: null, rung2Create: null, rung2Log: [], straysInOther: 0 }; // verify r4: each window's ACTIVE tab, the other holder's window a stray may land in, the create's shape, every rung-2 call's plan
+  const model = { windows: new Map(), targets: new Map(), nextW: 100, nextT: 0, openWindowCalls: 0, inWindowCalls: 0, rung2Calls: 0, windowReadFails: 0, rung2Fails: false, elsewhereOnce: false, rung2LeakOnce: false, rung2Opts: null, active: new Map(), otherWindow: null, rung2Create: null, rung2Log: [], straysInOther: 0, rung2Entered: null }; // verify r4: each window's ACTIVE tab, the other holder's window a stray may land in, the create's shape, every rung-2 call's plan
   const nsOfUrl = (u) => (/fake-(.+)$/.exec(String(u)) || [])[1] || null;
   const fakeState = (ns) => JSON.parse(fs.readFileSync(path.join(AB, ns + '.json'), 'utf8'));
   const fakeWrite = (ns, s) => fs.writeFileSync(path.join(AB, ns + '.json'), JSON.stringify(s));
@@ -656,8 +658,8 @@ console.log('— ④ verify r2 T1: the opener rule\'s own table — the real kee
       const tid = addTab(ns, mintTid(), { windowId: a.windowId, openerId: anchorTargetId, holder: 'keeper' }); await hook('onCreated', tid); return { ok: true, targetId: tid, windowId: a.windowId };
     },
     openTabByActivate: async (url, { anchorTargetId, tries = 1, breaker = null }) => {
-      model.rung2Calls++; model.rung2Opts = { tries, breaker }; model.rung2Log.push({ tries, breaker }); const ns = nsOfUrl(url); const a = model.targets.get(String(anchorTargetId));
-      if (model.rung2Hold) { const h = model.rung2Hold; model.rung2Hold = null; await h; } // verify r5 c31: this rung 2 in flight (under the keeper's lock) until the test lets go
+      model.rung2Calls++; model.rung2Opts = { tries, breaker }; model.rung2Log.push({ tries, breaker, anchor: String(anchorTargetId).toUpperCase() }); const ns = nsOfUrl(url); const a = model.targets.get(String(anchorTargetId));
+      if (model.rung2Hold) { const h = model.rung2Hold; model.rung2Hold = null; if (model.rung2Entered) model.rung2Entered(String(anchorTargetId)); await h; } // verify r5 c31: this rung 2 in flight (under the keeper's lock) until the test lets go; B-81c6: its ENTRY is seen (rung2Entered)
       if (!a || a.state === 'closed') return { ok: false, code: 'open_failed', error: 'no such target', leaks: [], tries: 1 };
       // verify r3 T2 ①: every try's stray is closed AT ONCE by the seam and listed in `leaks` (the keeper counts them);
       // verify r4 ③: a stray lands in the OTHER holder's window when the walk names one (`model.otherWindow`), in the
@@ -875,6 +877,27 @@ console.log('— ④ verify r2 T1: the opener rule\'s own table — the real kee
 
   // ── ⑦ verify r5 (2026-10-02): r4's THREE PARTS attacked — rows c29–c33 on a fresh keeper over the same model ──
   console.log('— ⑦ verify r5: r4\'s parts, attacked');
+  // lane browser-windows-rung-race (B-81c6, failed 2× in one CI shard on rel267): THE LOCK-WAIT INTERLEAVE, ordered by EVENTS.
+  // r5 slept 40 ms for "B is inside its rung 2" and 40 ms for "A waits for the lock", and counted EVERY rung 2 since a snapshot.
+  // Traced on a loaded 4-CPU shape: B's way to rung 2 (its tab new + probes) outlasted the first sleep, so B's OWN rung 2 was
+  // counted as A's (aRung2Ran:true beside A's correct refusal — the CI row), or A overtook B to the lock and read its plan before
+  // the takeover began; the keeper's verdict was right in both orderings. Now: B's ENTRY into rung 2 is seen (the model's
+  // rung2Entered), A's place in the lock queue is the keeper's own journal line (said before its wait), a rung 2 is A's only by
+  // A's own anchor. `sleepMs` = r5's harness (CONTROL q); `delayB` = a slow way to rung 2 for B (its first probe held that long).
+  const LOCK_WAIT = /rung 2 waits for the browser's lock/;
+  const lockWait = async (k, p, { act, sleepMs = 0, delayB = 0, tag = '31' } = {}) => {
+    const aRoots = new Set(roots(k, p, KA).map((x) => String(x).toUpperCase())); const log0 = model.rung2Log.length; const j0 = jl.length;
+    let releaseB = null, enteredB = null; const inB = new Promise((r) => { enteredB = r; });
+    model.rung2Hold = new Promise((r) => { releaseB = r; }); model.rung2Entered = (a) => enteredB(a); if (delayB) model.onProbe = () => sleep(delayB);
+    setState(roots(k, p, KB), 'crashed'); const pb = tabNew(k, KB, `https://lock.example/${tag}b`);
+    const bIn = sleepMs ? (await sleep(sleepMs), null) : await Promise.race([inB.then(() => true), sleep(20000).then(() => false)]); // B inside rung 2, holding the lock
+    setState(roots(k, p, KA), 'crashed'); const c0 = model.rung2Calls; const pa = tabNew(k, KA, `https://lock.example/${tag}a`);
+    const aQueued = sleepMs ? (await sleep(sleepMs), null) : await until(() => jl.slice(j0).some((l) => l.includes(KA) && LOCK_WAIT.test(l)), 20000, 2); // A past its probes, queued at the lock
+    const acted = act(); releaseB(); const [rb, ra] = await Promise.all([pb, pa]);
+    model.rung2Entered = null; model.onProbe = null; model.rung2Hold = null; setState(roots(k, p, KA), 'ok'); setState(roots(k, p, KB), 'ok');
+    const aLog = model.rung2Log.slice(log0).filter((x) => aRoots.has(x.anchor)); const bQueued = jl.slice(j0).some((l) => l.includes(KB) && LOCK_WAIT.test(l)); // B was alone at the lock: no wait journaled (the map cleared after every earlier rung 2)
+    return { rb, ra, acted, bIn, aQueued, bQueued, aRan: sleepMs ? model.rung2Calls > c0 : aLog.length > 0, aCycled: aLog.length ? !!aLog[0].breaker : null };
+  };
   const rows5 = []; const row5 = (state, act, got, want, extra) => { const okc = JSON.stringify(got) === JSON.stringify(want); rows5.push({ state, act, got, want, okc, extra }); return okc; };
   {
     const k14 = mk(K, { dataDir: path.join(O, 'data-r5') }); await k14._facts.probeVersion(); const p14 = k14.createProfile({ label: 'R5' }); const NS14 = B.sessionNameFor(p14.id);
@@ -897,11 +920,13 @@ console.log('— ④ verify r2 T1: the opener rule\'s own table — the real kee
     row5('a live view that opens on this window DURING rung 1, every anchor crashed', 'tab new', { ok: r7.ok, rung: r7.r && r7.r.opened && r7.r.opened.rung, cycled: o30.breaker }, { ok: true, rung: 'activate', cycled: false }, r7);
     // c31 (①, the lock): a takeover that begins while THIS holder WAITS for the browser's rung-2 lock (the other holder's rung 2 in
     // flight) ⇒ NOT run either — the plan is read after the lock wait, the last await before rung 2
-    let releaseB = null; model.rung2Hold = new Promise((r) => { releaseB = r; });
-    setState(roots(k14, p14, KB), 'crashed'); const pb = tabNew(k14, KB, 'https://r5.example/31b'); await new Promise((r) => setTimeout(r, 40)); // B inside rung 2, holding the lock
-    setState(roots(k14, p14, KA), 'crashed'); const c31a = model.rung2Calls; const pa = tabNew(k14, KA, 'https://r5.example/31a'); await new Promise((r) => setTimeout(r, 40)); // A past its probes, waiting for the lock
-    const t31 = takeB(); releaseB(); const [rb, ra] = await Promise.all([pb, pa]); const aRan31 = model.rung2Calls > c31a; backB(); setState(roots(k14, p14, KA), 'ok'); setState(roots(k14, p14, KB), 'ok');
-    row5('a takeover that begins while this holder WAITS for the rung-2 lock (the other holder\'s rung 2 in flight)', 'tab new ×2 (concurrent)', { takeover: t31.ok, b: { ok: rb.ok, rung: rb.r && rb.r.opened && rb.r.opened.rung }, a: { ok: ra.ok, code: ra.code || null, why: ra.why || null }, aRung2Ran: aRan31 }, { takeover: true, b: { ok: true, rung: 'activate' }, a: { ok: false, code: 'window_busy', why: 'user_driving' }, aRung2Ran: false }, { rb, ra });
+    // B-81c6: each step SEEN (B in rung 2, A queued at the lock), never slept; a rung 2 is A's by A's own anchor
+    const L31 = await lockWait(k14, p14, { act: takeB, tag: '31' }); backB(); const { rb, ra } = L31;
+    row5('a takeover that begins while this holder WAITS for the rung-2 lock (the other holder\'s rung 2 in flight)', 'tab new ×2 (concurrent)', { takeover: L31.acted.ok, bInside: L31.bIn, bQueued: L31.bQueued, aQueued: L31.aQueued, b: { ok: rb.ok, rung: rb.r && rb.r.opened && rb.r.opened.rung }, a: { ok: ra.ok, code: ra.code || null, why: ra.why || null }, aRung2Ran: L31.aRan }, { takeover: true, bInside: true, bQueued: false, aQueued: true, b: { ok: true, rung: 'activate' }, a: { ok: false, code: 'window_busy', why: 'user_driving' }, aRung2Ran: false }, { rb, ra });
+    // c31v (②, the lock — B-81c6): a live view that opens on THIS holder's window while it WAITS for the lock ⇒ its rung 2 runs
+    // WITHOUT the cycle (the plan is read at the grant, after the wait)
+    const L31v = await lockWait(k14, p14, { act: () => k14.noteViewers(KA, p14.id, 1), tag: '31v' }); k14.noteViewers(KA, p14.id, 0);
+    row5('a live view that opens on this window while this holder WAITS for the rung-2 lock (the other holder\'s rung 2 in flight)', 'tab new ×2 (concurrent)', { bInside: L31v.bIn, bQueued: L31v.bQueued, aQueued: L31v.aQueued, b: { ok: L31v.rb.ok, rung: L31v.rb.r && L31v.rb.r.opened && L31v.rb.r.opened.rung }, a: { ok: L31v.ra.ok, rung: L31v.ra.r && L31v.ra.r.opened && L31v.ra.r.opened.rung }, aCycled: L31v.aCycled }, { bInside: true, bQueued: false, aQueued: true, b: { ok: true, rung: 'activate' }, a: { ok: true, rung: 'activate' }, aCycled: false }, { rb: L31v.rb, ra: L31v.ra });
     // c32 (③, MEASURED 30/30 per mode): the holder's window closed between the create and the bind (every tab of it gone; the
     // binary knows no such tab) ⇒ window_busy (bind_failed), NEVER the binary's own `tab new` (r4 fell to it: the tab landed in the
     // other holder's window in the FOREGROUND, its page hidden for good); the same `tab new` again ⇒ a new window of its own
@@ -1103,6 +1128,36 @@ console.log('— ④ verify r2 T1: the opener rule\'s own table — the real kee
     const evs = []; kx.onInput((ev) => evs.push(ev.kind)); kx.takeover({ browserKey: KB, profileId: px.id, viewerId: 7, sessionId: 'x-' + KB, holderAlive: true });
     setState(roots(kx, px, KA), 'crashed'); const r = await tabNew(kx, KA, 'https://c.example/p'); setState(roots(kx, px, KA), 'ok'); kx.handback({ browserKey: KB, profileId: px.id, viewerId: 7, cause: 'explicit' });
     ok(r.code === 'window_busy' && !evs.includes('drive-ended'), 'CONTROL (p): a keeper copy that never remembers a refusal emits no drive-ended at the handback — the refused holder is left to poll (the c29 / c33 rows go red)', { code: r.code, evs });
+  }
+  { // (q) lane browser-windows-rung-race (B-81c6): r5's HARNESS (40 ms sleeps + a global rung-2 count) on a runner where B's way
+    // to rung 2 is 60 ms slower calls the PRODUCT keeper red (B's own rung 2 counted as A's — the CI row — or A overtaking B to the
+    // lock); the event-ordered harness
+    // under the same delay is green — the red was the harness's ordering, never the keeper's
+    const { kx, px } = await scen(K, 'q'); await kx.attach({ profileId: px.id, browserKey: KB, sessionId: 'x-' + KB }); await tabNew(kx, KB, 'https://c.example/qb');
+    const take = () => kx.takeover({ browserKey: KB, profileId: px.id, viewerId: 7, sessionId: 'x-' + KB, holderAlive: true }); const back = () => kx.handback({ browserKey: KB, profileId: px.id, viewerId: 7, cause: 'explicit' });
+    const slept = await lockWait(kx, px, { act: take, sleepMs: 40, delayB: 60, tag: 'q1' }); back(); const seen = await lockWait(kx, px, { act: take, delayB: 60, tag: 'q2' }); back();
+    const right = (x) => !!(x.rb.ok && x.ra.ok === false && x.ra.code === 'window_busy' && x.ra.why === 'user_driving' && !x.aRan);
+    const brief = (x) => ({ b: x.rb.ok ? 'ok' : x.rb.code, a: x.ra.ok ? 'ok' : `${x.ra.code}/${x.ra.why}`, aRan: x.aRan, bIn: x.bIn, aQueued: x.aQueued });
+    ok(!right(slept) && right(seen) && seen.bIn === true && seen.aQueued === true, `CONTROL (q): r5's harness (40 ms sleeps, a global rung-2 count) on a runner where B's way to rung 2 is 60 ms slower calls the product red (${JSON.stringify(brief(slept))} — one of its two wrong orderings: B's own rung 2 counted as A's, the CI row of B-81c6, or A overtaking B to the lock); the event-ordered harness under the same delay is green (${JSON.stringify(brief(seen))})`, JSON.stringify({ slept: brief(slept), seen: brief(seen) }));
+  }
+  { // (r) lane browser-windows-rung-race (B-81c6): a keeper copy that reads the plan after rung 1 but BEFORE the lock wait — a
+    // takeover or a live view that begins while it waits is missed (the c31 / c31v rows go red), whatever the scheduling
+    const needleR1 = "rung2Serialized(p.id, () => { plan = planNow(); if (plan.run === false)"; const needleR2 = '        if (!(made && made.ok)) made = await viaActivate(anchors[0]); // verify r5: the plan is read in there, at rung 2';
+    ok(ksrc.includes(needleR1) && ksrc.includes(needleR2), 'control (r) setup');
+    const Kr = M.load('src/server/browser-keeper.js', ksrc.replace(needleR1, "rung2Serialized(p.id, () => { if (plan.run === false)").replace(needleR2, '        if (!(made && made.ok)) { plan = planNow(); made = await viaActivate(anchors[0]); }'), 'plan-before-the-lock');
+    const { kx, px } = await scen(Kr, 'r'); await kx.attach({ profileId: px.id, browserKey: KB, sessionId: 'x-' + KB }); await tabNew(kx, KB, 'https://c.example/rb');
+    const tk = await lockWait(kx, px, { act: () => kx.takeover({ browserKey: KB, profileId: px.id, viewerId: 7, sessionId: 'x-' + KB, holderAlive: true }), tag: 'r1' }); kx.handback({ browserKey: KB, profileId: px.id, viewerId: 7, cause: 'explicit' });
+    const lv = await lockWait(kx, px, { act: () => kx.noteViewers(KA, px.id, 1), tag: 'r2' }); kx.noteViewers(KA, px.id, 0);
+    ok(tk.bIn && tk.aQueued && tk.ra.ok === true && tk.aRan === true && lv.bIn && lv.aQueued && lv.aCycled === true, 'CONTROL (r): a keeper copy that reads the plan after rung 1 but BEFORE the lock wait runs rung 2 under the hands of a user whose takeover began during the wait, and cycles the window under a live view that opened during it (the c31 / c31v rows go red)', JSON.stringify({ tk: { a: tk.ra.ok, aRan: tk.aRan, bIn: tk.bIn, aQueued: tk.aQueued }, lv: { aCycled: lv.aCycled, bIn: lv.bIn, aQueued: lv.aQueued } }));
+  }
+  { // (s) lane browser-windows-rung-race (B-81c6): r3's lock compared `cur`, never the stored tail — its entry outlived every rung 2,
+    // so a holder ALONE at the lock is journaled as waiting behind nobody (c31's bQueued goes red)
+    const needleS = 'if (rung2Locks.get(k) === tail) rung2Locks.delete(k);'; ok(ksrc.includes(needleS), 'control (s) setup');
+    const Ks = M.load('src/server/browser-keeper.js', ksrc.replace(needleS, 'if (rung2Locks.get(k) === cur) rung2Locks.delete(k);'), 'lock-entry-kept');
+    const { kx, px } = await scen(Ks, 's'); await kx.attach({ profileId: px.id, browserKey: KB, sessionId: 'x-' + KB }); await tabNew(kx, KB, 'https://c.example/sb');
+    setState(roots(kx, px, KA), 'crashed'); const r0 = await tabNew(kx, KA, 'https://c.example/s0'); setState(roots(kx, px, KA), 'ok'); // one rung 2, alone
+    const L = await lockWait(kx, px, { act: () => ({ ok: true }), tag: 's1' });
+    ok(r0.ok && r0.r && r0.r.opened && r0.r.opened.rung === 'activate' && L.bIn && L.bQueued === true, 'CONTROL (s): a keeper copy whose rung-2 lock compares `cur` (r3) keeps its map entry after every rung 2 — a holder ALONE at the lock is journaled as waiting behind nobody (the c31 / c31v rows\' bQueued goes red)', JSON.stringify({ r0: r0.ok && r0.r && r0.r.opened && r0.r.opened.rung, bIn: L.bIn, bQueued: L.bQueued }));
   }
   { // verify r5 pins: the drive-ended notice — its kind registered in session-status, its ONE sentence, the announcer's branch, the keeper's three drive-end sites
     const ssrc = read('src/session-status.js'); const hsrc = read('src/server/browser-handback.js');

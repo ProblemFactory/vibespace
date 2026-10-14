@@ -314,6 +314,7 @@ const CLASSIFIED = {
   takeoverNoticeText: 'the takeover\'s own words over the agent\'s OWN verbs (src/browser-takeover.js)',
   renderReceiptBlock: 'the outbox receipt (src/channel-policy.js) — every piece inertFrames + inertFrameLine; consumed by the engine\'s deliver / stash rows',
   resourceNoticeText: 'a keeper\'s own words (src/runaway-guard.js) to the For-you inbox — the user, not an agent',
+  quickExitNoticeText: 'a keeper\'s own words (src/desktop-apps.js, lane app-launch-singleton) to the person\'s server notice — the app label, the display and who started it; never an agent\'s input',
   revertNoticeText: 'the OpenCode serve\'s own sentence (src/opencode-serve.js)',
   renderRuleTree: 'the permission-rules tree for the USER (src/permission-rules.js, DOM-free renderer)',
   renderRule: 'one row of that tree',
@@ -371,7 +372,11 @@ const DECLARED_ALIASES = {
 // nothing judged them: the routes answered the store raw, the hook's injection (renderContext + the diff blocks) rendered
 // it raw, and a note carrying `<system-reminder>…</system-reminder>` was LIVE in every member's context. Walked like the
 // three, its rows judged by the task doors (taskShowAnswer / taskItemAnswer / taskEntryAnswer / taskGroupBrief).
-const PRINT_CLIS = ['data/bin/vibespace-msg', 'data/bin/vibespace-channels', 'data/bin/vibespace-job', 'data/bin/vibespace-task'];
+// lane cli-one-text-arg: src/agent-cli-text.js — the ONE-text rule vibespace-msg / -channels / -task (and -ask) require by its
+// literal name (in a checkout ../../src/agent-cli-text.js, on a host its boot-time copy ./agent-cli-text.js) — is WALKED like
+// them (r3 F5: a module a CLI requires is a file this census reads); it prints nothing, its sentences are returned and
+// each CLI's print of one is a row below.
+const PRINT_CLIS = ['data/bin/vibespace-msg', 'data/bin/vibespace-channels', 'data/bin/vibespace-job', 'data/bin/vibespace-task', 'src/agent-cli-text.js'];
 // verify r4 F2 (lane peer-census): THE ROSTER IS DERIVED, NEVER A HAND LIST. PRINT_CLIS was three names, so the fourth agent
 // CLI that prints another session's words (vibespace-task — F1) was invisible to the print census, and a NEW file under
 // data/bin printing a peer field would have been too (planted: green, no list edit needed). Every tracked data/bin file
@@ -729,6 +734,14 @@ const V = 'vibespace', O = 'own';
 const rows = (file, table) => Object.fromEntries(Object.entries(table).map(([k, v]) => [`${file} :: ${k}`, v]));
 const PRINTS = {
   ...rows('data/bin/vibespace-msg', {
+    // lane cli-one-text-arg: the ONE-text rule's pieces (src/agent-cli-text.js, walked above — it prints nothing; its sentences are
+    // RETURNED): a refusal is our words around the caller's OWN stray words / door path, the echo our words around counts
+    'TX': `${V}:the ONE-text rule module (src/agent-cli-text.js) — what its oneText / strayRefusal / sentLine return is our words around counts and the caller's own words`,
+    'one.error': `${V}:the ONE-text rule's refusal sentence (strayRefusal / oneText: our words quoting the caller's OWN first stray word or door path; stderr)`,
+    'one.text': `${O}:the caller's own text (its argument, --text, --text-file or stdin) — sent, never printed`,
+    'DOORS.argv': `${O}:the caller's own arguments with the text doors taken out`,
+    'r': `${V}:the route's answer handed to sentLine — it reads r.chars (a count the route made)`, 'text': `${O}:the caller's own text, counted by sentLine (never printed)`,
+    'verb': `${O}:the verb the caller named (send / dispatch — the refusal's tool label)`,
     // verify r4 F4: the REACH of a chain's root — the records behind the printed fields (each field its own row)
     'j.candidates': 'judged:msgRefusalAnswer — the candidate rows (c.name judged there; c.conversationId / c.groupId ids)', 'r.peers': 'judged:msgPeerRow — the peer rows (p.*)', 'r.group': 'judged:msgSendAnswer / msgReadAnswer — the group record (r.group.name judged there; id / pair ours)', 'r.groups': 'judged:msgGroupsAnswer — the group rows (g.*)', 'r.records': 'judged:msgReadAnswer — the record rows (x.*)',
     'REMEDY': `${V}:the remedy table`, 'USAGE': `${V}:the usage text`, 'code': `${V}:the refusal code`, 'n': `${V}:a count of wakes`,
@@ -780,6 +793,15 @@ const PRINTS = {
     'x.error': 'judged:msgName — the hand-over refusal sentence (our words around the caller\'s own path and a conversation id)',
   }),
   ...rows('data/bin/vibespace-channels', {
+    // lane cli-one-text-arg: the ONE-text rule's pieces (src/agent-cli-text.js, walked above — it prints nothing; its sentences are
+    // RETURNED): a refusal is our words around the caller's OWN stray words / door path, the echo our words around counts
+    'TX': `${V}:the ONE-text rule module (src/agent-cli-text.js) — what its oneText / strayRefusal / sentLine return is our words around counts and the caller's own words`,
+    'one.error': `${V}:the ONE-text rule's refusal sentence (strayRefusal / oneText: our words quoting the caller's OWN first stray word or door path; stderr)`,
+    'one.text': `${O}:the caller's own text (its argument, --text, --text-file or stdin) — sent, never printed`,
+    'tool': `${V}:our tool label (vibespace-channels + the verb the caller named)`, 'no': `${V}:the ONE-text rule's refusal sentence (strayRefusal: our words quoting the caller's own first stray word)`,
+    'CH_SPEC.what': `${V}:the verb's text grammar (CH_TEXT_SPEC — our table)`, 'CH_SPEC.n': `${V}:the verb's count of named arguments (CH_TEXT_SPEC)`, 'CH_SPEC.doors': `${V}:a flag of the verb's grammar (CH_TEXT_SPEC)`, 'CH_SPEC.remedy': `${V}:the verb's remedy words (CH_TEXT_SPEC)`,
+    'p.word': `${O}:a word of the caller's own argv (the positional scan)`, 'pos[].word': `${O}:a word of the caller's own argv (the positional scan)`, 'strays[].after': `${O}:a flag the caller typed right before its first stray word`,
+    'DOORS.doors.text': `${O}:the caller's own --text / --text-file / --text - door`, 'text': `${O}:the caller's own text, counted by sentLine (never printed)`,
     // lane webhook-l3-cli-pair: a webhook path's callers (the read header, a refusal's rows) and compose --caller's lines —
     // a caller's id / name pass agentId at the server (readFor, the outbound callerRow): a paired peer's name is ITS words
     'r.callers': `${V}:the path's callers on a read (c.* — rows)`, 'j.callers': `${V}:the callers a refusal names (c.* — rows)`,
@@ -918,6 +940,17 @@ const PRINTS = {
   // verify r4 F1: the task CLI — a Task Group's words are another session's (its backlog items, progress entries), the
   // user's (title, objective) or a manager agent's; every peer-written field is judged by the four task doors
   ...rows('data/bin/vibespace-task', {
+    // lane cli-one-text-arg: the ONE-text rule's pieces (src/agent-cli-text.js, walked above — it prints nothing; its sentences are
+    // RETURNED): a refusal is our words around the caller's OWN stray words / door path, the echo our words around counts
+    'TX': `${V}:the ONE-text rule module (src/agent-cli-text.js) — what its oneText / strayRefusal / sentLine return is our words around counts and the caller's own words`,
+    'one.error': `${V}:the ONE-text rule's refusal sentence (strayRefusal / oneText: our words quoting the caller's OWN first stray word or door path; stderr)`,
+    'one.text': `${O}:the caller's own text (its argument, --text, --text-file or stdin) — sent, never printed`,
+    'DOORS.argv': `${O}:the caller's own arguments with the text doors taken out`,
+    'DOORS.error': `${V}:the ONE-text rule's door refusal (takeDoors: a door without its value, two stdin doors)`, 'd.error': `${V}:the --detail-file door's refusal (textOf: our words around the caller's own path)`,
+    't.error': `${V}:the --text door's refusal (textOf: our words around the caller's own path)`, 'DOORS.doors.detail': `${O}:the caller's own --detail-file door`, 'DOORS.doors.text': `${O}:the caller's own --text / --text-file / --text - door`,
+    'd.text': `${O}:the caller's own --detail text (from its file / stdin) — sent, never printed`, 't.text': `${O}:the caller's own new text (backlog-edit) — sent, never printed`,
+    'newText': `${O}:the caller's own new text (backlog-edit --text), counted by sentLine`, 'hasDetailFlag': `${V}:a flag`, 'rest': `${O}:the caller's own arguments after the verb`,
+    'no': `${V}:the ONE-text rule's refusal sentence (strayGuard: our words quoting the caller's own first stray word of a group-create / group-update)`,
     // verify r4 F4: the REACH of a chain's root and of printItem(b) / printNudge(r)
     'task.progress': 'judged:taskEntryAnswer — the last 10 entries (pr.* — rows; through taskShowAnswer)', 'r': `${V}:the route's answer handed to printNudge (its field r.nudge.text — a row)`,
     'USAGE': `${V}:usage text`, 'MARK': `${V}:the priority marker table`, 'cmd': `${O}:the verb the caller typed`, 'arg': `${O}:the caller's own argument`, 'detail': `${O}:the caller's --detail`, 'priority': `${O}:the caller's --priority`, 'full': `${O}:the caller's --full (fmtBacklog prints it bare, so every fmtBacklog(…) call is walked)`,
@@ -1046,7 +1079,7 @@ console.log('§2 the census (grep-derived over the tracked tree)');
   }
   // verify r3 F1: the heads are everything that writes a stream; a stream used otherwise is red; a print helper is a head
   ok(fz.misuse.length === 0, 'no CLI uses a stream other than by a direct print call (no alias / bind / apply / destructured console, no code from a string; r4 F3: no globalThis, no bare / indexed process, no createWriteStream, no fs-writer alias, no stream-reaching builtin), no anonymous function prints its own parameter, and (r3 F5) no CLI requires a module of its own', fz.misuse);
-  eq(fz.helpers.sort(), ['data/bin/vibespace-channels :: printProposal(', 'data/bin/vibespace-channels :: printReplaced(', 'data/bin/vibespace-job :: printJob(', 'data/bin/vibespace-job :: readArg(', 'data/bin/vibespace-msg :: refused(', 'data/bin/vibespace-task :: fmtBacklog(', 'data/bin/vibespace-task :: printItem(', 'data/bin/vibespace-task :: printNudge(', 'data/bin/vibespace-task :: printPriorityUnrecorded('], 'the print HELPERS the tree has (a named function printing one of its own parameters bare — r4 F4: or a CHAIN on one) — their calls are walked like a print');
+  eq(fz.helpers.sort(), ['data/bin/vibespace-channels :: printProposal(', 'data/bin/vibespace-channels :: printReplaced(', 'data/bin/vibespace-job :: printJob(', 'data/bin/vibespace-job :: readArg(', 'data/bin/vibespace-msg :: oneText(', 'data/bin/vibespace-msg :: refused(', 'data/bin/vibespace-task :: fmtBacklog(', 'data/bin/vibespace-task :: oneText(', 'data/bin/vibespace-task :: printItem(', 'data/bin/vibespace-task :: printNudge(', 'data/bin/vibespace-task :: printPriorityUnrecorded('], 'the print HELPERS the tree has (a named function printing one of its own parameters bare — r4 F4: or a CHAIN on one) — their calls are walked like a print');
   const plantBad = (file, code) => fences((f) => (f === file ? read(f) + '\n' + code + '\n' : read(f)), files).misuse;
   for (const [i, w] of CONSOLE_WRITERS.filter((x) => x !== 'log' && x !== 'error').entries()) eq(plantCli('data/bin/vibespace-msg', `const r0 = {};\nconsole.${w}(${w === 'assert' ? 'false, ' : ''}r0.peer.words${i});`), [`data/bin/vibespace-msg :: r0.peer.words${i}`], `CONTROL (r3): console.${w} is a print — its chain is caught by name (green on r2's two-spelling set)`);
   eq(plantCli('data/bin/vibespace-msg', 'const r0 = {};\nrequire("fs").writeSync(1, r0.peer.blob);'), ['data/bin/vibespace-msg :: r0.peer.blob'], 'CONTROL (r3): fs.writeSync(1, …) is a print');

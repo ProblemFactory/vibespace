@@ -1189,5 +1189,56 @@ console.log('§xpra-repo the image and the machine plan read ONE xpra.org row (l
   ok((M.browserArgv({ browser: 'chromium', exec: '/opt/google/chrome/chrome', args: [] }, { profileDir: '/d/p' }).argv || []).includes('--password-store=basic'), 'a desktop-app Chrome already runs the basic password store — the private bus loses it no keyring');
 }
 
+{ // lane app-launch-singleton (fleet inc-mv7hxc2n-2cvr, .268): ONE PROGRAM, ONE INSTANCE — the PURE verdicts (the keeper legs:
+  // scripts/test-app-launch-once.mjs)
+  console.log('lane app-launch-singleton — the card\'s verdict, the installed browser\'s family, runs-twice, the quick exit');
+  const rec = (o) => ({ id: 'da-x', appId: 'app.chrome', state: 'ready', hostId: 'local', display: ':2', startedAt: 10, ...o });
+  const row = { id: 'app.chrome', path: '/usr/bin/google-chrome-stable', runsTwice: true };
+  const v1 = M.launchVerdict({ row, apps: [rec({ id: 'da-a', startedAt: 5 }), rec({ id: 'da-b', state: 'launching', startedAt: 9 })] });
+  ok(v1.act === 'attach' && v1.target.id === 'da-a' && v1.running.map((r) => r.id).join() === 'da-b,da-a' && v1.again === true, 'running same app ⇒ attach (the newest READY one is the target; every instance listed newest first; again for a row that runs twice)', v1);
+  ok(M.launchVerdict({ row: { ...row, runsTwice: false }, apps: [rec({})] }).again === false, '…and no "Open another" for a row that runs once');
+  ok(M.launchVerdict({ row, apps: [] }).act === 'launch' && M.launchVerdict({ row, apps: [rec({ state: 'exited' }), rec({ replacedBy: 'da-y' }), rec({ hostId: 'mac-1' }), rec({ appId: 'app.other' })] }).act === 'launch', 'no running instance ⇒ launch (an ended one, one being replaced, another machine\'s, another row\'s never count)');
+  ok(M.launchVerdict({ row, apps: [rec({ appId: undefined, exec: '/usr/bin/google-chrome-stable' })] }).act === 'attach' && M.launchVerdict({ row, apps: [rec({ appId: undefined, exec: '/usr/bin/xterm' })] }).act === 'launch', 'a TYPED command that ran the row\'s own executable is an instance of it (another program is not)');
+  ok(M.launchVerdict({ row, apps: [rec({ hostId: 'mac-1' })], host: 'mac-1' }).act === 'attach', 'the machine is the verdict\'s own (a paired machine\'s card reads its records)');
+  const lk = { ...row, id: 'seen.chrome', lock: { pid: 4242, live: true, recordId: 'da-l' } };
+  const v2 = M.launchVerdict({ row: lk, apps: [rec({ id: 'da-l', appId: 'chromium', exec: '/usr/bin/google-chrome' })] });
+  ok(v2.act === 'attach' && v2.target.id === 'da-l', 'the lock-file fact: a record whose process holds the default profile is an instance of every row of that browser', v2);
+  const held = M.launchVerdict({ row: { id: 'app.fp', runsTwice: false, lock: { pid: 4242, live: true, recordId: null } }, apps: [] });
+  ok(held.act === 'held' && held.lock.pid === 4242 && held.again === false, 'a browser WITHOUT its own profile whose default profile a live process outside every window holds ⇒ held (a launch would be handed over and exit)', held);
+  const own = M.launchVerdict({ row: { ...row, lock: { pid: 4242, live: true, recordId: null } }, apps: [] });
+  ok(own.act === 'launch' && own.lock.pid === 4242, '…a browser WITH its own profile launches beside it (the holder named for the words)', own);
+  ok(M.launchVerdict({ row: { ...row, runsTwice: false, lock: { pid: 4242, live: false, recordId: null } }, apps: [] }).act === 'launch', 'a stale lock (dead pid) holds nothing');
+  // the installed browser's family (DEFECT #0: Exec=/usr/bin/google-chrome-stable %U ran AS TYPED on the default profile)
+  const fam = (o) => M.appBrowserVerdict(o);
+  ok(same(fam({ exec: '/usr/bin/google-chrome-stable', args: [], category: 'browser' }), { isBrowser: true, browser: 'chromium', ownProfile: true, why: 'exec' }), 'an installed google-chrome-stable ⇒ the chromium family, its own profile');
+  ok(['brave-browser', 'microsoft-edge-stable', 'vivaldi-stable', 'chromium-browser', '/opt/x/chrome'].every((e) => fam({ exec: e }).browser === 'chromium') && ['firefox-esr', 'librewolf', '/usr/lib/firefox/firefox'].every((e) => fam({ exec: e }).browser === 'firefox'), 'the families by precise basename (chromium-based / firefox-based)');
+  ok(fam({ exec: 'chromium-thumbnailer' }).isBrowser === false && fam({ exec: 'firefox-wrapper' }).browser === null && fam({ exec: 'xterm' }).isBrowser === false, 'never a prefix: chromium-thumbnailer is no browser, an unknown name has no family');
+  ok(fam({ exec: 'flatpak', args: ['run', 'com.google.Chrome'], category: 'browser' }).why === 'launcher' && fam({ exec: '/var/lib/flatpak/exports/bin/com.google.Chrome' }).why === 'app-id' && fam({ exec: 'epiphany', category: 'browser' }).why === 'unknown-family', 'a launcher / a sandboxed app id / an unknown browser ⇒ a browser WITHOUT its own profile');
+  ok(fam({ id: 'chromium', browser: 'chromium', exec: 'google-chrome' }).why === 'catalog' && fam({ browser: 'chromium', browserBy: 'exec', exec: 'xterm' }).isBrowser === false, 'the catalog\'s browser row keeps its family; a family DERIVED from an exec is re-judged by the exec (a variant)');
+  // runs twice
+  const tw = (o) => M.runsTwiceVerdict(o);
+  ok(tw({ exec: 'google-chrome-stable' }).twice && tw({ office: 'writer', exec: 'soffice' }).twice && tw({ exec: '/usr/bin/xterm' }).twice, 'runs twice: a browser with its own profile, LibreOffice (its own profile), a one-process terminal');
+  ok(same(tw({ exec: 'flatpak', args: ['run', 'com.google.Chrome'] }), { twice: false, why: 'shared-profile' }) && same(tw({ exec: 'gnome-calculator' }), { twice: false, why: 'single-instance' }) && tw({ exec: 'gnome-terminal' }).twice === false, 'runs once: a browser on its default profile, anything that may hand a second start to the first (GApplication — gnome-terminal is a server)');
+  // the quick exit
+  ok(M.QUICK_EXIT_MS === 3000, 'QUICK_EXIT_MS = 3 s');
+  ok(same(M.quickExitVerdict({ appAt: 1000, readyAt: 1200 }, 2000), { quick: true, asked: false, afterMs: 1000, sinceReadyMs: 800, tail: '0.8 s after ready' }) && M.quickExitVerdict({ appAt: 1000 }, 1400).tail === 'before ready, 0.4 s after it started', 'quickExitVerdict: measured from the app\'s own spawn; the journal tail says it since ready (or before ready)');
+  ok(M.quickExitVerdict({ appAt: 1000, readyAt: 1010 }, 1030).tail === 'under 0.1 s after ready' && M.quickExitVerdict({ appAt: 1000 }, 1018).tail === 'before ready, under 0.1 s after it started', 'a handover inside 0.1 s says "under 0.1 s" (never "0.0 s")');
+  ok(M.quickExitVerdict({ appAt: 1000, readyAt: 1100 }, 4000).quick === false && M.quickExitVerdict({ appAt: 1000 }, 3999).quick === true && M.quickExitVerdict({ startedAt: 1000 }, 1500).quick === true, 'the 3 s edge; an older record without appAt is measured from its start');
+  // int267 seam (the guard-programmatic-not-the-press law): an exit after the person's own close (closeAskedAt since this spawn) ANSWERS it — never a quick exit; an ask from before this spawn, or after the exit, is not this exit's
+  ok(M.quickExitVerdict({ appAt: 1000, readyAt: 1100, closeAskedAt: 1500 }, 2000).quick === false && M.quickExitVerdict({ appAt: 1000, closeAskedAt: 1500 }, 2000).asked === true && M.quickExitVerdict({ appAt: 1000, closeAskedAt: 900 }, 2000).quick === true && M.quickExitVerdict({ appAt: 1000, closeAskedAt: 2500 }, 2000).quick === true && M.quickExitVerdict({ appAt: 1000 }, 2000).asked === false, 'an exit that answers the person\'s close ask (closeAskedAt since the spawn) is never quick; an older ask or none still is', [M.quickExitVerdict({ appAt: 1000, closeAskedAt: 1500 }, 2000), M.quickExitVerdict({ appAt: 1000, closeAskedAt: 900 }, 2000)]);
+  ok(same(M.exitCloseVerdict({ state: 'exited', quickExit: { afterMs: 10, code: 0 } }), { close: false, why: 'quick-exit' }) && M.exitCloseVerdict({ state: 'exited', quickExit: { afterMs: 10 }, stoppedBy: 'user' }).close === true && M.exitCloseVerdict({ state: 'exited' }).close === true, 'exitCloseVerdict: a quick exit KEEPS the window (its sentence) — a person\'s stop still closes it, a plain exit still closes');
+  const run = { display: ':2', launchedBy: { kind: 'agent', sessionId: 's', name: 'Install app chrome' } };
+  ok(M.quickExitNoticeText({ label: 'Google Chrome', quickExit: { afterMs: 800, code: 0 } }, run) === 'Google Chrome exited right after it started (code 0, 0.8 s after it started) — the same program is already running on :2 (started by agent session Install app chrome): open it from Apps.', 'the notice names where it runs and who started it');
+  ok(/already running elsewhere \(on another display, or outside VibeSpace\); nothing was left open\.$/.test(M.quickExitNoticeText({ label: 'X', quickExit: { afterMs: 5, code: 0 } })) && M.launchedByText({ launchedBy: { kind: 'person' } }) === 'you' && M.launchedByText({}) === '', '…and when nothing runs it, says where it usually is');
+  // the lock words
+  ok(same(M.singletonLockFact('my-box-1-4242', { hostname: 'my-box-1' }), { host: 'my-box-1', pid: 4242, here: true }) && M.singletonLockFact('other-4242', { hostname: 'mine' }).here === false && M.singletonLockFact('nopid') === null && M.singletonLockFact('h-1') === null, 'singletonLockFact: <hostname>-<pid> (a hyphenated host), another host, junk');
+  ok(M.defaultProfileDirOf('/usr/bin/google-chrome-stable') === '.config/google-chrome' && M.defaultProfileDirOf('chromium-browser') === '.config/chromium' && M.defaultProfileDirOf('brave-browser') === '.config/BraveSoftware/Brave-Browser' && M.defaultProfileDirOf('microsoft-edge-beta') === '.config/microsoft-edge-beta' && M.defaultProfileDirOf('firefox') === null, 'defaultProfileDirOf: the chromium family\'s default dirs (firefox keeps one lock per profile — not read)');
+  ok(M.REAL_BROWSER_ROOTS.includes(M.defaultProfileDirOf('google-chrome')) && M.REAL_BROWSER_ROOTS.includes(M.defaultProfileDirOf('chromium')), 'the default dirs are the user\'s real roots profileDirVerdict already refuses');
+  // the keeper's wiring (the acts: scripts/test-app-launch-once.mjs)
+  const ks = keeperSrc();
+  ok(/function launchFacts\(row\)[\s\S]{0,400}M\.appBrowserVerdict\(r\)[\s\S]{0,200}browserBy: 'exec'[\s\S]{0,120}runsTwice: M\.runsTwiceVerdict\(r\)\.twice/.test(ks) && /\.concat\(appRows, seenRows\)\.map\(launchFacts\)/.test(ks), 'WIRING: every served row passes launchFacts (an installed browser gets its family ⇒ browserArgv\'s own profile)');
+  ok(/ifRunning === 'attach' && v\.launch\.source === 'registry' && !v\.launch\.file/.test(ks) && /onQuickExit/.test(ks) && /rec\.appAt = now\(\);[^\n]*\n[^\n]*display\.startApp\(/.test(ks), 'WIRING: ifRunning attach (never for a document), the quick-exit hook, appAt stamped right before the app\'s spawn');
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

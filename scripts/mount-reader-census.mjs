@@ -41,7 +41,7 @@ export const ROWS = [
   ['src/conversation-index.js', 'own-tree', 1, null, DATA],
   ['src/ctx-sync.js', 'user-path', 4, 'DOOR\\.blocked\\(', 'the group context folder walk: refused by name before the device is dialled'],
   ['src/design-fs.js', 'user-path', 7, 'DOOR\\.blocked\\(', 'the design folder read: storage_blocked by name'],
-  ['src/desktop-display.js', 'own-tree', 23, null, PROC], // +3 lane app-display-portal: portal binaries stat'd in /usr/libexec, the app dir's bus socket, /proc/self/mountinfo; +1 lane app-display-notify-sink: the sink file beside the module
+  ['src/desktop-display.js', 'own-tree', 24, null, PROC], // +3 lane app-display-portal: portal binaries stat'd in /usr/libexec, the app dir's bus socket, /proc/self/mountinfo; +1 lane app-display-notify-sink: the sink file beside the module; +1 lane app-launch-singleton: the holder of a browser's default profile (/proc/<pid>/stat — its SingletonLock is a readlink in the browser's own tree under ~)
   ['src/desktop-serve.js', 'own-tree', 12, null, DATA], // +2 lane app-display-notify-sink: the app's notification journal (stat + read) in its own 0700 portal dir
   ['src/device-mount.js', 'exempt', 5, null, 'the device pull mount: /proc scans + its own mount point (its owner’s liveness)'],
   ['src/discovery-facts.js', 'own-tree', 5, null, PROC],
@@ -60,7 +60,7 @@ export const ROWS = [
   ['src/mounts.js', 'exempt', 26, null, 'the manager itself: /proc, its config, its own mount points only through probe CHILDREN (ls -d) — the sweep that sets the block; lane vfs-cache-local +4: the local cache root probe (accessSync, ~/.cache) + the vfsMeta walk\'s text run in a CHILD node (statSync/readdirSync/readFileSync inside CACHE_META_CHILD); r2 +2: the override root\'s statSync (a non-dir is refused) + the child\'s root stat (an absent root is unknown, not absence)'],
   ['src/opencode-serve.js', 'own-tree', 3, null, CLI],
   ['src/opslog.js', 'exempt', 2, null, '/proc/mounts + the ops log folder'],
-  ['src/peer-messaging.js', 'own-tree', 3, null, DATA],
+  ['src/peer-messaging.js', 'own-tree', 4, null, `${CLI}; lane peer-registry-identity +1: the registration's inbox socket (statSync isSocket — the CLI's own runtime-dir socket, never a mount)`],
   ['src/plugins.js', 'own-tree', 1, null, DATA],
   ['src/port-forward.js', 'own-tree', 4, null, PROC],
   ['src/proc-identity.js', 'own-tree', 7, null, PROC],
@@ -80,9 +80,9 @@ export const ROWS = [
   ['src/search-index-worker.js', 'own-tree', 5, null, CLI],
   ['src/secret-box.js', 'own-tree', 5, null, DATA],
   ['src/app-secrets.js', 'own-tree', 4, null, DATA], // lane app-display-secrets: the service/sealer files beside it, the key file (secret-box), the app dir's sealed store + bus socket
-  ['src/app-secrets-seal.js', 'own-tree', 2, null, DATA], // lane app-display-secrets: the app dir's sealed store + its stdin
+  ['src/app-secrets-seal.js', 'own-tree', 3, null, DATA], // lane app-display-secrets: the app dir's sealed store + its stdin; lane display-secret-fd +1: the per-display key off the inherited pipe fd (never a path anyone names)
   ['src/server/account-usage-routes.js', 'own-tree', 1, null, CLI],
-  ['src/server/agent-tool-generators.js', 'user-path', 21, 'DOOR\\.blocked\\(', 'a session root’s git facts: the sentence as facts.error'],
+  ['src/server/agent-tool-generators.js', 'user-path', 23, 'DOOR\\.blocked\\(', 'a session root’s git facts: the sentence as facts.error'], // lane cli-one-text-arg: +2 — src/agent-cli-text.js read and its copy beside the CLIs compared (own tree, every boot)
   ['src/server/apps-engine.js', 'own-tree', 1, null, DATA],
   ['src/server/auto-cli-loop.js', 'own-tree', 2, null, CLI],
   ['src/server/auto-resume.js', 'own-tree', 1, null, CLI],

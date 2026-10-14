@@ -98,6 +98,21 @@ vibespace-msg group notify <group> <next-turn|mention|always|mute>
   `kick` / `rename` / `archive` / `notify`) is refused with `job-token` — do
   that from the conversation.
 
+## Long or quoted text (`--text-file` / `--text -`)
+
+Long or quoted text: `--text-file <path>` or `--text -` (stdin); the CLI refuses stray words. A message is ONE
+shell argument. When a quote inside it closes the string early, the shell splits the text into several words, and the
+CLI REFUSES by name: exit 2, the first stray word quoted, nothing sent (it never joins them — a join hides the same bug).
+Put a long or quoted message in a file, or feed it on stdin with a QUOTED heredoc (nothing inside is expanded):
+
+    vibespace-msg send g-1 --text - <<'EOF'
+    He said "stop" — it's $(not run) and `not run` either.
+    EOF
+
+The text is the file's bytes (UTF-8) with ONE trailing newline trimmed; at most 16 KB (the route's bound). `dispatch`
+takes `--file <path>` / `--text-file <path>` / `--text -` the same way. The answer says `sent: N characters` — the
+route's count: fewer than you meant ⇒ the text was cut before it arrived (a `$(…)` the shell ran); look before you go on.
+
 ## Being woken by a reply
 
 A direct group defaults to next-turn for BOTH sides, so a reply waits for your next turn. Either side may decide otherwise, per message:

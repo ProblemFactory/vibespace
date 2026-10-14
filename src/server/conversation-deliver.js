@@ -875,6 +875,15 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   /** ms since the last SUCCESSFUL post to this conversation on any live rung (Infinity: none this process) */
   function sincePost(cid) { const at = lastPostAt.get(cid); return at ? clock.now() - at : Infinity; }
 
+  // THE REGISTRY'S VERDICT (lane peer-registry-identity): rung 1 asks for the record that passes the process-identity
+  // check (src/peer-messaging.js lookupPeer) AND for why none did, so the journal can tell "stale registrations only" (a
+  // pid reused after a reboot, a socket gone) from "not running". A stub with findPeer alone answers the plain lookup.
+  function lookPeer(cid) {
+    if (typeof peerMsg.lookupPeer === 'function') return peerMsg.lookupPeer(cid);
+    return { peer: peerMsg.findPeer(cid), candidates: 0, stale: 0, why: '' };
+  }
+  const staleOnly = (look) => `stale registration(s) only — pid reused / socket absent (${look.why})`;
+
   // rung 1.5 helper: a LIVE local chat session whose backend declares the
   // 'rpc-queue' peer-delivery lane AND whose wrapper adverts caps.peerMessage
   // in its own sidecar (capability law: gate on what the process wrote, never
@@ -1133,7 +1142,9 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
       // rung 1: this machine's CLI inbox registry
       let undo1 = null;
       try {
-        const peer = noWake ? null : peerMsg.findPeer(cid);
+        const look = noWake ? null : lookPeer(cid);
+        const peer = look && look.peer;
+        if (!peer && look && look.stale > 0) log(`[deliver] ${cid}: no live inbox on this machine — ${staleOnly(look)}`);
         if (peer) {
           undo1 = armTurn();
           const busy = busyOf(cid);
@@ -1149,7 +1160,17 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
             log(`[deliver] local peer post to ${peer.socketPath} failed: ${r.reason} (${where}) — parked for retry at ${new Date(e.nextAt).toISOString()} (${e.id}; the next turn end posts it sooner)`);
             return { ok: false, lane: 'message', reason: r.reason, parked: true, id: e.id, retryAt: e.nextAt, phase: r.phase || null, busy, late: Number(r.late) || 0 };
           }
-          log(`[deliver] local peer post to ${peer.socketPath} failed: ${r.reason} (${where})${r.transient ? '' : ' — the socket is not served: the conversation is not running'}`);
+          // "not running" is said ONLY when no record passes (re-judged after the miss — the CLI may have exited between the
+          // lookup and the post); a record that still passes refused with its own socket, which is NOT "not running"
+          let verdict = '';
+          if (!r.transient) {
+            let again = null;
+            try { again = lookPeer(cid); } catch { again = null; }
+            verdict = again && again.peer ? ` — the socket refused the post, though a registration still passes its identity check (pid ${again.peer.pid}${again.peer.identity ? `, ${again.peer.identity}` : ''}${again.why ? `; ${again.why}` : ''})`
+              : again && again.stale > 0 ? ` — the socket is not served: ${staleOnly(again)}`
+                : ' — the socket is not served: the conversation is not running';
+          }
+          log(`[deliver] local peer post to ${peer.socketPath} failed: ${r.reason} (${where})${verdict}`);
           return { ok: false, lane: 'message', reason: r.reason, phase: r.phase || null, busy, ...(r.transient ? {} : { notRunning: true }) };
         }
       } catch (e) { if (undo1) undo1(); return { ok: false, reason: e.message }; }

@@ -30,6 +30,7 @@ const { searchTouches } = require('./channel-touch.js'); // §26 (B-099e): a sea
 // the backlog's ONE read order (priority, then newest) + its closed priority set
 const { PRIORITIES: BACKLOG_PRIORITIES, sortBacklog, nudgeThreshold, backlogNudge, nudgeText } = require('./backlog-select.js');
 const { BACKLOG_CAPS } = require('./task-groups.js');
+const cliText = require('./agent-cli-text.js'); // lane cli-one-text-arg (PURE): chars = how many characters a free-text route KEPT, echoed by the CLIs as sent: N characters
 const { stopNudgeVerdict, turnStartOf } = require('./stop-nudge.js'); // B-a8f0: a turn that bookkept itself stops free (PURE)
 const { artifactsIntroLine } = require('./harnesses/artifacts-of.js'); // PURE: the one Artifacts sentence (lane artifacts-prompt-hint)
 const { liveForkPending, addressableId } = require('./claude-lock-capture.js'); // verify r3 (lane channel-withdraw): a pending fork carries its PARENT's conversation id — never an owner of a channel draft
@@ -90,7 +91,8 @@ const taskItemAnswer = (b) => (b && typeof b === 'object' ? { ...b, text: taskLi
 const taskEntryAnswer = (p) => (p && typeof p === 'object' ? { ...p, note: taskLine(p.note), ...(typeof p.detail === 'string' ? { detail: taskBlock(p.detail) } : {}) } : p);
 const taskShowAnswer = (t, openSorted) => ({ id: t.id, title: taskLine(t.title), archived: !!t.archived, objective: t.objective == null ? t.objective : taskBlock(t.objective), backlog: (openSorted || []).map(taskItemAnswer), progress: (t.progress || []).slice(-10).map(taskEntryAnswer), contextDir: t.contextDir });
 const taskGroupBrief = (t) => ({ id: t.id, title: taskLine(t.title), archived: !!t.archived, contextDir: t.contextDir ? taskLine(t.contextDir) : null, sessions: (t.sessions || []).length });   // verify r5 F2: a manager's context-dir path is its words too (group-list prints it)
-const msgSendAnswer = (r) => ({ posted: true, group: { id: r.group.id, name: msgName(r.group.name), pair: !!r.group.pair }, pairCreated: !!r.pairCreated, woke: msgNames(r.woke), refused: msgRefusals(r.refused), nextTurn: msgNames(r.later) });
+const msgSendAnswer = (r) => ({ posted: true, group: { id: r.group.id, name: msgName(r.group.name), pair: !!r.group.pair }, pairCreated: !!r.pairCreated, woke: msgNames(r.woke), refused: msgRefusals(r.refused), nextTurn: msgNames(r.later), ...(r.message && typeof r.message.text === 'string' ? { chars: cliText.chars(r.message.text) } : {}) });
+// lane cli-one-text-arg: chars = the STORED message, counted (code points) — vibespace-msg send / dispatch echo it as sent: N characters
 // lane worker-dispatch: POST /api/agent/msg/dispatch's answer — the send echo (msgSendAnswer) + the dispatch record. The
 // worker's name and the record's sentence (it can carry the CLI's compact_error words) leave as pieces of the belt.
 const dispatchAnswer = (r) => ({
@@ -1170,7 +1172,8 @@ app.post('/api/agent/task-progress', (req, res) => {
     bookkept(hit[0]);
     // `entry` = the one just written (addProgress is synchronous — the last entry IS it): its P- id
     // is what `vibespace-task progress-redact` names
-    res.json({ success: true, progress: t.progress.slice(-3).map(taskEntryAnswer), entry: taskEntryAnswer(t.progress[t.progress.length - 1] || null) });   // verify r4 F1: the last three entries are other sessions' too
+    const kept = t.progress[t.progress.length - 1] || null;   // lane cli-one-text-arg: what the store KEPT (a note past 2000 / a detail past 6000 is cut), counted for the echo of the CLI
+    res.json({ success: true, progress: t.progress.slice(-3).map(taskEntryAnswer), entry: taskEntryAnswer(t.progress[t.progress.length - 1] || null), ...(kept ? { chars: cliText.chars(kept.note), ...(kept.detail ? { detailChars: cliText.chars(kept.detail) } : {}) } : {}) });   // verify r4 F1: the last three entries are other sessions' too
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 // `vibespace-task progress-redact <P-id|at>` ("Clear content…", 2026-09-28): an
@@ -1341,6 +1344,7 @@ app.post('/api/agent/task-backlog', (req, res) => {
       success: true,
       backlog: sortBacklog(updated.backlog.filter((b) => b.status === 'open')).map(taskItemAnswer),   // verify r4 F1: through the belt
       ...(acted ? { item: taskItemAnswer(acted), others: (acted.claimedBy || []).filter((k) => k !== key), alreadyMine } : {}),
+      ...(acted && (added || edit !== undefined) ? { chars: cliText.chars(acted.text), ...(acted.detail ? { detailChars: cliText.chars(acted.detail) } : {}) } : {}),   // lane cli-one-text-arg: the stored item, counted
       ...(nudge ? { nudge } : {}),
     });
   } catch (e) { res.status(400).json({ error: e.message }); }
@@ -1709,13 +1713,13 @@ app.post('/api/agent/msg/send', async (req, res) => {
   const safeText = agentText(text, { kind: 'block' });
   const framed = `Message from session "${fromName}" (via vibespace-msg; reply: vibespace-msg send "${fromName}" "..."):\n${safeText}`;
   const r = deliver ? await deliver.deliverToConversation(target.cid, framed, { fromName, cardText: text, spendReason: 'peer-message' }) : { ok: false, reason: 'delivery not wired' };
-  if (r.ok) return res.json({ delivered: true, lane: r.lane, peerName: msgName(r.peerName || target.t.name || '') || null, machine: r.hostId || null });   // verify r2 F5: the target's name through the belt (the CLI prints it)
+  if (r.ok) return res.json({ delivered: true, chars: cliText.chars(text), lane: r.lane, peerName: msgName(r.peerName || target.t.name || '') || null, machine: r.hostId || null });   // verify r2 F5: the target's name through the belt (the CLI prints it)
   let st = null;
   try { st = deliver?.stashFor(target.cid, { source: 'agent', kind: 'peer', fromName, text: safeText }) || null; } // kind = the PATH (S3 verify F3): a session NAMED like VibeSpace still drains as a peer
   catch (e) { return res.status(503).json({ delivered: false, stashed: false, reason: r.reason || 'unreachable', error: `not delivered and not queued: ${e.message}` }); }
   // verify r5: the sender hears whether "queued" is on disk — a queue held in memory only is lost at a restart
   const durable = !(st && st.stored === false);
-  res.json({ delivered: false, stashed: true, durable, reason: r.reason || 'unreachable', note: durable ? 'queued — injected into that session on its next turn' : `queued in memory only — ${st.why}` });
+  res.json({ delivered: false, stashed: true, chars: cliText.chars(text), durable, reason: r.reason || 'unreachable', note: durable ? 'queued — injected into that session on its next turn' : `queued in memory only — ${st.why}` });
 });
 
 // ── lane worker-dispatch (2026-10-02, the owner: "你得及时让他们compact，不然容易积累太多历史context浪费token"):
@@ -1986,6 +1990,7 @@ app.post('/api/agent/channels/reply', async (req, res) => {
     const r = repR.id ? await eng.replaceProposal({ replaces: repR.id, by: ctxR, make: makeR }) : await makeR();
     if (r && r.ok && r.proposal) touchChannel(id, [{ op: 'reply', adapterId: key.adapterId, convId: key.convId, title: r.proposal.title, account: r.proposal.adapterLabel, proposalId: r.proposal.id, placement: r.proposal.placement || null }]);   // §26 (B-099e): the drafted conversation is a row on the tool card (2026-09-28: the row says where the reply lands)
     if (r && !r.ok && (r.code === 'topic-forbidden' || r.code === 'placement-not-offered')) return rxAnswer(res, r);   // a group that forbids thread replies / a placement the channel does not offer: 409, by name
+    if (r && r.ok) r.chars = cliText.chars(b.text);   // lane cli-one-text-arg: the text proposed, counted (the CLI echoes sent: N characters)
     chanAnswer(res, r);
   }
   catch (e) { res.status(500).json({ error: e.message }); }
@@ -2060,6 +2065,7 @@ app.post('/api/agent/channels/compose', async (req, res) => {
   if (!repC.ok) return res.status(400).json({ error: repC.error, code: 'bad-request' });
   try {
     const r = repC.id ? await eng.replaceProposal({ replaces: repC.id, by: ctxC, make: makeC }) : await makeC();
+    if (r && r.ok && r.proposal) r.chars = cliText.chars(b.text);   // lane cli-one-text-arg: the text proposed, counted
     if (r && r.ok && r.proposal) touchChannel(id, [{ op: 'compose', adapterId: r.proposal.adapterId || account, convId: r.proposal.convId || null, title: r.proposal.title, account: r.proposal.adapterLabel, proposalId: r.proposal.id }]);   // §26 (B-099e)
     chanAnswer(res, r);
   }
@@ -2074,7 +2080,7 @@ async function composeCallers(req, res, eng, s, id, b) {
   try {
     const r = await eng.composeEach(channelPrincipal(s, id), key.adapterId, key.convId, { text: b.text, why: b.why, recipients: b.caller });
     for (const x of (r && r.proposals) || []) if (x.ok && x.proposal) touchChannel(id, [{ op: 'compose', adapterId: key.adapterId, convId: key.convId, title: x.proposal.title, account: x.proposal.adapterLabel, proposalId: x.proposal.id }]);
-    if (r && Array.isArray(r.proposals) && r.proposals.length) return res.json(r);   // one answer per caller (a refused one says so on its row)
+    if (r && Array.isArray(r.proposals) && r.proposals.length) return res.json({ ...r, chars: cliText.chars(b.text) });   // one answer per caller (a refused one says so on its row); lane cli-one-text-arg: the text, counted
     chanAnswer(res, r);
   } catch (e) { res.status(500).json({ error: e.message }); }
 }
@@ -2162,6 +2168,7 @@ app.post('/api/agent/channels/request', async (req, res) => {
   try {
     const r = await eng.request(channelPrincipal(s, id), key.adapterId, key.convId, b.why);
     if (r && r.ok) touchChannel(id, [{ op: 'request', adapterId: key.adapterId, convId: key.convId }]);   // §26 (B-099e)
+    if (r && r.ok) r.chars = cliText.chars(b.why);   // lane cli-one-text-arg: the reason, counted
     chanAnswer(res, r);
   }
   catch (e) { res.status(500).json({ error: e.message }); }

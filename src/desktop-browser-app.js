@@ -176,6 +176,50 @@ function firefoxUserJs() {
   ].map(([k, v]) => `user_pref(${JSON.stringify(k)}, ${JSON.stringify(v)});`).join('\n') + '\n';
 }
 
+// ── lane app-launch-singleton (fleet inc-mv7hxc2n-2cvr, .268): an INSTALLED browser is a browser too ─────────────────
+// An app the person installed (`app.<entry>` from its .desktop file: `Exec=/usr/bin/google-chrome-stable %U`) or one
+// witnessed outside VibeSpace (`seen.…`) was launched AS TYPED — no profile of its own — so it opened the user's DEFAULT
+// profile (~/.config/google-chrome): a second launch on another display was handed by Chrome's process singleton to the
+// first one and exited `code 0` within a second (the window blinked shut). The keeper now gives such a row the family
+// its executable belongs to, and with it browserArgv's own profile dir. Precise basenames, never a prefix; a launcher
+// (`flatpak run …`, `env …`) or an unknown browser stays without a family (its profile switch is not known here).
+const CHROMIUM_FAMILY_RE = /^(?:google-chrome(?:-(?:stable|beta|unstable|canary))?|chrome|chromium(?:-browser|-freeworld)?|ungoogled-chromium|microsoft-edge(?:-(?:stable|beta|dev|canary))?|msedge|brave(?:-browser)?(?:-(?:stable|beta|nightly))?|vivaldi(?:-(?:stable|snapshot|bin))?)$/i;
+const FIREFOX_FAMILY_RE = /^(?:firefox(?:-(?:esr|bin|beta|nightly|devedition|developer-edition))?(?:\.real)?|librewolf|waterfox|floorp|icecat)$/i;
+const execBase = (x) => (typeof x === 'string' && x ? x.split('/').filter(Boolean).pop() || '' : '');
+/** The browser FAMILY (a BROWSER_KINDS key) an executable's own name belongs to, or null. */
+function browserFamilyOf(exec) {
+  const b = execBase(exec);
+  if (!b) return null;
+  if (CHROMIUM_FAMILY_RE.test(b)) return 'chromium';
+  if (FIREFOX_FAMILY_RE.test(b)) return 'firefox';
+  return null;
+}
+/** Where a chromium-family binary keeps its DEFAULT profile ($HOME-relative) — the dir whose `SingletonLock` says
+ *  which process holds it. null = not known (firefox keeps one lock per profile under ~/.mozilla; not read here). */
+const DEFAULT_PROFILE_DIRS = Object.freeze([
+  [/^(?:google-chrome(?:-stable)?|chrome)$/i, '.config/google-chrome'], [/^google-chrome-beta$/i, '.config/google-chrome-beta'],
+  [/^google-chrome-(?:unstable|canary)$/i, '.config/google-chrome-unstable'], [/^(?:chromium(?:-browser|-freeworld)?|ungoogled-chromium)$/i, '.config/chromium'],
+  [/^(?:microsoft-edge(?:-stable)?|msedge)$/i, '.config/microsoft-edge'], [/^microsoft-edge-(beta|dev)$/i, '.config/microsoft-edge-$1'],
+  [/^brave(?:-browser)?(?:-stable)?$/i, '.config/BraveSoftware/Brave-Browser'], [/^brave(?:-browser)?-beta$/i, '.config/BraveSoftware/Brave-Browser-Beta'],
+  [/^brave(?:-browser)?-nightly$/i, '.config/BraveSoftware/Brave-Browser-Nightly'], [/^vivaldi(?:-stable|-bin)?$/i, '.config/vivaldi'], [/^vivaldi-snapshot$/i, '.config/vivaldi-snapshot'],
+]);
+function defaultProfileDirOf(exec) {
+  const b = execBase(exec);
+  for (const [re, dir] of DEFAULT_PROFILE_DIRS) { const m = re.exec(b); if (m) return dir.replace('$1', (m[1] || '').toLowerCase()); }
+  return null;
+}
+/** Chrome's `SingletonLock` is a SYMLINK whose target is `<hostname>-<pid>` (the hostname may itself hold '-'). →
+ *  `{ host, pid, here }` (`here` = the lock names THIS machine — a pid on another host sharing the home says nothing
+ *  about this one's processes) | null for anything else. */
+function singletonLockFact(target, { hostname = null } = {}) {
+  const m = /^(.+)-(\d{1,10})$/.exec(typeof target === 'string' ? target : '');
+  if (!m) return null;
+  const pid = Number(m[2]);
+  if (!Number.isInteger(pid) || pid <= 1) return null;
+  return { host: m[1], pid, here: !hostname || m[1] === hostname };
+}
+
 module.exports = {
+  CHROMIUM_FAMILY_RE, FIREFOX_FAMILY_RE, browserFamilyOf, DEFAULT_PROFILE_DIRS, defaultProfileDirOf, singletonLockFact, // lane app-launch-singleton
   BROWSER_KINDS, A11Y_MEASURED_KINDS, BROWSER_BINS, isForbiddenBrowserArg, browserRowFor, URL_MAX, validateBrowserUrl, within, REAL_BROWSER_ROOTS, profileDirVerdict, browserArgv, CHROMIUM_FRAME_MARKER, chromiumFramePrefs, BROWSER_A11Y_FLAG, BROWSER_A11Y_ENV, CHROMIUM_A11Y_ENV, firefoxUserJs,
 };

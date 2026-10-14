@@ -13,6 +13,7 @@
 //      table event it is, every table event has a door, every `via` a take can carry is an event; a landed / fallen
 //      entry's record is never written again by any door
 import fs from 'node:fs';
+import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
@@ -153,6 +154,10 @@ const { CLEARED_TEXT } = require(path.join(REPO, 'src/record-clear.js'));
 let seq = 0;
 const base = scratchDir('parkstep');
 process.on('exit', () => { try { fs.rmSync(base, { recursive: true, force: true }); } catch { } });
+/** the CLI stand-in SERVES its inbox socket (lane peer-registry-identity: a registration counts only while its socket
+ *  exists — src/peer-messaging.js registryIdentityOk): bound at once (a unix listen binds synchronously), unref'd, every
+ *  connection dropped — the posts here are scripted */
+const serveSock = (p) => { if (fs.existsSync(p)) return; const s = net.createServer((c) => c.destroy()); s.on('error', () => { }); s.listen(p); s.unref(); };
 /** the gate's rig: a stub registry, a post scripted BY TEXT (an entry's own frame can be held in flight while a
  *  sibling's fails at once), a manual clock, a recording guard, `reboot()` = a new engine over the same dir */
 function rig(CDx, name) {
@@ -161,6 +166,7 @@ function rig(CDx, name) {
   const cid = 'c0ffee00-0000-4000-8000-00000000' + String(seq).padStart(4, '0');
   const regFile = path.join(reg, `${process.pid}.json`);
   fs.writeFileSync(regFile, JSON.stringify({ pid: process.pid, sessionId: cid, messagingSocketPath: path.join(dir, 'inbox.sock'), name: 'Owner' }));
+  serveSock(path.join(dir, 'inbox.sock'));
   const calls = [], posts = [], ledger = [], releases = [], authorized = [], logs = [], events = [];
   const answers = new Map();   // text fragment → answer fn; default: transient at once
   const answerFor = (text) => { for (const [k, fn] of answers) if (text.includes(k)) return fn; return () => ({ ok: false, reason: 'timeout', phase: 'connect', transient: true, elapsedMs: 5003 }); };

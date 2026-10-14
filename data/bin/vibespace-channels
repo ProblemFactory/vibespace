@@ -67,6 +67,48 @@ const verb = args[0];
 const SESS = process.env.VIBESPACE_SESSION_TOKEN || (verb === 'withdraw' ? process.env.VIBESPACE_JOB_TOKEN : null);
 if (!API || !SESS) { console.error('vibespace-channels: not inside a VibeSpace session (VIBESPACE_API / token missing)'); process.exit(2); }
 
+// lane cli-one-text-arg (the owner 2026-10-14 — a Lark reply reached the person cut mid-sentence: an inner `"` closed the
+// shell string and this CLI sent the first piece and dropped the rest): ONE TEXT PER FREE-TEXT COMMAND — the rule the four
+// agent CLIs share (PURE src/agent-cli-text.js in a checkout; its boot-time copy agent-cli-text.js beside this file on
+// a host). reply / compose / request take ONE text: a stray word is refused by name (exit 2, nothing sent); --text-file
+// <path> / --text - (stdin) carry long or quoted text; the answer's `chars` is echoed as `sent: N characters`. react /
+// unreact / withdraw / search refuse a stray word too (a --why or a query whose quote closed early). Each verb's flags
+// are listed in CH_TEXT_SPEC so the scan knows which flag takes the next word. Missing rule (a partial install) ⇒ refused.
+const TX = (() => {   // the module by its literal name (test-peer-text-census walks it beside the CLIs)
+  try { return require('fs').existsSync(require('path').join(__dirname, '..', '..', 'server.js')) ? require('../../src/agent-cli-text.js') : require('./agent-cli-text.js'); } catch { }
+  try { return require('./agent-cli-text.js'); } catch { return null; }
+})();
+const TX_IO = { readFile: (p) => require('fs').readFileSync(p, 'utf8'), readStdin: () => require('fs').readFileSync(0, 'utf8'), stdinIsTTY: (() => { try { return require('fs').fstatSync(0).isCharacterDevice(); } catch { return false; } })() };
+const CH_TEXT_SPEC = {
+  reply: { n: 2, what: 'a message', doors: true, valued: ['--why', '--replaces', '--attach'], optional: ['--to', '--reply-to', '--cc', '--in-thread'], bare: ['--also-in-chat', '--all'] },
+  compose: { n: 2, what: 'a message', doors: true, valued: ['--to', '--cc', '--subject', '--why', '--attach', '--replaces', '--caller'], optional: [], bare: [] },
+  request: { n: 2, what: 'the reason', doors: true, valued: [], optional: [], bare: [] },
+  react: { n: 3, what: 'the emoji key', remedy: 'escape the inner quotes of --why (its text is ONE argument)', valued: ['--why'], optional: [], bare: [] },
+  unreact: { n: 3, what: 'the emoji key', remedy: 'escape the inner quotes of --why (its text is ONE argument)', valued: ['--why'], optional: [], bare: [] },
+  withdraw: { n: 1, what: 'the proposal id', remedy: 'escape the inner quotes of --why (its text is ONE argument)', valued: ['--why'], optional: [], bare: [] },
+  search: { n: 1, what: 'the search', remedy: 'quote the words as ONE argument ("two words"), or escape the inner quotes', valued: ['--account', '--limit'], optional: [], bare: ['--full'] },
+};
+const CH_SPEC = CH_TEXT_SPEC[verb] || null;
+const DOORS = TX && CH_SPEC && CH_SPEC.doors ? TX.takeDoors(args.slice(1), ['text']) : null;
+if (DOORS) args.splice(1, args.length - 1, ...DOORS.argv);   // the door words leave `args`: flag() / valueOf() read the rest as before
+/** this verb's ONE text (the argument at index `at` — or, at = 'scan', the verb's last named positional as the scan finds
+ *  it — or its door); any stray word ⇒ refused, exit 2, nothing sent */
+function chText(at) {
+  const tool = 'vibespace-channels ' + verb;
+  if (!TX) { console.error(`${tool}: refused — this CLI's text rule (agent-cli-text.js) is missing beside it, so stray words cannot be told apart; nothing was sent — ask the user to reinstall the agent tools (Manage agents → the machine → Install)`); process.exit(2); }
+  const pos = TX.positionals(args.slice(1), CH_SPEC);
+  const strays = pos.slice(CH_SPEC.n);
+  if (!CH_SPEC.doors) {
+    const no = TX.strayRefusal({ tool, what: CH_SPEC.what, strays: strays.map((p) => p.word), after: strays.length ? strays[0].after : null, remedy: CH_SPEC.remedy });
+    if (no) { console.error(no); process.exit(TX.STRAY_EXIT); }
+    return args[at];
+  }
+  const own = DOORS.doors.text || at === 'scan' ? (pos[CH_SPEC.n - 1] && pos[CH_SPEC.n - 1].word) : args[at];
+  const one = TX.oneText({ tool, what: CH_SPEC.what, positional: own, strays: strays.map((p) => p.word), after: strays.length ? strays[0].after : null, doors: DOORS, io: TX_IO });
+  if (one.error) { console.error(one.error); process.exit(TX.STRAY_EXIT); }
+  return one.text;
+}
+
 // lane webhook-l3-cli-pair (docs/design-webhook.zh.md §9): THE ANSWER DOOR — every server answer this CLI reads is parsed
 // HERE and a webhook token (vswh_…) or a pairing code (vswp_…, it carries one — verify r1 #1) in it is withheld before any field can be printed; no verb registers a caller or mints
 // a token (the owner does, in the Channels window — an agent proposes it with vibespace-ask). test-webhook-cli holds the census.
@@ -183,6 +225,8 @@ const USAGE = `vibespace-channels — read connected channels, PROPOSE replies (
                                                      to a caller's record is 'reply webhook/<path> "…" --to <record id>'; no verb
                                                      makes a path or a caller token — propose one to the user with vibespace-ask
   vibespace-channels withdraw <proposalId> [--why "…"]
+  long or quoted text (reply / compose / request): --text-file <path> or --text - (stdin, a heredoc) instead of "text"; the CLI refuses
+      stray words (a message is ONE argument: a word after it ⇒ exit 2, nothing sent) and answers sent: N characters
                                                    ← takes back YOUR proposal while the user has not decided it
                                                      (--replaces on reply/compose = withdraw it + propose the new one, in one step)
   vibespace-channels search "words" [--account <id>] [--limit N] [--full]
@@ -450,7 +494,7 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
   }
   if (verb === 'reply') {
     const conv = args[1];
-    const text = args[2];
+    const text = chText(2);   // lane cli-one-text-arg: ONE text (or --text-file / --text -) — a stray word ⇒ exit 2
     const REPLY_USAGE = 'usage: vibespace-channels reply <conv> "text" [--why "…"] [--to <msg id> [--in-thread] [--also-in-chat]] [--all] [--cc <addr>[,<addr>]] [--attach <path>]… [--replaces <proposalId>]';
     if (!conv || !text || ['--why', '--reply-to', '--to', '--replaces', '--in-thread', '--also-in-chat', '--all', '--cc', '--attach'].includes(text)) { console.error(REPLY_USAGE); process.exit(1); }
     const body = { conv, text };
@@ -487,6 +531,7 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
     if (p.state === 'sent') console.log(`sent directly (policy: direct) — proposal ${p.id}, sent as ${(p.result && p.result.sentAs) || p.sendAs}`);
     else if (p.state === 'awaiting-approval') console.log(`proposed — proposal ${p.id} is awaiting the user's approval (${(p.policy.reasons || []).join(', ') || 'review'}); the receipt arrives in your next turn`);
     else console.log(`proposal ${p.id}: ${p.state}${p.reason ? ' — ' + p.reason : ''}`);
+    console.log('  ' + TX.sentLine(r, text));   // lane cli-one-text-arg: the route's count — a cut is visible here
     const attLine = attachmentLine(p);
     if (attLine) console.log(attLine);
     printRecipients(p);
@@ -497,7 +542,7 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
   // lane channel-threads (spec §5.3): a reaction is a PROPOSAL — the account's reaction policy decides (propose by
   // default: the user approves; direct only where the channel itself sends directly; off: refused by name)
   if (verb === 'react' || verb === 'unreact') {
-    const [conv, msg, key] = [args[1], args[2], args[3]];
+    const [conv, msg, key] = [args[1], args[2], chText(3)];   // lane cli-one-text-arg: a word after the key (a --why whose quote closed early) ⇒ exit 2
     if (!conv || !msg || !key || [conv, msg, key].some((x) => x.startsWith('--'))) { console.error(`usage: vibespace-channels ${verb} <conv> <msg id> <emoji key> [--why "…"]`); process.exit(1); }
     const body = { conv, msg, key, op: verb === 'unreact' ? 'remove' : 'add' };
     if (flag('--why')) body.why = flag('--why');
@@ -521,7 +566,7 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
   // 2026-09-27: the agent takes back its OWN proposal (never somebody else's,
   // never one the user already decided, is sending, or whose outcome is lost)
   if (verb === 'withdraw') {
-    const id = args[1];
+    const id = chText(1);   // lane cli-one-text-arg: a word after the id (a --why whose quote closed early) ⇒ exit 2
     if (!id || id.startsWith('--')) { console.error('usage: vibespace-channels withdraw <proposalId> [--why "…"]'); process.exit(1); }
     const body = {};
     if (flag('--why')) body.why = flag('--why');
@@ -565,7 +610,7 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
   }
   if (verb === 'compose') {
     const account = args[1];
-    const text = args.slice(2).filter((x, i, all) => !x.startsWith('--') && !(i > 0 && all[i - 1].startsWith('--'))).pop();
+    const text = chText('scan');   // lane cli-one-text-arg: ONE text after the account (or a door) — it was the LAST free word, so a quote that closed early sent only the tail
     // lane webhook-l3-cli-pair (design-webhook §7): `compose webhook/<path> --caller <id>[,<id>]|all "…"` — ONE proposal per caller
     if (args.includes('--caller')) {
       const caller = flag('--caller');
@@ -580,6 +625,7 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
         else if (p.state === 'awaiting-approval') console.log(`proposed — proposal ${p.id} to ${x.recipient} is awaiting the user's approval (${((p.policy && p.policy.reasons) || []).join(', ') || 'review'}); the receipt arrives in your next turn`);
         else console.log(`proposal ${p.id} to ${x.recipient}: ${p.state}${p.reason ? ' — ' + p.reason : ''}`);
       }
+      if ((r.proposals || []).some((x) => x.ok !== false)) console.log('  ' + TX.sentLine(r, text));   // lane cli-one-text-arg
       if ((r.skipped || []).length) console.log(`not sent to ${r.skipped.join(', ')} — delivery none (they take no replies)`);
       if (r.ok === false) process.exit(1);
       return;
@@ -599,6 +645,7 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
     if (p.state === 'sent') console.log(`sent directly (policy: direct) — proposal ${p.id}, a NEW message to ${(p.compose && p.compose.to || []).join(', ')}`);
     else if (p.state === 'awaiting-approval') console.log(`proposed — proposal ${p.id} (a NEW message to ${(p.compose && p.compose.to || []).join(', ')}) is awaiting the user's approval (${(p.policy.reasons || []).join(', ') || 'review'}); the receipt arrives in your next turn`);
     else console.log(`proposal ${p.id}: ${p.state}${p.reason ? ' — ' + p.reason : ''}`);
+    console.log('  ' + TX.sentLine(r, text));   // lane cli-one-text-arg: the route's count
     const attLine = attachmentLine(p);
     if (attLine) console.log(attLine);
     printReplaced(r);
@@ -606,7 +653,7 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
     return;
   }
   if (verb === 'search') {
-    const q = args[1];
+    const q = chText(1);   // lane cli-one-text-arg: the words are ONE argument — a stray word ⇒ exit 2 (never a narrower search)
     if (!q || q.startsWith('--')) { console.error('usage: vibespace-channels search "words" [--account <id>] [--limit N] [--full]'); process.exit(1); }
     const qs = new URLSearchParams({ q });
     if (flag('--account')) qs.set('account', flag('--account'));
@@ -739,12 +786,13 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
   }
   if (verb === 'request') {
     const conv = args[1];
-    const why = args[2];
+    const why = chText(2);   // lane cli-one-text-arg: ONE reason (or --text-file / --text -) — a stray word ⇒ exit 2
     if (!conv || !why) { console.error('usage: vibespace-channels request <conv> "why"'); process.exit(1); }
     const r = await call('POST', '/api/agent/channels/request', { conv, why });
     if (r.already && r.level) console.log(r.via === 'everyone' ? `already allowed — the user gave every agent access to ${conv} (All agents); no request was filed.` : `you can already see ${conv} (${r.level}).`);
     else if (r.already) console.log(`a request of yours is already open for ${conv} (${r.request.id}); the user decides.`);
     else console.log(`requested — the user sees "${why}" in their For-you inbox and decides; approval grants YOU visibility on this ONE conversation (request ${r.request.id}).`);
+    if (!r.already) console.log('  ' + TX.sentLine(r, why));   // lane cli-one-text-arg
     return;
   }
   console.log(USAGE);

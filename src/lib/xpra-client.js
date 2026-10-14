@@ -545,7 +545,10 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
       if (m.c === 'p') { onPacket(m.p); return; }
       if (m.c === 'l') { log?.log?.(`[xpra worker] ${m.t}`); return; }
     };
-    worker.onerror = (e) => { finish(`the xpra protocol worker failed: ${(e && (e.message || e.type)) || 'error'}`); };
+    // lane app-launch-singleton (fleet inc-mv7hxc2n-2cvr): a worker finish() already tore down (the display ended while the
+    // client was still loading its scripts) may still report its interrupted import — never acted on, never an uncaught error
+    // over the window's own exit sentence
+    w.onerror = (e) => { if (worker !== w) { try { e?.preventDefault?.(); } catch { /* not cancelable */ } return; } finish(`the xpra protocol worker failed: ${(e && (e.message || e.type)) || 'error'}`); };
     armHello();
   };
   function armHello() {
