@@ -25,6 +25,7 @@ const GLOBALS = new Set([
   '__dirname', '__filename', 'setTimeout', 'setInterval', 'clearTimeout', 'clearInterval', 'setImmediate', 'clearImmediate',
   'queueMicrotask', 'structuredClone', 'fetch', 'AbortController', 'AbortSignal', 'URL', 'URLSearchParams', 'TextEncoder',
   'TextDecoder', 'atob', 'btoa', 'performance', 'crypto', 'WebSocket', 'Headers', 'Request', 'Response', 'FormData', 'Blob',
+  'ReadableStream',   // a Node global since 18 (lane rule-learning-fix-r2: the text client's one-shot request body)
   'JSON', 'Math', 'Date', 'RegExp', 'String', 'Number', 'Boolean', 'Array', 'Object', 'Function', 'Symbol', 'BigInt',
   'Promise', 'Map', 'Set', 'WeakMap', 'WeakSet', 'WeakRef', 'Proxy', 'Reflect', 'Error', 'TypeError', 'RangeError',
   'SyntaxError', 'ReferenceError', 'EvalError', 'URIError', 'AggregateError', 'Intl', 'isNaN', 'isFinite', 'parseInt',

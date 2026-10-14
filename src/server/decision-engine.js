@@ -13,7 +13,10 @@
  *      notice) — and on a pass the estimate is reserved IN THE SAME synchronous step (`reserve`), so N judgments in
  *      flight with room for one make exactly one call;
  *   4. ONE fetch to the dialect's URL (every question's owner-written text through `M.scrubQuestions` first — the ONE
- *      scrub, B-d375) — 429 ⇒ its Retry-After (else the ladder), 5xx / a network failure ⇒ backoff 1 → 5 → 15 min;
+ *      scrub, B-d375); the body FROZEN where it is built, serialized ONCE into bytes and sent as a ONE-SHOT stream with
+ *      its length (`M.oneShotBody`, the text client's own — lane judge-one-shot-body: Node's fetch re-sends a string body
+ *      on an HTTP 421 over a new connection, empty but with the key — a second request); a 3xx is never followed —
+ *      429 ⇒ its Retry-After (else the ladder), 5xx / a network failure ⇒ backoff 1 → 5 → 15 min;
  *      a ROW STOP (`M.rowStopOf`, lane decision-vendor-hygiene): 401 / 403 ⇒ the row needs a new key (`reconnect`),
  *      402 ⇒ the plan does not allow the model (`plan`), 400 ⇒ the model refused the request shape (`shape`) — no
  *      call until the key, the provider or the model changes (the owner's Test still calls; its 200 lifts the stop),
@@ -38,6 +41,11 @@
  * call); then the items the rules do not place already (a blocked fact, the 48 h decay) are judged with their facts line
  * (`judged {group, why, p, at, v, facts, sig}`). A pass a refusal stopped is SAID: a log line when the reason changes and
  * `status().inbox` {at, judged, placed, stopped} (the plugin's status carries it).
+ *
+ * THE LEDGER (lane rule-learning, design q-037 P0): the ONE other paid caller on this pool — src/server/text-model-client.js
+ * (the chat completions that DRAFT the person's 「我关心什么」 block, use `learn`) — is created HERE (`textModel`) over
+ * `ledger`: the plugin's switches + budget, what the day spent (settled + reserved, every use), one use's share, a
+ * reservation in the SAME `open` map (`hold`), the settle and the journal — one counter, one journal, one daily budget.
  */
 const fs = require('fs');
 const path = require('path');
@@ -90,6 +98,7 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
       features: Object.fromEntries(M.FEATURES.map((f) => [f, c[f] === true])),
       dailyBudgetCents: Number.isFinite(Number(c.dailyBudgetCents)) && Number(c.dailyBudgetCents) >= 0 ? Number(c.dailyBudgetCents) : M.DAILY_BUDGET_CENTS_DEFAULT,
       threshold: Number.isFinite(Number(c.threshold)) ? Number(c.threshold) : M.THRESHOLD_DEFAULT,
+      learnModel: typeof c.learnModel === 'string' ? c.learnModel : null,   // lane rule-learning: the drafter's tier (flash | sonnet)
     };
   }
   /** The row's answer, as the engine needs it — never logged, never returned. */
@@ -204,22 +213,24 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
     const { v, id, estUsd } = reserve(use, { s, cred, accountNever, est, perHour, t });   // budgetVerdict + the reservation, one step
     if (!v.ok) return quiet(use, v.why, v.retryAt ? { retryAt: v.retryAt } : {});
     const sent = M.scrubQuestions(qs);   // B-d375: a rule's condition / a choice's description are the owner's words — the ONE scrub
-    const body = M.buildRequest(cred.provider, { model: cred.model, input: input.text, questions: sent });
+    const body = Object.freeze(M.buildRequest(cred.provider, { model: cred.model, input: input.text, questions: sent }));
+    const bytes = new TextEncoder().encode(JSON.stringify(body));   // serialized ONCE — the bytes the one-shot stream sends (never a string body: lane judge-one-shot-body)
     const url = M.urlOf(cred.provider, baseUrlFor && baseUrlFor[cred.provider]);
     const reserved = Math.round(estUsd * 1e8) / 1e8;
     const base = { use, memo: key, dialect: cred.provider, model: cred.model, est, reserved, truncated: input.truncated, n, keyFp: sha(cred.key).slice(0, 6) };
-    let status = 0, json = null, retryAfter = null;
+    let status = 0, json = null, retryAfter = null, failed = null, sending = null;
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), timeoutMs);
     try {
       // DECISION_ENDPOINT — the ONE vendor call (gates above: budgetVerdict, pluginOn, resolveIntegration(ROW_ID))
-      const res = await fetch(url, { method: 'POST', headers: { authorization: `Bearer ${cred.key}`, 'content-type': 'application/json' }, body: JSON.stringify(body), signal: ac.signal });
+      sending = fetch(url, { method: 'POST', headers: { authorization: `Bearer ${cred.key}`, 'content-type': 'application/json', 'content-length': String(bytes.length) }, body: M.oneShotBody(bytes), duplex: 'half', signal: ac.signal, redirect: 'error' });   // a 3xx is never followed (lane rule-learning-fix L2)
+      const res = await sending;
       status = res.status;
       if (status === 429 && res.headers && typeof res.headers.get === 'function') retryAfter = M.retryAfterMs(res.headers.get('retry-after'), now());
       if (res.ok) json = await res.json();
-    } catch { } finally { clearTimeout(timer); }   // a body that never parsed keeps its 2xx status (and its reservation)
+    } catch (e) { failed = sending ? M.fetchFailOf(e) : 'unsent'; } finally { clearTimeout(timer); }   // a body that never parsed keeps its 2xx status (and its reservation); nothing sent / a refused redirect releases it (L3)
     const u = json ? M.usageOf(cred.provider, json) : { inputTokens: 0, outputTokens: 0, costUsd: null };
-    const usd = M.settleUsd({ status, usage: json ? u : null, reservedUsd: estUsd, pricePerMtok: M.PRICE_PER_MTOK_USD[cred.provider] });
+    const usd = M.settleUsd({ status, usage: json ? u : null, reservedUsd: estUsd, pricePerMtok: M.PRICE_PER_MTOK_USD[cred.provider], failed });
     settle(id, use, u, usd, est);
     const spent = { inputTokens: u.inputTokens || undefined, usd };
     const halt = M.rowStopOf(status);   // B-2979: 401 / 403 the key, 402 the plan, 400 the shape — the ROW stops, not this record
@@ -231,6 +242,13 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
       lastOutcome = { at: now(), use, outcome: halt, status };
       journal({ ...base, ...spent, outcome: halt, status });
       return { ok: false, why: halt, status };
+    }
+    if (failed === 'redirect') {   // lane rule-learning-fix L2: the provider's URL answered a 3xx — refused by name, never followed; paced like a wall
+      backoff = M.nextBackoff(backoff, now(), 'wall');
+      say('redirect', `the provider answered a redirect: not followed (never a request to another origin) — paused until ${new Date(backoff.until).toISOString()}`);
+      lastOutcome = { at: now(), use, outcome: 'redirect', retryAt: backoff.until };
+      journal({ ...base, ...spent, outcome: 'redirect' });
+      return { ok: false, why: 'redirect', retryAt: backoff.until };
     }
     if (M.isWall(status)) {
       backoff = M.nextBackoff(backoff, now(), 'wall', { retryAfter });
@@ -371,7 +389,18 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
     }
   }
 
-  return { judge, testRunner, status, attachPlugin, settings, memoSize: () => memo.size, files: F, ROW_ID, attachInbox, inboxPass, inboxSwitched, grouping };
+  // ── THE LEDGER (lane rule-learning) — the budget door of the text-model client (header) ──
+  const ledger = Object.freeze({
+    settings,
+    spentUsd: () => totalOf(today()).usd + reservedUsd(),
+    useUsd: (use) => { const x = today().byUse[use]; return (x ? x.usd : 0) + [...open.values()].filter((r) => r.use === use).reduce((a, r) => a + r.usd, 0); },
+    hold: (use, usd) => { const id = ++openSeq; open.set(id, { use, usd: Number(usd) || 0 }); return id; },
+    settle: (id, use, u, usd, est) => settle(id, use, u, usd, est),
+    journal: (o) => { lastOutcome = { at: now(), use: o.use, outcome: o.outcome, ...(o.why ? { why: o.why } : {}) }; journal(o); },
+  });
+  const textModel = require('./text-model-client.js').create({ integrations, ledger, fetchImpl, now, log, baseUrl: baseUrlFor && baseUrlFor.openrouter ? baseUrlFor.openrouter : null });
+
+  return { judge, testRunner, status, attachPlugin, settings, memoSize: () => memo.size, files: F, ROW_ID, attachInbox, inboxPass, inboxSwitched, grouping, ledger, textModel };
 }
 
 module.exports = { create, ROW_ID, FEATURE_OF, TEST_SENTENCE };

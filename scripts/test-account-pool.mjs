@@ -166,6 +166,37 @@ var P2X; P2X = am.createPool({ name: 'P2' }).id; // the earlier block removed it
   ck('…a view with nothing to set aside carries an EMPTY spare list; a null family is the cache object itself',
     projectCacheForFamily({ ...cache, scopedWeekly: [cache.scopedWeekly[0], cache.scopedWeekly[2]] }, 'fable').spareScoped.length === 0 && projectCacheForFamily(cache, null) === cache);
 }
+// THE TOKEN SLOT (lane pool-oat-materialize, q-035 A): a member with no usable login whose long-lived token was
+// materialized into its folder is placed like any member — the pool dir re-points onto it and reads its token file
+{
+  const amT = new AccountManager({ dataDir: path.join(DATA, 'tok') });
+  const SH = { scopes: ['user:inference', 'user:profile'], subscriptionType: 'max' };
+  const X = amT.createSubscription({ name: 'Login X' }).id;
+  fs.writeFileSync(path.join(amT.subDir(X), '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'x', refreshToken: 'r', expiresAt: Date.now() + 36e5, refreshTokenExpiresAt: Date.now() + 20 * 864e5, ...SH } }), { mode: 0o600 });
+  const T = amT.createSubscription({ name: 'Token T' }).id; // a WIPED login (the CLI blanked its tokens, kept the shape)
+  fs.writeFileSync(path.join(amT.subDir(T), '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: '', refreshToken: '', expiresAt: 0, refreshTokenExpiresAt: Date.now() - 864e5, ...SH } }), { mode: 0o600 });
+  const tok = ['sk', '-ant-oat01-'].join('') + 'POOLfake_' + 'z'.repeat(40);
+  const PT = amT.createPool({ name: 'Tok pool' }).id;
+  amT.setOat(T, tok); // no CLI version known: the gate is shut
+  await amT.oatFileSettled(); // the file act runs on the store's queue, off the loop's back (verify r1 F13)
+  ck('token slot: gate shut (no measured CLI) ⇒ the member stays out of the pool (today\'s escape)', !amT.poolMembers(PT).some((m) => m.id === T));
+  amT.noteCliVersion('2.1.296 (Claude Code)');
+  await amT.oatFileSettled();
+  ck('token slot: the measured CLI ⇒ the token is in its folder and it is a pool candidate', amT.readSubCreds(T).oatFile === true && amT.poolMembers(PT).some((m) => m.id === T));
+  amT.setPoolTarget(PT, T);
+  ck('token slot: the pool dir re-points onto it and resolves through to its token file (no login in it)', amT.poolCurrent(PT) === T && amT.readSubCreds(PT).oatFile === true && amT.resolveForSpawn(PT).poolTarget === T);
+  amT.setPoolTarget(PT, X);
+  ck('token slot: …and back onto the login member — the ordinary re-point both ways', amT.poolCurrent(PT) === X && !amT.readSubCreds(PT).oatFile && amT.readSubCreds(PT).loggedIn);
+  // verify r1 F5: the hub's CLI moves to a KNOWN unmeasured version while a conversation's link names T
+  const lk = amT.ensureSessionPoolLink(PT, 'sess-7-1791900000000', T, { why: 'spawn' });
+  amT.noteCliVersion('2.1.300 (Claude Code)');
+  await amT.oatFileSettled();
+  ck('token slot (F5): an unmeasured CLI ⇒ T is no candidate for a NEW placement (poolMembers / isPoolMember agree) …', !amT.poolMembers(PT).some((m) => m.id === T) && !amT.isPoolMember(PT, T) && amT.resolveForSpawn(PT, 'claude', { sessionKey: 'sess-8-1791900000000' }).poolTarget === X);
+  ck('…while the conversation linked to it keeps its token file (the running process is the measured binary)', fs.existsSync(path.join(lk, '.credentials.json')) && amT.readSubCreds(T).oatFile === true);
+  amT.dropSessionPoolLink(PT, 'sess-7-1791900000000'); amT.dropSessionPoolLink(PT, 'sess-8-1791900000000');
+  await amT.syncOatFiles();
+  ck('…and the last link gone, the next sweep takes the file back', !fs.existsSync(path.join(amT.subDir(T), '.credentials.json')));
+}
 fs.rmSync(DATA, { recursive: true, force: true });
 
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);

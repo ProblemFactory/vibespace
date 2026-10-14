@@ -3,6 +3,8 @@
 // opts.priorityPaths: () => string[] — paths to surface at the TOP of the
 // dropdown, highlighted (used to float a task's linked folders when creating a
 // session "in" a task). Shown even when the input is empty (on focus).
+import { imeOwnsKey } from './chat-enter-keys.js';
+
 export function setupDirAutocomplete(input, dropdown, { onNavigate, endpoint, priorityPaths } = {}) {
   let timer = null, abortCtrl = null, activeIdx = -1, items = [];
 
@@ -70,7 +72,7 @@ export function setupDirAutocomplete(input, dropdown, { onNavigate, endpoint, pr
     }
     if (e.key === 'ArrowDown') { e.preventDefault(); highlight(Math.min(activeIdx + 1, items.length - 1)); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); highlight(Math.max(activeIdx - 1, 0)); }
-    else if (e.key === 'Tab' || e.key === 'Enter') {
+    else if (!imeOwnsKey(e) && (e.key === 'Tab' || e.key === 'Enter')) {
       if (activeIdx >= 0) { e.preventDefault(); pick(items[activeIdx]); }
       else if (e.key === 'Tab' && items.length === 1) { e.preventDefault(); pick(items[0]); }
     } else if (e.key === 'Escape') {

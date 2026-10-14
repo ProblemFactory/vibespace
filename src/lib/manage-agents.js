@@ -45,6 +45,7 @@ import { dialStateText, dialHistoryLine } from './dial-address-picker.js';
 import { openExitAccessDialog, exitSummaryText, exitCodeWords, agentUpgradeText } from './exit-access-dialog.js'; // lane-pairing ⑥: "Who can use it" 
 import { openExitRunsDialog } from './exit-runs-dialog.js'; // lane-exit-run-output E4: the machine's command list
 import { platformLabel } from '../exit-shell.js'; // lane-exit-run-output E1: the device's stated platform on its row (its shell follows it)
+import { enterSubmits } from './chat-enter-keys.js';
 
 // Roster order = TYPE, never add-order (2.268.5): pool → subscription → API
 // key, name-sorted within a type. ONE comparator for both rosters (2.369.18 —
@@ -94,6 +95,21 @@ const loginLeftText = (ms) => {
 // line, and a second-precision timestamp is noise for a deadline the user acts
 // on in hours. Locale-formatted — the device decides, like every other time here.
 const loginWhenText = (ms) => { try { return new Date(ms).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' }); } catch { try { return new Date(ms).toLocaleString(); } catch { return ''; } } };
+/** Why a member's long-lived token is NOT in its folder (lane pool-oat-materialize) —
+ *  what to do, in words; '' when there is no refusal to name. */
+function oatFileRefusedText(reason, code = '') {
+  if (reason === 'cli-unmeasured') return t('this CLI version is not measured');
+  if (reason === 'no-scopes') return t('mint again to record the subscription type');
+  if (reason === 'write-failed') return code === 'symlink' ? t('the credential file is a symlink — nothing written') : t('could not write it to the account folder');
+  // pool-oat-materialize verify r1: a READ that failed (F2), a symlinked folder (F8), a token that no longer decrypts (F4)
+  if (reason === 'read-failed') return t('could not read the account folder ({code})', { code: escHtml(code || '?') });
+  if (reason === 'dir-symlink') return t('the account folder is a symlink — nothing written');
+  if (reason === 'oat-unreadable') return t('the long-lived token can’t be decrypted — mint it again');
+  // the KEY FILE is why (lane oat-census-closure, O1): restore it / it will be read again — never a new key, never a re-mint
+  if (reason === 'key-missing') return t('the key file is missing — restore it from a backup');
+  if (reason === 'key-unreadable') return t('the key file could not be read ({code}) — nothing was replaced', { code: escHtml(code || '?') });
+  return '';
+}
 /** The chip, or '' when there is nothing worth saying (ok / unknown — an
  *  unreadable deadline is ignorance and must never be dressed as a warning).
  *  `local` = the "This machine" roster; a host section only ever shows the
@@ -112,10 +128,28 @@ export function loginExpiryChipHtml(a, { local = true } = {}) {
   if (ls.state === 'oat-only') {
     if (!local) return ''; // a host section shows the DEAD state only (and the token rides to hosts)
     const near = local && typeof ls.msLeft === 'number' && ls.msLeft < 24 * 3600e3;
+    // THE TOKEN IN THE FOLDER (lane pool-oat-materialize): a member with no usable login whose
+    // long-lived token was written into its credential file — pooled sessions spend it too. A POOL
+    // row whose worst member is such a slot has nothing to warn about until the token's last day.
+    if (ls.oatFile || ls.worstId) {
+      if (ls.worstId && !near) return '';
+      const who = ls.worstName ? escHtml(ls.worstName) + ': ' : '';
+      const cli = escHtml((a.oatFile && a.oatFile.cli) || ls.oatFileCli || '');
+      // HELD (verify r1 F5): the hub's CLI moved to an unmeasured version — the file stays for the sessions
+      // already on it, the pool places nothing new here
+      const held = !ls.worstId && a.oatFile && a.oatFile.state === 'held';
+      const label = near ? t('long-lived token ends in {left}', { left: escHtml(loginLeftText(ls.msLeft)) })
+        : held ? t('this CLI version is not measured: running sessions continue, no new ones are placed here')
+        : t('long-lived token written to this account’s folder (CLI {cli} verified)', { cli });
+      const title = t('No usable OAuth login here: the long-lived token (valid until {date}) is written into this account’s credential folder, so pooled sessions can use it too (measured on CLI {cli}). It never refreshes; only the quota refresh (⟳) needs you to sign in.', { date: escHtml(loginWhenText(ls.oatValidUntil)), cli });
+      return ` <span class="acct-blocked-hint acct-login-chip acct-login-oat" role="button" tabindex="0" data-relogin="${escHtml(ls.worstId || a.id)}" title="${title}">${ROSTER_ICONS.CLOCK}${who}${label}</span>`;
+    }
+    // a token NOT in the folder: the ONE word (.268), and the refusal that kept it out (pool-oat-materialize) beside it
+    const refused = a.oatFile && a.oatFile.state === 'refused' ? oatFileRefusedText(a.oatFile.reason, a.oatFile.code) : '';
     const label = near ? t('long-lived token only · ends in {left}', { left: escHtml(loginLeftText(ls.msLeft)) })
       : t('long-lived token only');
     const title = t('This account’s OAuth login ended {when}; sessions keep running on its long-lived token (valid until {date}); only the quota refresh (⟳) needs you to sign in again.', { when: escHtml(loginWhenText(ls.refreshExpiresAt)), date: escHtml(loginWhenText(ls.oatValidUntil)) });
-    return ` <span class="acct-blocked-hint acct-login-chip acct-login-oat" role="button" tabindex="0" data-relogin="${escHtml(a.id)}" title="${title}">${ROSTER_ICONS.CLOCK}${label}</span>`;
+    return ` <span class="acct-blocked-hint acct-login-chip acct-login-oat" role="button" tabindex="0" data-relogin="${escHtml(a.id)}" title="${title}">${ROSTER_ICONS.CLOCK}${label}${refused ? ' · ' + refused : ''}</span>`;
   }
   const dead = ls.state === 'expired' || ls.state === 'logged-out';
   if (!dead && !(local && ls.state === 'expiring')) return '';
@@ -128,7 +162,8 @@ export function loginExpiryChipHtml(a, { local = true } = {}) {
   // a POOL row whose dead member holds a valid long-lived token: the token runs that member's OWN
   // sessions, but a pooled session reads the login file — say why the token does not help here
   const poolOat = !!(ls.worstName && ls.worstOatValidUntil);
-  const poolOatNote = poolOat ? ' · ' + t('the pool can’t use its long-lived token') : '';
+  const poolRefused = poolOat ? oatFileRefusedText(ls.worstOatFileRefused) : '';
+  const poolOatNote = poolOat ? ' · ' + t('the pool can’t use its long-lived token') + (poolRefused ? ' · ' + poolRefused : '') : '';
   const title = poolOat
     ? t('{name}’s OAuth login ended. Its long-lived token (valid until {date}) keeps its own sessions running, but a pooled session reads the login file, so this pool cannot use the token — re-login to bring it back. Click to re-login.', { name: escHtml(ls.worstName), date: escHtml(loginWhenText(ls.worstOatValidUntil)) })
     : ls.state === 'logged-out'
@@ -720,7 +755,7 @@ export function installManageAgents(App, ctx = {}) {
           if (!r?.success) { if (box.querySelector('#oat-send')) box.querySelector('#oat-send').disabled = false; showToast(r?.error || t('Send failed'), { type: 'error' }); }
         };
         send.onclick = go;
-        code.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); go(); } };
+        code.onkeydown = (e) => { if (enterSubmits(e)) { e.preventDefault(); go(); } };
       }
       const yesBtn = box.querySelector('#oat-keep'), noBtn = box.querySelector('#oat-drop');
       if (yesBtn && noBtn) {

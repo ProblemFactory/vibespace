@@ -70,6 +70,7 @@ import { permissionModeOptions } from './permission-mode-labels.js'; // lane L: 
 import { BACKEND_META, createBackendIconHtml, getSessionKey, pickAgentIdentity, settingsPrefixFor, effortLabel, effortOptions, noteModelCatalog, worktreeCapsFor, backendFeatureCaps, billingRow, terminalOnly } from './agent-meta.js';
 import { sessionGivenName } from '../session-name.js'; // lane session-title-record: THE name ladder's given rungs (the window title)
 import { noteVoicePlugins } from './voice-input.js'; // lane voice-everywhere: every microphone follows the voice plugin (absent when off)
+import { enterSubmits } from './chat-enter-keys.js';
 
 const BACKEND_SESSION_OPTIONS = {
   claude: {
@@ -1559,7 +1560,7 @@ class App {
         this._doForkSession(info, text, at, customName);
       });
       forkTa.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); forkBtn.click(); }
+        if (enterSubmits(e) && !e.shiftKey) { e.preventDefault(); forkBtn.click(); }
       });
     }
 

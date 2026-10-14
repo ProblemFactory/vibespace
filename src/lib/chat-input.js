@@ -197,7 +197,7 @@ export class ChatInput {
     // Tab to accept slash autocomplete
     this._textarea.addEventListener('keydown', (e) => {
       if (!this._slashDropdown.classList.contains('hidden')) {
-        if (e.key === 'Tab' || e.key === 'Enter') {
+        if (!imeOwnsKey(e) && (e.key === 'Tab' || e.key === 'Enter')) {   // the input method's Enter commits its word, never the command
           const active = this._slashDropdown.querySelector('.active');
           if (active) { e.preventDefault(); this._textarea.value = active.dataset.cmd + ' '; this._slashDropdown.classList.add('hidden'); return; }
         }

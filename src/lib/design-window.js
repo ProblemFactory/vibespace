@@ -38,6 +38,7 @@ import { mountDesignPresent } from './design-present.js';
 import { mountDesignTweaks } from './design-tweaks.js';
 import { openDesignHome } from './design-home.js'; // lane design-systems-home: the window with no folder = the home
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
+import { enterSubmits } from './chat-enter-keys.js';
 
 const RELOAD_COALESCE_MS = 250;
 const CHIP_MS = 10000;
@@ -413,7 +414,7 @@ export function openDesign(app, { host = '', dir = '', sessionId = '', syncId } 
     send.onclick = () => sendComment();
     ta.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeComposer(); }
-      else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.isComposing) { e.preventDefault(); sendComment(); }
+      else if (enterSubmits(e) && (e.ctrlKey || e.metaKey)) { e.preventDefault(); sendComment(); }
     });
     return { box, quote, ta, send };
   }

@@ -4,6 +4,9 @@
 // sentence ends with the marker, frames stripped, secret-named fields erased, addresses cut, the ceiling held), the
 // memo key, budgetVerdict's full table (the 1 USD default, the day rollover, the backoff), journalRow, the rubric's
 // reason rule over the golden set, criteriaProposal on a labeled fixture. In-process, < 1 s.
+// ⑳ (lane judge-one-shot-body) THE ONE-SHOT BODY: the PURE helper, then the REAL judge over a loopback fake (ZERO vendor
+// calls) — 421 once / twice, a 303, a 307, a reset, a hang ⇒ ONE request, the body intact, the key never re-sent on an
+// empty one; RED: the judge's old string body (and bytes / a Blob as the body) re-sent empty with the key on the 421, a 303 followed.
 import { createRequire } from 'module';
 import crypto from 'crypto';
 import fs from 'fs';
@@ -564,6 +567,94 @@ console.log('⑲ one mail in K inboxes — the key and the window (measured on t
   const seen = [{ adapterId: 'gmail:a', lastAt: T }, { adapterId: 'gmail', lastAt: T + 170e3 }, { adapterId: 'gmail:b', lastAt: T + 1327e3 }];   // the owner's spread: 170 s, then 19 min
   ok(seen.every((x) => M.inboxCount(seen, x.adapterId, x.lastAt) === 3) && M.inboxCount(seen, 'gmail:c', T + 1327e3 + 59 * M1) === 2 && M.inboxCount(seen, 'gmail:c', T + 1327e3 + 61 * M1) === 1, 'the hour window: each of the 3 copies says 3; a fourth inbox 59 min after the last copy counts it, 61 min after counts none');
   ok(eq(seen.map((x) => M.inboxCount(seen, x.adapterId, x.lastAt, 15 * M1)), [2, 2, 1]), 'RED REFERENCE: the brief\'s 15-minute window says 2 / 2 / 1 on the owner\'s own notice — the third copy would read as a mail to one inbox');
+}
+
+console.log('⑳ THE ONE-SHOT BODY (lane judge-one-shot-body) — the PURE helper, then the REAL judge over a loopback fake: 421 once / twice, a 303, a 307, a reset, a hang ⇒ ONE request, the body intact, the key never re-sent');
+{
+  const bytes = new TextEncoder().encode(JSON.stringify({ state: '判定 — once' }));
+  const st = M.oneShotBody(bytes), rd = st instanceof ReadableStream ? st.getReader() : null, r1 = rd ? await rd.read() : {}, r2 = rd ? await rd.read() : {};   // no stream ⇒ RED by name, never a crash
+  let refused = 0;
+  for (const x of ['{"state":1}', null, undefined, { state: 1 }, [1, 2]]) { try { M.oneShotBody(x); } catch (e) { if (e instanceof TypeError) refused++; } }
+  ok(st instanceof ReadableStream && r1.value === bytes && r2.done === true && refused === 5, 'oneShotBody: a stream that hands the serialized bytes over ONCE (then done); a string / null / undefined / an object / an array is refused (TypeError — nothing is sent)', { once: r1.value === bytes, done: r2.done, refused });
+
+  const http = require('http'), path = require('path');
+  const { scratch } = await import('./scratch.mjs');
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const repo = new URL('..', import.meta.url).pathname;
+  const DE = require('../src/server/decision-engine.js');
+  const DE_SRC = fs.readFileSync(`${repo}/src/server/decision-engine.js`, 'utf8');
+  const MW = mutantCopies('dm-oneshot', repo);
+  const ROOT = scratch('dm-oneshot-wire');
+  process.on('exit', () => { try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { } });
+  const wire = [];
+  let plan = [], OTHER = 0;
+  const fake = (srv) => http.createServer((req, res) => {
+    const chunks = []; req.on('data', (c) => chunks.push(c));
+    req.on('end', () => {
+      const raw = Buffer.concat(chunks);
+      wire.push({ srv, url: req.url, len: raw.length, cl: req.headers['content-length'], te: req.headers['transfer-encoding'] || '', auth: req.headers.authorization || '', raw: raw.toString('utf8') });
+      const j = (s, o) => { res.writeHead(s, { 'content-type': 'application/json' }); res.end(JSON.stringify(o)); };
+      const b = srv === 'other' ? 'ok' : plan.length ? plan.shift() : 'ok';
+      if (b === 'reset') return req.socket.destroy();
+      if (b === 'hang') return undefined;
+      if (b && b.redirect) { res.writeHead(b.redirect, { location: `http://127.0.0.1:${OTHER}${req.url}` }); return res.end(); }
+      if (typeof b === 'number') return j(b, { error: { message: 'misdirected request' } });
+      return j(200, { model: 'm', answers: { q1: { type: 'noul', noul: 0.8 } }, usage: { input_tokens: 60, output_tokens: 1, cost: 0.00002 } });
+    });
+  });
+  const listen = (s) => new Promise((r) => s.listen(0, '127.0.0.1', () => r(s.address().port)));
+  const orSrv = fake('or'), otherSrv = fake('other');
+  const OR = await listen(orSrv);
+  OTHER = await listen(otherSrv);
+  const KEY = ['sk-or-v1-', 'd'.repeat(40)].join('');   // built at runtime (the tree's secret scan reads literals)
+  const Q = [{ type: 'predicate', name: 'q1', instructions: 'Does the text ask the reader to pay something?' }];
+  let en = 0;
+  const judgeOnce = async (Engine, answers, timeoutMs = 15000) => {
+    const dataDir = path.join(ROOT, `e${++en}`); fs.mkdirSync(dataDir, { recursive: true });
+    const e = Engine.create({ dataDir, integrations: { resolveIntegration: () => ({ values: { provider: 'openrouter', apiKey: KEY }, source: 'user' }) }, baseUrlFor: { openrouter: `http://127.0.0.1:${OR}` }, now: () => Date.UTC(2026, 9, 14, 12), tzOffset: () => 0, timeoutMs, log: { log() { }, warn() { }, error() { } } });
+    e.attachPlugin({ peek: () => ({ enabled: true }), settings: () => ({ dailyBudgetCents: 100, rules: true }) });
+    plan = [...answers]; const k = wire.length;
+    const r = await e.judge('rule', { body: 'Please pay the invoice by Friday.', thread: [] }, { questions: Q }).catch((x) => ({ ok: false, why: `threw ${x.message}` }));
+    await new Promise((res) => setTimeout(res, 60));   // a re-send would land after the answer — wait for it
+    plan = [];
+    return { why: r.ok ? 'ok' : r.why, got: wire.slice(k) };
+  };
+  const base = await judgeOnce(DE, ['ok']);
+  const SENT = base.got.length === 1 ? base.got[0].raw : '';
+  let sent = null; try { sent = JSON.parse(SENT); } catch { }
+  ok(base.why === 'ok' && sent && sent.model === M.DEFAULT_MODEL.openrouter && sent.questions.q1.type === 'noul' && /Please pay the invoice by Friday\./.test(sent.state) && base.got[0].auth === `Bearer ${KEY}` && !SENT.includes(KEY), 'the baseline: a 200 ⇒ ONE request, the OpenRouter decisions body (the key only in the Authorization header)', { why: base.why, n: base.got.length });
+  const CASES = [[[421], 'vendor-error', '421 once'], [[421, 421], 'vendor-error', '421 twice'], [[{ redirect: 303 }], 'redirect', 'a 303 to another origin'], [[{ redirect: 307 }], 'redirect', 'a 307 to another origin'], [['reset'], 'backoff', 'a reset'], [['hang'], 'backoff', 'a hang (the 250 ms timeout)']];
+  /** each case through `Engine` → the cases whose wire broke the law: ≠ 1 request, a request elsewhere, a body ≠ the
+   *  baseline's bytes, a length ≠ the bytes (or chunked), an empty request carrying the key, a why ≠ the named one */
+  const law = async (Engine, { first = false } = {}) => {
+    const broke = [];
+    for (const [answers, want, name] of CASES) {
+      const { why, got } = await judgeOnce(Engine, answers, answers[0] === 'hang' ? 250 : 15000);
+      const bad = got.length !== 1 || got.some((q) => q.srv !== 'or' || q.raw !== SENT || q.len !== Number(q.cl) || q.te !== '') || got.some((q) => q.len === 0 && q.auth) || why !== want;
+      if (bad) { broke.push({ name, why, want, requests: got.map((q) => `${q.srv}:${q.len}B${q.auth ? '+key' : ''}`) }); if (first) break; }
+    }
+    return broke;
+  };
+  const t0 = Date.now();
+  const broke = await law(DE);
+  ok(SENT && broke.length === 0, `${CASES.map((c) => c[2]).join(' · ')} ⇒ each EXACTLY one request to OpenRouter, the body byte-identical to the baseline with its own content-length (never chunked), no empty request with the key, the named why (${Date.now() - t0} ms)`, broke);
+  ok(wire.filter((q) => q.srv === 'other').length === 0, '…and not one request reached the redirects\' other origin');
+  // RED CONTROLS — copies of the engine: the old string body (lane rule-learning-fix-r2's probe: 2 requests, the second
+  // empty with the key), the bytes / a Blob as the body (a source Node re-sends too), redirects followed
+  const ONE = "body: M.oneShotBody(bytes), duplex: 'half',", LEN = ", 'content-length': String(bytes.length)";
+  const muts = {
+    'the string body again (the judge before this lane)': DE_SRC.replace(ONE, 'body: JSON.stringify(body),').replace(LEN, ''),
+    'the bytes as the body': DE_SRC.replace(ONE, 'body: bytes,'),
+    'a Blob as the body': DE_SRC.replace(ONE, 'body: new Blob([bytes]),'),
+    'redirects followed': DE_SRC.replace(", redirect: 'error' });", ' });'),
+  };
+  let i = 0;
+  for (const [name, src] of Object.entries(muts)) {
+    if (src === DE_SRC) { ok(false, `mutant anchor missing: ${name}`); continue; }
+    const b = await law(MW.load('src/server/decision-engine.js', src, `m${++i}`), { first: true });
+    ok(b.length > 0, `RED CONTROL (${name}): the law breaks at ${b[0] ? `${b[0].name} ⇒ ${b[0].requests.join(' + ')} (${b[0].why})` : 'nothing'}`, b.slice(0, 1));
+  }
+  orSrv.close(); otherSrv.close();
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

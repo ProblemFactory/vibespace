@@ -22,6 +22,10 @@
  *    examples hash in the memo material means the next scan judges again with it;
  *  · THE DRAFT ("Draft from my recent decisions"): D1's catalogue asked of the newest labeled examples (one call each,
  *    memoised), `M.criteriaProposal` PROPOSES lines for the person's own block — never applied by itself;
+ *  · THE TEXT-MODEL DRAFT (lane rule-learning, design q-037 P0 — 「从我的判定起草」, only on an OpenRouter row with a key):
+ *    `learnDraft` hands the text model (D1's `textModel`, src/server/text-model-client.js) ONLY what the judge already
+ *    saw — `M.examplesForInput` (the digests, ≤ 60) + the block — through PURE `RL.buildLearnInput`, and answers the
+ *    normalized PROPOSAL + the card's table; nothing is written here (the card's Save goes through the settings door);
  *  · THE FACTS (lane decision-attention-facts): each record carries a facts line FIRST (PURE `M.attentionFacts` — counts,
  *    kinds, ages, never a name) from the engine's `facts()` — built ONCE per scan (a drain from the first queued row
  *    until the queue is empty and nothing flies: the duplicate-inbox map is O(rows), never per row) — and the tail's
@@ -41,6 +45,7 @@ const path = require('path');
 const crypto = require('crypto');
 const M = require('../decision-model.js');
 const FO = require('../channel-focus.js');
+const RL = require('../rule-learning.js');   // lane rule-learning: the block drafter's input + its proposal (PURE)
 
 const CONCURRENCY = 3;          // calls in flight at most
 const PER_HOUR = 60;            // attention calls an hour at most (design §2.4)
@@ -236,8 +241,33 @@ function create({ dataDir, decision = null, serverSetting = () => undefined, now
     return { ok: true, read: used.length, calls, lines: p.lines, text: p.text, applied: false, ...(p.why ? { why: p.why } : {}), ...(stopped ? { stopped } : {}) };
   }
 
+  /** lane rule-learning: is the text-model drafter there? (an OpenRouter row with a key, the plugin on) → {exists, why, …}. */
+  function learnAvailable() {
+    const tm = decision && decision.textModel;
+    return tm && typeof tm.available === 'function' ? tm.available() : { exists: false, why: 'no-key' };
+  }
+  /** 「从我的判定起草」 (lane rule-learning): the text model PROPOSES the block from the person's verdicts — the input is ONLY
+   *  what the judge already saw (the examples' digests + the block, never a body); NEVER written here. */
+  async function learnDraft() {
+    const av = learnAvailable();
+    if (!av.exists) return { ok: false, code: 'not-found', why: av.why };
+    const sent = M.examplesForInput(examples, RL.LEARN.examplesMax, { clauses: true });
+    if (!sent.length) return { ok: false, why: 'no-examples', read: 0 };
+    const block = userBlock();
+    const input = RL.buildLearnInput({ block, examples: sent, rubricHits: sent.map((x) => x.clauses) });
+    const r = await decision.textModel.complete({ use: 'learn', messages: input.messages, schema: RL.LEARN_SCHEMA, est: input.est });
+    if (!r || !r.ok) return { ok: false, why: r ? r.why : 'no-answer', read: input.examples.length, ...(r && r.status ? { status: r.status } : {}) };
+    // the card's table is built on the STORED block, whole — a block already over 1 500 keeps its tail and is said (lane
+    // rule-learning-fix-r2 F6); the model saw only the judge's read of it (`shown` = those lines)
+    const stored = String(setting('decision.attentionBlock') ?? '');
+    const proposal = RL.normalizeProposal(r.answer, { block: stored, examples: input.examples, shown: input.lines.length });
+    if (!proposal.ok) return { ok: false, why: proposal.why, read: input.examples.length };
+    return { ok: true, applied: false, model: r.model, label: r.label, usd: r.usd, zdr: true, read: input.examples.length, counts: input.counts, dropped: input.dropped, est: input.est,
+      examples: input.examples, table: RL.diffTable(stored, proposal), note: proposal.note };
+  }
+
   const status = () => ({ on: !!decision && on(), queued: queue.size, inFlight, ...stats, why: lastWhy, examples: examples.length, threshold: threshold(), today: { ...todayNow() } });
-  return { note, viewOf, judgedFor, label, draft, status, learn, on: () => !!decision && on(), examples: () => examples.slice(), idle: () => !queue.size && !inFlight && !timer, file: FILE };
+  return { note, viewOf, judgedFor, label, draft, learnAvailable, learnDraft, status, learn, on: () => !!decision && on(), examples: () => examples.slice(), idle: () => !queue.size && !inFlight && !timer, file: FILE };
 }
 
 module.exports = { create, CONCURRENCY, PER_HOUR, STOP, LEARN_EVERY_MS };

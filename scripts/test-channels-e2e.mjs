@@ -21,6 +21,8 @@
 //      pointer is retracted, the audit holds propose→approve→attempt→outcome
 //      with draftedBy/approvedBy/sentAs/identityMarking; Reject with a reason;
 //      the outbox survives the restart in ③
+//   ⑩c lane channel-enter-ime (inc-mv7mdv6b-emxq): the reject box under CDP's input-method path — the IME's committing
+//      Enter posts nothing (the words stay), a plain Enter after rejects once with the whole reason
 //   ⑩b g3 (design §22.2 ①): the composer SENDS the owner's own words at once,
 //      as the user — no approval card, no approve line in the audit; a user
 //      proposal the owner wants reviewed goes through the /propose route
@@ -425,6 +427,49 @@ const PROPOSE = (text) => `(async () => {
   ok(!(todos3.open || []).some((t) => ptrB[0] && t.id === ptrB[0].id) && !rowC.pendingTodoId, 'the pointer is retracted again after the rejection (no awaiting proposal remains)', JSON.stringify({ open: (todos3.open || []).map((t) => t.text), row: rowC.pendingTodoId }));
   const auditB = fs.readFileSync(path.join(wt, 'data/channels/audit.ndjson'), 'utf-8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((a) => a.kind === 'outbox' && a.proposalId === second.id).map((a) => a.op);
   ok(auditB.includes('reject') && !auditB.includes('attempt'), 'a rejected proposal has a reject line and NO attempt line (nothing was sent)', auditB.join(' → '));
+  // ⑩c lane channel-enter-ime (inc-mv7mdv6b-emxq, 2026-10-14 — the owner's rejection left mid-word: the ring's
+  // `KEY Enter [composing]` in input.chan-opt-input, the server's receipt a second later): THE INPUT METHOD'S ENTER NEVER
+  // SENDS THE REASON. CDP's own IME path on the real reject box (test-chat-enter-ime-chrome's order): words typed, a
+  // composition, the IME's Enter keydown (keyCode 229), the commit (insertText) ⇒ nothing posted — the card still awaits,
+  // no reject line in the audit, the committed word stays in the box; then a plain Enter ⇒ rejected ONCE, the whole reason
+  // verbatim. VS_PNG_DIR=<dir> keeps reject-box-ime.png (the box holding the committed word, nothing sent).
+  const imeProp = await p1.evaljs(PROPOSE('Third draft, rejected through an input method'));
+  ok(!imeProp.fail && imeProp.id !== second.id, '⑩c a third proposal awaits approval (the reject box\'s input-method leg)', JSON.stringify(imeProp));
+  const CARD = `[...window.app.wm.windows.values()].find((x) => x._openSpec && x._openSpec.convId === 'fake-poll-ops').content.querySelector('.chanwin-outbox .chan-prop[data-proposal="${imeProp.id}"]')`;
+  const boxOpen = await p1.evaljs(`(() => {
+    const card = ${CARD};
+    card.querySelector('button[data-reject]').click();
+    const inp = card.querySelector('.chan-prop-rejectbox input.chan-opt-input');
+    if (!inp) return { fail: 'no reject box' };
+    window.__rjKeys = [];
+    inp.addEventListener('keydown', (e) => window.__rjKeys.push({ key: e.key, composing: e.isComposing, code: e.keyCode }), true);
+    inp.focus();
+    return { focused: document.activeElement === inp };
+  })()`);
+  ok(boxOpen.focused === true, '⑩c Reject… opens the reason box with the caret in it', JSON.stringify(boxOpen));
+  const rejectLines = () => fs.readFileSync(path.join(wt, 'data/channels/audit.ndjson'), 'utf-8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((a) => a.kind === 'outbox' && a.proposalId === imeProp.id && a.op === 'reject').length;
+  await p1.cdp('Input.insertText', { text: 'wrong ' });
+  await p1.cdp('Input.imeSetComposition', { text: '时间', selectionStart: 2, selectionEnd: 2 });
+  await p1.cdp('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 229 });
+  await p1.cdp('Input.insertText', { text: '时间' });   // the commit (compositionend)
+  await p1.cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 229 });
+  await sleep(1500);   // the incident's receipt came a second after its Enter
+  const held = await p1.evaljs(`(() => { const card = ${CARD}; const inp = card && card.querySelector('.chan-prop-rejectbox input.chan-opt-input'); return { cls: card && card.className, value: inp ? inp.value : null, keys: window.__rjKeys }; })()`);
+  const imeKey = (held.keys || []).find((k) => k.key === 'Enter');
+  ok(!!imeKey && (imeKey.composing === true || imeKey.code === 229), '⑩c the IME\'s Enter reached the reject box AS the input method\'s (isComposing / keyCode 229 — the ring\'s [composing])', JSON.stringify(held.keys));
+  ok(/chan-prop-awaiting-approval/.test(held.cls || '') && rejectLines() === 0, '⑩c … and posted NOTHING: the card still awaits approval, no reject line in the audit (inc-mv7mdv6b-emxq rejected here)', JSON.stringify({ cls: held.cls, rejects: rejectLines() }));
+  ok(held.value === 'wrong 时间', '⑩c … the committed word stays in the box after the words before it', JSON.stringify(held.value));
+  if (process.env.VS_PNG_DIR) {   // the Ops window raised, the card in view, the caret back in the box (the plain Enter below types there)
+    const r = await p1.evaljs(`(() => { const w = [...window.app.wm.windows.values()].find((x) => x._openSpec && x._openSpec.convId === 'fake-poll-ops'); window.app.wm.focusWindow(w.id); const card = ${CARD}; card.scrollIntoView({ block: 'center' }); card.querySelector('.chan-prop-rejectbox input.chan-opt-input')?.focus(); const b = card.getBoundingClientRect(); return { x: b.x, y: b.y, w: b.width, h: b.height }; })()`);
+    await sleep(300);
+    const shot = await p1.cdp('Page.captureScreenshot', { format: 'png', clip: { x: Math.max(0, r.x - 8), y: Math.max(0, r.y - 8), width: r.w + 16, height: r.h + 16, scale: 1 } });
+    if (shot.result && shot.result.data) { fs.mkdirSync(process.env.VS_PNG_DIR, { recursive: true }); fs.writeFileSync(path.join(process.env.VS_PNG_DIR, 'reject-box-ime.png'), Buffer.from(shot.result.data, 'base64')); }
+  }
+  await p1.cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' });
+  await p1.cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+  const imeSent = await p1.evaljs(`(async () => { for (let i = 0; i < 80; i++) { const c = ${CARD}; if (c && /chan-prop-rejected/.test(c.className)) return { cls: c.className, reason: c.querySelector('.chan-prop-reason')?.textContent || null }; await new Promise((r) => setTimeout(r, 250)); } return { fail: 'never rejected' }; })()`);
+  await sleep(500);
+  ok(!imeSent.fail && rejectLines() === 1 && (imeSent.reason || '').includes('wrong 时间'), '⑩c a plain Enter after it rejects ONCE, the whole reason verbatim', JSON.stringify({ ...imeSent, rejects: rejectLines() }));
   // client 2's Outbox window is closed again so the restart leg below restores only the channel windows it measures
   await p2.evaljs(`(() => { for (const w of [...window.app.wm.windows.values()].filter((x) => x.type === 'channel-outbox')) window.app.wm.closeWindow(w.id); return true; })()`);
 }

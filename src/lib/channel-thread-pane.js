@@ -24,6 +24,7 @@ import { composerMode } from './channel-groups-view.js';
 // page is a metered vendor walk where replies are listed separately, so it is asked of the same PURE rule
 import { pageUpVerdict, isUpKey, isTypingTarget, wheelTowardOlder } from './channel-paging.js';
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
+import { enterSubmits } from './chat-enter-keys.js';
 
 /** W1 — THE QUOTE LINE above a reply's body: `↩ author: first line` as a button (a click jumps to the parent);
  *  a parent not loaded / in another chat is said in words, never a blank. `onJump(vendorId, place)`. */
@@ -304,7 +305,7 @@ export function createThreadPane(host, ctx) {
       showToast(st === 'sent' ? t('Sent') : st === 'awaiting-approval' ? t('Held in the outbox for your approval ({why})', { why: '' }) : t('Proposal {state}', { state: st || '?' }));
       drawFoot();
     };
-    ta.addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); send.click(); } });
+    ta.addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && enterSubmits(e)) { e.preventDefault(); send.click(); } });
     row.append(note, send);
     comp.append(voiceField(ta, attachDictation(ta)), row);
     foot.appendChild(comp);

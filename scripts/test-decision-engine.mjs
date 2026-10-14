@@ -9,7 +9,14 @@
 //   F the day's budget stops calls with ONE server notice, the next local day resumes;  G the counter survives a restart;
 //   H the ONE scrub on a record's text;  I a 402 (the plan) / a 400 (the request shape) stops the ROW like a 401: a pass of
 //     5 records = 1 call (before: 5), ONE notice, the status / plugin row say why, a new key / model (or the owner's Test)
-//     lifts it;  J the owner's words in the QUESTIONS reach the vendor scrubbed (+ a RED control: scrubQuestions = identity).
+//     lifts it;  J the owner's words in the QUESTIONS reach the vendor scrubbed (+ a RED control: scrubQuestions = identity);
+//   K (lane rule-learning, design q-037 P0) THE TEXT-MODEL CLIENT on the same fake (its chat completions route): no OpenRouter
+//     row ⇒ absent, 0 requests; the request LITERAL (provider {zdr: true, data_collection: 'deny'}, the strict json_schema,
+//     temperature 0, the tier's id, the key only in the header); per-use accounting at the vendor's usage.cost + the journal
+//     line (zdr, cost — no key, no text); a 404 / a 400 naming the routing ⇒ `no-zdr` and NO second request (a plain 400 ⇒
+//     shape); the use `learn` stops at its own cap with room left in the day, and 3 presses in flight with room for one
+//     make ONE request (the hold is in the verdict's synchronous step); plugin off ⇒ absent; (lane judge-one-shot-body) a
+//     421 ⇒ ONE request for the drafter AND the judge (the one-shot body: never a second, empty one carrying the key).
 // Then the plugins card in headless Chrome (desk 1100 + phone 390, the REAL plugins-ui + integrations card as an
 // esbuild iife over a stub HTTP server that mounts the REAL integrations router and the plugin routes): the switch
 // turns on, the registry card's fields are on the card, the budget field reads USD and saves cents, the counter shows
@@ -38,17 +45,22 @@ const SHOTS = process.env.DECISION_PNG_DIR || '';
 const got = [];
 let walls = 0;
 let refuseWith = 0;   // lane decision-vendor-hygiene: the fake answers this status (402 / 400 / 401 / 422) while set
+const chat = { status: 200, message: '', cost: 0.0041, content: JSON.stringify({ lines: [{ text: 'Invoices matter', kind: 'add', line: null, from: [1], evidence: 'e' }], removed: [], note: '' }) };   // lane rule-learning
 const fake = http.createServer((req, res) => {
   let b = ''; req.on('data', (c) => { b += c; });
   req.on('end', () => {
     let body = null; try { body = JSON.parse(b); } catch { }
-    got.push({ path: req.url, auth: req.headers.authorization || '', raw: b, body });
+    got.push({ path: req.url, auth: req.headers.authorization || '', raw: b, body, cl: req.headers['content-length'] });   // + the length the request declared (lane judge-one-shot-body)
     const json = (code, o) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(o)); };
     if (walls > 0) { walls--; return json(429, { error: { message: 'rate limited' } }); }
     if (refuseWith) return json(refuseWith, { error: { message: refuseWith === 402 ? 'payment required' : 'refused' } });
     const inTok = Math.ceil(b.length / 4);
     if (req.url === '/v1/decisions') {
       return json(200, { answers: body.questions.map((q) => q.type === 'predicate' ? { type: 'predicate', name: q.name, probability: 0.8 } : q.type === 'choice' ? { type: 'choice', name: q.name, choice: q.choices[0].value, probabilities: [{ value: q.choices[0].value, probability: 0.9 }], confidence: 0.9 } : { type: 'score', name: q.name, score: 1, probabilities: [] }), usage: { input_tokens: inTok } });
+    }
+    if (req.url === '/api/v1/chat/completions') {   // lane rule-learning: the text-model client's route
+      if (chat.status !== 200) return json(chat.status, { error: { message: chat.message || 'refused' } });
+      return json(200, { id: 'gen-x', model: body.model, choices: [{ message: { role: 'assistant', content: chat.content } }], usage: { prompt_tokens: Math.ceil(b.length / 4), completion_tokens: 40, cost: chat.cost } });
     }
     if (req.url === '/api/alpha/decisions') {
       const answers = {};
@@ -276,6 +288,87 @@ console.log('J the owner\'s words in the QUESTIONS reach the vendor scrubbed (la
   const n2 = got.length;
   try { await ask('scrubq-2'); } finally { M.scrubQuestions = realSQ; }
   ok(got.length === n2 + 1 && got[n2].raw.includes(TOK), 'RED CONTROL: with scrubQuestions stubbed to identity the same leg sends the token (the leg is RED without the scrub)');
+}
+
+console.log('K the text-model client (lane rule-learning) — the request literal, the money, no-zdr, the use cap');
+{
+  const RL = require(path.join(repo, 'src/rule-learning.js'));
+  const T0 = T;   // K moves the shared clock two days on — put back at its end (the chrome card counts today's calls of the A–J engine)
+  const kDir = path.join(root, 'k'); fs.mkdirSync(kDir, { recursive: true });
+  const kStore = S.create({ dataDir: kDir, env: {}, log: { warn() {}, log() {} } });
+  let kOn = true;
+  const kCfg = { dailyBudgetCents: 100, learnModel: 'flash' };
+  const eK = E.create({ dataDir: kDir, integrations: kStore, baseUrlFor: BASE, now: () => T, tzOffset: () => 0, log: { warn() {} } });
+  eK.attachPlugin({ peek: () => ({ enabled: kOn }), settings: () => kCfg });
+  const kJournal = () => { try { return fs.readFileSync(path.join(kDir, 'decision-journal.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+  const inp = RL.buildLearnInput({ block: 'Invoices and contracts matter to me.', examples: [{ snippet: 'Invoice 7 — approve today?', verdict: 'needs' }, { snippet: 'Forum digest', verdict: 'not' }] });
+  const press = () => eK.textModel.complete({ use: 'learn', messages: inp.messages, schema: RL.LEARN_SCHEMA, est: inp.est });
+  const chatReqs = () => got.filter((g) => g.path === '/api/v1/chat/completions');
+  kStore.setIntegration('decision-api', { provider: 'openai', apiKey: SECRET });
+  let n = chatReqs().length;
+  const off = await press();
+  ok(!eK.textModel.available().exists && eK.textModel.available().why === 'not-openrouter' && !off.ok && off.why === 'not-openrouter' && chatReqs().length === n, 'an OpenAI row ⇒ the drafter does not exist (not-openrouter) and 0 requests', off);
+  const OR_KEY = ['sk-or-v1-', 'e'.repeat(48)].join('');
+  kStore.setIntegration('decision-api', { provider: 'openrouter', apiKey: OR_KEY });
+  const av = eK.textModel.available();
+  ok(av.exists && av.tier === 'flash' && av.model === 'google/gemini-3.8-flash' && av.label === 'Gemini 3.8 Flash', 'an OpenRouter row with a key ⇒ it exists, Flash by default', av);
+  n = chatReqs().length;
+  const r = await press();
+  const q = chatReqs()[n];
+  ok(r.ok && chatReqs().length === n + 1 && q && q.auth === `Bearer ${OR_KEY}` && !q.raw.includes(OR_KEY), 'ONE request to /api/v1/chat/completions; the key only in the Authorization header', { ok: r.ok, n: chatReqs().length - n });
+  ok(q && JSON.stringify(q.body.provider) === JSON.stringify({ zdr: true, data_collection: 'deny' }) && q.body.model === 'google/gemini-3.8-flash' && q.body.temperature === 0 && q.body.response_format.type === 'json_schema' && q.body.response_format.json_schema.strict === true && JSON.stringify(q.body.response_format.json_schema.schema) === JSON.stringify(RL.LEARN_SCHEMA) && q.body.messages[0].content === RL.TASK, 'THE REQUEST LITERAL: provider {zdr: true, data_collection: deny}, the strict json_schema, temperature 0, the tier id, the task first', q && { provider: q.body.provider, model: q.body.model, t: q.body.temperature });
+  ok(r.ok && JSON.parse(r.answer).lines[0].text === 'Invoices matter' && r.usd === 0.0041 && r.model === 'google/gemini-3.8-flash', 'the answer is the first choice\'s content; it cost the vendor\'s usage.cost', r);
+  const st = eK.status().today;
+  const jl = kJournal().filter((j) => j.use === 'learn');
+  ok(st.byUse.learn && st.byUse.learn.calls === 1 && st.byUse.learn.usd === 0.0041 && st.byUse.learn.outputTokens === 40 && st.total.usd === 0.0041 && st.reserved === 0, 'the day\'s counter: use learn, 1 call at $0.0041 (the vendor\'s cost), the reservation released', st.byUse.learn);
+  ok(jl.length === 1 && jl[0].outcome === 'ok' && jl[0].usd === 0.0041 && jl[0].zdr === true && jl[0].model === 'google/gemini-3.8-flash' && typeof jl[0].keyFp === 'string' && jl[0].keyFp.length === 6 && !JSON.stringify(jl).includes(OR_KEY) && !JSON.stringify(jl).includes('Invoice'), 'the journal line: use learn · ok · usd 0.0041 (usage.cost) · zdr true · the model — no key, no text', jl);
+  kCfg.learnModel = 'sonnet';
+  n = chatReqs().length;
+  await press();
+  ok(chatReqs()[n] && chatReqs()[n].body.model === 'anthropic/claude-sonnet-5.5' && JSON.stringify(chatReqs()[n].body.provider) === JSON.stringify({ zdr: true, data_collection: 'deny' }), 'the quality tier (learnModel = sonnet) rides the same routing: anthropic/claude-sonnet-5.5 through OpenRouter');
+  kCfg.learnModel = 'flash';
+  for (const [status, message, want] of [[404, 'No endpoints found that support the requested routing', 'no-zdr'], [400, 'No endpoints found matching your data policy (Zero Data Retention)', 'no-zdr'], [400, 'response_format is not supported', 'shape'], [402, 'Insufficient credits', 'plan'], [401, 'bad key', 'reconnect'], [421, 'Misdirected Request', 'shape'], [503, 'busy', 'vendor-busy']]) {
+    chat.status = status; chat.message = message;
+    n = chatReqs().length;
+    const x = await press();
+    const last = kJournal().filter((j) => j.use === 'learn').pop();
+    ok(!x.ok && x.why === want && chatReqs().length === n + 1 && last.outcome === want && !last.usd, `HTTP ${status}${status === 400 ? ` («${message.slice(0, 28)}…»)` : ''} ⇒ the named refusal ${want}, exactly ONE request (never a retry — never one without zdr), costs 0`, { x, reqs: chatReqs().length - n, last });
+  }
+  chat.status = 200; chat.message = '';
+  ok(chatReqs().every((g) => JSON.stringify(g.body.provider) === JSON.stringify({ zdr: true, data_collection: 'deny' })), `every one of the ${chatReqs().length} chat requests carried the zero-data-retention routing`);
+  // lane judge-one-shot-body: THE JUDGE on a 421 (Misdirected Request) — Node's fetch re-sends a body that has a source
+  // over a new connection, empty but with the key; the judge sends the one-shot body too: ONE request, the whole body
+  refuseWith = 421;
+  const decReqs = () => got.filter((g) => g.path === '/api/alpha/decisions');
+  n = decReqs().length;
+  const jd = await eK.judge('test', { body: 'Please pay the invoice by Friday.' }, { questions: [{ type: 'predicate', name: 'pay', instructions: 'Does the text ask the reader to pay something?' }] });
+  await sleep(60);   // a re-send would land after the answer
+  refuseWith = 0;
+  const dq = decReqs().slice(n);
+  ok(!jd.ok && jd.why === 'vendor-error' && jd.status === 421 && dq.length === 1 && dq[0].body && dq[0].body.questions.pay && Buffer.byteLength(dq[0].raw) === Number(dq[0].cl) && dq[0].auth === `Bearer ${OR_KEY}` && !dq[0].raw.includes(OR_KEY),
+    'THE JUDGE on a 421 ⇒ ONE request to /api/alpha/decisions carrying the whole body (its bytes = its content-length), the key in the header — never a second, empty one with the key (vendor-error, costs 0)', { jd, reqs: dq.map((g) => ({ len: Buffer.byteLength(g.raw), cl: g.cl, key: !!g.auth })) });
+  // the use's OWN cap (10 ¢ a day) — inside the daily budget (100 ¢): two $0.05 calls, then use-budget with the day half spent
+  T += 86400e3;
+  chat.cost = 0.05;
+  n = chatReqs().length;
+  const c1 = await press(), c2 = await press(), c3 = await press();
+  const day = eK.status().today;
+  ok(c1.ok && c2.ok && !c3.ok && c3.why === 'use-budget' && chatReqs().length === n + 2 && day.byUse.learn.usd === 0.1 && day.total.usd < 1, 'the use learn stops at ITS cap: two $0.05 drafts, the third refused use-budget with 0 requests — the day\'s $1 budget still has room', { c3, learn: day.byUse.learn, total: day.total });
+  ok(kJournal().filter((j) => j.why === 'use-budget').length === 1, 'the refusal is journalled (use-budget)');
+  // 3 presses in flight with room for ONE (the hold sits in the verdict's synchronous step)
+  T += 86400e3;
+  chat.cost = 0.09;
+  await press();
+  chat.cost = 0.001;
+  n = chatReqs().length;
+  const many = await Promise.all([press(), press(), press()]);
+  ok(chatReqs().length === n + 1 && many.filter((x) => x.ok).length === 1 && many.filter((x) => x.why === 'use-budget').length === 2, '3 presses in flight with room for one under the cap ⇒ ONE request, two use-budget (the reservation is held before any await)', many.map((x) => x.why || 'ok'));
+  ok(eK.ledger.spentUsd() === eK.status().today.total.usd && eK.ledger.useUsd('learn') === eK.status().today.byUse.learn.usd, 'the ledger IS the engine\'s day: one counter for the judge and the drafter');
+  kOn = false;
+  n = chatReqs().length;
+  const po = await press();
+  ok(!po.ok && po.why === 'plugin-off' && !eK.textModel.available().exists && chatReqs().length === n, 'the plugin off ⇒ the drafter does not exist (plugin-off), 0 requests');
+  T = T0;
 }
 
 // ── the plugins card in headless Chrome ───────────────────────────────────

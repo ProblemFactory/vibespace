@@ -2,6 +2,23 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.269 — 2026-10-14
+
+### Added
+- With an OpenRouter key, “Draft from my verdicts” under “What matters to me” has a model propose lines from your ✓ / ✗ answers; you edit them and save.
+- The draft card counts what Save would write: over 1,500 characters it says so and waits, instead of cutting lines.
+- A pool can now use a member's long-lived token when that member has no working login: the token is written into that account's folder on this machine.
+
+### Changed
+- Manage agents says “long-lived token written to this account’s folder” on such a row, and a pool row says why it still can’t use a token.
+- After a Claude CLI update nobody has measured yet, conversations already on such a member keep running and new ones don’t start on it; its row says so.
+
+### Fixed
+- Pressing Enter to finish a word in an input method no longer sends a reason or a search early.
+
+### Security
+- A damaged, unreadable or missing key file is never replaced while saved API keys, tokens or secrets need it; the row says to restore it instead.
+
 ## 2.369.268 — 2026-10-14
 
 ### Added

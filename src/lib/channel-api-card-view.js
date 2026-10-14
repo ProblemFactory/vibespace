@@ -5,6 +5,7 @@
 import * as C from '../channel-api-card.js';
 import { fetchJson, showToast } from './utils.js';
 import { t, resolveLang } from './i18n.js';
+import { enterSubmits } from './chat-enter-keys.js';
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
 const tw = (w) => (w ? t(w.key, w.params) : '');
@@ -104,7 +105,7 @@ function rejectPop(row, id) {
   const no = el('button', 'mounts-btn chan-api-reject-cancel', t('Cancel')); no.type = 'button';
   go.addEventListener('click', (ev) => { ev.stopPropagation(); pop.remove(); answerApiProposal(id, 'reject', { reason: why.value.trim() || null }); });
   no.addEventListener('click', (ev) => { ev.stopPropagation(); pop.remove(); });
-  why.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') go.click(); else if (ev.key === 'Escape') pop.remove(); });
+  why.addEventListener('keydown', (ev) => { if (enterSubmits(ev)) go.click(); else if (ev.key === 'Escape') pop.remove(); });
   pop.append(why, go, no);
   row.appendChild(pop);
   why.focus();

@@ -1,6 +1,7 @@
 import { wireFileDownload } from './file-download.js';
 import { formatSize, escHtml } from './utils.js';
 import { t } from './i18n.js';
+import { enterSubmits } from './chat-enter-keys.js';
 
 const BYTES_PER_ROW = 16;
 const CHUNK_SIZE = 65536; // 64KB chunks
@@ -25,7 +26,7 @@ class HexViewer {
     const jumpInput = document.createElement('input');
     jumpInput.className = 'toolbar-select'; jumpInput.placeholder = t('Jump to offset (hex)');
     jumpInput.style.cssText = 'width:140px;font-family:monospace';
-    jumpInput.onkeydown = (e) => { if (e.key === 'Enter') this._jumpTo(jumpInput.value); };
+    jumpInput.onkeydown = (e) => { if (enterSubmits(e)) this._jumpTo(jumpInput.value); };
     const loadMoreBtn = document.createElement('button'); loadMoreBtn.className = 'file-tool-btn media-btn';
     loadMoreBtn.textContent = t('Load more');
     loadMoreBtn.onclick = () => this._loadChunk();

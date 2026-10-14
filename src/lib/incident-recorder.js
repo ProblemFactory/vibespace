@@ -7,14 +7,15 @@
 // only has to relay the short incident id — the scene travels with it.
 //
 // PRIVACY RULES (do not regress): no typed TEXT is ever recorded (keydown
-// entries keep only special-key names + a "typing" marker), ws entries keep
+// entries keep only special-key names, an "S-·" for a shifted character and a
+// "typing" marker; keyup entries only a modifier's name), ws entries keep
 // type/sessionId/size only (never payload bodies), chat content is never
 // captured (transcripts already live on disk — the bundle's timestamps point
 // at them). The user-supplied note is the only free text.
 import { t } from './i18n.js';
 import { onRendererFreeze } from './telemetry-client.js';
 import { BUILD_VERSION } from './build-version.js';
-import { actionKeyWords, imeMarker } from './chat-enter-keys.js';
+import { actionKeyWords, actionKeyUpWords, imeMarker } from './chat-enter-keys.js';
 import { showToast, fetchJson, copyText, createModalShell, escHtml, uiScale } from './utils.js';
 
 const CAP = { action: 500, ws: 700, console: 250, op: 300 };
@@ -51,13 +52,18 @@ export function installIncidentRecorder(app) {
   }, { capture: true, passive: true });
   let lastTypeAt = 0;
   document.addEventListener('keydown', (e) => {
-    const w = actionKeyWords(e); // C-/M-/A-/S- + key, c:1 when the input method owned it (chat-enter-keys.js, PURE)
+    const w = actionKeyWords(e); // C-/M-/A-/S- + key, S-· for a shifted character, c:1 when the input method owned it (chat-enter-keys.js, PURE)
     if (w) {
       push(rings.action, CAP.action, { t: Date.now(), k: 'key', ...w, el: describeEl(e.target) });
     } else if (Date.now() - lastTypeAt > 3000) {
       lastTypeAt = Date.now(); // one "typing" marker per burst — never the text
       push(rings.action, CAP.action, { t: Date.now(), k: 'typing', el: describeEl(e.target) });
     }
+  }, { capture: true, passive: true });
+  // a modifier let go (Shift / Control / Alt / Meta): beside S-· it tells a Shift chord from a tap from a shifted character
+  document.addEventListener('keyup', (e) => {
+    const w = actionKeyUpWords(e); // { key, up: 1 } for a modifier only (chat-enter-keys.js, PURE)
+    if (w) push(rings.action, CAP.action, { t: Date.now(), k: 'key', ...w, el: describeEl(e.target) });
   }, { capture: true, passive: true });
   // input-method markers on a textarea (the composer): when a composition starts and ends — never its text
   for (const type of ['compositionstart', 'compositionend']) {

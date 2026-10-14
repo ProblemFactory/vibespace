@@ -29,6 +29,7 @@ import { namesGuiApp } from '../machine-window.js';
 import { openMachineApp } from './machine-app.js'; // lane machine-app-crop: one app of the machine as its own window
 import { screenMap, hdrShown } from '../desktop-screens.js'; // lane desktop-v2-entry: the OS table + the RFB table → the displays in fb pixels
 import { openDesktopPicker, rememberDesktop, rememberDisplays, readRecent } from './desktop-picker.js';
+import { enterSubmits } from './chat-enter-keys.js';
 
 const RUNS_KEY = 'vibespace.machineDesktopRuns'; // { [hostId]: [line…] } — the owner's latest lines per machine (≤ 3)
 function readRuns() { try { const o = JSON.parse(localStorage.getItem(RUNS_KEY) || '{}'); return o && typeof o === 'object' && !Array.isArray(o) ? o : {}; } catch { return {}; } }
@@ -409,7 +410,7 @@ export function showMachineDesktopDialog(app, m0, { install = null, recheck = nu
     if (body.isConnected) render();
     showToast(t('Started on {machine}: {cmd}', { machine, cmd: r.shown }));
   }
-  input.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); run({ window: asWindow() }); } };
+  input.onkeydown = (e) => { if (enterSubmits(e)) { e.preventDefault(); run({ window: asWindow() }); } };
   render();
   listApps(false);
 }

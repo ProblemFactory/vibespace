@@ -15,6 +15,7 @@ import { fetchJson, showToast, copyText } from './utils.js';
 import { t } from './i18n.js';
 import { foldPath } from './file-changed.js';
 import { ASK_LIMITS } from '../design-model.js';
+import { enterSubmits } from './chat-enter-keys.js';
 
 const hostKey = (h) => (!h || h === 'local' ? '' : String(h));
 const mk = (tag, cls) => { const e = document.createElement(tag); if (cls) e.className = cls; return e; };
@@ -132,7 +133,7 @@ export function mountDesignAsk({ app, win, stage, host = '', dir = '', signal, p
       inp.placeholder = t('Your answer');
       inp.setAttribute('aria-label', t('Your answer'));
       inp.addEventListener('input', () => { st.other = inp.value; }, L);
-      inp.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); send(false); } }, L);
+      inp.addEventListener('keydown', (e) => { if (enterSubmits(e)) { e.preventDefault(); send(false); } }, L);
       box.appendChild(inp);
     }
   }

@@ -1873,6 +1873,34 @@ html:not(.voice-absent) .voice-field-grip > textarea { padding-right: 44px; }
 .settings-multiline { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 6px; }
 .settings-multiline > .settings-multiline-text { flex: 1 1 100%; }
 .settings-multiline > .settings-link-btn { margin-top: 0; }
+/* lane rule-learning (design q-037 P0): 「从我的判定起草」's proposal card — under the box, across the row */
+.settings-multiline > .learn-card { flex: 1 1 100%; }
+.learn-card { box-sizing: border-box; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-window); padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; text-align: left; }
+.learn-card-head { font-weight: 600; font-size: 12px; color: var(--text); }
+.learn-card-sub, .learn-why, .learn-removed-head { font-size: 11px; color: var(--text-secondary); }
+.learn-removed-head { font-weight: 600; margin-top: 2px; }
+.learn-rows { display: flex; flex-direction: column; gap: 4px; }
+.learn-row { display: flex; flex-direction: column; gap: 2px; }
+.learn-row-main { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.learn-row-main > .learn-tick { margin: 0; flex: 0 0 auto; width: 16px; height: 16px; }
+.learn-text { flex: 1 1 220px; min-width: 0; box-sizing: border-box; font: inherit; font-size: 12px; padding: 3px 6px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text); }
+.learn-row[data-unsupported] .learn-text { color: var(--text-secondary); }
+.learn-chip, .learn-evidence, .learn-none { flex: 0 0 auto; font-size: 10px; line-height: 16px; padding: 0 6px; border-radius: var(--radius-sm); border: 1px solid var(--border); color: var(--text-secondary); white-space: nowrap; }
+.learn-evidence { color: var(--accent); cursor: help; }
+.learn-none { font-style: italic; }
+.learn-old { flex: 1 1 200px; min-width: 0; font-size: 12px; color: var(--text-secondary); overflow-wrap: anywhere; }
+.learn-row[data-op="remove"] .learn-tick:not(:checked) + .learn-old { text-decoration: line-through; }
+.learn-why { padding-left: 22px; overflow-wrap: anywhere; }
+.learn-tech { font-size: 11px; color: var(--text-secondary); }
+.learn-actions { display: flex; justify-content: flex-end; gap: 6px; }
+.learn-fit { font-size: 11px; font-weight: 600; color: var(--text); overflow-wrap: anywhere; }
+.learn-fit[data-state="over"] { color: var(--red); }
+.learn-stored { font-size: 11px; font-weight: 600; color: var(--red); overflow-wrap: anywhere; }   /* F6: a stored block over 1 500 (lane rule-learning-fix-r2) */
+.learn-row-tech { padding-left: 22px; overflow-wrap: anywhere; }   /* F4: an over-long line's whole text, under its row */
+.learn-actions > .learn-save:disabled { opacity: 0.5; cursor: not-allowed; }
+.learn-actions > .settings-link-btn { margin-top: 0; }
+.learn-actions > .learn-save { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+@media (max-width: 600px) { .learn-row-main > .learn-tick { width: 20px; height: 20px; } .learn-actions > .settings-link-btn { min-height: 32px; padding: 4px 14px; font-size: 12px; } }
 /* end: settings rows never squeeze their words */
 .btn-create {
   padding: 5px 14px; background: var(--accent); border: 1px solid var(--accent);

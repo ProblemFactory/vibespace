@@ -554,6 +554,35 @@ router.post('/api/channels/decision/draft', async (req, res) => {
     res.json(await engine().attention.draft());
   } catch (e) { fail(res, e); }
 });
+/** lane rule-learning (design q-037 P0): 「从我的判定起草」 — the text model PROPOSES the 「我关心什么」 block from the owner's
+ *  verdicts; the route NEVER writes it (the card's Save goes through the settings door). It EXISTS only on an OpenRouter row
+ *  with a key while the plugin is on — else 404 by name (`no-learn`), never a grey button. GET = is it there (+ the
+ *  tier's name and a full call's price); POST = one proposal (`{ok: false, why}` names a refusal: no-zdr, use-budget, …).
+ *  Owner-only: an agent never drafts the owner's block and a proposal never reaches an agent. SINGLE-FLIGHT (lane
+ *  rule-learning-fix L4): a POST while one draft is in flight answers 409 `busy` — no second request, no second hold. */
+const LEARN_GONE = 'the drafter needs an OpenRouter key on the Decision API row (⚙ → System → Integrations & keys) and the plugin on';
+router.get('/api/channels/decision/learn', (req, res) => {
+  try {
+    forHost(req);
+    if (refuseAgentBearer(req, res, DECISION_IS_OWNERS)) return;
+    const a = engine().attention.learnAvailable();
+    if (!a.exists) return res.status(404).json({ error: LEARN_GONE, code: 'no-learn', why: a.why });
+    res.json({ ok: true, ...a });
+  } catch (e) { fail(res, e); }
+});
+let learnInFlight = false;
+router.post('/api/channels/decision/learn', async (req, res) => {
+  try {
+    forHost(req);
+    if (refuseAgentBearer(req, res, DECISION_IS_OWNERS)) return;
+    if (learnInFlight) return res.status(409).json({ ok: false, why: 'busy', error: 'a draft is already being made' });
+    learnInFlight = true;
+    let r;
+    try { r = await engine().attention.learnDraft(); } finally { learnInFlight = false; }
+    if (r.code === 'not-found') return res.status(404).json({ error: LEARN_GONE, code: 'no-learn', why: r.why });
+    res.json(r);
+  } catch (e) { fail(res, e); }
+});
 
 /** LIST — THE FIRST SCREEN, never every conversation (design 008, B-3cf8: userW's ≈ 50 000 rows were one 77.5 MB
  *  answer, 1.49 s to first byte): the accounts, the counts, the totals, the attention rows and each account's newest

@@ -36,7 +36,7 @@ const { spawn, execFile, execFileSync } = require('child_process');
 // `_enc`/`_dec` (parity-pinned by scripts/test-secret-box.mjs), but the key
 // is created on ENOENT ONLY — the inline `_key()` used to mint a fresh key on
 // ANY read failure and silently orphan every stored ciphertext.
-const { secretBox, describeJsonError } = require('./secret-box');
+const { secretBox, holdsCiphertext, BOX_CIPHERTEXT_RE, describeJsonError } = require('./secret-box');
 const { parseDriveClients } = require('./preset-layers.js');
 const LIVENESS = require('./mount-liveness.js');   // lane mount-liveness: THE sweep's verdict table (PURE)
 const CACHE_PLACE = require('./vfs-cache-place.js');   // lane vfs-cache-local: where the VFS cache lives + the dirty witnesses (PURE)
@@ -83,7 +83,9 @@ class MountManager {
     this._getSetting = getSetting || (() => undefined);
     this._file = path.join(dataDir, 'mounts.json');
     this._keyFile = path.join(dataDir, '.mounts-key');
-    this._box = secretBox(this._keyFile);   // decision 24: mounts keeps ITS OWN key file, byte-for-byte
+    // decision 24: mounts keeps ITS OWN key file, byte-for-byte; THE KEY-FILE LAW (lane key-file-law-stores): a key is
+    // minted only while mounts.json (and the state in memory) holds no ciphertext — else `key-missing`, the rows say restore
+    this._box = secretBox(this._keyFile, { hasCiphertext: () => holdsCiphertext({ files: [this._file], values: [this._state] }) });
     this._logDir = path.join(dataDir, 'mount-logs');
     this.mountBase = process.env.VIBESPACE_MOUNT_BASE || path.join(os.homedir(), 'vibespace-mounts');
     this._state = { mounts: [], shares: [] };
@@ -595,6 +597,7 @@ class MountManager {
   }
 
   list() {
+    let keyNo; const keyOf = () => (keyNo === undefined ? (keyNo = this._box.refusal()) : keyNo); // THE KEY-FILE LAW: asked once, only for a row holding a secret (never mints)
     return this._state.mounts.map(m => {
       const conn = this._connOf(m);
       const st = this._starting?.get(m.id);
@@ -619,6 +622,7 @@ class MountManager {
         canCephShare: this.canCephShare(m),
         path: this.pathOf(m), desired: m.desired, expiresAt: m.expiresAt || null,
         mounted: this.isMounted(m), error: this._errors.get(m.id) || null,
+        ...(BOX_CIPHERTEXT_RE.test(JSON.stringify(conn)) && keyOf() ? { keyFile: keyOf() } : {}),   // { code, file } only on a refusal: a row with a secret says restore the key file
         ...((lv) => lv ? { probe: { verdict: lv.verdict, strikes: lv.strikes, lastMs: lv.lastMs } } : {})(this._liveness?.get(m.id)),   // the sweep's last verdict (lane mount-liveness)
         // A connect legitimately spends 10-25s in mount()'s window (mountpoint
         // wait + IO probe + auth probes). Without this flag EVERY client showed

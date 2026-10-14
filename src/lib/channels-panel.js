@@ -87,6 +87,7 @@ import './channel-outbox.js';
 // r4 (design-integrations-per-account, chunk 3): the account dialogs — every
 // one the storage dialog component (src/lib/mounts-dialog.js, D1)
 import { showConnectAccountDialog, showReauthAccountDialog, showEditAccountDialog, showDuplicateAccountDialog, removeAccount, accountName, clientChipText, providerOf } from './channel-account-dialogs.js';
+import { enterSubmits } from './chat-enter-keys.js';
 
 /** A short, honest freshness chip. The server sends `{kind, state, seconds}`
  *  and `freshnessText` turns it into words: a claim whose `state` we do not
@@ -630,7 +631,7 @@ function showSearchDialog(app, a, { q: initial = '', convId = null, convTitle = 
     observer = { disconnect() { list.removeEventListener('scroll', look); list.removeEventListener('wheel', onWheel); } };
   };
   go.onclick = run;
-  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); if (!e.repeat) run(); } });
+  input.addEventListener('keydown', (e) => { if (enterSubmits(e)) { e.preventDefault(); if (!e.repeat) run(); } });
   if (initial) { input.value = initial; run('open'); }   // the panel's "Search messages for …" / an agent's row: the saved copy + the memo (lane vendor-search-memo)
   setTimeout(() => input.focus(), 30);
 }

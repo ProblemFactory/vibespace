@@ -33,9 +33,14 @@
  *               spawn on the token, only the quota refresh needs the login
  *               (2026-10-13 owner: "都绑定长期token了，怎么还提示过期").
  *               LOGIN and TOKEN are two facts; a row lives by the better one.
- *               Only ever produced when the caller passes `opts.oat` — a pool
- *               SLOT reads the credential FILE through a symlink and can
- *               never be handed the token, so slot callers never pass it.
+ *               Produced when the caller passes `opts.oat` — a pool SLOT
+ *               reads the credential FILE through a symlink and can never be
+ *               handed the token, so slot callers never pass it — OR when the
+ *               FILE itself is the token VibeSpace MATERIALIZED there (lane
+ *               pool-oat-materialize, design q-035 A): our `vibespaceOat`
+ *               mark + an access token + no refresh token, dated by the
+ *               file's own expiresAt (= mint + OAT_TTL). Such a slot serves
+ *               a pooled session; `login: 'none'`, `oatFile: true`.
  */
 
 // The chip / first inbox warning: a login with less than a day left is worth
@@ -83,6 +88,86 @@ function oauthOf(creds) {
 const finite = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 const UNKNOWN = Object.freeze({ state: 'unknown', refreshExpiresAt: null, accessExpiresAt: null, msLeft: null });
 
+// THE MATERIALIZED LONG-LIVED TOKEN (lane pool-oat-materialize, design q-035 A,
+// measured on CLI 2.1.296 — scripts/fixtures/oat-in-file.json): accounts.setOat
+// may write the row's oat into the member's own .credentials.json in the CLI's
+// login shape ({claudeAiOauth: {accessToken, expiresAt = mint + OAT_TTL, scopes,
+// subscriptionType, rateLimitTier?}}, NO refreshToken) so a POOLED session —
+// which reads that file through its symlink — can spend it. The top-level
+// `vibespaceOat` key is OUR MARK. The CLI's store is a bag of top-level keys
+// (claudeAiOauth, mcpOAuth, designOauth …) and its own writes spread the bag
+// ({...G, claudeAiOauth}), so the mark can outlive a `claude login` on top of
+// our file: the file is OURS only while it ALSO has no refresh token, and the
+// mark names THIS row (verify r1 F3: ownership is the mark's, never the token
+// value's — an older token of the same row is ours and is replaced in place).
+// The bag's other keys are the CLI's (verify r1 F1): we replace claudeAiOauth
+// and the mark, and keep every other key (oatFileMerge / credsRestOf).
+const OAT_FILE_MARK = 'vibespaceOat';
+/** The materialized-token file's oauth record, or null: OUR mark + an access token + no refresh token. */
+function oatFileOf(creds) {
+  if (!creds || typeof creds !== 'object' || Array.isArray(creds) || !creds[OAT_FILE_MARK]) return null;
+  const o = creds.claudeAiOauth;
+  if (!o || typeof o !== 'object' || Array.isArray(o)) return null;
+  if (typeof o.accessToken !== 'string' || !o.accessToken || o.refreshToken) return null;
+  return o;
+}
+/** OURS for row `id`: our materialized file (oatFileOf) whose mark names this row. */
+function oatFileOurs(creds, id) {
+  if (!id || !oatFileOf(creds)) return false;
+  const mark = creds[OAT_FILE_MARK];
+  return !!mark && typeof mark === 'object' && mark.account === id;
+}
+/** The CLI's OTHER top-level credentials in a file (mcpOAuth, designOauth …): every
+ *  key but claudeAiOauth and our mark, as they are. {} for anything not an object. */
+function credsRestOf(creds) {
+  if (!creds || typeof creds !== 'object' || Array.isArray(creds)) return {};
+  const out = {};
+  // defineProperty, not `out[k] =`: JSON.parse makes "__proto__" an OWN key, and assignment would set the prototype
+  for (const k of Object.keys(creds)) if (k !== 'claudeAiOauth' && k !== OAT_FILE_MARK) Object.defineProperty(out, k, { value: creds[k], enumerable: true, writable: true, configurable: true });
+  return out;
+}
+/** What the store writes over `creds` (the file it read): ONLY claudeAiOauth + our mark
+ *  replaced, every other key of the CLI's bag kept. */
+function oatFileMerge(creds, body) {
+  return { ...credsRestOf(creds), claudeAiOauth: body.claudeAiOauth, [OAT_FILE_MARK]: body[OAT_FILE_MARK] };
+}
+const canon = (v) => JSON.stringify(v, (k, x) => (x && typeof x === 'object' && !Array.isArray(x) ? Object.keys(x).sort().reduce((o, kk) => { o[kk] = x[kk]; return o; }, {}) : x));
+/** OURS already says exactly `body` — judged on claudeAiOauth + the mark only (the CLI's
+ *  other keys are never a reason to write). */
+function oatFileCurrent(creds, body) {
+  if (!creds || typeof creds !== 'object' || !body) return false;
+  return canon(creds.claudeAiOauth) === canon(body.claudeAiOauth) && canon(creds[OAT_FILE_MARK]) === canon(body[OAT_FILE_MARK]);
+}
+/** The subscription SHAPE a CLI-shaped file must carry (measured: a file without
+ *  scopes / subscriptionType reads "Not logged in"), read off a login file — live,
+ *  dead, or the wiped residue (the CLI blanks the tokens and KEEPS scopes +
+ *  subscriptionType). null = not known. */
+function oatShapeOf(creds) {
+  const o = oauthOf(creds);
+  if (!o) return null;
+  const scopes = Array.isArray(o.scopes) ? o.scopes.filter((x) => typeof x === 'string' && x) : [];
+  const subscriptionType = typeof o.subscriptionType === 'string' && o.subscriptionType ? o.subscriptionType : null;
+  if (!scopes.length || !subscriptionType) return null;
+  return { scopes, subscriptionType, ...(typeof o.rateLimitTier === 'string' && o.rateLimitTier ? { rateLimitTier: o.rateLimitTier } : {}) };
+}
+/** The file we write: the measured shape + our mark (naming the row). Never a refreshToken. */
+function oatFileBody(token, { expiresAt, shape, mintedAt = null, account = null } = {}) {
+  return {
+    claudeAiOauth: { accessToken: String(token), expiresAt: Number(expiresAt), scopes: shape.scopes.slice(), subscriptionType: shape.subscriptionType, ...(shape.rateLimitTier ? { rateLimitTier: shape.rateLimitTier } : {}) },
+    [OAT_FILE_MARK]: { v: 1, mintedAt: Number(mintedAt) || null, ...(account ? { account: String(account) } : {}) },
+  };
+}
+/** OUR file, dated by ITS OWN expiresAt (the token's death): 'oat-only' while it
+ *  lives — usable, ranked below an equal healthy login, the 24h / 1h rungs count
+ *  the TOKEN down, and it never refreshes (there is nothing to refresh with) —
+ *  'expired' after. */
+function oatFileState(o, now) {
+  const exp = finite(o.expiresAt);
+  if (exp == null) return { ...UNKNOWN, oatFile: true };
+  const base = { refreshExpiresAt: null, accessExpiresAt: exp, oatValidUntil: exp, msLeft: exp - now, login: 'none', oatFile: true };
+  return exp > now ? { state: OAT_ONLY, ...base } : { state: 'expired', ...base, oatExpired: true };
+}
+
 /**
  * withOat(info, oat, now) — fold the account's LONG-LIVED TOKEN into a login
  * verdict. `oat` = { present, validUntil } (validUntil = minted + OAT_TTL_MS)
@@ -109,6 +194,8 @@ function loginState(creds, now = Date.now(), opts = {}) {
   return withOat(loginFileState(creds, now), opts && opts.oat, now);
 }
 function loginFileState(creds, now) {
+  const mat = oatFileOf(creds);
+  if (mat) return oatFileState(mat, now);
   const o = oauthOf(creds);
   if (!o) return { ...UNKNOWN };
   const refreshExpiresAt = finite(o.refreshTokenExpiresAt);
@@ -263,7 +350,10 @@ function warnStageFor(info) {
   if (typeof ms !== 'number') return null;
   if (ms < STAGE_MS['1h']) return '1h';
   if (ms < STAGE_MS['24h']) return '24h';
-  return info?.state === OAT_ONLY ? OAT_ONLY : null;
+  // the LOW "the login ended, the token carries its sessions" rung is the ROW's news;
+  // a materialized file (oatFile) has no login to have ended — its row says the
+  // token sits in the folder, and only the token's own 24h / 1h / expired rungs speak
+  return info?.state === OAT_ONLY && !info.oatFile ? OAT_ONLY : null;
 }
 
 /** The deadline a warning LEDGER is keyed by. A login's own deadline, except:
@@ -330,7 +420,61 @@ function reviewWarnings(info, entry, now = Date.now(), opts = {}) {
   return { emit: stage, entry: { exp, sent: nextSent } };
 }
 
+/**
+ * materializeVerdict(member, now) — may the row's long-lived token be written into
+ * its member dir's .credentials.json (lane pool-oat-materialize; the owner's two
+ * decisions: A only, and ONLY for a member with no usable login). The caller
+ * (accounts.syncOatFile) reads the file and the store and hands in:
+ *   file / fileState  the parsed .credentials.json; 'absent' | 'unreadable' (read, not a JSON object) |
+ *                     'read-failed' (the READ failed: any errno but ENOENT) | 'present'
+ *   dirState          'symlink' = the member dir is a symlink (never written through)
+ *   oat               { present, validUntil, readable } (accounts._oatFact + whether it decrypts) or null
+ *   ours              the file is OURS: our mark naming this row, no refresh token (oatFileOurs)
+ *   current           …and its claudeAiOauth + mark already say exactly what we would write
+ *   shape             { scopes, subscriptionType, rateLimitTier? } — the row's recorded one, else the file's
+ *   caps              { ok, known } — cliCaps.oatInFile(the hub's CLI version, the fixture); known = a version was read
+ *   linked            a session's pool link (or a pool's default link) names this member right now
+ * → { verdict, archive, cleanup, held?, reason? }:
+ *   none            no valid token: nothing written; `cleanup` = take OUR file back (never another).
+ *                   reason 'oat-unreadable': the stored token does not decrypt — nothing moves, the row says re-mint
+ *   read-failed     the file could not be READ (EACCES / EIO / EMFILE …): refused by name, nothing archived or written
+ *   dir-symlink     the member dir is a symlink: refused, nothing written through it
+ *   keep-login      a live OAuth login (a refresh token, loginUsable): the login is the authority
+ *   cli-unmeasured  this CLI version was never measured: nothing new is written; cleanup ours — only for a KNOWN
+ *                   version and only while no link names the member (`held` = it stays for the sessions on it);
+ *                   an unknown version (a probe that failed) takes nothing back. A STALE ours (an older token of
+ *                   this row) is still replaced in place: the window stops writes, never the swap of our own token
+ *   no-scopes       no subscription shape known (the CLI would read "Not logged in"): refused; cleanup ours
+ *   written         our file already holds exactly this: nothing to do
+ *   materialize     write it (the CLI's other keys kept); `archive` = rename the login there first (dead / wiped /
+ *                   foreign / unreadable bytes — never lost); a file with no login in it is merged, not archived
+ */
+function materializeVerdict(member, now = Date.now()) {
+  const m = member || {};
+  const ours = !!m.ours;
+  if (m.oat && m.oat.present && m.oat.readable === false) return { verdict: 'none', archive: false, cleanup: false, reason: 'oat-unreadable' };
+  const validUntil = m.oat && m.oat.present ? finite(m.oat.validUntil) : null;
+  if (validUntil == null || validUntil <= now) return { verdict: 'none', archive: false, cleanup: ours };
+  if (m.dirState === 'symlink') return { verdict: 'dir-symlink', archive: false, cleanup: false };
+  if (m.fileState === 'read-failed') return { verdict: 'read-failed', archive: false, cleanup: false };
+  const f = m.fileState === 'present' ? m.file : null;
+  const o = oauthOf(f);
+  if (!ours && o && typeof o.refreshToken === 'string' && o.refreshToken && loginUsable(loginFileState(f, now))) return { verdict: 'keep-login', archive: false, cleanup: false };
+  const sh = m.shape;
+  const shaped = !!sh && Array.isArray(sh.scopes) && sh.scopes.length > 0 && !!sh.subscriptionType;
+  if (!(m.caps && m.caps.ok === true)) {
+    const known = !!(m.caps && m.caps.known);
+    if (ours && !m.current && shaped && !(known && !m.linked)) return { verdict: 'materialize', archive: false, cleanup: false };
+    if (ours && known && m.linked) return { verdict: 'cli-unmeasured', archive: false, cleanup: false, held: true };
+    return { verdict: 'cli-unmeasured', archive: false, cleanup: ours && known };
+  }
+  if (!shaped) return { verdict: 'no-scopes', archive: false, cleanup: ours };
+  if (ours && m.current) return { verdict: 'written', archive: false, cleanup: false };
+  return { verdict: 'materialize', archive: !ours && (m.fileState === 'unreadable' || !!o), cleanup: false };
+}
+
 module.exports = {
+  OAT_FILE_MARK, oatFileOf, oatFileOurs, credsRestOf, oatFileMerge, oatFileCurrent, oatShapeOf, oatFileBody, materializeVerdict,
   EXPIRING_MS, NEAR_MS, WARN_STAGES, STAGE_MS, DEAD_STATES, STALE_GRACE_MS, SHORT_SESSION_MS, OAT_ONLY,
   loginState, withOat, ledgerExp, loginUsable, loginSwitchTarget, loginRank, loginBlockReason,
   loginAgeText, loginBucketLabel, loginBlockedPhrase, loginBlockedText, loginWallPhrase,

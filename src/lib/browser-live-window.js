@@ -163,6 +163,7 @@ import { createLoopBanner } from './browser-loop-banner.js';
 import { patchPasskeyButtons } from './browser-proposal-card.js'; // lane passkey-ui: the passkey_ask banner's choices = the card's (one approve route)
 import { passkeyWords } from '../browser-passkey.js'; // lane browser-passkey: a page waiting for a passkey — ONE button, Cancel (PURE words) // lane site-reset: the navigation loop, keyed + patched in place
 import { displayFactOf, displayFactText } from './browser-display-words.js'; // lane headless-fallback: a headless browser (no desktop session) says so under the bar
+import { enterSubmits } from './chat-enter-keys.js';
 
 const CONSOLE_CAP = 200;
 const RECONNECT_MAX = 5;
@@ -969,7 +970,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
           const box = (type, label, cls) => { const i = document.createElement('input'); i.type = type; i.autocomplete = 'off'; i.placeholder = label; i.setAttribute('aria-label', label); i.className = 'browser-live-dialog-input ' + cls; return i; };
           const user = box('text', prw.user, 'browser-live-prompt-user'); const pass = box('password', prw.password, 'browser-live-prompt-pass');
           const signIn = () => { if (!user.value) { user.focus(); return; } send({ type: 'prompt-answer', id: key, username: user.value, password: pass.value }); pass.value = ''; };
-          for (const i of [user, pass]) i.onkeydown = (e) => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); signIn(); } };
+          for (const i of [user, pass]) i.onkeydown = (e) => { e.stopPropagation(); if (enterSubmits(e)) { e.preventDefault(); signIn(); } };
           const n = document.createElement('div'); n.className = 'browser-live-dialog-note'; n.textContent = prw.hint;
           dialogBar.append(user, pass, n);
           acts.append(textBtn(prw.accept, signIn, 'browser-live-dialog-accept browser-live-prompt-signin'));
@@ -1021,7 +1022,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
         input = document.createElement('input'); input.type = 'text'; input.className = 'browser-live-dialog-input';
         input.value = st.dialogText != null ? st.dialogText : (w.defaultValue || ''); input.setAttribute('aria-label', w.title);
         input.oninput = () => { st.dialogText = input.value; };
-        input.onkeydown = (e) => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); answerDialog(true, input.value); } };
+        input.onkeydown = (e) => { e.stopPropagation(); if (enterSubmits(e)) { e.preventDefault(); answerDialog(true, input.value); } };
         dialogBar.append(input);
       }
       const acts = document.createElement('div'); acts.className = 'browser-live-dialog-actions';
@@ -2179,7 +2180,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
     return true;
   }
   addrInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') { e.preventDefault(); const u = addrInput.value.trim(); if (u) humanNav({ url: u }).then((ok) => { if (ok) { addrInput.blur(); if (driving()) focusSink(); } }); }
+    if (enterSubmits(e)) { e.preventDefault(); const u = addrInput.value.trim(); if (u) humanNav({ url: u }).then((ok) => { if (ok) { addrInput.blur(); if (driving()) focusSink(); } }); }
     else if (e.key === 'Escape') { e.preventDefault(); addrInput.value = st.url && st.url !== 'about:blank' ? st.url : ''; addrInput.blur(); if (driving()) focusSink(); }
   }, { signal: winInfo._listenerCtl?.signal });
   addrInput.addEventListener('focus', () => { try { addrInput.select(); } catch { /* */ } }, { signal: winInfo._listenerCtl?.signal });

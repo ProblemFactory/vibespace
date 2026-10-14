@@ -7,6 +7,7 @@ import { PRIORITIES, normalizePriority, priorityMarker, sortBacklog } from '../b
 // "Clear content…" (2026-09-28): the ONE confirm dialog + request path, and the cleared sentence's words
 import { clearRecords, isCleared, clearedText } from './record-clear-ui.js';
 import { matchSnippet } from '../record-clear.js'; // PURE: why a Find matched a row whose note does not say it (the dialog's line)
+import { enterSubmits } from './chat-enter-keys.js';
 
 /**
  * Task Group log viewer — a full-window browser for the two lists that
@@ -695,7 +696,7 @@ export function openTaskLog(app, taskId, { tab, syncId } = {}) {
       sidebar._taskUpdate(taskId, { backlog: [...(task.backlog || []), item] });
       add.value = ''; addDetail.value = '';
     };
-    add.onkeydown = (e) => { if (e.key === 'Enter') commit(); };
+    add.onkeydown = (e) => { if (enterSubmits(e)) commit(); };
     addLine.append(add, dToggle);
     addWrap.append(addLine, addDetail);
     body.appendChild(addWrap);

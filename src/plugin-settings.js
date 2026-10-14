@@ -48,7 +48,13 @@ const PLUGIN_SETTINGS = {
         description: t('How sure the judge must be (0.50–0.90) before a conversation joins the first screen. Higher = fewer, surer rows.') },
       { key: 'attentionBlock', path: 'decision.attentionBlock', type: 'text', multiline: true, maxLength: 1500, draft: 'decision', default: '', apply: 'server',
         label: t('What matters to me (Decision API)'),
-        description: t('With the Decision API plugin on, the Channels first screen also lists conversations the judge thinks need you now. Say in your own words what matters to you (at most 1,500 characters) — it goes to the judge as written. "Draft from my recent decisions" proposes lines from your ✓ / ✗ answers for you to edit; nothing is saved until you save it.') },
+        description: t('With the Decision API plugin on, the Channels first screen also lists conversations the judge thinks need you now. Say in your own words what matters to you (at most 1,500 characters) — it goes to the judge as written. "Draft from my recent decisions" (with an OpenRouter key: "Draft from my verdicts") proposes lines from your ✓ / ✗ answers for you to edit; nothing is saved until you save it.') },
+      // lane rule-learning (design q-037 P0): the text model that DRAFTS the block above (「从我的判定起草」 — only with an
+      // OpenRouter key on the Decision API row); both tiers ride the zero-data-retention routing of OpenRouter, never an Anthropic endpoint
+      { key: 'learnModel', type: 'enum', default: 'flash', apply: 'server',
+        options: [{ value: 'flash', label: t('Gemini 3.8 Flash (about $0.007 a draft)') }, { value: 'sonnet', label: t('Sonnet 5.5 (better, about $0.02 a draft)') }],
+        label: t('Model that drafts “What matters to me”'),
+        description: t('With an OpenRouter key, “Draft from my verdicts” asks this model to rewrite your block from your ✓ / ✗ answers. It is sent only the short digests the judge already saw and your block, through OpenRouter\'s zero-data-retention endpoints; nothing is saved until you save it. At most $0.10 a day, inside the daily limit.') },
       // lane decision-attention-facts: IMPLICIT LABELS — a reply ⇒ "needs", a listed row left unopened a day ⇒ "not"
       // (src/server/channels-attention.js `learn`); off by default, nothing written while off
       { key: 'implicitLabels', path: 'decision.implicitLabels', type: 'boolean', default: false, apply: 'server',

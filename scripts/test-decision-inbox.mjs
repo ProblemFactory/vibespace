@@ -85,12 +85,14 @@ console.log('① PURE — the inbox plan, the never-list, eligibility, the verdi
 }
 
 /** A world: the REAL engine + the REAL store over a fake fetch. `cents` = the daily budget; `inboxOn` = the switch. */
+// the judge's request body is a ONE-SHOT stream (lane judge-one-shot-body) — a fake reads it like the wire does
+const bodyText = (init) => (typeof init.body === 'string' ? init.body : new Response(init.body).text());
 function world(name, { Engine = DE, Store = UserTodoManager, cents = 100, inboxOn = true, dataDir = null } = {}) {
   const dir = dataDir || path.join(ROOT, name); fs.mkdirSync(dir, { recursive: true });
   const w = { fetches: 0, bodies: [], choices: [], warns: [], T: T0, cfg: { inbox: inboxOn, dailyBudgetCents: cents }, changes: 0, dir };
   const fakeFetch = async (url, init) => {
     w.fetches++;
-    const b = JSON.parse(init.body); w.bodies.push(b.input);
+    const b = JSON.parse(await bodyText(init)); w.bodies.push(b.input);
     const rec = b.input.split('———').pop();   // the item, not the choices text
     const choice = /deadline|invoice|22:00/i.test(rec) ? 'dated' : /expense|which|subnet|meeting/i.test(rec) ? 'blocked' : 'whenever';
     w.choices.push(choice);

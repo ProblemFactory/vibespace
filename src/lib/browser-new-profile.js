@@ -22,6 +22,7 @@ import { installConfirmWords, installOutcomeWords } from './browser-switcher-mod
 import { providerChoices, machineChoices, createBody, createRefusalWords, adoptFormOf, cloneSourceChoices, cloneMachineVerdict } from './browser-new-profile-model.js';
 import { buildRows, choiceOfRow, installHint, buildRefusalWords } from './browser-build-model.js'; // lane browser-admin 2a: the build section
 import { downloadRow, mountDownloadPicker } from './browser-build-dialog.js'; // lane chrome-builds-download: "Download another build…"
+import { enterSubmits } from './chat-enter-keys.js';
 
 const DIALOG_ID = 'browser-new-profile-dialog';
 const jsonPost = (body) => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
@@ -389,7 +390,7 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
     shell.close();
     try { onCreated?.(r.profile || null, r); } catch (e) { console.warn('[browser] new profile onCreated', e); }
   }
-  nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); doCreate(); } });
+  nameInput.addEventListener('keydown', (e) => { if (enterSubmits(e)) { e.preventDefault(); doCreate(); } });
   drawProviders(); drawMachines(); drawBuilds(); drawClones();
   loadFacts();
   setTimeout(() => { try { nameInput.focus(); nameInput.select(); } catch { /* none */ } }, 0);

@@ -8,6 +8,7 @@ import { getFileIcon, hasDedicatedViewer, getCategory } from './file-types.js';
 import { FILE_ICONS, UI_ICONS } from './icons.js';
 import { FileViewer } from './file-viewer.js';
 import { t, tc } from './i18n.js';
+import { enterSubmits } from './chat-enter-keys.js';
 
 const DEFAULT_COLUMNS = { name: true, size: true, modified: true, created: false, type: false };
 const ALL_COLUMNS = [
@@ -73,7 +74,7 @@ class FileExplorer {
     this._hostSelect.onchange = () => this.setHost(this._hostSelect.value);
     this._refreshHostOptions();
     this.pathInput = document.createElement('input'); this.pathInput.className = 'file-path-input';
-    this.pathInput.addEventListener('keydown', e => { if (e.key === 'Enter') { if (this._hideAC) this._hideAC(); this.navigate(this.pathInput.value); } });
+    this.pathInput.addEventListener('keydown', e => { if (enterSubmits(e)) { if (this._hideAC) this._hideAC(); this.navigate(this.pathInput.value); } });
     this._acDropdown = document.createElement('div'); this._acDropdown.className = 'path-autocomplete hidden';
     this._setupPathAutocomplete();
     const btnRefresh = this._btn('\u21BB', t('Refresh')); btnRefresh.onclick = () => this.refresh();

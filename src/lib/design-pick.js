@@ -208,7 +208,7 @@ export function designPicker() {
   addEventListener('keydown', function (e) {
     if (editing) {
       e.stopImmediatePropagation(); // the words being typed are the user's, never the page's shortcuts
-      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); commit(); }
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); commit(); }
       else if (e.key === 'Escape') { e.preventDefault(); cancelEdit(); }
       return;
     }

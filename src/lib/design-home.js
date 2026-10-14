@@ -15,6 +15,7 @@ import { t } from './i18n.js';
 import { registerMenuItem } from './contributions.js';
 import { UI_ICONS } from './icons.js';
 import { nameHelpers } from './browser-who-dialog.js';
+import { enterSubmits } from './chat-enter-keys.js';
 
 const hostKey = (h) => (!h || h === 'local' ? '' : String(h));
 const mk = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
@@ -191,7 +192,7 @@ export function openDesignHome(app, { syncId } = {}) {
       if (!r || !r.ok) { showToast(t('Not renamed: {why}', { why: words((r && r.error) || t('the server did not answer'), 200) }), { type: 'error' }); f.name.textContent = d.title || folderTail(d.dir); }
       else load();
     };
-    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); finish(true); } else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish(false); } }, { signal });
+    input.addEventListener('keydown', (e) => { if (enterSubmits(e)) { e.preventDefault(); finish(true); } else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish(false); } }, { signal });
     input.addEventListener('blur', () => finish(true), { signal });
   }
   async function unlist(d) {

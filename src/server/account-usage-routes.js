@@ -574,9 +574,14 @@ app.post('/api/accounts/:poolId/pin', (req, res) => {
 // Minting one (claude setup-token, 1-year, no refresh) is the per-account
 // consent to run this subscription on remote machines — it ships as
 // CLAUDE_CODE_OAUTH_TOKEN over the same 0600-file channel API keys use.
-app.post('/api/accounts/:id/oat', (req, res) => {
-  try { res.json({ success: true, ...accounts.setOat(req.params.id, req.body?.token) }); }
-  catch (e) { res.status(400).json({ error: e.message }); }
+app.post('/api/accounts/:id/oat', async (req, res) => {
+  let r;
+  try { r = accounts.setOat(req.params.id, req.body?.token); }
+  catch (e) { return res.status(400).json({ error: e.message }); }
+  // the token's file act runs on the store's queue, off the loop's back — the answer names its verdict
+  let f = null;
+  try { f = await accounts.oatFileSettled(r.id); } catch { }
+  res.json({ success: true, ...r, ...(f ? { oatFile: f.verdict } : {}) });
 });
 app.delete('/api/accounts/:id/oat', (req, res) => {
   try {

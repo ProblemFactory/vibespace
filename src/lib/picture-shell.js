@@ -36,6 +36,7 @@
 import { t } from './i18n.js';
 import { COUNTER_ZOOM, showToast } from './utils.js';
 import { UI_ICONS } from './icons.js';
+import { enterSubmits } from './chat-enter-keys.js';
 
 /** A floating copy chip (a seamless window's folded bar) hides itself after this long. */
 export const FLOATING_CHIP_MS = 10000;
@@ -273,7 +274,7 @@ export function createPictureShell(host, { labels = {}, autoReconnect = false, o
     const cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'file-tool-btn vnc-paste-cancel'; cancel.textContent = t('Cancel');
     sendBtn.onclick = () => { const v = ta.value; if (!v) { ta.focus(); return; } if (send(v)) closePasteBox({ refocus: false }); };
     cancel.onclick = () => closePasteBox();
-    ta.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); closePasteBox(); } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); sendBtn.click(); } });
+    ta.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); closePasteBox(); } else if (enterSubmits(e) && (e.ctrlKey || e.metaKey)) { e.preventDefault(); sendBtn.click(); } });
     row.append(sendBtn, cancel);
     pasteBox.append(note, ta, row);
     container.insertBefore(pasteBox, mount);   // under the bar, above the picture

@@ -20,6 +20,7 @@ import { censusRows, WORDS as MEMORY_WORDS } from '../memory-census.js'; // PURE
 import { CLEARED_TEXT } from '../record-clear.js'; // PURE: a cleared service's label / scan tag holds the stored key — worded here
 import { clearedText } from './record-clear-ui.js';
 import { Chart, LineController, LineElement, PointElement, CategoryScale, LinearScale, Tooltip, Filler } from 'chart.js';
+import { enterSubmits } from './chat-enter-keys.js';
 // Self-contained registration (idempotent) — the rail must not depend on the
 // usage-dashboard module having run its own Chart.register first.
 Chart.register(LineController, LineElement, PointElement, CategoryScale, LinearScale, Tooltip, Filler);
@@ -1162,7 +1163,7 @@ export function installSidebarRail(Sidebar) {
             if (r?.error) showToast(r.error, { type: 'error' }); else { mi.value = ''; render(); }
           };
           mb.onclick = doManual;
-          mi.onkeydown = (e) => { if (e.key === 'Enter') doManual(); };
+          mi.onkeydown = (e) => { if (enterSubmits(e)) doManual(); };
           man.append(mi, mb);
           ms.append(head, list, man);
           c.appendChild(ms);

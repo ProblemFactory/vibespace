@@ -93,6 +93,7 @@ import { splitWords, joinWords, commandLine } from '../argv-words.js'; // lane a
 import { installPlace } from '../app-witness.js'; // lane apps-launcher-witness: THE install-place words (PURE, shared with the engine's outcome)
 import { SHOW_SYSTEM_KEY } from '../app-witness.js'; // lane apps-dialog-fast: the person's "Show them" (user state)
 import { appPlanBlock, appSummaryBlock, appRefusalText, appDialogTitle, appGoLabel, appPlanNote, appDoneText, renderAppsSection, openDebInstall, openAppSearch, openAgentHelp, appsBannerModel } from './app-install-dialog.js'; // Layer 0 apps: THE install dialog shows an app's plan too
+import { enterSubmits } from './chat-enter-keys.js';
 const AGENT_BROWSER_ORIGIN = 'agent-browser'; // src/server/window-targets-engine.js AGENT_BROWSER_ORIGIN
 /** lane e2a r3 (verify r1 #11): a record the agent launched through its own door — the chip / the running row words. */
 export function agentBrowserText(rec) { return rec && rec.origin === AGENT_BROWSER_ORIGIN ? t('Agent browser ({name})', { name: (rec.by && rec.by.name) || t('an agent') }) : ''; }
@@ -1238,8 +1239,8 @@ export async function showLaunchDialog(app, opts = {}) {
     const cwd = cwdIn.value.trim() || undefined;
     launch({ exec, args, cwd }, { exec, args, cwd: cwd || null });
   };
-  execIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') runBtn.click(); });
-  argsIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') runBtn.click(); });
+  execIn.addEventListener('keydown', (e) => { if (enterSubmits(e)) runBtn.click(); });
+  argsIn.addEventListener('keydown', (e) => { if (enterSubmits(e)) runBtn.click(); });
 
   const off = app.ws.onGlobal((m) => { if (m.type === 'desktop-apps-updated' && overlay.isConnected) { if (data) { data.apps = m.apps; renderRunning(); } } }); // the Running rows only — never the catalog under the user's pointer
   const offApps = app.ws.onGlobal((m) => { if (m.type === 'apps-updated' && overlay.isConnected && (m.host || 'local') === host) refresh(); }); // Layer 0: an app installed / removed / put back — the catalog's rows follow

@@ -35,7 +35,8 @@ module.exports = {
       const v = h.settings();
       const usd = Number(v.dailyBudgetUsd);
       const th = Number(v.threshold);
-      return { ...Object.fromEntries(M.FEATURES.map((f) => [f, v[f] === true])), dailyBudgetCents: Number.isFinite(usd) && usd >= 0 ? Math.round(usd * 100) : M.DAILY_BUDGET_CENTS_DEFAULT, threshold: Number.isFinite(th) ? th : M.THRESHOLD_DEFAULT };
+      return { ...Object.fromEntries(M.FEATURES.map((f) => [f, v[f] === true])), dailyBudgetCents: Number.isFinite(usd) && usd >= 0 ? Math.round(usd * 100) : M.DAILY_BUDGET_CENTS_DEFAULT, threshold: Number.isFinite(th) ? th : M.THRESHOLD_DEFAULT,
+        learnModel: v.learnModel === 'sonnet' ? 'sonnet' : 'flash' };   // lane rule-learning: the tier that drafts 「我关心什么」
     };
     if (eng) eng.attachPlugin({ peek: h.peek, settings: cfg });
     return {

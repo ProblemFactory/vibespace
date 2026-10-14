@@ -3,6 +3,7 @@ import { setupDirAutocomplete } from './autocomplete.js';
 import { t } from './i18n.js';
 import { isCleared, clearedText } from './record-clear-ui.js'; // "Clear content…": a cleared Activity entry is worded here, never its stored English key
 import { registerWindowType, svgIcon16 } from './window-types.js';
+import { enterSubmits } from './chat-enter-keys.js';
 
 /**
  * Task detail window — the structured editor over data/tasks.json
@@ -221,7 +222,7 @@ export function openTaskDetail(app, taskId, { syncId } = {}) {
       blAdd.className = 'task-detail-input';
       blAdd.placeholder = t('+ Park an item (Enter)');
       blAdd.onkeydown = (e) => {
-        if (e.key === 'Enter' && blAdd.value.trim()) {
+        if (enterSubmits(e) && blAdd.value.trim()) {
           patch({ backlog: [...blAll, { text: blAdd.value.trim(), status: 'open', addedBy: 'user', addedAt: Date.now() }] });
           blAdd.value = '';
         }
@@ -239,7 +240,7 @@ export function openTaskDetail(app, taskId, { syncId } = {}) {
       progAdd.className = 'task-detail-input';
       progAdd.placeholder = t('+ Add activity note (Enter)');
       progAdd.onkeydown = async (e) => {
-        if (e.key === 'Enter' && progAdd.value.trim()) {
+        if (enterSubmits(e) && progAdd.value.trim()) {
           await sidebar._taskApi('POST', `/api/tasks/${encodeURIComponent(taskId)}/progress`, { note: progAdd.value.trim() });
           progAdd.value = '';
         }
@@ -315,7 +316,7 @@ export function openTaskDetail(app, taskId, { syncId } = {}) {
     foldAddWrap.append(foldAdd, foldDrop);
     setupDirAutocomplete(foldAdd, foldDrop);
     foldAdd.onkeydown = (e) => {
-      if (e.key === 'Enter' && foldAdd.value.trim() && !foldDrop.querySelector('.autocomplete-item.active')) {
+      if (enterSubmits(e) && foldAdd.value.trim() && !foldDrop.querySelector('.autocomplete-item.active')) {
         sidebar._taskAddFolder(taskId, foldAdd.value.trim().replace(/\/+$/, ''));
         foldAdd.value = '';
       }

@@ -122,6 +122,7 @@ const ALLOW = {
   // ── every other construction the tree held when the census was born ──
   'src/server/cli-env.js|api.anthropic.com': '§ban-safety: the guarded models fetch — its GATES are pinned by scripts/test-vendor-whitelist.mjs; this row only records that the host is a known decision',
   'src/usage-routes.js|api.anthropic.com': '§ban-safety: the opt-in / human-gated usage reads — GATES pinned by scripts/test-vendor-whitelist.mjs',
+  'src/server/text-model-client.js|openrouter.ai': 'lane rule-learning (q-037 P0): THE chat completions call that drafts the owner\'s 「我关心什么」 block — a button the owner pressed, zero-data-retention routing only; its GATES are pinned by scripts/test-vendor-whitelist.mjs',
   'src/plugins/tailscale.js|pkgs.tailscale.com': 'the tailscale plugin\'s install download (release index + binary) — a human\'s Install click',
   'src/plugins/frp.js|github.com': 'the frp plugin\'s pinned release tarball download — a human\'s Install click',
   'src/server/plugin-install.js|api.github.com': 'plugin install from a GitHub release (the release lookup) — a human\'s Install action, consent per package',

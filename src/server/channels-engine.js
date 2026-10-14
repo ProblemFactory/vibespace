@@ -100,7 +100,7 @@ const { createChannelRegistry, ChannelError } = require('../channels/index.js');
 const { identityOf, identityMismatch, heldIdentity, mismatchSentence, namelessSentence, cancelledSentence } = require('../channel-identity.js');   // verify r5: whose account a consent may land on; r6: the held identity read off the token it holds, a nameless consent; r7: a cancelled consent
 const caps = require('../channel-caps.js');
 const fake = require('../channels/fake.js');
-const { secretBox } = require('../secret-box.js');
+const { secretBox, holdsCiphertext } = require('../secret-box.js');
 const { OWN_KEY, CLUSTER_PREFIX } = require('./integration-store.js');   // the two credential-key forms, spelled ONCE (the store's)
 const R = require('../integration-registry.js');   // PURE: the rows' `bindsPerAccount` + `clientFieldsOf` (the custom client's two fields)
 const { createOAuthLoopback, OPTIONAL_SCOPES_MAX } = require('../oauth-loopback.js');
@@ -535,7 +535,9 @@ function create(deps = {}) {
       });
     } catch (e) { log.warn(`[channels] could not file the set-aside notice for ${q.file}: ${(e && e.message) || e}`); }
   }
-  const box = secretBox(path.join(dataDir, KEY_FILE));
+  // THE KEY-FILE LAW (lane key-file-law-stores): a key is minted only while adapters.json and every account's own
+  // callers.json hold no ciphertext — else `key-missing` (the account card's why), never a key that opens nothing
+  const box = secretBox(path.join(dataDir, KEY_FILE), { hasCiphertext: () => holdsCiphertext({ files: [path.join(dataDir, 'channels', 'adapters.json')], each: [{ dir: path.join(dataDir, 'channels'), file: 'callers.json' }] }) });
   const flows = oauth || createOAuthLoopback({ now, log });
   // design 018 → lane dc-channels-consent: THE ONE CONSENT MACHINE — a per-boot HMAC key signs each redirect consent's
   // state (a restart ends every flow anyway). The state's SHAPE, the landing page and the relay setting are the

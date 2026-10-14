@@ -88,6 +88,7 @@ import * as P from '../channel-policy.js';
 import { routeErrorText } from './channel-words.js';
 import { apiOutboxSection } from './channel-api-card-view.js';   // B-2198 part 2: one row per raw-API proposal, its card under it
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
+import { enterSubmits } from './chat-enter-keys.js';
 
 const ICON = svgIcon16('<path d="M2.5 4.5h11v8h-11z"/><path d="M2.5 4.5l5.5 4 5.5-4"/><path d="M8 2v3"/>');
 const JSON_HDR = { 'Content-Type': 'application/json' };
@@ -571,7 +572,7 @@ export function renderProposalCard(app, p, { compact = false, line = false, onLi
           if (!r) { go.disabled = false; return; }
           showToast(t('Rejected'));
         };
-        inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') go.click(); });
+        inp.addEventListener('keydown', (e) => { if (enterSubmits(e)) go.click(); });   // an input method's committing Enter is its own (inc-mv7mdv6b-emxq)
         box.append(inp, go);
         act.after(box);
         inp.focus();
@@ -630,7 +631,7 @@ export function renderProposalCard(app, p, { compact = false, line = false, onLi
         showToast(t('Rejected'));
         if (woke && r.proposal && r.proposal.receiptChoicePaced) showToast(t('The agent was not woken (paced: {why}) — it hears with its next message', { why: r.proposal.receiptChoicePaced }), { type: 'warn' });
       };
-      inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') go.click(); });
+      inp.addEventListener('keydown', (e) => { if (enterSubmits(e)) go.click(); });   // an input method's committing Enter is its own (inc-mv7mdv6b-emxq)
       box.append(inp, go);
       act.after(box);
       inp.focus();

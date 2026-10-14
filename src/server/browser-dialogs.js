@@ -167,7 +167,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       await Promise.allSettled([...w.targets.values()].map((e) => e.pk.arming));
       w.ready();
     });
-    ws.on('message', (d) => onMessage(w, d));
+    ws.on('message', (d) => { try { onMessage(w, d); } catch (err) { say('msg:' + (err && err.message), `${w.profileId}: a CDP event was not handled — ${err && err.message}`); } }); // key-file-law-fix: a throw never leaves the listener (uncaughtException = the hub's exit)
     ws.on('error', (e) => { say('err:' + w.profileId + ':' + (e && e.code), `${w.profileId}: the watch's socket failed — ${e && e.message}`); });
     ws.on('close', () => down(w, 'the browser\'s CDP socket closed'));
   }
@@ -292,10 +292,10 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
         const rec = ev && PK.applyEvent(e.pk.records, ev, { tab: e.targetId, ctx: p.executionContextId, now: now() });
         if (!rec) return;
         passkeyChanged(w, e, ev.ev === 'start');
-        if (pks) (ev.ev === 'start' ? pkGate(w, e, rec) : pkEnd(w, e, rec)).catch((err) => say('pk-flow:' + (err && err.message), `${w.profileId}: a passkey ceremony step failed — ${err && err.message}`)); // lane passkey-store-core
+        if (pks) (ev.ev === 'start' ? pkGate(w, e, rec).catch((err) => pkFailed(w, e, rec, err)) : pkEnd(w, e, rec).catch((err) => say('pk-flow:' + (err && err.message), `${w.profileId}: a passkey ceremony step failed — ${err && err.message}`))); // lane passkey-store-core // key-file-law-fix: a failed gate releases
         return;
       }
-      case 'WebAuthn.credentialAdded': case 'WebAuthn.credentialAsserted': { const e = tabOf(w, m); if (e && pks) pkHarvest(w, e, m.method, p); return; } // lane passkey-store-core: the harvest
+      case 'WebAuthn.credentialAdded': case 'WebAuthn.credentialAsserted': { const e = tabOf(w, m); if (e && pks) { try { pkHarvest(w, e, m.method, p); } catch (err) { pkFailed(w, e, null, err); } } return; } // lane passkey-store-core: the harvest
       // lane passkey-prewrap-fix: the main-world documents a (re-)arm reaches by identity
       case 'Runtime.executionContextCreated': { const e = tabOf(w, m); const c = p.context; if (e && c && c.auxData && c.auxData.isDefault) e.pk.ctxs.add(Number(c.id)); return; }
       case 'Runtime.executionContextDestroyed': { const e = tabOf(w, m); if (e) { e.pk.ctxs.delete(Number(p.executionContextId)); e.pk.ctl.delete(Number(p.executionContextId)); } if (e && PK.endPending(e.pk.records, { now: now(), ctx: Number(p.executionContextId) }).length) passkeyChanged(w, e); return; }
@@ -1237,6 +1237,29 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   function pkTrace(w, e, rec, outcome, extra = {}) {
     emit({ kind: 'passkey-trace', profileId: w.profileId, targetId: e.targetId, owner: pkOwner(w, e), act: { kind: rec.kind, rpId: rec.rpId, user: (rec.user && rec.user.name) || rec.userName || '', outcome, by: rec.by || 'agent', ...extra } });
   }
+  // key-file-law-fix (verify r1 F1): THE KEY FILE REFUSED — a VALUE at every door (src/key-file.js codes). ONE For-you line per
+  // refusal (the key file is the instance's, not a profile's), resolved when a seal / open works again; the open ceremony's
+  // sentence carries the restore words; the server log says it once.
+  let pkKeyFy = null;
+  function pkKeyRefused(w, rec, r) {
+    if (rec) rec.keyWords = r.words;
+    say('pk-key:' + r.code, `${w.profileId}: the passkey store is locked — ${r.words}`);
+    if (pkKeyFy && pkKeyFy.code === r.code) return;
+    pkKeyOk();
+    let id = null; try { id = forYou ? forYou.add?.(w.profileId, PK.keyForYouItem(r)) || null : null; } catch (err) { say('pk-key-fy:' + (err && err.message), `the passkey key line was not filed — ${err && err.message}`); }
+    pkKeyFy = { code: r.code, id };
+  }
+  function pkKeyOk() {
+    if (!pkKeyFy) return;
+    const { code, id } = pkKeyFy; pkKeyFy = null; sayOnce.delete('pk-key:' + code);
+    if (id && forYou) { try { forYou.resolve?.(id); } catch { /* the tray's own failure */ } }
+  }
+  /** A gate step that THREW (anything unexpected; a key refusal is a value) never holds the page: said, the ceremony released. */
+  function pkFailed(w, e, rec, err) {
+    say('pk-flow:' + (err && err.message), `${w.profileId}: a passkey ceremony step failed — ${err && err.message}`);
+    const r = PS.keyRefusal(err); if (r) pkKeyRefused(w, rec, r);
+    if (rec && rec.outcome === 'pending') pkCtl(w, e, rec, 'release').catch(() => {});
+  }
   /** ① a held ceremony starts → ② the gate → release (load ONLY its rows) | ask (a card) | refuse (the hook rejects in-page). */
   async function pkGate(w, e, rec) {
     if (!e.pk.auth) return pkCtl(w, e, rec, 'release'); // no authenticator on this tab: Chrome's own behaviour (said passkey_open if it never ends)
@@ -1254,7 +1277,9 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     let store = pkRead(); const loaded = [];
     for (const cid of v.load) {
       const row = PS.profileOf(store, pid).rows.find((r) => r.credentialId === cid); if (!row) continue;
-      const key = PS.open(pks.cipher, row);
+      const key = PS.open(pks.cipher, row), refused = PS.keyRefusal(key);
+      if (refused) { pkKeyRefused(w, rec, refused); break; } // key-file-law-fix: the key file cannot open the store — NOTHING loads; the ceremony is released below like "no passkey"
+      pkKeyOk();
       if (!key) { say('pk-open:' + cid.slice(0, 8), `${pid}: a stored passkey (${cid.slice(0, 8)}) could not be unsealed — the key file changed?`); continue; }
       const b = PS.bumpSignCount(row); store = PS.withRow(store, pid, b.row); loaded.push({ row, key, loadAs: b.loadAs });
     }
@@ -1292,7 +1317,10 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     const store = pkRead(), row = PS.profileOf(store, pid).rows.find((r) => r.credentialId === cid);
     if (method === 'WebAuthn.credentialAsserted') { if (row) { pkWrite(PS.withRow(store, pid, PS.reconcile(row, c.signCount, now()))); if (rec) rec.userName = row.userName; } return; }
     if (row || !c.privateKey) return; // a stored key we loaded ourselves
-    const nr = PS.normalizeRow({ credentialId: cid, rpId: c.rpId, userHandle: b64u(c.userHandle), userName: c.userName, displayName: c.userDisplayName, keySealed: PS.seal(pks.cipher, c.privateKey), signCount: c.signCount, createdBy: rec && rec.createdBy === 'human' ? 'human' : 'agent', bySession: pkOwner(w, e), createdAt: now(), policy: PS.NEW_KEY_POLICY });
+    const sealed = PS.seal(pks.cipher, c.privateKey), refused = PS.keyRefusal(sealed);
+    if (refused) return pkKeyRefused(w, rec, refused); // key-file-law-fix: the key file cannot open the store — the new passkey is NOT kept, said once
+    pkKeyOk();
+    const nr = PS.normalizeRow({ credentialId: cid, rpId: c.rpId, userHandle: b64u(c.userHandle), userName: c.userName, displayName: c.userDisplayName, keySealed: sealed, signCount: c.signCount, createdBy: rec && rec.createdBy === 'human' ? 'human' : 'agent', bySession: pkOwner(w, e), createdAt: now(), policy: PS.NEW_KEY_POLICY });
     if (!nr) return say('pk-harvest:' + pid, `${pid}: a new passkey was not stored (its fields did not read)`);
     pkWrite(PS.withRow(store, pid, nr));
     if (rec) { rec.harvested = true; rec.userName = nr.userName; }
@@ -1306,7 +1334,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     a.beat = setInterval(() => {
       if (rec.outcome !== 'pending' || w.state !== 'open') return pkClose(a, 'withdrawn');
       if (rec.by === 'agent' && pkTakeover(w, e)) { pkClose(a, 'withdrawn'); rec.ask = null; rec.refused = true; rec.why = 'withdrawn'; pkTrace(w, e, rec, 'refused', { why: 'withdrawn' }); pkCtl(w, e, rec, 'refuse'); passkeyChanged(w, e); return; }
-      if (now() > a.card.expiresAt) { pkClose(a, 'expired'); rec.ask = null; rec.answer = 'expired'; pkGate(w, e, rec); return; }
+      if (now() > a.card.expiresAt) { pkClose(a, 'expired'); rec.ask = null; rec.answer = 'expired'; pkGate(w, e, rec).catch((err) => pkFailed(w, e, rec, err)); return; }
       pkCtl(w, e, rec, 'wait');
     }, 1000);
     if (a.beat.unref) a.beat.unref();
@@ -1347,7 +1375,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       return { ok: true, proposal: a.card };
     }
     if (choice === 'always' || choice === 'never') { let s = pkRead(); for (const k of a.card.keys) { const r = PS.profileOf(s, a.profileId).rows.find((x) => x.credentialId.startsWith(k.id)); if (r) s = PS.setPolicy(s, a.profileId, r.credentialId, choice === 'always' ? 'yes' : 'no'); } pkWrite(s); emit({ kind: 'passkeys', profileId: a.profileId }); }
-    if (a.rec && a.rec.outcome === 'pending') { a.rec.ask = null; a.rec.answer = choice; pkGate(a.w, a.e, a.rec); }
+    if (a.rec && a.rec.outcome === 'pending') { a.rec.ask = null; a.rec.answer = choice; pkGate(a.w, a.e, a.rec).catch((err) => pkFailed(a.w, a.e, a.rec, err)); }
     return { ok: true, proposal: a.card };
   }
   /** The agent's `passkey register <rpId>`: ONE card; `waitMs` > 0 waits for its answer. → {ok, proposal, state}. */

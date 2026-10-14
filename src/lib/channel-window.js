@@ -109,6 +109,7 @@ import { renderMsgBar, syncMsgBar, holdBarOpen, msgActionMenu, renderMsgMore, is
 import * as P from '../channel-policy.js';
 import { firstLine } from '../channel-thread.js';
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
+import { enterSubmits, imeOwnsKey } from './chat-enter-keys.js';
 
 // lane owner-composer-attach (owner 2026-10-09: "我能操作的那个聊天框不能上传文件"): THE OWNER'S FILES in the reply box —
 // a paperclip (the system picker; phone too), a drop onto the box, a paste of a file or picture. Each file is ONE chip
@@ -968,7 +969,7 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
         else if (st === 'sent' && allBox && allBox.checked && r2.proposal.replyEnvelope) showToast(t('Sent to {to}', { to: [r2.proposal.replyEnvelope.to, r2.proposal.replyEnvelope.cc].filter(Boolean).join(', ') }));
         else showToast(st === 'sent' ? t('Sent') : st === 'awaiting-approval' ? t('Held in the outbox for your approval ({why})', { why: ((r2.decision && r2.decision.reasons) || []).map(reasonLabel).join('; ') }) : t('Proposal {state}', { state: st || '?' }));
       };
-      ta.addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); sendBtn.click(); } });
+      ta.addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && enterSubmits(e)) { e.preventDefault(); sendBtn.click(); } });
       row.prepend(note);
       row.appendChild(sendBtn);
       comp.append(...(cf ? [cf.box] : []), voiceField(ta, attachDictation(ta)), row);
@@ -2108,10 +2109,10 @@ function openGroupWindow(app, winInfo, groupId, { bar, list, foot }) {
       if (pop.style.display !== 'none' && cands.length) {
         if (e.key === 'ArrowDown') { e.preventDefault(); sel = (sel + 1) % cands.length; drawPop(); return; }
         if (e.key === 'ArrowUp') { e.preventDefault(); sel = (sel - 1 + cands.length) % cands.length; drawPop(); return; }
-        if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); pick(sel); return; }
+        if (!imeOwnsKey(e) && (e.key === 'Enter' || e.key === 'Tab')) { e.preventDefault(); pick(sel); return; }
         if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closePop(); return; }
       }
-      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); sendBtn.click(); }
+      if ((e.ctrlKey || e.metaKey) && enterSubmits(e)) { e.preventDefault(); sendBtn.click(); }
     });
     sendBtn.onclick = async () => {
       const text = ta.value.trim();

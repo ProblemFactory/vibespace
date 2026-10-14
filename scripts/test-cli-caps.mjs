@@ -10,6 +10,9 @@
 //   ⑤ --no-netns refuses a binary / anything under …/claude/versions/ before it runs (the
 //      measurement over the FAKE claude needs strace: scripts/test-oat-measure-fake.mjs, heavy)
 //   ⑥ the committed fixture, once 主开发's namespace rung wrote it: its shape
+//   ⑦ (pool-oat-materialize verify r1 F9) machine-probes.cliVersion: the FIRST line that parses as a
+//      version (a warning printed before the number is skipped), 'unparsed' for an answer with none,
+//      null for no answer — over fake #! binaries (never the real CLI)
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -54,6 +57,8 @@ const TABLE = [
   ['a prefix of it (2.1.29)', '2.1.29', fx(), false],
   ['a longer one (2.1.2960)', '2.1.2960', fx(), false],
   ['a four-part one (2.1.296.1)', '2.1.296.1', fx(), false],
+  ['a build of it (2.1.296-dev.1 — verify r1 F9)', '2.1.296-dev.1', fx(), false],
+  ['a build-metadata suffix (2.1.296+linux.7)', '2.1.296+linux.7 (Claude Code)', fx(), false],
   ['no version', null, fx(), false],
   ['a word for a version', 'latest', fx(), false],
   ['no fixture', '2.1.296', null, false],
@@ -66,6 +71,7 @@ const runTable = (fn) => TABLE.map(([, v, f]) => { try { return fn(v, f); } catc
 const real = runTable(C.oatInFile);
 TABLE.forEach(([name, , , want], i) => ok(`${name} ⇒ ${want}`, real[i] === want, `got ${real[i]}`));
 ok('cliVersionOf reads the CLI\'s words and nothing looser', C.cliVersionOf('2.1.296 (Claude Code)') === '2.1.296' && C.cliVersionOf('v2.1.296') === '2.1.296' && C.cliVersionOf('2.1') === null && C.cliVersionOf('2.1.296.1') === null && C.cliVersionOf(undefined) === null);
+ok('cliVersionOf KEEPS a build suffix (another version, never the measured release — F9)', C.cliVersionOf('2.1.296-dev.1') === '2.1.296-dev.1' && C.cliVersionOf('2.1.296+linux.7 (Claude Code)') === '2.1.296+linux.7' && C.cliVersionOf('2.1.296, build 7') === null, JSON.stringify([C.cliVersionOf('2.1.296-dev.1'), C.cliVersionOf('2.1.296+linux.7 (Claude Code)'), C.cliVersionOf('2.1.296, build 7')]));
 
 // ── ③ patched readers: each pinned rule, removed, turns its leg RED ──
 console.log('③ patched-reader controls');
@@ -83,8 +89,10 @@ const m2 = patched('no verdict check', "&& vs[name].verdict === 'PASS'", '');
 ok('a reader that ignores verdicts ⇒ the oat-file-401 FAIL leg goes RED', flips(m2, 'oat-file-401 FAIL (the CLI rewrote the file)'));
 const m3 = patched('in not own', 'Object.prototype.hasOwnProperty.call(vs, name)', 'name in vs');
 ok('a reader that counts inherited verdicts ⇒ the inherited leg goes RED', flips(m3, 'inherited verdicts do not count'));
-const m4 = patched('loose version', '(?![\\d.])', '');
+const m4 = patched('loose version', '(?=\\s|$)', '');
 ok('a looser version parse ⇒ the 2.1.296.1 leg goes RED', flips(m4, 'a four-part one (2.1.296.1)'));
+const m5 = patched('the r1 parse', '(\\d+\\.\\d+\\.\\d+(?:[-+][0-9A-Za-z.+-]+)?)(?=\\s|$)', '(\\d+\\.\\d+\\.\\d+)(?![\\d.])');
+ok('RED CONTROL (F9): the r1 parse (a build suffix dropped) opens the gate for 2.1.296-dev.1', flips(m5, 'a build of it (2.1.296-dev.1 — verify r1 F9)'));
 
 // ── ④ census ──
 console.log('④ census');
@@ -122,6 +130,29 @@ if (!fs.existsSync(COMMITTED)) {
   ok('scripts/fixtures/oat-in-file.json parses and has the six verdicts', !!F && !!C.cliVersionOf(F.cliVersion) && SIX.every((n) => F.variants?.[n] && /^(PASS|FAIL|INCOMPLETE)$/.test(F.variants[n].verdict) && typeof F.variants[n].note === 'string'), JSON.stringify(F).slice(0, 300));
   ok('…measured in the namespace with the real CLI (not a fake, not --no-netns)', !!F && F.netns === true && F.cliVersion !== '9.9.9', JSON.stringify(F && { netns: F.netns, cliVersion: F.cliVersion }));
   console.log(`  (oatInFile(${F?.cliVersion}) = ${C.oatInFile(F?.cliVersion, F)})`);
+}
+
+// ── ⑦ the probe the gate reads (verify r1 F9) ──
+console.log('⑦ machine-probes.cliVersion over fake #! binaries');
+{
+  const P = require(path.join(REPO, 'src/machine-probes.js'));
+  const fake = (name, body) => { const p = path.join(tmp, name); fs.writeFileSync(p, '#!/bin/sh\n' + body + '\n', { mode: 0o755 }); return p; };
+  const warn = await P.cliVersion(fake('claude-warn', "echo 'Warning: an update is available'; echo '2.1.300 (Claude Code)'"));
+  ok('a warning line BEFORE the number is skipped: the upgrade (2.1.300) is seen', warn === '2.1.300 (Claude Code)' && C.cliVersionOf(warn) === '2.1.300', JSON.stringify(warn));
+  const plain = await P.cliVersion(fake('claude-plain', "echo '2.1.296 (Claude Code)'"));
+  ok('…the plain answer reads as before', plain === '2.1.296 (Claude Code)', JSON.stringify(plain));
+  const junk = await P.cliVersion(fake('claude-junk', "echo 'Claude Code'; echo 'build: nightly'"));
+  ok('an answer with no version line says \'unparsed\' (a KNOWN CLI nobody measured — never "no answer")', junk === 'unparsed', JSON.stringify(junk));
+  const dead = await P.cliVersion(fake('claude-fails', 'exit 3'));
+  ok('a binary that fails says null (no answer: the gate keeps the last known version)', dead === null, JSON.stringify(dead));
+  const SRCP = fs.readFileSync(path.join(REPO, 'src/machine-probes.js'), 'utf8');
+  const A = ".find((l) => cliVersionOf(l)) || 'unparsed'";
+  if (SRCP.includes(A)) {
+    const f = path.join(tmp, 'machine-probes-r1.js');
+    fs.writeFileSync(f, SRCP.replace("return v.split('\\n').map((l) => l.trim())" + A + ';', "return v.trim().split('\\n')[0];").replace("require('./cli-caps.js')", `require(${JSON.stringify(CAPS)})`));
+    const r1 = await require(f).cliVersion(path.join(tmp, 'claude-warn'));
+    ok('RED CONTROL: the r1 probe (line 1 only) reads the warning, never the upgrade', r1 === 'Warning: an update is available' && C.cliVersionOf(r1) === null, JSON.stringify(r1));
+  } else ok('⑦ anchor present in src/machine-probes.js', false, A);
 }
 
 console.log(fail ? `${fail} FAILED (${pass} passed${skip ? `, ${skip} skipped` : ''})` : `ALL PASS (${pass}${skip ? `, ${skip} skipped` : ''})`);

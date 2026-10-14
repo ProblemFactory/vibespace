@@ -5,6 +5,7 @@
 import { escHtml } from './utils.js';
 import { registerCommand, runCommand } from './contributions.js';
 import { t } from './i18n.js';
+import { enterSubmits } from './chat-enter-keys.js';
 
 function subseq(t, s) {
   let qi = 0;
@@ -141,7 +142,7 @@ export function installSessionPalette(app) {
       if (e.key === 'Escape') { e.stopPropagation(); close(); }
       else if (e.key === 'ArrowDown') { e.preventDefault(); sel = Math.min(sel + 1, items.length - 1); render(); }
       else if (e.key === 'ArrowUp') { e.preventDefault(); sel = Math.max(sel - 1, 0); render(); }
-      else if (e.key === 'Enter') {
+      else if (enterSubmits(e)) {
         e.preventDefault();
         const it = items[sel];
         if (!it) return;

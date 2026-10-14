@@ -598,7 +598,7 @@ function repointLegs(AM) {
   ok('§C NEGATIVE CONTROL: the patch hit account-material', mat.hit === true, mat.why || '');
   if (mat.hit && r) {
     const rebind = ["require('./account-material.js')", `require(${JSON.stringify(mat.file)})`];
-    const accts = mutate('src/accounts.js', 'nobump-acc', [rebind, rebind, rebind]); // accounts.js requires it at each of its three re-point sites
+    const accts = mutate('src/accounts.js', 'nobump-acc', Array(read('src/accounts.js').split(rebind[0]).length - 1).fill(rebind)); // accounts.js requires it at EVERY site — the three re-points + the private writer's merge / import + the oat's syncOatFile (lane pool-oat-materialize): rebind them all
     const r2 = accts.hit ? repointLegs(accts.mod.AccountManager) : null;
     ok('§C NEGATIVE CONTROL: without the bump every path leaves the mtime — a running CLI never follows the move', !!r2 && !r2.perSession && !r2.sweep && r2.linkNow, JSON.stringify(r2) + (accts.why || ''));
   }

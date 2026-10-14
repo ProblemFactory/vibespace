@@ -74,7 +74,7 @@ const fs = require('fs');
 const path = require('path');
 const R = require('../integration-registry.js');
 const PL = require('../preset-layers.js');
-const { secretBox, SecretBoxError, describeJsonError } = require('../secret-box.js');
+const { secretBox, SecretBoxError, holdsCiphertext, describeJsonError } = require('../secret-box.js');
 const { writeJsonAtomic } = require('../channel-store.js');
 
 const TEST_TIMEOUT_MS = 15000;          // a human-triggered probe, bounded
@@ -114,7 +114,8 @@ function create(deps = {}) {
   if (!dataDir) throw new Error('integration-store: dataDir is required');
 
   const file = path.join(dataDir, FILE);
-  const box = secretBox(path.join(dataDir, KEY_FILE));
+  // THE KEY-FILE LAW (lane key-file-law-stores): a key is minted only while integrations.json holds no ciphertext
+  const box = secretBox(path.join(dataDir, KEY_FILE), { hasCiphertext: () => holdsCiphertext({ files: [file], values: [state] }) });
   const runners = new Map();          // id -> async ({resolved, row, signal}) => {ok, detail?}
   const inflight = new Map();         // id -> Promise
   const listeners = new Set();
@@ -178,14 +179,14 @@ function create(deps = {}) {
     if (create) { if (loadError) throw loadError; if (!s.integrations[id]) s.integrations[id] = { values: {}, clusterKey: null, updatedAt: null, testedAt: null, lastOk: null, lastError: null }; }
     return s.integrations[id] || null;
   }
-  const storeErrorView = () => (loadError ? { code: loadError.code, message: loadError.message } : keyError ? { code: keyError.code, message: keyError.message } : null);
+  const storeErrorView = () => (loadError ? { code: loadError.code, message: loadError.message } : keyError ? { code: keyError.code, message: keyError.message, ...(keyError.reason ? { reason: keyError.reason, file: KEY_FILE } : {}) } : null); // reason = the key-file law's whole code (key-unreadable:EIO); file = its name (the card's words, key-file-law-fix L3)
 
   // ── secrets ──────────────────────────────────────────────────────────────
   function encField(row, key, plain) {
     const f = row.fields.find((x) => x.key === key);
     if (!f || !f.secret) return String(plain);
     try { keyError = null; return box.enc(plain); }
-    catch (e) { keyError = e; throw new IntegrationError('key-unreadable', `cannot encrypt: ${e.message}`, { status: 500 }); }
+    catch (e) { keyError = e; throw new IntegrationError(e && e.code === 'key-missing' ? 'key-missing' : 'key-unreadable', `cannot encrypt: ${e.message}`, { status: 500 }); }
   }
   /** Plaintext of a stored field, or `undefined` when the key cannot decrypt it. */
   function decField(row, key, stored) {
@@ -194,7 +195,7 @@ function create(deps = {}) {
     if (!f || !f.secret) return String(stored);
     try { keyError = null; return box.dec(stored); }
     catch (e) {
-      if (e instanceof SecretBoxError && (e.code === 'key-unreadable' || e.code === 'key-malformed')) keyError = e;
+      if (e instanceof SecretBoxError && (e.code === 'key-unreadable' || e.code === 'key-malformed' || e.code === 'key-missing')) keyError = e;
       return undefined;
     }
   }

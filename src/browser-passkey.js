@@ -103,7 +103,8 @@ function passkeyVerdict(records, now, { armed = true, saidMs = PENDING_SAID_MS }
 /** THE SENTENCE — the first words of every agent-facing surface while a ceremony is open. */
 function passkeyText(r) {
   const rp = rpWord(r && r.rpId) || 'this site';
-  return `This page is waiting for a passkey (${rp}) and nothing in VibeSpace answers it — cancel it (\`vibespace-browser passkey cancel\`) and use the page's other way in (a recovery code, a password), or ask the user to sign in on their own device.`;
+  const locked = r && r.keyWords ? ` VibeSpace's saved passkeys are locked: ${str(r.keyWords)}.` : ''; // key-file-law-fix: the gate's key refusal
+  return `This page is waiting for a passkey (${rp}) and nothing in VibeSpace answers it — cancel it (\`vibespace-browser passkey cancel\`) and use the page's other way in (a recovery code, a password), or ask the user to sign in on their own device.${locked}`;
 }
 /** lane passkey-store-core (§2.4): the page waits for the owner's card. */
 function askText(r) {
@@ -214,6 +215,20 @@ function passkeyCardWords(card, tIn) {
   } else if (card.state === 'expired') outcome = t('Expired — nobody answered in time; nothing was allowed.');
   else if (card.state === 'withdrawn') outcome = t('Withdrawn — the request ended before an answer; nothing was allowed.');
   return { title, after, buttons, outcome, open, rp, user, profile, kind: reg ? 'register' : 'sign-in' };
+}
+/** key-file-law-fix (verify r1 F1): the passkey KEY FILE refused (src/key-file.js codes) — ONE For-you line naming the file and
+ *  the refusal (the key-file law's own words, src/lib/key-file-words.js), the detail = what it means for passkeys. */
+const KEY_WORDS = Object.freeze({
+  'key-missing': 'Key file {file} is missing — restore it from a backup',
+  'key-malformed': 'Key file {file} is damaged — restore it from a backup; nothing was replaced',
+  'key-unreadable': 'Key file {file} could not be read ({code}) — no new key was made',
+  detail: 'The agent browser\'s saved passkeys are sealed under this key: until it is back, a sign-in goes on without them and a new passkey is not kept.',
+});
+function keyForYouItem(r) {
+  const m = /^(key-missing|key-malformed|key-unreadable)(?::([A-Za-z0-9_]+))?$/.exec(str(r && r.code));
+  if (!m) return null;
+  const file = str(r.file) || 'the key file', key = KEY_WORDS[m[1]], params = m[1] === 'key-unreadable' ? { file, code: m[2] || '?' } : { file };
+  return { text: fill(key, params), detail: KEY_WORDS.detail, urgency: 'high', i18n: { text: { key, params }, detail: [{ key: KEY_WORDS.detail }] } };
 }
 function forYouItem(b, { label = '' } = {}) {
   const rp = rpWord(b && b.rpId) || 'this site';
@@ -390,5 +405,5 @@ module.exports = {
   PASSKEY_OPEN_CODE, PASSKEY_ASK_CODE, REFUSED_SAID_MS, HOOK_HOLD_MS, KINDS, OUTCOMES, PENDING_SAID_MS, FOR_YOU_AFTER_MS, RECORDS_KEEP, PASSKEY_PASS_VERBS, PASSKEY_READ_VERBS,
   NONE_TEXT, UNKNOWN_TEXT, FOR_YOU_WORDS,
   rpWord, parseEvent, recordOf, applyEvent, endPending, passkeyVerdict, passkeyText, passkeyBlock, passkeyPasses, passkeyReads,
-  loopVerdict, cancelText, passkeyWords, forYouItem, installHook, hookSource, SLOT_MARK, CTL_FN, REARM_FN, dropExpression, askText, refusedText, registerText, // lane passkey-prewrap-fix: − the slot-road expressions
+  loopVerdict, cancelText, passkeyWords, forYouItem, keyForYouItem, installHook, hookSource, SLOT_MARK, CTL_FN, REARM_FN, dropExpression, askText, refusedText, registerText, // lane passkey-prewrap-fix: − the slot-road expressions
 };

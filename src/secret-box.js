@@ -45,21 +45,99 @@
  *     up reading the one that landed; the atomic-write law matters more on
  *     this file than on any `.json` because it is the least recoverable byte
  *     under data/.
+ *
+ * THE KEY-FILE LAW (lane key-file-law-stores, .269 — src/key-file.js): ENOENT alone was not enough. A key file that
+ * went missing (a partial restore, a hand-copied data/) beside a store that still holds ciphertext used to be minted
+ * fresh — every stored secret undecryptable, and every secret entered afterwards sealed under a key a restored backup
+ * cannot open. So a box now asks its store `hasCiphertext()` (every src/ caller passes one — the census) before it mints: absent + ciphertext ⇒
+ * `key-missing` (the store's rows say: restore the key file from a backup). `refusal()` is the row fact.
  */
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const KF = require('./key-file.js'); // THE KEY-FILE LAW (PURE): mint only when absent AND no ciphertext; else a named refusal
 
 class SecretBoxError extends Error {
-  constructor(code, message, cause) {
+  constructor(code, message, cause, reason) {
     super(message);
     this.name = 'SecretBoxError';
     this.code = code;
     if (cause) this.cause = cause;
+    if (reason) this.reason = reason; // the key-file law's whole code: `key-missing` | `key-unreadable:<errno>` | `key-malformed`
   }
 }
 
-const KEY_HEX_RE = /^[0-9a-f]{64}$/i;
+const KEY_HEX_RE = KF.KEY_HEX_RE;
+/** A secret-box ciphertext as it sits in a store's JSON: `iv.tag.data` — 12-byte iv (16 base64), 16-byte tag (24). */
+const BOX_CIPHERTEXT_RE = /[A-Za-z0-9+/]{16}\.[A-Za-z0-9+/]{22}==\.[A-Za-z0-9+/]*={0,2}/;
+
+/**
+ * THE KEY-FILE LAW's fs half (lane key-file-law-stores): `holdsCiphertext({ files, each, values, re })` — does the store
+ * hold anything a key decrypts? A listed file that is ABSENT holds nothing; one that cannot be read holds (assume it
+ * does); one whose text passes `re` (a RegExp, or a function of the text) holds. `each` = `[{ dir, file }]`: that file
+ * in every immediate subdirectory of `dir` (a store kept per account / per app); `values` = in-memory state.
+ */
+function holdsCiphertext({ files = [], each = [], values = [], re = BOX_CIPHERTEXT_RE } = {}) {
+  const hit = (t) => (typeof re === 'function' ? !!re(t) : re.test(t));
+  for (const v of values) { let t = ''; try { t = typeof v === 'string' ? v : JSON.stringify(v); } catch { return true; } if (t && hit(t)) return true; }
+  const all = [...files];
+  for (const { dir, file } of each) {
+    let names;
+    try { names = fs.readdirSync(dir, { withFileTypes: true }); } catch (e) { if (e && e.code === 'ENOENT') continue; return true; }
+    for (const d of names) {
+      if (d.isDirectory()) all.push(path.join(dir, d.name, file));
+      else if (d.isSymbolicLink()) { try { if (fs.statSync(path.join(dir, d.name)).isDirectory()) all.push(path.join(dir, d.name, file)); } catch { /* a dangling link holds nothing */ } } // key-file-law-fix (verify r1 L4)
+    }
+  }
+  for (const f of all) {
+    let t;
+    try { t = fs.readFileSync(f, 'utf-8'); } catch (e) { if (e && e.code === 'ENOENT') continue; return true; }
+    if (hit(t)) return true;
+  }
+  return false;
+}
+
+/** Mint a key on ENOENT ONLY. tmp + hard link (refuses to clobber) with a rename fallback that re-checks existence —
+ *  never an overwrite. → the 32 bytes, or null when another writer landed first. `raw` = the file holds the 32 bytes
+ *  themselves (the passkey store) instead of 64 hex characters. */
+function mintKeyFile(keyFile, { raw = false } = {}) {
+  const k = crypto.randomBytes(32);
+  fs.mkdirSync(path.dirname(keyFile), { recursive: true });
+  const tmp = `${keyFile}.tmp-${process.pid}-${crypto.randomBytes(4).toString('hex')}`;
+  try {
+    fs.writeFileSync(tmp, raw ? k : k.toString('hex'), { mode: 0o600, flag: 'wx' });
+    try {
+      const fd = fs.openSync(tmp, 'r'); try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+    } catch { /* fsync is best effort on filesystems that refuse it */ }
+    try {
+      fs.linkSync(tmp, keyFile);           // atomic, EEXIST if somebody landed first
+    } catch (e) {
+      if (e && e.code === 'EEXIST') return null;   // the other minter wins; re-read below
+      // A filesystem without hard links: an EXCLUSIVE create (O_EXCL) — key-file-law-fix (verify r1 L2): existsSync +
+      // renameSync is not exclusive (16 racing minters split keys); EEXIST = the other minter won, re-read below.
+      try { fs.writeFileSync(keyFile, raw ? k : k.toString('hex'), { mode: 0o600, flag: 'wx' }); }
+      catch (e2) { if (e2 && e2.code === 'EEXIST') return null; throw e2; }
+      return k;
+    }
+    return k;
+  } finally {
+    try { fs.unlinkSync(tmp); } catch { /* already renamed or never written */ }
+  }
+}
+
+/**
+ * THE KEY-FILE LAW over a real file → `{ ok, key, minted? }` | `{ ok: false, code }` (src/key-file.js loadOrMintKey).
+ * `hasCiphertext` is REQUIRED — every store answers "do I hold anything this key decrypts?" before a key is minted
+ * (scripts/test-key-file-law.mjs: a reader of a data/ key file that does not come through here is RED).
+ */
+function lawfulKey(keyFile, { hasCiphertext, raw = false } = {}) {
+  return KF.loadOrMintKey({
+    readKey: () => (raw ? fs.readFileSync(keyFile) : fs.readFileSync(keyFile, 'utf-8')),
+    mintKey: () => mintKeyFile(keyFile, { raw }),
+    hasCiphertext,
+    parse: raw ? KF.parseRawKey : KF.parseHexKey,
+  });
+}
 
 /**
  * A JSON parse failure described WITHOUT the bytes that failed (2026-09-14).
@@ -80,63 +158,45 @@ function describeJsonError(e) {
   return `not valid JSON (SyntaxError${m ? ` at position ${m[1]}` : ''}${lc ? `, line ${lc[1]} column ${lc[2]}` : ''})`;
 }
 
+/** A box with no store behind it (a suite reading a key file that exists; a scratch key). EVERY src/ caller passes its
+ *  store's own `hasCiphertext` — scripts/test-key-file-law.mjs is RED on a src/ `secretBox(` call without one. */
+const NO_STORE = () => false;
+
 /**
  * @param {string} keyFile absolute path of THIS store's key file
- * @returns {{ enc(text:string):string, dec(blob:string):string, keyFile:string, hasKey():boolean, readKey():Buffer }}
+ * @param {{ hasCiphertext?: () => boolean }} opts THE KEY-FILE LAW's question (lane key-file-law-stores): does this store
+ *   hold anything the key decrypts? Asked only when the key file is ABSENT — yes ⇒ `key-missing`, never a new key.
+ * @returns {{ enc(text:string):string, dec(blob:string):string, keyFile:string, hasKey():boolean, readKey():Buffer, refusal():(null|{code:string,file:string}) }}
  */
-function secretBox(keyFile) {
+function secretBox(keyFile, { hasCiphertext = NO_STORE } = {}) {
   if (typeof keyFile !== 'string' || !keyFile) throw new SecretBoxError('bad-key-file', 'secretBox(keyFile): an absolute key file path is required');
+  if (typeof hasCiphertext !== 'function') throw new SecretBoxError('bad-key-file', `secretBox(${path.basename(keyFile)}): hasCiphertext must be a function`);
   let cached = null;
 
-  function parse(raw, where) {
-    const hex = String(raw).trim();
-    if (!KEY_HEX_RE.test(hex)) {
-      throw new SecretBoxError('key-malformed', `the secret key file ${where} is not a 64-hex-character key (${hex.length} chars) — a truncated or emptied key file is NOT a fresh key; restore it from a backup or delete it deliberately to start over`);
-    }
-    return Buffer.from(hex, 'hex');
-  }
-
-  /** Mint a key on ENOENT ONLY. tmp + hard link (refuses to clobber) with a
-   *  rename fallback that re-checks existence — never an overwrite. */
-  function mint() {
-    const k = crypto.randomBytes(32);
-    fs.mkdirSync(path.dirname(keyFile), { recursive: true });
-    const tmp = `${keyFile}.tmp-${process.pid}-${crypto.randomBytes(4).toString('hex')}`;
-    try {
-      fs.writeFileSync(tmp, k.toString('hex'), { mode: 0o600, flag: 'wx' });
-      try {
-        const fd = fs.openSync(tmp, 'r'); try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
-      } catch { /* fsync is best effort on filesystems that refuse it */ }
-      try {
-        fs.linkSync(tmp, keyFile);           // atomic, EEXIST if somebody landed first
-      } catch (e) {
-        if (e && e.code === 'EEXIST') return null;   // the other minter wins; re-read below
-        // A filesystem without hard links: rename, but only into an absence.
-        if (fs.existsSync(keyFile)) return null;
-        fs.renameSync(tmp, keyFile);
-        return k;
-      }
-      return k;
-    } finally {
-      try { fs.unlinkSync(tmp); } catch { /* already renamed or never written */ }
-    }
-  }
-
+  /** THE KEY-FILE LAW (src/key-file.js) — a refusal is a TYPED SecretBoxError: `code` = the kind (`key-missing` |
+   *  `key-unreadable` | `key-malformed`), `reason` = the law's whole code (`key-unreadable:EIO`). Nothing is cached
+   *  on a refusal: the next call reads again. */
   function readKey() {
     if (cached) return cached;
-    let raw;
-    try { raw = fs.readFileSync(keyFile, 'utf-8'); }
-    catch (e) {
-      if (!e || e.code !== 'ENOENT') {
-        throw new SecretBoxError('key-unreadable', `cannot read the secret key file ${keyFile}: ${(e && e.code) || (e && e.message) || e} — refusing to mint a new key over one that may exist`, e);
-      }
-      const minted = mint();
-      if (minted) { cached = minted; return cached; }
-      try { raw = fs.readFileSync(keyFile, 'utf-8'); }
-      catch (e2) { throw new SecretBoxError('key-unreadable', `cannot read the secret key file ${keyFile} after another writer created it: ${(e2 && e2.code) || e2}`, e2); }
+    const r = lawfulKey(keyFile, { hasCiphertext });
+    if (r.ok) { cached = r.key; return cached; }
+    const { kind, errno } = KF.refusalOf(r.code);
+    const why = kind === 'key-missing'
+      ? `the secret key file ${keyFile} is missing while this store holds encrypted values — restore it from a backup (no new key was made: it could never decrypt them)`
+      : kind === 'key-malformed'
+        ? `the secret key file ${keyFile} is not a 64-hex-character key — a truncated or emptied key file is NOT a fresh key; restore it from a backup or delete it deliberately to start over`
+        : `cannot read the secret key file ${keyFile}: ${errno} — refusing to mint a new key over one that may exist`;
+    throw new SecretBoxError(kind, why, errno ? Object.assign(new Error(errno), { code: errno }) : null, r.code);
+  }
+  /** The key file's state as a row fact: null (readable, or absent over an empty store) or `{ code, file }` — never
+   *  throws, never mints (a list may ask it on every render). */
+  function refusal() {
+    if (cached) return null;
+    const file = path.basename(keyFile);
+    try { fs.statSync(keyFile); } catch (e) {
+      if (e && e.code === 'ENOENT') { let holds = true; try { holds = !!hasCiphertext(); } catch { /* unreadable store = holds */ } return holds ? { code: 'key-missing', file } : null; }
     }
-    cached = parse(raw, keyFile);
-    return cached;
+    try { readKey(); return null; } catch (e) { return { code: (e instanceof SecretBoxError && e.reason) || 'key-unreadable:error', file }; }
   }
 
   const enc = (text) => encWith(readKey(), text);
@@ -144,7 +204,7 @@ function secretBox(keyFile) {
 
   const hasKey = () => { try { fs.statSync(keyFile); return true; } catch { return false; } };
 
-  return { enc, dec, readKey, hasKey, keyFile };
+  return { enc, dec, readKey, hasKey, refusal, keyFile };
 }
 
 /** THE cipher of every box, over an explicit 32-byte key (lane app-display-secrets: a per-display key DERIVED from a
@@ -169,4 +229,4 @@ function decWith(key, blob) {
   }
 }
 
-module.exports = { secretBox, SecretBoxError, KEY_HEX_RE, describeJsonError, encWith, decWith };
+module.exports = { secretBox, SecretBoxError, KEY_HEX_RE, BOX_CIPHERTEXT_RE, holdsCiphertext, lawfulKey, mintKeyFile, describeJsonError, encWith, decWith };

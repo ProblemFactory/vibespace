@@ -26,6 +26,7 @@ console.log('§1 a member\'s state, in words');
   const fine = { fiveHour: { utilization: 0.1, resetsAt: NOW + 3600 }, sevenDay: { utilization: 0.3, resetsAt: NOW + 86400 } };
   ok(st({ loggedIn: false, usage: fine }).code === 'signed-out', 'not signed in beats every reading');
   ok(st({ loginState: { state: 'expired' }, usage: fine }).code === 'login-expired' && st({ loginState: { state: 'logged-out' } }).code === 'login-expired', 'a dead login says "login expired" (its quota reading is beside the point)');
+  ok(st({ loginState: { state: 'oat-only' }, usage: fine }).code === 'login-expired' && st({ loginState: { state: 'oat-only', oatFile: true }, usage: fine }).code === 'usable', 'a token only in accounts.json is "login expired" to the pool; the token IN its folder (lane pool-oat-materialize) is a member like any other');
   const out = st({ usage: spent });
   ok(out.code === 'out' && out.key === 'out of quota until {time}' && out.params.atMs === (NOW + 3600) * 1000, 'a spent member says until WHEN (the pool\'s own hard bars decide "spent")', out);
   ok(st({ usage: fine }).code === 'usable' && st({}).code === 'unknown', 'usable / no reading yet');

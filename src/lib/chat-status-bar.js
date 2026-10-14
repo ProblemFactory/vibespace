@@ -13,6 +13,7 @@ import { waitingChip } from '../helper-ask.js'; // PURE (lane S1): the waiting c
 import { billingAuthKey, placementNote } from './pool-priority-model.js'; // PURE: THE ONE billing re-render key + the placement note (the title chip's twin)
 import { chipText as channelChipText, rowName as channelRowName, rowWords as channelRowWords, glyphFor as channelGlyphFor } from '../channel-touch.js'; // PURE (§26, B-099e): the channels chip's words
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
+import { enterSubmits } from './chat-enter-keys.js';
 
 /** Alias-tolerant model identity ('fable' vs 'claude-fable-5', a [1m] suffix) — the mismatch and the refusal chip (B-c643) ask the same. */
 const modelCore = (v) => String(v || '').replace(/\[1m\]$/, '').trim().replace(/^claude-/, '');
@@ -1603,7 +1604,7 @@ export class ChatStatusBar {
         dropdown.remove();
         this._ws.send({ type: 'set-goal', sessionId: this._sessionId, goal });
       };
-      input.onkeydown = (ev) => { if (ev.key === 'Enter' && !ev.shiftKey && !ev.isComposing) { ev.preventDefault(); submit(); } ev.stopPropagation(); };
+      input.onkeydown = (ev) => { if (enterSubmits(ev) && !ev.shiftKey) { ev.preventDefault(); submit(); } ev.stopPropagation(); };
       const actions = document.createElement('div');
       actions.style.cssText = 'display:flex;gap:6px;align-items:center';
       const setBtn = document.createElement('button');

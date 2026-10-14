@@ -32,10 +32,19 @@ async function appSecretsFacts({ env = process.env, mode, dataDir, id, keyFile =
   if (!secretsGiMemo.ok) return { why: 'python3 has no GObject introspection (python3-gi) on this machine' };
   if (!fs.existsSync(APP_SECRETS_SERVICE) || !fs.existsSync(APP_SECRETS_SEALER)) return { why: 'the secret service is not installed on this machine' };
   if (!keyFile || !id) return { why: 'no data dir or app id' };
-  let master;
-  try { master = require('./secret-box').secretBox(keyFile).readKey(); } catch (e) { return { why: `the secrets key file could not be read (${(e && e.code) || 'error'})` }; }
+  const { master, refused } = appSecretsMaster({ dataDir, keyFile });
+  if (!master) return { why: `${refused.code} (${path.basename(keyFile)})` }; // THE KEY-FILE LAW: the window's ⋯ says restore (src/lib/key-file-words.js)
   const keyHex = Buffer.from(crypto.hkdfSync('sha256', master, Buffer.from(String(id), 'utf8'), Buffer.from('vibespace app-secrets v1', 'utf8'), 32)).toString('hex');
   return { python, service: APP_SECRETS_SERVICE, node: process.execPath, sealer: APP_SECRETS_SEALER, keyHex };
+}
+/** THE KEY-FILE LAW (lane key-file-law-stores): the machine's master key — minted only while no app holds a sealed
+ *  login (`desktop-apps/<id>/portal/secrets.json` with n > 0, or one that cannot be read / parsed); else a refusal
+ *  `{ code: key-missing | key-unreadable:<errno> | key-malformed }` and NO service key (the sealed stores stay as they are). */
+function appSecretsMaster({ dataDir, keyFile = dataDir ? path.join(dataDir, APP_SECRETS_KEY_FILE) : null } = {}) {
+  const SB = require('./secret-box');
+  const sealed = (text) => { const n = require('./desktop-apps').secretsCountOf(text); return n == null || n > 0; };
+  const r = SB.lawfulKey(keyFile, { hasCiphertext: () => !dataDir || SB.holdsCiphertext({ each: [{ dir: path.join(dataDir, 'desktop-apps'), file: path.join('portal', 'secrets.json') }], re: sealed }) });
+  return r.ok ? { master: r.key, refused: null } : { master: null, refused: { code: r.code } };
 }
 /** The app's stored logins: `dir` = its app dir; `rec` = its record. → { secrets, count } (count = the sealed file's n). */
 function appSecretsOf({ rec, dir }) {
@@ -57,4 +66,4 @@ async function forgetAppSecrets({ rec, dir, env = process.env, timeout = 5000 })
   try { fs.unlinkSync(store); } catch (e) { if (!e || e.code !== 'ENOENT') return { ok: false, why: `the store could not be removed (${(e && e.code) || 'error'})` }; }
   return { ok: true, forgot: before, via: 'file' };
 }
-module.exports = { APP_SECRETS_SERVICE, APP_SECRETS_SEALER, APP_SECRETS_KEY_FILE, appSecretsFacts, appSecretsOf, forgetAppSecrets };
+module.exports = { APP_SECRETS_SERVICE, APP_SECRETS_SEALER, APP_SECRETS_KEY_FILE, appSecretsFacts, appSecretsMaster, appSecretsOf, forgetAppSecrets };

@@ -2,6 +2,7 @@ import { t } from './i18n.js';
 import { metric } from './telemetry-client.js';
 import { pressCloses, pressPhase, tapVerdict } from './outside-press.js';
 import { NATIVE_PRESS_SELECTOR, PRESS_CHROME_SELECTOR, effectiveUserSelect, pointOnText, pressTargetClass, longPressVerdict, selectionCloses, selectStartAllowed, trustedContextMenu } from './press-select.js';
+import { enterSubmits } from './chat-enter-keys.js';
 
 export function formatSize(b) { if(b<1024) return b+' B'; if(b<1048576) return (b/1024).toFixed(1)+' KB'; return (b/1048576).toFixed(1)+' MB'; }
 
@@ -168,7 +169,7 @@ let _gestureAt = 0;
 /** PURE: does this key press count as the user ACTING (not typing)? A modifier shortcut, Enter, or any key outside a text field. */
 export function isGestureKey(e, editable) {
   if (!e || typeof e.key !== 'string') return false;
-  if (e.ctrlKey || e.metaKey || e.altKey || e.key === 'Enter') return true;
+  if (e.ctrlKey || e.metaKey || e.altKey || enterSubmits(e)) return true;
   return !editable;
 }
 /** PURE: is a toast shown at `now` one the user was looking at? */

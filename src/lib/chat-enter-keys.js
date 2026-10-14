@@ -22,6 +22,13 @@ export const IME_HINT_MS = 2000;
 /** The IME owns this keydown (Chrome/Firefox: isComposing; Safari and older Chrome: keyCode 229). */
 export const imeOwnsKey = (e) => !!(e && (e.isComposing || e.keyCode === 229));
 
+/** THE ENTER THAT SUBMITS A TEXT BOX — one the input method does not own (lane channel-enter-ime, inc-mv7mdv6b-emxq,
+ *  2026-10-14: the Outbox's reject-reason box sent the owner's rejection mid-word on the Enter that committed a word —
+ *  the class's second incident after the composer's). EVERY Enter-submits / -navigates / -searches handler on a text box
+ *  in src/lib goes through it (or carries isComposing AND keyCode 229 itself); scripts/test-enter-census.mjs finds them
+ *  all and fails one that does not. The composer's EnterGuard (below) is its own, stricter rule. */
+export const enterSubmits = (e) => !!e && e.key === 'Enter' && !imeOwnsKey(e);
+
 /** PURE: what a non-composing Enter keydown does in the composer.
  *  'none' (not Enter) · 'send' · 'newline' (the default action: the textarea inserts it) · 'ime-swallow' (the input
  *  method's committing Enter: no newline, no send + the "input method just ended" hint). ctx: { expanded, touch, touchEnterSends, enterSends, imeEndedAt, now, windowMs } */
@@ -59,15 +66,25 @@ export class EnterGuard {
 export const sendKeyName = (enterSends, mac) => (enterSends === false ? (mac ? '⌘+Enter' : 'Ctrl+Enter') : 'Enter');
 
 /** The incident recorder's action-ring words for a keydown — never the text. null for a plain character (the ring's
- *  one-per-burst "typing" marker covers it); else { key } prefixed C-/M-/A-/S- for Ctrl/Meta/Alt/Shift, plus c:1 when
- *  the input method owned the key. Without S- and c:1, inc-muukd9oq-qyc3's Shift tap that ended a composition and the
- *  plain Enter after it read exactly like a deliberate send. */
+ *  one-per-burst "typing" marker covers it); SHIFTED_CHAR for a character typed with Shift held (that one was typed,
+ *  never which); else { key } prefixed C-/M-/A-/S- for Ctrl/Meta/Alt/Shift, plus c:1 when the input method owned the
+ *  key. Without S- and c:1, inc-muukd9oq-qyc3's Shift tap that ended a composition and the plain Enter after it read
+ *  exactly like a deliberate send. Without S-·, inc-mv7mdv6b-emxq's Shift → plain Enter could not say whether the Shift
+ *  typed the message's closing 「）」 or was a Shift+Enter let go early. */
+export const SHIFTED_CHAR = 'S-·';
 export function actionKeyWords(e) {
-  if (!(e.key.length > 1 || e.ctrlKey || e.metaKey || e.altKey)) return null;
-  const w = { key: (e.ctrlKey ? 'C-' : '') + (e.metaKey ? 'M-' : '') + (e.altKey ? 'A-' : '') + (e.shiftKey ? 'S-' : '') + e.key };
+  const char = e.key.length === 1 && !(e.ctrlKey || e.metaKey || e.altKey);
+  if (char && !e.shiftKey) return null;
+  const w = { key: char ? SHIFTED_CHAR : (e.ctrlKey ? 'C-' : '') + (e.metaKey ? 'M-' : '') + (e.altKey ? 'A-' : '') + (e.shiftKey ? 'S-' : '') + e.key };
   if (imeOwnsKey(e)) w.c = 1;
   return w;
 }
+
+/** The recorder's words for a keyup: a modifier let go ⇒ { key, up: 1 }; null for every other key. With S-· the ring
+ *  tells a chord (S-Shift, S-Enter) from a shifted character (S-Shift, S-·, Shift up, Enter) from a tap (S-Shift,
+ *  Shift up, Enter), and the up's time says how long the Shift was held and how long before the Enter it let go. */
+const MODIFIER_KEYS = new Set(['Shift', 'Control', 'Alt', 'Meta']);
+export const actionKeyUpWords = (e) => (MODIFIER_KEYS.has(e.key) ? { key: e.key, up: 1 } : null);
 
 /** The recorder's input-method marker: a composition starting / ending in a textarea (the composer) — never its text.
  *  An end says how when the event shows it (r2): how 'commit' (compositionend data non-empty) or 'cancel' (empty). */

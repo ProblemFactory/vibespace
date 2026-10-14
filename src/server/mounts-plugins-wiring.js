@@ -907,14 +907,14 @@ function createSessionMessages(session, sessionId) {
           let cipher = null;
           const cipherNow = () => {
             if (cipher) return cipher;
-            let key = null; try { key = fs.readFileSync(keyFile); } catch (e) { if (e.code !== 'ENOENT') throw e; }
-            if (!key) { key = crypto.randomBytes(32); try { fs.writeFileSync(keyFile, key, { mode: 0o600, flag: 'wx' }); } catch (e) { if (e.code !== 'EEXIST') throw e; key = fs.readFileSync(keyFile); } }
-            cipher = PS.cipherOf(crypto, key); return cipher;
+            const SB = require('../secret-box.js'), k = SB.lawfulKey(keyFile, { raw: true, hasCiphertext: () => SB.holdsCiphertext({ files: [file], re: /v1\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{22}\./ }) }); // THE KEY-FILE LAW
+            if (!k.ok) return { ok: false, code: k.code, file: path.basename(keyFile), words: require('../key-file.js').refusalWords(k.code, path.basename(keyFile)) }; // sealed passkeys stay sealed: never a new key over them — a VALUE (key-file-law-fix: a throw here left the ws listener ⇒ the hub's exit)
+            cipher = PS.cipherOf(crypto, k.key); return cipher;
           };
           return {
             read: () => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { if (e.code === 'ENOENT') return null; throw e; } },
             write: (o) => require('../channel-store.js').writeJsonAtomic(file, o, { mode: 0o600 }),
-            cipher: { seal: (t) => cipherNow().seal(t), open: (t) => cipherNow().open(t) },
+            cipher: { seal: (t) => { const c = cipherNow(); return c.ok === false ? c : c.seal(t); }, open: (t) => { const c = cipherNow(); return c.ok === false ? c : c.open(t); } }, // a refusal = the answer of both doors
           };
         })(),
         leaseCountOf: (profileId) => new Set(holdersOf(profileId).map((h) => h.browserKey)).size,

@@ -1469,7 +1469,7 @@ const channelsWiring = require('./src/server/channels-wiring.js').create({
   liveSessions: () => { const out = []; for (const [id, s] of activeSessions) { const cid = addressableId(s); /* verify r5 (channel-withdraw): a BORROWED id (a pending fork) is nobody's address — listed under its parent's id it let a third session mint the pair under the parent and bill it; ONE predicate with agent-routes' _msgEndpoints */ if (!cid) continue; let groups = []; try { groups = (tasks.groupsForSession({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, initialGroupId: s._initialGroupId }) || []).map((g) => g.id); } catch { } out.push({ cid, name: s.name || null, groups, webuiId: id, reachability: s._msgReachability || null }); } return out; }, groupSetting: (gid) => { try { return (tasks.get(gid) || {}).externalVisibility || 'none'; } catch { return 'none'; } }, // P2: the agent sessions an assignment can address (group = task group, round-robin over its live members); §22 agent groups: + each session's msg-acl override and the Task Groups' externalVisibility = the reach msg-acl answers
 });
 // Backend readiness for onboarding (src/server/backend-status-route.js)
-require('./src/server/backend-status-route.js').create({ app, machineProbes, accounts, claudeCmd: CLAUDE_CMD, codexCmd: CODEX_CMD });
+require('./src/server/backend-status-route.js').create({ app, machineProbes, accounts, claudeCmd: CLAUDE_CMD, codexCmd: CODEX_CMD }); require('./src/server/oat-file-sync.js').start({ accounts, machineProbes, claudeCmd: CLAUDE_CMD }); // lane pool-oat-materialize: the spawned claude's --version gates a member's long-lived token in its folder (cli-caps oatInFile) + the sweep for logins that die after a mint
 
 app.use(sessionsRouter);
 

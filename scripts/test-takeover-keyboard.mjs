@@ -1527,6 +1527,8 @@ const CENSUS = [
   ['jobs-panel.js', 'select', 'choice', 'kind / schedule'],
   ['manage-agents.js', 'input', 'text+control', 'the token paste; the pool member checkboxes'],
   ['manage-agents.js', 'textarea', 'text', 'instructions'],
+  ['learn-card.js', 'input', 'text+control', 'Decision API 「从我的判定起草」 card: a proposed line\'s tick (checkbox) + its edit box (text) (lane rule-learning; classified at the 2.369.269 integration — the lane never ran this heavy census)'],
+  ['learn-card.js', 'details', 'control', 'the drafter card\'s technical folds (the run\'s facts, a row\'s evidence) (lane rule-learning; the 2.369.269 integration)'],
   ['manage-agents.js', 'select', 'choice', 'the token mint\'s account pick when the sign-in proved no account (lane oat-verify-fixes: #oat-pick)'],
   ['manage-agents.js', 'tabindex', 'control', 'the re-login chip (role=button)'],
   ['mounts-dialog.js', 'input', 'text+control', 'a mount\'s fields; a read-only key / link'],

@@ -11,6 +11,7 @@ import { fetchJson, showToast } from './utils.js';
 import { t } from './i18n.js';
 import { registerWindowType } from './window-types.js';
 import { registerCommand, registerKeybinding, registerMenuItem } from './contributions.js';
+import { enterSubmits } from './chat-enter-keys.js';
 
 const SCOPES = [['all', 'All'], ['chats', 'Conversations'], ['artifacts', 'Files']];
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
@@ -160,7 +161,7 @@ export function openSearchWindow(app, opts = {}) {
   box.onkeydown = (e) => {
     if (e.key === 'ArrowDown') { e.preventDefault(); select(sel + 1); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); select(sel - 1); }
-    else if (e.key === 'Enter') { e.preventDefault(); const r = rows[sel >= 0 ? sel : 0]; if (r) activate(r._hit); }
+    else if (enterSubmits(e)) { e.preventDefault(); const r = rows[sel >= 0 ? sel : 0]; if (r) activate(r._hit); }
     else if (e.key === 'Escape') { e.preventDefault(); if (box.value) { box.value = ''; run(); } else { try { app.wm.closeWindow(winInfo.id); } catch { } } }
   };
   winInfo._searchSet = (nq, sc) => { box.value = String(nq || ''); if (sc && SCOPES.some(([k]) => k === sc)) scope = sc; paintChips(); run(); setTimeout(() => box.focus(), 0); };

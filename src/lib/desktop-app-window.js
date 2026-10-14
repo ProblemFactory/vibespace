@@ -176,6 +176,7 @@ import { seamlessVerdict, windowSeamless, isCsd, isPaused, revealStep, revealIni
 import { SCALE_PREF_KEY, scaleChoiceOf, setScaleChoice, appDefaultModel } from './desktop-app-scale.js';
 import { wireAppPrefs, appPrefs, onAppPrefs, saveAppPrefs, SATELLITE_PREF_KEY, satellitePlacement, setSatelliteOffset } from './desktop-app-prefs.js';
 import { openShareDialog, openAskDialog, shareChipText } from './window-share.js';
+import { appSecretsKeyWords } from './key-file-words.js'; // lane key-file-law-stores: the stored logins' key file, said
 /** int267 seam: how long the outer ✕ waits for the hub's `close-asked` stamp before it sends close-window anyway. */
 const CLOSE_STAMP_WAIT_MS = 1500;
 
@@ -910,6 +911,7 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
     if (cap(rec, 'scales')) items.push({ label: t('Scale'), children: scaleItems() });
     if (cap(rec, 'scales')) items.push({ label: t('Pin size…'), children: pinItems() }); // lane e2b: the xpra per-window rung (the client fits the pin)
     if (rec && rec.secrets === 'on') items.push({ label: t('Stored logins ({n})', { n: secretsCount == null ? '…' : secretsCount }), children: secretsItems() }); // lane app-display-secrets
+    if (rec && appSecretsKeyWords(rec.secrets)) items.push({ label: t('Stored logins: {why}', { why: appSecretsKeyWords(rec.secrets) }), disabled: true }); // lane key-file-law-stores: kept sealed, never re-keyed
     items.push(...shareItems()); // lane E: Share with agent… / Ask an agent to take control… (a local app, every rung)
     if (canKeep()) items.push({ label: t('Keep running'), action: () => keepBtn.onclick() });
     if (canStop()) items.push({ label: t('Stop app'), action: () => stopApp() });

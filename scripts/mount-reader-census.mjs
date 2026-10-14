@@ -22,8 +22,8 @@ const PROC = 'procfs / sysfs + its own record files';
 const CLI = 'the CLIs’ own trees under ~ (~/.claude, ~/.codex) + data/';
 const DATA = 'data/ or the checkout (its own store)';
 export const ROWS = [
-  ['src/account-material.js', 'own-tree', 1, null, CLI],
-  ['src/accounts.js', 'own-tree', 18, null, CLI],
+  ['src/account-material.js', 'own-tree', 13, null, `${CLI}; lane oat-census-closure +2: the rename-aside's check of what moved (lstat of the aside) + the link-in's symlink question on EEXIST, both inside the member dir; lane pool-oat-materialize +2: writePrivateFile's O_EXCL tmp open + the archive-name probe, both inside a member dir under data/subs; its verify r1 fix +8 (fs.promises, off the loop): the oat's one read (dir lstat + open), the async writer's O_EXCL tmp open, the F7 fresh-stat guard + the post-rename check, the F8 dir lstat, the merge's archive move (readdir + name probe) — every one inside a member dir under data/subs`],
+  ['src/accounts.js', 'own-tree', 21, null, `${CLI}; lane oat-census-closure +2: the key-file law asks accounts.json (data/) whether it holds ciphertext before a key is minted, and the merge reads the survivor's own file once (F3, a member dir under data/subs); lane pool-oat-materialize +2 −1: a member's .credentials.json read for the materialize verdict + the oat-in-file fixture (the checkout); the merge's tmp open moved to account-material; its verify r1 fix: the verdict's read moved to account-material (−1), the merge reads the folded dir's file once (ours is never copied, +1), the F5 link scan (data/pool-links readdir ×2 + readlink — the store's own tree, async)`], // lane key-file-law-stores: −1 — _key() reads through secret-box lawfulKey (int268: 22 → 21 on e709d1f74's count)
   ['src/acp-message-manager.js', 'own-tree', 1, null, CLI],
   ['src/app-serve.js', 'own-tree', 38, null, `${DATA}; lane apps-launcher-witness +3: the witness file (data/) + the XDG application dirs (~/.local/share/applications, /usr/share/applications — the OS's own records at fixed paths, opened O_NONBLOCK|O_NOFOLLOW, never a path anyone names); lane app-register-model +5: a Flatpak's exported desktop file (×2, a fixed path under the user's own ~/.local/share/flatpak), a declared exec's access/stat (resolving it as the user would run it) and a declared icon's size (validated under the home or /usr/share); rel254-verify-fixes +1: realpath of this machine's flatpak and a Flatpak row's exec (F8 — the binary the PATH names, never a mount path anyone types)`],
   ['src/app-squashfs.js', 'own-tree', 2, null, DATA],
@@ -78,7 +78,7 @@ export const ROWS = [
   ['src/routes/window-targets.js', 'own-tree', 1, null, DATA],
   ['src/safe-fs-worker.js', 'exempt', 18, null, 'the SafeFs worker: it runs a path SafeFs.call already asked the door about (src/safe-fs.js _blocked)'],
   ['src/search-index-worker.js', 'own-tree', 5, null, CLI],
-  ['src/secret-box.js', 'own-tree', 5, null, DATA],
+  ['src/secret-box.js', 'own-tree', 8, null, DATA], // lane key-file-law-stores: +3 — THE KEY-FILE LAW's reads (the key file raw/hex, each store's ciphertext files + their dirs)
   ['src/app-secrets.js', 'own-tree', 4, null, DATA], // lane app-display-secrets: the service/sealer files beside it, the key file (secret-box), the app dir's sealed store + bus socket
   ['src/app-secrets-seal.js', 'own-tree', 3, null, DATA], // lane app-display-secrets: the app dir's sealed store + its stdin; lane display-secret-fd +1: the per-display key off the inherited pipe fd (never a path anyone names)
   ['src/server/account-usage-routes.js', 'own-tree', 1, null, CLI],
@@ -129,7 +129,7 @@ export const ROWS = [
   ['src/server/memory-sampler.js', 'own-tree', 1, null, PROC],
   ['src/server/migrations.js', 'own-tree', 37, null, DATA],
   ['src/server/mount-health-watch.js', 'exempt', 6, null, 'the server-tree watch: /proc + mountinfo, never a user path (the judge’s P4)'],
-  ['src/server/mounts-plugins-wiring.js', 'own-tree', 10, null, DATA], // lane passkey-store-core: +3 — data/browser-passkeys.json + its key file (own data dir)
+  ['src/server/mounts-plugins-wiring.js', 'own-tree', 8, null, DATA], // lane passkey-store-core: +3 — data/browser-passkeys.json + its key file (own data dir); lane key-file-law-stores: −2 — the key file reads through secret-box lawfulKey
   ['src/server/oat-mint.js', 'own-tree', 3, null, 'its own 0700 scratch dir per mint (the $BROWSER URL file) + the boot sweep of its own orphaned vs-oat-mint-* dirs (readdir + lstat of tmpRoot)'],
   ['src/server/ops-routes.js', 'own-tree', 10, null, DATA],
   ['src/server/otel-ingest.js', 'own-tree', 5, null, CLI], // B-1319: +1 = the stash replay's fs.promises read (the sync read stays, for a reader before the replay is done)

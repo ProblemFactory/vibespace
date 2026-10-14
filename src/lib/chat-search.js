@@ -1,5 +1,6 @@
 import { t } from './i18n.js';
 import { metric } from './telemetry-client.js';
+import { enterSubmits } from './chat-enter-keys.js';
 
 /**
  * ChatSearch — extracted search functionality for ChatView.
@@ -70,7 +71,7 @@ class ChatSearch {
 
     this._input.addEventListener('input', () => this._doSearch(this._input.value));
     this._input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') { e.preventDefault(); this._searchNav(e.shiftKey ? -1 : 1); }
+      if (enterSubmits(e)) { e.preventDefault(); this._searchNav(e.shiftKey ? -1 : 1); }
       if (e.key === 'Escape') { closeBtn.click(); }
     });
   }

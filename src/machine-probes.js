@@ -21,6 +21,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { execFile } = require('child_process');
+const { cliVersionOf } = require('./cli-caps.js'); // PURE: the one version spelling the long-lived-token gate reads
 
 const exec = (cmd, args, timeout = 5000) => new Promise((resolve) => {
   try { execFile(cmd, args, { encoding: 'utf-8', timeout }, (err, stdout) => resolve(err ? null : String(stdout || ''))); }
@@ -166,4 +167,17 @@ async function credsFacts() {
   };
 }
 
-module.exports = { cliFacts, credsFacts, classifyInstall, which };
+/** ONE CLI's `--version` answer — cliFacts' own read (which + exec): the FIRST
+ *  line that parses as a version (a warning printed before the number is
+ *  skipped — pool-oat-materialize verify r1 F9), 'unparsed' when it answered
+ *  and no line does, null when it did not answer. The hub's long-lived-token
+ *  gate asks it for the claude it spawns (src/server/oat-file-sync.js). */
+async function cliVersion(cmd) {
+  const p = which(cmd);
+  if (!p) return null;
+  const v = await exec(p, ['--version']);
+  if (!v || !v.trim()) return null;
+  return v.split('\n').map((l) => l.trim()).find((l) => cliVersionOf(l)) || 'unparsed';
+}
+
+module.exports = { cliFacts, credsFacts, classifyInstall, which, cliVersion };

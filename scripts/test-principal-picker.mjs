@@ -112,7 +112,7 @@ console.log('① the model: fold, filter + rank, sections, recent, keyboard, tai
   // verify round 5: a HELD Enter is one Enter — the OS auto-repeat (~30 Hz after its delay) toggled the first row of a
   // multi picker on and off per repeat (measured with trusted CDP `autoRepeat: true`: ∅ / picked / ∅ / picked …), the
   // final pick the parity of the hold; a repeat picks nothing, the highlight / arm rules are asked only by a new press
-  ok(/\} else if \(e\.key === 'Enter'\) \{\n\s*e\.preventDefault\(\); e\.stopPropagation\(\);\n(?:\s*\/\/[^\n]*\n)*\s*if \(e\.repeat\) return;/.test(PK), 'PIN (round 5): an Enter auto-repeat (`e.repeat`) is consumed and picks NOTHING — a held Enter is one Enter, never a 30 Hz toggle of the first row');
+  ok(/\} else if \(enterSubmits\(e\)\) \{\n\s*e\.preventDefault\(\); e\.stopPropagation\(\);\n(?:\s*\/\/[^\n]*\n)*\s*if \(e\.repeat\) return;/.test(PK), 'PIN (round 5): an Enter auto-repeat (`e.repeat`) is consumed and picks NOTHING — a held Enter is one Enter, never a 30 Hz toggle of the first row');
   ok(PM.folderTail('/home/a/work/api') === 'api' && PM.folderTail('/home/a/work/api/') === 'api' && PM.folderTail('box: /srv/x/') === 'box: x' && PM.folderTail('/') === '/' && PM.folderTail('') === '', 'a folder\'s tail (a host label kept)');
   ok(PM.identityOf(ROSTER[0]) === 'group:t-ops' && PM.identityOf(ROSTER[3]) === 'agent:7f3a91c2', 'the identity every dialog remembers a pick by (never a caller\'s own key)');
   ok(PM.initialsOf === AV.initialsOf && PM.initialsOf('Ops triage') === 'OT', 'ONE initials implementation (the avatar rule\'s, re-exported)');

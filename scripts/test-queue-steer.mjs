@@ -1203,7 +1203,8 @@ console.log('— wiring + docs pins');
     // non-Shift Enter is 'send', Alt included — so the ordering still matters)
     cinput2.indexOf("e.key === 'Enter' && e.altKey") > 0 && cinput2.indexOf("e.key === 'Enter' && e.altKey") < cinput2.indexOf("this._enterGuard.enter(e,"));
   ok('…and it is the ONLY new chord: Tab stays the slash completion, Ctrl/Cmd+Enter stays plain send',
-    /if \(e\.key === 'Tab' \|\| e\.key === 'Enter'\)/.test(cinput2) && /const mod = !!\(e\.ctrlKey \|\| e\.metaKey\);[\s\S]*?return mod \? 'send' : 'newline';/.test(read('src/lib/chat-enter-keys.js')) && /if \(act === 'send'\) \{ e\.preventDefault\(\); this\._send\(\); \}/.test(cinput2)
+    // lane channel-enter-ime: the slash picker's Tab/Enter now stands behind !imeOwnsKey(e) (an input method's Enter commits its word)
+    /if \((?:!imeOwnsKey\(e\) && \()?e\.key === 'Tab' \|\| e\.key === 'Enter'\)/.test(cinput2) && /const mod = !!\(e\.ctrlKey \|\| e\.metaKey\);[\s\S]*?return mod \? 'send' : 'newline';/.test(read('src/lib/chat-enter-keys.js')) && /if \(act === 'send'\) \{ e\.preventDefault\(\); this\._send\(\); \}/.test(cinput2)
     && (cinput2.match(/e\.key === 'Enter' && e\.altKey/g) || []).length === 1);
   ok('the chord condition excludes every other modifier (Alt+Shift/Alt+Ctrl+Enter are not it)', /e\.key === 'Enter' && e\.altKey && !e\.ctrlKey && !e\.metaKey && !e\.shiftKey && this\.steerChordAllowed/.test(cinput2));
   ok('BOTH surfaces gate on the ONE capability answer, never on a backend id', /this\._steerBtn\.classList\.toggle\('hidden', !\(live && modes\.allowSteerChord\)\)/.test(cinput2) && !/=== 'codex'|=== 'claude'|=== 'opencode'/.test(cinput2));

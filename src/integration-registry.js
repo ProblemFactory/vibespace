@@ -352,7 +352,7 @@ const ROWS = Object.freeze([
     label: i18nKey('Decision API'),
     fields: [
       { key: 'provider', label: i18nKey('Provider'), secret: false, required: true, placeholder: 'openrouter',
-        help: i18nKey('openai (POST /v1/decisions) or openrouter (POST /api/alpha/decisions). The text that is judged is sent to this provider.'), validate: V.oneOf(['openai', 'openrouter']) },
+        help: i18nKey('openai (POST /v1/decisions) or openrouter (POST /api/alpha/decisions). The text that is judged is sent to this provider. With openrouter, “Draft from my verdicts” also sends the short digests the judge saw and your block to POST /api/v1/chat/completions (zero-data-retention endpoints only).'), validate: V.oneOf(['openai', 'openrouter']) },
       { key: 'model', label: i18nKey('Model'), secret: false, required: false, placeholder: 'openai/gpt-6-luna-decisions',
         help: i18nKey('Optional; empty = the provider\'s default (gpt-6-luna on OpenAI, openai/gpt-6-luna-decisions on OpenRouter).'), validate: V.noSpaces },
       { key: 'apiKey', label: i18nKey('API key'), secret: true, required: true, placeholder: 'sk-…',
@@ -375,7 +375,7 @@ const ROWS = Object.freeze([
       describe: i18nKey('Asks the model one yes/no question about a fixed sentence (about 60 input tokens, well under $0.0001). It counts toward today\'s spending.'),
       caveat: i18nKey('“Passed” means this key just asked the model one question and it answered. (OpenRouter\'s endpoint for this is still a beta; model names may change later.)'),
     },
-    consumers: ['src/server/decision-engine.js'],
+    consumers: ['src/server/decision-engine.js', 'src/server/text-model-client.js'],   // + the block drafter's chat completions (lane rule-learning-fix L6)
     usedBy: i18nKey('Only the Decision API plugin uses this key'),
     docs: 'docs/design-decision-api.zh.md',
   },

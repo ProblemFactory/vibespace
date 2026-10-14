@@ -7,11 +7,15 @@
 //      commit then Enter +1/+30 ms ⇒ swallow, +120/+300/+700 ms ⇒ send (Space → Enter never swallowed) · Cmd/Ctrl+Enter sends · Safari order (compositionend
 //      before the 229 Enter) ⇒ no send, one hint · chat.enterSends off · touch keeps chat.touchEnterSends · expanded;
 //   §2 the recorder's key words: S- for Shift, c:1 when the IME owned the key, k:'ime' start/end markers (textarea only),
-//      an end's how: commit | cancel (r2 — the data's length, never its text);
+//      an end's how: commit | cancel (r2 — the data's length, never its text); S-· for a character typed with Shift held
+//      and { key, up: 1 } for a modifier let go (lane enter-recorder-keyup, inc-mv7mdv6b-emxq — never the character);
+//   §2b the bundle's Shift → plain Enter replayed: a shifted character, a chord and a tap are three distinct rings;
 //   §3 the send-mode hint names the send key when chat.enterSends is off; the schema row, zh/ja words, docs row;
 //   §4 wiring census: ChatInput / the recorder / chat-view use these exports in the handler's order;
 //   §5 patched-copy controls: the guard removed, or r1's "an Enter ended it" exemption restored ⇒ the owner's sequence
 //      SENDS (and each other law has its own mutant).
+//   §6 enterSubmits(e) (lane channel-enter-ime, inc-mv7mdv6b-emxq): the one rule for plain text boxes + its control;
+//      every caller is held to it by scripts/test-enter-census.mjs.
 // The real textarea under CDP Input.imeSetComposition is scripts/test-chat-enter-ime-chrome.mjs (heavy).
 import fs from 'node:fs';
 import os from 'node:os';
@@ -88,12 +92,55 @@ ok('a Shift tap the IME owned ⇒ { key: "S-Shift", c: 1 }', JSON.stringify(kw({
 ok('a composing Enter ⇒ { key: "Enter", c: 1 }; a plain Enter ⇒ { key: "Enter" } (no c)', JSON.stringify(kw({ key: 'Enter', isComposing: true })) === '{"key":"Enter","c":1}' && JSON.stringify(kw({ key: 'Enter', keyCode: 13 })) === '{"key":"Enter"}');
 ok('Shift+Enter ⇒ "S-Enter"; Ctrl+Alt+Shift+Enter ⇒ "C-A-S-Enter" (the C-/M-/A- order kept, S- last)', kw({ key: 'Enter', shiftKey: true }).key === 'S-Enter' && kw({ key: 'Enter', ctrlKey: true, altKey: true, shiftKey: true }).key === 'C-A-S-Enter');
 ok('keyCode 229 alone (Safari) also marks c:1', kw({ key: 'Enter', keyCode: 229 }).c === 1);
-ok('a plain character (even shifted) is null — the "typing" marker, never the text', kw({ key: 'a' }) === null && kw({ key: 'A', shiftKey: true }) === null);
+ok('a plain character is null — the "typing" marker, never the text', kw({ key: 'a' }) === null && kw({ key: '0' }) === null && kw({ key: ' ' }) === null);
+ok('a character typed with Shift held ⇒ { key: "S-·" } — that one was typed, never which (A, ")", "？")', ['A', ')', '？'].every((k) => JSON.stringify(kw({ key: k, shiftKey: true })) === '{"key":"S-·"}') && M.SHIFTED_CHAR === 'S-·', kw({ key: 'A', shiftKey: true }));
+ok('…the IME owning it adds c:1 (a capital inside a composition)', JSON.stringify(kw({ key: 'H', shiftKey: true, isComposing: true, keyCode: 229 })) === '{"key":"S-·","c":1}');
+ok('Cmd+c / Ctrl+Shift+A / Alt+Shift+x keep naming the key as today ("M-c", "C-S-A", "A-S-x")', kw({ key: 'c', metaKey: true }).key === 'M-c' && kw({ key: 'A', ctrlKey: true, shiftKey: true }).key === 'C-S-A' && kw({ key: 'x', altKey: true, shiftKey: true }).key === 'A-S-x');
+ok('a modifier let go ⇒ { key, up: 1 }: Shift / Control / Alt / Meta', ['Shift', 'Control', 'Alt', 'Meta'].every((k) => JSON.stringify(M.actionKeyUpWords({ key: k })) === JSON.stringify({ key: k, up: 1 })));
+ok('…every other key up is null: a letter, a shifted letter, Enter, Escape', [{ key: 'a' }, { key: 'A', shiftKey: true }, { key: 'Enter' }, { key: 'Escape' }].every((e) => M.actionKeyUpWords(e) === null));
 ok('k:"ime" markers on a textarea: start / end (no data ⇒ no how), no text field', JSON.stringify(M.imeMarker('compositionstart', { tagName: 'TEXTAREA' })) === '{"k":"ime","ph":"start"}' && JSON.stringify(M.imeMarker('compositionend', { tagName: 'TEXTAREA' })) === '{"k":"ime","ph":"end"}');
 ok('…and none for an input / another event', M.imeMarker('compositionend', { tagName: 'INPUT' }) === null && M.imeMarker('compositionupdate', { tagName: 'TEXTAREA' }) === null);
 
 const mk = (d) => JSON.stringify(M.imeMarker('compositionend', { tagName: 'TEXTAREA' }, d));
 ok('an end with data "hello" ⇒ how "commit"; with "" ⇒ how "cancel" — and never the text', mk('hello') === '{"k":"ime","ph":"end","how":"commit"}' && mk('') === '{"k":"ime","ph":"end","how":"cancel"}' && !mk('hello').includes('hello'), [mk('hello'), mk('')]);
+
+console.log('§2b inc-mv7mdv6b-emxq replayed: ime commit → 196 ms → Shift → 554 ms → a plain Enter (the message ends in 「）」)');
+// the recorder's keydown + keyup in its own order (the one-per-3-s "typing" marker included), raw events, a fake clock;
+// mid-burst at the start (the composition's letters just made the marker), as in the bundle
+function ring(M, seq) {
+  let clock = 1_000_000, lastTypeAt = clock - 1000;
+  const out = [];
+  for (const s of seq) {
+    if (s.wait) { clock += s.wait; continue; }
+    const e = { shiftKey: false, ctrlKey: false, metaKey: false, altKey: false, keyCode: 0, ...s.e };
+    const w = s.up ? M.actionKeyUpWords(e) : M.actionKeyWords(e);
+    if (w) out.push({ t: clock, k: 'key', ...w });
+    else if (!s.up && clock - lastTypeAt > 3000) { lastTypeAt = clock; out.push({ t: clock, k: 'typing' }); }
+    clock += 1;
+  }
+  return out;
+}
+const words = (r) => r.map((x) => (x.k === 'typing' ? 'typing' : x.key + (x.up ? '↑' : ''))).join(' ');
+// what a reader gets from the ring: chord / character / tap, how long the Shift was held, how long before the Enter it let go
+function shiftStory(r) {
+  const i = r.findIndex((x) => x.key === 'S-Shift'), j = r.findIndex((x, n) => n > i && /(^|-)Enter$/.test(x.key || ''));
+  if (i < 0 || j < 0) return null;
+  const mid = r.slice(i + 1, j), up = mid.find((x) => x.key === 'Shift' && x.up);
+  return { kind: r[j].key === 'S-Enter' ? 'chord' : mid.some((x) => x.key === 'S-·') ? 'character' : up ? 'tap' : '?', heldMs: up ? up.t - r[i].t : null, upToEnterMs: up ? r[j].t - up.t : null };
+}
+const D = (key, extra = {}) => ({ e: { key, keyCode: key === 'Enter' ? 13 : 0, ...extra } }), U = (key, extra = {}) => ({ up: 1, e: { key, ...extra } }), SH = { shiftKey: true };
+const CHAR = [W(196), D('Shift', SH), W(140), D(')', SH), W(60), U(')', SH), W(40), U('Shift'), W(310), D('Enter')];   // Shift+0 typed 「）」, then a send
+const CHORD = [W(196), D('Shift', SH), W(554), D('Enter', SH), W(80), U('Enter', SH), W(30), U('Shift')];              // Shift+Enter held through
+const TAP = [W(196), D('Shift', SH), W(90), U('Shift'), W(463), D('Enter')];                                           // a Shift tap, then a send
+const EARLY = [W(196), D('Shift', SH), W(545), U('Shift'), W(8), D('Enter')];                                          // Shift+Enter let go 9 ms early
+const RINGS = { CHAR: ring(M, CHAR), CHORD: ring(M, CHORD), TAP: ring(M, TAP), EARLY: ring(M, EARLY) };
+ok('a character then a send ⇒ "S-Shift S-· Shift↑ Enter"', words(RINGS.CHAR) === 'S-Shift S-· Shift↑ Enter', words(RINGS.CHAR));
+ok('a chord ⇒ "S-Shift S-Enter" (then Shift↑)', words(RINGS.CHORD) === 'S-Shift S-Enter Shift↑', words(RINGS.CHORD));
+ok('a tap then a send ⇒ "S-Shift Shift↑ Enter"', words(RINGS.TAP) === 'S-Shift Shift↑ Enter', words(RINGS.TAP));
+ok('…three distinct ring sequences, and the reader names each (character / chord / tap)', new Set([RINGS.CHAR, RINGS.CHORD, RINGS.TAP].map(words)).size === 3 && shiftStory(RINGS.CHAR).kind === 'character' && shiftStory(RINGS.CHORD).kind === 'chord' && shiftStory(RINGS.TAP).kind === 'tap', [RINGS.CHAR, RINGS.CHORD, RINGS.TAP].map((r) => shiftStory(r)));
+ok('the character is never in the ring (")" nowhere in it)', !JSON.stringify(RINGS.CHAR).includes(')'), RINGS.CHAR);
+ok('a Shift+Enter let go 9 ms early still reads "tap" — the ring gives the times, not the intent: held 546 ms, up 9 ms before the Enter (the tap: 91 / 464)', words(RINGS.EARLY) === words(RINGS.TAP) && JSON.stringify(shiftStory(RINGS.EARLY)) === '{"kind":"tap","heldMs":546,"upToEnterMs":9}' && JSON.stringify(shiftStory(RINGS.TAP)) === '{"kind":"tap","heldMs":91,"upToEnterMs":464}', [shiftStory(RINGS.EARLY), shiftStory(RINGS.TAP)]);
+
 console.log('§3 the send-mode hint, the setting');
 const { composerSendModes } = await import(pathToFileURL(path.join(REPO, 'src/lib/agent-meta.js')).href);
 const q = { queue: true, steer: true, queueOps: true };
@@ -119,6 +166,7 @@ ok('compositionstart / compositionend on the textarea feed the guard', ci.includ
 ok('the ime line is a role=status node under the composer, hidden by IME_HINT_MS', /this\._imeHint\.setAttribute\('role', 'status'\)/.test(ci) && /this\._sendHint, this\._imeHint\);/.test(ci) && /setTimeout\(\(\) => \{ this\._imeHint\.hidden = true; \}, IME_HINT_MS\)/.test(ci));
 ok('chat-view hands chat.enterSends to the composer (default on)', read('src/lib/chat-view.js').includes("getEnterSends: () => this.app?.settings?.get('chat.enterSends') !== false,"));
 const rec = read('src/lib/incident-recorder.js');
+ok('…and a capture + passive keyup listener writes actionKeyUpWords (a modifier let go) into the same ring', /document\.addEventListener\('keyup', \(e\) => \{\n\s+const w = actionKeyUpWords\(e\);[^\n]*\n\s+if \(w\) push\(rings\.action, CAP\.action, \{ t: Date\.now\(\), k: 'key', \.\.\.w, el: describeEl\(e\.target\) \}\);\n\s+\}, \{ capture: true, passive: true \}\);/.test(read('src/lib/incident-recorder.js')) && /import \{ actionKeyWords, actionKeyUpWords, imeMarker \} from '\.\/chat-enter-keys\.js';/.test(read('src/lib/incident-recorder.js')));
 ok('the recorder writes actionKeyWords + imeMarker into the action ring', /const w = actionKeyWords\(e\);/.test(rec) && /k: 'key', \.\.\.w, el:/.test(rec) && /const m = imeMarker\(type, e\.target, e\.data\);/.test(rec) && /'compositionstart', 'compositionend'/.test(rec));
 
 console.log('§5 patched-copy controls');
@@ -142,6 +190,25 @@ for (const [n, [re, to], rowIdx] of MUT) {
 const sR = fs.readFileSync(path.join(REPO, 'src/lib/chat-enter-keys.js'), 'utf8');
 const noS = path.join(tmp, 'nos.mjs'); fs.writeFileSync(noS, sR.replace("(e.shiftKey ? 'S-' : '') + ", ''));
 ok('control: the S- prefix removed ⇒ the Shift tap reads as a bare "Shift"', (await import(pathToFileURL(noS).href)).actionKeyWords({ key: 'Shift', shiftKey: true, isComposing: true }).key === 'Shift');
+// the two new words removed, one at a time and together (= the 2.369.267 recorder that wrote inc-mv7mdv6b-emxq)
+const SC = ["const char = e.key.length === 1 && !(e.ctrlKey || e.metaKey || e.altKey);\n  if (char && !e.shiftKey) return null;", "const char = false;\n  if (!(e.key.length > 1 || e.ctrlKey || e.metaKey || e.altKey)) return null;"];
+const UP = ['(MODIFIER_KEYS.has(e.key) ? { key: e.key, up: 1 } : null)', 'null'];
+ok('control: both mutation sites exist', sR.includes(SC[0]) && sR.includes(UP[0]));
+const mut = async (n, s) => { const f = path.join(tmp, n + '.mjs'); fs.writeFileSync(f, s); return import(pathToFileURL(f).href); };
+const mSC = await mut('nosc', sR.replace(SC[0], SC[1])), mUP = await mut('noup', sR.replace(UP[0], UP[1])), mOLD = await mut('old', sR.replace(SC[0], SC[1]).replace(UP[0], UP[1]));
+ok('control: S-· removed ⇒ the character and the tap read the same ("S-Shift Shift↑ Enter")', words(ring(mSC, CHAR)) === words(ring(mSC, TAP)), [words(ring(mSC, CHAR)), words(ring(mSC, TAP))]);
+ok('control: the keyup words removed ⇒ the tap\'s hold and its gap before the Enter are gone', shiftStory(ring(mUP, TAP)).heldMs === null && shiftStory(ring(mUP, TAP)).upToEnterMs === null, shiftStory(ring(mUP, TAP)));
+ok('control: both removed (the .267 recorder) ⇒ character, tap and early chord are all "S-Shift Enter" — the bundle\'s shape', [CHAR, TAP, EARLY].every((q) => words(ring(mOLD, q)) === 'S-Shift Enter'), [CHAR, TAP, EARLY].map((q) => words(ring(mOLD, q))));
+
+// §6 (lane channel-enter-ime, inc-mv7mdv6b-emxq — the Outbox's reject-reason box sent the owner's rejection mid-word):
+// enterSubmits(e), the ONE rule for every plain text box — an Enter the input method does not own. Its callers are
+// found by scripts/test-enter-census.mjs; this is the rule itself.
+const ES = (e) => M.enterSubmits(e);
+ok('enterSubmits: a plain Enter (keyCode 13) submits; Shift/Ctrl+Enter are still Enter (the caller decides chords)', ES({ key: 'Enter', keyCode: 13 }) && ES({ key: 'Enter', keyCode: 13, shiftKey: true }) && ES({ key: 'Enter', keyCode: 13, ctrlKey: true }));
+ok('enterSubmits: the input method\'s Enter never submits — isComposing (Chrome/Firefox), keyCode 229 (Safari / the ring\'s [composing]), both, a chord while composing', !ES({ key: 'Enter', isComposing: true, keyCode: 13 }) && !ES({ key: 'Enter', keyCode: 229 }) && !ES({ key: 'Enter', isComposing: true, keyCode: 229 }) && !ES({ key: 'Enter', isComposing: true, metaKey: true }));
+ok('enterSubmits: not Enter / no event ⇒ false (Tab, Escape, a letter, null)', !ES({ key: 'Tab' }) && !ES({ key: 'Escape' }) && !ES({ key: 'a' }) && !ES(null) && !ES(undefined));
+const noG = path.join(tmp, 'nog.mjs'); fs.writeFileSync(noG, sR.replace("e.key === 'Enter' && !imeOwnsKey(e);", "e.key === 'Enter';"));
+ok('control: enterSubmits without imeOwnsKey ⇒ the ring\'s composing Enter SUBMITS (the incident)', (await import(pathToFileURL(noG).href)).enterSubmits({ key: 'Enter', isComposing: true, keyCode: 229 }) === true);
 fs.rmSync(tmp, { recursive: true, force: true });
 
 console.log(`\n${pass} passed, ${fail} failed`);

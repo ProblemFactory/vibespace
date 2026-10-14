@@ -39,6 +39,7 @@ import { createPopover } from './utils.js';
 import { icon, el, avatar } from './channel-chrome.js';
 import { createBackendIcon } from './agent-meta.js';
 import * as PM from './principal-picker-model.js';
+import { enterSubmits } from './chat-enter-keys.js';
 
 const RECENT_KEY = 'vibespace.principalPicker.recent';
 let seq = 0;
@@ -258,7 +259,7 @@ export function principalPicker({ items = [], app = null, multi = false, compact
       drawList();
       const n = active && nodes.get(active);
       if (n && n.scrollIntoView) n.scrollIntoView({ block: 'nearest' });
-    } else if (e.key === 'Enter') {
+    } else if (enterSubmits(e)) {
       e.preventDefault(); e.stopPropagation();
       // A HELD ENTER IS ONE ENTER (verify round 5): the OS repeats the key at ~30 Hz after its delay, and each repeat
       // toggled the first row of a multi picker on and off — the final pick was the parity of how long the finger

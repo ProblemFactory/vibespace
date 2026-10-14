@@ -9,6 +9,7 @@ import { UI_ICONS } from './icons.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { ATTENTION_RULES, attentionPolicy, presetOf, presetSwitches } from './channel-focus.js';   // lane attention-policy
 import { paintDecisionLine, liveDecisionLine } from './decision-readout.js';   // lane decision-spend-readout: the judge's money (ONE PURE line)
+import { mountLearnDraft } from './learn-card.js';   // lane rule-learning: 「从我的判定起草」 — the text model's proposal card (only with an OpenRouter key)
 const DECISION_BUDGET_PATH = 'plugin.decision-api.dailyBudgetUsd';   // src/plugin-settings.js: the judge's daily cap row
 
 // lane attention-policy: A PLUGIN'S FEATURE SWITCH shown as a settings row (`store: {plugin, feature}`) — read from GET
@@ -936,10 +937,19 @@ class SettingsUI {
       ta.rows = 5;
       if (schema.maxLength) ta.maxLength = schema.maxLength;
       ta.value = String(value || '');
-      const save = () => { this.settings.set(path, ta.value.slice(0, schema.maxLength || undefined)); row.classList.toggle('modified', this.settings.isModified(path)); saveBtn.hidden = true; };
-      ta.onchange = save;
+      // THE ROW'S WRITE DOOR (lane rule-learning-fix F3): a value over maxLength is REFUSED by name, never sliced — a typed
+      // value is bounded by the box's own maxLength already; a programmatic one (the drafter's card) is told {ok: false, why}
+      const save = (v = ta.value) => {
+        const text = String(v);
+        if (schema.maxLength && text.length > schema.maxLength) return { ok: false, why: 'too-long', chars: text.length, max: schema.maxLength };
+        ta.value = text;
+        this.settings.set(path, text); row.classList.toggle('modified', this.settings.isModified(path)); saveBtn.hidden = true;
+        return { ok: true };
+      };
+      const saveTyped = () => { const w = save(); if (!w.ok) showToast(t('Not saved — {n} characters, at most {max}', { n: w.chars, max: w.max }), { type: 'error' }); };
+      ta.onchange = saveTyped;
       const saveBtn = document.createElement('button');
-      saveBtn.className = 'settings-link-btn'; saveBtn.textContent = t('Save'); saveBtn.hidden = true; saveBtn.onclick = save;
+      saveBtn.className = 'settings-link-btn'; saveBtn.textContent = t('Save'); saveBtn.hidden = true; saveBtn.onclick = saveTyped;
       ta.oninput = () => { saveBtn.hidden = false; };
       wrap.appendChild(ta);
       if (schema.draft === 'decision') {
@@ -962,6 +972,9 @@ class SettingsUI {
           showToast(t('Read {n} of your decisions — {m} lines proposed; edit them, then Save', { n: r.read, m: (r.lines || []).length }));
         };
         wrap.appendChild(d);
+        // lane rule-learning (design q-037 P0): with an OpenRouter key on the Decision API row this button gives way to
+        // 「从我的判定起草」 (a proposal card under the box, saved through this row's own save); a 404 keeps it as it is
+        mountLearnDraft(wrap, { catalogue: d, ta, apply: (text) => save(text) });
       }
       wrap.appendChild(saveBtn);
       return wrap;

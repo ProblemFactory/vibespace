@@ -139,6 +139,15 @@ function cipherOf(crypto, key) {
 }
 const seal = (cipher, pkcs8B64) => cipher.seal(str(pkcs8B64));
 const open = (cipher, row) => (row ? cipher.open(row.keySealed) : null);
+/** key-file-law-fix (verify r1 F1): THE KEY REFUSAL is a VALUE — the caller's `seal` / `open` answer `{ ok: false, code, file, words }`
+ *  when the key file cannot open what is stored (src/key-file.js: key-missing | key-unreadable:<errno> | key-malformed); an
+ *  Error carrying such a code (a cipher that throws) reads the same. → `{ code, file, words }` | null (a sealed blob, text, null). */
+function keyRefusal(x) {
+  if (!x || typeof x !== 'object') return null;
+  const code = str(x.code);
+  if (!/^key-(missing|malformed|unreadable(:[A-Za-z0-9_]+)?)$/.test(code) || !(x.ok === false || x instanceof Error)) return null;
+  return { code, file: str(x.file), words: str(x.words || x.message) };
+}
 
 /** THE SIGN COUNT: the store is bumped BEFORE the release (written to disk), the authenticator loaded with the old value
  *  (it produces old + 1) — a crash between the release and the harvest never moves the count backwards. */
@@ -249,6 +258,6 @@ module.exports = {
   POLICIES, NEW_KEY_POLICY, AGENTS_OFF_DEFAULT, TAKEOVER_ASKS, GRANT_MS, ASK_MS, HOLD_MS, ALLOW_MAX, ROWS_MAX, ID_SHOWN, REASONS, CHOICES, PUBLIC_SUFFIXES,
   hostWord, normalizeRow, normalizeStore, profileOf, withProfile, withRow, findRows, dropRows, dropProfile, setPolicy, setAgentsOff, publicRow,
   ITEM_WORDS, // lane passkey-ui
-  cipherOf, seal, open, bumpSignCount, reconcile, rpMatches, rowsFor, gateVerdict, grantOf, grantKey, digest, proposalCard, proposalItem, countLine,
+  cipherOf, seal, open, keyRefusal, bumpSignCount, reconcile, rpMatches, rowsFor, gateVerdict, grantOf, grantKey, digest, proposalCard, proposalItem, countLine,
   cardBlock, // int258: the chat card's block (live + rebuild)
 };

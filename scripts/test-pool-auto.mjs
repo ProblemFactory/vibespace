@@ -523,6 +523,17 @@ ck('auth: hostile/empty input is quiet', classifyAuthFailure({}) === false && cl
   ck('HARD + warm + inTurn ⇒ the exhaustion move at once, band hard', hardIn.to === 'b' && hardIn.reason === 'exhausted' && hardIn.band === 'hard', JSON.stringify(hardIn));
   const deadLogin = hot({ a: acct(0.3, 6 * D), b: acct(0.3, 6 * D) }, { warm: W(warmW, true), readLogin: (id) => (id === 'a' ? { state: 'expired' } : { state: 'live' }) });
   ck('login-dead + warm + inTurn ⇒ login-expired move at once, band hard', deadLogin.to === 'b' && deadLogin.reason === 'login-expired' && deadLogin.band === 'hard', JSON.stringify(deadLogin));
+  // lane pool-oat-materialize: a member whose credential FILE is the materialized long-lived token — read by login-expiry's
+  // own reader of that file (oat-only, oatFile) — is a live escape target, ranked below an EQUAL healthy login, dead at its end
+  const LEX = require(path.resolve('src/login-expiry.js'));
+  const tokSlot = (msLeft) => LEX.loginState(LEX.oatFileBody('t', { expiresAt: nowMs + msLeft, shape: { scopes: ['user:inference'], subscriptionType: 'max' } }), nowMs);
+  const eq3 = { a: acct(0.3, 6 * D), b: acct(0.3, 6 * D), c: acct(0.3, 6 * D) };
+  const toTok = hot(eq3, { readLogin: (id) => (id === 'b' ? tokSlot(300 * D * 1000) : { state: 'expired' }) });
+  ck('token slot: a dead current member escapes onto the member whose FILE is the long-lived token (oat-only) like any live member', toTok.to === 'b' && toTok.reason === 'login-expired', JSON.stringify(toTok));
+  const tieTok = hot(eq3, { readLogin: (id) => (id === 'a' ? { state: 'expired' } : id === 'b' ? tokSlot(300 * D * 1000) : { state: 'ok', msLeft: 20 * D * 1000 }) });
+  ck('token slot: …below an EQUAL healthy login (oat-only ranks 1 — its quota cannot be refreshed)', tieTok.to === 'c', JSON.stringify(tieTok));
+  const goneTok = hot(eq3, { readLogin: (id) => (id === 'b' ? tokSlot(-1000) : { state: 'expired' }) });
+  ck('token slot: …and once the token ends (its file reads expired) it is never a target', goneTok.to === null, JSON.stringify(goneTok));
   const softNoSettle = hot({ a: acct(0.3, 6 * D, { u5: 0.93 }), b: acct(0.3, 6 * D, { u5: 0.92 }) }, { warm: W(warmW, true) });
   ck('soft + warm + inTurn with nowhere settleable ⇒ still no-settleable (the refusal that SPEAKS wins; nothing is owed)', softNoSettle.to === null && softNoSettle.reason === 'no-settleable', JSON.stringify(softNoSettle));
   const coldPoolIn = decidePoolSwitch({ currentId: 'a', members, readCache: (id) => softC[id] ?? null, nowSec: NOW, warm: W(warmW, true), explain: true });

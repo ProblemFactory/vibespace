@@ -38,6 +38,7 @@
 // layout restore.
 import { fetchJson, showToast, showConfirmDialog, copyText } from './utils.js';
 import { t } from './i18n.js';
+import { keyFileWords } from './key-file-words.js'; // key-file-law-fix (verify r1 L3): a key-file law refusal in its own translated words
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { registerMenuItem } from './contributions.js';
 // the shared chrome primitives (a4): one SVG helper — the copy glyph, the info affordance
@@ -51,6 +52,7 @@ import * as R from '../integration-registry.js';
 import * as PL from '../preset-layers.js';
 // a3 i18n: a route failure is worded by its CODE, never by the store's sentence.
 import { routeErrorText } from './channel-words.js';
+import { enterSubmits } from './chat-enter-keys.js';
 
 const ICON = svgIcon16('<circle cx="5" cy="11" r="3"/><path d="M7.5 8.5L13 3M11 5l2 2M9 7l1.5 1.5"/>');
 const FOCUS_MS = 2500;
@@ -90,6 +92,8 @@ function storeErrorText(err) {
   // only where it is the fact (an unreadable file's errno)
   if (err && err.code === 'store-unreadable') return t('The integrations store could not be read: {reason}', { reason });
   if (err && err.code === 'values-undecryptable') return t('The keys stored for this row cannot be decrypted with the current key file — restore the key file this instance had when they were entered, or clear the keys and enter them again.');
+  const law = err && err.reason ? keyFileWords(err.reason, err.file) : ''; // missing ⇒ restore; damaged; unreadable (errno) — never "could not be read" for a missing file
+  if (law) return law;
   return t('The secret key file could not be read: {reason}', { reason });
 }
 /** A row's `why` in the device's words — the store's `whyCode` + params (a3 i18n). */
@@ -251,7 +255,7 @@ function renderCard(app, v, { refresh, focus }) {
           showToast(t('Saved'));
           refresh(v.id);
         };
-        inp.onkeydown = (e) => { if (e.key === 'Enter') save.onclick(); if (e.key === 'Escape') done(); };
+        inp.onkeydown = (e) => { if (enterSubmits(e)) save.onclick(); if (e.key === 'Escape') done(); };
         row.appendChild(wrap);
         inp.focus();
       };

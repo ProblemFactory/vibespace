@@ -20,6 +20,7 @@ import { t } from './i18n.js';
 import { UI_ICONS } from './icons.js';
 import { onFileChanged, foldPath } from './file-changed.js';
 import { tweakText, tweakSwap, tweakValueOk, TWEAK_LIMITS } from '../design-user-layer.js';
+import { enterSubmits } from './chat-enter-keys.js';
 
 const WRITE_MS = 300;      // the write follows the last move by this much (a drag writes once it rests)
 const RELOAD_MS = 250;     // file-changed bursts coalesce
@@ -182,7 +183,7 @@ export function mountDesignTweaks({ winInfo, canvas, stage, button = null, signa
     const go = mk('button', 'btn-create design-tweaks-request'); go.type = 'button'; go.textContent = t('+ Tweaks');
     const send = () => request(inp.value, go);
     go.addEventListener('click', send, L);
-    inp.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); send(); } }, L);
+    inp.addEventListener('keydown', (e) => { if (enterSubmits(e)) { e.preventDefault(); send(); } }, L);
     box.append(p1, p2, inp, go);
     body.appendChild(box);
   }

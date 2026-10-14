@@ -20,7 +20,21 @@ const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 const { capsOf } = require('./backend-caps.js'); // PURE registry: per-backend hot-switch verdict rides list() so the UI never offers a dead toggle
-const { loginRank, loginUsable, withOat } = require('./login-expiry.js'); // PURE: which login is the WORST of a pool's members
+const { loginRank, loginUsable, withOat, oatFileOurs, credsRestOf, oatFileMerge, oatFileCurrent, oatShapeOf, oatFileBody, materializeVerdict } = require('./login-expiry.js'); // PURE: which login is the WORST of a pool's members; the materialized long-lived token's verdict
+const cliCaps = require('./cli-caps.js'); // PURE: oatInFile(version, fixture) — a measured CLI version gates the materialized token
+const { lawfulKey } = require('./secret-box.js'); // THE KEY-FILE LAW (src/key-file.js, lane key-file-law-stores): mint only when ABSENT with no ciphertext (tmp + link(2)); else a named refusal
+// why a row's long-lived token is NOT in its folder — the row's door names each (pool-oat-materialize + verify r1)
+const OAT_FILE_REFUSALS = Object.freeze(['cli-unmeasured', 'no-scopes', 'write-failed', 'read-failed', 'dir-symlink', 'oat-unreadable', 'key-missing', 'key-unreadable']);
+// THE KEY-FILE LAW's two refusals (lane oat-census-closure, pool-oat verify r2 O1): `key-missing` (absent while the store
+// holds ciphertext — restore the backup) and `key-unreadable:<code>` (EIO / EACCES / EMFILE / a bad length …) — never a new key
+function keyRefusal(reason, file) {
+  const [kind, code] = String(reason).split(':');
+  const words = kind === 'key-missing'
+    ? 'the key file is missing but this store holds encrypted secrets — restore it from a backup (no new key was made: it could never decrypt them)'
+    : `the key file could not be read (${code || 'error'}) — nothing was written and no new key was made`;
+  return Object.assign(new Error(`${file}: ${words}`), { code: String(reason) });
+}
+const isKeyRefusal = (e) => !!e && /^key-(missing|unreadable(:.*)?)$/.test(String(e.code || ''));
 // "no claim" — the shape every non-declaring harness / non-subscription record
 // answers with. Never 'ok': an unreadable deadline is ignorance, not health.
 const LOGIN_UNKNOWN = () => ({ state: 'unknown', refreshExpiresAt: null, accessExpiresAt: null, msLeft: null });
@@ -40,7 +54,7 @@ const { SlotTransitions } = require('./slot-transitions.js');
 const { OAT_TTL_MS: OAT_TTL_MS_SHARED } = require('./login-state.js');
 
 class AccountManager {
-  constructor({ dataDir, onChange, onSessionLinks, platform = process.platform }) {
+  constructor({ dataDir, onChange, onSessionLinks, platform = process.platform, oatFixture = null }) {
     this.dataDir = dataDir;
     this._file = path.join(dataDir, 'accounts.json');
     this._keyFile = path.join(dataDir, '.accounts-key');
@@ -63,6 +77,15 @@ class AccountManager {
     this._onChange = onChange || (() => {});
     this._onSessionLinks = onSessionLinks || (() => {}); // a per-session link moved (see _notifyLinks)
     this.slotTransitions = new SlotTransitions({ dataDir });
+    // THE MATERIALIZED LONG-LIVED TOKEN (lane pool-oat-materialize): the hub's CLI
+    // version (src/server/oat-file-sync.js learns it the way backend-status does —
+    // `claude --version`) and the measurement that grants that version (the
+    // fixture) gate every write. Unknown version ⇒ nothing is written.
+    this._oatCli = null;
+    this._oatFixturePath = oatFixture || path.join(__dirname, '..', 'scripts', 'fixtures', 'oat-in-file.json');
+    this._oatFileFacts = new Map(); // id → the last verdict (the row's door)
+    this._oatChain = Promise.resolve(); // THE ONE QUEUE of the oat's acts on member credential files (verify r1 F13 / F7)
+    this._oatSweeps = new Set();       // sweeps in flight (oatFileSettled waits for them too)
     this._state = { version: 1, defaultAccountId: null, defaultCodexAccountId: null, accounts: [] };
     this._load();
     // Console-login scratch dirs (con-*) are transient; drop any abandoned by a
@@ -131,12 +154,20 @@ class AccountManager {
       // and names the member's token, so the chip can say why it does not help
       const st = this.loginStateOf(m.id, now, { slot: true });
       const oat = !loginUsable(st) ? this._oatFact(this.get(m.id)) : null;
-      if (oat && oat.validUntil > now) st.oatValidUntil = oat.validUntil;
+      if (oat && oat.validUntil > now) {
+        st.oatValidUntil = oat.validUntil;
+        // why the token is not in its folder (lane pool-oat-materialize): this CLI unmeasured / no subscription shape
+        const f = this._oatFileFacts.get(m.id);
+        const why = f && (f.reason || f.verdict);
+        if (why && OAT_FILE_REFUSALS.includes(why)) st.oatFileRefused = why;
+      }
       out.members.push({ id: m.id, name: m.name, state: st.state, refreshExpiresAt: st.refreshExpiresAt, msLeft: st.msLeft });
       if (!worst || loginRank(st) > loginRank(worst.st) || (loginRank(st) === loginRank(worst.st) && (st.msLeft ?? Infinity) < (worst.st.msLeft ?? Infinity))) worst = { m, st };
     }
     if (!worst) return out;
-    return { ...worst.st, worstId: worst.m.id, worstName: worst.m.name, ...(worst.st.oatValidUntil ? { worstOatValidUntil: worst.st.oatValidUntil } : {}), members: out.members };
+    // worstOatValidUntil = THE ESCAPE (a dead slot whose row holds a valid token); a materialized
+    // slot carries its own oatValidUntil but serves, so it is never the escape
+    return { ...worst.st, worstId: worst.m.id, worstName: worst.m.name, ...(worst.st.oatValidUntil && !loginUsable(worst.st) ? { worstOatValidUntil: worst.st.oatValidUntil } : {}), ...(worst.st.oatFileRefused ? { worstOatFileRefused: worst.st.oatFileRefused, oatFileCli: this.oatFileCaps().cli } : {}), members: out.members };
   }
   /** Pool members for the LOGIN summary — MEMBERSHIP IS NOT ONE QUESTION
    *  (round-2 verifier, reproduced against this instance's own store):
@@ -231,13 +262,23 @@ class AccountManager {
     setImmediate(() => { this._linksNotifyArmed = false; try { this._onSessionLinks(); } catch { } }).unref?.();
   }
 
-  _key() {
-    try { return Buffer.from(fs.readFileSync(this._keyFile, 'utf-8').trim(), 'hex'); }
-    catch {
-      const k = crypto.randomBytes(32);
-      fs.writeFileSync(this._keyFile, k.toString('hex'), { mode: 0o600 });
-      return k;
-    }
+  // THE KEY-FILE LAW (lane oat-census-closure, pool-oat verify r2 O1): `.accounts-key` is the one byte string every
+  // stored API key and long-lived token needs. A key is MINTED only when the file is ABSENT (ENOENT) and the store
+  // holds NO ciphertext — through src/secret-box.js (tmp + link(2): never over a key another writer landed). Absent
+  // while ciphertext exists ⇒ `key-missing`; any other failure (EIO, EACCES, EMFILE, a truncated / bad-length file) ⇒
+  // `key-unreadable:<code>` for THIS call. A refusal writes nothing: the reader treats the secrets as unreadable for
+  // now (the oat row: F4's rung, nothing moves) and the next call reads again. (The old bare catch minted a new key
+  // on ANY read error — one EIO during a sweep, which reads it once per row, orphaned every stored secret.)
+  _key() { // routed through THE ONE helper (lane key-file-law-stores): src/key-file.js via secret-box lawfulKey (tmp + link(2) mint)
+    const r = lawfulKey(this._keyFile, { hasCiphertext: () => this._holdsCiphertext() });
+    if (!r.ok) throw keyRefusal(r.code === 'key-malformed' ? 'key-unreadable:malformed' : r.code, this._keyFile);
+    return r.key;
+  }
+  /** Ciphertext anywhere in the store — in memory, or in accounts.json on disk (a file this process could not load
+   *  still holds what it holds: unreadable = assume it does). */
+  _holdsCiphertext() {
+    if (this._state.accounts.some((a) => a && (a.keyEnc || a.oatEnc))) return true;
+    try { return /"(keyEnc|oatEnc)"\s*:/.test(fs.readFileSync(this._file, 'utf-8')); } catch (e) { return !(e && e.code === 'ENOENT'); }
   }
 
   _enc(text) {
@@ -291,7 +332,9 @@ class AccountManager {
           // loginState (2026-09-07): the LOGIN SESSION's own deadline, so every
           // surface can warn BEFORE the refresh fails instead of after a dead
           // turn. 'unknown' where the harness declares no reader.
-          return { ...base, loggedIn: info.loggedIn, email: info.email || a.email || null, emailDeclared: !info.email && !!a.email, subscriptionType: info.subscriptionType, loginState: this.loginStateOf(a.id), ...(info.authMode !== undefined ? { authMode: info.authMode } : {}), ...(this._credsOf(backend).longLivedToken ? this._oatMeta(a) : {}) };
+          const row = { ...base, loggedIn: info.loggedIn, email: info.email || a.email || null, emailDeclared: !info.email && !!a.email, subscriptionType: info.subscriptionType, loginState: this.loginStateOf(a.id), ...(info.authMode !== undefined ? { authMode: info.authMode } : {}), ...(this._credsOf(backend).longLivedToken ? this._oatMeta(a) : {}) };
+          if (row.oat) { const door = this._oatFileDoor(a, row.loginState); if (door) row.oatFile = door; }
+          return row;
         }
         return { ...base, tail: a.tail };
       }),
@@ -348,7 +391,7 @@ class AccountManager {
     const a = this.get(id);
     if (!a || this._acctType(a) !== 'subscription') throw new Error('not a subscription account');
     const fresh = this.readSubCreds(id);
-    if (!fresh.loggedIn) return { outcome: 'pending' };
+    if (!fresh.loggedIn || fresh.oatFile) return { outcome: 'pending' }; // our long-lived-token file is not the login being completed
     const norm = (s) => String(s || '').trim().toLowerCase();
     const freshEmail = norm(fresh.email);
     const knownEmail = norm(a.email || (String(a.name || '').includes('@') ? a.name : ''));
@@ -469,12 +512,19 @@ class AccountManager {
       // passphrase blob; re-encrypted under the TARGET's key on import) — an
       // oat-ONLY account would otherwise import as a dead record (B-211a)
       if (a.oatEnc) { try { rec.oat = this._dec(a.oatEnc); rec.oatMintedAt = a.oatMintedAt || null; } catch { } }
+      if (a.oatEnc && a.oatShape) rec.oatShape = a.oatShape; // the subscription SHAPE the target re-derives our file with (no secret in it)
       if (type === 'subscription') {
         // macOS secure storage is Keychain-primary. The local fallback is a
         // same-machine compatibility shadow for launchd and can diverge after
         // refresh-token rotation, so never treat it as a portable backup.
         const c = this._credsOf(backend);
         rec.files = readFiles(this._acctDir(backend, a.id), this._localOnlyClaudeSub(a) ? c.files.filter((x) => x !== c.authFile) : c.files);
+        // OUR materialized file is never exported (verify r1 F11: the token rides once, as rec.oat) — the
+        // CLI's other keys in it travel; the target re-derives ours from rec.oat
+        if (rec.files['.credentials.json'] && a.oatEnc) {
+          let f = null; try { f = JSON.parse(rec.files['.credentials.json']); } catch { }
+          if (oatFileOurs(f, a.id)) { const rest = credsRestOf(f); if (Object.keys(rest).length) rec.files['.credentials.json'] = JSON.stringify(rest); else delete rec.files['.credentials.json']; }
+        }
       }
       return rec;
     });
@@ -508,18 +558,19 @@ class AccountManager {
       if (rec.type === 'subscription' || !this._credsOf(be).supportsApiKeys) a.type = 'subscription';
       if (rec.key && /^sk-ant-/.test(rec.key)) { a.keyEnc = this._enc(String(rec.key)); a.tail = String(rec.key).slice(-8); }
       else if (rec.tail) a.tail = rec.tail;
-      if (rec.oat && /^sk-ant-oat\d{2}-/.test(String(rec.oat))) { a.oatEnc = this._enc(String(rec.oat)); a.oatMintedAt = Number(rec.oatMintedAt) || Date.now(); }
+      if (rec.oat && /^sk-ant-oat\d{2}-/.test(String(rec.oat))) { a.oatEnc = this._enc(String(rec.oat)); a.oatMintedAt = Number(rec.oatMintedAt) || Date.now(); const sh = oatShapeOf(rec.oatShape); if (sh) a.oatShape = sh; }
       if (rec.files && typeof rec.files === 'object' && a.type === 'subscription') {
         const dir = this._acctDir(be, a.id);
         fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
         this._credsOf(be).seedDir(dir); // claude: onboarding-complete .claude.json; codex: sessions/config.toml symlinks into the shared ~/.codex
         for (const [n, content] of Object.entries(rec.files)) {
           if (!FILE_OK.test(n) || typeof content !== 'string') continue;
-          fs.writeFileSync(path.join(dir, n), content, { mode: 0o600 });
+          require('./account-material.js').writePrivateFile(path.join(dir, n), content); // the one 0600 atomic writer of account-dir material
         }
       }
       this._state.accounts.push(a);
       imported++;
+      if (a.oatEnc) this.syncOatFile(a.id).catch(() => { }); // ours is re-derived here (the export never carries it)
     }
     // Defaults only when the referenced account actually landed and none is set
     // locally — an import must not silently re-route existing sessions' billing.
@@ -573,41 +624,49 @@ class AccountManager {
     // local creds: bring the dup's dir over when it's fresher/the only login
     try {
       const fromDir = this.subDir(fromId), intoDir = this.subDir(intoId);
-      const intoLogged = this.readSubCreds(intoId).loggedIn;
-      if (fs.existsSync(path.join(fromDir, '.credentials.json')) && (preferFromCreds || !intoLogged)) {
+      const intoAuth = this.readSubCreds(intoId);
+      const intoLogged = intoAuth.loggedIn && !intoAuth.oatFile; // our long-lived-token file is not a login to keep over a real one
+      // OUR long-lived-token file is never copied (verify r1 F3): it is re-derived on the survivor from the
+      // token the fold moves — only the CLI's other keys in it are material to carry
+      let fromBytes = null;
+      try { fromBytes = fs.readFileSync(path.join(fromDir, '.credentials.json')); } catch { }
+      if (fromBytes && (preferFromCreds || !intoLogged)) {
+        let fj = null; try { fj = JSON.parse(fromBytes); } catch { }
+        if (oatFileOurs(fj, fromId)) { const rest = credsRestOf(fj); fromBytes = Object.keys(rest).length ? Buffer.from(JSON.stringify(rest)) : null; }
+        // F3 (pool-oat verify r2): a survivor holding OUR file keeps the CLI's other keys (mcpOAuth …) — the folded
+        // login is written OVER them, and they are archived first (`.dead-<ms>-m…`, 0600). Our token never rests in an
+        // archive: it is the store's, and the survivor's sync re-derives it (a live login there keeps it out).
+        const intoCreds = path.join(intoDir, '.credentials.json');
+        let intoFile = null; if (fromBytes && intoAuth.oatFile) { try { intoFile = JSON.parse(fs.readFileSync(intoCreds, 'utf-8')); } catch { } }
+        if (fromBytes && oatFileOurs(intoFile, intoId)) {
+          const keep = credsRestOf(intoFile);
+          if (Object.keys(keep).length) require('./account-material.js').writePrivateFile(`${intoCreds}.dead-${Date.now()}-m${crypto.randomBytes(3).toString('hex')}`, JSON.stringify(keep));
+          let fobj = null; try { fobj = JSON.parse(fromBytes); } catch { }
+          if (fobj && typeof fobj === 'object' && !Array.isArray(fobj)) fromBytes = Buffer.from(JSON.stringify({ ...keep, ...fobj }));
+        }
         fs.mkdirSync(intoDir, { recursive: true, mode: 0o700 });
         fs.chmodSync(intoDir, 0o700);
         for (const f of ['.credentials.json', '.claude.json']) {
           const src = path.join(fromDir, f);
-          if (fs.existsSync(src)) {
-            const dest = path.join(intoDir, f);
-            const tmp = dest + `.${process.pid}.${crypto.randomBytes(6).toString('hex')}.tmp`;
-            let fd;
-            try {
-              const content = fs.readFileSync(src);
-              fd = fs.openSync(tmp, 'wx', 0o600);
-              fs.writeFileSync(fd, content);
-              fs.fchmodSync(fd, 0o600);
-              if ((fs.fstatSync(fd).mode & 0o777) !== 0o600) throw new Error('private mode not applied');
-              fs.fsyncSync(fd);
-              fs.closeSync(fd); fd = undefined;
-              fs.renameSync(tmp, dest);
-            } finally {
-              if (fd !== undefined) { try { fs.closeSync(fd); } catch { } }
-              try { fs.unlinkSync(tmp); } catch { }
-            }
-          }
+          const bytes = f === '.credentials.json' ? fromBytes : (fs.existsSync(src) ? fs.readFileSync(src) : null);
+          // the one 0600 atomic writer of account-dir material (tmp `wx` 0600 + fchmod + fsync + rename)
+          if (bytes) require('./account-material.js').writePrivateFile(path.join(intoDir, f), bytes);
         }
       }
+      // the folded dir's archived dead logins MOVE to the survivor before the rm (verify r1 F12 — never destroyed)
+      fs.mkdirSync(intoDir, { recursive: true, mode: 0o700 });
+      require('./account-material.js').moveCredentialArchives(fromDir, intoDir);
       fs.rmSync(fromDir, { recursive: true, force: true });
     } catch { /* best-effort file consolidation */ }
     if (from.hostLogins) into.hostLogins = { ...(from.hostLogins), ...(into.hostLogins || {}) };
     if (!into.email && from.email) into.email = from.email;
-    if (!into.oatEnc && from.oatEnc) { into.oatEnc = from.oatEnc; into.oatMintedAt = from.oatMintedAt; } // long-lived token survives the fold (B-211a)
+    if (!into.oatEnc && from.oatEnc) { into.oatEnc = from.oatEnc; into.oatMintedAt = from.oatMintedAt; if (!into.oatShape && from.oatShape) into.oatShape = from.oatShape; } // long-lived token survives the fold (B-211a)
     if (!into.note && from.note) into.note = from.note;
     if (this._state.defaultAccountId === fromId) this._state.defaultAccountId = intoId;
     this._state.accounts = this._state.accounts.filter((x) => x.id !== fromId);
+    this._oatFileFacts.delete(fromId);
     this._save();
+    if (into.oatEnc) this.syncOatFile(intoId).catch(() => { }); // ours is re-derived on the survivor
     this._notify();
     return this.list().accounts.find((x) => x.id === intoId) || null;
   }
@@ -886,7 +945,8 @@ class AccountManager {
       // API keys are the sanctioned programmatic path — always shippable
       return { usable: true, how: hostFacts ? 'ship' : 'local-env', reason: null, linked: false, held: false, heldVerified: false };
     }
-    const loggedIn = !!this._readAuthFor(backend, a.id).loggedIn;
+    const authNow = this._readAuthFor(backend, a.id);
+    const loggedIn = !!authNow.loggedIn && !authNow.oatFile; // our long-lived-token file is the token's road ('oat'), not a login to ship
     // Hosts KNOWN to hold this account's own login (noteHostLogins write-
     // through) minus the host being evaluated: "signed in SOMEWHERE else" is
     // a different situation than "never signed in anywhere" — userN's
@@ -976,6 +1036,12 @@ class AccountManager {
     a.oatEnc = this._enc(token);
     a.oatMintedAt = Date.now();
     this._save();
+    // THE SAME TRANSACTION, off the loop's back: the store first (the token's authority — a failed file
+    // write leaves today's env spawn working), then the file through the ONE queue. `mint` = record the
+    // subscription SHAPE off this member's own login file now (CLI 2.1.296's setup-token leaves nothing on
+    // disk; the file keeps scopes + subscriptionType when the CLI blanks the tokens), so it outlives that
+    // file being archived. The answer's oatFile verdict: await oatFileSettled(id).
+    this.syncOatFile(id, { mint: true }).catch(() => { });
     this._notify();
     return { id, mintedAt: a.oatMintedAt };
   }
@@ -985,7 +1051,153 @@ class AccountManager {
     if (!a) throw new Error('unknown account: ' + id);
     delete a.oatEnc; delete a.oatMintedAt;
     this._save();
+    this.syncOatFile(id).catch(() => { }); // no token ⇒ 'none' ⇒ our file (only ours — the mark names this row) goes
     this._notify();
+  }
+
+  // ── THE MATERIALIZED LONG-LIVED TOKEN (lane pool-oat-materialize, design q-035 A) ──
+  // A pooled session's CLI reads the member's credential FILE through its symlink,
+  // so a token that lives only in accounts.json can never serve it. For a member
+  // with NO usable login (the owner's decision 2) the row's oat is ALSO written to
+  // <member dir>/.credentials.json in the CLI's MEASURED login shape (expiresAt =
+  // mint + OAT_TTL, the row's scopes / subscriptionType, NO refresh token, our
+  // `vibespaceOat` mark naming the row) by account-material's 0600 atomic writer —
+  // and then the slot law needs nothing: ensureSessionPoolLink / repointPoolSymlink
+  // / _noteSlot are untouched, the hot switch onto it is the ordinary re-point. The
+  // verdict is PURE (login-expiry materializeVerdict); _syncOatFileNow is its one
+  // actor, reached from setOat / clearOat, the CLI version changing, a merge / an
+  // import, and oat-file-sync's sweep (a login that dies after the mint).
+  // VERIFY R1 (pool-oat-verify, 4c1be7e0e REFUTED): the file is the CLI's bag of
+  // top-level keys — we replace claudeAiOauth + the mark and keep the rest (F1); a
+  // failed READ is a named refusal, never "unreadable" (F2); ours is the MARK's,
+  // so a re-mint swaps our token in place (F3); a token that does not decrypt
+  // moves nothing (F4); a known unmeasured CLI keeps our file while a link names
+  // the member and the pool stops placing on it (F5); every act is guarded by a
+  // fresh stat (F7), refuses a symlinked dir (F8), and runs through ONE queue on
+  // fs.promises, one sweep row per loop turn (F13).
+  noteCliVersion(v) {
+    const before = this.oatFileCaps();
+    this._oatCli = v == null || v === '' ? null : String(v);
+    const after = this.oatFileCaps();
+    const changed = before.ok !== after.ok || before.cli !== after.cli;
+    if (changed) this.syncOatFiles().catch(() => { }); // a changed verdict re-syncs every row (queued, off the loop's back)
+    return { ...after, changed };
+  }
+  _oatFixture() {
+    if (this._oatFixtureMemo === undefined) {
+      try { this._oatFixtureMemo = JSON.parse(fs.readFileSync(this._oatFixturePath, 'utf-8')); } catch { this._oatFixtureMemo = null; }
+    }
+    return this._oatFixtureMemo;
+  }
+  /** { ok, known, cli, measured } — ok = cliCaps.oatInFile(the hub's CLI, the fixture) on a platform whose CLI reads
+   *  the FILE (the measurement is Linux; macOS keys its keychain by the env string — the pool's own platform rule).
+   *  An answer that names no version ('unparsed', F9) is a KNOWN CLI nobody measured. */
+  oatFileCaps() {
+    const fx = this._oatFixture();
+    const cli = cliCaps.cliVersionOf(this._oatCli) || (this._oatCli ? 'unparsed' : null);
+    const platformOk = this._platform !== 'darwin' && this._platform !== 'win32';
+    return { ok: platformOk && cliCaps.oatInFile(this._oatCli, fx), known: !!cli, cli, measured: fx ? cliCaps.cliVersionOf(fx.cliVersion) : null };
+  }
+  /** ONE QUEUE for every act on a member's credential file (F13 + F7): a setOat, a clearOat and a sweep row
+   *  never interleave on one file. → a promise of the row's result. */
+  syncOatFile(id, opts = {}) {
+    const run = this._oatChain.then(() => this._syncOatFileNow(id, opts));
+    this._oatChain = run.catch(() => null);
+    return run;
+  }
+  /** Resolves once every queued act and running sweep has finished (the POST /oat answer, the suites). */
+  async oatFileSettled(id = null) {
+    for (let i = 0; i < 1000; i++) {
+      const chain = this._oatChain, sweeps = [...this._oatSweeps];
+      await Promise.all([chain, ...sweeps.map((s) => s.catch(() => null))]);
+      if (chain === this._oatChain && !this._oatSweeps.size) break;
+    }
+    return id ? (this._oatFileFacts.get(id) || null) : null;
+  }
+  /** Does any conversation's pool link name member `id` right now? (F5) A claude conversation always runs on its
+   *  OWN link (ws-create passes the session key — plan C), so a pool's default link is no running reader. */
+  async _oatMemberLinked(id) {
+    const want = path.resolve(this.subDir(id));
+    const named = async (link) => { try { return path.resolve(path.dirname(link), await fs.promises.readlink(link)) === want; } catch { return false; } };
+    const root = path.join(this.dataDir, 'pool-links');
+    let pools = [];
+    try { pools = await fs.promises.readdir(root); } catch { }
+    for (const p of pools) {
+      let keys = [];
+      try { keys = await fs.promises.readdir(path.join(root, p)); } catch { continue; }
+      for (const k of keys) if (await named(path.join(root, p, k))) return true;
+    }
+    return false;
+  }
+  async _syncOatFileNow(id, { now = Date.now(), mint = false, quiet = false } = {}) {
+    const a = this.get(id);
+    if (!a || this._acctType(a) !== 'subscription' || !this._credsOf(this._acctBackend(a))?.longLivedToken) return null;
+    const material = require('./account-material.js');
+    const dir = this._acctDir(this._acctBackend(a), id);
+    const seen = await material.readCredentialFile(dir);
+    const ours = oatFileOurs(seen.file, id);
+    const fileShape = ours ? null : oatShapeOf(seen.file);
+    if (fileShape && (mint || !a.oatShape)) { a.oatShape = fileShape; this._save(); } // the shape outlives the file it came from
+    let keyNo = null; // THE KEY FILE as why the token does not read (O1) — the failing call's own refusal
+    const token = a.oatEnc ? (() => { try { return this._dec(a.oatEnc); } catch (e) { if (isKeyRefusal(e)) keyNo = e; return null; } })() : null;
+    const shape = (a.oatShape && Array.isArray(a.oatShape.scopes) ? a.oatShape : null) || fileShape;
+    const body = token && shape ? oatFileBody(token, { expiresAt: (Number(a.oatMintedAt) || 0) + this.OAT_TTL_MS, shape, mintedAt: a.oatMintedAt, account: id }) : null;
+    const current = ours && !!body && oatFileCurrent(seen.file, body);
+    const caps = this.oatFileCaps();
+    const linked = ours && caps.known && !caps.ok ? await this._oatMemberLinked(id) : false;
+    const fact = this._oatFact(a);
+    const v = materializeVerdict({ file: seen.file, fileState: seen.fileState, dirState: seen.dirState, oat: fact && { ...fact, readable: !!token }, ours, current, shape, caps, linked }, now);
+    const out = { verdict: v.verdict, ...(v.reason ? { reason: v.reason } : {}), ...(v.held ? { held: true } : {}), ...(v.verdict === 'read-failed' && seen.code ? { code: seen.code } : {}) };
+    if (keyNo && v.reason === 'oat-unreadable') { const [kind, code] = keyNo.code.split(':'); out.reason = kind; if (code) out.code = code; } // the row says restore / retry, never re-mint
+    try {
+      if (v.verdict === 'materialize') {
+        // a login there is archived first (whole — never lost); the new file keeps the CLI's other keys either way
+        if (v.archive) out.archived = await material.archiveCredentialFile(dir, now, { expect: seen.stat });
+        await material.writeCredentialFile(dir, oatFileMerge(seen.fileState === 'present' ? seen.file : null, body), { expect: v.archive ? null : seen.stat });
+        out.wrote = true;
+      } else if (v.cleanup) {
+        out.removed = await material.removeCredentialFile(dir, { isOurs: (f) => oatFileOurs(f, id), rest: credsRestOf, expect: seen.stat });
+      }
+    } catch (e) { out.verdict = 'write-failed'; out.code = String((e && e.code) || 'error'); }
+    const was = this._oatFileFacts.get(id);
+    this._oatFileFacts.set(id, { verdict: out.verdict, at: now, ...(out.code ? { code: out.code } : {}), ...(out.reason ? { reason: out.reason } : {}), ...(out.held ? { held: true } : {}) });
+    out.doorMoved = !!(out.wrote || out.removed) || !was || was.verdict !== out.verdict || was.code !== out.code || was.reason !== out.reason || !!was.held !== !!out.held;
+    if (out.doorMoved && !quiet) this._notify();
+    return out;
+  }
+  /** Every oat row through the queue, ONE row per loop turn (F13); one roster broadcast when a file moved. */
+  syncOatFiles({ now = Date.now() } = {}) {
+    const run = (async () => {
+      const out = {};
+      let moved = false;
+      const ids = this._state.accounts.filter((a) => this._acctType(a) === 'subscription' && a.oatEnc).map((a) => a.id);
+      for (const id of ids) {
+        let r = null;
+        try { r = await this.syncOatFile(id, { now, quiet: true }); } catch { r = null; }
+        if (r) { out[id] = r.verdict; if (r.doorMoved) moved = true; }
+        await new Promise((res) => setImmediate(res));
+      }
+      if (moved) this._notify();
+      return out;
+    })();
+    this._oatSweeps.add(run);
+    run.then(() => this._oatSweeps.delete(run), () => this._oatSweeps.delete(run));
+    return run;
+  }
+  /** The row's door about its materialized token (null = nothing to say): the
+   *  slot reading proves 'written' — or 'held' when the hub's CLI is a known
+   *  unmeasured one (the sessions on it keep running, nothing new is placed);
+   *  a refusal is the last verdict's. */
+  _oatFileDoor(a, ls) {
+    if (!a || !a.oatEnc) return null;
+    const caps = this.oatFileCaps();
+    const f = this._oatFileFacts.get(a.id);
+    const reason = f && (f.reason || f.verdict);
+    // a token that no longer decrypts is the row's fact even while the file it wrote still serves (F4)
+    if (reason === 'oat-unreadable' || reason === 'key-missing' || reason === 'key-unreadable') return { state: 'refused', reason, cli: caps.cli, ...(f.code ? { code: f.code } : {}) };
+    if (ls && ls.oatFile) return caps.known && !caps.ok ? { state: 'held', reason: 'cli-unmeasured', cli: caps.cli } : { state: 'written', cli: caps.cli };
+    if (!reason || !OAT_FILE_REFUSALS.includes(reason)) return null;
+    return { state: 'refused', reason, cli: caps.cli, ...(f.code ? { code: f.code } : {}) };
   }
 
   getOat(id) {
@@ -1035,8 +1247,19 @@ class AccountManager {
     const be = this._acctBackend(a) || 'claude';
     const all = this._state.accounts.filter((x) => this._acctBackend(x) === be && this._acctType(x) === 'subscription');
     const wanted = Array.isArray(a?.members) && a.members.length ? all.filter((x) => a.members.includes(x.id)) : all;
-    const loggedIn = (x) => !!this._readAuthFor(be, x.id).loggedIn;
+    const loggedIn = (x) => this._placeable(be, x.id);
     return wanted.filter(loggedIn).map((x) => ({ id: x.id, name: x.name }));
+  }
+  /** May a NEW placement land on this member (pool-oat-materialize verify r1 F5)? Its file holds a
+   *  login — or OUR long-lived-token file while the hub's CLI is not a KNOWN unmeasured one: on an
+   *  unmeasured CLI the sessions already linked to it keep running (the file stays — the running
+   *  processes are the measured binary) and nothing new is placed there. */
+  _placeable(be, id) {
+    const info = this._readAuthFor(be, id);
+    if (!info.loggedIn) return false;
+    if (!info.oatFile) return true;
+    const c = this.oatFileCaps();
+    return !(c.known && !c.ok);
   }
   /** Is `memberId` one of poolMembers(id)? THE SAME ANSWER as
    *  `poolMembers(id).some((m) => m.id === memberId)` — same roster filter,
@@ -1053,7 +1276,7 @@ class AccountManager {
     const all = this._state.accounts.filter((x) => this._acctBackend(x) === be && this._acctType(x) === 'subscription');
     const wanted = Array.isArray(a?.members) && a.members.length ? all.filter((x) => a.members.includes(x.id)) : all;
     if (!wanted.some((x) => x.id === memberId)) { if (wanted.length) this._acctDir(be, wanted[0].id); return false; }
-    return !!this._readAuthFor(be, memberId).loggedIn;
+    return this._placeable(be, memberId);
   }
   /** The pools whose CANDIDATES hold `memberId`, with the pool fields list()'s
    *  pooled row carries (`auto` is always true there, `hot` = !!record.hot) —
@@ -1428,10 +1651,14 @@ class AccountManager {
       // in" and the user had no way forward). Routing around a dead member is
       // the entire point of a pool — a dead target must re-point, not throw.
       // poolMembers() is already filtered to still-valid logins.
-      const liveTarget = (x) => !!x && this.readSubCreds(x).loggedIn;
-      if (!cur || !this.readSubCreds(id).loggedIn) {
+      const liveTarget = (x) => !!x && this._placeable('claude', x); // a member a NEW placement may land on (F5)
+      if (!cur || !this.readSubCreds(id).loggedIn || !liveTarget(cur)) {
         const alive = this.poolMembers(id).map((m) => m.id);
         if (!alive.length) {
+          // every member left holds only our long-lived-token file and the hub's CLI is a known UNMEASURED one:
+          // the conversations already on them keep running; a new one waits for a measured CLI (or a sign-in)
+          const held = this._poolLoginCandidates(id).filter((m) => this.readSubCreds(m.id).oatFile).length;
+          if (held) throw Object.assign(new Error(`pool "${a.name}" can't start a conversation: its members hold only long-lived tokens and the claude CLI ${this.oatFileCaps().cli || ''} was never measured with one in a member's folder — conversations already running continue; sign a member in, or wait for a measured CLI`), { code: 'oat-cli-unmeasured' });
           throw new Error(`every member of pool "${a.name}" is signed out — re-login one in Manage Agents (the pool cannot route around a fully signed-out member set)`);
         }
         // Prefer a member whose LOGIN SESSION is not already dead (2026-09-07):
@@ -1526,19 +1753,30 @@ class AccountManager {
       const oatExpired = a.oatEnc && (a.oatMintedAt || 0) + this.OAT_TTL_MS < Date.now();
       const oat = oatExpired ? null : this.getOat(id);
       const oatSecret = oat ? { var: 'CLAUDE_CODE_OAUTH_TOKEN', value: oat } : null;
+      // THE MATERIALIZED TOKEN (lane pool-oat-materialize): OUR file in the dir,
+      // holding this row's token, on a measured CLI IS the spawn — the CLI reads
+      // it like a login and NO CLAUDE_CODE_OAUTH_TOKEN rides the env (the env
+      // road defaults the model to sonnet: oat-in-file.json's oat-env). Remote
+      // spawns keep the secret channel (no creds dir is ever shipped for it).
+      if (oat && info.oatFile && info.accessToken === oat && this.oatFileCaps().ok) {
+        return { id: a.id, name: a.name, kind: 'subscription', oatOnly: true, oatFile: true, localEnv: { [this._credsOf('claude').spawnEnvVar]: this._acctDir('claude', id) }, secret: oatSecret };
+      }
+      // our token file is not a LOGIN: without the above it spawns on the env
+      // road, or (its token ended) is refused by name like a missing login
+      const loginInDir = !!info.loggedIn && !info.oatFile;
       // …and so does a DEAD dir login (2026-10-13): an 'expired' login still
       // parses loggedIn, and spawning on it fails the first refresh while the
       // row's chip says the token keeps it running — the token IS the spawn.
-      const dirDead = !!oat && info.loggedIn && !loginUsable(this.loginStateOf(id, Date.now(), { slot: true }));
-      if ((!info.loggedIn || dirDead) && oat) {
+      const dirDead = !!oat && loginInDir && !loginUsable(this.loginStateOf(id, Date.now(), { slot: true }));
+      if ((!loginInDir || dirDead) && oat) {
         return { id: a.id, name: a.name, kind: 'subscription', oatOnly: true, localEnv: { CLAUDE_CODE_OAUTH_TOKEN: oat }, secret: oatSecret };
       }
       // Expired oat: fail the CREATE with the real reason instead of letting
       // the CLI 401 opaquely mid-session (a long-lived 401 has no self-heal).
       // loggedIn + expired-oat just drops the secret — the dir login works
       // locally and the remote paths give their normal actionable errors.
-      if (!info.loggedIn && a.oatEnc && oatExpired) throw new Error(`the long-lived token for ${a.name} has expired — re-mint it in Manage agents (⋯ → Long-lived token)`);
-      if (!info.loggedIn) throw new Error('subscription not logged in: ' + a.name);
+      if (!loginInDir && a.oatEnc && oatExpired) throw new Error(`the long-lived token for ${a.name} has expired — re-mint it in Manage agents (⋯ → Long-lived token)`);
+      if (!loginInDir) throw new Error('subscription not logged in: ' + a.name);
       return {
         id: a.id, name: a.name, kind: 'subscription', oatExpired: oatExpired || undefined,
         localEnv: { [this._credsOf('claude').spawnEnvVar]: this._acctDir('claude', id) }, secret: oatSecret,
@@ -1551,8 +1789,9 @@ class AccountManager {
         remoteCreds: this._remoteCreds('claude', id, a), // shippable:false on a Keychain-primary Mac dir (must never be copied)
       };
     }
-    const key = this.getKey(id);
-    if (!key) throw new Error('account key unavailable (decryption failed): ' + a.name);
+    let key = null, keyNo = null;
+    try { key = this._dec(a.keyEnc); } catch (e) { if (isKeyRefusal(e)) keyNo = e; }
+    if (!key) throw keyNo ? Object.assign(new Error(`account key unavailable (${a.name}) — ${keyNo.message}`), { code: keyNo.code }) : new Error('account key unavailable (decryption failed): ' + a.name); // O1: the key file's refusal, said
     return { id: a.id, name: a.name, tail: a.tail, kind: 'api', localEnv: { ANTHROPIC_API_KEY: key }, secret: { var: 'ANTHROPIC_API_KEY', value: key } };
   }
 
@@ -1638,7 +1877,10 @@ class AccountManager {
     const a = this.get(id);
     // Anthropic-only poll — codex usage is OpenAI-side, not surfaced here.
     if (!a || !capsOf(this._acctBackend(a)).oauthUsage || this._acctType(a) !== 'subscription') return null;
-    return this.readSubCreds(id).accessToken || null;
+    // never our materialized long-lived token (pool-oat-materialize verify r1 F10): it is inference-only and
+    // was never measured as a direct bearer — an oat-only row refuses the ⟳ / identity reads as before
+    const info = this.readSubCreds(id);
+    return info.oatFile ? null : (info.accessToken || null);
   }
 
   // ── Read-only probes of the CLI's own login state (NEVER written) ──

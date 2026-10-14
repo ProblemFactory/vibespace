@@ -45,16 +45,18 @@ const now = () => clock;
 const got = [];
 let inflight = 0, maxIn = 0;
 const recordPart = (input) => String(input).split('———').pop();
+// the judge's request body is a ONE-SHOT stream (lane judge-one-shot-body) — a fake reads it like the wire does
+const bodyText = (init) => (typeof init.body === 'string' ? init.body : new Response(init.body).text());
 async function fakeFetch(url, opts) {
-  const body = JSON.parse(opts.body);
-  got.push({ url, body, raw: opts.body, auth: opts.headers.authorization });
   inflight++; maxIn = Math.max(maxIn, inflight);
+  const raw = await bodyText(opts), body = JSON.parse(raw);
+  got.push({ url, body, raw, auth: opts.headers.authorization });
   await sleep(40);
   inflight--;
   const hot = /URGENT/.test(recordPart(body.input));
   const P = { needs_now: hot ? 0.86 : 0.22, asks_me: hot ? 0.9 : 0.1, deadline_money: hot ? 0.75 : 0.05, money: /Lunch|Contract/.test(recordPart(body.input)) ? 0.9 : 0.1 };   // money: the draft's leg (the two "needs" examples)
   const answers = body.questions.map((q) => ({ type: 'predicate', name: q.name, probability: P[q.name] !== undefined ? P[q.name] : 0.3 }));
-  return { status: 200, ok: true, json: async () => ({ answers, usage: { input_tokens: Math.ceil(opts.body.length / 4) } }) };
+  return { status: 200, ok: true, json: async () => ({ answers, usage: { input_tokens: Math.ceil(raw.length / 4) } }) };
 }
 
 // ── the world: six conversations of one account, the newest message from Ada inside the hour ──

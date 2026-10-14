@@ -40,7 +40,9 @@ const VENDOR = /api\.anthropic\.com|platform\.claude\.com|console\.anthropic\.co
 // was invisible here. Only the census widens: whole-file VENDOR reads (permission-rules' comments name chatgpt.com) keep theirs
 // lane decision-core: + openrouter.ai and the decisions marker — the ONE decisions caller fetches a URL the PURE model
 // builds (any base URL), so the census counts the source marker DECISION_ENDPOINT beside the request, not a host
-const CONSTRUCT_HOSTS = new RegExp(VENDOR.source + '|chatgpt\\.com|openai\\.com|fish\\.audio|openrouter\\.ai|DECISION_ENDPOINT'); // + Dropline voice input (q-029): api.dropline.fish.audio | api.fish.audio | fish.audio
+// lane rule-learning (q-037 P0): + the chat completions marker TEXT_ENDPOINT — the ONE text-model caller fetches a URL it builds
+// from its base (a test hands in a loopback base), so the census counts the source marker beside the request, like DECISION_ENDPOINT
+const CONSTRUCT_HOSTS = new RegExp(VENDOR.source + '|chatgpt\\.com|openai\\.com|fish\\.audio|openrouter\\.ai|DECISION_ENDPOINT|TEXT_ENDPOINT'); // + Dropline voice input (q-029): api.dropline.fish.audio | api.fish.audio | fish.audio
 const REQUESTY = /https?\.request\s*\(|\bfetch\s*\(|axios|got\s*\(/;
 
 // ── collect every server-side JS file (the browser bundle never holds tokens) ──
@@ -93,7 +95,13 @@ const ALLOW = {
   'src/server/dropline-client.js': { max: 6, gates: ['pluginOn', 'credentialOf', 'teachCap', 'refreshing'] },
   // lane decision-core: THE decisions API caller (OpenAI /v1/decisions, OpenRouter /api/alpha/decisions) — ONE fetch,
   // behind the PURE budget verdict, the plugin's own switch and the registry row's key
-  'src/server/decision-engine.js': { max: 1, gates: ['budgetVerdict', 'pluginOn', "resolveIntegration(ROW_ID)", 'DECISION_ENDPOINT'] },
+  // lane judge-one-shot-body: `oneShot` — the request carries the ONE-SHOT body (M.oneShotBody), asserted by token below
+  'src/server/decision-engine.js': { max: 1, oneShot: true, gates: ['budgetVerdict', 'pluginOn', "resolveIntegration(ROW_ID)", 'DECISION_ENDPOINT'] },
+  // lane rule-learning (design q-037 P0): THE chat completions caller (OpenRouter /api/v1/chat/completions — the text model
+  // that DRAFTS the person's 「我关心什么」 block, proposed never written) — ONE fetch, behind the PURE budget verdict (the
+  // plugin's daily budget + the use's own cap), the plugin's switch, the Decision API row's key, and the zero-data-retention
+  // routing as LITERALS (no endpoint ⇒ the named refusal no-zdr, never a request without them)
+  'src/server/text-model-client.js': { max: 1, oneShot: true, gates: ['budgetVerdict', 'pluginOn', 'resolveIntegration(ROW_ID)', 'TEXT_ENDPOINT', 'zdr: true', "data_collection: 'deny'"] },
 };
 for (const [rel, n] of Object.entries(constructions)) {
   const a = ALLOW[rel];
@@ -149,6 +157,279 @@ for (const [rel, n] of Object.entries(constructions)) {
   const plantedEngine = eng.replace(/^.*budgetVerdict\(\{\s*$/m, '    const v = { ok: true }; ({');
   ok(!ALLOW['src/decision-model.js'] && constructionsIn(dm) === 0 && plantedModel !== dm && constructionsIn(plantedModel) >= 1, 'CONTROL: a decisions fetch planted in the PURE model (beside its own URL) is a construction outside the allowlist (RED)', String(constructionsIn(plantedModel)));
   ok(constructionsIn(eng) === 1 && plantedEngine !== eng && (plantedEngine.match(/budgetVerdict\(/g) || []).length < (eng.match(/budgetVerdict\(/g) || []).length, 'CONTROL: the engine with its budgetVerdict call removed loses the gate the row names (the gate census turns RED)');
+}
+// lane rule-learning: the chat completions call is EXACTLY one site in ONE file (count exact); the gates live in the CODE (a
+// header that merely names them is no gate); CONTROLS — a copy planted beside the learn route (RED: outside the allowlist), a
+// second call in the client (RED: over its count), the routing literal taken out / the budget verdict taken out (RED: a code
+// gate gone); the client and the PURE drafter name no Anthropic endpoint (the Sonnet tier rides OpenRouter)
+{
+  const REL = 'src/server/text-model-client.js';
+  const constructionsIn = (text) => { const L = text.split('\n'); let n = 0; for (let i = 0; i < L.length; i++) if (CONSTRUCT_HOSTS.test(L[i]) && REQUESTY.test(L.slice(Math.max(0, i - 4), i + 5).join('\n'))) n++; return n; };
+  const code = (text) => text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/\s\/\/ .*$/gm, '');
+  const ROUTING = "provider: Object.freeze({ zdr: true, data_collection: 'deny' })";   // the request's routing literal, whole and FROZEN (a journal row's zdr: true is no gate)
+  const CODE_GATES = ['budgetVerdict(', 'pluginOn', 'resolveIntegration(ROW_ID)', ROUTING];
+  const missing = (text) => CODE_GATES.filter((g) => !code(text).includes(g));
+  const tm = fs.readFileSync(path.join(REPO, REL), 'utf-8');
+  const rl = fs.readFileSync(path.join(REPO, 'src/rule-learning.js'), 'utf-8');
+  ok(constructions[REL] === 1 && constructionsIn(tm) === 1 && ALLOW[REL].max === 1, `${REL}: exactly ONE chat completions construction (count exact: ${constructions[REL]})`);
+  ok(missing(tm).length === 0, `${REL}: every gate is CODE, not only a comment (${CODE_GATES.join(' · ')})`, missing(tm).join());
+  ok(!VENDOR.test(tm) && !VENDOR.test(rl) && !/api\.anthropic|anthropic\.com/.test(tm + rl), 'the text-model client and the PURE drafter name no Anthropic endpoint (the quality tier rides OpenRouter, billed per token)');
+  const rt = fs.readFileSync(path.join(REPO, 'src/routes/channels.js'), 'utf-8');
+  const anchor = "router.post('/api/channels/decision/learn'";
+  const planted = rt.replace(anchor, "const direct = (body) => fetch('https://openrouter.ai/api/v1/chat/completions', { method: 'POST', body });\n" + anchor);
+  ok(!ALLOW['src/routes/channels.js'] && constructionsIn(rt) === 0 && planted !== rt && constructionsIn(planted) === 1, 'CONTROL: a chat completions fetch planted beside the learn route is a construction outside the allowlist (RED)', String(constructionsIn(planted)));
+  const twice = tm.replace('    const u = json ? usageOf(json)', "    // TEXT_ENDPOINT — a second call (a retry without the routing)\n    await fetch(url, { method: 'POST' });\n    const u = json ? usageOf(json)");
+  ok(twice !== tm && constructionsIn(twice) === 2 && constructionsIn(twice) > ALLOW[REL].max, 'CONTROL: a SECOND chat completions call in the client itself is over its count (RED)', String(constructionsIn(twice)));
+  const noZdr = tm.replace(ROUTING + ',', 'provider: {},'), offZdr = tm.replace(ROUTING, "provider: { zdr: false, data_collection: 'deny' }"), allow = tm.replace(ROUTING, "provider: { zdr: true, data_collection: 'allow' }");
+  ok([noZdr, offZdr, allow].every((x) => x !== tm && missing(x).join() === ROUTING), 'CONTROL: the client with its routing literal taken out, with zdr: false, or with data_collection: allow loses the zero-data-retention gate (RED ×3) — a header or a journal row naming them does not count', [noZdr, offZdr, allow].map((x) => missing(x).join()));
+  const noBudget = tm.replace('const v = M.budgetVerdict(', 'const v = ({ ok: true }) || (');
+  ok(noBudget !== tm && missing(noBudget).join() === 'budgetVerdict(', 'CONTROL: the client with its budget verdict taken out loses the money gate (RED)', missing(noBudget).join());
+
+  // lane rule-learning-fix F1 — the census COUNTS, it does not only look: (a) the request PRIMITIVES in the client's code are
+  // counted as TOKENS (a second call carries no marker comment of its own — the ±4-line host census above never saw it):
+  // exactly the row's max; the default binding `(...a) => globalThis.fetch(...a)` defines the primitive, it is no call site;
+  // (b) a server file that REACHES the client (requires text-model-client.js or reads a `.textModel`) and holds a request
+  // primitive is a construction site — allowlisted within its count, or RED (a fetch built from the client's own `url`
+  // carries no host literal); (c) the body the request carries is the literal as built — never written after (an
+  // Object.assign / a property write / a delete would override the routing on the wire with the literal still in the text);
+  // (d) the routing literal is a DIRECT line of that body (a literal in a dead branch is text, not a request)
+  const PRIM = /\b(?:fetch|fetchImpl)\s*\(|\bhttps?\.request\s*\(|\baxios\b|\bgot\s*\(|\bXMLHttpRequest\b|\bundici\b/g;
+  const DEFAULT_PRIM = '(...a) => globalThis.fetch(...a)';
+  const primCount = (text) => (code(text).split(DEFAULT_PRIM).join('').match(PRIM) || []).length;
+  const reaches = (text) => /text-model-client|\.textModel\b/.test(code(text));
+  const texts = Object.fromEntries(files.map((f) => { try { return [path.relative(REPO, f), fs.readFileSync(f, 'utf-8')]; } catch { return [path.relative(REPO, f), '']; } }));
+  const reachSites = (all) => Object.entries(all).filter(([rel, t]) => rel !== REL && reaches(t) && primCount(t) > 0)
+    .filter(([rel, t]) => !ALLOW[rel] || primCount(t) > ALLOW[rel].max).map(([rel, t]) => `${rel} (${primCount(t)} request primitive(s), allowlisted ${ALLOW[rel] ? ALLOW[rel].max : 0})`);
+  const bodyWrites = (text) => (code(text).match(/\b(?:Object\.assign|Object\.defineProperty|Reflect\.set|Reflect\.deleteProperty)\s*\(\s*body\b|\bbody\s*(?:\.\s*\w+|\[[^\]\n]*\])\s*(?:[-+*\/|&]?=(?!=)|\+\+|--)|\bdelete\s+body\b/g) || []).length;
+  const BODY_AT = 'const body = Object.freeze({';
+  const bodyLiteral = (text) => { const c = code(text), i = c.indexOf(BODY_AT); if (i < 0) return ''; let d = 0; for (let k = c.indexOf('{', i); k < c.length; k++) { if (c[k] === '{') d++; else if (c[k] === '}' && --d === 0) return c.slice(i, k + 1); } return ''; };
+  // …serialized ONCE into bytes and sent as a ONE-SHOT stream of them (lane rule-learning-fix-r2: a string body is re-sent
+  // by Node's fetch on a 421 — a second request; a body with no source never is)
+  const SERIAL = 'const bytes = new TextEncoder().encode(JSON.stringify(body));';
+  const ONE_SHOT = "body: M.oneShotBody(bytes), duplex: 'half',";   // the shared PURE stream (lane judge-one-shot-body) — the census below asserts it for BOTH rows
+  const count = (hay, needle) => hay.split(needle).length - 1;
+  const routedOnBody = (text) => { const c = code(text); return bodyLiteral(text).split('\n').some((l) => l.trim() === ROUTING + ',') && count(c, SERIAL) === 1 && count(c, ONE_SHOT) === 1 && (c.match(/\bbytes\b/g) || []).length === 3; };
+  ok(primCount(tm) === ALLOW[REL].max, `${REL}: ${primCount(tm)} request primitive token(s) in its code = the row's max ${ALLOW[REL].max} (counted as tokens, not as marker lines)`, primCount(tm));
+  const reachers = Object.entries(texts).filter(([rel, t]) => rel !== REL && reaches(t)).map(([rel]) => rel);
+  ok(reachers.includes('src/server/decision-engine.js') && reachers.includes('src/server/channels-attention.js') && reachSites(texts).length === 0, `the files that reach the text client (${reachers.join(', ')}) hold no request primitive beyond their own allowlisted count`, reachSites(texts));
+  ok(bodyWrites(tm) === 0 && routedOnBody(tm), `${REL}: the request's body is never written after it is built, and the routing literal is a direct line of it`, { writes: bodyWrites(tm), routed: routedOnBody(tm) });
+  const U = '    const u = json ? usageOf(json)';
+  const retry = tm.replace(U, "    if (status === 0) { try { const r2 = await fetch(url, { method: 'POST', body: JSON.stringify({ ...body, provider: undefined }) }); status = r2.status; } catch { } }\n" + U);
+  ok(retry !== tm && primCount(retry) === 2 && constructionsIn(retry) === 1, 'CONTROL (M3): a non-ZDR retry with NO marker comment — invisible to the ±4-line host census (still 1) — is 2 primitive tokens (RED)', [constructionsIn(retry), primCount(retry)]);
+  const ca = texts['src/server/channels-attention.js'] || '';
+  const viaUrl = ca.replace('  /** lane rule-learning: is the text-model drafter there?', "  async function quickDraft(messages) { const tm = decision && decision.textModel; return fetch(tm.url, { method: 'POST', body: JSON.stringify({ messages }) }); }\n  /** lane rule-learning: is the text-model drafter there?");
+  ok(viaUrl !== ca && reachSites({ ...texts, 'src/server/channels-attention.js': viaUrl }).some((s) => s.startsWith('src/server/channels-attention.js')), 'CONTROL (M4): a chat completions copy in channels-attention built from the client\'s own url (no host literal) is a construction site outside the allowlist (RED)');
+  const de = texts['src/server/decision-engine.js'] || '';
+  const engCopy = de.replace("  const textModel = require('./text-model-client.js').create(", "  const peek = (m) => fetch(String(textModel && textModel.url), { method: 'POST', body: JSON.stringify({ m }) });\n  const textModel = require('./text-model-client.js').create(");
+  ok(engCopy !== de && reachSites({ ...texts, 'src/server/decision-engine.js': engCopy }).some((s) => s.startsWith('src/server/decision-engine.js')), 'CONTROL: a second request in the decision engine (which builds the client) is over its own count (RED)');
+  const LET = "    let status = 0, json = null, message = '', failed = null, sending = null;";
+  const over = tm.replace(LET, "    Object.assign(body, { provider: { data_collection: 'allow' } });\n" + LET), prop = tm.replace(LET, '    body.provider = {};\n' + LET), del = tm.replace(LET, '    delete body.provider;\n' + LET);
+  ok([over, prop, del].every((x) => x !== tm && bodyWrites(x) === 1 && missing(x).length === 0), 'CONTROL (M2): the literal kept and then overridden (Object.assign / a property write / a delete) — every text gate still green — is a body write (RED ×3)', [over, prop, del].map(bodyWrites));
+  const dead = tm.replace(ROUTING + ',', `...(false ? { ${ROUTING}, } : {}),`);
+  ok(dead !== tm && missing(dead).length === 0 && !routedOnBody(dead), 'CONTROL (M8b): the routing literal moved into a dead branch — the text gate still green — is no direct line of the body (RED)');
+
+  // lane rule-learning-fix-r2 F1 (verify r2: N1 / N2a-c / N3 GREEN on every census above) — (e) THE REQUEST IS FROZEN where
+  // it is built, by TOKEN: `const body = Object.freeze({` and the routing `Object.freeze`d inside it, in a strict module
+  // (a write — `body.provider.zdr = false`, an alias of it — throws; it never reaches the wire), and SERIALIZED ONCE, in
+  // the request: ONE JSON.stringify in the client (into the bytes the one-shot stream sends — no copy, no spread, no edit of
+  // it — the bytes named three times: made · measured · sent), `body` named exactly twice (built · serialized), the routing
+  // never read back (`.provider`); (f) THE PRIMITIVES
+  // ARE COUNTED OVER THE CLIENT'S REQUIRE CLOSURE — the client and every src-local module it requires, transitively:
+  // fetch( / fetchImpl( / .call( / .apply( / .bind( / Reflect.apply( / Reflect.construct( / http(s).request|get( /
+  // undici / axios / got( / XMLHttpRequest / WebSocket / globalThis — EXACTLY 1 in total (the one call); the primitive
+  // named nowhere but where it is bound (an alias is a call site); a load the census cannot follow (a computed require, an
+  // import(), createRequire) or a network module (http / https / net / tls / undici …) anywhere in the closure is RED.
+  // `reaches` therefore runs both ways: the files that require the client (above) and the files the client requires.
+  const FROZEN = [BODY_AT, ROUTING];
+  const frozen = (text) => /^'use strict';/.test(text) && FROZEN.every((f) => code(text).includes(f));
+  const bodyRefs = (text) => (code(text).match(/\bbody\b(?!\s*:)/g) || []).length;            // a key `body:` is no reference
+  const serials = (text) => (code(text).match(/\bJSON\s*\.\s*stringify\s*\(/g) || []).length;
+  const readsRouting = (text) => /\.\s*provider\b|\[\s*['"`]provider['"`]\s*\]/.test(code(text));
+  const sealed = (text) => frozen(text) && bodyRefs(text) === 2 && serials(text) === 1 && routedOnBody(text) && !readsRouting(text);
+  const sealOf = (text) => ({ frozen: frozen(text), bodyRefs: bodyRefs(text), serials: serials(text), routed: routedOnBody(text), readsRouting: readsRouting(text) });
+  ok(sealed(tm), `${REL}: the request body and its routing are Object.freeze'd where they are built (strict module), \`body\` is named twice (built · serialized), ONE JSON.stringify — in the request — and the routing is never read back`, sealOf(tm));
+  // lane learn-card-untick (verify r3 R3-F4): + `module` (`require('module')._load` = a createRequire) and Node's internal
+  // aliases `_http_*` / `_tls_*` / `_stream_*` (`require('_http_client')` is the HTTP client itself)
+  const NET_MODULE = /^(?:node:)?(?:http|https|http2|net|tls|dgram|dns|child_process|worker_threads|cluster|inspector|module|_(?:http|tls|stream)_\w+|undici|node-fetch|axios|got|ws|request|superagent)$/;
+  const PRIM_ALL = /\b(?:fetch|fetchImpl)\s*\(|\.\s*(?:call|apply|bind)\s*\(|\bReflect\s*\.\s*(?:apply|construct)\s*\(|\bhttps?\s*\.\s*(?:request|get)\s*\(|\bundici\b|\baxios\b|\bgot\s*\(|\bXMLHttpRequest\b|\bWebSocket\b|\bglobalThis\b|\bglobal\s*\.\s*fetch\b/g;
+  const BENIGN = ['Object.prototype.hasOwnProperty.call('];   // the one `.call(` receiver the closure holds: an own-key read, never a request
+  const BINDING = ['fetchImpl = (...a) => globalThis.fetch(...a)', 'const fetch = fetchImpl;'];   // where the primitive is BOUND (the parameter, its census name)
+  const stripped = (text) => [...BINDING, ...BENIGN].reduce((c, b) => c.split(b).join(b === BINDING[0] ? 'fetchImpl' : ' '), code(text));
+  const primsOf = (text) => stripped(text).match(PRIM_ALL) || [];
+  const namesOf = (text) => (stripped(text).replace(/\bfetchImpl\b(?=\s*[,}])/, '').match(/\b(?:fetch|fetchImpl)\b(?!\s*\()/g) || []);   // an alias of the primitive
+  const resolveRel = (from, spec, exists) => { let r = path.posix.normalize(path.posix.join(path.posix.dirname(from), spec)); if (!/\.(c?js|mjs|json)$/.test(r)) r = exists(r + '.js') ? r + '.js' : r + '/index.js'; return r; };
+  const closureOf = (start, read, exists) => {
+    const seen = new Map(), bad = [], q = [start];
+    while (q.length) {
+      const rel = q.shift(); if (seen.has(rel)) continue;
+      const t = read(rel); if (t === null) { bad.push(`${rel}: unreadable`); continue; }
+      seen.set(rel, t);
+      const c = code(t);
+      for (const m of c.matchAll(/\b(require|import)\s*\(\s*([^)]*?)\s*\)/g)) {
+        const lit = /^(['"`])([^'"`$]+)\1$/.exec(m[2]);
+        if (!lit) { bad.push(`${rel}: ${m[1]}(${m[2].slice(0, 40)}) — a load the census cannot follow`); continue; }
+        if (lit[2].startsWith('.')) q.push(resolveRel(rel, lit[2], exists));
+        else if (NET_MODULE.test(lit[2])) bad.push(`${rel}: requires '${lit[2]}' (a network module)`);
+      }
+      if (/\bcreateRequire\b|\bmodule\s*\.\s*require\b|\bprocess\s*\.\s*(?:binding|dlopen)\b|\bprocess\s*\[|\b_load\s*\(/.test(c)) bad.push(`${rel}: a loader the census cannot follow`);   // process[…] (R3-F4)
+    }
+    return { files: [...seen.keys()], texts: seen, bad };
+  };
+  const onDisk = (over = {}) => ({ read: (rel) => (rel in over ? over[rel] : (() => { try { return fs.readFileSync(path.join(REPO, rel), 'utf-8'); } catch { return null; } })()), exists: (rel) => rel in over || fs.existsSync(path.join(REPO, rel)) });
+  const closureCensus = (over = {}) => {
+    const d = onDisk(over), cl = closureOf(REL, d.read, d.exists);
+    const prims = cl.files.flatMap((rel) => primsOf(cl.texts.get(rel)).map((p) => `${rel}: ${p.trim()}`));
+    const names = cl.files.flatMap((rel) => namesOf(cl.texts.get(rel)).map((p) => `${rel}: ${p}`));
+    return { files: cl.files, prims, names, bad: cl.bad, ok: prims.length === 1 && names.length === 0 && cl.bad.length === 0 };
+  };
+  const cc = closureCensus();
+  ok(cc.ok && cc.files.includes('src/rule-learning.js') && cc.files.includes('src/decision-model.js') && cc.files.length >= 3, `${REL} + the ${cc.files.length - 1} src-local modules it requires (transitively): EXACTLY 1 request primitive in all (${cc.prims.join('; ')}), the primitive named only where it is bound, every load followed, no network module`, { prims: cc.prims, names: cc.names, bad: cc.bad });
+  // CONTROLS — verify r2's own roads, each as a plant: every one RED on the census alone (the wire sweep of
+  // test-rule-learning ⑪b catches them by behaviour too)
+  const U2 = '    const u = json ? usageOf(json)';
+  const n3 = tm.replace(U2, "    if (status === 504) { const r2 = await fetch.call(null, url, { method: 'POST', headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' }, body: JSON.stringify({ ...body, provider: undefined }) }); status = r2.status; }\n" + U2);
+  const n1 = tm.replace(U2, "    if (status === 504) { const r2 = await require('./text-retry.js').again(url, key, { ...body, provider: undefined }); status = r2.status; }\n" + U2);
+  const HELPER = "'use strict';\nmodule.exports.again = (url, key, payload) => fetch(url, { method: 'POST', headers: { authorization: `Bearer ${key}` }, body: JSON.stringify(payload) });\n";
+  const alias = tm.replace(U2, "    const send = fetch; if (status === 502) await send(url, { method: 'POST', body: JSON.stringify({ model: body.model }) });\n" + U2);
+  const viaRl = (fs.readFileSync(path.join(REPO, 'src/rule-learning.js'), 'utf-8')).replace("const M = require('./decision-model.js');", "const M = require('./decision-model.js');\nconst https = require('https');");
+  const dyn = (fs.readFileSync(path.join(REPO, 'src/rule-learning.js'), 'utf-8')).replace("const M = require('./decision-model.js');", "const M = require('./decision-' + 'model.js');");
+  const rows = {
+    'N3 fetch.call( a non-ZDR retry': closureCensus({ [REL]: n3 }),
+    'N1 a helper the client requires': closureCensus({ [REL]: n1, 'src/server/text-retry.js': HELPER }),
+    'an alias of the primitive (const send = fetch)': closureCensus({ [REL]: alias }),
+    'a network module in a required module (rule-learning.js requires https)': closureCensus({ 'src/rule-learning.js': viaRl }),
+    'a computed require in the closure': closureCensus({ 'src/rule-learning.js': dyn }),
+  };
+  const missed = Object.entries(rows).filter(([n, r]) => r.ok || n3 === tm || n1 === tm || alias === tm || viaRl.length === dyn.length).map(([n]) => n);
+  ok(missed.length === 0, `CONTROLS (closure): ${Object.keys(rows).join(' · ')} — each RED`, Object.fromEntries(Object.entries(rows).map(([n, r]) => [n, { prims: r.prims.length, names: r.names, bad: r.bad }])));
+  const thawed = tm.replace(BODY_AT, 'const body = ({').replace(ROUTING, "provider: { zdr: true, data_collection: 'deny' }");
+  const N2B = "    if (tier.key === 'sonnet') body.provider.data_collection = 'allow';\n", N2C = "    const route = body.provider; if (tier.key === 'sonnet') route.zdr = false;\n";
+  const seals = {
+    'the freeze taken out (the routing a plain literal again)': thawed,
+    'N2b a nested write on the Sonnet tier': tm.replace('    ' + SERIAL, N2B + '    ' + SERIAL),
+    'N2c an alias of the routing written': tm.replace('    ' + SERIAL, N2C + '    ' + SERIAL),
+    'a spread copy without the routing serialized': tm.replace(SERIAL, 'const bytes = new TextEncoder().encode(JSON.stringify({ ...body, provider: undefined }));'),
+    'the serialized body edited on the Sonnet tier': tm.replace(SERIAL, "const bytes = new TextEncoder().encode(tier.key === 'sonnet' ? JSON.stringify(body).replace('\"zdr\":true', '\"zdr\":false') : JSON.stringify(body));"),
+    'the bytes edited before they are sent': tm.replace(SERIAL, SERIAL + " if (tier.key === 'sonnet') bytes[6] = 32;"),
+    'a string body again (Node re-sends it on a 421)': tm.replace(ONE_SHOT, "body: JSON.stringify(body), duplex: 'half',").replace(SERIAL, '').replace(", 'content-length': String(bytes.length)", ''),
+  };
+  const unsealed = Object.entries(seals).filter(([, x]) => x === tm || sealed(x)).map(([n]) => n);
+  ok(unsealed.length === 0, `CONTROLS (frozen + serialized once): ${Object.keys(seals).join(' · ')} — each RED`, Object.fromEntries(Object.entries(seals).map(([n, x]) => [n, sealOf(x)])));
+
+  // lane learn-card-untick (verify r3 R3-F3 / R3-F4) — (g) THE LITERAL'S SHAPE: its top-level keys are EXACTLY the request's
+  // seven (no spread; `provider` once — a second key or a spread inside it overrides the routing on the wire with the
+  // routing line still in the text), the client's code writes a `provider:` key ONCE (a branch's own literal is an
+  // override too), nothing follows the literal's `})` but `;` (`}) && Object.freeze({…})` re-creates the body after it),
+  // and the bytes are measured only as `String(bytes.length)` (a one-reference byte patch in that slot keeps the three
+  // names of (e)); (c) the closure census follows the three loader spellings r3 planted GREEN
+  const BODY_KEYS = ['model', 'messages', 'temperature', 'max_tokens', 'response_format', 'provider', 'usage'];
+  const topKeys = (lit) => {
+    const inner = lit.slice(lit.indexOf('{') + 1, lit.lastIndexOf('}')), parts = [];
+    let d = 0, q = null, cur = '';
+    for (const ch of inner) {
+      if (q) { cur += ch; if (ch === q) q = null; continue; }
+      if (ch === "'" || ch === '"' || ch === '`') q = ch;
+      else if ('([{'.includes(ch)) d++;
+      else if (')]}'.includes(ch)) d--;
+      if (ch === ',' && d === 0) { parts.push(cur.trim()); cur = ''; } else cur += ch;
+    }
+    if (cur.trim()) parts.push(cur.trim());
+    return parts.map((x) => (x.startsWith('...') ? '...' : (/^([A-Za-z_$][\w$]*)\s*(?::|$)/.exec(x) || [null, `?${x.slice(0, 24)}`])[1]));
+  };
+  const shapeOf = (text) => {
+    const c = code(text), lit = bodyLiteral(text), i = lit ? c.indexOf(lit) : -1;
+    return { keys: topKeys(lit), providerKeys: (c.match(/\bprovider\s*:/g) || []).length, closed: i >= 0 && /^\s*\)\s*;/.test(c.slice(i + lit.length)), measured: count(c, 'String(bytes.length)') };
+  };
+  const shaped = (text) => { const x = shapeOf(text); return JSON.stringify(x.keys) === JSON.stringify(BODY_KEYS) && x.providerKeys === 1 && x.closed && x.measured === 1; };
+  ok(shaped(tm), `${REL}: the request literal's keys are exactly ${BODY_KEYS.join(' · ')} (no spread, \`provider\` once in the client), nothing follows it but \`;\`, the bytes measured only as String(bytes.length)`, shapeOf(tm));
+  const CLOSE = '      usage: { include: true },\n    });', CL = "String(bytes.length)";
+  const LIT_AGAIN = "Object.freeze({ model: tier.id, messages, temperature: 0, max_tokens: outMax, response_format: { type: 'json_schema', json_schema: { name, strict: true, schema } }, usage: { include: true } })";
+  const shapes = {
+    'B2 a second provider key spread in on the Sonnet tier': tm.replace(CLOSE, "      usage: { include: true },\n      ...(tier.key === 'sonnet' ? { provider: { zdr: true } } : {}),\n    });"),
+    'a second provider key, plain': tm.replace(CLOSE, "      usage: { include: true },\n      provider: { zdr: false },\n    });"),
+    'B2b a spread of a tier field': tm.replace(CLOSE, '      usage: { include: true },\n      ...(tier.extra || {}),\n    });'),
+    'B2c a spread of a setting': tm.replace(CLOSE, '      usage: { include: true },\n      ...(s.learnProvider ? { provider: s.learnProvider } : {}),\n    });'),
+    'B1b the body re-created after the literal': tm.replace(CLOSE, `      usage: { include: true },\n    }) && ${LIT_AGAIN};`),
+    'B1c …only when a base URL is set': tm.replace(CLOSE, `      usage: { include: true },\n    }) && (baseUrl ? ${LIT_AGAIN} : null);`),
+    'a later body.provider = (a write after the freeze)': tm.replace('    ' + SERIAL, "    if (tier.key === 'sonnet') body.provider = { zdr: false };\n    " + SERIAL),
+    'B3 a one-reference byte patch where the bytes are measured': tm.replace(CL, "String(((b) => { if (tier.key === 'sonnet') b[b.length - 61] = 120; return b; })(bytes).length)"),
+  };
+  const unshaped = Object.entries(shapes).filter(([, x]) => x === tm || (shaped(x) && sealed(x) && bodyWrites(x) === 0)).map(([n]) => n);
+  ok(unshaped.length === 0, `CONTROLS (the literal's shape — verify r3 R3-F3, GREEN on (a)–(f)): ${Object.keys(shapes).join(' · ')} — each RED`, Object.fromEntries(Object.entries(shapes).map(([n, x]) => [n, { ...shapeOf(x), writes: bodyWrites(x) }])));
+  const TM_RL = "const RL = require('../rule-learning.js');";
+  const loaders = {
+    "process['binding'](…)": "const RAW = () => process['binding']('tcp_wrap');",
+    "require('module')._load('https')": "const RAW = () => require('module')._load('https');",
+    "require('_http_client')": "const RAW = () => require('_http_client').ClientRequest;",
+    "require('node:_tls_wrap')": "const RAW = () => require('node:_tls_wrap');",
+  };
+  const followed = Object.entries(loaders).filter(([, line]) => !tm.includes(TM_RL) || closureCensus({ [REL]: tm.replace(TM_RL, `${TM_RL}\n${line}`) }).ok).map(([n]) => n);
+  ok(followed.length === 0, `CONTROLS (closure — verify r3 R3-F4, GREEN before): ${Object.keys(loaders).join(' · ')} planted in the client — each RED`, Object.fromEntries(Object.entries(loaders).map(([n, line]) => [n, closureCensus({ [REL]: tm.replace(TM_RL, `${TM_RL}\n${line}`) }).bad])));
+}
+// lane judge-one-shot-body: BOTH vendor callers of the Decision API row (the rows marked `oneShot`: the judge's decisions
+// request and the text client's chat completions) send a ONE-SHOT body — by TOKEN. Node's fetch re-sends a body that has a
+// SOURCE (a string, bytes, a Buffer, a Blob — measured, all four) on an HTTP 421 over a new connection: empty, with every
+// header, the key included — a second request no count above ever saw (found by the status sweep, lane rule-learning-fix-r2).
+// Per row: the ONE request primitive's call (its argument text, read off the code) carries `body: M.oneShotBody(bytes),
+// duplex: 'half',` and NO other body key, the bytes' own `'content-length'` (never chunked) and `redirect: 'error'`; the
+// request is frozen where it is built and serialized ONCE into the bytes (named three times: made · measured · sent; `body`
+// twice: built · serialized); the row's file builds no stream of its own (ONE implementation — the PURE model's
+// oneShotBody); and the helper IS that stream: it hands the bytes over once, and refuses anything but bytes.
+{
+  const ROWS = Object.entries(ALLOW).filter(([, a]) => a.oneShot).map(([rel]) => rel);
+  const code = (text) => text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/\s\/\/ .*$/gm, '');
+  const SERIAL = 'const bytes = new TextEncoder().encode(JSON.stringify(body));';
+  const ONE_SHOT = "body: M.oneShotBody(bytes), duplex: 'half',";
+  const LENGTH = "'content-length': String(bytes.length)";
+  const BUILT = /const body = Object\.freeze\(/;
+  const count = (hay, needle) => hay.split(needle).length - 1;
+  /** the ONE request primitive call of a row's code: `fetch(` … its matching `)` (the default binding is no call) */
+  const callOf = (c) => {
+    const s = c.split('(...a) => globalThis.fetch(...a)').join(''), i = s.search(/\bfetch\s*\(/);
+    if (i < 0) return '';
+    for (let k = s.indexOf('(', i), d = 0; k < s.length; k++) { if (s[k] === '(') d++; else if (s[k] === ')' && --d === 0) return s.slice(i, k + 1); }
+    return '';
+  };
+  const oneShotOf = (text) => {
+    const c = code(text), call = callOf(c);
+    const f = { call: call.length > 0, oneShot: count(call, ONE_SHOT) === 1, oneBody: (call.match(/\bbody\s*:/g) || []).length === 1, length: call.includes(LENGTH), noRedirect: call.includes("redirect: 'error'"),
+      frozen: BUILT.test(c), serialOnce: count(c, SERIAL) === 1 && count(c, 'JSON.stringify(body)') === 1,
+      bytes3: (c.match(/\bbytes\b/g) || []).length === 3, body2: (c.match(/\bbody\b(?!\s*:)/g) || []).length === 2, noOwnStream: !/\bReadableStream\b/.test(c) };
+    return { ...f, ok: Object.values(f).every(Boolean), broken: Object.keys(f).filter((k) => !f[k]) };
+  };
+  const rowText = Object.fromEntries(ROWS.map((rel) => [rel, fs.readFileSync(path.join(REPO, rel), 'utf-8')]));
+  ok(ROWS.length === 2 && ROWS.includes('src/server/decision-engine.js') && ROWS.includes('src/server/text-model-client.js'), `the rows marked oneShot are BOTH vendor callers of the Decision API row (${ROWS.join(', ')})`);
+  for (const rel of ROWS) ok(oneShotOf(rowText[rel]).ok, `${rel}: its ONE request carries \`${ONE_SHOT}\` (no other body), its length and redirect: 'error'; the body frozen, serialized ONCE (bytes ×3, body ×2), no stream of its own`, oneShotOf(rowText[rel]));
+  // the helper: ONE implementation in the PURE model, and it IS a one-shot stream of the bytes (a behaviour read)
+  const DM_REL = 'src/decision-model.js', dmCode = code(fs.readFileSync(path.join(REPO, DM_REL), 'utf-8'));
+  const STREAM = 'return new ReadableStream({ start(c) { c.enqueue(bytes); c.close(); } });';
+  const streams = files.map((f) => path.relative(REPO, f)).filter((rel) => { try { return /\bnew\s+ReadableStream\b/.test(code(fs.readFileSync(path.join(REPO, rel), 'utf-8'))); } catch { return false; } });
+  const DMod = require(path.join(REPO, DM_REL));
+  const probe = new TextEncoder().encode('{"q":1}');
+  const st = DMod.oneShotBody(probe), rd = st instanceof ReadableStream ? st.getReader() : null, r1 = rd ? await rd.read() : {}, r2 = rd ? await rd.read() : {};   // no stream ⇒ RED by name, never a crash
+  let refused = false; try { DMod.oneShotBody('{"q":1}'); } catch (e) { refused = e instanceof TypeError; }
+  ok(count(dmCode, STREAM) === 1 && /function oneShotBody\(bytes\) \{/.test(dmCode) && streams.join() === DM_REL && st instanceof ReadableStream && r1.value === probe && r2.done === true && refused,
+    `the ONE implementation: ${DM_REL}'s oneShotBody (the only server-tier file that builds a request stream: ${streams.join(', ')}) — a stream that hands the bytes over ONCE (then done), and a string is refused (TypeError: nothing is sent)`, { streams, once: r1.value === probe, done: r2.done, refused });
+  // CONTROLS — each shape planted in EACH row is RED (the matrix): the four bodies with a source Node re-sends on a 421, a
+  // stream of the row's own, the length dropped (chunked), redirects followed, a second body key after the one-shot one
+  const PLANTS = {
+    'a string body': [ONE_SHOT, "body: JSON.stringify(body), duplex: 'half',"],
+    'the bytes as the body': [ONE_SHOT, "body: bytes, duplex: 'half',"],
+    'a Buffer': [ONE_SHOT, "body: Buffer.from(bytes), duplex: 'half',"],
+    'a Blob': [ONE_SHOT, "body: new Blob([bytes]), duplex: 'half',"],
+    'a stream of its own': [ONE_SHOT, "body: new ReadableStream({ start(c) { c.enqueue(bytes); c.close(); } }), duplex: 'half',"],
+    'the length dropped': [', ' + LENGTH, ''],
+    'redirects followed': [", redirect: 'error' });", ' });'],
+    'a second body key': [", redirect: 'error' });", ", redirect: 'error', body: JSON.stringify(body) });"],
+  };
+  const matrix = {};
+  for (const rel of ROWS) for (const [name, [from, to]] of Object.entries(PLANTS)) {
+    const t = rowText[rel], m = t.replace(from, to);
+    matrix[`${rel.split('/').pop()} · ${name}`] = m === t ? 'ANCHOR MISSING' : oneShotOf(m).ok ? 'GREEN' : `RED (${oneShotOf(m).broken.join(', ')})`;
+  }
+  const green = Object.entries(matrix).filter(([, v]) => !v.startsWith('RED'));
+  console.log(`    one-shot matrix: ${Object.entries(matrix).map(([k, v]) => `${k} ⇒ ${v.split(' ')[0]}`).join(' · ')}`);
+  ok(green.length === 0 && Object.keys(matrix).length === ROWS.length * Object.keys(PLANTS).length, `CONTROLS (one-shot, ${Object.keys(matrix).length}): ${Object.keys(PLANTS).join(' · ')} — planted in EACH row, each RED`, green.length ? green : matrix);
 }
 for (const [rel, a] of Object.entries(ALLOW)) {
   ok(constructions[rel] > 0, `${rel} still holds its allowlisted vendor call (moved/renamed ⇒ update the allowlist)`);

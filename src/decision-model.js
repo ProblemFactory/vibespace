@@ -21,6 +21,8 @@
  *    recorded cost, else the reservation; an answered 4xx / 5xx costs 0); `nextBackoff` — a wall is never retried;
  *  · `rowStopOf` — the answers that stop the ROW until the owner changes the key or the model (401 / 403 the key,
  *    402 the plan, 400 the request's shape — lane decision-vendor-hygiene), never a call a record;
+ *  · `oneShotBody` — THE request body of both vendor callers of the row (the judge and the text client): the bytes
+ *    serialized once, handed over once, never re-sent by the platform (lane judge-one-shot-body);
  *  · `scrubQuestions` — the owner's words that ride the QUESTIONS (a rule's condition, a choice's description) pass
  *    the ONE scrub too, before buildRequest (lane decision-vendor-hygiene);
  *  · `journalRow` — what a call leaves behind: never the key, never a text the vendor or a peer wrote;
@@ -57,7 +59,7 @@ const RETRY_AFTER_MAX_MS = 60 * 60 * 1000;   // a 429's Retry-After is honoured 
 const RATE_MIN_CALLS = 20;                   // recorded-cost calls before the row's own average prices the estimate
 const MEMO_MAX = 5000;
 const FEATURES = Object.freeze(['attention', 'rules', 'routing', 'inbox']);   // inbox = use ④, the For-you tray's two sections (lane inbox-decision-group)
-const WHY = Object.freeze(['plugin-off', 'feature-off', 'no-key', 'account-never', 'reconnect', 'plan', 'shape', 'backoff', 'daily-budget', 'per-hour']);
+const WHY = Object.freeze(['plugin-off', 'feature-off', 'no-key', 'account-never', 'reconnect', 'plan', 'shape', 'backoff', 'daily-budget', 'use-budget', 'per-hour']);   // + use-budget: a use's own cap a day (lane rule-learning)
 
 const DIALECTS = Object.freeze({
   openai: { baseUrl: 'https://api.openai.com', path: '/v1/decisions' },
@@ -354,9 +356,11 @@ function rateOf(stats, pricePerMtok = PRICE_PER_MTOK_USD.openai) {
  *  step as this verdict, so N calls in flight can never all pass one ceiling (decision-verify F2).
  *  → {ok:true, ceilingUsd} | {ok:false, why ∈ WHY, retryAt?}. Order: the switches, the key, the account, a key the
  *  provider refused, the plan / the request shape it refused (the row stops — lane decision-vendor-hygiene), then the
- *  walls (a backoff names its end), then the money, then the hour. */
+ *  walls (a backoff names its end), then the money, then the hour. A USE'S OWN CAP (lane rule-learning: `learn`, the
+ *  text model that drafts the person's block): `useSpentUsd` (that use's settled + reserved today) + this estimate against
+ *  `useCeilingCents` — INSIDE the daily budget, never beside it (the day's money is asked first). */
 function budgetVerdict({ pluginOn = false, featureOn = false, keyPresent = false, accountNever = false, reconnect = false, plan = false, shape = false, backoffUntil = 0, now = 0,
-  spentUsd = 0, estUsd = 0, ceilingCents = undefined, ceilingUsd = undefined, hourCount = 0, perHour = Infinity } = {}) {
+  spentUsd = 0, estUsd = 0, ceilingCents = undefined, ceilingUsd = undefined, hourCount = 0, perHour = Infinity, useSpentUsd = 0, useCeilingCents = undefined } = {}) {
   const cents = ceilingCents !== undefined ? Number(ceilingCents) : ceilingUsd !== undefined ? Number(ceilingUsd) * 100 : DAILY_BUDGET_CENTS_DEFAULT;
   const ceiling = (Number.isFinite(cents) && cents >= 0 ? cents : DAILY_BUDGET_CENTS_DEFAULT) / 100;
   if (!pluginOn) return { ok: false, why: 'plugin-off' };
@@ -368,17 +372,48 @@ function budgetVerdict({ pluginOn = false, featureOn = false, keyPresent = false
   if (shape) return { ok: false, why: 'shape' };
   if (Number(backoffUntil) > Number(now)) return { ok: false, why: 'backoff', retryAt: Number(backoffUntil) };
   if (microUsd(spentUsd) + microUsd(estUsd) > microUsd(ceiling)) return { ok: false, why: 'daily-budget', ceilingUsd: ceiling };
+  const useCap = useCeilingCents === undefined || useCeilingCents === null ? null : Number(useCeilingCents);
+  if (useCap !== null && Number.isFinite(useCap) && microUsd(useSpentUsd) + microUsd(estUsd) > microUsd(Math.max(0, useCap) / 100)) return { ok: false, why: 'use-budget', ceilingUsd: Math.max(0, useCap) / 100 };
   if ((Number(hourCount) || 0) >= perHour) return { ok: false, why: 'per-hour' };
   return { ok: true, ceilingUsd: ceiling };
 }
 /** What a call finally costs (SETTLE replaces its reservation): an answered 4xx / 5xx = 0 (the provider refused or
  *  failed before judging — OpenAI and OpenRouter bill no error answer); the vendor's recorded `usage.cost` when it
  *  said one; else the larger of the reservation and the vendor's input tokens × price — a 200 without usage, a body
- *  that never parsed, a timeout or a dropped connection (status 0: it may have been judged) keep the reservation. */
-function settleUsd({ status = 0, usage = null, reservedUsd = 0, pricePerMtok = PRICE_PER_MTOK_USD.openai } = {}) {
+ *  that never parsed, a timeout or a dropped connection (status 0: it may have been judged) keep the reservation.
+ *  `failed` (lane rule-learning-fix L3 — the judge and the text client alike) = `fetchFailOf`'s name for the request
+ *  primitive's failure: 'unsent' (nothing left the box) and 'redirect' (a 3xx, never followed — nothing was generated)
+ *  cost 0, so the reservation is RELEASED, never settled. */
+function settleUsd({ status = 0, usage = null, reservedUsd = 0, pricePerMtok = PRICE_PER_MTOK_USD.openai, failed = null } = {}) {
   if (status >= 400 && status <= 599) return 0;
+  if (failed === 'unsent' || failed === 'redirect') return 0;
   if (usage && usage.costUsd !== null && usage.costUsd !== undefined) return usage.costUsd;
   return microUsd(Math.max(Number(reservedUsd) || 0, estimateUsd(usage && usage.inputTokens, pricePerMtok))) / 1e8;
+}
+/** THE request primitive's failure, by name (lane rule-learning-fix L2 / L3 — the judge's fetch and the text client's
+ *  share it): 'redirect' = the vendor's URL answered a 3xx and `redirect: 'error'` refused to follow it (nothing goes to
+ *  another origin); 'unsent' = nothing left the box (a refused / unresolvable connection, an unreachable network, a bad
+ *  URL, a TLS failure — a connect-phase code on the error or one of its causes); null = anything else (a timeout, a
+ *  reset mid-answer): the request may have reached the vendor, so its reservation stays charged. */
+const UNSENT_CODES = Object.freeze(['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'EAI_NONAME', 'ENETUNREACH', 'EHOSTUNREACH', 'EADDRNOTAVAIL', 'ERR_INVALID_URL',
+  'UND_ERR_CONNECT_TIMEOUT', 'CERT_HAS_EXPIRED', 'DEPTH_ZERO_SELF_SIGNED_CERT', 'SELF_SIGNED_CERT_IN_CHAIN', 'UNABLE_TO_VERIFY_LEAF_SIGNATURE', 'ERR_TLS_CERT_ALTNAME_INVALID']);
+function fetchFailOf(err) {
+  for (let e = err, i = 0; e && typeof e === 'object' && i < 4; e = e.cause, i++) {
+    if (e.message === 'unexpected redirect') return 'redirect';   // Node's fetch words a 3xx under redirect: 'error' so
+    if (UNSENT_CODES.includes(e.code)) return 'unsent';
+  }
+  return null;
+}
+/** THE ONE-SHOT REQUEST BODY (lane judge-one-shot-body) — ONE implementation for both vendor callers of the Decision API
+ *  row (the judge's decisions request, the text client's chat completions). `bytes` = the request serialized ONCE (a
+ *  Uint8Array — anything else throws, so nothing is sent); the answer is a stream that hands them over once and has no
+ *  SOURCE, so the platform can never send them again. Node's fetch re-sends a body that has a source (a string, bytes,
+ *  a Buffer, a Blob) on an HTTP 421 over a new connection: empty, but with every header, the key included — a second
+ *  request (measured on Node 24: lane rule-learning-fix-r2, and judge-one-shot-body for all four shapes). The caller
+ *  sends it with `duplex: 'half'` and its own `content-length` (the framing a string had: never chunked). */
+function oneShotBody(bytes) {
+  if (!(bytes instanceof Uint8Array)) throw new TypeError('oneShotBody takes the serialized request bytes');
+  return new ReadableStream({ start(c) { c.enqueue(bytes); c.close(); } });
 }
 /** A 429's Retry-After (delta seconds or an HTTP date) in ms from `now`; null when absent / unreadable / past. */
 function retryAfterMs(header, now = 0) {
@@ -409,7 +444,8 @@ const rowStopOf = (status) => (isKeyRefused(status) ? 'reconnect' : status === 4
 
 /** A journal line: a fixed field list (no key, no text of anyone's) — the key only as its 6-character fingerprint. */
 // + `p` (lane decision-attention-facts): an attention call's needs_now, 2 decimals — the next quality check needs no memo join
-const JOURNAL_FIELDS = Object.freeze(['at', 'use', 'memo', 'dialect', 'model', 'outcome', 'why', 'status', 'inputTokens', 'outputTokens', 'reserved', 'usd', 'est', 'truncated', 'n', 'keyFp', 'rubric', 'hits', 'p']);
+// + `zdr` (lane rule-learning): a text-model call says it went through the zero-data-retention routing (always true — no other is sent)
+const JOURNAL_FIELDS = Object.freeze(['at', 'use', 'memo', 'dialect', 'model', 'outcome', 'why', 'status', 'inputTokens', 'outputTokens', 'reserved', 'usd', 'est', 'truncated', 'n', 'keyFp', 'rubric', 'hits', 'p', 'zdr']);
 function journalRow(o = {}) {
   const row = {};
   for (const k of JOURNAL_FIELDS) {
@@ -647,12 +683,14 @@ function addExample(list, ex, max = EXAMPLES_KEPT) {
   return out;
 }
 /** What an input carries: the person's own labels FIRST (the newest ≤ n, oldest first among them), then the implicit
- *  ones fill the slots left (marked `inferred`) — the plan keeps the LAST of the list it is handed, ≤ n in all. */
-function examplesForInput(list, n = EXAMPLES_SENT) {
+ *  ones fill the slots left (marked `inferred`) — the plan keeps the LAST of the list it is handed, ≤ n in all.
+ *  `{clauses: true}` (lane rule-learning — the block drafter): each also carries the clause names the judge had named. */
+function examplesForInput(list, n = EXAMPLES_SENT, { clauses = false } = {}) {
   const all = Array.isArray(list) ? list : [];
   const mine = all.filter((x) => x && !isImplicit(x)).slice(0, n);
   const inferred = all.filter(isImplicit).slice(0, Math.max(0, n - mine.length));
-  return [...mine.reverse().map((x) => ({ snippet: x.snippet, verdict: x.verdict })), ...inferred.reverse().map((x) => ({ snippet: x.snippet, verdict: x.verdict, inferred: true }))];
+  const named = (x) => (clauses ? { clauses: Array.isArray(x.clauses) ? x.clauses.slice() : [] } : {});
+  return [...mine.reverse().map((x) => ({ snippet: x.snippet, verdict: x.verdict, ...named(x) })), ...inferred.reverse().map((x) => ({ snippet: x.snippet, verdict: x.verdict, inferred: true, ...named(x) }))];
 }
 /** AN IMPLICIT LABEL off what the owner did (the switch `decision.implicitLabels`, off by default): 'needs' when they
  *  replied after the judged message within 24 h of the verdict (`row.selfAt`); 'not' when a row judged at or above the
@@ -883,8 +921,8 @@ function inboxRank(items, now = 0) {
 // Settings › Spending. Words go through the caller's `t` (the client's device words; a `{name}` filler stands in
 // for a test). Money that moved is NEVER drawn as $0.00: under a cent with calls > 0 is 「< $0.01」.
 const READOUT_WARN_AT = 0.9;                                   // ≥ 90 % of the day's cap ⇒ the line turns red
-const READOUT_USES = Object.freeze(['attention', 'inbox', 'rule', 'routing', 'webhook', 'test']);   // the title's order
-const useWord = (k, t) => ({ attention: t('Needs attention'), inbox: t('For-you tray'), rule: t('Rules'), routing: t('Routing'), webhook: t('Webhooks'), test: t('Test') })[k] || k;
+const READOUT_USES = Object.freeze(['attention', 'inbox', 'rule', 'routing', 'webhook', 'learn', 'test']);   // the title's order (+ learn: lane rule-learning)
+const useWord = (k, t) => ({ attention: t('Needs attention'), inbox: t('For-you tray'), rule: t('Rules'), routing: t('Routing'), webhook: t('Webhooks'), learn: t('Block drafts'), test: t('Test') })[k] || k;
 const fillWords = (s, v = {}) => String(s).replace(/\{(\w+)\}/g, (m, k) => (Object.prototype.hasOwnProperty.call(v, k) ? String(v[k]) : m));
 const num0 = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : 0);
 /** `$1.23` · `< $0.01` when anything moved under a cent · `$0` when nothing did. `fine` (the by-use title) keeps a
@@ -952,5 +990,5 @@ module.exports = {
   dialectOf, urlOf, questionError, buildRequest, normalizeAnswers, usageOf, estimateUsd, usdOf, estTokens, questionTokens,
   cutHeadTail, fitTokens, maskAddresses, eraseSecrets, scrub, cleanPart, scrubQuestions, inputPlan, buildInput, memoMaterial, memoKey, batchQuestions, unbatchAnswers,
   READOUT_WARN_AT, READOUT_USES, moneyText, decisionTodayLine, monthSpend,   // lane decision-spend-readout
-  dayOf, rateOf, budgetVerdict, settleUsd, retryAfterMs, nextBackoff, isWall, isKeyRefused, ROW_STOPS, rowStopOf, journalRow, rubricQuestions, rubricText, attentionVerdict, criteriaProposal,
+  dayOf, rateOf, budgetVerdict, settleUsd, fetchFailOf, oneShotBody, retryAfterMs, nextBackoff, isWall, isKeyRefused, ROW_STOPS, rowStopOf, journalRow, rubricQuestions, rubricText, attentionVerdict, criteriaProposal,
 };

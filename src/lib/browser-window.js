@@ -1,6 +1,7 @@
 import { t } from './i18n.js';
 import { escHtml } from './utils.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
+import { enterSubmits } from './chat-enter-keys.js';
 
 /**
  * Open an embedded browser window with URL bar, proxy toggle, and error overlay.
@@ -93,7 +94,7 @@ export function openBrowser(app, url, { syncId, proxy = false } = {}) {
     }
   });
 
-  urlInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') navigate(urlInput.value); });
+  urlInput.addEventListener('keydown', (e) => { if (enterSubmits(e)) navigate(urlInput.value); });
   goBtn.onclick = () => navigate(urlInput.value);
 
   container.append(urlBar, iframe, errorMsg);

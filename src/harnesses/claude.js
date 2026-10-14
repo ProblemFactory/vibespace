@@ -40,7 +40,7 @@ find "$HOME/.claude/sessions" -maxdepth 1 -name '*.json' 2>/dev/null | while rea
 done
 ${sweepSharedLegs()}`;
 }
-const { loginState } = require('../login-expiry'); // PURE: refreshTokenExpiresAt -> ok/expiring/expired/logged-out/unknown
+const { loginState, oatFileOf } = require('../login-expiry'); // PURE: refreshTokenExpiresAt -> ok/expiring/expired/logged-out/unknown; oatFileOf = OUR materialized long-lived-token file
 const { HARNESS_SETTINGS } = require('../harness-settings'); // PURE: THE declared settings table (design-harness-settings §2)
 const { cliConfigFile } = require('../harness-config');       // SHARED: the descriptor-side file object over the table's `files` entry
 const fs = require('fs');
@@ -66,7 +66,9 @@ function parseClaudeAuth(dir) {
         org = cfg?.oauthAccount?.organizationName || null;
       } catch { }
     }
-    return { loggedIn: true, subscriptionType: o.subscriptionType || null, email, org, accessToken: valid ? o.accessToken : null, expiresAt: o.expiresAt || null };
+    // oatFile: the file is the long-lived token VibeSpace MATERIALIZED (lane pool-oat-materialize) —
+    // the CLI reads it like a login, but there is no OAuth login in it (no refresh token)
+    return { loggedIn: true, subscriptionType: o.subscriptionType || null, email, org, accessToken: valid ? o.accessToken : null, expiresAt: o.expiresAt || null, ...(oatFileOf(raw) ? { oatFile: true } : {}) };
   } catch { return { loggedIn: false }; }
 }
 

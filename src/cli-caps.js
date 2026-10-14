@@ -22,14 +22,16 @@ const OAT_VARIANTS = Object.freeze(['oat-file', 'oat-env', 'oat-file-401', 'oat-
 // the three that must be PASS
 const OAT_IN_FILE_GATE = Object.freeze(['oat-file', 'oat-file-401', 'oat-file-switch']);
 
-/** '2.1.296 (Claude Code)' / 'v2.1.296' / '2.1.296' → '2.1.296'; anything else → null. */
+/** '2.1.296 (Claude Code)' / 'v2.1.296' / '2.1.296' → '2.1.296'. A pre-release / build suffix is KEPT
+ *  ('2.1.296-dev.1' is another build, never the measured release — pool-oat-materialize verify r1 F9);
+ *  anything else → null. */
 function cliVersionOf(v) {
-  const m = /^\s*v?(\d+\.\d+\.\d+)(?![\d.])/.exec(String(v == null ? '' : v));
+  const m = /^\s*v?(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.+-]+)?)(?=\s|$)/.exec(String(v == null ? '' : v));
   return m ? m[1] : null;
 }
 
-/** true only when `fixture` measured exactly this CLI version and named every
- *  gate variant PASS (an own property, verdict exactly 'PASS'). */
+/** true only when `fixture` measured EXACTLY this CLI version string (a build suffix is another
+ *  version) and named every gate variant PASS (an own property, verdict exactly 'PASS'). */
 function oatInFile(version, fixture) {
   const v = cliVersionOf(version);
   if (!v || !fixture || typeof fixture !== 'object') return false;
