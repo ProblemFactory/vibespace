@@ -11,6 +11,11 @@
 //   ⑥ teardownScript for real on this machine: a process carrying the run id, one whose cwd is under the snap and one
 //     naming the snap in its argv are killed and named; an unrelated sleeper survives (CONTROL: a copy keyed on another
 //     id kills nothing of the run)
+//   ⑦ THE DESKTOP BATCH (lane ci-aidev-desktop-batch, q-038 step ①): --batch refusals; the batch LOAD RULE (8 at
+//     ≥ 40 GB); the batch = THIS tree's ci.mjs HOSTS self-hosted set (desktop + binary) — and cut by an affected range
+//     inside it; a tree with no host rule is refused, never guessed; its run script hands ci.mjs a private env per
+//     lane (VIBESPACE_CI_LANE_ROOT) + the serial lane beside the floor suite + the memory line (CONTROL: a non-batch
+//     run carries none of it); the box's measured GTK row against the tree's rows (match / no row / disagree / none)
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -88,6 +93,37 @@ try {
   ok(['env', 'cwd', 'argv'].every((w) => td.stdout.includes(`(by ${w})`)) && /3 process\(es\) TERMed/.test(td.stdout), '⑥ each one named with what tied it to the run');
   ok(alive(by.pid), '⑥ the bystander survives');
   for (const k of [...kids, by]) { try { process.kill(k.pid, 'SIGKILL'); } catch { } }
+  // ⑦ the desktop batch
+  const b = R.parseArgs(['--host', 'aidev', '--snapshot', '/t', '--batch', 'desktop', '--lanes', '8', '--range', 'a..b']);
+  ok(b.batch === 'desktop' && b.lanes === '8' && b.range === 'a..b', '⑦ parseArgs: --batch desktop (with --lanes and an affected --range)');
+  ok(throws(() => R.parseArgs(['--host', 'h', '--snapshot', '/t', '--batch', 'laptop']), /--batch wants desktop/)
+    && throws(() => R.parseArgs(['--host', 'h', '--snapshot', '/t', '--batch', 'desktop', '--only', 'x']), /--batch IS the selection/)
+    && throws(() => R.parseArgs(['--host', 'h', '--snapshot', '/t', '--batch', 'desktop', '--shard', '1/2']), /--batch IS the selection/),
+    '⑦ an unknown batch, --batch with --only and --batch with --shard are refused by name');
+  ok([45, 40, 39, 25, 24].map((g) => R.loadRule(g, { batch: true })).join() === '8,8,4,4,2' && R.loadRule(45) === 4, '⑦ the batch LOAD RULE: ≥ 40 GB ⇒ 8 · ≥ 25 ⇒ 4 · else 2 (the tier\'s stays 4 / 2 / 1)');
+  const srcOf = (n) => { try { return fs.readFileSync(path.join(REPO, 'scripts', n + '.mjs'), 'utf-8'); } catch { return ''; } };
+  const self = CI.hostPlan(heavy, { sourceOf: srcOf }).self.map((s) => s.name).sort();
+  const bt = R.selectSlice(CI, { tree: REPO, batch: 'desktop' });
+  ok(self.length > 20 && bt.names.slice().sort().join() === self.join() && /--batch desktop: the \d+ self-hosted/.test(bt.summary),
+    `⑦ the batch IS the tree's self-hosted set (${bt.names.length} of ${heavy.length}: ci.mjs hostPlan .self)`);
+  const bta = R.selectSlice(CI, { tree: REPO, batch: 'desktop', changed: ['package.json'], range: 'x..y' });
+  ok(bta.names.slice().sort().join() === self.join(), '⑦ an affected batch selects inside the self-hosted set (a global input ⇒ all of it, none of the hosted)');
+  ok(throws(() => R.selectSlice({ SUITES: CI.SUITES }, { tree: REPO, batch: 'desktop' }), /no HOSTS rule/), 'CONTROL ⑦ a tree whose ci.mjs predates the host rule is refused (never a guessed list)');
+  const brs = R.runScript({ snap: '/s', id: 'RID', names: ['test-a'], head: 'h', lanes: null, batch: 'desktop' });
+  const nrs = R.runScript({ snap: '/s', id: 'RID', names: ['test-a'], head: 'h', lanes: null });
+  ok(/VIBESPACE_CI_LANE_ROOT="\$S\/lanes"/.test(brs) && /--serial-overlap=1/.test(brs) && /then echo 8; elif \[ \$avail -ge 25 \]; then echo 4/.test(brs) && /MemAvailable lowest/.test(brs),
+    '⑦ the batch run script: a private env per lane (VIBESPACE_CI_LANE_ROOT), the serial lane beside the floor suite, the batch LOAD RULE, the memory line');
+  ok(!/VIBESPACE_CI_LANE_ROOT|--serial-overlap/.test(nrs) && /then echo 4; elif/.test(nrs), 'CONTROL ⑦ a non-batch run script carries none of the batch\'s lane env');
+  const rows = { '4.22': { calculator: '50.0', calcSize2x: [720, 1232], calcMin2x: [720, 1232], calcButtonBound: true, pushButtonRole: 'button' }, '4.14': { calculator: '46.3', calcSize2x: [720, 1004], calcMin2x: [694, 980], calcButtonBound: false, pushButtonRole: 'push button' } };
+  const box = (o) => JSON.stringify({ gtk: '4.14.5', calculator: '46.3', atspi: '2.52.0', calcSize2x: [720, 1004], calcMinFirst2x: [694, 1004], calcMin2x: [694, 980], calcButtonBound: false, pushButtonRole: 'push button', ...o });
+  ok(R.gtkRowVerdict(box({}), rows).ok, '⑦ the GTK row: a box measuring what the tree\'s "4.14" row says is accepted');
+  ok(!R.gtkRowVerdict(box({ gtk: '4.18.1' }), rows).ok && /NO row[\s\S]*under "4\.18"/.test(R.gtkRowVerdict(box({ gtk: '4.18.1' }), rows).why), '⑦ a GTK the tree has no row for is refused, naming the row to check in');
+  ok(/disagrees[\s\S]*calcMin2x/.test(R.gtkRowVerdict(box({ calcMin2x: [694, 1004] }), rows).why) && /pushButtonRole/.test(R.gtkRowVerdict(box({ pushButtonRole: 'button' }), rows).why) && R.gtkRowVerdict(box({ calcMinFirst2x: [694, 980] }), rows).ok,
+    '⑦ a box that measures differently from its row is refused (the field named)');
+  ok(!R.gtkRowVerdict('', rows).ok && /ci-provision-aidev\.sh/.test(R.gtkRowVerdict('', rows).why), '⑦ a box that never measured is refused, naming the provision step');
+  const fx = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts', 'fixtures', 'gtk-rows.json'), 'utf-8')).rows;
+  ok(fx['4.22'] && fx['4.14'] && fx['4.22'].calcMin2x.join() === '720,1232' && fx['4.22'].calcButtonBound === true && fx['4.14'].calcMin2x.join() === '694,980' && fx['4.14'].pushButtonRole === 'push button',
+    '⑦ the checked-in rows carry the hub (4.22) and AIDev (4.14), as measured inside xpra');
 } finally {
   fs.rmSync(D, { recursive: true, force: true });
 }

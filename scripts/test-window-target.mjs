@@ -40,7 +40,7 @@ import http from 'node:http';
 import net from 'node:net';
 import { spawn, execFile, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, freePort } from './scratch.mjs';
+import { scratch, freePort, gtkRow } from './scratch.mjs';
 import { windowLiveMode, windowModeBadge, leaseTransition, newViewerId } from '../src/lib/window-live-mode.js';
 
 const require = createRequire(import.meta.url);
@@ -605,9 +605,12 @@ async function laneE() {
     const sh1 = await cli('vsst_aaaa', 'screenshot', C, '--out', shotFile);
     const png = fs.existsSync(shotFile) ? fs.readFileSync(shotFile) : Buffer.alloc(0);
     const pw = png.length > 24 ? png.readUInt32BE(16) : 0, ph = png.length > 24 ? png.readUInt32BE(20) : 0;
-    ok(sh1.code === 0 && png.slice(0, 8).toString('hex') === '89504e470d0a1a0a' && pw === 720 && ph === 1232 && /the window's own pixels \(origin 0,0 on its display, scale 2×\)/.test(sh1.out) && !/BLANK/.test(sh1.out), `pixels: \`screenshot\` = the window's OWN image ${pw}x${ph} (scale 2), window coordinates named — "${sh1.out.trim().slice(0, 160)}"`);
+    // the calculator's window at 2× is THIS box's measured row (B-4260 — scripts/fixtures/gtk-rows.json calcSize2x:
+    // 720×1232 on the hub's GTK 4.22, 720×1004 on AIDev's 4.14), never the hub's pixels
+    const G = gtkRow();
+    ok(sh1.code === 0 && png.slice(0, 8).toString('hex') === '89504e470d0a1a0a' && pw === G.calcSize2x[0] && ph === G.calcSize2x[1] && /the window's own pixels \(origin 0,0 on its display, scale 2×\)/.test(sh1.out) && !/BLANK/.test(sh1.out), `pixels: \`screenshot\` = the window's OWN image ${pw}x${ph} (scale 2), window coordinates named — "${sh1.out.trim().slice(0, 160)}"`);
     // where is "7"? the tree's WINDOW-relative extents (GTK4's screen extents are all 0,0 — measured) × the scale, read test-side
-    const py = await run('python3', ['-c', `import gi\ngi.require_version('Atspi','2.0')\nfrom gi.repository import Atspi\npids=set(${JSON.stringify(keeper.sessionPids(keeper.get(C)))})\nd=Atspi.get_desktop(0)\ndef walk(a):\n  if a.get_role_name()=='button' and a.get_name()=='7':\n    e=a.get_component_iface().get_extents(Atspi.CoordType.WINDOW); print(e.x,e.y,e.width,e.height); raise SystemExit\n  for i in range(a.get_child_count()): walk(a.get_child_at_index(i))\nfor i in range(d.get_child_count()):\n  app=d.get_child_at_index(i)\n  if app.get_process_id() in pids: walk(app)`], base, 20000);
+    const py = await run('python3', ['-c', `import gi\ngi.require_version('Atspi','2.0')\nfrom gi.repository import Atspi\npids=set(${JSON.stringify(keeper.sessionPids(keeper.get(C)))})\nd=Atspi.get_desktop(0)\ndef walk(a):\n  if a.get_role_name()==${JSON.stringify(G.pushButtonRole)} and a.get_name()=='7':\n    e=a.get_component_iface().get_extents(Atspi.CoordType.WINDOW); print(e.x,e.y,e.width,e.height); raise SystemExit\n  for i in range(a.get_child_count()): walk(a.get_child_at_index(i))\nfor i in range(d.get_child_count()):\n  app=d.get_child_at_index(i)\n  if app.get_process_id() in pids: walk(app)`], base, 20000);
     const b7 = py.stdout.trim().split(/\s+/).map(Number);
     const at7 = b7.length === 4 ? `${Math.round((b7[0] + b7[2] / 2) * 2)},${Math.round((b7[1] + b7[3] / 2) * 2)}` : '86,876';
     const c7 = await cli('vsst_aaaa', 'click', C, '--at', at7);

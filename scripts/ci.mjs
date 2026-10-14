@@ -106,7 +106,18 @@
 //                                        never the tier's verdict; --dry-run
 //                                        lists the slice (no lock, no build);
 //                                        with --only / --affected: exit 2
-//   node scripts/ci.mjs --list-affected --range=<old>..<new> [--shard <i>/<n>]
+//   node scripts/ci.mjs --heavy --host=<desktop|binary|self|hosted> [--shard <i>/<n>]
+//                                        the heavy suites ONE RUNNER runs (HOSTS —
+//                                        derived from the programs a suite's code
+//                                        names): `self` = desktop + binary, the
+//                                        self-hosted DESKTOP batch (ci-remote.mjs
+//                                        --batch desktop on AIDev); `hosted` = the
+//                                        Actions matrix (its --shard split is LPT
+//                                        over scripts/fixtures/ci-shard-timings.json)
+//   node scripts/ci.mjs --hosts          the partition: every self-hosted suite with
+//                                        the program it names, the sums, and the diff
+//                                        against the design's census (q-038)
+//   node scripts/ci.mjs --list-affected --range=<old>..<new> [--shard <i>/<n>] [--host=<h>]
 //                                        the heavy suites that range selects (one
 //                                        slice of them with --shard), comma-joined
 //                                        for --only; scripts/ci-remote.mjs runs
@@ -130,7 +141,16 @@
 // --lock=<file> + --lock-wait-ms=<n> (the machine lock — a test drives its own
 // so it never contends with, or waits for, a real heavy run).
 // VIBESPACE_CI_LANES=<n> overrides the heavy tier's parallel lane count (1 = the
-// pre-2026-09-15 strictly sequential tier — what a test that asserts ORDER wants).
+// pre-2026-09-15 strictly sequential tier — what a test that asserts ORDER wants);
+// ON THE HUB never above HUB_MAX_LANES (4 — the hub's LOAD RULE, q-038): only a
+// second machine's run (ci-remote.mjs stamps VIBESPACE_CI_REMOTE_RUN) goes past it.
+// --allow-hub-full: a FULL heavy tier on the hub by day (07:00–24:00 local) is
+// refused without it (hubFullRefusal; the halves run elsewhere). --serial-overlap=<n>:
+// the serial lane starts once the parallel queue is dispatched and ≤ n parallel suites
+// are still in flight (the desktop batch passes 1; default: after the lanes drain).
+// VIBESPACE_CI_LANE_ROOT=<dir>: every lane runs its suites with a PRIVATE HOME,
+// XDG_RUNTIME_DIR (0700) and session bus (<dir>/lane-<k>/{home,run,run/bus}) and
+// no inherited DISPLAY (laneEnv — the desktop batch's lanes).
 // Exit codes: 0 green · 1 red · 2 refused (dirty tree / bad --only) · 3 the
 // tier did not run (never got the machine lock) · 4 ABORTED (superseded, the
 // lock taken, or terminated from outside — it stopped mid-tier). 0 and 1 are
@@ -1776,17 +1796,51 @@ export function reapByHand({ dryRun = false, log = console.log, ...opts } = {}) 
 // telling our own kill from a supersede's. Resolves on 'exit' (+ a short grace
 // for buffered output) rather than 'close': a suite that leaks a server holding
 // our pipes would otherwise hold the lane until its budget.
+// A LANE'S PRIVATE ENV (lane ci-aidev-desktop-batch): with VIBESPACE_CI_LANE_ROOT set (the desktop batch — eight lanes on
+// one box), lane <k>'s suites run with their own HOME, XDG_RUNTIME_DIR (0700) and session bus (<root>/lane-<k>/run/bus,
+// started by ci-remote.mjs; no bus there ⇒ none inherited) and no DISPLAY: what one suite writes to a HOME, a runtime
+// dir or a bus is never what the next lane's suite reads. Unset ⇒ the env as it was.
+export function laneEnv(lane, { root = process.env.VIBESPACE_CI_LANE_ROOT, env = GIT_ENV, mkdir = true } = {}) {
+  if (!root) return env;
+  const d = path.join(root, `lane-${lane}`), home = path.join(d, 'home'), run = path.join(d, 'run');
+  if (mkdir) { fs.mkdirSync(home, { recursive: true }); fs.mkdirSync(run, { recursive: true, mode: 0o700 }); fs.chmodSync(run, 0o700); }
+  const out = { ...env, HOME: home, XDG_RUNTIME_DIR: run };
+  delete out.DISPLAY; delete out.WAYLAND_DISPLAY;
+  if (fs.existsSync(path.join(run, 'bus'))) out.DBUS_SESSION_BUS_ADDRESS = 'unix:path=' + path.join(run, 'bus'); else delete out.DBUS_SESSION_BUS_ADDRESS;
+  return out;
+}
+// …and its session bus: one dbus-daemon per lane, started before the lanes run and ended after them (a box without
+// dbus-daemon runs its lanes bus-less — laneEnv then hands no bus, never the caller's); said once, with the count up.
+export function startLaneBuses(lanes, { root = process.env.VIBESPACE_CI_LANE_ROOT, log = console.log, waitMs = 3000 } = {}) {
+  if (!root) return [];
+  const procs = [];
+  for (const lane of lanes) {
+    const run = path.join(root, `lane-${lane}`, 'run'), bus = path.join(run, 'bus');
+    fs.mkdirSync(run, { recursive: true, mode: 0o700 }); fs.chmodSync(run, 0o700);
+    try { fs.unlinkSync(bus); } catch { }
+    try {
+      const p = spawn('dbus-daemon', ['--session', '--nofork', '--nopidfile', `--address=unix:path=${bus}`], { stdio: 'ignore', env: GIT_ENV });
+      p.on('error', () => { });
+      procs.push({ lane, p, bus });
+    } catch { }
+  }
+  const until = Date.now() + waitMs;
+  while (Date.now() < until && procs.some((x) => !fs.existsSync(x.bus))) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+  log(`[ci:heavy] lane env: a private HOME + XDG_RUNTIME_DIR + session bus per lane under ${root} (${procs.filter((x) => fs.existsSync(x.bus)).length} of ${lanes.length} buses up), no DISPLAY inherited`);
+  return procs;
+}
+const load1 = () => Math.round(os.loadavg()[0] * 10) / 10;
 function runSuiteAsync(s, { root = repo, absentIsSkip = false, sha = '', lane = 1, inflight = new Set() } = {}) {
   return new Promise((resolve) => {
     if (absentIsSkip && !fs.existsSync(path.join(root, 'scripts', s.name + '.mjs'))) {
       resolve({ ok: true, ms: 0, absent: true, lines: [`  ⊘ ${s.name} — SKIPPED: not present at ${shortSha(sha)} (this gate's table names it; the commit being gated does not contain it, so this run says nothing about it)`] });
       return;
     }
-    const t = Date.now();
+    const t = Date.now(), l0 = load1();
     const tag = `[lane ${lane}]`;
     let child;
     try {
-      child = spawn(process.execPath, [path.join(root, 'scripts', s.name + '.mjs')], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: GIT_ENV });
+      child = spawn(process.execPath, [path.join(root, 'scripts', s.name + '.mjs')], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: laneEnv(lane) });
     } catch (e) {
       resolve({ ok: false, ms: 0, killedFromOutside: false, lines: [`\n✗ ${s.name} FAILED (0ms, ${e.code || e.message}) ${tag}`] });
       return;
@@ -1803,10 +1857,13 @@ function runSuiteAsync(s, { root = repo, absentIsSkip = false, sha = '', lane = 
       clearTimeout(budget);
       inflight.delete(child);
       const ms = Date.now() - t;
-      if (status === 0) { resolve({ ok: true, ms, lines: [`  ✓ ${s.name} (${ms}ms) ${tag} — ${(stdout.trim().split('\n').pop() || 'ok').slice(0, 80)}`] }); return; }
+      // the box's 1-min loadavg when the suite started → when it ended, on EVERY suite line (q-038 ④: a red under load
+      // carries its load as evidence — a timing leg's verdict is read beside it, never instead of it)
+      const load = [l0, load1()], ld = `load ${load[0]}→${load[1]}`;
+      if (status === 0) { resolve({ ok: true, ms, load, lines: [`  ✓ ${s.name} (${ms}ms) ${tag} ${ld} — ${(stdout.trim().split('\n').pop() || 'ok').slice(0, 80)}`] }); return; }
       const r = { status, signal, error };
-      resolve({ ok: false, ms, killedFromOutside: killedFromOutside(r), lines: [
-        `\n✗ ${s.name} FAILED (${ms}ms${error ? ', ' + error.code : ''}${signal ? ', ' + signal : ''}) ${tag}`,
+      resolve({ ok: false, ms, load, killedFromOutside: killedFromOutside(r), full: stdout + (stderr ? '\n── stderr ──\n' + stderr : ''), lines: [
+        `\n✗ ${s.name} FAILED (${ms}ms${error ? ', ' + error.code : ''}${signal ? ', ' + signal : ''}) ${tag} ${ld}`,
         stdout.split('\n').slice(-40).join('\n'),
         stderr || ''] });
     };
@@ -1873,10 +1930,24 @@ export const SERIAL = [
   // parallel lanes with the rest; the serial lane was 444 s of a ~16 min tier
   // and moving them is what brought the wall under 15 min.
 ];
+// THE HUB'S LOAD RULE (q-038, lane ci-aidev-desktop-batch): the hub is the owner's production machine — 4 lanes at
+// most, forced or not (boot-loop-hold's clock drifted 148 → 373 ms beside three); more lanes only on a second machine.
+export const HUB_MAX_LANES = 4;
 export function laneCount({ cpus = os.cpus().length, env = process.env } = {}) {
   const forced = Number(env.VIBESPACE_CI_LANES);
-  if (Number.isInteger(forced) && forced >= 1) return forced;
-  return Math.max(2, Math.min(4, Math.floor(cpus / 8)));
+  if (Number.isInteger(forced) && forced >= 1) return env.VIBESPACE_CI_REMOTE_RUN ? forced : Math.min(forced, HUB_MAX_LANES);
+  return Math.max(2, Math.min(HUB_MAX_LANES, Math.floor(cpus / 8)));
+}
+// THE HUB BY DAY (q-038 r1.4 ②, owner 2026-10-14: the hub runs at most 4 lanes and no full heavy by day): a FULL tier
+// (no --only / --shard / --host / --affected) on the hub between HUB_DAY.from and HUB_DAY.to local time is refused unless
+// --allow-hub-full; the halves run on the self-hosted batch box and the Actions mirror. A second machine
+// (VIBESPACE_CI_REMOTE_RUN) and a hosted runner (GITHUB_ACTIONS) are not the hub. PURE over its inputs.
+export const HUB_DAY = Object.freeze({ from: 7, to: 24 });
+export function hubFullRefusal({ full = false, allow = false, env = process.env, now = new Date() } = {}) {
+  if (!full || allow || env.VIBESPACE_CI_REMOTE_RUN || env.GITHUB_ACTIONS) return null;
+  const h = now.getHours();
+  if (h < HUB_DAY.from || h >= HUB_DAY.to) return null;
+  return `a FULL heavy tier on the hub by day (${String(h).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')} local; the hub runs none from ${String(HUB_DAY.from).padStart(2, '0')}:00 to ${HUB_DAY.to}:00) — run the two halves instead (node scripts/ci-remote.mjs --host aidev --batch desktop … ‖ the mirror's --host=hosted shards), or scope it (--affected / --only / --shard / --host), or pass --allow-hub-full`;
 }
 // PURE: split the tier into the parallel queue and the serial queue, each
 // longest-first. `timings` = name→ms from the previous markers; a suite with no
@@ -1944,11 +2015,31 @@ export function shardHash(name) {
   return h;
 }
 // PURE: n slices of `suites`, plus the serial group's names (all in slice 0).
-export function shardPlan(suites, n, { serial = SERIAL, fixtures = machineGlobalFixtures, sourceOf = () => '' } = {}) {
+// With `timings` (name → ms — the CHECKED-IN runner measurements, shardTimings(); never a marker, which differs per
+// runner) the measured suites are packed LONGEST-FIRST onto the least-loaded slice (LPT; ties → the lower slice, equal
+// times → by name), the serial group counting `lanes`× in slice 1 (it runs alone after the slice's lanes drain); an
+// UNMEASURED suite keeps its FNV slot, so a new suite still moves no other. Still a function of the names, the
+// checked-in times and n alone — every matrix job computes the same split (lane ci-aidev-desktop-batch: the 6 hosted
+// shards measured 14.0 min each by LPT vs 6.1–18.6 by FNV, Actions run 38504978786's per-suite times).
+export function shardPlan(suites, n, { serial = SERIAL, fixtures = machineGlobalFixtures, sourceOf = () => '', timings = null, lanes = 2 } = {}) {
   const serialNames = scheduleLanes(suites, { serial, fixtures, sourceOf, keepOrder: true }).serial.map((s) => s.name);
   const shards = Array.from({ length: n }, () => []);
-  for (const s of suites) shards[serialNames.includes(s.name) ? 0 : shardHash(s.name) % n].push(s);
-  return { shards, serial: serialNames };
+  if (!timings) {
+    for (const s of suites) shards[serialNames.includes(s.name) ? 0 : shardHash(s.name) % n].push(s);
+    return { shards, serial: serialNames };
+  }
+  const ms = (s) => (typeof timings[s.name] === 'number' ? timings[s.name] : null);
+  const loads = Array(n).fill(0);
+  for (const s of suites) if (serialNames.includes(s.name)) { shards[0].push(s); loads[0] += (ms(s) || 0) * lanes; }
+  const measured = suites.filter((s) => !serialNames.includes(s.name) && ms(s) !== null).sort((a, b) => (ms(b) - ms(a)) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  for (const s of measured) { const k = loads.indexOf(Math.min(...loads)); shards[k].push(s); loads[k] += ms(s); }
+  for (const s of suites) if (!serialNames.includes(s.name) && ms(s) === null) shards[shardHash(s.name) % n].push(s);
+  return { shards, serial: serialNames, loads };
+}
+// The checked-in per-suite runner times the hosted shards are packed by (scripts/fixtures/ci-shard-timings.json —
+// refreshed from an Actions run's heavy logs with `ci.mjs --shard-timings <log>…`); null when the tree has none.
+export function shardTimings(root = repo) {
+  try { const j = JSON.parse(fs.readFileSync(path.join(root, 'scripts', 'fixtures', 'ci-shard-timings.json'), 'utf-8')); return j && typeof j.ms === 'object' ? j.ms : null; } catch { return null; }
 }
 // PURE: what is wrong with a split — [] when every suite is in exactly one shard
 // and the serial group shares one.
@@ -1965,6 +2056,85 @@ export function shardCensus(suites, shards, serial = []) {
   const homes = new Set(serial.map((name) => home.get(name)));
   if (homes.size > 1) problems.push(`the serial group is split over shards ${[...homes].map((k) => (k === undefined ? 'none' : k + 1)).join(', ')}`);
   return problems;
+}
+
+// ── HOSTS (lane ci-aidev-desktop-batch, design q-038 step ①, 2026-10-14) ─────────
+// The heavy tier runs on TWO runners and the hub runs none of it by day: the Actions mirror's hosted jobs run what a
+// hosted runner CAN run (`hosted`), and the self-hosted DESKTOP batch box (AIDev — scripts/ci-provision-aidev.sh;
+// `ci-remote.mjs --host aidev --batch desktop`, 8 lanes) runs the rest — the suites that drive xpra / Xvfb / x11vnc /
+// LibreOffice (`desktop`) or a real binary the hosted image lacks (`binary`). THE SPLIT IS DERIVED, never a hand list:
+// a suite's host is read off the programs its CODE names (comments stripped — "no xpra here" in a comment is not an
+// xpra suite): a desktop program by its word, a binary by the way THE TIER RULE's `binary` disqualifier reads a run (a
+// literal command, a `command -v` / `which` probe, a `cmd:` field, a path literal ending in it; FUSE by /dev/fuse).
+// NOT rows — the hosted image has them (measured on Actions run 38504978786): claude (ci.yml installs it — helper-ask,
+// claude-hot-switch… run it there), helm (test-helm-render ALL PASS 32), strace (test-oat-measure-fake 17), dtach
+// (ci.yml installs it), google-chrome, agent-browser. A row may DECLARE `host: 'desktop' | 'binary'` with a `hostWhy`
+// — toward the self-hosted side ONLY (a program reached through the product, never named); a row that says 'hosted'
+// over a derived self-hosted verdict is a problem, never a move. test-ci-gate §8c holds the two sets to a PARTITION of
+// the tier, every self-hosted suite to the program it names, scripts/ci-provision-aidev.sh to a row per program, and
+// PRINTS the derivation against the design's census (scripts/fixtures/ci-hosts-q038.txt) with a computed reason per
+// differing name.
+export const HOSTS = Object.freeze(['desktop', 'binary', 'hosted']);
+const RUNS = (p, extra = '') => new RegExp(`\\b(?:spawn|spawnSync|execFile|execFileSync|exec|execSync|fork)\\(\\s*['"\`](?:/usr/(?:local/)?bin/)?(?:${p})['"\`\\s]|(?:command -v|\\bwhich)\\s+['"]?(?:${p})\\b|\\bcmd\\s*:\\s*['"\`](?:${p})['"\`]|['"\`][\\w./-]*/(?:${p})['"\`]${extra}`);
+export const HOST_PROGRAMS = Object.freeze([
+  { program: 'xpra', host: 'desktop', re: /\bxpra\b/ },
+  { program: 'Xvfb', host: 'desktop', re: /\bXvfb\b|\bstartXServer\(/ },
+  { program: 'x11vnc', host: 'desktop', re: /\b(?:x11vnc|Xvnc|Xtigervnc)\b/ },
+  { program: 'libreoffice', host: 'desktop', re: /\b(?:libreoffice|soffice)\b/ },
+  { program: 'codex', host: 'binary', re: RUNS('codex') },
+  { program: 'opencode', host: 'binary', re: RUNS('opencode') },
+  { program: 'bwrap', host: 'binary', re: RUNS('bwrap') },
+  { program: 'unshare', host: 'binary', re: RUNS('unshare') },
+  { program: 'rclone', host: 'binary', re: RUNS('rclone', `|['"\`]/dev/fuse['"\`]`) },
+]);
+export const isSelfHosted = (host) => host === 'desktop' || host === 'binary';
+/** PURE over one row + its suite source: { host, derived, declared, programs, mentions, problems }. */
+export function hostOf(row, source) {
+  const raw = source || '', code = stripComments(raw);
+  const hits = HOST_PROGRAMS.filter((p) => p.re.test(code));
+  const derived = hits.some((p) => p.host === 'desktop') ? 'desktop' : hits.length ? 'binary' : 'hosted';
+  const declared = row && row.host !== undefined ? row.host : null;
+  const problems = [];
+  if (declared !== null && !HOSTS.includes(declared)) problems.push(`host '${declared}' is none of ${HOSTS.join(' / ')}`);
+  else if (declared === 'hosted' && derived !== 'hosted') problems.push(`declares host 'hosted' over its derived '${derived}' (${hits.map((p) => p.program).join(', ')}) — a declaration moves a suite toward the self-hosted side only`);
+  else if (declared !== null && !(row.hostWhy && String(row.hostWhy).trim())) problems.push(`declares host '${declared}' without a hostWhy (what it reaches, through what)`);
+  // what the text MENTIONS but the code does not run — the design census's extra names, read back as a reason
+  const mentions = HOST_PROGRAMS.filter((p) => !hits.includes(p) && new RegExp(`\\b(?:${p.program === 'x11vnc' ? 'x11vnc|Xvnc|Xtigervnc' : p.program === 'libreoffice' ? 'libreoffice|soffice' : p.program})\\b`).test(raw)).map((p) => p.program);
+  const host = problems.length || declared === null ? derived : declared;
+  return { host, derived, declared, why: declared !== null ? String(row.hostWhy || '') : '', programs: hits.map((p) => p.program), mentions, problems };
+}
+/** PURE: the heavy tier cut by host — { desktop, binary, hosted, self, verdicts: Map(name → hostOf), problems }. */
+export function hostPlan(suites, { sourceOf = () => '' } = {}) {
+  const out = { desktop: [], binary: [], hosted: [], self: [], verdicts: new Map(), problems: [] };
+  for (const s of suites) {
+    const v = hostOf(s, sourceOf(s.name));
+    out.verdicts.set(s.name, v);
+    out[v.host].push(s);
+    if (isSelfHosted(v.host)) out.self.push(s);
+    for (const p of v.problems) out.problems.push(`${s.name}: ${p}`);
+  }
+  return out;
+}
+/** PURE: the derivation against a named list (the design's census) — each differing name with its computed reason. */
+export function hostDesignDiff(plan, names) {
+  const want = new Set(names), self = new Set(plan.self.map((s) => s.name));
+  const only = [...want].filter((n) => !self.has(n)).sort().map((name) => {
+    const v = plan.verdicts.get(name);
+    if (!v) return { name, why: 'not a heavy suite in this tree' };
+    return { name, why: v.mentions.length ? `its text names ${v.mentions.join(' / ')} but its code never runs it (a comment, a harness id, a stub, a TERM value)` : 'its text names no self-hosted program' };
+  });
+  const extra = [...self].filter((n) => !want.has(n)).sort().map((name) => {
+    const v = plan.verdicts.get(name);
+    return { name, why: v.declared ? `declared host '${v.declared}' — ${v.why}` : `runs ${v.programs.join(' / ')} (not in the design's census — a newer suite, or one it read as hosted)` };
+  });
+  return { onlyThere: only, onlyHere: extra };
+}
+const HOST_ARG = ['desktop', 'binary', 'hosted', 'self'];
+/** The suites of `suites` one runner runs: 'desktop' | 'binary' | 'hosted' | 'self' (= desktop + binary). */
+export function hostFilter(suites, want, { sourceOf = () => '' } = {}) {
+  if (!HOST_ARG.includes(want)) throw new Error(`--host wants ${HOST_ARG.join(' | ')} (got '${want}')`);
+  const keep = new Set(hostPlan(suites, { sourceOf })[want].map((s) => s.name));
+  return suites.filter((s) => keep.has(s.name));
 }
 
 // ── IMPACT SCOPE (2026-09-15) ────────────────────────────────────────────────
@@ -2613,7 +2783,7 @@ function writeGreenMarker() {
   } catch (e) { console.log('[ci] green marker not written: ' + e.message); }
 }
 
-async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lockWaitMs, pidFile, range, shard, why = false }) {
+async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lockWaitMs, pidFile, range, shard, why = false, host = null, allowHubFull = false, serialOverlap = null }) {
   const t0 = Date.now();
   markCiRun('heavy');
   const all = SUITES.filter((s) => s.tier === 'heavy');
@@ -2657,6 +2827,9 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
     console.error('    node scripts/ci.mjs --heavy --dirty-ok   runs it against this tree, NO verdict written\n');
     return 2;
   }
+  // THE HUB BY DAY — refused at t=0 like the dirty tree, before a lock or a build is spent (hubFullRefusal)
+  const dayNo = hubFullRefusal({ full: !only && !shard && !host && !range, allow: allowHubFull });
+  if (dayNo) { console.error(`\n[ci:heavy] REFUSED — ${dayNo}.\n`); return 2; }
   let runRoot = repo, wt = null;
   console.log(`release gate — HEAVY tier${scoped ? '' : `: ${shard ? `shard ${shard.i}/${shard.n} of ` : ''}${heavy.length} suites`} for ${shortSha(sha)}${isolate ? ' (isolated worktree)' : ''}${scoped ? ` — impact scope ${range}: the suites are selected from the sources AT ${shortSha(sha)}, after checkout` : ''}`);
   if (dirtyAtStart) console.log('[ci:heavy] --dirty-ok: this tree is dirty ⇒ NO VERDICT will be written for ' + shortSha(sha) + ' (said now, not in sixteen minutes)');
@@ -2765,13 +2938,26 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
       console.log(`[ci:heavy] ${heavy.length} suites for ${shortSha(sha)}${scope === 'affected' ? ` — AFFECTED scope (${all.length - heavy.length} of ${all.length} unaffected by ${range})` : ` — the selection is the whole tier (a FULL run)`}`);
       console.log(impact.summary);
     }
+    let tier = all;
+    if (host) {
+      // HOSTS: the suites ONE runner runs, read off the sources that RUN (hostOf); an --only name of another host is loud
+      const srcAt = (name) => { try { return fs.readFileSync(path.join(runRoot, 'scripts', name + '.mjs'), 'utf-8'); } catch { return ''; } };
+      tier = hostFilter(all, host, { sourceOf: srcAt });
+      const mine = new Set(tier.map((s) => s.name));
+      const other = heavy.filter((s) => !mine.has(s.name));
+      if (only && other.length) { console.error(`✗ --only names ${other.map((s) => s.name).join(', ')} — not a --host=${host} suite`); return 2; }
+      heavy = heavy.filter((s) => mine.has(s.name));
+      console.log(`[ci:heavy] --host=${host}: ${heavy.length} of ${all.length} heavy suites run on this runner (HOSTS — ${all.length - tier.length} are the other runner's)`);
+      if (!heavy.length) { console.error(`✗ --host=${host} selects no suite — an empty run judges nothing`); return 2; }
+    }
     if (shard) {
       // SHARDS: one slice of the tier, cut from the sources that RUN (the
-      // serial group is read off them, as scheduleLanes reads it below)
+      // serial group is read off them, as scheduleLanes reads it below) — LPT
+      // over the checked-in runner times when the tree carries them
       const srcAt = (name) => { try { return fs.readFileSync(path.join(runRoot, 'scripts', name + '.mjs'), 'utf-8'); } catch { return ''; } };
-      const cut = shardPlan(all, shard.n, { sourceOf: srcAt });
+      const cut = shardPlan(tier, shard.n, { sourceOf: srcAt, timings: shardTimings(runRoot) });
       heavy = cut.shards[shard.i - 1];
-      console.log(`[ci:heavy] shard ${shard.i}/${shard.n}: ${heavy.length} of ${all.length} heavy suites${cut.serial.length ? ` — the serial group (${cut.serial.join(', ')}) is shard 1's` : ''}`);
+      console.log(`[ci:heavy] shard ${shard.i}/${shard.n}: ${heavy.length} of ${tier.length} heavy suites${cut.loads ? ` (LPT by the checked-in runner times: ${Math.round(cut.loads[shard.i - 1] / 1000)} s of suites here)` : ''}${cut.serial.length ? ` — the serial group (${cut.serial.join(', ')}) is shard 1's` : ''}`);
       if (!heavy.length) { console.error(`✗ shard ${shard.i}/${shard.n} holds no suite — an empty slice judges nothing`); return 2; }
     }
     // Ask BEFORE the build too: a signal that landed during `git worktree add`
@@ -2799,14 +2985,32 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
       console.log(`\n[ci:heavy] stopping: ${why}`);
       for (const c of inflight) { try { c.kill('SIGTERM'); } catch { } }
     };
+    // A FAILED RUN'S WHOLE OUTPUT (lane ci-aidev-desktop-batch): the log above keeps a red suite's last 40 lines, and a
+    // suite's own diagnostics print long before its verdict (on a second machine nothing else is left to read) — so
+    // every failed run is kept whole in <markers>/fail-logs/<sha9>.<suite>.<try>.log, said on its own line
+    const keepFailLog = (s, r, attempt) => {
+      if (r.ok || r.absent || !r.full) return;
+      try {
+        const f = path.join(d, 'fail-logs', `${shortSha(sha)}.${s.name}.${attempt}.log`);
+        fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, r.full);
+        console.log(`  [ci:heavy] the whole output of ${s.name} (try ${attempt}): ${f}`);
+      } catch (e) { console.log(`  · fail log not kept: ${e && e.message}`); }
+    };
+    // the parallel lanes' in-flight count, for --serial-overlap (the serial lane may start beside the last ≤ n of them)
+    let parInFlight = 0, parQueue = null, overlapGo = () => {};
+    const overlapReady = new Promise((res) => { overlapGo = res; });
+    const overlapCheck = () => { if (parQueue && !parQueue.length && parInFlight <= (serialOverlap || 0)) overlapGo(); };
     const laneWorker = async (queue, lane) => {
       for (;;) {
         abandonedWhy = abandonedWhy || abandoned();
         if (abandonedWhy) { stop(abandonedWhy); break; }
         const s = queue.shift();
         if (!s) break;
+        const par = queue === parQueue;
+        if (par) { parInFlight++; overlapCheck(); }
         let r = noteChildResult(await runSuiteAsync(s, { root: runRoot, absentIsSkip: !!isolate, sha, lane, inflight }));
         console.log(r.lines.join('\n'));
+        keepFailLog(s, r, 1);
         // a suite may not leave a daemon behind (2.369.104) — the lanes sweep
         // after every suite exactly as the sync runner does, without blocking
         try { await reapScratchOrphansAsync({}); } catch (e) { console.log(`  · scratch reaper skipped: ${e && e.message}`); }
@@ -2815,7 +3019,7 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
         // Absent at the commit being gated (round 6): not run, not judged, and
         // not counted in `timings` — a marker that named 97 suites when 42 of
         // them do not exist at that sha is a claim nobody made.
-        if (r.absent) { absent.push(s.name); continue; }
+        if (r.absent) { absent.push(s.name); if (par) { parInFlight--; overlapCheck(); } continue; }
         if (!r.ok) {
           // …BUT NEVER RETRY A SUITE WE OURSELVES KILLED. Supersession SIGTERMs
           // the process GROUP, so the suite in flight dies with the runner's
@@ -2839,11 +3043,19 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
           // outcomes are in the log and in the marker, so the flakiness is
           // visible instead of being laundered into a green.
           console.log(`  … ${s.name} failed — retrying once before calling it red`);
+          const first = r;
           const again = noteChildResult(await runSuiteAsync(s, { root: runRoot, lane, inflight }));
           console.log(again.lines.join('\n'));
+          keepFailLog(s, again, 2);
           if (again.ok) { flaky.push(s.name); r = again; } else { failed.push(s.name); }
+          // THE RERUN LEDGER (q-038 ④): one rerun, ONE line per rerun in <markers>/reruns.jsonl — the suite, both
+          // outcomes, both loads, the first run's last lines — so a flake is counted across runs, never laundered
+          const line = { at: Date.now(), sha, host: os.hostname(), suite: s.name, lane: String(lane), first: { ms: first.ms, load: first.load, tail: (first.lines[1] || '').split('\n').filter((x) => /✗/.test(x)).slice(0, 3).map((x) => x.trim().slice(0, 200)) }, again: { ok: again.ok, ms: again.ms, load: again.load } };
+          try { fs.mkdirSync(d, { recursive: true }); fs.appendFileSync(path.join(d, 'reruns.jsonl'), JSON.stringify(line) + '\n'); } catch (e) { console.log(`  · rerun ledger not written: ${e && e.message}`); }
+          console.log(`  [ci:heavy] RERUN LEDGER ${s.name}: red (load ${(first.load || []).join('→')}) → ${again.ok ? 'GREEN — FLAKY, counted' : 'red again'} (load ${(again.load || []).join('→')}) — ${path.join(d, 'reruns.jsonl')}`);
         }
-        timings.push({ name: s.name, ms: r.ms, ok: r.ok, lane: String(lane) });
+        timings.push({ name: s.name, ms: r.ms, ok: r.ok, lane: String(lane), load: r.load });
+        if (par) { parInFlight--; overlapCheck(); }
       }
     };
     if (!build.ok && !abandonedWhy) failed.push('npm run build');
@@ -2854,15 +3066,30 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
       serialNames = plan.serial.map((s) => s.name);
       console.log(`[ci:heavy] ${laneN} parallel lane(s) over ${plan.parallel.length} suites (longest first), then 1 serial lane over ${plan.serial.length}${plan.serial.length ? ': ' + plan.serial.map((s) => `${s.name} (${s.serialWhy.split(/[—;]/)[0].trim()})`).join(', ') : ''}`);
       const parallelQ = [...plan.parallel];
+      parQueue = parallelQ;
       const tPar = Date.now();
-      await Promise.all(Array.from({ length: Math.max(1, Math.min(laneN, parallelQ.length)) }, (_, i) => laneWorker(parallelQ, i + 1)));
+      // --serial-overlap=<n> (the desktop batch: 1): the serial lane starts once the parallel queue is dispatched and at
+      // most n parallel suites are still in flight — beside the batch's floor suite instead of after it; said, with names
+      const overlapped = serialOverlap && plan.serial.length ? overlapReady.then(() => {
+        if (abandonedWhy) return null;
+        console.log(`[ci:heavy] serial lane starts at ${Math.round((Date.now() - tPar) / 1000)}s beside ${parInFlight} parallel suite(s) still in flight (--serial-overlap=${serialOverlap}): ${plan.serial.map((s) => s.name).join(', ')}`);
+        return laneWorker([...plan.serial], 'S');
+      }) : null;
+      overlapCheck();
+      const busLanes = Array.from({ length: Math.max(1, Math.min(laneN, parallelQ.length)) }, (_, i) => i + 1);
+      const buses = startLaneBuses(plan.serial.length ? [...busLanes, 'S'] : busLanes);
+      const endBuses = () => { for (const b of buses) { try { b.p.kill('SIGTERM'); } catch { } } };
+      process.once('exit', endBuses);
+      await Promise.all(busLanes.map((k) => laneWorker(parallelQ, k)));
       const parMs = Date.now() - tPar;
-      if (plan.serial.length && !abandonedWhy) {
+      if (overlapped) { overlapGo(); await overlapped; }
+      else if (plan.serial.length && !abandonedWhy) {
         console.log(`[ci:heavy] parallel lanes drained in ${Math.round(parMs / 1000)}s — serial lane: ${plan.serial.map((s) => s.name).join(', ')}`);
         await laneWorker([...plan.serial], 'S');
       }
+      endBuses();
       const sum = timings.reduce((a, t) => a + t.ms, 0);
-      if (!abandonedWhy) console.log(`[ci:heavy] lanes: ${laneN} parallel (${Math.round(parMs / 1000)}s) + serial (${Math.round((Date.now() - tPar - parMs) / 1000)}s); suites summed ${Math.round(sum / 1000)}s = what a sequential tier would have taken`);
+      if (!abandonedWhy) console.log(`[ci:heavy] lanes: ${laneN} parallel (${Math.round(parMs / 1000)}s) + serial (${overlapped ? `overlapped, ${Math.round((Date.now() - tPar) / 1000)}s wall in all` : `${Math.round((Date.now() - tPar - parMs) / 1000)}s`}); suites summed ${Math.round(sum / 1000)}s = what a sequential tier would have taken`);
     }
     const rec = {
       sha, result: failed.length ? 'red' : 'green', failed,
@@ -2874,8 +3101,9 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
       // the Diagnostics report can say what the verdict is about rather than
       // implying all `suites` of them ran.
       absent: absent.length ? absent : undefined,
-      partial: only ? only.slice() : (shard ? heavy.map((s) => s.name) : undefined),
+      partial: only ? only.slice() : ((shard || host) ? heavy.map((s) => s.name) : undefined),
       shard: shard ? `${shard.i}/${shard.n}` : undefined,
+      hosts: host || undefined,
       unlocked: held.ok ? undefined : true,
       // 2026-09-15: the scope ('full' | 'affected'), what selected it, the lane
       // count, which suites ran serially, and EVERY suite's timing (the next
@@ -2903,7 +3131,7 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
     // old ref that predates them would otherwise earn a GREEN marker for a run
     // of zero suites — the vacuous green `--only` already refuses on a typo.
     else if (absent.length && absent.length === heavy.length) noVerdict = `every suite in this run is absent at ${shortSha(sha)} — nothing ran, so nothing is claimed`;
-    else if ((only || shard) && existing) noVerdict = `partial run — keeping the existing FULL ${existing.kind.toUpperCase()} marker for ${shortSha(sha)}`;
+    else if ((only || shard || host) && existing) noVerdict = `partial run — keeping the existing FULL ${existing.kind.toUpperCase()} marker for ${shortSha(sha)}`;
     if (noVerdict) {
       console.log('\n[ci:heavy] ' + noVerdict);
     } else {
@@ -3038,7 +3266,12 @@ function heavyLaunch(sha, { dir, only, lock, lockWaitMs, range } = {}) {
   // affected run needs a range, and a full run is owed when the newest FULL
   // green is older than FULL_EVERY_MS (or there is none).
   const due = fullTierDue(dir, Date.now(), { sha });
-  const scope = range && !only && !due.due ? 'affected' : 'full';
+  let scope = range && !only && !due.due ? 'affected' : 'full';
+  // THE HUB BY DAY (hubFullRefusal): a FULL tier owed by the 24 h clock is not started here by day — the push's
+  // AFFECTED tier runs instead (the full is the self-hosted batch's + the mirror's); with no range, nothing is launched
+  const dayNo = scope === 'full' && !only ? hubFullRefusal({ full: true }) : null;
+  if (dayNo && range) { scope = 'affected'; console.error(`[ci:heavy] a FULL tier is owed (${due.why || 'no FULL green on record'}) — but not on the hub by day: launching the AFFECTED tier for ${shortSha(sha)}`); }
+  else if (dayNo) { console.error(`[ci:heavy] not launching: ${dayNo}`); return 0; }
   // ALREADY GREEN? (B-3ccf, see heavyAlreadyGreen) — asked AFTER supersession
   // on purpose: a run for an ancestor is still superseded (this sha's green
   // subsumes it and the machine is freed), only OUR run is not started.
@@ -3099,6 +3332,9 @@ function checkHeavy({ dir, head } = {}) {
   // a door that only opens from the other side (round 2 finding).
   console.error('     Fix it, COMMIT, then earn a green heavy verdict on the new commit:');
   console.error('       npm run ci:heavy        (the whole tier in an isolated worktree at HEAD, ~17 min; writes the marker that clears this)');
+  // …and by day the hub refuses that whole tier (hubFullRefusal): the AFFECTED tier clears the block too when it reruns
+  // every suite that failed (coversRed) — said here, so the door this message names is one that opens now
+  if (hubFullRefusal({ full: true })) console.error(`       by day the hub runs no FULL tier — instead: node scripts/ci.mjs --heavy --isolate --affected --range=${shortSha(blocker.sha)}..HEAD\n         (clears it when it reruns ${(blocker.failed || []).join(', ') || 'the failed suites'}), or npm run ci:heavy -- --allow-hub-full`);
   console.error('     Emergency bypass: VIBESPACE_SKIP_CI=1 git push\n');
   return 1;
 }
@@ -3156,12 +3392,13 @@ function status({ dir, head: wantHead } = {}) {
 // `--heavy --shard i/n --dry-run`: the slice one matrix job runs, from THIS
 // tree's table and sources — no lock, no build, no suite. Exit 1 when the split
 // fails its census (then no listing can be trusted).
-function shardDryRun({ i, n }) {
-  const all = SUITES.filter((s) => s.tier === 'heavy');
+function shardDryRun({ i, n }, { host = null } = {}) {
   const sourceOf = (name) => { try { return fs.readFileSync(path.join(repo, 'scripts', name + '.mjs'), 'utf-8'); } catch { return ''; } };
-  const { shards, serial } = shardPlan(all, n, { sourceOf });
+  const heavyAll = SUITES.filter((s) => s.tier === 'heavy');
+  const all = host ? hostFilter(heavyAll, host, { sourceOf }) : heavyAll;
+  const { shards, serial, loads } = shardPlan(all, n, { sourceOf, timings: shardTimings(repo) });
   const problems = shardCensus(all, shards, serial);
-  console.log(`heavy shard ${i}/${n}: ${shards[i - 1].length} of ${all.length} heavy suites${serial.length ? ` — the serial group (${serial.join(', ')}) is shard 1's` : ''}`);
+  console.log(`heavy shard ${i}/${n}: ${shards[i - 1].length} of ${all.length} heavy suites${host ? ` (--host=${host})` : ''}${loads ? ` — LPT: ${Math.round(loads[i - 1] / 1000)} s of suites` : ''}${serial.length ? ` — the serial group (${serial.join(', ')}) is shard 1's` : ''}`);
   for (const s of shards[i - 1]) console.log('  ' + s.name);
   for (const p of problems) console.error('  ✗ ' + p);
   return problems.length ? 1 : 0;
@@ -3188,6 +3425,46 @@ function census() {
   return problems.length ? 1 : 0;
 }
 
+// `--hosts` (lane ci-aidev-desktop-batch): the HOSTS partition of this tree — every self-hosted suite with the program
+// its code names, the two sets' sizes (+ their suite-minutes by the checked-in runner times), and the derivation
+// against the design's census (scripts/fixtures/ci-hosts-q038.txt) with a computed reason per differing name.
+// Exit 1 when a row's declaration is refused (hostOf's problems) — the same judge test-ci-gate §8c asserts.
+function hostsReport() {
+  const heavy = SUITES.filter((s) => s.tier === 'heavy');
+  const sourceOf = (name) => { try { return fs.readFileSync(path.join(repo, 'scripts', name + '.mjs'), 'utf-8'); } catch { return ''; } };
+  const plan = hostPlan(heavy, { sourceOf });
+  const t = shardTimings(repo) || {};
+  const min = (list) => Math.round(list.reduce((a, s) => a + (t[s.name] || 0), 0) / 6000) / 10;
+  console.log(`hosts: ${heavy.length} heavy suites = ${plan.desktop.length} desktop + ${plan.binary.length} binary (self-hosted: ${plan.self.length}) + ${plan.hosted.length} hosted`);
+  console.log(`  hosted runner times (scripts/fixtures/ci-shard-timings.json): self-hosted ${min(plan.self)} min · hosted ${min(plan.hosted)} min`);
+  for (const s of plan.self) { const v = plan.verdicts.get(s.name); console.log(`  ${v.host.padEnd(7)} ${s.name}  ← ${v.declared ? `declared: ${v.why}` : v.programs.join(', ')}`); }
+  let names = [];
+  try { names = fs.readFileSync(path.join(repo, 'scripts', 'fixtures', 'ci-hosts-q038.txt'), 'utf-8').split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#')); } catch { }
+  if (names.length) {
+    const diff = hostDesignDiff(plan, names);
+    console.log(`the design's census (q-038, ${names.length} names) vs the derivation: ${diff.onlyThere.length} there only, ${diff.onlyHere.length} here only`);
+    for (const x of diff.onlyThere) console.log(`  − ${x.name}: ${x.why}`);
+    for (const x of diff.onlyHere) console.log(`  + ${x.name}: ${x.why}`);
+  }
+  for (const p of plan.problems) console.error('  ✗ ' + p);
+  return plan.problems.length ? 1 : 0;
+}
+// `--shard-timings <log>…`: rewrite scripts/fixtures/ci-shard-timings.json from Actions heavy-shard logs (`gh run view
+// <id> --log`): every `✓ / ✗ <suite> (<n>ms)` line, the newest log first per suite. The split is a function of this file.
+function writeShardTimings(logs) {
+  const ms = {}, sources = [];
+  for (const f of logs) {
+    const txt = fs.readFileSync(f, 'utf-8'); sources.push(path.basename(f));
+    for (const m of txt.matchAll(/[✓✗] (test-[\w.-]+)(?: FAILED)? \((\d+)ms/g)) if (!(m[1] in ms)) ms[m[1]] = Number(m[2]);
+  }
+  const heavy = new Set(SUITES.filter((s) => s.tier === 'heavy').map((s) => s.name));
+  const kept = Object.fromEntries(Object.keys(ms).filter((n) => heavy.has(n)).sort().map((n) => [n, ms[n]]));
+  const out = path.join(repo, 'scripts', 'fixtures', 'ci-shard-timings.json');
+  fs.writeFileSync(out, JSON.stringify({ about: 'per-suite wall ms on the hosted Actions runner (2 lanes, 4 cpus) — the LPT split of `ci.mjs --heavy --shard i/n` reads ONLY this file (shardPlan); refresh with `node scripts/ci.mjs --shard-timings <gh run view --log output>…`', sources, ms: kept }, null, 1) + '\n');
+  console.log(`${out}: ${Object.keys(kept).length} heavy suites timed from ${sources.join(', ')}`);
+  return 0;
+}
+
 // `--list-affected --range=<old>..<new> [--shard <i>/<n>]` (lane heavy-runner-aidev, 2026-10-13): the heavy suites
 // an affected run of the range selects — cut by shardPlan when --shard is given (an affected run has no --shard of
 // its own: heavyGate selects inside its scratch worktree) — comma-joined on stdout, longest-first by the markers'
@@ -3195,10 +3472,15 @@ function census() {
 // list for a tree (its selectSlice — test-ci-remote pins the two equal), so the hub half
 // `--heavy --only=$(node scripts/ci.mjs --list-affected --range=… --shard 1/2)` and the second machine's
 // `ci-remote.mjs --shard 2/2` split one selection with no suite in both and none in neither.
-export function listAffected({ range, shard = null, dir, root = repo, changed, why = false } = {}) {
+export function listAffected({ range, shard = null, dir, root = repo, changed, why = false, host = null } = {}) {
   const all = SUITES.filter((s) => s.tier === 'heavy');
   const a = range ? affectedSuites({ range, suites: all, root, changed, why }) : { selected: all, summary: `[ci:heavy] the full tier: ${all.length} heavy suites` };
   let picked = a.selected, summary = a.summary;
+  if (host) {
+    const before = picked.length;
+    picked = hostFilter(picked, host, { sourceOf: (name) => { try { return fs.readFileSync(path.join(root, 'scripts', name + '.mjs'), 'utf-8'); } catch { return ''; } } });
+    summary += `\n[ci:heavy] --host=${host}: ${picked.length} of ${before}`;
+  }
   if (shard) {
     const sourceOf = (name) => { try { return fs.readFileSync(path.join(root, 'scripts', name + '.mjs'), 'utf-8'); } catch { return ''; } };
     const plan = shardPlan(picked, shard.n, { sourceOf });
@@ -3234,8 +3516,16 @@ function main(argv) {
   const shard = shardArg === null ? null : parseShard(shardArg);
   if (shardArg !== null && !shard) { console.error(`✗ --shard wants <i>/<n> with 1 ≤ i ≤ n (got '${shardArg}')`); process.exit(2); }
   if (arg('reap')) { process.exit(reapByHand({ dryRun: !!arg('dry-run') })); }
+  // --host=<desktop|binary|hosted|self>: the suites ONE runner runs (HOSTS); a bad name is a loud exit 2
+  const host = str('host');
+  if (arg('host') !== undefined && !HOST_ARG.includes(host)) { console.error(`✗ --host wants ${HOST_ARG.join(' | ')} (got '${host === null ? '' : host}')`); process.exit(2); }
+  const overlapArg = str('serial-overlap');
+  const serialOverlap = overlapArg === null ? null : Number(overlapArg);
+  if (overlapArg !== null && !(Number.isInteger(serialOverlap) && serialOverlap >= 0)) { console.error(`✗ --serial-overlap wants an integer ≥ 0 (got '${overlapArg}')`); process.exit(2); }
   if (arg('census')) process.exit(census());
-  if (arg('list-affected')) { const l = listAffected({ range: rangeArg || null, shard, dir, why: !!arg('why') }); console.error(l.summary); console.log(l.names.join(',')); process.exit(0); }
+  if (arg('hosts')) process.exit(hostsReport());
+  if (arg('shard-timings') !== undefined) process.exit(writeShardTimings(argv.filter((a) => !a.startsWith('--'))));
+  if (arg('list-affected')) { const l = listAffected({ range: rangeArg || null, shard, dir, why: !!arg('why'), host }); console.error(l.summary); console.log(l.names.join(',')); process.exit(0); }
   if (arg('status')) process.exit(status({ dir, head }));
   if (arg('check-heavy')) process.exit(checkHeavy({ dir, head }));
   if (arg('heavy-launch') !== undefined) process.exit(heavyLaunch(str('heavy-launch') || argv[argv.indexOf('--heavy-launch') + 1], { dir, only, lock, lockWaitMs, range: rangeArg || undefined }));
@@ -3243,8 +3533,8 @@ function main(argv) {
     const affected = !!arg('affected') || !!arg('heavy-affected');
     if (affected && !rangeArg) { console.error('✗ --affected needs --range=<old>..<new> (or --range=<sha> for its whole unpublished range)'); process.exit(2); }
     if (shard && (only || affected)) { console.error('✗ --shard slices the FULL tier — it does not combine with --only or --affected'); process.exit(2); }
-    if (shard && arg('dry-run')) process.exit(shardDryRun(shard));
-    heavyGate({ sha: str('sha'), isolate: !!arg('isolate'), dir, only, dirtyOk: !!arg('dirty-ok'), lock, lockWaitMs, pidFile: str('pid-file') || undefined, range: affected ? rangeArg : undefined, shard, why: !!arg('why') })
+    if (shard && arg('dry-run')) process.exit(shardDryRun(shard, { host }));
+    heavyGate({ sha: str('sha'), isolate: !!arg('isolate'), dir, only, dirtyOk: !!arg('dirty-ok'), lock, lockWaitMs, pidFile: str('pid-file') || undefined, range: affected ? rangeArg : undefined, shard, why: !!arg('why'), host, allowHubFull: !!arg('allow-hub-full'), serialOverlap })
       .then((code) => process.exit(code), (e) => { console.error('[ci:heavy] crashed: ' + (e && e.stack || e)); process.exit(1); });
     return;
   }

@@ -165,6 +165,22 @@ export async function vncEnv() {
   const port = await freePort();
   return { VIBESPACE_VNC_DISPLAY: `:${freeDisplay(port)}`, VIBESPACE_VNC_PORT: String(port) };
 }
+/** THE GTK ROW (B-4260, lane ci-aidev-desktop-batch): what THIS box's desktop stack draws the suites' GNOME Calculator
+ *  as — measured at provision INSIDE a private xpra (scripts/ci-provision-aidev.sh, its gtk-row step) into
+ *  scripts/fixtures/gtk-rows.json, keyed by the GTK 4 major.minor: `calcSize2x` (the window at GDK_SCALE=2), `calcMin2x`
+ *  (its minimum once settled — 720×1232 on the hub's 4.22, 694×980 on AIDev's 4.14, which first announces 694×1004),
+ *  `calcButtonBound` (the minimum ignores Xft.dpi — 50 does, 46 does not), `pushButtonRole` ("button" from at-spi2-core
+ *  2.60, "push button" before). A GTK with no row THROWS, naming the measurement: a pixel leg on a box nobody measured
+ *  would judge nothing — never a skip. `version` / `rows` are seams. */
+export function gtkRow({ version, rows } = {}) {
+  if (version === undefined) { try { version = require('node:child_process').execFileSync('dpkg-query', ['-W', '-f=${Version}', 'libgtk-4-1'], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }).replace(/[+~].*$/, '').trim(); } catch { version = ''; } }
+  if (rows === undefined) { try { rows = JSON.parse(fs.readFileSync(new URL('./fixtures/gtk-rows.json', import.meta.url), 'utf-8')).rows; } catch { rows = {}; } }
+  const key = String(version || '').split('.').slice(0, 2).join('.');
+  const row = rows && key && rows[key];
+  if (!row) throw new Error(`no measured GTK row for GTK ${version || '(libgtk-4-1 not installed)'} on this box — run scripts/ci-provision-aidev.sh's gtk-row step here and add its row to scripts/fixtures/gtk-rows.json under "${key || '?'}"`);
+  return { key, ...row };
+}
+
 /** Far above the lowest-first `-displayfd` band the keepers draw from, below
  *  the X TCP ceiling (6000 + n). */
 export const VNC_DISPLAY_RANGE = Object.freeze({ lo: 1000, span: 20000 });

@@ -7,6 +7,16 @@
 //        [--only a,b] [--lanes N] [--log <file>] [--exit <file>] [--keep] [--dirty-ok]
 //   node /abs/path/scripts/ci-remote.mjs --snapshot <tree> --range <base>..<head> --shard 1/2 --list
 //        ← the slice's names, comma-joined on stdout (the LOCAL half: ci.mjs --heavy --only=$(…))
+//   node /abs/path/scripts/ci-remote.mjs --host aidev --batch desktop --lanes 8 --snapshot <tree> [--range <b>..<h>]
+//        ← THE DESKTOP BATCH (lane ci-aidev-desktop-batch, design q-038 step ①; the owner 2026-10-14: 「你就用 aidev
+//          跑吧」): the tree's SELF-HOSTED heavy suites (ci.mjs HOSTS: desktop + binary — xpra / Xvfb / x11vnc /
+//          LibreOffice / a real binary; the rest is the Actions mirror's `--host=hosted` shards) on the box provisioned
+//          by scripts/ci-provision-aidev.sh (system) + ci-remote-provision.sh (user); each lane with a PRIVATE HOME /
+//          XDG_RUNTIME_DIR / session bus and no DISPLAY (ci.mjs laneEnv under <snap>/lanes), longest first, the serial
+//          group in its own lane beside the floor suite (--serial-overlap=1), every suite line stamped with the box's
+//          loadavg, a red re-run ONCE into the rerun ledger (<snap>/markers/reruns.jsonl, copied back). REFUSED (2) on
+//          a box whose measured GTK row (provision's $CI_ROOT/gtk-row.json) the tree's scripts/fixtures/gtk-rows.json
+//          does not carry — the pixel suites read that row, so a box the tree has no row for would judge nothing.
 //
 // STANDALONE ON PURPOSE: it is run by absolute path from a tree that may not contain it, against a <tree> that may
 // predate it. The selection is the TREE's own ci.mjs (its SUITES, affectedSuites over its git, shardPlan's FNV split,
@@ -19,7 +29,9 @@
 //                      /tmp: scratch roots ARE /tmp/vs-* (endDaemonsOf refuses any other root, the reaper judges only
 //                      those — measured: TMPDIR under the snap red test-agentd-dial + test-ci-heavy-launch, 2026-10-13)
 //                      /markers /ci.log /rc   the run's marker, its whole log, its exit code
-// The LOAD RULE is the box's own (MemAvailable ≥ 40 GB ⇒ 4 lanes, ≥ 25 ⇒ 2, else 1; --lanes overrides), printed.
+// The LOAD RULE is the box's own (MemAvailable ≥ 40 GB ⇒ 4 lanes, ≥ 25 ⇒ 2, else 1; --batch: ≥ 40 ⇒ 8, ≥ 25 ⇒ 4, else
+// 2 — the batch's lanes are a desktop each, measured ≤ 3 GB at peak, see the run's memory line; --lanes overrides),
+// printed, and the run's lowest MemAvailable is printed at its end (sampled every 10 s).
 // The log STREAMS back (every line also to --log); the marker + log are copied to <tree>/data/ci-heavy/remote/.
 // TEARDOWN: every process of the run carries VIBESPACE_CI_REMOTE_RUN=<id>; after the run — and when this process
 // is interrupted — each one still alive (by that env or a cwd / argv under the snap) is TERMed, then KILLed, and named.
@@ -35,15 +47,16 @@ export const CI_ROOT = '/var/tmp/vibespace-ci';
 const HERE = path.dirname(new URL(import.meta.url).pathname);
 
 // PURE: the box's own LOAD RULE (the hub's, scaled to what the box has free).
-export function loadRule(availGb) { return availGb >= 40 ? 4 : availGb >= 25 ? 2 : 1; }
+export function loadRule(availGb, { batch = false } = {}) { return batch ? (availGb >= 40 ? 8 : availGb >= 25 ? 4 : 2) : (availGb >= 40 ? 4 : availGb >= 25 ? 2 : 1); }
+export const BATCHES = Object.freeze({ desktop: 'self' }); // --batch <name> → the ci.mjs HOSTS set it runs
 
 export function parseArgs(argv) {
-  const o = { host: null, snapshot: null, range: null, shard: null, only: null, lanes: null, log: null, exit: null, keep: false, list: false, dirtyOk: false };
+  const o = { host: null, snapshot: null, range: null, shard: null, only: null, lanes: null, log: null, exit: null, keep: false, list: false, dirtyOk: false, batch: null };
   const val = (i, a) => (a.includes('=') ? a.slice(a.indexOf('=') + 1) : argv[i + 1]);
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i], k = a.replace(/^--/, '').split('=')[0];
     if (['keep', 'list', 'dirty-ok'].includes(k)) { o[k === 'dirty-ok' ? 'dirtyOk' : k] = true; continue; }
-    if (!['host', 'snapshot', 'range', 'shard', 'only', 'lanes', 'log', 'exit'].includes(k)) throw new Error(`unknown argument '${a}'`);
+    if (!['host', 'snapshot', 'range', 'shard', 'only', 'lanes', 'log', 'exit', 'batch'].includes(k)) throw new Error(`unknown argument '${a}'`);
     const v = val(i, a); if (!a.includes('=')) i++;
     if (v === undefined || v === '') throw new Error(`--${k} needs a value`);
     o[k] = v;
@@ -55,6 +68,8 @@ export function parseArgs(argv) {
   }
   if (o.only !== null) o.only = o.only.split(',').map((x) => x.trim()).filter(Boolean);
   if (o.only && o.range) throw new Error('--only and --range do not combine (--only IS the selection)');
+  if (o.batch !== null && !(o.batch in BATCHES)) throw new Error(`--batch wants ${Object.keys(BATCHES).join(' | ')} (got '${o.batch}')`);
+  if (o.batch !== null && (o.only || o.shard)) throw new Error('--batch IS the selection (the self-hosted set, cut by --range when given) — it does not combine with --only or --shard');
   if (o.lanes !== null && !(Number.isInteger(Number(o.lanes)) && Number(o.lanes) >= 1)) throw new Error(`--lanes wants an integer ≥ 1 (got '${o.lanes}')`);
   if (!o.snapshot) throw new Error('--snapshot <tree> is required');
   if (!o.list && !o.host) throw new Error('--host <ssh alias> is required (or --list)');
@@ -64,9 +79,18 @@ export function parseArgs(argv) {
 // The slice, cut by the TREE's ci.mjs. `mod` = that module (an import of <tree>/scripts/ci.mjs). Unknown --only
 // names are refused loudly (ci.mjs would exit 2 on the box after a whole rsync). Order: longest-first by the
 // newest timings in `timingDirs` (heavyGate's --only keeps the order it is given), unmeasured suites late-in-table first.
-export function selectSlice(mod, { tree, range = null, shard = null, only = null, timingDirs = [], changed } = {}) {
-  const all = mod.SUITES.filter((s) => s.tier === 'heavy');
+export function selectSlice(mod, { tree, range = null, shard = null, only = null, timingDirs = [], changed, batch = null } = {}) {
+  let all = mod.SUITES.filter((s) => s.tier === 'heavy');
   let picked = all, summary = `[ci-remote] the full heavy tier: ${all.length} suites`;
+  if (batch) {
+    // the tree's OWN host rule cuts the batch (a tree that predates it has none: refused — never a guessed list)
+    if (typeof mod.hostFilter !== 'function') throw new Error(`--batch ${batch}: this tree's scripts/ci.mjs has no HOSTS rule (hostFilter) — it predates the desktop batch`);
+    const sourceOf = (name) => { try { return fs.readFileSync(path.join(tree, 'scripts', name + '.mjs'), 'utf-8'); } catch { return ''; } };
+    const n = all.length;
+    all = mod.hostFilter(all, BATCHES[batch], { sourceOf });
+    picked = all;
+    summary = `[ci-remote] --batch ${batch}: the ${all.length} self-hosted heavy suites of ${n} (ci.mjs HOSTS: ${BATCHES[batch]}; the other ${n - all.length} are the mirror's --host=hosted shards)`;
+  }
   if (only) {
     const bad = only.filter((n) => !all.some((s) => s.name === n));
     if (bad.length) throw new Error(`--only: not a heavy suite in this tree: ${bad.join(', ')}`);
@@ -74,7 +98,7 @@ export function selectSlice(mod, { tree, range = null, shard = null, only = null
     summary = `[ci-remote] --only: ${picked.length} suites`;
   } else if (range) {
     const a = mod.affectedSuites({ range, suites: all, root: tree, changed });
-    picked = a.selected; summary = a.summary;
+    picked = a.selected; summary = (batch ? summary + '\n' : '') + a.summary;
   }
   let serial = [];
   if (shard) {
@@ -114,12 +138,12 @@ if [ "$c" -gt 0 ]; then sleep ${Number(graceS)}; k=$(kill_run KILL | tail -n 1);
 `;
 }
 
-export function runScript({ snap, id, names, head, lanes, ciRoot = CI_ROOT, lockWaitMs = 2 * 3600e3 }) {
+export function runScript({ snap, id, names, head, lanes, ciRoot = CI_ROOT, lockWaitMs = 2 * 3600e3, batch = null }) {
   return `set -u; S=${sh(snap)}; CI=${sh(ciRoot)}; ID=${sh(id)}
 mkdir -p "$S/home" "$S/run" "$S/markers" && chmod 700 "$S/run" || exit 5
 ln -sfn "$CI/repo/node_modules" "$S/tree/node_modules"
 avail=$(awk '/MemAvailable/{print int($2/1048576)}' /proc/meminfo)
-lanes=${lanes ? Number(lanes) : `$(if [ $avail -ge 40 ]; then echo 4; elif [ $avail -ge 25 ]; then echo 2; else echo 1; fi)`}
+lanes=${lanes ? Number(lanes) : batch ? `$(if [ $avail -ge 40 ]; then echo 8; elif [ $avail -ge 25 ]; then echo 4; else echo 2; fi)` : `$(if [ $avail -ge 40 ]; then echo 4; elif [ $avail -ge 25 ]; then echo 2; else echo 1; fi)`}
 echo "[ci-remote] $(hostname): LOAD RULE — \${avail} GB available, load $(cut -d' ' -f1 /proc/loadavg), $(nproc) cpus ⇒ VIBESPACE_CI_LANES=$lanes${lanes ? ' (--lanes)' : ''}"
 : > "$S/ci.log"; echo running > "$S/rc"
 cat > "$S/run.sh" <<RUN
@@ -127,17 +151,35 @@ cd "$S/tree" || exit 5
 env -i HOME="$S/home" PATH="$S/tree/data/bin:$CI/bin:/usr/local/bin:/usr/bin:/bin" LANG=C.UTF-8 TERM=dumb USER="\\$USER" LOGNAME="\\$USER" SHELL=/bin/bash \\\\
   XDG_RUNTIME_DIR="$S/run" TMPDIR=/tmp VIBESPACE_SKIP_AGENT_HOOKS=1 VIBESPACE_CI_DIR_SWEEP=off VIBESPACE_CI_LANES=$lanes VIBESPACE_CI_REMOTE_RUN="$ID" \\\\
   VIBESPACE_AB_BASE="$CI/tools/ab-0.38.1/node_modules/agent-browser/bin/agent-browser-linux-x64" GDK_BACKEND=x11 QT_QPA_PLATFORM=xcb NO_UPDATE_NOTIFIER=1 npm_config_update_notifier=false \\\\
-  dbus-run-session -- node scripts/ci.mjs --heavy --only=${names.join(',')} --sha=${head} --markers="$S/markers" --lock="$CI/heavy.lock" --lock-wait-ms=${lockWaitMs} < /dev/null
+  ${batch ? 'VIBESPACE_CI_LANE_ROOT="$S/lanes" ' : ''}dbus-run-session -- node scripts/ci.mjs --heavy --only=${names.join(',')} --sha=${head} --markers="$S/markers" --lock="$CI/heavy.lock" --lock-wait-ms=${lockWaitMs}${batch ? ' --serial-overlap=1' : ''} < /dev/null
 echo \\$? > "$S/rc"
 RUN
 setsid bash "$S/run.sh" >> "$S/ci.log" 2>&1 < /dev/null &
-tail -n +1 --pid=$! -F "$S/ci.log" 2>/dev/null
+RUNPID=$!; T0=$(date +%s)
+( while kill -0 $RUNPID 2>/dev/null; do awk '/MemAvailable/{print int($2/1048576)}' /proc/meminfo; sleep 10; done ) > "$S/mem.log" 2>/dev/null &
+tail -n +1 --pid=$RUNPID -F "$S/ci.log" 2>/dev/null
+echo "[ci-remote] memory: MemAvailable lowest $(sort -n "$S/mem.log" | head -n 1) GB over the run (\${avail} GB at its start, $(wc -l < "$S/mem.log") samples) · wall $(( $(date +%s) - T0 ))s at $lanes lanes"
 ${teardownScript(snap, id)}
 echo "[ci-remote] rc=$(cat "$S/rc")"
 `;
 }
 
 function rsync(args) { return spawnSync('rsync', args, { encoding: 'utf-8' }); }
+
+// PURE: a box's measured GTK row (scripts/ci-provision-aidev.sh's JSON) against the tree's rows (keyed by GTK major.minor).
+export function gtkRowVerdict(boxJson, rows) {
+  let box = null; try { box = JSON.parse(boxJson); } catch { }
+  if (!box || !box.gtk) return { ok: false, why: 'no measured GTK row on the box — run scripts/ci-provision-aidev.sh there (its gtk-row step writes it)' };
+  const key = String(box.gtk).split('.').slice(0, 2).join('.');
+  const row = rows && rows[key];
+  const FIELDS = ['calculator', 'calcSize2x', 'calcMin2x', 'calcButtonBound', 'pushButtonRole']; // what the suites judge by (calcMinFirst2x is a ~0.2 s transient: printed, not compared)
+  const measured = JSON.stringify(Object.fromEntries(['gtk', 'atspi', ...FIELDS, 'calcMinFirst2x'].map((k) => [k, box[k]])));
+  if (!row) return { ok: false, why: `the box's GTK ${box.gtk} has NO row in the tree's scripts/fixtures/gtk-rows.json — the pixel suites would have nothing to judge by; check the measured row in under "${key}": ${measured}` };
+  const bad = FIELDS.filter((k) => JSON.stringify(row[k]) !== JSON.stringify(box[k]));
+  if (bad.length) return { ok: false, why: `the box's measured GTK row disagrees with the tree's "${key}" row on ${bad.join(', ')} — box ${measured} vs tree ${JSON.stringify(row)}` };
+  return { ok: true, why: `GTK row "${key}" — the box's measured calculator ${box.calculator} (2× window ${row.calcSize2x.join('×')}, minimum ${row.calcMin2x.join('×')}, ${row.calcButtonBound ? 'button' : 'text'}-bound) and AT-SPI "${row.pushButtonRole}" match the tree's` };
+}
+function readTreeRows(tree) { try { return JSON.parse(fs.readFileSync(path.join(tree, 'scripts', 'fixtures', 'gtk-rows.json'), 'utf-8')).rows; } catch { return null; } }
 
 async function main(argv) {
   let o;
@@ -150,7 +192,7 @@ async function main(argv) {
   const common = git(tree, ['rev-parse', '--path-format=absolute', '--git-common-dir']);
   const timingDirs = [path.join(tree, 'data', 'ci-heavy', 'remote'), path.join(tree, 'data', 'ci-heavy'), ...(common ? [path.join(path.dirname(common), 'data', 'ci-heavy')] : [])];
   let sel;
-  try { sel = selectSlice(mod, { tree, range: o.range, shard: o.shard, only: o.only, timingDirs }); } catch (e) { console.error('✗ ' + e.message); return 2; }
+  try { sel = selectSlice(mod, { tree, range: o.range, shard: o.shard, only: o.only, timingDirs, batch: o.batch }); } catch (e) { console.error('✗ ' + e.message); return 2; }
   if (o.list) { console.error(sel.summary); process.stdout.write(sel.names.join(',') + '\n'); return 0; }
   const dirty = git(tree, ['status', '--porcelain', '--untracked-files=no']);
   if (dirty && !o.dirtyOk) { console.error(`✗ ${tree} is DIRTY — a marker for ${head.slice(0, 9)} would not describe what ran (commit, or --dirty-ok: no marker is copied back)`); return 2; }
@@ -159,12 +201,20 @@ async function main(argv) {
   const out = (s) => { process.stdout.write(s); if (logFd !== null) fs.writeSync(logFd, s); };
   out(sel.summary.split('\n').slice(-2).join('\n') + `\n[ci-remote] ${sel.names.length} suites for ${head.slice(0, 9)} on ${o.host} (${sel.measured} ordered by a measured time, longest first)\n`);
   if (!sel.names.length) { out('[ci-remote] nothing selected — nothing to run\n'); return 0; }
-  const tag = o.shard ? `${o.shard.i}of${o.shard.n}` : (o.only ? 'only' : 'all');
+  const tag = o.shard ? `${o.shard.i}of${o.shard.n}` : o.batch ? `batch-${o.batch}` : (o.only ? 'only' : 'all');
   const id = `${head.slice(0, 9)}-${tag}-${crypto.randomBytes(3).toString('hex')}`;
   const snap = `${CI_ROOT}/snap-${head.slice(0, 9)}-${tag}`;
   // 1. the box: provisioned? its lock vs the tree's (a newer lock ⇒ npm ci in the box's repo first)
   const probe = spawnSync('ssh', [...SSH(o.host), `test -x ${CI_ROOT}/bin/node && test -d ${CI_ROOT}/repo/node_modules && cat ${CI_ROOT}/repo/.lock-sha`], { encoding: 'utf-8' });
   if (probe.status !== 0) { out(`✗ ${o.host}: not reachable or not provisioned (${(probe.stderr || '').trim().slice(0, 200) || 'rc ' + probe.status}) — ssh ${o.host} 'bash -s' < ${path.join(HERE, 'ci-remote-provision.sh')}\n`); return 5; }
+  if (o.batch) {
+    // THE GTK ROW (B-4260): the pixel suites read the tree's measured row for the box's GTK (scripts/fixtures/gtk-rows.json);
+    // the box measured its own at provision ($CI_ROOT/gtk-row.json). Disagreeing ⇒ refused before a snapshot is shipped.
+    const boxRow = spawnSync('ssh', [...SSH(o.host), `cat ${CI_ROOT}/gtk-row.json`], { encoding: 'utf-8' });
+    const verdict = gtkRowVerdict(boxRow.status === 0 ? boxRow.stdout : '', readTreeRows(tree));
+    if (!verdict.ok) { out(`✗ ${o.host}: ${verdict.why}\n`); return 2; }
+    out(`[ci-remote] ${o.host}: ${verdict.why}\n`);
+  }
   const lock = crypto.createHash('sha256').update(fs.readFileSync(path.join(tree, 'package-lock.json'))).digest('hex').slice(0, 16);
   if (probe.stdout.trim() !== lock) {
     out(`[ci-remote] ${o.host}: package-lock ${probe.stdout.trim()} ≠ the tree's ${lock} — npm ci in ${CI_ROOT}/repo first\n`);
@@ -199,7 +249,7 @@ async function main(argv) {
   out(`[ci-remote] ${o.host}:${snap}/tree = a worktree at ${head.slice(0, 9)} (shipped: ${shipped}${dirty ? ' + the dirty files' : ''}) in ${((Date.now() - ts) / 1000).toFixed(1)}s\n`);
   // 3. run, streaming; an interrupt here tears the run down on the box before this process exits
   const child = spawn('ssh', [...SSH(o.host), 'bash -s'], { stdio: ['pipe', 'pipe', 'pipe'] });
-  child.stdin.end(runScript({ snap, id, names: sel.names, head, lanes: o.lanes }));
+  child.stdin.end(runScript({ snap, id, names: sel.names, head, lanes: o.lanes, batch: o.batch }));
   let tail = '', stopping = false;
   const onData = (b) => { const s = b.toString(); out(s); tail = (tail + s).slice(-4096); };
   child.stdout.on('data', onData); child.stderr.on('data', onData);
@@ -219,10 +269,12 @@ async function main(argv) {
   fs.mkdirSync(back, { recursive: true });
   const stem = `${head}.${tag}.${o.host}`;
   rsync(['-a', `${o.host}:${snap}/ci.log`, path.join(back, stem + '.log')]);
-  if (!dirty) {
+  { // the verdict comes back only for a clean tree (a dirty one ran what no sha names); the evidence always does
     const tmp = fs.mkdtempSync(path.join(back, '.in-'));
     rsync(['-a', `${o.host}:${snap}/markers/`, tmp + '/']);
-    for (const f of fs.readdirSync(tmp)) { const x = /^[0-9a-f]{7,40}\.(green|red)$/.exec(f); if (x) fs.renameSync(path.join(tmp, f), path.join(back, `${stem}.${x[1]}`)); }
+    if (!dirty) for (const f of fs.readdirSync(tmp)) { const x = /^[0-9a-f]{7,40}\.(green|red)$/.exec(f); if (x) fs.renameSync(path.join(tmp, f), path.join(back, `${stem}.${x[1]}`)); }
+    if (fs.existsSync(path.join(tmp, 'reruns.jsonl'))) fs.renameSync(path.join(tmp, 'reruns.jsonl'), path.join(back, `${stem}.reruns.jsonl`)); // the rerun ledger
+    if (fs.existsSync(path.join(tmp, 'fail-logs'))) { fs.rmSync(path.join(back, `${stem}.fail-logs`), { recursive: true, force: true }); fs.renameSync(path.join(tmp, 'fail-logs'), path.join(back, `${stem}.fail-logs`)); } // every failed run's whole output
     fs.rmSync(tmp, { recursive: true, force: true });
   }
   if (!o.keep && m) spawnSync('ssh', [...SSH(o.host), `git -C ${CI_ROOT}/repo worktree remove --force ${sh(snap + '/tree')}; git -C ${CI_ROOT}/repo worktree prune`]);

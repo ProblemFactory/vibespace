@@ -126,7 +126,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, fixtureSid, ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, fixtureSid, ONBOARDED_SOURCE, vncEnv, gtkRow } from './scratch.mjs';
 
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
@@ -886,6 +886,9 @@ try {
   };
   console.log('§6 HiDPI + the app\'s minimum — a deviceScaleFactor-2 page, xterm + GNOME Calculator, our server vs the pre-fix control');
   const CALC6 = bin('gnome-calculator');
+  // THE BOX'S GTK ROW (B-4260 — scripts/fixtures/gtk-rows.json, measured inside xpra at provision): the calculator's minimum
+  // at 2× is 720×1232 on the hub's GTK 4.22, 694×980 on AIDev's 4.14 (which first announces 694×1004) — never the hub's pixels
+  const G6 = CALC6 ? gtkRow() : null;
   const HI = (id) => `(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(id)}); if (!w) return null; const v = w._desktopAppView; if (!v || !v.pane) return null; const pr = v.pane.getBoundingClientRect(); const c = v.client; const main = c && c.windows.get(c.mainWid); const cv = v.pane.querySelector('.xpra-win-main canvas'); const cr = cv ? cv.getBoundingClientRect() : null; const er = w.element.getBoundingClientRect(); const chip = w.content.querySelector('.desktop-app-chip-scale'); return { dpr: devicePixelRatio, status: v.status.textContent, pane: { x: pr.x, y: pr.y, w: pr.width, h: pr.height }, main: main ? { x: main.x, y: main.y, w: main.w, h: main.h } : null, constraints: c ? c.mainConstraints : null, ratio: v.ratio, minSize: v.minSize, scale: v.stageScale, offset: v.stageOffset, badge: v.fitBadge ? { shown: v.fitBadge.style.display !== 'none', text: v.fitBadge.textContent } : null, canvas: cv ? { w: cv.width, h: cv.height, rw: cr.width, rh: cr.height, rx: cr.x, ry: cr.y } : null, win: { w: er.width, h: er.height, minW: w.minWidth, minH: w.minHeight }, chip: chip ? { shown: chip.style.display !== 'none', text: chip.textContent, title: chip.title } : null, backendTitle: (w.content.querySelector('.desktop-app-chip-backend') || {}).title || '' }; })()`;
   const mkPage = async (origin, metrics) => { const t = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/new?about:blank`, { method: 'PUT' })).json(); const p = await page(t); await p.cdp('Emulation.setDeviceMetricsOverride', metrics); await p.cdp('Emulation.setFocusEmulationEnabled', { enabled: true }); await openPage(p, origin); return { p, t }; };
   const dropPage = async (x) => { if (!x || x.dropped) return; x.dropped = true; x.p.close(); try { await fetch(`http://127.0.0.1:${CDP_PORT}/json/close/${x.t.id}`); } catch {} };
@@ -983,6 +986,8 @@ try {
         await ensureActive(H.p, rc.id);
         await sizeWinOn(H.p, rc.id, 900, 800);
         out.c0 = await until(async () => { const v = await H.p.evalJs(HI(rc.id)); return v && v.status === 'Connected' && v.main && v.main.h > 100 ? v : null; }, 40000, 300);
+        // a calculator whose minimum SETTLES after its first map (the row's calcMinFirst2x → calcMin2x) is read once settled
+        out.c0 = (await until(async () => { const v = await H.p.evalJs(HI(rc.id)); const m = v && v.constraints && v.constraints['minimum-size']; return m && m[0] === G6.calcMin2x[0] && m[1] === G6.calcMin2x[1] ? v : null; }, 8000, 200)) || out.c0;
         await sleep(1500);
         out.c1 = await dragSE(H.p, rc.id, -700, -700); // far below any minimum
         await sleep(1500);
@@ -1026,8 +1031,10 @@ try {
   if (CALC6) {
     console.log(`  ours calculator: record ${JSON.stringify(o.calcRec)}, constraints ${JSON.stringify(o.c0 && o.c0.constraints)}, min pane ${JSON.stringify(o.c1 && o.c1.minSize)}; window min ${o.c1 && `${o.c1.win.minW}×${o.c1.win.minH}`} layout px; after a drag 700 px past it: window ${o.c1 && `${o.c1.win.w.toFixed(0)}×${o.c1.win.h.toFixed(0)}`}, pane ${o.c1 && `${o.c1.pane.w}×${o.c1.pane.h}`}, main ${o.c1 && o.c1.main && `${o.c1.main.w}×${o.c1.main.h}`} device, stage ${o.c1 && o.c1.scale}; '7' clicked twice ⇒ the calculator copies "${o.seven}"`);
     const cmin = (o.c0 && o.c0.constraints && o.c0.constraints['minimum-size']) || [0, 0];
-    check(`GNOME Calculator at 2× announces its minimum (${JSON.stringify(o.c0 && o.c0.constraints)}) — the height exactly 2 × its 616 at 1× (GDK_SCALE=2), and the font dpi did not double it again`, cmin[1] === 1232 && cmin[0] >= 700 && cmin[0] < 800, o.c0 && o.c0.constraints);
-    const wantMin = { w: Math.ceil(cmin[0] / 2), h: Math.ceil(cmin[1] / 2) };
+    check(`GNOME Calculator at 2× announces its minimum (${JSON.stringify(o.c0 && o.c0.constraints)}) — the height exactly the box's measured 2× minimum (${G6.calcMin2x[1]}: calculator ${G6.calculator}, GTK ${G6.gtk}; 2 × 616 on the hub), and the font dpi did not double it again`, cmin[1] === G6.calcMin2x[1] && cmin[0] >= G6.calcMin2x[0] - 20 && cmin[0] < G6.calcMin2x[0] + 80, o.c0 && o.c0.constraints);
+    // "follows the app": against the app's minimum AT THE SAME MOMENT as the pane's (c1's own constraints)
+    const cNow = (o.c1 && o.c1.constraints && o.c1.constraints['minimum-size']) || cmin;
+    const wantMin = { w: Math.ceil(cNow[0] / 2), h: Math.ceil(cNow[1] / 2) };
     check(`the VibeSpace window's minimum follows the app: pane ≥ ${wantMin.w}×${wantMin.h} CSS (${o.c1 && JSON.stringify(o.c1.minSize)}); a resize DRAG 700 px past it stops there — the pane ${o.c1 && `${o.c1.pane.w}×${o.c1.pane.h}`} still holds the app`, !!o.c1 && !!o.c1.minSize && o.c1.minSize.w === wantMin.w && o.c1.minSize.h === wantMin.h && o.c1.pane.w >= wantMin.w - 0.5 && o.c1.pane.h >= wantMin.h - 0.5 && o.c1.win.w < 800, o.c1);
     check(`…and nothing is cropped: the main window (${o.c1 && o.c1.main && `${o.c1.main.w}×${o.c1.main.h}`} device) fits the pane at ratio 2, the picture unscaled (${o.c1 && o.c1.scale})`, !!o.c1 && !!o.c1.main && o.c1.main.w / 2 <= o.c1.pane.w + 1 && o.c1.main.h / 2 <= o.c1.pane.h + 1 && o.c1.scale === 1, o.c1);
     check(`a click on the '7' key at DPR 2 registers (the calculator copies "${o.seven}")`, /^77$/.test(o.seven || ''), o.seven);
@@ -1042,7 +1049,7 @@ try {
     await sleep(1500);
     const u2 = await A6.H.p.evalJs(HI(o.calcId));
     console.log(`  UI scale 1.25 at DPR 2: canvas ${u2 && u2.canvas && `${u2.canvas.w}×${u2.canvas.h} backing in ${u2.canvas.rw.toFixed(1)}×${u2.canvas.rh.toFixed(1)} CSS`}, pane ${u2 && `${u2.pane.w}×${u2.pane.h}`}, window min ${u2 && `${u2.win.minW}×${u2.win.minH}`} layout px, window ${u2 && `${u2.win.w.toFixed(0)}×${u2.win.h.toFixed(0)}`} on screen`);
-    check('UI scale 1.25 on the 2× page: the canvas is still 2× its on-screen CSS box (net zoom 1 under the counter-zoom) and the pane still holds the app\'s minimum', !!u && !!u2 && !!u2.canvas && Math.abs(u2.canvas.w - u2.canvas.rw * 2) <= 2 && u2.pane.h >= 615.5 && u2.pane.w >= 359.5, u2);
+    check('UI scale 1.25 on the 2× page: the canvas is still 2× its on-screen CSS box (net zoom 1 under the counter-zoom) and the pane still holds the app\'s minimum', !!u && !!u2 && !!u2.canvas && Math.abs(u2.canvas.w - u2.canvas.rw * 2) <= 2 && u2.pane.h >= G6.calcMin2x[1] / 2 - 0.5 && u2.pane.w >= G6.calcMin2x[0] / 2 - 0.5, u2);
     await A6.H.p.evalJs(`localStorage.removeItem('vibespace.uiScale'); true`);
   }
   // the phone: the window IS the screen, the pane smaller than the app's minimum ⇒ the picture SCALED to fit, never cropped
@@ -1723,6 +1730,7 @@ try {
   // the old session gone; CONTROL = a copy whose keeper ignores the UI scale (the pre-A3 pick): the same page gets 2× / 96 ──
   console.log('§11 A3 — the scale derived from dpr × UI scale (DPR 2 + 125 % ⇒ 2.5×: lane D (a) GDK_SCALE 3 + Xft.dpi 96 shown at 0.8333, measured in the app\'s display); the ⋯ Scale ▸ relaunch on two clients');
   const CALC11 = bin('gnome-calculator'), XRDB11 = bin('xrdb');
+  const G11 = CALC11 ? gtkRow() : null; // the box's measured 2× minimum (B-4260): the 3× floor is 1.5 × it
   if (!CALC11 || !XRDB11) skip('§11 the scale legs', `${!CALC11 ? 'gnome-calculator' : 'xrdb'} not on PATH`);
   else {
     const O11 = `http://127.0.0.1:${PORT}`;
@@ -1761,7 +1769,8 @@ try {
         // GNOME Calculator 50's minimum is BUTTON-bound (measured: 720x1232 at 2.5× / 120 dpi exactly as at 2× / 96 — its 120-dpi
         // text fits inside the 2× buttons; and 360x616 at 1.5× / 144): the widgets half is asserted here, the TEXT half is
         // measured where a text-bound window exists — test-desktop-app-keeper §20 (a) (xterm's 40×10 cells, 1.25× at 120 dpi)
-        check(`§11 (1): the calculator draws its widgets at 3× — its minimum ${JSON.stringify(min0)} is the 3× floor 1080x1848 (1×: 360x616), shown at 0.8333 = 2.5×`, min0[0] >= 1080 && min0[1] >= 1848, min0);
+        const F3x = [Math.floor(1.5 * G11.calcMin2x[0] * 0.99), Math.floor(1.5 * G11.calcMin2x[1] * 0.99)]; // 1 %: GTK rounds a scaled minimum
+        check(`§11 (1): the calculator draws its widgets at 3× — its minimum ${JSON.stringify(min0)} is at the 3× floor ${F3x.join('x')} (the box's 2× minimum ${G11.calcMin2x.join('x')} × 1.5; 1080x1848 on the hub), shown at 0.8333 = 2.5×`, min0[0] >= F3x[0] && min0[1] >= F3x[1], min0);
         check(`§11 (1): an automatic 2.5× puts no chip on the strip (design 009 §B2 — ${JSON.stringify(s0 && s0.chip)}), its numbers stay the hidden chip's tooltip, and the ⋯ button is there (an SVG)`, !!s0 && !!s0.chip && !s0.chip.shown && s0.chip.text === '' && /devicePixelRatio 2 × UI scale 125%/.test(s0.chip.title) && /widgets 2\.5×, text at 96 dpi/.test(s0.chip.title) && /Drawn at 3× and shown at 83\.3%/.test(s0.chip.title) && !!s0.more && s0.more.shown && s0.more.svg, s0 && { chip: s0.chip, more: s0.more });
         // (2) a second client (DPR 1) holds the same window (the layout sync), blocked — its menu is disabled with the reason
         B = await mkPage(O11, { width: 1200, height: 850, deviceScaleFactor: 1, mobile: false });
@@ -1801,7 +1810,7 @@ try {
             const nB = await B.p.evalJs(S11(id1));
             console.log(`  §11 (4): relaunch → ready ${readyMs} ms; successor scale ${r1.scale} dpi ${r1.dpi} origin ${r1.scaleOrigin}; inside: GDK_SCALE=${in1.gdk}, Xft.dpi ${in1.xft}; minimum ${JSON.stringify(min1)}; chip ${JSON.stringify(s1 && s1.chip && s1.chip.text)}; old ${old.state} stoppedBy ${old.stoppedBy} replacedBy ${old.replacedBy}, its app pid ${r0.pids.app} alive ${D.pidAlive(r0.pids.app)}; desktop-app windows: A ${s1 && s1.n}, B ${nB && nB.n}`);
             check(`§11 (4): the successor runs at the CHOSEN 1.5× — the record (${r1.scale}×, ${r1.dpi} dpi, GDK_SCALE ${r1.gdkScale} × ${r1.pictureScale}, ${r1.scaleOrigin}) and MEASURED inside its display (GDK_SCALE=${in1.gdk}, Xft.dpi ${in1.xft}: lane D (a) — widgets AND text 1.5×)`, r1.scale === 1.5 && r1.dpi === 96 && r1.gdkScale === 2 && r1.pictureScale === 0.75 && r1.scaleOrigin === 'chosen' && in1.gdk === '2' && in1.xft === 96, { r1: { scale: r1.scale, dpi: r1.dpi, gdk: r1.gdkScale, pic: r1.pictureScale, origin: r1.scaleOrigin }, in1 });
-            check(`§11 (4): the picture reconnected to the successor (${s1 && s1.status}) and its widgets are drawn at 2× (minimum ${JSON.stringify(min1)}: the 2× floor 720x1232, under the 3× one) and shown at 0.75`, !!s1 && s1.status === 'Connected' && min1[0] >= 720 && min1[0] < 1080 && min1[1] >= 1232 && min1[1] < 1848, min1);
+            check(`§11 (4): the picture reconnected to the successor (${s1 && s1.status}) and its widgets are drawn at 2× (minimum ${JSON.stringify(min1)}: the 2× floor ${G11.calcMin2x.join('x')}, under the 3× one) and shown at 0.75`, !!s1 && s1.status === 'Connected' && min1[0] >= G11.calcMin2x[0] && min1[0] < 1.5 * G11.calcMin2x[0] && min1[1] >= G11.calcMin2x[1] && min1[1] < 1.5 * G11.calcMin2x[1], min1);
             check(`§11 (4): a chosen 1.5× is on the strip in words, "Larger 1.5×" (design 009 §B2 — ${JSON.stringify(s1 && s1.chip && s1.chip.text)})`, !!s1 && !!s1.chip && s1.chip.text === 'Larger 1.5×', s1 && s1.chip);
             // desktop A r1: the seat is CARRIED — the client that chose the scale (A) holds the successor's seat with no Resume,
             // the other one (B, blocked before) is blocked again, whichever retargeted first (the verifier saw B win the race)
@@ -2497,6 +2506,7 @@ try {
   // the column in a window that kept its size (the owner's screenshot, reproduced). ──
   console.log('§15 lane D (a) — the scale geometry: a fraction is a real scale, the window follows a Scale ▸ relaunch, the picture covers the pane at every transition');
   const CALC14 = bin('gnome-calculator');
+  const G15 = CALC14 ? gtkRow() : null; // the box's calculator: BUTTON-bound (50 / GTK 4.22) or TEXT-bound (46 / 4.14) — B-4260
   const ids14 = [];
   const O14 = `http://127.0.0.1:${PORT}`;
   const M14 = require('../src/desktop-apps.js');
@@ -2777,7 +2787,13 @@ try {
               const g1 = next && await readyOn(H.p, id) && await settle14(H.p, id);
               const ratioC = g0 && g1 && typeof g0.col === 'object' && typeof g1.col === 'object' ? g1.col.css / g0.col.css : null;
               console.log(`  CONTROL §15: 2× column ${g0 && g0.col && g0.col.css && g0.col.css.toFixed(1)} CSS in a ${g0 && g0.pane.w.toFixed(1)} pane → 1.5× column ${g1 && g1.col && g1.col.css && g1.col.css.toFixed(1)} CSS in a ${g1 && g1.pane.w.toFixed(1)} pane (ratio ${ratioC && ratioC.toFixed(3)})`);
-              check(`§15 CONTROL: on the pre-lane-D copy 2× → 1.5× HALVES the calculator's column (ratio ${ratioC && ratioC.toFixed(3)}, not 0.75) in a window that KEPT its size (${g0 && g0.pane.w.toFixed(1)} → ${g1 && g1.pane.w.toFixed(1)}) — the app's own background ${g0 && g1 ? `${(100 * (1 - g0.col.css / g0.pane.w)).toFixed(0)} % → ${(100 * (1 - g1.col.css / g1.pane.w)).toFixed(0)} %` : '?'} of the width: the owner's screenshot`, ratioC != null && Math.abs(ratioC - 0.5) < 0.03 && Math.abs(g1.pane.w - g0.pane.w) <= 1, { g0: g0 && g0.col, g1: g1 && g1.col });
+              // THE CONTROL'S PREMISE IS A BUTTON-BOUND CALCULATOR (B-4260 — the box's measured row): the pre-lane-D rule
+              // (GDK_SCALE 1 + Xft.dpi 144) draws widgets at 1× and only text at 1.5×, which halves a button-bound column
+              // (calculator 50 / GTK 4.22, the owner's screenshot); a TEXT-bound one (46 / 4.14 — its minimum grows at
+              // Xft.dpi 144: ${G15.calcMin1x} → ${G15.calcMin1xDpi144}) is not halved, so on such a box this leg asserts
+              // the row's measured ratio and says the halving control is a button-bound box's — never a skip
+              if (G15.calcButtonBound) check(`§15 CONTROL: on the pre-lane-D copy 2× → 1.5× HALVES the calculator's column (ratio ${ratioC && ratioC.toFixed(3)}, not 0.75) in a window that KEPT its size (${g0 && g0.pane.w.toFixed(1)} → ${g1 && g1.pane.w.toFixed(1)}) — the app's own background ${g0 && g1 ? `${(100 * (1 - g0.col.css / g0.pane.w)).toFixed(0)} % → ${(100 * (1 - g1.col.css / g1.pane.w)).toFixed(0)} %` : '?'} of the width: the owner's screenshot`, ratioC != null && Math.abs(ratioC - 0.5) < 0.03 && Math.abs(g1.pane.w - g0.pane.w) <= 1, { g0: g0 && g0.col, g1: g1 && g1.col });
+              else check(`§15 CONTROL (a TEXT-bound calculator ${G15.calculator}, GTK ${G15.gtk}: its 1× minimum ${G15.calcMin1x.join('x')} → ${G15.calcMin1xDpi144.join('x')} at Xft.dpi 144): the pre-lane-D copy draws its column at the row's measured ${G15.controlRatio15} of 2× (ratio ${ratioC && ratioC.toFixed(3)}) in a window that KEPT its size — the halving the fix answers is a BUTTON-bound calculator's, judged on a GTK 4.22 box`, ratioC != null && Math.abs(ratioC - G15.controlRatio15) < 0.03 && Math.abs(g1.pane.w - g0.pane.w) <= 1, { g0: g0 && g0.col, g1: g1 && g1.col });
             } else check('§15 CONTROL: the calculator launches on the copy', false, l);
           } finally { await dropPage(H); }
         }
