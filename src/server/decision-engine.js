@@ -5,8 +5,10 @@
  *
  * `judge(use, parts, {questions, memo, accountNever, perHour})`:
  *   1. the MEMO (data/decision-memo.json, LRU 5 000, + memory) — a hit makes NO call;
- *   2. the key from the registry row (`resolveIntegration('decision-api')`: the user's own > the cluster preset >
- *      none) and the plugin's switches + budget (src/plugins/decision-api.js attaches its record here);
+ *   2. the key from the registry row (`resolveIntegration('llm')`: the user's own > the cluster preset > none) and the
+ *      LLM plugin's switches + budget + judging model (src/plugins/llm.js attaches its record here — lane
+ *      llm-plugin-rename: the model is the plugin's `judgeModel` row, else the cluster preset's `model` while its key is
+ *      in use, else the provider's default);
  *   3. RESERVE (lane decision-verify-fixes, F1–F5): `budgetVerdict` (PURE) — no key, a switch off, a key the
  *      provider refused, a backoff, the day's budget spent (SETTLED + the open RESERVATIONS + this estimate, in USD),
  *      the hour: a QUIET named refusal (journalled once per reason per 5 min; the day's budget stop says ONE server
@@ -52,7 +54,7 @@ const path = require('path');
 const crypto = require('crypto');
 const M = require('../decision-model.js');
 
-const ROW_ID = 'decision-api';
+const ROW_ID = 'llm';   // lane llm-plugin-rename: the Language model row (the key) — its data files keep their decision-* names
 const FEATURE_OF = Object.freeze({ attention: 'attention', rule: 'rules', routing: 'routing', inbox: 'inbox', webhook: 'rules', test: null });
 const JOURNAL_MAX = 5000;
 const JOURNAL_DAYS = 30;
@@ -99,6 +101,8 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
       dailyBudgetCents: Number.isFinite(Number(c.dailyBudgetCents)) && Number(c.dailyBudgetCents) >= 0 ? Number(c.dailyBudgetCents) : M.DAILY_BUDGET_CENTS_DEFAULT,
       threshold: Number.isFinite(Number(c.threshold)) ? Number(c.threshold) : M.THRESHOLD_DEFAULT,
       learnModel: typeof c.learnModel === 'string' ? c.learnModel : null,   // lane rule-learning: the drafter's tier (flash | sonnet)
+      learnOn: c.learn !== false,   // lane llm-plugin-rename: the drafter's own switch (the text-model client's availability)
+      judgeModel: typeof c.judgeModel === 'string' ? c.judgeModel.trim() : '',   // the plugin's row ('' = the preset's / the provider's)
     };
   }
   /** The row's answer, as the engine needs it — never logged, never returned. */
@@ -108,7 +112,10 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
     const v = (r && r.values) || {};
     const provider = M.dialectOf(String(v.provider || '').trim().toLowerCase());
     if (!provider || !v.apiKey) return null;
-    return { provider, model: String(v.model || '').trim() || M.DEFAULT_MODEL[provider], key: String(v.apiKey), source: r.source || null };
+    // the judging model: the plugin's row > the cluster preset's choice while ITS key is in use (a model named for the
+    // cluster's provider never rides the user's own key) > the provider's default
+    const preset = r.source === 'cluster' ? String(v.model || '').trim() : '';
+    return { provider, model: settings().judgeModel || preset || M.DEFAULT_MODEL[provider], key: String(v.apiKey), source: r.source || null };
   }
   function today() {
     const day = M.dayOf(now(), tzOffset(now()));
@@ -175,8 +182,8 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
   // lane decision-vendor-hygiene: a row stop the owner must act on (the plan, the request shape) says ONE server notice — the
   // client words it from the i18n key, `text` stays the English; a notice no client received is said again at the next refusal
   const STOP_NOTICE = Object.freeze({
-    plan: 'The Decision API stopped: the provider says the plan does not allow this model (HTTP 402). Change the model or the key in ⚙ → System → Integrations & keys.',
-    shape: 'The Decision API stopped: the model refused the request shape (HTTP 400). Change the model or the key in ⚙ → System → Integrations & keys.',
+    plan: 'The LLM plugin stopped: the provider says the plan does not allow this model (HTTP 402). Change the judging model in Settings › Plugins › LLM or the key in ⚙ → System → Integrations & keys.',
+    shape: 'The LLM plugin stopped: the model refused the request shape (HTTP 400). Change the judging model in Settings › Plugins › LLM or the key in ⚙ → System → Integrations & keys.',
   });
   function stopNotice(why) {
     if (!stop || !STOP_NOTICE[why]) return;
@@ -191,7 +198,7 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
     if (!(now() - (quietAt.get(k) || 0) < QUIET_MS)) { quietAt.set(k, now()); journal({ use, outcome: 'refused', why, ...extra }); }
     if (why === 'daily-budget' && noticedDay !== usage.day) {
       noticedDay = usage.day;
-      try { serverNotice?.('decision-budget', 'The Decision API stopped for today: its daily budget is spent. It resumes tomorrow (⚙ → Plugins → Decision API).', { level: 'warn' }); } catch { }
+      try { serverNotice?.('decision-budget', 'The LLM plugin stopped for today: its daily budget is spent. It resumes tomorrow (⚙ → Plugins → LLM).', { level: 'warn' }); } catch { }
     }
     return { ok: false, why, ...extra };
   }

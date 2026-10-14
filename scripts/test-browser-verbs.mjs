@@ -75,7 +75,7 @@ const FIX = path.join(REPO, 'scripts/fixtures/browser-verbs');
 // ═══ ① the PURE router ═══
 console.log('① the PURE router');
 {
-  ok(V.OURS.length === 14 && ['profiles', 'new', 'providers', 'use', 'detach', 'status', 'pin', 'watch', 'backend', 'blocked', 'new-child', 'help', 'resume', 'restart'].every((w) => V.OURS.includes(w)), 'OURS is exactly the 13 VibeSpace words (lane browser-resume B: + `resume`)');
+  ok(V.OURS.length === 15 && ['profiles', 'new', 'providers', 'use', 'detach', 'status', 'pin', 'watch', 'backend', 'blocked', 'new-child', 'help', 'resume', 'restart', 'size'].every((w) => V.OURS.includes(w)), 'OURS is exactly the 15 VibeSpace words (lane browser-resume B: + `resume`; lane launch-picture-size: + `size`)');
   for (const w of V.OURS) ok(V.classify([w, 'x']).kind === 'ours', `\`${w}\` is ours`);
   ok(V.classify([]).kind === 'ours' && V.classify([]).verb === 'help' && V.classify(['--help']).verb === 'help', 'no args / --help ⇒ help');
 

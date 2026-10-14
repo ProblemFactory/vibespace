@@ -554,22 +554,56 @@ console.log('§4 a key changes layer with identical values (B-8145)');
   ok(c.after === 'release:gdrive=3+lark=1' && c.pushed === null, `CONTROL: a copy that compares the values only keeps the summary on "release" after the override is gone and pushes nothing (${c.after}) — the asserts above are red on it`);
 }
 
-// §D lane decision-core: the decision-api row's cluster preset rides the Slack row's road — its OWN prefix
-// (VIBESPACE_INTEGRATION_DECISION_API_*), resolved by the ONE store, read by the ONE caller (the engine never sees env)
+// §D lane decision-core → lane llm-plugin-rename: the LLM row's cluster preset rides the Slack row's road — its OWN
+// prefix (VIBESPACE_INTEGRATION_LLM_*), resolved by the ONE store, read by the ONE caller (the engine never sees env).
+// The fleet's PRE-RENAME spellings — the old single-field prefix, a JSON entry under the old row id — still resolve the
+// row (the row DECLARES them: clusterEnv.legacy), and when both spellings are set the new one wins (said once).
 {
-  const R = require(path.join(REPO, 'src/integration-registry.js'));
   const S = require(path.join(REPO, 'src/server/integration-store.js'));
-  const row = R.rowById('decision-api');
-  ok(!!row, 'decision-api: the row exists (its prefix is proven below by resolution through the ONE store — this suite never builds or reads an env name)');
-  const dd = path.join(scratch('decision-presets'), 'data'); fs.mkdirSync(dd, { recursive: true });
-  const env = { VIBESPACE_INTEGRATION_DECISION_API_PROVIDER: 'openrouter', VIBESPACE_INTEGRATION_DECISION_API_APIKEY: 'sk-or-dummy-cluster-0001', VIBESPACE_INTEGRATION_DECISION_API_MODEL: 'typesafe/jev-router' };
-  const st = S.create({ dataDir: dd, env, log: { warn() {}, log() {} } });
-  const res = st.resolveIntegration('decision-api');
-  const eng = require(path.join(REPO, 'src/server/decision-engine.js')).create({ dataDir: dd, integrations: st, log: { warn() {} } });
-  const s1 = eng.status();
-  ok(res.source === 'cluster' && s1.configured && s1.provider === 'openrouter' && s1.model === 'typesafe/jev-router' && s1.keySource === 'cluster' && !JSON.stringify(s1).includes('sk-or-dummy-cluster-0001'), `the prefix resolves as the cluster default and the engine reads it through the store — the key never in its status (${res.source}, ${s1.provider}, ${s1.model})`);
-  const none = require(path.join(REPO, 'src/server/decision-engine.js')).create({ dataDir: dd, integrations: S.create({ dataDir: dd, env: {}, log: { warn() {}, log() {} } }), log: { warn() {} } });
-  ok(none.status().configured === false, 'no prefix, no own key ⇒ the engine is not configured (no key)');
+  const E = require(path.join(REPO, 'src/server/decision-engine.js'));
+  const { PluginManager } = require(path.join(REPO, 'src/plugins.js'));
+  const LLM = require(path.join(REPO, 'src/plugins/llm.js'));
+  const row = R.rowById('llm');
+  const OLD_ID = row && row.clusterEnv.legacy ? row.clusterEnv.legacy.jsonKeys[0] : null;
+  ok(!!row && !!OLD_ID && !R.rowById(OLD_ID), `llm: the row exists under its new id; its pre-rename id (${OLD_ID}) is no row — only a declared legacy spelling (this suite never builds or reads an env name: every leg resolves through the ONE store)`);
+  let seq = 0;
+  const mk = (env, { store = S, settings = null } = {}) => {
+    const dd = path.join(scratch('llm-presets-' + (++seq)), 'data'); fs.mkdirSync(dd, { recursive: true });
+    const said = [];
+    const st = store.create({ dataDir: dd, env, log: { warn() {}, log: (l) => said.push(String(l)), error() {} } });
+    const eng = E.create({ dataDir: dd, integrations: st, log: { warn() {} } });
+    if (settings) new PluginManager({ dataDir: dd, plugins: [LLM], settings: { read: () => settings, patch: () => {} }, decisionEngine: eng });
+    return { st, eng, said };
+  };
+  const KEY_NEW = 'sk-or-dummy-' + 'cluster-0001', KEY_OLD = 'sk-dummy-' + 'legacy-0002', KEY_JSON = 'sk-or-dummy-' + 'json-0003';
+  const NEW = { VIBESPACE_INTEGRATION_LLM_PROVIDER: 'openrouter', VIBESPACE_INTEGRATION_LLM_APIKEY: KEY_NEW, VIBESPACE_INTEGRATION_LLM_MODEL: 'typesafe/jev-router' };
+  const OLD = { VIBESPACE_INTEGRATION_DECISION_API_PROVIDER: 'openai', VIBESPACE_INTEGRATION_DECISION_API_APIKEY: KEY_OLD, VIBESPACE_INTEGRATION_DECISION_API_MODEL: 'gpt-6-luna-mini' };
+  const a = mk(NEW), s1 = a.eng.status(), res = a.st.resolveIntegration('llm');
+  ok(res.source === 'cluster' && s1.configured && s1.provider === 'openrouter' && s1.model === 'typesafe/jev-router' && s1.keySource === 'cluster' && !JSON.stringify(s1).includes(KEY_NEW), `the new prefix resolves as the cluster default and the engine reads it through the store — the preset's MODEL is the judging model while the cluster's key is in use, the key never in its status (${res.source}, ${s1.provider}, ${s1.model})`);
+  ok(!a.st.publicView('llm').fields.some((f) => f.key === 'model') && a.st.publicView('llm').values.model === undefined, 'the card shows provider + key only — the preset\'s model never reaches the card');
+  const b = mk(OLD), s2 = b.eng.status(), r2 = b.st.resolveIntegration('llm');
+  ok(r2.source === 'cluster' && r2.values.apiKey === KEY_OLD && s2.provider === 'openai' && s2.model === 'gpt-6-luna-mini', `LEGACY: the OLD prefix alone still resolves the row (the fleet's presets keep working) — provider, key and the model it chose (${r2.source}, ${s2.provider}, ${s2.model})`);
+  const c = mk({ ...OLD, ...NEW }), r3 = c.st.resolveIntegration('llm'); c.st.resolveIntegration('llm');
+  ok(r3.source === 'cluster' && r3.values.apiKey === KEY_NEW && r3.values.provider === 'openrouter' && c.eng.status().model === 'typesafe/jev-router', 'LEGACY: both prefixes set ⇒ the NEW one wins, whole (never a field-by-field mix)');
+  ok(c.said.filter((l) => /pre-rename/.test(l)).length === 1 && !c.said.join('\n').includes(KEY_OLD) && !c.said.join('\n').includes(KEY_NEW), 'both set is SAID once (two resolves, one line) — names only, never a value', c.said.join(' | '));
+  const jsonOld = [{ id: OLD_ID, key: 'fleet', values: { provider: 'openrouter', apiKey: KEY_JSON, model: 'openai/gpt-6-luna-decisions' } }];
+  const d = mk({ VIBESPACE_INTEGRATIONS: JSON.stringify(jsonOld) }), r4 = d.st.resolveIntegration('llm');
+  ok(r4.source === 'cluster' && r4.clusterKey === 'fleet' && r4.values.apiKey === KEY_JSON && d.eng.status().model === 'openai/gpt-6-luna-decisions', `LEGACY: a JSON entry under the old id still resolves the row (${r4.source} ${r4.clusterKey})`);
+  const e = mk({ VIBESPACE_INTEGRATIONS: JSON.stringify([...jsonOld, { id: 'llm', key: 'new', values: { provider: 'openrouter', apiKey: KEY_NEW } }]) }), r5 = e.st.resolveIntegration('llm');
+  ok(r5.clusterKey === 'new' && r5.values.apiKey === KEY_NEW && e.st.publicView('llm').clusterOptions.map((o) => o.key).join() === 'new', 'LEGACY: a JSON entry under each id ⇒ the new id\'s entries are the presets (the old ones are not offered beside them)');
+  // the plugin's judgeModel row outranks the preset's; a user's OWN key never borrows the cluster's model
+  const f = mk(NEW, { settings: { 'plugin.llm.judgeModel': 'openai/gpt-6-luna' } });
+  ok(f.eng.status().model === 'openai/gpt-6-luna', `the plugin's judgeModel row outranks the preset's model (${f.eng.status().model})`);
+  const g = mk(NEW); g.st.setIntegration('llm', { provider: 'openai', apiKey: 'sk-dummy-' + 'own-key-0004' });
+  ok(g.eng.status().keySource === 'user' && g.eng.status().model === 'gpt-6-luna', `a user's OWN key never takes the cluster's model — the provider's default (${g.eng.status().model})`);
+  // RED CONTROL: the store without its legacy read answers nothing for the old prefix
+  const SRC = fs.readFileSync(path.join(REPO, 'src/server/integration-store.js'), 'utf8');
+  const LINE = "const legacyIdsOf = (row) => (row.clusterEnv && row.clusterEnv.legacy && Array.isArray(row.clusterEnv.legacy.jsonKeys) ? row.clusterEnv.legacy.jsonKeys : []);";
+  const bare = SRC.includes(LINE) ? M.load('src/server/integration-store.js', SRC.replace(LINE, 'const legacyIdsOf = () => [];'), 'no-legacy') : null;
+  const h = bare ? mk(OLD, { store: bare }) : null;
+  ok(!!h && h.st.resolveIntegration('llm').source === 'none' && h.eng.status().configured === false, 'RED CONTROL: a store copy WITHOUT the legacy read leaves an old-prefix cluster unconfigured (the leg above proves the read)');
+  const none = mk({});
+  ok(none.eng.status().configured === false, 'no prefix (new or old), no own key ⇒ the engine is not configured (no key)');
 }
 
 for (const row of copiesCensus(M.files, M.dir, REPO, { minCopies: 8 })) ok(row.pass, row.name, row.detail);

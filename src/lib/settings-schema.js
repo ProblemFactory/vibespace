@@ -1292,7 +1292,7 @@ const SETTINGS_SCHEMA = {
   // LANDS ON THE FIRST SCREEN IS THE OWNER'S POLICY (src/channel-focus.js attentionPolicy) — ONE block (`block:
   // 'attention'`), drawn by the Settings window under its own head AND by the Channels first screen's ⚙ door with the
   // SAME row renderer (settings-ui renderBlock). Two rows store nothing here: the preset SETS the rule rows + the
-  // judge's switch (`store: 'derived'`), and the judge's row IS the Decision API plugin's `attention` feature (`store:
+  // judge's switch (`store: 'derived'`), and the judge's row IS the LLM plugin's `attention` feature (`store:
   // {plugin, feature}` — read from GET /api/plugins, written through the plugin's own config door; never a second flag).
   'channels.attention.preset': {
     type: 'enum', radio: true, store: 'derived', default: 'both', ...ATTENTION_BLOCK,
@@ -1345,11 +1345,11 @@ const SETTINGS_SCHEMA = {
     description: t('A conversation where your own message is from the last 24 hours.'),
   },
   'channels.attention.judge': {
-    type: 'boolean', default: false, store: { plugin: 'decision-api', feature: 'attention' }, fact: 'attention-today', ...ATTENTION_BLOCK,
-    label: t('Let the judge pick what needs me (Decision API)'),
-    description: t('The Decision API plugin\'s own switch, shown here too. It judges the rows no switch above lists; with the plugin turned off nothing is judged.'),
+    type: 'boolean', default: false, store: { plugin: 'llm', feature: 'attention' }, fact: 'attention-today', ...ATTENTION_BLOCK,
+    label: t('Let the judging model pick what needs me (LLM plugin)'),
+    description: t('The LLM plugin\'s own switch, shown here too. It judges the rows no switch above lists; with the plugin turned off nothing is judged.'),
   },
-  // decision.attentionBlock / decision.threshold: DERIVED from src/plugin-settings.js (the decision-api table, `path`
+  // decision.attentionBlock / decision.threshold: DERIVED from src/plugin-settings.js (the llm table, `path`
   // keeps the legacy spelling — zero migration); read SERVER-side by src/server/channels-attention.js via serverSetting
   'channels.senderHonestyLine': {
     type: 'boolean', default: false,
@@ -1734,7 +1734,7 @@ function derivePluginTable(pluginId, label, rows) {
   return paths;
 }
 for (const [id, tbl] of Object.entries(PLUGIN_SETTINGS)) derivePluginTable(id, tbl.label, tbl.rows);
-// int263 seam (b): the judge's threshold and "what matters to me" are ONE row each — plugin-settings-p0's 「插件 › Decision API」
+// int263 seam (b): the judge's threshold and "what matters to me" are ONE row each — plugin-settings-p0's 「插件 › LLM plugin」
 // rows (the threshold keeps tier advanced) — and the 「需关注 · 怎么判断」 block (the Channels ⚙ door) renders the SAME rows: one row, two doors
 for (const p of ['decision.threshold', 'decision.attentionBlock']) SETTINGS_SCHEMA[p].alsoBlock = 'attention';
 /** A built-in plugin's section facts for the Settings window: its id and link rows (null for any other category). */

@@ -127,7 +127,7 @@ export const ROWS = [
   ['src/server/login-expiry-watch.js', 'own-tree', 1, null, DATA],
   ['src/server/memory-pressure-watch.js', 'own-tree', 3, null, PROC],
   ['src/server/memory-sampler.js', 'own-tree', 1, null, PROC],
-  ['src/server/migrations.js', 'own-tree', 37, null, DATA],
+  ['src/server/migrations.js', 'own-tree', 38, null, DATA], // lane llm-plugin-rename: +1 — 2026-10-llm-rename reads settings / plugins / integrations.json (own data dir) to know which live store it needs
   ['src/server/mount-health-watch.js', 'exempt', 6, null, 'the server-tree watch: /proc + mountinfo, never a user path (the judge’s P4)'],
   ['src/server/mounts-plugins-wiring.js', 'own-tree', 8, null, DATA], // lane passkey-store-core: +3 — data/browser-passkeys.json + its key file (own data dir); lane key-file-law-stores: −2 — the key file reads through secret-box lawfulKey
   ['src/server/oat-mint.js', 'own-tree', 3, null, 'its own 0700 scratch dir per mint (the $BROWSER URL file) + the boot sweep of its own orphaned vs-oat-mint-* dirs (readdir + lstat of tmpRoot)'],

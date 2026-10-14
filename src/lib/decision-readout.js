@@ -1,7 +1,7 @@
 // THE JUDGE'S MONEY, LIVE (lane decision-spend-readout, owner 2026-10-13: 「看不到 decision api 花了多少钱了」).
 //
 // The words are ONE PURE line (src/decision-model.js decisionTodayLine); this file only reads the plugin's status
-// (GET /api/plugins/decision-api/status — the engine's `today` + `month` + the cap) and PATCHES a drawn element in place:
+// (GET /api/plugins/llm/status — the engine's `today` + `month` + the cap) and PATCHES a drawn element in place:
 // the same node keeps its place, only its text / title / red class move (never a re-render blink). The engine sends no
 // usage broadcast, so a drawn line asks again every 60 s while it is on screen and stops once it is gone.
 import * as DM from '../decision-model.js';
@@ -27,7 +27,7 @@ export function paintDecisionLine(el, L, pick = 'text') {
 
 /** keep `el` live: `draw(L)` now (from `first`, a row already in hand) and on every tick while `el` is in the page. */
 export function liveDecisionLine(el, draw, { first = null, tickMs = READOUT_TICK_MS } = {}) {
-  const ask = () => fetchJson('/api/plugins/decision-api/status').then((p) => { if (p && !p.error) draw(decisionLineOf(p)); }).catch(() => { });
+  const ask = () => fetchJson('/api/plugins/llm/status').then((p) => { if (p && !p.error) draw(decisionLineOf(p)); }).catch(() => { });
   if (first) draw(decisionLineOf(first)); else ask();
   const timer = setInterval(() => { if (el.isConnected) ask(); else clearInterval(timer); }, tickMs);   // a tick is long after the draw attached it
   return () => clearInterval(timer);

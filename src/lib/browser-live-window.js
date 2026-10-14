@@ -121,7 +121,9 @@
 //     refused with a hint.
 // XSS: page titles and URLs are page-controlled and sync to every client —
 // textContent / escHtml only. Theme vars only, SVG icons only.
-import { t, tc } from './i18n.js';
+import { t, tc, resolveLang } from './i18n.js';
+import { pinChipText } from '../desktop-pin.js'; // lane launch-picture-size: a FIXED picture size's chip = the pin's own words
+import { pinSizeItems } from './pin-size-ui.js'; // lane launch-picture-size: Pin size… — the ONE size table's rows + Custom… + Auto
 import { claimWords, backendName, dismissOutcomeWords } from './browser-switcher-model.js'; // the rebuilt switch dialog: the claim's words, a backend's name, the Dismiss answer (PURE)
 import { btn as textBtn } from './channel-chrome.js'; // the house text button (mounts-btn): the blocked banner's controls say what they do
 import { escHtml, fetchJson, showToast, showContextMenu, createPopover, showConfirmDialog, showInputDialog, COUNTER_ZOOM, copyText } from './utils.js';
@@ -2025,6 +2027,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
       case 'refused':
         if (m.code === 'held') showToast(t('Another viewer holds the controls'), { type: 'warn' });
         else if (m.code === 'browser_restarting') showToast(t('The browser is restarting — take over again in a few seconds, when it is back'), { type: 'warn' }); // verify r2 (H2)
+        else if (m.code === 'size_pinned') showToast(t('The picture size is pinned at {w}×{h} — change it from the window menu', { w: Number(m.width) || 0, h: Number(m.height) || 0 }), { type: 'warn' }); // lane launch-picture-size: "Fit here" refused by name
         else if (m.code === 'wake_count_changed') { st.wakes = Number.isInteger(m.wakes) ? m.wakes : st.wakes; renderMode(); showToast(t('Hand back now wakes {n} conversation(s) — nothing was handed back; press it again to confirm', { n: Number(m.wakes) || 0 }), { type: 'warn' }); }
         else if (m.code !== 'watch-mode') showToast(String(m.error || m.code || 'refused'), { type: 'warn' });
         break;
@@ -2079,11 +2082,22 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
     fitChip.dataset.kind = c.kind || '';
     if (!c.show) return;
     const w = fitChipWords(c, { t });
+    if (c.kind === 'fixed') w.text = pinChipText({ w: c.width, h: c.height }, resolveLang()); // lane launch-picture-size: a fixed size's chip = the pin's own words
     fitChip.textContent = w.text; fitChip.title = w.title; fitChip.setAttribute('aria-label', w.title);
     fitChip.classList.toggle('actionable', !!c.act);
   }
+  // ── lane launch-picture-size: A FIXED PICTURE SIZE — the user's Pin size… (the window menu, and the pinned chip's click) sets it
+  // for THIS conversation's browser (POST /api/browser/size; an agent sets its own with `vibespace-browser size`) ──
+  const fixedNow = () => (st.fit && st.fit.state === 'fixed' && st.fit.width > 0 && st.fit.height > 0 ? { w: st.fit.width, h: st.fit.height } : null);
+  const pinTo = async (size) => {
+    const r = await fetchJson('/api/browser/size', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId, size, ...(st.profileRef ? { profile: st.profileRef } : {}) }) });
+    if (!r || r.error) { showToast(r?.error || t('Could not change the picture size'), { type: 'error' }); return; }
+    showToast(r.fixed ? t('The page is now {w}×{h} wherever it is shown', r.fixed) : t('The page follows the window again'), { duration: 3500 });
+  };
+  const pinItems = () => pinSizeItems(fixedNow(), (size) => { pinTo(size); });
   fitChip.onclick = () => {
     const c = fitChipNow();
+    if (c.act === 'menu') { const r = (fitChip.classList.contains('bar-folded') ? moreBtn : fitChip).getBoundingClientRect(); showContextMenu(r.left, r.bottom + 2, pinItems()); return; } // lane launch-picture-size: a pinned chip (or its folded row) opens Pin size…
     if (c.act === 'claim') { // lane live-input: the page follows THIS window from now on (the explicit act — the other window then shows it scaled)
       reportFit({ claim: true });
       showToast(c.rule === 'holder' ? t('The page will fit this window once the other window hands back') : t('The page now fits this window'), { duration: 3500 });
@@ -2593,6 +2607,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
     connect, dispose, switchTo, pointerAt, rejoin,
     reconnect: () => { if (st.closed) return; st.reconnects = 0; connect(); }, // lane H: the auto-bind's "its browser holds again" (and the bar's Reconnect button's twin)
     isHuman: () => !!H, // BROWSE YOURSELF (B-6ae8): the user's own browsing window (no session: no bind row)
+    pinItems, fixedNow, // lane launch-picture-size: the window menu's Pin size… rows + the fixed size the bridge said
     toggleBind, bindLabel, isBound, // P7 (§4.6): the one act behind the bar button, the title-bar button and the window menu row
     refreshSet, openCapPopover, // MULTIVIEW: the suite re-reads the list / opens the chip
     el: () => root, img: () => img,
@@ -2702,6 +2717,8 @@ export function setBrowserCap(sessionId, cap) {
 export function registerLiveViewMenus() {
   // lane I: bind offered only while UNBOUND — a bound pane's menu already carries the chain's own "Unsplit" (the same unbindSplit), and two words for one act was the audit's D7
   registerMenuItem({ menu: 'window', group: '1_window', order: 35, id: 'window/browser-bind', kind: 'bind', when: (c) => !!(c.win && c.win.type === 'browser-live' && c.win._browserLive && !c.win._browserLive.isBound()) && !c.win._browserLive.isHuman?.(), label: (c) => c.win._browserLive.bindLabel(), run: (c) => { c.win._browserLive.toggleBind(); } }); // BROWSE YOURSELF: his own window has no session to snap beside
+  // lane launch-picture-size: Pin size… — a FIXED picture size for the conversation's browser (every view shows the same picture)
+  registerMenuItem({ menu: 'window', group: '1_window', order: 37, id: 'window/browser-pin-size', kind: 'pin-size', when: (c) => !!(c.win && c.win.type === 'browser-live' && c.win._browserLive && c.win._browserLive.pinItems) && !c.win._browserLive.isHuman?.(), label: () => t('Pin size…'), children: (c) => c.win._browserLive.pinItems() });
   registerMenuItem({ menu: 'window', group: '1_window', order: 36, id: 'window/browser-foldback', kind: 'foldback',
     when: (c) => { try { return !!(c.win && c.win.type === 'browser-live' && c.win._browserLive && otherLiveWindow(c.app, c.win._browserLive.state().sessionId, c.win.id)); } catch { return false; } },
     label: () => t('Fold back into the Agent browser window'), run: (c) => { foldBackLive(c.app, c.win); } });

@@ -271,7 +271,7 @@ The user gives you two DIFFERENT things, in this order:
     a reply in its thread, or a reply in its mail thread — the vendor's own
     reply marker, never "any message after yours"; refused as
     `not-on-this-version` where the server lacks it).
-  - judged by the Decision API (only where the user turned the plugin and its
+  - judged by the LLM plugin (only where the user turned the plugin and its
     `rules` switch on; each judgment is paid from THEIR daily budget):
     `--kind decision --condition "words" [--choice a,b,c] [--threshold 0.7]
     [--per-hour 20]` — the condition in plain words (≤ 500 characters); with

@@ -254,15 +254,40 @@ console.log('§8 the store\'s notifier walks a snapshot of its listeners');
   for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 1 })) ok(r.pass, r.name, r.detail);
 }
 
-console.log('§9 the Decision API rows (lane decision-attention, D2): the person\'s block + the threshold');
+console.log('§9 the LLM plugin rows (lane decision-attention, D2): the person\'s block + the threshold');
 {
   const SCHEMA = S.SETTINGS_SCHEMA;
   const b = SCHEMA['decision.attentionBlock'], th = SCHEMA['decision.threshold'];
   ok(b && b.type === 'text' && b.multiline === true && b.maxLength === 1500 && b.draft === 'decision' && b.default === '' && !b.tier && !b.when && b.liveApply === true, '"What matters to me": a multiline text of at most 1 500 characters, everyday (no tier, no when), with the draft button', b && { type: b.type, multiline: b.multiline, maxLength: b.maxLength, draft: b.draft, tier: b.tier });
-  ok(th && th.type === 'number' && th.default === 0.7 && th.min === 0.5 && th.max === 0.9 && th.step === 0.05 && th.tier === 'advanced' && !th.block && th.alsoBlock === 'attention', 'the threshold: a number 0.50–0.90, default 0.70, step 0.05 — ONE row in 插件 › Decision API (tier advanced, plugin-settings-p0) that the 「需关注 · 怎么判断」 block draws too (int263 seam b); was: a slider in the 「需关注 · 怎么判断」 block, out of Advanced (lane attention-policy)', th && { d: th.default, min: th.min, max: th.max, tier: th.tier });
+  ok(th && th.type === 'number' && th.default === 0.7 && th.min === 0.5 && th.max === 0.9 && th.step === 0.05 && th.tier === 'advanced' && !th.block && th.alsoBlock === 'attention', 'the threshold: a number 0.50–0.90, default 0.70, step 0.05 — ONE row in 插件 › LLM (tier advanced, plugin-settings-p0) that the 「需关注 · 怎么判断」 block draws too (int263 seam b); was: a slider in the 「需关注 · 怎么判断」 block, out of Advanced (lane attention-policy)', th && { d: th.default, min: th.min, max: th.max, tier: th.tier });
   ok(b.category === th.category && zh[b.label] && zh[th.label] && zh[b.description] && zh[th.description], 'both rows sit in the Channels category, their label and description worded in zh');
   const UI = fs.readFileSync(path.join(REPO, 'src/lib/settings-ui.js'), 'utf8');
   ok(/schema\.type === 'text' && schema\.multiline/.test(UI) && /'\/api\/channels\/decision\/draft'/.test(UI) && !/draft[\s\S]{0,400}this\.settings\.set\(path, r\.text/.test(UI), 'the UI draws the multiline row as a textarea, its draft button asks /api/channels/decision/draft, and the proposal is NEVER saved by itself (only Save / an edit saves)');
+}
+
+console.log('§9b 插件 › LLM (lane llm-plugin-rename, owner 2026-10-14): ordered by FEATURE — each switch, then its own rows; the drafter\'s own switch; no row says the old name or "judge"');
+{
+  const SCHEMA = S.SETTINGS_SCHEMA;
+  const PS = (await import('../src/plugin-settings.js')).default;
+  const tbl = PS.PLUGIN_SETTINGS.llm;
+  const paths = Object.entries(SCHEMA).filter(([, r]) => r.category === 'Plugin: LLM').map(([p]) => p);
+  const ORDER = ['plugin.llm.attention', 'decision.threshold', 'decision.attentionBlock', 'decision.implicitLabels', 'plugin.llm.rules', 'plugin.llm.routing', 'plugin.llm.inbox', 'plugin.llm.judgeModel', 'plugin.llm.learn', 'plugin.llm.learnModel', 'plugin.llm.dailyBudgetUsd'];
+  ok(tbl && tbl.label === 'LLM' && tbl.integration === 'llm' && paths.join() === ORDER.join(), `the section 「插件 › LLM」, in feature order: the judge (its four switches, attention's own rows after it, the judging model they share), the drafter (switch, model), the budget last (${paths.map((p) => p.split('.').pop()).join(' · ')})`);
+  ok(['attention', 'rules', 'routing', 'inbox'].every((k) => SCHEMA['plugin.llm.' + k].type === 'boolean' && SCHEMA['plugin.llm.' + k].default === false) && SCHEMA['plugin.llm.learn'].type === 'boolean' && SCHEMA['plugin.llm.learn'].default === true,
+    'the judge\'s four switches stay OFF by default (each bills by itself); the drafter\'s switch is ON (a draft is the owner\'s own click)');
+  const jm = SCHEMA['plugin.llm.judgeModel'];
+  ok(jm && jm.type === 'string' && jm.default === '' && !S.SETTINGS_SCHEMA['plugin.llm.model'], 'judgeModel: a text row, empty by default (the preset\'s / the provider\'s model) — the card\'s model field moved here');
+  const rows = paths.map((p) => SCHEMA[p]);
+  const words = rows.flatMap((r) => [r.label, r.description, ...((r.options || []).map((o) => o.label))]).filter(Boolean);
+  const OLD = /Decision API|决策 ?API|判定 ?API|decision-api|\bjudge\b/i;
+  const all = [...words, ...words.map((w) => zh[w] || ''), ...words.map((w) => ja[w] || '')];
+  ok(words.length >= 22 && !all.some((w) => OLD.test(w)), `no row says the old name or "judge" in en / zh / ja (${words.length} strings ×3) — 「判断模型」 is the word for the model that judges`, all.filter((w) => OLD.test(w)).join(' | '));
+  const keys = tbl.rows.flatMap((r) => [r.label, r.description, ...((r.options || []).map((o) => o.label))]).filter(Boolean).map((x) => (Array.isArray(x) ? x[0] : x));   // the dictionary keys (a templated description's own key)
+  ok(keys.length === words.length && keys.every((w) => zh[w] && ja[w]) && !keys.some((w) => OLD.test(w) || OLD.test(zh[w]) || OLD.test(ja[w])), `every word of the section in zh and ja (${keys.length} keys)`, keys.filter((w) => !zh[w] || !ja[w]).join(' | '));
+  const descs = rows.map((r) => r.description);
+  ok(descs.every((d) => /\b(Example|E\.g\.)/.test(d)), 'every row carries ONE example (the card-grammar law: what you get + an example + where it shows)', descs.filter((d) => !/\b(Example|E\.g\.)/.test(d)).join(' | '));
+  ok(zh[SCHEMA['plugin.llm.judgeModel'].label] === '判断模型' && zh[SCHEMA['decision.attentionBlock'].label] === '我在乎什么' && zh[SCHEMA['decision.threshold'].label] === '需关注阈值', 'the zh words: 「判断模型」, 「我在乎什么」, 「需关注阈值」 (no 「（决策 API）」 suffix)');
+  ok(OLD.test('Needs-attention threshold (Decision API)') && OLD.test('How sure the judge must be') && OLD.test('我在乎什么（决策 API）'), 'CONTROL: the base\'s words are caught by the same needle');
 }
 
 console.log('§10 「需关注 · 怎么判断」 (lane attention-policy): one block of rows — the rule switches, the preset, the judge\'s switch, its dials');
@@ -277,16 +302,16 @@ console.log('§10 「需关注 · 怎么判断」 (lane attention-policy): one b
   ok(rules.every((p) => SCHEMA[p].type === 'boolean' && SCHEMA[p].default === true && !SCHEMA[p].store), 'each fixed rule: a boolean, default ON (today\'s first screen), stored in settings');
   const pre = SCHEMA['channels.attention.preset'], jr = SCHEMA['channels.attention.judge'];
   ok(pre.type === 'enum' && pre.radio === true && pre.store === 'derived' && pre.default === 'both' && pre.options.map((o) => o.value).join() === Object.keys(FO.ATTENTION_PRESETS).join(), 'the preset: a radio over the PURE presets, derived (it stores nothing — it sets the switches)', pre.options.map((o) => o.value).join());
-  ok(jr.type === 'boolean' && jr.store && jr.store.plugin === 'decision-api' && jr.store.feature === 'attention' && jr.fact === 'attention-today', 'the judge\'s switch IS the Decision API plugin\'s `attention` feature (one store) with the today readout beside it');
+  ok(jr.type === 'boolean' && jr.store && jr.store.plugin === 'llm' && jr.store.feature === 'attention' && jr.fact === 'attention-today', 'the judge\'s switch IS the LLM plugin\'s `attention` feature (one store) with the today readout beside it');
   const words = [rows[0].blockTitle, ...rows.flatMap((r) => [r.label, r.description]), ...pre.options.map((o) => o.label), 'Today: judged {n} · {m} needed you', 'Open in Settings', 'How "needs attention" is decided'];
   const miss = words.filter((w) => !zh[w] || !ja[w]);
   ok(!miss.length, `every word of the block in zh and ja (${words.length} strings)`, miss.join(' | '));
-  ok(zh[rows[0].blockTitle] === '需关注 · 怎么判断' && zh[SCHEMA['channels.attention.rule.direct'].label] === '有人直接发给我、我还没读的' && zh[jr.label] === '让判断模型挑出需要我的（Decision API）', 'the owner\'s words: 「需关注 · 怎么判断」, 「有人直接发给我、我还没读的」, 「让判断模型挑出需要我的（Decision API）」');
+  ok(zh[rows[0].blockTitle] === '需关注 · 怎么判断' && zh[SCHEMA['channels.attention.rule.direct'].label] === '有人直接发给我、我还没读的' && zh[jr.label] === '让判断模型挑出需要我的（LLM 插件）', 'the owner\'s words: 「需关注 · 怎么判断」, 「有人直接发给我、我还没读的」, 「让判断模型挑出需要我的（LLM 插件）」');
   // THE SETTINGS SEARCH finds the block by its head (typing 需关注 in zh / attention in en)
   const zhSchema = Object.fromEntries(Object.entries(SCHEMA).map(([p, r]) => [p, { ...r, label: zh[r.label] || r.label, description: zh[r.description] || r.description, blockTitle: r.blockTitle && (zh[r.blockTitle] || r.blockTitle) }]));
   const find = (schema, q) => V.settingsViewModel(schema, { categories: CATS, query: q, ctx: { get: (k) => (SCHEMA[k] ? SCHEMA[k].default : undefined), facts: {}, nameOf: () => null }, t: tEn }).sections.flatMap((s) => s.rows.map((r) => r.path));
   const hitZh = find(zhSchema, '需关注'), hitEn = find(SCHEMA, 'attention');
-  const own = block.filter((p) => SCHEMA[p].block);   // int263 seam b: the plugin's two rows are found in 插件 › Decision API
+  const own = block.filter((p) => SCHEMA[p].block);   // int263 seam b: the plugin's two rows are found in 插件 › LLM
   ok(own.every((p) => hitZh.includes(p)) && own.every((p) => hitEn.includes(p)), `the Settings search finds every row of the block: 需关注 (${hitZh.filter((p) => own.includes(p)).length}/${own.length}) · attention (${hitEn.filter((p) => own.includes(p)).length}/${own.length})`);
   const noHead = Object.fromEntries(Object.entries(zhSchema).map(([p, r]) => [p, { ...r, blockTitle: undefined }]));
   ok(!find(noHead, '需关注').includes('channels.attention.rule.replied'), 'CONTROL: without the head in the search words, 需关注 misses 「我 24 小时内回过的」 ⇒ the leg above is the head\'s doing');
@@ -301,22 +326,22 @@ console.log('§10 「需关注 · 怎么判断」 (lane attention-policy): one b
 
 // ── lane decision-spend-readout: the judge's MONEY where Settings names the judge (owner 2026-10-13) ──
 {
-  console.log('\nthe Decision API\'s money in Settings (lane decision-spend-readout)');
+  console.log('\nthe LLM plugin\'s money in Settings (lane decision-spend-readout)');
   const UI = fs.readFileSync(path.join(REPO, 'src/lib/settings-ui.js'), 'utf8');
   const DM = (await import('../src/decision-model.js')).default;
-  const BUDGET = 'plugin.decision-api.dailyBudgetUsd';
+  const BUDGET = 'plugin.llm.dailyBudgetUsd';
   const SCHEMA = S.SETTINGS_SCHEMA;
   const wired = (ui) => ui.includes(`const DECISION_BUDGET_PATH = '${BUDGET}';`) && /if \(path === DECISION_BUDGET_PATH\) this\._renderDecisionToday\(info\);/.test(ui)
     && /_renderDecisionToday\(info\) \{[\s\S]{0,400}liveDecisionLine\(line, \(L\) => paintDecisionLine\(line, L, 'text'\)\);/.test(ui);
-  ok(SCHEMA[BUDGET] && SCHEMA[BUDGET].type === 'number' && wired(UI), 'the budget row (plugin.decision-api.dailyBudgetUsd) draws today\'s money against its cap under it — the PURE line, live');
+  ok(SCHEMA[BUDGET] && SCHEMA[BUDGET].type === 'number' && wired(UI), 'the budget row (plugin.llm.dailyBudgetUsd) draws today\'s money against its cap under it — the PURE line, live');
   ok(!wired(UI.replace('    if (path === DECISION_BUDGET_PATH) this._renderDecisionToday(info);', '')), 'RED CONTROL: without the row\'s dispatch line the leg above is red');
   const att = UI.slice(UI.indexOf('  _renderAttentionToday(info) {'), UI.indexOf('  _renderDecisionToday(info) {'));
   ok(/money && money\.on \? ' · ' \+ money\.spend : ''/.test(att) && /liveDecisionLine\(line, \(L\) => \{ money = L; draw\(\); \}\)/.test(att), 'the 需关注 block\'s judge line adds the money (the PURE line\'s spend half), patched in place');
-  ok(/if \(cat === t\('Spending'\)\) this\._renderDecisionSpend\(section, content, nav\);/.test(UI) && /paintDecisionLine\(line, L, 'month'\)/.test(UI) && /pluginCategoryOf\('decision-api'\)/.test(UI), 'Settings › Spending lists the Decision API (today / cap / month) with a door to its section');
+  ok(/if \(cat === t\('Spending'\)\) this\._renderDecisionSpend\(section, content, nav\);/.test(UI) && /paintDecisionLine\(line, L, 'month'\)/.test(UI) && /pluginCategoryOf\('llm'\)/.test(UI), 'Settings › Spending lists the LLM plugin (today / cap / month) with a door to its section');
   const tz = (w, v = {}) => String(zh[w] || w).replace(/\{(\w+)\}/g, (m, k) => (k in v ? String(v[k]) : m));
   const L = DM.decisionTodayLine({ byUse: { attention: { calls: 60, usd: 0.009, hits: 1 }, inbox: { calls: 3, usd: 0.001 } } }, 1, { t: tz, monthUsd: 0.4 });
-  ok(L.text === '今天：判断了 63 条 · 命中 1 条 · 已花 < $0.01（上限 $1.00）' && L.short === '今天 < $0.01 / $1.00 · 判断 63 · 命中 1' && L.title === '需关注 $0.009 · 托盘 $0.001 · 规则 $0' && L.month === '决策 API · 今天 < $0.01 / $1.00 · 本月 $0.40', 'zh: the owner\'s words — 「今天：判断了 63 条 · 命中 1 条 · 已花 < $0.01（上限 $1.00）」', L);
-  const words = ['Today {spent} / {cap} · judged {n} · hits {m}', 'The Decision API is off — it spends nothing', 'Decision API · today {spent} / {cap} · this month {month}', 'Needs attention', 'For-you tray', 'Rules', 'Routing', 'Webhooks', 'Test', '{spent} spent (limit {cap})', 'Open settings'];
+  ok(L.text === '今天：判断了 63 条 · 命中 1 条 · 已花 < $0.01（上限 $1.00）' && L.short === '今天 < $0.01 / $1.00 · 判断 63 · 命中 1' && L.title === '需关注 $0.009 · 托盘 $0.001 · 规则 $0' && L.month === 'LLM · 今天 < $0.01 / $1.00 · 本月 $0.40', 'zh: the owner\'s words — 「今天：判断了 63 条 · 命中 1 条 · 已花 < $0.01（上限 $1.00）」', L);
+  const words = ['Today {spent} / {cap} · judged {n} · hits {m}', 'The LLM plugin is off — it spends nothing', 'LLM · today {spent} / {cap} · this month {month}', 'Needs attention', 'For-you tray', 'Rules', 'Routing', 'Webhooks', 'Test', '{spent} spent (limit {cap})', 'Open settings'];
   const miss = words.filter((w) => !zh[w] || !ja[w]);
   ok(!miss.length, `every word of the readout in zh and ja (${words.length} strings)`, miss.join(' | '));
 }

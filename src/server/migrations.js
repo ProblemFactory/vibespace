@@ -44,7 +44,11 @@ const RUNAWAY_VOID_TEXT = 'stopped by the old resource guard (a per-process RSS 
 // pool reshape goes THROUGH it (`migrateManualPools`) — a file written beside it
 // would be overwritten by its next save. Without one the migration FAILS (and is
 // retried next boot) rather than writing beside a store it cannot see.
-function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null, userTodos = null, desktopKeeper = null, browserKeeper = null, hosts = null, accounts = null, plugins = null }) {
+// `plugins` (lane plugin-settings-p0) is the LIVE PluginManager (it holds data/plugins.json and is the settings
+// writer's client); `integrations` (lane llm-plugin-rename) is the LIVE integration store (it holds
+// data/integrations.json in memory and saves it whole) — the 2026-10-llm-rename move goes through both, and FAILS by
+// name (retried next boot) when there is something to move and the store that holds it was not handed in.
+function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null, userTodos = null, desktopKeeper = null, browserKeeper = null, hosts = null, accounts = null, plugins = null, integrations = null }) {
   const dataDir = path.join(rootDir, 'data');
   const archiveDir = path.join(dataDir, 'archive');
 
@@ -652,7 +656,39 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
         return rep;
       },
     },
+    {
+      id: '2026-10-llm-rename',
+      note: "the Decision API plugin is the LLM plugin (lane llm-plugin-rename, owner 2026-10-14: one key named by its provider, a switch per feature): (a) data/settings.json `plugin.decision-api.<k>` → `plugin.llm.<k>` unless the new key holds a value (the new one wins, the old key leaves either way; decision.threshold / attentionBlock / implicitLabels keep their spelling); (b) data/plugins.json's `decision-api` record → `llm` whole (the on-switch kept) THROUGH the live PluginManager — a record already under `llm` wins and the old one is removed, never merged; a record that arrives holding old config fields gets the config → settings move again; (c) data/integrations.json's `decision-api` record → `llm` (its values as they are, the cluster|own choice, the Test state) THROUGH the live integration store, same rule, and the card's retired `model` field leaves it — a non-empty one becomes `plugin.llm.judgeModel` when that is empty (written BEFORE the record moves, so a failed run re-reads it); (d) data/decision-memo.json / decision-usage.json / decision-journal.jsonl keep their names and shapes. A second run finds nothing under the old id (no-op).",
+      run() {
+        const rep = migrateLlmRename();
+        console.log('[migrate] llm-rename:', JSON.stringify(rep));
+        return rep;
+      },
+    },
   ];
+
+  /** 2026-10-llm-rename: what the DISK holds under the old id (read-only; an unreadable file counts as "may hold" — the
+   *  run then needs the live store that owns it), then the move through the live PluginManager + integration store. */
+  function migrateLlmRename() {
+    const FROM = 'decision-api', TO = 'llm';
+    const peek = (name, test) => {
+      let doc;
+      try { doc = JSON.parse(fs.readFileSync(path.join(dataDir, name), 'utf-8')); } catch (e) { return !(e && e.code === 'ENOENT'); }
+      try { return !!test(doc || {}); } catch { return true; }
+    };
+    const inSettings = peek('settings.json', (d) => Object.keys(d).some((k) => k.startsWith(`plugin.${FROM}.`)));
+    const inPlugins = peek('plugins.json', (d) => d.plugins && d.plugins[FROM]);
+    const inStore = peek('integrations.json', (d) => d.integrations && (d.integrations[FROM] || (d.integrations[TO] && d.integrations[TO].values && d.integrations[TO].values.model !== undefined)));
+    const pm = typeof plugins === 'function' ? plugins() : plugins;
+    const st = typeof integrations === 'function' ? integrations() : integrations;
+    if ((inSettings || inPlugins) && !(pm && typeof pm.renamePlugin === 'function')) throw new Error(`data/${inPlugins ? 'plugins' : 'settings'}.json holds the ${FROM} plugin and no live PluginManager was handed in — nothing was moved`);
+    if (inStore && !(st && typeof st.renameRecord === 'function')) throw new Error(`data/integrations.json holds the ${FROM} row and no live integration store was handed in — nothing was moved`);
+    // the card's retired model field → the plugin's judgeModel row (only where settings holds none), FIRST
+    const model = st && typeof st.plainOf === 'function' ? (st.plainOf(FROM, ['model']).model || st.plainOf(TO, ['model']).model || '') : '';
+    const plug = pm && typeof pm.renamePlugin === 'function' ? pm.renamePlugin(FROM, TO, { seed: model ? { judgeModel: model } : {} }) : { settings: { moved: [], dropped: [], seeded: [] }, record: 'none', config: null };
+    const store = inStore ? st.renameRecord(FROM, TO, { drop: ['model'] }) : { moved: false, dropped: false };
+    return { settings: plug.settings, plugins: plug.record, config: plug.config, integrations: store, judgeModel: plug.settings.seeded.length ? 'seeded' : model ? 'kept' : 'none' };
+  }
 
   /** 2026-10-settings-rows-retired, the settings half: strip RETIRED_SETTING_KEYS from data/settings.json, the values
    *  returned as the archive (the ledger report). Written the way the settings route writes it (2-space JSON, atomic,

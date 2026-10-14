@@ -3,11 +3,12 @@
 // owner's key — NEVER in CI, never from a lane: it makes REAL paid calls (≈ 30 calls, ≈ 60 K input tokens ≈ $0.006).
 //   node scripts/decision-probe.mjs            (DATA dir = $VIBESPACE_DATA_DIR or <checkout>/data; presets = the server's)
 // THE KEY is read ONLY at run time the way the server reads it — the registry store over data/ + the cluster presets
-// directory + the cluster env (resolveIntegration('decision-api'): the user's own > the cluster preset) — never from
+// directory + the cluster env (resolveIntegration('llm'): the user's own > the cluster preset) — never from
 // argv, never printed (a 6-character fingerprint only). Step 1: ONE minimal predicate to each candidate model on the
 // row's dialect — who answers 200, usage, cost, latency. Step 2: over 20 fixture records, batch-of-5 (4 calls) vs single
 // (20 calls) with the rubric v1 — input tokens per record and the needs_now agreement — the table for §2.10. Pin the
 // winner into src/decision-model.js DEFAULT_MODEL ("pinned by probe on <date>").
+import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -34,10 +35,13 @@ function keyed() {
   try { reader.start && reader.start(); } catch { }
   const dataDir = process.env.VIBESPACE_DATA_DIR || path.join(repo, 'data');
   const store = S.create({ dataDir, env: process.env, presets: reader, log: quiet });
-  const r = store.resolveIntegration('decision-api');
+  const r = store.resolveIntegration('llm');
   try { reader.stop && reader.stop(); } catch { }
   const v = r.values || {};
-  return { provider: M.dialectOf(String(v.provider || '').trim().toLowerCase()), key: v.apiKey ? String(v.apiKey) : '', model: String(v.model || '').trim(), source: r.source };
+  // the judging model the engine would use: the LLM plugin's judgeModel row, else the cluster preset's while its key is in use
+  let judgeModel = '';
+  try { judgeModel = String(JSON.parse(fs.readFileSync(path.join(dataDir, 'settings.json'), 'utf8'))['plugin.llm.judgeModel'] || '').trim(); } catch { }
+  return { provider: M.dialectOf(String(v.provider || '').trim().toLowerCase()), key: v.apiKey ? String(v.apiKey) : '', model: judgeModel || (r.source === 'cluster' ? String(v.model || '').trim() : ''), source: r.source };
 }
 
 async function call(provider, key, model, input, questions) {
@@ -53,8 +57,8 @@ async function call(provider, key, model, input, questions) {
 }
 
 const k = keyed();
-if (!k.provider || !k.key) { console.log(`no decision-api key resolves here (source: ${k.source}) — save a provider + key on the Decision API card (or the cluster preset) and run again`); process.exit(2); }
-console.log(`decision-api: provider ${k.provider} · source ${k.source} · key fingerprint ${crypto.createHash('sha256').update(k.key).digest('hex').slice(0, 6)} · row model ${k.model || '(empty)'}`);
+if (!k.provider || !k.key) { console.log(`no llm key resolves here (source: ${k.source}) — save a provider + key on the Language model card (or the cluster preset) and run again`); process.exit(2); }
+console.log(`llm: provider ${k.provider} · source ${k.source} · key fingerprint ${crypto.createHash('sha256').update(k.key).digest('hex').slice(0, 6)} · judging model ${k.model || '(empty)'}`);
 for (const other of M.PROVIDERS.filter((p) => p !== k.provider)) console.log(`  (${other}: no key on this row — its candidates are skipped)`);
 
 console.log('\nSTEP 1 — one minimal predicate per candidate');

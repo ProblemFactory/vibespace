@@ -1,5 +1,5 @@
 // THE BLOCK DRAFTER'S CARD (lane rule-learning, design q-037 P0 — owner 2026-10-14). The 「我关心什么」 row's draft button
-// becomes 「从我的判定起草」 only when the Decision API row is OpenRouter with a key and the plugin is on (GET
+// becomes 「从我的判定起草」 only when the Language model row is OpenRouter with a key and the plugin is on (GET
 // /api/channels/decision/learn answers 200; a 404 = the drafter does not exist ⇒ the catalogue draft stays, nothing else is
 // drawn — never a grey button). A press asks for ONE proposal (POST: the text model sees only the digests the judge already
 // saw + the block) and draws a card UNDER the box: the proposed lines (editable, ticked; an `unsupported` line says 「无依据」
@@ -35,7 +35,7 @@ const LINE_BOX_MAX = 300;   // a proposed line's box; a kept line is the person'
 const REFUSALS = () => ({
   'no-zdr': t('the model has no zero-data-retention endpoint — pick the other model in “Model that drafts” below'),
   'use-budget': t('today\'s drafts used their $0.10 — try again tomorrow'),
-  'daily-budget': t('the Decision API\'s daily limit is spent — try again tomorrow'),
+  'daily-budget': t('the LLM plugin\'s daily limit is spent — try again tomorrow'),
   'no-examples': t('answer ✓ and ✗ on a few judged rows first'),
   reconnect: t('OpenRouter refused the key — check it in Integrations & keys'),
   plan: t('OpenRouter says the plan does not allow this model'),
@@ -45,8 +45,9 @@ const REFUSALS = () => ({
   'no-answer': t('OpenRouter did not answer — try again in a minute'),
   redirect: t('OpenRouter answered with a redirect, which is never followed — try again later'),
   busy: t('a draft is already being made — wait for it'),
-  'not-openrouter': t('the drafter needs an OpenRouter key on the Decision API row'), 'no-key': t('the drafter needs an OpenRouter key on the Decision API row'),
-  'plugin-off': t('the Decision API plugin is off'),
+  'not-openrouter': t('the drafter needs an OpenRouter key on the Language model card'), 'no-key': t('the drafter needs an OpenRouter key on the Language model card'),
+  'plugin-off': t('the LLM plugin is off'),
+  'learn-off': t('the drafter is switched off in Settings › Plugins › LLM'),
 });
 /** A refusal's words (the POST's `why`) — null for a why the card has no words for (a server error). */
 export function learnRefusal(why) {

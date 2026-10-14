@@ -19,8 +19,11 @@
 //   lower    the span must be LONG (`span >= N`) — a slower runner only lengthens it;
 //   control  the bound reads something that is not a literal: the mechanism's constant (`DP.DUP_PROBE_MS`, a const the
 //            suite also hands the product), another span measured in the same run (a control), a ratio;
-//   LITERAL  an upper bound made of numbers alone (`< 3000`, `<= 2 * 200 + 400`, a const used only as a bound) — RED
-//            under 1 s always; at ≥ 1 s held by the per-suite ratchet in scripts/fixtures/wall-clock-baseline.json,
+//   LITERAL  an upper bound made of numbers alone (`< 3000`, `<= 2 * 200 + 400`, a const used only as a bound); a
+//            CONTROL PLUS A LITERAL BAND (`fix <= ctl + 25`, `fix <= ctl + Math.max(ctl * 0.25, 25)`, a literal floor
+//            `Math.max(ctl * 1.25, 50)`: the control is measured, the band is not — the bound is the band); a LITERAL IN
+//            MS SCALED BY A FACTOR THAT CARRIES NO UNIT (`250 * slack` with slack off the environment, `50 * rows.length`)
+//            — RED under 1 s always; at ≥ 1 s held by the per-suite ratchet in scripts/fixtures/wall-clock-baseline.json,
 //            which only FALLS: a suite with more is RED (a new literal bound), a suite with fewer is RED until the
 //            baseline is lowered in the same commit (`node scripts/wall-clock-census.mjs --lower`).
 // Lane wall-clock-ratchet-down (2.369.271) read what this header used to call BLIND: a span inside a TUPLE
@@ -30,6 +33,14 @@
 // Date.now()`), and a duration the PRODUCT measured and returned or a CHILD printed (see THE PRODUCT'S CLOCK below:
 // test-fs-canary's `r.fsMs < 100`, test-tls-pass's `t.ms < 5000`, test-app-display-secrets' `r.store.ms < 3000`).
 // THE RATCHET IS AT 0 since that lane: the baseline is empty, so any literal bound is a NEW one.
+// Lane reconnect-storm-band (2.369.272) read THE BAND: a bound relative to a control that adds a fixed number of ms is a
+// wall-clock assertion still — the noise it allows is the machine's. test-reconnect-storm (d) asserted `fix ≤ control
+// + max(25 %, 25 ms)` on the server's loop delay and read 61 vs 31 / 60 vs 25 on the 2-vCPU runner and 1207 vs 16 on the
+// hub beside an integrator's heavy (a heavy suite: the census reads fast ones, so its old text is a planted copy in
+// test-ci-gate §2e). The ms in `literal × factor` is the literal unless the factor carries the unit (a span, a duration
+// name `…Ms` / `…_MS`, a mechanism constant the suite also uses, a module's `DP.CONST`, an import or a parameter);
+// `k × control` is a ratio, `mechanism + literal` (`2 * DP.DUP_PROBE_MS + 500`) stays the mechanism's slack and a
+// timestamp + a number (`T0 + 1000`, T0 = NOW - 3 days) a deadline.
 // STILL UNREADABLE (each said; none compared in the tier today): a PRODUCT duration whose field is not named in ms
 // (`took`, `elapsed` — the house names a duration by its unit, and a string built from a span is no duration), one
 // renamed on the way through a module the suite does not load (`{ lagMs: r.fsMs }`), one measured deeper than the
@@ -344,9 +355,67 @@ export function wallClockFindings(src, { fields = [], ast = null } = {}) {
     if (v.type === 'TemplateLiteral' && !v.expressions.length) return Number(v.quasis[0].value.cooked);
     return NaN;
   };
+  // THE BAND (lane reconnect-storm-band): what a bound is made of — whether it carries a measured span (`span`), the
+  // largest literal number of ms added to it (`lit`: a bare literal term, a literal floor in Math.max / Math.min, a
+  // literal scaled by a unitless factor), and the scaled ones alone (`mlit`). `k × span` is the control scaled (a
+  // ratio — no literal in it); a const the suite uses beyond its bounds is a mechanism, never a band.
+  const NONE = { span: false, lit: null, mlit: null };
+  const join = (a, b) => ({ span: a.span || b.span, lit: a.lit == null ? b.lit : b.lit == null ? a.lit : Math.max(a.lit, b.lit), mlit: a.mlit == null ? b.mlit : b.mlit == null ? a.mlit : Math.max(a.mlit, b.mlit) });
+  const MS_NAME = /^ms$|^ms[A-Z]|Ms$|_MS$|_ms$/;
+  const ENV_READ = (m) => /^(?:process\.env|os)\b/.test(dotted(m.type === 'CallExpression' ? m.callee : m));
+  // does this factor carry the milliseconds itself? (then the literal beside it is a slack, not the ms)
+  const carriesMs = (f, seen = new Set()) => {
+    f = un(f);
+    if (!f || isSpan(f)) return true;
+    if (anyNode(f, (m) => m.type === 'Identifier' && MS_NAME.test(m.name))) return true;
+    if (f.type === 'Literal') return false;
+    if (f.type === 'Identifier') { const d = decl.get(f.name); return !d || seen.has(f.name) || usedElsewhere(f.name, d) || carriesMs(d.init, new Set([...seen, f.name])); }
+    if (f.type === 'MemberExpression' && !f.computed) return !ENV_READ(f) && /^[A-Z][A-Z0-9_]*$/.test(f.property.name);
+    if (f.type === 'ConditionalExpression') return carriesMs(f.consequent, seen) || carriesMs(f.alternate, seen);
+    if (f.type === 'BinaryExpression' || f.type === 'LogicalExpression') return carriesMs(f.left, seen) || carriesMs(f.right, seen);
+    if (f.type === 'UnaryExpression') return carriesMs(f.argument, seen);
+    if (f.type === 'CallExpression') return /^(?:Number|parseFloat|parseInt|Math\.\w+)$/.test(dotted(f.callee)) ? f.arguments.some((a) => carriesMs(a, seen)) : !anyNode(f, ENV_READ);
+    return true;
+  };
+  // a TIMESTAMP — a clock read, an epoch literal, a timestamp ± a number, a name only ever bound to one (a suite may declare
+  // `T0` in three scopes) — is no measured span: `r.at < T0 + 1000` is a deadline, never a band (the flow's `mark - const`
+  // over-approximation reads `T0 = NOW - 3 * 86400e3` as a span — test-channel-store:638 in the heavy tier)
+  const inits = new Map();
+  for (const n of all) if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && n.init) inits.set(n.id.name, [...(inits.get(n.id.name) || []), n.init]);
+  const isStamp = (n, seen = new Set()) => {
+    n = un(n);
+    if (!n) return false;
+    if (isClockRead(n)) return true;
+    if (n.type === 'Literal') return typeof n.value === 'number' && n.value >= 1e12;
+    if (n.type === 'BinaryExpression' && (n.operator === '+' || n.operator === '-')) return (isStamp(n.left, seen) && numbersOnly(n.right)) || (n.operator === '+' && numbersOnly(n.left) && isStamp(n.right, seen));
+    if (n.type === 'Identifier') { const xs = inits.get(n.name); if (!xs || seen.has(n.name)) return false; const s2 = new Set([...seen, n.name]); return xs.every((x) => isStamp(x, s2)); }
+    return false;
+  };
+  const bandOf = (n, seen = new Set()) => {
+    n = un(n);
+    if (!n || isStamp(n)) return NONE;
+    if (n.type === 'Literal') { const v = typeof n.value === 'number' ? Math.abs(n.value) : NaN; return v ? { span: false, lit: v, mlit: null } : NONE; }
+    // a sum is its terms; a difference too, unless it IS the measurement (`performance.now() - t`, `t1 - t0`)
+    if (n.type === 'BinaryExpression' && (n.operator === '+' || (n.operator === '-' && !isSpan(n)))) return join(bandOf(n.left, seen), bandOf(n.right, seen));
+    if (n.type === 'CallExpression' && /^Math\.(?:max|min)$/.test(dotted(n.callee))) return n.arguments.map((a) => bandOf(a, seen)).reduce(join, NONE);
+    if (n.type === 'ConditionalExpression') return join(bandOf(n.consequent, seen), bandOf(n.alternate, seen));
+    if (n.type === 'Identifier') {
+      const d = decl.get(n.name);
+      if (d && !seen.has(n.name) && !usedElsewhere(n.name, d)) return bandOf(d.init, new Set([...seen, n.name]));
+      return isSpan(n) ? { span: true, lit: null, mlit: null } : NONE;
+    }
+    if (isSpan(n)) return { span: true, lit: null, mlit: null };
+    if (n.type === 'BinaryExpression' && (n.operator === '*' || n.operator === '/')) {
+      if (numbersOnly(n)) { const v = Math.abs(evalNumbers(n)); return v ? { span: false, lit: v, mlit: null } : NONE; }
+      const litSide = numbersOnly(n.left) ? n.left : n.operator === '*' && numbersOnly(n.right) ? n.right : null;
+      if (litSide && !carriesMs(litSide === n.left ? n.right : n.left)) { const v = Math.abs(evalNumbers(litSide)); return v ? { span: false, lit: v, mlit: v } : NONE; }
+    }
+    return NONE;
+  };
   const out = [];
   for (const n of comparisons) {
-    const spanLeft = isSpan(n.left);
+    // both sides measured (`ctl + 25 >= fix`): the side carrying the band is the bound
+    const spanLeft = isSpan(n.left) && !(isSpan(n.right) && bandOf(n.left).lit != null && bandOf(n.right).lit == null);
     const bound = spanLeft ? n.right : n.left;
     // `span < N` (or `N > span`) says the span must be SHORT; polarity flips under `!` and in an if-test (the
     // consequent is the failure: `if (ms > 1500) bad.push(…)`)
@@ -380,15 +449,16 @@ export function wallClockFindings(src, { fields = [], ast = null } = {}) {
     }
     let boundMs = null;
     if (!kind) {
+      // the span's unit: a `/ 1000` or `/ 1e9` in the span itself means seconds
+      const sp = spanLeft ? n.left : n.right;
+      const unit = anyNode(sp, (m) => m.type === 'BinaryExpression' && m.operator === '/' && [1000, 1e3].includes(evalNumbers(m.right))) ? 1000 : 1;
+      const band = short && !numbersOnly(bound) ? bandOf(bound) : NONE;
       if (!short) kind = 'lower';
+      // a control plus a literal band (the bound is the band), a literal in ms scaled by a unitless factor
+      else if (band.span && band.lit != null) { kind = 'LITERAL'; boundMs = band.lit * unit; }
+      else if (!band.span && band.mlit != null) { kind = 'LITERAL'; boundMs = band.mlit * unit; }
       else if (!numbersOnly(bound)) kind = 'control';
-      else {
-        kind = 'LITERAL';
-        // the span's unit: a `/ 1000` or `/ 1e9` in the span itself means seconds
-        const sp = spanLeft ? n.left : n.right;
-        const secs = anyNode(sp, (m) => m.type === 'BinaryExpression' && m.operator === '/' && [1000, 1e3].includes(evalNumbers(m.right)));
-        boundMs = evalNumbers(bound) * (secs ? 1000 : 1);
-      }
+      else { kind = 'LITERAL'; boundMs = evalNumbers(bound) * unit; }
     }
     out.push({ line: n.loc.start.line, kind, boundMs, text: text(n).slice(0, 140) });
   }

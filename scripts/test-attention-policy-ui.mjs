@@ -154,11 +154,11 @@ routes.setup({ getEngine: () => eng });
 app.use(routes.router);
 // the plugin's own door (the GET /api/plugins row + POST /api/plugins/<id>/config of mounts-plugins-wiring, over `plug`)
 const PLUG_WRITES = [], SET_KEYS = [];
-app.get('/api/plugins', (req, res) => res.json({ plugins: [{ id: 'decision-api', enabled: plug.enabled, configured: true, decision: { ...plug.config } }] }));
+app.get('/api/plugins', (req, res) => res.json({ plugins: [{ id: 'llm', enabled: plug.enabled, configured: true, decision: { ...plug.config } }] }));
 // lane decision-spend-readout: the plugin's status row (mounts-plugins-wiring GET /api/plugins/:id/status) — the REAL decision
-// engine's `today` + `month` under the plugin's shape (src/plugins/decision-api.js status)
-app.get('/api/plugins/decision-api/status', (req, res) => res.json({ installed: true, running: plug.enabled, enabled: plug.enabled, configured: true, decision: { ...decision.status(), ...plug.config } }));
-app.post('/api/plugins/decision-api/config', (req, res) => { PLUG_WRITES.push(req.body); plug = { ...plug, config: { ...plug.config, ...req.body } }; res.json({ ok: true }); });
+// engine's `today` + `month` under the plugin's shape (src/plugins/llm.js status)
+app.get('/api/plugins/llm/status', (req, res) => res.json({ installed: true, running: plug.enabled, enabled: plug.enabled, configured: true, decision: { ...decision.status(), ...plug.config } }));
+app.post('/api/plugins/llm/config', (req, res) => { PLUG_WRITES.push(req.body); plug = { ...plug, config: { ...plug.config, ...req.body } }; res.json({ ok: true }); });
 app.post('/api/settings', (req, res) => { SET_KEYS.push(...Object.keys(req.body || {})); Object.assign(SV, req.body || {}); res.json({ ok: true }); });
 app.get('/api/channel-groups', (req, res) => res.json({ groups: [] }));
 app.all('/api/user-state', (req, res) => res.json(req.method === 'GET' ? { channelsPanelFolds: { internal: false, 'acct:im': false } } : { ok: true }));
@@ -205,8 +205,8 @@ const BLOCK = `(() => { const b = document.querySelector('[data-settings-block="
 const flip = (p, label) => p.ev(`(() => { const r = [...document.querySelectorAll('[data-settings-block="attention"] .settings-row')].find((x) => x.querySelector('.settings-row-label')?.textContent === ${JSON.stringify(label)}); r.querySelector('.settings-toggle input').click(); return true; })()`);
 const pick = (p, v) => p.ev(`(document.querySelector('[data-settings-block="attention"] input[type=radio][value="${v}"]').click(), true)`);
 const HEADN = `parseInt((document.querySelector('.chan-view-btn[data-view="focus"]') || {}).textContent, 10)`;
-const DIRECT = '有人直接发给我、我还没读的', AT_YOU = '有人 @ 了我、我还没读的', JUDGE = '让判断模型挑出需要我的（Decision API）';
-const JUDGE_READY = `(() => { const i = document.querySelector('[data-settings-block="attention"] input[data-plugin-feature="decision-api.attention"]'); return !!(i && !i.disabled && i.checked); })()`;
+const DIRECT = '有人直接发给我、我还没读的', AT_YOU = '有人 @ 了我、我还没读的', JUDGE = '让判断模型挑出需要我的（LLM 插件）';
+const JUDGE_READY = `(() => { const i = document.querySelector('[data-settings-block="attention"] input[data-plugin-feature="llm.attention"]'); return !!(i && !i.disabled && i.checked); })()`;
 const settled = async (p) => { await waitFor(p, JUDGE_READY, (v) => v === true); await sleep(350); };   // the plugin's answer drawn, the toggle's transition done
 const has = (rows, key, tag) => rows.some((r) => r.key === key && (!tag || r.tag === tag));
 
@@ -266,7 +266,7 @@ const w0 = PLUG_WRITES.length;
 await flip(d, JUDGE);
 st = await waitFor(d, BLOCK, (s) => s && s.radio === 'rules');
 const vals = await d.ev('window.__vals');
-ok(plug.config.attention === false && PLUG_WRITES.length === w0 + 1 && PLUG_WRITES[w0].attention === false && !('channels.attention.judge' in vals) && !SET_KEYS.includes('channels.attention.judge') && !SET_KEYS.includes('channels.attention.preset'), 'off: ONE write to POST /api/plugins/decision-api/config {attention:false}; no settings key for the judge or the preset — ever', { writes: PLUG_WRITES.slice(w0), keys: [...new Set(SET_KEYS)] });
+ok(plug.config.attention === false && PLUG_WRITES.length === w0 + 1 && PLUG_WRITES[w0].attention === false && !('channels.attention.judge' in vals) && !SET_KEYS.includes('channels.attention.judge') && !SET_KEYS.includes('channels.attention.preset'), 'off: ONE write to POST /api/plugins/llm/config {attention:false}; no settings key for the judge or the preset — ever', { writes: PLUG_WRITES.slice(w0), keys: [...new Set(SET_KEYS)] });
 ok(st && st.radio === 'rules', 'the preset reads back 只用固定规则');
 await flip(d, JUDGE);
 st = await waitFor(d, BLOCK, (s) => s && s.radio === 'both');
@@ -287,7 +287,7 @@ console.log('⑥ the Settings window: searching 需关注 finds the block');
 const sp = await page(900, 1000, 'w=100%25&b=panel&settings=' + encodeURIComponent('需关注'));
 await sp.go();
 st = await waitFor(sp, BLOCK, (s) => s && s.rows.length);
-// int263 seam (b): in the Settings window the threshold + 我在乎什么 are the Decision API plugin's rows (插件 › Decision API, plugin-settings-p0);
+// int263 seam (b): in the Settings window the threshold + 我在乎什么 are the LLM plugin's rows (插件 › LLM, plugin-settings-p0);
 // the block draws its own NINE there — the Channels ⚙ door (legs above) draws all eleven (alsoBlock)
 ok(st && st.rows.length === 10 && st.head === '需关注 · 怎么判断', 'the window\'s own content renderer, its search 需关注: the block under its head, its own 10 rows', st && st.rows.map((r) => r.label));
 await settled(sp);

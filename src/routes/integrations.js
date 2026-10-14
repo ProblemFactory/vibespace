@@ -24,7 +24,7 @@
  * row out (lark / gmail / fake — their OAuth client is chosen where the
  * account is added), and GET / PUT / DELETE / test on one answer
  * `404 binds-per-account` BY NAME — the store refuses, this file only
- * relays. The window keeps every other row (the browser key rows, the Decision API's).
+ * relays. The window keeps every other row (the browser key rows, the LLM plugin's).
  */
 const express = require('express');
 const router = express.Router();

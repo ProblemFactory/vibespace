@@ -10,7 +10,8 @@
  * `hostId` is a parameter, never a silent local fallback.
  *
  *   GET  /api/agent/window/targets                 the rows I may address + the verb verdicts + the probe
- *   POST /api/agent/window/open      {appId, label?}   start a REGISTRY app on a private display, attach (`exec`/`args`/`cwd` ⇒ 403 exec_is_human: an exec is the user's, §5;
+ *   POST /api/agent/window/open      {appId, label?, size?}   start a REGISTRY app on a private display, attach (lane launch-picture-size: `size`
+ *                                                     'WxH' = born pinned — 400 bad-size / size_out_of_bounds / pin_unsupported by name); (`exec`/`args`/`cwd` ⇒ 403 exec_is_human: an exec is the user's, §5;
  *                                                     a BROWSER row, or `url`/`keepProfile` ⇒ 403 browser_is_human: the desktop-app browser is the user's, B-bfe6)
  *   POST /api/agent/window/attach    {handle}      lane E (D1): a window NOT SHARED with this session ⇒ 403 not_exposed (snapshot / act /
  *                                                  screenshot / watch / detach refuse it the same; `targets` lists only shared windows);
@@ -72,6 +73,7 @@ const STATUS = {
   not_exposed: 403, agent_forbidden: 403, mode_pixels: 409, window_not_visible: 409, wake_paced: 409, no_conversation: 409, fork_pending: 409, not_live: 404,
   reach_unreadable: 503, // lane E verify r2 (L4): the Task Group store could not be read — try again (the lease is kept)
   outside_window: 400, bad_principal: 400, bad_mode: 400, share_local_only: 400,
+  'bad-size': 400, size_out_of_bounds: 400, pin_unsupported: 400, not_your_window: 403, // lane e2b + launch-picture-size: a pinned size refused by name
   desktop_injection_refused: 409, no_live_view: 409, tier3_is_a_window_target: 409, no_lease: 409, held: 409, not_taken: 409,
   desktop_window_gone: 404,
   capture_needs_portal: 503, capture_unavailable: 503,

@@ -649,7 +649,15 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     const appId = b.appId || b.app || undefined;
     const bRow = appId !== undefined ? registryRowsNow().find((r) => r && r.id === String(appId) && isBrowserRow(r)) : null;
     if (bRow) throw namedError('browser_is_human', `${bRow.label || bRow.id} is a desktop-app browser — the user starts their own browser and can share it with you (then \`vibespace-window list\` shows it); for your own web work use the agent browser, \`vibespace-browser\` (\`vibespace-docs browser\`) — or, when the agent browser cannot reach a site, a real desktop browser of your OWN beside your chat: \`vibespace-browser new <label> --backend desktop-app [--url <https://…>]\` (no CDP: you drive it with these window verbs)`, { apps: registryApps() });
-    const rec = await keeper.launch({ appId, label: b.label || b.title || undefined }, { launchedBy: { kind: 'agent', sessionId: facts.sessionId, name: facts.name || sessionName(facts.sessionId) } }); // lane app-launch-singleton: the card / Desktop list say who started it
+    // lane launch-picture-size: `vibespace-window open <app> --size WxH` — the window is BORN pinned (the keeper's launch stamps
+    // it); the opener's right by pinVerdict (who 'agent': at open the caller IS the opener), a bad size refused in its words
+    let pin = null;
+    if (b.size !== undefined && b.size !== null && b.size !== '') {
+      const pv = PIN.pinVerdict({ facts, record: { id: String(appId || 'the app'), by: { sessionId: facts.sessionId } }, who: 'agent', size: b.size });
+      if (!pv.ok) throw namedError(pv.code, pv.error);
+      pin = pv.pin;
+    }
+    const rec = await keeper.launch({ appId, label: b.label || b.title || undefined, ...(pin ? { pin } : {}) }, { launchedBy: { kind: 'agent', sessionId: facts.sessionId, name: facts.name || sessionName(facts.sessionId) } }); // lane app-launch-singleton: the card / Desktop list say who started it
     // lane E (D1's one exception): a window an agent opened itself is exposed to that agent's own session
     const s0 = sessionsMap().get(facts.sessionId) || facts.session || {};
     const g = R.openerGrant(reachRecord(rec.id), { key: keyOf(s0, facts.sessionId), name: facts.name || '', at: now() });   // verify r6: the opener's OWN key

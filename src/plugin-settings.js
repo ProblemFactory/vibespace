@@ -20,13 +20,29 @@ const ROW_FIELDS = new Set(['key', 'type', 'default', 'label', 'description', 't
 const MAX_ROWS = 24;
 
 const PLUGIN_SETTINGS = {
-  'decision-api': {
-    label: 'Decision API',
-    integration: 'decision-api',
+  // lane llm-plugin-rename (owner 2026-10-14 「把整个 decision api 插件改名叫 LLM 插件之类的，然后里面可以开关各种功能」): the
+  // section is ordered by FEATURE — the switch of each feature, then its own rows: the judge (picking out what needs you —
+  // its threshold, your words, learning from what you do — then the sentence rules, the hand-out, the For-you order and
+  // the judging model they share), the drafter (its switch, then its model), the budget of the day last
+  'llm': {
+    label: 'LLM',
+    integration: 'llm',
     rows: [
       { key: 'attention', type: 'boolean', default: false, apply: 'server',
         label: t('Channels home: pick out the messages that need me'),
         description: [t('Example: a colleague asks “Can you get back to me today?” — it gets marked “{label}” and moves to the top of Channels home; tap ✓ / ✗ to teach it.'), { label: [t('needs you · {p}'), { p: t('asks you') }] }] },
+      // the two LEGACY keys keep their spelling (zero migration) — only their section moved here from Channels
+      { key: 'threshold', path: 'decision.threshold', type: 'number', default: 0.7, min: 0.5, max: 0.9, step: 0.05, tier: 'advanced', apply: 'server',
+        label: t('Needs-attention threshold'),
+        description: t('How sure the judging model must be (0.50–0.90) before it picks a conversation out. Example: at 0.80 “Can you sign this today?” still gets picked, a vague “maybe we could catch up sometime” does not. It shows in what Channels home lists.') },
+      { key: 'attentionBlock', path: 'decision.attentionBlock', type: 'text', multiline: true, maxLength: 1500, draft: 'decision', default: '', apply: 'server',
+        label: t('What matters to me'),
+        description: t('In your own words (at most 1,500 characters), what the judging model should pick out for you — it reads it as written. Example: “Invoices and anything from my manager matter; newsletters never do.” It shapes what Channels home lists. “Draft from my recent decisions” (with an OpenRouter key: “Draft from my verdicts”) proposes lines from your ✓ / ✗ answers; nothing is saved until you save it.') },
+      // lane decision-attention-facts: IMPLICIT LABELS — a reply ⇒ "needs", a listed row left unopened a day ⇒ "not"
+      // (src/server/channels-attention.js `learn`); off by default, nothing written while off
+      { key: 'implicitLabels', path: 'decision.implicitLabels', type: 'boolean', default: false, apply: 'server',
+        label: t('Learn from what I do'),
+        description: t('Besides your ✓ / ✗, it learns from what you do. Example: you reply in a conversation it did not pick out, so similar ones are picked out next time; one it picked out that you leave unopened for a day counts as a “no”. You see it in what Channels home lists. Your own ✓ / ✗ always come first.') },
       { key: 'rules', type: 'boolean', default: false, apply: 'server',
         label: t('Notification rules can use a sentence as the condition'),
         description: [t('Example: the rule “Notify me when someone chases me for a payment” — the model checks whether each message fits. Set it up in {notify} by adding a rule.'), { notify: t('Notify…') }] },
@@ -38,28 +54,28 @@ const PLUGIN_SETTINGS = {
       { key: 'inbox', type: 'boolean', default: false, apply: 'server',
         label: t('For-you tray: put what needs me now first'),
         description: t('E.g. an agent asking you "which expense process?" goes to the top; a "task finished" notice goes further down.') },
-      { key: 'dailyBudgetUsd', type: 'number', default: 1, min: 0, max: 1000, step: 0.01, apply: 'server',
-        label: t('Spend at most per day (USD)'),
-        description: t('Once a day\'s calls have cost this much, nothing more is sent to the model until midnight. The Plugins list shows today\'s count on the Decision API row.'),
-        migrate: { from: 'config.dailyBudgetCents', scale: 0.01 } },
-      // the two LEGACY keys keep their spelling (zero migration) — only their section moved here from Channels
-      { key: 'threshold', path: 'decision.threshold', type: 'number', default: 0.7, min: 0.5, max: 0.9, step: 0.05, tier: 'advanced', apply: 'server',
-        label: t('Needs-attention threshold (Decision API)'),
-        description: t('How sure the judge must be (0.50–0.90) before a conversation joins the first screen. Higher = fewer, surer rows.') },
-      { key: 'attentionBlock', path: 'decision.attentionBlock', type: 'text', multiline: true, maxLength: 1500, draft: 'decision', default: '', apply: 'server',
-        label: t('What matters to me (Decision API)'),
-        description: t('With the Decision API plugin on, the Channels first screen also lists conversations the judge thinks need you now. Say in your own words what matters to you (at most 1,500 characters) — it goes to the judge as written. "Draft from my recent decisions" (with an OpenRouter key: "Draft from my verdicts") proposes lines from your ✓ / ✗ answers for you to edit; nothing is saved until you save it.') },
+      // lane llm-plugin-rename: the judging model MOVED here from the `model` field of the key card (the migration carries a
+      // saved one over); empty = the model of the cluster preset while its key is in use (`model` in the preset), else the
+      // default of the provider — src/server/decision-engine.js `credential`
+      { key: 'judgeModel', type: 'string', default: '', maxLength: 200, apply: 'server',
+        label: t('Judging model'),
+        description: t('The model behind the four switches above. Example: openai/gpt-6-luna-decisions on OpenRouter. Empty = the model the cluster chose when you use the cluster\'s key, otherwise the provider\'s default (gpt-6-luna on OpenAI, openai/gpt-6-luna-decisions on OpenRouter). The Test on the Language model card asks this model.') },
+      // lane llm-plugin-rename: the OWN switch of the drafter — ON by default (a draft costs nothing until the owner clicks;
+      // the four switches above stay OFF because they bill by themselves); off ⇒ no 「从我的判定起草」 button and the
+      // named refusal of the learn route `learn-off`
+      { key: 'learn', type: 'boolean', default: true, apply: 'server',
+        label: t('Draft “What matters to me” from my ✓ / ✗'),
+        description: t('With an OpenRouter key, the “What matters to me” box gets “Draft from my verdicts”: a model reads the short digests of the messages you marked ✓ / ✗ and proposes lines for you to tick. Example: you marked three invoice reminders ✓ — it proposes “Invoices due this week matter”. Nothing is sent until you press the button, nothing is saved until you save.') },
       // lane rule-learning (design q-037 P0): the text model that DRAFTS the block above (「从我的判定起草」 — only with an
-      // OpenRouter key on the Decision API row); both tiers ride the zero-data-retention routing of OpenRouter, never an Anthropic endpoint
+      // OpenRouter key on the Language model card); both tiers ride the zero-data-retention routing of OpenRouter, never an Anthropic endpoint
       { key: 'learnModel', type: 'enum', default: 'flash', apply: 'server',
         options: [{ value: 'flash', label: t('Gemini 3.8 Flash (about $0.007 a draft)') }, { value: 'sonnet', label: t('Sonnet 5.5 (better, about $0.02 a draft)') }],
         label: t('Model that drafts “What matters to me”'),
-        description: t('With an OpenRouter key, “Draft from my verdicts” asks this model to rewrite your block from your ✓ / ✗ answers. It is sent only the short digests the judge already saw and your block, through OpenRouter\'s zero-data-retention endpoints; nothing is saved until you save it. At most $0.10 a day, inside the daily limit.') },
-      // lane decision-attention-facts: IMPLICIT LABELS — a reply ⇒ "needs", a listed row left unopened a day ⇒ "not"
-      // (src/server/channels-attention.js `learn`); off by default, nothing written while off
-      { key: 'implicitLabels', path: 'decision.implicitLabels', type: 'boolean', default: false, apply: 'server',
-        label: t('Learn from what I do'),
-        description: t('Besides your ✓ / ✗, it learns from what you do. Example: you reply in a conversation it did not pick out, so similar ones are picked out next time; one it picked out that you leave unopened for a day counts as a “no”. You see it in what Channels home lists. Your own ✓ / ✗ always come first.') },
+        description: t('The model “Draft from my verdicts” asks to rewrite your block from your ✓ / ✗ answers. Example: Sonnet 5.5 words the lines better for about $0.02 a draft. It is sent only the short digests the judging model already saw and your block, through OpenRouter\'s zero-data-retention endpoints; the draft card names the model. At most $0.10 a day, inside the daily limit.') },
+      { key: 'dailyBudgetUsd', type: 'number', default: 1, min: 0, max: 1000, step: 0.01, apply: 'server',
+        label: t('Spend at most per day (USD)'),
+        description: t('Every feature above counts toward it: once a day\'s calls have cost this much, nothing more is sent to the model until midnight. Example: one judged message costs well under $0.001, so $1 covers a busy day. The LLM row in the Plugins list and Settings › Spending show today\'s spend.'),
+        migrate: { from: 'config.dailyBudgetCents', scale: 0.01 } },
     ],
   },
   'voice-input': {
@@ -184,7 +200,7 @@ function linksOf(id) {
 }
 /** THE ONE-TIME MOVE (migration 2026-10-plugin-config-to-settings): each table row whose old home (`migrate.from`,
  *  default `config.<key>`) holds a value moves into settings.json unless settings already holds one; the old
- *  field is dropped either way, and decision-api's `config.threshold` (read by nobody) and the feature switches
+ *  field is dropped either way, and the LLM plugin's `config.threshold` (read by nobody) and the feature switches
  *  `config.<attention|rules|routing>` move too. Returns {patch, strip: {id: [field…]}}. PURE. */
 function migrationPlan(pluginsState, settings) {
   const plugins = isObj(pluginsState) && isObj(pluginsState.plugins) ? pluginsState.plugins : {};
@@ -212,7 +228,7 @@ function migrationPlan(pluginsState, settings) {
       if (v === r.default) continue; // sparse store: a default is never written
       patch[p] = v;
     }
-    if (id === 'decision-api' && isObj(rec.config) && rec.config.threshold !== undefined) fields.push('config.threshold');
+    if (id === 'llm' && isObj(rec.config) && rec.config.threshold !== undefined) fields.push('config.threshold');
     if (fields.length) strip[id] = fields;
   }
   return { patch, strip };

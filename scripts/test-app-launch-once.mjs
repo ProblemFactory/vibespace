@@ -32,6 +32,10 @@
 //      EXIT_CENSUS_MS of the exit while that member still runs; the teardown then reaps it (SIGKILL after STOP_GRACE_MS, the
 //      keeper's clock moved) and commits again, clean. RED CONTROL: the pre-lane order (an in-memory copy of desktop-serve
 //      committing only after the teardown) holds the verdict behind the member until the grace runs out.
+//   ⑧ lane launch-picture-size: a launch with a PICTURE SIZE (the Apps dialog's select / `vibespace-window open --size`, the
+//      body's `pin`) — the record is BORN pinned through the one stamp; a keeper-fixed rung (Xvfb+x11vnc's fit cell) starts
+//      its X server AT the pin; a bad size is refused in parsePin's words; a rung that cannot hold a pin (this suite's own
+//      rung has no fit cell; a 'shared' one; Xvnc's 'follows') refuses `pin_unsupported` BY NAME — no record, nothing run.
 // ~3 s.
 import fs from 'node:fs';
 import os from 'node:os';
@@ -293,6 +297,35 @@ await leg('⑦', async () => {
   });
   const bFirst = b.casts.find((c) => c.state === 'exited');
   ok(bFirst && bFirst.at - b.rec.endedAt >= DS.STOP_GRACE_MS && bFirst.memberAlive === false, `CONTROL: its exited commit came only after the grace ran out (${bFirst && bFirst.at - b.rec.endedAt} ms on the keeper's clock ≥ STOP_GRACE_MS) — the window closed that late`, bFirst);
+});
+await leg('⑧', async () => {
+  console.log('⑧ lane launch-picture-size — a launch with a PICTURE SIZE: born pinned, a keeper-fixed rung started AT the pin, an unpinnable rung refused by name');
+  const PINAPP = script('pin-app', 'exec sleep 600');
+  const ROW = { id: 'pin-app', label: 'Pin App', exec: PINAPP, args: [], category: 'app' };
+  const noApps = { catalogRows: () => [], refreshCatalog: async () => {}, witnessRows: () => [] };
+  const geoms = [];
+  const disp = { ...fakeDisplay, RECIPES: Object.freeze({ 'fake-x': async (ctx) => { geoms.push(ctx.geometry); return fakeDisplay.RECIPES['fake-x'](ctx); } }) };
+  const withFit = (cell) => Object.freeze([Object.freeze({ ...BACKENDS[0], fit: Object.freeze({ fakex: cell }) })]);
+  const ds = DS.install({ dataDir: path.join(root, 'ds-pin'), env, display: disp, backends: withFit('fixed'), registryRows: [ROW], log, now, tickMs: 3600e3, apps: noApps });
+  const a = await ds.launch({ appId: 'pin-app', pin: '1280x720' }, {});
+  ok(a.pin && a.pin.w === 1280 && a.pin.h === 720, 'pin 1280x720 ⇒ the record is BORN pinned (the launch\'s own answer carries it)', a.pin);
+  const ra = await until(() => { const r = ds.get(a.id); return r && r.state === 'ready' ? r : null; });
+  ok(ra && ra.pin && ra.pin.w === 1280 && geoms[0] === '1280x720', 'a keeper-fixed rung (fit \'fixed\' — Xvfb+x11vnc) starts its X server AT the pin', { geoms, pin: ra && ra.pin, err: ra && ra.lastError });
+  const b = await ds.launch({ appId: 'pin-app', pin: null }, {});
+  await until(() => { const r = ds.get(b.id); return r && r.state === 'ready' ? r : null; });
+  ok(!('pin' in ds.get(b.id)) && geoms[1] === '1280x800', 'no pin ⇒ unpinned, and the X server takes the keeper\'s own geometry', { geoms, rec: ds.get(b.id).pin });
+  let e1 = null; try { await ds.launch({ appId: 'pin-app', pin: '100x100' }, {}); } catch (x) { e1 = x; }
+  ok(e1 && e1.code === 'size_out_of_bounds' && /width 100 is outside 320–7680 pixels/.test(e1.message) && geoms.length === 2, 'a bad size ⇒ refused in parsePin\'s own words before anything starts', e1 && e1.message);
+  for (const id of [a.id, b.id]) { try { await ds.stop(id, { why: 'user' }); } catch { } }
+  ds.shutdown?.();
+  for (const [cell, name] of [[null, 'no fit cell (this suite\'s rung)'], ['shared', 'the shared desktop\'s \'shared\''], ['follows', 'Xvnc\'s \'follows\'']]) {
+    const d2 = DS.install({ dataDir: path.join(root, `ds-pin-${cell}`), env, display: disp, backends: cell ? withFit(cell) : BACKENDS, registryRows: [ROW], log, now, tickMs: 3600e3, apps: noApps });
+    const n0 = d2.listApps().length, g0 = geoms.length;
+    let e2 = null; try { await d2.launch({ appId: 'pin-app', pin: '1920x1080' }, {}); } catch (x) { e2 = x; }
+    ok(e2 && e2.code === 'pin_unsupported' && /vnc-display \(fakex\)/.test(e2.message) && /the picture follows the pane/.test(e2.message) && /Follow the pane/.test(e2.message) && d2.listApps().length === n0 && geoms.length === g0,
+      `${name}: pin_unsupported BY NAME (the backend named, the picture follows the pane there, where to change it) — no record, no X server`, e2 && e2.message);
+    d2.shutdown?.();
+  }
 });
 } catch (e) {
   ok(false, 'the suite ran to its end', e && e.stack);

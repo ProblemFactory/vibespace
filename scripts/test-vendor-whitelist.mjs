@@ -99,7 +99,7 @@ const ALLOW = {
   'src/server/decision-engine.js': { max: 1, oneShot: true, gates: ['budgetVerdict', 'pluginOn', "resolveIntegration(ROW_ID)", 'DECISION_ENDPOINT'] },
   // lane rule-learning (design q-037 P0): THE chat completions caller (OpenRouter /api/v1/chat/completions — the text model
   // that DRAFTS the person's 「我关心什么」 block, proposed never written) — ONE fetch, behind the PURE budget verdict (the
-  // plugin's daily budget + the use's own cap), the plugin's switch, the Decision API row's key, and the zero-data-retention
+  // plugin's daily budget + the use's own cap), the plugin's switch, the Language model row's key, and the zero-data-retention
   // routing as LITERALS (no endpoint ⇒ the named refusal no-zdr, never a request without them)
   'src/server/text-model-client.js': { max: 1, oneShot: true, gates: ['budgetVerdict', 'pluginOn', 'resolveIntegration(ROW_ID)', 'TEXT_ENDPOINT', 'zdr: true', "data_collection: 'deny'"] },
 };
@@ -366,7 +366,7 @@ for (const [rel, n] of Object.entries(constructions)) {
   const followed = Object.entries(loaders).filter(([, line]) => !tm.includes(TM_RL) || closureCensus({ [REL]: tm.replace(TM_RL, `${TM_RL}\n${line}`) }).ok).map(([n]) => n);
   ok(followed.length === 0, `CONTROLS (closure — verify r3 R3-F4, GREEN before): ${Object.keys(loaders).join(' · ')} planted in the client — each RED`, Object.fromEntries(Object.entries(loaders).map(([n, line]) => [n, closureCensus({ [REL]: tm.replace(TM_RL, `${TM_RL}\n${line}`) }).bad])));
 }
-// lane judge-one-shot-body: BOTH vendor callers of the Decision API row (the rows marked `oneShot`: the judge's decisions
+// lane judge-one-shot-body: BOTH vendor callers of the Language model row (the rows marked `oneShot`: the judge's decisions
 // request and the text client's chat completions) send a ONE-SHOT body — by TOKEN. Node's fetch re-sends a body that has a
 // SOURCE (a string, bytes, a Buffer, a Blob — measured, all four) on an HTTP 421 over a new connection: empty, with every
 // header, the key included — a second request no count above ever saw (found by the status sweep, lane rule-learning-fix-r2).
@@ -398,7 +398,7 @@ for (const [rel, n] of Object.entries(constructions)) {
     return { ...f, ok: Object.values(f).every(Boolean), broken: Object.keys(f).filter((k) => !f[k]) };
   };
   const rowText = Object.fromEntries(ROWS.map((rel) => [rel, fs.readFileSync(path.join(REPO, rel), 'utf-8')]));
-  ok(ROWS.length === 2 && ROWS.includes('src/server/decision-engine.js') && ROWS.includes('src/server/text-model-client.js'), `the rows marked oneShot are BOTH vendor callers of the Decision API row (${ROWS.join(', ')})`);
+  ok(ROWS.length === 2 && ROWS.includes('src/server/decision-engine.js') && ROWS.includes('src/server/text-model-client.js'), `the rows marked oneShot are BOTH vendor callers of the Language model row (${ROWS.join(', ')})`);
   for (const rel of ROWS) ok(oneShotOf(rowText[rel]).ok, `${rel}: its ONE request carries \`${ONE_SHOT}\` (no other body), its length and redirect: 'error'; the body frozen, serialized ONCE (bytes ×3, body ×2), no stream of its own`, oneShotOf(rowText[rel]));
   // the helper: ONE implementation in the PURE model, and it IS a one-shot stream of the bytes (a behaviour read)
   const DM_REL = 'src/decision-model.js', dmCode = code(fs.readFileSync(path.join(REPO, DM_REL), 'utf-8'));

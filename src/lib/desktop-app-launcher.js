@@ -86,6 +86,9 @@ import { launchVerdict } from '../desktop-fit.js'; // lane app-launch-singleton:
 import { runningWhereText, quickExitText } from './desktop-app-words.js';
 import { SCALE_PREF_KEY, scaleKeyOf, scaleChoiceOf, setScaleChoice, launchScaleChoice, scaleDefaultMenuModel } from './desktop-app-scale.js';
 import { wireAppPrefs, appPrefs, appPrefsReady, onAppPrefs, saveAppPrefs } from './desktop-app-prefs.js';
+import { PIN_PREF_KEY, pinChoiceOf, setPinChoice } from './desktop-app-prefs.js'; // lane launch-picture-size: the size each app remembers
+import { SIZE_CHOICES, launchPinOf } from '../desktop-pin.js'; // lane launch-picture-size: THE size table (PURE)
+import { sizeWords, sizeChoiceLabel, askCustomSize } from './pin-size-ui.js';
 import { mountLaunchShareRow, launchKeyOf } from './window-share.js';
 import { showMachineDesktopDialog } from './machine-desktop.js'; // design 014 D1: a Windows / macOS machine's whole desktop
 import { OFFICE_MODULES, installSpecFor, FONTS_ID } from '../office-open.js'; // §7.9: the LibreOffice table (PURE)
@@ -714,8 +717,10 @@ export async function showLaunchDialog(app, opts = {}) {
     <div class="desktop-launch-banner is-empty"></div>
     <div class="desktop-launch-head">
       <div class="desktop-launch-machines" role="group" aria-label="${escHtml(t('Machine'))}"><span class="desktop-launch-machines-label">${escHtml(t('Run on'))}</span></div>
+      <label class="desktop-launch-size"><span class="desktop-launch-size-label">${escHtml(t('Picture size'))}</span><select class="desktop-launch-size-select"></select></label>
       <button type="button" class="btn-create desktop-launch-install-app">${escHtml(t('Install an app…'))}</button>
     </div>
+    <p class="desktop-launch-size-hint" hidden>${escHtml(t('Fixed pixels, scaled to fit the pane; an agent sees exactly this size'))}</p>
     <div class="desktop-launch-avail-head"></div>
     <div class="desktop-launch-install is-empty"></div>
     <section class="desktop-launch-sec desktop-launch-running-sec is-empty">
@@ -926,6 +931,61 @@ export async function showLaunchDialog(app, opts = {}) {
   };
   advToggle.onclick = () => { setAdvanced(!advancedOpen, { persist: true }); if (advancedOpen) focusQuiet(execIn); };
 
+  // ── lane launch-picture-size: THE PICTURE SIZE a launch from this dialog carries — the head's select over the ONE size table
+  // (src/desktop-pin.js SIZE_CHOICES). Untouched, each app launches at the size it REMEMBERS (user state `desktopAppPin`, by the
+  // launch key — a browser row per browser) and its card names it; touched, every launch takes the one choice and the app
+  // remembers it. A rung that cannot hold a pin refuses by name in the banner — never a greyed select.
+  const sizeSel = $('.desktop-launch-size-select'), sizeHint = $('.desktop-launch-size-hint');
+  let sizeTouched = false, sizeChoice = 'pane', sizeCustom = null;
+  const rememberedPins = () => appPrefs(PIN_PREF_KEY) || {};
+  const anyRememberedPin = () => Object.keys(rememberedPins()).length > 0;
+  const renderSize = () => {
+    const each = !sizeTouched && anyRememberedPin();
+    const opts = each ? [{ value: '', label: t('Each app’s last size') }] : [];
+    for (const c of SIZE_CHOICES) {
+      if (c.custom && sizeCustom) opts.push({ value: `${sizeCustom.w}x${sizeCustom.h}`, label: sizeWords(sizeCustom) });
+      opts.push({ value: c.id, label: sizeChoiceLabel(c) });
+    }
+    sizeSel.replaceChildren(...opts.map((o) => { const op = document.createElement('option'); op.value = o.value; op.textContent = o.label; return op; }));
+    sizeSel.value = each ? '' : sizeChoice;
+    sizeHint.hidden = !(each || (sizeTouched && launchPinOf(sizeChoice).pin));
+    sizeSel.title = t('Fixed pixels, scaled to fit the pane; an agent sees exactly this size');
+  };
+  /** Each catalog / browser card that will launch at a REMEMBERED size names it (only while the select is untouched). */
+  const paintSizeCards = () => {
+    for (const host of [regEl, browsersEl]) for (const card of host.querySelectorAll('.desktop-launch-card[data-app-id]')) {
+      card.querySelector('.desktop-launch-card-size')?.remove();
+      const p = sizeTouched ? null : pinChoiceOf(rememberedPins(), launchKeyOf({ appId: card.dataset.appId }));
+      if (!p) continue;
+      const chip = document.createElement('span'); chip.className = 'desktop-launch-card-size'; chip.textContent = sizeWords(p);
+      chip.title = t('Starts at {size} — the picture size it last launched with; change it with “Picture size” above', { size: sizeWords(p) });
+      card.appendChild(chip);
+    }
+  };
+  const setSize = (choice) => { sizeTouched = true; sizeChoice = choice; renderSize(); paintSizeCards(); };
+  sizeSel.onchange = async () => {
+    const v = sizeSel.value;
+    if (v === '') { sizeTouched = false; sizeChoice = 'pane'; renderSize(); paintSizeCards(); return; }
+    if (v !== 'custom') { setSize(v); return; }
+    const p = await askCustomSize(sizeCustom);
+    if (!overlay.isConnected) return;
+    if (p) { sizeCustom = p; setSize(`${p.w}x${p.h}`); } else renderSize(); // cancelled: the select shows what still applies
+  };
+  renderSize();
+  /** The size a launch of the app `key` carries ({w, h} | null = follow the pane). */
+  const pinFor = (key) => (sizeTouched ? launchPinOf(sizeChoice).pin : pinChoiceOf(rememberedPins(), key));
+  const PIN_REFUSALS = new Set(['pin_unsupported', 'bad-size', 'size_out_of_bounds']);
+  /** A launch's size refused by the machine — said in the dialog's banner, with the door that changes it. */
+  const sayPinRefusal = (r) => {
+    bannerEl.replaceChildren(); bannerEl.classList.remove('is-empty');
+    const said = document.createElement('span'); said.className = 'desktop-launch-banner-text';
+    said.textContent = r.code === 'pin_unsupported' ? t('A fixed picture size needs the xpra (or Xvfb) display backend — here the picture follows the pane. Choose “Follow the pane”, or install xpra.') : String(r.error || r.code);
+    said.title = String(r.error || r.code); // the machine's exact sentence (it names the display backend)
+    const go = document.createElement('button'); go.type = 'button'; go.className = 'btn-create desktop-launch-banner-go'; go.textContent = t('Follow the pane');
+    go.onclick = () => { setSize('pane'); bannerEl.replaceChildren(); bannerEl.classList.add('is-empty'); };
+    bannerEl.append(said, go);
+  };
+
   const launch = async (payload, recent) => {
     runBtn.disabled = true;
     // lane E (D2): the share this app launches with — the row's choice, else what the app remembers (this machine only)
@@ -937,12 +997,15 @@ export async function showLaunchDialog(app, opts = {}) {
     // default") — the user state is read once per page; a click before it answered waits for it (≤ 3 s)
     await Promise.race([appPrefsReady(), new Promise((r) => setTimeout(r, 3000))]);
     const scaleChoice = launchScaleChoice(appPrefs(SCALE_PREF_KEY), payload);
-    const r = await fetchJson('/api/desktop/apps', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...payload, dpr: launchDpr(), uiScale: launchUiScale(), ...(scaleChoice != null ? { scaleChoice } : {}), ...(host !== 'local' ? { host } : {}), ...(share ? { share } : {}) }) });
+    const pin = pinFor(shareKey); // lane launch-picture-size: the select's choice, else what this app remembers
+    const r = await fetchJson('/api/desktop/apps', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...payload, dpr: launchDpr(), uiScale: launchUiScale(), ...(scaleChoice != null ? { scaleChoice } : {}), ...(host !== 'local' ? { host } : {}), ...(share ? { share } : {}), ...(pin ? { pin: `${pin.w}x${pin.h}` } : {}) }) });
     runBtn.disabled = false;
+    if (r && r.error && PIN_REFUSALS.has(r.code)) { sayPinRefusal(r); return null; }
     if (!r || r.error) { showToast(r?.error || t('Could not launch the application'), { type: 'error' }); return null; }
     if (r.attached) { close(); app.openDesktopApp(r.id); showToast(t('It was already running — its window is open')); return r; } // lane app-launch-singleton: the keeper found it running
     shareRow.remember(shareKey, share);
     shareRow.announce(shareKey, share, r); // lane E verify: a launch that applied the app's REMEMBERED share says so
+    if (sizeTouched && shareKey) saveAppPrefs(PIN_PREF_KEY, (map) => setPinChoice(map, shareKey, pin), t('Could not remember the picture size for this app')); // lane launch-picture-size: the next launch of this app starts there
     if (r.reachError) showToast(t('The app started, but sharing it failed: {why}', { why: r.reachError.error || '' }), { type: 'error' });
     if (recent) {
       recents = pushRecent(recents, { ...recent, label: r.label });
@@ -1194,6 +1257,7 @@ export async function showLaunchDialog(app, opts = {}) {
     if (refocusScale) { const el = body.querySelector(`.desktop-launch-card-scale[data-scale-for="${CSS.escape(refocusScale)}"]`); refocusScale = null; focusQuiet(el); }
     browsersSec.classList.toggle('is-empty', !browsersEl.children.length);
     shareRow.decorateCards([regEl, browsersEl]); // lane E verify: a card that will launch shared names it (the app's remembered share)
+    renderSize(); paintSizeCards(); // lane launch-picture-size: the select's "each app's last size" + each card's remembered size
     urlIn.disabled = keepIn.disabled = dead;
     const registryEmpty = !regEl.children.length && !browsersEl.children.length;
     if (!regEl.children.length) regEl.innerHTML = doc

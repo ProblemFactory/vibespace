@@ -243,10 +243,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   console.log('① the PURE census can go red');
   const planted = census([{ text: 'Nothing is fetched yet', paths: ['div.chan-empty < div.chan-list'], surfaces: ['panel-01-fresh'] }]);
   ok(planted.violations.length === 1 && /latin:/.test(planted.violations[0].why), 'NEGATIVE CONTROL: one planted English literal on a chrome path is a violation', JSON.stringify(planted));
-  // int258 (D1's plugin name on the ⚙ → Integrations card): ja gives it its own word (判定 API, like zh's 决策 API) — no
-  // allowlist row; the untranslated Latin label stays a violation on a chrome path
-  const dn = census([{ text: 'Decision API', paths: ['b < div.integ-card-head'], surfaces: ['integ-01-window'] }]);
-  ok(dn.violations.length === 1 && /latin:Decision/.test(dn.violations[0].why), 'CONTROL: the plugin name "Decision API" left untranslated on the Integrations card is a violation (ja says 判定 API; no allowlist row excuses it)', JSON.stringify(dn));
+  // int258 → lane llm-plugin-rename (the key card is named by its provider): zh / ja give the card's name their own words
+  // (语言模型 / 言語モデル) — no allowlist row; the untranslated Latin label stays a violation on a chrome path
+  const dn = census([{ text: 'Language model (OpenAI / OpenRouter)', paths: ['b < div.integ-card-head'], surfaces: ['integ-01-window'] }]);
+  ok(dn.violations.length === 1 && /latin:Language/.test(dn.violations[0].why), 'CONTROL: the card name "Language model" left untranslated on the Integrations card is a violation (ja says 言語モデル; no allowlist row excuses it)', JSON.stringify(dn));
   // (the URL sits on a CHROME path here so the pattern rule — not the data-path rule — is what excuses it)
   const excusedData = census([{ text: 'Ops room', paths: ['span.chan-row-title < div.chan-row-line'], surfaces: ['panel-02-rows'] }, { text: LARK_CALLBACK_URL, paths: ['code < div.mounts-field-hint'], surfaces: ['wizard-02-connect-lark-custom'] }, { text: 'Lark / 飞书', paths: ['b < div.chan-sec-head'], surfaces: ['panel-02-rows'] }]);
   ok(excusedData.violations.length === 0 && excusedData.excused['data-path:chan-row-title'] === 1 && Object.keys(excusedData.excused).some((k) => k.startsWith('pattern:')), 'CONTROL: a fixture title (by path), a callback URL (by pattern) and a brand beside CJK are excused, each by a NAMED rule', JSON.stringify(excusedData.excused));

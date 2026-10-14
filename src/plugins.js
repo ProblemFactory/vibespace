@@ -91,12 +91,12 @@ class PluginManager {
     }
   }
 
-  _save() {
+  _save({ loud = false } = {}) {
     try {
       const tmp = this._file + '.tmp';
       fs.writeFileSync(tmp, JSON.stringify(this._state, null, 2), { mode: 0o600 });
       fs.renameSync(tmp, this._file);
-    } catch { }
+    } catch (e) { if (loud) throw e; }   // a migration's write is loud (a failed run is retried, never recorded)
   }
 
   _readSettings() { try { return this._settings.read() || {}; } catch { return {}; } }
@@ -123,6 +123,44 @@ class PluginManager {
     }
     if (Object.keys(strip).length) this._save();
     return { moved: Object.keys(patch), stripped: strip };
+  }
+  /** A RENAMED BUILT-IN (migration 2026-10-llm-rename, src/server/migrations.js — through this live manager: it holds
+   *  plugins.json in memory and writes settings through THE settings store). (a) settings.json `plugin.<from>.<k>` →
+   *  `plugin.<to>.<k>` unless the new key holds a value (the new one wins; the old key leaves either way); `seed` = rows
+   *  of the new table written only where settings holds no value (an empty string counts as none); (b) plugins.json's
+   *  record `<from>` → `<to>` WHOLE (the on-switch and anything else) unless a `<to>` record exists — then the new one
+   *  wins and the old is removed, never merged; (c) a record that ARRIVES with old `config` fields gets the one-time
+   *  config → settings move again (an instance that ran 2026-10-plugin-config-to-settings while the table had the new
+   *  id). Idempotent: a second run finds nothing under the old id. → {settings: {moved, dropped, seeded}, record, config}. */
+  renamePlugin(fromId, toId, { seed = {} } = {}) {
+    if (!this._defs.has(toId)) throw new Error(`renamePlugin: ${toId} is not a built-in plugin`);
+    const tbl = PS.PLUGIN_SETTINGS[toId];
+    const cur = this._readSettings();
+    const fromP = `plugin.${fromId}.`, toP = `plugin.${toId}.`;
+    const patch = {}, moved = [], dropped = [], seeded = [];
+    for (const [k, v] of Object.entries(cur)) {
+      if (!k.startsWith(fromP)) continue;
+      const nk = toP + k.slice(fromP.length);
+      if (cur[nk] === undefined && v !== null && v !== undefined) { patch[nk] = v; moved.push(nk); } else dropped.push(k);
+      patch[k] = null;
+    }
+    for (const [key, v] of Object.entries(seed || {})) {
+      const r = tbl && tbl.rows.find((x) => x.key === key);
+      if (!r) throw new Error(`renamePlugin: plugin ${toId} has no setting ${key}`);
+      const p = PS.rowPath(toId, r);
+      const now = p in patch ? patch[p] : cur[p];
+      if ((now === undefined || now === null || now === '') && v !== undefined && v !== r.default) { patch[p] = v; seeded.push(p); }
+    }
+    if (Object.keys(patch).length) this._settings.patch(patch);
+    const P = this._state.plugins;
+    let record = 'none';
+    if (P[fromId]) {
+      if (P[toId]) record = 'dropped'; else { P[toId] = P[fromId]; record = 'moved'; }
+      delete P[fromId];
+      this._save({ loud: true });
+    }
+    const config = record === 'moved' ? this.migrateConfigToSettings() : null;
+    return { settings: { moved, dropped, seeded }, record, config };
   }
   /** settings.json changed (server.js onSettingsWrite): a plugin whose `plugin-config` row moved re-applies it */
   onSettingsWrite(next, prev) {

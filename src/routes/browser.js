@@ -131,6 +131,7 @@ function refuseHost(req, res) {
   return true;
 }
 const STATUS = { // lane browser-profile-clone: the copy's refusals by name
+  'bad-size': 400, size_out_of_bounds: 400, not_your_window: 403, // lane launch-picture-size: a fixed picture size refused by name
   source_not_found: 404, source_same_machine_only: 409, source_leased: 409, source_still_running: 409, source_no_folder: 409, clone_too_big: 413, clone_failed: 500, clone_unsupported_platform: 400, clone_agent_too_old: 400,
   'not-found': 404, no_lease: 404, 'bad-request': 400, label_required: 400, label_taken: 409, provider_unknown: 400, provider_unavailable: 400, 'unsupported-host': 400, sharing_refused: 400, fence_refused: 409, bad_proxy: 400, ambiguous: 409, not_owner: 403, leased: 409, running: 409, cap: 409, launch_failed: 502, dir_unwritable: 500, unavailable: 503,
   // lane chrome-builds-download (design 004): the download's refusals by name
@@ -1931,6 +1932,37 @@ router.post('/api/agent/browser/permission', async (req, res) => {
     try { ctx.traceDialogAct?.({ sessionId: f.sessionId, profileId: t.ephemeral ? null : t.profileId, action: 'permission', permission: r.permission }); } catch (e) { console.warn('[browser-permission] the trace row was not written — ' + (e && e.message)); }
     res.json({ ok: true, permission: r.permission, text: r.text });
   } catch (e) { fail(res, e); }
+});
+/** lane launch-picture-size: A FIXED PICTURE SIZE for a conversation's browser (the CDP rung) — the page IS that size, every
+ *  viewer letterboxes the same picture, the restore never undoes it (src/browser-fit.js fitTarget kind 'fixed'; the bridge's
+ *  setFixed keeps it in the page-size note). `size` = 'WxH' | 'auto' — anything else refused in parsePin's own words;
+ *  `check: true` = judged only (`vibespace-browser open … --size` asks before its open runs). */
+async function fixedSizeAct(res, f, body) {
+  const pv = require('../desktop-pin.js').parsePin(body && body.size !== undefined && body.size !== null ? body.size : '');
+  if (!pv.ok) return res.status(400).json({ error: pv.error, code: pv.code });
+  if (body && body.check === true) return res.json({ ok: true, fixed: pv.pin, applied: 'check' });
+  if (typeof ctx?.browserFixed !== 'function') return res.status(503).json({ error: 'the live view is not available in this process', code: 'unavailable' });
+  const r = await ctx.browserFixed({ sessionId: f.sessionId, profileRef: typeof body?.profile === 'string' ? body.profile : '', fixed: pv.pin });
+  if (!r || !r.ok) return failVerdict(res, r || { code: 'unavailable', error: 'the live view is not available in this process' });
+  res.json({ ok: true, fixed: r.fixed || null, applied: r.applied, ...(r.code ? { code: r.code, why: r.error || '' } : {}) });
+}
+const NOT_YOUR_WINDOW = 'an agent fixes the picture size of its OWN conversation\'s browser only — the user sets any conversation\'s from the live view\'s menu (Pin size…)';
+/** The agent's `vibespace-browser size <WxH|auto>` (and `open … --size WxH`): its own conversation's browser. */
+router.post('/api/agent/browser/size', async (req, res) => {
+  const f = agentFacts(req, res); if (!f) return;
+  if (req.body && req.body.sessionId !== undefined && String(req.body.sessionId) !== String(f.sessionId)) return res.status(403).json({ error: NOT_YOUR_WINDOW, code: 'not_your_window' });
+  try { await fixedSizeAct(res, f, req.body || {}); } catch (e) { fail(res, e); }
+});
+/** The USER's Pin size… in the live window's ⋯ — any conversation's browser. An agent's session or job token is refused
+ *  `agent_forbidden` (the house rule of every human-only route — test-browser-human's walk; int271 seam 2): an agent fixes its
+ *  OWN conversation's browser through the door above. */
+const SIZE_IS_USERS = 'the picture size set from the live view is the user\'s (Pin size…) — an agent fixes its own conversation\'s browser with vibespace-browser size (POST /api/agent/browser/size)';
+router.post('/api/browser/size', async (req, res) => {
+  if (refuseHost(req, res)) return;
+  if (refuseAgentBearer(req, res, SIZE_IS_USERS)) return;
+  const sid = String(req.body?.sessionId || '');
+  const f = needKey(res, sessionFacts(sid)); if (!f) return;
+  try { await fixedSizeAct(res, f, req.body || {}); } catch (e) { fail(res, e); }
 });
 /** The agent's `dialog status | accept [text] | dismiss` — answered through the watch (the one client that saw the
  *  dialog open). While the user drives it is the user's page: refused `browser_interrupted` (the mediator's fence says

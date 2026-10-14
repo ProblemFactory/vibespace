@@ -55,7 +55,7 @@ function normalizeI18n(x) {
   return out;
 }
 
-/** lane decision-inbox-rank (the Decision API's INBOX v2): the board's FACTS of an item as the store keeps them —
+/** lane decision-inbox-rank (the LLM plugin's INBOX v2): the board's FACTS of an item as the store keeps them —
  *  {state, dated (≤ 40 characters of the item's own words, a date phrase), due, reasks, askedAt} — or null. Counts,
  *  kinds and times only: what the tray orders by without reading the item's text. */
 const FACT_STATES = ['blocked', 'continued', 'finished', 'unknown'];
@@ -340,7 +340,7 @@ class UserTodoManager {
       .slice(0, RESOLVED_SNAPSHOT_MAX);
     // a resolved item's detail rides as a PREVIEW (previewOf): the tail is history, and
     // 250 × 8 000 chars per broadcast is not a price every client pays for it
-    // lane inbox-decision-group: the Decision API's tray sections ride the snapshot ONLY while its switch is on
+    // lane inbox-decision-group: the LLM plugin's tray sections ride the snapshot ONLY while its switch is on
     // (the engine's `grouping()`), so a switched-off tray receives today's payload byte for byte
     let grouping = null;
     try { grouping = this._grouping ? this._grouping() : null; } catch { grouping = null; }
@@ -348,7 +348,7 @@ class UserTodoManager {
     return { open, resolved: resolved.map(previewOf) };
   }
 
-  /** USE ④ (lane inbox-decision-group): the Decision API's door. `setGrouping(fn)` — what the snapshot says about the
+  /** USE ④ (lane inbox-decision-group): the LLM plugin's door. `setGrouping(fn)` — what the snapshot says about the
    *  tray's sections (null = off); `openItems()` — the open items (copies); `setJudged(id, judged)` — writes the judge's
    *  verdict BESIDE an open item (`judged: {group: 'now'|'later'|null, p, at, v}`) and nothing else: the item's
    *  urgency is the agent's declaration and is never written here. → true when it wrote.

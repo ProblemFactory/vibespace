@@ -897,16 +897,16 @@ console.log("㉑ THE DECISION API'S TRAY SECTIONS (lane inbox-decision-group) �
     const word = (html) => (html.match(/>([^<]*)<\/span>$/) || [, ''])[1];
     const cases = [
       ['a blocked fact', C({ group: null, v: 0, facts: Fz({ state: 'blocked' }) }), '卡住等你', /它的 agent 为这个问题把状态设成了「卡住」/],
-      ['the judge: dated', C({ group: 'now', why: 'dated', p: 0.81, v: 2, facts: Fz({ dated: '今晚 22:00', due: now + H }) }), '有期限 · 今晚 22:00', /Decision API 选的理由 \(p 0\.81\)/],
-      ['the judge: whenever', C({ group: 'later', why: 'whenever', p: 0.9, v: 2, facts: Fz() }), '随时', /Decision API 选的理由 \(p 0\.90\)/],
+      ['the judge: dated', C({ group: 'now', why: 'dated', p: 0.81, v: 2, facts: Fz({ dated: '今晚 22:00', due: now + H }) }), '有期限 · 今晚 22:00', /LLM 插件选的理由 \(p 0\.81\)/],
+      ['the judge: whenever', C({ group: 'later', why: 'whenever', p: 0.9, v: 2, facts: Fz() }), '随时', /LLM 插件选的理由 \(p 0\.90\)/],
       ['the decay', C({ group: 'now', why: 'blocked', p: 1, v: 2, facts: Fz({ askedAt: now - 49 * H }) }, { createdAt: now - 49 * H }), '48 小时无人再问', /48 小时前问的，之后没人再问/],
-      ['a v1 verdict (until v2 scores it)', C({ group: 'now', p: 0.7, v: 1 }), '现在', /由 Decision API 分组/],
+      ['a v1 verdict (until v2 scores it)', C({ group: 'now', p: 0.7, v: 1 }), '现在', /由 LLM 插件分组/],
     ];
     const badC = cases.filter(([, html, w, title]) => word(html) !== w || !title.test(html));
     ok(!badC.length, 'THE CHIP (zh): 卡住等你 / 有期限 · <the item\'s date phrase> / 随时 / 48 小时无人再问 — OUR words through t(); the title says who placed it (its agent, the judge with its p, the clock)', badC.map(([n, h]) => [n, h]));
     ok(/data-why="stale"/.test(cases[3][1]) && /data-group="later"/.test(cases[3][1]) && /data-group="now"/.test(cases[0][1]), 'the chip carries its section + reason (data-group / data-why — the stale one is drawn dashed)');
     ok(R.judgedChipHtml(it('x', { judged: { group: 'now', why: 'blocked', p: 1, v: 2 } }), tZh, { grouping: false }) === '' && R.judgedChipHtml(it('x', { urgency: 'high', judged: { group: null, v: 0, facts: Fz({ state: 'blocked' }) } }), tZh, { grouping: true }) === '', 'no chip while the sections are off, and none on an item that stands by its own urgency');
-    const newKeys = ['Agent waits on you', 'Due {when}', 'Has a deadline', 'Any time', 'Nobody asked again in 48 h', 'Asked over 48 hours ago, and nobody asked again since', 'Its agent set its status to blocked for this question', 'The Decision API chose this reason'];
+    const newKeys = ['Agent waits on you', 'Due {when}', 'Has a deadline', 'Any time', 'Nobody asked again in 48 h', 'Asked over 48 hours ago, and nobody asked again since', 'Its agent set its status to blocked for this question', 'The LLM plugin chose this reason'];
     ok(newKeys.every((k) => !/—/.test(k) && !/—/.test(zhOf(k) || '—')), 'the card grammar: no em-dash sentence in the new chip words (en / zh)', newKeys.filter((k) => /—/.test(k) || /—/.test(zhOf(k) || '—')));
   } catch (e) { ok(false, 'v2 chip: the row renderer runs under the minimal DOM', e.stack); }
   finally { for (const [k, v] of Object.entries(had)) { if (v === undefined) delete globalThis[k]; else globalThis[k] = v; } }

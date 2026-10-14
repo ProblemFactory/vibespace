@@ -44,7 +44,8 @@ const SHIM_MARKER = 'VIBESPACE-AGENT-BROWSER-SHIM';
 /** VibeSpace's own verbs — they always win. */
 // lane browser-resume B (§3.9): + `resume` (its conversation's own browser, started again with its kept tabs — the collision
 // census reads the binary's own words: `resume` is none of 0.38.1's)
-const OURS = Object.freeze(['profiles', 'new', 'providers', 'use', 'detach', 'status', 'pin', 'watch', 'backend', 'blocked', 'new-child', 'help', 'resume', 'restart']); // lane browser-unresponsive: + restart (a hung browser's way out)
+// lane launch-picture-size: + `size <WxH|auto>` (the conversation's FIXED picture size — 0.38.1 has no `size` verb)
+const OURS = Object.freeze(['profiles', 'new', 'providers', 'use', 'detach', 'status', 'pin', 'watch', 'backend', 'blocked', 'new-child', 'help', 'resume', 'restart', 'size']); // lane browser-unresponsive: + restart (a hung browser's way out)
 /** lane site-reset (2026-09-30): VibeSpace's own verbs that act on the conversation's CURRENT PAGE — they take the page verbs'
  *  road (the one /resolve: which browser, the lease, the refusals, the audit) but never reach the binary as a verb: `stop`
  *  (Page.stopLoading through the watch — a looping tab never disables the browser) and `site-reset <host>` (one site's
@@ -203,6 +204,9 @@ function splitWords(line) {
  *  newer than this table may navigate too). */
 const NAV_VERBS = Object.freeze(['open', 'goto', 'navigate', 'tab', 'window', 'pushstate', 'diff', 'read', 'vitals', 'record', 'a11y']); // 0.38.1: + `a11y [url]`
 const NAV_SET = new Set(NAV_VERBS);
+/** lane launch-picture-size: the navigations that take OUR `--size WxH` (the conversation's fixed picture size, applied by the
+ *  server once the open ran) — stripped before the flag rules: the browser CLI never sees it (0.38.1 has no --size). */
+const SIZE_NAV = new Set(['open', 'goto', 'navigate']);
 /** VERIFY S2 r3 (r2 F2): the verbs that would CHANGE WHAT THE USER IS LOOKING AT — another tab or window, another page
  *  in this tab. Every page verb is refused `browser_paused` by /resolve while the user drives (the keeper's
  *  `resolveFor`); these are said BY NAME so the agent reads why it must not retry: it would move the user's view. */
@@ -928,6 +932,15 @@ function classify(argv, { ours = true, stdin, drift = null } = {}) {
     if (a[i].startsWith('--profile=')) { profile = a[i].slice('--profile='.length); continue; }
     rest.push(a[i]);
   }
+  // lane launch-picture-size: `open <url> --size WxH` (the first `--` ends what is ours)
+  let size;
+  if (ours && SIZE_NAV.has(rest[0])) {
+    for (let i = 1; i < rest.length; i++) {
+      if (rest[i] === '--') break;
+      if (rest[i] === '--size') { size = rest[i + 1] ?? ''; rest.splice(i, 2); i--; continue; }
+      if (rest[i].startsWith('--size=')) { size = rest[i].slice('--size='.length); rest.splice(i, 1); i--; }
+    }
+  }
   if (ours) {
     // ② ③
     if (!rest.length || rest[0] === '--help' || rest[0] === '-h') return { kind: 'ours', verb: 'help', sub: null, argv: rest, profile };
@@ -937,7 +950,8 @@ function classify(argv, { ours = true, stdin, drift = null } = {}) {
     // ④
     if (rest[0] === '--') return judge(rest.slice(1), { escape: true, profile, stdin, drift });
   }
-  return judge(rest, { escape: false, profile, stdin, drift });
+  const j = judge(rest, { escape: false, profile, stdin, drift });
+  return size !== undefined && j && j.kind === 'page' ? { ...j, size } : j;
 }
 
 /** The census helper the gate uses: which words of a listing collide with ours. */

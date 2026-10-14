@@ -10,7 +10,7 @@ import { registerWindowType, svgIcon16 } from './window-types.js';
 import { ATTENTION_RULES, attentionPolicy, presetOf, presetSwitches } from './channel-focus.js';   // lane attention-policy
 import { paintDecisionLine, liveDecisionLine } from './decision-readout.js';   // lane decision-spend-readout: the judge's money (ONE PURE line)
 import { mountLearnDraft } from './learn-card.js';   // lane rule-learning: 「从我的判定起草」 — the text model's proposal card (only with an OpenRouter key)
-const DECISION_BUDGET_PATH = 'plugin.decision-api.dailyBudgetUsd';   // src/plugin-settings.js: the judge's daily cap row
+const DECISION_BUDGET_PATH = 'plugin.llm.dailyBudgetUsd';   // src/plugin-settings.js: the judge's daily cap row
 
 // lane attention-policy: A PLUGIN'S FEATURE SWITCH shown as a settings row (`store: {plugin, feature}`) — read from GET
 // /api/plugins (the plugin row's own `decision` / `config` answer), written through POST /api/plugins/<id>/config, the
@@ -494,7 +494,7 @@ class SettingsUI {
     liveDecisionLine(line, (L) => { money = L; draw(); });
   }
 
-  /** lane decision-spend-readout: under the plugin.decision-api.dailyBudgetUsd row — today's money against that cap
+  /** lane decision-spend-readout: under the plugin.llm.dailyBudgetUsd row — today's money against that cap
    *  (red at 90 %), the by-use breakdown on hover; patched in place while the row is drawn. */
   _renderDecisionToday(info) {
     const line = document.createElement('div');
@@ -505,15 +505,15 @@ class SettingsUI {
     liveDecisionLine(line, (L) => paintDecisionLine(line, L, 'text'));
   }
 
-  /** lane decision-spend-readout: Settings › Spending lists what bills — the Decision API's day and month beside the
+  /** lane decision-spend-readout: Settings › Spending lists what bills — the LLM plugin's day and month beside the
    *  ceilings, with a door to the plugin's own section (the cap lives there). */
   _renderDecisionSpend(section, content, nav) {
     const row = document.createElement('div');
     row.className = 'settings-row settings-spend-producer';
-    row.dataset.spendProducer = 'decision-api';
+    row.dataset.spendProducer = 'llm';
     const line = Object.assign(document.createElement('div'), { className: 'settings-row-fact', textContent: t('checking…') });
     const open = Object.assign(document.createElement('button'), { className: 'settings-link-btn', textContent: t('Open settings') });
-    const cat = pluginCategoryOf('decision-api');
+    const cat = pluginCategoryOf('llm');
     open.disabled = !cat;
     open.onclick = () => { if (cat) { this._onlyCategory = null; this._renderContent(content, nav); this._showCategory(content, nav, cat); } };
     row.append(line, open);
@@ -926,7 +926,7 @@ class SettingsUI {
       return textarea;
     }
 
-    // lane decision-attention: a LONG text (the Decision API's "what matters to me") — a textarea bounded by the row's
+    // lane decision-attention: a LONG text (the LLM plugin's "what matters to me") — a textarea bounded by the row's
     // maxLength; `draft: 'decision'` adds "Draft from my recent decisions": the server PROPOSES lines from the person's
     // ✓ / ✗ answers, they land in the box for editing, and nothing is saved until the person presses Save
     if (schema.type === 'text' && schema.multiline) {
@@ -956,7 +956,7 @@ class SettingsUI {
         const d = document.createElement('button');
         d.className = 'settings-link-btn'; d.dataset.draft = 'decision';
         d.textContent = t('Draft from my recent decisions');
-        d.title = t('Asks the Decision API which kinds of message your ✓ / ✗ answers set apart, and proposes lines for you to edit — never saved by itself');
+        d.title = t('Asks the judging model which kinds of message your ✓ / ✗ answers set apart, and proposes lines for you to edit — never saved by itself');
         d.onclick = async () => {
           d.disabled = true;
           const r = await fetchJson('/api/channels/decision/draft', { method: 'POST' });
@@ -972,7 +972,7 @@ class SettingsUI {
           showToast(t('Read {n} of your decisions — {m} lines proposed; edit them, then Save', { n: r.read, m: (r.lines || []).length }));
         };
         wrap.appendChild(d);
-        // lane rule-learning (design q-037 P0): with an OpenRouter key on the Decision API row this button gives way to
+        // lane rule-learning (design q-037 P0): with an OpenRouter key on the Language model row this button gives way to
         // 「从我的判定起草」 (a proposal card under the box, saved through this row's own save); a 404 keeps it as it is
         mountLearnDraft(wrap, { catalogue: d, ta, apply: (text) => save(text) });
       }

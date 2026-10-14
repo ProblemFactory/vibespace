@@ -42,15 +42,23 @@ const flag = (name) => { const i = args.indexOf(name); return i >= 0 ? (args[i +
 const has = (name) => args.includes(name);
 const json = has('--json');
 
+// lane launch-picture-size: the size table's fixed rows (src/desktop-pin.js SIZE_CHOICES — this CLI ships alone, so its help
+// carries a MIRROR; scripts/test-desktop-pin.mjs pins it to the table, order and all)
+const SIZE_HELP = '1280x720 | 1920x1080 | 2560x1440 | your own WxH';
+/** A refused size is the caller's typo — exit 2 like a usage error (the server's words are parsePin's). */
+const SIZE_REFUSALS = new Set(['bad-size', 'size_out_of_bounds']);
 const USAGE = `vibespace-window — act on a native window through its accessibility tree
   vibespace-window list                          windows SHARED with me (hidden unless the user shared them, or I opened them) + each one's mode
                                                  (tree | pixels, and why); plus, behind the user's switch, their own desktop — marked
-  vibespace-window open <app-id> [--title <t>]   start a REGISTRY app on a private display ('list' prints the ids); attaches you. An arbitrary
+  vibespace-window open <app-id> [--title <t>] [--size WxH]
+                                                 start a REGISTRY app on a private display ('list' prints the ids); attaches you. An arbitrary
                                                  executable is the user's act (their Desktop apps dialog), never yours: --exec is refused exec_is_human
                                                  A desktop-app BROWSER row is the user's (browser_is_human): your own desktop browser
                                                  is \`vibespace-browser new <label> --backend desktop-app\` — then snapshot / click / type here
+                                                 --size fixes its picture (${SIZE_HELP}): the window IS that many pixels, the
+                                                 picture scales into the pane — you see exactly that size (auto / none = fit the pane)
   vibespace-window attach <handle>               take the lease on a window (one holder per window) — prints the share's mode and why
-  vibespace-window size <handle> <WxH|auto>      pin YOUR desktop browser's pixel size (320–7680 × 240–4320): the X window IS
+  vibespace-window size <handle> <WxH|auto>      pin YOUR desktop browser's pixel size (${SIZE_HELP}; 320–7680 × 240–4320): the X window IS
                                                  that size — screenshot and click --at speak its pixels, the picture scales
                                                  to the pane; auto = fit the pane again (the user pins any window: its menu)
   vibespace-window mode <handle> <tree|pixels|auto>  how YOU drive your desktop browser: tree = snapshot + @refs, pixels =
@@ -95,7 +103,7 @@ async function call(method, p, body, { soft = false, raw = false } = {}) {
   if (!res.ok || j.error) {
     if (soft) return { ...j, _status: res.status, _failed: true };
     printRefusal(j, res.status);
-    process.exit(1);
+    process.exit(SIZE_REFUSALS.has(j.code) ? 2 : 1);
   }
   return j;
 }
@@ -264,11 +272,13 @@ function printNode(n) {
   if (verb === 'open') {
     const app = args[1] && !args[1].startsWith('-') ? args[1] : null;
     if (has('--exec') || has('--args') || has('--cwd')) { console.error('vibespace-window open: --exec / --args / --cwd are not yours [exec_is_human] — an agent opens a REGISTRY app by id (`vibespace-window list` prints the ids); an arbitrary executable is the user\'s act in their Desktop apps dialog'); process.exit(1); }
-    if (!app) usageOf('vibespace-window open <app-id> [--title <t>]');
-    const body = { label: flag('--title'), appId: app };
+    if (!app) usageOf('vibespace-window open <app-id> [--title <t>] [--size WxH]');
+    const size = flag('--size');
+    if (size === '' || (size && size.startsWith('--'))) usageOf('vibespace-window open <app-id> --size WxH (' + SIZE_HELP + ')');
+    const body = { label: flag('--title'), appId: app, ...(size !== undefined ? { size } : {}) };
     const r = await call('POST', '/api/agent/window/open', body);
     if (json) { console.log(JSON.stringify(r, null, 2)); return; }
-    console.log(`${r.app.label} started on ${r.app.display || 'a private display'} (state ${r.app.state}) — handle ${r.handle}, attached to this session (a window you opened is shared with you${r.mode ? `; mode ${r.mode.mode}` : ''}). Next: ${r.next}`);
+    console.log(`${r.app.label} started on ${r.app.display || 'a private display'} (state ${r.app.state}) — handle ${r.handle}, attached to this session (a window you opened is shared with you${r.mode ? `; mode ${r.mode.mode}` : ''})${r.app.pin ? `; picture pinned at ${r.app.pin.w}×${r.app.pin.h} — screenshot and click --at speak those pixels` : ''}. Next: ${r.next}`);
     return;
   }
 

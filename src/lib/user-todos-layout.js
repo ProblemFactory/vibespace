@@ -42,7 +42,7 @@
  *                                    (the panel HOLDS this value — r2: never re-derives a stored choice)
  *   tabCounts(open, history, seenTs) — {inbox:{action, notice, urgency}, history:{unread}}
  *
- * lane inbox-decision-group (the Decision API's use ④, its tray switch on — the snapshot carries `grouping`):
+ * lane inbox-decision-group (the LLM plugin's use ④, its tray switch on — the snapshot carries `grouping`):
  *   inboxChip(item, now)           — {group, why, p, dated} of a normal option-less item the judge, a board fact or the
  *                                    decay placed (its chip), else null
  *   inboxSectionOf(item, now)      — 'now' (urgent / high, an item carrying options / buttons, a blocked fact, judged

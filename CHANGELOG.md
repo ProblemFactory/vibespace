@@ -2,6 +2,17 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.272 — 2026-10-14
+
+### Added
+- Launching an app or a browser, you can now pick a fixed picture size (1280×720, 1920×1080, 2560×1440 or your own) that scales into the pane; agents can ask too.
+
+### Changed
+- The Decision API plugin is now the LLM plugin: one key named by its provider, a switch for each thing it does; your settings and key move over by themselves.
+
+### Fixed
+- A conversation you open on the Stage no longer gives its place back to the previous one when you leave the Stage and come straight back.
+
 ## 2.369.271 — 2026-10-14
 
 ### Changed

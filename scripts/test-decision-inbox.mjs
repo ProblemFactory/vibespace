@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// test-decision-inbox — FAST (lane inbox-decision-group: the Decision API's use ④, design-decision-api §2.6 row
+// test-decision-inbox — FAST (lane inbox-decision-group: the LLM plugin's use ④, docs/design-decision-api.zh.md §2.6 row
 // 「For-you 托盘分组」 + §2.10 ④; in-process, ZERO vendor calls). The For-you tray's two sections are the judge's SORT,
 // never a new urgency:
 //   ① PURE — the `inbox` plan (600 tokens / item, ONE item a call, ≤ 10 a pass, off the wake path, memo = use + item

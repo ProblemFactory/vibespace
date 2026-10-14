@@ -609,6 +609,47 @@ async function sceneLegs({ StageMgr, DeskMgr = DesktopManager, WinMgr = WindowMa
   leg(!m2.isMaximized && nearBox(m2.gridBounds, qHome) && nearBox(m2.element.box, qHome), '§2 X14 un-maximized on Scra it is at its pre-max box', J({ gb: m2.gridBounds, box: m2.element.box }));
   await switchTo('fin');
 
+  // X21 THE SHARED-HERO PUBLISH LAW (lane stage-hero-key-race — rel271's Actions mirror: test-stage-overlap B2 + D red twice
+  //     on a 2-vCPU runner): a Stage-born hero whose session id had not landed published nothing, so leave() + enter()
+  //     followed the record it had superseded back to the previous hero (enter() adopted ANY shared record), and an id
+  //     landing after leave() was dropped (onIdentitySync's `_active` gate). Every publish is stamped; the page follows
+  //     only a record written since the one it last stood on; the landing pays an owed publish.
+  store.delete('hero'); sm._applyingRemoteHero = false;
+  await switchTo(STAGE_ID); sm._followRemoteHero(); await tick(); await tick();
+  const SID = (n) => `e2e00000-0000-4000-8000-00000000d52${n}`;
+  const recOf = () => { try { return JSON.parse(store.get('hero') || 'null'); } catch { return 'bad'; } };
+  const land = (w, sid) => { w._openSpec = { action: 'attachSession', backend: 'claude', backendSessionId: sid }; sm.onIdentitySync(); }; // = app.syncSessionIdentity's Object.assign + its hook
+  const hk1 = mkWin('hk1', 'chat', STAGE_ID, { sid: SID(1) });
+  wm.focusWindow('hk1'); await tick(); await tick();
+  leg(sm._heroWinId === 'hk1' && recOf()?.key === 'claude:' + SID(1) && recOf()?.by === sm._clientId && recOf()?.seq > 0, '§2 X21 a Stage-born hero whose id is known is published at once, STAMPED {by: this page, seq}', J({ hero: sm._heroWinId, rec: recOf(), me: sm._clientId }));
+  const hk2 = mkWin('hk2', 'chat', STAGE_ID); // born before its id landed
+  wm.focusWindow('hk2'); await tick(); await tick();
+  leg(sm._heroWinId === 'hk2' && recOf()?.key === 'claude:' + SID(1) && sm._heroOwed === true, '§2 X21 born before its id landed, hk2 is the hero and its publish is OWED (the record still names hk1)', J({ hero: sm._heroWinId, rec: recOf()?.key, owed: sm._heroOwed }));
+  await switchTo('fin'); await switchTo(STAGE_ID); sm._followRemoteHero(); await tick(); await tick(); // = enter()'s 100 ms follow
+  leg(sm._heroWinId === 'hk2' && drawn(hk2) && hidden(hk1), '§2 X21 THE RUNNER\'S RED: left and entered again before the id landed, hk2 is still the hero and hk1 stays parked (f57d1cbe9: the follow took the superseded record back to hk1 — test-stage-overlap B2 + D)', J({ hero: sm._heroWinId, rec: recOf()?.key, hk1: marks(hk1), hk2: marks(hk2) }));
+  land(hk2, SID(2));
+  leg(recOf()?.key === 'claude:' + SID(2) && recOf()?.by === sm._clientId && sm._heroOwed === false && sm._heroKey === 'claude:' + SID(2), '§2 X21 the id LANDS ⇒ the owed publish is paid: the record names hk2', J({ rec: recOf(), owed: sm._heroOwed, key: sm._heroKey }));
+  const hk3 = mkWin('hk3', 'chat', STAGE_ID);
+  wm.focusWindow('hk3'); await tick(); await tick();
+  await switchTo('fin');
+  land(hk3, SID(3));
+  leg(recOf()?.key === 'claude:' + SID(3) && store.has('ws:claude:' + SID(3)), '§2 X21 an id that lands AFTER leave() still publishes hk3 and records its workspace under the landed key (f57d1cbe9: the `_active` gate dropped it — nothing published hk3, ever)', J({ rec: recOf()?.key, ws: [...store.keys()].filter((k) => k.startsWith('ws:')) }));
+  await switchTo(STAGE_ID); sm._followRemoteHero(); await tick(); await tick();
+  leg(sm._heroWinId === 'hk3' && drawn(hk3) && hidden(hk2), '§2 X21 …and the Stage comes back on hk3', J({ hero: sm._heroWinId, hk3: marks(hk3) }));
+  await switchTo('fin');
+  store.set('hero', J({ key: 'claude:' + SID(1), openSpec: hk1._openSpec, by: 'other-device', seq: 7 })); // another device's pick, written while this page is off the Stage
+  await switchTo(STAGE_ID); sm._followRemoteHero(); await tick(); await tick();
+  leg(sm._heroWinId === 'hk1' && drawn(hk1) && hidden(hk3), '§2 X21 THE WALK-OVER STAYS (挂机): another device\'s pick, written while this page was off the Stage, is adopted on enter', J({ hero: sm._heroWinId, rec: recOf() }));
+  const hk4 = mkWin('hk4', 'chat', STAGE_ID);
+  wm.focusWindow('hk4'); await tick(); await tick(); // this page's pick, its id not landed
+  store.set('hero', J({ key: 'claude:' + SID(2), openSpec: hk2._openSpec, by: 'other-device', seq: 8 })); // another device's NEWER pick — its remote op's 150 ms follow not run yet
+  land(hk4, SID(4));
+  leg(recOf()?.key === 'claude:' + SID(2) && recOf()?.by === 'other-device', '§2 X21 hk4\'s id landing after another device\'s newer pick publishes NOTHING over it (the landing pays only a debt nobody overtook)', J({ rec: recOf() }));
+  sm._followRemoteHero(); await tick(); await tick(); // the remote op's follow
+  leg(sm._heroWinId === 'hk2' && drawn(hk2) && hidden(hk4), '§2 X21 …and the live follow adopts that pick (the other device\'s operations win)', J({ hero: sm._heroWinId }));
+  store.delete('hero'); sm._applyingRemoteHero = false;
+  await switchTo('fin');
+
   for (const v of sessions.values()) { try { v._clearResumeRetail(); } catch { } }
   return failed;
 }
@@ -875,7 +916,7 @@ console.log('— §4 negative controls (patched copies, scripts/mutant-copy.mjs)
     const mut = SMSRC.replace(blackoutFind, "    if (this._applyingRemoteHero) return;\n").replace(/\nregisterWindowType\(\{\n  type: 'stage-placeholder'[\s\S]*?\n\}\);\n/, '\n');
     const f = M.write('src/lib/stage-manager.js', mut, 'follow-blackout');
     const failed = await sceneLegs({ StageMgr: (await import(f)).StageManager, quiet: true });
-    ok(failed.some((n) => /X20 the user's click on h2/.test(n)) && failed.some((n) => /X20 leaving and entering again/.test(n)), `control follow-blackout: the time-boxed blackout turns §2 X20 RED (${failed.length}: ${failed.slice(0, 2).join(' | ').slice(0, 200)})`);
+    ok(failed.some((n) => /X20 the user's click on h2/.test(n)), `control follow-blackout: the time-boxed blackout turns §2 X20 RED — the click goes unpublished (its re-enter leg stays green since the publish law: a pick made after the record the page stood on is kept) (${failed.length}: ${failed.slice(0, 2).join(' | ').slice(0, 200)})`);
   }
   // (20) verify r4: the stamp honoured wherever the half stands (97cbf0b2 verbatim) ⇒ §2 X15b RED
   const stampFind = "    const given = host && !host._stageHomeBounds ? givenHomeOf(host._stageGivenHome, { gridBounds: host.gridBounds, isMaximized: host.isMaximized }) : null;\n";
@@ -902,6 +943,24 @@ console.log('— §4 negative controls (patched copies, scripts/mutant-copy.mjs)
   if (RSRC.includes(geoFind)) {
     const f = geometryLegs(M.load('src/lib/stage-rules.js', RSRC.replace(geoFind, '  const borrowed = false;\n'), 'slot-as-home'), { quiet: true });
     ok(f.some((n) => /a BORROWED hero carries its HOME box/.test(n)), `control slot-as-home: the element's box as the carried box (c4f17e39) turns the §2b hero leg RED (${f.length}: ${f.slice(0, 1).join(' | ').slice(0, 160)})`);
+  }
+  // (21) lane stage-hero-key-race: the pre-fix follow — ANY shared record wins at enter() (f57d1cbe9) ⇒ §2 X21 THE RUNNER'S RED
+  const adoptFind = "      if (shared && (!hero || shared !== this._heroWitness)) {\n", witnessFind = "    if (this._heroWinId && raw === this._heroWitness) return;\n";
+  ok(SMSRC.includes(adoptFind) && SMSRC.includes(witnessFind), 'control adopt-any-record: the patched lines exist in stage-manager.js');
+  if (SMSRC.includes(adoptFind) && SMSRC.includes(witnessFind)) {
+    const mut = SMSRC.replace(adoptFind, "      if (shared) {\n").replace(witnessFind, '').replace(/\nregisterWindowType\(\{\n  type: 'stage-placeholder'[\s\S]*?\n\}\);\n/, '\n');
+    const f = M.write('src/lib/stage-manager.js', mut, 'adopt-any-record');
+    const failed = await sceneLegs({ StageMgr: (await import(f)).StageManager, quiet: true });
+    ok(failed.some((n) => /X21 THE RUNNER'S RED/.test(n)), `control adopt-any-record: enter() adopting any shared record turns §2 X21 THE RUNNER'S RED RED (${failed.length}: ${failed.slice(0, 2).join(' | ').slice(0, 200)})`);
+  }
+  // (22) lane stage-hero-key-race: the landing's pre-fix `_active` gate (f57d1cbe9) ⇒ §2 X21's off-Stage landing RED
+  const landFind = "    if (!this.enabled || !this._heroWinId || (this._heroKey && !this._heroOwed)) return;\n";
+  ok(SMSRC.includes(landFind), 'control landing-on-stage-only: the patched line exists in stage-manager.js');
+  if (SMSRC.includes(landFind)) {
+    const mut = SMSRC.replace(landFind, "    if (!this._active || !this.enabled || !this._heroWinId || (this._heroKey && !this._heroOwed)) return;\n").replace(/\nregisterWindowType\(\{\n  type: 'stage-placeholder'[\s\S]*?\n\}\);\n/, '\n');
+    const f = M.write('src/lib/stage-manager.js', mut, 'landing-on-stage-only');
+    const failed = await sceneLegs({ StageMgr: (await import(f)).StageManager, quiet: true });
+    ok(failed.some((n) => /X21 an id that lands AFTER leave\(\)/.test(n)), `control landing-on-stage-only: a landing gated on the Stage turns §2 X21's off-Stage landing RED (${failed.length}: ${failed.slice(0, 2).join(' | ').slice(0, 200)})`);
   }
   for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 12 })) ok(r.pass, r.name, r.detail);
 }
@@ -937,6 +996,7 @@ console.log('— §5 wiring');
   ok(/onChainJoined\(chain, \{ restored = false \} = \{\}\) \{[\s\S]{0,1600}const host = restored \? this\.app\.wm\.windows\.get\(this\._sessionHostOf\(hero\)\) : null;/.test(SM) && /_stageGivenHome = \{ gridBounds: \{ \.\.\.home\.gridBounds \}, isMaximized: !!home\.isMaximized, at: \{ \.\.\.w\.gridBounds \} \};/.test(SM) && /givenHomeOf\(host\._stageGivenHome, \{ gridBounds: host\.gridBounds, isMaximized: host\.isMaximized \}\)/.test(SM) && /delete win\._stageGivenHome;/.test(SM), '§5 a RESTORED chain around the hero hands the frame\'s home to its new host (the stamp _giveHome writes, cleared at a borrow) — never a user\'s own merge (verify r3)');
   ok(/restoreTabChain\(tabIds, activeIndex[\s\S]{0,1800}if \(hostWin\._desktopId && guestWin\._desktopId !== hostWin\._desktopId\) guestWin\._desktopId = hostWin\._desktopId;/.test(TG) && /createTabChain\(hostWin, guestWin(?:, \{ show = true \} = \{\})?\) \{[\s\S]{0,1200}if \(hostWin\._desktopId\) guestWin\._desktopId = hostWin\._desktopId;/.test(TG), '§5 every chain formation keeps the chain on ONE desktop (restoreTabChain too — verify r3)');
   ok(/_publishHero\(win\) \{[\s\S]{0,700}if \(this\._applyingRemoteHero === true \|\| \(this\._applyingRemoteHero && this\._applyingRemoteHero === win\.id\)\) return;/.test(SM) && /this\._applyingRemoteHero = target \? target\.id : replayId;/.test(SM), '§5 the follow\'s echo guard is scoped to the window the follow materializes, never a time box over every publish (verify r3)');
+  ok(/try \{ this\.stage\?\.onIdentitySync\?\.\(\); \} catch \{ \}/.test(read('src/lib/app.js')) && /_heroWitness = this\._sync\(\)\?\.get\('stage', 'hero'\) \|\| '';[^\n]*\n\s+this\._publishHero\(win\);/.test(SM), '§5 the publish law is wired: app.syncSessionIdentity (where a new window\'s id lands) hands every merge to stage.onIdentitySync — the owed publish\'s owner; every local pick takes the record it supersedes as its witness (lane stage-hero-key-race)');
   // the incident capture carries the derived marks (a diagnostic the forensics needed: `marks` beside the flags)
   ok(/hiddenByStage: !!w\._hiddenByStage, onStage: !!w\._onStage,/.test(read('src/lib/incident-recorder.js')) && /marks: w\.element \? \{ cv: w\.element\.style\.contentVisibility \|\| '', vis: w\.element\.style\.visibility \|\| '', aria: w\.element\.getAttribute\('aria-hidden'\) \} : null,/.test(read('src/lib/incident-recorder.js')), '§5 the incident capture lists every window\'s derived marks (cv / vis / aria) beside both hider flags (the next blank window names itself in the bundle)');
 }

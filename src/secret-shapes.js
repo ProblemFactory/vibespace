@@ -42,7 +42,7 @@
  *   R7 a URL query value (inbox-verify F1, 2026-10-13) — `?token=…`, `&sig=…`, `;access_token=…`, `#key=…`: a parameter whose
  *      name carries a secret word (the R2 words) ⇒ its value to the next `& # ; ' " < >` or blank; the name stays (the judge,
  *      a reader, still sees what the link was)
- *   R8 key material with no name (`{ runs: true }`, the Decision API's judge input only — inbox-verify F1): a 32+ run of
+ *   R8 key material with no name (`{ runs: true }`, the LLM plugin's judge input only — inbox-verify F1): a 32+ run of
  *      hex with a digit and a letter, or of base64 / base64url with an upper, a lower and a digit and no lowercase word of
  *      4+ between its `/ _ - + =` (a path, a slug, an identifier keeps its words). Opt-in: a command's stored head
  *      keeps its commit shas and hashes (diagnosis); a text bound for a vendor's model loses them (nothing to diagnose)

@@ -72,6 +72,13 @@
  * letterboxed by its own aspect — never stretched. Nobody visible for
  * `RESTORE_AFTER_MS` ⇒ the page goes back to its `baseline`.
  *
+ * A FIXED PICTURE SIZE (lane launch-picture-size, owner 2026-10-14 「我启动浏览器或者app的时候能不能选固定画面尺寸？」): a
+ * browser session may hold `fixed` = {w, h} (`vibespace-browser open … --size WxH` / `size WxH`, the live window's Pin
+ * size…). Then `fitTarget` answers kind 'fixed' before the holder / a claim / the largest pane — the page IS that size,
+ * every viewer letterboxes the same picture, the baseline restore never undoes it (nobody visible still answers the
+ * fixed size), and a viewer's "Fit here" / "Fit to this window" is refused by name (`fixedRefusal`: where to change
+ * it). The size was judged at its door (src/desktop-pin.js parsePin); this file only reads the shape (`fixedOf`).
+ *
  * THE PHONE'S PINCH (watch mode): a transform on the picture (`zoomAt`,
  * `pinchStep`, `panStep`, origin top-left, `ZOOM_MIN`..`ZOOM_MAX`, the picture
  * always covering its box); a tap maps through it because the pointer
@@ -120,6 +127,15 @@ const PLACE_TAG_RE = /^[A-Za-z0-9_-]{4,40}$/;
 const posNum = (v) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : 0; };
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
+/** lane launch-picture-size: a session's FIXED picture size → `{w, h}` (whole positive px) or null (judged at its door). */
+function fixedOf(v) { const w = Math.round(posNum(v && v.w)), h = Math.round(posNum(v && v.h)); return w && h ? { w, h } : null; }
+/** lane launch-picture-size: a viewer's "Fit here" / "Fit to this window" while the size is FIXED — refused by name, saying
+ *  where to change it (a door, never a silent no-op); null when nothing is fixed. */
+function fixedRefusal(fixed) {
+  const fx = fixedOf(fixed);
+  return fx ? { code: 'size_pinned', width: fx.w, height: fx.h, error: `the picture size is pinned at ${fx.w}×${fx.h} — change it from the window menu (Pin size…)` } : null;
+}
+
 /** A viewer's `{type:'fit'}` message → the report the bridge keeps, or null. */
 function fitReport(msg) {
   if (!msg || typeof msg !== 'object') return null;
@@ -155,7 +171,9 @@ function paneViewport({ width, height, dpr = 1, floorW = FIT_MIN_W } = {}) {
  * holder has a visible report), else the largest visible pane by area, ties →
  * the lowest viewer id (the earliest). Null when nobody visible reported.
  */
-function fitTarget({ fits = [], holder = null, mode = 'watch', claim = null } = {}) {
+function fitTarget({ fits = [], holder = null, mode = 'watch', claim = null, fixed = null } = {}) {
+  const fx = fixedOf(fixed); // lane launch-picture-size: a FIXED size beats the holder, a claim and the largest pane — seen or not
+  if (fx) return { kind: 'fixed', viewerId: null, width: fx.w, height: fx.h, dpr: 1, rule: 'fixed' };
   const vis = (fits || []).filter((f) => f && f.visible !== false && posNum(f.width) && posNum(f.height));
   if (!vis.length) return null;
   if (mode === 'takeover' && holder !== null && holder !== undefined) {
@@ -185,14 +203,20 @@ function fitTarget({ fits = [], holder = null, mode = 'watch', claim = null } = 
  * = the page's size before the first fit; `floorW` = HEADED_MIN_W once a headed
  * browser was seen scaling (`fitHonored`).
  */
-function fitVerdict({ fits = [], holder = null, mode = 'watch', agent = null, applied = null, baseline = null, force = false, floorW = FIT_MIN_W, ready = true, claim = null } = {}) {
-  if (agent && !force) return { act: 'letterbox', why: 'agent', agent };
-  const t = fitTarget({ fits, holder, mode, claim });
+function fitVerdict({ fits = [], holder = null, mode = 'watch', agent = null, applied = null, baseline = null, force = false, floorW = FIT_MIN_W, ready = true, claim = null, fixed = null } = {}) {
+  const fx = fixedOf(fixed);
+  if (agent && (!force || fx)) return { act: 'letterbox', why: 'agent', agent }; // a FIXED size takes no "Fit to this window" (fixedRefusal)
+  const t = fitTarget({ fits, holder, mode, claim, fixed: fx });
   if (!t) {
     if (applied && baseline && posNum(baseline.width) && posNum(baseline.height)) return { act: 'restore', width: Math.round(baseline.width), height: Math.round(baseline.height), why: 'no-visible-viewer' };
     return { act: 'keep', why: 'no-visible-viewer' };
   }
   if (!ready) return { act: 'wait', why: 'no-baseline', viewerId: t.viewerId };
+  if (t.kind === 'fixed') { // lane launch-picture-size: the page IS the fixed size — no pane bound, no floor, factor 1
+    const vf = { width: t.width, height: t.height, scale: FIT_SCALE, drawScale: 1, dpr: 1, bounded: false };
+    if (applied && Math.abs(posNum(applied.width) - vf.width) <= FIT_SLACK_PX && Math.abs(posNum(applied.height) - vf.height) <= FIT_SLACK_PX) return { act: 'keep', why: 'fitted', ...vf, viewerId: null, rule: 'fixed' };
+    return { act: 'set', ...vf, viewerId: null, rule: 'fixed' };
+  }
   const vp = paneViewport({ width: t.width, height: t.height, dpr: t.dpr, floorW });
   if (!vp) return { act: 'keep', why: 'no-size' };
   if (!force && applied && Math.abs(posNum(applied.width) - vp.width) <= FIT_SLACK_PX && Math.abs(posNum(applied.height) - vp.height) <= FIT_SLACK_PX) return { act: 'keep', why: 'fitted', ...vp, viewerId: t.viewerId, rule: t.rule };
@@ -239,12 +263,13 @@ function restoreDeferred(turn) { return turn === 'running' || turn === 'waiting'
 /** Verify r1: the page-size NOTE the keeper keeps on the browser's own record (it dies with the record at the next
  *  launch — a relaunched browser has its own size): the bridge's state ↔ the note. A server restart no longer forgets
  *  that the agent chose the size (the first viewer's fit would have overridden it) nor the size to restore to. */
-function fitNoteOf({ agent = null, applied = null, baseline = null, floorW = FIT_MIN_W } = {}) {
+function fitNoteOf({ agent = null, applied = null, baseline = null, floorW = FIT_MIN_W, fixed = null } = {}) {
   const sz = (o) => o && posNum(o.width) && posNum(o.height) ? { width: Math.round(o.width), height: Math.round(o.height) } : null;
   const a = agent && typeof agent === 'object' ? agent : null;
   return {
     agent: a ? { kind: a.kind === 'device' ? 'device' : 'viewport', width: posNum(a.width), height: posNum(a.height), scale: posNum(a.scale) || 1, device: a.device ? String(a.device).slice(0, 80) : null, at: Number(a.at) || 0 } : null,
     applied: sz(applied), baseline: sz(baseline), floorW: Math.max(FIT_MIN_W, posNum(floorW) || FIT_MIN_W),
+    fixed: fixedOf(fixed), // lane launch-picture-size: the session's fixed size outlives a server restart like the agent's choice
   };
 }
 function fitStateFromNote(note) {
@@ -252,7 +277,7 @@ function fitStateFromNote(note) {
   const n = fitNoteOf(note);
   const a = n.agent;
   const agent = a && (a.kind === 'device' ? a.device : (a.width && a.height)) ? { ...a, id: null, seq: null } : null;
-  return { agent, applied: n.applied, baseline: n.baseline, floorW: n.floorW };
+  return { agent, applied: n.applied, baseline: n.baseline, floorW: n.floorW, fixed: n.fixed };
 }
 
 /** An upstream `command` mirror that SETS the viewport — `{kind:'viewport'|'device', width, height, scale, device, id}` or null. */
@@ -360,6 +385,7 @@ function fitChipState({ fit = null, you = null, place = null, pane = null, mine 
   const none = { show: false, kind: null, width: 0, height: 0, act: null };
   if (!fit || typeof fit !== 'object') return none;
   const w = Math.round(posNum(fit.width)), h = Math.round(posNum(fit.height));
+  if (fit.state === 'fixed') return { show: true, kind: 'fixed', width: w, height: h, act: 'menu' }; // lane launch-picture-size: a click opens Pin size…
   if (fit.state === 'agent') return { show: true, kind: 'agent', width: w, height: h, act: 'force', device: fit.device || null };
   if (fit.state === 'unavailable') return { show: true, kind: 'unavailable', width: w, height: h, act: null, error: fit.error || null, code: fit.code || null, mine: !!mine };
   if (fit.state === 'fitted') {
@@ -418,6 +444,8 @@ function fitHoldVerdict({ down = 0, downAt = 0, now = 0, maxMs = 15000 } = {}) {
 function fitChipWords(c, { t = (s, p) => (p ? s.replace(/\{(\w+)\}/g, (_, k) => (p[k] !== undefined ? String(p[k]) : '{' + k + '}')) : s) } = {}) {
   if (!c || !c.show) return { text: '', title: '' };
   const size = { w: c.width, h: c.height };
+  // lane launch-picture-size: the chip's TEXT is the pin's own (the view sets src/desktop-pin.js pinChipText over it — this file imports nothing)
+  if (c.kind === 'fixed') return { text: `${c.width}×${c.height}`, title: t('The picture size is pinned at {w}×{h}: the page is that size wherever it is shown, scaled to fit here. Click to change it.', size) };
   // builder r2: sentences are joined by a TRANSLATED template ("{first} {then}" — zh / ja join with no space after 。),
   // and every sentence carries its own full stop (the agent kind printed "…1280×720. 这个窗口…" / "…にしました. この…")
   const join = (...parts) => parts.filter(Boolean).reduce((a, b) => t('{first} {then}', { first: a, then: b }));
@@ -517,5 +545,6 @@ module.exports = {
   FIT_MIRROR_WAIT_MS, FIT_STALE_ASK_MS, frameJudgeVerdict, // 2.369.198: is this picture THIS fit's answer (an earlier fit's late frame / a frame before the daemon's mirror is not)
   fitChipWords, PLACE_TAG_RE, buttonStep, fitHoldVerdict, // lane live-input (+ builder r2: the driver's held buttons hold a resize): the chip's words (where the page's size comes from + what a click does); a view's place tags
   agentSetArgs, ownSetOutcome, restoreDeferred, fitNoteOf, fitStateFromNote, // verify r1: the order-judged outcome of our own set, the deferred restore, the persisted note
+  fixedOf, fixedRefusal, // lane launch-picture-size: a session's fixed picture size, and the refusal of a viewer's fit while it holds
   zoomClamp, isZoomed, zoomAt, pinchStep, panStep, zoomedRect, transformCss,
 };

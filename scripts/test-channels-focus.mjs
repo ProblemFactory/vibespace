@@ -165,7 +165,7 @@ const FIXTURE = [
   for (const p of peel) { p(cur); const t2 = Fo.statusTag(cur, NOW); steps.push(t2 ? t2.code : null); }
   const WANT = ['awaiting', 'unknown', 'assigned', 'new-since-read', 'read', 'held', 'replied', null];
   ok(JSON.stringify(steps) === JSON.stringify(WANT), `THE ONE TAG, by priority: ${WANT.map(String).join(' › ')}`, JSON.stringify(steps));
-  ok(JSON.stringify(Fo.TAG_ORDER) === JSON.stringify(['awaiting', 'unknown', 'at-you', 'assigned', 'read', 'new-since-read', 'held', 'judged', 'direct', 'replied']), 'TAG_ORDER is the documented table (read / new-since-read are ONE fact split by what arrived after it; `judged` — the Decision API\'s verdict, lane decision-attention — after held, before direct; `direct` — a single chat with unread messages — before replied)');
+  ok(JSON.stringify(Fo.TAG_ORDER) === JSON.stringify(['awaiting', 'unknown', 'at-you', 'assigned', 'read', 'new-since-read', 'held', 'judged', 'direct', 'replied']), 'TAG_ORDER is the documented table (read / new-since-read are ONE fact split by what arrived after it; `judged` — the LLM plugin\'s verdict, lane decision-attention — after held, before direct; `direct` — a single chat with unread messages — before replied)');
   const dTag = Wd.statusTagParts({ code: 'direct', n: 3 }, { now: NOW });
   ok(dTag && dTag.before === 'DM · 3 new' && dTag.tone === 'attn' && /single chat/.test(dTag.title), 'the direct tag\'s words: "DM · 3 new" (zh 单聊 · 3 条新消息, ja 個別 · 新着 3 件 — the tag\'s width budget lives in its words)', JSON.stringify(dTag));
   const heldAssigned = Fo.statusTag(row('x', { assignment: principal('Alpha'), touch: { pending: 1 } }), NOW);

@@ -5,7 +5,7 @@
 // a real worktree server and headless chrome at 375×667).
 //
 // Since r4 the Integrations window holds ONLY the rows the registry does not bind per account (the six
-// agent-browser key rows, and since 2.369.260 / .261 the Dropline row and the Decision API's)
+// agent-browser key rows, and since 2.369.260 / .261 the Dropline row and the LLM plugin's)
 // (a Lark / Gmail OAuth client is chosen where the ACCOUNT is added, exactly
 // like a storage mount's), so ①–⑨ drive the browser rows and ⑩ drives the
 // account card and its dialogs. What is measured:
@@ -114,7 +114,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const R = require(path.join(repo, 'src/integration-registry.js'));
 const LARK_CB = require(path.join(repo, 'src/channels/lark/manifest.js')).LARK_CALLBACK_URL;
 const BROWSER_ROWS = ['cloak', 'cloud:browserbase', 'cloud:browserless', 'cloud:kernel', 'cloud:browseruse', 'cloud:agentcore'];
-// int260 + int258 (voice P0's dropline row and D1's decision-api row = cards 7 and 8): the window's cards are THE REGISTRY'S OWN CENSUS — every row that is not
+// int260 + int258 (voice P0's dropline row and D1's llm row — the Language model card — = cards 7 and 8): the window's cards are THE REGISTRY'S OWN CENSUS — every row that is not
 // `bindsPerAccount` (an account-bound row's OAuth client is chosen where the account is added) — never a literal count;
 // ①–⑨ still drive BROWSER_ROWS, which the census must hold.
 const WINDOW_ROWS = R.rowIds().filter((id) => !R.bindsPerAccount(id));

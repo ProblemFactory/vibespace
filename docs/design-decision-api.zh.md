@@ -1,5 +1,7 @@
 # 设计：决策 API 插件（OpenAI Decisions + 兼容提供方模拟）— q-028
 
+> **头注（2026-10-14，lane llm-plugin-rename，2.369.272）**：这个插件现在叫 **LLM 插件**（id `llm`，src/plugins/llm.js，`provides: ['decision', 'text-model']`）。它的钥匙卡是「语言模型（OpenAI / OpenRouter）」（登记行 `llm`，只有提供方 + 钥匙）；判断模型是插件的设置行 `plugin.llm.judgeModel`（空 = 用集群钥匙时集群选的模型，否则提供方默认）；「插件 › LLM」按功能排，每个功能一个开关（起草另有开关 `learn`，默认开）。集群 env 是 `VIBESPACE_INTEGRATION_LLM_*` / 条目 `id: 'llm'`，旧拼写在新拼写没给时仍可读。迁移 `2026-10-llm-rename` 搬 settings / plugins.json / integrations.json。内部名不变（decision-engine.js、text-model-client.js、data/decision-*）。下文是当时的设计原文，未改写。
+
 owner 2026-10-12 提出；设计台（Fable）2026-10-12，**修订 r1**（同日 owner 补充：OpenRouter 原生 decisions、每种用途的 context management、预算按输入 token 计）。只设计，不建、不跑门。
 
 **一句话**：一个人自己打开的插件「决策 API」，一张登记行放提供方 + 钥匙（集群预设 = OpenRouter 钥匙，走 Slack 行的路），**一个** decisions 客户端（两种方言：OpenAI `/v1/decisions`、OpenRouter `/api/alpha/decisions`；chat 模拟是以后的档），一个 PURE 模型 + 一个 ORCH 调用者，**每种用途一份 PURE 的输入计划**（进什么、上限多少、怎么截、怎么去重、怎么批）；第一个用途是 Channels 第一屏「需关注」的**其余行**——规则标签已经定了的行不碰，剩下的由一个**我们写的、带版本的固定评分表 + 用户自己的「我在乎什么」一段 + 从他的判定学来的例子**交给判官，答案是概率和**条款号**，不是厂商的散文；第二个用途是通知文法里的新规则种类 `decision`。每一次判定都是没人敲键盘的付费调用 ⇒ 先过 PURE 预算判定，没钥匙或超预算就安静关闭，撞墙不重试。

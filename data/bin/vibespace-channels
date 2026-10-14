@@ -243,7 +243,7 @@ const USAGE = `vibespace-channels — read connected channels, PROPOSE replies (
                                                      --has-attachment --not-contains w --time-window HH:MM-HH:MM [--tz-offset ±min]
                                                      --reply-to-mine --in-thread-with-me --reply-to-sent
                                                      --kind decision --condition "words" [--choice a,b] [--threshold 0.7] [--per-hour 20]
-                                                     (the Decision API judges each message — the user's plugin + daily budget); or --spec '<json row>' | @file
+                                                     (the LLM plugin judges each message — the user's plugin + daily budget); or --spec '<json row>' | @file
   vibespace-channels watch --show <conv|account>   ← what notifies you there: yours, and the user's for you (theirs to change)
   vibespace-channels watches                       ← every place something notifies you, one line each
   vibespace-channels unwatch <conv|account>        ← removes YOUR notification there (one the user set is theirs)

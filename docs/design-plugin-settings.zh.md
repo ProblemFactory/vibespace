@@ -1,5 +1,7 @@
 # 设计：插件设置并入「全部设置」（VS Code contributes.configuration 式）— q-032
 
+> **头注（2026-10-14，lane llm-plugin-rename，2.369.272）**：下文的「决策 API」插件（id `decision-api`）现在是 **LLM 插件**（id `llm`）：它的节是「插件 › LLM」，按功能排（每个功能一个开关，新增 `judgeModel` 与起草开关 `learn`），设置键 `plugin.llm.*`（`decision.*` 三个旧拼写不变）。见 docs/design-decision-api.zh.md 的头注。下文原文未改写。
+
 owner 2026-10-13 提议；设计台（Fable）2026-10-13。只设计，不建。生产 .261（fa4ffd88b）。
 
 **一句话**：每个内建插件 **一份 PURE 声明表**（src/plugin-settings.js，harness-settings.js 的形），设置窗口从它派生「插件 › <名>」节（可搜索、同一套行渲染、zh/ja），值只住 data/settings.json（`plugin.<id>.<key>`，manifest 插件早已这么住），服务端经 `serverSetting` 读；Plugins 面板的卡退化为**同一声明的视图**：状态 + 动作 + 至多 3 个「快捷行」（同一行画家），其余一个「全部设置 › 插件 › <名>」链接。钥匙永不进设置——留在登记行。先让 plugins-panel-grammar 落地，本设计的 P0 叠在它的头部/折叠之上。

@@ -556,17 +556,24 @@ router.post('/api/channels/decision/draft', async (req, res) => {
 });
 /** lane rule-learning (design q-037 P0): 「从我的判定起草」 — the text model PROPOSES the 「我关心什么」 block from the owner's
  *  verdicts; the route NEVER writes it (the card's Save goes through the settings door). It EXISTS only on an OpenRouter row
- *  with a key while the plugin is on — else 404 by name (`no-learn`), never a grey button. GET = is it there (+ the
+ *  with a key while the LLM plugin and its drafter switch are on — else 404 by name (`no-learn`, the sentence naming the
+ *  provider / the key / the plugin / the switch — lane llm-plugin-rename), never a grey button. GET = is it there (+ the
  *  tier's name and a full call's price); POST = one proposal (`{ok: false, why}` names a refusal: no-zdr, use-budget, …).
  *  Owner-only: an agent never drafts the owner's block and a proposal never reaches an agent. SINGLE-FLIGHT (lane
  *  rule-learning-fix L4): a POST while one draft is in flight answers 409 `busy` — no second request, no second hold. */
-const LEARN_GONE = 'the drafter needs an OpenRouter key on the Decision API row (⚙ → System → Integrations & keys) and the plugin on';
+const LEARN_GONE = Object.freeze({
+  'not-openrouter': 'the drafter needs an OpenRouter key — the Language model card holds another provider (⚙ → System → Integrations & keys)',
+  'no-key': 'the drafter needs an OpenRouter key on the Language model card (⚙ → System → Integrations & keys)',
+  'plugin-off': 'the drafter needs the LLM plugin on (the Plugins list)',
+  'learn-off': 'the drafter is switched off — Settings › Plugins › LLM › “Draft “What matters to me” from my ✓ / ✗”',
+});
+const learnGone = (why) => (Object.hasOwn(LEARN_GONE, String(why)) ? LEARN_GONE[why] : LEARN_GONE['no-key']);
 router.get('/api/channels/decision/learn', (req, res) => {
   try {
     forHost(req);
     if (refuseAgentBearer(req, res, DECISION_IS_OWNERS)) return;
     const a = engine().attention.learnAvailable();
-    if (!a.exists) return res.status(404).json({ error: LEARN_GONE, code: 'no-learn', why: a.why });
+    if (!a.exists) return res.status(404).json({ error: learnGone(a.why), code: 'no-learn', why: a.why });
     res.json({ ok: true, ...a });
   } catch (e) { fail(res, e); }
 });
@@ -579,7 +586,7 @@ router.post('/api/channels/decision/learn', async (req, res) => {
     learnInFlight = true;
     let r;
     try { r = await engine().attention.learnDraft(); } finally { learnInFlight = false; }
-    if (r.code === 'not-found') return res.status(404).json({ error: LEARN_GONE, code: 'no-learn', why: r.why });
+    if (r.code === 'not-found') return res.status(404).json({ error: learnGone(r.why), code: 'no-learn', why: r.why });
     res.json(r);
   } catch (e) { fail(res, e); }
 });

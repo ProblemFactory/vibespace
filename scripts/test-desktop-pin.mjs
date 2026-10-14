@@ -15,6 +15,15 @@
 //      connection) behind the REAL bridge: a pinned window's viewer says hello ⇒ nothing else reaches xpra before it answers
 //   CONTROLS (patched copies): a downscale-only fit ⇒ RED; a non-opener allowed ⇒ RED; --size still not_yet ⇒ RED;
 //      the relay's pin fence removed ⇒ RED; the relay's hello gate removed ⇒ RED (the viewer dropped, 1005)
+//   ⑧ lane launch-picture-size — THE ONE SIZE TABLE (SIZE_CHOICES: follow the pane / 1280×720 / 1920×1080 / 2560×1440 /
+//      custom), launchPinOf, pinSupportVerdict over the REAL rung table (xpra 'client' + Xvfb 'fixed' hold a pin; Xvnc
+//      'follows' / the shared desktop / no cell ⇒ pin_unsupported by name), pinMenuModel (the rows both windows word), and
+//      THE CENSUS: no second list of sizes anywhere in src/ or data/bin/ — only the table and the two CLI help MIRRORS
+//      (pinned to the table, order and all); the engine's `open --size` (born pinned, opener by pinVerdict, a bad size
+//      refused before the keeper); the seams (the route judges `pin`, the launch's one stamp, the support verdict after the
+//      rung is resolved, the Xvfb rung born at the pin); both CLIs (`vibespace-window open --size`, `vibespace-browser size`
+//      / `open --size` — a refused size exits 2 with the server's words)
+//   CONTROLS (lane launch-picture-size): a planted second list ⇒ the census RED; Xvnc admitted ⇒ the support leg RED
 // Fast: in-process, scratch dirs only, no browser, no display.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -58,7 +67,18 @@ function pureChecks(PP) {
   const up = PP.fitForPin({ w: 1600, h: 900 }, { width: 3200, height: 1800 });
   const down = PP.fitForPin({ w: 1600, h: 900 }, { width: 700, height: 500 });
   const tall = PP.fitForPin({ w: 1280, h: 720 }, { w: 640, h: 720 });
+  const DA = require(path.join(REPO, 'src/desktop-apps.js'));
+  const pol = (backend, via) => DA.fitPolicyOf({ backend, via });
+  const support = {
+    xpra: PP.pinSupportVerdict(pol('xpra', 'xpra'), { backend: 'xpra', via: 'xpra' }),
+    xvfb: PP.pinSupportVerdict(pol('vnc-display', 'Xvfb+x11vnc'), { backend: 'vnc-display', via: 'Xvfb+x11vnc' }),
+    xvnc: PP.pinSupportVerdict(pol('vnc-display', 'Xvnc'), { backend: 'vnc-display', via: 'Xvnc' }),
+    shared: PP.pinSupportVerdict(pol('desktop-singleton', 'Xtigervnc'), { backend: 'desktop-singleton', via: 'Xtigervnc' }),
+    none: PP.pinSupportVerdict(null, {}),
+  };
+  const refusedBy = (v, re) => !v.ok && v.code === 'pin_unsupported' && re.test(v.error) && /the picture follows the pane/.test(v.error) && /Follow the pane/.test(v.error);
   return {
+    support, supportOk: support.xpra.ok && support.xvfb.ok && refusedBy(support.xvnc, /vnc-display \(Xvnc\)/) && refusedBy(support.shared, /desktop-singleton \(Xtigervnc\)/) && refusedBy(support.none, /this display backend/),
     parseOk, refuseOk, who,
     whoOk: who.opener.ok && same(who.opener.pin, { w: 1600, h: 900 }) && !who.other.ok && who.other.code === 'not_your_window' && !who.agentOnUsers.ok && who.agentOnUsers.code === 'not_your_window'
       && who.userOnAny.ok && same(who.userOnAny.pin, { w: 1280, h: 720 }) && who.userOnAgents.ok && who.userOnAgents.pin === null && !who.badFirst.ok && who.badFirst.code === 'size_out_of_bounds' && !who.noRecord.ok && who.noRecord.code === 'not-found',
@@ -82,8 +102,57 @@ console.log('① PURE (src/desktop-pin.js)');
   ok(r.noPin, 'fitForPin: no pin / no pane ⇒ null (the caller keeps its own fit)');
   ok(same(r.chips, ['1920×1080 (pinned)', '1920×1080（钉住）', '1280×720（固定）', '', '', '1920×1080 (pinned)']), 'pinChipText: "1920×1080 (pinned)" / 钉住 / 固定; unpinned or invalid ⇒ ""; an unknown language ⇒ en', r.chips);
   ok(same(r.defaults, [{ w: 1920, h: 1080 }, null, null, null]), 'defaultPinFor (E2c calls it): pixels ⇒ 1920×1080, tree / none ⇒ unpinned', r.defaults);
-  ok(same(P.PIN_CHOICES, [{ w: 1920, h: 1080 }, { w: 1280, h: 720 }]) && same(P.PIN_BOUNDS, { minW: 320, maxW: 7680, minH: 240, maxH: 4320 }), 'the menu rows (1920×1080, 1280×720, then Auto) and the bounds');
+  ok(same(P.SIZE_CHOICES.map((c) => [c.id, c.pin, !!c.custom]), [['pane', null, false], ['1280x720', { w: 1280, h: 720 }, false], ['1920x1080', { w: 1920, h: 1080 }, false], ['2560x1440', { w: 2560, h: 1440 }, false], ['custom', null, true]])
+    && Object.isFrozen(P.SIZE_CHOICES) && P.SIZE_CHOICES.every((c) => Object.isFrozen(c) && (!c.pin || Object.isFrozen(c.pin))) && same(P.PIN_BOUNDS, { minW: 320, maxW: 7680, minH: 240, maxH: 4320 }),
+  'THE size table (lane launch-picture-size): follow the pane / 1280×720 / 1920×1080 / 2560×1440 / custom, frozen — and the bounds');
   ok(!/require\(|import /.test(read(PIN_REL).replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')), 'src/desktop-pin.js imports nothing (PURE)');
+}
+
+// ⑧ lane launch-picture-size — THE ONE SIZE TABLE: the launch's choice, which rungs hold a pin, the menu rows, the census
+/** THE CENSUS — every tracked src/ + data/bin/ file whose CODE (comments stripped) names two or more of the table's sizes in a
+ *  machine form ('1280x720', '1920×1080', {w: 2560, h: 1440}) is a LIST: only the table and the CLI help mirrors may hold one,
+ *  and a mirror must say the table's fixed rows in its order. `texts` = {rel: source} (the control plants into a copy). */
+const SIZE_HOME = 'src/desktop-pin.js', SIZE_MIRRORS = ['data/bin/vibespace-window', 'data/bin/vibespace-browser'];
+function sizeCensus(PP, texts) {
+  const fixed = PP.SIZE_CHOICES.filter((c) => c.pin);
+  const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`\\])\/\/.*$/gm, '$1');
+  const lists = [], mirrors = {};
+  for (const [rel, src] of Object.entries(texts)) {
+    const code = strip(src);
+    const hits = fixed.filter(({ pin: { w, h } }) => new RegExp(`\\b${w}\\s*[x×X]\\s*${h}\\b|\\bw:\\s*${w},\\s*h:\\s*${h}\\b|\\bwidth:\\s*${w},\\s*height:\\s*${h}\\b`).test(code));
+    if (hits.length >= 2) lists.push(rel);
+    if (SIZE_MIRRORS.includes(rel)) { const m = /const SIZE_HELP = '([^']*)';/.exec(src); mirrors[rel] = m ? m[1] : null; }
+  }
+  const want = fixed.map((c) => c.id).join(' | ') + ' | your own WxH';
+  const strays = lists.filter((f) => f !== SIZE_HOME && !SIZE_MIRRORS.includes(f));
+  return { lists, strays, mirrors, want, ok: !strays.length && SIZE_MIRRORS.every((f) => mirrors[f] === want) };
+}
+const trackedTexts = () => {
+  const out = {};
+  const files = require('child_process').execFileSync('git', ['-C', REPO, 'ls-files', 'src', 'data/bin'], { encoding: 'utf8' }).split('\n').filter((f) => f && (/\.(?:js|mjs|cjs)$/.test(f) || /^data\/bin\/[^./]+$/.test(f)));
+  for (const f of files) { try { out[f] = read(f); } catch { } }
+  return out;
+};
+console.log('⑧ lane launch-picture-size — THE ONE SIZE TABLE');
+{
+  const L = [['', null], [null, null], ['pane', null], ['1280x720', { w: 1280, h: 720 }], ['1920x1080', { w: 1920, h: 1080 }], ['2560x1440', { w: 2560, h: 1440 }], ['1600x900', { w: 1600, h: 900 }], ['auto', null]];
+  const lOk = L.every(([c, want]) => { const v = P.launchPinOf(c); return v.ok && same(v.pin, want); });
+  const lc = P.launchPinOf('custom'), lb = P.launchPinOf('100x100');
+  ok(lOk && !lc.ok && lc.code === 'bad-size' && lc.error === P.parsePin('custom').error && !lb.ok && lb.code === 'size_out_of_bounds', 'launchPinOf: pane / \'\' / null ⇒ none, a table id ⇒ its pin, a typed WxH ⇒ parsed, `custom` with no size and an out-of-bounds size refused in parsePin\'s OWN words', { lc, lb });
+  const r = pureChecks(P);
+  ok(r.supportOk, 'pinSupportVerdict over the REAL rung table: xpra (client) and Xvfb+x11vnc (keeper-fixed) hold a pin; Xvnc (follows), the shared desktop and an unknown rung ⇒ pin_unsupported naming the backend, that the picture follows the pane, and the way out', r.support);
+  const m0 = P.pinMenuModel(null), m1 = P.pinMenuModel({ w: 1920, h: 1080 }), m2 = P.pinMenuModel({ w: 1600, h: 900 });
+  ok(same(m0.map((x) => [x.kind, x.id, x.checked]), [['size', '1280x720', false], ['size', '1920x1080', false], ['size', '2560x1440', false], ['custom', 'custom', false], ['auto', 'auto', true]])
+    && m1.find((x) => x.checked).id === '1920x1080' && m2.find((x) => x.checked).kind === 'custom' && same(m2.find((x) => x.kind === 'custom').pin, { w: 1600, h: 900 }),
+  'pinMenuModel: the table\'s sizes in its order, Custom…, Auto — ✓ on the current (unpinned ⇒ Auto; a custom pin ⇒ Custom… carrying its size)', { m0, m2 });
+  const c = sizeCensus(P, trackedTexts());
+  ok(c.ok && same(c.lists.slice().sort(), [SIZE_HOME, ...SIZE_MIRRORS].sort()), `THE CENSUS: no second list of sizes in src/ or data/bin/ — only the table and the two CLI help mirrors, each saying "${c.want}"`, c);
+  const ui = read('src/lib/pin-size-ui.js'), launcher = read('src/lib/desktop-app-launcher.js'), win = read('src/lib/desktop-app-window.js'), live = read('src/lib/browser-live-window.js');
+  ok(/import \{ SIZE_CHOICES, launchPinOf \} from '\.\.\/desktop-pin\.js';/.test(launcher) && /for \(const c of SIZE_CHOICES\) \{/.test(launcher) && /pinMenuModel\(cur\)\.map\(/.test(ui)
+    && /const pinItems = \(\) => pinSizeItems\(pinOf\(rec && rec\.pin\), /.test(win) && /const pinItems = \(\) => pinSizeItems\(fixedNow\(\), /.test(live),
+  'the Apps dialog\'s select draws its options from SIZE_CHOICES; both windows\' Pin size… rows come from pinMenuModel (pin-size-ui pinSizeItems)');
+  ok(/validate: \(v\) => \{ const r = parsePin\(v\); return !r\.ok \? r\.error :/.test(ui) && /await showInputDialog\(\{/.test(ui) && !/\bprompt\(/.test(ui),
+    'Custom… is a showInputDialog (never a native prompt) refused INLINE in parsePin\'s own words');
 }
 
 /** ② the door — re-run on the not_yet copy below. */
@@ -116,7 +185,7 @@ function world(ENG, sub) {
       const row = REGISTRY.find((r) => r.id === body.appId);
       const rec = { id: opts.id || `da-${++n}`, label: row.label, appId: row.id, browser: row.browser || undefined, state: 'launching', display: ':77', pids: { app: 4242 }, starts: { app: 9 }, backend: 'xpra', startedAt: 1 };
       if (row.browser && opts.origin === 'agent-browser') { rec.origin = 'agent-browser'; rec.by = { sessionId: opts.by.sessionId }; if (opts.label) rec.label = opts.label; }
-      if (P.pinOf(opts.pin)) rec.pin = P.pinOf(opts.pin); // src/desktop-serve.js launch's stamp
+      const p0 = P.pinOf(body.pin) || P.pinOf(opts.pin); if (p0) rec.pin = p0; // src/desktop-serve.js launch's ONE stamp (the body's pin, else the door's / a relaunch's)
       records.set(rec.id, rec); return rec;
     },
     setPin: async (id, pin) => { pins.push({ id, pin }); await new Promise((r) => setTimeout(r, 2)); const r = records.get(id); const p = P.pinOf(pin); if (p) r.pin = p; else delete r.pin; return { ...r }; },
@@ -151,15 +220,38 @@ console.log('③ the REAL engine over a fake keeper');
   ok(same(rl.app.pin, { w: 1280, h: 720 }) && rl.app.origin === 'agent-browser', 'a relaunch KEEPS the pin (the successor\'s opts carry it, beside origin/opener/label)', rl.app);
   const off = await W.engine.setSize(rl.app.id, 'auto', W.fA);
   ok(off.pin === null && !('pin' in W.records.get(rl.app.id)), '`size <h> auto` ⇒ unpinned (the fact removed — the window fits the pane again)', off);
+  // lane launch-picture-size: `vibespace-window open <app> --size WxH` — born pinned; the opener's right by pinVerdict
+  const n0 = W.launches.length;
+  const o1 = await W.engine.open({ appId: 'gedit', size: '1280x720' }, W.fA);
+  ok(same(W.launches[n0].body.pin, { w: 1280, h: 720 }) && same(W.records.get(o1.handle).pin, { w: 1280, h: 720 }) && o1.attached === true, '⑧ `open gedit --size 1280x720` ⇒ the keeper\'s launch body carries the pin ⇒ the window is BORN pinned (and attached)', W.launches[n0]);
+  const o2 = await W.engine.open({ appId: 'gedit', size: 'auto' }, W.fA);
+  ok(!('pin' in W.launches[n0 + 1].body) && !('pin' in W.records.get(o2.handle)), '⑧ `--size auto` ⇒ no pin (it fits the pane)');
+  const n1 = W.launches.length;
+  const o3 = await codeOf(W.engine.open({ appId: 'gedit', size: '9x9' }, W.fA));
+  const o4 = await codeOf(W.engine.open({ appId: 'gedit', size: 'wide' }, W.fA));
+  ok(o3 === 'size_out_of_bounds' && o4 === 'bad-size' && W.launches.length === n1, '⑧ a bad size ⇒ refused by name BEFORE the keeper is asked (nothing launched)', { o3, o4 });
 }
 
 console.log('④ the keeper + route + window seams (source)');
 {
   const ds = read('src/desktop-serve.js'), keeper = read('src/server/desktop-app-keeper.js'), routes = read('src/routes/desktop-apps.js'), wt = read('src/routes/window-targets.js'), win = read('src/lib/desktop-app-window.js'), view = read('src/lib/xpra-view.js');
-  ok(/function setPin\(id, pin\) \{\n    const rec = store\.apps\[id\];[\s\S]{0,200}if \(p\) rec\.pin = p; else delete rec\.pin;\n    commit\(\);/.test(ds), 'desktop-serve setPin is the one writer: the fact set or removed, then commit() (saved + broadcast — a restart restores it, every client hears it)');
-  ok(/if \(pinOf\(opts\.pin\)\) rec\.pin = pinOf\(opts\.pin\);/.test(ds) && /\.\.\.\(pinOf\(rec\.pin\) \? \{ pin: rec\.pin \} : \{\}\) \}; \/\/ lane e2b: the pin rides the relaunch/.test(ds), 'the launch stamps opts.pin; the relaunch\'s opts carry rec.pin (the real keeper; the heavy suite drives it)');
+  ok(/function setPin\(id, pin\) \{\n    const rec = store\.apps\[id\];[\s\S]{0,200}const p = stampPin\(rec, pin\);\n    commit\(\);/.test(ds) && /function stampPin\(rec, pin\) \{ const p = pinOf\(pin\); if \(p\) rec\.pin = p; else delete rec\.pin; return p; \}/.test(ds) && (ds.match(/\brec\.pin = /g) || []).length === 1 && (ds.match(/delete rec\.pin\b/g) || []).length === 1, 'desktop-serve setPin is the one writer: the fact set or removed, then commit() (saved + broadcast — a restart restores it, every client hears it)');
+  ok(/const pinAsked = pv\.pin \|\| pinOf\(opts\.pin\);/.test(ds) && /stampPin\(rec, pinAsked\);/.test(ds) && /\.\.\.\(pinOf\(rec\.pin\) \? \{ pin: rec\.pin \} : \{\}\) \}; \/\/ lane e2b: the pin rides the relaunch/.test(ds), 'the launch stamps opts.pin; the relaunch\'s opts carry rec.pin (the real keeper; the heavy suite drives it)');
   ok(/'keep-alive', 'pin', 'relaunch'/.test(ds) && /if \(op === 'pin'\) \{ const v = parsePin\(p\.pin\);/.test(ds) && /acc\(\)\.call\(ro\.hostId, 'pin', \{ id, pin \}\)/.test(keeper), 'the `pin` op (a paired machine\'s window) and the hub keeper\'s setPin routing to it');
   ok(/router\.post\('\/api\/desktop\/apps\/:id\/pin'[\s\S]{0,300}pinVerdict\(\{ record: ctx\.keeper\.get\(req\.params\.id\), who: 'user',/.test(routes), 'the user route (the window menu) judges who: \'user\' — any window');
+  // lane launch-picture-size: the launch's `pin` — judged at the route (before a paired machine is asked), the support verdict
+  // once the rung is resolved (a relaunch never re-judged), the Xvfb rung born at the pin, the codes by status
+  const launchRoute = (routes.split("router.post('/api/desktop/apps', async (req, res) => {")[1] || '').split('\n});')[0];
+  ok(/const pv = parsePin\(req\.body && req\.body\.pin !== undefined && req\.body\.pin !== '' \? req\.body\.pin : null\);\n  if \(!pv\.ok\) return fail\(res, \{ code: pv\.code, message: pv\.error \}\);/.test(launchRoute)
+    && /code === 'bad-size' \|\| code === 'size_out_of_bounds' \|\| code === 'pin_unsupported'/.test(routes),
+  '⑧ POST /api/desktop/apps judges `pin` in parsePin\'s words before any machine is asked; bad-size / size_out_of_bounds / pin_unsupported answer 400');
+  const lsrc = (ds.split('  async function launch(body, opts = {}) {')[1] || '').split('\n  function startDeferred')[0];
+  ok(lsrc.indexOf('const pv = parsePin(') > -1 && lsrc.indexOf('const pv = parsePin(') < lsrc.indexOf('const resolved = resolve(') && lsrc.indexOf('if (pv.pin) { const sv = pinSupportVerdict(M.fitPolicyOf({ backend: resolved.backend, via: resolved.via }, backends)') > lsrc.indexOf('const resolved = resolve(')
+    && lsrc.indexOf('pinSupportVerdict(') < lsrc.indexOf('store.apps[id] = rec;') && /geometry: bornGeometry\(rec\),/.test(ds) && /return p && pol && pol\.mode === 'fixed' \? `\$\{p\.w\}x\$\{p\.h\}` : geometry;/.test(ds),
+  '⑧ desktop-serve launch: the body\'s pin parsed first, the support verdict on it right after the rung is resolved and before the record exists (the door\'s / a relaunch\'s opts.pin keep e2b\'s road); a keeper-fixed rung\'s X server is born at the pin');
+  const eng = read(ENGINE_REL);
+  ok(/const pv = PIN\.pinVerdict\(\{ facts, record: \{ id: String\(appId \|\| 'the app'\), by: \{ sessionId: facts\.sessionId \} \}, who: 'agent', size: b\.size \}\);/.test(eng) && /'bad-size': 400, size_out_of_bounds: 400, pin_unsupported: 400, not_your_window: 403/.test(wt),
+    '⑧ the engine\'s open judges --size by pinVerdict (the caller IS the opener); the agent routes answer the size codes 400 / 403');
   ok(/router\.post\('\/api\/agent\/window\/size'[\s\S]{0,200}refuseHost\(req, res\)[\s\S]{0,200}agentFacts\(req, res, engine\)[\s\S]{0,200}engine\.setSize\(h,/.test(wt), 'the agent route sits behind the agent belt and calls engine.setSize (the opener verdict is the engine\'s)');
   ok(/view\?\.setPin\?\.\(pinOf\(rec\.pin\)\);/.test(win) && /pinChipText\(rec\.pin, resolveLang\(\)\)/.test(win) && /label: t\('Pin size…'\), children: pinItems\(\)/.test(win) && !/setFixedSize\([^)]*pin/i.test(win), 'the window: every record re-fits the view IN PLACE + the chip "(pinned)" + the menu Pin size… — never setFixedSize');
   ok(/const pf = pinNow \? fitForPin\(\{ w: pinNow\.w \/ drawRatio, h: pinNow\.h \/ drawRatio \}, paneSize\(\)\) : null;/.test(view) && /if \(client\) client\.setPin\(n\);/.test(view), 'the view scales a pinned stage with fitForPin (upscale allowed) and hands the pin to the client');
@@ -174,6 +266,10 @@ console.log('⑤ the CLI against a stub server');
       if (req.url === '/api/agent/window/size' && j.size === 'auto') return res.end(JSON.stringify({ handle: j.handle, pin: null }));
       if (req.url === '/api/agent/window/size' && j.size === '9x9') { res.statusCode = 400; return res.end(JSON.stringify({ error: 'width 9 is outside 320–7680 pixels', code: 'size_out_of_bounds' })); }
       if (req.url === '/api/agent/window/size') return res.end(JSON.stringify({ handle: j.handle, pin: { w: 1600, h: 900 } }));
+      // lane launch-picture-size: the agent's open --size and the browser's fixed size (the stub answers as the routes do)
+      const P2 = require(path.join(REPO, PIN_REL));
+      if (req.url === '/api/agent/window/open') { const v = P2.parsePin(j.size === undefined ? null : j.size); if (!v.ok) { res.statusCode = 400; return res.end(JSON.stringify({ error: v.error, code: v.code })); } return res.end(JSON.stringify({ handle: 'da-9', app: { label: 'gedit', display: ':9', state: 'launching', ...(v.pin ? { pin: v.pin } : {}) }, attached: true, next: 'vibespace-window snapshot da-9' })); }
+      if (req.url === '/api/agent/browser/size') { const v = P2.parsePin(j.size); if (!v.ok) { res.statusCode = 400; return res.end(JSON.stringify({ error: v.error, code: v.code })); } return res.end(JSON.stringify({ ok: true, fixed: v.pin, applied: j.check ? 'check' : 'now' })); }
       res.statusCode = 404; res.end('{}');
     });
   });
@@ -191,6 +287,27 @@ console.log('⑤ the CLI against a stub server');
   ok(c.code !== 0 && /size_out_of_bounds/.test(c.err), 'a refusal is printed with its code', c);
   const d = await run('vibespace-window', ['size', 'da-7']);
   ok(d.code !== 0 && /vibespace-window size <handle> <WxH\|auto>/.test(d.err + d.out), 'no size ⇒ the usage line', d);
+  // lane launch-picture-size: `vibespace-window open <app> --size WxH`
+  const o = await run('vibespace-window', ['open', 'gedit', '--size', '1280x720']);
+  ok(o.code === 0 && same(seen.slice(-1)[0], { url: '/api/agent/window/open', j: { appId: 'gedit', size: '1280x720' } }) && /picture pinned at 1280×720/.test(o.out), '⑧ `vibespace-window open gedit --size 1280x720` ⇒ POST …/open {appId, size}; the line says the picture is pinned', o);
+  const o2 = await run('vibespace-window', ['open', 'gedit', '--size', '9x9']);
+  ok(o2.code === 2 && /width 9 is outside 320–7680 pixels \[size_out_of_bounds\]/.test(o2.err), '⑧ a refused size ⇒ the server\'s words (parsePin\'s) and exit 2', o2);
+  const o3 = await run('vibespace-window', ['open', 'gedit', '--size']);
+  ok(o3.code === 2 && /--size WxH \(1280x720 \| 1920x1080 \| 2560x1440 \| your own WxH\)/.test(o3.err), '⑧ `--size` with no size ⇒ the usage line naming the table, exit 2', o3);
+  const h = await run('vibespace-window', ['help']);
+  ok(/open <app-id> \[--title <t>\] \[--size WxH\]/.test(h.out + h.err) && /--size fixes its picture \(1280x720 \| 1920x1080 \| 2560x1440 \| your own WxH\)/.test(h.out + h.err), '⑧ the window CLI\'s help names --size and the table', h.out.slice(0, 200));
+  // lane launch-picture-size: `vibespace-browser size <WxH|auto>` (the CDP rung's fixed size)
+  const b1 = await run('vibespace-browser', ['size', '1920x1080']);
+  ok(b1.code === 0 && same(seen.slice(-1)[0], { url: '/api/agent/browser/size', j: { size: '1920x1080' } }) && /picture size fixed at 1920×1080/.test(b1.out), '⑧ `vibespace-browser size 1920x1080` ⇒ POST /api/agent/browser/size; it says the size is fixed', b1);
+  const b2 = await run('vibespace-browser', ['size', 'auto']);
+  ok(b2.code === 0 && /picture size unfixed/.test(b2.out), '⑧ `size auto` ⇒ unfixed (the page follows the view again)', b2);
+  const b3 = await run('vibespace-browser', ['size', '1x1']);
+  ok(b3.code === 2 && /width 1 is outside 320–7680 pixels \[size_out_of_bounds\]/.test(b3.err), '⑧ a refused size ⇒ parsePin\'s words, exit 2', b3);
+  const nSeen = seen.length;
+  const b4 = await run('vibespace-browser', ['open', 'https://example.com/', '--size', '9x9']);
+  ok(b4.code === 2 && /nothing was opened/.test(b4.err) && seen.length === nSeen + 1 && seen[nSeen].j.check === true, '⑧ `open <url> --size 9x9` ⇒ judged BEFORE the open (one check call), refused with exit 2 — nothing opened', { b4, seen: seen.slice(nSeen) });
+  const bh = await run('vibespace-browser', ['help']);
+  ok(/size <WxH\|auto>/.test(bh.out + bh.err) && /open <url> --size WxH/.test(bh.out + bh.err) && /1280x720 \| 1920x1080 \| 2560x1440 \| your own WxH/.test(bh.out + bh.err), '⑧ the browser CLI\'s help names `size`, `open … --size` and the table');
   srv.close();
 }
 
@@ -320,6 +437,18 @@ console.log('CONTROLS (patched copies)');
   ok(dsMut !== dsSrc && relaysSrc.includes("require('./stream-relay-xpra.js')"), 'control (e): the copies chain desktop-stream → stream-relays → the patched relay');
   const re = await helloGateChecks(MUT.load(DS_REL, dsMut, 'no-hello-gate'), require(path.join(REPO, RELAY_REL)));
   ok(re.early.includes('desktop_size') && !re.open && re.closeCode === 1005, `CONTROL (e): the pin ask behind the hello ⇒ xpra drops the viewer (early ${JSON.stringify(re.early)}, close ${re.closeCode}) ⇒ the gate leg goes RED`, re);
+  // (f) lane launch-picture-size: a SECOND LIST planted in the launcher ⇒ the census goes RED (by the file it names)
+  const texts = trackedTexts();
+  const lrel = 'src/lib/desktop-app-launcher.js';
+  const planted = { ...texts, [lrel]: texts[lrel] + "\nconst SIZES = ['1280x720', '1920x1080']; // a second list\n" };
+  const cf = sizeCensus(P, planted);
+  ok(!cf.ok && same(cf.strays, [lrel]), 'CONTROL (f): a second list of sizes planted in the launcher ⇒ the census RED, naming it', cf.strays);
+  const mirrorOff = { ...texts, 'data/bin/vibespace-window': texts['data/bin/vibespace-window'].replace("const SIZE_HELP = '1280x720 | 1920x1080 | 2560x1440 | your own WxH';", "const SIZE_HELP = '1920x1080 | 1280x720 | your own WxH';") };
+  ok(!sizeCensus(P, mirrorOff).ok, 'CONTROL (f2): a help mirror out of step with the table (order / a row missing) ⇒ the census RED');
+  // (g) pinSupportVerdict admitting Xvnc's 'follows' (a fit the viewer moves) ⇒ the support leg RED
+  const xv = ps.replace("if (policy && (policy.mode === 'client' || policy.mode === 'fixed')) return { ok: true };", "if (policy && (policy.mode === 'client' || policy.mode === 'fixed' || policy.mode === 'follows')) return { ok: true };");
+  ok(xv !== ps, 'control (g) planted: Xvnc admitted');
+  ok(!pureChecks(MUT.load(PIN_REL, xv, 'xvnc-pins')).supportOk, 'CONTROL (g): Xvnc\'s follows admitted ⇒ the support leg goes RED');
   for (const x of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 7, label: 'desktop-pin' })) ok(x.pass, x.name, x.detail);
 }
 

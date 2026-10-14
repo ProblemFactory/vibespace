@@ -404,7 +404,7 @@ function fetchFailOf(err) {
   }
   return null;
 }
-/** THE ONE-SHOT REQUEST BODY (lane judge-one-shot-body) — ONE implementation for both vendor callers of the Decision API
+/** THE ONE-SHOT REQUEST BODY (lane judge-one-shot-body) — ONE implementation for both vendor callers of the LLM plugin
  *  row (the judge's decisions request, the text client's chat completions). `bytes` = the request serialized ONCE (a
  *  Uint8Array — anything else throws, so nothing is sent); the answer is a stream that hands them over once and has no
  *  SOURCE, so the platform can never send them again. Node's fetch re-sends a body that has a source (a string, bytes,
@@ -935,10 +935,10 @@ function moneyText(usd, moved = false, { fine = false } = {}) {
   return n > 0 || moved ? `< $${floor}` : '$0';
 }
 /** decisionTodayLine(usage, capUsd, {on, t, monthUsd}) — `usage` = the engine's `today` ({byUse, total?, reserved?}) or
- *  data/decision-usage.json itself; `capUsd` = the plugin.decision-api.dailyBudgetUsd row. → `{on, calls, hits, spentUsd,
+ *  data/decision-usage.json itself; `capUsd` = the plugin.llm.dailyBudgetUsd row. → `{on, calls, hits, spentUsd,
  *  capUsd, warn, money, cap, short, spend, text, title, month}`: `short` = the list row's second line, `text` = the full
  *  sentence, `spend` = its money half (for a line whose counts come from elsewhere), `title` = the by-use breakdown,
- *  `month` = 「Decision API · today … · this month …」 (Settings › Spending). Off ⇒ every string says so, never a number. */
+ *  `month` = 「LLM · today … · this month …」 (Settings › Spending). Off ⇒ every string says so, never a number. */
 function decisionTodayLine(usage, capUsd, { on = true, t = fillWords, monthUsd = null } = {}) {
   const u = usage && typeof usage === 'object' ? usage : {};
   const byUse = u.byUse && typeof u.byUse === 'object' ? u.byUse : {};
@@ -948,7 +948,7 @@ function decisionTodayLine(usage, capUsd, { on = true, t = fillWords, monthUsd =
   const hits = sum('hits');
   const cap = Number.isFinite(Number(capUsd)) && Number(capUsd) >= 0 ? Number(capUsd) : DAILY_BUDGET_CENTS_DEFAULT / 100;
   if (!on) {
-    const off = t('The Decision API is off — it spends nothing');
+    const off = t('The LLM plugin is off — it spends nothing');
     return { on: false, calls: 0, hits: 0, spentUsd: 0, capUsd: cap, warn: false, money: '', cap: '', short: off, spend: off, text: off, title: '', month: off };
   }
   const moved = calls > 0 || spentUsd > 0;
@@ -962,7 +962,7 @@ function decisionTodayLine(usage, capUsd, { on = true, t = fillWords, monthUsd =
     on: true, calls, hits, spentUsd, capUsd: cap, warn, money, cap: capText, spend, title,
     short: t('Today {spent} / {cap} · judged {n} · hits {m}', { spent: money, cap: capText, n: calls, m: hits }),
     text: t('Today: judged {n} · {m} needed you', { n: calls, m: hits }) + ' · ' + spend,
-    month: t('Decision API · today {spent} / {cap} · this month {month}', { spent: money, cap: capText, month: mo === null ? '—' : moneyText(mo, moved || mo > 0) }),
+    month: t('LLM · today {spent} / {cap} · this month {month}', { spent: money, cap: capText, month: mo === null ? '—' : moneyText(mo, moved || mo > 0) }),
   };
 }
 /** The month so far from journal rows (data/decision-journal.jsonl, the caller's bounded tail): Σ usd of the rows whose

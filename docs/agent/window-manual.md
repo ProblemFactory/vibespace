@@ -87,6 +87,10 @@ speaks them, while the picture scales to whatever pane the user has (up or
 down) — whoever is viewing, even while you hold it. `size <handle> auto` unpins
 (it fits the pane again). Only the opener
 pins its own browser; the user pins any window from its menu (Pin size…).
+`vibespace-window open <app-id> --size 1920x1080` starts a registry app ALREADY
+pinned (1280x720 | 1920x1080 | 2560x1440 | your own WxH) — the same pin, from its
+first frame; on a display backend that cannot hold one (only xpra and Xvfb can)
+it is refused `pin_unsupported` and nothing starts. A refused size exits 2.
 
 `vibespace-window mode <handle> tree|pixels|auto` switches how YOU drive the
 desktop browser you opened (`--mode` at `new` does it at launch): tree =

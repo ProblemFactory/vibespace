@@ -202,6 +202,15 @@ cluster.
   directory wins for a kind it holds a file for; the env is the fallback.
   When the JSON form and the single-field form both name the same row, **the
   JSON form wins** and the server says so once.
+- **A renamed row keeps its old spellings working** (2.369.272): the language
+  model key — the LLM plugin's — is the row `llm`: `VIBESPACE_INTEGRATION_LLM_PROVIDER`,
+  `VIBESPACE_INTEGRATION_LLM_APIKEY` and `VIBESPACE_INTEGRATION_LLM_MODEL` (the
+  model the cluster chose; the plugin's «Judging model» row defaults to it while
+  the cluster's key is in use), or an entry `{"id": "llm", …}` in
+  `integrations.json` / `VIBESPACE_INTEGRATIONS`. The pre-rename spellings —
+  `VIBESPACE_INTEGRATION_DECISION_API_*` and `{"id": "decision-api", …}` — are
+  still read when the new ones say nothing; when both are set the new ones win
+  (the server says so once). Move a preset to the new names at its next change.
 - **A mistyped block never takes the instance down**: it is logged
   (`[presets] … could not be read` / `[integrations] … unparseable`) and the
   previous presets (or none) stay in effect.

@@ -145,16 +145,18 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
   // lane S4: per (session, target) — OUTLIVES a relay (a relay ends when its last viewer leaves; the page keeps the size we
   // set and the agent's own choice stays the agent's): { target, applied, baseline, agent, floorW, pending, restoreTimer }
   const fitStates = new Map();
-  const fitStateOf = (relay) => {
-    let fs = fitStates.get(relay.key);
+  const fitStateFor = (key, sessionId, target) => {
+    let fs = fitStates.get(key);
     if (!fs) {
       // verify r1: seeded from the NOTE on the keeper's browser record (a server restart forgets neither the agent's choice nor the baseline)
-      let seed = null; if (keeper && typeof keeper.viewportNoteFor === 'function') { try { seed = FIT.fitStateFromNote(keeper.viewportNoteFor(relay.target)); } catch { seed = null; } }
-      fs = { target: relay.target, sessionId: relay.sessionId, applied: seed && seed.applied ? { ...seed.applied, viewerId: null, rule: null, at: 0 } : null, baseline: (seed && seed.baseline) || null, agent: (seed && seed.agent) || null, floorW: (seed && seed.floorW) || FIT.FIT_MIN_W, pending: null, prevOwn: null, ownDone: null, restoreTimer: null, failed: null, restoreDeferredSaid: false };
-      fitStates.set(relay.key, fs);
+      let seed = null; if (keeper && typeof keeper.viewportNoteFor === 'function') { try { seed = FIT.fitStateFromNote(keeper.viewportNoteFor(target)); } catch { seed = null; } }
+      fs = { target, sessionId, applied: seed && seed.applied ? { ...seed.applied, viewerId: null, rule: null, at: 0 } : null, baseline: (seed && seed.baseline) || null, agent: (seed && seed.agent) || null, floorW: (seed && seed.floorW) || FIT.FIT_MIN_W, pending: null, prevOwn: null, ownDone: null, restoreTimer: null, failed: null, restoreDeferredSaid: false,
+        fixed: (seed && seed.fixed) || null }; // lane launch-picture-size: the session's fixed picture size (the note keeps it)
+      fitStates.set(key, fs);
     }
-    fs.target = relay.target; fs.sessionId = relay.sessionId; return fs;
+    fs.target = target; fs.sessionId = sessionId; return fs;
   };
+  const fitStateOf = (relay) => fitStateFor(relay.key, relay.sessionId, relay.target);
   /** verify r1: the note follows every change of the agent's choice / the size we set / the baseline / the floor. */
   function persistFit(fs) { if (!keeper || typeof keeper.noteViewport !== 'function') return; try { keeper.noteViewport(fs.target, FIT.fitNoteOf(fs)); } catch (e) { log.warn?.(`[browser-live] the page-size note could not be written — ${e && e.message}`); } }
   const turnOfSession = (sessionId) => { const s = activeSessions.get?.(sessionId); return s && TF.turnKnown(s) ? TF.turnOf(s) : null; };
@@ -802,7 +804,8 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     if (!fs.baseline && open && relay.picture && (relay.viewport || now() - relay.firstFrameAt >= 1500)) fs.baseline = pageSizeOf(relay);
     const force = relay.fitForce;
     if (force && fs.agent) { log.log?.(`[browser-live] ${relay.key}: a viewer asked to fit the page to its window — the agent's ${fs.agent.width}×${fs.agent.height} is set aside`); fs.agent = null; persistFit(fs); }
-    const v = FIT.fitVerdict({ fits: [...relay.fits.values()], holder: relay.holder, mode: relay.mode, agent: fs.agent, applied: fs.applied, baseline: fs.baseline, force, floorW: fs.floorW, ready: open && !!fs.baseline, claim: relay.fitClaim });
+    const v = FIT.fitVerdict({ fits: [...relay.fits.values()], holder: relay.holder, mode: relay.mode, agent: fs.agent, applied: fs.applied, baseline: fs.baseline, force, floorW: fs.floorW, ready: open && !!fs.baseline, claim: relay.fitClaim, fixed: fs.fixed });
+    const fitState = v.rule === 'fixed' ? 'fixed' : 'fitted'; // lane launch-picture-size: the chip says the pin (pinChipText), never "fitted"
     const placeOf = (id) => { const f = relay.fits.get(id); return f && f.place ? { ...f.place } : null; }; // lane live-input: WHERE the ruling window is (the chip's words)
     relay.fitForce = false;
     if (v.act === 'wait') { if (open && relay.picture && !fs.baseline) scheduleFit(relay, why, { delay: 500 }); return; }
@@ -814,7 +817,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     if (v.act === 'restore') { armRestore(relay.key); return; }
     if (fs.restoreTimer) { clearTimeout(fs.restoreTimer); fs.restoreTimer = null; }
     if (v.act === 'keep') {
-      if (v.why === 'fitted') { const last = relay.lastFit ? JSON.parse(relay.lastFit) : null; if (!last || last.state !== 'fitted' || last.viewerId !== v.viewerId || last.rule !== v.rule) broadcastFit(relay, { state: 'fitted', width: fs.applied.width, height: fs.applied.height, viewerId: v.viewerId, rule: v.rule, drawScale: v.drawScale, floor: fs.floorW > FIT.FIT_MIN_W ? fs.floorW : null, place: placeOf(v.viewerId) }); }
+      if (v.why === 'fitted') { const last = relay.lastFit ? JSON.parse(relay.lastFit) : null; if (!last || last.state !== fitState || last.viewerId !== v.viewerId || last.rule !== v.rule) broadcastFit(relay, { state: fitState, width: fs.applied.width, height: fs.applied.height, viewerId: v.viewerId, rule: v.rule, drawScale: v.drawScale, floor: fs.floorW > FIT.FIT_MIN_W ? fs.floorW : null, place: placeOf(v.viewerId) }); }
       return;
     }
     // act 'set' — a size that just failed is not asked again for FIT_RETRY_MS (each ask is a CLI spawn: the fork tax)
@@ -845,7 +848,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
       relay.fitCheck = { width: v.width, height: v.height, at: now(), frames: 0, own: fs.pending || fs.ownDone || null }; // own: this set's own record — its `doneSeq` says when the daemon echoed it (2.369.198)
       relay.fitWarned = false;
       persistFit(fs);
-      if (relays.get(relay.key) === relay) broadcastFit(relay, { state: 'fitted', width: v.width, height: v.height, viewerId: v.viewerId, rule: v.rule, drawScale: v.drawScale, floor: fs.floorW > FIT.FIT_MIN_W ? fs.floorW : null, why, place: placeOf(v.viewerId) });
+      if (relays.get(relay.key) === relay) broadcastFit(relay, { state: fitState, width: v.width, height: v.height, viewerId: v.viewerId, rule: v.rule, drawScale: v.drawScale, floor: fs.floorW > FIT.FIT_MIN_W ? fs.floorW : null, why, place: placeOf(v.viewerId) });
     } else {
       // builder r2 (the reality verifier's A): a failed set's command mirror may land AFTER the CLI returned (a busy stream) —
       // it is still OURS (`prevOwn`), never the agent's choice (the chip said "Agent's size 1398×835" = our own refused set)
@@ -906,16 +909,53 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     if (fs.pending) fs.pending.inFlight = false;
     if (!(r && r.ok)) { setAsideOwn(fs); log.warn?.(`[browser-live] ${key}: the agent's own size could not be put back (${r && (r.code || '')} ${r && r.error})`); } // builder r2: its late mirror is still ours
   }
+  /** lane launch-picture-size: a browser session's FIXED picture size (`fixed` {w, h} | null) — the agent's `vibespace-browser
+   *  size` / `open --size`, the user's Pin size… in the live window (the routes judged who and the size). Kept in the page-size
+   *  note (a restart keeps it, the next launch of the browser forgets it); a watched relay re-fits at once (every viewer
+   *  letterboxes the same picture); nobody watching ⇒ the page takes the size NOW (what the agent sees), and `null` puts
+   *  back the size it had before our first set. Never starts a browser (keeper.setViewportFor's rule). */
+  async function setFixed({ sessionId, profileRef = '', fixed = null } = {}) {
+    const sid = String(sessionId || '');
+    const f = sessionFacts(sid);
+    if (!f) return { ok: false, code: 'not-found', error: `no such live session ${JSON.stringify(sid)}` };
+    if (f.host) return { ok: false, code: 'unsupported-host', error: `a fixed picture size is local-only in this release — session ${sid} runs on host ${JSON.stringify(f.host)}` };
+    let set = null, profiles = [];
+    if (keeper) { try { set = keeper.setFor(f.browserKey); profiles = keeper.list().profiles; } catch (e) { return { ok: false, code: 'unavailable', error: `the browser keeper is unreadable (${e && e.message})` }; } }
+    const target = S.streamTargetFor({ browserKey: f.browserKey, set, profileRef: String(profileRef || ''), envPairs: f.envPairs, profiles });
+    if (!target.ok) return { ok: false, code: target.code, error: target.error, handles: target.handles || [] };
+    const key = relayKeyFor(sid, target);
+    const relay = relays.get(key) || null;
+    const fs = fitStateFor(key, sid, target);
+    const fx = FIT.fixedOf(fixed);
+    fs.fixed = fx;
+    if (fx && fs.agent) { log.log?.(`[browser-live] ${key}: the picture size is fixed at ${fx.w}×${fx.h} — the agent's own ${fs.agent.width}×${fs.agent.height} is set aside`); fs.agent = null; } // the latest explicit act
+    if (fs.restoreTimer) { clearTimeout(fs.restoreTimer); fs.restoreTimer = null; }
+    persistFit(fs);
+    log.log?.(`[browser-live] ${key}: picture size ${fx ? `fixed at ${fx.w}×${fx.h}` : 'unfixed (it follows the panes again)'}`);
+    if (relay) { scheduleFit(relay, fx ? 'fixed' : 'unfixed', { delay: 0 }); return { ok: true, fixed: fx, applied: 'live' }; }
+    if (!canFit()) return { ok: true, fixed: fx, applied: 'later' };
+    const want = fx ? { width: fx.w, height: fx.h } : fs.applied && fs.baseline ? { width: fs.baseline.width, height: fs.baseline.height } : null;
+    if (!want) return { ok: true, fixed: fx, applied: 'none' };
+    if (fx && fs.applied && fs.applied.width === fx.w && fs.applied.height === fx.h) return { ok: true, fixed: fx, applied: 'now' };
+    beginOwn(fs, { ...want, why: fx ? 'fixed' : 'restore' });
+    let r; try { r = await keeper.setViewportFor(target, want); } catch (e) { r = { ok: false, code: 'internal', error: String(e && e.message) }; }
+    if (fs.pending) fs.pending.inFlight = false;
+    setAsideOwn(fs); // its late mirror is still ours (prevOwn), never the agent's choice
+    if (!(r && r.ok)) return { ok: true, fixed: fx, applied: 'later', code: (r && r.code) || null, error: String((r && r.error) || '').slice(0, 200) };
+    fs.applied = fx ? { width: fx.w, height: fx.h, viewerId: null, rule: 'fixed', at: now() } : null;
+    persistFit(fs);
+    return { ok: true, fixed: fx, applied: 'now' };
+  }
   /** Nobody visible: after RESTORE_AFTER_MS (a reload, a tab switch, a desktop flip come back first) the page goes
    *  back to the size it had before our first fit — never over the agent's own choice, never a browser started. */
   function armRestore(key) {
     const fs = fitStates.get(key);
-    if (!fs || !fs.applied || fs.agent || !fs.baseline || fs.restoreTimer || !canFit()) return;
+    if (!fs || !fs.applied || fs.agent || fs.fixed || !fs.baseline || fs.restoreTimer || !canFit()) return; // lane launch-picture-size: a FIXED size is never restored away
     fs.restoreTimer = setTimeout(async () => {
       fs.restoreTimer = null;
       const relay = relays.get(key);
-      if (relay && FIT.fitTarget({ fits: [...relay.fits.values()], holder: relay.holder, mode: relay.mode, claim: relay.fitClaim })) return; // somebody is back
-      if (!fs.applied || fs.agent || !fs.baseline) return;
+      if (relay && FIT.fitTarget({ fits: [...relay.fits.values()], holder: relay.holder, mode: relay.mode, claim: relay.fitClaim, fixed: fs.fixed })) return; // somebody is back (or the size is fixed)
+      if (!fs.applied || fs.agent || fs.fixed || !fs.baseline) return;
       // verify r1: never under the agent's feet — a KNOWN running turn keeps the size until the turn ends (re-asked every grace; a
       // terminal-mode session publishes no turn and restores on the clock as before)
       const turn = turnOfSession(fs.sessionId);
@@ -1219,10 +1259,14 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
       const rep = FIT.fitReport(msg);
       if (!rep) { send(viewer.ws, { type: 'refused', code: 'bad-message', error: 'a fit report carries a positive width and height' }); return; }
       relay.fits.set(viewer.id, { viewerId: viewer.id, width: rep.width, height: rep.height, dpr: rep.dpr, visible: rep.visible, place: rep.place || null, at: now() });
+      // lane launch-picture-size: a FIXED size takes no "Fit here" / "Fit to this window" — refused BY NAME, saying where to change
+      // it (the pane's report itself still counts: the size comes back to the panes once it is unfixed)
+      const pinned = rep.claim || rep.force ? FIT.fixedRefusal(fitStateOf(relay).fixed) : null;
+      if (pinned) send(viewer.ws, { type: 'refused', ...pinned });
       // lane live-input: "Fit here" = this view CLAIMS the page's size (the latest claim wins; hiding or leaving ends it)
-      if (rep.claim && rep.visible) relay.fitClaim = viewer.id;
+      if (rep.claim && rep.visible && !pinned) relay.fitClaim = viewer.id;
       else if (!rep.visible && relay.fitClaim === viewer.id) relay.fitClaim = null;
-      scheduleFit(relay, rep.force ? 'force' : rep.claim ? 'claim' : 'report', { force: rep.force });
+      scheduleFit(relay, pinned ? 'report' : rep.force ? 'force' : rep.claim ? 'claim' : 'report', { force: rep.force && !pinned });
       return;
     }
     if (v.kind === 'refresh') {
@@ -1563,7 +1607,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
       key: r.key, sessionId: r.sessionId, target: { kind: r.target.kind, profileId: r.target.profileId || null, alias: r.target.alias || null, handle: r.target.handle || null }, port: r.port, browserKey: r.browserKey,
       upstream: r.upstream ? r.upstream.readyState : null, paused: r.paused, upstreamMaxFps: r.upstreamMaxFps, mode: r.mode, holder: r.holder,
       picture: r.picture, viewport: r.viewport ? { clientWidth: r.viewport.clientWidth, clientHeight: r.viewport.clientHeight, why: r.viewport.why } : null, // lane J
-      fit: (() => { const f = fitStates.get(r.key); return { fits: [...r.fits.values()].map((x) => ({ ...x })), applied: f && f.applied ? { ...f.applied } : null, baseline: f && f.baseline ? { ...f.baseline } : null, agent: f && f.agent ? { ...f.agent } : null, floorW: f ? f.floorW : FIT.FIT_MIN_W, last: r.lastFit ? JSON.parse(r.lastFit) : null, pending: f && f.pending ? { ...f.pending } : null }; })(), frameSeq: r.frameSeq, ordSeq: r.ordSeq, // lane S4 (+ verify r1: the in-flight set and the record order)
+      fit: (() => { const f = fitStates.get(r.key); return { fits: [...r.fits.values()].map((x) => ({ ...x })), applied: f && f.applied ? { ...f.applied } : null, baseline: f && f.baseline ? { ...f.baseline } : null, agent: f && f.agent ? { ...f.agent } : null, floorW: f ? f.floorW : FIT.FIT_MIN_W, last: r.lastFit ? JSON.parse(r.lastFit) : null, pending: f && f.pending ? { ...f.pending } : null, fixed: f && f.fixed ? { ...f.fixed } : null }; })(), frameSeq: r.frameSeq, ordSeq: r.ordSeq, // lane S4 (+ verify r1: the in-flight set and the record order)
       viewers: [...r.viewers.values()].map((v) => ({ id: v.id, maxFps: v.maxFps, sent: v.sent, dropped: v.dropped, bufferedAmount: v.ws.bufferedAmount })),
       input: { queued: r.inq.length, inflight: r.inflight, claim: r.fitClaim, copyWatch: r.copyWatch ? { armed: !!r.copyWatch.armed, targetId: r.copyWatch.targetId || null, error: r.copyWatch.error || null } : null }, // lane live-input
       ...r.stats,
@@ -1573,7 +1617,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
 
   // BROWSE YOURSELF (B-6ae8): the keeper asks the cross-relay viewer fact too (is a window of the user's still live)
   try { keeper?.setViewerAlive?.(viewerAlive); } catch { /* optional */ }
-  return { handleUpgrade, closeForSession, viewerCount, stats, shutdown, STREAM_PATH: S.STREAM_PATH, _relays: relays, _fitStates: fitStates,
+  return { handleUpgrade, closeForSession, viewerCount, stats, shutdown, setFixed, STREAM_PATH: S.STREAM_PATH, _relays: relays, _fitStates: fitStates,
     tap, tapHuman, broadcastTo, TAP_FPS, viewerAlive, // P5: the recorder's seam (+ BROWSE YOURSELF: the user's own relay)
     activeTargetsFor, tapDialogAct }; // lane browser-stuck: the watch's scope (the tab each relay shows) + the agent's dialog act on the trace
 }

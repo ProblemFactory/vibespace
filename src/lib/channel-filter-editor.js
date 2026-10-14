@@ -65,8 +65,8 @@ const RULE_LABELS = () => ({
   'reply-to-sent': t('is a quote, a reply in a thread, or a reply in the mail thread of a message this agent sent'),
   // lane webhook-l2-ui: a FACT the message carries (a webhook path's declared keys, sender / subject / event) equals a value
   'fact': t('has the fact (key = value)'),
-  // lane decision-rule: the person's condition in plain words, judged per message by the Decision API plugin
-  'decision': t('is judged by the Decision API'),
+  // lane decision-rule: the person's condition in plain words, judged per message by the LLM plugin
+  'decision': t('is judged by the LLM plugin'),
 });
 
 
@@ -487,12 +487,12 @@ const valueSlug = (s) => String(s || '').toLowerCase().normalize('NFKD').replace
 /** Why this rule judges nothing right now (null = it will judge): the plugin row's own facts. */
 function decisionOffWhy(row, route) {
   if (!row) return null;
-  if (row.missing) return t('The Decision API plugin is not available on this server — this rule never matches.');
-  if (!row.enabled) return t('The Decision API plugin is off — this rule judges nothing (and never matches) until you turn it on.');
-  if (!row.configured) return t('The Decision API has no provider key yet — this rule judges nothing until you add one on its card.');
+  if (row.missing) return t('The LLM plugin is not available on this server — this rule never matches.');
+  if (!row.enabled) return t('The LLM plugin is off — this rule judges nothing (and never matches) until you turn it on.');
+  if (!row.configured) return t('The LLM plugin has no key yet — this rule judges nothing until you add one on the Language model card (Integrations & keys).');
   const f = (row.decision && row.decision.features) || {};
-  if (route && f.routing !== true) return t('The Decision API\'s switch “Hand messages to a task group or agent by what they say” is off — this rule hands nothing out until you turn it on.');
-  if (!route && f.rules !== true) return t('The Decision API\'s switch “Notification rules can use a sentence as the condition” is off — this rule checks nothing until you turn it on.');
+  if (route && f.routing !== true) return t('The LLM plugin\'s switch “Hand messages to a task group or agent by what they say” is off — this rule hands nothing out until you turn it on.');
+  if (!route && f.rules !== true) return t('The LLM plugin\'s switch “Notification rules can use a sentence as the condition” is off — this rule checks nothing until you turn it on.');
   return null;
 }
 function decisionBlock(rule, { principals, changed }) {

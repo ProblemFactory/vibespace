@@ -129,19 +129,19 @@ console.log("§1b the window's groups");
   ok(table.every(([, g]) => R.GROUPS.includes(g)), `every row lands in exactly ONE group (${table.map(([id, g]) => id + '→' + g).join(', ')})`);
   ok(ids('browser') === R.ROWS.filter((r) => r.id === 'cloak' || r.id.startsWith('cloud:')).map((r) => r.id).sort().join() && ids('browser').split(',').length === 6, `browser = cloak + every cloud:* row (${ids('browser')})`);
   const named = Object.values(PS.PLUGIN_SETTINGS).map((p) => p.integration).filter(Boolean).sort().join();
-  ok(ids('plugins') === named && /decision-api/.test(named) && /dropline/.test(named), `plugins = exactly the rows a built-in plugin's settings table names (${ids('plugins')}) — the Decision API's key is a plugin's, not Communication's`);
+  ok(ids('plugins') === named && /\bllm\b/.test(named) && /dropline/.test(named), `plugins = exactly the rows a built-in plugin's settings table names (${ids('plugins')}) — the LLM plugin's key is a plugin's, not Communication's`);
   ok(ids('communication') === R.ROWS.filter((r) => r.consumers.some((c) => c.startsWith('src/channels/'))).map((r) => r.id).sort().join() && R.ROWS.filter((r) => R.groupOf(r) === 'communication').every((r) => r.bindsPerAccount === true),
     `communication = the rows a channel adapter consumes (${ids('communication')}); today every one is account-bound, so the window (which draws no account-bound row) shows no 通讯 head — it draws when such a row becomes a card`);
-  ok(R.groupOf('decision-api') === 'plugins' && R.groupOf('cloud:kernel') === 'browser' && R.groupOf('no-such-row') === null && R.groupOf(null) === null, 'groupOf answers an id as it answers the row; an unknown id is null (the window draws it last, never drops it)');
+  ok(R.groupOf('llm') === 'plugins' && R.groupOf('cloud:kernel') === 'browser' && R.groupOf('no-such-row') === null && R.groupOf(null) === null, 'groupOf answers an id as it answers the row; an unknown id is null (the window draws it last, never drops it)');
   // derived, never listed: groupOf's own source names no row id
   const src = fs.readFileSync(path.join(REPO, 'src/integration-registry.js'), 'utf-8');
   const body = src.slice(src.indexOf('function groupOf('), src.indexOf('\n}\n', src.indexOf('function groupOf(')));
   const quoted = R.rowIds().filter((id) => body.includes(`'${id}'`) || body.includes(`"${id}"`));
   ok(body.length > 50 && !quoted.length, `groupOf names no row id — the group is derived (${quoted.join(', ') || 'none named'})`);
   // CONTROLS — each must be null (the census above is RED for such a row)
-  const cloak = R.rowById('cloak'), dec = R.rowById('decision-api');
+  const cloak = R.rowById('cloak'), dec = R.rowById('llm');
   ok(R.groupOf({ ...cloak, id: 'brand-new', consumers: ['src/server/brand-new.js'] }) === null, 'CONTROL: a new row whose consumer is neither a channel adapter nor the browser backend and that no plugin names is null (RED)');
-  ok(R.groupOf({ ...dec, id: 'decision-api-2' }) === null, 'CONTROL: the Decision API row under an id no plugin names is null (the plugins group comes from the plugin table, not the row\'s look)');
+  ok(R.groupOf({ ...dec, id: 'llm-2' }) === null, 'CONTROL: the Language model row under an id no plugin names is null (the plugins group comes from the plugin table, not the row\'s look)');
   ok(R.groupOf({ ...cloak, consumers: ['src/server/browser-backend.js', 'src/channels/fake.js'] }) === null, 'CONTROL: a row consumed by both a channel adapter and the browser backend (two groups) is null');
   ok(R.groupOf({ ...cloak, consumers: [] }) === null, 'CONTROL: a row with no consumer is null');
 }
@@ -231,7 +231,7 @@ store.registerTest(CARD, shapeRunner);
 {
   const r0 = await get('/api/integrations');
   const cards = R.ROWS.filter((r) => !r.bindsPerAccount).map((r) => r.id);
-  ok(r0.status === 200 && Array.isArray(r0.json.integrations) && r0.json.integrations.map((x) => x.id).join() === cards.join() && cards.length === 8 && cards[6] === 'dropline' && cards[7] === 'decision-api', `GET /api/integrations lists the six browser key rows + the Dropline voice key row + the decision-api row ONLY (${r0.json.integrations.map((x) => x.id).join(', ')})`);
+  ok(r0.status === 200 && Array.isArray(r0.json.integrations) && r0.json.integrations.map((x) => x.id).join() === cards.join() && cards.length === 8 && cards[6] === 'dropline' && cards[7] === 'llm', `GET /api/integrations lists the six browser key rows + the Dropline voice key row + the llm row ONLY (${r0.json.integrations.map((x) => x.id).join(', ')})`);
   ok(['fake', 'lark', 'gmail'].every((id) => !r0.json.integrations.some((x) => x.id === id)) && ['fake', 'lark', 'gmail'].every((id) => R.rowById(id).bindsPerAccount === true), 'r4: the account-bound rows (fake / lark / gmail) are NOT cards — absent from the list');
   // every card verb on an account-bound row: 404 BY NAME
   for (const id of ['fake', 'lark', 'gmail']) {
@@ -952,16 +952,36 @@ if (tracked.length) {
   // title + three ORDERED steps + its own radio words reach the view, every other row keeps the shared ones, and no
   // string the card shows (row, plugin description, the three switches + their example hints) carries an engine word
   const ENGINE = /\b(judge[sd]?|judg(e)?ments?|records?|rows?|first screen|route[sd]?|routing|predicates?)\b/i;
-  const dv = store.publicView('decision-api');
-  ok(dv.setup && dv.setup.title === 'How to use it' && dv.setup.ordered === true && dv.setup.prerequisites.length === 3 && /Test connection/.test(dv.setup.prerequisites[1]) && dv.choiceWords && dv.choiceWords.cluster === 'Use the key the cluster set up' && dv.choiceWords.own === 'Use a key of my own', 'decision-api: the view carries its own title, three ordered steps (the second names the Test button) and its radios\' words', JSON.stringify([dv.setup, dv.choiceWords]));
-  ok(R.ROWS.every((r) => r.id === 'decision-api' || (!(r.setup && (r.setup.title || r.setup.ordered)) && !r.choiceWords)) && store.publicView('cloak').choiceWords === null && store.publicView('cloak').setup === null, 'every other row keeps the shared words (no title / ordered / choiceWords; the view says null)');
-  // lane plugin-settings-p0: the three switches are settings rows now (src/plugin-settings.js decision-api) — label + example hint
-  const featRows = require(path.join(REPO, 'src/plugin-settings.js')).PLUGIN_SETTINGS['decision-api'].rows.filter((r) => ['attention', 'rules', 'routing'].includes(r.key));
+  const dv = store.publicView('llm');
+  ok(dv.setup && dv.setup.title === 'How to use it' && dv.setup.ordered === true && dv.setup.prerequisites.length === 3 && /Test connection/.test(dv.setup.prerequisites[1]) && dv.choiceWords && dv.choiceWords.cluster === 'Use the key the cluster set up' && dv.choiceWords.own === 'Use a key of my own', 'llm: the view carries its own title, three ordered steps (the second names the Test button) and its radios\' words', JSON.stringify([dv.setup, dv.choiceWords]));
+  ok(R.ROWS.every((r) => r.id === 'llm' || (!(r.setup && (r.setup.title || r.setup.ordered)) && !r.choiceWords)) && store.publicView('cloak').choiceWords === null && store.publicView('cloak').setup === null, 'every other row keeps the shared words (no title / ordered / choiceWords; the view says null)');
+  // lane plugin-settings-p0: the three switches are settings rows now (src/plugin-settings.js llm) — label + example hint
+  const featRows = require(path.join(REPO, 'src/plugin-settings.js')).PLUGIN_SETTINGS['llm'].rows.filter((r) => ['attention', 'rules', 'routing'].includes(r.key));
   const feats = featRows.flatMap((r) => [r.label, Array.isArray(r.description) ? r.description[0] : r.description]);
   ok(feats.length === 6 && feats.filter((s) => /^Example: /.test(s)).length === 3, `the three switches each carry ONE example hint (${feats.length} strings)`);
-  const shown = [dv.setup.title, ...dv.setup.prerequisites, dv.choiceWords.cluster, dv.choiceWords.own, dv.testDescribe, dv.testCaveat, dv.usedBy, require(path.join(REPO, 'src/plugins/decision-api.js')).description, ...feats];
+  const shown = [dv.setup.title, ...dv.setup.prerequisites, dv.choiceWords.cluster, dv.choiceWords.own, dv.testDescribe, dv.testCaveat, dv.usedBy, require(path.join(REPO, 'src/plugins/llm.js')).description, ...feats];
   ok(shown.every((s) => typeof s === 'string' && s && !ENGINE.test(s)), `no engine word on the card (${shown.length} strings)`, shown.filter((s) => ENGINE.test(s)).join(' | '));
   ok(ENGINE.test('Lets VibeSpace judge records for you') && ENGINE.test('Judge the first screen\'s other rows') && ENGINE.test('Route records to a group or agent'), 'CONTROL: the .261 card words are caught by the same needle');
+  // lane llm-plugin-rename (owner 2026-10-14): the key card is named by its PROVIDER, holds provider + key only (the model is
+  // the LLM plugin's judgeModel row), says every feature of the plugin uses it, and its third step names where the switches are
+  const llm = R.rowById('llm');
+  ok(llm.label === 'Language model (OpenAI / OpenRouter)' && llm.fields.map((f) => f.key).join() === 'provider,apiKey' && dv.fields.map((f) => f.key).join() === 'provider,apiKey' && dv.usedBy === 'Every feature of the LLM plugin uses this key' && /Settings › Plugins › LLM/.test(dv.setup.prerequisites[2]),
+    `llm: named by its provider, provider + key ONLY, used by every feature of the LLM plugin, step 3 names the plugin's switches (${llm.label} · ${llm.fields.map((f) => f.key)} · ${dv.setup.prerequisites[2]})`);
+  const zhD = (await import(path.join(REPO, 'src/lib/i18n-zh.js'))).default || {}, jaD = (await import(path.join(REPO, 'src/lib/i18n-ja.js'))).default || {};
+  ok(zhD[llm.label] === '语言模型（OpenAI / OpenRouter）' && jaD[llm.label] === '言語モデル（OpenAI / OpenRouter）' && zhD[dv.usedBy] === 'LLM 插件的各项功能用这把钥匙' && !!jaD[dv.usedBy] && !!zhD[dv.setup.prerequisites[2]] && !!jaD[dv.setup.prerequisites[2]],
+    `the card's name in three languages (${zhD[llm.label]} · ${jaD[llm.label]}) and its used-by line (${zhD[dv.usedBy]})`);
+  // the LEGACY spellings: DECLARED on the row (the store reads them — test-cluster-presets resolves them), one declaration one
+  // derivation: each old prefix IS what the store derives from the old id; no other row claims an old prefix or id
+  const lg = llm.clusterEnv.legacy;
+  ok(lg && lg.jsonKeys.length === 1 && lg.prefixes.length === 1 && storeMod.envFieldName(lg.jsonKeys[0], 'x').startsWith(lg.prefixes[0]) && storeMod.envFieldName('llm', 'x').startsWith(llm.clusterEnv.prefix) && llm.clusterEnv.prefix === 'VIBESPACE_INTEGRATION_LLM_',
+    `llm: the new prefix ${llm.clusterEnv.prefix} and the declared legacy ${JSON.stringify(lg)} are each what the store derives from an id`);
+  const claimed = R.ROWS.flatMap((r) => (r.clusterEnv ? [r.clusterEnv.prefix, ...((r.clusterEnv.legacy && r.clusterEnv.legacy.prefixes) || [])] : []));
+  ok(new Set(claimed).size === claimed.length && lg.jsonKeys.every((id) => !R.rowById(id)), 'every prefix — new or legacy — belongs to ONE row, and an old id is no row');
+  ok(Array.isArray(llm.clusterEnv.extras) && llm.clusterEnv.extras.join() === 'model' && !llm.fields.some((f) => f.key === 'model'), 'llm: the preset may carry `model` beyond the card\'s fields (clusterEnv.extras — the judgeModel default), never a card field');
+  ok(R.checkRow({ ...llm, clusterEnv: { ...llm.clusterEnv, legacy: { jsonKeys: ['llm'], prefixes: ['VIBESPACE_INTEGRATION_LLM_'] } } }).some((e) => /legacy/.test(e))
+    && R.checkRow({ ...llm, clusterEnv: { ...llm.clusterEnv, legacy: { jsonKeys: ['a', 'b'], prefixes: ['X_'] } } }).some((e) => /legacy/.test(e))
+    && R.checkRow({ ...llm, clusterEnv: { ...llm.clusterEnv, extras: ['apiKey'] } }).some((e) => /extras/.test(e)) && !R.checkRow(llm).length,
+    'CONTROLS: a legacy list naming the row\'s own id, an unbalanced one, and an extra that IS a field are each refused by checkRow; the row itself passes');
   for (const row of R.ROWS) {
     if (row.wiredIn) continue;
     // D7 (r4): an account-bound row is not a card — no Test verb, no runner (the store refuses test() by name)

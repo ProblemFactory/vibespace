@@ -117,9 +117,15 @@ const flag = (name) => { const i = args.indexOf(name); return i >= 0 ? (args[i +
 const has = (name) => args.includes(name);
 const shq = (s) => (/^[A-Za-z0-9_@%+=:,./-]+$/.test(s) ? s : "'" + String(s).replace(/'/g, "'\\''") + "'");
 
+// lane launch-picture-size: the size table's fixed rows (src/desktop-pin.js SIZE_CHOICES — this CLI ships alone, so its help
+// carries a MIRROR; scripts/test-desktop-pin.mjs pins it to the table, order and all)
+const SIZE_HELP = '1280x720 | 1920x1080 | 2560x1440 | your own WxH';
+/** A refused size is the caller's typo — exit 2 like a usage error (the server's words are parsePin's). */
+const SIZE_REFUSALS = new Set(['bad-size', 'size_out_of_bounds']);
 const USAGE = `vibespace-browser — THIS session's browser: every page verb, named profiles, handles
 PAGE VERBS (your own browser, or the attachment you name):
   vibespace-browser open <url>                    navigate (a 403/429 prints a may-need-cloak HINT)
+  vibespace-browser open <url> --size WxH         …and FIX the picture size (${SIZE_HELP}): see \`size\`
   vibespace-browser snapshot [-i] [-c]            the accessibility tree with @refs (read this first)
   vibespace-browser click @ref | fill @ref "…" | type @ref "…" | press Enter | select @ref <v> | hover @ref
   vibespace-browser get text|html|value|title|url @ref · is visible @ref · find role button click --name …
@@ -174,6 +180,10 @@ YOURS:
                                                   this conversation's own ephemeral browser stops at once);
                                                   refused [browser_paused] while the user has taken it over
   vibespace-browser pin <handle|label|id> | --none   THIS conversation's default browser: your next bare command opens it
+  vibespace-browser size <WxH|auto>               FIX this conversation's page at that size (${SIZE_HELP}): every live
+                                                  view shows the same picture scaled to its pane, snapshot / screenshot see
+                                                  exactly that; auto = the page follows the live view again (the user
+                                                  changes it from the live view's ⋯ → Pin size…)
   vibespace-browser new-child                     a browser of its own for a SUB-AGENT (prints its VIBESPACE_BROWSER)
   vibespace-browser providers [--host <machine>]  which providers can run here (or there), and why not
   vibespace-browser backend [<name>] [--confirm-downgrade]   which backend; PROPOSE a switch (the user decides)
@@ -600,6 +610,12 @@ async function runPage(c) {
     const wr = writeRefusal(cls.writeFiles);
     if (wr) refuseLocally(wr);
   }
+  // lane launch-picture-size: `open … --size WxH` is judged BEFORE the open runs (the server's parsePin words; a refusal exits 2)
+  if (cls.size !== undefined) {
+    needSession();
+    const ck = await call('POST', '/api/agent/browser/size', { size: cls.size, check: true }, { soft: true });
+    if (ck && ck._failed) { console.error(`${ck.error || 'HTTP ' + ck._status}${ck.code ? ` [${ck.code}]` : ''} — nothing was opened`); process.exit(SIZE_REFUSALS.has(ck.code) ? 2 : 1); }
+  }
   // lane L r5 F1: the words the binary will be handed as paths are rewritten to the absolute path judged here —
   // and every rewritten word is judged (the over-named sets above already hold them; this is the proof, not a hope)
   let framed = inFrame(cls);
@@ -1015,10 +1031,20 @@ async function runPage(c) {
       console.error(profileLine(r.profile, null, r.others, r.handle) + ' · lease dropped');
     }
     if (interrupted) { printInterrupted(interrupted, code); process.exit(1); }
+    if (cls.size !== undefined && code === 0) process.exit(await applySize(cls.size, profileId || handle || null)); // lane launch-picture-size: `open … --size` — the browser runs now
     process.exit(code == null ? 1 : code);
   });
 }
 
+/** lane launch-picture-size: the conversation's FIXED picture size — `size <WxH|auto>`, and `open … --size` once its open ran.
+ *  → the exit code (2 = a refused size: the server says it in parsePin's words). */
+async function applySize(size, profile) {
+  const r = await call('POST', '/api/agent/browser/size', { size, ...(profile ? { profile } : {}) }, { soft: true });
+  if (r && r._failed) { console.error(`${r.error || 'HTTP ' + r._status}${r.code ? ` [${r.code}]` : ''}`); return SIZE_REFUSALS.has(r.code) ? 2 : 1; }
+  if (!r.fixed) { console.log('picture size unfixed: the page follows the live view\'s pane again'); return 0; }
+  console.log(`picture size fixed at ${r.fixed.w}×${r.fixed.h}: every live view shows that picture scaled to its pane; snapshot / screenshot see exactly that${r.applied === 'later' ? ` (not applied yet${r.why ? ' — ' + r.why : ''}: a live view applies it while it shows this browser)` : ''}; \`vibespace-browser size auto\` lets it follow the view again`);
+  return 0;
+}
 /** lane site-reset: a way out through VibeSpace's own socket (`/api/agent/browser/direct`) — `stop` always, a bare `tab close`
  *  and a `screenshot` while a loop stands. → true when it answered (printed, audited, exited), false = run the binary. */
 async function runDirect(action, { r, head, profileId, wantsJson, shotPath = null }) {
@@ -1306,6 +1332,11 @@ async function runOursPage(cls, { r, head, profileId, wantsJson }) {
   // lane browser-resume B (§3.9): THIS conversation's own browser, started again with its kept tabs (same order, the same tab
   // on show) — or, when it runs, the tabs still waiting from a deliberate stop reopened as new tabs
   // lane browser-unresponsive: a HUNG browser's way out — the server admits it only while the keeper judges it hung
+  if (verb === 'size') { // lane launch-picture-size: THIS conversation's fixed picture size (auto = follow the view)
+    const size = args[1];
+    if (!size || size.startsWith('--')) { console.error(`usage: vibespace-browser size <WxH|auto>   (${SIZE_HELP})`); process.exit(2); }
+    process.exit(await applySize(size, handle || null));
+  }
   if (verb === 'restart') {
     const ref = (args[1] && !args[1].startsWith('-') ? args[1] : '') || handle || '';
     const r = await call('POST', '/api/agent/browser/restart', ref ? { profile: ref } : {});

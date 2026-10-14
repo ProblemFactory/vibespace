@@ -47,6 +47,11 @@ export class StageManager {
     this._queued = undefined;      // latest queued materialize target
     this._replayingKeys = new Map(); // userW lesson #2: spawn/replay dedup (key → timeout)
     this._boundAux = new Map();    // winId → heroKey (live bindings this tab)
+    // THE SHARED-HERO PUBLISH LAW (lane stage-hero-key-race) — see _publishHero
+    this._clientId = Math.random().toString(36).slice(2, 10); // this page's id: the stamp on every hero it publishes
+    this._heroSeq = 0;             // its publish count (no two of its publishes read the same)
+    this._heroWitness = null;      // the shared hero record (raw) this page last stood on
+    this._heroOwed = false;        // the local hero's publish waits for its session id (its landing pays it)
   }
 
   get enabled() {
@@ -109,22 +114,38 @@ export class StageManager {
    *  over shows the CURRENT workspace). The active hero is SHARED state in
    *  the stage store ('hero' → {key, openSpec}); staged clients follow
    *  changes live, and entering the stage adopts the shared hero. This
-   *  supersedes the v1 "hero is per-tab" decision. */
+   *  supersedes the v1 "hero is per-tab" decision.
+   *  THE PUBLISH LAW (lane stage-hero-key-race — rel271's Actions mirror, test-stage-overlap B2 + D): every publish is
+   *  STAMPED {by: this page's id, seq}, and the page remembers the record it last stood on (_heroWitness: its own
+   *  publish, the record its newer local pick superseded, the record it followed). Only a record written SINCE — by
+   *  another client — is followed (enter(), a remote op); a pick whose session id has not landed is OWED, and the
+   *  landing publishes it (onIdentitySync). Before, a Stage-born hero left before its id landed published nothing,
+   *  and the re-enter's follow took the superseded record back to the hero it had replaced. */
   _publishHero(win) {
     // only the follow's OWN materialize echoes nothing (verify r3 of inc-munl8jkl-gaih: the 800 ms blackout was a time box
     // over EVERY publish — the user's next click within it went unpublished, the shared record stayed stale, and every
     // later enter() / remote op yanked this device back to the stale hero; found by the walk's slow-timer phase)
     if (this._applyingRemoteHero === true || (this._applyingRemoteHero && this._applyingRemoteHero === win.id)) return;
-    if (!this._heroKey) return; // brand-new session, id not landed — publish next time
-    const payload = JSON.stringify({ key: this._heroKey, openSpec: this._freshOpenSpec(win) || null });
+    if (!this._heroKey) { this._heroOwed = true; return; } // brand-new session, id not landed — its LANDING publishes it (onIdentitySync)
+    this._heroOwed = false;
     const sync = this._sync();
-    if (sync && (sync.get('stage', 'hero') || '') !== payload) sync.set('stage', 'hero', payload);
+    if (!sync) return;
+    const openSpec = this._freshOpenSpec(win) || null;
+    const raw = sync.get('stage', 'hero') || '';
+    let cur = null;
+    try { cur = raw ? JSON.parse(raw) : null; } catch {}
+    if (cur && cur.key === this._heroKey && JSON.stringify(cur.openSpec ?? null) === JSON.stringify(openSpec)) { this._heroWitness = raw; return; } // already shared
+    const payload = JSON.stringify({ key: this._heroKey, openSpec, by: this._clientId, seq: ++this._heroSeq });
+    sync.set('stage', 'hero', payload);
+    this._heroWitness = payload;
   }
 
   _publishNoHero() {
     if (this._applyingRemoteHero === true) return; // the follow's synchronous clear branch only
+    this._heroOwed = false;
     const sync = this._sync();
     if (sync && sync.get('stage', 'hero')) sync.set('stage', 'hero', ''); // '' deletes the key
+    this._heroWitness = '';
   }
 
   /** Apply the shared hero locally (debounced from the remote op / on enter).
@@ -136,12 +157,17 @@ export class StageManager {
       this._heroFollowTimer = setTimeout(() => this._followRemoteHero(), 900);
       return;
     }
+    const raw = this._sync()?.get('stage', 'hero') || '';
+    // the publish law: a record this page already stood on (its own publish, or the one its newer pick superseded while
+    // that pick's id had not landed) is nothing to follow — only a record another client wrote since is
+    if (this._heroWinId && raw === this._heroWitness) return;
     let rec = null;
-    try { const raw = this._sync()?.get('stage', 'hero'); rec = raw ? JSON.parse(raw) : null; } catch {}
+    try { rec = raw ? JSON.parse(raw) : null; } catch {}
     if (!rec || !rec.key) {
       // shared hero cleared (closed on another client) → placeholder here too
       if (this._heroWinId) {
         this._applyingRemoteHero = true;
+        this._heroWitness = raw;
         try {
           this._recordActiveWorkspace();
           this._deactivateHero();
@@ -299,12 +325,18 @@ export class StageManager {
         const ph = this._placeholderId && this.app.wm.windows.get(this._placeholderId);
         if (ph) this._hideStage(ph);
       }
-      // Shared-view sync: adopt the shared hero if one is published (the
-      // walk-over-to-the-idle-device case — the OTHER device's operations
-      // win); publish ours only when nothing is shared yet.
-      if (this._sync()?.get('stage', 'hero')) {
+      // Shared-view sync: adopt the shared hero when ANOTHER client wrote it
+      // since this page last stood on the record (the walk-over-to-the-idle-
+      // device case — the OTHER device's operations win); else this page's own
+      // hero is the newest pick: keep it and publish it (one whose id has not
+      // landed is owed — its landing publishes it). Before the publish law ANY
+      // shared record won: a Stage-born hero left before its id landed came
+      // back as the hero it had replaced (rel271's mirror, test-stage-overlap).
+      const shared = this._sync()?.get('stage', 'hero') || '';
+      if (shared && (!hero || shared !== this._heroWitness)) {
         setTimeout(() => this._followRemoteHero(), 100);
       } else if (hero) {
+        if (!this._heroKey) this._heroKey = this._sessionKeyFor(hero);
         this._publishHero(hero);
       }
       dm._renderSwitcher();
@@ -618,6 +650,8 @@ export class StageManager {
     wm.focusWindow(win.id, { _stageBypass: true });
     // Restore this session's recorded workspace (aux windows).
     this._restoreWorkspace(this._heroKey || this._sessionKeyFor(win));
+    this._heroOwed = false;
+    this._heroWitness = this._sync()?.get('stage', 'hero') || ''; // the record this pick supersedes (or the one the follow adopts)
     this._publishHero(win); // shared-view sync: other staged clients follow
     this._enforceLru();
     this.app.desktopManager?._renderSwitcher();
@@ -746,6 +780,7 @@ export class StageManager {
     }
     this._heroWinId = null;
     this._heroKey = null;
+    this._heroOwed = false;
   }
 
   /** Hero window closed → placeholder returns. */
@@ -1108,14 +1143,18 @@ export class StageManager {
     }
   }
 
-  /** B-8194 (H4 null-key race): a hero staged before its backend id landed
-   *  published NOTHING (_publishHero early-returns on null _heroKey) and
-   *  nothing re-published when the id arrived — other clients' walk-over
-   *  followed a stale hero record. app.syncSessionIdentity calls this on
-   *  every merge; once the id exists we adopt the real key, re-own aux bound
-   *  under '__pending__', and publish. No-op guard keeps the per-poll cost nil. */
+  /** B-8194 (H4 null-key race) + lane stage-hero-key-race — THE LANDING PAYS
+   *  THE PUBLISH. A hero picked before its backend id landed publishes nothing
+   *  (_publishHero marks it OWED); app.syncSessionIdentity — where a new
+   *  window's id lands — calls this on every merge: once the id exists we adopt
+   *  the real key, re-own aux bound under '__pending__', publish the owed pick
+   *  unless ANOTHER client wrote the shared hero since (that pick is newer: the
+   *  follow / the next enter() adopts it), and record the workspace under the
+   *  landed key. On the Stage or off it: the `_active` gate this had dropped a
+   *  landing that came after leave() — nothing published that hero, ever.
+   *  No-op guard keeps the per-merge cost nil. */
   onIdentitySync() {
-    if (!this._active || !this.enabled || this._heroKey || !this._heroWinId) return;
+    if (!this.enabled || !this._heroWinId || (this._heroKey && !this._heroOwed)) return;
     const win = this.app.wm.windows.get(this._heroWinId);
     if (!win) return;
     const key = this._sessionKeyFor(win);
@@ -1124,8 +1163,9 @@ export class StageManager {
     for (const [winId, owner] of [...this._boundAux]) {
       if (owner === '__pending__') this._boundAux.set(winId, key);
     }
-    this._publishHero(win);
-    this._scheduleRecord?.();
+    if (this._heroOwed && (this._sync()?.get('stage', 'hero') || '') === this._heroWitness) this._publishHero(win);
+    this._heroOwed = false;
+    if (this._active) this._scheduleRecord?.(); else this._recordActiveWorkspace();
   }
 
   _sessionKeyFor(win) {

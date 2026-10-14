@@ -31,14 +31,39 @@
 // the storm (≥ 15 attaches in one second), or the harness proves nothing.
 //
 // ASSERTS (fix vs control): (a) attaches-per-second peak at the server ≤ 6;
-// (b) the 5 visible windows' `attached` p95 ≤ the control's (+ a 50 ms noise band);
+// (b) the 5 visible windows' attaches are the first five sent at the reconnect and
+// their `attached` p95 is ≤ the control's (a ratio — no band);
 // (c) the 14 hidden windows' acks spread ≥ 14 × 250 ms past the reconnect and all
-// land within the control's last + 6 s; (d) `srv-loop-gap-ms` max over the storm
-// ≤ the control's (+ max(25 %, 50 ms) noise band; printed); (e) a hidden window
+// land within the control's last + the slot cap (RECONNECT_CAP_MS); (d) THE STORM'S
+// WORK ON THE SERVER'S LOOP (below); (e) a hidden window
 // un-hidden 500 ms after the RECONNECT (the socket is still down 500 ms after the
 // drop — the reconnect waits 2–3 s — so nothing is queued yet then) attaches
 // within one round trip of the un-hide, its slot cancelled; (f) loadHistory
 // rebuilds (calls minus identical-skips) ≤ the control's.
+//
+// (d) THE STORM'S WORK ON THE SERVER'S LOOP (lane reconnect-storm-band, 2.369.272). It
+// used to compare the server's loop-delay max (a 5 ms histogram) to the control's
+// + max(25 %, 25 ms): a wall reading with a literal band, and RED wherever the box was
+// not the server's alone — 61 vs 31 and 60 vs 25 on the 2-vCPU runner (load < 1: the
+// page and the server share two cores, and the fix's window is ~2 × the control's),
+// 1207 vs 16 / 1141 vs 307 / 349 vs 126 on the hub beside an integrator's heavy. A
+// harness-only meter in the server's preload now stamps every `attach` the server
+// handles with the loop TURN it ran in and the CPU its handler spent (thread CPU;
+// node < 23.9: process CPU) — a loaded session's re-attach is synchronous from the
+// verdict to the send, so that is its whole work on the loop. Measured on the hub:
+// the control's 19 landed in ONE turn of 114 ms CPU (loop delay 118 ms); the fix's
+// in 15 turns, the costliest the five displayed windows' at 21 ms (Σ 69 ms). (d) =
+// the server's own receipts — every re-attach handled, ≤ 5 before the first slot came
+// due (RECONNECT_BASE_MS: a hidden window's attach cannot reach it earlier, a stall
+// only delays it); the work vs the in-run control — the costliest turn ≤ ½ the
+// control's whole storm (what the unfixed client puts in one turn when its frames land
+// together, as here; on the runner they arrive spread, so the control's turns are no
+// reference); the server's own heartbeat counters — no round tainted by a stall, no
+// client terminated (the incident's failure). PRINTED, never judged: the histogram max
+// and `srv-loop-gap-ms` (the machine's view), and Σ — the stagger SPREADS the work, it
+// does not shrink it: the fix's 19 attaches each pay their own cold start over 4.7 s
+// while the control's run hot in one turn (Σ fix / control 0.45 idle, 0.88 beside a
+// sibling fast tier).
 //
 // LIVE TURNS BETWEEN DROPS (perf chunk C, 2.369.167): before each drop every
 // transcript grows by a live turn (VS_STORM_APPEND_KB, default 64 KB — what the
@@ -125,6 +150,7 @@ for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => { clean
 const REAL_PROJECTS = path.join(process.env.HOME || '', '.claude', 'projects');
 const realBefore = (() => { try { return new Set(fs.readdirSync(REAL_PROJECTS)); } catch { return new Set(); } })();
 const { fixtureLitter } = require('../src/fixture-guard.js');
+const VV = require('../src/lib/view-visibility.js'); // the reconnect slots: RECONNECT_BASE_MS (the first), RECONNECT_CAP_MS (the last)
 
 const SIDS = Array.from({ length: N }, (_, i) => fixtureSid((0x5700 + i).toString(16)));
 
@@ -267,6 +293,21 @@ WS.prototype.send = function (data, ...a) { const r = s0.call(this, data, ...a);
   return r; };
 setInterval(() => { if (mx || fr) { try { fs.appendFileSync(${JSON.stringify(bufLog)}, Date.now() + ' ' + mx + ' ' + fr + ' ' + mmx + ' ' + mfr + ' ' + pmx + '\\n'); } catch {} mx = 0; fr = 0; mmx = 0; mfr = 0; pmx = 0; } }, 250).unref(); } } }
 `);
+  // …and (reconnect-storm-band, .272) THE STORM'S WORK ON THE SERVER'S LOOP, the server's own view of it: every
+  // `attach` frame the server handles (ws's emit wrapped, main thread only) is one line '<ms> <turn> <cpu µs>' — the
+  // loop TURN it ran in (the attaches handled before the next setImmediate, i.e. one poll phase) and the CPU time the
+  // handler spent inside the emit (a loaded session's re-attach is synchronous from the verdict to the send — the
+  // 2.369.16 law). CPU time, never a wall reading: a starved or shared box stretches the wall, not the work.
+  const attachLog = scratch(`rstorm-${variant}-attach`); dirs.add(attachLog);
+  fs.appendFileSync(preload, `{ const wt = require('worker_threads'); if (wt.isMainThread) { let WS = null; try { WS = require('module').createRequire(process.cwd() + '/server.js')('ws'); } catch {}
+if (WS && WS.prototype && typeof WS.prototype.emit === 'function') { const cpu = typeof process.threadCpuUsage === 'function' ? () => process.threadCpuUsage() : () => process.cpuUsage();
+try { fs.appendFileSync(${JSON.stringify(attachLog)}, '# ' + (typeof process.threadCpuUsage === 'function' ? 'threadCpuUsage' : 'cpuUsage') + '\\n'); } catch {}
+let turn = 0, open = false; const e1 = WS.prototype.emit;
+WS.prototype.emit = function (ev, data, ...a) { let attach = false; if (ev === 'message' && data && data.length < 65536) { try { attach = /^\\{"type":"attach"[,}]/.test(String(data)); } catch {} }
+  if (!attach) return e1.call(this, ev, data, ...a);
+  if (!open) { open = true; turn++; setImmediate(() => { open = false; }); }
+  const c0 = cpu(); try { return e1.call(this, ev, data, ...a); } finally { const c = cpu(); try { fs.appendFileSync(${JSON.stringify(attachLog)}, Date.now() + ' ' + turn + ' ' + ((c.user - c0.user) + (c.system - c0.system)) + '\\n'); } catch {} } }; } } }
+`);
   let journal = '';
   const srv = spawn(process.execPath, ['-r', preload, 'server.js'], { cwd: wt, stdio: ['ignore', 'pipe', 'pipe'],
     env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: stub, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' } });
@@ -404,7 +445,7 @@ setInterval(() => { if (mx || fr) { try { fs.appendFileSync(${JSON.stringify(buf
     const heldTr = wins.map((w) => (app.sessions.get(w)?._traceRing || []).filter((e) => e.tag === 'reattach:held' && e.t >= dropWall));
     const rel = (x) => Math.round(x - conn.t);
     return {
-      dropWall, endWall: Date.now(), reconnectAfterDropMs: Math.round(conn.t - tDrop), unhideAt: tUnhide == null ? null : rel(tUnhide),
+      dropWall, endWall: Date.now(), connWall: conn.wall, reconnectAfterDropMs: Math.round(conn.t - tDrop), unhideAt: tUnhide == null ? null : rel(tUnhide),
       sends: S.sends.filter((s) => s.t >= conn.t).map((s) => ({ i: s.i, t: rel(s.t) })),
       acks: S.acks.filter((a) => a.t >= conn.t && !a.re).map((a) => ({ i: a.i, t: rel(a.t) })),
       attached: S.attached.filter((a) => a.t >= conn.t).map((a) => ({ i: a.i, t: rel(a.t) })),
@@ -448,6 +489,16 @@ setInterval(() => { if (mx || fr) { try { fs.appendFileSync(${JSON.stringify(buf
     try { for (const l of fs.readFileSync(loopLog, 'utf8').split('\n')) { const [t, v] = l.split(' ').map(Number); if (t >= fromWall && t <= toWall + 250 && v > max) max = v; } } catch { }
     return Math.round(max);
   };
+  // the attach meter over one storm: per attach its turn + CPU µs ⇒ the count, the receipts before the first slot came due
+  // (stamped after the handler: a stall can only make one look later), the costliest turn (attaches, CPU), the sum
+  const attachWork = ({ dropWall, endWall, connWall }) => {
+    let clock = '?'; const rows = [];
+    try { for (const l of fs.readFileSync(attachLog, 'utf8').split('\n')) { if (l.startsWith('# ')) { clock = l.slice(2); continue; } const [t, turn, us] = l.split(' ').map(Number); if (t >= dropWall && t <= endWall) rows.push({ t, turn, us }); } } catch { }
+    const turns = new Map(); for (const r of rows) { const x = turns.get(r.turn) || { n: 0, us: 0 }; x.n++; x.us += r.us; turns.set(r.turn, x); }
+    const ts = [...turns.values()];
+    return { clock, n: rows.length, early: rows.filter((r) => r.t < connWall + VV.RECONNECT_BASE_MS).length, turns: ts.length, sumUs: rows.reduce((a, r) => a + r.us, 0),
+      maxTurnN: Math.max(0, ...ts.map((x) => x.n)), maxTurnUs: Math.max(0, ...ts.map((x) => x.us)), perTurn: ts.map((x) => x.n) };
+  };
   const appended = liveTurns();
   await sleep(300); // the preload's 250 ms flush: the append's own reads (none — the harness writes) never land in the window
   const s1 = await storm();
@@ -456,7 +507,9 @@ setInterval(() => { if (mx || fr) { try { fs.appendFileSync(${JSON.stringify(buf
   await sleep(Math.max(0, s1.endWall + 33000 - Date.now()));
   const gaps = telemetryGaps(s1.dropWall - 200, s1.endWall + 33000);
   const sum = (xs) => Math.round(xs.reduce((a, b) => a + b, 0) * 10) / 10;
-  const result = { storm: s1, gapMax: gaps.length ? Math.max(...gaps) : 0, gaps, loopMax: loopDelay(s1.dropWall, s1.endWall),
+  const result = { storm: s1, gapMax: gaps.length ? Math.max(...gaps) : 0, gaps, loopMax: loopDelay(s1.dropWall, s1.endWall), work: attachWork(s1),
+    // the server's own heartbeat counters over the storm's round(s): a round tainted by a stall > 5 s, a client terminated
+    hb: { tainted: telemetryEvents('ws-heartbeat-stall-skip', s1.dropWall - 200, s1.endWall + 33000).length, terminated: telemetryEvents('ws-heartbeat-terminate', s1.dropWall - 200, s1.endWall + 33000).length },
     appended, jsonl: jsonlReads(s1.dropWall, s1.endWall),
     parseBytes: sum(telemetryMetric('srv-jsonl-parse-bytes', s1.dropWall - 200, s1.endWall + 33000)),
     parseMs: sum(telemetryMetric('srv-jsonl-parse-ms', s1.dropWall - 200, s1.endWall + 33000)) };
@@ -619,11 +672,12 @@ const summarize = (name, r) => {
     acked: acks.size, attached: att.size,
     peak: peakPerSecond([...acks.values()]),
     visP95: p95(vis.map((i) => att.get(i)).filter(Number.isFinite)),
+    firstSent: [...r.storm.sends].sort((a, b) => a.t - b.t).slice(0, N_VISIBLE).map((x) => x.i),
     hidSpread: Math.max(...hid.map((i) => acks.get(i) ?? -1)),
     hidFirst: Math.min(...hid.map((i) => acks.get(i) ?? 1e9)),
     hidLastAttached: Math.max(...hid.map((i) => att.get(i) ?? -1)),
     rebuilds: r.storm.lh - r.storm.skips + r.storm.resets, lh: r.storm.lh, skips: r.storm.skips, resets: r.storm.resets, catchUps: r.storm.catchUps,
-    gapMax: r.gapMax, gaps: r.gaps, loopMax: r.loopMax,
+    gapMax: r.gapMax, gaps: r.gaps, loopMax: r.loopMax, work: r.work, hb: r.hb,
     appended: r.appended, jsonlMain: r.jsonl.main, jsonlWorker: r.jsonl.worker, parseBytes: r.parseBytes, parseMs: r.parseMs,
     sendsPerWin: [...Array(19).keys()].map((i) => r.storm.sends.filter((s) => s.i === i).length),
     frames: r.storm.frames, heldApplied: r.storm.heldApplied, heldViews: r.storm.heldViews,
@@ -634,6 +688,8 @@ const summarize = (name, r) => {
   console.log(`  ${name.padEnd(7)} [chunk D] attached frames ${fr.n}: with a slab ${fr.slab} (${kb(fr.slabBytes)} KB), held ${fr.held} (${fr.replayOps} replayed ops, ${out.heldApplied} applied in ${out.heldViews} views) · bytes on the wire for the whole reconnect ${kb(fr.bytes)} KB (${kb(fr.bytes / Math.max(1, fr.n))} KB per window)`);
   if (out.inflight) console.log(`  ${name.padEnd(7)} [chunk D, records in flight] attached with a slab ${out.inflight.frames.slab}, held ${out.inflight.frames.held} (${out.inflight.frames.replayOps} replayed ops, ${out.inflight.heldApplied} applied) · ${kb(out.inflight.frames.bytes)} KB on the wire · loadHistory ${out.inflight.lh}, catch-ups ${out.inflight.catchUps}, full resets ${out.inflight.resets} · windows equal to the server afterwards ${out.inflight.eq}/19${out.inflight.bad.length ? ' — first mismatch: ' + JSON.stringify(out.inflight.bad[0]).slice(0, 400) : ''}`);
   console.log(`  ${name.padEnd(7)} reconnect +${out.reconnectAfterDropMs} ms after the drop · acks ${out.acked}/19 · attached ${out.attached}/19 · peak ${out.peak}/s · visible attached p95 ${out.visP95} ms · hidden acks ${out.hidFirst}…${out.hidSpread} ms, last attached ${out.hidLastAttached} ms · loadHistory ${out.lh} (identical-skip ${out.skips}) + full resets ${out.resets} ⇒ rebuilds ${out.rebuilds}, same-epoch catch-ups ${out.catchUps} · srv-loop-gap-ms max ${out.gapMax || '<50'} [${out.gaps.join(',')}] · loop delay max (5 ms histogram) ${out.loopMax} ms · live turns appended ${(out.appended / 1024).toFixed(0)} KB ⇒ .jsonl bytes read: main ${(out.jsonlMain / 1048576).toFixed(2)} MB, workers ${(out.jsonlWorker / 1048576).toFixed(2)} MB · srv-jsonl-parse-bytes ${(out.parseBytes / 1048576).toFixed(2)} MB · srv-jsonl-parse-ms Σ ${out.parseMs} ms`);
+  const w = out.work, msOf = (us) => (us / 1000).toFixed(1);
+  console.log(`  ${name.padEnd(7)} [the server's loop] ${w.n} re-attaches handled in ${w.turns} turns [${w.perTurn.join(',')}], ${w.early} before the first slot (+${VV.RECONNECT_BASE_MS} ms) · ${w.clock === 'threadCpuUsage' ? 'thread' : 'process'} CPU in the handlers Σ ${msOf(w.sumUs)} ms, costliest turn ${msOf(w.maxTurnUs)} ms (${w.maxTurnN} attaches) · heartbeat rounds tainted ${out.hb.tainted}, clients terminated ${out.hb.terminated} · the machine's view (printed, never judged): loop delay max ${out.loopMax} ms, srv-loop-gap-ms max ${out.gapMax || '<50'}`);
   return out;
 };
 console.log('— measurements (ms after the reconnect; server arrival = attach-ack receipt)');
@@ -644,15 +700,20 @@ check(`every window re-attached in both runs (fix ${F.attached}/19, control ${C.
 check(`each window sent exactly ONE attach in the fix storm (${F.sendsPerWin.join('')})`, F.sendsPerWin.every((n) => n === 1));
 check(`CONTROL shows the storm: ≥ 15 attaches in one second at the server (${C.peak}/s) — else the harness proves nothing`, C.peak >= 15);
 check(`(a) fix: attaches-per-second peak at the server ≤ 6 (${F.peak}/s; control ${C.peak}/s)`, F.peak <= 6);
-check(`(b) fix: the 5 visible windows' attached p95 ≤ the control's (+50 ms noise band): ${F.visP95} ≤ ${C.visP95}`, F.visP95 <= C.visP95 + 50);
+check(`(b) fix: the 5 visible windows' attaches were the first five sent at the reconnect (${F.firstSent.join(',')}; the control sent hidden ones first, in window order: ${C.firstSent.join(',')}) and their attached p95 is ≤ the control's — a ratio, no band: ${F.visP95} ≤ ${C.visP95}`,
+  F.firstSent.length === N_VISIBLE && F.firstSent.every((i) => i >= N_HIDDEN) && F.visP95 <= C.visP95);
 check(`(c) fix: the 14 hidden acks spread ≥ 14 × 250 ms past the reconnect (first ${F.hidFirst}, last ${F.hidSpread})`, F.hidSpread >= 14 * 250 && F.hidFirst >= 1400);
-check(`(c) fix: every hidden window attached within the control's last + 6 s (${F.hidLastAttached} ≤ ${C.hidLastAttached + 6000})`, F.hidLastAttached <= C.hidLastAttached + 6000);
+check(`(c) fix: every hidden window attached within the control's last + the slot cap (${F.hidLastAttached} ≤ ${C.hidLastAttached} + ${VV.RECONNECT_CAP_MS})`, F.hidLastAttached <= C.hidLastAttached + VV.RECONNECT_CAP_MS);
 const hiddenQueued = fix.storm.queued.slice(0, 14).filter((w) => w.includes('slot')).length;
 check(`(c) fix: the 14 hidden windows attached from their queue SLOT (${hiddenQueued}/14) and no displayed one queued`, hiddenQueued === 14 && fix.storm.queued.slice(14).every((w) => w.length === 0), fix.storm.queued);
-const band = Math.max(C.gapMax * 0.25, 50);
-check(`(d) fix: srv-loop-gap-ms max over the storm ≤ the control's (+${Math.round(band)} ms noise band): ${F.gapMax || '<50'} vs ${C.gapMax || '<50'}`, F.gapMax <= Math.max(C.gapMax + band, 50));
-const lband = Math.max(C.loopMax * 0.25, 25);
-check(`(d) fix: the server's loop-delay max over the storm (harness histogram) ≤ the control's (+${Math.round(lband)} ms noise band): ${F.loopMax} vs ${C.loopMax}`, F.loopMax <= C.loopMax + lband);
+// (d) — see the header: counts off the server's own receipts and counters, ratios of its CPU against the in-run control
+const ms1 = (us) => (us / 1000).toFixed(1);
+check(`(d) fix: rate-limited at the server's own receipts — it handled every re-attach (fix ${F.work.n}/${N}, control ${C.work.n}/${N}), ${F.work.early} of them before the first slot came due at +${VV.RECONNECT_BASE_MS} ms (≤ the ${N_VISIBLE} displayed; control ${C.work.early}), in ${F.work.turns} loop turns [${F.work.perTurn.join(',')}] (control ${C.work.turns} [${C.work.perTurn.join(',')}])`,
+  F.work.n === N && C.work.n === N && F.work.early <= N_VISIBLE, { fix: F.work, control: C.work });
+check(`(d) fix: the storm never lands on the server's loop in one piece — its costliest turn ${ms1(F.work.maxTurnUs)} ms (${F.work.maxTurnN} attaches) ≤ ½ the control's whole storm ${ms1(C.work.sumUs)} ms (${F.work.clock === 'threadCpuUsage' ? 'thread' : 'process'} CPU in the attach handlers — a starved box stretches the wall, not the work; ratio ${(F.work.maxTurnUs / Math.max(1, C.work.sumUs)).toFixed(2)}, the control's own costliest turn ${(C.work.maxTurnUs / Math.max(1, C.work.sumUs)).toFixed(2)} of it in ${C.work.turns} turn${C.work.turns === 1 ? '' : 's'}; Σ printed: ${ms1(F.work.sumUs)} vs ${ms1(C.work.sumUs)} ms — the stagger spreads the work, it does not shrink it)`,
+  F.work.n === N && F.work.maxTurnUs * 2 <= C.work.sumUs);
+check(`(d) the server's own heartbeat counters over both storms: no round tainted by a stall, no client terminated — the incident's failure (fix ${F.hb.tainted}/${F.hb.terminated}, control ${C.hb.tainted}/${C.hb.terminated})`,
+  !F.hb.tainted && !F.hb.terminated && !C.hb.tainted && !C.hb.terminated);
 {
   const u = fix.unhide;
   const ack13 = u ? firstBy(u.acks).get(13) : undefined;

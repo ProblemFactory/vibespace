@@ -1323,6 +1323,9 @@ ok(hs && hs.browserKey === HL && hs.open && hs.recorded === true && hs.count >= 
       ['GET', '/api/browser/builds/available', '/api/browser/builds/available'],
       ['POST', '/api/browser/builds/download', '/api/browser/builds/download', { version: '151.0.7922.34' }],
       ['DELETE', '/api/browser/builds/:version', '/api/browser/builds/151.0.7922.34'],
+      // lane launch-picture-size (composed at the 2.369.272 integration): the user's Pin size… — a FIXED picture size for any
+      // conversation's browser; an agent fixes its OWN through POST /api/agent/browser/size (SIZE_IS_USERS)
+      ['POST', '/api/browser/size', '/api/browser/size', { sessionId: 'sess-any', size: '1280x720' }],
     ];
     const table = WALK_H.map(([m, p]) => m + ' ' + p).sort();
     ok(J(derived) === J(table), `the human-route census: the routes that serve HIS browsing, derived from the routers (${derived.length}), are exactly the walk's table — a new one is RED until it is walked`, { derived, table });

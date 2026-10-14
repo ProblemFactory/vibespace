@@ -3,9 +3,10 @@
  * RULE LEARNING (lane rule-learning — design q-037 P0, owner 2026-10-14) — PURE, CJS, bundled by the server and the
  * client alike. It imports only the decision model (THE ONE scrub `cleanPart`, `estTokens`, the RUBRIC's words).
  * The 「我关心什么」 block DRAFTED by a text model from the owner's verdicts — PROPOSED, never written:
- *  · `availability({integrationRow, pluginOn})` — the feature EXISTS only on the Decision API row with provider
- *    `openrouter` and a key (the user's own or the cluster's) while the plugin is on; otherwise the button and the route
- *    do not exist (the route answers 404 by name) — never a grey control;
+ *  · `availability({integrationRow, pluginOn, learnOn})` — the feature EXISTS only on the Language model row with
+ *    provider `openrouter` and a key (the user's own or the cluster's) while the LLM plugin and its drafter switch
+ *    (`learn`, lane llm-plugin-rename — ON by default) are on; otherwise the button and the route do not exist (the
+ *    route answers 404 naming why: the provider, the key, the plugin, the switch) — never a grey control;
  *  · `buildLearnInput({block, examples, rubricHits})` — FIXED first (the task and the answer's rules), VARIABLE last (the
  *    block numbered line by line, then ≤ 60 examples: the person's own labels first, the implicit ones marked
  *    `inferred`, each the ≤ 200-character digest the judge already saw, cleaned again by cleanPart), ≤ 4 000 tokens by
@@ -70,7 +71,7 @@ const fold = (s) => str(s).toLowerCase().replace(/\s+/g, ' ').trim();
 /** A string the MODEL wrote, on its way to the card: the ONE scrub, one line, bounded. */
 const clean = (s, max) => (typeof s === 'string' ? M.cleanPart(s, max, 'line').replace(/\s+/g, ' ').trim().slice(0, max) : '');
 
-/** The tier of the setting `plugin.decision-api.learnModel` (flash | sonnet; an OpenRouter id is accepted too). */
+/** The tier of the setting `plugin.llm.learnModel` (flash | sonnet; an OpenRouter id is accepted too). */
 const modelOf = (v) => (typeof v === 'string' && Object.hasOwn(MODELS, v) ? MODELS[v] : null) || Object.values(MODELS).find((m) => m.id === v) || MODELS[DEFAULT_TIER];   // own keys only (lane rule-learning-fix L1)
 /** USD of one call: input × the input price + output × the output price (1e-8 steps). */
 function learnCost(model, tokensIn = 0, tokensOut = 0) {
@@ -79,14 +80,16 @@ function learnCost(model, tokensIn = 0, tokensOut = 0) {
   return Math.round(usd * 1e8) / 1e8;
 }
 
-/** Does the feature EXIST? → {exists, why: null | 'not-openrouter' | 'no-key' | 'plugin-off'}. `integrationRow` = the
- *  registry's answer for the Decision API row ({values: {provider, apiKey}, source}). */
-function availability({ integrationRow = null, pluginOn = true } = {}) {
+/** Does the feature EXIST? → {exists, why: null | 'not-openrouter' | 'no-key' | 'plugin-off' | 'learn-off'}.
+ *  `integrationRow` = the registry's answer for the Language model row ({values: {provider, apiKey}, source});
+ *  `learnOn` = the plugin's drafter switch (absent = on, its default). */
+function availability({ integrationRow = null, pluginOn = true, learnOn = true } = {}) {
   const v = (integrationRow && integrationRow.values) || {};
   const provider = str(v.provider).trim().toLowerCase();
   if (provider !== 'openrouter') return { exists: false, why: provider ? 'not-openrouter' : 'no-key' };
   if (!str(v.apiKey).trim()) return { exists: false, why: 'no-key' };
   if (!pluginOn) return { exists: false, why: 'plugin-off' };
+  if (learnOn === false) return { exists: false, why: 'learn-off' };
   return { exists: true, why: null, source: (integrationRow && integrationRow.source) || null };
 }
 

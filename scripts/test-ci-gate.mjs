@@ -253,6 +253,8 @@ console.log('\n§2e no fast suite asserts a wall-clock bound on its own run');
   ok(!held.length && !Object.keys(baseline).length, `THE RATCHET IS AT 0 (lane wall-clock-ratchet-down): no literal wall-clock bound held in any fast suite, the baseline empty — the next one is a NEW one, RED (${held.length} held, ${Object.keys(baseline).length} baseline rows)`);
   // PLANTS: every spelling of the class is LITERAL; every legitimate form is classified out of it
   const kinds = (src) => WC.wallClockFindings(src).map((f) => f.kind).join(',');
+  // two spans measured in the run: a control and the thing judged against it
+  const TWO = 'const t = performance.now(); a(); const ctl = performance.now() - t; const u = performance.now(); b(); const fix = performance.now() - u; ';
   const RED = {
     'Date.now() delta': "const t0 = Date.now(); run(); ok('fast', Date.now() - t0 < 3000);",
     'performance.now() span variable': "const t = performance.now(); run(); const ms = performance.now() - t; ok('fast', ms < 500);",
@@ -278,6 +280,14 @@ console.log('\n§2e no fast suite asserts a wall-clock bound on its own run');
     'a span in a Set, spread': "const s = new Set(); const t = Date.now(); run(); s.add(Date.now() - t); ok(Math.max(...s) < 300);",
     'a clock function (`const now = () => Date.now()`)': "const now = () => Date.now(); const t0 = now(); run(); ok(now() - t0 < 300);",
     'a for-of over an array of spans': "const times = []; for (const x of xs) { const t = Date.now(); run(x); times.push(Date.now() - t); } for (const ms of times) ok(ms < 300);",
+    // lane reconnect-storm-band (.272): THE BAND — a bound relative to a control that adds a literal number of ms
+    'a control plus a literal band (test-reconnect-storm (d) before .272)': TWO + 'const lband = Math.max(ctl * 0.25, 25); ok(fix <= ctl + lband);',
+    'a control plus a bare literal': TWO + 'ok(fix <= ctl + 50);',
+    'a literal floor under a scaled control': TWO + 'ok(fix <= Math.max(ctl * 1.25, 50));',
+    'the band on the left (`ctl + 25 >= fix`)': TWO + 'ok(ctl + 25 >= fix);',
+    'a band in an if-test failure': TWO + "if (fix > ctl + 40) bad.push('slow');",
+    'a literal ms × an environment factor': "const slack = process.env.CI ? 4 : 1; const t = Date.now(); run(); ok(Date.now() - t < 250 * slack);",
+    'a literal ms per item (× a count)': 'const t = Date.now(); run(rows); ok(Date.now() - t < 50 * rows.length);',
   };
   const OUT = {
     wait: ["const t0 = Date.now(); while (Date.now() - t0 < 5000 && !done()) await sleep(50);", 'wait'],
@@ -287,6 +297,13 @@ console.log('\n§2e no fast suite asserts a wall-clock bound on its own run');
     'a const the suite hands the fake': ["const HOLD = 300; fake.holdMs = HOLD; const t0 = Date.now(); await fake.run(); ok(Date.now() - t0 < 3 * HOLD);", 'control'],
     'a control measured in the run': ["const t = performance.now(); a(); const ta = performance.now() - t; const u = performance.now(); b(); const tb = performance.now() - u; ok(tb < 4 * ta);", 'control'],
     'a noise-floor conjunct': ["const t = performance.now(); a(); const ta = performance.now() - t; if (ta > 10 && other > 2.5) bad.push('x');", 'guard'],
+    // lane reconnect-storm-band: the look-alikes of a band — the control scaled (a ratio), a band made of the control
+    // itself, the mechanism's constant as the band, a band on a LOWER bound
+    'K × the control': [TWO + 'ok(fix <= 2 * ctl);', 'control'],
+    'a relative band (`ctl + ctl * 0.25`)': [TWO + 'ok(fix <= ctl + ctl * 0.25);', 'control'],
+    "the mechanism's constant as the band": [TWO + 'const SLOT_MS = 250; prod.slotMs = SLOT_MS; ok(fix <= ctl + SLOT_MS);', 'control'],
+    'a band on a lower bound': [TWO + 'ok(fix >= ctl + 50);', 'lower'],
+    'a timestamp plus a number (a deadline, never a band)': ["const NOW = Date.now(); const T0 = NOW - 3 * 86400e3; const r = { at: Date.now() - 5 }; ok(Number(r.at) < T0 + 1000);", 'control'],
     "F13's form since .270 (a stall against a control loop of the same length)": ["const f13 = async () => { let maxGap = 0, last = performance.now(); const tick = () => { const t = performance.now(); maxGap = Math.max(maxGap, t - last); last = t; }; tick(); const ctl = performance.now() - last; return { maxGap: +maxGap.toFixed(1), ctlGap: +ctl.toFixed(1) }; }; const r13 = await f13(); ok(r13.maxGap <= 3 * r13.ctlGap);", 'control'],
   };
   const redWrong = Object.entries(RED).filter(([, src]) => kinds(src) !== 'LITERAL').map(([n, src]) => `${n} → ${kinds(src) || 'not seen'}`);
@@ -363,6 +380,22 @@ console.log('\n§2e no fast suite asserts a wall-clock bound on its own run');
   else {
     const pF13 = WC.ratchetVerdict(plantSuite('test-oat-materialize', a7321), baseline).problems.filter((p) => p.startsWith('test-oat-materialize'));
     ok(pF13.length === 1 && /r13\.maxGap < 50/.test(pF13[0]), `CONTROL: a7321ff0e's test-oat-materialize (\`r13.maxGap < 50\`, the 59.4 ms red) reads RED here (${pF13.length} problem${pF13.length === 1 ? '' : 's'})`);
+  }
+  // THE THIRD INCIDENT (lane reconnect-storm-band): .271's heavy shard 6/6 went red on test-reconnect-storm (d), `fix ≤
+  // control + max(25 %, 25 ms)` on the server's loop delay — 61 vs 31 and 60 vs 25 on ubuntu-latest — a bound relative to
+  // a control that ADDS a literal band. That suite is HEAVY (this census reads the fast tier) and its loop figures come
+  // off the server's preload log under names that carry no unit (`loopMax`, `gapMax`, `visP95`): planted with those names
+  // read as the durations they are, rel270's copy reads RED on (d)'s two banded legs and on (b)'s `+ 50`; today's holds none
+  const STORM_FIELDS = ['loopMax', 'gapMax', 'visP95'];
+  const stormNow = WC.wallClockFindings(fs.readFileSync(path.join(REPO, 'scripts', 'test-reconnect-storm.mjs'), 'utf-8'), { fields: STORM_FIELDS });
+  ok(!stormNow.some((f) => f.kind === 'LITERAL') && stormNow.some((f) => f.kind === 'control'), `today's test-reconnect-storm, planted the same way, holds no literal band — (b) is a ratio to the control (${stormNow.map((f) => `${f.kind} :${f.line}`).join(' · ')})`);
+  let storm270 = null;
+  try { storm270 = git(REPO, ['show', '25cd69aef:scripts/test-reconnect-storm.mjs']); } catch { storm270 = null; }
+  if (storm270 === null) console.log('    SKIP: 25cd69aef is not in this checkout (a depth-1 clone) — the reconnect-storm (d) control needs rel270');
+  else {
+    const pS = WC.ratchetVerdict([...suites, { name: 'test-reconnect-storm', findings: WC.wallClockFindings(storm270, { fields: STORM_FIELDS }) }], baseline).problems.filter((p) => p.startsWith('test-reconnect-storm'));
+    ok(pS.length === 3 && [/F\.loopMax <= C\.loopMax \+ lband/, /F\.gapMax <= Math\.max\(C\.gapMax \+ band, 50\)/, /F\.visP95 <= C\.visP95 \+ 50/].every((re) => pS.some((p) => re.test(p) && /under 1000 ms/.test(p))),
+      `CONTROL: 25cd69aef's test-reconnect-storm, planted, reads RED on (d)'s loop-delay and srv-loop-gap-ms bands and on (b)'s \`+ 50\` (${pS.length} problems)`);
   }
 }
 

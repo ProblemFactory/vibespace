@@ -32,7 +32,7 @@ const { makeRecord, makeConversation } = require(path.join(repo, 'src/channel-re
 const S = require(path.join(repo, 'src/server/integration-store.js'));
 const DE = require(path.join(repo, 'src/server/decision-engine.js'));
 const { PluginManager } = require(path.join(repo, 'src/plugins.js'));
-const DP = require(path.join(repo, 'src/plugins/decision-api.js'));
+const DP = require(path.join(repo, 'src/plugins/llm.js'));
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -74,9 +74,9 @@ function decisionSide() {
   return { store, eng, pm };
 }
 let D = decisionSide();
-D.store.setIntegration('decision-api', { provider: 'openai', apiKey: SECRET });
-D.pm.setEnabled('decision-api', true);
-D.pm.setConfig('decision-api', { rules: true, routing: true });
+D.store.setIntegration('llm', { provider: 'openai', apiKey: SECRET });
+D.pm.setEnabled('llm', true);
+D.pm.setConfig('llm', { rules: true, routing: true });
 
 const GA = { kind: 'group', id: 'T-a', name: 'Billing desk' }, GB = { kind: 'group', id: 'T-b', name: 'Tech desk' }, AG3 = { kind: 'agent', id: 'agent-3', name: 'Ledger' };
 const PRED = F.validateRule({ kind: 'decision', condition: 'the sender asks me to pay an invoice' }).rule;
@@ -177,19 +177,19 @@ console.log('C the rule\'s hour cap spent ⇒ no call + ONE journal line');
 
 console.log('D the plugin off ⇒ no call; the routing switch off ⇒ only the predicate is asked');
 {
-  D.pm.setEnabled('decision-api', false);
+  D.pm.setEnabled('llm', false);
   const w = await world('d', { watchers: [W(AG3, [PRED]), W(GB, [ROUTE])] });
   const n = got.length;
   await w.ingest('dr-d1', 'Invoice 11 — the server is down.');
   await w.ingest('dr-d2', 'Invoice 12 — the server is down again.');
   const off = w.lines.filter((l) => /not judged — plugin-off/.test(l));
   ok(got.length === n && !w.ladder.calls.length && off.length === 2, `plugin off: 0 calls, 0 wakes, one journal line per rule (${off.length}) — not per record`, w.lines);
-  D.pm.setEnabled('decision-api', true);
-  D.pm.setConfig('decision-api', { routing: false });
+  D.pm.setEnabled('llm', true);
+  D.pm.setConfig('llm', { routing: false });
   await w.ingest('dr-d3', 'Invoice 13 — the server is down for good.');
   const q = got[got.length - 1];
   ok(got.length === n + 1 && q.body.questions.length === 1 && q.body.questions[0].type === 'predicate' && callsTo(w, 'agent-3').length === 1 && !callsTo(w, 'agent-2').length && w.lines.some((l) => /not judged — feature-off/.test(l)), 'routing off: the call carries ONLY the predicate (rules on); the route is said feature-off and routes nothing');
-  D.pm.setConfig('decision-api', { routing: true });
+  D.pm.setConfig('llm', { routing: true });
   w.stop();
 }
 
@@ -271,17 +271,17 @@ const ROW = `(() => {
   const sr = sw && sw.filter && sw.filter.rules;
   ok(sr && sr.length === 2 && sr[1].kind === 'decision' && sr[1].threshold === 0.8 && sr[1].choices.map((o) => `${o.value}>${o.to.kind}:${o.to.id}`).join() === 'billing>group:T-a,tech>group:T-b' && F.validateFilter(sw.filter).ok, 'desk: the saved row carries the moved threshold (0.80) and both routes — and passes the server\'s validator', sw);
   pg.close();
-  D.pm.setEnabled('decision-api', false);
+  D.pm.setEnabled('llm', false);
   const ph = await page(390, 844, 'zh');
   await ph.until(`!!document.querySelector('.chan-dec-off')`);
   const Z = await ph.ev(ROW);
   const fit = Z[Z.length - 1];
-  ok(Z[0].off && /决策 API 插件已关闭/.test(Z[0].off) && Z[1].off && !Z[0].disabled && !Z[1].disabled, `phone (zh): the plugin OFF is said on the row ("${Z[0].off}") — the controls stay live, never greyed`, Z);
+  ok(Z[0].off && /LLM 插件已关闭/.test(Z[0].off) && Z[1].off && !Z[0].disabled && !Z[1].disabled, `phone (zh): the plugin OFF is said on the row ("${Z[0].off}") — the controls stay live, never greyed`, Z);
   ok(fit.sw <= fit.vw + 1, `phone 390: the dialog fits (scrollWidth ${fit.sw} ≤ ${fit.vw})`, fit);
   ok(await ph.press('.chan-dec-open') && await ph.until(`window.__plugins === 1`, 10), 'phone: Open Plugins on the row opens the Plugins card (app.openPluginsDialog)');
   await ph.shot('phone.png', '.chan-af-decision');
   ph.close();
-  D.pm.setEnabled('decision-api', true);
+  D.pm.setEnabled('llm', true);
 }
 finish();
 function finish() {

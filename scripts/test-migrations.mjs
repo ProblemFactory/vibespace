@@ -1969,6 +1969,114 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const nr = purgeCodexForkReplays({ dataDir: path.join(nroot, 'data'), codexSessionsDir: path.join(fhome, '.codex', 'sessions'), id: ID });
     ok(nr.archived === 0 && fs.readFileSync(path.join(nroot, 'data', 'usage-history', 'events-2026-08.ndjson'), 'utf8') === claudeOnly && !fs.existsSync(path.join(nroot, 'data', 'archive')), 'a ledger without codex rows: byte-identical (even a CRLF, a blank and a torn line), no archive dir', nr);
   }
+  // ── 2026-10-llm-rename (lane llm-plugin-rename): the Decision API plugin → the LLM plugin — settings.json keys,
+  // plugins.json's record (THROUGH the live PluginManager), integrations.json's row (THROUGH the live store) + the card's
+  // retired `model` → plugin.llm.judgeModel; the decision-* data files untouched; idempotent; new wins on a half move ──
+  {
+    console.log('2026-10-llm-rename');
+    const ID = '2026-10-llm-rename', OLD = 'decision-' + 'api';   // the pre-rename id, as the stores on disk spell it
+    const { PluginManager } = require('../src/plugins.js');
+    const S = require('../src/server/integration-store.js');
+    const KEY = ['sk-or-v1-', 'a'.repeat(40)].join(''), KEY2 = ['sk-or-v1-', 'b'.repeat(40)].join('');
+    const rd = (f) => JSON.parse(fs.readFileSync(f, 'utf8'));
+    // the settings store the server hands the plugin manager: ONE writer over data/settings.json (null deletes)
+    const fileSettings = (dataDir) => {
+      const f = path.join(dataDir, 'settings.json');
+      return { read: () => { try { return rd(f); } catch { return {}; } }, patch: (p) => { const m = { ...(fs.existsSync(f) ? rd(f) : {}), ...p }; for (const [k, v] of Object.entries(m)) if (v === null) delete m[k]; fs.writeFileSync(f, JSON.stringify(m, null, 2)); } };
+    };
+    /** an instance on disk as the old release left it: the old row's record (an encrypted key through a REAL store, then
+     *  re-keyed under the old id the way that release wrote it), its plugins.json record, its settings keys */
+    const oldInstance = (tag, { settings = {}, plugins = {}, row = null, extraRows = {} } = {}) => {
+      const root = path.join(tmp, 'llm-' + tag), dataDir = path.join(root, 'data'); fs.mkdirSync(dataDir, { recursive: true });
+      fs.writeFileSync(path.join(dataDir, 'settings.json'), JSON.stringify(settings, null, 2));
+      fs.writeFileSync(path.join(dataDir, 'plugins.json'), JSON.stringify({ plugins }, null, 2));
+      if (row) {
+        const st0 = S.create({ dataDir, env: {}, log: { warn() {}, log() {}, error() {} } });
+        st0.setIntegration('llm', { provider: row.provider, apiKey: row.apiKey });
+        const doc = rd(path.join(dataDir, 'integrations.json'));
+        const rec = doc.integrations.llm; delete doc.integrations.llm;
+        if (row.model !== undefined) rec.values.model = row.model;
+        Object.assign(rec, { clusterKey: row.clusterKey || null, testedAt: 1700000000000, lastOk: true, lastError: null });
+        doc.integrations[row.id || OLD] = rec;
+        for (const [id, r] of Object.entries(extraRows)) { st0.setIntegration('llm', { provider: r.provider, apiKey: r.apiKey }); const d2 = rd(path.join(dataDir, 'integrations.json')); doc.integrations[id] = d2.integrations.llm; }
+        fs.writeFileSync(path.join(dataDir, 'integrations.json'), JSON.stringify(doc, null, 2));
+      }
+      for (const n of ['decision-memo.json', 'decision-usage.json', 'decision-journal.jsonl']) fs.writeFileSync(path.join(dataDir, n), `{"kept":"${n}"}\n`);
+      const live = () => ({ pm: new PluginManager({ dataDir, settings: fileSettings(dataDir) }), st: S.create({ dataDir, env: {}, log: { warn() {}, log() {}, error() {} } }) });
+      return { root, dataDir, live };
+    };
+    const runOne = (inst, handles) => create({ rootDir: inst.root, homeDir: scratchHomeDir, serverNotice: () => { }, ...handles }).runLocalMigrations().find((r) => r.id === ID);
+
+    // (1) the whole move, one instance: every store before → after
+    const a = oldInstance('full', {
+      settings: { [`plugin.${OLD}.attention`]: true, [`plugin.${OLD}.dailyBudgetUsd`]: 2.5, [`plugin.${OLD}.inbox`]: true, 'plugin.llm.inbox': false, 'decision.threshold': 0.8, 'decision.attentionBlock': 'Invoices matter.', 'chat.compactMode': true },
+      plugins: { [OLD]: { enabled: true }, tailscale: { enabled: false, mode: 'auto' } },
+      row: { provider: 'openrouter', apiKey: KEY, model: 'openai/gpt-6-luna-decisions', clusterKey: null },
+    });
+    const before = { s: rd(path.join(a.dataDir, 'settings.json')), p: rd(path.join(a.dataDir, 'plugins.json')), i: rd(path.join(a.dataDir, 'integrations.json')) };
+    const h = a.live();
+    const ra = runOne(a, { plugins: h.pm, integrations: h.st });
+    const s1 = rd(path.join(a.dataDir, 'settings.json')), p1 = rd(path.join(a.dataDir, 'plugins.json')), i1 = rd(path.join(a.dataDir, 'integrations.json'));
+    ok(ra && ra.status === 'ran', 'the migration ran (recorded once)', ra);
+    ok(!Object.keys(s1).some((k) => k.startsWith(`plugin.${OLD}.`)) && s1['plugin.llm.attention'] === true && s1['plugin.llm.dailyBudgetUsd'] === 2.5 && s1['plugin.llm.inbox'] === false,
+      'settings: plugin.<old>.* → plugin.llm.* (attention, the budget); the NEW key that already held a value WINS (inbox stays false); no old key left', s1);
+    ok(s1['decision.threshold'] === 0.8 && s1['decision.attentionBlock'] === 'Invoices matter.' && s1['chat.compactMode'] === true, 'settings: the legacy decision.* spellings and every other key are untouched');
+    ok(s1['plugin.llm.judgeModel'] === 'openai/gpt-6-luna-decisions', `settings: the card's model → plugin.llm.judgeModel (${s1['plugin.llm.judgeModel']})`);
+    ok(!p1.plugins[OLD] && p1.plugins.llm && p1.plugins.llm.enabled === true && JSON.stringify(p1.plugins.tailscale) === JSON.stringify(before.p.plugins.tailscale) && h.pm.list().find((x) => x.id === 'llm').enabled === true,
+      'plugins.json: the record moved whole (enabled kept) THROUGH the live manager — its list says the LLM plugin is on; tailscale untouched', p1);
+    const oldRec = before.i.integrations[OLD], newRec = i1.integrations.llm;
+    ok(!i1.integrations[OLD] && newRec && newRec.values.apiKey === oldRec.values.apiKey && newRec.values.provider === 'openrouter' && !('model' in newRec.values) && newRec.testedAt === oldRec.testedAt && newRec.lastOk === true && newRec.clusterKey === null,
+      'integrations.json: the row moved (the ciphertext byte for byte, the provider, the Test state, the own|cluster choice); the retired model left it', i1);
+    ok(h.st.resolveIntegration('llm').source === 'user' && h.st.resolveIntegration('llm').values.apiKey === KEY, 'the live store answers the moved key (it decrypts under the same key file)');
+    ok(['decision-memo.json', 'decision-usage.json', 'decision-journal.jsonl'].every((n) => fs.readFileSync(path.join(a.dataDir, n), 'utf8') === `{"kept":"${n}"}\n`), 'data/decision-memo.json / decision-usage.json / decision-journal.jsonl keep their names and bytes');
+    console.log(`    report: ${JSON.stringify(ra.report)}`);
+    // (2) idempotent: the ledger says already; the move itself run again changes nothing
+    const again = runOne(a, { plugins: h.pm, integrations: h.st });
+    const mig = create({ rootDir: a.root, homeDir: scratchHomeDir, plugins: h.pm, integrations: h.st }).MIGRATIONS.find((m) => m.id === ID);
+    const r2 = mig.run();
+    ok(again.status === 'already' && r2.plugins === 'none' && !r2.integrations.moved && !r2.integrations.dropped && !r2.settings.moved.length && !r2.settings.seeded.length
+      && JSON.stringify(rd(path.join(a.dataDir, 'settings.json'))) === JSON.stringify(s1) && JSON.stringify(rd(path.join(a.dataDir, 'plugins.json'))) === JSON.stringify(p1) && JSON.stringify(rd(path.join(a.dataDir, 'integrations.json'))) === JSON.stringify(i1),
+      'running twice is a no-op (the ledger, and the move itself: every store byte-identical)', r2);
+    // (3) a HALF-migrated store: both ids present ⇒ the new one wins, the old one is removed — never merged
+    const b = oldInstance('half', {
+      settings: { [`plugin.${OLD}.rules`]: true, 'plugin.llm.rules': false, 'plugin.llm.judgeModel': 'mine/model' },
+      plugins: { [OLD]: { enabled: false, stale: 1 }, llm: { enabled: true } },
+      row: { provider: 'openai', apiKey: KEY2, model: 'gpt-6-luna-mini' }, extraRows: { llm: { provider: 'openrouter', apiKey: KEY } },
+    });
+    const hb = b.live();
+    const rb = runOne(b, { plugins: hb.pm, integrations: hb.st });
+    const sb = rd(path.join(b.dataDir, 'settings.json')), pb = rd(path.join(b.dataDir, 'plugins.json')), ib = rd(path.join(b.dataDir, 'integrations.json'));
+    ok(rb.status === 'ran' && rb.report.plugins === 'dropped' && rb.report.integrations.dropped === true, 'half-migrated: reported as dropped (the old record), not moved', rb.report);
+    ok(JSON.stringify(pb.plugins.llm) === '{"enabled":true}' && !pb.plugins[OLD] && sb['plugin.llm.rules'] === false && !(`plugin.${OLD}.rules` in sb), 'half-migrated: plugins.json and settings keep the NEW values whole (no `stale` field merged in), the old ones are gone', { pb, sb });
+    ok(!ib.integrations[OLD] && hb.st.resolveIntegration('llm').values.apiKey === KEY && hb.st.resolveIntegration('llm').values.provider === 'openrouter', 'half-migrated: the integrations row under the new id wins (its key, its provider); the old one is removed');
+    ok(sb['plugin.llm.judgeModel'] === 'mine/model', 'a judgeModel the person already set is never overwritten by the card\'s old model');
+    // (4) an instance that SKIPPED the config → settings move (it upgrades straight past it): the old record still holds
+    // `config`; the shipped move runs first (the table now has the new id: nothing under it), the rename moves the record
+    // and runs the config → settings move again
+    const c = oldInstance('jump', { plugins: { [OLD]: { enabled: true, config: { attention: true, dailyBudgetCents: 250, threshold: 0.75 } } } });
+    const hc = c.live();
+    const rc = create({ rootDir: c.root, homeDir: scratchHomeDir, serverNotice: () => { }, plugins: hc.pm, integrations: hc.st }).runLocalMigrations();
+    const sc = rd(path.join(c.dataDir, 'settings.json')), pc = rd(path.join(c.dataDir, 'plugins.json'));
+    ok(rc.find((r) => r.id === '2026-10-plugin-config-to-settings').status === 'ran' && rc.find((r) => r.id === ID).status === 'ran' && sc['plugin.llm.attention'] === true && sc['plugin.llm.dailyBudgetUsd'] === 2.5 && JSON.stringify(pc.plugins.llm) === '{"enabled":true}',
+      'a jump past both: the old record\'s config lands in settings under the new id, plugins.json keeps only enabled', { sc, pc });
+    // (5) no live store handed in while the disk holds something to move ⇒ FAILED by name, never recorded (retried next boot)
+    const d = oldInstance('nohandle', { plugins: { [OLD]: { enabled: true } } });
+    const rd5 = runOne(d, {});
+    const led = rd(path.join(d.dataDir, 'migrations.json'));
+    ok(rd5.status === 'failed' && /no live PluginManager/.test(rd5.error) && !led.applied[ID] && rd(path.join(d.dataDir, 'plugins.json')).plugins[OLD], 'no manager + an old record on disk ⇒ FAILED by name, not recorded, nothing touched', rd5);
+    const e = oldInstance('nostore', { row: { provider: 'openai', apiKey: KEY2 } });
+    const re5 = runOne(e, { plugins: e.live().pm });
+    ok(re5.status === 'failed' && /no live integration store/.test(re5.error), 'no integration store + the old row on disk ⇒ FAILED by name', re5);
+    const fresh = path.join(tmp, 'llm-fresh'); fs.mkdirSync(path.join(fresh, 'data'), { recursive: true });
+    const rf = create({ rootDir: fresh, homeDir: scratchHomeDir, serverNotice: () => { } }).runLocalMigrations().find((r) => r.id === ID);
+    ok(rf.status === 'ran' && rf.report.plugins === 'none' && rf.report.judgeModel === 'none', 'CONTROL: a fresh instance (nothing under the old id, no handles) is a dry run — a success', rf);
+    // RED CONTROL: a plugin manager whose rename MERGED would carry the stale field over (the rule above is what keeps it out)
+    const merged = oldInstance('merge-ctl', { plugins: { [OLD]: { enabled: false, stale: 1 }, llm: { enabled: true } } });
+    const hm = merged.live();
+    hm.pm.renamePlugin = function (from, to) { const P = this._state.plugins; P[to] = { ...P[from], ...P[to] }; delete P[from]; this._save({ loud: true }); return { settings: { moved: [], dropped: [], seeded: [] }, record: 'merged', config: null }; };
+    runOne(merged, { plugins: hm.pm, integrations: hm.st });
+    ok('stale' in rd(path.join(merged.dataDir, 'plugins.json')).plugins.llm, 'RED CONTROL: a merging rename carries the old record\'s stale field into the new one (the half-migrated leg would go red)');
+  }
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true });
 }

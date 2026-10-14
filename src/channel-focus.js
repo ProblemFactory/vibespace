@@ -60,7 +60,7 @@ const TAG_ORDER = Object.freeze(['awaiting', 'unknown', 'at-you', 'assigned', 'r
 
 // lane attention-policy (owner 2026-10-13: "应该允许禁用原来的固定规则，或者直接加个配置选项可以改怎么判断需关注"): THE FIRST
 // SCREEN IS THE OWNER'S POLICY. Each fixed rule is a switch — the setting `channels.attention.rule.<code>`, default on
-// (`read` covers read + new-since-read) — and the judge's switch is the Decision API plugin's own `attention` feature
+// (`read` covers read + new-since-read) — and the judge's switch is the LLM plugin's own `attention` feature
 // (ONE store: the plugin's config, never a flag here). A rule switched off never lands its row: `statusTag` skips it
 // and asks the next rule that is on, so the row keeps any other reason it has and otherwise stays under All with its
 // facts. No policy, or every switch on = the table above, byte for byte. A preset SETS the switches (a convenience
@@ -162,7 +162,7 @@ function atYouOf(row, now = Date.now()) {
 }
 
 // lane decision-attention (D2 of docs/design-decision-api.zh.md §2.4): THE JUDGED TAG — a row no FACT tag claims, judged by
-// the Decision API (the engine's async scan, src/server/channels-attention.js) to need the owner now. The row's `judged` =
+// the LLM plugin (the engine's async scan, src/server/channels-attention.js) to need the owner now. The row's `judged` =
 // `{p, clauses: [name], source, rubricV, lastAt, threshold, label?}`: it speaks ONLY of the message it was judged on
 // (`lastAt` — a newer message waits for its own verdict), `p ≥ threshold` (the setting `decision.threshold`), and the
 // person's own label wins (`label: 'needs'` keeps it, `'not'` drops it). The facts are free and stronger: the scan never

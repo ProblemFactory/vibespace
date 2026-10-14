@@ -9,12 +9,12 @@ import { renderVoiceSheet } from './voice-plugin-card.js'; // the Voice row's �
 import { pluginCategoryOf } from './settings-schema.js';
 import { decisionLineOf, paintDecisionLine, liveDecisionLine } from './decision-readout.js'; // lane decision-spend-readout: the judge's money as the row's second line
 
-// lane decision-vendor-hygiene: the Decision API row's STOPS (decision-model rowStopOf — no call until the key or the
+// lane decision-vendor-hygiene: the LLM plugin row's STOPS (decision-model rowStopOf — no call until the key or the
 // model changes): the chip says which, its title says what to do. `s` = the engine's status().stop {why, status, at}.
 const DECISION_STOP_WORDS = Object.freeze({
   reconnect: (s) => [t('stopped — key refused'), t('Reconnect: the provider refused this key (HTTP {status}).', { status: s.status })],
-  plan: () => [t('stopped — plan refused'), t('The Decision API stopped: the provider says the plan does not allow this model (HTTP 402). Change the model or the key in ⚙ → System → Integrations & keys.')],
-  shape: () => [t('stopped — model refused'), t('The Decision API stopped: the model refused the request shape (HTTP 400). Change the model or the key in ⚙ → System → Integrations & keys.')],
+  plan: () => [t('stopped — plan refused'), t('The LLM plugin stopped: the provider says the plan does not allow this model (HTTP 402). Change the judging model in Settings › Plugins › LLM or the key in ⚙ → System → Integrations & keys.')],
+  shape: () => [t('stopped — model refused'), t('The LLM plugin stopped: the model refused the request shape (HTTP 400). Change the judging model in Settings › Plugins › LLM or the key in ⚙ → System → Integrations & keys.')],
 });
 
 // lane plugin-settings-p0 (owner 2026-10-13, the VS Code plugin model — docs/design-plugin-settings.zh.md): the
@@ -35,7 +35,7 @@ function makeSwitch(on, { disabled = false, label, onChange }) {
   return l;
 }
 /** one list row: icon dot · name + description [+ a readout line] · chip · switch · [install] · ⚙ — `fact` is a READOUT
- *  (a drawn element, not a control: the Decision API's money today, lane decision-spend-readout), under the description */
+ *  (a drawn element, not a control: the LLM plugin's money today, lane decision-spend-readout), under the description */
 function pluginRow({ id, label, description, tone, chip, chipTitle, onChip, sw, install, gear, fact = null }) {
   const row = document.createElement('div');
   row.className = 'plugin-row'; row.dataset.plugin = id;

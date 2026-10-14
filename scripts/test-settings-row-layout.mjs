@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // test-settings-row-layout — HEAVY (lane settings-multiline-row, owner 2026-10-14 「这个地方布局有点问题」: All Settings ›
-// 插件 › Decision API › 「我在乎什么（决策 API）」 — the multi-line box kept its own width and crushed the row's words to a
+// 插件 › LLM › 「我在乎什么」 — the multi-line box kept its own width and crushed the row's words to a
 // ~80 px sliver, the label wrapped five lines). The REAL SettingsUI.open() (an esbuild iife of the tree) in headless chrome
 // (zh, light, advanced rows shown) over a stub hub (every /api read answers {}), the REAL style.css, the Settings window's
 // content at 600 / 760 (the owner's) / 1200 px on a desk viewport and at 390 px on a phone:
@@ -15,7 +15,7 @@
 //   ⑤ CONTROL — the pre-fix page (style.css without the lane's block, the renderer without the stack class): the box
 //     beside the words at one fixed width at 600 / 760 / 1200, the words < 40 % of the row at 600 px and on the phone
 //     (the owner's shape), and the fixture's words < 40 % at 600 px (③)
-// PNGs → SETTINGS_ROW_LAYOUT_PNG_DIR: decision-{600,760}-{before,after}.png (the Decision API section: the box + its
+// PNGs → SETTINGS_ROW_LAYOUT_PNG_DIR: decision-{600,760}-{before,after}.png (the LLM plugin section: the box + its
 // switch rows), rail-600-{before,after}.png, phone-390-{before,after}.png (the 我在乎什么 row).
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';

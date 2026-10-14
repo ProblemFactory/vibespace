@@ -220,7 +220,7 @@ function partsOf(entry, ctx) {
 
 /** The reply box (design-user-inbox-reply D3b): Enter sends, Shift+Enter is a
  *  newline, Esc folds — the panel owns those keys; this only builds it. */
-/** lane inbox-decision-group: a placed item's chip while the tray draws the Decision API's sections. v2 (lane
+/** lane inbox-decision-group: a placed item's chip while the tray draws the LLM plugin's sections. v2 (lane
  *  decision-inbox-rank): THE REASON in OUR words, never the vendor's — 卡住等你 / 有期限 · <the item's own date phrase> /
  *  随时 / 48 小时无人再问; the title says who placed it (the agent's status, the clock, or the judge with its p). A v1
  *  verdict keeps 现在 / 可等 until v2 scores it again. Nothing when off. */
@@ -230,12 +230,12 @@ export function judgedChipHtml(i, t, ctx) {
   const p = c.p !== null ? ` (p ${c.p.toFixed(2)})` : '';
   let word, title;
   if (c.why === 'stale') { word = t('Nobody asked again in 48 h'); title = t('Asked over 48 hours ago, and nobody asked again since'); }
-  else if (c.why === 'blocked') { word = t('Agent waits on you'); title = c.fact ? t('Its agent set its status to blocked for this question') : t('The Decision API chose this reason') + p; }
-  else if (c.why === 'dated') { word = c.dated ? t('Due {when}', { when: c.dated }) : t('Has a deadline'); title = t('The Decision API chose this reason') + p; }
-  else if (c.why === 'whenever') { word = t('Any time'); title = t('The Decision API chose this reason') + p; }
+  else if (c.why === 'blocked') { word = t('Agent waits on you'); title = c.fact ? t('Its agent set its status to blocked for this question') : t('The LLM plugin chose this reason') + p; }
+  else if (c.why === 'dated') { word = c.dated ? t('Due {when}', { when: c.dated }) : t('Has a deadline'); title = t('The LLM plugin chose this reason') + p; }
+  else if (c.why === 'whenever') { word = t('Any time'); title = t('The LLM plugin chose this reason') + p; }
   else {
     word = c.group === 'now' ? t('now') : t('can wait');
-    title = t('Sorted by the Decision API — {why}', { why: c.group === 'now' ? t('needs you now: an agent waits on your decision, a deadline, money or someone waiting on your reply') : t('can wait: a notice, a finished report, nothing to do') }) + p;
+    title = t('Sorted by the LLM plugin — {why}', { why: c.group === 'now' ? t('needs you now: an agent waits on your decision, a deadline, money or someone waiting on your reply') : t('can wait: a notice, a finished report, nothing to do') }) + p;
   }
   return ` · <span class="ut-judged" data-group="${c.group}" data-why="${c.why || ''}" title="${escHtml(title)}">${escHtml(word)}</span>`;
 }

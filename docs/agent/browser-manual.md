@@ -263,6 +263,14 @@ Exit codes: `0` ok · `1` a typed refusal, or the page command itself failed ·
   applied). A navigation refused as "not in the allowed domains list" is the
   user's own fence: tell them which domain you need.
 
+### A page of an exact size — `vibespace-browser size`
+
+(a screenshot at 1920×1080, a layout at a given width): `vibespace-browser size 1920x1080` (or `vibespace-browser open <url> --size 1920x1080`)
+FIXES this conversation's page at that size (1280x720 | 1920x1080 | 2560x1440 | your own WxH) — every live view shows
+the same picture scaled to its pane, `snapshot` / `screenshot` see exactly that, and nobody watching never undoes it;
+`vibespace-browser size auto` gives the size back to the live view. The user may change it from the live view's window
+menu (Pin size…). A refused size exits 2 with the reason.
+
 ### Page dialogs — a page that will not move until you answer it
 
 A page can open a **dialog** that holds everything until somebody answers it:

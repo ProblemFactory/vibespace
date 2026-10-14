@@ -74,7 +74,7 @@ const fs = require('fs');
 const path = require('path');
 const R = require('../integration-registry.js');
 const PL = require('../preset-layers.js');
-const { secretBox, SecretBoxError, holdsCiphertext, describeJsonError } = require('../secret-box.js');
+const { secretBox, SecretBoxError, holdsCiphertext, describeJsonError, BOX_CIPHERTEXT_RE } = require('../secret-box.js');
 const { writeJsonAtomic } = require('../channel-store.js');
 
 const TEST_TIMEOUT_MS = 15000;          // a human-triggered probe, bounded
@@ -125,6 +125,7 @@ function create(deps = {}) {
   let loadErrorSaid = null;           // the last such line logged (publicView is polled; one line per transition)
   const undecryptableSaid = new Map(); // row id -> the last "could not be decrypted" line logged (one per transition, per row)
   let envFormSaid = false;
+  const legacySaid = new Set();       // row ids whose "the old spelling is set beside the new one" line was said (once each)
 
   // ── persistence ──────────────────────────────────────────────────────────
   // ONLY ENOENT MEANS "FRESH" (2026-09-14, the round-1 verifier's HIGH — the
@@ -251,14 +252,30 @@ function create(deps = {}) {
     const fromFile = presets && typeof presets.entries === 'function' ? presets.entries('integrations') : null;
     return fromFile ? { entries: fromFile, rung: 'file' } : { entries: envJsonEntries(), rung: 'env' };
   }
+  /** A renamed row's PRE-RENAME ids (lane llm-plugin-rename: the LLM row's id before it) — the fleet's presets still
+   *  spell the row that way; the registry declares them (`clusterEnv.legacy`), this store reads them. */
+  const legacyIdsOf = (row) => (row.clusterEnv && row.clusterEnv.legacy && Array.isArray(row.clusterEnv.legacy.jsonKeys) ? row.clusterEnv.legacy.jsonKeys : []);
+  function legacySaidOnce(row, form) {
+    if (legacySaid.has(row.id + form)) return;
+    legacySaid.add(row.id + form);
+    log.log(`[integrations] ${row.id}: both its own ${form} and the pre-rename one (${legacyIdsOf(row).join(', ')}) are set — the row's own is in effect`);
+  }
   function envPrefixValues(row) {
     if (!row.clusterEnv || !row.clusterEnv.prefix) return null;
-    const out = {};
-    for (const f of row.fields) {
-      const v = env[envFieldName(row.id, f.key)];
-      if (v !== undefined && String(v).length) out[f.key] = String(v);
-    }
-    return Object.keys(out).length ? out : null;
+    // the card's fields + the preset values beyond them (`extras`: the LLM row's model, the plugin's judgeModel default)
+    const names = [...row.fields.map((f) => f.key), ...(Array.isArray(row.clusterEnv.extras) ? row.clusterEnv.extras : [])];
+    const read = (id) => {
+      const out = {};
+      for (const k of names) {
+        const v = env[envFieldName(id, k)];
+        if (v !== undefined && String(v).length) out[k] = String(v);
+      }
+      return Object.keys(out).length ? out : null;
+    };
+    const own = read(row.id);
+    // a pre-rename prefix only when the row's own says nothing — both set ⇒ the new one wins (said once)
+    for (const old of legacyIdsOf(row)) { const v = read(old); if (v && !own) return v; if (v) legacySaidOnce(row, 'single-field env form'); }
+    return own;
   }
   /** THE PRESET LIST the environment offers this row RIGHT NOW, as
    *  `[{key,label,values}]` — the delegating row's through the injected
@@ -270,7 +287,12 @@ function create(deps = {}) {
       return (drivePresets() || []).map((p) => ({ key: String(p.key), label: String(p.label || p.key), values: { clientId: String(p.clientId || ''), clientSecret: String(p.clientSecret || '') } }));
     }
     const src = clusterJsonEntries();
-    const json = src.entries.filter((e) => e.id === row.id);
+    let json = src.entries.filter((e) => e.id === row.id);
+    // a pre-rename id's entries only when none names the row by its own id — both ⇒ the row's own (said once)
+    for (const old of legacyIdsOf(row)) {
+      const was = src.entries.filter((e) => e.id === old);
+      if (was.length && !json.length) json = was; else if (was.length && json[0].id === row.id) legacySaidOnce(row, 'JSON entries');
+    }
     const fromPrefix = envPrefixValues(row);
     if (json.length && fromPrefix && !envFormSaid) {
       envFormSaid = true;
@@ -543,7 +565,7 @@ function create(deps = {}) {
     const out = [];
     for (const row of R.ROWS) {
       if (row.delegate || !row.clusterEnv) continue;
-      const mine = fileItems.filter((i) => i.kind === row.id);
+      const mine = fileItems.filter((i) => i.kind === row.id || legacyIdsOf(row).includes(i.kind));
       if (mine.length) { out.push(...mine); continue; }
       const n = clusterPresetsFor(row).length;   // the env JSON, or the single-field form as one preset
       if (n) out.push({ kind: row.id, source: 'env', n });
@@ -631,6 +653,34 @@ function create(deps = {}) {
     return changed(id, 'clear');
   }
 
+  /** A RENAMED ROW'S RECORD (lane llm-plugin-rename, migration 2026-10-llm-rename — through this LIVE store: it holds
+   *  integrations.json in memory and saves it whole). `plainOf(fromId, keys)` = the PLAINTEXT of values the old row
+   *  declared NON-secret (a ciphertext-shaped one is never handed out); `renameRecord(fromId, toId, {drop})` moves the
+   *  record whole — its values (a ciphertext stays as it is: the key file is the store's, not the row's), the
+   *  cluster|own choice (`clusterKey`), the Test state — and removes `drop` (values the new row has no field for) from
+   *  the record that survives. A record already under the new id WINS (a half-migrated store): the old one is removed,
+   *  never merged. No broadcast (a boot step: nothing is drawn yet). → {moved, dropped}. */
+  function plainOf(fromId, keys = []) {
+    const r = rec(String(fromId));
+    const out = {};
+    for (const k of keys) { const v = r && r.values ? r.values[k] : undefined; if (typeof v === 'string' && v.trim() && !BOX_CIPHERTEXT_RE.test(v)) out[k] = v.trim(); }
+    return out;
+  }
+  function renameRecord(fromId, toId, { drop = [] } = {}) {
+    if (!R.rowById(toId)) throw new IntegrationError('unknown-integration', `unknown integration '${toId}'`, { status: 404 });
+    assertWritable();
+    const s = load();
+    const old = s.integrations[fromId];
+    const had = !!s.integrations[toId];
+    if (!old && !had) return { moved: false, dropped: false };
+    if (old && !had) s.integrations[toId] = old;
+    if (old) delete s.integrations[fromId];
+    const r = s.integrations[toId];
+    for (const k of drop) if (r && r.values && k in r.values) delete r.values[k];
+    save();
+    return { moved: !!old && !had, dropped: !!old && had };
+  }
+
   // ── test: human-triggered, bounded, one in flight per id ─────────────────
   function registerTest(id, fn) {
     if (!R.rowById(id)) throw new Error(`registerTest: unknown integration '${id}'`);
@@ -674,7 +724,7 @@ function create(deps = {}) {
 
   return {
     resolveIntegration, offeredCredentials, presetsFor, legacyOwnValues, publicView, list,
-    setIntegration, setClusterKey, useClusterDefault, clearUserValues,
+    setIntegration, setClusterKey, useClusterDefault, clearUserValues, plainOf, renameRecord,
     test, registerTest, hasTestRunner: (id) => runners.has(id),
     onChange, presetsChanged, presetItems, file, keyFile: box.keyFile,
     IntegrationError, TEST_TIMEOUT_MS,

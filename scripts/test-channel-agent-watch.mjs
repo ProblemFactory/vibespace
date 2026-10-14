@@ -469,7 +469,7 @@ async function parityLeg(ENGM, name) {
   out.show = eng.agentWatchesFor(AG, KEY);
   out.refused = await eng.agentWatch(AG, KEY, { target: KEY, args: ['--regex', '(a+)+'] });
   out.kind = await eng.agentWatch(AG, KEY, { target: KEY, spec: { filter: { rules: [{ kind: 'nope' }] } } });
-  // lane decision-rule: the Decision API rule through the agent's flags (the same grammar), read back by --show
+  // lane decision-rule: the LLM plugin rule through the agent's flags (the same grammar), read back by --show
   out.dec = await eng.agentWatch(AG, KEY, { target: KEY, args: ['--kind', 'decision', '--condition', 'the sender asks me to pay', '--per-hour', '5'] });
   out.decShow = eng.agentWatchesFor(AG, KEY);
   // the USER sets a digest for this agent on the whole account — the agent reads it, never writes it

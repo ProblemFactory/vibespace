@@ -17,7 +17,7 @@
 // mini inbox's head opens THE window (src/lib/inbox-window.js, app.openInbox) —
 // the read-only viewer modal is retired.
 import { t, tc } from './i18n.js';
-import { inboxSections } from './user-todos-layout.js'; // lane inbox-decision-group: the Decision API's two tray sections (PURE)
+import { inboxSections } from './user-todos-layout.js'; // lane inbox-decision-group: the LLM plugin's two tray sections (PURE)
 import { sortGroups, openLayout, nextLayout, entriesFor, splitNotices, badgeCounts, inboxBadgeFor, miniInboxEntries, foldGroup, FOLD_MAX, noticeGroups, noticeChips, noticeFilterFor, tabCounts, NOTICE_FILTER_KEY, HISTORY_SEEN_KEY } from './user-todos-layout.js'; // PURE: the group order + append-only row order while the popup is open (inc-mtw02kbq-kj96); notices split (2.369.118); the flood fold (chunk 4); notices by origin + the tab counts (B-328d)
 import { inboxModel, tierCounts, actionWords } from './user-todos-actions.js'; // THE client model (§9): the store, the live facts (the running dot + the reply verdict, D1.5/D1.7), the words, every verb — shared with the For-you window
 import { trayWhere } from './user-todos-layout.js'; // lane S3: the new-item toast names the corner the tray sits in on this device
@@ -416,7 +416,7 @@ export function installUserTodos(app) {
     noticeFilter = origin || 'all';
     try { localStorage.setItem(NOTICE_FILTER_KEY, noticeFilter); } catch { }
   };
-  /** lane inbox-decision-group: the Decision API's section heads — 「现在要你」 above .ut-groups, 「待判断」 + its own
+  /** lane inbox-decision-group: the LLM plugin's section heads — 「现在要你」 above .ut-groups, 「待判断」 + its own
    *  .ut-groups-pending after it (inbox-verify F4: the normal items no verdict sorted yet), then 「可以等」 + its own
    *  .ut-groups-later; `sections` null (the switch off) ⇒ none of them exist (today's popup, node for node). */
   const patchSections = (root, sections) => {
@@ -434,7 +434,7 @@ export function installUserTodos(app) {
       gBox.before(nowHead);
       gBox.after(pendHead, pending, laterHead, later);
     }
-    const sub = t('Sorted by the Decision API · {n} judged today', { n: todos.grouping.today || 0 });
+    const sub = t('Sorted by the LLM plugin · {n} judged today', { n: todos.grouping.today || 0 });
     const subEl = nowHead.querySelector(':scope > .ut-head-sub');
     if (subEl.textContent !== sub) subEl.textContent = sub;
     nowHead.style.display = sections.now.length || sections.pending.length || sections.later.length ? '' : 'none';
@@ -462,7 +462,7 @@ export function installUserTodos(app) {
     const { action: rows, notices } = splitNotices(allRows);
     const openActions = badgeCounts(todos.open).action.length;
     root.querySelector(':scope > .ut-title > .ut-head-sub').textContent = openActions ? t('{n} open', { n: openActions }) : t('all clear');
-    // groups, keyed by data-key — lane inbox-decision-group: with the Decision API's tray switch on (the snapshot's
+    // groups, keyed by data-key — lane inbox-decision-group: with the LLM plugin's tray switch on (the snapshot's
     // `grouping`) the same groups are drawn into three sections, 「现在要你」 (.ut-groups), 「待判断」 (.ut-groups-pending)
     // and 「可以等」 (.ut-groups-later); a group's "Mark all seen" / fold there are keyed `pending|<key>` / `later|<key>` (data-fk)
     const sections = todos.grouping ? inboxSections(rows, { prev: secHeld, now: Date.now() }) : null;

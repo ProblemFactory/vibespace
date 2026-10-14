@@ -40,9 +40,9 @@ function create({ app, server, rootDir, HOST, PORT, BUFFERS_DIR, PERMISSION_MODE
 const { PluginManager } = require('../plugins');
 let voicePlugin = { peek: () => ({}), update: () => {}, settings: () => ({}), writeSettings: () => {} }; // Dropline voice input (q-029 P0): the plugin hands its record reader back here
 // THE DECISION ENGINE (lane decision-core): the ONE decisions-API caller — the plugin row attaches its switches, the
-// registry row `decision-api` gives the key, its Test runner is the engine's own one-question judgment
+// registry row `llm` gives the key, its Test runner is the engine's own one-question judgment
 const decisionEngine = require('./decision-engine.js').create({ dataDir: path.join(rootDir, 'data'), integrations, serverNotice });
-try { if (integrations && typeof integrations.registerTest === 'function') integrations.registerTest('decision-api', decisionEngine.testRunner); } catch (e) { console.warn('[decision] Test runner not registered:', e.message); }
+try { if (integrations && typeof integrations.registerTest === 'function') integrations.registerTest(decisionEngine.ROW_ID, decisionEngine.testRunner); } catch (e) { console.warn('[decision] Test runner not registered:', e.message); }
 // lane decision-inbox-rank: THE BOARD the For-you judge's facts are read from, once a pass — vibespace-status's record +
 // history of a conversation and its newest vibespace-task progress note (the stores' own readers; nothing is kept here)
 const inboxBoard = () => {
@@ -979,6 +979,8 @@ function createSessionMessages(session, sessionId) {
       },
       // lane browser-stuck: the agent's `dialog accept|dismiss` is a page act on the trace like any other (the stream mirror's own shape)
       traceDialogAct: (act) => browserStream?.tapDialogAct?.(act),
+      // lane launch-picture-size: a conversation's FIXED picture size (the agent's `size`, the user's Pin size… in the live window)
+      browserFixed: (q) => (browserStream && typeof browserStream.setFixed === 'function' ? browserStream.setFixed(q) : { ok: false, code: 'unavailable', error: 'the live view is not available on this server' }),
       // the agent's `new --adopt <dir>` may register a directory ONLY under these roots (browser-profiles.adoptDirVerdict)
       adoptRoots: { homeDir: os.homedir(), dataDir: path.join(rootDir, 'data') },
       // P4: the providers route's live CDP forwards

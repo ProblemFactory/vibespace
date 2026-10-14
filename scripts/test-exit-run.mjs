@@ -274,7 +274,7 @@ await section('§2b PURE secret-shapes: what a stored head never keeps (verify r
   const shapes = { quoteNoClose: (n) => 'token="' + 'x'.repeat(n), kvStorm: (n) => 'a=b '.repeat(n / 4), pwStorm: (n) => 'password '.repeat(n / 9), eyJ: (n) => 'eyJ'.repeat(n / 3), bearer: (n) => 'Bearer '.repeat(n / 7), colon: (n) => ':'.repeat(n), spaces: (n) => 'a: ' + ' '.repeat(n) };
   const best = (mk, n) => { let b = Infinity; for (let i = 0; i < 5; i++) { const t = mk(n); const t0 = process.hrtime.bigint(); SS.redactSecrets(t); b = Math.min(b, Number(process.hrtime.bigint() - t0) / 1e6); } return b; };
   for (const [k, mk] of Object.entries(shapes)) { const a = best(mk, 16384), b = best(mk, 65536); ok(b <= 1000 && (a < 0.5 || b / a <= 8), `linear on ${k}: ${a.toFixed(2)} ms → ${b.toFixed(2)} ms (×4 input)`); }
-  // R7 / R8 (inbox-verify F1, 2026-10-13 — the Decision API's judge read a record's token query values and its key material verbatim)
+  // R7 / R8 (inbox-verify F1, 2026-10-13 — the LLM plugin's judge read a record's token query values and its key material verbatim)
   const R7A = ['https://hooks.example.com/cb?to', 'ken=tok_9f8e7d6c5b4a&sig=ab12'].join(''), R7B = 'see https://x.io/a?access_token=AT-99zz&api_key=K-77yy&x=1#key=frag-55';
   const qa = SS.redactSecrets(R7A).text, qb = SS.redactSecrets(R7B).text;
   ok(qa === ['https://hooks.example.com/cb?to', 'ken=«redacted»&sig=«redacted»'].join('') && !/AT-99zz|K-77yy|frag-55/.test(qb) && qb.includes('&x=1') && SS.redactSecrets(qb).text === qb, 'R7: a URL query value named by a secret word goes, its name and the plain parameters stay (idempotent)', [qa, qb]);

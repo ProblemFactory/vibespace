@@ -16,6 +16,10 @@
  *                                     dialog (auto | 1 | 1.5 | 2 | 2.5 | 3 — the record's origin
  *                                     'app'); anything else 400 bad-request HERE, before a paired
  *                                     machine is asked (an older device drops an unknown field)
+ *                                     + (lane launch-picture-size) `pin`: 'WxH' | null — the dialog's
+ *                                     Picture size (src/desktop-pin.js SIZE_CHOICES); a bad size 400
+ *                                     bad-size / size_out_of_bounds HERE, a rung that cannot hold it
+ *                                     400 pin_unsupported (the machine's verdict, by name)
  *   GET  /api/desktop/apps/:id
  *   POST /api/desktop/apps/:id/stop        `{ force? }` — B-04da ④: a LibreOffice session is ASKED to quit first (its own
  *                                     save prompt); still asking ⇒ 409 `app-asked`, `force: true` = the person confirmed the loss
@@ -143,7 +147,7 @@ const { capsOf, scaleChoiceVerdict, relaunchLeaseVerdict, TIGHTVNC, machineDeskt
 const { INSTALL_WHATS, DEFAULT_INSTALL, installRow } = require('../installs'); // THE INSTALLABLES — the routes ask the row (lane dc-apps-rows)
 /** design 014 D1: the whole-desktop refusals' statuses (by name, like every code below). */
 const D014_STATUS = Object.freeze({ human_only: 403, no_vnc: 409, not_desktop_machine: 409, not_windows: 409, no_admin: 409, run_failed: 409, empty: 400, too_long: 400, multi_line: 400, hidden_chars: 400 });
-const { pinVerdict } = require('../desktop-pin'); // lane e2b (§E2.2): the window menu's Pin size… (the user pins any window)
+const { pinVerdict, parsePin } = require('../desktop-pin'); // lane e2b (§E2.2): the window menu's Pin size… (the user pins any window); lane launch-picture-size: the launch's pin
 const { openWithVerdict, installSpecFor, FONTS_ID } = require('../office-open'); // §7.9: the ONE open-with verdict
 const router = express.Router();
 
@@ -182,11 +186,11 @@ function launchedByOfReq(req) {
 function fail(res, e) {
   const code = e?.code || null;
   const status = code === 'not-found' || code === 'file-missing' ? 404 : code === 'bad-request' || code === 'exec-not-found' || code === 'cwd-missing' || code === 'needs-wayland' || code === 'bad-url' || code === 'not-a-browser' || code === 'automation-flag' || code === 'profile-not-owned' || code === 'profile-is-users' || code === 'unsupported-host'
-      || code === 'relative-path' || code === 'not-office-file' || code === 'not-office-app' || ['bad_label', 'bad_exec', 'bad_args', 'too_many_variants', 'needs_root', 'bad_icon', 'shadow'].includes(code) ? 400
+      || code === 'relative-path' || code === 'not-office-file' || code === 'not-office-app' || code === 'bad-size' || code === 'size_out_of_bounds' || code === 'pin_unsupported' || ['bad_label', 'bad_exec', 'bad_args', 'too_many_variants', 'needs_root', 'bad_icon', 'shadow'].includes(code) ? 400
     : code === 'cap' || code === 'no-backend' || code === 'backend-not-wired' || code === 'held' || code === 'not_taken' || code === 'no_lease' || code === 'not-xpra' || code === 'no_viewer' || code === 'not-ready' || code === 'relaunch-browser' || code === 'browser-absent' || code === 'snap-profile-unreachable'
       || code === 'host_needs_daemon' || code === 'no_x11' || code === 'no_apt' || code === 'no_repo' || code === 'no_sudo' || code === 'no_facts' || code === 'busy' || code === 'no_conversation' || code === 'fork_pending' || code === 'wake_paced'
       || code === 'machine-mismatch' || code === 'app-absent' || code === 'still-absent' || code === 'app-asked' || code === 'changed_outside' || code === 'lease' ? 409
-      : code === 'agent_forbidden' ? 403 : code === 'not_live' ? 404 : code === 'bad_principal' || code === 'bad_mode' || code === 'share_local_only' ? 400
+      : code === 'agent_forbidden' || code === 'not_your_window' ? 403 : code === 'not_live' ? 404 : code === 'bad_principal' || code === 'bad_mode' || code === 'share_local_only' ? 400
       : code === 'no-engine' || code === 'xpra-ui-unavailable' || code === 'host_unavailable' || code === 'install_link_lost' || code === 'host-unreachable' ? 503 : code === 'install_timeout' ? 504 : 500;
   res.status(D014_STATUS[code] || status).json({ error: String(e?.message || e), code, ...(e && e.plan ? { plan: e.plan } : {}), ...(e && e.remedy ? { remedy: e.remedy } : {}), ...(e && e.vnc ? { vnc: e.vnc, platform: e.platform || null } : {}) });
 }
@@ -206,6 +210,9 @@ router.post('/api/desktop/apps', async (req, res) => {
   // predates the field would drop it silently; a bad value is the person's request refused by name, on every machine
   const sv = scaleChoiceVerdict(req.body);
   if (!sv.ok) return fail(res, { code: sv.code, message: sv.error });
+  // lane launch-picture-size: the dialog's Picture size — judged HERE by parsePin's own words too (before a paired machine is asked)
+  const pv = parsePin(req.body && req.body.pin !== undefined && req.body.pin !== '' ? req.body.pin : null);
+  if (!pv.ok) return fail(res, { code: pv.code, message: pv.error });
   // §7.9: a DOCUMENT — THE MACHINE RULE before any machine is asked (the app runs where the file is); the file's own
   // module row is filled in when the request names none (the machine runs the verdict again with its catalog)
   let fill = null;

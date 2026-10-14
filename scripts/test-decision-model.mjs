@@ -377,11 +377,11 @@ console.log('the ONE scrub on the QUESTIONS (lane decision-vendor-hygiene, B-d37
   const free = L({ byUse: { attention: { calls: 2, usd: 0 } } }, 1);
   ok(free.money === '< $0.01', 'calls > 0 at a recorded $0 still says money moved (「< $0.01」)', free.money);
   const norm = L({ day: '2026-10-13', byUse: { attention: { calls: 9, usd: 0.4 } }, total: { calls: 9, usd: 0.4 }, reserved: 0.02 }, 2.5, { monthUsd: 3.21 });
-  ok(norm.money === '$0.42' && norm.cap === '$2.50' && !norm.warn && norm.month === 'Decision API · today $0.42 / $2.50 · this month $3.21', 'normal: the engine `today` (total + reserved) and the month', norm);
+  ok(norm.money === '$0.42' && norm.cap === '$2.50' && !norm.warn && norm.month === 'LLM · today $0.42 / $2.50 · this month $3.21', 'normal: the engine `today` (total + reserved) and the month', norm);
   const near = L({ byUse: { rule: { calls: 200, usd: 0.9 } } }, 1), under = L({ byUse: { rule: { calls: 200, usd: 0.899 } } }, 1), at = L({ byUse: { rule: { calls: 300, usd: 1 } } }, 1);
   ok(near.warn && at.warn && !under.warn, 'red from 90 % of the cap (0.90 of 1.00 red, 0.899 not, at the cap red)', [near.warn, under.warn, at.warn]);
   const off = L({ byUse: { attention: { calls: 5, usd: 0.3 } } }, 1, { on: false });
-  ok(!off.on && off.short === 'The Decision API is off — it spends nothing' && off.text === off.short && off.month === off.short && !/\$/.test(off.short + off.month), 'off: every string says so instead of a number', off);
+  ok(!off.on && off.short === 'The LLM plugin is off — it spends nothing' && off.text === off.short && off.month === off.short && !/\$/.test(off.short + off.month), 'off: every string says so instead of a number', off);
   const zh = L({ byUse: { attention: { calls: 1, usd: 0.002 } } }, 1, { t: (s, v = {}) => ({ 'Today {spent} / {cap} · judged {n} · hits {m}': '今天 {spent} / {cap} · 判断 {n} · 命中 {m}' }[s] || s).replace(/\{(\w+)\}/g, (m, k) => (k in v ? String(v[k]) : m)) });
   ok(zh.short === '今天 < $0.01 / $1.00 · 判断 1 · 命中 0', 'the words go through the caller\'s t (device words)', zh.short);
   const mo = M.monthSpend([{ at: Date.UTC(2026, 9, 1, 5), usd: 0.2, outcome: 'ok' }, { at: Date.UTC(2026, 8, 30, 5), usd: 9, outcome: 'ok' }, { at: Date.UTC(2026, 9, 13), outcome: 'refused' }, null, 'x', { at: Date.UTC(2026, 9, 12), usd: 0.05, outcome: 'ok' }], '2026-10');

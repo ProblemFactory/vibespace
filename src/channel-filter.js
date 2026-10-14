@@ -195,7 +195,7 @@ function hhmm(v) {
 
 const MAX_RULES = 50;
 /** lane decision-rule (D3 of docs/design-decision-api.zh.md §2.5): THE `decision` RULE — the person's CONDITION in plain
- *  words, judged by the Decision API (src/server/decision-engine.js, the ONE caller: its memo, its budget). `matchRecord`
+ *  words, judged by the LLM plugin (src/server/decision-engine.js, the ONE caller: its memo, its budget). `matchRecord`
  *  stays SYNC and PURE: the channels engine PRE-JUDGES every fresh record a decision rule in scope could match (ONE
  *  judgment per record carrying EVERY such rule's question — the same rule on two rows is one question) and hands the
  *  answers in `ctx.decisions` keyed `decisionKeyOf(rule) + '|' + record.id` (a Map or an object) — the place rules'

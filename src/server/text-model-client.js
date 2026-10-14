@@ -3,8 +3,9 @@
  * THE TEXT MODEL CLIENT (lane rule-learning — design q-037 P0, owner 2026-10-14) — ORCH, and the ONLY file in the tree
  * that builds a chat-completions request (scripts/test-vendor-whitelist.mjs allowlists this file alone, by its gates —
  * a copy anywhere else is RED). A NEW VENDOR SURFACE, gated like the judge:
- *  1. THE KEY: the Decision API's own registry row (`resolveIntegration('decision-api')` — the user's own > the cluster
- *     preset); the feature EXISTS only on an OpenRouter row with a key while the plugin is on (PURE `RL.availability`);
+ *  1. THE KEY: the LLM plugin's registry row (`resolveIntegration('llm')` — the user's own > the cluster preset); the
+ *     feature EXISTS only on an OpenRouter row with a key while the plugin AND its drafter switch (`learn`, lane
+ *     llm-plugin-rename) are on (PURE `RL.availability`);
  *  2. RESERVE: `budgetVerdict` (PURE — the judge's own verdict) against the plugin's DAILY budget, counting what EVERY
  *     use settled + reserved today (the decision engine's ledger: one counter, one journal), AND the use's own cap
  *     (`learn`: 10 ¢ a day, inside the daily budget); the reservation is held in the SAME synchronous step, so a
@@ -30,7 +31,7 @@ const crypto = require('crypto');
 const M = require('../decision-model.js');
 const RL = require('../rule-learning.js');
 
-const ROW_ID = 'decision-api';            // ONE key box for the judge and the drafter (the Integrations card)
+const ROW_ID = 'llm';                     // ONE key box for the judge and the drafter (the Language model card)
 const HOST = 'https://openrouter.ai';
 const PATH = '/api/v1/chat/completions';
 // a 400 that names the routing ⇒ no ZDR endpoint for this model (a 404 always is: nothing satisfies the routing)
@@ -72,7 +73,7 @@ function create({ integrations = null, ledger = null, fetchImpl = (...a) => glob
   /** Is the drafter there? → {exists, why, tier, model, label, estUsd} (estUsd = a full-size call). */
   function available() {
     const s = settings();
-    const a = RL.availability({ integrationRow: credential(), pluginOn: s.pluginOn });
+    const a = RL.availability({ integrationRow: credential(), pluginOn: s.pluginOn, learnOn: s.learnOn !== false });
     const tier = RL.modelOf(s.learnModel);
     return { exists: a.exists, why: a.why, tier: tier.key, model: tier.id, label: tier.label, estUsd: RL.learnCost(tier.key, RL.LEARN.inputMax, 1000) };
   }
@@ -82,7 +83,7 @@ function create({ integrations = null, ledger = null, fetchImpl = (...a) => glob
     if (!ledger) return { ok: false, why: 'plugin-off' };
     const s = settings();
     const row = credential();
-    const a = RL.availability({ integrationRow: row, pluginOn: s.pluginOn });   // pluginOn + the row's provider + key
+    const a = RL.availability({ integrationRow: row, pluginOn: s.pluginOn, learnOn: s.learnOn !== false });   // pluginOn + the drafter's switch + the row's provider + key
     if (!a.exists) return { ok: false, why: a.why };
     const tier = RL.modelOf(s.learnModel);
     const key = String(row.values.apiKey).trim();

@@ -6,5 +6,5 @@ module.exports = [
   require('./frp.js'),
   require('./opencode-serve.js'),
   require('./voice-input.js'),
-  require('./decision-api.js'),
+  require('./llm.js'),
 ];

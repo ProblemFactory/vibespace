@@ -893,7 +893,7 @@ export function registerChannelAdapterMenu() {
   // B-2198: the RAW API pass-through — who may call this account's vendor API, at which tier (off until granted)
   registerMenuItem({ menu: M, group: '1_rows', order: 11.5, when: (c) => !A(c).builtin && !!A(c).rawApi, label: () => t('API access…'), run: (c) => showApiAccessDialog(c.app, A(c).id) });
   registerMenuItem({ menu: M, group: '1_rows', order: 12, when: (c) => !A(c).builtin, label: () => t('Conversations matching a rule…'), run: (c) => showGrantAccessDialog(c.app, { kind: 'pattern', adapter: A(c), id: null }) });
-  // lane decision-attention (design §2.8): the account's "never judge" — shown while the Decision API judges the first screen
+  // lane decision-attention (design §2.8): the account's "never judge" — shown while the LLM plugin judges the first screen
   // (or to undo it); the field lives on the account record, the engine skips the account's rows
   registerMenuItem({ menu: M, group: '1_rows', order: 13, when: (c) => !A(c).builtin && (A(c).judge === 'never' || !!c.judging), label: (c) => (A(c).judge === 'never' ? t('Judge this account again') : t('Never judge this account')), run: (c) => put(`/api/channels/adapters/${encodeURIComponent(A(c).id)}`, { judge: A(c).judge === 'never' ? null : 'never' }).catch((e) => showToast(e.message, { type: 'error' })) });
   registerMenuItem({ menu: M, group: '1_rows', order: 20, when: (c) => (A(c).optionsSchema || []).length > 0, label: () => t('Options'), run: (c) => showOptionsDialog(c.app, A(c)) });

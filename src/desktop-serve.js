@@ -216,7 +216,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const M = require('./desktop-apps');
-const { parsePin, pinOf } = require('./desktop-pin'); // lane e2b (§E2.2): the record's fact `pin` (PURE)
+const { parsePin, pinOf, pinSupportVerdict } = require('./desktop-pin'); // lane e2b (§E2.2): the record's fact `pin` (PURE); lane launch-picture-size: which rungs can be born pinned
 const O = require('./office-open'); // §7.9: the LibreOffice rows as a machine serves them, the open-with verdict, the argv
 const LIMITS = require('./keeper-limits');
 const displayFacts = require('./desktop-display');
@@ -625,6 +625,11 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     const reg = registry(f);
     const v = M.validateLaunchRequest(body || {}, reg);
     if (!v.ok) throw namedError(v.code || 'bad-request', v.error);
+    // lane launch-picture-size: the launch's PICTURE SIZE — the Apps dialog's select / `vibespace-window open --size` (the body's
+    // `pin`: 'WxH' | {w,h} | null), else the door's / a relaunch's opts.pin; refused in parsePin's words before anything starts
+    const pv = parsePin(body && body.pin !== undefined && body.pin !== '' ? body.pin : null);
+    if (!pv.ok) throw namedError(pv.code, pv.error);
+    const pinAsked = pv.pin || pinOf(opts.pin);
     let row = v.launch.row;
     // lane app-launch-singleton: `ifRunning: 'attach'` (the Apps card's press, For you's Open) — a RUNNING instance of the
     // row is answered (`attached: true`) instead of a second launch its singleton would swallow; a document always opens
@@ -691,6 +696,10 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     const backend = M.backendById(resolved.backend, backends);
     if (!backend.wired) throw namedError('backend-not-wired', `${resolved.backend} is probed and recorded but its relay is not wired (${resolved.via})`); // unreachable through the shipped table (resolveBackend passes an unwired rung over) — the belt for a table copy
     if (!resolved.recipe || typeof display.RECIPES?.[resolved.recipe] !== 'function') throw namedError('no-recipe', `${resolved.backend} via ${resolved.via} names no bring-up recipe (${resolved.recipe || 'none'}) — the capability table and desktop-display disagree`);
+    // lane launch-picture-size: a rung that cannot hold the launch's OWN pin (the dialog's select, `vibespace-window open --size`)
+    // refuses it BY NAME — never a window that silently follows the pane; the e2a door's `--size` / E2c's default and a
+    // relaunch's carried pin (opts.pin) keep e2b's road (the keeper fits them)
+    if (pv.pin) { const sv = pinSupportVerdict(M.fitPolicyOf({ backend: resolved.backend, via: resolved.via }, backends), { backend: resolved.backend, via: resolved.via }); if (!sv.ok) throw namedError(sv.code, sv.error); }
     const line = M.fallbackLogLine(resolved);
     if (line) log.log?.(line);
     // HiDPI (2.369.158): the app's SCALE is decided ONCE, here, from `desktop.appScale` and the launching
@@ -727,7 +736,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
       rec.by = opts.by && opts.by.sessionId ? { sessionId: String(opts.by.sessionId), ...(opts.by.name ? { name: String(opts.by.name).slice(0, 120) } : {}) } : null;
       if (typeof opts.label === 'string' && opts.label.trim()) rec.label = opts.label.trim().slice(0, 120); // r3 (#11): the agent's own label (the door cleaned it)
     }
-    if (pinOf(opts.pin)) rec.pin = pinOf(opts.pin); // lane e2b (§E2.2): the pinned pixel size — the door's `--size`, or a relaunch carrying it
+    stampPin(rec, pinAsked); // lane e2b (§E2.2): the pinned pixel size — the record is BORN with it (the dialog's select, `--size`, a relaunch carrying it)
     const lb = launchedByOf(opts.launchedBy || (rec.origin === AGENT_BROWSER_ORIGIN && rec.by ? { kind: 'agent', ...rec.by } : null));
     if (lb) rec.launchedBy = lb; // lane app-launch-singleton: WHO started it — the card / the Desktop list say it ("started by agent session X")
     if (office) { rec.office = office.module; rec.profileDir = office.profileDir; } // §7.9
@@ -934,7 +943,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
       const authFile = path.join(dir, 'Xauthority');
       display.writeXauthority(authFile, [{ display: '0', cookieHex: cookie }]);
       const ctx = {
-        bins: f.bins, dir, authFile, cookie, geometry, base, logFd, dpi: rec.dpi || 96,
+        bins: f.bins, dir, authFile, cookie, geometry: bornGeometry(rec), base, logFd, dpi: rec.dpi || 96,
         freePort: () => display.freePort(),
         x11Env: (disp) => display.x11Env(base, { display: disp, authFile }),
         writeAuth: (disp) => display.writeXauthority(authFile, [{ display: '0', cookieHex: cookie }, { display: disp, cookieHex: cookie }]),
@@ -1726,14 +1735,18 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
   /** MIGRATIONS ONLY (src/server/migrations.js, 2026-09-runaway-parks-void): reshape the IN-MEMORY store and commit
    *  (atomic save + broadcast) — a file edit beside a loaded keeper is overwritten by its next save. */
   function reshapeStore(fn) { const r = fn(store); commit(); return r; }
+  /** lane launch-picture-size: the pin's ONE stamp — the launch (a record born pinned) and setPin write the fact here only. */
+  function stampPin(rec, pin) { const p = pinOf(pin); if (p) rec.pin = p; else delete rec.pin; return p; }
+  /** lane launch-picture-size: the X server's first size — a pinned window on the Xvfb+x11vnc rung (fit 'fixed': its
+   *  framebuffer never follows a viewer) is started AT the pin; every other rung starts at the keeper's geometry. */
+  function bornGeometry(rec) { const p = pinOf(rec.pin); const pol = M.fitPolicyOf(rec, backends); return p && pol && pol.mode === 'fixed' ? `${p.w}x${p.h}` : geometry; }
   /** lane e2b (design-agent-browser-v2 §E2.2): the record's fact `pin` ({w, h} device px | null = fit the pane) — set
    *  and cleared HERE only, saved + broadcast (commit): the showing clients re-fit in place, a restart restores it, a
    *  relaunch carries it. Who may and the bounds are the caller's verdict (src/desktop-pin.js). */
   function setPin(id, pin) {
     const rec = store.apps[id];
     if (!rec) throw namedError('not-found', `no desktop app ${id} on this machine`);
-    const p = pinOf(pin);
-    if (p) rec.pin = p; else delete rec.pin;
+    const p = stampPin(rec, pin);
     commit();
     // r2 (the ruling): the KEEPER fits X to the pin at once (and at a launch's ready, a restart's adopt, every belt — fitApplies);
     // auto hands the geometry back to the active viewer (today's one-owner rule) — the keeper's fit stops unless its rung fits anyway

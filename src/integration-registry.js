@@ -343,22 +343,31 @@ const ROWS = Object.freeze([
     docs: 'docs/design-dropline-voice.zh.md',
   },
 
-  // ── THE DECISION API (lane decision-core, docs/design-decision-api.zh.md §2.2) ──
-  // The ONE caller is src/server/decision-engine.js (its Test runner too); the plugin row (⚙ → Plugins →
-  // Decision API) holds the switches and the budget, never the key. The cluster preset = OpenRouter + the
-  // cluster's key + its chosen model, through the Slack row's road (the env JSON or the prefix).
+  // ── THE LANGUAGE MODEL KEY (lane decision-core, docs/design-decision-api.zh.md §2.2; lane llm-plugin-rename, owner
+  // 2026-10-14 「openrouter key 这部分不适合继续叫 decision api 配置了」: the row is named by its provider) ──
+  // The ONE caller is src/server/decision-engine.js (its Test runner too) + the text-model client; the LLM plugin
+  // (⚙ → Plugins → LLM) holds the switches, the judging model and the budget, never the key. The cluster preset =
+  // OpenRouter + the cluster's key (+ the model it chose: the plugin's judgeModel default), through the Slack row's road
+  // (the env JSON or the prefix). LEGACY: the fleet's presets name the row by its pre-rename id — the store reads
+  // those spellings too (`clusterEnv.legacy`: a JSON entry `id: 'decision-api'`, the old single-field prefix), and
+  // the new spelling wins whenever both are set.
   {
-    id: 'decision-api',
-    label: i18nKey('Decision API'),
+    id: 'llm',
+    label: i18nKey('Language model (OpenAI / OpenRouter)'),
     fields: [
       { key: 'provider', label: i18nKey('Provider'), secret: false, required: true, placeholder: 'openrouter',
         help: i18nKey('openai (POST /v1/decisions) or openrouter (POST /api/alpha/decisions). The text that is judged is sent to this provider. With openrouter, “Draft from my verdicts” also sends the short digests the judge saw and your block to POST /api/v1/chat/completions (zero-data-retention endpoints only).'), validate: V.oneOf(['openai', 'openrouter']) },
-      { key: 'model', label: i18nKey('Model'), secret: false, required: false, placeholder: 'openai/gpt-6-luna-decisions',
-        help: i18nKey('Optional; empty = the provider\'s default (gpt-6-luna on OpenAI, openai/gpt-6-luna-decisions on OpenRouter).'), validate: V.noSpaces },
       { key: 'apiKey', label: i18nKey('API key'), secret: true, required: true, placeholder: 'sk-…',
         help: i18nKey('Your OpenAI key (platform.openai.com → API keys) or OpenRouter key (openrouter.ai → Keys). It is sent only to the provider above, and never shown again.'), validate: V.minLen(8) },
     ],
-    clusterEnv: { json: 'VIBESPACE_INTEGRATIONS', prefix: 'VIBESPACE_INTEGRATION_DECISION_API_' },
+    clusterEnv: {
+      json: 'VIBESPACE_INTEGRATIONS', prefix: 'VIBESPACE_INTEGRATION_LLM_',
+      // a preset value beyond the card's fields: the model the cluster chose (the plugin's judgeModel row defaults to it
+      // while the cluster's key is in use) — the store reads `<prefix>MODEL` / a JSON entry's `model`, the card never shows it
+      extras: ['model'],
+      // the pre-rename spellings the fleet's presets still carry (read only when the new ones say nothing)
+      legacy: { jsonKeys: ['decision-api'], prefixes: ['VIBESPACE_INTEGRATION_DECISION_API_'] },
+    },
     // lane decision-card-words: the card's words are the user's — a titled, numbered recipe (`setup.title` +
     // `ordered`) and the radios' own words (`choiceWords`); a row without them keeps the shared ones
     setup: {
@@ -366,7 +375,7 @@ const ROWS = Object.freeze([
       prerequisites: [
         i18nKey('Pick a key: use the one the cluster set up, or paste your own (OpenAI or OpenRouter)'),
         i18nKey('Click “Test connection”'),
-        i18nKey('Turn on the features you want below'),
+        i18nKey('Turn on what you want in Settings › Plugins › LLM — each feature has its own switch'),
       ],
     },
     choiceWords: { cluster: i18nKey('Use the key the cluster set up'), own: i18nKey('Use a key of my own') },
@@ -376,7 +385,7 @@ const ROWS = Object.freeze([
       caveat: i18nKey('“Passed” means this key just asked the model one question and it answered. (OpenRouter\'s endpoint for this is still a beta; model names may change later.)'),
     },
     consumers: ['src/server/decision-engine.js', 'src/server/text-model-client.js'],   // + the block drafter's chat completions (lane rule-learning-fix L6)
-    usedBy: i18nKey('Only the Decision API plugin uses this key'),
+    usedBy: i18nKey('Every feature of the LLM plugin uses this key'),
     docs: 'docs/design-decision-api.zh.md',
   },
 ]);
@@ -592,6 +601,10 @@ function checkRow(row) {
   for (const f of row.fields || []) if (typeof f.validate !== 'function') errs.push(`field ${f.key}: validate must be a function`);
   if (!row.clusterEnv && !row.delegate && !paste) errs.push('clusterEnv or delegate required');
   if (row.clusterEnv && row.delegate) errs.push('clusterEnv and delegate are a UNION — declare one');
+  const words = (x) => Array.isArray(x) && x.length > 0 && x.every((w) => typeof w === 'string' && /^[A-Za-z][A-Za-z0-9_:-]*$/.test(w));
+  if (row.clusterEnv && row.clusterEnv.extras !== undefined && (!words(row.clusterEnv.extras) || row.clusterEnv.extras.some((k) => (row.fields || []).some((f) => f.key === k)))) errs.push('clusterEnv.extras is a list of preset value names that are NOT fields');
+  const lg = row.clusterEnv && row.clusterEnv.legacy;
+  if (lg !== undefined && (!lg || !words(lg.jsonKeys) || !words(lg.prefixes) || lg.jsonKeys.length !== lg.prefixes.length || lg.jsonKeys.includes(row.id))) errs.push('clusterEnv.legacy = {jsonKeys, prefixes}: the old row ids and their old prefixes, one each, never the row\'s own id');
   if (row.delegate && row.delegate.to !== 'drive-presets') errs.push('delegate.to must be drive-presets');
   if (!row.test || !TEST_KINDS.includes(row.test.kind)) errs.push(`test.kind must be one of ${TEST_KINDS.join('|')}`);
   if (row.setup && Array.isArray(row.setup.prerequisites) && row.setup.prerequisites.length && !(row.test && row.test.caveat)) errs.push('a row with setup.prerequisites must declare test.caveat');

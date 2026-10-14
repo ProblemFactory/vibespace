@@ -206,5 +206,29 @@ console.log('⑧ nothing sent ⇒ released, never settled — the judge AND the 
   ok(Object.values(red).every((x) => x.judge > 0 && x.learn > 0), 'RED CONTROL: settleUsd without `failed` (the old rule) charges the reservation for every one of them — to both uses', red);
 }
 
+console.log('⑨ THE JUDGING MODEL ON THE WIRE (lane llm-plugin-rename): the LLM plugin\'s judgeModel row > the cluster preset\'s model (only while the cluster\'s key is in use) > the provider\'s default');
+{
+  const wire = (tag, { settings = {}, values = {}, source = 'user' } = {}) => {
+    const dataDir = path.join(ROOT, 'model-' + tag); fs.mkdirSync(dataDir, { recursive: true });
+    const seen = [];
+    const eng = DE.create({ dataDir, now: () => Date.UTC(2026, 9, 14, 12, 0), tzOffset: () => 0, log: quiet,
+      fetchImpl: async (url, init) => { seen.push(JSON.parse(await bodyText(init)).model); return { status: 200, ok: true, headers: { get: () => null }, json: async () => okBody({ input_tokens: 40 }) }; },
+      integrations: { resolveIntegration: () => ({ values: { provider: 'openrouter', apiKey: 'sk-dummy-KEY-' + tag, ...values }, source }) } });
+    eng.attachPlugin({ peek: () => ({ enabled: true }), settings: () => ({ rules: true, dailyBudgetCents: 100, ...settings }) });
+    return { eng, seen, judge: () => eng.judge('rule', { body: BODY, thread: [] }, { questions: Q, memo: { id: 'jm-' + tag, rule: 'r' } }) };
+  };
+  const a = wire('row', { settings: { judgeModel: 'openai/gpt-6-luna' }, values: { model: 'typesafe/jev-router' }, source: 'cluster' });
+  await a.judge();
+  const b = wire('preset', { values: { model: 'typesafe/jev-router' }, source: 'cluster' });
+  await b.judge();
+  const c = wire('own', { values: { model: 'typesafe/jev-router' }, source: 'user' });
+  await c.judge();
+  const d = wire('blank', { settings: { judgeModel: '   ' } });
+  await d.judge();
+  ok(a.seen.join() === 'openai/gpt-6-luna' && a.eng.status().model === 'openai/gpt-6-luna', `the plugin's judgeModel row is the model on the wire, over the preset's (${a.seen})`);
+  ok(b.seen.join() === 'typesafe/jev-router', `no row ⇒ the cluster preset's model while the cluster's key is in use (${b.seen})`);
+  ok(c.seen.join() === M.DEFAULT_MODEL.openrouter && d.seen.join() === M.DEFAULT_MODEL.openrouter, `the person's OWN key never borrows a model from its values (a card's old field) — the provider's default; a blank row is the default too (${c.seen} · ${d.seen})`);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -166,7 +166,8 @@ import { launchDpr, launchUiScale, explicitScaleLabel, stopDesktopApp, confirmDi
 import { quickExitText } from './desktop-app-words.js'; // lane app-launch-singleton
 import { satelliteFocus, agentOpenedRecord } from './desktop-app-placement.js';
 import { startCenterVerdict } from '../office-open.js'; // B-04da ⑤ (PURE)
-import { PIN_CHOICES, pinOf, pinChipText } from '../desktop-pin.js'; // lane e2b (§E2.2): the pinned pixel size (PURE)
+import { pinOf, pinChipText } from '../desktop-pin.js'; // lane e2b (§E2.2): the pinned pixel size (PURE)
+import { pinSizeItems } from './pin-size-ui.js'; // lane launch-picture-size: the ONE size table's rows + Custom… + Auto
 import { UI_ICONS } from './icons.js';
 import { registerMenuItem } from './contributions.js';
 import { createBarFold } from './bar-fold.js'; // lane I: the strip folds into ⋯ by priority — never wraps, never overlaps
@@ -864,17 +865,13 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
     scaleChip.title = scaleChipTitle(rec, why);
     winInfo._desktopScaleChip = { control, why, text, title: scaleChip.title }; // the raw handle the suites read
   }
-  // ── lane e2b (design-agent-browser-v2 §E2.2): Pin size… 1920×1080 / 1280×720 / Auto — the USER pins any window ──
+  // ── lane e2b (design-agent-browser-v2 §E2.2): Pin size… — the USER pins any window (lane launch-picture-size: the table's rows + Custom… + Auto) ──
   const pinTo = async (size) => {
     const r = await fetchJson(`/api/desktop/apps/${encodeURIComponent(id)}/pin`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ size }) });
     if (!r || r.error) { showToast(r?.error || t('Could not change the pinned size'), { type: 'error' }); return; }
     applyRecord(r);
   };
-  const pinItems = () => {
-    const cur = pinOf(rec && rec.pin);
-    const rows = PIN_CHOICES.map((p) => ({ label: (cur && cur.w === p.w && cur.h === p.h ? '✓ ' : '\u2003') + `${p.w}×${p.h}`, action: () => { pinTo(`${p.w}x${p.h}`); } }));
-    return [...rows, { label: (cur ? '\u2003' : '✓ ') + t('Auto — fit the window'), action: () => { pinTo('auto'); } }];
-  };
+  const pinItems = () => pinSizeItems(pinOf(rec && rec.pin), (size) => { pinTo(size); });
   winInfo._desktopPinItems = pinItems; // the raw handle the suites read
   const openPinMenu = (e) => { e?.stopPropagation?.(); const r = pinChip.getBoundingClientRect(); showContextMenu(r.left, r.bottom + 2, pinItems()); };
   pinChip.addEventListener('click', openPinMenu, { signal: lsig });

@@ -2794,7 +2794,7 @@ function create(deps = {}) {
       // the For-you item alone left a real instance's vanished accounts
       // unexplained in the panel
       quarantined: (store.quarantined || []).map(({ file, to, why, at, blocked }) => ({ file, to: to || null, why, at, blocked: !!blocked })),
-      judging: attention.on(),   // lane decision-attention: the Decision API judges the first screen (the account ⋯ "never judge" row)
+      judging: attention.on(),   // lane decision-attention: the LLM plugin judges the first screen (the account ⋯ "never judge" row)
       at: t,
     };
   }
@@ -3400,7 +3400,7 @@ function create(deps = {}) {
       // first screen's attention list is decided from (PURE src/lib/channel-focus.js) — present only on a row
       // something touched, so the 800 untouched rows of an aggregated account stay the slim row
       touch: touchView(en, lw, ob),
-      ...attention.viewOf(en, rec),   // lane decision-attention: `judged` — the Decision API's verdict on this row's newest message
+      ...attention.viewOf(en, rec),   // lane decision-attention: `judged` — the LLM plugin's verdict on this row's newest message
       lane: { via: lane.via, why: lane.why || null, source: lane.source || null },
       lastError: en.lane && en.lane.lastError ? { code: en.lane.lastError.code, at: en.lane.lastError.at } : null,
     };
@@ -6763,7 +6763,7 @@ function create(deps = {}) {
     if (!rules.size) return null;
     const decisions = new Map();
     const keys = [...rules.keys()].sort();   // a stable question order: a memo answer lines up with the same rules
-    if (!decisionEngine || typeof decisionEngine.judge !== 'function') { for (const k of keys) decisionSay(rec, convId, k, rules.get(k), 'no Decision API on this server'); return decisions; }
+    if (!decisionEngine || typeof decisionEngine.judge !== 'function') { for (const k of keys) decisionSay(rec, convId, k, rules.get(k), 'no LLM plugin on this server'); return decisions; }
     const s = decisionEngine.settings();
     if (!s.pluginOn) { for (const k of keys) decisionSay(rec, convId, k, rules.get(k), 'plugin-off'); return decisions; }
     let tailOf = null;

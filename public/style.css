@@ -1405,7 +1405,7 @@ body.wm-dragging .window iframe, body.wm-dragging .window canvas, body.wm-draggi
 .ut-detail-exp[open] > summary::before { content: '▾ '; content: '▾ ' / ""; }
 .ut-detail-exp > summary:hover { color: var(--accent); }
 .ut-meta { font-size: 9px; color: var(--text-dim); margin-top: 2px; }
-/* lane inbox-decision-group: the Decision API's tray sections (+ 待判断, inbox-verify F4) + a judged row's chip (+ the switch's example line) */
+/* lane inbox-decision-group: the LLM plugin's tray sections (+ 待判断, inbox-verify F4) + a judged row's chip (+ the switch's example line) */
 .plugin-cfg-example { flex-basis: 100%; font-size: 11px; color: var(--text-dim); margin: 2px 0 0 22px; }
 .ut-sec-head { font-size: 11px; font-weight: 600; color: var(--text); margin: 8px 0 2px; display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px; }
 .ut-sec-pending, .ut-sec-later { color: var(--text-dim); border-top: 1px solid var(--border); padding-top: 6px; }
@@ -1653,6 +1653,7 @@ html:not(.voice-absent) .voice-field-grip > textarea { padding-right: 44px; }
 .dialog-body input:focus, .dialog-body select:focus, .dialog-body textarea:focus { outline: none; border-color: var(--accent); }
 .dialog-hint { font-size: 11px; color: var(--text-dim); line-height: 1.45; margin: 0; }
 .dialog-hint.hidden { display: none; } /* no global .hidden in this project */
+.dialog-hint.dialog-error { color: var(--red); margin-top: 6px; } /* lane launch-picture-size: showInputDialog's inline refusal (validate) */
 .dialog-list { margin: 0; padding-left: 18px; max-height: 40vh; overflow-y: auto; font-size: 12px; line-height: 1.5; color: var(--text); } /* B-a67c: what a confirm ends (a group close's tab names) */
 .dialog-list li { overflow-wrap: anywhere; }
 /* A CHECKBOX row inside a dialog body. `.dialog-body label.dialog-check-row`
@@ -2661,6 +2662,14 @@ body.taskbar-top #taskbar-hotzone { bottom: auto; top: 0; }
 .desktop-launch-head > .desktop-launch-machines { flex: 1 1 auto; margin: 0; }
 .desktop-launch-install-app { margin-left: auto; width: auto; padding: 0 12px; min-height: 30px; }
 @media (max-width: 768px) { .desktop-launch-install-app { min-height: 36px; } } /* one tap on a phone */
+/* lane launch-picture-size: the head's Picture size select — beside Run on on a desk, its OWN full row on a phone (the
+   install button keeps its row end); the one-line hint under the head; a card's remembered size under its label */
+/* `.dialog-body label.desktop-launch-size` out-ranks `.dialog-body label` (0,1,1), whose column flex would stack the words above the select */
+.dialog-body label.desktop-launch-size { display: inline-flex; flex-direction: row; align-items: center; gap: 6px; font-size: 11px; color: var(--text-secondary); margin: 0; }
+.dialog-body select.desktop-launch-size-select { padding: 3px 6px; font-size: 11px; min-height: 26px; cursor: pointer; }
+.desktop-launch-size-hint { font-size: 11px; color: var(--text-dim); margin: -2px 0 6px; }
+.desktop-launch-card .desktop-launch-card-size { grid-column: 2; font-size: 10px; line-height: 1.3; color: var(--text-secondary); min-width: 0; }
+@media (max-width: 768px) { .dialog-body label.desktop-launch-size { flex: 1 1 100%; order: 3; } .dialog-body select.desktop-launch-size-select { flex: 1 1 auto; min-height: 36px; font-size: 13px; } }
 .desktop-launch-avail-head:empty { display: none; }
 .desktop-launch-foot { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); }
 .desktop-launch-foot .desktop-launch-intro { font-size: 11px; color: var(--text-secondary); }
@@ -4343,7 +4352,7 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
 .plugin-row-main { grid-area: main; min-width: 0; }
 .plugin-row-name { font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
 .plugin-row-desc { font-size: 10px; color: var(--text-secondary); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.plugin-row-fact { margin-top: 2px; font-size: 10px; color: var(--text-secondary); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; } /* lane decision-spend-readout: the Decision API's money today — a readout, not a control; it WRAPS (the desk rail is ~75 px wide: an ellipsis would hide the money) */
+.plugin-row-fact { margin-top: 2px; font-size: 10px; color: var(--text-secondary); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; } /* lane decision-spend-readout: the LLM plugin's money today — a readout, not a control; it WRAPS (the desk rail is ~75 px wide: an ellipsis would hide the money) */
 .plugin-row-fact.is-near-cap, .settings-row-fact.is-near-cap { color: var(--red, #e55); } /* ≥ 90 % of the day's cap */
 .settings-spend-producer { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; } .settings-spend-producer .settings-row-fact { margin-top: 0; flex: 1 1 auto; } .settings-spend-producer .settings-link-btn { margin-top: 0; }
 .plugin-row > .plugin-sw { grid-area: sw; }

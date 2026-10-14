@@ -16,7 +16,16 @@
 //      lists Tool outside VibeSpace again
 //   ⑥ the changed-outside row: a DISABLED card saying why; its remove refused by name (needs_root), nothing ran
 //   ⑦ phone 390: a long press on the outside card → Add to VibeSpace… → a full-height sheet, nothing wider than the screen
-// PNGs desk / remove / phone (+ desk-menu, adopt) in VS_SHOT_DIR. SKIPs by name: no chrome. ~40 s.
+//   ⑧ lane launch-picture-size — THE PICTURE SIZE at launch: desk 1100 — the head's select (the ONE size table's rows: Follow
+//      the pane / 1280×720 / 1920×1080 / 2560×1440 / Custom…) in the head row, its one-line hint once a size is chosen;
+//      Custom… = a showInputDialog refusing "abc" INLINE in parsePin's words (the box keeps the text), 1600x900 taken; a
+//      launch at 2560×1440 the machine refuses pin_unsupported ⇒ said in the dialog's BANNER with its door ("Follow the
+//      pane" resets the select); the card's launch POSTs `pin: '1280x720'` ⇒ (the captured launch answers a record born
+//      pinned, the fake keeper's) the window's chip says "1280×720 (pinned)"; the app REMEMBERS it (user state
+//      desktopAppPin) — reopened, the select says "Each app's last size" and the card names 1280×720; zh phone 390: the
+//      select on its OWN row, full width, a phone-sized target; a zh launch ⇒ the chip 「1280×720（钉住）」
+// PNGs desk / remove / phone (+ desk-menu, adopt; ⑧ size-desk / size-window / size-phone / size-phone-window) in VS_SHOT_DIR.
+// SKIPs by name: no chrome. ~45 s.
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -88,6 +97,16 @@ const STUB = `(() => {
   const f0 = window.fetch;
   window.fetch = function (u, o) {
     const p = String(u).split('?')[0], m = (o && o.method) || 'GET';
+    // ⑧ lane launch-picture-size: a launch WITH a pin is answered as the keeper would — 2560×1440 refused pin_unsupported by
+    // name (the server's sentence), any other size a record BORN pinned (the fake keeper's: no app starts), read back by id
+    if (p === '/api/desktop/apps' && m === 'POST' && JSON.parse(o.body).pin) {
+      const b = JSON.parse(o.body); S.launches.push(b);
+      if (b.pin === '2560x1440') return Promise.resolve(new Response(JSON.stringify({ error: 'a fixed picture size needs the xpra or Xvfb display backend — this app would run on vnc-display (Xvnc), where the picture follows the pane; launch it with Picture size: Follow the pane (or install xpra)', code: 'pin_unsupported' }), { status: 400, headers: { 'Content-Type': 'application/json' } }));
+      const [w, h] = String(b.pin).split('x').map(Number);
+      S.rec = { id: 'da-pin-' + S.launches.length, label: 'JASP Tools', appId: b.appId, state: 'launching', backend: 'xpra', via: 'xpra', startedAt: 1, endedAt: 2, pids: {}, pin: { w, h } };
+      return Promise.resolve(new Response(JSON.stringify(S.rec), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    }
+    if (S.rec && p === '/api/desktop/apps/' + S.rec.id && m === 'GET') return Promise.resolve(new Response(JSON.stringify(S.rec), { status: 200, headers: { 'Content-Type': 'application/json' } }));
     if (p === '/api/desktop/apps' && m === 'POST') { S.launches.push(JSON.parse(o.body)); return Promise.resolve(new Response(JSON.stringify({ error: 'the launch was recorded (this suite starts no app)' }), { status: 200, headers: { 'Content-Type': 'application/json' } })); }
     return f0.apply(this, arguments);
   };
@@ -229,5 +248,68 @@ try {
   check('the adopt dialog is a full-height sheet, nothing wider than the screen', Math.abs(sheet.w - sheet.vw) <= 2 && sheet.h >= sheet.vh - 2 && sheet.top <= 1 && !sheet.wide.length, sheet);
   await shot('phone');
   check('no page errors', !pageErrors.length, pageErrors);
+
+  console.log('⑧ lane launch-picture-size — the picture size at launch (desk 1100, then zh phone 390)');
+  const SEL = `${D} .desktop-launch-size-select`;
+  const size = () => evalJs(`(() => { const s = document.querySelector('${SEL}'); if (!s) return null; const hd = document.querySelector('${D} .desktop-launch-head'), inst = document.querySelector('${D} .desktop-launch-install-app'), hint = document.querySelector('${D} .desktop-launch-size-hint');
+    const q = s.getBoundingClientRect(), hq = hd.getBoundingClientRect(), iq = inst.getBoundingClientRect(), lq = s.closest('.desktop-launch-size').getBoundingClientRect();
+    return { values: [...s.options].map((o) => o.value), labels: [...s.options].map((o) => o.textContent), value: s.value, label: s.closest('label').querySelector('.desktop-launch-size-label').textContent,
+      inHead: hd.contains(s), sameRow: Math.abs((q.top + q.bottom) / 2 - (iq.top + iq.bottom) / 2) < 8, h: q.height, w: lq.width, headW: hq.width, top: q.top, instTop: iq.top, hint: hint.hidden ? null : hint.textContent, vw: innerWidth }; })()`);
+  const choose = (v) => evalJs(`(() => { const s = document.querySelector('${SEL}'); s.value = ${JSON.stringify(v)}; s.dispatchEvent(new Event('change')); return s.value; })()`);
+  const pinChip = `(() => { const c = [...document.querySelectorAll('.desktop-app-chip-pin')].filter((e) => e.isConnected && getComputedStyle(e).display !== 'none').pop(); return c ? c.textContent : null; })()`;
+  await evalJs(`localStorage.setItem('vibespace.lang', 'en'); true`);
+  check('desk: the Apps dialog opens', await boot(1100, 800, false));
+  let z = await size();
+  check('desk: the head carries "Picture size" — the ONE table\'s rows in order, Follow the pane chosen, no hint yet',
+    !!z && z.inHead && z.label === 'Picture size' && z.values.join('|') === 'pane|1280x720|1920x1080|2560x1440|custom' && z.labels.join('|') === 'Follow the pane|1280×720|1920×1080|2560×1440|Custom…' && z.value === 'pane' && z.hint === null, z);
+  check('desk: it sits in the head row beside the machine row / Install an app… (one row)', !!z && z.sameRow, z);
+  await choose('custom');
+  check('Custom… opens the size question (a VibeSpace dialog, never a native prompt)', await waitFor(`[...document.querySelectorAll('.dialog-overlay')].some((o) => o.textContent.includes('Custom picture size'))`, 4000));
+  const ask = (v) => evalJs(`(() => { const o = [...document.querySelectorAll('.dialog-overlay')].pop(); const i = o.querySelector('input'); i.value = ${JSON.stringify(v)}; o.querySelector('.btn-create').click(); const e = o.querySelector('.dialog-error'); return { open: o.isConnected, err: e && !e.classList.contains('hidden') ? e.textContent : null, kept: i.value }; })()`);
+  const a1 = await ask('abc');
+  check('"abc" is refused INLINE in parsePin\'s own words — the dialog stays, the box keeps the text', a1.open && /a size is WxH in pixels \(e\.g\. 1920x1080\) or auto — got "abc"/.test(a1.err || '') && a1.kept === 'abc', a1);
+  await ask('1600x900'); await sleep(200);
+  z = await size();
+  check('1600x900 is taken: the select lists and shows it (before Custom…), the hint says what a fixed size means',
+    !!z && z.value === '1600x900' && z.labels.includes('1600×900') && z.values.indexOf('1600x900') === z.values.indexOf('custom') - 1 && z.hint === 'Fixed pixels, scaled to fit the pane; an agent sees exactly this size', z);
+  await choose('2560x1440');
+  const nL = await evalJs('window.__reg.launches.length');
+  await realClick(`${D} .desktop-launch-card[data-app-id="${REG.id}"]`);
+  check('a size the machine cannot hold ⇒ pin_unsupported said in the dialog\'s BANNER (never a toast, never a greyed select), with its door',
+    await waitFor(`(() => { const b = document.querySelector('${D} .desktop-launch-banner'); return !!b && !b.classList.contains('is-empty') && /needs the xpra \\(or Xvfb\\) display backend/.test(b.textContent) && b.querySelector('.desktop-launch-banner-go')?.textContent === 'Follow the pane'; })()`, 6000),
+    await evalJs(`document.querySelector('${D} .desktop-launch-banner')?.outerHTML.slice(0, 600)`));
+  check('…the launch carried pin 2560x1440', (await evalJs(`window.__reg.launches.slice(${nL}).map((x) => x.pin).join()`)) === '2560x1440');
+  await realClick(`${D} .desktop-launch-banner-go`);
+  z = await size();
+  check('the banner\'s "Follow the pane" resets the select (the door)', !!z && z.value === 'pane' && (await evalJs(`document.querySelector('${D} .desktop-launch-banner').classList.contains('is-empty')`)), z);
+  await choose('1280x720');
+  await sleep(150); await shot('size-desk');
+  const nL2 = await evalJs('window.__reg.launches.length');
+  await realClick(`${D} .desktop-launch-card[data-app-id="${REG.id}"]`);
+  check('the card\'s launch POSTs pin 1280x720 (with its appId)', await waitFor(`window.__reg.launches.slice(${nL2}).some((x) => x.appId === '${REG.id}' && x.pin === '1280x720')`, 6000), await evalJs(`window.__reg.launches.slice(${nL2})`));
+  check('…the record is born pinned ⇒ the window\'s chip says "1280×720 (pinned)"', await waitFor(`${pinChip} === '1280×720 (pinned)'`, 8000), await evalJs(pinChip));
+  await sleep(200); await shot('size-window');
+  check('the app REMEMBERS it (user state desktopAppPin, by the app\'s key)', await waitFor(`fetch('/api/user-state').then((r) => r.json()).then((j) => j.desktopAppPin && j.desktopAppPin['${REG.id}'] === '1280x720')`, 6000),
+    await evalJs(`fetch('/api/user-state').then((r) => r.json()).then((j) => j.desktopAppPin || null)`));
+  check('reopened: the select says "Each app’s last size" and the card names 1280×720', await boot(1100, 800, false) && await waitFor(`(() => { const s = document.querySelector('${SEL}'); const c = document.querySelector('${D} .desktop-launch-card[data-app-id="${REG.id}"] .desktop-launch-card-size'); return s && s.value === '' && s.options[0].textContent === 'Each app’s last size' && c && c.textContent === '1280×720'; })()`, 6000),
+    await evalJs(`(() => { const s = document.querySelector('${SEL}'); return { v: s && s.value, o: s && [...s.options].map((x) => x.textContent), chip: document.querySelector('${D} .desktop-launch-card-size')?.textContent || null }; })()`));
+  const nL3 = await evalJs('window.__reg.launches.length');
+  await realClick(`${D} .desktop-launch-card[data-app-id="${REG.id}"]`);
+  check('…and an untouched select launches it AT the remembered 1280x720', await waitFor(`window.__reg.launches.slice(${nL3}).some((x) => x.pin === '1280x720')`, 6000), await evalJs(`window.__reg.launches.slice(${nL3})`));
+  // zh phone 390: its own row; a zh launch ⇒ 「1280×720（钉住）」
+  await evalJs(`localStorage.setItem('vibespace.lang', 'zh'); true`);
+  check('zh phone 390: the Apps dialog opens', await boot(390, 844, true));
+  await choose('1280x720');
+  z = await size();
+  check('zh phone: 「画面尺寸」 on its OWN row (below the head\'s first row, nearly the head\'s width), a phone-sized target, the hint in Chinese',
+    !!z && z.label === '画面尺寸' && z.labels[0] === '跟随窗格' && z.top > z.instTop + 4 && z.w >= z.headW - 4 && z.h >= 36 && z.hint === '画面像素固定，窗格里按比例缩放；agent 看到的就是这个尺寸', z);
+  const wide = await evalJs(`[...document.querySelectorAll('${D} .desktop-launch-head *, ${D} .desktop-launch-size-hint')].filter((e) => e.getBoundingClientRect().right > innerWidth + 1).map((e) => e.className)`);
+  check('zh phone: nothing in the head is wider than the screen', Array.isArray(wide) && !wide.length, wide);
+  await sleep(150); await shot('size-phone');
+  await realClick(`${D} .desktop-launch-card[data-app-id="${REG.id}"]`);
+  check('zh: the launch ⇒ the window\'s chip 「1280×720（钉住）」', await waitFor(`${pinChip} === '1280×720（钉住）'`, 8000), await evalJs(pinChip));
+  await sleep(200); await shot('size-phone-window');
+  await evalJs(`localStorage.setItem('vibespace.lang', 'en'); true`);
+  check('⑧ no page errors', !pageErrors.length, pageErrors);
 } catch (e) { check('the suite ran to its end', false, String(e && e.stack || e)); }
 done();

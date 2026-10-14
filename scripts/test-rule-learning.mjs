@@ -2,7 +2,9 @@
 // test-rule-learning — FAST (lane rule-learning, design q-037 P0: the 「我关心什么」 block DRAFTED by a text model from the
 // owner's verdicts, proposed never written). PURE src/rule-learning.js + its seams in src/decision-model.js, in-process,
 // ZERO vendor calls:
-//   ① availability — the truth table provider × key × plugin: the drafter exists ONLY on OpenRouter + a key + the plugin on;
+//   ① availability — the truth table provider × key × plugin: the drafter exists ONLY on OpenRouter + a key + the plugin on
+//     (+ lane llm-plugin-rename: AND its own switch `learn`, ON by default — off ⇒ `learn-off`); ⑬b the route names the
+//     switch / the provider in its 404;
 //   ② the tiers + learnCost (Flash default, Sonnet the quality tier — OpenRouter ids, never an Anthropic endpoint);
 //   ③ THE INPUT: fixed first (the task), variable last (the block numbered, then the examples: own first, inferred
 //     marked), ≤ 60 examples, ≤ 4 000 tokens by estTokens with a 70-example fixture (the inferred ones leave first, then
@@ -84,6 +86,10 @@ console.log('① availability — exists only on OpenRouter + a key + the plugin
   ok(yes.length === 2 && yes.every((c) => c[0] === 'openrouter' && c[1] === 'key' && c[2] === 'on'), 'of 16 rows, ONLY openrouter + a key + the plugin on EXIST (the trimmed / cased provider counts)', cases);
   ok(cases.filter((c) => c[0] === 'openai').every((c) => !c[3] && c[4] === 'not-openrouter') && cases.filter((c) => c[0] === 'openrouter' && c[1] === 'none').every((c) => c[4] === 'no-key')
     && cases.filter((c) => c[0] === 'openrouter' && c[1] === 'key' && c[2] === 'off').every((c) => c[4] === 'plugin-off') && cases.filter((c) => c[0] === '-').every((c) => c[4] === 'no-key'), 'each absence is named: not-openrouter · no-key · plugin-off');
+  const orRow = row('openrouter', KEY);
+  ok(RL.availability({ integrationRow: orRow, pluginOn: true, learnOn: false }).why === 'learn-off' && !RL.availability({ integrationRow: orRow, pluginOn: true, learnOn: false }).exists
+    && RL.availability({ integrationRow: orRow, pluginOn: true }).exists && RL.availability({ integrationRow: orRow, pluginOn: false, learnOn: false }).why === 'plugin-off'
+    && RL.availability({ integrationRow: row('openai', KEY), pluginOn: true, learnOn: false }).why === 'not-openrouter', 'lane llm-plugin-rename: the drafter\'s own switch — off ⇒ `learn-off` (named after the provider, the key and the plugin); absent ⇒ on (its default)');
   ok(!RL.availability({}).exists && !RL.availability({ integrationRow: { values: null } }).exists && RL.availability({ integrationRow: { values: { provider: 'openrouter', apiKey: KEY }, source: 'cluster' } }).source === 'cluster', 'no row ⇒ absent; a cluster preset counts (its source said)');
 }
 
@@ -639,6 +645,37 @@ console.log('⑬ ONE DRAFT AT A TIME (lane rule-learning-fix L4) — the REAL ch
   }
 }
 
+console.log('⑬b THE DRAFTER\'S OWN SWITCH (lane llm-plugin-rename) — the REAL router: off ⇒ 404 naming the switch; another provider ⇒ 404 naming the provider; 0 requests');
+{
+  const express = require(path.join(repo, 'node_modules/express'));
+  const ENG = require(path.join(repo, 'src/server/channels-engine.js'));
+  const CH = require(path.join(repo, 'src/channels/index.js'));
+  const routes = require(path.join(repo, 'src/routes/channels.js'));
+  const ask = async (decisionEngine, tag) => {
+    const dataDir = path.join(WIRE_ROOT, 'switch-' + tag); fs.mkdirSync(dataDir, { recursive: true });
+    const eng = ENG.create({ dataDir, registry: CH.createChannelRegistry(), env: {}, broadcast: () => { }, serverSetting: () => undefined, liveSessions: () => [], deliver: null, log: quiet, decisionEngine });
+    routes.setup({ getEngine: () => eng });
+    const app = express(); app.use(express.json()); app.use(routes.router);
+    const srv = await new Promise((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)); });
+    const url = `http://127.0.0.1:${srv.address().port}/api/channels/decision/learn`;
+    const g = await fetch(url); const gj = await g.json().catch(() => null);
+    const p = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }); const pj = await p.json().catch(() => null);
+    srv.close();
+    return { g: g.status, gj: gj || {}, p: p.status, pj: pj || {} };
+  };
+  const n = wire.length;
+  const off = await ask(mkEng({ learn: false }), 'off');
+  ok(off.g === 404 && off.p === 404 && off.gj.code === 'no-learn' && off.gj.why === 'learn-off' && off.pj.why === 'learn-off' && /switched off/.test(off.gj.error) && /Settings › Plugins › LLM/.test(off.gj.error),
+    `the switch OFF ⇒ GET and POST answer 404 no-learn naming the switch («${off.gj.error}»)`, off);
+  ok(mkEng({}).textModel.available().exists === true && mkEng({ learn: true }).textModel.available().exists === true, 'the switch absent (its default) or on ⇒ the drafter exists on an OpenRouter key');
+  const dataDir = path.join(WIRE_ROOT, 'openai'); fs.mkdirSync(dataDir, { recursive: true });
+  const oai = DE.create({ dataDir, integrations: { resolveIntegration: () => ({ values: { provider: 'openai', apiKey: KEYW }, source: 'user' }) }, baseUrlFor: { openrouter: `http://127.0.0.1:${OR}` }, now: () => Date.UTC(2026, 9, 14, 12), tzOffset: () => 0, log: quiet });
+  oai.attachPlugin({ peek: () => ({ enabled: true }), settings: () => ({ dailyBudgetCents: 100, learnModel: 'flash', learn: true }) });
+  const other = await ask(oai, 'openai');
+  ok(other.g === 404 && other.p === 404 && other.gj.why === 'not-openrouter' && /OpenRouter key/.test(other.gj.error) && /another provider/.test(other.gj.error), `an OpenAI key ⇒ 404 naming the provider («${other.gj.error}»)`, other);
+  ok(wire.length === n, `0 vendor requests for either (${wire.length - n})`);
+}
+
 console.log('⑭ EVERY REFUSAL HAS WORDS (lane rule-learning-fix L5) + the registry row names both consumers (L6)');
 {
   const CARD = fs.readFileSync(path.join(repo, 'src/lib/learn-card.js'), 'utf8');
@@ -684,9 +721,9 @@ console.log('⑭ EVERY REFUSAL HAS WORDS (lane rule-learning-fix L5) + the regis
   const p2 = [];
   ok(planted !== TM_SRC && [...routeWhys({ ...srcs, tm: planted }, p2)].filter((w) => !words.has(w)).join() === 'empty-input' && swept !== TM_SRC && [...routeWhys({ ...srcs, tm: swept }, p2)].filter((w) => !words.has(w)).join() === 'account-never', 'RED CONTROLS: a new refusal literal in the client (empty-input) and a budget argument that makes account-never reachable — each a why without words (RED)', p2);
   const R = require(path.join(repo, 'src/integration-registry.js'));
-  const row = R.rowById('decision-api'), help = row.fields.find((f) => f.key === 'provider').help;
+  const row = R.rowById('llm'), help = row.fields.find((f) => f.key === 'provider').help;
   const helpText = typeof help === 'string' ? help : JSON.stringify(help);
-  ok(eq(row.consumers, ['src/server/decision-engine.js', 'src/server/text-model-client.js']) && helpText.includes('/api/alpha/decisions') && helpText.includes('/api/v1/chat/completions'), 'L6: the Decision API row lists BOTH consumers of its key (the judge, the text client) and its help names both endpoints', { consumers: row.consumers, help: helpText.slice(0, 260) });
+  ok(eq(row.consumers, ['src/server/decision-engine.js', 'src/server/text-model-client.js']) && helpText.includes('/api/alpha/decisions') && helpText.includes('/api/v1/chat/completions'), 'L6: the Language model row lists BOTH consumers of its key (the judge, the text client) and its help names both endpoints', { consumers: row.consumers, help: helpText.slice(0, 260) });
 }
 
 console.log('⑮ THE CARD (lane rule-learning-fix F2 / F3 / L5) — the REAL learn-card.js (zh) over a fake DOM: the long kept line, the count, the empty block, the door, the refusals');

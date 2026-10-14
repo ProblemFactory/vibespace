@@ -11,9 +11,10 @@
 // Residual (documented): two clients editing in the same GET→PATCH window (tens of ms) are last-write-wins for the map.
 import { t } from './i18n.js';
 import { fetchJson, showToast } from './utils.js';
+import { pinOf } from '../desktop-pin.js'; // lane launch-picture-size: a remembered size read back through the ONE parse
 
 /** The per-app maps this loader holds. */
-export const APP_PREF_KEYS = Object.freeze(['desktopAppFrame', 'desktopAppScale', 'desktopAppSatellite']);
+export const APP_PREF_KEYS = Object.freeze(['desktopAppFrame', 'desktopAppScale', 'desktopAppSatellite', 'desktopAppPin']); // lane launch-picture-size: + the app's picture size
 const asMap = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? { ...v } : {});
 const okState = (st) => !!st && typeof st === 'object' && !Array.isArray(st) && !st.error;
 
@@ -111,6 +112,13 @@ export function createAppPrefs({ fetchJson: fj, toast, failDefault = () => 'Coul
 
 // ── design 016 S2: WHERE AN APP'S SATELLITE WINDOW OPENS (user state `desktopAppSatellite[<app key>]` = {dx, dy}) ──
 export const SATELLITE_PREF_KEY = 'desktopAppSatellite';
+/** Lane launch-picture-size: the PICTURE SIZE each app last launched with from the Apps dialog — `{ <app key>: 'WxH' }` (the
+ *  key = window-share's launchKeyOf: the registry id, a browser row's own id, `exec:<basename>`); absent = follow the pane. */
+export const PIN_PREF_KEY = 'desktopAppPin';
+/** The size an app remembers → `{w, h}` | null (a stored value parsePin refuses reads as none — the launch judges it again). */
+export function pinChoiceOf(map, key) { return map && key ? pinOf(map[key]) : null; }
+/** The map with ONE app's size set (`pin` {w, h}) or removed (null) — an edit, never a whole-map write. */
+export function setPinChoice(map, key, pin) { const out = { ...(map || {}) }; if (pin && pin.w > 0 && pin.h > 0) out[key] = `${pin.w}x${pin.h}`; else delete out[key]; return out; }
 /** PURE: a satellite's top-left (layout px) — at the offset from its main window where the person last left one of this
  *  app (`remembered` {dx, dy}), else BESIDE the main (its right, else its left; top edges aligned), else at the
  *  workspace's right edge; the top-left always on the workspace (a window larger than it overhangs right / bottom). */

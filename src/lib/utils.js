@@ -75,7 +75,7 @@ function _modalShell(title) {
   return { overlay, body, okBtn, cancelBtn, closeBtn };
 }
 
-export function showInputDialog({ title = t('Input'), label = '', value = '', placeholder = '', confirmText = t('OK'), multiline = false, decorate = null } = {}) {
+export function showInputDialog({ title = t('Input'), label = '', value = '', placeholder = '', confirmText = t('OK'), multiline = false, decorate = null, validate = null } = {}) {
   return new Promise((resolve) => {
     const { overlay, body, okBtn, cancelBtn, closeBtn } = _modalShell(title);
     okBtn.textContent = confirmText;
@@ -91,12 +91,21 @@ export function showInputDialog({ title = t('Input'), label = '', value = '', pl
     // a multi-line box is a message: its caller may attach to it (the microphone — src/lib/voice-input.js; utils imports none of it)
     const deco = multiline && typeof decorate === 'function' ? decorate(input) : null;
     const done = (result) => { try { deco && deco.destroy && deco.destroy(); } catch { } overlay.remove(); resolve(result); };
-    okBtn.onclick = () => done(input.value);
+    // lane launch-picture-size: `validate(value)` → '' | the refusal's words — said INLINE under the box (role alert), the dialog
+    // stays open and the box keeps the text (a typed size refused never closes the question)
+    const err = document.createElement('p'); err.className = 'dialog-hint dialog-error hidden'; err.setAttribute('role', 'alert');
+    if (typeof validate === 'function') body.appendChild(err);
+    const submit = () => {
+      const why = typeof validate === 'function' ? validate(input.value) : '';
+      if (why) { err.textContent = String(why); err.classList.remove('hidden'); input.focus(); return; }
+      done(input.value);
+    };
+    okBtn.onclick = submit;
     cancelBtn.onclick = closeBtn.onclick = () => done(null);
     overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) done(null); });
     input.addEventListener('keydown', (e) => {
       if (e.isComposing || e.keyCode === 229) return;
-      if (e.key === 'Enter' && !multiline) { e.preventDefault(); done(input.value); }
+      if (e.key === 'Enter' && !multiline) { e.preventDefault(); submit(); }
       if (e.key === 'Enter' && multiline && (e.ctrlKey || e.metaKey)) { e.preventDefault(); done(input.value); }
       if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); done(null); }
     });
