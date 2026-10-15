@@ -27,6 +27,11 @@
 //      nothing on 1                                                                                       hdr-chip.png
 //   ⑪ RED CONTROL: noVNC built WITHOUT the patch (scripts/build-novnc.mjs --unpatched) ⇒ ③'s crop predicate fails, and the
 //      96 px pointer stays 96 px at scale 0.5 (DPR 2)                                                    cursor-before.png
+//   ⑮ lane heavy3-flake-races (the ②③④ / ⑫ flake of rel276, now named): THE TABLE LANDS LATE — the machine's display table
+//      (GET …/displays, through the agent) is HELD on the hub while the -308 rects draw the strip: the names are not there yet
+//      (② waits for them now — RED CONTROL: the old read right after 已连接 sees 显示器 1 / 显示器 2); 2 is pressed, then the
+//      table is released ⇒ display 2 STAYS drawn (carryPick: the RFB id → the OS id at the same place); RED CONTROL: the
+//      pre-fix machine-desktop.js falls back to the whole 2560 px framebuffer the moment the names arrive
 // PNGs when `--shots <dir>`.
 import fs from 'node:fs';
 import net from 'node:net';
@@ -186,17 +191,29 @@ window.__picker = (o) => openDesktopPicker(app, o || {});
 window.__dialog = (m) => showMachineDesktopDialog(app, m, { recheck: async () => m });
 window.__closeAll = () => { for (const id of [...wm.windows.keys()]) wm.closeWindow(id); };
 window.__desktopView = () => [...wm.windows.values()].map((w) => w._desktopView).find(Boolean) || null;`;
+// ⑮'s RED control: the page with the PRE-FIX machine-desktop.js (no carry — a pick keyed by the RFB id dies at the remap)
+const CARRY = '    const carried = carryPick(prev, map, want);\n    if (carried !== want) { want = carried; rememberDesktop(m.hostId, want); }\n';
+const preFix = { name: 'pre-fix-carry', setup(b) { b.onLoad({ filter: /machine-desktop\.js$/ }, (a) => { const src = fs.readFileSync(a.path, 'utf8'); if (!src.includes(CARRY)) throw new Error('the carry lines moved'); return { contents: src.replace(CARRY, ''), loader: 'js' }; }); } };
+await esbuild.build({ stdin: { contents: entry, resolveDir: REPO, loader: 'js' }, bundle: true, format: 'iife', platform: 'browser', target: 'es2020', outfile: path.join(root, 'page-prefix.js'), loader: { '.css': 'empty' }, logLevel: 'error', plugins: [preFix] });
 await esbuild.build({ stdin: { contents: entry, resolveDir: REPO, loader: 'js' }, bundle: true, format: 'iife', platform: 'browser', target: 'es2020', outfile: path.join(root, 'page.js'), loader: { '.css': 'empty' }, logLevel: 'error' });
 // the mutant: noVNC built without the patch (the shipped build script's own --unpatched switch)
 const MUTANT = path.join(root, 'novnc-unpatched.js');
 execFileSync(process.execPath, [path.join(REPO, 'scripts/build-novnc.mjs'), MUTANT, '--unpatched'], { cwd: REPO, stdio: 'pipe' });
 let novncFile = NOVNC;
-const app = express(); app.use(express.json()); app.use(R.router);
+const app = express(); app.use(express.json());
+// ⑮ (lane heavy3-flake-races): while `dhold.on` the machine's display table waits here — the late table made deterministic
+const dhold = { on: false, held: [] };
+app.use((q, s, next) => { if (dhold.on && q.path === '/api/desktop/machine-desktop/displays') { dhold.held.push(next); return; } next(); });
+const dRelease = () => { dhold.on = false; for (const f of dhold.held.splice(0)) f(); };
+app.use(R.router);
 const CSS = ['style', 'viewers', 'chat', 'fonts'].filter((n) => fs.existsSync(path.join(REPO, `public/${n}.css`)));
 for (const n of CSS) app.get(`/${n}.css`, (q, s) => s.type('text/css').send(fs.readFileSync(path.join(REPO, `public/${n}.css`))));
 app.get('/page.js', (q, s) => s.type('text/javascript').send(fs.readFileSync(path.join(root, 'page.js'))));
+app.get('/page-prefix.js', (q, s) => s.type('text/javascript').send(fs.readFileSync(path.join(root, 'page-prefix.js'))));
 app.get('/novnc.js', (q, s) => s.type('text/javascript').send(fs.readFileSync(novncFile)));
-app.get('/', (q, s) => s.type('text/html').send(`<!doctype html><html data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">${CSS.map((n) => `<link rel="stylesheet" href="/${n}.css">`).join('')}<style>body{margin:0;background:var(--bg-root);height:100vh;overflow:hidden}</style></head><body><script src="/page.js"></script></body></html>`));
+const HTML = `<!doctype html><html data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">${CSS.map((n) => `<link rel="stylesheet" href="/${n}.css">`).join('')}<style>body{margin:0;background:var(--bg-root);height:100vh;overflow:hidden}</style></head><body><script src="/page.js"></script></body></html>`;
+app.get('/', (q, s) => s.type('text/html').send(HTML));
+app.get('/prefix', (q, s) => s.type('text/html').send(HTML.replace('/page.js', '/page-prefix.js')));
 const PORT = await freePort();
 srv = http.createServer(app);
 srv.on('upgrade', (req, socket, head) => bridge.handleUpgrade(req, socket, head, bridge.upgradeId(new URL(req.url, 'http://x').pathname)));
@@ -210,7 +227,7 @@ const cenv = { ...process.env, HOME: chromeHome, XDG_RUNTIME_DIR: chromeRun }; d
 chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--hide-scrollbars', '--font-render-hinting=none', `--user-data-dir=${path.join(root, 'chrome-profile')}`, 'about:blank'], { stdio: 'ignore', env: cenv });
 const WebSocket = require(path.join(REPO, 'node_modules/ws'));
 for (let i = 0; i < 120; i++) { try { await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json(); break; } catch { await sleep(250); } }
-async function page(w, h, winCss, dpr = 1) {
+async function page(w, h, winCss, dpr = 1, at = '/') {
   const tg = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/new?about:blank`, { method: 'PUT' })).json();
   const ws = new WebSocket(tg.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
   await new Promise((r) => ws.on('open', r));
@@ -224,7 +241,7 @@ async function page(w, h, winCss, dpr = 1) {
   await cdp('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: dpr, mobile: w < 600 });
   const ev = async (expr) => { const r = await cdp('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.result?.exceptionDetails) throw new Error('page threw: ' + JSON.stringify(r.result.exceptionDetails).slice(0, 600)); return r.result?.result?.value; };
   const until = async (expr, ms = 20000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await ev(expr).catch(() => false)) return true; await sleep(100); } return false; };
-  const load = async () => { await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` }); await sleep(300); await until('typeof window.__picker === "function"', 10000); };
+  const load = async () => { await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}${at}` }); await sleep(300); await until('typeof window.__picker === "function"', 10000); };
   await load();
   const mouse = async (type, x, y, buttons = 0) => cdp('Input.dispatchMouseEvent', { type, x, y, button: type === 'mouseMoved' && !buttons ? 'none' : 'left', buttons, clickCount: type === 'mouseMoved' ? 0 : 1 });
   const click = async (x, y) => { await mouse('mouseMoved', x, y); await mouse('mousePressed', x, y, 1); await mouse('mouseReleased', x, y, 0); };
@@ -252,6 +269,7 @@ const signIn = async (p) => { const asked = await p.until(`!!document.querySelec
 const connected = (p) => p.until(`(() => { const s = document.querySelector('${WIN} .desktop-strip-status'); return !!s && /已连接/.test(s.textContent) && document.querySelectorAll('${WIN} .desktop-strip-seg').length === 3; })()`, 20000);
 const seg = (p, label) => p.ev(`[...document.querySelectorAll('${WIN} .desktop-strip-seg')].find((b) => b.textContent === ${JSON.stringify(label)}).click()`);
 const cropOk = async (p) => { await sleep(400); const r = await p.ev(PATTERN(2)); return { ok: !!r && r.W === 1280 && r.H === 800 && r.bad === 0, r }; };
+const NAMED = '1 · DELL P2419H|2 · LG 27UL|全部';
 const DESK = 'position:fixed;left:30px;top:70px;width:1100px;height:600px;display:flex;flex-direction:column;background:var(--bg-window);border:1px solid var(--border);box-shadow:0 6px 24px rgba(0,0,0,.25);border-radius:8px;overflow:hidden;z-index:5';
 
 console.log('① – ⑨ desk 1280 px');
@@ -267,8 +285,11 @@ console.log('① – ⑨ desk 1280 px');
   const up = await connected(p);
   const strip = await p.ev(`[...document.querySelector('${WIN} .desktop-strip').children].filter((e) => !e.hidden && !e.classList.contains('desktop-strip-hdr')).map((e) => e.classList.contains('desktop-strip-displays') ? [...e.children].map((b) => b.textContent).join(' · ') : e.classList.contains('desktop-strip-status') ? e.textContent.replace(/\\d+|—/g, 'N') : e.textContent)`);
   ok(asked && up && vnc.seen.authed === 1 && vnc.seen.sessions === 1 && JSON.stringify(strip) === JSON.stringify(['WIN-DESK1 ▾', '1 · 2 · 全部', '⤢ 全屏', '⌨ 捕获快捷键', '已连接 · N ms · N fps', '清晰']), '② the press opens the window: the sign-in asked; the strip [WIN-DESK1 ▾] [1 · 2 · 全部] [⤢ 全屏] [⌨ 捕获快捷键] [已连接 · N ms · N fps] [清晰] (P1 added ⌨ + the rung)', { asked, up, seen: { a: vnc.seen.authed, s: vnc.seen.sessions }, strip });
+  // the machine's own table is an HTTP read through the agent, the -308 rects ride the first frame: either lands first
+  // (⑮ holds the table to prove both orders) — the names are WAITED for, never read the moment the strip says 已连接
+  await p.until(`[...document.querySelectorAll('${WIN} .desktop-strip-seg')].map((b) => b.title).join('|') === ${JSON.stringify(NAMED)}`, 10000);
   const titles = await p.ev(`[...document.querySelectorAll('${WIN} .desktop-strip-seg')].map((b) => b.title)`);
-  ok(titles.join('|') === '1 · DELL P2419H|2 · LG 27UL|全部', '② the displays carry the machine\'s own names (the OS table agreed with the -308 rects)', titles);
+  ok(titles.join('|') === NAMED, '② the displays carry the machine\'s own names (the OS table agreed with the -308 rects)', titles);
   await seg(p, '2');
   const c2 = await cropOk(p);
   ok(c2.ok, '③ 2: ONLY the second display is drawn — a 1280×800 canvas, every pixel the stub\'s screen-2 pattern (0 off, 0 from screen 1)', c2.r);
@@ -417,6 +438,38 @@ console.log('⑫ – ⑭ the pointer at the picture\'s scale (DPR 2) + the HDR c
     '⑭ HDR: display 2 (hdr 1) shows 「HDR 已开 · 画面会偏白」 with the remedy; display 1 (hdr 0) nothing; 全部 (an HDR screen in it) shows it', { h2, h1, hAll });
   vnc.st.cursor = null;
   p.close();
+}
+console.log('⑮ the table lands late: 2 pressed on the -308 rects, then the machine\'s names arrive');
+{
+  const lateTable = async (at) => {
+    const p = await page(1280, 800, DESK, 1, at);
+    dhold.on = true;
+    await p.ev('window.__picker()');
+    await p.until(`!!document.querySelector('.desktop-picker-row[data-group="remote"]')`, 15000);
+    await p.ev(`document.querySelector('.desktop-picker-row[data-group="remote"]').click()`);
+    await signIn(p);
+    const up = await connected(p);
+    const t0 = Date.now(); while (!dhold.held.length && Date.now() - t0 < 10000) await sleep(50); // the window's one table read, held
+    const held = dhold.held.length;
+    const early = await p.ev(`[...document.querySelectorAll('${WIN} .desktop-strip-seg')].map((b) => b.title).join('|')`);
+    await seg(p, '2');
+    const two = await p.until(`(() => { const r = ${PATTERN(2)}; return !!r && r.W === 1280 && r.bad === 0; })()`, 8000);
+    dRelease();
+    const named = await p.until(`[...document.querySelectorAll('${WIN} .desktop-strip-seg')].map((b) => b.title).join('|') === ${JSON.stringify(NAMED)}`, 10000);
+    // the names are drawn by the same apply() that set the crop: the view's own crop now is the verdict
+    const after = await p.ev(`(() => { const v = window.__desktopView(); const b = [...document.querySelectorAll('${WIN} .desktop-strip-seg')].find((x) => x.getAttribute('aria-pressed') === 'true'); return { crop: v && v.crop, pressed: b ? b.textContent : null, recent: JSON.parse(localStorage.getItem('vibespace.desktopRecent') || 'null') }; })()`);
+    const drawn = after.crop ? await p.until(`(() => { const r = ${PATTERN(2)}; return !!r && r.W === 1280 && r.bad === 0; })()`, 8000) : await p.until(`(() => { const r = ${PATTERN('all')}; return !!r && r.W === 2560 && r.bad === 0; })()`, 8000);
+    p.close();
+    return { up, held, early, two, named, after, drawn };
+  };
+  const f = await lateTable('/');
+  ok(f.up && f.held === 1 && f.early === '显示器 1|显示器 2|全部' && f.two,
+    '⑮ the table held: the strip draws off the -308 rects with no names yet (RED CONTROL for ②: the old read right after 已连接 sees 显示器 1 / 显示器 2), and 2 crops on them', f);
+  ok(f.named && f.after.crop && f.after.crop.x === HALF && f.after.crop.w === HALF && f.after.pressed === '2' && f.after.recent && /DISPLAY2$/.test(String(f.after.recent.display)) && f.drawn,
+    '⑮ released: the names arrive and display 2 STAYS drawn — the pick moved from the RFB id to the OS id at the same place (carryPick), and the recent choice names the OS id', f.after);
+  const g = await lateTable('/prefix');
+  ok(g.up && g.held === 1 && g.two && g.named && !g.after.crop && g.drawn,
+    '⑮ RED CONTROL: the pre-fix machine-desktop.js drops the pick the moment the names arrive — the whole 2560 px framebuffer (the mirror\'s ③ {W:2560} and ④ press at x 1280)', g.after);
 }
 console.log('⑪ RED CONTROL: noVNC without the patch');
 {

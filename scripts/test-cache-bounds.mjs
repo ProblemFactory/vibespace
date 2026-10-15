@@ -338,7 +338,12 @@ console.log('§6–§11 r2: the cold walk off the loop, held, single-flight; the
     const walkSrc = fs.readFileSync(path.join(REPO, 'src/usage-cold-walk.js'), 'utf8');
     const unverified = walkSrc.replace("if (idHash(line) !== rh) throw stale(where + ' holds another line');", '').replace("if (!ev || (ev.ts || 0) !== ts) throw stale(where + ' holds another row');", '').replace("let ev; try { ev = JSON.parse(line); } catch { throw stale(where + ' is not a row'); }", 'let ev; try { ev = JSON.parse(line); } catch { ev = {}; }').replace("if (o > 0 && buf[o - base - 1] !== 10) throw stale(`${path.basename(fp)}@${o} does not start a line`);", '');
     const UW = MW.load('src/usage-cold-walk.js', unverified, 'noverify');
-    let n3 = 0; for (const ev of UW.coldRows(walk)) if (ev && ev.ts) n3++;
+    // The shrink can leave a planned place BEYOND the shard's new end: the structural checks the mutant keeps (`does not
+    // start a line` / `has no line end`, usage-cold-walk.js readLinesAt) throw STALE there — which places are planned is a
+    // matter of which rows the clock put in the first shard (2026-10-15: red on every tree from 09:00Z, green at 07:42Z).
+    // The control's claim is the COUNT: an unverified reader answers a wrong number, partial or fragmentary — so the walk
+    // stops at the first structural STALE and the count must still differ from the truth.
+    let n3 = 0; try { for (const ev of UW.coldRows(walk)) if (ev && ev.ts) n3++; } catch (e) { if (e.code !== 'STALE') throw e; }
     let staleSeen = false; try { for (const ev of require('../src/usage-cold-walk.js').coldRows(walk)) void ev; } catch (e) { staleSeen = e.code === 'STALE'; }
     ok(staleSeen, '§17 (verify #10) the real reader refuses the stale places (STALE), never folds a fragment');
     const c3 = { totals: { requests: n3 } }, want3 = { requests: [...t.rows(null, NOW - 1)].length };

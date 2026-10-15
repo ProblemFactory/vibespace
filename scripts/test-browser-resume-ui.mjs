@@ -11,6 +11,10 @@
 //   ② the user's Stop: the live view keeps its last frame, its status says what is KEPT, and Reconnect is RESUME in place
 //      (the play glyph + its word, whole); a REAL click resumes — the fake browser reopened the three pages IN ORDER and
 //      switched back to the second BY ITS TARGET ID; the view reconnected by itself and draws again
+//      (lane heavy3-flake-races, the rel276 flake now named: the view reconnects BY ITSELF the moment the relaunched browser
+//      holds again — MID-resume — so "connected with three tabs" is no sign the resume ended; the leg waits for the Resume's
+//      own answer (resumedHere, the POST answered after its last step); RED CONTROL: the switch back HELD in the fake — the
+//      old wait passes while the tab on show is still the last one opened)
 //   ③ "Hand back and continue…" is offered after the Resume; a REAL Take over, a REAL click on it: the note box takes the
 //      typed keys (not one reached the page), a REAL click on Hand back: the takeover ended, ONE card in the chat, the
 //      stash holds "a browser handback", NO billed turn (the spend ledger has no row, the journal says "nothing
@@ -81,6 +85,7 @@ if (a === '--version') { console.log('agent-browser 0.38.1'); process.exit(0); }
 if (a === 'session' && b === 'info') { const s = read(); const act = !!(s && alive(s.pid)); out({ success: true, data: { active: act, namespace: ns, pid: act ? s.pid : null, session: process.env.AGENT_BROWSER_SESSION || null, socketDir: path.join(st, ns, 'run'), version: act ? '0.38.1' : null } }); process.exit(0); }
 if (a === 'open') { let s = read(); if (!(s && alive(s.pid))) { const c = spawn('sleep', ['600'], { detached: true, stdio: 'ignore' }); c.unref(); s = { pid: c.pid, n: 1, tabs: [{ tabId: 't1', targetId: tid(), url: 'about:blank', title: '', active: true }] }; fs.appendFileSync(path.join(st, 'pids'), c.pid + '\\n'); }
   const act = s.tabs.find((t) => t.active) || s.tabs[0]; act.url = b; act.title = 'Page ' + String(b).replace(/^https?:\\/\\//, ''); write(s); out({ success: true, data: { targetId: act.targetId, url: b } }); process.exit(0); }
+if (a === 'tab' && b && !['new', 'list', 'close'].includes(b) && fs.existsSync(path.join(st, 'hold-switch'))) { const w = new Int32Array(new SharedArrayBuffer(4)); while (fs.existsSync(path.join(st, 'hold-switch'))) Atomics.wait(w, 0, 0, 20); } // lane heavy3-flake-races: a switch waits while the suite holds it
 if (a === 'tab') { const s = read(); if (!(s && alive(s.pid))) { out({ success: false, error: 'fake: no browser' }); process.exit(1); }
   const rest = argv.slice(1);
   if (rest[0] === 'new') { const url = rest[1] || 'about:blank'; s.n = (s.n || 1) + 1; for (const t of s.tabs) t.active = false; const t = { tabId: 't' + s.n, targetId: tid(), url, title: 'Page ' + url.replace(/^https?:\\/\\//, ''), active: true }; s.tabs.push(t); write(s); out({ success: true, data: { tabId: t.tabId, targetId: t.targetId, url, total: s.tabs.length } }); process.exit(0); }
@@ -226,8 +231,16 @@ else await (async () => {
     ok(offered && s2.resumeText === 'Resume' && s2.btn && s2.btn.mode === 'resume' && s2.btn.svg && s2.btn.sw <= s2.btn.cw + 1, 'the stopped view keeps its last frame and offers RESUME in place of Reconnect — the play glyph + its word, whole on the bar (no greyed control)', S(s2));
     ok(/3 tab\(s\) and its logins are kept/.test(s2.statusText || '') && s2.fact && s2.fact.kept && s2.fact.kept.tabs === 3, 'its status line says what is kept ("… 3 tab(s) and its logins are kept …") — THE fact\'s own.kept', S({ status: s2.statusText, own: s2.fact }));
     const nBefore = cmds().length;
+    fs.writeFileSync(path.join(AB, 'hold-switch'), ''); // the Resume's LAST step (the switch back to the tab on show) waits in the fake
     if (s2.btn) await click(centre(s2.btn.rect));
-    const resumed = await until(() => ev('const s = L().state(); return !!(s.connected && !s.stopped && s.frames >= 1 && s.tabs.length === 3);'), 20000, 150);
+    // the OLD wait: connected with three tabs — the view reconnects by itself as soon as the relaunched browser holds again
+    const oldSaid = await until(() => ev('const s = L().state(); return !!(s.connected && !s.stopped && s.frames >= 1 && s.tabs.length === 3);'), 20000, 150);
+    const mid = { view: await ev('const s = L().state(); return { resuming: s.resuming, resumedHere: s.resumedHere };'), onShow: ((tabsOf().find((t) => t.active)) || {}).url || null };
+    ok(oldSaid && mid.view.resuming && !mid.view.resumedHere && mid.onShow === 'https://c.test/',
+      'RED CONTROL (the old wait): with the switch back held, the view is already connected with three tabs while the Resume has not answered — the tab on show is still the last one opened (the mirror\'s red read here)', S(mid));
+    fs.unlinkSync(path.join(AB, 'hold-switch'));
+    // the Resume's own answer: the POST came back after its last step (resumedHere, resuming over)
+    const resumed = await until(() => ev('const s = L().state(); return !!(s.resumedHere && !s.resuming && s.connected && !s.stopped && s.frames >= 1 && s.tabs.length === 3);'), 20000, 150);
     const after = cmds().slice(nBefore);
     const t2 = tabsOf();
     const bId = t2[1] && t2[1].targetId;

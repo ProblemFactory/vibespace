@@ -25,6 +25,18 @@
 // { kind: 'code-prompt' } | { kind: 'token', token } | { kind: 'error', line }.
 // The token leaves ONLY as a step — the caller hands it to the store and
 // drops the parser; nothing here keeps a public copy.
+//
+// THE SNAPSHOT'S REVISION (lane heavy3-flake-races, the oat-mint-ui flake of
+// int264 / int268 / int274 / rel277): a page learns a mint twice — the HTTP
+// answer of its own request (POST …/code answers `minting`) and the WS
+// `oat-mint` push of every change (`saved` / `failed` / `confirm` a few ms
+// later). The two ride different sockets and the answer's body is read a
+// step later, so the push can be drawn FIRST and the late answer then drew
+// `minting` back over it — the dialog stuck there with nothing left to move
+// it. Every published change bumps `rev` (src/server/oat-mint.js emit), each
+// snapshot carries it, and mintShowVerdict(shown, incoming) keeps an older
+// snapshot of the SAME run from repainting a newer one ('stale'), beside the
+// older run's echo ('older-run').
 
 const MAX_RAW = 256 * 1024;
 const TOKEN_RE = /sk-ant-oat\d{2}-[\w-]{20,600}/;
@@ -128,6 +140,7 @@ function publicMint(m) {
   const word = (v, n) => (typeof v === 'string' && v ? redact(v).slice(0, n) : null);
   return {
     id: String(m.id), accountId: String(m.accountId), phase: MINT_PHASES.includes(m.phase) ? m.phase : 'failed',
+    rev: Number(m.rev) || 0, // lane heavy3-flake-races: the publication this snapshot is (mintShowVerdict)
     url: typeof m.url === 'string' ? m.url : null, localUrl: typeof m.localUrl === 'string' ? m.localUrl : null,
     error: m.error ? redact(m.error).slice(0, 300) : null,
     startedAt: Number(m.startedAt) || 0, endedAt: Number(m.endedAt) || null, mintedAt: Number(m.mintedAt) || null,
@@ -136,6 +149,17 @@ function publicMint(m) {
     signedInAs: word(m.signedInAs, 120), other: word(m.other, 120),
     choices: m.phase === 'confirm' && Array.isArray(m.choices) ? m.choices.filter((c) => c && c.id).slice(0, 50).map((c) => ({ id: String(c.id), name: word(c.name, 60) || String(c.id) })) : null,
   };
+}
+
+/** lane heavy3-flake-races: may a page draw `incoming` over the mint it shows?
+ *  'show' | 'older-run' (another run that started before the live one shown —
+ *  its echo) | 'stale' (the same run, an earlier publication: a late HTTP
+ *  answer after the WS push of a later phase). Equal revisions show (the same
+ *  publication, or a fresher read of it). */
+function mintShowVerdict(shown, incoming) {
+  if (!incoming || !shown) return 'show';
+  if (incoming.id !== shown.id) return !MINT_DONE.includes(shown.phase) && Number(incoming.startedAt) < Number(shown.startedAt) ? 'older-run' : 'show';
+  return (Number(incoming.rev) || 0) < (Number(shown.rev) || 0) ? 'stale' : 'show';
 }
 
 /** A sign-in code as the person pasted it: one line, printable, ≤ 2000. */
@@ -176,4 +200,4 @@ function mintEnvOf(base, { home, configDir, browser } = {}) {
   return Object.assign(out, { HOME: String(home), CLAUDE_CONFIG_DIR: String(configDir), BROWSER: String(browser), TERM: 'xterm-256color', DISABLE_AUTOUPDATER: '1' });
 }
 
-module.exports = { cleanPty, redact, lastLine, findUrl, findToken, initialMintParse, mintStep, publicMint, codeVerdict, identityVerdict, mintEnvOf, MINT_ENV_ALLOW, MINT_PHASES, MINT_DONE, MINT_REASONS };
+module.exports = { cleanPty, redact, lastLine, findUrl, findToken, initialMintParse, mintStep, publicMint, mintShowVerdict, codeVerdict, identityVerdict, mintEnvOf, MINT_ENV_ALLOW, MINT_PHASES, MINT_DONE, MINT_REASONS };

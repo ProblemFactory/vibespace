@@ -2,6 +2,12 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.278 — 2026-10-15
+
+### Fixed
+- The Long-lived token dialog no longer sticks on "Creating the token…" after a quick sign-in: it shows Saved, why it was not saved, or the account pick.
+- On a paired machine with several displays, the display you picked stays shown when the machine's display names arrive a moment later.
+
 ## 2.369.277 — 2026-10-15
 
 ### Fixed

@@ -13,6 +13,16 @@
 // account's sign-in ⇒ 这把 token 属于 …；没有保存; phone 390 fits. PNGs (zh):
 // link / code / saved / confirm / mismatch at desk 1100, phone at 390 →
 // $OAT_PNG_DIR or the scratch dir.
+// lane heavy3-flake-races (the flake of int264 / int268 / int274 / rel277, now
+// named): each page RECORDS its dialog's every phase (`__phases`, armed at
+// load) — the second page's 已保存 is read off its own record, because the
+// dialog closes itself 2 s after saving and a slow screenshot of page A used
+// to outlast that (RED CONTROL: the old live look after the self-close);
+// §3b THE LATE ANSWER: POST …/code's answer (`minting`) held on the hub until
+// the page drew the push of the save, then released — the dialog stays
+// 已保存 (mintShowVerdict drops the older snapshot); RED CONTROL: the pre-fix
+// guard (an older RUN's echo only), bundled for a third page, draws the late
+// answer back over the push.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -59,12 +69,22 @@ app.ws = { onGlobal(h) { hs.push(h); return () => { const i = hs.indexOf(h); if 
 const sock = new WebSocket(location.origin.replace('http', 'ws') + '/ws');
 sock.onmessage = (e) => { const m = JSON.parse(e.data); window.__casts.push(m); for (const h of [...hs]) h(m); };
 window.__casts = []; window.__browsed = []; window.__refreshes = 0;
+window.__phases = []; // [phase, words] per paint of #oat-mint — recorded from the page's load, so nothing shown is missed
+new MutationObserver((ms) => { for (const r of ms) if (r.type === 'attributes' && r.target.id === 'oat-mint') window.__phases.push([r.target.dataset.phase, r.target.textContent]); }).observe(document.documentElement, { subtree: true, attributes: true, attributeFilter: ['data-phase'] });
+window.__answers = 0; // mint answers the dialog has CONSUMED (counted a task after its own await of the body)
+const fetch0 = window.fetch;
+window.fetch = async (...a) => { const r = await fetch0(...a); if (String(a[0]).includes('/oat/mint')) { const j0 = r.json.bind(r); r.json = () => j0().finally(() => setTimeout(() => { window.__answers++; }, 0)); } return r; };
 app.browseYourself = (pid, o) => { window.__browsed.push({ pid, label: o && o.label }); return null; };
 window.openOat = async () => { const a = await (await fetch('/api/test/account')).json(); app._oatDialog(a.id, a, () => { window.__refreshes++; }); };
 window.wsReady = () => sock.readyState === 1;`;
   await esbuild.build({ stdin: { contents: entry, resolveDir: path.join(REPO, 'src/lib'), sourcefile: 'oat-entry.js' }, bundle: true, format: 'iife', platform: 'browser', target: 'es2022', outfile: path.join(dir, 'www/oat.js'), logLevel: 'silent', loader: { '.css': 'text' }, plugins: [stubBuildVersion] });
+  // the RED control's page: the dialog with the PRE-FIX guard (an older run's echo only — a late answer of the same run drew)
+  const NEW_GUARD = "if (m && mintShowVerdict(mint, m) !== 'show') return;";
+  const preFix = { name: 'pre-fix-guard', setup(b) { b.onLoad({ filter: /manage-agents\.js$/ }, (a) => { const src = fs.readFileSync(a.path, 'utf8'); if (!src.includes(NEW_GUARD)) throw new Error('the guard line moved: ' + NEW_GUARD); return { contents: src.replace(NEW_GUARD, 'if (m && mint && m.id !== mint.id && live() && m.startedAt < mint.startedAt) return;'), loader: 'js' }; }); } };
+  await esbuild.build({ stdin: { contents: entry, resolveDir: path.join(REPO, 'src/lib'), sourcefile: 'oat-entry.js' }, bundle: true, format: 'iife', platform: 'browser', target: 'es2022', outfile: path.join(dir, 'www/oat-prefix.js'), logLevel: 'silent', loader: { '.css': 'text' }, plugins: [stubBuildVersion, preFix] });
   fs.copyFileSync(path.join(REPO, 'public/style.css'), path.join(dir, 'www/style.css'));
   fs.writeFileSync(path.join(dir, 'www/index.html'), '<!doctype html><html data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/style.css"></head><body><script>localStorage.setItem("vibespace.lang","zh")</' + 'script><script src="/oat.js"></' + 'script></body></html>');
+  fs.writeFileSync(path.join(dir, 'www/prefix.html'), fs.readFileSync(path.join(dir, 'www/index.html'), 'utf8').replace('/oat.js', '/oat-prefix.js'));
   // ── the hub: real routes + ORCH over the fake CLI; browser door stubbed ──
   const app = express(); app.use(express.json());
   const navs = [];
@@ -72,6 +92,10 @@ window.wsReady = () => sock.readyState === 1;`;
   const wss = new WebSocketServer({ server: srv, path: '/ws' });
   const broadcastAll = (m) => { const j = JSON.stringify(m); for (const c of wss.clients) { try { c.send(j); } catch { } } };
   mint = O.create({ accounts: am, claudeCmd: fakeClaudeCmd(dir, { TOKEN, RECORD: rec, IDENTITY_FILE: identFile }), env: process.env, tmpRoot: scratch, broadcastAll, log: () => { } });
+  // lane heavy3-flake-races: the late answer made deterministic — while `hold.on`, POST …/code's answer waits here
+  const hold = { on: false, held: [] };
+  app.use((req, res, next) => { if (hold.on && req.method === 'POST' && /\/oat\/mint\/[^/]+\/code$/.test(req.path)) { const json = res.json.bind(res); res.json = (b) => { hold.held.push(() => json(b)); return res; }; } next(); });
+  const release = () => { hold.on = false; for (const f of hold.held.splice(0)) f(); };
   O.registerMintRoutes(app, { mint, isAgentBearer: (req) => /^Bearer\s+(vsst_|jbt_)/i.test(String(req.headers.authorization || '')) });
   app.get('/api/test/account', (req, res) => { const a = am.get(acct); res.json({ id: acct, name: a.name, oat: !!a.oatEnc, oatDaysLeft: a.oatEnc ? 365 : null }); });
   app.get('/api/browser/profiles', (req, res) => res.json([{ id: 'bp-ab12', label: 'Personal' }]));
@@ -89,7 +113,7 @@ window.wsReady = () => sock.readyState === 1;`;
   let list = null;
   for (let i = 0; i < 80 && !list; i++) { try { const l = await (await fetch('http://127.0.0.1:' + CDP_PORT + '/json')).json(); if (l.some((t) => t.type === 'page')) list = l; } catch { await sleep(200); } }
   if (!list) throw new Error('chrome never came up on the devtools port');
-  const connect = async (target) => {
+  const connect = async (target, page = '/') => {
     const sock = new WS(target.webSocketDebuggerUrl);
     await race(new Promise((res, rej) => { sock.on('open', res); sock.on('error', rej); }), 15000, 'devtools socket');
     let seq = 0; const pend = new Map(); const errors = [];
@@ -100,7 +124,7 @@ window.wsReady = () => sock.readyState === 1;`;
     await cdp('Page.enable'); await cdp('Runtime.enable');
     await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });
     await cdp('Emulation.setDeviceMetricsOverride', { width: 1100, height: 820, deviceScaleFactor: 1, mobile: false });
-    await cdp('Page.navigate', { url: ORIGIN + '/' });
+    await cdp('Page.navigate', { url: ORIGIN + page });
     await waitFor('typeof window.openOat === "function" && window.wsReady()');
     const shot = async (file) => { const s = await cdp('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(PNG, file), Buffer.from(s.data, 'base64')); };
     return { cdp, ev, waitFor, shot, errors, close: () => sock.close() };
@@ -132,11 +156,16 @@ window.wsReady = () => sock.readyState === 1;`;
   console.log('§3 paste the code → 已保存 → the Active line');
   await A.ev('(() => { const i = document.querySelector("#oat-code"); i.value = "fakecode123#FAKESTATE"; i.dispatchEvent(new Event("input")); })()');
   await A.shot('code.png');
+  await B.ev('window.__phases.length = 0');
   await A.ev('document.querySelector("#oat-send").click()');
   ok(await A.waitFor('document.querySelector("#oat-mint")?.dataset.phase === "saved"'), 'phase saved', await phase(A));
   ok(await A.ev('document.querySelector(".oat-saved")?.textContent') === '✓ 已保存 · 有效 1 年', 'the words: ✓ 已保存 · 有效 1 年');
   await A.shot('saved.png');
-  ok(await B.waitFor('document.querySelector("#oat-mint")?.dataset.phase === "saved"'), 'the second page shows 已保存 too (WS oat-mint)');
+  // B's own paints, recorded since before the send: its dialog closes itself 2 s after 已保存, and A's screenshot just
+  // above can take longer than that on a loaded runner (the mirror's red) — the record keeps what B showed
+  ok(await B.waitFor('window.__phases.some(([p, w]) => p === "saved" && w.includes("已保存"))'), 'the second page shows 已保存 too (WS oat-mint)', await B.ev('window.__phases'));
+  ok(await B.waitFor('!document.querySelector("#oat-dialog")', 4000) && !(await B.ev('document.querySelector("#oat-mint")?.dataset.phase === "saved"')) && (await B.ev('window.__phases')).some(([p]) => p === 'saved'),
+    'RED CONTROL (the old wait): looked at once its dialog closed itself, the second page no longer says 已保存 — only the record armed before the send holds it');
   ok(am.getOat(acct) === TOKEN, 'the token is in the store');
   ok(fakeFacts().some((f) => f.code === 'fakecode123#FAKESTATE'), 'the code reached the CLI');
   ok(await A.ev('window.__refreshes') >= 1, 'the roster refresh ran');
@@ -146,6 +175,33 @@ window.wsReady = () => sock.readyState === 1;`;
   await A.ev('openOat()');
   ok(await A.waitFor('/365/.test(document.querySelector("#oat-active")?.textContent || "")'), 'reopened: the Active line (365 days)', await A.ev('document.querySelector("#oat-active")?.textContent'));
   await A.ev('document.querySelector("#oat-dialog .dialog-close")?.click()');
+
+  console.log('§3b the late answer: POST …/code answers AFTER the push of the save (held on the hub)');
+  const lateAnswer = async (P) => {
+    am.clearOat(acct);
+    await P.ev('openOat()'); await P.waitFor('!!document.querySelector("#oat-run")');
+    await P.ev('document.querySelector("#oat-run").click()');
+    const waiting = await P.waitFor('document.querySelector("#oat-mint")?.dataset.phase === "waiting-code"');
+    hold.on = true;
+    await P.ev('(() => { window.__phases.length = 0; window.__answers = 0; const i = document.querySelector("#oat-code"); i.value = "latecode#S0"; i.dispatchEvent(new Event("input")); })()');
+    await P.ev('document.querySelector("#oat-send").click()');
+    const pushed = await P.waitFor('window.__phases.some(([p]) => p === "saved")'); // the push of the save, drawn first
+    const held = hold.held.length;
+    release();
+    const consumed = await P.waitFor('window.__answers >= 1'); // the dialog has read the late answer (a task after its await)
+    const seq = (await P.ev('window.__phases')).map(([p]) => p);
+    await P.waitFor('!document.querySelector("#oat-dialog")', 4000);
+    return { waiting, pushed, held, consumed, seq, stored: am.getOat(acct) === TOKEN };
+  };
+  const late = await lateAnswer(A);
+  ok(late.waiting && late.pushed && late.held === 1 && late.consumed && late.stored && late.seq[late.seq.length - 1] === 'saved' && !late.seq.slice(late.seq.indexOf('saved')).includes('minting'),
+    'the late answer (minting, an older revision) never repaints over the push: the dialog stays 已保存 (mintShowVerdict → stale)', late);
+  const tC = await (await fetch('http://127.0.0.1:' + CDP_PORT + '/json/new?about:blank', { method: 'PUT' })).json();
+  const C = await connect(tC, '/prefix.html');
+  const lateC = await lateAnswer(C);
+  ok(lateC.waiting && lateC.pushed && lateC.held === 1 && lateC.consumed && lateC.seq.slice(lateC.seq.indexOf('saved')).includes('minting'),
+    'RED CONTROL: the pre-fix guard (an older run\'s echo only) draws the late answer back over the push — 已保存 → minting', lateC);
+  C.close();
 
   console.log('§4 zero-copy: the hub browser profile');
   await A.ev('openOat()'); await A.waitFor('!!document.querySelector("#oat-run")');

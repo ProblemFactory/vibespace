@@ -528,7 +528,7 @@ function fakeChrome() {
       if (m.method === 'Target.setDiscoverTargets') return reply({ result: {} });
       if (m.method === 'Target.getTargets') return reply({ result: { targetInfos: [...targets.values()].map((t) => t.info) } });
       if (m.method === 'Target.attachToTarget') { const t = targets.get(m.params.targetId); if (!t) return reply({ error: { code: -32602, message: 'No target' } }); const sid = `S-${m.params.targetId}-${++n}`; sessions.set(sid, { targetId: m.params.targetId, ws, enabled: false }); return reply({ result: { sessionId: sid } }); }
-      if (m.method === 'Page.enable') { const s = sessions.get(m.sessionId); const t = s && targets.get(s.targetId); if (t && (t.held || t.open)) return; if (s) s.enabled = true; return reply({ result: {} }); } // measured: a tab whose dialog opened before this client enabled Page never answers
+      if (m.method === 'Page.enable') { const s = sessions.get(m.sessionId); const t = s && targets.get(s.targetId); if (t && (t.held || t.open)) return; const on = () => { if (s) s.enabled = true; reply({ result: {} }); }; if (api.enableGate) { api.enableGate.then(on); return; } return on(); } // measured: a tab whose dialog opened before this client enabled Page never answers; enableGate (lane heavy3-flake-races): the answer waits
       if (m.method === 'Page.handleJavaScriptDialog') {
         const s = sessions.get(m.sessionId); const t = s && targets.get(s.targetId);
         handled.push({ sessionId: m.sessionId, targetId: s && s.targetId, params: m.params, at: Date.now() });
@@ -551,7 +551,7 @@ function fakeChrome() {
     for (const [sid, s] of sessions) if (s.targetId === targetId && s.enabled && s.ws.readyState === 1) s.ws.send(JSON.stringify({ sessionId: sid, method: 'Page.javascriptDialogOpening', params }));
   }
   const pageEvent = (targetId, method, params) => { for (const [sid, s] of sessions) if (s.targetId === targetId && s.enabled && s.ws.readyState === 1) s.ws.send(JSON.stringify({ sessionId: sid, method, params })); }; // verify r1 A7: navigation events
-  const api = { srv, wss, addTab, emit, pageEvent, handled, events, targets, sessions, handleDelayMs: 0, onAnswered: null, failHandle: false,
+  const api = { srv, wss, addTab, emit, pageEvent, handled, events, targets, sessions, handleDelayMs: 0, onAnswered: null, failHandle: false, enableGate: null,
     async listen() { const p = await freePort(); await new Promise((r) => srv.listen(p, '127.0.0.1', r)); this.port = p; this.url = `ws://127.0.0.1:${p}/devtools/browser/fake`; return this; },
     async close() { for (const c of wss.clients) { try { c.terminate(); } catch { } } await new Promise((r) => srv.close(() => r())); },
     closeSockets() { for (const c of wss.clients) { try { c.terminate(); } catch { } } } };
@@ -1720,8 +1720,18 @@ console.log('④ the real bridge: the viewer\'s dialog record, the user\'s answe
   const P = await freePort(); await new Promise((r) => srv.listen(P, '127.0.0.1', r));
   const view = async () => { const v = new WebSocket(`ws://127.0.0.1:${P}${S.STREAM_PATH}?session=sess-b&profile=${NAMED}`); const got = []; v.on('message', (d) => got.push(JSON.parse(d))); await new Promise((r, e) => { v.on('open', r); v.on('error', e); }); return { v, got }; };
   try {
+    // lane heavy3-flake-races (the int264–268 flake, now named): `watched` is the watch's SOCKET being open — the view's tab is
+    // attached and Page-enabled some CDP round trips later, and a dialog that opens in between reaches no session (the fake,
+    // like Chrome, never answers a late Page.enable on a tab holding one): lost for good. The dialog waits for the watch's own
+    // READY (arm resolves on it — every tab enabled, the passkey hook armed). RED CONTROL: Page.enable held ⇒ the old wait passes
+    let openGate = null; ch2.enableGate = new Promise((r) => { openGate = r; });
     const a = await view();
-    await until(() => a.got.some((m) => m.type === 'tabs') && dw.factFor({ profileId: NAMED, browserKey: KEY, sessionId: 'sess-b', consume: false }).watched, 3000);
+    const t1On = () => [...ch2.sessions.values()].some((x) => x.targetId === 'T1' && x.enabled);
+    const oldSaid = await until(() => a.got.some((m) => m.type === 'tabs') && dw.factFor({ profileId: NAMED, browserKey: KEY, sessionId: 'sess-b', consume: false }).watched, 15000);
+    ok(!!oldSaid && !t1On(), 'RED CONTROL (the old wait): with the tab\'s Page.enable held, the watch already says `watched` — the view\'s tab is not enabled, a dialog opened now would reach no session', { oldSaid, t1: t1On() });
+    ch2.enableGate = null; openGate();
+    const armed = await dw.arm(NAMED, { budgetMs: 15000 });
+    ok(armed.ok && t1On(), 'the watch is READY on the view\'s tab before the dialog opens (arm resolves on its ready: attached + Page-enabled)', { armed, t1: t1On() });
     ok(JSON.stringify(bridge.activeTargetsFor({ sessionId: 'sess-b', profileId: NAMED })) === '["T1"]', 'activeTargetsFor: the tab each relay shows (the stream\'s own tabs record) — the watch\'s scope on a shared browser');
     ch2.emit('T1', { type: 'beforeunload', message: '' });
     const rec = await until(() => a.got.find((m) => m.type === 'dialog' && m.state === 'open'), 2000);

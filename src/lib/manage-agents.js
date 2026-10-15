@@ -46,6 +46,7 @@ import { openExitAccessDialog, exitSummaryText, exitCodeWords, agentUpgradeText 
 import { openExitRunsDialog } from './exit-runs-dialog.js'; // lane-exit-run-output E4: the machine's command list
 import { platformLabel } from '../exit-shell.js'; // lane-exit-run-output E1: the device's stated platform on its row (its shell follows it)
 import { enterSubmits } from './chat-enter-keys.js';
+import { mintShowVerdict } from '../oat-mint-model.js'; // PURE (lane heavy3-flake-races): a late answer never repaints over a newer push
 
 // Roster order = TYPE, never add-order (2.268.5): pool → subscription → API
 // key, name-sorted within a type. ONE comparator for both rosters (2.369.18 —
@@ -745,7 +746,7 @@ export function installManageAgents(App, ctx = {}) {
     const startBtn = (label) => `<div class="oat-row"><button class="btn-create" id="oat-run">${escHtml(label)}</button></div>`;
     const render = (m) => {
       if (gone) return;
-      if (m && mint && m.id !== mint.id && live() && m.startedAt < mint.startedAt) return; // an older run's echo
+      if (m && mintShowVerdict(mint, m) !== 'show') return; // an older run's echo, or this run's late answer under a newer push
       mint = m || null;
       const ph = mint?.phase || 'idle';
       box.dataset.phase = ph;

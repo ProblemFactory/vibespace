@@ -76,7 +76,15 @@ console.log('§1 the PURE screen reader');
   ok(M.mintStep(null, 'https://claude.example/a?b=c').steps.length === 0, 'a URL with no line after it is not yet a URL (never half a link)');
   ok(M.lastLine('real failure here\n✻\n *\n·\n') === 'real failure here' && M.lastLine('x ' + TOKEN) === ['x sk', '-ant-…'].join(''), 'lastLine skips spinner frames and masks a token');
   const pub = M.publicMint({ id: 'om-1', accountId: 'sub-1', phase: 'url', url: 'https://x', token: TOKEN, _p: {}, code: CODE, error: 'bad ' + TOKEN });
-  ok(!JSON.stringify(pub).includes(['sk', '-ant-oat01'].join('')) && !JSON.stringify(pub).includes(CODE) && Object.keys(pub).join() === 'id,accountId,phase,url,localUrl,error,startedAt,endedAt,mintedAt,reason,signedInAs,other,choices', 'publicMint is a whitelist (token / code / handles dropped, error masked)', pub);
+  ok(!JSON.stringify(pub).includes(['sk', '-ant-oat01'].join('')) && !JSON.stringify(pub).includes(CODE) && Object.keys(pub).join() === 'id,accountId,phase,rev,url,localUrl,error,startedAt,endedAt,mintedAt,reason,signedInAs,other,choices', 'publicMint is a whitelist (token / code / handles dropped, error masked)', pub);
+  // lane heavy3-flake-races: THE verdict before a repaint — an older publication of the SAME run is stale (a late HTTP
+  // answer after the WS push of a later phase); another run keeps the older-run rule; equal revisions show
+  {
+    const V = M.mintShowVerdict, a = { id: 'om-a', phase: 'saved', rev: 4, startedAt: 10 };
+    const rows = [[V(null, a), 'show'], [V(a, null), 'show'], [V(a, { ...a, phase: 'minting', rev: 3 }), 'stale'], [V(a, { ...a }), 'show'], [V({ ...a, phase: 'minting', rev: 3 }, a), 'show'],
+      [V({ id: 'om-b', phase: 'waiting-code', rev: 2, startedAt: 20 }, a), 'older-run'], [V({ id: 'om-b', phase: 'saved', rev: 9, startedAt: 20 }, a), 'show'], [V(a, { id: 'om-c', phase: 'starting', rev: 1, startedAt: 30 }), 'show']];
+    ok(rows.every(([got, want]) => got === want), 'mintShowVerdict: the same run\'s older revision ⇒ stale (never repaints), equal / newer ⇒ show, another run\'s echo before the live one ⇒ older-run', rows);
+  }
   ok(M.codeVerdict(' a#b ').ok && M.codeVerdict(' a#b ').code === 'a#b' && !M.codeVerdict('').ok && !M.codeVerdict('a\nb').ok && !M.codeVerdict('x'.repeat(2001)).ok, 'codeVerdict: one printable line ≤ 2000');
   ok(!/require\(|^import /m.test(fs.readFileSync(path.join(REPO, 'src/oat-mint-model.js'), 'utf8')), 'the model imports nothing (PURE)');
 }
@@ -179,6 +187,8 @@ console.log('§2 the ORCH over the fake claude, through the REAL AccountManager'
   const phases = r.out.casts.map((c) => JSON.parse(c).mint.phase);
   ok(['starting', 'waiting-code', 'minting', 'saved'].every((p) => phases.includes(p)) && r.out.casts.every((c) => JSON.parse(c).type === 'oat-mint'), 'every phase is broadcast as a WS `oat-mint` message', phases);
   const cast = JSON.parse(r.out.casts.find((c) => JSON.parse(c).mint.phase === 'waiting-code')).mint;
+  const revs = r.out.casts.map((c) => JSON.parse(c).mint.rev);
+  ok(revs.length >= 4 && revs.every((v, i) => v === i + 1) && r.mint.get(r.id).rev === revs[revs.length - 1], 'every publication is a new revision (1, 2, …) and the GET answer carries the last — a page drops an older snapshot (lane heavy3-flake-races)', revs);
   ok(/^https:\/\/claude\.example\/cai\/oauth\/authorize\?/.test(cast.url) && /redirect_uri=http%3A%2F%2Flocalhost/.test(cast.localUrl || ''), 'the screen URL (code page) AND the $BROWSER URL (localhost callback, the zero-copy door) are both carried', cast);
   ok(r.leaks.length === 0, 'THE SPY: neither the token nor the sign-in code on any outbound path (log, console, stdout/stderr, broadcasts, GET answers, file writes)', r.leaks);
   const facts = readRec();

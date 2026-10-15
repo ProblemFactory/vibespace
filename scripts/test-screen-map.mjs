@@ -52,6 +52,19 @@ ok(m.state === 'unknown', 'a Mac with MIXED scales (Retina + a 1× monitor): no 
 ok(S.screenMap({ screens: win }).why === 'no_framebuffer' && S.screenMap({ fb: { w: 10, h: 10 }, screens: [{ x: 'a' }, null, { x: 0, y: 0, w: 0, h: 5 }] }).why === 'no_table', 'no framebuffer / no usable OS row ⇒ unknown, by name');
 ok(S.screenMap({ fb: { w: 1441, h: 900 }, screens: [mac2[0]] }).state === 'single' && S.screenMap({ fb: { w: 1444, h: 900 }, screens: [mac2[0]] }).state === 'unknown', `a bbox within ${S.FIT_TOL} px fits (rounding), beyond does not`);
 
+// lane heavy3-flake-races: a pick made on the first map (the -308 rects, keyed by the RFB ids) stays on its display when the
+// machine's own table lands (the same places, keyed by the OS ids) — the desktop-v2-chrome ②③④ / ⑫ flake
+{
+  const first = S.screenMap({ fb: { w: 3200, h: 900 }, rfb: rfbT });
+  const both = S.screenMap({ fb: { w: 3200, h: 900 }, screens: [{ id: 'L', x: 0, y: 0, w: 1600, h: 900, name: 'Left' }, { id: 'R', x: 1600, y: 0, w: 1600, h: 900, name: 'Right' }], rfb: rfbT });
+  const rows = [[S.carryPick(first, both, '8'), 'R'], [S.carryPick(first, both, '7'), 'L'], [S.carryPick(both, both, 'R'), 'R'], [S.carryPick(first, both, null), null],
+    [S.carryPick(first, S.screenMap({ fb: { w: 3200, h: 900 } }), '8'), '8'], [S.carryPick(null, both, '8'), '8'], [S.carryPick(first, both, 'gone'), 'gone'],
+    [S.carryPick(first, S.screenMap({ fb: { w: 3200, h: 900 }, rfb: [{ id: 3, x: 0, y: 0, w: 1000, h: 900 }, { id: 4, x: 1000, y: 0, w: 2200, h: 900 }] }), '8'), '8']];
+  ok(first.displays.map((d) => d.key).join() === '7,8' && both.displays.map((d) => d.key).join() === 'L,R' && rows.every(([got, want]) => got === want),
+    'carryPick: a key the new map lacks moves to its display at the SAME place (RFB id 8 → OS id R); kept as it was when the new map has it, maps nothing, or has no display there', rows);
+  ok(!both.displays.some((d) => d.key === '8'), 'RED CONTROL: without the carry the first map\'s key names no display of the second — the picture falls back to the whole framebuffer');
+}
+
 console.log('§2 the skimmer and the timing table');
 const u16 = (n) => [(n >> 8) & 255, n & 255], u32 = (n) => [(n >>> 24) & 255, (n >> 16) & 255, (n >> 8) & 255, n & 255];
 const payload = Uint8Array.from([2, 0, 0, 0, ...u32(1), ...u16(0), ...u16(0), ...u16(1280), ...u16(800), ...u32(0), ...u32(0xdeadbeef), ...u16(1280), ...u16(0), ...u16(1280), ...u16(800), ...u32(1)]);

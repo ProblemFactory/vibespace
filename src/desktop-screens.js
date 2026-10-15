@@ -22,6 +22,9 @@
  *                                        'server' (wider than 128 px: the machine paints it into the picture); scaleRgba draws it
  *   hdrShown({screens, map, key})        the shown display (or, showing all, any display) is in Windows HDR — TightVNC captures
  *                                        it without tone mapping, so the bar says so (true only on a measured `hdr: true`)
+ *   carryPick(prev, next, key)           lane heavy3-flake-races: the display a pick named, across a remap — the RFB rects and
+ *                                        the machine's own table land in EITHER order and key a display differently (an RFB
+ *                                        screen id vs the OS id); a key the new map lacks moves to its display at the same place
  */
 
 /** Slack (fb px) when a union's bbox is compared with the framebuffer (a 1.5 scale rounds by a pixel). */
@@ -259,6 +262,23 @@ function scaleRgba(src, w, h, W, H) {
   return out;
 }
 
+/**
+ * lane heavy3-flake-races (the desktop-v2-chrome ②③④ / ⑫ flake of rel276, now named): a window maps its displays TWICE —
+ * the -308 rects arrive with the first frame (keys = the RFB screen ids), the machine's own table (display-facts, an HTTP
+ * read through the agent that starts at `connected`) later or earlier; when both agree the OS ids key the displays. A pick
+ * made on the first map (the person pressed 2 while the names were still on their way) named a key the second map does not
+ * have — the picture fell back to the whole framebuffer. → the key in `next` of the display `key` named in `prev` (the same
+ * rect), else `key` as it was (a key `next` has, a key `prev` never had, no map to carry onto).
+ */
+function carryPick(prev, next, key) {
+  if (key == null || !next || next.state !== 'map' || !Array.isArray(next.displays)) return key;
+  if (next.displays.some((d) => d.key === key)) return key;
+  const was = prev && Array.isArray(prev.displays) ? prev.displays.find((d) => d.key === key) : null;
+  if (!was) return key;
+  const at = next.displays.find((d) => sameRect(d.rect, was.rect));
+  return at ? at.key : key;
+}
+
 /** lane win-desktop-cursor-hdr: the shown display (key) is in Windows HDR — or, with no display picked (全部 / one screen), any
  *  of the machine's screens is. Only a measured `hdr: true` says yes (false / unknown say nothing). */
 function hdrShown({ screens = null, map = null, key = null } = {}) {
@@ -267,4 +287,4 @@ function hdrShown({ screens = null, map = null, key = null } = {}) {
   return osScreens(screens).some((s) => s.hdr === true);
 }
 
-module.exports = { FIT_TOL, MAX_SCREENS, IDLE_TRIP_MS, RATE_MIN_BYTES, STATES, ROW_STATES, CURSOR_MIN, CURSOR_MAX, CURSOR_SERVER_OVER, rfbScreens, osScreens, screenMap, rowState, pickerRows, recentChoice, clientMessages, clientCuts, updateTimer, cursorPlan, scaleRgba, hdrShown };
+module.exports = { FIT_TOL, MAX_SCREENS, IDLE_TRIP_MS, RATE_MIN_BYTES, STATES, ROW_STATES, CURSOR_MIN, CURSOR_MAX, CURSOR_SERVER_OVER, rfbScreens, osScreens, screenMap, rowState, pickerRows, recentChoice, clientMessages, clientCuts, updateTimer, cursorPlan, scaleRgba, hdrShown, carryPick };

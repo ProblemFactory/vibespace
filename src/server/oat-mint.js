@@ -59,7 +59,8 @@ function create({ accounts, claudeCmd = 'claude', broadcastAll = () => { }, spaw
   // by mint id — never a field of a mint, so no copy of one can carry it
   const held = new Map();
   const spawn = spawnPty || ((file, args, opts) => require('node-pty').spawn(file, args, opts));
-  const emit = (m) => { try { broadcastAll({ type: 'oat-mint', mint: publicMint(m) }); } catch { } };
+  // every publication is a new revision (lane heavy3-flake-races): a page drops a snapshot older than the one it shows
+  const emit = (m) => { m.rev = (Number(m.rev) || 0) + 1; try { broadcastAll({ type: 'oat-mint', mint: publicMint(m) }); } catch { } };
   const live = (m) => m && !MINT_DONE.includes(m.phase);
   const wipe = (m) => {
     m.parse = null;

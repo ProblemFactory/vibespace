@@ -27,7 +27,7 @@ import { keyboardLockGate, NAGLE_REFERENCE, SLOW_KBPS, STILL_MS } from '../deskt
 import { desktopRunPlan, desktopRunPresets, rememberRun, machineDesktopId } from '../machine-desktop-model.js';
 import { namesGuiApp } from '../machine-window.js';
 import { openMachineApp } from './machine-app.js'; // lane machine-app-crop: one app of the machine as its own window
-import { screenMap, hdrShown } from '../desktop-screens.js'; // lane desktop-v2-entry: the OS table + the RFB table → the displays in fb pixels
+import { screenMap, hdrShown, carryPick } from '../desktop-screens.js'; // lane desktop-v2-entry: the OS table + the RFB table → the displays in fb pixels
 import { openDesktopPicker, rememberDesktop, rememberDisplays, readRecent } from './desktop-picker.js';
 import { enterSubmits } from './chat-enter-keys.js';
 
@@ -169,7 +169,12 @@ export function openMachineDesktop(app, m, { display } = {}) {
   const pick = (key) => { want = key; rememberDesktop(m.hostId, key); apply(); };
   const remap = () => {
     const fb = view.fbSize(); if (!fb) return;
+    const prev = map;
     map = screenMap({ fb, screens: facts && facts.ok ? facts.displays : null, rfb: rfbTable });
+    // lane heavy3-flake-races: the two tables land in either order and key a display differently — a pick made on the
+    // first map stays on its display (the same place), never the whole screen when the names arrive
+    const carried = carryPick(prev, map, want);
+    if (carried !== want) { want = carried; rememberDesktop(m.hostId, want); }
     if (map.state === 'map') rememberDisplays(m.hostId, map.displays);
     apply(); drawChip();
   };

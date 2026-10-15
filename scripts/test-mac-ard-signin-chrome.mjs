@@ -14,6 +14,10 @@
 //   ③ a fixture that never answers ⇒ "登录没能完成：那台机器 20 秒内没有应答" + Reconnect at ~20 s     ④ the phone (390 px)
 //   ⑤ RED control: the BASE vnc-view.js (e2a303c61) on the same insecure origin — 连接中… after the sign-in, nothing sent
 //   ⑥ CONTROL: the same base page on 127.0.0.1 (a secure context) signs in — the loopback is blind to the bug
+// lane heavy3-flake-races (the "words stay" flake of int274 / rel276, now named): the status record (WATCH) is armed AFTER the
+// window opened, so its first word is whatever the connect gate left — 连接中… when the gate answered first, 正在启动桌面… when it
+// had not (a loaded runner) — and the old `slice(1)` read the gate's own 连接中… as a re-ask. §3 holds the gate until the record
+// is armed (that order, always) and judges "never 连接中… again" from the sign-in on; RED CONTROL: the old predicate.
 // PNGs (when `--shots <dir>`): signin.png, connected.png, failed.png (desk 1100), phone.png (390).
 import fs from 'node:fs';
 import os from 'node:os';
@@ -189,7 +193,12 @@ for (const [file, plugins] of [['page.js', []], ...(baseView ? [['page-base.js',
 const app = express();
 // the scratch hub listens on a LAN-reachable address for this run: only this box's own requests are served
 app.use((q, s, next) => { const ra = String(q.socket.remoteAddress || '').replace(/^::ffff:/, ''); if (ra !== IP && ra !== '127.0.0.1') { s.status(403).end(); return; } next(); });
-app.use(express.json()); app.use(R.router);
+app.use(express.json());
+// §3 (lane heavy3-flake-races): while `ghold.on` the window's connect gate (POST …/connect) waits here — the record's order made deterministic
+const ghold = { on: false, held: [] };
+app.use((q, s, next) => { if (ghold.on && q.method === 'POST' && q.path === '/api/desktop/machine-desktop/connect') { ghold.held.push(next); return; } next(); });
+const gRelease = () => { ghold.on = false; for (const f of ghold.held.splice(0)) f(); };
+app.use(R.router);
 const CSS = ['xterm', 'style', 'viewers', 'chat', 'fonts'].filter((n) => fs.existsSync(path.join(REPO, `public/${n}.css`)));
 for (const n of CSS) app.get(`/${n}.css`, (q, s) => s.type('text/css').send(fs.readFileSync(path.join(REPO, `public/${n}.css`))));
 for (const f of ['page.js', 'page-base.js'].filter((x) => fs.existsSync(path.join(root, x)))) app.get(`/${f}`, (q, s) => s.type('text/javascript').send(fs.readFileSync(path.join(root, f))));
@@ -246,15 +255,18 @@ const press = (text) => `(() => { const b = [...document.querySelectorAll('#mach
 const typeSignIn = (user, pass) => `(() => { const f = document.querySelector('#machine-desktop-signin form'); if (!f) return false; const i = f.querySelectorAll('input'); i[0].value = ${JSON.stringify(user)}; i[1].value = ${JSON.stringify(pass)}; f.requestSubmit(); return true; })()`;
 const statusText = `document.querySelector(${JSON.stringify(STATUS)})?.textContent || ''`;
 const deskPixel = `(() => { const c = document.querySelector('.vs-win[data-type="machine-desktop"] canvas'); if (!c || !c.width) return null; return [c.width, c.height, ...c.getContext('2d').getImageData(20, 20, 1, 1).data.slice(0, 3)]; })()`;
-async function openAndAsk(p) {
+async function openAndAsk(p, { holdGate = false } = {}) {
+  if (holdGate) ghold.on = true;
   await p.ev('window.__openApps(), window.__open(' + JSON.stringify(M) + '), true');
   await p.until(`!!document.querySelector('#machine-desktop-dialog')`);
   const before = await p.ev(`[document.querySelectorAll('.dialog-overlay').length, !!document.getElementById('desktop-launch-dialog'), !!document.getElementById('machine-desktop-dialog')]`);
   const pressed = await p.ev(press(Z('Open its desktop → Desktop'))); // lane desktop-v2-entry: the dialog's link to the Desktop (it still opens the window at once)
   const after = await p.ev(`[document.querySelectorAll('.dialog-overlay').length, !!document.getElementById('desktop-launch-dialog'), !!document.getElementById('machine-desktop-dialog'), document.querySelectorAll('.vs-win[data-type="machine-desktop"]').length]`);
   await p.ev(WATCH);
+  let held = 0;
+  if (holdGate) { const t0 = Date.now(); while (!ghold.held.length && Date.now() - t0 < 10000) await sleep(50); held = ghold.held.length; gRelease(); } // the record is armed; the gate answers now
   const asked = await p.until(`!!document.querySelector('#machine-desktop-signin form input[type=password]')`, 15000);
-  return { before, pressed, after, asked };
+  return { before, pressed, after, asked, held };
 }
 const closeWins = (p) => p.ev(`(() => { for (const id of [...window.__wm.windows.keys()]) window.__wm.closeWindow(id); document.getElementById('machine-desktop-signin')?.remove(); return true; })()`);
 
@@ -294,8 +306,9 @@ console.log('§2 name + password ⇒ 正在登录… ⇒ 已连接, the fixture\
 console.log('§3 a Mac that never answers the sign-in ⇒ the named status with Reconnect at ~20 s');
 {
   ard.st.mode = 'silent';
-  const r = await openAndAsk(desk);
+  const r = await openAndAsk(desk, { holdGate: true });
   ok(r.asked, 'the sign-in is asked again for the second window');
+  ok(r.held === 1, 'its connect gate was held until the status record was armed (the loaded runner\'s order, every run)', r.held);
   const t0 = Date.now();
   await desk.ev(typeSignIn(USER, PASS));
   ok(await desk.until(`${JSON.stringify(Z('Signing in…'))} === (${statusText})`, 5000), `${Z('Signing in…')} while the Mac is silent`, await desk.ev(statusText));
@@ -305,7 +318,9 @@ console.log('§3 a Mac that never answers the sign-in ⇒ the named status with 
   const re = await desk.ev(`(() => { const b = [...document.querySelectorAll('.vs-win[data-type="machine-desktop"] .desktop-bar button')].find((x) => x.textContent === ${JSON.stringify(Z('Reconnect'))}); return !!b && getComputedStyle(b).display !== 'none'; })()`);
   ok(named && took >= 19 && took < 24 && re, `"${want}" at ${took.toFixed(1)} s (bound 20 s), with ${Z('Reconnect')} shown`, { st: await desk.ev(statusText), took, re });
   await sleep(1500);
-  ok(await desk.ev(`${JSON.stringify(want)} === (${statusText})`) && !(await desk.ev('window.__st')).slice(1).includes(Z('Connecting…')), 'the words stay after the socket closes (no ladder re-asks the sign-in, never 连接中… again)', await desk.ev('window.__st'));
+  const st3 = await desk.ev('window.__st'), iS3 = st3.indexOf(Z('Signing in…'));
+  ok(await desk.ev(`${JSON.stringify(want)} === (${statusText})`) && iS3 >= 0 && !st3.slice(iS3).includes(Z('Connecting…')), 'the words stay after the socket closes (no ladder re-asks the sign-in, never 连接中… again)', st3);
+  ok(st3[0] === Z('Starting desktop…') && st3.slice(1).includes(Z('Connecting…')), 'RED CONTROL (the old predicate): a record armed while the gate was out starts at 正在启动桌面…, and "everything after its first word" counts the gate\'s own 连接中… as a re-ask', st3);
   await desk.shot('failed.png', '.vs-win');
   await closeWins(desk);
 }
