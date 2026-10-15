@@ -137,7 +137,8 @@ export function threadsLine(snap) {
  * PURE: THE DIGEST — a report (object, or its text — a partial one is repaired) → ≤ 12 lines: the top JS frames
  * (the main thread's, else the first workers' with a stack; node:internal frames dropped), the handles holding
  * the loop, cpu user/sys + maxRSS, and — from the tier's own /proc read — the threads and the child processes.
- * `opts`: { root (cut off frame paths), snapshot ({threads, children} from procSnapshot), partial, cutIn, bytes }.
+ * `opts`: { root (cut off frame paths), snapshot ({threads, children} from procSnapshot), partial, cutIn, bytes, at (who asked:
+ *  'the signal' — or 'the watchdog', a suite's own clock: scripts/suite-watchdog.mjs) }.
  */
 export function hangDigest(reportJson, opts = {}) {
   const parsed = typeof reportJson === 'string' ? parseReport(reportJson) : { report: reportJson || null, partial: !!opts.partial, cutIn: opts.cutIn || null };
@@ -149,7 +150,7 @@ export function hangDigest(reportJson, opts = {}) {
     const main = framesOf(r, opts.root), workers = (r.workers || []).map((w) => ({ tid: w && w.header && w.header.threadId, frames: framesOf(w, opts.root) }));
     const stacks = [];
     if (main.length) stacks.push({ who: 'main', frames: main });
-    else out.push(`${P}JS main: idle at the signal (no JS running — the loop waits on the handles below)`);
+    else out.push(`${P}JS main: idle at ${opts.at || 'the signal'} (no JS running — the loop waits on the handles below)`);
     for (const w of workers) if (w.frames.length) stacks.push({ who: `worker ${w.tid != null ? w.tid : '?'}`, frames: w.frames });
     tailLines.push(`${P}handles holding the loop: ${handleSummary(r.libuv, { workers: workers.length, root: opts.root }).line}`);
     const ru = r.resourceUsage || {};

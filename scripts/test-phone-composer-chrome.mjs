@@ -19,6 +19,7 @@ import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { freePort, scratch, ONBOARDED_SOURCE } from './scratch.mjs';
+import { armWatchdog } from './suite-watchdog.mjs';
 
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
@@ -35,7 +36,10 @@ const SHOTS = process.env.PHONE_COMPOSER_PNG_DIR || root;
 const TAG = process.env.PHONE_COMPOSER_TAG || 'after';
 let chrome = null, srv = null, vendor = null;
 const end = (code) => { try { chrome && chrome.kill('SIGKILL'); } catch { } try { srv && srv.close(); vendor && vendor.close(); } catch { } process.exit(code); };
-setTimeout(() => { console.log('✗ TIMEOUT (150 s)'); end(1); }, 150e3).unref();
+// the suite's own clock (scripts/suite-watchdog.mjs, the two-clock rule): its 150 s ceiling, before the gate's budget — it names
+// the leg it was in, the CDP calls nobody answered, and the gate's digest (it was `✗ TIMEOUT (150 s)` and nothing else)
+const CDP_PENDS = new Set();
+armWatchdog({ capMs: 150e3, exit: end, pending: () => [...CDP_PENDS].flatMap((m) => [...m.values()].map((x) => `CDP ${x.method} (${((Date.now() - x.at) / 1000).toFixed(1)} s)`)) });
 
 // ── the fake Dropline (answers every dictation with one sentence) ──
 vendor = http.createServer((req, res) => {
@@ -114,9 +118,9 @@ async function page(w, h, { phone, theme = 'dark', css = 'real' }) {
   const tg = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/new?about:blank`, { method: 'PUT' })).json();
   const ws = new WebSocket(tg.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
   await new Promise((r) => ws.on('open', r));
-  let seq = 0; const pend = new Map();
-  ws.on('message', (d) => { const m = JSON.parse(d); if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); } });
-  const cdp = (method, params = {}) => new Promise((r) => { const id = ++seq; pend.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
+  let seq = 0; const pend = new Map(); CDP_PENDS.add(pend);
+  ws.on('message', (d) => { const m = JSON.parse(d); if (m.id && pend.has(m.id)) { pend.get(m.id).r(m); pend.delete(m.id); } });
+  const cdp = (method, params = {}) => new Promise((r) => { const id = ++seq; pend.set(id, { r, method, at: Date.now() }); ws.send(JSON.stringify({ id, method, params })); });
   await cdp('Runtime.enable'); await cdp('Page.enable');
   await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });
   await cdp('Page.addScriptToEvaluateOnNewDocument', { source: `try { localStorage.setItem('vibespace.lang', 'zh'); } catch {} ${FAKE_MIC}` });
@@ -144,7 +148,7 @@ async function page(w, h, { phone, theme = 'dark', css = 'real' }) {
     if (file) { fs.writeFileSync(path.join(SHOTS, file), buf); console.log(`    (PNG ${path.join(SHOTS, file)})`); }
     return crypto.createHash('sha1').update(buf).digest('hex');
   };
-  return { cdp, ev, until, tap, shot, close: () => ws.close() };
+  return { cdp, ev, until, tap, shot, close: () => { CDP_PENDS.delete(pend); ws.close(); } };
 }
 const rect = (sel) => `(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return null; const b = e.getBoundingClientRect(); return { l: b.left, t: b.top, r: b.right, b: b.bottom, w: b.width, h: b.height }; })()`;
 const inside = (a, b) => a && b && a.l >= b.l - 0.5 && a.r <= b.r + 0.5 && a.t >= b.t - 0.5 && a.b <= b.b + 0.5;

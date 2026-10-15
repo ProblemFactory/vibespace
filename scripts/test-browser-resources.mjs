@@ -51,6 +51,7 @@ import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch, vncEnv, endRootedProcesses } from './scratch.mjs';
 import { mutantCopies, copiesCensus, sweepLegacy } from './mutant-copy.mjs';
+import { armWatchdog } from './suite-watchdog.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 const BE = require('../src/server/browser-env.js');
@@ -210,8 +211,9 @@ function reap() {
 }
 process.on('exit', reap);
 for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { reap(); process.exit(1); });
-const WATCHDOG = setTimeout(() => { console.error('  ✗ WATCHDOG: this suite owns its children and is killing them now'); reap(); process.exit(1); }, 25 * 60 * 1000);
-WATCHDOG.unref?.();
+// the suite's own clock (scripts/suite-watchdog.mjs, the two-clock rule): it fires before the gate's budget, names the leg,
+// and reaps — this suite owns its children. (It was a 25-min timer: the row's 600 s gate budget always came first.)
+const WATCHDOG = armWatchdog({ exit: (code) => { reap(); process.exit(code); } });
 
 // ── the environment under test comes from the REAL resolver ────────────────
 // HEADLESS THROUGH THE PRODUCT'S OWN KNOB, not through a flag. The fixture user's (this machine's owner's shape)
@@ -821,7 +823,7 @@ console.log('\nⓓ ownership: this suite reaps every process it started');
   ok(nsLeft.length === 0, `and no socket-dir entry of ours survives either (${nsLeft.length ? nsLeft.join(', ') : 'none'})`);
 }
 
-clearTimeout(WATCHDOG);
+WATCHDOG.clear();
 
 // ── ⓙ THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──
 // Measured HERE, while every patched copy this run made still exists (the exit

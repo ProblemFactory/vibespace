@@ -1145,7 +1145,10 @@ export function machineGlobalFixtures(source) {
 // A row may name its OWN budget (`budgetMs`) when its measured wall is known to exceed its class's — stated on the row,
 // never a blanket raise (lane D (a), 2026-09-25: test-desktop-xpra-window measured 718–774 s before its §15/§16 legs; since
 // lane xpra-window-split its parts each carry 2× their own measured wall — test-ci-gate §8d).
-const budgetFor = (s) => (Number(s.budgetMs) > 0 ? Number(s.budgetMs) : s.tier === 'fast' ? 300000 : /chrome/.test(s.why || '') ? 900000 : 600000);
+// The child is TOLD its budget (VIBESPACE_SUITE_BUDGET_MS) and, when the tier arms a hang report, where that report goes
+// (VIBESPACE_SUITE_HANG_REPORT): a suite's own clock (scripts/suite-watchdog.mjs — the two-clock rule) fires before
+// this one, names its leg, and writes the report itself; the ✗ row names that file (test-ci-gate §12).
+export const budgetFor = (s) => (Number(s.budgetMs) > 0 ? Number(s.budgetMs) : s.tier === 'fast' ? 300000 : /chrome/.test(s.why || '') ? 900000 : 600000);
 
 // ONE runner for both tiers. `root` is the checkout the suite runs in — the
 // repo for the fast tier and for a manual `npm run ci:heavy`, an isolated
@@ -1915,7 +1918,9 @@ export function runSuiteAsync(s, { root = repo, absentIsSkip = false, sha = '', 
     const hr = hangFile ? { dir: hang.dir, file: path.join(hang.dir, hangFile), ...hangReportArgv({ dir: hang.dir, filename: hangFile, flags: hang.flags }) } : { argv: [], armed: false };
     let child;
     try {
-      child = spawn(process.execPath, [...hr.argv, path.join(root, 'scripts', s.name + '.mjs')], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: laneEnv(lane) });
+      const env = { ...laneEnv(lane), VIBESPACE_SUITE_BUDGET_MS: String(budgetFor(s)) };
+      if (hr.armed) env.VIBESPACE_SUITE_HANG_REPORT = hr.file; else delete env.VIBESPACE_SUITE_HANG_REPORT; // never an outer run's file
+      child = spawn(process.execPath, [...hr.argv, path.join(root, 'scripts', s.name + '.mjs')], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env });
     } catch (e) {
       resolve({ ok: false, ms: 0, killedFromOutside: false, lines: [`\n✗ ${s.name} FAILED (0ms, ${e.code || e.message}) ${tag}`] });
       return;
@@ -1940,8 +1945,10 @@ export function runSuiteAsync(s, { root = repo, absentIsSkip = false, sha = '', 
       const r = { status, signal, error };
       // the hang report rides INSIDE the ✗ line's entry: lines[1] / lines[2] stay the stdout tail / stderr the rerun ledger reads
       const hl = asked ? readHangReport(asked, { root, envExcluded: hr.envExcluded }) : null, digest = hl && hl.lines.length ? '\n' + hl.lines.join('\n') : '';
-      resolve({ ok: false, ms, load, killedFromOutside: killedFromOutside(r), hangReport: hl ? hr.file : undefined, full: (digest ? digest.slice(1) + '\n' : '') + stdout + (stderr ? '\n── stderr ──\n' + stderr : ''), lines: [
-        `\n✗ ${s.name} FAILED (${ms}ms${error ? ', ' + error.code : ''}${signal ? ', ' + signal : ''}) ${tag} ${ld}${hl ? hl.head : ''}${digest}`,
+      // the suite's OWN watchdog wrote the report before this clock ran (its digest is in the stdout tail): the row names the file
+      const own = !asked && hr.armed && (() => { try { return fs.statSync(hr.file).mtimeMs >= t - 1000; } catch { return false; } })() ? hr.file : '';
+      resolve({ ok: false, ms, load, killedFromOutside: killedFromOutside(r), hangReport: hl || own ? hr.file : undefined, full: (digest ? digest.slice(1) + '\n' : '') + stdout + (stderr ? '\n── stderr ──\n' + stderr : ''), lines: [
+        `\n✗ ${s.name} FAILED (${ms}ms${error ? ', ' + error.code : ''}${signal ? ', ' + signal : ''}) ${tag} ${ld}${hl ? hl.head : own ? ` — hang report (the suite's own watchdog): ${own}` : ''}${digest}`,
         stdout.split('\n').slice(-40).join('\n'),
         stderr || ''] });
     };

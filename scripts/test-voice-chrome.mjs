@@ -26,6 +26,7 @@ import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { freePort, scratch, ONBOARDED_SOURCE } from './scratch.mjs';
+import { armWatchdog } from './suite-watchdog.mjs';
 
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
@@ -41,7 +42,10 @@ const root = scratch('voice');
 const SHOTS = process.env.VIBESPACE_VOICE_PNG_DIR || root;
 let chrome = null, srv = null, vendor = null;
 const end = (code) => { try { chrome && chrome.kill('SIGKILL'); } catch { } try { srv && srv.close(); vendor && vendor.close(); } catch { } process.exit(code); };
-setTimeout(() => { console.log('✗ TIMEOUT (240 s)'); end(1); }, 240e3).unref();
+// the suite's own clock (scripts/suite-watchdog.mjs, the two-clock rule): its 240 s ceiling, before the gate's budget — it names
+// the leg it was in, the CDP calls nobody answered, and the gate's digest (it was `✗ TIMEOUT (240 s)` and nothing else)
+const CDP_PENDS = new Set();
+armWatchdog({ capMs: 240e3, exit: end, pending: () => [...CDP_PENDS].flatMap((m) => [...m.values()].map((x) => `CDP ${x.method} (${((Date.now() - x.at) / 1000).toFixed(1)} s)`)) });
 
 // ── the fake Dropline ──
 const KEY = 'dl_chrome_fake_0123456789';
@@ -145,9 +149,9 @@ async function page(w, h, origin, { touch = false, on = true } = {}) {
   const tg = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/new?about:blank`, { method: 'PUT' })).json();
   const ws = new WebSocket(tg.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
   await new Promise((r) => ws.on('open', r));
-  let seq = 0; const pend = new Map();
-  ws.on('message', (d) => { const m = JSON.parse(d); if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); } });
-  const cdp = (method, params = {}) => new Promise((r) => { const id = ++seq; pend.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
+  let seq = 0; const pend = new Map(); CDP_PENDS.add(pend);
+  ws.on('message', (d) => { const m = JSON.parse(d); if (m.id && pend.has(m.id)) { pend.get(m.id).r(m); pend.delete(m.id); } });
+  const cdp = (method, params = {}) => new Promise((r) => { const id = ++seq; pend.set(id, { r, method, at: Date.now() }); ws.send(JSON.stringify({ id, method, params })); });
   await cdp('Runtime.enable'); await cdp('Page.enable');
   await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });
   await cdp('Page.addScriptToEvaluateOnNewDocument', { source: `try { localStorage.setItem('vibespace.lang', 'zh'); } catch {} ${FAKE_MIC}` });
@@ -181,7 +185,7 @@ async function page(w, h, origin, { touch = false, on = true } = {}) {
     fs.writeFileSync(path.join(SHOTS, file), Buffer.from(pic.result.data, 'base64'));
     console.log(`    (PNG ${path.join(SHOTS, file)})`);
   };
-  return { cdp, ev, until, clickSel, key, shot, touchTap, tapSel, shotSel, close: () => ws.close() };
+  return { cdp, ev, until, clickSel, key, shot, touchTap, tapSel, shotSel, close: () => { CDP_PENDS.delete(pend); ws.close(); } };
 }
 const TA = `document.querySelector('#frame textarea')`;
 const setText = (p, v, s, e) => p.ev(`(() => { const t = ${TA}; t.focus(); t.value = ${JSON.stringify(v)}; t.setSelectionRange(${s}, ${e}); return true; })()`);

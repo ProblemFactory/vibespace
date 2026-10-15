@@ -23,6 +23,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { freePort, scratchDir, ONBOARDED_SOURCE } from './scratch.mjs';
+import { armWatchdog } from './suite-watchdog.mjs';
 
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
@@ -38,7 +39,10 @@ const root = scratchDir('voiceteach');
 const SHOTS = process.env.VIBESPACE_VOICE_PNG_DIR || root;
 let chrome = null, hubSrv = null, vendor = null;
 const end = (code) => { try { chrome && chrome.kill('SIGKILL'); } catch { } try { hubSrv && hubSrv.close(); vendor && vendor.close(); } catch { } process.exit(code); };
-setTimeout(() => { console.log('✗ TIMEOUT (300 s)'); end(1); }, 300e3).unref();
+// the suite's own clock (scripts/suite-watchdog.mjs, the two-clock rule): its 300 s ceiling, before the gate's budget — it names
+// the leg it was in, the CDP calls nobody answered, and the gate's digest (it was `✗ TIMEOUT (300 s)` and nothing else)
+const CDP_PENDS = new Set();
+armWatchdog({ capMs: 300e3, exit: end, pending: () => [...CDP_PENDS].flatMap((m) => [...m.values()].map((x) => `CDP ${x.method} (${((Date.now() - x.at) / 1000).toFixed(1)} s)`)) });
 
 // ── the scratch certificate for hub.test (an https origin that is NOT loopback by name) ──
 const cert = spawnSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', path.join(root, 'key.pem'), '-out', path.join(root, 'cert.pem'), '-days', '1', '-subj', '/CN=hub.test', '-addext', 'subjectAltName=DNS:hub.test'], { encoding: 'utf8' });
@@ -173,9 +177,9 @@ const FAKE_MIC = `(() => {
 async function attach(wsUrl, w = 1280, h = 860) {
   const ws = new WebSocket(wsUrl, { maxPayload: 64 * 1024 * 1024 });
   await new Promise((r) => ws.on('open', r));
-  let seq = 0; const pend = new Map();
-  ws.on('message', (d) => { const m = JSON.parse(d); if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); } });
-  const cdp = (method, params = {}) => new Promise((r) => { const id = ++seq; pend.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
+  let seq = 0; const pend = new Map(); CDP_PENDS.add(pend);
+  ws.on('message', (d) => { const m = JSON.parse(d); if (m.id && pend.has(m.id)) { pend.get(m.id).r(m); pend.delete(m.id); } });
+  const cdp = (method, params = {}) => new Promise((r) => { const id = ++seq; pend.set(id, { r, method, at: Date.now() }); ws.send(JSON.stringify({ id, method, params })); });
   await cdp('Runtime.enable'); await cdp('Page.enable');
   const ev = async (expr) => { const r = await cdp('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.result?.exceptionDetails) throw new Error('page threw: ' + JSON.stringify(r.result.exceptionDetails).slice(0, 400)); return r.result?.result?.value; };
   const until = async (expr, ms = 10000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await ev(expr).catch(() => false)) return true; await sleep(80); } return false; };
@@ -194,7 +198,7 @@ async function attach(wsUrl, w = 1280, h = 860) {
     fs.writeFileSync(path.join(SHOTS, file), Buffer.from(pic.result.data, 'base64'));
     console.log(`    (PNG ${path.join(SHOTS, file)})`);
   };
-  return { cdp, ev, until, clickSel, shot, close: () => ws.close() };
+  return { cdp, ev, until, clickSel, shot, close: () => { CDP_PENDS.delete(pend); ws.close(); } };
 }
 async function page(w, h) {
   const tg = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/new?about:blank`, { method: 'PUT' })).json();
