@@ -520,6 +520,7 @@ function sendWhyText(why, { t = defaultT } = {}) {
     case 'read-only-channel': return t('only some people may post in this channel');
     case 'thread-only-channel': return t('in this channel you may only reply in threads');
     case 'team-access-not-granted': return t('your organization has not granted this app access to this conversation');
+    case 'org-team-not-granted': return t('the app is installed for the whole organization but not granted to this workspace — Re-authorize from a workspace the app is added to');   // lane slack-org-team-id
     case 'restricted': return t('your workspace\'s settings do not allow this');
     case 'ekm': return t('your organization\'s key management hides this content');
     case 'missing-scope': return t('the app was installed without a permission this needs — add it on the app\'s page and paste the new token (Re-authorize)');

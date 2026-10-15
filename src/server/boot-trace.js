@@ -18,6 +18,8 @@
 // hold lists its top sites. A diagnostics door (a stack per call) — never on by default.
 // VIBESPACE_BOOT_TRACE_SYNC=1 is the gate's RED control (scripts/test-boot-loop-hold.mjs): the boot's ledger warm runs
 // the old way, in one tick on the loop.
+// NOTES (B-92a4): a boot step's own lines that outlive its span — the restore's probe-pending sessions and the re-probe's
+// verdicts after listen — `note(text)`, answered live by GET /api/boot-trace (`notes`) and listed in ⚙ Diagnostics.
 const fs = require('fs');
 const path = require('path');
 const { performance, monitorEventLoopDelay } = require('perf_hooks');
@@ -27,13 +29,14 @@ const HOLD_MS = 100;      // recorded from here; the gate's law is 250 ms
 const WINDOW_MS = 90000;  // past the boot's deferred steps (the ledger warm starts 8 s after listen)
 const KEEP = 20;          // holds kept in the report, longest first
 const BIG_PARSE = 1 << 20;
+const NOTES_KEEP = 40;
 
 let one = null;
 
 /** The boot clock (one per process; a second call answers the first). */
 function start({ dataDir, env = process.env, now = () => performance.now(), windowMs = Number(env.VIBESPACE_BOOT_TRACE_WINDOW_MS) || WINDOW_MS } = {}) {
   if (one) return one;
-  const startAt = now(), steps = [], spans = [], gaps = [], ops = [];
+  const startAt = now(), steps = [], spans = [], gaps = [], ops = [], notes = [];
   let label = null, sticky = null, last = startAt, mainMs = null, mainEndAt = null, listenAt = null, closed = false, resolveDone;
   const done = new Promise((r) => { resolveDone = r; });
   const eld = monitorEventLoopDelay({ resolution: 20 }); eld.enable();
@@ -66,7 +69,7 @@ function start({ dataDir, env = process.env, now = () => performance.now(), wind
   function report() {
     const holds = gaps.slice().sort((a, b) => b.ms - a.ms).slice(0, KEEP).map((g) => ({ at: g.at, ms: g.ms, name: nameOf(g), ...(ops.length ? { sites: sitesOf(g) } : {}) }));
     return { pid: process.pid, startedAt: Math.round(performance.timeOrigin + startAt), startAt: Math.round(startAt), mainMs, listenAt: listenAt == null ? null : Math.round(listenAt), windowMs, closed, traced: env.VIBESPACE_BOOT_TRACE === '1',
-      maxHoldMs: gaps.reduce((m, g) => Math.max(m, g.ms), 0), eldMaxMs: Math.round(eld.max / 1e6), holds, steps: steps.map((s) => ({ name: s.name, at: Math.round(s.at), ms: Math.round(s.ms) })), spans: spans.map((s) => ({ name: s.name, at: Math.round(s.at), ms: s.ms == null ? null : Math.round(s.ms), ...(s.facts || {}) })) };
+      maxHoldMs: gaps.reduce((m, g) => Math.max(m, g.ms), 0), eldMaxMs: Math.round(eld.max / 1e6), holds, steps: steps.map((s) => ({ name: s.name, at: Math.round(s.at), ms: Math.round(s.ms) })), spans: spans.map((s) => ({ name: s.name, at: Math.round(s.at), ms: s.ms == null ? null : Math.round(s.ms), ...(s.facts || {}) })), notes: notes.slice() };
   }
   function close() {
     if (closed) return;
@@ -83,6 +86,8 @@ function start({ dataDir, env = process.env, now = () => performance.now(), wind
     step(name, fn) { const prev = label, t0 = now(); label = name; try { return fn(); } finally { label = prev; steps.push({ name, at: t0, ms: now() - t0 }); } },
     /** A boot step that runs a slice per tick: its holds (if any) carry its name; `facts(result)` rides the report. */
     span(name, promise, facts = () => null) { const s = { name, at: now(), ms: null, facts: null }; spans.push(s); Promise.resolve(promise).then((r) => { s.facts = facts(r) || null; }, () => { }).finally(() => { s.ms = now() - s.at; }); return promise; },
+    /** A line a boot step keeps saying past its span (B-92a4: the restore's re-probe) — live in the report, the newest kept. */
+    note(text) { notes.push({ at: Math.round(now()), text: String(text).slice(0, 300) }); if (notes.length > NOTES_KEEP) notes.shift(); },
     /** server.js's last line: the main-module evaluation is over. */
     mainEnd() { if (mainEndAt === null) mainEndAt = now(); },
     /** The listen callback's first line: until the next tick, a hold is the listen callback's. */

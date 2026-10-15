@@ -158,6 +158,12 @@ const SHAPES = {
   "claude:stream:system/ui_status": sh(['plugin', 'text']),
   "claude:stream:system/ui_scroll": sh(['client_id', 'component', 'instance_id', 'offset', 'follow_end']),
   "claude:stream:system/ui_focus": sh(['client_id', 'component', 'instance_id', 'plugin', 'key']),
+  // NEW in 2.1.296 (lane record-oracle-2-1-296) — VERBATIM from the 2.1.296 union (scripts/fixtures/claude-cli/2.1.296.json, `zod` holds
+  // the literal). permission_check_status: a tool call's permission check has waited ~4 s ('checking') / that wait is over ('done') —
+  // a pulse with no words, before any ask exists: card-less (KNOWN_IGNORED). file_attachments_missing: the files an inbound user
+  // message's file_attachments named that did not arrive (reason codes) — a plain dim line (message-manager HANDLED).
+  "claude:stream:system/permission_check_status": sh(['tool_use_id', 'agent_id', 'status'], { enums: { status: ['checking', 'done'] } }),
+  "claude:stream:system/file_attachments_missing": sh(['message_uuid', 'sent_count', 'missing']),
   "claude:stream:result": sh(['duration_ms', 'duration_api_ms', 'ttft_ms', 'ttft_stream_ms', 'time_to_request_ms', 'user_message_uuid', 'user_message_uuids', 'resume_reason', 'local_command', 'request_sent_wall_ms', 'first_content_frame_ms', 'first_stream_post_ms', 'first_stream_post_ack_ms', 'first_stream_post_wall_ms', 'time_to_request_from_spawn_ms', 'warm_spare_claimed', 'time_origin_ms', 'is_error', 'api_error_status', 'api_error_code', 'num_turns', 'result', 'stop_reason', 'total_cost_usd', 'usage', 'modelUsage', 'subagent_stats', 'permission_denials', 'queued_turn_count', 'structured_output', 'deferred_tool_use', 'terminal_reason', 'result_index', 'fast_mode_state', 'fast_mode_disabled_reason', 'origin', 'errors', 'runner_exit', 'startup_failure_reason'], { ignored: { 'first_stream_post_queue_wait_ms': LATENCY_UNREAD, 'first_stream_post_queued_behind': LATENCY_UNREAD, 'frame_received_wall_ms': LATENCY_UNREAD, 'frame_enqueued_wall_ms': LATENCY_UNREAD, 'turn_started_wall_ms': LATENCY_UNREAD, 'first_text_post_ms': LATENCY_UNREAD, 'first_text_post_wall_ms': LATENCY_UNREAD } }),
   "claude:stream:user": sh(['message', 'parent_tool_use_id', 'isSynthetic', 'tool_use_result', 'priority', 'origin', 'client_platform', 'inbound_origin', 'historical', 'shouldQuery', 'timestamp', 'is_meta', 'seeded_summon', 'client_composed', 'is_visible_in_transcript_only', 'is_virtual', 'is_compact_summary', 'summarize_metadata', 'mcp_meta', 'tool_result_meta', 'source_tool_use_id', 'source_tool_assistant_uuid', 'image_paste_ids', 'plan_content', 'permission_mode', 'interrupted_message_id'], { ignored: { 'initiator': 'who started the turn (2.1.280) — 2.1.280 — no consumer yet (declared so the drift card stays quiet; move to known with the consumer)' } }),
   "claude:stream:bash_command": sh(['command', 'cwd']),
@@ -228,8 +234,28 @@ const FIELDS_288 = Object.freeze({
   'claude:stream:system/informational': { tag: NEW_288('a machine tag on the CLI\'s banner line — the dim card shows the text') },
   'claude:stream:system/turn_handoff_available': { home_files: NEW_288('handoff staging (cloud worker)'), file_names: NEW_288('handoff staging (cloud worker)'), carried_writes: NEW_288('handoff staging (cloud worker)') },
 });
+// The 18 fields 2.1.296 added to shapes 2.1.288 already declared (2026-10-15 census: the 2.1.296 dump minus the 2.1.288 dump; the dump's own
+// `.describe()` text is the evidence) — each an `ignored` row saying why nothing reads it (a `known` field would name its reader). A read
+// of the tree (grep over src/ server.js data/bin) found NO reader for any of the 18: agent_id is read on control_request.request and on
+// system/permission_denied, never on an assistant record; `handback` / `awaited` hits are the browser hand-back and unrelated awaits.
+const NEW_296 = (what) => what + ' (2.1.296) — no consumer yet (declared so no drift is recorded; move to known with the consumer)';
+const RESUME_296 = NEW_296('@internal a refusal re-ask\'s bookkeeping — the refusal path renders from the CLI\'s own informational / result text');
+const TASK_RUN_296 = NEW_296('the run a task record belongs to — task cards key on task_id + tool_use_id');
+const FIELDS_296 = Object.freeze({
+  'claude:stream:user': { refused_message_id: RESUME_296 },
+  'claude:stream:assistant': { agent_id: NEW_296('the helper that produced an assistant message — helper views key on parent_tool_use_id; agent_id is read only on asks (helper-ask.js) and permission_denied'), thinking_display: NEW_296('@internal the thinking.display Claude Code requested — thinking blocks render as they arrive') },
+  'claude:stream:result': { safety_stops: NEW_296('a count of safety stops in the turn — the stop card reads system/informational (src/safety-stop.js), never this count'), resume_store_confirm_detail: NEW_296('@internal how one time_to_request phase was spent — nothing in VibeSpace reads latency (see LATENCY_UNREAD)') },
+  'claude:stream:stream_event': { api_message_id: NEW_296('@internal the API message id of the streamed frame — the assistant record carries its own message.id'), abandoned_blocks: NEW_296('@internal blocks of an abandoned API attempt — the final assistant record is what renders'), text_runs_joined: NEW_296('@internal a joined-text-runs marker on a frame — the streaming text is read from the deltas') },
+  'claude:stream:system/status': { compact_output_chars: NEW_296('@internal summary characters so far on an auto-compaction status — the spinner label reads status + compact_result only') },
+  'claude:stream:system/task_notification': { run_id: TASK_RUN_296, handback: NEW_296('@internal how a SubagentHandback helper reported — the task card closes on status'), handback_report: NEW_296('@internal the hand-back report itself — the helper\'s result reaches the chat as its tool result') },
+  'claude:stream:system/task_progress': { run_id: TASK_RUN_296 },
+  'claude:stream:system/task_started': { run_id: TASK_RUN_296, awaited: NEW_296('whether the parent waits on the task — background-ness is read from is_backgrounded'), parent_task_id: NEW_296('the task that spawned this one — task cards are found by task_id / tool_use_id, nothing nests them') },
+  'claude:stream:system/task_updated': { run_id: TASK_RUN_296 },
+  'claude:stream:system/turn_handoff_available': { hydrates_carried_lines: NEW_296('handoff staging (cloud worker)') },
+});
 // (filled BEFORE the CORPUS_KNOWN line: test-record-shape §5's control clears every ignored map at that line)
 for (const [key, fields] of Object.entries(FIELDS_288)) for (const [f, note] of Object.entries(fields)) if (!SHAPES[key].known.has(f)) SHAPES[key].ignored.set(f, note);
+for (const [key, fields] of Object.entries(FIELDS_296)) for (const [f, note] of Object.entries(fields)) if (!SHAPES[key].known.has(f)) SHAPES[key].ignored.set(f, note);
 for (const [key, fields] of Object.entries(CORPUS_KNOWN)) for (const [f, note] of Object.entries(fields)) if (!SHAPES[key].known.has(f)) SHAPES[key].ignored.set(f, note);
 
 
@@ -395,6 +421,9 @@ const SHAPE_SINCE = Object.freeze({
   'system/ui_status': '2.1.288',
   'system/ui_scroll': '2.1.288',
   'system/ui_focus': '2.1.288',
+  // lane record-oracle-2-1-296 — the 2.1.296 dump (scripts/fixtures/claude-cli/2.1.296.json)
+  'system/permission_check_status': '2.1.296',
+  'system/file_attachments_missing': '2.1.296',
 });
 // Names the corpus carries that are NOT in the SDK union (the REPL's own rows): the oracle's reverse
 // check excuses them so a handled/ignored list entry is never called dead by mistake.
@@ -404,6 +433,15 @@ const CORPUS_ONLY_SUBTYPES = Object.freeze({
   success: 'legacy list entry (never observed as a system subtype)',
   bridge_status: 'the TUI\'s "/remote-control is active" banner (2.1.81 transcripts, 11 rows) — not in the SDK union; VibeSpace never runs the remote-control bridge, card-less',
   ui_panes: 'the plugin UI host\'s pane list (2.1.288, emitted beside ui_log under the same uiSurfaceChannel gate) — spelled in the binary, NOT in the SDK union; card-less like the other ui_* records',
+});
+
+// The transcript ATTACHMENT payloads a pinned dump's `zod` names (2.1.296: the CLI's own SessionStart-hook attachment parser — a
+// `type`-discriminated union over these three, read back to rebuild the session-start context). They are `attachment.type` values,
+// not stream records (no uuid / session_id), so the union legs never judge them; each is classified here, on its literal.
+const ATTACHMENT_PAYLOADS = Object.freeze({
+  hook_success: 'known — message-manager _processAttachment: the hook card (✓ Hook: <name>, its output behind the expander)',
+  hook_additional_context: 'known — message-manager _processAttachment: the "✓ Hook context" card (the injected text, deduped against the hook\'s stdout card)',
+  async_hook_response: 'ignored — an ASYNC hook\'s protocol JSON (response / command / exitCode); _processAttachment has no branch, so nothing renders and no card is made; the CLI reads only its systemMessage + additionalContext, to rebuild session-start context',
 });
 
 // ── carrier + shape key ──────────────────────────────────────────────────────────────────────────
@@ -552,12 +590,13 @@ function unknownFieldsSample(record) {
 
 // The claude builds the STREAM shapes are verified against — PINNED PER CLI VERSION, never to the box (lane
 // cli-2-1-288-records, B-e05e): 2.1.274 dump + the 2.1.280 additions (2026-09-22) + 2.1.281 (2026-09-23 — one new
-// subtype, six fields on three shapes) + 2.1.288 (2026-10-07 — eight new subtypes, 23 fields on six shapes). Each
+// subtype, six fields on three shapes) + 2.1.288 (2026-10-07 — eight new subtypes, 23 fields on six shapes) + 2.1.296 (2026-10-15 — two new
+// subtypes, 18 fields on ten shapes, three hook attachment payloads: FIELDS_296 / ATTACHMENT_PAYLOADS). Each
 // pinned build has its TRACKED dump in scripts/fixtures/claude-cli/<version>.json, judged with no binary at all;
 // test-record-shape's binary oracle runs on whichever claude is installed and expects the rows of THAT build
 // (SHAPE_SINCE excuses a newer row on an older build). STRICT on any developer box; on the Actions mirror (which
 // installs whatever npm serves today) an UNPINNED build's drift is printed and skipped, never a red gate nobody reads.
-const SCHEMA_CLI_VERSIONS = Object.freeze(['2.1.281', '2.1.288']);
+const SCHEMA_CLI_VERSIONS = Object.freeze(['2.1.281', '2.1.288', '2.1.296']);
 const SCHEMA_CLI_VERSION = SCHEMA_CLI_VERSIONS[SCHEMA_CLI_VERSIONS.length - 1];
 
-module.exports = { SCHEMA_CLI_VERSION, SCHEMA_CLI_VERSIONS, FIELDS_288, SHAPE_SINCE, SHAPES, ENVELOPES, OURS, isOurs, CONTENT_BLOCK_TYPES, CORPUS_KNOWN, DECLARED_UPSTREAM_UNSEEN, CORPUS_ONLY_SUBTYPES, carrierOf, shapeKeyOf, unknownFields, redactRecord, unknownFieldsSample, isSecretKey, keySegments };
+module.exports = { SCHEMA_CLI_VERSION, SCHEMA_CLI_VERSIONS, FIELDS_288, FIELDS_296, ATTACHMENT_PAYLOADS, SHAPE_SINCE, SHAPES, ENVELOPES, OURS, isOurs, CONTENT_BLOCK_TYPES, CORPUS_KNOWN, DECLARED_UPSTREAM_UNSEEN, CORPUS_ONLY_SUBTYPES, carrierOf, shapeKeyOf, unknownFields, redactRecord, unknownFieldsSample, isSecretKey, keySegments };

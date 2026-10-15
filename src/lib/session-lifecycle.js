@@ -17,6 +17,7 @@ import { carriedGeometry } from './stage-rules.js'; // the geometry a replaced w
 import { attachSlab } from './view-visibility.js'; // perf r1: the slab an attach asks for (floor | text)
 import { memberState, poolSubmenuModel, submenuNoteWords } from './pool-priority-model.js'; // THE CONVERSATION'S POOL PIN (2026-09-28): the pool row's submenu, as a PURE model
 import { deviceLocale } from './i18n.js';
+import { resumeAccountVerdict } from '../resume-account.js'; // lane resume-account-door: the pinned account is asked FIRST at the Resume press
 
 // lane mirror-green-228: a window's focus on the server's answer never takes the keys from an open app dialog (the Rename
 // dialog a double-click on its own sidebar row opened while the attach was in flight)
@@ -342,6 +343,12 @@ export function installSessionLifecycle(App, ctx = {}) {
         showToast(text, { type: 'error' });
         if (sessionMode === 'chat' && resumeId && !/^sess-\d/.test(resumeId) && backend === 'claude') {
           rescueViewOnly();
+          // an account the create refused (a resume that never asked — the sidebar card, resume-all; lane
+          // resume-account-door): the rescued window's bar says it with its doors, on fresh facts
+          if (/^Account error: /.test(text) && this.resumeAccountCheck) {
+            const q = { backend, backendSessionId: resumeId, hostId: hostId || undefined };
+            this.resumeAccountCheck(q).then((v) => { if (v && !v.ok) this.sessions.get(winInfo.id)?._showAccountRefusalBar?.(v, q); }).catch(() => {});
+          }
           return true;
         }
         const err = document.createElement('div');
@@ -943,6 +950,60 @@ export function installSessionLifecycle(App, ctx = {}) {
     });
   },
 
+  // RESUME ACCOUNT (lane resume-account-door, owner 2026-10-15 「无法 resume 一个对话」): the Resume press asks the PURE
+  // verdict FIRST (src/resume-account.js) over facts the page already holds — the conversation's on-resume account, the
+  // accounts list (login-expiry's loginState), the usage route's logins (login-state's `since`), the host's verdicts — so
+  // a pinned account that cannot serve is said IN THE RESUME BAR with its two doors, not by a create failing into a toast.
+  _resumeAccountVerdict({ backend = 'claude', backendSessionId, hostId } = {}) {
+    const acc = this._accounts || {};
+    // no list yet (a fresh page) or a harness with no roster: no claim — the create stays the judge
+    if (!backendFeatureCaps(backend).accounts || !backendSessionId || !(acc.accounts || []).length) return { ok: true };
+    const saved = this.sidebar?.getSessionConfig?.({ backend, backendSessionId }) || {};
+    const bill = billingRow(backend);
+    return resumeAccountVerdict({
+      pinned: { account: saved.account || '', backend, host: hostId || null },
+      accounts: acc.accounts,
+      loginStates: this._usageLogins || null,
+      defaults: {
+        defaultAccountId: acc[bill.defaultIdField] || null,
+        // the machine's own CLI login is a candidate where the billing row declares one (its status rides /api/accounts)
+        machineLogin: !hostId && bill.hostLogin ? acc.subscription || null : null,
+        hostVerdicts: hostId ? this._hostVerdicts?.[hostId] || null : null,
+      },
+    });
+  },
+  /** The Resume press's question, on FRESH facts: a login the CLI wiped broadcasts nothing, so a page loaded before the
+   *  wipe still holds "serves" (the incident's page) — and a re-login may have landed since the last broadcast. One
+   *  GET /api/accounts (list() re-reads every credential file), bounded; the cache when the server does not answer. */
+  async resumeAccountCheck(ids = {}) {
+    await Promise.race([this.refreshAccounts?.(), new Promise((r) => setTimeout(r, 3000))]);
+    return this._resumeAccountVerdict(ids);
+  },
+  /** The refusal's first door: Manage agents, on that account's own re-login (the row's login chip / ⋯ → Re-login on
+   *  this machine — the same terminal and the same finalize), or Manage agents alone for a pool / a host that cannot
+   *  take the account. The bar re-asks on the accounts-updated the finished login broadcasts. */
+  openResumeAccountDoor(door) {
+    if (!door || door.kind !== 'relogin') return;
+    const a = (this._accounts?.accounts || []).find((x) => x.id === door.accountId) || null;
+    this._showAgentsDialog?.();
+    if (door.via === 'login' && a) this._reloginSubscription?.(a.id, a, () => { this._agentsRefreshHook?.(); this.refreshAccounts?.(); });
+  },
+  // PERSIST-AFTER-VERIFY (B-77f3, 2.243.0): a picked account used to be written as the on-resume account BEFORE the
+  // spawn — a doomed pick (not logged in, can't ship, host down) poisoned the session's config, and every later manual
+  // Resume re-failed with it (userN's 2.240.0 incident chain). The pick rides the create explicitly and is persisted only
+  // once the server confirms the session actually spawned with it — the billing switcher and the resume bar's account
+  // picker write through this ONE door.
+  _persistAccountOnCreate(key, acctVal) {
+    return (ok2, createdMsg) => {
+      if (!ok2) return; // create errored — config untouched, old account stands
+      // Persist the POST-FACTO truth (B-f531): what the server actually
+      // resolved the spawn to (created.billing), not the requested intent.
+      // billing.accountId null = the CLI/host's own login = the sentinel.
+      const resolved = createdMsg?.billing ? (createdMsg.billing.accountId || 'subscription') : acctVal;
+      this.sidebar?.setSessionConfig?.(key, { ...(this.sidebar?.getSessionConfig?.(key) || {}), account: resolved });
+    };
+  },
+
   _snapshotWinBounds(win) {
     if (!win) return undefined;
     // PURE stage-rules carriedGeometry (verify r1 of inc-munl8jkl-gaih): a window BORROWED by the Stage sits at the
@@ -1087,20 +1148,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       });
       if (!ok) return;
       const key = spec.sessionKey || `${backend}:${backendSessionId}`;
-      // PERSIST-AFTER-VERIFY (B-77f3, 2.243.0): the pick used to be written as
-      // the on-resume account BEFORE the spawn — a doomed pick (not logged in,
-      // can't ship, host down) poisoned the session's config, and every later
-      // manual Resume re-failed with it (userN's 2.240.0 incident chain).
-      // The pick now rides the create explicitly and is persisted only once
-      // the server confirms the session actually spawned with it.
-      const persistOnSuccess = (ok2, createdMsg) => {
-        if (!ok2) return; // create errored — config untouched, old account stands
-        // Persist the POST-FACTO truth (B-f531): what the server actually
-        // resolved the spawn to (created.billing), not the requested intent.
-        // billing.accountId null = the CLI/host's own login = the sentinel.
-        const resolved = createdMsg?.billing ? (createdMsg.billing.accountId || 'subscription') : acctVal;
-        this.sidebar?.setSessionConfig?.(key, { ...(this.sidebar?.getSessionConfig?.(key) || {}), account: resolved });
-      };
+      const persistOnSuccess = this._persistAccountOnCreate(key, acctVal); // PERSIST-AFTER-VERIFY (B-77f3): written once the spawn is confirmed
       const name = this.sidebar?.getCustomName?.({ backend, backendSessionId }) || live?.name || spec.name || win?.title || t('Session');
       const cwd = live?.cwd || spec.cwd || '';
       const mode = live?.webuiMode || (win ? (win.type === 'terminal' ? 'terminal' : 'chat') : (this.settings.get('session.defaultMode') || 'chat'));

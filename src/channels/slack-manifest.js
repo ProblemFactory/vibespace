@@ -135,6 +135,9 @@ function pasteAction(box, shape) {
 /** design 018: THE WORKSPACE APP'S CONSENT — Slack's authorize page, the code exchange, the instance's landing route. */
 const AUTHORIZE_URL = 'https://slack.com/oauth/v2/authorize';
 const EXCHANGE_METHOD = 'oauth.v2.access';
+/** lane slack-org-team-id: the sign-in's own two methods (the app's create, the code exchange) — slack.js's METHOD_SCOPE
+ *  rows them `org` from HERE, so each name stays spelled once (test-vendor-whitelist §12 / §13 ONE SITE). */
+const SIGN_IN_METHODS = Object.freeze([CREATE_METHOD, EXCHANGE_METHOD]);
 const CALLBACK_PATH = '/api/channels/oauth/cb/slack';
 const STATE_MAX = 1024;
 const STATE_REFUSALS = Object.freeze(['bad-shape', 'bad-hmac', 'wrong-flow', 'expired']);
@@ -237,4 +240,4 @@ function scopesOfHeader(h) {
 }
 
 module.exports = { EGRESS, CREATE_URL, CONFIG_PAGE, INSTALL_BASE, CREATE_METHOD, APP_ID_RE, BOXES, USER_SCOPES, READ_SCOPES, SEND_SCOPES, APP_NAME_MAX, OWNER_NAME_MAX, LINK_MAX, manifestFor, createLink, appNameFor, tokenShapeOf, createRequest, installLink, pasteAction, scopesOfHeader,
-  AUTHORIZE_URL, EXCHANGE_METHOD, CALLBACK_PATH, STATE_MAX, STATE_REFUSALS, PRIVATE_SUFFIXES, RELAY_DEFAULT, originOf, authorizeUrl, redirectFor, stateOf, stateParts, stateVerdict, relayTargetVerdict };
+  AUTHORIZE_URL, EXCHANGE_METHOD, SIGN_IN_METHODS, CALLBACK_PATH, STATE_MAX, STATE_REFUSALS, PRIVATE_SUFFIXES, RELAY_DEFAULT, originOf, authorizeUrl, redirectFor, stateOf, stateParts, stateVerdict, relayTargetVerdict };

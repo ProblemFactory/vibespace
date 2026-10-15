@@ -2,6 +2,7 @@ import { escHtml, showToast, showConfirmDialog, fetchJson, createModalShell } fr
 import { TerminalSession } from './terminal.js';
 import { t, setLang, getLangPref } from './i18n.js';
 import { THEMES, BUILTIN_THEMES } from './themes.js';
+import { sessionDisplayName } from '../session-name.js'; // THE name ladder — a drift-ledger row names its conversation (lane record-oracle-2-1-296)
 
 /**
  * App setup/config flows mixin — the onboarding wizard, Backup & migrate
@@ -465,7 +466,7 @@ export function installSetupFlows(App) {
 
     async _openDiagnostics() {
     const [d, c, ci, bt] = await Promise.all([
-      fetchJson('/api/telemetry/summary?days=14'),
+      fetchJson('/api/telemetry/summary?days=14&drift=1'),
       fetchJson('/api/telemetry/central-summary?days=14'),
       fetchJson('/api/ci-heavy'),
       fetchJson('/api/boot-trace'),
@@ -503,12 +504,15 @@ export function installSetupFlows(App) {
       // THE BOOT HOLDS (B-1319): this server's start — the longest times its main loop was held (pages, paired
       // devices, the keeper and every timer waited), each named by the boot step it ran in; the top 5. Loading the
       // code is said apart (the port is not open yet, nothing waits). Absent on a server older than the route.
+      // B-92a4: below them, a span's note (restore-probes: N unanswered …) and the boot's notes (the restore's re-probe).
       if (!bt || !Array.isArray(bt.holds)) return '';
+      const said = [...(bt.spans || []).filter((s) => s.note).map((s) => `${s.name}: ${s.note}`), ...(Array.isArray(bt.notes) ? bt.notes : []).map((n) => `${n.at} ms · ${n.text}`)];
       const rows = bt.holds.slice(0, 5).map((h) => `<tr><td class="n">${h.at} ms</td><td class="n"><b>${h.ms} ms</b></td><td>${esc(h.name || '?')}${(h.sites || []).map((x) => `<div class="dim">${x.ms} ms · ${esc(x.what)}</div>`).join('')}</td></tr>`).join('');
       return `<h2>${esc(t('Server start — the longest holds'))}</h2>
       <p class="dim">${esc(t('How long the server\'s main loop was held while it started — pages, paired devices and timers waited that long. Start it with VIBESPACE_BOOT_TRACE=1 to name the file read or command behind each.'))}</p>
       <p>${esc(t('Code loaded in {ms} ms; longest hold since: {max} ms.', { ms: bt.mainMs ?? '?', max: bt.maxHoldMs ?? 0 }))}</p>
-      ${rows ? `<table><tr><td class="n dim">${esc(t('after start'))}</td><td class="n dim">${esc(t('duration'))}</td><td class="dim">${esc(t('detail'))}</td></tr>${rows}</table>` : `<p class="dim">${esc(t('No hold of 100 ms or more since this server started.'))}</p>`}`;
+      ${rows ? `<table><tr><td class="n dim">${esc(t('after start'))}</td><td class="n dim">${esc(t('duration'))}</td><td class="dim">${esc(t('detail'))}</td></tr>${rows}</table>` : `<p class="dim">${esc(t('No hold of 100 ms or more since this server started.'))}</p>`}
+      ${said.length ? `<ul class="dim">${said.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>` : ''}`;
     })()}
     <h2>${esc(t('Events per day'))}</h2><div class="chart">${bars || `<span class="dim">${esc(t('No data'))}</span>`}</div>
     ${(() => {
@@ -522,6 +526,19 @@ export function installSetupFlows(App) {
       return `<h2>${esc(t('Harness drift'))}</h2>
       <p class="dim">${esc(t('Records a harness emitted that VibeSpace does not recognize, and known records carrying fields it does not declare. Each row is one breadcrumb; the CLI build that started it rides the detail.'))}</p>
       <table><tr><td class="dim">${esc(t('breadcrumb'))}</td><td class="dim">${esc(t('detail'))}</td><td class="n dim">n</td><td class="dim">${esc(t('first seen'))}</td><td class="dim">${esc(t('last seen'))}</td><td class="dim">${esc(t('versions'))}</td></tr>${tr}</table>`;
+    })()}
+    ${(() => {
+      // THE DRIFT LEDGER (lane record-oracle-2-1-296, owner 2026-10-15 「最近多了很多红色提示」): a known record that merely grew a
+      // field gets no chat card any more — it is listed HERE, one row per conversation + record shape: the new fields, the CLI build,
+      // how many records carried them, the latest (redacted) sample behind 技术细节. The server's memory since it started (bounded).
+      const rows = Array.isArray(d.driftLedger) ? d.driftLedger : [];
+      if (!rows.length) return '';
+      const nameOf = (cid) => { const s = (this.sidebar?._allSessions || []).find((x) => (x.backendSessionId || x.claudeSessionId || x.sessionId) === cid); return (s && sessionDisplayName(s, this.sidebar.getCustomName?.(s) || '')) || cid; };
+      const tr = rows.map((r) => `<tr><td>${esc(nameOf(r.conversation))}</td><td>${esc(r.harness || '')} · ${esc(r.shape || '')}</td><td>+{${esc((r.fields || []).join(', '))}}</td><td class="dim">${esc(r.cli || '?')}</td><td class="n">${r.count}</td></tr>`
+        + (r.sample ? `<tr><td colspan="5"><details><summary>${esc(t('Technical details'))}</summary><pre>${esc(r.sample)}</pre></details></td></tr>` : '')).join('');
+      return `<h2>${esc(t('Records that grew a field'))}</h2>
+      <p class="dim">${esc(t('Records VibeSpace knows that arrived carrying fields it does not declare. Handling is unchanged, so the chat shows no card for them; each row is one kind of record in one conversation, since this server started.'))}</p>
+      <table class="drift-ledger"><tr><td class="dim">${esc(t('conversation'))}</td><td class="dim">${esc(t('harness record'))}</td><td class="dim">${esc(t('new fields'))}</td><td class="dim">${esc(t('CLI version'))}</td><td class="n dim">n</td></tr>${tr}</table>`;
     })()}
     <h2>${esc(t('By event'))}</h2><table>${kv(d.byName)}</table>
     <h2>${esc(t('By version'))}</h2><table>${kv(d.byVersion)}</table>

@@ -43,7 +43,8 @@ const WHY = Object.freeze({
   ratelimited: 'rate-limited',
   frozen_channel: 'frozen',
 });
-const WHYS = Object.freeze([...new Set([...Object.values(WHY), 'vendor', 'rate-limited', 'transport', 'not-found'])]);
+// lane slack-org-team-id: `org-team-not-granted` is the adapter's own (an org-wide install whose workspace Slack refuses)
+const WHYS = Object.freeze([...new Set([...Object.values(WHY), 'vendor', 'rate-limited', 'transport', 'not-found', 'org-team-not-granted'])]);
 const FORBIDDEN = new Set(['not_in_channel', 'is_archived', 'channel_is_archived', 'restricted_action', 'restricted_action_read_only_channel', 'restricted_action_thread_only_channel', 'restricted_action_non_threadable_channel', 'team_access_not_granted', 'ekm_access_denied', 'missing_scope', 'no_permission', 'access_denied', 'not_allowed_token_type', 'cant_post_in_channel', 'cannot_reply_to_message', 'no_reaction', 'frozen_channel']);
 const CODE_RE = /^[a-z][a-z0-9_]{0,63}$/;
 

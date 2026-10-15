@@ -12,7 +12,7 @@
 // Run: node scripts/test-unknown-records.mjs
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
@@ -354,7 +354,8 @@ console.log('§10 lane classifier-stop-card: system/informational is HANDLED on 
   ok('history: the transcript row (envelope level + isMeta, toolUseID / preventContinuation / highlight) is the same card, no drift card', infos(gh).length === 1 && infos(gh)[0].content[0].level === 'info' && drift(gh).length === 0 && cards(gh).length === 0, gh.messages.map((m) => m.noticeKind));
   const gd = createMessageManager('claude', 'test-info-drift');
   gd.convertHistory([env('g2', { type: 'system', subtype: 'informational', content: 'x', isMeta: false, level: 'notice', brandNewField: 1 })]);
-  ok('…the transcript shape is LIVE: a row that grew a field is a drift card naming it (negative control)', drift(gd).length === 1 && drift(gd)[0].content[0].fields.join() === 'brandNewField', drift(gd).map((m) => m.content[0]));
+  const grew = MM.driftLedgerRows().filter((r) => r.conversation === SID && r.shape === 'system/informational');
+  ok('…the transcript shape is LIVE: a row that grew a field is judged — a drift-ledger row naming it, no card (negative control; lane record-oracle-2-1-296: field growth is never a card)', drift(gd).length === 0 && grew.length === 1 && grew[0].fields.join() === 'brandNewField' && grew[0].cli === '2.1.288' /* no init in the window: the row's own version */, grew);
   ok('record-shape: informational LEFT declared-upstream-unseen (now seen + handled) and has a transcript row', !('informational' in require(path.join(REPO, 'src/record-shape.js')).DECLARED_UPSTREAM_UNSEEN.system) && !!require(path.join(REPO, 'src/record-shape.js')).SHAPES['claude:transcript:system/informational'] && MM.HANDLED_SYSTEM_SUBTYPES.has('informational'));
 
   // the renderer + its words
@@ -421,6 +422,76 @@ console.log('§11 lane cli-2-1-288-records (B-e05e): claude 2.1.288\'s eight new
   const KEY = 'The CLI warns the instructions are large: {chars} characters (limit {limit})';
   ok('renderer: the instruction-size notice is OUR words through t() (escaped) on the same dim card; zh + ja carry the line', /b\.say === 'instruction-size' \? escHtml\(t\('The CLI warns the instructions are large: \{chars\} characters \(limit \{limit\}\)'/.test(ib) && ['zh', 'ja'].every((l) => read('src/lib/i18n-' + l + '.js').includes(JSON.stringify(KEY) + ':')));
   ok('every one is a declared 2.1.288 row (SHAPE_SINCE) and on exactly one normalizer list', Object.keys(REC).every((st) => R.SHAPE_SINCE['system/' + st] === '2.1.288' && (MM.HANDLED_SYSTEM_SUBTYPES.has(st) !== MM.KNOWN_IGNORED_SYSTEM_SUBTYPES.has(st))));
+}
+
+console.log('§12 lane record-oracle-2-1-296: claude 2.1.296\'s two new system records are KNOWN; a known record that GREW a field is no red card — stored ones render nothing, the rows live in ⚙ Diagnostics');
+{
+  const S = 'sess-296';
+  const R = require(path.join(REPO, 'src/record-shape.js'));
+  const zod = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/claude-cli/2.1.296.json'), 'utf8')).zod;
+  const REC = {
+    permission_check_status: { tool_use_id: 'toolu_296', agent_id: 'a1', status: 'checking' },
+    file_attachments_missing: { message_uuid: 'm-296', sent_count: 3, missing: [{ file_uuid: 'f1', reason: 'too_large' }, { file_uuid: 'f2', reason: 'not_found' }] },
+  };
+  ok('the fixture records carry exactly the fields of each 2.1.296 zod object (the dump is the evidence)', Object.entries(REC).every(([st, f]) => Object.keys(f).every((k) => zod['system/' + st].includes(k + ':'))));
+  const mm = createMessageManager('claude', 'test-296');
+  const ops = []; mm.listeners.push((e) => ops.push(e));
+  let i = 0;
+  for (const [st, f] of Object.entries(REC)) mm.processLive({ type: 'system', subtype: st, ...f, uuid: 'u296-' + (i++), session_id: S });
+  mm.processLive({ type: 'system', subtype: 'permission_check_status', tool_use_id: 'toolu_296', status: 'done', uuid: 'u296-d', session_id: S });
+  const infos = mm.messages.filter((m) => m.noticeKind === 'harness-informational');
+  ok('both live (+ the done pulse): NO unknown-event card, NO drift card', cards(mm).length === 0 && mm.messages.every((m) => m.noticeKind !== 'unknown-fields'), mm.messages.map((m) => m.noticeKind));
+  ok('file_attachments_missing → ONE plain dim line (level notice, say attachments-missing: 2 of 3, the reason codes in params); permission_check_status card-less', infos.length === 1 && mm.messages.length === 1 && infos[0].content[0].level === 'notice' && infos[0].content[0].say === 'attachments-missing' && infos[0].content[0].params.missing === 2 && infos[0].content[0].params.sent === 3 && infos[0].content[0].params.codes.join() === 'too_large,not_found' && /^2 of 3 attached files did not reach Claude/.test(infos[0].content[0].text), infos.map((m) => m.content[0]));
+  ok('…emitted once as a create op (an open window sees the line)', ops.filter((o) => o.op === 'create').length === 1);
+  const h = createMessageManager('claude', 'test-296-h');
+  h.convertHistory([{ parentUuid: null, isSidechain: false, userType: 'external', cwd: '/w', sessionId: S, version: '2.1.296', type: 'system', subtype: 'file_attachments_missing', messageUuid: 'm', sentCount: 1, missing: [{ fileUuid: 'f', reason: 'download' }], uuid: 'h296', timestamp: '2026-10-15T00:00:00Z' }]);
+  ok('…a camelCase history row reads the same line (1 of 1, never red)', cards(h).length === 0 && h.messages.length === 1 && h.messages[0].content[0].params.sent === 1 && h.messages[0].content[0].params.codes.join() === 'download', h.messages.map((m) => m.content[0]));
+  const e = createMessageManager('claude', 'test-296-empty');
+  e.processLive({ type: 'system', subtype: 'file_attachments_missing', message_uuid: 'm', sent_count: 1, missing: [], uuid: 'u296-e', session_id: S });
+  ok('…an empty missing list draws nothing (the literal says "Never empty"; a malformed record is no line)', e.messages.length === 0);
+  ok('each is a declared 2.1.296 row (SHAPE_SINCE) and on exactly one normalizer list', Object.keys(REC).every((st) => R.SHAPE_SINCE['system/' + st] === '2.1.296' && (MM.HANDLED_SYSTEM_SUBTYPES.has(st) !== MM.KNOWN_IGNORED_SYSTEM_SUBTYPES.has(st))));
+  const ctl = createMessageManager('claude', 'test-296-ctl');
+  ctl.processLive({ type: 'system', subtype: 'file_attachments_lost', missing: [{ file_uuid: 'f', reason: 'x' }], uuid: 'c296', session_id: S });
+  ok('CONTROL: an invented neighbour (file_attachments_lost) still renders the red Unknown-event card', cards(ctl).length === 1, ctl.messages.map((m) => m.noticeKind));
+
+  // THE RENDERER: the attachments line in our words; a stored FIELD-ONLY drift card renders nothing, an enum card still renders
+  const cr = read('src/lib/chat-renderers.js');
+  const ib = cr.slice(cr.indexOf("noticeKind === 'harness-informational'"), cr.indexOf("noticeKind === 'harness-informational'") + 1600);
+  const KEY = '{missing} of {sent} attached files did not reach Claude';
+  ok('renderer: the attachments line is OUR words through t() (escaped through the same auto path), the codes only on hover; zh + ja carry the line', /b\.say === 'attachments-missing' \? attachmentsMissingWords\(p\)/.test(ib) && /function attachmentsMissingWords\(p\) \{[\s\S]{0,200}t\('\{missing\} of \{sent\} attached files did not reach Claude'/.test(cr) && ['zh', 'ja'].every((l) => read(`src/lib/i18n-${l}.js`).includes(JSON.stringify(KEY) + ':')));
+  const uf = cr.slice(cr.indexOf("if (msg.noticeKind === 'unknown-fields' && msg.content?.[0]?.type === 'unknown_fields') {"));
+  ok('renderer: an enum-only card (every card the normalizers make now) is headed by the VALUE, not "New fields"; zh + ja carry both new lines', /fields\.length \? t\('New fields on a known record'\) : t\('An undeclared value on a known record'\)/.test(uf.slice(0, 1600)) && ['zh', 'ja'].every((l) => ['An undeclared value on a known record', 'A record VibeSpace knows, carrying a value it does not declare — its meaning may differ from the declared ones. Handling is unchanged.'].every((k) => read(`src/lib/i18n-${l}.js`).includes(JSON.stringify(k) + ':'))));
+  ok('renderer: the drift branch answers NOTHING for a stored field-only card BEFORE it builds an element (isQuietDrift → return null)', /^if \(msg\.noticeKind === 'unknown-fields' && msg\.content\?\.\[0\]\?\.type === 'unknown_fields'\) \{\s*if \(isQuietDrift\(msg\)\) return null;\s*const b = msg\.content\[0\];/.test(uf.trimStart()) && /import \{ isQuietDrift \} from '\.\/chat-run-summary\.js';/.test(cr));
+  const RS = await import(path.join(REPO, 'src/lib/chat-run-summary.js'));
+  const stored = { role: 'system', noticeKind: 'unknown-fields', content: [{ type: 'unknown_fields', harness: 'Claude Code', shape: 'system/init', fields: ['foo'], enumDrift: [], sample: '{}' }] };
+  const enumCard = { role: 'system', noticeKind: 'unknown-fields', content: [{ type: 'unknown_fields', harness: 'Claude Code', shape: 'system/vcs_state_changed', fields: [], enumDrift: [{ field: 'kind', value: 'squash' }] }] };
+  const both = { role: 'system', noticeKind: 'unknown-fields', content: [{ type: 'unknown_fields', shape: 'system/x', fields: ['a'], enumDrift: [{ field: 'k', value: 'v' }] }] };
+  ok('isQuietDrift: a stored field-only card (fields, no enumDrift) is quiet; an enum card and a both card are NOT; a legacy enumDrift-less card too', RS.isQuietDrift(stored) && !RS.isQuietDrift(enumCard) && !RS.isQuietDrift(both) && RS.isQuietDrift({ noticeKind: 'unknown-fields', content: [{ type: 'unknown_fields', fields: ['x'] }] }) && !RS.isQuietDrift({ noticeKind: 'unknown-record', content: [{ fields: ['x'] }] }));
+  ok('messageKind: the quiet card has NO kind (counts in no fold — "1 unknown events" never shows for it); the enum card is still "unknown"', RS.messageKind(stored, { toolCard: false }) === null && RS.messageKind(enumCard, { toolCard: false }) === 'unknown');
+  const M = mutantCopies('quiet-drift', REPO);
+  const rsSrc = read('src/lib/chat-run-summary.js');
+  const guard = "(m?.noticeKind === 'unknown-fields' && !isQuietDrift(m))";
+  ok('the patch site exists (a control is meaningful only if its line does)', rsSrc.includes(guard));
+  const RSx = await import(pathToFileURL(M.write('src/lib/chat-run-summary.js', rsSrc.replace(guard, "m?.noticeKind === 'unknown-fields'"), 'no-quiet-guard', { esm: true })).href);
+  ok('CONTROL: a copy without the guard counts the stored field-only card as "unknown" again (RED for the fold leg)', RSx.messageKind(stored, { toolCard: false }) === 'unknown');
+
+  // ⚙ DIAGNOSTICS: the ledger rows reach the report (the server route answers them on ?drift=1, the section draws one row each)
+  const srv = read('server.js');
+  ok('server: GET /api/telemetry/summary answers driftLedger ONLY on ?drift=1 (the sidebar badge probe stays small)', /app\.get\('\/api\/telemetry\/summary'[\s\S]{0,300}req\.query\.drift === '1' \? \{ driftLedger: driftLedgerRows\(\) \} : \{\}/.test(srv) && /const \{ MessageManager, driftLedgerRows \} = require\('\.\/src\/message-manager'\);/.test(srv));
+  const sf = read('src/lib/setup-flows.js');
+  ok('the Diagnostics report asks for the ledger (?drift=1)', sf.includes("fetchJson('/api/telemetry/summary?days=14&drift=1')"));
+  const a = sf.indexOf('// THE DRIFT LEDGER (lane record-oracle-2-1-296'), a0 = sf.lastIndexOf('(() => {', a), a1 = sf.indexOf('})()', a) + 4;
+  const section = new Function('d', 'esc', 't', 'sessionDisplayName', 'return ' + sf.slice(a0, a1) + ';');
+  const esc = (x) => String(x).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const { sessionDisplayName } = require(path.join(REPO, 'src/session-name.js'));
+  const SIDD = 'e2e00000-0000-4000-8000-0000000000d1';
+  createMessageManager('claude', 'test-296-diag').processLive({ type: 'system', subtype: 'init', cwd: '/w', session_id: SIDD, uuid: 'u-d1', model: 'm', permissionMode: 'default', claude_code_version: '2.1.296', 'grown_<i>': '<b>x</b>' });
+  const rows = MM.driftLedgerRows().filter((r) => r.conversation === SIDD);
+  const html = section.call({ sidebar: { _allSessions: [{ sessionId: SIDD, cliTitle: 'Fix the login' }] } }, { driftLedger: rows }, esc, (k) => k, sessionDisplayName);
+  const renamed = section.call({ sidebar: { _allSessions: [{ sessionId: SIDD, cliTitle: 'Fix the login' }], getCustomName: (s) => (s.sessionId === SIDD ? 'My rename' : null) } }, { driftLedger: rows }, esc, (k) => k, sessionDisplayName);
+  ok('Diagnostics section: ONE row per conversation + shape — the conversation by its NAME (THE name ladder; the user\'s rename first), harness · shape, the fields, the CLI build, the count; the sample behind "Technical details"; everything escaped', rows.length === 1 && /<h2>Records that grew a field<\/h2>/.test(html) && html.includes('<td>Fix the login</td>') && html.includes('Claude Code · system/init') && html.includes('+{grown_&lt;i&gt;}') && html.includes('<td class="dim">2.1.296</td>') && html.includes('<td class="n">1</td>') && /<summary>Technical details<\/summary><pre>[\s\S]*&lt;b&gt;x&lt;\/b&gt;/.test(html) && !html.includes('<b>x</b>') && renamed.includes('<td>My rename</td>'), html.slice(0, 600));
+  ok('…no rows ⇒ no section (a server that saw no growth says nothing); an unnamed conversation shows its id', section.call({}, { driftLedger: [] }, esc, (k) => k, sessionDisplayName) === '' && section.call({}, { driftLedger: rows }, esc, (k) => k, sessionDisplayName).includes('<td>' + SIDD + '</td>'));
+  ok('the Diagnostics words: zh + ja carry the heading, the explanation and the new column names', ['Records that grew a field', 'conversation', 'harness record', 'new fields'].every((k) => sf.includes("t('" + k + "')") && ['zh', 'ja'].every((l) => read(`src/lib/i18n-${l}.js`).includes(JSON.stringify(k) + ':'))) && ['zh', 'ja'].every((l) => read(`src/lib/i18n-${l}.js`).includes('"Records VibeSpace knows that arrived carrying fields it does not declare.')));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

@@ -19,6 +19,10 @@
 //     stderr line — and the row shows it. Measured: at boot the loop was held (canary 7450 ms) past execFile's 10 s
 //     `timeout`, whose kill destroys the UNREAD stdout first — an answer the child had given in ms came back as
 //     `code 0, out ''` ⇒ "Tailscale is not running". runChild keeps its own timer and never discards an answer.
+//   · THE TIMER ANSWERS (B-92a4, lane boot-probes-unkillable — the boot restore's fuser / pgrep / fd-scan questions ride
+//     runChild too): a child that cannot die on TERM (a `fuser` in D state on an NFS fd walk) never fired execFile's
+//     callback, so the promise never settled and production's hub did not listen for 96 s. At its bound runChild now
+//     settles TIMEOUT with whatever the child wrote, KILLs it 1 s later if it is still there and lets it go.
 const fs = require('fs');
 const path = require('path');
 const net = require('net');
@@ -43,17 +47,46 @@ function acceptAs(server, socket) {
 }
 
 /** A child process, never sync: { code, out, err, ms } — code 'ENOENT' when the binary is missing, 'TIMEOUT' when OUR
- *  bound killed it. Not execFile's `timeout`: its kill destroys the unread stdout, so a bound that fires late on a held
- *  loop threw away an answer the child had already given (code 0, out ''). A child that exited first keeps its answer. */
+ *  bound answered for it. Not execFile's `timeout`: its kill destroys the unread stdout, so a bound that fires late on a held
+ *  loop threw away an answer the child had already given (code 0, out ''). A child that exited first keeps its answer.
+ *  THE BOUND IS AN ANSWER, NEVER A WAIT (B-92a4): at `timeout` the child gets TERM and, one turn later (the I/O a held loop
+ *  runs after its timers), unless it has exited or closed its stdout (then its own answer follows), the promise settles
+ *  { code: 'TIMEOUT', out: <what it wrote so far>, err: 'timeout' }. KILL_AFTER_MS later a child still there gets KILL,
+ *  and its handle + pipes are let go (unref, destroyed) so nothing waits on it; a late execFile callback is a no-op.
+ *  One console line per (bin, basename of its path argument) per process — never the argument itself. */
+const KILL_AFTER_MS = 1000;
+const timedOutOnce = new Set();
 function runChild(bin, args, timeout) {
   return new Promise((resolve) => {
     const t0 = Date.now();
-    let timer = null, timedOut = false;
-    const child = execFile(bin, args, { maxBuffer: 4 * 1024 * 1024 }, (e, out, err) => {
-      clearTimeout(timer);
-      resolve({ code: e ? (e.code === 'ENOENT' ? 'ENOENT' : timedOut && e.signal ? 'TIMEOUT' : e.code || e.signal || 1) : 0, out: String(out || ''), err: String(err || (e && e.message) || ''), ms: Date.now() - t0 });
+    let bound = null, killer = null, timedOut = false, settled = false, ended = false, out = '', err = '';
+    const settle = (r) => {
+      if (settled) return;
+      settled = true;
+      if (r.code === 'TIMEOUT') {
+        const p = (args || []).find((a) => typeof a === 'string' && a.startsWith('/')), key = p ? `${bin} ${path.basename(p)}` : String(bin);
+        if (!timedOutOnce.has(key)) { timedOutOnce.add(key); console.warn(`[child] ${key}: no answer in ${timeout} ms — answered TIMEOUT (${Buffer.byteLength(r.out)} bytes kept); TERM, KILL ${KILL_AFTER_MS} ms later if it is still there`); }
+      }
+      resolve({ ...r, ms: Date.now() - t0 });
+    };
+    const child = execFile(bin, args, { maxBuffer: 4 * 1024 * 1024 }, (e, o, se) => {
+      clearTimeout(bound); clearTimeout(killer);
+      settle({ code: e ? (e.code === 'ENOENT' ? 'ENOENT' : timedOut && e.signal ? 'TIMEOUT' : e.code || e.signal || 1) : 0, out: String(o || ''), err: String(se || (e && e.message) || '') });
     });
-    timer = setTimeout(() => { timedOut = true; try { child.kill(); } catch { } }, timeout);
+    if (child.stdout) { child.stdout.on('data', (d) => { out += d; }); child.stdout.on('end', () => { ended = true; }); }
+    if (child.stderr) child.stderr.on('data', (d) => { err += d; });
+    const gone = () => child.exitCode !== null || child.signalCode !== null;
+    bound = setTimeout(() => {
+      timedOut = true;
+      try { child.kill('SIGTERM'); } catch { }
+      killer = setTimeout(() => {
+        if (!gone()) { try { child.kill('SIGKILL'); } catch { } }
+        settle({ code: 'TIMEOUT', out, err: 'timeout' }); // exited, but a grandchild still holds its pipe: no close will come
+        try { child.unref(); } catch { }
+        for (const st of [child.stdin, child.stdout, child.stderr]) { try { if (st) st.destroy(); } catch { } }
+      }, KILL_AFTER_MS);
+      setImmediate(() => { if (!gone() && !ended) settle({ code: 'TIMEOUT', out, err: 'timeout' }); });
+    }, timeout);
   });
 }
 
@@ -245,4 +278,4 @@ function create({ app, httpServer, dataDir, port, serverSetting = () => undefine
     _https: () => httpsServer, _state: () => ({ ...state }), _cadence: () => ({ started, liveOnce, misses, nextMs }), INBOX_KEY };
 }
 
-module.exports = { create, acceptAs, runChild, readPair, INBOX_KEY, STATUS_TIMEOUT_MS, CERT_TIMEOUT_MS, PASS_MS };
+module.exports = { create, acceptAs, runChild, readPair, INBOX_KEY, STATUS_TIMEOUT_MS, CERT_TIMEOUT_MS, PASS_MS, KILL_AFTER_MS };

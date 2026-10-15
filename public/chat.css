@@ -674,6 +674,24 @@
 .chat-subagent-note { justify-content: flex-start; }
 .chat-login-bar { flex-wrap: wrap; gap: 8px; }
 .chat-login-bar .chat-resume-note { width: 100%; }
+/* The pinned account cannot serve (lane resume-account-door): the sentence on its own line in the text colour (it names
+   the account and since when — a fact to act on, not the dim read-only note), the two doors under it, then the picker. */
+.chat-account-bar { gap: 8px; justify-content: flex-start; }
+.chat-account-bar .chat-resume-note { flex-basis: 100%; display: flex; gap: 6px; align-items: flex-start; color: var(--text); font-size: 13px; line-height: 1.45; }
+.chat-account-bar .chat-resume-note svg { flex: none; width: 15px; height: 15px; margin-top: 2px; color: var(--yellow, #e5c07b); }
+.chat-account-doors, .chat-account-pick { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.chat-account-pick { flex-basis: 100%; }
+.chat-account-pick[hidden] { display: none; }
+.chat-account-pick select { flex: 1 1 200px; min-width: 0; max-width: 340px; }
+.chat-account-bar .chat-resume-btn.secondary { background: transparent; color: var(--text); border-color: var(--border); }
+.chat-account-bar .chat-resume-btn.secondary:hover { background: var(--bg-hover, rgba(127,127,127,.12)); border-color: var(--border); }
+.chat-account-bar .chat-resume-btn:disabled { opacity: .5; cursor: default; }
+.chat-account-none { flex-basis: 100%; font-size: 12px; color: var(--text-dim); }
+@media (max-width: 768px) {
+  .chat-account-doors { flex-basis: 100%; }
+  .chat-account-doors .chat-resume-btn, .chat-account-pick .chat-resume-btn { flex: 1 1 auto; justify-content: center; min-height: 44px; }
+  .chat-account-pick select { flex-basis: 100%; max-width: none; min-height: 44px; }
+}
 
 /* Chat input area */
 .chat-input-area {

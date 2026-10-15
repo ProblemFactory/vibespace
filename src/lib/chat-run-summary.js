@@ -126,8 +126,16 @@ export function messageKind(m, { toolCard, isMemoryPath = () => false }) {
   if (machineCardOf(m)) return 'machine'; // lane machine-card-fold: a Machines card folds with the run it sits in (the Bash toggle), one machine per run
   if (m?.originKind === 'peer-message' && m.peerGroup && m.peerGroup.id) return 'group'; // lane group-report-card: its own fold kind, default OFF (the owner asked to see them)
   if (m?.originKind === 'peer-message') return 'peer'; // lane peer-card-fold: every other peer card (agent, worker, job) — default OFF, so it still breaks a run unless ticked
-  if (m?.noticeKind === 'unknown-record' || m?.noticeKind === 'unknown-fields') return 'unknown'; // 2.369.120: the fall-back card has its own toggle; the §3 drift card shares it
+  if (m?.noticeKind === 'unknown-record' || (m?.noticeKind === 'unknown-fields' && !isQuietDrift(m))) return 'unknown'; // 2.369.120: the fall-back card has its own toggle; the §3 drift card shares it (a stored field-only one renders nothing — no kind)
   return null;
+}
+
+// A STORED FIELD-ONLY DRIFT CARD (lane record-oracle-2-1-296, owner 2026-10-15 「最近多了很多红色提示」): the normalizers no longer
+// make one — a known record that merely grew a field is a drift-ledger row (⚙ Diagnostics). The cards conversations already carry
+// (fields named, no undeclared enum value) render nothing and count in no fold; an enum-drift card still renders.
+export function isQuietDrift(m) {
+  const b = m?.noticeKind === 'unknown-fields' ? m.content?.[0] : null;
+  return !!b && Array.isArray(b.fields) && b.fields.length > 0 && !(Array.isArray(b.enumDrift) && b.enumDrift.length);
 }
 
 // ── TEXT ADDRESSED TO THE ASSISTANT (lane S3, naive-user study 2 — "聊天里到处是

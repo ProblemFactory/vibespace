@@ -1270,7 +1270,7 @@ console.log('— §6c every kill door is declared: an actor marked before the ki
     // the 2.369.256 integration — lane app-display-portal's own session bus for a sandboxed app (startPortalBus)
     'src/desktop-display.js': [1, "not a conversation: desktop apps — a sandboxed app's own portal bus (dbus-daemon) that never listened within its deadline, SIGKILLed through our own spawn handle (app-display-portal)"],
     // the 2.369.262 integration — lane tls-pass-retry's runChild: execFile WITHOUT its timeout + our own bound
-    'src/server/tls.js': [1, "not a conversation: a tailscale status / cert child past its own bound, killed by runChild's timer so the answer it already wrote is kept (tls-pass-retry)"],
+    'src/server/tls.js': [2, "not a conversation: a tailscale status / cert child or a boot-restore probe (fuser / pgrep / the fd scan) past its own bound — runChild's timer TERMs it (the answer it already wrote is kept, tls-pass-retry) and KILLs it 1 s later if it is still there (B-92a4)"],
     // the 2.369.263 integration — lane oat-mint-flow (+ oat-verify-fixes): the hub's own `claude setup-token` PTY
     'src/server/oat-mint.js': [1, "not a conversation: the token mint's own setup-token PTY (node-pty, our spawn handle), SIGKILLed when the mint ends, is cancelled or times out (oat-mint-flow)"],
   };

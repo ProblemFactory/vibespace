@@ -12,7 +12,7 @@
  */
 
 const { unknownFields: shapeUnknownFields, unknownFieldsSample } = require('./record-shape.js'); // §3 schema drift (2026-09-21)
-const { peerOriginOf } = require('./message-manager'); // peerOriginOf = peerDisplayName's name + the PATH (S3 verify F3)
+const { peerOriginOf, noteFieldDrift } = require('./message-manager'); // peerOriginOf = peerDisplayName's name + the PATH (S3 verify F3); noteFieldDrift = THE drift ledger (lane record-oracle-2-1-296)
 // web-search cards: the ONE results renderer + the twin-dedup key (PURE, shared with the client's title chip)
 const { renderSearchOutput, searchActionKey, NO_SEARCH_DETAILS } = require('./search-card');
 const { MessageWindow } = require('./message-window.js'); // the ordered card list + its window arithmetic (dc-twins M10)
@@ -611,7 +611,8 @@ class CodexMessageManager extends MessageWindow {
   }
 
   // SCHEMA DRIFT ON A KNOWN RECORD — the codex twin of MessageManager's hook (same
-  // card, same merge-into-one-card rule, same telemetry name). `kind` picks the
+  // policy: field growth → the drift ledger, never a card; an enum drift → ONE card
+  // per shape, merged; same telemetry name). `kind` picks the
   // level: 'record' (session_meta / turn_context / response_item…), 'event' (an
   // event_msg payload), 'item' (an item_completed item).
   _noteShapeDrift(raw, kind, emit) {
@@ -619,29 +620,28 @@ class CodexMessageManager extends MessageWindow {
     let drift = null;
     try { drift = shapeUnknownFields('codex', 'rollout', raw, { kind }); } catch { return; }
     if (!drift) return;
-    const cards = this._shapeDrift || (this._shapeDrift = new Map());
-    const entry = cards.get(drift.shape);
-    const newFields = drift.fields.filter((f) => !entry || !entry.fields.has(f));
-    const newEnums = drift.enumDrift.filter((e) => !entry || !entry.enums.has(e.field + '=' + e.value));
-    if (entry && !newFields.length && !newEnums.length) return;
+    const ver = this._status?.cliVersion || null;
     if (!CodexMessageManager._seenShapeDrift.has(drift.shape)) {
       CodexMessageManager._seenShapeDrift.add(drift.shape);
-      const ver = this._status?.cliVersion || null;
       try { global.__vsEvent?.('harness-shape-drift', `${drift.shape} +{${drift.fields.join(',')}}${drift.enumDrift.length ? ' enum:' + drift.enumDrift.map((e) => e.field + '=' + e.value).join(',') : ''}${ver ? ' · cli ' + ver : ''}`.slice(0, 300)); } catch {}
     }
+    if (drift.fields.length) noteFieldDrift({ conversation: this._threadId || this.sessionId, harness: 'Codex', shape: drift.shape, fields: drift.fields, cli: ver, raw, recordKey: this._currentRk });
+    const cards = this._shapeDrift || (this._shapeDrift = new Map());
+    const entry = cards.get(drift.shape);
+    const newEnums = drift.enumDrift.filter((e) => !entry || !entry.enums.has(e.field + '=' + e.value));
+    if (!newEnums.length) return;
     if (!entry) {
       const msg = this._create({
         role: 'system', status: 'complete', noticeKind: 'unknown-fields',
-        content: [{ type: 'unknown_fields', harness: 'Codex', shape: drift.shape.replace(/^[a-z]+:[a-z]+:/, ''), fields: [...newFields], enumDrift: [...newEnums], sample: unknownFieldsSample(raw) }],
+        content: [{ type: 'unknown_fields', harness: 'Codex', shape: drift.shape.replace(/^[a-z]+:[a-z]+:/, ''), fields: [], enumDrift: [...newEnums], sample: unknownFieldsSample(raw) }],
       });
-      cards.set(drift.shape, { msgId: msg.id, fields: new Set(newFields), enums: new Set(newEnums.map((e) => e.field + '=' + e.value)) });
+      cards.set(drift.shape, { msgId: msg.id, enums: new Set(newEnums.map((e) => e.field + '=' + e.value)) });
       if (emit) this._emit({ op: 'create', message: msg });
       return;
     }
     const msg = this.messageIndex.get(entry.msgId);
     if (!msg) return;
     const b = msg.content[0];
-    for (const f of newFields) { entry.fields.add(f); b.fields.push(f); }
     for (const e of newEnums) { entry.enums.add(e.field + '=' + e.value); b.enumDrift.push(e); }
     b.sample = unknownFieldsSample(raw);
     if (emit) this._emit({ op: 'edit', id: msg.id, fields: { content: msg.content } });

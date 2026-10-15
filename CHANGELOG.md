@@ -2,6 +2,14 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.276 — 2026-10-15
+
+### Fixed
+- When your company installs its Slack app for the whole organization, your Slack account still reads and sends normally.
+- After a restart, one stuck check on a session no longer keeps the server from opening for a minute or more.
+- A record VibeSpace already knows that only gained a new field no longer puts a red warning in your chat; newer Claude Code records are recognized.
+- Resuming a conversation whose account was signed out now says so in the conversation and offers two choices: log that account in again, or switch to another.
+
 ## 2.369.275 — 2026-10-15
 
 ### Fixed

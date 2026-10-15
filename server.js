@@ -16,7 +16,7 @@ const fs = require('fs');
 const os = require('os');
 const { execFileSync, spawn } = require('child_process');
 const compression = require('compression');
-const { MessageManager } = require('./src/message-manager');
+const { MessageManager, driftLedgerRows } = require('./src/message-manager');
 const { sameToken } = require('./src/pairing-token'); // B-8dda: a vsst_ compare in constant time
 const { createMessageManager, feedLive, feedPeerCard } = require('./src/normalizers');
 const { Telemetry } = require('./src/telemetry');
@@ -462,7 +462,7 @@ const { setupSessionPty, attachToDtach, readSessionMeta, writeSessionMeta,
 // ── Boot restore (src/server/boot-restore.js, decomposition #7) ──
 // migrations + restoreSessions + R6 pipe re-open + keeper re-adoption.
 const { migrateLegacyHomeProjects, restoreSessions, restoreAgentdPipeSessions,
-  readoptOrphanKeeperSessions, probeSockets,
+  readoptOrphanKeeperSessions, probeSockets, probeFacts,
 } = require('./src/server/boot-restore.js').create({
   rootDir: __dirname, PORT, BUFFERS_DIR, META_DIR, SOCKETS_DIR, DTACH_CMD,
   ENV_CMD, NODE_CMD, CHAT_WRAPPER, activeSessions, sessionCounterRef,
@@ -472,8 +472,8 @@ const { migrateLegacyHomeProjects, restoreSessions, restoreAgentdPipeSessions,
   refreshWebuiPids: (...a) => refreshWebuiPids(...a),
   sbNoteServerOp: (...a) => sbNoteServerOp(...a),
   getHosts: () => { try { return hosts; } catch { return null; } },
-  getDialBridge: () => { try { return dialBridge; } catch { return null; } },
-}); bootTrace.span('restore-probes', probeSockets()); // B-1319: the restore's fuser / fd-scan questions start now, as children — the server listens once they answered (below)
+  getDialBridge: () => { try { return dialBridge; } catch { return null; } }, getExitProxy: () => { try { return exitProxy; } catch { return null; } }, note: (line) => bootTrace.note(line), // B-92a4: the re-probe un-adopts through the exit proxy's onSessionEnd; its lines ride the boot trace (⚙ Diagnostics)
+}); bootTrace.span('restore-probes', probeSockets(), probeFacts); // B-1319: the restore's fuser / fd-scan questions start now, as children — the server listens once they answered (below); B-92a4: or at the cap, the span naming what did not answer
 // ── Agent-tool generators + hook registration (src/server/agent-tool-generators.js) ──
 const hooksLate = require('./src/server/hooks-late.js').create({ activeSessions, getSessionStatus: () => sessionStatus, getUserTodos: () => userTodos, sessionStatusKey: (...a) => sessionStatusKey(...a), harnesses: require('./src/harnesses'), log: (...a) => console.log(...a), warn: (...a) => console.warn(...a) }); // lane hooks-create: a hook file CREATED by the registration ('dir-exists') is told to the conversations that predate it (one free note each + ONE For-you line); held until ready() after the boot restore; owns POST /api/cli-config/apply
 // lane browser-resource-care (B-afeb): memory pressure reaches the owner — ONE For-you item per episode naming who started each
@@ -1032,7 +1032,7 @@ app.post('/api/telemetry', (req, res) => {
 app.get('/api/telemetry/summary', (req, res) => {
   try {
     telemetry.flush();
-    res.json(telemetry.summary({ days: Math.min(parseInt(req.query.days) || 14, 90) }));
+    res.json({ ...telemetry.summary({ days: Math.min(parseInt(req.query.days) || 14, 90) }), ...(req.query.drift === '1' ? { driftLedger: driftLedgerRows() } : {}) }); // ?drift=1 = ⚙ Diagnostics: the drift ledger (lane record-oracle-2-1-296)
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // ── Account + usage routes (src/server/account-usage-routes.js, decomposition #9) ──

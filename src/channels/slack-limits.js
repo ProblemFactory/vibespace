@@ -23,6 +23,7 @@ const TIER_PER_MIN = Object.freeze({ 1: 1, 2: 20, 3: 50, 4: 100 });
  *  published for it; metered like files.info). */
 const METHOD_TIERS = Object.freeze({
   'auth.test': 4,
+  'auth.teams.list': 3,   // lane slack-org-team-id: an org-wide install's granted workspaces, once per sign-in
   'users.conversations': 3,
   'conversations.info': 3,
   'conversations.members': 4,

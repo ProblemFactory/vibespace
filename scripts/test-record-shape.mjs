@@ -8,10 +8,11 @@
 //      the 2026-09-09 fixture rule): every field on every declared shape ∈ known ∪ ignored ∪ envelope
 //      ∪ ours. An optional PRINTED local leg over ~/.claude/projects + ~/.codex/sessions runs only
 //      behind VIBESPACE_SHAPE_CENSUS=1 (SKIP with reason in the gate).
-//   §2 synthetic drift: init +{foo,bar} → one card naming both, a repeat adds no card, a third with
-//      +{qux} MERGES into the same card (edit op), telemetry once; codex token_count.info +{baz}; an
-//      unknown TYPE is the fall-back card only (never double-reported as drift); the redactor.
-//   §3 enum drift: an undeclared enum value is a card AND the handler still runs.
+//   §2 synthetic drift (the card policy, lane record-oracle-2-1-296): init +{foo,bar} → NO chat card, ONE drift-ledger row
+//      naming both (conversation + shape, CLI build, count, the redacted sample), a repeat counts, a third with +{qux} GROWS the
+//      row, a re-read record counts once, telemetry once; codex token_count.info +{baz}; an unknown TYPE is the fall-back card only.
+//   §2c the policy's RED controls (patched copies): the old field card / no ledger write / no enum card each go red.
+//   §3 enum drift: an undeclared enum value is STILL a card (its meaning may differ) AND the handler still runs.
 //   §4a the extractor on every spelling the minifier has used (2.1.280 `u(`, 2.1.281 `d(`, a future
 //      rename, an unminified form) — the helper names are read off an anchor; an unknown form is an error
 //      naming the anchor, never a silent 0 / 0 / 0.
@@ -28,6 +29,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { mutantCopies } from './mutant-copy.mjs';
 // §4d (lane S1 verify r5): THE PERMISSION-OUTCOME SENTENCE CENSUS — the binary's OWN lists of the tool_result
 //   texts it writes for a permission outcome (`Gd()` and the exact is_error set) vs src/permission-outcome.js;
 //   the names are read off an anchor (the interrupt marker), never spelled; a newer build's extra sentence
@@ -44,6 +46,7 @@ const { CodexMessageManager } = require(path.join(REPO, 'src/codex-message-manag
 const { createMessageManager } = require(path.join(REPO, 'src/normalizers.js'));
 const driftCards = (mm) => mm.messages.filter((m) => m.noticeKind === 'unknown-fields');
 const unknownCards = (mm) => mm.messages.filter((m) => m.noticeKind === 'unknown-record');
+const ledgerOf = (conversation, MMx = MM) => MMx.driftLedgerRows().filter((r) => r.conversation === conversation); // THE drift ledger (lane record-oracle-2-1-296)
 
 // ── the census walker (shared by §1, the local leg and §5) ──
 const CODEX_RECORD_TYPES = new Set(['session_meta', 'response_item', 'event_msg', 'turn_context', 'wrapper_meta', 'token_usage_record', 'compacted', 'world_state', 'server_request', 'server_request_resolved', 'inter_agent_communication_metadata', '_stdin_ack']);
@@ -132,7 +135,7 @@ console.log('§1 census over the tracked fixtures — every field on every decla
   } else skip('local census over ~/.claude/projects + ~/.codex/sessions', 'set VIBESPACE_SHAPE_CENSUS=1 to print it (read-only; never in the gate)');
 }
 
-console.log('§2 synthetic drift — one card per shape per session, merged on repeat, telemetry once, the fall-back card never doubled');
+console.log('§2 synthetic drift — a known record that GREW a field is NO chat card (lane record-oracle-2-1-296): ONE drift-ledger row per conversation + shape, telemetry once, the fall-back card never doubled');
 {
   const prevEv = global.__vsEvent; const events = []; global.__vsEvent = (n, d) => events.push([n, d]);
   MM.MessageManager._seenShapeDrift.clear();
@@ -140,10 +143,11 @@ console.log('§2 synthetic drift — one card per shape per session, merged on r
   const ops = []; mm.listeners.push((e) => ops.push(e));
   const init = (extra) => ({ type: 'system', subtype: 'init', cwd: '/w/proj', session_id: 'e2e00000-0000-4000-8000-000000000001', uuid: 'u-init-' + Math.random(), tools: [], mcp_servers: [], model: 'claude-fable-5-1', permissionMode: 'default', slash_commands: [], apiKeySource: 'sk-ant-fixture-secret', claude_code_version: '2.1.274', output_style: 'default', skills: [], plugins: [], ...extra });
   mm.processLive(init({ foo: 1, bar: 'x' }));
-  let c = driftCards(mm);
-  ok('init +{foo,bar} ⇒ ONE card, noticeKind unknown-fields, block type unknown_fields naming the shape and both fields', c.length === 1 && c[0].content[0].type === 'unknown_fields' && c[0].content[0].shape === 'system/init' && JSON.stringify(c[0].content[0].fields) === '["foo","bar"]' && c[0].content[0].harness === 'Claude Code', c.map((m) => m.content[0]));
-  ok('…the card is EMITTED as a create op (an open window sees it)', ops.filter((o) => o.op === 'create' && (o.message || o.msg)?.noticeKind === 'unknown-fields').length === 1);
-  ok('…the sample rides through the redactor: the value under apiKeySource (an api+key compound) is masked, the field names are visible', /«redacted»/.test(c[0].content[0].sample) && !/sk-ant-fixture-secret/.test(c[0].content[0].sample) && /"foo": 1/.test(c[0].content[0].sample));
+  const SID1 = 'e2e00000-0000-4000-8000-000000000001';
+  let row = ledgerOf(SID1)[0];
+  ok('init +{foo,bar} ⇒ NO chat card; ONE drift-ledger row for the conversation (the record\'s own session id) naming the shape, both fields, the CLI build and count 1', driftCards(mm).length === 0 && ledgerOf(SID1).length === 1 && row.shape === 'system/init' && JSON.stringify(row.fields) === '["foo","bar"]' && row.harness === 'Claude Code' && row.cli === '2.1.274' && row.count === 1, { cards: driftCards(mm).length, rows: ledgerOf(SID1) });
+  ok('…and NO op carries an unknown_fields card (an open window shows nothing new)', ops.filter((o) => (o.message || o.msg)?.noticeKind === 'unknown-fields' || o.fields?.content?.[0]?.type === 'unknown_fields').length === 0);
+  ok('…the row\'s sample rides through the redactor: the value under apiKeySource (an api+key compound) is masked, the field names are visible', /«redacted»/.test(row.sample) && !/sk-ant-fixture-secret/.test(row.sample) && /"foo": 1/.test(row.sample));
   // the redactor judges key SEGMENTS, never substrings (r3 2026-09-21: the /key/ alternative masked the notification's own `key`)
   const red = R.redactRecord({ key: 'stop-hook-error', monkey: 'm', hotkey: 'h', keyboard: 'k', keys: ['a'], turnkey: 't', api_key: 'x', apiKey: 'x', ANTHROPIC_API_KEY: 'x', access_token: 'x', refreshToken: 'x', OAuthToken: 'x', authorization: 'x', password: 'x', secret_key: 'x', apiKeySource: 'x', input_tokens: 5, nested: { cookie: 'c', session_key: 's', key: 'inner-visible' } });
   ok('NEGATIVE CONTROL: `key` / `monkey` / `hotkey` / `keyboard` / `keys` / `turnkey` values stay VISIBLE (a drift card on system/notification must show the field that identifies it)', red.key === 'stop-hook-error' && red.monkey === 'm' && red.hotkey === 'h' && red.keyboard === 'k' && red.keys[0] === 'a' && red.turnkey === 't' && red.nested.key === 'inner-visible', red);
@@ -151,26 +155,29 @@ console.log('§2 synthetic drift — one card per shape per session, merged on r
   ok('isSecretKey is exported and table-true on the same rows', R.isSecretKey('apiKey') && R.isSecretKey('ACCESS_TOKEN') && !R.isSecretKey('key') && !R.isSecretKey('monkey') && !R.isSecretKey('keyboard') && !R.isSecretKey('messaging_socket_path'));
   ok('…the init card itself still rendered (handling unchanged — the drift hook runs AFTER routing)', mm.messages.some((m) => m.content?.[0]?.initData));
   mm.processLive(init({ foo: 2, bar: 'y' }));
-  ok('a SECOND occurrence with the same fields adds NO card and no op', driftCards(mm).length === 1 && ops.filter((o) => o.op === 'edit' && o.fields?.content?.[0]?.type === 'unknown_fields').length === 0);
-  const nEdits = ops.length;
+  row = ledgerOf(SID1)[0];
+  ok('a SECOND record with the same fields counts 2 on the SAME row — still no card', ledgerOf(SID1).length === 1 && row.count === 2 && driftCards(mm).length === 0, row);
   mm.processLive(init({ foo: 3, qux: true }));
-  c = driftCards(mm);
-  ok('a THIRD with +{qux} MERGES into the same card (fields now foo,bar,qux) through an EDIT op — never a new card', c.length === 1 && JSON.stringify(c[0].content[0].fields) === '["foo","bar","qux"]' && ops.slice(nEdits).some((o) => o.op === 'edit' && o.id === c[0].id && o.fields.content[0].fields.length === 3), c.map((m) => m.content[0].fields));
+  row = ledgerOf(SID1)[0];
+  ok('a THIRD with +{qux} GROWS the same row (fields foo,bar,qux, count 3) — never a card', ledgerOf(SID1).length === 1 && JSON.stringify(row.fields) === '["foo","bar","qux"]' && row.count === 3 && driftCards(mm).length === 0, row);
   const drifts = events.filter((e) => e[0] === 'harness-shape-drift');
   ok('telemetry harness-shape-drift fired ONCE per process per shape, the detail naming shape + fields + the CLI build', drifts.length === 1 && /^claude:stream:system\/init \+\{foo,bar\}/.test(drifts[0][1]) && /cli 2\.1\.274/.test(drifts[0][1]), drifts);
   // the fall-back card owns an unknown TYPE: never ALSO a drift card
   mm.processLive({ type: 'brand_new_record', anything: 1, uuid: 'u-x', session_id: 's' });
   mm.processLive({ type: 'system', subtype: 'never_seen_subtype', whatever: 2, uuid: 'u-y', session_id: 's' });
-  ok('an unknown TYPE / subtype is the fall-back card ONLY (2 unknown-record cards, still 1 drift card)', unknownCards(mm).length === 2 && driftCards(mm).length === 1);
-  // history renders the same one card
+  ok('an unknown TYPE / subtype is the fall-back card ONLY (2 unknown-record cards, no drift card, no ledger row for them)', unknownCards(mm).length === 2 && driftCards(mm).length === 0 && ledgerOf('s').length === 0);
+  // a history rebuild: still no card; a record already counted (the same record key) is not counted again
+  const SID2 = 'e2e00000-0000-4000-8000-000000000002';
+  const again = [init({ foo: 1, bar: 2, session_id: SID2, uuid: 'u-h1' }), init({ foo: 1, bar: 2, session_id: SID2, uuid: 'u-h2' })];
+  createMessageManager('claude', 'test-shape-2-live').convertHistory(again);
   const hist = createMessageManager('claude', 'test-shape-2');
-  hist.convertHistory([init({ foo: 1, bar: 2 }), init({ foo: 1, bar: 2 })]);
-  ok('a HISTORY rebuild renders the same ONE card (the hook is a renderer, not an alert)', driftCards(hist).length === 1 && driftCards(hist)[0].content[0].fields.length === 2);
+  hist.convertHistory(again);
+  ok('a HISTORY rebuild of the same two records: NO card; the SAME row, still count 2 (a re-read record counts once, by its record key)', driftCards(hist).length === 0 && ledgerOf(SID2).length === 1 && ledgerOf(SID2)[0].count === 2 && ledgerOf(SID2)[0].fields.length === 2, ledgerOf(SID2));
   // a handled record with NO drift produces nothing
   const clean = createMessageManager('claude', 'test-shape-3');
-  clean.processLive(init({}));
+  clean.processLive(init({ session_id: 'e2e00000-0000-4000-8000-000000000003' }));
   clean.processLive({ type: 'system', subtype: 'thinking_tokens', estimated_tokens: 5, estimated_tokens_delta: 5, uuid: 'u-t', session_id: 's' });
-  ok('clean records ⇒ no drift card (negative control for the hook)', driftCards(clean).length === 0 && unknownCards(clean).length === 0);
+  ok('clean records ⇒ no drift card and no ledger row (negative control for the hook)', driftCards(clean).length === 0 && unknownCards(clean).length === 0 && ledgerOf('e2e00000-0000-4000-8000-000000000003').length === 0);
   // codex
   CodexMessageManager._seenShapeDrift.clear();
   const cx = new CodexMessageManager('test-shape-cx');
@@ -178,29 +185,66 @@ console.log('§2 synthetic drift — one card per shape per session, merged on r
   const tc = (extra) => ({ timestamp: '2026-09-13T16:39:55.000Z', type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { total_tokens: 1 }, last_token_usage: { total_tokens: 1 }, model_context_window: 100, ...extra }, rate_limits: { limit_id: 'codex' } } });
   cx.processLive(tc({ baz: 1 }));
   cx.processLive(tc({ baz: 2 }));
-  const cc = driftCards(cx);
-  ok('codex token_count.info +{baz} ⇒ ONE card (shape event/token_count, field info.baz, harness Codex), the repeat adds none', cc.length === 1 && cc[0].content[0].shape === 'event/token_count' && JSON.stringify(cc[0].content[0].fields) === '["info.baz"]' && cc[0].content[0].harness === 'Codex', cc.map((m) => m.content[0]));
+  const cxr = ledgerOf('test-shape-cx');
+  ok('codex token_count.info +{baz} ⇒ NO card; ONE ledger row (harness Codex, shape event/token_count, field info.baz), the repeat (another record) counts 2', driftCards(cx).length === 0 && cxr.length === 1 && cxr[0].shape === 'event/token_count' && JSON.stringify(cxr[0].fields) === '["info.baz"]' && cxr[0].harness === 'Codex' && cxr[0].count === 2, cxr);
   ok('…the token_count itself was still consumed (usage meta path ran)', cops.some((o) => o.op === 'meta' && o.subtype === 'usage') || cx.messages.length >= 1);
   ok('codex telemetry once, naming the shape', events.filter((e) => e[0] === 'harness-shape-drift' && /codex:rollout:event\/token_count \+\{info\.baz\}/.test(e[1])).length === 1);
   cx.processLive({ timestamp: '2026-09-13T16:39:56.000Z', type: 'event_msg', payload: { type: 'item_completed', thread_id: 't', turn_id: 'x', item: { type: 'Extension', kind: 'web.sleep', id: 'exec-1', seconds: 2 } } });
-  ok('an unknown codex item KIND is the fall-back card by name — never ALSO a drift card for its fields', unknownCards(cx).length === 1 && driftCards(cx).length === 1);
+  ok('an unknown codex item KIND is the fall-back card by name — never ALSO a drift card / ledger field for its fields', unknownCards(cx).length === 1 && driftCards(cx).length === 0 && ledgerOf('test-shape-cx').length === 1);
   // the event_msg CARRIER line is judged at the envelope level too (r3 2026-09-21: a new top-level key on an event line was
   // invisible while the same key on a response_item line was flagged) — and the payload is still judged exactly once
   const ce = new CodexMessageManager('test-shape-cx-env');
   ce.processLive({ ...tc({}), brand_new_top: 1 });
-  let ced = driftCards(ce);
-  ok('codex event_msg line +{brand_new_top} at the TOP level ⇒ a drift card on event/token_count naming brand_new_top (the envelope judged)', ced.length === 1 && ced[0].content[0].shape === 'event/token_count' && JSON.stringify(ced[0].content[0].fields) === '["brand_new_top"]', ced.map((m) => m.content[0]));
+  let ced = ledgerOf('test-shape-cx-env');
+  ok('codex event_msg line +{brand_new_top} at the TOP level ⇒ a ledger row on event/token_count naming brand_new_top (the envelope judged), no card', driftCards(ce).length === 0 && ced.length === 1 && ced[0].shape === 'event/token_count' && JSON.stringify(ced[0].fields) === '["brand_new_top"]', ced);
   ce.processLive({ ...tc({ baz: 1 }), brand_new_top: 2 });
-  ced = driftCards(ce);
-  ok('…a line with BOTH an envelope key and a payload field ⇒ still ONE card per shape (the two verdicts merge: brand_new_top + info.baz), each judged exactly once (no duplicate field)', ced.length === 1 && JSON.stringify(ced[0].content[0].fields) === '["brand_new_top","info.baz"]', ced.map((m) => m.content[0].fields));
+  ced = ledgerOf('test-shape-cx-env');
+  ok('…a line with BOTH an envelope key and a payload field ⇒ still ONE row per shape (the two verdicts merge: brand_new_top + info.baz), each judged exactly once (no duplicate field)', ced.length === 1 && JSON.stringify(ced[0].fields) === '["brand_new_top","info.baz"]', ced.map((r) => r.fields));
   const cr2 = new CodexMessageManager('test-shape-cx-ri');
   cr2.processLive({ timestamp: '2026-09-13T16:39:57.000Z', type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'hi' }] }, brand_new_top: 1 });
-  ok('…the response_item twin flags the same key (parity between the two carriers)', driftCards(cr2).length === 1 && driftCards(cr2)[0].content[0].fields.includes('brand_new_top'), driftCards(cr2).map((m) => m.content[0]));
+  ok('…the response_item twin flags the same key (parity between the two carriers)', ledgerOf('test-shape-cx-ri').length === 1 && ledgerOf('test-shape-cx-ri')[0].fields.includes('brand_new_top') && driftCards(cr2).length === 0, ledgerOf('test-shape-cx-ri'));
   const cclean = new CodexMessageManager('test-shape-cx-clean');
   cclean.processLive(tc({}));
-  ok('a clean event_msg line ⇒ no card (negative control for the envelope judgement)', driftCards(cclean).length === 0);
+  ok('a clean event_msg line ⇒ no card, no ledger row (negative control for the envelope judgement)', driftCards(cclean).length === 0 && ledgerOf('test-shape-cx-clean').length === 0);
   ok('unknownFields kind envelope: judges ONLY the carrier keys (a payload field is not its business)', R.unknownFields('codex', 'rollout', { ...tc({ baz: 1 }), brand_new_top: 1 }, { kind: 'envelope' }).fields.join(',') === 'brand_new_top');
   global.__vsEvent = prevEv;
+}
+
+console.log('§2c the card policy\'s RED controls — a patched copy per rule (the old field card, no ledger write, no enum card) fails its leg');
+{
+  const M = mutantCopies('record-policy', REPO);
+  const mmSrc = read('src/message-manager.js'), cxSrc = read('src/codex-message-manager.js');
+  const gate = '    if (!newEnums.length) return;\n';
+  const write = "    if (drift.fields.length) noteFieldDrift({ conversation: raw.session_id || raw.sessionId || this.sessionId,";
+  const cxWrite = "    if (drift.fields.length) noteFieldDrift({ conversation: this._threadId || this.sessionId,";
+  ok('the patch sites exist, once per normalizer (a control is meaningful only if its line does)', mmSrc.split(gate).length === 2 && cxSrc.split(gate).length === 2 && mmSrc.includes(write) && cxSrc.includes(cxWrite));
+  const SIDC = 'e2e00000-0000-4000-8000-0000000000c1';
+  const run = (MMx) => {
+    const { createMessageManager: cm } = MMx === MM ? { createMessageManager } : { createMessageManager: (b, id) => new MMx.MessageManager(id) };
+    const x = cm('claude', 'test-policy-ctl');
+    x.processLive({ type: 'system', subtype: 'init', cwd: '/w', session_id: SIDC, uuid: 'u-pc1', model: 'm', permissionMode: 'default', claude_code_version: '2.1.296', grown_field: 1 });
+    x.processLive({ type: 'system', subtype: 'vcs_state_changed', kind: 'squash', cwd: '/w', uuid: 'u-pc2', session_id: SIDC });
+    const cardsOf = x.messages.filter((m) => m.noticeKind === 'unknown-fields');
+    return { fieldCards: cardsOf.filter((m) => m.content[0].shape === 'system/init').length, enumCards: cardsOf.filter((m) => m.content[0].shape === 'system/vcs_state_changed').length, rows: ledgerOf(SIDC, MMx).length };
+  };
+  const real = run(MM);
+  ok('the real normalizer: field growth ⇒ 0 cards + 1 ledger row; an enum drift ⇒ 1 card', real.fieldCards === 0 && real.rows === 1 && real.enumCards === 1, real);
+  const oldCard = require(M.write('src/message-manager.js', mmSrc.replace(gate, '    if (!newEnums.length && !drift.fields.length) return;\n'), 'old-field-card'));
+  const oc = run(oldCard);
+  ok('CONTROL: a copy that still cards field growth (the pre-lane policy) ⇒ the field leg goes RED (a system/init card exists)', oc.fieldCards === 1, oc);
+  const noRow = require(M.write('src/message-manager.js', mmSrc.replace(write, '    if (false) noteFieldDrift({ conversation: raw.session_id || raw.sessionId || this.sessionId,'), 'no-ledger'));
+  const nr = run(noRow);
+  ok('CONTROL: a copy that never writes the ledger ⇒ the ledger leg goes RED (0 rows, and still 0 cards — the growth would vanish)', nr.rows === 0 && nr.fieldCards === 0, nr);
+  const noEnum = require(M.write('src/message-manager.js', mmSrc.replace(gate, '    return;\n'), 'no-enum-card'));
+  const ne = run(noEnum);
+  ok('CONTROL: a copy that drops the enum card ⇒ the enum leg goes RED (0 cards for the undeclared value)', ne.enumCards === 0, ne);
+  // the codex twin, the same three-way rule
+  const cxRun = (C, MMx) => { const x = new C('test-policy-cx-' + Math.random()); x.processLive({ timestamp: '2026-10-15T00:00:00.000Z', type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { total_tokens: 1 }, last_token_usage: { total_tokens: 1 }, model_context_window: 100, grown: 1 }, rate_limits: { limit_id: 'codex' } } }); return { cards: driftCards(x).length, rows: ledgerOf(x.sessionId, MMx).length }; };
+  const cr = cxRun(CodexMessageManager, MM);
+  ok('codex: field growth ⇒ 0 cards + 1 ledger row (the shared ledger, harness Codex)', cr.cards === 0 && cr.rows === 1, cr);
+  const cxOld = require(M.write('src/codex-message-manager.js', cxSrc.replace(gate, '    if (!newEnums.length && !drift.fields.length) return;\n'), 'cx-old-card')).CodexMessageManager;
+  const co = cxRun(cxOld, MM);
+  ok('CONTROL: the codex copy that still cards field growth ⇒ RED (1 card)', co.cards === 1, co);
 }
 
 // §2b OURS BY PREFIX (2.369.126 r2): the wrappers mint webui_* keys faster than any list —
@@ -242,6 +286,11 @@ console.log('§3 enum drift — an undeclared enum value is a card, and the hand
   const w = createMessageManager('claude', 'test-shape-enum3');
   w.processLive({ type: 'system', subtype: 'vcs_state_changed', kind: 'push', branch: 'main', cwd: '/w/proj', uuid: 'u-w', session_id: 's' });
   ok('…a declared value is silent (negative control)', driftCards(w).length === 0);
+  const SIDX = 'e2e00000-0000-4000-8000-0000000000e4';
+  const x = createMessageManager('claude', 'test-shape-enum4');
+  x.processLive({ type: 'system', subtype: 'vcs_state_changed', kind: 'squash', cwd: '/w/proj', uuid: 'u-x', session_id: SIDX, also_grown: 1 });
+  const xc = driftCards(x);
+  ok('a record with BOTH an undeclared value and a new field ⇒ ONE card naming the VALUE only (fields []), the field a ledger row (lane record-oracle-2-1-296)', xc.length === 1 && xc[0].content[0].fields.length === 0 && xc[0].content[0].enumDrift[0].value === 'squash' && ledgerOf(SIDX).length === 1 && ledgerOf(SIDX)[0].fields.join() === 'also_grown', { cards: xc.map((m) => m.content[0]), rows: ledgerOf(SIDX) });
 }
 
 // ── THE EXTRACTOR (§4a, §4) — moved verbatim to scripts/claude-cli-dump.mjs (lane cli-2-1-288-records) ──
@@ -426,7 +475,7 @@ console.log('§4b the CLI 2.1.280 pass (2026-09-22): the latency reason told tru
 
 console.log('§4c the CLI 2.1.281 pass (2026-09-23): the pinned build, six fields on three shapes, one new subtype routed to the fall-back card');
 {
-  ok('2.1.281 stays a PINNED build beside 2.1.288 (SCHEMA_CLI_VERSIONS; SCHEMA_CLI_VERSION = the newest)', R.SCHEMA_CLI_VERSIONS.join() === '2.1.281,2.1.288' && R.SCHEMA_CLI_VERSION === '2.1.288', R.SCHEMA_CLI_VERSIONS);
+  ok('2.1.281 stays a PINNED build beside 2.1.288 and 2.1.296 (SCHEMA_CLI_VERSIONS; SCHEMA_CLI_VERSION = the newest)', R.SCHEMA_CLI_VERSIONS.join() === '2.1.281,2.1.288,2.1.296' && R.SCHEMA_CLI_VERSION === '2.1.296', R.SCHEMA_CLI_VERSIONS);
   const ADDED = [['system/init', 'per_turn_effort_active'], ['system/init', 'view_mode'], ['assistant', 'local_command_outcome'], ['conversation_reset', 'trigger'], ['conversation_reset', 'user_message_uuid'], ['conversation_reset', 'timestamp']];
   ok('the six fields 2.1.281 added are declared IGNORED (never known — known is the 2.1.274 dump), each with a reason naming the build', ADDED.every(([k, f]) => { const sp = R.SHAPES['claude:stream:' + k]; return !sp.known.has(f) && /2\.1\.281/.test(sp.ignored.get(f) || '') && sp.ignored.get(f).length > 60; }), ADDED.map(([k, f]) => k + '.' + f + ' = ' + R.SHAPES['claude:stream:' + k].ignored.get(f)));
   const pte = R.SHAPES['claude:stream:system/per_turn_effort_changed'];
@@ -447,8 +496,8 @@ console.log('§4c the CLI 2.1.281 pass (2026-09-23): the pinned build, six field
   mi.processLive({ type: 'system', subtype: 'init', cwd: '/w/proj', session_id: 's', uuid: 'u-i', tools: [], mcp_servers: [], model: 'claude-fable-5-1', permissionMode: 'default', slash_commands: [], apiKeySource: 'none', claude_code_version: '2.1.281', output_style: 'default', skills: [], plugins: [], per_turn_effort_active: true, view_mode: 'default' });
   ok('a 2.1.281 init carrying per_turn_effort_active + view_mode is clean (no drift card)', driftCards(mi).length === 0 && unknownCards(mi).length === 0, mi.messages.map((m) => m.noticeKind));
   const mj = createMessageManager('claude', 'test-shape-281-init2');
-  mj.processLive({ type: 'system', subtype: 'init', cwd: '/w/proj', session_id: 's', uuid: 'u-j', model: 'claude-fable-5-1', view_mode: 'focus', per_turn_effort_mode: 'x' });
-  ok('…NEGATIVE CONTROL: a near-miss name (per_turn_effort_mode) is still drift, named', driftCards(mj).length === 1 && driftCards(mj)[0].content[0].fields.join() === 'per_turn_effort_mode', driftCards(mj).map((m) => m.content[0].fields));
+  mj.processLive({ type: 'system', subtype: 'init', cwd: '/w/proj', session_id: 's-281-near', uuid: 'u-j', model: 'claude-fable-5-1', view_mode: 'focus', per_turn_effort_mode: 'x' });
+  ok('…NEGATIVE CONTROL: a near-miss name (per_turn_effort_mode) is still drift, named (a ledger row — field growth is no card)', ledgerOf('s-281-near').length === 1 && ledgerOf('s-281-near')[0].fields.join() === 'per_turn_effort_mode' && driftCards(mj).length === 0, ledgerOf('s-281-near'));
 }
 
 console.log('§4e the PINNED dumps (lane cli-2-1-288-records, B-e05e): every build in SCHEMA_CLI_VERSIONS judged from its tracked dump — no binary needed');
@@ -509,7 +558,8 @@ console.log('§4e the PINNED dumps (lane cli-2-1-288-records, B-e05e): every bui
     // the §4d sentences of each pinned build: all resolved, each a row of the table
     const PO = require(path.join(REPO, 'src/permission-outcome.js'));
     for (const d of dumps) { const c = outcomeCensus(d.sentences.rows || [], PO.PERMISSION_OUTCOME_ROWS, ''); ok(`${d.version}: §4d ${(d.sentences.rows || []).length} permission sentences, none unresolved, each a row of src/permission-outcome.js`, (d.sentences.rows || []).length === 14 && d.sentences.unresolved.length === 0 && c.unclassified.length === 0, { unresolved: d.sentences.unresolved, c: c.unclassified }); }
-    ok('§4d 2.1.281 → 2.1.288: the same sentences (none added, none vanished — no row needs `until`), PERMISSION_OUTCOME_CLI_VERSION 2.1.288', JSON.stringify(dumps[0].sentences.rows.map((x) => x.text).sort()) === JSON.stringify(dumps[1].sentences.rows.map((x) => x.text).sort()) && PO.PERMISSION_OUTCOME_CLI_VERSION === '2.1.288');
+    const texts = (d) => JSON.stringify(d.sentences.rows.map((x) => x.text).sort());
+    ok('§4d 2.1.281 → 2.1.288 → 2.1.296: the same sentences (none added, none vanished — no row needs `until`), PERMISSION_OUTCOME_CLI_VERSION 2.1.296 (the newest pinned)', dumps.every((d) => texts(d) === texts(dumps[0])) && PO.PERMISSION_OUTCOME_CLI_VERSION === '2.1.296' && PO.PERMISSION_OUTCOME_CLI_VERSION === R.SCHEMA_CLI_VERSION);
     // THE EIGHT DECISIONS, each on its evidence (the dump's zod literal)
     const z = dumps[1].zod || {};
     const EIGHT = ['session_metadata', 'instruction_size_warning', 'ui_invalidate', 'ui_log', 'ui_toast', 'ui_status', 'ui_scroll', 'ui_focus'];
@@ -517,6 +567,24 @@ console.log('§4e the PINNED dumps (lane cli-2-1-288-records, B-e05e): every bui
     ok('instruction_size_warning is HANDLED (the dim notice); the other seven are KNOWN_IGNORED (card-less) — none left for the red card', HANDLED.has('instruction_size_warning') && !IGN.has('instruction_size_warning') && EIGHT.filter((s) => s !== 'instruction_size_warning').every((s) => IGN.has(s) && !HANDLED.has(s)));
     ok('ui_toast evidence: its zod object is {plugin, text, timeout_ms} only — no level / severity, so no error-class toast exists to surface', (dumps[1].union['system/ui_toast'] || []).filter((f) => f !== 'uuid' && f !== 'session_id').join() === 'plugin,text,timeout_ms' && !/level|severity|error/.test(z['system/ui_toast'].replace(/describe\("[^"]*"\)/g, '')));
     ok('session_metadata evidence: metadata carries artifacts only (no model / cwd / version for the status bar)', /metadata:u\(\{artifacts:/.test(z['system/session_metadata'] || '') && !/model|cwd|version/.test(z['system/session_metadata'] || ''));
+    // THE 2.1.296 PIN (lane record-oracle-2-1-296) — each decision on the dump's zod literal
+    const d296 = dumps.find((d) => d.version === '2.1.296'), d288 = dumps.find((d) => d.version === '2.1.288');
+    const z6 = d296.zod || {};
+    const no296 = { ...R, SHAPES: Object.fromEntries(Object.entries(R.SHAPES).map(([k, sp]) => [k, R.FIELDS_296[k] ? { ...sp, ignored: new Map([...sp.ignored].filter(([f]) => !(f in R.FIELDS_296[k]))) } : sp])) };
+    const n296 = judgeDump(no296, d296);
+    ok('CONTROL: a copy without FIELDS_296 is red on the 2.1.296 dump (18 fields named, result/success\'s twin included) and still green on 2.1.288', n296.filter((x) => x.startsWith('UNDECLARED ')).length === n296.length && new Set(n296.map((x) => x.replace('result/success.', 'result.'))).size === 18 && judgeDump(no296, d288).length === 0, n296);
+    const f296 = Object.entries(R.FIELDS_296).flatMap(([k, fs]) => Object.entries(fs).map(([f, note]) => [k, f, note]));
+    ok('FIELDS_296: 18 fields on ten shapes, each IGNORED with a one-line reason naming 2.1.296 (no reader in the tree), never known', f296.length === 18 && new Set(f296.map(([k]) => k)).size === 10 && f296.every(([k, f, note]) => typeof note === 'string' && /2\.1\.296/.test(note) && note.length > 60 && R.SHAPES[k].ignored.get(f) === note && !R.SHAPES[k].known.has(f)), f296.filter(([k, f, n]) => !/2\.1\.296/.test(n || '')));
+    const lit = (st) => z6['system/' + st] || '';
+    ok('the two 2.1.296 subtypes: a zod literal in the dump (helpers read off the anchor), a stream shape row of exactly the literal\'s fields, SHAPE_SINCE 2.1.296', ['permission_check_status', 'file_attachments_missing'].every((st) => lit(st).includes('subtype:A("' + st + '")') && R.SHAPE_SINCE['system/' + st] === '2.1.296' && [...R.SHAPES['claude:stream:system/' + st].known].join() === d296.union['system/' + st].filter((f) => f !== 'uuid' && f !== 'session_id').join()));
+    ok('permission_check_status is KNOWN_IGNORED (card-less): its literal is {tool_use_id, agent_id?, status: checking|done} — a pulse with no words for any card', IGN.has('permission_check_status') && !HANDLED.has('permission_check_status') && /status:U\(\["checking","done"\]\)/.test(lit('permission_check_status')) && !/text:|message:|content:/.test(lit('permission_check_status').replace(/describe\("[^"]*"\)/g, '')) && [...R.SHAPES['claude:stream:system/permission_check_status'].enums.status].join() === 'checking,done');
+    ok('file_attachments_missing is HANDLED (a plain dim line): its literal names the files that did not arrive — missing[{file_uuid, reason}] + sent_count', HANDLED.has('file_attachments_missing') && !IGN.has('file_attachments_missing') && /missing:T\(u\(\{file_uuid:/.test(lit('file_attachments_missing')) && /reason:o\(\)/.test(lit('file_attachments_missing')) && /sent_count:E\(\)/.test(lit('file_attachments_missing')));
+    // the three hook ATTACHMENT payloads (no uuid / session_id — never a stream record type): each classified on its literal
+    const nonRec = Object.keys(z6).filter((k) => !k.startsWith('system/'));
+    ok('every non-system zod key of the 2.1.296 dump is an attachment payload on ATTACHMENT_PAYLOADS (async_hook_response, hook_additional_context, hook_success) — none is a stream record (no uuid / session_id)', nonRec.sort().join() === 'async_hook_response,hook_additional_context,hook_success' && nonRec.every((k) => k in R.ATTACHMENT_PAYLOADS && z6[k].includes('type:A("' + k + '")') && !(d296.union[k] || []).includes('uuid')), nonRec);
+    const mmSrc6 = read('src/message-manager.js');
+    const attBody = mmSrc6.slice(mmSrc6.indexOf('_processAttachment(raw, emit) {'), mmSrc6.indexOf('_processUser(raw, emit) {'));
+    ok('…the two KNOWN ones name a reader that exists (_processAttachment branches on hook_success / hook_additional_context); async_hook_response is IGNORED and no branch reads it', /^known — message-manager _processAttachment/.test(R.ATTACHMENT_PAYLOADS.hook_success) && /^known — message-manager _processAttachment/.test(R.ATTACHMENT_PAYLOADS.hook_additional_context) && attBody.includes("a.type === 'hook_success'") && attBody.includes("a.type === 'hook_additional_context'") && /^ignored — /.test(R.ATTACHMENT_PAYLOADS.async_hook_response) && !attBody.includes('async_hook_response'));
   }
 }
 

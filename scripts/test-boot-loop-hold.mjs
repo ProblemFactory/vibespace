@@ -12,6 +12,12 @@
 //     shape's rows in > 100 slices), and the server's own boot clock (GET /api/boot-trace) agrees with this one.
 //   ③ RED CONTROL: the same boot with VIBESPACE_BOOT_TRACE_SYNC=1 (the warm the old way, in one tick) is red by the
 //     same judge — and VIBESPACE_BOOT_TRACE=1 names the hold: the step (usage-ledger-warm) and its sync sites.
+//   ⑤ A PROBE THAT CANNOT BE REAPED IS AN ANSWER (B-92a4, lane boot-probes-unkillable): the same boot with a fake `fuser`
+//     + `pgrep` on PATH that ignore TERM and never answer about a restore socket (the NFS D-state stand-in) ⇒ the listener
+//     opens within the probe cap + 5 s of the probes' start, the span names the N unanswered, every session is restored
+//     (probe-pending, alive), none retired; once the questions answer again the re-probe settles all N alive.
+//   ⑥ RED CONTROL: the pre-fix pair (runChild settles only in execFile's callback, no cap) over the same fakes ⇒ no
+//     listener within 40 s.
 // Run: node scripts/test-boot-loop-hold.mjs   (BOOT_SHAPE_SCALE=0.3 for a lighter shape; BOOT_SESSIONS=13)
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -131,6 +137,68 @@ await stop();
 check(`the same judge is RED on the old warm (max ${j2.maxMs} ms)`, !j2.ok && j2.over.length > 0, j2);
 const named = rep2 && (rep2.holds || []).find((h) => h.name === 'usage-ledger-warm');
 check('…the server names the hold: the step usage-ledger-warm, and the tracer its sync sites in src/usage-history.js', !!named && named.ms >= LAW_MS && (named.sites || []).some((x) => /usage-history\.js/.test(x.what)), named || (rep2 && rep2.holds));
+
+// ── boots 3 + 4: THE RESTORE'S PROBES CANNOT BE REAPED (B-92a4) ──
+console.log('⑤ a fake fuser + pgrep that ignore TERM and never answer about a restore socket (the NFS D-state stand-in)');
+const FAKE = path.join(OUT, 'fake-bin'), HELD = path.join(OUT, 'held-mode'), HELD_PIDS = path.join(OUT, 'held-pids'), CAP = 8000;
+fs.mkdirSync(FAKE, { recursive: true });
+const realOf = (b) => process.env.PATH.split(':').map((d) => path.join(d, b)).find((f) => { try { fs.accessSync(f, fs.constants.X_OK); return true; } catch { return false; } });
+for (const b of ['fuser', 'pgrep']) fs.writeFileSync(path.join(FAKE, b), `#!/bin/sh\nfor a; do case "$a" in */sockets/cw-*) if [ "$(cat ${JSON.stringify(HELD)} 2>/dev/null)" = hang ]; then echo $$ >> ${JSON.stringify(HELD_PIDS)}; trap '' TERM; exec sleep 120; fi;; esac; done\nexec ${realOf(b)} "$@"\n`, { mode: 0o755 });
+const isFake = (p) => { try { return fs.readFileSync(`/proc/${p}/cmdline`, 'utf8').startsWith('sleep\u0000120'); } catch { return false; } }; // a recorded pid is ended only while it is still that fake
+const endHeld = () => { try { for (const p of fs.readFileSync(HELD_PIDS, 'utf8').split('\n').map(Number).filter((n) => n > 1 && isFake(n))) { try { process.kill(p, 'SIGKILL'); } catch { } } } catch { } };
+process.on('exit', endHeld);
+const heldEnv = { PATH: `${FAKE}:${process.env.PATH}`, VIBESPACE_PROBE_CAP_MS: String(CAP) };
+fs.writeFileSync(HELD, 'hang');
+boot('held', heldEnv);
+await until(async () => getJson('/api/boot'), 60000);
+fs.writeFileSync(HELD, 'real'); // the listener is up: the questions answer again, and the re-probe (10 s after listen) settles every pending socket
+const b3 = await ready();
+const rep3 = await getJson('/api/boot-trace'), probes3 = span(rep3, 'restore-probes');
+const reprobes = (r) => ((r && r.notes) || []).filter((n) => /^re-probe \d\/5:/.test(n.text));
+const settledAll = (r) => reprobes(r).reduce((n, x) => n + Number((/: (\d+) alive, 0 dead/.exec(x.text) || [])[1] || 0), 0) === SESSIONS;
+const rep3b = await until(async () => { const r = await getJson('/api/boot-trace'); return settledAll(r) ? r : null; }, 90000);
+const log3 = logOf('held');
+await stop();
+const sockets3 = fs.readdirSync(path.join(wt, 'data', 'sockets')).filter((f) => f.startsWith('cw-')).length;
+const reconnected3 = (log3.match(/✓ Reconnected:/g) || []).length;
+check(`the listener opened at the cap: ${rep3 && probes3 ? rep3.listenAt - probes3.at : '?'} ms after the probes began (cap ${CAP} ms + 5 s; ${rep3 && rep3.listenAt} ms after the process started)`, !!b3 && !!probes3 && rep3.listenAt - probes3.at <= CAP + 5000, { listenAt: rep3 && rep3.listenAt, probes3 });
+check(`the boot trace names what did not answer — restore-probes: ${probes3 && probes3.note}`, !!probes3 && probes3.unanswered === SESSIONS && new RegExp(`^${SESSIONS} unanswered \\((fuser|pgrep|not asked) cw-`).test(probes3.note || ''), probes3);
+check(`every session restored (${reconnected3}/${SESSIONS} reconnected, probe-pending), none retired, every socket in place (${sockets3})`, reconnected3 === SESSIONS && !/Dead socket|Duplicate of/.test(log3) && sockets3 === SESSIONS && new RegExp(`${SESSIONS} session\\(s\\) adopted probe-pending`).test(log3), log3.split('\n').filter((l) => /Dead socket|Duplicate|probe-pending|\[child\]/.test(l)).slice(0, 8));
+check(`the re-probe after listen settles all ${SESSIONS} alive once they answer: ${reprobes(rep3b).map((n) => n.text).join(' | ')}`, !!rep3b && reprobes(rep3b).every((n) => /0 dead \(retired\), 0 duplicate/.test(n.text)), rep3b && rep3b.notes);
+endHeld();
+
+console.log('⑥ RED control: the pre-fix pair (runChild settles only in its callback; no cap) over the same fakes');
+{
+  // the pre-fix runChild (2.369.274), verbatim
+  const OLD_RUN_CHILD = `function runChild(bin, args, timeout) {
+  return new Promise((resolve) => {
+    const t0 = Date.now();
+    let timer = null, timedOut = false;
+    const child = execFile(bin, args, { maxBuffer: 4 * 1024 * 1024 }, (e, out, err) => {
+      clearTimeout(timer);
+      resolve({ code: e ? (e.code === 'ENOENT' ? 'ENOENT' : timedOut && e.signal ? 'TIMEOUT' : e.code || e.signal || 1) : 0, out: String(out || ''), err: String(err || (e && e.message) || ''), ms: Date.now() - t0 });
+    });
+    timer = setTimeout(() => { timedOut = true; try { child.kill(); } catch { } }, timeout);
+  });
+}
+`;
+  const tlsF = path.join(wt, 'src/server/tls.js'), brF = path.join(wt, 'src/server/boot-restore.js');
+  const tlsReal = fs.readFileSync(tlsF, 'utf8'), brReal = fs.readFileSync(brF, 'utf8');
+  const rcA = tlsReal.indexOf('function runChild('), rcB = tlsReal.indexOf('\n}\n', rcA) + 3;
+  const RACE = 'await Promise.race([Promise.all([drain(), drain(), drain(), drain()]), new Promise((r) => { cap = setTimeout(() => { out.capped = true; r(); }, capMs); })]);';
+  check('control setup: the copy cuts runChild\'s answering timer and the cap\'s race', rcA > 0 && brReal.includes(RACE));
+  fs.writeFileSync(tlsF, tlsReal.slice(0, rcA) + OLD_RUN_CHILD + tlsReal.slice(rcB));
+  fs.writeFileSync(brF, brReal.replace(RACE, 'await Promise.all([drain(), drain(), drain(), drain()]);'));
+  fs.writeFileSync(HELD, 'hang');
+  boot('held-control', heldEnv, false);
+  const t4 = Date.now();
+  const listened = await until(async () => ((await getJson('/api/boot')) ? true : null), 40000);
+  const ms4 = Date.now() - t4, log4 = logOf('held-control');
+  await stop('SIGKILL');
+  fs.writeFileSync(tlsF, tlsReal); fs.writeFileSync(brF, brReal);
+  endHeld();
+  check(`the pre-fix pair has NO listener within 40 s (RED): ${listened ? 'it listened at ' + ms4 + ' ms' : 'none at ' + ms4 + ' ms'}${/worker pool up/.test(log4) ? ' — its log ends past `[safe-fs] worker pool up`, the incident\'s last line' : ''}`, !listened && ms4 >= 40000 && !/running at http/.test(log4));
+}
 
 console.log(failed ? `\n${failed} FAILED (${passed} passed)` : `\nALL PASS (${passed})`);
 process.exit(failed ? 1 : 0);

@@ -26,6 +26,7 @@ import { collabTrafficStats, collabHeadText, collabRunPart, subAgentStreamLabel 
 import { TEXT_WINDOW } from '../text-window.js';
 import { attachSlab } from './view-visibility.js'; // perf r1: which slab an attach asks for // PURE: the attach slab's numbers (the rescue's harm bound reads maxRecords)
 import { heldText } from './jobs-layout.js';
+import { resumeAccountBar } from './resume-account-bar.js'; // lane resume-account-door: the pinned account cannot serve ⇒ the bar says so, with its two doors
 import { browserFactWords } from '../browser-fact.js'; // lane S2: THE words of THE browser fact (the chip prints them, never its own)
 import { createCardTraceLoader } from './browser-trace-view.js'; // agent browser P5 (§4.5 / D35): the tool card's action trace
 import { createChannelTouchView, openTouchRow } from './channel-touch-view.js'; // §26 (B-099e): the conversations an agent read / drafted, as rows on the tool card + the status-bar chip
@@ -6438,7 +6439,33 @@ class ChatView {
     this._resumeBar = bar;
   }
 
-  _resumeAndClose() {
+  // The pinned account cannot serve (lane resume-account-door, owner 2026-10-15): the verdict's sentence + its two doors
+  // IN THE RESUME BAR — log it in again, or resume on another account (the picker pre-filled, the pool first). An
+  // accounts-updated that makes the pin serve again (the re-login finished) turns the bar back into Resume.
+  _showAccountRefusalBar(verdict, ids) {
+    if (this._resumeBar) this._resumeBar.remove();
+    this._resumeBar = null;
+    const container = this._container;
+    if (!container) return;
+    const bar = resumeAccountBar(verdict, {
+      backend: ids.backend,
+      hostName: ids.hostId ? this.app._hostLabel?.(ids.hostId) || '' : '',
+      relogin: (door) => this.app.openResumeAccountDoor?.(door),
+      resume: (accountId) => this._resumeAndClose({ accountId }),
+    });
+    if (this._statusBar?.element && this._statusBar.element.parentNode === container) container.insertBefore(bar, this._statusBar.element);
+    else container.appendChild(bar);
+    this._resumeBar = bar;
+    const onAccounts = (msg) => {
+      if (msg?.type !== 'accounts-updated') return;
+      if (!bar.isConnected || this._resumeBar !== bar) { this.ws.offGlobal(onAccounts); return; }
+      const v = this.app._resumeAccountVerdict?.(ids);
+      if (!v || v.ok) { this.ws.offGlobal(onAccounts); bar.remove(); this._resumeBar = null; this._showResumeBar(); }
+    };
+    this.ws.onGlobal(onAccounts);
+  }
+
+  _resumeAndClose({ accountId, asked = false } = {}) {
     const ids = this._getSessionIds();
     const backend = ids.backend || 'claude';
     const backendSessionId = ids.backendSessionId || this.winInfo?.backendSessionId || null;
@@ -6448,6 +6475,18 @@ class ChatView {
       // must reach the frontend — a dead click reads as a VibeSpace bug).
       showToast(t('Cannot resume from this window — session identity is incomplete. Use the session card in the sidebar instead.'), { type: 'error' });
       this.app.sidebar?.refresh?.();
+      return;
+    }
+    // the pinned account is asked FIRST (lane resume-account-door): a refusal stays in this window, in the bar
+    if (!accountId && !asked && this.app.resumeAccountCheck) {
+      const q = { backend, backendSessionId, hostId: ids.host || undefined };
+      const btn = this._resumeBar?.querySelector?.('.chat-resume-btn');
+      if (btn) btn.disabled = true;
+      this.app.resumeAccountCheck(q).catch(() => null).then((v) => {
+        if (btn) btn.disabled = false;
+        if (v && !v.ok) this._showAccountRefusalBar(v, q);
+        else this._resumeAndClose({ asked: true });
+      });
       return;
     }
     const customName = this.app.sidebar?.getCustomName?.(backendSessionId);
@@ -6464,6 +6503,8 @@ class ChatView {
       agentRole: this.winInfo?.titleMeta?.agentRole,
       agentNickname: this.winInfo?.titleMeta?.agentNickname,
       sourceKind: this.winInfo?.titleMeta?.sourceKind,
+      // the bar's account picker: the pick rides this create and is saved as the on-resume account once it spawned
+      ...(accountId ? { accountId, onCreateResult: this.app._persistAccountOnCreate?.(`${backend}:${backendSessionId}`, accountId) } : {}),
     });
     // Close the read-only window — the resumed session opens in a new window
     if (winId) this.app.wm?.closeWindow?.(winId);

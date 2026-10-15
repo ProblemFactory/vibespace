@@ -52,6 +52,14 @@
  *
  * EVERY OUTBOUND HOST IS DECLARED in `EGRESS`: the Web API on slack.com and the files on files.slack.com — a file URL
  * on any other host is refused BEFORE the token could be sent there.
+ *
+ * AN ORG-WIDE INSTALL (lane slack-org-team-id, B-8ca4 + B-091e): on an Enterprise Grid an app may be installed on the
+ * whole ORGANIZATION (`is_enterprise_install: true` on `auth.test` / `oauth.v2.access`); its token is the org's, so a
+ * workspace-scoped method must name the workspace (`team_id`) or Slack answers `missing_argument` /
+ * `team_access_not_granted`. The token record learns the kind (`isEnterpriseInstall`) and the workspace (`team`, its
+ * source in `teamFrom`); `METHOD_SCOPE` names every method this file sends as `workspace` or `org`, and `withTeam` —
+ * called by `api()` alone — adds `team_id` to a `workspace` method on such a record. A workspace-level record (every
+ * record before this lane: no field reads as `false`) sends byte-identical requests.
  */
 const { makeRecord, makeConversation, peerName, validateFacts } = require('../channel-record.js');
 const { ChannelError, retryAfterSeconds, sentSecrets, withoutSent } = require('./index.js');
@@ -260,6 +268,37 @@ async function callSlack(fetchFn, method, params, { token, signal = null, json =
   return { body, scopes: sc ? Manifest.scopesOfHeader(sc) : null };
 }
 
+/** lane slack-org-team-id: EVERY Web API method this file sends through `callSlack`, by where it acts. `workspace` = the
+ *  method acts in one workspace — an ORG-WIDE install's token must name it (`team_id`; docs.slack.dev "Developing apps
+ *  for Enterprise orgs": "a safe option is to always pass a team_id", ignored on a workspace-level token); `org` = the
+ *  token itself, the sign-in, the app, or a team named by its own argument (`team.info {team}`). test-slack-org-install's
+ *  census fails a method the file calls that this table does not name, and a row nothing calls. (`files.upload` /
+ *  `files.download` are the upload URL's POST and a file GET — no Web API method, never through callSlack.) */
+const METHOD_SCOPE = Object.freeze({
+  'auth.test': 'org', 'auth.teams.list': 'org', 'team.info': 'org', ...Object.fromEntries(Manifest.SIGN_IN_METHODS.map((m) => [m, 'org'])),   // + the sign-in's two, named once in slack-manifest.js
+  'users.conversations': 'workspace', 'users.list': 'workspace', 'users.info': 'workspace', 'bots.info': 'workspace',
+  'conversations.info': 'workspace', 'conversations.members': 'workspace', 'conversations.history': 'workspace', 'conversations.replies': 'workspace',
+  'chat.postMessage': 'workspace', 'search.messages': 'workspace', 'reactions.get': 'workspace', 'reactions.add': 'workspace', 'reactions.remove': 'workspace',
+  'files.info': 'workspace', 'files.getUploadURLExternal': 'workspace', 'files.completeUploadExternal': 'workspace',
+});
+const TEAMS_LIST_MAX = 100;
+/** THE ONE PLACE `team_id` is added (lane slack-org-team-id): a method that is not `org` on an org-wide install's
+ *  record names the workspace the record learned; anything else is handed back AS IS (the same object — a
+ *  workspace-level record's request is byte-identical to before). A method with no row counts as `workspace`. */
+function withTeam(method, params, held) {
+  const t = held || {};
+  if (t.isEnterpriseInstall !== true || typeof t.team !== 'string' || !ID_RE.test(t.team) || METHOD_SCOPE[method] === 'org') return params;
+  return { ...(params || {}), team_id: t.team };
+}
+/** Slack's `missing_argument` / `team_access_not_granted` on an org-wide install's record = the workspace it names is
+ *  not granted to the app — said with the door (Re-authorize), never as the vendor's bare code (it rides `detail.error`). */
+function orgRefusal(method, e, held) {
+  const d = (e && e.detail) || {};
+  if (!(e instanceof ChannelError) || !held || held.isEnterpriseInstall !== true || (d.error !== 'missing_argument' && d.error !== 'team_access_not_granted')) return e;
+  const team = typeof held.team === 'string' ? held.team : '?';
+  return new ChannelError('forbidden', `slack ${method}: the app is installed for the whole organization, and the workspace ${team} is not granted to it — Re-authorize from a workspace the app is added to`, { retryable: false, detail: { method, error: d.error, why: 'org-team-not-granted', status: d.status, team, orgInstall: true } });
+}
+
 /** The bounded name of a Slack person object. */
 function personOf(u) {
   const p = (u && u.profile) || {};
@@ -425,20 +464,40 @@ function create(record = {}, deps = {}) {
     if (!r || r.source === 'none' || !v.clientId || !v.clientSecret) throw new ChannelError('auth-expired', `the Slack workspace app is not usable: ${(r && r.why) || 'no client id / secret'}`, { retryable: false, detail: { why: 'client-missing' } });
     return { source: r.source, clientId: String(v.clientId), secret: () => String(v.clientSecret), relayUrl: typeof v.relayUrl === 'string' ? v.relayUrl : '', teamDomain: typeof v.teamDomain === 'string' ? v.teamDomain : '' };
   }
-  /** THE TOKEN, CONNECTED: one `auth.test` names who it is; the record the paste path and the workspace consent share. */
-  async function connectUserToken(pasted, cancelled) {
+  /** lane slack-org-team-id: the workspaces an org-wide install is granted — ONE `auth.teams.list` (an org method, no
+   *  scope, Tier 3); the first names the record's workspace (several workspaces under one token = not now). */
+  async function grantedTeam(pasted) {
+    let r;
+    try { r = await callSlack(fetchFn, 'auth.teams.list', { limit: TEAMS_LIST_MAX }, { token: pasted }); }   // ungated: consent-teams-list (once per human paste, an org-wide install only)
+    catch (e) { throw new ChannelError(e instanceof ChannelError ? e.code : 'vendor-error', `Slack did not list the organization's workspaces for this app: ${e instanceof ChannelError && e.detail && e.detail.error ? e.detail.error : 'no answer'}`, { retryable: false, detail: { why: e instanceof ChannelError && e.detail ? e.detail.why : 'vendor', orgInstall: true } }); }   // rate-ok: consent-teams-list
+    const t = (Array.isArray(r.body && r.body.teams) ? r.body.teams : []).find((x) => x && typeof x.id === 'string' && ID_RE.test(x.id) && !x.id.startsWith('E'));
+    return t ? { team: t.id, title: peerName(t.name, 100) || null } : { team: null, title: null };
+  }
+  /** THE TOKEN, CONNECTED: one `auth.test` names who it is; the record the paste path and the workspace consent share.
+   *  lane slack-org-team-id: an ORG-WIDE install (`is_enterprise_install` on auth.test, or on the consent's exchange —
+   *  `hint`; or an auth.test whose `team_id` IS the org) records `isEnterpriseInstall: true` and the workspace its
+   *  `workspace` methods name, by `teamFrom`: auth.test's `team_id` when it names a workspace (not the org) › the
+   *  exchange's `team.id` › the first workspace `auth.teams.list` names. None ⇒ refused by name, nothing connected.
+   *  Every sign-in writes the whole record, so a re-authorize learns the later facts. */
+  async function connectUserToken(pasted, cancelled, hint = null) {
     let r;
     try { r = await callSlack(fetchFn, 'auth.test', {}, { token: pasted }); }   // ungated: consent-auth-test (once per human paste)
     catch (e) { throw new ChannelError(e instanceof ChannelError ? e.code : 'vendor-error', `Slack refused the pasted token: ${e instanceof ChannelError && e.detail && e.detail.error ? e.detail.error : 'no answer'}`, { retryable: false, detail: { why: e instanceof ChannelError && e.detail ? e.detail.why : 'vendor' } }); }   // rate-ok: consent-auth-test
     const a = r.body || {};
-    const team = typeof a.team_id === 'string' && ID_RE.test(a.team_id) ? a.team_id : null;
-    const user = typeof a.user_id === 'string' && ID_RE.test(a.user_id) ? a.user_id : null;
-    if (!team || !user) throw new ChannelError('vendor-error', 'Slack answered the pasted token without naming a workspace and a person — nothing was connected', { retryable: false, detail: { nameless: true } });
     const ent = typeof a.enterprise_id === 'string' && ID_RE.test(a.enterprise_id) ? a.enterprise_id : null;
+    const said = typeof a.team_id === 'string' && ID_RE.test(a.team_id) ? a.team_id : null;
+    const org = a.is_enterprise_install === true || !!(hint && hint.isEnterpriseInstall === true) || (!!ent && said === ent);
+    let team = org && said && (said === ent || said.startsWith('E')) ? null : said;
+    let teamFrom = team ? 'auth.test' : null, teamTitle = null;
+    const user = typeof a.user_id === 'string' && ID_RE.test(a.user_id) ? a.user_id : null;
+    if (org && user && !team && hint && typeof hint.team === 'string' && ID_RE.test(hint.team) && !hint.team.startsWith('E')) { team = hint.team; teamFrom = 'exchange'; }
+    if (org && user && !team) { const g = await grantedTeam(pasted); team = g.team; teamTitle = g.title; teamFrom = team ? 'auth.teams.list' : null; }
+    if (org && user && !team) throw new ChannelError('forbidden', 'Slack: the app is installed for the whole organization, but no workspace is granted to it yet — an admin adds the app to a workspace, then Re-authorize — nothing was connected', { retryable: false, detail: { why: 'org-team-not-granted', orgInstall: true } });
+    if (!team || !user) throw new ChannelError('vendor-error', 'Slack answered the pasted token without naming a workspace and a person — nothing was connected', { retryable: false, detail: { nameless: true } });
     const scopes = r.scopes || [];
-    const teamName = peerName(a.team, 100) || team;
+    const teamName = (teamFrom === 'auth.teams.list' ? teamTitle : null) || peerName(a.team, 100) || team;
     const handle = peerName(a.user, 100) || user;
-    const tok = { access_token: pasted, user, team, ...(ent ? { enterprise: ent } : {}), userId: `${ent ? `${ent}/` : ''}${team}/${user}`, teamName, name: handle, label: `${teamName} · @${handle}`, scopes, url: typeof a.url === 'string' && /^https:\/\/[a-z0-9.-]+\.slack\.com\/$/i.test(a.url) ? a.url : null };
+    const tok = { access_token: pasted, user, team, ...(ent ? { enterprise: ent } : {}), isEnterpriseInstall: org, ...(org ? { teamFrom } : {}), userId: `${ent ? `${ent}/` : ''}${team}/${user}`, teamName, name: handle, label: `${teamName} · @${handle}`, scopes, url: typeof a.url === 'string' && /^https:\/\/[a-z0-9.-]+\.slack\.com\/$/i.test(a.url) ? a.url : null };
     if (tokens) await tokens.write(tok, { expiresAt: null, scopes, user: tok.label, consent: { cancelled } });
     probe('userOnlyManifest', 'accepted');
     probe('scopes', scopes);
@@ -458,7 +517,9 @@ function create(record = {}, deps = {}) {
     const u = (r.body && r.body.authed_user) || {};
     const tok = typeof u.access_token === 'string' ? u.access_token : '';
     if (Manifest.tokenShapeOf(tok) !== 'user') throw new ChannelError('vendor-error', 'Slack finished the sign-in without a user token (the app asks for no user scopes?) — nothing was connected', { retryable: false, detail: { why: 'no-user-token' } });
-    return connectUserToken(tok, cancelled);
+    // lane slack-org-team-id: an org-wide install answers `is_enterprise_install: true` and `team: null` here
+    const b = r.body || {};
+    return connectUserToken(tok, cancelled, { isEnterpriseInstall: b.is_enterprise_install === true, team: b.team && typeof b.team.id === 'string' ? b.team.id : null });
   }
 
   // ── THE GATE: token → the method's bucket → the pace → the meter → the request ──
@@ -476,8 +537,9 @@ function create(record = {}, deps = {}) {
     await pace(1);
     meter(1);
     const tok = bearer();   // re-read after the pace (a disconnect while waiting sends nothing)
+    const held = readToken().token;   // lane slack-org-team-id: the record's install kind + workspace (withTeam)
     try {
-      const r = await callSlack(fetchFn, method, params, { token: tok });
+      const r = await callSlack(fetchFn, method, withTeam(method, params, held), { token: tok });
       if (r.scopes && r.scopes.length) probe('scopes', r.scopes);
       return r.body;
     } catch (e) {
@@ -486,7 +548,7 @@ function create(record = {}, deps = {}) {
         const t = readToken().token;
         if (t && t.access_token === tok && tokens) { try { await tokens.write({ ...t, revokedAt: now(), revokedWhy: e.detail.error }, { expiresAt: null, scopes: t.scopes || [], user: t.label || null }); } catch { /* the next call says it again */ } }
       }
-      throw e;
+      throw orgRefusal(method, e, held);
     }
   }
 
@@ -1119,7 +1181,7 @@ module.exports = {
   kind: KIND, caps, create, manifest: MANIFEST, api: API_ROW, sendGrant: SEND_GRANT, reactionsGrant: REACTIONS_GRANT, API_ROW, consent: CONSENT, label: LABEL, integration: INTEGRATION, OPTIONS, optionOf,
   EGRESS, API, FILES_ORIGIN, FIRST_INGEST_MAX, WALK_TTL_MS, PAGE_MAX, PEOPLE_TTL_MS, PEOPLE_LOOKUPS_PER_CALL, RX_CACHE_TTL_MS, ATTACH_MAX_BYTES,
   toRecord, recordView, factsOfMessage, personOf, avatarUrlOf, AVATAR_ORIGIN, callSlack, sendCapsOf, capsOfScopes, vendorNameOf, tsMs, msTs, threadOfMatch, SEARCH_PAGES_MAX,
-  SEND_GRANT, REACTIONS_GRANT, READ_SCOPES, SEND_SCOPES, blocksOf: Text.slackStoredBlocks,
+  SEND_GRANT, REACTIONS_GRANT, READ_SCOPES, SEND_SCOPES, blocksOf: Text.slackStoredBlocks, METHOD_SCOPE,
 };
 // lane dc-channels-manifest (rv F2): the module IS the registered thing — register() validates every field the engine
 // reads off it; `adapter` stays the module itself for the suites that register it by that name

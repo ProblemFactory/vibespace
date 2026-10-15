@@ -9,7 +9,6 @@ const os = require('os');
 const path = require('path');
 const { restoredTurnState } = require('../turn-state.js'); // PURE (lane parked-ask-stall): the ring's last turn-state record
 const pty = require('node-pty');
-const { execFileSync, spawn } = require('child_process');
 const { createMessageManager } = require('../normalizers');
 const { pipePtyShim } = require('../pty-duck'); // B-ae4b: the R6 re-open duck holds a listener SET (the liveness stamp + the consumer)
 const { dedupWebuiSockets } = require('../session-store');
@@ -62,9 +61,10 @@ function create({ rootDir, PORT, BUFFERS_DIR, META_DIR, SOCKETS_DIR, DTACH_CMD,
   ENV_CMD, NODE_CMD, CHAT_WRAPPER, activeSessions, sessionCounterRef,
   attachToDtach, setupSessionPty, readSessionMeta, writeSessionMeta,
   deleteSessionMeta, broadcastToSession, broadcastActiveSessions,
-  refreshWebuiPids, sbNoteServerOp, getHosts, getDialBridge }) {
+  refreshWebuiPids, sbNoteServerOp, getHosts, getDialBridge, getExitProxy = () => null, note = () => { } }) {
   const hosts = mk(getHosts);
   const dialBridge = mk(getDialBridge);
+  const exitProxyRef = mk(getExitProxy); // B-92a4: a session the re-probe un-adopts ends its exit pairs + waiting asks like any ended one
   const ensureDir = (p) => { if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true }); };
   // THE CLASSIFIER REROUTE SURVIVES A RESTART (2026-09-13 r3 §7). The stamp
   // says "the CLI is answering with a model we did not ask for"; it is
@@ -170,37 +170,174 @@ function armRestoredCapture(id, s) {
 // adds ~3 s at 3 678 processes). The SAME questions as children, asked before the server listens (server.js waits for
 // this promise), four at a time: which sockets have an owner (fuser, else pgrep), which remote sockets are alive (fuser),
 // which conversations a live process holds (the batched fd scan). restoreSessions takes the answers once and asks
-// synchronously only what they do not hold (a socket or a conversation that appeared since).
+// never asks itself (B-92a4, below): what they did not answer it adopts as probe-pending.
+//
+// A PROBE THAT CANNOT BE REAPED IS AN ANSWER, NEVER A WAIT (B-92a4, lane boot-probes-unkillable; production 2026-10-14
+// 17:14 PDT: the hub printed `[safe-fs] worker pool up`, then nothing for 96 s and no listener until a second restart —
+// data/sockets on NFS, ~3 700 processes). A `fuser` stuck in D state on its NFS fd walk never died on runChild's TERM,
+// the promise never settled, and server.js listens only after this one. Two bounds now: runChild's timer ANSWERS
+// (TIMEOUT, then KILL — src/server/tls.js), and the whole pass has a cap (PROBE_CAP_MS; env VIBESPACE_PROBE_CAP_MS for
+// the gate): what is still open at the cap — or ran out both bounds — is `unanswered` (sockFile → the open question),
+// named by the boot trace's restore-probes span (probeFacts). A non-answer is never evidence (the keeper law).
+const PROBE_CAP_MS = 25000;
 const dedupIdsOf = (metas) => [...new Set(metas.map(({ m }) => m.claudeSessionId).filter((s) => /^[\w-]+$/.test(s || '')))];
 const fdScanScript = (ids) => `${fdScanShellFns()}\nvs_fd_scan '/(${ids.join('|')})[.]jsonl' | cut -f2`;
 const liveConvosOf = (ids, out) => { const held = out.split('\n'), live = new Set(); for (const id of ids) if (held.some((t) => t.includes(`/${id}.jsonl`))) live.add(id); return live; };
 const sameIds = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
+const dedupKey = (m) => `${m.backend || 'claude'}:${m.host || 'local'}:${m.claudeSessionId}`; // dedupWebuiSockets' own key
+const runChildP = (bin, args, ms) => require('./tls.js').runChild(bin, args, ms);
+// the restore's two liveness rungs, as children: fuser (an owner ⇒ alive), else pgrep -f (a command line naming the socket — never one of `own`, this server's own `dtach -a` attach clients) ⇒ true / false, or null = NO ANSWER (its bound ran out, or the tool is missing)
+const noAnswer = (r) => r.code === 'TIMEOUT' || r.code === 'ENOENT';
+const ownedP = async (sp, rung2, ask = () => { }, own = new Set()) => { ask('fuser'); const r = await runChildP('fuser', [sp], 2000); if (r.code === 0) return r.out.trim().length > 0; if (!rung2) return noAnswer(r) ? null : false; ask('pgrep'); const g = await runChildP('pgrep', ['-f', sp], 2000); return noAnswer(g) ? null : g.code === 0 && g.out.split('\n').some((x) => x.trim() && !own.has(Number(x))); };
 let probed = null, probing = null;
 function probeSockets() {
   if (probing) return probing;
-  const { runChild } = require('./tls.js');
-  const ownedP = async (sp, rung2) => { const r = await runChild('fuser', [sp], 2000); return r.code === 0 ? r.out.trim().length > 0 : !!rung2 && (await runChild('pgrep', ['-f', sp], 2000)).code === 0; }; // the sync rungs below, as children
-  const out = { dedupIds: [], liveConvos: null, fdScanError: null, alive: new Map(), remoteAlive: new Map() };
+  const capMs = Number(process.env.VIBESPACE_PROBE_CAP_MS) || PROBE_CAP_MS;
+  const out = { dedupIds: [], liveConvos: null, fdScanError: null, alive: new Map(), remoteAlive: new Map(), unanswered: new Map(), capMs, capped: false };
+  const asking = new Map(); // sockFile → the question in flight
+  let closed = false; // the cap (or the end): a late answer writes nothing, a queued question is never asked
   probing = (async () => {
     let sockets = []; try { sockets = fs.readdirSync(SOCKETS_DIR).filter(f => f.startsWith('cw-')); } catch { }
     const metas = [];
     for (const sockFile of sockets) { let m; try { m = readSessionMeta(sockFile); } catch { continue; } if (ownsItsId(m)) metas.push({ sockFile, m }); }
     out.dedupIds = dedupIdsOf(metas);
-    const asks = sockets.map((sockFile) => async () => out.alive.set(sockFile, await ownedP(path.join(SOCKETS_DIR, sockFile), true)));
-    for (const { sockFile, m } of metas) if (m.host) asks.push(async () => out.remoteAlive.set(sockFile, await ownedP(path.join(SOCKETS_DIR, sockFile), false)));
-    if (out.dedupIds.length) asks.unshift(async () => { const r = await runChild('sh', ['-c', fdScanScript(out.dedupIds)], 20000); if (r.code === 0) out.liveConvos = liveConvosOf(out.dedupIds, r.out); else out.fdScanError = r.err.split('\n')[0] || String(r.code); });
-    const drain = async () => { for (let a; (a = asks.shift());) { try { await a(); } catch { } } };
-    await Promise.all([drain(), drain(), drain(), drain()]);
+    const answer = (map, key, v) => { if (!closed) map.set(key, v); };
+    const asks = sockets.map((sockFile) => async () => answer(out.alive, sockFile, await ownedP(path.join(SOCKETS_DIR, sockFile), true, (q) => { if (closed) throw new Error('past the cap'); asking.set(sockFile, q); })));
+    for (const { sockFile, m } of metas) if (m.host) asks.push(async () => answer(out.remoteAlive, sockFile, await ownedP(path.join(SOCKETS_DIR, sockFile), false)));
+    if (out.dedupIds.length) asks.unshift(async () => { const r = await runChildP('sh', ['-c', fdScanScript(out.dedupIds)], 20000); if (closed || r.code === 'TIMEOUT') return; if (r.code === 0) out.liveConvos = liveConvosOf(out.dedupIds, r.out); else out.fdScanError = r.err.split('\n')[0] || String(r.code); });
+    const drain = async () => { for (let a; !closed && (a = asks.shift());) { try { await a(); } catch { } } };
+    let cap = null;
+    await Promise.race([Promise.all([drain(), drain(), drain(), drain()]), new Promise((r) => { cap = setTimeout(() => { out.capped = true; r(); }, capMs); })]);
+    clearTimeout(cap); closed = true;
+    for (const sockFile of sockets) if (out.alive.get(sockFile) == null) out.unanswered.set(sockFile, asking.get(sockFile) || 'not asked');
+    if (out.dedupIds.length && !out.liveConvos && !out.fdScanError) { // the conversations the fd scan did not cover: only a duplicate's matter (a lone socket is never retired by the dedup)
+      const n = new Map(); for (const { m } of metas) n.set(dedupKey(m), (n.get(dedupKey(m)) || 0) + 1);
+      for (const { sockFile, m } of metas) if (!m.host && n.get(dedupKey(m)) > 1 && !out.unanswered.has(sockFile)) out.unanswered.set(sockFile, 'fd-scan');
+    }
     probed = out;
     return out;
-  })().catch(() => { probed = out; return out; }); // never rejects: server.js listens after it whatever happened (what it did not answer, the restore asks itself)
+  })().catch(() => { closed = true; probed = out; return out; }); // never rejects: server.js listens after it whatever happened (what it did not answer is adopted probe-pending)
   return probing;
+}
+/** The boot trace's restore-probes facts (server.js): the sockets with no answer, named — `N unanswered (fuser cw-…)`. */
+function probeFacts(o) {
+  const u = o && o.unanswered;
+  if (!u || !u.size) return null;
+  const named = [...u].slice(0, 3).map(([sockFile, q]) => `${q} ${sockFile}`).join(', ');
+  return { unanswered: u.size, capped: !!o.capped, note: `${u.size} unanswered (${named}${u.size > 3 ? `, +${u.size - 3}` : ''})` };
+}
+
+// THE TWO RETIRES — ONE function each, called by restoreSessions AND by its deferred re-probe (B-92a4), so a socket the
+// re-probe settles dead / a duplicate it settles losing goes exactly the way the boot would have sent it.
+/** A dead dtach socket: the socket goes; a REMOTE session's meta is kept as an orphan for the re-adopt, a local one's is deleted. */
+function retireDeadSocket(sockFile, socketPath) {
+  console.log(`  ✗ Dead socket: ${sockFile} — cleaning up`);
+  try { fs.unlinkSync(socketPath); } catch {}
+  // B-1525 (2.219.0): a REMOTE session's meta holds the ONLY local record
+  // of its keeper sid / dial device — the remote half (keeper daemon,
+  // device pipe session) survives a pod-level death, and deleting the
+  // meta here orphaned it forever (userL's h200 keeper claudes needed
+  // manual surgery). Keep those metas tagged orphanedAt for re-adopt
+  // (resume host-inference + findKeeperFor consume them); local-only
+  // sessions keep the old cleanup.
+  try {
+    const dm = readSessionMeta(sockFile) || {};
+    if ((dm.host || dm.dialDeviceId) && !dm.orphanedAt) {
+      writeSessionMeta(sockFile.replace(/\.orphan$/, ''), { ...dm, orphanedAt: Date.now() });
+      const op = path.join(META_DIR, sockFile + '.json');
+      fs.renameSync(op, op + '.orphan');
+      console.log(`    ↳ remote session meta preserved as orphan (${dm.keeperSid || dm.dialDeviceId || dm.host})`);
+      return;
+    }
+  } catch { }
+  deleteSessionMeta(sockFile);
+}
+/** A stale duplicate of a conversation another socket owns: SIGTERM its dtach session (claude, if any, is the older/losing
+ *  writer — the pids from a pgrep CHILD, never a sync ask) and clean socket + buffer + meta. */
+function retireDuplicate(sockFile, socketPath, id, claudeSessionId) {
+  console.log(`  ⤫ Duplicate of ${claudeSessionId} — retiring stale ${sockFile}`);
+  runChildP('pgrep', ['-f', socketPath], 2000).then((r) => {
+    for (const p of r.code === 0 ? r.out.split('\n') : []) {
+      const pid = Number(p.trim());
+      if (pid > 1 && pid !== process.pid) { try { process.kill(pid, 'SIGTERM'); } catch {} }
+    }
+  }, () => { });
+  try { fs.unlinkSync(socketPath); } catch {}
+  try { fs.unlinkSync(path.join(BUFFERS_DIR, id + '.buf')); } catch {}
+  try { fs.unlinkSync(path.join(BUFFERS_DIR, id + '.json')); } catch {}
+  deleteSessionMeta(sockFile);
+}
+
+// THE RE-PROBE (B-92a4): restoreSessions adopts a socket with no answer ALIVE — never retired, never dedup-killed, never
+// marked stopped on a non-answer; its card is an ordinary card. After listen, off the loop, the SAME questions are asked
+// again through runChild: 10 s, then 30 / 60 / 120 / 120 s (≤ 5 tries). alive ⇒ the mark clears; dead ⇒
+// retireDeadSocket and the adopted session goes; a duplicate's conversation answered ⇒ the same dedup, its loser
+// retireDuplicate'd; no answer after the tries ⇒ it stays alive, said in ⚙ Diagnostics (the boot trace) — never a kill.
+const REPROBE_MS = [10000, 30000, 60000, 120000, 120000];
+const pendingProbes = new Map(); // sockFile → { id, session, socketPath, q: Set('alive' | 'dedup') }
+const pendingGroups = new Map(); // dedup key → every member sockFile of an undecided duplicate set
+let reprobeTries = 0, reprobeTimer = null, reprobing = null;
+const say = (line) => { console.log(`[boot-restore] ${line}`); try { note(line); } catch { } };
+const unadopt = (id, s) => {
+  if (activeSessions.get(id) !== s) return;
+  try { exitProxyRef.onSessionEnd?.(s, id); } catch { } // its exit pairs + waiting asks end with it (the exit path's rule)
+  activeSessions.delete(id); restoredSidecars.delete(id); broadcastActiveSessions();
+};
+function armReprobe() {
+  if (reprobeTimer || reprobing || !pendingProbes.size || reprobeTries >= REPROBE_MS.length) return;
+  reprobeTimer = setTimeout(() => { reprobeTimer = null; reprobePending().catch((e) => console.warn('[boot-restore] re-probe failed:', e.message)); }, REPROBE_MS[reprobeTries]);
+  if (reprobeTimer.unref) reprobeTimer.unref();
+}
+/** One pass of the ladder (the timer's, or a caller's now — it takes the scheduled one's place; one pass at a time). */
+function reprobePending() {
+  if (reprobing) return reprobing;
+  clearTimeout(reprobeTimer); reprobeTimer = null;
+  reprobing = reprobePass().finally(() => { reprobing = null; armReprobe(); });
+  return reprobing;
+}
+async function reprobePass() {
+  if (!pendingProbes.size) return { tries: reprobeTries, alive: [], dead: [], duplicate: [], open: [] };
+  reprobeTries++;
+  const tally = { tries: reprobeTries, alive: [], dead: [], duplicate: [], open: [] };
+  const own = new Set([...activeSessions.values()].map((s) => s && s.pty && s.pty.pid).filter(Boolean));
+  const asks = [];
+  for (const [sockFile, p] of [...pendingProbes]) { // 1. is the socket alive — four at a time, like the boot's probes
+    if (activeSessions.get(p.id) !== p.session) { pendingProbes.delete(sockFile); continue; } // ended or replaced meanwhile (a Terminate): nothing left to settle
+    if (p.q.has('alive')) asks.push(async () => {
+      const v = await ownedP(p.socketPath, true, () => { }, own);
+      if (v === true) p.q.delete('alive');
+      else if (v === false && activeSessions.get(p.id) === p.session) { retireDeadSocket(sockFile, p.socketPath); unadopt(p.id, p.session); pendingProbes.delete(sockFile); tally.dead.push(sockFile); }
+    });
+  }
+  const drain = async () => { for (let a; (a = asks.shift());) { try { await a(); } catch { } } };
+  await Promise.all([drain(), drain(), drain(), drain()]);
+  for (const [key, members] of [...pendingGroups]) { // 2. which duplicate wins — once every pending member's socket answered
+    const rows = members.map((sockFile) => { let m = null; try { m = readSessionMeta(sockFile); } catch { } return { sockFile, m, p: pendingProbes.get(sockFile) }; }).filter((r) => r.m && ownsItsId(r.m));
+    if (rows.some((r) => r.p && r.p.q.has('alive'))) continue;
+    let live = new Set(), known = true;
+    const ids = dedupIdsOf(rows.filter((r) => !r.m.host));
+    if (ids.length) { const r = await runChildP('sh', ['-c', fdScanScript(ids)], 20000); if (r.code === 0) live = liveConvosOf(ids, r.out); else if (r.code === 'TIMEOUT') known = false; }
+    const remote = new Map();
+    for (const r of rows) if (r.m.host) { const v = await ownedP(path.join(SOCKETS_DIR, r.sockFile), false); if (v == null) known = false; remote.set(r.sockFile, v); }
+    if (!known) continue;
+    pendingGroups.delete(key);
+    const { retire } = dedupWebuiSockets(rows.map(({ sockFile, m }) => ({ sockFile, backend: m.backend || 'claude', host: m.host || 'local', claudeSessionId: m.claudeSessionId, createdAt: m.createdAt || 0, claudeAlive: m.host ? !!remote.get(sockFile) : live.has(m.claudeSessionId) })));
+    for (const r of rows) {
+      if (!r.p) continue;
+      r.p.q.delete('dedup');
+      if (retire.has(r.sockFile)) { retireDuplicate(r.sockFile, r.p.socketPath, r.p.id, r.m.claudeSessionId); unadopt(r.p.id, r.p.session); pendingProbes.delete(r.sockFile); tally.duplicate.push(r.sockFile); }
+    }
+  }
+  for (const [sockFile, p] of [...pendingProbes]) { if (p.q.size) tally.open.push(sockFile); else { pendingProbes.delete(sockFile); tally.alive.push(sockFile); } }
+  say(`re-probe ${reprobeTries}/${REPROBE_MS.length}: ${tally.alive.length} alive, ${tally.dead.length} dead (retired), ${tally.duplicate.length} duplicate (retired), ${tally.open.length} still unanswered`);
+  if (tally.open.length && reprobeTries === REPROBE_MS.length) say(`re-probe gave up after ${reprobeTries} tries: ${tally.open.join(', ')} kept alive — a non-answer is never a kill`);
+  return tally;
 }
 
 function restoreSessions() {
   ensureDir(SOCKETS_DIR);
   ensureDir(BUFFERS_DIR);
-  const P = probed; probed = null; probing = null; // the probes answer THIS restore only
+  const P = probed || { dedupIds: [], liveConvos: null, fdScanError: null, alive: new Map(), remoteAlive: new Map(), unanswered: new Map() }; probed = null; probing = null; // the probes answer THIS restore only (none ran: every socket is unanswered)
   const sockets = fs.readdirSync(SOCKETS_DIR).filter(f => f.startsWith('cw-'));
   if (!sockets.length) return;
 
@@ -263,39 +400,33 @@ function restoreSessions() {
   // changing which socket boot destroys is its own decision, not a rider on a
   // performance fix. Backlog: give claudeAlive the registry, keyed with the
   // procStart counter-capture so pid reuse cannot fake it.
-  let liveConvos = new Set();
+  let liveConvos = new Set(), convosUnknown = false;
   const dedupIds = dedupIdsOf(dedupMetas);
-  if (dedupIds.length && P && sameIds(P.dedupIds, dedupIds) && (P.liveConvos || P.fdScanError)) {
+  if (dedupIds.length && sameIds(P.dedupIds, dedupIds) && (P.liveConvos || P.fdScanError)) {
+    // Degrading to "nobody is live" is survivable (the dedup falls back to
+    // createdAt), but it must never be silent again — that is what hid this
+    // for as long as it was broken.
     if (P.liveConvos) liveConvos = P.liveConvos; else console.warn('[boot-restore] live-conversation fd scan failed:', P.fdScanError);
-  } else if (dedupIds.length) {
-    try {
-      const pat = `/(${dedupIds.join('|')})[.]jsonl`;
-      const script = `${fdScanShellFns()}\nvs_fd_scan '${pat}' | cut -f2`;
-      const out = execFileSync('sh', ['-c', script], { encoding: 'utf-8', timeout: 20000 });
-      const held = out.split('\n');
-      for (const id of dedupIds) if (held.some((t) => t.includes(`/${id}.jsonl`))) liveConvos.add(id);
-    } catch (e) {
-      // Degrading to "nobody is live" is survivable (the dedup falls back to
-      // createdAt), but it must never be silent again — that is what hid this
-      // for as long as it was broken.
-      console.warn('[boot-restore] live-conversation fd scan failed:', e?.message || e);
-    }
-  }
+  } else if (dedupIds.length) convosUnknown = true; // B-92a4: the scan gave NO answer for these conversations (its bound or the cap ran out, or a socket appeared since) — never asked here; their duplicates wait for the re-probe
   // REMOTE sockets: the /proc scan can't see a claude running ON THE HOST, so
   // claudeAlive was unconditionally false and duplicate sockets of one remote
   // conversation could retire the wrong one (audit 2.192.0/B-82ea). Substitute
   // the LOCAL transport liveness (dtach socket has an owner = the ssh/agentd
   // pipe survived the restart) — the same signal the adoption loop uses below.
   const remoteSockAlive = new Set();
+  const remoteUnknown = new Set();
   for (const { sockFile, m } of dedupMetas) {
     if (!m.host) continue;
-    if (P && P.remoteAlive.has(sockFile)) { if (P.remoteAlive.get(sockFile)) remoteSockAlive.add(sockFile); continue; }
-    try {
-      const out = execFileSync('fuser', [path.join(SOCKETS_DIR, sockFile)], { encoding: 'utf-8', timeout: 2000, stdio: ['pipe', 'pipe', 'pipe'] });
-      if (out.trim().length > 0) remoteSockAlive.add(sockFile);
-    } catch {}
+    const v = P.remoteAlive.get(sockFile);
+    if (v === true) remoteSockAlive.add(sockFile); else if (v == null) remoteUnknown.add(sockFile); // B-92a4: no answer ⇒ the re-probe asks
   }
-  const { retire: retireSockets } = dedupWebuiSockets(dedupMetas.map(({ sockFile, m }) => ({
+  // B-92a4: a duplicate set whose liveness has no answer (local: the fd scan; remote: a member's fuser) is UNDECIDED —
+  // none of its sockets is retired now; each is adopted probe-pending and the re-probe re-runs this dedup once it answers.
+  const groupOf = new Map();
+  for (const { sockFile, m } of dedupMetas) { const k = dedupKey(m); if (!groupOf.has(k)) groupOf.set(k, []); groupOf.get(k).push(sockFile); }
+  const undecided = new Set();
+  for (const { sockFile, m } of dedupMetas) if (groupOf.get(dedupKey(m)).length > 1 && (m.host ? remoteUnknown.has(sockFile) : convosUnknown)) undecided.add(dedupKey(m));
+  const { retire: retireSockets } = dedupWebuiSockets(dedupMetas.filter(({ m }) => !undecided.has(dedupKey(m))).map(({ sockFile, m }) => ({
     sockFile, backend: m.backend || 'claude', host: m.host || 'local',
     claudeSessionId: m.claudeSessionId, createdAt: m.createdAt || 0,
     claudeAlive: m.host ? remoteSockAlive.has(sockFile) : liveConvos.has(m.claudeSessionId),
@@ -305,66 +436,24 @@ function restoreSessions() {
     const socketPath = path.join(SOCKETS_DIR, sockFile);
     try { fs.statSync(socketPath); } catch { continue; }
 
-    // Verify socket is live — check if any process owns it
-    let socketAlive = false;
-    if (P && P.alive.has(sockFile)) socketAlive = P.alive.get(sockFile);
-    else try {
-      const out = execFileSync('fuser', [socketPath], { encoding: 'utf-8', timeout: 2000, stdio: ['pipe', 'pipe', 'pipe'] });
-      socketAlive = out.trim().length > 0;
-    } catch {
-      // fuser returns non-zero if no process found, also try pgrep
-      try {
-        execFileSync('pgrep', ['-f', socketPath], { encoding: 'utf-8', timeout: 2000 });
-        socketAlive = true;
-      } catch { socketAlive = false; }
-    }
+    // Verify socket is live — the probes' answer (fuser, else pgrep: asked before listen, as children). NO ANSWER
+    // (B-92a4) is not "dead": the socket is adopted ALIVE, probe-pending, and the re-probe after listen settles it.
+    const open = new Set();
+    let socketAlive = P.alive.get(sockFile);
+    if (socketAlive == null) { open.add('alive'); socketAlive = true; }
 
-    if (!socketAlive) {
-      console.log(`  ✗ Dead socket: ${sockFile} — cleaning up`);
-      try { fs.unlinkSync(socketPath); } catch {}
-      // B-1525 (2.219.0): a REMOTE session's meta holds the ONLY local record
-      // of its keeper sid / dial device — the remote half (keeper daemon,
-      // device pipe session) survives a pod-level death, and deleting the
-      // meta here orphaned it forever (userL's h200 keeper claudes needed
-      // manual surgery). Keep those metas tagged orphanedAt for re-adopt
-      // (resume host-inference + findKeeperFor consume them); local-only
-      // sessions keep the old cleanup.
-      try {
-        const dm = readSessionMeta(sockFile) || {};
-        if ((dm.host || dm.dialDeviceId) && !dm.orphanedAt) {
-          writeSessionMeta(sockFile.replace(/\.orphan$/, ''), { ...dm, orphanedAt: Date.now() });
-          const op = path.join(META_DIR, sockFile + '.json');
-          fs.renameSync(op, op + '.orphan');
-          console.log(`    ↳ remote session meta preserved as orphan (${dm.keeperSid || dm.dialDeviceId || dm.host})`);
-          continue;
-        }
-      } catch { }
-      deleteSessionMeta(sockFile);
-      continue;
-    }
+    if (!socketAlive) { retireDeadSocket(sockFile, socketPath); continue; }
 
     const meta = readSessionMeta(sockFile);
     const id = meta.webuiSessionId || ('sess-' + (++sessionCounterRef.value) + '-' + Date.now());
     persistNoStart(sockFile, meta, { readSessionMeta, writeSessionMeta }); // r5: before any writer persists the boot instant as its createdAt
 
     // stale duplicate of a conversation another socket owns — do NOT adopt (two
-    // cards); retire the husk so it can't double-write the JSONL. SIGTERM the
-    // socket's dtach session (claude, if any, is the older/losing writer) then
-    // clean socket + buffer + meta.
-    if (retireSockets.has(sockFile)) {
-      console.log(`  ⤫ Duplicate of ${meta.claudeSessionId} — retiring stale ${sockFile}`);
-      try {
-        for (const p of execFileSync('pgrep', ['-f', socketPath], { encoding: 'utf-8', timeout: 2000 }).split('\n')) {
-          const pid = Number(p.trim());
-          if (pid > 1 && pid !== process.pid) { try { process.kill(pid, 'SIGTERM'); } catch {} }
-        }
-      } catch {}
-      try { fs.unlinkSync(socketPath); } catch {}
-      try { fs.unlinkSync(path.join(BUFFERS_DIR, id + '.buf')); } catch {}
-      try { fs.unlinkSync(path.join(BUFFERS_DIR, id + '.json')); } catch {}
-      deleteSessionMeta(sockFile);
-      continue;
-    }
+    // cards); retire the husk so it can't double-write the JSONL (retireDuplicate).
+    // B-92a4: never on a non-answer — an undecided set, or an unanswered socket the dedup would retire, waits probe-pending.
+    const dk = ownsItsId(meta) ? dedupKey(meta) : null;
+    if (dk && (undecided.has(dk) || (open.size && retireSockets.has(sockFile)))) { open.add('dedup'); pendingGroups.set(dk, groupOf.get(dk) || [sockFile]); }
+    else if (retireSockets.has(sockFile)) { retireDuplicate(sockFile, socketPath, id, meta.claudeSessionId); continue; }
 
     // Detect mode and streaming state from wrapper metadata
     let sessionMode = meta.mode || 'terminal';
@@ -481,8 +570,14 @@ function restoreSessions() {
     session._artifacts = (meta.artifacts && typeof meta.artifacts === 'object') ? meta.artifacts : null; // lane artifacts-model: the deliverable rows (the user's saves live only here) survive the restart
     session._helperAskedAt = (meta.helperAskedAt && typeof meta.helperAskedAt === 'object') ? meta.helperAskedAt : null; // verify r3: each waiting helper ask's first-seen instant — the 60 s inbox clock survives the restart
     attachToDtach(id, socketPath, session);
+    if (open.size) pendingProbes.set(sockFile, { id, session, socketPath, q: open });
 
     console.log(`  ✓ Reconnected: ${session.name} (${session.cwd})`);
+  }
+  if (pendingProbes.size) {
+    const named = [...pendingProbes].slice(0, 3).map(([sockFile]) => `${P.unanswered.get(sockFile) || 'not asked'} ${sockFile}`).join(', ');
+    say(`${pendingProbes.size} session(s) adopted probe-pending — no answer (${named}${pendingProbes.size > 3 ? `, +${pendingProbes.size - 3}` : ''}); asked again from ${REPROBE_MS[0] / 1000} s, never retired on a non-answer`);
+    armReprobe();
   }
 
   // Populate webuiPids cache after all sessions are restored
@@ -750,6 +845,6 @@ async function readoptOrphanKeeperSessions() {
 }
 
   return { migrateLegacyHomeProjects, restoreSessions, restoreAgentdPipeSessions,
-    readoptOrphanKeeperSessions, probeSockets };
+    readoptOrphanKeeperSessions, probeSockets, probeFacts, reprobePending, probePending: () => new Map([...pendingProbes].map(([f, p]) => [f, [...p.q]])) };
 }
 module.exports = { create, heldOriginOf, persistNoStart }; // r5: the two held-origin helpers are PURE over a meta + store (test-codex-pool §R17b)

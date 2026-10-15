@@ -29,6 +29,7 @@ import { handoverFacts } from '../stash-summary.js'; // 2026-09-28: the hand-ove
 import { encodedCommandOf } from '../encoded-command.js'; // lane machine-card-fold: a PowerShell -EncodedCommand drawn as the script it runs (PURE, bundled)
 import { revealParts as hiddenPartsOf } from '../hidden-chars.js'; // …its hidden characters as visible U+XXXX marks (THE one set)
 import { machineLineOf } from './chat-run-summary.js'; // lane machine-card-compact: a Machines card's ONE line inside its machine's group (PURE)
+import { isQuietDrift } from './chat-run-summary.js'; // lane record-oracle-2-1-296: a stored FIELD-ONLY drift card renders nothing (PURE)
 import { exitCallCardOf } from './chat-run-summary.js'; // lane exit-calls-in-history: a vibespace-exit Bash call drawn as its machine card (PURE)
 import { outputPreview, cmdFold } from '../exit-reach.js'; // lane-exit-run-output E3: the command card's first lines of output (stderr first) + "Show output" (PURE, bundled)
 const noticeFacts = (body) => handbackFacts(body) || handoverFacts(body) || channelWakeFacts(body);   // ONE facts hook per producer, tried in order; null = the generic rules
@@ -68,6 +69,13 @@ function bypassLineWords(p) {
     ? t('Auto-allowed (bypass), but the CLI did not run it: {tool} — {why}', { tool: p.tool || '?', why: p.refused })
     : t('Auto-allowed (bypass): {tool} — {head}', { tool: p.tool || '?', head: p.head || '' });
   return { text, title: t('VibeSpace answered this permission prompt because the conversation runs in bypass mode. Asked: {reason}', { reason: p.reason || p.reasonType || '—' }) };
+}
+
+/** 2.1.296 `file_attachments_missing` (lane record-oracle-2-1-296): how many of a message's attached files did not reach Claude, in
+ *  our words; the CLI's reason codes (too_large, not_found, …) ride the hover. */
+function attachmentsMissingWords(p) {
+  const codes = Array.isArray(p.codes) ? p.codes.map(String).join(', ') : '';
+  return { text: t('{missing} of {sent} attached files did not reach Claude', { missing: Number(p.missing), sent: p.sent == null ? '?' : Number(p.sent) }), title: t('Harness message · {level}', { level: 'notice' }) + (codes ? ' · ' + codes : '') };
 }
 
 function memoryBase(fp) {
@@ -1693,16 +1701,21 @@ class ChatRenderers {
     // upstream) with the DIM head variant (handling is unchanged), the shape +
     // the field list in the head, enum drift as its own line, the redacted
     // sample behind the expander. Everything is harness-authored ⇒ escaped.
-    // Folds under the same 'unknown' kind.
+    // Folds under the same 'unknown' kind. Since lane record-oracle-2-1-296 the
+    // normalizer makes it for an ENUM drift only (field growth is a drift-ledger
+    // row in ⚙ Diagnostics); a FIELD-ONLY card a conversation already stores
+    // renders NOTHING — the owner's open conversations go quiet, no store rewritten.
     if (msg.noticeKind === 'unknown-fields' && msg.content?.[0]?.type === 'unknown_fields') {
+      if (isQuietDrift(msg)) return null;
       const b = msg.content[0];
       const el = document.createElement('div');
       el.className = 'chat-msg chat-msg-system chat-unknown-event chat-unknown-fields';
       const fields = Array.isArray(b.fields) ? b.fields : [];
       const plus = fields.length ? ` +{${fields.map((f) => escHtml(String(f))).join(', ')}}` : '';
-      el.innerHTML = `<div class="chat-unknown-event-head"><span class="chat-unknown-event-title">⚠ ${escHtml(t('New fields on a known record'))}</span><span class="chat-unknown-event-name">${escHtml(b.harness || '')} · ${escHtml(b.shape || '')}${plus}</span></div>`
+      // enum-only (every card the normalizers make since lane record-oracle-2-1-296): a VALUE, not fields — say so
+      el.innerHTML = `<div class="chat-unknown-event-head"><span class="chat-unknown-event-title">⚠ ${escHtml(fields.length ? t('New fields on a known record') : t('An undeclared value on a known record'))}</span><span class="chat-unknown-event-name">${escHtml(b.harness || '')} · ${escHtml(b.shape || '')}${plus}</span></div>`
         + (Array.isArray(b.enumDrift) ? b.enumDrift.map((e) => `<div class="chat-unknown-event-hint">${escHtml(t('Undeclared value: {field} = {value}', { field: String(e?.field || ''), value: String(e?.value || '') }))}</div>`).join('') : '')
-        + `<div class="chat-unknown-event-hint">${escHtml(t('A record VibeSpace knows, carrying fields it does not declare — the harness may have extended this event. Handling is unchanged.'))}</div>`;
+        + `<div class="chat-unknown-event-hint">${escHtml(fields.length ? t('A record VibeSpace knows, carrying fields it does not declare — the harness may have extended this event. Handling is unchanged.') : t('A record VibeSpace knows, carrying a value it does not declare — its meaning may differ from the declared ones. Handling is unchanged.'))}</div>`;
       if (b.sample) {
         const det = document.createElement('details');
         det.innerHTML = `<summary>${escHtml(t('Full record'))}</summary><pre class="chat-pre">${escHtml(b.sample)}</pre>`;
@@ -1737,7 +1750,7 @@ class ChatRenderers {
       // `say` = a notice in OUR words (2.1.288 instruction_size_warning carries numbers only); else the CLI's own text
       const p = b.params || {};
       const ours = b.say === 'instruction-size' ? escHtml(t('The CLI warns the instructions are large: {chars} characters (limit {limit})', { chars: Number(p.chars).toLocaleString(), limit: p.limit == null ? '?' : Number(p.limit).toLocaleString() })) : null;
-      const auto = b.say === 'bypass-auto-allow' ? bypassLineWords(p) : null; // lane bypass-no-prompts
+      const auto = b.say === 'bypass-auto-allow' ? bypassLineWords(p) : b.say === 'attachments-missing' ? attachmentsMissingWords(p) : null; // lane bypass-no-prompts · lane record-oracle-2-1-296
       el.innerHTML = `<span class="chat-system-text" title="${escHtml(auto ? auto.title : t('Harness message · {level}', { level: lv }))}">${lv === 'warning' ? UI_ICONS.alert : UI_ICONS.info || ''} ${ours ?? (auto ? escHtml(auto.text) : escHtml(b.text || ''))}</span>`;
       return { el, sideEffect: null };
     }

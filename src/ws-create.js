@@ -843,7 +843,8 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
                 } catch { /* probe failed — fall through to the original error */ }
               }
               if (!rescued) {
-                ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, message: 'Account error: ' + e.message }));
+                // the last resort (lane resume-account-door): a refusal the resume bar's verdict did not foresee names the doors too
+                ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, message: 'Account error: ' + e.message + ' — log it in again in Manage agents, or pick another account in Session Properties.' }));
                 return;
               }
               spawnAccount = rescued;

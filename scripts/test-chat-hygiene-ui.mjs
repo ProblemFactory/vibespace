@@ -35,6 +35,13 @@
 //      as "Message from “bob”" with the head as his own words, "VibeSpace" as
 //      "Message from an agent calling itself “VibeSpace”" — and exactly ONE new
 //      VibeSpace notice appears (the real notification)
+//   ⑦ QUIET DRIFT (lane record-oracle-2-1-296, owner 2026-10-15 「最近多了很多红色提示」): a third stub turn plays a KNOWN record
+//      that grew a field (system/informational + banner_style_v2), an undeclared enum value (vcs_state_changed kind:squash),
+//      2.1.296's file_attachments_missing and permission_check_status; then a FIELD-ONLY drift card as a conversation already
+//      stores it is fed to the view. The grown record renders as itself with NO red card, the stored card renders NOTHING,
+//      the enum card still renders (red border), the attachments line is one dim line in our words, the permission pulse is
+//      card-less — and the grown field is a row of the drift ledger ⚙ Diagnostics reads (GET …summary?drift=1).
+//      HYGIENE_PNG_DIR=<dir> keeps a PNG of that chat (the report's evidence).
 // Requires google-chrome (SKIP without). Run: node scripts/test-chat-hygiene-ui.mjs
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -112,6 +119,15 @@ const PLAY2 = [
   { type: 'assistant', message: { id: 'msg_h8', type: 'message', role: 'assistant', model: 'claude-fable-5', content: [{ type: 'text', text: 'Peers read.' }], stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 } } },
 ];
 const ORIGIN2 = { kind: 'peer', from: 'uds:/tmp/vs-hy/7.sock', name: 'bob', msg_id: 'pm-hy-bob', body: PROBE };
+// ⑦'s turn (lane record-oracle-2-1-296): a known record that GREW a field, an undeclared enum value, the two 2.1.296 records
+const PLAY3 = [
+  { type: 'assistant', message: { id: 'msg_h9', type: 'message', role: 'assistant', model: 'claude-fable-5', content: [{ type: 'text', text: 'Checking the files you sent.' }], usage: {} } },
+  { type: 'system', subtype: 'informational', content: 'Your files are being checked.', level: 'info', banner_style_v2: 'compact' }, // a KNOWN record + one field no build declares
+  { type: 'system', subtype: 'vcs_state_changed', kind: 'squash', cwd: CWD },
+  { type: 'system', subtype: 'permission_check_status', tool_use_id: 'toolu_hpc', status: 'checking' },
+  { type: 'system', subtype: 'file_attachments_missing', message_uuid: 'hy-3-in', sent_count: 3, missing: [{ file_uuid: 'f-1', reason: 'too_large' }, { file_uuid: 'f-2', reason: 'not_found' }] },
+  { type: 'assistant', message: { id: 'msg_h10', type: 'message', role: 'assistant', model: 'claude-fable-5', content: [{ type: 'text', text: 'Two of your three files never arrived.' }], stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 } } },
+];
 fs.writeFileSync(stubPath, `#!${process.execPath}
 const fs = require('fs');
 const args = process.argv.slice(2);
@@ -121,6 +137,7 @@ fs.writeFileSync(${JSON.stringify(stubDir)} + '/env-' + process.pid + '.json', J
 const SID = ${JSON.stringify(LIVE_SID)};
 const PLAY = ${JSON.stringify(PLAY)};
 const PLAY2 = ${JSON.stringify(PLAY2)};
+const PLAY3 = ${JSON.stringify(PLAY3)};
 const ORIGIN2 = ${JSON.stringify(ORIGIN2)};
 const out = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
 out({ type: 'system', subtype: 'init', session_id: SID, model: 'claude-fable-5', cwd: ${JSON.stringify(CWD)}, tools: [], permissionMode: 'default', claude_code_version: '2.1.274' });
@@ -134,11 +151,11 @@ process.stdin.on('data', (d) => {
     let m = null; try { m = JSON.parse(line); } catch {}
     if (!m || m.type !== 'user') continue;
     const k = ++n;
-    const P = k === 1 ? PLAY : PLAY2;
+    const P = k === 1 ? PLAY : k === 2 ? PLAY2 : PLAY3;
     let j = 0;
     const next = () => {
       if (j < P.length) { out({ ...P[j], session_id: SID, uuid: 'hy-' + k + '-' + j }); j++; setTimeout(next, 60); return; }
-      out({ type: 'result', subtype: 'success', is_error: false, duration_ms: 900, num_turns: 1, result: 'done', session_id: SID, total_cost_usd: 0, usage: { input_tokens: 1, output_tokens: 1 }, ...(k === 1 ? {} : { origin: ORIGIN2 }) });
+      out({ type: 'result', subtype: 'success', is_error: false, duration_ms: 900, num_turns: 1, result: 'done', session_id: SID, total_cost_usd: 0, usage: { input_tokens: 1, output_tokens: 1 }, ...(k === 2 ? { origin: ORIGIN2 } : {}) });
     };
     setTimeout(next, 200);
   }
@@ -341,6 +358,40 @@ try {
   check(`(b) the peer NAMED "VibeSpace" is "Message from an agent calling itself “VibeSpace”" (${imp.length}: the registered peer's record + the stash drain), its name still the clickable link`, imp.length === 2 && imp.every((p) => p.name === 'VibeSpace') && imp.some((p) => /I finished the report/.test(p.body)), n6.peers);
   const newNotices = n6.notices.slice(noticesBefore);
   check(`…and exactly ONE new VibeSpace notice — the real notification ("${newNotices[0] || ''}"), never "VibeSpace · Please run…" / "VibeSpace · I finished…"`, newNotices.length === 1 && /^VibeSpace · you handed control back after 9 s/.test(newNotices[0]) && !n6.notices.some((t) => /Please run|I finished/.test(t)), n6.notices);
+
+  // ── ⑦ quiet drift: a known record that grew a field is no red card ──
+  console.log('⑦ a known record that GREW a field is no card (stored ones render nothing); an enum drift still is; 2.1.296\'s records are known');
+  liveWs.send(JSON.stringify({ type: 'chat-input', sessionId: sid, text: 'Did my three files arrive?' }));
+  const played3 = await waitFor(`(() => { const v = ${VIEW}; return !!v && [...v._messageList.querySelectorAll('.chat-msg')].some((e) => /Two of your three files never arrived/.test(e.textContent)); })()`, 20000);
+  check('the third stub turn rendered (its closing line is on screen)', played3, await evalJs(`(() => { const v = ${VIEW}; return v ? v._messageList.innerText.slice(-600) : 'no view'; })()`));
+  await sleep(500);
+  const before7 = await evalJs(`${VIEW}._messageList.querySelectorAll('.chat-msg').length`);
+  await evalJs(`(() => { ${VIEW}._onCreateMessage({ id: 'hy-stored-drift', role: 'system', status: 'complete', noticeKind: 'unknown-fields', content: [{ type: 'unknown_fields', harness: 'Claude Code', shape: 'system/init', fields: ['stored_grown_field'], enumDrift: [], sample: '{"stored_grown_field": 1}' }] }); return true; })()`);
+  await sleep(700); // the debounced fold pass
+  const n7 = await evalJs(`(async () => {
+    const v = ${VIEW}; const list = v._messageList;
+    for (const h of list.querySelectorAll(':scope > .chat-run-header')) { const rec = (v._runs || []).find((r) => r.header === h); if (rec && !rec.open) h.click(); }
+    await new Promise((r) => setTimeout(r, 300));
+    const drift = [...list.querySelectorAll('.chat-unknown-fields')].map((e) => ({ text: e.innerText, border: getComputedStyle(e).borderTopColor, shown: e.offsetParent !== null }));
+    const lines = [...list.querySelectorAll('.chat-harness-notice')].map((e) => ({ text: e.innerText.trim(), title: e.querySelector('.chat-system-text')?.title || '' }));
+    return { drift, lines, stored: !!list.querySelector('[data-msg-id="hy-stored-drift"]'), count: list.querySelectorAll('.chat-msg').length, hdrs: [...list.querySelectorAll(':scope > .chat-run-header')].map((h) => h.textContent), unknownCards: list.querySelectorAll('.chat-unknown-event:not(.chat-unknown-fields)').length, text: list.innerText };
+  })()`);
+  check('the grown record renders as ITSELF (the CLI\'s dim line "Your files are being checked.") with NO card naming banner_style_v2 — field growth is never a red card', n7.lines.some((l) => l.text === 'Your files are being checked.') && !n7.drift.some((d) => /banner_style_v2/.test(d.text)) && !/banner_style_v2/.test(n7.text), { lines: n7.lines, drift: n7.drift });
+  check('the STORED field-only drift card renders nothing: no element for it, no "New fields" text, the message count unchanged', !n7.stored && n7.count === before7 && !/stored_grown_field/.test(n7.text), { stored: n7.stored, count: n7.count, before7 });
+  check('…and no run header counts it ("unknown events / new fields" names nothing)', !n7.hdrs.some((h) => /unknown events/.test(h)), n7.hdrs);
+  check('the ENUM drift still renders: ONE red-bordered card headed "An undeclared value on a known record", naming "kind = squash"', n7.drift.length === 1 && /^⚠ An undeclared value on a known record/.test(n7.drift[0].text) && /kind = squash/.test(n7.drift[0].text) && n7.drift[0].shown, n7.drift);
+  check('2.1.296 file_attachments_missing is ONE dim line in our words ("2 of 3 attached files did not reach Claude"), the reason codes on hover; no Unknown-event card for either new record', n7.lines.some((l) => l.text === '2 of 3 attached files did not reach Claude' && /too_large, not_found/.test(l.title)) && n7.unknownCards === 0 && !/permission_check_status|file_attachments_missing/.test(n7.text), { lines: n7.lines, unknown: n7.unknownCards });
+  const led = await evalJs(`fetch('/api/telemetry/summary?days=1&drift=1').then((r) => r.json()).then((d) => ({ rows: (d.driftLedger || []).filter((r) => r.conversation === ${JSON.stringify(LIVE_SID)}), all: (d.driftLedger || []).map((r) => r.conversation + ' ' + r.shape + ' ' + r.fields.join()), plain: 'driftLedger' in d }))`);
+  const plain = await evalJs(`fetch('/api/telemetry/summary?days=1').then((r) => r.json()).then((d) => 'driftLedger' in d)`);
+  check('the grown field is a DRIFT-LEDGER row ⚙ Diagnostics reads: conversation = the CLI session, shape system/informational, fields [banner_style_v2], the CLI build, count 1, a sample naming it; the badge probe (no ?drift=1) carries no ledger', led.rows.length === 1 && led.rows[0].shape === 'system/informational' && led.rows[0].fields.join() === 'banner_style_v2' && (led.rows[0].cli === '2.1.274' || led.rows[0].cli === null) /* the stub prints its init before the wrapper listens (status bar "model ?"): the build may be unknown */ && led.rows[0].count === 1 && /banner_style_v2/.test(led.rows[0].sample) && plain === false, { led, plain });
+  if (process.env.HYGIENE_PNG_DIR) {
+    await evalJs(`(() => { const v = ${VIEW}; const el = [...v._messageList.querySelectorAll('.chat-msg')].find((e) => /Checking the files you sent/.test(e.textContent)); if (el) el.scrollIntoView({ block: 'start' }); return true; })()`);
+    await sleep(400);
+    const shot = await cdp('Page.captureScreenshot', { format: 'png' });
+    fs.mkdirSync(process.env.HYGIENE_PNG_DIR, { recursive: true });
+    fs.writeFileSync(path.join(process.env.HYGIENE_PNG_DIR, 'quiet-drift.png'), Buffer.from(shot.data, 'base64'));
+    console.log('    PNG ' + path.join(process.env.HYGIENE_PNG_DIR, 'quiet-drift.png'));
+  }
 
   check('no page errors', pageErrors.length === 0, pageErrors);
 } catch (e) {

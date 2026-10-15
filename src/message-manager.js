@@ -68,6 +68,7 @@ const HANDLED_SYSTEM_SUBTYPES = new Set([
   'task_updated',            // {task_id, patch:{status}} → applied to the task card (closes a failed task without waiting for task_notification)
   'code_change_published',   // ONE small "PR #608 pushed" card (escaped link) — the same fact as the transcript's pr-link row
   'instruction_size_warning', // 2.1.288 (lane cli-2-1-288-records): CLAUDE.md + rules + imports over the model's limit → the dim harness notice "the CLI warns the instructions are large: N characters (limit M)" — never red
+  'file_attachments_missing', // 2.1.296 (lane record-oracle-2-1-296): the files an inbound user message's file_attachments named that did not arrive → ONE plain dim line "N of M attached files did not reach Claude" (the reason codes on hover) — never red
   'informational',           // the CLI's text banner → a dim card, its words verbatim at `level`; the SAFETY STOP line (src/safety-stop.js) + its model-only nudge → ONE worded stop card (lane classifier-stop-card — was the red Unknown-event card)
 ]);
 
@@ -756,12 +757,15 @@ class MessageManager extends MessageWindow {
   }
 
   // SCHEMA DRIFT ON A KNOWN RECORD (owner ruling (b), 2026-09-21): the fall-back
-  // card catches an unknown TYPE; this catches a known type that GREW. ONE card
-  // per shape per session — a second occurrence with new fields MERGES into that
-  // card (an edit op), never a new card; a repeat with nothing new is silent.
-  // Telemetry `harness-shape-drift` once per process per shape, the CLI version
-  // in the detail so Diagnostics can say which build started it. The sample
-  // rides through the redactor (values under token/secret/key/… keys masked).
+  // card catches an unknown TYPE; this catches a known type that GREW. THE CARD
+  // POLICY (lane record-oracle-2-1-296, owner 2026-10-15 「最近多了很多红色提示」):
+  // a known record that only grew a FIELD is no chat card — the handler ran and
+  // nothing the user reads changed; it is a row of the DRIFT LEDGER (one per
+  // conversation + shape, ⚙ Diagnostics lists it). An ENUM drift (an undeclared
+  // value — its meaning may differ) keeps ONE card per shape per session, a new
+  // value MERGED into it (an edit op), never a new card. Telemetry
+  // `harness-shape-drift` once per process per shape, the CLI version in the
+  // detail. Samples ride through the redactor (token/secret/key/… masked).
   _noteShapeDrift(raw, emit) {
     if (this._unknownCarded === raw) { this._unknownCarded = null; return; } // the fall-back card owns it
     let drift = null;
@@ -769,33 +773,32 @@ class MessageManager extends MessageWindow {
     if (!drift) return;
     this._noteDrift(drift, raw, emit);
   }
-  /** ONE drift card per shape per session, merged on new evidence (the record-shape path; verify r5 also
-   *  feeds it a permission-outcome sentence outside the census). */
+  /** Field growth → the drift ledger; an enum drift → ONE card per shape per session, merged on new values (the record-shape
+   *  path; verify r5 also feeds it a permission-outcome sentence outside the census — enum-only). */
   _noteDrift(drift, raw, emit) {
-    const cards = this._shapeDrift || (this._shapeDrift = new Map());
-    const entry = cards.get(drift.shape);
-    const newFields = drift.fields.filter((f) => !entry || !entry.fields.has(f));
-    const newEnums = drift.enumDrift.filter((e) => !entry || !entry.enums.has(e.field + '=' + e.value));
-    if (entry && !newFields.length && !newEnums.length) return;
+    const ver = this._harnessVersion?.() || (typeof raw.version === 'string' ? raw.version.slice(0, 40) : null); // a transcript row names its own build
     const seen = this.constructor._seenShapeDrift;
     if (seen && !seen.has(drift.shape)) {
       seen.add(drift.shape);
-      const ver = this._harnessVersion?.() || null;
       try { global.__vsEvent?.('harness-shape-drift', `${drift.shape} +{${drift.fields.join(',')}}${drift.enumDrift.length ? ' enum:' + drift.enumDrift.map((e) => e.field + '=' + e.value).join(',') : ''}${ver ? ' · cli ' + ver : ''}`.slice(0, 300)); } catch {}
     }
+    if (drift.fields.length) noteFieldDrift({ conversation: raw.session_id || raw.sessionId || this.sessionId, harness: 'Claude Code', shape: drift.shape, fields: drift.fields, cli: ver, raw, recordKey: this._currentRk });
+    const cards = this._shapeDrift || (this._shapeDrift = new Map());
+    const entry = cards.get(drift.shape);
+    const newEnums = drift.enumDrift.filter((e) => !entry || !entry.enums.has(e.field + '=' + e.value));
+    if (!newEnums.length) return;
     if (!entry) {
       const msg = this._create({
         role: 'system', status: 'complete', noticeKind: 'unknown-fields',
-        content: [{ type: 'unknown_fields', harness: 'Claude Code', shape: drift.shape.replace(/^[a-z]+:[a-z]+:/, ''), fields: [...newFields], enumDrift: [...newEnums], sample: unknownFieldsSample(raw) }],
+        content: [{ type: 'unknown_fields', harness: 'Claude Code', shape: drift.shape.replace(/^[a-z]+:[a-z]+:/, ''), fields: [], enumDrift: [...newEnums], sample: unknownFieldsSample(raw) }],
       });
-      cards.set(drift.shape, { msgId: msg.id, fields: new Set(newFields), enums: new Set(newEnums.map((e) => e.field + '=' + e.value)) });
+      cards.set(drift.shape, { msgId: msg.id, enums: new Set(newEnums.map((e) => e.field + '=' + e.value)) });
       if (emit) this._emit({ op: 'create', message: msg });
       return;
     }
     const msg = this.messageIndex.get(entry.msgId);
     if (!msg) return;
     const b = msg.content[0];
-    for (const f of newFields) { entry.fields.add(f); b.fields.push(f); }
     for (const e of newEnums) { entry.enums.add(e.field + '=' + e.value); b.enumDrift.push(e); }
     b.sample = unknownFieldsSample(raw); // the latest occurrence is the freshest evidence
     if (emit) this._emit({ op: 'edit', id: msg.id, fields: { content: msg.content } });
@@ -1093,6 +1096,20 @@ class MessageManager extends MessageWindow {
       const files = n(raw.file_count, raw.fileCount);
       const text = `The CLI warns the instructions are large: ${chars} characters (limit ${limit ?? '?'})`;
       const msg = this._create({ role: 'system', status: 'complete', noticeKind: 'harness-informational', content: [{ type: 'harness_informational', text, level: 'notice', say: 'instruction-size', params: { chars, limit, files } }] });
+      if (emit) this._emit({ op: 'create', message: msg });
+      return;
+    }
+    // FILES THAT DID NOT ARRIVE (`system`/`file_attachments_missing`, 2.1.296 — lane record-oracle-2-1-296): the files an inbound user
+    // message's file_attachments named that the CLI could not fetch, each with a short reason code (download / too_large / not_found /
+    // write / no_token / not_finished / count_cap — "read an unknown one as 'did not arrive'"). ONE plain dim line in OUR words (`say`);
+    // the codes ride `params` for the hover. VibeSpace sends no file_attachments today: this is the remote bridge's record.
+    if (raw.subtype === 'file_attachments_missing') {
+      const missing = Array.isArray(raw.missing) ? raw.missing : [];
+      if (!missing.length) return;
+      const sent = Number.isFinite(raw.sent_count) ? raw.sent_count : (Number.isFinite(raw.sentCount) ? raw.sentCount : null);
+      const codes = [...new Set(missing.map((m) => String((m && m.reason) || '').slice(0, 40)).filter(Boolean))].slice(0, 8);
+      const text = `${missing.length} of ${sent ?? '?'} attached files did not reach Claude${codes.length ? ' (' + codes.join(', ') + ')' : ''}`;
+      const msg = this._create({ role: 'system', status: 'complete', noticeKind: 'harness-informational', content: [{ type: 'harness_informational', text, level: 'notice', say: 'attachments-missing', params: { missing: missing.length, sent, codes } }] });
       if (emit) this._emit({ op: 'create', message: msg });
       return;
     }
@@ -2150,6 +2167,42 @@ class MessageManager extends MessageWindow {
   }
 }
 
+// THE DRIFT LEDGER (lane record-oracle-2-1-296, owner 2026-10-15 「最近多了很多红色提示」): a KNOWN record that merely grew a field
+// is no chat card — it is a row here, per conversation (the record's own session id, so the live normalizer, a history rebuild and a
+// transcript read land on ONE row) and shape, listed by ⚙ Diagnostics (GET /api/telemetry/summary → driftLedger). Both harnesses
+// write it (the codex normalizer imports noteFieldDrift). Bounded: 100 conversations (the least recently drifted leaves first) × 32
+// shapes; ONE redacted sample per row (≤ 8 KB, the latest — refreshed when the fields grow or 30 s after the last); a record is counted
+// once by its record key (a rebuild re-reads the same records; the first 2000 keys per row are remembered).
+const DRIFT_LEDGER = new Map(); // conversation → Map(shape → row)
+const LEDGER_CAP = Object.freeze({ conversations: 100, shapes: 32, sampleChars: 8192, keys: 2000, sampleEveryMs: 30000 });
+function noteFieldDrift({ conversation, harness, shape, fields, cli, raw, recordKey }) {
+  const conv = String(conversation || '?').slice(0, 80);
+  const rows = DRIFT_LEDGER.get(conv) || new Map();
+  DRIFT_LEDGER.delete(conv); DRIFT_LEDGER.set(conv, rows); // most recently drifted last
+  if (DRIFT_LEDGER.size > LEDGER_CAP.conversations) DRIFT_LEDGER.delete(DRIFT_LEDGER.keys().next().value);
+  const now = Date.now();
+  let row = rows.get(shape);
+  if (!row) {
+    if (rows.size >= LEDGER_CAP.shapes) return;
+    row = { harness, shape: shape.replace(/^[a-z]+:[a-z]+:/, ''), fields: [], cli: null, count: 0, firstTs: now, lastTs: now, sample: '', sampleTs: 0, keys: new Set() };
+    rows.set(shape, row);
+  }
+  if (recordKey && row.keys.has(recordKey)) return; // the same record, re-read
+  if (recordKey && row.keys.size < LEDGER_CAP.keys) row.keys.add(recordKey);
+  row.count++;
+  row.lastTs = now;
+  if (cli) row.cli = String(cli).slice(0, 40);
+  const grew = fields.filter((f) => !row.fields.includes(f));
+  row.fields.push(...grew);
+  if (grew.length || now - row.sampleTs >= LEDGER_CAP.sampleEveryMs) { row.sample = unknownFieldsSample(raw).slice(0, LEDGER_CAP.sampleChars); row.sampleTs = now; }
+}
+/** The ledger's rows, the most recently drifted first (⚙ Diagnostics). */
+function driftLedgerRows() {
+  const out = [];
+  for (const [conversation, rows] of DRIFT_LEDGER) for (const r of rows.values()) out.push({ conversation, harness: r.harness, shape: r.shape, fields: [...r.fields], cli: r.cli, count: r.count, firstTs: r.firstTs, lastTs: r.lastTs, sample: r.sample });
+  return out.sort((a, b) => b.lastTs - a.lastTs);
+}
+
 MessageManager._seenUnknownSubtypes = new Set();
 MessageManager._seenShapeDrift = new Set(); // telemetry `harness-shape-drift` once per process per shape (§3)
 /** Background-launch ACK → task identity, PURE (2.368.30, owner: "很多
@@ -2277,7 +2330,9 @@ const KNOWN_IGNORED_SYSTEM_SUBTYPES = new Set([
   'ui_invalidate',          // the plugin UI host: re-render request for mounted plugin panes — card-less
   'ui_scroll',              // the plugin UI host: scroll a plugin pane — card-less
   'ui_focus',               // the plugin UI host: move the focus ring in a plugin pane — card-less
+  // 2026-10-15 (CLI 2.1.296, lane record-oracle-2-1-296 — read off the 2.1.296 zod union, scripts/fixtures/claude-cli/2.1.296.json):
+  'permission_check_status', // {tool_use_id, agent_id?, status: checking|done} — a tool call's permission check has waited ~4 s / that wait is over: a pulse with no words, BEFORE any ask exists (the permission card is the control_request); the tool card already shows the call running — card-less
   'ui_panes',               // the plugin UI host's pane list (spelled in 2.1.288, NOT in its union — record-shape CORPUS_ONLY_SUBTYPES). All ui_* fire only when a client attached a UI surface channel (2.1.288 zi()); VibeSpace attaches none
 ]);
 
-module.exports = { splitToolResultContent, toolResultText, MessageManager, classifyResultError, parseBackgroundLaunch, normalizeTaskType, TASK_TYPE_MAP, peerDisplayName, peerOriginOf, PEER_RECORDED, initFrameFacts, commandNames, normalizeWorkflowProgress, HANDLED_SYSTEM_SUBTYPES, KNOWN_IGNORED_RECORD_TYPES, KNOWN_IGNORED_SYSTEM_SUBTYPES, unknownRecordJson };
+module.exports = { splitToolResultContent, toolResultText, MessageManager, classifyResultError, parseBackgroundLaunch, normalizeTaskType, TASK_TYPE_MAP, peerDisplayName, peerOriginOf, PEER_RECORDED, initFrameFacts, commandNames, normalizeWorkflowProgress, HANDLED_SYSTEM_SUBTYPES, KNOWN_IGNORED_RECORD_TYPES, KNOWN_IGNORED_SYSTEM_SUBTYPES, unknownRecordJson, noteFieldDrift, driftLedgerRows };
