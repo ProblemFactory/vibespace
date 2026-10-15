@@ -19,6 +19,8 @@ const { pickCodexThreadCandidate } = require('../ws-handler');
 const { fdScanShellFns } = require('../writer-sweep.js');
 const { lockCaptureWanted, captureLockId, armLockCapture, adoptCapturedId, restoredForkPending, ownsItsId } = require('../claude-lock-capture'); // the ONE local lock capture (ws-create's create chain + this boot re-arm; the witness is the wrapper's pid)
 const { readPpid } = require('../cli-identity');
+const { restoreMarks } = require('../seen-marks.js'); // PURE (B-86d3, lane hook-seen-marks): the hook injection's seen marks come back with the session
+const BUILD_VERSION = (() => { try { return require('../../package.json').version; } catch { return ''; } })(); // the build an intro mark must name to count as seen
 
 const { mk } = require('./lazy.js');
 
@@ -114,6 +116,7 @@ function sessionFromMeta(meta, transportFacts) {
     // live in memory as well as on disk.
     _poolPin: poolPinFromMeta(meta), // THE CONVERSATION'S PIN (2026-09-28) survives a restart
     _browserKey: meta.browserKey || null, _browserVariant: meta.browserVariant || null, _browserProfileId: meta.browserProfileId || null, _browserPinOrigin: meta.browserPinOrigin || null, _browserEnv: Array.isArray(meta.browserEnv) ? meta.browserEnv : null, _browserProfileActive: typeof meta.browserProfileActive === 'string' ? meta.browserProfileActive : null, _browserCap: Number.isInteger(meta.browserCap) ? meta.browserCap : null, _channelTouches: Array.isArray(meta.channelTouches) ? meta.channelTouches : null, _groupCards: Array.isArray(meta.groupCards) ? meta.groupCards : null,
+    ...restoreMarks(meta.seenMarks, BUILD_VERSION), // B-86d3: the seen marks (groups' instants + folder digests + lite diff snapshots, the preamble hash, the intros' build) — a restart re-sends only what changed
     ...transportFacts,
   };
 }

@@ -26,10 +26,22 @@ const bucketBe = (r) => r.key === '__global__' ? 'claude'
 // hiding it would quietly shrink the totals these rows are read against. The
 // label/colour table itself is imported from usage-dashboard.js — ONE
 // vocabulary, or the panel legend and this window's column headers drift.
-// The two 2-D crosses this window ALWAYS needs (the session table's columns and
-// the project rows' tooltip) — requested beside whatever the panel dashboard
-// asks for, never instead of it.
-const ORIGIN_PIVOTS = ['session:origin', 'project:origin'];
+// 2-D PIVOTS ON DEMAND (B-f95d ②, 2.369.274). A cross whose rows are
+// conversations or repos (session×origin behind the session table and the
+// overview's agent-split panel, project×origin behind the project rows' hover —
+// one row per conversation / repo EVER: 14.5k / 940 on this instance) is asked
+// for by the panel that draws it, the first time that panel is ON SCREEN —
+// never with the first paint. The window used to ask for both origin crosses on
+// every load (All time: 9.1 MB instead of 5.1 MB) while the default dashboard
+// draws one of them in its LAST panel and the other nowhere. The ask is the
+// same route with only=pivots (the totals and groups already held are not sent
+// again). A cross over a BOUNDED dimension (day within the range, account,
+// model, …: a few hundred KB at most) still rides the load when a panel of the
+// dashboard draws it — asking for it later would only cost a second fold.
+// An asked pivot is HELD while a panel of the current view draws it, and every
+// later load carries it beside the rest: one answer, refreshed by the same
+// triggers as everything else (the 2.309.0 law).
+const unboundedPivot = (key) => key.split(':').some((dim) => dim === 'session' || dim === 'project');
 const pivotMap = (d, key) => {
   const out = {};
   for (const r of (d?.pivots?.[key] || [])) out[r.key] = r.cells || {};
@@ -80,17 +92,25 @@ export function openUsageWindow(app, opts = {}) {
     acctOptions: null, // account rows from the last UNFILTERED load — the chip set must not shrink while filtered
     device: '',        // DEVICE filter: '' all · 'local' · a host id (2.128.0)
     deviceOptions: null, // host rows union (like acctOptions)
+    held: new Set(),   // B-f95d ②: the pivots a panel on screen asked for — every load carries them
+    asking: false,     // one only=pivots ask at a time
+    pivotErr: null,    // a failed ask: the waiting panels say so (Retry), nothing re-asks by itself
+    gen: 0,            // bumped by every load: an ask that a load overtook is dropped (the load carries its pivots)
+    seen: [],          // the IntersectionObservers of the current paint
+    paintedView: null, // the view the last paint drew (a repaint of the same one keeps the scroll)
   };
 
   // The dashboard's saved panels (or the default preset) — split-series
-  // panels declare 2-D pivots the fetch must request.
+  // panels declare 2-D pivots (bounded ones ride the load, the rest are asked
+  // for on screen — B-f95d ②).
   const currentPanels = () => {
     const saved = app.settings.get('usage.dashboard');
     return Array.isArray(saved) && saved.length ? saved : PRESETS().overview.panels;
   };
 
-  const load = async () => {
-    state.loading = true; render();
+  // The FILTER half of every /api/usage-stats ask — a load and a pivot ask must
+  // describe the same slice, or a panel's split would not add up to its rows.
+  const filterQuery = () => {
     const qs = new URLSearchParams();
     if (state.range === 'custom') {
       const f = Date.parse(state.customFrom), to = Date.parse(state.customTo);
@@ -103,13 +123,23 @@ export function openUsageWindow(app, opts = {}) {
     if (state.backend) qs.set('backend', state.backend);
     if (state.account) qs.set('account', state.account);
     if (state.device) qs.set('host', state.device);
-    const pivots = [...new Set([...ORIGIN_PIVOTS, ...panelPivots(currentPanels())])];
+    return qs;
+  };
+
+  const load = async () => {
+    state.loading = true; state.gen++; render();
+    const qs = filterQuery();
+    // B-f95d ②: the held pivots + the BOUNDED crosses the dashboard draws — never
+    // a session/project cross nobody has scrolled to (the first paint asks for none)
+    const eager = state.view === 'dash' ? panelPivots(currentPanels()).filter((k) => !unboundedPivot(k)) : [];
+    const pivots = [...new Set([...state.held, ...eager])];
     if (pivots.length) qs.set('pivot', pivots.join(','));
     // fetchJson CANNOT throw (null on network failure, {error} bodies handed
     // back as data) — the old try/catch was dead code and a failed load fell
     // through to the "No usage recorded yet" empty state, i.e. a factual lie
     // that steered the user away from retrying. Keep the distinction.
     state.loadError = null;
+    state.pivotErr = null; // this answer carries every held pivot — a failed ask before it is moot
     const got = await fetchJson('/api/usage-stats?' + qs.toString());
     if (!got || got.error) {
       state.data = null;
@@ -132,8 +162,61 @@ export function openUsageWindow(app, opts = {}) {
     state.loading = false; render();
   };
 
+  // ── B-f95d ②: a panel whose pivot the answer lacks shows a wait note and asks
+  // for it the first time it is ON SCREEN (an IntersectionObserver on the page:
+  // the window's scrolling body clips it, a minimized window never intersects).
+  // One ask at a time, for every held pivot the answer lacks; an asked key the
+  // server did not answer is filled empty, so a panel never asks twice.
+  const askPivots = async () => {
+    if (state.asking || state.loading || !state.data || state.pivotErr) return;
+    const missing = [...state.held].filter((k) => !state.data.pivots?.[k]).slice(0, 8); // the route's cap
+    if (!missing.length) return;
+    state.asking = true;
+    const gen = state.gen, qs = filterQuery();
+    qs.set('pivot', missing.join(','));
+    qs.set('only', 'pivots');
+    const got = await fetchJson('/api/usage-stats?' + qs.toString());
+    state.asking = false;
+    if (gen !== state.gen) return; // a load went out meanwhile — it carries every held pivot
+    if (!got || got.error || !got.pivots) state.pivotErr = got?.error || t('the server did not answer');
+    else state.data = { ...state.data, pivots: { ...(state.data.pivots || {}), ...Object.fromEntries(missing.map((k) => [k, got.pivots[k] || []])) } };
+    render();
+  };
+  const onScreen = (el, go) => {
+    if (typeof IntersectionObserver !== 'function') { queueMicrotask(go); return; }
+    const io = new IntersectionObserver((seen) => { if (seen.some((e) => e.isIntersecting)) { io.disconnect(); go(); } });
+    io.observe(el);
+    state.seen.push(io);
+  };
+  let drawn = new Set(); // the pivots the current paint draws (held ones nobody draws any more are let go)
+  /** true ⇒ `key` is in the answer, draw it; false ⇒ `el` got the wait note (or the ask's error + Retry) and asks once on screen. */
+  const pivotHere = (key, el, { note = true } = {}) => {
+    drawn.add(key);
+    if (state.data?.pivots?.[key]) return true;
+    if (note) {
+      const box = document.createElement('div'); box.className = 'usage-note';
+      box.textContent = state.pivotErr ? t('Could not load usage: {msg}', { msg: state.pivotErr }) : t('Loading…');
+      if (state.pivotErr) {
+        const again = document.createElement('button');
+        again.className = 'usage-btn'; again.textContent = t('Retry'); again.style.marginLeft = '8px';
+        again.onclick = () => { state.pivotErr = null; render(); };
+        box.appendChild(again);
+      }
+      el.appendChild(box);
+    }
+    if (!state.pivotErr) onScreen(el, () => { state.held.add(key); askPivots(); });
+    return false;
+  };
+
   const render = () => {
+    // A repaint of the SAME view keeps the reader where they were: a pivot that
+    // arrives because its panel was scrolled into view must not throw the window
+    // back to the top (B-f95d ②). A view switch starts at the top.
+    const was = root.querySelector('.usage-body');
+    const keepTop = was && state.paintedView === state.view ? was.scrollTop : 0;
+    state.paintedView = state.view;
     destroyCharts(root); // Chart.js instances must not outlive their canvases
+    for (const io of state.seen.splice(0)) io.disconnect();
     root.innerHTML = '';
     root.appendChild(renderControls(app, state, load, render));
     // Remote ledger harvest failures: without this line a machine that has not
@@ -149,6 +232,7 @@ export function openUsageWindow(app, opts = {}) {
     }
     const body = document.createElement('div'); body.className = 'usage-body';
     root.appendChild(body);
+    if (keepTop) queueMicrotask(() => { body.scrollTop = keepTop; }); // once this paint has filled it
     if (state.view === 'pricing') { body.appendChild(renderPricingEditor(state, render, load)); return; }
     if (state.loading && !state.data) { body.innerHTML = `<div class="usage-empty">${t('Loading…')}</div>`; return; }
     // A FAILED load is not an empty ledger — say so and offer the retry
@@ -172,6 +256,7 @@ export function openUsageWindow(app, opts = {}) {
     body.appendChild(renderTiles(d));
     const ledgerNote = ledgerNoteEl(document, d, t);
     if (ledgerNote) body.appendChild(ledgerNote);
+    drawn = new Set();
     if (state.view === 'classic') {
       // The pre-2.96 fixed layout, kept as an escape hatch.
       body.appendChild(renderTrend(d, state));
@@ -189,11 +274,12 @@ export function openUsageWindow(app, opts = {}) {
         renderCache(d),
         // The parent project's cwd since 2026-09-10 (an agent's own worktree is
         // no longer its own project row); the origin split rides the tooltip.
-        renderGroup(t('By project'), d.groups.project, state, { path: true, originSplit: pivotMap(d, 'project:origin') }),
+        // (the split joins the hover once the section has been on screen — B-f95d ②)
+        withPivot('project:origin', renderGroup(t('By project'), d.groups.project, state, { path: true, originSplit: pivotMap(d, 'project:origin') })),
         renderGroup(t('By mode'), d.groups.mode, state, { small: true }),
         renderHours(d),
         renderWeekdays(d),
-        renderSessions(d, state, { limit: 12 }),
+        renderSessions(d, state, { limit: 12, pivotHere }),
       ].filter(Boolean)));
     } else {
       // Configurable dashboard (2.96.0): panels persist in settings and sync
@@ -202,19 +288,21 @@ export function openUsageWindow(app, opts = {}) {
       renderDashboard(body, d, panels, {
         onChange: (next) => {
           app.settings.set('usage.dashboard', next);
-          // An edit that introduces a NEW 2-D cross (splitBy) needs data the
-          // last fetch didn't request — refetch instead of rendering a hole.
-          const needed = panelPivots(next);
-          if (needed.some((k) => !state.data?.pivots?.[k])) load();
-          else render();
+          // An edit that introduces a NEW 2-D cross (splitBy) draws its wait
+          // note and asks for that pivot alone once on screen (B-f95d ②) — a
+          // repaint, never a reload of everything else.
+          render();
         },
+        pivotHere,
       });
     }
     body.appendChild(renderFooter(d));
+    for (const k of [...state.held]) if (!drawn.has(k)) state.held.delete(k);
   };
+  const withPivot = (key, sec) => { pivotHere(key, sec, { note: false }); return sec; };
 
   const prevClose = winInfo.onClose;
-  winInfo.onClose = () => { destroyCharts(root); prevClose?.(); };
+  winInfo.onClose = () => { destroyCharts(root); for (const io of state.seen.splice(0)) io.disconnect(); prevClose?.(); };
   winInfo._reloadUsage = load;
   load();
   // Remote hosts (2.127.0): kick an incremental ledger harvest over ssh on
@@ -349,8 +437,9 @@ function renderControls(app, state, load, rerender) {
     showContextMenu(r.left, r.bottom + 4, [
       ...Object.entries(presets).map(([key, p]) => ({
         label: t('Preset: {name}', { name: p.label }),
-        // load(), not rerender(): a preset can carry split-series panels whose
-        // 2-D pivots the last fetch didn't request (accounts preset does).
+        // load(), not rerender(): a preset can carry bounded split-series
+        // crosses that ride the load (accounts preset does); its session /
+        // project crosses still wait until their panel is on screen (B-f95d ②).
         action: () => { app.settings.set('usage.dashboard', p.panels); state.view = 'dash'; load(); },
       })),
       { label: state.view === 'classic' ? t('Switch to panel dashboard') : t('Switch to classic layout'),
@@ -631,6 +720,9 @@ function renderSessions(d, state, opts = {}) {
   const sec = section(t('By session'));
   const rows = (d.groups.session || []).slice(0, opts.limit || 12);
   if (!rows.length) { sec.appendChild(emptyLine()); return sec; }
+  // the origin columns ARE the session×origin pivot: until it is here the
+  // section says so and asks once on screen (B-f95d ②)
+  if (opts.pivotHere && !opts.pivotHere('session:origin', sec)) return sec;
   const piv = pivotMap(d, 'session:origin');
   const M = ORIGIN_META();
   const metric = state.metric;

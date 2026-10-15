@@ -18,6 +18,18 @@ const WHO_MAX = 24;
 /** THE POLICY'S WORD as a chip (card grammar ③) — why it always asks, never a sentence. */
 const SENSITIVE_CHIP = Object.freeze({ delete: 'Delete · always asks', path: 'Sensitive path · always asks', 'large-body': 'Large body · always asks', upload: 'Upload · always asks' });
 const FATES = Object.freeze(['pending', 'running', 'ran', 'failed', 'rejected', 'expired', 'withdrawn']);
+/** WHY A VENDOR REDIRECT WAS NOT FOLLOWED (src/channel-api.js REDIRECT_WHY + `loop`) — the card's 技术细节 words (B-fc37). */
+const REDIRECT_WHY_WORDS = Object.freeze({
+  approval: 'it would need your approval',
+  heavier: 'it does more than the call you approved',
+  tier: 'it is beyond the agent\'s API tier',
+  'off-host': 'it points to another host — the account\'s token never goes there',
+  unreadable: 'its address cannot be read',
+  'bad-path': 'its path breaks the API fence\'s rules',
+  loop: 'more than 5 redirects, or back to an address already asked',
+});
+const REDIRECT_CODES = Object.freeze(['api_redirect_unjudged', 'api_redirect_loop']);
+const redirectOf = (p) => { const r = (p && p.result) || {}; return REDIRECT_CODES.includes(r.code) && r.to ? r : null; };
 /** `decidedBy` words the sweeper stamps through the orchestrator's own reject (status stays `rejected`, the fate is named). */
 const SWEEP_BY = Object.freeze({ expired: 'expired', withdrawn: 'withdrawn' });
 
@@ -73,6 +85,11 @@ function outcomeOf(p, { now = Date.now() } = {}) {
   if (f === 'rejected') return p.decidedBy === 'user' || !p.decidedBy ? { key: 'Rejected by you', params: {} } : { key: 'Rejected by {who}', params: { who: String(p.decidedBy) } };
   if (f === 'expired') return { key: 'Expired — unanswered for 24 h, nothing ran', params: {} };
   if (f === 'withdrawn') return { key: 'Withdrawn — {reason}', params: { reason: p.reason || '' } };
+  // the vendor answered with a redirect the fence did not follow (B-fc37): said by name, where it pointed in 技术细节
+  if (f === 'failed' && redirectOf(p)) {
+    if (p.resubmittedAs) return { key: 'The vendor redirected it — resubmitted as a new card', params: {} };
+    return r.code === 'api_redirect_loop' ? { key: 'The vendor kept redirecting it — stopped', params: {} } : { key: 'The vendor redirected it — not followed', params: {} };
+  }
   return { key: 'Not run — {reason}', params: { reason: (r && r.error) || p.reason || '' } };
 }
 
@@ -94,8 +111,12 @@ function cardModel(p, { now = Date.now() } = {}) {
     always: p.offersAlways && !p.sensitive && p.shape ? { key: 'Run and never ask again ({what})', params: { shape: p.shape }, what: alwaysWhat(p) } : null,
     expiresAt: (p.at || 0) + TTL_MS,
     outcome: outcomeOf(p, { now }),
+    // B-fc37: where the vendor pointed (method + host + path — the 技术细节 fold) and why it was not followed; the door
+    // 「重新提交」 only while the target is one the user may still choose and the card was not resubmitted yet
+    redirect: redirectOf(p) ? { status: Number(p.result.status) || null, to: String(p.result.to), why: { key: REDIRECT_WHY_WORDS[p.result.why] || REDIRECT_WHY_WORDS['bad-path'], params: {} } } : null,
+    resubmit: fate === 'failed' && !!redirectOf(p) && p.result.resubmit === true && !p.resubmittedAs,
   };
-  m.sig = JSON.stringify([m.fate, m.head, m.note, m.request, m.headers, m.body, m.bodyBytes, m.bodySha, m.tier, m.sensitive, m.always, m.outcome]);
+  m.sig = JSON.stringify([m.fate, m.head, m.note, m.request, m.headers, m.body, m.bodyBytes, m.bodySha, m.tier, m.sensitive, m.always, m.outcome, m.redirect, m.resubmit]);
   return m;
 }
 
@@ -134,8 +155,17 @@ function receiptText(p) {
   if (f === 'rejected') return `${what}: REJECTED by ${p.decidedBy && p.decidedBy !== 'user' ? p.decidedBy : 'the user'}${p.reason ? ` — "${String(p.reason).slice(0, 300)}"` : ''}. Nothing ran.`;
   if (f === 'expired') return `${what}: EXPIRED — unanswered for 24 h. Nothing ran; ask again if it is still needed.`;
   if (f === 'withdrawn') return `${what}: WITHDRAWN — ${p.reason || 'access ended'}. Nothing ran.`;
+  if (f === 'failed' && redirectOf(p)) return `${what}: approved, but the vendor redirected it — ${r.error}.${p.resubmittedAs ? ` The user resubmitted it there as proposal ${p.resubmittedAs}.` : ''}`;
   if (f === 'failed') return `${what}: approved but NOT run — ${(r && r.error) || p.reason || 'failed'}.`;
   return null;   // pending / running: nothing to tell yet
+}
+
+/** THE CHAT'S CARDS of a call row: its own proposals + every card resubmitted from them (重新提交, any depth) — the new
+ *  card sits under the one the vendor redirected. */
+function chainIds(ids, recs) {
+  const out = new Set(ids || []);
+  for (let grew = true; grew;) { grew = false; for (const r of recs || []) if (r && r.resubmitOf && out.has(r.resubmitOf) && !out.has(r.id)) { out.add(r.id); grew = true; } }
+  return [...out];
 }
 
 /** THE SWEEP'S VERDICTS (PURE): which pending proposals end now, and how. `live(p)` → null | a reason the access ended. */
@@ -150,4 +180,4 @@ function sweepVerdicts(list, { now = Date.now(), live = () => null } = {}) {
   return out;
 }
 
-module.exports = { TTL_MS, BODY_SHOWN, NOTE_MAX, SENSITIVE_CHIP, FATES, SWEEP_BY, fateOf, sizeText, outcomeOf, titleOf, titleWords, cardModel, forYouOf, resolvedFactOf, receiptText, sweepVerdicts };
+module.exports = { TTL_MS, BODY_SHOWN, NOTE_MAX, SENSITIVE_CHIP, FATES, SWEEP_BY, REDIRECT_WHY_WORDS, fateOf, sizeText, outcomeOf, titleOf, titleWords, cardModel, forYouOf, resolvedFactOf, receiptText, chainIds, sweepVerdicts };

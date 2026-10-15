@@ -14,7 +14,9 @@
  *    NAME), the body bound (1 MiB).
  *  · the verdict — tier (channel-acl's `api` field, widen-only) × class (read / write / sensitive) ⇒ run | propose |
  *    refused, and the "always allow this call shape" pattern (never for a sensitive call).
- *  · the response bound (4 MiB, truncation SAID), the response header allowlist, the redirect rule (never off-host).
+ *  · the response bound (4 MiB, truncation SAID), the response header allowlist.
+ *  · the redirect rule (B-fc37): a vendor's 3xx target is a request again, judged by the SAME rows as the call (host,
+ *    path, class, sensitive, tier) before anything is sent there — never followed blind, never off the host.
  *  · the budget (per grant per conversation: per-minute + per-day counts) and the audit line (never a body).
  */
 const crypto = require('crypto');
@@ -27,7 +29,8 @@ const RESPONSE_MAX = 4 * 1024 * 1024;      // the vendor's answer handed on (the
 const SENSITIVE_BODY = 256 * 1024;         // a body this large always asks
 const PATH_MAX = 2048;
 const TIMEOUT_MS = 30e3;
-const REDIRECTS_MAX = 3;                   // on-host only; an off-host Location is refused, never followed
+const REDIRECTS_MAX = 5;                   // redirects one call follows, each target judged (B-fc37); one more = api_redirect_loop
+const REDIRECT_STATUSES = Object.freeze([301, 302, 303, 307, 308]);   // the statuses whose Location is judged (others answer as is)
 const BUDGET_DEFAULT = Object.freeze({ perMin: 30, perDay: 1000 });
 const SHOWN_BODY_MAX = 4 * 1024;           // the proposal card shows this much of a body; "N KB more" after
 const PENDING_MAX = 10;                    // one conversation's proposals waiting on one credential (more = api_budget)
@@ -169,12 +172,68 @@ function urlOf(req) {
   return `https://${req.host}${req.path}${qs ? `?${qs}` : ''}`;
 }
 
-/** A redirect's Location: followed only ON the same host (≤ REDIRECTS_MAX); anything else stops the call. */
-function redirectTarget(req, location) {
+/** A call as the redirect sentences, the card's 技术细节 and the API log name it: method + host + path (never the query —
+ *  a vendor's Location may carry a signed one). */
+const callText = (req) => `${req.method} ${req.host}${req.path}`.slice(0, 300);
+const addressOf = (req) => `${req.method} ${urlOf(req)}`;
+/** A body never rides a 303 (it becomes a GET); its content type goes with it. */
+const bodyless = (headers) => { const h = { ...headers }; delete h['content-type']; return h; };
+/** How much a call can do: a read < a write < a sensitive call. A redirect may never make a call heavier. */
+const weightOf = (cls, sensitive) => (sensitive ? 2 : cls === 'write' ? 1 : 0);
+/** Why a redirect target was not followed — `resubmit` = a target the user may still choose (重新提交: a new card). */
+const REDIRECT_WHY = Object.freeze({
+  'off-host': { says: 'it points off the credential\'s host — the credential is never sent to another host', resubmit: false },
+  unreadable: { says: 'its address cannot be read', resubmit: false },
+  'bad-path': { says: 'its path breaks the fence\'s path rules', resubmit: false },
+  tier: { says: 'your tier on this credential does not reach it', resubmit: false },
+  approval: { says: 'it would need the user\'s approval', resubmit: true },
+  heavier: { says: 'it is a heavier call than the one judged (a read never becomes a write, a write never a sensitive call)', resubmit: true },
+});
+function unjudged(status, from, to, why, more = '', target = null) {
+  const w = REDIRECT_WHY[why];
+  const door = w.resubmit ? ` — if it is still wanted, call ${to} yourself (it is judged like any call; on a card the user approved, the user can resubmit it from the card)` : why === 'tier' ? ' — the user widens your tier in Channels → the account → API access…' : '';
+  return refuse('api_redirect_unjudged', `the vendor answered ${status} and pointed ${from} at ${to} — not followed: ${w.says}${more ? ` (${more})` : ''}; VibeSpace sent nothing there${door}`, { from, to, why, resubmit: w.resubmit, ...(target ? { target } : {}) });
+}
+
+/** THE REDIRECT AS A REQUEST: the Location resolved against the URL that was asked, https on the SAME host, through
+ *  validateRequest's own path / header / body rules. 303 makes the call a GET without a body (HEAD stays HEAD); 301 /
+ *  302 / 307 / 308 keep the method and the body. → {ok, req} or `api_redirect_unjudged` (nothing is sent there). */
+function redirectRequest(cred, req, status, location) {
+  const from = callText(req);
   let u;
-  try { u = new URL(String(location || ''), urlOf(req)); } catch { return refuse('api_redirect_refused', 'the vendor redirected to an unreadable location — not followed'); }
-  if (u.protocol !== 'https:' || u.host !== req.host) return refuse('api_redirect_refused', `the vendor redirected off ${req.host} — not followed (the credential is never sent to another host)`);
-  return { ok: true, path: u.pathname, query: [...u.searchParams] };
+  try { u = new URL(String(location || '').slice(0, PATH_MAX + 512), urlOf(req)); } catch { return unjudged(status, from, '(an unreadable address)', 'unreadable'); }
+  if (u.protocol !== 'https:' || u.host !== req.host || u.username || u.password) return unjudged(status, from, `${u.protocol}//${u.host}${u.pathname}`.slice(0, 300), 'off-host');
+  const get = status === 303 && req.method !== 'GET' && req.method !== 'HEAD';
+  const v = validateRequest(cred, { method: get ? 'GET' : req.method, host: u.host, path: u.pathname + u.search, headers: get ? bodyless(req.headers) : req.headers, body: get ? null : req.body });
+  if (!v.ok) return unjudged(status, from, `${get ? 'GET' : req.method} ${u.host}${u.pathname}`.slice(0, 300), 'bad-path', v.code);
+  return { ok: true, req: v.req };
+}
+
+/** THE REDIRECT VERDICT (B-fc37) — the SAME judge as the call: the target's class / sensitive / shape through `verdict`
+ *  under the tier (+ always-allowed shapes) the caller holds NOW. Followed iff the verdict RUNS it without a card AND it
+ *  weighs no more than `call` (the request that was judged, or approved): a redirect never turns a read into a write, a
+ *  write into a sensitive call, or one approved request into another. `hops` = redirects followed so far (one more than
+ *  REDIRECTS_MAX ⇒ `api_redirect_loop`), `seen` = the chain's addresses (a revisit ⇒ `api_redirect_loop`). A target the
+ *  user may still choose rides the refusal as `target` (method, host, path, query, body kept?) for 重新提交. */
+function judgeRedirect(cred, { call, req, status, location, tier, shapes = [], hops = 0, seen = [] }) {
+  const r = redirectRequest(cred, req, status, location);
+  if (!r.ok) return r;
+  const to = r.req, from = callText(req), at = callText(to);
+  const target = { method: to.method, host: to.host, path: to.path, query: to.query.map(([k, v]) => [k, v]), body: !!to.body };
+  const cls = classOf(cred, to), sensitive = sensitiveOf(cred, to);
+  const vd = verdict({ tier, cls, sensitive, shape: shapeOf(to), shapes });
+  if (!vd.ok) return unjudged(status, from, at, 'tier', vd.code);
+  if (vd.action !== 'run') return unjudged(status, from, at, 'approval', sensitive ? `sensitive: ${sensitive}` : 'a write under "ask each"', target);
+  const first = call || req;
+  if (weightOf(cls, sensitive) > weightOf(classOf(cred, first), sensitiveOf(cred, first))) return unjudged(status, from, at, 'heavier', sensitive ? `sensitive: ${sensitive}` : cls, target);
+  if (hops >= REDIRECTS_MAX) return refuse('api_redirect_loop', `the vendor redirected more than ${REDIRECTS_MAX} times (the last: ${from} → ${at}) — stopped; VibeSpace sent nothing more`, { from, to: at, why: 'loop', resubmit: false });
+  if (seen.includes(addressOf(to))) return refuse('api_redirect_loop', `the vendor pointed ${from} back at ${at}, already asked in this call — a loop, stopped; VibeSpace sent nothing more`, { from, to: at, why: 'loop', resubmit: false });
+  return { ok: true, req: to, why: vd.why };
+}
+/** 重新提交: the stored redirect `target` of a proposal as a request again (the original's headers and body, or none). */
+function retarget(cred, orig, target) {
+  const t = target || {};
+  return validateRequest(cred, { method: t.method, host: t.host, path: t.path, query: t.query, headers: t.body ? orig.headers : bodyless(orig.headers), body: t.body ? orig.body : null });
 }
 
 /** The response bound: ≤ RESPONSE_MAX handed on, the truncation SAID. */
@@ -200,7 +259,7 @@ function budgetCheck(stamps, now, caps = BUDGET_DEFAULT) {
 }
 
 /** THE AUDIT LINE — who, what, how it went; the query's KEYS only and NEVER a body (a body's size + sha256 at most). */
-function auditLine({ at, principal, conv, cred, req, status = null, bytes = 0, ms = 0, verdict: vd, code = null, proposal = null, by = null, bodySha = null, trust = null, sensitive = null }) {
+function auditLine({ at, principal, conv, cred, req, status = null, bytes = 0, ms = 0, verdict: vd, code = null, proposal = null, by = null, bodySha = null, trust = null, sensitive = null, redirect = null }) {
   return {
     at, cred, principal: principal ? { kind: principal.kind, id: String(principal.id || '').slice(0, 256), name: principal.name ? String(principal.name).slice(0, 200) : null } : null,
     conv: conv ? String(conv).slice(0, 128) : null,
@@ -209,6 +268,8 @@ function auditLine({ at, principal, conv, cred, req, status = null, bytes = 0, m
     status, bytes, ms, verdict: vd, code, proposal, by, bodySha,
     // a sensitive call that ran under 完全信任 says so on its line (the owner sees what ran without a card)
     ...(trust === 'write-all' ? { trust, sensitive: sensitive ? String(sensitive).slice(0, 40) : null } : {}),
+    // a redirect the fence did not follow: where the vendor pointed (method + host + path, never a query) and why (B-fc37)
+    ...(redirect && redirect.to ? { redirect: { to: String(redirect.to).slice(0, 300), why: String(redirect.why || '').slice(0, 20) } } : {}),
   };
 }
 
@@ -228,8 +289,8 @@ function apiGrant({ principal, cred, tier, perDay = null, at = null, by = 'user'
 }
 
 module.exports = {
-  METHODS, READ_METHODS, BODY_MAX, RESPONSE_MAX, SENSITIVE_BODY, PATH_MAX, TIMEOUT_MS, REDIRECTS_MAX, BUDGET_DEFAULT, SHOWN_BODY_MAX, PENDING_MAX,
-  HEADER_ALLOW, HEADER_REFUSED, RESPONSE_HEADER_ALLOW, TIERS, EVERYONE_TIER, TIER_SAYS,
+  METHODS, READ_METHODS, BODY_MAX, RESPONSE_MAX, SENSITIVE_BODY, PATH_MAX, TIMEOUT_MS, REDIRECTS_MAX, REDIRECT_STATUSES, BUDGET_DEFAULT, SHOWN_BODY_MAX, PENDING_MAX,
+  HEADER_ALLOW, HEADER_REFUSED, RESPONSE_HEADER_ALLOW, TIERS, EVERYONE_TIER, TIER_SAYS, REDIRECT_WHY,
   vendorRowOf, validateRequest, classOf, sensitiveOf, shapeOf, verdict, offersAlways, freeze, thaw, digestOf, urlOf,
-  redirectTarget, boundResponse, responseHeaders, budgetCheck, auditLine, apiGrant,
+  callText, addressOf, redirectRequest, judgeRedirect, retarget, boundResponse, responseHeaders, budgetCheck, auditLine, apiGrant,
 };

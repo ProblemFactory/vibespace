@@ -171,8 +171,12 @@ const get = (url) => new Promise((resolve) => { http.get(url, (res) => { let b =
     'the consent URL: the accounts host, the app id as client_id, the REGISTERED redirect_uri, the READ scopes and a state');
   ok(/im:message\.send_as_user/.test(cu.searchParams.get('scope')) && !/im:message:send_as_user/.test(cu.searchParams.get('scope')), 'P4 requests BOTH send scopes — the dotted spelling, never the colon one');
   const state = cu.searchParams.get('state');
+  // lane lark-minutes-scopes: begin() read the app's own permission list (a tenant token, then applications/me) — that
+  // is ALL the vendor saw before the redirect; the forged state adds nothing
+  const nBegin = v.calls.length;
+  ok(JSON.stringify(v.calls.map((c) => c.path)) === JSON.stringify(['/open-apis/auth/v3/tenant_access_token/internal', '/open-apis/application/v6/applications/me']), 'begin() asked the vendor ONLY for the app\'s own permission list (a tenant token + application/v6/applications/me)', JSON.stringify(v.calls.map((c) => c.path)));
   const bad = await get(`${cb}?state=forged&code=stolen`);
-  ok(bad.status === 400 && v.calls.length === 0, 'a forged state on the loopback exchanges nothing');
+  ok(bad.status === 400 && v.calls.length === nBegin, 'a forged state on the loopback exchanges nothing');
   const good = await get(`${cb}?state=${state}&code=auth-code-0001`);
   await sleep(40);
   const ex = v.calls.find((c) => c.path === '/open-apis/authen/v2/oauth/token');
@@ -509,7 +513,7 @@ function gateCensus(src, { gateRe, ungatedIds }) {
   const c1 = gateCensus(src, { gateRe: GATE, ungatedIds: ids });
   console.log('    gate census (lark.js): ' + c1.sites.map((x) => `${x.cls}${x.id ? ':' + x.id : ''}@${x.line}`).join(' '));
   ok(c1.problems.length === 0 && c1.sites.filter((x) => x.cls === 'gate').length === 1, `every outbound call is the ONE gate, a gated-inline site with its own pace + meter, or a listed ungated site (${c1.sites.length} sites)`, c1.problems.join(' ; '));
-  ok(c1.sites.filter((x) => x.cls === 'gated-inline').map((x) => x.id).sort().join() === 'app-name,resource,send,send-reply,tenant-token,token-refresh,upload' && c1.sites.filter((x) => x.cls === 'ungated').map((x) => x.id).sort().join() === 'consent-exchange,consent-user-info,integration-test', 'gated-inline = {token-refresh, send, send-reply, resource, tenant-token, app-name (D3: a bot\'s name is a paced + metered request)}; ungated = {consent-exchange, consent-user-info, integration-test} — the send, unpaced and unmetered since P4, is now inside');
+  ok(c1.sites.filter((x) => x.cls === 'gated-inline').map((x) => x.id).sort().join() === 'app-name,consent-app-scopes,resource,send,send-reply,tenant-token,token-refresh,upload' && c1.sites.filter((x) => x.cls === 'ungated').map((x) => x.id).sort().join() === 'consent-exchange,consent-user-info,integration-test', 'gated-inline = {token-refresh, send, send-reply, resource, tenant-token, app-name (D3: a bot\'s name is a paced + metered request)}; ungated = {consent-exchange, consent-user-info, integration-test} — the send, unpaced and unmetered since P4, is now inside');
   const L = src.split('\n'); const a0 = L.findIndex((l) => /^  const api = async \(pathq, opts = \{\}\) => \{/.test(l)); const g0 = L.findIndex((l) => GATE.test(l));
   const idx = (re) => L.findIndex((l, i) => i > a0 && i < g0 && re.test(l));
   ok(a0 >= 0 && g0 > a0 && idx(/await accessToken\(\)/) < idx(/await pace\(1\)/) && idx(/await pace\(1\)/) < idx(/^\s*meter\(1\)/) && /bearerNow\(at\)/.test(L[g0]), 'the gate reads token → pace → meter → bearerNow(at) → send');
@@ -1196,25 +1200,27 @@ console.log('\n⑪ owner ruling: reactions read by default; the one narrowing re
   const PPL3 = [lark.JOB_SCOPE, lark.DEPT_SCOPE, lark.PEOPLE_SCOPE];
   const UP = [...lark.UPLOAD_CONSENT_SCOPES];   // lane lark-upload-preflight: sending files — the SECOND optional group; lane lark-upload-scope-split: im:resource ALONE (V2 is deprecated)
   const WIDE = [...lark.WIDE_SCOPES];   // lane slack-scopes-lark-reauth: every other usable scope, the FIRST group dropped
+  const MIN = [...lark.MINUTES_SCOPES];   // lane lark-minutes-scopes: reading 妙记 — the THIRD group
+  const MED = [...lark.MINUTES_MEDIA_SCOPES];   // …and its recording — the SECOND group (right after WIDE: an app without it keeps 妙记)
   const WIDE_OFF = WIDE.filter((x) => !lark.REACTIONS_READ_SCOPES.includes(x));   // verify r1: reactions off asks no wide scope that reads who reacted
   const dflt = await capture(lark, {}), on = await capture(lark, { reactions: 'read' }), off = await capture(lark, { reactions: 'off' });
-  ok(dflt.scopes.includes(OPT) && lark.SCOPES.every((x) => dflt.scopes.includes(x)) && FEED2.every((x) => dflt.scopes.includes(x)) && PPL3.every((x) => dflt.scopes.includes(x)) && UP.every((x) => dflt.scopes.includes(x)) && dflt.scopes.length === lark.SCOPES.length + 7 + WIDE.length && JSON.stringify(dflt.optional) === JSON.stringify([WIDE, UP, [OPT], [lark.JOB_SCOPE], [lark.DEPT_SCOPE], [lark.PEOPLE_SCOPE], [lark.P2P_READ_SCOPE], [lark.SEARCH_SCOPE]]), `the DEFAULT consent (a record that never set the option): the five base scopes + ${OPT} + the three profile scopes + the feed's two, declared OPTIONAL as ordered groups, reactions first (${dflt.scopes.join(' ')})`);
+  ok(dflt.scopes.includes(OPT) && lark.SCOPES.every((x) => dflt.scopes.includes(x)) && FEED2.every((x) => dflt.scopes.includes(x)) && PPL3.every((x) => dflt.scopes.includes(x)) && UP.every((x) => dflt.scopes.includes(x)) && dflt.scopes.length === lark.SCOPES.length + 10 + WIDE.length && [...MIN, ...MED].every((x) => dflt.scopes.includes(x)) && JSON.stringify(dflt.optional) === JSON.stringify([WIDE, MED, MIN, UP, [OPT], [lark.JOB_SCOPE], [lark.DEPT_SCOPE], [lark.PEOPLE_SCOPE], [lark.P2P_READ_SCOPE], [lark.SEARCH_SCOPE]]), `the DEFAULT consent (a record that never set the option): the five base scopes + ${OPT} + the three profile scopes + the feed's two, declared OPTIONAL as ordered groups, reactions first (${dflt.scopes.join(' ')})`);
   ok(JSON.stringify(on.scopes) === JSON.stringify(dflt.scopes) && JSON.stringify(on.optional) === JSON.stringify(dflt.optional), 'option "read" = the default');
-  ok(!off.scopes.includes(OPT) && JSON.stringify(off.scopes) === JSON.stringify([...lark.SCOPES, ...UP, ...PPL3, ...FEED2, ...WIDE_OFF]) && JSON.stringify(off.optional) === JSON.stringify([WIDE_OFF, UP, [lark.JOB_SCOPE], [lark.DEPT_SCOPE], [lark.PEOPLE_SCOPE], [lark.P2P_READ_SCOPE], [lark.SEARCH_SCOPE]]), 'option "off": the base scopes + the profile scopes + the feed\'s, the reactions group not offered');
+  ok(!off.scopes.includes(OPT) && JSON.stringify(off.scopes) === JSON.stringify([...lark.SCOPES, ...UP, ...PPL3, ...FEED2, ...MIN, ...MED, ...WIDE_OFF]) && JSON.stringify(off.optional) === JSON.stringify([WIDE_OFF, MED, MIN, UP, [lark.JOB_SCOPE], [lark.DEPT_SCOPE], [lark.PEOPLE_SCOPE], [lark.P2P_READ_SCOPE], [lark.SEARCH_SCOPE]]), 'option "off": the base scopes + the profile scopes + the feed\'s, the reactions group not offered');
   const narrowed = new URL(dflt.build({ redirectUri: 'http://127.0.0.1:1/cb', state: 's', without: [...WIDE, OPT] })).searchParams.get('scope').split(' ');
-  ok(JSON.stringify(narrowed) === JSON.stringify([...lark.SCOPES, ...UP, ...PPL3, ...FEED2]), 'the narrowing retry\'s URL `without` the wide group and the reactions group drops nothing else — the profiles and the search are kept');
+  ok(JSON.stringify(narrowed) === JSON.stringify([...lark.SCOPES, ...UP, ...PPL3, ...FEED2, ...MIN, ...MED]), 'the narrowing retry\'s URL `without` the wide group and the reactions group drops nothing else — the profiles, the search and 妙记 are kept');
   const optDecl = lark.OPTIONS.find((o) => o.key === 'reactions');
-  ok(optDecl && optDecl.default === 'read' && optDecl.choices.includes('off') && lark.REACTIONS_GRANT.option === 'reactions' && JSON.stringify(lark.OPTIONAL_SCOPES) === JSON.stringify([...WIDE, ...UP, OPT, ...PPL3, ...FEED2]), 'the option is declared on by default, the grant names it (so `off` silences the account\'s line), and the optional set is the wide group + the read scope + the profile scopes + the feed\'s two');
+  ok(optDecl && optDecl.default === 'read' && optDecl.choices.includes('off') && lark.REACTIONS_GRANT.option === 'reactions' && JSON.stringify(lark.OPTIONAL_SCOPES) === JSON.stringify([...WIDE, ...MED, ...MIN, ...UP, OPT, ...PPL3, ...FEED2]), 'the option is declared on by default, the grant names it (so `off` silences the account\'s line), and the optional set is the wide group + the read scope + the profile scopes + the feed\'s two');
   // lane slack-scopes-lark-reauth: EVERY USABLE SCOPE ONCE — the scopes Lark's own token answer named for the owner's app
   // (2026-10-03), none a feature reads today, all in the default consent, dropped together by the FIRST press
   const MEASURED_WIDE = ['auth:user.id:read', 'im:message:readonly', 'im:message.group_msg:get_as_user', 'im:chat:read', 'docx:document', 'docx:document:readonly', 'drive:drive', 'sheets:spreadsheet', 'bitable:app', 'wiki:wiki:readonly', 'calendar:calendar:readonly'];
   ok(JSON.stringify(WIDE) === JSON.stringify(MEASURED_WIDE) && WIDE.every((x) => dflt.scopes.includes(x)) && WIDE_OFF.every((x) => off.scopes.includes(x)) && !WIDE.some((x) => [...lark.SCOPES, ...UP, OPT, ...PPL3, ...FEED2].includes(x)) && new Set(dflt.scopes).size === dflt.scopes.length, `the default consent asks for every usable scope (the ${WIDE.length} measured beyond today's features), each once (reactions off: all but the one that reads who reacted — verify r1)`);
   const narrowW = new URL(dflt.build({ redirectUri: 'http://127.0.0.1:1/cb', state: 's', without: WIDE })).searchParams.get('scope').split(' ');
-  ok(JSON.stringify(narrowW) === JSON.stringify([...lark.SCOPES, ...UP, OPT, ...PPL3, ...FEED2]), 'the FIRST press (an app that has not enabled one of them) drops the whole wide group and nothing a feature uses — the consent every release before asked (+ the upload pair)');
+  ok(JSON.stringify(narrowW) === JSON.stringify([...lark.SCOPES, ...UP, OPT, ...PPL3, ...FEED2, ...MIN, ...MED]), 'the FIRST press (an app that has not enabled one of them) drops the whole wide group and nothing a feature uses — the consent every release before asked (+ the upload pair)');
   { const MW = mutantCopies('chan-lark-wide', REPO);
     const LW = require(MW.write('src/channels/lark.js', fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf-8').replace(", ...wideScopes()].filter((x) =>", '].filter((x) =>'), 'nowide'));
     const nw = await capture(LW, {});
-    ok(!WIDE.some((x) => nw.scopes.includes(x)) && nw.scopes.length === lark.SCOPES.length + 7, `CONTROL — the pre-lane consent (no wide group) asks for none of them (${nw.scopes.length} scopes): the next feature would need a new consent`); }
+    ok(!WIDE.some((x) => nw.scopes.includes(x)) && nw.scopes.length === lark.SCOPES.length + 10, `CONTROL — the pre-lane consent (no wide group) asks for none of them (${nw.scopes.length} scopes): the next feature would need a new consent`); }
   // verify r1 (lane slack-scopes-lark-reauth): NO CAPABILITY WIDENED BY THE WIDE GROUP — im:message:readonly (wide) is also a
   // reactions READ scope (capsOfScopes): "Add and remove only" must stay a consent whose token cannot read who reacted
   const rxRead = (scopes) => lark.capsOfScopes(scopes).reactions.read;
@@ -1245,7 +1251,7 @@ console.log('\n⑪ owner ruling: reactions read by default; the one narrowing re
   const STORE = require(path.join(REPO, 'src/server/integration-store.js'));
   const ENG = require(path.join(REPO, 'src/server/channels-engine.js'));
   const ROOT11 = fs.mkdtempSync(path.join(process.env.TMPDIR || '/tmp', `vs-larkrx-${process.pid}-`));
-  const ENABLED = new Set([...lark.SCOPES, ...lark.UPLOAD_SCOPES, lark.P2P_READ_SCOPE, lark.SEARCH_SCOPE, lark.JOB_SCOPE, lark.DEPT_SCOPE, lark.PEOPLE_SCOPE, ...lark.WIDE_SCOPES]);   // the fake APP: the base scopes + the profile scopes + the feed's two — the reactions read scope NOT enabled yet (owner decision 5: dropping it keeps the search)
+  const ENABLED = new Set([...lark.SCOPES, ...lark.UPLOAD_SCOPES, lark.P2P_READ_SCOPE, lark.SEARCH_SCOPE, lark.JOB_SCOPE, lark.DEPT_SCOPE, lark.PEOPLE_SCOPE, ...lark.WIDE_SCOPES, ...lark.MINUTES_SCOPES, ...lark.MINUTES_MEDIA_SCOPES]);   // the fake APP: the base scopes + the profile scopes + the feed's two — the reactions read scope NOT enabled yet (owner decision 5: dropping it keeps the search)
   const granted = new Map();              // code → the scopes the fake page granted
   let codeN = 0;
   const fakeAuth = http.createServer((req, res) => {
@@ -1290,14 +1296,20 @@ console.log('\n⑪ owner ruling: reactions read by default; the one narrowing re
     // (2) the ONE retry: the same flow, the consent without the optional scope; a second one refused by name
     const nW = eng.oauthNarrow(s0.flowId);
     const pW = await browse(nW.flow.consentUrl);
-    ok(pW.status === 200 && /20027/.test(pW.body) && exchanges === 0 && JSON.stringify(nW.flow.nextNarrow) === JSON.stringify(UP), 'the first press drops the wide group — this app still refuses (it lacks the reactions read); the next press names im:resource ALONE (lane lark-upload-scope-split: never the deprecated V2)');
+    ok(pW.status === 200 && /20027/.test(pW.body) && exchanges === 0 && JSON.stringify(nW.flow.nextNarrow) === JSON.stringify(MED), 'the first press drops the wide group — this app still refuses (it lacks the reactions read); the next press names 妙记\'s recording scope (lane lark-minutes-scopes)');
+    const nD = eng.oauthNarrow(s0.flowId);
+    const pD = await browse(nD.flow.consentUrl);
+    ok(pD.status === 200 && /20027/.test(pD.body) && exchanges === 0 && JSON.stringify(nD.flow.nextNarrow) === JSON.stringify(MIN), 'the second press drops 妙记\'s recording — still refused (the reactions read); the next press names the two 妙记 read scopes');
+    const nM = eng.oauthNarrow(s0.flowId);
+    const pM = await browse(nM.flow.consentUrl);
+    ok(pM.status === 200 && /20027/.test(pM.body) && exchanges === 0 && JSON.stringify(nM.flow.nextNarrow) === JSON.stringify(UP), 'the third press drops 妙记 — still refused (the reactions read); the next press names im:resource ALONE (lane lark-upload-scope-split: never the deprecated V2)');
     // lane lark-upload-preflight: the SECOND press drops the upload group (a blind ordered drop — this app still refuses)
     const nU = eng.oauthNarrow(s0.flowId);
     const pU = await browse(nU.flow.consentUrl);
-    ok(pU.status === 200 && /20027/.test(pU.body) && exchanges === 0 && JSON.stringify(nU.flow.nextNarrow) === JSON.stringify([OPT]), 'the second press drops im:resource — still refused (the reactions read); the next press names it');
+    ok(pU.status === 200 && /20027/.test(pU.body) && exchanges === 0 && JSON.stringify(nU.flow.nextNarrow) === JSON.stringify([OPT]), 'the fourth press drops im:resource — still refused (the reactions read); the next press names it');
     const n0 = eng.oauthNarrow(s0.flowId);
     const sc0 = new URL(n0.flow.consentUrl).searchParams.get('scope').split(' ');
-    ok(JSON.stringify(n0.flow.narrowed) === JSON.stringify([...lark.WIDE_SCOPES, ...UP, OPT]) && !sc0.includes(OPT) && sc0.includes(lark.SEARCH_SCOPE) && n0.flowId === s0.flowId && JSON.stringify(n0.flow.nextNarrow) === JSON.stringify([lark.JOB_SCOPE]), `the narrowing retry (POST /api/channels/oauth/narrow): same flow, the consent without ${OPT} ONLY (the search kept); the next press would name the job-title field (lane lark-threads' profile scopes come next)`);
+    ok(JSON.stringify(n0.flow.narrowed) === JSON.stringify([...lark.WIDE_SCOPES, ...MED, ...MIN, ...UP, OPT]) && !sc0.includes(OPT) && sc0.includes(lark.SEARCH_SCOPE) && n0.flowId === s0.flowId && JSON.stringify(n0.flow.nextNarrow) === JSON.stringify([lark.JOB_SCOPE]), `the narrowing retry (POST /api/channels/oauth/narrow): same flow, the consent without ${OPT} ONLY (the search kept); the next press would name the job-title field (lane lark-threads' profile scopes come next)`);
     const p1 = await browse(n0.flow.consentUrl);
     for (let i = 0; i < 50 && !eng.oauthStatus(s0.flowId).done; i++) await sleep(20);
     ok(p1.status === 302 && eng.oauthStatus(s0.flowId).ok === true && exchanges === 1, 'the narrowed consent is granted and exchanged once');
@@ -1305,7 +1317,7 @@ console.log('\n⑪ owner ruling: reactions read by default; the one narrowing re
     const id = c0.adapter.id;
     const rec0 = eng.adapterRecords().adapters.find((x) => x.id === id);
     const g0 = c0.adapter.reactionsGrant;
-    ok(JSON.stringify(rec0.auth.refusedScopes) === JSON.stringify([...lark.WIDE_SCOPES, ...UP, OPT]) && JSON.stringify(g0.missing) === JSON.stringify([OPT]) && JSON.stringify(g0.refused) === JSON.stringify([OPT]) && g0.wanted === true, 'the account records what Lark refused (auth.refusedScopes) and its view says it (reactionsGrant: missing + refused, wanted)', JSON.stringify(g0));
+    ok(JSON.stringify(rec0.auth.refusedScopes) === JSON.stringify([...lark.WIDE_SCOPES, ...MED, ...MIN, ...UP, OPT]) && JSON.stringify(g0.missing) === JSON.stringify([OPT]) && JSON.stringify(g0.refused) === JSON.stringify([OPT]) && g0.wanted === true, 'the account records what Lark refused (auth.refusedScopes) and its view says it (reactionsGrant: missing + refused, wanted)', JSON.stringify(g0));
     ok(words(id) === `Lark refused ${OPT} — enable it in the app console and Re-authorize`, `THE CARD'S WORDS after a narrowed consent: "${words(id)}" — never a silent narrower consent`);
     // (3) the owner enables it in the console; ONE Re-authorize reads reactions — the refusal is gone
     ENABLED.add(OPT);
@@ -1337,6 +1349,8 @@ console.log('\n⑪ owner ruling: reactions read by default; the one narrowing re
     // the account route's narrow: the running re-authorize of this account, once
     const r4 = await eng.reauthorize(id, {});
     const aW = eng.narrowAuth(id);   // lane slack-scopes-lark-reauth: the wide group goes first
+    const aD = eng.narrowAuth(id);   // lane lark-minutes-scopes: 妙记's recording second
+    const aM = eng.narrowAuth(id);   // …妙记 third
     const aU = eng.narrowAuth(id);   // lane lark-upload-preflight: the upload group second (lane lark-upload-scope-split: im:resource alone)
     const a4 = eng.narrowAuth(id);
     // lane lark-threads: the three profile groups sit between the reactions and the feed's two (one press each)
@@ -1344,14 +1358,14 @@ console.log('\n⑪ owner ruling: reactions read by default; the one narrowing re
     for (let i = 0; i < 5; i++) presses.push(eng.narrowAuth(id));
     let a5c = null; try { eng.narrowAuth(id); } catch (e) { a5c = e; }
     const want = [lark.JOB_SCOPE, lark.DEPT_SCOPE, lark.PEOPLE_SCOPE, lark.P2P_READ_SCOPE, lark.SEARCH_SCOPE];
-    ok(r4.flow.flowId === a4.flow.flowId && JSON.stringify(aW.flow.narrowed) === JSON.stringify([...lark.WIDE_SCOPES]) && JSON.stringify(aU.flow.narrowed) === JSON.stringify([...lark.WIDE_SCOPES, ...UP]) && JSON.stringify(a4.flow.narrowed) === JSON.stringify([...lark.WIDE_SCOPES, ...UP, OPT]) && presses.every((x, i) => JSON.stringify(x.flow.narrowed) === JSON.stringify([...lark.WIDE_SCOPES, ...UP, OPT, ...want.slice(0, i + 1)])) && a5c && a5c.code === 'already-narrowed', 'the account\'s own narrow (POST /api/channels/adapters/:id/auth/narrow) narrows ITS running re-authorize one group per press (the wide group → im:resource → reactions → the job title → the department → people → the single-chat read → the search), then refuses by name');
+    ok(r4.flow.flowId === a4.flow.flowId && JSON.stringify(aW.flow.narrowed) === JSON.stringify([...lark.WIDE_SCOPES]) && JSON.stringify(aD.flow.narrowed) === JSON.stringify([...lark.WIDE_SCOPES, ...MED]) && JSON.stringify(aM.flow.narrowed) === JSON.stringify([...lark.WIDE_SCOPES, ...MED, ...MIN]) && JSON.stringify(aU.flow.narrowed) === JSON.stringify([...lark.WIDE_SCOPES, ...MED, ...MIN, ...UP]) && JSON.stringify(a4.flow.narrowed) === JSON.stringify([...lark.WIDE_SCOPES, ...MED, ...MIN, ...UP, OPT]) && presses.every((x, i) => JSON.stringify(x.flow.narrowed) === JSON.stringify([...lark.WIDE_SCOPES, ...MED, ...MIN, ...UP, OPT, ...want.slice(0, i + 1)])) && a5c && a5c.code === 'already-narrowed', 'the account\'s own narrow (POST /api/channels/adapters/:id/auth/narrow) narrows ITS running re-authorize one group per press (the wide group → im:resource → reactions → the job title → the department → people → the single-chat read → the search), then refuses by name');
     await eng.cancelAuth(id);
     let a6 = null; try { eng.narrowAuth(id); } catch (e) { a6 = e; }
     ok(a6 && a6.status === 404 && a6.code === 'no-flow', 'no sign-in running ⇒ 404 no-flow');
     // (6) verify r1 (lane slack-scopes-lark-reauth): EVERY GROUP DROPPED, END TO END — the default options name 17 optional
     // scopes (the wide 11 + reactions + 3 profile + the feed's 2); the account records all 17 and the card names both feed
     // scopes (the engine's own bound was 16: the LAST one, the search, fell off the record)
-    const allOpt = [...lark.WIDE_SCOPES, ...UP, OPT, lark.JOB_SCOPE, lark.DEPT_SCOPE, lark.PEOPLE_SCOPE, lark.P2P_READ_SCOPE, lark.SEARCH_SCOPE];
+    const allOpt = [...lark.WIDE_SCOPES, ...MED, ...MIN, ...UP, OPT, lark.JOB_SCOPE, lark.DEPT_SCOPE, lark.PEOPLE_SCOPE, lark.P2P_READ_SCOPE, lark.SEARCH_SCOPE];
     const narrowAll = async (E2, tag) => {
       fs.mkdirSync(path.join(ROOT11, tag), { recursive: true });
       const ints2 = STORE.create({ dataDir: path.join(ROOT11, tag, 'int'), env: {}, now, broadcast: () => {}, log: quiet11 });
@@ -1362,7 +1376,7 @@ console.log('\n⑪ owner ruling: reactions read by default; the one narrowing re
       try {
         const s = await e2.startOAuth({ kind: 'lark', credentialKey: 'custom', credential: { appId: 'cli_appa0001', appSecret: 'fs-appa-secret-0001' } });
         const ns = [];
-        for (let i = 0; i < 8; i++) ns.push(e2.oauthNarrow(s.flowId));   // lane lark-upload-preflight: + the upload group's press (lane lark-upload-scope-split: im:resource alone)
+        for (let i = 0; i < 10; i++) ns.push(e2.oauthNarrow(s.flowId));   // lane lark-minutes-scopes: + the two 妙记 groups' presses   // lane lark-upload-preflight: + the upload group's press (lane lark-upload-scope-split: im:resource alone)
         const last = ns[ns.length - 1];
         const pg = await browse(last.flow.consentUrl);
         for (let i = 0; i < 50 && !e2.oauthStatus(s.flowId).done; i++) await sleep(20);
@@ -1374,15 +1388,15 @@ console.log('\n⑪ owner ruling: reactions read by default; the one narrowing re
     const full = await narrowAll(ENG, 'all17');
     const fg = (full.view.grants || []).find((g) => g.what === 'feed');
     const fw = CC.grantsText(full.view.grants, { vendor: 'Lark' }).text;
-    ok(full.pg.status === 302 && JSON.stringify(full.narrowed) === JSON.stringify(allOpt) && allOpt.length === 18, `eight presses drop all ${allOpt.length} optional scopes and the base consent is granted`);
-    ok(JSON.stringify(full.rec.auth.refusedScopes) === JSON.stringify(allOpt) && fg && JSON.stringify(fg.refused) === JSON.stringify([lark.SEARCH_SCOPE, lark.P2P_READ_SCOPE]) && fw.includes(lark.SEARCH_SCOPE) && fw.includes(lark.P2P_READ_SCOPE), `the account records EXACTLY what Lark refused (${(full.rec.auth.refusedScopes || []).length} of 17) and the card names both feed scopes: "${fw.slice(0, 160)}…"`);
+    ok(full.pg.status === 302 && JSON.stringify(full.narrowed) === JSON.stringify(allOpt) && allOpt.length === 21, `ten presses drop all ${allOpt.length} optional scopes and the base consent is granted`);
+    ok(JSON.stringify(full.rec.auth.refusedScopes) === JSON.stringify(allOpt) && fg && JSON.stringify(fg.refused) === JSON.stringify([lark.SEARCH_SCOPE, lark.P2P_READ_SCOPE]) && fw.includes(lark.SEARCH_SCOPE) && fw.includes(lark.P2P_READ_SCOPE), `the account records EXACTLY what Lark refused (${(full.rec.auth.refusedScopes || []).length} of ${allOpt.length}) and the card names both feed scopes: "${fw.slice(0, 160)}…"`);
     { const ME = mutantCopies('chan-lark-refused16', REPO);
       const srcE = engineSource(REPO);
       const BOUND = '].slice(0, OPTIONAL_SCOPES_MAX);';
       ok(srcE.split(BOUND).length === 2, 'CONTROL setup: the engine\'s refusal bound is spelled once');
-      const cut = await narrowAll(ME.load('src/server/channels-engine.js', srcE.replace(BOUND, '].slice(0, 17);'), 'refused16'), 'cut16');   // lane lark-upload-preflight: 19 optional scopes now — a bound one short
+      const cut = await narrowAll(ME.load('src/server/channels-engine.js', srcE.replace(BOUND, '].slice(0, 20);'), 'refused16'), 'cut16');   // lane lark-minutes-scopes: 21 now — still a bound one short   // lane lark-upload-preflight: 19 optional scopes now — a bound one short
       const cg = (cut.view.grants || []).find((g) => g.what === 'feed');
-      ok(cut.rec.auth.refusedScopes.length === 17 && !cut.rec.auth.refusedScopes.includes(lark.SEARCH_SCOPE) && cg && JSON.stringify(cg.refused) === JSON.stringify([lark.P2P_READ_SCOPE]), 'CONTROL — the engine\'s old bound (16): the search scope falls off the record and the card names only the single-chat scope — the asserts above would be red');
+      ok(cut.rec.auth.refusedScopes.length === 20 && !cut.rec.auth.refusedScopes.includes(lark.SEARCH_SCOPE) && cg && JSON.stringify(cg.refused) === JSON.stringify([lark.P2P_READ_SCOPE]), 'CONTROL — the engine\'s old bound (16): the search scope falls off the record and the card names only the single-chat scope — the asserts above would be red');
       for (const r of copiesCensus(ME.files, ME.dir, REPO, { minCopies: 1, label: 'chan-lark-refused16: ' })) ok(r.pass, r.name, r.detail); }
     // (7) lane lark-upload-scope-split — THE OWNER'S APP (2026-10-08): `im:resource` (V1) enabled, `im:resource:upload` (V2)
     // not in its catalog — Lark's doc: "im:resource:upload（上传文件V2，高级）— 该权限已不再维护，不可新增申请；你可申请开通权限
@@ -1416,7 +1430,7 @@ console.log('\n⑪ owner ruling: reactions read by default; the one narrowing re
     // the dialog's press for the upload group names im:resource in en/zh/ja (mounts-dialog narrowRow: ≤ 3 scopes joined)
     { const MD = fs.readFileSync(path.join(REPO, 'src/lib/mounts-dialog.js'), 'utf-8');
       const zh = (await import(pathToFileURL(path.join(REPO, 'src/lib/i18n-zh.js')).href)).default, ja = (await import(pathToFileURL(path.join(REPO, 'src/lib/i18n-ja.js')).href)).default;
-      const K = 'Sign in without {scopes} too', sc = nW.flow.nextNarrow.join(' + ');
+      const K = 'Sign in without {scopes} too', sc = nM.flow.nextNarrow.join(' + ');   // lane lark-minutes-scopes: the upload press is the FOURTH now
       const said = [K, zh[K], ja[K]].map((x) => String(x || '').replace('{scopes}', sc));
       ok(MD.includes("const scopes = list.length > 3 ? tr('the {n} extra permissions', { n: list.length }) : list.join(' + ');") && JSON.stringify(said) === JSON.stringify(['Sign in without im:resource too', '登录时也不要 im:resource', 'im:resource も外してサインイン']), `the dialog's upload press names im:resource only, en/zh/ja: ${said.join(' | ')}`); }
     // an app WITHOUT im:resource: the upload press drops it and the card says files are off, naming im:resource only
@@ -1436,6 +1450,351 @@ console.log('\n⑪ owner ruling: reactions read by default; the one narrowing re
     ol.stopAll(); eng.stop(); await new Promise((r) => fakeAuth.close(r));
     fs.rmSync(ROOT11, { recursive: true, force: true });
   }
+}
+
+// ═══ ⑪b lane lark-minutes-scopes (owner 2026-10-15: the app holds every permission — the token lacked 妙记 only because no
+// consent asked; 「你就不能一次性索要全部权限吗？」; 「新权限能下载视频吗」) ═══
+// (a) 妙记's scopes as Lark's doc spells them — the read + transcript group and the recording's group right after WIDE, a
+// closed scope never in the floor; (b) THE CONSENT ASKS EVERY USER PERMISSION THE APP HAS ENABLED — read from GET
+// application/v6/applications/me when it starts (`token_types` user), the hand list the FLOOR, the floor alone when the read
+// fails / is late, a group the app's list lacks pressed first, the app's extras the last group; (c) PAGED BY URL BYTES (主开发
+// measured a 5.6 KB authorize URL answered 431 in the owner's browser): ≤ CONSENT_URL_MAX_BYTES a consent, the next page on the
+// next Re-authorize (Lark's grants accumulate), the card counts what is left; (d) END TO END through the REAL engine + consent
+// machine + raw-API orchestrator against a fake Lark: a token minted before this release ⇒ the card names 妙记 and the agent's
+// raw minutes reads are refused 99991679; ONE Re-authorize ⇒ 200.
+console.log('\n⑪b lane lark-minutes-scopes: 妙记 in the consent; every permission the app has enabled, paged by URL bytes; the card; the raw API door');
+{
+  const CC = require(path.join(REPO, 'src/channel-caps.js'));
+  const zh = (await import(pathToFileURL(path.join(REPO, 'src/lib/i18n-zh.js')).href)).default, ja = (await import(pathToFileURL(path.join(REPO, 'src/lib/i18n-ja.js')).href)).default;
+  const tr = (tab) => (k, p = {}) => String(tab[k] || k).replace(/\{(\w+)\}/g, (m, n) => (n in p ? String(p[n]) : m));
+  const MIN = [...lark.MINUTES_SCOPES], MED = [...lark.MINUTES_MEDIA_SCOPES];
+  // (a) THE NAMES — Lark's doc, 2026-10-15: GET minutes/v1/minutes/:minute_token "开启任一权限即可调用": 查看、创建、编辑及管理妙记
+  // 文件(minutes:minutes) · 获取妙记的基本信息(minutes:minutes.basic:read) · 查看妙记文件(minutes:minutes:readonly); GET …/transcript:
+  // 导出妙记文件(minutes:minute:download) · 导出妙记转写的文字内容(minutes:minutes.transcript:export); GET …/media: 导出妙记文件
+  // (minutes:minute:download) · 下载妙记的音视频文件(minutes:minutes.media:export) — and on both "“导出妙记文件”权限不再开放，已添加权限的
+  // 应用不受影响，新应用请使用…权限。"
+  const DOC_READ = ['minutes:minutes', 'minutes:minutes:readonly', 'minutes:minutes.basic:read'];
+  const DOC_EXPORT = ['minutes:minute:download', 'minutes:minutes.transcript:export'];
+  const DOC_MEDIA = ['minutes:minute:download', 'minutes:minutes.media:export'];
+  // THE CLOSED SCOPES, this suite's own table (a copy editing the module's list cannot hide one): Lark's doc says
+  // im:resource:upload "该权限已不再维护，不可新增申请" and minutes:minute:download "权限不再开放"
+  const CLOSED = ['im:resource:upload', 'minutes:minute:download'];
+  ok(JSON.stringify(MIN) === JSON.stringify(['minutes:minutes:readonly', 'minutes:minutes.transcript:export']) && JSON.stringify(MED) === JSON.stringify(['minutes:minutes.media:export']) && DOC_READ.includes(MIN[0]) && DOC_EXPORT.includes(MIN[1]) && DOC_MEDIA.includes(MED[0]) && ![...MIN, ...MED].some((x) => x === 'minutes:minutes' || CLOSED.includes(x)) && JSON.stringify(lark.CLOSED_SCOPES) === JSON.stringify(CLOSED),
+    '妙记\'s scopes as Lark\'s doc spells them: the READ-ONLY read (never the write form minutes:minutes), the transcript export and the recording download new apps can add (never the closed minutes:minute:download)');
+  ok(JSON.stringify(lark.OPTIONAL_SCOPE_GROUPS[0]) === JSON.stringify([...lark.WIDE_SCOPES]) && JSON.stringify(lark.OPTIONAL_SCOPE_GROUPS[1]) === JSON.stringify(MED) && JSON.stringify(lark.OPTIONAL_SCOPE_GROUPS[2]) === JSON.stringify(MIN),
+    'their OWN groups right after WIDE: the recording first (an app without it keeps reading 妙记), then the read + transcript (WIDE → 妙记 media → 妙记 → im:resource → reactions → job → department → people → p2p → search)');
+  ok(lark.MINUTES_GRANT.console === true && JSON.stringify(lark.MINUTES_GRANT.scopes) === JSON.stringify([...MIN, ...MED]) && lark.adapter.minutesGrant === lark.MINUTES_GRANT, 'the grant the card reads names the three (One Re-authorize adds: reading Minutes and their recordings)');
+  // a consent's scope list for these options, with this vendor (the app-list read) — the fake oauth captures the URL + groups
+  const row = (scope, types = ['user']) => ({ scope, description: `d ${scope}`, level: 1, token_types: types });
+  const vendorOf = (rowsFn, { refuse = null, hang = false } = {}) => {
+    const calls = [];
+    const fetchFn = async (url) => {
+      const u = new URL(String(url));
+      calls.push(u.pathname + u.search);
+      if (u.pathname === '/open-apis/auth/v3/tenant_access_token/internal') return jsonRes({ code: 0, msg: 'ok', tenant_access_token: 't-app-0001', expire: 7200 });
+      if (u.pathname === '/open-apis/application/v6/applications/me') {
+        if (hang) return new Promise(() => {});
+        if (refuse) return jsonRes(refuse.body, refuse.status);
+        return jsonRes({ code: 0, msg: 'success', data: { app: { app_id: 'cli_fixture0001', app_name: 'Fixture', scopes: rowsFn() } } });
+      }
+      return jsonRes({ code: 404, msg: 'unrouted' }, 404);
+    };
+    return { fetchFn, calls };
+  };
+  const capture = async (mod, options, v, oauth0 = null) => {
+    let u = null, o = null;
+    const warns = [];
+    const oauth = oauth0 || { begin: async (x) => { o = x; u = x.buildConsentUrl({ redirectUri: lark.consent.callbackUrl, state: 'f'.repeat(24) }); return { flowId: 'f' }; } };
+    const x = mod.create({ id: 'l', options }, { oauth, resolveIntegration: () => CRED, tokens: mkTokens(), fetch: v.fetchFn, now, log: { warn: (m) => warns.push(String(m)), log() {}, error() {} } });
+    const flow = await x.auth.begin();
+    const url = u || (flow && flow.consentUrl);
+    return { url, scopes: url ? new URL(url).searchParams.get('scope').split(' ') : [], groups: o ? o.optionalScopes : (flow && flow.groups) || null, build: o && o.buildConsentUrl, warns, flow };
+  };
+  // THE FLOOR: the hand list a consent asks when the app's list cannot be read (Lark refuses the read: the app lacks
+  // application:application:self_manage) — exactly the static consent of ⑪ (its pins), said once in the log
+  const REFUSE_READ = { status: 400, body: { code: 99991672, msg: 'Access denied. One of the following scopes is required: [application:application:self_manage, admin:app.info:readonly].' } };
+  const fl = await capture(lark, {}, vendorOf(() => [], { refuse: REFUSE_READ }));
+  const FLOOR = fl.scopes;
+  ok(FLOOR.length === lark.SCOPES.length + 10 + lark.WIDE_SCOPES.length && [...MIN, ...MED].every((x) => FLOOR.includes(x)) && JSON.stringify(fl.groups) === JSON.stringify(lark.OPTIONAL_SCOPE_GROUPS.map((g) => [...g])) && fl.warns.length === 1 && /permission list could not be read .*99991672.* asks the built-in list; granting the app application:application:self_manage/.test(fl.warns[0]),
+    `a read Lark refuses ⇒ the FLOOR alone (${FLOOR.length} scopes: the hand list, 妙记 included), the static ladder, ONE log line naming the scope that lets it read: "${(fl.warns[0] || '').slice(0, 150)}…"`);
+  for (const [why, v] of [['rate-limited', vendorOf(() => [], { refuse: { status: 429, body: { code: 99991400, msg: 'request trigger frequency limit' } } })], ['no list in the answer', { fetchFn: async (url) => (new URL(String(url)).pathname.includes('tenant_access_token') ? jsonRes({ code: 0, tenant_access_token: 't-1', expire: 7200 }) : jsonRes({ code: 0, data: { app: { app_id: 'x' } } })), calls: [] }]]) {
+    const c = await capture(lark, {}, v);
+    ok(JSON.stringify(c.scopes) === JSON.stringify(FLOOR) && c.warns.length === 1, `a read that answers ${why} ⇒ the floor, said once (never a failed sign-in)`, c.warns.join(' | ').slice(0, 200));
+  }
+  ok(!FLOOR.some((x) => CLOSED.includes(x)) && !FLOOR.includes('minutes:minutes'), 'THE CLOSED-SCOPE GUARD: the floor names no closed scope (im:resource:upload, minutes:minute:download) and never 妙记\'s write form');
+  // (b) THE OWNER'S APP: every permission enabled — the floor + extras the hand list never named (妙记's WRITE form among them,
+  // enabled by the owner ⇒ asked), the two CLOSED ones it added before Lark closed them ("已添加权限的应用不受影响" ⇒ asked:
+  // enabled on THIS app), + tenant-only permissions (never a user's)
+  const EXTRA = ['task:task:read', 'vc:meeting:readonly', 'approval:approval:readonly', 'mail:user_mailbox.message:readonly', 'okr:okr:readonly', 'minutes:minutes'];
+  const TENANT_ONLY = ['im:message:send_as_bot', 'application:application:self_manage', 'admin:app.info:readonly'];
+  const appRows = (scopes, closed = CLOSED) => [...scopes.map((x) => row(x, x === 'contact:user.base:readonly' ? ['tenant', 'user'] : ['user'])), ...TENANT_ONLY.map((x) => row(x, ['tenant'])), ...closed.map((x) => row(x))];
+  let OWN = [...FLOOR, ...EXTRA];
+  const vOwn = vendorOf(() => appRows(OWN));
+  const all = await capture(lark, {}, vOwn);
+  const N = OWN.length + CLOSED.length;
+  ok(all.scopes.length === N && new Set(all.scopes).size === N && [...OWN, ...CLOSED].every((x) => all.scopes.includes(x)) && all.warns.length === 0 && JSON.stringify(vOwn.calls) === JSON.stringify(['/open-apis/auth/v3/tenant_access_token/internal', '/open-apis/application/v6/applications/me?lang=zh_cn']),
+    `THE OWNER'S APP with N = ${N} enabled user permissions ⇒ the consent asks exactly those ${all.scopes.length} (the ${FLOOR.length}-scope floor + ${N - FLOOR.length} the hand list never named) — read with ONE tenant token + ONE applications/me`);
+  { const MP = mutantCopies('chan-lark-noread', REPO);
+    const srcP = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf-8');
+    const READ = '        const app = await appUserScopes();\n';
+    ok(srcP.split(READ).length === 2, 'CONTROL setup: the consent\'s read of the app\'s list is spelled once');
+    const np = await capture(require(MP.write('src/channels/lark.js', srcP.replace(READ, "        const app = { scopes: [], why: 'the pre-lane consent' };\n"), 'noread')), {}, vOwn);
+    ok(JSON.stringify(np.scopes) === JSON.stringify(FLOOR) && np.scopes.length < N, `CONTROL — the consent without the read (every release before): ${np.scopes.length} of the app's ${N} — the assert above would be red`);
+    for (const r of copiesCensus(MP.files, MP.dir, REPO, { minCopies: 1, label: 'chan-lark-noread: ' })) ok(r.pass, r.name, r.detail); }
+  ok(!all.scopes.some((x) => TENANT_ONLY.includes(x)), 'a TENANT-only permission (token_types tenant) is never asked of a user');
+  ok(JSON.stringify(all.groups) === JSON.stringify([...lark.OPTIONAL_SCOPE_GROUPS.map((g) => [...g]), [...EXTRA, ...CLOSED]]), 'the ladder: the static groups (all covered by the app\'s list — their order kept) and the app\'s extras as the LAST group');
+  // the owner's OPTIONS still rule: reactions "Add and remove only" / the search off never ask those scopes back through the list
+  const rxOff = await capture(lark, { reactions: 'off' }, vOwn), sOff = await capture(lark, { search: 'off' }, vOwn);
+  ok(!rxOff.scopes.some((x) => lark.REACTIONS_READ_SCOPES.includes(x)) && !sOff.scopes.includes(lark.SEARCH_SCOPE) && !sOff.scopes.includes(lark.P2P_READ_SCOPE) && EXTRA.every((x) => rxOff.scopes.includes(x) && sOff.scopes.includes(x)),
+    'the owner\'s options rule over the app\'s list: reactions off asks no scope that reads who reacted, the search off asks neither feed scope — every other enabled one still asked');
+  // a scope the owner enables LATER: the next consent asks it — no code change
+  OWN = [...OWN, 'calendar:calendar.event:read'];
+  const later = await capture(lark, {}, vOwn);
+  ok(later.scopes.length === N + 1 && later.scopes.includes('calendar:calendar.event:read'), `a permission the app enables later is in the NEXT consent (${later.scopes.length} = N + 1) — no code change`);
+  // AN APP WITHOUT 妙记 (its list lacks all three): the two 妙记 groups are pressed FIRST (the recording's, then the read's) —
+  // the groups the app covers keep their order behind them; an app without only the recording loses only that group
+  const noMin = await capture(lark, {}, vendorOf(() => appRows([...FLOOR, ...EXTRA].filter((x) => ![...MIN, ...MED].includes(x)), [])));
+  const noMed = await capture(lark, {}, vendorOf(() => appRows([...FLOOR, ...EXTRA].filter((x) => !MED.includes(x)), [])));
+  const rest = lark.OPTIONAL_SCOPE_GROUPS.filter((g) => !g.some((x) => [...MIN, ...MED].includes(x))).map((g) => [...g]);
+  ok(JSON.stringify(noMin.groups.slice(0, 2)) === JSON.stringify([MED, MIN]) && JSON.stringify(noMin.groups.slice(2, -1)) === JSON.stringify(rest) && [...MIN, ...MED].every((x) => noMin.scopes.includes(x)) && JSON.stringify(noMed.groups[0]) === JSON.stringify(MED) && JSON.stringify(noMed.groups[1]) === JSON.stringify([...lark.WIDE_SCOPES]),
+    'an app whose list lacks 妙记: the floor still ASKS it (never the ceiling) and its groups are the FIRST presses; an app lacking only the recording: its first press is that group alone');
+  // (c) THE PAGES — an app with 326 user permissions: ONE consent asks the floor + as many extras as one authorize URL carries
+  const MANY = Array.from({ length: 300 }, (_, i) => `zz:scope${String(i).padStart(3, '0')}:readonly`);
+  const port = await freePort();
+  const olB = OL.createOAuthLoopback({ now, log: { warn() {}, log() {}, error() {} }, fixedCallbackUrl: `http://127.0.0.1:${port}/lark/cb` });
+  try {
+    const big = await capture(lark, {}, vendorOf(() => appRows([...FLOOR, ...MANY], [])), olB);
+    const gf = (big.flow.groups || []).flat();
+    const page = big.scopes.filter((x) => !FLOOR.includes(x));
+    ok(Buffer.byteLength(big.url) <= lark.CONSENT_URL_MAX_BYTES && lark.CONSENT_URL_MAX_BYTES === 3000 && FLOOR.every((x) => big.scopes.includes(x)) && JSON.stringify(page) === JSON.stringify(MANY.slice(0, page.length)) && page.length > 40 && page.length < MANY.length && gf.length === big.scopes.length - lark.SCOPES.length && JSON.stringify(big.flow.groups[big.flow.groups.length - 1]) === JSON.stringify(page),
+      `an app with ${FLOOR.length + MANY.length} user permissions: ONE consent asks the floor + the first ${page.length} extras — a ${Buffer.byteLength(big.url)}-byte authorize URL (≤ ${lark.CONSENT_URL_MAX_BYTES}); the narrowing chain carries every optional one (${gf.length})`);
+    // the PURE pager: the byte bound first, then Lark's 200-scope cap; nothing past the first that does not fit
+    const P0 = lark.consentPage(['a:b'], ['c:d', 'e:f', 'g:h'], (sc) => sc.join(' ').length * 250);   // 1 750 · 2 750 · 3 750 bytes
+    const P1 = lark.consentPage(FLOOR, MANY, () => 1);
+    ok(JSON.stringify(P0) === JSON.stringify(['c:d', 'e:f']) && P1.length === lark.CONSENT_SCOPES_MAX - FLOOR.length && lark.CONSENT_SCOPES_MAX === 200, `consentPage: in order while the URL fits (${P0.length} of 3 at a 3 000-byte bound), never past Lark's 200 a consent (${FLOOR.length} + ${P1.length})`);
+    olB.stopAll();
+    // CONTROL — oauth-loopback's old bound (64): the chain silently loses the extras past 64 (a refused one could never be dropped)
+    const MO = mutantCopies('chan-lark-optmax64', REPO);
+    const srcO = fs.readFileSync(path.join(REPO, 'src/oauth-loopback.js'), 'utf-8');
+    ok(srcO.split('const OPTIONAL_SCOPES_MAX = 200;').length === 2, 'CONTROL setup: the loopback bound is spelled once');
+    const OL64 = MO.load('src/oauth-loopback.js', srcO.replace('const OPTIONAL_SCOPES_MAX = 200;', 'const OPTIONAL_SCOPES_MAX = 64;'), 'max64');
+    const ol64 = OL64.createOAuthLoopback({ now, log: { warn() {}, log() {}, error() {} }, fixedCallbackUrl: `http://127.0.0.1:${await freePort()}/lark/cb` });
+    try {
+      const b64 = await capture(lark, {}, vendorOf(() => appRows([...FLOOR, ...MANY], [])), ol64);
+      const g64 = b64.flow.groups || [];
+      ok(g64.flat().length < b64.scopes.length - lark.SCOPES.length && g64[g64.length - 1].length === 64, `CONTROL — the bound at 64: the page's group is cut to 64 and the chain carries ${g64.flat().length} of the ${b64.scopes.length - lark.SCOPES.length} optional scopes — the assert above would be red`);
+    } finally { ol64.stopAll(); }
+    for (const r of copiesCensus(MO.files, MO.dir, REPO, { minCopies: 1, label: 'chan-lark-optmax64: ' })) ok(r.pass, r.name, r.detail);
+  } finally { olB.stopAll(); }
+  // THE WAIT: a read that never answers ⇒ the floor once APP_SCOPES_WAIT_MS passes (a human is waiting for the page) — a
+  // copy at 300 ms keeps the suite fast; the module's own bound is pinned
+  { const MW = mutantCopies('chan-lark-appwait', REPO);
+    const srcW = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf-8');
+    ok(lark.APP_SCOPES_WAIT_MS === 8000 && srcW.split('const APP_SCOPES_WAIT_MS = 8000;').length === 2, 'the wait for the app\'s list is 8 s, spelled once');
+    const lw = require(MW.write('src/channels/lark.js', srcW.replace('const APP_SCOPES_WAIT_MS = 8000;', 'const APP_SCOPES_WAIT_MS = 300;'), 'wait300'));
+    const hung = await capture(lw, {}, vendorOf(() => [], { hang: true }));
+    ok(JSON.stringify(hung.scopes) === JSON.stringify(FLOOR) && hung.warns.length === 1 && /no answer in 0\.3 s/.test(hung.warns[0]), 'a read that never answers: the page opens once the bound passes (a 300 ms copy) with the floor, said once');
+    for (const r of copiesCensus(MW.files, MW.dir, REPO, { minCopies: 1, label: 'chan-lark-appwait: ' })) ok(r.pass, r.name, r.detail); }
+  // CONTROLS — the read's user-type filter (a TENANT permission asked of a user: Lark refuses such a consent); a floor naming a
+  // closed scope (the im:resource:upload lesson) is red at the guard
+  { const MC = mutantCopies('chan-lark-appfilters', REPO);
+    const srcC = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf-8');
+    const TYPE = " || !(Array.isArray(r.token_types) && r.token_types.includes('user'))) continue;";
+    const MEDS = "const MINUTES_MEDIA_SCOPES = Object.freeze(['minutes:minutes.media:export']);";
+    ok(srcC.split(TYPE).length === 2 && srcC.split(MEDS).length === 2, 'CONTROL setup: the read\'s user-type filter and the recording\'s scope are spelled once');
+    const lt = require(MC.write('src/channels/lark.js', srcC.replace(TYPE, ') continue;'), 'notype'));
+    const ct = await capture(lt, {}, vOwn);
+    ok(TENANT_ONLY.every((x) => ct.scopes.includes(x)), 'CONTROL — the read without its user-type filter asks the tenant-only permissions of a user — the assert above would be red');
+    const lc = require(MC.write('src/channels/lark.js', srcC.replace(MEDS, "const MINUTES_MEDIA_SCOPES = Object.freeze(['minutes:minute:download']);"), 'closed'));
+    const cc = await capture(lc, {}, vendorOf(() => [], { refuse: REFUSE_READ }));
+    ok(cc.scopes.includes('minutes:minute:download') && cc.scopes.some((x) => CLOSED.includes(x)), 'CONTROL — the recording spelled with the closed minutes:minute:download: the floor names it (every new app would refuse the consent, 20027) — the guard above would be red');
+    for (const r of copiesCensus(MC.files, MC.dir, REPO, { minCopies: 1, label: 'chan-lark-appfilters: ' })) ok(r.pass, r.name, r.detail); }
+
+  // (d) END TO END — the real engine + integration store + consent machine + the raw-API orchestrator; a fake Lark: its
+  // authorize page (431 when the URL + the owner's cookies pass its header limit — 主开发's measurement; 20027 for a scope the
+  // app has not enabled; else 302), its token answer (the user's ACCUMULATED grants — Lark's doc — or, for a token "minted
+  // before this release", none of 妙记), its app list, and its minutes endpoints judging the Bearer's scopes
+  const STORE = require(path.join(REPO, 'src/server/integration-store.js'));
+  const ENG = require(path.join(REPO, 'src/server/channels-engine.js'));
+  const ORCH = require(path.join(REPO, 'src/server/channel-api.js'));
+  const ROOTB = fs.mkdtempSync(path.join(process.env.TMPDIR || '/tmp', `vs-larkmin-${process.pid}-`));
+  const HEADER_LIMIT = 8192, COOKIE_BYTES = 3500;   // the owner's browser: his Lark cookies ride every authorize request
+  // (the e2e app's extras leave out 妙记's write form: a "token minted before this release" holds no 妙记 scope at all)
+  const EXTRA_E2E = EXTRA.filter((x) => !/^minutes:/.test(x));
+  const APP = { scopes: [...FLOOR, ...EXTRA_E2E] };
+  const enabled = () => new Set([...APP.scopes, ...TENANT_ONLY]);
+  let stripMinutes = true;                 // the token Lark mints: before this release no consent asked any 妙记 scope
+  const granted = new Map(), held = new Map();
+  let userGrants = new Set();              // Lark: "最新生成的 user_access_token 将包含用户历史上已授予的所有权限"
+  let codeN = 0, exchanges = 0;
+  const pages = [];
+  const fakeAuth = http.createServer((req, res) => {
+    const u = new URL(req.url, 'http://127.0.0.1');
+    pages.push(Buffer.byteLength(req.url));
+    if (Buffer.byteLength(req.url) + COOKIE_BYTES > HEADER_LIMIT) { res.writeHead(431, { 'Content-Type': 'text/html' }).end('<h1>431 Request Header Fields Too Large</h1>'); return; }
+    const scopes = String(u.searchParams.get('scope') || '').split(' ').filter(Boolean);
+    const missing = scopes.filter((x) => !enabled().has(x));
+    if (missing.length) { res.writeHead(200, { 'Content-Type': 'text/html' }).end(`<p>错误码 20027: scope 参数中包含当前应用未开通的权限 ${missing.join(' ')}</p>`); return; }
+    const code = `cm-${++codeN}`; granted.set(code, stripMinutes ? scopes.filter((x) => !/^minutes:/.test(x)) : scopes);
+    const to = new URL(u.searchParams.get('redirect_uri')); to.searchParams.set('code', code); to.searchParams.set('state', u.searchParams.get('state'));
+    res.writeHead(302, { Location: to.toString() }).end();
+  });
+  await new Promise((r) => fakeAuth.listen(0, '127.0.0.1', r));
+  const AUTH = `http://127.0.0.1:${fakeAuth.address().port}/open-apis/authen/v1/authorize`;
+  const R = (body, status = 200, type = 'application/json') => new Response(typeof body === 'string' ? body : JSON.stringify(body), { status, headers: { 'content-type': type } });
+  const DENY = (set) => ({ code: 99991679, msg: `Unauthorized. You do not have permission to perform the requested operation on the resource. Please request user re-authorization and try again. required one of these privileges under the user identity: [${set.join(', ')}]` });
+  const vendor = async (url, init = {}) => {
+    const u = new URL(String(url));
+    const auth = String((init.headers && (init.headers.Authorization || init.headers.authorization)) || '');
+    let body = null; try { body = init.body ? JSON.parse(String(init.body)) : null; } catch {}
+    if (u.pathname === '/open-apis/authen/v2/oauth/token') {
+      exchanges++;
+      if (body && body.grant_type === 'authorization_code') for (const x of granted.get(body.code) || []) userGrants.add(x);
+      const sc = [...userGrants]; const at = `u-min-${exchanges}`; held.set(at, sc);
+      return R({ code: 0, access_token: at, expires_in: 7200, refresh_token: `ur-min-${exchanges}`, refresh_token_expires_in: 2592000, scope: sc.join(' ') });
+    }
+    if (u.pathname === '/open-apis/authen/v1/user_info') return R({ code: 0, data: { open_id: 'ou_owner', union_id: 'on_owner', user_id: 'uid_owner', name: 'Owner' } });
+    if (u.pathname === '/open-apis/auth/v3/tenant_access_token/internal') return R({ code: 0, tenant_access_token: 't-app-0001', expire: 7200 });
+    if (u.pathname === '/open-apis/application/v6/applications/me') return R({ code: 0, data: { app: { app_id: 'cli_appa0001', scopes: appRows(APP.scopes, []) } } });
+    if (u.pathname === '/open-apis/im/v1/chats') return R({ code: 0, data: { items: [], has_more: false } });
+    const mm = /^\/open-apis\/minutes\/v1\/minutes\/([A-Za-z0-9]+)(\/transcript|\/media)?$/.exec(u.pathname);
+    if (mm) {
+      const h = held.get(auth.replace(/^Bearer /, '')) || [];
+      const need = mm[2] === '/transcript' ? DOC_EXPORT : mm[2] === '/media' ? DOC_MEDIA : DOC_READ;
+      if (!need.some((x) => h.includes(x))) return R(DENY(need), 400);
+      if (mm[2] === '/transcript') return R('Owner 00:00:01\n今天看一下妙记的权限。\n', 200, 'text/plain; charset=utf-8');
+      // the doc's answer: "download_url | 妙记音视频文件下载链接" (valid one day)
+      if (mm[2] === '/media') return R({ code: 0, msg: 'success', data: { download_url: 'https://internal-api-drive-stream.feishu.cn/space/api/box/stream/download/authcode/?code=fixture0001' } });
+      return R({ code: 0, msg: 'success', data: { minute: { token: mm[1], title: '周会', duration: '1800000' } } });
+    }
+    return R({ code: 404, msg: 'unrouted' }, 404);
+  };
+  const browse = async (consentUrl) => {
+    const q = new URL(consentUrl).search;
+    const page0 = await new Promise((resolve) => { http.get(AUTH + q, (res) => { let b = ''; res.on('data', (c) => { b += c; }); res.on('end', () => resolve({ status: res.statusCode, location: res.headers.location || null, body: b })); }).on('error', (e) => resolve({ status: 0, body: e.message })); });
+    if (page0.status === 302 && page0.location) { const back = await get(page0.location); await sleep(120); return { ...page0, back }; }
+    return page0;
+  };
+  const quiet = { log() {}, warn() {}, error() {} };
+  let pt = 0;
+  const mkEngine = async (tag, E = ENG, extra = {}) => {
+    userGrants = new Set();   // a fresh Lark user per engine
+    fs.mkdirSync(path.join(ROOTB, tag), { recursive: true });
+    const ints = STORE.create({ dataDir: path.join(ROOTB, tag, 'int'), env: {}, now, broadcast: () => {}, log: quiet });
+    const ol = OL.createOAuthLoopback({ now, log: quiet, fixedCallbackUrl: `http://127.0.0.1:${await freePort()}/lark/cb` });
+    const eng = E.create({ dataDir: path.join(ROOTB, tag), env: {}, now, broadcast: () => {}, integrations: ints, fetch: vendor, log: quiet, oauth: ol, paceClock: () => pt, sleep: (ms) => new Promise((r) => { pt += ms; setImmediate(r); }), ...extra });
+    return { eng, ol };
+  };
+  const connect = async (eng) => {
+    const s = await eng.startOAuth({ kind: 'lark', credentialKey: 'custom', credential: { appId: 'cli_appa0001', appSecret: 'fs-appa-' + 'secret-0001' } });
+    const p = await browse(s.url);
+    for (let i = 0; i < 50 && p.status === 302 && !eng.oauthStatus(s.flowId).done; i++) await sleep(20);
+    return { s, p, asked: new URL(s.url).searchParams.get('scope').split(' '), id: p.status === 302 ? (await eng.connect('lark', { flowId: s.flowId })).adapter.id : null };
+  };
+  const reauth = async (eng, id, until) => {
+    const r = await eng.reauthorize(id, {});
+    const p = await browse(r.flow.consentUrl);
+    for (let i = 0; i < 50 && !until(); i++) await sleep(20);
+    return { r, p, asked: new URL(r.flow.consentUrl).searchParams.get('scope').split(' ') };
+  };
+  const recOf = (eng, id) => eng.adapterRecords().adapters.find((x) => x.id === id);
+  const said = (eng, id, t) => CC.grantsText(eng.adapterView(recOf(eng, id)).grants, { vendor: 'Lark', ...(t ? { t } : {}) }).text;
+  const AG = { kind: 'agent', id: 'conv-min', name: 'Agent M', groups: [] };
+  const { eng, ol } = await mkEngine('owner');
+  try {
+    // A TOKEN MINTED BEFORE THIS RELEASE (no 妙记 in it): the card names it, the agent's raw reads are refused 99991679
+    const c0 = await connect(eng);
+    const id = c0.id;
+    ok(c0.p.status === 302 && c0.asked.length === APP.scopes.length && APP.scopes.every((x) => c0.asked.includes(x)) && JSON.stringify(recOf(eng, id).auth.refusedScopes || []) === '[]' && recOf(eng, id).auth.morePending === 0, `the owner's app (every permission enabled, ${APP.scopes.length} user ones): the FIRST page grants the consent that asked all ${c0.asked.length} — no 20027, no press, nothing left for a later page`);
+    const g0 = (eng.adapterView(recOf(eng, id)).grants || []).find((g) => g.what === 'minutes');
+    ok(!recOf(eng, id).auth.scopes.some((x) => /^minutes:/.test(x)) && g0 && JSON.stringify(g0.missing) === JSON.stringify([...MIN, ...MED]) && JSON.stringify(g0.refused) === '[]' && said(eng, id) === 'One Re-authorize adds: reading Minutes and their recordings' && said(eng, id, tr(zh)) === '重新授权一次即可开启：读取妙记及其音视频' && said(eng, id, tr(ja)) === '一度再認可すると追加されます：Minutes とその音声・動画の読み取り',
+      `a held token WITHOUT 妙记 (every token minted before this release): the account card says "${said(eng, id)}" · "${said(eng, id, tr(zh))}" · "${said(eng, id, tr(ja))}"`, JSON.stringify(g0));
+    const api = ORCH.create({ dataDir: path.join(ROOTB, 'api'), engine: eng, fetchFn: vendor, broadcast: () => {} });
+    await api.setTiers(id, [{ principal: { kind: 'agent', id: AG.id, name: AG.name }, tier: 'read' }]);
+    const MT = '/open-apis/minutes/v1/minutes/obcnq3b9jl72l83w4f149w9c';
+    const b = await Promise.all(['', '/transcript', '/media'].map((x) => api.call(AG, { cred: id, method: 'GET', path: MT + x })));
+    ok(b.every((x) => x.ok && x.status === 400 && x.json && x.json.code === 99991679) && /minutes:minutes:readonly/.test(b[0].json.msg) && /minutes:minutes\.transcript:export/.test(b[1].json.msg) && /minutes:minutes\.media:export/.test(b[2].json.msg),
+      'BEFORE — the agent\'s raw reads (vibespace-channels api lark GET …/minutes/<token>, …/transcript, …/media) through the door as it is: Lark answers 99991679 naming each set (the vendor\'s own words reach the agent)', JSON.stringify(b.map((x) => [x.status, x.json && x.json.code])));
+    // ONE RE-AUTHORIZE — and a permission the owner enabled on the app meanwhile rides it with no code change
+    stripMinutes = false;
+    APP.scopes = [...APP.scopes, 'task:task:write'];
+    const r1 = await reauth(eng, id, () => (recOf(eng, id).auth.scopes || []).includes(MIN[0]));
+    const sc1 = recOf(eng, id).auth.scopes || [];
+    ok(r1.p.status === 302 && r1.asked.includes('task:task:write') && sc1.includes('task:task:write') && [...MIN, ...MED].every((x) => sc1.includes(x)), `ONE Re-authorize: the consent asks the floor + the permission the app enabled since (task:task:write — no code change; the extras the token holds are not asked again: ${r1.asked.length} asked) and the token holds 妙记`);
+    ok(said(eng, id) === '' && (eng.adapterView(recOf(eng, id)).grants || []).find((g) => g.what === 'minutes').missing.length === 0, 'the card says nothing more about 妙记');
+    const a = await Promise.all(['', '/transcript', '/media'].map((x) => api.call(AG, { cred: id, method: 'GET', path: MT + x })));
+    ok(a[0].ok && a[0].status === 200 && a[0].json.data.minute.title === '周会' && a[1].ok && a[1].status === 200 && /妙记的权限/.test(a[1].text || '') && a[2].ok && a[2].status === 200 && /^https:\/\/internal-api-drive-stream\.feishu\.cn\//.test(a[2].json.data.download_url),
+      'AFTER — the SAME raw calls through the SAME door (nothing new in it): the minute, its transcript (text) and its recording\'s one-day download address (the doc\'s `download_url`)', JSON.stringify(a.map((x) => x.status)));
+  } finally { eng.stop(); ol.stopAll(); }
+  // AN APP THAT HAS NOT ENABLED 妙记: the consent still asks it (the floor) — Lark's 20027; the presses drop the two 妙记 groups
+  // FIRST (the app's own list lacks them) and the account names what Lark refused. An app without only the recording: ONE press
+  for (const [tag, lack, presses] of [['no-minutes', [...MIN, ...MED], [MED, MIN]], ['no-media', MED, [MED]]]) {
+    APP.scopes = [...FLOOR, ...EXTRA_E2E].filter((x) => !lack.includes(x)); stripMinutes = false;
+    const { eng: e2, ol: ol2 } = await mkEngine(tag);
+    try {
+      const s = await e2.startOAuth({ kind: 'lark', credentialKey: 'custom', credential: { appId: 'cli_appa0001', appSecret: 'fs-appa-' + 'secret-0001' } });
+      const pg = await browse(s.url);
+      ok(pg.status === 200 && /20027/.test(pg.body) && lack.every((x) => pg.body.includes(x)) && JSON.stringify(s.flow.nextNarrow) === JSON.stringify(presses[0]), `${tag}: Lark refuses the consent (20027 naming ${lack.join(' + ')}) and the next press names ${presses[0].join(' + ')} ALONE (the app's list lacks it)`);
+      let n = null;
+      for (let i = 0; i < presses.length; i++) n = e2.oauthNarrow(s.flowId);
+      const p2 = await browse(n.flow.consentUrl);
+      for (let i = 0; i < 50 && !e2.oauthStatus(s.flowId).done; i++) await sleep(20);
+      const c = await e2.connect('lark', { flowId: s.flowId });
+      const rec = recOf(e2, c.adapter.id);
+      ok(p2.status === 302 && JSON.stringify(n.flow.narrowed) === JSON.stringify(presses.flat()) && JSON.stringify(rec.auth.refusedScopes) === JSON.stringify(presses.flat()) && APP.scopes.every((x) => rec.auth.scopes.includes(x)),
+        `${tag}: ${presses.length} press${presses.length > 1 ? 'es drop' : ' drops'} ONLY ${presses.flat().join(' + ')}: granted with everything else the app enabled (${rec.auth.scopes.length} scopes${lack.length === 1 ? ' — 妙记\'s read and transcript kept' : ''})`);
+      const want = `Lark refused ${[...MIN, ...MED].filter((x) => lack.includes(x)).join(' + ')} — enable it in the app console and Re-authorize`;
+      ok(said(e2, c.adapter.id) === want, `${tag}: the card names what Lark refused: "${said(e2, c.adapter.id)}"`);
+    } finally { e2.stop(); ol2.stopAll(); }
+  }
+  // THE PAGES, end to end: an app with 150 more permissions than the floor — every authorize URL ≤ CONSENT_URL_MAX_BYTES (the
+  // owner's browser answers none of them 431), each Re-authorize asks the NEXT page (the held ones never again) and the card
+  // counts what is left, until the token holds every one
+  { APP.scopes = [...FLOOR, ...MANY.slice(0, 150)]; stripMinutes = false; pages.length = 0;
+    const { eng: e4, ol: ol4 } = await mkEngine('pages');
+    try {
+      const c = await connect(e4);
+      const steps = [{ asked: c.asked.length, left: recOf(e4, c.id).auth.morePending, said: said(e4, c.id) }];
+      for (let i = 0; i < 6 && recOf(e4, c.id).auth.morePending > 0; i++) {
+        const before = recOf(e4, c.id).auth.morePending;
+        const r = await reauth(e4, c.id, () => recOf(e4, c.id).auth.morePending < before);
+        steps.push({ asked: r.asked.length, left: recOf(e4, c.id).auth.morePending, said: said(e4, c.id), status: r.p.status });
+      }
+      const fin = recOf(e4, c.id);
+      ok(c.p.status === 302 && steps.length >= 2 && pages.every((b) => b <= lark.CONSENT_URL_MAX_BYTES) && steps.every((x, i) => i === 0 || x.status === 302) && APP.scopes.every((x) => fin.auth.scopes.includes(x)) && fin.auth.morePending === 0 && steps[steps.length - 1].said === '',
+        `${steps.length} consents (${pages.join(' / ')} bytes, each ≤ ${lark.CONSENT_URL_MAX_BYTES}) hold all ${APP.scopes.length}: asked ${steps.map((x) => x.asked).join(' → ')}, left ${steps.map((x) => x.left).join(' → ')}`);
+      ok(steps[0].left > 0 && steps[0].said === `One Re-authorize adds: ${steps[0].left} more of the permissions your app has enabled` && CC.grantsText(e4.adapterView(recOf(e4, c.id)).grants, { vendor: 'Lark', t: tr(zh) }).text === '' && tr(zh)('{n} more of the permissions your app has enabled', { n: 85 }) === '应用已开通的另外 85 项权限',
+        `between pages the card counts what is left: "${steps[0].said}"`);
+    } finally { e4.stop(); ol4.stopAll(); }
+    // CONTROL — a copy paging at 6 KB: the first consent's URL passes the owner's header budget ⇒ Lark answers 431, nothing is granted
+    const MB = mutantCopies('chan-lark-page6k', REPO);
+    const srcB = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf-8');
+    ok(srcB.split('const CONSENT_URL_MAX_BYTES = 3000;').length === 2, 'CONTROL setup: the page bound is spelled once');
+    const L6 = require(MB.write('src/channels/lark.js', srcB.replace('const CONSENT_URL_MAX_BYTES = 3000;', 'const CONSENT_URL_MAX_BYTES = 6144;'), 'page6k'));
+    // the engine registers a vendor kind only when its registry lacks it — a registry holding the copy runs it as Lark
+    const reg6 = CH.createChannelRegistry(); reg6.register(L6.adapter);
+    APP.scopes = [...FLOOR, ...MANY]; pages.length = 0;   // enough permissions to fill a 6 KB page
+    const { eng: e6, ol: ol6 } = await mkEngine('page6k', ENG, { registry: reg6 });
+    try {
+      const c6 = await connect(e6);
+      ok(c6.p.status === 431 && pages[0] > 5000 && c6.id === null, `CONTROL — paging at 6 KB: a ${pages[0]}-byte authorize URL, Lark answers 431 in the owner's browser and nothing is connected — the page assert above would be red`);
+    } finally { e6.stop(); ol6.stopAll(); }
+    for (const r of copiesCensus(MB.files, MB.dir, REPO, { minCopies: 1, label: 'chan-lark-page6k: ' })) ok(r.pass, r.name, r.detail); }
+  // CONTROL — an engine copy without the 妙记 row in its grant list (the release before): a token without 妙记 and the card
+  // says nothing — the owner would only learn it from an agent's refused read
+  { APP.scopes = [...FLOOR, ...EXTRA_E2E]; stripMinutes = true;
+    const MG = mutantCopies('chan-lark-nominrow', REPO);
+    const srcG = engineSource(REPO);
+    const ROW = "    const mn = minutesGrantView(rec); if (mn) out.push({ what: 'minutes', ...mn });\n";
+    ok(srcG.split(ROW).length === 2, 'CONTROL setup: the engine\'s 妙记 grant row is spelled once');
+    const { eng: e3, ol: ol3 } = await mkEngine('no-row', MG.load('src/server/channels-engine.js', srcG.replace(ROW, ''), 'norow'));
+    try {
+      const c = await connect(e3);
+      ok(!recOf(e3, c.id).auth.scopes.some((x) => /^minutes:/.test(x)) && said(e3, c.id) === '', 'CONTROL — without the row the same token draws NO line on the card — the card assert above would be red');
+    } finally { e3.stop(); ol3.stopAll(); }
+    for (const r of copiesCensus(MG.files, MG.dir, REPO, { minCopies: 1, label: 'chan-lark-nominrow: ' })) ok(r.pass, r.name, r.detail); }
+  await new Promise((r) => fakeAuth.close(r));
+  fs.rmSync(ROOTB, { recursive: true, force: true });
 }
 
 // ═══ ⑬ THE CHANGE FEED (lane lark-search-poll, B-5aab — design §2 / §3.3 / §4 / §5) ═══
@@ -1724,8 +2083,8 @@ console.log('\n⑬ the change feed: the search page, the declared unit, the desc
   };
   const on = await capture({}), offS = await capture({ search: 'off' }), offBoth = await capture({ search: 'off', reactions: 'off' });
   const PPLG = [[lark.JOB_SCOPE], [lark.DEPT_SCOPE], [lark.PEOPLE_SCOPE]];   // lane lark-threads: the profile groups
-  ok(on.scopes.includes('search:message') && on.scopes.includes('im:message.p2p_msg:get_as_user') && JSON.stringify(on.groups) === JSON.stringify([[...lark.WIDE_SCOPES], [...lark.UPLOAD_CONSENT_SCOPES], ['im:message.reactions:read'], ...PPLG, ['im:message.p2p_msg:get_as_user'], ['search:message']]), 'the default consent asks for the search + the single-chat read; the optional groups are ORDERED least valuable first (reactions, the profile fields, people, the single-chat read, the search)', JSON.stringify(on));
-  ok(!offS.scopes.includes('search:message') && !offS.scopes.includes('im:message.p2p_msg:get_as_user') && JSON.stringify(offS.groups) === JSON.stringify([[...lark.WIDE_SCOPES], [...lark.UPLOAD_CONSENT_SCOPES], ['im:message.reactions:read'], ...PPLG]) && JSON.stringify(offBoth.groups) === JSON.stringify([lark.WIDE_SCOPES.filter((x) => !lark.REACTIONS_READ_SCOPES.includes(x)), [...lark.UPLOAD_CONSENT_SCOPES], ...PPLG]), 'the option `search: off` removes BOTH scopes from the consent (and from the retry\'s groups); the profile groups stay (reactions off too: the wide group without its reactions reader — verify r1)', JSON.stringify(offS));
+  ok(on.scopes.includes('search:message') && on.scopes.includes('im:message.p2p_msg:get_as_user') && JSON.stringify(on.groups) === JSON.stringify([[...lark.WIDE_SCOPES], [...lark.MINUTES_MEDIA_SCOPES], [...lark.MINUTES_SCOPES], [...lark.UPLOAD_CONSENT_SCOPES], ['im:message.reactions:read'], ...PPLG, ['im:message.p2p_msg:get_as_user'], ['search:message']]), 'the default consent asks for the search + the single-chat read; the optional groups are ORDERED least valuable first (reactions, the profile fields, people, the single-chat read, the search)', JSON.stringify(on));
+  ok(!offS.scopes.includes('search:message') && !offS.scopes.includes('im:message.p2p_msg:get_as_user') && JSON.stringify(offS.groups) === JSON.stringify([[...lark.WIDE_SCOPES], [...lark.MINUTES_MEDIA_SCOPES], [...lark.MINUTES_SCOPES], [...lark.UPLOAD_CONSENT_SCOPES], ['im:message.reactions:read'], ...PPLG]) && JSON.stringify(offBoth.groups) === JSON.stringify([lark.WIDE_SCOPES.filter((x) => !lark.REACTIONS_READ_SCOPES.includes(x)), [...lark.MINUTES_MEDIA_SCOPES], [...lark.MINUTES_SCOPES], [...lark.UPLOAD_CONSENT_SCOPES], ...PPLG]), 'the option `search: off` removes BOTH scopes from the consent (and from the retry\'s groups); the profile groups stay (reactions off too: the wide group without its reactions reader — verify r1)', JSON.stringify(offS));
   const sOpt = lark.OPTIONS.find((o) => o.key === 'search');
   ok(sOpt && sOpt.default === 'on' && JSON.stringify(sOpt.choices) === JSON.stringify(['off', 'on']) && lark.FEED_GRANT.option === 'search' && JSON.stringify(lark.FEED_GRANT.scopes) === JSON.stringify(['search:message', 'im:message.p2p_msg:get_as_user']) && lark.FEED_GRANT.console === true && lark.adapter.feedGrant === lark.FEED_GRANT, 'the option is declared (on by default, never hidden), and FEED_GRANT names the two scopes, the console step and the option');
   // the gated-call census reads both new calls as the ONE gate (api())
@@ -2152,7 +2511,7 @@ console.log('\n⑰ verify r3: one response judge, the catch census, the push pat
   const cls = (cc, k) => cc.sites.filter((s) => `${s.kind}:${s.cls}` === k).length;
   ok(c.problems.length === 0 && cls(c, 'catch:RED') === 0, `every raw send is judged and every catch over a vendor call re-throws a RATE refusal, ends by re-throwing, or is a RATE_OK row (${c.sites.length} sites)`, c.problems.join(' ; '));
   ok(cls(c, 'raw:judge') === 1 && cls(c, 'raw:judged-inline') === 3 && cls(c, 'raw:unjudged') === 0, 'raw sends: exactly the judge\'s own (callJson), the resource bytes, the avatar bytes (lane channel-avatars) and the upload\'s multipart (lane channel-send-files: callForm) — each typedFailure right after — nothing else touches fetch');
-  ok(c.sites.filter((s) => s.cls === 'rate-ok').map((s) => s.id).sort().join() === 'consent-user-info,integration-test,push-names,send-parts' && Object.isFrozen(lark.RATE_OK) && lark.RATE_OK.every((r) => typeof r.why === 'string' && r.why.length > 40), 'the deliberate swallows are exactly {push-names, consent-user-info, integration-test, send-parts (lane channel-send-files: a send in parts stops at its first refusal)}, each a frozen row with its reason');
+  ok(c.sites.filter((s) => s.cls === 'rate-ok').map((s) => s.id).sort().join() === 'consent-app-scopes,consent-user-info,integration-test,push-names,send-parts' && Object.isFrozen(lark.RATE_OK) && lark.RATE_OK.every((r) => typeof r.why === 'string' && r.why.length > 40), 'the deliberate swallows are exactly {push-names, consent-user-info, consent-app-scopes (lane lark-minutes-scopes: one read of the app\'s own list per human consent — any refusal asks the built-in list), integration-test, send-parts (lane channel-send-files: a send in parts stops at its first refusal)}, each a frozen row with its reason');
   ok(cls(c, 'catch:rethrows-rate') >= 7 && cls(c, 'catch:ends-throw') >= 5 && cls(c, 'catch:raw-fetch') === 4, `the rate re-throws (${cls(c, 'catch:rethrows-rate')}: the members page, a profile, a department, the app name, the chat lookup, the reconcile's scan and re-issue), the end-throws (${cls(c, 'catch:ends-throw')}), the four raw-fetch catches (the judge, the resource, the avatar, callForm)`);
   const cl = responseCensus(liveSrc, { direct: /\b(?:api|callJson|fetchFn|f)\s*\(/, raw: /\b(?:fetchFn|f)\s*\(/g, rateOkIds: new Set() });
   ok(cl.problems.length === 0 && cl.sites.length >= 3 && cl.sites.every((s) => s.cls === 'no-vendor') && Array.isArray(LL.EGRESS) && LL.EGRESS.length === 0, `live/lark.js constructs no request (EGRESS empty) and none of its ${cl.sites.length} catches sits over a vendor call — the push path's only vendor touch is the adapter's names, judged there`);

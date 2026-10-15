@@ -3,6 +3,8 @@
 // the hot rows by (shard, offset) (usage-cold-walk.js), parses them and folds them into the SAME accumulator
 // aggregate() uses (UsageHistory._aggRow / _aggEnd, same pricing, same order) — the main thread receives the
 // finished answer and names what needs its live account / session tables (_fixLabels).
+// B-748f: …and THE LEDGER REBUILD — op 'rebuild' runs the cache's ONE load pass (UsageHistory._loadSteps) on this
+// thread's own instance and hands the loop the built cache as transferable parts (UsageHistory._packWhole).
 const { parentPort } = require('worker_threads');
 const { answerMemory } = require('./worker-memory.js');
 const { UsageHistory } = require('./usage-history.js');
@@ -11,6 +13,16 @@ const v8 = require('v8');
 
 parentPort.on('message', (msg) => {
   if (answerMemory(msg, parentPort)) return; // the memory census (src/worker-memory.js)
+  if (msg && msg.op === 'rebuild') {
+    try {
+      const uh = Object.assign(Object.create(UsageHistory.prototype), { dir: msg.dir, ledgerWindowMs: msg.windowMs, ledgerHotMaxBytes: msg.hotMaxBytes, coldMaxBytes: msg.coldMaxBytes, _evCache: null });
+      const { built, transfer } = uh._packWhole();
+      parentPort.postMessage({ ev: 'done', id: msg.id, built }, transfer);
+    } catch (e) {
+      parentPort.postMessage({ ev: 'error', id: msg.id, error: String((e && e.message) || e), code: (e && e.code) || null });
+    }
+    return;
+  }
   if (!msg || msg.op !== 'fold') return;
   try {
     const agg = Object.create(UsageHistory.prototype);

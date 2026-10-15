@@ -13,6 +13,9 @@ const { spawn } = require('child_process');
 
 const { mk } = require('./lazy.js');
 
+// The only=pivots answer (B-f95d ②): the asked crosses + the words that qualify them (as of / partial).
+const pivotsOnly = (a) => ({ pivots: a.pivots || {}, ...(a.asOf ? { asOf: a.asOf } : {}), ...(a.partial ? { partial: a.partial } : {}) });
+
 function create({ app, rootDir, HOST, CLAUDE_CMD, NODE_CMD,
   CLAUDE_SUBSCRIPTION_LOGIN_HELPER, activeSessions, auth, engine,
   serverSetting, recordUsageAttribution, liveAccountIdSet, broadcastActiveSessions = () => { }, broadcastAll = () => { },
@@ -185,15 +188,18 @@ app.get('/api/usage-stats', async (req, res) => {
     // pivot = comma list of 'dimA:dimB' 2-D crosses (dashboard split-series
     // panels, e.g. pivot=day:account) — validated + capped in aggregate/here
     const pivots = req.query.pivot
-      // Cap 8 since 2026-09-10: the window asks for two of its own crosses
-      // (session:origin, project:origin) on TOP of whatever the panel
-      // dashboard needs, and the 'accounts' preset already declares two — a
-      // cap of 6 would silently drop a panel's pivot and leave it rendering a
-      // hole while the client re-fetched the same truncated list.
+      // Cap 8 since 2026-09-10 (the window then asked for its two origin
+      // crosses on TOP of the dashboard's; since B-f95d ② it asks only for what
+      // a panel draws, but a custom dashboard can still draw several) — a cap
+      // of 6 would silently drop a panel's pivot and leave it rendering a hole.
       ? String(req.query.pivot).split(',').map((s) => s.split(':')).filter((p) => p.length === 2).slice(0, 8)
       : null;
     // host = the DEVICE filter ('local' | a host id) — top-level over the view
     const hostFilter = req.query.host ? String(req.query.host) : null;
+    // only=pivots (B-f95d ②, 2.369.274): a panel that came on screen asks for
+    // ITS pivot — the answer is { pivots, asOf?, partial? }, never the totals and
+    // groups the window already holds (All time here: 5.1 MB it would re-send)
+    const onlyPivots = req.query.only === 'pivots';
     const ac = new AbortController(); // B-9428 r3: a request that went away leaves the fold queue
     req.on?.('close', () => { if (!res.writableEnded) ac.abort(); });
     let answer;
@@ -204,7 +210,7 @@ app.get('/api/usage-stats', async (req, res) => {
     // step so the index answers over exactly the appends this answer saw; it
     // settles off the response and feeds nothing
     usageIndex.compare(answer, { from, to, backend, accounts, hostFilter, pivots });
-    res.json(answer);
+    res.json(onlyPivots ? pivotsOnly(answer) : answer);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // Per-message account attribution for the msg-meta popup (2.266.1, user

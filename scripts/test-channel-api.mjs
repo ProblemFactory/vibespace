@@ -6,6 +6,10 @@
 //  ② ORCH src/server/channel-api.js over a LOOPBACK stub vendor: refusals by code, the frozen-bytes Approve, the re-ask
 //    after an await (a revoke mid-call withholds the answer), the budget wall, the 429 → the account's ladder, the
 //    belt + redaction on the answer, the audit ring (never a body) — and two ORCH mutants (no belt, no audit row).
+//  ⑦ THE REDIRECT RULE (B-fc37): a vendor's 3xx target is judged by the SAME rows as the call before anything is sent
+//    there — the measured table over the stub vendor (on-host 307 to a sensitive path, off-host 308, same-tier 307,
+//    303, an endless chain, a cycle), the approved card's 重新提交, the old auto-follow as the RED control, and the
+//    grep-derived census of every raw-API fetch site's redirect policy (a planted `redirect: 'follow'` is RED).
 //  ③ the REAL engine's tier rows (`apiGrants` table, widen-only MAX, an agent's write refused, persisted).
 //  ④ the CLI end to end (data/bin/vibespace-channels api …) against a loopback agent surface over the ORCH.
 //  ⑥ THE DECLARED ROW (lane channel-api-declared): every registered adapter with `apiBearer` declares a valid `api` row
@@ -82,8 +86,23 @@ const ROWS = [
     mutant: [`  if (t === 'read') return refuse('api_tier_read'`, `  if (false) return refuse('api_tier_read'`] },
   { name: 'write-ask ⇒ a proposal; an always-allowed SHAPE runs it; write-auto runs', judge: (M, K = C) => M.verdict({ tier: 'write-ask', cls: 'write' }).action === 'propose' && M.verdict({ tier: 'write-ask', cls: 'write', shape: 'S', shapes: ['S'] }).action === 'run' && M.verdict({ tier: 'write-auto', cls: 'write' }).action === 'run',
     mutant: [`  return { ok: true, action: 'propose', why: 'write-ask' };`, `  return { ok: true, action: 'run', why: 'write-ask' };`] },
-  { name: 'a redirect off the host is refused (api_redirect_refused); on-host is followed', judge: (M, K = C) => { const req = { method: 'GET', host: 'open.feishu.cn', path: '/a', query: [] }; return M.redirectTarget(req, 'https://evil.example/steal').code === 'api_redirect_refused' && M.redirectTarget(req, 'http://open.feishu.cn/b').code === 'api_redirect_refused' && M.redirectTarget(req, '/b?x=1').ok; },
-    mutant: [`if (u.protocol !== 'https:' || u.host !== req.host) return refuse(`, `if (false) return refuse(`] },
+  // B-fc37 THE REDIRECT RULE — a vendor's 3xx target is a request again, judged by the SAME rows as the call
+  { name: 'a redirect off the host is never followed — another host (even another of the credential\'s own), http, userinfo ⇒ api_redirect_unjudged (off-host)', judge: (M) => { const q = lark({ method: 'POST', path: '/open-apis/docx/v1/documents', body: '{"t":1}' }).req; const j = (location) => M.judgeRedirect(C.lark, { call: q, req: q, status: 308, location, tier: 'write-all' }); return ['https://evil.example/steal', 'http://open.feishu.cn/open-apis/docx/v1/documents', 'https://u:p@open.feishu.cn/open-apis/docx/v1/documents', 'https://open.larksuite.com/open-apis/docx/v1/documents'].every((l) => { const r = j(l); return r.code === 'api_redirect_unjudged' && r.why === 'off-host' && r.resubmit === false && !r.target; }); },
+    mutant: [`if (u.protocol !== 'https:' || u.host !== req.host || u.username || u.password) return unjudged(`, `if (false) return unjudged(`] },
+  { name: 'an APPROVED call redirected on-host (307) to another request that needs the user ⇒ api_redirect_unjudged (approval): the approval named ONE request', judge: (M) => { const d = lark({ method: 'DELETE', path: '/open-apis/im/v1/messages/om_1' }).req, w = lark({ method: 'POST', path: '/open-apis/im/v1/messages', body: '{"t":1}' }).req; const a = M.judgeRedirect(C.lark, { call: d, req: d, status: 307, location: '/open-apis/im/v1/chats/oc_1/members/ou_1', tier: 'write-ask' }), b = M.judgeRedirect(C.lark, { call: w, req: w, status: 307, location: '/open-apis/im/v2/messages', tier: 'write-ask' }); return a.code === 'api_redirect_unjudged' && a.why === 'approval' && a.resubmit === true && a.from === 'DELETE open.feishu.cn/open-apis/im/v1/messages/om_1' && a.to === 'DELETE open.feishu.cn/open-apis/im/v1/chats/oc_1/members/ou_1' && a.target.method === 'DELETE' && a.target.path === '/open-apis/im/v1/chats/oc_1/members/ou_1' && a.target.body === false && b.why === 'approval' && b.target.body === true; },
+    mutant: [`  if (vd.action !== 'run') return unjudged(`, `  if (false) return unjudged(`] },
+  { name: 'a redirect never makes a call heavier — a read-by-POST onto a write, a write onto a sensitive path ⇒ api_redirect_unjudged (heavier), even under a tier that would run them', judge: (M) => { const s = lark({ method: 'POST', path: '/open-apis/search/v1/user', body: '{"q":"x"}' }).req, w = lark({ method: 'POST', path: '/open-apis/docx/v1/documents', body: '{"t":1}' }).req; const a = M.judgeRedirect(C.lark, { call: s, req: s, status: 307, location: '/open-apis/im/v1/messages', tier: 'write-auto' }), b = M.judgeRedirect(C.lark, { call: w, req: w, status: 308, location: '/open-apis/drive/v1/permissions/doc_1/members', tier: 'write-all' }); return a.code === 'api_redirect_unjudged' && a.why === 'heavier' && b.why === 'heavier' && b.resubmit === true; },
+    mutant: [`  if (weightOf(cls, sensitive) > weightOf(classOf(cred, first), sensitiveOf(cred, first))) return unjudged(`, `  if (false) return unjudged(`] },
+  { name: 'a redirect target beyond the tier ⇒ api_redirect_unjudged (tier) — a Read conversation\'s read-by-POST redirected onto a write', judge: (M) => { const s = lark({ method: 'POST', path: '/open-apis/search/v1/user', body: '{"q":"x"}' }).req; const r = M.judgeRedirect(C.lark, { call: s, req: s, status: 307, location: '/open-apis/im/v1/messages', tier: 'read' }); return r.code === 'api_redirect_unjudged' && r.why === 'tier' && r.resubmit === false && /api_tier_read/.test(r.error) && !r.target; },
+    mutant: [`  if (!vd.ok) return unjudged(status, from, at, 'tier', vd.code);`, ``] },
+  { name: 'a target the call\'s own tier runs is followed: 307 / 308 keep the method + the body, 303 ⇒ GET without the body or its content type; a relative Location resolves against the asked URL', judge: (M) => { const w = lark({ method: 'POST', path: '/open-apis/docx/v1/documents', body: '{"t":1}' }).req; const j = (status, location) => M.judgeRedirect(C.lark, { call: w, req: w, status, location, tier: 'write-auto' }); const a = j(307, '/open-apis/docx/v2/documents'), b = j(303, '/open-apis/docx/v1/documents/doc_1'), c = j(308, 'v2/documents?x=1'); return a.ok && a.req.method === 'POST' && String(a.req.body) === '{"t":1}' && a.req.path === '/open-apis/docx/v2/documents' && b.ok && b.req.method === 'GET' && b.req.body === null && !b.req.headers['content-type'] && c.ok && c.req.path === '/open-apis/docx/v1/v2/documents' && c.req.query[0][0] === 'x'; },
+    mutant: [`  const get = status === 303 && req.method !== 'GET' && req.method !== 'HEAD';`, `  const get = false;`] },
+  { name: 'a redirect target that breaks the path rules (an encoded "/", an "@") or cannot be read ⇒ api_redirect_unjudged (bad-path / unreadable)', judge: (M) => { const q = lark({ method: 'GET', path: '/open-apis/a' }).req; const j = (location) => M.judgeRedirect(C.lark, { call: q, req: q, status: 302, location, tier: 'read' }); return j('/open-apis/a%2fb').why === 'bad-path' && j('/open-apis/u@x').why === 'bad-path' && j('https://[::1').why === 'unreadable'; },
+    mutant: [`  const v = validateRequest(cred, { method: get ? 'GET' : req.method,`, `  const v = ((c0, x) => ({ ok: true, req: { method: x.method, host: x.host, path: x.path.split('?')[0], query: [], headers: x.headers, body: x.body } }))(cred, { method: get ? 'GET' : req.method,`] },
+  { name: `a redirect chain stops: more than ${F.REDIRECTS_MAX} redirects ⇒ api_redirect_loop (the ${F.REDIRECTS_MAX}th still followed)`, judge: (M) => { const q = lark({ method: 'GET', path: '/open-apis/a' }).req; const j = (hops) => M.judgeRedirect(C.lark, { call: q, req: q, status: 302, location: '/open-apis/b', tier: 'read', hops, seen: [] }); return M.REDIRECTS_MAX === 5 && j(4).ok && j(5).code === 'api_redirect_loop'; },
+    mutant: [`  if (hops >= REDIRECTS_MAX) return refuse('api_redirect_loop'`, `  if (false) return refuse('api_redirect_loop'`] },
+  { name: 'a redirect back to an address already asked in the call ⇒ api_redirect_loop at once', judge: (M) => { const q = lark({ method: 'GET', path: '/open-apis/a' }).req; const r = M.judgeRedirect(C.lark, { call: q, req: q, status: 307, location: '/open-apis/a', tier: 'read', hops: 1, seen: [M.addressOf(q)] }); return r.code === 'api_redirect_loop' && r.why === 'loop'; },
+    mutant: [`  if (seen.includes(addressOf(to))) return refuse(`, `  if (false) return refuse(`] },
   { name: 'the response bound: > 4 MiB is cut and the truncation SAID', judge: (M, K = C) => { const r = M.boundResponse(Buffer.alloc(M.RESPONSE_MAX + 10)); return r.truncated === true && r.body.length === M.RESPONSE_MAX && r.bytes === M.RESPONSE_MAX + 10; },
     mutant: [`return b.length > max ? {`, `return false ? {`] },
   { name: 'the response headers: an allowlist (never set-cookie)', judge: (M, K = C) => { const h = M.responseHeaders({ 'content-type': 'a/b', 'set-cookie': 's=1', authorization: 'Bearer x' }); return h['content-type'] === 'a/b' && !('set-cookie' in h) && !('authorization' in h); },
@@ -126,14 +145,19 @@ console.log('② the orchestrator over a stub vendor (loopback)');
 const seen = [];
 let slowNext = null;
 let tokenHits = 0, tokenFail = false;
+// ⑦ B-fc37: the stub vendor's redirects (status, Location) — on-host to a sensitive path, off-host, same tier, 303, a cycle
+const SENS_PATH = '/open-apis/drive/v1/permissions/doc_1/members';
+const REDIRECTS = { '/r/307-sensitive': [307, SENS_PATH], '/r/308-off': [308, 'https://evil.example/steal'], '/r/307-same': [307, '/open-apis/docx/v2/documents'], '/r/303': [303, '/open-apis/docx/v1/documents/doc_1'], '/r/cycle-a': [307, '/r/cycle-b'], '/r/cycle-b': [307, '/r/cycle-a'] };
 const vendor = http.createServer((req, res) => {
   const chunks = [];
   req.on('data', (c) => chunks.push(c));
   req.on('end', async () => {
     const body = Buffer.concat(chunks).toString();
-    seen.push({ method: req.method, url: req.url, auth: req.headers.authorization || null, cookie: req.headers.cookie || null, body });
+    seen.push({ method: req.method, url: req.url, auth: req.headers.authorization || null, cookie: req.headers.cookie || null, body, host: req.headers['x-test-host'] || null, ct: req.headers['content-type'] || null });
     if (slowNext) { const w = slowNext; slowNext = null; await w(); }
     if (req.url.startsWith('/redirect-off')) { res.writeHead(302, { location: 'https://evil.example/steal' }); return res.end(); }
+    const moved = REDIRECTS[req.url.split('?')[0]] || (req.url.startsWith('/r/loop/') ? [302, `/r/loop/${Number(req.url.split('/')[3]) + 1}`] : null);   // ⑦ B-fc37
+    if (moved) { res.writeHead(moved[0], { location: moved[1], 'content-type': 'text/plain' }); return res.end('moved'); }
     if (req.url === '/token') { tokenHits++; await new Promise((r) => setTimeout(r, 30)); res.writeHead(tokenFail ? 400 : 200, { 'content-type': 'application/json' }); return res.end(tokenFail ? '{"error":"invalid_grant"}' : '{"access_token":"ya29.NEW","expires_in":3600}'); }
     if (req.url.startsWith('/echo-bin')) { res.writeHead(200, { 'content-type': 'application/octet-stream' }); return res.end(`auth=${req.headers.authorization}`); }
     if (req.url.startsWith('/limited')) { res.writeHead(429, { 'retry-after': '7', 'content-type': 'application/json' }); return res.end('{"code":99991400}'); }
@@ -201,7 +225,7 @@ const B = { kind: 'agent', id: 'conv-B', name: 'Agent B', groups: [] };
   r = await api.call(A, { cred: 'lark-1', method: 'GET', path: '/x', headers: { Authorization: 'Bearer mine' } });
   ok(r.code === 'api_header_refused' && seen.every((s) => s.auth !== 'Bearer mine'), 'the agent\'s own Authorization is refused by name, never sent');
   r = await api.call(A, { cred: 'lark-1', method: 'GET', path: '/redirect-off' });
-  ok(r.code === 'api_redirect_refused', 'a vendor redirect off the host is not followed (api_redirect_refused)', r);
+  ok(r.code === 'api_redirect_unjudged' && r.why === 'off-host' && !seen.some((s) => s.host === 'evil.example'), 'a vendor redirect off the host is not followed (api_redirect_unjudged, off-host) — nothing reaches the other host', r);
   r = await api.call(A, { cred: 'lark-1', method: 'GET', path: '/limited' });
   ok(r.ok && r.status === 429 && eng.backoffSec === 7, 'a vendor 429 is answered once and enters the account\'s rate ladder (its Retry-After), never retried', { r: r.status, b: eng.backoffSec });
   eng.gateRefusal = { ok: false, code: 'vendor-budget', error: 'the account minute is spent', retryAfterSec: 9 };
@@ -470,6 +494,114 @@ module.exports = { ...adapter, consent: Object.freeze({ mode: 'ephemeral', landi
   ok(c.code === 0 && /"status": 200/.test(c.out) && !/acme-TOKEN-SECRET/.test(c.out + c.err), 'acme: `vibespace-channels api acme-1 GET /v1/items` prints the vendor answer, never the token', c.err || c.out.slice(0, 300));
   srv.close();
   try { engA.stop(); } catch {}
+}
+// ── ⑦ B-fc37 THE REDIRECT RULE over the stub vendor: every 3xx target judged like the call; the table printed ──
+console.log('⑦ the redirect rule (B-fc37): a vendor\'s 3xx target is judged before anything is sent there');
+{
+  const BODY = '{"title":"q3 plan"}';
+  const after = (n0) => seen.slice(n0);
+  const at = (p, n0) => after(n0).filter((s) => s.url.split('?')[0] === p);
+  const bytesAt = (p, n0) => at(p, n0).reduce((n, s) => n + Buffer.byteLength(s.body), 0);
+  const leg = async (Mod, tier, input) => {
+    const api = mkOrch(Mod, fakeEngine(), fs.mkdtempSync(path.join(tmpRoot, 'r-')));
+    await api.setTiers('lark-1', [{ principal: { kind: 'agent', id: 'conv-A' }, tier }]);
+    const n0 = seen.length;
+    return { api, n0, r: await api.call(A, { cred: 'lark-1', ...input }) };
+  };
+  const table = [];
+  const row = (status, target, verdict, sent) => table.push(`    ${String(status).padEnd(4)}│ ${target.padEnd(52)}│ ${verdict.padEnd(44)}│ ${sent}`);
+  // 1. on-host 307 to a SENSITIVE path — a write-auto conversation's plain write: refused by name, 0 bytes re-sent
+  let { api, r, n0 } = await leg(ORCH, 'write-auto', { method: 'POST', path: '/r/307-sensitive', body: BODY });
+  const l1 = api.auditTail('lark-1', { n: 1 })[0];
+  ok(r.code === 'api_redirect_unjudged' && r.why === 'approval' && r.to === `POST open.feishu.cn${SENS_PATH}` && at(SENS_PATH, n0).length === 0 && at('/r/307-sensitive', n0).length === 1 && !('target' in r) && /pointed POST open\.feishu\.cn\/r\/307-sensitive at POST open\.feishu\.cn\/open-apis\/drive/.test(r.error), 'on-host 307 to a sensitive path ⇒ api_redirect_unjudged (approval) by name, where the vendor pointed in the answer; NOTHING sent there (the target\'s query never in the agent\'s answer)', { code: r.code, why: r.why, there: at(SENS_PATH, n0).length });
+  ok(l1 && l1.verdict === 'refused' && l1.code === 'api_redirect_unjudged' && l1.status === 307 && l1.redirect && l1.redirect.to === `POST open.feishu.cn${SENS_PATH}` && l1.redirect.why === 'approval', 'the API log line names the redirect: where (method + host + path) and why it was not followed', l1);
+  row(307, `on-host · ${SENS_PATH}`, `refused · api_redirect_unjudged (approval)`, `${bytesAt(SENS_PATH, n0)} B re-sent`);
+  // 2. off-host 308
+  ({ api, r, n0 } = await leg(ORCH, 'write-auto', { method: 'POST', path: '/r/308-off', body: BODY }));
+  ok(r.code === 'api_redirect_unjudged' && r.why === 'off-host' && !after(n0).some((s) => s.host === 'evil.example'), 'off-host 308 ⇒ api_redirect_unjudged (off-host); nothing reaches the other host', r);
+  row(308, 'off-host · https://evil.example/steal', 'refused · api_redirect_unjudged (off-host)', `${after(n0).filter((s) => s.host === 'evil.example').length} requests there`);
+  // 3. same host, same tier 307 — followed once, the body re-sent once
+  ({ api, r, n0 } = await leg(ORCH, 'write-auto', { method: 'POST', path: '/r/307-same', body: BODY }));
+  ok(r.ok && r.status === 200 && at('/open-apis/docx/v2/documents', n0).length === 1 && bytesAt('/open-apis/docx/v2/documents', n0) === BODY.length && at('/open-apis/docx/v2/documents', n0)[0].method === 'POST', 'same host, same tier 307 (a write onto a write under write-auto) ⇒ followed once, the body re-sent once', { r: r.code || r.status, n: at('/open-apis/docx/v2/documents', n0).length });
+  row(307, 'on-host · /open-apis/docx/v2/documents (write → write)', 'followed · 200', `${bytesAt('/open-apis/docx/v2/documents', n0)} B re-sent (×${at('/open-apis/docx/v2/documents', n0).length})`);
+  // 4. 303 ⇒ GET without the body
+  ({ api, r, n0 } = await leg(ORCH, 'write-auto', { method: 'POST', path: '/r/303', body: BODY }));
+  const g = at('/open-apis/docx/v1/documents/doc_1', n0);
+  ok(r.ok && r.status === 200 && g.length === 1 && g[0].method === 'GET' && g[0].body === '' && !g[0].ct, '303 ⇒ followed as a GET without the body (nor its content type)', g);
+  row(303, 'on-host · /open-apis/docx/v1/documents/doc_1', 'followed as GET · 200', `${bytesAt('/open-apis/docx/v1/documents/doc_1', n0)} B (no body)`);
+  // 5. an endless chain — 5 followed, the 6th refused
+  ({ api, r, n0 } = await leg(ORCH, 'read', { method: 'GET', path: '/r/loop/0' }));
+  const loops = after(n0).filter((s) => s.url.startsWith('/r/loop/')).length;
+  ok(r.code === 'api_redirect_loop' && loops === 1 + F.REDIRECTS_MAX, `an endless chain stops after ${F.REDIRECTS_MAX} followed redirects (api_redirect_loop; ${1 + F.REDIRECTS_MAX} requests in all)`, { code: r.code, loops });
+  row(302, '/r/loop/n → /r/loop/n+1 (endless)', `stopped · api_redirect_loop after ${loops - 1} hops`, `${loops} requests`);
+  // 6. a cycle — stopped at the revisit
+  ({ api, r, n0 } = await leg(ORCH, 'read', { method: 'GET', path: '/r/cycle-a' }));
+  ok(r.code === 'api_redirect_loop' && after(n0).length === 2, 'a cycle (a → b → a) stops at the revisit (api_redirect_loop; 2 requests)', { code: r.code, n: after(n0).length });
+  row(307, '/r/cycle-a → /r/cycle-b → /r/cycle-a', 'stopped · api_redirect_loop at the revisit', `${after(n0).length} requests`);
+  // 7. THE RED CONTROL — the old auto-follow (on-host only, the target never judged) re-sends the body to the sensitive path
+  const AUTO = MUT.load('src/server/channel-api.js', mutate(OSRC, 'const j = F.judgeRedirect(c, { call: req, req: cur, status: res.status, location, tier: tierNow(ctx, cred).tier, shapes: shapesOf(ctx, cred), hops, seen });', 'const j = F.redirectRequest(c, cur, res.status, location);'), 'autofollow');
+  ({ api, r, n0 } = await leg(AUTO, 'write-auto', { method: 'POST', path: '/r/307-sensitive', body: BODY }));
+  ok(r.ok && bytesAt(SENS_PATH, n0) === BODY.length, 'CONTROL: the old auto-follow (on-host only, the target never judged) re-sends the body to the sensitive path — the redirect rule is what stops it', { r: r.code || r.status, bytes: bytesAt(SENS_PATH, n0) });
+  row(307, `on-host · ${SENS_PATH} (CONTROL: old auto-follow)`, `followed · ${r.status || r.code}`, `${bytesAt(SENS_PATH, n0)} B re-sent`);
+  console.log(`  the redirect table (status │ target │ verdict │ sent there):\n${table.join('\n')}`);
+
+  // 8. an APPROVED card the vendor redirects: the card says so + where (技术细节) + 「重新提交」; resubmit = a NEW card
+  ({ api, r, n0 } = await leg(ORCH, 'write-ask', { method: 'POST', path: '/r/307-sensitive', body: BODY, why: 'publish the plan' }));
+  const pid = r.proposal && r.proposal.id;
+  const a1 = await api.approve(pid, { digest: r.proposal.digest });
+  const rec = () => api.ownerView().proposals.find((p) => p.id === pid);
+  let m = CARD.cardModel(rec());
+  ok(a1.ok && rec().status === 'failed' && at(SENS_PATH, n0).length === 0 && rec().result.code === 'api_redirect_unjudged' && rec().result.why === 'approval' && rec().result.resubmit === true && rec().result.status === 307, 'an approved write the vendor redirects (307) to a sensitive path: the card fails by name — nothing sent there', rec().result);
+  ok(m.outcome.key === 'The vendor redirected it — not followed' && m.redirect && m.redirect.to === `POST open.feishu.cn${SENS_PATH}` && m.redirect.status === 307 && m.redirect.why.key === CARD.REDIRECT_WHY_WORDS.approval && m.resubmit === true && m.actionable === false, 'the card: outcome "The vendor redirected it — not followed", where + why for 技术细节, the 「重新提交」 door', { outcome: m.outcome, redirect: m.redirect, resubmit: m.resubmit });
+  ok(/approved, but the vendor redirected it — the vendor answered 307 and pointed POST open\.feishu\.cn\/r\/307-sensitive at POST open\.feishu\.cn\/open-apis\/drive\/v1\/permissions\/doc_1\/members/.test(CARD.receiptText(rec())), 'the agent\'s receipt says the vendor redirected it and where', CARD.receiptText(rec()));
+  const stale = api.resubmit(pid, { digest: 'f'.repeat(64) });
+  const rs = api.resubmit(pid, { digest: r.proposal.digest });
+  const np = rs.proposal;
+  ok(stale.code === 'api_frozen_mismatch' && rs.ok && np && np.status === 'pending' && np.method === 'POST' && np.path === SENS_PATH && np.sensitive === 'path' && np.resubmitOf === pid && rec().resubmittedAs === np.id && at(SENS_PATH, n0).length === 0, '重新提交 files the vendor\'s target as a NEW pending card (its own digest, sensitive chip) — nothing runs; a stale digest files nothing', { stale: stale.code, np });
+  m = CARD.cardModel(rec());
+  const again = api.resubmit(pid, { digest: r.proposal.digest });
+  ok(m.outcome.key === 'The vendor redirected it — resubmitted as a new card' && m.resubmit === false && again.code === 'not-resubmittable' && CARD.chainIds([pid], api.ownerView().proposals).includes(np.id), 'once resubmitted: the card says so, the door is gone, a second resubmit is refused; the new card sits in the call row\'s chain', { outcome: m.outcome.key, again: again.code });
+  const a2 = await api.approve(np.id, { digest: np.digest });
+  ok(a2.ok && api.ownerView().proposals.find((p) => p.id === np.id).status === 'ran' && at(SENS_PATH, n0).length === 1 && bytesAt(SENS_PATH, n0) === BODY.length, 'Approve on the new card runs it at the address the vendor gave — the body sent there once, now that the user judged it', { there: at(SENS_PATH, n0).length });
+  const off = await leg(ORCH, 'write-ask', { method: 'POST', path: '/r/308-off', body: BODY });
+  await off.api.approve(off.r.proposal.id, { digest: off.r.proposal.digest });
+  const offRec = off.api.ownerView().proposals.find((p) => p.id === off.r.proposal.id);
+  ok(offRec.result.why === 'off-host' && CARD.cardModel(offRec).resubmit === false && off.api.resubmit(offRec.id, { digest: off.r.proposal.digest }).code === 'not-resubmittable', 'an approved call redirected off the host: the card says where, and offers no 重新提交 (the credential never leaves its host)', offRec.result);
+
+  // 9. THE CODES: the agent route maps both; the retired api_redirect_refused is gone from src/
+  const ar = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf8');
+  const retired = fs.readdirSync(path.join(REPO, 'src'), { recursive: true }).filter((f) => /\.js$/.test(f) && fs.readFileSync(path.join(REPO, 'src', f), 'utf8').includes('api_redirect_refused'));
+  ok(/api_redirect_unjudged: 502, api_redirect_loop: 502/.test(ar) && retired.length === 0, 'the agent route answers api_redirect_unjudged / api_redirect_loop as 502; api_redirect_refused is retired from src/', retired);
+
+  // 10. THE REDIRECT POLICY CENSUS (grep-derived): every src/ server file that requires the fence is a raw-API file; each
+  //     outbound fetch site in it (`fetchFn(`, a bare `fetch(`, `http(s).request(` / `.get(`) must spell `redirect:
+  //     'manual'` AFTER any init spread (no caller's init can turn it back), and no string-valued `redirect:` other than
+  //     'manual' may appear in the file. Printed; a planted `redirect: 'follow'` and the policy put before the spread are RED.
+  const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, (x) => x.replace(/[^\n]/g, ' ')).replace(/(^|[^:\\'"`])\/\/.*$/gm, '$1');
+  const callAt = (code, i) => { let d = 0; for (let k = code.indexOf('(', i); k < code.length; k++) { if (code[k] === '(') d++; else if (code[k] === ')' && --d === 0) return code.slice(i, k + 1); } return code.slice(i); };
+  const files = fs.readdirSync(path.join(REPO, 'src'), { recursive: true }).map((f) => `src/${f}`).filter((f) => /\.js$/.test(f) && !f.startsWith('src/lib/') && (f === 'src/channel-api.js' || /require\((['"])(\.\.?\/)+channel-api\.js\1\)/.test(fs.readFileSync(path.join(REPO, f), 'utf8')))).sort();
+  const texts = Object.fromEntries(files.map((f) => [f, fs.readFileSync(path.join(REPO, f), 'utf8')]));
+  const census = (tx) => {
+    const rows = [], bad = [];
+    for (const [rel, text] of Object.entries(tx)) {
+      const code = strip(text), lineOf = (i) => code.slice(0, i).split('\n').length;
+      for (const x of code.matchAll(/(?<![\w.])(fetchFn|fetch|https?\.(?:request|get))\(/g)) {
+        const c = callAt(code, x.index), iPol = c.lastIndexOf("redirect: 'manual'"), good = iPol > 0 && iPol > c.lastIndexOf('...');
+        rows.push(`${rel}:${lineOf(x.index)} ${x[1]}( — ${good ? "redirect: 'manual' after the init spread" : 'NO manual redirect policy'}`);
+        if (!good) bad.push(rows.at(-1));
+      }
+      for (const x of code.matchAll(/(?<![\w.])vendorFetch\(/g)) if (!/function\s+$/.test(code.slice(Math.max(0, x.index - 12), x.index))) rows.push(`${rel}:${lineOf(x.index)} vendorFetch( — through the one site`);
+      for (const x of code.matchAll(/\bredirect\s*:\s*(['"`])(\w*)\1/g)) if (x[2] !== 'manual') bad.push(`${rel}:${lineOf(x.index)} redirect: '${x[2]}'`);
+    }
+    return { rows, bad };
+  };
+  const c0 = census(texts);
+  console.log(`  the redirect census (${files.length} raw-API files: ${files.join(', ')}):\n${c0.rows.map((x) => `    ${x}`).join('\n')}`);
+  ok(files.includes('src/server/channel-api.js') && c0.rows.filter((x) => / fetchFn\( /.test(x)).length === 1 && c0.bad.length === 0, `the redirect census: every raw-API fetch site names redirect: 'manual' after its init spread, no other redirect value (${c0.rows.length} sites)`, c0.bad);
+  const O = 'src/server/channel-api.js';
+  const plant = census({ ...texts, [O]: texts[O].replace("headers: { ...cur.headers, authorization: `Bearer ${token}` }, body: cur.body || undefined }", "headers: { ...cur.headers, authorization: `Bearer ${token}` }, body: cur.body || undefined, redirect: 'follow' }") });
+  const before = census({ ...texts, [O]: texts[O].replace("{ ...init, redirect: 'manual', signal:", "{ redirect: 'manual', ...init, signal:") });
+  ok(plant.bad.some((x) => /redirect: 'follow'/.test(x)) && before.bad.some((x) => /NO manual redirect/.test(x)), 'CONTROL: the census goes red on a planted redirect: \'follow\' (in the run\'s init) and on the policy put before the init spread', { plant: plant.bad, before: before.bad });
 }
 for (const c of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 20, label: '' })) ok(c.pass, c.name, c.detail);
 vendor.close();

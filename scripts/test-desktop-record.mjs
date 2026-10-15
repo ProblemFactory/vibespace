@@ -55,6 +55,29 @@
 //      verify r4 ②: adoptRemoteMove told `to === from` searched the held records and moved a listed window out (leg ue)
 //      verify r4 ③: the keyboard / button geometry doors (maximize, minimize, restore, snap, move mode) stamped no witness — the §6 doors pin; the real doors are test-desktop-move O
 //      verify r4 ④: a stale hold outliving the 60 s expiry — the page follows the server and says how many changes were not kept (leg st2)
+//      THE LAYER LAW (lane layout-layers-p0): a phone taking chrome / boxes, a phone hiding nothing (guard 5 lost), a desk taking a
+//      live phone record's arrangement, a preset opening the sidebar, the boot dropping the preference, a field listed twice, a
+//      field no layer names — each turns its §8 leg RED
+//      THE LAYER GATE (lane layout-layers-p1): no epsilon, no legacy spelling, desktops judged, the chrome unjudged, new
+//      windows judged — each turns its §9 leg RED; the gate removed on the real handler ⇒ a phone write moves a desk window;
+//      the P0 write half (a phone carries the sidebar and the grid only) ⇒ the gate refuses a current phone's save
+//   §8 THE LAYER LAW (design q-039 P0, the owner 2026-10-14 「彻底根治这类问题」; docs/kb-design-lessons.md §6b item 10) — PURE
+//      LAYERS / layerOf / applyForViewport: the five rows; THE CENSUS of the production document's SHAPE (every field of it in
+//      exactly one layer; a window / record / chain field no row names is RED by name; the table names nothing the document
+//      cannot hold); THE CAPTURE CENSUS (acorn — every key layout.js captureWin / captureChrome / captureState writes into a
+//      record has a layer; a planted capture field is RED); the write half's lists are layered; the legacy spellings sit with
+//      their canonical; THE TRUTH TABLE class × source × writer (24 cells, printed) and its named rows; key presence kept (an
+//      explicit `toolbarScale: null`), the legacy spellings carried, inputs never mutated, an unknown source = membership only
+//   §9 THE LAYER GATE (design q-039 P1, lane layout-layers-p1 — the layer law's SERVER half): PURE layerGate on the real
+//      document shape — a phone record equal outside the workspace passes; z / a box / the sidebar / the grid / the theme
+//      moved ⇒ refused by name; THE GATE CENSUS (every arrangement / chrome / preference field moved alone is refused by its
+//      own name; PHONE_KEEPS derived from LAYERS); legacy spellings, guard 4's epsilon, absent flags, the toolbar scale's
+//      null; a desktop / unstamped / unknown stamp, a first write, the workspace, meta and unnamed fields pass. §9b THE REAL
+//      ws-handler (registerWsHandler on a fake wss, layouts in memory): the refusal frame {desktopId, reason:'cross-layer',
+//      fields, state, sentAt}, nothing written or broadcast, the journal + telemetry; desktop / unstamped / membership /
+//      first writes pass; the shrink belt unchanged and asked first. §9c RECONCILIATION on the real classes wired to the
+//      real handler: a current phone's close passes at once (its record keeps the desk's chrome — PHONE_KEEPS); an OLD
+//      phone bundle's save carrying a close is refused, the page re-sends membership only, the close lands, the desk unchanged
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -151,13 +174,210 @@ console.log('— §1–§3 PURE: the merge, the belt, the change');
 const P = require(path.join(REPO, MODEL));
 const pureFailed = pureLegs(P);
 
+// ── §8 THE LAYER LAW (design q-039 P0) ─────────────────────────────────────────────────────────────────────────────
+/** The production document's SHAPE (design q-039 §1, read off data/layouts.json by the design desk — never its words):
+ *  three desktops, the legacy top-level record, a preset, every field a record and a window hold today (+ the ones only a
+ *  window type writes), and a pre-2.1xx record in the legacy spellings. Titles, paths and ids are invented. */
+function realShapeDoc() {
+  const spec = (o = {}) => ({ action: 'attachSession', serverId: 'srv-1', name: 'Session one', cwd: '/home/u/proj', mode: 'chat', backend: 'claude', backendSessionId: 'bs-1', hostId: 'h-1', sessionKey: 'k-1', agentKind: 'claude', agentRole: 'worker', agentNickname: 'nick', sourceKind: 'local', parentThreadId: 'pt-1', sessionId: 's-1', profileId: 'p-1', ...o });
+  const box = (l, t) => ({ left: l, top: t, width: 0.5, height: 0.5 });
+  const chain = () => ({ tabs: ['w-web', 'w-ed'], active: 0, layout: 'split', order: ['w-web', 'w-ed'], split: { pair: ['w-web', 'w-ed'], ratio: 0.5, dir: 'row', left: ['w-web'], right: ['w-ed'] } });
+  const chat = { winId: 'w-chat', title: 'Session one — /home/u/proj', type: 'chat', openSpec: spec(), serverSessionId: 'srv-s1', backend: 'claude', backendSessionId: 'bs-1', claudeSessionId: 'bs-1', cwd: '/home/u/proj', zIndex: 12, gridBounds: box(0, 0), isMaximized: false, isMinimized: false };
+  const term = { winId: 'w-term', title: 'Shell — /home/u', type: 'terminal', openSpec: spec({ mode: 'terminal' }), serverSessionId: 'srv-s2', backend: 'claude', backendSessionId: 'bs-2', claudeSessionId: 'bs-2', cwd: '/home/u', zIndex: 11, gridBounds: box(0.5, 0), isMaximized: true, isMinimized: false, terminalOverrides: { fontSize: 13 }, editorState: { open: true } };
+  const files = { winId: 'w-files', title: 'Files', type: 'files', openSpec: { action: 'openFileExplorer', path: '/home/u' }, zIndex: 9, gridBounds: box(0, 0.5), isMaximized: false, isMinimized: true, explorerPath: '/home/u/docs', explorerHost: 'h-2', isSnapped: true, preSnapBounds: box(0.1, 0.1) };
+  const viewer = { winId: 'w-view', title: 'notes.md', type: 'viewer', openSpec: { action: 'openFile', path: '/home/u/notes.md' }, zIndex: 8, gridBounds: box(0.5, 0.5), isMaximized: false, isMinimized: false, filePath: '/home/u/notes.md', fileName: 'notes.md' };
+  const host = { winId: 'w-web', title: 'Docs', type: 'browser', openSpec: { action: 'openBrowser', url: 'https://example.com/' }, zIndex: 7, gridBounds: box(0.25, 0.25), isMaximized: false, isMinimized: false, browserUrl: 'https://example.com/', tabChain: chain(), isTabGuest: false };
+  const guest = { winId: 'w-ed', title: 'draft.md', type: 'editor', openSpec: { action: 'openEditor', path: '/home/u/draft.md' }, zIndex: 7, gridBounds: box(0.25, 0.25), isMaximized: false, isMinimized: false, filePath: '/home/u/draft.md', fileName: 'draft.md', tabChain: chain(), isTabGuest: true };
+  const record = (windows, o = {}) => ({ windows, grid: { rows: 1, cols: 3 }, sidebarOpen: true, theme: 'dark', globalFontSize: 14, globalFontFamily: 'monospace', taskbarHeight: 40, toolbarScale: 1.2, toolbarHeight: 48, viewport: 'phone', updatedAt: 1790000000000, ...o });
+  const legacy = { windows: [{ id: 'w-old', title: 'Old', type: 'files', openSpec: { action: 'openFileExplorer', path: '/' }, z: 3, gridBounds: box(0, 0), isMaximized: false, min: true, snap: true, snapBounds: box(0, 0) }], grid: null, sidebarOpen: false, theme: 'light', taskbarHeight: 36, toolbarHeight: 40, updatedAt: 1700000000000 };
+  return {
+    current: 'Work',
+    autoSave: legacy,
+    saved: { Work: record([chat, files], { viewport: 'desktop' }) },
+    customGrids: [{ rows: 3, cols: 3 }],
+    desktopMeta: [{ id: 'd-1', name: 'One' }, { id: 'd-2', name: 'Two' }, { id: 'd-3', name: 'Three' }],
+    desktops: { 'd-1': { autoSave: record([chat, term, files]) }, 'd-2': { autoSave: record([viewer, host, guest], { viewport: 'desktop', toolbarScale: null }) }, 'd-3': { autoSave: record([], { grid: null }) } },
+  };
+}
+/** Every field of a layout document: [field, where] — a chain's keys as 'tabChain.<key>'. */
+function documentFields(doc) {
+  const out = [];
+  const win = (w, where) => { for (const k of Object.keys(w)) { out.push([k, where]); if (k === 'tabChain' && w.tabChain) for (const c of Object.keys(w.tabChain)) out.push(['tabChain.' + c, where]); } };
+  const rec = (r, where) => { for (const k of Object.keys(r || {})) out.push([k, where]); ((r && r.windows) || []).forEach((w, i) => win(w, `${where}.windows[${i}]`)); };
+  for (const k of Object.keys(doc)) out.push([k, 'document']);
+  if (doc.autoSave) rec(doc.autoSave, 'autoSave');
+  for (const [n, r] of Object.entries(doc.saved || {})) rec(r, `saved.${n}`);
+  for (const [id, d] of Object.entries(doc.desktops || {})) { for (const k of Object.keys(d)) out.push([k, `desktops.${id}`]); if (d.autoSave) rec(d.autoSave, `desktops.${id}.autoSave`); }
+  return out;
+}
+/** Every key layout.js's capture writes into a record (acorn — comments / strings never count): captureWin's entry and
+ *  its assignments ('tabChain.<key>' for the chain's), captureChrome's and captureState's returned fields. */
+function captureKeys(text) {
+  const ast = require('acorn').parse(text, { ecmaVersion: 'latest', sourceType: 'module' });
+  const keys = new Set();
+  const propKeys = (o) => o.properties.filter((p) => p.type === 'Property' && !p.computed).map((p) => (p.key.type === 'Identifier' ? p.key.name : String(p.key.value)));
+  const pathOf = (m) => { const st = []; while (m.type === 'MemberExpression' && !m.computed) { st.unshift(m.property.name); m = m.object; } return m.type === 'Identifier' ? [m.name, ...st] : null; };
+  const visit = (node, meth) => {
+    if (!node || typeof node.type !== 'string') return;
+    if (node.type === 'MethodDefinition' && node.key) meth = node.key.name;
+    if (meth === 'captureWin' && node.type === 'VariableDeclarator' && node.id.name === 'winState' && node.init && node.init.type === 'ObjectExpression') propKeys(node.init).forEach((k) => keys.add(k));
+    if (meth === 'captureWin' && node.type === 'AssignmentExpression' && node.left.type === 'MemberExpression') {
+      const p = pathOf(node.left);
+      if (p && p[0] === 'winState' && p.length > 1) { const f = p.slice(1).join('.'); keys.add(f); if (p.length === 2 && node.right.type === 'ObjectExpression') propKeys(node.right).forEach((k) => keys.add(f + '.' + k)); }
+    }
+    if ((meth === 'captureChrome' || meth === 'captureState') && node.type === 'ReturnStatement' && node.argument && node.argument.type === 'ObjectExpression') propKeys(node.argument).forEach((k) => keys.add(k));
+    for (const k of Object.keys(node)) { const c = node[k]; if (Array.isArray(c)) c.forEach((x) => visit(x, meth)); else if (c && typeof c.type === 'string') visit(c, meth); }
+  };
+  visit(ast, null);
+  return [...keys];
+}
+/** The layer law's legs over one copy of desktop-record.js — the §7 controls re-run them on patched copies. */
+function layerLegs(P, { quiet = false } = {}) {
+  const failed = [];
+  const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
+  const { LAYERS, layerOf, applyForViewport, arrangementFor, ARRANGEMENT, PHONE_KEEPS, PHONE_SHOWS } = P;
+  if (!LAYERS || !layerOf || !applyForViewport || !arrangementFor) { leg(false, '§8 desktop-record.js exports LAYERS, layerOf, applyForViewport and arrangementFor'); return failed; }
+  const NAMES = ['workspace', 'arrangement', 'chrome', 'preference', 'meta'];
+  const all = LAYERS.flatMap((r) => r.fields.map((f) => [f, r.layer]));
+  const twice = [...new Set(all.map(([f]) => f).filter((f, i, a) => a.indexOf(f) !== i))];
+  leg(J(LAYERS.map((r) => r.layer)) === J(NAMES) && Object.isFrozen(LAYERS) && LAYERS.every((r) => Object.isFrozen(r.fields)), '§8 LAYERS is the design\'s five rows in order — workspace · arrangement (the desktop shard) · chrome · preference · meta (the phone shard is local, never in the document) — frozen', J(LAYERS.map((r) => r.layer)));
+  leg(!twice.length, `§8 no field is listed twice (${all.length} fields, each in exactly ONE layer)`, J(twice));
+  // THE CENSUS of the real shape
+  const fields = documentFields(realShapeDoc());
+  const distinct = [...new Set(fields.map(([f]) => f))];
+  const unlayered = [...new Set(fields.filter(([f]) => layerOf(f) == null).map(([f, w]) => `${f} (${w})`))];
+  if (!quiet) console.log('    §8 the real shape: ' + distinct.length + ' distinct fields — ' + NAMES.map((n) => `${n} ${distinct.filter((f) => layerOf(f) === n).length}`).join(' · '));
+  leg(!unlayered.length && distinct.length > 40, `§8 THE CENSUS: every field of the real document shape (${distinct.length} distinct, ${fields.length} occurrences) maps to exactly one layer`, J(unlayered));
+  const WIRE_ONLY = ['seq', 'evidence']; // META stamps the layout-sync carries, never stored in the document
+  const dead = all.map(([f]) => f).filter((f) => !distinct.includes(f) && !WIRE_ONLY.includes(f));
+  leg(!dead.length, '§8 …and the table names nothing the document cannot hold (every row field appears in the real shape; seq / evidence are the wire\'s)', J(dead));
+  const plant = (mut) => { const d = realShapeDoc(); mut(d); return [...new Set(documentFields(d).filter(([f]) => layerOf(f) == null).map(([f]) => f))]; };
+  leg(J(plant((d) => { d.desktops['d-1'].autoSave.windows[0].dockSide = 'left'; })) === J(['dockSide']), '§8 RED control: a WINDOW field no layer names (dockSide) is RED, by name');
+  leg(J(plant((d) => { d.desktops['d-2'].autoSave.sidebarWidth = 320; })) === J(['sidebarWidth']), '§8 RED control: a RECORD field no layer names (sidebarWidth) is RED, by name');
+  leg(J(plant((d) => { d.desktops['d-2'].autoSave.windows[1].tabChain.recent = ['w-ed']; })) === J(['tabChain.recent']), '§8 RED control: a CHAIN key no layer names (tabChain.recent — local state, never persisted) is RED, by name');
+  // THE CAPTURE CENSUS
+  const LT = read('src/lib/layout.js');
+  const cap = captureKeys(LT);
+  const capBad = cap.filter((k) => layerOf(k) == null);
+  leg(cap.length >= 35 && !capBad.length, `§8 THE CAPTURE CENSUS (acorn over layout.js captureWin / captureChrome / captureState): every key a page writes into a record (${cap.length}) has a layer`, J({ capBad, cap }));
+  const SNAP = '      if (win._isSnapped) { winState.isSnapped = true;';
+  leg(LT.includes(SNAP) && J(captureKeys(LT.replace(SNAP, '      winState.dockSide = win._dock;\n' + SNAP)).filter((k) => layerOf(k) == null)) === J(['dockSide']), '§8 RED control: a capture writing a field no layer names (winState.dockSide) is RED, by name');
+  leg(!captureKeys(LT.replace('  captureWin(win, id = win?.id) {', "  // winState.dockSide = win._dock; 'winState.sidebarWidth = 1'\n  captureWin(win, id = win?.id) {")).filter((k) => layerOf(k) == null).length, '§8 control: the same assignment in a comment and a string captures nothing (acorn reads code only)');
+  leg(ARRANGEMENT.every((k) => layerOf(k) === 'arrangement') && PHONE_KEEPS.every((k) => ['arrangement', 'chrome', 'preference'].includes(layerOf(k))) && PHONE_SHOWS.every((k) => layerOf(k) === 'arrangement'), '§8 the write half\'s lists are layered: ARRANGEMENT (captureForViewport\'s carry) ⊂ arrangement, PHONE_KEEPS (recordFor\'s record carry) ⊂ arrangement ∪ chrome ∪ preference, the phone\'s minimize ⊂ arrangement');
+  const LEGACY = [['z', 'zIndex'], ['min', 'isMinimized'], ['snap', 'isSnapped'], ['snapBounds', 'preSnapBounds'], ['id', 'winId']];
+  leg(LEGACY.every(([o, n]) => layerOf(o) && layerOf(o) === layerOf(n)), '§8 a legacy spelling sits in its canonical\'s layer: z / zIndex, min / isMinimized, snap / isSnapped, snapBounds / preSnapBounds, id / winId', J(LEGACY.map(([o, n]) => [o, layerOf(o), n, layerOf(n)])));
+  // THE TRUTH TABLE: reader class × source × writer
+  const doc = realShapeDoc(), rec = doc.desktops['d-1'].autoSave, before = J(doc);
+  const WRITERS = [['desktop-written', 'desktop'], ['phone-written (live)', 'phone'], ['unstamped', 'desktop'], ['a re-read', 'desktop']]; // the writer = layout-model.js writerClass(msg)
+  const kindOf = (a) => (a == null ? '—' : J(Object.keys(a.windows['w-chat'] || {})) === J(ARRANGEMENT) && 'grid' in a ? 'all' : !('grid' in a) && J(Object.keys(a.windows['w-chat'] || {})) === J(PHONE_SHOWS) ? 'minimize' : 'other');
+  const law = (cls, src, w) => ({ a: cls === 'phone' ? 'minimize' : src === 'remote' && w === 'phone' ? '—' : 'all', c: cls === 'desktop' && (src === 'boot' || (src === 'remote' && w !== 'phone')), p: cls === 'desktop' && src === 'boot' });
+  const cells = [], bad = [];
+  for (const cls of ['phone', 'desktop']) for (const src of ['remote', 'boot', 'preset']) for (const [label, w] of WRITERS) {
+    const r = applyForViewport(cls, rec, { source: src, writer: w });
+    const got = { a: kindOf(r.arrangement), c: r.chrome != null, p: r.preference != null }, want = law(cls, src, w);
+    const memOk = r.membership && r.membership.windows.length === 3;
+    cells.push(`${cls.padEnd(7)} ${src.padEnd(6)} ${label.padEnd(20)} membership ${memOk ? '✓' : '✗'} · arrangement ${got.a} · chrome ${got.c ? '✓' : '—'} · preference ${got.p ? '✓' : '—'}`);
+    if (!memOk || J(got) !== J(want)) bad.push({ cls, src, label, got, want });
+  }
+  if (!quiet) console.log('    §8 ' + cells.join('\n    §8 '));
+  leg(!bad.length && cells.length === 24, `§8 THE TRUTH TABLE (reader class × source × writer, ${cells.length} cells) is the law`, J(bad));
+  const row = (pred) => bad.filter(pred).length === 0;
+  leg(row((b) => b.cls === 'phone') && cells.filter((c) => c.startsWith('phone')).every((c) => /arrangement minimize · chrome — · preference —/.test(c)), '§8 a PHONE applies membership + a desktop\'s minimize only — no grid, box, z, maximize or snap, no sidebar or bars, no theme — from any record by any road (inc-mv8l2frb-xkqm; §6b guard 5)', J(bad));
+  leg(row((b) => b.cls === 'desktop' && b.src === 'remote' && b.label.startsWith('phone')) && /arrangement — · chrome — · preference —/.test(cells.find((c) => c.startsWith('desktop remote phone'))), '§8 a DESKTOP takes a live phone record\'s membership only (§6b guard 10 — the retired membershipOnly)', J(bad));
+  leg(row((b) => b.cls === 'desktop' && b.src === 'remote' && !b.label.startsWith('phone')), '§8 a DESKTOP takes a desktop-written, an unstamped and a re-read record\'s arrangement + chrome live — never its preference', J(bad));
+  leg(row((b) => b.cls === 'desktop' && b.src === 'boot') && applyForViewport('desktop', rec, { source: 'boot' }).arrangement?.grid?.cols === 3, '§8 the boot takes the record on disk WHOLE on a desktop — a phone-written one too (the owner\'s record holds the desk\'s 1×3) — with its preference', J(bad));
+  leg(row((b) => b.cls === 'desktop' && b.src === 'preset'), '§8 a PRESET is membership + arrangement on a desktop — never a sidebar, the bars, a theme or fonts', J(bad));
+  // the subsets' shapes
+  const boot = applyForViewport('desktop', rec, { source: 'boot' });
+  const memKeys = [...new Set(boot.membership.windows.flatMap((w) => Object.keys(w)))];
+  leg(memKeys.every((k) => layerOf(k) === 'workspace') && memKeys.includes('openSpec') && !memKeys.includes('gridBounds') && J(Object.keys(boot.arrangement?.windows['w-term'] || {})) === J(ARRANGEMENT), '§8 the membership carries the entries\' WORKSPACE fields only (an arrangement field is not in it); a desktop\'s arrangement carries every arrangement key of each entry', J({ memKeys, a: boot.arrangement && Object.keys(boot.arrangement.windows['w-term'] || {}) }));
+  const d2 = applyForViewport('desktop', doc.desktops['d-2'].autoSave, { source: 'boot' }), old = applyForViewport('desktop', doc.autoSave, { source: 'boot' });
+  leg(!!d2.chrome && !!old.chrome && 'toolbarScale' in d2.chrome && d2.chrome.toolbarScale === null && !('toolbarScale' in old.chrome) && old.chrome.toolbarHeight === 40 && J(Object.keys(d2.preference || {})) === J(['theme', 'globalFontSize', 'globalFontFamily']), '§8 a present key stays present (an explicit toolbarScale: null is the sender\'s reset), an absent one stays absent (a legacy record\'s toolbarHeight decodes alone)', J({ d2: d2.chrome, old: old.chrome }));
+  const la = arrangementFor(old, { id: 'w-old' }), lp = arrangementFor(applyForViewport('phone', doc.autoSave, { source: 'boot' }), { id: 'w-old' });
+  leg(la && la.z === 3 && la.min === true && la.snap === true && !!la.snapBounds && old.membership.windows[0].id === 'w-old' && lp && lp.min === true && J(Object.keys(lp)) === J(PHONE_SHOWS), '§8 the legacy spellings ride the subsets verbatim (read both, write the canonical — the apply\'s precedence decides): a desktop\'s z / min / snap / snapBounds, a phone\'s min, the membership\'s id', J({ la, lp }));
+  leg(arrangementFor(boot, { winId: 'w-nope' }) === null && arrangementFor(applyForViewport('desktop', rec, { source: 'remote', writer: 'phone' }), { winId: 'w-chat' }) === null && arrangementFor(boot, null) === null, '§8 arrangementFor: an entry the record does not hold, a live phone record on a desktop, no entry ⇒ null');
+  leg(applyForViewport('desktop', rec, { source: 'remote' }).arrangement === null && applyForViewport('desktop', { ...rec, viewport: 'desktop' }, { source: 'remote' }).chrome.sidebarOpen === true, '§8 no writer named ⇒ the record\'s own stamp (a phone-stamped record live on a desktop: membership only)');
+  const odd = applyForViewport('desktop', rec, { source: 'switch' });
+  leg(odd.arrangement === null && odd.chrome === null && odd.preference === null && odd.membership.windows.length === 3, '§8 an unknown source ⇒ membership only (fail closed)', J(odd));
+  const none = applyForViewport('desktop', null, { source: 'boot' });
+  leg(J(none.membership) === J({ windows: [] }) && J(doc) === before, '§8 no record ⇒ an empty membership; the inputs are never mutated');
+  return failed;
+}
+console.log('— §8 THE LAYER LAW: LAYERS, the census, the truth table (src/lib/desktop-record.js)');
+const layerFailed = layerLegs(P);
+
+// ── §9 THE LAYER GATE (design q-039 P1, lane layout-layers-p1 — the layer law's SERVER half) ──────────────────────────
+/** The gate's legs over one copy of desktop-record.js (PURE layerGate, on the real document shape) — the §7 controls
+ *  re-run them on patched copies. */
+function gateLegs(P, { quiet = false } = {}) {
+  const failed = [];
+  const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
+  const { layerGate, PHONE_KEEPS, ARRANGEMENT, LAYERS } = P;
+  if (!layerGate || !PHONE_KEEPS) { leg(false, '§9 desktop-record.js exports layerGate and PHONE_KEEPS'); return failed; }
+  const doc = realShapeDoc(), held = doc.desktops['d-1'].autoSave, before = J(doc);
+  /** what a phone sends: `from` as recordFor writes it (the server's stamps dropped), `edit(r, win)` applied to the copy */
+  const sent = (edit = () => {}, from = held) => { const r = JSON.parse(J(from)); delete r.updatedAt; delete r.viewport; edit(r, (id) => r.windows.find((w) => (w.winId || w.id) === id)); return r; };
+  const rows = [];
+  const gate = (label, stamp, h, n) => { const v = layerGate(stamp, h, n); rows.push(`${String(stamp).padEnd(9)} ${label.padEnd(66)} ⇒ ${v.ok ? 'ok' : `REFUSED ${v.reason}: ${v.fields.join(', ')}${v.windows.length ? ' · ' + v.windows.join(', ') : ''}`}`); return v; };
+  const refused = (v, fields, windows = []) => !v.ok && v.reason === 'cross-layer' && J(v.fields) === J(fields) && J(v.windows) === J(windows);
+  const box = (l) => ({ left: l, top: 0, width: 1, height: 1 });
+  // THE TABLE (each cell printed)
+  const eq = gate('the held record, as the phone\'s recordFor writes it', 'phone', held, sent());
+  const z = gate('w-chat raised (zIndex 12 → 13)', 'phone', held, sent((r, w) => { w('w-chat').zIndex = 13; }));
+  const gb = gate('w-term moved (gridBounds.left +0.1)', 'phone', held, sent((r, w) => { w('w-term').gridBounds.left += 0.1; }));
+  const sb = gate('the sidebar closed (sidebarOpen true → false)', 'phone', held, sent((r) => { r.sidebarOpen = false; }));
+  const gr = gate('the grid 1×3 → 2×2', 'phone', held, sent((r) => { r.grid = { rows: 2, cols: 2 }; }));
+  const th = gate('the theme dark → light', 'phone', held, sent((r) => { r.theme = 'light'; }));
+  const lg1 = gate('legacy record (z / min / snap / snapBounds) ← the canonical spelling', 'phone', doc.autoSave, sent((r) => { const w = r.windows[0]; w.zIndex = w.z; w.isMinimized = w.min; w.isSnapped = w.snap; w.preSnapBounds = w.snapBounds; for (const k of ['z', 'min', 'snap', 'snapBounds']) delete w[k]; }, doc.autoSave));
+  const lg2 = gate('canonical record ← w-files in the legacy spelling', 'phone', held, sent((r, w) => { const f = w('w-files'); f.z = f.zIndex; f.min = f.isMinimized; f.snap = f.isSnapped; f.snapBounds = f.preSnapBounds; for (const k of ['zIndex', 'isMinimized', 'isSnapped', 'preSnapBounds']) delete f[k]; }));
+  const wob = gate('every box ±0.0015 (a sub-pixel wobble, guard 4)', 'phone', held, sent((r) => { for (const w of r.windows) for (const b of [w.gridBounds, w.preSnapBounds]) if (b) for (const k of Object.keys(b)) b[k] += 0.0015; }));
+  const wob2 = gate('w-chat\'s box +0.003 (past the epsilon)', 'phone', held, sent((r, w) => { w('w-chat').gridBounds.left += 0.003; }));
+  const abs = gate('every false flag absent; toolbarScale null ← 1.01 (the capture\'s null)', 'phone', doc.desktops['d-2'].autoSave, sent((r) => { for (const w of r.windows) for (const k of ['isMaximized', 'isMinimized']) if (w[k] === false) delete w[k]; r.toolbarScale = 1.01; }, doc.desktops['d-2'].autoSave));
+  const sc = gate('toolbarScale null → 1.1', 'phone', doc.desktops['d-2'].autoSave, sent((r) => { r.toolbarScale = 1.1; }, doc.desktops['d-2'].autoSave));
+  const all = (r, w) => { w('w-chat').zIndex = 99; w('w-term').gridBounds = box(0); r.sidebarOpen = false; r.grid = null; r.theme = 'light'; };
+  const dk = gate('a DESKTOP moves boxes, z, the sidebar, the grid, the theme', 'desktop', held, sent(all));
+  const un = gate('…the same, UNSTAMPED (a pre-.264 sender = a desktop\'s)', undefined, held, sent(all));
+  const odd = gate('…the same, an unknown stamp', 'tablet', held, sent(all));
+  const first = gate('a FIRST write (no record held), every field the phone\'s own', 'phone', null, sent(all));
+  const mem = gate('membership: w-files closed, a phone-born window (full box, on top)', 'phone', held, sent((r) => { r.windows = r.windows.filter((w) => w.winId !== 'w-files'); r.windows.push({ winId: 'w-new', title: 'New', type: 'files', openSpec: { action: 'openFileExplorer', path: '/' }, zIndex: 99, gridBounds: box(0), isMaximized: true, isMinimized: false }); }));
+  const ws = gate('the workspace: titles, openSpec, a path, the chain\'s active / layout / split', 'phone', doc.desktops['d-2'].autoSave, sent((r, w) => { w('w-view').title = 'renamed'; w('w-view').openSpec.path = '/x'; w('w-view').filePath = '/x'; const c = w('w-web').tabChain; c.active = 1; c.layout = 'tabs'; c.split.ratio = 0.3; }, doc.desktops['d-2'].autoSave));
+  const meta = gate('meta: the record\'s viewport / updatedAt / seq / evidence', 'phone', held, sent((r) => { r.viewport = 'phone'; r.updatedAt = 5; r.seq = 9; r.evidence = [{ id: 'x', why: 'closed' }]; }));
+  const unk = gate('a field no layer names (a window\'s dockSide, a record\'s wallpaper)', 'phone', held, sent((r, w) => { w('w-chat').dockSide = 'left'; r.wallpaper = 'sea'; }));
+  const many = gate('the theme, w-files\' z, the sidebar and w-chat\'s box at once', 'phone', held, sent((r, w) => { r.theme = 'light'; w('w-files').zIndex = 1; r.sidebarOpen = false; w('w-chat').gridBounds.top += 0.2; }));
+  if (!quiet) console.log('    §9 ' + rows.join('\n    §9 '));
+  leg(eq.ok, '§9 a phone record EQUAL to the held one outside the workspace passes (the record a current phone writes)', J(eq));
+  leg(refused(z, ['zIndex'], ['w-chat']) && refused(gb, ['gridBounds'], ['w-term']) && refused(sb, ['sidebarOpen']) && refused(gr, ['grid']) && refused(th, ['theme']), '§9 a phone record that changes z, a box, the sidebar, the grid or the theme is REFUSED cross-layer — each by name (and the window)', J({ z, gb, sb, gr, th }));
+  // THE CENSUS: every field of the arrangement / chrome / preference rows is gated — each one moved alone is refused by its name
+  const LEG = { z: 'zIndex', min: 'isMinimized', snap: 'isSnapped', snapBounds: 'preSnapBounds' };
+  const winF = ARRANGEMENT.filter((f) => !(f in LEG)), rowF = LAYERS.filter((r) => ['arrangement', 'chrome', 'preference'].includes(r.layer)).flatMap((r) => r.fields);
+  const bump = (v) => (v == null ? [{ rows: 2, cols: 2 }] : typeof v === 'boolean' ? !v : typeof v === 'number' ? v + 1 : typeof v === 'string' ? v + '-x' : Array.isArray(v) ? [...v, 1] : { ...v, [Object.keys(v)[0]]: Object.values(v)[0] + 0.25 });
+  const missed = [];
+  for (const f of winF) { const v = layerGate('phone', held, sent((r, w) => { w('w-files')[f] = bump(w('w-files')[f]); })); if (!refused(v, [f], ['w-files'])) missed.push([f, v]); }
+  for (const f of PHONE_KEEPS) { const v = layerGate('phone', held, sent((r) => { r[f] = bump(r[f]); })); if (!refused(v, [f])) missed.push([f, v]); }
+  leg(!missed.length && J([...winF, ...PHONE_KEEPS, ...Object.keys(LEG)].sort()) === J([...rowF].sort()), `§9 THE GATE CENSUS: every field of the arrangement / chrome / preference rows (${rowF.length}, the legacy spellings read as their canonical) is gated — each one moved alone is refused by its own name`, J(missed));
+  leg(J(PHONE_KEEPS) === J(rowF.filter((f) => !ARRANGEMENT.includes(f))) && PHONE_KEEPS.includes('theme') && PHONE_KEEPS.includes('taskbarHeight') && !PHONE_KEEPS.includes('zIndex'), '§9 PHONE_KEEPS (what a phone\'s record carries from the held one) = every RECORD field outside the workspace, derived from LAYERS', J(PHONE_KEEPS));
+  leg(lg1.ok && lg2.ok, '§9 a legacy spelling equals its canonical (z / zIndex, min / isMinimized, snap / isSnapped, snapBounds / preSnapBounds) — both ways', J({ lg1, lg2 }));
+  leg(wob.ok && refused(wob2, ['gridBounds'], ['w-chat']), '§9 a sub-pixel wobble (≤ 0.002, guard 4\'s apply epsilon) passes; 0.003 is a move', J({ wob, wob2 }));
+  leg(abs.ok && refused(sc, ['toolbarScale']), '§9 an absent false flag is false; a toolbar scale within 0.02 of 1 is the null the capture writes; 1.1 is a change', J({ abs, sc }));
+  leg(dk.ok && un.ok && odd.ok, '§9 a DESKTOP stamp is unrestricted; an UNSTAMPED record (a pre-.264 sender) and an unknown stamp are a desktop\'s (today\'s behaviour)', J({ dk, un, odd }));
+  leg(first.ok, '§9 a FIRST write (the server holds no record of that desktop) passes', J(first));
+  leg(mem.ok && ws.ok && meta.ok, '§9 the WORKSPACE flows: a close, a phone-born window (its box is the workspace\'s news), titles / openSpec / paths / the chain\'s active-layout-split; meta stamps are never judged', J({ mem, ws, meta }));
+  leg(unk.ok, '§9 a field no layer names is not judged here (the §8 census reds it first — the gate never refuses a new workspace field)', J(unk));
+  leg(refused(many, ['zIndex', 'gridBounds', 'sidebarOpen', 'theme'], ['w-chat', 'w-files']), '§9 a refusal names EVERY field moved, in table order (window fields, then the record\'s), and the windows in the record\'s order', J(many));
+  let threw = null; try { layerGate('phone', held, null); layerGate('phone', { windows: 'x' }, { windows: [null, 3, { winId: 'w-chat' }] }); layerGate('phone', held, { windows: [{ zIndex: 1 }] }); } catch (e) { threw = e.message; }
+  leg(!threw && layerGate('phone', held, null).ok && J(doc) === before, '§9 garbage never throws (no record / a non-list / entries with no id); the inputs are never mutated', threw);
+  return failed;
+}
+console.log('— §9 THE LAYER GATE (PURE layerGate — the server half, src/lib/desktop-record.js)');
+const gateFailed = gateLegs(P);
+
 // ── §4 THE DOORS on the real classes ─────────────────────────────────────────────────────────────────────────────
 const { DesktopManager: RealDM } = await import('../src/lib/desktop-manager.js');
 const { LayoutManager: RealLM } = await import('../src/lib/layout.js');
 
 /** Two desktops, the page booted on `active` with its windows BUILT (as the boot restore builds them); the other
  *  desktop's record lives only in the held cache (lazy — never opened). */
-function world(DM, LM, { records, active = 'desk-fin', failReplay = [], desks = null } = {}) {
+function world(DM, LM, { records, active = 'desk-fin', failReplay = [], desks = null, server = null } = {}) {
   const sent = [], handlers = [], stateHandlers = [], closed = [], detached = [], ungrouped = [], pending = [];
   const wins = new Map();
   // THE ACK (verify r5 ⑤): the fake server answers every layout-sync it READ ~20 ms later (`app._acks = false` = an older
@@ -165,6 +385,7 @@ function world(DM, LM, { records, active = 'desk-fin', failReplay = [], desks = 
   let ackSeq = 0;
   const deliver = (m) => {
     sent.push(m);
+    if (server) { server.send(m); return; } // §9c: the REAL ws-handler reads it (its frames reach the page's socket handlers)
     if (app._swallow) return; // the socket looks open; the server reads nothing (verify r5 ⑤)
     if (m.type === 'layout-sync' && app._refuse?.(m)) { setTimeout(() => { for (const h of handlers) h({ type: 'layout-sync-refused', desktopId: m.desktopId, reason: 'shrink-without-close', unexplained: [], arrived: [], state: { windows: app._refuse.kept || [] }, sentAt: m.sentAt ?? null }); }, 20); return; }
     if (m.type === 'layout-sync' && app._acks !== false) setTimeout(() => { for (const h of handlers) h({ type: 'layout-sync-ack', desktopId: m.desktopId || null, sentAt: m.sentAt ?? null, seq: ++ackSeq }); }, 20);
@@ -1054,14 +1275,17 @@ console.log('— §6 wiring: every door, the belt, the refusal route, the rollba
   ok(/else if \(msg\.type === 'layout-sync-refused'\) this\.onSyncRefused\(msg\);/.test(D), '§6 the client routes `layout-sync-refused` to onSyncRefused');
   const beltAt = WS.indexOf('const v = shrinkVerdict({ prev: stored.windows, next: data.state.windows, evidence: data.evidence, alive: (sid) => activeSessions.has(sid), recent: recentArrivals(desktopId, ws) });');
   const writeAt = WS.indexOf('layoutData.desktops[desktopId].autoSave = { ...data.state, updatedAt: Date.now() };');
-  ok(/const \{ shrinkVerdict, windowIds \} = require\('\.\/lib\/desktop-record\.js'\);/.test(WS) && beltAt > 0 && writeAt > beltAt, '§6 ws-handler asks the PURE belt BEFORE it writes the desktop record');
+  ok(/const \{ shrinkVerdict, windowIds, layerGate \} = require\('\.\/lib\/desktop-record\.js'\);/.test(WS) && beltAt > 0 && writeAt > beltAt, '§6 ws-handler asks the PURE belt BEFORE it writes the desktop record');
+  const gateAt = WS.indexOf('const g = layerGate(data.viewport, stored, data.state);');
+  ok(gateAt > beltAt && gateAt < writeAt && WS.indexOf("const viewport = data.viewport === 'phone'") > gateAt && /if \(!g\.ok\) \{[\s\S]{0,1200}ws\.send\(JSON\.stringify\(\{ type: 'layout-sync-refused', desktopId, reason: g\.reason, fields: g\.fields, state: stored, sentAt: data\.sentAt \?\? null \}\)\);[\s\S]{0,40}break;/.test(WS), '§6 THE LAYER GATE (lane layout-layers-p1): ws-handler asks PURE layerGate with the SYNC\'s own stamp AFTER the shrink belt and BEFORE the stamp is stored and the record written; a refusal tells the sender with the record kept, writes nothing, broadcasts nothing');
+  ok(/if \(viewport === 'phone'\) for \(const k of PHONE_KEEPS\) delete chrome\[k\];/.test(D) && /if \(this\.app\.isMobile\) for \(const k of PHONE_KEEPS\) \{ if \(k in held\) state\[k\] = held\[k\]; else delete state\[k\]; \}/.test(D) && !/VIEWPORT_CHROME/.test(D), '§6 the write half: a phone\'s recordFor and presetState carry every record field outside the workspace from the held record (PHONE_KEEPS — the retired VIEWPORT_CHROME carried the sidebar and the grid only)');
   ok(/if \(!v\.ok\) \{[\s\S]{0,1200}ws\.send\(JSON\.stringify\(\{ type: 'layout-sync-refused', desktopId, reason: v\.reason, unexplained: v\.unexplained, arrived: v\.arrived \|\| \[\], state: stored, sentAt: data\.sentAt \?\? null \}\)\);[\s\S]{0,40}break;/.test(WS), '§6 …a refusal tells the SENDER (with the record the server kept, and which drops were arrivals), writes nothing and broadcasts nothing (break)');
   const noteAt = WS.indexOf('noteArrivals(desktopId, windowIds(layoutData.desktops[desktopId].autoSave || null), windowIds(data.state.windows), ws);');
   ok(noteAt > beltAt && noteAt < writeAt && /layoutArrivals\.delete\(data\.desktopId\);/.test(WS) && /const ARRIVAL_TTL_MS = 10 \* 60 \* 1000;/.test(WS) && /if \(a\.by !== me\) out\.push\(id\);/.test(WS), '§6 verify r1: what a write ADDS is remembered per desktop against every OTHER socket for 10 min (the belt\'s `recent`), noted after the verdict and before the write; a deleted desktop forgets them');
   ok(/if \(this\._restoring \|\| this\._pointerDown \|\| this\._pendingRemote\.size\) \{ this\._deferRemote\(msg\); return; \}/.test(L) && /this\._pendingRemote\.set\(deferKey\(msg\), msg\);/.test(L) && !/if \(msg\.type !== 'layout-sync' \|\| this\._restoring\) return;/.test(L), '§6 verify r1: a layout-sync under a gate is deferred PER DESKTOP (never dropped under `_restoring`, never one slot for all)');
-  ok(/if \(this\._connects\+\+ > 0\) setTimeout\(\(\) => this\._resyncFromServer\(\), 250\);/.test(L) && /this\._applyRemoteState\(msg\.state, \{ closeOnlyWired: !!msg\.resync, receivedAt, membershipOnly, from: msg \}\);/.test(L) && /if \(closeOnlyWired && !this\.app\.desktopManager\?\.wireListed\?\.\(activeDesk, id\)\) continue;/.test(L), '§6 verify r1: a reconnect re-reads /api/layouts through the ordinary inbound path, closing only what the wire listed');
+  ok(/if \(this\._connects\+\+ > 0\) setTimeout\(\(\) => this\._resyncFromServer\(\), 250\);/.test(L) && /this\._applyRemoteState\(msg\.state, \{ closeOnlyWired: !!msg\.resync, receivedAt, writer: writerClass\(msg\) \}\);/.test(L) && /if \(closeOnlyWired && !this\.app\.desktopManager\?\.wireListed\?\.\(activeDesk, id\)\) continue;/.test(L), '§6 verify r1: a reconnect re-reads /api/layouts through the ordinary inbound path, closing only what the wire listed');
   ok(/msg\.receivedAt = Date\.now\(\);/.test(L) && /const receivedAt = msg\.receivedAt \?\? Date\.now\(\);/.test(L) && (L.match(/if \(this\.actHeld\(win\._movedAt, receivedAt, win\)\) \{ heldMoved = true; continue; \}/g) || []).length === 2 && /if \(heldMoved\) setTimeout\(\(\) => this\._resendHeldMove\(\), 1000\);/.test(L) && /dm\.cacheRemoteState\(msg\.desktopId, msg\.state, \{ receivedAt \}\);/.test(L) && /&& !this\.app\.layoutManager\?\.actHeld\?\.\(w\._movedAt, receivedAt, w\)\)/.test(D) && /m\._movedAt = movedAt;/.test(D), '§6 verify r2: THE HELD MOVE — every inbound record is stamped when it lands, a move stamps its windows, the apply\'s update loop / close loop and the cached sweep skip a window moved after the record arrived, and the move is re-sent once');
-  ok((W.match(/win\._boundsAt = Date\.now\(\);/g) || []).length === 2 && /const heldGeom = this\.actHeld\(win\._boundsAt, receivedAt, win\);/.test(L) && /if \(rw\.gridBounds && !heldGeom && !membershipOnly\) \{/.test(L) && /const t = Math\.max\(w\._movedAt \|\| 0, w\._boundsAt \|\| 0\);/.test(L), '§6 verify r2 ⑩: THE HELD GEOMETRY — window.js stamps the drag\'s and the resize\'s pointerup, the apply keeps the user\'s box / maximize / minimize over a record received before it, and the re-send carries it');
+  ok((W.match(/win\._boundsAt = Date\.now\(\);/g) || []).length === 2 && /const heldGeom = this\.actHeld\(win\._boundsAt, receivedAt, win\);/.test(L) && /if \(a && a\.gridBounds && !heldGeom\) \{/.test(L) && /const t = Math\.max\(w\._movedAt \|\| 0, w\._boundsAt \|\| 0\);/.test(L), '§6 verify r2 ⑩: THE HELD GEOMETRY — window.js stamps the drag\'s and the resize\'s pointerup, the apply keeps the user\'s box / maximize / minimize over a record received before it, and the re-send carries it');
   ok(/return t >= receivedAt \|\| t > \(win \? this\._carriedAt\(win\._desktopId\) : \(this\._movesSentAt \|\| 0\)\);/.test(L) && /if \(!\(t > 0\) \|\| Date\.now\(\) - t > ACT_HOLD_MS\) return false;/.test(L) && /const ACT_HOLD_MS = 60000;/.test(L), '§6 verify r4 ①: THE UNSAVED ACT — a witness holds over a record while no save the server READ has carried the act (the window\'s desktop `_carriedAt`, verify r5 ⑤), or when the record landed before it; bounded by ACT_HOLD_MS (guard 2\'s expiry)');
   ok(/if \(to\) \{[\s\S]{0,700}if \(to === from \|\| to === '__stage__'\) return null;\s*dest = to;\s*\} else \{/.test(D), '§6 verify r4 ②: adoptRemoteMove told the destination answers it or nothing — the held-record search is the close loop\'s and the sweep\'s alone');
   { const doors = geomDoorsPin(W, read('src/lib/taskbar.js'), CM); ok(doors.every(Boolean), '§6 verify r4 ③: every USER door of a geometry act stamps the witness (the □ / ▁ buttons, the double-click, snapToHalf, a named window\'s restore, move mode, the taskbar row + menu, command mode m + cycle) — and no programmatic caller does (the apply, the boot, a replay, a preset, the Stage)', J(doors)); }
@@ -1076,7 +1300,7 @@ console.log('— §6 wiring: every door, the belt, the refusal route, the rollba
   { const rows = geomDoorCensus(libFiles()); const bad = rows.filter((r) => !r.verdict); ok(rows.length >= 35 && bad.length === 0, `§6 verify r5 ③: THE GEOMETRY DOOR CENSUS — every call of a geometry primitive in src/lib (${rows.length} sites) is a self-stamping verb, a witnessed door, a primitive's own body or a named machine path; a new door without a witness is RED by name`, J(bad.map((r) => `${r.file}:${r.line} ${r.verb} in ${r.enclosing}`)));
     ok(GEOM_MACHINE.every(([f, en]) => rows.some((r) => r.file === f && r.enclosing === en && r.verdict === 'machine')), '§6 …and no dead machine row (every allowlisted path still has a site)', J(GEOM_MACHINE.filter(([f, en]) => !rows.some((r) => r.file === f && r.enclosing === en)))); }
   ok(geomWitnessPin(W), '§6 verify r3 ①: the geometry witness is stamped only by a press that DRAGGED (after `if (!dragging) return;`) or a handle press that MOVED (`if (resized)`) — a click-to-focus on a title bar holds no geometry');
-  ok(/this\.app\.desktopManager\?\.adoptRemoteMove\?\.\(win, win\._desktopId, \{ to: this\.app\.desktopManager\.activeDesktopId, rec: rw \}\);/.test(L) && /if \(this\.app\.desktopManager\?\.adoptRemoteMove\?\.\(win, activeDesk\)\) continue;/.test(L) && /\.filter\(\(w\) => !this\.adoptRemoteMove\(w, desktopId\)\)/.test(D), '§6 verify r1: a remote move is adopted at all three sites — the apply\'s update loop (in), its close loop (out), the cached record\'s gone sweep');
+  ok(/this\.app\.desktopManager\?\.adoptRemoteMove\?\.\(win, win\._desktopId, \{ to: this\.app\.desktopManager\.activeDesktopId, rec: \{ \.\.\.rw, \.\.\.a \} \}\);/.test(L) && /if \(this\.app\.desktopManager\?\.adoptRemoteMove\?\.\(win, activeDesk\)\) continue;/.test(L) && /\.filter\(\(w\) => !this\.adoptRemoteMove\(w, desktopId\)\)/.test(D), '§6 verify r1: a remote move is adopted at all three sites — the apply\'s update loop (in), its close loop (out), the cached record\'s gone sweep');
   ok(/const \{ desktopChanges \} = require\('\.\.\/lib\/desktop-record\.js'\);/.test(PR) && /snapshotLayout\(_lastGood, nextShape, data\);/.test(PR) && /totalWindows: total, change \}\);/.test(PR), '§6 a rollback point records the change that FOLLOWED it (routes/persistence.js; its own legs: test-layout-history)');
   const orphanAt = WS.indexOf("if (desktopId && Array.isArray(layoutData.desktopMeta) && layoutData.desktopMeta.length && !layoutData.desktopMeta.some((d) => d && d.id === desktopId)) {");
   ok(orphanAt > 0 && orphanAt < beltAt && /reason: 'no-such-desktop', desktops: layoutData\.desktopMeta, sentAt: data\.sentAt \?\? null \}\)\);[\s\S]{0,40}break;/.test(WS.slice(orphanAt, orphanAt + 1200)) && /if \(msg\?\.reason === 'no-such-desktop'\) \{ if \(Array\.isArray\(msg\.desktops\)\) this\._onRemoteDesktopUpdated\(\{ desktops: msg\.desktops \}\); return; \}/.test(D), '§6 verify r2 ⑦: a per-desktop write for a desktop the meta does not name is refused BEFORE the belt (`no-such-desktop`, the meta rides the refusal, nothing written) and the client drops the desktop as a desktop-updated would');
@@ -1084,6 +1308,137 @@ console.log('— §6 wiring: every door, the belt, the refusal route, the rollba
   const keys = ['{n} windows on “{desktop}” were kept — this page had not opened them yet', 'Then: {changes}', 'The layout could not be re-read after reconnecting — window changes on this page are held until it can be', 'The layout was re-read — window changes made on this page more than a minute ago were not kept ({n})'];
   ok(keys.every((k) => zh.includes(J(k) + ':') && ja.includes(J(k) + ':')), '§6 the new words have zh AND ja entries', J(keys.filter((k) => !zh.includes(J(k) + ':') || !ja.includes(J(k) + ':'))));
 }
+
+// ── §9b THE GATE ON THE REAL HANDLER + §9c RECONCILIATION (lane layout-layers-p1) ─────────────────────────────────────
+const WSH_PATH = require.resolve(path.join(REPO, 'src/ws-handler.js'));
+/** A fresh copy of the REAL ws-handler module; `gate` stands in for desktop-record.js's layerGate while it is required
+ *  (the RED control: the gate removed). */
+const loadHandler = (gate = null) => {
+  const DR = require(path.join(REPO, MODEL)), real = DR.layerGate;
+  delete require.cache[WSH_PATH];
+  if (gate) DR.layerGate = gate;
+  try { return require(WSH_PATH); } finally { DR.layerGate = real; delete require.cache[WSH_PATH]; }
+};
+/** The real registerWsHandler on a fake wss (test-contributions' harness) over `seed` — layouts.json in memory.
+ *  connect(reply?) → a socket {send(msg) (awaits the handler), frames}; `reply(frame)` hears each frame it is sent. */
+function hub(WSH, seed) {
+  let layouts = JSON.parse(J(seed)), writes = 0;
+  const tele = [], warns = [];
+  const quietly = (fn) => { const o = console.warn; console.warn = (...a) => warns.push(a.map(String).join(' ')); try { return fn(); } finally { console.warn = o; } };
+  const ctx = new Proxy({ telemetry: { record: (e) => tele.push(e) }, activeSessionsPayload: () => [], serverNotice: () => {}, activeSessions: new Map(), WS_OPEN: 1, readLayouts: () => JSON.parse(J(layouts)), writeLayouts: (d) => { writes++; layouts = JSON.parse(J(d)); } }, { has: () => true, get: (t, k) => (k in t ? t[k] : undefined) });
+  const on = {};
+  const wss = { _heartbeatTimer: true, clients: new Set(), on: (ev, fn) => { on[ev] = fn; } };
+  WSH.registerWsHandler(wss, ctx);
+  const connect = (reply = null) => {
+    const h = {}, frames = [];
+    const sock = { readyState: 1, send: (s) => { const f = JSON.parse(s); frames.push(f); if (reply) reply(f); }, on: (ev, fn) => { h[ev] = fn; } };
+    wss.clients.add(sock); quietly(() => on.connection(sock));
+    return { frames, send: async (m) => { const o = console.warn; console.warn = (...a) => warns.push(a.map(String).join(' ')); try { await h.message(J(m)); } finally { console.warn = o; } } };
+  };
+  return { connect, layouts: () => layouts, writes: () => writes, tele, warns };
+}
+const GSEED = () => ({ desktopMeta: [{ id: 'desk-a', name: 'Alpha' }, { id: 'desk-new', name: 'New' }], desktops: { 'desk-a': { autoSave: { windows: [R('a-1', { gridBounds: GB(0.1, 0.1), zIndex: 11 }), R('a-2', { gridBounds: GB(0.5, 0.1), zIndex: 12 }), R('a-3', { gridBounds: GB(0, 0.5), zIndex: 13, isMinimized: true })], grid: { rows: 1, cols: 3 }, sidebarOpen: false, theme: 'light', globalFontSize: 16, globalFontFamily: 'serif', taskbarHeight: 48, toolbarScale: 1.2, toolbarHeight: 48, viewport: 'desktop', updatedAt: 1 } } } });
+/** desk-a's record as a phone holding it sends it (the server's stamps dropped) */
+const gHeld = () => { const r = GSEED().desktops['desk-a'].autoSave; delete r.updatedAt; delete r.viewport; return r; };
+const FULL = () => ({ left: 0, top: 0, width: 1, height: 1 });
+
+async function hubLegs(WSH, { quiet = false } = {}) {
+  const failed = [];
+  const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
+  const send = (S, state, o = {}) => S.send({ type: 'layout-sync', desktopId: o.desktopId || 'desk-a', state, evidence: o.evidence || [], sentAt: o.sentAt || 77, ...(o.viewport !== undefined ? { viewport: o.viewport } : {}) });
+  const syncs = (S) => S.frames.filter((f) => f.type === 'layout-sync');
+  const answer = (S) => S.frames.find((f) => f.type === 'layout-sync-ack' || f.type === 'layout-sync-refused') || {};
+  {
+    const H = hub(WSH, GSEED()), phone = H.connect(), desk = H.connect();
+    const moved = gHeld(); moved.windows[0].gridBounds = FULL();
+    await send(phone, moved, { viewport: 'phone', sentAt: 4242 });
+    const r = answer(phone);
+    leg(r.type === 'layout-sync-refused' && J(Object.keys(r)) === J(['type', 'desktopId', 'reason', 'fields', 'state', 'sentAt']) && r.desktopId === 'desk-a' && r.reason === 'cross-layer' && J(r.fields) === J(['gridBounds']) && J(r.state) === J(GSEED().desktops['desk-a'].autoSave) && r.sentAt === 4242, '§9b a PHONE record that moves a box is REFUSED by the real handler: layout-sync-refused {desktopId, reason:\'cross-layer\', fields:[\'gridBounds\'], state: the record kept, sentAt} — the shrink belt\'s door', J(r));
+    leg(H.writes() === 0 && J(H.layouts()) === J(GSEED()) && !syncs(desk).length, '§9b …nothing written, nothing broadcast (the desk\'s socket hears nothing)', J({ writes: H.writes(), desk: desk.frames.map((f) => f.type) }));
+    leg(H.warns.some((w) => /\[layout-sync\] REFUSED a phone record of desktop "Alpha" \(desk-a\): it changes gridBounds \(window a-1\)/.test(w)) && H.tele.some((e) => e.kind === 'event' && e.name === 'layout-sync-refused' && e.detail === 'cross-layer gridBounds'), '§9b …the journal names the desktop, the fields and the window; telemetry counts it (layout-sync-refused · cross-layer gridBounds)', J({ warns: H.warns.filter((w) => /layout-sync/.test(w)), tele: H.tele }));
+  }
+  for (const [label, viewport] of [['desktop-stamped', 'desktop'], ['UNSTAMPED (a pre-.264 sender)', undefined]]) {
+    const H = hub(WSH, GSEED()), w = H.connect(), desk = H.connect();
+    const moved = gHeld(); moved.windows[0].gridBounds = FULL(); moved.theme = 'dark';
+    await send(w, moved, { viewport });
+    const st = H.layouts().desktops['desk-a'].autoSave, b = syncs(desk)[0] || {};
+    leg(answer(w).type === 'layout-sync-ack' && st.windows[0].gridBounds.width === 1 && st.theme === 'dark' && syncs(desk).length === 1 && (viewport ? b.viewport === viewport : !('viewport' in b)), `§9b the same record ${label} is written and broadcast — the gate judges a phone only`, J({ answer: answer(w), theme: st.theme }));
+  }
+  {
+    const H = hub(WSH, GSEED()), phone = H.connect(), desk = H.connect();
+    const next = gHeld(); next.windows = next.windows.filter((w) => w.winId !== 'a-3'); next.windows.push(R('p-new', { gridBounds: FULL(), zIndex: 14 }));
+    const a2 = next.windows[1]; a2.z = a2.zIndex; delete a2.zIndex; a2.gridBounds = { ...a2.gridBounds, left: a2.gridBounds.left + 0.0013 }; delete next.windows[0].isMaximized;
+    await send(phone, next, { viewport: 'phone', evidence: [{ id: 'a-3', why: 'closed' }] });
+    const st = H.layouts().desktops['desk-a'].autoSave;
+    leg(answer(phone).type === 'layout-sync-ack' && J(ids(st)) === J(['a-1', 'a-2', 'p-new']) && st.viewport === 'phone' && syncs(desk).length === 1, '§9b a phone\'s MEMBERSHIP change is written and broadcast — a window closed (its evidence), one born on the phone (its box is the workspace\'s news), the held arrangement in a legacy spelling with a sub-pixel wobble and an absent false flag', J({ answer: answer(phone), ids: ids(st) }));
+  }
+  {
+    const H = hub(WSH, GSEED()), phone = H.connect();
+    const next = gHeld(); next.windows = [R('n-1', { gridBounds: FULL() })]; next.theme = 'dark';
+    await send(phone, next, { viewport: 'phone', desktopId: 'desk-new' });
+    leg(answer(phone).type === 'layout-sync-ack' && J(ids(H.layouts().desktops['desk-new']?.autoSave)) === J(['n-1']), '§9b a phone\'s FIRST write of a desktop (the server holds no record of it) passes', J(answer(phone)));
+  }
+  {
+    const H = hub(WSH, GSEED()), phone = H.connect();
+    const next = gHeld(); next.windows = [next.windows[0]]; next.windows[0].gridBounds = FULL();
+    await send(phone, next, { viewport: 'phone', sentAt: 99 });
+    const r = answer(phone);
+    leg(r.type === 'layout-sync-refused' && r.reason === 'shrink-without-close' && J(Object.keys(r)) === J(['type', 'desktopId', 'reason', 'unexplained', 'arrived', 'state', 'sentAt']) && J(r.unexplained) === J(['a-2', 'a-3']) && r.sentAt === 99 && H.writes() === 0, '§9b THE SHRINK BELT is unchanged and asked FIRST: a phone record dropping 2 windows unexplained (and moving a box) gets the belt\'s refusal, its frame as before', J(r));
+  }
+  return failed;
+}
+
+/** §9c: a PHONE page — the real DesktopManager + LayoutManager (app.isMobile) on desk-a — whose socket is the REAL
+ *  handler's (`world`'s `server`), a desk's socket beside it. The page holds the desk's record (light theme, closed
+ *  sidebar, bars 48, toolbar 1.2, a 1×3 grid); its OWN look differs (dark, sidebar open, no taskbar, every window full
+ *  screen, z 40) — a phone's. */
+async function gateDoorLegs(DM, WSH, { quiet = false, legs = null } = {}) {
+  const failed = [];
+  const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
+  const want = (k) => !legs || legs.includes(k);
+  const { ARRANGEMENT, PHONE_KEEPS, applyForViewport } = P;
+  const seedRec = () => GSEED().desktops['desk-a'].autoSave;
+  const arr = (st) => J((st.windows || []).map((w) => [w.winId, ARRANGEMENT.filter((k) => k in w).map((k) => [k, w[k]])]));
+  const keeps = (st) => J(PHONE_KEEPS.map((k) => [k, st[k]]));
+  const kept = () => { const s = seedRec(); return { ...s, windows: s.windows.filter((w) => w.winId !== 'a-3') }; };
+  const phoneWorld = () => {
+    const H = hub(WSH, GSEED()), desk = H.connect();
+    let W = null;
+    const sock = H.connect((f) => setTimeout(() => { if (W) for (const h of W.handlers) h(f); }, 5));
+    W = world(DM, RealLM, { records: { 'desk-a': seedRec().windows }, active: 'desk-a', desks: [{ id: 'desk-a', name: 'Alpha' }, { id: 'desk-new', name: 'New' }], server: sock });
+    W.app.isMobile = true;
+    const rec = seedRec(); W.dm._setRecord('desk-a', rec); W.dm.noteWire('desk-a', rec);
+    for (const w of W.wins.values()) { w.gridBounds = FULL(); w.element.style.zIndex = '40'; }
+    return { H, desk, sock, W };
+  };
+  const closeOnPhone = (W, id) => { W.app.wm.closeWindow(id); W.lm._userDirty = true; W.lm._lastUserInputAt = Date.now(); };
+  if (want('cur')) {
+    const { H, sock, W } = phoneWorld();
+    closeOnPhone(W, 'a-3'); await W.lm._doAutoSave(); await tick(40);
+    const st = H.layouts().desktops['desk-a'].autoSave, refusals = sock.frames.filter((f) => f.type === 'layout-sync-refused');
+    leg(!refusals.length && sock.frames.some((f) => f.type === 'layout-sync-ack') && J(ids(st)) === J(['a-1', 'a-2']) && st.viewport === 'phone', '§9c a CURRENT phone page (this tree\'s recordFor) closes a window: its save passes the gate at once — the close lands', J({ refusals, ids: ids(st) }));
+    leg(arr(st) === arr(kept()) && keeps(st) === keeps(seedRec()), '§9c …and the record keeps the desk\'s every box and z, grid, sidebar, bars, theme and fonts — the page\'s own (full-screen boxes, dark, sidebar open) never leave it (PHONE_KEEPS from the held record)', J({ arr: arr(st), keeps: keeps(st) }));
+  }
+  if (want('old')) {
+    const { H, desk, sock, W } = phoneWorld();
+    closeOnPhone(W, 'a-3');
+    // the FIRST save is an OLD phone bundle's (pre-.264 — its own boxes, z and chrome, as an old tab writes them): one call
+    const realFor = W.dm.recordFor;
+    W.dm.recordFor = function (d) { this.recordFor = realFor; const rec = { ...this._savedStates.get(d), windows: W.lm.captureWindows(d), ...W.lm.captureChrome() }; delete rec.updatedAt; delete rec.viewport; return rec; };
+    await W.lm._doAutoSave(); await tick(40);
+    const r = sock.frames.find((f) => f.type === 'layout-sync-refused') || {}, w0 = H.writes(), heard0 = desk.frames.filter((f) => f.type === 'layout-sync').length;
+    leg(r.reason === 'cross-layer' && ['zIndex', 'gridBounds', 'sidebarOpen', 'theme'].every((f) => (r.fields || []).includes(f)) && J(r.state) === J(seedRec()) && w0 === 0 && heard0 === 0, `§9c an OLD phone bundle's save (its own full-screen boxes, z, sidebar, theme…) carrying a closed window is REFUSED cross-layer (${(r.fields || []).join(', ')}) — nothing written, the desk hears nothing`, J({ r, w0, heard0 }));
+    await tick(900); // onSyncRefused reconciles (the view = the record kept + what the page built), rearmSave re-arms, the autosave sends
+    const st = H.layouts().desktops['desk-a'].autoSave, heard = desk.frames.filter((f) => f.type === 'layout-sync');
+    leg(W.syncs('desk-a').length === 2 && J(ids(st)) === J(['a-1', 'a-2']) && heard.length === 1 && heard[0].viewport === 'phone' && !W.wins.has('a-3'), '§9c RECONCILIATION NEVER LOSES MEMBERSHIP: the page re-sends on its own through this tree\'s capture (membership only) and the close LANDS — the desk hears that one record, the closed window is not reopened', J({ sends: W.syncs('desk-a').length, ids: ids(st), heard: heard.length }));
+    leg(arr(st) === arr(kept()) && keeps(st) === keeps(seedRec()) && J(applyForViewport('desktop', st, { source: 'boot' }).arrangement.windows['a-1'].gridBounds) === J(GB(0.1, 0.1)), '§9c …and THE DESK IS UNCHANGED: every box and z, the grid, the sidebar, the bars, the theme and the fonts on disk are the desk\'s (a desk\'s boot places a-1 where the desk left it)', J({ arr: arr(st), keeps: keeps(st) }));
+  }
+  return failed;
+}
+console.log('— §9b THE LAYER GATE on the REAL ws-handler (registerWsHandler on a fake wss, layouts.json in memory)');
+const hubFailed = await hubLegs(loadHandler());
+console.log('— §9c RECONCILIATION: a phone page (the real DesktopManager + LayoutManager) whose socket is the real handler');
+const gateDoorFailed = await gateDoorLegs(RealDM, loadHandler());
 
 // ── §7 NEGATIVE CONTROLS ─────────────────────────────────────────────────────────────────────────────────────────
 console.log('— §7 negative controls (patched copies, scripts/mutant-copy.mjs)');
@@ -1442,9 +1797,51 @@ console.log('— §7 negative controls (patched copies, scripts/mutant-copy.mjs)
     const bad = census(sources({ 'src/lib/desktop-manager.js': mut })).filter((s) => !s.ok);
     ok(bad.length === 1 && bad[0].kind === 'windows-assign' && /st\.windows = st\.windows\.filter/.test(bad[0].line), 'control raw-writer: a new raw write of a held record is RED under §5, and only it', J(bad));
   }
-  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 26 })) ok(r.pass, r.name, r.detail);
+  // THE LAYER LAW (lane layout-layers-p0): each rule of applyForViewport / LAYERS turns its own §8 leg RED
+  for (const m of [
+    { tag: 'phone-applies-chrome', find: "  const chromed = known && !phone && source !== 'preset' && (source === 'boot' || by !== 'phone');", repl: "  const chromed = known && source !== 'preset' && (source === 'boot' || by !== 'phone');", expect: /a PHONE applies membership/ },
+    { tag: 'phone-takes-the-boxes', find: '? pickOf(w, PHONE_SHOWS, true) : pickOf(w, ARRANGEMENT, true);', repl: '? pickOf(w, ARRANGEMENT, true) : pickOf(w, ARRANGEMENT, true);', expect: /a PHONE applies membership/ },
+    { tag: 'phone-hides-nothing', find: "  const arranged = known && (phone || source !== 'remote' || by !== 'phone');", repl: "  const arranged = known && !phone && (source !== 'remote' || by !== 'phone');", expect: /a PHONE applies membership/ },
+    { tag: 'desk-takes-phone-arrangement', find: "  const arranged = known && (phone || source !== 'remote' || by !== 'phone');", repl: '  const arranged = known;', expect: /live phone record's membership only/ },
+    { tag: 'preset-opens-sidebar', find: "  const chromed = known && !phone && source !== 'preset' && (source === 'boot' || by !== 'phone');", repl: "  const chromed = known && !phone && (source === 'boot' || source === 'preset' || by !== 'phone');", expect: /a PRESET is membership \+ arrangement/ },
+    { tag: 'boot-drops-preference', find: "  const preferred = known && !phone && source === 'boot';", repl: '  const preferred = false;', expect: /the boot takes the record on disk WHOLE/ },
+    { tag: 'layer-twice', find: "Object.freeze({ layer: 'chrome', fields: Object.freeze(['sidebarOpen',", repl: "Object.freeze({ layer: 'chrome', fields: Object.freeze(['grid', 'sidebarOpen',", expect: /no field is listed twice/ },
+    { tag: 'unlisted-field', find: "'explorerPath', 'explorerHost', ", repl: "'explorerPath', ", expect: /THE CENSUS: every field|THE CAPTURE CENSUS/ },
+  ]) {
+    ok(PSRC.includes(m.find), `control ${m.tag}: the patched line exists in desktop-record.js`);
+    if (!PSRC.includes(m.find)) continue;
+    const f = layerLegs(M.load(MODEL, PSRC.replace(m.find, m.repl), m.tag), { quiet: true });
+    ok(f.some((n) => m.expect.test(n)), `control ${m.tag}: the patched copy turns its §8 leg RED (${f.length}: ${f.slice(0, 2).join(' | ').slice(0, 160)})`);
+  }
+  // THE LAYER GATE (lane layout-layers-p1): each rule of layerGate turns its own §9 leg RED; the gate removed and the P0
+  // write half turn the real handler's / the reconciliation's legs RED
+  for (const m of [
+    { tag: 'gate-no-epsilon', find: "  if (typeof a === 'number' && typeof b === 'number') return Math.abs(a - b) <= GATE_EPS;", repl: "  if (typeof a === 'number' && typeof b === 'number') return a === b;", expect: /sub-pixel wobble/ },
+    { tag: 'gate-no-legacy', find: 'const gateValue = (o, f) => { const v = o[f] != null ? o[f] : (LEGACY[f] ? o[LEGACY[f]] : undefined);', repl: 'const gateValue = (o, f) => { const v = o[f];', expect: /legacy spelling equals/ },
+    { tag: 'gate-judges-desktops', find: "  if (stamp !== 'phone' || !held", repl: '  if (!held', expect: /DESKTOP stamp is unrestricted/ },
+    { tag: 'gate-blind-to-chrome', find: '  for (const f of PHONE_KEEPS) if (!sameValue(gateValue(held, f), gateValue(next, f))) moved.add(f);', repl: '', expect: /THE GATE CENSUS/ },
+    { tag: 'gate-judges-new-windows', find: '    if (!h || seen.has(id)) continue;', repl: "    if (seen.has(id)) continue; if (!h) { windows.push(id); moved.add('gridBounds'); continue; }", expect: /the WORKSPACE flows/ },
+  ]) {
+    ok(PSRC.includes(m.find), `control ${m.tag}: the patched line exists in desktop-record.js`);
+    if (!PSRC.includes(m.find)) continue;
+    const f = gateLegs(M.load(MODEL, PSRC.replace(m.find, m.repl), m.tag), { quiet: true });
+    ok(f.some((n) => m.expect.test(n)), `control ${m.tag}: the patched copy turns its §9 leg RED (${f.length}: ${f.slice(0, 2).join(' | ').slice(0, 160)})`);
+  }
+  {
+    const WSH0 = loadHandler(() => ({ ok: true }));
+    const h = await hubLegs(WSH0, { quiet: true }), d = await gateDoorLegs(RealDM, WSH0, { quiet: true, legs: ['old'] });
+    ok(h.some((n) => /a PHONE record that moves a box is REFUSED/.test(n)) && !h.some((n) => /SHRINK BELT is unchanged/.test(n)) && d.some((n) => /THE DESK IS UNCHANGED/.test(n)), `control gate-removed (layerGate answering ok on the real handler): a phone write MOVES A DESK WINDOW — the record on disk takes the phone's full-screen box and a desk's boot shows it; the shrink belt still holds (${h.length + d.length}: ${[...h, ...d].slice(0, 2).join(' | ').slice(0, 200)})`);
+  }
+  {
+    const find = "    if (viewport === 'phone') for (const k of PHONE_KEEPS) delete chrome[k];";
+    ok(DSRC.includes(find), 'control pre-p1-write-half: the patched line exists in desktop-manager.js');
+    const DM0 = (await import(M.write('src/lib/desktop-manager.js', DSRC.replace(find, "    if (viewport === 'phone') for (const k of ['sidebarOpen', 'grid']) delete chrome[k];"), 'pre-p1-write-half', { esm: true }))).DesktopManager;
+    const f = await gateDoorLegs(DM0, loadHandler(), { quiet: true, legs: ['cur'] });
+    ok(f.some((n) => /a CURRENT phone page/.test(n)), `control pre-p1-write-half: the P0 write half (a phone carries the sidebar and the grid only) — the gate REFUSES a phone save whose own theme / fonts / bars differ from the desk's (RED) (${f.length})`);
+  }
+  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 34 })) ok(r.pass, r.name, r.detail);
 }
 
-const anyFailed = fail || pureFailed.length || doorFailed.length;
+const anyFailed = fail || pureFailed.length || layerFailed.length || doorFailed.length || gateFailed.length || hubFailed.length || gateDoorFailed.length;
 console.log(`\n${anyFailed ? 'FAIL' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);
 process.exit(anyFailed ? 1 : 0);

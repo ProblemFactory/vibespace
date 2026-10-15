@@ -485,12 +485,13 @@ console.log('§13–§19 r3: no loop fold, worker death / deadline / missing sha
   // r4 (verify #7): EVERY write door — sync, promises, callbacks, streams, an open with a write flag, the atomic helpers
   const WRITE_DOOR = /\b(writeFileSync|appendFileSync|renameSync|_writeAtomic|writeJsonAtomic|writeAtomic|createWriteStream|copyFileSync|truncateSync|ftruncateSync)\(|\b(?:fs\.promises|fsp|promises)\.(?:writeFile|rename|appendFile|copyFile|truncate)\(|\bfs\.(?:writeFile|rename|appendFile|truncate)\(|\bopen(?:Sync)?\([^)]*['"](?:w|a|r\+|wx|ax)\+?['"]/;
   const writes = (txt) => /events-[^'"`]*ndjson|_shardFor\(|shardNames|historyDir/.test(txt) && WRITE_DOOR.test(txt);
+  const FIXTURE_WRITERS = ['scripts/boot-shape.mjs', 'scripts/usage-shape-fixture.mjs']; // fixture ledgers into a scratch tree, never the server's
   const writerCensus = (fl) => {
     const bad = [];
     const mig = fl['src/server/migrations.js'] || '', srv = fl['server.js'] || '';
     const reloads = /usageHistory\.reloadEvents\?\.\(\)/.test(srv);
     for (const [f, txt] of Object.entries(fl)) {
-      if (!(f.startsWith('src/') || (f.startsWith('scripts/') && !/^scripts\/test-/.test(f))) || f === 'src/usage-history.js' || f === 'scripts/boot-shape.mjs' || !writes(txt)) continue; // scripts/test-* write their own fixture ledgers (and boot-shape.mjs the boot gate's, into a scratch tree — B-1319)
+      if (!(f.startsWith('src/') || (f.startsWith('scripts/') && !/^scripts\/test-/.test(f))) || f === 'src/usage-history.js' || FIXTURE_WRITERS.includes(f) || !writes(txt)) continue; // scripts/test-* write their own fixture ledgers (and boot-shape.mjs the boot gate's, into a scratch tree — B-1319; usage-shape-fixture.mjs the Usage suites', into the caller's scratch dataDir — B-f95d ②)
       if (/usage-index|telemetry|otel|usage-routes|usage-index-model|usage-cold/.test(f)) continue; // read or own other files
       const base = path.basename(f, '.js');
       if (!(mig.includes(base) && reloads)) bad.push(`${f} rewrites ledger shards outside the ONE invalidation (a migration + server.js reloadEvents)`);
@@ -499,7 +500,7 @@ console.log('§13–§19 r3: no loop fold, worker death / deadline / missing sha
   };
   const scriptFiles = Object.fromEntries(fs.readdirSync(path.join(REPO, 'scripts')).filter((f) => /\.(m?js|cjs)$/.test(f)).map((f) => ['scripts/' + f, fs.readFileSync(path.join(REPO, 'scripts', f), 'utf8')]));
   const allFiles = { ...files, ...scriptFiles };
-  const writerRows = Object.keys(allFiles).filter((f) => (f.startsWith('src/') || (f.startsWith('scripts/') && !/^scripts\/test-/.test(f))) && f !== 'scripts/boot-shape.mjs' && writes(allFiles[f]));
+  const writerRows = Object.keys(allFiles).filter((f) => (f.startsWith('src/') || (f.startsWith('scripts/') && !/^scripts\/test-/.test(f))) && !FIXTURE_WRITERS.includes(f) && writes(allFiles[f]));
   console.log('     shard writers (src/ + scripts/, every write door): ' + writerRows.join(', '));
   eq(writerCensus(allFiles), [], '§32 (verify #7) every shard writer over src/ AND scripts/, through EVERY write door, is a migration the server follows with reloadEvents()');
   ok(writerCensus({ ...allFiles, 'scripts/rogue-fix.mjs': "await fs.promises.writeFile(path.join(historyDir, 'events-2026-01.ndjson'), x)" }).length === 1, 'control: a scripts/ writer through fs.promises.writeFile ⇒ RED');

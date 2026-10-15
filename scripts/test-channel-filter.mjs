@@ -962,7 +962,7 @@ console.log('⑯ THE CENSUS (lane channel-reply-real, B-a871): every reply-to-se
   ok(!missing.length && CENSUS.length === 17, `the census: ${CENSUS.length} rows (adapter × clause), every writer line pinned in its adapter`, J2(missing));
   // threadOnly (Slack's thread_ts read without a topic) comes from the DECLARED placements: Slack has no quote, Lark has
   ok(src('src/channels/slack.js').includes("placements: Object.freeze(['chat', 'thread', 'thread+chat']), rootReply: 'thread'") && src('src/channels/lark.js').includes("placements: Object.freeze(['chat', 'quote', 'thread']), rootReply: 'quote'") && src('src/server/channels-engine.js').includes('threadOnly: F.threadOnlyCaps(registry.capsOf(rec.kind))'), 'threadOnly = the adapter\'s declared placements (Slack: no quote ⇒ thread_ts is the thread; Lark: quote ⇒ root_id may be a chain), handed over by the engine');
-  const adapters = fs.readdirSync(path.join(REPO, 'src/channels')).filter((n) => /\.js$/.test(n) && !/^(index|registry-list)\.js$/.test(n) && !/^slack-/.test(n));
+  const adapters = fs.readdirSync(path.join(REPO, 'src/channels')).filter((n) => /\.js$/.test(n) && !/^(index|registry-list|vendor-hold)\.js$/.test(n) && !/^slack-/.test(n));   // lane lark-send-hold: vendor-hold.js is the adapters' shared PURE hold, not an adapter
   ok(J2(adapters.sort()) === J2([...new Set(CENSUS.map((r) => r[0] + '.js'))].sort()), 'every adapter module has its census rows (a new adapter must say how it marks a reply)', J2(adapters));
   // (c) is a MAIL thread only: no adapter but gmail writes a conversation of kind `thread`; the record model knows dm / group / thread
   const threadKind = adapters.filter((n) => /\bkind: 'thread',/.test(src('src/channels/' + n)));

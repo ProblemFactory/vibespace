@@ -126,8 +126,8 @@ function fail(res, e) {
 function requestOrigin(req) {
   const o = req.headers && req.headers.origin;
   if (typeof o === 'string' && o && o !== 'null') return o.slice(0, 300);
-  const h = typeof req.get === 'function' ? req.get('host') : null;
-  return h ? `${req.protocol}://${String(h).slice(0, 255)}` : null;
+  // else the request's own origin — THE one rule (src/write-origin.js: the forwarded proto / host first; lane owner-write-origin)
+  return require('../write-origin.js').ownOriginOf(req.headers, { encrypted: req.protocol === 'https' || !!(req.socket && req.socket.encrypted) }) || null;
 }
 function choiceOf(b) {
   const out = {};
@@ -167,6 +167,10 @@ router.get('/api/channels/api/:cred/log', (req, res) => {
 });
 router.post('/api/channels/api/proposals/:id/approve', async (req, res) => {
   try { if (refuseAgentBearer(req, res, API_IS_OWNERS)) return; const shown = (req.body || {}).shown; const cur = shown ? (rawApi().ownerView().proposals || []).find((p) => p.id === String(req.params.id)) : null; if (shown && cur && cur.digest !== shown) return res.status(409).json({ ok: false, code: 'proposal_changed', error: 'that card is not this proposal any more — nothing ran' }); const r = await rawApi().approve(String(req.params.id), { always: !!(req.body || {}).always, by: 'user', digest: String(shown || (req.body || {}).digest || '') }); res.status(r.ok ? 200 : r.code === 'not-found' ? 404 : 409).json(r); } catch (e) { fail(res, e); }
+});
+// 重新提交 (B-fc37): a card whose approved run the vendor redirected — its target filed as a NEW card (nothing runs here)
+router.post('/api/channels/api/proposals/:id/resubmit', (req, res) => {
+  try { if (refuseAgentBearer(req, res, API_IS_OWNERS)) return; const r = rawApi().resubmit(String(req.params.id), { by: 'user', digest: String((req.body || {}).shown || '') }); res.status(r.ok ? 200 : r.code === 'not-found' ? 404 : r.code === 'api_budget' ? 429 : 409).json(r); } catch (e) { fail(res, e); }
 });
 router.post('/api/channels/api/proposals/:id/reject', (req, res) => {
   try { if (refuseAgentBearer(req, res, API_IS_OWNERS)) return; const r = rawApi().reject(String(req.params.id), { reason: (req.body || {}).reason || null, by: 'user' }); res.status(r.ok ? 200 : r.code === 'not-found' ? 404 : 409).json(r); } catch (e) { fail(res, e); }

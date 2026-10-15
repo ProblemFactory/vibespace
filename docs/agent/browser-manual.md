@@ -271,6 +271,14 @@ the same picture scaled to its pane, `snapshot` / `screenshot` see exactly that,
 `vibespace-browser size auto` gives the size back to the live view. The user may change it from the live view's window
 menu (Pin size…). A refused size exits 2 with the reason.
 
+`vibespace-browser set viewport W H` (or `set device NAME`) answers with the size the page actually took, read after the
+set: `viewport: 1280x720 (asked 1280x720)` — no need to measure it yourself. **A pinned size rules your set:** while the
+size is pinned (by the user's Pin size…, or by your own `size`), a `set viewport` / `set device` does NOT run — the answer
+says the size that holds, who pinned it and the way out, exit 1 `[size_pinned]` (your own pin: `vibespace-browser size auto`;
+the user's: only they unpin it — ask them, never work around it). A batch carrying such a line is refused whole. While the
+user drives, the `[browser_paused]` refusal also says the page's size (their pane rules it). `viewport: unreadable (why)`
+means the page could not be read — the size is not known. Each set shows in the user's Actions list.
+
 ### Page dialogs — a page that will not move until you answer it
 
 A page can open a **dialog** that holds everything until somebody answers it:

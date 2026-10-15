@@ -24,6 +24,7 @@ const { timedSync } = require('./timed-sync.js'); // PURE: the store-write clock
 const CB = require('./cache-bounds.js'); // PURE: the ledger's hot window + byte ceiling + the cold columns (B-9428)
 const { coldRows, readLineAt, readLineAtSync } = require('./usage-cold-walk.js'); // the ledger rows read where they live, verified (B-9428 r2/r3)
 const { Worker } = require('worker_threads');
+const v8 = require('v8');
 const { trackWorker } = require('./worker-memory.js');
 
 // API-equivalent prices, USD per MILLION tokens. Subscription sessions don't
@@ -181,6 +182,13 @@ const COLD_WORKER_HEAP_MB = 1536;
 // Fold workers terminated but not exited (blocked in a sync read — the storage is not answering): r4, verify #2.
 // Process-wide: while one is stuck no fold worker starts (they would STACK, +40 MB each, nobody told).
 const STUCK = new Set(); // the cold fold's worker heap cap: one month of cold lines + the accumulator (B-9428 r2)
+// THE LEDGER REBUILD OFF THE LOOP (B-748f, the never-block law): a rebuild parses the whole ledger in the fold worker;
+// its hot rows and ids come back as v8-serialized chunks of this many rows, ONE chunk deserialized per loop turn
+// (~2 ms a chunk of 485 B rows measured here) while the previous cache keeps serving.
+const HOT_CHUNK_ROWS = 2048;
+// A failed rebuild keeps the previous cache and tries again no sooner than this, doubling to the cap — an
+// out-of-memory or stuck worker would otherwise respawn on every reader's pass.
+const REBUILD_RETRY_MS = 60e3, REBUILD_RETRY_MAX_MS = 15 * 60e3;
 // L0 (design 011): how often the walk's writer looks for cursor keys whose
 // transcript is gone — one stat per key (~45 ms for production's 37 024 keys,
 // measured 2026-10-03), so at most hourly, and on the first walk after boot.
@@ -230,7 +238,7 @@ class UsageHistory {
     // already-warm cache — and `_evCache.rids` would keep serving the
     // pre-migration objects for the life of the process. Boot re-reads after
     // runLocalMigrations, exactly like reloadCursors.
-    this.reloadEvents = () => { this._evCache = null; if (this._index) this._index.recover(); }; // …and the index re-checks its shard marks
+    this.reloadEvents = () => { this._rebuildInWorker('a reload after a repair'); if (this._index) this._index.recover(); }; // …and the index re-checks its shard marks (B-748f: rebuilt in the worker, the old cache serving until the swap)
     this._pricing = this._loadPricing();
     this._scanning = false;
     this._lastScan = 0;
@@ -466,7 +474,7 @@ class UsageHistory {
       }
       if (dirty) this._writeAtomic(fp, out.join('\n') + '\n');
     }
-    if (changed) { this._evCache = null; if (this._index) this._index.recover(); } // sizes may match — force a clean reload (the index re-checks its marks)
+    if (changed) { this._rebuildInWorker('a re-attribution rewrote shards'); if (this._index) this._index.recover(); } // sizes may match — force a clean reload (the index re-checks its marks)
     try { fs.writeFileSync(marker, JSON.stringify({ at: Date.now(), changed })); } catch {}
     if (changed) console.log(`[usage-history] re-attributed ${changed} events (pre-binding history → global)`);
   }
@@ -860,7 +868,8 @@ class UsageHistory {
     try { files = fs.readdirSync(this.dir).filter(f => /^events-\d{4}-\d{2}\.ndjson$/.test(f)).sort(); } catch {}
     const pass = { seen: null, grew: false, cooled: false, added: 0 };
     // r3 (verify #13): a shard the cache read that is GONE ⇒ rebuild (every place in it is stale)
-    if (c.consumed.size) { const have = new Set(files); for (const fn of c.consumed.keys()) if (!have.has(fn)) { this._evCache = null; yield* this._loadSteps(chunkBytes, trimBatch); return; } }
+    // B-748f: with a whole cache the WORKER rebuilds (this pass goes on over the other shards); none yet ⇒ the first load starts over
+    if (c.consumed.size) { const have = new Set(files); for (const fn of c.consumed.keys()) if (!have.has(fn)) { if (this._rebuildInWorker(`a shard vanished (${fn})`, c)) break; yield* this._loadSteps(chunkBytes, trimBatch); return; } }
     for (const fn of files) {
       const fp = path.join(this.dir, fn);
       let st; try { st = fs.statSync(fp); } catch { continue; }
@@ -870,8 +879,8 @@ class UsageHistory {
       // the old end that changed (the append-only proof: the old last line's tail still at its old offset)
       // ⇒ rebuild from scratch. A shrink is a rewrite too (the 2026-09 rule).
       if (consumed && (st.size < consumed || (mark && (mark.ino !== st.ino || (st.size === consumed && mark.mtimeMs !== st.mtimeMs) || (st.size > consumed && !probeHolds(fp, consumed, mark.probe)))))) {
-        this._evCache = null;
-        yield* this._loadSteps(chunkBytes, trimBatch); return;
+        const why = `${fn} was rewritten (${st.size < consumed ? 'it shrank' : mark.ino !== st.ino ? 'another file' : st.size === consumed ? 'same size, a new mtime' : 'bytes before its old end changed'})`;
+        if (this._rebuildInWorker(why, c)) continue; yield* this._loadSteps(chunkBytes, trimBatch); return; // B-748f: the worker rebuilds, this pass keeps the old rows of it; no whole cache yet ⇒ the first load starts over
       }
       if (st.size === consumed) continue;
       if (!pass.seen) { // the first new bytes of this pass: slide the window (hourly, never under a walk), order the id indexes
@@ -899,6 +908,7 @@ class UsageHistory {
       try { global.__vsEvent?.('usage-cold-over-ceiling', String(Math.round(c.cold.bytes() / CB.MB))); } catch { }
       console.warn(`[usage] the ledger's cold columns passed their ${Math.round(this._coldMaxBytes() / CB.MB)} MB ceiling (${Math.round(c.cold.bytes() / CB.MB)} MB, ${c.cold.n} rows) — kept: the money readers' numbers never drop a row`);
     }
+    c.whole = true; // a pass ran to its end: from now on a rebuild keeps serving this cache (B-748f)
   }
   /** One slice [from, to) of a shard's new bytes: its complete lines taken, the shard's place + append-proof moved past
    *  them (the proof = the last PROBE_BYTES before the place, never reaching back before this pass's start — what one
@@ -1026,6 +1036,7 @@ class UsageHistory {
    *  migration, a test; aggregate()). The server's route folds the cold part in a worker (aggregateAsync). */
   * _allRows(from, to) {
     this._loadEvents();
+    if (this._evCache.stale) this._rebuildOnLoop(); // B-748f: a stale cache's places only STALE, and a sync reader cannot wait for the worker
     const c = this._evCache;
     if (!c.cold.n || (from && from >= c.cutoff)) { yield* this._hotEvents(from, to); return; }
     yield* this._merged(coldRows(this._coldWalk(from, to)), from, to, this._sortedEvents());
@@ -1045,15 +1056,29 @@ class UsageHistory {
   /** The cold fold in a worker (usage-cold-worker.js): one per walk, terminated after; the main thread never
    *  parses a cold line for the route. */
   _foldInWorker(msg) {
+    return this._inWorker({ op: 'fold', rowBudget: this.coldRowBudget || CB.COLD_ROW_BUDGET, ...msg }, [...msg.walk.groups.flatMap((g) => [g.sh.buffer, g.off.buffer, g.ts.buffer, g.rh.buffer]), msg.hot.tss.buffer, msg.hot.locs.buffer, msg.hot.rh.buffer]);
+  }
+  /** ONE fold-worker job at a time, whichever it is — a fold or the ledger rebuild (B-748f): the next spawns when the
+   *  previous settled (its terminate() awaited). */
+  _inWorker(msg, transfer) {
+    const p = (this._workerTail || Promise.resolve()).then(() => this._spawnJob(msg, transfer));
+    this._workerTail = p.then(() => { }, () => { });
+    return p;
+  }
+  _spawnJob(msg, transfer) {
     if (STUCK.size) return Promise.reject(Object.assign(new Error(`the usage ledger is not answering (storage) — ${STUCK.size} fold worker(s) stuck in a read; usage summaries resume when it returns`), { code: 'STUCK' }));
     return new Promise((resolve, reject) => {
       let w, settled = false, timer = null, exited = false;
-      const file = this.coldWorkerFile || path.join(__dirname, 'usage-cold-worker.js');
-      const capMb = this.coldWorkerHeapMb || COLD_WORKER_HEAP_MB; // the hard limit never under 64 MB: below ~16 MB V8 dies PROCESS-WIDE deserializing the isolate (measured)
+      const rb = msg.op === 'rebuild'; // the rebuild has its own seams: a fold stub (coldWorkerFile) knows no 'rebuild'
+      const file = (rb ? this.rebuildWorkerFile : this.coldWorkerFile) || path.join(__dirname, 'usage-cold-worker.js');
+      const capMb = (rb ? this.rebuildWorkerHeapMb : this.coldWorkerHeapMb) || COLD_WORKER_HEAP_MB; // the hard limit never under 64 MB: below ~16 MB V8 dies PROCESS-WIDE deserializing the isolate (measured)
+      // …and a rebuild gets at least the MAIN thread's own heap limit: it builds what the on-loop rebuild built there (the pass's id set
+      // holds every rid of the ledger) — a smaller cap would fail it forever on a big ledger
+      const heapMb = rb && !this.rebuildWorkerHeapMb ? Math.max(capMb, Math.round(v8.getHeapStatistics().heap_size_limit / 1048576)) : capMb;
       // execArgv [] (r3, verify #1/#12): a parent --max-old-space-size would otherwise replace resourceLimits
-      try { w = new Worker(file, { execArgv: [], resourceLimits: { maxOldGenerationSizeMb: Math.max(64, capMb), maxYoungGenerationSizeMb: 32 } }); } catch (e) { reject(e); return; }
-      trackWorker('usage-cold-fold', w); // the memory census (src/worker-memory.js)
-      this._coldWalks = (this._coldWalks || 0) + 1;
+      try { w = new Worker(file, { execArgv: [], resourceLimits: { maxOldGenerationSizeMb: Math.max(64, heapMb), maxYoungGenerationSizeMb: 32 } }); } catch (e) { reject(e); return; }
+      trackWorker(rb ? 'usage-ledger-rebuild' : 'usage-cold-fold', w); // the memory census (src/worker-memory.js)
+      if (rb) this._rebuildWorkers = (this._rebuildWorkers || 0) + 1; else this._coldWalks = (this._coldWalks || 0) + 1;
       w.on('exit', () => { exited = true; if (STUCK.delete(w)) console.log(`[usage] a stuck fold worker exited — ${STUCK.size} still stuck${STUCK.size ? '' : '; usage summaries resume'}`); });
       // ONE worker at a time (r4): the request settles only after terminate() — awaited for its own deadline;
       // a worker still alive then is STUCK (counted, said once, no new worker until it exits)
@@ -1073,7 +1098,7 @@ class UsageHistory {
       });
       w.on('error', (e) => end(reject, Object.assign(new Error(e && e.code === 'ERR_WORKER_OUT_OF_MEMORY' ? 'the fold worker ran out of memory' : 'the fold worker failed: ' + (e && e.message)), { code: (e && e.code) || 'WORKER' })));
       w.on('exit', (code) => end(reject, Object.assign(new Error('the fold worker exited (' + code + ')'), { code: 'WORKER' })));
-      w.postMessage({ op: 'fold', id: 1, capMb, rowBudget: this.coldRowBudget || CB.COLD_ROW_BUDGET, ...msg }, [...msg.walk.groups.flatMap((g) => [g.sh.buffer, g.off.buffer, g.ts.buffer, g.rh.buffer]), msg.hot.tss.buffer, msg.hot.locs.buffer, msg.hot.rh.buffer]);
+      w.postMessage({ id: 1, capMb, ...msg }, transfer);
     });
   }
   /** The worker folded with no account / session tables: name what it could not on the answer's rows,
@@ -1116,6 +1141,93 @@ class UsageHistory {
       step();
     });
   }
+
+  // THE LEDGER REBUILD OFF THE LOOP (B-748f, the never-block law; memory-residency verify r3 #4): a rebuild parsed the whole
+  // ledger in ONE loop turn — 5 s at 497 MB, 69 s at 4.9 GB measured — every time a shard was rewritten, shrank or
+  // vanished, a walk read a stale place, or a repair asked for a reload. Now the parse runs in the fold worker (the same
+  // file, one job at a time with the folds); the loop keeps serving the previous cache — stale but whole, never a
+  // blank — stages the result a chunk per turn and swaps it in with ONE assignment. Asks during a rebuild join it; a
+  // failed rebuild keeps the previous cache, says why in one line, and tries again after REBUILD_RETRY_MS (doubling).
+  /** THE ONE DOOR every ledger re-parse goes through. true = the worker took it (the cache keeps serving); false = there
+   *  is no whole cache to keep serving (the first load is still under way): dropped, the caller's pass starts over. */
+  _rebuildInWorker(why, c = this._evCache) {
+    if (!c) return false; // nothing loaded: the first load reads the ledger as it is
+    if (c !== this._evCache) return true; // a rebuilt cache already replaced the one that was asked about
+    if (!c.whole) { this._evCache = null; return false; }
+    if (!c.stale) c.stale = why;
+    this._requestRebuild(why).catch(() => { }); // a failure is said once, by the job
+    return true;
+  }
+  /** THE DECLARED ON-LOOP REBUILD — the sync full-row readers only (aggregate(), rows(): a migration, a test; no server
+   *  caller — test-ledger-rebuild's census): they cannot wait for the worker, and a stale cache's places only STALE. */
+  _rebuildOnLoop() { this._evCache = null; this._loadEvents(); }
+  /** The rebuild in flight (an ask joins it), a new one, or — inside a failed one's retry wait — that failure again. */
+  _requestRebuild(why) {
+    if (this._rb) { this._rb.asks++; return this._rb.p; }
+    if (this._rbFail && Date.now() < this._rbFail.retryAt) return Promise.reject(this._rbFail.err);
+    const job = { why, asks: 1, p: null };
+    this._rb = job;
+    job.p = this._rebuildJob(job).finally(() => { if (this._rb === job) this._rb = null; });
+    return job.p;
+  }
+  /** Resolves when no rebuild is in flight (a test; a reader that wants the rebuilt figures). Never rejects. */
+  rebuildSettled() { return this._rb ? this._rb.p.then(() => { }, () => { }) : Promise.resolve(); }
+  async _rebuildJob(job) {
+    const t0 = Date.now();
+    try {
+      const res = await this._inWorker({ op: 'rebuild', dir: this.dir, windowMs: this._ledgerWindowMs(), hotMaxBytes: this._ledgerHotMaxBytes(), coldMaxBytes: this._coldMaxBytes() }, []);
+      const next = await this._stageBuilt(res.built);
+      this._swapCache(next);
+      this._rbFail = null;
+      console.log(`[usage] the ledger cache was rebuilt in the fold worker (${job.why}${job.asks > 1 ? `; ${job.asks - 1} more ask(s) joined it` : ''}): ${next.events.length + next.cold.n} rows in ${((Date.now() - t0) / 1000).toFixed(1)} s — the previous cache served meanwhile`);
+    } catch (e) {
+      const n = (this._rbFail ? this._rbFail.n : 0) + 1, wait = Math.min(REBUILD_RETRY_MAX_MS, REBUILD_RETRY_MS * 2 ** (n - 1)), why = (e && e.message) || String(e);
+      this._rbFail = { n, retryAt: Date.now() + wait, err: Object.assign(new Error(`the usage ledger could not be rebuilt after ${job.why} (${why}) — the previous figures keep serving; it tries again in ${Math.round(wait / 1000)} s`), { code: 'REBUILD' }) };
+      console.warn(`[usage] the ledger cache rebuild failed (${job.why}): ${why} — the previous cache keeps serving; next try in ${Math.round(wait / 1000)} s`);
+      throw this._rbFail.err;
+    }
+  }
+  /** The worker's half (usage-cold-worker.js runs it on its own instance): the ONE load pass to its end + warm()'s settle
+   *  + the hot rows' ts order (= _sortHot's stable sort), packed — the cold columns' ArrayBuffers moved whole, the hot rows
+   *  and their ids v8-serialized in chunks of HOT_CHUNK_ROWS inside ONE transferred buffer. */
+  _packWhole() {
+    this._evCache = null; // the worker's own instance: its first load
+    this._loadEvents();
+    const c = this._evCache;
+    c.cold.settle(); for (const k of Object.keys(c.cold.idx)) c.cold.idx[k].settle();
+    const n = c.events.length, perm = new Uint32Array(n);
+    for (let i = 0; i < n; i++) perm[i] = i;
+    perm.sort((a, b) => ((c.events[a].ts || 0) - (c.events[b].ts || 0)) || (a - b));
+    const parts = [], put = (k, arr) => { for (let a = 0; a < arr.length; a += HOT_CHUNK_ROWS) parts.push([k, v8.serialize(arr.slice(a, a + HOT_CHUNK_ROWS))]); };
+    put('ev', c.events); put('rid', [...c.rids]); put('mid', [...c.mids]);
+    const buf = new Uint8Array(parts.reduce((t, [, b]) => t + b.length, 0)), chunks = [];
+    let at = 0;
+    for (const [k, b] of parts) { buf.set(b, at); chunks.push({ k, at, len: b.length }); at += b.length; }
+    const sizes = Float64Array.from(c.sizes), locs = Float64Array.from(c.locs), hrh = Float64Array.from(c.hrh), cold = c.cold.parts();
+    const marks = [...c.marks].map(([f, m]) => [f, { ino: m.ino, mtimeMs: m.mtimeMs, probe: new Uint8Array(m.probe) }]);
+    return {
+      built: { buf, chunks, sizes, locs, hrh, perm, hotBytes: c.hotBytes, cold: cold.parts, consumed: [...c.consumed], marks, srcWm: [...c.srcWm], cutoff: c.cutoff, shards: c.shards, overWarned: !!c.overWarned },
+      transfer: [buf.buffer, sizes.buffer, locs.buffer, hrh.buffer, perm.buffer, ...cold.transfer],
+    };
+  }
+  /** The loop's half: the built cache staged where no reader looks — a chunk of hot rows (or ids) per loop turn, the cold
+   *  columns taken whole (moved, not copied). */
+  async _stageBuilt(b) {
+    const events = [], sizes = [], locs = [], hrh = [], rids = new Set(), mids = new Set();
+    for (const ch of b.chunks) {
+      const rows = v8.deserialize(Buffer.from(b.buf.buffer, b.buf.byteOffset + ch.at, ch.len));
+      if (ch.k === 'ev') for (const ev of rows) { const i = events.length; events.push(ev); sizes.push(b.sizes[i]); locs.push(b.locs[i]); hrh.push(b.hrh[i]); }
+      else { const ids = ch.k === 'rid' ? rids : mids; for (const id of rows) ids.add(id); }
+      await new Promise((r) => setImmediate(r));
+    }
+    const sorted = new Array(events.length);
+    for (let k = 0; k < sorted.length; k++) sorted[k] = events[b.perm[k]];
+    const marks = new Map(b.marks.map(([f, m]) => [f, { ino: m.ino, mtimeMs: m.mtimeMs, probe: Buffer.from(m.probe.buffer, m.probe.byteOffset, m.probe.length) }]));
+    return { consumed: new Map(b.consumed), marks, events, sizes, locs, hrh, hotBytes: b.hotBytes, rids, mids, srcWm: new Map(b.srcWm), checkedAt: 0, cold: CB.ColdSlab.fromParts(b.cold), cutoff: b.cutoff, walking: 0, shards: b.shards, shardIx: new Map(b.shards.map((f, i) => [f, i])), sorted, sortedLen: events.length, overWarned: b.overWarned, whole: true };
+  }
+  /** THE SWAP: ONE assignment — a reader sees the previous cache or the rebuilt one, each whole — and a new generation for
+   *  the cost memos (usage-anchors keys on ledgerGen). The appends since the worker read come in the next pass (checkedAt 0). */
+  _swapCache(next) { next.checkedAt = 0; this._evCache = next; this.ledgerGen = (this.ledgerGen || 0) + 1; }
 
   /** Per-source (per-machine) newest-event-timestamp map: {local: ts, <hostId>: ts}.
    *  The offline-bias defense reads this to tell "idle" from "dark": a source
@@ -1252,7 +1364,7 @@ class UsageHistory {
         const st = this._aggBegin(opts);
         for (const ev of this._allRows(opts.from, opts.to)) this._aggRow(st, ev);
         return this._aggEnd(st);
-      } catch (e) { if (!(e && e.code === 'STALE') || tries >= 2) throw e; this._evCache = null; } // a rewritten shard: rebuild, read again
+      } catch (e) { if (!(e && e.code === 'STALE') || tries >= 2) throw e; this._rebuildOnLoop(); } // a rewritten shard: rebuild, read again
     }
   }
   /** The route's aggregate (r2/r3). A hot-only range folds the in-memory hot rows on the loop in yielding
@@ -1306,6 +1418,7 @@ class UsageHistory {
   }
   async _aggregateWalk(opts, tries) {
     this._loadEvents();
+    if (this._evCache.stale) { await this._requestRebuild(this._evCache.stale); this._loadEvents(); } // B-748f: a stale cache's places only STALE — fold the rebuilt one
     const c = this._evCache;
     if (!c.cold.n || (opts.from && opts.from >= c.cutoff)) return this._hotFold(opts);
     let res;
@@ -1319,8 +1432,8 @@ class UsageHistory {
       if (hook) await hook(tries);
       res = await this._foldInWorker({ pricing: this._pricing, query: { ...opts }, walk, hot: { tss, locs, rh, objs } });
     } catch (e) {
-      if (e && e.code === 'STALE') { // a shard was rewritten under the plan: rebuild, re-run in the worker
-        this._evCache = null;
+      if (e && e.code === 'STALE') { // a shard was rewritten under the plan: the worker rebuilds (B-748f), the re-run folds the rebuilt cache
+        this._rebuildInWorker('a walk read a stale place (' + e.message + ')', c);
         if (tries < 1) return this._aggregateWalk(opts, tries + 1); // r4 (verify #4): ONE rebuild per request, never a second loop reload
         throw Object.assign(new Error('the usage ledger was rewritten during the read twice (' + e.message + ') — retry'), { code: 'STALE' });
       }
@@ -1332,7 +1445,7 @@ class UsageHistory {
     if (res.missing > 0) { // verify #13: a vanished shard — this answer says so, the cache rebuilds from the directory
       answer.partial = { missingRows: res.missing, shards: res.missingShards, why: 'a usage ledger shard vanished during the read' };
       console.warn(`[usage] ${res.missing} ledger rows were missing (${res.missingShards.join(', ')}) — answered without them; the cache rebuilds`);
-      this._evCache = null;
+      this._rebuildInWorker(`a shard vanished during a walk (${res.missingShards.join(', ')})`, c);
     }
     return answer;
   }

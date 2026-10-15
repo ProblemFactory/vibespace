@@ -731,8 +731,6 @@ const STORAGE = {
   'src/lib/file-explorer.js|localStorage|\'fileExplorerColumnWidths\'': ['pref', 'explorer column widths'],
   'src/lib/file-explorer.js|localStorage|\'fileExplorerGroupBy\'': ['pref', 'explorer grouping'],
   'src/lib/i18n.js|localStorage|STORAGE_KEY': ['pref', 'the device language'],
-  'src/lib/layout.js|localStorage|\'termFontSize\'': ['pref', 'terminal font size'],
-  'src/lib/layout.js|localStorage|\'termFontFamily\'': ['pref', 'terminal font'],
   'src/lib/layout.js|localStorage|\'toolbarScale\'': ['pref', 'toolbar scale'],
   'src/lib/layout.js|localStorage|\'taskbarHeight\'': ['pref', 'taskbar height'],
   'src/lib/manage-agents.js|localStorage|\'vibespace.quotaRefreshAck\'': ['marker', 'the quota-refresh explanation was acknowledged'],

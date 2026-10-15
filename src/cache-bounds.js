@@ -236,6 +236,25 @@ class ColdSlab {
       yield this.row(q);
     }
   }
+  /** The slab as TRANSFERABLE parts (B-748f: the ledger rebuild builds it in the fold worker and the loop takes it
+   *  whole) — every column an ArrayBuffer moved, never copied; `transfer` lists them once each. */
+  parts() {
+    const idx = {};
+    for (const k of Object.keys(this.idx)) idx[k] = this.idx[k].parts();
+    const p = { n: this.n, sortedN: this.sortedN, cap: this.cap, ts: this.ts, rh: this.rh, sh: this.sh, off: this.off, tok: this.tok, nm: this.nm, names: this.names.map((t) => t.vals), idx };
+    const bufs = new Set([this.ts, this.rh, this.sh, this.off, ...this.tok, ...this.nm].map((a) => a.buffer));
+    for (const k of Object.keys(idx)) for (const a of ['keys', 'vals', 'tk', 'tv']) bufs.add(idx[k][a].buffer);
+    return { parts: p, transfer: [...bufs] };
+  }
+  /** …and back: the same slab (the intern maps rebuilt from their values — a few hundred names). */
+  static fromParts(p) {
+    const s = Object.create(ColdSlab.prototype);
+    Object.assign(s, { n: p.n, sortedN: p.sortedN, cap: p.cap, ts: p.ts, rh: p.rh, sh: p.sh, off: p.off, tok: p.tok, nm: p.nm });
+    s.names = p.names.map((vals) => ({ vals, ix: new Map(vals.map((v, i) => [v, i])) }));
+    s.idx = {};
+    for (const k of Object.keys(p.idx)) s.idx[k] = HashIndex.fromParts(p.idx[k]);
+    return s;
+  }
   /** Resident bytes: the typed columns + the hash indexes + the intern tables (2 B/char + 40 B a slot). */
   bytes() {
     let b = this.cap * (8 * 2 + 4 * (TOKEN_FIELDS.length + NAME_FIELDS.length) + 1 + 4);
@@ -290,6 +309,8 @@ class HashIndex {
     return out;
   }
   bytes() { return this.keys.byteLength + this.vals.byteLength + this.tk.byteLength + this.tv.byteLength; }
+  parts() { return { keys: this.keys, vals: this.vals, tk: this.tk, tv: this.tv, tn: this.tn, merges: this.merges }; }
+  static fromParts(p) { return Object.assign(Object.create(HashIndex.prototype), p); }
 }
 
 /** A census row. bytes in the CEILING's unit (unit says which); kind = where it lives: 'heap' (counted in

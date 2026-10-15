@@ -135,10 +135,8 @@ function create({ dataDir, requestAuthed = () => true, publicUrl = () => null, l
   const originOf = (req) => {
     try {
       if (!req) return '';
-      const proto = String(req.headers['x-forwarded-proto'] || req.protocol || 'http').split(',')[0].trim();
-      const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
-      if (!host || !/^(\[[0-9a-fA-F:.]+\]|[A-Za-z0-9][A-Za-z0-9.\-]*)(:\d{1,5})?$/.test(host) || !/^https?$/.test(proto)) return '';
-      return `${proto}://${host}`;
+      // the request's own origin — THE one rule (src/write-origin.js, lane owner-write-origin): forwarded proto/host first
+      return require('../write-origin.js').ownOriginOf(req.headers, { encrypted: req.protocol === 'https' || !!(req.socket && req.socket.encrypted) });
     } catch { return ''; }
   };
   const urlFor = (id, req) => {

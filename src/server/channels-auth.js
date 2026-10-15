@@ -27,7 +27,7 @@ function create(engineCtx) {
   const {
     KEY_FILE, CUSTOM_KEY, PENDING_FLOW_TTL_MS, DUPLICATE_FIELDS, registry, integrations, mountClients, now, log, fetchFn, deliver, liveSessions,
     store, box, flows, signState, consentRowOf, consentDepsOf, resolveIntegration, rowOf, live, paceCarry, adapterRecords, saveAdapters,
-    refusedScopesOf, tokensFor, adapterFor, refreshAuth, EMPTY_SCAN, pass, rejudgeConvCaps, conversationName, presetsOf, clientFieldDecls,
+    refusedScopesOf, morePendingOf, tokensFor, adapterFor, refreshAuth, EMPTY_SCAN, pass, rejudgeConvCaps, conversationName, presetsOf, clientFieldDecls,
     customClientView, vendorNameOf, adapterView, notify, disarmPush, syncPushLanes, dropLive, retractUnsaved, retractFailure, wakeTimers, policyFor,
     accountGrainOf, patternsOf, convGrainOf, honestyLineFor, notifyOutbox,
   } = engineCtx;
@@ -441,7 +441,7 @@ function create(engineCtx) {
         if (meta.consent && !Object.keys(offered).length) throw new ChannelError('forbidden', namelessSentence(rec.label || rec.id, 'the sign-in named no account'), { retryable: false, detail: { nameless: true } });
         p.tokenEnc = box.enc(JSON.stringify(token));
         p.identity = offered;   // verify r5: judged against the target's held identity when the rebind lands
-        p.tokenMeta = { expiresAt: meta.expiresAt == null ? null : Number(meta.expiresAt), scopes: Array.isArray(meta.scopes) ? meta.scopes.slice() : [], user: meta.user || token.name || token.email || token.openId || null, refusedScopes: refusedScopesOf(meta.refusedScopes) };
+        p.tokenMeta = { expiresAt: meta.expiresAt == null ? null : Number(meta.expiresAt), scopes: Array.isArray(meta.scopes) ? meta.scopes.slice() : [], user: meta.user || token.name || token.email || token.openId || null, refusedScopes: refusedScopesOf(meta.refusedScopes), morePending: morePendingOf(meta.morePending) };
       },
       async clear() { p.tokenEnc = null; p.tokenMeta = null; },
     };
@@ -496,7 +496,7 @@ function create(engineCtx) {
     await store.adapters.update(() => {
       rec.credentialKey = p.choice.credentialKey;
       if (p.choice.credential) rec.credential = p.choice.credential; else delete rec.credential;
-      rec.auth = { ...(rec.auth || {}), tokenEnc: p.tokenEnc, expiresAt: p.tokenMeta.expiresAt, scopes: p.tokenMeta.scopes, user: p.tokenMeta.user || (rec.auth && rec.auth.user) || null, updatedAt: now(), scopesAt: now(), refusedScopes: p.tokenMeta.refusedScopes || [] };
+      rec.auth = { ...(rec.auth || {}), tokenEnc: p.tokenEnc, expiresAt: p.tokenMeta.expiresAt, scopes: p.tokenMeta.scopes, user: p.tokenMeta.user || (rec.auth && rec.auth.user) || null, updatedAt: now(), scopesAt: now(), refusedScopes: p.tokenMeta.refusedScopes || [], morePending: p.tokenMeta.morePending || 0 };
       // lane slack-grid-identity: the one stamp rule, as at the token door — an organisation the consent names is learned once
       const st = stampIdentity(rec.identity, p.identity);
       if (st.changed) rec.identity = st.identity;
@@ -669,7 +669,7 @@ function create(engineCtx) {
     if (p.choice.credential) rec.credential = p.choice.credential;
     rec.options = options;
     if (b.name) rec.label = cleanLabel(b.name) || rec.label;
-    rec.auth = { tokenEnc: p.tokenEnc, expiresAt: p.tokenMeta.expiresAt, scopes: p.tokenMeta.scopes, user: p.tokenMeta.user || null, updatedAt: now(), refusedScopes: p.tokenMeta.refusedScopes || [] };
+    rec.auth = { tokenEnc: p.tokenEnc, expiresAt: p.tokenMeta.expiresAt, scopes: p.tokenMeta.scopes, user: p.tokenMeta.user || null, updatedAt: now(), refusedScopes: p.tokenMeta.refusedScopes || [], morePending: p.tokenMeta.morePending || 0 };
     if (p.identity && Object.keys(p.identity).length) rec.identity = { ...p.identity };   // verify r5: whose account this record is, from its first consent
     rec.lastAuthAt = now();
     await store.adapters.update((a) => { a.adapters.push(rec); });

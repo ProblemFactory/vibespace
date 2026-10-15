@@ -1416,7 +1416,10 @@ console.log('§7 the REAL producer (usage-pool-engine recordRateLimitEvent) — 
     ok(schema._billingHow?.persisted === 'session-meta billingHow' && schema._oatRoad?.persisted === 'session-meta oatRoad' && schema._oatGen?.persisted === 'session-meta oatGen'
       && (br.match(/= sessionFromMeta\(meta, \{/g) || []).length === 3, '…the ONE schema says each is persisted, and every boot-restore path rebuilds its session through sessionFromMeta');
     const body = br.slice(br.indexOf('function sessionFromMeta(meta, transportFacts) {'), br.indexOf('\n}\n', br.indexOf('function sessionFromMeta(meta, transportFacts) {')) + 3);
-    const sessionFromMeta = new Function('os', 'poolPinFromMeta', body + '\nreturn sessionFromMeta;')(os, () => null);
+    // sessionFromMeta also spreads the seen marks (lane hook-seen-marks, B-86d3): the REAL restoreMarks + a build version, as
+    // test-seen-marks compiles it; a tree without src/seen-marks.js gets a restorer that restores nothing
+    const restoreMarks = (() => { try { return require(path.join(REPO, 'src/seen-marks.js')).restoreMarks; } catch { return () => ({}); } })();
+    const sessionFromMeta = new Function('os', 'poolPinFromMeta', 'restoreMarks', 'BUILD_VERSION', body + '\nreturn sessionFromMeta;')(os, () => null, restoreMarks, '');
     const nw = sessionFromMeta({ accountId: 'sub-a', billingHow: 'oat', oatRoad: 'env', oatGen: 1790000000123 }, {});
     const old = sessionFromMeta({ accountId: 'sub-a' }, {});
     const junk = sessionFromMeta({ accountId: 'sub-a', billingHow: 7, oatRoad: 'tunnel', oatGen: 'x' }, {});

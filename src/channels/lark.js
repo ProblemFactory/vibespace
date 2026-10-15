@@ -57,6 +57,7 @@
 const crypto = require('crypto');
 const { makeRecord, makeConversation, peerName, validateFacts } = require('../channel-record.js');   // peerName: THE name door (the .197 integration — the D3 app names pass it, lark-search-poll ④g)
 const { ChannelError, retryAfterSeconds, sentSecrets, withoutSent } = require('./index.js');
+const Holds = require('./vendor-hold.js');   // lane lark-send-hold: the ACCOUNT's send hold (the one shape Slack's per-method hold uses)
 const { namelessSentence } = require('../channel-identity.js');   // verify r6: a consent must name its account
 const { createLarkLive, NAMES_WAIT_MS, UNAVAILABLE_WORDS } = require('./live/lark.js');
 // §25 (2026-09-27): THE RENDER RUNGS — a vendor item → the typed block tree
@@ -173,13 +174,60 @@ const UPLOAD_SCOPES = Object.freeze(['im:resource:upload', 'im:resource']);
 // it (the owner's console catalog has no such scope), Lark refuses EVERY consent naming it (20027), and with the pair as
 // one optional group the retry dropped the working V1 too. The consent asks — and every word names — `im:resource` only.
 const UPLOAD_CONSENT_SCOPES = Object.freeze(['im:resource']);
+// lane lark-minutes-scopes (owner 2026-10-15: the app holds every permission — the token lacked 妙记 only because no consent
+// asked): READING A MINUTE and EXPORTING ITS TRANSCRIPT, spelled as Lark's own doc spells them. GET minutes/v1/minutes/:token
+// "开启任一权限即可调用": 查看、创建、编辑及管理妙记文件(minutes:minutes) · 获取妙记的基本信息(minutes:minutes.basic:read) ·
+// 查看妙记文件(minutes:minutes:readonly); GET …/:token/transcript: 导出妙记文件(minutes:minute:download) · 导出妙记转写的文字内容
+// (minutes:minutes.transcript:export), and "“导出妙记文件”权限不再开放，已添加权限的应用不受影响，新应用请使用“导出妙记转写的文字内容”权限。"
+// The consent asks the READ-ONLY form (never the write form) and the export new apps can add (never the closed one).
+const MINUTES_SCOPES = Object.freeze(['minutes:minutes:readonly', 'minutes:minutes.transcript:export']);
+// …and DOWNLOADING ITS RECORDING (the owner, 2026-10-15: 「新权限能下载视频吗」): GET minutes/v1/minutes/:token/media "开启任一权限即可
+// 调用": 导出妙记文件(minutes:minute:download) · 下载妙记的音视频文件(minutes:minutes.media:export), and again "“导出妙记文件”权限不再开放，
+// 已添加权限的应用不受影响，新应用请使用“下载妙记的音视频文件”权限。" — the floor asks the one new apps can add; an app that still holds the
+// closed one has it asked through its own list (below). Its OWN group, pressed before the read's: an app without it keeps 妙记.
+const MINUTES_MEDIA_SCOPES = Object.freeze(['minutes:minutes.media:export']);
+/** Scopes Lark has CLOSED to new apps (its doc: im:resource:upload "该权限已不再维护，不可新增申请", minutes:minute:download
+ *  "权限不再开放") — never in the FLOOR (an app that cannot add one refuses the whole consent, 20027 — lane lark-upload-scope-split's
+ *  lesson); an app whose own list still holds one ("已添加权限的应用不受影响") has it asked like any other enabled permission. */
+const CLOSED_SCOPES = Object.freeze(['im:resource:upload', 'minutes:minute:download']);
+/** lane lark-minutes-scopes (owner 2026-10-15: 「你就不能一次性索要全部权限吗？」): THE CONSENT ASKS EVERY USER PERMISSION THE APP
+ *  HAS ENABLED. Lark's authorize doc names no "everything" form — `scope` is "用户需要增量授予应用的权限" and the developer
+ *  "自主拼接 `scope` 参数" — so the app's list is READ when a consent starts: GET application/v6/applications/me (a tenant
+ *  token; application:application:self_manage or admin:app.info:readonly) answers `app.scopes` with `token_types`
+ *  ("返回用户身份类型user、应用身份类型tenant"), and every `user` one is asked. The hand list (`consentScopes`) is the FLOOR —
+ *  asked whatever the read says, and alone when it cannot be read. Bounded: the doc's "应用最多一次可以请求用户授予 200 个
+ *  `scope`" (CONSENT_SCOPES_MAX), ≤ APP_SCOPES_READ_MAX rows walked, each name in SCOPE_SHAPE, an answer within
+ *  APP_SCOPES_WAIT_MS (a human is waiting for the page). */
+const CONSENT_SCOPES_MAX = 200;
+/** …and ONE CONSENT'S AUTHORIZE URL ≤ CONSENT_URL_MAX_BYTES (MEASURED by 主开发, 2026-10-15: a 200-scope consent — a 5.6 KB URL —
+ *  was answered HTTP 431 by accounts.larksuite.com in the owner's browser, his Lark cookies riding the same request against a
+ *  ~8 KB header limit; 115 scopes = 3.3 KB passed). The app's extras are PAGED: a consent asks the floor + the extras the held
+ *  token lacks, in the app's order, while the URL fits; Lark's grants accumulate ("最新生成的 user_access_token 将包含用户历史上已
+ *  授予的所有权限"), so each Re-authorize asks the next page and the account says how many are left (`morePending`). */
+const CONSENT_URL_MAX_BYTES = 3000;
+/** ONE consent's page of extras: in order, while the floor + the page stay ≤ CONSENT_SCOPES_MAX scopes and the authorize URL
+ *  (`bytesOf(scopes)` = its encoded bytes) ≤ CONSENT_URL_MAX_BYTES. */
+function consentPage(floor, todo, bytesOf) {
+  const page = [];
+  for (const x of todo) {
+    if (floor.length + page.length >= CONSENT_SCOPES_MAX || bytesOf([...floor, ...page, x]) > CONSENT_URL_MAX_BYTES) break;
+    page.push(x);
+  }
+  return page;
+}
+const APP_SCOPES_READ_MAX = 2000;
+const APP_SCOPES_WAIT_MS = 8000;
+const SCOPE_SHAPE = /^[a-z][a-z0-9_.-]{0,63}(?::[a-z0-9_.-]{1,64}){0,4}$/;
 // lane lark-upload-preflight: the upload scopes come right after the wide group — an app that has not enabled one loses
 // only it, never the reactions / profiles / search after it.
 // lane lark-upload-scope-split: the upload group is `im:resource` ALONE (V2 is deprecated — never asked); the ladder is
 // WIDE → im:resource → reactions → job → department → people → p2p → search (one group per press)
+// lane lark-minutes-scopes: the 妙记 groups right after WIDE — the recording's first (an app without it keeps reading 妙记), then
+// the read + transcript; an app that has not enabled them loses only them (the owner's app, which holds everything, keeps
+// them): WIDE → 妙记 media → 妙记 → im:resource → reactions → job → department → people → p2p → search
 // lane lark-threads: the profile scopes join the ordered groups AFTER the reactions — the two field scopes (a job title,
 // a department: cosmetic) next, then reading people (it names who left a chat), the feed's two last
-const OPTIONAL_SCOPE_GROUPS = Object.freeze([Object.freeze([...WIDE_SCOPES]), Object.freeze([...UPLOAD_CONSENT_SCOPES]), Object.freeze([REACTIONS_READ_SCOPES[0]]), Object.freeze([JOB_SCOPE]), Object.freeze([DEPT_SCOPE]), Object.freeze([PEOPLE_SCOPE]), Object.freeze([P2P_READ_SCOPE]), Object.freeze([SEARCH_SCOPE])]);
+const OPTIONAL_SCOPE_GROUPS = Object.freeze([Object.freeze([...WIDE_SCOPES]), Object.freeze([...MINUTES_MEDIA_SCOPES]), Object.freeze([...MINUTES_SCOPES]), Object.freeze([...UPLOAD_CONSENT_SCOPES]), Object.freeze([REACTIONS_READ_SCOPES[0]]), Object.freeze([JOB_SCOPE]), Object.freeze([DEPT_SCOPE]), Object.freeze([PEOPLE_SCOPE]), Object.freeze([P2P_READ_SCOPE]), Object.freeze([SEARCH_SCOPE])]);
 /** …flat (every optional scope — what a narrowed consent may have dropped). */
 const OPTIONAL_SCOPES = Object.freeze(OPTIONAL_SCOPE_GROUPS.flat());
 const REACTIONS_WRITE_SCOPES = Object.freeze(['im:message', 'im:message.reactions:write_only']);
@@ -278,7 +326,8 @@ const UNGATED = Object.freeze([
 const RATE_OK = Object.freeze([
   { id: 'push-names', why: 'the push path must persist the record inside the vendor\'s 3 s ack budget, so a names refusal never fails a message; a RATE refusal pauses the push path\'s lookups for the vendor\'s hint (at most 5 min) instead of one members read per pushed message into the stop' },
   { id: 'consent-user-info', why: 'ONE user_info read inside a human consent: a refusal of any kind ends that consent as nameless, by name; no pass, nothing retried' },
-  { id: 'integration-test', why: 'the integrations panel\'s Test button (a human POST): the refusal\'s words ARE the answer; no pass, nothing retried' },  { id: 'send-parts', why: 'lane channel-send-files: a message sent in PARTS (the text, then one message per file) whose LATER part is refused — a rate refusal included — STOPS the chain: no further request, nothing retried, the receipt names the refusal; a refusal before anything landed is re-thrown to the ladder' },
+  { id: 'consent-app-scopes', why: 'lane lark-minutes-scopes: ONE read of the app\'s own permission list when a human starts a consent: a refusal of any kind (a 429 too) asks the built-in list instead, said once in the log; no pass, nothing retried' },
+  { id: 'integration-test', why: 'the integrations panel\'s Test button (a human POST): the refusal\'s words ARE the answer; no pass, nothing retried' },  { id: 'send-parts', why: 'lane channel-send-files: a message sent in PARTS (the text, then one message per file) whose LATER part is refused — a rate refusal included — STOPS the chain: no further request, nothing retried, the receipt names the refusal; a refusal before anything landed is re-thrown to the ladder; lane lark-send-hold: a RATE refusal also holds the account\'s later sends until the vendor\'s reset (noteSendHold)' },
 ]);
 
 /** lane dc-channels-consent: THE CONSENT ROW (src/channels/index.js validateConsent) — Lark's consent comes back to the
@@ -950,6 +999,13 @@ async function callJson(fetchFn, url, { method = 'GET', headers = {}, body = nul
   return parsed;
 }
 
+/** lane lark-send-hold (B-efa0 LOW): an upload's answer is a few hundred bytes of JSON (`{code, data: {image_key}}`) — read
+ *  BOUNDED at the existing 256 KiB answer ceiling (`readAvatarBytes`: a chunked or lying answer is cancelled past it,
+ *  nothing kept); a fixture answer without a body is read through its own `json()`. */
+async function readAnswerJson(r, what) {
+  if (r && ((r.body && typeof r.body.getReader === 'function') || typeof r.arrayBuffer === 'function')) return JSON.parse((await readAvatarBytes(r, what)).toString('utf8'));
+  return r.json();
+}
 /** lane channel-send-files: ONE multipart upload (im/v1/images · im/v1/files) — the same judge as `callJson`. */
 async function callForm(fetchFn, url, { headers = {}, fields = {}, file = null, what = 'lark upload', signal = null } = {}) {
   const sent = sentSecrets({ headers });
@@ -960,7 +1016,7 @@ async function callForm(fetchFn, url, { headers = {}, fields = {}, file = null, 
   try { r = await fetchFn(url, { method: 'POST', headers: { Accept: 'application/json', ...headers }, body: form, signal: signal || AbortSignal.timeout(60000) }); }
   catch (e) { throw new ChannelError('transport', withoutSent(`${what}: ${(e && e.message) || e}`, sent), { retryable: true }); }
   let parsed = null;
-  try { parsed = await r.json(); } catch { parsed = null; }
+  try { parsed = await readAnswerJson(r, what); } catch (e) { if (e instanceof ChannelError && e.code === 'too-large') throw e; parsed = null; }
   const refused = !r.ok || !parsed || (parsed.code !== undefined && Number(parsed.code) !== 0);
   if (refused) throw typedFailure(r.status, withoutSent(parsed, sent), what, retryAfterSeconds(r.headers));
   return parsed;
@@ -969,6 +1025,9 @@ async function callForm(fetchFn, url, { headers = {}, fields = {}, file = null, 
 const LARK_IMAGE_TYPES = Object.freeze(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/bmp', 'image/tiff']);
 const LARK_IMAGE_MAX = 10 * 1024 * 1024;
 const LARK_FILE_MAX = 30 * 1024 * 1024;
+/** lane lark-send-hold (B-efa0): how long a send 429 that names no reset holds the account's sends. Lark's rate body
+ *  (code 99991400 app-level / 99991403 user-level + msg) names none; the reset rides `x-ogw-ratelimit-reset` (seconds). */
+const SEND_HOLD_DEFAULT_SEC = 30;
 /** PURE: how ONE stored attachment goes to Lark — `{route, msgType, fields, field, keyName}`. */
 function attachmentPlan(f) {
   const mime = String((f && f.mime) || '');
@@ -994,6 +1053,25 @@ function create(record = {}, deps = {}) {
 
   const meter = typeof deps.meter === 'function' ? deps.meter : () => {};   // 2026-09-26: one unit per request SENT
   const pace = typeof deps.pace === 'function' ? deps.pace : async () => {};   // lane R5: awaited BEFORE every request (drain rule 18's bucket)
+  // lane lark-send-hold (B-efa0): THE ACCOUNT'S SEND HOLD. A 429 on any send request (the text, a reply, an upload, a
+  // file's message) holds EVERY later send of this account until the vendor's reset (`x-ogw-ratelimit-reset`, else
+  // SEND_HOLD_DEFAULT_SEC; at most vendor-hold's 15 min); a held send is refused BEFORE any request with the typed
+  // `rate-limited` + `held: true` + `heldUntil` (the outbox WAITS it — never a failed send). In memory; forgotten by the
+  // first success after the reset (a request that left before the 429 and lands after it frees nothing early).
+  const sendHold = Holds.createHolds();
+  const noteSendHold = (e) => {
+    if (!(e instanceof ChannelError) || e.code !== 'rate-limited' || (e.detail && e.detail.held === true)) return;
+    const hint = e.detail && e.detail.retryAfterSec != null ? Number(e.detail.retryAfterSec) : NaN;
+    const s = sendHold.hold('send', Number.isFinite(hint) && hint >= 0 ? hint : SEND_HOLD_DEFAULT_SEC, now());
+    log.warn && log.warn(`[channels] lark ${adapterId}: the vendor rate-limited a send — this account's next sends wait ${s} s`);
+  };
+  const heldRefusal = () => {
+    const wait = sendHold.heldFor('send', now());
+    if (!wait) return null;
+    const until = sendHold.untilOf('send', now());
+    const vendor = vendorNameOf(record);
+    return new ChannelError('rate-limited', `lark send: ${vendor} asked to slow down — nothing was sent; this account's sends wait until ${new Date(until).toISOString()} (${wait} s)`, { retryable: true, detail: { why: 'vendor-hold', held: true, retryAfterSec: wait, heldUntil: until, vendor } });
+  };
   const walks = new Map();      // convId -> { stopAt, pageToken, newest, at, count }; a THREAD walk is keyed `${convId}#${threadKey}`
   const members = new Map();    // convId -> { names: Map, at }
   // lane channels-list-polish: THE ACCOUNT'S PEOPLE MEMO (deps.people → <account>/people.json): who the account IS (`self`,
@@ -1049,7 +1127,9 @@ function create(record = {}, deps = {}) {
   // verify r1: a wide scope that ALSO reads who reacted (im:message:readonly is in REACTIONS_READ_SCOPES — capsOfScopes) is
   // asked only while the reactions option is 'read': "Add and remove only" stays a consent that cannot read reactions
   const wideScopes = () => WIDE_SCOPES.filter((x) => optionOf(record, 'reactions') === 'read' || !REACTIONS_READ_SCOPES.includes(x));
-  const consentScopes = (without = []) => [...SCOPES, ...UPLOAD_CONSENT_SCOPES, ...(optionOf(record, 'reactions') === 'read' ? [REACTIONS_READ_SCOPES[0]] : []), JOB_SCOPE, DEPT_SCOPE, PEOPLE_SCOPE, ...(optionOf(record, 'search') !== 'off' ? [P2P_READ_SCOPE, SEARCH_SCOPE] : []), ...wideScopes()].filter((x) => !(Array.isArray(without) && without.includes(x)));
+  const consentScopes = (without = []) => [...SCOPES, ...UPLOAD_CONSENT_SCOPES, ...(optionOf(record, 'reactions') === 'read' ? [REACTIONS_READ_SCOPES[0]] : []), JOB_SCOPE, DEPT_SCOPE, PEOPLE_SCOPE, ...(optionOf(record, 'search') !== 'off' ? [P2P_READ_SCOPE, SEARCH_SCOPE] : []), ...MINUTES_SCOPES, ...MINUTES_MEDIA_SCOPES, ...wideScopes()].filter((x) => !(Array.isArray(without) && without.includes(x)));
+  // lane lark-minutes-scopes: what the owner's OPTIONS keep out of a consent — never asked back through the app's own list
+  const optedOut = () => [...(optionOf(record, 'reactions') === 'read' ? [] : REACTIONS_READ_SCOPES), ...(optionOf(record, 'search') !== 'off' ? [] : [P2P_READ_SCOPE, SEARCH_SCOPE])];
   const sleep = (ms) => new Promise((r) => { const t = setTimeout(r, ms); if (t.unref) t.unref(); });
 
   /** THIS ACCOUNT's credential binding (2026-09-22): `cluster:<k>` / `own`,
@@ -1398,6 +1478,33 @@ function create(record = {}, deps = {}) {
   const APP_LOOKUPS_PER_CALL = 5;
   const appInflight = new Map();
   const lang = brand === 'lark' ? 'en_us' : 'zh_cn';
+  /** lane lark-minutes-scopes: the USER permissions this app has enabled, read from Lark when a consent starts —
+   *  `{scopes, why}`; `why` names a read that failed (the consent then asks the floor alone). */
+  async function readAppUserScopes() {
+    try {
+      const tt = await tenantToken();
+      await pace(1);   // a vendor request like any other — paced, then metered
+      meter(1);
+      const d = await callJson(fetchFn, `${H.open}/open-apis/application/v6/applications/me?lang=${lang}`, { what: 'lark app scopes', headers: { Authorization: `Bearer ${tt}` }, signal: AbortSignal.timeout(APP_SCOPES_WAIT_MS) });   // gated-inline: consent-app-scopes
+      const rows = d && d.data && d.data.app && Array.isArray(d.data.app.scopes) ? d.data.app.scopes.slice(0, APP_SCOPES_READ_MAX) : null;
+      if (!rows) return { scopes: [], why: 'the answer carried no scope list' };
+      const out = new Set();
+      for (const r of rows) {
+        const x = r && typeof r.scope === 'string' ? r.scope : '';
+        if (!SCOPE_SHAPE.test(x) || !(Array.isArray(r.token_types) && r.token_types.includes('user'))) continue;
+        out.add(x);
+      }
+      return { scopes: [...out], why: null };
+    } catch (e) {   // rate-ok: consent-app-scopes
+      return { scopes: [], why: String((e && e.message) || e).slice(0, 300) };
+    }
+  }
+  /** …within APP_SCOPES_WAIT_MS — a human is waiting for the consent page; a late answer is the floor's. */
+  async function appUserScopes() {
+    let timer = null;
+    const late = new Promise((resolve) => { timer = setTimeout(() => resolve({ scopes: [], why: `no answer in ${APP_SCOPES_WAIT_MS / 1000} s` }), APP_SCOPES_WAIT_MS); if (timer.unref) timer.unref(); });
+    try { return await Promise.race([readAppUserScopes(), late]); } finally { clearTimeout(timer); }
+  }
   async function appNamesFor(appIds) {
     const want = [...new Set((appIds || []).map(String).filter(Boolean))].filter((id) => { const h = APP_NAMES.get(id); return !h || h.weak || now() - h.at >= MEMBERS_TTL_MS; }).slice(0, APP_LOOKUPS_PER_CALL);
     for (const id of want) {
@@ -1516,6 +1623,7 @@ function create(record = {}, deps = {}) {
         parts.push({ ...label, ok: true, vendorMessageId: r.vendorMessageId });
         if (!first) first = r;
       } catch (e) {   // rate-ok: send-parts
+        noteSendHold(e);   // lane lark-send-hold: a part's 429 (an upload's too) holds the account's later sends
         // nothing landed yet: the plain refusal (the ladder reads a rate / lost answer as for any send)
         if (!first) { if (e instanceof ChannelError) { e.detail = { ...(e.detail || {}), parts: [fail(e, label), ...pieces.slice(k + 1).map((q) => ({ part: q.part, ...(q.name ? { name: q.name } : {}), ok: false, code: 'not-sent' }))] }; } throw e; }
         parts.push(fail(e, label));
@@ -1551,6 +1659,9 @@ function create(record = {}, deps = {}) {
       }
     }
     if (!hasSendScopes(readToken().token)) throw new ChannelError('forbidden', 'lark: the held token has no send scopes (im:message + im:message.send_as_user) — reconnect to request them', { retryable: false, detail: { why: 'send-scope-not-granted' } });
+    // lane lark-send-hold: while the vendor's reset runs, NO send request leaves — refused by name (the outbox waits it)
+    const held = heldRefusal();
+    if (held) throw held;
     const files = Array.isArray(attachments) ? attachments.filter((a) => a && Buffer.isBuffer(a.data)) : [];
     if (files.length) return sendWithFiles(convId, { text, replyTo, replyAnchor, idemKey, inThread, placement, files });
     const uuid = uuidFor(idemKey);
@@ -1570,6 +1681,7 @@ function create(record = {}, deps = {}) {
         ? await callJson(fetchFn, `${H.open}/open-apis/im/v1/messages/${encodeURIComponent(String(replyTo))}/reply`, { method: 'POST', what: 'lark reply', headers: { Authorization: `Bearer ${at}` }, body })   // gated-inline: send-reply
         : await callJson(fetchFn, `${H.open}/open-apis/im/v1/messages?receive_id_type=chat_id`, { method: 'POST', what: 'lark send', headers: { Authorization: `Bearer ${at}` }, body: { receive_id: convId, ...body } });   // gated-inline: send
     } catch (e) {
+      noteSendHold(e);   // lane lark-send-hold: a send's own 429 holds the account's later sends
       if (e instanceof ChannelError && e.code === 'transport') throw new ChannelError('transport', `${e.message} — the request left and the answer was lost`, { retryable: true, detail: { ...(e.detail || {}), lost: true, uuid } });
       // lane channel-threads (L6 errors): 230019 the thread is gone, 230071 this group does not support replies in
       // threads (REMEMBERED on the conversation — convCaps narrows `threads.replyInto` for 6 h), 230072 a merged message
@@ -1579,6 +1691,7 @@ function create(record = {}, deps = {}) {
       if (vc === 230072) throw new ChannelError('forbidden', `${e.message} — a merged message cannot be replied to`, { retryable: false, detail: { code: vc, why: 'merged-message' } });
       throw e;
     }
+    sendHold.release('send', now());   // lane lark-send-hold: the first success after the reset forgets the hold
     const m = (d && d.data) || {};
     const senderType = m.sender && m.sender.sender_type ? String(m.sender.sender_type) : null;
     return {
@@ -1766,12 +1879,33 @@ function create(record = {}, deps = {}) {
         const cred = credential();
         if (!cred.values) throw new ChannelError('auth-expired', `cannot start a Lark consent flow: ${cred.why}`, { retryable: false, detail: { needsCredentials: true, missing: cred.missing } });
         const { appId, appSecret } = cred.values;
+        // lane lark-minutes-scopes: EVERY user permission the app has enabled (read now) beyond the floor, never one the
+        // owner's options keep out, a page at a time (consentPage); a read that failed asks the floor alone, said once
+        const app = await appUserScopes();
+        if (app.why) log.warn && log.warn(`[channels] lark: the app's permission list could not be read (${app.why}) — this consent asks the built-in list; granting the app application:application:self_manage lets a consent ask every permission it has enabled`);
+        const floor = consentScopes(), out = optedOut();
+        const enabled = app.scopes.filter((x) => !floor.includes(x) && !out.includes(x));
+        // THE PAGE: the extras the held token lacks (grants accumulate), as many as one authorize URL carries — measured with the
+        // registered callback and a state longer than any the loopback mints
+        const heldNow = new Set(((readToken().token || {}).scopes) || []);
+        const urlOf = (scopes, redirectUri, state) => `${H.accounts}/open-apis/authen/v1/authorize?` + new URLSearchParams({ client_id: appId, redirect_uri: redirectUri, scope: scopes.join(' '), state });
+        const extras = consentPage(floor, enabled.filter((x) => !heldNow.has(x)), (sc) => Buffer.byteLength(urlOf(sc, CONSENT.callbackUrl, 'x'.repeat(64))));
+        const asked = (without = []) => [...consentScopes(without), ...extras.filter((x) => !(Array.isArray(without) && without.includes(x)))];
         return oauth.begin({
           id: adapterId, mode: 'fixed', registeredCallbackUrl: CONSENT.callbackUrl, label: 'Lark',
           successText: 'VibeSpace: Lark connected — you can close this tab.',
-          buildConsentUrl: ({ redirectUri, state, without = [] }) => `${H.accounts}/open-apis/authen/v1/authorize?` + new URLSearchParams({ client_id: appId, redirect_uri: redirectUri, scope: consentScopes(without).join(' '), state }),
+          buildConsentUrl: ({ redirectUri, state, without = [] }) => urlOf(asked(without), redirectUri, state),
           // the ORDERED groups this consent actually names (a group whose scopes the owner's options leave out is not offered)
-          optionalScopes: OPTIONAL_SCOPE_GROUPS.map((g) => g.filter((x) => consentScopes().includes(x))).filter((g) => g.length),
+          // lane lark-minutes-scopes: when the app's own list was read, a group naming a scope that list LACKS goes first (that
+          // is what Lark refuses with 20027 — an app without 妙记 loses only the 妙记 group on the first press), the groups it
+          // covers keep their order after them, and the app's own extras are the LAST group (the least likely cause of a 20027;
+          // a stale read still has its one press)
+          optionalScopes: (() => {
+            const groups = OPTIONAL_SCOPE_GROUPS.map((g) => g.filter((x) => floor.includes(x))).filter((g) => g.length);
+            const listed = new Set(app.scopes);
+            const lacks = (g) => !app.why && g.some((x) => !listed.has(x));
+            return [...groups.filter(lacks), ...groups.filter((g) => !lacks(g)), extras].filter((g) => g.length);
+          })(),
           exchange: async ({ code, redirectUri, cancelled = null, narrowed = [] }) => {
             const d = await callJson(fetchFn, `${H.open}/open-apis/authen/v2/oauth/token`, {   // ungated: consent-exchange
               method: 'POST', what: 'lark token exchange',
@@ -1794,9 +1928,12 @@ function create(record = {}, deps = {}) {
             // cancelled meanwhile (a disconnect / cancel / newer sign-in used to be undone by this write landing late)
             // owner ruling (2026-09-28): a consent the person narrowed (Lark refused an optional scope on its page) carries
             // WHAT it dropped — the account says it by name, never a silent narrower consent
-            const refusedScopes = (Array.isArray(narrowed) ? narrowed : []).filter((x) => OPTIONAL_SCOPES.includes(x) && !(tok.scopes || []).includes(x));
-            if (tokens) await tokens.write(tok, { expiresAt: tok.refreshExpiresAt, scopes: tok.scopes, consent: { cancelled }, refusedScopes });
-            return { ok: true, user: tok.name || tok.openId || null, scopes: tok.scopes, refusedScopes };
+            const refusedScopes = (Array.isArray(narrowed) ? narrowed : []).filter((x) => (OPTIONAL_SCOPES.includes(x) || extras.includes(x)) && !(tok.scopes || []).includes(x));
+            // lane lark-minutes-scopes: the app's enabled permissions this token still lacks (the next pages) — never one this
+            // consent dropped (the refusal names it)
+            const morePending = enabled.filter((x) => !(tok.scopes || []).includes(x) && !refusedScopes.includes(x)).length;
+            if (tokens) await tokens.write(tok, { expiresAt: tok.refreshExpiresAt, scopes: tok.scopes, consent: { cancelled }, refusedScopes, morePending });
+            return { ok: true, user: tok.name || tok.openId || null, scopes: tok.scopes, refusedScopes, morePending };
           },
           onDone: deps.onAuthDone ? (r) => deps.onAuthDone(adapterId, r) : null,
         });
@@ -2361,9 +2498,12 @@ const PEOPLE_GRANT = Object.freeze({ scopes: Object.freeze([PEOPLE_SCOPE]), cons
 /** lane lark-upload-preflight: what unlocks SENDING FILES — ANY one of the upload scopes (the card: "One Re-authorize adds: sending files"). */
 // lane lark-upload-scope-split: `scopes` judge the HELD token (either carries files); `asked` = what a consent can add
 const FILES_GRANT = Object.freeze({ scopes: UPLOAD_SCOPES, asked: UPLOAD_CONSENT_SCOPES, console: true, any: true });
+/** lane lark-minutes-scopes: what unlocks READING 妙记 (a minute, its transcript, its recording) — the card: "One Re-authorize adds:
+ *  reading Minutes and their recordings". */
+const MINUTES_GRANT = Object.freeze({ scopes: Object.freeze([...MINUTES_SCOPES, ...MINUTES_MEDIA_SCOPES]), console: true });
 module.exports = {
-  attachmentPlan, LARK_IMAGE_MAX, LARK_FILE_MAX,
-  kind: KIND, caps, create, manifest: MANIFEST, api: API_ROW, sendGrant: SEND_GRANT, reactionsGrant: REACTIONS_GRANT, feedGrant: FEED_GRANT, peopleGrant: PEOPLE_GRANT, filesGrant: FILES_GRANT, API_ROW, consent: CONSENT, label: LABEL, integration: INTEGRATION, integrationTest, OPTIONS, UNGATED, RATE_OK,
+  attachmentPlan, LARK_IMAGE_MAX, LARK_FILE_MAX, SEND_HOLD_DEFAULT_SEC,
+  kind: KIND, caps, create, manifest: MANIFEST, api: API_ROW, sendGrant: SEND_GRANT, reactionsGrant: REACTIONS_GRANT, feedGrant: FEED_GRANT, peopleGrant: PEOPLE_GRANT, filesGrant: FILES_GRANT, minutesGrant: MINUTES_GRANT, API_ROW, consent: CONSENT, label: LABEL, integration: INTEGRATION, integrationTest, OPTIONS, UNGATED, RATE_OK,
   EGRESS, HOSTS, BRANDS, SCOPES, SEND_SCOPES, FIRST_INGEST_MAX, WALK_TTL_MS, UUID_WINDOW_MS, UUID_MAX, RECONCILE_SLACK_MS, RECONCILE_SCAN_MAX, RENEW_WINDOW_MS,
   toRecord, textOf, mentionsOf, attachmentsOf, typedFailure, avatarUrlOf, AVATAR_ORIGINS, nextToken, uuidFor, hasSendScopes, vendorNameOf,
   SEND_GRANT, blocksOf: Blocks.larkStoredBlocks, sendCapsOf,
@@ -2377,6 +2517,8 @@ module.exports = {
   SEARCH_SCOPE, P2P_READ_SCOPE, OPTIONAL_SCOPE_GROUPS, FEED_GRANT, requiredScopesOf,
   // lane slack-scopes-lark-reauth: every usable scope, asked once (the first optional group)
   WIDE_SCOPES, UPLOAD_SCOPES, UPLOAD_CONSENT_SCOPES, FILES_GRANT,
+  // lane lark-minutes-scopes: 妙记's two scopes + their grant, the closed scopes, the consent's read of the app's own list
+  MINUTES_SCOPES, MINUTES_MEDIA_SCOPES, MINUTES_GRANT, CLOSED_SCOPES, CONSENT_SCOPES_MAX, CONSENT_URL_MAX_BYTES, consentPage, APP_SCOPES_READ_MAX, APP_SCOPES_WAIT_MS, SCOPE_SHAPE,
   // lane lark-p2p: THE ONE search-hit reader (the measured shape) + the probe's value-form words
   readSearchHit, valueFormOf,
   // lane lark-threads (A4): the by-id answer's verdict

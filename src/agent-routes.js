@@ -42,6 +42,8 @@ const { VIBESPACE_NOTICE_HEAD, stashKindOf, withoutNoticeHead } = require('./not
 // our own tags inside it by design) and is never re-judged here.
 const { toAgentText: agentText } = require('./peer-text.js');
 const { hooksLateStale } = require('./hooks-late.js'); // lane hooks-create: a late-hooks note queued for another process of the conversation is dropped unread (PURE)
+const SEEN = require('./seen-marks.js'); // PURE (B-86d3, lane hook-seen-marks): the hook injection's seen marks, persisted when an injection is SENT
+const BUILD_VERSION = (() => { try { return require('../package.json').version; } catch { return ''; } })(); // the build an intro's seen mark names
 const MSG_STASH_LINE_MAX = 400;
 const MSG_STASH_MAX_ENTRIES = 6;
 const MSG_STASH_MAX_BYTES = 6144;
@@ -90,6 +92,9 @@ const taskBlock = (v) => agentText(v == null ? '' : v, { kind: 'block' });
 const taskItemAnswer = (b) => (b && typeof b === 'object' ? { ...b, text: taskLine(b.text), ...(typeof b.detail === 'string' ? { detail: taskBlock(b.detail) } : {}) } : b);
 const taskEntryAnswer = (p) => (p && typeof p === 'object' ? { ...p, note: taskLine(p.note), ...(typeof p.detail === 'string' ? { detail: taskBlock(p.detail) } : {}) } : p);
 const taskShowAnswer = (t, openSorted) => ({ id: t.id, title: taskLine(t.title), archived: !!t.archived, objective: t.objective == null ? t.objective : taskBlock(t.objective), backlog: (openSorted || []).map(taskItemAnswer), progress: (t.progress || []).slice(-10).map(taskEntryAnswer), contextDir: t.contextDir });
+// B-86d3 ② (lane hook-seen-marks): `vibespace-task show --full` lists the WHOLE context-folder index the injection's
+// budgeted one points at — a file name is any member's word, so each path leaves through the belt as a line piece
+const contextIndexAnswer = (ix) => ({ dir: taskLine(ix.dir), files: (ix.files || []).map((f) => ({ path: taskLine(f.path), size: Number(f.size) || 0 })) });
 const taskGroupBrief = (t) => ({ id: t.id, title: taskLine(t.title), archived: !!t.archived, contextDir: t.contextDir ? taskLine(t.contextDir) : null, sessions: (t.sessions || []).length });   // verify r5 F2: a manager's context-dir path is its words too (group-list prints it)
 const msgSendAnswer = (r) => ({ posted: true, group: { id: r.group.id, name: msgName(r.group.name), pair: !!r.group.pair }, pairCreated: !!r.pairCreated, woke: msgNames(r.woke), refused: msgRefusals(r.refused), nextTurn: msgNames(r.later), ...(r.message && typeof r.message.text === 'string' ? { chars: cliText.chars(r.message.text) } : {}) });
 // lane cli-one-text-arg: chars = the STORED message, counted (code points) — vibespace-msg send / dispatch echo it as sent: N characters
@@ -317,7 +322,7 @@ function stopNudgeReason(T = {}, extra = '') {
   if (T.task) steps.push('if you completed meaningful work, log it — vibespace-task progress "summary"');
   return (extra ? extra + '\n' : '') + 'VibeSpace bookkeeping before you stop (your board state is stale; this note is from VibeSpace, not from the user): ' + steps.map((t, i) => `(${i + 1}) ${t}`).join('; ') + '. ' + STOP_NUDGE_CLOSE;
 }
-function setupAgentRoutes({ app, activeSessions, tasks, sessionStatus, SessionStatusManager, userTodos, sessionStatusKey, serverSetting, spendGuard = null, integrationEnabled, scheduleCtxSync, remoteCtxBaseFor, readUserState, getJobs, deliver, getPublishedPages = () => null, getChannels = () => null, getGroups = () => null, getTouches = () => null, getRecordClear = () => null, getSendUserInput = () => null }) {
+function setupAgentRoutes({ app, activeSessions, tasks, sessionStatus, SessionStatusManager, userTodos, sessionStatusKey, serverSetting, spendGuard = null, integrationEnabled, scheduleCtxSync, remoteCtxBaseFor, readUserState, getJobs, deliver, getPublishedPages = () => null, getChannels = () => null, getGroups = () => null, getTouches = () => null, getRecordClear = () => null, getSendUserInput = () => null, getSessionMetaStore = () => null }) {
   // THE NUMBERED LIST EACH SESSION WAS SHOWN (2026-09-22): `vibespace-task
   // backlog` prints 1-based numbers over GET task's sortBacklog order, and a
   // mutating verb run LATER (`backlog-done 3`) must mean the item that was
@@ -338,6 +343,21 @@ function setupAgentRoutes({ app, activeSessions, tasks, sessionStatus, SessionSt
     const live = new Set();
     for (const [sid, sess] of activeSessions) { live.add(`webui:${sid}`); try { live.add(sessionStatusKey(sess, sid)); } catch { } }
     return (k) => live.has(k);
+  };
+  // THE SEEN MARKS ARE WRITTEN WHEN AN INJECTION IS SENT (B-86d3 ①, lane hook-seen-marks): the two hook routes call this
+  // beside their answer — never while a payload is assembled (a producer that waits moves no mark) — and the session
+  // meta gets `seenMarks` (src/seen-marks.js marksOf) only when they differ from the last write; boot-restore's
+  // sessionFromMeta puts them back, so a restart re-sends only what changed. A session with no meta file (no sockName,
+  // a test fake) keeps today's in-memory marks.
+  const persistSeenMarks = (s, key) => {
+    let ms = null;
+    try { ms = getSessionMetaStore(); } catch { ms = null; }
+    if (!s || !s.sockName || !ms || typeof ms.writeSessionMeta !== 'function') return;
+    const marks = SEEN.marksOf(s, BUILD_VERSION, key);   // key: the lite diff snapshots keep this session's own items
+    const k = JSON.stringify(marks);
+    if (s._seenMarksKey === k) return;
+    try { ms.writeSessionMeta(s.sockName, { ...(ms.readSessionMeta(s.sockName) || {}), seenMarks: marks }); s._seenMarksKey = k; }
+    catch (e) { console.warn(`[inject] ${s.sockName}: the seen marks were not persisted — a restart repeats this delivery: ${(e && e.message) || e}`); }
   };
 // ── vibespace-ask / vibespace-status — src/agent-routes/status.js (the status / todos family, decoupling wave 2b)
 require('./agent-routes/status.js').register(app, { activeSessions, sessionStatus, userTodos, sessionStatusKey, clearAsAgent, agentSession, toolOn, toolDisabled, bookkept, handoverItems: (b) => handoverItems(b) }); // lane foryou-attachments: vibespace-ask --artifact reads the hand-over's argument shape
@@ -549,6 +569,7 @@ app.get('/api/agent/task-context', (req, res) => {
           // instead of re-injecting the whole group (2.113.0).
           s._groupSnap[g.id] = tasks.snapshotForDiff(g.id);
         }
+        s._marksRestored = false;   // B-86d3: this delivery carried every group whole — nothing left to name as unrepeated
       }
     } else if (honoursSessionStart(s) && !s._toolsIntroSeen) {
       // No INJECTABLE group (none at all, or every belonged group has
@@ -609,6 +630,7 @@ app.get('/api/agent/task-context', (req, res) => {
         if (pmText) context = context ? context + '\n\n' + pmText : pmText;
       }
     } catch { }
+    persistSeenMarks(s, key);   // B-86d3: the marks this answer moved, written as it is sent
     res.json({ success: true, context: capInline(context, injectGroups.length > 1) });
   } catch (e) { res.status(404).json({ error: e.message }); }
 });
@@ -719,11 +741,17 @@ app.get('/api/agent/prompt-context', (req, res) => {
       const firstGroups = [];   // never-delivered groups → full context below
       const changedDiffs = [];  // updated groups delivering as a DELTA
       const updatedFulls = [];  // updated groups needing a FULL re-delivery
+      const restoredSame = [];  // B-86d3: groups the restored seen marks say are unchanged — named once, not repeated
       for (const g of injectGroups) {
         const seenAt = s._groupSeenAt[g.id];
         // User-written contextDir files don't bump updatedAt — a signature diff
         // (path/size/mtime of the indexed files) is how we notice them.
         const sig = g.contextDir ? tasks.contextDirSignature(g.contextDir) : '';
+        // B-86d3: RESTORED marks — a held folder digest becomes the live signature when the folder is unchanged; a restored
+        // LITE snapshot serves the diff unless the folder changed (the file diff needs the old signature itself) or it was
+        // cut for another key — then that group is re-sent whole, as a session without a snapshot always was
+        if (SEEN.isSigDigest(s._ctxSig[g.id])) s._ctxSig[g.id] = SEEN.liveSig(s._ctxSig[g.id], sig);
+        if (s._groupSnap[g.id] && s._groupSnap[g.id].of !== undefined && (s._groupSnap[g.id].of !== key || SEEN.isSigDigest(s._ctxSig[g.id]))) delete s._groupSnap[g.id];
         const hadSig = s._ctxSig[g.id] !== undefined;
         const ctxChanged = hadSig && s._ctxSig[g.id] !== sig;
         // Gate on CONTENT changes only (title/objective/activity/
@@ -764,6 +792,7 @@ app.get('/api/agent/prompt-context', (req, res) => {
           // no contextDir baseline recorded yet — set it now WITHOUT re-injecting.
           s._ctxSig[g.id] = sig;
         }
+        if (s._marksRestored && !metaChanged && !ctxChanged) restoredSame.push(g);
         // Seen but no snapshot yet (session predates 2.113.0 in memory): leave
         // _groupSnap unset — the next change falls back to full delivery once,
         // which records the snapshot.
@@ -821,6 +850,14 @@ app.get('/api/agent/prompt-context', (req, res) => {
         if (newFullGroups.length) kinds.push(`the FULL context for group(s) NEW to this session: ${newFullGroups.map(name).join(', ')}`);
         // the manifest HEADS the unit a held report's cut trims (verify r1: pushed apart, it took the cut pointer's room)
         blocks.unshift(`<vibespace-delivery-note>This delivery contains, in order: ${kinds.join('; ')}. ${tasks._persistRescueLine()}</vibespace-delivery-note>`);
+      }
+      // THE FIRST PROMPT AFTER A RESTART (B-86d3): the groups the restored marks say are unchanged are not repeated —
+      // ONE line names them, decided BEFORE the blocks (a re-delivery beside it may take the cut, never this line); a
+      // session whose meta held no marks has none here and gets the full context, as before
+      if (s._marksRestored) {
+        s._marksRestored = false;
+        const note = restoredSame.length ? tasks.renderUnchangedNote(restoredSame.map((g) => g.id), { multi }) : '';
+        if (note && fits(note)) parts.push(note);
       }
       // the report's held room (B-c198): a re-delivery that would take it gives up its tail here, never the report
       const blockCap = INLINE_CAP - INLINE_TAIL_MARGIN - committed() - 2;
@@ -1002,6 +1039,7 @@ app.get('/api/agent/prompt-context', (req, res) => {
     } catch (e) { console.warn('[groups] next-turn report skipped:', e && e.message); }
     // Stay INLINE — capInline (module scope; the one cap both hook payloads use)
     const ctx = capInline(outParts.join('\n\n'), injectGroups.length > 1);
+    persistSeenMarks(s, key);   // B-86d3: the marks this answer moved, written as it is sent
     res.json({ success: true, context: ctx });
   } catch (e) { res.json({ success: true, context: '' }); }
 });
@@ -1160,7 +1198,9 @@ app.get('/api/agent/task', (req, res) => {
     const you = sessionStatusKey(hit[0], hit[1]);
     const openSorted = sortBacklog((t.backlog || []).filter((b) => b.status === 'open'));
     rememberBacklogListing(`${you}|${gid}`, openSorted.map((b) => b.id)); // the numbers this session now holds
-    res.json({ success: true, you, task: taskShowAnswer(t, openSorted) });   // verify r4 F1: every peer-written field through the belt
+    const ctxBaseOf = req.query && req.query.full === '1' ? remoteCtxBaseFor(hit[0]) : null;
+    const ix = req.query && req.query.full === '1' ? tasks.contextIndexOf(gid, ctxBaseOf ? ctxBaseOf(gid) : null) : null;   // B-86d3 ②: --full lists every file
+    res.json({ success: true, you, task: taskShowAnswer(t, openSorted), ...(ix ? { contextIndex: contextIndexAnswer(ix) } : {}) });   // verify r4 F1: every peer-written field through the belt
   } catch (e) { res.status(404).json({ error: e.message }); }
 });
 app.post('/api/agent/task-progress', (req, res) => {
@@ -2098,7 +2138,9 @@ async function composeCallers(req, res, eng, s, id, b) {
 // already decided / sending / of unknown outcome is 409 `not-withdrawable`.
 app.post('/api/agent/channels/proposals/:id/withdraw', async (req, res) => {
   // verify r2 (round 1 LOW 6): a BROWSER here (the owner's cookie / a fetch from a page, no agent token) is
-  // refused BY NAME — withdraw is the drafting agent's verb; the user rejects from the card — not "missing token"
+  // refused BY NAME — withdraw is the drafting agent's verb; the user rejects from the card — not "missing token".
+  // A ROLE rule, not an origin rule (the owner's own tab is refused too): where a write came FROM is judged once, at
+  // the auth layer (src/write-origin.js — lane owner-write-origin; test-auth ⑥ declares this reader)
   if (!/^Bearer\s+\S/i.test(String(req.headers.authorization || '')) && !(req.body && req.body.token) && (req.headers.cookie || req.headers['sec-fetch-site'])) return res.status(403).json({ error: 'only the agent that proposed it can withdraw a proposal — reject it from the card instead', code: 'not-yours' });
   const who = msgCaller(req, res);
   if (!who) return;
@@ -2225,7 +2267,7 @@ app.get('/api/agent/channels/watches', (req, res) => {
 // every await), the fence, the budget, the ONE fetch, the belt and the audit ring. A write under "ask each" and every
 // sensitive call is a proposal the user approves (the frozen bytes run). The call row rides the §26 witness.
 const rawApi = () => { const c = channelsEngine(); return c && c.rawApi ? c.rawApi : null; };
-const API_STATUS = Object.freeze({ api_not_granted: 403, api_tier_read: 403, api_pending: 202, api_host_refused: 400, api_header_refused: 400, api_bad_request: 400, api_body_too_large: 413, api_budget: 429, api_redirect_refused: 502, api_cred_expired: 409, api_cred_unsupported: 409, api_vendor_unreachable: 502, 'not-found': 404 });
+const API_STATUS = Object.freeze({ api_not_granted: 403, api_tier_read: 403, api_pending: 202, api_host_refused: 400, api_header_refused: 400, api_bad_request: 400, api_body_too_large: 413, api_budget: 429, api_redirect_unjudged: 502, api_redirect_loop: 502, api_cred_expired: 409, api_cred_unsupported: 409, api_vendor_unreachable: 502, 'not-found': 404 });
 const apiAnswer = (res, r) => {
   const { touch, ...out } = r || {};
   if (out.ok) return res.json(out);
@@ -2638,4 +2680,4 @@ function browserSetLine(set) {
 module.exports = {
   turnIsUserInitiated, GROUP_REPORT_BUDGET, setupAgentRoutes, renderMsgStash, drainStashUnderCap, drainNotifsUnderCap, roomUnderCap, INLINE_CAP, INLINE_TAIL_MARGIN, JOBS_DIGEST_BUDGET, MSG_STASH_LINE_MAX, MSG_STASH_MAX_ENTRIES, MSG_STASH_MAX_BYTES, sessionToolsIntro, fileToolsOf, browserIntroLine, AGENT_DOC_TOPICS, browserSetLine, stopNudgeReason, STOP_NUDGE_CLOSE, BROWSER_DIALOG_LINE,
   msgPeerRow, msgGroupsAnswer, msgReadAnswer, msgSendAnswer, msgGroupOpAnswer, msgRefusalAnswer, dispatchAnswer,   // lane peer-census verify r1 / r2: the msg answers' doors, the refusal's too (test-peer-text-census drives them)
-  taskShowAnswer, taskItemAnswer, taskEntryAnswer, taskGroupBrief };   // verify r4 F1: the task answers' doors
+  taskShowAnswer, taskItemAnswer, taskEntryAnswer, taskGroupBrief, contextIndexAnswer };   // verify r4 F1: the task answers' doors

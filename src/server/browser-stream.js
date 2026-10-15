@@ -151,7 +151,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
       // verify r1: seeded from the NOTE on the keeper's browser record (a server restart forgets neither the agent's choice nor the baseline)
       let seed = null; if (keeper && typeof keeper.viewportNoteFor === 'function') { try { seed = FIT.fitStateFromNote(keeper.viewportNoteFor(target)); } catch { seed = null; } }
       fs = { target, sessionId, applied: seed && seed.applied ? { ...seed.applied, viewerId: null, rule: null, at: 0 } : null, baseline: (seed && seed.baseline) || null, agent: (seed && seed.agent) || null, floorW: (seed && seed.floorW) || FIT.FIT_MIN_W, pending: null, prevOwn: null, ownDone: null, restoreTimer: null, failed: null, restoreDeferredSaid: false,
-        fixed: (seed && seed.fixed) || null }; // lane launch-picture-size: the session's fixed picture size (the note keeps it)
+        fixed: (seed && seed.fixed) || null, fixedBy: (seed && seed.fixedBy) || null }; // lane launch-picture-size: the session's fixed picture size (the note keeps it; lane browser-viewport-answer: and who pinned it)
       fitStates.set(key, fs);
     }
     fs.target = target; fs.sessionId = sessionId; return fs;
@@ -914,7 +914,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
    *  note (a restart keeps it, the next launch of the browser forgets it); a watched relay re-fits at once (every viewer
    *  letterboxes the same picture); nobody watching ⇒ the page takes the size NOW (what the agent sees), and `null` puts
    *  back the size it had before our first set. Never starts a browser (keeper.setViewportFor's rule). */
-  async function setFixed({ sessionId, profileRef = '', fixed = null } = {}) {
+  async function setFixed({ sessionId, profileRef = '', fixed = null, by = 'user' } = {}) {
     const sid = String(sessionId || '');
     const f = sessionFacts(sid);
     if (!f) return { ok: false, code: 'not-found', error: `no such live session ${JSON.stringify(sid)}` };
@@ -928,6 +928,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     const fs = fitStateFor(key, sid, target);
     const fx = FIT.fixedOf(fixed);
     fs.fixed = fx;
+    fs.fixedBy = fx ? (by === 'agent' ? 'agent' : 'user') : null; // lane browser-viewport-answer: the agent's answer names who pinned it and the door
     if (fx && fs.agent) { log.log?.(`[browser-live] ${key}: the picture size is fixed at ${fx.w}×${fx.h} — the agent's own ${fs.agent.width}×${fs.agent.height} is set aside`); fs.agent = null; } // the latest explicit act
     if (fs.restoreTimer) { clearTimeout(fs.restoreTimer); fs.restoreTimer = null; }
     persistFit(fs);
@@ -945,6 +946,65 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     fs.applied = fx ? { width: fx.w, height: fx.h, viewerId: null, rule: 'fixed', at: now() } : null;
     persistFit(fs);
     return { ok: true, fixed: fx, applied: 'now' };
+  }
+  /** lane browser-viewport-answer: the (session, browser) an agent's set names — the target, its relay key — or a typed refusal. */
+  function setTargetOf(sessionId, profileRef = '') {
+    const sid = String(sessionId || '');
+    const f = sessionFacts(sid);
+    if (!f) return { ok: false, code: 'not-found', error: `no such live session ${JSON.stringify(sid)}` };
+    if (f.host) return { ok: false, code: 'unsupported-host', error: `this browser runs on host ${JSON.stringify(f.host)} — its page is not read from here` };
+    let set = null, profiles = [];
+    if (keeper) { try { set = keeper.setFor(f.browserKey); profiles = keeper.list().profiles; } catch (e) { return { ok: false, code: 'unavailable', error: `the browser keeper is unreadable (${e && e.message})` }; } }
+    const target = S.streamTargetFor({ browserKey: f.browserKey, set, profileRef: String(profileRef || ''), envPairs: f.envPairs, profiles });
+    if (!target.ok) return { ok: false, code: target.code, error: target.error };
+    return { ok: true, sid, target, key: relayKeyFor(sid, target) };
+  }
+  /** The page-size facts of that browser WITHOUT making a state for it: the bridge's, else the keeper's note. */
+  function fitFactsOf(t) {
+    const fs = fitStates.get(t.key);
+    if (fs) return fs;
+    let seed = null; if (keeper && typeof keeper.viewportNoteFor === 'function') { try { seed = FIT.fitStateFromNote(keeper.viewportNoteFor(t.target)); } catch { seed = null; } }
+    return seed;
+  }
+  /** lane browser-viewport-answer (the 2026-10-14 ruling 「a pin RULES」): judged BEFORE an agent's raw `set viewport|device`
+   *  runs — a pinned picture size (the user's Pin size…, or the agent's own `vibespace-browser size`) means it does not run.
+   *  → FIT.agentSetRuling's `{ruledBy:'fixed', by, width, height, text}` | null. Reads only; never starts anything. */
+  function viewportRuling({ sessionId, profileRef = '' } = {}) {
+    const t = setTargetOf(sessionId, profileRef);
+    if (!t.ok) return null;
+    const fx = fitFactsOf(t);
+    return fx ? FIT.agentSetRuling({ fixed: fx.fixed, fixedBy: fx.fixedBy }) : null;
+  }
+  /** lane browser-viewport-answer (B-6dae ①): THE ANSWER of an agent's own `set viewport|device` — the page's CSS viewport
+   *  read AFTER it (`ran`) or instead of it (a pin ruled; `paused` = the keeper refused it browser_paused: the user drives),
+   *  over the tab the relay shows (else the browser's page), ONE line (FIT.agentSetAnswer) and ONE trace row
+   *  (`agent-viewport`, to the recorder's taps only — never a viewer's "Running a command"). Never throws. */
+  async function agentViewport({ sessionId, profileRef = '', argv = [], ran = true, paused = false } = {}) {
+    const asked = FIT.agentSetAsked(argv);
+    const t = setTargetOf(sessionId, profileRef);
+    let got = null, ruling = paused ? { ruledBy: 'holder' } : null;
+    if (!t.ok) got = { error: t.error || t.code };
+    else {
+      if (!ran && !paused) { const fx = fitFactsOf(t); ruling = fx ? FIT.agentSetRuling({ fixed: fx.fixed, fixedBy: fx.fixedBy }) : null; }
+      const relay = relays.get(t.key) || null;
+      let r = null;
+      if (keeper && typeof keeper.viewportFor === 'function') { try { r = await keeper.viewportFor(t.target, { activeUrl: relay ? (relay.activeUrl || lastUrlOf(relay)) : '' }); } catch (e) { r = { ok: false, error: String(e && e.message) }; } }
+      got = r && r.ok ? { width: Number(r.clientWidth), height: Number(r.clientHeight) } : { error: String((r && r.error) || 'unreadable') };
+    }
+    const ans = FIT.agentSetAnswer({ asked, got, ruling, ran });
+    if (t.ok) tapAgentViewport(t.key, ans);
+    return { ok: true, ...ans };
+  }
+  let viewportActSeq = 0;
+  function tapAgentViewport(key, ans) {
+    const relay = relays.get(key);
+    if (!relay || !relay.taps.size) return 0;
+    const params = FIT.agentSetTraceParams(ans);
+    const id = `r-vs-viewport-${++viewportActSeq}`; const t = now();
+    const cmd = { type: 'command', action: 'agent-viewport', id, params: { action: 'agent-viewport', id, ...params }, timestamp: t };
+    const res = { type: 'result', action: 'agent-viewport', id, success: ans.applied !== false, data: { ...params }, ...(ans.applied === false ? { error: ans.line } : {}), duration_ms: 0, timestamp: t };
+    for (const fn of [...relay.taps]) { try { fn(cmd, null, relay); fn(res, null, relay); } catch (e) { log.warn?.(`[browser-live] ${relay.key}: tap failed — ${e && e.message}`); } }
+    return 1;
   }
   /** Nobody visible: after RESTORE_AFTER_MS (a reload, a tab switch, a desktop flip come back first) the page goes
    *  back to the size it had before our first fit — never over the agent's own choice, never a browser started. */
@@ -1618,6 +1678,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
   // BROWSE YOURSELF (B-6ae8): the keeper asks the cross-relay viewer fact too (is a window of the user's still live)
   try { keeper?.setViewerAlive?.(viewerAlive); } catch { /* optional */ }
   return { handleUpgrade, closeForSession, viewerCount, stats, shutdown, setFixed, STREAM_PATH: S.STREAM_PATH, _relays: relays, _fitStates: fitStates,
+    viewportRuling, agentViewport, // lane browser-viewport-answer: a pin rules an agent's raw set; the set answers with the page's size + one trace row
     tap, tapHuman, broadcastTo, TAP_FPS, viewerAlive, // P5: the recorder's seam (+ BROWSE YOURSELF: the user's own relay)
     activeTargetsFor, tapDialogAct }; // lane browser-stuck: the watch's scope (the tab each relay shows) + the agent's dialog act on the trace
 }

@@ -11,10 +11,11 @@
 // eat those rows — and never another home: the home-rename self-heal would rewrite every store), and every one-shot
 // migration reads as applied (production ran them long ago; `repoDir` names the registry they are read from).
 // writeBootShape({ dataDir, homeDir, repoDir, scale = 1 }) → { rows, bytes } — deterministic for a given scale.
+// only: 'ledger' writes the usage ledger's shards alone (the same rows) — test-ledger-rebuild's fixture (B-748f).
 import fs from 'node:fs';
 import path from 'node:path';
 
-export function writeBootShape({ dataDir: D, homeDir: H, repoDir = null, scale: S = 1, now: NOW = Date.now() }) {
+export function writeBootShape({ dataDir: D, homeDir: H, repoDir = null, scale: S = 1, now: NOW = Date.now(), only = null }) {
   let seed = 12345;
   const rnd = () => { seed = (seed + 0x6D2B79F5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; // mulberry32 (an LCG in doubles degenerates)
   const ri = (n) => Math.floor(rnd() * n), pick = (a) => a[ri(a.length)];
@@ -45,6 +46,7 @@ export function writeBootShape({ dataDir: D, homeDir: H, repoDir = null, scale: 
     const want = mb * 1e6 * S, est = Math.max(1, Math.round(want / 485));
     rows.ledger += ndjson(`usage-history/events-${name}.ndjson`, want, (n) => ({ rid: 'req_' + hex(24), mid: 'msg_' + hex(24), ts: Math.round(t0 + (t1 - t0) * Math.min(1, Math.max(0, (n + (ri(10) ? 0 : ri(400) - 200)) / est))), sid: pick(SIDS), be: 'claude', model: pick(MODELS), acct: pick(ACCTS), pool: pick(POOLS), atype: 'subscription', aname: 'Account ' + hex(3), mode: null, host: null, cwd: pick(CWDS), wcwd: pick(CWDS) + '/wt-x', origin: 'terminal', agent: 'general-purpose-' + hex(7), i: 1 + ri(400), cw5: ri(5) ? 0 : ri(30000), cw1: 0, cr: ri(200000), o: ri(3000), tier: 'standard' }));
   }
+  if (only === 'ledger') return { rows, bytes };
   rows.otel = ndjson('usage-history/otel-truth.ndjson', 163.5e6 * S, (n) => ({ event: 'api_request', ts: NOW - 29 * DAY + Math.round(n * 29 * DAY / (353e3 * S)), rid: 'req_' + hex(24), sid: pick(SIDS), orgUuid: uuid(), accountUuid: uuid(), email: 'someone' + ri(9) + '@example.org', model: pick(MODELS), i: ri(400), o: ri(3000), cr: ri(200000), cw: ri(30000), costUsd: rnd(), cliVersion: '2.1.288', acct: pick(ACCTS), acctKnown: true, attributed: pick(ACCTS), agreed: true }));
   const cursors = {}; for (let i = 0; i < Math.round(12543 * S); i++) cursors[path.join(pick(PROJ), uuid() + '.jsonl')] = { offset: ri(5e6), lastRid: 'req_' + hex(24) };
   w('usage-history/_cursors.json', JSON.stringify(cursors));

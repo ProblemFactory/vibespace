@@ -746,6 +746,11 @@ function createChannelRegistry({ channelSettings } = {}) {
       const g = mod.peopleGrant;
       if (!g || !Array.isArray(g.scopes) || !g.scopes.length || !g.scopes.every((x) => typeof x === 'string' && x) || typeof g.console !== 'boolean') throw new Error(`channel adapter '${kind}': peopleGrant must be {scopes: [non-empty strings], console: boolean}`);
     }
+    // lane lark-minutes-scopes: what unlocks READING MEETING MINUTES (the card's one-Re-authorize line) — {scopes, console}
+    if (mod.minutesGrant !== undefined) {
+      const g = mod.minutesGrant;
+      if (!g || !Array.isArray(g.scopes) || !g.scopes.length || !g.scopes.every((x) => typeof x === 'string' && x) || typeof g.console !== 'boolean') throw new Error(`channel adapter '${kind}': minutesGrant must be {scopes: [non-empty strings], console: boolean}`);
+    }
     if (vendor) validateVendor(kind, mod);
     mods.set(kind, mod);
     if (vendor) vendorKinds.add(kind);

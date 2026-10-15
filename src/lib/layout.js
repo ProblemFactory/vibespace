@@ -6,7 +6,8 @@ import { isTransientWindowType } from './window-types.js';
 import { legacyIdFor } from './agent-meta.js';
 import { wordlessTitleOf } from '../record-clear.js'; // PURE: the title a layout RECORD keeps for a window drawn from a record's words (lane-redact verify r7)
 import { chainSyncKey, ratioDiffers, heldRatio, releaseRatio, withoutMembers, restoreVerdict } from './chain-layout.js'; // agent browser P7 (§4.6): the sync key carries the layout; the ratio applies in place (unless a local divider drag holds it — v2 verify r1 ①)
-import { writerClass, deferKey, deferKeysOf, releaseNext, noteApplied, chromeToApply, TAKEN_WHOLE } from './layout-model.js'; // B-4767: the deferred records — one slot per desktop AND writer class, released in arrival order (PURE)
+import { writerClass, deferKey, deferKeysOf, releaseNext, noteApplied } from './layout-model.js'; // B-4767: the deferred records — one slot per desktop AND writer class, released in arrival order (PURE)
+import { applyForViewport, arrangementFor } from './desktop-record.js'; // THE LAYER LAW's read half (design q-039 P0, §6b item 10): every read site of a record takes this page's subsets of it here (PURE)
 
 // The MEMBERS of a chain (host first) — NOT a sync key (chainSyncKey is): two
 // records with the same members differ only in layout and are applied in place.
@@ -315,9 +316,11 @@ class LayoutManager {
     // kept the old size; its next desktop switch then captured that stale
     // size and broadcast it back, erasing the first client's resize (and its
     // localStorage) fleet-wide — a residual snap-back route after 2.252.1.
-    if (msg.state) {
-      if (msg.state.taskbarHeight) this._applyTaskbarHeight(msg.state.taskbarHeight);
-      this._applyToolbarState(msg.state);
+    // The bars are CHROME (the layer law): a desktop-class record's, on a desktop page — a phone's bars are its own.
+    const bars = msg.state ? applyForViewport(this._viewport(), msg.state, { source: 'remote', writer: writerClass(msg) }).chrome : null;
+    if (bars) {
+      if (bars.taskbarHeight) this._applyTaskbarHeight(bars.taskbarHeight);
+      this._applyToolbarState(bars);
     }
     const receivedAt = msg.receivedAt ?? Date.now(); // THE HELD MOVE (verify r2): a record cannot know a move this page made after it arrived (a re-read's horizon may be 0: a page that never saved — verify r3 ②)
     if (dm && msg.desktopId) {
@@ -337,9 +340,9 @@ class LayoutManager {
     // "ignore this record's arrangement" — a phone's record carries the held desktop arrangement verbatim (belt 1), so a
     // RE-READ (the reconnect / outage resync, like the boot) takes it whole: it is the truth on disk and the page's own
     // newer acts are kept by the held-act witnesses (phone-arrangement-verify F1: the re-read dropped another desktop's
-    // drag and this page's next save wrote its stale boxes over it, on disk and on that desktop)
-    const membershipOnly = writerClass(msg) === 'phone' && !this.app.isMobile; // THE ONE writer predicate — the deferred slot's too (layout-model.js)
-    this._applyRemoteState(msg.state, { closeOnlyWired: !!msg.resync, receivedAt, membershipOnly, from: msg });
+    // drag and this page's next save wrote its stale boxes over it, on disk and on that desktop). The layer law's table
+    // says it (desktop-record.js applyForViewport): a desktop takes a live phone record's MEMBERSHIP only.
+    this._applyRemoteState(msg.state, { closeOnlyWired: !!msg.resync, receivedAt, writer: writerClass(msg) }); // THE ONE writer predicate — the deferred slot's too (layout-model.js)
     if (dm && msg.desktopId) {
       dm.noteWire(msg.desktopId, msg.state); // the record this desktop was last seen as on the wire
       // …and the held record of the desktop on show follows it (the view's base: the next save merges the page's
@@ -350,9 +353,12 @@ class LayoutManager {
   }
 
   // Apply remote state: diff against local windows, update only what changed
-  _applyRemoteState(state, { closeOnlyWired = false, receivedAt = Date.now(), membershipOnly = false, from = null } = {}) {
+  _applyRemoteState(state, { closeOnlyWired = false, receivedAt = Date.now(), writer = null } = {}) {
     if (!state) return;
-    const chrome = chromeToApply(this._viewport(), from); // §6b guard 10's READ half: a phone applies no record's sidebar / grid (inc-mv8l2frb-xkqm)
+    // THE LAYER LAW's read half (§6b item 10): this page's subsets of the record — a phone takes the membership and a
+    // desktop's minimize (guard 5), never its sidebar, bars, grid or boxes (inc-mv8l2frb-xkqm); a desktop takes no live
+    // phone record's arrangement or chrome (guard 10)
+    const layers = applyForViewport(this._viewport(), state, { source: 'remote', writer });
     this._restoring = true;
     this._applying = true;
     let heldKept = false; // a local divider drag kept over the record (v2 verify r1 ①) — re-sent once below
@@ -364,29 +370,32 @@ class LayoutManager {
     const heldChain = new Set(this._heldChainIds(state));
     const chainHeld = (tabs) => Array.isArray(tabs) && tabs.some((id) => heldChain.has(String(id)));
     try {
-      // Grid
-      if (state.grid && chrome.grid) {
+      // Grid (a desktop's arrangement)
+      const grid = layers.arrangement && layers.arrangement.grid;
+      if (grid) {
         const cur = this.app.wm.grid;
-        if (!cur || cur.rows !== state.grid.rows || cur.cols !== state.grid.cols) {
-          this.app.wm.setGrid(state.grid.rows, state.grid.cols);
+        if (!cur || cur.rows !== grid.rows || cur.cols !== grid.cols) {
+          this.app.wm.setGrid(grid.rows, grid.cols);
         }
       }
-      // Sidebar
-      if (state.sidebarOpen !== undefined && chrome.sidebarOpen && state.sidebarOpen !== this.app.sidebar.isOpen) {
-        this.app.sidebar.toggle(state.sidebarOpen);
+      // Sidebar (chrome)
+      const chrome = layers.chrome;
+      if (chrome && chrome.sidebarOpen !== undefined && chrome.sidebarOpen !== this.app.sidebar.isOpen) {
+        this.app.sidebar.toggle(chrome.sidebarOpen);
       }
       // Taskbar height
-      if (state.taskbarHeight) {
-        this._applyTaskbarHeight(state.taskbarHeight);
+      if (chrome && chrome.taskbarHeight) {
+        this._applyTaskbarHeight(chrome.taskbarHeight);
       }
-      this._applyToolbarState(state);
+      if (chrome) this._applyToolbarState(chrome);
       // Windows: update existing, create missing, close removed
       if (state.windows) {
         const remoteIds = new Set();
-        for (const rw of state.windows) {
+        for (const rw of layers.membership.windows) { // the entries' workspace fields — their arrangement is `a`
           const winId = rw.winId || rw.id;
           remoteIds.add(winId);
           const win = this.app.wm.windows.get(winId);
+          const a = arrangementFor(layers, rw); // this page's arrangement of the entry (null: none — a live phone record on a desktop)
           // a window whose chain act is held: the record's entry for it (its box = its OLD frame's) is older than the act —
           // skipped whole, the act re-sent below (stage-blank verify r5)
           if (win && heldChain.has(String(winId))) { heldClosed = true; continue; }
@@ -396,7 +405,7 @@ class LayoutManager {
             // yet — the record is OLDER than the close; it never re-creates the window (the close goes out below)
             if (heldIds.includes(winId)) { heldClosed = true; continue; }
             // Window doesn't exist locally — create it
-            this._createRemoteWindow(rw, { membershipOnly });
+            this._createRemoteWindow(rw, { arrangement: a });
             continue;
           }
           // THE HELD MOVE (verify r2): this page moved the window AFTER the record arrived (a drop on a preview at
@@ -408,7 +417,7 @@ class LayoutManager {
           // this client holds on ANOTHER desktop — another client moved it here. It is moved here, not left
           // where it was: the source desktop's record (sent right after the target's) would otherwise CLOSE it
           // below, and that close became evidence that lost the window on the server.
-          this.app.desktopManager?.adoptRemoteMove?.(win, win._desktopId, { to: this.app.desktopManager.activeDesktopId, rec: rw });
+          this.app.desktopManager?.adoptRemoteMove?.(win, win._desktopId, { to: this.app.desktopManager.activeDesktopId, rec: { ...rw, ...a } });
           // THE HELD GEOMETRY (verify r2 ⑩; the held move's twin for a drag / a resize on the desktop on show): the
           // user's own drag or resize ended AFTER this record arrived (`_boundsAt`, stamped by window.js at the
           // pointerup) — the record's box, maximize and minimize are older than it; skipped, and re-sent below
@@ -423,40 +432,44 @@ class LayoutManager {
           // 1280w) — the old 0.0001 epsilon saw that as a "change" and clients
           // with different viewport sizes re-broadcast forever (ping-pong).
           // 0.002 ≈ 2-4px: below any real move, above all rounding noise.
-          if (rw.gridBounds && !heldGeom && !membershipOnly) { // a phone's record moves no box (guard 10)
+          if (a && a.gridBounds && !heldGeom) { // a phone's record moves no box on a desktop, a phone takes none (guard 10)
             const EPS = 0.002;
             const changed = !win.gridBounds
-              || Math.abs(win.gridBounds.left - rw.gridBounds.left) > EPS
-              || Math.abs(win.gridBounds.top - rw.gridBounds.top) > EPS
-              || Math.abs(win.gridBounds.width - rw.gridBounds.width) > EPS
-              || Math.abs(win.gridBounds.height - rw.gridBounds.height) > EPS;
+              || Math.abs(win.gridBounds.left - a.gridBounds.left) > EPS
+              || Math.abs(win.gridBounds.top - a.gridBounds.top) > EPS
+              || Math.abs(win.gridBounds.width - a.gridBounds.width) > EPS
+              || Math.abs(win.gridBounds.height - a.gridBounds.height) > EPS;
             if (changed) {
-              win.gridBounds = rw.gridBounds;
+              win.gridBounds = a.gridBounds;
               this.app.wm._applyGridBounds(win);
               setTimeout(() => { if (win.onResize) win.onResize(); this.app.wm._applyGridBounds(win); }, 150);
             }
           }
           // z-index: only apply if remote z is higher (local focus wins)
-          const z = rw.z || rw.zIndex || 0;
+          const z = a ? (a.z || a.zIndex || 0) : 0;
           const localZ = parseInt(win.element.style.zIndex) || 0;
-          if (z > localZ && !membershipOnly) {
+          if (z > localZ) {
             win.element.style.zIndex = z;
             if (z >= this.app.wm.zIndex) this.app.wm.zIndex = z + 1;
           }
-          if (!heldGeom && !membershipOnly) {
-            // maximize
-            const isMax = rw.isMaximized ?? false;
-            if (isMax && !win.isMaximized) this.app.wm.toggleMaximize(win.id);
-            if (!isMax && win.isMaximized) this.app.wm.toggleMaximize(win.id);
+          if (a && !heldGeom) {
+            // maximize (a desktop's — a phone's subset carries the minimize alone, guard 5)
+            if ('isMaximized' in a) {
+              const isMax = a.isMaximized ?? false;
+              if (isMax && !win.isMaximized) this.app.wm.toggleMaximize(win.id);
+              if (!isMax && win.isMaximized) this.app.wm.toggleMaximize(win.id);
+            }
             // minimize/restore
-            const isMin = rw.min ?? rw.isMinimized ?? false;
+            const isMin = a.min ?? a.isMinimized ?? false;
             // the phone's window ON SHOW is its own (guard 10): a record minimizing it does not take it off this screen
             if (isMin && !win.isMinimized && !(this.app.isMobile && win.element.classList.contains('window-active'))) this.app.wm.minimize(win.id);
             if (!isMin && win.isMinimized) this.app.wm.restore(win.id);
-            // snap state
-            win._isSnapped = rw.snap ?? rw.isSnapped ?? false;
-            const snapB = rw.snapBounds || rw.preSnapBounds;
-            if (snapB) win._preSnapBounds = snapB;
+            // snap state (a desktop's)
+            if ('isSnapped' in a) {
+              win._isSnapped = a.snap ?? a.isSnapped ?? false;
+              const snapB = a.snapBounds || a.preSnapBounds;
+              if (snapB) win._preSnapBounds = snapB;
+            }
           }
           // file explorer navigation sync (host first — path is host-relative)
           const rwHost = rw.explorerHost || '';
@@ -508,7 +521,6 @@ class LayoutManager {
         // split / unsplit — is applied IN PLACE too (applyChainRecord: no
         // re-parenting, `active` stays this client's); only a membership or
         // host change rebuilds the chain.
-        const recorded = new Map(state.windows.map((rw) => [rw.winId || rw.id, rw])); // the record's row per window id (the broken chain's members go back to the record's boxes, verify r4)
         const remoteChains = new Map(); // key -> { tabs, active, layout, split, order }
         const remoteByMembers = new Map(); // tabs.join(',') -> key
         for (const rw of state.windows) {
@@ -568,8 +580,8 @@ class LayoutManager {
               }
               if (w._tabChain) this.app.wm._ungroupLast(w._tabChain);
               for (const id of members) {
-                const rw = recorded.get(id), win = this.app.wm.windows.get(id);
-                if (rw && rw.gridBounds && win && !win._onStage && !membershipOnly) { win.gridBounds = { ...rw.gridBounds }; this.app.wm._applyGridBounds(win); }
+                const ra = arrangementFor(layers, { winId: id }), win = this.app.wm.windows.get(id); // the record's box for this page (the broken chain's members go back to the record's boxes, verify r4)
+                if (ra && ra.gridBounds && win && !win._onStage) { win.gridBounds = { ...ra.gridBounds }; this.app.wm._applyGridBounds(win); }
               }
             }
           }
@@ -920,8 +932,9 @@ class LayoutManager {
     }
   }
 
-  // Create a window from remote layout state using its saved openSpec
-  _createRemoteWindow(rw, { membershipOnly = false } = {}) {
+  // Create a window from remote layout state using its saved openSpec (`arrangement` = this page's arrangement of the
+  // entry, applyForViewport's subset via arrangementFor; null = none)
+  _createRemoteWindow(rw, { arrangement = null } = {}) {
     const winId = rw.winId || rw.id;
     const spec = rw.openSpec;
     if (!spec) return; // no spec = can't recreate
@@ -938,11 +951,11 @@ class LayoutManager {
       setTimeout(() => {
         const winInfo = this.app.wm.windows.get(winId);
         keepShown();
-        if (!winInfo || membershipOnly) return; // a phone's record: placed by this desktop's own default (guard 10)
-        if (rw.gridBounds) { winInfo.gridBounds = rw.gridBounds; this.app.wm._applyGridBounds(winInfo); }
-        if (rw.isSnapped) { winInfo._isSnapped = true; winInfo._preSnapBounds = rw.preSnapBounds; }
-        if (rw.isMaximized) this.app.wm.toggleMaximize(winInfo.id);
-        if (rw.isMinimized) this.app.wm.minimize(winInfo.id);
+        if (!winInfo || !arrangement) return; // a live phone record on a desktop: placed by this desktop's own default (guard 10)
+        if (arrangement.gridBounds) { winInfo.gridBounds = arrangement.gridBounds; this.app.wm._applyGridBounds(winInfo); }
+        if (arrangement.isSnapped) { winInfo._isSnapped = true; winInfo._preSnapBounds = arrangement.preSnapBounds; }
+        if (arrangement.isMaximized) this.app.wm.toggleMaximize(winInfo.id);
+        if (arrangement.isMinimized) this.app.wm.minimize(winInfo.id);
       }, 500);
     } catch {}
   }
@@ -1117,26 +1130,30 @@ class LayoutManager {
       this._bootStoppedSessions.push({ key, sessionId, cwd, name, opts });
     };
 
+    // THE LAYER LAW's read half (§6b item 10): the record on disk taken whole — its preference, arrangement and chrome
+    // only where this viewport class applies them (a phone: the membership and a desktop's minimize; its sidebar stays
+    // as this page has it, closed at boot)
+    const layers = applyForViewport(this._viewport(), state, { source: 'boot' });
+    const { arrangement, chrome, preference } = layers;
     // Restore theme
-    if (state.theme) {
-      this.app.themeManager.apply(state.theme);
+    if (preference && preference.theme) {
+      this.app.themeManager.apply(preference.theme);
     }
 
-    // Restore grid — the record on disk taken whole, its chrome only where this viewport class applies it (a phone: none)
-    const chrome = chromeToApply(this._viewport(), TAKEN_WHOLE);
-    if (state.grid && chrome.grid) {
-      this.app.wm.setGrid(state.grid.rows, state.grid.cols);
+    // Restore grid
+    if (arrangement && arrangement.grid) {
+      this.app.wm.setGrid(arrangement.grid.rows, arrangement.grid.cols);
     }
 
     // Restore taskbar height
-    if (state.taskbarHeight) {
-      this._applyTaskbarHeight(state.taskbarHeight);
+    if (chrome && chrome.taskbarHeight) {
+      this._applyTaskbarHeight(chrome.taskbarHeight);
     }
-    this._applyToolbarState(state); // incl. explicit-null reset — a stale localStorage must not resurrect an erased scale at boot
+    if (chrome) this._applyToolbarState(chrome); // incl. explicit-null reset — a stale localStorage must not resurrect an erased scale at boot
 
-    // Restore sidebar (a phone's stays as this page has it: closed at boot)
-    if (state.sidebarOpen !== undefined && chrome.sidebarOpen) {
-      this.app.sidebar.toggle(state.sidebarOpen);
+    // Restore sidebar
+    if (chrome && chrome.sidebarOpen !== undefined) {
+      this.app.sidebar.toggle(chrome.sidebarOpen);
     }
 
     // Wait for active sessions list from server
@@ -1167,13 +1184,14 @@ class LayoutManager {
         this.onWindowCreated(winInfo); // the record's id appeared: a pending chain naming it reconciles
         if (wm.activeWindowId === oldId) wm.activeWindowId = winState.winId; // the focus follows the re-key (it named a window that no longer existed — v2 verify r1 ⑦)
       }
-      if (winState.gridBounds) {
-        winInfo.gridBounds = winState.gridBounds;
+      const a = arrangementFor(layers, winState); // this page's arrangement of the entry (a phone's: the minimize only)
+      if (a && a.gridBounds) {
+        winInfo.gridBounds = a.gridBounds;
         this.app.wm._applyGridBounds(winInfo);
       }
-      if (winState.zIndex) { winInfo.element.style.zIndex = winState.zIndex; if (winState.zIndex >= this.app.wm.zIndex) this.app.wm.zIndex = winState.zIndex + 1; }
-      if (winState.isSnapped) { winInfo._isSnapped = true; winInfo._preSnapBounds = winState.preSnapBounds; }
-      if (winState.isMinimized) this.app.wm.minimize(winInfo.id);
+      if (a && a.zIndex) { winInfo.element.style.zIndex = a.zIndex; if (a.zIndex >= this.app.wm.zIndex) this.app.wm.zIndex = a.zIndex + 1; }
+      if (a && a.isSnapped) { winInfo._isSnapped = true; winInfo._preSnapBounds = a.preSnapBounds; }
+      if (a && a.isMinimized) this.app.wm.minimize(winInfo.id);
       setTimeout(() => { if (winInfo.onResize) winInfo.onResize(); }, 200);
       // Force terminal redraw after attach completes (triggers SIGWINCH via size toggle)
       setTimeout(() => {
@@ -1470,7 +1488,8 @@ class LayoutManager {
       // (applied by _setupToolbarResize moments ago) resurrects an erased
       // scale and the first autosave re-broadcasts it fleet-wide.
       const bootState = data.desktopMeta?.length ? data.desktops?.[data.desktopMeta[0].id]?.autoSave : data.autoSave;
-      this._applyToolbarState(bootState || data.autoSave);
+      const bootBars = applyForViewport(this._viewport(), bootState || data.autoSave, { source: 'boot' }).chrome; // the bars are chrome: a phone keeps its own
+      if (bootBars) this._applyToolbarState(bootBars);
       // Desktop-aware restore: delegate to DesktopManager
       if (this.app.desktopManager) {
         await this.app.desktopManager.loadFromServer(data);
@@ -1576,22 +1595,27 @@ class LayoutManager {
     // Track which current window IDs are matched to a preset window
     const matchedWinIds = new Set();
 
+    // THE LAYER LAW's read half (§6b item 10): a preset is membership + arrangement — never a sidebar, the bars, a theme or
+    // fonts (the moment it was saved is not the person's chrome now); on a phone the membership and the minimize only
+    const layers = applyForViewport(this._viewport(), preset, { source: 'preset' });
+
     // Helper: apply position to a window from preset state
     const applyPosition = (winInfo, winState) => {
       if (!winInfo) return;
-      if (winState.gridBounds) {
-        winInfo.gridBounds = winState.gridBounds;
+      const a = arrangementFor(layers, winState);
+      if (a && a.gridBounds) {
+        winInfo.gridBounds = a.gridBounds;
         this.app.wm._applyGridBounds(winInfo);
       }
-      if (winState.zIndex) {
-        winInfo.element.style.zIndex = winState.zIndex;
-        if (winState.zIndex >= this.app.wm.zIndex) this.app.wm.zIndex = winState.zIndex + 1;
+      if (a && a.zIndex) {
+        winInfo.element.style.zIndex = a.zIndex;
+        if (a.zIndex >= this.app.wm.zIndex) this.app.wm.zIndex = a.zIndex + 1;
       }
       this.app.wm.witnessGeometry?.(winInfo.id); // a named preset is the user's act on every window it places (verify r5 ③) — the ONE witness stamp in this file
       // Restore from minimized if preset says it should be visible
-      if (!winState.isMinimized && winInfo.isMinimized) {
+      if (a && !a.isMinimized && winInfo.isMinimized) {
         this.app.wm.restore(winInfo.id);
-      } else if (winState.isMinimized && !winInfo.isMinimized) {
+      } else if (a && a.isMinimized && !winInfo.isMinimized) {
         this.app.wm.minimize(winInfo.id);
       }
       setTimeout(() => { if (winInfo.onResize) winInfo.onResize(); }, 200);
@@ -1601,47 +1625,12 @@ class LayoutManager {
       }, 2000);
     };
 
-    // Restore global settings
-    if (preset.theme) {
-      this.app.themeManager.apply(preset.theme);
-      for (const [, term] of this.app.sessions) { if (term.updateTheme) term.updateTheme(this.app.themeManager.getTerminalTheme()); }
-    }
-    if (preset.globalFontSize && preset.globalFontSize !== this.app._fontSize) {
-      this.app._fontSize = preset.globalFontSize;
-      localStorage.setItem('termFontSize', this.app._fontSize);
-      for (const [, term] of this.app.sessions) {
-        if (!term.overrides || !term.terminal) continue;
-        if (!term.overrides.fontSize) {
-          term.terminal.options.fontSize = this.app._fontSize;
-          try { term.terminal.clearTextureAtlas(); } catch {}
-          term.fit();
-        }
-      }
-    }
-    if (preset.globalFontFamily && preset.globalFontFamily !== this.app._fontFamily) {
-      this.app._fontFamily = preset.globalFontFamily;
-      localStorage.setItem('termFontFamily', this.app._fontFamily);
-      for (const [, term] of this.app.sessions) {
-        if (!term.overrides || !term.terminal) continue;
-        if (!term.overrides.fontFamily) {
-          term.terminal.options.fontFamily = this.app._fontFamily;
-          try { term.terminal.clearTextureAtlas(); } catch {}
-          term.fit();
-        }
-      }
-    }
-
-    // Restore grid — a preset is a record taken whole: a phone applies none of its chrome (§6b guard 10's read half)
-    const chrome = chromeToApply(this._viewport(), TAKEN_WHOLE);
-    if (preset.grid && chrome.grid) {
-      this.app.wm.setGrid(preset.grid.rows, preset.grid.cols);
-    } else if (chrome.grid) {
+    // Restore grid — a desktop's arrangement (a phone's subset holds no grid: it never sets one)
+    const arrangement = layers.arrangement;
+    if (arrangement && arrangement.grid) {
+      this.app.wm.setGrid(arrangement.grid.rows, arrangement.grid.cols);
+    } else if (arrangement && 'grid' in arrangement) {
       this.app.wm.setGrid(null);
-    }
-
-    // Restore sidebar
-    if (preset.sidebarOpen !== undefined && chrome.sidebarOpen) {
-      this.app.sidebar.toggle(preset.sidebarOpen);
     }
 
     // Build maps of currently open terminal windows by backend session ID and server session ID

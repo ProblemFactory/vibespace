@@ -39,8 +39,9 @@ export function panelMetrics(panel) {
 }
 
 // A panel with splitBy (series split, 2.99.3) needs a 2-D pivot from the
-// server — collect the 'dim:splitBy' keys a panel set requires so the window's
-// one fetch can request them all (and refetch when an edit adds a new one).
+// server — collect the 'dim:splitBy' keys a panel set draws (the window asks
+// for the bounded ones with its load, the session/project ones once their panel
+// is on screen — B-f95d ②).
 export function panelPivots(panels) {
   return [...new Set((panels || [])
     .filter((p) => p.splitBy && p.splitBy !== p.dim && p.dim !== 'total' && (p.chart === 'line' || p.chart === 'bars'))
@@ -497,14 +498,14 @@ function empty(body) {
 
 // ── Panel + grid rendering ──
 
-export function renderDashboard(container, data, panels, { onChange }) {
+export function renderDashboard(container, data, panels, { onChange, pivotHere = null }) {
   const grid = document.createElement('div');
   grid.className = 'udash-grid';
   // Attach BEFORE rendering panels: chart color resolution probes computed
   // styles (var(--accent) etc.) — in a detached tree they resolve to nothing
   // and every chart renders black (real regression).
   container.appendChild(grid);
-  panels.forEach((panel, idx) => renderPanel(grid, data, panels, panel, idx, onChange));
+  panels.forEach((panel, idx) => renderPanel(grid, data, panels, panel, idx, onChange, pivotHere));
   const add = document.createElement('button');
   add.className = 'udash-add';
   add.textContent = '+ ' + t('Add panel');
@@ -513,7 +514,7 @@ export function renderDashboard(container, data, panels, { onChange }) {
   container.appendChild(grid);
 }
 
-function renderPanel(grid, data, panels, panel, idx, onChange) {
+function renderPanel(grid, data, panels, panel, idx, onChange, pivotHere) {
   const mlist = panelMetrics(panel).map(metricOf);
   const dimMeta = DIMENSIONS().find((d) => d.key === panel.dim);
   const card = document.createElement('div');
@@ -552,6 +553,9 @@ function renderPanel(grid, data, panels, panel, idx, onChange) {
   // Split-series route: line/bars with a splitBy render from the 2-D pivot.
   // Other chart types ignore the split (a donut/table of a cross isn't a thing).
   if (panel.splitBy && panel.splitBy !== panel.dim && panel.dim !== 'total' && (panel.chart === 'line' || panel.chart === 'bars')) {
+    // B-f95d ②: no pivot in the answer yet ⇒ the window's pivotHere drew the
+    // wait note and asks for it once this panel is on screen
+    if (pivotHere && !pivotHere(`${panel.dim}:${panel.splitBy}`, body)) return;
     chartSplit(body, data, panel, mlist);
     return;
   }

@@ -839,11 +839,17 @@ export function anchorFixedPopup(popup, anchor, { gap = 6 } = {}) {
   else if (pr.left < 8) { popup.style.left = '8px'; popup.style.right = 'auto'; }
 }
 
+/** The auth layer's same-origin refusal (403 {error:'cross-site'}, lane owner-write-origin) said in words: VibeSpace's
+ *  own page never meets it — a page that ever does shows the sentence, not the code (`code` keeps the code). */
+function refusalWords(body) {
+  return body && typeof body === 'object' && body.error === 'cross-site' ? { ...body, code: 'cross-site', error: t('This action came from another site and was refused') } : body;
+}
+
 /** Fetch JSON with silent error handling. Returns null on failure. */
 export async function fetchJson(url, opts) {
   try {
     const res = await fetch(url, opts);
-    return await res.json();
+    return refusalWords(await res.json());
   } catch { return null; }
 }
 
@@ -876,7 +882,7 @@ export async function api(url, opts) {
   try { res = await fetch(url, opts); }
   catch { throw new Error('Server unreachable — check your connection and retry'); }
   let body = null;
-  try { body = await res.json(); } catch { body = null; }
+  try { body = refusalWords(await res.json()); } catch { body = null; }
   if (!res.ok) throw new Error(body?.error || `${res.status} ${res.statusText || 'request failed'}`);
   if (body && typeof body === 'object' && body.error) throw new Error(String(body.error));
   return body;

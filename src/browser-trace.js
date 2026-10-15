@@ -73,8 +73,13 @@ const AFTER_SETTLE_MS = 400;
  *  row per run of re-fits (a drag, a snap, a desktop switch), the reflow between two agent actions still its own row. */
 const FIT_COALESCE_MS = 10 * 1000;
 /** The live view's own re-fit as the bridge taps it (src/server/browser-stream.js tapOwnSet) — the ONE action name the
- *  fold reads; the agent's own `viewport` verb is an untraced observation and never one of these. */
+ *  fold reads; the agent's own `viewport` verb is an untraced observation and never one of these (its row is
+ *  AGENT_VIEWPORT_ACTION, never folded). */
 const FIT_ACTION = 'viewer-fit';
+/** lane browser-viewport-answer (B-6dae ①): the agent's OWN `set viewport|device` as the bridge taps it once its answer is
+ *  read (src/server/browser-stream.js agentViewport) — asked, the size the page has, who ruled (a pin, the user driving).
+ *  The daemon's raw `viewport` mirror stays an untraced observation, so the set is ONE row. */
+const AGENT_VIEWPORT_ACTION = 'agent-viewport';
 /** … or, failing one by then, the latest frame seen (marked `afterSame` when
  *  it is the before-frame itself — a page that did not repaint). */
 const AFTER_MAX_MS = 1500;
@@ -111,6 +116,7 @@ const TRACED_ACTIONS = Object.freeze({
   // agent's own size put back) — a name the daemon never mirrors (its verb is `viewport`); only the bridge taps it, so
   // an agent's clicks before and after a reflow are told apart in the trace
   'viewer-fit': 'viewport',
+  [AGENT_VIEWPORT_ACTION]: 'viewport', // lane browser-viewport-answer: the agent's own set (asked → got, ruled by)
   // lane browser-ui-prompts-r2: the agent's `permission <kind> allow|deny` — VibeSpace's own CDP act (the dialog act's tap shape)
   permission: 'permission',
 });
@@ -211,6 +217,12 @@ function commandText(action, redacted) {
     return r.kind === 'create' ? `${who}registered a passkey on ${rp}${u ? ` for ${u}` : ''}` : `${who}signed in with ${u ? `${u}'s` : 'a'} passkey on ${rp}`;
   }
   if (a === 'viewer-fit') return `live view: set ${r.device ? `device ${r.device}` : `viewport ${r.width} ${r.height}`}${r.why ? ` (${r.why})` : ''}`;
+  if (a === AGENT_VIEWPORT_ACTION) { // lane browser-viewport-answer: what the agent asked, the size the page has, who ruled
+    const asked = r.device ? `device ${r.device}` : `viewport ${r.width} ${r.height}${Number(r.scale) > 1 ? ` ${r.scale}` : ''}`;
+    const got = Number(r.gotWidth) > 0 && Number(r.gotHeight) > 0 ? `${r.gotWidth}×${r.gotHeight}` : 'unreadable';
+    const why = r.ruled === 'fixed' ? ` (pinned by ${r.by === 'agent' ? 'the agent' : 'the user'}: not applied)` : r.ruled === 'holder' ? ' (the user drives: not applied)' : '';
+    return `vibespace-browser set ${asked} → ${got}${why}`;
+  }
   const parts = ['agent-browser', a];
   const sel = selectorOf(r);
   if (sel) parts.push(sel);
@@ -240,6 +252,7 @@ function positionOf({ kind, params, box = null, boxWhy = null } = {}) {
   if (kind === 'scroll') return { kind: 'scroll', direction: String(p.direction || 'down'), amount: Number(p.amount) || 0 };
   if (kind === 'permission') return { kind: 'permission', permission: String(p.kind || '').slice(0, 40), setting: String(p.setting || ''), origin: typeof p.origin === 'string' ? p.origin.slice(0, 300) : null }; // lane browser-ui-prompts-r2
   if (kind === 'navigation') return { kind: 'navigation', url: typeof p.url === 'string' ? p.url.slice(0, 2000) : null };
+  if (kind === 'viewport' && p.gotWidth !== undefined) return { kind: 'viewport', width: Math.round(Number(p.gotWidth) || 0), height: Math.round(Number(p.gotHeight) || 0), why: String(p.ruled || 'agent') }; // lane browser-viewport-answer: the size the page HAS after the agent's set (0×0 = unreadable)
   if (kind === 'viewport') return p.device ? { kind: 'viewport', device: String(p.device).slice(0, 80), why: String(p.why || '') } : { kind: 'viewport', width: Math.round(Number(p.width) || 0), height: Math.round(Number(p.height) || 0), why: String(p.why || '') };
   return { kind: 'input', why: 'unknown action kind' };
 }
@@ -391,7 +404,7 @@ function timelineLabel(entry) {
   else if (e.position && e.position.kind === 'keys' && e.position.keys) bits.push(e.position.keys);
   else if (e.position && e.position.kind === 'navigation' && e.position.url) bits.push(e.position.url.slice(0, 60));
   else if (e.position && e.position.kind === 'scroll') bits.push(`${e.position.direction} ${e.position.amount}`);
-  else if (e.position && e.position.kind === 'viewport') bits.push(e.position.device || `${e.position.width}×${e.position.height}`);
+  else if (e.position && e.position.kind === 'viewport') bits.push(e.position.device || (e.position.width && e.position.height ? `${e.position.width}×${e.position.height}` : 'unreadable'));
   return bits.join(' ') + (e.ok === false ? ' ✗' : '');
 }
 /** The tool card's window: the tool call's own ts back 2 s, forward to the next message (+2 s) or now. */
@@ -714,7 +727,7 @@ function positionText(position) {
   if (p.kind === 'keys') return String(p.keys || '');
   if (p.kind === 'scroll') return `${p.direction || ''} ${p.amount || 0}`.trim();
   if (p.kind === 'navigation') return String(p.url || '');
-  if (p.kind === 'viewport') return p.device ? String(p.device) : `${p.width}×${p.height}`;
+  if (p.kind === 'viewport') return p.device ? String(p.device) : p.width && p.height ? `${p.width}×${p.height}` : 'unreadable';
   return p.why ? String(p.why) : '';
 }
 
@@ -733,7 +746,7 @@ function scopeDigest(entries) {
 
 module.exports = {
   TRACE_BYTES_PER_PROFILE, TRACE_BYTES_FLOOR, TRACE_BYTES_SETTING, TRACE_TAP_FPS, AFTER_SETTLE_MS, AFTER_MAX_MS, BOX_PROBE_TIMEOUT_MS, PENDING_CAP, FRAME_RING,
-  FIT_COALESCE_MS, FIT_ACTION, isFitEntry, fitCount, fitCoalesceVerdict, coalesceFits, foldFits, visibleEntries, // lane trace-fits: the page-size fold
+  FIT_COALESCE_MS, FIT_ACTION, AGENT_VIEWPORT_ACTION, isFitEntry, fitCount, fitCoalesceVerdict, coalesceFits, foldFits, visibleEntries, // lane trace-fits: the page-size fold
   RECORDING_FLOOR, RECORDING_DIR, TRACE_DIR, FORGOTTEN_FILE, STALE_PROFILE_DAYS, INFLIGHT_GRACE_MS, PROFILE_MARKERS, FORGOTTEN_SUFFIX, EPHEMERAL_SCOPE,
   TRACED_ACTIONS, classifyAction, isTracedCommand, selectorOf, redactParams, withoutUserinfo, withoutUrlSecrets, credentialKey, CREDENTIAL_WORDS, commandText, positionOf, resultOk, resultError, frameMeta, boxFromProbe, afterFramePick,
   entryFor, isEntryId, mintEntryId, timelineLabel, traceWindowFor, commandDrivesBrowser, entriesInWindow, overlayGeometry,

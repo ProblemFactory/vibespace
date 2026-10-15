@@ -3,6 +3,7 @@
 // Generated after each i18n sweep; hand-edited for quality. Missing entries
 // fall back to English automatically.
 export default {
+  "This action came from another site and was refused": "这次操作来自别的站点，已拒绝",
   "This read {vendor} directly, not through VibeSpace channels — no channel card, read marker or budget record; vibespace-channels read would have them.": "这次直接读了 {vendor}，没经过 VibeSpace 频道 — 没有频道卡片、已读标记和预算记录；用 vibespace-channels read 会有。",
   "this conversation": "本对话",
   "{what} is running — click for the live view": "{what} 正在运行 —— 点击打开实时视图",
@@ -4101,6 +4102,8 @@ export default {
   "Refused by the channel ({code}): {detail}": "被频道拒绝({code}): {detail}",
   "Refused by the channel ({code}).": "被频道拒绝({code})。",
   "Expired: not approved within 24 h.": "已过期: 24 小时内未获批准。",
+  "{vendor} asked to slow down — sends at {time}": "{vendor} 要求放慢，{time} 后发出",
+  "The platform": "平台",
   "Rejected: {reason}": "已拒绝: {reason}",
   "Rejected.": "已拒绝。",
   "this channel requires review before anything is sent": "这个频道要求任何东西发出前先经审批",
@@ -4508,6 +4511,8 @@ export default {
   "Low priority": "低优先级",
   "Backlog cleanup nudge: items per session": "待办清理提醒：每会话条目数",
   "When one session holds this many open backlog items (claimed or parked by it), its backlog commands and its per-turn backlog note ask it to finish, drop or merge items before parking more. 0 = never.": "当一个会话持有这么多未完成的待办条目（由它认领或搁置）时，它的待办命令和每轮待办提示会要求它先完成、丢弃或合并条目，再搁置新的。0 = 从不提醒。",
+  "Context-folder index budget per group (bytes)": "上下文文件夹索引预算（每组，字节）",
+  "How many bytes one Task Group's context-folder file list may take in an agent's injected context: the newest files that fit are listed, then one line counts the rest (vibespace-task show --full lists every file). 0 = no byte budget (at most 100 files).": "一个任务组的上下文文件夹文件列表在注入给智能体的上下文中最多占用的字节数：列出放得下的最新文件，其余用一行计数（vibespace-task show --full 列出全部文件）。0 = 不限字节（最多 100 个文件）。",
   "Scaled to fit — the app needs at least {w}×{h}": "已缩放以适应 — 应用至少需要 {w}×{h}",
   "The scale this app was started at (Settings → Desktop app scale). A change takes effect when the app is launched again.": "此应用启动时的缩放（设置 → 桌面应用缩放）。修改后需重新启动应用才会生效。",
   "xpra streams each app window as pixels; text stays crisp at your screen’s scale": "xpra 把每个应用窗口作为像素流传输；文字按你屏幕的缩放渲染，保持清晰",
@@ -7781,6 +7786,18 @@ export default {
   "Run and never ask again ({what})": "执行，并以后不再问（{what}）",
   "call the {vendor} API": "调用 {vendor} API",
   "Allowed from then on: {shape}": "以后放行：{shape}",
+  "The vendor redirected it — not followed": "服务方把它重定向到了别处 — 未跟随",
+  "The vendor kept redirecting it — stopped": "服务方不断重定向 — 已停止",
+  "The vendor redirected it — resubmitted as a new card": "服务方把它重定向到了别处 — 已重新提交为新卡片",
+  "The vendor redirected it ({status}) to {to} — not followed: {why}": "服务方把它重定向（{status}）到 {to} — 未跟随：{why}",
+  "Resubmit": "重新提交",
+  "it would need your approval": "需要你的批准",
+  "it does more than the call you approved": "它做的比你批准的调用更多",
+  "it is beyond the agent's API tier": "超出了该 agent 的 API 档位",
+  "it points to another host — the account's token never goes there": "它指向另一个主机 — 账号的凭据从不发往那里",
+  "its address cannot be read": "地址无法解析",
+  "its path breaks the API fence's rules": "路径不符合 API 围栏的规则",
+  "more than 5 redirects, or back to an address already asked": "重定向超过 5 次，或绕回了已请求过的地址",
   "{name} wants to {what}": "{name} 想{what}",
   "delete {n} blocks ({start}–{end}) from the document “{object}”": "删除文档《{object}》里的 {n} 个块（第 {start}–{end} 个）",
   "insert {n} blocks into the document “{object}”": "在文档《{object}》里插入 {n} 个块",
@@ -8963,4 +8980,7 @@ export default {
   "Ask for the browser version once more now — this notice goes away by itself once it reads": "现在再读取一次浏览器版本——读到后这条通知会自动撤回",
   "The browser version reads again: {version}": "浏览器版本又能读取了：{version}",
   "Still no answer: {why}": "仍然没有应答：{why}",
+  // lane lark-minutes-scopes: the account card's one-Re-authorize line names Lark's 妙记 (Minutes)
+  "reading Minutes and their recordings": "读取妙记及其音视频",
+  "{n} more of the permissions your app has enabled": "应用已开通的另外 {n} 项权限",
 };

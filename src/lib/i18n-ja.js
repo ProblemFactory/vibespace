@@ -3,6 +3,7 @@
 // Generated after each i18n sweep; hand-edited for quality. Missing entries
 // fall back to English automatically.
 export default {
+  "This action came from another site and was refused": "この操作は別のサイトから来たため拒否しました",
   "This read {vendor} directly, not through VibeSpace channels — no channel card, read marker or budget record; vibespace-channels read would have them.": "今回は {vendor} を直接読みました（VibeSpace のチャンネル経由ではありません）— チャンネルカード・既読マーク・予算記録はありません。vibespace-channels read なら残ります。",
   "this conversation": "この会話",
   "{what} is running — click for the live view": "{what} が実行中 —— クリックでライブビュー",
@@ -4100,6 +4101,8 @@ export default {
   "Refused by the channel ({code}): {detail}": "チャンネルに拒否されました({code}): {detail}",
   "Refused by the channel ({code}).": "チャンネルに拒否されました({code})。",
   "Expired: not approved within 24 h.": "期限切れ: 24 時間以内に承認されませんでした。",
+  "{vendor} asked to slow down — sends at {time}": "{vendor} から送信を控えるよう求められました — {time} に送信します",
+  "The platform": "プラットフォーム",
   "Rejected: {reason}": "却下: {reason}",
   "Rejected.": "却下しました。",
   "this channel requires review before anything is sent": "このチャンネルは何かを送る前に承認を必要とします",
@@ -4507,6 +4510,8 @@ export default {
   "Low priority": "低優先度",
   "Backlog cleanup nudge: items per session": "バックログ整理ナッジ：セッションあたりの項目数",
   "When one session holds this many open backlog items (claimed or parked by it), its backlog commands and its per-turn backlog note ask it to finish, drop or merge items before parking more. 0 = never.": "1 つのセッションが（自分で引き受けた、または保留した）未解決のバックログ項目をこの数だけ抱えると、そのバックログコマンドとターンごとのバックログ通知が、新しく保留する前に項目の完了・破棄・統合を求めます。0 = 通知しない。",
+  "Context-folder index budget per group (bytes)": "コンテキストフォルダ索引の予算（グループごと、バイト）",
+  "How many bytes one Task Group's context-folder file list may take in an agent's injected context: the newest files that fit are listed, then one line counts the rest (vibespace-task show --full lists every file). 0 = no byte budget (at most 100 files).": "1 つのタスクグループのコンテキストフォルダのファイル一覧が、エージェントに注入されるコンテキストで使える最大バイト数です。収まる最新のファイルを列挙し、残りは 1 行で件数を示します（vibespace-task show --full ですべてのファイルを一覧できます）。0 = バイト上限なし（最大 100 ファイル）。",
   "Scaled to fit — the app needs at least {w}×{h}": "収まるように縮小 — アプリには少なくとも {w}×{h} が必要です",
   "The scale this app was started at (Settings → Desktop app scale). A change takes effect when the app is launched again.": "このアプリを起動したときのスケール（設定 → デスクトップアプリのスケール）。変更はアプリを再起動したときに反映されます。",
   "xpra streams each app window as pixels; text stays crisp at your screen’s scale": "xpra は各アプリウィンドウをピクセルとして配信します。文字は画面のスケールで描かれ、くっきり表示されます",
@@ -7780,6 +7785,18 @@ export default {
   "Run and never ask again ({what})": "実行し、今後は確認しない（{what}）",
   "call the {vendor} API": "{vendor} API を呼び出す",
   "Allowed from then on: {shape}": "今後許可：{shape}",
+  "The vendor redirected it — not followed": "サービス側が別の宛先へリダイレクトしました — 追従していません",
+  "The vendor kept redirecting it — stopped": "サービス側がリダイレクトを繰り返したため停止しました",
+  "The vendor redirected it — resubmitted as a new card": "サービス側が別の宛先へリダイレクトしました — 新しいカードとして再送信済み",
+  "The vendor redirected it ({status}) to {to} — not followed: {why}": "サービス側が {to} へリダイレクトしました（{status}）— 追従していません：{why}",
+  "Resubmit": "再送信",
+  "it would need your approval": "あなたの承認が必要です",
+  "it does more than the call you approved": "承認した呼び出しより多くのことを行います",
+  "it is beyond the agent's API tier": "エージェントの API 権限を超えています",
+  "it points to another host — the account's token never goes there": "別のホストを指しています — アカウントのトークンはそこへ送られません",
+  "its address cannot be read": "アドレスを読み取れません",
+  "its path breaks the API fence's rules": "パスが API フェンスの規則に反しています",
+  "more than 5 redirects, or back to an address already asked": "リダイレクトが 5 回を超えたか、すでに要求した宛先に戻りました",
   "{name} wants to {what}": "{name} が次を行おうとしています：{what}",
   "delete {n} blocks ({start}–{end}) from the document “{object}”": "ドキュメント「{object}」のブロック {n} 個（{start}–{end}）を削除",
   "insert {n} blocks into the document “{object}”": "ドキュメント「{object}」にブロック {n} 個を挿入",
@@ -8962,4 +8979,7 @@ export default {
   "Ask for the browser version once more now — this notice goes away by itself once it reads": "ブラウザのバージョンを今もう一度読み取ります — 読み取れたらこの通知は自動で取り下げられます",
   "The browser version reads again: {version}": "ブラウザのバージョンをまた読み取れました：{version}",
   "Still no answer: {why}": "まだ応答がありません：{why}",
+  // lane lark-minutes-scopes: the account card's one-Re-authorize line names Lark's 妙记 (Minutes)
+  "reading Minutes and their recordings": "Minutes とその音声・動画の読み取り",
+  "{n} more of the permissions your app has enabled": "アプリで有効な残り {n} 件の権限",
 };

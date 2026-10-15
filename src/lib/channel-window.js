@@ -981,6 +981,7 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
         // the policy's reasons are an ENUM — worded through the card's own `reasonLabel` (a3 i18n)
         if (st === 'failed') showToast(t('The channel refused the send: {error}', { error: (r2.proposal && r2.proposal.reason) || '' }), { type: 'error' });
         else if (st === 'unknown') showToast(t('The send left but its answer was lost — check the conversation on the platform'), { type: 'warn' });
+        else if (st === 'sending' && r2.proposal.held) showToast(P.outcomeText(P.outcomeOf(r2.proposal), { t }), { type: 'info' });   // lane lark-send-hold: it waits the vendor's reset
         else if (st === 'sent' && allBox && allBox.checked && r2.proposal.replyEnvelope) showToast(t('Sent to {to}', { to: [r2.proposal.replyEnvelope.to, r2.proposal.replyEnvelope.cc].filter(Boolean).join(', ') }));
         else showToast(st === 'sent' ? t('Sent') : st === 'awaiting-approval' ? t('Held in the outbox for your approval ({why})', { why: ((r2.decision && r2.decision.reasons) || []).map(reasonLabel).join('; ') }) : t('Proposal {state}', { state: st || '?' }));
       };

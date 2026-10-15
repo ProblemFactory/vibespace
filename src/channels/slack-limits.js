@@ -10,11 +10,13 @@
  * before a request is built, `go` or `wait(seconds)`; the adapter turns a `wait` into the typed `rate-limited` with
  * `retryAfterSec` — the refusal the engine's ladder already honours (design §2 alternative D). A 429 the vendor still
  * answers (another client of the same app, a tier lower than published) is honoured by `hold(method, seconds)`:
- * that method alone waits the vendor's `Retry-After`.
+ * that method alone waits the vendor's `Retry-After` (lane lark-send-hold: the hold is the ONE shared PURE shape,
+ * src/channels/vendor-hold.js — Lark's per-account send hold is the same helper keyed `'send'`).
  *
  * `chat.postMessage` is Slack's "special" limit: about one message a second PER CONVERSATION — a per-conversation
  * one-second gap (`sendGap`) beside the method's own minute.
  */
+const Holds = require('./vendor-hold.js');
 const TIER_PER_MIN = Object.freeze({ 1: 1, 2: 20, 3: 50, 4: 100 });
 /** THE METHOD → TIER TABLE (research §2 tables; every method this adapter calls has a row — a call outside it is
  *  refused by name, never unmetered). `files.download` is the attachment GET on files.slack.com (no tier is
@@ -49,7 +51,7 @@ const METHODS = Object.freeze(Object.keys(METHOD_TIERS));
 const WINDOW_MS = 60 * 1000;
 const SEND_GAP_MS = 1000;
 /** A Retry-After longer than this is read as this (a hostile or broken header cannot park a method for a day). */
-const HOLD_MAX_SEC = 15 * 60;
+const HOLD_MAX_SEC = Holds.HOLD_MAX_SEC;
 const SEND_GAP_KEYS_MAX = 2000;
 
 /** The per-minute floor of a method (its tier's), or null for a method the table does not name. */
@@ -63,7 +65,7 @@ function perMinOf(method) { const t = METHOD_TIERS[method]; return t ? TIER_PER_
  */
 function createBuckets({ perMin = null } = {}) {
   const hits = new Map();       // method -> [instants], oldest first, ≤ the method's per-minute floor
-  const holds = new Map();      // method -> until (ms)
+  const holds = Holds.createHolds({ maxSec: HOLD_MAX_SEC });   // method -> until: the shared vendor hold (rebases itself on the same instants)
   const sendAt = new Map();     // convId -> the last send instant
   let last = 0;                 // the newest instant this bucket was asked at (skew guard)
   const cap = (m) => { const o = perMin && typeof perMin === 'object' ? Number(perMin[m]) : NaN; return Number.isFinite(o) && o > 0 ? Math.floor(o) : perMinOf(m); };
@@ -76,7 +78,6 @@ function createBuckets({ perMin = null } = {}) {
     if (v < last) {
       const d = last - v;
       for (const [m, xs] of hits) hits.set(m, xs.map((x) => x - d));
-      for (const [m, u] of holds) holds.set(m, u - d);
       for (const [k, x] of sendAt) sendAt.set(k, x - d);
     }
     last = v;
@@ -86,9 +87,8 @@ function createBuckets({ perMin = null } = {}) {
     const n = cap(method);
     if (!n) return { go: false, retryAfterSec: null, why: 'unknown-method' };
     const at = clock(t);
-    const held = Number(holds.get(method)) || 0;
-    if (held > at) return { go: false, retryAfterSec: Math.max(1, Math.ceil((held - at) / 1000)), why: 'vendor-hold' };
-    if (held) holds.delete(method);
+    const held = holds.heldFor(method, at);
+    if (held) return { go: false, retryAfterSec: held, why: 'vendor-hold' };
     const list = (hits.get(method) || []).filter((x) => at - x < WINDOW_MS);
     if (list.length >= n) {
       hits.set(method, list);
@@ -105,20 +105,15 @@ function createBuckets({ perMin = null } = {}) {
     hits.set(method, list);
     return { go: true, retryAfterSec: null, why: null };
   }
-  function hold(method, seconds, t) {
-    const s = Math.min(HOLD_MAX_SEC, Math.max(1, Math.ceil(Number(seconds) || 0)));
-    const at = clock(t);
-    const until = at + s * 1000;
-    if (until > (Number(holds.get(method)) || 0)) holds.set(method, until);
-    return s;
-  }
+  function hold(method, seconds, t) { return holds.hold(method, seconds, clock(t)); }
   function view(t) {
     const at = clock(t);
     const out = {};
+    const held = holds.view(at);
     for (const m of METHODS) {
       const used = (hits.get(m) || []).filter((x) => at - x < WINDOW_MS).length;
-      const h = Number(holds.get(m)) || 0;
-      if (used || h > at) out[m] = { used, perMin: cap(m), heldFor: h > at ? Math.ceil((h - at) / 1000) : 0 };
+      const h = Number(held[m]) || 0;
+      if (used || h) out[m] = { used, perMin: cap(m), heldFor: h };
     }
     return out;
   }

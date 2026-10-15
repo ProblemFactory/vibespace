@@ -156,8 +156,8 @@ app.use((req, res, next) => {
   });
   next();
 });
+app.use(auth.middleware()); // FIRST — the cookie gate + the same-origin rule stand before every route, the auth routes too (test-auth census)
 auth.registerRoutes(app);
-app.use(auth.middleware());
 // Serve index.html with cache-busting query params on every local js/css asset
 // (?v=<mtime>). Browsers serve unversioned <script>/<link> from memory cache on
 // a soft reload without revalidating, so users were stuck on a stale bundle
@@ -1142,7 +1142,7 @@ app.post('/api/sessions/:id/msg-reachability', (req, res) => {
   res.json({ ok: true, level: lv });
 });
 const recordClear = require('./src/server/record-clear.js').create({ tasks, userTodos, sessionStatus, getJobs: jobsWiring.getJobs, getGroups: () => channelsWiring.groups, getChannels: () => channelsWiring.channels }); require('./src/routes/records-clear.js').registerRecordClearRoutes(app, { recordClear }); // "Clear content…" (2026-09-28): ONE entry point (PURE verdict, each store's door, the journal line); the owner's POST /api/records/clear[-many] here, an agent's own verbs through setupAgentRoutes
-setupAgentRoutes({ app, activeSessions, tasks, sessionStatus, SessionStatusManager, userTodos, sessionStatusKey, serverSetting, spendGuard, scheduleCtxSync, remoteCtxBaseFor, readUserState: () => persistenceRouter.readUserState(), getJobs: jobsWiring.getJobs, deliver, getPublishedPages: () => publishedPages, getChannels: () => channelsWiring.channels, getGroups: () => channelsWiring.groups, getTouches: () => channelsWiring.touches, getRecordClear: () => recordClear, getSendUserInput: () => sendUserInput }); // lazy getters: all three are created further down (TDZ at boot otherwise); getChannels = the vibespace-channels routes' engine (P3); getSendUserInput = THE typing path for a dispatch's `/compact` (lane worker-dispatch — sendUserInput is declared further down)
+setupAgentRoutes({ app, activeSessions, tasks, sessionStatus, SessionStatusManager, userTodos, sessionStatusKey, serverSetting, spendGuard, scheduleCtxSync, remoteCtxBaseFor, readUserState: () => persistenceRouter.readUserState(), getJobs: jobsWiring.getJobs, deliver, getPublishedPages: () => publishedPages, getChannels: () => channelsWiring.channels, getGroups: () => channelsWiring.groups, getTouches: () => channelsWiring.touches, getRecordClear: () => recordClear, getSendUserInput: () => sendUserInput, getSessionMetaStore: () => ({ readSessionMeta, writeSessionMeta }) }); // B-86d3: the seen marks ride the session meta; lazy getters: all three are created further down (TDZ at boot otherwise); getChannels = the vibespace-channels routes' engine (P3); getSendUserInput = THE typing path for a dispatch's `/compact` (lane worker-dispatch — sendUserInput is declared further down)
 app.get('/api/agent-hooks', (req, res) => res.json({ ...agentHooksStatus(), integrationOff: !integrationEnabled(), cliConfig: harnessConfig.cliConfigStatus() })); // cliConfig = fresh per-key receipts for the managed CLI-config rows (Settings window chips + the Machines card; D2: never persisted)
 app.post('/api/agent-hooks/install', (req, res) => {
   // The master switch outranks the button: boot/toggle would strip the entries
@@ -1336,7 +1336,7 @@ app.post('/api/machine-mounts/:hostId', async (req, res) => {
       // address needed). The request-derived URL is only the last-resort
       // fallback for hosts without the device agent.
       let pub = b.publicUrl ? String(b.publicUrl) : null;
-      if (!pub) { const proto = req.headers['x-forwarded-proto'] || 'http'; const host = req.headers['x-forwarded-host'] || req.headers.host; if (host) pub = `${proto}://${host}`; }
+      if (!pub) pub = require('./src/write-origin.js').ownOriginOf(req.headers, { encrypted: !!(req.socket && req.socket.encrypted) }) || null; // the request's own origin: THE one rule
       res.json(await machineMounts.mountPush(req.params.hostId, { folder: b.folder, mode: b.mode, mountpoint: b.mountpoint, publicUrlFallback: pub }));
     }
   } catch (e) { res.status(400).json({ error: e.message }); }

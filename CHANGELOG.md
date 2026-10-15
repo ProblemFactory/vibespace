@@ -2,6 +2,25 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.274 — 2026-10-15
+
+### Changed
+- A phone and a computer on one workspace each keep their own window layout, sidebar and bars for good; they share only the open windows and what is in them.
+- After a VibeSpace restart, your conversations are told only what changed in their shared context, not everything again — fewer tokens on each first turn.
+- The Usage window loads faster: it fetches a per-conversation or per-project breakdown only when you scroll to that panel.
+- When an agent resizes its browser page it now learns the size the page really got (a size you pinned holds), and the resize shows in the browser's Actions.
+- Signing in to Lark now asks for every permission your Lark app has enabled, Minutes and their recordings included; a long list takes a few re-authorizations.
+
+### Fixed
+- A phone can no longer change the computer's window layout, sidebar, bars or theme, even from an older VibeSpace page still open on it.
+- VibeSpace no longer freezes for seconds when it has to rebuild its usage records after a repair.
+- A Gmail conversation is no longer re-read every minute after you reply to it from the mail app.
+- When Lark asks VibeSpace to slow down, the next messages for that account wait for the time Lark named instead of failing one after another.
+- An agent's raw API request can no longer be redirected by the service onto an address VibeSpace has not checked; the card says where and offers Resubmit.
+
+### Security
+- A web page on another site can no longer make your signed-in VibeSpace do things; every change must come from VibeSpace's own page.
+
 ## 2.369.273 — 2026-10-14
 
 ### Added

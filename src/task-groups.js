@@ -73,6 +73,9 @@ const KINDS = ['task', 'group'];
 // write is acknowledged only once it is found stored (agent-routes), and
 // scripts/test-backlog-no-truncation.mjs fails any slice on this store.
 const CAPS = { title: 120, objective: 20000, note: 2000, detail: 6000, reason: 500, backlogItem: 500 };
+// B-86d3 ② (lane hook-seen-marks): the default byte budget of ONE group's context-folder index in an injection
+// (setting tasks.contextIndexBytes; 0 = the 100-file cap only) — see _indexRows
+const CONTEXT_INDEX_BYTES = 4096;
 // the unclaimed-HIGH reminder line's TEXT budget in BYTES (CJK = 3 B/char), shared by every group of one injection
 const HIGH_LINE_TEXT_BYTES = 600;
 // Multi-group payloads share ONE text budget for the "claimed by THIS session"
@@ -442,6 +445,52 @@ class TaskGroupManager {
     return sig;
   }
 
+  // THE CONTEXT-FOLDER INDEX IS BUDGETED (B-86d3 ②, lane hook-seen-marks): the index listed up to 100 files whatever
+  // their bytes — 12 KB and 20 KB for two real groups — so capInline cut 6 of 13 sessions' SessionStart INSIDE it, every
+  // time (the shared-folder teaching and the activity log after it never arrived). One group's index now spends at most
+  // `tasks.contextIndexBytes` (default 4096; 0 = the 100-file cap only): the NEWEST files that fit, listed in path order,
+  // then ONE line counting the rest and naming where every file is listed. The rules / tools part rides above the index
+  // untouched (it comes first by the law); the 100-file cap stays the upper bound. Returns the index's lines.
+  _indexRows(files, base, gid) {
+    const row = (f) => `- ${agentLine(base)}/${agentLine(f.path)} (${f.size < 1024 ? f.size + ' B' : Math.round(f.size / 1024) + ' KB'})`;
+    const rows = files.map((f) => { const text = row(f); return { f, text, bytes: Buffer.byteLength(text, 'utf-8') + 1 }; });
+    const budget = this.contextIndexBytes();
+    if (!budget || rows.reduce((n, r) => n + r.bytes, 0) <= budget) return rows.map((r) => r.text);
+    const more = (m) => `- … +${m} more (older) — \`vibespace-task ${gid}show --full\` lists every file`;
+    const keep = new Set();
+    let used = Buffer.byteLength(more(rows.length), 'utf-8') + 1;
+    for (const r of [...rows].sort((a, b) => (b.f.mtime || 0) - (a.f.mtime || 0))) {   // newest first (stable: path order on a tie)
+      if (used + r.bytes > budget) break;
+      keep.add(r); used += r.bytes;
+    }
+    return [...rows.filter((r) => keep.has(r)).map((r) => r.text), more(rows.length - keep.size)];
+  }
+
+  // `tasks.contextIndexBytes` as a number (absent ⇒ 4096; 0 = no byte budget)
+  contextIndexBytes() {
+    let raw; try { raw = this._getSetting?.('tasks.contextIndexBytes'); } catch { raw = undefined; }
+    const v = raw === undefined || raw === null || raw === '' ? NaN : Number(raw);
+    return Number.isFinite(v) && v >= 0 ? Math.floor(v) : CONTEXT_INDEX_BYTES;
+  }
+
+  /** The WHOLE context-folder index (≤ 100 files, path order) — what `vibespace-task show --full` lists, where the
+   *  injection's budgeted index points. Paths as the agent reads them (a remote session's synced copy under ctxBase). */
+  contextIndexOf(id, ctxBase = null) {
+    const t = this.get(id);
+    if (!t || !t.contextDir) return null;
+    const base = ctxBase || t.contextDir;
+    return { dir: base, files: this._listContextFiles(t.contextDir).map((f) => ({ path: base + '/' + f.path, size: f.size })) };
+  }
+
+  // THE FIRST PROMPT AFTER A RESTART (B-86d3 ①): the groups whose restored seen marks say "unchanged since you last saw
+  // it" are not repeated — ONE line names them and where their current state is (src/seen-marks.js).
+  renderUnchangedNote(groupIds, { multi = false } = {}) {
+    const ts = (groupIds || []).map((id) => this._state.tasks[id]).filter((t) => t && !t.archived);
+    if (!ts.length) return '';
+    const names = ts.map((t) => `"${agentLine(t.title)}" (${t.id})`).join(', ');
+    return `<vibespace-task-unchanged>VibeSpace restarted; unchanged since you last saw ${ts.length > 1 ? 'them' : 'it'}, so not repeated: ${names} — \`vibespace-task ${multi ? '--group <id> ' : ''}show --full\` prints the current state.</vibespace-task-unchanged>`;
+  }
+
   // The SessionStart injection payload (design §4a): rendered task state +
   // Class-B file INDEX (names only, agents read what they need) + the rules.
   // ctxBase: for REMOTE sessions the context folder is auto-synced to
@@ -672,7 +721,7 @@ class TaskGroupManager {
       const files = this._listContextFiles(t.contextDir);
       if (files.length) {
         parts.push('', 'Files (read what you need with your normal file tools):');
-        for (const f of files) parts.push(`- ${agentLine(base)}/${agentLine(f.path)} (${f.size < 1024 ? f.size + ' B' : Math.round(f.size / 1024) + ' KB'})`);
+        parts.push(...this._indexRows(files, base, multi ? `--group ${t.id} ` : ''));   // B-86d3 ②: byte-budgeted
       } else {
         parts.push('', '(No shared files yet.)');
       }
@@ -1014,7 +1063,7 @@ class TaskGroupManager {
         const base = baseOf(id) || t.contextDir;
         head.push('', `### "${agentLine(t.title)}" → \`${agentLine(base)}\`` + (baseOf(id) ? ' _(live-synced copy, newer file wins, ~1 min lag)_' : ''));
         const files = this._listContextFiles(t.contextDir);
-        if (files.length) for (const f of files) head.push(`- ${agentLine(base)}/${agentLine(f.path)} (${f.size < 1024 ? f.size + ' B' : Math.round(f.size / 1024) + ' KB'})`);
+        if (files.length) head.push(...this._indexRows(files, base, `--group ${id} `));   // B-86d3 ②: byte-budgeted per group
         else head.push('(no shared files yet)');
       }
     }

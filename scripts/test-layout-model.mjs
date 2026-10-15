@@ -18,20 +18,22 @@
 //      record sets arrangement + membership, a phone record membership only
 //   ⑥ THE WIRING in src/lib/layout.js + desktop-manager.js: the ONE slot writer keys by deferKey, the drain asks releaseNext
 //      and drops its `drop`, every apply notes its seq, a reconnect clears the applied seqs, a record arriving while others
-//      wait joins them, the apply's membership-only law asks the same writerClass, a deleted desktop forgets both slots
+//      wait joins them, the apply's layer law asks the same writerClass, a deleted desktop forgets both slots
 //   ⑦ NEGATIVE CONTROLS — patched copies (scripts/mutant-copy.mjs): the single slot restored (F5's move is lost), the drain
 //      in map order (the mirror's membership is undone), no drop (an older record lands after a newer one), the resync
-//      read as a phone record, the phone applying a record's chrome again (inc-mv8l2frb-xkqm), a desktop taking a phone
-//      record's chrome — each turns its own leg RED
-//   ⑧ chromeToApply — THE READ HALF OF GUARD 10 (lane phone-sidebar-chrome, owner inc-mv8l2frb-xkqm: the phone's
-//      full-screen sidebar popped open at every reload and every return from background — the desk's `sidebarOpen` read
-//      back): the table {phone, desktop} × {phone-written, desktop-written, unstamped, a re-read, taken whole, none} ×
-//      {sidebarOpen, grid} — a phone applies NONE; a desktop applies a desktop-class record (a re-read / the boot's restore
-//      / a preset = the record on disk taken whole), never a live phone record's
-//   ⑨ THE CHROME CENSUS (static, acorn — comments and strings never count): every `.sidebar.toggle(` and `.setGrid(` call
-//      in src/lib/layout.js is a CHROME_SITES row (method · call · count), sits in the consequent of an `if` whose test
-//      reads `chrome.<its key>`, and its method declares `chrome` once, from `chromeToApply(this._viewport(), …)`; planted
-//      RED controls: the pre-fix boot apply, the pre-fix live guard, a new door, a forged verdict, a desk-spelled viewport
+//      read as a phone record — each turns its own leg RED (the read half's controls live in test-desktop-record §7)
+//   ⑧ THE READ HALF composes with this predicate (lane phone-sidebar-chrome's table, lane layout-layers-p0's law): the
+//      model keeps no second read rule (chromeToApply / TAKEN_WHOLE folded into desktop-record.js applyForViewport); asked
+//      with writerClass(msg), {phone, desktop} × {phone-written, stamped in the record, desktop-written, unstamped, a
+//      re-read} — a phone applies no record's sidebar / grid; a desktop a desktop-class record's, never a live phone one's
+//   ⑨ THE READ CENSUS (static, acorn — comments and strings never count; THE LAYER LAW, design q-039 P0): every read of a
+//      record's arrangement / chrome / preference field in src/lib/layout.js comes off a subset applyForViewport handed
+//      the page (a binding of its answer, an alias of one, arrangementFor of one, or a RECEIVER's parameter every caller
+//      hands a subset) or a PAGE object (this, win, winInfo, el, Math) — else RED by name, bar one DECLARED row; every ask
+//      is a READ_SITES row (method · source · count), spelled applyForViewport(this._viewport(), …), a remote one with
+//      writerClass(msg); `membershipOnly` is gone. Ten planted RED controls (the pre-fix live sidebar, the pre-fix boot
+//      grid, a raw box apply, a forged subset, a desk-spelled viewport, a phone writer read as a desk, a preset asking as
+//      the boot, membershipOnly back, a receiver fed the record, a new door off the raw record) + the blind-spot control
 import path from 'node:path';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
@@ -144,39 +146,30 @@ function legs(Mod, { quiet = false } = {}) {
     }
     leg(!bad && shapes.size > 1000, `⑤ DEFERRAL IS INVISIBLE: ${runs} random arrival sequences (${shapes.size} distinct) (2 desktops; phone / desktop / unstamped / unknown) deferred and released end where applying each LIVE in arrival order ends`, J(bad));
   }
-  // ⑧ chromeToApply — the read half of guard 10
-  if (typeof Mod.chromeToApply === 'function') {
-    const KEYS = require(path.join(REPO, 'src/lib/desktop-record.js')).VIEWPORT_CHROME;
+  // ⑧ THE READ HALF composes with this predicate: desktop-record.js applyForViewport asked with writerClass(msg)
+  {
+    const DR = require(path.join(REPO, 'src/lib/desktop-record.js'));
+    leg(!('chromeToApply' in Mod) && !('TAKEN_WHOLE' in Mod), '⑧ the model keeps no second read rule — chromeToApply / TAKEN_WHOLE folded into desktop-record.js applyForViewport (the layer law: one function, not two)');
     const RECORDS = [
       ['phone-written (live)', rec(1, 'd', 'phone'), false],
-      ['phone-written (stamp in the record)', { desktopId: 'd', state: { viewport: 'phone' } }, false],
+      ['phone-written (stamp in the record)', { desktopId: 'd', state: { viewport: 'phone', windows: [] } }, false],
       ['desktop-written (live)', rec(1, 'd', 'desktop'), true],
       ['unstamped (a pre-.264 sender)', rec(1, 'd'), true],
-      ['a re-read of a phone-written record', { desktopId: 'd', resync: true, state: { viewport: 'phone' } }, true],
-      ['TAKEN_WHOLE (the boot restore, a preset)', Mod.TAKEN_WHOLE, true],
-      ['none named (a bare apply)', null, true],
+      ['a re-read of a phone-written record', { desktopId: 'd', resync: true, state: { viewport: 'phone', windows: [] } }, true],
     ];
-    const table = [];
-    let keysOk = true, phoneNone = true;
-    const deskBad = [];
-    for (const viewport of ['phone', 'desktop']) {
-      for (const [label, msg, deskApplies] of RECORDS) {
-        const v = Mod.chromeToApply(viewport, msg);
-        if (J(Object.keys(v || {})) !== J(KEYS)) keysOk = false;
-        const want = viewport === 'phone' ? false : deskApplies;
-        for (const k of KEYS) {
-          table.push(`${viewport} × ${label} × ${k} → ${v && v[k] ? 'apply' : 'keep'}`);
-          if (!!(v && v[k]) !== want) { if (viewport === 'phone') phoneNone = false; else deskBad.push(`${label} × ${k}`); }
-        }
-      }
+    const table = [], bad = [];
+    for (const viewport of ['phone', 'desktop']) for (const [label, msg, deskApplies] of RECORDS) {
+      const v = DR.applyForViewport(viewport, { ...msg.state, sidebarOpen: true, grid: { rows: 1, cols: 3 } }, { source: 'remote', writer: Mod.writerClass(msg) });
+      const got = (v.chrome && v.chrome.sidebarOpen ? 'sidebar' : '-') + ' · ' + (v.arrangement && v.arrangement.grid ? 'grid' : '-');
+      const want = viewport === 'desktop' && deskApplies ? 'sidebar · grid' : '- · -';
+      table.push(`${viewport} × ${label} → ${got}`);
+      if (got !== want) bad.push(`${viewport} × ${label}: ${got} (want ${want})`);
     }
     if (!quiet) console.log('    ⑧ ' + table.join('\n    ⑧ '));
-    leg(keysOk, '⑧ chromeToApply answers every VIEWPORT_CHROME key (sidebarOpen, grid) and nothing else', J(KEYS));
-    leg(phoneNone, '⑧ a PHONE applies none of any record\'s chrome — its sidebar is a modal it opens itself, it never sets a grid (inc-mv8l2frb-xkqm)', J(table.filter((r) => r.startsWith('phone') && r.endsWith('apply'))));
-    leg(!deskBad.some((x) => x.startsWith('phone-written')), '⑧ a DESKTOP applies a phone-written live record\'s chrome: none (membership + content only — by class)', J(deskBad));
-    leg(!deskBad.some((x) => !x.startsWith('phone-written')), '⑧ a DESKTOP applies a desktop-written, an unstamped, a re-read and a taken-whole record\'s chrome (today\'s path)', J(deskBad));
-    leg(Mod.chromeToApply('desktop', Mod.TAKEN_WHOLE).grid === true && Mod.writerClass(Mod.TAKEN_WHOLE) === 'desktop' && Object.isFrozen(Mod.TAKEN_WHOLE), '⑧ TAKEN_WHOLE is the writer predicate\'s re-read (frozen): a desktop booting on the record the phone wrote last keeps its own grid');
-  } else leg(false, '⑧ chromeToApply is exported by the model');
+    leg(!bad.some((b) => b.startsWith('phone')), '⑧ a PHONE applies no record\'s sidebar or grid, by any writer (inc-mv8l2frb-xkqm) — applyForViewport × writerClass', J(bad));
+    leg(!bad.some((b) => b.startsWith('desktop') && b.includes('phone-written')), '⑧ a DESKTOP applies a phone-written live record\'s sidebar / grid: none (membership only — by class)', J(bad));
+    leg(!bad.some((b) => b.startsWith('desktop') && !b.includes('phone-written')), '⑧ a DESKTOP applies a desktop-written, an unstamped and a re-read record\'s sidebar / grid (a re-read is the record on disk taken whole)', J(bad));
+  }
   return failed;
 }
 
@@ -189,7 +182,7 @@ console.log('— ⑥ the wiring (src/lib/layout.js, src/lib/desktop-manager.js)'
 {
   const L = fs.readFileSync(path.join(REPO, 'src/lib/layout.js'), 'utf8');
   const D = fs.readFileSync(path.join(REPO, 'src/lib/desktop-manager.js'), 'utf8');
-  ok(/import \{ writerClass, deferKey, deferKeysOf, releaseNext, noteApplied, chromeToApply, TAKEN_WHOLE \} from '\.\/layout-model\.js';/.test(L) && /import \{ deferKeysOf \} from '\.\/layout-model\.js';/.test(D), '⑥ layout.js and desktop-manager.js import the model (the ONE rule, no copy)');
+  ok(/import \{ writerClass, deferKey, deferKeysOf, releaseNext, noteApplied \} from '\.\/layout-model\.js';/.test(L) && /import \{ applyForViewport, arrangementFor \} from '\.\/desktop-record\.js';/.test(L) && /import \{ deferKeysOf \} from '\.\/layout-model\.js';/.test(D), '⑥ layout.js and desktop-manager.js import the model (the ONE rule, no copy)');
   const libFiles = fs.readdirSync(path.join(REPO, 'src/lib')).filter((f) => f.endsWith('.js'));
   const writers = libFiles.flatMap((f) => (fs.readFileSync(path.join(REPO, 'src/lib', f), 'utf8').match(/_pendingRemote\??\.set\(/g) || []).map(() => f));
   ok(J(writers) === J(['layout.js']) && L.includes('    this._pendingRemote.set(deferKey(msg), msg);\n'), '⑥ ONE writer of the deferred slot in src/lib (layout.js _deferRemote), keyed by deferKey — desktop AND writer class', J(writers));
@@ -197,80 +190,159 @@ console.log('— ⑥ the wiring (src/lib/layout.js, src/lib/desktop-manager.js)'
   ok(/  _handleRemoteSync\(msg\) \{\n    noteApplied\(this\._appliedSeq, msg\);/.test(L), '⑥ every apply (live, drained, re-read, cached) notes its seq first');
   ok(/app\.ws\.onStateChange\(\(connected\) => \{ if \(connected\) this\._appliedSeq\.clear\(\); \}\);/.test(L) && /this\._lastRemoteSeq = 0;/.test(L), '⑥ a reconnect clears the applied seqs with `_lastRemoteSeq` (the server\'s seq restarts with the socket — guard 1)');
   ok(L.includes('      if (this._restoring || this._pointerDown || this._pendingRemote.size) { this._deferRemote(msg); return; }\n'), '⑥ a record that arrives while others still wait (the drain after a pointerup) joins them — never applied before an older one');
-  ok(L.includes("    const membershipOnly = writerClass(msg) === 'phone' && !this.app.isMobile;") && !/\(msg\.viewport \?\? msg\.state\?\.viewport\) === 'phone'/.test(L), '⑥ the apply\'s membership-only law (guard 10) asks the SAME writerClass the slot keys by — no second spelling');
+  ok(L.includes("    this._applyRemoteState(msg.state, { closeOnlyWired: !!msg.resync, receivedAt, writer: writerClass(msg) });") && !/\(msg\.viewport \?\? msg\.state\?\.viewport\) === 'phone'/.test(L), '⑥ the apply\'s layer law (guard 10) asks the SAME writerClass the slot keys by — no second spelling');
   ok(/const phoneKey = deferKeysOf\(key\)\[1\], phonePend = this\._pendingRemote\.get\(phoneKey\);\n\s+if \(phonePend && \(phonePend\.receivedAt \|\| 0\) < startedAt\) this\._pendingRemote\.delete\(phoneKey\);/.test(L), '⑥ the re-read drops a phone record deferred BEFORE it was asked (the read holds it), keeps one received while it was in flight');
   ok(D.includes('for (const k of deferKeysOf(id)) this.app.layoutManager?._pendingRemote?.delete(k);'), '⑥ a deleted desktop forgets BOTH its deferred slots (never a ghost phone record the drain fills)');
   ok(/if \(msg\.seq <= this\._lastRemoteSeq\) return;/.test(L) && /const EPS = 0\.002;/.test(L), '⑥ guards 1 and 4 untouched (the seq drop of a stale echo; the 0.002 apply epsilon)');
 }
 
-// ⑨ THE CHROME CENSUS — every record-chrome apply in src/lib/layout.js asks chromeToApply (acorn: comments / strings never count)
-console.log('— ⑨ the chrome census (src/lib/layout.js, acorn)');
+// ⑨ THE READ CENSUS — THE LAYER LAW's read half over src/lib/layout.js (acorn: comments / strings never count)
+console.log('— ⑨ the read census (src/lib/layout.js, acorn)');
 const acorn = require('acorn');
-const CHROME_SITES = [
-  // [enclosing method, call, count] — the call sits in the consequent of an `if` whose test reads chrome.<key>
-  ['_applyRemoteState', 'setGrid', 1, 'grid'], ['_applyRemoteState', 'sidebar.toggle', 1, 'sidebarOpen'], // a live record / the reconnect's re-read
-  ['restoreState', 'setGrid', 1, 'grid'], ['restoreState', 'sidebar.toggle', 1, 'sidebarOpen'], // the boot's restore (TAKEN_WHOLE)
-  ['loadPreset', 'setGrid', 2, 'grid'], ['loadPreset', 'sidebar.toggle', 1, 'sidebarOpen'], // a preset the person loads (TAKEN_WHOLE)
+const DRM = require(path.join(REPO, 'src/lib/desktop-record.js'));
+/** The fields of a record a page applies only through applyForViewport's subsets (arrangement · chrome · preference). */
+const LAYERED = new Set(DRM.LAYERS.filter((r) => ['arrangement', 'chrome', 'preference'].includes(r.layer)).flatMap((r) => r.fields));
+/** Roots that are THIS page's own objects, never a record: its state (`this`), a live window the apply targets (win /
+ *  winInfo), a window's element (el), Math. A layered read off any other root is a record's. */
+const PAGE = ['this', 'win', 'winInfo', 'el', 'Math'];
+/** Every ask: [method, source, calls] — applyForViewport(this._viewport(), record, { source, … }). */
+const READ_SITES = [
+  ['_handleRemoteSync', 'remote', 1], // the bars, before the desktop gate (2.252.2)
+  ['_applyRemoteState', 'remote', 1], // a live record / the reconnect's re-read
+  ['restoreState', 'boot', 1], // the boot's restore, a desktop switch's
+  ['loadAutoSave', 'boot', 1], // the boot's bar heal
+  ['loadPreset', 'preset', 1], // a preset the person loads
 ];
-const isMember = (n, prop) => n && n.type === 'MemberExpression' && !n.computed && n.property && n.property.name === prop;
-const reads = (n, key) => { let hit = false; const v = (x) => { if (hit || !x || typeof x.type !== 'string') return; if (isMember(x, key) && x.object.type === 'Identifier' && x.object.name === 'chrome') { hit = true; return; } for (const k of Object.keys(x)) { const c = x[k]; if (Array.isArray(c)) c.forEach(v); else if (c && typeof c.type === 'string') v(c); } }; v(n); return hit; };
-/** layout.js text → { tally: Map('method · call' → n), unguarded: [], unbound: [], unknown: [], dead: [] } against CHROME_SITES. */
-function chromeCensus(text) {
+/** Methods whose parameter IS a subset — every call hands it one: [method, param, argument index | property name]. */
+const RECEIVERS = [['_applyToolbarState', 'state', 0], ['_createRemoteWindow', 'arrangement', 'arrangement']];
+/** A layered read off a record outside the law, named with its why: [unit, read]. */
+const DECLARED = [
+  ['scanStoppedInDesktopStates', 'ws.gridBounds'], // the resume offer hands a held record's box to the resume door (desktop-manager places the window on ITS desktop; a phone's capture carries the held box back — belt 1)
+];
+const isFn = (n) => n && (n.type === 'FunctionDeclaration' || n.type === 'FunctionExpression' || n.type === 'ArrowFunctionExpression');
+const isViewportAsk = (n) => n && n.type === 'CallExpression' && n.callee.type === 'MemberExpression' && !n.callee.computed && n.callee.property.name === '_viewport' && n.callee.object.type === 'ThisExpression' && n.arguments.length === 0;
+const propOf = (obj, name) => obj && obj.type === 'ObjectExpression' ? obj.properties.find((p) => p.type === 'Property' && !p.computed && (p.key.name || p.key.value) === name) : null;
+const textOf = (n) => n.type === 'ThisExpression' ? 'this' : n.type === 'Identifier' ? n.name : n.type === 'MemberExpression' && !n.computed ? textOf(n.object) + '.' + n.property.name : n.type === 'CallExpression' ? textOf(n.callee) + '(…)' : n.type === 'ChainExpression' ? textOf(n.expression) : '‹' + n.type + '›';
+/** layout.js text → the census: strays (a record's layered field read outside the law), asks per site, bad asks, bad
+ *  receiver calls, the retired name, and the tallies. */
+function readCensus(text) {
   const ast = acorn.parse(text, { ecmaVersion: 'latest', sourceType: 'module', locations: true });
-  const tally = new Map(), unguarded = [], methods = new Map();
+  const scopes = new Map(); // fn node → Map(name → [{ kind, expr, anc }])
+  const unitOf = (anc) => { for (let i = anc.length - 1; i >= 0; i--) { const a = anc[i]; if (a.type === 'MethodDefinition') return a.key.name; if (a.type === 'FunctionDeclaration' && a.id) return a.id.name; } return '(top level)'; };
+  const fnOf = (anc) => { for (let i = anc.length - 1; i >= 0; i--) if (isFn(anc[i])) return anc[i]; return null; };
+  const declare = (fn, name, d) => { if (!scopes.has(fn)) scopes.set(fn, new Map()); const m = scopes.get(fn); if (!m.has(name)) m.set(name, []); m.get(name).push(d); };
+  const patNames = (p, out = []) => { if (!p) return out; if (p.type === 'Identifier') out.push(p.name); else if (p.type === 'AssignmentPattern') patNames(p.left, out); else if (p.type === 'ObjectPattern') p.properties.forEach((q) => patNames(q.type === 'RestElement' ? q.argument : q.value, out)); else if (p.type === 'ArrayPattern') p.elements.forEach((q) => patNames(q, out)); else if (p.type === 'RestElement') patNames(p.argument, out); return out; };
+  const reads = [], asks = [], calls = [], retired = [];
   const visit = (node, anc) => {
     if (!node || typeof node.type !== 'string') return;
-    if (node.type === 'MethodDefinition' && node.key) methods.set(node, { name: node.key.name, decls: [], assigns: 0 });
-    const meth = () => { for (let i = anc.length - 1; i >= 0; i--) if (anc[i].type === 'MethodDefinition') return anc[i]; return null; };
-    if (node.type === 'VariableDeclarator' && node.id.type === 'Identifier' && node.id.name === 'chrome') { const m = meth(); if (m) methods.get(m).decls.push(node.init); }
-    if (node.type === 'AssignmentExpression' && node.left.type === 'Identifier' && node.left.name === 'chrome') { const m = meth(); if (m) methods.get(m).assigns++; }
-    if (node.type === 'CallExpression' && node.callee.type === 'MemberExpression' && !node.callee.computed) {
-      const p = node.callee.property.name;
-      const call = p === 'setGrid' ? 'setGrid' : p === 'toggle' && isMember(node.callee.object, 'sidebar') ? 'sidebar.toggle' : null;
-      if (call) {
-        const m = meth(), name = m ? m.key.name : '(top level)', key = call === 'setGrid' ? 'grid' : 'sidebarOpen';
-        const k = `${name} · ${call}`;
-        tally.set(k, (tally.get(k) || 0) + 1);
-        const chain = [...anc, node];
-        const guarded = chain.some((a, i) => a.type === 'IfStatement' && chain[i + 1] === a.consequent && reads(a.test, key));
-        if (!guarded) unguarded.push(`${k} (line ${node.loc.start.line})`);
-      }
+    if (isFn(node)) { if (!scopes.has(node)) scopes.set(node, new Map()); for (const p of node.params) for (const n of patNames(p)) declare(node, n, { kind: 'param', fn: node, anc: [...anc, node] }); }
+    if (node.type === 'VariableDeclarator') {
+      const fn = fnOf(anc);
+      if (node.id.type === 'Identifier') declare(fn, node.id.name, { kind: 'init', expr: node.init, anc });
+      else for (const n of patNames(node.id)) declare(fn, n, { kind: 'pattern', expr: node.init, anc });
     }
+    if (node.type === 'AssignmentExpression' && node.left.type === 'Identifier') declare(fnOf(anc), node.left.name, { kind: 'assign', expr: node.right, anc });
+    if (node.type === 'Identifier' && node.name === 'membershipOnly') retired.push(`${unitOf(anc)} (line ${node.loc.start.line})`);
+    if (node.type === 'MemberExpression' && !node.computed && LAYERED.has(node.property.name)) {
+      const parent = anc[anc.length - 1];
+      if (!(parent && parent.type === 'AssignmentExpression' && parent.left === node)) reads.push({ node, anc });
+    }
+    if (node.type === 'CallExpression' && node.callee.type === 'Identifier' && node.callee.name === 'applyForViewport') asks.push({ node, anc });
+    if (node.type === 'CallExpression' && node.callee.type === 'MemberExpression' && !node.callee.computed && node.callee.object.type === 'ThisExpression') calls.push({ node, anc, name: node.callee.property.name });
     for (const k of Object.keys(node)) { if (k === 'loc') continue; const c = node[k]; if (Array.isArray(c)) c.forEach((x) => visit(x, [...anc, node])); else if (c && typeof c.type === 'string') visit(c, [...anc, node]); }
   };
   visit(ast, []);
-  const asks = (init) => !!init && init.type === 'CallExpression' && init.callee.type === 'Identifier' && init.callee.name === 'chromeToApply' && init.arguments.length === 2
-    && init.arguments[0].type === 'CallExpression' && isMember(init.arguments[0].callee, '_viewport') && init.arguments[0].callee.object.type === 'ThisExpression';
-  const sited = new Set([...tally.keys()].map((k) => k.split(' · ')[0]));
-  const unbound = [...methods.values()].filter((m) => sited.has(m.name) && !(m.decls.length === 1 && asks(m.decls[0]) && !m.assigns)).map((m) => m.name);
+  // a name's declarations, by the nearest enclosing function that declares it (lexical, function-scoped)
+  const resolve = (name, anc) => { for (let i = anc.length - 1; i >= 0; i--) if (isFn(anc[i]) && scopes.get(anc[i])?.has(name)) return { fn: anc[i], decls: scopes.get(anc[i]).get(name) }; return null; };
+  const receiverOf = (fn, name, anc) => { const m = [...anc].reverse().find((a) => a.type === 'MethodDefinition'); return !!m && m.value === fn && RECEIVERS.some(([meth, param]) => meth === m.key.name && param === name); };
+  const memo = new Map();
+  const subsetName = (name, anc) => {
+    const r = resolve(name, anc);
+    if (!r) return false;
+    const key = r.decls;
+    if (memo.has(key)) return memo.get(key);
+    memo.set(key, false); // a cycle is no subset
+    const v = r.decls.every((d) => d.kind === 'param' ? receiverOf(r.fn, name, d.anc) : (d.kind === 'init' || d.kind === 'pattern') && subsetExpr(d.expr, d.anc));
+    memo.set(key, v);
+    return v;
+  };
+  const isNull = (n) => n && ((n.type === 'Literal' && n.value === null) || (n.type === 'Identifier' && n.name === 'undefined'));
+  function subsetExpr(n, anc) {
+    if (!n) return false;
+    if (n.type === 'ChainExpression') return subsetExpr(n.expression, anc);
+    if (n.type === 'CallExpression' && n.callee.type === 'Identifier' && n.callee.name === 'applyForViewport') return true; // the ask itself is judged below
+    if (n.type === 'CallExpression' && n.callee.type === 'Identifier' && n.callee.name === 'arrangementFor') return subsetExpr(n.arguments[0], anc);
+    if (n.type === 'MemberExpression') return subsetExpr(n.object, anc);
+    if (n.type === 'Identifier') return subsetName(n.name, anc);
+    if (n.type === 'LogicalExpression') return (subsetExpr(n.left, anc) || isNull(n.left)) && (subsetExpr(n.right, anc) || isNull(n.right));
+    if (n.type === 'ConditionalExpression') return (subsetExpr(n.consequent, anc) || isNull(n.consequent)) && (subsetExpr(n.alternate, anc) || isNull(n.alternate));
+    return false;
+  }
+  const baseOf = (n) => { while (n.type === 'MemberExpression' || n.type === 'ChainExpression') n = n.type === 'ChainExpression' ? n.expression : n.object; return n; };
+  const strays = [], tally = { page: 0, subset: 0, declared: 0 };
+  for (const { node, anc } of reads) {
+    const base = baseOf(node.object), unit = unitOf(anc), read = `${textOf(node.object)}.${node.property.name}`;
+    const root = base.type === 'ThisExpression' ? 'this' : base.type === 'Identifier' ? base.name : null;
+    if (root && PAGE.includes(root)) { tally.page++; continue; }
+    if (subsetExpr(node.object, anc)) { tally.subset++; continue; }
+    if (DECLARED.some(([u, r]) => u === unit && r === read)) { tally.declared++; continue; }
+    strays.push(`${unit} · ${read} (line ${node.loc.start.line})`);
+  }
+  // the asks: spelled with this page's class, a known source, a remote one with the ONE writer predicate
+  const sites = new Map(), badAsks = [];
+  const fedByWriterClass = (method) => calls.filter((c) => c.name === method).every((c) => { const w = propOf(c.node.arguments[1], 'writer'); return w && w.value.type === 'CallExpression' && w.value.callee.name === 'writerClass'; }) && calls.some((c) => c.name === method);
+  for (const { node, anc } of asks) {
+    const unit = unitOf(anc), opts = node.arguments[2], src = propOf(opts, 'source'), source = src && src.value.type === 'Literal' ? src.value.value : '?';
+    const k = `${unit} · ${source}`; sites.set(k, (sites.get(k) || 0) + 1);
+    if (!isViewportAsk(node.arguments[0])) badAsks.push(`${unit}: the class is not this page's (${textOf(node.arguments[0])})`);
+    if (!['remote', 'boot', 'preset'].includes(source)) badAsks.push(`${unit}: source ${source}`);
+    if (source === 'remote') {
+      const w = propOf(opts, 'writer');
+      const ok = w && ((w.value.type === 'CallExpression' && w.value.callee.name === 'writerClass') || (w.value.type === 'Identifier' && resolve(w.value.name, anc)?.decls.every((d) => d.kind === 'param') && fedByWriterClass(unit)));
+      if (!ok) badAsks.push(`${unit}: a remote ask whose writer is not writerClass(msg)`);
+    }
+  }
   const rowKey = (r) => `${r[0]} · ${r[1]}`;
-  const unknown = [...tally].filter(([k, n]) => { const r = CHROME_SITES.find((x) => rowKey(x) === k); return !r || r[2] !== n; }).map(([k, n]) => `${k} ×${n}`);
-  const dead = CHROME_SITES.filter((r) => !tally.has(rowKey(r))).map(rowKey);
-  return { tally, unguarded, unbound, unknown, dead };
+  const unknownSites = [...sites].filter(([k, n]) => { const r = READ_SITES.find((x) => rowKey(x) === k); return !r || r[2] !== n; }).map(([k, n]) => `${k} ×${n}`);
+  const deadSites = READ_SITES.filter((r) => !sites.has(rowKey(r))).map(rowKey);
+  // the receivers: every call hands the parameter a subset
+  const badReceivers = [];
+  for (const [method, , at] of RECEIVERS) for (const c of calls.filter((x) => x.name === method)) {
+    const arg = typeof at === 'number' ? c.node.arguments[at] : propOf(c.node.arguments[1], at)?.value;
+    if (!subsetExpr(arg, c.anc)) badReceivers.push(`${unitOf(c.anc)} → ${method}(${arg ? textOf(arg) : 'nothing'}) (line ${c.node.loc.start.line})`);
+  }
+  return { strays, sites, unknownSites, deadSites, badAsks, badReceivers, retired, tally };
 }
-const censusGreen = (c) => !c.unguarded.length && !c.unbound.length && !c.unknown.length && !c.dead.length;
+const readGreen = (c) => !c.strays.length && !c.unknownSites.length && !c.deadSites.length && !c.badAsks.length && !c.badReceivers.length && !c.retired.length;
 {
   const L = fs.readFileSync(path.join(REPO, 'src/lib/layout.js'), 'utf8');
-  const c = chromeCensus(L);
-  console.log('    ⑨ sites: ' + [...c.tally].map(([k, n]) => `${k} ×${n}`).join(' | '));
-  ok(c.tally.size === CHROME_SITES.length && !c.unknown.length && !c.dead.length, `⑨ every sidebar.toggle / setGrid call in layout.js (${[...c.tally.values()].reduce((a, b) => a + b, 0)}) is a CHROME_SITES row — none unnamed, no dead row`, J({ unknown: c.unknown, dead: c.dead }));
-  ok(!c.unguarded.length, '⑨ each sits in the consequent of an `if` that reads chrome.<its key> (sidebarOpen / grid)', J(c.unguarded));
-  ok(!c.unbound.length, '⑨ each of their methods declares `chrome` ONCE, from chromeToApply(this._viewport(), …) — never reassigned', J(c.unbound));
+  const c = readCensus(L);
+  console.log(`    ⑨ asks: ${[...c.sites].map(([k, n]) => `${k} ×${n}`).join(' | ')} — layered reads: ${c.tally.subset} off a subset, ${c.tally.page} off the page, ${c.tally.declared} declared`);
+  ok(!c.unknownSites.length && !c.deadSites.length, `⑨ every applyForViewport ask in layout.js is a READ_SITES row (${READ_SITES.length} sites: remote ×2, boot ×2, preset) — none unnamed, no dead row`, J({ unknown: c.unknownSites, dead: c.deadSites }));
+  ok(!c.badAsks.length, '⑨ each asks with this page\'s class — applyForViewport(this._viewport(), …) — a known source, and a remote one with the ONE writer predicate (writerClass(msg), straight or through the apply\'s `writer`)', J(c.badAsks));
+  ok(!c.strays.length && c.tally.subset >= 40, `⑨ every read of a record's arrangement / chrome / preference field comes off applyForViewport's subsets (${c.tally.subset}) or the page's own objects (${c.tally.page}) — 0 off a raw record, ${c.tally.declared} declared (the resume offer's box)`, J(c.strays));
+  ok(!c.badReceivers.length, '⑨ every call of a receiver (_applyToolbarState, _createRemoteWindow\'s arrangement) hands it a subset, never the record', J(c.badReceivers));
+  ok(!c.retired.length && !L.includes('membershipOnly') && !L.includes('chromeToApply'), '⑨ `membershipOnly` and chromeToApply are gone from layout.js (code and comments) — the table replaced the special case', J(c.retired));
   const PLANTS = [
-    { tag: 'pre-fix boot apply', find: '    if (state.sidebarOpen !== undefined && chrome.sidebarOpen) {\n      this.app.sidebar.toggle(state.sidebarOpen);', repl: '    if (state.sidebarOpen !== undefined) {\n      this.app.sidebar.toggle(state.sidebarOpen);', red: (x) => x.unguarded.some((u) => u.startsWith('restoreState · sidebar.toggle')) },
-    { tag: 'pre-fix live guard', find: 'state.sidebarOpen !== undefined && chrome.sidebarOpen && state.sidebarOpen', repl: 'state.sidebarOpen !== undefined && !membershipOnly && state.sidebarOpen', red: (x) => x.unguarded.some((u) => u.startsWith('_applyRemoteState · sidebar.toggle')) },
-    { tag: 'a new door', find: '    const membershipOnly = writerClass(msg) === \'phone\' && !this.app.isMobile;', repl: '    if (msg.state && chrome.sidebarOpen) this.app.sidebar.toggle(msg.state.sidebarOpen);\n    const membershipOnly = writerClass(msg) === \'phone\' && !this.app.isMobile;', red: (x) => x.unknown.some((u) => u.startsWith('_handleRemoteSync · sidebar.toggle')) && x.unbound.includes('_handleRemoteSync') },
-    { tag: 'a forged verdict', find: '    const chrome = chromeToApply(this._viewport(), TAKEN_WHOLE);\n    if (state.grid && chrome.grid) {', repl: '    const chrome = { sidebarOpen: true, grid: true };\n    if (state.grid && chrome.grid) {', red: (x) => x.unbound.includes('restoreState') },
-    { tag: 'a desk-spelled viewport', find: 'const chrome = chromeToApply(this._viewport(), from);', repl: "const chrome = chromeToApply('desktop', from);", red: (x) => x.unbound.includes('_applyRemoteState') },
+    { tag: 'the pre-fix live sidebar', find: '      if (chrome && chrome.sidebarOpen !== undefined && chrome.sidebarOpen !== this.app.sidebar.isOpen) {\n        this.app.sidebar.toggle(chrome.sidebarOpen);', repl: '      if (state.sidebarOpen !== undefined && state.sidebarOpen !== this.app.sidebar.isOpen) {\n        this.app.sidebar.toggle(state.sidebarOpen);', red: (x) => x.strays.some((s) => s.startsWith('_applyRemoteState · state.sidebarOpen')) },
+    { tag: 'the pre-fix boot grid', find: '    if (arrangement && arrangement.grid) {\n      this.app.wm.setGrid(arrangement.grid.rows, arrangement.grid.cols);\n    }\n\n    // Restore taskbar height', repl: '    if (state.grid) {\n      this.app.wm.setGrid(state.grid.rows, state.grid.cols);\n    }\n\n    // Restore taskbar height', red: (x) => x.strays.some((s) => s.startsWith('restoreState · state.grid')) },
+    { tag: 'a raw box apply', find: '          if (a && a.gridBounds && !heldGeom) {', repl: '          if (rw.gridBounds && !heldGeom) {', red: (x) => x.strays.some((s) => s.startsWith('_applyRemoteState · rw.gridBounds')) },
+    { tag: 'a forged subset', find: "    const layers = applyForViewport(this._viewport(), state, { source: 'boot' });", repl: '    const layers = { arrangement: state, chrome: state, preference: state };', red: (x) => x.strays.some((s) => s.startsWith('restoreState · arrangement.grid')) && x.deadSites.includes('restoreState · boot') },
+    { tag: 'a desk-spelled viewport', find: "applyForViewport(this._viewport(), state, { source: 'remote', writer })", repl: "applyForViewport('desktop', state, { source: 'remote', writer })", red: (x) => x.badAsks.some((b) => b.startsWith('_applyRemoteState: the class')) },
+    { tag: 'a phone writer read as a desk', find: '{ closeOnlyWired: !!msg.resync, receivedAt, writer: writerClass(msg) }', repl: "{ closeOnlyWired: !!msg.resync, receivedAt, writer: 'desktop' }", red: (x) => x.badAsks.some((b) => b.startsWith('_applyRemoteState: a remote ask')) },
+    { tag: 'a preset asking as the boot', find: "applyForViewport(this._viewport(), preset, { source: 'preset' })", repl: "applyForViewport(this._viewport(), preset, { source: 'boot' })", red: (x) => x.unknownSites.some((u) => u.startsWith('loadPreset · boot')) && x.deadSites.includes('loadPreset · preset') },
+    { tag: 'membershipOnly back', find: '    this._applyRemoteState(msg.state, { closeOnlyWired', repl: "    const membershipOnly = writerClass(msg) === 'phone' && !this.app.isMobile;\n    this._applyRemoteState(msg.state, { closeOnlyWired", red: (x) => x.retired.some((r) => r.startsWith('_handleRemoteSync')) },
+    { tag: 'a receiver fed the record', find: '    if (chrome) this._applyToolbarState(chrome); // incl. explicit-null reset', repl: '    this._applyToolbarState(state); // incl. explicit-null reset', red: (x) => x.badReceivers.some((b) => b.startsWith('restoreState → _applyToolbarState(state)')) },
+    { tag: 'a new door off the raw record', find: '    if (msg.desktopMeta && dm) dm.updateFromMeta(msg.desktopMeta);', repl: '    if (msg.state && msg.state.theme) this.app.themeManager.apply(msg.state.theme);\n    if (msg.desktopMeta && dm) dm.updateFromMeta(msg.desktopMeta);', red: (x) => x.strays.some((s) => s.startsWith('_handleRemoteSync · msg.state.theme')) },
   ];
   for (const p of PLANTS) {
-    if (!ok(L.includes(p.find), `⑨ RED control ${p.tag}: the planted line exists in layout.js (the control judges this source)`)) continue;
-    const x = chromeCensus(L.replace(p.find, p.repl));
-    ok(!censusGreen(x) && p.red(x), `⑨ RED control ${p.tag}: the census turns RED and names it`, J({ unguarded: x.unguarded, unbound: x.unbound, unknown: x.unknown }));
+    if (!ok(L.split(p.find).length === 2, `⑨ RED control ${p.tag}: the planted line exists once in layout.js (the control judges this source)`)) continue;
+    const x = readCensus(L.replace(p.find, p.repl));
+    ok(!readGreen(x) && p.red(x), `⑨ RED control ${p.tag}: the census turns RED and names it`, J({ strays: x.strays, badAsks: x.badAsks, unknown: x.unknownSites, dead: x.deadSites, receivers: x.badReceivers, retired: x.retired }));
   }
-  // the blind-spot control: the same call text in a comment and in a string is no call (a regex census would count both)
-  const blind = chromeCensus(L.replace('  _applyRemoteState(state, {', "  // this.app.sidebar.toggle(state.sidebarOpen); this.app.wm.setGrid(1, 3);\n  _blind() { return 'this.app.sidebar.toggle(state.sidebarOpen); this.app.wm.setGrid(1, 3)'; }\n  _applyRemoteState(state, {"));
-  ok(censusGreen(blind) && J([...blind.tally]) === J([...c.tally]), '⑨ control: the call text inside a comment and a string counts nothing (acorn reads code only)', J([...blind.tally]));
+  // the blind-spot control: the same reads in a comment and in a string are no read (a regex census would count both)
+  const blind = readCensus(L.replace('  _applyRemoteState(state, {', "  // if (state.sidebarOpen) this.app.sidebar.toggle(state.sidebarOpen); rw.gridBounds\n  _blind() { return 'state.sidebarOpen rw.gridBounds msg.state.theme'; }\n  _applyRemoteState(state, {"));
+  ok(readGreen(blind) && blind.tally.subset === c.tally.subset, '⑨ control: the reads inside a comment and a string count nothing (acorn reads code only)', J({ strays: blind.strays }));
 }
 
 console.log('— ⑦ negative controls (patched copies, scripts/mutant-copy.mjs)');
@@ -280,8 +352,6 @@ const MUTANTS = [
   { tag: 'drain-in-map-order', find: '    if (!next || seq < seqOf(next[1])) next = e;', repl: '    if (!next) next = e;', expect: /lowest seq goes first|④ the mirror|DEFERRAL IS INVISIBLE/ },
   { tag: 'no-drop', find: '    if (seq > 0 && applied && seq <= (Number(applied.get(desktopOf(e[1]))) || 0)) { drop.push(e[0]); continue; }\n', repl: '\n', expect: /never applied backwards/ },
   { tag: 'resync-as-phone', find: "  if (!msg || msg.resync) return 'desktop';\n", repl: "  if (!msg) return 'desktop';\n", expect: /re-read \(resync\) of a phone-written record/ },
-  { tag: 'phone-applies-chrome', find: "  const on = viewport !== 'phone' && writerClass(msg) === 'desktop';", repl: "  const on = writerClass(msg) === 'desktop';", expect: /⑧ a PHONE applies none/ },
-  { tag: 'desk-takes-phone-chrome', find: "  const on = viewport !== 'phone' && writerClass(msg) === 'desktop';", repl: "  const on = viewport !== 'phone';", expect: /⑧ a DESKTOP applies a phone-written live record/ },
 ];
 for (const m of MUTANTS) {
   const found = SRC.includes(m.find);

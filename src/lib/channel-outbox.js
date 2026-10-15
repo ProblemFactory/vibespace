@@ -617,7 +617,9 @@ export function renderProposalCard(app, p, { compact = false, line = false, onLi
       if (!r) { lock(false); return; }
       const sent = !!(r.proposal && r.proposal.state === 'sent');
       const o = r.proposal ? (r.proposal.outcome || P.outcomeOf(r.proposal)) : null;
-      showToast(sent ? t('Sent') : t('Not sent: {why}', { why: (o && P.outcomeText(o, { t, errorCodeText: chanCaps.errorCodeText, sendWhyText: chanCaps.sendWhyText })) || routeErrorText(r) }), { type: sent ? 'info' : 'error' });
+      // lane lark-send-hold: a send waiting the vendor's reset is approved — the toast says when it goes, never "Not sent"
+      if (!sent && o && o.kind === 'held') showToast(P.outcomeText(o, { t }), { type: 'info' });
+      else showToast(sent ? t('Sent') : t('Not sent: {why}', { why: (o && P.outcomeText(o, { t, errorCodeText: chanCaps.errorCodeText, sendWhyText: chanCaps.sendWhyText })) || routeErrorText(r) }), { type: sent ? 'info' : 'error' });
       if (woke && r.proposal && r.proposal.receiptChoicePaced) showToast(t('The agent was not woken (paced: {why}) — it hears with its next message', { why: r.proposal.receiptChoicePaced }), { type: 'warn' });
     };
     approve.onclick = (ev) => { if (cardArmed(card, ev)) doApprove(toAgent ? pressedDelivery(approve) : null); };   // verify r3: what the button SAYS; r6 F6: armed only

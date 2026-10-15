@@ -12,6 +12,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { crossSiteVerdict, ownOriginOf } = require('./write-origin.js');
 
 const TOKEN_COOKIE = 'vs_token';
 const TOKEN_TTL_MS = 180 * 24 * 3600 * 1000; // 180 days
@@ -172,18 +173,37 @@ class Auth {
     return m ? m[1] : null;
   }
 
-  /** true when this request carries a valid token (or auth is disabled) */
+  /** THE SAME-ORIGIN RULE for this request (src/write-origin.js): a write or a WebSocket handshake that rides the
+   *  cookie must come from this instance's own page — its own origin as the reverse proxies forward it */
+  originVerdict(req) {
+    return crossSiteVerdict({ method: req.method, headers: req.headers || {} }, ownOriginOf(req.headers, { encrypted: !!(req.socket && req.socket.encrypted) }));
+  }
+
+  /** ONE log line per refusal — at most 5 a minute, the rest counted (a hostile page can repeat itself) */
+  _logCrossSite(req, v) {
+    const now = Date.now(), w = this._xsLog || (this._xsLog = { at: 0, n: 0, muted: 0 });
+    if (now - w.at > 60e3) { if (w.muted) console.warn(`[auth] ${w.muted} more cross-site refusals in the last minute (not logged one by one)`); w.at = now; w.n = 0; w.muted = 0; }
+    if (++w.n > 5) { w.muted++; return; }
+    const route = String(req.path || req.url || '').split('?')[0].split('/').slice(0, 4).join('/') || '/'; // first 3 segments — paths can carry user data
+    console.warn(`[auth] refused a cross-site ${req.headers && req.headers.upgrade ? 'WebSocket' : String(req.method)} ${route} — ${v.why}, origin ${JSON.stringify(String(v.origin || '-').slice(0, 120))} (own ${v.own || '-'})`);
+  }
+
+  /** true when this request carries a valid token (or auth is disabled) — and, a write or a WebSocket handshake, came
+   *  from this instance's own page: every caller (the upgrade dispatcher's /ws and /proxy/, the desktop and browser
+   *  streams, private /svc mounts, private /p pages) inherits the same-origin rule */
   requestAuthed(req) {
+    const v = this.originVerdict(req);
+    if (!v.ok) { this._logCrossSite(req, v); return false; }
     if (!this.enabled) return true;
     return this.checkToken(Auth.cookieToken(req));
   }
 
-  /** Express middleware guarding everything except the login flow */
+  /** Express middleware guarding everything except the login flow — server.js mounts it BEFORE every router */
   middleware() {
     return (req, res, next) => {
-      if (!this.enabled) return next();
       const p = req.path;
-      if (p === '/login' || p === '/api/login' || p === '/api/clerk-login' || p === '/favicon.ico') return next();
+      // ── THE DOORS: callers that are not the owner's browser, each judged by its OWN credential — never the cookie,
+      // so never the same-origin rule below (a door's refusals are its own) ──
       // WebDAV bridge authenticates with scoped Bearer mount tokens (webdav.js)
       if (p === '/dav' || p.startsWith('/dav/')) return next();
       // Agent endpoints authenticate with per-session tokens spawned into the
@@ -241,7 +261,15 @@ class Auth {
       // method: a non-POST is its 405; /hook/<slug>/, /hook/<SLUG>, /hook/x/y are its misses — verify r1 #6, ONE shape), a
       // caller's GET of its own replies, and the pairing completion. Pinned by scripts/test-webhook-routes.mjs.
       if (/^\/hook(?:\/|$)/.test(p) || (req.method === 'GET' && /^\/api\/channels\/webhook\/[a-z0-9][a-z0-9-]{0,62}\/replies$/.test(p)) || (req.method === 'POST' && /^\/api\/channels\/webhook\/[a-z0-9][a-z0-9-]{0,62}\/pair$/.test(p))) return next();
-      if (this.requestAuthed(req)) return next();
+      // ── THE SAME-ORIGIN RULE (lane owner-write-origin, B-6b2b): every other write rides the owner's cookie — or, on an
+      // instance nobody signs in to, its open door — and must come from VibeSpace's own page; a page on another site
+      // (a same-site sibling too: the fleet's pods share one domain) is refused by name, before any router ──
+      const v = this.originVerdict(req);
+      if (!v.ok) { this._logCrossSite(req, v); return res.status(403).json({ error: 'cross-site', origin: v.origin, own: v.own }); }
+      if (!this.enabled) return next();
+      // the login flow (logout revokes only the token it presents)
+      if (p === '/login' || p === '/api/login' || p === '/api/clerk-login' || p === '/api/logout' || p === '/favicon.ico') return next();
+      if (this.checkToken(Auth.cookieToken(req))) return next();
       // Browsers navigating to pages get the login form; API calls get 401
       const wantsHtml = req.method === 'GET' && (req.headers.accept || '').includes('text/html');
       if (wantsHtml) return res.redirect('/login');
@@ -322,9 +350,9 @@ class Auth {
     // Changing/setting revokes every other device's token (that's usually the
     // point); the caller gets a fresh token so they stay logged in.
     app.post('/api/auth/set-password', express_json_lite, (req, res) => {
-      // WHO MAY SET A PASSWORD is judged HERE, by the instance's state — server.js registers these routes BEFORE the
-      // cookie gate, so no middleware ever stood in front of this one (lane owner-write-origin: on a Clerk-only
-      // instance an anonymous POST set a password, revoked every token and handed the caller a session):
+      // WHO MAY SET A PASSWORD is judged HERE too, by the instance's state — server.js registered these routes BEFORE
+      // the cookie gate until .274 (lane owner-write-origin: on a Clerk-only instance an anonymous POST set a password,
+      // revoked every token and handed the caller a session); the route never leans on a mount order again:
       //   a password configured ⇒ the current password (below) · SSO and no password ⇒ a signed-in request only ·
       //   neither ⇒ open — that is how a local instance opts INTO auth (first-run onboarding)
       if (this.enabled && !this.passwordEnabled && !this.requestAuthed(req)) return res.status(401).json({ error: 'unauthorized' });

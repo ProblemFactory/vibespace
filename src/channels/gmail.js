@@ -233,6 +233,13 @@ const META_TTL_MS = 6 * 60 * 60 * 1000;
 const CHANGED_CAP = 5000;
 /** lane gmail-feed-gap: history pages ONE sync reads (500 records each); a longer walk resumes from its token next sync. */
 const HISTORY_PAGES_PER_SYNC = 20;
+/** lane gmail-anchor-churn (B-3081): THE RE-READ'S BOUND — a thread whose stored anchor vanished this many times (distinct
+ *  ids) within LOST_WINDOW_MS, none sticking in between, is HELD: no `threads.get` on a mere history mention until a
+ *  delivered (INBOX) or sent (SENT) message joins it, the window passes, or a reseed owes it a walk. LOST_MAX threads
+ *  are remembered (the oldest forgotten first). */
+const LOST_HOLD_AT = 3;
+const LOST_WINDOW_MS = 60 * 60 * 1000;
+const LOST_MAX = 1000;
 /** design 010 S6: a full-search page — `messages.list` answers this many ids, each one the person is shown costs ONE
  *  metadata read, so the page's worst cost is the list + this many reads (the row's `cost`). */
 const SEARCH_PAGE = 10;
@@ -619,6 +626,22 @@ function factsFromHeaders(headers, { selfEmail = null, threadSubject = null, sen
 }
 /** verify r1 F2: Gmail's SENT label of a message — true / false, null when the message carries no label list. */
 const sentLabel = (m) => (m && Array.isArray(m.labelIds) ? m.labelIds.includes('SENT') : null);
+/** lane gmail-anchor-churn (B-3081) — THE ANCHOR RULE (PURE): an anchor is a message the vendor will KEEP. A DRAFT's id is
+ *  replaced on every save and when it is sent; a message in the TRASH is expunged later — neither is ever an anchor. */
+const TRANSIENT_LABELS = Object.freeze(['DRAFT', 'TRASH']);
+const transientMessage = (m) => !!m && Array.isArray(m.labelIds) && m.labelIds.some((l) => TRANSIENT_LABELS.includes(l));
+/** A thread's anchor from its messages (oldest first): the newest one that is not transient; none ⇒ `keep` (the previous
+ *  anchor, or null) — a thread holding only drafts never anchors on one. */
+function anchorOf(msgs, keep = null) {
+  const list = Array.isArray(msgs) ? msgs : [];
+  for (let i = list.length - 1; i >= 0; i--) if (list[i] && list[i].id && !transientMessage(list[i])) return String(list[i].id);
+  return keep == null ? null : String(keep);
+}
+/** A `history.list` messagesAdded[].message that is NEWS for its thread: not transient (a draft saved in the mail app is
+ *  no new mail — the reply, once sent, arrives as its own add). Unknown labels are news (read, as before). */
+const addIsNews = (m) => !!(m && m.threadId) && !transientMessage(m);
+/** An add Gmail DELIVERED (INBOX) or the account SENT — the only mention that reads a HELD thread. */
+const addDelivered = (m) => !!m && Array.isArray(m.labelIds) && (m.labelIds.includes('INBOX') || m.labelIds.includes('SENT'));
 /** The headers a stored thread's facts are read from (`factsOf` — one `format=metadata` read). */
 const FACT_HEADERS = Object.freeze(['Subject', 'From', 'To', 'Cc', 'Bcc', 'Reply-To', 'Sender', 'List-Id', 'Delivered-To', 'Importance', 'Priority', 'X-Priority', 'Auto-Submitted', 'Precedence']);
 /** §25: the render tree of a record stored BEFORE this layer (read time —
@@ -1079,6 +1102,35 @@ function create(record = {}, deps = {}) {
     return msgs;
   }
 
+  // lane gmail-anchor-churn (B-3081): A LOST ANCHOR IS SAID ONCE AND ITS RE-READ IS BOUNDED. Per thread: the vanished id
+  // last noted (the SAME id again — a pass that never completed kept it — is silent and not counted), the instants
+  // distinct anchors vanished, the hold (LOST_HOLD_AT within LOST_WINDOW_MS) and `muted` (the hold was said: silent until
+  // an anchor sticks). A read that FINDS its stored anchor forgets the thread. In memory, ≤ LOST_MAX threads.
+  const lost = new Map();
+  function anchorLost(convId, id) {
+    const t = now();
+    let L = lost.get(convId);
+    if (!L) { L = { id: null, at: [], heldAt: 0, muted: false }; lost.set(convId, L); if (lost.size > LOST_MAX) lost.delete(lost.keys().next().value); }
+    if (L.id === String(id)) return;
+    L.id = String(id);
+    L.at = L.at.filter((x) => t - x < LOST_WINDOW_MS).concat(t);
+    const hold = L.at.length >= LOST_HOLD_AT;
+    if (hold) L.heldAt = t;
+    if (L.muted) return;
+    if (hold) L.muted = true;
+    if (log.warn) log.warn(hold
+      ? `[channels] gmail: thread ${convId} lost its anchor ${L.at.length} times within an hour — it is read again when a delivered or sent message joins it (or in an hour)`
+      : `[channels] gmail: the stored anchor ${id} of ${convId} is no longer in the thread — re-reading it (the dedup absorbs the re-read)`);
+  }
+  function anchorHeld(convId) {
+    const L = lost.get(convId);
+    if (!L || !L.heldAt) return false;
+    if (now() - L.at[L.at.length - 1] < LOST_WINDOW_MS) return true;
+    L.heldAt = 0; L.at = [];
+    return false;
+  }
+  function heldRelease(convId) { const L = lost.get(convId); if (L) L.heldAt = 0; }
+
   /** ONE `history.list` per pass (memoised): which threads gained messages
    *  since the cursor. A 404 is RESEED (the cursor is too old); no cursor is
    *  RESEED too (a fresh process). "Reseed" = walk every tracked thread. */
@@ -1108,7 +1160,9 @@ function create(record = {}, deps = {}) {
         if (pageToken) q.set('pageToken', pageToken);
         const h = await api(`/history?${q}`, { what: 'gmail history' });
         mailbox.walkPages++;
-        for (const ev of h.history || []) for (const a of ev.messagesAdded || []) if (a && a.message && a.message.threadId) mailbox.changed.add(String(a.message.threadId));
+        // lane gmail-anchor-churn (B-3081): a DRAFT saved in the mail app (or a message added straight to the trash) is no
+        // news — its thread is not read for it; a delivered or sent add also lifts a HELD thread
+        for (const ev of h.history || []) for (const a of ev.messagesAdded || []) if (addIsNews(a && a.message)) { mailbox.changed.add(String(a.message.threadId)); if (addDelivered(a.message)) heldRelease(String(a.message.threadId)); }
         if (h.historyId) newest = String(h.historyId);
         pageToken = h.nextPageToken ? String(h.nextPageToken) : null;
         mailbox.walk = pageToken ? { from, token: pageToken, newest } : null;
@@ -1577,6 +1631,11 @@ function create(record = {}, deps = {}) {
       if (anchor && !mb.changed.has(convId) && !threads.has(convId) && (mb.walked.has(convId) || !mb.mustWalk)) {
         return { records: [], anchor, reachedAnchor: true, complete: true, changed: hint() };
       }
+      // lane gmail-anchor-churn: a HELD thread (its anchor kept vanishing) is not read on a mere mention — it stays in
+      // `changed` and is read once a delivered/sent message joins it, the hold's hour passes, or a reseed owes it a walk
+      if (anchor && anchorHeld(convId) && !threads.has(convId) && (mb.walked.has(convId) || !mb.mustWalk)) {
+        return { records: [], anchor, reachedAnchor: true, complete: true, changed: hint() };
+      }
       let t;
       try { t = await threadFull(convId); }
       catch (e) {
@@ -1592,7 +1651,8 @@ function create(record = {}, deps = {}) {
       let idx = -1;
       if (anchor) {
         idx = msgs.findIndex((m) => String(m.id) === String(anchor));
-        if (idx < 0) log.warn && log.warn(`[channels] gmail: the stored anchor ${anchor} of ${convId} is no longer in the thread — re-reading it (the dedup absorbs the re-read)`);
+        if (idx < 0) anchorLost(convId, anchor);   // said once per vanished id, bounded (B-3081)
+        else lost.delete(convId);
       }
       const pending = msgs.slice(idx + 1);
       const page = pending.slice(0, size);
@@ -1602,7 +1662,10 @@ function create(record = {}, deps = {}) {
       const threadSubject = msgs.length ? header(msgs[0].payload && msgs[0].payload.headers, 'Subject') || null : null;   // lane message-facts: a message's own subject is a fact only when it differs
       return {
         records: page.map((m) => toRecord(adapterId, convId, m, { selfEmail: self, onBody: holdBody, threadSubject })),
-        anchor: page.length ? String(page[page.length - 1].id) : (anchor || (msgs.length ? String(msgs[msgs.length - 1].id) : null)),
+        // lane gmail-anchor-churn (B-3081): a DRAINED thread anchors on its newest message the vendor will keep (never a
+        // draft or trash — the newest id used to be a draft the next save replaced: a re-read + a warn every poll); a page
+        // mid-walk hands back its own last id (the SAME pass continues from there)
+        anchor: drained ? anchorOf(msgs, anchor) : String(page[page.length - 1].id),
         reachedAnchor: drained,
         complete: drained,
         changed: hint(),
@@ -1748,6 +1811,7 @@ module.exports = {
   blocksOf, sendCapsOf,
   rawFacts, unavailableWords: UNAVAILABLE_WORDS,   // lane dc-channels-blocks
   factsFromHeaders, decodeWords, FACT_HEADERS,   // lane message-facts (B-f066)
+  anchorOf, transientMessage, addIsNews, addDelivered, TRANSIENT_LABELS, LOST_HOLD_AT, LOST_WINDOW_MS, LOST_MAX,   // lane gmail-anchor-churn (B-3081)
   convCapsFromListing: true,   // lane gmail-reply-known: a listed thread's send row is answered from held facts (no vendor call)
 };
 // lane dc-channels-manifest (rv F2): the module IS the registered thing — register() validates every field the engine

@@ -1186,8 +1186,21 @@ function outcomeOf(p) {
       const d = q.draftedBy || {};
       return { kind: 'withdrawn', code: null, detail: null, userReason: w.why ? String(w.why) : '', who: d.kind === 'agent' ? (d.name || d.id || null) : null };
     }
+    // lane lark-send-hold (B-efa0): an approved send WAITING the vendor's reset (nothing left yet) — the pending delivery
+    // is said: who asked to slow down and the moment it goes out by itself
+    case 'sending': {
+      const h = q.held && typeof q.held === 'object' ? q.held : null;
+      return h && Number(h.until) > 0 ? { kind: 'held', code: 'rate-limited', detail: null, userReason: null, until: Number(h.until), vendor: h.vendor ? String(h.vendor) : null } : null;
+    }
     default: return null;
   }
+}
+/** HH:MM:SS of an instant on THIS device's clock (the held line's moment). */
+function clockTime(ms) {
+  const d = new Date(Number(ms));
+  if (!Number.isFinite(d.getTime())) return '';
+  const p2 = (n) => String(n).padStart(2, '0');
+  return `${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}`;
 }
 /** The outcome sentence. `errorCodeText` is channel-caps' composer, injected
  *  so this module keeps importing nothing but channel-record. */
@@ -1202,6 +1215,7 @@ function outcomeText(o, { t = defaultT, errorCodeText = (c) => String(c || ''), 
     case 'not-landed': return t('Not sent: the platform holds no such message.');
     case 'refused': return o.detail ? t('Refused by the channel ({code}): {detail}', { code: code || o.code || '', detail: o.detail }) : t('Refused by the channel ({code}).', { code: code || o.code || '' });
     case 'expired': return t('Expired: not approved within 24 h.');
+    case 'held': return t('{vendor} asked to slow down — sends at {time}', { vendor: o.vendor ? t(o.vendor) : t('The platform'), time: clockTime(o.until) });
     case 'rejected': return o.userReason ? t('Rejected: {reason}', { reason: o.userReason }) : t('Rejected.');
     case 'withdrawn':
       if (o.who && o.userReason) return t('Withdrawn by {who} · {reason}', { who: o.who, reason: o.userReason });

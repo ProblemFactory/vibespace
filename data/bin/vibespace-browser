@@ -544,6 +544,19 @@ function writeRefusal(files) {
  *  exactly the judged words, never re-quoted), and in every element of a stdin
  *  batch. → `{argv, stdinJson, writes, reads}` (`writes`/`reads` = the slot
  *  words, so the caller judges every word it rewrites). */
+/** lane browser-viewport-answer: is this command line the agent's own `set viewport|device`? (the verb's words, flags stepped over) */
+function isViewportSet(argv) {
+  const w = (argv || []).map(String);
+  let i = typeof V.verbAt === 'function' ? V.verbAt(w) : 0;
+  if (w[i] === '--') i++;
+  return w[i] === 'set' && (w[i + 1] === 'viewport' || w[i + 1] === 'device');
+}
+/** A batch's command lines as word lists — the stdin JSON form, else its argument lines (comments dropped). */
+function batchCommands(cls, framed) {
+  if (framed.stdinJson != null) { try { return JSON.parse(framed.stdinJson).map((c) => (Array.isArray(c) ? c.map(String) : [])); } catch { return []; } }
+  const vi = V.verbAt(cls.argv);
+  return cls.argv.filter((t, i) => i > vi && !(typeof t === 'string' && t.length > 1 && t[0] === '-')).map((l) => V.splitWords(String(l).trim())).filter((w) => w.length && !String(w[0]).startsWith('#'));
+}
 function inFrame(cls) {
   const writes = []; const reads = [];
   const isFlagW = (t) => typeof t === 'string' && t.length > 1 && t[0] === '-';   // the verb table's own flag test
@@ -650,8 +663,15 @@ async function runPage(c) {
   const rest = cls.argv;
   // ONE call decides which browser this command acts on (§3.7) — after the
   // one-time profile_changed check (§3.8 layer ①). Refusals are typed.
-  const r = await call('POST', '/api/agent/browser/resolve', { handle: handle || '', argv: rest, wrapper: true }, { soft: true });
+  // lane browser-viewport-answer (B-6dae ①; the 2026-10-14 ruling 「a pin RULES」): the agent's own `set viewport|device` — the
+  // verb or a batch line. The resolve says whether a PINNED picture size rules it (then nothing runs); after a set that ran,
+  // the audit answers the page's resulting size
+  const vpSet = isViewportSet(rest);
+  const vpInBatch = cls.verb === 'batch' && batchCommands(cls, framed).some(isViewportSet);
+  const r = await call('POST', '/api/agent/browser/resolve', { handle: handle || '', argv: rest, wrapper: true, ...(vpSet || vpInBatch ? { viewportSet: true } : {}) }, { soft: true });
   if (r._failed) {
+    // lane browser-viewport-answer: a set refused while the user drives says the page's size first (their pane rules it)
+    if (r.viewport && r.viewport.line) (rest.includes('--json') ? console.error : console.log)(r.viewport.line);
     printRefusal(r);
     // lane browser-recipes: refused on its FIRST command (no browser of this conversation's yet) ⇒ the recipe, by name
     if (r.recipe) console.error(`  next: ${r.recipe}`);
@@ -721,11 +741,11 @@ async function runPage(c) {
   // `tab` verbs are the SERVER's there (its own tabs only, judged before anything runs), and a batch never carries one
   const tabFenced = r.kind === 'attachment' && !r.mediated;
   if (tabFenced && cls.verb === 'batch') {
-    let cmds = [];
-    if (framed.stdinJson != null) { try { cmds = JSON.parse(framed.stdinJson).map((c) => (Array.isArray(c) ? c.map(String) : [])); } catch { cmds = []; } }
-    else { const vi = V.verbAt(cls.argv); cmds = cls.argv.filter((t, i) => i > vi && !(typeof t === 'string' && t.length > 1 && t[0] === '-')).map((l) => V.splitWords(String(l).trim())).filter((w) => w.length && !String(w[0]).startsWith('#')); }
+    const cmds = batchCommands(cls, framed);
     if (cmds.some((w) => w[V.verbAt(w)] === 'tab')) refuseLocally({ code: 'tab_in_batch', error: 'a `tab` line cannot run inside a batch on a shared profile\'s browser — its tabs are judged one command at a time (yours only); nothing ran', remedy: 'run the tab verb on its own (`vibespace-browser tab list`), then the batch' });
   }
+  // lane browser-viewport-answer: while the picture size is pinned a batch never carries a raw set past it — refused whole, nothing ran
+  if (vpInBatch && r.viewportRuling) refuseLocally({ code: 'size_pinned', error: `a \`set viewport\` / \`set device\` line cannot run inside a batch while ${r.viewportRuling.text || 'the picture size is pinned'} — nothing ran`, remedy: 'run the batch without that line' });
   if (tabFenced && words0[0] === 'tab') { // (a page dialog never lets the binary's unfenced `tab` run instead — the server lists and closes by the CDP's own)
     // integration 2.369.199 (lane site-reset × lane browser-resume): while a NAVIGATION LOOP stands on this conversation's
     // tab, a bare `tab close` is site-reset's way out — DIRECT through VibeSpace's own socket, this conversation's tab only
@@ -891,6 +911,18 @@ async function runPage(c) {
     const done = await runDirect(words[0] === 'screenshot' ? 'screenshot' : 'close', { r, head, profileId, wantsJson, shotPath: words[0] === 'screenshot' && framed.writes[0] ? (() => { const rw = resolveWord(framed.writes[0]); return rw.ok ? rw.path : null; })() : null });
     if (done) return;
   }
+  // lane browser-viewport-answer (the 2026-10-14 ruling 「a pin RULES」): a PINNED picture size — the raw set does not run; the
+  // page's own size answers it, with who pinned it and the door that unpins it (exit 1)
+  if (vpSet && r.viewportRuling) {
+    const au = await call('POST', '/api/agent/browser/audit', { profile: profileId, verb: 'set', ok: false, viewport: { argv: rest, ran: false, handle: handle || '' }, ...(Number(r.at) > 0 ? { since: Number(r.at) } : {}) }, { soft: true }).catch(() => null);
+    const vp = au && !au._failed && au.viewport && au.viewport.line ? au.viewport : null;
+    const line = vp ? vp.line : `viewport: ${r.viewportRuling.text || 'the picture size is pinned'} — your set did not apply`;
+    for (const h of head) console.error(h);
+    if (wantsJson) console.log(JSON.stringify({ success: false, data: vp ? { viewport: { asked: vp.asked, got: vp.got, ruledBy: vp.ruledBy, by: vp.by } } : null, code: (vp && vp.code) || 'size_pinned', error: line }));
+    else console.log(line);
+    console.error(`[${(vp && vp.code) || 'size_pinned'}]`);
+    process.exit(1);
+  }
   // r5 F1 (b): the binary (and a daemon this spawn starts) runs in the private directory, never this shell's
   const child = spawn(bin.path, argv, { stdio, env, cwd: runCwd.dir });
   if (stdinJson != null) child.stdin.end(stdinJson);
@@ -949,7 +981,7 @@ async function runPage(c) {
     const nav = navVerb && code === 0 ? navFacts(outText) : null; // lane browser-propose: the final url + title the server judges for the sign-in hint
     // verify r4 #1: a `tab new` that succeeded names its tab (the ack) — the server binds it to this conversation
     const tabAck = words[0] === 'tab' && words[1] === 'new' && code === 0 && profileId ? await tabNewAck(outText, { bin: bin.path, env, cwd: runCwd.dir, wantsJson }) : null;
-    try { au = await call('POST', '/api/agent/browser/audit', { profile: profileId, verb: words[0] || null, ok: code === 0 && !dialogHit && !loopHit && !shotCut && !passkeyHit && !promptHit, ...(navUrl ? { url: navUrl } : {}), ...(tabAck ? { tab: { new: true, targetId: tabAck.targetId } } : {}), ...(Number(r.at) > 0 ? { since: Number(r.at) } : {}), ...(r.kind === 'child' && r.handle ? { handle: r.handle } : {}), ...(timedOut && !loopHit && !shotCut ? { timedOut: true } : {}), ...(dialogHit ? { dialog: true } : {}), ...(loopHit ? { loop: 'cut' } : shotCut ? { loop: true } : {}), ...(nav ? { nav } : {}) }, { soft: true }); } catch { au = null; }
+    try { au = await call('POST', '/api/agent/browser/audit', { profile: profileId, verb: words[0] || null, ok: code === 0 && !dialogHit && !loopHit && !shotCut && !passkeyHit && !promptHit, ...(navUrl ? { url: navUrl } : {}), ...(vpSet && code === 0 ? { viewport: { argv: rest, ran: true, handle: handle || '' } } : {}), ...(tabAck ? { tab: { new: true, targetId: tabAck.targetId } } : {}), ...(Number(r.at) > 0 ? { since: Number(r.at) } : {}), ...(r.kind === 'child' && r.handle ? { handle: r.handle } : {}), ...(timedOut && !loopHit && !shotCut ? { timedOut: true } : {}), ...(dialogHit ? { dialog: true } : {}), ...(loopHit ? { loop: 'cut' } : shotCut ? { loop: true } : {}), ...(nav ? { nav } : {}) }, { soft: true }); } catch { au = null; }
     const after = au && !au._failed && au.dialog && typeof au.dialog === 'object' ? au.dialog : null;
     // THE VERDICT: a dialog holds the page (the long-poll's hit, else the watch's fact after the verb, else — where no watch
     // runs — the browser CLI's own line) ⇒ the sentence FIRST, exit 1 [dialog_open]
@@ -1005,6 +1037,8 @@ async function runPage(c) {
     const outShown = strip ? DS.stripDaemonDialogLines(outText) : outText, errShown = strip ? DS.stripDaemonDialogLines(errText) : errText;
     if (!(open && wantsJson)) process.stdout.write(outShown); // --json with a dialog: the ONE JSON object on stdout is ours
     process.stderr.write(errShown);
+    // lane browser-viewport-answer (B-6dae ①): the agent's own set answers with the page's RESULTING size, read after it
+    if (vpSet && code === 0 && !open && au && !au._failed && au.viewport && au.viewport.line) (wantsJson ? console.error : console.log)(au.viewport.line);
     if (navVerb) { const h = navHint(tail); if (h) console.error(h); }
     // lane browser-propose step 2: the server's hint for this navigation's final page (a known vendor's sign-in refusal) —
     // printed exactly as the 403/429 one is

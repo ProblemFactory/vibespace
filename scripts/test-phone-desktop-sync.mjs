@@ -18,8 +18,9 @@
 //   ④ D drags one window and minimizes another ⇒ P keeps ITS window on show; P's next user-caused save carries D's box +
 //      isMinimized:true verbatim (guard 5 by construction)
 //   ⑤ P reloads ⇒ the same window on show (this tab's own view state)
-//   ⑥ BELT 2 ALONE: a hand-built phone-stamped record (a raw socket) with scrambled z / boxes / maximize / minimize plus one
-//      new window ⇒ D keeps every box and its z order, builds the new window
+//   ⑥ THE LAYER GATE + BELT 2: a hand-built phone-stamped record (a raw socket) with scrambled z / boxes / maximize /
+//      minimize plus one new window ⇒ the server REFUSES it (cross-layer, lane layout-layers-p1), D never hears it; the same
+//      new window on the HELD arrangement passes ⇒ D builds it at its own default, keeps every box and its z order
 //   ⑦ BELT 1 ALONE: P's stamp stripped on the wire (its ws.send wrapped) ⇒ P's taps still leave D unchanged
 //   ⑧ RED CONTROLS on the base tree, printed: ①'s taps restack D (z changes); ②'s window lands near {0,0,1,1}
 //   ⑨ an unstamped record (an old desktop bundle) and a desktop-stamped one still move D's window (today's path)
@@ -39,16 +40,28 @@
 //      desktop) counts as desktop; ⑮d a phone record landing in the 300 ms after the release, while DW's still waits, joins
 //      it. RED controls on patched copies of THIS source (printed): the pre-fix slot line restored (a, c, d red; b holds),
 //      a record arriving while others wait applied at once (d red: the drain then drops DW's older record)
-//   ⑯ lane phone-sidebar-chrome (owner inc-mv8l2frb-xkqm, the READ half of guard 10 — layout-model.js chromeToApply): on a
+//   ⑯ lane phone-sidebar-chrome (owner inc-mv8l2frb-xkqm, the READ half of guard 10 — since lane layout-layers-p0 THE LAYER
+//      LAW, desktop-record.js applyForViewport): on a
 //      record whose desk chrome holds the sidebar OPEN and a 1×3 grid (the owner's shape) ⑯a P's reload ⇒ P's sidebar
 //      CLOSED and no grid set, again after P's own save made the record the phone's; ⑯b P's socket drops and it re-reads on
 //      reconnect (the return-from-background path) ⇒ CLOSED, and a live desk record opening the sidebar ⇒ CLOSED; ⑯c P's
 //      person opens its sidebar, the desk's record closes then opens its own ⇒ P's stays as its person left it, and every
 //      save P sends carries the DESK's sidebarOpen byte-identical; ⑯d the desk still follows a desk record's sidebarOpen,
-//      ignores a live phone record's, and its reload on the record the phone wrote last keeps its sidebar and grid (taken
-//      whole). RED control on a patched copy of THIS source (printed): every chromeToApply asks as a desk ('desktop') ⇒ the
-//      pre-fix apply — P's sidebar pops open at reload and at the re-read. PDSYNC_PNG_DIR=<dir> keeps ⑯'s PNGs.
-// PDSYNC_ONLY=1,2,… runs a subset (the base control is ⑧; ⑩–⑬, ⑮ and ⑯ carry their own).
+//      never hears a live phone record's (the server's layer gate refuses it — lane layout-layers-p1), and its reload on the record the phone wrote last keeps its sidebar and grid (taken
+//      whole); D's boxes and z order are byte-identical across P's reloads, P's save and P's re-read. ⑯e THE LAYER LAW on
+//      the phone (lane layout-layers-p0): a live desk record moving a box, raising a z, maximizing a window and setting the
+//      toolbar scale ⇒ D follows all of it, P keeps its own (a phone takes no desk arrangement or chrome) — and the same
+//      record's minimize of a window P does not show still hides it on P (§6b guard 5). RED control on a patched copy of
+//      THIS source (printed): every applyForViewport asks as a desk ('desktop') ⇒ the pre-fix apply — P's sidebar pops
+//      open at reload and at the re-read, P takes the desk's box / z / maximize / toolbar. PDSYNC_PNG_DIR=<dir> keeps ⑯'s PNGs.
+//   ⑰ lane layout-layers-p1 (design q-039 P1 — THE LAYER GATE, the layer law's server half): P's switcher taps restack P,
+//      then P closes a window and its save is an OLD phone bundle's (pre-.264: its own z / boxes / maximize / chrome, one
+//      recordFor call swapped on the live page) ⇒ the server REFUSES it (cross-layer, the fields named, the journal line);
+//      P reconciles and re-sends membership only ⇒ the close LANDS (on disk, on D); every remaining window's z / box /
+//      maximize / minimize on disk is the desk's, and D's reload shows the desk D had. RED copy (printed): this source with
+//      the server's gate removed (layerGate answers ok) ⇒ the old save lands whole — D keeps its boxes live (belt 2), but
+//      the record on disk is the phone's and D's reload takes it (a phone write moves a desk window).
+// PDSYNC_ONLY=1,2,… runs a subset (the base control is ⑧; ⑩–⑬, ⑮, ⑯ and ⑰ carry their own).
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
@@ -185,8 +198,9 @@ else if (ONLY.length && ONLY.every((x) => x === '14')) console.log('  (⑭ alone
 else await (async () => {
   const esbuild = path.join(repo, 'node_modules', '.bin', 'esbuild');
   /** A tree at `ref`; `copy` = this checkout's source over it (the fixed tree judges THIS source, never a stale bundle);
-   *  `patchLayout` (⑮'s RED copies) rewrites its src/lib/layout.js before the bundle is built. */
-  const mkTree = (name, ref, copy, patchLayout = null) => {
+   *  `patchLayout` (⑮'s RED copies) rewrites its src/lib/layout.js before the bundle is built; `patch` = [file, fn] any
+   *  one file (⑰'s RED copy: the server's gate in src/lib/desktop-record.js). */
+  const mkTree = (name, ref, copy, patchLayout = null, patch = null) => {
     const wt = path.join(ROOT, name);
     execFileSync('git', ['-C', repo, 'worktree', 'add', '--detach', wt, ref], { stdio: 'ignore' }); worktrees.add(wt);
     if (copy) for (const f of ['src', 'public', 'server.js', 'package.json']) { execFileSync('rm', ['-rf', path.join(wt, f)]); execFileSync('cp', ['-r', path.join(repo, f), path.join(wt, f)]); }
@@ -194,6 +208,7 @@ else await (async () => {
     if (fs.existsSync(bv) && !fs.existsSync(path.join(wt, 'src', 'lib', 'build-version.js'))) fs.copyFileSync(bv, path.join(wt, 'src', 'lib', 'build-version.js'));
     fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
     if (patchLayout) { const lf = path.join(wt, 'src', 'lib', 'layout.js'); fs.writeFileSync(lf, patchLayout(fs.readFileSync(lf, 'utf8'))); }
+    if (patch) { const pf = path.join(wt, patch[0]); fs.writeFileSync(pf, patch[1](fs.readFileSync(pf, 'utf8'))); }
     execFileSync(esbuild, ['src/client.js', '--bundle', '--outfile=public/bundle.js', '--format=iife', '--platform=browser', '--target=es2020', '--loader:.css=css', '--minify'], { cwd: wt, stdio: 'pipe' });
     return wt;
   };
@@ -210,6 +225,9 @@ else await (async () => {
     s.stop = async () => { try { srv.kill('SIGKILL'); } catch { } await until(() => srv.exitCode !== null || srv.signalCode !== null, 5000); procs.delete(srv); };
     s.disk = () => (JSON.parse(fs.readFileSync(path.join(DATA, 'layouts.json'), 'utf8')).desktops?.[DESK]?.autoSave || {});
     s.diskArr = () => Object.fromEntries((s.disk().windows || []).map((w) => [w.winId, Object.fromEntries(FIELDS.filter((k) => k in w).map((k) => [k, w[k]]))]));
+    // the record the server holds NOW (GET /api/layouts answers its cache; layouts.json is flushed 500 ms after a write) — a
+    // phone-stamped record forged from the file can be older than the server's and the layer gate refuses it (lane layout-layers-p1)
+    s.held = async () => { try { return (await (await fetch(`http://127.0.0.1:${PORT}/api/layouts`)).json()).desktops?.[DESK]?.autoSave || {}; } catch { return {}; } };
     return s;
   };
 
@@ -477,14 +495,14 @@ else await (async () => {
       if (ok(!!pt, `${tag}⑮d: D's person holds the pointer on an empty spot of its desktop`)) {
         const c0 = await gbOf(D, 'win-pd-charlie'), dG = D.got.length, a0 = (await arrivals()).length;
         const moved = await dwDrag('win-pd-charlie', 110, -50); const gotW = await gotMove(D, dG, 'win-pd-charlie', moved); await sleep(400);
-        const name = 'pd-late-' + mode, disk = S.disk();
+        const name = 'pd-late-' + mode, disk = await S.held();
         const state = { ...disk, windows: [...(disk.windows || []), W(name, { left: 0.55, top: 0.5, width: 0.3, height: 0.3 }, 300)] }; delete state.viewport;
-        const sock = await rawSock(S.PORT);
+        const sock = await rawSock(S.PORT), j0 = S.journal.length;
         await release(pt);
         sock.send(J({ type: 'layout-sync', desktopId: DESK, state, evidence: [], sentAt: Date.now(), viewport: 'phone' }));
         await sleep(4000); sock.close();
-        const arr = (await arrivals()).slice(a0), late = arr.find((x) => x.vp === 'phone');
-        console.log(`    ${tag}⑮d: charlie on D ${J(c0)}, DW moved it to ${J(moved)}; arrivals ${J(arr)}`);
+        const arr = (await arrivals()).slice(a0), late = arr.find((x) => x.vp === 'phone'), refused = S.journal.slice(j0).match(/[^\n]*REFUSED[^\n]*/g) || [];
+        console.log(`    ${tag}⑮d: charlie on D ${J(c0)}, DW moved it to ${J(moved)}; arrivals ${J(arr)}${refused.length ? '; the server: ' + refused.join(' | ') : ''}`);
         ok(gotW && !gbEq(c0, moved) && !!late && !late.down && late.waiting >= 1, `${tag}⑮d: the setup is real — the phone record landed AFTER the release while DW's record still waited (${late ? late.waiting : 0} waiting)`, J({ gotW, arr }));
         const after = await gbOf(D, 'win-pd-charlie'), hasLate = (await idsOf(D)).includes('win-' + name);
         console.log(`    ${tag}⑮d: after the drain charlie on D ${J(after)}; the phone's window on D ${hasLate}`);
@@ -508,8 +526,10 @@ else await (async () => {
     const chromeOf = (r) => J({ sidebarOpen: r.sidebarOpen, grid: r.grid, viewport: r.viewport });
     const closeP = async () => { if ((await P.ev(SBSTATE)).open) { await P.tap(`document.getElementById('sidebar-close')`); await sleep(500); } };
     // a live record from another client (a raw socket): the record on disk with its sidebarOpen set, stamped `viewport`
+    let liveFrames = []; // what the server answered the last live() record's socket (⑯d: the layer gate's refusal)
     const live = async (sidebarOpen, viewport = 'desktop') => {
       const rec = S.disk(), s = await rawSock(S.PORT), gP = P.got.length, gD = D.got.length;
+      liveFrames = []; s.on('message', (d) => { try { liveFrames.push(JSON.parse(d)); } catch { } });
       s.send(J({ type: 'layout-sync', desktopId: DESK, state: { ...rec, sidebarOpen, updatedAt: undefined }, evidence: [], sentAt: Date.now(), viewport }));
       const seen = (Pg, from) => Pg.got.slice(from).some((m) => m.type === 'layout-sync' && m.viewport === viewport && m.state && m.state.sidebarOpen === sidebarOpen);
       const got = await until(() => seen(P, gP) && seen(D, gD), 8000); await sleep(1200); s.close();
@@ -525,6 +545,7 @@ else await (async () => {
     judge(sbClosed(p0), `${tag}⑯a: P's reload on the desk's record (sidebarOpen true) ⇒ P's sidebar CLOSED`, J(p0));
     judge(p0.grid === null, `${tag}⑯a: …and P set no grid from it (a phone never sets one)`, J(p0));
     await png(P, 'phone-390-after-reload.png'); await png(D, 'desk-1440-unchanged.png');
+    const dArr0 = await D.ev(ARR);
     await closeP();
 
     console.log(`— ${tag}⑯a P saves (the record becomes the phone's — the owner's shape), then reloads on it`);
@@ -546,6 +567,8 @@ else await (async () => {
     console.log(`    ${tag}⑯b: re-read ${reread}; disk ${chromeOf(S.disk())}; P ${J(p2)}`);
     ok(reread, `${tag}⑯b: the setup is real — P's socket dropped and P re-read /api/layouts on reconnect (state-resync → layout-resync)`);
     judge(sbClosed(p2), `${tag}⑯b: after the re-read P's sidebar is still CLOSED`, J(p2));
+    const dArr1 = await D.ev(ARR), boxZ = (a) => J(Object.entries(a).map(([id, w]) => [id, w.z, w.box, w.max, w.min]));
+    ok(Object.keys(dArr0).length === 5 && boxZ(dArr1) === boxZ(dArr0), `${tag}⑯b: D's boxes and z order are byte-identical across P's reloads, P's own save and P's re-read (${zOrder(dArr1)})`, J({ dArr0, dArr1 }));
     await png(P, 'phone-390-after-resync.png');
     await closeP();
     const g0 = await live(true), p2b = await P.ev(SBSTATE);
@@ -589,8 +612,62 @@ else await (async () => {
     const d7 = await D.ev(SBSTATE);
     console.log(`    ${tag}⑯d: D after a reload on the record the phone wrote last (${chromeOf(S.disk())}): ${J(d7)}`);
     ok(S.disk().viewport === 'phone' && sbOpen(d7) && J(d7.grid) === '[1,3]', `${tag}⑯d: D's reload on the record the phone wrote last takes it whole — D keeps its sidebar open and its 1×3 grid (belt 1 carried them)`, J(d7));
-    const g3 = await live(false, 'phone'), d8 = await D.ev(SBSTATE);
-    ok(g3 && sbOpen(d8), `${tag}⑯d: a live PHONE-stamped record holding sidebarOpen false leaves D's sidebar open (membership + content only — by class)`, J({ g3, d8 }));
+    const g3 = await live(false, 'phone'), d8 = await D.ev(SBSTATE), r3g = liveFrames.find((f) => f.type === 'layout-sync-refused');
+    ok(!g3 && r3g?.reason === 'cross-layer' && (r3g.fields || []).includes('sidebarOpen') && sbOpen(d8), `${tag}⑯d: a live PHONE-stamped record holding sidebarOpen false is REFUSED by the server (the layer gate — cross-layer sidebarOpen): nobody hears it and D's sidebar stays open`, J({ g3, refusal: r3g && { reason: r3g.reason, fields: r3g.fields }, d8 }));
+
+    console.log(`— ${tag}⑯e THE LAYER LAW on the phone: a live desk record moves a box, raises a z, maximizes a window, sets the toolbar scale and minimizes a window P does not show`);
+    await P.boot(S.PORT); await sleep(1500);
+    const TB = `(getComputedStyle(document.documentElement).getPropertyValue('--toolbar-scale').trim() || '1')`;
+    const shown = await P.ev(SHOWN);
+    const pool = ['win-pd-bravo', 'win-pd-alpha', 'win-pd-charlie'].filter((id) => id !== shown);
+    const [mover, maxer, hider] = pool.length === 3 ? pool : [...pool, 'win-pd-delta']; // three distinct windows P does not show (delta, maximized on D, can still be minimized)
+    const pa0 = await P.ev(ARR), tbP0 = await P.ev(TB);
+    const MOVED = { left: 0.5, top: 0.45, width: 0.3, height: 0.3 };
+    const rec = S.disk();
+    const next = { ...rec, toolbarScale: 1.2, toolbarHeight: 48, updatedAt: undefined, windows: rec.windows.map((w) => (w.winId === mover ? { ...w, gridBounds: MOVED, zIndex: 999 } : w.winId === maxer ? { ...w, isMaximized: true } : w.winId === hider ? { ...w, isMinimized: true } : w)) };
+    const sock = await rawSock(S.PORT), gP = P.got.length, gD = D.got.length;
+    sock.send(J({ type: 'layout-sync', desktopId: DESK, state: next, evidence: [], sentAt: Date.now(), viewport: 'desktop' }));
+    const seenE = (Pg, from) => Pg.got.slice(from).some((m) => m.type === 'layout-sync' && m.viewport === 'desktop' && m.state && m.state.toolbarScale === 1.2);
+    const gE = await until(() => seenE(P, gP) && seenE(D, gD), 8000); await sleep(1500); sock.close();
+    const da1 = await D.ev(ARR), pa1 = await P.ev(ARR), tbD1 = await D.ev(TB), tbP1 = await P.ev(TB);
+    console.log(`    ${tag}⑯e: mover ${mover} maxer ${maxer} hider ${hider} (P shows ${shown}); D ${J({ mover: da1[mover], maxer: da1[maxer]?.max, hider: da1[hider]?.min, tb: tbD1 })}; P before ${J({ mover: pa0[mover], maxer: pa0[maxer]?.max, tb: tbP0 })} after ${J({ mover: pa1[mover], maxer: pa1[maxer]?.max, hider: pa1[hider]?.min, tb: tbP1 })}`);
+    ok(gE && mover && maxer && hider && new Set([mover, maxer, hider]).size === 3, `${tag}⑯e: the setup is real — the live desk record (box, z 999, a maximize, a minimize, toolbar 1.2) reached P and D`, J({ gE, mover, maxer, hider, shown }));
+    ok(J(da1[mover]?.gb) === J([MOVED.left, MOVED.top, MOVED.width, MOVED.height]) && da1[mover].z >= 999 && da1[maxer]?.max === true && da1[hider]?.min === true && Math.abs(Number(tbD1) - 1.2) < 0.01, `${tag}⑯e: D (a desk) follows the desk record — the box moved, z 999, the maximize, the minimize, the toolbar at 1.2`, J({ da1, tbD1 }));
+    judge(J(pa1[mover]?.gb) === J(pa0[mover]?.gb) && pa1[mover]?.z === pa0[mover]?.z && pa1[maxer]?.max === pa0[maxer]?.max && tbP1 === tbP0, `${tag}⑯e: P (a phone) takes none of the desk's arrangement or chrome — ${mover}'s box and z, ${maxer}'s maximize and P's toolbar scale stay P's own`, J({ before: { m: pa0[mover], x: pa0[maxer], tb: tbP0 }, after: { m: pa1[mover], x: pa1[maxer], tb: tbP1 } }));
+    ok(pa1[hider]?.min === true && (await P.ev(SHOWN)) === shown, `${tag}⑯e: …but the desk's minimize of ${hider} is the truth on P (§6b guard 5: hidden, listed under Minimized) and P keeps ITS window on show`, J({ hider: pa1[hider], shown }));
+    await png(P, 'phone-390-layer-law.png'); await png(D, 'desk-1440-layer-law.png');
+  };
+
+  // ── ⑰ (lane layout-layers-p1, design q-039 P1): THE LAYER GATE on real pages. `red` = this source with the server's
+  // gate removed (src/lib/desktop-record.js layerGate answers ok) — the checks judged by `judge` FAIL there.
+  // P's NEXT recordFor (one call) writes as an OLD phone bundle (pre-.264: its own windows' z / boxes / maximize, its chrome)
+  const OLD_FOR = `(() => { const dm = app.desktopManager, real = dm.recordFor; window.__oldFor = 0; dm.recordFor = function (d) { window.__oldFor++; this.recordFor = real; const lm = app.layoutManager; const rec = { ...this._savedStates.get(d), windows: lm.captureWindows(d), ...lm.captureChrome() }; delete rec.updatedAt; delete rec.viewport; return rec; }; })()`;
+  const GATE_FIND = "  if (stamp !== 'phone' || !held", GATE_GONE = '  if (true || !held';
+  const gateLegs = async (S, D, P, red) => {
+    const tag = red ? 'NO-GATE ' : '';
+    const judge = (c, n, extra) => (red ? ok(!c, `RED CONTROL ${n} — FAILS with the gate removed`, extra) : ok(c, n, extra));
+    ok(await D.boot(S.PORT) && await P.boot(S.PORT), `${tag}⑰: D and P booted on a fresh record`);
+    await tapThrough(P, ['pd-alpha', 'pd-bravo', 'pd-charlie'], 1); await sleep(1500); // P restacks ITS windows (its own z) — none of it reaches the record
+    const arr0 = S.diskArr(), d0 = await D.ev(ARR), pS = P.sent.length, pG = P.got.length, j0 = S.journal.length;
+    console.log(`    ${tag}⑰: D before ${zOrder(d0)}`);
+    await P.ev(OLD_FOR);
+    await P.tap(`document.getElementById('mobile-nav-close')`); await sleep(400); // pd-charlie (on show) — the membership change
+    const confirmBtn = await P.ptOf(`document.querySelector('.dialog-overlay .btn-primary, #dialog-overlay .btn-primary')`);
+    if (confirmBtn) await P.touch(confirmBtn);
+    const gone = await until(() => !(S.disk().windows || []).some((w) => w.winId === 'win-pd-charlie'), 10000); await sleep(2000);
+    const sends = P.sent.slice(pS), old = sends[0], refusal = P.got.slice(pG).find((m) => m.type === 'layout-sync-refused');
+    const zMoved = (old?.state?.windows || []).filter((w) => arr0[w.winId] && w.zIndex !== arr0[w.winId].zIndex).map((w) => w.winId);
+    console.log(`    ${tag}⑰: the old bundle's save ${old ? 'left' : 'never left'} (z differs from the record on ${J(zMoved)}); refusal ${J(refusal ? { reason: refusal.reason, fields: refusal.fields } : null)}; ${sends.length} phone save(s); charlie off the disk ${gone}`);
+    ok((await P.ev('window.__oldFor')) === 1 && !!old && !(old.state?.windows || []).some((w) => w.winId === 'win-pd-charlie') && zMoved.length > 0, `${tag}⑰: the setup is real — P's first save after the close is the OLD bundle's: charlie gone, P's own z on ${zMoved.length} window(s)`, J({ zMoved, ids: (old?.state?.windows || []).map((w) => w.winId) }));
+    judge(refusal?.reason === 'cross-layer' && (refusal.fields || []).includes('zIndex') && /REFUSED a phone record of desktop "Main"/.test(S.journal.slice(j0)), `${tag}⑰: the server REFUSES the old bundle's save — cross-layer, the fields named, the journal line`, J({ refusal: refusal && { reason: refusal.reason, fields: refusal.fields }, journal: (S.journal.slice(j0).match(/[^\n]*REFUSED[^\n]*/g) || []) }));
+    ok(gone && (red || sends.length >= 2), `${tag}⑰: the membership change LANDS — charlie is off the record on disk${red ? '' : ' (P re-sent the reconciled record: membership only)'}`, J({ gone, sends: sends.length }));
+    const arr1 = S.diskArr(); delete arr0['win-pd-charlie'];
+    judge(J(arr1) === J(arr0), `${tag}⑰: THE DESK IS UNCHANGED on disk — every remaining window's z / box / maximize / minimize is the desk's`, J({ arr0, arr1 }));
+    const d1 = await D.ev(ARR); delete d0['win-pd-charlie'];
+    ok(!d1['win-pd-charlie'] && J(d1) === J(d0), `${tag}⑰: D closed charlie and kept every box and z live (${zOrder(d1)})${red ? ' — belt 2 alone holds the live page' : ''}`, J({ d0, d1 }));
+    await D.boot(S.PORT); const d2 = await D.ev(ARR);
+    console.log(`    ${tag}⑰: D after reload ${zOrder(d2)}`);
+    judge(J(d2) === J(d0), `${tag}⑰: D's reload shows the desk D had (the boot takes the record whole — a phone write never moved a desk window)`, J({ d0, d2 }));
   };
 
   const D = await mkPage('desk', false), P = await mkPage('phone', true);
@@ -604,12 +681,13 @@ else await (async () => {
     const env = await P.ev(`({ mobile: app.isMobile, touch: app.isTouch, nav: !!app._mobileNav })`);
     ok(env.mobile && env.touch && env.nav && !(await D.ev('app.isMobile')), 'P is a phone (app.isMobile AND app.isTouch, MobileNav), D is not', J(env));
     // a boot restores no maximize (restoreState never did) — D's person maximizes delta by a REAL title-bar double-click,
-    // D's save carries it, P applies it: the fixture's maximized window is a real one on both pages
+    // D's save carries it to P (which takes none of a desk's arrangement but the minimize — the layer law): the fixture's
+    // maximized window is a real one on D and in the record P holds
     const dtb = await D.ev(`(() => { app.wm.focusWindow('win-pd-delta'); const r = app.wm.windows.get('win-pd-delta').element.querySelector('.window-titlebar').getBoundingClientRect(); return { x: r.left + 120, y: r.top + r.height / 2 }; })()`);
     await D.cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: dtb.x, y: dtb.y, buttons: 0 });
     for (const n of [1, 2]) { await D.cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: dtb.x, y: dtb.y, button: 'left', buttons: 1, clickCount: n }); await D.cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: dtb.x, y: dtb.y, button: 'left', buttons: 0, clickCount: n }); await sleep(60); }
     await until(() => S.disk().windows?.find((w) => w.winId === 'win-pd-delta')?.isMaximized === true, 5000);
-    await until(() => P.ev(`app.wm.windows.get('win-pd-delta')?.isMaximized === true`), 5000);
+    await until(() => P.got.some((m) => m.type === 'layout-sync' && (m.state?.windows || []).some((w) => w.winId === 'win-pd-delta' && w.isMaximized === true)), 5000);
     await sleep(1500);
     const d0 = await D.ev(ARR);
     ok(Object.keys(d0).length === 5 && d0['win-pd-delta']?.max && d0['win-pd-echo']?.min, 'D shows the 5 windows: 3 freeform + 1 maximized + 1 minimized', J(d0));
@@ -715,20 +793,27 @@ else await (async () => {
     }
 
     if (want(6)) {
-      console.log('— ⑥ BELT 2 alone: a hand-built phone-stamped record with scrambled arrangement');
+      console.log('— ⑥ THE LAYER GATE + BELT 2: a hand-built phone-stamped record with scrambled arrangement, then the held one with a new window');
       const before = await D.ev(ARR);
-      const rec = S.disk();
+      const rec = await S.held(), disk0 = J(rec);
       const scrambled = (rec.windows || []).map((w, i) => ({ ...w, zIndex: 9000 - i * 7, gridBounds: { left: 0, top: 0, width: 1, height: 1 }, isMaximized: i % 2 === 0, isMinimized: i % 3 === 1 }));
       scrambled.push(W('pd-foxtrot', { left: 0, top: 0, width: 1, height: 1 }, 9999));
-      const s = await rawSock(S.PORT);
+      const s = await rawSock(S.PORT), frames = []; s.on('message', (d) => { try { frames.push(JSON.parse(d)); } catch { } });
       s.send(J({ type: 'layout-sync', desktopId: DESK, state: { ...rec, windows: scrambled, updatedAt: undefined }, evidence: [], sentAt: Date.now(), viewport: 'phone' }));
-      ok(await until(async () => !!(await D.ev(ARR))['win-pd-foxtrot'], 8000), '⑥: D built the record\'s new window (membership applies)');
+      const refused = await until(() => frames.some((f) => f.type === 'layout-sync-refused'), 6000); await sleep(1200);
+      const r = frames.find((f) => f.type === 'layout-sync-refused') || {};
+      ok(refused && r.reason === 'cross-layer' && ['zIndex', 'gridBounds', 'isMaximized', 'isMinimized'].every((f) => (r.fields || []).includes(f)) && J(await S.held()) === disk0, `⑥: the server REFUSES it — the layer gate (cross-layer: ${(r.fields || []).join(', ')}), the record on disk unchanged`, J({ reason: r.reason, fields: r.fields }));
+      const mid = await D.ev(ARR);
+      ok(!mid['win-pd-foxtrot'] && J(mid) === J(before), '⑥: …D never hears it — no new window, every box and z as it was', J({ before, mid }));
+      // BELT 2 on what passes: the held arrangement verbatim + one new window with a full-screen box
+      s.send(J({ type: 'layout-sync', desktopId: DESK, state: { ...rec, windows: [...(rec.windows || []), W('pd-foxtrot', { left: 0, top: 0, width: 1, height: 1 }, 9999)], updatedAt: undefined }, evidence: [], sentAt: Date.now(), viewport: 'phone' }));
+      ok(await until(async () => !!(await D.ev(ARR))['win-pd-foxtrot'], 8000), '⑥: the same new window on the HELD arrangement passes — D built it (membership applies)');
       await sleep(900);
       const after = await D.ev(ARR);
       const kept = Object.fromEntries(Object.entries(after).filter(([id]) => before[id]));
       ok(J(kept) === J(before), `⑥: D's existing windows kept every box, z, maximize and minimize (${zOrder(kept)})`, J({ before, after: kept }));
-      ok(!nearFull(after['win-pd-foxtrot']?.gb) && !after['win-pd-foxtrot']?.max, `⑥: …and the new one is placed by D's own default, not the record's full box (${J(after['win-pd-foxtrot']?.box)})`);
-      ok(S.disk().viewport === 'phone', '⑥: the server stored the stamp on the record (viewport:\'phone\')', J(S.disk().viewport));
+      ok(!nearFull(after['win-pd-foxtrot']?.gb) && !after['win-pd-foxtrot']?.max, `⑥: …and the new one is placed by D's own default, not the record's full box — BELT 2 (${J(after['win-pd-foxtrot']?.box)})`);
+      ok((await S.held()).viewport === 'phone', '⑥: the server stored the stamp on the record (viewport:\'phone\')', J((await S.held()).viewport));
       s.close();
     }
 
@@ -813,17 +898,31 @@ else await (async () => {
         }
       } finally { DW?.close(); }
     }
-    // ── ⑯ lane phone-sidebar-chrome: this source, then the RED copy (every chromeToApply asks as a desk) ──
+    // ── ⑯ lane phone-sidebar-chrome + layout-layers-p0: this source, then the RED copy (every applyForViewport asks as a desk) ──
     if (want(16)) {
       await S.stop();
       const SB = await startServer(fixedTree, 'sb', fixtureSB);
       if (ok(SB.up, '⑯: the fixed-tree server re-booted on the desk-chrome record', SB.journal.slice(-600))) await sbLegs(SB, D, P, false);
       await SB.stop();
-      const LSRC = fs.readFileSync(path.join(repo, 'src', 'lib', 'layout.js'), 'utf8'), ASK = 'chromeToApply(this._viewport(), ';
-      console.log('— ⑯ RED control: this source with every chromeToApply asking as a desk (the phone applies the record\'s chrome again)');
-      if (ok(LSRC.split(ASK).length - 1 === 3, `⑯ RED: the three asks exist in src/lib/layout.js (the control judges this source)`)) {
-        const SR = await startServer(mkTree('sb-red', 'HEAD', true, (t) => t.split(ASK).join("chromeToApply('desktop', ")), 'sb-red', fixtureSB);
+      const LSRC = fs.readFileSync(path.join(repo, 'src', 'lib', 'layout.js'), 'utf8'), ASK = 'applyForViewport(this._viewport(), ';
+      console.log('— ⑯ RED control: this source with every applyForViewport asking as a desk (the phone applies the record\'s chrome and arrangement again)');
+      if (ok(LSRC.split(ASK).length - 1 === 5, `⑯ RED: the five asks exist in src/lib/layout.js (the control judges this source)`)) {
+        const SR = await startServer(mkTree('sb-red', 'HEAD', true, (t) => t.split(ASK).join("applyForViewport('desktop', ")), 'sb-red', fixtureSB);
         if (ok(SR.up, '⑯ RED: its server booted', SR.journal.slice(-600))) await sbLegs(SR, D, P, true);
+        await SR.stop();
+      }
+    }
+    // ── ⑰ lane layout-layers-p1: THE LAYER GATE — this source, then the RED copy (the server's gate removed) ──
+    if (want(17)) {
+      await S.stop();
+      const SG = await startServer(fixedTree, 'gate', fixture);
+      if (ok(SG.up, '⑰: the fixed-tree server re-booted on a fresh record', SG.journal.slice(-600))) await gateLegs(SG, D, P, false);
+      await SG.stop();
+      const RSRC = fs.readFileSync(path.join(repo, 'src', 'lib', 'desktop-record.js'), 'utf8');
+      console.log('— ⑰ RED control: this source with the server\'s gate removed (src/lib/desktop-record.js layerGate answers ok)');
+      if (ok(RSRC.split(GATE_FIND).length === 2, '⑰ RED: the gate\'s line exists once in src/lib/desktop-record.js (the control judges this source)')) {
+        const SR = await startServer(mkTree('gate-red', 'HEAD', true, null, ['src/lib/desktop-record.js', (t) => t.replace(GATE_FIND, GATE_GONE)]), 'gate-red', fixture);
+        if (ok(SR.up, '⑰ RED: its server booted', SR.journal.slice(-600))) await gateLegs(SR, D, P, true);
         await SR.stop();
       }
     }

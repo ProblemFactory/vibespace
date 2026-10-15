@@ -79,6 +79,15 @@
  * fixed size), and a viewer's "Fit here" / "Fit to this window" is refused by name (`fixedRefusal`: where to change
  * it). The size was judged at its door (src/desktop-pin.js parsePin); this file only reads the shape (`fixedOf`).
  *
+ * AN AGENT'S OWN `set viewport` ANSWERS WITH THE PAGE'S SIZE (lane browser-viewport-answer, B-6dae ①; the 2026-10-02
+ * coordinator decision — no new read verb — and the 2026-10-14 ruling 「a pin RULES」: the owner asked for the pin so that
+ * 「agent 看到的就是这个尺寸」, and a pin an agent can override is not a pin). `agentSetAsked` reads what the agent asked off
+ * its words; `agentSetRuling` is judged BEFORE the set runs — a pinned size (by the user's Pin size…, or by the agent's own
+ * `vibespace-browser size`: `fixedBy`) means the raw set does not run; `agentSetAnswer` is the ONE line the agent reads,
+ * the page's CSS viewport read after the set (or instead of it): applied, pinned (who + the door that unpins), held (the
+ * user drives — the keeper's browser_paused), unreadable by name — never a guessed number. The latest explicit act wins
+ * only among unpinned sets. `agentSetTraceParams` is its trace row's flat params (action `agent-viewport`).
+ *
  * THE PHONE'S PINCH (watch mode): a transform on the picture (`zoomAt`,
  * `pinchStep`, `panStep`, origin top-left, `ZOOM_MIN`..`ZOOM_MAX`, the picture
  * always covering its box); a tap maps through it because the pointer
@@ -134,6 +143,74 @@ function fixedOf(v) { const w = Math.round(posNum(v && v.w)), h = Math.round(pos
 function fixedRefusal(fixed) {
   const fx = fixedOf(fixed);
   return fx ? { code: 'size_pinned', width: fx.w, height: fx.h, error: `the picture size is pinned at ${fx.w}×${fx.h} — change it from the window menu (Pin size…)` } : null;
+}
+
+/** lane browser-viewport-answer: what the agent's own `set viewport W H [scale]` / `set device NAME` ASKED, read off its
+ *  words (flags dropped) → `{kind:'viewport', width, height, scale}` | `{kind:'device', device}` | null (another `set`). */
+function agentSetAsked(argv) {
+  const w = (Array.isArray(argv) ? argv : []).map(String).filter((x) => !x.startsWith('-'));
+  if (w[0] !== 'set') return null;
+  if (w[1] === 'viewport') {
+    const width = Math.round(posNum(w[2])), height = Math.round(posNum(w[3]));
+    return width && height ? { kind: 'viewport', width, height, scale: posNum(w[4]) || 1 } : null;
+  }
+  if (w[1] === 'device') { const device = w.slice(2).join(' ').trim().slice(0, 80); return device ? { kind: 'device', device } : null; }
+  return null;
+}
+const sizeWords = (s) => `${Math.round(s.width)}x${Math.round(s.height)}`;
+const askedWords = (a) => (!a ? 'size' : a.kind === 'device' ? `device "${a.device}"` : sizeWords(a) + (posNum(a.scale) > 1 ? ` @${posNum(a.scale)}` : ''));
+/** Who pinned it and the door that unpins it — the user's pin is the user's to lift (the agent is never told to undo it). */
+const pinDoor = (by) => (by === 'agent' ? 'vibespace-browser size auto unpins it' : 'only the user unpins it (Pin size… → Auto in the live window\'s menu)');
+const pinWho = (by) => (by === 'agent' ? 'by you (vibespace-browser size)' : 'by the user');
+/** Judged BEFORE an agent's raw set runs: a PINNED size rules it → `{ruledBy:'fixed', by:'user'|'agent', width, height, text}`;
+ *  else null. A pin without a recorded author (a note older than this rule) is the user's. The holder is not judged here —
+ *  while the user drives, the keeper refuses every page verb `browser_paused` (the route asks the answer with `paused`). */
+function agentSetRuling({ fixed = null, fixedBy = null } = {}) {
+  const fx = fixedOf(fixed);
+  if (!fx) return null;
+  const by = fixedBy === 'agent' ? 'agent' : 'user';
+  return { ruledBy: 'fixed', by, width: fx.w, height: fx.h, text: `the picture size is pinned at ${fx.w}x${fx.h} ${pinWho(by)} — ${pinDoor(by)}` };
+}
+/**
+ * THE ANSWER of an agent's own set — ONE line. `got` = the page's CSS layout viewport `{width, height}` read AFTER the set
+ * (or instead of it when it did not run), or `{error}` when the page could not be read; `ruling` = agentSetRuling's, or
+ * `{ruledBy:'holder'}` (the keeper refused it browser_paused); `ran` = the browser CLI ran the set.
+ *   applied     viewport: 1280x720 (asked 1280x720)                 · a device: viewport: 390x844 (asked device "iPhone 12")
+ *   not taken   viewport: 1265x720 (asked 1280x720) — the page did not take that size
+ *   pinned      viewport: 1920x1080 — pinned by the user, your 1280x720 did not apply; only the user unpins it (Pin size… → Auto)
+ *   held        viewport: 1440x900 — the user drives this browser and their pane rules its size, your 1280x720 did not apply
+ *   unreadable  viewport: unreadable (<why>) — … (the size the page took is not known — never a guessed number)
+ * → `{line, ruledBy, by, asked, got, applied, code}` (`code` = the CLI's bracket word for a set that did not apply).
+ */
+function agentSetAnswer({ asked = null, got = null, ruling = null, ran = true } = {}) {
+  const g = got && posNum(got.width) && posNum(got.height) ? { width: Math.round(got.width), height: Math.round(got.height) } : null;
+  const head = g ? `viewport: ${sizeWords(g)}` : `viewport: unreadable (${String((got && got.error) || 'unreadable').replace(/\s+/g, ' ').slice(0, 160)})`;
+  const yours = askedWords(asked);
+  const r = ruling && typeof ruling === 'object' ? ruling : null;
+  const base = { asked: asked || null, got: g };
+  if (r && r.ruledBy === 'fixed') {
+    const pin = { width: Math.round(posNum(r.width)), height: Math.round(posNum(r.height)) };
+    const at = !g || Math.abs(g.width - pin.width) > FIT_SLACK_PX || Math.abs(g.height - pin.height) > FIT_SLACK_PX ? ` at ${sizeWords(pin)}` : '';
+    const by = r.by === 'agent' ? 'agent' : 'user';
+    return { ...base, line: `${head} — pinned${at} ${pinWho(by)}, your ${yours} did not apply; ${pinDoor(by)}`, ruledBy: 'fixed', by, applied: false, code: 'size_pinned' };
+  }
+  if (r && r.ruledBy === 'holder') return { ...base, line: `${head} — the user drives this browser and their pane rules its size, your ${yours} did not apply`, ruledBy: 'holder', by: 'user', applied: false, code: 'browser_paused' };
+  if (!ran) return { ...base, line: `${head} — your ${yours} did not run (the size was pinned when you asked and is not any more: run it again)`, ruledBy: null, by: null, applied: false, code: 'not_run' };
+  if (!g) return { ...base, line: `${head} — you asked ${yours}; the size the page took is not known`, ruledBy: null, by: null, applied: null, code: null };
+  if (asked && asked.kind === 'viewport' && (Math.abs(g.width - asked.width) > FIT_SLACK_PX || Math.abs(g.height - asked.height) > FIT_SLACK_PX)) {
+    return { ...base, line: `${head} (asked ${yours}) — the page did not take that size`, ruledBy: null, by: null, applied: false, code: null };
+  }
+  return { ...base, line: `${head} (asked ${yours})`, ruledBy: null, by: null, applied: true, code: null };
+}
+/** The trace row of that answer (action `agent-viewport` → kind 'viewport', src/browser-trace.js) — FLAT params (the
+ *  recorder redacts nested objects): what was asked, the size the page has (0 = unreadable), who ruled. */
+function agentSetTraceParams(ans) {
+  const a = ans && ans.asked ? ans.asked : null, g = ans && ans.got ? ans.got : null;
+  return {
+    ...(a && a.kind === 'device' ? { device: String(a.device).slice(0, 80) } : a ? { width: a.width, height: a.height, ...(posNum(a.scale) > 1 ? { scale: posNum(a.scale) } : {}) } : {}),
+    gotWidth: g ? g.width : 0, gotHeight: g ? g.height : 0,
+    ...(ans && ans.ruledBy ? { ruled: ans.ruledBy, by: ans.by || 'user' } : {}),
+  };
 }
 
 /** A viewer's `{type:'fit'}` message → the report the bridge keeps, or null. */
@@ -263,13 +340,14 @@ function restoreDeferred(turn) { return turn === 'running' || turn === 'waiting'
 /** Verify r1: the page-size NOTE the keeper keeps on the browser's own record (it dies with the record at the next
  *  launch — a relaunched browser has its own size): the bridge's state ↔ the note. A server restart no longer forgets
  *  that the agent chose the size (the first viewer's fit would have overridden it) nor the size to restore to. */
-function fitNoteOf({ agent = null, applied = null, baseline = null, floorW = FIT_MIN_W, fixed = null } = {}) {
+function fitNoteOf({ agent = null, applied = null, baseline = null, floorW = FIT_MIN_W, fixed = null, fixedBy = null } = {}) {
   const sz = (o) => o && posNum(o.width) && posNum(o.height) ? { width: Math.round(o.width), height: Math.round(o.height) } : null;
   const a = agent && typeof agent === 'object' ? agent : null;
   return {
     agent: a ? { kind: a.kind === 'device' ? 'device' : 'viewport', width: posNum(a.width), height: posNum(a.height), scale: posNum(a.scale) || 1, device: a.device ? String(a.device).slice(0, 80) : null, at: Number(a.at) || 0 } : null,
     applied: sz(applied), baseline: sz(baseline), floorW: Math.max(FIT_MIN_W, posNum(floorW) || FIT_MIN_W),
     fixed: fixedOf(fixed), // lane launch-picture-size: the session's fixed size outlives a server restart like the agent's choice
+    fixedBy: fixedOf(fixed) ? (fixedBy === 'agent' ? 'agent' : 'user') : null, // lane browser-viewport-answer: who pinned it (the door the answer names)
   };
 }
 function fitStateFromNote(note) {
@@ -277,7 +355,7 @@ function fitStateFromNote(note) {
   const n = fitNoteOf(note);
   const a = n.agent;
   const agent = a && (a.kind === 'device' ? a.device : (a.width && a.height)) ? { ...a, id: null, seq: null } : null;
-  return { agent, applied: n.applied, baseline: n.baseline, floorW: n.floorW, fixed: n.fixed };
+  return { agent, applied: n.applied, baseline: n.baseline, floorW: n.floorW, fixed: n.fixed, fixedBy: n.fixedBy };
 }
 
 /** An upstream `command` mirror that SETS the viewport — `{kind:'viewport'|'device', width, height, scale, device, id}` or null. */
@@ -546,5 +624,6 @@ module.exports = {
   fitChipWords, PLACE_TAG_RE, buttonStep, fitHoldVerdict, // lane live-input (+ builder r2: the driver's held buttons hold a resize): the chip's words (where the page's size comes from + what a click does); a view's place tags
   agentSetArgs, ownSetOutcome, restoreDeferred, fitNoteOf, fitStateFromNote, // verify r1: the order-judged outcome of our own set, the deferred restore, the persisted note
   fixedOf, fixedRefusal, // lane launch-picture-size: a session's fixed picture size, and the refusal of a viewer's fit while it holds
+  agentSetAsked, agentSetRuling, agentSetAnswer, agentSetTraceParams, // lane browser-viewport-answer: an agent's own set answers with the page's size (a pin rules)
   zoomClamp, isZoomed, zoomAt, pinchStep, panStep, zoomedRect, transformCss,
 };

@@ -125,7 +125,7 @@ ok(/ORIGIN_COLS, ORIGIN_ORDER, ORIGIN_META \} from '\.\/usage-dashboard\.js'/.te
   'the window imports that one vocabulary instead of keeping a second copy');
 ok(/function renderSessions\(/.test(win) && /ORIGIN_COLS\.map\(k => `<th/.test(win),
   'the "By session" table renders one column per origin');
-ok(/renderSessions\(d, state, \{ limit: 12 \}\)/.test(win),
+ok(/renderSessions\(d, state, \{ limit: 12, pivotHere \}\)/.test(win),
   'and it REPLACED the old plain session group (a renderer nobody calls is not a feature)');
 ok(/function originStack\(/.test(win) && /td\.appendChild\(originStack\(cells, metric\)\)/.test(win),
   'every session row carries the stacked share bar');
@@ -136,12 +136,15 @@ ok(/originSplit: pivotMap\(d, 'project:origin'\)/.test(win),
 ok(/const split = opts\.originSplit \? originSplitText\(opts\.originSplit\[r\.key\], metric\) : '';/.test(win)
   && /title2 \+= '\\n' \+ split/.test(win),
   'and the split reaches the row TITLE (the hover answer the row itself cannot give)');
-ok(/const ORIGIN_PIVOTS = \['session:origin', 'project:origin'\]/.test(win)
-  && /\[\.\.\.new Set\(\[\.\.\.ORIGIN_PIVOTS, \.\.\.panelPivots\(currentPanels\(\)\)\]\)\]/.test(win),
-  'the window asks for its own two crosses BESIDE the dashboard\'s, never instead of them');
+// B-f95d ② (2.369.274): the two crosses are no longer asked for with every load —
+// the session table / the project section ask once on screen (test-usage-pivots
+// pins the mechanism; this is the tripwire that the old line stays gone).
+ok(!/ORIGIN_PIVOTS/.test(win) && /renderSessions\(d, state, \{ limit: 12, pivotHere \}\)/.test(win)
+  && /withPivot\('project:origin', renderGroup\(/.test(win),
+  'the window asks for its two crosses when their sections are on screen, never with every load');
 
-// The route caps the pivot list; the window now always asks for two of its own
-// on top of whatever the biggest preset needs, so the cap must cover both.
+// The route caps the pivot list; a view asks for at most what it draws (the
+// classic view's two crosses, or the widest preset's), so the cap covers both.
 const capM = /\.slice\(0, (\d+)\)/.exec(route.slice(route.indexOf("req.query.pivot")));
 const cap = capM ? Number(capM[1]) : 0;
 const { PRESETS, panelPivots } = await import(path.join(REPO, 'src/lib/usage-dashboard.js'))
@@ -153,8 +156,8 @@ if (PRESETS && panelPivots) {
   // the assertion below still holds against the shipped numbers.
   try { for (const p of Object.values(PRESETS())) worstPreset = Math.max(worstPreset, panelPivots(p.panels).length); } catch { }
 }
-ok(cap >= 2 + worstPreset,
-  `the route's pivot cap (${cap}) covers the window's two crosses plus the widest preset's (${worstPreset})`);
+ok(cap >= Math.max(2, worstPreset),
+  `the route's pivot cap (${cap}) covers the classic view's two crosses and the widest preset's (${worstPreset})`);
 
 // ── ⑥ the shipped scanner stamps it too (remote hosts run workflows) ──────
 const scan = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-usage-scan'), 'utf-8');

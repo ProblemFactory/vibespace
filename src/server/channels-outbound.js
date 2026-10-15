@@ -18,6 +18,7 @@ const OF = require('../channel-outbox-files.js');
 const Thr = require('../channel-thread.js');
 const { toAgentText: agentText } = require('../peer-text.js');
 const { reactionsOf: reactionsRow, threadsOf: threadsRow, ChannelError } = require('../channels/index.js');
+const { HOLD_MAX_SEC } = require('../channels/vendor-hold.js');   // lane lark-send-hold: the longest wait a vendor hold can name
 
 /** THE FAMILY'S FACTORY — `engineCtx` is the engine's ONE context object (channels-engine.js, the composition root): every
  *  field this family reads is named in the destructure below (test-architecture §79 pins the list), and what it answers
@@ -1019,7 +1020,9 @@ function create(engineCtx) {
     }
     wakeRefundIfUnsent(gate, { mayWake }, p0.convId, id);
     const fresh = store.outbox.snapshot().proposals[id];
-    return { ok: fresh.state === 'sent', code: fresh.state === 'sent' ? null : fresh.state, error: fresh.state === 'sent' ? null : (fresh.reason || fresh.state), proposal: proposalView(fresh) };
+    // lane lark-send-hold: a send HELD for the vendor's reset is an approval that landed — its wait is the answer, never an error
+    const went = fresh.state === 'sent' || (fresh.state === 'sending' && !!fresh.held);
+    return { ok: went, code: went ? null : fresh.state, error: went ? null : (fresh.reason || fresh.state), ...(fresh.held && fresh.state === 'sending' ? { held: true } : {}), proposal: proposalView(fresh) };
   }
 
   // ── HOW THE DRAFTER HEARS OF A DECISION IS CHOSEN AT THE DECISION (2026-09-27, owner ruling) ──
@@ -1258,7 +1261,9 @@ function create(engineCtx) {
     const line = P.honestyLine({ draftedBy: p.draftedBy, enabled: honestyLineFor(rec) });
     const wire = P.withHonestyLine(p.text, line);
     const t0 = now();
-    await store.outbox.update((ob) => { const q = ob.proposals[id]; if (q) { q.attemptAt = t0; q.wire = { text: wire, honestyLine: !!line, at: t0 }; } });
+    // lane lark-send-hold: a REAL attempt ends a held wait in the same write — a `sending` proposal still carrying `held`
+    // at a restart therefore never left (sweepSending re-arms it); one without it may have (unknown)
+    await store.outbox.update((ob) => { const q = ob.proposals[id]; if (q) { q.attemptAt = t0; q.wire = { text: wire, honestyLine: !!line, at: t0 }; if (q.held) delete q.held; } });
     auditOutbox(store.outbox.snapshot().proposals[id], 'attempt', { idemKey: p.id, honestyLine: !!line });
     let r = null, threw = false;
     if (!rec) r = { ok: false, code: 'not-found', retryable: false, detail: { reason: 'adapter no longer exists' } };
@@ -1301,6 +1306,10 @@ function create(engineCtx) {
     // once, and learnSentFiles skips a proposal that is not yet sent) — the conversation's STORED self-authored records since
     // the send began re-key a file-keyed result IN this transition (one write; a local read, never a vendor call)
     const shared = r && r.ok && Array.isArray(r.parts) && r.parts.some((x) => x && x.ok === true && x.part === 'attachment') ? sharedSince(p.adapterId, p.convId, t0) : null;
+    // lane lark-send-hold (B-efa0): the adapter refused BEFORE any request because the vendor's own reset is still
+    // running (`rate-limited` + `held`) — nothing left and nothing failed: the proposal stays `sending`, its wait SAID
+    const heldUntil = lost ? null : heldUntilOf(r, t);
+    if (heldUntil) return holdSend(id, rec, r, heldUntil, t);
     let to, patch;
     if (r && r.ok) {
       to = 'sent';
@@ -1355,6 +1364,76 @@ function create(engineCtx) {
     sendLeft.delete(id);
     return { ok: to === 'sent', state: to };
   }
+  // ── lane lark-send-hold (B-efa0): A HELD SEND WAITS THE VENDOR'S RESET, NEVER FAILS ──────────────────────────────
+  // An adapter whose vendor answered a send 429 holds the ACCOUNT's later sends (Lark: src/channels/lark.js `sendHold`)
+  // and refuses each one before any request with `rate-limited` + `held: true` + `heldUntil`. Here that refusal is no
+  // outcome: the proposal stays `sending` with `held = {until, at, vendor}` (the card says "Lark asked to slow down —
+  // sends after HH:MM:SS", the agent reads `reason`), and ONE timer per account sends the held ones, oldest first, at
+  // the reset (each through `sendNow` again — the adapter judges anew; a fresh 429 holds the rest anew). The stamp is
+  // persisted, so a restart re-arms the wait (sweepSending) instead of calling a send that never left "unknown".
+  const HELD_SLACK_MS = 250;   // the timer fires this long after the reset (a timer a hair early would be held again)
+  const heldTimers = new Map();      // adapterId → { timer, at } — the account's ONE release timer (its earliest reset)
+  const heldReleasing = new Map();   // adapterId → the release running now (a second ask joins it — never two sends of one id)
+  /** The instant a HELD refusal names (bounded by the vendor hold's ceiling), or null for any other answer. */
+  function heldUntilOf(r, t) {
+    if (!r || r.ok || r.code !== 'rate-limited' || !r.detail || r.detail.held !== true) return null;
+    const named = Number(r.detail.heldUntil) || (t + Math.max(1, Number(r.detail.retryAfterSec) || 0) * 1000);
+    return Math.min(Math.max(named, t + 1000), t + HOLD_MAX_SEC * 1000);
+  }
+  async function holdSend(id, rec, r, until, t) {
+    const vendor = (typeof r.detail.vendor === 'string' && r.detail.vendor.trim() ? r.detail.vendor.trim().slice(0, 40) : null) || (rec ? rec.kind : null) || 'the platform';
+    await store.outbox.update((ob) => {
+      const q = ob.proposals[id];
+      if (!q || q.state !== 'sending') return;
+      q.held = { until, at: t, vendor };
+      q.reason = `held: ${vendor} asked to slow down (rate-limited) — nothing was sent yet; it goes out by itself after ${new Date(until).toISOString()}`;
+    });
+    const p1 = store.outbox.snapshot().proposals[id];
+    auditOutbox(p1, 'held', { until, vendor });
+    armHeld(p1.adapterId, until);
+    await pointerSync(p1.key);
+    notifyOutbox([id]); notify(p1.convId ? [p1.convId] : []);
+    log.log(`[channels] outbox ${id} → ${p1.adapterId}/${p1.convId || ''}: held — ${vendor} asked to slow down; it goes out after ${new Date(until).toISOString()}`);
+    sendLeft.delete(id);
+    return { ok: false, state: 'sending', held: true, until };
+  }
+  /** Arm (or keep) the account's ONE release timer at its earliest held reset. */
+  function armHeld(adapterId, until) {
+    const k = String(adapterId);
+    const cur = heldTimers.get(k);
+    if (cur && cur.at <= until) return;
+    if (cur) clearTimeout(cur.timer);
+    const timer = setTimeout(() => { heldTimers.delete(k); track(releaseHeld(k)); }, Math.max(0, until - now()) + HELD_SLACK_MS);
+    if (timer.unref) timer.unref();
+    heldTimers.set(k, { timer, at: until });
+  }
+  /** The account's held sends whose reset has passed go out, oldest first, ONE at a time; a reset still running re-arms
+   *  the timer. Answers how many were handed to the send. */
+  function releaseHeld(adapterId) {
+    const k = String(adapterId);
+    if (heldReleasing.has(k)) return heldReleasing.get(k);
+    const cur = heldTimers.get(k);
+    if (cur) { clearTimeout(cur.timer); heldTimers.delete(k); }
+    const run = (async () => {
+      const held = proposalsFor().filter((p) => p.adapterId === k && p.state === 'sending' && p.held)
+        .sort((a, b) => (Number(a.held.at) - Number(b.held.at)) || String(a.id).localeCompare(String(b.id)));
+      let n = 0;
+      for (const p of held) {
+        const q = store.outbox.snapshot().proposals[p.id];
+        if (!q || q.state !== 'sending' || !q.held) continue;
+        if (Number(q.held.until) > now()) { armHeld(k, Number(q.held.until)); continue; }
+        await onProposal(p.id, () => sendNow(p.id));
+        n++;
+      }
+      return n;
+    })();
+    heldReleasing.set(k, run);
+    run.then(() => heldReleasing.delete(k), () => heldReleasing.delete(k));
+    return run;
+  }
+  /** The engine stops: no release timer outlives it (the stamps stay — the next boot re-arms them). */
+  function stopHeld() { for (const w of heldTimers.values()) clearTimeout(w.timer); heldTimers.clear(); }
+
   /**
    * AN APPROVED (or direct) REACTION PROPOSAL GOES OUT (spec §5.3 / §3.4): the SAME act the window's click is —
    * `react` / `unreact` as the user, `by:'agent'` (the side record's `src:'agent'`), ONE vendor call, never retried.
@@ -1650,7 +1729,10 @@ function create(engineCtx) {
    * on. Never a re-send.
    */
   async function sweepSending() {
-    const stuck = proposalsFor().filter((p) => p.state === 'sending');
+    // lane lark-send-hold: a HELD send never left (`held` is deleted the moment a real attempt starts) — its wait is
+    // re-armed from the stamp (a reset already past ⇒ it goes out at once), never called unknown
+    for (const p of proposalsFor().filter((x) => x.state === 'sending' && x.held)) armHeld(p.adapterId, Number(p.held.until) || now());
+    const stuck = proposalsFor().filter((p) => p.state === 'sending' && !p.held);
     for (const p of stuck) {
       const tr = await transition(p.id, 'unknown', 'boot', (q) => { q.reason = 'outcome unknown: the server stopped between the attempt and the outcome; NOT retried automatically — check the conversation on the platform, or press Check outcome'; q.failure = { code: 'lost-at-boot', detail: null, at: now() }; });
       if (!tr.ok) continue;
@@ -1869,6 +1951,7 @@ function create(engineCtx) {
     outboxAttachment, filesSweep, propose, proposeReaction, compose, composeEach, approve, reject, onProposal, withdrawProposal, replaceProposal,
     noteReceiptStash, reconcileReceiptFates, reconcile, sweepSending, sweepReplaces, receipt, expireSweep, pointerSync, learnSentFiles,
     filesOfferFor,   // lane owner-composer-attach: the owner's composer judges its chips by the same offer the send reads
+    releaseHeld, stopHeld,   // lane lark-send-hold: the held sends of an account go out at its reset; stop drops the timers
   };
 }
 

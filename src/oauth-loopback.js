@@ -112,8 +112,11 @@ const VENDOR_ERROR_MAX = 64;
 const vendorErrorOf = (v) => String(v == null ? '' : v).slice(0, VENDOR_ERROR_MAX).replace(/[^A-Za-z0-9_.:-]/g, '_') || 'error';
 /** Scopes as a caller hands them: strings, bounded, deduped. */
 /** lane slack-scopes-lark-reauth: 16 → 64 — Lark's consent now asks for every usable scope (18 optional), and a bound
- *  below that silently cut the LAST groups (the feed's) out of the narrowing chain. */
-const OPTIONAL_SCOPES_MAX = 64;
+ *  below that silently cut the LAST groups (the feed's) out of the narrowing chain.
+ *  lane lark-minutes-scopes: 64 → 200 — Lark's consent asks every permission the app has enabled (its own list, read at
+ *  consent time), and Lark's own cap on one consent is 200 ("应用最多一次可以请求用户授予 200 个 `scope`"): every scope a
+ *  consent can name stays in the narrowing chain and in the account's record of what was refused. */
+const OPTIONAL_SCOPES_MAX = 200;
 const scopeList = (xs) => [...new Set((Array.isArray(xs) ? xs : []).filter((x) => typeof x === 'string' && x && x.length <= 200))].slice(0, OPTIONAL_SCOPES_MAX);
 /** The optional scopes as ORDERED GROUPS (lane lark-search-poll): an element that is an array is one group, a bare
  *  string a group of one; a scope appears once (its first group), empty groups vanish; ≤ OPTIONAL_SCOPES_MAX in all. */

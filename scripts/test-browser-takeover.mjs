@@ -52,6 +52,16 @@
 //      list; CONTROL: an announcer copy without the takeover card stays silent. The
 //      shipped CLI end to end (⑥): a verb running when the user takes over prints
 //      [browser_interrupted] and exits 1.
+//   ⑪ lane browser-viewport-answer (B-6dae ①; the 2026-10-14 ruling 「a pin RULES」): an agent's own `set viewport|device`
+//      answers with the page's RESULTING size — PURE (what was asked, the pin's ruling + who pinned it, the line's shapes:
+//      applied / not taken / pinned by the user / pinned by the agent / held / unreadable, the note keeps who pinned it);
+//      THE REAL BRIDGE over a stub keeper (no pin ⇒ no ruling; the answer read after the set; a pin by the user / by the
+//      agent rules; a restarted bridge rules the same off the note; auto lifts it; held; unreadable; ONE trace row per
+//      set, `agent-viewport`); END TO END the shipped CLI over the in-process routes + the real bridge + the real keeper,
+//      the page a fake CDP endpoint the fake browser CLI's set resizes: applied (exit 0 + the line), pinned by the user's
+//      Pin size… (the set never reaches the browser CLI, exit 1 [size_pinned], the door), a batch carrying a set refused
+//      whole, pinned by the agent's own `size` (its door; --json), `size auto` ⇒ applied again, the user driving
+//      ([browser_paused] + the line, nothing ran), a page that answers no layout viewport (unreadable by name).
 //   ⑦ lane J r2 (the 2026-09-25 naive-user study): the keyboard while you
 //      drive (ownership / key routes / reserved chords / paste / IME / focus
 //      reclaim / one owner per client, and the focus guards' placement), the
@@ -119,6 +129,8 @@ if (a === 'session' && b === 'info') { const s = read(); const act = !!(s && ali
 if (a === 'open') { let s = read(); if (!(s && alive(s.pid))) { const c = spawn('sleep', ['600'], { detached: true, stdio: 'ignore' }); c.unref(); s = { pid: c.pid, profile: process.env.AGENT_BROWSER_PROFILE || null }; fs.writeFileSync(f, JSON.stringify(s)); fs.appendFileSync(path.join(st, 'launches.log'), JSON.stringify({ ns, ...s }) + '\\n'); } out({ success: true, data: { url: b } }); process.exit(0); }
 if (a === 'get' && b === 'cdp-url') { const s = read(); if (!(s && alive(s.pid))) { out({ success: false, error: 'fake: no browser' }); process.exit(1); } out({ success: true, data: { cdpUrl: 'ws://127.0.0.1:${DEAD_CDP}/devtools/browser/fake-' + ns } }); process.exit(0); }
 if (a === 'close' && b === '--all') { const s = read(); let closed = 0; if (s && alive(s.pid)) { try { process.kill(s.pid, 'SIGKILL'); closed = 1; } catch { } } try { fs.unlinkSync(f); } catch { } out({ success: true, data: { closed, failed: [], sessions: [] } }); process.exit(0); }
+// lane browser-viewport-answer (⑪): \`set viewport W H\` / \`set device NAME\` resize the fake page the fake CDP endpoint answers for
+{ const vi = argv.indexOf('set'); if (vi >= 0 && (argv[vi + 1] === 'viewport' || argv[vi + 1] === 'device')) { fs.appendFileSync(path.join(st, 'sets.log'), JSON.stringify({ ns, argv: argv.slice(vi) }) + '\\n'); const pg = argv[vi + 1] === 'device' ? { w: 390, h: 844 } : { w: Number(argv[vi + 2]), h: Number(argv[vi + 3]) }; let prev = {}; try { prev = JSON.parse(fs.readFileSync(path.join(st, 'vp-page.json'), 'utf8')); } catch { } fs.writeFileSync(path.join(st, 'vp-page.json'), JSON.stringify({ ...prev, ...pg })); out({ success: true, data: { width: pg.w, height: pg.h } }); process.exit(0); } }
 if (a === 'confirm' || a === 'deny') { fs.appendFileSync(path.join(st, 'confirms.log'), JSON.stringify({ verb: a, id: b, ns, session: process.env.AGENT_BROWSER_SESSION || null, profile: process.env.AGENT_BROWSER_PROFILE || null }) + '\\n'); if (b === 'c_gone') { out({ success: false, data: null, error: 'No pending confirmation' }); process.exit(1); } out({ success: true, data: { confirmed: a === 'confirm', id: b }, error: null }); process.exit(0); }
 out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.slice(2).join(' ') }); process.exit(1);
 `, { mode: 0o755 });
@@ -1755,6 +1767,158 @@ console.log('— ⑩ r6 A-F8 / A-F9: the pre-fix rule in a patched copy makes ea
   ok(/T\.confirmationFromUpstream\(msg, now\(\), \{ command: /.test(bs) && /if \(!unsubConfirm && view && !view\.conflict\) broadcast\(relay, view\)/.test(bs) && /else if \(ev\.kind === 'conflict'\) broadcast\(r, \{ type: 'confirmation-conflict'/.test(bs) && /shown: v\.shown/.test(bs) && /handbackFor\(relay, viewer\.id, 'explicit', v\.expectWakes\)/.test(bs), 'WIRING PIN (r6): the bridge pairs command → result, broadcasts only the keeper\'s first-written view, says a conflict as its own record, passes the digest and the count through');
   ok(/send\(\{ type: 'confirm', id, decision, shown: confirmationDigest\(c\) \}\)/.test(lw) && /st\.confirmSlots = confirmSlots\(/.test(lw) && !/confirms\.innerHTML = ''/.test(lw) && /expectWakes: st\.wakes/.test(lw) && /t\('Hand back \(wakes \{n\}\)'/.test(lw), 'WIRING PIN (r6): the live view confirms with the digest of the row it drew, keeps KEYED slots (no whole-card rebuild), and its Hand back carries and says the count');
   for (const r of copiesCensus(M10.files, M10.dir, REPO, { minCopies: 4, label: '⑩ ' })) ok(r.pass, r.name, r.detail);
+}
+
+// ═══ ⑪ lane browser-viewport-answer: an agent's own `set viewport` answers with the page's RESULTING size + ONE trace row ═══
+console.log('— ⑪ the agent\'s own set viewport: the answer line (applied / pinned / held / unreadable), a pin rules, one trace row');
+{
+  const FIT = require('../src/browser-fit.js');
+  const TR = require('../src/browser-trace.js');
+  const VP = require('../src/server/browser-viewport.js');
+  const quiet = { warn() { }, log() { } };
+  // ── PURE ──
+  const a = FIT.agentSetAsked(['set', 'viewport', '1280', '720', '--json']);
+  ok(a && a.kind === 'viewport' && a.width === 1280 && a.height === 720 && a.scale === 1 && FIT.agentSetAsked(['set', 'viewport', '390', '844', '2']).scale === 2 && FIT.agentSetAsked(['set', 'device', 'iPhone 12']).device === 'iPhone 12'
+    && FIT.agentSetAsked(['set', 'geo', '1', '2']) === null && FIT.agentSetAsked(['set', 'viewport', 'wide']) === null && FIT.agentSetAsked(['click', '@e1']) === null, 'PURE agentSetAsked: `set viewport W H [scale]` / `set device NAME` (flags dropped); any other set, or no size, is not one');
+  const rU = FIT.agentSetRuling({ fixed: { w: 1920, h: 1080 } }), rA = FIT.agentSetRuling({ fixed: { w: 1600, h: 900 }, fixedBy: 'agent' });
+  ok(FIT.agentSetRuling({}) === null && rU.ruledBy === 'fixed' && rU.by === 'user' && rU.width === 1920 && rU.height === 1080 && rA.by === 'agent' && /Pin size… → Auto/.test(rU.text) && /vibespace-browser size auto unpins it/.test(rA.text) && !/vibespace-browser size auto/.test(rU.text),
+    'PURE agentSetRuling: a pin rules — by the user (a pin of unknown author is the user\'s: the agent is never told to lift it) or by the agent (its own door)');
+  const L = (o) => FIT.agentSetAnswer({ asked: a, ...o });
+  const applied = L({ got: { width: 1280, height: 720 } }), off = L({ got: { width: 1265, height: 720 } }), pinnedU = L({ got: { width: 1920, height: 1080 }, ruling: rU, ran: false }), pinnedA = L({ got: { width: 1280, height: 577 }, ruling: rA, ran: false });
+  const held = L({ got: { width: 1440, height: 900 }, ruling: { ruledBy: 'holder' }, ran: false }), unread = L({ got: { error: 'the page answered no layout viewport' } }), unreadPinned = L({ got: { error: 'no CDP endpoint' }, ruling: rU, ran: false });
+  ok(applied.line === 'viewport: 1280x720 (asked 1280x720)' && applied.applied === true && applied.code === null && FIT.agentSetAnswer({ asked: FIT.agentSetAsked(['set', 'device', 'iPhone 12']), got: { width: 390, height: 844 } }).line === 'viewport: 390x844 (asked device "iPhone 12")', 'PURE answer — applied: the page\'s size and what was asked (a device by name)', applied.line);
+  ok(off.line === 'viewport: 1265x720 (asked 1280x720) — the page did not take that size' && off.applied === false && L({ got: { width: 1281, height: 719 } }).applied === true, 'PURE answer — not taken: said (within FIT_SLACK_PX is the same size)', off.line);
+  ok(pinnedU.line === 'viewport: 1920x1080 — pinned by the user, your 1280x720 did not apply; only the user unpins it (Pin size… → Auto in the live window\'s menu)' && pinnedU.code === 'size_pinned' && pinnedU.ruledBy === 'fixed' && pinnedU.by === 'user', 'PURE answer — pinned by the user: the size that holds, who, the user\'s door', pinnedU.line);
+  ok(pinnedA.line === 'viewport: 1280x577 — pinned at 1600x900 by you (vibespace-browser size), your 1280x720 did not apply; vibespace-browser size auto unpins it' && pinnedA.by === 'agent', 'PURE answer — pinned by the agent: its own door (and the pin\'s size when the page is not at it yet)', pinnedA.line);
+  ok(held.line === 'viewport: 1440x900 — the user drives this browser and their pane rules its size, your 1280x720 did not apply' && held.code === 'browser_paused' && held.ruledBy === 'holder', 'PURE answer — held: the user drives, their pane rules', held.line);
+  ok(unread.line === 'viewport: unreadable (the page answered no layout viewport) — you asked 1280x720; the size the page took is not known' && unread.got === null && /^viewport: unreadable \(no CDP endpoint\) — pinned at 1920x1080 by the user, your 1280x720 did not apply/.test(unreadPinned.line),
+    'PURE answer — unreadable by name, never a guessed number (the pin\'s own size is the ruling, not a reading)', unread.line + ' | ' + unreadPinned.line);
+  const nt = FIT.fitStateFromNote(FIT.fitNoteOf({ fixed: { w: 1600, h: 900 }, fixedBy: 'agent' }));
+  ok(nt.fixedBy === 'agent' && FIT.fitNoteOf({ fixed: null, fixedBy: 'agent' }).fixedBy === null && FIT.fitStateFromNote(FIT.fitNoteOf({ fixed: { w: 800, h: 600 } })).fixedBy === 'user', 'the page-size note keeps who pinned it (none without a pin; unknown = the user)');
+  const tp0 = FIT.agentSetTraceParams(pinnedU);
+  ok(tp0.width === 1280 && tp0.height === 720 && tp0.gotWidth === 1920 && tp0.gotHeight === 1080 && tp0.ruled === 'fixed' && tp0.by === 'user' && Object.values(tp0).every((v) => typeof v !== 'object'), 'the trace row\'s params are FLAT (the recorder redacts nested objects): asked, got, ruled, by');
+
+  // ── THE REAL BRIDGE over a stub keeper whose page the leg sizes ──
+  const up = await fakeUpstream();
+  const PAGE = { w: 1280, h: 720, fail: null };
+  const notes = new Map();
+  const sk = { setFor: () => ({ attachments: [] }), list: () => ({ profiles: [] }), streamPortFor: async () => ({ ok: true, port: up.port }),
+    viewportFor: async () => (PAGE.fail ? { ok: false, error: PAGE.fail } : { ok: true, clientWidth: PAGE.w, clientHeight: PAGE.h }),
+    setViewportFor: async (_t, { width, height }) => { PAGE.w = width; PAGE.h = height; return { ok: true }; },
+    noteViewport: (_t, note) => { notes.set('n', note); }, viewportNoteFor: () => notes.get('n') || null };
+  const activeVb = new Map([['sess-vb', { _browserKey: KEY_A, name: 'vb', _browserEnv: [`AGENT_BROWSER_SESSION=vs-${KEY_A}`, `AGENT_BROWSER_NAMESPACE=vs-${KEY_A}`] }]]);
+  const bV = BS.create({ keeper: sk, activeSessions: activeVb, requestAuthed: () => true, log: quiet, now });
+  const tapped = [];
+  const tp = await bV.tap('sess-vb', '', (m) => { if (m && (m.type === 'command' || m.type === 'result')) tapped.push(m); });
+  const rows = () => tapped.filter((m) => m.type === 'command' && m.action === 'agent-viewport');
+  const SET = ['set', 'viewport', '1280', '720'];
+  const v0 = await bV.agentViewport({ sessionId: 'sess-vb', argv: SET, ran: true });
+  ok(tp.ok && bV.viewportRuling({ sessionId: 'sess-vb' }) === null && v0.ok && v0.line === 'viewport: 1280x720 (asked 1280x720)', 'bridge: nothing pinned ⇒ no ruling; a set that ran answers the page\'s size read after it', v0.line);
+  ok(rows().length === 1 && TR.isTracedCommand(rows()[0]) && tapped.filter((m) => m.type === 'result' && m.action === 'agent-viewport').length === 1 && !tapped.some((m) => m.action === 'viewport'), '…and leaves ONE trace row (one command + one result to the recorder\'s taps)');
+  await bV.setFixed({ sessionId: 'sess-vb', fixed: { w: 1920, h: 1080 }, by: 'user' }); await sleep(60);
+  PAGE.w = 1920; PAGE.h = 1080;
+  const rU2 = bV.viewportRuling({ sessionId: 'sess-vb' });
+  const v1 = await bV.agentViewport({ sessionId: 'sess-vb', argv: SET, ran: false });
+  const c1 = rows().at(-1), r1 = tapped.filter((m) => m.type === 'result' && m.action === 'agent-viewport').at(-1);
+  const e1 = TR.entryFor({ id: 'tr-0000000000a1', at: 1, command: c1, result: r1, position: TR.positionOf({ kind: TR.classifyAction(c1.action), params: c1.params }) });
+  ok(rU2 && rU2.ruledBy === 'fixed' && rU2.by === 'user' && v1.line === pinnedU.line && v1.code === 'size_pinned', 'bridge: the user\'s Pin size… rules — the answer says the size that holds, who, the door', v1.line);
+  ok(rows().length === 2 && e1.kind === 'viewport' && e1.ok === false && e1.text === 'vibespace-browser set viewport 1280 720 → 1920×1080 (pinned by the user: not applied)' && e1.position.why === 'fixed', 'its trace row: asked → got, ruled by the user\'s pin, not applied', e1.text);
+  await bV.setFixed({ sessionId: 'sess-vb', fixed: { w: 1600, h: 900 }, by: 'agent' }); await sleep(60);
+  PAGE.w = 1600; PAGE.h = 900;
+  const v2 = await bV.agentViewport({ sessionId: 'sess-vb', argv: SET, ran: false });
+  const bV2 = BS.create({ keeper: sk, activeSessions: activeVb, requestAuthed: () => true, log: quiet, now });
+  const rA2 = bV2.viewportRuling({ sessionId: 'sess-vb' });
+  ok(v2.line === 'viewport: 1600x900 — pinned by you (vibespace-browser size), your 1280x720 did not apply; vibespace-browser size auto unpins it' && notes.get('n') && notes.get('n').fixedBy === 'agent' && rA2 && rA2.by === 'agent' && rA2.width === 1600,
+    'bridge: the agent\'s own `size` pin rules with ITS door; the note keeps who pinned it — a restarted bridge rules the same', v2.line);
+  bV2.shutdown();
+  await bV.setFixed({ sessionId: 'sess-vb', fixed: null, by: 'agent' });
+  ok(bV.viewportRuling({ sessionId: 'sess-vb' }) === null && notes.get('n').fixedBy === null, '`size auto`: no pin, no ruling — the latest act wins again among unpinned sets');
+  PAGE.w = 1440; PAGE.h = 900;
+  const v3 = await bV.agentViewport({ sessionId: 'sess-vb', argv: SET, ran: false, paused: true });
+  ok(v3.line === 'viewport: 1440x900 — the user drives this browser and their pane rules its size, your 1280x720 did not apply' && rows().at(-1).params.ruled === 'holder', 'bridge: a set the keeper refused browser_paused answers the page\'s size — the user\'s pane rules it (its row ruled by the holder)', v3.line);
+  PAGE.fail = 'the page answered no layout viewport';
+  const v4 = await bV.agentViewport({ sessionId: 'sess-vb', argv: SET, ran: true });
+  PAGE.fail = null;
+  ok(v4.line === 'viewport: unreadable (the page answered no layout viewport) — you asked 1280x720; the size the page took is not known' && rows().at(-1).params.gotWidth === 0, 'bridge: a page that cannot be read is said by name (its row: unreadable)', v4.line);
+  const v5 = await bV.agentViewport({ sessionId: 'nope', argv: SET });
+  ok(v5.ok && /^viewport: unreadable \(no such live session/.test(v5.line) && bV.viewportRuling({ sessionId: 'nope' }) === null && rows().length === 5 && rows().every((m) => TR.classifyAction(m.action) === 'viewport'),
+    'bridge: a session it cannot name ⇒ unreadable by name, no ruling, no row; five sets ⇒ five rows, one pair each', v5.line);
+  try { tp.untap(); } catch { }
+  bV.shutdown(); await up.close();
+
+  // ── END TO END: the shipped CLI → the in-process routes → the REAL bridge + the REAL keeper; the page = a fake CDP endpoint
+  //    (the real readViewport reads it: /json/list + Page.getLayoutMetrics) that the fake browser CLI's own set resizes ──
+  const pageFile = path.join(AB_STATE, 'vp-page.json');
+  const setsLog = () => { try { return fs.readFileSync(path.join(AB_STATE, 'sets.log'), 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+  fs.writeFileSync(pageFile, JSON.stringify({ w: 1280, h: 577 }));
+  const cdpPort = await freePort();
+  const hs = http.createServer((req, res) => {
+    if (req.url === '/json/list') { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify([{ id: 'VP1', type: 'page', url: 'https://vp.test/', webSocketDebuggerUrl: `ws://127.0.0.1:${cdpPort}/devtools/page/VP1` }])); return; }
+    res.statusCode = 404; res.end();
+  });
+  const wssC = new WebSocketServer({ server: hs });
+  wssC.on('connection', (ws) => ws.on('message', (d) => { const m = JSON.parse(d); let pg = {}; try { pg = JSON.parse(fs.readFileSync(pageFile, 'utf8')); } catch { } ws.send(JSON.stringify({ id: m.id, result: pg.nolayout ? {} : { cssLayoutViewport: { pageX: 0, pageY: 0, clientWidth: pg.w, clientHeight: pg.h } } })); }));
+  await new Promise((r) => hs.listen(cdpPort, '127.0.0.1', r)); servers.push(hs);
+  const pV = keeper.createProfile({ label: 'Viewport' }, { owner: { kind: 'session', id: KEY_B } });
+  await keeper.attach({ profileId: pV.id, browserKey: KEY_B, sessionId: 'sess-vp' });
+  const CDP = `ws://127.0.0.1:${cdpPort}/devtools/browser/vp`;
+  const kV = new Proxy(keeper, { get(t, k) { if (k === 'viewportFor') return (_target, o) => VP.readViewport(CDP, o); const v = t[k]; return typeof v === 'function' ? v.bind(t) : v; } });
+  const TOKEN_V = 'vsst_' + 'v'.repeat(24);
+  const activeVp = new Map([['sess-vp', { agentToken: TOKEN_V, _browserKey: KEY_B, name: 'vp', _browserEnv: [] }]]);
+  const bE = BS.create({ keeper: kV, activeSessions: activeVp, requestAuthed: () => true, log: quiet, now });
+  const R = require('../src/routes/browser.js');
+  const app = express(); app.use(express.json());
+  R.setup({ keeper, activeSessions: activeVp, browserEnv: () => null, notice: () => { }, browserFixed: (q) => bE.setFixed(q), browserViewport: { ruling: (q) => bE.viewportRuling(q), answer: (q) => bE.agentViewport(q) } });
+  app.use(R.router);
+  const srvE = http.createServer(app); const PORTE = await freePort(); await new Promise((r) => srvE.listen(PORTE, '127.0.0.1', r)); servers.push(srvE);
+  const API = `http://127.0.0.1:${PORTE}`;
+  const post = async (pp, body, headers = {}) => { const r = await fetch(API + pp, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) }); return { status: r.status, json: await r.json() }; };
+  const cliEnv = { PATH: PATH_ENV, HOME, FAKE_AB_STATE: AB_STATE, VIBESPACE_API: API, VIBESPACE_SESSION_TOKEN: TOKEN_V };
+  const runCli = (argv) => new Promise((resolve) => { // ASYNC on purpose (⑥): the routes are served by THIS process
+    const ch = spawn(process.execPath, [path.join(REPO, 'data/bin/vibespace-browser'), ...argv], { env: cliEnv, stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '', stderr = '';
+    ch.stdout.on('data', (d) => { stdout += d; }); ch.stderr.on('data', (d) => { stderr += d; });
+    const t = setTimeout(() => { try { ch.kill('SIGKILL'); } catch { } }, 20000);
+    ch.on('close', (status) => { clearTimeout(t); resolve({ status, stdout, stderr }); });
+    ch.on('error', (e) => { clearTimeout(t); resolve({ status: null, stdout, stderr: stderr + String(e) }); });
+  });
+  const sized = (w, h) => setsLog().filter((x) => x.argv[1] === 'viewport' && Number(x.argv[2]) === w && Number(x.argv[3]) === h).length;
+  const told = await post('/api/agent/browser/resolve', { handle: '' }, { Authorization: 'Bearer ' + TOKEN_V }); // the new attachment's one-time profile_changed is told here, not to the first set
+  ok(told.status === 409 && told.json.code === 'profile_changed', 'E2E setup: the new attachment\'s one-time profile_changed is consumed before the legs', JSON.stringify(told.json).slice(0, 200));
+  // applied
+  const c0 = await runCli(['set', 'viewport', '1280', '720']);
+  ok(c0.status === 0 && c0.stdout.split('\n').includes('viewport: 1280x720 (asked 1280x720)') && sized(1280, 720) === 1, 'E2E applied: `vibespace-browser set viewport 1280 720` exits 0 and its answer names the size the page took (read after the set)', `${c0.status} ${c0.stdout.slice(-300)} ${c0.stderr.slice(-300)}`);
+  // pinned by the user's Pin size… (the user's door): the set never reaches the browser CLI
+  const pinU = await post('/api/browser/size', { sessionId: 'sess-vp', size: '1920x1080' });
+  const c1e = await runCli(['set', 'viewport', '1280', '720']);
+  const lineU = c1e.stdout.trim().split('\n').at(-1) || '';
+  ok(pinU.status === 200 && c1e.status === 1 && /\[size_pinned\]/.test(c1e.stderr) && /^viewport: \d+x\d+ — pinned( at 1920x1080)? by the user, your 1280x720 did not apply; only the user unpins it \(Pin size… → Auto in the live window's menu\)$/.test(lineU) && sized(1280, 720) === 1,
+    `E2E pinned by the user (Pin size… applied: ${pinU.json.applied}): the set does NOT run (no new set reached the browser CLI), exit 1 [size_pinned], the page's size + who + the user's door`, `${c1e.status} ${lineU} ${c1e.stderr.slice(-300)}`);
+  const cb = await runCli(['batch', 'set viewport 1280 720', 'get url']);
+  ok(cb.status === 1 && /cannot run inside a batch while the picture size is pinned at 1920x1080 by the user/.test(cb.stderr) && /\[size_pinned\]/.test(cb.stderr) && sized(1280, 720) === 1, 'E2E: a batch carrying a set line while pinned is refused whole — nothing ran', cb.stderr.slice(-400));
+  // pinned by the agent's own `size` (its door), --json; `size auto` lifts it ⇒ applied again
+  const cs = await runCli(['size', '1600x900']);
+  fs.writeFileSync(pageFile, JSON.stringify({ w: 1600, h: 900 }));
+  const c2e = await runCli(['set', 'viewport', '1280', '720']);
+  const c2j = await runCli(['set', 'viewport', '1280', '720', '--json']);
+  let j2 = null; try { j2 = JSON.parse(c2j.stdout.trim().split('\n').at(-1)); } catch { j2 = null; }
+  ok(cs.status === 0 && c2e.status === 1 && c2e.stdout.trim().split('\n').at(-1) === 'viewport: 1600x900 — pinned by you (vibespace-browser size), your 1280x720 did not apply; vibespace-browser size auto unpins it' && j2 && j2.success === false && j2.code === 'size_pinned' && j2.data.viewport.ruledBy === 'fixed' && j2.data.viewport.by === 'agent' && sized(1280, 720) === 1,
+    'E2E pinned by the agent\'s own `vibespace-browser size`: ITS door named; --json answers one object (code size_pinned)', `${cs.status} ${c2e.stdout.slice(-200)} ${c2j.stdout.slice(-300)}`);
+  const ca = await runCli(['size', 'auto']);
+  const c3e = await runCli(['set', 'viewport', '1024', '768']);
+  ok(ca.status === 0 && c3e.status === 0 && c3e.stdout.split('\n').includes('viewport: 1024x768 (asked 1024x768)') && sized(1024, 768) === 1, 'E2E `size auto` lifts the pin ⇒ the set runs and applies again', `${ca.status} ${c3e.status} ${c3e.stdout.slice(-200)}`);
+  // the user drives: browser_paused + the page's size (their pane rules), nothing ran
+  keeper.takeover({ browserKey: KEY_B, profileId: pV.id, viewerId: 77, sessionId: 'sess-vp' });
+  const c4e = await runCli(['set', 'viewport', '800', '600']);
+  keeper.handback({ browserKey: KEY_B, profileId: pV.id, cause: 'explicit' });
+  clock += 1000; // (the keeper's injected clock: the next command resolves AFTER that takeover — ⑧'s rule)
+  ok(c4e.status === 1 && /\[browser_paused\]/.test(c4e.stderr) && c4e.stdout.split('\n').includes('viewport: 1024x768 — the user drives this browser and their pane rules its size, your 800x600 did not apply') && sized(800, 600) === 0,
+    'E2E the user drives: refused [browser_paused] AND the answer says the page\'s size — their pane rules it; nothing ran', `${c4e.status} ${c4e.stdout.slice(-200)} ${c4e.stderr.slice(-300)}`);
+  // a page that answers no layout viewport: unreadable, by name
+  fs.writeFileSync(pageFile, JSON.stringify({ w: 1024, h: 768, nolayout: true }));
+  const c5e = await runCli(['set', 'viewport', '1100', '700']);
+  ok(c5e.status === 0 && c5e.stdout.split('\n').includes('viewport: unreadable (the page answered no layout viewport) — you asked 1100x700; the size the page took is not known') && sized(1100, 700) === 1, 'E2E a page that cannot be read: the set ran, the answer says unreadable by name — never a guessed number', `${c5e.status} ${c5e.stdout.slice(-300)}`);
+  bE.shutdown(); wssC.close();
 }
 
 keeper.shutdown();

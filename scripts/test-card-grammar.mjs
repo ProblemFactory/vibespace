@@ -223,6 +223,10 @@ const FX = {
   gen: base({ id: 'api-gen', method: 'DELETE', path: `/open-apis/docx/v1/documents/${DOC}/blocks/${BLK}/children/batch_delete`, body: '{}', bodyBytes: 2, sensitive: 'delete' }),   // no count in the body ⇒ the GENERATED words
   send: base({ id: 'api-send', method: 'POST', path: '/open-apis/im/v1/messages', query: [['receive_id_type', 'chat_id']], body: '{"receive_id":"oc_fixture","msg_type":"text"}', bodyBytes: 46, sensitive: null, offersAlways: true, shape: 'POST open.feishu.cn/open-apis/im/*/messages', objectName: 'Product room', objectConv: { adapterId: 'lark-1', convId: 'oc_fixture' }, note: 'post the weekly summary' }),
 };
+// B-fc37: the send, approved, then redirected by the vendor (307) onto a sensitive path the fence did not clear — the
+// outcome says so, the target is a fold line, the door is 「重新提交」; once resubmitted the door is gone
+const REDIR_TO = 'POST open.feishu.cn/open-apis/drive/v1/permissions/doc_1/members';
+FX.redirected = { ...FX.send, id: 'api-redirected', status: 'failed', result: { code: 'api_redirect_unjudged', error: 'the vendor answered 307 …', status: 307, from: 'POST open.feishu.cn/open-apis/im/v1/messages', to: REDIR_TO, why: 'approval', resubmit: true } };
 const opened = [];
 const app = { openChannel: (a, c) => opened.push([a, c]), ws: { onGlobal() {} } };
 const WANT = {
@@ -231,6 +235,8 @@ const WANT = {
   zh: { gen: 'Odd jobs 想批量删除 文档块的子块（DocFixtu…）', docxDelete: 'Odd jobs 想删除文档《DocFixtu…》里的 3 个块（第 1–3 个）', unknown: 'Odd jobs 想调用 Lark API（POST users）', send: 'Odd jobs 想在 Product room 发消息', chip: '删除 · 总是询问', fold: '技术细节',
     alwaysSend: '执行，并以后不再问（在 Product room 发消息）', alwaysUnknown: '执行，并以后不再问（调用 Lark API）', allowLine: '以后放行：POST open.feishu.cn/open-apis/im/*/messages' },
 };
+Object.assign(WANT.en, { redirected: WANT.en.send, redirOutcome: 'The vendor redirected it — not followed', redirLine: `The vendor redirected it (307) to ${REDIR_TO} — not followed: it would need your approval`, resubmit: 'Resubmit', resubmitted: 'The vendor redirected it — resubmitted as a new card' });
+Object.assign(WANT.zh, { redirected: WANT.zh.send, redirOutcome: '服务方把它重定向到了别处 — 未跟随', redirLine: `服务方把它重定向（307）到 ${REDIR_TO} — 未跟随：需要你的批准`, resubmit: '重新提交', resubmitted: '服务方把它重定向到了别处 — 已重新提交为新卡片' });
 for (const lang of ['en', 'zh']) {
   globalThis.__LANG = lang === 'en' ? null : lang;
   console.log(`② the raw-API card (${lang})`);
@@ -259,6 +265,17 @@ for (const lang of ['en', 'zh']) {
   const btns = [d, s, u].flatMap((c) => c.querySelectorAll('.mounts-btn'));
   ok(btns.length >= 7 && btns.every((b) => !TELLS.button.test(b.textContent)), `no button label carries a URL / method + path (${btns.length} buttons)`, btns.map((b) => b.textContent));
   ok(V.renderApiCard(FX.docxDelete, null, { app }).querySelector('.chan-api-objid').textContent === 'DocFixtu…', 'an unnamed document is its id in an 8-char chip');
+  // B-fc37: a card the vendor redirected — the outcome by name, where it pointed INSIDE the fold, 「重新提交」 the one door
+  const rd = V.renderApiCard(FX.redirected, null, { app });
+  const rline = rd.querySelector('.chan-api-redirectline'), rbtn = rd.querySelectorAll('.mounts-btn');
+  ok(rd.querySelector('.chan-api-outcome').textContent === WANT[lang].redirOutcome && rline && rline.textContent === WANT[lang].redirLine && rline.parentNode.dataset.fold === 'tech', `a redirected card: the outcome "${WANT[lang].redirOutcome}", where the vendor pointed + why as a 技术细节 line`, { out: rd.querySelector('.chan-api-outcome').textContent, line: rline && rline.textContent });
+  ok(rbtn.length === 1 && rbtn[0].textContent === WANT[lang].resubmit && /chan-api-resubmit/.test(rbtn[0].className) && !TELLS.button.test(rbtn[0].textContent) && !rd.querySelector('.chan-api-approve'), `its one door is the button "${WANT[lang].resubmit}" (no Approve / Reject on a decided card)`, rbtn.map((b) => b.textContent));
+  const n0 = calls.length;
+  rbtn[0].dispatch('click');
+  await new Promise((r) => setTimeout(r, 0));
+  ok(calls.slice(n0).some((c) => c.url === '/api/channels/api/proposals/api-redirected/resubmit' && c.body && c.body.shown === 'd-1'), 'pressing it posts the card\'s digest to …/resubmit (a NEW card is filed; nothing runs)', calls.slice(n0));
+  const done = V.renderApiCard({ ...FX.redirected, resubmittedAs: 'api-next' }, null, { app });
+  ok(done.querySelector('.chan-api-outcome').textContent === WANT[lang].resubmitted && !done.querySelector('.chan-api-resubmit'), 'once resubmitted: the outcome says so and the door is gone', done.querySelector('.chan-api-outcome').textContent);
   // actions: Approve needs no reason; Reject asks in a popover
   calls.length = 0;
   const a = V.renderApiCard(FX.send, null, { app });

@@ -203,7 +203,7 @@ app.get('/api/device/dial-addresses', (req, res) => {
   try {
     const DF = require('../dial-facts.js');
     const deviceId = DF.deviceIdOf(req.query.device); // THE one name rule
-    const origin = req.headers.origin || `${String(req.headers['x-forwarded-proto'] || 'http').split(',')[0].trim()}://${req.headers.host || ''}`;
+    const origin = req.headers.origin || require('../write-origin.js').ownOriginOf(req.headers, { encrypted: !!(req.socket && req.socket.encrypted) }); // the request's own origin: THE one rule (lane owner-write-origin)
     let relay = null, relayPublishable = false;
     try { const st = instanceUrl?.status?.() || {}; relay = st.effectiveUrl || null; relayPublishable = !!(st.frpConfigured && !st.published && !relay); } catch { }
     // verify-r4 F3: the address this server's SOCKET is bound to (not the addresses the machine has) decides which
@@ -533,7 +533,7 @@ app.post('/api/mount-tokens', (req, res) => {
   try {
     const { name, root, mode } = req.body || {};
     const { raw, rec } = mountTokens.mint({ name, root, mode });
-    const url = `${req.protocol}://${req.get('host')}`;
+    const url = require('../write-origin.js').ownOriginOf(req.headers, { encrypted: !!(req.socket && req.socket.encrypted) }); // the request's own origin (forwarded proto / host first — behind an https ingress the link is https): THE one rule
     res.json({ success: true, token: raw, davUrl: `${url}/dav`, link: mountTokens.buildLink({ url, raw, rec }), id: rec.id, rec: { id: rec.id, name: rec.name, root: rec.root, mode: rec.mode } });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
@@ -981,6 +981,11 @@ function createSessionMessages(session, sessionId) {
       traceDialogAct: (act) => browserStream?.tapDialogAct?.(act),
       // lane launch-picture-size: a conversation's FIXED picture size (the agent's `size`, the user's Pin size… in the live window)
       browserFixed: (q) => (browserStream && typeof browserStream.setFixed === 'function' ? browserStream.setFixed(q) : { ok: false, code: 'unavailable', error: 'the live view is not available on this server' }),
+      // lane browser-viewport-answer: a pin rules an agent's raw `set viewport|device` (judged before it runs); the set answers with the page's size + one trace row
+      browserViewport: {
+        ruling: (q) => (browserStream && typeof browserStream.viewportRuling === 'function' ? browserStream.viewportRuling(q) : null),
+        answer: (q) => (browserStream && typeof browserStream.agentViewport === 'function' ? browserStream.agentViewport(q) : null),
+      },
       // the agent's `new --adopt <dir>` may register a directory ONLY under these roots (browser-profiles.adoptDirVerdict)
       adoptRoots: { homeDir: os.homedir(), dataDir: path.join(rootDir, 'data') },
       // P4: the providers route's live CDP forwards

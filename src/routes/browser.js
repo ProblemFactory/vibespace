@@ -89,7 +89,9 @@
  *                                             for the wrapper); the "sub-agent" ASIDE rides only when this session has a
  *                                             sidechain open right now (`_subNormalizers`) — never the reason
  *   POST   /api/agent/browser/new-child       → a child handle `bk-<parent>.<n>` + its own env (D23)
- *   POST   /api/agent/browser/audit           { profile, verb, ok }  one §3.7 audit line (the verb only, never content)
+ *   POST   /api/agent/browser/audit           { profile, verb, ok }  one §3.7 audit line (the verb only, never content);
+ *                                             + `viewport` {argv, ran, handle}: an agent's own `set viewport|device` answers the
+ *                                             page's size read after it (lane browser-viewport-answer — one line + one trace row)
  *   GET    /api/agent/browser/backend[?profile=]   P4 (§7.4): which backend I am on, what else exists, what each can do
  *   POST   /api/agent/browser/backend         { provider, profile?, confirmDowngrade? }   PROPOSE a switch: direct only when
  *                                             this conversation is the only lease-holder and nobody drives; else a "For you"
@@ -234,7 +236,7 @@ function rulingExtras(v) {
     ...(v && Number.isFinite(v.retryAfterMs) ? { retryAfterMs: v.retryAfterMs } : {}), ...(v && v.pinned ? { pinned: true, pinnedProfile: v.pinnedProfile || null } : {}) };
 }
 /** A typed `{ok:false, code, …}` verdict → the same wire shape a thrown refusal gets, with its extras kept. */
-function failVerdict(res, v) { return res.status(STATUS[v.code] || 409).json({ error: String(v.error || v.code), code: v.code, handles: v.handles || [], ...(v.default !== undefined ? { default: v.default } : {}), ...(v.was !== undefined ? { was: v.was } : {}), ...(v.now !== undefined ? { now: v.now } : {}), ...(v.takenAt !== undefined ? { takenAt: v.takenAt, lastUserInputAt: v.lastUserInputAt || 0 } : {}), ...(v.remedy ? { remedy: v.remedy } : {}), ...(Number.isInteger(v.holderPid) ? { holderPid: v.holderPid } : {}), ...(Number.isInteger(v.wakes) ? { wakes: v.wakes } : {}), ...(typeof v.digest === 'string' ? { digest: v.digest } : {}), ...rulingExtras(v), ...(res.locals && res.locals.minted ? { minted: res.locals.minted } : {}), ...(res.locals && res.locals.recipe ? { recipe: res.locals.recipe } : {}) }); } // B-f7ab verify r2: + the key this call minted (LOW)
+function failVerdict(res, v) { return res.status(STATUS[v.code] || 409).json({ error: String(v.error || v.code), code: v.code, handles: v.handles || [], ...(v.default !== undefined ? { default: v.default } : {}), ...(v.was !== undefined ? { was: v.was } : {}), ...(v.now !== undefined ? { now: v.now } : {}), ...(v.takenAt !== undefined ? { takenAt: v.takenAt, lastUserInputAt: v.lastUserInputAt || 0 } : {}), ...(v.remedy ? { remedy: v.remedy } : {}), ...(Number.isInteger(v.holderPid) ? { holderPid: v.holderPid } : {}), ...(Number.isInteger(v.wakes) ? { wakes: v.wakes } : {}), ...(typeof v.digest === 'string' ? { digest: v.digest } : {}), ...rulingExtras(v), ...(res.locals && res.locals.viewport ? { viewport: res.locals.viewport } : {}), ...(res.locals && res.locals.minted ? { minted: res.locals.minted } : {}), ...(res.locals && res.locals.recipe ? { recipe: res.locals.recipe } : {}) }); } // B-f7ab verify r2: + the key this call minted (LOW)
 /** P3 (§4.3): resolve the browser a takeover/handback/confirm names — a handle,
  *  a profile id, or (nothing) the set's default / only member / the ephemeral one. */
 function inputTargetFor(k, f, ref) {
@@ -1587,7 +1589,10 @@ router.post('/api/agent/browser/resolve', async (req, res) => {
   if (f.job) return resolveForJob(req, res, k, f); // lane jobs-browser: the owner's profile, the job's own lease + window
   const B = require('../browser-profiles.js');
   // B-f7ab: a key minted by THIS call (the session had none) is said in the answer — the CLI prints one note line
-  const send = (o) => res.json(f.minted ? { ...o, minted: f.minted } : o);
+  // lane browser-viewport-answer (the 2026-10-14 ruling 「a pin RULES」): an agent's raw `set viewport|device` (the verb, or a
+  // batch line — the CLI says `viewportSet`) is told whether a PINNED picture size rules it; the CLI then runs nothing
+  const vpRuling = () => (req.body?.viewportSet === true && ctx.browserViewport ? ctx.browserViewport.ruling({ sessionId: f.sessionId, profileRef: String(req.body?.handle || '') }) : null);
+  const send = (o) => { const vr = vpRuling(); const o2 = vr ? { ...o, viewportRuling: vr } : o; return res.json(f.minted ? { ...o2, minted: f.minted } : o2); };
   // lane e2a (§E2.1 Driving): a handle naming THIS conversation's desktop-app browser — no CDP is that rung's definition
   { const da = windowEngine && req.body?.handle ? windowEngine.agentBrowserFor(String(req.body.handle), f.browserKey) : null;
     if (da) return res.status(409).json({ error: `${da.handle} is your desktop-app browser: it has no CDP, so browser page verbs do not run there — drive it with \`vibespace-window snapshot ${da.handle}\`, then \`vibespace-window click / type / key / screenshot ${da.handle} …\``, code: 'no_cdp_on_this_backend', handle: da.handle, remedy: `vibespace-window snapshot ${da.handle}` }); }
@@ -1600,6 +1605,9 @@ router.post('/api/agent/browser/resolve', async (req, res) => {
     let v = k.resolveFor({ browserKey: f.browserKey, handle: req.body?.handle || '', subagent: sidechainOpen(f.session), verb });
     // owner ruling A: a pin is this conversation's DEFAULT ATTACHMENT, opened through the keeper — never a directory
     if (v.ok && v.kind === 'pin') v = await attachPin(k, f, v, verb);
+    // lane browser-viewport-answer: an agent's set refused while the user drives answers the page's size too — their pane rules it
+    { const argv = Array.isArray(req.body?.argv) ? req.body.argv.map(String) : [];
+      if (!v.ok && v.code === 'browser_paused' && ctx.browserViewport && require('../browser-fit.js').agentSetAsked(argv)) res.locals.viewport = await ctx.browserViewport.answer({ sessionId: f.sessionId, profileRef: String(req.body?.handle || ''), argv, ran: false, paused: true }); }
     if (!v.ok) return failVerdict(res, v);
     // …and the SERVER's instant this command was allowed to run: the CLI hands it back with its audit, and a takeover that
     // began at or after it caught the command in flight (`interrupted` — one clock, the server's, for every machine)
@@ -1798,7 +1806,12 @@ router.post('/api/agent/browser/audit', async (req, res) => {
     if (profileId && since > 0 && typeof k.cloakRefusals === 'function' && typeof k.leasesFor === 'function' && k.leasesFor(f.browserKey).some((l) => l.profileId === profileId)) {
       try { const hosts = k.cloakRefusals(profileId, since); if (hosts.length) egressRefused = { hosts, text: require('../browser-switch.js').egressRefusedText(hosts) }; } catch { egressRefused = null; }
     }
-    res.json({ ok: true, ...(interrupted ? { interrupted } : {}), ...dlg, ...(hint ? { hint } : {}), ...(rejected ? { proposalRejected: { site: rejected.site, text: rejected.text } } : {}), ...(egressRefused ? { egressRefused } : {}) });
+    // lane browser-viewport-answer (B-6dae ①): the agent's own `set viewport|device` — the page's size read AFTER it (or instead
+    // of it: a pin ruled), ONE line the CLI prints and ONE trace row (the bridge's)
+    const vpq = req.body?.viewport && typeof req.body.viewport === 'object' ? req.body.viewport : null;
+    let viewport = null;
+    if (vpq && ctx.browserViewport) { try { viewport = await ctx.browserViewport.answer({ sessionId: f.sessionId, profileRef: typeof vpq.handle === 'string' ? vpq.handle.slice(0, 200) : '', argv: Array.isArray(vpq.argv) ? vpq.argv.slice(0, 16).map((x) => String(x).slice(0, 200)) : [], ran: vpq.ran !== false }); } catch { viewport = null; } }
+    res.json({ ok: true, ...(viewport ? { viewport } : {}), ...(interrupted ? { interrupted } : {}), ...dlg, ...(hint ? { hint } : {}), ...(rejected ? { proposalRejected: { site: rejected.site, text: rejected.text } } : {}), ...(egressRefused ? { egressRefused } : {}) });
   } catch (e) { fail(res, e); }
 });
 // ── lane browser-stuck (2026-09-28, the owner's ruling "让agent知道这个对话框的存在和交互能力"): A PAGE DIALOG IS A FACT OF THE
@@ -1953,12 +1966,12 @@ router.post('/api/agent/browser/permission', async (req, res) => {
  *  viewer letterboxes the same picture, the restore never undoes it (src/browser-fit.js fitTarget kind 'fixed'; the bridge's
  *  setFixed keeps it in the page-size note). `size` = 'WxH' | 'auto' — anything else refused in parsePin's own words;
  *  `check: true` = judged only (`vibespace-browser open … --size` asks before its open runs). */
-async function fixedSizeAct(res, f, body) {
+async function fixedSizeAct(res, f, body, by = 'user') {
   const pv = require('../desktop-pin.js').parsePin(body && body.size !== undefined && body.size !== null ? body.size : '');
   if (!pv.ok) return res.status(400).json({ error: pv.error, code: pv.code });
   if (body && body.check === true) return res.json({ ok: true, fixed: pv.pin, applied: 'check' });
   if (typeof ctx?.browserFixed !== 'function') return res.status(503).json({ error: 'the live view is not available in this process', code: 'unavailable' });
-  const r = await ctx.browserFixed({ sessionId: f.sessionId, profileRef: typeof body?.profile === 'string' ? body.profile : '', fixed: pv.pin });
+  const r = await ctx.browserFixed({ sessionId: f.sessionId, profileRef: typeof body?.profile === 'string' ? body.profile : '', fixed: pv.pin, by }); // lane browser-viewport-answer: who pinned it
   if (!r || !r.ok) return failVerdict(res, r || { code: 'unavailable', error: 'the live view is not available in this process' });
   res.json({ ok: true, fixed: r.fixed || null, applied: r.applied, ...(r.code ? { code: r.code, why: r.error || '' } : {}) });
 }
@@ -1967,7 +1980,7 @@ const NOT_YOUR_WINDOW = 'an agent fixes the picture size of its OWN conversation
 router.post('/api/agent/browser/size', async (req, res) => {
   const f = agentFacts(req, res); if (!f) return;
   if (req.body && req.body.sessionId !== undefined && String(req.body.sessionId) !== String(f.sessionId)) return res.status(403).json({ error: NOT_YOUR_WINDOW, code: 'not_your_window' });
-  try { await fixedSizeAct(res, f, req.body || {}); } catch (e) { fail(res, e); }
+  try { await fixedSizeAct(res, f, req.body || {}, 'agent'); } catch (e) { fail(res, e); }
 });
 /** The USER's Pin size… in the live window's ⋯ — any conversation's browser. An agent's session or job token is refused
  *  `agent_forbidden` (the house rule of every human-only route — test-browser-human's walk; int271 seam 2): an agent fixes its

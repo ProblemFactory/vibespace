@@ -1535,6 +1535,204 @@ console.log('lane gmail-feed-gap (B-5134): a gap is ONE history walk from the sa
   ok(asked.join(' ') === '1000:21 1000:22 1000:23 1000:24' && c3.pages === 4 && st.gmailHistoryId === '1300' && all.every((t) => c3.changed.includes(t)) && c3.mustWalk === false, `past the 20-page bound the walk continues from its token: pages 22–25, then the cursor moves to 1300 — all ${all.length} changed threads named (none lost past page 20)`, JSON.stringify({ asked, pages: c3.pages, cursor: st.gmailHistoryId, n: c3.changed.length }));
 }
 
+// ── ㉒ lane gmail-anchor-churn (B-3081, a fleet pod 2026-10-12: «the stored anchor <id> of thread … is no longer in the
+//    thread — re-reading it» every ~60 s for the SAME thread, a NEW anchor each time). The anchor was the thread's NEWEST
+//    message id — after the owner replied from the mail app that is a DRAFT, whose id the next save replaces: every poll a
+//    thread read, a warn, a new transient anchor. Now: the anchor is the newest message the vendor will KEEP (never DRAFT /
+//    TRASH); a draft saved in the mail app is no news for the history walk; a lost anchor is said ONCE per vanished id; a
+//    thread that loses LOST_HOLD_AT anchors within an hour is HELD (no threads.get) until a delivered/sent message joins
+//    it. Measured through the REAL engine over 5 polls (the incident's 61 s cadence) against an injected fake vendor;
+//    CONTROLS: patched copies of the adapter (the pre-fix rules, and each piece alone).
+console.log('\n㉒ lane gmail-anchor-churn: the anchor is a message the vendor will keep; a lost anchor is said once and its re-read bounded');
+{
+  // the anchor table (PURE): draft / sent / trashed / normal × newest / older
+  const M = (id, labelIds) => ({ id, ...(labelIds ? { labelIds } : {}) });
+  const TABLE = [
+    ['normal newest', [M('a', ['INBOX']), M('b', ['INBOX'])], null, 'b'],
+    ['sent newest', [M('a', ['INBOX']), M('s', ['SENT'])], null, 's'],
+    ['draft newest', [M('a', ['INBOX']), M('s', ['SENT']), M('d', ['DRAFT'])], null, 's'],
+    ['draft older', [M('a', ['INBOX']), M('d', ['DRAFT']), M('b', ['INBOX'])], null, 'b'],
+    ['trashed newest', [M('a', ['INBOX']), M('b', ['INBOX']), M('t', ['TRASH'])], null, 'b'],
+    ['trashed older', [M('a', ['INBOX']), M('t', ['TRASH', 'INBOX']), M('b', ['SENT'])], null, 'b'],
+    ['sent then trashed newest', [M('a', ['INBOX']), M('x', ['SENT', 'TRASH'])], null, 'a'],
+    ['draft + trash newest, sent older', [M('s', ['SENT']), M('t', ['TRASH']), M('d', ['DRAFT'])], null, 's'],
+    ['unknown labels newest (kept: not known transient)', [M('a', ['INBOX']), M('u', null)], null, 'u'],
+    ['only drafts, a previous anchor', [M('d1', ['DRAFT']), M('d2', ['DRAFT'])], 'prev', 'prev'],
+    ['only transient, none before', [M('d1', ['DRAFT']), M('t1', ['TRASH'])], null, null],
+    ['empty thread keeps its anchor', [], 'prev', 'prev'],
+  ];
+  const bad = TABLE.filter(([, msgs, keep, want]) => gmail.anchorOf(msgs, keep) !== want).map(([n, msgs, keep]) => `${n} → ${gmail.anchorOf(msgs, keep)}`);
+  ok(!bad.length, `the anchor table: ${TABLE.length} shapes — the newest message that is not DRAFT / TRASH; only transient ⇒ the previous anchor (or none)`, bad.join('; '));
+  ok(JSON.stringify(gmail.TRANSIENT_LABELS) === '["DRAFT","TRASH"]' && Object.isFrozen(gmail.TRANSIENT_LABELS), 'the transient labels are DRAFT and TRASH (frozen)');
+  const NEWS = [
+    [{ id: 'd', threadId: 't', labelIds: ['DRAFT'] }, false, false, 'a draft saved in the mail app'],
+    [{ id: 't', threadId: 't', labelIds: ['TRASH'] }, false, false, 'a message added straight to the trash'],
+    [{ id: 'i', threadId: 't', labelIds: ['INBOX', 'UNREAD'] }, true, true, 'a delivered message'],
+    [{ id: 's', threadId: 't', labelIds: ['SENT'] }, true, true, 'a sent message'],
+    [{ id: 'l', threadId: 't', labelIds: ['Label_7'] }, true, false, 'a message filed past the inbox'],
+    [{ id: 'u', threadId: 't' }, true, false, 'an add without labels (read, as before)'],
+    [{ id: 'n' }, false, false, 'an add naming no thread'],
+  ];
+  const badN = NEWS.filter(([m, news, dlv]) => gmail.addIsNews(m) !== news || gmail.addDelivered(m) !== dlv).map(([, , , n]) => n);
+  ok(!badN.length && gmail.addIsNews(null) === false, `the history walk's table: ${NEWS.length} adds — a draft / trash add is no news; only a delivered (INBOX) or sent (SENT) add lifts a held thread`, badN.join('; '));
+  ok(gmail.LOST_HOLD_AT === 3 && gmail.LOST_WINDOW_MS === 3600e3 && gmail.LOST_MAX === 1000, `the bound: ${gmail.LOST_HOLD_AT} lost anchors within ${gmail.LOST_WINDOW_MS / 60e3} min ⇒ held; ≤ ${gmail.LOST_MAX} threads remembered`);
+
+  // ── the rig: ONE tracked thread behind an injected fake vendor, the REAL engine over the given adapter module ──
+  const CT = 'thr_churn_0001';
+  const PEER = 'Ada <ada@example.com>', SELF = 'Member A <member.a@example.com>';
+  const H0 = 700000;
+  function churnVendor(mode) {
+    // mode 'draft': the owner's reply is being written in the mail app — every poll the draft is saved again (a NEW id,
+    // the old one gone) and history.list names it with labelIds ['DRAFT']. 'bare': the same, but the add carries no
+    // labels (the walk cannot judge it — the anchor rule alone must hold). 'unknown': a message of a shape the rule does
+    // not know (labelIds ['SCHEDULED']) replaced on every poll — the bound's case.
+    const st = { k: 0, savedAt: [T0 - 60e3], reply: null, at: () => clock };
+    const calls = [];
+    const mk = (id, labelIds, at, from) => ({ id, threadId: CT, labelIds, internalDate: String(at), snippet: id, payload: { mimeType: 'text/plain', headers: [{ name: 'Subject', value: 'Quarterly numbers' }, { name: 'From', value: from }, { name: 'To', value: 'member.a@example.com' }, { name: 'Message-ID', value: `<${id}@example.com>` }], body: { data: Buffer.from(`body of ${id}`).toString('base64url'), size: 10 } } });
+    const vid = (k) => `${mode === 'unknown' ? 's' : 'd'}-${k}`;
+    const thread = () => {
+      const msgs = [mk('m-a', ['INBOX'], T0 - 7200e3, PEER), mk('m-b', ['SENT'], T0 - 3600e3, SELF)];
+      if (st.reply) msgs.push(mk('m-r', ['INBOX', 'UNREAD'], st.reply.at, PEER));
+      msgs.push(mk(vid(st.k), mode === 'unknown' ? ['SCHEDULED'] : ['DRAFT'], st.savedAt[st.k], SELF));
+      return { id: CT, historyId: String(H0 + st.k), messages: msgs };
+    };
+    const fetchFn = async (url, init = {}) => {
+      const u = new URL(String(url));
+      const form = init.body ? Object.fromEntries(new URLSearchParams(String(init.body))) : null;
+      calls.push({ method: init.method || 'GET', path: u.pathname, q: Object.fromEntries(u.searchParams) });
+      if (u.hostname === 'oauth2.googleapis.com') return jsonRes(form && form.grant_type === 'authorization_code' ? FX.token : FX.tokenRefreshed);
+      if (u.hostname !== 'gmail.googleapis.com') return jsonRes({ error: { code: 404, message: 'unrouted host' } }, 404);
+      const p = u.pathname.replace('/gmail/v1/users/me', '');
+      if (p === '/profile') return jsonRes({ emailAddress: 'member.a@example.com', historyId: String(H0), messagesTotal: 3 });
+      if (p === '/threads') return jsonRes({ threads: [{ id: CT, snippet: 'numbers', historyId: String(H0) }], resultSizeEstimate: 1 });
+      if (p === '/history') {
+        const from = Number(u.searchParams.get('startHistoryId')) - H0;
+        const history = [];
+        for (let j = from + 1; j <= st.k; j++) {
+          const lab = mode === 'draft' ? ['DRAFT'] : mode === 'unknown' ? ['SCHEDULED'] : null;
+          history.push({ id: String(H0 + j), messagesAdded: [{ message: { id: vid(j), threadId: CT, ...(lab ? { labelIds: lab } : {}) } }] });
+          if (st.reply && st.reply.k === j) history.push({ id: String(H0 + j), messagesAdded: [{ message: { id: 'm-r', threadId: CT, labelIds: ['INBOX', 'UNREAD'] } }] });
+        }
+        return jsonRes({ historyId: String(H0 + st.k), ...(history.length ? { history } : {}) });
+      }
+      if (p === `/messages/${CT}`) return jsonRes(mk(CT, ['INBOX'], T0 - 7200e3, PEER));
+      if (p === `/threads/${CT}`) return jsonRes(thread());
+      return jsonRes({ error: { code: 404, message: `unrouted ${p}` } }, 404);
+    };
+    return { st, calls, fetchFn, vid };
+  }
+  const RIGS = [];
+  async function churnRig(mod, mode, tag) {
+    const cv = churnVendor(mode);
+    const dir = path.join(ROOT, `churn-${tag}`); fs.mkdirSync(dir, { recursive: true });
+    const warns = [];
+    const lg = { log() {}, error() {}, warn: (...a) => { const s = a.join(' '); if (/gmail: (the stored anchor|thread \S+ lost its anchor)/.test(s)) warns.push(s); } };
+    const reg = CH.createChannelRegistry(); reg.register(mod.adapter);
+    const e2 = ENG.create({ dataDir: dir, env: {}, now, broadcast: () => {}, integrations, fetch: cv.fetchFn, log: lg, registry: reg, ...FAST_PACE });
+    RIGS.push(e2);
+    const r = await e2.connect('gmail');
+    await get(`${r.flow.redirectUri}/?state=${new URL(r.flow.consentUrl).searchParams.get('state')}&code=auth-code-churn`);
+    const anchorNow = () => ((e2.store.index.snapshot().conversations || {})[`gmail/${CT}`] || {}).anchor || null;
+    for (let i = 0; i < 100 && !anchorNow(); i++) await sleep(20);   // the pass connect() kicked: discovery + the first walk
+    const reads = () => cv.calls.filter((c) => c.path.endsWith(`/threads/${CT}`) && c.q.format === 'full').length;
+    const first = { anchor: anchorNow(), reads: reads() };
+    const rows = [];
+    const poll = async ({ reply = false, gapMs = 61e3 } = {}) => {
+      clock += gapMs; cv.st.k++; cv.st.savedAt[cv.st.k] = clock;
+      if (reply) cv.st.reply = { k: cv.st.k, at: clock - 1000 };
+      const a0 = anchorNow(), r0 = reads(), w0 = warns.length;
+      await e2.pass('gmail', { force: true });
+      rows.push({ k: cv.st.k, anchor: anchorNow(), moved: anchorNow() !== a0, reads: reads() - r0, warns: warns.length - w0 });
+    };
+    const stored = () => e2.messages('gmail', CT, { limit: 100 }).map((m) => m.vendorId);
+    return { e2, cv, warns, first, rows, poll, stored, anchorNow };
+  }
+  const sum = (rows, k) => rows.reduce((a, r) => a + (k === 'moved' ? (r.moved ? 1 : 0) : r[k]), 0);
+  const line = (rig) => rig.rows.map((r) => `${r.k}:${r.anchor}${r.reads ? ' read' : ''}${r.warns ? ' warn' : ''}`).join(' ');
+
+  // the verbatim pieces the controls restore (present ONCE each)
+  const SRC = fs.readFileSync(path.join(REPO, 'src/channels/gmail.js'), 'utf-8');
+  const NEW_ANCHOR = '        anchor: drained ? anchorOf(msgs, anchor) : String(page[page.length - 1].id),\n';
+  const OLD_ANCHOR = '        anchor: page.length ? String(page[page.length - 1].id) : (anchor || (msgs.length ? String(msgs[msgs.length - 1].id) : null)),\n';
+  const NEW_WALK = '        for (const ev of h.history || []) for (const a of ev.messagesAdded || []) if (addIsNews(a && a.message)) { mailbox.changed.add(String(a.message.threadId)); if (addDelivered(a.message)) heldRelease(String(a.message.threadId)); }\n';
+  const OLD_WALK = '        for (const ev of h.history || []) for (const a of ev.messagesAdded || []) if (a && a.message && a.message.threadId) mailbox.changed.add(String(a.message.threadId));\n';
+  const NEW_LOST = '        if (idx < 0) anchorLost(convId, anchor);   // said once per vanished id, bounded (B-3081)\n';
+  const OLD_LOST = '        if (idx < 0) log.warn && log.warn(`[channels] gmail: the stored anchor ${anchor} of ${convId} is no longer in the thread — re-reading it (the dedup absorbs the re-read)`);\n';
+  const HOLD = '      if (anchor && anchorHeld(convId) && !threads.has(convId)';
+  const SAME = '    if (L.id === String(id)) return;\n';
+  ok([NEW_ANCHOR, NEW_WALK, NEW_LOST, HOLD, SAME].every((x) => SRC.split(x).length === 2), 'the anchor line, the history-walk line, the lost-anchor line, the hold and the same-id note are present ONCE each (the controls restore exactly them)');
+  const MC = mutantCopies('chan-gmail-churn', REPO);
+  const gPre = MC.load('src/channels/gmail.js', SRC.replace(NEW_ANCHOR, OLD_ANCHOR).replace(NEW_WALK, OLD_WALK).replace(NEW_LOST, OLD_LOST).replace(HOLD, '      if (false'), 'pre-fix');
+  const gNewest = MC.load('src/channels/gmail.js', SRC.replace(NEW_ANCHOR, OLD_ANCHOR), 'newest-id');
+  const gNoNews = MC.load('src/channels/gmail.js', SRC.replace(NEW_WALK, OLD_WALK), 'draft-is-news');
+  const gNoHold = MC.load('src/channels/gmail.js', SRC.replace(HOLD, '      if (false'), 'no-hold');
+  const gNoNote = MC.load('src/channels/gmail.js', SRC.replace(SAME, ''), 'no-same-id-note');
+
+  // ① THE INCIDENT, 5 polls: the owner's reply is a draft being saved in the mail app
+  const yours = await churnRig(gmail, 'draft', 'yours');
+  for (let i = 0; i < 5; i++) await yours.poll();
+  const pre = await churnRig(gPre, 'draft', 'pre');
+  for (let i = 0; i < 5; i++) await pre.poll();
+  const draftsY = yours.stored().filter((id) => /^d-/.test(id)).length, draftsP = pre.stored().filter((id) => /^d-/.test(id)).length;
+  ok(yours.first.anchor === 'm-b' && sum(yours.rows, 'moved') === 0 && yours.anchorNow() === 'm-b', `yours: ONE anchor — the newest non-draft (m-b, the sent reply before the draft) — through 5 polls (${line(yours)})`, JSON.stringify(yours.first));
+  ok(sum(yours.rows, 'warns') === 0 && yours.warns.length === 0, `yours: 0 warns over 5 polls (${yours.warns.length})`, yours.warns[0]);
+  ok(sum(yours.rows, 'reads') === 0, `yours: 0 thread reads over 5 polls — a draft saved in the mail app is no news (${sum(yours.rows, 'reads')})`);
+  ok(pre.first.anchor === 'd-0' && sum(pre.rows, 'moved') === 5 && sum(pre.rows, 'warns') === 5 && sum(pre.rows, 'reads') === 5, `CONTROL (the pre-fix rules — the newest id, every add is news, a warn per loss): 5 anchor replacements + 5 warns + 5 thread reads (${line(pre)})`, JSON.stringify({ first: pre.first, moved: sum(pre.rows, 'moved'), warns: sum(pre.rows, 'warns'), reads: sum(pre.rows, 'reads') }));
+  ok(draftsY === 1 && draftsP === 6, `the stored drafts: yours 1 (the first walk's — drafts are records, B-a085), the pre-fix rules 6 (every save a new record) (${draftsY} / ${draftsP})`);
+
+  // ② the anchor rule ALONE: adds the walk cannot judge (no labels) read the thread every poll — the anchor must hold
+  const bare = await churnRig(gmail, 'bare', 'bare');
+  for (let i = 0; i < 5; i++) await bare.poll();
+  const bareN = await churnRig(gNewest, 'bare', 'bare-newest');
+  for (let i = 0; i < 5; i++) await bareN.poll();
+  ok(sum(bare.rows, 'reads') === 5 && sum(bare.rows, 'moved') === 0 && sum(bare.rows, 'warns') === 0 && bare.anchorNow() === 'm-b', `unlabelled adds: 5 thread reads, the anchor stays m-b, 0 warns (${line(bare)})`);
+  ok(sum(bareN.rows, 'moved') === 3 && sum(bareN.rows, 'warns') === 3 && sum(bareN.rows, 'reads') === 3 && bareN.warns[2].includes('lost its anchor 3 times'), `CONTROL (the newest-id rule alone): 3 replacements, 2 warns + the hold line, then HELD — the bound caps even the old rule at 3 reads (${line(bareN)})`, bareN.warns.join(' | '));
+  // ③ the history walk's rule ALONE: the same incident with every add news ⇒ a read per poll (the anchor still holds)
+  const news = await churnRig(gNoNews, 'draft', 'draft-is-news');
+  for (let i = 0; i < 5; i++) await news.poll();
+  ok(sum(news.rows, 'reads') === 5 && sum(news.rows, 'warns') === 0 && sum(news.rows, 'moved') === 0, `CONTROL (a draft add is news): 5 thread reads — the "0 reads" above is the walk's rule (${line(news)})`);
+
+  // ④ THE BOUND: a vanishing message of a shape the rule does not know, replaced every poll
+  const unk = await churnRig(gmail, 'unknown', 'bound');
+  for (let i = 0; i < 6; i++) await unk.poll();
+  await unk.poll({ reply: true });                       // poll 7: Ada's answer (INBOX) joins the thread
+  await unk.poll();                                      // poll 8: held again
+  const r1to8 = unk.rows.map((r) => r.reads).join('');
+  ok(r1to8 === '11100010', `held after ${gmail.LOST_HOLD_AT} lost anchors: polls 1–3 read, 4–6 do not, poll 7 reads (a delivered message joined), poll 8 does not (${r1to8} · ${line(unk)})`);
+  ok(unk.stored().includes('m-r'), 'the delivered message was ingested at poll 7 — the hold delays no mail Gmail delivered');
+  ok(unk.warns.length === 3 && /no longer in the thread/.test(unk.warns[0]) && /no longer in the thread/.test(unk.warns[1]) && /lost its anchor 3 times within an hour — it is read again when a delivered or sent message joins it/.test(unk.warns[2]), `the words: 2 lost-anchor lines + ONE hold line, then silence (${unk.warns.length})`, unk.warns.join(' | '));
+  await unk.poll({ gapMs: gmail.LOST_WINDOW_MS + 61e3 });   // the hold's hour passes
+  ok(unk.rows[unk.rows.length - 1].reads === 1 && unk.warns.length === 3, `past the hour the hold lapses: the mention reads the thread again (still silent: the hold was said) (${line(unk)})`);
+  const unkN = await churnRig(gNoHold, 'unknown', 'bound-no-hold');
+  for (let i = 0; i < 6; i++) await unkN.poll();
+  await unkN.poll({ reply: true }); await unkN.poll();
+  ok(unkN.rows.map((r) => r.reads).join('') === '11111111', `CONTROL (no hold): a read on every one of 8 polls (${unkN.rows.map((r) => r.reads).join('')})`);
+  const unkP = await churnRig(gPre, 'unknown', 'bound-pre');
+  for (let i = 0; i < 8; i++) await unkP.poll();
+  ok(sum(unkP.rows, 'reads') === 8 && sum(unkP.rows, 'warns') === 8, `CONTROL (the pre-fix rules): 8 reads + 8 warns over the same 8 polls (${sum(unkP.rows, 'reads')} / ${sum(unkP.rows, 'warns')})`);
+
+  // ⑤ THE NOTE: the SAME vanished id again (a pass that never completed kept it) is silent — the adapter alone
+  async function sameIdWarns(mod) {
+    const cv = churnVendor('bare');
+    const ws = [];
+    const tk = { token: { access_token: 'ya', expiresAt: T0 + 3600e3 * 48, refresh_token: 'r', scopes: [gmail.SCOPE], email: 'member.a@example.com' } };
+    const a = mod.create({ id: 'gmail-note', options: {} }, { now, fetch: cv.fetchFn, named: () => true, state: { read: () => ({}), write: async () => {} },
+      tokens: { read: () => ({ token: tk.token, why: null }), async write(t) { tk.token = t; }, async clear() {} }, resolveIntegration: () => ({ values: { clientId: 'c', clientSecret: 's' }, why: null }),
+      log: { warn: (s) => ws.push(String(s)), log() {} } });
+    for (let i = 0; i < 2; i++) { clock += 61e3; cv.st.k++; cv.st.savedAt[cv.st.k] = clock; await a.history(CT, { anchor: 'm-gone' }); }
+    clock += 61e3; cv.st.k++; cv.st.savedAt[cv.st.k] = clock;
+    await a.history(CT, { anchor: 'm-b' });           // the anchor is found: the thread is forgotten
+    clock += 61e3; cv.st.k++; cv.st.savedAt[cv.st.k] = clock;
+    await a.history(CT, { anchor: 'm-gone' });        // …so the same id vanishing later is said again
+    return ws.filter((s) => /no longer in the thread/.test(s));
+  }
+  const wsY = await sameIdWarns(gmail), wsN = await sameIdWarns(gNoNote);
+  ok(wsY.length === 2 && wsY.every((s) => s.includes('m-gone')), `the same vanished id twice ⇒ said ONCE; a read that finds its anchor resets the note (said again later): ${wsY.length} lines`, wsY.join(' | '));
+  ok(wsN.length === 3, `CONTROL (no same-id note): the repeat is said every time (${wsN.length})`);
+  for (const x of copiesCensus(MC.files, MC.dir, REPO, { minCopies: 5, label: '㉒ ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
+  for (const e2 of RIGS) { try { e2.stop(); } catch {} }
+}
+
 eng.stop();
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

@@ -15,7 +15,7 @@ const { capsOf } = require('./backend-caps');      // inputModes.queueVerbs / re
 const { reconcileAttachStreaming } = require('./turn-state'); // §2.5: ONE attach-time streaming decision, shared with the live consumer
 const { pidsMatchingCmdline } = require('./cli-identity'); // THE process reader: the kill path's `pgrep -f` without the fork
 const PI = require('./proc-identity'); // the ssh kill compares the meta's recorded birth (vs_same_proc, B-5ee1)
-const { shrinkVerdict, windowIds } = require('./lib/desktop-record.js'); // PURE (userW inc-mun7qjmw-iksh): the layout-sync shrink belt
+const { shrinkVerdict, windowIds, layerGate } = require('./lib/desktop-record.js'); // PURE (userW inc-mun7qjmw-iksh): the layout-sync shrink belt + the layer gate (design q-039 P1)
 
 /** The sentence a harness-level verb refusal carries. Every branch says what
  *  happens to the message ANYWAY — a refusal that only says "no" leaves the
@@ -1576,6 +1576,23 @@ function registerWsHandler(wss, ctx) {
               console.warn(`[layout-sync] REFUSED a record of desktop "${name}" (${desktopId}): it drops ${v.unexplained.length} window(s) with no close/move/kill (${v.unexplained.join(', ')}) — ${(stored.windows || []).length} → ${data.state.windows.length}${arrived}; the server keeps its record`);
               try { telemetry?.record?.({ kind: 'event', name: 'layout-sync-refused', detail: `${v.reason} ${v.unexplained.length}/${(stored.windows || []).length}${v.arrived?.length ? ' arrived=' + v.arrived.length : ''}` }); } catch { }
               try { ws.send(JSON.stringify({ type: 'layout-sync-refused', desktopId, reason: v.reason, unexplained: v.unexplained, arrived: v.arrived || [], state: stored, sentAt: data.sentAt ?? null })); } catch { }
+              break;
+            }
+          }
+          // THE LAYER GATE (design q-039 P1, §6b item 10 — the layer law's server half): a PHONE-stamped record may change
+          // the workspace only. One that moves a held window's z / box / maximize / minimize / snap, the grid, the sidebar,
+          // the bars, the theme or the fonts of the record held is REFUSED for that desktop, whichever bundle sent it (an old
+          // phone tab, a new bug) — the shrink belt's door: nothing written, nothing broadcast, the sender told WITH the
+          // record kept; it reconciles (its view = that record + what it built; a phone's re-send carries the held
+          // arrangement — its membership change lands). A desktop / unstamped writer is not judged. PURE: desktop-record.js layerGate.
+          if (desktopId && layoutData.desktops?.[desktopId]?.autoSave && data.state && typeof data.state === 'object') {
+            const stored = layoutData.desktops[desktopId].autoSave;
+            const g = layerGate(data.viewport, stored, data.state);
+            if (!g.ok) {
+              const name = (layoutData.desktopMeta || []).find((d) => d.id === desktopId)?.name || desktopId;
+              console.warn(`[layout-sync] REFUSED a phone record of desktop "${name}" (${desktopId}): it changes ${g.fields.join(', ')}${g.windows.length ? ` (window${g.windows.length > 1 ? 's' : ''} ${g.windows.join(', ')})` : ''} — a phone writes the workspace only; the server keeps its record`);
+              try { telemetry?.record?.({ kind: 'event', name: 'layout-sync-refused', detail: `${g.reason} ${g.fields.join(',')}` }); } catch { }
+              try { ws.send(JSON.stringify({ type: 'layout-sync-refused', desktopId, reason: g.reason, fields: g.fields, state: stored, sentAt: data.sentAt ?? null })); } catch { }
               break;
             }
           }

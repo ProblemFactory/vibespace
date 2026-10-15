@@ -910,6 +910,13 @@ const SETTINGS_SCHEMA = {
     tier: 'advanced',
     category: t('Integration'), liveApply: true,
   },
+  'tasks.contextIndexBytes': {
+    type: 'number', default: 4096, min: 0, max: 65536, step: 256,
+    label: t('Context-folder index budget per group (bytes)'),
+    description: t("How many bytes one Task Group's context-folder file list may take in an agent's injected context: the newest files that fit are listed, then one line counts the rest (vibespace-task show --full lists every file). 0 = no byte budget (at most 100 files)."),
+    tier: 'advanced',
+    category: t('Integration'), liveApply: true,
+  },
   'agents.stopBookkeepingNudge': {
     type: 'boolean', default: true,
     label: t('Stop-time bookkeeping nudge for agents'),

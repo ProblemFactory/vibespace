@@ -4,8 +4,8 @@
  * `POST /api/agent/channels/api` (src/agent-routes.js) hands a call here: the credential → the TIER (the engine's
  * `apiTierFor`, asked again after EVERY await — a revoke lands mid-call) → the fence → the budget (the grant's own
  * per-minute / per-day counts, then the account's vendor meter) → the bearer (the adapter's, or a storage mount's lent
- * OAuth token — D3) → the ONE fetch (`vendorFetch`: the credential's DECLARED hosts only, no redirect off-host, 30 s,
- * bounded) → the answer
+ * OAuth token — D3) → the ONE fetch (`vendorFetch`: the credential's DECLARED hosts only, a redirect never followed by
+ * itself — each target judged by the fence like the call, B-fc37 —, 30 s, bounded) → the answer
  * through secret-shapes' redaction and the peer-text belt → the audit ring (data/channels/<cred>/api.ndjson — never a
  * body) and the chat's call row (the caller's touchChannel). A write under `write-ask` and every SENSITIVE call is a
  * PROPOSAL: the frozen bytes (method, host, path, query, headers, body digest) are what the user's Approve runs.
@@ -35,6 +35,8 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
   const save = () => { try { fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(stateFile + '.tmp', JSON.stringify(state)); fs.renameSync(stateFile + '.tmp', stateFile); } catch (e) { log.warn('[channel-api] state write failed:', e && e.message); } };
   const credDir = (cred) => path.join(dir, String(cred).replace(/[^A-Za-z0-9._-]/g, '_'), 'api.ndjson');
   const pkOf = (ctx) => `${ctx.kind}:${ctx.id}`;
+  /** The call shapes this principal's cards made always-allowed on one credential (the verdict's `shapes`). */
+  const shapesOf = (ctx, cred) => state.shapes.filter((s) => s.cred === cred && s.principal === pkOf(ctx)).map((s) => s.shape);
 
   /** THE AUDIT RING — one line per call (and per decision), the 16 MB ring rolled once (the exit-run precedent). */
   function audit(cred, line) {
@@ -145,23 +147,28 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
     return { text: toAgentText(s.split('\n').map((l) => redactSecrets(l).text).join('\n'), { max: F.RESPONSE_MAX }) };
   }
 
-  /** RUN one vetted request (the agent's own, or a proposal's frozen bytes). Re-asks the tier after each await. */
-  async function run(ctx, cred, c, req) {
+  /** RUN one vetted request (the agent's own, or a proposal's frozen bytes). Re-asks the tier after each await. A vendor
+   *  redirect is never followed by itself (B-fc37): its target is judged by the fence like the call (`F.judgeRedirect`,
+   *  the tier asked again just then) and a target it does not clear is sent NOTHING — the refusal names where the vendor
+   *  pointed; one the user may still choose lands in `kept.target` (approve keeps it for 重新提交). */
+  async function run(ctx, cred, c, req, kept = null) {
     const t0 = now();
     let token;
     try { token = await c.bearer(); } catch (e) { return { ok: false, code: 'api_cred_expired', error: `the credential cannot be used now (${String((e && e.message) || e).slice(0, 200)}) — the user re-authorizes it in Channels` }; }
     if (tierNow(ctx, cred).tier === 'none') return NOT_GRANTED();   // the revoke may have landed while the token was read
     let res, cur = req, hops = 0;
+    const seen = [F.addressOf(req)];
     try {
       for (;;) {
         c.charge();
         res = await vendorFetch(F.urlOf(cur), { method: cur.method, headers: { ...cur.headers, authorization: `Bearer ${token}` }, body: cur.body || undefined }, F.vendorRowOf(c));
         if (tierNow(ctx, cred).tier === 'none') return { ...NOT_GRANTED(), withheld: true, status: res.status };   // …or while the vendor answered: the answer is withheld (the audit keeps that it ran)
-        if (res.status < 300 || res.status >= 400 || !res.headers.get('location')) break;
-        const to = F.redirectTarget(cur, res.headers.get('location'));
-        if (!to.ok) return { ...to, status: res.status };
-        if (++hops > F.REDIRECTS_MAX) return { ok: false, code: 'api_redirect_refused', error: `more than ${F.REDIRECTS_MAX} redirects — not followed` };
-        cur = { ...cur, method: res.status === 303 ? 'GET' : cur.method, body: res.status === 303 ? null : cur.body, path: to.path, query: to.query };
+        const location = res.headers.get('location');
+        if (!F.REDIRECT_STATUSES.includes(res.status) || !location) break;
+        if (res.body && typeof res.body.cancel === 'function') res.body.cancel().catch(() => {});   // the 3xx's own body is never read
+        const j = F.judgeRedirect(c, { call: req, req: cur, status: res.status, location, tier: tierNow(ctx, cred).tier, shapes: shapesOf(ctx, cred), hops, seen });
+        if (!j.ok) { const { target, ...said } = j; if (kept && target) kept.target = target; return { ...said, status: res.status }; }
+        hops++; seen.push(F.addressOf(j.req)); cur = j.req;
       }
     } catch (e) { return { ok: false, code: (e && e.code && /^api_/.test(e.code)) ? e.code : 'api_vendor_unreachable', error: `the vendor could not be reached (${String((e && e.name === 'TimeoutError' ? 'timed out after 30 s' : e && e.message) || e).slice(0, 200)})` }; }
     if (res.status === 429) c.rateLimited(Number(res.headers.get('retry-after')) || 30);
@@ -189,6 +196,7 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
       method: f.method, host: f.host, path: f.path, query: f.query, digest: f.digest, sensitive: p.sensitive, offersAlways: p.offersAlways,
       body: body ? toAgentText(body.toString('utf8').slice(0, F.SHOWN_BODY_MAX), { max: F.SHOWN_BODY_MAX }) : null, bodyBytes: body ? body.length : 0,
       decidedAt: p.decidedAt || null, decidedBy: agent ? undefined : p.decidedBy || null, reason: p.reason || null, result: p.result || null, note: p.note || null,
+      resubmitOf: p.resubmitOf || null, resubmittedAs: p.resubmittedAs || null,
     };
   }
   const pending = () => Object.values(state.proposals).filter((p) => p.status === 'pending');
@@ -208,6 +216,15 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
     if (!v) return NOT_GRANTED();
     return { ok: true, cred, vendor: v.label, docs: v.docs, hosts: v.hosts, tier: tr.tier, tierSays: F.TIER_SAYS[tr.tier] || tr.tier, fence: { readByPost: v.readByPost.map(String), sensitive: v.sensitive.map(String), sensitiveAlso: ['DELETE', `a body over ${F.SENSITIVE_BODY / 1024} KiB`, 'an upload'], budget: { perMin: F.BUDGET_DEFAULT.perMin, perDay: tr.perDay || F.BUDGET_DEFAULT.perDay }, bodyMax: F.BODY_MAX, responseMax: F.RESPONSE_MAX } };
   }
+  /** ONE PROPOSAL: the FROZEN request (what the user's Approve runs), the policy, the agent's note; the oldest decided
+   *  ones beyond PROPOSALS_KEEP are dropped. The caller saves + tells the owner. */
+  function fileProposal(ctx, cred, c, req, { cls, sensitive, note = null, why, extra = {} }) {
+    const id = `api-${crypto.randomBytes(6).toString('hex')}`;
+    state.proposals[id] = { id, status: 'pending', cred, credLabel: c.label, kind: c.kind, at: now(), conv: ctx.id, principal: { kind: ctx.kind, id: ctx.id, name: ctx.name || null, groups: ctx.groups || [] }, frozen: F.freeze(req), sensitive, offersAlways: F.offersAlways({ cls, sensitive }), note, why, ...extra };
+    const keep = Object.values(state.proposals).sort((a, b) => b.at - a.at).slice(PROPOSALS_KEEP).filter((p) => p.status !== 'pending');
+    for (const p of keep) delete state.proposals[p.id];
+    return state.proposals[id];
+  }
   /** THE CALL. → the answer, `api_pending` (a proposal filed), or a refusal by name. `touch` = the chat's call row. */
   async function call(ctx, input = {}) {
     const cred = String(input.cred || '');
@@ -219,7 +236,7 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
     if (!v.ok) { line({ method: String(input.method || '').toUpperCase().slice(0, 8), host: null, path: String(input.path || '').slice(0, 200), query: [] }, { verdict: 'refused', code: v.code }); return v; }
     const req = v.req;
     const cls = F.classOf(c, req), sensitive = F.sensitiveOf(c, req), shape = F.shapeOf(req);
-    const shapes = state.shapes.filter((s) => s.cred === cred && s.principal === pkOf(ctx)).map((s) => s.shape);
+    const shapes = shapesOf(ctx, cred);
     const vd = F.verdict({ tier: tr.tier, cls, sensitive, shape, shapes });
     const touch = { op: 'api', adapterId: cred, title: `${req.method} ${req.path}`, kind: c.kind };
     if (!vd.ok) { line(req, { verdict: 'refused', code: vd.code }); return { ...vd, touch }; }
@@ -230,10 +247,7 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
       const waiting = pending().filter((p) => p.cred === cred && p.conv === ctx.id).length;
       if (waiting >= F.PENDING_MAX) { line(req, { verdict: 'refused', code: 'api_budget' }); return { ok: false, code: 'api_budget', error: `${waiting} of your API proposals on this credential wait for the user already — \`vibespace-channels api wait <id>\` until one is decided`, touch }; }
       stamps.set(`${cred}|${ctx.id}`, [...bs.stamps, now()]);
-      const id = `api-${crypto.randomBytes(6).toString('hex')}`;
-      state.proposals[id] = { id, status: 'pending', cred, credLabel: c.label, kind: c.kind, at: now(), conv: ctx.id, principal: { kind: ctx.kind, id: ctx.id, name: ctx.name || null, groups: ctx.groups || [] }, frozen: F.freeze(req), sensitive, offersAlways: F.offersAlways({ cls, sensitive }), note: typeof input.why === 'string' && input.why.trim() ? input.why.trim().slice(0, 200) : null, why: vd.why };
-      const keep = Object.values(state.proposals).sort((a, b) => b.at - a.at).slice(PROPOSALS_KEEP).filter((p) => p.status !== 'pending');
-      for (const p of keep) delete state.proposals[p.id];
+      const id = fileProposal(ctx, cred, c, req, { cls, sensitive, note: typeof input.why === 'string' && input.why.trim() ? input.why.trim().slice(0, 200) : null, why: vd.why }).id;
       save(); notifyOwner([id]);
       line(req, { verdict: 'proposed', proposal: id, bodySha: req.body ? crypto.createHash('sha256').update(req.body).digest('hex') : null });
       return { ok: false, code: 'api_pending', error: `this call waits for the user's approval (${sensitive ? `sensitive: ${sensitive}; your tier is ${F.TIER_SAYS[tr.tier] || tr.tier} — only Full trust (write-all) runs a sensitive call without asking` : 'a write under "ask each"'}) — proposal ${id}; \`vibespace-channels api wait ${id}\` prints the outcome`, proposal: proposalView(state.proposals[id], { agent: true }), touch: { ...touch, proposalId: id } };
@@ -243,7 +257,7 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
     stamps.set(`${cred}|${ctx.id}`, [...bs.stamps, now()]);
     const r = await run(ctx, cred, c, req);
     const trusted = vd.why === 'write-all' && sensitive ? { trust: 'write-all', sensitive } : {};   // 完全信任 · 敏感 on the log line and the chat row
-    line(req, { verdict: r.ok ? 'ok' : r.withheld ? 'withheld' : 'refused', code: r.ok ? null : r.code, status: r.status || null, bytes: r.bytes || 0, ms: r.ms || 0, bodySha: req.body ? crypto.createHash('sha256').update(req.body).digest('hex') : null, ...trusted });
+    line(req, { verdict: r.ok ? 'ok' : r.withheld ? 'withheld' : 'refused', code: r.ok ? null : r.code, status: r.status || null, bytes: r.bytes || 0, ms: r.ms || 0, bodySha: req.body ? crypto.createHash('sha256').update(req.body).digest('hex') : null, ...trusted, redirect: r.ok ? null : r.to ? { to: r.to, why: r.why } : null });
     if (tierNow(ctx, cred).tier === 'none') return NOT_GRANTED();
     return { ...r, touch: { ...touch, count: r.status || 0, ...(trusted.trust ? { trust: 'write-all' } : {}) } };
   }
@@ -305,12 +319,41 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
     p.status = 'running'; p.decidedAt = now(); p.decidedBy = by;
     if (always && p.offersAlways) state.shapes.push({ id: `shape-${crypto.randomBytes(5).toString('hex')}`, cred: p.cred, principal: `${ctx.kind}:${ctx.id}`, principalName: ctx.name || null, groups: ctx.groups, shape: F.shapeOf(req), at: now(), by });
     save();
-    const r = await run(ctx, p.cred, c, req);
+    const kept = {};
+    const r = await run(ctx, p.cred, c, req, kept);
     p.status = r.ok ? 'ran' : 'failed';
-    p.result = r.ok ? { status: r.status, headers: r.headers, json: r.json, text: r.text, binary: r.binary || false, bytes: r.bytes, truncated: r.truncated } : { code: r.code, error: r.error };
-    audit(p.cred, F.auditLine({ at: now(), principal: ctx, conv: p.conv, cred: p.cred, req, status: r.status || null, bytes: r.bytes || 0, ms: r.ms || 0, verdict: r.ok ? 'approved' : r.withheld ? 'withheld' : 'refused', code: r.ok ? null : r.code, proposal: p.id, by }));
+    p.result = r.ok ? { status: r.status, headers: r.headers, json: r.json, text: r.text, binary: r.binary || false, bytes: r.bytes, truncated: r.truncated } : { code: r.code, error: r.error, ...(r.to ? { status: r.status || null, from: r.from, to: r.to, why: r.why, resubmit: r.resubmit === true } : {}) };
+    // 重新提交 (B-fc37): the target the vendor pointed at, kept SERVER-side (its query may be signed) for resubmit()
+    if (!r.ok && r.resubmit === true && kept.target) p.redirect = { status: r.status, ...kept.target };
+    audit(p.cred, F.auditLine({ at: now(), principal: ctx, conv: p.conv, cred: p.cred, req, status: r.status || null, bytes: r.bytes || 0, ms: r.ms || 0, verdict: r.ok ? 'approved' : r.withheld ? 'withheld' : 'refused', code: r.ok ? null : r.code, proposal: p.id, by, redirect: r.ok ? null : r.to ? { to: r.to, why: r.why } : null }));
     save(); notifyOwner([p.id]);
     return { ok: true, proposal: proposalView(p) };
+  }
+  /** 重新提交 (B-fc37) — the user's door on an approved card whose run the vendor redirected to a target the fence did not
+   *  clear (it would need the user, or is heavier than the call): that target becomes a NEW proposal — its own card,
+   *  words, chip and digest, judged like any call of the agent's — so what the user approves next is exactly what runs.
+   *  Nothing runs here; once per card; `digest` = the failed card's own (the card the user pressed). */
+  function resubmit(id, { by = 'user', digest = null } = {}) {
+    const p = state.proposals[String(id || '')];
+    if (!p) return { ok: false, code: 'not-found', error: 'no such API proposal' };
+    if (p.status !== 'failed' || !p.redirect || p.resubmittedAs) return { ok: false, code: 'not-resubmittable', error: p.resubmittedAs ? `this card was resubmitted already (${p.resubmittedAs})` : 'only a card whose run the vendor redirected can be resubmitted' };
+    if (!digest || digest !== (p.frozen && p.frozen.digest)) return { ok: false, code: 'api_frozen_mismatch', error: 'the card you pressed is not the request on record — reopen API access… and look again' };
+    const orig = F.thaw(p.frozen), c = credentialOf(p.cred);
+    if (!orig || !c) return { ok: false, code: 'api_frozen_mismatch', error: !orig ? 'the frozen request no longer matches its digest — nothing filed' : 'the credential is gone' };
+    const ctx = { kind: p.principal.kind, id: p.principal.id, name: p.principal.name, groups: p.principal.groups || [] };
+    const tr = tierNow(ctx, p.cred);
+    if (tr.tier === 'none') return { ok: false, code: 'api_not_granted', error: 'the agent no longer holds API access to this credential — nothing filed' };
+    const v = F.retarget(c, orig, p.redirect);
+    if (!v.ok) return v;
+    const cls = F.classOf(c, v.req), sensitive = F.sensitiveOf(c, v.req);
+    const vd = F.verdict({ tier: tr.tier, cls, sensitive, shape: F.shapeOf(v.req), shapes: shapesOf(ctx, p.cred) });
+    if (!vd.ok) return vd;
+    if (pending().filter((x) => x.cred === p.cred && x.conv === p.conv).length >= F.PENDING_MAX) return { ok: false, code: 'api_budget', error: `${F.PENDING_MAX} of this agent's API proposals on the credential wait already — decide one first` };
+    const np = fileProposal(ctx, p.cred, c, v.req, { cls, sensitive, note: p.note || null, why: 'resubmit', extra: { resubmitOf: p.id } });
+    p.resubmittedAs = np.id;
+    audit(p.cred, F.auditLine({ at: now(), principal: ctx, conv: p.conv, cred: p.cred, req: v.req, verdict: 'resubmitted', proposal: np.id, by }));
+    save(); notifyOwner([p.id, np.id]);
+    return { ok: true, proposal: proposalView(np) };
   }
   function reject(id, { reason = null, by = 'user' } = {}) {
     const p = state.proposals[String(id || '')];
@@ -329,7 +372,7 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
     return { ok: true };
   }
 
-  return { creds, docs, call, proposalFor, logFor, ownerView, setTiers, approve, reject, revokeShape, auditTail, pending };
+  return { creds, docs, call, proposalFor, logFor, ownerView, setTiers, approve, resubmit, reject, revokeShape, auditTail, pending };
 }
 
 module.exports = { create, AUDIT_RING_BYTES };

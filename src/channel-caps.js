@@ -1236,11 +1236,13 @@ function feedCatchUpText(cu, { t = defaultT } = {}) {
  *  `grants` = the engine's `adapterView().grants` ([{what: 'reactions'|'feed', scopes, missing, refused, wanted}]). */
 function grantsText(grants, { t = defaultT, vendor = '' } = {}) {
   const list = Array.isArray(grants) ? grants.filter((g) => g && g.wanted !== false && Array.isArray(g.missing) && g.missing.length) : [];
+  // lane lark-minutes-scopes: the app's enabled permissions the last consent's page did not reach (a count) — the next Re-authorize
+  const more = Array.isArray(grants) ? grants.find((g) => g && g.what === 'more' && Number(g.n) > 0) : null;
   // lane lark-upload-scope-split: a narrowed consent lost the upload scope while another HELD one still carries files
   // (Lark: a legacy token holding the deprecated V2) — said by name with "still works", never a warning
   const kept = Array.isArray(grants) ? grants.find((g) => g && g.what === 'files' && g.wanted !== false && Array.isArray(g.missing) && !g.missing.length && Array.isArray(g.dropped) && g.dropped.length) : null;
   const keptText = kept ? t('{vendor} refused {scopes} — sending files still works', { vendor: vendor || t('The vendor'), scopes: kept.dropped.join(' + ') }) : '';
-  if (!list.length) return { text: keptText, warn: false };
+  if (!list.length && !more) return { text: keptText, warn: false };
   const refused = [];
   const adds = [];
   let filesOff = null;
@@ -1252,7 +1254,9 @@ function grantsText(grants, { t = defaultT, vendor = '' } = {}) {
     else adds.push(g.what);
   }
   // lane lark-threads (B1/B5, MEASURED): `people` = reading people's profiles (who left a chat, the nickname, the department)
-  const words = { reactions: t('reading reactions'), feed: t('new-message search and single chats'), people: t('reading people\'s profiles'), files: t('sending files') };
+  if (more) adds.push('more');
+  // lane lark-minutes-scopes: `minutes` = reading 妙记 (a minute, its transcript, its recording) — Lark's own name in each language
+  const words = { reactions: t('reading reactions'), feed: t('new-message search and single chats'), people: t('reading people\'s profiles'), files: t('sending files'), minutes: t('reading Minutes and their recordings'), more: more ? t('{n} more of the permissions your app has enabled', { n: Number(more.n) }) : '' };
   const parts = [];
   if (refused.length) parts.push(refusedScopeText([...new Set(refused)], { t, vendor }));
   if (filesOff) parts.push(t('Sending files is off: {vendor} refused {scopes} — enable it in the app console and Re-authorize', { vendor: vendor || t('The vendor'), scopes: filesOff.join(' + ') }));

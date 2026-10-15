@@ -2,7 +2,7 @@ import { cssVarDefault, showContextMenu, showInputDialog, showToast, uiScale } f
 import { startPointerDrag } from './drag-feed.js'; // THE feed for every drag door (lane-drag-release verify r2 census)
 import { t } from './i18n.js';
 import { stageRefusalSentence } from './stage-rules.js'; // inc-muly2izg-cks3: the Stage's move refusal, in words (PURE)
-import { mergeDesktopRecord, windowIds, captureForViewport, VIEWPORT_CHROME } from './desktop-record.js'; // userW inc-mun7qjmw-iksh: a held record is a VIEW — every write merges (PURE)
+import { mergeDesktopRecord, windowIds, captureForViewport, PHONE_KEEPS } from './desktop-record.js'; // userW inc-mun7qjmw-iksh: a held record is a VIEW — every write merges (PURE)
 import { deferKeysOf } from './layout-model.js'; // B-4767: a desktop's deferred records wait in one slot per writer class (PURE)
 
 /** A window this page tried to build (a desktop's first visit, the boot restore) and that is still absent this long
@@ -254,12 +254,13 @@ export class DesktopManager {
     const unbuilt = this._unbuilt(desktopId, held);
     lm.dropUnbuiltMembers?.(unbuilt); // a chain waiting for a window the page could not build is rebuilt without it
     // a PHONE writes membership, never arrangement (§6b guard 10): the boxes, z, maximize / minimize / snap of the windows
-    // it built — and the sidebar / grid chrome — are the held record's, verbatim (PURE captureForViewport)
+    // it built — and every record field outside the workspace (the grid, the sidebar, the bars, the theme, the fonts:
+    // PHONE_KEEPS) — are the held record's, verbatim (PURE captureForViewport; the server's layerGate refuses anything else)
     const viewport = this.app.isMobile ? 'phone' : 'desktop';
     const built = this.captureBuilt(desktopId, held);
     const rec = mergeDesktopRecord({ record: held, built, remove: [...unbuilt, ...elsewhere] });
     const { grid, ...chrome } = lm.captureChrome();
-    if (viewport === 'phone') for (const k of VIEWPORT_CHROME) delete chrome[k];
+    if (viewport === 'phone') for (const k of PHONE_KEEPS) delete chrome[k];
     Object.assign(rec, chrome);
     if (desktopId === this._activeId && viewport !== 'phone') rec.grid = grid;
     delete rec.updatedAt; // the server's stamp on the record it holds — it stamps every write itself
@@ -279,11 +280,12 @@ export class DesktopManager {
   }
 
   /** A named preset of the desktop on show (layout.js savePreset): its windows through THE ONE CAPTURE, the page's chrome
-   *  — a phone's sidebar / grid are the held record's (its own are an overlay and the full screen), as recordFor's. */
+   *  — a phone's grid / chrome / preference are the held record's (PHONE_KEEPS: its sidebar is an overlay, its screen
+   *  the full one, its bars and theme its own), as recordFor's. */
   presetState() {
     const held = this._savedStates.get(this._activeId) || { windows: [] };
     const state = { windows: this.captureBuilt(this._activeId, held), ...this.app.layoutManager.captureChrome() };
-    if (this.app.isMobile) for (const k of VIEWPORT_CHROME) { if (k in held) state[k] = held[k]; else delete state[k]; }
+    if (this.app.isMobile) for (const k of PHONE_KEEPS) { if (k in held) state[k] = held[k]; else delete state[k]; }
     return state;
   }
 
@@ -350,10 +352,11 @@ export class DesktopManager {
     return out;
   }
 
-  /** The server REFUSED a record of `desktopId` (its shrink belt, ws-handler layout-sync): the server kept its own
-   *  and sent it back. The view becomes that record plus what this page has built; on the desktop on show the
-   *  windows it holds that this page never opened are opened now; the corrected record goes out with the next save
-   *  (the dirty bit re-armed at the last REAL input — §6b guard 2's expiry keeps its meaning). */
+  /** The server REFUSED a record of `desktopId` (its shrink belt — or its layer gate, `cross-layer`: a phone record that
+   *  moved a field outside the workspace — ws-handler layout-sync): the server kept its own and sent it back. The view
+   *  becomes that record plus what this page has built; on the desktop on show the windows it holds that this page never
+   *  opened are opened now; the corrected record goes out with the next save (the dirty bit re-armed at the last REAL
+   *  input — §6b guard 2's expiry keeps its meaning). */
   onSyncRefused(msg) {
     const d = msg?.desktopId;
     // the server no longer has this desktop (verify r2 ⑦): its meta rides the refusal — the page drops the desktop

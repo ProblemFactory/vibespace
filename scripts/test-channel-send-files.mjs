@@ -16,12 +16,17 @@
 //   ⑧ verify r1: a lost text answer reconciled names the files that never left (F1); Slack thread+chat + a file refused (F4);
 //   ⑨b ⑨c lane composer-file-only-send: a file BY ITSELF — the vendor gets the file and no text message; propose mode
 //      holds it, Approve sends it alone, Reject drops it (control: an empty text message posted beside it);
-//   ⑦ PATCHED-COPY CONTROLS: a copy sending the key / the upload URL as text, and a copy dropping a refusal, go red.
+//   ⑦ PATCHED-COPY CONTROLS: a copy sending the key / the upload URL as text, and a copy dropping a refusal, go red;
+//   ⑩ lane lark-send-hold (B-efa0): a Lark 429 on a send (text or upload) holds the ACCOUNT's next sends for the
+//      vendor's reset — the adapter refuses them before any request (`held`), the engine keeps them `sending` with the
+//      wait SAID ("Lark asked to slow down — sends at HH:MM:SS") and sends them at the reset; a restart re-arms the wait;
+//      the base (a copy without the hold) sends the next proposal at once — RED controls;
+//   ⑪ every Slack method slack.js names has its METHOD_TIERS row (a copy of the table without `files.upload` is red).
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { createRequire } from 'node:module';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { mutantCopies } from './mutant-copy.mjs';
 import { engineSource } from './channels-engine-src.mjs';   // lane dc-channels-seams: the engine + its three family files as one text
 
@@ -373,6 +378,132 @@ ok(alo.length === 0, `Lark on a stub vendor: the owner's file alone ⇒ ONE uplo
   const red = LS.includes(from) ? await aloneOwnerJudge(ENG, require(MC.write('src/channels/lark.js', LS.replace(from, "const pieces = [{ part: 'text' }, ...files.map("), 'lark-empty-text'))) : null;
   ok(Array.isArray(red) && red.length > 0, `control — lark posts an EMPTY text message beside the file: red (${red === null ? 'the patch site is gone' : red.length ? red[0].slice(0, 120) : 'GREEN — the judge missed it'})`); }
 
+// ⑩ lane lark-send-hold (B-efa0, channel-send-files verify r1 L2): A LARK 429 ON A SEND HOLDS THE ACCOUNT'S NEXT SENDS.
+// The probe's shape (probe1 L2/L3): the text lands, the picture upload answers 429 reset 30 s ⇒ the chain stops; the
+// next proposal 2 s later and one with a file 3 s later WAIT (0 requests, not failed, the card says so), and go out
+// after the reset; a 429 on a text-only send does the same; a 429 naming no reset holds 30 s; a restart keeps the wait.
+const ZH = (await import(pathToFileURL(path.join(REPO, 'src/lib/i18n-zh.js')).href)).default;
+const zhT = (k, v = {}) => String(ZH[k] || k).replace(/\{(\w+)\}/g, (m, x) => (x in v ? String(v[x]) : m));
+const hms = (ms) => { const d = new Date(ms); return [d.getHours(), d.getMinutes(), d.getSeconds()].map((x) => String(x).padStart(2, '0')).join(':'); };
+async function holdEngineJudge(ENGm, L, { shape = 'upload', reset = '30' } = {}) {
+  const out = [];
+  const fake = require(path.join(REPO, 'src/channels/fake.js'));
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-send-files-hold-'));
+  let clock = T0, k = 0;
+  const calls = [];
+  const rate = () => jsonRes(429, { code: 99991400, msg: 'request trigger frequency limit' }, reset ? { 'x-ogw-ratelimit-reset': reset } : {});
+  let route = (c) => (shape === 'upload' ? (c.form ? rate() : jsonRes(200, LF.answers.message)) : (++k === 1 ? rate() : jsonRes(200, LF.answers.message)));
+  const fetchFn = async (url, init = {}) => { const c = { url: String(url), method: init.method || 'GET', form: init.body instanceof FormData, json: typeof init.body === 'string' ? JSON.parse(init.body) : null }; calls.push(c); if (c.method === 'GET') return jsonRes(200, { code: 0, data: { items: [], has_more: false } }); return route(c); };
+  const A = L.create({ id: 'l', options: {} }, { resolveIntegration: () => CRED, fetch: fetchFn, now: () => clock, log: { log() {}, warn() {}, error() {} }, tokens: tokens({ access_token: 'u-fixture-user-token', expiresAt: T0 + 3600e3, refresh_token: 'r', refreshExpiresAt: T0 + 30 * 86400e3, scopes: ['im:message', 'im:message.send_as_user', 'im:resource'], openId: 'ou_me', brand: 'feishu' }) });
+  const mod = { kind: 'lark-hold', caps: { ...fake.fakePoll.caps, idempotency: L.caps.idempotency, sendAttachments: L.caps.sendAttachments, sendAttachmentsWhy: null, budget: undefined, pace: undefined },
+    create(record, deps) { return Object.assign(Object.create(fake.fakePoll.create(record, { ...deps })), { send: (c, o) => A.send(c, o), reconcile: (c, o) => A.reconcile(c, o) }); } };
+  const registry = CH.createChannelRegistry(); registry.register(mod);
+  fs.mkdirSync(path.join(dataDir, 'channels'), { recursive: true });
+  fs.writeFileSync(path.join(dataDir, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: [{ id: 'la', kind: 'lark-hold', label: 'la', enabled: true, auth: { tokenEnc: null, expiresAt: null, scopes: [] }, lastPass: null, consecutiveFailures: 0, push: { enabled: false }, scan: null }] }));
+  const mk = () => ENGm.create({ dataDir, registry, env: {}, now: () => clock, broadcast: () => {}, serverSetting: (x) => ({ 'channels.guardAttachmentsReview': true })[x], liveSessions: () => [], log: { log() {}, warn() {}, error() {} } });
+  let eng = mk();
+  try {
+    await eng.pass('la', { force: true });
+    const conv = Object.keys(eng.store.index.live()).find((x) => x.startsWith('la/')).slice(3);
+    const snap = (id) => eng.store.outbox.snapshot().proposals[id];
+    const view = (id) => (eng.outboxView().proposals || []).find((p) => p.id === id);
+    const sendOne = async (text, fl) => { const pr = await eng.propose(null, 'la', conv, { text, attachments: fl.map((f) => ({ name: f.name, data: f.data.toString('base64') })) }); if (!pr.ok) throw new Error(`propose: ${JSON.stringify(pr).slice(0, 160)}`); const a = await eng.approve(pr.proposal.id, { shown: P.shownDigest(view(pr.proposal.id)) }); return { id: pr.proposal.id, a }; };
+    const r1 = await sendOne(shape === 'upload' ? 'two files' : 'one', shape === 'upload' ? files() : []);
+    const q1 = snap(r1.id), n1 = calls.length, t429 = clock;
+    if (shape === 'upload' ? !(q1.state === 'sent' && n1 === 2 && /^partly sent — landed: the text · NOT landed: "a\.png" \(rate-limited/.test(q1.reason || '')) : !(q1.state === 'failed' && n1 === 1)) out.push(`the 429'd send itself: ${q1.state} after ${n1} requests (${String(q1.reason).slice(0, 80)})`);
+    clock += 2e3;
+    const r2 = await sendOne('next one', []);
+    const q2 = snap(r2.id), n2 = calls.length - n1;
+    const wantUntil = t429 + (reset ? Number(reset) : 30) * 1000;
+    if (!(q2.state === 'sending' && q2.held && q2.held.until === wantUntil && n2 === 0)) out.push(`the next proposal 2 s later did not WAIT: ${q2.state}, ${n2} requests, held ${JSON.stringify(q2.held || null)} (want until ${wantUntil - t429} ms after the 429)`);
+    if (!(r2.a.ok === true && r2.a.held === true && !r2.a.error)) out.push(`its approve answered ${JSON.stringify({ ok: r2.a.ok, held: r2.a.held, code: r2.a.code })} — a wait is no error`);
+    const o2 = P.outcomeOf(view(r2.id) || q2);
+    const zh = o2 ? P.outcomeText(o2, { t: zhT }) : '';
+    if (zh !== `飞书 要求放慢，${hms(wantUntil)} 后发出`) out.push(`the card's line (zh): ${JSON.stringify(zh)}`);
+    if (!/^held: Feishu asked to slow down \(rate-limited\) — nothing was sent yet; it goes out by itself after /.test(q2.reason || '')) out.push(`the agent's reason: ${JSON.stringify(q2.reason)}`);
+    clock += 1e3;
+    const b3 = calls.length; const r3 = await sendOne('with a file', files().slice(0, 1));
+    const q3 = snap(r3.id);
+    if (!(q3.state === 'sending' && q3.held && q3.held.until === wantUntil && calls.length === b3)) out.push(`the file proposal 3 s later did not wait: ${q3.state}, ${calls.length - b3} requests`);
+    // inside the reset: a release sends nothing
+    const b4 = calls.length;
+    const early = await eng.releaseHeld('la');
+    if (!(early === 0 && calls.length === b4 && snap(r2.id).state === 'sending')) out.push(`a release before the reset sent ${early} (${calls.length - b4} requests)`);
+    // a restart while held: the wait is kept (never "unknown"), re-armed from the stamp
+    eng.stop();
+    eng = mk();
+    const swept = await eng.sweepSending();
+    if (!(swept === 0 && eng.store.outbox.snapshot().proposals[r2.id].state === 'sending' && eng.store.outbox.snapshot().proposals[r3.id].held)) out.push(`a restart called the held sends ${eng.store.outbox.snapshot().proposals[r2.id].state} (swept ${swept})`);
+    // the reset passes: both go out, oldest first; the hold is forgotten
+    route = (c) => (c.form ? jsonRes(200, c.url.includes('/im/v1/images') ? LF.answers.image : LF.answers.file) : jsonRes(200, LF.answers.message));
+    clock = wantUntil + 300;
+    const b5 = calls.length;
+    const sent = await eng.releaseHeld('la');
+    const q2b = eng.store.outbox.snapshot().proposals[r2.id], q3b = eng.store.outbox.snapshot().proposals[r3.id];
+    const post = calls.slice(b5);
+    if (!(sent === 2 && q2b.state === 'sent' && q3b.state === 'sent' && !q2b.held && !q3b.held && post.length === 4 && post[0].json && JSON.parse(post[0].json.content).text === 'next one')) out.push(`after the reset: released ${sent}, ${q2b.state}/${q3b.state}, ${post.length} requests (the text-only one first: ${post[0] && post[0].json ? post[0].json.content : '-'})`);
+    const b6 = calls.length; const r6 = await sendOne('after', []);
+    if (!(snap(r6.id).state === 'sent' && calls.length - b6 === 1)) out.push(`a send after the reset waited (${snap(r6.id).state})`);
+  } catch (e) { out.push(`threw: ${(e && e.message) || e}`); }
+  finally { try { eng.stop(); } catch { } fs.rmSync(dataDir, { recursive: true, force: true }); }
+  return out;
+}
+/** The adapter alone: the 429's reset read (header / none ⇒ 30 s / a huge one capped), the hold refused with no request. */
+async function holdAdapterJudge(L) {
+  const out = [];
+  let clock = T0;
+  const mkA = (route) => { const s = stub(route); const a = L.create({ id: 'l', options: { brand: 'lark' } }, { resolveIntegration: () => CRED, fetch: s.fetchFn, now: () => clock, log: { log() {}, warn() {}, error() {} }, tokens: tokens({ access_token: 'u-fixture-user-token', expiresAt: T0 + 3600e3, refresh_token: 'r', refreshExpiresAt: T0 + 30 * 86400e3, scopes: ['im:message', 'im:message.send_as_user', 'im:resource'], openId: 'ou_me', brand: 'lark' }) }); return { a, ...s }; };
+  for (const [hdr, want] of [['7', 7], [null, 30], ['999999999', 15 * 60]]) {
+    clock = T0; let n = 0;
+    const { a, calls } = mkA(() => (++n === 1 ? jsonRes(429, { code: 99991403, msg: 'request trigger frequency limit' }, hdr ? { 'x-ogw-ratelimit-reset': hdr } : {}) : jsonRes(200, LF.answers.message)));
+    let e1 = null, e2 = null;
+    try { await a.send('oc_fixture', { text: 'one', idemKey: 'h-1', as: 'user' }); } catch (x) { e1 = x; }
+    clock += 1000;
+    try { await a.send('oc_fixture', { text: 'two', idemKey: 'h-2', as: 'user' }); } catch (x) { e2 = x; }
+    const d = (e2 && e2.detail) || {};
+    if (!(e1 && e1.code === 'rate-limited' && e2 && e2.code === 'rate-limited' && d.held === true && d.why === 'vendor-hold' && d.heldUntil === T0 + want * 1000 && d.retryAfterSec === want - 1 && d.vendor === 'Lark' && calls.length === 1)) out.push(`reset ${hdr}: the next send ${e2 ? `${e2.code} ${JSON.stringify(d).slice(0, 140)}` : 'went'} after ${calls.length} requests (want held ${want} s, 1 request)`);
+    clock = T0 + want * 1000;
+    const r = await a.send('oc_fixture', { text: 'three', idemKey: 'h-3', as: 'user' }).catch((x) => x);
+    if (!(r && r.ok && calls.length === 2)) out.push(`reset ${hdr}: at the reset the send did not go (${r && r.code}, ${calls.length} requests)`);
+  }
+  return out;
+}
+console.log('⑩ lane lark-send-hold (B-efa0): a Lark 429 on a send holds the account\'s next sends for the vendor\'s reset');
+{
+  const H = require(path.join(REPO, 'src/channels/vendor-hold.js'));
+  const h = H.createHolds();
+  const s7 = h.hold('send', 7, 1000), s0 = h.hold('x', 0, 1000), sBig = h.hold('y', 1e12, 1000);
+  ok(s7 === 7 && s0 === 1 && sBig === H.HOLD_MAX_SEC && h.heldFor('send', 7999) === 1 && h.heldFor('send', 8000) === 0, 'vendor-hold: the reset read whole seconds, at least 1 s, at most the 15-min ceiling; free AT the reset');
+  const h2 = H.createHolds(); h2.hold('send', 30, 10000); h2.hold('send', 5, 12000);
+  ok(h2.untilOf('send', 12000) === 40000 && h2.release('send', 20000) === false && h2.heldFor('send', 20000) === 20 && h2.release('send', 40000) === true && h2.untilOf('send', 40000) === null, 'vendor-hold: the LATER reset wins; a success inside the reset frees nothing, one after it forgets the hold');
+  const h3 = H.createHolds(); h3.hold('send', 30, 8 * 3600e3 + 1000); const back = h3.heldFor('send', 1000);
+  ok(back === 30 && h3.heldFor('send', 31000) === 0, `vendor-hold: a clock stepped back 8 h keeps the hold's AGE (30 s from the correction, ${back} s)`);
+}
+const ha = await holdAdapterJudge(lark);
+ok(ha.length === 0, `lark adapter: a 429 holds the account's sends for x-ogw-ratelimit-reset (7 s), none named ⇒ 30 s, a billion ⇒ 15 min; the held send is refused before any request (held, heldUntil, the vendor's name); at the reset it goes${ha.length ? ` — ${ha.join('; ')}` : ''}`);
+const hu = await holdEngineJudge(ENG, lark, { shape: 'upload' });
+ok(hu.length === 0, `engine: text landed + upload 429 reset 30 s ⇒ partly sent; the next proposal 2 s later and a file 3 s later WAIT (0 requests, "飞书 要求放慢，HH:MM:SS 后发出", approve ok+held); a restart keeps the wait; after the reset both go, oldest first${hu.length ? ` — ${hu.join('; ')}` : ''}`);
+const ht = await holdEngineJudge(ENG, lark, { shape: 'text', reset: null });
+ok(ht.length === 0, `engine: a 429 on a TEXT-ONLY send naming no reset ⇒ failed, and the account's next sends wait 30 s the same way${ht.length ? ` — ${ht.join('; ')}` : ''}`);
+
+// ⑪ B-efa0 LOW: every Slack Web API method slack.js names has its METHOD_TIERS row — a call outside the table is refused
+// by name at run time (unknown-method), so a missing row is a send that never goes; this census makes it red at once
+console.log('⑪ the Slack method table covers every method slack.js names');
+const SLACK_METHOD = /'((?:auth|users|conversations|chat|reactions|bots|team|emoji|files|search|pins|stars|usergroups|dnd|apps)\.[A-Za-z]+(?:\.[A-Za-z]+)*)'/g;
+const slackMethodsMissing = (src, tiers) => [...new Set([...src.matchAll(SLACK_METHOD)].map((m) => m[1]).filter((m) => !/\.(?:com|net|org)$/.test(m)))].filter((m) => !Object.prototype.hasOwnProperty.call(tiers, m));
+{
+  const Limits = require(path.join(REPO, 'src/channels/slack-limits.js'));
+  const ssrc = fs.readFileSync(path.join(REPO, 'src/channels/slack.js'), 'utf8');
+  const named = new Set([...ssrc.matchAll(SLACK_METHOD)].map((m) => m[1]).filter((m) => !/\.(?:com|net|org)$/.test(m)));
+  const miss = slackMethodsMissing(ssrc, Limits.METHOD_TIERS);
+  ok(miss.length === 0 && named.has('files.upload') && named.has('files.getUploadURLExternal') && named.size >= 15, `slack.js names ${named.size} methods, every one a METHOD_TIERS row${miss.length ? ` — missing ${miss.join(', ')}` : ''}`);
+  const lsrc = fs.readFileSync(path.join(REPO, 'src/channels/slack-limits.js'), 'utf8');
+  const ROW = "  'files.upload': 4,\n";
+  const L2 = lsrc.includes(ROW) ? require(MC.write('src/channels/slack-limits.js', lsrc.replace(ROW, ''), 'no-files-upload')) : null;
+  const red = L2 ? slackMethodsMissing(ssrc, L2.METHOD_TIERS) : null;
+  ok(Array.isArray(red) && red.join() === 'files.upload', `control — a copy of the table without 'files.upload': red (${red === null ? 'the patch site is gone' : red.join() || 'GREEN — the census missed it'})`);
+}
+
 console.log('⑦ patched-copy controls');
 const keep = setInterval(() => {}, 1000);   // a send-gap wait inside a copy is an unref'd timer
 const ctl = [
@@ -391,6 +522,16 @@ for (const [f, from, to, judge, mod, what] of ctl) {
 
 { const red = await mutantEngine("const own = !!(input && input.direct === true) && (!ctx || ctx.kind === 'user');", 'const own = false;', ownerJudge, 'engine-owner-not-direct');
   ok(Array.isArray(red) && red.length > 0, `control — engine: the owner's send with files held as a proposal: red (${red === null ? 'the patch site is gone' : red.length ? red[0].slice(0, 120) : 'GREEN — the judge missed it'})`); }
+// ⑩ controls: THE BASE (no account hold — a copy whose send never checks it) sends the next proposal at once; a copy
+// whose upload 429 holds nothing, an engine that FAILS a held send, a boot sweep that calls a held send unknown
+{ const red = await mutant('channels/lark.js', '    if (held) throw held;', '    if (false) throw held;', (L) => holdEngineJudge(ENG, L, { shape: 'text' }), 'lark-no-send-hold');
+  ok(Array.isArray(red) && red.length > 0 && /did not WAIT: sent, 1 requests/.test(red.join()), `control — BASE (no account hold): the next proposal 2 s later is SENT at once: red (${red === null ? 'the patch site is gone' : red.length ? red[0].slice(0, 120) : 'GREEN — the judge missed it'})`); }
+{ const red = await mutant('channels/lark.js', '        noteSendHold(e);   // lane lark-send-hold: a part\'s 429', '        void e;   // a part\'s 429', (L) => holdEngineJudge(ENG, L, { shape: 'upload' }), 'lark-upload-no-hold');
+  ok(Array.isArray(red) && red.length > 0, `control — lark: an upload's 429 holds nothing: red (${red === null ? 'the patch site is gone' : red.length ? red[0].slice(0, 120) : 'GREEN — the judge missed it'})`); }
+{ const red = await mutantEngine('    if (heldUntil) return holdSend(id, rec, r, heldUntil, t);', '', (E) => holdEngineJudge(E, lark, { shape: 'text' }), 'engine-held-fails');
+  ok(Array.isArray(red) && red.length > 0 && /did not WAIT: failed/.test(red.join()), `control — engine: a held send is FAILED: red (${red === null ? 'the patch site is gone' : red.length ? red[0].slice(0, 120) : 'GREEN — the judge missed it'})`); }
+{ const red = await mutantEngine("    const stuck = proposalsFor().filter((p) => p.state === 'sending' && !p.held);", "    const stuck = proposalsFor().filter((p) => p.state === 'sending');", (E) => holdEngineJudge(E, lark, { shape: 'text' }), 'engine-boot-unknown');
+  ok(Array.isArray(red) && red.length > 0 && /a restart called the held sends unknown/.test(red.join()), `control — engine: a restart calls a held send unknown: red (${red === null ? 'the patch site is gone' : red.length ? red[0].slice(0, 120) : 'GREEN — the judge missed it'})`); }
 clearInterval(keep);
 console.log(`\n${fails ? '✗' : '✓'} test-channel-send-files: ${n - fails}/${n} passed`);
 process.exit(fails ? 1 : 0);

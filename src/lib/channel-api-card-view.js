@@ -13,12 +13,15 @@ const JSON_HDR = { 'Content-Type': 'application/json' };
 // the tier as the dialog words it (the record carries its id: read / write-ask / write-auto / write-all; under an `everyone` row it is Read unless the user ticked write for All agents)
 const TIER_WORD = { read: 'Read', 'write-ask': 'Read + write, ask each', 'write-auto': 'Read + write, auto (sensitive still asks)', 'write-all': 'Full trust (sensitive runs without asking)' };
 
-/** Approve / Reject — the same route from every surface; the Approve names the frozen digest it was pressed on. */
+/** Approve / Reject / 重新提交 — the same route from every surface; Approve and Resubmit name the frozen digest they were
+ *  pressed on (Resubmit files the vendor's redirect target as a NEW card — nothing runs, B-fc37). */
 export async function answerApiProposal(id, answer, { shown = null, always = false, reason = null } = {}) {
   const pid = encodeURIComponent(id), no = (e) => ({ ok: false, error: String((e && e.message) || e) });
   const r = answer === 'reject'
     ? await fetchJson(`/api/channels/api/proposals/${pid}/reject`, { method: 'POST', headers: JSON_HDR, body: JSON.stringify({ reason }) }).catch(no)
-    : await fetchJson(`/api/channels/api/proposals/${pid}/approve`, { method: 'POST', headers: JSON_HDR, body: JSON.stringify({ shown, always }) }).catch(no);
+    : answer === 'resubmit'
+      ? await fetchJson(`/api/channels/api/proposals/${pid}/resubmit`, { method: 'POST', headers: JSON_HDR, body: JSON.stringify({ shown }) }).catch(no)
+      : await fetchJson(`/api/channels/api/proposals/${pid}/approve`, { method: 'POST', headers: JSON_HDR, body: JSON.stringify({ shown, always }) }).catch(no);
   if (!r || !r.ok) showToast(r && r.code === 'not-pending' ? t('That request was already decided') : (r && r.error) || t('server unreachable'), { type: 'error' });
   refreshApiCards();
   return !!(r && r.ok);
@@ -75,11 +78,21 @@ export function renderApiCard(rec, prev = null, { app = null, head = true } = {}
   tech.appendChild(el('code', 'chan-api-url', `${m.request.method} https://${m.request.host}${m.request.path}${m.request.query ? `?${m.request.query}` : ''}`));
   for (const h of m.headers) tech.appendChild(el('div', 'chat-status-dim chan-api-hdr', h));
   if (m.always) tech.appendChild(el('div', 'chat-status-dim chan-api-allowline', t('Allowed from then on: {shape}', { shape: m.always.params.shape })));
+  // B-fc37: where the vendor redirected the approved call (method + host + path) and why VibeSpace did not follow
+  if (m.redirect) tech.appendChild(el('div', 'chat-status-dim chan-api-redirectline', t('The vendor redirected it ({status}) to {to} — not followed: {why}', { status: m.redirect.status || '3xx', to: m.redirect.to, why: tw(m.redirect.why) })));
   if (m.body != null) {
     tech.appendChild(el('div', 'chat-status-dim chan-api-bodyline', t('Body · {size} · sha256 {sha}', { size: C.sizeText(m.bodyBytes), sha: String(m.bodySha || '').slice(0, 16) })));
     tech.appendChild(el('pre', 'chan-api-body', m.body + (m.bodyMore ? '…' : '')));
   }
   card.appendChild(tech);
+  if (m.resubmit) {
+    // 重新提交: the vendor's target becomes a NEW card (its own words + chip), decided like any other — nothing runs now
+    const row = el('div', 'chan-api-actions');
+    const x = el('button', 'mounts-btn chan-api-resubmit', t('Resubmit')); x.type = 'button';
+    x.addEventListener('click', (ev) => { ev.stopPropagation(); x.disabled = true; answerApiProposal(m.id, 'resubmit', { shown: rec.digest }); });
+    row.appendChild(x);
+    card.appendChild(row);
+  }
   if (m.actionable) {
     const row = el('div', 'chan-api-actions');
     const b = (label, cls, fn) => { const x = el('button', cls, label); x.type = 'button'; x.addEventListener('click', (ev) => { ev.stopPropagation(); fn(); }); row.appendChild(x); return x; };
@@ -135,6 +148,8 @@ export function onApiCards(app, fn) {
   return () => listeners.delete(fn);
 }
 
+/** A call row's cards: its own proposals, then each card resubmitted from them (重新提交) right after — under it. */
+const rowCards = (ids, all) => { const more = C.chainIds(ids, all).filter((id) => !ids.includes(id)); return [...all.filter((r) => ids.includes(r.id)), ...more.map((id) => all.find((r) => r.id === id))]; };
 /** THE CHAT: the cards of `ids` (the call rows' proposals) in ONE keyed box right after the call's touch box. */
 export function chatApiCards(app, cardEl, ids) {
   let box = cardEl.querySelector(':scope .chat-api-cards');
@@ -144,10 +159,10 @@ export function chatApiCards(app, cardEl, ids) {
     const touch = cardEl.querySelector('.chat-channel-touches');
     if (touch) touch.after(box); else cardEl.appendChild(box);
     box._ids = ids;
-    const off = onApiCards(app, (all) => { if (!box.isConnected && box._seen) { off(); return; } box._seen = true; placeApiCards(box, all.filter((r) => box._ids.includes(r.id)), { app }); });
+    const off = onApiCards(app, (all) => { if (!box.isConnected && box._seen) { off(); return; } box._seen = true; placeApiCards(box, rowCards(box._ids, all), { app }); });
   }
   box._ids = ids;
-  placeApiCards(box, records.filter((r) => ids.includes(r.id)), { app });
+  placeApiCards(box, rowCards(ids, records), { app });
 }
 
 /** THE OUTBOX'S API section: one row per proposal (fate dot · short title · policy chip · outcome), its card opens

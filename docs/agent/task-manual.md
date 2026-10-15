@@ -105,7 +105,8 @@ drop it instead.
 vibespace-task --group <id> show [--full]   # objective, folders, recent activity, backlog heads
 ```
 
-`--full` re-reads everything (use after compaction). The group's shared
+`--full` re-reads everything (use after compaction) and lists EVERY file of the
+shared folder (your injection lists only the newest that fit its budget). The group's shared
 context FOLDER (named in your injection) is the group's文件记忆 — organize
 durable knowledge there yourself; the `.vibespace/` subfolder is generated,
 read-only.

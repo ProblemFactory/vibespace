@@ -662,6 +662,8 @@ function create(deps = {}) {
   /** The scopes a consent dropped (bounded strings; never a secret). lane slack-scopes-lark-reauth verify r1: bounded by the
    *  consent machine's OWN optional bound (one constant) — at 16, a Lark consent narrowed through every group (17 scopes with
    *  the wide one) lost the feed's search scope from the record, and the card named only half of what Lark refused. */
+  /** lane lark-minutes-scopes: how many of the app's enabled permissions a consent's token still lacks (the next pages). */
+  const morePendingOf = (n) => Math.max(0, Math.min(10000, Math.floor(Number(n) || 0)));
   const refusedScopesOf = (xs) => [...new Set((Array.isArray(xs) ? xs : []).filter((x) => typeof x === 'string' && x && x.length <= 200))].slice(0, OPTIONAL_SCOPES_MAX);
   function tokensFor(rec) {
     const read = () => {
@@ -720,6 +722,7 @@ function create(deps = {}) {
             // owner ruling (2026-09-28): a CONSENT carries what it dropped (the sign-in's one narrowing retry — the vendor
             // refused an optional scope on its page); a refresh keeps the evidence of the consent it renews
             if (consent) rec.auth.refusedScopes = refusedScopesOf(meta.refusedScopes);
+            if (consent) rec.auth.morePending = morePendingOf(meta.morePending);   // lane lark-minutes-scopes: the pages left
             // lane slack-grid-identity: THE ONE STAMP RULE (src/channel-identity.js `stampIdentity`) — a fact the vendor
             // names later (the organisation a workspace joined) is LEARNED once, never a different person; an unchanged
             // identity is not rewritten. A consent's card line says what it learned (`lastAuthNote`), the next one clears it.
@@ -2162,6 +2165,17 @@ function create(deps = {}) {
     const missing = g.scopes.filter((x) => !held.has(x));
     return { scopes: g.scopes.slice(), missing, refused: missing.filter((x) => refusedBy.has(x)), console: !!g.console, wanted: true };
   }
+  /** lane lark-minutes-scopes: what unlocks READING 妙记 (the module's `minutesGrant`) against the held scopes. */
+  function minutesGrantView(rec) {
+    let mod = null;
+    try { mod = registry.get(rec.kind); } catch { mod = null; }
+    const g = mod && mod.minutesGrant;
+    if (!g) return null;
+    const held = new Set(((rec.auth && rec.auth.scopes) || []).map(String));
+    const refusedBy = new Set(((rec.auth && rec.auth.refusedScopes) || []).map(String));
+    const missing = g.scopes.filter((x) => !held.has(x));
+    return { scopes: g.scopes.slice(), missing, refused: missing.filter((x) => refusedBy.has(x)), console: !!g.console, wanted: true };
+  }
   /** lane lark-upload-preflight: what unlocks SENDING FILES (the module's `filesGrant`, `any` = one scope is enough). */
   function filesGrantView(rec) {
     let mod = null;
@@ -2189,6 +2203,13 @@ function create(deps = {}) {
     // lane lark-upload-preflight (userW inc-muxsy69b-mjg1): SENDING FILES — "One Re-authorize adds: sending files" while
     // the sign-in holds none of the module's `filesGrant` scopes (ANY one carries files), never a silent drop at the send
     const fl = filesGrantView(rec); if (fl) out.push({ what: 'files', ...fl });
+    // lane lark-minutes-scopes: READING 妙记 — a token minted before the consent asked for it says "One Re-authorize adds:
+    // reading Minutes" (exactly the tokens Lark refuses a minutes read, 99991679); a consent narrowed past it names the scopes
+    const mn = minutesGrantView(rec); if (mn) out.push({ what: 'minutes', ...mn });
+    // …and the app's enabled permissions the last consent's page did not reach ("One Re-authorize adds: 85 more of the
+    // permissions your app has enabled") — a count the consent wrote, never a list
+    const more = morePendingOf(rec.auth && rec.auth.morePending);
+    if (more) out.push({ what: 'more', n: more, scopes: [], missing: [], refused: [], console: false, wanted: true });
     return out;
   }
 
@@ -7609,7 +7630,7 @@ function create(deps = {}) {
     agentTitle, agentId, agentEnvelope, KEY_FILE, CUSTOM_KEY, PENDING_FLOW_TTL_MS, DUPLICATE_FIELDS, INBOX_KEY, i18nKey, INBOX_SOURCE, RESOLVED_BY,
     RECONCILE_SECONDS, ESTIMATE_CAP, registry, liveSessions, log, now, userTodos, serverSetting, broadcast, deliver, integrations, mountClients,
     fetchFn, store, box, flows, signState, consentRowOf, consentDepsOf, agentsWanted, resolveIntegration, rowOf, live, paceCarry, BOOT_ID,
-    adapterRecords, saveAdapters, refusedScopesOf, tokensFor, adapterFor, refreshAuth, tiers, agentShareRefusal, affordable, vendor, isWatched,
+    adapterRecords, saveAdapters, refusedScopesOf, morePendingOf, tokensFor, adapterFor, refreshAuth, tiers, agentShareRefusal, affordable, vendor, isWatched,
     laneOf, EMPTY_SCAN, pass, effectiveConvCaps, rejudgeConvCaps, rawFactsOf, ownRecordOf, viewOf, agentCopy, humanNameOf, accountsBrief, conversationName,
     presetsOf, clientFieldDecls, customClientView, vendorNameOf, adapterView, notify, disarmPush, syncPushLanes, kick, known, budgetRefusal,
     dropLive, outlived, reactionsPerMin, threadIxOf, vocabularyOf, reactionsFor, withView, offerNow, NOT_A_THREAD, threadRead, threadRefresh,
@@ -7630,7 +7651,7 @@ function create(deps = {}) {
   const {
     honestyLineFor, proposalsFor, stashAbout, stashGate, outboxView, sendStartsTurn, outboxAttachment, filesSweep, propose, proposeReaction, compose, composeEach,
     approve, reject, onProposal, withdrawProposal, replaceProposal, noteReceiptStash, reconcileReceiptFates, reconcile, sweepSending, sweepReplaces,
-    receipt, expireSweep, pointerSync, learnSentFiles, filesOfferFor,
+    receipt, expireSweep, pointerSync, learnSentFiles, filesOfferFor, releaseHeld, stopHeld,
   } = Object.assign(engineCtx, ChannelsOutbound.create(engineCtx));
   const {
     clientFor, resolverFor, credentialFactsFor, credentialFacts, offeredCredentials, defaultCredentialKey, credentialLabelFor, connectableFor,
@@ -7859,6 +7880,7 @@ function create(deps = {}) {
     // P2: a window that never fired keeps its hits PENDING on the index (they
     // were persisted before the timer existed), so the next boot delivers them.
     for (const key of [...wakeTimers.keys()]) clearWakeTimer(key);
+    stopHeld();   // lane lark-send-hold: a held send's release timer (its stamp stays — the next boot re-arms it)
     for (const e of live.values()) {
       disarmPush(e, 'engine stopped');
       if (e.pushTimer) { clearTimeout(e.pushTimer); e.pushTimer = null; }
@@ -7995,7 +8017,7 @@ function create(deps = {}) {
     // 2026-09-27: the agent withdraws / replaces its OWN proposal (a decision of the user waits for a replace in flight)
     withdrawProposal, replaceProposal, reconcileReceiptFates,
     // P4: reconcile / the boot sweep / the per-channel honesty switch
-    reconcile: (id, o) => onProposal(id, () => reconcile(id, o)), sweepSending, sweepReplaces, setSenderHonesty, honestyLineFor, deprecatedReceiptWakes,   // verify r2: two Check-outcome presses ask the adapter ONCE
+    reconcile: (id, o) => onProposal(id, () => reconcile(id, o)), sweepSending, sweepReplaces, releaseHeld, setSenderHonesty, honestyLineFor, deprecatedReceiptWakes,   // verify r2: two Check-outcome presses ask the adapter ONCE
     setPolicy, policyFor, setReach, reachView, reachFor, request, decideRequest,
     agentWatch, agentUnwatch, agentWatchesFor, setAgentDirectory, directoryLists,   // lane channel-agent-watch
     attention, setJudge, labelJudged,   // lane decision-attention: the judged rows' scan, the account's "never judge", a label

@@ -21,6 +21,11 @@
 //      `traceSummary`; the bridge's fit storm is bounded upstream (F4: ONE in flight per relay, the latest geometry wins —
 //      `scheduleFit` re-arms one timer, `runFit` parks `fitAgain`); the toggle has a label; zh + ja for every new word;
 //      ci.mjs carries this suite.
+//   ⑦ lane browser-viewport-answer (B-6dae ①): THE ROW CENSUS — every action the trace records and its kind (a new traced
+//      action is named here first; `agent-viewport` joins as kind viewport, the daemon's raw `viewport` mirror stays an
+//      untraced observation, so an agent's set is ONE row); the agent's own set through the REAL recorder: asked → got and
+//      who ruled (a pin), ok false when it did not apply, never a fit and never folded (a fit on either side stays its own
+//      run); CONTROL: a copy without the row ⇒ the recorder drops the agent's set.
 // ~190 ms, scratch dirs only, no browser, no vendor call.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -311,6 +316,58 @@ console.log('— ⑥ wiring: the surfaces fold, the route sums, the bridge bound
   ok(/\.browser-live-trace-row\.fits/.test(css) && /\.brp-tick/.test(css) && /\.browser-trace-row\.fits/.test(css) && /\.browser-trace-fits-toggle/.test(css), 'the dim fold rows, the replay tick and the toggle have their rules');
   const ci = read('scripts/ci.mjs');
   ok(/\{ name: 'test-browser-trace', tier: 'fast'/.test(ci), 'ci.mjs carries this suite (fast)');
+}
+
+// ═══ ⑦ lane browser-viewport-answer: the agent's own set is ONE row (`agent-viewport`, kind viewport) ═══
+console.log('— ⑦ the row census + the agent\'s own set viewport: one agent-viewport row (asked → got, ruled by), never folded');
+{
+  const ROWS = ['agent-viewport:viewport', 'back:navigation', 'check:target', 'click:target', 'dblclick:target', 'drag:target', 'fill:target', 'focus:target', 'forward:navigation',
+    'goto:navigation', 'hover:target', 'keydown:keys', 'keyup:keys', 'mouseclick:point', 'mousedown:point', 'mousemove:point', 'mouseup:point', 'mousewheel:point', 'navigate:navigation',
+    'open:navigation', 'permission:permission', 'press:keys', 'pushstate:navigation', 'reload:navigation', 'scroll:scroll', 'scrollintoview:target', 'select:target', 'type:target',
+    'uncheck:target', 'upload:target', 'viewer-fit:viewport'];
+  const rows = Object.entries(T.TRACED_ACTIONS).map(([a, k]) => `${a}:${k}`).sort();
+  ok(rows.join(' ') === [...ROWS].sort().join(' '), `THE ROW CENSUS: ${rows.length} traced actions and their kinds — the agent's own set (agent-viewport → viewport) is one of them (${rows.filter((r) => !ROWS.includes(r)).join(', ') || 'no stray row'}; ${ROWS.filter((r) => !rows.includes(r)).join(', ') || 'none missing'})`);
+  ok(T.AGENT_VIEWPORT_ACTION === 'agent-viewport' && T.classifyAction('agent-viewport') === 'viewport' && T.classifyAction('viewport') === null && !T.isTracedCommand({ type: 'command', id: 'v1', action: 'viewport' }), 'the agent\'s set is a traced row; the daemon\'s raw `viewport` mirror stays an untraced observation — one row per set, never two');
+  const FIT = require('../src/browser-fit.js');
+  const w7 = world('w7');
+  const bc7 = [];
+  const tr7 = mkRecorder(w7, bc7);
+  tr7.install();
+  w7.reg.leases.push({ profileId: P1, browserKey: KA, sessionId: 's-a' });
+  await w7.emit({ kind: 'attach', browserKey: KA, profileId: P1, sessionId: 's-a' });
+  const K7 = `s-a|${P1}`;
+  // the bridge's tap shape (src/server/browser-stream.js tapAgentViewport): ONE command + result pair, then the page's frame
+  const vp = (id, ans) => {
+    const params = FIT.agentSetTraceParams(ans);
+    w7.push(K7, { type: 'command', action: 'agent-viewport', id, params: { action: 'agent-viewport', id, ...params }, timestamp: 0 });
+    w7.push(K7, { type: 'result', action: 'agent-viewport', id, success: ans.applied !== false, data: { ...params }, ...(ans.applied === false ? { error: ans.line } : {}), timestamp: 0 });
+    clock += 500; w7.push(K7, { type: 'frame', seq: ++seq, data: jpeg(id + 'a'), metadata: { deviceWidth: 1280, deviceHeight: 720 } });
+  };
+  const asked = FIT.agentSetAsked(['set', 'viewport', '1280', '720']);
+  fit(w7, K7, 'v-f1', 1200, 800); clock += SEC;
+  vp('v-a1', FIT.agentSetAnswer({ asked, got: { width: 1920, height: 1080 }, ruling: FIT.agentSetRuling({ fixed: { w: 1920, h: 1080 }, fixedBy: 'user' }), ran: false })); clock += SEC;
+  fit(w7, K7, 'v-f2', 1201, 800); clock += SEC;
+  vp('v-a2', FIT.agentSetAnswer({ asked, got: { width: 1280, height: 720 } })); clock += SEC;
+  vp('v-a3', FIT.agentSetAnswer({ asked: FIT.agentSetAsked(['set', 'device', 'iPhone 12']), got: { error: 'the page answered no layout viewport' } }));
+  const all7 = tr7.list({ profileId: P1, limit: 100 });
+  const ag = all7.filter((e) => e.action === 'agent-viewport');
+  ok(ag.length === 3 && ag.every((e) => e.kind === 'viewport' && !T.isFitEntry(e) && e.n === undefined), 'the agent\'s three sets are three rows of kind viewport — never a fit, never folded', JSON.stringify(ag.map((e) => [e.action, e.kind, e.n])));
+  ok(ag[0] && ag[0].ok === false && ag[0].text === 'vibespace-browser set viewport 1280 720 → 1920×1080 (pinned by the user: not applied)' && ag[0].position.width === 1920 && ag[0].position.height === 1080 && ag[0].position.why === 'fixed' && /pinned by the user, your 1280x720 did not apply/.test(ag[0].error || '') && T.timelineLabel(ag[0]) === 'agent-viewport 1920×1080 ✗',
+    'a set a PIN ruled: asked 1280 720 → the page\'s 1920×1080, "pinned by the user", ok false with the answer line as its error', JSON.stringify(ag[0] && { text: ag[0].text, pos: ag[0].position, ok: ag[0].ok, error: ag[0].error }));
+  ok(ag[1] && ag[1].ok === true && ag[1].text === 'vibespace-browser set viewport 1280 720 → 1280×720' && T.positionText(ag[1].position) === '1280×720', 'a set that applied: asked → got, ok', JSON.stringify(ag[1] && ag[1].text));
+  ok(ag[2] && ag[2].text === 'vibespace-browser set device iPhone 12 → unreadable' && T.positionText(ag[2].position) === 'unreadable' && T.timelineLabel(ag[2]) === 'agent-viewport unreadable', 'a page that could not be read is "unreadable" in the row — never a guessed number', JSON.stringify(ag[2] && ag[2].text));
+  const fits7 = all7.filter(isFit);
+  ok(fits7.length === 2 && fits7.every((e) => e.n === 1), 'a fit on either side of the agent\'s set stays its own run (the set is an action between, 2 s apart)', JSON.stringify(fits7.map((e) => [e.id, e.n])));
+  const sum = T.traceSummary(all7);
+  ok(sum.n === 3 && sum.failed === 1 && sum.fits === 2, `the summary counts the sets as the agent's actions (n ${sum.n}, failed ${sum.failed}) and the fits beside (${sum.fits})`);
+  ok(bc7.filter((m) => m.type === 'browser-trace-appended' && m.entry && m.entry.action === 'agent-viewport').length === 3, 'each set is broadcast once as an appended row');
+  // CONTROL: a copy of the table without the agent's row ⇒ the recorder never sees the set (isTracedCommand false: no row)
+  const src7 = read('src/browser-trace.js');
+  const x = src7.replace("  [AGENT_VIEWPORT_ACTION]: 'viewport', // lane browser-viewport-answer: the agent's own set (asked → got, ruled by)\n", '');
+  ok(x !== src7, 'control (e) patched: the agent-viewport row removed from the table');
+  const Tx = M.load('src/browser-trace.js', x, 'no-agent-viewport');
+  ok(Tx.classifyAction('agent-viewport') === null && !Tx.isTracedCommand({ type: 'command', id: 'v1', action: 'agent-viewport' }), 'control (e): the copy drops the agent\'s set — ⑦ would be red');
+  tr7.shutdown();
 }
 
 tr1.shutdown();
