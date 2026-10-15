@@ -42,6 +42,7 @@ const ROWS = [
   ['chat-status-bar.js', 'chat-ask-custom', A, 1, 'the goal the agent works toward'],
   ['utils.js', "createElement(multiline ? 'textarea'", A, 1, 'showInputDialog multiline — attached by its caller through `decorate` (Custom review instructions)', 'chat-status-bar.js'],
   ['window-share.js', 'wshare-note-input', A, 1, 'the note to the agent a window is shared with'],
+  ['refresh-live.js', 'refresh-live-note', A, 1, 'the note every live session reads on its next turn (lane refresh-live-sessions)'],
   ['jobs-panel.js', "b.type === 'input' ? 'input' : 'textarea'", A, 1, 'a job\'s question answered in its panel (the textarea block)'],
   ['channel-filter-editor.js', 'chan-dec-cond', 'a notification rule\'s condition — a setting the judge reads, not a message', 1],
   ['mounts-dialog.js', "el = document.createElement('textarea')", 'a mount form\'s field (configuration)', 1],

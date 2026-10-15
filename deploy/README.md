@@ -80,6 +80,87 @@ anonymous instance ids and error names/stacks/metrics only, never content.
 Deployment-specific values (your domain, registry, storage class, issuer,
 allow-listed CIDRs) belong in a private values file, not in this repo.
 
+## Disk and eviction — ephemeral storage and priority
+
+Everything an instance writes OUTSIDE its home PVC is the pod's **ephemeral
+storage**, on the node's own disk: the container's writable layer (`/tmp` —
+the image sets no `TMPDIR`, so agent-browser profiles, downloads and build
+scratch land there; apt packages replayed by `~/.vibespace-init.sh`) and the
+container's log. When a node's disk fills, the kubelet evicts pods in this
+order:
+
+1. pods whose ephemeral-storage usage is **over their request** — a pod with
+   no request (= 0) is over it from its first byte;
+2. among those, the **lowest priority** first;
+3. then the one furthest over its request.
+
+A chart that declares no request therefore puts every instance at the head of
+that queue — ahead of the pod actually filling the disk, if that one declared
+a request and a higher priority. So the chart declares, per pod
+(`resources` in values.yaml):
+
+| value | default | why |
+|---|---|---|
+| `resources.requests.ephemeral-storage` | `2Gi` | above what an instance writes there — a fleet of 17 measured on 2026-10-15: median 0, p90 8 MiB, all but one ≤ 59 MiB; the scheduler reserves it on the node |
+| `resources.limits.ephemeral-storage` | `20Gi` | 2.4× the largest instance measured (8.3 GiB), so none is evicted by its own limit; one that writes more is evicted ALONE (its sessions restart, the home PVC is untouched) instead of filling the node for every user |
+
+An instance ALREADY over the request — that fleet's 8.3 GiB one (browser
+profiles, tmp files and caches in `/tmp`) — still ranks among the pods over
+theirs in step 1: give that release a larger request in its upgrade (e.g.
+`resources.requests.ephemeral-storage=10Gi`); the priority class orders that
+group (step 2). Change either key per release the same way, or drop one with
+`=null`. A private values file that names `resources` without these keys
+keeps them (helm merges nested maps).
+
+**Priority.** `priorityClassName` stays empty (the cluster's default, usually
+0 — the first thing anything else preempts or evicts). Give the fleet a class
+ABOVE your batch / CI work and with `preemptionPolicy: Never`, so it outranks
+that work for a slot without ever evicting anything itself; the same class
+keeps an instance behind that work in step 2 above. Create it once per
+cluster (pick a value above your batch classes; ≥ 1000000000 is reserved for
+the system):
+
+```yaml
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: vibespace-interactive
+value: 100000
+preemptionPolicy: Never
+globalDefault: false
+description: "Interactive VibeSpace workspaces: above batch work, never preempts."
+```
+
+### Rolling it out to existing releases
+
+`helm upgrade --reuse-values` keeps the values the release was installed with
+— its old chart's defaults included — so it never picks up a default added to
+values.yaml later. The new keys need `--set` (not a values file: the chart's
+values.yaml or a fleet-wide file laid over an older release also changes
+everything else added since that release was installed):
+
+```
+helm upgrade u-<user> deploy/helm/vibespace-user -n vibespace --reuse-values \
+  --set resources.requests.ephemeral-storage=2Gi \
+  --set resources.limits.ephemeral-storage=20Gi \
+  --set priorityClassName=vibespace-interactive
+```
+
+(the last line only once the class exists). `--reset-then-reuse-values` (helm
+≥ 3.14) would pick the defaults up by itself, but with every other default
+added since that release's chart — use it only after a render diff.
+
+- **Each upgrade recreates the pod** (strategy `Recreate`, one RWO volume):
+  the user's running sessions restart; the home PVC stays. Ride the next
+  planned roll (an image bump), or tell the user first.
+- **Dry-run first**: `--dry-run` prints the manifest. For a release whose
+  chart is otherwise current, its Deployment differs from
+  `helm get manifest u-<user>` only in the two `ephemeral-storage` lines (and
+  `priorityClassName`); anything else in the diff is an older chart's change
+  arriving with it — read it before you roll.
+- **Check the Deployment, not the helm values** (they drift):
+  `kubectl -n vibespace get deploy vibespace-<user> -o jsonpath='{.spec.template.spec.containers[0].resources}'`.
+
 ## Company presets — OAuth clients and integration keys (optional)
 
 Some integrations need a credential a user would otherwise have to obtain

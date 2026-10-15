@@ -1544,6 +1544,7 @@ const CENSUS = [
   ['principal-picker.js', 'input', 'text', 'the picker\'s search box (type=search)'],
   ['reaction-picker.js', 'input', 'text', 'the reaction picker\'s search box (type=search, lane channel-threads)'],
   ['record-clear-ui.js', 'tabindex', 'dialog', 'the "Clear content…" confirm\'s overlay (-1, lane redact)'],
+  ['refresh-live.js', 'textarea', 'text', 'Refresh all live sessions…: the confirm\'s note (editable, pre-filled; lane refresh-live-sessions — composed at the 2.369.279 integration)'],
   ['resume-account-bar.js', 'select', 'choice', 'the resume bar\'s Use another account picker (pre-filled with the first account that can serve; lane resume-account-door — composed at the 2.369.276 integration)'],
   ['search-window.js', 'input', 'text', 'the Search everything box (type=search, lane global-search — composed at the 2.369.221 integration)'],
   ['search-window.js', 'combobox', 'widget', 'the Search everything results (role=listbox; Enter / a click opens a hit)'],

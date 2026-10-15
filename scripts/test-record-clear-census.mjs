@@ -369,6 +369,7 @@ const ROUTES = {
   'GET /api/user-todos/:id': 'reads',
   // ── verify r3 on the merged tree: the rows the DERIVED file list + the call closure add ──
   'POST /api/sessions/:id/stash/hand-over': 'writes',  // src/server/stash-handover.js: reads BOTH stashes (peekNotifs / stashEntries) and delivers them as ONE turn; answers counts; a hand-over after a clear carries the sentence (the walk hands over after its clear)
+  'POST /api/sessions/refresh-note': 'writes',  // lane refresh-live-sessions (src/server/stash-handover.js refreshLive): the OWNER's typed note stashed into each live conversation (a waiting refresh note taken out by identity — its own words, never a record's); answers counts + session ids
   'GET /api/agent/channels/list': 'meta',              // msgCaller: the caller's identity + its group ids (jobByToken / groupsForSession) — adapter conversations, never a store's text
   'GET /api/agent/channels/read': 'meta',
   'GET /api/agent/channels/attachment': 'meta',        // lane channel-attach-read: an attachment's bytes + who sent it where (the engine's attachment(); like read)

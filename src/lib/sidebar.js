@@ -9,6 +9,8 @@ import { installSidebarMounts } from './sidebar-mounts.js';
 import { installSidebarRail, PANEL_TABS } from './sidebar-rail.js';
 import { installSidebarWorkbench } from './sidebar-workbench.js';
 import { installSidebarTasks } from './sidebar-tasks.js';
+import { openRefreshLive, REFRESH_ICON } from './refresh-live.js'; // lane refresh-live-sessions: the list's ⋯ menu entry 「刷新所有活着的会话」
+import { UI_ICONS } from './icons.js';
 import { patchStashHints } from './stash-strip.js'; // 2026-09-27: the card's "N waiting" hint (the stash fact), patched in place
 
 // Consecutive failed /api/sessions polls before the sidebar admits the list is
@@ -313,6 +315,19 @@ class Sidebar {
         this._render();
       };
     }
+    // THE LIST-WIDE ACTIONS (lane refresh-live-sessions): the session list had no menu of its own — the ⋯ beside sort
+    // holds what acts on every session in the list; today 「刷新所有活着的会话」 (src/lib/refresh-live.js)
+    const listMenuBtn = document.getElementById('session-list-menu');
+    if (listMenuBtn) {
+      listMenuBtn.innerHTML = UI_ICONS.more;   // the library's own static SVG
+      listMenuBtn.onclick = (e) => {
+        e.stopPropagation();
+        const r = listMenuBtn.getBoundingClientRect();
+        showContextMenu(r.left, r.bottom + 2, [
+          { labelHtml: `${REFRESH_ICON} ${escHtml(tr('Refresh all live sessions…'))}`, label: tr('Refresh all live sessions…'), action: () => openRefreshLive(this.app) },
+        ]);
+      };
+    }
     // Apply defaultStatusFilter once after async settings load (setting may differ from schema default)
     const _applyDefaultFilter = (val) => {
       this._statusFilter = new Set(val);
@@ -409,6 +424,7 @@ class Sidebar {
     show('sort-toggle', t === 'folders' || (t === 'tasks' && this._boardView === 'tasks')); // Tasks flat view has its sort on ALL form factors now
     this._updateSortBtn(document.getElementById('sort-toggle'));
     show('manage-toggle', t !== 'mounts');
+    show('session-list-menu', t !== 'mounts'); // the list-wide ⋯ menu: wherever sessions are listed
     show('status-quick-tabs', t === 'folders');
     show('agent-kind-quick-tabs', t !== 'mounts'); // agentKind filter applies on tasks too
   }

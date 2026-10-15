@@ -144,7 +144,8 @@ try {
   const askedA = () => { let n = 0; try { for (const l of fs.readFileSync(PIDS, 'utf8').split('\n')) if (aOut.unanswered.has(l.split(' ')[1])) n++; } catch { } return n; };
   const askedAtCap = askedA();
   {
-    ok(aOut.capped && aMs >= CAP && aMs < CAP + TLS.KILL_AFTER_MS, `twelve sockets whose fuser + pgrep never die: probeSockets settles at the cap (${aMs} ms, cap ${CAP})`);
+    // CAP - 5: a Node timer may fire up to 1 ms early against Date.now() (monotonic ms truncation vs the wall clock) — the hosted runner measured 1499 ms on a 1500 ms cap (ci/int277)
+    ok(aOut.capped && aMs >= CAP - 5 && aMs < CAP + TLS.KILL_AFTER_MS, `twelve sockets whose fuser + pgrep never die: probeSockets settles at the cap (${aMs} ms, cap ${CAP})`);
     const qs = [...aOut.unanswered.values()];
     ok(aOut.unanswered.size === 12 && qs.filter((q) => q === 'fuser').length === 4 && qs.filter((q) => q === 'not asked').length === 8, `unanswered names every socket with its open question (4 fuser in flight, 8 not asked)`, [...aOut.unanswered]);
     const facts = A.api.probeFacts(aOut);

@@ -37,16 +37,36 @@ storage:
   # chart does NOT create its PVC — the named claim must already exist.
   existingClaim: ""
 
+# ephemeral-storage = what the pod writes OUTSIDE the home PVC: the container's
+# writable layer (/tmp — the image sets no TMPDIR, so agent-browser profiles,
+# downloads and build scratch land there; apt installs replayed by
+# ~/.vibespace-init.sh) plus the container's log. When a node's disk fills, the
+# kubelet evicts pods in this order: usage OVER the pod's request first (no
+# request = 0, so a pod using 200 KiB is already over it), then the lowest
+# priority, then the most over its request. Without a request every instance
+# goes before a pod that has one, however much that pod holds.
+#   request 2Gi:  above what an instance writes there (a measured fleet:
+#                 median 0, p90 8 MiB, all but one ≤ 59 MiB); the scheduler
+#                 reserves it per node. One ALREADY over it (that fleet had one
+#                 at 8.3 GiB) still ranks with the pods over theirs — give its
+#                 release a larger request; the priority class orders that group.
+#   limit   20Gi: 2.4× that largest one, so none is evicted by its own limit;
+#                 an instance that writes more is evicted ALONE (its sessions
+#                 restart; the home PVC is untouched) instead of filling the
+#                 node for everyone. `=null` on either key drops it.
 resources:
-  requests: { cpu: "1", memory: "4Gi" }
-  limits:   { cpu: "8", memory: "32Gi" }
+  requests: { cpu: "1", memory: "4Gi", ephemeral-storage: "2Gi" }
+  limits:   { cpu: "8", memory: "32Gi", ephemeral-storage: "20Gi" }
 
-# Scheduling priority. An interactive workspace that gets preempted mid-session
-# loses the user's terminal state, so a shared cluster running batch/CI beside
-# VibeSpace should give these pods a priority class ABOVE those workloads —
-# ideally one with preemptionPolicy: Never (it can outrank others for a slot
-# without evicting anything itself). Empty = the cluster's global default
-# (usually priority 0, the first thing anything else preempts).
+# Scheduling AND eviction priority. An interactive workspace that gets
+# preempted mid-session loses the user's terminal state, so a shared cluster
+# running batch/CI beside VibeSpace should give these pods a priority class
+# ABOVE those workloads — ideally one with preemptionPolicy: Never (it can
+# outrank others for a slot without evicting anything itself). The kubelet's
+# full-disk order (above) ranks pods over their ephemeral-storage request by
+# priority, so the same class keeps an instance behind that work there too.
+# Empty = the cluster's global default (usually priority 0, the first thing
+# anything else preempts or evicts). deploy/README.md has a class to create once.
 priorityClassName: ""
 
 # Schedule onto whatever nodes you want VibeSpace pods on.

@@ -18,7 +18,8 @@
 // D the legacy single gdrive.clientId/secret ⇒ one `default` entry in the
 //   override list; no gdriveClientSecret key, no env.
 // E presets.volume=false ⇒ the env form, as before (+ byte-identical to the
-//   pre-lane chart at 2.369.199 when the history is present — else SKIP said).
+//   pre-lane chart at 2.369.199 when the history is present — else SKIP said;
+//   the two ephemeral-storage lines of J aside, as in every byte leg below).
 // F clusterSecret / mountPath named ⇒ the source and the mount follow.
 // G THE POD TEMPLATE IS THE SAME for A, B, C, D: the item list never depends
 //   on the values, so changing an override is a Secret-only upgrade — no roll.
@@ -37,10 +38,28 @@
 //   Unconfined), never a seccompProfile; on together with fuse / cephfs ⇒ ONE
 //   SYS_ADMIN (no duplicate), with tun ⇒ SYS_ADMIN + NET_ADMIN; the presets
 //   volume stays present by default either way.
+// J EVERY POD DECLARES ITS EPHEMERAL STORAGE (lane fleet-helm-ephemeral, B-6911):
+//   with no request (= 0) a pod is "over its request" from its first byte, and
+//   the kubelet evicts those FIRST when a node's disk fills — the fleet went
+//   before the pod filling the disk. Default ⇒ the container's requests carry
+//   ephemeral-storage 2Gi and its limits 20Gi, cpu / memory as before; a --set
+//   renders through; a values file naming `resources` WITHOUT the key (a
+//   private file written before this chart) keeps both (helm merges nested
+//   maps); `=null` drops one; the fuse / tun device limits stay beside it;
+//   priorityClassName empty ⇒ no field, set ⇒ the pod's. Against the
+//   2.369.277 chart (when the history is present) those two lines are the
+//   WHOLE diff.
+// K THE ROLLOUT RECIPE, modelled: `helm upgrade --reuse-values` swaps the new
+//   chart's values.yaml for the release's OLD coalesced values (helm's
+//   reuseValues: chart.Values = oldVals) — so an old release upgraded with it
+//   alone renders NO ephemeral-storage; with the README's two --set (read out
+//   of deploy/README.md, equal to the values.yaml defaults) it renders both.
 // CONTROLS (chart copies in scratch): a subPath mount, a source without
 //   optional, an env rendered beside the volume — each turns its assert red;
 //   the app system's env without the forced caps, a second SYS_ADMIN, the env
-//   rendered while off, a seccompProfile — each turns its I assert red.
+//   rendered while off, a seccompProfile — each turns its I assert red; a
+//   values.yaml without the ephemeral-storage keys (the chart before J) and a
+//   template that drops the key from requests — each turns J's first assert red.
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -54,6 +73,9 @@ const CHART = path.join(REPO, 'deploy/helm/vibespace-user');
 const BASE_SHA = 'b924041f';            // 2.369.199 — the last chart before the volume form
 const PRE_FIX_SHA = '0e7dc5b4';         // 2.369.200 — the volume form with the override in the release Secret's stringData (B-8145)
 const PRE_APPSYS_SHA = '8d934bb1';      // 2.369.210 — the last chart before appSystem.enabled
+const PRE_EPH_SHA = 'f174d5b88';        // 2.369.277 — the last chart without ephemeral-storage (J)
+/** A render with J's ephemeral-storage lines taken out — what the byte legs compare against older charts. */
+const noEph = (out) => out.replace(/^ {14}ephemeral-storage: \S+\n/gm, '');
 const REL_OV = 'vibespace-alice-preset-override';
 const ROOT = scratch('cpr');
 fs.rmSync(ROOT, { recursive: true, force: true }); fs.mkdirSync(ROOT, { recursive: true });
@@ -154,7 +176,7 @@ ok(envNames(docOf(rED, 'Deployment')).includes('VIBESPACE_GDRIVE_CLIENT_ID') && 
     const tar = execFileSync('git', ['-C', REPO, 'archive', BASE_SHA, 'deploy/helm/vibespace-user'], { env: gitEnvFrom(process.env), maxBuffer: 16 << 20 });
     spawnSync('tar', ['-x', '-C', baseDir], { input: tar });
     const baseChart = path.join(baseDir, 'deploy/helm/vibespace-user');
-    for (const [name, v] of [['A', A], ['C', C], ['D', D]]) ok(render(baseChart, v) === render(CHART, v, ['--set', 'presets.volume=false']), `presets.volume=false renders ${name} BYTE-IDENTICAL to the ${BASE_SHA} chart (an operator who opts out sees no change)`);
+    for (const [name, v] of [['A', A], ['C', C], ['D', D]]) ok(render(baseChart, v) === noEph(render(CHART, v, ['--set', 'presets.volume=false'])), `presets.volume=false renders ${name} BYTE-IDENTICAL to the ${BASE_SHA} chart, J's ephemeral-storage lines aside (an operator who opts out sees no other change)`);
     const diffA = render(baseChart, A) !== rA;
     ok(diffA, `(and the default render of A differs from ${BASE_SHA} — the switch is real)`);
   }
@@ -167,9 +189,9 @@ ok(!volumeVerdict(rF, { cluster: 'acme-presets', mountPath: '/run/acme/presets',
 console.log('G the pod template does not depend on the preset values');
 ok(depOf(rA) === depOf(render(CHART, B)) && depOf(rA) === depOf(rC) && depOf(rA) === depOf(rD), 'the Deployment renders IDENTICAL for A, B, C, D — adding / changing / removing an override is a Secret-only upgrade: no pod roll, the kubelet re-projects it live');
 
-function chartCopy(tag, patch) {
+function chartCopy(tag, patch, file = 'templates/main.yaml') {
   const dir = path.join(ROOT, 'ctl-' + tag); fs.cpSync(CHART, dir, { recursive: true });
-  const f = path.join(dir, 'templates/main.yaml'); const s = fs.readFileSync(f, 'utf-8'); const p = patch(s);
+  const f = path.join(dir, file); const s = fs.readFileSync(f, 'utf-8'); const p = patch(s);
   if (p === s) throw new Error(`control ${tag}: the patch matched nothing`);
   fs.writeFileSync(f, p); return dir;
 }
@@ -267,10 +289,10 @@ const say = (b) => (b.length ? ' — ' + b.join('; ') : '');
     const preDir = path.join(ROOT, 'preappsys'); fs.mkdirSync(preDir, { recursive: true });
     spawnSync('tar', ['-x', '-C', preDir], { input: execFileSync('git', ['-C', REPO, 'archive', PRE_APPSYS_SHA, 'deploy/helm/vibespace-user'], { env: gitEnvFrom(process.env), maxBuffer: 16 << 20 }) });
     const PRE = path.join(preDir, 'deploy/helm/vibespace-user');
-    ok([A, C, D].every((v) => render(PRE, v) === render(CHART, v)), `off renders A, C, D BYTE-IDENTICAL to the ${PRE_APPSYS_SHA} chart — a release that never sets it sees no change on upgrade`);
+    ok([A, C, D].every((v) => render(PRE, v) === noEph(render(CHART, v))), `off renders A, C, D BYTE-IDENTICAL to the ${PRE_APPSYS_SHA} chart, J's ephemeral-storage lines aside — a release that never sets it sees no other change on upgrade`);
     const noComments = (o) => o.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
     const shapes = [['fuse', ['--set', 'fuse.enabled=true']], ['cephfs', ['--set', 'cephfs.mons=10.0.0.1', '--set', 'cephfs.secret=k']], ['tun', ['--set', 'tun.enabled=true']]];
-    ok(shapes.every(([, x]) => noComments(render(PRE, C, x)) === noComments(render(CHART, C, x))), `fuse / cephfs / tun alone render as the ${PRE_APPSYS_SHA} chart did, comment lines aside (the shared securityContext essay grew)`);
+    ok(shapes.every(([, x]) => noComments(render(PRE, C, x)) === noComments(noEph(render(CHART, C, x)))), `fuse / cephfs / tun alone render as the ${PRE_APPSYS_SHA} chart did, comment lines and J's ephemeral-storage lines aside (the shared securityContext essay grew)`);
   }
   const rOn = render(CHART, C, ON);
   const vOn = appSysVerdict(rOn, { on: true, caps: ['SYS_ADMIN'] });
@@ -285,6 +307,76 @@ const say = (b) => (b.length ? ' — ' + b.join('; ') : '');
   ok(!vTunOff.length, `(tun alone, switch off: [NET_ADMIN] and no AppArmor override — the switch leaks into no other branch)${say(vTunOff)}`);
   const vPre = volumeVerdict(rOn, { release: REL_OV });
   ok(!vPre.length && !volumeVerdict(rC, { release: REL_OV }).length, `the presets volume is present by default with the switch on and off${say(vPre)}`);
+}
+
+console.log('J every pod declares its ephemeral storage (B-6911)');
+/** The app container's `resources:` (the chart's ONE container) → {requests, limits}, values unquoted. */
+function resourcesOf(out) {
+  const m = depOf(out).match(/^ {10}resources:\n((?: {12,}\S.*\n)+)/m); const r = { requests: {}, limits: {} }; let cur = null;
+  for (const line of (m ? m[1] : '').split('\n')) {
+    let k;
+    if ((k = line.match(/^ {12}(requests|limits):$/))) cur = k[1];
+    else if (cur && (k = line.match(/^ {14}(\S+): (.+)$/))) r[cur][k[1]] = k[2].replace(/^"(.*)"$/, '$1');
+  }
+  return r;
+}
+const EPH = { req: '2Gi', lim: '20Gi' };   // the values.yaml defaults
+const bothMissing = (bad) => ['requests', 'limits'].every((side) => bad.some((b) => b.startsWith(`${side}.ephemeral-storage missing`)));
+/** J's verdict on a render, as named failures ([] = good): `req` / `lim` = the ephemeral-storage expected (null = none). */
+function ephVerdict(out, { req = EPH.req, lim = EPH.lim } = {}) {
+  const r = resourcesOf(out); const bad = [];
+  for (const [side, want] of [['requests', req], ['limits', lim]]) {
+    const got = r[side]['ephemeral-storage'];
+    if (got !== (want ?? undefined)) bad.push(`${side}.ephemeral-storage ${got ?? 'missing'}, want ${want ?? 'none'}`);
+  }
+  const n = (depOf(out).match(/ephemeral-storage:/g) || []).length;
+  if (n !== (req != null) + (lim != null)) bad.push(`${n} ephemeral-storage lines in the Deployment`);
+  return bad;
+}
+const cpuMem = (out) => { const r = resourcesOf(out); return [r.requests.cpu, r.requests.memory, r.limits.cpu, r.limits.memory].join(' '); };
+{
+  const vC = ephVerdict(rC);
+  ok(!vC.length && !ephVerdict(rA).length && !ephVerdict(rD).length, `the default: requests.ephemeral-storage ${EPH.req} + limits.ephemeral-storage ${EPH.lim} on the container (A, C, D)${say(vC)}`);
+  ok(cpuMem(rC) === '1 4Gi 8 32Gi', `cpu / memory as before (requests 1 / 4Gi, limits 8 / 32Gi): ${cpuMem(rC)}`);
+  const vSet = ephVerdict(render(CHART, C, ['--set', 'resources.requests.ephemeral-storage=5Gi', '--set', 'resources.limits.ephemeral-storage=50Gi']), { req: '5Gi', lim: '50Gi' });
+  ok(!vSet.length, `a --set override renders through (5Gi / 50Gi)${say(vSet)}`);
+  const own = render(CHART, { ...C, resources: { requests: { cpu: '2', memory: '8Gi' }, limits: { cpu: '16', memory: '64Gi' } } });
+  const vOwn = ephVerdict(own);
+  ok(!vOwn.length && cpuMem(own) === '2 8Gi 16 64Gi', `a values file naming resources WITHOUT the key (written before this chart) keeps its cpu / memory AND gets both defaults — helm merges nested maps (${cpuMem(own)})${say(vOwn)}`);
+  const vNull = ephVerdict(render(CHART, C, ['--set', 'resources.limits.ephemeral-storage=null']), { lim: null });
+  ok(!vNull.length, `--set resources.limits.ephemeral-storage=null drops the limit and keeps the request${say(vNull)}`);
+  const dev = render(CHART, C, ['--set', 'fuse.enabled=true', '--set', 'tun.enabled=true', '--set', 'tun.mode=device-plugin']);
+  const lim = resourcesOf(dev).limits;
+  ok(!ephVerdict(dev).length && lim['github.com/fuse'] === '1' && lim['squat.ai/tun'] === '1', `the fuse / tun device limits stay beside it (limits: ${Object.keys(lim).join(', ')})`);
+  ok(!/^\s+priorityClassName:/m.test(depOf(rC)) && /^ {6}priorityClassName: vs-interactive$/m.test(depOf(render(CHART, C, ['--set', 'priorityClassName=vs-interactive']))), 'priorityClassName: empty (the default) ⇒ no field (the cluster default); set ⇒ the pod spec carries it');
+  const have = spawnSync('git', ['-C', REPO, 'cat-file', '-e', `${PRE_EPH_SHA}^{commit}`], { env: gitEnvFrom(process.env) }).status === 0;
+  if (!have) console.log(`  … SKIP the whole-diff comparison with the ${PRE_EPH_SHA} chart: not in this checkout's history (a shallow clone)`);
+  else {
+    const preDir = path.join(ROOT, 'preeph'); fs.mkdirSync(preDir, { recursive: true });
+    spawnSync('tar', ['-x', '-C', preDir], { input: execFileSync('git', ['-C', REPO, 'archive', PRE_EPH_SHA, 'deploy/helm/vibespace-user'], { env: gitEnvFrom(process.env), maxBuffer: 16 << 20 }) });
+    const PRE = path.join(preDir, 'deploy/helm/vibespace-user');
+    const shapes = [['A', A, []], ['C', C, []], ['D', D, []], ['C+appSystem', C, ON], ['C+fuse+tun', C, ['--set', 'fuse.enabled=true', '--set', 'tun.enabled=true', '--set', 'tun.mode=device-plugin']], ['A env form', A, ['--set', 'presets.volume=false']]];
+    const off = shapes.filter(([, v, x]) => { const now = render(CHART, v, x); return render(PRE, v, x) !== noEph(now) || ephVerdict(now).length; }).map(([n]) => n);
+    ok(!off.length, `against the ${PRE_EPH_SHA} chart the two ephemeral-storage lines are the WHOLE diff (${shapes.map(([n]) => n).join(' · ')})${off.length ? ' — differs: ' + off.join(', ') : ''}`);
+  }
+}
+
+console.log('K the rollout recipe (helm upgrade --reuse-values), modelled');
+// helm's upgrade --reuse-values: oldVals = Coalesce(the release's OLD chart, its config); the NEW
+// chart's values.yaml is replaced by oldVals (pkg/action/upgrade.go reuseValues). So the templates
+// are new, the defaults old: the model is this chart with the pre-J values.yaml, the release's own
+// values, plus the command's --set.
+const preJ = chartCopy('noeph-values', (s) => s.replace(', ephemeral-storage: "2Gi" }', ' }').replace(', ephemeral-storage: "20Gi" }', ' }'), 'values.yaml');
+{
+  const readme = fs.readFileSync(path.join(REPO, 'deploy/README.md'), 'utf-8');
+  const sets = [...readme.matchAll(/--set (resources\.(requests|limits)\.ephemeral-storage)=(\S+)/g)];
+  const want = { requests: EPH.req, limits: EPH.lim };
+  ok(sets.length === 2 && sets.every((m) => want[m[2]] === m[3]) && new Set(sets.map((m) => m[2])).size === 2, `the README's recipe names both keys with the values.yaml defaults (${sets.map((m) => m[1] + '=' + m[3]).join(' ') || 'none found'})`);
+  const vReuse = ephVerdict(render(preJ, C));
+  ok(bothMissing(vReuse), `--reuse-values ALONE on a release from the chart before J renders no ephemeral-storage — the trap the recipe answers (${vReuse.join('; ') || 'rendered both'})`);
+  const vRecipe = ephVerdict(render(preJ, C, sets.flatMap((m) => ['--set', `${m[1]}=${m[3]}`])));
+  ok(!vRecipe.length, `--reuse-values + the README's two --set renders both${say(vRecipe)}`);
+  ok(!ephVerdict(render(CHART, C)).length, '(and a release replayed WITHOUT --reuse-values — its own values over this chart — gets the defaults by itself)');
 }
 
 console.log('CONTROLS (chart copies)');
@@ -306,6 +398,9 @@ const envOn = chartCopy('appsys-always', (s) => s.replace('{{- if $appsys }}\n  
 ok(appSysVerdict(render(envOn, C), { on: false, caps: [] }).some((b) => /while off/.test(b)), 'CONTROL: VIBESPACE_APP_SYSTEM rendered while the switch is off is RED');
 const secc = chartCopy('appsys-seccomp', (s) => s.replace('            appArmorProfile:\n              type: Unconfined\n', '            appArmorProfile:\n              type: Unconfined\n            seccompProfile:\n              type: RuntimeDefault\n'));
 ok(appSysVerdict(render(secc, C, ON), { on: true, caps: ['SYS_ADMIN'] }).some((b) => /seccompProfile/.test(b)), 'CONTROL: a seccompProfile on the container is RED');
+ok(bothMissing(ephVerdict(render(preJ, C))), 'CONTROL: a values.yaml without the ephemeral-storage keys (the chart before J) is RED on both');
+const reqDrop = chartCopy('eph-template', (s) => s.replace('requests: {{- toYaml .Values.resources.requests | nindent 14 }}', 'requests: {{- toYaml (omit .Values.resources.requests "ephemeral-storage") | nindent 14 }}'));
+ok(ephVerdict(render(reqDrop, C)).some((b) => /^requests\.ephemeral-storage missing/.test(b)), 'CONTROL: a template that drops the key from requests is RED');
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

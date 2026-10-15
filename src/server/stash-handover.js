@@ -74,6 +74,8 @@ const { capsOf, notificationDelivery } = require('../backend-caps.js');
 const { vibespaceNoticeText } = require('../notification-senders.js');   // the ladder heads every notification with it: the frame text the wrapper echoes is the HEADED one
 const GC = require('../group-card.js');   // lane group-report-card: a waiting group message as the summary reads an entry
 const { addressableId } = require('../claude-lock-capture.js');   // the groups engine's member id = the conversation's OWN id (a pending fork has none)
+const RN = require('../refresh-note.js');   // PURE (lane refresh-live-sessions): 「刷新所有活着的会话」 — which conversations take the note, its bound
+const { toAgentText: agentText } = require('../peer-text.js');   // THE belt on the typed note before it reaches an agent's context
 /** The name the hand-over speaks under — a VibeSpace notification SENDER (src/notification-senders.js lists it). */
 const FROM_NAME = 'VibeSpace notices';
 
@@ -395,6 +397,45 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
     // the caller keeps the frame as one notice rather than dropping it; a second echo is handled (-1)
     return k;
   }
+  /** 「刷新所有活着的会话」 (lane refresh-live-sessions): ONE note into every LIVE conversation's next turn, through the
+   *  stash — the next-turn door the browser handback uses: free, never a wake, never the spend guard. The plan is PURE
+   *  (src/refresh-note.js) over this server's live sessions plus `others` — the stopped / read-only conversations the
+   *  pressing client has open, which it can only SKIP (a client never makes a conversation live; they are counted).
+   *  An earlier press's note still waiting is replaced, never doubled: the new one is stored first, then the old one
+   *  is taken out by identity (a failed write loses neither). → `{ok, queued, replaced, skipped, failed, ids}` | refusal. */
+  function refreshLive(note, { others = [] } = {}) {
+    if (closed) return { ok: false, code: 'restarting', error: 'the server is restarting — nothing was queued' };
+    const d = getDeliver();
+    if (!d || typeof d.stashFor !== 'function' || typeof d.stashEntries !== 'function') return { ok: false, code: 'unavailable', error: 'the delivery ladder is not ready' };
+    const waitingOf = (cid) => { try { return d.stashEntries(cid).filter((e) => RN.isRefreshEntry(e) && !e.ho); } catch { return []; } };
+    const rows = [];
+    for (const [id, s] of activeSessions) {
+      if (!s || s.isTmuxView) continue;   // a tmux view is its session's second face, never a conversation of its own
+      const cid = addressableId(s);
+      rows.push({ id, conversationId: cid, state: 'live', queued: !!cid && waitingOf(cid).length > 0 });
+    }
+    for (const o of (Array.isArray(others) ? others : []).slice(0, 200)) {
+      const cid = o && typeof o.conversationId === 'string' ? o.conversationId.slice(0, 200) : '';
+      if (cid) rows.push({ id: 'open:' + cid, conversationId: cid, state: o.state === 'read-only' ? 'read-only' : 'stopped' });
+    }
+    const plan = RN.refreshPlan(rows, note);
+    if (plan.error) return { ok: false, code: plan.error === 'empty' ? 'empty_note' : 'note_too_long', error: plan.error === 'empty' ? 'the note is empty' : `the note is longer than ${RN.REFRESH_NOTE_MAX} characters` };
+    const cidOfRow = new Map(rows.map((r) => [r.id, r.conversationId]));
+    const text = agentText(plan.text, { kind: 'block', max: RN.REFRESH_NOTE_MAX });
+    const ids = [];
+    let replaced = 0, failed = 0;
+    for (const id of plan.queue) {
+      const cid = cidOfRow.get(id);
+      const old = waitingOf(cid);
+      try { d.stashFor(cid, { source: 'agent', kind: 'notification', fromName: RN.REFRESH_FROM, ref: RN.REFRESH_REF, text }); }
+      catch (e) { failed++; log.warn?.(`[stash] refresh note for ${id} not queued — ${(e && e.message) || e}`); continue; }
+      if (old.length) { try { d.drainStash(cid, new Set(old)); replaced++; } catch (e) { log.warn?.(`[stash] the earlier refresh note for ${id} could not be taken out — ${(e && e.message) || e}`); } }
+      ids.push(id);
+    }
+    log.log?.(`[stash] refresh note queued for ${ids.length} live conversation(s) (${replaced} replaced, ${plan.skipped.length} skipped, ${failed} failed)`);
+    return { ok: true, queued: ids.length, replaced, skipped: plan.skipped.length, failed, ids };
+  }
+
   /** Shutdown: wait (bounded) for every hand-over in flight — a SIGTERM restart is then exactly-once by construction
    *  (the drain after a delivery is on disk before the process exits). */
   /** Shutdown, step one: no hand-over starts from here on (a press during the wait below would be one nobody
@@ -418,9 +459,20 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
         res.json(r);
       } catch (e) { res.status(500).json({ error: (e && e.message) || String(e) }); }
     });
+    // lane refresh-live-sessions: the user's 「刷新所有活着的会话」 — cookie only, like the hand-over (an agent never queues
+    // a note into every conversation); body `{ text, others: [{conversationId, state}] }`
+    app.post('/api/sessions/refresh-note', (req, res) => {
+      try {
+        if (isAgentBearer(req)) return res.status(403).json({ error: 'the user’s refresh — not an agent route', code: 'agent_forbidden' });
+        const b = req.body || {};
+        const r = refreshLive(b.text, { others: b.others });
+        if (!r.ok) return res.status(STATUS[r.code] || 400).json(r);
+        res.json(r);
+      } catch (e) { res.status(500).json({ error: (e && e.message) || String(e) }); }
+    });
   }
 
-  return { summaryFor, billedFor, reachableFor, changed, handOver, register, entriesOf, restoreHandedOver, redactDelivered, close, settle, isClosed: () => closed, inFlight: (cid) => inflight.has(cid), inFlightCount: () => inflight.size, _delivered: delivered };
+  return { summaryFor, billedFor, reachableFor, changed, handOver, refreshLive, register, entriesOf, restoreHandedOver, redactDelivered, close, settle, isClosed: () => closed, inFlight: (cid) => inflight.has(cid), inFlightCount: () => inflight.size, _delivered: delivered };
 }
 
 module.exports = { create, STATUS, FROM_NAME, HANDOVER_MAX_ENTRIES, HANDOVER_MAX_BYTES, HANDOVER_TAG_RE, DELIVERED_TTL_MS, DELIVERED_MAX, DELIVERED_FILE };

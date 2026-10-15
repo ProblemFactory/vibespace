@@ -2,6 +2,14 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.279 — 2026-10-15
+
+### Added
+- The session list's ⋯ menu has "Refresh all live sessions…": after changing shared skills or context, every running session is told to re-read them next turn.
+
+### Fixed
+- Instances on a cluster are no longer the first to be pushed off a machine when another program fills its disk.
+
 ## 2.369.278 — 2026-10-15
 
 ### Fixed

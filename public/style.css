@@ -3588,6 +3588,16 @@ label.cfg-row {
 
 /* Sidebar manage mode: mark-then-apply batch management */
 #manage-toggle.active { color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
+/* lane refresh-live-sessions: the session list's ⋯ (its list-wide actions) + the confirm of 「刷新所有活着的会话」 */
+#session-list-menu { width: auto; padding: 0 5px; font-size: 14px; }
+.refresh-live-dialog { width: min(480px, calc(100vw - 24px)); }
+.refresh-live-dialog .dialog-body { display: flex; flex-direction: column; gap: 8px; }
+.refresh-live-dialog .refresh-live-count { font-size: 12px; color: var(--text); }
+.refresh-live-dialog textarea.refresh-live-note { width: 100%; box-sizing: border-box; min-height: 84px; }
+.refresh-live-meta { display: flex; align-items: baseline; gap: 8px; min-height: 16px; }
+.refresh-live-meta .refresh-live-error { flex: 1; margin: 0; }
+.refresh-live-chars { margin: 0 0 0 auto; font-size: 11px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+@media (max-width: 768px) { .refresh-live-dialog .dialog-footer button { min-height: 44px; min-width: 72px; } }
 /* Manage-mode MARK toggles: a bordered box reads as "checkable state" (not a
    one-shot action), gives a bigger hit target, and a clearer boundary. */
 .session-mark-toggle {
