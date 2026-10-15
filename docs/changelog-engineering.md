@@ -4,6 +4,15 @@ This file is the engineers' record of every release: the lanes, the verification
 
 `CHANGELOG.md` (with `CHANGELOG.zh.md` and `CHANGELOG.ja.md`) is the user's: what changed for the person using VibeSpace, one plain line per change, in the interface's language — the rules are in docs/changelog-style.md. From 2.369.199 on, every release also writes its section here, under the same `## <version> — <date>` heading as its user entry and in the same commit, newest first above the verbatim record.
 
+## 2.369.275 — 2026-10-15
+
+Hotfix by 主开发 (no lane; one PURE line + the test rows), 50 min after the first fleet instance updated to .274.
+
+- **Incident:** userW's fleet pod booted 2.369.274 at 03:52:40Z; from 03:52:43Z its log showed `[auth] refused a cross-site WebSocket /ws — origin, origin "https://<his instance>" (own -)` (40 in 7 min: 35 /ws + 5 /api/browser/stream; no HTTP refusal). The page loaded, no conversation connected — "my instance is dead". Only he was on .274 (fleet census: 13 × .212, 1 × .227, 1 × .273, 1 × .96); a dead UI cannot self-update, so 主开发 updated his pod in place.
+- **Cause:** `ownOriginOf` (src/write-origin.js, .274 pick 1 owner-write-origin) accepted only `http|https` in `X-Forwarded-Proto`. Traefik (the fleet's ingress) forwards a WebSocket upgrade with `X-Forwarded-Proto: wss` (a long-standing Traefik behaviour) ⇒ own '' ⇒ the Origin compare refused the instance's own page. The lane's deployment table (test-auth ③) had the ingress row for HTTP only; the handshake shape through the ingress was never a row. The hub (no proxy, or Caddy / Tailscale serve, which forward https) was never affected.
+- **Fix:** `UPGRADE_PROTO = { ws: 'http', wss: 'https' }` applied to the forwarded scheme (one line, PURE); test-auth ③ gains the two ingress-upgrade rows (wss ⇒ https, ws ⇒ http) and the incident-shaped leg (a GET upgrade with Origin = the page, no Sec-Fetch-Site) with the CONTROL = the .274 reading (own '' ⇒ `origin … (own -)`, the exact log shape). 93/0.
+- **Lesson (kb-bugfix-invariants):** a reverse proxy's forwarded headers on an UPGRADE are not the HTTP request's — every deployment row of an origin table needs its handshake twin.
+
 ## 2.369.274 — 2026-10-15
 
 ### int273 — the integration of 2.369.274 (eight accepted lanes in two chains + three late picks on rel273 eb007c6d0, two seams)

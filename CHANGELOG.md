@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.275 — 2026-10-15
+
+### Fixed
+- Behind a cluster ingress, the 2.369.274 update refused every live connection as cross-site: the page loaded but nothing worked. Fixed.
+
 ## 2.369.274 — 2026-10-15
 
 ### Changed

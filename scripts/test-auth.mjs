@@ -217,6 +217,8 @@ console.log('③ the request\'s own origin behind each deployment (ownOriginOf) 
     ['the hub\'s own https (src/server/tls.js, one port)', { host: 'box.tail0.ts.net:3456' }, { encrypted: true }, 'https://box.tail0.ts.net:3456', 'https://box.tail0.ts.net:3456', ['http://box.tail0.ts.net:3456', 'https://box.tail0.ts.net']],
     ['the same port over plain http', { host: 'box.tail0.ts.net:3456' }, {}, 'http://box.tail0.ts.net:3456', 'http://box.tail0.ts.net:3456', ['https://box.tail0.ts.net:3456']],
     ['the fleet behind the cluster ingress', { host: 'alice.pods.example', 'x-forwarded-proto': 'https', 'x-forwarded-host': 'alice.pods.example', 'x-forwarded-port': '443' }, {}, 'https://alice.pods.example', 'https://alice.pods.example', ['https://bob.pods.example', 'https://pods.example']],
+    ['the fleet ingress on a WebSocket UPGRADE (Traefik forwards wss — 2.369.275, userW\'s instance)', { host: 'alice.pods.example', 'x-forwarded-proto': 'wss', 'x-forwarded-host': 'alice.pods.example', upgrade: 'websocket', connection: 'Upgrade' }, {}, 'https://alice.pods.example', 'https://alice.pods.example', ['https://bob.pods.example', 'http://alice.pods.example']],
+    ['the same upgrade through a plain-http ingress (ws)', { host: 'alice.pods.example', 'x-forwarded-proto': 'ws', 'x-forwarded-host': 'alice.pods.example', upgrade: 'websocket' }, {}, 'http://alice.pods.example', 'http://alice.pods.example', ['https://alice.pods.example']],
     ['an ingress that rewrites Host (forwarded host kept)', { host: 'vibespace.svc.cluster.local:3000', 'x-forwarded-proto': 'https', 'x-forwarded-host': 'alice.pods.example' }, {}, 'https://alice.pods.example', 'https://alice.pods.example', ['http://vibespace.svc.cluster.local:3000']],
     ['a proxy chain (the first forwarded value)', { host: 'inner:3000', 'x-forwarded-proto': 'https, http', 'x-forwarded-host': 'alice.pods.example, inner' }, {}, 'https://alice.pods.example', 'https://alice.pods.example', ['http://alice.pods.example']],
     ['plain http on localhost', { host: 'localhost:3000' }, {}, 'http://localhost:3000', 'http://localhost:3000', ['http://127.0.0.1:3000', 'http://localhost:3001', 'https://localhost:3000']],
@@ -231,6 +233,14 @@ console.log('③ the request\'s own origin behind each deployment (ownOriginOf) 
     const refusedOthers = others.every((o) => !WO.crossSiteVerdict({ method: 'POST', headers: { origin: o } }, got).ok);
     ok(got === own && okMine && refusedOthers, `${where}: own = ${own || "'' (refuses every Origin)"}; its page allowed, ${others.join(' / ')} refused (no Sec-Fetch-Site: the Origin compare)`, { got });
     tbl.push(`${where} → ${own || '—'}`);
+  }
+  { // THE .275 INCIDENT, as the handshake arrived: a GET upgrade with Origin = the page, no Sec-Fetch-Site, X-Forwarded-Proto wss
+    const hs = { method: 'GET', headers: { origin: 'https://alice.pods.example', upgrade: 'websocket', connection: 'Upgrade', 'sec-websocket-version': '13' } };
+    const fwd = { host: 'alice.pods.example', 'x-forwarded-proto': 'wss', 'x-forwarded-host': 'alice.pods.example' };
+    const now = WO.crossSiteVerdict(hs, WO.ownOriginOf(fwd));
+    ok(now.ok && now.why === 'origin', 'a WebSocket handshake of the instance\'s own page through Traefik (X-Forwarded-Proto: wss) is allowed — Origin is ours', now);
+    const before = WO.crossSiteVerdict(hs, ''); // what .274 computed: own '' — the control, the incident\'s exact log shape
+    ok(!before.ok && before.why === 'origin' && before.own === null && before.origin === 'https://alice.pods.example', 'CONTROL: with own \'\' (the .274 reading of wss) the same handshake is refused as "origin … (own -)" — the incident', before);
   }
   const sib = WO.crossSiteVerdict({ method: 'POST', headers: { 'sec-fetch-site': 'same-site', origin: 'https://bob.pods.example' } }, WO.ownOriginOf(D[3][1]));
   ok(!sib.ok && sib.why === 'same-site' && sib.own === 'https://alice.pods.example', 'the fleet: a page on a SIBLING pod (same-site — the cookie rides along under SameSite=Lax) is refused', sib);

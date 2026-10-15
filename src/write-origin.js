@@ -22,6 +22,7 @@
 const WRITES = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 const HOST_RE = /^(\[[0-9a-fA-F:.]+\]|[A-Za-z0-9][A-Za-z0-9.-]*)(:\d{1,5})?$/;
 const first = (v) => String(v == null ? '' : v).split(',')[0].trim();
+const UPGRADE_PROTO = Object.freeze({ ws: 'http', wss: 'https' }); // Traefik forwards a WebSocket upgrade's proto as ws / wss
 
 /** `scheme://host[:port]`, lower-cased, the scheme's default port dropped; '' when it is not an http(s) origin. */
 function normOrigin(o) {
@@ -37,11 +38,14 @@ function normOrigin(o) {
  * THE request's own origin, as the browser addressed it — behind the reverse proxies exactly as they forward it: the
  * first `X-Forwarded-Proto` (else https on a TLS socket — the hub's own https, src/server/tls.js — else http) and the
  * first `X-Forwarded-Host` (else `Host`). Tailscale serve, the fleet's ingress and frp keep Host and add the forwarded
- * pair; plain http on localhost has neither. '' when the host is no host.
+ * pair; plain http on localhost has neither. '' when the host is no host. A WebSocket UPGRADE through Traefik (the
+ * fleet's ingress) arrives with `X-Forwarded-Proto: ws` / `wss` — the page's scheme is http / https (2.369.275: a
+ * .274 fleet instance refused every /ws handshake of its own page as cross-site, own '').
  */
 function ownOriginOf(headers, { encrypted = false } = {}) {
   const h = headers || {};
-  const proto = (first(h['x-forwarded-proto']) || (encrypted ? 'https' : 'http')).toLowerCase();
+  const fwd = (first(h['x-forwarded-proto']) || (encrypted ? 'https' : 'http')).toLowerCase();
+  const proto = UPGRADE_PROTO[fwd] || fwd; // a WebSocket upgrade's forwarded scheme names the page's
   const host = first(h['x-forwarded-host']) || first(h.host);
   if (!/^https?$/.test(proto) || !host) return '';
   return normOrigin(`${proto}://${host}`);
