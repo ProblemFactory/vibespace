@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.285 — 2026-10-15
+
+### Fixed
+- Merging two accounts no longer overwrites the other sign-ins saved in the kept account's credentials file; the old file is archived first.
+
 ## 2.369.284 — 2026-10-15
 
 ### Changed

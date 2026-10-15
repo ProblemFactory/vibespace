@@ -902,7 +902,7 @@ console.log('§8 VERIFY R2 (lane oat-census-closure, pool-oat-verify-r2 REFUTED 
   ok(m3.login && m3.fileMcp && m3.design && m3.restArchived, 'F3 merge.cliKeys (the verifier\'s probe): a live login folded onto a member holding OUR file — the new file is the login over the CLI\'s other keys (mcpOAuth + designOauth kept), and those keys were archived first', m3);
   ok(m3c.login && m3c.fileMcp && m3c.restArchived, 'F3: …a folded login that brings its OWN mcpOAuth wins the key, and the survivor\'s is in the archive — never lost', m3c);
   ok(m3.tokenFiles.length === 0 && m3c.tokenFiles.length === 0, 'F3: our token rests in no file afterwards — not the new file, not the archive (the survivor now has a live login; the store keeps the token)', { a: m3.tokenFiles, b: m3c.tokenFiles });
-  const mF3 = mutantStore({ acc: [['        if (fromBytes && oatFileOurs(intoFile, intoId)) {\n', '        if (false) {\n']] });
+  const mF3 = mutantStore({ mat: [['  const keeps = intoFile != null;', '  const keeps = false;']] }); // the merge's verdict (lane creds-merge-keep-rest): no survivor file kept
   const m3m = mF3 ? await mergeKeys(mF3) : null;
   ok(!!m3m && m3m.login && !m3m.fileMcp && !m3m.restArchived, 'RED control (F3): c9fea70ad\'s whole-file copy — mcpOAuth in no file and no archive (the legs above catch it)', m3m);
 

@@ -27,6 +27,9 @@
  * never deleted) and take OURS back. WHICH file may go is the caller's
  * verdict; the remover still asks it again (`isOurs`) on the bytes it is about
  * to remove, and keeps the CLI's other keys (`rest`) when there are any.
+ * credsMergeVerdict: PURE — what a merge (accounts.mergeSubscription) writes over
+ * the survivor's .credentials.json and what it archives first (lane
+ * creds-merge-keep-rest, B-5fc0); the merge acts on it with writePrivateFile.
  *
  * pool-oat-materialize verify r1: the oat's acts run off the event loop's back
  * (fs.promises — the never-block-the-loop law, F13) and each is GUARDED: the
@@ -238,4 +241,45 @@ function moveCredentialArchives(fromDir, intoDir) {
   return moved;
 }
 
-module.exports = { repointPoolSymlink, writePrivateFile, writePrivateFileAsync, readCredentialFile, writeCredentialFile, archiveCredentialFile, removeCredentialFile, moveCredentialArchives };
+/** THE MERGE'S FILE VERDICT (lane creds-merge-keep-rest, B-5fc0) — PURE, no I/O: a merge folds the
+ *  merged-away row's .credentials.json into the survivor's. The CLI's store is a bag of top-level keys
+ *  (claudeAiOauth, mcpOAuth, designOauth …): a survivor's file is never replaced whole — its other keys
+ *  stay under the folded login, and the old file is archived before the write (never lost).
+ *   intoFile    the survivor's file as read (its bytes / text), null when it has none
+ *   intoOurs    it is OUR long-lived-token file for the survivor (login-expiry oatFileOurs)
+ *   fromFile    the merged-away row's file as read, null when it has none
+ *   fromOurs    it is OUR long-lived-token file for the merged-away row
+ *   preferFrom  the folded login wins over a real login on the survivor (a re-login's merge)
+ *   intoLogged  the survivor holds a real login (an access token that is not our token file)
+ *   rest        the "CLI's other keys" question (login-expiry credsRestOf) — asked, not imported: this
+ *               module stays free of login-expiry (the daemon bundles it)
+ *  → { fold, write, archive, aside, keep, why }:
+ *   fold     the merge brings the merged-away row's files over (its .claude.json rides on this)
+ *   write    the object written as the survivor's .credentials.json, or null (the survivor's file stays)
+ *   archive  the survivor's old file goes aside FIRST; `aside` = exactly what the archive holds — the old
+ *            file as it was read, or for OUR file only its other keys (our token never rests in an archive)
+ *   keep     the names of the survivor's keys kept in `write`
+ *  The rules: (a) OUR file on the merged-away side is never copied — only its other keys travel; (b) a
+ *  write over an EXISTING survivor file — ours or not — keeps the survivor's other keys under the folded
+ *  login and archives the old file first; (c) a real login on the survivor wins unless `preferFrom`;
+ *  (d) a survivor file that does not parse is archived as it is, and the fold goes on. */
+function credsMergeVerdict({ intoFile = null, intoOurs = false, fromFile = null, fromOurs = false, preferFrom = false, intoLogged = false, rest } = {}) {
+  if (typeof rest !== 'function') throw Object.assign(new Error('a merge verdict needs the "other keys" question'), { code: 'no-rest' });
+  const none = (fold, why) => ({ fold, write: null, archive: false, aside: null, keep: [], why });
+  const objOf = (b) => { let v = null; try { v = JSON.parse(String(b)); } catch { } return v && typeof v === 'object' && !Array.isArray(v) ? v : null; };
+  if (fromFile == null) return none(false, 'no-fold-file');
+  if (intoLogged && !preferFrom) return none(false, 'survivor-login');                      // (c)
+  const fromObj = objOf(fromFile);
+  if (!fromObj) return none(true, 'fold-unparsed');       // bytes that are no credentials object never replace a file
+  const folded = fromOurs ? rest(fromObj) : fromObj;      // (a)
+  if (!Object.keys(folded).length) return none(true, fromOurs ? 'fold-ours-bare' : 'fold-empty'); // ours: re-derived on the survivor from the moved token
+  const keeps = intoFile != null;                         // (b) (d): an existing survivor file, ours or not (was: ours only — B-5fc0)
+  if (!keeps) return { fold: true, write: folded, archive: false, aside: null, keep: [], why: 'survivor-absent' };
+  const intoObj = objOf(intoFile);
+  if (!intoObj) return { fold: true, write: folded, archive: true, aside: intoFile, keep: [], why: 'survivor-unparsed' }; // (d)
+  const kept = rest(intoObj), keep = Object.keys(kept);
+  const aside = intoOurs ? (keep.length ? JSON.stringify(kept) : null) : intoFile;
+  return { fold: true, write: { ...kept, ...folded }, archive: aside != null, aside, keep, why: intoOurs ? 'survivor-ours' : 'survivor-file' };
+}
+
+module.exports = { repointPoolSymlink, writePrivateFile, writePrivateFileAsync, readCredentialFile, writeCredentialFile, archiveCredentialFile, removeCredentialFile, moveCredentialArchives, credsMergeVerdict };

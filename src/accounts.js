@@ -20,7 +20,7 @@ const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 const { capsOf } = require('./backend-caps.js'); // PURE registry: per-backend hot-switch verdict rides list() so the UI never offers a dead toggle
-const { loginRank, loginUsable, withOat, oatFileOurs, credsRestOf, oatFileMerge, oatFileCurrent, oatShapeOf, oatFileBody, materializeVerdict } = require('./login-expiry.js'); // PURE: which login is the WORST of a pool's members; the materialized long-lived token's verdict
+const { loginRank, loginUsable, withOat, oatFileOf, oatFileOurs, credsRestOf, oatFileMerge, oatFileCurrent, oatShapeOf, oatFileBody, materializeVerdict } = require('./login-expiry.js'); // PURE: which login is the WORST of a pool's members; the materialized long-lived token's verdict
 const { identityRowState } = require('./oat-identity-model.js'); // PURE: what the roster says of a row's token identity (lane oat-identity-fix)
 const cliCaps = require('./cli-caps.js'); // PURE: oatInFile(version, fixture) — a measured CLI version gates the materialized token
 const { lawfulKey } = require('./secret-box.js'); // THE KEY-FILE LAW (src/key-file.js, lane key-file-law-stores): mint only when ABSENT with no ciphertext (tmp + link(2)); else a named refusal
@@ -627,31 +627,28 @@ class AccountManager {
     // local creds: bring the dup's dir over when it's fresher/the only login
     try {
       const fromDir = this.subDir(fromId), intoDir = this.subDir(intoId);
-      const intoAuth = this.readSubCreds(intoId);
-      const intoLogged = intoAuth.loggedIn && !intoAuth.oatFile; // our long-lived-token file is not a login to keep over a real one
-      // OUR long-lived-token file is never copied (verify r1 F3): it is re-derived on the survivor from the
-      // token the fold moves — only the CLI's other keys in it are material to carry
-      let fromBytes = null;
+      const intoCreds = path.join(intoDir, '.credentials.json');
+      // ONE reading of each side's file: account-material's PURE credsMergeVerdict judges these bytes and the act
+      // writes and archives exactly what it said (lane creds-merge-keep-rest, B-5fc0 — a survivor whose file was
+      // not OUR token file, a real CLI login with mcpOAuth beside it, was overwritten whole and archived nowhere)
+      let intoBytes = null, fromBytes = null;
+      try { intoBytes = fs.readFileSync(intoCreds); } catch { }
       try { fromBytes = fs.readFileSync(path.join(fromDir, '.credentials.json')); } catch { }
-      if (fromBytes && (preferFromCreds || !intoLogged)) {
-        let fj = null; try { fj = JSON.parse(fromBytes); } catch { }
-        if (oatFileOurs(fj, fromId)) { const rest = credsRestOf(fj); fromBytes = Object.keys(rest).length ? Buffer.from(JSON.stringify(rest)) : null; }
-        // F3 (pool-oat verify r2): a survivor holding OUR file keeps the CLI's other keys (mcpOAuth …) — the folded
-        // login is written OVER them, and they are archived first (`.dead-<ms>-m…`, 0600). Our token never rests in an
-        // archive: it is the store's, and the survivor's sync re-derives it (a live login there keeps it out).
-        const intoCreds = path.join(intoDir, '.credentials.json');
-        let intoFile = null; if (fromBytes && intoAuth.oatFile) { try { intoFile = JSON.parse(fs.readFileSync(intoCreds, 'utf-8')); } catch { } }
-        if (fromBytes && oatFileOurs(intoFile, intoId)) {
-          const keep = credsRestOf(intoFile);
-          if (Object.keys(keep).length) require('./account-material.js').writePrivateFile(`${intoCreds}.dead-${Date.now()}-m${crypto.randomBytes(3).toString('hex')}`, JSON.stringify(keep));
-          let fobj = null; try { fobj = JSON.parse(fromBytes); } catch { }
-          if (fobj && typeof fobj === 'object' && !Array.isArray(fobj)) fromBytes = Buffer.from(JSON.stringify({ ...keep, ...fobj }));
-        }
+      const parsed = (b) => { try { return JSON.parse(b); } catch { return null; } };
+      const intoObj = parsed(intoBytes), fromObj = parsed(fromBytes);
+      const v = require('./account-material.js').credsMergeVerdict({
+        intoFile: intoBytes, intoOurs: oatFileOurs(intoObj, intoId), fromFile: fromBytes, fromOurs: oatFileOurs(fromObj, fromId), preferFrom: preferFromCreds,
+        // parseClaudeAuth's loggedIn (an access token) read off THESE bytes — our long-lived-token file is not a login to keep over a real one
+        intoLogged: !!(intoObj && intoObj.claudeAiOauth && intoObj.claudeAiOauth.accessToken) && !oatFileOf(intoObj), rest: credsRestOf });
+      if (v.fold) {
+        // the survivor's old file ARCHIVED first (`.dead-<ms>-m<hex>`, 0600, the one writer): as it was read — or, OUR
+        // file, only the CLI's other keys (our token is the store's: the survivor's sync re-derives it)
+        if (v.archive) require('./account-material.js').writePrivateFile(`${intoCreds}.dead-${Date.now()}-m${crypto.randomBytes(3).toString('hex')}`, v.aside);
         fs.mkdirSync(intoDir, { recursive: true, mode: 0o700 });
         fs.chmodSync(intoDir, 0o700);
         for (const f of ['.credentials.json', '.claude.json']) {
           const src = path.join(fromDir, f);
-          const bytes = f === '.credentials.json' ? fromBytes : (fs.existsSync(src) ? fs.readFileSync(src) : null);
+          const bytes = f === '.credentials.json' ? (v.write && JSON.stringify(v.write)) : (fs.existsSync(src) ? fs.readFileSync(src) : null);
           // the one 0600 atomic writer of account-dir material (tmp `wx` 0600 + fchmod + fsync + rename)
           if (bytes) require('./account-material.js').writePrivateFile(path.join(intoDir, f), bytes);
         }
