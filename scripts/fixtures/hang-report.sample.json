@@ -1,0 +1,385 @@
+{
+  "header": {
+    "reportVersion": 5,
+    "event": "SIGUSR2",
+    "trigger": "Signal",
+    "filename": "abcdef01.test-planted-hang.1.hang.json",
+    "dumpEventTime": "2026-10-15T06:48:18Z",
+    "processId": 102187,
+    "threadId": 0,
+    "nodejsVersion": "v24.12.0",
+    "arch": "x64",
+    "platform": "linux"
+  },
+  "javascriptStack": {
+    "message": "",
+    "errorProperties": {}
+  },
+  "javascriptHeap": {
+    "totalMemory": 6352896,
+    "usedMemory": 5363008,
+    "memoryLimit": 4496293888
+  },
+  "nativeStack": [
+    {
+      "pc": "0x000000000096edfd",
+      "symbol": "node::TriggerNodeReport(v8::Isolate*, node::Environment*, char const*, char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, v8::Local<v8::Value>) [/usr/local/bin/node]"
+    },
+    {
+      "pc": "0x000000000096f7d7",
+      "symbol": "node::TriggerNodeReport(node::Environment*, char const*, char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, v8::Local<v8::Value>) [/usr/local/bin/node]"
+    },
+    {
+      "pc": "0x000000000097440c",
+      "symbol": "node::report::WriteReport(v8::FunctionCallbackInfo<v8::Value> const&) [/usr/local/bin/node]"
+    }
+  ],
+  "resourceUsage": {
+    "free_memory": 98501099520,
+    "total_memory": 131734257664,
+    "rss": 64147456,
+    "constrained_memory": 25769803776,
+    "available_memory": 25730584576,
+    "userCpuSeconds": 0.029391,
+    "kernelCpuSeconds": 0.010885,
+    "cpuConsumptionPercent": 1.34253,
+    "userCpuConsumptionPercent": 0.9797,
+    "kernelCpuConsumptionPercent": 0.362833,
+    "maxRss": 64147456,
+    "pageFaults": {
+      "IORequired": 0,
+      "IONotRequired": 5743
+    },
+    "fsActivity": {
+      "reads": 0,
+      "writes": 0
+    }
+  },
+  "uvthreadResourceUsage": {
+    "userCpuSeconds": 0.013768,
+    "kernelCpuSeconds": 0.004917,
+    "cpuConsumptionPercent": 0.622833,
+    "userCpuConsumptionPercent": 0.458933,
+    "kernelCpuConsumptionPercent": 0.1639,
+    "fsActivity": {
+      "reads": 0,
+      "writes": 0
+    }
+  },
+  "libuv": [
+    {
+      "type": "async",
+      "is_active": true,
+      "is_referenced": false,
+      "address": "0x000000001b9387c0"
+    },
+    {
+      "type": "async",
+      "is_active": true,
+      "is_referenced": false,
+      "address": "0x0000000006695960"
+    },
+    {
+      "type": "timer",
+      "is_active": true,
+      "is_referenced": true,
+      "address": "0x000000001b9a2308",
+      "repeat": 0,
+      "firesInMsFromNow": 12,
+      "expired": false
+    },
+    {
+      "type": "check",
+      "is_active": true,
+      "is_referenced": false,
+      "address": "0x000000001b9a23a0"
+    },
+    {
+      "type": "idle",
+      "is_active": false,
+      "is_referenced": true,
+      "address": "0x000000001b9a2418"
+    },
+    {
+      "type": "prepare",
+      "is_active": true,
+      "is_referenced": false,
+      "address": "0x000000001b9a2490"
+    },
+    {
+      "type": "check",
+      "is_active": true,
+      "is_referenced": false,
+      "address": "0x000000001b9a2508"
+    },
+    {
+      "type": "async",
+      "is_active": true,
+      "is_referenced": true,
+      "address": "0x000000001b9a2580"
+    },
+    {
+      "type": "signal",
+      "is_active": true,
+      "is_referenced": false,
+      "address": "0x000000001b9de6e0",
+      "signum": 12,
+      "signal": "SIGUSR2"
+    },
+    {
+      "type": "pipe",
+      "is_active": true,
+      "is_referenced": true,
+      "address": "0x000000001b9bc318",
+      "localEndpoint": "/ROOT/scripts/test-planted-hang.sock",
+      "remoteEndpoint": null,
+      "sendBufferSize": 212992,
+      "recvBufferSize": 212992,
+      "fd": 21,
+      "writeQueueSize": 0,
+      "readable": false,
+      "writable": false
+    },
+    {
+      "type": "async",
+      "is_active": true,
+      "is_referenced": false,
+      "address": "0x000000001ba21830"
+    },
+    {
+      "type": "pipe",
+      "is_active": false,
+      "is_referenced": true,
+      "address": "0x000000001b9bbad8",
+      "localEndpoint": null,
+      "remoteEndpoint": null,
+      "sendBufferSize": 131072,
+      "recvBufferSize": 131072,
+      "fd": 1,
+      "stdio": "stdout",
+      "writeQueueSize": 0,
+      "readable": true,
+      "writable": true
+    },
+    {
+      "type": "pipe",
+      "is_active": false,
+      "is_referenced": true,
+      "address": "0x000000001ba3c118",
+      "localEndpoint": null,
+      "remoteEndpoint": null,
+      "sendBufferSize": 131072,
+      "recvBufferSize": 131072,
+      "fd": 2,
+      "stdio": "stderr",
+      "writeQueueSize": 0,
+      "readable": true,
+      "writable": true
+    },
+    {
+      "type": "async",
+      "is_active": true,
+      "is_referenced": false,
+      "address": "0x000000001ba3c2e0"
+    },
+    {
+      "type": "async",
+      "is_active": true,
+      "is_referenced": false,
+      "address": "0x000000001b9b4740"
+    },
+    {
+      "type": "pipe",
+      "is_active": true,
+      "is_referenced": true,
+      "address": "0x000000001b9b4e88",
+      "localEndpoint": null,
+      "remoteEndpoint": "/ROOT/scripts/test-planted-hang.sock",
+      "sendBufferSize": 212992,
+      "recvBufferSize": 212992,
+      "fd": 27,
+      "writeQueueSize": 0,
+      "readable": true,
+      "writable": true
+    },
+    {
+      "type": "pipe",
+      "is_active": true,
+      "is_referenced": true,
+      "address": "0x000000001b9b3928",
+      "localEndpoint": "/ROOT/scripts/test-planted-hang.sock",
+      "remoteEndpoint": null,
+      "sendBufferSize": 212992,
+      "recvBufferSize": 212992,
+      "fd": 28,
+      "writeQueueSize": 0,
+      "readable": true,
+      "writable": true
+    },
+    {
+      "type": "loop",
+      "is_active": true,
+      "address": "0x00000000066a7a60",
+      "loopIdleTimeSeconds": 2.00001
+    }
+  ],
+  "workers": [
+    {
+      "header": {
+        "reportVersion": 5,
+        "event": "Worker thread subreport [WorkerThread]",
+        "trigger": "Signal",
+        "filename": null,
+        "dumpEventTime": "2026-10-15T06:48:18Z",
+        "processId": 102187,
+        "threadId": 1,
+        "nodejsVersion": "v24.12.0",
+        "arch": "x64",
+        "platform": "linux"
+      },
+      "javascriptStack": {
+        "message": "Signal",
+        "stack": [
+          "at waitForever (file:///ROOT/scripts/test-planted-hang.mjs:6:34)",
+          "at stuckFold (file:///ROOT/scripts/test-planted-hang.mjs:7:24)",
+          "at  (file:///ROOT/scripts/test-planted-hang.mjs:8:20)",
+          "at run (node:internal/modules/esm/module_job:413:25)",
+          "at processTicksAndRejections (node:internal/process/task_queues:103:5)"
+        ],
+        "errorProperties": {}
+      },
+      "javascriptHeap": {
+        "totalMemory": 11595776,
+        "usedMemory": 7266096,
+        "memoryLimit": 4496293888
+      },
+      "nativeStack": [
+        {
+          "pc": "0x000000000096fb39",
+          "symbol": "node::GetNodeReport(node::Environment*, char const*, char const*, v8::Local<v8::Value>, std::ostream&) [/usr/local/bin/node]"
+        },
+        {
+          "pc": "0x000000000096fef1",
+          "symbol": " [/usr/local/bin/node]"
+        },
+        {
+          "pc": "0x00000000007f3a18",
+          "symbol": "node::Environment::RunAndClearInterrupts() [/usr/local/bin/node]"
+        }
+      ],
+      "resourceUsage": {
+        "free_memory": 98501099520,
+        "total_memory": 131734257664,
+        "rss": 64147456,
+        "constrained_memory": 25769803776,
+        "available_memory": 25730584576,
+        "userCpuSeconds": 0.031532,
+        "kernelCpuSeconds": 0.01196,
+        "cpuConsumptionPercent": 1.44973,
+        "userCpuConsumptionPercent": 1.05107,
+        "kernelCpuConsumptionPercent": 0.398667,
+        "maxRss": 64147456,
+        "pageFaults": {
+          "IORequired": 0,
+          "IONotRequired": 5751
+        },
+        "fsActivity": {
+          "reads": 0,
+          "writes": 0
+        }
+      },
+      "uvthreadResourceUsage": {
+        "userCpuSeconds": 0.014999,
+        "kernelCpuSeconds": 0.005999,
+        "cpuConsumptionPercent": 0.699933,
+        "userCpuConsumptionPercent": 0.499967,
+        "kernelCpuConsumptionPercent": 0.199967,
+        "fsActivity": {
+          "reads": 0,
+          "writes": 0
+        }
+      },
+      "libuv": [
+        {
+          "type": "async",
+          "is_active": true,
+          "is_referenced": false,
+          "address": "0x000079952c0155c0"
+        },
+        {
+          "type": "async",
+          "is_active": true,
+          "is_referenced": false,
+          "address": "0x000079952c0b5fa0"
+        },
+        {
+          "type": "timer",
+          "is_active": false,
+          "is_referenced": false,
+          "address": "0x000079952c0e7138",
+          "repeat": 0,
+          "firesInMsFromNow": -159709160,
+          "expired": true
+        },
+        {
+          "type": "check",
+          "is_active": true,
+          "is_referenced": false,
+          "address": "0x000079952c0e71d0"
+        },
+        {
+          "type": "idle",
+          "is_active": false,
+          "is_referenced": true,
+          "address": "0x000079952c0e7248"
+        },
+        {
+          "type": "prepare",
+          "is_active": true,
+          "is_referenced": false,
+          "address": "0x000079952c0e72c0"
+        },
+        {
+          "type": "check",
+          "is_active": true,
+          "is_referenced": false,
+          "address": "0x000079952c0e7338"
+        },
+        {
+          "type": "async",
+          "is_active": true,
+          "is_referenced": false,
+          "address": "0x000079952c0e73b0"
+        },
+        {
+          "type": "timer",
+          "is_active": true,
+          "is_referenced": false,
+          "address": "0x000079952c08b010",
+          "repeat": 0,
+          "firesInMsFromNow": 8100,
+          "expired": false
+        },
+        {
+          "type": "async",
+          "is_active": true,
+          "is_referenced": false,
+          "address": "0x000079952c0b5d90"
+        },
+        {
+          "type": "async",
+          "is_active": true,
+          "is_referenced": false,
+          "address": "0x000079952c0b1670"
+        },
+        {
+          "type": "loop",
+          "is_active": false,
+          "address": "0x000079953efee938",
+          "loopIdleTimeSeconds": 0
+        }
+      ],
+      "workers": []
+    }
+  ]
+}

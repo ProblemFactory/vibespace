@@ -175,6 +175,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { gitEnvFrom } from './git-env.mjs';
 import { procStat, procBootMs, procBornMs, machineBootId, readRunRecord, runOwnerState, stampScratchRun } from './scratch-run.mjs';
 import { sweepScratchDirs, sweepDue, sweepPaceLine } from './scratch-sweep.mjs';
+import { hangReportName, hangReportArgv, askThenKill, readHangReport } from './hang-report.mjs';
 import { WORK_ROOT } from './scratch.mjs';
 import { MODELED, KEPT, parseHunks, changeOf, ruleSelect } from './affected-model.mjs';
 import * as RM from './reach-model.mjs';
@@ -1863,6 +1864,11 @@ export function reapByHand({ dryRun = false, log = console.log, ...opts } = {}) 
 // telling our own kill from a supersede's. Resolves on 'exit' (+ a short grace
 // for buffered output) rather than 'close': a suite that leaks a server holding
 // our pipes would otherwise hold the lane until its budget.
+// A HANG LEAVES A REPORT (lane ci-hang-report, 2026-10-15 — rel280's mirror: test-cache-bounds hung 300 s twice, one
+// stdout line, load 4.8→0.2): with `hang` = { dir: the run's fail-log dir, attempt } the suite runs with Node's own
+// diagnostic report armed on SIGUSR2 (env left out); at the budget the runner reads its threads from /proc, ASKS
+// (SIGUSR2, ≤ 2 s for a complete <sha8>.<suite>.<try>.hang.json), THEN SIGTERMs (SIGKILL 10 s on), and the ✗ row
+// names the file and carries its ≤ 12-line digest (scripts/hang-report.mjs). No `hang` ⇒ the old kill, no report.
 // A LANE'S PRIVATE ENV (lane ci-aidev-desktop-batch): with VIBESPACE_CI_LANE_ROOT set (the desktop batch — eight lanes on
 // one box), lane <k>'s suites run with their own HOME, XDG_RUNTIME_DIR (0700) and session bus (<root>/lane-<k>/run/bus,
 // started by ci-remote.mjs; no bus there ⇒ none inherited) and no DISPLAY: what one suite writes to a HOME, a runtime
@@ -1897,7 +1903,7 @@ export function startLaneBuses(lanes, { root = process.env.VIBESPACE_CI_LANE_ROO
   return procs;
 }
 const load1 = () => Math.round(os.loadavg()[0] * 10) / 10;
-function runSuiteAsync(s, { root = repo, absentIsSkip = false, sha = '', lane = 1, inflight = new Set() } = {}) {
+export function runSuiteAsync(s, { root = repo, absentIsSkip = false, sha = '', lane = 1, inflight = new Set(), hang = null } = {}) {
   return new Promise((resolve) => {
     if (absentIsSkip && !fs.existsSync(path.join(root, 'scripts', s.name + '.mjs'))) {
       resolve({ ok: true, ms: 0, absent: true, lines: [`  ⊘ ${s.name} — SKIPPED: not present at ${shortSha(sha)} (this gate's table names it; the commit being gated does not contain it, so this run says nothing about it)`] });
@@ -1905,9 +1911,11 @@ function runSuiteAsync(s, { root = repo, absentIsSkip = false, sha = '', lane = 
     }
     const t = Date.now(), l0 = load1();
     const tag = `[lane ${lane}]`;
+    const hangFile = hang && hang.dir ? hangReportName(shortSha(sha), s.name, hang.attempt) : '';
+    const hr = hangFile ? { dir: hang.dir, file: path.join(hang.dir, hangFile), ...hangReportArgv({ dir: hang.dir, filename: hangFile, flags: hang.flags }) } : { argv: [], armed: false };
     let child;
     try {
-      child = spawn(process.execPath, [path.join(root, 'scripts', s.name + '.mjs')], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: laneEnv(lane) });
+      child = spawn(process.execPath, [...hr.argv, path.join(root, 'scripts', s.name + '.mjs')], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: laneEnv(lane) });
     } catch (e) {
       resolve({ ok: false, ms: 0, killedFromOutside: false, lines: [`\n✗ ${s.name} FAILED (0ms, ${e.code || e.message}) ${tag}`] });
       return;
@@ -1916,7 +1924,8 @@ function runSuiteAsync(s, { root = repo, absentIsSkip = false, sha = '', lane = 
     let stdout = '', stderr = '', error = null, done = false;
     child.stdout.on('data', (d) => { stdout += d; });
     child.stderr.on('data', (d) => { stderr += d; });
-    const budget = setTimeout(() => { error = { code: 'ETIMEDOUT' }; try { child.kill('SIGTERM'); } catch { } }, budgetFor(s));
+    let asked = null; // the deadline's ask (askThenKill): the /proc read, the signal, the wait
+    const budget = setTimeout(() => { error = { code: 'ETIMEDOUT' }; if (hr.armed) asked = askThenKill(child, hr); else { try { child.kill('SIGTERM'); } catch { } } }, budgetFor(s));
     child.on('error', (e) => { error = error || e; });
     const finish = (status, signal) => {
       if (done) return;
@@ -1929,8 +1938,10 @@ function runSuiteAsync(s, { root = repo, absentIsSkip = false, sha = '', lane = 
       const load = [l0, load1()], ld = `load ${load[0]}→${load[1]}`;
       if (status === 0) { resolve({ ok: true, ms, load, lines: [`  ✓ ${s.name} (${ms}ms) ${tag} ${ld} — ${(stdout.trim().split('\n').pop() || 'ok').slice(0, 80)}`] }); return; }
       const r = { status, signal, error };
-      resolve({ ok: false, ms, load, killedFromOutside: killedFromOutside(r), full: stdout + (stderr ? '\n── stderr ──\n' + stderr : ''), lines: [
-        `\n✗ ${s.name} FAILED (${ms}ms${error ? ', ' + error.code : ''}${signal ? ', ' + signal : ''}) ${tag} ${ld}`,
+      // the hang report rides INSIDE the ✗ line's entry: lines[1] / lines[2] stay the stdout tail / stderr the rerun ledger reads
+      const hl = asked ? readHangReport(asked, { root, envExcluded: hr.envExcluded }) : null, digest = hl && hl.lines.length ? '\n' + hl.lines.join('\n') : '';
+      resolve({ ok: false, ms, load, killedFromOutside: killedFromOutside(r), hangReport: hl ? hr.file : undefined, full: (digest ? digest.slice(1) + '\n' : '') + stdout + (stderr ? '\n── stderr ──\n' + stderr : ''), lines: [
+        `\n✗ ${s.name} FAILED (${ms}ms${error ? ', ' + error.code : ''}${signal ? ', ' + signal : ''}) ${tag} ${ld}${hl ? hl.head : ''}${digest}`,
         stdout.split('\n').slice(-40).join('\n'),
         stderr || ''] });
     };
@@ -2900,12 +2911,13 @@ async function fastGate({ sha: wantSha, isolate } = {}) {
     const absent = [], timings = [];
     let red = null;
     const dirPace = dirSweepPacer();
+    const hangDir = path.join(markerDir(), 'fail-logs'); // a timed-out suite's hang report (the heavy tier's fail-log dir; ci-hang-report)
     const laneWorker = async (queue, lane) => {
       for (;;) {
         if (red) break;
         const s = queue.shift();
         if (!s) break;
-        const r = await runSuiteAsync(s, { root: runRoot, absentIsSkip: !!isolate, sha, lane, inflight });
+        const r = await runSuiteAsync(s, { root: runRoot, absentIsSkip: !!isolate, sha, lane, inflight, hang: { dir: hangDir, attempt: 1 } });
         if (red) r.lines = [`  · ${s.name} stopped [lane ${lane}] — ${red} is red`];   // SIGTERMed by another lane's red: not a verdict
         console.log(r.lines.join('\n'));
         // a suite may not leave a daemon behind (2.369.104) — swept after every suite, as the heavy lanes do
@@ -3200,7 +3212,7 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
         if (!s) break;
         const par = queue === parQueue;
         if (par) { parInFlight++; overlapCheck(); }
-        let r = noteChildResult(await runSuiteAsync(s, { root: runRoot, absentIsSkip: !!isolate, sha, lane, inflight }));
+        let r = noteChildResult(await runSuiteAsync(s, { root: runRoot, absentIsSkip: !!isolate, sha, lane, inflight, hang: { dir: path.join(d, 'fail-logs'), attempt: 1 } }));
         console.log(r.lines.join('\n'));
         keepFailLog(s, r, 1);
         // a suite may not leave a daemon behind (2.369.104) — the lanes sweep
@@ -3236,7 +3248,7 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
           // visible instead of being laundered into a green.
           console.log(`  … ${s.name} failed — retrying once before calling it red`);
           const first = r;
-          const again = noteChildResult(await runSuiteAsync(s, { root: runRoot, lane, inflight }));
+          const again = noteChildResult(await runSuiteAsync(s, { root: runRoot, sha, lane, inflight, hang: { dir: path.join(d, 'fail-logs'), attempt: 2 } }));
           console.log(again.lines.join('\n'));
           keepFailLog(s, again, 2);
           if (again.ok) { flaky.push(s.name); r = again; } else { failed.push(s.name); }
