@@ -139,10 +139,14 @@ export function loginExpiryChipHtml(a, { local = true } = {}) {
       // HELD (verify r1 F5): the hub's CLI moved to an unmeasured version — the file stays for the sessions
       // already on it, the pool places nothing new here
       const held = !ls.worstId && a.oatFile && a.oatFile.state === 'held';
+      // A NOUN (2026-10-15, owner: "哪有人在这种提示的地方写这么长的废话的，就写长期token不就行了？"): the chip says
+      // 「长期 token」 (HELD too); where the token sits and which CLI verified it lead the hover — HELD's hover names its
+      // CLI as unmeasured (a held file's cli is the hub's NEW version — never "verified")
       const label = near ? t('long-lived token ends in {left}', { left: escHtml(loginLeftText(ls.msLeft)) })
-        : held ? t('this CLI version is not measured: running sessions continue, no new ones are placed here')
-        : t('long-lived token written to this account’s folder (CLI {cli} verified)', { cli });
-      const title = t('No usable OAuth login here: the long-lived token (valid until {date}) is written into this account’s credential folder, so pooled sessions can use it too (measured on CLI {cli}). It never refreshes; only the quota refresh (⟳) needs you to sign in.', { date: escHtml(loginWhenText(ls.oatValidUntil)), cli });
+        : t('Long-lived token');
+      const date = escHtml(loginWhenText(ls.oatValidUntil));
+      const title = held ? t('Written to this account’s folder, but this CLI version ({cli}) is not measured: running sessions continue, no new ones are placed here. The long-lived token is valid until {date}; only the quota refresh (⟳) needs you to sign in.', { date, cli })
+        : t('Written to this account’s folder; CLI {cli} verified. No usable OAuth login here, so pooled sessions run on this long-lived token too (valid until {date}). It never refreshes; only the quota refresh (⟳) needs you to sign in.', { date, cli });
       return ` <span class="acct-blocked-hint acct-login-chip acct-login-oat" role="button" tabindex="0" data-relogin="${escHtml(ls.worstId || a.id)}" title="${title}">${ROSTER_ICONS.CLOCK}${who}${label}</span>`;
     }
     // a token NOT in the folder: the ONE word (.268), and the refusal that kept it out (pool-oat-materialize) beside it

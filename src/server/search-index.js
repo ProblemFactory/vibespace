@@ -23,6 +23,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { Worker } = require('worker_threads');
 const { trackWorker } = require('../worker-memory.js');
+const { exitWithout } = require('./exit-hook.js'); // THE re-raise past a join bound (lane usage-fold-worker-exit-hook)
 const M = require('../search-model.js');
 
 const REASON = Object.freeze({ OFF: 'not-started', STARTING: 'starting', NO_SQLITE: 'no-node-sqlite', LOCKED: 'locked-by-another-server', WRITE_FAILED: 'write-failed',
@@ -75,9 +76,7 @@ function create({ dataDir, homeDir = os.homedir(), workerFile = path.join(__dirn
   };
   function onExit() {
     if (closeSync() !== 'timed-out') return;
-    try { log.error?.(`[search-index] the index worker did not close within ${closeBoundMs} ms — exiting without it`); } catch { }
-    process.removeAllListeners('SIGTERM');
-    process.kill(process.pid, 'SIGTERM');
+    exitWithout(`[search-index] the index worker did not close within ${closeBoundMs} ms — exiting without it`, log);
   }
   function armIdle() {
     lastCallAt = now();

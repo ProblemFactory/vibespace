@@ -1954,5 +1954,106 @@ console.log('— §10 login × long-lived token (oat-only)');
     finally { try { chrome.kill('SIGKILL'); } catch { } }
   }
 }
+// §11 THE TOKEN IN THE FOLDER IS A NOUN (lane oat-chip-words, 2026-10-15, owner: "哪有人在这种提示的地方写这么长的废话的，
+// 就写长期token不就行了？"). A member whose long-lived token was written into its credential folder drew the chip
+// 「长期 token 已写入此账号目录（CLI 2.1.296 已验）」 — three lines in a 260 px sidebar. The chip is now the noun
+// 「长期 token」 / "Long-lived token" / 「長期トークン」 (a HELD file's too); the sentence leads its hover. Real
+// manage-agents.js + style.css in headless Chrome: the desk sidebar (260 px − padding, and its 200 px minimum) and a
+// 360 px phone (the sidebar is the whole screen there). RED control = this file with the base sentence back on the chip.
+console.log('— §11 the token-in-folder chip is one noun (desk + phone)');
+{
+  const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
+  if (!CHROME) console.log('  SKIP: no chrome binary on this machine (the chip legs need headless chrome)');
+  else {
+    const { spawn } = await import('node:child_process');
+    const esbuild = require(path.join(REPO, 'node_modules/esbuild'));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-loat11-'));
+    const stubBV = { name: 'stub-bv', setup(b) { b.onResolve({ filter: /build-version\.js$/ }, () => ({ path: 'bv', namespace: 'stub' })); b.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({ contents: "export const BUILD_VERSION = 'test';", loader: 'js' })); } };
+    const bundle = (opts, out) => esbuild.build({ ...opts, bundle: true, format: 'iife', globalName: 'MA', platform: 'browser', target: 'es2022', outfile: path.join(dir, out), logLevel: 'silent', loader: { '.css': 'text' }, plugins: [stubBV] });
+    await bundle({ entryPoints: [path.join(REPO, 'src/lib/manage-agents.js')] }, 'ma.js');
+    const maSrc = fs.readFileSync(path.join(REPO, 'src/lib/manage-agents.js'), 'utf8');
+    const CUT = [": t('Long-lived token');\n",
+      ": held ? t('this CLI version is not measured: running sessions continue, no new ones are placed here')\n        : t('long-lived token written to this account’s folder (CLI {cli} verified)', { cli });\n"];
+    const maBase = maSrc.replace(CUT[0], CUT[1]);
+    ck('the noun control cut the chip word out of manage-agents.js (the base sentence back on the chip)', maSrc.split(CUT[0]).length === 2 && !maBase.includes(CUT[0]));
+    await bundle({ stdin: { contents: maBase, resolveDir: path.join(REPO, 'src/lib'), sourcefile: 'manage-agents.js', loader: 'js' } }, 'ma-base.js');
+    fs.copyFileSync(path.join(REPO, 'public/style.css'), path.join(dir, 'style.css'));
+    const D = 86400e3, NOWB = Date.now();
+    const ls = { state: 'oat-only', login: 'logged-out', msLeft: 300 * D, refreshExpiresAt: NOWB - 9 * H, oatValidUntil: NOWB + 300 * D, oatFile: true };
+    const ROWS = JSON.stringify([
+      ['W', { id: 'sub-w', name: 'Mat Max', type: 'subscription', oat: true, oatDaysLeft: 300, loggedIn: false, oatFile: { state: 'written', cli: '2.1.296' }, loginState: ls }, 'mat.max.address@example.com'],
+      ['Hd', { id: 'sub-h', name: 'Work Max', type: 'subscription', oat: true, oatDaysLeft: 300, loggedIn: false, oatFile: { state: 'held', reason: 'cli-unmeasured', cli: '2.1.301' }, loginState: ls }, 'work.max@example.com']]);
+    // composed like the roster row (keyLines): ident from subIdentHtml, the extras from acctExtrasHtml (same as §10)
+    const rowsJs = "const ROWS = " + ROWS + ";\nfor (const id of ['desk', 'min', 'phone']) document.getElementById(id).innerHTML = ROWS.map(([k, a, email]) => { const chip = MA.loginExpiryChipHtml(a), oat = MA.oatTagHtml(a);\n"
+      + "  return '<div class=\"acct-key-row\" data-k=\"' + k + '\"><span class=\"acct-type-icon\"></span><span class=\"acct-key-main\"><span class=\"acct-key-line\"><span class=\"acct-key-name\">' + a.name + '</span><span class=\"acct-key-tail\">' + MA.subIdentHtml(a, { email })"
+      + " + '</span></span>' + MA.acctExtrasHtml({ login: chip, oat, oatWarn: false }) + '</span><span class=\"acct-key-actions\"><button class=\"acct-icon\"></button></span></div>'; }).join('');\n";
+    const page = (lang, js) => '<!doctype html><html data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="./style.css"></head>\n'
+      + "<body style=\"margin:12px\"><script>localStorage.setItem('vibespace.lang','" + lang + "');<" + "/script>"
+      + '<div id="desk" class="acct-list" style="width:236px"></div><div id="min" class="acct-list" style="width:176px"></div><div id="phone" class="acct-list" style="width:calc(100vw - 24px)"></div>'
+      + '<script src="./' + js + '"></script><script>\n' + rowsJs + '<' + '/script></body></html>';
+    for (const lang of ['en', 'zh', 'ja']) fs.writeFileSync(path.join(dir, lang + '.html'), page(lang, 'ma.js'));
+    fs.writeFileSync(path.join(dir, 'base-en.html'), page('en', 'ma-base.js'));
+    const CDP_PORT = await freePort();
+    const chrome = spawn(CHROME, ['--headless=new', '--remote-debugging-port=' + CDP_PORT, '--no-first-run', '--disable-gpu', '--window-size=900,700', '--user-data-dir=' + path.join(dir, 'chrome'), 'about:blank'], { stdio: 'ignore' });
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    try {
+      const WS = require(path.join(REPO, 'node_modules/ws'));
+      const race = (pr, ms, what) => Promise.race([pr, new Promise((_, rej) => { const t = setTimeout(() => rej(new Error(what + ' timed out')), ms); if (t.unref) t.unref(); })]);
+      let target = null;
+      for (let i = 0; i < 60 && !target; i++) { try { const l = await (await fetch('http://127.0.0.1:' + CDP_PORT + '/json')).json(); target = l.find((t) => t.type === 'page'); } catch { await sleep(200); } }
+      if (!target) throw new Error('chrome never came up');
+      const sock = new WS(target.webSocketDebuggerUrl);
+      await race(new Promise((res, rej) => { sock.on('open', res); sock.on('error', rej); }), 15000, 'devtools socket');
+      let sq = 0; const pend = new Map();
+      sock.on('message', (d) => { const m = JSON.parse(d); if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); } });
+      const cdp = (method, params = {}) => race(new Promise((res, rej) => { const id = ++sq; pend.set(id, (m) => (m.error ? rej(new Error(m.error.message)) : res(m.result))); sock.send(JSON.stringify({ id, method, params })); }), 30000, 'CDP ' + method);
+      const ev = async (e) => { const rr = await cdp('Runtime.evaluate', { expression: e, awaitPromise: true, returnByValue: true }); if (rr.exceptionDetails) throw new Error(rr.exceptionDetails.exception?.description || 'threw'); return rr.result.value; };
+      await cdp('Page.enable'); await cdp('Runtime.enable');
+      await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });
+      // per list: each row's chip words, hover, LINES (distinct tops of its TEXT nodes — the svg's own rect is not a line),
+      // and whether it overflows its box or the row
+      const look = async (lang, phone) => {
+        if (phone) await cdp('Emulation.setDeviceMetricsOverride', { width: 360, height: 740, deviceScaleFactor: 2, mobile: true });
+        else await cdp('Emulation.clearDeviceMetricsOverride');
+        await cdp('Page.navigate', { url: 'file://' + path.join(dir, lang + '.html') }); await sleep(900);
+        return ev(`(() => { const lines = (el) => { const tops = new Set(), w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT); let n;
+            while ((n = w.nextNode())) { if (!n.textContent.trim()) continue; const r = document.createRange(); r.selectNodeContents(n); for (const b of r.getClientRects()) if (b.width > 0) tops.add(Math.round(b.top)); } return tops.size; };
+          const out = {}; for (const id of ${phone ? "['phone']" : "['desk', 'min']"}) { const list = document.getElementById(id);
+            out[id] = { width: Math.round(list.getBoundingClientRect().width), rows: Object.fromEntries([...list.querySelectorAll('.acct-key-row')].map((row) => { const c = row.querySelector('.acct-login-chip'), cr = c.getBoundingClientRect(), rr = row.getBoundingClientRect();
+              return [row.dataset.k, { chip: c.textContent.trim(), title: c.title, lines: lines(c), fits: c.scrollWidth <= c.clientWidth + 1 && cr.right <= rr.right + 0.5, relogin: c.dataset.relogin }]; })) }; }
+          return out; })()`);
+      };
+      const NOUN = { en: 'Long-lived token', zh: '长期 token', ja: '長期トークン' };
+      const LEAD = { en: ['Written to this account’s folder; CLI 2.1.296 verified.', 'Written to this account’s folder, but this CLI version (2.1.301) is not measured'], zh: ['已写入此账号目录；CLI 2.1.296 已验。', '已写入此账号目录，但此 CLI 版本（2.1.301）未测量'], ja: ['このアカウントのフォルダーに書き込み済み；CLI 2.1.296 で検証済み。', 'このアカウントのフォルダーに書き込み済みですが、この CLI バージョン（2.1.301）は未計測です'] };
+      const nounOk = (lang, r) => [r.W, r.Hd].every((c) => c.chip === NOUN[lang] && c.lines === 1 && c.fits);
+      for (const lang of ['en', 'zh', 'ja']) {
+        const desk = await look(lang, false), phone = await look(lang, true);
+        for (const [where, l] of [['desk sidebar', desk.desk], ['200 px sidebar', desk.min], ['phone', phone.phone]]) {
+          console.log('    ' + lang + ' ' + where + ' (' + l.width + ' px): [' + l.rows.W.chip + '] ' + l.rows.W.lines + ' line · [' + l.rows.Hd.chip + '] ' + l.rows.Hd.lines + ' line');
+          ck('BROWSER ' + lang + ' ' + where + ' (' + l.width + ' px): the chip says only 「' + NOUN[lang] + '」 (a HELD file too), ONE line, inside its row', nounOk(lang, l.rows));
+        }
+        const W = desk.desk.rows.W, Hd = desk.desk.rows.Hd;
+        ck('BROWSER ' + lang + ': the hover leads with the facts the chip used to say (「' + LEAD[lang][0] + '」) and keeps the rest; the re-login door stays',
+          W.title.startsWith(LEAD[lang][0]) && W.title.length > LEAD[lang][0].length + 20 && W.relogin === 'sub-w');
+        ck('BROWSER ' + lang + ': a HELD file\'s hover names the hub\'s CLI as unmeasured (never "verified")', Hd.title.startsWith(LEAD[lang][1]) && !Hd.title.includes('2.1.296') && Hd.relogin === 'sub-h');
+      }
+      const base = await look('base-en', false);
+      console.log('    base desk: [' + base.desk.rows.W.chip + '] ' + base.desk.rows.W.lines + ' lines');
+      ck('BROWSER: RED control — the base sentence on the chip fails the same check at the desk sidebar (' + base.desk.rows.W.lines + ' lines)',
+        !nounOk('en', base.desk.rows) && base.desk.rows.W.chip === 'long-lived token written to this account’s folder (CLI 2.1.296 verified)' && base.desk.rows.W.lines > 1);
+      // LOGIN_OAT_SHOTS=<dir> writes oat-folder-<lang>-desk.png / oat-folder-<lang>-phone.png (lang base-en = the control's words)
+      if (process.env.LOGIN_OAT_SHOTS) {
+        for (const [lang, phone] of [['en', false], ['zh', false], ['ja', false], ['base-en', false], ['en', true], ['zh', true], ['ja', true]]) {
+          await look(lang, phone);
+          const r = await ev(`(() => { const b = document.getElementById('${phone ? 'phone' : 'desk'}').getBoundingClientRect(); return { x: Math.floor(b.x) - 4, y: Math.floor(b.y) - 4, width: Math.ceil(b.width) + 8, height: Math.ceil(b.height) + 8 }; })()`);
+          const shot = await cdp('Page.captureScreenshot', { format: 'png', clip: { ...r, scale: phone ? 1 : 2 } });
+          fs.writeFileSync(path.join(process.env.LOGIN_OAT_SHOTS, 'oat-folder-' + lang + '-' + (phone ? 'phone' : 'desk') + '.png'), Buffer.from(shot.data, 'base64'));
+        }
+      }
+      sock.close();
+    } catch (e) { ck('BROWSER §11 ran: ' + e.message, false); }
+    finally { try { chrome.kill('SIGKILL'); } catch { } }
+  }
+}
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

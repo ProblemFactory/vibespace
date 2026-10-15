@@ -2,6 +2,14 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.284 — 2026-10-15
+
+### Changed
+- The “long-lived token” mark on an account card is now one word; the details moved to its hover text.
+
+### Fixed
+- When the storage holding your usage history stops responding, restarting VibeSpace no longer hangs waiting for it.
+
 ## 2.369.283 — 2026-10-15
 
 ### Maintenance

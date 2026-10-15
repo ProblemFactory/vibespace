@@ -26,6 +26,7 @@ const { coldRows, readLineAt, readLineAtSync } = require('./usage-cold-walk.js')
 const { Worker } = require('worker_threads');
 const v8 = require('v8');
 const { trackWorker } = require('./worker-memory.js');
+const EH = require('./server/exit-hook.js'); // THE exit hook: a fold worker asleep in a read is never joined (lane usage-fold-worker-exit-hook)
 
 // API-equivalent prices, USD per MILLION tokens. Subscription sessions don't
 // actually cost this — it's shown as a reference ("what this would cost on the
@@ -182,6 +183,19 @@ const COLD_WORKER_HEAP_MB = 1536;
 // Fold workers terminated but not exited (blocked in a sync read — the storage is not answering): r4, verify #2.
 // Process-wide: while one is stuck no fold worker starts (they would STACK, +40 MB each, nobody told).
 const STUCK = new Set(); // the cold fold's worker heap cap: one month of cold lines + the accumulator (B-9428 r2)
+// Every fold worker not yet exited → its thread's id (/proc/self/task; null where /proc named none). process.exit()
+// JOINS worker threads, and one asleep in a read is never joined: the restart waited for an external SIGKILL. At the
+// join — after every 'exit' listener, so the stores' flushes keep their order — the in-flight ones are terminated (the
+// join's own first step; a fold that is merely busy leaves in ms) and all get EH.EXIT_BOUND_MS to leave; past it the
+// process ends without them (lane usage-fold-worker-exit-hook, src/server/exit-hook.js).
+const LIVE = new Map();
+function foldJoinJudge() {
+  if (!LIVE.size) return null;
+  for (const w of LIVE.keys()) if (!STUCK.has(w)) { try { w.terminate().catch(() => { }); } catch { } }
+  const live = [...LIVE].map(([w, tid]) => ({ tid, stuck: STUCK.has(w) }));
+  const n = EH.unjoinable(live, EH.threadsLeft(live.map((x) => x.tid).filter(Boolean))).length;
+  return n ? `[usage] ${n} stuck fold worker(s) cannot be joined — exiting without them` : null;
+}
 // THE LEDGER REBUILD OFF THE LOOP (B-748f, the never-block law): a rebuild parses the whole ledger in the fold worker;
 // its hot rows and ids come back as v8-serialized chunks of this many rows, ONE chunk deserialized per loop turn
 // (~2 ms a chunk of 485 B rows measured here) while the previous cache keeps serving.
@@ -1076,10 +1090,12 @@ class UsageHistory {
       // holds every rid of the ledger) — a smaller cap would fail it forever on a big ledger
       const heapMb = rb && !this.rebuildWorkerHeapMb ? Math.max(capMb, Math.round(v8.getHeapStatistics().heap_size_limit / 1048576)) : capMb;
       // execArgv [] (r3, verify #1/#12): a parent --max-old-space-size would otherwise replace resourceLimits
+      const threads = EH.threadsNow(); // the diff around the constructor names the worker's thread (the exit hook's judge)
       try { w = new Worker(file, { execArgv: [], resourceLimits: { maxOldGenerationSizeMb: Math.max(64, heapMb), maxYoungGenerationSizeMb: 32 } }); } catch (e) { reject(e); return; }
+      LIVE.set(w, EH.threadAdded(threads)); EH.atJoin('usage-fold', foldJoinJudge);
       trackWorker(rb ? 'usage-ledger-rebuild' : 'usage-cold-fold', w); // the memory census (src/worker-memory.js)
       if (rb) this._rebuildWorkers = (this._rebuildWorkers || 0) + 1; else this._coldWalks = (this._coldWalks || 0) + 1;
-      w.on('exit', () => { exited = true; if (STUCK.delete(w)) console.log(`[usage] a stuck fold worker exited — ${STUCK.size} still stuck${STUCK.size ? '' : '; usage summaries resume'}`); });
+      w.on('exit', () => { exited = true; LIVE.delete(w); if (STUCK.delete(w)) console.log(`[usage] a stuck fold worker exited — ${STUCK.size} still stuck${STUCK.size ? '' : '; usage summaries resume'}`); });
       // ONE worker at a time (r4): the request settles only after terminate() — awaited for its own deadline;
       // a worker still alive then is STUCK (counted, said once, no new worker until it exits)
       const end = async (fn, v) => {

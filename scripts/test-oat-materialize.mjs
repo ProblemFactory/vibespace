@@ -359,8 +359,11 @@ console.log('§5 THE DOORS — the row, the pool row, the client chip and model,
   const M = await import(path.join(REPO, 'src/lib/pool-priority-model.js'));
   ok(M.memberState({ loggedIn: true, loginState: { state: 'oat-only', oatFile: true } }).code !== 'login-expired' && M.memberState({ loggedIn: true, loginState: { state: 'oat-only' } }).code === 'login-expired', 'the Members… dialog: oat-only WITH the file is not "login expired"; without it, unchanged');
   const zh = (await import(path.join(REPO, 'src/lib/i18n-zh.js'))).default, ja = (await import(path.join(REPO, 'src/lib/i18n-ja.js'))).default;
-  const K = ['long-lived token written to this account’s folder (CLI {cli} verified)', 'this CLI version is not measured', 'mint again to record the subscription type', 'could not write it to the account folder', 'long-lived token ends in {left}'];
-  ok(zh[K[0]] === '长期 token 已写入此账号目录（CLI {cli} 已验）' && zh[K[1]] === '此 CLI 版本未测量' && zh[K[2]] === '重新铸造一次以记录订阅类型', 'zh says the brief\'s words: 长期 token 已写入此账号目录（CLI {cli} 已验） / 此 CLI 版本未测量 / 重新铸造一次以记录订阅类型');
+  // the chip is a NOUN (lane oat-chip-words, 2026-10-15); the sentence it carried leads the hover (K[5]; HELD = K[6])
+  const K = ['Long-lived token', 'this CLI version is not measured', 'mint again to record the subscription type', 'could not write it to the account folder', 'long-lived token ends in {left}',
+    'Written to this account’s folder; CLI {cli} verified. No usable OAuth login here, so pooled sessions run on this long-lived token too (valid until {date}). It never refreshes; only the quota refresh (⟳) needs you to sign in.',
+    'Written to this account’s folder, but this CLI version ({cli}) is not measured: running sessions continue, no new ones are placed here. The long-lived token is valid until {date}; only the quota refresh (⟳) needs you to sign in.'];
+  ok(zh[K[0]] === '长期 token' && ja[K[0]] === '長期トークン' && zh[K[1]] === '此 CLI 版本未测量' && zh[K[2]] === '重新铸造一次以记录订阅类型' && zh[K[5]].startsWith('已写入此账号目录；CLI {cli} 已验。') && zh[K[6]].startsWith('已写入此账号目录，但此 CLI 版本（{cli}）未测量'), 'zh says the brief\'s words: chip 长期 token (ja 長期トークン), hover 已写入此账号目录；CLI {cli} 已验 / 此 CLI 版本未测量 / 重新铸造一次以记录订阅类型');
   ok(K.every((k) => zh[k] && ja[k] && zh[k].includes('{cli}') === k.includes('{cli}') && ja[k].includes('{left}') === k.includes('{left}')), 'every new door word has zh + ja with its placeholders');
   // the chip itself, rendered by the real manage-agents module (esbuild, a fake DOM)
   let MA = null, why = null;
@@ -380,7 +383,9 @@ console.log('§5 THE DOORS — the row, the pool row, the client chip and model,
   else {
     const ls = am.list().accounts.find((a) => a.id === wiped);
     const chip = MA.loginExpiryChipHtml(ls);
-    ok(/long-lived token written to this account’s folder \(CLI 2\.1\.296 verified\)/.test(chip) && /data-relogin="sub-/.test(chip) && !chip.includes(OAT.slice(14, 30)), 'the member row\'s chip: "long-lived token written to this account’s folder (CLI 2.1.296 verified)" (the re-login door kept for the quota ⟳)', chip.slice(0, 200));
+    ok(/>Long-lived token<\/span>$/.test(chip) && /title="Written to this account’s folder; CLI 2\.1\.296 verified\. /.test(chip) && !/written to this account’s folder \(CLI/.test(chip) && /data-relogin="sub-/.test(chip) && !chip.includes(OAT.slice(14, 30)), 'the member row\'s chip: the noun "Long-lived token"; its hover leads "Written to this account’s folder; CLI 2.1.296 verified." (the re-login door kept for the quota ⟳)', chip.slice(0, 200));
+    const heldChip = MA.loginExpiryChipHtml({ ...ls, oatFile: { state: 'held', reason: 'cli-unmeasured', cli: '2.1.999' } });
+    ok(/>Long-lived token<\/span>$/.test(heldChip) && /title="Written to this account’s folder, but this CLI version \(2\.1\.999\) is not measured: running sessions continue/.test(heldChip) && !/verified/.test(heldChip), 'a HELD file: the same noun "Long-lived token"; the hover names the hub\'s CLI as unmeasured, never "verified"', heldChip.slice(0, 300));
     const poolRow = amP.list().accounts.find((a) => a.id === P);
     ok(MA.loginExpiryChipHtml(poolRow) === '', 'the POOL row whose worst member is the token slot says nothing (the escape sentence is gone; a slot that serves is not a warning)', MA.loginExpiryChipHtml(poolRow));
     const nearPool = { ...poolRow, loginState: { ...poolRow.loginState, state: 'oat-only', oatFile: true, msLeft: 5 * H, worstId: O, worstName: 'Token O' } };

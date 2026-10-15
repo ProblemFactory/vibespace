@@ -1259,9 +1259,9 @@ console.log('— §6c every kill door is declared: an actor marked before the ki
     'src/vnc.js': [2, 'not a conversation: VNC (lane desktop-apps-safety B-956d added the held-display retry\'s end — composed at the 2.369.202 integration)'],
     'src/window-targets.js': [2, 'not a conversation: X helpers'],
     // the 2.369.204 integration — usage-index-shadow (on the .202 base) re-raises the server's OWN exit: at process exit the index worker is joined; past its 2 s bound the server ends itself (SIGTERM, then SIGKILL if ignored) — never a conversation
-    'src/server/usage-index.js': [2, "not a conversation: the server's own exit, re-raised past the index worker's 2 s join bound (usage-index-shadow)"],
-    // the 2.369.221 integration — lane global-search's ORCH joins its index worker at process exit the same way (its own close bound)
-    'src/server/search-index.js': [1, "not a conversation: the server's own exit, re-raised past the search index worker's close bound (global-search)"],
+    // lane usage-fold-worker-exit-hook (.284): both index owners re-raise through THE exit hook, and so do the usage ledger's fold workers
+    'src/server/exit-hook.js': [2, "not a conversation: the server's own exit, re-raised past a worker's join bound — the index owners' close and the usage ledger's fold workers (usage-fold-worker-exit-hook)"],
+    // the 2.369.221 integration — lane global-search's ORCH joins its index worker at process exit the same way (its own close bound; its re-raise is the exit hook's since .284)
     // the 2.369.237 integration — lane daemon-orphan-end's end-daemon op and lane fork-flag-server-side's fork proof
     'src/browser-serve.js': [2, "not a conversation: a machine's browser daemon with no browser, ended by pid+starttime when the hub asks (end-daemon, daemon-orphan-end)"],
     'src/ws-create.js': [1, "actor fork-resumed-parent: a pending fork's own CLI holding its parent's id, SIGKILLed before its first turn (B-8b7b)"],

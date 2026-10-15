@@ -27,6 +27,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { Worker } = require('worker_threads');
 const { trackWorker } = require('../worker-memory.js');
+const { exitWithout } = require('./exit-hook.js'); // THE re-raise past a join bound (lane usage-fold-worker-exit-hook)
 const M = require('../usage-index-model.js');
 
 // Why the index is not answering — each one a NAME the comparer counts under.
@@ -115,10 +116,7 @@ function create({ getLedger, homeDir = os.homedir(), workerFile = path.join(__di
     const r = closeSync();
     if (r !== 'timed-out') return;
     // the worker is wedged: process.exit() would wait for it forever
-    try { log.error?.(`[usage-index] the index worker did not close within ${closeBoundMs} ms — exiting without it`); } catch { }
-    process.removeAllListeners('SIGTERM');
-    process.kill(process.pid, 'SIGTERM');
-    process.kill(process.pid, 'SIGKILL'); // only if SIGTERM was ignored
+    exitWithout(`[usage-index] the index worker did not close within ${closeBoundMs} ms — exiting without it`, log);
   }
 
   /** Start the worker (once). Resolves the ledger now — the index belongs to

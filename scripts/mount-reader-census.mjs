@@ -115,6 +115,7 @@ export const ROWS = [
   ['src/server/device-upgrade-watch.js', 'own-tree', 1, null, DATA],
   ['src/server/dial-health-watch.js', 'own-tree', 1, null, DATA], // lane host-stale-dialer: data/dial-health.json (the For-you ledger)
   ['src/server/dial-pairing.js', 'own-tree', 1, null, DATA],
+  ['src/server/exit-hook.js', 'own-tree', 2, null, PROC], // lane usage-fold-worker-exit-hook: /proc/self/task (a worker's thread named at spawn, listed at the join)
   ['src/server/exit-routes.js', 'own-tree', 1, null, DATA],
   ['src/server/fd-gauge.js', 'own-tree', 4, null, PROC],
   ['src/server/fs-canary-worker.js', 'exempt', 1, null, 'the canary probes the server’s own tree in its own worker'],
