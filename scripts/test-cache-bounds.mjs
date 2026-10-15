@@ -24,7 +24,9 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { Worker } from 'node:worker_threads';
 import { mutantCopies } from './mutant-copy.mjs';
+import { armWatchdog } from './suite-watchdog.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
@@ -32,6 +34,10 @@ const CB = require('../src/cache-bounds.js');
 const { UsageHistory } = require('../src/usage-history.js');
 const { costBetweenMulti } = require('../src/usage-anchors.js');
 const MC = require('../src/memory-census.js');
+// the suite's own clock (scripts/suite-watchdog.mjs, the two-clock rule): an async hang ends before the gate's budget naming
+// the last § header it printed and that header's last line (a main thread asleep in a syscall runs no timer — the gate's
+// /proc read names that one: rel280's was `main S wait_for_partner`, the r4 §26 release below)
+armWatchdog();
 // r4: a walk's answer carries asOf (its instant) — the parity legs compare the rest; _asOf keeps it for §31
 const rawAA = UsageHistory.prototype.aggregateAsync;
 UsageHistory.prototype.aggregateAsync = function (...a) { return rawAA.apply(this, a).then((x) => { if (!x || !('asOf' in x)) return x; const { asOf, ...r } = x; Object.defineProperty(r, '_asOf', { value: asOf }); return r; }); };
@@ -603,31 +609,94 @@ console.log('§25–§31 r4: the person is told, stuck workers, the whole-line h
   await t4.aggregateAsync({ to: NOW - 35 });
   ok(t4._evCache !== before27 && costAt(t4) === truth27, `§27 the next fold reads the edited line, its WHOLE-line hash says STALE, the cache rebuilds: the money readers answer the NEW value (${oldCost.toFixed(4)} → ${costAt(t4).toFixed(4)})`);
   // §26 (verify #2): a fold worker blocked in a read is STUCK — counted, said, no second worker, resume on release
+  // r5 (lane cache-bounds-stuck-worker-race, B-a568 — the hosted runner: rel282 EPIPE in the r4 release(), rel280 a 300 s hang
+  // whose last lines are the r3 control's "2 stuck"): three orders of the fifo stub a descheduled 2-cpu runner wins the other
+  // way, FORCED here instead of hoped (measured at 2 cpus + the event-loop stall preload: the r4 fixture red 11 in 20 — EPIPE ×10, rel280's hang ×1):
+  //   ① a TERMINATED worker never reads its fifo: its open() returns into a terminating isolate and the worker's cleanup closes
+  //     the fd (strace: close, no read) — the r4 release() wrote after its open, racing that close ⇒ EPIPE thrown (rel282)
+  //   ② ONE writer open wakes EVERY reader asleep in the fifo's open: `release(); release();` left the second BLOCKING open
+  //     with no reader ever to come — the main thread asleep in it runs no timer (rel280: 300 s, load 4.8→0.2)
+  //   ③ the fold deadline is armed at spawn and the stub blocks only once booted: a boot slower than the deadline ⇒
+  //     terminated before its read, never stuck. The deadline is HELD until a thread sits in the fifo's open
+  // Released = KNOCKED: a NONBLOCK writer open (ENXIO = no reader at this instant — nothing to wait for), one byte (EPIPE =
+  // the woken worker went first — released all the same), again until the PRODUCT says it exited (its stuck row gone).
+  console.log('  §26 a fold worker blocked in a read: stuck, refused, knocked loose');
   const fifo = path.join(tmp, 'ledger.fifo'); spawnSync('mkfifo', [fifo]);
-  const blocked = path.join(tmp, 'blocked-worker.js');
-  fs.writeFileSync(blocked, `const fs = require('fs'); const { parentPort } = require('worker_threads'); parentPort.on('message', (m) => { if (m && m.op === 'fold') fs.readFileSync(${JSON.stringify(fifo)}); });`);
-  const release = () => { const fd = fs.openSync(fifo, 'w'); fs.writeSync(fd, 'x'); fs.closeSync(fd); };
+  const blocked = path.join(tmp, 'blocked-worker.js'), mark = path.join(tmp, 'blocked-worker.at');
+  fs.writeFileSync(blocked, `const fs = require('fs'); const { parentPort } = require('worker_threads'); parentPort.on('message', (m) => { if (m && m.op === 'fold') { fs.writeFileSync(${JSON.stringify(mark)}, ''); fs.readFileSync(${JSON.stringify(fifo)}); } });`);
   const until = async (fn, ms = 5000) => { const end = Date.now() + ms; while (!fn() && Date.now() < end) await new Promise((r) => setTimeout(r, 25)); return fn(); };
+  const knock = () => { let fd = null; try { fd = fs.openSync(fifo, fs.constants.O_WRONLY | fs.constants.O_NONBLOCK); fs.writeSync(fd, 'x'); return 'wrote'; } catch (e) { if (['ENXIO', 'EPIPE', 'EAGAIN'].includes(e.code)) return e.code; throw e; } finally { if (fd !== null) fs.closeSync(fd); } };
+  const stuckGone = (u) => () => !u.cacheCensus().some((x) => x.name === 'usage fold workers stuck');
+  const releaseUntil = async (gone) => { const end = Date.now() + 5000; while (!gone() && Date.now() < end) { knock(); await new Promise((r) => setTimeout(r, 25)); } return gone(); };
+  // a thread of this process asleep in a fifo's open (Linux /proc wchan; the stub's fifo is the only one here); WCHAN = this
+  // box's /proc names a sleeping thread's wait at all (the V8 helpers sit in a futex)
+  const FIFO_WAIT = /^(?:wait_for_partner|fifo_open)$/;
+  const wchans = () => { try { return fs.readdirSync('/proc/self/task').map((t) => { try { return [t, fs.readFileSync(`/proc/self/task/${t}/wchan`, 'utf8').trim()]; } catch { return [t, '']; } }); } catch { return []; } };
+  const WCHAN = wchans().some(([, w]) => w && w !== '0');
+  const fifoTid = () => (wchans().find(([, w]) => FIFO_WAIT.test(w)) || [null])[0];
+  /** ③ the product arms setTimeout(onDeadline, coldFoldDeadlineMs) as it spawns the worker: that one call is captured (by its
+   *  delay, inside _spawnJob alone) and the leg fires it. */
+  const holdDeadline = (u) => {
+    const h = { fire: null }, st = globalThis.setTimeout, spawn = u._spawnJob;
+    u._spawnJob = function (...a) { globalThis.setTimeout = (fn, ms, ...r) => (ms === u.coldFoldDeadlineMs && !h.fire ? ((h.fire = fn), st(() => { }, 0)) : st(fn, ms, ...r)); try { return spawn.apply(this, a); } finally { globalThis.setTimeout = st; } };
+    h.restore = () => { delete u._spawnJob; };
+    return h;
+  };
   t4.coldWorkerFile = blocked; t4.coldFoldDeadlineMs = 300; t4.coldTerminateDeadlineMs = 300;
-  const w26 = t4._coldWalks;
-  const tq1 = Date.now(), e1 = await t4.aggregateAsync({ to: NOW - 40 }).then(() => null, (e) => e), took1 = Date.now() - tq1;
+  const w26 = t4._coldWalks, hold26 = holdDeadline(t4);
+  const tq1 = Date.now(), p1 = t4.aggregateAsync({ to: NOW - 40 }).then(() => null, (e) => e);
+  const sat26 = await until(() => hold26.fire && fs.existsSync(mark) && (!WCHAN || fifoTid()));
+  hold26.restore(); if (hold26.fire) hold26.fire();
+  const e1 = await p1, took1 = Date.now() - tq1;
   const tq = Date.now(); const e2 = await t4.aggregateAsync({ to: NOW - 41 }).then(() => null, (e) => e); const took2 = Date.now() - tq;
   // "at once" = refused before a worker spawns (the witness: _coldWalks +1 — the r3stuck mutant below spawns ×2); the time is
   // printed beside the same-run control, the first request's deadline wait
   boundLine('§26', took2, took1, 'witness: refused before a worker spawns (_coldWalks +1)');
   const row26 = t4.cacheCensus().find((x) => x.name === 'usage fold workers stuck');
-  ok(e1 && e1.code === 'DEADLINE' && e2 && e2.code === 'STUCK' && /1 fold worker\(s\) stuck/.test(e2.message) && t4._coldWalks - w26 === 1 && row26 && row26.count === 1, `§26 a worker blocked in a read: DEADLINE once, then "${e2 && e2.message.slice(0, 60)}…" at once (${took2} ms), 1 worker spawned, the census counts it`);
-  t4.coldWorkerFile = null; release();
-  await until(() => !t4.cacheCensus().some((x) => x.name === 'usage fold workers stuck'));
+  ok(sat26 && e1 && e1.code === 'DEADLINE' && e2 && e2.code === 'STUCK' && /1 fold worker\(s\) stuck/.test(e2.message) && t4._coldWalks - w26 === 1 && row26 && row26.count === 1, `§26 a worker blocked in a read (the deadline held until it sat in the fifo's open${WCHAN ? '' : ' — by its mark: /proc names no wait on this box'}: ${!!sat26}): DEADLINE once, then "${e2 && e2.message.slice(0, 60)}…" at once (${took2} ms), 1 worker spawned, the census counts it`);
+  t4.coldWorkerFile = null;
+  const gone26 = await releaseUntil(stuckGone(t4));
+  t4.coldFoldDeadlineMs = 0; t4.coldTerminateDeadlineMs = 0; // the real fold below runs on the product's own deadlines (300 ms is the stub's)
   const a26 = await t4.aggregateAsync({ to: NOW - 42 }).then((x) => x, (e) => e);
-  ok(a26 && a26.totals && !t4.cacheCensus().some((x) => x.name === 'usage fold workers stuck'), '§26 released: the stuck worker exited, the count dropped, folds resume');
+  ok(gone26 && a26 && a26.totals && stuckGone(t4)(), '§26 released: the stuck worker exited, the count dropped, folds resume');
   const r3stuck = uhSrc4.replace("if (STUCK.size) return Promise.reject(", "if (false) return Promise.reject(");
   const ts3 = new (M4.load('src/usage-history.js', r3stuck, 'r3stuck').UsageHistory)({ dataDir: path.join(tmp, 'r4'), homeDir: tmp }); ts3.ledgerWindowMs = 40 * DAY; ts3.ledgerHotMaxBytes = 60 * 1024; ts3.warm();
   ts3.coldWorkerFile = blocked; ts3.coldFoldDeadlineMs = 300; ts3.coldTerminateDeadlineMs = 300;
   await ts3.aggregateAsync({ to: NOW - 43 }).catch(() => null); await ts3.aggregateAsync({ to: NOW - 44 }).catch(() => null);
   ok(r3stuck !== uhSrc4 && ts3._coldWalks === 2, `control (no stuck refusal, r3): ${ts3._coldWalks} blocked workers alive at once ⇒ RED`);
-  release(); release(); await new Promise((r) => setTimeout(r, 300));
-  t4.coldFoldDeadlineMs = 0; t4.coldTerminateDeadlineMs = 0;
+  ok(await releaseUntil(stuckGone(ts3)), '§26 the r3 control\'s two blocked workers knocked loose: both exited (② one knock wakes every reader; the next finds none and waits for nothing)');
+  // the r4 fixture's release, verbatim — the controls' subject
+  const r4release = () => { const fd = fs.openSync(fifo, 'w'); fs.writeSync(fd, 'x'); fs.closeSync(fd); };
+  if (!WCHAN) console.log('  §26 controls ①② need /proc wchan (a thread asleep in the fifo\'s open) — not on this box');
+  else {
+    /** a stub worker of our own asleep in the fifo's open, then terminated (what the product's end() does) */
+    const stub = async () => { const w = new Worker(blocked), s = { exited: false }; w.on('exit', () => { s.exited = true; }); w.postMessage({ op: 'fold' }); s.tid = await until(fifoTid); w.terminate().catch(() => { }); return s; };
+    /** fn() with its fs.writeSync HELD until thread `tid` is gone — the woken worker's cleanup closed its end first, the
+     *  runner's order (a bounded spin: Atomics.wait 1 ms steps, 2 s) */
+    const heldWrite = (fn, tid) => {
+      const ws = fs.writeSync, sab = new Int32Array(new SharedArrayBuffer(4)), alive = () => fs.existsSync('/proc/self/task/' + tid);
+      let fd = null, first = false, err = null, out;
+      fs.writeSync = function (d, ...a) { fd = d; const end = Date.now() + 2000; while (alive() && Date.now() < end) Atomics.wait(sab, 0, 0, 1); first = !alive(); return ws.call(this, d, ...a); };
+      try { out = fn(); } catch (e) { err = e; } finally { fs.writeSync = ws; }
+      if (err && fd !== null) try { fs.closeSync(fd); } catch { }
+      return { err, out, first };
+    };
+    const a1 = await stub(), ra = a1.tid ? heldWrite(r4release, a1.tid) : { err: null }; await until(() => a1.exited); // its blocking open only over a reader seen asleep
+    ok(a1.tid && ra.first && ra.err && ra.err.code === 'EPIPE', `control ① (rel282's order — the r4 release, the woken worker gone before its write): ${ra.err ? ra.err.code + ' thrown' : 'wrote'} ⇒ RED`);
+    const b1 = await stub(), rb = heldWrite(knock, b1.tid); await until(() => b1.exited);
+    ok(b1.tid && rb.first && !rb.err && rb.out === 'EPIPE' && b1.exited, `§26 the knock in that order: ${rb.err ? 'threw ' + rb.err.code : rb.out} — nothing thrown, the worker released and exited`);
+    // control ② (rel280's order): the r4 release with NO reader left sits in the fifo's open — run in a worker thread so this
+    // suite survives it (the main thread there is the 300 s hang: no timer runs); a reader opened from here lets it go
+    const c1 = new Worker(`const fs = require('fs'); const fifo = ${JSON.stringify(fifo)}; (${r4release})(); require('worker_threads').parentPort.postMessage('released');`, { eval: true });
+    let c1Done = false; c1.on('message', () => { c1Done = true; }); c1.on('error', () => { });
+    const sat2 = await until(fifoTid, 2000), rfd = fs.openSync(fifo, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
+    await until(() => c1Done, 2000); fs.closeSync(rfd); c1.terminate().catch(() => { });
+    ok(sat2 && c1Done, `control ② (rel280's order — the r4 release with no reader left): ${sat2 ? 'asleep in the fifo\'s open until a reader came' : 'never in the open'} ⇒ RED`);
+    ok(knock() === 'ENXIO', '§26 the knock with no reader left: ENXIO at once — never asleep in the open');
+  }
+  // the belt: nothing of this leg may still sit in the fifo's open when the suite ends — process.exit() waits for such a
+  // worker thread forever (measured, Node 22 + 24): a knock wakes a reader, a reader's open + close a writer
+  await until(() => { if (!fifoTid()) return true; knock(); try { fs.closeSync(fs.openSync(fifo, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK)); } catch { } return false; });
 }
 { // §30 (verify #5): a month bigger than the fold's soft cap folds in row-budget chunks
   const t5 = mkUh('r4big', 40 * DAY, 60 * 1024);
