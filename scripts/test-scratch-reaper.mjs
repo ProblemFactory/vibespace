@@ -18,13 +18,17 @@
 // process younger than the stale floor under an existing path) and the two-sweeps leg (two node children driving the
 // REAL reaper over a fake proc root whose one victim is a process this suite started). Nothing but this suite's own
 // processes is ever signalled, each by pid + starttime.
+//
+// §9 (B-9ec9, lane ci-sweep-pace, 2.369.280): the tiers' DIRECTORY sweep runs on a pace (scratch-sweep.mjs sweepDue, ci.mjs
+// dirSweepPacer) — a fake clock, a counting sweep and a fixture tree; never the box's /tmp.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { judgeScratch, scratchOrphans, reapScratchOrphans, reapScratchOrphansAsync, reapByHand, acquireReaperLock, acquireReaperLockAsync, verdictReport, scratchRootClaims, SCRATCH_ROOT_RE, REAPER_LOCK_WAIT_MS, defaultReaperLockPath } from './ci.mjs';
+import { judgeScratch, scratchOrphans, reapScratchOrphans, reapScratchOrphansAsync, reapByHand, acquireReaperLock, acquireReaperLockAsync, verdictReport, scratchRootClaims, SCRATCH_ROOT_RE, REAPER_LOCK_WAIT_MS, defaultReaperLockPath, dirSweepPacer, sweepDirsNow } from './ci.mjs';
+import { sweepDue, sweepPaceLine, sweepScratchDirs, SWEEP_PACE } from './scratch-sweep.mjs';
 import { scratch, scratchDir, scratchHome, stampScratchRun, readRunRecord, runOwnerState, RUN_RECORD, endDaemonsOf, endRootedProcesses } from './scratch.mjs';
 import { procStat, procUid, machineBootId, makeRunRecord, procBootMs, procBornMs } from './scratch-run.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
@@ -826,6 +830,116 @@ console.log('\n§8 wiring');
   // that print (the revert table found it uncaught); a launcher's stderr is the one place a pusher sees the refusal before the tier
   ok(/try \{ reapScratchOrphans\(\{ log: \(m\) => console\.error\(m\) \}\); \} catch \(e\) \{ console\.error\(`\[ci:heavy\] scratch reaper skipped: \$\{e && e\.message\}`\); \}/.test(fnBody(ci, 'function heavyLaunch(')),
     'WIRING: the heavy launcher prints a refused seam (`[ci:heavy] scratch reaper skipped: …`) instead of swallowing it');
+}
+// ── §9 THE PACE (B-9ec9, lane ci-sweep-pace, 2.369.280): A TIER SWEEPS THE DIRS ON A PACE, NEVER AFTER EVERY ROW ──
+// int236 timed test-ci-heavy-launch's five stub tiers (~1 500 rows, a /tmp sweep after each, skipped rows too): 766 s with
+// the sweep, 386 s without. A dir needs a day to qualify, so a tier asks sweepDue (scripts/scratch-sweep.mjs, PURE) after
+// each RAN row: due at a boundary, or 60 s / 20 ran rows since the last sweep. The pacer (ci.mjs dirSweepPacer) runs here
+// over a fake clock and a counting sweep; a fixture tree proves the pace reaps what a per-row sweep reaps by the tier's end.
+console.log('\n§9 the dir sweep runs on a pace — a boundary, 60 s or 20 ran rows; never after a skipped row');
+{
+  const T0 = 1_000_000;
+  const D = (o) => sweepDue({ lastSweepAt: T0, now: T0, ...o });
+  for (const [o, due, why, name] of [
+    [{ boundary: true }, true, 'boundary', "a boundary (the tier's end, the heavy launch, --reap) ⇒ due with nothing ran and no time passed"],
+    [{ now: T0 + 59_000, ranSinceSweep: 19 }, false, 'not due: 19 row(s) ran, 59 s since the last sweep', '59 s and 19 ran rows ⇒ not due, and the why says both'],
+    [{ now: T0 + 60_000, ranSinceSweep: 1 }, true, '60 s', '60 s since the last sweep ⇒ due (one row ran)'],
+    [{ now: T0 + 1_000, ranSinceSweep: 20 }, true, '20 rows', '20 ran rows ⇒ due (1 s passed)'],
+    [{ now: T0 + 60_000, ranSinceSweep: 20 }, true, '60 s', 'both ⇒ the clock is named first'],
+    [{ lastSweepAt: null, ranSinceSweep: 1 }, true, '60 s', 'no sweep yet ⇒ due (never is longer than 60 s)'],
+    [{ ranSinceSweep: 0 }, false, 'not due: 0 row(s) ran, 0 s since the last sweep', 'nothing ran, no time passed ⇒ not due'],
+    [{ ranSinceSweep: 3, pace: { ms: 5000, rows: 3 } }, true, '3 rows', 'the pace is a parameter: rows'],
+    [{ now: T0 + 5000, ranSinceSweep: 1, pace: { ms: 5000, rows: 3 } }, true, '5 s', 'the pace is a parameter: ms'],
+  ]) { const v = D(o); ok(v.due === due && v.why === why, `sweepDue: ${name}`, v); }
+  ok(SWEEP_PACE.ms === 60_000 && SWEEP_PACE.rows === 20, 'the pace: 60 s or 20 ran rows (the brief)', SWEEP_PACE);
+  ok(sweepPaceLine({ why: '20 rows', ran: 20, sinceMs: 14_200 }) === '[ci] dir sweep due — 20 rows: 20 row(s) ran, 14 s since the last sweep'
+    && sweepPaceLine({ why: 'boundary', what: 'heavy launch' }) === '[ci] dir sweep due — boundary (heavy launch)',
+  'ONE pace line per sweep names why it ran and what passed since the last one', [sweepPaceLine({ why: '20 rows', ran: 20, sinceMs: 14_200 }), sweepPaceLine({ why: 'boundary', what: 'heavy launch' })]);
+
+  // THE PACER over a fake clock: a plan of rows (ms each, ran or skipped), a counting sweep
+  const drive = (mod, plan, { env = {}, mkSweep = null } = {}) => {
+    let t = T0; const swept = [];
+    const sweepFn = mkSweep ? mkSweep(() => t) : null;
+    const p = mod.dirSweepPacer({ now: () => t, sweep: (info) => { swept.push(info); if (sweepFn) sweepFn(info); }, env, log: () => { } });
+    for (const step of plan) { t += step.ms || 0; p.afterRow(step.absent ? { absent: true, ok: true } : { ok: true }); }
+    p.boundary("the tier's end");
+    return { swept, rowsSwept: swept.slice(0, -1), last: swept.at(-1), state: p.state };
+  };
+  const ran = (n, ms = 0) => Array.from({ length: n }, () => ({ ms }));
+  const skipped = (n, ms = 0) => Array.from({ length: n }, () => ({ ms, absent: true }));
+  const PACER = { dirSweepPacer };
+  const p1 = drive(PACER, ran(100));
+  ok(p1.rowsSwept.length === 5 && p1.rowsSwept.every((s) => s.why === '20 rows' && s.ran === 20), `100 ran rows in no time ⇒ 5 sweeps, each after 20 ran rows (${p1.rowsSwept.length})`, p1.rowsSwept);
+  ok(p1.last.why === 'boundary' && p1.last.what === "the tier's end" && p1.last.ran === 0 && p1.swept.length === 6, "the tier's end ALWAYS sweeps — a boundary, even with nothing ran since the last sweep", p1.last);
+  const p2 = drive(PACER, ran(10, 7000));
+  ok(p2.rowsSwept.length === 1 && p2.rowsSwept[0].why === '60 s' && p2.rowsSwept[0].ran === 9 && p2.rowsSwept[0].sinceMs === 63_000, '10 ran rows 7 s apart ⇒ ONE sweep, after the 9th (63 s ≥ 60 s)', p2.rowsSwept);
+  const p3 = drive(PACER, skipped(1000, 10_000));
+  ok(p3.rowsSwept.length === 0 && p3.state.rows === 1000 && p3.last.why === 'boundary' && p3.swept.length === 1, `1 000 skipped rows over 10 000 s ⇒ no sweep after any of them; the tier's end sweeps once (${p3.swept.length})`, p3.swept);
+  const p4 = drive(PACER, [...ran(19), ...skipped(50), ...ran(1)]);
+  ok(p4.rowsSwept.length === 1 && p4.rowsSwept[0].why === '20 rows' && p4.rowsSwept[0].ran === 20, 'a skipped row is never COUNTED: 19 ran + 50 skipped + 1 ran ⇒ the sweep comes after the 20th RAN row', p4.rowsSwept);
+  const p5 = drive(PACER, [...ran(1), ...skipped(13, 5000), ...ran(1)]);
+  ok(p5.rowsSwept.length === 1 && p5.rowsSwept[0].why === '60 s' && p5.rowsSwept[0].ran === 2, 'never AFTER a skipped row: 65 s pass over skipped rows with no sweep; the next ran row sweeps (60 s)', p5.rowsSwept);
+  const p6 = drive(PACER, [...ran(30), ...skipped(10)], { env: { VIBESPACE_CI_DIR_SWEEP: 'every' } });
+  ok(p6.rowsSwept.length === 40 && p6.rowsSwept.every((s) => s.why === 'every row'), `VIBESPACE_CI_DIR_SWEEP=every keeps the pre-.280 sweep: 40 rows (10 skipped) ⇒ 40 sweeps (${p6.rowsSwept.length})`);
+
+  // sweepDirsNow: `off` judges and says nothing (the pace line neither); a seam says so FIRST and no pace line follows; the pace
+  // line leads the verdict lines (a dry sweep over a fixture root — never the box's /tmp)
+  const FXL = mkRoot('pace-line'); fs.mkdirSync(path.join(FXL, 'vs-old-1'));
+  const OLDT = (Date.now() - 25 * 3600e3) / 1000; fs.utimesSync(path.join(FXL, 'vs-old-1'), OLDT, OLDT);
+  const prevEnv = process.env.VIBESPACE_CI_DIR_SWEEP;
+  const linesOf = (envVal, opts) => { if (envVal == null) delete process.env.VIBESPACE_CI_DIR_SWEEP; else process.env.VIBESPACE_CI_DIR_SWEEP = envVal; const lines = []; try { const r = sweepDirsNow({ dryRun: true, log: (l) => lines.push(l), pace: { why: '20 rows', ran: 20, sinceMs: 9000 }, prefixes: [{ under: FXL, prefix: 'vs-' }], production: [], readOwner: () => null, ...opts }); return { r, lines }; } finally { if (prevEnv == null) delete process.env.VIBESPACE_CI_DIR_SWEEP; else process.env.VIBESPACE_CI_DIR_SWEEP = prevEnv; } };
+  const off = linesOf('off'), seamed = linesOf(null, { procRoot: path.join(MAIN, 'no-such-proc') }), paced = linesOf(null);
+  ok(off.r === null && off.lines.length === 0, 'VIBESPACE_CI_DIR_SWEEP=off: nothing judged, nothing said — not even the pace line', off.lines);
+  ok(seamed.r === null && seamed.lines.length === 1 && /^\[ci\] dir sweep: skipped under the fake process table /.test(seamed.lines[0]), 'under a seam the sweep says so first, and no pace line claims a sweep', seamed.lines);
+  ok(paced.r && paced.lines[0] === '[ci] dir sweep due — 20 rows: 20 row(s) ran, 9 s since the last sweep' && paced.lines.some((l) => l.startsWith(`[ci] would reap dir ${FXL}/vs-old-1 — `)) && /^\[ci\] dir sweep: would reap 1 dir\(s\)/.test(paced.lines.at(-1)) && fs.existsSync(path.join(FXL, 'vs-old-1')),
+    'the pace line LEADS the verdict lines, which are unchanged (one per reaped root + the summary)', paced.lines);
+
+  // THE SAME VICTIMS: a stale dir, a fresh one and one crossing the 24 h line mid-tier — `every` and the pace reap the same two
+  // by the tier's end (the fixture root a suite-owned sibling; the clock a day on is the pacer's)
+  const victimsOf = (tag, env) => {
+    const FX = mkRoot('pace-' + tag), now0 = Date.now();
+    const mk = (n, at) => { const d = path.join(FX, n); fs.mkdirSync(path.join(d, 'sub'), { recursive: true }); fs.writeFileSync(path.join(d, 'sub', 'f'), 'x'.repeat(4096)); for (const q of [path.join(d, 'sub', 'f'), path.join(d, 'sub'), d]) fs.utimesSync(q, at / 1000, at / 1000); };
+    mk('vs-stale-1', now0 - 25 * 3600e3); mk('vs-fresh-1', now0); mk('vs-crossing-1', now0 - 24 * 3600e3 + 30_000);
+    const reaped = [];
+    const r = drive(PACER, ran(50, 1000), { env, mkSweep: (clock) => () => { const res = sweepScratchDirs({ prefixes: [{ under: FX, prefix: 'vs-' }], production: [], now: now0 + (clock() - T0), liveRoots: [], readOwner: () => null, log: () => { } }); reaped.push(...res.reaped.map((x) => x.name)); } });
+    return { sweeps: r.swept.length, reaped: reaped.sort(), left: fs.readdirSync(FX).sort() };
+  };
+  const vEvery = victimsOf('every', { VIBESPACE_CI_DIR_SWEEP: 'every' }), vPace = victimsOf('paced', {});
+  ok(JSON.stringify(vEvery.reaped) === '["vs-crossing-1","vs-stale-1"]' && JSON.stringify(vPace.reaped) === JSON.stringify(vEvery.reaped) && JSON.stringify(vPace.left) === '["vs-fresh-1"]' && JSON.stringify(vEvery.left) === '["vs-fresh-1"]',
+    `THE SAME VICTIMS: 50 rows 1 s apart — per row and on the pace both reap the stale dir and the one crossing the 24 h line mid-tier, and keep the fresh one (${vEvery.reaped.join(', ')})`, { vEvery, vPace });
+  ok(vEvery.sweeps === 51 && vPace.sweeps === 3, `…in 51 sweeps per row, 3 on the pace (after the 20th and the 40th ran row + the tier's end): ${vEvery.sweeps} vs ${vPace.sweeps}`);
+
+  // THE WIRING: both tiers ask the pacer after each row and sweep at their end; the heavy launch and --reap say `boundary`
+  const body = (src, head) => { const i = src.indexOf(head); if (i < 0) return ''; const j = src.indexOf('\n}\n', i); return src.slice(i, j < 0 ? undefined : j); };
+  const paceWiring = (src) => {
+    const out = [];
+    for (const [head, end] of [['async function fastGate(', "dirPace.boundary(\"the fast tier's end\")"], ['async function heavyGate(', "dirPace.boundary(\"the heavy tier's end\")"]]) {
+      const b = body(src, head);
+      if (!/const dirPace = dirSweepPacer\(\);/.test(b)) out.push(`${head} makes no pacer`);
+      if ((b.match(/dirPace\.afterRow\(r\);/g) || []).length !== 1) out.push(`${head} does not ask the pacer once per row`);
+      if (/quietSweep\(|sweepDirsNow\(/.test(b)) out.push(`${head} sweeps outside the pacer (the per-row call)`);
+      if (!b.includes(end)) out.push(`${head} does not sweep at its end`);
+    }
+    if (!/sweepDirsNow\(\{ log: \(m\) => console\.error\(m\), pace: \{ why: 'boundary', what: 'heavy launch' \} \}\)/.test(body(src, 'function heavyLaunch('))) out.push('the heavy launch does not sweep as a boundary');
+    if (!/byHand: true, pace: \{ why: 'boundary', what: '--reap' \}/.test(src)) out.push('--reap does not sweep as a boundary');
+    if (!/^\/\/ VIBESPACE_CI_DIR_SWEEP: .*\n(?:\/\/.*\n){0,3}\/\/ .*`every` = the pre-\.280 sweep after every row/m.test(src)) out.push('the usage block does not name `every`');
+    return out;
+  };
+  ok(paceWiring(ciSrc).length === 0, 'WIRING: fastGate + heavyGate ask dirPace.afterRow(r) once per row and sweep at their end; the heavy launch and --reap sweep as a boundary; the usage block names off / every', paceWiring(ciSrc));
+  // CONTROLS — the old per-row call restored, on scratch copies
+  const PER_ROW = "        dirPace.afterRow(r); // …nor its scratch dir, once nothing holds it (B-60d2) — on the tier's pace (B-9ec9)\n";
+  const OLD_ROW = "        try { quietSweep(); } catch (e) { console.log(`  · dir sweep skipped: ${e && e.message}`); } // …nor its scratch dir, once nothing holds it (B-60d2)\n";
+  ok(ciSrc.split(PER_ROW).length === 3 && paceWiring(ciSrc.replace(PER_ROW, OLD_ROW)).some((f) => /fastGate.*(per-row call|once per row)/.test(f)),
+    'CONTROL (text): the old per-row `quietSweep()` restored in the fast loop of a copy reads RED', paceWiring(ciSrc.replace(PER_ROW, OLD_ROW)));
+  const cRow = await copy('pace-per-row', [["      return v.due ? run(v.why) : v;\n", "      return run(v.why);\n"], ["      if (r && r.absent) return { due: false, why: 'a skipped row' };\n", '']]);
+  const r100 = cRow && cRow.dirSweepPacer ? drive(cRow, [...ran(80), ...skipped(20)]) : null;
+  ok(!!r100 && r100.rowsSwept.length === 100, `CONTROL (the old per-row sweep restored in a copy of the pacer): N sweeps for N rows — 100 for 100, 20 of them skipped (${r100 && r100.rowsSwept.length}; the pace: ${drive(PACER, [...ran(80), ...skipped(20)]).rowsSwept.length})`, cRow && cRow.missing);
+  const cSkip = await copy('pace-skip-counts', [["      if (r && r.absent) return { due: false, why: 'a skipped row' };\n", '']]);
+  const r4 = cSkip && cSkip.dirSweepPacer ? drive(cSkip, [...ran(19), ...skipped(50), ...ran(1)]) : null;
+  ok(!!r4 && r4.rowsSwept.length !== 1 && r4.rowsSwept[0] && r4.rowsSwept[0].ran === 20 && r4.rowsSwept[0].why === '20 rows', 'CONTROL (a skipped row counted, in a copy): the sweep lands after the 1st SKIPPED row — the skipped-row leg reads red', r4 && r4.rowsSwept.slice(0, 3));
+  const cEnd = await copy('pace-no-end', [["    boundary(what) { return run('boundary', what); },\n", "    boundary(what) { return { due: false, why: what }; },\n"]]);
+  const rEnd = cEnd && cEnd.dirSweepPacer ? drive(cEnd, skipped(5)) : null;
+  ok(!!rEnd && rEnd.swept.length === 0, "CONTROL (the boundary dropped, in a copy): a tier of skipped rows ends with NO sweep — the tier's-end leg reads red", rEnd && rEnd.swept);
 }
 } finally {
   endPlanted();

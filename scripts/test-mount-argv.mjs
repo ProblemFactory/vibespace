@@ -11,11 +11,21 @@
 //   ⑥ the log survives a remount (append, a marker per spawn, 1 MB rotate, a bounded tail)
 //   ⑦ _rcStats over a fake rclone: parsed JSON, a 2 s-style bound, no socket = {error}
 //   ⑧ patched-copy controls: poll ≥ ttl ⇒ red; a child built from rowOf(child) ⇒ red; the log opened 'w' ⇒ red
+// B-069b (lane mount-argv-vsdav-twin) — the ssh-host push mount (machine-mounts.js, a `sh -c` line on the user's machine)
+// is the THIRD caller of the builder:
+//   ⑩ its row's cells (daemon + log file, the vfs / dir-cache cells, the macOS volname, the nfs rung) + shellWords
+//     round-tripped through a real sh
+//   ⑪ byte parity: the REAL mountPush (stubbed _run) vs the base's hand-built line, both run by sh into a fake rclone
+//     that records its argv + env — the same words in the same order (Linux, macOS fuse + nfs); a `'` in the folder
+//     broke the old line, the new one hands the word over intact
+//   ⑫ the drift census over every src/ module (agentd included): no rclone mount flag, `rclone … mount` shell line or
+//     mount subcommand cell outside src/mount-argv.js — twin-sets = 0, re-measured every run; planted controls red
 import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { execFileSync } from 'node:child_process';
 import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
@@ -195,6 +205,139 @@ try {
   ok(cdOf(argvOf(cm, 'K', { cacheDir: cm._cacheDirOf(cm._get('K')) })) === '/home/u/.cache/vibespace/vfs-cache/K' && cdOf(argvOf(cm, 'J', { cacheDir: cm._cacheDirOf(cm._get('J')) })) === path.join(D, 'data-cache', 'vfs-cache', 'J'),
     '⑨ --cache-dir = the record\'s own cacheDir; a record that never moved keeps <dataDir>/vfs-cache/<id>');
   ok(!DM.pullMountArgs('/MP').includes('--cache-dir') && cdOf(DM.pullMountArgs('/MP', '/c/x')) === '/c/x', '⑨ the device twin: no dir ⇒ no --cache-dir (rclone\'s local default); a given dir is passed through');
+
+  console.log('⑩ the ssh-host push mount: its row on the builder (B-069b)');
+  const H = A.SSH_HOST_WEBDAV_ROW;
+  const hostArgs = (o) => A.rcloneMountArgs({ row: H, remote: 'vsdav:', mountpoint: '/m', logFile: '/L', ...o });
+  ok(JSON.stringify(hostArgs({ hostOs: 'linux', folderName: 'Project X' })) === JSON.stringify(['mount', 'vsdav:', '/m', '--daemon', '--log-file', '/L', '--log-level', 'NOTICE',
+    '--vfs-cache-mode', 'writes', '--dir-cache-time', '10s', '--timeout', '30s', '--contimeout', '10s']), '⑩ Linux rw: the hand-built cells, in their order (no --volname, no --read-only)', JSON.stringify(hostArgs({ hostOs: 'linux' })));
+  ok(JSON.stringify(hostArgs({ via: 'nfs', hostOs: 'macos', folderName: "Bob's notes/ü", readOnly: true })) === JSON.stringify(['nfsmount', 'vsdav:', '/m', '--daemon', '--log-file', '/L', '--log-level', 'NOTICE',
+    '--volname', 'VibeSpace Bobs notes', '--vfs-cache-mode', 'off', '--read-only', '--dir-cache-time', '10s', '--timeout', '30s', '--contimeout', '10s']), '⑩ macOS ro over the nfs rung: nfsmount, the folder-named volume (only [\\w .-] kept), cache off + --read-only', JSON.stringify(hostArgs({ via: 'nfs', hostOs: 'macos', folderName: "Bob's notes/ü", readOnly: true })));
+  const throws = (f) => { try { f(); return ''; } catch (e) { return String(e.message); } };
+  ok(/no "sshfs" rung/.test(throws(() => hostArgs({ via: 'sshfs' }))) && /onedrive row has no "nfs" rung/.test(throws(() => A.rcloneMountArgs({ row: PROV.byId.onedrive, remote: 'VS:', mountpoint: '/m', cacheDir: '/c', via: 'nfs' }))),
+    '⑩ a rung a row does not declare is refused by name (the hub rows: FUSE mount only)');
+  ok(/needs its log file/.test(throws(() => hostArgs({ logFile: null }))), '⑩ a --daemon row without its log file is refused (--daemon detaches stderr: the reason would be lost, inc-mtl78uhs)');
+  ok(census([{ ...H, rcloneType: 'webdav' }]).length === 0 && JSON.stringify(H.dirCache) === '{"ttl":"10s"}', '⑩ the row passes the dirCache census (webdav: a ttl, no poll)');
+  const WORDS = ['plain', 'two words', "Bob's", "''", '$HOME', '`id`', '"dq"', 'back\\slash', '', '*', '-n', 'a\nb', 'ü 名'];
+  const splitBySh = (line) => execFileSync('sh', ['-c', `printf '%s\\0' ${line}`], { env: { PATH: '/usr/bin:/bin' } }).toString().split('\0').slice(0, -1);
+  ok(JSON.stringify(splitBySh(A.shellWords(WORDS))) === JSON.stringify(WORDS), '⑩ shellWords: a real sh hands back every word as written (quote, $, backtick, space, empty, glob, newline, UTF-8)', JSON.stringify(splitBySh(A.shellWords(WORDS))));
+
+  console.log('⑪ byte parity: the real push mount vs the base\'s hand-built line, both run by sh');
+  const { MachineMounts } = require(path.join(REPO, 'src/machine-mounts.js'));
+  const HOME = path.join(D, 'home'), RCLONE = path.join(HOME, '.vibespace', 'bin', 'rclone'), EMPTY = path.join(D, 'empty-path');
+  fs.mkdirSync(path.dirname(RCLONE), { recursive: true }); fs.mkdirSync(EMPTY);
+  const OUT = path.join(D, 'rclone-seen');
+  // the fake rclone records what sh handed it (builtins only — the line runs under an empty PATH, so no setsid either)
+  fs.writeFileSync(RCLONE, `#!/bin/sh\nfor a in "$@"; do printf '%s\\0' "$a"; done > '${OUT}.argv'\nprintf '%s\\0' "$RCLONE_CONFIG_VSDAV_TYPE" "$RCLONE_CONFIG_VSDAV_URL" "$RCLONE_CONFIG_VSDAV_VENDOR" "$RCLONE_CONFIG_VSDAV_BEARER_TOKEN" > '${OUT}.env'\n`, { mode: 0o755 });
+  // ff33cdf1e src/machine-mounts.js:350–353, VERBATIM — the hand-built line this lane retired (the parity fixture)
+  const OLD_LINE = ({ env, rclone, sub, mp, logf, osKind, abs, mode }) => {
+    const roFlag = mode === 'rw' ? '' : '--read-only';
+    const volname = osKind === 'macos' ? `--volname 'VibeSpace ${path.basename(abs).replace(/[^\w .-]/g, '')}'` : '';
+    return `${env} $(command -v setsid >/dev/null 2>&1 && echo setsid) "${rclone}" ${sub} vsdav: '${mp}' --daemon --log-file '${logf}' --log-level NOTICE ${volname} --vfs-cache-mode ${mode === 'rw' ? 'writes' : 'off'} ${roFlag} --dir-cache-time 10s --timeout 30s --contimeout 10s </dev/null >/dev/null 2>>'${logf}'`;
+  };
+  const SETSID = '$(command -v setsid >/dev/null 2>&1 && echo setsid)';
+  const ENV = "RCLONE_CONFIG_VSDAV_TYPE=webdav RCLONE_CONFIG_VSDAV_URL='https://vs.example/dav' RCLONE_CONFIG_VSDAV_VENDOR=other RCLONE_CONFIG_VSDAV_BEARER_TOKEN='vsmt_TOKEN'";
+  const runSeen = (line) => {
+    for (const x of ['.argv', '.env']) fs.rmSync(OUT + x, { force: true });
+    try { execFileSync('/bin/sh', ['-c', line], { env: { PATH: EMPTY }, stdio: 'pipe' }); } catch (e) { return { code: e.status ?? 1, argv: null, env: null, why: String(e.stderr || e.message).trim().slice(0, 200) }; }
+    const rd = (x) => fs.readFileSync(OUT + x, 'utf8').split('\0').slice(0, -1);
+    return { code: 0, argv: rd('.argv'), env: rd('.env') };
+  };
+  const pushOnce = async ({ osKind, mode, folder, nfs = false }) => {
+    const abs = path.join(D, 'share', folder); fs.mkdirSync(abs, { recursive: true });
+    const dataDir = path.join(D, 'mm-' + Math.random().toString(16).slice(2)); fs.mkdirSync(dataDir);
+    const mm = new MachineMounts({ dataDir, hosts: { get: () => ({ id: 'h1', name: 'h1', transport: 'ssh' }) }, mountTokens: { mint: () => ({ raw: 'vsmt_TOKEN', rec: { id: 'tk1' } }), revoke: () => {} } });
+    const lines = [];
+    mm.detectOS = async () => osKind; mm._remoteHome = async () => HOME; mm._ensureRclone = async () => RCLONE;
+    mm._davBase = async () => ({ base: 'https://vs.example', tunnelPort: null });
+    mm._run = async (_h, cmd, args) => {
+      if (cmd === 'sh' && /nfsmount --help/.test(args[1])) return { code: 0, stdout: nfs ? 'yes' : 'no', stderr: '' };
+      if (cmd === 'sh' && /macfuse\.fs/.test(args[1])) return { code: 0, stdout: 'yes', stderr: '' };
+      if (cmd === 'sh') lines.push(args[1]);
+      return { code: 0, stdout: '', stderr: '' };
+    };
+    const log0 = console.log; console.log = () => {};
+    let r; try { r = await mm.mountPush('h1', { folder: abs, mode }); } finally { console.log = log0; }
+    const sub = nfs ? 'nfsmount' : 'mount', mp = `${HOME}/vibespace-remote/${folder}`, logf = `${HOME}/.vibespace/host-mount-${r.id}.log`;
+    return { r, lines, old: OLD_LINE({ env: ENV, rclone: RCLONE, sub, mp, logf, osKind, abs, mode }), mp, logf, sub };
+  };
+  for (const c of [{ osKind: 'linux', mode: 'rw', folder: 'Project X' }, { osKind: 'linux', mode: 'ro', folder: 'plain' },
+    { osKind: 'macos', mode: 'ro', folder: 'Project X', nfs: false }, { osKind: 'macos', mode: 'rw', folder: 'Notes (2026)', nfs: true }]) {
+    const p = await pushOnce(c), tag = `${c.osKind} ${c.mode} ${p.sub} "${c.folder}"`;
+    const nw = p.lines[0] || '', a = runSeen(p.old), b = runSeen(nw);
+    ok(p.lines.length === 1 && p.r.method === (c.nfs ? 'rclone-nfs' : 'rclone-webdav'), `⑪ ${tag}: one sh line, rung ${p.r.method}`, JSON.stringify(p.lines));
+    ok(nw.startsWith(`${ENV} ${SETSID} '${RCLONE}' '${p.sub}' 'vsdav:' `) && nw.endsWith(` </dev/null >/dev/null 2>>'${p.logf}'`) && p.old.startsWith(`${ENV} ${SETSID} `),
+      `⑪ ${tag}: the caller composes only env + the setsid prefix + shellWords + the fd redirect`, nw);
+    ok(a.code === 0 && b.code === 0 && JSON.stringify(a.argv) === JSON.stringify(b.argv) && JSON.stringify(a.env) === JSON.stringify(b.env) && a.argv.includes(p.mp),
+      `⑪ ${tag}: sh hands rclone the SAME words in the SAME order + the same env (${(b.argv || []).length} words)`, `old ${JSON.stringify(a.argv)} ${a.why || ''} new ${JSON.stringify(b.argv)} ${b.why || ''}`);
+    ok(c.osKind === 'macos' ? (b.argv || []).join(' ').includes(`--volname VibeSpace ${c.folder.replace(/[^\w .-]/g, '')} `) : !(b.argv || []).includes('--volname'), `⑪ ${tag}: ${c.osKind === 'macos' ? 'the folder-named volume' : 'no --volname'}`);
+  }
+  const q = await pushOnce({ osKind: 'linux', mode: 'rw', folder: "Bob's notes" });
+  const qa = runSeen(q.old), qb = runSeen(q.lines[0] || '');
+  ok(qa.code !== 0 && qb.code === 0 && qb.argv[2] === q.mp, '⑪ a `\'` in the folder name: the old line was a sh syntax error (the mount never ran), the new one hands the mountpoint over intact', `old exit ${qa.code} (${qa.why}), new ${JSON.stringify(qb.argv && qb.argv[2])}`);
+
+  console.log('⑫ the drift census: no rclone mount argv spelled outside src/mount-argv.js (twin-sets = 0, re-measured every run)');
+  const acorn = require('acorn');
+  // a string / template token (acorn — a comment is not an argv) that carries a mount-layer flag; xpra's `--daemon=no`
+  // is another program's cell. --timeout / --retries / --low-level-retries are not here: rclone lsf / cat probes use them
+  const MOUNT_FLAG = /(?:^|[\s'"`])--(?:vfs-[a-z-]+|dir-cache-time|poll-interval|attr-timeout|volname|daemon|allow-other|allow-non-empty|network-mode)(?=$|[\s'"`=])(?!=no\b)/;
+  const SHELL_MOUNT = /\brclone["'`]?\s+(?:nfs)?mount\b/;
+  const PROSE = [   // a `rclone … mount` that is TEXT, never run — each declared with its site count (a new site or a dead row is red)
+    { needle: 'rclone mount {name}: ', count: 5, why: 'the share dialog\'s hint for the user\'s OWN shell (sidebar-mounts.js + its zh / ja keys and values)' },
+    { needle: '=== vibespace: rclone mount spawned', count: 1, why: 'mounts.js LOG_MARK — the line written into a mount\'s log before each spawn' },
+  ];
+  const driftCensus = (files) => {
+    const red = [], seen = new Map(PROSE.map((x) => [x.needle, 0]));
+    let tokens = 0, excused = 0;
+    for (const { rel, src } of files) {
+      let toks = null;
+      for (const sourceType of ['script', 'module']) { try { toks = [...acorn.tokenizer(src, { ecmaVersion: 'latest', allowHashBang: true, sourceType, allowReturnOutsideFunction: true, locations: true })]; break; } catch { } }
+      if (!toks) { red.push(`${rel}: not tokenizable — the census cannot judge it`); continue; }
+      const onLine = new Map();
+      for (const t of toks) { const l = t.loc.start.line; if (!onLine.has(l)) onLine.set(l, []); onLine.get(l).push(t); }
+      toks.forEach((t, i) => {
+        if (t.type !== acorn.tokTypes.string && t.type !== acorn.tokTypes.template) return;
+        tokens++;
+        const v = String(t.value), at = `${rel}:${t.loc.start.line}`;
+        if (MOUNT_FLAG.test(v)) red.push(`${at} mount flag ${JSON.stringify(v.trim().slice(0, 60))}`);
+        else if (/--daemon=no\b/.test(v)) excused++;
+        if (SHELL_MOUNT.test(v)) { const pr = PROSE.find((x) => v.includes(x.needle)); if (pr) seen.set(pr.needle, seen.get(pr.needle) + 1); else red.push(`${at} shell \`rclone … mount\` ${JSON.stringify(v.slice(0, 60))}`); }
+        if (v === 'mount' || v === 'nfsmount') {
+          // the subcommand cell on a line that spells rclone — unless it is READ (argv.includes('mount') over a ps table)
+          const spells = onLine.get(t.loc.start.line).some((x) => /rclone/i.test(x.type === acorn.tokTypes.regexp ? x.value.pattern : String(x.value ?? '')));
+          const read = toks[i - 1]?.type === acorn.tokTypes.parenL && ['includes', 'indexOf'].includes(toks[i - 2]?.value) && toks[i - 3]?.type === acorn.tokTypes.dot;
+          if (spells && !read) red.push(`${at} the ${JSON.stringify(v)} subcommand cell beside rclone`);
+        }
+      });
+    }
+    for (const x of PROSE) if (seen.get(x.needle) !== x.count) red.push(`prose row ${JSON.stringify(x.needle)}: ${seen.get(x.needle)} sites, declared ${x.count} (${x.why})`);
+    return { red, tokens, excused };
+  };
+  const scope = [];
+  (function walk(d) { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const rel = d + '/' + e.name; if (e.isDirectory()) walk(rel); else if (/\.[cm]?js$/.test(e.name) && rel !== 'src/mount-argv.js') scope.push(rel); } })('src');
+  // every red / prose row needs `rclone` or a mount flag in the file's text — only those files are tokenized (sound: a
+  // file that spells neither cannot hit; it keeps the leg at a fraction of a second over ~770 modules)
+  const CAN_HIT = /rclone|--(?:vfs-|dir-cache-time|poll-interval|attr-timeout|volname|daemon|allow-other|allow-non-empty|network-mode)/i;
+  const all = scope.map((rel) => ({ rel, src: fs.readFileSync(path.join(REPO, rel), 'utf8') }));
+  const judge = (list) => driftCensus(list.filter((f) => CAN_HIT.test(f.src)));
+  const files = all.filter((f) => CAN_HIT.test(f.src));
+  const real = judge(all), agentd = scope.filter((f) => f.startsWith('src/agentd/')).length;
+  ok(real.red.length === 0, `⑫ twin-sets = 0: ${scope.length} src/ modules walked (${agentd} under src/agentd), ${files.length} spell rclone or a mount flag, ${real.tokens} string tokens judged — no mount argv outside the builder`, real.red.join('; '));
+  ok(agentd > 0 && files.some((f) => f.rel.startsWith('src/agentd/')) && real.excused >= 1 && files.some((f) => f.rel === 'src/machine-mounts.js'), '⑫ (the scope is derived and live: the daemon\'s modules walked + judged, xpra\'s --daemon=no seen and excused, machine-mounts.js judged)', `${agentd} agentd, ${real.excused} excused`);
+  const plant = (rel, extra) => { if (!scope.includes(rel)) throw new Error(`control target ${rel} is not in the scope`); return judge(all.map((f) => (f.rel === rel ? { rel, src: f.src + '\n' + extra + '\n' } : f))).red; };
+  // the base's own line (ff33cdf1e machine-mounts.js:353), planted back VERBATIM
+  const BASE_353 = "const rcloneCmd = (sub) => `${env} $(command -v setsid >/dev/null 2>&1 && echo setsid) \"${rclone}\" ${sub} vsdav: '${mp}' --daemon --log-file '${logf}' --log-level NOTICE ${volname} --vfs-cache-mode ${mode === 'rw' ? 'writes' : 'off'} ${roFlag} --dir-cache-time 10s --timeout 30s --contimeout 10s </dev/null >/dev/null 2>>'${logf}'`;";
+  const c1 = plant('src/machine-mounts.js', BASE_353);
+  ok(c1.length === 3 && c1.every((x) => x.startsWith('src/machine-mounts.js:')), '⑫ CONTROL: the base\'s hand-built line planted back ⇒ red (its --daemon, --vfs-cache-mode, --dir-cache-time cells)', c1.join('; '));
+  const c2 = plant('src/mounts.js', "execFile(this.rcloneBin(), ['mount', remote, mp, '--read-only']);");
+  ok(c2.length === 1 && /"mount" subcommand cell/.test(c2[0]), '⑫ CONTROL: a hand-built argv array (the subcommand cell beside rclone, no mount flag) ⇒ red', c2.join('; '));
+  ok(!files.some((f) => f.rel === 'src/agentd/mux.js'), '⑫ (control target: src/agentd/mux.js spells neither rclone nor a mount flag today — the prefilter skips it)');
+  const c3 = plant('src/agentd/mux.js', 'const line = `rclone mount vsdav: ${mp}`;');
+  ok(c3.length === 1 && /^src\/agentd\/mux\.js:\d+ shell/.test(c3[0]), '⑫ CONTROL: a literal `rclone mount` shell line planted in a daemon module the prefilter skipped ⇒ red (the filter reads the planted text)', c3.join('; '));
+  const c4 = plant('src/lib/sidebar-mounts.js', "tr('Then: rclone mount {name}: /mnt/x');");
+  ok(c4.length === 1 && /prose row .*6 sites, declared 5/.test(c4[0]), '⑫ CONTROL: a sixth copy of the declared prose ⇒ red (the row counts its sites)', c4.join('; '));
+  const c5 = plant('src/desktop-display.js', "spawn(rcloneBin, [mountWord, remote, mp, '--daemon']);");
+  ok(c5.length === 1 && /mount flag "--daemon"/.test(c5[0]), '⑫ CONTROL: a bare rclone --daemon beside the excused xpra --daemon=no ⇒ red', c5.join('; '));
 } finally {
   fs.rmSync(D, { recursive: true, force: true });
 }

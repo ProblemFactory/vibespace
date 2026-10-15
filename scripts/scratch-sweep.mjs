@@ -6,7 +6,8 @@
 // argv — ci.mjs liveScratchPaths), its run record's owner is not alive, and the NEWEST mtime in its tree is a day old
 // (a leaked server still writing is young whatever its dir's own mtime says). Never a production root, never a symlink
 // (lstat, then realpath == path, then an O_NOFOLLOW fd whose inode is the lstat's), never a shell: fs.rmSync.
-// dirVerdict is PURE (test-ci-gate §9d drives it as a table); sweepScratchDirs is the thin fs driver.
+// dirVerdict is PURE (test-ci-gate §9d drives it as a table); sweepScratchDirs is the thin fs driver. sweepDue (B-9ec9)
+// is the tiers' PACE, PURE too (test-scratch-reaper §9): a sweep a minute or per 20 ran rows, never one per row.
 import fs from 'node:fs';
 import path from 'node:path';
 import { SCRATCH_SWEEP } from './scratch.mjs';
@@ -16,6 +17,26 @@ export const DIR_STALE_MS = 24 * 60 * 60 * 1000;
 const NAME_RE = /^[A-Za-z0-9._-]+$/;
 const fmtAge = (ms) => (ms >= 3600000 ? `${Math.round(ms / 3600000)} h` : `${Math.round(ms / 60000)} min`);
 export const fmtBytes = (b) => (b >= 1 << 30 ? `${(b / (1 << 30)).toFixed(1)} GB` : b >= 1 << 20 ? `${(b / (1 << 20)).toFixed(1)} MB` : `${Math.round(b / 1024)} KB`);
+
+/** THE PACE (B-9ec9, lane ci-sweep-pace, 2.369.280). A tier swept /tmp after EVERY row, a skipped one too, at ~0.1–0.2 s a
+ *  sweep: int236 timed test-ci-heavy-launch's five stub tiers (~1 500 rows) at 766 s with the sweep, 386 s without. A dir
+ *  needs DIR_STALE_MS (a day) to qualify, so a sweep a minute reaps what a sweep a row reaps, at most a minute later.
+ *  sweepDue is PURE: due at a `boundary` (a tier's end, the heavy launch, `--reap`), once `pace.ms` passed since the last
+ *  sweep (none yet = due), or once `pace.rows` rows RAN since it. A skipped row is never counted: its caller never asks. */
+export const SWEEP_PACE = { ms: 60 * 1000, rows: 20 };
+export function sweepDue({ lastSweepAt, ranSinceSweep = 0, now, boundary = false, pace = SWEEP_PACE } = {}) {
+  if (boundary) return { due: true, why: 'boundary' };
+  const since = Number.isFinite(lastSweepAt) ? now - lastSweepAt : Infinity;
+  if (since >= pace.ms) return { due: true, why: `${Math.round(pace.ms / 1000)} s` };
+  if (ranSinceSweep >= pace.rows) return { due: true, why: `${pace.rows} rows` };
+  return { due: false, why: `not due: ${ranSinceSweep} row(s) ran, ${Math.round(since / 1000)} s since the last sweep` };
+}
+/** The ONE line a paced sweep adds before its verdict lines: why it ran (`boundary` + where / `60 s` / `20 rows` / `every
+ *  row`) and what passed since the last sweep. PURE. */
+export function sweepPaceLine({ why, what = '', ran = null, sinceMs = null } = {}) {
+  const since = [ran == null ? '' : `${ran} row(s) ran`, sinceMs == null || !Number.isFinite(sinceMs) ? '' : `${Math.round(sinceMs / 1000)} s`].filter(Boolean).join(', ');
+  return `[ci] dir sweep due — ${why}${what ? ` (${what})` : ''}${since ? `: ${since} since the last sweep` : ''}`;
+}
 
 /** reap | keep(why) for ONE directory entry, PURE. `mtimeMs` = the NEWEST mtime in its tree (-Infinity: not measured —
  *  only the other rules can keep it); `liveRoots` = the paths live processes name; `production` = never a unit (exact

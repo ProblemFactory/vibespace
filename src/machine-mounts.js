@@ -25,6 +25,7 @@ const fs = require('fs');
 const path = require('path');
 const { execFile } = require('child_process');
 const { deviceFolderMount } = require('./device-mount');
+const { rcloneMountArgs, shellWords, SSH_HOST_WEBDAV_ROW } = require('./mount-argv.js');   // THE mount argv (B-069b: the push mount's too)
 
 const RCLONE_PIN = 'v1.69.3'; // ≥1.66 brings `rclone nfsmount` (macOS without macFUSE); 2.369.12
 
@@ -338,7 +339,6 @@ class MachineMounts {
       const rclone = await this._ensureRclone(hostId, osKind);
       await this._run(hostId, 'mkdir', ['-p', mp]);
       const env = `RCLONE_CONFIG_VSDAV_TYPE=webdav RCLONE_CONFIG_VSDAV_URL='${davUrl}' RCLONE_CONFIG_VSDAV_VENDOR=other RCLONE_CONFIG_VSDAV_BEARER_TOKEN='${shareToken}'`;
-      const roFlag = mode === 'rw' ? '' : '--read-only';
       // FULL fd redirect (</dev/null >/dev/null 2>>log) is MANDATORY: without
       // it the --daemon rclone inherits the ssh channel's stdio and the
       // ControlMaster connection never frees, deadlocking the next
@@ -346,13 +346,18 @@ class MachineMounts {
       // setsid is LINUX-ONLY (macOS has none — the installer hit the same
       // trap, 2.152.1): prefix it only where it exists; rclone --daemon
       // self-detaches either way.
+      const setsid = '$(command -v setsid >/dev/null 2>&1 && echo setsid)';
       const logf = `${home}/.vibespace/host-mount-${id}.log`;
-      // Finder shows the VOLUME name, which defaults to an opaque
-      // 'vsdav{hash}' (real report: 名字不太对) — name it after the folder.
-      const volname = osKind === 'macos' ? `--volname 'VibeSpace ${path.basename(abs).replace(/[^\w .-]/g, '')}'` : '';
-      const rcloneCmd = (sub) => `${env} $(command -v setsid >/dev/null 2>&1 && echo setsid) "${rclone}" ${sub} vsdav: '${mp}' --daemon --log-file '${logf}' --log-level NOTICE ${volname} --vfs-cache-mode ${mode === 'rw' ? 'writes' : 'off'} ${roFlag} --dir-cache-time 10s --timeout 30s --contimeout 10s </dev/null >/dev/null 2>>'${logf}'`;
-      const runRclone = async (sub) => {
-        const r = await this._run(hostId, 'sh', ['-c', rcloneCmd(sub)]);
+      // THE argv is src/mount-argv.js's (B-069b, lane mount-argv-vsdav-twin): SSH_HOST_WEBDAV_ROW carries --daemon +
+      // --log-file, the vfs / dir-cache cells and the macOS --volname (Finder's name, after the folder); this line
+      // composes only the env, the setsid prefix, the quoted words (shellWords) and the fd redirect.
+      const rcloneLine = (via) => {
+        const argv = rcloneMountArgs({ row: SSH_HOST_WEBDAV_ROW, via, remote: 'vsdav:', mountpoint: mp, readOnly: mode !== 'rw', logFile: logf, hostOs: osKind, folderName: path.basename(abs) });
+        return { sub: argv[0], line: `${env} ${setsid} ${shellWords([rclone, ...argv])} </dev/null >/dev/null 2>>${shellWords([logf])}` };
+      };
+      const runRclone = async (via) => {
+        const { sub, line } = rcloneLine(via);
+        const r = await this._run(hostId, 'sh', ['-c', line]);
         if (r.code !== 0) {
           // the daemon child now writes to logf too — pull its tail so the
           // dialog shows the REAL reason, not an empty message
@@ -370,8 +375,8 @@ class MachineMounts {
           try { await this._ensureRclone(hostId, osKind, { force: true }); nfsOk = (await this._run(hostId, 'sh', ['-c', `"${rclone}" nfsmount --help >/dev/null 2>&1 && echo yes || echo no`])).stdout.includes('yes'); } catch { }
         }
         const fuse = await this._run(hostId, 'sh', ['-c', 'if [ -d /Library/Filesystems/macfuse.fs ] || [ -d /Library/Filesystems/osxfuse.fs ]; then echo yes; else echo no; fi']);
-        if (nfsOk) rungs.push({ method: 'rclone-nfs', run: () => runRclone('nfsmount') });
-        if ((fuse.stdout || '').includes('yes')) rungs.push({ method: 'rclone-webdav', run: () => runRclone('mount') });
+        if (nfsOk) rungs.push({ method: 'rclone-nfs', run: () => runRclone('nfs') });
+        if ((fuse.stdout || '').includes('yes')) rungs.push({ method: 'rclone-webdav', run: () => runRclone('fuse') });
         rungs.push({ method: 'mount_webdav', run: async () => {
           // macOS built-in WebDAV: keychain-free credentialed URL
           const url2 = davUrl.replace('://', `://vibespace:${shareToken}@`);
@@ -379,7 +384,7 @@ class MachineMounts {
           if (r.code !== 0) throw new Error('mount_webdav failed: ' + (r.stderr || r.stdout).slice(0, 200));
         } });
       } else {
-        rungs.push({ method: 'rclone-webdav', run: () => runRclone('mount') });
+        rungs.push({ method: 'rclone-webdav', run: () => runRclone('fuse') });
       }
       const errs = [];
       for (const rung of rungs) {

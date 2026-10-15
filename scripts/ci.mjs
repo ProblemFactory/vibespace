@@ -155,6 +155,10 @@
 // VIBESPACE_CI_LANE_ROOT=<dir>: every lane runs its suites with a PRIVATE HOME,
 // XDG_RUNTIME_DIR (0700) and session bus (<dir>/lane-<k>/{home,run,run/bus}) and
 // no inherited DISPLAY (laneEnv — the desktop batch's lanes).
+// VIBESPACE_CI_DIR_SWEEP: a tier sweeps the scratch dirs (scripts/scratch-sweep.mjs) on a PACE — once 60 s or 20 RAN
+// rows since its last sweep (a skipped row never counts), always at its end, and at the heavy launch (sweepDue, one
+// `[ci] dir sweep due — <why>` line per sweep); `off` skips every tier's sweep (a lane on a box whose reap is the
+// owner's; `--reap` by hand still judges); `every` = the pre-.280 sweep after every row, a skipped one too.
 // Exit codes: 0 green · 1 red · 2 refused (dirty tree / bad --only) · 3 the
 // tier did not run (never got the machine lock) · 4 ABORTED (superseded, the
 // lock taken, or terminated from outside — it stopped mid-tier). 0 and 1 are
@@ -170,7 +174,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { gitEnvFrom } from './git-env.mjs';
 import { procStat, procBootMs, procBornMs, machineBootId, readRunRecord, runOwnerState, stampScratchRun } from './scratch-run.mjs';
-import { sweepScratchDirs } from './scratch-sweep.mjs';
+import { sweepScratchDirs, sweepDue, sweepPaceLine } from './scratch-sweep.mjs';
 import { WORK_ROOT } from './scratch.mjs';
 import { MODELED, KEPT, parseHunks, changeOf, ruleSelect } from './affected-model.mjs';
 import * as RM from './reach-model.mjs';
@@ -408,7 +412,7 @@ export const SUITES = [
   { name: 'test-mount-liveness', tier: 'fast', why: 'PURE verdict table + the real MountManager over stubbed probes + 3 patched copies · 0.4 s' }, // lane mount-liveness: the health sweep's two questions (a slow listing is never a teardown)
   { name: 'test-mount-providers', tier: 'fast', why: 'in-process + 4 esbuild client bundles · 2.7 s' }, // lane dc-mount-providers: a storage provider = its row file + one index line (fake acme provider through the real manager; base-vs-tree differential; patched-copy controls)
   { name: 'test-vfs-cache-place', tier: 'fast', why: 'in-process + vfsMeta walk children · 800 ms' }, // lane vfs-cache-local (B-4997): where a mount's VFS cache lives — the PURE rule over REAL rclone vfsMeta bytes ("Dirty": true WITH a space: parsed, never grepped), the real manager's remount switch (never a copy), removal by a child; patched-copy controls
-  { name: 'test-mount-argv', tier: 'fast', why: 'in-process · 0.4 s' }, // lane mount-argv-dir-cache: THE rclone mount argv (src/mount-argv.js, hub + device twin) — the production OneDrive argv as fixture, dirCache by row (poll < ttl), the s3 flag on an s3 backend only (a child = its parent's row), the rc socket rule, the log kept across remounts, _rcStats over a fake rclone; patched-copy controls
+  { name: 'test-mount-argv', tier: 'fast', why: 'in-process · 0.9 s' }, // lane mount-argv-dir-cache: THE rclone mount argv (src/mount-argv.js, hub + device twin; + the ssh-host push mount, B-069b lane mount-argv-vsdav-twin: its row, shellWords, sh-run byte parity vs the base line, the src/ drift census with planted controls) — the production OneDrive argv as fixture, dirCache by row (poll < ttl), the s3 flag on an s3 backend only (a child = its parent's row), the rc socket rule, the log kept across remounts, _rcStats over a fake rclone; patched-copy controls
   { name: 'test-mount-oauth-probe', tier: 'fast', why: 'in-process · 31 ms' }, // dead OAuth token behind a healthy-looking mount: probe eligibility + slow clock + phrasings + Re-authorize button; §4 D2 (integrations 4a): a Drive client switch lands WITH its token (applyDriveToken client), children bounce, Gmail through its PATCH
   { name: 'test-compaction-ux', tier: 'fast', why: 'PURE · 91 ms' }, // prompt_too_long → guidance card + /compact turn label + two-step Stop (normalizer behavioral + wiring pins)
   { name: 'test-job-model', tier: 'fast', why: 'PURE · 34 ms' },
@@ -1576,16 +1580,45 @@ export function liveScratchPaths({ procRoot = defaultProcRoot() } = {}) {
   return [...out];
 }
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-/** THE DIRECTORY SWEEP, where the process reaper runs (after every suite, at every heavy launch, `--reap`): the scratch
- *  dirs nothing live names and nothing wrote for a day (scripts/scratch-sweep.mjs). Never under a fake process table
- *  (a seam's word about who is alive is not the kernel's). `VIBESPACE_CI_DIR_SWEEP=off` skips the tiers' sweeps (a lane
- *  on a box whose reap is the owner's); `--reap` by hand always judges. */
-export function sweepDirsNow({ dryRun = false, log = console.log, byHand = false, procRoot = defaultProcRoot(), ...opts } = {}) {
+/** THE DIRECTORY SWEEP, beside the process reaper (in a tier on a PACE — dirSweepPacer —, at every heavy launch,
+ *  `--reap`): the scratch dirs nothing live names and nothing wrote for a day (scripts/scratch-sweep.mjs). Never under a
+ *  fake process table (a seam's word about who is alive is not the kernel's). `VIBESPACE_CI_DIR_SWEEP=off` skips the
+ *  tiers' sweeps (a lane on a box whose reap is the owner's); `--reap` by hand always judges. `pace` = why this sweep runs
+ *  (sweepPaceLine, said to `paceLog` first: the verdict lines may be held back by a quiet caller, the why never is). */
+export function sweepDirsNow({ dryRun = false, log = console.log, byHand = false, procRoot = defaultProcRoot(), pace = null, paceLog = log, ...opts } = {}) {
   if (!byHand && process.env.VIBESPACE_CI_DIR_SWEEP === 'off') return null;
   if (procRoot !== '/proc') { log(`[ci] dir sweep: skipped under the fake process table ${procRoot} (a test seam) — no directory judged`); return null; }
+  if (pace) paceLog(sweepPaceLine(pace));
   return sweepScratchDirs({ liveRoots: liveScratchPaths({ procRoot }), dryRun, log, keepList: [REPO_ROOT, path.join(REPO_ROOT, 'data')], ...opts });
 }
-const quietSweep = () => { const lines = []; const r = sweepDirsNow({ log: (l) => lines.push(l) }); if (r && (r.reaped.length || r.failed.length)) console.log(lines.join('\n')); };
+const quietSweep = (pace) => { const lines = []; const r = sweepDirsNow({ log: (l) => lines.push(l), pace, paceLog: console.log }); if (r && (r.reaped.length || r.failed.length)) console.log(lines.join('\n')); };
+/** B-9ec9 (lane ci-sweep-pace, 2.369.280): THE TIER'S DIR-SWEEP PACE — ONE pacer per tier, shared by its lanes (one JS
+ *  thread: ask → sweep → reset never interleave). `afterRow(r)` after every row: a RAN row is counted and the sweep runs
+ *  when sweepDue says so; a skipped row (absent at the gated commit) is neither counted nor swept after. `boundary(what)`
+ *  at the tier's end always sweeps. `VIBESPACE_CI_DIR_SWEEP=every` sweeps after every row, a skipped one too (the pre-.280
+ *  tier); `off` is sweepDirsNow's (nothing judged, nothing said). The pace starts at the tier's start (`now()` here). */
+export function dirSweepPacer({ now = Date.now, sweep = quietSweep, log = console.log, env = process.env, pace } = {}) {
+  const st = { lastSweepAt: now(), ranSinceSweep: 0, sweeps: 0, rows: 0 };
+  const run = (why, what = '') => {
+    const at = now();
+    const info = { why, what, ran: st.ranSinceSweep, sinceMs: at - st.lastSweepAt };
+    st.lastSweepAt = at; st.ranSinceSweep = 0; st.sweeps++;
+    try { sweep(info); } catch (e) { log(`  · dir sweep skipped: ${e && e.message}`); }
+    return { due: true, why };
+  };
+  return {
+    state: st,
+    afterRow(r) {
+      st.rows++;
+      if (env.VIBESPACE_CI_DIR_SWEEP === 'every') { if (!(r && r.absent)) st.ranSinceSweep++; return run('every row'); }
+      if (r && r.absent) return { due: false, why: 'a skipped row' };
+      st.ranSinceSweep++;
+      const v = sweepDue({ lastSweepAt: st.lastSweepAt, ranSinceSweep: st.ranSinceSweep, now: now(), pace });
+      return v.due ? run(v.why) : v;
+    },
+    boundary(what) { return run('boundary', what); },
+  };
+}
 /** THE VICTIM LIST, ONE LINE PER PID (B-a965, 2026-09-24): a sweep that named only its
  *  roots left "22 roots / 34 processes" unattributable after a stray `ci.mjs --help`
  *  reaped a lane's detached servers under /tmp/vs-work. PURE over the list. B-1d08: each
@@ -1794,7 +1827,7 @@ export function sweepUsageIndexDirs({ root = path.join(os.homedir(), '.vibespace
  *  victims with their evidence, the spared and why, the processes naming no root)
  *  and signals nothing; it takes no lock (it signals nothing). A refused test seam (procRootSeam) is printed and
  *  exits 2 on both paths (verify r1 K7); an accepted one lists and signals nothing (verify r2 R2). */
-const dirSweepByHand = (log, dryRun) => { try { sweepDirsNow({ dryRun, log, byHand: true }); } catch (e) { log(`[ci] dir sweep refused: ${e.message}`); } };
+const dirSweepByHand = (log, dryRun) => { try { sweepDirsNow({ dryRun, log, byHand: true, pace: { why: 'boundary', what: '--reap' } }); } catch (e) { log(`[ci] dir sweep refused: ${e.message}`); } };
 export function reapByHand({ dryRun = false, log = console.log, ...opts } = {}) {
   let seam = null;
   try { seam = opts.procRoot ? null : procRootSeam(); } catch (e) { log(`[ci] --reap refused: ${e.message}`); return 2; }
@@ -2866,6 +2899,7 @@ async function fastGate({ sha: wantSha, isolate } = {}) {
     console.log(`[ci] ${lanes} parallel lane(s) over ${plan.parallel.length} suites (longest first), then 1 serial lane over ${plan.serial.length}: ${plan.serial.map((s) => s.name).join(', ')}`);
     const absent = [], timings = [];
     let red = null;
+    const dirPace = dirSweepPacer();
     const laneWorker = async (queue, lane) => {
       for (;;) {
         if (red) break;
@@ -2876,7 +2910,7 @@ async function fastGate({ sha: wantSha, isolate } = {}) {
         console.log(r.lines.join('\n'));
         // a suite may not leave a daemon behind (2.369.104) — swept after every suite, as the heavy lanes do
         try { await reapScratchOrphansAsync({}); } catch (e) { console.log(`  · scratch reaper skipped: ${e && e.message}`); }
-        try { quietSweep(); } catch (e) { console.log(`  · dir sweep skipped: ${e && e.message}`); } // …nor its scratch dir, once nothing holds it (B-60d2)
+        dirPace.afterRow(r); // …nor its scratch dir, once nothing holds it (B-60d2) — on the tier's pace (B-9ec9)
         sweepUsageIndexDirs(); // …nor a usage index of a data/ it removed (design 011 lane 3)
         if (red) break;
         if (r.absent) { absent.push(s.name); continue; }
@@ -2895,6 +2929,7 @@ async function fastGate({ sha: wantSha, isolate } = {}) {
     await Promise.all(Array.from({ length: Math.max(1, Math.min(lanes, parallelQ.length)) }, (_, i) => laneWorker(parallelQ, i + 1)));
     const parMs = Date.now() - tPar;
     if (!red && plan.serial.length) await laneWorker([...plan.serial], 'S');
+    dirPace.boundary("the fast tier's end"); // B-9ec9: whatever the pace left since its last sweep
     if (red) { console.error(`\n✗ ${red} — release gate is RED, do not push\n`); return 1; }
     // NOTHING RAN IS NOT A PASS. An old tag or a commit that predates the gate
     // contains none of these suites (measured: v2.30.0 ⇒ 73 of 73 absent), and
@@ -3123,6 +3158,7 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
     const build = abandonedWhy ? { ok: false } : noteChildResult(runBuild({ cwd: runRoot }));
     const failed = [], flaky = [], timings = [], absent = [];
     let laneN = 0, serialNames = [];
+    const dirPace = dirSweepPacer();
     // The build is the first thing a supersede kill lands on, so ask before
     // believing its failure — and before spending the rest of the tier.
     abandonedWhy = abandonedWhy || abandoned();
@@ -3170,7 +3206,7 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
         // a suite may not leave a daemon behind (2.369.104) — the lanes sweep
         // after every suite exactly as the sync runner does, without blocking
         try { await reapScratchOrphansAsync({}); } catch (e) { console.log(`  · scratch reaper skipped: ${e && e.message}`); }
-        try { quietSweep(); } catch (e) { console.log(`  · dir sweep skipped: ${e && e.message}`); } // …nor its scratch dir, once nothing holds it (B-60d2)
+        dirPace.afterRow(r); // …nor its scratch dir, once nothing holds it (B-60d2) — on the tier's pace (B-9ec9)
         sweepUsageIndexDirs(); // …nor a usage index of a data/ it removed (design 011 lane 3)
         // Absent at the commit being gated (round 6): not run, not judged, and
         // not counted in `timings` — a marker that named 97 suites when 42 of
@@ -3247,6 +3283,7 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
       const sum = timings.reduce((a, t) => a + t.ms, 0);
       if (!abandonedWhy) console.log(`[ci:heavy] lanes: ${laneN} parallel (${Math.round(parMs / 1000)}s) + serial (${overlapped ? `overlapped, ${Math.round((Date.now() - tPar) / 1000)}s wall in all` : `${Math.round((Date.now() - tPar - parMs) / 1000)}s`}); suites summed ${Math.round(sum / 1000)}s = what a sequential tier would have taken`);
     }
+    dirPace.boundary("the heavy tier's end"); // B-9ec9: whatever the pace left since its last sweep
     const rec = {
       sha, result: failed.length ? 'red' : 'green', failed,
       flaky: flaky.length ? flaky : undefined,
@@ -3386,7 +3423,7 @@ export function heavyAlreadyGreen({ markers = [], sha, full, commitTimeMs, scope
 function heavyLaunch(sha, { dir, only, lock, lockWaitMs, range } = {}) {
   const d = markerDir(dir);
   try { reapScratchOrphans({ log: (m) => console.error(m) }); } catch (e) { console.error(`[ci:heavy] scratch reaper skipped: ${e && e.message}`); }
-  try { sweepDirsNow({ log: (m) => console.error(m) }); } catch (e) { console.error(`[ci:heavy] dir sweep skipped: ${e && e.message}`); } // B-60d2: the leaked dirs too // the tier starts on a box the last runs did not litter (2.369.104); a refused seam is said, never swallowed (verify r1 K7)
+  try { sweepDirsNow({ log: (m) => console.error(m), pace: { why: 'boundary', what: 'heavy launch' } }); } catch (e) { console.error(`[ci:heavy] dir sweep skipped: ${e && e.message}`); } // B-60d2: the leaked dirs too // the tier starts on a box the last runs did not litter (2.369.104); a refused seam is said, never swallowed (verify r1 K7)
   if (!sha || gitOut(['cat-file', '-e', sha + '^{commit}']) === null) { console.error(`[ci:heavy] not launching: ${sha ? 'unknown commit ' + shortSha(sha) : 'no sha given'}`); return 0; }
   // SERIALISE THE TIER, NOT JUST THE SHA (round 2 finding). Refusing only a
   // twin for the SAME sha meant two pushes inside one 16-minute window started

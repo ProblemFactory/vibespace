@@ -101,8 +101,12 @@ check('unpair (record removal) revokes the pairing', hosts2.dialTokenHash('frps-
   const src = fs.readFileSync(new URL('../src/machine-mounts.js', import.meta.url), 'utf8');
   const pin = (n, c) => { if (!c) { console.error('  ✗ ' + n); process.exitCode = 1; } else console.log('  ✓ ' + n); };
   pin("a typed '~/…' or '$HOME/…' mountpoint resolves against the MACHINE's home, trailing slash dropped", /replace\(\/\^~\(\?=\\\/\|\$\)\/, home\)/.test(src) && /replace\(\/\(\.\)\\\/\+\$\/, '\$1'\)/.test(src));
-  pin('the rclone daemon child logs to the SAME file the dialog tails (--log-file) — the real failure reason is never lost again', /--daemon --log-file '\$\{logf\}' --log-level NOTICE/.test(src));
-  pin('macOS ladder: nfsmount (FUSE-less, rclone ≥1.66) → FUSE mount when macFUSE present → native mount_webdav; every rung failure is kept', /method: 'rclone-nfs', run: \(\) => runRclone\('nfsmount'\)/.test(src) && /method: 'mount_webdav', run: async/.test(src) && /errs\.join\('\\n'\)/.test(src));
+  // B-069b (lane mount-argv-vsdav-twin): the argv is THE builder's (src/mount-argv.js SSH_HOST_WEBDAV_ROW) — the
+  // log-file cell is asked of the builder, the caller only hands it the file it tails
+  const { rcloneMountArgs, SSH_HOST_WEBDAV_ROW } = require('../src/mount-argv.js');
+  const hostArgv = rcloneMountArgs({ row: SSH_HOST_WEBDAV_ROW, remote: 'vsdav:', mountpoint: '/m', logFile: '/L' }).join(' ');
+  pin('the rclone daemon child logs to the SAME file the dialog tails (--log-file) — the real failure reason is never lost again', hostArgv.includes('--daemon --log-file /L --log-level NOTICE') && /logFile: logf,/.test(src) && /tail -c 500 '\$\{logf\}'/.test(src));
+  pin('macOS ladder: nfsmount (FUSE-less, rclone ≥1.66) → FUSE mount when macFUSE present → native mount_webdav; every rung failure is kept', /method: 'rclone-nfs', run: \(\) => runRclone\('nfs'\)/.test(src) && SSH_HOST_WEBDAV_ROW.subs.nfs === 'nfsmount' && /method: 'mount_webdav', run: async/.test(src) && /errs\.join\('\\n'\)/.test(src));
   pin('device rclone pin ≥1.66 (nfsmount) and an owned pre-1.66 install is re-installed, a system rclone is never touched', /RCLONE_PIN = 'v1\.69\.3'/.test(src) && /rclone !== 'rclone'\) \{[\s\S]{0,400}force: true/.test(src));
   pin('unmount + liveness treat rclone-nfs like the other umount-family methods', /rec\.method === 'rclone-nfs'/.test(src));
 }

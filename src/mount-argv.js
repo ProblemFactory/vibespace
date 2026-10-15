@@ -1,6 +1,8 @@
 // src/mount-argv.js — THE rclone `mount` argv (lane mount-argv-dir-cache, owner 2026-10-09: the OneDrive disconnect
-// forensics). ONE PURE builder the hub mount (MountManager._mountArgv) and the device pull mount (device-mount.js
-// pullMountArgs) both call — a flag edited on one side only used to drift the twin. Imports nothing.
+// forensics). ONE PURE builder the hub mount (MountManager._mountArgv), the device pull mount (device-mount.js
+// pullMountArgs) and the ssh-host push mount (machine-mounts.js, SSH_HOST_WEBDAV_ROW + shellWords — B-069b, lane
+// mount-argv-vsdav-twin) all call — a flag edited on one side only used to drift the twin. Imports nothing.
+// test-mount-argv's drift census fails any rclone mount flag or `rclone … mount` spelled outside this file.
 //
 // THE DIRECTORY CACHE IS A ROW FACT. rclone's own rule: a backend that POLLS for changes (ChangeNotify) keeps its
 // listings `--dir-cache-time` and learns of changes every `--poll-interval`, which must be SMALLER. rclone's
@@ -18,6 +20,28 @@ const DIR_CACHE_DEFAULT = Object.freeze({ ttl: '30s' });
 const LOG_LEVEL = 'NOTICE';   // rclone's default: the INFO per-minute vfs-cache heartbeat grew logs for weeks
 const LOG_ROTATE_BYTES = 1024 * 1024;   // data/mount-logs/<id>.log → <id>.log.1 past this, before a spawn
 const RC_DIR = 'vibespace-mounts';
+/** The rung → rclone subcommand of a row that declares none (the hub + the device pull mount): a FUSE `mount`. */
+const MOUNT_SUBS = Object.freeze({ fuse: 'mount' });
+/** What a macOS volume name keeps of the folder's name (it rode a single-quoted shell word before shellWords). */
+const VOLNAME_DROP = /[^\w .-]/g;
+
+/**
+ * The ssh-host push mount's ROW (B-069b — the THIRD twin, a shell string built by hand in machine-mounts.js until
+ * lane mount-argv-vsdav-twin): an rclone ON THE USER'S MACHINE mounts this instance's /dav as the env-configured
+ * remote `vsdav:` (webdav: no ChangeNotify ⇒ a ttl, no poll). It runs as ONE `sh -c` line over ssh / the device link,
+ * so rclone self-detaches (`daemon`) and its child logs to the file the caller tails on a failure (the logFile input:
+ * --daemon detaches stderr, inc-mtl78uhs). macOS Finder shows the VOLUME name (default 'vsdav{hash}', real report:
+ * 名字不太对) ⇒ `volname` names it after the folder. `subs` = the rung → subcommand (macOS tries `nfsmount`, rclone
+ * ≥ 1.66, before a FUSE `mount`). Every cell is the one the hand-built string carried, in its order (2.369.12).
+ */
+const SSH_HOST_WEBDAV_ROW = Object.freeze({
+  id: 'ssh-host-webdav', host: true, daemon: true,
+  subs: Object.freeze({ fuse: 'mount', nfs: 'nfsmount' }),
+  vfsCacheMode: Object.freeze({ rw: 'writes', ro: 'off' }),
+  dirCache: Object.freeze({ ttl: '10s' }),
+  timeouts: Object.freeze({ timeout: '30s', contimeout: '10s' }),
+  volname: Object.freeze({ os: Object.freeze(['macos']), prefix: 'VibeSpace ' }),
+});
 
 /** rclone duration → ms ('90s', '5m', '1h', '1m30s'); NaN for anything else. */
 function durationMs(s) {
@@ -43,6 +67,10 @@ function dirCacheArgs(row) {
   const d = dirCacheOf(row);
   return ['--dir-cache-time', d.ttl, ...(d.poll ? ['--poll-interval', d.poll] : [])];
 }
+
+/** The argv as ONE POSIX shell line (the ssh-host mount runs through `sh -c` on the user's machine): every word
+ *  single-quoted, a `'` inside it as `'\''` — sh hands rclone exactly these words, whatever a path or a name holds. */
+const shellWords = (argv) => argv.map((w) => `'${String(w).replace(/'/g, `'\\''`)}'`).join(' ');
 
 /** Is `p` inside `dir` (or `dir` itself)? Plain string paths, no fs. */
 const isUnder = (p, dir) => { const d = String(dir || '').replace(/\/+$/, ''); return !!d && (p === d || String(p).startsWith(d + '/')); };
@@ -75,13 +103,28 @@ function rcSocketPath({ id, dataDir = '', xdgRuntimeDir = '', uid = null, tmpBas
  * THE argv. `row` = the EFFECTIVE provider row (a child record mounts its parent's backend — the caller resolves
  * it; this never sees a record). `s3` = the record's backend is rclone's s3 (the caller asks the row's s3Backend).
  * `hasFlag(name)` = the installed rclone knows `--name` (an unknown flag makes rclone refuse to start).
- * A `row.pull` row is the device pull mount (read-only webdav, minimal cache — device-mount.js); every other row is
- * the hub's cached mount. `rcSocket` (a path from rcSocketPath) adds the owner-only rc server when rclone has it.
+ * A `row.pull` row is the device pull mount (read-only webdav, minimal cache — device-mount.js); a `row.host` row is
+ * the ssh-host push mount (SSH_HOST_WEBDAV_ROW: `logFile` = the machine-side log a `daemon` row needs, `hostOs` +
+ * `folderName` = the macOS volume name); every other row is the hub's cached mount. `via` = the rung (a key of
+ * `row.subs`, default MOUNT_SUBS: `fuse` → `mount`). `rcSocket` (a path from rcSocketPath) adds the owner-only rc
+ * server when rclone has it.
  */
 function rcloneMountArgs({ row, remote, mountpoint, cacheDir = null, cacheGB = 10, s3 = false, readOnly = false,
-  hasFlag = () => false, rcSocket = null, dataDir = '' }) {
-  const args = ['mount', remote, mountpoint];
-  if (row && row.pull) {
+  hasFlag = () => false, rcSocket = null, dataDir = '', via = 'fuse', logFile = null, hostOs = '', folderName = '' }) {
+  const subs = (row && row.subs) || MOUNT_SUBS, sub = Object.prototype.hasOwnProperty.call(subs, via) ? subs[via] : null;
+  if (!sub) throw new Error(`rclone mount: the ${(row && row.id) || 'hub'} row has no ${JSON.stringify(via)} rung`);
+  const args = [sub, remote, mountpoint];
+  if (row && row.daemon) {
+    // --daemon detaches the child's stderr: without its own log file the reason it died is lost (inc-mtl78uhs)
+    if (!logFile) throw new Error(`rclone mount: the ${row.id} row runs --daemon and needs its log file`);
+    args.push('--daemon', '--log-file', logFile);
+  }
+  if (row && row.host) {
+    const vol = row.volname && row.volname.os.includes(hostOs) ? ['--volname', row.volname.prefix + String(folderName).replace(VOLNAME_DROP, '')] : [];
+    args.push('--log-level', LOG_LEVEL, ...vol,
+      '--vfs-cache-mode', readOnly ? row.vfsCacheMode.ro : row.vfsCacheMode.rw, ...(readOnly ? ['--read-only'] : []),
+      ...dirCacheArgs(row), '--timeout', row.timeouts.timeout, '--contimeout', row.timeouts.contimeout);
+  } else if (row && row.pull) {
     args.push('--read-only', ...dirCacheArgs(row), '--vfs-cache-mode', 'minimal', '--timeout', '30s', '--contimeout', '10s', '--attr-timeout', '1s');
     if (cacheDir) args.push('--cache-dir', cacheDir);
   } else {
@@ -110,5 +153,5 @@ function rcloneMountArgs({ row, remote, mountpoint, cacheDir = null, cacheGB = 1
   return args;
 }
 
-module.exports = { CHANGE_NOTIFY_BACKENDS, DIR_CACHE_DEFAULT, LOG_LEVEL, LOG_ROTATE_BYTES, RC_DIR,
-  durationMs, dirCacheOf, dirCacheArgs, rcSocketPath, rcloneMountArgs };
+module.exports = { CHANGE_NOTIFY_BACKENDS, DIR_CACHE_DEFAULT, LOG_LEVEL, LOG_ROTATE_BYTES, RC_DIR, MOUNT_SUBS, SSH_HOST_WEBDAV_ROW,
+  durationMs, dirCacheOf, dirCacheArgs, rcSocketPath, shellWords, rcloneMountArgs };
