@@ -611,8 +611,8 @@ class CodexMessageManager extends MessageWindow {
   }
 
   // SCHEMA DRIFT ON A KNOWN RECORD — the codex twin of MessageManager's hook (same
-  // policy: field growth → the drift ledger, never a card; an enum drift → ONE card
-  // per shape, merged; same telemetry name). `kind` picks the
+  // card — the update signal, the CLI build on it —, same merge-into-one-card rule,
+  // same drift-ledger row for a grown field, same telemetry name). `kind` picks the
   // level: 'record' (session_meta / turn_context / response_item…), 'event' (an
   // event_msg payload), 'item' (an item_completed item).
   _noteShapeDrift(raw, kind, emit) {
@@ -628,21 +628,24 @@ class CodexMessageManager extends MessageWindow {
     if (drift.fields.length) noteFieldDrift({ conversation: this._threadId || this.sessionId, harness: 'Codex', shape: drift.shape, fields: drift.fields, cli: ver, raw, recordKey: this._currentRk });
     const cards = this._shapeDrift || (this._shapeDrift = new Map());
     const entry = cards.get(drift.shape);
+    const newFields = drift.fields.filter((f) => !entry || !entry.fields.has(f));
     const newEnums = drift.enumDrift.filter((e) => !entry || !entry.enums.has(e.field + '=' + e.value));
-    if (!newEnums.length) return;
+    if (entry && !newFields.length && !newEnums.length) return;
     if (!entry) {
       const msg = this._create({
         role: 'system', status: 'complete', noticeKind: 'unknown-fields',
-        content: [{ type: 'unknown_fields', harness: 'Codex', shape: drift.shape.replace(/^[a-z]+:[a-z]+:/, ''), fields: [], enumDrift: [...newEnums], sample: unknownFieldsSample(raw) }],
+        content: [{ type: 'unknown_fields', harness: 'Codex', shape: drift.shape.replace(/^[a-z]+:[a-z]+:/, ''), fields: [...newFields], enumDrift: [...newEnums], cli: ver, sample: unknownFieldsSample(raw) }],
       });
-      cards.set(drift.shape, { msgId: msg.id, enums: new Set(newEnums.map((e) => e.field + '=' + e.value)) });
+      cards.set(drift.shape, { msgId: msg.id, fields: new Set(newFields), enums: new Set(newEnums.map((e) => e.field + '=' + e.value)) });
       if (emit) this._emit({ op: 'create', message: msg });
       return;
     }
     const msg = this.messageIndex.get(entry.msgId);
     if (!msg) return;
     const b = msg.content[0];
+    for (const f of newFields) { entry.fields.add(f); b.fields.push(f); }
     for (const e of newEnums) { entry.enums.add(e.field + '=' + e.value); b.enumDrift.push(e); }
+    if (ver) b.cli = ver;
     b.sample = unknownFieldsSample(raw);
     if (emit) this._emit({ op: 'edit', id: msg.id, fields: { content: msg.content } });
   }

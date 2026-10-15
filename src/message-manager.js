@@ -757,15 +757,16 @@ class MessageManager extends MessageWindow {
   }
 
   // SCHEMA DRIFT ON A KNOWN RECORD (owner ruling (b), 2026-09-21): the fall-back
-  // card catches an unknown TYPE; this catches a known type that GREW. THE CARD
-  // POLICY (lane record-oracle-2-1-296, owner 2026-10-15 「最近多了很多红色提示」):
-  // a known record that only grew a FIELD is no chat card — the handler ran and
-  // nothing the user reads changed; it is a row of the DRIFT LEDGER (one per
-  // conversation + shape, ⚙ Diagnostics lists it). An ENUM drift (an undeclared
-  // value — its meaning may differ) keeps ONE card per shape per session, a new
-  // value MERGED into it (an edit op), never a new card. Telemetry
-  // `harness-shape-drift` once per process per shape, the CLI version in the
-  // detail. Samples ride through the redactor (token/secret/key/… masked).
+  // card catches an unknown TYPE; this catches a known type that GREW. ONE card
+  // per shape per session — a second occurrence with new fields or a new enum
+  // value MERGES into that card (an edit op), never a new card; a repeat with
+  // nothing new is silent. THE CARD IS THE UPDATE SIGNAL (owner 2026-10-15
+  // 「那个红色是有理由的啊，就是为了知道什么时候有更新啊」, lane drift-card-restore —
+  // .276 had hidden field growth): it carries the CLI build (the init frame's) and
+  // says the CLI may have updated; every grown field is ALSO a row of the drift
+  // ledger (⚙ Diagnostics). Telemetry `harness-shape-drift` once per process per
+  // shape, the CLI version in the detail. Samples ride through the redactor
+  // (values under token/secret/key/… keys masked).
   _noteShapeDrift(raw, emit) {
     if (this._unknownCarded === raw) { this._unknownCarded = null; return; } // the fall-back card owns it
     let drift = null;
@@ -773,8 +774,8 @@ class MessageManager extends MessageWindow {
     if (!drift) return;
     this._noteDrift(drift, raw, emit);
   }
-  /** Field growth → the drift ledger; an enum drift → ONE card per shape per session, merged on new values (the record-shape
-   *  path; verify r5 also feeds it a permission-outcome sentence outside the census — enum-only). */
+  /** ONE drift card per shape per session, merged on new evidence (the record-shape path; verify r5 also feeds it a
+   *  permission-outcome sentence outside the census — enum-only); grown fields are also a drift-ledger row. */
   _noteDrift(drift, raw, emit) {
     const ver = this._harnessVersion?.() || (typeof raw.version === 'string' ? raw.version.slice(0, 40) : null); // a transcript row names its own build
     const seen = this.constructor._seenShapeDrift;
@@ -785,21 +786,24 @@ class MessageManager extends MessageWindow {
     if (drift.fields.length) noteFieldDrift({ conversation: raw.session_id || raw.sessionId || this.sessionId, harness: 'Claude Code', shape: drift.shape, fields: drift.fields, cli: ver, raw, recordKey: this._currentRk });
     const cards = this._shapeDrift || (this._shapeDrift = new Map());
     const entry = cards.get(drift.shape);
+    const newFields = drift.fields.filter((f) => !entry || !entry.fields.has(f));
     const newEnums = drift.enumDrift.filter((e) => !entry || !entry.enums.has(e.field + '=' + e.value));
-    if (!newEnums.length) return;
+    if (entry && !newFields.length && !newEnums.length) return;
     if (!entry) {
       const msg = this._create({
         role: 'system', status: 'complete', noticeKind: 'unknown-fields',
-        content: [{ type: 'unknown_fields', harness: 'Claude Code', shape: drift.shape.replace(/^[a-z]+:[a-z]+:/, ''), fields: [], enumDrift: [...newEnums], sample: unknownFieldsSample(raw) }],
+        content: [{ type: 'unknown_fields', harness: 'Claude Code', shape: drift.shape.replace(/^[a-z]+:[a-z]+:/, ''), fields: [...newFields], enumDrift: [...newEnums], cli: ver, sample: unknownFieldsSample(raw) }],
       });
-      cards.set(drift.shape, { msgId: msg.id, enums: new Set(newEnums.map((e) => e.field + '=' + e.value)) });
+      cards.set(drift.shape, { msgId: msg.id, fields: new Set(newFields), enums: new Set(newEnums.map((e) => e.field + '=' + e.value)) });
       if (emit) this._emit({ op: 'create', message: msg });
       return;
     }
     const msg = this.messageIndex.get(entry.msgId);
     if (!msg) return;
     const b = msg.content[0];
+    for (const f of newFields) { entry.fields.add(f); b.fields.push(f); }
     for (const e of newEnums) { entry.enums.add(e.field + '=' + e.value); b.enumDrift.push(e); }
+    if (ver) b.cli = ver;
     b.sample = unknownFieldsSample(raw); // the latest occurrence is the freshest evidence
     if (emit) this._emit({ op: 'edit', id: msg.id, fields: { content: msg.content } });
   }
@@ -2167,8 +2171,8 @@ class MessageManager extends MessageWindow {
   }
 }
 
-// THE DRIFT LEDGER (lane record-oracle-2-1-296, owner 2026-10-15 「最近多了很多红色提示」): a KNOWN record that merely grew a field
-// is no chat card — it is a row here, per conversation (the record's own session id, so the live normalizer, a history rebuild and a
+// THE DRIFT LEDGER (lane record-oracle-2-1-296; since lane drift-card-restore BESIDE the chat card, owner 2026-10-15): a KNOWN record
+// that grew a field is a row here, per conversation (the record's own session id, so the live normalizer, a history rebuild and a
 // transcript read land on ONE row) and shape, listed by ⚙ Diagnostics (GET /api/telemetry/summary → driftLedger). Both harnesses
 // write it (the codex normalizer imports noteFieldDrift). Bounded: 100 conversations (the least recently drifted leaves first) × 32
 // shapes; ONE redacted sample per row (≤ 8 KB, the latest — refreshed when the fields grow or 30 s after the last); a record is counted

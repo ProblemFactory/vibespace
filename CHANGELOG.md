@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.277 — 2026-10-15
+
+### Fixed
+- The red "New fields on a known record" note is back in the chat: it tells you Claude Code updated, and hiding it in the previous version was a mistake.
+
 ## 2.369.276 — 2026-10-15
 
 ### Fixed

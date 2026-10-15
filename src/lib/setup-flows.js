@@ -528,8 +528,8 @@ export function installSetupFlows(App) {
       <table><tr><td class="dim">${esc(t('breadcrumb'))}</td><td class="dim">${esc(t('detail'))}</td><td class="n dim">n</td><td class="dim">${esc(t('first seen'))}</td><td class="dim">${esc(t('last seen'))}</td><td class="dim">${esc(t('versions'))}</td></tr>${tr}</table>`;
     })()}
     ${(() => {
-      // THE DRIFT LEDGER (lane record-oracle-2-1-296, owner 2026-10-15 「最近多了很多红色提示」): a known record that merely grew a
-      // field gets no chat card any more — it is listed HERE, one row per conversation + record shape: the new fields, the CLI build,
+      // THE DRIFT LEDGER (lane record-oracle-2-1-296; beside the chat card since lane drift-card-restore, owner 2026-10-15): a known
+      // record that grew a field is listed HERE, one row per conversation + record shape: the new fields, the CLI build,
       // how many records carried them, the latest (redacted) sample behind 技术细节. The server's memory since it started (bounded).
       const rows = Array.isArray(d.driftLedger) ? d.driftLedger : [];
       if (!rows.length) return '';
@@ -537,7 +537,7 @@ export function installSetupFlows(App) {
       const tr = rows.map((r) => `<tr><td>${esc(nameOf(r.conversation))}</td><td>${esc(r.harness || '')} · ${esc(r.shape || '')}</td><td>+{${esc((r.fields || []).join(', '))}}</td><td class="dim">${esc(r.cli || '?')}</td><td class="n">${r.count}</td></tr>`
         + (r.sample ? `<tr><td colspan="5"><details><summary>${esc(t('Technical details'))}</summary><pre>${esc(r.sample)}</pre></details></td></tr>` : '')).join('');
       return `<h2>${esc(t('Records that grew a field'))}</h2>
-      <p class="dim">${esc(t('Records VibeSpace knows that arrived carrying fields it does not declare. Handling is unchanged, so the chat shows no card for them; each row is one kind of record in one conversation, since this server started.'))}</p>
+      <p class="dim">${esc(t('Records VibeSpace knows that arrived carrying fields it does not declare. Handling is unchanged; the conversation also shows one red card per kind of record — the sign that the CLI may have updated. Each row is one kind of record in one conversation, since this server started.'))}</p>
       <table class="drift-ledger"><tr><td class="dim">${esc(t('conversation'))}</td><td class="dim">${esc(t('harness record'))}</td><td class="dim">${esc(t('new fields'))}</td><td class="dim">${esc(t('CLI version'))}</td><td class="n dim">n</td></tr>${tr}</table>`;
     })()}
     <h2>${esc(t('By event'))}</h2><table>${kv(d.byName)}</table>

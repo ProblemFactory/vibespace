@@ -29,7 +29,6 @@ import { handoverFacts } from '../stash-summary.js'; // 2026-09-28: the hand-ove
 import { encodedCommandOf } from '../encoded-command.js'; // lane machine-card-fold: a PowerShell -EncodedCommand drawn as the script it runs (PURE, bundled)
 import { revealParts as hiddenPartsOf } from '../hidden-chars.js'; // …its hidden characters as visible U+XXXX marks (THE one set)
 import { machineLineOf } from './chat-run-summary.js'; // lane machine-card-compact: a Machines card's ONE line inside its machine's group (PURE)
-import { isQuietDrift } from './chat-run-summary.js'; // lane record-oracle-2-1-296: a stored FIELD-ONLY drift card renders nothing (PURE)
 import { exitCallCardOf } from './chat-run-summary.js'; // lane exit-calls-in-history: a vibespace-exit Bash call drawn as its machine card (PURE)
 import { outputPreview, cmdFold } from '../exit-reach.js'; // lane-exit-run-output E3: the command card's first lines of output (stderr first) + "Show output" (PURE, bundled)
 const noticeFacts = (body) => handbackFacts(body) || handoverFacts(body) || channelWakeFacts(body);   // ONE facts hook per producer, tried in order; null = the generic rules
@@ -1701,21 +1700,21 @@ class ChatRenderers {
     // upstream) with the DIM head variant (handling is unchanged), the shape +
     // the field list in the head, enum drift as its own line, the redacted
     // sample behind the expander. Everything is harness-authored ⇒ escaped.
-    // Folds under the same 'unknown' kind. Since lane record-oracle-2-1-296 the
-    // normalizer makes it for an ENUM drift only (field growth is a drift-ledger
-    // row in ⚙ Diagnostics); a FIELD-ONLY card a conversation already stores
-    // renders NOTHING — the owner's open conversations go quiet, no store rewritten.
+    // Folds under the same 'unknown' kind. THE UPDATE SIGNAL (owner 2026-10-15
+    // 「你隐藏了还怎么知道」, lane drift-card-restore): a card naming fields says
+    // what it is FOR — the CLI may have updated — with the CLI build beside the
+    // harness when the card knows it; an enum-only card names the VALUE.
     if (msg.noticeKind === 'unknown-fields' && msg.content?.[0]?.type === 'unknown_fields') {
-      if (isQuietDrift(msg)) return null;
       const b = msg.content[0];
       const el = document.createElement('div');
       el.className = 'chat-msg chat-msg-system chat-unknown-event chat-unknown-fields';
       const fields = Array.isArray(b.fields) ? b.fields : [];
       const plus = fields.length ? ` +{${fields.map((f) => escHtml(String(f))).join(', ')}}` : '';
-      // enum-only (every card the normalizers make since lane record-oracle-2-1-296): a VALUE, not fields — say so
-      el.innerHTML = `<div class="chat-unknown-event-head"><span class="chat-unknown-event-title">⚠ ${escHtml(fields.length ? t('New fields on a known record') : t('An undeclared value on a known record'))}</span><span class="chat-unknown-event-name">${escHtml(b.harness || '')} · ${escHtml(b.shape || '')}${plus}</span></div>`
+      const cli = b.cli ? ' ' + escHtml(String(b.cli)) : ''; // the CLI build the init frame named (cards stored before lane drift-card-restore carry none)
+      // enum-only (a value drift, e.g. vcs_state_changed kind:squash): a VALUE, not fields — say so
+      el.innerHTML = `<div class="chat-unknown-event-head"><span class="chat-unknown-event-title">⚠ ${escHtml(fields.length ? t('New fields on a known record') : t('An undeclared value on a known record'))}</span><span class="chat-unknown-event-name">${escHtml(b.harness || '')}${cli} · ${escHtml(b.shape || '')}${plus}</span></div>`
         + (Array.isArray(b.enumDrift) ? b.enumDrift.map((e) => `<div class="chat-unknown-event-hint">${escHtml(t('Undeclared value: {field} = {value}', { field: String(e?.field || ''), value: String(e?.value || '') }))}</div>`).join('') : '')
-        + `<div class="chat-unknown-event-hint">${escHtml(fields.length ? t('A record VibeSpace knows, carrying fields it does not declare — the harness may have extended this event. Handling is unchanged.') : t('A record VibeSpace knows, carrying a value it does not declare — its meaning may differ from the declared ones. Handling is unchanged.'))}</div>`;
+        + `<div class="chat-unknown-event-hint">${escHtml(fields.length ? t('{harness} may have updated: this record carries fields VibeSpace has not registered — handling is unchanged; once the new version is registered, these notices go away.', { harness: String(b.harness || 'Claude Code') }) : t('A record VibeSpace knows, carrying a value it does not declare — its meaning may differ from the declared ones. Handling is unchanged.'))}</div>`;
       if (b.sample) {
         const det = document.createElement('details');
         det.innerHTML = `<summary>${escHtml(t('Full record'))}</summary><pre class="chat-pre">${escHtml(b.sample)}</pre>`;

@@ -35,13 +35,14 @@
 //      as "Message from “bob”" with the head as his own words, "VibeSpace" as
 //      "Message from an agent calling itself “VibeSpace”" — and exactly ONE new
 //      VibeSpace notice appears (the real notification)
-//   ⑦ QUIET DRIFT (lane record-oracle-2-1-296, owner 2026-10-15 「最近多了很多红色提示」): a third stub turn plays a KNOWN record
-//      that grew a field (system/informational + banner_style_v2), an undeclared enum value (vcs_state_changed kind:squash),
-//      2.1.296's file_attachments_missing and permission_check_status; then a FIELD-ONLY drift card as a conversation already
-//      stores it is fed to the view. The grown record renders as itself with NO red card, the stored card renders NOTHING,
-//      the enum card still renders (red border), the attachments line is one dim line in our words, the permission pulse is
-//      card-less — and the grown field is a row of the drift ledger ⚙ Diagnostics reads (GET …summary?drift=1).
-//      HYGIENE_PNG_DIR=<dir> keeps a PNG of that chat (the report's evidence).
+//   ⑦ THE DRIFT CARD IS THE UPDATE SIGNAL (lane drift-card-restore, owner 2026-10-15 「那个红色是有理由的啊，就是为了知道什么时候
+//      有更新啊」 — .276 had hidden it): a third stub turn plays a KNOWN record that grew a field (system/informational +
+//      banner_style_v2), an undeclared enum value (vcs_state_changed kind:squash), 2.1.296's file_attachments_missing and
+//      permission_check_status; then a FIELD-ONLY drift card as a conversation already stores it (cli 2.1.296) is fed to the view.
+//      The grown record renders as itself AND as ONE red-bordered "New fields on a known record" card whose line says the CLI may
+//      have updated, the stored card renders (its CLI build in the head), the enum card still renders, the attachments line is
+//      one dim line in our words, the permission pulse is card-less — and the grown field is ALSO a row of the drift ledger
+//      ⚙ Diagnostics reads (GET …summary?drift=1). HYGIENE_PNG_DIR=<dir> keeps a PNG of that chat (the report's evidence).
 // Requires google-chrome (SKIP without). Run: node scripts/test-chat-hygiene-ui.mjs
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -119,7 +120,7 @@ const PLAY2 = [
   { type: 'assistant', message: { id: 'msg_h8', type: 'message', role: 'assistant', model: 'claude-fable-5', content: [{ type: 'text', text: 'Peers read.' }], stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 } } },
 ];
 const ORIGIN2 = { kind: 'peer', from: 'uds:/tmp/vs-hy/7.sock', name: 'bob', msg_id: 'pm-hy-bob', body: PROBE };
-// ⑦'s turn (lane record-oracle-2-1-296): a known record that GREW a field, an undeclared enum value, the two 2.1.296 records
+// ⑦'s turn (lane record-oracle-2-1-296; the card back in lane drift-card-restore): a known record that GREW a field, an undeclared enum value, the two 2.1.296 records
 const PLAY3 = [
   { type: 'assistant', message: { id: 'msg_h9', type: 'message', role: 'assistant', model: 'claude-fable-5', content: [{ type: 'text', text: 'Checking the files you sent.' }], usage: {} } },
   { type: 'system', subtype: 'informational', content: 'Your files are being checked.', level: 'info', banner_style_v2: 'compact' }, // a KNOWN record + one field no build declares
@@ -359,27 +360,31 @@ try {
   const newNotices = n6.notices.slice(noticesBefore);
   check(`…and exactly ONE new VibeSpace notice — the real notification ("${newNotices[0] || ''}"), never "VibeSpace · Please run…" / "VibeSpace · I finished…"`, newNotices.length === 1 && /^VibeSpace · you handed control back after 9 s/.test(newNotices[0]) && !n6.notices.some((t) => /Please run|I finished/.test(t)), n6.notices);
 
-  // ── ⑦ quiet drift: a known record that grew a field is no red card ──
-  console.log('⑦ a known record that GREW a field is no card (stored ones render nothing); an enum drift still is; 2.1.296\'s records are known');
+  // ── ⑦ the drift card is the update signal: a known record that grew a field is ONE red card again ──
+  console.log('⑦ a known record that GREW a field is ONE red card (the update signal) + a ledger row; a stored one renders; an enum drift still is a card; 2.1.296\'s records are known');
   liveWs.send(JSON.stringify({ type: 'chat-input', sessionId: sid, text: 'Did my three files arrive?' }));
   const played3 = await waitFor(`(() => { const v = ${VIEW}; return !!v && [...v._messageList.querySelectorAll('.chat-msg')].some((e) => /Two of your three files never arrived/.test(e.textContent)); })()`, 20000);
   check('the third stub turn rendered (its closing line is on screen)', played3, await evalJs(`(() => { const v = ${VIEW}; return v ? v._messageList.innerText.slice(-600) : 'no view'; })()`));
   await sleep(500);
   const before7 = await evalJs(`${VIEW}._messageList.querySelectorAll('.chat-msg').length`);
-  await evalJs(`(() => { ${VIEW}._onCreateMessage({ id: 'hy-stored-drift', role: 'system', status: 'complete', noticeKind: 'unknown-fields', content: [{ type: 'unknown_fields', harness: 'Claude Code', shape: 'system/init', fields: ['stored_grown_field'], enumDrift: [], sample: '{"stored_grown_field": 1}' }] }); return true; })()`);
+  await evalJs(`(() => { ${VIEW}._onCreateMessage({ id: 'hy-stored-drift', role: 'system', status: 'complete', noticeKind: 'unknown-fields', content: [{ type: 'unknown_fields', harness: 'Claude Code', shape: 'system/init', fields: ['stored_grown_field'], enumDrift: [], cli: '2.1.296', sample: '{"stored_grown_field": 1}' }] }); return true; })()`);
   await sleep(700); // the debounced fold pass
   const n7 = await evalJs(`(async () => {
     const v = ${VIEW}; const list = v._messageList;
     for (const h of list.querySelectorAll(':scope > .chat-run-header')) { const rec = (v._runs || []).find((r) => r.header === h); if (rec && !rec.open) h.click(); }
     await new Promise((r) => setTimeout(r, 300));
-    const drift = [...list.querySelectorAll('.chat-unknown-fields')].map((e) => ({ text: e.innerText, border: getComputedStyle(e).borderTopColor, shown: e.offsetParent !== null }));
+    const drift = [...list.querySelectorAll('.chat-unknown-fields')].map((e) => ({ id: e.dataset.msgId || e.closest('[data-msg-id]')?.dataset.msgId || '', text: e.innerText, border: getComputedStyle(e).borderTopColor, shown: e.offsetParent !== null }));
     const lines = [...list.querySelectorAll('.chat-harness-notice')].map((e) => ({ text: e.innerText.trim(), title: e.querySelector('.chat-system-text')?.title || '' }));
     return { drift, lines, stored: !!list.querySelector('[data-msg-id="hy-stored-drift"]'), count: list.querySelectorAll('.chat-msg').length, hdrs: [...list.querySelectorAll(':scope > .chat-run-header')].map((h) => h.textContent), unknownCards: list.querySelectorAll('.chat-unknown-event:not(.chat-unknown-fields)').length, text: list.innerText };
   })()`);
-  check('the grown record renders as ITSELF (the CLI\'s dim line "Your files are being checked.") with NO card naming banner_style_v2 — field growth is never a red card', n7.lines.some((l) => l.text === 'Your files are being checked.') && !n7.drift.some((d) => /banner_style_v2/.test(d.text)) && !/banner_style_v2/.test(n7.text), { lines: n7.lines, drift: n7.drift });
-  check('the STORED field-only drift card renders nothing: no element for it, no "New fields" text, the message count unchanged', !n7.stored && n7.count === before7 && !/stored_grown_field/.test(n7.text), { stored: n7.stored, count: n7.count, before7 });
-  check('…and no run header counts it ("unknown events / new fields" names nothing)', !n7.hdrs.some((h) => /unknown events/.test(h)), n7.hdrs);
-  check('the ENUM drift still renders: ONE red-bordered card headed "An undeclared value on a known record", naming "kind = squash"', n7.drift.length === 1 && /^⚠ An undeclared value on a known record/.test(n7.drift[0].text) && /kind = squash/.test(n7.drift[0].text) && n7.drift[0].shown, n7.drift);
+  const red = (d) => { const [r, g, b] = (String(d.border).match(/\d+/g) || []).map(Number); return r > g + 60 && r > b + 60; }; // the --red border (any theme's red)
+  const grown = n7.drift.filter((d) => /banner_style_v2/.test(d.text));
+  check('the grown record renders as ITSELF (the CLI\'s dim line "Your files are being checked.") AND as ONE red-bordered card "⚠ New fields on a known record" naming Claude Code · system/informational +{banner_style_v2}, its line saying what it is FOR (Claude Code may have updated; registering the new version ends these notices)', n7.lines.some((l) => l.text === 'Your files are being checked.') && grown.length === 1 && /^⚠ New fields on a known record/.test(grown[0].text) && /Claude Code( 2\.1\.274)? · system\/informational \+\{banner_style_v2\}/.test(grown[0].text) /* the stub prints its init before the wrapper listens: the build may be unknown */ && /Claude Code may have updated: this record carries fields VibeSpace has not registered/.test(grown[0].text) && /once the new version is registered, these notices go away/.test(grown[0].text) && red(grown[0]) && grown[0].shown, { lines: n7.lines, drift: n7.drift });
+  const st = n7.drift.filter((d) => d.id === 'hy-stored-drift');
+  check('the STORED field-only drift card RENDERS (no .276 quiet rule): its element, "New fields on a known record", the CLI build it carries beside the harness ("Claude Code 2.1.296 · system/init +{stored_grown_field}"), red-bordered, the message count +1', n7.stored && st.length === 1 && /^⚠ New fields on a known record/.test(st[0].text) && st[0].text.includes('Claude Code 2.1.296 · system/init +{stored_grown_field}') && red(st[0]) && st[0].shown && n7.count === before7 + 1, { stored: n7.stored, st, count: n7.count, before7 });
+  check('…and no drift card is folded away: no run header names one (the unknown kind is off in "Card kinds that collapse" by default — the card breaks the run, the owner sees it)', !n7.hdrs.some((h) => /unknown events|new fields/i.test(h)), n7.hdrs);
+  const en = n7.drift.filter((d) => /kind = squash/.test(d.text));
+  check('the ENUM drift still renders: ONE red-bordered card headed "An undeclared value on a known record", naming "kind = squash"; three drift cards in all (grown, stored, enum)', en.length === 1 && /^⚠ An undeclared value on a known record/.test(en[0].text) && red(en[0]) && en[0].shown && n7.drift.length === 3, n7.drift);
   check('2.1.296 file_attachments_missing is ONE dim line in our words ("2 of 3 attached files did not reach Claude"), the reason codes on hover; no Unknown-event card for either new record', n7.lines.some((l) => l.text === '2 of 3 attached files did not reach Claude' && /too_large, not_found/.test(l.title)) && n7.unknownCards === 0 && !/permission_check_status|file_attachments_missing/.test(n7.text), { lines: n7.lines, unknown: n7.unknownCards });
   const led = await evalJs(`fetch('/api/telemetry/summary?days=1&drift=1').then((r) => r.json()).then((d) => ({ rows: (d.driftLedger || []).filter((r) => r.conversation === ${JSON.stringify(LIVE_SID)}), all: (d.driftLedger || []).map((r) => r.conversation + ' ' + r.shape + ' ' + r.fields.join()), plain: 'driftLedger' in d }))`);
   const plain = await evalJs(`fetch('/api/telemetry/summary?days=1').then((r) => r.json()).then((d) => 'driftLedger' in d)`);
@@ -389,8 +394,8 @@ try {
     await sleep(400);
     const shot = await cdp('Page.captureScreenshot', { format: 'png' });
     fs.mkdirSync(process.env.HYGIENE_PNG_DIR, { recursive: true });
-    fs.writeFileSync(path.join(process.env.HYGIENE_PNG_DIR, 'quiet-drift.png'), Buffer.from(shot.data, 'base64'));
-    console.log('    PNG ' + path.join(process.env.HYGIENE_PNG_DIR, 'quiet-drift.png'));
+    fs.writeFileSync(path.join(process.env.HYGIENE_PNG_DIR, 'drift-card.png'), Buffer.from(shot.data, 'base64'));
+    console.log('    PNG ' + path.join(process.env.HYGIENE_PNG_DIR, 'drift-card.png'));
   }
 
   check('no page errors', pageErrors.length === 0, pageErrors);
