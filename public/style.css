@@ -7364,5 +7364,11 @@ button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: u
 .desktop-strip-hdr { flex: 0 0 auto; padding: 1px 7px; border-radius: 9px; background: var(--bg-input); color: var(--text); border: 1px solid var(--warning, #d9822b); cursor: help; }
 .desktop-strip-compare { flex: 0 0 auto; display: flex; flex-direction: column; gap: 2px; padding: 4px 10px; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
 .desktop-strip-compare[hidden] { display: none; }
+/* lane stream-p1a-transport: the WebRTC stream's <video> in the machine desktop's shell (the picture contained, never
+   cropped; touch drives the pointer), its numbers on the strip and the note that says why the VNC picture came back */
+.stream-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; display: block; touch-action: none; outline: none; }
+.desktop-strip-stream { flex: 0 0 auto; padding: 1px 7px; border-radius: 9px; background: var(--bg-input); color: var(--text-secondary); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.desktop-strip-stream[data-path="relay"] { color: var(--text); }
+.desktop-strip-note { flex: 0 0 auto; padding: 1px 7px; border-radius: 9px; background: var(--bg-input); color: var(--text); border: 1px solid var(--warning, #d9822b); white-space: nowrap; }
 .desktop-machine-content:fullscreen { background: var(--bg-window, #1e1e1e); }
 .desktop-open-link { border-style: dashed; }

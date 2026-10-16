@@ -22,6 +22,7 @@ import { t } from './i18n.js';
 import { createModalShell, fetchJson, showToast } from './utils.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { createVncView, streamUrl } from './vnc-view.js';
+import { createStreamView } from './stream-view.js'; // lane stream-p1a-transport: the WebRTC rung's <video>, in this same shell
 import { pageIsSecure } from './picture-shell.js';
 import { keyboardLockGate, NAGLE_REFERENCE, SLOW_KBPS, STILL_MS } from '../desktop-quality.js'; // lane desktop-v2-latency
 import { desktopRunPlan, desktopRunPresets, rememberRun, machineDesktopId } from '../machine-desktop-model.js';
@@ -136,7 +137,7 @@ export function openMachineDesktop(app, m, { display } = {}) {
     else if (!g.lock && locked) { locked = false; try { navigator.keyboard.unlock(); } catch { /* gone with the page */ } }
     drawKeys();
   };
-  const onFull = () => { lockKeys(); if (document.fullscreenElement === c) view.focus(); };
+  const onFull = () => { lockKeys(); if (document.fullscreenElement === c) (stream || view)?.focus(); };
   document.addEventListener('fullscreenchange', onFull);
   drawKeys();
   const chip = el('span'); chip.className = 'desktop-strip-status';
@@ -169,10 +170,10 @@ export function openMachineDesktop(app, m, { display } = {}) {
     seg.replaceChildren(...map.displays.map((d) => segBtn(String(d.n), d.key, d.name ? `${d.n} · ${d.name}` : t('Display {n}', { n: d.n }))), segBtn(t('All'), null, t('All')));
     seg.hidden = false;
   };
-  const apply = () => { const d = shown(); view.setCrop(d ? d.rect : null); drawSeg(); hdrEl.hidden = !hdrShown({ screens: facts && facts.ok ? facts.displays : null, map, key: d ? d.key : null }); };
+  const apply = () => { if (!view) return; const d = shown(); view.setCrop(d ? d.rect : null); drawSeg(); hdrEl.hidden = !hdrShown({ screens: facts && facts.ok ? facts.displays : null, map, key: d ? d.key : null }); };
   const pick = (key) => { want = key; rememberDesktop(m.hostId, key); apply(); };
   const remap = () => {
-    const fb = view.fbSize(); if (!fb) return;
+    const fb = view ? view.fbSize() : null; if (!fb) return;
     const prev = map;
     map = screenMap({ fb, screens: facts && facts.ok ? facts.displays : null, rfb: rfbTable });
     // lane heavy3-flake-races: the two tables land in either order and key a display differently — a pick made on the
@@ -184,6 +185,7 @@ export function openMachineDesktop(app, m, { display } = {}) {
   };
   const RUNG_WORDS = { sharp: () => t('Sharp'), balanced: () => t('Balanced'), fluid: () => t('Fluid'), lean: () => t('Lean') };
   const drawRung = () => {
+    if (!view) { rungEl.hidden = true; slowEl.hidden = true; return; }
     const q = view.quality, st = view.stats();
     rungEl.hidden = !q || view.state !== 'connected';
     if (!q) { slowEl.hidden = true; return; }
@@ -196,7 +198,7 @@ export function openMachineDesktop(app, m, { display } = {}) {
   };
   // lane win-desktop-cursor-hdr: which path draws the machine's pointer (the stats row and the chip's title say it)
   const cursorWords = () => {
-    const c = view.cursor;
+    const c = view && view.cursor;
     if (!c) return '';
     if (c.path === 'server') return t('Pointer: painted by the machine into the picture — its {px} px pointer is too big to draw here', { px: c.side });
     if (c.path === 'scaled') return t('Pointer: drawn here at {pct} % of its {px} px, with the picture', { pct: Math.round(c.factor * 100), px: c.side });
@@ -204,12 +206,13 @@ export function openMachineDesktop(app, m, { display } = {}) {
   };
   const drawChip = () => {
     drawRung();
-    if (view.state !== 'connected') { chip.textContent = ''; chip.title = scope; cmp.hidden = true; return; }
+    if (stream) { drawStream(); return; }
+    if (!view || view.state !== 'connected') { chip.textContent = ''; chip.title = scope; cmp.hidden = true; return; }
     const st = view.stats();
     const ms = link && link.hub != null ? link.hub + (link.device || 0) : null;
     chip.textContent = t('Connected · {ms} ms · {fps} fps', { ms: ms == null ? '—' : ms, fps: st.fps });
     chip.title = [scope, t('Browser ⇄ hub {a} ms · hub ⇄ machine {b} ms · update round trip {c} ms · {fps} fps', { a: link && link.hub != null ? link.hub : '—', b: link && link.device != null ? link.device : '—', c: st.roundTripMs == null ? '—' : st.roundTripMs, fps: st.fps }),
-      map && map.state === 'unknown' && facts && facts.ok && facts.displays.length > 1 ? t('The layout of its displays could not be read — the whole screen is shown') : '', cursorWords()].filter(Boolean).join('\n');
+      map && map.state === 'unknown' && facts && facts.ok && facts.displays.length > 1 ? t('The layout of its displays could not be read — the whole screen is shown') : '', cursorWords(), refusedWhy ? t('Not streamed: {why}', { why: refusedWhy }) : ''].filter(Boolean).join('\n');
     if (!cmp.hidden) {
       cmp.replaceChildren(
         el('div', null, t('Now: browser ⇄ hub {a} ms · hub ⇄ machine {b} ms · update round trip {c} ms · {fps} fps · {kbps} kbps', { a: link && link.hub != null ? link.hub : '—', b: link && link.device != null ? link.device : '—', c: st.roundTripMs == null ? '—' : st.roundTripMs, fps: st.fps, kbps: st.kbps == null ? '—' : st.kbps })),
@@ -218,30 +221,85 @@ export function openMachineDesktop(app, m, { display } = {}) {
     }
   };
   const measure = async () => { const t0 = performance.now(); const r = await fetchJson(`/api/desktop/machine-desktop/link?host=${encodeURIComponent(m.hostId)}`); if (!r || r.error) return; link = { hub: Math.max(0, Math.round(performance.now() - t0 - (r.took || 0))), device: r.device }; drawChip(); };
-  let tick = null, n = 0;
-  const view = createVncView(pane, {
-    url: streamUrl(`/api/desktop/${id}/stream`),
-    autoReconnect: true,
-    resizeSession: false,
-    channel: true,
-    ladder: true, // lane desktop-v2-latency: fluid while moving, sharp when still
-    pasteKeys: true, // lane desktop-v2-latency: Ctrl/⌘+V sends this computer's clipboard text, then the V
-    onQuality: () => drawRung(),
-    onScreens: (sc) => { rfbTable = sc; remap(); },
-    onStatus: (state) => {
-      if (state === 'connected') {
-        if (!asked) { asked = true; fetchJson(`/api/desktop/machine-desktop/displays?host=${encodeURIComponent(m.hostId)}`).then((r) => { facts = r || null; remap(); }); }
-        remap();
-        if (!tick) tick = setInterval(() => { drawChip(); if (++n % 3 === 1) measure(); }, 1000);
-      } else { clearInterval(tick); tick = null; }
-      drawChip();
-    },
-    ...machineViewOpts(m),
-  });
+  let tick = null, n = 0, view = null, stream = null;
+  const startVnc = () => {
+    view = createVncView(pane, {
+      url: streamUrl(`/api/desktop/${id}/stream`),
+      autoReconnect: true,
+      resizeSession: false,
+      channel: true,
+      ladder: true, // lane desktop-v2-latency: fluid while moving, sharp when still
+      pasteKeys: true, // lane desktop-v2-latency: Ctrl/⌘+V sends this computer's clipboard text, then the V
+      onQuality: () => drawRung(),
+      onScreens: (sc) => { rfbTable = sc; remap(); },
+      onStatus: (state) => {
+        if (state === 'connected') {
+          if (!asked) { asked = true; fetchJson(`/api/desktop/machine-desktop/displays?host=${encodeURIComponent(m.hostId)}`).then((r) => { facts = r || null; remap(); }); }
+          remap();
+          if (!tick) tick = setInterval(() => { drawChip(); if (++n % 3 === 1) measure(); }, 1000);
+        } else { clearInterval(tick); tick = null; }
+        drawChip();
+      },
+      ...machineViewOpts(m),
+    });
+    winInfo._desktopView = view;
+    view.connect();
+  };
+  // lane stream-p1a-transport (design q-041 r2 §2 客户端): THE WEBRTC RUNG first — when the machine passes it (its agent streams,
+  // a source: src/server/desktop-access.js streamRung) the picture is a <video> in this same shell, its numbers on the strip
+  // (getStats: RTT · jitter · fps · decode · kbps, and "via the hub" when the relay carries it); a refusal (an older agent, no
+  // screen source yet) quietly shows the VNC picture, a failure AFTER the stream started shows it too and says why
+  const streamEl = el('span'); streamEl.className = 'desktop-strip-stream'; streamEl.hidden = true;
+  const noteEl = el('span'); noteEl.className = 'desktop-strip-note'; noteEl.hidden = true;
+  strip.append(streamEl, noteEl);
+  let noteTimer = null, refusedWhy = '';
+  const note = (text, title, ms = 0) => { clearTimeout(noteTimer); noteEl.textContent = text; noteEl.title = title || text; noteEl.hidden = !text; if (ms) noteTimer = setTimeout(() => { noteEl.hidden = true; }, ms); };
+  const STREAM_WHY = {
+    ice_failed: () => t('the connection failed'), ice_disconnected: () => t('the connection dropped'), connect_timeout: () => t('it did not connect in time'),
+    answer_failed: () => t('the browser and the machine could not agree'), restart_failed: () => t('it could not reconnect'), link_lost: () => t('the machine’s link dropped'),
+    agent_too_old: () => t('the machine’s agent cannot stream yet — update it'), no_screen_source: () => t('the machine’s agent cannot capture its screen yet'),
+    too_many_streams: () => t('the machine already streams to two windows'), offer_failed: () => t('the machine could not start it'),
+  };
+  const streamWords = (code) => (STREAM_WHY[code] ? STREAM_WHY[code]() : t('the machine ended it ({code})', { code: code || '?' }));
+  const ms = (v) => (v == null ? '—' : v);
+  const drawStream = () => {
+    const p = stream ? stream.stats() : null, a = stream ? stream.agent() : null;
+    const playing = !!stream && stream.state === 'playing';
+    streamEl.hidden = !playing;
+    chip.textContent = playing ? t('Stream · {ms} ms · {fps} fps', { ms: ms(p && p.rttMs), fps: ms(p && p.fps) }) : t('Stream · connecting…');
+    if (!p) return;
+    streamEl.textContent = t('RTT {rtt} ms · jitter {jitter} ms · {fps} fps · decode {decode} ms · {kbps} kbps', { rtt: ms(p.rttMs), jitter: ms(p.jitterMs), fps: ms(p.fps), decode: ms(p.decodeMs), kbps: ms(p.kbps) }) + (p.path === 'relay' ? ' · ' + t('via the hub') : '');
+    streamEl.dataset.path = p.path || '';
+    chip.title = [scope, t('WebRTC from the machine’s agent: {w}×{h}, sent {sent} fps at {kbps} kbps', { w: ms(p.width), h: ms(p.height), sent: ms(a && a.fps), kbps: ms(a && a.kbps) })].join('\n');
+  };
+  const inputWords = (ref) => {
+    const code = ref && ref.code;
+    if (!code) return;
+    note(code === 'uipi_blocked' ? t('Windows keeps input away from an administrator window — click another window on the machine first')
+      : code === 'input_unsupported' ? t('This machine cannot take input over the stream yet')
+        : t('The machine did not take that input ({code})', { code }), null, 8000);
+  };
+  const startStream = () => {
+    stream = createStreamView(pane, {
+      hostId: m.hostId,
+      hostPlatform: m.setup || null,
+      onStatus: () => { drawChip(); if (!tick) tick = setInterval(() => { drawChip(); }, 1000); },
+      onStats: () => drawChip(),
+      onInput: inputWords,
+      onFallback: (code, why, taken) => {
+        stream = null; streamEl.hidden = true; clearInterval(tick); tick = null;
+        refusedWhy = STREAM_WHY[code] ? streamWords(code) : why || streamWords(code); // the page words a known code in its own language; else the machine's sentence
+        if (taken) note(t('Stream stopped ({why}) — showing the VNC picture', { why: streamWords(code) }), why || code);
+        chip.title = [scope, t('Not streamed: {why}', { why: refusedWhy })].join('\n');
+        startVnc();
+      },
+    });
+    winInfo._streamView = stream;
+    stream.connect();
+  };
   winInfo._pickDisplay = (key) => pick(key);
-  winInfo._desktopView = view;
-  winInfo.onClose = () => { clearInterval(tick); document.removeEventListener('fullscreenchange', onFull); if (locked) { locked = false; try { navigator.keyboard.unlock(); } catch { /* gone */ } } view.dispose(); };
-  view.connect();
+  winInfo.onClose = () => { clearInterval(tick); clearTimeout(noteTimer); document.removeEventListener('fullscreenchange', onFull); if (locked) { locked = false; try { navigator.keyboard.unlock(); } catch { /* gone */ } } if (stream) stream.dispose(); if (view) view.dispose(); };
+  if (typeof RTCPeerConnection === 'function') startStream(); else startVnc();
   return winInfo;
 }
 

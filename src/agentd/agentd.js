@@ -1254,6 +1254,13 @@ const socksServers = new Map(); // port → { server, owner: mux }
 // lane machine-app-crop: the followed app windows (`window-track` with `watch`) — wid → { owner: mux, h, last, pinned }. A watch
 // belongs to the link that asked it (its death stops it; the hub re-arms it); a pin it made is undone when it stops.
 const windowWatches = new Map();
+// lane stream-p1a-transport (design q-041 r2 §2 / §3 P1b): THE one input injector of this machine (src/input-inject.js —
+// SendInput through a resident PowerShell on Windows; the Linux stub writes a file only when VIBESPACE_INPUT_STUB_FILE names
+// one) and the WebRTC stream sessions that feed it (src/agentd/stream-host.js) — both made at their first use, so werift
+// is never loaded by an agent that never streams
+let inputInjector = null, streamHost = null;
+const injectorOf = () => inputInjector || (inputInjector = require('./../input-inject.js').createInjector({ platform: process.platform, spawn: require('child_process').spawn, env: spawnEnv(), stubFile: process.env.VIBESPACE_INPUT_STUB_FILE || null, fs, log }));
+const streamHostOf = () => streamHost || (streamHost = require('./stream-host.js').createStreamHost({ injector: injectorOf(), log }));
 function unpinWindow(rec) {
   rec.pinned = false;
   const a = rec.last;
@@ -1522,7 +1529,7 @@ function serveConnection(sock) {
           // per-op capability gating (three-tier design): consumers check the
           // capability, NEVER parse daemonVersion — unknown ops on an old
           // daemon get no reply and hang the request until its timeout
-          capabilities: ['probe', 'transcript-op', 'usage-scan', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events', 'pool-orders', 'sysinfo', 'design-fs', 'session-events', 'proc-list', 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'browser-end-daemon', 'desktop-serve', 'window-track', 'window-pin', 'dial-status', 'run-shell', 'app-install', 'fs-portable', 'fs-write-stream', 'desktop-apps-list', 'display-facts', 'remoteapp-facts'],
+          capabilities: ['probe', 'transcript-op', 'usage-scan', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events', 'pool-orders', 'sysinfo', 'design-fs', 'session-events', 'proc-list', 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'browser-end-daemon', 'desktop-serve', 'window-track', 'window-pin', 'dial-status', 'run-shell', 'app-install', 'fs-portable', 'fs-write-stream', 'desktop-apps-list', 'display-facts', 'remoteapp-facts', 'stream-offer', 'input-events'],
         }));
         return;
       }
@@ -2117,6 +2124,27 @@ function serveConnection(sock) {
           .then((r) => mux.control({ op: 'remoteapp-facts-result', id: msg.id, result: r }), (e) => mux.control({ op: 'remoteapp-facts-result', id: msg.id, error: String((e && e.message) || e) }));
         return;
       }
+      // lane stream-p1a-transport (design q-041 r2 — THREE-TOUCH: these handlers, `stream-offer` / `input-events` in the hello-ack,
+      // the client's gated methods and its push branch for `stream-ice` / `stream-stats`): THIS machine's WebRTC stream sessions
+      // (werift, the source, the relay — src/agentd/stream-host.js) and THE input injector, each answered with `op` on the reply;
+      // the offer's ICE candidates follow its reply as pushes (replied() releases the ones gathered while it was made)
+      if (msg.op === 'stream-offer') {
+        streamHostOf().offer(msg, mux).then((r) => { mux.control({ op: 'stream-offer-result', id: msg.id, result: r }); if (r && r.ok) streamHostOf().replied(r.sid); }, (e) => mux.control({ op: 'stream-offer-result', id: msg.id, error: String((e && e.message) || e) }));
+        return;
+      }
+      if (msg.op === 'stream-answer') { streamHostOf().answer(msg).then((r) => mux.control({ op: 'stream-answer-result', id: msg.id, result: r }), (e) => mux.control({ op: 'stream-answer-result', id: msg.id, error: String((e && e.message) || e) })); return; }
+      if (msg.op === 'stream-stop') { mux.control({ op: 'stream-stop-result', id: msg.id, stopped: streamHost ? streamHost.stop(String(msg.sid || ''), 'stopped') : false }); return; }
+      if (msg.op === 'stream-stats') { mux.control({ op: 'stream-stats-result', id: msg.id, result: streamHostOf().stats(msg, mux) }); return; }
+      if (msg.op === 'input-events') {
+        const SM = require('./../stream-model.js');
+        const all = (Array.isArray(msg.events) ? msg.events : []).slice(0, 200).map((e) => SM.inputEventOf(e));
+        const good = [], refused = [];
+        all.forEach((e, i) => { if (e.refused) refused.push({ i, code: e.refused }); else good.push({ i, e }); });
+        const inj = injectorOf();
+        inj.inject(good.map((g) => g.e)).then((r) => mux.control({ op: 'input-events-result', id: msg.id, result: { ok: !!r.ok && !refused.length, n: r.n, kind: inj.kind, refused: [...refused, ...(r.refused || []).map((x) => ({ ...x, i: good[x.i] ? good[x.i].i : x.i }))].sort((a, b) => a.i - b.i) } }),
+          (e) => mux.control({ op: 'input-events-result', id: msg.id, error: String((e && e.message) || e) }));
+        return;
+      }
       if (msg.op === 'window-untrack') { const rec = windowWatches.get(String(msg.wid || '')); if (rec) rec.h.stop(); mux.control({ op: 'window-untrack-result', id: msg.id, stopped: !!rec }); return; }
       if (msg.op === 'window-pin') {
         const rec = windowWatches.get(String(msg.wid || ''));
@@ -2443,6 +2471,7 @@ function serveConnection(sock) {
       for (const [port, s] of socksServers) { if (s.owner === mux) { try { s.server.close(); } catch { } socksServers.delete(port); } }
       if (this._discoWatch) { for (const w of this._discoWatch) { try { w.close(); } catch { } } this._discoWatch = null; }
       for (const rec of [...windowWatches.values()]) if (rec.owner === mux) rec.h.stop(); // lane machine-app-crop: a watch dies with its link (unpinned); the hub re-arms it
+      if (streamHost) streamHost.linkDead(mux); // lane stream-p1a-transport: its streams become orphans (the media keeps flowing) until the hub re-arms them
       if (this._usageEvWatch) { try { for (const w of this._usageEvWatch.watches) w.close(); } catch { } this._usageEvWatch = null; }
       pipeSessions.detachAll(mux);
     },

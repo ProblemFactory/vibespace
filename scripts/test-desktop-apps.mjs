@@ -78,9 +78,9 @@ ok(Number.isInteger(L.CONCURRENT_CAP) && L.CONCURRENT_CAP >= 1, `CONCURRENT_CAP 
 }
 
 console.log('§2 DISPLAY_BACKENDS — the capability table');
-ok(same(M.BACKEND_IDS, ['xpra', 'vnc-display', 'desktop-singleton', 'remoteapp']) && same(M.LADDER_IDS, ['xpra', 'vnc-display', 'desktop-singleton']), 'three LOCAL rungs in DA1 order: xpra > vnc-display > desktop-singleton — then the remoteapp row (lane remoteapp-r1a: `remote`, never on the local ladder; scripts/test-remoteapp.mjs §1)');
+ok(same(M.BACKEND_IDS, ['xpra', 'vnc-display', 'desktop-singleton', 'remoteapp', 'webrtc']) && same(M.LADDER_IDS, ['xpra', 'vnc-display', 'desktop-singleton']), 'three LOCAL rungs in DA1 order: xpra > vnc-display > desktop-singleton — then the two `remote` rows, never on the local ladder: remoteapp (lane remoteapp-r1a; scripts/test-remoteapp.mjs §1) and webrtc (lane stream-p1a-transport; scripts/test-desktop-webrtc.mjs §1)');
 for (const b of M.DISPLAY_BACKENDS) {
-  ok(M.CAP_KEYS.every((k) => typeof b[k] === 'boolean') && !('adaptive' in b) && Array.isArray(b.needs) && b.needs.every((g) => Array.isArray(g) && g.length) && ['rfb', 'xpra'].includes(b.stream) && typeof b.wired === 'boolean', `row ${b.id} declares every capability cell (${M.CAP_KEYS.join('/')}) + needs/stream/wired`);
+  ok(M.CAP_KEYS.every((k) => typeof b[k] === 'boolean') && !('adaptive' in b) && Array.isArray(b.needs) && b.needs.every((g) => Array.isArray(g) && g.length) && (['rfb', 'xpra'].includes(b.stream) || (b.remote === 'agent-webrtc' && b.stream === 'webrtc')) && typeof b.wired === 'boolean', `row ${b.id} declares every capability cell (${M.CAP_KEYS.join('/')}) + needs/stream/wired`);
   ok(Object.isFrozen(b) && Object.isFrozen(b.needs), `row ${b.id} is frozen (a rung is a declaration, not state)`);
 }
 ok(M.CAP_KEYS.every((k) => M.backendById('xpra')[k] === true) && M.backendById('xpra').stream === 'xpra' && M.backendById('xpra').wired === true, 'xpra: every cell (scales, crisp text, per-window, seamless, satellites, geometry, its own display, a hosted client), xpra stream, WIRED since P8-2 (DA1: installed ⇒ every NEW session takes it)');
@@ -91,8 +91,12 @@ ok(M.CAP_KEYS.every((k) => M.backendById('vnc-display')[k] === (k === 'ownsDispl
   const pix = Object.freeze({ id: 'fakepix', label: 'fakepix', stream: 'rfb', needs: Object.freeze([Object.freeze(['Xfakepix'])]), recipes: Object.freeze({ Xfakepix: 'x-then-server' }), wired: true });
   ok(D.probeBinsOf([pix, ...M.DISPLAY_BACKENDS]).includes('Xfakepix') && !D.PROBE_BINS.includes('Xfakepix') && !D.PROBE_BINS.some((n) => n.includes(':')) && D.PROBE_BINS.includes('xrdb'), 'PROBE_BINS = every rung\'s needs (derived; a pseudo-binary is a fact, not a file) + the helpers — a fake row\'s binary is probed with no edit');
   const probed = new Set([...D.PROBE_BINS, 'desktop-singleton:running']);
-  const needed = M.DISPLAY_BACKENDS.flatMap((b) => b.needs.flat());
+  const needed = M.DISPLAY_BACKENDS.flatMap((b) => b.needs.flat()).filter((n) => !/^agent:/.test(n));
   ok(needed.every((n) => probed.has(n)), 'every binary a rung needs is one desktop-display PROBES (a rung nobody can probe is prose)', needed.filter((n) => !probed.has(n)));
+  // lane stream-p1a-transport: an `agent:<capability>` need is the paired machine's AGENT's — judged against its hello-ack, never a PATH probe
+  const agentNeeds = M.DISPLAY_BACKENDS.flatMap((b) => b.needs.flat()).filter((n) => /^agent:/.test(n));
+  const helloCaps = (/capabilities: \[([^\]]*)\]/.exec(read('src/agentd/agentd.js')) || [])[1] || '';
+  ok(agentNeeds.length > 0 && agentNeeds.every((n) => helloCaps.includes(`'${n.slice(6)}'`)), `every agent:<capability> a rung needs is one the agent's hello-ack names (${agentNeeds.join(', ')})`, agentNeeds);
 }
 
 for (const b of M.DISPLAY_BACKENDS) {

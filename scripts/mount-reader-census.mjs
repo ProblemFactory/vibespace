@@ -156,6 +156,7 @@ export const ROWS = [
   ['src/sock-path.js', 'own-tree', 4, null, DATA],
   ['src/ssh-key.js', 'own-tree', 1, null, DATA],
   ['src/sync-store.js', 'own-tree', 2, null, DATA],
+  ['src/input-inject.js', 'exempt', 2, null, 'lane stream-p1a-transport: the Linux input stub\'s own record (VIBESPACE_INPUT_STUB_FILE — the suites\' witness, unset = no file), read back only to trim it; never a hub path'],
   ['src/installed-apps.js', 'exempt', 2, null, 'lane machine-desktop-apps: runs on a paired Mac (the daemon\'s `desktop-apps-list` op) over its /Applications + ~/Applications — never a hub path, bounded by its budget'],
   ['src/sysinfo.js', 'own-tree', 9, null, PROC],
   ['src/task-groups.js', 'user-path', 11, 'DOOR\\.blocked\\(', 'the TASK.md writer (contextDir) + a session cwd realpath: skipped / not cached, said once'],

@@ -73,6 +73,22 @@ const DISPLAY_BACKENDS = Object.freeze([
     remote: 'rdp-loopback',
     wired: true,
   }),
+  // design q-041 r2 §2 (lane stream-p1a-transport, 2026-10-16): a PAIRED Windows / macOS machine's desktop as a low-latency
+  // WebRTC STREAM — the machine's agent encodes and sends (werift in the daemon: one H.264 RTP track + one `input` data
+  // channel), the page plays it in a <video> inside the same window shell as the VNC picture, which stays the fallback. The
+  // hub runs NOTHING for it (no X, no picture server): its `needs` group is the AGENT's capability, spelled as the table's
+  // pseudo-binary facts (`agent:<capability>` — probeBinsOf skips a name with a colon), judged by src/stream-model.js
+  // streamRungVerdict against the hello-ack; `remote` keeps it off the local ladder like the RemoteApp row. P1: the whole
+  // screen (perWindow false — the single-window stream is P2), no cell of the local rungs applies.
+  Object.freeze({
+    id: 'webrtc', label: 'WebRTC stream', stream: 'webrtc',
+    scales: false, crispText: false, perWindow: false, seamless: false, satellites: false, geometry: false, ownsDisplay: false, hostedClient: false,
+    needs: Object.freeze([Object.freeze(['agent:stream-offer'])]),
+    recipes: Object.freeze({ 'agent:stream-offer': 'agent-stream' }), // desktop-display's recipe of that name REFUSES by name: the agent brings it up, never this hub's keeper
+    fit: Object.freeze({ 'agent:stream-offer': 'shared' }), // the machine's own desktop at its own size — the page scales the picture, never the screen
+    remote: 'agent-webrtc',
+    wired: true,
+  }),
 ]);
 const BACKEND_IDS = Object.freeze(DISPLAY_BACKENDS.map((b) => b.id));
 /** The rows a LOCAL app may land on (lane remoteapp-r1a): every row but a `remote` one — what a preference may name. */

@@ -84,6 +84,12 @@
  *   POST /api/desktop/machine-desktop/remoteapp/trust {host}    which fields are SET, the pinned certFp — never a password}; `trust` =
  *   GET  /api/desktop/machine-desktop/remoteapp/facts?host=   the first connection (pins the certificate); `facts` = the machine's
  *                                     Remote Desktop facts ({ok, facts, rows, ready} | agent_too_old {have, need})
+ *   POST /api/desktop/machine-desktop/stream/start {host}   lane stream-p1a-transport (design q-041 r2): the machine's desktop
+ *                                     as a WebRTC stream from its agent — {take: false, code, why} (the window shows the VNC
+ *                                     picture) | {take: true, key, sid, offer, source, codec, seq}; then, by `key`:
+ *   POST …/stream/answer {key, sdp} · …/stream/candidate {key, candidate} · …/stream/restart {key} (an ICE-restart offer) ·
+ *   …/stream/stop {key, why?} · GET …/stream/watch?key&n&seq[&path] (THE LONG POLL: the agent's candidates from index n,
+ *   the state, the agent's numbers, `ended`) · GET …/stream/facts?host= (the sessions' record). People only.
  *   GET  /api/desktop/install-plan?host=     the xpra INSTALL RUNG's plan for a machine (its facts +
  *                                     the PURE plan: source apt | xpra.org, the commands, canRun)
  *                                     — SHOWN before anything runs
@@ -489,6 +495,55 @@ router.post('/api/desktop/machine-app/untrack', (req, res) => {
   if (humanOnly(req, res)) return;
   const ma = appsOf(res); if (!ma) return;
   res.json(ma.untrack(String((req.body && req.body.key) || '')));
+});
+// lane stream-p1a-transport (design q-041 r2 §2 传输 / 客户端): THE WEBRTC STREAM of a machine's desktop — the signaling relay
+// between the page's RTCPeerConnection and the machine's agent, and the session's record (src/server/desktop-webrtc.js); people
+// only, like the picture. `start` answers `{take: false, code, why}` when the rung is not taken (the window shows the VNC picture)
+let webrtc = null;
+const webrtcOf = (res) => { if (ctx.webrtc) return ctx.webrtc; if (!ctx.access || typeof ctx.access.streamRung !== 'function') { noAccess(res); return null; } return webrtc || (webrtc = require('../server/desktop-webrtc.js').create({ access: ctx.access, log: console })); };
+const STREAM_STATUS = Object.freeze({ not_found: 404, 'bad-request': 400, answer_failed: 409, restart_failed: 409 });
+const streamFail = (res, e) => (e && STREAM_STATUS[e.code] ? res.status(STREAM_STATUS[e.code]).json({ error: String(e.message), code: e.code }) : fail(res, e));
+const streamKey = (req) => String((req.method === 'GET' ? req.query.key : req.body && req.body.key) || '');
+router.post('/api/desktop/machine-desktop/stream/start', async (req, res) => {
+  if (humanOnly(req, res)) return;
+  const host = hostParam(req, res); if (!host) return;
+  const wr = webrtcOf(res); if (!wr) return;
+  const b = req.body || {};
+  try { res.json(await wr.start(host, { maxKbps: Number(b.maxKbps) || null })); } catch (e) { streamFail(res, e); }
+});
+router.post('/api/desktop/machine-desktop/stream/answer', async (req, res) => {
+  if (humanOnly(req, res)) return;
+  const wr = webrtcOf(res); if (!wr) return;
+  try { res.json(await wr.answer(streamKey(req), req.body && req.body.sdp)); } catch (e) { streamFail(res, e); }
+});
+router.post('/api/desktop/machine-desktop/stream/candidate', async (req, res) => {
+  if (humanOnly(req, res)) return;
+  const wr = webrtcOf(res); if (!wr) return;
+  try { res.json(await wr.candidate(streamKey(req), req.body && req.body.candidate)); } catch (e) { streamFail(res, e); }
+});
+router.post('/api/desktop/machine-desktop/stream/restart', async (req, res) => {
+  if (humanOnly(req, res)) return;
+  const wr = webrtcOf(res); if (!wr) return;
+  try { res.json(await wr.restart(streamKey(req))); } catch (e) { streamFail(res, e); }
+});
+router.get('/api/desktop/machine-desktop/stream/watch', async (req, res) => {
+  if (humanOnly(req, res)) return;
+  const wr = webrtcOf(res); if (!wr) return;
+  const key = streamKey(req);
+  if (req.query.path) wr.notePath(key, String(req.query.path));
+  res.json(await wr.poll(key, Number(req.query.n) || 0, Number(req.query.seq ?? -1), Number(req.query.waitMs) || undefined));
+});
+router.post('/api/desktop/machine-desktop/stream/stop', async (req, res) => {
+  if (humanOnly(req, res)) return;
+  const wr = webrtcOf(res); if (!wr) return;
+  const why = String((req.body && req.body.why) || 'stopped').replace(/[^a-z_]/g, '').slice(0, 40) || 'stopped';
+  res.json(await wr.stop(streamKey(req), why));
+});
+router.get('/api/desktop/machine-desktop/stream/facts', (req, res) => {
+  if (humanOnly(req, res)) return;
+  const host = hostParam(req, res); if (!host) return;
+  const wr = webrtcOf(res); if (!wr) return;
+  res.json({ sessions: wr.facts(host) });
 });
 /** lane machine-desktop-apps: the machine's INSTALLED apps — listed ON it by witness (src/installed-apps.js), kept by the
  *  hub; `fresh=1` = Check again (listed now). Answered 200 with the list as it is when the machine cannot list right

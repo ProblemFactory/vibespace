@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.294 — 2026-10-16
+
+### Added
+- A paired machine's desktop can stream to the browser over low-latency WebRTC, keyboard and mouse on the same channel (step one: transport and player).
+
 ## 2.369.293 — 2026-10-16
 
 ### Maintenance

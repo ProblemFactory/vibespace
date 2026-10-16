@@ -26,9 +26,11 @@
  *     reach any agent child" was true of the dtach path only.
  *
  * TWO KEEP SETS, ONE FILTER. `AGENT_ENV_KEEP` is what an agent child may see;
- * `DAEMON_ENV_KEEP` adds the two names the daemon tier itself reads
+ * `DAEMON_ENV_KEEP` adds the three names the daemon tier itself reads
  * (`VIBESPACE_NODE_MODULES` — node-pty's home; `VIBESPACE_AGENTD_VERSION` —
- * the upgrade re-exec's stamp). The set is DERIVED from the daemon tier's own
+ * the upgrade re-exec's stamp; `VIBESPACE_INPUT_STUB_FILE` — where the Linux
+ * input stub records what it would have sent: the suites' witness, unset = no
+ * file, lane stream-p1a-transport). The set is DERIVED from the daemon tier's own
  * `process.env.VIBESPACE_*` reads (grep src/agentd + its bundled deps), never
  * typed from memory: a name the daemon reads but this set omits would break
  * the daemon the moment the sanitizer lands, loudly; a name it keeps but
@@ -61,7 +63,7 @@ const AGENT_ENV_DROP = Object.freeze(new Set(['PORT', 'HOST', 'NODE_ENV', 'NODE_
   'CLAUDE_CODE_OAUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR']));
 
 /** The daemon tier's own reads, on top of the agent set (derived — see the header). */
-const DAEMON_ENV_KEEP = Object.freeze(new Set([...AGENT_ENV_KEEP, 'VIBESPACE_NODE_MODULES', 'VIBESPACE_AGENTD_VERSION']));
+const DAEMON_ENV_KEEP = Object.freeze(new Set([...AGENT_ENV_KEEP, 'VIBESPACE_NODE_MODULES', 'VIBESPACE_AGENTD_VERSION', 'VIBESPACE_INPUT_STUB_FILE']));
 
 /**
  * The sanitized copy of `base`: every `VIBESPACE_*` not in `keep` is dropped

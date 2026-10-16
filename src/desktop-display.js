@@ -838,6 +838,10 @@ const RECIPES = Object.freeze({
     ctx.onPart('server', v, { port });
     return { display: x.display, port, shared: false };
   },
+  /** lane stream-p1a-transport: the `webrtc` row's recipe — a paired machine's AGENT brings its stream up (the `stream-offer`
+   *  device op), never this hub's display keeper; the row is `remote` (off the local ladder), so reaching here is a bug,
+   *  refused by name. */
+  'agent-stream': async () => { throw namedError('agent-stream', 'the WebRTC stream is brought up by the machine\'s agent (stream-offer), never by this hub\'s display keeper'); },
   /** The pre-existing shared desktop (src/vnc.js): nothing is started. */
   shared: async (ctx) => {
     const s = await ctx.singleton();

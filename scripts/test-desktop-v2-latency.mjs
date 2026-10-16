@@ -189,7 +189,7 @@ ok(!kc.propagationStopped && !kw.propagationStopped && !pw.defaultPrevented && w
 
 console.log('§3 the machine window\'s strip');
 const md = read('src/lib/machine-desktop.js');
-ok(/channel: true,\n    ladder: true,[^\n]*\n    pasteKeys: true,/.test(md) && /onQuality: \(\) => drawRung\(\),/.test(md), 'the machine window asks for the ladder and the paste chord');
+ok(/channel: true,\n\s+ladder: true,[^\n]*\n\s+pasteKeys: true,/.test(md) && /onQuality: \(\) => drawRung\(\),/.test(md), 'the machine window asks for the ladder and the paste chord');
 ok(/c\.requestFullscreen\(\)/.test(md) && !/winInfo\.element \|\| c/.test(md) && /keyboardLockGate\(\{ secure: pageIsSecure\(\), api: hasLock\(\), fullscreen: document\.fullscreenElement === c, want: wantKeys \}\)/.test(md)
   && /if \(g\.lock && !locked\) \{ locked = true; navigator\.keyboard\.lock\(\)/.test(md) && /document\.removeEventListener\('fullscreenchange', onFull\)/.test(md),
   'full screen = the window\'s CONTENT; navigator.keyboard.lock() only through keyboardLockGate with the page\'s isSecureContext (pageIsSecure) and full screen; released on close');

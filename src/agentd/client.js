@@ -331,7 +331,7 @@ class DeviceManager {
             mux.onWritable = (chan) => { sessions.get(chan)?.onWritable?.(); };
             const prevControl = mux.onControl;
             mux.onControl = (m) => {
-              if (m.op === 'fs-result' || m.op === 'discovery-result' || m.op === 'discovery-watching' || m.op === 'usage-events-watching' || m.op === 'session-events-watching' || m.op === 'cmd-result' || m.op === 'probe-result' || m.op === 'secret-result' || m.op === 'quota-result' || m.op === 'sysinfo-result' || m.op === 'desktop-apps-list-result' || m.op === 'design-fs-result' || m.op === 'dial-status-result' || m.op === 'proc-list-result' || m.op === 'opencode-serve-result' || m.op === 'browser-serve-result' || m.op === 'desktop-serve-result' || m.op === 'window-track-result' || m.op === 'window-untrack-result' || m.op === 'window-pin-result' || m.op === 'display-facts-result' || m.op === 'remoteapp-facts-result' || m.op === 'peer-post-result' || m.op === 'pool-orders-ok' || m.op === 'tcp-open' || m.op === 'listen-open' || m.op === 'serve-folder-result' || m.op === 'serve-socks-result') {
+              if (m.op === 'fs-result' || m.op === 'discovery-result' || m.op === 'discovery-watching' || m.op === 'usage-events-watching' || m.op === 'session-events-watching' || m.op === 'cmd-result' || m.op === 'probe-result' || m.op === 'secret-result' || m.op === 'quota-result' || m.op === 'sysinfo-result' || m.op === 'desktop-apps-list-result' || m.op === 'design-fs-result' || m.op === 'dial-status-result' || m.op === 'proc-list-result' || m.op === 'opencode-serve-result' || m.op === 'browser-serve-result' || m.op === 'desktop-serve-result' || m.op === 'window-track-result' || m.op === 'window-untrack-result' || m.op === 'window-pin-result' || m.op === 'display-facts-result' || m.op === 'remoteapp-facts-result' || m.op === 'stream-offer-result' || m.op === 'stream-answer-result' || m.op === 'stream-stop-result' || m.op === 'stream-stats-result' || m.op === 'input-events-result' || m.op === 'peer-post-result' || m.op === 'pool-orders-ok' || m.op === 'tcp-open' || m.op === 'listen-open' || m.op === 'serve-folder-result' || m.op === 'serve-socks-result') {
                 const r = pending.get(m.id); if (r) { pending.delete(m.id); r(m); }
                 if (m.op === 'tcp-open' && !m.error) return; // channel stays live
                 return;
@@ -356,6 +356,7 @@ class DeviceManager {
               if (m.op === 'session-events') { this._onSessionEvents?.(m); return; } // step-2 dark stream (unsolicited push branch — the three-touch rule)
               if (m.op === 'window-rect') { this._windowWatches?.get(m.wid)?.push(m.result); return; } // lane machine-app-crop: a followed window's change (unsolicited push branch)
               if (m.op === 'pool-orders-executed') { this._onPoolOrdersExecuted?.(m.events || []); return; }
+              if (m.op === 'stream-ice' || m.op === 'stream-stats') { const f = this._streamWatches?.get(m.sid); if (m.ended) this._streamWatches?.delete(m.sid); try { f?.(m); } catch { } return; } // lane stream-p1a-transport: a stream session's candidates / numbers (unsolicited push branch)
               if (m.op === 'session-open' || m.op === 'pipe-session-open') { sessions.get(m.chan)?.onOpen?.(m); return; }
               if (m.op === 'session-exit') { const h = sessions.get(m.chan); sessions.delete(m.chan); h?.onExit?.(m.code); return; }
               if (m.op === 'session-error') { const h = sessions.get(m.chan); sessions.delete(m.chan); h?.onError?.(m.error); return; }
@@ -397,6 +398,7 @@ class DeviceManager {
             if (this._onUsageEvents) this._request({ op: 'usage-events-watch' }).catch(() => { });
             if (this._onSessionEvents) this._request({ op: 'session-events-watch' }).catch(() => { }); // session-brain step 2 re-arm
             for (const w of this._windowWatches?.values() || []) w.rearm(); // lane machine-app-crop: a followed window is followed again (and re-pinned)
+            for (const sid of [...(this._streamWatches?.keys() || [])]) this._rearmStream(sid); // lane stream-p1a-transport: a stream outlives a link blip (its media never rode it) — this link owns its pushes again
             return;
           }
           if (msg.op === 'auth-fail') {
@@ -961,6 +963,72 @@ class DeviceManager {
     const r = await this._request({ op: 'remoteapp-facts', timeoutMs });
     if (r.error) throw new Error(r.error);
     return r.result || { ok: false, code: 'facts_failed', error: 'no answer' };
+  }
+  /** lane stream-p1a-transport (design q-041 r2 §2): a WebRTC STREAM session on this device — the daemon's werift offers ONE
+   *  H.264 track + ONE `input` data channel (src/agentd/stream-host.js). `params` = { sid?, sourceKind, sourceId?, maxKbps?,
+   *  relay?, iceRestart? }; the session id is made HERE (before the request), so the pushes that follow the reply —
+   *  `stream-ice` (the offer's candidates, `null` = the last) and `stream-stats` (once a second; `ended` = it is over) — always
+   *  find `onPush`; after a reconnect the session is re-armed (this link owns its pushes again). Capability-gated: an agent
+   *  that predates the op is never asked (it would not answer — the 2.300.0 rule): `host_needs_daemon` + its version.
+   *  → the daemon's answer { ok, sid, offer, source, relayPort, codec } | { ok: false, code, error } */
+  async streamOffer(params = {}, { onPush = null, timeoutMs = 20000 } = {}) {
+    const conn = await this.connect();
+    if (!conn.info?.capabilities?.includes?.('stream-offer')) { const e = new Error('daemon lacks stream-offer (capabilities gate) -- upgrade the agent on this machine to stream its desktop'); e.code = 'host_needs_daemon'; e.daemonVersion = conn.info?.daemonVersion || null; throw e; }
+    const sid = params.sid || 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+    if (!this._streamWatches) this._streamWatches = new Map();
+    const fresh = !params.iceRestart;
+    if (onPush) this._streamWatches.set(sid, onPush);
+    const forget = () => { if (fresh) this._streamWatches.delete(sid); };
+    let r;
+    try { r = await this._request({ op: 'stream-offer', sid, sourceKind: params.sourceKind, sourceId: params.sourceId, maxKbps: params.maxKbps, relay: !!params.relay, iceRestart: !fresh, timeoutMs }); } catch (e) { forget(); throw e; }
+    if (r.error) { forget(); throw new Error(r.error); }
+    const res = r.result || { ok: false, code: 'offer_failed', error: 'no answer' };
+    if (!res.ok) forget();
+    return res;
+  }
+  /** The browser's SDP answer, or one trickled candidate of it, for a stream session. → { ok } | { ok: false, code, error } */
+  async streamAnswer(sid, { answer = null, candidate = null } = {}) {
+    const conn = await this.connect();
+    if (!conn.info?.capabilities?.includes?.('stream-offer')) { const e = new Error('daemon lacks stream-offer (capabilities gate)'); e.code = 'host_needs_daemon'; throw e; }
+    const r = await this._request({ op: 'stream-answer', sid, answer, candidate, timeoutMs: 15000 });
+    if (r.error) throw new Error(r.error);
+    return r.result || { ok: false, code: 'answer_failed', error: 'no answer' };
+  }
+  /** End a stream session (its watch goes with it). → { stopped } */
+  async streamStop(sid) {
+    this._streamWatches?.delete(sid);
+    const conn = await this.connect();
+    if (!conn.info?.capabilities?.includes?.('stream-offer')) return { stopped: false };
+    const r = await this._request({ op: 'stream-stop', sid, timeoutMs: 10000 });
+    return { stopped: !!(r && r.stopped) };
+  }
+  /** A stream session's numbers now (the daemon's side: fps, kbps, the bandwidth estimate, the input counts). */
+  async streamStats(sid) {
+    const conn = await this.connect();
+    if (!conn.info?.capabilities?.includes?.('stream-offer')) { const e = new Error('daemon lacks stream-offer (capabilities gate)'); e.code = 'host_needs_daemon'; throw e; }
+    const r = await this._request({ op: 'stream-stats', sid, timeoutMs: 10000 });
+    if (r.error) throw new Error(r.error);
+    return r.result || { ok: false, code: 'not_found', error: 'no answer' };
+  }
+  /** After a reconnect: the session is asked for its numbers WITH `watch` (this link owns its pushes again); a session that
+   *  ended while the link was down is told to its watcher as ended (`link_lost`). */
+  _rearmStream(sid) {
+    this._request({ op: 'stream-stats', sid, watch: true, timeoutMs: 10000 }).then((r) => {
+      const f = this._streamWatches?.get(sid);
+      const res = r && r.result;
+      if (res && res.ok) { try { f?.({ op: 'stream-stats', sid, stats: res.stats, state: res.state, rearmed: true }); } catch { } return; }
+      this._streamWatches?.delete(sid);
+      try { f?.({ op: 'stream-stats', sid, state: 'closed', ended: 'link_lost' }); } catch { }
+    }, () => { });
+  }
+  /** Pointer / key / clipboard events into THE machine's injector (the `input-events` op — the data channel's twin for a
+   *  caller with no stream). Capability-gated. → { ok, n, kind, refused: [{ i, code }] } */
+  async inputEvents(events) {
+    const conn = await this.connect();
+    if (!conn.info?.capabilities?.includes?.('input-events')) { const e = new Error('daemon lacks input-events (capabilities gate) -- upgrade the agent on this machine'); e.code = 'host_needs_daemon'; e.daemonVersion = conn.info?.daemonVersion || null; throw e; }
+    const r = await this._request({ op: 'input-events', events: Array.isArray(events) ? events : [], timeoutMs: 15000 });
+    if (r.error) throw new Error(r.error);
+    return r.result || { ok: false, n: 0, refused: [] };
   }
   /** lane desktop-v2-entry: the machine's own screen table (the display picker). Capability-gated (an old agent never hears
    *  an op it would not answer). → { ok, platform, displays } | { ok:false, code, error } */

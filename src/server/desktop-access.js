@@ -52,6 +52,7 @@ const MW = require('../machine-window.js'); // lane machine-app-crop: the run's 
 const D = require('../desktop-display.js'); // design 014 D1: the PURE RFB greeting read of the vnc-native rung
 const AGENT_VERSION = (() => { try { return require('../../package.json').version; } catch { return ''; } })(); // lane remoteapp-r1b: the agent version that answers `remoteapp-facts` = this hub's (its agents upgrade to it)
 const RA = require('../remoteapp.js'); // lane remoteapp-r1a (design q-024 §1.2): the RemoteApp setup words, the platform verdict, the RDP port
+const SMOD = require('../stream-model.js'); // lane stream-p1a-transport: the webrtc rung's PURE verdict (the agent's capability, a source)
 const IA = require('../installed-apps.js'); // lane machine-desktop-apps: a Windows / macOS machine's installed apps (SHARED: the device lists, the hub judges again)
 
 let installed = null;
@@ -634,6 +635,20 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
     if (typeof dm.displayFacts !== 'function') throw named('host_needs_daemon', `${hostId}: its agent cannot list its displays`);
     return dm.displayFacts();
   }
+  /** lane stream-p1a-transport (design q-041 r2 §2): THE WEBRTC RUNG beside vnc-native — may this machine's desktop open as a
+   *  low-latency stream from its agent (src/stream-model.js streamRungVerdict over the agent's hello-ack: the `stream-offer`
+   *  capability and a source — its screen once the agent captures it, else this instance's fake source,
+   *  VIBESPACE_STREAM_FAKE_SOURCE, for the suites and demos). Asks NOTHING of the machine (its hello is in hand); every "no"
+   *  is named and the window shows the VNC picture. → { take, source, code, why, dm, platform, sourceId } */
+  async function streamRung(hostId) {
+    if (isLocal(hostId)) return { take: false, source: null, code: 'not_desktop_machine', why: 'this machine\'s own desktop is the Desktop window', dm: null, platform: null, sourceId: null };
+    const dm = await deviceOf(hostId);
+    let info = {};
+    try { const st = dm && dm.status ? dm.status() : null; info = (st && st.connected && st.info) || {}; } catch { info = {}; }
+    const fake = String((env() || {}).VIBESPACE_STREAM_FAKE_SOURCE || '') || null;
+    const v = SMOD.streamRungVerdict({ capabilities: info.capabilities || [], desktop: M.DESKTOP_PLATFORMS.includes(info.platform), fakeSource: fake });
+    return { ...v, dm, platform: info.platform || null };
+  }
   // ── design q-024 r1 §1.3–§1.4 (lane remoteapp-r1b): THE REMOTEAPP SETTINGS CARD'S DOORS — the owner's (the routes refuse an agent token) ──
   /** The machine's Remote Desktop facts through its agent (the `remoteapp-facts` op, read-only) → `{ ok, platform, facts, rows,
    *  ready }`. An agent that predates the op is never asked: `agent_too_old` naming the version it has and the one it needs
@@ -714,7 +729,7 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
     try { return !!(hosts && typeof hosts.connectedDevice === 'function' && hosts.connectedDevice(hostId)); } catch { return false; }
   }
 
-  const layer = { call, forwardPort, closeForward, forwards: listForwards, hostKnown, isLocal, shutdown, machines, installPlan, installXpra, installPackage, installBusy, runArgv, readFile, connectedNow, setAppPlanner, planDigest, probeDesktop, openMachineDesktop, machineDesktopTarget, machineDesktopGone, runOnDesktop, installedApps, installedNow, deviceOf, displayFacts, linkPing, remoteappSetup, remoteappForward, setRdpSetup, launchRemoteApp, remoteappSignin, remoteappFacts, remoteappSetupView, saveRemoteappSetup, trustRemoteApp };
+  const layer = { call, forwardPort, closeForward, forwards: listForwards, hostKnown, isLocal, shutdown, machines, installPlan, installXpra, installPackage, installBusy, runArgv, readFile, connectedNow, setAppPlanner, planDigest, probeDesktop, openMachineDesktop, streamRung, machineDesktopTarget, machineDesktopGone, runOnDesktop, installedApps, installedNow, deviceOf, displayFacts, linkPing, remoteappSetup, remoteappForward, setRdpSetup, launchRemoteApp, remoteappSignin, remoteappFacts, remoteappSetupView, saveRemoteappSetup, trustRemoteApp };
   if (install) installed = layer;
   return layer;
 }
