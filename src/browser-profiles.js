@@ -2951,7 +2951,7 @@ function isLoopbackCdpUrl(u) { return !!u && /^(ws|http)s?:\/\/(127\.0\.0\.1|loc
  * ⇒ `null`: the caller refuses BY NAME (`browser_no_cdp`), never a directory
  * fallback. (`profileDir` is accepted and ignored — the old signature.)
  */
-function attachedEnvFor({ browserKey, profileId, cdpUrl = null }) {
+function attachedEnvFor({ browserKey, profileId, cdpUrl = null, socketDir = null }) {
   if (!isProfileId(profileId)) return [];
   if (!isLoopbackCdpUrl(cdpUrl)) return null;
   return [
@@ -2959,6 +2959,9 @@ function attachedEnvFor({ browserKey, profileId, cdpUrl = null }) {
     `AGENT_BROWSER_NAMESPACE=${sessionNameFor(profileId)}`,
     `AGENT_BROWSER_CDP=${cdpUrl}`,
     'AGENT_BROWSER_IDLE_TIMEOUT_MS=0',
+    // lane one-browser-b1: a browser on the ATTACH road names its config's own socket root (the keeper's calls run there
+    // too — the CLI sets it on the child last, src/routes/browser.js envBasis), so `close --all` never crosses configs
+    ...(typeof socketDir === 'string' && socketDir.startsWith('/') ? [`AGENT_BROWSER_SOCKET_DIR=${socketDir}`] : []),
   ];
 }
 /** Is this env pair the CDP endpoint (the ONE pair `use --print` withholds —

@@ -128,6 +128,7 @@ const TABLE = {
   'src/agentd/client.js': 'hub local device #0 transport — witnessOrRule (the same function)',
   'src/hosts.js': 'ssh ControlPath masters — os.tmpdir()/vs-cm-<uid>, short by construction (existing)',
   'src/browser-profiles.js': 'agent-browser session sockets — its own socketDirDecision (SOCKET_PATH_MAX = 103, existing)',
+  'src/browser-attach.js': 'agent-browser session sockets on the attach road — the per-config root `<base>/vs-ab-<uid>/<profileId>` sized against the same 103 bytes (attachSocketDir `fits`; lane one-browser-b1)',
   'src/browser-facts.js': 'agent-browser — reads the CLI\'s own socketDir (browser-profiles\' rule)',
   'src/browser-serve.js': 'agent-browser — reports socketDir (browser-profiles\' rule)',
   'src/browser-verbs.js': 'agent-browser — hands socketDirDecision().dir to the CLI (browser-profiles\' rule)',

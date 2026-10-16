@@ -146,6 +146,170 @@ function reapDaemons(sessionNames, { cwdUnder = null } = {}) {
 }
 const done = () => { console.log(fail ? `\n${fail} FAILED (${pass} passed${skipped ? ', ' + skipped + ' skipped' : ''})` : `\nALL PASS (${pass}${skipped ? ', ' + skipped + ' skipped' : ''})`); process.exit(fail ? 1 : 0); };
 
+// ═══ ⑨ LANE ONE-BROWSER-B1 (design q-026 r1 §2.1 / §3 row B1): THE ATTACH ROAD on a REAL Chrome + a REAL xpra display ═══
+// The REAL keeper with the REAL desktop machine half (src/desktop-serve.js → desktop-display's xpra-seamless recipe) as its
+// display keeper: `start` opens a display-only session, spawns Google Chrome on it with the attach argv, reads its NEW
+// DevToolsActivePort; the REAL driver then runs as the agent (the attach answer's pairs: AGENT_BROWSER_CDP + the config's
+// socket root): a LOCAL page opened, `snapshot -i`, stream frames arriving, `navigator.webdriver === false`; an X click
+// (xdotool on the SESSION's display — a private viewer attached so xpra maps the window) lands on the page as a trusted
+// click while CDP stays live; the stop ends Chrome and its display. CONTROLS: the same Chrome argv WITHOUT
+// AutomationControlled ⇒ webdriver true (the flag is load-bearing — the RED control); the DRIVER road on the same box
+// (agent-browser launches Chrome itself in its hidden window) ⇒ webdriver true with `browser.automationFlag` off, false
+// with it on (the default passes the flag through the config). Private world only: scratch HOME / XDG_RUNTIME_DIR /
+// profiles / socket roots, no session bus, the viewer on a pinned high display; every process found by its environ.
+// PNGs: VIBESPACE_B1_PNG_DIR (optional) receives the session display's root and one stream frame.
+async function legAttach() {
+  console.log('— ⑨ lane one-browser-b1: the keeper spawns a REAL Google Chrome on its own xpra display; the REAL driver attaches');
+  const DD = require('../src/desktop-display.js');
+  const envBase = {}; for (const [k, v] of Object.entries(process.env)) if (!k.startsWith('AGENT_BROWSER_')) envBase[k] = v;
+  const realBin = F.binaryResolver('agent-browser', envBase)();
+  const binOf = (n) => DD.binOnPath(n, { env: envBase });
+  const need = { 'agent-browser': realBin, 'google-chrome': binOf('google-chrome'), xpra: binOf('xpra'), xauth: binOf('xauth'), xdotool: binOf('xdotool'), Xvfb: binOf('Xvfb') };
+  const missing = Object.entries(need).filter(([, v]) => !v).map(([k]) => k);
+  if (missing.length) { skip(`⑨ the attach road's real leg: ${missing.join(', ')} not on this machine`); return; }
+  const K9 = require('../src/server/browser-keeper.js');
+  const DS9 = require('../src/desktop-serve.js');
+  const AT9 = require('../src/browser-attach.js');
+  const ATL9 = require('../src/server/browser-attach-launch.js');
+  const B9 = require('../src/browser-profiles.js');
+  const R9 = path.join(ROOT, 'b1'); const SB = scratch('b1s'); // the socket root must stay short (≤ 103-byte socket paths)
+  for (const d of [R9, SB, path.join(R9, 'home'), path.join(R9, 'xdg'), path.join(R9, 'data'), path.join(R9, 'desk')]) fs.mkdirSync(d, { recursive: true, mode: 0o700 });
+  const env = { ...envBase, HOME: path.join(R9, 'home'), XDG_RUNTIME_DIR: path.join(R9, 'xdg') };
+  for (const k of ['DBUS_SESSION_BUS_ADDRESS', 'DISPLAY', 'WAYLAND_DISPLAY', 'XAUTHORITY']) delete env[k]; // never the owner's bus or display
+  const PNG = process.env.VIBESPACE_B1_PNG_DIR || null; if (PNG) fs.mkdirSync(PNG, { recursive: true });
+  const hidden = { log() { }, warn() { }, error() { } };
+  const mine = () => { const out = []; for (const pid of fs.readdirSync('/proc').filter((x) => /^\d+$/.test(x))) { if (Number(pid) === process.pid) continue; try { const e = fs.readFileSync(`/proc/${pid}/environ`, 'utf8'); const c = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8'); if (e.includes(R9) || c.includes(R9) || e.includes(SB) || c.includes(SB)) out.push(Number(pid)); } catch { } } return out; };
+  const alive9 = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  const extra = [];
+  // the LOCAL page: one full-viewport button that records every click (trusted or not) — never a vendor page
+  const page = http.createServer((q, r) => { r.setHeader('content-type', 'text/html'); r.end('<!doctype html><title>B1 attach probe</title><style>html,body{margin:0;height:100%}#big{position:fixed;inset:0;width:100vw;height:100vh;font:32px sans-serif;background:#e8f0ff}</style><button id=big>B1 big button</button><script>window.__b1={n:0,trusted:0};document.getElementById("big").addEventListener("click",(e)=>{window.__b1.n++;if(e.isTrusted)window.__b1.trusted++;document.title="clicked "+window.__b1.n;});</script>'); });
+  await new Promise((r) => page.listen(0, '127.0.0.1', r));
+  const PAGE = `http://127.0.0.1:${page.address().port}/`;
+  const ds = DS9.install({ dataDir: path.join(R9, 'desk'), env: () => env, log: hidden });
+  const dk = { facts: (o) => ds.facts(o), launchDisplay: (b) => ds.launchDisplay(b), x11EnvFor: (id) => ds.x11EnvFor(id), stop: (id, o) => ds.stop(id, o), liveRecords: () => ds.liveRecords() };
+  const settings = { 'browser.idleTimeoutMs': 600000 };
+  const mkK = (o = {}) => K9.create({ dataDir: path.join(R9, o.data || 'data'), homeDir: env.HOME, env: () => env, serverSetting: (x) => settings[x], runtime: F.createBrowserRuntime({ env }), facts: F.createBrowserFacts({ env }), log: hidden, install: false, tickMs: 3600e3, attachSocketBase: SB, ...o.k });
+  const abRun = (args, pairsEnv, timeout = 30000) => new Promise((resolve) => require('node:child_process').execFile(realBin, args, { env: { ...env, ...pairsEnv }, encoding: 'utf8', timeout }, (err, stdout, stderr) => resolve({ ok: !err, out: String(stdout || '').trim(), err: String(stderr || '').trim() })));
+  const x = (args, xenv, timeout = 10000) => { try { return execFileSync(args[0], args.slice(1), { env: { ...env, ...xenv }, encoding: 'utf8', timeout }).trim(); } catch (e) { return null; } };
+  let k = null, viewerX = null, viewer = null;
+  try {
+    k = mkK({ k: { displaySessions: dk } });
+    const p = k.createProfile({ label: 'B1 live' }, { owner: { kind: 'instance', id: null } });
+    const t0 = Date.now();
+    const v = await k.start(p.id, { why: 'heavy' });
+    const startMs = Date.now() - t0;
+    const rec = k._reg().browsers[p.id];
+    const drec = rec.displaySession ? ds.get(rec.displaySession.id) : null;
+    ok(v.state === 'ready' && rec.launch === 'attach' && drec && drec.state === 'ready' && DA9.isDisplayForBrowser(drec) && drec.forBrowser === p.id && drec.backend === 'xpra', `⑨ start: the ATTACH road — a display-only xpra session (${drec && drec.display}, port ${drec && drec.port}) and the keeper's own Chrome on it (${startMs} ms)`, JSON.stringify({ state: v.state, launch: rec.launch, why: rec.launchWhy, err: rec.lastError, d: drec && { state: drec.state, err: drec.lastError } }));
+    if (!(v.state === 'ready' && rec.launch === 'attach' && drec)) return;
+    const argv = fs.readFileSync(`/proc/${rec.pid}/cmdline`, 'utf8').split('\0').filter(Boolean);
+    ok(AT9.ATTACH_REQUIRED.every((f) => argv.includes(f)) && !argv.some((a) => a.startsWith('--disable-sync')) && argv.includes(`--user-data-dir=${p.dir}`) && /chrome$/.test(argv[0]), `⑨ the REAL Chrome's own command line: every required flag, its profile dir, NO --disable-sync (${path.basename(argv[0])}, ${argv.length} args)`, argv.join(' '));
+    ok(/^Chrome\/\d+\./.test(rec.cdpBrowser || '') && rec.cdpPort === Number(fs.readFileSync(path.join(p.dir, 'DevToolsActivePort'), 'utf8').split('\n')[0]) && fs.readFileSync(`/proc/${rec.pid}/environ`, 'utf8').split('\0').includes(`DISPLAY=${drec.display}`), `⑨ its port = the NEW DevToolsActivePort (${rec.cdpPort}); it answers as ${rec.cdpBrowser}; it runs on the session's display`);
+    // THE AGENT: the real driver as the shipped CLI runs it — the attach answer's pairs (the CDP url + the config's socket
+    // root) and the config /resolve names (the lease file)
+    const pairs = B9.attachedEnvFor({ browserKey: 'bk-0000b901', profileId: p.id, cdpUrl: rec.cdpUrl, socketDir: rec.socketDir });
+    const penv = { ...S.pairsToEnv(pairs), AGENT_BROWSER_CONFIG: k.configFileFor({ ephemeral: false }) };
+    const o1 = await abRun(['open', PAGE], penv);
+    const snap = await abRun(['snapshot', '-i'], penv);
+    const wd = await abRun(['eval', 'String(navigator.webdriver)'], penv);
+    ok(o1.ok && /button "B1 big button" \[ref=e\d+\]/.test(snap.out) && /"?false"?/.test(wd.out) && !/true/.test(wd.out), `⑨ the agent (the real driver, attached): open a LOCAL page, \`snapshot -i\` names its button with a ref, navigator.webdriver = ${wd.out}`, JSON.stringify({ o1, snap: snap.out.slice(0, 200), wd }));
+    const chromes = () => mine().filter((pid) => { try { const a = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0'); return /chrome$/.test(a[0]) && !a.some((y) => y.startsWith('--type=')); } catch { return false; } });
+    ok(chromes().length === 1 && chromes()[0] === rec.pid, `⑨ ONE Chrome in the world — the driver attached, it launched nothing (pid ${rec.pid})`, JSON.stringify(chromes()));
+    // THE STREAM: the driver's own stream server under the lease's session, through the keeper's attach call
+    const sp = await k._runtime.streamPort(k.nsOf(p.id), { session: B9.sessionNameFor('bk-0000b901'), extraEnv: { AGENT_BROWSER_CDP: rec.cdpUrl, AGENT_BROWSER_IDLE_TIMEOUT_MS: '0' } });
+    const frames = []; const drops = [];
+    let wsS = null;
+    if (sp.ok) {
+      wsS = new WebSocket(`ws://127.0.0.1:${sp.port}`);
+      wsS.on('message', (m) => { try { const j = JSON.parse(String(m)); if (j && j.type === 'frame') frames.push(j); if (j && j.connected === false) drops.push(j); } catch { } });
+      await new Promise((r) => { wsS.once('open', r); wsS.once('error', r); setTimeout(r, 3000); });
+      for (const c of ['#ffe0e0', '#e0ffe0', '#e0e0ff']) { await abRun(['eval', `document.getElementById("big").style.background=${JSON.stringify(c)};1`], penv); await sleep(400); }
+      await until(() => frames.length >= 2, 4000, 50);
+    }
+    const stamps = new Set(frames.map((f) => f.metadata && f.metadata.timestamp));
+    ok(sp.ok && frames.length >= 2 && stamps.size >= 2, `⑨ stream frames arrive from the attached Chrome (port ${sp.port}: ${frames.length} frames, ${stamps.size} distinct timestamps)`, JSON.stringify({ sp, n: frames.length }));
+    // the keeper's own call between the agent's (the view's status, a tab list) names the SAME url + config: the session's
+    // connection is never re-launched under the stream (another spelling drops it every call — tools/probe4.sh b/d)
+    await k._runtime.exec(k.nsOf(p.id), ['tab', 'list', '--json'], { session: B9.sessionNameFor('bk-0000b901'), extraEnv: { AGENT_BROWSER_CDP: rec.cdpUrl, AGENT_BROWSER_IDLE_TIMEOUT_MS: '0' } });
+    await abRun(['eval', 'document.getElementById("big").style.background="#f0f0f0";1'], penv); await sleep(600);
+    ok(drops.length === 0, `⑨ …and the keeper's calls between the agent's never drop the session's connection (${drops.length} "connected: false" on the stream)`, JSON.stringify(drops.slice(0, 2)));
+    if (PNG && frames.length) fs.writeFileSync(path.join(PNG, 'b1-stream-frame.jpg'), Buffer.from(frames[frames.length - 1].data, 'base64'));
+    // THE X CLICK: a private viewer attaches (xpra maps a window only for a client), xdotool clicks on the SESSION's display
+    const VD = [2731, 2733, 2735].find((n) => !fs.existsSync(`/tmp/.X11-unix/X${n}`) && !fs.existsSync(`/tmp/.X${n}-lock`));
+    const sx = ds.x11EnvFor(drec.id);
+    let clicked = null, wid = null, geo = null;
+    if (VD) {
+      const vauth = path.join(R9, 'viewer.xauth');
+      execFileSync('xauth', ['-f', vauth, 'add', `:${VD}`, '.', crypto.randomBytes(16).toString('hex')], { env, stdio: 'ignore' });
+      viewerX = spawn('Xvfb', [`:${VD}`, '-screen', '0', '1600x1000x24', '-nolisten', 'tcp', '-noreset', '-auth', vauth], { env, stdio: 'ignore', detached: true }); extra.push(viewerX);
+      await until(() => fs.existsSync(`/tmp/.X11-unix/X${VD}`), 5000, 50);
+      viewer = spawn('xpra', ['attach', `tcp://127.0.0.1:${drec.port}/`, '--opengl=no', '--splash=no', '--tray=no', '--notifications=no', '--audio=no', '--speaker=disabled', '--microphone=disabled', '--webcam=no', '--mdns=no', '--dbus-control=no', '--clipboard=no'], { env: { ...env, DISPLAY: `:${VD}`, XAUTHORITY: vauth }, stdio: 'ignore', detached: true }); extra.push(viewer);
+      const found = await (async () => { for (let i = 0; i < 100; i++) { const w = x(['xdotool', 'search', '--onlyvisible', '--pid', String(rec.pid)], sx); if (w) return w.split('\n').filter(Boolean).pop(); await sleep(150); } return null; })();
+      wid = found;
+      if (wid) {
+        const g = x(['xdotool', 'getwindowgeometry', '--shell', wid], sx) || '';
+        geo = Object.fromEntries(g.split('\n').map((l) => l.split('=')).filter((a) => a.length === 2).map(([a, b]) => [a, Number(b)]));
+        const cx = Math.round(geo.X + geo.WIDTH / 2), cy = Math.round(geo.Y + geo.HEIGHT * 0.7);
+        x(['xdotool', 'mousemove', String(cx), String(cy)], sx); await sleep(150); x(['xdotool', 'click', '1'], sx); await sleep(500);
+        const got = await abRun(['eval', 'JSON.stringify(window.__b1)'], penv);
+        try { clicked = JSON.parse(JSON.parse(got.out)); } catch { try { clicked = JSON.parse(got.out); } catch { clicked = { raw: got.out }; } }
+      }
+    }
+    const t1 = await abRun(['get', 'title'], penv);
+    const fBefore = frames.length;
+    await abRun(['eval', 'document.getElementById("big").style.background="#fff0c0";1'], penv);
+    await until(() => frames.length > fBefore, 4000, 50);
+    if (!VD) skip('⑨ the X click: no free pinned viewer display (:2731/:2733/:2735)');
+    else ok(wid && clicked && clicked.n >= 1 && clicked.trusted >= 1 && /clicked/.test(t1.out) && frames.length > fBefore, `⑨ an X click (xdotool on ${drec.display}, window ${wid} ${geo ? geo.WIDTH + '×' + geo.HEIGHT + '+' + geo.X + '+' + geo.Y : ''}) lands on the page as a TRUSTED click — and CDP stays live (title "${t1.out}", a new stream frame after it)`, JSON.stringify({ wid, clicked, t1, frames: frames.length, fBefore }));
+    if (PNG) { x(['import', '-window', 'root', path.join(PNG, 'b1-session-display.png')], sx, 15000); if (VD) x(['import', '-window', 'root', path.join(PNG, 'b1-viewer.png')], { DISPLAY: `:${VD}`, XAUTHORITY: path.join(R9, 'viewer.xauth') }, 15000); }
+    try { wsS && wsS.close(); } catch { }
+    // RED CONTROL: the same argv WITHOUT AutomationControlled, spawned the same way on the same display ⇒ webdriver true
+    {
+      const pd = path.join(R9, 'home', 'noac-profile'); fs.mkdirSync(pd, { recursive: true, mode: 0o700 });
+      const avc = AT9.attachArgv({ profileDir: pd, quiet: [] }).argv.filter((a) => a !== '--disable-blink-features=AutomationControlled');
+      const rc = await ATL9.spawnChrome({ exe: need['google-chrome'], argv: avc, env: { ...env, ...sx }, profileDir: pd, logFile: path.join(R9, 'noac.log') });
+      let wd2 = null;
+      if (rc.ok) { wd2 = await abRun(['--cdp', String(rc.port), 'eval', 'String(navigator.webdriver)'], { AGENT_BROWSER_SOCKET_DIR: path.join(SB, 'noac'), AGENT_BROWSER_SESSION: 'noac', AGENT_BROWSER_IDLE_TIMEOUT_MS: '0' }); await abRun(['close', '--all'], { AGENT_BROWSER_SOCKET_DIR: path.join(SB, 'noac'), AGENT_BROWSER_SESSION: 'noac' }); try { process.kill(rc.pid, 'SIGTERM'); } catch { } }
+      ok(rc.ok && wd2 && /true/.test(wd2.out), `⑨ CONTROL (RED): the attach argv minus AutomationControlled ⇒ navigator.webdriver = ${wd2 && wd2.out} (the debugging port alone sets it — the flag is load-bearing)`, JSON.stringify({ rc: { ...rc, child: undefined }, wd2 }));
+    }
+    // THE STOP: Chrome ended by its identity, the display session with it
+    const cpid = rec.pid; const xpid = drec.pids && drec.pids.x;
+    const sv = await k.stop(p.id, { why: 'user' });
+    await until(() => !alive9(cpid) && !(xpid && alive9(xpid)), 8000, 100);
+    const d2 = ds.get(drec.id);
+    ok(sv.state === 'stopped' && !alive9(cpid) && d2 && !DA9.isLiveState(d2.state) && !(xpid && alive9(xpid)), `⑨ stop: the Chrome (pid ${cpid}) is gone and its display session ${drec.id} ended (${d2 && d2.state}) — xpra ${xpid} gone`, JSON.stringify({ state: sv.state, chrome: alive9(cpid), d: d2 && d2.state, xpra: xpid && alive9(xpid) }));
+    // CONTROL — the DRIVER road on the same box (no display keeper wired ⇒ agent-browser launches Chrome itself)
+    for (const [flag, want] of [[false, 'true'], [true, 'false']]) {
+      settings['browser.automationFlag'] = flag;
+      const k3 = mkK({ data: 'data-driver-' + flag });
+      const p3 = k3.createProfile({ label: 'driver ' + flag }, { owner: { kind: 'instance', id: null } });
+      let r3 = null, wd3 = null;
+      try {
+        await k3.start(p3.id, { why: 'heavy' }); r3 = k3._reg().browsers[p3.id];
+        const pe3 = S.pairsToEnv(B9.attachedEnvFor({ browserKey: 'bk-0000b9d' + (flag ? '1' : '0'), profileId: p3.id, cdpUrl: r3.cdpUrl }));
+        wd3 = await abRun(['eval', 'String(navigator.webdriver)'], pe3);
+        await k3.stop(p3.id, { why: 'user' });
+      } catch (e) { wd3 = { out: 'threw ' + (e && e.message) }; }
+      k3.shutdown?.();
+      ok(r3 && r3.launch === 'driver' && wd3 && new RegExp(want).test(wd3.out), `⑨ CONTROL: the DRIVER road (agent-browser's own launch, ${r3 && r3.launchWhy ? '"' + r3.launchWhy.slice(0, 40) + '…"' : '?'}) with browser.automationFlag ${flag ? 'ON (the default: the flag rides its config)' : 'OFF'} ⇒ navigator.webdriver = ${wd3 && wd3.out}`, JSON.stringify({ launch: r3 && r3.launch, why: r3 && r3.launchWhy, wd3 }));
+    }
+    delete settings['browser.automationFlag'];
+  } catch (e) {
+    ok(false, '⑨ the attach road\'s real leg threw', e && (e.stack || e.message));
+  } finally {
+    try { k && k.shutdown?.(); } catch { }
+    for (const c of extra.reverse()) { try { process.kill(-c.pid, 'SIGTERM'); } catch { } try { c.kill('SIGTERM'); } catch { } }
+    try { for (const r of ds.liveRecords()) await ds.stop(r.id, { why: 'test' }).catch(() => { }); ds.shutdown?.(); } catch { }
+    await sleep(500);
+    for (const pid of mine()) { try { process.kill(pid, 'SIGKILL'); } catch { } }
+    await new Promise((r) => page.close(() => r()));
+    try { fs.rmSync(SB, { recursive: true, force: true }); } catch { }
+  }
+}
+// lane one-browser-b1: BROWSER_LIVE_ONLY=b1 runs ⑨ alone (the attach road's real leg — the other sections need a worktree server)
+const DA9 = require('../src/desktop-apps.js');
+if (process.env.BROWSER_LIVE_ONLY === 'b1') { await legAttach(); done(); }
+
 // ═══ ① PURE ═══════════════════════════════════════════════════════════════
 console.log('— ① the PURE rules over the captured 0.32.0 shapes');
 {
@@ -1672,4 +1836,5 @@ await (async () => {
   }
 })().catch((e) => ok(false, '⑤ the real-rung leg threw', e && (e.stack || e.message)));
 
+await legAttach(); // ⑨ lane one-browser-b1
 done();

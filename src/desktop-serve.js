@@ -851,6 +851,32 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     } catch { /* no log: the exit code alone */ }
     return RA.rdpEndVerdict({ code, signal, lines: text.split('\n'), machine: rec.remoteapp ? rec.remoteapp.hostId : 'the machine' });
   }
+  /**
+   * lane one-browser-b1 (design q-026 r1 §2.1 B1): A DISPLAY-ONLY SESSION for an agent browser (`kind: display-for-browser`,
+   * `forBrowser` = the browser profile's id) — brought up like any session by the xpra-seamless recipe (pid + starttime +
+   * port recorded the moment each is known, adopted or reaped at boot, torn down verified empty), but with NO app (the
+   * browser keeper spawns Google Chrome on it itself) and NO idle stop (idleTimeoutMs 0: its lifetime is the browser
+   * record's — the browser keeper stops it with the record). Never counted against the app ceiling. This machine only.
+   * → the record's view once its bring-up settled (`ready`, or `failed` with its lastError); no xpra ⇒ refused `no-xpra`.
+   */
+  async function launchDisplay(body = {}) {
+    const forBrowser = body && typeof body.forBrowser === 'string' && /^[a-z0-9][a-z0-9-]{0,40}$/i.test(body.forBrowser) ? body.forBrowser : null;
+    if (!forBrowser) throw namedError('bad-request', 'forBrowser must name a browser profile id');
+    const f = await facts();
+    const bins = (f && f.bins) || {};
+    if (!bins.xpra || !bins.xauth) throw namedError('no-xpra', `no ${bins.xpra ? 'xauth' : 'xpra'} on this machine — a browser's display session needs xpra and xauth`);
+    const id = newId();
+    const rec = M.newRecord({ id, label: M.displayForBrowserLabel(body.label), exec: null, args: [], cwd: null, env: null, source: 'browser', backend: 'xpra', via: 'xpra', fallbackWhy: null, idleTimeoutMs: 0, now: now() });
+    rec.kind = M.DISPLAY_FOR_BROWSER; rec.forBrowser = forBrowser; rec.recipe = 'xpra-seamless';
+    store.apps[id] = rec;
+    pruneHistory();
+    commit();
+    const p = bringUp(rec, f).catch((e) => log.warn?.(`[desktop] ${id} bring-up crashed: ${e.stack || e.message}`));
+    inflight.set(id, p);
+    p.finally(() => { if (inflight.get(id) === p) inflight.delete(id); }).catch(() => { });
+    await p;
+    return view(rec);
+  }
 
   /** The Scale ▸ relaunch as ONE machine act (the `relaunch` op, and the in-process hub keeper's relaunch()): the
    *  successor first (a refusal — the cap, a vanished binary — leaves the running app untouched), `replacedBy`
@@ -1140,8 +1166,8 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
         if (gone()) return;
       }
       rec.appAt = now(); // lane app-launch-singleton: the app's own start — a quick exit is measured from here
-      const a = await display.startApp({ exec: rec.exec, args: rec.args, cwd: rec.cwd, env: seat ? { ...appEnv, XDG_CONFIG_HOME: seat.configDir } : appEnv, logFd, ...(seat ? { stdinOnce: () => { const line = stdinLine; stdinLine = null; return line; } } : {}) });
-      ctx.onPart('app', a, {});
+      const a = M.isDisplayForBrowser(rec) ? null : await display.startApp({ exec: rec.exec, args: rec.args, cwd: rec.cwd, env: seat ? { ...appEnv, XDG_CONFIG_HOME: seat.configDir } : appEnv, logFd, ...(seat ? { stdinOnce: () => { const line = stdinLine; stdinLine = null; return line; } } : {}) });
+      if (a) ctx.onPart('app', a, {}); // lane one-browser-b1: a browser's display-only session starts no app (its browser keeper spawns Chrome)
       if (gone()) return;
       const w = await display.waitForListen(rec.probe, up.port, { deadlineMs: RFB_DEADLINE_MS, child: handles.server || handles.x, now });
       if (gone()) return; // died during the wait
@@ -1159,7 +1185,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
       rec.readyAt = now();
       log.log?.(`[desktop] ${id} ready: ${rec.label} on ${rec.display} via ${rec.backend}/${rec.via} (${rec.recipe}) port ${rec.port}${rec.fallbackWhy ? ` (${rec.fallbackWhy})` : ''}`);
       commit();
-      armFirstFit(id); // P8-2 x4: the app's window may map seconds after ready (GTK ~1-2 s) — fitted the moment it exists
+      if (!M.isDisplayForBrowser(rec)) armFirstFit(id); // P8-2 x4: the app's window may map seconds after ready (GTK ~1-2 s) — fitted the moment it exists
     } catch (e) {
       await failed(e.code ? `${e.message} [${e.code}]` : e.message);
     } finally {
@@ -1863,7 +1889,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
   const isStopping = (id) => stopping.has(id);
 
   load();
-  return { notifications, launch, relaunch, startDeferred, stop, reshapeStore, setPin, keepAlive, closeAsked, noteInput, noteDesktopSize, setWatchProbe, fitApp, get, list, listApps, liveRecords, streamTarget, x11EnvFor, windows, xpraWww, instancePrefs, facts, installFacts, installState, registry, adoptAll, start, shutdown, tick, sessionPids, apps,
+  return { notifications, launch, launchDisplay, relaunch, startDeferred, stop, reshapeStore, setPin, keepAlive, closeAsked, noteInput, noteDesktopSize, setWatchProbe, fitApp, get, list, listApps, liveRecords, streamTarget, x11EnvFor, windows, xpraWww, instancePrefs, facts, installFacts, installState, registry, adoptAll, start, shutdown, tick, sessionPids, apps,
     machineView, commit, markDirty, latestSample, isStopping, backends,
     storeFile, logRoot, STORE_FILE, LOG_DIR, SESSION_ENV, _store: () => store };
 }

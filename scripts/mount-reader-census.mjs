@@ -88,6 +88,7 @@ export const ROWS = [
   ['src/server/auto-resume.js', 'own-tree', 1, null, CLI],
   ['src/server/boot-restore.js', 'own-tree', 14, null, DATA], // B-1319: +1 = probeSockets' readdir of the sockets folder (the restore's probes, before listen)
   ['src/server/bridge-watch.js', 'own-tree', 6, null, PROC],
+  ['src/server/browser-attach-launch.js', 'own-tree', 8, null, DATA], // lane one-browser-b1: the attach launch — Chrome on PATH (access/stat), the per-config socket dirs (lstat), the profile's DevToolsActivePort (stat/read) + its log tail
   ['src/server/browser-bindings.js', 'own-tree', 2, null, DATA],
   ['src/server/browser-builds-keeper.js', 'own-tree', 8, null, DATA],
   ['src/server/browser-cli-install.js', 'own-tree', 2, null, DATA],

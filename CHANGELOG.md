@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.290 — 2026-10-16
+
+### Changed
+- The agent's browser is now a real Google Chrome window on VibeSpace's own display that you can see and take over; without xpra it stays hidden.
+
 ## 2.369.289 — 2026-10-16
 
 ### Maintenance

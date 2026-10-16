@@ -278,6 +278,13 @@ function transition(state, event) {
   return row[event] || null;
 }
 const isLiveState = (s) => LIVE_STATES.includes(s);
+/** lane one-browser-b1 (design q-026 r1 §2.1 B1): A DISPLAY-ONLY SESSION for an agent browser — the xpra-seamless recipe, NO
+ *  app (the browser keeper spawns Google Chrome on it itself), NO idle stop; `forBrowser` names the browser profile whose
+ *  record it lives and ends with. Never counted against the app ceiling (the browser keeper's own ceiling counted it). */
+const DISPLAY_FOR_BROWSER = 'display-for-browser';
+const isDisplayForBrowser = (rec) => !!rec && rec.kind === DISPLAY_FOR_BROWSER;
+/** Its label in the Desktop apps list (the browser profile's name, bounded). */
+const displayForBrowserLabel = (label) => `Browser display · ${String(label || 'agent browser').replace(/\s+/g, ' ').trim().slice(0, 80) || 'agent browser'}`;
 const isTerminalState = (s) => s === 'exited' || s === 'failed';
 
 // ── verdicts the keeper acts on ─────────────────────────────────────────────
@@ -292,7 +299,8 @@ function idleState(rec, now, idleTimeoutMs) {
 
 /** The concurrency ceiling: `live` = the records in a live state. Returns
  *  null when a launch may proceed, else a refusal naming the holders. */
-function capVerdict(live, limits = LIMITS) {
+function capVerdict(live0, limits = LIMITS) {
+  const live = (live0 || []).filter((r) => !isDisplayForBrowser(r)); // lane one-browser-b1: a browser's display-only session is never an app here — the browser keeper's own ceiling counted that browser
   const cap = Number(limits.CONCURRENT_CAP) || LIMITS.CONCURRENT_CAP;
   if (live.length < cap) return null;
   const names = live.map((r) => `${r.label || r.exec || r.id} (${r.id})`);
@@ -436,7 +444,7 @@ function profileRetireVerdict(rec) {
 function adoptVerdict(rec, alive, portOk) {
   if (!rec || !isLiveState(rec.state)) return null;
   if (!alive.x) return { state: 'exited', lastError: rec.lastError || 'X display gone while VibeSpace was down' };
-  if (!alive.app) return { state: 'exited', lastError: rec.lastError || 'application exited while VibeSpace was down' };
+  if (!alive.app && !isDisplayForBrowser(rec)) return { state: 'exited', lastError: rec.lastError || 'application exited while VibeSpace was down' }; // lane one-browser-b1: a display-only session has no app
   if (!alive.server || !portOk) return { state: 'failed', lastError: rec.lastError || 'picture server not answering after restart' };
   return { state: 'ready', adopted: true };
 }
@@ -804,6 +812,7 @@ function sessionBusCensus({ universe = [], activatable = [], table = SESSION_BUS
 
 module.exports = {
   LIMITS, DESKTOP_SINGLETON_ID, APP_STATES, LIVE_STATES, DEFAULT_IDLE_TIMEOUT_MIN, KEEPER_ENV,
+  DISPLAY_FOR_BROWSER, isDisplayForBrowser, displayForBrowserLabel, // lane one-browser-b1: the browser's display-only session
   APP_SECRETS_MODES, APP_SECRETS_DEFAULT, appSecretsMode, SECRETS_NAME, SECRETS_STORE_FILE, SECRETS_KEY_FILE, secretServicePlan, secretsCountOf, // lane app-display-secrets (+ display-secret-fd: the key file)
   DISPLAY_BACKENDS, BACKEND_IDS, LADDER_IDS, backendById, CAP_KEYS, capsOf, recipeFor, needsVerdict, resolveBackend, fallbackLogLine, parseBackendPrefs, streamKindOf,
   fitPolicyOf, keeperFits, topLevelWindows, appWindows, appFitPlan, appMainWindow, windowTitleOf, APP_TITLE_MAX,

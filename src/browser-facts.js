@@ -23,6 +23,7 @@ const { execFile } = require('child_process');
 const path = require('path');
 const B = require('./browser-profiles.js');
 const VERBS = require('./browser-verbs.js');
+const A = require('./browser-attach.js'); // lane one-browser-b1: a call on the attach road (PURE)
 
 /**
  * THE REAL BINARY, NEVER THE SHIM (design-browser-takeover §3.4 / §4). Agent
@@ -581,8 +582,11 @@ function createBrowserRuntime({ cmd = 'agent-browser', execFileImpl = execFile, 
   // verify r2 (H1): `cli` = THE BROWSER'S OWN CLI for this call (the keeper's `{path}` — the binary of the version its
   // daemon runs, never the current `browser.cli` when they differ: a client of another version restarts the daemon and
   // its Chrome), or `{gone}` = that version is no longer installed ⇒ refused by name, never a silent fall to PATH
-  const run = (args, extra, { timeout = 15000, cli = null } = {}) => new Promise((resolve) => {
-    const e = { ...base, ...extra, AGENT_BROWSER_JSON: '1' };
+  const run = (args, extra, { timeout = 15000, cli = null, attach = null } = {}) => new Promise((resolve) => {
+    let e = { ...base, ...extra, AGENT_BROWSER_JSON: '1' };
+    // lane one-browser-b1: a call on the ATTACH road (the keeper spawned Chrome; src/browser-attach.js) — `--cdp <its ws
+    // url>` first, no launch key in the env, the config's own socket root: it can reach that Chrome and never start one
+    if (attach && typeof attach.cdp === 'string' && attach.cdp) { const c = A.attachCall(args, e, attach); args = c.args; e = c.env; }
     // lane browser-resource-care: any call may START the daemon, and the daemon mints its ephemeral Chrome profile under
     // TMPDIR — the keeper's data/browser-env/tmp (a getter: made on first use), never the RAM-backed /tmp
     { let td = null; try { td = typeof tmpDir === 'function' ? tmpDir() : tmpDir; } catch { td = null; } if (typeof td === 'string' && td.startsWith('/')) e.TMPDIR = td; }
@@ -613,13 +617,13 @@ function createBrowserRuntime({ cmd = 'agent-browser', execFileImpl = execFile, 
   // (scripts/fixtures/browser-stream/session-0.32.0.json).
   const streamEnvOf = (ns, { dir = null, session = null, extraEnv = null } = {}) => (ns ? { ...nsEnv(ns, dir, session), ...(extraEnv || {}) } : { ...(extraEnv || {}) });
   return {
-    async streamStatus(ns, opts = {}) { return run(['stream', 'status', '--json'], streamEnvOf(ns, opts), { timeout: opts.timeout || 60000, cli: opts.cli || null }); },
-    async streamEnable(ns, opts = {}) { return run(['stream', 'enable', '--json'], streamEnvOf(ns, opts), { timeout: opts.timeout || 60000, cli: opts.cli || null }); },
+    async streamStatus(ns, opts = {}) { return run(['stream', 'status', '--json'], streamEnvOf(ns, opts), { timeout: opts.timeout || 60000, cli: opts.cli || null, attach: opts.attach || null }); },
+    async streamEnable(ns, opts = {}) { return run(['stream', 'enable', '--json'], streamEnvOf(ns, opts), { timeout: opts.timeout || 60000, cli: opts.cli || null, attach: opts.attach || null }); },
     /** takeover C3: with `ns` null and `extraEnv` = a MANAGED EPHEMERAL
      *  browser's spawn pairs, the question is asked under exactly those (the
      *  socket dir / config the session's own commands see) — never a guess. */
-    async info(ns, { dir = null, extraEnv = null, cli = null } = {}) {
-      const r = await run(['session', 'info', '--json'], streamEnvOf(ns, { dir, extraEnv }), { cli });
+    async info(ns, { dir = null, extraEnv = null, cli = null, attach = null } = {}) {
+      const r = await run(['session', 'info', '--json'], streamEnvOf(ns, { dir, extraEnv }), { cli, attach });
       const d = r.json && r.json.data && typeof r.json.data === 'object' ? r.json.data : null;
       return { ok: r.ok && !!d, active: !!(d && d.active), pid: d && Number.isInteger(d.pid) ? d.pid : null, socketDir: d && d.socketDir ? String(d.socketDir) : null, version: d && d.version ? String(d.version) : null, raw: r };
     },
@@ -640,11 +644,11 @@ function createBrowserRuntime({ cmd = 'agent-browser', execFileImpl = execFile, 
       const url = typeof d === 'string' ? d : (d && typeof d === 'object' ? (d.url || d.cdpUrl || d.value || null) : null) || (r.ok ? r.stdout.trim().split('\n').pop() : null);
       return { ok: r.ok && !!url && /^(ws|http)s?:\/\//.test(String(url)), url: url ? String(url) : null, raw: r };
     },
-    async closeAll(ns, { dir = null, timeout = 20000, extraEnv = null, cli = null } = {}) { return run(['close', '--all'], streamEnvOf(ns, { dir, extraEnv }), { timeout, cli }); },
+    async closeAll(ns, { dir = null, timeout = 20000, extraEnv = null, cli = null, attach = null } = {}) { return run(['close', '--all'], streamEnvOf(ns, { dir, extraEnv }), { timeout, cli, attach }); },
     /** P3 (§4.3): ONE upstream command under a lease's session (`confirm <id>` /
      *  `deny <id>`) — the profile's namespace + the lease's own session name,
      *  or the ephemeral browser's spawn pairs (`extraEnv`, no namespace of ours). */
-    async exec(ns, argv, { dir = null, session = null, extraEnv = null, timeout = 15000, cli = null } = {}) { return run(Array.isArray(argv) ? argv : [String(argv)], streamEnvOf(ns, { dir, session, extraEnv }), { timeout, cli }); },
+    async exec(ns, argv, { dir = null, session = null, extraEnv = null, timeout = 15000, cli = null, attach = null } = {}) { return run(Array.isArray(argv) ? argv : [String(argv)], streamEnvOf(ns, { dir, session, extraEnv }), { timeout, cli, attach }); },
     /** The stream port for ONE session inside a namespace (or, with `ns` null
      *  and `extraEnv`, for an ephemeral browser): status → enable if disabled
      *  → status again. Never throws: `{ok, port, error}`. */

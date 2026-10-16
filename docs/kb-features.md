@@ -1740,6 +1740,10 @@ with the old browser — `open` answered `tab_gone`).
 
 **Verify r1 V1 — the sign-in page's own sites.** A claim on a known vendor's sign-in host (Google, Microsoft, GitHub, Apple — `SIGNIN_DEPENDENCIES`, dated, not a measurement) adds, with the host, the sites that page loads its parts from, named on the card ("also www.gstatic.com, …"); any other site stays one host. A site CloakBrowser's list refuses while a page loads is named on the agent's next page command (`note: … [egress_refused]`, its own browser only), and its `blocked --why egress-refused` is ONE card that adds exactly that site (the browser already is CloakBrowser — nothing else changes).
 
+### Agent browser — one Google Chrome on VibeSpace's own display: the keeper spawns it, the driver attaches (lane one-browser-b1, 2026-10-16; design q-026 r1 §2.1 B1)
+
+On a machine with xpra a named profile's browser is a real Google Chrome window on a display session of its own (it appears in the Desktop apps list as "Browser display · <profile>", no idle stop, it lives and ends with the browser): the keeper starts Chrome itself — never with `--disable-sync`, so Chrome's own "Sign in to Chrome" entry is there for B4; `navigator.webdriver` is false (AutomationControlled hidden) — and reads its new DevToolsActivePort (≤ 5 s, else `cdp_port_missing`); agent-browser attaches with `--cdp` on every call, each profile's sessions in a socket directory of their own. The record says which road it took (`launch: attach | driver`, `launchWhy`). Without xpra (or for a headless ask, cloak, a paired machine, a conversation's own temporary browser) the driver launches it as before — the hidden window, which cannot sign in to Google, said on the record. An X click on the window lands while the agent's CDP stays live (measured). Gates: test-browser-keeper, test-desktop-serve §bdisp, test-browser-live ⑨.
+
 ### Agent browser v2 — P5: the action trace, the per-profile screencast, the housekeeping (server 2026-09-18, client 2026-09-21; design §4.5 / §6.4 / §7.1 / §8 step 3, D7 / D8 / D35)
 
 **Every action the agent SENDS to its browser is recorded with a before-JPEG,

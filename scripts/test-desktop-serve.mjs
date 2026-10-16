@@ -1310,6 +1310,56 @@ console.log('\n§adopt-office (verify r1, B-04da ④) a restart never signals a 
   ok(pre.state === 'failed' && !pre.appAlive && pre.asks.length === 0, 'CONTROL: without the boot ask the same record is REAPED — failed, its LibreOffice signalled with nobody asked (the verify r1 reproduction)', pre);
 }
 
+// ── lane one-browser-b1 (design q-026 r1 §2.1 B1): THE BROWSER'S DISPLAY-ONLY SESSION — the xpra-seamless recipe, no app,
+// no idle stop, its lifetime the browser record's (the browser keeper opens and stops it; test-browser-keeper ④ drives that
+// side). A fake display: the recipe spawns a `sleep` as the X part (pid + starttime real), nothing else runs.
+console.log('\n§bdisp a browser\'s display-only session (lane one-browser-b1)');
+{
+  const { spawn: spawnB } = await import('node:child_process');
+  const aliveB = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  const appStarts = [];
+  const spawned = [];
+  const bdisp = (bins) => ({ ...fakeDisplay, hostFacts: async () => ({ hostId: 'local', bins, xpra: bins.xpra ? { version: '6.5.4' } : null }),
+    RECIPES: { ...D.RECIPES, 'xpra-seamless': async (ctx) => { const c = spawnB('sleep', ['60'], { stdio: 'ignore', detached: true }); spawned.push(c); ctx.onPart('x', c, { display: ':977', port: 1, alsoServer: true }); return { display: ':977', port: 1, shared: false, wm: false, probe: 'http' }; } },
+    startApp: async (o) => { appStarts.push(o); throw new Error('a display-only session must never start an app'); },
+    waitForXftDpi: async () => ({ ok: true, dpi: 96, ms: 0, why: null }), waitForListen: async () => ({ ok: true }), listenerHeldBy: () => true, enumerateWindows: async () => ({ ok: true, windows: [] }), portAnswers: async () => true });
+  const XPRA_BINS = { xpra: '/usr/bin/xpra', xauth: '/usr/bin/xauth' };
+  const dsB = machine({ display: bdisp(XPRA_BINS) });
+  const v = await dsB.launchDisplay({ forBrowser: 'bp-0000000a', label: 'Work' });
+  const rec = dsB.get(v.id);
+  ok(v.state === 'ready' && rec.kind === M.DISPLAY_FOR_BROWSER && M.isDisplayForBrowser(rec) && rec.forBrowser === 'bp-0000000a' && rec.recipe === 'xpra-seamless' && rec.backend === 'xpra' && rec.label === 'Browser display · Work', '§bdisp launchDisplay: a ready record of the display-only kind, for THAT browser, on the xpra-seamless recipe', { state: v.state, kind: rec.kind, label: rec.label, lastError: rec.lastError });
+  ok(Number.isInteger(rec.pids.x) && aliveB(rec.pids.x) && rec.starts.x != null && rec.display === ':977' && rec.port === 1 && rec.pids.app == null && appStarts.length === 0, '§bdisp its record carries FACTS only — the display, the X part\'s pid + starttime, the port — and NO app was started', { pids: rec.pids, starts: rec.starts, appStarts: appStarts.length });
+  ok(dsB.liveRecords().some((r) => r.id === v.id) && dsB.listApps().some((r) => r.id === v.id), '§bdisp it is a live record like any display (the Desktop apps list, the window rows)');
+  ok(rec.idleTimeoutMs === 0 && !M.idleState(rec, Date.now() + 7 * 24 * 3600e3, rec.idleTimeoutMs).expired, '§bdisp NO idle stop: idleTimeoutMs 0 — a week without input is not idle (its lifetime is the browser record\'s)');
+  const x11 = dsB.x11EnvFor(v.id);
+  ok(x11 && x11.DISPLAY === ':977' && x11.XAUTHORITY === path.join(dsB.logRoot, v.id, 'Xauthority') && fs.existsSync(x11.XAUTHORITY), '§bdisp x11EnvFor answers the display + its own cookie file (what the browser keeper spawns Chrome with)', x11);
+  { const full = Array.from({ length: M.LIMITS.CONCURRENT_CAP }, (_, i) => ({ id: 'da-b' + i, kind: M.DISPLAY_FOR_BROWSER, label: 'Browser display · ' + i }));
+    ok(M.capVerdict(full, M.LIMITS) === null && M.capVerdict([...full.slice(1), { id: 'da-app', label: 'xterm' }], M.LIMITS) === null && M.capVerdict(full.map((r) => ({ ...r, kind: undefined })), M.LIMITS).code === 'cap', '§bdisp never counted against the app ceiling (the browser keeper\'s own ceiling counted the browser) — the same records as apps are', { cap: M.LIMITS.CONCURRENT_CAP }); }
+  // the boot: a display-only record whose X part lives is ADOPTED (it has no app to be alive)
+  const stored = JSON.parse(fs.readFileSync(dsB.storeFile, 'utf8'));
+  const dir2 = path.join(root, 'm-bdisp-boot'); fs.mkdirSync(dir2, { recursive: true });
+  fs.writeFileSync(path.join(dir2, DS.STORE_FILE), JSON.stringify({ apps: { [v.id]: { ...stored.apps[v.id] } } }));
+  const ds2 = DS.install({ dataDir: dir2, env: () => ({ PATH: '/usr/bin:/bin', HOME: root }), display: bdisp(XPRA_BINS), log: quiet });
+  await ds2.adoptAll();
+  ok(ds2.get(v.id).state === 'ready' && ds2.get(v.id).adoptedAt, '§bdisp boot: the record is ADOPTED by its X part (no app part to judge)', { state: ds2.get(v.id).state, err: ds2.get(v.id).lastError });
+  const preAdopt = M.adoptVerdict(rec, { x: true, server: true, app: false }, true);
+  const mutM = MUT.load('src/desktop-apps.js', read('src/desktop-apps.js').replace("if (!alive.app && !isDisplayForBrowser(rec)) return", 'if (!alive.app) return'), 'bdispadopt');
+  ok(preAdopt.state === 'ready' && mutM.adoptVerdict(rec, { x: true, server: true, app: false }, true).state === 'exited', '§bdisp CONTROL: without the display-only clause the same record is reaped at boot ("application exited")');
+  // the stop follows the browser record (the browser keeper asks it, why 'browser')
+  const xpid = rec.pids.x;
+  const sv = await dsB.stop(v.id, { why: 'browser' });
+  await until(() => !aliveB(xpid), 3000);
+  ok(!M.isLiveState(sv.state) && !aliveB(xpid) && !dsB.liveRecords().some((r) => r.id === v.id), '§bdisp stop: the record ends and its X part is gone (teardown verified, as for any session)', { state: sv.state });
+  // absent without xpra: refused by name, no record
+  const dsN = machine({ display: bdisp({ xauth: '/usr/bin/xauth' }) });
+  let e = null; try { await dsN.launchDisplay({ forBrowser: 'bp-0000000a', label: 'Work' }); } catch (x) { e = x; }
+  ok(e && e.code === 'no-xpra' && /a browser's display session needs xpra/.test(e.message) && dsN.listApps().length === 0, '§bdisp no xpra ⇒ refused `no-xpra`, nothing recorded (the browser keeper takes the driver road)', e && { code: e.code, m: e.message });
+  let e2 = null; try { await dsB.launchDisplay({ forBrowser: '../x', label: 'W' }); } catch (x) { e2 = x; }
+  ok(e2 && e2.code === 'bad-request', '§bdisp a forBrowser that is not a profile id is refused');
+  ok(/launchDisplay: machine\.launchDisplay/.test(read('src/server/desktop-app-keeper.js')), '§bdisp the hub keeper hands launchDisplay out (this machine only)');
+  for (const c of spawned) { try { process.kill(c.pid, 'SIGKILL'); } catch { } }
+}
+
 console.log('\n§tree the patched copies never touch the tree');
 for (const r of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 3 })) ok(r.pass, '§tree ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

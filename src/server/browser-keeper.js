@@ -86,6 +86,9 @@ const BI = require('./browser-installs.js'); // rv-browser F7 (lane dc-browser-i
 const CDP = require('../cdp-census.js'); // lane chrome-builds-download: a version's relation to the CDP census, said on its row before the download
 const WIN = require('../browser-windows.js'); // lane browser-windows: a window per holder — the measured placement, the window mates, the cap setting (PURE)
 const TBS = require('../browser-tabs.js'); // lane browser-resume C (§3.9, ruling 3): whose tab it is — the agent's own tab verbs, the user's tab row (PURE)
+const AT = require('../browser-attach.js'); // lane one-browser-b1: THE ATTACH ROAD — the argv, the port file, the socket dir per config, the road (PURE)
+const ATL = require('./browser-attach-launch.js'); // lane one-browser-b1: …its I/O half (the executable, the socket dir, the spawn + the port poll)
+const DA = require('../desktop-apps.js'); // lane one-browser-b1: the desktop keeper's display-only kind (isDisplayForBrowser)
 
 const STORE_FILE = 'browser-profiles.json';
 const AUDIT_FILE = 'browser-audit.jsonl';
@@ -167,6 +170,11 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   // against the shared CONCURRENT_CAP (the desktop-app keeper's live apps,
   // `[{label, kind}]`); wired late by server.js through `setOtherHolders`
   otherHolders = null,
+  // lane one-browser-b1 (design q-026 §2.1 B1): THE DISPLAY KEEPER (src/server/desktop-app-keeper.js, or a gate's fake with
+  // the same five methods: facts / launchDisplay / x11EnvFor / stop / liveRecords) — a browser on the attach road runs on a
+  // display-only session it opens; wired late by server.js through `setDisplaySessions`. Absent ⇒ every launch is the
+  // driver road. `attachSocketBase` = the short root of the per-config socket dirs (production B.SOCKET_DIR_BASE).
+  displaySessions = null, attachSocketBase = null,
   // MULTIVIEW D4 / B-325a (docs/design-browser-multiview.zh.md): what the
   // keeper may ask about a CONVERSATION (its parent browser key) — `{turn}`:
   // the turn of the session carrying it ('idle'|'running'|'waiting', null =
@@ -241,13 +249,26 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // (`session info` never restarts a daemon of another version — measured — so a browser whose CLI is gone is still ASKED
     // with the current one: its liveness / adoption reads keep working; every other call is refused by name)
     const add = async (ns, o, m) => {
-      const opts = withConfig(ns, o);
+      const opts = attachOpts(ns, o) || withConfig(ns, o);
       if (opts.cli) return opts;
       // verify r3 (Y1): a binary never asked its version is ASKED before the call is judged (cliOptReady) — a same-version
       // re-install at the same path used to be refused once, "no longer installed"
       const c = await cliOptReady(browserRecordForCall(ns, opts.extraEnv && typeof opts.extraEnv === 'object' ? opts.extraEnv : {}));
       if (!c || (c.gone && m === 'info')) return opts;
       return { ...opts, cli: c };
+    };
+    // lane one-browser-b1: a call in the namespace of a browser on the ATTACH road (the keeper's own session or a lease's) —
+    // `--cdp <its ws url>` in the config's own socket root (AT.attachCall, in the runtime), never the profile directory and
+    // never the LAUNCH file: the lease file. Both are the VALUES the agent's own commands carry (its pairs' AGENT_BROWSER_CDP,
+    // /resolve's config) — measured: another endpoint spelling re-launches the session's connection, another config ends
+    // its stream (src/browser-attach.js)
+    const attachOpts = (ns, o) => {
+      const rec = ns && String(ns).startsWith('vs-') ? recordFor(String(ns).slice(3)) : null;
+      if (!rec || rec.launch !== 'attach' || !B.isLoopbackCdpUrl(rec.cdpUrl)) return null;
+      const opts = o && typeof o === 'object' ? o : {};
+      const ex = opts.extraEnv && typeof opts.extraEnv === 'object' ? opts.extraEnv : {};
+      const file = machineConfigFile('machine');
+      return { ...opts, dir: null, attach: { cdp: rec.cdpUrl, socketDir: rec.socketDir || null }, extraEnv: { ...ex, ...(file ? { [VERBS.CONFIG_KEY]: file } : {}) } };
     };
     const withConfig = (ns, o) => {
       const opts = o && typeof o === 'object' ? o : {};
@@ -344,6 +365,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   const turnIdleSince = new Map();
   const watchers = new Map();
   let othersFn = typeof otherHolders === 'function' ? otherHolders : null;
+  let displayKeeper = displaySessions && typeof displaySessions === 'object' ? displaySessions : null; // lane one-browser-b1
   const othersNow = () => { if (!othersFn) return []; try { const v = othersFn(); return Array.isArray(v) ? v : []; } catch (e) { log.warn?.(`[browser] the ceiling's count seam failed — ${e && e.message}`); return []; } };
   // P3 (§4.3): WHO DRIVES each (conversation, browser) pair — IN MEMORY ONLY.
   // A server restart is a handback by construction (the viewer that held the
@@ -1594,6 +1616,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const v = livenessOf(rec);
     rec.state = 'stopped'; rec.endedAt = now();
     rec.lastError = v === 'recycled' ? `the browser daemon exited (pid ${rec.pid} is another process now)` : 'the browser daemon exited';
+    if (rec.launch === 'attach') { rec.lastError = v === 'recycled' ? `the browser exited (pid ${rec.pid} is another process now)` : 'the browser exited (its window was closed, or it crashed)'; endDisplay(rec, 'its browser exited'); tabsWentWithBrowser(rec, seenBy); } // lane one-browser-b1: Chrome IS the record's process — the user's own browsing went with it (the driver heal's rule)
     guard.delete(rec.profileId); live.delete(rec.profileId);
     dirty = true;
     log.log?.(`[browser] ${rec.profileId} daemon gone (pid ${rec.pid}${v === 'recycled' ? ', now another process' : ''}, seen by ${seenBy}) — recorded stopped`);
@@ -1906,6 +1929,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const b = recaptureBrowser(rec, seenBy);
     const p = rec ? profile(rec.profileId) : null;
     if (!p || isEph(p) || rec.state !== 'ready' || !isLocalRec(rec)) return b;
+    if (rec.launch === 'attach') return b; // lane one-browser-b1: no daemon relaunches it — its exit is the record's (markDaemonGone)
     // r4 MAJOR 1: a named profile's daemon whose identified browser is GONE (the user closed its window, a crash) —
     // nothing else relaunches it
     if (!b) return heal && (rec.browserLost || rec.closed) ? healBrowser(rec, p, seenBy, { force }) : null;
@@ -3701,6 +3725,12 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       // killed the pid it had just recorded and started a second Chrome. Every call of the keeper's own session
       // carries this view (`rec.launchEnv`, no secret in it; the vendor's key names ride alongside, never recorded).
       let headed0 = headedSetting();
+      // lane one-browser-b1 (design q-026 §2.1 B1): THE ROAD — xpra here ⇒ the keeper spawns Chrome on a display session of
+      // its own and agent-browser ATTACHES (attachStart); anything else is today's driver launch below — the why on the record
+      const attachExe = buildEnv.executablePath || ATL.chromeExecutable(rtEnv);
+      const road = AT.launchRoad({ local: true, starts: !!prow.starts, ownLaunch: argvPrefix.length > 0 || prow.executable === 'installed', headed: headed0, wired: !!displayKeeper, driverVersion: displayKeeper ? ((await cliNow()) || {}).version || null : null, xpra: await displayHasXpra(), exe: attachExe });
+      rec.launch = road.launch; rec.launchWhy = road.why;
+      if (road.launch === 'attach') { const a = await attachStart(p, rec, prevRec, { exe: attachExe, why, ns }); if (a) return a; } // null ⇒ its display did not come up: the driver road, said
       // lane headless-fallback: THE DISPLAY IS A FACT — probed now, here (the launch's view carries the plan: HEADED and the
       // planned config every call of this record names); the fact rides the record
       rec.display = await displays.factFor({ baseFile: machineConfigFile('machine', p.id), headedEnv: headed0, prev: prevRec && prevRec.display, mode: noDisplayMode(), preference: headed0 }); // H5: an unset preference resolved against this probe
@@ -3850,6 +3880,118 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // a keeper call with another view would restart that daemon and lose the agent's pinned tab (measured on 0.38.1)
     return url ? { session: B.sessionNameFor(String(browserKey || '')), extraEnv: { AGENT_BROWSER_CDP: url, AGENT_BROWSER_IDLE_TIMEOUT_MS: '0' } } : null;
   }
+  // ── LANE ONE-BROWSER-B1 (design q-026 r1 §2.1 / §2.4 / §3 row B1, 2026-10-16): THE ATTACH ROAD ──
+  /** Does the display keeper's machine have xpra + xauth (the display-only session's recipe)? false when unwired / unknown. */
+  async function displayHasXpra() {
+    if (!displayKeeper || typeof displayKeeper.facts !== 'function') return false;
+    try { const f = await displayKeeper.facts(); return !!(f && f.bins && f.bins.xpra && f.bins.xauth); } catch { return false; }
+  }
+  /** The display session goes WITH its browser record (a stop, Chrome's own exit, a failed launch, a boot that could not
+   *  adopt it, a session no record names) — asked of the desktop keeper; a failure is journalled, never thrown. */
+  function endDisplay(rec, why) {
+    const id = rec && rec.displaySession && rec.displaySession.id;
+    if (!id || !displayKeeper || typeof displayKeeper.stop !== 'function') return Promise.resolve(null);
+    return Promise.resolve().then(() => displayKeeper.stop(id, { why: 'browser' })).then((v) => { log.log?.(`[browser] ${rec.profileId || '?'}: its display session ${id} stopped — ${why}`); return v; })
+      .catch((e) => { log.warn?.(`[browser] ${rec.profileId || '?'}: its display session ${id} could not be stopped (${e && e.message}) — ${why}`); return null; });
+  }
+  /** A display-only session whose browser record no longer names it (a crash between the two writes, a record replaced) is
+   *  stopped: its lifetime is the record's. The desktop keeper's live list, filtered by kind — cheap, once per tick. */
+  function reconcileDisplays() {
+    if (!displayKeeper || typeof displayKeeper.liveRecords !== 'function') return;
+    let recs = [];
+    try { recs = displayKeeper.liveRecords() || []; } catch { return; }
+    for (const d of recs) {
+      if (!DA.isDisplayForBrowser(d) || !d.forBrowser || starting.has(d.forBrowser) || stopping.has(d.forBrowser)) continue;
+      const rec = reg.browsers[d.forBrowser];
+      if (rec && B.isLiveBrowser(rec) && rec.launch === 'attach' && rec.displaySession && rec.displaySession.id === d.id) continue;
+      endDisplay({ profileId: d.forBrowser, displaySession: { id: d.id } }, 'no live browser record names it');
+    }
+  }
+  /** THE ATTACH ROAD'S HEAL: its process IS Chrome, so a Chrome that died under a HOLDER (a lease, the user browsing it) is
+   *  started again by the keeper — a fresh attach launch on the same profile (its lock judged again; every tab of the old
+   *  Chrome went with it — markDaemonGone said so to the leases and the user's browsing), within the driver road's budget
+   *  (B.healBudgetVerdict: HEAL_BUDGET in HEAL_WINDOW_MS, the day tier); past it the record stays stopped and says why — the
+   *  next command starts it. Nobody holding it ⇒ no heal (the driver road's rule, r4 MAJOR 1). In memory: a restart counts anew. */
+  const attachHeals = new Map(); // profileId → the times of its attach heals
+  function healAttach(rec, seenBy) {
+    if (!rec || rec.launch !== 'attach' || !leasedNow(rec.profileId) || starting.has(rec.profileId) || stopping.has(rec.profileId)) return null;
+    const t = now();
+    const bud = B.healBudgetVerdict({ attempts: attachHeals.get(rec.profileId) || [], now: t });
+    if (!bud.ok) {
+      rec.lastError = `${rec.lastError || 'the browser exited'} — it closed ${bud.count} times in ${Math.round(bud.windowMs / 60000)} min, so it is not started again by itself; the next command starts it`;
+      dirty = true;
+      log.warn?.(`[browser] ${rec.profileId}: ${rec.lastError} (seen by ${seenBy})`);
+      return null;
+    }
+    attachHeals.set(rec.profileId, [...bud.kept, t]);
+    log.log?.(`[browser] ${rec.profileId}: its Chrome exited under a holder (seen by ${seenBy}) — started again on the attach road (${bud.kept.length + 1} in the window)`);
+    return start(rec.profileId, { why: 'heal' }).catch((e) => log.warn?.(`[browser] ${rec.profileId}: the attach road's heal did not start it — ${e && e.message}`));
+  }
+  /**
+   * THE ATTACH LAUNCH — the keeper's own `launch` + `cdpUrl` (design §2.4: the boundary moves one step; `exec` is
+   * `agent-browser --cdp <port>`, the stream stays the driver's). The directory's lock is judged as on the driver road; then
+   * the config's socket dir (0700, ours), a display-only session from the desktop keeper (xpra-seamless, no app, no idle
+   * stop), Google Chrome spawned on it with AT.attachArgv (never --disable-sync: its sign-in entry exists), its NEW
+   * DevToolsActivePort read (≤ 5 s — else `cdp_port_missing`, the Chrome ended, never a stale port), the endpoint asked.
+   * The record names CHROME as its process (pid + starttime): the tick's liveness, the stop's signal and the boot's
+   * adoption judge that pid — no daemon of ours sits under it. → browserView(rec) | null when the display session did not
+   * come up (said on the record; the caller runs the driver road).
+   */
+  async function attachStart(p, rec, prevRec, { exe, why, ns }) {
+    const profileId = p.id;
+    const failed = (code, msg, extra = {}) => { rec.state = 'failed'; rec.endedAt = now(); rec.lastError = msg; commit(); return namedError(code, msg, extra); };
+    if (reaping.has(profileId)) { try { await reaping.get(profileId); } catch { /* its own log */ } }
+    const lk = await clearProfileLock(p, ns, prevRec);
+    if (!lk.ok) { const e = failed(lk.code, lk.error); e.holderPid = lk.holderPid; throw e; }
+    const so = ATL.ensureSocketDir(AT.attachSocketDir({ base: attachSocketBase || B.SOCKET_DIR_BASE, uid: typeof process.getuid === 'function' ? process.getuid() : null, profileId }));
+    if (!so.ok) throw failed(so.code, so.error);
+    let ds = null;
+    try { ds = await displayKeeper.launchDisplay({ forBrowser: profileId, label: p.label }); } catch (e) { ds = { state: 'failed', lastError: `${e && e.message}${e && e.code ? ` [${e.code}]` : ''}` }; }
+    if (!ds || ds.state !== 'ready' || !ds.id) {
+      if (ds && ds.id) endDisplay({ profileId, displaySession: { id: ds.id } }, 'its bring-up failed');
+      rec.launch = 'driver'; rec.launchWhy = `its display session did not come up (${(ds && ds.lastError) || 'no answer'}) — the hidden window: this browser cannot sign in to Google`;
+      log.warn?.(`[browser] ${profileId} "${p.label}": ${rec.launchWhy}`);
+      commit();
+      return null;
+    }
+    rec.displaySession = { id: ds.id, display: ds.display || null };
+    stampLaunchHost(rec, prevRec, p.dir || null); // lane profile-lock-roll (L1): THIS machine's name on the record
+    rec.mark = p.id; rec.holdDialogs = true; rec.automationFlag = true; rec.quietLog = true; // the argv carries the mark, AutomationControlled and the quiet switches
+    rec.browserChoice = p.browser ? BB.choiceView(p.browser) : { kind: 'default' };
+    rec.launchEnv = { AGENT_BROWSER_IDLE_TIMEOUT_MS: '0' };
+    rec.cli = await cliNow(); // the CLI every later call of this browser runs (it attaches; it never launches)
+    commit();
+    const av = AT.attachArgv({ profileDir: p.dir, mark: B.keeperMarkArg(p.id), quiet: BE.QUIET_LOG_ARGS });
+    if (!av.ok) { await endDisplay(rec, 'its launch was refused'); throw failed(av.code, av.error); }
+    // the env: the keeper's base env (agentEnv — never process.env) minus every driver key, the display session's X, the
+    // daemon's short TMPDIR (Chrome's singleton socket must fit sun_path — lane browser-tmpdir-socket-length)
+    const env = { ...rtEnv };
+    for (const k of Object.keys(env)) if (k.startsWith('AGENT_BROWSER_')) delete env[k];
+    delete env.WAYLAND_DISPLAY;
+    const xenv = (typeof displayKeeper.x11EnvFor === 'function' && displayKeeper.x11EnvFor(ds.id)) || {};
+    if (xenv.DISPLAY) env.DISPLAY = xenv.DISPLAY; else if (ds.display) env.DISPLAY = ds.display;
+    if (xenv.XAUTHORITY) env.XAUTHORITY = xenv.XAUTHORITY;
+    { const td = daemonTmp(); if (td) env.TMPDIR = td; }
+    const r = await ATL.spawnChrome({ exe, argv: av.argv, env, profileDir: p.dir, logFile: path.join(dataDir, 'browser-env', 'attach', profileId + '.log') });
+    if (!r.ok) {
+      const lr = lockRefusalAfterLaunch(p, prevRec); // the directory taken meanwhile ⇒ its holder named
+      await endDisplay(rec, 'its browser did not start');
+      if (lr) throw failed(lr.code, lr.error, lr.holderPid ? { holderPid: lr.holderPid } : {});
+      throw failed(r.code, r.error);
+    }
+    rec.pid = r.pid; rec.starttime = await launchStart(r.pid);
+    if (rec.starttime == null && F.startsReadable()) { try { r.child.kill('SIGKILL'); } catch { /* gone */ } await endDisplay(rec, 'its browser could not be identified'); throw failed('launch_failed', unrecordedLaunch(r.pid)); }
+    rec.browser = { pid: r.pid, starttime: rec.starttime, dir: p.dir, devtoolsPort: r.port };
+    rec.socketDir = so.dir; rec.cdpPort = r.port; rec.cdpUrl = AT.cdpUrlOf(r.port, r.wsPath); rec.executable = exe;
+    rec.state = 'ready';
+    if (mediator) mediator.repoint(profileId, rec.cdpUrl); // P6: every mediated lease follows the browser
+    p.lastUsedAt = now(); p.lastBackend = p.provider;
+    { const pr = await probeCdp(rec.cdpUrl, { timeoutMs: 2500 }); if (pr.ok && pr.browser) { rec.cdpBrowser = pr.browser; const mj = SW.majorOfBrowserString(pr.browser); if (mj) { reg.majors[p.provider] = { major: mj, at: now() }; if ((rowOf(p.provider) || {}).ownsDir) p.lastChromiumMajor = Math.max(Number(p.lastChromiumMajor) || 0, mj); } } }
+    commit();
+    log.log?.(`[browser] ${profileId} "${p.label}" started on the ATTACH road (${why}): Chrome pid ${rec.pid} on ${rec.displaySession.display || '?'} (display session ${ds.id}), DevToolsActivePort ${r.port} after ${r.ms} ms${rec.cdpBrowser ? ', ' + rec.cdpBrowser : ''} — the driver attaches with --cdp`);
+    emitLease({ kind: 'browser-ready', profileId, why, local: true });
+    return browserView(rec);
+  }
   async function stop(profileId, { why = 'user' } = {}) {
     ensureLoaded();
     const rec = reg.browsers[profileId];
@@ -3892,6 +4034,9 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       // ephemeral browser is asked under its session's pairs (its socket dir).
       if (isEph(p)) await rt.closeAll(null, { extraEnv: pairsEnv(pairsOf(profileId) || [`AGENT_BROWSER_SESSION=${rec.ns}`, `AGENT_BROWSER_NAMESPACE=${rec.ns}`]) });
       else await rt.closeAll(rec.ns, { dir: p ? p.dir : null, extraEnv: rec.launchEnv || { AGENT_BROWSER_IDLE_TIMEOUT_MS: '0' } }); // naive study 2: the launch's own view
+      // lane one-browser-b1: on the ATTACH road the record's process IS Chrome (this keeper spawned it; a CDP session's close
+      // never ends an attached browser — measured) — ended by its identity now, then its display session goes with it
+      if (rec.launch === 'attach') { await endProcess(rec.pid, rec.starttime, { termMs: STOP_GRACE_MS }); await endDisplay(rec, `its browser stopped (${why})`); }
       let left = null;
       const until = now() + STOP_GRACE_MS;
       while (now() < until && rec.pid && F.pidAlive(rec.pid)) await sleep(100);
@@ -4158,7 +4303,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // hub-side CDP url, never by a directory — the pair rides the env only
     // (the subshell and the `--` form), `use --print` withholds it (§5.1)
     const noteOut = takeRebound(p.id, browserKey, rebound); // verify r3 (F4): this answer carries the note (its own, or one an abandoned answer left)
-    return { lease: leaseView(d.lease), created: d.created, resumed: d.resumed, others: d.others, profile: pview(p), browser, mediated: false, env: B.attachedEnvFor({ browserKey, profileId: p.id, cdpUrl: leaseCdp }), cdpUrl: rec ? rec.cdpUrl : null, pinTab, ...(added ? { added } : {}), ...(noteOut ? { rebound: noteOut } : {}) };
+    return { lease: leaseView(d.lease), created: d.created, resumed: d.resumed, others: d.others, profile: pview(p), browser, mediated: false, env: B.attachedEnvFor({ browserKey, profileId: p.id, cdpUrl: leaseCdp, socketDir: rec && rec.launch === 'attach' ? rec.socketDir : null }), cdpUrl: rec ? rec.cdpUrl : null, pinTab, ...(added ? { added } : {}), ...(noteOut ? { rebound: noteOut } : {}) };
   }
   /** VERIFY r2 L8: the paused sentence, said about a DETACH (the refusal's own words name a command). */
   const detachPausedText = (err) => String(err || '').replace('your command did NOT run', 'your detach did NOT run (it would end their takeover and take the browser out from under them)');
@@ -6164,7 +6309,8 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       const verdict = pidVerdictOf(rec);
       let active = false;
       // takeover C3: a managed ephemeral browser is asked under the session pairs it was started with
-      if (verdict === 'ours') { try { active = (isEph(p) && Array.isArray(rec.envPairs) ? await rt.info(null, { extraEnv: pairsEnv(rec.envPairs) }) : await rt.info(rec.ns, { dir: p ? p.dir : null })).active; } catch { active = false; } }
+      if (verdict === 'ours' && rec.launch === 'attach') active = (await probeCdp(rec.cdpUrl, { timeoutMs: 2500 })).ok; // lane one-browser-b1: Chrome itself answers
+      else if (verdict === 'ours') { try { active = (isEph(p) && Array.isArray(rec.envPairs) ? await rt.info(null, { extraEnv: pairsEnv(rec.envPairs) }) : await rt.info(rec.ns, { dir: p ? p.dir : null })).active; } catch { active = false; } }
       const v = B.adoptVerdict(rec, { verdict, active });
       if (!v) continue;
       if (v.state === 'ready') { rec.state = 'ready'; rec.adoptedAt = now(); recaptureBrowser(rec, 'boot'); if (rec.closed && rec.closed.code === 'browser_unstable' && rec.closed.unstable === 'failing') bootRejudge.add(rec.profileId); // lane browser-unstable-rejudge
@@ -6174,6 +6320,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
         if (isEph(p)) keptNote('stop', p, { why: 'restart' }); // lane browser-resume: it died while VibeSpace was down — its last persisted tabs are kept (D2: reopened at its next start)
         else tabsLost(rec.profileId, 'a boot that could not adopt it (a pod roll, a crash while VibeSpace was down)'); // lane profile-lock-roll (L2)
         if (daemonGone(rec)) reapOrphan(rec, 'boot'); // r2 M1: the daemon died while VibeSpace was down — its browser is ended too
+        if (rec.launch === 'attach') { if (verdict === 'ours') await endProcess(rec.pid, rec.starttime); endDisplay(rec, 'a boot that could not adopt its browser'); } // lane one-browser-b1: an unanswering Chrome of ours is ended, its display goes with it
       }
     }
   }
@@ -6206,6 +6353,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const r = reconcile({ graceMs: B.LEASE_DROP_GRACE_MS });
     if (r.dropped.length || r.stamped.length) dirty = true;
     await r.retired;
+    reconcileDisplays(); // lane one-browser-b1: a display-only session no live attach record names is stopped
     const asks = []; // lane browser-unresponsive: each live local browser's `/json/version` ask (parallel, awaited below)
     for (const rec of Object.values(reg.browsers)) {
       if (!B.isLiveBrowser(rec) || stopping.has(rec.profileId) || starting.has(rec.profileId)) continue;
@@ -6216,7 +6364,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       if (isEph(p) && daemonGone(rec)) { markEphemeralGone(rec); continue; }
       // P4: a process on a paired machine / an external browser is never
       // pid-judged or sampled here (the pid is not ours, or not local)
-      if (isLocalRec(rec) && daemonGone(rec)) { markDaemonGone(rec, 'the tick'); continue; }
+      if (isLocalRec(rec) && daemonGone(rec)) { markDaemonGone(rec, 'the tick'); healAttach(rec, 'the tick'); continue; } // lane one-browser-b1: an attach Chrome under a holder is started again
       // verify r3 M1 (a): the daemon is ours — its browser record follows an in-place relaunch (re-captured from the lock)
       // r4 MAJOR 1: a daemon with no browser is healed by the tick while a lease holds it (a conversation is using it); an
       // unleased one waits for its next start / view (or its idle clock) — nobody is asking for a window to reappear
@@ -6634,6 +6782,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     socketRootOf, // takeover r2: the root every command of a browser this keeper runs must land under
     configFileFor, machineConfigFile, // takeover r3: the config a command on a browser this keeper runs is NAMED with
     setOtherHolders: (fn) => { othersFn = typeof fn === 'function' ? fn : null; },
+    setDisplaySessions: (dk) => { displayKeeper = dk && typeof dk === 'object' ? dk : null; }, // lane one-browser-b1: the desktop keeper (the attach road's display sessions)
     streamPortFor, // P2: the live view's port (attachment or ephemeral; MULTIVIEW: a helper's — a view never STARTS any of them: released / stopped / not-started are said)
     noteStreamClosed, // VERIFY r1 H2: the bridge's upstream closed on an ephemeral relay — judge the process now
     leaseCliOpts, // naive study 2: the ONE way a CLI call under a lease's session reaches the keeper's browser (CDP, never the directory)
