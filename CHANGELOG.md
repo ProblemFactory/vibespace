@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.295 — 2026-10-16
+
+### Added
+- A paired Windows machine's desktop can open as a low-latency video stream, with correct colours on HDR displays.
+
 ## 2.369.294 — 2026-10-16
 
 ### Added

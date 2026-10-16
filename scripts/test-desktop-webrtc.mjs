@@ -59,7 +59,7 @@ console.log('§2 streamRungVerdict');
 {
   const v = (o) => SM.streamRungVerdict(o);
   ok(same(v({ capabilities: ['stream-offer'], desktop: true, fakeSource: '/x/a.h264' }), { take: true, source: 'fake', sourceId: '/x/a.h264', code: null, why: null }), 'an agent with the op + the instance\'s fake source ⇒ taken, the source\'s path handed on');
-  ok(v({ capabilities: ['stream-offer', 'stream-screen'], desktop: true, fakeSource: '/x/a.h264' }).source === 'screen', 'an agent that captures its screen (part B\'s capability) ⇒ the screen, before any fake');
+  ok(v({ capabilities: ['stream-offer', 'stream-screen'], desktop: true, platform: 'win32' }).source === 'screen' && v({ capabilities: ['stream-offer', 'stream-screen'], desktop: true, platform: 'win32', fakeSource: '/x/a.h264' }).source === 'fake' && v({ capabilities: ['stream-offer', 'stream-screen'], desktop: true, platform: 'darwin' }).code === 'no_screen_source', 'a Windows agent that captures its screen (lane stream-p1b-screen\'s capability) ⇒ the screen; an instance that names a fake source keeps it (an explicit override wins — the suites, demos); a Mac agent\'s capture is P3 ⇒ no_screen_source');
   ok(v({ capabilities: ['display-facts'], desktop: true, fakeSource: '/x/a.h264' }).code === 'agent_too_old', 'an agent without the op ⇒ agent_too_old (it is never asked)');
   ok(v({ capabilities: ['stream-offer'], desktop: false, fakeSource: '/x/a.h264' }).code === 'not_desktop_machine', 'a Linux machine ⇒ not_desktop_machine');
   ok(v({ capabilities: ['stream-offer'], desktop: true }).code === 'no_screen_source', 'P1-A on a real machine: the op but no screen source ⇒ no_screen_source (the window shows the VNC picture)');

@@ -1,0 +1,267 @@
+'use strict';
+/**
+ * THE SCREEN SOURCE — the paired Windows machine's own desktop as the stream's picture (DEVICE: inside agentd; design q-041
+ * r2 §2 采集/映射+编码 + §3 P1, lane stream-p1b-screen). What runs is decided by src/stream-plan.js (PURE); this file only
+ * spawns, pipes and counts. Part A's source interface (src/agentd/stream-host.js):
+ *   { kind: 'screen', origin, fps, start(onAccessUnit, onEnd), stop(), requestKeyframe(), setTargetKbps(kbps), stats() }
+ *
+ * TWO ROADS (planScreen picks by the display's HDR state):
+ *   direct  an SDR display — DDA's 8-bit picture IS the screen: ONE ffmpeg, ddagrab → hwdownload → NV12 (BT.709) → the
+ *           encoder → FLV on stdout
+ *   mapped  an HDR display — DDA's 8-bit picture is clipped scRGB (the P0 calibration: «过曝», unusable): ffmpeg #1 hands the
+ *           FP16 frames' raw bits (rgbaf16le, never a float `format=` conversion — swscale clamps them), THIS agent maps
+ *           them (÷ white/80 → OETF through ONE 64 K table per white level, src/stream-plan.js nv12FromHalf) in a worker
+ *           thread (the loop that holds the device links never maps a frame), ffmpeg #2 encodes the NV12 → FLV
+ *   Reading and mapping overlap (two frame buffers move between this thread and the worker); when both are full the
+ *   capture's pipe is paused — ddagrab then hands the newest picture, so a slow mapper drops frames, never queues them.
+ * TIMING: a mapped frame's clock is its first byte's arrival (ts90k for RTP; encodeMs = that → its access unit out of the
+ *   encoder: map + encode + both pipes). The direct road's capture and encode happen inside ffmpeg: no per-picture clock
+ *   (encodeMs null, said in stats as `timing: 'in-ffmpeg'`).
+ * KEYFRAMES: ffmpeg's CLI cannot force an IDR on a running encoder — the GOP (2 s) bounds a keyframe request; the wait is
+ *   measured (`keyWaitMs`). BITRATE: likewise fixed per process — werift's estimate restarts the ENCODER (kbpsDecision: at
+ *   most once per 5 s, only on a ≥ 25 % move); the new process opens with a key frame.
+ * ENDINGS, BY NAME (onEnd → the session's `ended`): `capture_exited` / `encoder_exited` (an ffmpeg died — its last stderr
+ *   line is logged), `display_gone` (the capture died and the display is no longer in the facts), `capture_failed` (it could
+ *   not start). The facts (`stream-facts`): the screens (DisplayConfig: HDR + SDR white level; DXGI: the output ddagrab
+ *   opens) and the ffmpeg found (PATH → %LOCALAPPDATA%\vibespace\ffmpeg\bin → the probe folder), kept FACTS_MS.
+ */
+const path = require('path');
+const SP = require('../stream-plan.js');
+
+const FACTS_MS = 30000;      // a facts answer is reused this long (a refused offer re-reads them: `force`)
+const RUN_MS = 15000;        // one facts child (PowerShell, an ffmpeg -version) at most
+const TAIL = 3;              // stderr lines kept per ffmpeg
+const named = (code, error) => ({ ok: false, code, error });
+const median = (a) => (a.length ? [...a].sort((x, y) => x - y)[a.length >> 1] : null);
+
+function createScreen({ platform = process.platform, spawn, execFile, env = process.env, lookupEnv = process.env, fs = require('fs'), log = () => { }, makeWorker = null, now = Date.now } = {}) {
+  let memo = null, inflight = null;
+  const run = (file, args, maxBuffer = 1 << 20) => new Promise((resolve) => {
+    try {
+      execFile(file, args, { env, windowsHide: true, timeout: RUN_MS, maxBuffer, encoding: 'utf8' }, (err, stdout, stderr) => resolve({ err, stdout: String(stdout || ''), stderr: String(stderr || '') }));
+    } catch (e) { resolve({ err: e, stdout: '', stderr: '' }); }
+  });
+  async function findFfmpeg() {
+    const looked = [], tried = new Set();
+    // PATH = this process's own (Windows' is the real `Path` — spawnEnv's copy is colon-joined) and then the spawn env's (its
+    // ~/.local/bin); the folders from this process's environment
+    const PATH = [lookupEnv.PATH, env.PATH].filter(Boolean).join(path.delimiter);
+    for (const c of SP.ffmpegCandidates({ platform, env: { PATH, LOCALAPPDATA: lookupEnv.LOCALAPPDATA, USERPROFILE: lookupEnv.USERPROFILE }, delim: path.delimiter, sep: path.sep })) {
+      if (!looked.includes(c.where)) looked.push(c.where);
+      if (tried.has(c.path)) continue;
+      tried.add(c.path);
+      let st = null; try { st = fs.statSync(c.path); } catch { continue; }
+      if (!st.isFile()) continue;
+      const [v, fl, en] = [await run(c.path, ['-hide_banner', '-version']), await run(c.path, ['-hide_banner', '-filters']), await run(c.path, ['-hide_banner', '-encoders'])];
+      if (v.err && !v.stdout) continue;
+      return { looked, ffmpeg: { path: c.path, where: c.where, ...SP.parseFfmpegFacts(v.stdout, fl.stdout, en.stdout) } };
+    }
+    return { looked, ffmpeg: null };
+  }
+  async function readFacts() {
+    if (platform !== 'win32') return { ok: false, code: 'not_windows', platform, error: `the screen source captures a Windows desktop (this machine runs ${platform})` };
+    const ps = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(SP.STREAM_FACTS_PS, 'utf16le').toString('base64')], 256 * 1024);
+    const d = SP.parseStreamFacts(ps.stdout);
+    const ff = await findFfmpeg();
+    const facts = { ok: true, platform, at: now(), ffmpeg: ff.ffmpeg, looked: ff.looked, displays: d.ok ? d.displays : [], dxgi: d.ok ? d.dxgi : 0 };
+    if (!d.ok) facts.displaysError = (ps.stderr.trim().split('\n')[0] || (ps.err && ps.err.message) || d.error).slice(0, 200);
+    const p = SP.planScreen(facts);
+    facts.primary = p.ok ? { mode: p.mode, encoder: p.encoder.label, note: p.note, display: p.display.id, w: p.w, h: p.h, white: p.white } : { code: p.code, error: p.error };
+    return facts;
+  }
+  /** The machine's screen facts (memo FACTS_MS; one read at a time). */
+  function facts({ force = false } = {}) {
+    if (!force && memo && now() - memo.at < FACTS_MS) return Promise.resolve(memo);
+    if (!inflight) inflight = readFacts().then((f) => { memo = f.ok ? f : null; inflight = null; return f; }, (e) => { inflight = null; return named('facts_failed', String((e && e.message) || e)); });
+    return inflight;
+  }
+
+  /** A session's source: the plan from fresh-enough facts, or its refusal by name. */
+  async function source(msg = {}, { maxKbps = 8000 } = {}) {
+    let f = await facts();
+    let plan = f.ok ? SP.planScreen(f, { display: msg.sourceId || null, kbps: maxKbps }) : f;
+    if (!plan.ok && f.ok && plan.code !== 'not_windows') { f = await facts({ force: true }); plan = f.ok ? SP.planScreen(f, { display: msg.sourceId || null, kbps: maxKbps }) : f; } // a refusal re-reads once (ffmpeg installed a minute ago, a display plugged in)
+    if (!plan.ok) return plan;
+    return screenSource(plan, maxKbps);
+  }
+
+  function screenSource(plan, maxKbps) {
+    const st = { frames: 0, aus: 0, dropped: 0, restarts: 0, keyWaitMs: null, keysAnswered: 0, encode: [], map: [], mapper: null, startedAt: null };
+    let onAu = null, onEnd = null, stopped = false, kbps = plan.kbps, rateAt = 0, keyAskedAt = null, t0 = 0, lastTs = -1;
+    const procs = new Set();
+    const end = (c) => { if (c && c.exitCode == null && !c.killed) { try { c.kill(); } catch { /* gone */ } } };
+    function finish(code, why) {
+      if (stopped) return;
+      stopped = true;
+      for (const c of procs) end(c);
+      teardownMapper();
+      log(`[stream] screen source ended: ${code}${why ? ` (${why})` : ''}`);
+      try { onEnd && onEnd(code); } catch { /* the host's */ }
+    }
+    /** ONE ffmpeg: its stderr tail kept, its unasked exit = the session's end by name. */
+    function ffmpeg(args, role, { stdin = 'ignore' } = {}) {
+      const c = spawn(plan.ffmpeg, args, { env, windowsHide: true, stdio: [stdin, 'pipe', 'pipe'] });
+      const tail = [];
+      c.asked = false;
+      procs.add(c);
+      c.stderr.on('data', (d) => { for (const l of String(d).split(/\r?\n/)) if (l.trim()) { tail.push(l.trim().slice(0, 200)); if (tail.length > TAIL) tail.shift(); } });
+      c.on('error', (e) => { procs.delete(c); if (!c.asked) finish('capture_failed', `${role}: ${e && (e.code || e.message)}`); });
+      c.on('exit', (code, sig) => {
+        procs.delete(c);
+        if (c.asked || stopped) return;
+        const why = `${role} exit ${code == null ? sig : code}${tail.length ? ': ' + tail[tail.length - 1] : ''}`;
+        if (role === 'encoder') { finish('encoder_exited', why); return; }
+        facts({ force: true }).then((f) => finish(f.ok && !f.displays.some((x) => x.id === plan.display.id) ? 'display_gone' : 'capture_exited', why), () => finish('capture_exited', why));
+      });
+      if (c.stdin) c.stdin.on('error', () => { /* the encoder died: its exit says so */ });
+      return c;
+    }
+    /** Access units out of an encoder's FLV → the host, in order, each once. */
+    function readAus(c, clockOf) {
+      const r = SP.flvReader();
+      c.stdout.on('data', (d) => {
+        if (stopped || c.asked) return; // a retired encoder's last pictures: the new one opens with a key frame
+        for (const ev of r.push(d)) {
+          if (ev.type === 'bad') { finish('encoder_exited', ev.error); return; }
+          const at = clockOf(ev);
+          const ts = Math.max(lastTs + 1, Math.round((at - t0) * 90));
+          lastTs = ts;
+          st.aus++;
+          if (ev.key && keyAskedAt != null) { st.keyWaitMs = now() - keyAskedAt; st.keysAnswered++; keyAskedAt = null; }
+          try { onAu({ nalus: ev.nalus.filter((n) => (n[0] & 0x1f) !== 9).map((n) => Buffer.from(n.buffer, n.byteOffset, n.length)), key: ev.key, ts90k: ts >>> 0 }); } catch { /* the host's */ }
+        }
+      });
+    }
+
+    // ── the DIRECT road: one ffmpeg ──
+    let direct = null;
+    function startDirect() {
+      direct = ffmpeg(SP.directArgv(plan, kbps), 'capture');
+      readAus(direct, () => Math.max(now(), t0));
+    }
+
+    // ── the MAPPED road: capture → this agent's mapping → encoder ──
+    const FB = plan.srcW * plan.srcH * 8, NB = SP.nv12Bytes(plan.srcW, plan.srcH);
+    const lut = plan.white ? SP.buildLut({ white: plan.white, knee: plan.tone.knee, peak: plan.tone.peak }) : null;
+    let cap = null, enc = null, encClock = [], worker = null, busy = false, waiting = null, fill = null, fillU8 = null, filled = 0, fillAt = 0, carry = null, paused = false;
+    const inFree = [], outFree = [];
+    function setupMapper() {
+      for (let k = 0; k < 2; k++) { inFree.push(new ArrayBuffer(FB)); outFree.push(new ArrayBuffer(NB)); }
+      if (makeWorker) {
+        try {
+          worker = makeWorker();
+          worker.on('message', (m) => { if (m && m.op === 'mapped') mapped(m.input, m.output, m.ms); else if (m && m.op === 'error') finish('capture_failed', `mapper: ${m.error}`); });
+          worker.on('error', (e) => { log(`[stream] mapper worker failed (${e && e.message}) — mapping inline`); worker = null; });
+          const l = lut.slice().buffer;
+          worker.postMessage({ op: 'lut', lut: l }, [l]);
+          st.mapper = 'worker';
+        } catch (e) { worker = null; log(`[stream] no mapper worker (${e && e.message}) — mapping inline`); }
+      }
+      if (!worker) st.mapper = 'inline';
+    }
+    function teardownMapper() { if (worker) { const w = worker; worker = null; try { w.terminate(); } catch { /* gone */ } } }
+    function pump() {
+      while (carry && carry.length && !stopped) {
+        if (!fill) {
+          fill = inFree.pop();
+          if (!fill) { if (!paused) { paused = true; cap.stdout.pause(); } return; }
+          fillU8 = new Uint8Array(fill); filled = 0; fillAt = now();
+        }
+        const take = Math.min(FB - filled, carry.length);
+        fillU8.set(carry.subarray(0, take), filled); filled += take;
+        carry = take < carry.length ? carry.subarray(take) : null;
+        if (filled === FB) { const f = { buf: fill, at: fillAt }; fill = null; st.frames++; frameDone(f); }
+      }
+      if (paused && cap) { paused = false; cap.stdout.resume(); }
+    }
+    function frameDone(f) {
+      if (!busy && outFree.length) { send(f); return; }
+      if (waiting) { inFree.push(waiting.buf); st.dropped++; }
+      waiting = f;
+    }
+    let mapping = null;
+    function send(f) {
+      busy = true;
+      const out = outFree.pop();
+      mapping = f;
+      if (worker) { worker.postMessage({ op: 'map', input: f.buf, output: out, w: plan.srcW, h: plan.srcH }, [f.buf, out]); return; }
+      const t = now();
+      SP.nv12FromHalf(new Uint16Array(f.buf), plan.srcW, plan.srcH, lut, new Uint8Array(out));
+      const ms = now() - t;
+      setImmediate(() => mapped(f.buf, out, ms));
+    }
+    function mapped(input, output, ms) {
+      if (stopped) return;
+      const f = mapping; mapping = null; busy = false;
+      st.map.push(ms); if (st.map.length > 30) st.map.shift();
+      inFree.push(input);
+      writeEnc(output, f.at);
+      if (waiting && outFree.length) { const w = waiting; waiting = null; send(w); }
+      pump();
+    }
+    function writeEnc(output, at) {
+      if (!enc || enc.asked || !enc.stdin || enc.stdin.destroyed) { outFree.push(output); st.dropped++; return; }
+      const clock = encClock;
+      clock.push(at);
+      enc.stdin.write(Buffer.from(output, 0, NB), () => {
+        outFree.push(output);
+        if (!busy && waiting && !stopped) { const w = waiting; waiting = null; send(w); }
+      });
+    }
+    function startEncoder() {
+      enc = ffmpeg(SP.encodeArgv(plan, kbps), 'encoder', { stdin: 'pipe' });
+      const clock = encClock = [];
+      readAus(enc, () => { const at = clock.shift(); if (at != null) { st.encode.push(now() - at); if (st.encode.length > 30) st.encode.shift(); } return at != null ? at : now(); });
+    }
+    function startMapped() {
+      setupMapper();
+      startEncoder();
+      cap = ffmpeg(SP.captureArgv(plan), 'capture');
+      cap.stdout.on('data', (d) => { carry = carry ? Buffer.concat([carry, d]) : d; pump(); });
+    }
+
+    return {
+      ok: true, kind: 'screen', origin: plan.origin, fps: plan.fps, mode: plan.mode, encoder: plan.encoder.label,
+      start(onAccessUnit, onEnded) {
+        if (onAu || stopped) return;
+        onAu = onAccessUnit; onEnd = onEnded || null; t0 = now(); rateAt = t0; st.startedAt = t0;
+        if (keyAskedAt == null) keyAskedAt = t0;
+        try { if (plan.mode === 'mapped') startMapped(); else startDirect(); } catch (e) { finish('capture_failed', String((e && e.message) || e)); }
+        log(`[stream] screen source: ${plan.mode}, ${plan.display.id} ${plan.w}×${plan.h} @ ${plan.fps} fps, ${plan.encoder.label} ${kbps} kbps${plan.white ? `, white ${plan.white}` : ''}`);
+      },
+      stop() { if (stopped) return; stopped = true; for (const c of procs) { c.asked = true; end(c); } teardownMapper(); },
+      requestKeyframe() { if (keyAskedAt == null) keyAskedAt = now(); },
+      setTargetKbps(target) {
+        if (!onAu || stopped) return;
+        const d = SP.kbpsDecision({ current: kbps, target, cap: maxKbps, lastAt: rateAt, now: now() });
+        if (!d.change) return;
+        kbps = d.kbps; rateAt = now(); st.restarts++;
+        if (plan.mode === 'mapped') { const old = enc; old.asked = true; end(old); startEncoder(); } else { const old = direct; old.asked = true; end(old); startDirect(); }
+        log(`[stream] screen source: encoder restarted at ${kbps} kbps`);
+      },
+      stats() {
+        return { mode: plan.mode, encoder: plan.encoder.label, encoderId: plan.encoder.id, note: plan.note, display: plan.display.id, w: plan.w, h: plan.h, white: plan.white, kbps,
+          encodeMs: plan.mode === 'mapped' ? median(st.encode) : null, timing: plan.mode === 'mapped' ? 'agent' : 'in-ffmpeg', mapMs: median(st.map), mapper: st.mapper,
+          captured: st.frames, aus: st.aus, dropped: st.dropped, restarts: st.restarts, keyWaitMs: st.keyWaitMs, keysAnswered: st.keysAnswered };
+      },
+    };
+  }
+
+  return { facts, source };
+}
+
+/** THE MAPPER WORKER's body (agentd.js runs it in its `stream-map` worker branch): the table once, then frames. */
+function mapperServant(port) {
+  let lut = null;
+  port.on('message', (m) => {
+    try {
+      if (m.op === 'lut') { lut = new Uint8Array(m.lut); return; }
+      if (m.op !== 'map' || !lut) return;
+      const t = Date.now();
+      SP.nv12FromHalf(new Uint16Array(m.input), m.w, m.h, lut, new Uint8Array(m.output));
+      port.postMessage({ op: 'mapped', input: m.input, output: m.output, ms: Date.now() - t }, [m.input, m.output]);
+    } catch (e) { try { port.postMessage({ op: 'error', error: String((e && e.message) || e) }); } catch { /* gone */ } }
+  });
+}
+
+module.exports = { createScreen, mapperServant, FACTS_MS };

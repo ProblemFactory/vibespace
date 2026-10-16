@@ -259,6 +259,11 @@ export function openMachineDesktop(app, m, { display } = {}) {
     answer_failed: () => t('the browser and the machine could not agree'), restart_failed: () => t('it could not reconnect'), link_lost: () => t('the machine’s link dropped'),
     agent_too_old: () => t('the machine’s agent cannot stream yet — update it'), no_screen_source: () => t('the machine’s agent cannot capture its screen yet'),
     too_many_streams: () => t('the machine already streams to two windows'), offer_failed: () => t('the machine could not start it'),
+    // lane stream-p1b-screen: the screen source's own names (src/agentd/stream-screen.js — refused before it starts, or ended)
+    no_ffmpeg: () => t('the machine needs ffmpeg 7 or newer (with ddagrab and NVENC) — on its PATH or in {dir}', { dir: '%LOCALAPPDATA%\\vibespace\\ffmpeg\\bin' }),
+    no_encoder: () => t('the machine’s ffmpeg has no H.264 encoder'), no_white_level: () => t('the machine’s HDR white level could not be read'),
+    display_gone: () => t('the display it showed is gone'), display_other_gpu: () => t('that display is on another graphics card'),
+    capture_failed: () => t('the machine’s screen capture could not start'), capture_exited: () => t('the machine’s screen capture stopped'), encoder_exited: () => t('the machine’s video encoder stopped'),
   };
   const streamWords = (code) => (STREAM_WHY[code] ? STREAM_WHY[code]() : t('the machine ended it ({code})', { code: code || '?' }));
   const ms = (v) => (v == null ? '—' : v);
@@ -268,9 +273,12 @@ export function openMachineDesktop(app, m, { display } = {}) {
     streamEl.hidden = !playing;
     chip.textContent = playing ? t('Stream · {ms} ms · {fps} fps', { ms: ms(p && p.rttMs), fps: ms(p && p.fps) }) : t('Stream · connecting…');
     if (!p) return;
-    streamEl.textContent = t('RTT {rtt} ms · jitter {jitter} ms · {fps} fps · decode {decode} ms · {kbps} kbps', { rtt: ms(p.rttMs), jitter: ms(p.jitterMs), fps: ms(p.fps), decode: ms(p.decodeMs), kbps: ms(p.kbps) }) + (p.path === 'relay' ? ' · ' + t('via the hub') : '');
+    const sc = a && a.screen; // lane stream-p1b-screen: the machine's own screen — its encoder and what encoding costs there
+    streamEl.textContent = t('RTT {rtt} ms · jitter {jitter} ms · {fps} fps · decode {decode} ms · {kbps} kbps', { rtt: ms(p.rttMs), jitter: ms(p.jitterMs), fps: ms(p.fps), decode: ms(p.decodeMs), kbps: ms(p.kbps) }) + (p.path === 'relay' ? ' · ' + t('via the hub') : '')
+      + (sc && sc.encoder ? ' · ' + (sc.encodeMs != null ? t('{encoder} · encode {ms} ms', { encoder: sc.encoder, ms: sc.encodeMs }) : sc.encoder) : '');
     streamEl.dataset.path = p.path || '';
-    chip.title = [scope, t('WebRTC from the machine’s agent: {w}×{h}, sent {sent} fps at {kbps} kbps', { w: ms(p.width), h: ms(p.height), sent: ms(a && a.fps), kbps: ms(a && a.kbps) })].join('\n');
+    chip.title = [scope, t('WebRTC from the machine’s agent: {w}×{h}, sent {sent} fps at {kbps} kbps', { w: ms(p.width), h: ms(p.height), sent: ms(a && a.fps), kbps: ms(a && a.kbps) }),
+      ...(sc && sc.white ? [t('HDR mapped on the machine (SDR white {nits} nits)', { nits: Math.round(sc.white * 0.08) })] : []), ...(sc && sc.note === 'no_hw_encoder' ? [t('software encoding (no hardware encoder found)')] : [])].join('\n');
   };
   const inputWords = (ref) => {
     const code = ref && ref.code;

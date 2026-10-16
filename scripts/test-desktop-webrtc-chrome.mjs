@@ -14,8 +14,12 @@
 //   ⑤ UIPI: an elevated window in front ⇒ the strip names it (the press never reached it)
 //   ⑥ THE FALLBACK: the machine ends the stream ⇒ the <video> goes, the strip says why, the VNC picture signs in and draws  fallback.png
 //   ⑦ relay-only (the hub's UDP relay over the device link): it plays, the strip says 经 hub 中转                            relay.png
-//   ⑧ a hub with no source: the rung is not taken ⇒ the VNC picture at once, NO note (the chip's title says why)
+//   ⑧ a hub with no fake source and a machine with no ffmpeg: its screen source is refused (no_ffmpeg) ⇒ the VNC picture at
+//      once, NO note (the chip's title says why: 需要 ffmpeg ≥ 7（含 ddagrab 与 NVENC）…)
 //   ⑨ phone 375×667: it plays in the same shell, the strip is ONE row (scrolled to its numbers), a TAP is a click on the machine   phone.png, phone-stats.png
+//   ⑩ THE MACHINE'S OWN SCREEN (lane stream-p1b-screen): a fake ffmpeg.exe + PowerShell facts (an HDR primary, SDR white
+//      200 nits): the HDR road plays, the strip reads NVENC · 编码 N ms, the chip's title says the HDR was mapped on the
+//      machine; the capture ffmpeg dies ⇒ 串流停了（机器的屏幕采集停了）and the VNC picture signs in and draws   screen.png, screen-fallback.png
 // PNGs when `--shots <dir>`.
 import fs from 'node:fs';
 import net from 'node:net';
@@ -25,6 +29,7 @@ import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { freePort, scratch, endDaemonsOf, ONBOARDED_SOURCE } from './scratch.mjs';
+import { writeFakeFfmpeg, factsLine, calibrationFrame } from './fixtures/stream/screen-fakes.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
@@ -56,9 +61,11 @@ const cleanup = () => {
 process.on('exit', cleanup);
 for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => { cleanup(); process.exit(143); });
 fs.mkdirSync(path.join(home, '.local/bin'), { recursive: true });
-const PS_LOG = path.join(root, 'ps-lines.txt'), ELEVATED = path.join(root, 'elevated');
+const PS_LOG = path.join(root, 'ps-lines.txt'), ELEVATED = path.join(root, 'elevated'), FACTS = path.join(root, 'stream-facts.json');
+fs.writeFileSync(FACTS, factsLine([{ id: '\\\\.\\DISPLAY1', x: 0, y: 0, w: 1280, h: 720, primary: true, hdr: true, white: 2500, adapter: 0, output: 0 }])); // ⑧ ⑩: the machine's screen facts (an HDR primary, SDR white 200 nits)
 fs.writeFileSync(path.join(home, '.local/bin/powershell.exe'), `#!${process.execPath}
-const fs = require('fs'); process.stdout.write('ready\\r\\n');
+const fs = require('fs'); { const a = process.argv.slice(2); if (/'stream-facts'/.test(Buffer.from(a[a.length - 1] || '', 'base64').toString('utf16le'))) { process.stdout.write(fs.readFileSync(${JSON.stringify(FACTS)}, 'utf8') + '\\r\\n'); process.exit(0); } }
+process.stdout.write('ready\\r\\n');
 let buf = ''; process.stdin.setEncoding('utf8');
 process.stdin.on('data', (d) => { buf += d; let i; while ((i = buf.indexOf('\\n')) >= 0) { const l = buf.slice(0, i).trim(); buf = buf.slice(i + 1); fs.appendFileSync(${JSON.stringify(PS_LOG)}, l + '\\n'); process.stdout.write(((l[0] === 'D' || (l[0] === 'K' && l.endsWith(' 0'))) && fs.existsSync(${JSON.stringify(ELEVATED)}) ? 'uipi' : 'ok') + '\\r\\n'); } });
 `, { mode: 0o755 });
@@ -66,9 +73,10 @@ const psLines = () => (fs.existsSync(PS_LOG) ? fs.readFileSync(PS_LOG, 'utf8').t
 const bundleText = fs.readFileSync(BUNDLE, 'utf8');
 const HELLO = /(op: "hello-ack",[\s\S]{0,200}?)platform: process\.platform,/;
 const INJ = /(createInjector\(\{\s*)platform: process\.platform,/;
-ok(HELLO.test(bundleText) && INJ.test(bundleText) && /"stream-offer"/.test(bundleText), 'the bundle carries the hello-ack platform, THE injector\'s platform and the stream-offer capability (the copy patches exactly those)');
+const SCR = /(createScreen\(\{\s*)platform: process\.platform,/;
+ok(HELLO.test(bundleText) && INJ.test(bundleText) && SCR.test(bundleText) && /"stream-offer"/.test(bundleText) && /"stream-screen"/.test(bundleText), 'the bundle carries the hello-ack platform, THE injector\'s, THE screen source\'s and the stream-offer / stream-screen capabilities (the copy patches exactly those)');
 fs.mkdirSync(path.join(root, 'bundle'), { recursive: true });
-fs.writeFileSync(path.join(root, 'bundle', 'vibespace-agentd.js'), bundleText.replace(HELLO, '$1platform: "win32",').replace(INJ, '$1platform: "win32",'));
+fs.writeFileSync(path.join(root, 'bundle', 'vibespace-agentd.js'), bundleText.replace(HELLO, '$1platform: "win32",').replace(INJ, '$1platform: "win32",').replace(SCR, '$1platform: "win32",'));
 const { DeviceManager } = require(path.join(REPO, 'src/agentd/client.js'));
 process.env.HOME = home; process.env.VIBESPACE_AGENTD_ROOT = rootOf(home);
 const dataDir = path.join(home, 'hub-data'); fs.mkdirSync(dataDir, { recursive: true });
@@ -292,7 +300,7 @@ console.log('⑦ relay-only ⑧ no source');
   await q.until(`!!document.querySelector('${WIN} canvas')`, 15000);
   await sleep(500);
   const s = await stripText(q);
-  ok(asked && vnc.seen.sessions === before + 1 && !s.note && !(await q.ev(`!!document.querySelector('${WIN} .stream-video')`)) && /没有串流：机器的 agent 还不能采集它的屏幕/.test(s.title), '⑧ a hub with no source: the rung is not taken ⇒ the VNC picture at once with NO note (the chip\'s title says why, in the page\'s words: 没有串流：机器的 agent 还不能采集它的屏幕)', s);
+  ok(asked && vnc.seen.sessions === before + 1 && !s.note && !(await q.ev(`!!document.querySelector('${WIN} .stream-video')`)) && /没有串流：需要 ffmpeg ≥ 7（含 ddagrab 与 NVENC）/.test(s.title), '⑧ a hub with no fake source, a machine with no ffmpeg (its screen source refused, no_ffmpeg): the rung is not taken ⇒ the VNC picture at once with NO note (the chip\'s title says why, in the page\'s words: 没有串流：需要 ffmpeg ≥ 7（含 ddagrab 与 NVENC）……)', s);
   await q.close();
   noSource.shutdown();
   R.setup({ ...BASE });
@@ -318,6 +326,35 @@ console.log('⑨ phone 375×667');
   ok(scrolled, '⑨ the strip scrolls sideways to its stream numbers (往返 · 抖动 · fps · 解码 · kbps in view)');
   await p.shot('phone-stats.png');
   await p.close();
+}
+console.log('⑩ the machine\'s own screen: the HDR road, NVENC on the strip — and its capture dying');
+{
+  const SP = require(path.join(REPO, 'src/stream-plan.js'));
+  const cal = calibrationFrame(1280, 720, SP.CALIBRATION.rows);
+  const RAW = path.join(root, 'cal.f16'), DIE = path.join(root, 'die-capture');
+  fs.writeFileSync(RAW, cal.buf);
+  writeFakeFfmpeg(path.join(home, '.local/bin'), { log: path.join(root, 'ffmpeg.log'), fixture: FIXTURE, raw: RAW, dieCapture: DIE, version: '7.1', encoders: ['h264_nvenc', 'libx264'] });
+  const screenHub = DW.create({ access: ACC.create({ hosts, install: false, log: quiet, vncPort: vnc.port, probeMs: 3000, env: () => ({}) }), log: quiet });
+  R.setup({ ...BASE, webrtc: screenHub });
+  const p = await page(1280, 800, DESK);
+  await p.ev(`window.__open(${JSON.stringify(M)})`);
+  const up = await playing(p);
+  const nv = await p.until(`/ · NVENC · 编码 \\d+ ms$/.test((document.querySelector('${WIN} .desktop-strip-stream') || {}).textContent || '')`, 10000);
+  const s = await stripText(p);
+  const f = screenHub.facts('win-a')[0] || {};
+  ok(up && nv && /HDR 已在机器上映射（SDR 白点 200 nits）/.test(s.title) && f.source && f.source.kind === 'screen' && f.source.encoder === 'NVENC' && f.source.mode === 'mapped', '⑩ the machine\'s own screen (no fake source on the hub): the HDR road plays, the strip reads … · NVENC · 编码 N ms, the chip\'s title says HDR 已在机器上映射（SDR 白点 200 nits）', { s, src: f.source });
+  await p.shot('screen.png', WIN);
+  fs.writeFileSync(DIE, '1');
+  const fell = await p.until(`!document.querySelector('${WIN} .stream-video') && /串流停了（机器的屏幕采集停了）/.test((document.querySelector('${WIN} .desktop-strip-note') || {}).textContent || '')`, 12000);
+  const asked = await p.until(`!!document.querySelector('#machine-desktop-signin input[type=password]')`, 15000);
+  if (asked) await p.ev(`(() => { const f = document.querySelector('#machine-desktop-signin form'); f.querySelector('input[type=password]').value = 'pw'; f.requestSubmit(); })()`);
+  const drawn = await p.until(`(() => { const cv = document.querySelector('${WIN} canvas'); if (!cv || cv.width !== 1280) return false; const d = cv.getContext('2d').getImageData(640, 360, 1, 1).data; return Math.abs(d[0] - 40) < 8 && Math.abs(d[1] - 150) < 8 && Math.abs(d[2] - 70) < 8; })()`, 15000);
+  fs.rmSync(DIE);
+  ok(fell && drawn, '⑩ the capture ffmpeg dies ⇒ the stream ends BY NAME: the <video> goes, the strip says 串流停了（机器的屏幕采集停了）——改为显示 VNC 画面, the VNC picture signs in and draws', { fell, asked, drawn });
+  await p.shot('screen-fallback.png', WIN);
+  await p.close();
+  screenHub.shutdown();
+  R.setup({ ...BASE });
 }
 ok((await sessions()).length === 0, 'every window closed ⇒ no stream session left on the hub');
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

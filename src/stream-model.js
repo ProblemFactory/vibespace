@@ -48,19 +48,21 @@ const RUNG_ID = 'webrtc';
 
 /**
  * May this machine's desktop open as a WebRTC stream? `capabilities` = the agent's hello-ack list; `desktop` = it is a
- * Windows / macOS machine (the access layer's verdict); `fakeSource` = the instance names a fake source file (tests,
- * demos — its path, handed back as `sourceId`). The source: 'screen' when the agent captures its screen (the `stream-screen` capability — part B), else 'fake' when configured.
+ * Windows / macOS machine (the access layer's verdict); `platform` = the agent's; `fakeSource` = the instance names a fake
+ * source file (tests, demos — its path, handed back as `sourceId`). The source: 'fake' when the instance names one (an
+ * explicit override wins — lane stream-p1b-screen), else 'screen' when the agent captures its screen (the `stream-screen`
+ * capability — a Windows agent; a Mac's capture is P3), else no_screen_source.
  * → { take, source, sourceId, code, why }
  */
-function streamRungVerdict({ capabilities = [], desktop = false, fakeSource = null, table = B.DISPLAY_BACKENDS } = {}) {
+function streamRungVerdict({ capabilities = [], desktop = false, platform = null, fakeSource = null, table = B.DISPLAY_BACKENDS } = {}) {
   const row = B.backendById(RUNG_ID, table);
   const caps = Array.isArray(capabilities) ? capabilities : [];
   if (!row || row.wired === false) return { take: false, source: null, code: 'not_wired', why: 'the WebRTC stream rung is not wired on this instance' };
   if (!desktop) return { take: false, source: null, code: 'not_desktop_machine', why: 'a stream shows a Windows or macOS machine\'s desktop' };
   const met = row.needs.find((group) => group.every((c) => /^agent:/.test(c) && caps.includes(c.slice(6))));
   if (!met) return { take: false, source: null, code: 'agent_too_old', why: 'the machine\'s agent cannot stream yet — update it' };
-  if (caps.includes('stream-screen')) return { take: true, source: 'screen', sourceId: null, code: null, why: null };
   if (fakeSource) return { take: true, source: 'fake', sourceId: String(fakeSource), code: null, why: null };
+  if (caps.includes('stream-screen') && platform === 'win32') return { take: true, source: 'screen', sourceId: null, code: null, why: null };
   return { take: false, source: null, code: 'no_screen_source', why: 'the machine\'s agent cannot capture its screen yet' };
 }
 

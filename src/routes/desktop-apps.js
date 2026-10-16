@@ -89,7 +89,9 @@
  *                                     picture) | {take: true, key, sid, offer, source, codec, seq}; then, by `key`:
  *   POST …/stream/answer {key, sdp} · …/stream/candidate {key, candidate} · …/stream/restart {key} (an ICE-restart offer) ·
  *   …/stream/stop {key, why?} · GET …/stream/watch?key&n&seq[&path] (THE LONG POLL: the agent's candidates from index n,
- *   the state, the agent's numbers, `ended`) · GET …/stream/facts?host= (the sessions' record). People only.
+ *   the state, the agent's numbers, `ended`) · GET …/stream/facts?host=[&machine=1[&force=1]] (the sessions' record; `machine`
+ *                                     adds the agent's screen-source facts — HDR + SDR white per display, its ffmpeg, the
+ *                                     primary display's plan; lane stream-p1b-screen). People only.
  *   GET  /api/desktop/install-plan?host=     the xpra INSTALL RUNG's plan for a machine (its facts +
  *                                     the PURE plan: source apt | xpra.org, the commands, canRun)
  *                                     — SHOWN before anything runs
@@ -539,11 +541,14 @@ router.post('/api/desktop/machine-desktop/stream/stop', async (req, res) => {
   const why = String((req.body && req.body.why) || 'stopped').replace(/[^a-z_]/g, '').slice(0, 40) || 'stopped';
   res.json(await wr.stop(streamKey(req), why));
 });
-router.get('/api/desktop/machine-desktop/stream/facts', (req, res) => {
+router.get('/api/desktop/machine-desktop/stream/facts', async (req, res) => {
   if (humanOnly(req, res)) return;
   const host = hostParam(req, res); if (!host) return;
   const wr = webrtcOf(res); if (!wr) return;
-  res.json({ sessions: wr.facts(host) });
+  if (!req.query.machine) { res.json({ sessions: wr.facts(host) }); return; }
+  let machine;
+  try { machine = await ctx.access.streamFacts(host, { force: !!req.query.force }); } catch (e) { machine = { ok: false, code: (e && e.code) || 'facts_failed', error: String((e && e.message) || e) }; }
+  res.json({ sessions: wr.facts(host), machine });
 });
 /** lane machine-desktop-apps: the machine's INSTALLED apps — listed ON it by witness (src/installed-apps.js), kept by the
  *  hub; `fresh=1` = Check again (listed now). Answered 200 with the list as it is when the machine cannot list right

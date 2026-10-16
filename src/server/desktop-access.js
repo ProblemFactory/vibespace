@@ -635,10 +635,20 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
     if (typeof dm.displayFacts !== 'function') throw named('host_needs_daemon', `${hostId}: its agent cannot list its displays`);
     return dm.displayFacts();
   }
+  /** lane stream-p1b-screen: the machine's SCREEN-SOURCE facts through its agent (the `stream-facts` op — HDR + SDR white per
+   *  display, the ffmpeg found, the primary display's plan). An agent that predates the op answers `host_needs_daemon`. */
+  async function streamFacts(hostId, { force = false } = {}) {
+    if (isLocal(hostId)) throw named('not_desktop_machine', 'this machine\'s own desktop is the Desktop window');
+    const dm = await deviceOf(hostId);
+    const platform = platformOfHandle(dm);
+    if (!M.DESKTOP_PLATFORMS.includes(platform)) throw notDesktop(hostId, platform);
+    if (typeof dm.streamFacts !== 'function') throw named('host_needs_daemon', `${hostId}: its agent cannot read its screen facts`);
+    return dm.streamFacts({ force });
+  }
   /** lane stream-p1a-transport (design q-041 r2 §2): THE WEBRTC RUNG beside vnc-native — may this machine's desktop open as a
    *  low-latency stream from its agent (src/stream-model.js streamRungVerdict over the agent's hello-ack: the `stream-offer`
-   *  capability and a source — its screen once the agent captures it, else this instance's fake source,
-   *  VIBESPACE_STREAM_FAKE_SOURCE, for the suites and demos). Asks NOTHING of the machine (its hello is in hand); every "no"
+   *  capability and a source — this instance's fake source when it names one (VIBESPACE_STREAM_FAKE_SOURCE, for the suites
+   *  and demos), else a Windows agent's own screen (`stream-screen`, lane stream-p1b-screen). Asks NOTHING of the machine (its hello is in hand); every "no"
    *  is named and the window shows the VNC picture. → { take, source, code, why, dm, platform, sourceId } */
   async function streamRung(hostId) {
     if (isLocal(hostId)) return { take: false, source: null, code: 'not_desktop_machine', why: 'this machine\'s own desktop is the Desktop window', dm: null, platform: null, sourceId: null };
@@ -646,7 +656,7 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
     let info = {};
     try { const st = dm && dm.status ? dm.status() : null; info = (st && st.connected && st.info) || {}; } catch { info = {}; }
     const fake = String((env() || {}).VIBESPACE_STREAM_FAKE_SOURCE || '') || null;
-    const v = SMOD.streamRungVerdict({ capabilities: info.capabilities || [], desktop: M.DESKTOP_PLATFORMS.includes(info.platform), fakeSource: fake });
+    const v = SMOD.streamRungVerdict({ capabilities: info.capabilities || [], desktop: M.DESKTOP_PLATFORMS.includes(info.platform), platform: info.platform || null, fakeSource: fake });
     return { ...v, dm, platform: info.platform || null };
   }
   // ── design q-024 r1 §1.3–§1.4 (lane remoteapp-r1b): THE REMOTEAPP SETTINGS CARD'S DOORS — the owner's (the routes refuse an agent token) ──
@@ -729,7 +739,7 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
     try { return !!(hosts && typeof hosts.connectedDevice === 'function' && hosts.connectedDevice(hostId)); } catch { return false; }
   }
 
-  const layer = { call, forwardPort, closeForward, forwards: listForwards, hostKnown, isLocal, shutdown, machines, installPlan, installXpra, installPackage, installBusy, runArgv, readFile, connectedNow, setAppPlanner, planDigest, probeDesktop, openMachineDesktop, streamRung, machineDesktopTarget, machineDesktopGone, runOnDesktop, installedApps, installedNow, deviceOf, displayFacts, linkPing, remoteappSetup, remoteappForward, setRdpSetup, launchRemoteApp, remoteappSignin, remoteappFacts, remoteappSetupView, saveRemoteappSetup, trustRemoteApp };
+  const layer = { call, forwardPort, closeForward, forwards: listForwards, hostKnown, isLocal, shutdown, machines, installPlan, installXpra, installPackage, installBusy, runArgv, readFile, connectedNow, setAppPlanner, planDigest, probeDesktop, openMachineDesktop, streamRung, machineDesktopTarget, machineDesktopGone, runOnDesktop, installedApps, installedNow, deviceOf, displayFacts, streamFacts, linkPing, remoteappSetup, remoteappForward, setRdpSetup, launchRemoteApp, remoteappSignin, remoteappFacts, remoteappSetupView, saveRemoteappSetup, trustRemoteApp };
   if (install) installed = layer;
   return layer;
 }

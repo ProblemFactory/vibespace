@@ -139,6 +139,9 @@ const FS_ACTIONS = {
     });
     return; // the worker never falls through to daemon code
   }
+  // lane stream-p1b-screen: THE MAPPER of the screen source's HDR road (src/agentd/stream-screen.js) — FP16 frames → NV12
+  // through the 64 K table, off the loop that holds the device links; the same bundle, its own branch, never daemon code
+  if (wt && !wt.isMainThread && wt.workerData && wt.workerData.role === 'stream-map') { require('./stream-screen.js').mapperServant(wt.parentPort); return; }
 }
 // ── R4 usage-scan child (docs/design-three-tier.md `usage.scan`): the ledger
 // walk runs in a CHILD of the daemon — heavy IO must never ride the loop
@@ -1258,9 +1261,13 @@ const windowWatches = new Map();
 // SendInput through a resident PowerShell on Windows; the Linux stub writes a file only when VIBESPACE_INPUT_STUB_FILE names
 // one) and the WebRTC stream sessions that feed it (src/agentd/stream-host.js) — both made at their first use, so werift
 // is never loaded by an agent that never streams
-let inputInjector = null, streamHost = null;
+let inputInjector = null, streamHost = null, streamScreen = null;
 const injectorOf = () => inputInjector || (inputInjector = require('./../input-inject.js').createInjector({ platform: process.platform, spawn: require('child_process').spawn, env: spawnEnv(), stubFile: process.env.VIBESPACE_INPUT_STUB_FILE || null, fs, log }));
-const streamHostOf = () => streamHost || (streamHost = require('./stream-host.js').createStreamHost({ injector: injectorOf(), log }));
+// lane stream-p1b-screen (design q-041 r2 §2 采集/映射+编码): THE screen source — this machine's facts (`stream-facts`) and its
+// ffmpeg pipelines (src/agentd/stream-screen.js); the HDR road's mapper is a worker of THIS bundle (the `stream-map` branch)
+const streamMapWorker = () => new (require('worker_threads').Worker)(__filename, { workerData: { role: 'stream-map' } });
+const streamScreenOf = () => streamScreen || (streamScreen = require('./stream-screen.js').createScreen({ platform: process.platform, spawn: require('child_process').spawn, execFile: require('child_process').execFile, env: spawnEnv(), fs, log, makeWorker: streamMapWorker }));
+const streamHostOf = () => streamHost || (streamHost = require('./stream-host.js').createStreamHost({ injector: injectorOf(), log, screen: (msg, o) => streamScreenOf().source(msg, o) }));
 function unpinWindow(rec) {
   rec.pinned = false;
   const a = rec.last;
@@ -1529,7 +1536,7 @@ function serveConnection(sock) {
           // per-op capability gating (three-tier design): consumers check the
           // capability, NEVER parse daemonVersion — unknown ops on an old
           // daemon get no reply and hang the request until its timeout
-          capabilities: ['probe', 'transcript-op', 'usage-scan', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events', 'pool-orders', 'sysinfo', 'design-fs', 'session-events', 'proc-list', 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'browser-end-daemon', 'desktop-serve', 'window-track', 'window-pin', 'dial-status', 'run-shell', 'app-install', 'fs-portable', 'fs-write-stream', 'desktop-apps-list', 'display-facts', 'remoteapp-facts', 'stream-offer', 'input-events'],
+          capabilities: ['probe', 'transcript-op', 'usage-scan', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events', 'pool-orders', 'sysinfo', 'design-fs', 'session-events', 'proc-list', 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'browser-end-daemon', 'desktop-serve', 'window-track', 'window-pin', 'dial-status', 'run-shell', 'app-install', 'fs-portable', 'fs-write-stream', 'desktop-apps-list', 'display-facts', 'remoteapp-facts', 'stream-offer', 'input-events', 'stream-facts', 'stream-screen'],
         }));
         return;
       }
@@ -2135,6 +2142,13 @@ function serveConnection(sock) {
       if (msg.op === 'stream-answer') { streamHostOf().answer(msg).then((r) => mux.control({ op: 'stream-answer-result', id: msg.id, result: r }), (e) => mux.control({ op: 'stream-answer-result', id: msg.id, error: String((e && e.message) || e) })); return; }
       if (msg.op === 'stream-stop') { mux.control({ op: 'stream-stop-result', id: msg.id, stopped: streamHost ? streamHost.stop(String(msg.sid || ''), 'stopped') : false }); return; }
       if (msg.op === 'stream-stats') { mux.control({ op: 'stream-stats-result', id: msg.id, result: streamHostOf().stats(msg, mux) }); return; }
+      // lane stream-p1b-screen (THREE-TOUCH: this handler, `stream-facts` / `stream-screen` in the hello-ack, the client's gated
+      // streamFacts): THIS machine's screen facts — each display's HDR state + SDR white level + the DXGI output, the ffmpeg
+      // found and what it can do, the primary display's plan — one bounded look (memo 30 s; `force` re-reads)
+      if (msg.op === 'stream-facts') {
+        streamScreenOf().facts({ force: !!msg.force }).then((r) => mux.control({ op: 'stream-facts-result', id: msg.id, result: r }), (e) => mux.control({ op: 'stream-facts-result', id: msg.id, error: String((e && e.message) || e) }));
+        return;
+      }
       if (msg.op === 'input-events') {
         const SM = require('./../stream-model.js');
         const all = (Array.isArray(msg.events) ? msg.events : []).slice(0, 200).map((e) => SM.inputEventOf(e));

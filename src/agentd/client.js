@@ -331,7 +331,7 @@ class DeviceManager {
             mux.onWritable = (chan) => { sessions.get(chan)?.onWritable?.(); };
             const prevControl = mux.onControl;
             mux.onControl = (m) => {
-              if (m.op === 'fs-result' || m.op === 'discovery-result' || m.op === 'discovery-watching' || m.op === 'usage-events-watching' || m.op === 'session-events-watching' || m.op === 'cmd-result' || m.op === 'probe-result' || m.op === 'secret-result' || m.op === 'quota-result' || m.op === 'sysinfo-result' || m.op === 'desktop-apps-list-result' || m.op === 'design-fs-result' || m.op === 'dial-status-result' || m.op === 'proc-list-result' || m.op === 'opencode-serve-result' || m.op === 'browser-serve-result' || m.op === 'desktop-serve-result' || m.op === 'window-track-result' || m.op === 'window-untrack-result' || m.op === 'window-pin-result' || m.op === 'display-facts-result' || m.op === 'remoteapp-facts-result' || m.op === 'stream-offer-result' || m.op === 'stream-answer-result' || m.op === 'stream-stop-result' || m.op === 'stream-stats-result' || m.op === 'input-events-result' || m.op === 'peer-post-result' || m.op === 'pool-orders-ok' || m.op === 'tcp-open' || m.op === 'listen-open' || m.op === 'serve-folder-result' || m.op === 'serve-socks-result') {
+              if (m.op === 'fs-result' || m.op === 'discovery-result' || m.op === 'discovery-watching' || m.op === 'usage-events-watching' || m.op === 'session-events-watching' || m.op === 'cmd-result' || m.op === 'probe-result' || m.op === 'secret-result' || m.op === 'quota-result' || m.op === 'sysinfo-result' || m.op === 'desktop-apps-list-result' || m.op === 'design-fs-result' || m.op === 'dial-status-result' || m.op === 'proc-list-result' || m.op === 'opencode-serve-result' || m.op === 'browser-serve-result' || m.op === 'desktop-serve-result' || m.op === 'window-track-result' || m.op === 'window-untrack-result' || m.op === 'window-pin-result' || m.op === 'display-facts-result' || m.op === 'remoteapp-facts-result' || m.op === 'stream-offer-result' || m.op === 'stream-answer-result' || m.op === 'stream-stop-result' || m.op === 'stream-stats-result' || m.op === 'input-events-result' || m.op === 'stream-facts-result' || m.op === 'peer-post-result' || m.op === 'pool-orders-ok' || m.op === 'tcp-open' || m.op === 'listen-open' || m.op === 'serve-folder-result' || m.op === 'serve-socks-result') {
                 const r = pending.get(m.id); if (r) { pending.delete(m.id); r(m); }
                 if (m.op === 'tcp-open' && !m.error) return; // channel stays live
                 return;
@@ -1029,6 +1029,18 @@ class DeviceManager {
     const r = await this._request({ op: 'input-events', events: Array.isArray(events) ? events : [], timeoutMs: 15000 });
     if (r.error) throw new Error(r.error);
     return r.result || { ok: false, n: 0, refused: [] };
+  }
+  /** lane stream-p1b-screen (design q-041 r2 §2): the machine's SCREEN-SOURCE facts — each display's HDR state + SDR white level
+   *  + DXGI output, the ffmpeg its agent found (path, version, ddagrab, the encoders) and the primary display's plan (the
+   *  road, the encoder — or the refusal by name). Capability-gated: an agent that predates the op is never asked (the 2.300.0
+   *  rule) — `host_needs_daemon` + its version. `force` re-reads (the agent keeps an answer 30 s).
+   *  → { ok, platform, ffmpeg, looked, displays, primary } | { ok: false, code, error } */
+  async streamFacts({ force = false, timeoutMs = 45000 } = {}) {
+    const conn = await this.connect();
+    if (!conn.info?.capabilities?.includes?.('stream-facts')) { const e = new Error('daemon lacks stream-facts (capabilities gate) -- upgrade the agent on this machine'); e.code = 'host_needs_daemon'; e.daemonVersion = conn.info?.daemonVersion || null; throw e; }
+    const r = await this._request({ op: 'stream-facts', force: !!force, timeoutMs });
+    if (r.error) throw new Error(r.error);
+    return r.result || { ok: false, code: 'facts_failed', error: 'no answer' };
   }
   /** lane desktop-v2-entry: the machine's own screen table (the display picker). Capability-gated (an old agent never hears
    *  an op it would not answer). → { ok, platform, displays } | { ok:false, code, error } */

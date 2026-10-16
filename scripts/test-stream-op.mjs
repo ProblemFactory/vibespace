@@ -18,10 +18,19 @@
 //      connects through the hub's UDP port and the daemon's shims (the relay's counters move, the pictures arrive)
 //   §7 THE CAPABILITY GATE: a copy without stream-offer / input-events is never asked (host_needs_daemon, NO request) —
 //      CONTROL: asked past the gate it answers nothing (the request times out)
+//   §8 THE SCREEN SOURCE (lane stream-p1b-screen): a Windows-shaped daemon whose ffmpeg.exe and PowerShell facts are fakes
+//      (scripts/fixtures/stream/screen-fakes.mjs): stream-facts; the HDR primary's MAPPED road plays THE fixture byte for
+//      byte; THE COLOUR GATE through the real daemon (the owner's FP16 calibration frame → the worker's mapping → the NV12
+//      the encoder got: every patch ±1); the ffmpegs ran the plan's argvs; a PLI answered by the next key; capture /
+//      encoder death and an unplugged display end the session BY NAME; an SDR primary = the direct road; x264 only = said;
+//      no ffmpeg = no_ffmpeg naming where it looked
+//   §9 the bitrate: werift's estimate restarts ONLY the encoder, at most once per 5 s and only on a ≥ 25 % move (the same
+//      module in-process, an injected clock, the fake ffmpeg)
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { scratch, scratchHome, endDaemonsOf } from './scratch.mjs';
+import { writeFakeFfmpeg, factsLine, calibrationFrame, rgbAt } from './fixtures/stream/screen-fakes.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -30,6 +39,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (f, ms = 8000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await f()) return true; await sleep(50); } return false; };
 const SM = require(path.join(REPO, 'src/stream-model.js'));
 const H = require(path.join(REPO, 'src/stream-h264.js'));
+const SP = require(path.join(REPO, 'src/stream-plan.js'));
 const ACC = require(path.join(REPO, 'src/server/desktop-access.js'));
 const DW = require(path.join(REPO, 'src/server/desktop-webrtc.js'));
 const { DeviceManager } = require(path.join(REPO, 'src/agentd/client.js'));
@@ -57,7 +67,7 @@ function standIn() {
   const pc = new w.RTCPeerConnection({ iceServers: [{ urls: 'stun:127.0.0.1:9' }], iceStunGatherTimeout: 0.2, iceUseIpv6: false, codecs: { video: [new w.RTCRtpCodecParameters({ mimeType: SM.STREAM_CODEC.mimeType, clockRate: SM.STREAM_CODEC.clockRate, rtcpFeedback: SM.STREAM_CODEC.rtcpFeedback.map((f) => ({ ...f })), parameters: SM.STREAM_CODEC.fmtp })] } });
   peers.push(pc);
   const got = { rtp: [], dc: null };
-  pc.onTrack.subscribe((t) => t.onReceiveRtp.subscribe((r) => got.rtp.push({ ts: r.header.timestamp, marker: r.header.marker, payload: Buffer.from(r.payload), at: Date.now() })));
+  pc.onTrack.subscribe((t) => t.onReceiveRtp.subscribe((r) => { got.ssrc = r.header.ssrc; got.rtp.push({ ts: r.header.timestamp, marker: r.header.marker, payload: Buffer.from(r.payload), at: Date.now() }); }));
   pc.onDataChannel.subscribe((ch) => { got.dc = ch; });
   return { pc, got };
 }
@@ -216,6 +226,153 @@ console.log('§7 the capability gate');
   const raw = await send0({ op: 'stream-offer', sid: 'sraw', sourceKind: 'fake', sourceId: FIXTURE, timeoutMs: 1500 }).then((r) => ({ answered: r }), (x) => ({ error: String(x && x.message) }));
   ok(!raw.answered && /time(?:d)? ?out/i.test(raw.error || ''), 'CONTROL: asked past the gate, the old agent answers NOTHING — the request ends on its own timeout (the 2.300.0 rule)', raw);
   dmo.stop(); endDaemonsOf(rootOf(homeOld));
+}
+
+console.log('§8 THE SCREEN SOURCE: a Windows-shaped daemon whose ffmpeg and PowerShell facts are fakes');
+const homeScr = scratchHome('sop-scr', fs, ['.vibespace', '.local/bin']); homes.push(homeScr);
+const binS = path.join(homeScr, '.local/bin');
+const SCR = /(createScreen\(\{\s*)platform: process\.platform,/;
+const scrText = winText.replace(SCR, '$1platform: "win32",');
+ok(scrText !== winText && (scrText.match(/platform: "win32"/g) || []).length === 3 && /mapperServant\(wt\.parentPort\)/.test(scrText) && /stream-facts-result/.test(scrText), 'the copy says win32 three times: the hello-ack, THE injector, THE screen source (found by content); the bundle carries the mapper\'s worker branch and the facts op');
+const scrBundle = path.join(copyDir, 'scr', 'vibespace-agentd.js'); fs.mkdirSync(path.dirname(scrBundle), { recursive: true }); fs.writeFileSync(scrBundle, scrText);
+const D1 = { id: '\\\\.\\DISPLAY1', x: 0, y: 0, w: 1280, h: 720, primary: true, hdr: true, white: SP.CALIBRATION.white, adapter: 0, output: 0 };
+const D2 = { id: '\\\\.\\DISPLAY2', x: 1280, y: 0, w: 1280, h: 720, primary: false, hdr: false, white: 1000, adapter: 0, output: 1 };
+const factsFile = path.join(homeScr, 'facts.json'), psArgsS = path.join(homeScr, 'ps-args.json');
+const setDisplays = (list) => fs.writeFileSync(factsFile, factsLine(list));
+setDisplays([D1, D2]);
+fs.writeFileSync(path.join(binS, 'powershell.exe'), `#!${process.execPath}
+const fs = require('fs'); const a = process.argv.slice(2); const script = Buffer.from(a[a.length - 1] || '', 'base64').toString('utf16le');
+if (/'stream-facts'/.test(script)) { fs.writeFileSync(${JSON.stringify(psArgsS)}, JSON.stringify(a)); process.stdout.write(fs.readFileSync(${JSON.stringify(factsFile)}, 'utf8') + '\\r\\n'); process.exit(0); }
+process.stdout.write('ready\\r\\n'); process.stdin.on('data', () => process.stdout.write('ok\\r\\n'));
+`, { mode: 0o755 });
+const cal = calibrationFrame(1280, 720, SP.CALIBRATION.rows);
+const rawFile = path.join(homeScr, 'cal.f16'), ffLog = path.join(homeScr, 'ffmpeg.log'), nv12File = path.join(homeScr, 'first.nv12'), dieCap = path.join(homeScr, 'die-capture'), dieEnc = path.join(homeScr, 'die-encoder');
+fs.writeFileSync(rawFile, cal.buf);
+const FF = writeFakeFfmpeg(binS, { log: ffLog, fixture: FIXTURE, raw: rawFile, nv12: nv12File, dieCapture: dieCap, dieEncoder: dieEnc, version: '7.1', encoders: ['h264_nvenc', 'libx264'] });
+const ffRuns = () => (fs.existsSync(ffLog) ? fs.readFileSync(ffLog, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
+const dms = deviceOn(homeScr, scrBundle);
+const cs = await dms.connect();
+ok(cs.info.platform === 'win32' && JSON.stringify(cs.info.capabilities.slice(-4)) === JSON.stringify(['stream-offer', 'input-events', 'stream-facts', 'stream-screen']), 'the hello-ack names stream-facts and stream-screen (after stream-offer / input-events)');
+/** One screen session with a fresh stand-in: offer → answer. */
+async function screenSession(pushArr) {
+  const b = standIn();
+  const off = await dms.streamOffer({ sourceKind: 'screen' }, { onPush: (m) => { pushArr.push(m); if (m.op === 'stream-ice' && m.candidate) b.pc.addIceCandidate(m.candidate).catch(() => { }); } });
+  if (off.ok) { await b.pc.setRemoteDescription(off.offer); await b.pc.setLocalDescription(await b.pc.createAnswer()); await dms.streamAnswer(off.sid, { answer: { type: 'answer', sdp: b.pc.localDescription.sdp } }); }
+  return { off, b };
+}
+const endedOf = (arr) => { const m = arr.find((x) => x.op === 'stream-stats' && x.ended); return m ? m.ended : null; };
+{
+  const f = await dms.streamFacts();
+  const psA = fs.existsSync(psArgsS) ? JSON.parse(fs.readFileSync(psArgsS, 'utf8')) : [];
+  ok(f.ok && f.platform === 'win32' && f.ffmpeg && f.ffmpeg.where === 'PATH' && f.ffmpeg.major === 7 && f.ffmpeg.ddagrab && JSON.stringify(f.ffmpeg.encoders) === '["h264_nvenc","libx264"]' && f.displays.length === 2 && f.displays[0].white === 2500 && f.displays[1].output === 1, 'stream-facts: the ffmpeg found on PATH (7.1, ddagrab, NVENC + x264) and both displays (HDR + SDR white 2500; DXGI output 1)', f);
+  ok(f.primary && f.primary.mode === 'mapped' && f.primary.encoder === 'NVENC' && f.primary.white === 2500 && Buffer.from(psA[psA.length - 1] || '', 'base64').toString('utf16le') === SP.STREAM_FACTS_PS, 'the primary\'s plan rides the facts (mapped, NVENC, white 2500); the script the agent ran is STREAM_FACTS_PS verbatim', f.primary);
+}
+{
+  const pushS = [];
+  const { off, b } = await screenSession(pushS);
+  ok(off.ok && off.source.kind === 'screen' && off.source.encoder === 'NVENC' && off.source.mode === 'mapped' && JSON.stringify(off.source.origin) === '{"x":0,"y":0}' && off.source.fps === 30, 'a screen offer: the source is the HDR primary on the mapped road, NVENC, its origin', off.source || off);
+  const flowing = await until(() => pictures(b.got.rtp).length >= 40, 12000);
+  const pics = pictures(b.got.rtp);
+  const k0 = AUS.findIndex((a) => a.key);
+  const matches = pics.slice(0, 40).filter((p, i) => { const a = AUS[k0 + i]; return p.length === a.nalus.length && p.every((n, k) => Buffer.compare(n, a.nalus[k]) === 0); }).length;
+  ok(flowing && matches === 40, 'the encoder\'s pictures reach the browser byte for byte: THE fixture\'s access units from its first key frame (FLV → access units → RTP, SPS/PPS before the key)', { n: pics.length, matches });
+  const nv = fs.existsSync(nv12File) ? fs.readFileSync(nv12File) : null;
+  const bad = nv ? cal.patches.map((p) => ({ label: p.label, want: p.srgb, got: rgbAt(nv, 1280, 720, p.x, p.y) })).filter((r) => r.got.some((v, i) => Math.abs(v - r.want[i]) > 1)) : ['no frame'];
+  ok(nv && nv.length === 1280 * 720 * 1.5 && bad.length === 0, 'THE COLOUR GATE through the real daemon: the owner\'s FP16 calibration frame → the agent\'s worker mapping → the NV12 its encoder got: all 17 patches within ±1 of what the window drew, the 10× white patch white', bad);
+  const runs = ffRuns(), capRun = runs.find((a) => a.some((x) => /^ddagrab=/.test(x))), encRun = runs.find((a) => a.includes('pipe:0'));
+  const plan = SP.planScreen({ platform: 'win32', ffmpeg: { path: 'x', major: 7, ddagrab: true, encoders: ['h264_nvenc'] }, displays: [D1] });
+  ok(JSON.stringify(capRun) === JSON.stringify(SP.captureArgv(plan)) && JSON.stringify(encRun) === JSON.stringify(SP.encodeArgv(plan)), 'the two ffmpegs ran EXACTLY the plan\'s argvs (FP16 capture → raw bits; NV12 → NVENC → FLV)', { capRun, encRun });
+  const st = await dms.streamStats(off.sid);
+  const sc = st.stats && st.stats.screen;
+  ok(st.ok && sc && sc.mode === 'mapped' && sc.encoder === 'NVENC' && sc.mapper === 'worker' && sc.white === 2500 && typeof sc.encodeMs === 'number' && sc.encodeMs >= 0 && st.stats.encodeMs === sc.encodeMs && sc.captured >= 40 && typeof sc.mapMs === 'number' && sc.keyWaitMs != null, `the numbers: mapped by the worker in ${sc && sc.mapMs} ms, encodeMs ${sc && sc.encodeMs} (capture → access unit), the first key ${sc && sc.keyWaitMs} ms after the ask`, sc);
+  // a keyframe request (the browser's PLI) is answered by the next key frame — the GOP bounds it (ffmpeg's CLI cannot force one)
+  const before = st.stats.keyRequests, answered = sc.keysAnswered;
+  await b.pc.getTransceivers()[0].receiver.sendRtcpPLI(b.got.ssrc);
+  const asked = await until(async () => { const s2 = await dms.streamStats(off.sid); return s2.stats.keyRequests > before && s2.stats.screen.keysAnswered > answered; }, 4000);
+  const s3 = await dms.streamStats(off.sid);
+  ok(answered === 1 && asked && s3.stats.screen.keyWaitMs <= 2500, `a PLI from the browser: counted, and answered by the next key frame ${s3.stats.screen.keyWaitMs} ms later (≤ the 2 s GOP — ffmpeg's CLI cannot force one)`, s3.stats.screen);
+  // ffmpeg dies mid-stream ⇒ the session ends BY NAME (the page falls back to the VNC picture on `ended`)
+  fs.writeFileSync(dieCap, '1');
+  const ended = await until(() => endedOf(pushS), 6000);
+  fs.rmSync(dieCap);
+  ok(ended && endedOf(pushS) === 'capture_exited' && (await dms.streamStats(off.sid)).code === 'not_found', 'the capture ffmpeg dies (DXGI_ERROR_ACCESS_LOST) ⇒ the session ends as capture_exited, pushed to the watcher; the session is gone', endedOf(pushS));
+  b.pc.close();
+}
+{
+  const pushS = [];
+  const { off, b } = await screenSession(pushS);
+  await until(() => pictures(b.got.rtp).length >= 5, 8000);
+  fs.writeFileSync(dieEnc, '1');
+  await until(() => endedOf(pushS), 6000);
+  fs.rmSync(dieEnc);
+  ok(off.ok && endedOf(pushS) === 'encoder_exited', 'the encoder ffmpeg dies ⇒ encoder_exited', endedOf(pushS));
+  b.pc.close();
+}
+{
+  const pushS = [];
+  const { off, b } = await screenSession(pushS);
+  await until(() => pictures(b.got.rtp).length >= 5, 8000);
+  setDisplays([{ ...D2, primary: true }]); // the HDR display is unplugged …
+  fs.writeFileSync(dieCap, '1'); // … and its capture fails
+  await until(() => endedOf(pushS), 8000);
+  fs.rmSync(dieCap);
+  ok(off.ok && endedOf(pushS) === 'display_gone', 'the display is unplugged under the capture ⇒ the facts are read again and say so: display_gone', endedOf(pushS));
+  b.pc.close();
+}
+{
+  // the SDR display is now the primary: the DIRECT road (one ffmpeg; DDA's 8-bit picture is exact)
+  const n0 = ffRuns().length;
+  const pushS = [];
+  const { off, b } = await screenSession(pushS);
+  const up = await until(() => pictures(b.got.rtp).length >= 20, 10000);
+  const st = await dms.streamStats(off.sid);
+  const runs = ffRuns().slice(n0).filter((a) => a.some((x) => /^ddagrab=/.test(x) || x === 'pipe:0'));
+  ok(off.ok && off.source.mode === 'direct' && up && st.stats.screen.mode === 'direct' && st.stats.screen.timing === 'in-ffmpeg' && st.stats.screen.encodeMs === null && runs.length === 1 && runs[0].includes('ddagrab=output_idx=1:framerate=30') && !runs[0].join(' ').includes('16bit'), 'an SDR primary: the direct road — ONE ffmpeg (8-bit DDA of output 1 → NVENC), the pictures play, encodeMs null (timed inside ffmpeg)', { src: off.source, runs: runs.map((r) => r.join(' ')) });
+  await dms.streamStop(off.sid);
+  b.pc.close();
+}
+{
+  // refused by name before anything starts
+  setDisplays([D1, D2]);
+  FF.set({ encoders: ['libx264'] });
+  await dms.streamFacts({ force: true });
+  const pushS = [];
+  const { off, b } = await screenSession(pushS);
+  ok(off.ok && off.source.encoder === 'x264' && (await dms.streamStats(off.sid)).stats.screen.note === 'no_hw_encoder', 'only x264 in the ffmpeg: the software rung is taken and SAID (no_hw_encoder)', off.source);
+  await dms.streamStop(off.sid); b.pc.close();
+  fs.renameSync(FF.exe, FF.exe + '.away');
+  await dms.streamFacts({ force: true });
+  const r = await dms.streamOffer({ sourceKind: 'screen' });
+  fs.renameSync(FF.exe + '.away', FF.exe);
+  ok(r.ok === false && r.code === 'no_ffmpeg' && /PATH/.test(r.error) && /LOCALAPPDATA/.test(r.error) && /vs-probe/.test(r.error), 'no ffmpeg on the machine ⇒ the offer is refused as no_ffmpeg, naming where it looked (the page shows the VNC picture)', r);
+}
+dms.stop(); endDaemonsOf(rootOf(homeScr));
+
+console.log('§9 the bitrate follows the estimate: an encoder restart, with hysteresis (in-process, the same module + the fake ffmpeg)');
+{
+  const SS = require(path.join(REPO, 'src/agentd/stream-screen.js'));
+  FF.set({ encoders: ['h264_nvenc', 'libx264'] });
+  const { spawn: sp, execFile: ef } = require('child_process');
+  let clock = 1e9;
+  const n0 = ffRuns().length;
+  const scr = SS.createScreen({ platform: 'win32', spawn: sp, execFile: ef, env: { PATH: binS }, lookupEnv: { PATH: binS }, fs, makeWorker: null, now: () => clock });
+  const src = await scr.source({}, { maxKbps: 8000 });
+  const aus = [];
+  src.start((au) => aus.push(au), () => { });
+  await until(() => aus.length >= 5, 8000);
+  src.setTargetKbps(3000); // inside the first 5 s
+  const early = ffRuns().slice(n0).filter((a) => a.includes('pipe:0')).length;
+  clock += 6000;
+  src.setTargetKbps(3000);
+  const k = aus.length;
+  await until(() => aus.length >= k + 5, 8000);
+  clock += 1000;
+  src.setTargetKbps(1500); // 1 s after the change
+  const encRuns = ffRuns().slice(n0).filter((a) => a.includes('pipe:0'));
+  const afterKey = aus.slice(k).findIndex((a) => a.key);
+  ok(early === 1 && encRuns.length === 2 && encRuns[1][encRuns[1].indexOf('-b:v') + 1] === '3000k' && src.stats().restarts === 1 && src.stats().kbps === 3000 && src.stats().mapper === 'inline' && afterKey === 0, 'the estimate inside 5 s changes nothing; after 5 s a 62 % drop restarts ONLY the encoder at 3000k (its first picture a key frame); 1 s later another drop waits', { early, encs: encRuns.length, stats: src.stats(), afterKey });
+  src.stop();
+  await sleep(200);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

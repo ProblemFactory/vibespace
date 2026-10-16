@@ -19,10 +19,12 @@
  * A session's owner is the link that asked; when that link dies the session is an ORPHAN for STREAM_LIMITS.orphanMs (the
  * media path does not ride the link — a re-armed hub finds it playing) and then stops.
  *
- * THE SOURCE INTERFACE (part B fills sourceKind 'screen'): `{ kind, origin: {x, y}, start(onAccessUnit), stop(),
- * requestKeyframe(), setTargetKbps(kbps) }` where `onAccessUnit({ nalus: Buffer[], key, ts90k })` is called once per encoded
- * picture, in order (src/stream-h264.js splits Annex-B). Here: the FAKE source — a pre-encoded Annex-B file looped at its
- * frame rate (scripts/fixtures/stream/) — and 'screen' refused by name until part B.
+ * THE SOURCE INTERFACE: `{ kind, origin: {x, y}, start(onAccessUnit, onEnd?), stop(), requestKeyframe(), setTargetKbps(kbps),
+ * stats?() }` where `onAccessUnit({ nalus: Buffer[], key, ts90k })` is called once per encoded picture, in order
+ * (src/stream-h264.js splits Annex-B) and `onEnd(code)` = the source died — the session ends by that name. Here: the FAKE
+ * source — a pre-encoded Annex-B file looped at its frame rate (scripts/fixtures/stream/); 'screen' = the agent's `screen`
+ * factory (lane stream-p1b-screen: src/agentd/stream-screen.js — the machine's own desktop, ffmpeg + the HDR mapping),
+ * refused by name where none is given. stats() lands in the session's numbers as `screen` (+ its `encodeMs`).
  *
  * ICE: werift is an ICE-LITE agent with host candidates only and NO STUN/TURN server (its default asks Google's public STUN
  * server — never here); the page is the controlling full agent.
@@ -71,13 +73,13 @@ function fakeSource(file, { fps = 30 } = {}) {
   };
 }
 
-/** The part-B seam: no screen capture in this agent yet. */
-function screenSource() { return named('no_screen_source', 'this agent cannot capture its screen yet (the capture arrives with the next step of the streaming work)'); }
+/** A host made without a screen factory (the suites' bare hosts) refuses the screen by name. */
+function screenSource() { return named('no_screen_source', 'this agent cannot capture its screen'); }
 
-/** The sources by kind (src/stream-model.js STREAM_SOURCES names them). */
-const SOURCES = Object.freeze({ fake: (msg) => fakeSource(msg.sourceId), screen: (msg) => screenSource(msg) });
+/** The sources by kind (src/stream-model.js STREAM_SOURCES names them); `screen` = the agent's factory (async). */
+const SOURCES = Object.freeze({ fake: (msg) => fakeSource(msg.sourceId), screen: (msg, o, screen) => (screen ? screen(msg, o) : screenSource(msg)) });
 
-function createStreamHost({ injector = null, log = () => { }, now = Date.now, loadWerift = () => require('werift') } = {}) {
+function createStreamHost({ injector = null, log = () => { }, now = Date.now, loadWerift = () => require('werift'), screen = null } = {}) {
   const sessions = new Map();
   let W = null;
   const werift = () => W || (W = loadWerift());
@@ -88,11 +90,12 @@ function createStreamHost({ injector = null, log = () => { }, now = Date.now, lo
     const dt = Math.max(1, t - s.mark.at) / 1000;
     const st = {
       fps: Math.round((s.frames - s.mark.frames) / dt), kbps: Math.round(((s.bytes - s.mark.bytes) * 8) / dt / 1000),
-      frames: s.frames, dropped: s.dropped, encodeMs: null, // part B's encoder reports it; a pre-encoded source spends none
+      frames: s.frames, dropped: s.dropped, encodeMs: null, // the screen source's encoder reports it (below); a pre-encoded source spends none
       bweKbps: s.bweKbps, congested: s.congested, keyRequests: s.keyRequests,
       input: { n: s.inputN, refused: s.inputRefused, dropped: s.inputDropped }, ackMs: s.ackMs,
       source: s.source ? s.source.kind : null, relay: s.relay ? { peers: s.relay.shims.size, forwarded: s.relay.fwd, port: s.relay.port } : null,
     };
+    if (s.source && typeof s.source.stats === 'function') { try { st.screen = s.source.stats(); st.encodeMs = st.screen.encodeMs; } catch { /* the source's */ } }
     s.mark = { at: t, frames: s.frames, bytes: s.bytes };
     return st;
   }
@@ -187,12 +190,14 @@ function createStreamHost({ injector = null, log = () => { }, now = Date.now, lo
     if (sessions.size >= L.sessionsPerAgent) return named('too_many_streams', `this machine already streams ${sessions.size} pictures (at most ${L.sessionsPerAgent})`);
     const kind = String(msg.sourceKind || '');
     if (!SM.STREAM_SOURCES.includes(kind)) return named('bad_source', `unknown source kind ${JSON.stringify(kind.slice(0, 20))}`);
-    const source = SOURCES[kind](msg);
-    if (!source.ok) return source;
-    let w;
-    try { w = werift(); } catch (e) { return named('stream_unsupported', `this agent cannot stream here (${(e && e.message) || e}; Node ${process.version})`); }
-    const C = SM.STREAM_CODEC;
     const maxKbps = Math.min(L.maxKbpsMax, Math.max(L.maxKbpsMin, Number(msg.maxKbps) || L.maxKbpsDefault));
+    let source;
+    try { source = await SOURCES[kind](msg, { maxKbps }, screen); } catch (e) { return named('capture_failed', `the screen source could not start (${(e && e.message) || e})`); }
+    if (!source.ok) return source;
+    if (sessions.has(sid)) { try { source.stop(); } catch { } return named('busy', 'that stream session already exists'); } // asked twice while the facts were read
+    let w;
+    try { w = werift(); } catch (e) { try { source.stop(); } catch { } return named('stream_unsupported', `this agent cannot stream here (${(e && e.message) || e}; Node ${process.version})`); }
+    const C = SM.STREAM_CODEC;
     const pc = new w.RTCPeerConnection({
       codecs: { video: [new w.RTCRtpCodecParameters({ mimeType: C.mimeType, clockRate: C.clockRate, rtcpFeedback: C.rtcpFeedback.map((f) => ({ ...f })), parameters: C.fmtp })] },
       headerExtensions: { video: [w.useTransportWideCC()] },
@@ -220,7 +225,7 @@ function createStreamHost({ injector = null, log = () => { }, now = Date.now, lo
       pc.onIceCandidate.subscribe((c) => { if (!c) { endIce(); return; } iceOut(typeof c.toJSON === 'function' ? c.toJSON() : c); });
       pc.iceGatheringStateChange.subscribe((g) => { if (g === 'complete') endIce(); });
       pc.connectionStateChange.subscribe((st) => {
-        if (st === 'connected' && !s.sending) { s.sending = true; source.requestKeyframe(); source.start(sendAccessUnit); } // the picture starts at a KEY frame the moment the browser can take it
+        if (st === 'connected' && !s.sending) { s.sending = true; source.requestKeyframe(); source.start(sendAccessUnit, (why) => stop(sid, why || 'source_ended')); } // the picture starts at a KEY frame the moment the browser can take it; a source that dies ends the session by its name
         pushStats(s);
         clearTimeout(s.failTimer);
         if (st === 'failed') { s.failTimer = setTimeout(() => stop(sid, 'ice_failed'), L.orphanMs); s.failTimer.unref?.(); }
@@ -247,7 +252,7 @@ function createStreamHost({ injector = null, log = () => { }, now = Date.now, lo
     }
     s.statsTimer = setInterval(() => pushStats(s), L.statsMs); s.statsTimer.unref?.();
     log(`[stream] ${sid} offered (${source.kind}${s.relay ? ', relay' : ''})`);
-    return { ok: true, sid, offer: { type: 'offer', sdp: pc.localDescription.sdp }, source: { kind: source.kind, origin: source.origin, fps: source.fps || null }, relayPort: s.relay ? s.relay.port : null, codec: { mimeType: SM.STREAM_CODEC.mimeType, fmtp: SM.STREAM_CODEC.fmtp }, maxKbps };
+    return { ok: true, sid, offer: { type: 'offer', sdp: pc.localDescription.sdp }, source: { kind: source.kind, origin: source.origin, fps: source.fps || null, encoder: source.encoder || null, mode: source.mode || null }, relayPort: s.relay ? s.relay.port : null, codec: { mimeType: SM.STREAM_CODEC.mimeType, fmtp: SM.STREAM_CODEC.fmtp }, maxKbps };
   }
   /** After the offer's reply went out: the candidates gathered while it was made follow as pushes, in order. */
   function replied(sid) {
