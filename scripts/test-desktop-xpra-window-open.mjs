@@ -583,8 +583,9 @@ try {
     const hits = [];
     const PAGE_TITLE = `vs-bfe6 ${process.pid}`;
     // the page (lane xpra-ime-mac): a text box for the keys legs, its key events and value reported back to this server (/vs-bfe6-k —
-    // what the browser IN the app saw: key, code, keyCode), and a long text below for the scroll leg
-    const KEYS_PAGE = `<textarea id="t" autofocus style="position:fixed;left:0;top:0;width:100%;height:45vh;font-size:18px;z-index:1"></textarea><div style="height:45vh"></div><div style="font:16px monospace">${Array.from({ length: 400 }, (_, i) => `line ${i} of the scroll leg`).join('<br>')}</div><script>let n=0;const send=(o)=>fetch('/vs-bfe6-k?e='+encodeURIComponent(JSON.stringify(o))).catch(()=>{});for(const ty of ['keydown','keyup'])document.addEventListener(ty,(e)=>send({n:n++,ty,key:e.key,code:e.code,kc:e.keyCode,rep:e.repeat}),true);document.getElementById('t').addEventListener('input',(e)=>send({n:n++,ty:'value',v:e.target.value}));</script>`;
+    // what the browser IN the app saw: key, code, keyCode; lane xpra-mac-modifiers: + ctrlKey / metaKey, and the box's selection
+    // 60 ms after each keydown, once its default action ran), and a long text below for the scroll leg
+    const KEYS_PAGE = `<textarea id="t" autofocus style="position:fixed;left:0;top:0;width:100%;height:45vh;font-size:18px;z-index:1"></textarea><div style="height:45vh"></div><div style="font:16px monospace">${Array.from({ length: 400 }, (_, i) => `line ${i} of the scroll leg`).join('<br>')}</div><script>let n=0;const send=(o)=>fetch('/vs-bfe6-k?e='+encodeURIComponent(JSON.stringify(o))).catch(()=>{});const sel=()=>{const t=document.getElementById('t');return{ss:t.selectionStart,se:t.selectionEnd,len:t.value.length};};for(const ty of ['keydown','keyup'])document.addEventListener(ty,(e)=>{send({n:n++,ty,key:e.key,code:e.code,kc:e.keyCode,rep:e.repeat,ctrl:e.ctrlKey,meta:e.metaKey});if(ty==='keydown')setTimeout(()=>send({n:n++,ty:'sel',...sel()}),60);},true);document.getElementById('t').addEventListener('input',(e)=>send({n:n++,ty:'value',v:e.target.value}));</script>`;
     const web = http.createServer((q, s) => { hits.push({ url: q.url, ua: String(q.headers['user-agent'] || '') }); s.writeHead(q.url.startsWith('/vs-bfe6') ? 200 : 404, { 'Content-Type': 'text/html; charset=utf-8' }); s.end(q.url.startsWith('/vs-bfe6') ? `<!doctype html><title>${PAGE_TITLE}</title><body style="background:#fff"><h1>${PAGE_TITLE}</h1>${KEYS_PAGE}` : ''); });
     const keyLog = () => hits.filter((h) => h.url.startsWith('/vs-bfe6-k?e=')).map((h) => { try { return JSON.parse(decodeURIComponent(h.url.slice('/vs-bfe6-k?e='.length))); } catch { return null; } }).filter(Boolean).sort((a, b) => a.n - b.n);
     const [WEB_PORT] = await freePorts(1);
@@ -662,6 +663,38 @@ try {
           for (let i = 0; i < 12; i++) { await p1.cdp('Input.dispatchMouseEvent', { type: 'mouseWheel', x: wk.pane.x + wk.pane.w / 2, y: wk.pane.y + wk.pane.h * 0.7, deltaX: 0, deltaY: i < 8 ? 240 : -240 }); await sleep(150); }
           await sleep(2000);
           check(`${row.id}: a wheel scroll over a long page loses NO frame to xpra's scroll encoder (${lost() - lost0} "queue_damage_packet() missing" in app.log)`, lost0 >= 0 && lost() - lost0 === 0, { lost0, lost: lost() });
+          // ── lane xpra-mac-modifiers (the owner 2026-10-16: 「根据 host+client 两边自动判断」): a MAC viewer's ⌘+a is the app's Ctrl+a —
+          // the browser in the app selects all of its text box and sees ctrlKey (and the ⌘ key itself as Control). CONTROL: a LINUX
+          // viewer sending the same keys — Super+a: metaKey, nothing selected. The viewer page names its platform where the view
+          // reads it (navigator.userAgentData.platform); a Mac sends no keyup for a key pressed under ⌘, so none is sent here. ──
+          const asViewer = (plat) => p1.evalJs(plat ? `(() => { Object.defineProperty(navigator, 'userAgentData', { value: { platform: ${JSON.stringify(plat)} }, configurable: true }); return navigator.userAgentData.platform; })()` : `(() => { delete navigator.userAgentData; return navigator.userAgentData ? navigator.userAgentData.platform : navigator.platform; })()`);
+          const cmdA = async ({ mac }) => {
+            const from = keyLog().length ? keyLog().slice(-1)[0].n + 1 : 0;
+            await p1.cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Meta', code: 'MetaLeft', windowsVirtualKeyCode: 91, location: 1, modifiers: 4 });
+            await sleep(80);
+            await p1.cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'a', code: 'KeyA', windowsVirtualKeyCode: 65, modifiers: 4 });
+            await sleep(80);
+            if (!mac) await p1.cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'a', code: 'KeyA', windowsVirtualKeyCode: 65, modifiers: 4 });
+            await p1.cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Meta', code: 'MetaLeft', windowsVirtualKeyCode: 91, location: 1, modifiers: 0 });
+            // the a's keydown, the selection after it, and the modifier key's keydown — as the browser IN the app saw them
+            const got = await until(() => { const l = keyLog().filter((e) => e.n >= from); const a = l.find((e) => e.ty === 'keydown' && e.key === 'a'); const se = a && l.find((e) => e.ty === 'sel' && e.n > a.n); return se && l.some((e) => e.ty === 'keyup' && e.n > a.n && e.key !== 'a') ? { a, sel: se, mod: l.find((e) => e.ty === 'keydown' && e.key !== 'a') || null, log: l } : null; }, 10000, 200);
+            await sleep(400);
+            return got || { a: null, sel: null, mod: null, log: keyLog().filter((e) => e.n >= from) };
+          };
+          const said = (r) => r && r.a ? `${r.mod ? `${r.mod.key}/${r.mod.code} then ` : ''}a ctrl=${r.a.ctrl} meta=${r.a.meta}; selection ${r.sel.ss}–${r.sel.se} of ${r.sel.len}` : `nothing (${JSON.stringify(r && r.log ? r.log.slice(-6) : null)})`;
+          await trustedClickAt(p1, wk.pane.x + wk.pane.w / 2, wk.pane.y + wk.pane.h * 0.3); // the caret into the text box: nothing selected
+          await sleep(600);
+          const vMac = await asViewer('macOS');
+          const mA = await cmdA({ mac: true });
+          console.log(`  ${row.id}: a Mac viewer (${vMac}) ⌘+a ⇒ the browser in the app saw: ${said(mA)}`);
+          check(`${row.id}: a MAC viewer's ⌘+a is the app's Ctrl+a — the browser in the app saw ctrlKey (not metaKey) and selected ALL of its text box (${said(mA)})`, vMac === 'macOS' && !!mA.a && mA.a.ctrl === true && mA.a.meta === false && mA.sel.len > 0 && mA.sel.ss === 0 && mA.sel.se === mA.sel.len, mA);
+          check(`${row.id}: …the ⌘ key itself reached it as Control (${mA.mod ? `${mA.mod.key}/${mA.mod.code}` : 'none'})`, !!mA.mod && mA.mod.key === 'Control' && mA.mod.code === 'ControlLeft', mA.mod);
+          const vLinux = await asViewer(null);
+          await trustedClickAt(p1, wk.pane.x + wk.pane.w / 2, wk.pane.y + wk.pane.h * 0.3); // collapse the selection again
+          await sleep(600);
+          const lA = await cmdA({ mac: false });
+          console.log(`  ${row.id}: a Linux viewer (${vLinux}) ⌘/Super+a ⇒ the browser in the app saw: ${said(lA)}`);
+          check(`${row.id}: CONTROL — a LINUX viewer (${vLinux}) sending the same keys: Super+a — the browser in the app saw metaKey, not ctrlKey, and selected nothing (${said(lA)})`, /linux/i.test(String(vLinux)) && !!lA.a && lA.a.meta === true && lA.a.ctrl === false && lA.sel.ss === lA.sel.se, lA);
           // CONTROL in the same session: the pre-lane map (browser keyCodes) programmed by a keyboard-config, w pressed on 87
           const pre = [[8, ['BackSpace']], [13, ['Return']], [32, ['space']], [16, ['Shift_L']], [17, ['Control_L']], [18, ['Alt_L']], ...[...'0123456789'].map((d) => [48 + Number(d), [d]]), ...[...'abcdefghijklmnopqrstuvwxyz'].map((c, i) => [65 + i, [c, c.toUpperCase()]])];
           const before2 = keyLog().length;

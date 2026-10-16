@@ -111,6 +111,7 @@
 
 const INT = require('./browser-interrupt.js'); // PURE: the interruption's words + cycle (the owner's ruling, 2026-09-27)
 const TBS = require('./browser-tabs.js'); // lane browser-resume C (PURE): the user's tab acts while he drove, said at the handback
+const MM = require('./lib/modifier-map.js'); // lane xpra-mac-modifiers (PURE, imports nothing): THE primary-modifier table macChord asks — the xpra app window asks the same one
 // re-exported under their own names (shorthand keeps node's CJS named-export detection whole: the client imports this file as ESM)
 const { INTERRUPTED_CODE, INTERRUPTED_TEXT, inFlightAt, openInterruption, noteRefused, closeInterruption, interruptedVerbs, interruptionView, takeoverText, rerunSentence } = INT;
 // lane H verify r6 LOW 3: `stop` — the browser the takeover was on was STOPPED (a panel Stop while the user drove it): the
@@ -617,22 +618,26 @@ const MAC_CHORD_ROWS = Object.freeze([
   Object.freeze({ id: 'command', from: '⌘ + any other key (A C X Z ⇧Z F R …)', to: 'Ctrl + the same key, no text', why: 'the editing and browser chords (select all, copy, cut, undo, redo, find, reload …) — the text is dropped so a chord never types a letter' }),
   Object.freeze({ id: 'option-char', from: '⌥ + a key that produced a character (⌥2 = ™, ⌥e then e = é)', to: 'that character, no Alt', why: 'the Mac\'s Option characters are text, not an Alt accelerator' }),
 ]);
-const META_CODES = Object.freeze({ MetaLeft: 'ControlLeft', MetaRight: 'ControlRight', OSLeft: 'ControlLeft', OSRight: 'ControlRight' });
 /**
  * `k` = the DOM KeyboardEvent's fields {key, code, keyCode, ctrlKey, altKey, metaKey, shiftKey}; → the same fields
  * translated (+ `dropText` when the record must carry no text, `rule` = the MAC_CHORD_ROWS id, null = unchanged).
- * Identity unless `viewerMac && !remoteMac`.
+ * Identity unless the primary-modifier table (src/lib/modifier-map.js — the xpra app window's too) moves ⌘ onto Ctrl:
+ * a Mac viewer on a browser that is not a Mac's. The modifier rows ('meta-key', 'command', ⌘⌫) are that table's
+ * applyModifierMap; the rest are the Mac's editing idioms on top of it.
  */
 function macChord(k, { viewerMac = false, remoteMac = false } = {}) {
   const f = { key: String((k && k.key) || ''), code: String((k && k.code) || ''), keyCode: Number(k && k.keyCode) || 0, ctrlKey: !!(k && k.ctrlKey), altKey: !!(k && k.altKey), metaKey: !!(k && k.metaKey), shiftKey: !!(k && k.shiftKey), dropText: false, rule: null };
-  if (!viewerMac || remoteMac) return f;
+  const map = MM.primaryModifierMap({ viewer: viewerMac ? 'mac' : 'unknown', host: remoteMac ? 'mac' : 'unknown' });
+  if (map.meta !== 'control') return f;
   const out = (o, rule) => ({ ...f, ...o, rule });
-  if (f.key === 'Meta' || f.key === 'OS' || META_CODES[f.code]) return out({ key: 'Control', code: META_CODES[f.code] || 'ControlLeft', keyCode: 17, metaKey: false, ctrlKey: f.metaKey || f.ctrlKey }, 'meta-key'); // held on its keydown, released on its keyup
+  const held = () => { const m = MM.applyModifierMap({ shift: f.shiftKey, control: f.ctrlKey, alt: f.altKey, meta: f.metaKey }, map); return { shiftKey: m.shift, ctrlKey: m.control, altKey: m.alt, metaKey: m.meta }; };
+  const own = MM.modifierKeyOf(f, map);
+  if (own) return out({ ...own, ...held() }, 'meta-key'); // held on its keydown, released on its keyup
   if (f.metaKey && !f.ctrlKey) {
     const nav = { ArrowLeft: ['Home', 'Home', 36, false, 'line-start'], ArrowRight: ['End', 'End', 35, false, 'line-end'], ArrowUp: ['Home', 'Home', 36, true, 'doc-start'], ArrowDown: ['End', 'End', 35, true, 'doc-end'] }[f.key];
     if (nav) return out({ key: nav[0], code: nav[1], keyCode: nav[2], metaKey: false, ctrlKey: nav[3], altKey: false, dropText: true }, nav[4]);
-    if (f.key === 'Backspace') return out({ metaKey: false, ctrlKey: true, altKey: false, dropText: true }, 'word-delete');
-    return out({ metaKey: false, ctrlKey: true, dropText: true }, 'command');
+    if (f.key === 'Backspace') return out({ ...held(), altKey: false, dropText: true }, 'word-delete');
+    return out({ ...held(), dropText: true }, 'command');
   }
   if (f.altKey && !f.metaKey && !f.ctrlKey) {
     if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(f.key)) return out({ altKey: false, ctrlKey: true, dropText: true }, 'word-jump');

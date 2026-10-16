@@ -189,7 +189,7 @@ console.log('§3 a Mac viewer\'s ⌘ chords on a non-Mac browser; the copy chord
   const U = [['https://shop.example.com/checkout/pay?order=123&token=abc#frag', 'https://shop.example.com/checkout/pay?…'], ['http://127.0.0.1:3/a', 'http://127.0.0.1:3/a'], ['about:blank', 'about:blank'], ['data:text/html,<b>secret</b>', 'data:…'], ['', '']];
   for (const [u, w] of U) ok(T.urlForLog(u) === w, `urlForLog(${JSON.stringify(u).slice(0, 50)}) = ${JSON.stringify(w)}`);
   const src = read('src/browser-takeover.js');
-  const C = "  if (!viewerMac || remoteMac) return f;";
+  const C = "  if (map.meta !== 'control') return f;"; // lane xpra-mac-modifiers: the gate is the shared primary-modifier table's answer (src/lib/modifier-map.js)
   ok(src.split(C).length === 2, 'control setup: the Mac gate is found once');
   const Tid = M.load('src/browser-takeover.js', src.replace(C, '  return f;'), 'no-mac-map');
   const m0 = Tid.macChord({ key: 'a', code: 'KeyA', keyCode: 65, metaKey: true }, { viewerMac: true, remoteMac: false });

@@ -601,6 +601,7 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
     const shortcut = P.clipboardShortcut({ key: ev?.key, control: ev?.mods?.control, meta: ev?.mods?.meta });
     if (shortcut === 'paste') return 'paste';
     if (viewOnly) return null;
+    foreignDown.delete(ev?.code || ev?.key); // a FRESH press: this key's earlier mark is stale (a ⌘-chord key's keyup never comes from a Mac) — else its real keyup below is swallowed and X holds the key
     const k = P.keyActionFor(ev);
     if (!k) return null;
     if (!P.nativeKey(k)) {
@@ -612,8 +613,9 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
     // A ⌘ CHORD FROM A MAC IS A TAP (lane xpra-ime-mac, inc-mvaddc4m-6m0t's ⌘+a): a Mac browser never fires the keyup of a key
     // pressed while ⌘ is held, so the press stayed down in X — X autorepeats it once ⌘ is let go, and xpra ignores the next
     // press of a key it still holds. Released at once (xpra-html5's `unpress_now` on macOS); a keyup, if one comes, is ignored.
-    // Linux and Windows clients keep their real key-up (`mac` is the view's platform answer).
-    if (ev?.mods?.meta && (typeof mac === 'function' ? mac() : mac) && !P.MODIFIER_KEYNAMES.has(k.keyname)) { keyOut(k, false); foreignDown.add(ev.code || ev.key); }
+    // Linux and Windows clients keep their real key-up (`mac` is the view's platform answer). It keys off the VIEWER's ⌘
+    // (`viewerMeta`): the view's primary-modifier map (lane xpra-mac-modifiers) has already moved that ⌘ onto Ctrl.
+    if ((ev?.viewerMeta ?? ev?.mods?.meta) && (typeof mac === 'function' ? mac() : mac) && !P.MODIFIER_KEYNAMES.has(k.keyname)) { keyOut(k, false); foreignDown.add(ev.code || ev.key); }
     return shortcut === 'copy' ? 'copy' : 'sent';
   };
   const keyUp = (ev) => {

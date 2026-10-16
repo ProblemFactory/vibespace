@@ -81,6 +81,7 @@ import { createPictureShell, streamUrl, copyViaSelection } from './picture-shell
 import { createXpraClient, defaultDecode } from './xpra-client.js';
 import { fitForPin } from '../desktop-pin.js'; // lane e2b (§E2.2): a pinned window's picture — contain-fit, upscaling allowed
 import { minPaneCss, pixelRatioOf, backingSize, fixedSizeOf, sizeHintsOf } from './xpra-proto.js';
+import { platformOf, primaryModifierMap, applyModifierMap, modifierKeyOf } from './modifier-map.js'; // lane xpra-mac-modifiers (PURE, one table): the viewer's primary modifier becomes the host's — ⌘ on a Mac is Ctrl in the app
 
 export { streamUrl, copyViaSelection };
 
@@ -104,17 +105,23 @@ export function pngDataUrl(bytes) {
   return /^[A-Za-z0-9+/=]+$/.test(b64) ? `data:image/png;base64,${b64}` : null;
 }
 
-/** Is the person's own machine a Mac (its browser never fires the keyup of a key pressed under ⌘ — xpra-client taps those)? */
-const viewerMac = () => { try { return /mac|iphone|ipad|ipod/i.test(String((navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || '')); } catch { return false; } };
-/** A KeyboardEvent → the plain shape xpra-proto's keyActionFor reads. */
-export function keyInputOf(e) {
+/** The person's own machine: 'mac' | 'windows' | 'linux' | 'unknown' (modifier-map.js's words). A Mac's browser also never
+ *  fires the keyup of a key pressed under ⌘ — xpra-client taps those. */
+const navigatorPlatform = () => { try { return platformOf((navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || navigator.userAgent); } catch { return 'unknown'; } };
+/** A KeyboardEvent → the plain shape xpra-proto's keyActionFor reads. `map` = modifier-map.js's primaryModifierMap of the
+ *  viewer and the host: it moves the modifiers AND a modifier key itself (a Mac viewer's ⌘ keydown is the host's Control_L).
+ *  `viewerMeta` = the viewer's own ⌘, before the map — the .286 tap keys off it. */
+export function keyInputOf(e, map = null) {
   const gm = (n) => { try { return !!e.getModifierState?.(n); } catch { return false; } };
+  const mods = { shift: !!e.shiftKey, control: !!e.ctrlKey, alt: !!e.altKey, meta: !!e.metaKey, altGraph: gm('AltGraph'), capsLock: gm('CapsLock'), numLock: gm('NumLock') };
+  const own = map ? modifierKeyOf(e, map) : null;
   return {
-    key: e.key, code: e.code, keyCode: e.keyCode, location: e.location, composing: !!e.isComposing,
-    mods: { shift: !!e.shiftKey, control: !!e.ctrlKey, alt: !!e.altKey, meta: !!e.metaKey, altGraph: gm('AltGraph'), capsLock: gm('CapsLock'), numLock: gm('NumLock') },
+    key: own ? own.key : e.key, code: own ? own.code : e.code, keyCode: own ? own.keyCode : e.keyCode, location: e.location, composing: !!e.isComposing,
+    mods: map ? applyModifierMap(mods, map) : mods, viewerMeta: !!e.metaKey,
   };
 }
-const pointerMods = (e) => ({ shift: !!e.shiftKey, control: !!e.ctrlKey, alt: !!e.altKey, meta: !!e.metaKey });
+/** A pointer event's modifiers, moved by the same map (⌘+click on a Mac viewer is Ctrl+click on a Linux host). */
+const pointerMods = (e, map = null) => { const m = { shift: !!e.shiftKey, control: !!e.ctrlKey, alt: !!e.altKey, meta: !!e.metaKey }; return map ? applyModifierMap(m, map) : m; };
 
 /** Design 009 §B8: the pane's one starting line — "Starting…", then "Starting… 8 s" once a second has passed. PURE. */
 export function startingText(ms) {
@@ -142,13 +149,18 @@ export function startingText(ms) {
  *   pixelRatio    — () => devicePixelRatio (injectable); CSS px × this = the device px the session speaks
  *   pictureScale  — () => the record's pictureScale (lane D (a): a fractional scale renders at GDK_SCALE = ⌈s⌉ and is
  *                   SHOWN at s ÷ ⌈s⌉ — the view's ratio is devicePixelRatio ÷ this; 1 = the picture 1:1, as ever)
+ *   viewerPlatform — () => the person's machine, 'mac' | 'windows' | 'linux' | 'unknown' (default: the navigator's)
+ *   hostPlatform  — the machine the app runs on (a platform string or a function; null / unnamed = Linux, as every xpra
+ *                   display is): with the viewer's it picks the primary-modifier map (modifier-map.js) keys and pointer go through
  *   Worker / decode / now / secure / clipboardApi — injectable for the node suite
  * Returns { container, bar, mount, pane, status, connect, disconnect, setStatus, addControl,
  *           focus, dispose, setViewOnly, get client, get state, get wanted, windows() }.
  */
-export function createXpraView(host, { url, workerUrl, before = null, labels = {}, autoReconnect = false, onStatus = null, onTitle = null, onIcon = null, onMinSize = null, onMain = null, onState = null, onMoveResize = null, onFixedSize = null, onFront = null, onSatellite = null, mayFocus = () => true, fixedFollows = () => true, dpi = 96, pixelRatio = () => (typeof devicePixelRatio === 'number' ? devicePixelRatio : 1), pictureScale = () => 1, Worker: WorkerCtor = undefined, decode = defaultDecode, now = undefined, secure = null, clipboardApi = null, log = console } = {}) {
+export function createXpraView(host, { url, workerUrl, before = null, labels = {}, autoReconnect = false, onStatus = null, onTitle = null, onIcon = null, onMinSize = null, onMain = null, onState = null, onMoveResize = null, onFixedSize = null, onFront = null, onSatellite = null, mayFocus = () => true, fixedFollows = () => true, dpi = 96, pixelRatio = () => (typeof devicePixelRatio === 'number' ? devicePixelRatio : 1), pictureScale = () => 1, viewerPlatform = navigatorPlatform, hostPlatform = null, Worker: WorkerCtor = undefined, decode = defaultDecode, now = undefined, secure = null, clipboardApi = null, log = console } = {}) {
   const shell = createPictureShell(host, { labels: { starting: t('Starting application…'), unavailable: t('Desktop app unavailable'), ...labels }, autoReconnect, onStatus, background: 'var(--bg-primary)', focus: () => focus() });
   const { container, bar, mount, status, pasteBtn, reBtn, labels: L, setStatus, addControl, emit } = shell;
+  /** lane xpra-mac-modifiers: the primary-modifier map of THIS viewer and THIS app's machine, asked per event (the one table). */
+  const modMap = () => primaryModifierMap({ viewer: viewerPlatform(), host: typeof hostPlatform === 'function' ? hostPlatform() : hostPlatform });
 
   const pane = document.createElement('div');
   pane.className = 'xpra-pane';
@@ -386,13 +398,13 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
     el.addEventListener('keydown', (e) => {
       if (!client || e.isComposing || e.keyCode === 229) return;
       aim(owner);
-      const r = client.keyDown(keyInputOf(e));
+      const r = client.keyDown(keyInputOf(e, modMap()));
       if (r === 'sent') e.preventDefault();
       else if (r === 'copy' && e.isTrusted === true && !e.repeat) copyGestureAt = clock(); // forwarded to the app: its token may follow
     });
     el.addEventListener('keyup', (e) => {
       if (!client || e.isComposing || e.keyCode === 229) return;
-      const r = client.keyUp(keyInputOf(e));
+      const r = client.keyUp(keyInputOf(e, modMap()));
       if (r === 'sent') e.preventDefault();
     });
     el.addEventListener('compositionend', (e) => { const text = e.data || el.value; el.value = ''; if (client && text) { aim(owner); client.typeText(text); } });
@@ -422,7 +434,7 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
     if (!h) return;
     try { h.ctl.abort(); } catch {}
     // the button is still down in X (the app handed the gesture over mid-press): release it once, where it was let go
-    if (client) { const xy = e && ptr.el.isConnected ? ptr.xy(e) : h.xy; client.pointerButton(xy[0], xy[1], h.button, false, e ? pointerMods(e) : {}); }
+    if (client) { const xy = e && ptr.el.isConnected ? ptr.xy(e) : h.xy; client.pointerButton(xy[0], xy[1], h.button, false, e ? pointerMods(e, modMap()) : {}); }
   };
   const wirePointer = (ptr, imeEl) => {
     const pane = ptr.el; // THIS pointer's pane (the main's, or a satellite's)
@@ -433,23 +445,23 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
       try { pane.setPointerCapture(e.pointerId); } catch {}
       const [x, y] = ptr.xy(e);
       ptr.press = { pointerId: e.pointerId, button: e.button, xy: [x, y], client: { clientX: e.clientX, clientY: e.clientY, pointerId: e.pointerId } }; // the pointerId rides with the hand-over: the title bar / handle CAPTURES it (lane-drag-release)
-      client.pointerButton(x, y, e.button, true, pointerMods(e));
+      client.pointerButton(x, y, e.button, true, pointerMods(e, modMap()));
     });
     pane.addEventListener('pointerup', (e) => {
       if (!client) return;
       if (ptr.wmHold) return; // the window manager's gesture owns this press — its document listener releases the button in X
       ptr.press = null;
       const [x, y] = ptr.xy(e);
-      client.pointerButton(x, y, e.button, false, pointerMods(e));
+      client.pointerButton(x, y, e.button, false, pointerMods(e, modMap()));
       try { pane.releasePointerCapture(e.pointerId); } catch {}
     });
     pane.addEventListener('pointermove', (e) => {
       if (!client || ptr.wmHold) return;
       ptr.last = e;
       if (ptr.raf) return;
-      ptr.raf = requestAnimationFrame(() => { ptr.raf = 0; const ev = ptr.last; ptr.last = null; if (!ev || !client) return; const [x, y] = ptr.xy(ev); client.pointerMove(x, y, pointerMods(ev)); });
+      ptr.raf = requestAnimationFrame(() => { ptr.raf = 0; const ev = ptr.last; ptr.last = null; if (!ev || !client) return; const [x, y] = ptr.xy(ev); client.pointerMove(x, y, pointerMods(ev, modMap())); });
     });
-    pane.addEventListener('wheel', (e) => { e.preventDefault(); if (!client) return; const [x, y] = ptr.xy(e); client.wheel(x, y, e.deltaX, e.deltaY, e.deltaMode, pointerMods(e)); }, { passive: false });
+    pane.addEventListener('wheel', (e) => { e.preventDefault(); if (!client) return; const [x, y] = ptr.xy(e); client.wheel(x, y, e.deltaX, e.deltaY, e.deltaMode, pointerMods(e, modMap())); }, { passive: false });
     pane.addEventListener('contextmenu', (e) => e.preventDefault());
   };
   pane.addEventListener('pointerenter', () => { if (client) fitStage(); }); // the window may have moved: back onto the device grid
@@ -566,7 +578,7 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
       pin: pinNow, // lane e2b: the X window fits the pin from the hello on
       url: typeof url === 'function' ? url() : url,
       workerUrl: typeof workerUrl === 'function' ? workerUrl() : workerUrl,
-      screen: s, ratio: () => drawRatio, cover: () => drawK !== 1, dpi: typeof dpi === 'function' ? dpi() : dpi, Worker: WorkerCtor, decode, now, log, mac: viewerMac,
+      screen: s, ratio: () => drawRatio, cover: () => drawK !== 1, dpi: typeof dpi === 'function' ? dpi() : dpi, Worker: WorkerCtor, decode, now, log, mac: () => viewerPlatform() === 'mac',
       slots: () => typeof onSatellite === 'function', // S2: a window per top-level only where the caller can open one
       on: {
         status: (st, detail) => {

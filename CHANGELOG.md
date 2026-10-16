@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.287 — 2026-10-16
+
+### Fixed
+- On a Mac, ⌘ shortcuts in an app window such as ⌘+C, V, X, A and Z now act as Ctrl on the other machine, the way the app expects.
+
 ## 2.369.286 — 2026-10-16
 
 ### Fixed

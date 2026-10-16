@@ -429,10 +429,35 @@ console.log('§2 the session over a fake worker (xpra-client.js)');
     const t4 = await tapRun(C, true, { meta: true }, 'Meta', 'MetaLeft');
     ok(same(t4.atDown, ['Super_L+']) && same(t4.atUp, ['Super_L+', 'Super_L-']), 'the ⌘ key itself is held as pressed (a modifier is never tapped)', t4);
     // CONTROL on a copy: without the tap line the Mac ⌘+a press stays down until a keyup a Mac never sends
-    const csrc = read('src/lib/xpra-client.js'), TAP = "    if (ev?.mods?.meta && (typeof mac === 'function' ? mac() : mac) && !P.MODIFIER_KEYNAMES.has(k.keyname)) {";
+    const csrc = read('src/lib/xpra-client.js'), TAP = "    if ((ev?.viewerMeta ?? ev?.mods?.meta) && (typeof mac === 'function' ? mac() : mac) && !P.MODIFIER_KEYNAMES.has(k.keyname)) {";
     ok(csrc.split(TAP).length === 2, 'CONTROL anchor: the tap is one line in xpra-client.js');
     const t0 = await tapRun(await import(pathToFileURL(MUTXC.write('src/lib/xpra-client.js', csrc.replace(TAP, '    if (false) {'), 'mactap')).href), true, { meta: true });
     ok(same(t0.atDown, ['a+']), `CONTROL: the pre-lane client leaves ⌘+a pressed at the keydown (${t0.atDown.join(' ')}) — X holds it and autorepeats`, t0);
+    // lane xpra-mac-modifiers: ⌘+a (tapped; its keyup never comes), THEN a plain a — the fresh press clears the stale mark, so
+    // the plain a's own keyup releases it (the .286 mark swallowed that keyup: X held a and autorepeated it)
+    const againRun = async (CC) => {
+      FakeWorker.instances.length = 0;
+      const c = CC.createXpraClient({ url: 'ws://x/s', workerUrl: '/w.js', screen: { width: 900, height: 600 }, Worker: FakeWorker, decode: async () => ({ close() {} }), log: null, mac: () => true });
+      c.connect();
+      const w = await until(() => FakeWorker.instances[0]);
+      await until(() => w.sent('hello').length);
+      w.feed(['hello', { 'packet-types': ['keyboard-config', 'display-configure'] }]);
+      w.feed(['new-window', 4, 0, 0, 400, 300, { title: 'Docs', 'window-type': ['NORMAL'] }]);
+      await sleep(20);
+      w.posted.length = 0;
+      c.keyDown({ key: 'a', code: 'KeyA', keyCode: 65, mods: { control: true }, viewerMeta: true });
+      c.keyDown({ key: 'a', code: 'KeyA', keyCode: 65, mods: {} });
+      c.keyUp({ key: 'a', code: 'KeyA', keyCode: 65, mods: {} });
+      const seq = w.sent('key-action').map((q) => `${q[2]}${q[3] ? '+' : '-'}`);
+      c.close();
+      return seq;
+    };
+    const s1 = await againRun(C);
+    ok(same(s1, ['a+', 'a-', 'a+', 'a-']), `a Mac viewer's ⌘+a, then a plain a: the plain a's own keyup releases it (${s1.join(' ')}) — the tapped press's mark is cleared by the next press of that key`, s1);
+    const FRESH = '    foreignDown.delete(ev?.code || ev?.key); // a FRESH press:';
+    ok(csrc.split(FRESH).length === 2, 'CONTROL anchor: the stale-mark clear is one line');
+    const s0 = await againRun(await import(pathToFileURL(MUTXC.write('src/lib/xpra-client.js', csrc.replace(FRESH, '    void 0; //'), 'stalemark')).href));
+    ok(same(s0, ['a+', 'a-', 'a+']), `CONTROL: without it the stale mark swallows the plain a's keyup (${s0.join(' ')}) — X holds a and autorepeats it`, s0);
   }
   wk.posted.length = 0;
   client.pointerButton(50, 40, 0, true, {});
@@ -916,6 +941,67 @@ console.log('§3c A1 (round 3): the plain-http GESTURE WINDOW — the user\'s ow
   ok(C3.view.chip.style.display === '' && C3.view.hintShown === false && !store.has(S.COPY_HINT_KEY), 'A1: a secure page\'s refused API write shows the chip but never the HTTPS hint (and leaves the device\'s hint unspent)');
   C.view.dispose(); C2.view.dispose(); C3.view.dispose();
   globalThis.localStorage = realLS;
+}
+
+console.log('§3d lane xpra-mac-modifiers (the owner, 2026-10-16: 「根据 host+client 两边自动判断」): through the VIEW, a Mac viewer\'s ⌘ is the Linux app\'s Ctrl — the key packet, the ⌘ key itself, the pointer; the .286 tap still releases');
+{
+  // one view per (viewer, host): ⌘ down, a down (a Mac never sends that keyup), ⌘ up; Ctrl+a; ⌘+click — the packets as sent
+  const modRun = async (VV, viewer, host) => {
+    const h = new El('div');
+    const view = VV.createXpraView(h, { url: () => 'ws://x/stream', workerUrl: '/w.js', Worker: FakeWorker, decode: async () => ({ close() {} }), viewerPlatform: () => viewer, hostPlatform: host });
+    const pane = h.children[0].children[1].children[0];
+    pane.clientWidth = 400; pane.clientHeight = 300;
+    await view.connect();
+    const wk = await until(() => FakeWorker.instances[FakeWorker.instances.length - 1]);
+    await until(() => wk.sent('hello').length);
+    wk.feed(['hello', { 'packet-types': ['keyboard-config'] }]);
+    wk.feed(['new-window', 1, 0, 0, 300, 200, { title: 'Docs' }]);
+    await sleep(20);
+    const ime = pane.children[1], gm = () => false;
+    const keys = () => wk.sent('key-action').map((q) => `${q[2]}${q[3] ? '+' : '-'}[${q[4].join(',')}]`);
+    wk.posted.length = 0;
+    ime.fire('keydown', { key: 'Meta', code: 'MetaLeft', keyCode: 91, location: 1, metaKey: true, getModifierState: gm });
+    const atMeta = keys();
+    const ka = ime.fire('keydown', { key: 'a', code: 'KeyA', keyCode: 65, metaKey: true, getModifierState: gm });
+    const atA = keys();
+    ime.fire('keyup', { key: 'Meta', code: 'MetaLeft', keyCode: 91, location: 1, metaKey: false, getModifierState: gm });
+    const chord = keys();
+    wk.posted.length = 0;
+    ime.fire('keydown', { key: 'Control', code: 'ControlLeft', keyCode: 17, ctrlKey: true, getModifierState: gm });
+    ime.fire('keydown', { key: 'a', code: 'KeyA', keyCode: 65, ctrlKey: true, getModifierState: gm });
+    ime.fire('keyup', { key: 'a', code: 'KeyA', keyCode: 65, ctrlKey: true, getModifierState: gm });
+    ime.fire('keyup', { key: 'Control', code: 'ControlLeft', keyCode: 17, getModifierState: gm });
+    const ctrl = keys();
+    wk.posted.length = 0;
+    pane.fire('pointerdown', { clientX: 60, clientY: 50, button: 0, pointerId: 1, metaKey: true });
+    pane.fire('pointerup', { clientX: 60, clientY: 50, button: 0, pointerId: 1, metaKey: true });
+    const click = wk.sent('button-action').map((q) => `${q[3] ? 'down' : 'up'}[${q[5].join(',')}]`);
+    view.dispose();
+    return { atMeta, atA, chord, ctrl, click, prevented: !!ka.prevented };
+  };
+  const m = await modRun(V, 'mac', null);
+  ok(same(m.atMeta, ['Control_L+[control]']), `a Mac viewer, an app on Linux (the record names no platform): the ⌘ keydown ITSELF goes as Control_L with control held (${m.atMeta.join(' ')})`, m);
+  ok(same(m.atA, ['Control_L+[control]', 'a+[control]', 'a-[control]']) && m.prevented, `…⌘+a reaches the packet as a with control — keyname a, modifiers [control], never Super / mod4 — and the .286 tap still releases it at the keydown (${m.atA.slice(1).join(' ')})`, m);
+  ok(same(m.chord, ['Control_L+[control]', 'a+[control]', 'a-[control]', 'Control_L-[]']), `…and the ⌘ keyup releases Control_L (${m.chord.join(' ')})`, m);
+  ok(same(m.ctrl, ['Control_L+[control]', 'a+[control]', 'a-[control]', 'Control_L-[]']), `…the Mac's own Ctrl stays Ctrl (${m.ctrl.join(' ')})`, m);
+  ok(same(m.click, ['down[control]', 'up[control]']), `…⌘+click on the pane is Ctrl+click in the app (button-action modifiers ${m.click.join(' ')})`, m);
+  const l = await modRun(V, 'linux', null);
+  ok(same(l.chord, ['Super_L+[mod4]', 'a+[mod4]', 'Super_L-[]']), `a Linux viewer is unchanged: Super is Super (${l.chord.join(' ')} — a's keyup is its own; no tap off a Mac)`, l);
+  ok(same(l.ctrl, ['Control_L+[control]', 'a+[control]', 'a-[control]', 'Control_L-[]']) && same(l.click, ['down[mod4]', 'up[mod4]']), `…its Ctrl+a is control, its Super+click mod4 (${l.ctrl.join(' ')} · ${l.click.join(' ')})`, l);
+  const w = await modRun(V, 'windows', null);
+  ok(same(w.chord, l.chord) && same(w.ctrl, l.ctrl), 'a Windows viewer on Linux: same family, identity', w);
+  const mm = await modRun(V, 'mac', 'macOS');
+  ok(same(mm.chord, ['Super_L+[mod4]', 'a+[mod4]', 'a-[mod4]', 'Super_L-[]']), `a Mac viewer on a host whose record names macOS (hostPlatform): same family, ⌘ stays ⌘ (${mm.chord.join(' ')}; the tap is the viewer's)`, mm);
+  const lm = await modRun(V, 'linux', 'darwin');
+  ok(same(lm.ctrl, ['Super_L+[mod4]', 'a+[mod4]', 'a-[mod4]', 'Super_L-[]']), `a Linux viewer on a Mac host: Ctrl is the host's ⌘ (${lm.ctrl.join(' ')})`, lm);
+  const u = await modRun(V, 'unknown', null);
+  ok(same(u.chord, l.chord), 'a viewer that names no platform keeps its keys as pressed', u);
+  // CONTROL: the view with no map (the pre-lane door) — the Mac viewer's ⌘+a goes as Super_L + a under mod4
+  const vsrc = read('src/lib/xpra-view.js'), MAPLINE = "  const modMap = () => primaryModifierMap({ viewer: viewerPlatform(), host: typeof hostPlatform === 'function' ? hostPlatform() : hostPlatform });";
+  ok(vsrc.split(MAPLINE).length === 2, 'CONTROL anchor: the view asks the table on one line');
+  const V0 = await import(pathToFileURL(MUTXC.write('src/lib/xpra-view.js', vsrc.replace(MAPLINE, '  const modMap = () => null;'), 'nomodmap')).href);
+  const m0 = await modRun(V0, 'mac', null);
+  ok(same(m0.chord, ['Super_L+[mod4]', 'a+[mod4]', 'a-[mod4]', 'Super_L-[]']) && same(m0.click, ['down[mod4]', 'up[mod4]']), `CONTROL: without the map a Mac viewer's ⌘+a reaches the Linux app as ${m0.chord.join(' ')} and ⌘+click as mod4 — Super, never select-all`, m0);
 }
 
 console.log('§5 x5 — ONE active viewer (docs/design-desktop-apps §7 P8-2): Watch sends no geometry and is fit-scaled, a dormant (blocked) pane never times out, a held hello re-sizes');
