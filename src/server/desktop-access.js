@@ -50,6 +50,7 @@ const I = require('../installs.js'); // THE INSTALLABLES: one row each — this 
 const SYS = require('../app-system.js'); // Layer 1: a sys plan's digest binds what it runs (sysDigestPart)
 const MW = require('../machine-window.js'); // lane machine-app-crop: the run's launch report (one app as its own window)
 const D = require('../desktop-display.js'); // design 014 D1: the PURE RFB greeting read of the vnc-native rung
+const RA = require('../remoteapp.js'); // lane remoteapp-r1a (design q-024 §1.2): the RemoteApp setup words, the platform verdict, the RDP port
 const IA = require('../installed-apps.js'); // lane machine-desktop-apps: a Windows / macOS machine's installed apps (SHARED: the device lists, the hub judges again)
 
 let installed = null;
@@ -66,6 +67,10 @@ function access() {
     installBusy: () => null, setAppPlanner: () => { },
     machineDesktopTarget: () => null, machineDesktopGone: () => null, // design 014 D1
     installedApps: async () => { const e = new Error('the desktop access layer is not wired on this instance'); e.code = 'host_unavailable'; throw e; }, // lane machine-desktop-apps
+    // lane remoteapp-r1a: the RemoteApp seam the hub keeper's machine half asks, and the launcher's door
+    remoteappSetup: async () => { const e = new Error('the desktop access layer is not wired on this instance'); e.code = 'host_unavailable'; throw e; },
+    remoteappForward: async () => { const e = new Error('the desktop access layer is not wired on this instance'); e.code = 'host_unavailable'; throw e; },
+    launchRemoteApp: async () => { const e = new Error('the desktop access layer is not wired on this instance'); e.code = 'host_unavailable'; throw e; },
   };
 }
 
@@ -76,7 +81,7 @@ const INSTALL_LOG_NAME = `~/.vibespace/${SLOT.INSTALL_FILES.log}`; // how a mess
  * @param hosts   HostManager (deviceBounded / get / isLocal) or null (local only)
  * @param local   () => THIS machine's desktop-serve handle (the hub keeper's `machine`)
  */
-function create({ hosts = null, local = null, env = () => process.env, log = console, install = true, connectMs = 8000, installMs = 15 * 60 * 1000, holdMs = 60 * 60 * 1000, pollMs = 15000, vncPort = D.VNC_NATIVE.port, probeMs = 3000, audit = null, installedStore = null, helloListMs = 3000 } = {}) {
+function create({ hosts = null, local = null, env = () => process.env, log = console, install = true, connectMs = 8000, installMs = 15 * 60 * 1000, holdMs = 60 * 60 * 1000, pollMs = 15000, vncPort = D.VNC_NATIVE.port, probeMs = 3000, audit = null, installedStore = null, helloListMs = 3000, rdpSetup = null } = {}) {
   const forwards = new Map(); // `${hostId}:${remotePort}` → { server, sockets, localPort, hostId, remotePort, refs }
   const opening = new Map();  // key → the in-flight listen (a concurrent second caller joins it)
   const installs = new Map(); // machine key → { since, running } — THIS hub's follower; the machine's own slot is its pidfile (installState)
@@ -467,6 +472,40 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
     log.log?.(`[desktop] started on ${hostId}'s desktop at the owner's click (${String(line).length} characters)`);
     return { ok: true, hostId, platform, shown: plan.shown, ...(report ? { launched: MW.parseLaunchReport(r.stdout) } : {}) };
   }
+  // ── design q-024 r1 §1.2 (lane remoteapp-r1a): THE REMOTEAPP SEAM — the hub keeper hands these two to its machine half ──
+  /** A machine's RemoteApp setup, read FRESH at every launch and relaunch: `{ user, domain?, certFp, password: () =>
+   *  string }` from `rdpSetup(hostId)` — R1a: a getter the caller injects (`create({ rdpSetup })` / `setRdpSetup(fn)`; nothing
+   *  is wired in server.js yet); R1b: the sealed integration row `remoteapp/<hostId>` + the machine's pinned fingerprint. A
+   *  part missing ⇒ `remoteapp_needs_setup` naming it (the settings card that asks for it is the next version). */
+  let rdpSetupGetter = typeof rdpSetup === 'function' ? rdpSetup : null;
+  function setRdpSetup(fn) { rdpSetupGetter = typeof fn === 'function' ? fn : null; }
+  const hostName = (hostId) => { try { const h = hosts && hosts.get ? hosts.get(hostId) : null; return String((h && (h.name || h.id)) || hostId); } catch { return String(hostId); } }; // the machine's own name (a display string)
+  async function remoteappSetup(hostId) {
+    const s = rdpSetupGetter ? await rdpSetupGetter(hostId) : null;
+    const missing = RA.setupMissing(s);
+    if (missing.length) { const e = named('remoteapp_needs_setup', RA.needsSetupWords(missing, hostName(hostId))); e.missing = missing; throw e; }
+    return s;
+  }
+  /** The loopback forward to the machine's 127.0.0.1:3389 through its agent's tcpForward — forwardPort's (reference
+   *  counted: a relaunch's successor shares it until the old session lets go; the same pipe as VNC). → { port, forwardId, close } */
+  async function remoteappForward(hostId) {
+    if (isLocal(hostId)) throw named('not_desktop_machine', 'RemoteApp reaches a PAIRED machine — never this one');
+    const fw = await forwardPort(hostId, RA.RDP_PORT);
+    return { port: fw.localPort, forwardId: `${hostId}:${RA.RDP_PORT}`, close: fw.close };
+  }
+  /** "RemoteApp…" — the OWNER's click (the route refuses an agent token: design §1.6 fence 4, an agent never starts one).
+   *  The machine is reached and must be Windows, its setup complete — asked HERE first, so the launcher's answer names what
+   *  is missing before anything else — then THIS machine's keeper starts xfreerdp (src/desktop-serve.js launchRemoteApp
+   *  through the seam above). → the record's view */
+  async function launchRemoteApp(hostId, app = {}, { launchedBy = { kind: 'person' } } = {}) {
+    if (isLocal(hostId)) throw named('not_desktop_machine', 'RemoteApp opens an app of a paired Windows machine — this machine\'s own apps open through the Apps launcher');
+    const dm = await deviceOf(hostId);
+    const pv = RA.platformVerdict(platformOfHandle(dm), hostName(hostId));
+    if (pv) throw named(pv.code, pv.error);
+    await remoteappSetup(hostId);
+    const a = app && typeof app === 'object' ? app : {};
+    return localOf().launch({ remoteapp: { hostId, program: a.program, name: a.name, args: a.args, kbdUnicode: a.kbdUnicode } }, { launchedBy, remoteappDoor: true }); // the ONE door that sets it
+  }
   /** design 014 D1, the owner's option A (2026-10-03): THE WINDOWS INSTALL. The agent runs unelevated, so the plan's
    *  argv asks Windows for elevation ON THAT MACHINE'S SCREEN and waits: someone there clicks Yes and types the VNC
    *  password into the administrator window — VibeSpace never carries it. Declined / nobody there ⇒ `no_admin` by name
@@ -582,7 +621,7 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
     try { return !!(hosts && typeof hosts.connectedDevice === 'function' && hosts.connectedDevice(hostId)); } catch { return false; }
   }
 
-  const layer = { call, forwardPort, closeForward, forwards: listForwards, hostKnown, isLocal, shutdown, machines, installPlan, installXpra, installPackage, installBusy, runArgv, readFile, connectedNow, setAppPlanner, planDigest, probeDesktop, openMachineDesktop, machineDesktopTarget, machineDesktopGone, runOnDesktop, installedApps, installedNow, deviceOf, displayFacts, linkPing };
+  const layer = { call, forwardPort, closeForward, forwards: listForwards, hostKnown, isLocal, shutdown, machines, installPlan, installXpra, installPackage, installBusy, runArgv, readFile, connectedNow, setAppPlanner, planDigest, probeDesktop, openMachineDesktop, machineDesktopTarget, machineDesktopGone, runOnDesktop, installedApps, installedNow, deviceOf, displayFacts, linkPing, remoteappSetup, remoteappForward, setRdpSetup, launchRemoteApp };
   if (install) installed = layer;
   return layer;
 }

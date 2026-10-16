@@ -221,6 +221,7 @@ const O = require('./office-open'); // §7.9: the LibreOffice rows as a machine 
 const LIMITS = require('./keeper-limits');
 const displayFacts = require('./desktop-display');
 const AWD = require('./argv-words.js'); // PURE — a launch journalled as the one line a person reads (rel254 verify F4b)
+const RA = require('./remoteapp'); // lane remoteapp-r1a (design q-024 §1.2): the RemoteApp request, argv, client build + end verdicts — PURE
 const AS = require('./app-serve'); // Layer 0 apps (docs/design-app-persistence.zh.md §3.1): the app-* ops + the catalog rows of the apps the user installed
 
 const STORE_FILE = 'desktop-apps.json';
@@ -325,9 +326,13 @@ const settingsReader = (obj) => (key) => (obj && typeof obj === 'object' && SETT
  *   apps           — the apps machine half (src/app-serve.js; default: created here over `appsHome` + dataDir as
  *                    the package slot's state dir) — its catalog rows join the registry (`app.<entry>`)
  *   appsHome       — the user's home on this machine (default: the base env's HOME, else os.homedir())
+ *   remoteapp      — lane remoteapp-r1a: the HUB's way to a paired Windows machine for a RemoteApp launch —
+ *                    `{ setup(hostId) → { user, domain?, certFp, password: () => string }, forward(hostId) → { port,
+ *                    forwardId, close } }` (src/server/desktop-access.js through the hub keeper); absent on a daemon,
+ *                    where a RemoteApp launch is refused `remoteapp_unwired`
  */
 function install({ dataDir, env, serverSetting = () => undefined, singleton = null,
-  display = displayFacts, limits = LIMITS, registryRows = M.DEFAULT_REGISTRY, backends = M.DISPLAY_BACKENDS, log = console, now = Date.now, tickMs = TICK_MS, guardSampleMs = null, geometry = DEFAULT_GEOMETRY, hostId = null, fitSlowBeltMs = FIT_SLOW_BELT_MS, askCloseMs = ASK_CLOSE_MS, hooks = {}, apps = null, appsHome = null } = {}) {
+  display = displayFacts, limits = LIMITS, registryRows = M.DEFAULT_REGISTRY, backends = M.DISPLAY_BACKENDS, log = console, now = Date.now, tickMs = TICK_MS, guardSampleMs = null, geometry = DEFAULT_GEOMETRY, hostId = null, fitSlowBeltMs = FIT_SLOW_BELT_MS, askCloseMs = ASK_CLOSE_MS, hooks = {}, apps = null, appsHome = null, remoteapp = null } = {}) {
   if (!dataDir) throw new Error('desktop-serve: dataDir is required');
   if (env && typeof env === 'object') { const e0 = env; env = () => e0; }
   if (typeof env !== 'function') throw new Error('desktop-serve: env must be a function returning the sanitised base env');
@@ -356,6 +361,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
   const stopping = new Set();
   const quitAsks = new Map();   // id -> the ChildProcess of a `.uno:Quit` hand-over still waiting on LibreOffice's save prompt (B-04da ④)
   const deferred = new Map();   // id -> () => bringUp — a launch whose start waits for the record it replaces to stop (a browser relaunch, 2.369.176)
+  const rdpSeats = new Map();   // id -> { close, password, configDir } — a RemoteApp session's forward + its password GETTER (lane remoteapp-r1a; never persisted)
   let dirty = false;
   let factsCache = null;        // { at, facts }
   let timer = null;
@@ -618,6 +624,13 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
    *  settings when the call arrived as an op (in-process the hub's own reader). The cap is THIS MACHINE's: a
    *  bound on its own resources, counted over its own live sessions. */
   async function launch(body, opts = {}) {
+    // lane remoteapp-r1a: an app of a PAIRED Windows machine — ONLY through its own door (design §1.6 fence 4: a person's click,
+    // desktop-access.launchRemoteApp, or the relaunch of such a session); the generic launch (POST /api/desktop/apps — an agent's
+    // token reaches it —, `vibespace-window open`, the `launch` op) can never set `remoteappDoor`, so a `remoteapp` body there is refused
+    if (body && typeof body === 'object' && body.remoteapp !== undefined) {
+      if (opts.remoteappDoor !== true) throw namedError('remoteapp_door', 'a RemoteApp session starts only from the launcher\'s RemoteApp… (a person\'s click) — never through the generic launch');
+      return launchRemoteApp(body, opts);
+    }
     const serverSetting = opts.settings ? settingsReader(opts.settings) : serverSetting0; // an op's settings shadow the hub's reader
     const f = await facts();
     try { await apps.refreshCatalog(); } catch { /* the last rows */ }
@@ -761,6 +774,84 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
   }
   function startDeferred(id) { const start = deferred.get(id); deferred.delete(id); if (start) start(); return !!start; }
 
+  /** design q-024 r1 §1.2 (lane remoteapp-r1a): ONE app of a PAIRED Windows machine as a real X window — THIS machine's
+   *  xfreerdp in RemoteApp (RAIL) mode, an app on its own xpra display (the table's `remote` row), connected to the
+   *  machine's 127.0.0.1:3389 through the agent's loopback forward. The way there is the hub's seam (`remoteapp`). Every
+   *  refusal happens BEFORE the forward opens; a refusal after it closes it at once, the session's teardown otherwise. The
+   *  record holds FACTS only — `remoteapp` (the machine + the app: what a relaunch asks again) and `rdp` (forwardId, the
+   *  pinned certFp, the forward's port, the client's version); the password stays a GETTER in `rdpSeats`, read once at the
+   *  spawn for xfreerdp's stdin. A relaunch (Scale ▸) comes back here through relaunchBodyOf: a new forward reference, the
+   *  setup read again. xfreerdp ignores GDK_SCALE, so the session is recorded at 1× (a relaunch reconnects at 1×). */
+  async function launchRemoteApp(body, opts = {}) {
+    const serverSetting = opts.settings ? settingsReader(opts.settings) : serverSetting0;
+    const rq = RA.remoteappRequestVerdict(body.remoteapp);
+    if (!rq.ok) throw namedError(rq.code, rq.error);
+    if (!remoteapp || typeof remoteapp.setup !== 'function' || typeof remoteapp.forward !== 'function') throw namedError('remoteapp_unwired', 'RemoteApp runs only on the VibeSpace server — this machine has no way to a paired machine');
+    const row = backends.find((b) => b.remote === RA.REMOTE_KIND);
+    if (!row) throw namedError('no-backend', 'this machine\'s display table has no RemoteApp row');
+    const f = await facts();
+    const nv = M.needsVerdict(row, f.bins || {});
+    if (!nv.ok) throw namedError('no-backend', RA.needsClientWords(nv.missing));
+    const recipe = M.recipeFor(row.id, nv.via, backends);
+    if (!recipe || typeof display.RECIPES?.[recipe] !== 'function') throw namedError('no-recipe', `${row.id} via ${nv.via} names no bring-up recipe (${recipe || 'none'}) — the capability table and desktop-display disagree`);
+    const cap = M.capVerdict(liveRecords().filter((r) => r.id !== opts.replacing), limits);
+    if (cap) throw namedError(cap.code, cap.error);
+    // design §1.6 fence 5: Windows Pro gives ONE remote session per machine — a second launch is refused, naming the first
+    const busy = liveRecords().find((r) => r.id !== opts.replacing && r.remoteapp && r.remoteapp.hostId === rq.hostId);
+    if (busy) throw namedError('rdp_session_busy', `${rq.hostId} already shows a RemoteApp session (${busy.label}, ${busy.id}) — Windows gives one remote session per machine; use that window or stop it first`);
+    const exec = f.bins[RA.rdpClientOf(nv.via)];
+    const build = RA.rdpBuildVerdict(typeof display.rdpBuildFacts === 'function' ? await display.rdpBuildFacts(exec, { env: env() }) : {});
+    if (!build.ok) throw namedError(build.code, build.error);
+    const setup = await remoteapp.setup(rq.hostId); // the seam refuses an incomplete setup BY NAME (remoteapp_needs_setup); checked again here
+    const missing = RA.setupMissing(setup);
+    if (missing.length) throw namedError('remoteapp_needs_setup', RA.needsSetupWords(missing, rq.hostId));
+    const fp = RA.certFpVerdict(setup.certFp).fp;
+    const fwd = await remoteapp.forward(rq.hostId);
+    let closed = false;
+    const close = () => { if (closed) return; closed = true; try { fwd.close(); } catch (e) { log.warn?.(`[desktop] RemoteApp forward ${fwd.forwardId}: close failed — ${e.message}`); } };
+    const id = opts.id || newId();
+    let rec, configDir;
+    try {
+      const av = RA.remoteappArgv({ port: fwd.port, user: setup.user, domain: setup.domain || '', program: rq.program, name: rq.name, args: rq.args, certFp: fp, kbdUnicode: rq.kbdUnicode, h264: build.h264 });
+      if (!av.ok) throw namedError(av.code, av.error);
+      // the client's OWN config dir, fresh and empty (0700): a certificate an earlier TOFU stored under ~/.config/freerdp wins over the pin (measured)
+      configDir = path.join(appDir(id), 'rdp-config');
+      await fs.promises.rm(configDir, { recursive: true, force: true });
+      await fs.promises.mkdir(configDir, { recursive: true, mode: 0o700 });
+      const knobs = M.scaleKnobs(1);
+      rec = M.newRecord({ id, label: rq.name, exec, args: av.argv, cwd: null, env: undefined, source: 'remoteapp', backend: row.id, via: nv.via, fallbackWhy: null, idleTimeoutMs: idleTimeoutMin(serverSetting) * 60000, now: now(), scale: knobs.scale, dpi: knobs.dpi, gdkScale: knobs.gdkScale, pictureScale: knobs.pictureScale, scaleOrigin: 'auto', scaleFrom: null });
+    } catch (e) { close(); throw e; }
+    rec.recipe = recipe;
+    rec.remoteapp = { hostId: rq.hostId, program: rq.program, name: rq.name, args: rq.args, kbdUnicode: rq.kbdUnicode };
+    rec.rdp = { forwardId: fwd.forwardId, certFp: fp, port: fwd.port, client: build.version };
+    const lb = launchedByOf(opts.launchedBy);
+    if (lb) rec.launchedBy = lb;
+    rdpSeats.set(id, { close, password: setup.password, configDir });
+    store.apps[id] = rec;
+    pruneHistory();
+    commit();
+    log.log?.(`[desktop] RemoteApp ${id}: ${rq.name} on ${rq.hostId} through 127.0.0.1:${fwd.port} (FreeRDP ${build.version}${build.h264 ? ', H.264' : ''})`);
+    const start = () => {
+      const p = bringUp(rec, f).catch((e) => log.warn?.(`[desktop] ${id} bring-up crashed: ${e.stack || e.message}`));
+      inflight.set(id, p);
+      p.finally(() => { if (inflight.get(id) === p) inflight.delete(id); }).catch(() => { });
+    };
+    if (opts.deferBringUp) deferred.set(id, start); else start();
+    return view(rec);
+  }
+  /** lane remoteapp-r1a: a RemoteApp session's forward reference goes with it (every terminal path runs teardown). */
+  function closeRdp(id) { const seat = rdpSeats.get(id); if (!seat) return; rdpSeats.delete(id); seat.close(); }
+  /** lane remoteapp-r1a: why a RemoteApp session ended — the client's own words in the tail of its log + its exit code
+   *  (src/remoteapp.js rdpEndVerdict). → { code, words } | null */
+  async function rdpEndOf(rec, code, signal) {
+    let text = '';
+    try {
+      const fh = await fs.promises.open(path.join(logRoot, rec.id, 'app.log'), 'r');
+      try { const st = await fh.stat(); const n = Math.min(st.size, 16384); const b = Buffer.alloc(n); await fh.read(b, 0, n, st.size - n); text = b.toString('utf8'); } finally { await fh.close(); }
+    } catch { /* no log: the exit code alone */ }
+    return RA.rdpEndVerdict({ code, signal, lines: text.split('\n'), machine: rec.remoteapp ? rec.remoteapp.hostId : 'the machine' });
+  }
+
   /** The Scale ▸ relaunch as ONE machine act (the `relaunch` op, and the in-process hub keeper's relaunch()): the
    *  successor first (a refusal — the cap, a vanished binary — leaves the running app untouched), `replacedBy`
    *  committed before the old session's stop. `onSuccessor(nextId)` = the hub's seat carry, called between the
@@ -783,6 +874,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     // and label ride to the successor (keepProfile + url already ride the body); the engine carries the lease along replacedBy
     const lopts = { scaleChoice: rv.choice, replacing: id, ...(rec.origin === AGENT_BROWSER_ORIGIN ? { origin: rec.origin, by: rec.by, label: rec.label } : {}), ...(pinOf(rec.pin) ? { pin: rec.pin } : {}) }; // lane e2b: the pin rides the relaunch
     if (rec.launchedBy) lopts.launchedBy = rec.launchedBy; // lane app-launch-singleton: and who started it
+    if (rec.remoteapp) lopts.remoteappDoor = true; // lane remoteapp-r1a: the relaunch of a RemoteApp session a person started reconnects it
     if (settings) lopts.settings = settings;
     // §7.9: a LibreOffice session relaunches the same way — its document is LOCKED by the running instance
     // (.~lock.<name>#: a successor started beside it would open "Document in use"), and its profile goes with it
@@ -1037,8 +1129,18 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
         if (!sd.ok) log.warn?.(`[desktop] ${id}: the browser's own frame was not seeded (${sd.why}) — it keeps the system title bar and VibeSpace's`);
         if (gone()) return;
       }
+      // lane remoteapp-r1a: a RemoteApp's password is read from its getter NOW (nothing spawned yet when it fails) and handed to
+      // xfreerdp's stdin as ONE line (`/from-stdin`), the pipe then closed; the client gets its own empty config dir
+      const seat = rdpSeats.get(id) || null;
+      let stdinLine = null;
+      if (seat) {
+        try { stdinLine = String(await seat.password()); } catch (e) { await failed(`the RemoteApp sign-in could not be read (${(e && e.code) || 'error'})`); return; }
+        seat.password = null;
+        if (/[\r\n]/.test(stdinLine)) { stdinLine = null; await failed('the RemoteApp password holds a line break — it cannot be handed over as one line'); return; }
+        if (gone()) return;
+      }
       rec.appAt = now(); // lane app-launch-singleton: the app's own start — a quick exit is measured from here
-      const a = await display.startApp({ exec: rec.exec, args: rec.args, cwd: rec.cwd, env: appEnv, logFd });
+      const a = await display.startApp({ exec: rec.exec, args: rec.args, cwd: rec.cwd, env: seat ? { ...appEnv, XDG_CONFIG_HOME: seat.configDir } : appEnv, logFd, ...(seat ? { stdinOnce: () => { const line = stdinLine; stdinLine = null; return line; } } : {}) });
       ctx.onPart('app', a, {});
       if (gone()) return;
       const w = await display.waitForListen(rec.probe, up.port, { deadlineMs: RFB_DEADLINE_MS, child: handles.server || handles.x, now });
@@ -1103,6 +1205,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
       // (the app's own ✕, a quit), > 0 = a forking launcher exited while its child still shows one, null = not counted.
       const handles = children.get(id);
       (async () => {
+        if (rec.rdp) { const rv = await rdpEndOf(rec, code, signal); if (rv) { rec.rdp.ended = rv.code; rec.lastError = rv.words; } } // lane remoteapp-r1a: the client's own reason
         rec.windowsAtExit = await windowsLeftAtExit(rec);
         // lane exit-close-cadence (B-8778): the exit + its census ARE the verdict — committed (saved + broadcast) HERE, so
         // every client closes its window at the app's exit; the teardown is the keeper's own and commits again. Committed
@@ -1246,6 +1349,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     // its keyring leaves the file behind, so the display's teardown takes it with it (never at rest beside the store).
     try { fs.unlinkSync(path.join(logRoot, rec.id, 'portal', M.SECRETS_KEY_FILE)); } catch { /* read by the service, or never written */ }
     children.delete(rec.id); sampledAt.delete(rec.id); samples.delete(rec.id); clearFit(rec.id); endNotes(rec.id);
+    closeRdp(rec.id); // lane remoteapp-r1a: the RemoteApp's loopback forward goes with its session
     if (rec.file) await noteFileEnd(rec, { clean }); // §7.9: every part is gone — the document's mtime now vs at launch (the hub's file-changed); its lock, when this session wrote it
     try { H.onTeardown?.(rec.id); } catch (e) { log.warn?.(`[desktop] ${rec.id}: teardown hook failed: ${e.message}`); } // the hub's guard + live rows go with the session
     if (rec.profileDir && !M.isLiveState(rec.state) && !stopping.has(rec.id)) await retireProfile(rec, { clean, why: rec.state }); // B-bfe6: a stop retires AFTER its verdict (below)

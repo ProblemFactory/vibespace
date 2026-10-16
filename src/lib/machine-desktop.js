@@ -26,6 +26,7 @@ import { pageIsSecure } from './picture-shell.js';
 import { keyboardLockGate, NAGLE_REFERENCE, SLOW_KBPS, STILL_MS } from '../desktop-quality.js'; // lane desktop-v2-latency
 import { desktopRunPlan, desktopRunPresets, rememberRun, machineDesktopId } from '../machine-desktop-model.js';
 import { namesGuiApp } from '../machine-window.js';
+import { remoteappProgramOf } from '../remoteapp.js'; // lane remoteapp-r1a: the typed line → the program a RemoteApp starts
 import { openMachineApp } from './machine-app.js'; // lane machine-app-crop: one app of the machine as its own window
 import { screenMap, hdrShown, carryPick } from '../desktop-screens.js'; // lane desktop-v2-entry: the OS table + the RFB table → the displays in fb pixels
 import { openDesktopPicker, rememberDesktop, rememberDisplays, readRecent } from './desktop-picker.js';
@@ -61,6 +62,8 @@ export function desktopRefusalText(r, m) {
   if (c === 'multi_line') return t('One line only — a line break would start a second command');
   if (c === 'hidden_chars') return t('The command holds an invisible character — retype it so what runs is what you see');
   if (c === 'run_failed') return t('The command did not start on {machine}', { machine });
+  if (c === 'remoteapp_needs_setup') return t('RemoteApp needs {machine}’s Windows sign-in and its certificate fingerprint — the RemoteApp settings that ask for them come in the next version. Until then, Run as its own window opens its apps.', { machine }); // lane remoteapp-r1a: the settings card is R1b — said, never greyed
+  if (c === 'rdp_session_busy') return t('{machine} already shows a RemoteApp session — Windows gives one remote session per machine; use that window or stop it first', { machine });
   return (r && r.error) || t('Could not reach {machine}', { machine });
 }
 
@@ -356,19 +359,24 @@ export function showMachineDesktopDialog(app, m0, { install = null, recheck = nu
   const acts = el('div'); acts.className = 'desktop-install-actions';
   const scope = el('p', NOTE, t('Its desktop shows everything on {machine}’s screen, and what you type there goes to it. Only people can open it — agents cannot.', { machine }));
   const runHead = el('div', 'margin-top:12px;font-weight:600', t('Run on its desktop…'));
-  const input = el('input', 'flex:1 1 auto;min-width:0;font-family:var(--font-mono, monospace)'); input.type = 'text'; input.spellcheck = false; input.autocomplete = 'off'; input.className = 'machine-desktop-cmd';
+  const input = el('input', 'flex:1 1 120px;min-width:0;font-family:var(--font-mono, monospace)'); input.type = 'text'; input.spellcheck = false; input.autocomplete = 'off'; input.className = 'machine-desktop-cmd';
   const apps = installedList(m, { onPick: (line) => { input.value = line; pickDefault(); input.focus(); } });
   const presets = el('div'); presets.className = 'machine-apps-chips';
-  const runRow = el('div', 'display:flex;gap:6px');
+  const runRow = el('div', 'display:flex;flex-wrap:wrap;gap:6px'); // lane remoteapp-r1a: three buttons on a phone wrap below the line (the line keeps 120 px)
   const runBtn = btn('btn-create', t('Run…'), () => run());
   // lane machine-app-crop: "Run as its own window…" beside "Run…" — the DEFAULT (the filled button, Enter) when the line names a
   // GUI app (`open -a …` / `start "" …`); the whole-desktop run stays as it was
   const winBtn = btn('file-tool-btn', t('Run as its own window…'), () => run({ window: true }));
-  for (const b of [winBtn, runBtn]) b.style.cssText = 'width:auto;padding:0 10px;flex:0 0 auto;white-space:nowrap';
+  // lane remoteapp-r1a (design q-024 §1.1): "RemoteApp…" beside it on a Windows machine — the app as a REAL window through Remote
+  // Desktop (this machine's xfreerdp on its own xpra display). Offered, never greyed: what the machine still lacks comes back as
+  // the launch's answer, in words (R1a: its sign-in + certificate fingerprint — the settings card is the next version)
+  const raBtn = m.setup === 'win32' ? btn('file-tool-btn', t('RemoteApp…'), () => remoteApp()) : null;
+  if (raBtn) { raBtn.title = t('Open the app as a real window through Remote Desktop (Windows Pro or Enterprise)'); raBtn.className = 'file-tool-btn machine-remoteapp-btn'; }
+  for (const b of [winBtn, raBtn, runBtn]) if (b) b.style.cssText = 'width:auto;padding:0 10px;flex:0 0 auto;white-space:nowrap';
   const asWindow = () => namesGuiApp(m.setup, input.value);
   const pickDefault = () => { const w = asWindow(); winBtn.className = w ? 'btn-create' : 'file-tool-btn'; runBtn.className = w ? 'file-tool-btn' : 'btn-create'; };
   input.addEventListener('input', pickDefault);
-  runRow.append(input, winBtn, runBtn);
+  runRow.append(input, winBtn, ...(raBtn ? [raBtn] : []), runBtn);
   body.append(state, acts, scope, runHead, apps.el, presets, runRow, el('p', NOTE, t('It starts on {machine}’s desktop as you — the exact command is shown before it runs.', { machine })));
   let asked = 0; // the newest listing asked (an older answer never overwrites a newer one)
   const listApps = async (fresh) => {
@@ -394,7 +402,7 @@ export function showMachineDesktopDialog(app, m0, { install = null, recheck = nu
     if (m.code === 'no_vnc' && m.setup === 'win32' && install) acts.append(btn('btn-create', t('Install TightVNC Server…'), () => install(m, { what: 'tightvnc', onDone: () => check() })));
     if (m.code !== 'offline' && recheck) acts.append(btn('file-tool-btn', t('Check again'), () => check()));
     const offline = m.code === 'offline';
-    input.disabled = offline; runBtn.disabled = offline; winBtn.disabled = offline; apps.disable(offline); pickDefault();
+    input.disabled = offline; runBtn.disabled = offline; winBtn.disabled = offline; if (raBtn) raBtn.disabled = offline; apps.disable(offline); pickDefault();
     const list = desktopRunPresets(m.setup, readRuns()[m.hostId]);
     input.placeholder = list.length ? t('A command, e.g. {example}', { example: list[0].cmd }) : t('A command');
     const chip = (p) => { const b = btn('file-tool-btn machine-apps-chip', p.label, () => { input.value = p.cmd; pickDefault(); input.focus(); }); b.title = p.cmd; b.disabled = offline; return b; };
@@ -414,6 +422,18 @@ export function showMachineDesktopDialog(app, m0, { install = null, recheck = nu
     saveRun(m.hostId, line);
     if (body.isConnected) render();
     showToast(t('Started on {machine}: {cmd}', { machine, cmd: r.shown }));
+  }
+  /** lane remoteapp-r1a: the line's program (src/remoteapp.js remoteappProgramOf) as a RemoteApp of this machine — the hub
+   *  judges the request and the machine's setup; a started session opens as this machine's desktop-app window. */
+  async function remoteApp() {
+    const { program, args } = remoteappProgramOf(input.value);
+    raBtn.disabled = true;
+    const r = await post('/api/desktop/machine-desktop/remoteapp', { host: m.hostId, program, args });
+    raBtn.disabled = false;
+    if (!r || r.error) { showToast(desktopRefusalText(r, m), { type: 'error' }); return; }
+    showToast(t('Opening {app} from {machine} through RemoteApp…', { app: r.label || program, machine }));
+    toWindow();
+    app.openDesktopApp(r.id);
   }
   input.onkeydown = (e) => { if (enterSubmits(e)) { e.preventDefault(); run({ window: asWindow() }); } };
   render();

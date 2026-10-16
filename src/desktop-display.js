@@ -480,9 +480,9 @@ function listenerHeldBy(port, pids, opts = {}) {
  * ChildProcess `error` with no listener is an uncaught exception, i.e. the
  * whole server (r2's HIGH). `extraStdio` adds fd 3 (`-displayfd`).
  */
-function spawnDetached(bin, args, { env, cwd, logFd = 'ignore', extraStdio = null, name = null } = {}) {
+function spawnDetached(bin, args, { env, cwd, logFd = 'ignore', extraStdio = null, name = null, stdin = 'ignore' } = {}) {
   const label = name || path.basename(String(bin));
-  const stdio = ['ignore', logFd, logFd];
+  const stdio = [stdin === 'pipe' ? 'pipe' : 'ignore', logFd, logFd]; // lane remoteapp-r1a: a pipe only for an app handed ONE stdin line (startApp's stdinOnce)
   if (extraStdio) stdio.push(extraStdio);
   let child;
   try { child = spawn(bin, args, { env, cwd: cwd || undefined, detached: true, stdio }); }
@@ -687,9 +687,33 @@ async function startWindowManager({ bins, env, logFd = 'ignore' }) {
 
 /** Spawn the APPLICATION itself, detached, stdout/err to the app log.
  *  Resolves the child once SPAWNED; rejects a spawn failure by name. */
-function startApp({ exec, args = [], cwd, env, logFd = 'ignore' }) {
+function startApp({ exec, args = [], cwd, env, logFd = 'ignore', stdinOnce = null }) {
   // design 009 §B8: an app with no cwd of its own starts in the user's HOME — never in the server's checkout
-  return spawnDetached(exec, args, { env, cwd: cwd || (env && env.HOME) || os.homedir(), logFd, name: path.basename(String(exec)) }).spawned;
+  const { spawned } = spawnDetached(exec, args, { env, cwd: cwd || (env && env.HOME) || os.homedir(), logFd, name: path.basename(String(exec)), stdin: typeof stdinOnce === 'function' ? 'pipe' : 'ignore' });
+  if (typeof stdinOnce !== 'function') return spawned;
+  // lane remoteapp-r1a (design q-024 §1.2): ONE line on the app's stdin, then the pipe CLOSED — xfreerdp `/from-stdin` reads its
+  // password there. The getter is called only once the process exists; its value goes to the pipe and nowhere else (never the
+  // argv, the env, the log, the record).
+  return spawned.then((child) => { child.stdin.on('error', () => { /* the app closed its stdin early — its exit says why */ }); child.stdin.end(`${stdinOnce()}\n`); return child; });
+}
+
+/** lane remoteapp-r1a: the hub's RDP client as FACTS — `<bin> /version` + `<bin> /buildconfig` (FreeRDP prints both and
+ *  exits; measured 3.32.1: "This is FreeRDP version 3.32.1 (3.32.1)", the build flags space-separated), read with a deadline
+ *  and kept per binary (path + size + mtime) so a launch does not spawn them twice. PURE src/remoteapp.js rdpBuildVerdict
+ *  judges them. → Promise<{ version, buildconfig }> (empty strings when a read failed — the verdict names it). */
+const rdpBuildMemo = new Map();
+function rdpBuildFacts(binPath, { deadlineMs = 4000, env = process.env } = {}) {
+  let key = null;
+  try { const st = fs.statSync(binPath); key = `${binPath}:${st.size}:${st.mtimeMs}`; } catch { return Promise.resolve({ version: '', buildconfig: '' }); }
+  if (rdpBuildMemo.has(key)) return rdpBuildMemo.get(key);
+  const run = (arg) => new Promise((resolve) => {
+    try { execFile(binPath, [arg], { env, timeout: deadlineMs, maxBuffer: 1 << 20 }, (err, out, errOut) => resolve(`${out || ''}${errOut || ''}`)); }
+    catch { resolve(''); }
+  });
+  const p = Promise.all([run('/version'), run('/buildconfig')]).then(([version, buildconfig]) => ({ version, buildconfig }));
+  rdpBuildMemo.set(key, p);
+  p.then((f) => { if (!f.version) rdpBuildMemo.delete(key); }); // a failed read is asked again next time
+  return p;
 }
 
 /**
@@ -1421,7 +1445,7 @@ module.exports = {
   assertLocal, binOnPath, resetBinMemo, forgetBin, assertExecutable, PROBE_BINS, probeBinsOf, BROWSER_BINS, browserConfinement, profileLockFact /* lane app-launch-singleton */, hostFacts, officeFacts, x11Env, NO_WAYLAND_DISPLAY, withoutWayland,
   newCookie, writeXauthority, xauthEntry, freePort, rfbBanner, waitForRfb, httpProbe, waitForHttp, waitForListen, portAnswers, LISTEN_PROBES,
   listenerInode, pidHoldsInode, listenerHeldBy,
-  spawnDetached, X_SERVER_ARGS, startXServer, startX11vnc, startWindowManager, startApp, applyXResources, waitForXftDpi, RECIPES,
+  spawnDetached, X_SERVER_ARGS, startXServer, startX11vnc, startWindowManager, startApp, applyXResources, waitForXftDpi, RECIPES, rdpBuildFacts,
   XPRA_ARGS, XPRA_GEOMETRY_MAX, XPRA_BIND_REFUSALS, startXpra, xpraWwwDir, seamlessWindows,
   pidAlive, procStart, sameProcess, procSample,
   sessionMembers, refreshSessions, sessionCensus, environHas, sessionSample, sessionSampleSync, markerCensus, environCensus,

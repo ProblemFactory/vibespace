@@ -7569,6 +7569,11 @@ export default {
   "“{title}” is not on the screen {machine} shares (minimized, or on another display)": "“{title}”不在{machine}共享的屏幕上（已最小化，或在另一个显示器上）", // lane machine-app-crop
   "Waiting for the app’s window on {machine}…": "正在等待{machine}上该应用的窗口…", // lane machine-app-crop
   "Run as its own window…": "作为独立窗口运行…", // lane machine-app-crop
+  "RemoteApp needs {machine}’s Windows sign-in and its certificate fingerprint — the RemoteApp settings that ask for them come in the next version. Until then, Run as its own window opens its apps.": "RemoteApp 需要 {machine} 的 Windows 登录和证书指纹——填写它们的 RemoteApp 设置在下一版提供。在那之前，请用「作为独立窗口运行」打开它的应用。", // lane remoteapp-r1a
+  "{machine} already shows a RemoteApp session — Windows gives one remote session per machine; use that window or stop it first": "{machine} 已经有一个 RemoteApp 会话——Windows 每台机器只给一个远程会话；请用那个窗口，或先停掉它", // lane remoteapp-r1a
+  "Open the app as a real window through Remote Desktop (Windows Pro or Enterprise)": "通过远程桌面把应用作为真正的窗口打开（Windows 专业版或企业版）", // lane remoteapp-r1a
+  "Opening {app} from {machine} through RemoteApp…": "正在通过 RemoteApp 打开 {machine} 上的 {app}…", // lane remoteapp-r1a
+  "RemoteApp…": "RemoteApp…", // lane remoteapp-r1a
   "Run": "运行",
   "This exact command starts on {machine}’s desktop, as its signed-in user:": "这条命令会原样在{machine}的桌面上、以当前登录的用户身份启动：",
   "Its desktop shows everything on {machine}’s screen, and what you type there goes to it. Only people can open it — agents cannot.": "「它的桌面」显示{machine}屏幕上的一切，你在里面输入的内容会发到那台机器。只有人能打开，智能体不能。",

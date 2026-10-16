@@ -190,7 +190,7 @@ function fail(res, e) {
     : code === 'cap' || code === 'no-backend' || code === 'backend-not-wired' || code === 'held' || code === 'not_taken' || code === 'no_lease' || code === 'not-xpra' || code === 'no_viewer' || code === 'not-ready' || code === 'relaunch-browser' || code === 'browser-absent' || code === 'snap-profile-unreachable'
       || code === 'host_needs_daemon' || code === 'no_x11' || code === 'no_apt' || code === 'no_repo' || code === 'no_sudo' || code === 'no_facts' || code === 'busy' || code === 'no_conversation' || code === 'fork_pending' || code === 'wake_paced'
       || code === 'machine-mismatch' || code === 'app-absent' || code === 'still-absent' || code === 'app-asked' || code === 'changed_outside' || code === 'lease' ? 409
-      : code === 'agent_forbidden' || code === 'not_your_window' ? 403 : code === 'not_live' ? 404 : code === 'bad_principal' || code === 'bad_mode' || code === 'share_local_only' ? 400
+      : code === 'agent_forbidden' || code === 'not_your_window' || code === 'remoteapp_door' ? 403 : code === 'not_live' ? 404 : code === 'bad_principal' || code === 'bad_mode' || code === 'share_local_only' ? 400
       : code === 'no-engine' || code === 'xpra-ui-unavailable' || code === 'host_unavailable' || code === 'install_link_lost' || code === 'host-unreachable' ? 503 : code === 'install_timeout' ? 504 : 500;
   res.status(D014_STATUS[code] || status).json({ error: String(e?.message || e), code, ...(e && e.plan ? { plan: e.plan } : {}), ...(e && e.remedy ? { remedy: e.remedy } : {}), ...(e && e.vnc ? { vnc: e.vnc, platform: e.platform || null } : {}) });
 }
@@ -406,6 +406,19 @@ router.post('/api/desktop/machine-desktop/run', async (req, res) => {
   const host = hostParam(req, res); if (!host) return;
   if (!ctx.access) return noAccess(res);
   try { res.json(await ctx.access.runOnDesktop(host, req.body ? req.body.cmd : undefined, { report: !!(req.body && req.body.window === true) })); } catch (e) { fail(res, e); }
+});
+// lane remoteapp-r1a (design q-024 §1.2): ONE app of a paired WINDOWS machine as a real window through RemoteApp — people only
+// (§1.6 fence 4: an agent never starts one). R1a: the machine's setup is asked first, so the launcher hears what is missing
+// (`remoteapp_needs_setup` — the settings card is the next version); the refusals of the launch itself by name (409 / 400).
+const RA_409 = new Set(['remoteapp_needs_setup', 'remoteapp_not_windows', 'not_desktop_machine', 'rdp_session_busy', 'rdp_client_too_old', 'rdp_client_unknown', 'remoteapp_unwired']);
+const RA_400 = new Set(['remoteapp_bad_program', 'rdp_arg_forbidden', 'rdp_cert_bad']);
+router.post('/api/desktop/machine-desktop/remoteapp', async (req, res) => {
+  if (humanOnly(req, res)) return;
+  const host = hostParam(req, res); if (!host) return;
+  if (!ctx.access || typeof ctx.access.launchRemoteApp !== 'function') return noAccess(res);
+  const b = req.body || {};
+  try { res.json(await ctx.access.launchRemoteApp(host, { program: b.program, name: b.name, args: b.args, kbdUnicode: b.kbdUnicode })); }
+  catch (e) { const c = e && e.code; if (RA_409.has(c) || RA_400.has(c)) res.status(RA_409.has(c) ? 409 : 400).json({ error: String(e.message), code: c, ...(Array.isArray(e.missing) ? { missing: e.missing } : {}) }); else fail(res, e); }
 });
 // lane machine-app-crop: ONE app of the machine as its own window — the device follows the app's window, the page crops the
 // whole picture to it (src/server/machine-app.js; people only, like the whole desktop). `not_tracked` = its watch ended.

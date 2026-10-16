@@ -1783,6 +1783,8 @@ const I_RECV = {
   'src/channel-record.js|b': ['channel block', 'a render block\'s own kind word'], 'src/channel-record.js|BLOCK_LIMITS': ['constant', 'a length limit'],
   'src/desktop-fit.js|rec': ['desktop app', 'an app label'], 'src/desktop-apps.js|row': ['desktop app', 'an app label'], 'src/desktop-browser-app.js|row': ['desktop app', 'an app label'], // rv-desktop-apps F-S1: the window / browser families' own files
   'src/desktop-serve.js|rec': ['desktop app', 'an app label'], 'src/desktop-serve.js|row': ['desktop app', 'an app label / refusal reason'],
+  'src/desktop-serve.js|busy': ['desktop app', 'lane remoteapp-r1a: the RemoteApp session already running on that machine — its app label + id in the rdp_session_busy refusal'], 'src/desktop-serve.js|rq': ['desktop app', 'lane remoteapp-r1a: a RemoteApp request\'s app name (the window label) in the launch journal line'],
+  'src/lib/machine-desktop.js|r': ['desktop app', 'lane remoteapp-r1a: the started RemoteApp record\'s app label in the "Opening … through RemoteApp" toast'],
   'src/exit-proxy.js|session': ['session', 'the conversation the network / a command is lent to — its own name (lane-pairing exit access)'], 'src/exit-proxy.js|h': ['host', 'a machine name'], 'src/hosts.js|h': ['host', 'a machine name'],
   'src/lib/app.js|BACKEND_META[h.id]': ['harness', 'a harness label'], 'src/lib/app.js|BACKEND_META[msg.backend]': ['harness', 'a harness label'],
   'src/lib/app.js|lost': ['account', 'an account'], 'src/lib/app.js|msg': ['frame', 'a server-notice / backend-status frame\'s text (its producer is judged at the `notice` sink)'],

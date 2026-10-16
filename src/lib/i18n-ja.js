@@ -7568,6 +7568,11 @@ export default {
   "“{title}” is not on the screen {machine} shares (minimized, or on another display)": "「{title}」は{machine}が共有している画面にありません（最小化されているか、別のディスプレイにあります）", // lane machine-app-crop
   "Waiting for the app’s window on {machine}…": "{machine}のアプリのウィンドウを待っています…", // lane machine-app-crop
   "Run as its own window…": "独立したウィンドウとして実行…", // lane machine-app-crop
+  "RemoteApp needs {machine}’s Windows sign-in and its certificate fingerprint — the RemoteApp settings that ask for them come in the next version. Until then, Run as its own window opens its apps.": "RemoteApp には {machine} の Windows サインインと証明書のフィンガープリントが必要です。これらを入力する RemoteApp 設定は次のバージョンで追加されます。それまでは「独立したウィンドウとして実行」でアプリを開けます。", // lane remoteapp-r1a
+  "{machine} already shows a RemoteApp session — Windows gives one remote session per machine; use that window or stop it first": "{machine} にはすでに RemoteApp セッションがあります。Windows はマシンごとにリモートセッションを 1 つしか許可しません。そのウィンドウを使うか、先に停止してください", // lane remoteapp-r1a
+  "Open the app as a real window through Remote Desktop (Windows Pro or Enterprise)": "リモートデスクトップ経由でアプリを本物のウィンドウとして開きます（Windows Pro または Enterprise）", // lane remoteapp-r1a
+  "Opening {app} from {machine} through RemoteApp…": "{machine} の {app} を RemoteApp で開いています…", // lane remoteapp-r1a
+  "RemoteApp…": "RemoteApp…", // lane remoteapp-r1a
   "Run": "実行",
   "This exact command starts on {machine}’s desktop, as its signed-in user:": "このコマンドがそのまま、{machine}のデスクトップでサインイン中のユーザーとして開始されます：",
   "Its desktop shows everything on {machine}’s screen, and what you type there goes to it. Only people can open it — agents cannot.": "「そのデスクトップ」には{machine}の画面のすべてが映り、そこで入力した内容はそのマシンに送られます。開けるのは人だけで、エージェントは開けません。",

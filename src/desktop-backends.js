@@ -55,8 +55,29 @@ const DISPLAY_BACKENDS = Object.freeze([
     fit: Object.freeze({ Xtigervnc: 'shared', Xvnc: 'shared', 'desktop-singleton:running': 'shared' }),
     wired: true,
   }),
+  // design q-024 r1 §1.1 (lane remoteapp-r1a, 2026-10-16): ONE app of a PAIRED Windows machine as a real X window — the hub's
+  // xfreerdp in RemoteApp (RAIL) mode is the app, on its own xpra display (every cell = the xpra rung's: the picture IS that
+  // xpra). `needs` is the ladder's own rule (ALL of a group): xpra AND FreeRDP 3's X client, spelled `xfreerdp` (Ubuntu 26.04
+  // freerdp-x11 3.32.1, measured) or `xfreerdp3` (Debian's freerdp3-x11) — one recipe and fit per group. The design's
+  // `[['xpra'], ['xfreerdp']]` read as "xpra OR xfreerdp" here: a hub with xpra and no client would have passed and died at the
+  // spawn, and the xfreerdp-only group named no recipe (test-desktop-apps §2 refuses that).
+  Object.freeze({
+    id: 'remoteapp', label: 'RemoteApp (RDP)', stream: 'xpra',
+    scales: true, crispText: true, perWindow: true, seamless: true, satellites: true, geometry: true, ownsDisplay: true, hostedClient: true,
+    needs: Object.freeze([Object.freeze(['xpra', 'xfreerdp']), Object.freeze(['xpra', 'xfreerdp3'])]),
+    recipes: Object.freeze({ 'xpra+xfreerdp': 'xpra-seamless', 'xpra+xfreerdp3': 'xpra-seamless' }), // one more app on the xpra rung's recipe
+    fit: Object.freeze({ 'xpra+xfreerdp': 'client', 'xpra+xfreerdp3': 'client' }), // a RAIL window's size is the remote app's; the client fits it like any X window
+    // the ONLY new cell: the app runs on a PAIRED machine, reached on its loopback through the agent (src/remoteapp.js
+    // REMOTE_KIND) — a `remote` row is never a rung of the LOCAL ladder (resolveBackend / parseBackendPrefs skip it); only
+    // the RemoteApp launch (src/desktop-serve.js) takes it
+    remote: 'rdp-loopback',
+    wired: true,
+  }),
 ]);
 const BACKEND_IDS = Object.freeze(DISPLAY_BACKENDS.map((b) => b.id));
+/** The rows a LOCAL app may land on (lane remoteapp-r1a): every row but a `remote` one — what a preference may name. */
+const ladderOf = (table) => table.filter((b) => !b.remote);
+const LADDER_IDS = Object.freeze(ladderOf(DISPLAY_BACKENDS).map((b) => b.id));
 const backendById = (id, table = DISPLAY_BACKENDS) => table.find((b) => b.id === id) || null;
 /** THE CAPABILITY CELLS a rung declares — booleans on its row (lane dc-desktop-caps, 2026-10-04). Every reader outside
  *  this file asks `capsOf(rec)` (the server) or the record's served `caps` (the client) — never a rung id or a stream kind:
@@ -114,8 +135,8 @@ function resolveBackend(hostFacts = {}, prefs = {}, table = DISPLAY_BACKENDS) {
   const bins = (hostFacts && hostFacts.bins) || {};
   const effBins = { ...bins };
   if (hostFacts && hostFacts.singletonRunning) effBins['desktop-singleton:running'] = true;
-  let order = table;
-  const ids = table.map((b) => b.id);
+  let order = ladderOf(table); // a `remote` row (RemoteApp) is never judged for a local app
+  const ids = order.map((b) => b.id);
   const pref = Array.isArray(prefs && prefs.backendPrefs) ? prefs.backendPrefs.filter((id) => ids.includes(id)) : null;
   if (pref && pref.length) order = pref.map((id) => backendById(id, table));
   // EVERY rung is judged (the route reports each one's availability with its
@@ -154,7 +175,7 @@ function fallbackLogLine(resolved) {
  * a row's prefs); empty ⇒ the table's own DA1 order. PURE.
  */
 function parseBackendPrefs(value, table = DISPLAY_BACKENDS) {
-  const ids = table.map((b) => b.id);
+  const ids = ladderOf(table).map((b) => b.id);
   const raw = Array.isArray(value) ? value : typeof value === 'string' ? value.split(/[,\s]+/) : [];
   const out = [];
   for (const v of raw) { const id = String(v || '').trim(); if (id && ids.includes(id) && !out.includes(id)) out.push(id); }
@@ -169,5 +190,5 @@ function streamKindOf(rec, table = DISPLAY_BACKENDS) {
 }
 
 module.exports = {
-  DISPLAY_BACKENDS, BACKEND_IDS, backendById, CAP_KEYS, capsOf, recipeFor, needsVerdict, resolveBackend, fallbackLogLine, parseBackendPrefs, streamKindOf,
+  DISPLAY_BACKENDS, BACKEND_IDS, LADDER_IDS, backendById, CAP_KEYS, capsOf, recipeFor, needsVerdict, resolveBackend, fallbackLogLine, parseBackendPrefs, streamKindOf,
 };

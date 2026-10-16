@@ -135,7 +135,8 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
 
   // THE MACHINE KEEPER of device #0 — in-process, ONE store shared with this registry; the policy is handed in as hooks
   const machine = DS.install({ dataDir, env, serverSetting, singleton, display, limits, registryRows, backends, log, now, tickMs, guardSampleMs, geometry, hostId, fitSlowBeltMs,
-    hooks: { view, onCommit: () => { dirty = false; notify(); }, idle: idleVerdict, readyTick, onSample: reportSample, onTeardown, onWitness: notifyWitness, onNotify, onQuickExit } });
+    hooks: { view, onCommit: () => { dirty = false; notify(); }, idle: idleVerdict, readyTick, onSample: reportSample, onTeardown, onWitness: notifyWitness, onNotify, onQuickExit },
+    remoteapp: { setup: (h) => acc().remoteappSetup(h), forward: (h) => acc().remoteappForward(h) } }); // lane remoteapp-r1a: a RemoteApp's way to its machine (late-bound)
   /** The shared store, read through the machine (it owns load/save). */
   const store = { get apps() { return machine._store().apps; } };
 

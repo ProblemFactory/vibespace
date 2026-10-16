@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.288 — 2026-10-16
+
+### Added
+- A single app on a paired Windows machine can open as a RemoteApp window (first step: the display mode and the launch).
+
 ## 2.369.287 — 2026-10-16
 
 ### Fixed

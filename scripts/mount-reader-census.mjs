@@ -41,8 +41,8 @@ export const ROWS = [
   ['src/conversation-index.js', 'own-tree', 1, null, DATA],
   ['src/ctx-sync.js', 'user-path', 4, 'DOOR\\.blocked\\(', 'the group context folder walk: refused by name before the device is dialled'],
   ['src/design-fs.js', 'user-path', 7, 'DOOR\\.blocked\\(', 'the design folder read: storage_blocked by name'],
-  ['src/desktop-display.js', 'own-tree', 24, null, PROC], // +3 lane app-display-portal: portal binaries stat'd in /usr/libexec, the app dir's bus socket, /proc/self/mountinfo; +1 lane app-display-notify-sink: the sink file beside the module; +1 lane app-launch-singleton: the holder of a browser's default profile (/proc/<pid>/stat — its SingletonLock is a readlink in the browser's own tree under ~)
-  ['src/desktop-serve.js', 'own-tree', 12, null, DATA], // +2 lane app-display-notify-sink: the app's notification journal (stat + read) in its own 0700 portal dir
+  ['src/desktop-display.js', 'own-tree', 25, null, PROC], // +3 lane app-display-portal: portal binaries stat'd in /usr/libexec, the app dir's bus socket, /proc/self/mountinfo; +1 lane app-display-notify-sink: the sink file; +1 lane remoteapp-r1a: the RDP client binary stat'd (its build facts' memo key) beside the module; +1 lane app-launch-singleton: the holder of a browser's default profile (/proc/<pid>/stat — its SingletonLock is a readlink in the browser's own tree under ~)
+  ['src/desktop-serve.js', 'own-tree', 13, null, DATA], // +2 lane app-display-notify-sink: the app's notification journal (stat + read) in its own 0700 portal dir; +1 lane remoteapp-r1a: the tail of a RemoteApp session's own app.log (why it ended)
   ['src/device-mount.js', 'exempt', 5, null, 'the device pull mount: /proc scans + its own mount point (its owner’s liveness)'],
   ['src/discovery-facts.js', 'own-tree', 5, null, PROC],
   ['src/exit-proxy.js', 'user-path', 10, 'DOOR\\.blocked\\(', 'an exit-run transfer’s local side: refused by name (transfer_failed)'],

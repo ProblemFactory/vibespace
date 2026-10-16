@@ -37,7 +37,7 @@ const S = require('./install-slot'); // PURE — the machine's ONE package slot 
 const { planLines, PKG_RE, APT_LOCK_WAIT_S, packageInstallPlan, installArgv, INSTALL_FILES, INSTALL_UNRECORDED_EXIT, INSTALL_LOCK_PREFIX, INSTALL_RUNNER, INSTALL_LAUNCHER, installLauncherArgv } = S;
 // rv-desktop-apps F-S1 (lane dc-seams-desktop, 2026-10-05): the ladder, the app's window (fit / scale / close), the browser
 // families and a machine's whole desktop live in their OWN files — this model re-exports each name, unchanged
-const { DISPLAY_BACKENDS, BACKEND_IDS, backendById, CAP_KEYS, capsOf, recipeFor, needsVerdict, resolveBackend, fallbackLogLine, parseBackendPrefs, streamKindOf } = require('./desktop-backends.js');
+const { DISPLAY_BACKENDS, BACKEND_IDS, LADDER_IDS, backendById, CAP_KEYS, capsOf, recipeFor, needsVerdict, resolveBackend, fallbackLogLine, parseBackendPrefs, streamKindOf } = require('./desktop-backends.js');
 const { BROWSER_KINDS, BROWSER_BINS, isForbiddenBrowserArg, browserRowFor, URL_MAX, validateBrowserUrl, within, REAL_BROWSER_ROOTS, profileDirVerdict, browserArgv, CHROMIUM_FRAME_MARKER, chromiumFramePrefs, BROWSER_A11Y_FLAG, BROWSER_A11Y_ENV, CHROMIUM_A11Y_ENV, firefoxUserJs, browserFamilyOf, defaultProfileDirOf, singletonLockFact } = require('./desktop-browser-app.js');
 const { fitPolicyOf, keeperFits, topLevelWindows, appWindows, appFitPlan, appMainWindow, APP_TITLE_MAX, windowTitleOf, APP_SCALES, EXPLICIT_SCALES, SCALE_CHOICES, SCALE_ORIGINS, parseScaleChoice, SCALE_MAX, UI_SCALE_RANGE, normalizeDpr, normalizeUiScale, effectiveScale, appScaleFor, scalePick, normalizeScale, SCALE_RULES, round4, scaleKnobs, scaleRuleOf, renderOf, relaunchPaneCss, validateRelaunchRequest, relaunchLeaseVerdict, askCloseVerdict, relaunchVerdict, relaunchBodyOf, scaleMenuModel, OUTER_CLOSE_AGAIN_MS, windowsLeftCount, exitCloseVerdict, outerCloseVerdict, RUNNING_STATES, sameAppRecord, launchVerdict } = require('./desktop-fit.js');
 const { DESKTOP_PLATFORMS, MACHINE_DESKTOP_PORT, MACHINE_DESKTOP_PREFIX, machineDesktopId, machineDesktopHost, desktopPickRow, RUN_LINE_MAX, psQuote, psEncoded, desktopRunPlan, DESKTOP_RUN_PRESETS, RUN_REMEMBER_MAX, desktopRunPresets, rememberRun, TIGHTVNC, TIGHTVNC_NO_ADMIN_EXIT, tightvncInstallPlan, TIGHTVNC_INSTALL } = require('./machine-desktop-model.js');
@@ -77,7 +77,7 @@ function validateAppRow(row) {
   }
   if (row.category !== undefined && row.category !== null && !cleanStr(row.category, 40)) return { ok: false, error: 'category must be a short string' };
   if (row.backendPrefs !== undefined && row.backendPrefs !== null) {
-    if (!Array.isArray(row.backendPrefs) || row.backendPrefs.some((b) => !BACKEND_IDS.includes(b))) return { ok: false, error: `backendPrefs may only name ${BACKEND_IDS.join('/')}` };
+    if (!Array.isArray(row.backendPrefs) || row.backendPrefs.some((b) => !LADDER_IDS.includes(b))) return { ok: false, error: `backendPrefs may only name ${LADDER_IDS.join('/')}` }; // lane remoteapp-r1a: never the RemoteApp row
   }
   if (row.needsWayland !== undefined && typeof row.needsWayland !== 'boolean') return { ok: false, error: 'needsWayland must be a boolean' };
   // B-bfe6: a BROWSER row names its family, the bare exec names it may resolve to (first on PATH wins), and may never
@@ -805,7 +805,7 @@ function sessionBusCensus({ universe = [], activatable = [], table = SESSION_BUS
 module.exports = {
   LIMITS, DESKTOP_SINGLETON_ID, APP_STATES, LIVE_STATES, DEFAULT_IDLE_TIMEOUT_MIN, KEEPER_ENV,
   APP_SECRETS_MODES, APP_SECRETS_DEFAULT, appSecretsMode, SECRETS_NAME, SECRETS_STORE_FILE, SECRETS_KEY_FILE, secretServicePlan, secretsCountOf, // lane app-display-secrets (+ display-secret-fd: the key file)
-  DISPLAY_BACKENDS, BACKEND_IDS, backendById, CAP_KEYS, capsOf, recipeFor, needsVerdict, resolveBackend, fallbackLogLine, parseBackendPrefs, streamKindOf,
+  DISPLAY_BACKENDS, BACKEND_IDS, LADDER_IDS, backendById, CAP_KEYS, capsOf, recipeFor, needsVerdict, resolveBackend, fallbackLogLine, parseBackendPrefs, streamKindOf,
   fitPolicyOf, keeperFits, topLevelWindows, appWindows, appFitPlan, appMainWindow, windowTitleOf, APP_TITLE_MAX,
   validateAppRow, validateLaunchRequest, DEFAULT_REGISTRY, APP_SCALES, normalizeDpr, appScaleFor, scaleKnobs, SCALE_RULES, scaleRuleOf, renderOf, relaunchPaneCss, // lane D (a)
   BROWSER_EXEC_RE, BROWSER_APP_ID_RE, isBrowserName, launchedProgram, browserLaunchVerdict,

@@ -3961,7 +3961,7 @@ console.log('§DB1 a display backend is one row: no rung-id / stream-kind branch
   const scan = (files) => { const hits = []; for (const [f, t] of files) if (!OWNERS.has(f)) t.split('\n').forEach((l, i) => { if (BRANCH.test(l) && !INSTALL_WHAT.test(l)) hits.push(`${f}:${i + 1}`); }); return hits; };
   const files = [...walk('src'), 'server.js'].map((f) => [f, read(f)]);
   const hits = scan(files);
-  ok(IDS.length === 4 && hits.length === 0, `§DB1 no file outside the owners branches on a rung id / stream kind (${IDS.join(', ')} — derived from DISPLAY_BACKENDS): ${hits.length}${hits.length ? ' — ' + hits.join(', ') + ' (read the row: capsOf(rec).<cell>)' : ''}`);
+  ok(IDS.length === 5 && hits.length === 0, `§DB1 no file outside the owners branches on a rung id / stream kind (${IDS.join(', ')} — derived from DISPLAY_BACKENDS): ${hits.length}${hits.length ? ' — ' + hits.join(', ') + ' (read the row: capsOf(rec).<cell>)' : ''}`);
   const daw = files.find(([f]) => f === 'src/lib/desktop-app-window.js')[1];
   const planted = scan([['src/lib/desktop-app-window.js', daw.replaceAll("if (!cap(rec, 'scales')) return '';", "if (!rec || rec.stream !== 'xpra') return '';")], ['src/desktop-serve.js', "const own = rec.backend !== M.DESKTOP_SINGLETON_ID;"]]);
   ok(planted.length === 3, `§DB1 CONTROL: the restored \`rec.stream !== 'xpra'\` (scaleChipText, scaleChipTitle) and a planted singleton-id branch are caught (${planted.length})`);

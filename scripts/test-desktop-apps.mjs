@@ -78,7 +78,7 @@ ok(Number.isInteger(L.CONCURRENT_CAP) && L.CONCURRENT_CAP >= 1, `CONCURRENT_CAP 
 }
 
 console.log('§2 DISPLAY_BACKENDS — the capability table');
-ok(same(M.BACKEND_IDS, ['xpra', 'vnc-display', 'desktop-singleton']), 'three rungs in DA1 order: xpra > vnc-display > desktop-singleton');
+ok(same(M.BACKEND_IDS, ['xpra', 'vnc-display', 'desktop-singleton', 'remoteapp']) && same(M.LADDER_IDS, ['xpra', 'vnc-display', 'desktop-singleton']), 'three LOCAL rungs in DA1 order: xpra > vnc-display > desktop-singleton — then the remoteapp row (lane remoteapp-r1a: `remote`, never on the local ladder; scripts/test-remoteapp.mjs §1)');
 for (const b of M.DISPLAY_BACKENDS) {
   ok(M.CAP_KEYS.every((k) => typeof b[k] === 'boolean') && !('adaptive' in b) && Array.isArray(b.needs) && b.needs.every((g) => Array.isArray(g) && g.length) && ['rfb', 'xpra'].includes(b.stream) && typeof b.wired === 'boolean', `row ${b.id} declares every capability cell (${M.CAP_KEYS.join('/')}) + needs/stream/wired`);
   ok(Object.isFrozen(b) && Object.isFrozen(b.needs), `row ${b.id} is frozen (a rung is a declaration, not state)`);

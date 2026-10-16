@@ -401,8 +401,9 @@ function relaunchVerdict(rec, backends = DISPLAY_BACKENDS) {
   // profile onto the successor (a browser locks its profile dir, so the successor cannot start beside it), then starts it
   return null;
 }
-/** The launch body that starts the same app again: a catalog row by its id, a typed command as typed. */
+/** The launch body that starts the same app again: a catalog row by its id, a typed command as typed, a RemoteApp as its request. */
 function relaunchBodyOf(rec) {
+  if (rec.remoteapp && typeof rec.remoteapp === 'object') return { remoteapp: { ...rec.remoteapp } }; // lane remoteapp-r1a: the same app of the same machine — a new forward, the setup read again
   if (rec.source === 'registry' && rec.appId) return { appId: rec.appId, ...(rec.office && rec.file ? { file: rec.file } : {}) }; // §7.9: a document's app reopens its document
   return { exec: rec.exec, args: Array.isArray(rec.args) ? rec.args.slice() : [], cwd: rec.cwd || null, label: rec.label };
 }
