@@ -30,6 +30,23 @@
 //   argv `/p:` ⇒ the record + cmdline sinks see it; the client's XDG_CONFIG_HOME dropped ⇒ the stored certificate wins
 //   over a wrong pin (it connects); `/d:` dropped ⇒ the fake reads the password as the domain and the session ends cancelled;
 //   the door check dropped ⇒ the generic launch starts a RemoteApp
+// LANE REMOTEAPP-R1B — THE SEALED ROW (design §1.3–§1.6): the same chain over the REAL integration store (`remoteapp/<hostId>`)
+// and the settings card's routes, the fake as the machine's certificate (scripts/fixtures/remoteapp/server-a.pem / -b):
+//   §8 the card's doors — people only (an agent token on every one ⇒ 403, so no transcript can carry a sign-in); save SEALS
+//      (the file holds ciphertext, the answer says "set"); no pin ⇒ the launch refused naming First connection; the first
+//      connection = ONE `/auth-only /from-stdin:force /cert:tofu` run in its OWN fresh config dir (gone after), the pin = the
+//      machine certificate's sha256, the forward closed; the launch then reads the sealed row (stdin = the password, the pin
+//      = the stored one); a relaunch reads the row AGAIN (a password changed meanwhile is the one handed over); a changed
+//      certificate ⇒ the launch ends rdp_cert_changed, the card says refused, 「重新信任」 pins the new one; a wrong
+//      password ⇒ rdp_auth_failed, nothing pinned; the facts door answers a machine's rows, an old agent `agent_too_old`
+//      naming the version it needs; a second session ⇒ rdp_session_busy; the forward stays loopback; two first connections at once
+//      with a cold build read ⇒ ONE client run + rdp_trust_busy (verify r1; CONTROL: the pre-fix mark order runs two)
+//   §9 THE SINKS of the sealed chain — the password's bytes ONLY in the store's sealed record (opened by resolveMachine) and
+//      the child's stdin: never in the machine view, a route answer, the record, /proc cmdline / environ, the console, the
+//      logs, app.log (a client that PRINTED it is scrubbed at its teardown), any file under the data dir (integrations.json
+//      holds ciphertext), any WS broadcast, any audit row, GET /api/desktop/apps
+//   CONTROLS: a planted machine-view leak (the secret field drawn like a plain one) ⇒ the view sink sees it; the teardown
+//   scrub dropped ⇒ the printed password stays in app.log
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
@@ -226,7 +243,7 @@ await section('§5 the door\'s refusals — by name, nothing opened', async () =
   setup = null;
   const ns = await post('/api/desktop/machine-desktop/remoteapp', { host: HOST, program: PROGRAM });
   const nv = JSON.parse(ns.text);
-  ok(ns.status === 409 && nv.code === 'remoteapp_needs_setup' && JSON.stringify(nv.missing) === JSON.stringify(['user', 'password', 'certificate']) && /needs its Windows user name, its Windows password and its Remote Desktop certificate fingerprint — the RemoteApp settings card that asks for them comes in the next version/.test(nv.error) && /Lab PC/.test(nv.error), 'no setup ⇒ 409 remoteapp_needs_setup naming every missing part, the machine by its name, and the NEXT version', nv);
+  ok(ns.status === 409 && nv.code === 'remoteapp_needs_setup' && JSON.stringify(nv.missing) === JSON.stringify(['user', 'password', 'certificate']) && /needs its Windows user name, its Windows password and its Remote Desktop certificate fingerprint — give them once on its RemoteApp settings card/.test(nv.error) && /Lab PC/.test(nv.error), 'no setup ⇒ 409 remoteapp_needs_setup naming every missing part, the machine by its name, and its door (the RemoteApp settings card, r1b)', nv);
   setup = { user: 'someone', domain: '', certFp: FP, pw: () => PW };
   platform = 'darwin';
   const mac = await post('/api/desktop/machine-desktop/remoteapp', { host: HOST, program: PROGRAM });
@@ -361,6 +378,187 @@ await section('CONTROLS — the door check', async () => {
   if (vd && vd.id) { await until(() => { const x = dsd.get(vd.id); return x && x.state !== 'launching' ? x : null; }); await dsd.stop(vd.id).catch(() => { }); await until(() => accd.forwards().length === 0, 5000); }
 });
 
-for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 4 })) ok(r.pass, 'tree: ' + r.name, r.pass ? undefined : r.detail);
+// ═══ LANE REMOTEAPP-R1B — the sealed row (§8) + its sinks (§9) ═══
+const IS = require(path.join(repo, 'src/server/integration-store.js'));
+const RAm = require(path.join(repo, 'src/remoteapp.js'));
+const PEM_A = path.join(repo, 'scripts/fixtures/remoteapp/server-a.pem'), PEM_B = path.join(repo, 'scripts/fixtures/remoteapp/server-b.pem');
+const fpOf = (f) => new crypto.X509Certificate(fs.readFileSync(f)).fingerprint256.toLowerCase();
+const PW2 = ['Kp', crypto.randomBytes(5).toString('hex'), '!z9'].join('');
+const sealedDir = path.join(root, 'data-sealed');
+const sFrames = [], audits = [];
+let serverPem = PEM_A, leak = '0';
+const storeS = IS.create({ dataDir: sealedDir, env: {}, broadcast: (m) => sFrames.push(JSON.stringify(m)), log: spyLog });
+let factsAnswer = null;
+const dmS = { ...dm, remoteappFacts: async () => { if (factsAnswer === 'old') { const e = new Error('daemon lacks remoteapp-facts (capabilities gate)'); e.code = 'host_needs_daemon'; e.daemonVersion = '2.369.250'; throw e; } return factsAnswer; } };
+const hostsS = { ...hosts, deviceBounded: async () => dmS };
+let keeperS = null;
+const accS = A.create({ hosts: hostsS, local: () => keeperS.machine, install: false, integrations: storeS, audit: (line) => { audits.push(JSON.stringify(line)); return line; }, log: spyLog });
+// the server's fingerprint is PASSED (the sh fake parses no certificate); its PEM is only what `/cert:tofu` stores
+const sealedEnv = (over = {}) => () => ({ ...baseEnv()(), VS_FAKE_RDP_SERVER_FP: fpOf(serverPem), VS_FAKE_RDP_SERVER_PEM: serverPem, VS_FAKE_RDP_PASSWORD_SHA256: sha(PW2), VS_FAKE_RDP_LEAK: leak, ...over });
+keeperS = K.create({ dataDir: sealedDir, env: sealedEnv(), broadcast: (m) => frames.push(JSON.stringify(m)), display: stubDisplay({ xfreerdp: FAKE }), access: () => accS, log: spyLog, serverSetting: () => undefined });
+R.setup({ keeper: keeperS, access: accS, vnc: {} });
+const answers = [];
+const postS = async (url, body, headers) => { const r = await post(url, body, headers); answers.push(r.text); return { ...r, json: (() => { try { return JSON.parse(r.text); } catch { return null; } })() }; };
+const getS = async (url, headers = {}) => { const r = await fetch(base + url, { headers }); const text = await r.text(); answers.push(text); return { status: r.status, text, json: (() => { try { return JSON.parse(text); } catch { return null; } })() }; };
+const startOf = (pid) => (fakeSaw(pid).find((x) => x.phase === 'start') || {});
+const lastTrustRun = () => { const all = fs.readFileSync(recFile, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); const st = all.filter((x) => x.phase === 'start' && x.argv.includes('/auth-only')).pop(); return st ? all.filter((x) => x.pid === st.pid) : []; };
+let sealedRec = null;
+const settleS = (id, ms = 10000) => until(() => { const r = keeperS.get(id); return r && r.state !== 'launching' ? r : null; }, ms);
+const endedS = (id, ms = 10000) => until(() => { const r = keeperS.get(id); return r && !['launching', 'ready'].includes(r.state) ? r : null; }, ms);
+await section('§8 the sealed row — the card\'s doors, the first connection, the launch reads the store', async () => {
+  const AG = { authorization: 'Bearer ' + 'v'.repeat(8) };
+  const ag = [await getS(`/api/desktop/machine-desktop/remoteapp/setup?host=${HOST}`, AG), await getS(`/api/desktop/machine-desktop/remoteapp/facts?host=${HOST}`, AG), await postS('/api/desktop/machine-desktop/remoteapp/setup', { host: HOST, user: 'x', password: PW2 }, AG), await postS('/api/desktop/machine-desktop/remoteapp/trust', { host: HOST }, AG)];
+  ok(ag.every((r) => r.status === 403 && r.json.code === 'human_only') && storeS.machineView('remoteapp', HOST).hasValues === false, 'an agent token on every door of the card (setup GET / POST, facts, trust) ⇒ 403 human_only, nothing stored — no agent turn can carry a sign-in (the transcript sink)', ag.map((r) => r.status));
+  const sv = await postS('/api/desktop/machine-desktop/remoteapp/setup', { host: HOST, user: 'someone', password: PW2, certFp: 'aa:' + 'bb:'.repeat(30) + 'cc' });
+  ok(sv.status === 200 && sv.json.setup.set.password === true && sv.json.setup.values.user === 'someone' && sv.json.setup.values.certFp === '' && !sv.text.includes(PW2), 'save: the password SEALED (the answer says "set", never its bytes); a certFp in the body is NOT taken (only the first connection pins one)', sv.json);
+  const file = fs.readFileSync(path.join(sealedDir, 'integrations.json'), 'utf8');
+  ok(file.includes(`remoteapp/${HOST}`) && !file.includes(PW2) && storeS.resolveMachine('remoteapp', HOST).values.password === PW2, 'integrations.json holds remoteapp/<hostId> with the password as ciphertext; the store opens it for its consumer');
+  const bad = await postS('/api/desktop/machine-desktop/remoteapp/setup', { host: HOST, password: 'two\nlines' });
+  ok(bad.status === 400 && bad.json.code === 'invalid-values' && /password: one line/.test(bad.json.error), 'a password with a line break (it is ONE stdin line) ⇒ 400 invalid-values by name, nothing changed', bad.json);
+  const nopin = await postS('/api/desktop/machine-desktop/remoteapp', { host: HOST, program: PROGRAM });
+  ok(nopin.status === 409 && nopin.json.code === 'remoteapp_needs_setup' && JSON.stringify(nopin.json.missing) === '["certificate"]' && /press First connection on its RemoteApp settings card/.test(nopin.json.error) && accS.forwards().length === 0, 'saved but not pinned ⇒ the launch is refused naming First connection; nothing opened', nopin.json);
+  // the first connection
+  const tr = await postS('/api/desktop/machine-desktop/remoteapp/trust', { host: HOST });
+  const run = lastTrustRun();
+  const st = run.find((x) => x.phase === 'start'), stdin = run.find((x) => x.phase === 'stdin');
+  ok(tr.status === 200 && tr.json?.setup?.values?.certFp === fpOf(PEM_A) && tr.json.setup.missing.length === 0 && tr.json.setup.changed === false, 'the first connection PINS the machine certificate\'s sha256 (the fixture server-a\'s) on the sealed row', tr.json);
+  ok(st && JSON.stringify(st.argv.slice(1)) === JSON.stringify(['/u:someone', '/d:', '/from-stdin:force', '/cert:tofu', '/auth-only', '/log-level:WARN']) && /^\/v:127\.0\.0\.1:\d+$/.test(st.argv[0]) && !st.argv.some((x) => /\/app:/.test(x)) && st.env.DISPLAY === null, 'its argv: the forward, /u:, /d:, /from-stdin:force, /cert:tofu, /auth-only — NO app, no display', st && st.argv);
+  ok(stdin && stdin.lines === 1 && stdin.password.sha256 === sha(PW2) && run.some((x) => x.why === 'auth-only-ok'), 'it read ONE stdin line = the sealed password (sha256), and signed in', stdin);
+  ok(st && /\/rdp-trust-da-[\w-]+$/.test(st.env.XDG_CONFIG_HOME) && st.env.XDG_CONFIG_HOME.startsWith(keeperS.logRoot) && !fs.existsSync(st.env.XDG_CONFIG_HOME) && accS.forwards().length === 0, 'its OWN fresh config dir (under the keeper\'s dir) is gone after; the forward closed', st && st.env.XDG_CONFIG_HOME);
+  ok(audits.some((a) => /"verb":"remoteapp-trust"/.test(a) && a.includes(fpOf(PEM_A)) && /"ok":true/.test(a)) && audits.some((a) => /"verb":"remoteapp-setup"/.test(a) && /"fields":\["user","password"\]/.test(a)), 'one audit line per change: the setup (the field NAMES) and the first connection (the pin) — never a value', audits);
+  // the launch reads the sealed row
+  const l = await postS('/api/desktop/machine-desktop/remoteapp', { host: HOST, program: PROGRAM });
+  sealedRec = l.json && l.json.id ? await settleS(l.json.id) : null;
+  const pid = sealedRec && sealedRec.pids.app;
+  const saw = await until(() => { const sw = fakeSaw(pid); return sw.some((x) => x.phase === 'connected') ? sw : null; }, 8000);
+  const ls = saw && saw.find((x) => x.phase === 'stdin');
+  ok(sealedRec && sealedRec.state === 'ready' && sealedRec.rdp.certFp === fpOf(PEM_A) && startOf(pid).argv.includes(`/cert:deny,fingerprint:sha256:${fpOf(PEM_A)}`) && ls && ls.password.sha256 === sha(PW2), 'the launch reads the SEALED row: the pinned certificate in its argv, the sealed password on its stdin', { state: sealedRec && sealedRec.state, ls });
+  const busy = await postS('/api/desktop/machine-desktop/remoteapp/trust', { host: HOST });
+  ok(busy.status === 409 && busy.json?.code === 'rdp_session_busy' && !!sealedRec && busy.json.error.includes(sealedRec.id), 'a first connection while a session runs ⇒ 409 rdp_session_busy naming it', busy.json);
+  const fw = accS.forwards();
+  ok(fw.length === 1 && fw[0].localPort === sealedRec?.rdp?.port && fw[0].remotePort === 3389, 'one loopback forward to the machine\'s 3389 (the hub side 127.0.0.1 only)');
+  // a relaunch reads the row AGAIN: a password changed meanwhile is the one handed over
+  const PW3 = PW2 + 'Q';
+  await postS('/api/desktop/machine-desktop/remoteapp/setup', { host: HOST, password: PW3 });
+  const rl = sealedRec ? await keeperS.relaunch(sealedRec.id, { scale: 1 }).catch(() => null) : null;
+  const b = rl && rl.app ? await until(() => { const x = keeperS.get(rl.app.id); return x && x.state !== 'launching' ? x : null; }) : null;
+  const sawB = await until(() => { const sw = fakeSaw(b && b.pids.app); return sw.some((x) => ['connected', 'end'].includes(x.phase)) ? sw : null; }, 8000);
+  const stB = sawB && sawB.find((x) => x.phase === 'stdin');
+  ok(stB && stB.password.sha256 === sha(PW3), 'the relaunch read the sealed row AGAIN — the password saved meanwhile is the one on its stdin (never carried from the first launch)', stB);
+  if (b) await keeperS.machine.stop(b.id).catch(() => { }); await until(() => accS.forwards().length === 0);
+  await postS('/api/desktop/machine-desktop/remoteapp/setup', { host: HOST, password: PW2 });
+  // a changed certificate
+  serverPem = PEM_B;
+  const c = await postS('/api/desktop/machine-desktop/remoteapp', { host: HOST, program: PROGRAM });
+  const ce = c.json && c.json.id ? await endedS(c.json.id) : null;
+  const gv = await getS(`/api/desktop/machine-desktop/remoteapp/setup?host=${HOST}`);
+  ok(ce && ce.rdp.ended === 'rdp_cert_changed' && gv.json?.setup?.refused?.code === 'rdp_cert_changed' && gv.json.setup.refused.id === ce.id, 'the machine shows ANOTHER certificate ⇒ the launch ends rdp_cert_changed, and the card\'s view says refused (under the pin still in force)', { ended: ce && ce.rdp, refused: gv.json?.setup?.refused });
+  await until(() => accS.forwards().length === 0);
+  const re = await postS('/api/desktop/machine-desktop/remoteapp/trust', { host: HOST });
+  ok(re.status === 200 && re.json?.setup?.values?.certFp === fpOf(PEM_B) && re.json.setup.changed === true && re.json.setup.refused === null && audits.some((a) => a.includes(`"replaced":"${fpOf(PEM_A)}"`)), '「重新信任」 pins the new certificate (changed, the old one named in the audit line), and the refusal no longer stands', re.json && re.json.setup && { fp: re.json.setup.values.certFp, changed: re.json.setup.changed, refused: re.json.setup.refused, audit: audits.slice(-1) });
+  const l2 = await postS('/api/desktop/machine-desktop/remoteapp', { host: HOST, program: PROGRAM });
+  const r2 = l2.json && l2.json.id ? await settleS(l2.json.id) : null;
+  ok(r2 && r2.state === 'ready' && r2.rdp.certFp === fpOf(PEM_B), 'the next launch connects under the new pin');
+  if (r2) await keeperS.machine.stop(r2.id).catch(() => { }); await until(() => accS.forwards().length === 0);
+  // a wrong password at the first connection pins nothing
+  await postS('/api/desktop/machine-desktop/remoteapp/setup', { host: HOST, password: PW2 + 'x' });
+  serverPem = PEM_A;
+  const wp = await postS('/api/desktop/machine-desktop/remoteapp/trust', { host: HOST });
+  ok(wp.status === 409 && wp.json.code === 'rdp_auth_failed' && /nothing was pinned/.test(wp.json.error) && storeS.machineView('remoteapp', HOST).values.certFp === fpOf(PEM_B) && accS.forwards().length === 0, 'a wrong password ⇒ 409 rdp_auth_failed, the pin unchanged (the certificate it was shown is NOT taken), the forward closed', wp.json);
+  await postS('/api/desktop/machine-desktop/remoteapp/setup', { host: HOST, password: PW2 });
+  serverPem = PEM_B;
+  // the facts door
+  factsAnswer = RAm.parseRemoteappFacts(JSON.stringify({ t: 'remoteapp-facts', edition: 'Core', product: 'Windows 11 Home', deny: '1', listening: 0, allowList: null, gpu: null }));
+  const fh = await getS(`/api/desktop/machine-desktop/remoteapp/facts?host=${HOST}`);
+  ok(fh.status === 200 && fh.json.ok && fh.json.ready === false && JSON.stringify(fh.json.rows.map((r) => r.code)) === '["edition_home","rdp_off","allowlist_off","gpu_off"]', 'the facts door: a Home machine with Remote Desktop off ⇒ its rows, each unmet with its sentence code, not ready', fh.json);
+  factsAnswer = 'old';
+  const fo = await getS(`/api/desktop/machine-desktop/remoteapp/facts?host=${HOST}`);
+  ok(fo.status === 200 && fo.json.code === 'agent_too_old' && fo.json.have === '2.369.250' && fo.json.need === require(path.join(repo, 'package.json')).version, 'an agent that predates the op ⇒ agent_too_old naming the version it has and the one it needs (this hub\'s), never asked', fo.json);
+  // verify r1 (RED low): two first connections at ONCE while the client's build read is cold (a boot's first pair of clicks) ⇒ ONE
+  // `/auth-only` run and one rdp_trust_busy — the mark is taken with the check, before any await. CONTROL: the pre-fix order
+  // (the mark after the build read + the sign-in) runs the client twice.
+  const authStarts = () => (fs.existsSync(recFile) ? fs.readFileSync(recFile, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((x) => x.phase === 'start' && x.argv.includes('/auth-only')).length : 0);
+  const slowBuild = { rdpBuildFacts: async (...a) => { await sleep(200); return D.rdpBuildFacts(...a); } };
+  const racePair = async (DSmod, tag) => {
+    let ds = null;
+    const accR = A.create({ hosts: hostsS, local: () => ds, install: false, integrations: storeS, log: spyLog });
+    ds = DSmod.install({ dataDir: path.join(root, `race-${tag}`), env: sealedEnv(), display: { ...stubDisplay({ xfreerdp: FAKE }), ...slowBuild }, log: spyLog, remoteapp: { setup: (h) => accR.remoteappSetup(h), forward: (h) => accR.remoteappForward(h), signin: (h) => accR.remoteappSignin(h) } });
+    const before = authStarts();
+    const codes = await Promise.all([accR.trustRemoteApp(HOST).then(() => 'ok', (e) => e.code), accR.trustRemoteApp(HOST).then(() => 'ok', (e) => e.code)]);
+    await until(() => accR.forwards().length === 0, 5000);
+    return { codes, runs: authStarts() - before };
+  };
+  const DSreal = require(path.join(repo, 'src/desktop-serve.js'));
+  const fixed = await racePair(DSreal, 'fixed');
+  ok(fixed.runs === 1 && fixed.codes.includes('rdp_trust_busy') && fixed.codes.includes('ok'), 'two first connections at once with a COLD build read ⇒ one runs, the other is refused rdp_trust_busy — ONE /auth-only sign-in to the machine', fixed);
+  const Ssrc = fs.readFileSync(path.join(repo, 'src/desktop-serve.js'), 'utf8');
+  const cutR = (src, from, to) => { if (src.split(from).length !== 2) throw new Error(`anchor not unique: ${from.slice(0, 70)}`); return src.replace(from, to); };
+  const markLine = "    rdpTrusting.add(hostId); // taken with the check, BEFORE any await (verify r1: two clicks during a cold build read both ran /auth-only)\n";
+  const signLine = "      const signin = await remoteapp.signin(hostId); // refuses a missing user / password BY NAME\n";
+  const preFix = MUT.load('src/desktop-serve.js', cutR(cutR(Ssrc, markLine, ''), signLine, signLine + '      rdpTrusting.add(hostId);\n'), 'trust-race');
+  const ctl = await racePair(preFix, 'prefix');
+  ok(ctl.runs === 2 && !ctl.codes.includes('rdp_trust_busy'), 'CONTROL: with the mark taken after the build read + the sign-in (the pre-fix order) BOTH clicks run /auth-only — the leg above would be red', ctl);
+});
+
+await section('§9 THE SINKS of the sealed chain — the password only in the sealed record and the child\'s stdin', async () => {
+  // a client that PRINTS the password (VS_FAKE_RDP_LEAK) — its app.log is scrubbed at the session's teardown
+  leak = '1';
+  const l = await postS('/api/desktop/machine-desktop/remoteapp', { host: HOST, program: PROGRAM });
+  const r = await settleS(l.json.id);
+  const pid = r && r.pids.app;
+  await until(() => fakeSaw(pid).some((x) => x.phase === 'connected'), 8000);
+  const logFile = path.join(keeperS.logRoot, r.id, 'app.log');
+  const printed = await until(() => fs.readFileSync(logFile, 'utf8').includes(`password=${PW2}`), 4000);
+  const holds = (b) => Buffer.isBuffer(b) ? b.includes(Buffer.from(PW2)) : String(b).includes(PW2);
+  const sinks = [];
+  const look = (name, data) => sinks.push([name, holds(data)]);
+  look('/proc/<pid>/cmdline', fs.readFileSync(`/proc/${pid}/cmdline`));
+  look('/proc/<pid>/environ', fs.readFileSync(`/proc/${pid}/environ`));
+  look('the record\'s argv', JSON.stringify(r.args));
+  await post(`/api/desktop/apps/${r.id}/stop`, {}); const end = await endedS(r.id);
+  await until(() => accS.forwards().length === 0);
+  leak = '0';
+  look('app.log (after its teardown)', fs.readFileSync(logFile));
+  look('the record (lastError included)', JSON.stringify(end));
+  const gv = await getS(`/api/desktop/machine-desktop/remoteapp/setup?host=${HOST}`);
+  look('the machine view (GET …/remoteapp/setup)', gv.text);
+  look('the store\'s machineView', JSON.stringify(storeS.machineView('remoteapp', HOST)));
+  look(`every answer of the card's routes (${answers.length})`, answers.join('\n'));
+  look('console', said.join('\n'));
+  look('keeper + access + store logs', logs.join('\n'));
+  look('desktop-apps.json', fs.readFileSync(path.join(sealedDir, 'desktop-apps.json')));
+  const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : e.isFile() ? [path.join(d, e.name)] : []));
+  const files = walk(sealedDir);
+  look(`every file under the data dir (${files.length}, integrations.json included)`, Buffer.concat(files.map((f) => fs.readFileSync(f))));
+  look(`every WS broadcast — keeper + store (${frames.length + sFrames.length})`, frames.join('\n') + sFrames.join('\n'));
+  look(`every audit row (${audits.length})`, audits.join('\n'));
+  const gl = await get('/api/desktop/apps'); const gi = await get(`/api/desktop/apps/${r.id}`);
+  look('GET /api/desktop/apps', gl.text); look('GET /api/desktop/apps/:id', gi.text);
+  look('the access layer\'s forwards()', JSON.stringify(accS.forwards()));
+  const leaked = sinks.filter(([, h]) => h).map(([n]) => n);
+  ok(printed && leaked.length === 0 && sinks.length === 17, `the client PRINTED it (app.log held it while it ran) — and the password is in 0 of ${sinks.length} sinks after (${sinks.map(([n]) => n).join(' · ')})`, { printed, leaked });
+  ok(files.some((f) => f.endsWith('integrations.json')) && sFrames.length >= 4 && audits.length >= 4 && answers.length >= 10, 'the sinks were live: the sealed file, the store broadcasts, the audit rows and the route answers exist');
+  ok(storeS.resolveMachine('remoteapp', HOST).values.password === PW2, 'the ONE readable place: the sealed record, opened by its consumer\'s resolveMachine');
+  // CONTROLS
+  const cut = (src, from, to) => { if (src.split(from).length !== 2) throw new Error(`anchor not unique: ${from.slice(0, 70)}`); return src.replace(from, to); };
+  const ISsrc = fs.readFileSync(path.join(repo, 'src/server/integration-store.js'), 'utf8');
+  const leakView = MUT.load('src/server/integration-store.js', cut(ISsrc, '      if (!f.secret) values[f.key] = set[f.key] ? String(v) : \'\';', '      values[f.key] = set[f.key] ? String(v) : \'\';'), 'viewleak');
+  const ctlStore = leakView.create({ dataDir: sealedDir, env: {}, broadcast: () => { }, log: spyLog });
+  ok(holds(JSON.stringify(ctlStore.machineView('remoteapp', HOST))), 'CONTROL: a machine view that draws the secret field like a plain one ⇒ the view sink sees the password (§8 would be red)');
+  const Ssrc = fs.readFileSync(path.join(repo, 'src/desktop-serve.js'), 'utf8');
+  const DSn = MUT.load('src/desktop-serve.js', cut(Ssrc, '    if (rec.rdp) await scrubRdpLogFile(rec.id); // lane remoteapp-r1b: its log at rest holds no password shape', '    // (no scrub)'), 'noscrub');
+  let dsn = null;
+  const accN = A.create({ hosts: hostsS, local: () => dsn, install: false, integrations: storeS, log: spyLog });
+  dsn = DSn.install({ dataDir: path.join(root, 'mut-noscrub'), env: sealedEnv({ VS_FAKE_RDP_SERVER_FP: fpOf(PEM_B), VS_FAKE_RDP_SERVER_PEM: PEM_B, VS_FAKE_RDP_LEAK: '1' }), display: stubDisplay({ xfreerdp: FAKE }), log: spyLog, remoteapp: { setup: (h) => accN.remoteappSetup(h), forward: (h) => accN.remoteappForward(h), signin: (h) => accN.remoteappSignin(h) } });
+  const vn = await accN.launchRemoteApp(HOST, { program: PROGRAM });
+  const rn = await until(() => { const x = dsn.get(vn.id); return x && x.state !== 'launching' ? x : null; });
+  const logN = path.join(root, 'mut-noscrub', 'desktop-apps', vn.id, 'app.log');
+  await until(() => fakeSaw(rn && rn.pids.app).some((x) => x.phase === 'connected'), 8000);
+  await until(() => fs.existsSync(logN) && fs.readFileSync(logN, 'utf8').includes('password='), 4000);
+  await dsn.stop(vn.id).catch(() => { }); await until(() => { const x = dsn.get(vn.id); return x && !['launching', 'ready'].includes(x.state); }); await until(() => accN.forwards().length === 0, 5000);
+  ok(fs.existsSync(logN) && holds(fs.readFileSync(logN)), 'CONTROL: without the teardown scrub the printed password stays in app.log (§8\'s app.log sink would be red)', fs.existsSync(logN) ? fs.readFileSync(logN, 'utf8').slice(-300) : 'no log at ' + logN);
+});
+
+for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 7 })) ok(r.pass, 'tree: ' + r.name, r.pass ? undefined : r.detail);
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

@@ -128,7 +128,7 @@ console.log('§2 live re-derive + notify');
   const cards = frames.filter((f) => f.type === 'integrations-updated');
   const cloak = cards.find((f) => f.id === 'cloak');
   ok(cloak && cloak.why === 'presets' && cloak.integration.source === 'cluster' && cloak.integration.masked.licenseKey === '••••' + CLOAK_B.slice(-4), `the cloak card's RECOMPUTED view is pushed (masked ••••${CLOAK_B.slice(-4)}, why: presets)`);
-  const cardIds = R.ROWS.filter((r) => !r.bindsPerAccount).map((r) => r.id);
+  const cardIds = R.ROWS.filter((r) => !r.bindsPerAccount && !r.bindsPerMachine).map((r) => r.id); // lane remoteapp-r1b: a per-machine row is no card either (never re-broadcast as one)
   ok(cards.length === cardIds.length && cardIds.every((id) => cards.filter((f) => f.id === id).length === 1) && !cards.some((f) => ['lark', 'gmail', 'fake'].includes(f.id)), `every CARD row re-broadcast exactly once (${cards.length} of the registry's ${cardIds.length}), no account-bound row (not a card)`);
   ok(listened.length === 1 && listened[0][0] === null && listened[0][1] === 'presets', 'the store listeners run ONCE (the channels engine re-asks every adapter and re-pushes its digest)');
   const sumF = frames.filter((f) => f.type === 'cluster-presets-updated');

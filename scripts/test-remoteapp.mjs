@@ -13,10 +13,22 @@
 //   §6 parseRailLine over lines the REAL client printed (cert refused, logon failure, nothing listening, the stdin domain
 //      prompt eating the password, a stop, the Kerberos noise) + the RAIL exec rows; rdpEndVerdict's rank + the measured
 //      exit codes
-//   §7 the request verdict, the typed line → program, the setup words (the settings card is the NEXT version), the platform
+//   §7 the request verdict, the typed line → program, the setup words (their door: the machine's RemoteApp settings card), the platform
 //   §8 relaunchBodyOf carries a RemoteApp record's request (the relaunch reconnects: a new forward, the setup read again)
+//   §9 (lane remoteapp-r1b) THE FACTS: REMOTEAPP_FACTS_SCRIPT is read-only (no registry write, no service touched), its ONE
+//      JSON line → parseRemoteappFacts (Home / Pro / Enterprise / Education / Server / unknown editions, Remote Desktop on or
+//      off, listening or not, the allow list and the GPU policy present / absent / 0) → remoteappFactRows (FACT_KEYS, each
+//      unmet fact's sentence code + the admin command its door is) → factsReady (the GPU policy optional)
+//   §10 (r1b) THE FIRST CONNECTION: remoteappTrustArgv (`/from-stdin:force` — measured: `/auth-only` refuses plain
+//      `/from-stdin` —, `/cert:tofu`, `/auth-only`, `/d:` always, never a password), trustVerdict over the lines the REAL
+//      client printed: a successful tofu run ALSO prints "Host key verification failed." + CONNECT_CANCELLED — exit 0 decides;
+//      a wrong password (134), nothing listening (141), the plain-stdin refusal (136), a timeout — nothing pinned, by name
+//   §11 (r1b) scrubRdpLog: `password=` / `password:` / `pwd=` / `/p:` shapes erased to the END of their line (verify r1: a password
+//       may hold a blank / quote / comma / semicolon), a named secret wherever it stands; other lines untouched
 //   CONTROLS — patched copies (scripts/mutant-copy.mjs): `/p:` let through ⇒ §3 red; `/d:` dropped ⇒ §2 red; the ladder
-//   without its remote filter ⇒ §1 red; the end rank reversed ⇒ §6 red
+//   without its remote filter ⇒ §1 red; the end rank reversed ⇒ §6 red; (r1b) a parser that takes a Home edition as one
+//   that hosts Remote Desktop ⇒ §9 red (Home "ready"); a trust verdict that reads the lines before the exit code ⇒ §10 red
+//   (the measured success reads as a changed certificate); the scrub's pattern emptied ⇒ §11 red
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -167,8 +179,8 @@ console.log('§7 the request, the typed line, the setup words, the platform');
   ok(RA.programLabel('||calc') === 'calc' && RA.programLabel('C:\\x\\Blender.EXE') === 'Blender' && RA.programLabel('') === 'RemoteApp', 'the default window name');
   ok(same(RA.setupMissing(null), ['user', 'password', 'certificate']) && same(RA.setupMissing({ user: 'u', password: () => 'x', certFp: FP }), []) && same(RA.setupMissing({ user: 'u', password: 'plain', certFp: FP }), ['password']) && same(RA.setupMissing({ user: ' ', password: () => 'x', certFp: 'no' }), ['user', 'certificate']), 'setupMissing: the password must be a GETTER (a plain string is not accepted), the user non-empty, the pin a sha256');
   const w = RA.needsSetupWords(['user', 'password', 'certificate'], 'Lab PC');
-  ok(w === 'RemoteApp on Lab PC needs its Windows user name, its Windows password and its Remote Desktop certificate fingerprint — the RemoteApp settings card that asks for them comes in the next version; until then "Run as its own window" opens its apps as a cropped picture', 'the needs-setup sentence names every missing part and says the card is the NEXT version (never greyed, never vague)', w);
-  ok(RA.needsSetupWords(['certificate'], 'X').startsWith('RemoteApp on X needs its Remote Desktop certificate fingerprint — '), 'one missing part ⇒ one name');
+  ok(w === 'RemoteApp on Lab PC needs its Windows user name, its Windows password and its Remote Desktop certificate fingerprint — give them once on its RemoteApp settings card (the machine\'s dialog → RemoteApp settings…)', 'the needs-setup sentence names every missing part and its DOOR — the machine\'s RemoteApp settings card (lane remoteapp-r1b)', w);
+  ok(RA.needsSetupWords(['certificate'], 'X') === 'RemoteApp on X needs its Remote Desktop certificate fingerprint — press First connection on its RemoteApp settings card (the machine\'s dialog → RemoteApp settings…)', 'only the certificate missing ⇒ the door is the First connection press');
   ok(RA.platformVerdict('win32') === null && RA.platformVerdict('darwin', 'Mac').code === 'remoteapp_not_windows' && /Mac runs darwin/.test(RA.platformVerdict('darwin', 'Mac').error) && RA.platformVerdict(null).code === 'remoteapp_not_windows', 'only a Windows machine; a Mac / an unknown system refused by name');
   ok(/apt install freerdp3-x11$/.test(RA.needsClientWords(['xpra+xfreerdp not on PATH'])) && RA.needsClientWords(['xpra+xfreerdp not on PATH']).includes('xpra+xfreerdp not on PATH'), 'a hub without the client: the needs verdict\'s words + the package to install');
 }
@@ -181,6 +193,108 @@ console.log('§8 the relaunch reconnects (relaunchBodyOf)');
   ok(same(F.relaunchBodyOf({ source: 'adhoc', exec: '/bin/x', args: ['a'], cwd: null, label: 'x' }), { exec: '/bin/x', args: ['a'], cwd: null, label: 'x' }), 'any other record relaunches as before');
 }
 
-for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 4 })) ok(r.pass, 'tree: ' + r.name, r.pass ? undefined : r.detail);
+console.log('§9 the facts — the read-only script, its line, the card\'s rows (lane remoteapp-r1b)');
+const factLine = (o) => `noise before\r\n${JSON.stringify({ t: 'remoteapp-facts', edition: 'Professional', product: 'Windows 10 Pro', build: '26100', deny: '0', listening: 1, allowList: '1', gpu: '1', ...o })}\r\n`;
+{
+  const S = RA.REMOTEAPP_FACTS_SCRIPT;
+  ok(!/\b(?:Set|New|Remove|Rename|Clear)-Item(?:Property)?\b|\breg(?:\.exe)?\s+(?:add|delete)\b|\b(?:Start|Stop|Restart|Set)-Service\b|\bInvoke-Expression\b|\biex\b/i.test(S) && /Get-ItemProperty/.test(S) && /BeginConnect\('127\.0\.0\.1', 3389/.test(S), 'the facts script only READS: Get-ItemProperty + one loopback connect to 3389 — no registry write, no service touched, no Invoke-Expression');
+  for (const k of ['EditionID', 'fDenyTSConnections', 'fDisabledAllowList', 'bEnumerateHWBeforeSW', 'TSAppAllowList']) ok(S.includes(k), `the script reads ${k}`);
+  ok(/ConvertTo-Json -InputObject \$o -Compress/.test(S) && S.split('\n').filter((l) => /WriteLine/.test(l)).length === 1, 'it prints ONE compressed JSON line');
+  const pro = RA.parseRemoteappFacts(factLine({}));
+  ok(same(pro, { ok: true, edition: { id: 'Professional', product: 'Windows 10 Pro', build: '26100', kind: 'pro' }, rdpOn: true, listening: true, allowList: true, gpuPolicy: true }), 'a ready Pro machine parses to every fact met', pro);
+  const kinds = ['Core', 'CoreSingleLanguage', 'CoreN', 'Professional', 'ProfessionalWorkstation', 'Enterprise', 'EnterpriseS', 'Education', 'ServerStandard', 'IoTEnterprise', 'Starter', '', null].map((e) => RA.editionKind(e));
+  ok(same(kinds, ['home', 'home', 'home', 'pro', 'pro', 'pro', 'pro', 'pro', 'pro', 'pro', 'unknown', 'unknown', 'unknown']), 'editions: Core* = Home (no Remote Desktop service); Pro / Workstation / Enterprise / LTSC / Education / Server / IoT Enterprise host it; anything else unknown', kinds);
+  const absent = RA.parseRemoteappFacts(factLine({ deny: null, listening: 0, allowList: null, gpu: null }));
+  ok(absent.rdpOn === null && absent.listening === false && absent.allowList === null && absent.gpuPolicy === null, 'absent values parse to null (never a guess), a failed loopback connect to false', absent);
+  const zero = RA.parseRemoteappFacts(factLine({ deny: '1', allowList: '0', gpu: '0' }));
+  ok(zero.rdpOn === false && zero.allowList === false && zero.gpuPolicy === false, 'fDenyTSConnections 1 = off; fDisabledAllowList 0 and the policy 0 = not set up', zero);
+  ok(RA.parseRemoteappFacts('').code === 'bad_output' && RA.parseRemoteappFacts('{"t":"displays"}\n').code === 'bad_output' && RA.parseRemoteappFacts('{not json').code === 'bad_output', 'no line of ours ⇒ bad_output by name');
+  const ctl = RA.parseRemoteappFacts(factLine({ product: 'Win\u0007dows\u2028 10 Pro', edition: 'P'.repeat(300) }));
+  ok(ctl.edition.product === 'Windows 10 Pro' && ctl.edition.id.length === 80, 'a control character is stripped and a long value cut at 80 (the card shows them as text)', ctl.edition);
+  // the card's rows
+  const rows = RA.remoteappFactRows(pro);
+  ok(same(rows.map((r) => r.key), [...RA.FACT_KEYS]) && same(RA.FACT_KEYS, ['edition', 'rdp', 'allowlist', 'gpu']) && rows.every((r) => r.met && r.code === null), 'remoteappFactRows: one row per FACT_KEYS entry, in order; all met ⇒ no sentence code', rows);
+  ok(RA.factsReady(pro) === true && RA.factsReady(RA.parseRemoteappFacts(factLine({ gpu: null }))) === true, 'ready: every fact but the optional GPU policy');
+  const table = [
+    ['Home', { edition: 'Core' }, 'edition', 'edition_home'],
+    ['unknown edition', { edition: 'Starter' }, 'edition', 'edition_unknown'],
+    ['Remote Desktop off', { deny: '1', listening: 0 }, 'rdp', 'rdp_off'],
+    ['Remote Desktop value absent', { deny: null, listening: 0 }, 'rdp', 'rdp_off'],
+    ['on but not listening', { listening: 0 }, 'rdp', 'rdp_not_listening'],
+    ['allow list 0', { allowList: '0' }, 'allowlist', 'allowlist_off'],
+    ['allow list absent', { allowList: null }, 'allowlist', 'allowlist_off'],
+  ];
+  for (const [name, over, key, code] of table) {
+    const f = RA.parseRemoteappFacts(factLine(over));
+    const row = RA.remoteappFactRows(f).find((r) => r.key === key);
+    ok(row && row.met === false && row.code === code && RA.factsReady(f) === false, `${name} ⇒ the ${key} row unmet with ${code}, not ready`, row);
+  }
+  const g = RA.remoteappFactRows(RA.parseRemoteappFacts(factLine({ gpu: null }))).find((r) => r.key === 'gpu');
+  ok(g.met === false && g.optional === true && g.code === 'gpu_off' && g.command === RA.GPU_COMMAND, 'the GPU policy absent ⇒ its row unmet, OPTIONAL, its door the GPU admin command');
+  const al = RA.remoteappFactRows(RA.parseRemoteappFacts(factLine({ allowList: '0' }))).find((r) => r.key === 'allowlist');
+  ok(al.command === RA.ALLOWLIST_COMMAND, 'the allow list row\'s door is the allow-list admin command');
+  for (const [name, cmd, val] of [['allow list', RA.ALLOWLIST_COMMAND, 'fDisabledAllowList'], ['GPU policy', RA.GPU_COMMAND, 'bEnumerateHWBeforeSW']]) {
+    ok(cmd.includes(`-Name ${val} -PropertyType DWord -Value 1 -Force`) && /if \(-not \(Test-Path \$k\)\) \{ New-Item -Path \$k/.test(cmd) && !/^New-Item -Path \$k -Force/.test(cmd.split('; ')[0]) && !/[\r\n]/.test(cmd), `the ${name} command: ONE line, creates the key only when it is missing (an existing key is never re-created — New-Item -Force would empty it), sets ${val}=1`);
+  }
+  ok(RA.remoteappFactRows(null) === null && RA.remoteappFactRows({ ok: false }) === null && RA.factsReady(null) === false, 'no facts ⇒ no rows, not ready');
+  ok(RA.FACTS_CAPABILITY === 'remoteapp-facts' && RA.CREDENTIAL_ROW === 'remoteapp', 'the op / capability name and the credential row id are spelled once here');
+  // RED: a parser that takes Home as an edition that hosts Remote Desktop
+  const rsrc = fs.readFileSync(path.join(repo, 'src/remoteapp.js'), 'utf8');
+  const homeOk = MUT.load('src/remoteapp.js', cut(cut(rsrc, "  if (HOME_EDITION_RE.test(s)) return 'home';\n", ''), "return RDP_HOST_EDITION_RE.test(s) ? 'pro' : 'unknown';", "return 'pro';"), 'home-ready');
+  const homeFacts = homeOk.parseRemoteappFacts(factLine({ edition: 'Core' }));
+  ok(homeOk.factsReady(homeFacts) === true && RA.factsReady(RA.parseRemoteappFacts(factLine({ edition: 'Core' }))) === false, 'CONTROL: a parser that takes any edition as one hosting Remote Desktop calls a Windows Home machine READY — the Home row above would be red');
+}
+
+console.log('§10 the first connection — the argv and its verdict (measured)');
+{
+  const TP = await deadPort();
+  const a = RA.remoteappTrustArgv({ port: TP, user: 'someone', domain: '' });
+  ok(a.ok && same(a.argv, [`/v:127.0.0.1:${TP}`, '/u:someone', '/d:', '/from-stdin:force', '/cert:tofu', '/auth-only', '/log-level:WARN']), 'the first connection\'s argv: the forward, the user, /d: ALWAYS, /from-stdin:force (measured), /cert:tofu, /auth-only — no app, no password', a);
+  ok(RA.remoteappTrustArgv({ port: TP, user: 'someone', domain: 'LAB' }).argv[2] === '/d:LAB', 'a domain account: /d:<domain>');
+  const refusals = [RA.remoteappTrustArgv({ port: 0, user: 'u' }), RA.remoteappTrustArgv({ port: 1, user: '' }), RA.remoteappTrustArgv({ port: 1, user: 'u', domain: 'a,b' }), RA.remoteappTrustArgv({ port: 1, user: 'u"x' })].map((r) => r.code);
+  ok(same(refusals, ['bad-request', 'remoteapp_needs_setup', 'bad-request', 'bad-request']), 'no port / no user / a comma in the domain / a quote in the user — refused by name', refusals);
+  ok(!a.argv.some((x) => /^\/p:|password/i.test(x)) && RA.rdpArgVerdict(a.argv).ok, 'never a password; the forbidden-options verdict passes it');
+  // THE REAL CLIENT'S LINES (xfreerdp 3.32.1 against the shadow server, /auth-only, 2026-10-16)
+  const L = (fn, msg) => `[05:57:39:300] [1:1] [ERROR][com.freerdp.core] - [${fn}]: ${msg}`;
+  const okLines = ["[WARN][com.freerdp.crypto] - [verify_cb]: Certificate verification failure 'self-signed certificate (18)' at stack position 0", L('tls_print_certificate_name_mismatch_error', 'A valid certificate for the wrong name should NOT be trusted!'), L('tls_print_new_certificate_warn', 'Host key verification failed.'), L('freerdp_connect_begin', 'Authentication only, exit status 1'), L('freerdp_abort_connect_context', 'ERRCONNECT_CONNECT_CANCELLED [0x0002000B]')];
+  const good = RA.trustVerdict({ code: 0, lines: okLines, machine: 'Lab PC' });
+  ok(good.ok === true, 'a SUCCESSFUL first connection (exit 0) is ok although its lines say "Host key verification failed." and CONNECT_CANCELLED (measured) — the exit code decides', good);
+  const pwLines = [okLines[0], okLines[2], L('nla_recv_pdu', 'ERRCONNECT_LOGON_FAILURE [0x00020014]'), L('freerdp_connect_begin', 'Authentication only, exit status 0')];
+  const bad = RA.trustVerdict({ code: 134, lines: pwLines, machine: 'Lab PC' });
+  ok(!bad.ok && bad.code === 'rdp_auth_failed' && /refused the Windows sign-in/.test(bad.error) && /nothing was pinned/.test(bad.error), 'a wrong password (134) ⇒ rdp_auth_failed — not "certificate changed" (the tofu lines are noise here) — nothing pinned', bad);
+  const none = RA.trustVerdict({ code: 141, lines: [L('get_next_addrinfo', 'ERRCONNECT_CONNECT_FAILED [0x00020006]'), L('freerdp_connect_begin', 'Authentication only, exit status 0')], machine: 'Lab PC' });
+  ok(!none.ok && none.code === 'rdp_unreachable', 'nothing listening (141) ⇒ rdp_unreachable', none);
+  const plain = RA.trustVerdict({ code: 136, lines: [L('freerdp_connect_begin', 'ERRCONNECT_PRE_CONNECT_FAILED [0x00020001]')], machine: 'Lab PC' });
+  ok(!plain.ok && plain.code === 'rdp_client_refused' && RA.EXIT_CODES[136] === 'rdp_client_refused', '`/auth-only` + plain `/from-stdin` (136, PRE_CONNECT_FAILED, measured) ⇒ rdp_client_refused by name', plain);
+  ok(RA.trustVerdict({ timedOut: true, code: null, signal: 'SIGKILL', machine: 'Lab PC' }).code === 'rdp_trust_timeout' && RA.trustVerdict({ code: 1, lines: [] }).code === 'rdp_trust_failed' && RA.trustVerdict({ code: 0, signal: 'SIGTERM' }).ok !== true, 'a timeout / an unexplained exit / a signal — refused by name, never ok');
+  // RED: a verdict that reads the lines first
+  const rsrc = fs.readFileSync(path.join(repo, 'src/remoteapp.js'), 'utf8');
+  const linesFirst = MUT.load('src/remoteapp.js', cut(rsrc, "  if (code === 0 && !signal) return { ok: true };\n  const kept = (Array.isArray(lines) ? lines : String(lines || '').split('\\n')).filter((l) => !TOFU_NOISE_RE.test(String(l)));", "  const kept = Array.isArray(lines) ? lines : String(lines || '').split('\\n');\n  { const w = rdpEndVerdict({ code, signal, lines: kept, machine }); if (w && w.code !== 'rdp_cancelled') return refuse(w.code, w.words); }\n  if (code === 0 && !signal) return { ok: true };"), 'lines-first');
+  const lf = linesFirst.trustVerdict({ code: 0, lines: okLines, machine: 'Lab PC' });
+  ok(lf.ok !== true && lf.code === 'rdp_cert_changed', 'CONTROL: a verdict that reads the lines before the exit code calls the measured SUCCESS a changed certificate — the success leg above would be red', lf);
+}
+
+console.log('§11 scrubRdpLog — a password shape never reaches a record or a log at rest');
+{
+  const pw = ['Rw', 'x9k2', '-q#7'].join('');
+  const rows = [
+    [`[WARN] using password=${pw} for the sign-in`, '[WARN] using password=<scrubbed>'],
+    [`Password: ${pw}`, 'Password: <scrubbed>'],
+    [`args /v:x /p:${pw} /u:y`, 'args /v:x /p:<scrubbed>'],
+    [`pwd = ${pw};next`, 'pwd = <scrubbed>'],
+    [`"passwd":"${pw}"`, '"passwd":"<scrubbed>'],
+    [`using password=${pw},with blank ;semi 'quote" }brace for the sign-in\nnext line stays`, 'using password=<scrubbed>\nnext line stays'], // verify r1: a separator inside the password does not end the scrub early
+    ['[ERROR] ERRCONNECT_LOGON_FAILURE [0x00020014]', '[ERROR] ERRCONNECT_LOGON_FAILURE [0x00020014]'],
+    ['the Windows password could not be read', 'the Windows password could not be read'],
+  ];
+  for (const [inp, out] of rows) ok(RA.scrubRdpLog(inp) === out, `scrub ${JSON.stringify(out.slice(0, 50))}`, RA.scrubRdpLog(inp));
+  ok(RA.scrubRdpLog(`a ${pw} b`, [pw]) === 'a <scrubbed> b' && RA.scrubRdpLog(`a ${pw} b`) === `a ${pw} b` && RA.scrubRdpLog('abc', ['ab']) === 'abc', 'a NAMED secret (≥ 4 characters) is erased wherever it stands; without the name a bare word is left alone');
+  ok(RA.scrubRdpLog(null) === '' && RA.scrubRdpLog(undefined) === '', 'nothing in, nothing out');
+  const rsrc = fs.readFileSync(path.join(repo, 'src/remoteapp.js'), 'utf8');
+  const noScrub = MUT.load('src/remoteapp.js', cut(rsrc, "let s = String(text == null ? '' : text).replace(PASSWORD_SHAPE_RE, (m, head) => `${head}<scrubbed>`);", "let s = String(text == null ? '' : text);"), 'no-scrub');
+  ok(noScrub.scrubRdpLog(rows[0][0]).includes(pw), 'CONTROL: the pattern emptied ⇒ the password stays (§11\'s first row would be red)');
+}
+
+for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 7 })) ok(r.pass, 'tree: ' + r.name, r.pass ? undefined : r.detail);
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

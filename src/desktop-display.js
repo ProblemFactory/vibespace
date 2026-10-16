@@ -716,6 +716,44 @@ function rdpBuildFacts(binPath, { deadlineMs = 4000, env = process.env } = {}) {
   return p;
 }
 
+/** lane remoteapp-r1b (design q-024 r1 §1.4 「首次连接」): ONE xfreerdp `/auth-only` run — the argv is src/remoteapp.js
+ *  remoteappTrustArgv's (`/cert:tofu` into `configDir`, the client's own fresh XDG_CONFIG_HOME) — its password written to
+ *  stdin as ONE line and the pipe closed, its output kept (≤ 64 KB) for the verdict, killed at its deadline; then the ONE
+ *  certificate the client stored under `<configDir>/freerdp/server/` (measured: `127.0.0.1_<port>.pem`) and its sha256.
+ *  → Promise<{ code, signal, out, timedOut, certFp, certWhy }> — never rejects (trustVerdict judges it). */
+function rdpTrustRun({ exec, argv, env, configDir, stdinLine, deadlineMs = 20000 }) {
+  return new Promise((resolve) => {
+    let child, size = 0, timedOut = false, done = false;
+    const chunks = [];
+    const finish = async (code, signal, why = null) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      const out = Buffer.concat(chunks).toString('utf8') + (why ? `\n${why}` : '');
+      resolve({ code, signal, out, timedOut, ...(await storedCertOf(configDir)) });
+    };
+    const timer = setTimeout(() => { timedOut = true; try { child && child.kill('SIGKILL'); } catch { /* gone */ } }, deadlineMs);
+    try { child = spawn(exec, argv, { env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true }); }
+    catch (e) { finish(null, null, `not started: ${e.message}`); return; }
+    const keep = (b) => { if (size < 65536) { chunks.push(b); size += b.length; } };
+    child.stdout.on('data', keep); child.stderr.on('data', keep);
+    child.stdin.on('error', () => { /* the client closed its stdin early — its exit says why */ });
+    child.on('error', (e) => finish(null, null, `not started: ${e.message}`));
+    child.on('close', (code, signal) => finish(code, signal));
+    child.stdin.end(`${stdinLine()}\n`);
+  });
+}
+/** The certificate a `/cert:tofu` run stored in its own config dir → { certFp (sha256, colon hex lowercase), certWhy: null }
+ *  | { certFp: null, certWhy } — exactly ONE stored certificate is pinned, anything else is said. */
+async function storedCertOf(configDir) {
+  const dir = path.join(String(configDir || ''), 'freerdp', 'server');
+  let names;
+  try { names = (await fs.promises.readdir(dir)).filter((n) => n.endsWith('.pem')); } catch { return { certFp: null, certWhy: 'no certificate was stored' }; }
+  if (names.length !== 1) return { certFp: null, certWhy: `${names.length} certificates were stored` };
+  try { return { certFp: new crypto.X509Certificate(await fs.promises.readFile(path.join(dir, names[0]))).fingerprint256.toLowerCase(), certWhy: null }; }
+  catch (e) { return { certFp: null, certWhy: `the stored certificate does not read (${e.message})` }; }
+}
+
 /**
  * Merge X resources into a display's resource database BEFORE its app starts
  * (2.369.158, HiDPI — PURE desktop-apps `scaleKnobs().xresources`: an Xft face
@@ -1445,7 +1483,7 @@ module.exports = {
   assertLocal, binOnPath, resetBinMemo, forgetBin, assertExecutable, PROBE_BINS, probeBinsOf, BROWSER_BINS, browserConfinement, profileLockFact /* lane app-launch-singleton */, hostFacts, officeFacts, x11Env, NO_WAYLAND_DISPLAY, withoutWayland,
   newCookie, writeXauthority, xauthEntry, freePort, rfbBanner, waitForRfb, httpProbe, waitForHttp, waitForListen, portAnswers, LISTEN_PROBES,
   listenerInode, pidHoldsInode, listenerHeldBy,
-  spawnDetached, X_SERVER_ARGS, startXServer, startX11vnc, startWindowManager, startApp, applyXResources, waitForXftDpi, RECIPES, rdpBuildFacts,
+  spawnDetached, X_SERVER_ARGS, startXServer, startX11vnc, startWindowManager, startApp, applyXResources, waitForXftDpi, RECIPES, rdpBuildFacts, rdpTrustRun,
   XPRA_ARGS, XPRA_GEOMETRY_MAX, XPRA_BIND_REFUSALS, startXpra, xpraWwwDir, seamlessWindows,
   pidAlive, procStart, sameProcess, procSample,
   sessionMembers, refreshSessions, sessionCensus, environHas, sessionSample, sessionSampleSync, markerCensus, environCensus,

@@ -7569,11 +7569,75 @@ export default {
   "“{title}” is not on the screen {machine} shares (minimized, or on another display)": "“{title}”不在{machine}共享的屏幕上（已最小化，或在另一个显示器上）", // lane machine-app-crop
   "Waiting for the app’s window on {machine}…": "正在等待{machine}上该应用的窗口…", // lane machine-app-crop
   "Run as its own window…": "作为独立窗口运行…", // lane machine-app-crop
-  "RemoteApp needs {machine}’s Windows sign-in and its certificate fingerprint — the RemoteApp settings that ask for them come in the next version. Until then, Run as its own window opens its apps.": "RemoteApp 需要 {machine} 的 Windows 登录和证书指纹——填写它们的 RemoteApp 设置在下一版提供。在那之前，请用「作为独立窗口运行」打开它的应用。", // lane remoteapp-r1a
   "{machine} already shows a RemoteApp session — Windows gives one remote session per machine; use that window or stop it first": "{machine} 已经有一个 RemoteApp 会话——Windows 每台机器只给一个远程会话；请用那个窗口，或先停掉它", // lane remoteapp-r1a
   "Open the app as a real window through Remote Desktop (Windows Pro or Enterprise)": "通过远程桌面把应用作为真正的窗口打开（Windows 专业版或企业版）", // lane remoteapp-r1a
   "Opening {app} from {machine} through RemoteApp…": "正在通过 RemoteApp 打开 {machine} 上的 {app}…", // lane remoteapp-r1a
   "RemoteApp…": "RemoteApp…", // lane remoteapp-r1a
+  "Windows edition": "Windows 版本", // lane remoteapp-r1b
+  "{edition} — it has the Remote Desktop service": "{edition}，有远程桌面服务", // lane remoteapp-r1b
+  "This machine runs Windows Home, which has no Remote Desktop service; RemoteApp cannot work here, “Run as its own window…” (a cropped picture) can": "这台是 Windows Home，没有远程桌面服务；RemoteApp 做不了，「作为独立窗口运行…」（裁剪画面）可用", // lane remoteapp-r1b
+  "Could not tell this machine’s Windows edition; RemoteApp needs Windows Pro or Enterprise": "看不出这台机器的 Windows 版本；RemoteApp 需要 Windows 专业版或企业版", // lane remoteapp-r1b
+  "Remote Desktop": "远程桌面", // lane remoteapp-r1b
+  "On, and answering on the machine itself": "已打开，本机上有应答", // lane remoteapp-r1b
+  "Remote Desktop is on, but nothing answers on its port 3389; restart {machine} or check Settings → System → Remote Desktop": "远程桌面已打开，但 3389 端口没有应答；请重启 {machine}，或检查 设置 → 系统 → 远程桌面", // lane remoteapp-r1b
+  "Turn it on in Settings → System → Remote Desktop; no firewall opening to the local network is needed": "打开 设置 → 系统 → 远程桌面；无需开放防火墙到局域网", // lane remoteapp-r1b
+  "Apps allowed as RemoteApps": "允许作为 RemoteApp 的应用", // lane remoteapp-r1b
+  "Any app may open as a RemoteApp": "任何应用都可以作为 RemoteApp 打开", // lane remoteapp-r1b
+  "Windows opens only listed programs as RemoteApps; copy the admin command and run it once in an administrator PowerShell on {machine}": "Windows 只把名单里的程序作为 RemoteApp 打开；复制管理员命令，在 {machine} 上以管理员身份打开 PowerShell 运行一次", // lane remoteapp-r1b
+  "Copy the admin command": "复制管理员命令", // lane remoteapp-r1b
+  "Graphics card in remote sessions (optional)": "远程会话使用显卡（可选）", // lane remoteapp-r1b
+  "Remote sessions use the graphics card": "远程会话使用显卡", // lane remoteapp-r1b
+  "Apps like Blender render in software; to use the graphics card, turn on this policy with the admin command": "Blender 这类走软件渲染；要 GPU 请用管理员命令开这条策略", // lane remoteapp-r1b
+  "After the Remote Desktop sign-in, that machine’s own screen shows its lock screen; anyone using it in person is pushed out. Best for a machine nobody sits at.": "RDP 登录后那台机器的屏幕会显示锁屏；正在它面前用的人会被挤出。适合无人值守的机器", // lane remoteapp-r1b
+  "Only people can set up RemoteApp": "只有人可以设置 RemoteApp", // lane remoteapp-r1b
+  "Save the Windows user name and password first": "请先保存 Windows 用户名和密码", // lane remoteapp-r1b
+  "{machine} refused the Windows sign-in; check the user name and password": "{machine} 拒绝了 Windows 登录；请检查用户名和密码", // lane remoteapp-r1b
+  "Nothing answered on {machine}’s Remote Desktop port; is Remote Desktop turned on there?": "{machine} 的远程桌面端口没有应答；那台机器打开远程桌面了吗？", // lane remoteapp-r1b
+  "{machine} shows a RemoteApp session now; stop it before connecting again": "{machine} 现在有一个 RemoteApp 会话；请先停掉它再连接", // lane remoteapp-r1b
+  "A first connection to {machine} is already running": "到 {machine} 的首次连接已经在进行", // lane remoteapp-r1b
+  "Not saved: {why}": "没有保存：{why}", // lane remoteapp-r1b
+  "RemoteApp settings — {machine}": "RemoteApp 设置：{machine}", // lane remoteapp-r1b
+  "Open {machine}’s apps as their own windows through Remote Desktop. Set it up once here.": "通过远程桌面把 {machine} 的应用作为独立窗口打开。在这里设置一次即可。", // lane remoteapp-r1b
+  "What {machine} needs": "{machine} 需要什么", // lane remoteapp-r1b
+  "Windows sign-in": "Windows 登录", // lane remoteapp-r1b
+  "Windows user name": "Windows 用户名", // lane remoteapp-r1b
+  "Domain (only for a domain account)": "域（仅域账号需要）", // lane remoteapp-r1b
+  "Windows password": "Windows 密码", // lane remoteapp-r1b
+  "The password is sealed on this VibeSpace server; only the Remote Desktop client receives it, when you open an app.": "密码密封保存在这台 VibeSpace 服务器上；只有在你打开应用时，远程桌面客户端才会收到它。", // lane remoteapp-r1b
+  "Save sign-in": "保存登录信息", // lane remoteapp-r1b
+  "Certificate": "证书", // lane remoteapp-r1b
+  "First connection": "首次连接", // lane remoteapp-r1b
+  "Edition": "版本", // lane remoteapp-r1b
+  "Pinned certificate (sha256)": "钉住的证书（sha256）", // lane remoteapp-r1b
+  "Allow every app as a RemoteApp (admin PowerShell)": "允许所有应用作为 RemoteApp（管理员 PowerShell）", // lane remoteapp-r1b
+  "Use the graphics card in remote sessions (admin PowerShell)": "远程会话使用显卡（管理员 PowerShell）", // lane remoteapp-r1b
+  "Copied — paste it into an administrator PowerShell on {machine}": "已复制，请粘贴到 {machine} 上以管理员身份打开的 PowerShell", // lane remoteapp-r1b
+  "Reading {machine}’s Remote Desktop settings…": "正在读取 {machine} 的远程桌面设置…", // lane remoteapp-r1b
+  "{machine}’s agent ({have}) cannot read these settings; it needs version {need} or later": "{machine} 的 agent（{have}）读不了这些设置；需要 {need} 或更新的版本", // lane remoteapp-r1b
+  "{machine}’s agent cannot read these settings; it needs version {need} or later": "{machine} 的 agent 读不了这些设置；需要 {need} 或更新的版本", // lane remoteapp-r1b
+  "{machine} is ready for RemoteApp": "{machine} 已经可以用 RemoteApp", // lane remoteapp-r1b
+  "{machine} is not ready for RemoteApp yet": "{machine} 还不能用 RemoteApp", // lane remoteapp-r1b
+  "Saved — type to replace": "已保存，输入新的即替换", // lane remoteapp-r1b
+  "{machine} showed a different certificate at the last launch, so the launch was refused. If the machine was reinstalled, trust it again.": "上次打开时 {machine} 出示了不同的证书，所以被拒绝了。如果那台机器重装过，请重新信任它。", // lane remoteapp-r1b
+  "{machine}’s certificate is pinned; every launch checks it.": "{machine} 的证书已钉住；每次打开都会核对。", // lane remoteapp-r1b
+  "No certificate is pinned yet. First connection signs in once without opening an app and pins the certificate {machine} shows.": "还没有钉住证书。「首次连接」会不打开应用登录一次，并钉住 {machine} 出示的证书。", // lane remoteapp-r1b
+  "Trust again": "重新信任", // lane remoteapp-r1b
+  "Saved {machine}’s sign-in": "已保存 {machine} 的登录信息", // lane remoteapp-r1b
+  "Signed in to {machine} and pinned its new certificate": "已登录 {machine} 并钉住它的新证书", // lane remoteapp-r1b
+  "Signed in to {machine} and pinned its certificate": "已登录 {machine} 并钉住它的证书", // lane remoteapp-r1b
+  "RemoteApp needs {machine}’s Windows sign-in and its pinned certificate — set them once in RemoteApp settings…": "RemoteApp 需要 {machine} 的 Windows 登录信息和钉住的证书；请在「RemoteApp 设置…」里设置一次", // lane remoteapp-r1b
+  "RemoteApp settings…": "RemoteApp 设置…", // lane remoteapp-r1b
+  "Set up RemoteApp once for this Windows machine: its sign-in and its certificate": "为这台 Windows 机器设置一次 RemoteApp：登录信息和证书", // lane remoteapp-r1b
+  "RemoteApp sign-in": "RemoteApp 登录", // lane remoteapp-r1b
+  "The account you sign in to that Windows machine with.": "你登录那台 Windows 机器用的账号。", // lane remoteapp-r1b
+  "Domain": "域", // lane remoteapp-r1b
+  "Only for a domain account — leave it empty for a local or Microsoft account.": "仅域账号需要；本地账号或 Microsoft 账号请留空。", // lane remoteapp-r1b
+  "Sealed on this VibeSpace server; handed only to the Remote Desktop client when you open an app.": "密封保存在这台 VibeSpace 服务器上；只在你打开应用时交给远程桌面客户端。", // lane remoteapp-r1b
+  "Pinned certificate": "钉住的证书", // lane remoteapp-r1b
+  "Pinned by the first connection — never typed.": "由首次连接钉住，从不手动输入。", // lane remoteapp-r1b
+  "Checks that the saved sign-in has every part the Remote Desktop client needs. Zero network.": "检查保存的登录信息是否包含远程桌面客户端需要的每一项。不联网。", // lane remoteapp-r1b
+  "This proves nothing about the machine — the first connection is what signs in to it.": "这不能证明机器那边的任何事；真正登录它的是首次连接。", // lane remoteapp-r1b
+  "Used by RemoteApp windows of a paired Windows machine": "配对的 Windows 机器的 RemoteApp 窗口使用", // lane remoteapp-r1b
   "Run": "运行",
   "This exact command starts on {machine}’s desktop, as its signed-in user:": "这条命令会原样在{machine}的桌面上、以当前登录的用户身份启动：",
   "Its desktop shows everything on {machine}’s screen, and what you type there goes to it. Only people can open it — agents cannot.": "「它的桌面」显示{machine}屏幕上的一切，你在里面输入的内容会发到那台机器。只有人能打开，智能体不能。",

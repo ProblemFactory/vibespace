@@ -7568,11 +7568,75 @@ export default {
   "“{title}” is not on the screen {machine} shares (minimized, or on another display)": "「{title}」は{machine}が共有している画面にありません（最小化されているか、別のディスプレイにあります）", // lane machine-app-crop
   "Waiting for the app’s window on {machine}…": "{machine}のアプリのウィンドウを待っています…", // lane machine-app-crop
   "Run as its own window…": "独立したウィンドウとして実行…", // lane machine-app-crop
-  "RemoteApp needs {machine}’s Windows sign-in and its certificate fingerprint — the RemoteApp settings that ask for them come in the next version. Until then, Run as its own window opens its apps.": "RemoteApp には {machine} の Windows サインインと証明書のフィンガープリントが必要です。これらを入力する RemoteApp 設定は次のバージョンで追加されます。それまでは「独立したウィンドウとして実行」でアプリを開けます。", // lane remoteapp-r1a
   "{machine} already shows a RemoteApp session — Windows gives one remote session per machine; use that window or stop it first": "{machine} にはすでに RemoteApp セッションがあります。Windows はマシンごとにリモートセッションを 1 つしか許可しません。そのウィンドウを使うか、先に停止してください", // lane remoteapp-r1a
   "Open the app as a real window through Remote Desktop (Windows Pro or Enterprise)": "リモートデスクトップ経由でアプリを本物のウィンドウとして開きます（Windows Pro または Enterprise）", // lane remoteapp-r1a
   "Opening {app} from {machine} through RemoteApp…": "{machine} の {app} を RemoteApp で開いています…", // lane remoteapp-r1a
   "RemoteApp…": "RemoteApp…", // lane remoteapp-r1a
+  "Windows edition": "Windows のエディション", // lane remoteapp-r1b
+  "{edition} — it has the Remote Desktop service": "{edition}（リモート デスクトップ サービスあり）", // lane remoteapp-r1b
+  "This machine runs Windows Home, which has no Remote Desktop service; RemoteApp cannot work here, “Run as its own window…” (a cropped picture) can": "このマシンは Windows Home で、リモート デスクトップ サービスがありません。RemoteApp は使えませんが、「独立したウィンドウとして実行…」（切り抜き表示）は使えます", // lane remoteapp-r1b
+  "Could not tell this machine’s Windows edition; RemoteApp needs Windows Pro or Enterprise": "このマシンの Windows エディションを判別できませんでした。RemoteApp には Windows Pro か Enterprise が必要です", // lane remoteapp-r1b
+  "Remote Desktop": "リモート デスクトップ", // lane remoteapp-r1b
+  "On, and answering on the machine itself": "オン（マシン上で応答あり）", // lane remoteapp-r1b
+  "Remote Desktop is on, but nothing answers on its port 3389; restart {machine} or check Settings → System → Remote Desktop": "リモート デスクトップはオンですが、ポート 3389 が応答しません。{machine} を再起動するか、設定 → システム → リモート デスクトップ を確認してください", // lane remoteapp-r1b
+  "Turn it on in Settings → System → Remote Desktop; no firewall opening to the local network is needed": "設定 → システム → リモート デスクトップ でオンにしてください。LAN 向けにファイアウォールを開ける必要はありません", // lane remoteapp-r1b
+  "Apps allowed as RemoteApps": "RemoteApp として許可されたアプリ", // lane remoteapp-r1b
+  "Any app may open as a RemoteApp": "どのアプリも RemoteApp として開けます", // lane remoteapp-r1b
+  "Windows opens only listed programs as RemoteApps; copy the admin command and run it once in an administrator PowerShell on {machine}": "Windows は一覧にあるプログラムしか RemoteApp として開きません。管理者コマンドをコピーし、{machine} で管理者として開いた PowerShell で一度実行してください", // lane remoteapp-r1b
+  "Copy the admin command": "管理者コマンドをコピー", // lane remoteapp-r1b
+  "Graphics card in remote sessions (optional)": "リモート セッションでのグラフィックス カード（任意）", // lane remoteapp-r1b
+  "Remote sessions use the graphics card": "リモート セッションはグラフィックス カードを使います", // lane remoteapp-r1b
+  "Apps like Blender render in software; to use the graphics card, turn on this policy with the admin command": "Blender のようなアプリはソフトウェアで描画されます。GPU を使うには、管理者コマンドでこのポリシーをオンにしてください", // lane remoteapp-r1b
+  "After the Remote Desktop sign-in, that machine’s own screen shows its lock screen; anyone using it in person is pushed out. Best for a machine nobody sits at.": "RDP でサインインすると、そのマシンの画面はロック画面になり、その前で使っている人は追い出されます。無人のマシン向けです", // lane remoteapp-r1b
+  "Only people can set up RemoteApp": "RemoteApp を設定できるのは人だけです", // lane remoteapp-r1b
+  "Save the Windows user name and password first": "先に Windows のユーザー名とパスワードを保存してください", // lane remoteapp-r1b
+  "{machine} refused the Windows sign-in; check the user name and password": "{machine} が Windows のサインインを拒否しました。ユーザー名とパスワードを確認してください", // lane remoteapp-r1b
+  "Nothing answered on {machine}’s Remote Desktop port; is Remote Desktop turned on there?": "{machine} のリモート デスクトップのポートが応答しません。リモート デスクトップはオンになっていますか？", // lane remoteapp-r1b
+  "{machine} shows a RemoteApp session now; stop it before connecting again": "{machine} には今 RemoteApp セッションがあります。止めてから接続し直してください", // lane remoteapp-r1b
+  "A first connection to {machine} is already running": "{machine} への初回接続はすでに実行中です", // lane remoteapp-r1b
+  "Not saved: {why}": "保存されませんでした：{why}", // lane remoteapp-r1b
+  "RemoteApp settings — {machine}": "RemoteApp の設定：{machine}", // lane remoteapp-r1b
+  "Open {machine}’s apps as their own windows through Remote Desktop. Set it up once here.": "リモート デスクトップで {machine} のアプリを独立したウィンドウとして開きます。ここで一度設定してください。", // lane remoteapp-r1b
+  "What {machine} needs": "{machine} に必要なもの", // lane remoteapp-r1b
+  "Windows sign-in": "Windows のサインイン", // lane remoteapp-r1b
+  "Windows user name": "Windows のユーザー名", // lane remoteapp-r1b
+  "Domain (only for a domain account)": "ドメイン（ドメイン アカウントのみ）", // lane remoteapp-r1b
+  "Windows password": "Windows のパスワード", // lane remoteapp-r1b
+  "The password is sealed on this VibeSpace server; only the Remote Desktop client receives it, when you open an app.": "パスワードはこの VibeSpace サーバーに封印して保存されます。受け取るのは、アプリを開くときのリモート デスクトップ クライアントだけです。", // lane remoteapp-r1b
+  "Save sign-in": "サインインを保存", // lane remoteapp-r1b
+  "Certificate": "証明書", // lane remoteapp-r1b
+  "First connection": "初回接続", // lane remoteapp-r1b
+  "Edition": "エディション", // lane remoteapp-r1b
+  "Pinned certificate (sha256)": "固定した証明書（sha256）", // lane remoteapp-r1b
+  "Allow every app as a RemoteApp (admin PowerShell)": "すべてのアプリを RemoteApp として許可（管理者 PowerShell）", // lane remoteapp-r1b
+  "Use the graphics card in remote sessions (admin PowerShell)": "リモート セッションでグラフィックス カードを使う（管理者 PowerShell）", // lane remoteapp-r1b
+  "Copied — paste it into an administrator PowerShell on {machine}": "コピーしました。{machine} で管理者として開いた PowerShell に貼り付けてください", // lane remoteapp-r1b
+  "Reading {machine}’s Remote Desktop settings…": "{machine} のリモート デスクトップ設定を読み取っています…", // lane remoteapp-r1b
+  "{machine}’s agent ({have}) cannot read these settings; it needs version {need} or later": "{machine} のエージェント（{have}）はこれらの設定を読めません。{need} 以降のバージョンが必要です", // lane remoteapp-r1b
+  "{machine}’s agent cannot read these settings; it needs version {need} or later": "{machine} のエージェントはこれらの設定を読めません。{need} 以降のバージョンが必要です", // lane remoteapp-r1b
+  "{machine} is ready for RemoteApp": "{machine} は RemoteApp を使える状態です", // lane remoteapp-r1b
+  "{machine} is not ready for RemoteApp yet": "{machine} はまだ RemoteApp を使えません", // lane remoteapp-r1b
+  "Saved — type to replace": "保存済み。入力すると置き換えます", // lane remoteapp-r1b
+  "{machine} showed a different certificate at the last launch, so the launch was refused. If the machine was reinstalled, trust it again.": "前回の起動で {machine} が別の証明書を示したため、起動は拒否されました。マシンを再インストールした場合は、もう一度信頼してください。", // lane remoteapp-r1b
+  "{machine}’s certificate is pinned; every launch checks it.": "{machine} の証明書は固定済みで、起動のたびに照合します。", // lane remoteapp-r1b
+  "No certificate is pinned yet. First connection signs in once without opening an app and pins the certificate {machine} shows.": "まだ証明書は固定されていません。「初回接続」はアプリを開かずに一度サインインし、{machine} が示す証明書を固定します。", // lane remoteapp-r1b
+  "Trust again": "もう一度信頼", // lane remoteapp-r1b
+  "Saved {machine}’s sign-in": "{machine} のサインインを保存しました", // lane remoteapp-r1b
+  "Signed in to {machine} and pinned its new certificate": "{machine} にサインインし、新しい証明書を固定しました", // lane remoteapp-r1b
+  "Signed in to {machine} and pinned its certificate": "{machine} にサインインし、証明書を固定しました", // lane remoteapp-r1b
+  "RemoteApp needs {machine}’s Windows sign-in and its pinned certificate — set them once in RemoteApp settings…": "RemoteApp には {machine} の Windows サインインと固定した証明書が必要です。「RemoteApp の設定…」で一度設定してください", // lane remoteapp-r1b
+  "RemoteApp settings…": "RemoteApp の設定…", // lane remoteapp-r1b
+  "Set up RemoteApp once for this Windows machine: its sign-in and its certificate": "この Windows マシンの RemoteApp を一度設定します：サインインと証明書", // lane remoteapp-r1b
+  "RemoteApp sign-in": "RemoteApp のサインイン", // lane remoteapp-r1b
+  "The account you sign in to that Windows machine with.": "その Windows マシンにサインインするアカウントです。", // lane remoteapp-r1b
+  "Domain": "ドメイン", // lane remoteapp-r1b
+  "Only for a domain account — leave it empty for a local or Microsoft account.": "ドメイン アカウントのみ。ローカル アカウントや Microsoft アカウントでは空欄にしてください。", // lane remoteapp-r1b
+  "Sealed on this VibeSpace server; handed only to the Remote Desktop client when you open an app.": "この VibeSpace サーバーに封印して保存し、アプリを開くときにだけリモート デスクトップ クライアントへ渡します。", // lane remoteapp-r1b
+  "Pinned certificate": "固定した証明書", // lane remoteapp-r1b
+  "Pinned by the first connection — never typed.": "初回接続で固定します。手入力はしません。", // lane remoteapp-r1b
+  "Checks that the saved sign-in has every part the Remote Desktop client needs. Zero network.": "保存したサインインに、リモート デスクトップ クライアントが必要とする項目がそろっているかを確認します。ネットワークは使いません。", // lane remoteapp-r1b
+  "This proves nothing about the machine — the first connection is what signs in to it.": "マシン側については何も証明しません。実際にサインインするのは初回接続です。", // lane remoteapp-r1b
+  "Used by RemoteApp windows of a paired Windows machine": "ペアリングした Windows マシンの RemoteApp ウィンドウが使います", // lane remoteapp-r1b
   "Run": "実行",
   "This exact command starts on {machine}’s desktop, as its signed-in user:": "このコマンドがそのまま、{machine}のデスクトップでサインイン中のユーザーとして開始されます：",
   "Its desktop shows everything on {machine}’s screen, and what you type there goes to it. Only people can open it — agents cannot.": "「そのデスクトップ」には{machine}の画面のすべてが映り、そこで入力した内容はそのマシンに送られます。開けるのは人だけで、エージェントは開けません。",

@@ -1785,6 +1785,7 @@ const I_RECV = {
   'src/desktop-serve.js|rec': ['desktop app', 'an app label'], 'src/desktop-serve.js|row': ['desktop app', 'an app label / refusal reason'],
   'src/desktop-serve.js|busy': ['desktop app', 'lane remoteapp-r1a: the RemoteApp session already running on that machine — its app label + id in the rdp_session_busy refusal'], 'src/desktop-serve.js|rq': ['desktop app', 'lane remoteapp-r1a: a RemoteApp request\'s app name (the window label) in the launch journal line'],
   'src/lib/machine-desktop.js|r': ['desktop app', 'lane remoteapp-r1a: the started RemoteApp record\'s app label in the "Opening … through RemoteApp" toast'],
+  'src/lib/remoteapp-card.js|m': ['host', 'lane remoteapp-r1b: the paired machine\'s own name (its GET /api/desktop/machines row) in the RemoteApp settings card\'s title, sentences and toasts — a machine name, never a record\'s words'],
   'src/exit-proxy.js|session': ['session', 'the conversation the network / a command is lent to — its own name (lane-pairing exit access)'], 'src/exit-proxy.js|h': ['host', 'a machine name'], 'src/hosts.js|h': ['host', 'a machine name'],
   'src/lib/app.js|BACKEND_META[h.id]': ['harness', 'a harness label'], 'src/lib/app.js|BACKEND_META[msg.backend]': ['harness', 'a harness label'],
   'src/lib/app.js|lost': ['account', 'an account'], 'src/lib/app.js|msg': ['frame', 'a server-notice / backend-status frame\'s text (its producer is judged at the `notice` sink)'],

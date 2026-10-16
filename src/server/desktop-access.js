@@ -50,6 +50,7 @@ const I = require('../installs.js'); // THE INSTALLABLES: one row each — this 
 const SYS = require('../app-system.js'); // Layer 1: a sys plan's digest binds what it runs (sysDigestPart)
 const MW = require('../machine-window.js'); // lane machine-app-crop: the run's launch report (one app as its own window)
 const D = require('../desktop-display.js'); // design 014 D1: the PURE RFB greeting read of the vnc-native rung
+const AGENT_VERSION = (() => { try { return require('../../package.json').version; } catch { return ''; } })(); // lane remoteapp-r1b: the agent version that answers `remoteapp-facts` = this hub's (its agents upgrade to it)
 const RA = require('../remoteapp.js'); // lane remoteapp-r1a (design q-024 §1.2): the RemoteApp setup words, the platform verdict, the RDP port
 const IA = require('../installed-apps.js'); // lane machine-desktop-apps: a Windows / macOS machine's installed apps (SHARED: the device lists, the hub judges again)
 
@@ -71,6 +72,12 @@ function access() {
     remoteappSetup: async () => { const e = new Error('the desktop access layer is not wired on this instance'); e.code = 'host_unavailable'; throw e; },
     remoteappForward: async () => { const e = new Error('the desktop access layer is not wired on this instance'); e.code = 'host_unavailable'; throw e; },
     launchRemoteApp: async () => { const e = new Error('the desktop access layer is not wired on this instance'); e.code = 'host_unavailable'; throw e; },
+    // lane remoteapp-r1b: the RemoteApp settings card's doors
+    remoteappSignin: async () => { const e = new Error('the desktop access layer is not wired on this instance'); e.code = 'host_unavailable'; throw e; },
+    remoteappFacts: async () => { const e = new Error('the desktop access layer is not wired on this instance'); e.code = 'host_unavailable'; throw e; },
+    remoteappSetupView: () => { const e = new Error('the desktop access layer is not wired on this instance'); e.code = 'host_unavailable'; throw e; },
+    saveRemoteappSetup: () => { const e = new Error('the desktop access layer is not wired on this instance'); e.code = 'host_unavailable'; throw e; },
+    trustRemoteApp: async () => { const e = new Error('the desktop access layer is not wired on this instance'); e.code = 'host_unavailable'; throw e; },
   };
 }
 
@@ -81,7 +88,7 @@ const INSTALL_LOG_NAME = `~/.vibespace/${SLOT.INSTALL_FILES.log}`; // how a mess
  * @param hosts   HostManager (deviceBounded / get / isLocal) or null (local only)
  * @param local   () => THIS machine's desktop-serve handle (the hub keeper's `machine`)
  */
-function create({ hosts = null, local = null, env = () => process.env, log = console, install = true, connectMs = 8000, installMs = 15 * 60 * 1000, holdMs = 60 * 60 * 1000, pollMs = 15000, vncPort = D.VNC_NATIVE.port, probeMs = 3000, audit = null, installedStore = null, helloListMs = 3000, rdpSetup = null } = {}) {
+function create({ hosts = null, local = null, env = () => process.env, log = console, install = true, connectMs = 8000, installMs = 15 * 60 * 1000, holdMs = 60 * 60 * 1000, pollMs = 15000, vncPort = D.VNC_NATIVE.port, probeMs = 3000, audit = null, installedStore = null, helloListMs = 3000, rdpSetup = null, integrations = null } = {}) {
   const forwards = new Map(); // `${hostId}:${remotePort}` → { server, sockets, localPort, hostId, remotePort, refs }
   const opening = new Map();  // key → the in-flight listen (a concurrent second caller joins it)
   const installs = new Map(); // machine key → { since, running } — THIS hub's follower; the machine's own slot is its pidfile (installState)
@@ -474,10 +481,21 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
   }
   // ── design q-024 r1 §1.2 (lane remoteapp-r1a): THE REMOTEAPP SEAM — the hub keeper hands these two to its machine half ──
   /** A machine's RemoteApp setup, read FRESH at every launch and relaunch: `{ user, domain?, certFp, password: () =>
-   *  string }` from `rdpSetup(hostId)` — R1a: a getter the caller injects (`create({ rdpSetup })` / `setRdpSetup(fn)`; nothing
-   *  is wired in server.js yet); R1b: the sealed integration row `remoteapp/<hostId>` + the machine's pinned fingerprint. A
-   *  part missing ⇒ `remoteapp_needs_setup` naming it (the settings card that asks for it is the next version). */
-  let rdpSetupGetter = typeof rdpSetup === 'function' ? rdpSetup : null;
+   *  string }`. Lane remoteapp-r1b: THE SEALED INTEGRATION ROW `remoteapp/<hostId>` (src/server/integration-store.js
+   *  resolveMachine — `integrations`, wired in server.js): the user, the domain, the certificate the first connection pinned,
+   *  and the password as a GETTER that opens the seal again at the spawn (the plaintext is never carried between reads). The
+   *  R1a seam stays for tests (`create({ rdpSetup })` / `setRdpSetup(fn)` outrank the store). A part missing ⇒
+   *  `remoteapp_needs_setup` naming it — its door is the machine's RemoteApp settings card. */
+  const credentialsOf = () => (typeof integrations === 'function' ? integrations() : integrations);
+  const sealed = (hostId) => { const st = credentialsOf(); return st && typeof st.resolveMachine === 'function' ? st.resolveMachine('remoteapp', hostId) : null; }; // the row's id spelled at the call (the registry's consumer census reads it; = RA.CREDENTIAL_ROW)
+  function storeSetup(hostId) {
+    const r = sealed(hostId);
+    if (!r) return null;
+    const v = r.values || {};
+    const password = v.password ? () => { const again = sealed(hostId); const pw = again && again.values ? again.values.password : ''; if (!pw) throw named('remoteapp_needs_setup', RA.needsSetupWords(['password'], hostName(hostId))); return pw; } : undefined;
+    return { user: v.user || '', domain: v.domain || '', certFp: v.certFp || '', password };
+  }
+  let rdpSetupGetter = typeof rdpSetup === 'function' ? rdpSetup : credentialsOf() ? storeSetup : null;
   function setRdpSetup(fn) { rdpSetupGetter = typeof fn === 'function' ? fn : null; }
   const hostName = (hostId) => { try { const h = hosts && hosts.get ? hosts.get(hostId) : null; return String((h && (h.name || h.id)) || hostId); } catch { return String(hostId); } }; // the machine's own name (a display string)
   async function remoteappSetup(hostId) {
@@ -485,6 +503,14 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
     const missing = RA.setupMissing(s);
     if (missing.length) { const e = named('remoteapp_needs_setup', RA.needsSetupWords(missing, hostName(hostId))); e.missing = missing; throw e; }
     return s;
+  }
+  /** lane remoteapp-r1b: what the FIRST CONNECTION needs — the sign-in without a pinned certificate (it is what pins one):
+   *  `{ user, domain, password: () => string }`, the user and the password refused by name when missing. */
+  async function remoteappSignin(hostId) {
+    const s = rdpSetupGetter ? await rdpSetupGetter(hostId) : null;
+    const missing = RA.setupMissing(s).filter((k) => k !== 'certificate');
+    if (missing.length) { const e = named('remoteapp_needs_setup', RA.needsSetupWords(missing, hostName(hostId))); e.missing = missing; throw e; }
+    return { user: s.user, domain: s.domain || '', password: s.password };
   }
   /** The loopback forward to the machine's 127.0.0.1:3389 through its agent's tcpForward — forwardPort's (reference
    *  counted: a relaunch's successor shares it until the old session lets go; the same pipe as VNC). → { port, forwardId, close } */
@@ -608,6 +634,73 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
     if (typeof dm.displayFacts !== 'function') throw named('host_needs_daemon', `${hostId}: its agent cannot list its displays`);
     return dm.displayFacts();
   }
+  // ── design q-024 r1 §1.3–§1.4 (lane remoteapp-r1b): THE REMOTEAPP SETTINGS CARD'S DOORS — the owner's (the routes refuse an agent token) ──
+  /** The machine's Remote Desktop facts through its agent (the `remoteapp-facts` op, read-only) → `{ ok, platform, facts, rows,
+   *  ready }`. An agent that predates the op is never asked: `agent_too_old` naming the version it has and the one it needs
+   *  (this hub's — the version that ships the op; never a guess). */
+  async function remoteappFacts(hostId) {
+    if (isLocal(hostId)) throw named('not_desktop_machine', 'RemoteApp reaches a PAIRED Windows machine — never this one');
+    const dm = await deviceOf(hostId);
+    const platform = platformOfHandle(dm);
+    const pv = RA.platformVerdict(platform, hostName(hostId));
+    if (pv) throw named(pv.code, pv.error);
+    const tooOld = (have) => ({ ok: false, code: 'agent_too_old', platform, have: have || null, need: AGENT_VERSION, error: `${hostName(hostId)}'s agent ${have ? `(${have}) ` : ''}cannot read its Remote Desktop facts — it needs version ${AGENT_VERSION} or later` });
+    if (typeof dm.remoteappFacts !== 'function') return tooOld(null);
+    let f;
+    try { f = await dm.remoteappFacts(); }
+    catch (e) { if (e && e.code === 'host_needs_daemon') return tooOld(e.daemonVersion); throw named('host_unavailable', `${hostId}: ${e && e.message}`); }
+    if (!f || f.ok !== true) return { ok: false, code: (f && f.code) || 'facts_failed', platform, error: (f && f.error) || 'the machine did not answer its facts' };
+    return { ok: true, platform, facts: f, rows: RA.remoteappFactRows(f), ready: RA.factsReady(f) };
+  }
+  /** The card's view of the machine's sealed row: user + domain, whether a password is SET (never its bytes, never a tail), the
+   *  pinned certificate — the store's machineView (src/server/integration-store.js) — and `refused`: the newest RemoteApp
+   *  session of this machine ended rdp_cert_changed UNDER THE PIN STILL IN FORCE (the card's 「重新信任」 sentence; a re-trust
+   *  moves the pin and the old refusal is no longer this pin's). */
+  function remoteappSetupView(hostId) {
+    const st = credentialsOf();
+    if (!st || typeof st.machineView !== 'function') throw named('host_unavailable', 'the integration store is not wired on this instance');
+    if (isLocal(hostId) || !hostKnown(hostId)) throw named('unsupported-host', `${JSON.stringify(hostId)} is not a paired machine on this instance`);
+    const view = st.machineView(RA.CREDENTIAL_ROW, hostId);
+    let last = null;
+    try { const ds = typeof local === 'function' ? local() : local; last = ds && typeof ds.listApps === 'function' ? ds.listApps().find((r) => r.remoteapp && r.remoteapp.hostId === hostId && r.rdp) || null : null; } catch { last = null; }
+    const refused = last && last.rdp.ended === 'rdp_cert_changed' && view.values.certFp && last.rdp.certFp === view.values.certFp ? { code: last.rdp.ended, id: last.id, at: last.endedAt || last.startedAt || null } : null;
+    return { ...view, refused };
+  }
+  // one audit line per settings change / first connection (the exit proxy's ONE writer) — WHAT changed, never a value
+  const auditRemoteapp = (hostId, verb, extra) => {
+    if (typeof audit !== 'function') return;
+    try { audit({ hostId, machine: hostName(hostId), sessionId: null, sessionKey: null, name: 'you — RemoteApp settings', by: 'user', verb, via: 'remoteapp', ...extra }); } catch (e) { log.warn?.(`[desktop] the RemoteApp ${verb} on ${hostId} was not audited: ${e && e.message}`); }
+  };
+  /** Save the sign-in typed on the card — `{ user, domain, password }` ONLY (the certificate is pinned by the first connection,
+   *  never typed): the store validates, trims and SEALS the password; an omitted field stays as it was, '' clears it. */
+  function saveRemoteappSetup(hostId, body = {}) {
+    remoteappSetupView(hostId); // the same refusals first (no store / not a paired machine)
+    const patch = {};
+    for (const k of ['user', 'domain', 'password']) if (body && body[k] !== undefined) patch[k] = body[k];
+    credentialsOf().setMachineValues(RA.CREDENTIAL_ROW, hostId, patch);
+    auditRemoteapp(hostId, 'remoteapp-setup', { ok: true, fields: Object.keys(patch) });
+    return remoteappSetupView(hostId);
+  }
+  /** 「首次连接」 / 「重新信任」 — the owner's click: ONE sign-in with no app through the loopback forward (this machine's keeper
+   *  runs it: src/desktop-serve.js trustRemoteApp — `/auth-only /cert:tofu` into a fresh config dir), and the certificate the
+   *  machine showed is PINNED on its sealed row. A failed sign-in pins nothing. → the card's view */
+  async function trustRemoteApp(hostId) {
+    if (isLocal(hostId)) throw named('not_desktop_machine', 'RemoteApp reaches a PAIRED Windows machine — never this one');
+    remoteappSetupView(hostId);
+    const dm = await deviceOf(hostId);
+    const pv = RA.platformVerdict(platformOfHandle(dm), hostName(hostId));
+    if (pv) throw named(pv.code, pv.error);
+    await remoteappSignin(hostId); // the user + password are asked HERE first: the card hears what is missing before anything opens
+    let r;
+    try { r = await localOf().trustRemoteApp({ hostId, machine: hostName(hostId) }); }
+    catch (e) { auditRemoteapp(hostId, 'remoteapp-trust', { ok: false, refusal: (e && e.code) || 'error' }); throw e; }
+    const before = remoteappSetupView(hostId).values.certFp || null;
+    credentialsOf().setMachineValues(RA.CREDENTIAL_ROW, hostId, { certFp: r.certFp });
+    const view = remoteappSetupView(hostId);
+    auditRemoteapp(hostId, 'remoteapp-trust', { ok: true, certFp: r.certFp, ...(before && before !== r.certFp ? { replaced: before } : {}) });
+    log.log?.(`[desktop] RemoteApp: ${hostId}'s Remote Desktop certificate pinned at the owner's click (sha256 ${r.certFp.slice(0, 11)}…)`);
+    return { ...view, changed: !!before && before !== r.certFp, client: r.client || null };
+  }
   /** The hub ⇄ machine link's round trip now (one mux PING) — the stats strip's second number. → { ms } | { ms: null } */
   async function linkPing(hostId) {
     if (isLocal(hostId)) return { ms: 0 };
@@ -621,7 +714,7 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
     try { return !!(hosts && typeof hosts.connectedDevice === 'function' && hosts.connectedDevice(hostId)); } catch { return false; }
   }
 
-  const layer = { call, forwardPort, closeForward, forwards: listForwards, hostKnown, isLocal, shutdown, machines, installPlan, installXpra, installPackage, installBusy, runArgv, readFile, connectedNow, setAppPlanner, planDigest, probeDesktop, openMachineDesktop, machineDesktopTarget, machineDesktopGone, runOnDesktop, installedApps, installedNow, deviceOf, displayFacts, linkPing, remoteappSetup, remoteappForward, setRdpSetup, launchRemoteApp };
+  const layer = { call, forwardPort, closeForward, forwards: listForwards, hostKnown, isLocal, shutdown, machines, installPlan, installXpra, installPackage, installBusy, runArgv, readFile, connectedNow, setAppPlanner, planDigest, probeDesktop, openMachineDesktop, machineDesktopTarget, machineDesktopGone, runOnDesktop, installedApps, installedNow, deviceOf, displayFacts, linkPing, remoteappSetup, remoteappForward, setRdpSetup, launchRemoteApp, remoteappSignin, remoteappFacts, remoteappSetupView, saveRemoteappSetup, trustRemoteApp };
   if (install) installed = layer;
   return layer;
 }

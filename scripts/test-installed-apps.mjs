@@ -236,7 +236,7 @@ console.log('§8 the dialog: installed list + filter + keyed rows + Examples / R
   const esbuild = require(REPO + '/node_modules/esbuild');
   const STUBS = {
     './i18n.js': 'export const t = (s, p) => String(s).replace(/\\{(\\w+)\\}/g, (m, k) => (p && k in p ? String(p[k]) : m)); export const tc = (c, s, p) => t(s, p);',
-    './utils.js': 'export const createModalShell = (o) => globalThis.__shell(o); export const fetchJson = (u, o) => globalThis.__fetch(u, o); export const showToast = (m, o) => globalThis.__toasts.push(m);',
+    './utils.js': 'export const createModalShell = (o) => globalThis.__shell(o); export const fetchJson = (u, o) => globalThis.__fetch(u, o); export const showToast = (m, o) => globalThis.__toasts.push(m); export const copyText = () => Promise.resolve();', // + copyText: lane remoteapp-r1b's settings card (imported by the dialog)
     './window-types.js': 'export const registerWindowType = () => {}; export const svgIcon16 = () => "";',
     './vnc-view.js': 'export const createVncView = () => ({ connect() {}, dispose() {} }); export const streamUrl = (u) => u;',
     './picture-shell.js': 'export const pageIsSecure = () => false;', // lane desktop-v2-latency: the strip's keyboard-lock gate (the real one imports utils.js)
@@ -245,7 +245,7 @@ console.log('§8 the dialog: installed list + filter + keyed rows + Examples / R
   // the same four stubs for src/lib/machine-app.js (machine-app-crop's "Run as its own window…" module the dialog imports — the real
   // utils.js wires document-level tooltips at load)
   const out = await esbuild.build({ entryPoints: [path.join(REPO, 'src/lib/machine-desktop.js')], bundle: true, format: 'cjs', platform: 'node', write: false, logLevel: 'silent',
-    plugins: [{ name: 'stubs', setup(b) { b.onResolve({ filter: /^\.\/(i18n|utils|window-types|vnc-view|picture-shell)\.js$/ }, (a) => (/(machine-(desktop|app)|desktop-picker)\.js$/.test(a.importer) ? { path: a.path, namespace: 'stub' } : null)); b.onLoad({ filter: /.*/, namespace: 'stub' }, (a) => ({ contents: STUBS[a.path], loader: 'js' })); } }] });
+    plugins: [{ name: 'stubs', setup(b) { b.onResolve({ filter: /^\.\/(i18n|utils|window-types|vnc-view|picture-shell)\.js$/ }, (a) => (/(machine-(desktop|app)|desktop-picker|remoteapp-card)\.js$/.test(a.importer) ? { path: a.path, namespace: 'stub' } : null)); b.onLoad({ filter: /.*/, namespace: 'stub' }, (a) => ({ contents: STUBS[a.path], loader: 'js' })); } }] });
   class N {
     constructor(tag) { this.tagName = String(tag).toUpperCase(); this.children = []; this.parent = null; this.style = { cssText: '' }; this.attrs = {}; this.className = ''; this._text = ''; this.hidden = false; this.disabled = false; this.value = ''; this.title = '';
       this.classList = { toggle: (c, on) => { const s = new Set(this.className.split(/\s+/).filter(Boolean)); if (on === undefined ? !s.has(c) : on) s.add(c); else s.delete(c); this.className = [...s].join(' '); }, contains: (c) => this.className.split(/\s+/).includes(c) }; }
@@ -307,7 +307,7 @@ console.log('§8 the dialog: installed list + filter + keyed rows + Examples / R
   answer = { hostId: 'win-a', platform: 'win32', rows: [{ name: 'Blender', launch: 'start "" "C:\\B\\blender.exe"', source: 'start-menu', seenAt: 2 }, ZR, JR], total: 3, truncated: false, listedAt: 2 };
   const checkBtn = body.find('file-tool-btn').find((b) => b.textContent === 'Check again');
   const acts = body.find('desktop-install-actions')[0];
-  ok(acts && J(acts.children.map((b) => b.textContent)) === J(['Install TightVNC Server…', 'Check again']), 'the action row: Install… and Check again (the CSS rule below keeps both whole)');
+  ok(acts && J(acts.children.map((b) => b.textContent)) === J(['Install TightVNC Server…', 'Check again', 'RemoteApp settings…']), 'the action row: Install…, Check again and (a Windows machine, lane remoteapp-r1b) RemoteApp settings… — the CSS rule below keeps each whole');
   await checkBtn.onclick(); await tick();
   ok(asked[asked.length - 1] === '/api/desktop/machine-desktop/apps?host=win-a&fresh=1' && rechecks === 1, 'Check again re-reads the machine row AND lists its apps again (fresh)');
   ok(J(rowsNow().map((b) => b.firstChild.textContent)) === J(['Blender', '7-Zip', 'JASP']) && rowsNow()[2] === jaspNode, 'a re-list moves the existing row nodes (keyed by the launch line), never rebuilds them');

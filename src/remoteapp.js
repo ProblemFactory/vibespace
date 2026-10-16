@@ -13,7 +13,13 @@
  *   certFpVerdict(s)             — the pinned certificate's sha256 (colon hex, lowercase)
  *   rdpBuildVerdict(facts)       — the hub's own client: FreeRDP 3 (the argv is its syntax), and whether it decodes H.264
  *   parseRailLine / rdpEndVerdict — why a session ended, from the client's own log words and exit code
- *   setupMissing / needsSetupWords — what a machine still lacks before a launch (the settings card is R1b)
+ *   setupMissing / needsSetupWords — what a machine still lacks before a launch (its RemoteApp settings card asks for it)
+ *   remoteappTrustArgv / trustVerdict — the settings card's 「首次连接」 (lane remoteapp-r1b): ONE sign-in without an app
+ *                                  (`/auth-only`, `/cert:tofu` into a fresh config dir) whose stored certificate is pinned
+ *   REMOTEAPP_FACTS_SCRIPT / parseRemoteappFacts / remoteappFactRows — the machine's Remote Desktop facts (the `remoteapp-facts`
+ *                                  device op, lane remoteapp-r1b): Windows edition, Remote Desktop on + listening, the
+ *                                  RemoteApp allow list, the GPU policy — each unmet fact a sentence with its door
+ *   scrubRdpLog                  — a password-shaped token in the client's output erased (belt: measured, it prints none)
  *
  * MEASURED 2026-10-16 (xfreerdp 3.32.1 = Ubuntu 26.04 freerdp-x11, against a FreeRDP shadow server on a private Xvfb, loopback):
  *   • `/gfx:AVC444` and `/gfx:AVC420` are REFUSED at argv parse by a build without H.264 ("Command line parsing failed at
@@ -28,6 +34,16 @@
  *   • a wrong password ⇒ ERRCONNECT_LOGON_FAILURE [0x00020014], exit 134; nothing listening ⇒ ERRCONNECT_CONNECT_FAILED, exit 141.
  *   • `-audio-mode:2`, `/dynamic-resolution`, `/network:auto`, `/kbd:unicode:on`, `-clipboard` parse; the password never
  *     appeared in the client's output (0 of 13 runs).
+ * MEASURED 2026-10-16 (lane remoteapp-r1b, the same client and shadow server, `/auth-only` — the first connection):
+ *   • `/auth-only` with `/from-stdin` NEVER CONNECTS: the client checks for a password before it reads stdin ("auth-only, but
+ *     no password set" ⇒ ERRCONNECT_PRE_CONNECT_FAILED, exit 136, nothing sent). `/from-stdin:force` reads the one line BEFORE
+ *     connecting; with `/u:` and `/d:` given that line is the password.
+ *   • `/cert:tofu` with a fresh XDG_CONFIG_HOME: a good sign-in exits 0 and leaves ONE file, <config>/freerdp/server/
+ *     127.0.0.1_<port>.pem, whose sha256 IS the server certificate's. The same run ALSO prints "Host key verification failed."
+ *     (the name mismatch tofu accepts), "Authentication only, exit status 1" and ERRCONNECT_CONNECT_CANCELLED (its own stop)
+ *     — only the exit code tells success. A wrong password exits 134 and stores the certificate all the same (so a pin is
+ *     taken only from exit 0); nothing listening exits 141; a deny + wrong pin under `/auth-only` exits 143. Password in the
+ *     output: 0 of 12 runs.
  */
 
 const RDP_PORT = 3389;              // the machine's own Remote Desktop listener — reached on ITS loopback, never opened to the LAN
@@ -37,6 +53,9 @@ const RDP_PLATFORM = 'win32';       // RemoteApp is a Windows server feature (Pr
 const RDP_CLIENT_BINS = Object.freeze(['xfreerdp', 'xfreerdp3']);
 const FIELD_MAX = 260;              // Windows MAX_PATH — a program path, an app name, a user
 const ARGS_MAX = 1000;
+const CREDENTIAL_ROW = 'remoteapp'; // lane remoteapp-r1b: the integration row (src/integration-registry.js) — one sealed record per machine, `remoteapp/<hostId>`
+const FACTS_CAPABILITY = 'remoteapp-facts'; // lane remoteapp-r1b: the device op (and its capability in the agent's hello-ack)
+const TRUST_DEADLINE_MS = 20000;    // the first connection: one TLS + NLA round trip through the forward (measured < 0.1 s on loopback)
 
 const refuse = (code, error, extra = {}) => ({ ok: false, code, error, ...extra });
 // a control character (a line break would end the stdin line or forge a log line) or a NUL anywhere is refused
@@ -186,13 +205,15 @@ const RAIL_LINE_ROWS = Object.freeze([
   Object.freeze({ re: /\bERRCONNECT_(CONNECT_FAILED|DNS_NAME_NOT_FOUND)\b/, code: () => 'rdp_unreachable' }),
   Object.freeze({ re: /\bERRCONNECT_CONNECT_TRANSPORT_FAILED\b/, code: () => 'rdp_link_lost' }), // a session whose connection dropped (FreeRDP's constant; the fake prints it — unmeasured on a real drop)
   Object.freeze({ re: /\bERRCONNECT_CONNECT_CANCELLED\b/, code: () => 'rdp_cancelled' }),
+  Object.freeze({ re: /\bERRCONNECT_PRE_CONNECT_FAILED\b/, code: () => 'rdp_client_refused' }), // lane remoteapp-r1b, measured: `/auth-only` + `/from-stdin` (exit 136)
 ]);
 // most decisive first: a cert refusal also prints the TLS failure, a stop prints CANCELLED after anything else
-const END_RANK = Object.freeze(['rdp_bad_argv', 'rdp_cert_changed', 'rdp_auth_failed', 'rail_not_allowed', 'rail_no_program', 'rail_session_locked', 'rail_refused', 'rdp_tls_failed', 'rdp_unreachable', 'rdp_link_lost', 'rdp_cancelled']);
+const END_RANK = Object.freeze(['rdp_bad_argv', 'rdp_client_refused', 'rdp_cert_changed', 'rdp_auth_failed', 'rail_not_allowed', 'rail_no_program', 'rail_session_locked', 'rail_refused', 'rdp_tls_failed', 'rdp_unreachable', 'rdp_link_lost', 'rdp_cancelled']);
 // MEASURED exit codes of xfreerdp 3.32.1 (its XF_EXIT_* table)
-const EXIT_CODES = Object.freeze({ 134: 'rdp_auth_failed', 141: 'rdp_unreachable', 143: 'rdp_tls_failed', 145: 'rdp_cancelled' });
+const EXIT_CODES = Object.freeze({ 134: 'rdp_auth_failed', 136: 'rdp_client_refused', 141: 'rdp_unreachable', 143: 'rdp_tls_failed', 145: 'rdp_cancelled' });
 const END_WORDS = Object.freeze({
   rdp_bad_argv: () => 'this machine\'s RDP client refused its command line (an option its build does not have) — nothing was sent to the machine',
+  rdp_client_refused: () => 'this machine\'s RDP client stopped before connecting (it refused how it was started) — nothing was sent to the machine',
   rdp_cert_changed: (m) => `${m}'s Remote Desktop certificate is not the one pinned for it — the connection was refused (a reinstalled machine needs its new certificate trusted again)`,
   rdp_auth_failed: (m) => `${m} refused the Windows sign-in (a wrong user name or password, or an account that may not sign in remotely)`,
   rail_not_allowed: (m) => `${m} refused to start the app as a RemoteApp: it is not in its allow list (TSAppAllowList fDisabledAllowList is not 1)`,
@@ -236,19 +257,139 @@ function setupMissing(s) {
   return out;
 }
 const MISSING_WORDS = Object.freeze({ user: 'its Windows user name', password: 'its Windows password', certificate: 'its Remote Desktop certificate fingerprint' });
-/** The refusal sentence for an incomplete setup — honest that the card asking for it is the next version (R1b). */
+/** The refusal sentence for an incomplete setup — its door named: the machine's RemoteApp settings card (lane remoteapp-r1b). */
 function needsSetupWords(missing, machine = 'this machine') {
   const parts = (Array.isArray(missing) && missing.length ? missing : ['user', 'password', 'certificate']).map((k) => MISSING_WORDS[k] || k);
   const list = parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}` : parts[0];
-  return `RemoteApp on ${machine} needs ${list} — the RemoteApp settings card that asks for them comes in the next version; until then "Run as its own window" opens its apps as a cropped picture`;
+  const how = missing && missing.length === 1 && missing[0] === 'certificate' ? 'press First connection on its RemoteApp settings card' : 'give them once on its RemoteApp settings card';
+  return `RemoteApp on ${machine} needs ${list} — ${how} (the machine's dialog → RemoteApp settings…)`;
 }
 /** The words for a hub without the client (the needs verdict's missing list) — the package to install named. */
 function needsClientWords(missing) {
   return `RemoteApp needs xpra and FreeRDP 3's X client on this machine (${(missing || []).join('; ') || 'not on PATH'}) — apt install freerdp3-x11`;
 }
 
+// ── THE FIRST CONNECTION (design §1.4 「首次连接」, lane remoteapp-r1b — MEASURED, see the header) ─────────────────────────
+// The owner's click on the settings card: ONE sign-in to the machine with no app (`/auth-only`), the client trusting the
+// certificate it is shown (`/cert:tofu`) into its OWN fresh config dir — the hub reads the one certificate stored there and
+// pins its sha256 on the machine's sealed row. Every later launch says `/cert:deny,fingerprint:sha256:<pin>`; a machine whose
+// certificate changed is refused there (rdp_cert_changed) until the owner trusts it again (the same click). The password
+// rides stdin exactly as at a launch — but `/from-stdin:force`: `/auth-only` refuses to start before a password is known.
+/** → { ok, argv } | refusal */
+function remoteappTrustArgv({ port, user, domain = '' } = {}) {
+  const p = Number(port);
+  if (!Number.isInteger(p) || p < 1 || p > 65535) return refuse('bad-request', `the RemoteApp forward port ${JSON.stringify(port)} is not a port`);
+  const u = fieldVerdict(user, 'user name', { comma: true });
+  if (!u.ok) return u;
+  if (!u.value) return refuse('remoteapp_needs_setup', 'the first connection needs the Windows user name of the machine');
+  const d = fieldVerdict(domain, 'domain', { max: 120 });
+  if (!d.ok) return d;
+  const argv = [`/v:127.0.0.1:${p}`, `/u:${u.value}`, `/d:${d.value || ''}`, '/from-stdin:force', '/cert:tofu', '/auth-only', '/log-level:WARN'];
+  const v = rdpArgVerdict(argv);
+  if (!v.ok) return v;
+  return { ok: true, argv };
+}
+// a successful tofu run prints the certificate-name lines too (measured): they are not why a first connection failed
+const TOFU_NOISE_RE = /Host key verification failed|certificate not trusted, aborting|CERTIFICATE NAME MISMATCH|certificate for the wrong name/;
+/** The first connection's outcome: exit 0 = the machine took the sign-in (the EXIT CODE decides — the run also prints "Host
+ *  key verification failed." and ERRCONNECT_CONNECT_CANCELLED when it succeeds); otherwise why, from its lines minus the
+ *  tofu noise, else its exit code (a wrong password ⇒ rdp_auth_failed, nothing listening ⇒ rdp_unreachable).
+ *  → { ok:true } | refusal */
+function trustVerdict({ code = null, signal = null, lines = [], timedOut = false, machine = 'the machine' } = {}) {
+  if (timedOut) return refuse('rdp_trust_timeout', `${machine} did not finish the first connection within ${TRUST_DEADLINE_MS / 1000} s — nothing was pinned`);
+  if (code === 0 && !signal) return { ok: true };
+  const kept = (Array.isArray(lines) ? lines : String(lines || '').split('\n')).filter((l) => !TOFU_NOISE_RE.test(String(l)));
+  const v = rdpEndVerdict({ code, signal, lines: kept, machine });
+  if (v && v.code !== 'rdp_cancelled') return refuse(v.code, `${v.words} — nothing was pinned`);
+  return refuse('rdp_trust_failed', `the first connection to ${machine} ended without a sign-in (${signal ? `signal ${signal}` : `exit ${code}`}) — nothing was pinned`);
+}
+
+// ── A PASSWORD-SHAPED TOKEN IN THE CLIENT'S OUTPUT (design §1.3: app.log at WARN + this) — measured, xfreerdp printed the
+// password in 0 of 25 runs; this is the belt: `password=`, `password:`, `passwd`, `pass`, `pwd`, `/p:` and the REST OF THAT
+// LINE (verify r1: a Windows password may hold a blank, a quote, a comma or a semicolon — a value cut at one left its tail),
+// plus any secret the caller names, become <scrubbed>. PURE.
+const PASSWORD_SHAPE_RE = /((?:^|[\s"'(,;[{])(?:[/-]p:|(?:password|passwd|pass|pwd)["']?\s*[=:]\s*["']?))([^\r\n]+)/gi;
+function scrubRdpLog(text, secrets = []) {
+  let s = String(text == null ? '' : text).replace(PASSWORD_SHAPE_RE, (m, head) => `${head}<scrubbed>`);
+  for (const v of Array.isArray(secrets) ? secrets : []) if (typeof v === 'string' && v.length >= 4) s = s.split(v).join('<scrubbed>');
+  return s;
+}
+
+// ── THE MACHINE'S REMOTE DESKTOP FACTS (design §1.4, lane remoteapp-r1b) — the `remoteapp-facts` device op runs THIS script on
+// the paired Windows machine (src/remoteapp-facts.js, the agent's runner, `powershell -EncodedCommand`): READ-ONLY — registry
+// reads and one loopback connect, never a write (setting a fact up is the owner's own admin PowerShell, the card's command).
+// It prints ONE JSON line; parseRemoteappFacts reads it, remoteappFactRows turns it into the card's table. ──
+const TSAPP_KEY = 'HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Terminal Server\\TSAppAllowList';
+const GPU_KEY = 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\Terminal Services';
+const REMOTEAPP_FACTS_SCRIPT = [
+  "$ErrorActionPreference = 'SilentlyContinue'",
+  'function Val($k, $n) { $p = Get-ItemProperty -Path $k -Name $n -ErrorAction SilentlyContinue; if ($p -and $null -ne $p.$n) { return [string]$p.$n }; return $null }',
+  "$o = @{ t = 'remoteapp-facts' }",
+  "$cv = 'HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion'",
+  "$o.edition = Val $cv 'EditionID'; $o.product = Val $cv 'ProductName'; $o.build = Val $cv 'CurrentBuildNumber'",
+  "$o.deny = Val 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Terminal Server' 'fDenyTSConnections'",
+  `$o.listening = 0; try { $c = New-Object System.Net.Sockets.TcpClient; $a = $c.BeginConnect('127.0.0.1', ${RDP_PORT}, $null, $null); if ($a.AsyncWaitHandle.WaitOne(2000) -and $c.Connected) { $o.listening = 1 }; $c.Close() } catch { }`,
+  `$o.allowList = Val '${TSAPP_KEY}' 'fDisabledAllowList'`,
+  `$o.gpu = Val '${GPU_KEY}' 'bEnumerateHWBeforeSW'`,
+  '[Console]::Out.WriteLine((ConvertTo-Json -InputObject $o -Compress))',
+].join('\n');
+/** The copyable ADMIN PowerShell lines the card shows for an unmet fact — shown, never run by VibeSpace (a registry write
+ *  under HKLM is an administrator's, on that machine: the owner pastes it into an administrator PowerShell there). A key
+ *  that does not exist yet is created first; an existing key is never re-created (New-Item -Force would empty it). */
+const ALLOWLIST_COMMAND = `$k = '${TSAPP_KEY}'; if (-not (Test-Path $k)) { New-Item -Path $k | Out-Null }; New-ItemProperty -Path $k -Name fDisabledAllowList -PropertyType DWord -Value 1 -Force | Out-Null`;
+const GPU_COMMAND = `$k = '${GPU_KEY}'; if (-not (Test-Path $k)) { New-Item -Path $k -Force | Out-Null }; New-ItemProperty -Path $k -Name bEnumerateHWBeforeSW -PropertyType DWord -Value 1 -Force | Out-Null`;
+// Windows' EditionID: Core* = Home (no Remote Desktop SERVICE — it can connect out, never be connected to); the editions that
+// host Remote Desktop: Professional (+ N, Workstation, Education), Enterprise (+ N, S = LTSC), Education, Server*, IoTEnterprise
+const HOME_EDITION_RE = /^Core/i;
+const RDP_HOST_EDITION_RE = /^(?:Professional|Enterprise|Education|Server|IoTEnterprise)/i;
+function editionKind(id) {
+  const s = String(id || '');
+  if (!s) return 'unknown';
+  if (HOME_EDITION_RE.test(s)) return 'home';
+  return RDP_HOST_EDITION_RE.test(s) ? 'pro' : 'unknown';
+}
+const FACT_TEXT_MAX = 80;
+const factText = (v) => (typeof v === 'string' || typeof v === 'number' ? String(v).replace(/[\u0000-\u001f\u007f\u2028\u2029]/g, '').trim().slice(0, FACT_TEXT_MAX) || null : null);
+const dword = (v) => { const s = factText(v); return s !== null && /^-?\d+$/.test(s) ? Number(s) : null; };
+/** The script's one line → { ok, edition: { id, product, build, kind: 'pro'|'home'|'unknown' }, rdpOn, listening, allowList,
+ *  gpuPolicy } (each a boolean, or null when the machine has no such value) | { ok:false, code:'bad_output' }. PURE. */
+function parseRemoteappFacts(stdout) {
+  let o = null;
+  for (const line of String(stdout || '').split(/\r?\n/)) { const l = line.trim(); if (!l.startsWith('{')) continue; try { const v = JSON.parse(l); if (v && v.t === 'remoteapp-facts') { o = v; break; } } catch { /* not ours */ } }
+  if (!o) return refuse('bad_output', 'the machine did not print its Remote Desktop facts');
+  const id = factText(o.edition);
+  const deny = dword(o.deny), allow = dword(o.allowList), gpu = dword(o.gpu), listen = dword(o.listening);
+  return {
+    ok: true,
+    edition: { id, product: factText(o.product), build: factText(o.build), kind: editionKind(id) },
+    rdpOn: deny === null ? null : deny === 0,           // fDenyTSConnections 0 = connections allowed
+    listening: listen === null ? null : listen === 1,   // something answered on the machine's own 127.0.0.1:3389
+    allowList: allow === null ? null : allow === 1,     // TSAppAllowList fDisabledAllowList 1 = any program may start as a RemoteApp
+    gpuPolicy: gpu === null ? null : gpu === 1,         // the policy "use the hardware graphics adapter for all Remote Desktop sessions"
+  };
+}
+const FACT_KEYS = Object.freeze(['edition', 'rdp', 'allowlist', 'gpu']);
+/** The settings card's facts table: one row per fact — `met`, the CODE of the sentence an unmet fact shows (the card words
+ *  it), `optional` (the GPU policy: without it apps render in software), and the admin `command` its door is. RemoteApp is
+ *  READY when every row that is not optional is met. → [{ key, met, code, optional, command? }] | null (no facts) */
+function remoteappFactRows(f) {
+  if (!f || f.ok !== true || !f.edition) return null;
+  const kind = f.edition.kind;
+  const rdpMet = f.rdpOn === true && f.listening === true;
+  return [
+    { key: 'edition', met: kind === 'pro', code: kind === 'pro' ? null : kind === 'home' ? 'edition_home' : 'edition_unknown', optional: false },
+    { key: 'rdp', met: rdpMet, code: rdpMet ? null : f.rdpOn === true ? 'rdp_not_listening' : 'rdp_off', optional: false },
+    { key: 'allowlist', met: f.allowList === true, code: f.allowList === true ? null : 'allowlist_off', optional: false, command: ALLOWLIST_COMMAND },
+    { key: 'gpu', met: f.gpuPolicy === true, code: f.gpuPolicy === true ? null : 'gpu_off', optional: true, command: GPU_COMMAND },
+  ];
+}
+/** Every fact RemoteApp needs is met. */
+function factsReady(f) { const rows = remoteappFactRows(f); return !!rows && rows.every((r) => r.optional || r.met); }
+
 module.exports = {
   RDP_PORT, REMOTE_KIND, RDP_PLATFORM, RDP_CLIENT_BINS, FORBIDDEN_RDP_ARG_RE, EXIT_CODES,
   remoteappRequestVerdict, remoteappProgramOf, programLabel, certFpVerdict, rdpArgVerdict, remoteappArgv, rdpBuildVerdict, rdpClientOf,
   parseRailLine, rdpEndVerdict, platformVerdict, setupMissing, needsSetupWords, needsClientWords,
+  CREDENTIAL_ROW, FACTS_CAPABILITY, TRUST_DEADLINE_MS, remoteappTrustArgv, trustVerdict, scrubRdpLog, // lane remoteapp-r1b
+  REMOTEAPP_FACTS_SCRIPT, ALLOWLIST_COMMAND, GPU_COMMAND, FACT_KEYS, editionKind, parseRemoteappFacts, remoteappFactRows, factsReady,
 };

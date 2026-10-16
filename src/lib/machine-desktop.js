@@ -27,6 +27,7 @@ import { keyboardLockGate, NAGLE_REFERENCE, SLOW_KBPS, STILL_MS } from '../deskt
 import { desktopRunPlan, desktopRunPresets, rememberRun, machineDesktopId } from '../machine-desktop-model.js';
 import { namesGuiApp } from '../machine-window.js';
 import { remoteappProgramOf } from '../remoteapp.js'; // lane remoteapp-r1a: the typed line → the program a RemoteApp starts
+import { openRemoteappSettings } from './remoteapp-card.js'; // lane remoteapp-r1b: the machine's RemoteApp settings card
 import { openMachineApp } from './machine-app.js'; // lane machine-app-crop: one app of the machine as its own window
 import { screenMap, hdrShown, carryPick } from '../desktop-screens.js'; // lane desktop-v2-entry: the OS table + the RFB table → the displays in fb pixels
 import { openDesktopPicker, rememberDesktop, rememberDisplays, readRecent } from './desktop-picker.js';
@@ -62,7 +63,7 @@ export function desktopRefusalText(r, m) {
   if (c === 'multi_line') return t('One line only — a line break would start a second command');
   if (c === 'hidden_chars') return t('The command holds an invisible character — retype it so what runs is what you see');
   if (c === 'run_failed') return t('The command did not start on {machine}', { machine });
-  if (c === 'remoteapp_needs_setup') return t('RemoteApp needs {machine}’s Windows sign-in and its certificate fingerprint — the RemoteApp settings that ask for them come in the next version. Until then, Run as its own window opens its apps.', { machine }); // lane remoteapp-r1a: the settings card is R1b — said, never greyed
+  if (c === 'remoteapp_needs_setup') return t('RemoteApp needs {machine}’s Windows sign-in and its pinned certificate — set them once in RemoteApp settings…', { machine }); // lane remoteapp-r1b: its door is the settings card (the launcher opens it)
   if (c === 'rdp_session_busy') return t('{machine} already shows a RemoteApp session — Windows gives one remote session per machine; use that window or stop it first', { machine });
   return (r && r.error) || t('Could not reach {machine}', { machine });
 }
@@ -401,6 +402,7 @@ export function showMachineDesktopDialog(app, m0, { install = null, recheck = nu
     if (m.code === 'desktop_ready') acts.append(btn('desktop-open-link', t('Open its desktop → Desktop'), () => { toWindow(); openMachineDesktop(app, m); }));
     if (m.code === 'no_vnc' && m.setup === 'win32' && install) acts.append(btn('btn-create', t('Install TightVNC Server…'), () => install(m, { what: 'tightvnc', onDone: () => check() })));
     if (m.code !== 'offline' && recheck) acts.append(btn('file-tool-btn', t('Check again'), () => check()));
+    if (m.setup === 'win32') { const rs = btn('file-tool-btn machine-remoteapp-settings', t('RemoteApp settings…'), () => openRemoteappSettings(app, m)); rs.title = t('Set up RemoteApp once for this Windows machine: its sign-in and its certificate'); acts.append(rs); } // lane remoteapp-r1b: never greyed — offline, the card says so
     const offline = m.code === 'offline';
     input.disabled = offline; runBtn.disabled = offline; winBtn.disabled = offline; if (raBtn) raBtn.disabled = offline; apps.disable(offline); pickDefault();
     const list = desktopRunPresets(m.setup, readRuns()[m.hostId]);
@@ -430,7 +432,7 @@ export function showMachineDesktopDialog(app, m0, { install = null, recheck = nu
     raBtn.disabled = true;
     const r = await post('/api/desktop/machine-desktop/remoteapp', { host: m.hostId, program, args });
     raBtn.disabled = false;
-    if (!r || r.error) { showToast(desktopRefusalText(r, m), { type: 'error' }); return; }
+    if (!r || r.error) { showToast(desktopRefusalText(r, m), { type: 'error' }); if (r && r.code === 'remoteapp_needs_setup') openRemoteappSettings(app, m); return; } // lane remoteapp-r1b: the refusal's door, opened
     showToast(t('Opening {app} from {machine} through RemoteApp…', { app: r.label || program, machine }));
     toWindow();
     app.openDesktopApp(r.id);

@@ -328,8 +328,9 @@ const settingsReader = (obj) => (key) => (obj && typeof obj === 'object' && SETT
  *   appsHome       — the user's home on this machine (default: the base env's HOME, else os.homedir())
  *   remoteapp      — lane remoteapp-r1a: the HUB's way to a paired Windows machine for a RemoteApp launch —
  *                    `{ setup(hostId) → { user, domain?, certFp, password: () => string }, forward(hostId) → { port,
- *                    forwardId, close } }` (src/server/desktop-access.js through the hub keeper); absent on a daemon,
- *                    where a RemoteApp launch is refused `remoteapp_unwired`
+ *                    forwardId, close }, signin(hostId) → { user, domain, password: () => string } }` (src/server/
+ *                    desktop-access.js through the hub keeper; `signin` = lane remoteapp-r1b's first connection, which
+ *                    needs no pin — it takes one); absent on a daemon, where RemoteApp is refused `remoteapp_unwired`
  */
 function install({ dataDir, env, serverSetting = () => undefined, singleton = null,
   display = displayFacts, limits = LIMITS, registryRows = M.DEFAULT_REGISTRY, backends = M.DISPLAY_BACKENDS, log = console, now = Date.now, tickMs = TICK_MS, guardSampleMs = null, geometry = DEFAULT_GEOMETRY, hostId = null, fitSlowBeltMs = FIT_SLOW_BELT_MS, askCloseMs = ASK_CLOSE_MS, hooks = {}, apps = null, appsHome = null, remoteapp = null } = {}) {
@@ -362,6 +363,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
   const quitAsks = new Map();   // id -> the ChildProcess of a `.uno:Quit` hand-over still waiting on LibreOffice's save prompt (B-04da ④)
   const deferred = new Map();   // id -> () => bringUp — a launch whose start waits for the record it replaces to stop (a browser relaunch, 2.369.176)
   const rdpSeats = new Map();   // id -> { close, password, configDir } — a RemoteApp session's forward + its password GETTER (lane remoteapp-r1a; never persisted)
+  const rdpTrusting = new Set(); // hostIds whose first connection runs now (lane remoteapp-r1b: one at a time per machine)
   let dirty = false;
   let factsCache = null;        // { at, facts }
   let timer = null;
@@ -839,8 +841,74 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     if (opts.deferBringUp) deferred.set(id, start); else start();
     return view(rec);
   }
+  /** lane remoteapp-r1b (design q-024 r1 §1.4 「首次连接」 / 「重新信任」): ONE sign-in to the machine with no app — THIS machine's
+   *  xfreerdp `/auth-only /cert:tofu` (src/remoteapp.js remoteappTrustArgv, measured) through the loopback forward a launch
+   *  takes, into a FRESH config dir of its own (0700, removed after): the one certificate it stored there is the machine's,
+   *  its sha256 the pin the hub writes on the sealed row. The password rides stdin as ONE line (`/from-stdin:force` —
+   *  `/auth-only` will not start before it knows one). Exit 0 alone is success (trustVerdict: the run also prints the
+   *  certificate warnings when it succeeds); a failed sign-in pins nothing. → { ok, certFp, client } */
+  async function trustRemoteApp({ hostId, machine = null } = {}) {
+    if (!remoteapp || typeof remoteapp.signin !== 'function' || typeof remoteapp.forward !== 'function') throw namedError('remoteapp_unwired', 'RemoteApp runs only on the VibeSpace server — this machine has no way to a paired machine');
+    if (typeof hostId !== 'string' || hostId === 'local' || !/^[\w.:-]{1,128}$/.test(hostId)) throw namedError('bad-request', 'the first connection is to a PAIRED Windows machine — name it by its host id');
+    const who = machine || hostId;
+    const row = backends.find((b) => b.remote === RA.REMOTE_KIND);
+    if (!row) throw namedError('no-backend', 'this machine\'s display table has no RemoteApp row');
+    const f = await facts();
+    const nv = M.needsVerdict(row, f.bins || {});
+    if (!nv.ok) throw namedError('no-backend', RA.needsClientWords(nv.missing));
+    // a live session IS the machine's trusted certificate in use — re-trusting under it is refused, naming the session
+    const busy = liveRecords().find((r) => r.remoteapp && r.remoteapp.hostId === hostId);
+    if (busy) throw namedError('rdp_session_busy', `${who} shows a RemoteApp session now (${busy.label}, ${busy.id}) — stop it before connecting to the machine again`);
+    if (rdpTrusting.has(hostId)) throw namedError('rdp_trust_busy', `a first connection to ${who} is already running`);
+    rdpTrusting.add(hostId); // taken with the check, BEFORE any await (verify r1: two clicks during a cold build read both ran /auth-only)
+    let fwd = null;
+    const configDir = path.join(logRoot, `rdp-trust-${newId()}`);
+    try {
+      const exec = f.bins[RA.rdpClientOf(nv.via)];
+      const build = RA.rdpBuildVerdict(typeof display.rdpBuildFacts === 'function' ? await display.rdpBuildFacts(exec, { env: env() }) : {});
+      if (!build.ok) throw namedError(build.code, build.error);
+      const signin = await remoteapp.signin(hostId); // refuses a missing user / password BY NAME
+      fwd = await remoteapp.forward(hostId);
+      const av = RA.remoteappTrustArgv({ port: fwd.port, user: signin.user, domain: signin.domain || '' });
+      if (!av.ok) throw namedError(av.code, av.error);
+      let line = String(await signin.password()); // read NOW, once: the run's stdin and nowhere else
+      if (/[\r\n]/.test(line)) throw namedError('bad-request', 'the RemoteApp password holds a line break — it cannot be handed over as one line');
+      await fs.promises.rm(configDir, { recursive: true, force: true });
+      await fs.promises.mkdir(configDir, { recursive: true, mode: 0o700 });
+      const runEnv = { ...env(), XDG_CONFIG_HOME: configDir }; // its OWN config dir: an earlier TOFU elsewhere is never read, and nothing it stores outlives the run
+      delete runEnv.DISPLAY; // measured: `/auth-only` opens no window and needs no display
+      const run = await display.rdpTrustRun({ exec, argv: av.argv, env: runEnv, configDir, stdinLine: () => { const l = line; line = null; return l; }, deadlineMs: RA.TRUST_DEADLINE_MS });
+      const v = RA.trustVerdict({ code: run.code, signal: run.signal, lines: RA.scrubRdpLog(run.out).split('\n'), timedOut: run.timedOut, machine: who });
+      if (!v.ok) throw namedError(v.code, v.error);
+      const fp = RA.certFpVerdict(run.certFp || '');
+      if (!fp.ok) throw namedError('rdp_trust_no_cert', `${who} took the sign-in, but the client left no certificate to pin (${run.certWhy || fp.error}) — nothing was pinned`);
+      log.log?.(`[desktop] RemoteApp first connection to ${hostId}: signed in, certificate sha256 ${fp.fp.slice(0, 11)}… (FreeRDP ${build.version})`);
+      return { ok: true, certFp: fp.fp, client: build.version };
+    } finally {
+      rdpTrusting.delete(hostId);
+      if (fwd) { try { fwd.close(); } catch (e) { log.warn?.(`[desktop] RemoteApp forward ${fwd.forwardId}: close failed — ${e.message}`); } }
+      await fs.promises.rm(configDir, { recursive: true, force: true }).catch((e) => log.warn?.(`[desktop] the first connection's config dir was not removed: ${e.message}`));
+    }
+  }
   /** lane remoteapp-r1a: a RemoteApp session's forward reference goes with it (every terminal path runs teardown). */
   function closeRdp(id) { const seat = rdpSeats.get(id); if (!seat) return; rdpSeats.delete(id); seat.close(); }
+  /** lane remoteapp-r1b (design q-024 r1 §1.3): a RemoteApp session's app.log AT REST holds no password shape — rewritten
+   *  through src/remoteapp.js scrubRdpLog once its parts are gone (the client logs at WARN and measured none: the belt). */
+  const SCRUB_MAX_BYTES = 32 * 1024 * 1024;
+  async function scrubRdpLogFile(id) {
+    const f = path.join(logRoot, id, 'app.log');
+    try {
+      const st = await fs.promises.stat(f);
+      if (st.size > SCRUB_MAX_BYTES) { log.warn?.(`[desktop] ${id}: app.log is ${st.size} bytes — over the scrub's bound, left as written`); return; }
+      const text = await fs.promises.readFile(f, 'utf8');
+      const clean = RA.scrubRdpLog(text);
+      if (clean === text) return;
+      const tmp = `${f}.scrub-${process.pid}`;
+      await fs.promises.writeFile(tmp, clean, { mode: 0o600 });
+      await fs.promises.rename(tmp, f);
+      log.warn?.(`[desktop] ${id}: a password-shaped token in the RemoteApp client's log was scrubbed`);
+    } catch (e) { if (e && e.code !== 'ENOENT') log.warn?.(`[desktop] ${id}: app.log not scrubbed (${e.code || e.message})`); }
+  }
   /** lane remoteapp-r1a: why a RemoteApp session ended — the client's own words in the tail of its log + its exit code
    *  (src/remoteapp.js rdpEndVerdict). → { code, words } | null */
   async function rdpEndOf(rec, code, signal) {
@@ -849,7 +917,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
       const fh = await fs.promises.open(path.join(logRoot, rec.id, 'app.log'), 'r');
       try { const st = await fh.stat(); const n = Math.min(st.size, 16384); const b = Buffer.alloc(n); await fh.read(b, 0, n, st.size - n); text = b.toString('utf8'); } finally { await fh.close(); }
     } catch { /* no log: the exit code alone */ }
-    return RA.rdpEndVerdict({ code, signal, lines: text.split('\n'), machine: rec.remoteapp ? rec.remoteapp.hostId : 'the machine' });
+    return RA.rdpEndVerdict({ code, signal, lines: RA.scrubRdpLog(text).split('\n'), machine: rec.remoteapp ? rec.remoteapp.hostId : 'the machine' }); // lane remoteapp-r1b: scrubbed before a word of it reaches the record
   }
   /**
    * lane one-browser-b1 (design q-026 r1 §2.1 B1): A DISPLAY-ONLY SESSION for an agent browser (`kind: display-for-browser`,
@@ -1376,6 +1444,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     try { fs.unlinkSync(path.join(logRoot, rec.id, 'portal', M.SECRETS_KEY_FILE)); } catch { /* read by the service, or never written */ }
     children.delete(rec.id); sampledAt.delete(rec.id); samples.delete(rec.id); clearFit(rec.id); endNotes(rec.id);
     closeRdp(rec.id); // lane remoteapp-r1a: the RemoteApp's loopback forward goes with its session
+    if (rec.rdp) await scrubRdpLogFile(rec.id); // lane remoteapp-r1b: its log at rest holds no password shape
     if (rec.file) await noteFileEnd(rec, { clean }); // §7.9: every part is gone — the document's mtime now vs at launch (the hub's file-changed); its lock, when this session wrote it
     try { H.onTeardown?.(rec.id); } catch (e) { log.warn?.(`[desktop] ${rec.id}: teardown hook failed: ${e.message}`); } // the hub's guard + live rows go with the session
     if (rec.profileDir && !M.isLiveState(rec.state) && !stopping.has(rec.id)) await retireProfile(rec, { clean, why: rec.state }); // B-bfe6: a stop retires AFTER its verdict (below)
@@ -1889,7 +1958,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
   const isStopping = (id) => stopping.has(id);
 
   load();
-  return { notifications, launch, launchDisplay, relaunch, startDeferred, stop, reshapeStore, setPin, keepAlive, closeAsked, noteInput, noteDesktopSize, setWatchProbe, fitApp, get, list, listApps, liveRecords, streamTarget, x11EnvFor, windows, xpraWww, instancePrefs, facts, installFacts, installState, registry, adoptAll, start, shutdown, tick, sessionPids, apps,
+  return { notifications, launch, launchDisplay, relaunch, trustRemoteApp, startDeferred, stop, reshapeStore, setPin, keepAlive, closeAsked, noteInput, noteDesktopSize, setWatchProbe, fitApp, get, list, listApps, liveRecords, streamTarget, x11EnvFor, windows, xpraWww, instancePrefs, facts, installFacts, installState, registry, adoptAll, start, shutdown, tick, sessionPids, apps,
     machineView, commit, markDirty, latestSample, isStopping, backends,
     storeFile, logRoot, STORE_FILE, LOG_DIR, SESSION_ENV, _store: () => store };
 }

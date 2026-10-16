@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.292 — 2026-10-16
+
+### Added
+- Give a paired Windows machine's RemoteApp sign-in once and pin its certificate, then open its apps from its row; the password is kept only in sealed storage.
+
 ## 2.369.291 — 2026-10-16
 
 ### Maintenance

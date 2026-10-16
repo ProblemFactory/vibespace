@@ -11,7 +11,17 @@
  * value). A ROW carries no value, ever.
  *
  * A ROW = { id, label, fields[], clusterEnv | delegate, setup?, test, consumers,
- *           wiredIn?, docs, bindsPerAccount?, clientHint?, signinName? }
+ *           wiredIn?, docs, bindsPerAccount?, clientHint?, signinName?, bindsPerMachine? }
+ *
+ *  · `bindsPerMachine` (lane remoteapp-r1b, design q-024 r1 §1.3): ONE
+ *    credential per PAIRED MACHINE, kept under `<id>/<hostId>` and set on that
+ *    machine's own settings card (the RemoteApp sign-in of a Windows machine) —
+ *    never a card in the Integrations window (`list()` leaves it out, every
+ *    card verb refuses it by name), never a cluster preset (a machine's sign-in
+ *    is nobody's company default: no clusterEnv, no delegate), never account-
+ *    bound. The store's per-machine verbs (`resolveMachine` / `machineView` /
+ *    `setMachineValues`) are its only doors; its consumer calls
+ *    `resolveMachine('<id>', hostId)` — the consumer census reads that form.
  *
  *  · `bindsPerAccount` (2.369.165, docs/design-integrations-per-account.zh.md
  *    r4 §2.3): the row's credential is an OAuth CLIENT that each ACCOUNT picks
@@ -115,6 +125,12 @@ const V = {
   /** one of a closed word list (lane decision-core: the decision provider) */
   oneOf: (words) => (v) => (words.includes(String(v)) ? okV : bad(`one of ${words.join(' | ')}`)),
   awsRegion: (v) => (/^[a-z]{2}-[a-z]+-\d$/.test(String(v)) ? okV : bad('an AWS region id such as us-east-1')),
+  // lane remoteapp-r1b: a Windows sign-in handed to the Remote Desktop client — a quote or a control character could end or
+  // split what the client reads (its /u: /d: words; the password is ONE stdin line), so each is refused by name
+  rdpUser: (v) => (/[\u0000-\u001f\u007f\u2028\u2029"]/.test(String(v)) ? bad('no quotes, line breaks or control characters') : String(v).length > 260 ? bad('at most 260 characters') : okV),
+  rdpDomain: (v) => (/[\u0000-\u001f\u007f\u2028\u2029",]/.test(String(v)) ? bad('no quotes, commas, line breaks or control characters') : String(v).length > 120 ? bad('at most 120 characters') : okV),
+  oneLine: (v) => (/[\u0000\r\n\u2028\u2029]/.test(String(v)) ? bad('one line — a line break would end it early') : String(v).length > 256 ? bad('at most 256 characters') : okV),
+  sha256Fp: (v) => (/^[0-9a-f]{2}(?::[0-9a-f]{2}){31}$/.test(String(v)) ? okV : bad('a sha256 fingerprint: 32 hex pairs, aa:bb:…')),
 };
 
 /**
@@ -388,6 +404,35 @@ const ROWS = Object.freeze([
     usedBy: i18nKey('Every feature of the LLM plugin uses this key'),
     docs: 'docs/design-decision-api.zh.md',
   },
+
+  // ── A PAIRED WINDOWS MACHINE'S REMOTEAPP SIGN-IN (design q-024 r1 §1.3, lane remoteapp-r1b) ──
+  // ONE record per machine (`remoteapp/<hostId>`), set on that machine's RemoteApp settings card (the launcher → the machine's
+  // dialog → RemoteApp settings…). The password is SEALED by the store and opened only for the Remote Desktop client's stdin —
+  // at a launch (src/server/desktop-access.js reads it fresh each time) and at the first connection. The certificate
+  // fingerprint is never typed: the first connection PINS it (the settings route takes user / domain / password only).
+  {
+    id: 'remoteapp',
+    label: i18nKey('RemoteApp sign-in'),
+    fields: [
+      { key: 'user', label: i18nKey('Windows user name'), secret: false, required: true, placeholder: '',
+        help: i18nKey('The account you sign in to that Windows machine with.'), validate: V.rdpUser },
+      { key: 'domain', label: i18nKey('Domain'), secret: false, required: false, placeholder: '',
+        help: i18nKey('Only for a domain account — leave it empty for a local or Microsoft account.'), validate: V.rdpDomain },
+      { key: 'password', label: i18nKey('Windows password'), secret: true, required: true, placeholder: '',
+        help: i18nKey('Sealed on this VibeSpace server; handed only to the Remote Desktop client when you open an app.'), validate: V.oneLine },
+      { key: 'certFp', label: i18nKey('Pinned certificate'), secret: false, required: true, placeholder: '',
+        help: i18nKey('Pinned by the first connection — never typed.'), validate: V.sha256Fp },
+    ],
+    bindsPerMachine: true,
+    test: {
+      kind: 'shape-only',
+      describe: i18nKey('Checks that the saved sign-in has every part the Remote Desktop client needs. Zero network.'),
+      caveat: i18nKey('This proves nothing about the machine — the first connection is what signs in to it.'),
+    },
+    consumers: ['src/server/desktop-access.js'],
+    usedBy: i18nKey('Used by RemoteApp windows of a paired Windows machine'),
+    docs: 'docs/kb-features.md',
+  },
 ]);
 
 const byId = new Map(ROWS.map((r) => [r.id, r]));
@@ -534,6 +579,8 @@ function clientFieldsOf(row) {
   return { idKey: idF ? idF.key : null, secretKey: secF ? secF.key : null, id: idF ? { key: idF.key, label: idF.label, placeholder: idF.placeholder || '', help: idF.help || '', required: !!idF.required } : null, secret: secF ? { key: secF.key, label: secF.label, placeholder: secF.placeholder || '', help: secF.help || '', required: !!secF.required } : null };
 }
 const bindsPerAccount = (id) => { const r = rowById(id); return !!(r && r.bindsPerAccount === true); };
+/** lane remoteapp-r1b: a row kept ONE record per paired machine (`<id>/<hostId>`). */
+const bindsPerMachine = (id) => { const r = typeof id === 'string' ? rowById(id) : id; return !!(r && r.bindsPerMachine === true); };
 /** WHOSE OAuth clients a `bindsPerAccount` row signs in with — the vendor a
  *  storage mount's own client must belong to for an account of this row to
  *  borrow it (2.369.195, "use the OAuth client of a storage mount"). DERIVED,
@@ -559,7 +606,7 @@ const BROWSER_CONSUMER = 'src/server/browser-backend.js';
 const PLUGIN_ROWS = new Set(Object.values(PluginSettings.PLUGIN_SETTINGS).map((p) => p && p.integration).filter(Boolean));
 function groupOf(row) {
   const r = typeof row === 'string' ? rowById(row) : row;
-  if (!r) return null;
+  if (!r || r.bindsPerMachine === true) return null; // lane remoteapp-r1b: a per-machine row is never drawn in the window (its card is the machine's)
   const used = Array.isArray(r.consumers) ? r.consumers.map(String) : [];
   const hits = [
     used.some((c) => c.startsWith('src/channels/')) && 'communication',
@@ -573,6 +620,11 @@ function groupOf(row) {
 function checkRow(row) {
   const errs = [];
   if (row.bindsPerAccount !== undefined && typeof row.bindsPerAccount !== 'boolean') errs.push('bindsPerAccount must be a boolean');
+  // lane remoteapp-r1b: a per-machine row is ONE machine's own sign-in — never account-bound, never a cluster preset, no
+  // vendor console (setup), no sign-in kind, and its one consumer resolves it per machine
+  if (row.bindsPerMachine !== undefined && typeof row.bindsPerMachine !== 'boolean') errs.push('bindsPerMachine must be a boolean');
+  const perMachine = row.bindsPerMachine === true;
+  if (perMachine && (row.bindsPerAccount === true || row.clusterEnv || row.delegate || row.setup || row.signin !== undefined || row.wiredIn)) errs.push('a bindsPerMachine row is one machine\'s own credential: never account-bound, never a cluster preset (no clusterEnv / delegate), no setup block, no sign-in kind, and it lands WITH its consumer (no wiredIn)');
   // design 012: `signin` = how an account of the row signs in — absent = the OAuth client the row declares; 'paste' = an
   // account with NO client key pastes a token from the vendor's own page. design 018: a paste row MAY also declare a
   // workspace client (fields + clusterEnv, never a delegate) — then the client is a rung beside the paste
@@ -599,7 +651,7 @@ function checkRow(row) {
   if (!row.label) errs.push('label required');
   if (!Array.isArray(row.fields) || (!row.fields.length && !paste)) errs.push('fields required');
   for (const f of row.fields || []) if (typeof f.validate !== 'function') errs.push(`field ${f.key}: validate must be a function`);
-  if (!row.clusterEnv && !row.delegate && !paste) errs.push('clusterEnv or delegate required');
+  if (!row.clusterEnv && !row.delegate && !paste && !perMachine) errs.push('clusterEnv or delegate required');
   if (row.clusterEnv && row.delegate) errs.push('clusterEnv and delegate are a UNION — declare one');
   const words = (x) => Array.isArray(x) && x.length > 0 && x.every((w) => typeof w === 'string' && /^[A-Za-z][A-Za-z0-9_:-]*$/.test(w));
   if (row.clusterEnv && row.clusterEnv.extras !== undefined && (!words(row.clusterEnv.extras) || row.clusterEnv.extras.some((k) => (row.fields || []).some((f) => f.key === k)))) errs.push('clusterEnv.extras is a list of preset value names that are NOT fields');
@@ -617,6 +669,6 @@ function checkRow(row) {
 module.exports = {
   ROWS, TEST_KINDS, SIGNIN_KINDS, TEST_BUTTON_LABEL, MASK, MASK_TAIL_MIN,
   rowById, rowIds, maskValue, validateValues, missingFields, resolvePrecedence, pickPreset,
-  fieldDecls, checkRow, TRIM_NOTE, credentialWhyText, clientFieldsOf, bindsPerAccount, oauthClientVendorOf,
+  fieldDecls, checkRow, TRIM_NOTE, credentialWhyText, clientFieldsOf, bindsPerAccount, bindsPerMachine, oauthClientVendorOf,
   GROUPS, GROUP_WORDS, groupOf,
 };

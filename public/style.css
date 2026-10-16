@@ -2735,6 +2735,36 @@ body.taskbar-top #taskbar-hotzone { bottom: auto; top: 0; }
 .desktop-install-actions > .file-tool-btn { width: auto; height: auto; min-height: 28px; padding: 0 12px; border-color: var(--border); }
 /* a Windows / macOS machine's dialog: its INSTALLED apps (listed on it by witness), filtered; Examples / Recent below */
 .dialog.machine-desktop-dialog { width: 520px; max-width: calc(100vw - 24px); }
+/* lane remoteapp-r1b: the RemoteApp settings card (src/lib/remoteapp-card.js) */
+.dialog.remoteapp-settings { width: 560px; max-width: calc(100vw - 24px); }
+.remoteapp-settings .ra-lead { margin: 2px 0 10px; }
+.remoteapp-settings .ra-head { margin: 14px 0 6px; font-weight: 600; }
+.remoteapp-settings .ra-facts { display: flex; flex-direction: column; gap: 8px; }
+.remoteapp-settings .ra-fact { display: flex; gap: 8px; align-items: flex-start; }
+.remoteapp-settings .ra-icon { flex: none; margin-top: 2px; display: inline-flex; }
+.remoteapp-settings .ra-met .ra-icon { color: var(--ok-text); }
+.remoteapp-settings .ra-unmet .ra-icon { color: var(--bad-text); }
+.remoteapp-settings .ra-optional.ra-unmet .ra-icon { color: var(--text-secondary); }
+.remoteapp-settings .ra-fact-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.remoteapp-settings .ra-fact-label { font-weight: 500; }
+.remoteapp-settings .ra-fact-state, .remoteapp-settings .ra-note { color: var(--text-secondary); font-size: 12px; }
+.remoteapp-settings .ra-note { margin: 4px 0; }
+.remoteapp-settings .ra-ready { margin: 2px 0 0; color: var(--ok-text); font-size: 12px; }
+.remoteapp-settings .ra-todo-line { margin: 2px 0 0; color: var(--bad-text); font-size: 12px; }
+.remoteapp-settings .ra-save, .remoteapp-settings .ra-trust { align-self: flex-start; }
+.remoteapp-settings .ra-takeover { margin: 12px 0 4px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-hover); font-size: 12px; }
+.remoteapp-settings .ra-field { display: flex; flex-direction: column; gap: 3px; margin: 6px 0; }
+.remoteapp-settings .ra-field > span { font-size: 12px; color: var(--text-secondary); }
+.remoteapp-settings .ra-field > input { min-width: 0; }
+.remoteapp-settings .ra-cert { margin: 2px 0 6px; }
+.remoteapp-settings .file-tool-btn.ra-copy, .remoteapp-settings .file-tool-btn.ra-recheck { width: auto; height: auto; min-height: 26px; padding: 0 10px; align-self: flex-start; border-color: var(--border); white-space: nowrap; }
+.remoteapp-settings .file-tool-btn.ra-recheck { margin-top: 6px; }
+.remoteapp-settings .ra-tech { margin-top: 14px; }
+.remoteapp-settings .ra-tech > summary { cursor: pointer; color: var(--text-secondary); font-size: 12px; }
+.remoteapp-settings .ra-tech-body { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; font-size: 12px; }
+.remoteapp-settings .ra-tech-line, .remoteapp-settings .ra-tech-cmd { display: flex; flex-direction: column; gap: 3px; }
+.remoteapp-settings .ra-tech code, .remoteapp-settings .ra-tech pre { font-family: monospace; white-space: pre-wrap; word-break: break-all; margin: 0; }
+.desktop-install-actions > .file-tool-btn.machine-remoteapp-settings { white-space: nowrap; }
 .machine-apps { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; min-width: 0; }
 .machine-apps-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .machine-apps-title { flex: 1 1 auto; min-width: 0; font-size: 12px; color: var(--text-secondary); }

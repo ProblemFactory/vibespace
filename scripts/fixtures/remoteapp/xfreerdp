@@ -18,6 +18,12 @@
 # VS_FAKE_RDP_RAIL=<RAIL_EXEC_E_…> prints FreeRDP's RAIL exec error line instead and exits 1 (that row's wording is from
 # FreeRDP's xf_rail.c, not measured). What it saw goes to VS_FAKE_RDP_RECORD as JSON lines — the stdin password as its
 # sha256 + length only, never its bytes.
+# THE FIRST CONNECTION (lane remoteapp-r1b — `/auth-only`, measured on the same client + shadow server): `/auth-only` with plain
+# `/from-stdin` never connects (ERRCONNECT_PRE_CONNECT_FAILED, exit 136); `/cert:tofu` stores VS_FAKE_RDP_SERVER_PEM's bytes in
+# <config dir>/freerdp/server/<host>_<port>.pem (the suite passes its sha256 as VS_FAKE_RDP_SERVER_FP — no certificate is parsed
+# here) after the measured warnings; a good sign-in exits 0 after "Authentication only, exit status 1" + CONNECT_CANCELLED, a
+# wrong password exits 134 with the certificate stored all the same. VS_FAKE_RDP_LEAK=1 prints the password in a `password=`
+# line once connected (the suites' log-scrub control).
 # Needs sh + sed, sort, tr, wc, date, mktemp, mkfifo, rm, sha256sum (or shasum) and perl: the ONE socket is perl-base's
 # IO::Socket::INET (Debian/Ubuntu Essential) — POSIX sh cannot open one, and OpenBSD nc never exits when the far side
 # closes while its stdin is held open (measured), so the link-lost exit would hang. The password stays in this shell:
@@ -50,6 +56,7 @@ onsig() {
   end 145
 }
 trap 'onsig TERM' TERM; trap 'onsig INT' INT; trap 'onsig HUP' HUP
+fail() { say ERROR com.freerdp.core freerdp_connect "the fake xfreerdp could not $1"; record "\"phase\":\"end\",\"why\":$(js "$1")"; end 70; }
 
 argv=; for a in "$@"; do argv="$argv${argv:+,}$(js "$a")"; done
 names=; for nm in $(if [ -r "/proc/$$/environ" ]; then tr '\n\0' ' \n' <"/proc/$$/environ"; else env; fi | sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p' | LC_ALL=C sort -u); do names="$names${names:+,}\"$nm\""; done
@@ -58,6 +65,14 @@ target=$(opt v "$@") || target=
 port=${target##*:}
 case $target in *:*) case $port in ''|*[!0-9]*) host=$target port= ;; *) host=${target%:*} ;; esac ;; *) host=$target port= ;; esac
 record "\"phase\":\"start\",\"argv\":[$argv],\"env\":{\"names\":[$names],\"XDG_CONFIG_HOME\":$(jn "${XDG_CONFIG_HOME-}"),\"DISPLAY\":$(jn "${DISPLAY-}")}"
+
+authonly=0; for a in "$@"; do [ "$a" = /auth-only ] && authonly=1; done
+if [ $authonly = 1 ]; then for a in "$@"; do if [ "$a" = /from-stdin ]; then # measured: the password check comes BEFORE a plain /from-stdin reads
+  say ERROR com.freerdp.core freerdp_connect_begin 'ERRCONNECT_PRE_CONNECT_FAILED [0x00020001]'
+  say ERROR com.freerdp.core freerdp_connect_begin 'freerdp_pre_connect failed: CLIENT_STATE_PRECONNECT_PASSED'
+  record '"phase":"end","why":"auth-only-no-password"'
+  end 136
+fi; done; fi
 
 # ── the credentials on stdin, exactly as measured ──
 fromstdin=0; for a in "$@"; do case $a in /from-stdin|/from-stdin:force) fromstdin=1 ;; esac; done
@@ -77,8 +92,17 @@ record "\"phase\":\"stdin\",\"lines\":$lines,\"domainFromStdin\":$domstdin,\"pas
 cert=$(opt cert "$@") || cert=
 pinned=; case $cert in *fingerprint:sha256:*) pinned=$(printf '%s\n' "${cert#*fingerprint:sha256:}" | sed -e 's/[^0-9A-Fa-f:].*//' -e q) ;; esac
 stored=false; [ -e "$cfg/freerdp/server/${host}_${port}.pem" ] && stored=true
+tofu=0; case ",$cert," in *,tofu,*) tofu=1 ;; esac
+if [ $tofu = 1 ] && [ $stored = false ]; then # measured: the name-mismatch warnings, then the certificate is stored and it goes on
+  say WARN com.freerdp.crypto verify_cb "Certificate verification failure 'self-signed certificate (18)' at stack position 0"
+  say ERROR com.freerdp.crypto tls_print_certificate_name_mismatch_error 'A valid certificate for the wrong name should NOT be trusted!'
+  say ERROR com.freerdp.crypto tls_print_new_certificate_warn 'Host key verification failed.'
+  mkdir -p "$cfg/freerdp/server" || fail 'make its config dir'
+  if [ -n "${VS_FAKE_RDP_SERVER_PEM-}" ]; then cat "$VS_FAKE_RDP_SERVER_PEM"; else printf '%s\n' '-----BEGIN CERTIFICATE-----' fake '-----END CERTIFICATE-----'; fi >"$cfg/freerdp/server/${host}_${port}.pem"
+  record "\"phase\":\"tofu\",\"stored\":$(js "$cfg/freerdp/server/${host}_${port}.pem")"
+fi
 sfp=${VS_FAKE_RDP_SERVER_FP-}
-if [ -n "$sfp" ] && [ $stored = false ] && { [ -z "$pinned" ] || [ "$(lc "$pinned")" != "$(lc "$sfp")" ]; }; then
+if [ -n "$sfp" ] && [ $tofu = 0 ] && [ $stored = false ] && { [ -z "$pinned" ] || [ "$(lc "$pinned")" != "$(lc "$sfp")" ]; }; then
   say WARN com.freerdp.crypto verify_cb "Certificate verification failure 'self-signed certificate (18)' at stack position 0"
   say ERROR com.freerdp.crypto tls_print_new_certificate_warn 'Host key verification failed.'
   say ERROR com.freerdp.crypto freerdp_tls_handshake 'certificate not trusted, aborting.'
@@ -110,7 +134,6 @@ for (1 .. 20) { last if index($b, "\n") >= 0; next unless $wait->(0.25); if (!sy
 my $i = index($b, "\n");
 print $i >= 0 ? "R " . substr($b, 0, $i) . "\n" : ($closed && length $b) ? "R $b\n" : "N\n";
 while (1) { exit 0 if getppid != $parent; next unless $wait->(1); sysread($s, my $x, 4096) or exit 31 }'
-fail() { say ERROR com.freerdp.core freerdp_connect "the fake xfreerdp could not $1"; record "\"phase\":\"end\",\"why\":$(js "$1")"; end 70; }
 command -v perl >/dev/null 2>&1 || fail 'find perl for its socket'
 d=$(mktemp -d "${TMPDIR:-/tmp}/vs-fake-rdp.XXXXXX") && mkfifo "$d/link" || fail 'make its link fifo'
 perl -e "$LINK" "${host:-127.0.0.1}" "$port" "$logon" >"$d/link" &
@@ -123,6 +146,7 @@ case $ans in
   N) reply=null ;;
   L) link=
     say ERROR com.freerdp.core nla_recv_pdu 'ERRCONNECT_LOGON_FAILURE [0x00020014]'
+    [ $authonly = 0 ] || say ERROR com.freerdp.core freerdp_connect_begin 'Authentication only, exit status 0'
     record '"phase":"end","why":"logon"'
     end 134 ;;
   *) link=
@@ -131,7 +155,14 @@ case $ans in
     record '"phase":"end","why":"unreachable"'
     end 141 ;;
 esac
+if [ $authonly = 1 ]; then # the real wording of a SUCCESSFUL auth-only run ("exit status 1" and CANCELLED, then exit 0)
+  say ERROR com.freerdp.core freerdp_connect_begin 'Authentication only, exit status 1'
+  say ERROR com.freerdp.core freerdp_abort_connect_context 'ERRCONNECT_CONNECT_CANCELLED [0x0002000B]'
+  record "\"phase\":\"end\",\"why\":\"auth-only-ok\",\"reply\":$reply"
+  end 0
+fi
 record "\"phase\":\"connected\",\"reply\":$reply"
+if [ "${VS_FAKE_RDP_LEAK-}" = 1 ] && [ $havepw = 1 ]; then say WARN com.freerdp.client.common client_cli_auth "using password=$pw for the sign-in"; fi
 if [ -n "${VS_FAKE_RDP_RAIL-}" ]; then
   say ERROR com.freerdp.client.x11 xf_rail_server_execute_result "RAIL exec error: execResult=$VS_FAKE_RDP_RAIL NtError=0x0"
   record "\"phase\":\"end\",\"why\":\"rail\",\"rail\":$(js "$VS_FAKE_RDP_RAIL")"

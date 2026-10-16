@@ -110,6 +110,13 @@ console.log('§1 the PURE table');
   ok(R.ROWS.filter((r) => r.bindsPerAccount).every((r) => typeof r.clientHint === 'string' && r.clientHint.length > 20) && R.ROWS.filter((r) => !r.bindsPerAccount).every((r) => r.clientHint === undefined && r.bindsPerAccount === undefined), 'each account-bound row declares ONE clientHint; the six browser rows declare neither (untouched)');
   ok(JSON.stringify([R.clientFieldsOf('lark').idKey, R.clientFieldsOf('lark').secretKey, R.clientFieldsOf('gmail').idKey, R.clientFieldsOf('gmail').secretKey]) === JSON.stringify(['appId', 'appSecret', 'clientId', 'clientSecret']) && R.clientFieldsOf('lark').id.label === 'App ID' && R.clientFieldsOf('gmail').secret.label === 'OAuth client secret', 'clientFieldsOf maps each row\'s custom client onto its declared fields (Lark App ID / App Secret, Google client id / secret) with the row\'s own labels');
   ok(R.bindsPerAccount('gmail') === true && R.bindsPerAccount('cloak') === false && R.bindsPerAccount('nope') === false, 'bindsPerAccount(id) answers by the row');
+  // lane remoteapp-r1b (design q-024 r1 §1.3): THE PER-MACHINE ROW — a paired Windows machine's RemoteApp sign-in
+  const ra = R.rowById('remoteapp');
+  ok(ra && ra.bindsPerMachine === true && !ra.bindsPerAccount && !ra.clusterEnv && !ra.delegate && !ra.setup && !ra.wiredIn && ra.test.kind === 'shape-only' && ra.test.caveat && JSON.stringify(ra.consumers) === '["src/server/desktop-access.js"]' && R.bindsPerMachine('remoteapp') && !R.bindsPerMachine('cloak'), 'remoteapp: ONE record per paired machine — no cluster env (a machine\'s sign-in is nobody\'s company preset), no setup, not account-bound, shape-only with its caveat, consumed by the RemoteApp launch (desktop-access)');
+  ok(JSON.stringify(ra.fields.map((f) => [f.key, !!f.secret, !!f.required])) === JSON.stringify([['user', false, true], ['domain', false, false], ['password', true, true], ['certFp', false, true]]), 'its fields: user, domain (optional), password (the ONE secret), certFp (pinned by the first connection)');
+  const rv = (patch) => R.validateValues(ra, patch);
+  ok(rv({ user: 'someone', domain: 'LAB', password: 'a b;c#' + 'd', certFp: Array(32).fill('ab').join(':') }).ok && rv({ user: 'a"b' }).errors.user && rv({ domain: 'a,b' }).errors.domain && rv({ password: 'line\nbreak' }).errors.password && rv({ certFp: 'AB:CD' }).errors.certFp && rv({ password: 'x'.repeat(257) }).errors.password, 'its validators: a quote / control char in the user, a comma in the domain, a line break in the password (it is ONE stdin line), a non-sha256 pin — each refused by name');
+  ok(R.checkRow({ ...ra, clusterEnv: { json: 'VIBESPACE_INTEGRATIONS', prefix: 'VIBESPACE_INTEGRATION_REMOTEAPP_' } }).some((e) => /bindsPerMachine/.test(e)) && R.checkRow({ ...ra, bindsPerAccount: true }).some((e) => /bindsPerMachine/.test(e)) && R.checkRow({ ...ra, bindsPerMachine: 'yes' }).some((e) => /boolean/.test(e)) && R.checkRow({ ...ra, bindsPerMachine: undefined }).some((e) => /clusterEnv or delegate required/.test(e)), 'CONTROL: a per-machine row with a cluster env / account-bound / a non-boolean flag is refused; without the flag the row needs a cluster env like any card');
   ok(R.checkRow({ ...lark, clientHint: '' }).some((e) => /clientHint/.test(e)), 'CONTROL: an account-bound row without its hint is refused');
   ok(R.checkRow({ ...lark, fields: lark.fields.map((f) => ({ ...f, secret: true })) }).some((e) => /non-secret field/.test(e)) && R.checkRow({ ...lark, fields: [...lark.fields, { ...lark.fields[1], key: 'x' }] }).some((e) => /exactly ONE secret/.test(e)), 'CONTROL: an account-bound row needs exactly one secret field and a non-secret one (the custom client\'s id + secret)');
   ok(R.checkRow({ ...cloak, clientHint: 'x' }).some((e) => /bindsPerAccount row only/.test(e)) && R.checkRow({ ...cloak, bindsPerAccount: 'yes' }).some((e) => /boolean/.test(e)), 'CONTROL: a hint on a card row, or a non-boolean flag, is refused');
@@ -123,7 +130,11 @@ console.log('§1 the PURE table');
 console.log("§1b the window's groups");
 {
   const PS = require(path.join(REPO, 'src/plugin-settings.js'));
-  const table = R.ROWS.map((r) => [r.id, R.groupOf(r)]);
+  // lane remoteapp-r1b: a PER-MACHINE row (bindsPerMachine) is set on its machine's own card, never drawn in this window —
+  // the store's list() leaves it out and groupOf answers null for it BY THAT FLAG (asserted, with its control, below)
+  const table = R.ROWS.filter((r) => r.bindsPerMachine !== true).map((r) => [r.id, R.groupOf(r)]);
+  const perMachine = R.ROWS.filter((r) => r.bindsPerMachine === true);
+  ok(perMachine.map((r) => r.id).join() === 'remoteapp' && perMachine.every((r) => R.groupOf(r) === null) && R.groupOf({ ...R.rowById('cloak'), bindsPerMachine: true }) === null, 'the per-machine rows (exactly remoteapp) land in NO group — never drawn in the window; CONTROL: a browser key row flagged per-machine leaves its group too');
   const ids = (g) => table.filter(([, x]) => x === g).map(([id]) => id).sort().join();
   ok(JSON.stringify(R.GROUPS) === JSON.stringify(['communication', 'browser', 'plugins']) && R.GROUPS.every((g) => typeof R.GROUP_WORDS[g] === 'string' && R.GROUP_WORDS[g].length > 0), 'three groups in the window\'s order (communication, browser, plugins), each with its plain noun');
   ok(table.every(([, g]) => R.GROUPS.includes(g)), `every row lands in exactly ONE group (${table.map(([id, g]) => id + '→' + g).join(', ')})`);
@@ -230,7 +241,7 @@ const { integrationTest: shapeRunner } = require(path.join(REPO, 'src/channels/f
 store.registerTest(CARD, shapeRunner);
 {
   const r0 = await get('/api/integrations');
-  const cards = R.ROWS.filter((r) => !r.bindsPerAccount).map((r) => r.id);
+  const cards = R.ROWS.filter((r) => !r.bindsPerAccount && !r.bindsPerMachine).map((r) => r.id); // lane remoteapp-r1b: a per-machine row is not a card either
   ok(r0.status === 200 && Array.isArray(r0.json.integrations) && r0.json.integrations.map((x) => x.id).join() === cards.join() && cards.length === 8 && cards[6] === 'dropline' && cards[7] === 'llm', `GET /api/integrations lists the six browser key rows + the Dropline voice key row + the llm row ONLY (${r0.json.integrations.map((x) => x.id).join(', ')})`);
   ok(['fake', 'lark', 'gmail'].every((id) => !r0.json.integrations.some((x) => x.id === id)) && ['fake', 'lark', 'gmail'].every((id) => R.rowById(id).bindsPerAccount === true), 'r4: the account-bound rows (fake / lark / gmail) are NOT cards — absent from the list');
   // every card verb on an account-bound row: 404 BY NAME
@@ -595,6 +606,40 @@ const captured = () => { const lines = []; const cap = (lvl) => (...a) => lines.
   }
 }
 
+// ═══ §4c THE PER-MACHINE ROW (lane remoteapp-r1b, design q-024 r1 §1.3) — the same store, the same file, `<id>/<hostId>` ═══
+console.log('§4c the per-machine row (remoteapp/<hostId>) through the real store + routes');
+{
+  const PW = ['Rw', 'Q7f3'.repeat(3), '-q#7'].join('');      // a password SHAPE built at runtime (16 chars)
+  const HOST = 'dev-' + 'w1n';
+  const f0 = frames.length, l0 = logLines.length;
+  const v1 = store.setMachineValues('remoteapp', HOST, { user: '  someone  ', password: PW });
+  ok(v1.id === 'remoteapp' && v1.hostId === HOST && v1.values.user === 'someone' && v1.set.password === true && v1.set.certFp === false && JSON.stringify(v1.missing) === '["certFp"]', 'setMachineValues: trimmed + validated, the password SET, the certificate still missing (the first connection pins it)', v1);
+  ok(!JSON.stringify(v1).includes(PW) && !('masked' in v1) && !JSON.stringify(v1).includes(PW.slice(-4)), 'the machine view holds NO password byte — not even a mask tail (its last 4 characters would be a quarter of it)');
+  const res = store.resolveMachine('remoteapp', HOST);
+  ok(res.values.password === PW && res.values.user === 'someone' && res.undecryptable.length === 0, 'resolveMachine (the consumer\'s call) opens the seal');
+  const fileText = fs.readFileSync(path.join(dataDir, 'integrations.json'), 'utf-8');
+  const fileRec = JSON.parse(fileText).integrations[`remoteapp/${HOST}`];
+  ok(fileRec && !fileText.includes(PW) && fileRec.values.user === 'someone' && /^[A-Za-z0-9+/=:._-]+$/.test(fileRec.values.password) && fileRec.values.password !== PW, 'integrations.json holds the record under remoteapp/<hostId> with the password SEALED (ciphertext), never its bytes');
+  const fr = frames.slice(f0);
+  ok(fr.length === 1 && fr[0].type === 'integration-machine-updated' && fr[0].hostId === HOST && !JSON.stringify(fr).includes(PW) && !fr.some((m) => m.type === 'integrations-updated'), 'ONE broadcast `integration-machine-updated` with the machine view — no password, and never `integrations-updated` (the Integrations window would draw it as a card)');
+  ok(!logLines.slice(l0).join('\n').includes(PW), 'no log line carries it');
+  const card = ['publicView', 'resolveIntegration', 'clearUserValues', 'useClusterDefault'].map((fn) => { try { store[fn]('remoteapp'); return 'answered'; } catch (e) { return e.code; } });
+  let setRef; try { store.setIntegration('remoteapp', { user: 'x' }); } catch (e) { setRef = e.code; }
+  ok(card.every((c) => c === 'binds-per-machine') && setRef === 'binds-per-machine', 'every card verb and resolveIntegration refuse it BY NAME (binds-per-machine)', { card, setRef });
+  ok(!store.list().integrations.some((v) => v.id === 'remoteapp'), 'list() leaves it out (not an Integrations card)');
+  const g = await get('/api/integrations/remoteapp');
+  const put = await api('PUT', '/api/integrations/remoteapp', { values: { user: 'x' } });
+  ok(g.status === 404 && g.json.code === 'binds-per-machine' && put.status === 404 && !g.text.includes(PW), 'the generic integrations routes answer 404 binds-per-machine (no route reads or writes it but its machine card\'s)', { g: g.status, put: put.status });
+  const refs = [() => store.machineView('remoteapp', 'local'), () => store.machineView('remoteapp', 'a b'), () => store.machineView('cloak', HOST), () => store.machineView('nope', HOST), () => store.setMachineValues('remoteapp', HOST, { user: 'a"b' }), () => store.setMachineValues('remoteapp', HOST, { color: 'x' })].map((fn) => { try { fn(); return 'answered'; } catch (e) { return e.code; } });
+  ok(JSON.stringify(refs) === JSON.stringify(['bad-request', 'bad-request', 'not-per-machine', 'unknown-integration', 'invalid-values', 'invalid-values']), 'this machine / a bad id / a card row / an unknown row / an invalid user / an unknown field — each refused by name', refs);
+  const fp = Array.from({ length: 32 }, (_, i) => ((i * 7 + 3) % 256).toString(16).padStart(2, '0')).join(':');
+  const v2 = store.setMachineValues('remoteapp', HOST, { certFp: fp });
+  ok(v2.values.certFp === fp && v2.missing.length === 0 && store.resolveMachine('remoteapp', HOST).values.password === PW, 'the pin lands beside the sign-in; an omitted field (the password) stays as it was');
+  ok(store.machineView('remoteapp', 'dev-other').hasValues === false && store.resolveMachine('remoteapp', 'dev-other').values.password === undefined, 'another machine has its own (empty) record');
+  const v3 = store.clearMachineValues('remoteapp', HOST);
+  ok(v3.hasValues === false && !(`remoteapp/${HOST}` in JSON.parse(fs.readFileSync(path.join(dataDir, 'integrations.json'), 'utf-8')).integrations), 'clearMachineValues forgets the machine\'s record whole');
+}
+
 // ═══ §5 THE ADAPTERS ROW FLIPS (real engine + real store) ═════════════════
 // r4: the fake row is ACCOUNT-BOUND — no card, no Test verb (D7) — so its
 // credential is the cluster's (the keyless pick) and the flip is walked on
@@ -897,7 +942,9 @@ function consumerCensus(rows, read) {
       // lane dc-browser-backends (F10): a TABLE consumer resolves each of its DECLARED rows with one generic call — its
       // ids are DERIVED from those declarations (the browser track's KEY_ROWS), not a literal per id
       const table = (TABLE_CONSUMERS[f] || []).includes(row.id) && /\.resolveIntegration\(id\)/.test(s);
-      if (!table && !new RegExp(`resolveIntegration\\(['"]${row.id}['"]\\s*[,)]`).test(s)) problems.push(`${row.id}: consumer ${f} never calls resolveIntegration('${row.id}')`);
+      // lane remoteapp-r1b: a PER-MACHINE row's consumer resolves it per machine — `resolveMachine('<id>', hostId)`
+      const verb = row.bindsPerMachine === true ? 'resolveMachine' : 'resolveIntegration';
+      if (!table && !new RegExp(`${verb}\\(['"]${row.id}['"]\\s*[,)]`).test(s)) problems.push(`${row.id}: consumer ${f} never calls ${verb}('${row.id}')`);
     }
     if (!row.consumers.length && !row.wiredIn) problems.push(`${row.id}: no consumer and no wiredIn phase`);
   }
@@ -908,6 +955,8 @@ function consumerCensus(rows, read) {
   ok(!p.length, `every consumer file exists and REALLY calls resolveIntegration('<id>') (${p.join('; ') || 'clean'})`);
   const ctl = consumerCensus([{ id: 'fake', consumers: ['src/channels/index.js'], wiredIn: null }], readRepo);
   ok(ctl.length === 1 && /never calls/.test(ctl[0]), 'CONTROL: a consumer that EXISTS but never calls resolveIntegration is RED ("file exists" is the degenerate form of this census)');
+  const mctl = consumerCensus([{ id: 'remoteapp', bindsPerMachine: true, consumers: ['src/server/desktop-serve-nope.js'], wiredIn: null }, { id: 'remoteapp', bindsPerMachine: true, consumers: ['src/server/desktop-app-keeper.js'], wiredIn: null }, { id: 'remoteapp', consumers: ['src/server/desktop-access.js'], wiredIn: null }], readRepo);
+  ok(mctl.length === 3 && /does not exist/.test(mctl[0]) && /never calls resolveMachine\('remoteapp'\)/.test(mctl[1]) && /never calls resolveIntegration\('remoteapp'\)/.test(mctl[2]), 'CONTROL (lane remoteapp-r1b): a per-machine row\'s consumer must call resolveMachine(\'<id>\') — a file that only names the store, or the card verb spelling, is RED', mctl);
   const tctl = consumerCensus([{ id: 'fake', consumers: ['src/server/browser-backend.js'], wiredIn: null }], readRepo);
   ok(tctl.length === 1 && /never calls/.test(tctl[0]), 'CONTROL: the table consumer\'s generic call covers only its DECLARED key rows — a row it does not declare (fake) is RED');
 }
@@ -986,6 +1035,8 @@ if (tracked.length) {
     if (row.wiredIn) continue;
     // D7 (r4): an account-bound row is not a card — no Test verb, no runner (the store refuses test() by name)
     if (row.bindsPerAccount) { ok(!store.hasTestRunner(row.id), `${row.id}: account-bound — NO Test runner (D7)`); continue; }
+    // lane remoteapp-r1b: a per-machine row is not a card — no Test verb (its check is the machine card's First connection)
+    if (row.bindsPerMachine) { const t = await store.test(row.id).then(() => null, (e) => e); ok(!store.hasTestRunner(row.id) && t && t.code === 'binds-per-machine', `${row.id}: per-machine — NO Test runner, test() refused by name (its check is the first connection)`); continue; }
     ok(store.hasTestRunner(row.id), `${row.id}: declares a test and its consumer registered the runner`);
   }
 }

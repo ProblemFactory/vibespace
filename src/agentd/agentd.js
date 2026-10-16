@@ -1522,7 +1522,7 @@ function serveConnection(sock) {
           // per-op capability gating (three-tier design): consumers check the
           // capability, NEVER parse daemonVersion — unknown ops on an old
           // daemon get no reply and hang the request until its timeout
-          capabilities: ['probe', 'transcript-op', 'usage-scan', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events', 'pool-orders', 'sysinfo', 'design-fs', 'session-events', 'proc-list', 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'browser-end-daemon', 'desktop-serve', 'window-track', 'window-pin', 'dial-status', 'run-shell', 'app-install', 'fs-portable', 'fs-write-stream', 'desktop-apps-list', 'display-facts'],
+          capabilities: ['probe', 'transcript-op', 'usage-scan', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events', 'pool-orders', 'sysinfo', 'design-fs', 'session-events', 'proc-list', 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'browser-end-daemon', 'desktop-serve', 'window-track', 'window-pin', 'dial-status', 'run-shell', 'app-install', 'fs-portable', 'fs-write-stream', 'desktop-apps-list', 'display-facts', 'remoteapp-facts'],
         }));
         return;
       }
@@ -2107,6 +2107,14 @@ function serveConnection(sock) {
       if (msg.op === 'display-facts') {
         require('./../machine-window.js').readDisplayFacts({ platform: process.platform, execFile: require('child_process').execFile, env: spawnEnv() })
           .then((r) => mux.control({ op: 'display-facts-result', id: msg.id, result: r }), (e) => mux.control({ op: 'display-facts-result', id: msg.id, error: String((e && e.message) || e) }));
+        return;
+      }
+      // lane remoteapp-r1b (design q-024 r1 §1.4 — THREE-TOUCH: this handler, `remoteapp-facts` in the hello-ack, the client's gated
+      // method): THIS machine's Remote Desktop facts for the RemoteApp settings card — one bounded READ-ONLY look through THE
+      // shared runner (src/remoteapp-facts.js), refused by name off Windows; answered with the op on the reply
+      if (msg.op === 'remoteapp-facts') {
+        require('./../remoteapp-facts.js').readRemoteappFacts({ platform: process.platform, execFile: require('child_process').execFile, env: spawnEnv() })
+          .then((r) => mux.control({ op: 'remoteapp-facts-result', id: msg.id, result: r }), (e) => mux.control({ op: 'remoteapp-facts-result', id: msg.id, error: String((e && e.message) || e) }));
         return;
       }
       if (msg.op === 'window-untrack') { const rec = windowWatches.get(String(msg.wid || '')); if (rec) rec.h.stop(); mux.control({ op: 'window-untrack-result', id: msg.id, stopped: !!rec }); return; }

@@ -69,6 +69,19 @@
  * reader: `legacyOwnValues(id)`, the engine's one-shot copy of a legacy `own`
  * account's client onto its own record (the channels engine re-seals it
  * under `.channels-key`). The six browser key rows are untouched.
+ *
+ * A `bindsPerMachine` ROW IS NOT A CARD EITHER (lane remoteapp-r1b, design
+ * q-024 r1 §1.3): ONE record per PAIRED MACHINE, keyed `<id>/<hostId>` in the
+ * same file, its secret fields sealed by the same box. Its doors are the
+ * per-machine verbs only — `resolveMachine(id, hostId)` (the consumer's call:
+ * the plaintext, never handed to a route), `machineView(id, hostId)` (THE
+ * masked view of such a record: non-secret values + which fields are SET —
+ * no mask tail, a password's last characters are not shown) and
+ * `setMachineValues(id, hostId, patch)` / `clearMachineValues(id, hostId)`.
+ * Every card verb and `resolveIntegration` refuse it `404 binds-per-machine`
+ * by name, `list()` leaves it out, no cluster rung is ever consulted. A write
+ * broadcasts `integration-machine-updated` carrying the machine view (never
+ * `integrations-updated`: the Integrations window would draw it as a card).
  */
 const fs = require('fs');
 const path = require('path');
@@ -90,6 +103,10 @@ const envFieldName = (rowId, fieldKey) => `VIBESPACE_INTEGRATION_${String(rowId)
 
 /** A row whose client each ACCOUNT picks (never a card). */
 const bindsPer = (row) => !!(row && row.bindsPerAccount === true);
+/** lane remoteapp-r1b: a row kept ONE record per paired machine (never a card, never resolved without its machine). */
+const bindsMachine = (row) => !!(row && row.bindsPerMachine === true);
+/** A paired machine's id as a record key's second half (the host table's ids; never this machine). */
+const MACHINE_ID_RE = /^[\w.:-]{1,128}$/;
 
 class IntegrationError extends Error {
   constructor(code, message, { status = 400, detail = null } = {}) {
@@ -205,7 +222,7 @@ function create(deps = {}) {
    *  lives on each account; the pre-r4 bytes are read only by
    *  `legacyOwnValues`. */
   function userValues(row) {
-    if (bindsPer(row)) return { values: {}, undecryptable: [] };
+    if (bindsPer(row) || bindsMachine(row)) return { values: {}, undecryptable: [] };
     const r = rec(row.id);
     const out = {};
     const undecryptable = [];
@@ -443,14 +460,16 @@ function create(deps = {}) {
     if (missing.length) return { ok: false, code: 'own-missing', why: `the saved ${row.label} values lack ${missing.join(', ')}`, missing };
     return { ok: true, values };
   }
-  /** Every card verb asks this first: an account-bound row is not a card. */
+  /** Every card verb asks this first: an account-bound row is not a card — nor is a per-machine row (lane remoteapp-r1b). */
   function assertCard(row) {
+    if (bindsMachine(row)) throw new IntegrationError('binds-per-machine', `${row.label} is kept per paired machine, on that machine's own settings card — it is not an Integrations card`, { status: 404, detail: { id: row.id } });
     if (bindsPer(row)) throw new IntegrationError('binds-per-account', `${row.label}'s OAuth client is chosen per account where the account is added (Communication panel → Connect an account) — it is not an Integrations card`, { status: 404, detail: { id: row.id } });
   }
 
   function resolveIntegration(id, { credentialKey = null } = {}) {
     const row = R.rowById(id);
     if (!row) throw new IntegrationError('unknown-integration', `unknown integration '${id}'`, { status: 404 });
+    if (bindsMachine(row)) assertCard(row); // lane remoteapp-r1b: resolved per machine only (resolveMachine)
     const r = rec(row.id);
     const key = credentialKey == null || credentialKey === '' ? null : String(credentialKey);
     if (key) return resolveByKey(row, r, key);
@@ -526,7 +545,7 @@ function create(deps = {}) {
     };
   }
   function list() {
-    return { integrations: R.ROWS.filter((r) => !bindsPer(r)).map((r) => publicView(r.id)), storeError: storeErrorView() };
+    return { integrations: R.ROWS.filter((r) => !bindsPer(r) && !bindsMachine(r)).map((r) => publicView(r.id)), storeError: storeErrorView() };
   }
 
   // ── change notification (the cache-invalidation law: ONE entry point) ────
@@ -549,7 +568,7 @@ function create(deps = {}) {
   function presetsChanged() {
     const ids = [];
     for (const row of R.ROWS) {
-      if (bindsPer(row)) continue;                 // not a card: its presets reach the dialogs through the listeners
+      if (bindsPer(row) || bindsMachine(row)) continue; // not a card: its presets reach the dialogs through the listeners (a per-machine row has none)
       try { broadcast({ type: 'integrations-updated', id: row.id, why: 'presets', integration: publicView(row.id) }); ids.push(row.id); }
       catch (e) { log.warn(`[integrations] presets re-derive of ${row.id} failed:`, e && e.message); }
     }
@@ -681,6 +700,85 @@ function create(deps = {}) {
     return { moved: !!old && !had, dropped: !!old && had };
   }
 
+
+  // ── PER-MACHINE RECORDS (lane remoteapp-r1b, design q-024 r1 §1.3): `<id>/<hostId>`, sealed like any card's values ──
+  function machineRow(id, hostId) {
+    const row = R.rowById(id);
+    if (!row) throw new IntegrationError('unknown-integration', `unknown integration '${id}'`, { status: 404 });
+    if (!bindsMachine(row)) throw new IntegrationError('not-per-machine', `${row.label} is not kept per machine`, { status: 400, detail: { id: row.id } });
+    if (typeof hostId !== 'string' || hostId === 'local' || !MACHINE_ID_RE.test(hostId)) throw new IntegrationError('bad-request', `${row.label} is kept per PAIRED machine — name it by its host id`, { status: 400 });
+    return { row, key: `${row.id}/${hostId}` };
+  }
+  /** The CONSUMER'S call (never a route's): the machine's values, decrypted — `{ id, hostId, values, missing, undecryptable, why }`. */
+  function resolveMachine(id, hostId) {
+    const { row, key } = machineRow(id, hostId);
+    const r = rec(key);
+    const values = {}, undecryptable = [];
+    for (const [k, v] of Object.entries((r && r.values) || {})) {
+      const plain = decField(row, k, v);
+      if (plain === undefined) undecryptable.push(k);
+      else if (plain !== '') values[k] = plain;
+    }
+    const why = loadError ? loadError.message : undecryptable.length ? undecryptableWhy(undecryptable) : null;
+    return { id: row.id, hostId, values, missing: R.missingFields(row, values), undecryptable, why };
+  }
+  /** THE masked view of a machine's record: non-secret values, which fields are SET, what is missing — a secret's bytes
+   *  and its tail never (`masked` is not part of this view: a short secret's last characters are most of it). */
+  function machineView(id, hostId) {
+    const { row, key } = machineRow(id, hostId);
+    const res = resolveMachine(id, hostId);
+    const r = rec(key);
+    const set = {}, values = {};
+    for (const f of row.fields) {
+      const v = res.values[f.key];
+      set[f.key] = !!(v && String(v).length);
+      if (!f.secret) values[f.key] = set[f.key] ? String(v) : '';
+    }
+    return {
+      id: row.id, hostId, label: row.label, fields: R.fieldDecls(row), set, values, missing: res.missing,
+      hasValues: Object.keys((r && r.values) || {}).length > 0, updatedAt: (r && r.updatedAt) || null,
+      storeError: storeErrorView() || (res.undecryptable.length ? { code: 'values-undecryptable', message: UNDECRYPTABLE_REMEDY, fields: res.undecryptable.slice() } : null),
+    };
+  }
+  function changedMachine(id, hostId, why) {
+    const view = machineView(id, hostId);
+    try { broadcast({ type: 'integration-machine-updated', id, hostId, why, view }); } catch (e) { log.warn('[integrations] broadcast failed:', e && e.message); }
+    for (const fn of listeners) { try { fn(`${id}/${hostId}`, why); } catch (e) { log.warn('[integrations] listener failed:', e && e.message); } }
+    return view;
+  }
+  /** Omitted = untouched · '' = cleared · else trimmed + validated FIRST (the row's validators), secret fields sealed. */
+  function setMachineValues(id, hostId, patch) {
+    const { row, key } = machineRow(id, hostId);
+    if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw new IntegrationError('bad-request', 'values must be an object');
+    assertWritable();
+    const v = R.validateValues(row, patch);
+    if (!v.ok) {
+      const named = Object.entries(v.errors).map(([k, why]) => `${k}: ${why}`).join('; ');
+      throw new IntegrationError('invalid-values', `invalid value — ${named}`, { detail: v.errors });
+    }
+    const r = rec(key, { create: true });
+    let touched = 0;
+    for (const [k, val] of Object.entries(v.values)) {
+      if (val === '') { if (r.values[k] !== undefined) { delete r.values[k]; touched++; } continue; }
+      r.values[k] = encField(row, k, val);
+      touched++;
+    }
+    if (!touched) return machineView(id, hostId);
+    r.updatedAt = now();
+    save();
+    return changedMachine(id, hostId, 'set');
+  }
+  /** Forget the machine's record whole (ALWAYS allowed). */
+  function clearMachineValues(id, hostId) {
+    const { key } = machineRow(id, hostId);
+    assertWritable();
+    const s = load();
+    if (!s.integrations[key]) return machineView(id, hostId);
+    delete s.integrations[key];
+    save();
+    return changedMachine(id, hostId, 'clear');
+  }
+
   // ── test: human-triggered, bounded, one in flight per id ─────────────────
   function registerTest(id, fn) {
     if (!R.rowById(id)) throw new Error(`registerTest: unknown integration '${id}'`);
@@ -725,6 +823,7 @@ function create(deps = {}) {
   return {
     resolveIntegration, offeredCredentials, presetsFor, legacyOwnValues, publicView, list,
     setIntegration, setClusterKey, useClusterDefault, clearUserValues, plainOf, renameRecord,
+    resolveMachine, machineView, setMachineValues, clearMachineValues, // lane remoteapp-r1b: the per-machine rows' only doors
     test, registerTest, hasTestRunner: (id) => runners.has(id),
     onChange, presetsChanged, presetItems, file, keyFile: box.keyFile,
     IntegrationError, TEST_TIMEOUT_MS,

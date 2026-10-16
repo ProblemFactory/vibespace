@@ -79,6 +79,11 @@
  *   GET  /api/desktop/machine-desktop/apps?host=[&fresh=1]   lane machine-desktop-apps: a Windows / macOS machine's
  *                                     INSTALLED apps, listed on it by witness (people only) — {rows:[{name, launch,
  *                                     source, seenAt}], listedAt, total, truncated, code?}
+ *   GET  /api/desktop/machine-desktop/remoteapp/setup?host=   lane remoteapp-r1b: the machine's RemoteApp settings card (people only) —
+ *   POST /api/desktop/machine-desktop/remoteapp/setup {host, user, domain?, password?}   {setup: the sealed row's view: user, domain,
+ *   POST /api/desktop/machine-desktop/remoteapp/trust {host}    which fields are SET, the pinned certFp — never a password}; `trust` =
+ *   GET  /api/desktop/machine-desktop/remoteapp/facts?host=   the first connection (pins the certificate); `facts` = the machine's
+ *                                     Remote Desktop facts ({ok, facts, rows, ready} | agent_too_old {have, need})
  *   GET  /api/desktop/install-plan?host=     the xpra INSTALL RUNG's plan for a machine (its facts +
  *                                     the PURE plan: source apt | xpra.org, the commands, canRun)
  *                                     — SHOWN before anything runs
@@ -408,8 +413,8 @@ router.post('/api/desktop/machine-desktop/run', async (req, res) => {
   try { res.json(await ctx.access.runOnDesktop(host, req.body ? req.body.cmd : undefined, { report: !!(req.body && req.body.window === true) })); } catch (e) { fail(res, e); }
 });
 // lane remoteapp-r1a (design q-024 §1.2): ONE app of a paired WINDOWS machine as a real window through RemoteApp — people only
-// (§1.6 fence 4: an agent never starts one). R1a: the machine's setup is asked first, so the launcher hears what is missing
-// (`remoteapp_needs_setup` — the settings card is the next version); the refusals of the launch itself by name (409 / 400).
+// (§1.6 fence 4: an agent never starts one). The machine's setup is asked first, so the launcher hears what is missing
+// (`remoteapp_needs_setup` — its door is the machine's RemoteApp settings card, r1b); the launch's own refusals by name (409 / 400).
 const RA_409 = new Set(['remoteapp_needs_setup', 'remoteapp_not_windows', 'not_desktop_machine', 'rdp_session_busy', 'rdp_client_too_old', 'rdp_client_unknown', 'remoteapp_unwired']);
 const RA_400 = new Set(['remoteapp_bad_program', 'rdp_arg_forbidden', 'rdp_cert_bad']);
 router.post('/api/desktop/machine-desktop/remoteapp', async (req, res) => {
@@ -419,6 +424,44 @@ router.post('/api/desktop/machine-desktop/remoteapp', async (req, res) => {
   const b = req.body || {};
   try { res.json(await ctx.access.launchRemoteApp(host, { program: b.program, name: b.name, args: b.args, kbdUnicode: b.kbdUnicode })); }
   catch (e) { const c = e && e.code; if (RA_409.has(c) || RA_400.has(c)) res.status(RA_409.has(c) ? 409 : 400).json({ error: String(e.message), code: c, ...(Array.isArray(e.missing) ? { missing: e.missing } : {}) }); else fail(res, e); }
+});
+// lane remoteapp-r1b (design q-024 r1 §1.3–§1.4): THE REMOTEAPP SETTINGS CARD — people only, like the launch. Its sign-in is the
+// machine's SEALED integration row (`remoteapp/<hostId>`: the page sends user / domain / password, gets back the view —
+// "password: set", never its bytes); the certificate is pinned by the first connection, never typed; the facts are the
+// machine's own (the `remoteapp-facts` device op, read-only). No body is ever logged.
+const RA_SET_409 = new Set([...RA_409, 'rdp_trust_busy', 'rdp_trust_timeout', 'rdp_trust_failed', 'rdp_trust_no_cert', 'rdp_auth_failed', 'rdp_unreachable', 'rdp_tls_failed', 'rdp_client_refused', 'rdp_bad_argv', 'rdp_cert_changed', 'rdp_link_lost', 'no-backend']);
+const RA_SET_400 = new Set([...RA_400, 'invalid-values', 'bad-request']);
+const raFail = (res, e) => {
+  const c = e && e.code;
+  const status = RA_SET_409.has(c) ? 409 : RA_SET_400.has(c) ? 400 : c === 'unsupported-host' || c === 'binds-per-machine' ? 404 : null;
+  if (status) return res.status(status).json({ error: String(e.message), code: c, ...(Array.isArray(e.missing) ? { missing: e.missing } : {}), ...(e.detail && c === 'invalid-values' ? { fields: e.detail } : {}) });
+  return fail(res, e);
+};
+const raAccess = (res, fn) => { if (!ctx.access || typeof ctx.access[fn] !== 'function') { noAccess(res); return null; } return ctx.access; };
+router.get('/api/desktop/machine-desktop/remoteapp/setup', (req, res) => {
+  if (humanOnly(req, res)) return;
+  const host = hostParam(req, res); if (!host) return;
+  const acc = raAccess(res, 'remoteappSetupView'); if (!acc) return;
+  try { res.json({ setup: acc.remoteappSetupView(host) }); } catch (e) { raFail(res, e); }
+});
+router.get('/api/desktop/machine-desktop/remoteapp/facts', async (req, res) => {
+  if (humanOnly(req, res)) return;
+  const host = hostParam(req, res); if (!host) return;
+  const acc = raAccess(res, 'remoteappFacts'); if (!acc) return;
+  try { res.json(await acc.remoteappFacts(host)); } catch (e) { raFail(res, e); }
+});
+router.post('/api/desktop/machine-desktop/remoteapp/setup', (req, res) => {
+  if (humanOnly(req, res)) return;
+  const host = hostParam(req, res); if (!host) return;
+  const acc = raAccess(res, 'saveRemoteappSetup'); if (!acc) return;
+  const b = req.body || {};
+  try { res.json({ setup: acc.saveRemoteappSetup(host, { user: b.user, domain: b.domain, password: b.password }) }); } catch (e) { raFail(res, e); }
+});
+router.post('/api/desktop/machine-desktop/remoteapp/trust', async (req, res) => {
+  if (humanOnly(req, res)) return;
+  const host = hostParam(req, res); if (!host) return;
+  const acc = raAccess(res, 'trustRemoteApp'); if (!acc) return;
+  try { res.json({ setup: await acc.trustRemoteApp(host) }); } catch (e) { raFail(res, e); }
 });
 // lane machine-app-crop: ONE app of the machine as its own window — the device follows the app's window, the page crops the
 // whole picture to it (src/server/machine-app.js; people only, like the whole desktop). `not_tracked` = its watch ended.
