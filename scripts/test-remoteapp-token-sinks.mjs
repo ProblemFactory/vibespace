@@ -131,6 +131,10 @@ const get = async (url) => { const r = await fetch(base + url); return { status:
 const live = (id) => keeper.get(id);
 const settle = (id, ms = 10000) => until(() => { const r = live(id); return r && r.state !== 'launching' ? r : null; }, ms);
 const ended = (id, ms = 10000) => until(() => { const r = live(id); return r && !['launching', 'ready'].includes(r.state) ? r : null; }, ms);
+// lane one-browser-b1-mirror-fix (the .290 mirror's red): an app exit flips the state at once (fail()) and writes the
+// client's own reason (rdp.ended + lastError) only after rdpEndOf's async read of its app.log — a leg judging the REASON
+// waits for the reason, never for the state alone (a loaded runner read the record between the two)
+const endedWhy = (get, ms = 10000) => until(() => { const r = get(); return r && !['launching', 'ready'].includes(r.state) && r.rdp && r.rdp.ended ? r : null; }, ms);
 const PROGRAM = 'C:\\Windows\\System32\\notepad.exe';
 const cleanup = () => { try { srv.close(); machineSrv.close(); } catch { /* down */ } for (const r of keeper.machine.listApps()) { for (const pid of Object.values(r.pids || {})) if (pid) { try { process.kill(-pid, 'SIGKILL'); } catch { /* gone */ } } } };
 process.on('exit', cleanup);
@@ -195,7 +199,7 @@ await section('§3 stop — the forward goes with the session', async () => {
   ok(await until(() => fakeSaw(fakePid).some((x) => x.phase === 'signal')), 'the fake xfreerdp was signalled (SIGTERM) by the keeper\'s teardown');
 });
 
-const launchAndEnd = async (body, ms = 10000) => { const r = await post('/api/desktop/machine-desktop/remoteapp', body); const v = JSON.parse(r.text); if (!v.id) return { r, v }; return { r, v, end: await ended(v.id, ms) }; };
+const launchAndEnd = async (body, ms = 10000) => { const r = await post('/api/desktop/machine-desktop/remoteapp', body); const v = JSON.parse(r.text); if (!v.id) return { r, v }; return { r, v, end: await endedWhy(() => live(v.id), ms) }; };
 await section('§4 why it ended — the client\'s own words through the real chain', async () => {
   setup = { ...setup, certFp: randFp() };
   const c = await launchAndEnd({ host: HOST, program: PROGRAM });
@@ -339,7 +343,7 @@ await section('CONTROLS — each sink / rule proven able to fail', async () => {
   const raNoD = MUT.write('src/remoteapp.js', cut(RAsrc, "`/d:${d.value || ''}`, '/from-stdin'", "...(d.value ? [`/d:${d.value}`] : []), '/from-stdin'"), 'nod');
   const c4 = await runMutant('nod', cut(S, "const RA = require('./remoteapp');", `const RA = require(${JSON.stringify(raNoD)});`));
   const st4 = c4.saw.find((x) => x.phase === 'stdin');
-  const end4 = await until(() => { const x = c4.dsm.get(c4.rec.id); return x && !['launching', 'ready'].includes(x.state) ? x : null; }, 6000);
+  const end4 = await endedWhy(() => c4.dsm.get(c4.rec.id), 6000);
   ok(st4 && st4.domainFromStdin === true && st4.password === null && end4 && end4.rdp.ended === 'rdp_cancelled', 'CONTROL: without `/d:` the fake reads the password line as the DOMAIN, has no password, and the session ends cancelled (§1 would be red)', { st4, ended: end4 && end4.rdp });
   await c4.stop();
 });

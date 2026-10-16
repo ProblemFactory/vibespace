@@ -1250,7 +1250,8 @@ console.log('— §6c every kill door is declared: an actor marked before the ki
     'src/port-forward.js': [1, 'not a conversation: port forwards'],
     'src/remote-fs.js': [2, 'not a conversation: file transfers'],
     'src/routes/files.js': [5, 'not a conversation: file transfers'],
-    'src/server/browser-keeper.js': [4, 'not a conversation: agent browsers and their stale holders (the 2.369.202 integration: lanes browser-windows / jobs-browser / browser-admin added four; rv-browser F7 moved the install children out — the two rows below)'],
+    'src/server/browser-keeper.js': [5, 'not a conversation: agent browsers and their stale holders (the 2.369.202 integration: lanes browser-windows / jobs-browser / browser-admin added four; rv-browser F7 moved the install children out — the two rows below; lane one-browser-b1 added the fifth: attachStart SIGKILLs the Chrome it just spawned when its starttime cannot be read)'],
+    'src/server/browser-attach-launch.js': [2, "not a conversation: agent browsers — the attach road's Chrome that the launch itself spawned (our child handle), ended by endChild (SIGTERM, a grace, then SIGKILL) when its DevToolsActivePort never appeared (lane one-browser-b1)"],
     'src/server/browser-installs.js': [3, 'not a conversation: THE install slot — a step child past its wall clock, a re-attached stalled step (its pid, or its npm group) — rv-browser F7, moved out of the keeper'],
     'src/server/browser-cli-install.js': [2, 'not a conversation: the browser CLI install\'s detached npm group (or its child) past its deadline — rv-browser F7, moved out of the keeper'],
     // the 2.369.202 integration — kill calls the other lanes of this release added beside lane unexpected-exit's census
