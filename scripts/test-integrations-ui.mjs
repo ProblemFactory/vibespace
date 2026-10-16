@@ -9,7 +9,7 @@
 // (a Lark / Gmail OAuth client is chosen where the ACCOUNT is added, exactly
 // like a storage mount's), so ①–⑨ drive the browser rows and ⑩ drives the
 // account card and its dialogs. What is measured:
-//   ⓪ the window draws EXACTLY the registry's census (every row not `bindsPerAccount`) — no Lark / Gmail / fake
+//   ⓪ the window draws EXACTLY the registry's census (every row neither `bindsPerAccount` nor `bindsPerMachine`) — no Lark / Gmail / fake
 //      card, and a deep link to a retired id opens nothing new
 //   ① a browser row's SOURCE CHIP walks none → your own (PUT) → cluster
 //      default (env injected + "use cluster") → none WITH A REASON (env
@@ -116,8 +116,9 @@ const LARK_CB = require(path.join(repo, 'src/channels/lark/manifest.js')).LARK_C
 const BROWSER_ROWS = ['cloak', 'cloud:browserbase', 'cloud:browserless', 'cloud:kernel', 'cloud:browseruse', 'cloud:agentcore'];
 // int260 + int258 (voice P0's dropline row and D1's llm row — the Language model card — = cards 7 and 8): the window's cards are THE REGISTRY'S OWN CENSUS — every row that is not
 // `bindsPerAccount` (an account-bound row's OAuth client is chosen where the account is added) — never a literal count;
+// .293 (the .292 mirror's red): nor `bindsPerMachine` — R1b's remoteapp row is ONE paired machine's own sign-in, set on that machine's card: never listed, never a card;
 // ①–⑨ still drive BROWSER_ROWS, which the census must hold.
-const WINDOW_ROWS = R.rowIds().filter((id) => !R.bindsPerAccount(id));
+const WINDOW_ROWS = R.rowIds().filter((id) => !R.bindsPerAccount(id) && !R.bindsPerMachine(id));
 const sameSet = (a, b) => JSON.stringify(a.slice().sort()) === JSON.stringify(b.slice().sort());
 const SECRET40 = 'sk-' + 'Q7f3'.repeat(8) + 'ZZZ99';   // 40 chars
 const PRESETS = JSON.stringify([
@@ -292,16 +293,16 @@ const BB = 'cloud:browserbase', BL = 'cloud:browserless';
 const p1 = await newPage();
 ok(await p1.load(), 'page 1 loaded the app at 375×667');
 
-// ── ⓪ the window keeps ONLY the registry's census (every row not bound per account) ──
+// ── ⓪ the window keeps ONLY the registry's census (every row bound neither per account nor per machine) ──
 {
   const g = await api('GET', '/api/integrations');
   const ids = ((g.json && g.json.integrations) || []).map((x) => x.id).sort();
-  ok(BROWSER_ROWS.every((id) => WINDOW_ROWS.includes(id)) && WINDOW_ROWS.length > 0 && R.rowIds().some((id) => R.bindsPerAccount(id) && !WINDOW_ROWS.includes(id)), `the census (${WINDOW_ROWS.join(', ')}) holds every browser row the legs below drive and leaves the account-bound rows out`);
+  ok(BROWSER_ROWS.every((id) => WINDOW_ROWS.includes(id)) && WINDOW_ROWS.length > 0 && R.rowIds().some((id) => R.bindsPerAccount(id) && !WINDOW_ROWS.includes(id)) && R.rowIds().some((id) => R.bindsPerMachine(id) && !WINDOW_ROWS.includes(id)), `the census (${WINDOW_ROWS.join(', ')}) holds every browser row the legs below drive and leaves the account-bound and per-machine rows out`);
   ok(sameSet(ids, WINDOW_ROWS), `GET /api/integrations lists exactly the registry's census (${ids.join(', ')})`);
   ok(await p1.evaljs(OPEN(BB)), 'app.openIntegration(<a browser row>) opened the window');
   const cards = await p1.evaljs(`[...document.querySelectorAll('.integ-card')].map((c) => c.dataset.integ).sort()`);
   ok(sameSet(cards, WINDOW_ROWS), `the window draws exactly the census's cards — no Lark / Gmail / fake card (${cards.join(', ')})`);
-  ok(!sameSet([...cards, 'lark'], WINDOW_ROWS) && !sameSet(cards.slice(0, -1), WINDOW_ROWS), 'CONTROL: the card check is not vacuous — a leaked account-bound card (lark) and one registry row missing each fail it');
+  ok(!sameSet([...cards, 'lark'], WINDOW_ROWS) && !sameSet([...cards, 'remoteapp'], WINDOW_ROWS) && !sameSet(cards.slice(0, -1), WINDOW_ROWS), 'CONTROL: the card check is not vacuous — a leaked account-bound card (lark), a leaked per-machine card (remoteapp) and one registry row missing each fail it');
   ok(await p1.evaljs(`!document.querySelector('.integ-card[data-integ="lark"], .integ-card[data-integ="gmail"], .integ-card[data-integ="fake"]')`), 'no retired OAuth-client card anywhere on the page');
 }
 

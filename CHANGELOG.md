@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.293 — 2026-10-16
+
+### Maintenance
+- Test and release tooling only; nothing changes for you.
+
 ## 2.369.292 — 2026-10-16
 
 ### Added

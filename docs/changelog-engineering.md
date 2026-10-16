@@ -4,6 +4,13 @@ This file is the engineers' record of every release: the lanes, the verification
 
 `CHANGELOG.md` (with `CHANGELOG.zh.md` and `CHANGELOG.ja.md`) is the user's: what changed for the person using VibeSpace, one plain line per change, in the interface's language — the rules are in docs/changelog-style.md. From 2.369.199 on, every release also writes its section here, under the same `## <version> — <date>` heading as its user entry and in the same commit, newest first above the verbatim record.
 
+## 2.369.293 — 2026-10-16
+
+### lane remoteapp-r1b-mirror-fix — the .292 master mirror's red in test-integrations-ui after R1b (run 38883792640 heavy 4/6 twice + its pre-run 38883789438); test tooling only; base 57a4c56c
+- test-integrations-ui (heavy) ⓪: the suite's census `WINDOW_ROWS` was every registry row not `bindsPerAccount` — so it counted R1b's per-machine `remoteapp` row (`bindsPerMachine: true`), 9 rows. The product is right by the design rule (a per-machine row is ONE paired machine's own sign-in, set on that machine's card: never in GET /api/integrations, never an Integrations card): the store's `list()` leaves it out and the window draws only what `list()` returns — 8 cards. The census now leaves out `bindsPerMachine` rows too (`R.bindsPerMachine`, the registry's own predicate — still no literal count). The cascade was the suite's own design, not restructured: `OPEN()` waits for `≥ WINDOW_ROWS.length` cards, so with a 9-row census every open timed out (the window, deep-link highlight, retired-id, 375×667 and the page 2 / reload legs: 9 ✗ of 181, reproduced on 57a4c56c exactly; after: 181/0).
+- The census leg now also proves a per-machine row exists and stays out (like the account-bound one), and the card CONTROL plants a leaked `remoteapp` card beside the leaked `lark` one (each RED; the planted fake card / retired-id controls unchanged).
+- Not touched: test-integration-registry and test-integrations-store already filtered per-machine rows (R1b); the product (store `list()`, integrations-window) is unchanged.
+
 ## 2.369.292 — 2026-10-16
 
 ### lane remoteapp-r1b — RemoteApp R1b: the sealed per-machine sign-in row, the `remoteapp-facts` device op, the settings card, the first-connection pin (design q-024 r1 §1.3–§1.6; credential class — a verify round follows; built on .288, rebased onto 4f218586 (.291) — the fake's r1b behaviours ported onto .289's POSIX-sh fake)
