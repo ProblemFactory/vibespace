@@ -1,111 +1,154 @@
-#!/usr/bin/env node
-// A FAKE `xfreerdp` (lane remoteapp-r1a) — stands in for FreeRDP 3's X client in the RemoteApp suites. It answers
-// `/version` + `/buildconfig` like FreeRDP 3.32.1, and a launch the way the REAL one was measured to behave (src/remoteapp.js
-// header — xfreerdp 3.32.1 against a FreeRDP shadow server on a private Xvfb):
-//   • `/from-stdin` with no `/d:` prompts "Domain:" and reads the FIRST stdin line as the domain, then the password line;
-//     EOF before the password ⇒ ERRCONNECT_CONNECT_CANCELLED, exit 145
-//   • a pinned `/cert:…fingerprint:sha256:<fp>` that differs from VS_FAKE_RDP_SERVER_FP ⇒ "Host key verification failed",
-//     ERRCONNECT_TLS_CONNECT_FAILED, exit 143 — UNLESS a certificate is stored for that host:port under the client's config
-//     dir ($XDG_CONFIG_HOME, else $HOME/.config)/freerdp/server/ (then it connects: the measured hole)
-//   • a password whose sha256 is not VS_FAKE_RDP_PASSWORD_SHA256 ⇒ ERRCONNECT_LOGON_FAILURE, exit 134
-//   • nothing listening on `/v:` ⇒ ERRCONNECT_CONNECT_FAILED, exit 141
-// Then it connects to `/v:`, says one line and reads the machine's one-line answer (the suites' stand-in for the machine's
-// 3389 behind the forward), prints a RAIL-looking line and — unless VS_FAKE_RDP_WINDOW=0 — opens ONE X top-level on $DISPLAY
-// (xmessage, instance name `xfreerdp`), and runs until SIGTERM. VS_FAKE_RDP_RAIL=<RAIL_EXEC_E_…> prints FreeRDP's RAIL exec
-// error line instead and exits 1 (that row's wording is from FreeRDP's xf_rail.c, not measured). What it saw goes to
-// VS_FAKE_RDP_RECORD as JSON lines — the stdin password as its sha256 + length only, never its bytes.
-'use strict';
-const fs = require('fs');
-const net = require('net');
-const path = require('path');
-const crypto = require('crypto');
-const { spawn } = require('child_process');
+#!/bin/sh
+# A FAKE `xfreerdp` (lane remoteapp-r1a; POSIX sh since lane remoteapp-fake-node-path — it was `#!/usr/bin/env node`, and the
+# hosted runner's sanitized spawn PATH holds no node: master .288 read "/usr/bin/env: 'node': No such file or directory" as
+# the client's version ⇒ rdp_client_unknown) — stands in for FreeRDP 3's X client in the RemoteApp suites. It answers
+# `/version` + `/buildconfig` like FreeRDP 3.32.1 (VS_FAKE_RDP_VERSION, VS_FAKE_RDP_H264=ON change them), and a launch the
+# way the REAL one was measured to behave (src/remoteapp.js header — xfreerdp 3.32.1 against a FreeRDP shadow server on a
+# private Xvfb):
+#   • `/from-stdin` with no `/d:` prompts "Domain:" and reads the FIRST stdin line as the domain, then the password line;
+#     EOF before the password ⇒ ERRCONNECT_CONNECT_CANCELLED, exit 145
+#   • a pinned `/cert:…fingerprint:sha256:<fp>` that differs from VS_FAKE_RDP_SERVER_FP ⇒ "Host key verification failed",
+#     ERRCONNECT_TLS_CONNECT_FAILED, exit 143 — UNLESS a certificate is stored for that host:port under the client's config
+#     dir ($XDG_CONFIG_HOME, else $HOME/.config)/freerdp/server/ (then it connects: the measured hole)
+#   • a password whose sha256 is not VS_FAKE_RDP_PASSWORD_SHA256 ⇒ ERRCONNECT_LOGON_FAILURE, exit 134
+#   • nothing listening on `/v:` ⇒ ERRCONNECT_CONNECT_FAILED, exit 141
+# Then it connects to `/v:`, says one line and reads the machine's one-line answer (the suites' stand-in for the machine's
+# 3389 behind the forward), prints a RAIL-looking line and — unless VS_FAKE_RDP_WINDOW=0 — opens ONE X top-level on $DISPLAY
+# (xmessage, instance name `xfreerdp`), and runs until SIGTERM (exit 145) or until the machine's side closes (exit 131).
+# VS_FAKE_RDP_RAIL=<RAIL_EXEC_E_…> prints FreeRDP's RAIL exec error line instead and exits 1 (that row's wording is from
+# FreeRDP's xf_rail.c, not measured). What it saw goes to VS_FAKE_RDP_RECORD as JSON lines — the stdin password as its
+# sha256 + length only, never its bytes.
+# Needs sh + sed, sort, tr, wc, date, mktemp, mkfifo, rm, sha256sum (or shasum) and perl: the ONE socket is perl-base's
+# IO::Socket::INET (Debian/Ubuntu Essential) — POSIX sh cannot open one, and OpenBSD nc never exits when the far side
+# closes while its stdin is held open (measured), so the link-lost exit would hang. The password stays in this shell:
+# builtins only (printf, read), never an argv or an exported variable; the socket helper is told only whether it was right.
 
-const argv = process.argv.slice(2);
-if (argv[0] === '/version') { process.stdout.write(`This is FreeRDP version ${process.env.VS_FAKE_RDP_VERSION || '3.32.1'} (fake)\n`); process.exit(0); }
-if (argv[0] === '/buildconfig') { process.stdout.write(`Build configuration: BUILD_TESTING=OFF WITH_FFMPEG=OFF WITH_GFX_H264=${process.env.VS_FAKE_RDP_H264 === 'ON' ? 'ON' : 'OFF'} WITH_OPENH264=OFF\n`); process.exit(0); }
+case ${1-} in
+  /version) printf 'This is FreeRDP version %s (fake)\n' "${VS_FAKE_RDP_VERSION:-3.32.1}"; exit 0 ;;
+  /buildconfig) if [ "${VS_FAKE_RDP_H264-}" = ON ]; then h=ON; else h=OFF; fi
+    printf 'Build configuration: BUILD_TESTING=OFF WITH_FFMPEG=OFF WITH_GFX_H264=%s WITH_OPENH264=OFF\n' "$h"; exit 0 ;;
+esac
 
-const sha = (s) => crypto.createHash('sha256').update(s).digest('hex');
-const record = (o) => { const f = process.env.VS_FAKE_RDP_RECORD; if (f) fs.appendFileSync(f, JSON.stringify({ pid: process.pid, at: Date.now(), ...o }) + '\n'); };
-const say = (level, tag, fn, msg) => process.stderr.write(`[00:00:00:000] [${process.pid}:00000000] [${level}][${tag}] - [${fn}]: ${msg}\n`);
-const opt = (name) => { const a = argv.find((x) => x.startsWith(`/${name}:`) || x === `/${name}`); return a === undefined ? undefined : a.slice(name.length + 2); };
-const configDir = process.env.XDG_CONFIG_HOME || path.join(process.env.HOME || '/nonexistent', '.config');
-const target = String(opt('v') || '');
-const [host, port] = [target.replace(/:\d+$/, ''), Number((/:(\d+)$/.exec(target) || [])[1])];
-record({ phase: 'start', argv, env: { names: Object.keys(process.env).sort(), XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME || null, DISPLAY: process.env.DISPLAY || null } });
+TAB=$(printf '\t'); CR=$(printf '\r')
+js() { printf '%s\n' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e "s/$TAB/\\\\t/g" -e "s/$CR/\\\\r/g" | { IFS= read -r l; o=$l; while IFS= read -r l; do o="$o\\n$l"; done; printf '"%s"' "$o"; }; }
+jn() { if [ -n "$1" ]; then js "$1"; else printf null; fi; }
+sha() { if command -v sha256sum >/dev/null 2>&1; then printf '%s' "$1" | sha256sum; else printf '%s' "$1" | shasum -a 256; fi | { read -r h _; printf '%s' "$h"; }; }
+lc() { printf '%s' "$1" | tr 'A-Z' 'a-z'; }
+REC=${VS_FAKE_RDP_RECORD-}
+record() { [ -z "$REC" ] || printf '{"pid":%s,"at":%s000,%s}\n' "$$" "$(date +%s)" "$1" >>"$REC"; }
+say() { printf '[00:00:00:000] [%s:00000000] [%s][%s] - [%s]: %s\n' "$$" "$1" "$2" "$3" "$4" >&2; }
+opt() { _n=$1; shift; for _a in "$@"; do case $_a in "/$_n:"*) printf '%s' "${_a#"/$_n:"}"; return 0 ;; "/$_n") return 0 ;; esac; done; return 1; }
 
-// ── the credentials on stdin, exactly as measured ──
-function readStdinLines(want) {
-  return new Promise((resolve) => {
-    let buf = '';
-    const lines = [];
-    const done = () => { process.stdin.removeAllListeners(); process.stdin.pause(); resolve({ lines, eof: lines.length < want }); };
-    process.stdin.setEncoding('utf8');
-    process.stdin.on('data', (d) => { buf += d; let i; while ((i = buf.indexOf('\n')) >= 0 && lines.length < want) { lines.push(buf.slice(0, i)); buf = buf.slice(i + 1); } if (lines.length >= want) done(); });
-    process.stdin.on('end', () => { if (buf && lines.length < want) lines.push(buf); done(); });
-    process.stdin.on('error', () => done());
-  });
+win=; link=
+end() { [ -z "$win" ] || kill "$win" 2>/dev/null; [ -z "$link" ] || kill -9 "$link" 2>/dev/null; exit "$1"; }
+onsig() {
+  trap '' TERM INT HUP
+  if [ "$1" = TERM ]; then w=Terminated; else w=SIG$1; fi
+  say ERROR com.freerdp.utils.signal fsig_term_handler "Caught signal '$w' [15]"
+  say ERROR com.freerdp.core freerdp_abort_connect_context 'ERRCONNECT_CONNECT_CANCELLED [0x0002000B]'
+  record "\"phase\":\"signal\",\"sig\":\"SIG$1\""
+  end 145
 }
-async function credentials() {
-  if (!argv.includes('/from-stdin') && !argv.includes('/from-stdin:force')) return { password: null, domainFromStdin: false, lines: 0 };
-  const askDomain = opt('d') === undefined;
-  if (askDomain) process.stdout.write('Domain:          ');
-  const r = await readStdinLines(askDomain ? 2 : 1);
-  const password = askDomain ? r.lines[1] : r.lines[0];
-  return { password: password === undefined ? null : password, domainFromStdin: askDomain, lines: r.lines.length };
-}
+trap 'onsig TERM' TERM; trap 'onsig INT' INT; trap 'onsig HUP' HUP
 
-let child = null;
-function end(code) { if (child) { try { child.kill('SIGTERM'); } catch { /* gone */ } } process.exit(code); }
-for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => { say('ERROR', 'com.freerdp.utils.signal', 'fsig_term_handler', `Caught signal '${sig === 'SIGTERM' ? 'Terminated' : sig}' [15]`); say('ERROR', 'com.freerdp.core', 'freerdp_abort_connect_context', 'ERRCONNECT_CONNECT_CANCELLED [0x0002000B]'); record({ phase: 'signal', sig }); end(145); });
+argv=; for a in "$@"; do argv="$argv${argv:+,}$(js "$a")"; done
+names=; for nm in $(if [ -r "/proc/$$/environ" ]; then tr '\n\0' ' \n' <"/proc/$$/environ"; else env; fi | sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p' | LC_ALL=C sort -u); do names="$names${names:+,}\"$nm\""; done
+cfg=${XDG_CONFIG_HOME:-${HOME:-/nonexistent}/.config}
+target=$(opt v "$@") || target=
+port=${target##*:}
+case $target in *:*) case $port in ''|*[!0-9]*) host=$target port= ;; *) host=${target%:*} ;; esac ;; *) host=$target port= ;; esac
+record "\"phase\":\"start\",\"argv\":[$argv],\"env\":{\"names\":[$names],\"XDG_CONFIG_HOME\":$(jn "${XDG_CONFIG_HOME-}"),\"DISPLAY\":$(jn "${DISPLAY-}")}"
 
-(async () => {
-  const cred = await credentials();
-  record({ phase: 'stdin', lines: cred.lines, domainFromStdin: cred.domainFromStdin, password: cred.password === null ? null : { sha256: sha(cred.password), length: Buffer.byteLength(cred.password) } });
-  // the pinned certificate (the real client checks it during TLS, before the credentials are used)
-  const certOpt = String(opt('cert') || '');
-  const pinned = (/fingerprint:sha256:([0-9a-f:]+)/i.exec(certOpt) || [])[1] || null;
-  const serverFp = process.env.VS_FAKE_RDP_SERVER_FP || null;
-  const stored = fs.existsSync(path.join(configDir, 'freerdp', 'server', `${host}_${port}.pem`));
-  if (serverFp && !stored && (!pinned || pinned.toLowerCase() !== serverFp.toLowerCase())) {
-    say('WARN', 'com.freerdp.crypto', 'verify_cb', "Certificate verification failure 'self-signed certificate (18)' at stack position 0");
-    say('ERROR', 'com.freerdp.crypto', 'tls_print_new_certificate_warn', 'Host key verification failed.');
-    say('ERROR', 'com.freerdp.crypto', 'freerdp_tls_handshake', 'certificate not trusted, aborting.');
-    say('ERROR', 'com.freerdp.core', 'transport_default_connect_tls', 'ERRCONNECT_TLS_CONNECT_FAILED [0x00020008]');
-    record({ phase: 'end', why: 'cert', pinned, stored });
-    end(143);
-  }
-  if (cred.password === null && (argv.includes('/from-stdin') || argv.includes('/from-stdin:force'))) {
-    say('ERROR', 'com.freerdp.core', 'nla_client_setup_identity', 'ERRCONNECT_CONNECT_CANCELLED [0x0002000B]');
-    say('ERROR', 'com.freerdp.core.transport', 'transport_connect_nla', 'NLA begin failed');
-    record({ phase: 'end', why: 'no-password' });
-    end(145);
-  }
-  const wantPw = process.env.VS_FAKE_RDP_PASSWORD_SHA256 || null;
-  // the machine first (TCP), then the sign-in — like the real NLA order
-  const sock = await new Promise((resolve) => {
-    const s = net.connect({ host: host || '127.0.0.1', port });
-    s.once('connect', () => resolve(s));
-    s.once('error', (e) => { say('WARN', 'com.freerdp.core', 'freerdp_tcp_connect_timeout', `connect to ${host}:${port} failed with error: ${e.message}`); say('ERROR', 'com.freerdp.core', 'get_next_addrinfo', 'ERRCONNECT_CONNECT_FAILED [0x00020006]'); record({ phase: 'end', why: 'unreachable' }); end(141); });
-  });
-  if (wantPw && sha(cred.password || '') !== wantPw) {
-    say('ERROR', 'com.freerdp.core', 'nla_recv_pdu', 'ERRCONNECT_LOGON_FAILURE [0x00020014]');
-    record({ phase: 'end', why: 'logon' });
-    sock.destroy(); end(134);
-  }
-  sock.write('VS-FAKE-RDP hello\n');
-  const reply = await new Promise((resolve) => { let b = ''; const t = setTimeout(() => resolve(null), 5000); sock.on('data', (d) => { b += d; const i = b.indexOf('\n'); if (i >= 0) { clearTimeout(t); resolve(b.slice(0, i)); } }); sock.on('close', () => { clearTimeout(t); resolve(b || null); }); });
-  record({ phase: 'connected', reply });
-  sock.on('close', () => { say('ERROR', 'com.freerdp.core', 'transport_read_layer', 'ERRCONNECT_CONNECT_TRANSPORT_FAILED [0x0002000D]'); record({ phase: 'end', why: 'link-closed' }); end(131); });
-  const rail = process.env.VS_FAKE_RDP_RAIL;
-  if (rail) { say('ERROR', 'com.freerdp.client.x11', 'xf_rail_server_execute_result', `RAIL exec error: execResult=${rail} NtError=0x0`); record({ phase: 'end', why: 'rail', rail }); end(1); }
-  const app = String(opt('app') || '');
-  const name = (/(?:^|,)name:([^,]*)/.exec(app) || [])[1] || 'RemoteApp';
-  process.stdout.write(`[INFO][com.freerdp.client.x11] - [xf_rail_window_common]: RAIL window "${name}" mapped (fake xfreerdp)\n`);
-  if (process.env.VS_FAKE_RDP_WINDOW !== '0' && process.env.DISPLAY) {
-    const xm = (process.env.PATH || '').split(':').map((d) => path.join(d, 'xmessage')).find((f) => { try { fs.accessSync(f, fs.constants.X_OK); return true; } catch { return false; } });
-    if (xm) { child = spawn(xm, ['-name', 'xfreerdp', '-title', name, '-geometry', '360x120+40+40', `${name} - a RemoteApp (fake xfreerdp)`], { stdio: 'ignore', env: process.env }); record({ phase: 'window', tool: 'xmessage', windowPid: child.pid }); }
-    else record({ phase: 'window', tool: null });
-  }
-  setInterval(() => { }, 1 << 30); // a session runs until it is stopped
-})();
+# ── the credentials on stdin, exactly as measured ──
+fromstdin=0; for a in "$@"; do case $a in /from-stdin|/from-stdin:force) fromstdin=1 ;; esac; done
+readline() { line=; IFS= read -r line || [ -n "$line" ]; }
+pw=; havepw=0; lines=0; domstdin=false
+if [ $fromstdin = 1 ]; then
+  if opt d "$@" >/dev/null; then want=1; else want=2; domstdin=true; printf 'Domain:          '; fi
+  if readline; then
+    lines=1
+    if [ $want = 1 ]; then pw=$line; havepw=1; elif readline; then lines=2; pw=$line; havepw=1; fi
+  fi
+fi
+if [ $havepw = 1 ]; then pwj="{\"sha256\":\"$(sha "$pw")\",\"length\":$(printf '%s' "$pw" | wc -c | tr -d ' ')}"; else pwj=null; fi
+record "\"phase\":\"stdin\",\"lines\":$lines,\"domainFromStdin\":$domstdin,\"password\":$pwj"
+
+# the pinned certificate (the real client checks it during TLS, before the credentials are used)
+cert=$(opt cert "$@") || cert=
+pinned=; case $cert in *fingerprint:sha256:*) pinned=$(printf '%s\n' "${cert#*fingerprint:sha256:}" | sed -e 's/[^0-9A-Fa-f:].*//' -e q) ;; esac
+stored=false; [ -e "$cfg/freerdp/server/${host}_${port}.pem" ] && stored=true
+sfp=${VS_FAKE_RDP_SERVER_FP-}
+if [ -n "$sfp" ] && [ $stored = false ] && { [ -z "$pinned" ] || [ "$(lc "$pinned")" != "$(lc "$sfp")" ]; }; then
+  say WARN com.freerdp.crypto verify_cb "Certificate verification failure 'self-signed certificate (18)' at stack position 0"
+  say ERROR com.freerdp.crypto tls_print_new_certificate_warn 'Host key verification failed.'
+  say ERROR com.freerdp.crypto freerdp_tls_handshake 'certificate not trusted, aborting.'
+  say ERROR com.freerdp.core transport_default_connect_tls 'ERRCONNECT_TLS_CONNECT_FAILED [0x00020008]'
+  record "\"phase\":\"end\",\"why\":\"cert\",\"pinned\":$(jn "$pinned"),\"stored\":$stored"
+  end 143
+fi
+if [ $fromstdin = 1 ] && [ $havepw = 0 ]; then
+  say ERROR com.freerdp.core nla_client_setup_identity 'ERRCONNECT_CONNECT_CANCELLED [0x0002000B]'
+  say ERROR com.freerdp.core.transport transport_connect_nla 'NLA begin failed'
+  record '"phase":"end","why":"no-password"'
+  end 145
+fi
+logon=ok
+if [ -n "${VS_FAKE_RDP_PASSWORD_SHA256-}" ] && [ "$(sha "$pw")" != "$VS_FAKE_RDP_PASSWORD_SHA256" ]; then logon=refused; fi
+
+# the machine first (TCP), then the sign-in — like the real NLA order. The helper answers ONE line on a fifo (E <why> = no
+# connection, L = the sign-in refused, R <reply> / N = connected: the machine's answer or none in 5 s), then holds the link
+# until the far side closes (its exit; it ignores TERM — this shell ends it) or this shell is gone
+LINK='use IO::Socket::INET; $SIG{$_} = "IGNORE" for qw(TERM INT HUP); $| = 1;
+my ($h, $p, $logon) = @ARGV; my $parent = getppid;
+my $s = IO::Socket::INET->new(PeerAddr => $h, PeerPort => $p, Proto => "tcp");
+if (!$s) { (my $e = $@ || "$!") =~ s/\s+/ /g; print "E $e\n"; exit 41 }
+if ($logon ne "ok") { close $s; print "L\n"; exit 34 }
+syswrite $s, "VS-FAKE-RDP hello\n";
+my ($b, $closed) = ("", 0);
+my $wait = sub { my $rin = ""; vec($rin, fileno($s), 1) = 1; select(my $r = $rin, undef, undef, $_[0]) };
+for (1 .. 20) { last if index($b, "\n") >= 0; next unless $wait->(0.25); if (!sysread($s, $b, 4096, length $b)) { $closed = 1; last } }
+my $i = index($b, "\n");
+print $i >= 0 ? "R " . substr($b, 0, $i) . "\n" : ($closed && length $b) ? "R $b\n" : "N\n";
+while (1) { exit 0 if getppid != $parent; next unless $wait->(1); sysread($s, my $x, 4096) or exit 31 }'
+fail() { say ERROR com.freerdp.core freerdp_connect "the fake xfreerdp could not $1"; record "\"phase\":\"end\",\"why\":$(js "$1")"; end 70; }
+command -v perl >/dev/null 2>&1 || fail 'find perl for its socket'
+d=$(mktemp -d "${TMPDIR:-/tmp}/vs-fake-rdp.XXXXXX") && mkfifo "$d/link" || fail 'make its link fifo'
+perl -e "$LINK" "${host:-127.0.0.1}" "$port" "$logon" >"$d/link" &
+link=$!
+exec 3<"$d/link"
+rm -rf "$d"
+IFS= read -r ans <&3 || ans=
+case $ans in
+  'R '*) reply=$(js "${ans#R }") ;;
+  N) reply=null ;;
+  L) link=
+    say ERROR com.freerdp.core nla_recv_pdu 'ERRCONNECT_LOGON_FAILURE [0x00020014]'
+    record '"phase":"end","why":"logon"'
+    end 134 ;;
+  *) link=
+    say WARN com.freerdp.core freerdp_tcp_connect_timeout "connect to $host:$port failed with error: ${ans#E }"
+    say ERROR com.freerdp.core get_next_addrinfo 'ERRCONNECT_CONNECT_FAILED [0x00020006]'
+    record '"phase":"end","why":"unreachable"'
+    end 141 ;;
+esac
+record "\"phase\":\"connected\",\"reply\":$reply"
+if [ -n "${VS_FAKE_RDP_RAIL-}" ]; then
+  say ERROR com.freerdp.client.x11 xf_rail_server_execute_result "RAIL exec error: execResult=$VS_FAKE_RDP_RAIL NtError=0x0"
+  record "\"phase\":\"end\",\"why\":\"rail\",\"rail\":$(js "$VS_FAKE_RDP_RAIL")"
+  end 1
+fi
+app=$(opt app "$@") || app=
+name=",$app"; name=${name#*,name:}; name=${name%%,*}; case ",$app" in *,name:*) ;; *) name= ;; esac; [ -n "$name" ] || name=RemoteApp
+printf '[INFO][com.freerdp.client.x11] - [xf_rail_window_common]: RAIL window "%s" mapped (fake xfreerdp)\n' "$name"
+if [ "${VS_FAKE_RDP_WINDOW-}" != 0 ] && [ -n "${DISPLAY-}" ]; then
+  if xm=$(command -v xmessage) && [ -n "$xm" ]; then
+    "$xm" -name xfreerdp -title "$name" -geometry 360x120+40+40 "$name - a RemoteApp (fake xfreerdp)" </dev/null >/dev/null 2>&1 &
+    win=$!
+    record "\"phase\":\"window\",\"tool\":\"xmessage\",\"windowPid\":$win"
+  else record '"phase":"window","tool":null'; fi
+fi
+wait "$link" # a session runs until it is stopped (the TERM trap) or the machine's side goes away
+link=
+say ERROR com.freerdp.core transport_read_layer 'ERRCONNECT_CONNECT_TRANSPORT_FAILED [0x0002000D]'
+record '"phase":"end","why":"link-closed"'
+end 131
