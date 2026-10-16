@@ -582,7 +582,11 @@ try {
     const trustedClick = async (p, sel) => { const r = await p.evalJs(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return null; e.scrollIntoView({ block: 'nearest' }); const b = e.getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; })()`); if (r) await trustedClickAt(p, r.x, r.y); return !!r; };
     const hits = [];
     const PAGE_TITLE = `vs-bfe6 ${process.pid}`;
-    const web = http.createServer((q, s) => { hits.push({ url: q.url, ua: String(q.headers['user-agent'] || '') }); s.writeHead(q.url.startsWith('/vs-bfe6') ? 200 : 404, { 'Content-Type': 'text/html; charset=utf-8' }); s.end(q.url.startsWith('/vs-bfe6') ? `<!doctype html><title>${PAGE_TITLE}</title><body style="background:#fff"><h1>${PAGE_TITLE}</h1>` : ''); });
+    // the page (lane xpra-ime-mac): a text box for the keys legs, its key events and value reported back to this server (/vs-bfe6-k —
+    // what the browser IN the app saw: key, code, keyCode), and a long text below for the scroll leg
+    const KEYS_PAGE = `<textarea id="t" autofocus style="position:fixed;left:0;top:0;width:100%;height:45vh;font-size:18px;z-index:1"></textarea><div style="height:45vh"></div><div style="font:16px monospace">${Array.from({ length: 400 }, (_, i) => `line ${i} of the scroll leg`).join('<br>')}</div><script>let n=0;const send=(o)=>fetch('/vs-bfe6-k?e='+encodeURIComponent(JSON.stringify(o))).catch(()=>{});for(const ty of ['keydown','keyup'])document.addEventListener(ty,(e)=>send({n:n++,ty,key:e.key,code:e.code,kc:e.keyCode,rep:e.repeat}),true);document.getElementById('t').addEventListener('input',(e)=>send({n:n++,ty:'value',v:e.target.value}));</script>`;
+    const web = http.createServer((q, s) => { hits.push({ url: q.url, ua: String(q.headers['user-agent'] || '') }); s.writeHead(q.url.startsWith('/vs-bfe6') ? 200 : 404, { 'Content-Type': 'text/html; charset=utf-8' }); s.end(q.url.startsWith('/vs-bfe6') ? `<!doctype html><title>${PAGE_TITLE}</title><body style="background:#fff"><h1>${PAGE_TITLE}</h1>${KEYS_PAGE}` : ''); });
+    const keyLog = () => hits.filter((h) => h.url.startsWith('/vs-bfe6-k?e=')).map((h) => { try { return JSON.parse(decodeURIComponent(h.url.slice('/vs-bfe6-k?e='.length))); } catch { return null; } }).filter(Boolean).sort((a, b) => a.n - b.n);
     const [WEB_PORT] = await freePorts(1);
     await new Promise((r) => web.listen(WEB_PORT, '127.0.0.1', r));
     try {
@@ -632,6 +636,39 @@ try {
         check(`${row.id}: X agrees — a mapped browser window titled with the page (${(xs.windows || []).map((w) => JSON.stringify(w.title)).join(', ')})`, (xs.windows || []).some((w) => (w.title || '').includes(PAGE_TITLE)), xs);
         const got = hits.filter((h) => h.url.startsWith(`/vs-bfe6-${row.id}`));
         check(`${row.id}: the URL argument LANDED — our http server served ${got.length} GET(s) of ${new URL(url).pathname} (UA ${got[0] ? got[0].ua.slice(0, 60) : 'none'})`, got.length > 0, hits.slice(-5));
+        // ── lane xpra-ime-mac (inc-mvaddc4m-6m0t: in a Google Docs window w = End, s = Left, x = Down): the keys as the BROWSER IN THE
+        // APP sees them. Chrome started on the stock evdev map, THEN our client programmed its own (the owner's order). A real
+        // Chrome names a key by its X keycode — `code` — so every key must reach X on its stock keycode: w on 25 = KeyW, never on
+        // 87 = Numpad1 (Docs acts on a numpad code with NumLock off). Then an IME commit (insertText ⇒ typeText ⇒ the published
+        // rows on stock-NoSymbol keycodes) lands as its characters; the CONTROL re-programs the pre-lane browser-keyCode map in
+        // this very session and presses w on 87 ⇒ Numpad1. Then the scroll leg: wheel over a long page ⇒ no lost scroll frame. ──
+        if (row.id === 'chromium') {
+          const wk = await p1.evalJs(WIN(recB.id));
+          await trustedClickAt(p1, wk.pane.x + wk.pane.w / 2, wk.pane.y + wk.pane.h * 0.3); // the text box: the page's top 45 % under Chrome's own bar
+          await sleep(500);
+          const before = keyLog().length;
+          for (const ch of 'wsxd') { const k = keyOf(ch); await p1.cdp('Input.dispatchKeyEvent', { type: 'keyDown', ...k }); await p1.cdp('Input.dispatchKeyEvent', { type: 'keyUp', ...k }); await sleep(60); }
+          const downs = await until(() => { const d = keyLog().slice(before).filter((e) => e.ty === 'keydown'); return d.length >= 4 ? d : null; }, 10000, 200) || keyLog().slice(before).filter((e) => e.ty === 'keydown');
+          check(`${row.id}: w s x d typed through the window reach the browser in the app as KeyW KeyS KeyX KeyD with keys w s x d — never a numpad / function key (${downs.map((e) => `${e.key}/${e.code}`).join(' ')})`, same2(downs.map((e) => [e.key, e.code]), [['w', 'KeyW'], ['s', 'KeyS'], ['x', 'KeyX'], ['d', 'KeyD']]), downs);
+          const v1 = await until(() => { const v = keyLog().filter((e) => e.ty === 'value').pop(); return v && v.v === 'wsxd' ? v.v : null; }, 8000, 200);
+          check(`${row.id}: …and the text box holds "wsxd" (${JSON.stringify(v1)})`, v1 === 'wsxd', keyLog().filter((e) => e.ty === 'value').slice(-3));
+          await p1.cdp('Input.insertText', { text: '中文输入' });
+          const v2 = await until(() => { const v = keyLog().filter((e) => e.ty === 'value').pop(); return v && v.v === 'wsxd中文输入' ? v.v : null; }, 10000, 200);
+          check(`${row.id}: an IME commit (中文输入) lands as its characters after them — the published rows on stock-NoSymbol keycodes (${JSON.stringify(v2 || (keyLog().filter((e) => e.ty === 'value').pop() || {}).v)})`, v2 === 'wsxd中文输入', keyLog().filter((e) => e.ty === 'value').slice(-3));
+          // the scroll leg (UPSTREAM bug, xpra 6.5.4: a scroll-encoded frame is lost — the client offers no scroll encoding)
+          const appLog = path.join(wt, 'data', 'desktop-apps', recB.id, 'app.log');
+          const lost = () => { try { return (fs.readFileSync(appLog, 'utf8').match(/queue_damage_packet\(\) missing 1 required positional argument/g) || []).length; } catch { return -1; } };
+          const lost0 = lost();
+          for (let i = 0; i < 12; i++) { await p1.cdp('Input.dispatchMouseEvent', { type: 'mouseWheel', x: wk.pane.x + wk.pane.w / 2, y: wk.pane.y + wk.pane.h * 0.7, deltaX: 0, deltaY: i < 8 ? 240 : -240 }); await sleep(150); }
+          await sleep(2000);
+          check(`${row.id}: a wheel scroll over a long page loses NO frame to xpra's scroll encoder (${lost() - lost0} "queue_damage_packet() missing" in app.log)`, lost0 >= 0 && lost() - lost0 === 0, { lost0, lost: lost() });
+          // CONTROL in the same session: the pre-lane map (browser keyCodes) programmed by a keyboard-config, w pressed on 87
+          const pre = [[8, ['BackSpace']], [13, ['Return']], [32, ['space']], [16, ['Shift_L']], [17, ['Control_L']], [18, ['Alt_L']], ...[...'0123456789'].map((d) => [48 + Number(d), [d]]), ...[...'abcdefghijklmnopqrstuvwxyz'].map((c, i) => [65 + i, [c, c.toUpperCase()]])];
+          const before2 = keyLog().length;
+          const sent = await p1.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(recB.id)}); const c = w._desktopAppView.client; const pre = ${JSON.stringify(pre)}; c.send(['keyboard-config', { layout: 'us', keycodes: pre.map(([kc, n]) => [kc, n[0], kc, 0, 0]), x11_keycodes: new Map(pre), query_struct: { rules: 'evdev', model: 'pc105', layout: 'us', variant: '', options: '' }, variant: '', options: '', force: true }]); setTimeout(() => { c.send(['key-action', c.mainWid, 'w', true, [], 119, 'w', 87, 0]); c.send(['key-action', c.mainWid, 'w', false, [], 119, 'w', 87, 0]); }, 400); return true; })()`);
+          const preDown = await until(() => keyLog().slice(before2).find((e) => e.ty === 'keydown') || null, 8000, 200);
+          check(`${row.id}: CONTROL — the pre-lane map (browser keyCodes) in this session: w pressed on X keycode 87 reaches the browser as ${preDown ? `${preDown.key}/${preDown.code}` : 'nothing'} (the numpad key Docs moves the caret with)`, !!sent && !!preDown && preDown.code === 'Numpad1', preDown);
+        }
         // the profile is the keeper's — the browser wrote into it; 0700; not under $HOME; the apps' $HOME has no profile of that browser
         const profEntries = (() => { try { return fs.readdirSync(profWant); } catch { return null; } })();
         // A PROFILE of that browser under $HOME = anything but Chrome's crashpad database: Chrome creates

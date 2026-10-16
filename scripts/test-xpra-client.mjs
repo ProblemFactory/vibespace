@@ -104,32 +104,66 @@ console.log('§1 the PURE words (xpra-proto.js)');
   ok(same(caps.display.desktop_size, [900, 600]) && caps.screen_sizes[0][1] === 900 && caps.dpi.x === 96, 'hello: the desktop size IS the pane (the pane is the X root)');
   ok(caps.clipboard.enabled && caps.clipboard.greedy && caps.clipboard.want_targets && same(caps.clipboard.selections, ['CLIPBOARD']), 'hello: clipboard greedy on CLIPBOARD only (PRIMARY would copy on every selection)');
   ok(caps.audio.receive === false && caps.file.enabled === false && caps.notifications.enabled === false && caps.system_tray === false && caps['xdg-menu'] === false, 'hello: no audio, file transfer, printing, notifications, tray, xdg menu — what this window does not do is not announced');
-  ok(same(caps.encodings[''], [...P.ENCODINGS]) && !P.ENCODINGS.includes('rgb32') && P.ENCODINGS.includes('scroll') && P.ENCODINGS.includes('void'), 'hello: png/jpeg/webp + scroll + void, NO rgb (its lz4 lives in the worker, not on the main thread)');
+  ok(same(caps.encodings[''], [...P.ENCODINGS]) && !P.ENCODINGS.includes('rgb32') && !P.ENCODINGS.includes('scroll') && P.ENCODINGS.includes('void'), 'hello: png/jpeg/webp + void, NO rgb (its lz4 lives in the worker, not on the main thread), NO scroll (xpra 6.5.4\'s scroll encoder loses every frame it encodes — lane xpra-ime-mac)');
   ok(caps.share === true && caps.steal === true && caps.windows === true && caps.keyboard === true && caps.cursors === true, 'hello: share (N viewers on one app — the recipe runs --sharing=yes), windows, keyboard, cursors');
-  ok(caps.keymap.keycodes.some((r) => same(r, [65, 'a', 65, 0, 0])) && caps.keymap.keycodes.some((r) => same(r, [13, 'Return', 13, 0, 0])), 'hello: the keycode table rows are [keycode, keysym, keycode, 0, 0] (a key-action resolves by (keycode, keyname) first)');
+  ok(caps.keymap.keycodes.some((r) => same(r, [38, 'a', 38, 0, 0])) && caps.keymap.keycodes.some((r) => same(r, [36, 'Return', 36, 0, 0])), 'hello: the keycode table rows are [keycode, keysym, keycode, 0, 0] (a key-action resolves by (keycode, keyname) first)');
   const K = (key, code, keyCode, mods = {}, location = 0) => P.keyActionFor({ key, code, keyCode, location, mods });
   const table = [
-    [K('a', 'KeyA', 65), { keyname: 'a', keyval: 97, string: 'a', keycode: 65, modifiers: [] }],
-    [K('A', 'KeyA', 65, { shift: true }), { keyname: 'a', keyval: 97, string: 'A', keycode: 65, modifiers: ['shift'] }],
-    [K('!', 'Digit1', 49, { shift: true }), { keyname: 'exclam', keyval: 33, string: '!', keycode: 49, modifiers: ['shift'] }],
-    [K(' ', 'Space', 32), { keyname: 'space', keyval: 0, string: ' ', keycode: 32, modifiers: [] }],
-    [K('Enter', 'Enter', 13), { keyname: 'Return', keyval: 0, string: '', keycode: 13, modifiers: [] }],
-    [K('Backspace', 'Backspace', 8), { keyname: 'BackSpace', keyval: 0, string: '', keycode: 8, modifiers: [] }],
-    [K('ArrowLeft', 'ArrowLeft', 37), { keyname: 'Left', keyval: 0, string: '', keycode: 37, modifiers: [] }],
-    [K('PageUp', 'PageUp', 33), { keyname: 'Prior', keyval: 0, string: '', keycode: 33, modifiers: [] }],
-    [K('F5', 'F5', 116), { keyname: 'F5', keyval: 0, string: '', keycode: 116, modifiers: [] }],
-    [K('Enter', 'NumpadEnter', 13, {}, 3), { keyname: 'KP_Enter', keyval: 0, string: '', keycode: 108, modifiers: [] }],
-    [K('Shift', 'ShiftRight', 16, { shift: true }, 2), { keyname: 'Shift_L', keyval: 0, string: '', keycode: 16, modifiers: ['shift'] }],
-    [K('AltGraph', 'AltRight', 225, { altGraph: true }), { keyname: 'ISO_Level3_Shift', keyval: 0, string: '', keycode: 225, modifiers: ['mod5'] }],
-    [K('Meta', 'MetaLeft', 91, { meta: true }), { keyname: 'Super_L', keyval: 0, string: '', keycode: 91, modifiers: ['mod4'] }],
-    [K('Control', 'ControlLeft', 17, { control: true }), { keyname: 'Control_L', keyval: 0, string: '', keycode: 17, modifiers: ['control'] }],
-    [K('é', 'KeyE', 69, { altGraph: true }), { keyname: 'eacute', keyval: 233, string: 'é', keycode: 69, modifiers: ['mod5'] }],
+    [K('a', 'KeyA', 65), { keyname: 'a', keyval: 97, string: 'a', keycode: 38, modifiers: [] }],
+    [K('A', 'KeyA', 65, { shift: true }), { keyname: 'a', keyval: 97, string: 'A', keycode: 38, modifiers: ['shift'] }],
+    [K('w', 'KeyW', 87), { keyname: 'w', keyval: 119, string: 'w', keycode: 25, modifiers: [] }],
+    [K('!', 'Digit1', 49, { shift: true }), { keyname: 'exclam', keyval: 33, string: '!', keycode: 10, modifiers: ['shift'] }],
+    [K(' ', 'Space', 32), { keyname: 'space', keyval: 0, string: ' ', keycode: 65, modifiers: [] }],
+    [K('Enter', 'Enter', 13), { keyname: 'Return', keyval: 0, string: '', keycode: 36, modifiers: [] }],
+    [K('Backspace', 'Backspace', 8), { keyname: 'BackSpace', keyval: 0, string: '', keycode: 22, modifiers: [] }],
+    [K('ArrowLeft', 'ArrowLeft', 37), { keyname: 'Left', keyval: 0, string: '', keycode: 113, modifiers: [] }],
+    [K('PageUp', 'PageUp', 33), { keyname: 'Prior', keyval: 0, string: '', keycode: 112, modifiers: [] }],
+    [K('F5', 'F5', 116), { keyname: 'F5', keyval: 0, string: '', keycode: 71, modifiers: [] }],
+    [K('Enter', 'NumpadEnter', 13, {}, 3), { keyname: 'KP_Enter', keyval: 0, string: '', keycode: 104, modifiers: [] }],
+    [K('Shift', 'ShiftRight', 16, { shift: true }, 2), { keyname: 'Shift_L', keyval: 0, string: '', keycode: 50, modifiers: ['shift'] }],
+    [K('AltGraph', 'AltRight', 225, { altGraph: true }), { keyname: 'ISO_Level3_Shift', keyval: 0, string: '', keycode: 92, modifiers: ['mod5'] }],
+    [K('Meta', 'MetaLeft', 91, { meta: true }), { keyname: 'Super_L', keyval: 0, string: '', keycode: 133, modifiers: ['mod4'] }],
+    [K('Control', 'ControlLeft', 17, { control: true }), { keyname: 'Control_L', keyval: 0, string: '', keycode: 37, modifiers: ['control'] }],
+    [K('é', 'KeyE', 69, { altGraph: true }), { keyname: 'eacute', keyval: 233, string: 'é', keycode: 0, modifiers: ['mod5'] }],
     [K('中', '', 0), { keyname: 'U4E2D', keyval: 0x1004E2D, string: '中', keycode: 0, modifiers: [] }],
-    [K('c', 'KeyC', 67, { control: true, capsLock: true, numLock: true }), { keyname: 'c', keyval: 99, string: 'c', keycode: 67, modifiers: ['control', 'lock', 'mod2'] }],
+    [K('c', 'KeyC', 67, { control: true, capsLock: true, numLock: true }), { keyname: 'c', keyval: 99, string: 'c', keycode: 54, modifiers: ['control', 'lock', 'mod2'] }],
   ];
-  ok(table.every(([got, want]) => same(got, want)), 'the browser-key → keysym rule: letters lower-case with shift on the modifier list, punctuation by X name on its base keycode, code first (KP_Enter on its own keycode 108, right-hand modifiers on the left name — one JS keyCode), Meta = Super (mod4), AltGraph = ISO_Level3_Shift (mod5), Latin-1 by name, anything else U<HEX> with the Unicode keysym value', table.filter(([g, w]) => !same(g, w)).map(([g, w]) => ({ got: g, want: w })));
+  ok(table.every(([got, want]) => same(got, want)), 'the browser-key → keysym rule: letters lower-case with shift on the modifier list, punctuation by X name on its base keycode, code first (KP_Enter on its own keycode 104, right-hand modifiers on the left name), every key on its EVDEV X keycode (w = 25, never the browser keyCode 87 — lane xpra-ime-mac), Meta = Super (mod4), AltGraph = ISO_Level3_Shift (mod5), Latin-1 by name, anything else U<HEX> with the Unicode keysym value', table.filter(([g, w]) => !same(g, w)).map(([g, w]) => ({ got: g, want: w })));
   ok(P.nativeKey(K('a', 'KeyA', 65)) && P.nativeKey(K('!', 'Digit1', 49, { shift: true })) && P.nativeKey(K('Enter', 'Enter', 13)) && !P.nativeKey(K('é', 'KeyE', 69, { altGraph: true })) && !P.nativeKey(K('中', '', 0)), 'nativeKey: a / ! / Return are on the published keymap; é (US layout) and 中 are not — they go publish-then-press');
-  ok(caps.keymap.x11_keycodes instanceof Map && same(caps.keymap.x11_keycodes.get(49), ['1', 'exclam']) && same(caps.keymap.x11_keycodes.get(65), ['a', 'A']) && same(caps.keymap.x11_keycodes.get(16), ['Shift_L']) && caps.keymap.query_struct.rules === 'evdev' && caps.keymap.query_struct.layout === 'us', 'hello: the NATIVE keymap shape — x11_keycodes as a Map of integer keycodes with the shifted level, the modifiers on their own keycodes, a query_struct naming the base layout (the server PROGRAMS the X keymap from it; the keycodes-only shape is only translated onto `us`)');
+  // ── THE STOCK-KEYMAP CENSUS (lane xpra-ime-mac, inc-mvaddc4m-6m0t: w = End, s = Left, x = Down in a Google Docs window). The
+  // map this client publishes must coincide with the STOCK evdev `us` map — scripts/fixtures/evdev-us-pke.txt, captured by
+  // scripts/capture-evdev-keymap.mjs from a fresh Xvfb, never hand-typed — wherever both have a key: a real Chrome names
+  // the key by its X keycode (`code`), so a letter on a keypad keycode is a numpad key to the page (MEASURED: keycode 87 =
+  // code Numpad1 whatever keysym xpra programmed there; Docs acts on it). And the IME slots sit only on keycodes the stock
+  // map leaves NoSymbol (a slot on a stock media key is a key the page or the desktop may act on).
+  {
+    const stock = new Map();
+    for (const l of fs.readFileSync(path.join(repo, 'scripts', 'fixtures', 'evdev-us-pke.txt'), 'utf8').split('\n')) { const m = /^keycode\s+(\d+) =(.*)$/.exec(l); if (m) stock.set(Number(m[1]), m[2].trim().split(/\s+/).filter((x) => x && x !== 'NoSymbol')); }
+    ok(stock.size === 248 && same(stock.get(25).slice(0, 2), ['w', 'W']) && same(stock.get(87).slice(0, 2), ['KP_End', 'KP_1']) && same(stock.get(8), []), `the fixture is the stock evdev us map (${stock.size} keycodes; 25 = w W, 87 = KP_End KP_1, 8 = NoSymbol)`, { n: stock.size, k25: stock.get(25), k87: stock.get(87) });
+    /** Violations of the census: a published keysym the stock map does not carry on that keycode, or an IME slot on a keycode
+     *  the stock map gives a keysym (or the published table uses). */
+    const census = (table, shifted, slots) => {
+      const bad = [];
+      for (const [kc, name] of Object.entries(table)) { const st = stock.get(Number(kc)) || []; for (const n of [name, shifted[kc]].filter(Boolean)) if (!st.includes(n)) bad.push(`${n}@${kc} (stock ${st.slice(0, 2).join(' ') || 'NoSymbol'})`); }
+      for (const kc of slots) if ((stock.get(kc) || ['?']).length || table[kc]) bad.push(`slot ${kc} (stock ${(stock.get(kc) || ['?']).slice(0, 2).join(' ')})`);
+      return bad;
+    };
+    const shipped = census(P.KEYCODE_TABLE, P.SHIFTED_TABLE, P.IME_KEYCODES);
+    ok(shipped.length === 0 && Object.keys(P.KEYCODE_TABLE).length === 105, `every keysym the client publishes sits where the stock map has it (${Object.keys(P.KEYCODE_TABLE).length} keycodes) and the ${P.IME_KEYCODES.length} IME slots are stock NoSymbol`, shipped);
+    const letters = [...'abcdefghijklmnopqrstuvwxyz0123456789'].map((ch) => { const k = K(ch, /\d/.test(ch) ? `Digit${ch}` : `Key${ch.toUpperCase()}`, ch.toUpperCase().charCodeAt(0)); return [ch, k.keycode, (stock.get(k.keycode) || [])[0]]; });
+    ok(letters.every(([ch, , st]) => st === ch), 'every letter and digit, keyed by its browser keyCode, is pressed on the keycode whose STOCK level 0 is that very character (none on a keypad or function keycode)', letters.filter(([ch, , st]) => st !== ch));
+    // CONTROL 1: the pre-lane table (xpra-html5's CHARCODE_TO_NAME — keyed by the BROWSER's keyCodes) fails the same census on
+    // exactly the incident's keys, and the old 226–255 slot run sits on stock media keys
+    const preTable = { 8: 'BackSpace', 13: 'Return', 32: 'space', ...Object.fromEntries([...'0123456789'].map((d) => [48 + Number(d), d])), ...Object.fromEntries([...'abcdefghijklmnopqrstuvwxyz'].map((c, i) => [65 + i, c])) };
+    const pre = census(preTable, {}, [226, 227, 228]);
+    ok(['w@87 (stock KP_End KP_1)', 's@83 (stock KP_Left KP_4)', 'x@88 (stock KP_Down KP_2)', 'd@68 (stock F2 F2)'].every((v) => pre.includes(v)) && pre.some((v) => /^slot 226 \(stock XF86/.test(v)), `CONTROL: the pre-lane browser-keyCode table fails the census (${pre.length} violations: w@87, s@83, x@88, d@68 among them) and a slot at 226 is a stock media key`, pre.slice(0, 12));
+    // CONTROL 2: the pre-lane keyActionFor fallback (the browser's keyCode as the X keycode) on a copy — keyCode 87 'w' leaves on 87
+    const src = read('src/lib/xpra-proto.js'), own = '  const own = NAME_TO_KEYCODE[keyname];', fb = '  const keycode = own != null ? own : 0;';
+    ok(src.split(own).length === 2 && src.split(fb).length === 2, 'CONTROL anchor: the keycode rule is two lines in xpra-proto.js');
+    const Pk = await import(pathToFileURL(MUTXC.write('src/lib/xpra-proto.js', src.replace(own, '  const own = undefined;').replace(fb, '  const keycode = own != null ? own : (Number(ev.keyCode) || 0);'), 'browserkeycode')).href);
+    ok(Pk.keyActionFor({ key: 'w', code: 'KeyW', keyCode: 87, mods: {} }).keycode === 87 && K('w', 'KeyW', 87).keycode === 25, 'CONTROL: with the browser keyCode as the X keycode, w leaves on 87 (stock KP_1 — Chrome code Numpad1); the shipped rule sends 25');
+  }
+  ok(caps.keymap.x11_keycodes instanceof Map && same(caps.keymap.x11_keycodes.get(10), ['1', 'exclam']) && same(caps.keymap.x11_keycodes.get(38), ['a', 'A']) && same(caps.keymap.x11_keycodes.get(50), ['Shift_L']) && caps.keymap.query_struct.rules === 'evdev' && caps.keymap.query_struct.layout === 'us', 'hello: the NATIVE keymap shape — x11_keycodes as a Map of integer keycodes with the shifted level, the modifiers on their own keycodes, a query_struct naming the base layout (the server PROGRAMS the X keymap from it; the keycodes-only shape is only translated onto `us`)');
   ok(K('Process', 'KeyA', 229) === null && K('Dead', 'Quote', 222) === null && K('Unidentified', '', 0) === null && P.keyActionFor({ key: 'a', code: 'KeyA', keyCode: 65, mods: {}, composing: true }) === null, 'an IME in flight (229 / composing), a dead key and an unidentified key send NOTHING — composition delivers the text');
   ok(P.clipboardShortcut({ key: 'v', control: true }) === 'paste' && P.clipboardShortcut({ key: 'V', meta: true }) === 'paste' && P.clipboardShortcut({ key: 'c', control: true }) === 'copy' && P.clipboardShortcut({ key: 'x', control: true }) === 'copy' && P.clipboardShortcut({ key: 'v' }) === null && P.clipboardShortcut({ key: 'a', control: true }) === null, 'Ctrl/⌘+V is the browser\'s (the paste event carries the text on plain http); Ctrl+C/X go to the app AND the browser; everything else is the app\'s');
   ok(S.clipboardDelivery({ secure: true, canWrite: true }) === 'api' && S.clipboardDelivery({ secure: false, canWrite: true }) === 'chip' && S.clipboardDelivery({ secure: true, canWrite: false }) === 'chip', 'a copy in the app goes to the Clipboard API only on a secure context that has it — else the click-to-copy chip, never a silent no-op (the rule is the SHARED shell\'s: every rung, RFB too)');
@@ -196,15 +230,28 @@ console.log('§1 the PURE words (xpra-proto.js)');
   }
   const ime = new P.ImeKeymap();
   const p1 = ime.plan('a中文');
-  ok(p1.changed && same(p1.rows, [['U4E2D', 226], ['U6587', 227]]) && p1.keys.length === 3 && p1.keys[0].keyname === 'a' && p1.keys[0].keycode === 65 && p1.keys[1].keycode === 226, 'IME: composed characters outside the keymap get PUBLISHED keycode rows (U<hex> from 226) before their presses; a keymap character presses its own keycode');
+  ok(p1.changed && same(p1.rows, [['U4E2D', 8], ['U6587', 120]]) && p1.keys.length === 3 && p1.keys[0].keyname === 'a' && p1.keys[0].keycode === 38 && p1.keys[1].keycode === 8 && p1.rest === '', 'IME: composed characters outside the keymap get PUBLISHED keycode rows (U<hex> on the stock-NoSymbol slots, 8 first) before their presses; a keymap character presses its own keycode');
   const p0 = ime.plan('A!');
-  ok(same(p0.keys.map((k) => [k.keyname, k.keycode, k.modifiers]), [['a', 65, ['shift']], ['exclam', 49, ['shift']]]) && !p0.changed, 'IME: an upper-case letter and a shifted symbol press their base keycode WITH shift (nothing to publish)');
+  ok(same(p0.keys.map((k) => [k.keyname, k.keycode, k.modifiers]), [['a', 38, ['shift']], ['exclam', 10, ['shift']]]) && !p0.changed, 'IME: an upper-case letter and a shifted symbol press their base keycode WITH shift (nothing to publish)');
   const kc = P.keyboardConfigPacket(['keyboard-config'], { extra: p1.rows });
-  ok(kc[1].x11_keycodes instanceof Map && same(kc[1].x11_keycodes.get(226), ['U4E2D']) && kc[1].keycodes.some((r) => same(r, [226, 'U4E2D', 226, 0, 0])) && kc[1].force === true && kc[1].query_struct.layout === 'us', 'keyboard-config with IME rows: the x11 map AND the gtk rows carry them, force set, the query struct kept');
+  ok(kc[1].x11_keycodes instanceof Map && same(kc[1].x11_keycodes.get(8), ['U4E2D']) && kc[1].keycodes.some((r) => same(r, [8, 'U4E2D', 8, 0, 0])) && kc[1].force === true && kc[1].query_struct.layout === 'us', 'keyboard-config with IME rows: the x11 map AND the gtk rows carry them, force set, the query struct kept');
   const p2 = ime.plan('中');
-  ok(!p2.changed && p2.keys[0].keycode === 226, 'IME: a character already published needs no new table');
+  ok(!p2.changed && p2.keys[0].keycode === 8, 'IME: a character already published needs no new table');
   for (let i = 0; i < 40; i++) ime.plan(String.fromCodePoint(0x4e00 + i));
-  ok(ime.slots.size <= 30 && [...ime.slots.values()].every((kc) => kc >= 226 && kc <= 255), 'IME: the table rolls over its 30 slots (X keycodes end at 255) — a slot\'s old name leaves when it is reused');
+  ok(ime.slots.size === P.IME_KEYCODES.length && [...ime.slots.values()].every((kc) => P.IME_KEYCODES.includes(kc)), `IME: the table rolls over its ${P.IME_KEYCODES.length} slots — a slot\'s old name leaves when it is reused`);
+  // ONE BATCH NEVER MOVES A SLOT IT PRESSES (lane xpra-ime-mac, MEASURED on a real Chrome: two tables back to back that move a
+  // slot made Chrome read the earlier press with the later table — 一丁 typed as 一万): more new characters than slots ⇒ the
+  // head that fits + `rest`; without `mayEvict` (the last table is too fresh) nothing published is moved
+  const big = new P.ImeKeymap();
+  const long = Array.from({ length: 20 }, (_, i) => String.fromCodePoint(0x5000 + i)).join('');
+  const b1 = big.plan(long);
+  ok(b1.keys.length === P.IME_KEYCODES.length && new Set(b1.keys.map((k) => k.keycode)).size === b1.keys.length && b1.rest === long.slice(P.IME_KEYCODES.length) && b1.changed, `IME batch: 20 new characters ⇒ the first ${P.IME_KEYCODES.length} on distinct slots, the other ${20 - P.IME_KEYCODES.length} left for a later batch`, { keys: b1.keys.length, rest: [...b1.rest].length });
+  const b2 = big.plan(b1.rest, { mayEvict: false });
+  ok(b2.keys.length === 0 && b2.rest === b1.rest && !b2.changed, 'IME batch: with the last table too fresh, a batch that would move a slot presses nothing and keeps all of its text for later');
+  const b3 = big.plan(b1.rest);
+  ok(b3.keys.length === 20 - P.IME_KEYCODES.length && b3.rest === '' && b3.changed && b3.keys.every((k) => big.slots.get(k.keyname) === k.keycode), 'IME batch: once the table may move, the rest lands on reused slots (their old names leave the table)');
+  const repeat = new P.ImeKeymap().plan('中中中a中');
+  ok(repeat.keys.length === 5 && new Set(repeat.keys.filter((k) => k.keyname === 'U4E2D').map((k) => k.keycode)).size === 1 && repeat.rest === '', 'IME batch: a repeated character presses its one slot again (a batch is bounded by NEW characters, not by length)');
   ok(same(P.keyAction(3, { keyname: 'a', keyval: 97, string: 'a', keycode: 65, modifiers: ['shift'] }, true), ['key-action', 3, 'a', true, ['shift'], 97, 'a', 65, 0]) && same(P.buttonAction(3, 1, false, [5, 6, 1, 2], []), ['button-action', 3, 1, false, [5, 6, 1, 2], [], []]) && same(P.pointerPosition(3, [5, 6, 1, 2], ['control']), ['pointer-position', 3, [5, 6, 1, 2], ['control'], []]) && same(P.mapWindow(3, { x: 0, y: 0, w: 10, h: 20 }), ['map-window', 3, 0, 0, 10, 20, {}]) && same(P.configureWindow(3, { x: 0, y: 0, w: 10, h: 20 }), ['configure-window', 3, 0, 0, 10, 20, {}, 0, {}, false]) && same(P.damageAck(7, 3, 10, 20, 4, ''), ['damage-sequence', 7, 3, 10, 20, 4, '']) && same(P.focusPacket(3), ['focus', 3, []]) && same(P.pingEcho(12, 'sid'), ['ping_echo', 12, 0, 0, 0, 0, 'sid']), 'the packet forms are xpra-html5 v21\'s (read from its Client.js on this box)');
   const tok = P.clipboardToken('hi');
   ok(tok[0] === 'clipboard-token' && tok[1] === 'CLIPBOARD' && tok[3] === 'UTF8_STRING' && tok[5] === 8 && tok[6] === 'bytes' && str(tok[7]) === 'hi' && tok[8] === true && tok[9] === true && tok[10] === true && same(P.clipboardNone(4, 'CLIPBOARD'), ['clipboard-contents-none', 4, 'CLIPBOARD']) && str(P.clipboardContents(4, 'CLIPBOARD', 'x')[6]) === 'x', 'clipboard packets: a greedy token carrying UTF8_STRING bytes; contents / contents-none answer a request');
@@ -298,18 +345,95 @@ console.log('§2 the session over a fake worker (xpra-client.js)');
   ok(wk.all.length === 3, 'the same size again sends nothing');
   // (h) keys, pointer, wheel
   wk.posted.length = 0;
-  ok(client.keyDown({ key: 'a', code: 'KeyA', keyCode: 65, mods: {} }) === 'sent' && same(wk.all[0], ['key-action', 2, 'a', true, [], 97, 'a', 65, 0]), 'a key goes to the FOCUSED window (the dialog took focus when it mapped)');
+  ok(client.keyDown({ key: 'a', code: 'KeyA', keyCode: 65, mods: {} }) === 'sent' && same(wk.all[0], ['key-action', 2, 'a', true, [], 97, 'a', 38, 0]), 'a key goes to the FOCUSED window (the dialog took focus when it mapped)');
   ok(client.keyDown({ key: 'v', code: 'KeyV', keyCode: 86, mods: { control: true } }) === 'paste' && wk.all.length === 1, 'Ctrl+V sends NOTHING and answers paste (the browser must fire its paste event)');
   ok(client.keyDown({ key: 'c', code: 'KeyC', keyCode: 67, mods: { control: true } }) === 'copy' && wk.all.length === 2 && same(wk.all[1][4], ['control']), 'Ctrl+C goes to the app (it copies) and answers copy (the browser keeps its event too)');
   ok(client.keyUp({ key: 'a', code: 'KeyA', keyCode: 65, mods: {} }) === 'sent' && wk.all[2][3] === false, 'a key release is sent as pressed=false');
   wk.posted.length = 0;
-  ok(client.typeText('中a') === 2 && wk.all[0][0] === 'keyboard-config' && wk.all[0][1].keycodes.some((r) => same(r, [226, 'U4E2D', 226, 0, 0])) && same(wk.all[0][1].x11_keycodes.get(226), ['U4E2D']) && wk.all.slice(1).length === 4 && wk.all[1][2] === 'U4E2D' && wk.all[1][7] === 226 && wk.all[3][2] === 'a' && wk.all[3][7] === 65, 'IME text: the keymap with the new U<hex> row is published FIRST (gtk rows + x11 map), then press/release per character');
+  ok(client.typeText('中a') === 2 && wk.all[0][0] === 'keyboard-config' && wk.all[0][1].keycodes.some((r) => same(r, [8, 'U4E2D', 8, 0, 0])) && same(wk.all[0][1].x11_keycodes.get(8), ['U4E2D']) && wk.all.slice(1).length === 4 && wk.all[1][2] === 'U4E2D' && wk.all[1][7] === 8 && wk.all[3][2] === 'a' && wk.all[3][7] === 38, 'IME text: the keymap with the new U<hex> row is published FIRST (gtk rows + x11 map), then press/release per character');
   wk.posted.length = 0;
   client.typeText('中');
   ok(wk.all.length === 2 && wk.all[0][0] === 'key-action', 'a character already published needs no new table');
   wk.posted.length = 0;
-  ok(client.keyDown({ key: 'é', code: 'KeyE', keyCode: 69, mods: { altGraph: true } }) === 'sent' && wk.all[0][0] === 'keyboard-config' && same(wk.all[0][1].x11_keycodes.get(227), ['eacute']) && wk.all[1][2] === 'eacute' && wk.all[1][7] === 227 && wk.all[2][3] === false && wk.all.length === 3, 'a key the US keymap lacks (é via AltGr) goes publish-then-press from keyDown (the html5 shape would drop it)');
+  ok(client.keyDown({ key: 'é', code: 'KeyE', keyCode: 69, mods: { altGraph: true } }) === 'sent' && wk.all[0][0] === 'keyboard-config' && same(wk.all[0][1].x11_keycodes.get(120), ['eacute']) && wk.all[1][2] === 'eacute' && wk.all[1][7] === 120 && wk.all[2][3] === false && wk.all.length === 3, 'a key the US keymap lacks (é via AltGr) goes publish-then-press from keyDown (the html5 shape would drop it)');
   ok(client.keyUp({ key: 'é', code: 'KeyE', keyCode: 69, mods: {} }) === 'sent' && wk.all.length === 3, 'its keyUp sends nothing more (the press already released)');
+  // A LONG COMMIT IN BATCHES, IN ORDER (lane xpra-ime-mac): more new characters than IME slots ⇒ one table + its presses now,
+  // the rest one gap later (a table that moves a slot right behind the last one is read by a real Chrome for the EARLIER
+  // presses); a key pressed meanwhile waits behind the rest; a reconnect's first keymap republishes the rows already used
+  {
+    const imeRun = async (CC) => {
+      FakeWorker.instances.length = 0;
+      const c = CC.createXpraClient({ url: 'ws://x/s', workerUrl: '/w.js', screen: { width: 900, height: 600 }, Worker: FakeWorker, decode: async () => ({ close() {} }), log: null, imeGapMs: 40 });
+      c.connect();
+      const w = await until(() => FakeWorker.instances[0]);
+      await until(() => w.sent('hello').length);
+      w.feed(['hello', { 'packet-types': ['keyboard-config', 'display-configure'] }]);
+      w.feed(['new-window', 4, 0, 0, 400, 300, { title: 'Docs', 'window-type': ['NORMAL'] }]);
+      await sleep(20);
+      w.posted.length = 0;
+      const long = Array.from({ length: 20 }, (_, i) => String.fromCodePoint(0x6000 + i)).join('');
+      const n = c.typeText(long);
+      const now = w.all.map((q) => (q[0] === 'key-action' ? `${q[2]}${q[3] ? '+' : '-'}` : q[0]));
+      c.keyDown({ key: 'a', code: 'KeyA', keyCode: 65, mods: {} }); c.keyUp({ key: 'a', code: 'KeyA', keyCode: 65, mods: {} });
+      await sleep(160);
+      const all = w.all.map((q) => (q[0] === 'key-action' ? `${q[2]}${q[3] ? '+' : '-'}` : q[0]));
+      const typed = all.filter((x) => x.endsWith('+')).map((x) => x.slice(0, -1));
+      w.posted.length = 0;
+      w.feed(['hello', { 'packet-types': ['keyboard-config', 'display-configure'] }]); // what a reconnect's server hello starts
+      const again = w.sent('keyboard-config')[0];
+      c.close();
+      return { n, now, all, typed, want: [...long].map((ch) => P.charKeysym(ch).keyname).concat('a'), again: again ? [...again[1].x11_keycodes.entries()].filter(([kc]) => P.IME_KEYCODES.includes(kc)).length : -1 };
+    };
+    const r = await imeRun(C);
+    ok(r.n === 20 && r.now.filter((x) => x === 'keyboard-config').length === 1 && r.now.length === 1 + 2 * P.IME_KEYCODES.length, `a 20-character commit: ONE table + ${P.IME_KEYCODES.length} presses at once (the slots it has), nothing else yet`, r.now.length);
+    ok(same(r.typed, r.want) && r.all.filter((x) => x === 'keyboard-config').length === 2, 'one gap later the second table and the other 7 presses — and the key pressed meanwhile (a) comes AFTER them: every character once, in order', { typed: r.typed.join(' ') });
+    ok(r.again === P.IME_KEYCODES.length, `a reconnect's first keyboard-config republishes the ${P.IME_KEYCODES.length} IME rows the client already uses (else a slot it counts as published would press NoSymbol)`, r.again);
+    // CONTROLS on copies of the client: the rest dropped; the key not held behind the rest; the post-hello keymap without the rows
+    const csrc = read('src/lib/xpra-client.js');
+    const REST = '    if (plan.rest) {', HOLD = '  const keyOut = (k, pressed) => { if (held) held.push', AGAIN = '        send(P.keyboardConfigPacket(packetTypes, { layout, extra: ime.slots.size ? [...ime.slots.entries()] : null }));';
+    ok([REST, HOLD, AGAIN].every((l) => csrc.split(l).length === 2), 'CONTROL anchors: the rest, the hold and the republish are one line each in xpra-client.js');
+    const r1 = await imeRun(await import(pathToFileURL(MUTXC.write('src/lib/xpra-client.js', csrc.replace(REST, '    if (false) {'), 'imerest')).href));
+    ok(r1.typed.length === P.IME_KEYCODES.length + 1, `CONTROL: without the later batch the commit loses ${20 - P.IME_KEYCODES.length} characters (${r1.typed.length - 1} of 20 typed)`, r1.typed.length);
+    const r2 = await imeRun(await import(pathToFileURL(MUTXC.write('src/lib/xpra-client.js', csrc.replace(HOLD, '  const keyOut = (k, pressed) => { if (false) held.push'), 'imehold')).href));
+    ok(r2.typed.length === 21 && r2.typed.indexOf('a') === P.IME_KEYCODES.length, `CONTROL: without the hold, the key pressed during the gap overtakes the rest (a typed ${r2.typed.indexOf('a') + 1}th of 21)`, r2.typed.indexOf('a'));
+    const r3 = await imeRun(await import(pathToFileURL(MUTXC.write('src/lib/xpra-client.js', csrc.replace(AGAIN, '        send(P.keyboardConfigPacket(packetTypes, { layout }));'), 'imeagain')).href));
+    ok(r3.again === 0, 'CONTROL: the pre-lane post-hello keymap carries no IME row', r3.again);
+  }
+  // A ⌘ CHORD FROM A MAC IS A TAP (lane xpra-ime-mac, inc-mvaddc4m-6m0t's ⌘+a): a Mac browser never fires the keyup of a key
+  // pressed under ⌘ — the client releases it at once; a plain key, a non-Mac client and the ⌘ key itself keep the real key-up
+  {
+    const tapRun = async (CC, mac, mods, key = 'a', code = 'KeyA') => {
+      FakeWorker.instances.length = 0;
+      const c = CC.createXpraClient({ url: 'ws://x/s', workerUrl: '/w.js', screen: { width: 900, height: 600 }, Worker: FakeWorker, decode: async () => ({ close() {} }), log: null, mac: () => mac });
+      c.connect();
+      const w = await until(() => FakeWorker.instances[0]);
+      await until(() => w.sent('hello').length);
+      w.feed(['hello', { 'packet-types': ['keyboard-config', 'display-configure'] }]);
+      w.feed(['new-window', 4, 0, 0, 400, 300, { title: 'Docs', 'window-type': ['NORMAL'] }]);
+      await sleep(20);
+      w.posted.length = 0;
+      const ev = { key, code, keyCode: 65, mods };
+      const r = c.keyDown(ev);
+      const atDown = w.sent('key-action').map((q) => `${q[2]}${q[3] ? '+' : '-'}`);
+      const up = c.keyUp(ev);
+      const atUp = w.sent('key-action').map((q) => `${q[2]}${q[3] ? '+' : '-'}`);
+      c.close();
+      return { r, up, atDown, atUp };
+    };
+    const t1 = await tapRun(C, true, { meta: true });
+    ok(t1.r === 'sent' && same(t1.atDown, ['a+', 'a-']) && same(t1.atUp, ['a+', 'a-']), `a Mac client's ⌘+a: press AND release at the keydown (${t1.atDown.join(' ')}); the keyup that may never come adds nothing`, t1);
+    const t2 = await tapRun(C, true, {});
+    ok(same(t2.atDown, ['a+']) && same(t2.atUp, ['a+', 'a-']), `RED-side: a plain a on the same Mac client still waits for its keyup (${t2.atDown.join(' ')} → ${t2.atUp.join(' ')})`, t2);
+    const t3 = await tapRun(C, false, { meta: true });
+    ok(same(t3.atDown, ['a+']) && same(t3.atUp, ['a+', 'a-']), `a Linux / Windows client's Super+a keeps its real key-up (${t3.atDown.join(' ')} → ${t3.atUp.join(' ')})`, t3);
+    const t4 = await tapRun(C, true, { meta: true }, 'Meta', 'MetaLeft');
+    ok(same(t4.atDown, ['Super_L+']) && same(t4.atUp, ['Super_L+', 'Super_L-']), 'the ⌘ key itself is held as pressed (a modifier is never tapped)', t4);
+    // CONTROL on a copy: without the tap line the Mac ⌘+a press stays down until a keyup a Mac never sends
+    const csrc = read('src/lib/xpra-client.js'), TAP = "    if (ev?.mods?.meta && (typeof mac === 'function' ? mac() : mac) && !P.MODIFIER_KEYNAMES.has(k.keyname)) {";
+    ok(csrc.split(TAP).length === 2, 'CONTROL anchor: the tap is one line in xpra-client.js');
+    const t0 = await tapRun(await import(pathToFileURL(MUTXC.write('src/lib/xpra-client.js', csrc.replace(TAP, '    if (false) {'), 'mactap')).href), true, { meta: true });
+    ok(same(t0.atDown, ['a+']), `CONTROL: the pre-lane client leaves ⌘+a pressed at the keydown (${t0.atDown.join(' ')}) — X holds it and autorepeats`, t0);
+  }
   wk.posted.length = 0;
   client.pointerButton(50, 40, 0, true, {});
   ok(same(wk.all, [['button-action', 3, 1, true, [50, 40, 30, 10], [], []]]), 'a press on the popup: button-action to wid 3 with root + window coords, no focus change (popups never take focus)');

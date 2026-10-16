@@ -13,7 +13,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
-import { execFile, spawn } from 'node:child_process';
+import { execFile, execFileSync, spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { scratch } from './scratch.mjs';
@@ -820,6 +820,26 @@ console.log('\n§9 a desktop app never reaches the machine\'s own Wayland deskto
   const up = await D.startXpra({ binPath: xp, port: 1, dir: sdir, env: xenv, deadlineMs: 4000 }).catch((e) => ({ error: e.message }));
   const xe = await envOf(xp);
   ok(up.display === ':4' && !!xe && !xe.some((l) => l.startsWith('WAYLAND_DISPLAY=')) && xe.includes('XPRA_CLIENT_CAN_SHUTDOWN=0'), 'startXpra hands xpra an x11Env WITHOUT WAYLAND_DISPLAY (its env as before the fix; the shutdown switch kept)', { up: up.display || up.error, wl: xe && xe.filter((l) => /WAYLAND|XPRA_CLIENT/.test(l)) });
+  // lane xpra-ime-mac (UPSTREAM bug, xpra 6.5.4): the scroll encoder loses every frame it picks, on the make_data_packet road
+  // AND the video encoder's (XPRA_SCROLL_ALL=0 gates only the first — MEASURED: 93 lost frames through do_video_encode with it
+  // set) — so the client advertises no `scroll` (xpra-proto ENCODINGS). The drift guard reads the INSTALLED xpra: what its
+  // encode_scrolling does is a MEASURED row per version (an unmeasured version is RED, naming the check to make), and while
+  // the row says broken the client must not offer `scroll`.
+  {
+    const XPRA_PY = '/usr/lib/python3/dist-packages/xpra/server/window';
+    const XPRA_SCROLL_BROKEN = { '6.5.4': true }; // measured: queue_damage_packet() called with 3 of its 4 arguments in encode_scrolling
+    const PX = await import('../src/lib/xpra-proto.js');
+    const realX = D.binOnPath('xpra', { env: process.env });
+    const comp = (() => { try { return fs.readFileSync(path.join(XPRA_PY, 'compress.py'), 'utf8'); } catch { return null; } })();
+    const vid = (() => { try { return fs.readFileSync(path.join(XPRA_PY, 'video_compress.py'), 'utf8'); } catch { return null; } })();
+    if (!realX || !comp || !vid) skip(`the installed xpra's scroll encoder (${!realX ? 'no xpra on PATH' : `no ${XPRA_PY}/{compress,video_compress}.py`})`);
+    else {
+      const xv = (/v?(\d+\.\d+\.\d+)/.exec(execFileSync(realX, ['--version'], { encoding: 'utf8', timeout: 10000 })) || [])[1] || null;
+      const broken = /self\.queue_damage_packet\(packet, damage_time, process_damage_time\)\n/.test(vid) && /def queue_damage_packet\(self, packet: Packet, damage_time: float,\s+process_damage_time: float, options: typedict\)/.test(comp);
+      ok(Object.prototype.hasOwnProperty.call(XPRA_SCROLL_BROKEN, xv) && XPRA_SCROLL_BROKEN[xv] === broken, `xpra ${xv}: its encode_scrolling is ${broken ? 'BROKEN (queue_damage_packet without options)' : 'fixed'} — ${Object.prototype.hasOwnProperty.call(XPRA_SCROLL_BROKEN, xv) ? 'the measured row agrees' : 'an UNMEASURED version: read video_compress.py encode_scrolling, record the row (and offer scroll again in xpra-proto ENCODINGS once fixed)'}`, { xv, broken });
+      ok(!broken || !PX.ENCODINGS.includes('scroll'), `while xpra ${xv}'s scroll encoder is broken the client offers no scroll encoding (ENCODINGS: ${PX.ENCODINGS.join(', ')}) — a client without it is never scroll-encoded`, PX.ENCODINGS);
+    }
+  }
   const xs = shim('Xvnc', 'echo 4 >&3\nexec sleep 1');
   const xu = await D.startXServer({ bin: 'Xvnc', binPath: xs, authFile: '/a', rfbPort: 1, env: xenv, deadlineMs: 4000 }).catch((e) => ({ error: e.message }));
   const se = await envOf(xs);

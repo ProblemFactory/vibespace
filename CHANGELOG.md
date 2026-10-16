@@ -2,6 +2,13 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.286 — 2026-10-16
+
+### Fixed
+- Typing in an app window such as Google Docs no longer turns letters like w, s and x into cursor moves, and text from a Chinese input method arrives in full.
+- An app window's picture no longer stops following after you scroll in it.
+- On a Mac, a ⌘ shortcut in an app window no longer leaves its letter key held down and repeating.
+
 ## 2.369.285 — 2026-10-15
 
 ### Fixed

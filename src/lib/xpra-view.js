@@ -104,6 +104,8 @@ export function pngDataUrl(bytes) {
   return /^[A-Za-z0-9+/=]+$/.test(b64) ? `data:image/png;base64,${b64}` : null;
 }
 
+/** Is the person's own machine a Mac (its browser never fires the keyup of a key pressed under ⌘ — xpra-client taps those)? */
+const viewerMac = () => { try { return /mac|iphone|ipad|ipod/i.test(String((navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || '')); } catch { return false; } };
 /** A KeyboardEvent → the plain shape xpra-proto's keyActionFor reads. */
 export function keyInputOf(e) {
   const gm = (n) => { try { return !!e.getModifierState?.(n); } catch { return false; } };
@@ -564,7 +566,7 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
       pin: pinNow, // lane e2b: the X window fits the pin from the hello on
       url: typeof url === 'function' ? url() : url,
       workerUrl: typeof workerUrl === 'function' ? workerUrl() : workerUrl,
-      screen: s, ratio: () => drawRatio, cover: () => drawK !== 1, dpi: typeof dpi === 'function' ? dpi() : dpi, Worker: WorkerCtor, decode, now, log,
+      screen: s, ratio: () => drawRatio, cover: () => drawK !== 1, dpi: typeof dpi === 'function' ? dpi() : dpi, Worker: WorkerCtor, decode, now, log, mac: viewerMac,
       slots: () => typeof onSatellite === 'function', // S2: a window per top-level only where the caller can open one
       on: {
         status: (st, detail) => {

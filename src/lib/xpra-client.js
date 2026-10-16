@@ -110,6 +110,7 @@ import * as P from './xpra-proto.js';
 
 const HELLO_TIMEOUT_MS = 15000;
 const PING_EVERY_MS = 5000;
+const IME_GAP_MS = 150; // a table that MOVES an IME slot waits this long after the last one (lane xpra-ime-mac: 0 ms garbled, 50 ms clean on a real Chrome)
 const PASTE_KEY_DELAY_MS = 60; // the token must reach the server before the app's Ctrl+V asks for it (xpra-html5 delays the same way)
 export const BELT_GAP_MS = 500;    // at most one corrective configure-window per window per 500 ms
 export const BELT_FIGHT_MS = 2000; // an undo within 2 s of our last correction is a FIGHT…
@@ -136,7 +137,7 @@ export function defaultDecode(bytes, mime) {
  *   on.slot(wid, rect|null)    S2 (`slots` on): a secondary top-level's slot of the root (device px) — gained, moved, lost
  * Returns the session handle (see the tail).
  */
-export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, cover = false, slots = false, pin = null, layout = 'us', uuid = null, on = {}, Worker: WorkerCtor = (typeof Worker !== 'undefined' ? Worker : null), decode = defaultDecode, now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now()), log = null, helloTimeoutMs = HELLO_TIMEOUT_MS, pasteKeyDelayMs = PASTE_KEY_DELAY_MS, beltGapMs = BELT_GAP_MS, beltFightMs = BELT_FIGHT_MS, beltMaxFights = BELT_MAX_FIGHTS, refreshDelaysMs = REFRESH_DELAYS_MS } = {}) {
+export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, cover = false, slots = false, pin = null, layout = 'us', uuid = null, on = {}, Worker: WorkerCtor = (typeof Worker !== 'undefined' ? Worker : null), decode = defaultDecode, now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now()), log = null, helloTimeoutMs = HELLO_TIMEOUT_MS, pasteKeyDelayMs = PASTE_KEY_DELAY_MS, imeGapMs = IME_GAP_MS, mac = false, beltGapMs = BELT_GAP_MS, beltFightMs = BELT_FIGHT_MS, beltMaxFights = BELT_MAX_FIGHTS, refreshDelaysMs = REFRESH_DELAYS_MS } = {}) {
   const emit = (name, ...args) => { try { on[name]?.(...args); } catch (e) { log?.warn?.(`[xpra] on.${name} threw: ${e && e.message}`); } };
   const windows = new Map();
   const ime = new P.ImeKeymap();
@@ -470,7 +471,9 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
         clearTimeout(helloTimer);
         serverCaps = p[1] && typeof p[1] === 'object' ? p[1] : {};
         packetTypes = Array.isArray(serverCaps['packet-types']) ? serverCaps['packet-types'].map(P.bytesToString) : [];
-        send(P.keyboardConfigPacket(packetTypes, { layout }));
+        // the IME rows this client already published ride along (a reconnect starts a fresh server table; a slot the client
+        // still counts as published would otherwise press NoSymbol — lane xpra-ime-mac)
+        send(P.keyboardConfigPacket(packetTypes, { layout, extra: ime.slots.size ? [...ime.slots.entries()] : null }));
         // x5: a hello held while this pane was blocked carried the pane of THAT moment — the display follows the pane of now
         state = 'connected';
         syncDisplay();
@@ -593,7 +596,7 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
     refit(windows.get(mainWid));
     for (const win of windows.values()) if (win.wid !== mainWid && win.kind !== 'popup') belt(win, 'pane resized'); // a shrunk pane keeps dialogs inside
   };
-  const foreignDown = new Set(); // keys whose press went through typeText (already released) — their keyup is ignored
+  const foreignDown = new Set(); // keys whose press was already released (typeText, a Mac ⌘ chord) — their keyup is ignored
   const keyDown = (ev) => {
     const shortcut = P.clipboardShortcut({ key: ev?.key, control: ev?.mods?.control, meta: ev?.mods?.meta });
     if (shortcut === 'paste') return 'paste';
@@ -605,7 +608,12 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
       if (k.string && !k.modifiers.some((m) => m === 'control' || m === 'mod1' || m === 'mod4')) { foreignDown.add(ev.code || ev.key); typeText(k.string); return 'sent'; }
       return null;
     }
-    send(P.keyAction(focusedWid, k, true));
+    keyOut(k, true);
+    // A ⌘ CHORD FROM A MAC IS A TAP (lane xpra-ime-mac, inc-mvaddc4m-6m0t's ⌘+a): a Mac browser never fires the keyup of a key
+    // pressed while ⌘ is held, so the press stayed down in X — X autorepeats it once ⌘ is let go, and xpra ignores the next
+    // press of a key it still holds. Released at once (xpra-html5's `unpress_now` on macOS); a keyup, if one comes, is ignored.
+    // Linux and Windows clients keep their real key-up (`mac` is the view's platform answer).
+    if (ev?.mods?.meta && (typeof mac === 'function' ? mac() : mac) && !P.MODIFIER_KEYNAMES.has(k.keyname)) { keyOut(k, false); foreignDown.add(ev.code || ev.key); }
     return shortcut === 'copy' ? 'copy' : 'sent';
   };
   const keyUp = (ev) => {
@@ -615,17 +623,30 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
     if (foreignDown.delete(ev?.code || ev?.key)) return 'sent';
     const k = P.keyActionFor(ev);
     if (!k || !P.nativeKey(k)) return null;
-    send(P.keyAction(focusedWid, k, false));
+    keyOut(k, false);
     return shortcut === 'copy' ? 'copy' : 'sent';
   };
-  /** Composed / inserted text (an IME's compositionend, a virtual keyboard's input). */
+  /** Composed / inserted text (an IME's compositionend, a virtual keyboard's input). ONE table per batch (P.ImeKeymap):
+   *  a table that would move a slot goes `imeGapMs` after the last one (a real Chrome reads an earlier batch's press with
+   *  a table that came right behind it — lane xpra-ime-mac), the rest of the text waits, and every key and text that
+   *  arrives meanwhile waits behind it (`held`, in order). Answers the characters it will type. */
+  let held = null, lastTableAt = -Infinity;
   function typeText(text) {
     if (viewOnly || !text) return 0;
-    const plan = ime.plan(text);
-    if (plan.changed) send(P.keyboardConfigPacket(packetTypes, { layout, extra: plan.rows })); // the keymap is reprogrammed before the presses (same socket, same thread on the server)
+    const n = [...String(text)].length;
+    if (held) { held.push(() => typeText(text)); return n; }
+    const wait = lastTableAt + imeGapMs - now();
+    const plan = ime.plan(text, { mayEvict: wait <= 0 });
+    if (plan.changed) { send(P.keyboardConfigPacket(packetTypes, { layout, extra: plan.rows })); lastTableAt = now(); } // the keymap is reprogrammed before the presses (same socket, same thread on the server)
     for (const k of plan.keys) { send(P.keyAction(focusedWid, k, true)); send(P.keyAction(focusedWid, k, false)); }
-    return plan.keys.length;
+    if (plan.rest) {
+      held = [];
+      setTimeout(() => { const q = held; held = null; if (state !== 'connected') return; typeText(plan.rest); for (const fn of q) { if (held) held.push(fn); else fn(); } }, Math.max(1, lastTableAt + imeGapMs - now()));
+    }
+    return n;
   }
+  /** A key's packet, or — while a text batch waits — its place in the line behind it. */
+  const keyOut = (k, pressed) => { if (held) held.push(() => send(P.keyAction(focusedWid, k, pressed))); else send(P.keyAction(focusedWid, k, pressed)); };
   const pointerMove = (x, y, mods = {}) => {
     if (viewOnly) return;
     const win = windowAt(x, y);
@@ -651,8 +672,8 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
     send(P.clipboardToken(lastPaste));
     if (press) setTimeout(() => {
       if (state !== 'connected') return;
-      const ctrl = { keyname: 'Control_L', keyval: 0, string: '', keycode: 17, modifiers: [] };
-      const v = { keyname: 'v', keyval: 118, string: 'v', keycode: 86, modifiers: ['control'] };
+      const ctrl = { keyname: 'Control_L', keyval: 0, string: '', keycode: P.NAME_TO_KEYCODE.Control_L, modifiers: [] };
+      const v = { keyname: 'v', keyval: 118, string: 'v', keycode: P.NAME_TO_KEYCODE.v, modifiers: ['control'] };
       send(P.keyAction(focusedWid, ctrl, true)); send(P.keyAction(focusedWid, v, true)); send(P.keyAction(focusedWid, v, false)); send(P.keyAction(focusedWid, { ...ctrl, modifiers: ['control'] }, false));
     }, pasteKeyDelayMs);
     return true;

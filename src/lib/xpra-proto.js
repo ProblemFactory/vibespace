@@ -57,37 +57,55 @@ export const METADATA_SUPPORTED = Object.freeze(['fullscreen', 'maximized', 'ico
 /** Picture encodings this client can paint. NO rgb32/rgb24 on purpose: raw
  *  pixel data may arrive lz4-compressed inside the packet and the decoder for
  *  that lives in the protocol worker, not on the main thread — png/jpeg/webp
- *  decode natively (createImageBitmap), `scroll` is a list of copy moves,
- *  `void` is an ack with nothing to paint. */
-export const ENCODINGS = Object.freeze(['png', 'png/P', 'png/L', 'jpeg', 'webp', 'scroll', 'void']);
+ *  decode natively (createImageBitmap), `void` is an ack with nothing to paint.
+ *  NO `scroll` (lane xpra-ime-mac — an UPSTREAM bug, MEASURED on xpra 6.5.4): its
+ *  encode_scrolling calls queue_damage_packet() without `options`, so every frame
+ *  it picks scrolling for is LOST ("failed to create data packet": 104× in one
+ *  Google Docs window's log, 30 788× in another) and the picture stops following
+ *  until something else repaints. XPRA_SCROLL_ALL=0 is NOT enough — the video
+ *  encoder reaches the same call. A client without `scroll` is never scroll-encoded
+ *  (supports_scrolling); the view still paints a `scroll` draw (the moves) if one
+ *  comes. test-desktop-display keeps the installed version's row. */
+export const ENCODINGS = Object.freeze(['png', 'png/P', 'png/L', 'jpeg', 'webp', 'void']);
 
-/** The X keysym names for JS keyCodes (xpra-html5's CHARCODE_TO_NAME, the
- *  rows this client can produce). Published to the server as its keycode
- *  table so a `key-action` resolves by (keycode, keyname) first. */
+/** The keymap this client publishes, on the X KEYCODES A pc105 `evdev` KEYBOARD HAS (keycode = evdev code + 8 — what
+ *  `xmodmap -pke` lists on a stock `us` display; lane xpra-ime-mac, inc-mvaddc4m-6m0t): level 0 per keycode. Until
+ *  2.369.286 the table was keyed by the BROWSER's keyCodes (xpra-html5's CHARCODE_TO_NAME: w = 87, s = 83, x = 88,
+ *  a = 65, 2 = 50, Enter = 13) and xpra PROGRAMS the X keymap from it, so `w` reached the app on X keycode 87 — the
+ *  evdev KP_1 slot. MEASURED with xpra 6.5.4's own KeyboardConfig.set_keymap on a private Xvfb and a real Chrome in it:
+ *  the keysym was `w` but Chrome named the key `code: Numpad1` (s Numpad4, x Numpad2, d F2, a Space, 2 ShiftLeft, Enter
+ *  Digit4), and Google Docs acts on a numpad code with NumLock off — the owner's w = End, s = Left, x = Down. On the
+ *  evdev keycodes the keysym AND the physical code agree, and the map equals the server's own `us` map for every key
+ *  (so a pane whose keymap never reached xpra types the same). The IME rows ride the free keycodes above (226–255). */
 export const KEYCODE_TABLE = Object.freeze({
-  8: 'BackSpace', 9: 'Tab', 13: 'Return', 16: 'Shift_L', 17: 'Control_L', 18: 'Alt_L', 19: 'Pause', 20: 'Caps_Lock', 27: 'Escape', 32: 'space',
-  33: 'Prior', 34: 'Next', 35: 'End', 36: 'Home', 37: 'Left', 38: 'Up', 39: 'Right', 40: 'Down', 42: 'Print', 45: 'Insert', 46: 'Delete',
-  48: '0', 49: '1', 50: '2', 51: '3', 52: '4', 53: '5', 54: '6', 55: '7', 56: '8', 57: '9',
-  65: 'a', 66: 'b', 67: 'c', 68: 'd', 69: 'e', 70: 'f', 71: 'g', 72: 'h', 73: 'i', 74: 'j', 75: 'k', 76: 'l', 77: 'm', 78: 'n', 79: 'o', 80: 'p', 81: 'q', 82: 'r', 83: 's', 84: 't', 85: 'u', 86: 'v', 87: 'w', 88: 'x', 89: 'y', 90: 'z',
-  91: 'Super_L', 92: 'Super_R', 93: 'Menu',
-  96: 'KP_0', 97: 'KP_1', 98: 'KP_2', 99: 'KP_3', 100: 'KP_4', 101: 'KP_5', 102: 'KP_6', 103: 'KP_7', 104: 'KP_8', 105: 'KP_9', 106: 'KP_Multiply', 107: 'KP_Add', 108: 'KP_Enter', 109: 'KP_Subtract', 110: 'KP_Decimal', 111: 'KP_Divide',
-  112: 'F1', 113: 'F2', 114: 'F3', 115: 'F4', 116: 'F5', 117: 'F6', 118: 'F7', 119: 'F8', 120: 'F9', 121: 'F10', 122: 'F11', 123: 'F12',
-  144: 'Num_Lock', 145: 'Scroll_Lock', 186: 'semicolon', 187: 'equal', 188: 'comma', 189: 'minus', 190: 'period', 191: 'slash', 192: 'grave', 219: 'bracketleft', 220: 'backslash', 221: 'bracketright', 222: 'apostrophe', 225: 'ISO_Level3_Shift',
+  9: 'Escape', 10: '1', 11: '2', 12: '3', 13: '4', 14: '5', 15: '6', 16: '7', 17: '8', 18: '9', 19: '0', 20: 'minus', 21: 'equal', 22: 'BackSpace', 23: 'Tab',
+  24: 'q', 25: 'w', 26: 'e', 27: 'r', 28: 't', 29: 'y', 30: 'u', 31: 'i', 32: 'o', 33: 'p', 34: 'bracketleft', 35: 'bracketright', 36: 'Return', 37: 'Control_L',
+  38: 'a', 39: 's', 40: 'd', 41: 'f', 42: 'g', 43: 'h', 44: 'j', 45: 'k', 46: 'l', 47: 'semicolon', 48: 'apostrophe', 49: 'grave', 50: 'Shift_L', 51: 'backslash',
+  52: 'z', 53: 'x', 54: 'c', 55: 'v', 56: 'b', 57: 'n', 58: 'm', 59: 'comma', 60: 'period', 61: 'slash', 62: 'Shift_R', 63: 'KP_Multiply', 64: 'Alt_L', 65: 'space', 66: 'Caps_Lock',
+  67: 'F1', 68: 'F2', 69: 'F3', 70: 'F4', 71: 'F5', 72: 'F6', 73: 'F7', 74: 'F8', 75: 'F9', 76: 'F10', 77: 'Num_Lock', 78: 'Scroll_Lock',
+  79: 'KP_7', 80: 'KP_8', 81: 'KP_9', 82: 'KP_Subtract', 83: 'KP_4', 84: 'KP_5', 85: 'KP_6', 86: 'KP_Add', 87: 'KP_1', 88: 'KP_2', 89: 'KP_3', 90: 'KP_0', 91: 'KP_Decimal',
+  92: 'ISO_Level3_Shift', 95: 'F11', 96: 'F12', 104: 'KP_Enter', 105: 'Control_R', 106: 'KP_Divide', 107: 'Print', 108: 'Alt_R',
+  110: 'Home', 111: 'Up', 112: 'Prior', 113: 'Left', 114: 'Right', 115: 'End', 116: 'Down', 117: 'Next', 118: 'Insert', 119: 'Delete',
+  127: 'Pause', 133: 'Super_L', 134: 'Super_R', 135: 'Menu',
 });
 /** The SHIFTED level of the US layout for the keycodes that have one (a
  *  letter's upper case is derived by X itself). */
-export const SHIFTED_TABLE = Object.freeze({ 48: 'parenright', 49: 'exclam', 50: 'at', 51: 'numbersign', 52: 'dollar', 53: 'percent', 54: 'asciicircum', 55: 'ampersand', 56: 'asterisk', 57: 'parenleft', 186: 'colon', 187: 'plus', 188: 'less', 189: 'underscore', 190: 'greater', 191: 'question', 192: 'asciitilde', 219: 'braceleft', 220: 'bar', 221: 'braceright', 222: 'quotedbl' });
+export const SHIFTED_TABLE = Object.freeze({ 10: 'exclam', 11: 'at', 12: 'numbersign', 13: 'dollar', 14: 'percent', 15: 'asciicircum', 16: 'ampersand', 17: 'asterisk', 18: 'parenleft', 19: 'parenright', 20: 'underscore', 21: 'plus', 34: 'braceleft', 35: 'braceright', 47: 'colon', 48: 'quotedbl', 49: 'asciitilde', 51: 'bar', 59: 'less', 60: 'greater', 61: 'question' });
 /** The NATIVE keymap this client publishes (`x11_keycodes`: keycode → [level0, level1]) — the X keymap is
  *  programmed from it, so every keysym this client can press is on it. Integer keys: sent as a Map (rencode_map). */
 export const X11_KEYMAP = Object.freeze(Object.fromEntries(Object.entries(KEYCODE_TABLE).map(([kc, name]) => [Number(kc), SHIFTED_TABLE[kc] ? [name, SHIFTED_TABLE[kc]] : /^[a-z]$/.test(name) ? [name, name.toUpperCase()] : [name]])));
-/** keysym name → the client keycode carrying it (level 0 first, then the shifted level). */
+/** The modifier keysyms (a ⌘ chord's own modifier press is never tapped — lane xpra-ime-mac). */
+export const MODIFIER_KEYNAMES = Object.freeze(new Set(['Shift_L', 'Shift_R', 'Control_L', 'Control_R', 'Alt_L', 'Alt_R', 'Super_L', 'Super_R', 'Meta_L', 'Meta_R', 'ISO_Level3_Shift', 'Caps_Lock', 'Num_Lock']));
+/** keysym name → the X keycode carrying it on the published map (level 0 first, then the shifted level). */
 export const NAME_TO_KEYCODE = Object.freeze((() => { const m = {}; for (const [kc, name] of Object.entries(KEYCODE_TABLE)) if (!(name in m)) m[name] = Number(kc); for (const [kc, name] of Object.entries(SHIFTED_TABLE)) if (!(name in m)) m[name] = Number(kc); return m; })());
 /** What `setxkbmap -query` would say for the base layout the keymap is built on. */
 export const QUERY_STRUCT = Object.freeze({ rules: 'evdev', model: 'pc105', layout: 'us', variant: '', options: '' });
-/** Client keycodes above every JS keyCode: the rolling slots ImeKeymap hands
- *  to composed characters (X keycodes end at 255). */
-export const IME_KEYCODE_FIRST = 226;
-export const IME_KEYCODE_LAST = 255;
+/** The rolling slots ImeKeymap hands to composed characters (lane xpra-ime-mac): ONLY keycodes that are NoSymbol on the
+ *  stock evdev `us` map (scripts/fixtures/evdev-us-pke.txt — what an app started before a viewer's keymap has seen) AND
+ *  that a real Chrome on X names with no `code` and keyCode 0 (MEASURED on a private Xvfb with xpra's own set_keymap:
+ *  each slot typed its character; 97 IntlRo, 103 keyCode 108, 132 IntlYen, 197 F19 and 202 F24 left out). The old
+ *  226–255 run carried stock XF86 media keysyms. */
+export const IME_KEYCODES = Object.freeze([8, 120, 149, 154, 168, 178, 183, 184, 217, 219, 222, 230, 248]);
 
 /** KeyboardEvent.code → X keysym name (xpra-html5's KEY_TO_NAME + the arrows,
  *  keypad and function keys it resolves through other tables). */
@@ -163,10 +181,11 @@ export function keyActionFor(ev) {
   else if (/^Key[A-Z]$/.test(code)) { keyname = code.slice(3).toLowerCase(); keyval = keyname.charCodeAt(0); }
   else if (/^Digit[0-9]$/.test(code)) { keyname = code.slice(5); keyval = keyname.charCodeAt(0); }
   else return null; // Dead, Unidentified, Process, Compose … — composition carries the text
-  // the keycode is the one carrying this keysym on OUR keymap (KP_Enter shares
-  // the browser's 13 with Return; a shifted name sits on its base key), else the browser's
+  // the keycode is the X keycode carrying this keysym on OUR (evdev) keymap — a shifted name sits on its base key; a
+  // keysym the map lacks has none (0: never sent as a key — `typeText` publishes a row for its character). NEVER the
+  // browser's keyCode: X keycode 87 is KP_1 (the lane's measurement above).
   const own = NAME_TO_KEYCODE[keyname];
-  const keycode = own != null ? own : (Number(ev.keyCode) || 0);
+  const keycode = own != null ? own : 0;
   return { keyname, keyval, string: [...key].length === 1 ? key : '', keycode, modifiers };
 }
 /** Is this key on the keymap this client published (so the press resolves)?
@@ -582,20 +601,29 @@ export function parseCursor(p) {
 
 /**
  * The IME keymap: composed characters get a published keycode row before
- * their press. Rolling over IME_KEYCODE_FIRST..IME_KEYCODE_LAST (32 slots);
- * `rowsFor(text)` answers the rows to (re)publish and whether the table
- * changed — the caller sends `keyboard-config` when it did, then the keys.
+ * their press, rolling over IME_KEYCODES; `plan(text)` answers ONE batch —
+ * the rows to (re)publish, whether the table changed (the caller sends
+ * `keyboard-config` when it did, then the keys) and the `rest` a later batch
+ * carries.
+ * A BATCH NEVER REUSES A SLOT IT PRESSES, and reuses (evicts) one at all only
+ * with `mayEvict` (lane xpra-ime-mac, MEASURED with a real Chrome: two tables
+ * back to back that move a slot to another character make Chrome read the
+ * EARLIER batch's press with the later table — 一丁 typed as 一万; 50 ms apart
+ * every character lands). The caller says when the last table is old enough.
  */
 export class ImeKeymap {
-  constructor() { this.slots = new Map(); this.next = IME_KEYCODE_FIRST; }
-  /** The presses for `text`: a character on the published keymap is its
-   *  keycode (+ shift for an upper-case letter or a shifted symbol); every
-   *  other character gets a rolling slot. `rows` = [[keysym, keycode], …]
-   *  to publish, `changed` = a keyboard-config is due before the presses. */
-  plan(text) {
+  constructor(pool = IME_KEYCODES) { this.pool = [...pool]; this.slots = new Map(); this.next = 0; }
+  /** The presses for the longest head of `text` that fits: a character on the published keymap is its keycode
+   *  (+ shift for an upper-case letter or a shifted symbol); every other character gets a slot — a free one, else (with
+   *  `mayEvict`) the next one this batch does not press. `rows` = [[keysym, keycode], …] to publish, `changed` = a
+   *  keyboard-config is due before the presses, `rest` = the text left for a later batch ('' when all fit). */
+  plan(text, { mayEvict = true } = {}) {
     let changed = false;
-    const keys = [];
-    for (const ch of [...String(text || '')]) {
+    const keys = [], used = new Set();
+    const chars = [...String(text || '')];
+    let i = 0;
+    for (; i < chars.length; i++) {
+      const ch = chars[i];
       const k = charKeysym(ch);
       if (!k) continue;
       const own = NAME_TO_KEYCODE[k.keyname];
@@ -606,14 +634,19 @@ export class ImeKeymap {
       }
       let kc = this.slots.get(k.keyname);
       if (kc == null) {
-        kc = this.next;
-        this.next = this.next >= IME_KEYCODE_LAST ? IME_KEYCODE_FIRST : this.next + 1;
-        for (const [n, c] of this.slots) if (c === kc) this.slots.delete(n); // the slot rolls over: its old name leaves the table
+        const taken = new Set(this.slots.values());
+        kc = this.pool.find((c) => !taken.has(c));
+        if (kc == null && mayEvict) {
+          for (let n = 0; n < this.pool.length && kc == null; n++) { const c = this.pool[(this.next + n) % this.pool.length]; if (!used.has(c)) { kc = c; this.next = (this.next + n + 1) % this.pool.length; } }
+          if (kc != null) for (const [n, c] of this.slots) if (c === kc) this.slots.delete(n); // the slot rolls over: its old name leaves the table
+        }
+        if (kc == null) break; // no slot this batch may take: the rest rides a later batch
         this.slots.set(k.keyname, kc);
         changed = true;
       }
+      used.add(kc);
       keys.push({ ...k, string: ch, keycode: kc, modifiers: [] });
     }
-    return { keys, changed, rows: [...this.slots.entries()] };
+    return { keys, changed, rows: [...this.slots.entries()], rest: chars.slice(i).join('') };
   }
 }
