@@ -26,11 +26,14 @@
  *                        argvs, origin, encoder } or a refusal by name (no_ffmpeg, display_gone, display_other_gpu,
  *                        no_white_level, no_encoder)
  *   kbpsDecision         the bandwidth estimate → an encoder restart, with hysteresis (ffmpeg's CLI cannot change a
- *                        bitrate live): at most once per 5 s, only on a ≥ 25 % move
+ *                        bitrate live): at most once per 5 s, only on a ≥ 25 % move, never under the source's `floor`
  *   planWindow           ONE WINDOW (lane stream-p2w-build): the vibespace-wgc helper's build recipe (wgcBuildPlan — csc on the
  *                        machine), its frame head (wgcHead) and lines (wgcLine), the window's road (BGRA exact SDR by default,
  *                        FP16 → THE table on an HDR display when asked), the capture + encoder argvs (wgcCaptureArgv,
- *                        windowEncodeArgv) — or a refusal by name (helper_missing, no_ffmpeg, window_gone, no_encoder)
+ *                        windowEncodeArgv) — or a refusal by name (helper_missing, no_ffmpeg, window_gone, no_encoder);
+ *                        its RATE (lane stream-window-fixes): a floor sized by the window (WINDOW_KBPS_FLOOR — its pixels ×
+ *                        its rate), werift's estimate judged against what was sent (windowRateDecision — an echo changes
+ *                        nothing) and an intra-refresh wave instead of a periodic IDR (WINDOW_REFRESH)
  *   flvReader            the encoder's output: FLV (length-framed — an Annex-B pipe only shows a picture's end when the NEXT
  *                        one starts, a frame of latency) → access units { nalus, key, tsMs }, SPS/PPS put in front of every
  *                        key frame (a browser that joins at a key frame needs them; FLV carries them once)
@@ -250,10 +253,10 @@ function parseStreamFacts(stdout) {
 // ── THE PLAN ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 const SCREEN_DEFAULTS = Object.freeze({ fps: 30, gopSeconds: 2, minKbps: 300 });
 const QUIET = Object.freeze(['-hide_banner', '-loglevel', 'error', '-nostats']);
-/** The rate, GOP, profile and VUI every rung takes, then the FLV pipe (flushed per picture). */
-function encodeTail(enc, { kbps, fps, gop }) {
+/** The rate, GOP, profile and VUI every rung takes (+ a road's `extra` encoder options), then the FLV pipe (flushed per picture). */
+function encodeTail(enc, { kbps, fps, gop, extra = [] }) {
   const k = Math.round(kbps);
-  return ['-c:v', enc.id, ...enc.args, '-profile:v', enc.profile, '-bf', '0', '-g', String(gop), '-b:v', `${k}k`, '-maxrate', `${k}k`, '-bufsize', `${Math.max(1, Math.round((k * 2) / fps))}k`,
+  return ['-c:v', enc.id, ...enc.args, ...extra, '-profile:v', enc.profile, '-bf', '0', '-g', String(gop), '-b:v', `${k}k`, '-maxrate', `${k}k`, '-bufsize', `${Math.max(1, Math.round((k * 2) / fps))}k`,
     '-color_primaries', 'bt709', '-color_trc', 'iec61966-2-1', '-colorspace', 'bt709', '-color_range', 'tv',
     '-fps_mode', 'passthrough', '-f', 'flv', '-flvflags', 'no_duration_filesize', '-flush_packets', '1', 'pipe:1'];
 }
@@ -304,9 +307,10 @@ function planScreen(facts, opts = {}) {
 // ── THE BITRATE ──────────────────────────────────────────────────────────────────────────────────────────────────────
 const KBPS_RULE = Object.freeze({ minGapMs: 5000, band: 0.25, stepKbps: 100 });
 /** werift's estimate → restart the encoder at a new rate? Never within minGapMs of the last change (or the start), only on
- *  a move of at least `band`, rounded to stepKbps, never under minKbps or over the session's cap. → { change, kbps } */
-function kbpsDecision({ current, target, cap, lastAt, now }, rule = KBPS_RULE) {
-  const t = Math.max(SCREEN_DEFAULTS.minKbps, Math.min(Number(cap) || Infinity, Math.round((Number(target) || 0) / rule.stepKbps) * rule.stepKbps));
+ *  a move of at least `band`, rounded to stepKbps, never under minKbps or the source's `floor` (a window's: windowKbpsFloor)
+ *  or over the session's cap. → { change, kbps } */
+function kbpsDecision({ current, target, cap, lastAt, now, floor = 0 }, rule = KBPS_RULE) {
+  const t = Math.max(SCREEN_DEFAULTS.minKbps, Math.min(Number(cap) || Infinity, Math.max(Number(floor) || 0, Math.round((Number(target) || 0) / rule.stepKbps) * rule.stepKbps)));
   if (!(current > 0) || !(t > 0)) return { change: false, kbps: current };
   if (now - lastAt < rule.minGapMs) return { change: false, kbps: current };
   if (Math.abs(t - current) / current < rule.band) return { change: false, kbps: current };
@@ -553,6 +557,60 @@ function wgcLine(line) {
 }
 
 const WINDOW_DEFAULTS = Object.freeze({ fps: 30 });
+// THE WINDOW ROAD'S RATE (lane stream-window-fixes — the owner's first real stream, a 2698×2078 Lightroom window, pulsed blurry ↔
+// sharp). Measured on his agent: 5 s in, werift's estimate restarted the encoder at 300 kbps and it stayed there. werift's
+// `availableBitrate` is min(send, receive) of the packets WE sent in its last ≥ 100 ms — a still window sends a trickle, so the
+// estimate is that trickle, and no estimate can rise 25 % above what is sent: a ratchet down to minKbps. So the window road
+// never goes under a FLOOR sized by the window (its pixels × its rate; the session's cap still wins), and its picture is
+// refreshed by an intra-refresh wave — a column of intra blocks sweeping the picture once per GOP — instead of a periodic IDR
+// (the whole picture re-coded in one frame of a two-frame VBV: the blurry key frame, then P-frames sharpening it, then the next
+// key frame). A key frame only when the viewer asks (PLI ⇒ the encoder restarts: its first picture is one).
+const WINDOW_KBPS_FLOOR = Object.freeze([
+  Object.freeze({ maxPixels: 640 * 480, at30: 1000, at60: 1500 }),
+  Object.freeze({ maxPixels: 1280 * 800, at30: 2500, at60: 3500 }),
+  Object.freeze({ maxPixels: 1920 * 1200, at30: 4000, at60: 6000 }),
+  Object.freeze({ maxPixels: 2560 * 1600, at30: 6000, at60: 8000 }),
+  Object.freeze({ maxPixels: Infinity, at30: 8000, at60: 12000 }),
+]);
+/** A window's rate floor: the row of its pixel count, 30 → 60 fps interpolated, rounded to 100, never over the session's `cap`. */
+function windowKbpsFloor({ w = 0, h = 0, fps = WINDOW_DEFAULTS.fps, cap = Infinity } = {}) {
+  const px = Math.max(0, Number(w) || 0) * Math.max(0, Number(h) || 0);
+  const row = WINDOW_KBPS_FLOOR.find((r) => px <= r.maxPixels);
+  const f = Math.max(0, Math.min(1, ((Number(fps) || WINDOW_DEFAULTS.fps) - 30) / 30));
+  const k = Math.round((row.at30 + (row.at60 - row.at30) * f) / 100) * 100;
+  return Math.max(SCREEN_DEFAULTS.minKbps, Math.min(Number(cap) > 0 ? Number(cap) : Infinity, k));
+}
+/** THE WINDOW ROAD'S RATE RULE — werift's estimate judged, never obeyed. Replayed on the access units of a real 30 s window stream
+ *  (the owner's machine, NVENC ~7.4 Mbps, a lossless link): its samples spread p10 6.2 / p50 ~10 / p90 14–17 Mbps around what was
+ *  sent, ~9 % under 0.85 × the sent rate (one 976 kbps) — so the old rule (the first sample after 5 s) restarted the encoder at
+ *  whatever sample came, and once low, werift's 20-packet window spans longer, the estimate becomes an exact echo, and nothing
+ *  rises 25 % above it again (the owner's 300 kbps). Here: the MEDIAN of the last `windowMs` of samples against the kbps the source
+ *  itself SENT over the same span — at or above `echo` × sent it is an echo (no evidence of a limit: nothing changes); under it the
+ *  link may receive less than is sent (it drops or queues) — a real bottleneck HOLDS (the estimate sits at its capacity), a
+ *  sampling dip does not (measured live: NVENC's intra-refresh cycle swings the sent rate 4 ↔ 14 Mbps a second, and one median
+ *  dipped) — so only a shortfall that held `holdMs` acts: kbpsDecision toward the median, never under the floor, never up; with
+ *  no shortfall for `recoverMs`, one `recoverStep` back toward the cap. `shortSince` = when the current shortfall began (0 = none),
+ *  `shortAt` = the last shortfall seen. → { change, kbps, why: 'shortfall' | 'hold' | 'recover' | 'echo' | 'wait', median,
+ *  shortSince } */
+const WINDOW_RATE_RULE = Object.freeze({ windowMs: 2000, minSamples: 5, echo: 0.75, holdMs: 2000, recoverMs: 20000, recoverStep: 1.25 });
+function windowRateDecision({ current, cap, floor = 0, samples = [], sentKbps = 0, lastAt = 0, shortAt = 0, shortSince = 0, now = 0 }, rule = WINDOW_RATE_RULE) {
+  const keep = { change: false, kbps: current, shortSince: 0 };
+  const s = (Array.isArray(samples) ? samples : []).filter((v) => typeof v === 'number' && Number.isFinite(v) && v >= 0).sort((a, b) => a - b);
+  if (s.length < rule.minSamples || !(sentKbps > 0) || now - lastAt < rule.windowMs) return { ...keep, why: 'wait' };
+  const median = s[s.length >> 1];
+  if (median < rule.echo * sentKbps) {
+    const since = shortSince || now;
+    if (now - since < rule.holdMs) return { change: false, kbps: current, why: 'hold', median, shortSince: since };
+    const d = kbpsDecision({ current, target: Math.min(median, current), cap, lastAt, now, floor }); // a shortfall only ever lowers
+    return { ...d, why: 'shortfall', median, shortSince: since };
+  }
+  const top = Math.max(SCREEN_DEFAULTS.minKbps, Number(cap) || current);
+  if (current < top && now - Math.max(lastAt, shortAt) >= rule.recoverMs) return { change: true, kbps: Math.min(top, Math.round((current * rule.recoverStep) / 100) * 100), why: 'recover', median };
+  return { ...keep, why: 'echo', median };
+}
+/** The encoders whose intra-refresh wave was measured (the owner's NVENC; x264 on the lane's box): ONE key frame at the start,
+ *  then the GOP is the wave's period. AMF and Quick Sync keep the periodic GOP (not measured on any machine of ours). */
+const WINDOW_REFRESH = Object.freeze({ h264_nvenc: Object.freeze(['-intra-refresh', '1']), libx264: Object.freeze(['-intra-refresh', '1']) });
 /** MinUpdateInterval for a rate: 30 fps → 33 ms, 60 → 16 (the probe: 33 ms paces the source at ~27–30 and halves the readback). */
 const windowIntervalMs = (fps) => Math.max(1, Math.floor(1000 / Math.max(1, fps)));
 /**
@@ -562,8 +620,10 @@ const windowIntervalMs = (fps) => Math.max(1, Math.floor(1000 / Math.max(1, fps)
  * (BT.709 limited, NV12) → the encoder ladder → FLV. `fp16` (the start route's flag, off by default) = the FP16 road: scRGB like DDA →
  * THE table (white of the window's display) → NV12 → the encoder — only on an HDR display (an SDR display: BGRA, `note`).
  * The source sends WINDOW pixels (origin 0,0, `relative`): the daemon adds the window's live place to every pointer event.
- * → { ok, mode: 'window-bgra' | 'window-f16', fmt, window, origin, relative, w, h, fps, interval, kbps, gop, white, tone,
- *   encoder, note, ffmpeg, helper } | { ok: false, code, error }
+ * THE RATE: `floor` = windowKbpsFloor at the window's size (the source moves it with each new size), `refresh` = the encoder
+ * refreshes by an intra-refresh wave (WINDOW_REFRESH) — no periodic key frame.
+ * → { ok, mode: 'window-bgra' | 'window-f16', fmt, window, origin, relative, w, h, fps, interval, kbps, floor, refresh, gop,
+ *   white, tone, encoder, note, ffmpeg, helper } | { ok: false, code, error }
  */
 function planWindow(facts, { window = null, fps = WINDOW_DEFAULTS.fps, kbps = 8000, fp16 = false, tone = TONE_DEFAULT } = {}) {
   const f = facts || {};
@@ -577,11 +637,12 @@ function planWindow(facts, { window = null, fps = WINDOW_DEFAULTS.fps, kbps = 80
   const d = (Array.isArray(f.displays) ? f.displays : []).find((x) => x.id === w.display) || null;
   const f16 = !!fp16 && !!d && d.hdr === true && d.white > 0;
   const r = Math.max(1, Math.min(120, Math.round(Number(fps) || WINDOW_DEFAULTS.fps)));
+  const rate = Math.max(SCREEN_DEFAULTS.minKbps, Math.round(Number(kbps) || 8000));
   return {
     ok: true, mode: f16 ? 'window-f16' : 'window-bgra', fmt: f16 ? 'f16' : 'bgra',
     window: { id: w.id, title: w.title, app: w.app, display: w.display, dpi: w.dpi, bounds: { ...w.bounds }, minimized: !!w.minimized },
     origin: { x: 0, y: 0 }, relative: true, w: w.bounds.w & ~1, h: w.bounds.h & ~1, fps: r, interval: windowIntervalMs(r),
-    kbps: Math.max(SCREEN_DEFAULTS.minKbps, Math.round(Number(kbps) || 8000)), gop: r * SCREEN_DEFAULTS.gopSeconds,
+    kbps: rate, floor: windowKbpsFloor({ w: w.bounds.w, h: w.bounds.h, fps: r, cap: rate }), refresh: Object.hasOwn(WINDOW_REFRESH, pe.encoder.id), gop: r * SCREEN_DEFAULTS.gopSeconds,
     white: f16 ? d.white : null, tone: { knee: tone.knee, peak: tone.peak }, encoder: pe.encoder,
     note: pe.note || (fp16 && !f16 ? 'fp16_sdr_display' : null), ffmpeg: f.ffmpeg.path, helper: f.helper.exe,
   };
@@ -589,11 +650,13 @@ function planWindow(facts, { window = null, fps = WINDOW_DEFAULTS.fps, kbps = 80
 /** The helper's capture argv for a plan. */
 function wgcCaptureArgv(plan) { return ['capture', '--hwnd', String(plan.window.id), '--fmt', plan.fmt, '--fps', String(plan.fps), '--interval', String(plan.interval)]; }
 /** The encoder ffmpeg of a window at its CURRENT size (`w` × `h`, even — the helper's frame head): BGRA through the direct
- *  road's own conversion (BT.709 limited → NV12), or the agent's mapped NV12 (the FP16 road). */
+ *  road's own conversion (BT.709 limited → NV12), or the agent's mapped NV12 (the FP16 road); the intra-refresh wave where the
+ *  encoder has one (plan.refresh — the GOP is then its period). */
 function windowEncodeArgv(plan, { w = plan.w, h = plan.h, kbps = plan.kbps } = {}) {
   const input = plan.fmt === 'f16' ? ['-pix_fmt', 'nv12'] : ['-pix_fmt', 'bgra'];
   const vf = plan.fmt === 'f16' ? [] : ['-vf', 'scale=out_color_matrix=bt709:out_range=tv,format=nv12'];
-  return [...QUIET, '-f', 'rawvideo', ...input, '-video_size', `${w}x${h}`, '-framerate', String(plan.fps), '-i', 'pipe:0', ...vf, ...encodeTail(plan.encoder, { kbps, fps: plan.fps, gop: plan.gop })];
+  const extra = plan.refresh && Object.hasOwn(WINDOW_REFRESH, plan.encoder.id) ? WINDOW_REFRESH[plan.encoder.id] : [];
+  return [...QUIET, '-f', 'rawvideo', ...input, '-video_size', `${w}x${h}`, '-framerate', String(plan.fps), '-i', 'pipe:0', ...vf, ...encodeTail(plan.encoder, { kbps, fps: plan.fps, gop: plan.gop, extra })];
 }
 
 module.exports = {
@@ -602,5 +665,5 @@ module.exports = {
   SCREEN_DEFAULTS, planScreen, captureArgv, encodeArgv, directArgv, KBPS_RULE, kbpsDecision, flvReader,
   MAC_HELPER, MAC_SETTINGS, MAC_LADDER, MAC_WHY, macHelperPaths, macHelperSourceFile, macBuildPlan, macHelperSpawn, parseMacFacts, windowSourceOf, macDisplayOf, macWindowRows,
   macRungOf, planMacScreen, macInputTarget, macPoint, MAC_KBPS_RULE, macKbpsDecision,
-  WGC_HELPER, WGC_RECIPE, wgcBuildPlan, wgcHead, wgcLine, WINDOW_DEFAULTS, windowIntervalMs, planWindow, wgcCaptureArgv, windowEncodeArgv,
+  WGC_HELPER, WGC_RECIPE, wgcBuildPlan, wgcHead, wgcLine, WINDOW_DEFAULTS, WINDOW_KBPS_FLOOR, windowKbpsFloor, WINDOW_RATE_RULE, windowRateDecision, WINDOW_REFRESH, windowIntervalMs, planWindow, wgcCaptureArgv, windowEncodeArgv,
 };

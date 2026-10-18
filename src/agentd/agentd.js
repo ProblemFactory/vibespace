@@ -2156,7 +2156,7 @@ function serveConnection(sock) {
         return;
       }
       if (msg.op === 'stream-answer') { streamHostOf().answer(msg).then((r) => mux.control({ op: 'stream-answer-result', id: msg.id, result: r }), (e) => mux.control({ op: 'stream-answer-result', id: msg.id, error: String((e && e.message) || e) })); return; }
-      if (msg.op === 'stream-stop') { mux.control({ op: 'stream-stop-result', id: msg.id, stopped: streamHost ? streamHost.stop(String(msg.sid || ''), 'stopped') : false }); return; }
+      if (msg.op === 'stream-stop') { mux.control({ op: 'stream-stop-result', id: msg.id, stopped: streamHost ? streamHost.stop(String(msg.sid || ''), /^[a-z_]{1,40}$/.test(String(msg.why || '')) ? msg.why : 'stopped') : false }); return; } // why: the end's name (lane stream-window-fixes)
       if (msg.op === 'stream-stats') { mux.control({ op: 'stream-stats-result', id: msg.id, result: streamHostOf().stats(msg, mux) }); return; }
       // lane stream-p1b-screen (THREE-TOUCH: this handler, `stream-facts` / `stream-screen` in the hello-ack, the client's gated
       // streamFacts): THIS machine's screen facts — each display's HDR state + SDR white level + the DXGI output, the ffmpeg

@@ -997,11 +997,11 @@ class DeviceManager {
     return r.result || { ok: false, code: 'answer_failed', error: 'no answer' };
   }
   /** End a stream session (its watch goes with it). → { stopped } */
-  async streamStop(sid) {
+  async streamStop(sid, { why = null } = {}) { // why: the end's name, for the machine's log (an older daemon ignores it)
     this._streamWatches?.delete(sid);
     const conn = await this.connect();
     if (!conn.info?.capabilities?.includes?.('stream-offer')) return { stopped: false };
-    const r = await this._request({ op: 'stream-stop', sid, timeoutMs: 10000 });
+    const r = await this._request({ op: 'stream-stop', sid, ...(why ? { why } : {}), timeoutMs: 10000 });
     return { stopped: !!(r && r.stopped) };
   }
   /** A stream session's numbers now (the daemon's side: fps, kbps, the bandwidth estimate, the input counts). */

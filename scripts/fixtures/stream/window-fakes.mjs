@@ -6,9 +6,13 @@
 //                            ("VSWF", w, h, flags 1 = a new picture, 4 bytes a pixel) + w × h × 4 bytes — then plays
 //                            cfg.capture.script: { at, size: {w, h} } (a `size` line, frames of the new size), { at, fresh }
 //                            (false = the last picture again, as a minimized window), { at, ev } (one stderr line),
-//                            { at, exit, stderr } (dies). Every argv → cfg.log.
-//   writeFakeCsc(file, cfg)  the in-box csc.exe: writes its /out: file, or refuses the first define set when cfg.refuse
-//                            names it (a Windows without MinUpdateInterval); every argv → cfg.log
+//                            { at, exit, stderr } (dies). Every argv → cfg.log. Lane stream-window-fixes: stdin closed ⇒ the
+//                            real helper's `end` line ({"ev":"end","why":"stdin","code":0}) and exit 0 — unless
+//                            cfg.capture.ignoreStdin (a helper that never notices: the agent's grace kill); its pid →
+//                            cfg.capture.pidFile
+//   writeFakeCsc(file, cfg)  the in-box csc.exe: writes its /out: file (cfg.helper = a script copied there, runnable — the
+//                            agent then spawns THAT as its helper), or refuses the first define set when cfg.refuse names it
+//                            (a Windows without MinUpdateInterval); every argv → cfg.log
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -24,8 +28,9 @@ const cfg = JSON.parse(fs.readFileSync(${JSON.stringify(cfgFile)}, 'utf8'));
 const argv = process.argv.slice(2);
 if (cfg.log) fs.appendFileSync(cfg.log, JSON.stringify(argv) + '\\n');
 const arg = (k) => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : null; };
-const say = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
-const err = (o) => process.stderr.write(JSON.stringify(o) + '\\n');
+const ascii = (o) => JSON.stringify(o).replace(/[\\u007f-\\uffff]/g, (c) => '\\\\u' + c.charCodeAt(0).toString(16).padStart(4, '0')); // the real helper's JSON is ASCII (lane stream-window-fixes)
+const say = (o) => process.stdout.write(ascii(o) + '\\n');
+const err = (o) => process.stderr.write(ascii(o) + '\\n');
 const rows = cfg.windows || [];
 const mode = argv[0], hwnd = arg('--hwnd');
 if (mode === 'facts') {
@@ -43,7 +48,8 @@ let w = c.w, h = c.h, fresh = true;
 err({ ev: 'open', hwnd, w, h, bpp: 4, fps, cls: c.cls || 'WindowsForms10.Window.8.app.0.1', border: false });
 err({ ev: 'window', min: false, frame: c.frame, display: c.display || '\\\\\\\\.\\\\DISPLAY1', dpi: c.dpi || 96, covered: false });
 process.stdout.on('error', () => process.exit(0));
-process.stdin.on('end', () => process.exit(0)); process.stdin.resume();
+if (c.pidFile) fs.writeFileSync(c.pidFile, String(process.pid));
+process.stdin.on('end', () => { if (c.ignoreStdin) return; err({ ev: 'end', why: 'stdin', code: 0 }); process.exit(0); }); process.stdin.resume();
 const head = (fr) => { const b = Buffer.alloc(16); b.write('VSWF', 0, 'latin1'); b.writeUInt32LE(w, 4); b.writeUInt32LE(h, 8); b.writeUInt16LE(fr ? 1 : 0, 12); b[14] = 4; return b; };
 setInterval(() => { if (process.stdout.writableNeedDrain) return; process.stdout.write(Buffer.concat([head(fresh), Buffer.alloc(w * h * 4, 0x80)])); }, 1000 / fps);
 for (const s of c.script || []) setTimeout(() => {
@@ -68,7 +74,7 @@ if (cfg.log) fs.appendFileSync(cfg.log, JSON.stringify(argv) + '\\n');
 const def = (argv.find((a) => a.startsWith('/define:')) || '/define:').slice(8);
 if (cfg.refuse != null && def === cfg.refuse) { process.stdout.write("vibespace-wgc.cs(1,1): error CS0117: 'GraphicsCaptureSession' does not contain a definition for 'MinUpdateInterval'\\n"); process.exit(1); }
 const out = (argv.find((a) => a.startsWith('/out:')) || '').slice(5);
-fs.writeFileSync(out, 'MZ fake helper ' + def);
+if (cfg.helper) { fs.copyFileSync(cfg.helper, out); fs.chmodSync(out, 0o755); } else fs.writeFileSync(out, 'MZ fake helper ' + def);
 process.exit(0);
 `, { mode: 0o755 });
   return { file, cfgFile };

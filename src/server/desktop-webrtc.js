@@ -19,7 +19,12 @@
  *                            anything is newer than `seq`, else after ≤ STREAM_LIMITS.pollMaxMs
  *   • answer / candidate     the page's SDP answer and trickled candidates → `stream-answer`
  *   • restart(key)           an ICE-restart offer (the page's restart budget — src/stream-model.js streamStep)
- *   • stop(key)              `stream-stop`; a session no page polled for STREAM_LIMITS.idleMs is stopped (the page closed)
+ *   • stop(key, why)         `stream-stop` (its `why` reaches the machine's log); a session no page polled for STREAM_LIMITS.idleMs
+ *                            is stopped (the page closed). THE VIEWER GONE (lane stream-window-fixes): the route says when a long
+ *                            poll's connection closed before its answer (pollGone — the tab closed, the browser quit or crashed):
+ *                            no new poll within STREAM_LIMITS.goneMs ⇒ stopped `viewer_gone`, so the machine ends the capture in
+ *                            seconds, not at the idle sweep
+ *   • stopWindow(host, id)   every session of that host streaming that window (the picker's 停止 — any browser's)
  *   • facts(hostId)          THE RECORD: per session { key, sid, codec, source, startedAt, state, stats, path, ended } — facts,
  *                            never a decision
  * THE RELAY (NAT — direct first, else the hub forwards): per session ONE UDP socket on this hub; each datagram is framed
@@ -87,7 +92,7 @@ async function pushMacHelper(dm, need, helpersDir = HELPERS_DIR) {
   return { ok: true, size: st.size };
 }
 
-function create({ access, log = console, now = Date.now, idleMs = L.idleMs, sweepMs = 5000, ips = hubIps, pollMaxMs = L.pollMaxMs, relay = true, direct = true, udpLeg = true, legMute = () => false, helpersDir = HELPERS_DIR } = {}) {
+function create({ access, log = console, now = Date.now, idleMs = L.idleMs, goneMs = L.goneMs, sweepMs = 5000, ips = hubIps, pollMaxMs = L.pollMaxMs, relay = true, direct = true, udpLeg = true, legMute = () => false, helpersDir = HELPERS_DIR } = {}) {
   const sessions = new Map(); // key → session
   const keyOf = () => 'st' + now().toString(36) + Math.random().toString(36).slice(2, 10);
   const wake = (s) => { s.seq++; for (const f of s.waiters.splice(0)) { try { f(); } catch { /* gone */ } } };
@@ -97,7 +102,7 @@ function create({ access, log = console, now = Date.now, idleMs = L.idleMs, swee
     return { port: r.port, up: r.up, down: r.down, dropped: r.dropped, via: legUsable(r) ? 'udp' : 'link',
       leg: g ? { addr: g.addr ? `${g.addr.ip}:${g.addr.port}` : null, pings: g.pings, forged: g.forged, replayed: g.replayed, stray: g.stray, up: g.up, down: g.down, heardMsAgo: g.heardAt ? now() - g.heardAt : null, changes: g.changes.slice() } : null };
   };
-  const view = (s) => ({ key: s.key, sid: s.sid, hostId: s.hostId, codec: s.codec, source: s.source, startedAt: s.startedAt, state: s.state, stats: s.stats, path: s.path, ended: s.ended, relay: relayFacts(s) });
+  const view = (s) => ({ key: s.key, sid: s.sid, hostId: s.hostId, codec: s.codec, source: s.source, windowId: s.windowId, startedAt: s.startedAt, state: s.state, stats: s.stats, path: s.path, ended: s.ended, relay: relayFacts(s) });
 
   function onPush(s, m) {
     if (m.op === 'stream-ice') {
@@ -213,7 +218,7 @@ function create({ access, log = console, now = Date.now, idleMs = L.idleMs, swee
     try { v = src ? await access.streamRung(hostId, { want: src.kind }) : await access.streamRung(hostId); } catch (e) { return { take: false, code: (e && e.code) || 'host_unavailable', why: String((e && e.message) || e) }; }
     if (!v.take) return { take: false, code: v.code, why: v.why };
     const key = keyOf();
-    const s = { key, hostId, dm: v.dm, sid: null, source: null, codec: null, startedAt: now(), state: 'new', stats: null, path: null, ended: null, cands: [], seq: 0, waiters: [], lastPoll: now(), relay: null, direct, relayLines: [] };
+    const s = { key, hostId, dm: v.dm, sid: null, source: null, windowId: src && src.kind === 'window' ? String(src.id) : null, codec: null, startedAt: now(), state: 'new', stats: null, path: null, ended: null, cands: [], seq: 0, waiters: [], lastPoll: now(), goneTimer: null, relay: null, direct, relayLines: [] };
     sessions.set(key, s);
     if (relay) { try { await bindRelay(s); } catch (e) { log.warn?.(`[stream] ${hostId}: the relay did not open (${e && e.message}) — direct only`); } }
     // the leg's spec rides the offer: the relay's port, the session's key (over the device link only) and this hub's addresses
@@ -267,7 +272,7 @@ function create({ access, log = console, now = Date.now, idleMs = L.idleMs, swee
   async function poll(key, n = 0, seq = -1, waitMs = pollMaxMs) {
     const s = sessions.get(String(key || ''));
     if (!s) return { key, ended: 'not_found' };
-    s.lastPoll = now();
+    s.lastPoll = now(); clearTimeout(s.goneTimer); s.goneTimer = null; // a poll: the viewer is here
     if (s.seq <= seq && !s.ended) {
       await new Promise((res) => { const t = setTimeout(res, Math.max(0, Math.min(pollMaxMs, waitMs))); s.waiters.push(() => { clearTimeout(t); res(); }); });
       s.lastPoll = now();
@@ -277,23 +282,38 @@ function create({ access, log = console, now = Date.now, idleMs = L.idleMs, swee
   }
   /** The page's own read of its path (getStats — direct | relay) is told here so the record says it. */
   function notePath(key, p) { const s = sessions.get(String(key || '')); if (s && (p === 'direct' || p === 'relay')) s.path = p; }
+  /** A long poll's connection closed before its answer: no new poll within goneMs ⇒ the viewer is gone, the stream stops. */
+  function pollGone(key) {
+    const s = sessions.get(String(key || ''));
+    if (!s || s.ended) return;
+    clearTimeout(s.goneTimer);
+    s.goneTimer = setTimeout(() => { s.goneTimer = null; if (sessions.get(s.key) === s) stop(s.key, 'viewer_gone').catch(() => { }); }, goneMs);
+    s.goneTimer.unref?.();
+  }
   async function stop(key, why = 'stopped') {
     const s = sessions.get(String(key || ''));
     if (!s) return { stopped: false };
     sessions.delete(s.key);
+    clearTimeout(s.goneTimer);
     s.ended = s.ended || why;
     closeRelay(s);
     wake(s);
     let stopped = false;
-    try { stopped = !!(s.sid && (await s.dm.streamStop(s.sid)).stopped); } catch { stopped = false; }
+    try { stopped = !!(s.sid && (await s.dm.streamStop(s.sid, { why })).stopped); } catch { stopped = false; }
     log.log?.(`[stream] ${s.hostId}: session ${s.sid} stopped (${why})`);
     return { stopped };
+  }
+  /** The picker's 停止: every session of `hostId` streaming the window `id` (whichever browser opened it). */
+  async function stopWindow(hostId, id, why = 'stopped_in_list') {
+    const keys = [...sessions.values()].filter((s) => s.hostId === hostId && s.windowId != null && s.windowId === String(id)).map((s) => s.key);
+    const r = await Promise.all(keys.map((k) => stop(k, why)));
+    return { ok: true, sessions: keys.length, stopped: r.filter((x) => x.stopped).length };
   }
   function facts(hostId) { return [...sessions.values()].filter((s) => !hostId || s.hostId === hostId).map(view); }
   const sweep = setInterval(() => { for (const s of [...sessions.values()]) if (now() - s.lastPoll > idleMs) stop(s.key, 'idle').catch(() => { }); }, sweepMs);
   sweep.unref?.();
   function shutdown() { clearInterval(sweep); for (const s of [...sessions.values()]) stop(s.key, 'shutdown').catch(() => { }); }
-  return { start, answer, candidate, restart, poll, notePath, stop, facts, shutdown };
+  return { start, answer, candidate, restart, poll, pollGone, notePath, stop, stopWindow, facts, shutdown };
 }
 
 module.exports = { create, hubIps, stripHosts, withRelay, pushMacHelper, HELPERS_DIR };

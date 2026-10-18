@@ -23,6 +23,7 @@ import { createModalShell, fetchJson, showToast, copyText } from './utils.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { createVncView, streamUrl } from './vnc-view.js';
 import { createStreamView } from './stream-view.js'; // lane stream-p1a-transport: the WebRTC rung's <video>, in this same shell
+import { createStreamStats } from './stream-stats.js'; // lane stream-window-fixes: THE stats row — shared with one window's stream
 import { pageIsSecure } from './picture-shell.js';
 import { keyboardLockGate, NAGLE_REFERENCE, SLOW_KBPS, STILL_MS } from '../desktop-quality.js'; // lane desktop-v2-latency
 import { desktopRunPlan, desktopRunPresets, rememberRun, machineDesktopId } from '../machine-desktop-model.js';
@@ -250,18 +251,14 @@ export function openMachineDesktop(app, m, { display } = {}) {
   // a source: src/server/desktop-access.js streamRung) the picture is a <video> in this same shell, its numbers on the strip
   // (getStats: RTT · jitter · fps · decode · kbps, and "via the hub" when the relay carries it); a refusal (an older agent, no
   // screen source yet) quietly shows the VNC picture, a failure AFTER the stream started shows it too and says why
-  const streamEl = el('span'); streamEl.className = 'desktop-strip-stream'; streamEl.hidden = true;
+  // THE STATS ROW (src/lib/stream-stats.js — lane stream-window-fixes: the same component in one window's stream): the numbers
+  // and lane stream-relay-udp's firewall notice — the machine's firewall blocks the direct path (its agent's self-probe), said
+  // while the hub relay carries the picture, with the owner's admin line to copy. The notice sits right after the status chip,
+  // AHEAD of the numbers (lane stream-relay-udp-ci): the numbers run long on the relay (the path, NVENC · encode) and the strip
+  // scrolls sideways, so after them the copy button sat past a desk-sized window's edge (DejaVu: the .296 mirror)
+  const stats = createStreamStats({ machine });
+  const streamEl = stats.numbers, fwEl = stats.firewall;
   const noteEl = el('span'); noteEl.className = 'desktop-strip-note'; noteEl.hidden = true;
-  // lane stream-relay-udp: the machine's firewall blocks the direct path (its agent's self-probe) — said while the hub relay
-  // carries the picture, with the owner's admin line to copy (run once there; VibeSpace never runs it). It sits right after the
-  // status chip, AHEAD of the numbers (lane stream-relay-udp-ci): the numbers run long on the relay (the path, NVENC · encode)
-  // and the strip scrolls sideways, so after them the copy button sat past a desk-sized window's edge (DejaVu: the .296 mirror)
-  const fwEl = el('span'); fwEl.className = 'desktop-strip-firewall'; fwEl.hidden = true;
-  const fwText = el('span', null, t('The machine’s firewall blocks the direct path; going through the hub'));
-  const fwCopy = el('button', null, t('Copy the admin command')); fwCopy.type = 'button'; fwCopy.className = 'file-tool-btn desktop-strip-fw-copy';
-  let fwCommand = null;
-  fwCopy.onclick = () => { if (fwCommand) copyText(fwCommand).then(() => showToast(t('Copied — paste it into an administrator PowerShell on {machine}', { machine }))); };
-  fwEl.append(fwText, fwCopy);
   // lane stream-p3m-build: A MAC'S PERMISSION — macOS keeps the screen (Screen Recording) or the input (Accessibility) from the
   // agent's screen helper until its owner turns it on; a background agent cannot even ask (tccd: "does not allow prompting"),
   // so the strip says which switch, with the Settings pane's link to copy (it opens that pane on the Mac). The next stream
@@ -303,18 +300,10 @@ export function openMachineDesktop(app, m, { display } = {}) {
   const streamWords = (code) => (STREAM_WHY[code] ? STREAM_WHY[code]() : t('the machine ended it ({code})', { code: code || '?' }));
   const ms = (v) => (v == null ? '—' : v);
   const drawStream = () => {
-    const p = stream ? stream.stats() : null, a = stream ? stream.agent() : null;
-    const playing = !!stream && stream.state === 'playing';
-    streamEl.hidden = !playing;
-    const via = stream && stream.path ? stream.path() : null, fw = via && via !== 'direct' && stream.firewall ? stream.firewall() : null;
-    fwEl.hidden = !(playing && fw); fwCommand = (fw && fw.command) || null; fwCopy.hidden = !fwCommand; fwEl.title = fwCommand || '';
+    const { playing, page: p, agent: a } = stats.draw(stream); // the numbers + the firewall notice (src/lib/stream-stats.js)
     chip.textContent = playing ? t('Stream · {ms} ms · {fps} fps', { ms: ms(p && p.rttMs), fps: ms(p && p.fps) }) : t('Stream · connecting…');
     if (!p) return;
     const sc = a && a.screen; // lane stream-p1b-screen: the machine's own screen — its encoder and what encoding costs there
-    streamEl.textContent = t('RTT {rtt} ms · jitter {jitter} ms · {fps} fps · decode {decode} ms · {kbps} kbps', { rtt: ms(p.rttMs), jitter: ms(p.jitterMs), fps: ms(p.fps), decode: ms(p.decodeMs), kbps: ms(p.kbps) })
-      + (via === 'udp' ? ' · ' + t('via the hub · UDP') : via === 'link' ? ' · ' + t('via the device link') : via === 'relay' ? ' · ' + t('via the hub') : '') // lane stream-relay-udp: which relay path
-      + (sc && sc.encoder ? ' · ' + (sc.encodeMs != null ? t('{encoder} · encode {ms} ms', { encoder: sc.encoder, ms: sc.encodeMs }) : sc.encoder) : '');
-    streamEl.dataset.path = p.path || ''; streamEl.dataset.via = via || '';
     chip.title = [scope, t('WebRTC from the machine’s agent: {w}×{h}, sent {sent} fps at {kbps} kbps', { w: ms(p.width), h: ms(p.height), sent: ms(a && a.fps), kbps: ms(a && a.kbps) }),
       ...(sc && sc.white ? [t('HDR mapped on the machine (SDR white {nits} nits)', { nits: Math.round(sc.white * 0.08) })] : []), ...(sc && sc.note === 'no_hw_encoder' ? [t('software encoding (no hardware encoder found)')] : []),
       t('Pointer: yours — the machine draws none into the picture')].join('\n'); // lane stream-cursor: no source paints the machine's

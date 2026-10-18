@@ -11,8 +11,11 @@
 //                      (w, h even); the NEWEST picture wins (a slow reader drops pictures, never queues them); 64 KiB writes.
 //                      --interval = MinUpdateInterval (Windows 11 24H2+). stderr: one JSON line per event — open, size (the
 //                      frame pool was recreated: the next frames have the new size), window (min / frame / display / dpi /
-//                      covered changed), stats (each second), gone, error. Ends when stdin closes (0), the window is gone
-//                      (3) or on an error (1)
+//                      covered changed), stats (each second), gone, error, end (why + code: the capture session is
+//                      disposed — the window released). Ends when stdin closes (0), the window is gone (3) or on an error (1)
+// Every JSON line is ASCII: a character past 0x7E is written \uXXXX (lane stream-window-fixes — the console's OEM code page,
+// 936 on a Chinese Windows, turned every CJK title into U+FFFD for the agent, which reads UTF-8); the lines go out through a
+// UTF-8 writer without a BOM.
 //   restore --hwnd H   ShowWindow(SW_SHOWNOACTIVATE): a minimized window comes back without taking the focus
 using System;
 using System.Collections.Generic;
@@ -58,7 +61,7 @@ static class W {
   static readonly Dictionary<string, string> A = new Dictionary<string, string>();
   static string Arg(string k, string d) { string v; return A.TryGetValue(k, out v) ? v : d; }
   static int ArgI(string k, int d) { int v; return int.TryParse(Arg(k, ""), NumberStyles.Integer, CultureInfo.InvariantCulture, out v) ? v : d; }
-  static TextWriter Log = Console.Out;
+  static TextWriter Log;
   static readonly object LogLock = new object();
   static void Say(Js j) { lock (LogLock) { Log.WriteLine(j.ToString()); Log.Flush(); } }
   class Js {
@@ -72,7 +75,7 @@ static class W {
   }
   static void Q(StringBuilder b, string s) {
     b.Append('"');
-    foreach (char c in s) { if (c == '"' || c == '\\') b.Append('\\').Append(c); else if (c < 0x20) b.Append("\\u").Append(((int)c).ToString("x4")); else b.Append(c); }
+    foreach (char c in s) { if (c == '"' || c == '\\') b.Append('\\').Append(c); else if (c < 0x20 || c > 0x7e) b.Append("\\u").Append(((int)c).ToString("x4")); else b.Append(c); }
     b.Append('"');
   }
   static string Rc(RECT r) { return "[" + r.L + "," + r.T + "," + r.R + "," + r.B + "]"; }
@@ -232,6 +235,7 @@ static class W {
       writes.Add(w0.Elapsed.TotalMilliseconds); if (writes.Count > 240) writes.RemoveAt(0); written++;
     }
     try { Pool.FrameArrived -= OnFrame; Sess.Dispose(); Pool.Dispose(); } catch (Exception) { }
+    Say(new Js().S("ev", "end").S("why", code == 3 ? "gone" : StdinClosed ? "stdin" : "reader").N("code", code)); // the window is released
     return code;
   }
   static void PutU32(byte[] b, int at, uint v) { b[at] = (byte)v; b[at + 1] = (byte)(v >> 8); b[at + 2] = (byte)(v >> 16); b[at + 3] = (byte)(v >> 24); }
@@ -250,7 +254,7 @@ static class W {
   static int Main(string[] argv) {
     for (int i = 1; i < argv.Length; i++) { if (argv[i].StartsWith("--")) { A[argv[i]] = i + 1 < argv.Length && !argv[i + 1].StartsWith("--") ? argv[i + 1] : "1"; } }
     string mode = argv.Length > 0 ? argv[0] : "";
-    if (mode == "capture") Log = Console.Error;
+    Log = new StreamWriter(mode == "capture" ? Console.OpenStandardError() : Console.OpenStandardOutput(), new UTF8Encoding(false)); // capture: stdout carries the frames
     SetProcessDpiAwarenessContext(new IntPtr(-4)); // per-monitor v2: every rectangle in physical pixels, like the frames
     long hv; IntPtr hwnd = new IntPtr(long.TryParse(Arg("--hwnd", "0"), NumberStyles.Integer, CultureInfo.InvariantCulture, out hv) ? hv : 0);
     try {

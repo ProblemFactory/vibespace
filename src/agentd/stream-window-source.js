@@ -22,6 +22,16 @@
  *   Chromium window stopped painting). ENDS, BY NAME: `window_gone` (closed — the helper says so, or it ends 3),
  *   `helper_missing` (no helper / it cannot start), `helper_exited` (it died — its last stderr line logged), `encoder_exited`,
  *   `capture_failed`. Never minimized, hidden, moved or raised by us.
+ * STOP, BY NAME (lane stream-window-fixes): stop(why) closes the helper's and the encoder's stdin first — the helper disposes its
+ *   capture session (the window is released, its `end` line) and exits 0, ffmpeg flushes and exits — and kills what is still
+ *   running after STOP_GRACE_MS; the log line names why (the person's × = `closed`, 停止串流 = `stopped`, the picker's 停止,
+ *   the viewer gone) with each exit and the time it took. Both are plain children: an agent that dies closes their stdin too.
+ * THE RATE (lane stream-window-fixes): werift's estimate is min(send, receive) of OUR packets — noise around what we sent — so
+ *   each sample is kept with what the source sent (its access units' bytes) and src/stream-plan.js windowRateDecision judges the
+ *   median of the last 2 s: an echo changes nothing, a shortfall that holds 2 s steps down — never under the window's floor
+ *   (windowKbpsFloor, at each new size) — and the rate climbs back after 20 s without one. The intra-refresh road (plan.refresh)
+ *   has no periodic key frame: a viewer's ask (PLI) restarts the encoder — its first picture is a key frame — at most every
+ *   KEY_GAP_MS.
  */
 const crypto = require('crypto');
 const SP = require('../stream-plan.js');
@@ -29,6 +39,8 @@ const SW = require('../stream-window.js');
 
 const RUN_MS = 20000;
 const HELD_TICK_MS = 250;
+const STOP_GRACE_MS = 1000;
+const KEY_GAP_MS = 2000;
 const TAIL = 3;
 const named = (code, error) => ({ ok: false, code, error });
 /** This agent's own window capability — the verdict's id + platform checks, asked here again (never the hub's word alone). */
@@ -134,10 +146,11 @@ function createWindowSource({ platform = process.platform, spawn, execFile, env 
   }
 
   function windowSource(plan, maxKbps, row) {
-    const st = { frames: 0, fresh: 0, aus: 0, dropped: 0, restarts: 0, sizes: 0, keyWaitMs: null, keysAnswered: 0, encode: [], map: [], startedAt: null, helper: null, border: null };
+    const st = { frames: 0, fresh: 0, aus: 0, dropped: 0, restarts: 0, keyRestarts: 0, sizes: 0, keyWaitMs: null, keysAnswered: 0, encode: [], map: [], startedAt: null, helper: null, border: null, end: null, rate: null };
     const live = { bounds: { ...plan.window.bounds }, display: plan.window.display, dpi: plan.window.dpi, minimized: plan.window.minimized, covered: false, cls: (row && row.cls) || null };
-    let onAu = null, onEnd = null, stopped = false, kbps = plan.kbps, rateAt = 0, keyAskedAt = null, t0 = 0, lastTs = -1, lastFreshAt = 0, held = null, heldTimer = null;
-    let cap = null, enc = null, encSize = null, encClock = [];
+    let onAu = null, onEnd = null, stopped = false, kbps = Math.max(plan.kbps, plan.floor || 0), floor = plan.floor || 0, rateAt = 0, keyAskedAt = null, t0 = 0, lastTs = -1, lastFreshAt = 0, held = null, heldTimer = null;
+    let cap = null, enc = null, encSize = null, encClock = [], encAus = 0, encAt = 0, shortAt = 0, shortSince = 0;
+    const sent = [], samples = []; // [at, bytes] per access unit · [at, kbps] per estimate — the rate rule's last 2 s
     const procs = new Set();
     const tail = [];
     const kill = (c) => { if (c && c.exitCode == null && !c.killed) { try { c.kill(); } catch { /* gone */ } } };
@@ -154,7 +167,7 @@ function createWindowSource({ platform = process.platform, spawn, execFile, env 
     function startEncoder(w, h) {
       const c = spawn(plan.ffmpeg, SP.windowEncodeArgv(plan, { w, h, kbps }), { env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
       const etail = [];
-      c.asked = false; procs.add(c); enc = c; encSize = { w, h };
+      c.asked = false; c.role = 'encoder'; procs.add(c); enc = c; encSize = { w, h }; encAus = 0; encAt = now();
       const clock = encClock = [];
       c.stderr.on('data', (d) => { for (const l of String(d).split(/\r?\n/)) if (l.trim()) { etail.push(l.trim().slice(0, 200)); if (etail.length > TAIL) etail.shift(); } });
       c.on('error', (e) => { procs.delete(c); if (!c.asked) finish('encoder_exited', `encoder: ${e && (e.code || e.message)}`); });
@@ -168,7 +181,8 @@ function createWindowSource({ platform = process.platform, spawn, execFile, env 
           const at = clock.shift();
           if (at != null) { st.encode.push(now() - at); if (st.encode.length > 30) st.encode.shift(); }
           const ts = Math.max(lastTs + 1, Math.round(((at != null ? at : now()) - t0) * 90));
-          lastTs = ts; st.aus++;
+          lastTs = ts; st.aus++; encAus++;
+          sent.push([now(), ev.nalus.reduce((n, x) => n + x.length, 0)]);
           if (ev.key && keyAskedAt != null) { st.keyWaitMs = now() - keyAskedAt; st.keysAnswered++; keyAskedAt = null; }
           try { onAu({ nalus: ev.nalus.filter((n) => (n[0] & 0x1f) !== 9).map((n) => Buffer.from(n.buffer, n.byteOffset, n.length)), key: ev.key, ts90k: ts >>> 0 }); } catch { /* the host's */ }
         }
@@ -206,7 +220,9 @@ function createWindowSource({ platform = process.platform, spawn, execFile, env 
       if (head.fresh) { st.fresh++; lastFreshAt = now(); }
       st.frames++;
       if (!encSize || encSize.w !== head.w || encSize.h !== head.h) { // the window's size changed (or the first frame): the encoder restarts at it
-        if (encSize) { st.sizes++; log(`[stream] window source: ${encSize.w}×${encSize.h} → ${head.w}×${head.h} — the encoder restarts`); }
+        floor = SP.windowKbpsFloor({ w: head.w, h: head.h, fps: plan.fps, cap: maxKbps }); // the rate floor follows the window's size
+        if (kbps < floor) kbps = floor;
+        if (encSize) { st.sizes++; log(`[stream] window source: ${encSize.w}×${encSize.h} → ${head.w}×${head.h} — the encoder restarts (${kbps} kbps, floor ${floor})`); }
         retireEncoder(); startEncoder(head.w, head.h);
       }
       if (plan.fmt !== 'f16') { writeEnc(buf, at, () => releaseBuf(buf)); return; }
@@ -244,11 +260,12 @@ function createWindowSource({ platform = process.platform, spawn, execFile, env 
       } else if (e.ev === 'open') { st.border = e.border === false ? 'off' : e.borderErr ? 'on' : null; if (e.cls) live.cls = e.cls; }
       else if (e.ev === 'stats') st.helper = { arrived: e.arrived, written: e.written, repeats: e.repeats, copyMs: e.copyP50, writeMs: e.writeP50 };
       else if (e.ev === 'gone') finish('window_gone', 'the window closed');
+      else if (e.ev === 'end') st.end = { why: String(e.why || ''), code: e.code };
       else if (e.ev === 'error') { tail.push(String(e.error || '').slice(0, 200)); if (tail.length > TAIL) tail.shift(); }
     }
     function startHelper() {
       const c = spawn(plan.helper, SP.wgcCaptureArgv(plan), { env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
-      c.asked = false; procs.add(c); cap = c;
+      c.asked = false; c.role = 'helper'; procs.add(c); cap = c;
       let rest = '';
       c.stderr.on('data', (d) => {
         const lines = (rest + String(d)).split(/\r?\n/); rest = lines.pop();
@@ -280,30 +297,54 @@ function createWindowSource({ platform = process.platform, spawn, execFile, env 
         if (keyAskedAt == null) keyAskedAt = t0;
         try { startHelper(); } catch (e) { finish('helper_missing', String((e && e.message) || e)); return; }
         heldTimer = setInterval(judgeHeld, HELD_TICK_MS); heldTimer.unref?.();
-        log(`[stream] window source: ${plan.mode}, window ${plan.window.id} ${plan.w}×${plan.h} @ ${plan.fps} fps (interval ${plan.interval} ms), ${plan.encoder.label} ${kbps} kbps${plan.white ? `, white ${plan.white}` : ''}`);
+        log(`[stream] window source: ${plan.mode}, window ${plan.window.id} ${plan.w}×${plan.h} @ ${plan.fps} fps (interval ${plan.interval} ms), ${plan.encoder.label} ${kbps} kbps (floor ${floor}), ${plan.refresh ? 'intra refresh' : `key frame every ${plan.gop} frames`}${plan.white ? `, white ${plan.white}` : ''}`);
       },
-      stop() {
+      /** The session ends (the host's stop — `why` = its name): stdin closed first (the helper releases the window and exits
+       *  0, ffmpeg flushes), what still runs after STOP_GRACE_MS is killed; one log line names why, each exit and the time. */
+      stop(why = 'stopped') {
         if (stopped) return;
         stopped = true; clearInterval(heldTimer);
-        for (const c of procs) { c.asked = true; try { c.stdin && c.stdin.end(); } catch { } kill(c); }
+        const t = now(), left = [...procs];
+        for (const c of left) { c.asked = true; try { c.stdin && c.stdin.end(); } catch { /* gone */ } }
+        const exits = left.map((c) => (c.exitCode != null || c.signalCode != null ? Promise.resolve(c.exitCode != null ? c.exitCode : c.signalCode) : new Promise((res) => c.once('exit', (code, sig) => res(code == null ? sig : code)))));
+        const grace = setTimeout(() => { for (const c of left) kill(c); }, STOP_GRACE_MS); grace.unref?.();
+        Promise.all(exits).then((codes) => {
+          clearTimeout(grace);
+          log(`[stream] window source ended: ${why} — ${left.map((c, i) => `${c.role || 'child'} exit ${codes[i]}`).join(', ') || 'nothing running'} in ${now() - t} ms${st.end ? ` (the helper released the window: ${st.end.why})` : ''}`);
+        });
         if (worker) { try { worker.terminate(); } catch { } worker = null; }
       },
-      requestKeyframe() { if (keyAskedAt == null) keyAskedAt = now(); },
+      requestKeyframe() {
+        if (keyAskedAt == null) keyAskedAt = now();
+        // the intra-refresh road has no periodic key frame: a viewer's ask restarts the encoder (its first picture is a key
+        // frame) — not before the running encoder's first picture (that IS one), at most every KEY_GAP_MS
+        if (!plan.refresh || stopped || !enc || !encSize || encAus === 0 || now() - encAt < KEY_GAP_MS) return;
+        st.keyRestarts++;
+        const { w, h } = encSize; retireEncoder(); startEncoder(w, h);
+        log('[stream] window source: a key frame asked — the encoder restarted (the intra-refresh road has no periodic key frame)');
+      },
       setTargetKbps(target) {
         if (!onAu || stopped) return;
-        const d = SP.kbpsDecision({ current: kbps, target, cap: maxKbps, lastAt: rateAt, now: now() });
+        const t = now(), span = SP.WINDOW_RATE_RULE.windowMs;
+        samples.push([t, Number(target)]);
+        while (samples.length && t - samples[0][0] > span) samples.shift();
+        while (sent.length && t - sent[0][0] > span) sent.shift();
+        const d = SP.windowRateDecision({ current: kbps, cap: maxKbps, floor, samples: samples.map((x) => x[1]), sentKbps: (sent.reduce((n, x) => n + x[1], 0) * 8) / span, lastAt: rateAt, shortAt, shortSince, now: t });
+        if (d.why !== 'wait') shortSince = d.shortSince || 0;
+        if (d.why === 'shortfall' || d.why === 'hold') shortAt = t;
+        st.rate = { why: d.why, median: d.median == null ? null : Math.round(d.median) };
         if (!d.change) return;
-        kbps = d.kbps; rateAt = now(); st.restarts++;
+        kbps = d.kbps; rateAt = t; st.restarts++;
         if (encSize) { const { w, h } = encSize; retireEncoder(); startEncoder(w, h); }
-        log(`[stream] window source: encoder restarted at ${kbps} kbps`);
+        log(`[stream] window source: encoder restarted at ${kbps} kbps (${d.why}: the estimate's median ${Math.round(d.median)} kbps, floor ${floor})`);
       },
       stats() {
         return {
-          mode: plan.mode, encoder: plan.encoder.label, encoderId: plan.encoder.id, note: plan.note, kbps, white: plan.white,
+          mode: plan.mode, encoder: plan.encoder.label, encoderId: plan.encoder.id, note: plan.note, kbps, floor, rate: st.rate, refresh: plan.refresh ? 'intra' : 'gop', white: plan.white,
           w: encSize ? encSize.w : plan.w, h: encSize ? encSize.h : plan.h, held, border: st.border,
           window: { id: plan.window.id, title: plan.window.title, app: plan.window.app, bounds: { ...live.bounds }, display: live.display, dpi: live.dpi, minimized: live.minimized, covered: live.covered },
           encodeMs: median(st.encode), timing: 'agent', mapMs: median(st.map), captured: st.frames, fresh: st.fresh, aus: st.aus, dropped: st.dropped,
-          restarts: st.restarts, sizes: st.sizes, keyWaitMs: st.keyWaitMs, keysAnswered: st.keysAnswered, helper: st.helper,
+          restarts: st.restarts, keyRestarts: st.keyRestarts, sizes: st.sizes, keyWaitMs: st.keyWaitMs, keysAnswered: st.keysAnswered, helper: st.helper,
         };
       },
     };

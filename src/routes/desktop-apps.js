@@ -85,7 +85,7 @@
  *   GET  /api/desktop/machine-desktop/remoteapp/facts?host=   the first connection (pins the certificate); `facts` = the machine's
  *                                     Remote Desktop facts ({ok, facts, rows, ready} | agent_too_old {have, need})
  *   GET  /api/desktop/machine-desktop/stream/windows?host=  lane stream-p2w-build: the machine's application windows (the
- *                                     one-window picker — {ok, windows: [{id, title, app, bounds, dpi, minimized…}]} |
+ *                                     one-window picker — {ok, windows: [{id, title, app, bounds, dpi, minimized…, streaming}]} |
  *                                     agent_too_old; a Mac's too — int304) · POST …/stream/restore {host, window} (a minimized
  *                                     Windows window back, no focus)
  *   POST /api/desktop/machine-desktop/stream/start {host, source?, fp16?}   lane stream-p1a-transport (design q-041 r2): the machine's desktop
@@ -94,8 +94,9 @@
  *                                     as a WebRTC stream from its agent — {take: false, code, why} (the window shows the VNC
  *                                     picture) | {take: true, key, sid, offer, source, codec, seq}; then, by `key`:
  *   POST …/stream/answer {key, sdp} · …/stream/candidate {key, candidate} · …/stream/restart {key} (an ICE-restart offer) ·
- *   …/stream/stop {key, why?} · GET …/stream/watch?key&n&seq[&path] (THE LONG POLL: the agent's candidates from index n,
- *   the state, the agent's numbers, `ended`) · GET …/stream/facts?host=[&machine=1[&force=1]] (the sessions' record; `machine`
+ *   …/stream/stop {key, why?} | {host, window, why?} (every stream of that window — the picker's 停止; lane stream-window-fixes) ·
+ *   GET …/stream/watch?key&n&seq[&path] (THE LONG POLL: the agent's candidates from index n, the state, the agent's numbers,
+ *   `ended`; its connection closing before the answer = the viewer may be gone — no new poll within goneMs stops it) · GET …/stream/facts?host=[&machine=1[&force=1]] (the sessions' record; `machine`
  *                                     adds the agent's screen-source facts — HDR + SDR white per display, its ffmpeg, the
  *                                     primary display's plan; lane stream-p1b-screen). People only.
  *   GET  /api/desktop/install-plan?host=     the xpra INSTALL RUNG's plan for a machine (its facts +
@@ -526,7 +527,12 @@ router.get('/api/desktop/machine-desktop/stream/windows', async (req, res) => {
   if (humanOnly(req, res)) return;
   const host = hostParam(req, res); if (!host) return;
   if (!ctx.access || typeof ctx.access.streamWindows !== 'function') return noAccess(res);
-  try { res.json(await ctx.access.streamWindows(host)); } catch (e) { fail(res, e); }
+  try {
+    const r = await ctx.access.streamWindows(host);
+    // lane stream-window-fixes: which of them a stream shows now (this hub's sessions, whichever browser opened them)
+    const wr = ctx.webrtc || webrtc, on = new Set(wr ? wr.facts(host).filter((s) => s.windowId && !s.ended).map((s) => s.windowId) : []);
+    res.json(r && Array.isArray(r.windows) ? { ...r, windows: r.windows.map((w) => ({ ...w, streaming: on.has(String(w.id)) })) } : r);
+  } catch (e) { fail(res, e); }
 });
 router.post('/api/desktop/machine-desktop/stream/restore', async (req, res) => {
   if (humanOnly(req, res)) return;
@@ -556,12 +562,21 @@ router.get('/api/desktop/machine-desktop/stream/watch', async (req, res) => {
   const wr = webrtcOf(res); if (!wr) return;
   const key = streamKey(req);
   if (req.query.path) wr.notePath(key, String(req.query.path));
+  res.on('close', () => { if (!res.writableFinished) wr.pollGone(key); }); // closed before its answer: the tab closed / the browser quit (lane stream-window-fixes)
   res.json(await wr.poll(key, Number(req.query.n) || 0, Number(req.query.seq ?? -1), Number(req.query.waitMs) || undefined));
 });
 router.post('/api/desktop/machine-desktop/stream/stop', async (req, res) => {
   if (humanOnly(req, res)) return;
   const wr = webrtcOf(res); if (!wr) return;
-  const why = String((req.body && req.body.why) || 'stopped').replace(/[^a-z_]/g, '').slice(0, 40) || 'stopped';
+  const b = req.body || {};
+  const why = String(b.why || 'stopped').replace(/[^a-z_]/g, '').slice(0, 40) || 'stopped';
+  if (b.window != null) { // lane stream-window-fixes: the picker's 停止 — every stream of that window
+    const host = hostParam(req, res); if (!host) return;
+    const id = String(b.window);
+    if (!WINDOW_ID_RE.test(id)) { res.status(400).json({ error: 'window is the machine\'s window id (a whole number)', code: 'bad-request' }); return; }
+    res.json(await wr.stopWindow(host, id, why));
+    return;
+  }
   res.json(await wr.stop(streamKey(req), why));
 });
 router.get('/api/desktop/machine-desktop/stream/facts', async (req, res) => {

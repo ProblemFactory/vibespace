@@ -22,6 +22,8 @@
  *                              WINDOW_GAP_MS while the window is minimized), `window_covered_idle` (a covered Chromium /
  *                              Electron window stops painting — its own occlusion tracking — no fresh frame for WINDOW_IDLE_MS)
  *   WINDOW_ENDS                the source's ends by name (the session's `ended`)
+ *   windowHeldDoor(held)       what the window's strip shows for a held state (lane stream-window-fixes): the minimized row —
+ *                              its sentence + 「还原它」 — ONLY while the source says window_minimized; never a bare button
  *   windowInputOf(ev, bounds)  a pointer event in WINDOW pixels (the page maps the <video> to the frame; the window's place is
  *                              the daemon's — it moves while streamed) → the machine's desktop: the window's origin added, the
  *                              point held inside the window (a press never lands beside it); keys pass unchanged
@@ -102,6 +104,15 @@ function windowHeldVerdict({ minimized = false, covered = false, cls = null, fre
   return null;
 }
 
+/** THE HELD DOOR (lane stream-window-fixes — 「还原它」 sat top-right of the window at all times: viewers.css's `.file-tool-btn
+ *  { display: flex }` out-ranks the `hidden` attribute, so hiding the button never hid it). → { row: 'minimized' | 'covered' |
+ *  null, restore } — the restore door only with the minimized row (its sentence says the stream is paused). */
+function windowHeldDoor(held) {
+  if (held === 'window_minimized') return { row: 'minimized', restore: true };
+  if (held === 'window_covered_idle') return { row: 'covered', restore: false };
+  return { row: null, restore: false };
+}
+
 const POINTER = new Set(['mv', 'md', 'mu', 'wh']);
 /** A validated input event in window pixels → the machine's desktop (origin added, held inside the window). */
 function windowInputOf(ev, bounds) {
@@ -123,5 +134,5 @@ function windowViewSize(src, room = {}) {
 
 module.exports = {
   WINDOW_KIND, WINDOW_CAPABILITY, WINDOW_PLATFORMS, WINDOW_MIN_SIDE, WINDOW_GAP_MS, WINDOW_IDLE_MS, CHROMIUM_CLASSES, WINDOW_HELD, WINDOW_ENDS,
-  windowSourceOf, windowSourceVerdict, windowPickRows, windowHeldVerdict, windowInputOf, windowViewSize,
+  windowSourceOf, windowSourceVerdict, windowPickRows, windowHeldVerdict, windowHeldDoor, windowInputOf, windowViewSize,
 };

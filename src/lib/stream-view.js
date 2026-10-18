@@ -24,7 +24,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const BASE = '/api/desktop/machine-desktop/stream';
 
 /** `opts` = { hostId, hostPlatform?, source?, fp16?, onStatus(state, code), onStats(page, agent), onFallback(code, why, taken),
- *  onInput(refused), onSource(source) } → { connect(), dispose(), focus(), get state, stats(), agent(), source(), video } */
+ *  onInput(refused), onSource(source) } → { connect(), dispose(why?), focus(), get state, stats(), agent(), source(), video } —
+ *  dispose(why) names the end for the hub and the machine's log ('closed' = the window's ×; 'stopped' = the person's 停止串流 —
+ *  lane stream-window-fixes) */
 export function createStreamView(host, opts = {}) {
   const { hostId } = opts;
   const video = document.createElement('video');
@@ -34,7 +36,7 @@ export function createStreamView(host, opts = {}) {
   video.tabIndex = 0;
   host.append(video);
   let st = { state: 'idle', restarts: 0 };
-  let pc = null, dc = null, key = null, n = 0, seq = -1, origin = { x: 0, y: 0 }, taken = false, why = null, disposed = false;
+  let pc = null, dc = null, key = null, n = 0, seq = -1, origin = { x: 0, y: 0 }, taken = false, why = null, disposed = false, closeWhy = 'closed';
   let polling = false, statsTimer = null, connectTimer = null, prev = null, page = null, agent = null, pathSent = null, pcSince = 0;
   let source = null; // the offer's source facts (a window's: {kind: 'window', window: {id, title, app, w, h, dpi, display}})
   let hubRelay = null; // lane stream-relay-udp: the hub relay's facts (the long poll's `relay` — which way it forwards: udp | link)
@@ -50,7 +52,7 @@ export function createStreamView(host, opts = {}) {
     if (r.action === 'start') start();
     else if (r.action === 'restart') restart();
     else if (r.action === 'fallback') fallback(r.code);
-    else if (r.action === 'dispose') teardown('closed');
+    else if (r.action === 'dispose') teardown(closeWhy);
   }
   function armConnectTimer() {
     clearTimeout(connectTimer);
@@ -64,7 +66,7 @@ export function createStreamView(host, opts = {}) {
   }
   async function start() {
     const r = await post(`${BASE}/start`, { host: hostId, ...(opts.source ? { source: opts.source, ...(opts.fp16 ? { fp16: true } : {}) } : {}) }).catch(() => null); // opts.source: a display / ONE window (a Mac's or a Windows machine's — int304's one door)
-    if (disposed) { if (r && r.key) post(`${BASE}/stop`, { key: r.key, why: 'closed' }); return; }
+    if (disposed) { if (r && r.key) post(`${BASE}/stop`, { key: r.key, why: closeWhy }); return; }
     if (!r || r.error || !r.take) { why = (r && (r.why || r.error)) || null; step('refused', (r && r.code) || 'start_failed'); return; }
     taken = true; key = r.key;
     origin = (r.source && r.source.origin) || { x: 0, y: 0 };
@@ -216,6 +218,6 @@ export function createStreamView(host, opts = {}) {
     // the device link | relay) and the machine's firewall fact ({command} = the owner's admin line, null where none is safe)
     path: () => relayPathOf(page, hubRelay || (agent && agent.relay)),
     firewall: () => (agent && agent.directInbound && agent.directInbound.verdict === 'blocked' ? { command: firewallRuleCommand(agent.directInbound.program) } : null),
-    dispose() { disposed = true; step('close'); teardown('closed'); },
+    dispose(reason = 'closed') { disposed = true; closeWhy = String(reason || 'closed'); step('close'); teardown(closeWhy); },
   };
 }

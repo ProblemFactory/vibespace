@@ -31,6 +31,14 @@
 //   ⑩ THE MACHINE'S OWN SCREEN (lane stream-p1b-screen): a fake ffmpeg.exe + PowerShell facts (an HDR primary, SDR white
 //      200 nits): the HDR road plays, the strip reads NVENC · 编码 N ms, the chip's title says the HDR was mapped on the
 //      machine; the capture ffmpeg dies ⇒ 串流停了（机器的屏幕采集停了）and the VNC picture signs in and draws   screen.png, screen-fallback.png
+//   ⑪ ONE WINDOW as the stream (lane stream-window-fixes — the owner's first real use): the agent's REAL window source (a fake
+//      csc "builds" a fake vibespace-wgc whose window is titled 中文窗口 🎨 测试) in the real src/lib/machine-app.js window: the
+//      title intact, THE stats row of the whole screen's window (往返 · 抖动 · fps · 解码 · kbps · NVENC · 编码); no 「还原它」 while
+//      live (and the measured cause: a hidden .file-tool-btn computes display:flex); minimized on the machine ⇒ the row
+//      窗口在…上被最小化了——串流暂停 + 「还原它」, which asks the helper to restore THAT window, then goes when live again; the
+//      picker marks the window 正在串流 with 「停止」; 「停止串流」, the picker's 「停止」 and the window's × each end the session on
+//      the hub AND the machine's helper (by name, in the agent's log); a viewer that vanishes (its tab gone, no word) ends it
+//      within 5 s — RED CONTROL: a hub that never acts on the closed poll still streams at 6 s       window-*.png
 // PNGs when `--shots <dir>`.
 import fs from 'node:fs';
 import net from 'node:net';
@@ -41,6 +49,7 @@ import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { freePort, scratch, endDaemonsOf, ONBOARDED_SOURCE } from './scratch.mjs';
 import { writeFakeFfmpeg, factsLine, calibrationFrame } from './fixtures/stream/screen-fakes.mjs';
+import { writeFakeWgc, writeFakeCsc } from './fixtures/stream/window-fakes.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
@@ -81,23 +90,35 @@ let buf = ''; process.stdin.setEncoding('utf8');
 process.stdin.on('data', (d) => { buf += d; let i; while ((i = buf.indexOf('\\n')) >= 0) { const l = buf.slice(0, i).trim(); buf = buf.slice(i + 1); fs.appendFileSync(${JSON.stringify(PS_LOG)}, l + '\\n'); process.stdout.write(((l[0] === 'D' || (l[0] === 'K' && l.endsWith(' 0'))) && fs.existsSync(${JSON.stringify(ELEVATED)}) ? 'uipi' : 'ok') + '\\r\\n'); } });
 `, { mode: 0o755 });
 const psLines = () => (fs.existsSync(PS_LOG) ? fs.readFileSync(PS_LOG, 'utf8').trim().split('\n').filter(Boolean) : []);
+// ⑪ (lane stream-window-fixes): the machine's window helper — %WINDIR% with its WinMetadata and the in-box csc (one Linux file name
+// each: the agent joins Windows paths with backslashes), a csc that "builds" the fake vibespace-wgc into %LOCALAPPDATA%
+const CJK = '中文窗口 🎨 测试', WPID = path.join(root, 'wgc.pid'), WLOG = path.join(root, 'wgc.log');
+const WROW = { hwnd: '657982', pid: 4242, cls: 'WindowsForms10.Window.8.app.0.1', title: CJK, exe: 'C:\\Program Files\\Lightroom\\Lightroom.exe', visible: true, min: false, cloaked: 0, tool: false, owner: '0', frame: [100, 80, 740, 440], dpi: 96, display: '\\\\.\\DISPLAY1', elevated: false, capturable: true };
+const WCAP = { w: 640, h: 360, frame: WROW.frame, dpi: 96, pidFile: WPID, script: [] };
+const wgc = writeFakeWgc(path.join(root, 'wgc'), { log: WLOG, windows: [WROW], capture: WCAP });
+const WINDIR = path.join(root, 'windows'), LAD = path.join(root, 'lad');
+fs.mkdirSync(`${WINDIR}\\System32\\WinMetadata`, { recursive: true });
+for (const f of ['Windows.Foundation.winmd', 'Windows.Graphics.winmd']) fs.writeFileSync(path.join(`${WINDIR}\\System32\\WinMetadata`, f), '');
+writeFakeCsc(`${WINDIR}\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe`, { helper: wgc.exe });
+const wgcLines = () => (fs.existsSync(WLOG) ? fs.readFileSync(WLOG, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
 const bundleText = fs.readFileSync(BUNDLE, 'utf8');
 const HELLO = /(op: "hello-ack",[\s\S]{0,200}?)platform: process\.platform,/;
 const INJ = /(createInjector\(\{\s*)platform: process\.platform,/;
 const SCR = /(createScreen\(\{\s*)platform: process\.platform,/;
-ok(HELLO.test(bundleText) && INJ.test(bundleText) && SCR.test(bundleText) && /"stream-offer"/.test(bundleText) && /"stream-screen"/.test(bundleText), 'the bundle carries the hello-ack platform, THE injector\'s, THE screen source\'s and the stream-offer / stream-screen capabilities (the copy patches exactly those)');
+const WSRC = /(createWindowSource\(\{\s*)platform: process\.platform,/; // ⑪: THE window source, Windows-shaped
+ok(HELLO.test(bundleText) && INJ.test(bundleText) && SCR.test(bundleText) && WSRC.test(bundleText) && /"stream-offer"/.test(bundleText) && /"stream-screen"/.test(bundleText), 'the bundle carries the hello-ack platform, THE injector\'s, THE screen source\'s and the stream-offer / stream-screen capabilities (the copy patches exactly those)');
 fs.mkdirSync(path.join(root, 'bundle'), { recursive: true });
 // lane stream-relay-udp: the copy's firewall drops its self-probe (no probe datagram is heard ⇒ directInbound blocked) and it names
 // a Windows node.exe (the page builds the owner's admin line from it)
 const PROBE = 'const i = tokens.findIndex((tk) => tk.equals(m));', PROGRAM = 'program: process.platform === "win32" ? process.execPath : null';
 const NODE_EXE = 'C:\\Users\\owner\\AppData\\Local\\vibespace\\node\\node.exe';
 ok(bundleText.split(PROBE).length === 2 && bundleText.split(PROGRAM).length === 2, 'the bundle carries the self-probe\'s receive line and the stream host\'s program (the copy patches exactly those)');
-fs.writeFileSync(path.join(root, 'bundle', 'vibespace-agentd.js'), bundleText.replace(HELLO, '$1platform: "win32",').replace(INJ, '$1platform: "win32",').replace(SCR, '$1platform: "win32",').replace(PROBE, 'const i = -1;').replace(PROGRAM, `program: ${JSON.stringify(NODE_EXE)}`));
+fs.writeFileSync(path.join(root, 'bundle', 'vibespace-agentd.js'), bundleText.replace(HELLO, '$1platform: "win32",').replace(INJ, '$1platform: "win32",').replace(SCR, '$1platform: "win32",').replace(WSRC, '$1platform: "win32",').replace(PROBE, 'const i = -1;').replace(PROGRAM, `program: ${JSON.stringify(NODE_EXE)}`));
 const { DeviceManager } = require(path.join(REPO, 'src/agentd/client.js'));
-process.env.HOME = home; process.env.VIBESPACE_AGENTD_ROOT = rootOf(home);
+process.env.HOME = home; process.env.VIBESPACE_AGENTD_ROOT = rootOf(home); process.env.WINDIR = WINDIR; process.env.LOCALAPPDATA = LAD; // ⑪: the helper's build recipe reads these
 const dataDir = path.join(home, 'hub-data'); fs.mkdirSync(dataDir, { recursive: true });
 dm = new DeviceManager({ dataDir, bundlePath: path.join(root, 'bundle', 'vibespace-agentd.js'), version: '0.0.0-t', nodeModules: path.join(REPO, 'node_modules'), log: () => { } });
-try { await dm.connect(); } finally { process.env.HOME = realHome; delete process.env.VIBESPACE_AGENTD_ROOT; }
+try { await dm.connect(); } finally { process.env.HOME = realHome; delete process.env.VIBESPACE_AGENTD_ROOT; delete process.env.WINDIR; delete process.env.LOCALAPPDATA; }
 ok(dm.status().info.platform === 'win32' && dm.status().info.capabilities.includes('stream-offer'), 'a real agent, Windows-shaped, says stream-offer');
 
 // ── the machine's VNC server for the fallback: a stub RFB 3.8, VNC-password sign-in, one 1280×720 green frame ─────────
@@ -147,6 +168,7 @@ const BASE = { access, stream: bridge, vnc: { status: async () => ({ available: 
 R.setup({ ...BASE });
 const esbuild = require(path.join(REPO, 'node_modules/esbuild'));
 const entry = `import { openMachineDesktop } from ${JSON.stringify(path.join(REPO, 'src/lib/machine-desktop.js'))};
+import { openWindowStream, openWindowPicker } from ${JSON.stringify(path.join(REPO, 'src/lib/machine-app.js'))};
 let n = 0;
 const wm = { windows: new Map(), revealWindow() {},
   createWindow({ title, type }) {
@@ -157,9 +179,12 @@ const wm = { windows: new Map(), revealWindow() {},
     el.append(bar, content); document.body.append(el);
     const w = { id, element: el, content, title, type }; wm.windows.set(id, w); return w; },
   closeWindow(id) { const w = wm.windows.get(id); if (!w) return; wm.windows.delete(id); w.onClose && w.onClose(); w.element.remove(); },
+  setTitle(id, t) { const w = wm.windows.get(id); if (w) w.element.querySelector('.vs-win-title').textContent = t; }, resizeWindowTo() {},
 };
 const app = { wm, _hideWelcome() {} };
 window.__open = (m) => { openMachineDesktop(app, m); return true; };
+window.__openWin = (m, row) => { openWindowStream(app, m, row); return true; }; // ⑪
+window.__picker = (m) => { openWindowPicker(app, m, {}); return true; };
 window.__closeAll = () => { for (const id of [...wm.windows.keys()]) wm.closeWindow(id); };
 // the binary band (16 cells × 80 px at y 640–700 of the 1280×720 picture), read off the <video>
 window.__band = () => { const v = document.querySelector('.vs-win .stream-video'); if (!v || !v.videoWidth) return null; const c = document.createElement('canvas'); c.width = v.videoWidth; c.height = v.videoHeight; const g = c.getContext('2d'); g.drawImage(v, 0, 0); let k = 0; for (let b = 0; b < 16; b++) { const d = g.getImageData(b * 80 + 40, 670, 1, 1).data; k = k * 2 + (d[0] > 128 ? 1 : 0); } return k; };`;
@@ -225,7 +250,8 @@ async function page(w, h, winCss, { at = '/', mac = false, touch = false } = {})
     fs.writeFileSync(path.join(SHOTS, file), Buffer.from(pic.result.data, 'base64'));
     console.log(`    (PNG ${path.join(SHOTS, file)})`);
   };
-  return { cdp, ev, until, click, tap, key, shot, close: async () => { await ev('window.__closeAll()').catch(() => { }); await sleep(300); ws.close(); await fetch(`http://127.0.0.1:${CDP_PORT}/json/close/${tg.id}`).catch(() => { }); } };
+  return { cdp, ev, until, click, tap, key, shot, close: async () => { await ev('window.__closeAll()').catch(() => { }); await sleep(300); ws.close(); await fetch(`http://127.0.0.1:${CDP_PORT}/json/close/${tg.id}`).catch(() => { }); },
+    vanish: async () => { ws.close(); await fetch(`http://127.0.0.1:${CDP_PORT}/json/close/${tg.id}`).catch(() => { }); } }; // ⑪: the tab gone, the page says nothing
 }
 const WIN = '.vs-win[data-type="machine-desktop"]';
 const M = { hostId: 'win-a', label: 'WIN-DESK1', setup: 'win32', code: 'desktop_ready', auth: 'password' };
@@ -427,6 +453,95 @@ console.log('⑩ the machine\'s own screen: the HDR road, NVENC on the strip —
   await p.shot('screen-fallback.png', WIN);
   await p.close();
   screenHub.shutdown();
+  R.setup({ ...BASE });
+}
+console.log('⑪ ONE WINDOW as the stream: the stats row, 「还原它」 only while minimized, and every way it ends on the machine');
+{
+  const WWIN = '.vs-win[data-type="machine-app"]';
+  const ROW = { id: '657982', title: CJK, app: 'Lightroom', bounds: { x: 100, y: 80, w: 640, h: 360 }, dpi: 96 };
+  const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  const untilN = async (f, ms) => { const t = Date.now(); while (Date.now() - t < ms) { if (f()) return true; await sleep(100); } return !!f(); };
+  const helperPid = () => (fs.existsSync(WPID) ? Number(fs.readFileSync(WPID, 'utf8')) : 0);
+  const agentLog = () => { const f = path.join(rootOf(home), 'state', 'agentd.log'); return fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : ''; };
+  const winHub = DW.create({ access: ACC.create({ hosts, install: false, log: quiet, vncPort: vnc.port, probeMs: 3000, env: () => ({}) }), log: quiet });
+  R.setup({ ...BASE, webrtc: winHub });
+  const MIN = { ev: 'window', min: true, frame: [-32000, -32000, -31840, -31972], display: '\\\\.\\DISPLAY1', dpi: 96, covered: false };
+  const BACK = { ev: 'window', min: false, frame: WROW.frame, display: '\\\\.\\DISPLAY1', dpi: 96, covered: false };
+  wgc.set({ capture: { ...WCAP, script: [{ at: 6000, fresh: false, ev: MIN }, { at: 13000, fresh: true, ev: BACK }] } });
+  const p = await page(1280, 800, DESK);
+  const plays = () => p.until(`(() => { const v = document.querySelector('${WWIN} .stream-video'); return !!v && v.videoWidth > 0 && v.currentTime > 0.2; })()`, 25000);
+  const vis = `const vis = (e) => !!e && getComputedStyle(e).display !== 'none' && e.getBoundingClientRect().width > 0;`;
+  const centreOf = (sel) => p.ev(`(() => { const b = document.querySelector(${JSON.stringify(sel)}).getBoundingClientRect(); return [Math.round(b.left + b.width / 2), Math.round(b.top + b.height / 2)]; })()`);
+  const sayText = () => p.ev(`(() => { const s = document.querySelector('${WWIN} .machine-app-say'); return s && getComputedStyle(s).display !== 'none' ? { text: s.firstChild.textContent, acts: [...s.querySelectorAll('button')].map((b) => b.textContent) } : null; })()`);
+  await p.ev(`window.__openWin(${JSON.stringify(M)}, ${JSON.stringify(ROW)})`);
+  const up = await plays();
+  await p.until(`/ · NVENC · 编码 \\d+ ms$/.test((document.querySelector('${WWIN} .machine-window-stats .desktop-strip-stream') || {}).textContent || '')`, 10000);
+  const s1 = await p.ev(`(() => { ${vis} const q = (sel) => document.querySelector('${WWIN} ' + sel); return { title: q('.vs-win-title').textContent, chip: q('.machine-window-chip').textContent, stats: q('.machine-window-stats .desktop-strip-stream').textContent, statsShown: vis(q('.machine-window-stats')), held: vis(q('.machine-window-held')), restore: vis(q('.machine-window-restore')), stop: vis(q('.machine-window-stop')) ? q('.machine-window-stop').textContent : null }; })()`);
+  ok(up && s1.title === `WIN-DESK1上的${CJK}` && /^串流 · \d+ ms · \d+ fps$/.test(s1.chip) && /^往返 \d+ ms · 抖动 \d+ ms · \d+ fps · 解码 [\d.]+ ms · \d+ kbps · NVENC · 编码 \d+ ms$/.test(s1.stats) && s1.statsShown, '⑪ the window stream plays, its title intact (CJK + emoji), with THE stats row of the whole screen\'s window: 往返 · 抖动 · fps · 解码 · kbps · NVENC · 编码', s1);
+  ok(!s1.held && !s1.restore && s1.stop === '停止串流', '⑪ live: no 「还原它」 (the held row is not shown); 「停止串流」 is', s1);
+  const cause = await p.ev(`(() => { const b = document.createElement('button'); b.className = 'file-tool-btn'; b.hidden = true; document.body.append(b); const d = getComputedStyle(b).display; b.remove(); return d; })()`);
+  ok(cause === 'flex', '⑪ the cause, measured in this page: a hidden .file-tool-btn computes display:flex (viewers.css out-ranks [hidden]) — the old bare 「还原它」 showed at all times', cause);
+  await p.shot('window-live.png', WWIN);
+  const minShown = await p.until(`(() => { ${vis} const r = document.querySelector('${WWIN} .machine-window-held'); return vis(r) && r.firstChild.textContent === '窗口在WIN-DESK1上被最小化了——串流暂停' && vis(document.querySelector('${WWIN} .machine-window-restore')); })()`, 15000);
+  ok(minShown, '⑪ minimized on the machine ⇒ the row 窗口在WIN-DESK1上被最小化了——串流暂停 + 「还原它」 appear — only now');
+  await p.shot('window-minimized.png', WWIN);
+  const rb = await centreOf(`${WWIN} .machine-window-restore`);
+  await p.click(rb[0], rb[1]);
+  ok(await untilN(() => wgcLines().some((a) => a[0] === 'restore' && a[2] === '657982'), 6000), '⑪ 「还原它」 asks the machine\'s helper to restore THAT window', wgcLines().slice(-3));
+  ok(await p.until(`getComputedStyle(document.querySelector('${WWIN} .machine-window-held')).display === 'none'`, 15000), '⑪ live again ⇒ the row goes');
+  await p.ev(`window.__picker(${JSON.stringify(M)})`);
+  const pick = await p.until(`(() => { const r = document.querySelector('.machine-window-picker .machine-window-row.is-streaming'); return !!r && r.textContent.includes('正在串流') && !!r.querySelector('.machine-window-row-stop'); })()`, 10000);
+  ok(pick, '⑪ the picker marks the window a stream shows now — 正在串流 — with 「停止」');
+  await p.shot('window-picker.png', '.machine-window-picker');
+  await p.key('Escape', 'Escape', 27);
+  // 停止串流: the session ends on the hub AND the helper on the machine; the window stays and says so
+  const pid1 = helperPid();
+  const sb = await centreOf(`${WWIN} .machine-window-stop`);
+  await p.click(sb[0], sb[1]);
+  const said1 = await p.until(`(() => { const s = document.querySelector('${WWIN} .machine-app-say'); return !!s && getComputedStyle(s).display !== 'none' && s.firstChild.textContent === '已停止串流“${CJK}”'; })()`, 8000) ? await sayText() : null;
+  ok(said1 && said1.acts[0] === '重新串流' && await untilN(() => winHub.facts('win-a').length === 0, 4000) && pid1 > 0 && await untilN(() => !alive(pid1), 4000), '⑪ 「停止串流」 ⇒ the hub\'s session ends and the machine\'s helper exits; the window stays: 已停止串流“…” + 「重新串流」', { said1, pid1, sessions: winHub.facts('win-a').length });
+  await p.shot('window-stopped.png', WWIN);
+  ok(await untilN(() => /window source ended: stopped — helper exit 0, encoder exit 0/.test(agentLog()), 4000), '⑪ the agent\'s log names it: window source ended: stopped — helper exit 0, encoder exit 0');
+  // 重新串流, then the picker's 停止 (any browser's session of that window)
+  const ag = await centreOf(`${WWIN} .machine-app-say button`);
+  await p.click(ag[0], ag[1]);
+  ok(await plays(), '⑪ 「重新串流」 streams it again');
+  const pid2 = helperPid();
+  await p.ev(`window.__picker(${JSON.stringify(M)})`);
+  await p.until(`!!document.querySelector('.machine-window-picker .machine-window-row-stop')`, 10000);
+  const ps = await centreOf('.machine-window-picker .machine-window-row-stop');
+  await p.click(ps[0], ps[1]);
+  const said2 = await p.until(`(() => { const s = document.querySelector('${WWIN} .machine-app-say'); return !!s && getComputedStyle(s).display !== 'none' && s.firstChild.textContent === '已停止串流“${CJK}”'; })()`, 10000);
+  const rowBack = await p.until(`(() => { const r = document.querySelector('.machine-window-picker .machine-window-row'); return !!r && !r.classList.contains('is-streaming') && r.textContent.includes('串流这个窗口'); })()`, 5000);
+  ok(said2 && rowBack && pid2 !== pid1 && await untilN(() => !alive(pid2), 4000) && winHub.facts('win-a').length === 0 && /window source ended: stopped_in_list/.test(agentLog()), '⑪ the picker\'s 「停止」 ends that window\'s stream on the machine (stopped_in_list); the open window says 已停止串流, the row offers 串流这个窗口 again', { said2, rowBack, pid2 });
+  await p.key('Escape', 'Escape', 27);
+  // the window's ×
+  const ag2 = await centreOf(`${WWIN} .machine-app-say button`);
+  await p.click(ag2[0], ag2[1]);
+  await plays();
+  const pid3 = helperPid();
+  await p.ev('window.__closeAll()');
+  ok(await untilN(() => winHub.facts('win-a').length === 0, 3000) && await untilN(() => !alive(pid3), 4000) && await untilN(() => /window source ended: closed — helper exit 0/.test(agentLog()), 3000), '⑪ the window\'s × ends the session and the helper on the machine (closed, in the agent\'s log)', { pid3 });
+  await p.close();
+  // a viewer that vanishes: its tab gone, not a word — the closed long poll ⇒ stopped within 5 s
+  const vanish = async (hub) => {
+    R.setup({ ...BASE, webrtc: hub });
+    const q = await page(1280, 800, DESK);
+    await q.ev(`window.__openWin(${JSON.stringify(M)}, ${JSON.stringify(ROW)})`);
+    const ok1 = await q.until(`(() => { const v = document.querySelector('${WWIN} .stream-video'); return !!v && v.videoWidth > 0 && v.currentTime > 0.2; })()`, 25000);
+    const pid = helperPid(), t0 = Date.now();
+    await q.vanish();
+    const gone = await untilN(() => hub.facts('win-a').length === 0 && !alive(pid), 6000);
+    return { ok1, gone, ms: Date.now() - t0, pid };
+  };
+  const v1 = await vanish(winHub);
+  ok(v1.ok1 && v1.gone && v1.ms <= 5500 && /window source ended: viewer_gone/.test(agentLog()), `⑪ the viewer vanishes (its tab closed, no stop asked) ⇒ the hub stops it (viewer_gone) and the machine's helper exits — ${v1.ms} ms`, v1);
+  const deaf = DW.create({ access: ACC.create({ hosts, install: false, log: quiet, vncPort: vnc.port, probeMs: 3000, env: () => ({}) }), log: quiet, goneMs: 600000 });
+  const v2 = await vanish(deaf);
+  ok(v2.ok1 && !v2.gone && deaf.facts('win-a').length === 1 && alive(v2.pid), '⑪ RED CONTROL: a hub that never acts on the closed poll (goneMs 10 min) still streams 6 s after the tab is gone — the idle sweep would wait 30 s', { v2, sessions: deaf.facts('win-a').length });
+  deaf.shutdown();
+  await untilN(() => !alive(v2.pid), 4000);
+  winHub.shutdown();
   R.setup({ ...BASE });
 }
 ok((await sessions()).length === 0, 'every window closed ⇒ no stream session left on the hub');

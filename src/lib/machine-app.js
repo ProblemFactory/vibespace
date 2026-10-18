@@ -21,15 +21,19 @@
 //     src/stream-window.js windowViewSize) inside the workspace, aspect kept; the title is the app's
 //   • input = the stream's own road (the <video>'s pointer + keys; the agent adds the window's live place — src/stream-window.js
 //     windowInputOf); it lands where the window is visible on its machine, like a person's own click
-//   • held, by name (the stream lives on): minimized (「还原它」 brings it back without the focus) · covered and not drawing
+//   • held, by name (the stream lives on): minimized (its row: the sentence + 「还原它」, which brings it back without the focus —
+//     shown ONLY while minimized) · covered and not drawing
+//   • lane stream-window-fixes: THE STATS ROW of the whole screen's window (src/lib/stream-stats.js), 「停止串流」 (the window
+//     stays, 「重新串流」), × ends it on the machine too; the picker marks a window a stream shows now, with 「停止」
 import { t } from './i18n.js';
 import { fetchJson, createModalShell, showToast, uiScale } from './utils.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { createVncView, streamUrl } from './vnc-view.js';
 import { createStreamView } from './stream-view.js';
+import { createStreamStats } from './stream-stats.js'; // lane stream-window-fixes: THE stats row (the whole screen's window shows it too)
 import { machineDesktopId } from '../machine-desktop-model.js';
 import { cropLayout, paneToMachine, clampToBox } from '../machine-window.js';
-import { windowViewSize } from '../stream-window.js';
+import { windowViewSize, windowHeldDoor } from '../stream-window.js';
 
 const nameOf = (m) => String((m && (m.label || m.hostId)) || ''); // peer-controlled text: textContent only
 const el = (tag, css, text) => { const e = document.createElement(tag); if (css) e.style.cssText = css; if (text != null) e.textContent = text; return e; };
@@ -199,9 +203,9 @@ export function openMachineApp(app, m, { cmd = '', track = {}, view: viewOpts = 
 const STREAM_BASE = '/api/desktop/machine-desktop/stream';
 /** The words of a one-window stream's held state or its end (PURE over the code; titles are peer text: textContent only). */
 export function windowStreamText(code, { title = '', machine = '', why = '' } = {}) {
-  if (code === 'window_minimized') return t('“{title}” is minimized on {machine} — its picture stops until it is restored', { title, machine });
   if (code === 'window_covered_idle') return t('“{title}” is covered on {machine} and stopped drawing (a browser does not paint a covered window)', { title, machine });
   if (code === 'window_gone' || code === 'stream_ended') return t('“{title}” closed on {machine}', { title, machine });
+  if (code === 'stopped' || code === 'stopped_in_list' || code === 'viewer_gone' || code === 'closed') return t('Streaming of “{title}” stopped', { title }); // lane stream-window-fixes: a stop by name (this window, the picker, another tab)
   if (code === 'agent_too_old') return t('{machine}’s VibeSpace agent is too old to stream one window — update the agent there', { machine });
   if (code === 'helper_missing') return t('{machine} could not prepare its window capture: {why}', { machine, why: why || code });
   if (code === 'no_ffmpeg' || code === 'no_encoder') return t('{machine} needs ffmpeg with an H.264 encoder — on its PATH or in {dir}', { machine, dir: '%LOCALAPPDATA%\\vibespace\\ffmpeg\\bin' });
@@ -215,6 +219,10 @@ export function windowStreamText(code, { title = '', machine = '', why = '' } = 
 /**
  * THE WINDOW: one application window of `m` (a picker row: {id, title, app, bounds, dpi}) streamed by its agent; `fp16` = the
  * start route's FP16 flag (an HDR window's FP16 road, off by default). `openDesktop()` = the way on when the stream cannot be had.
+ * Lane stream-window-fixes (the owner's first real use): the strip says the stream's state (串流 · N ms · N fps) with 「停止串流」;
+ * THE STATS ROW is the whole screen's (src/lib/stream-stats.js); the minimized row (its sentence + 「还原它」) shows only while
+ * the source says minimized (src/stream-window.js windowHeldDoor); 停止串流 ends the stream on the machine and leaves the window
+ * with 「重新串流」; the window's × ends it too (its view's dispose — the hub, then the machine's helper, by name).
  */
 export function openWindowStream(app, m, row, { fp16 = false, openDesktop = null } = {}) {
   if (!machineDesktopId(m && m.hostId) || !row || !row.id) return null;
@@ -226,21 +234,46 @@ export function openWindowStream(app, m, row, { fp16 = false, openDesktop = null
   const c = winInfo.content;
   c.style.display = 'flex'; c.style.flexDirection = 'column';
   c.classList.add('machine-app', 'machine-window-stream');
+  // the strip: what this window shows · the stream's state · 停止串流
   const strip = el('div', NOTE + ';display:flex;align-items:center;gap:8px'); strip.className = 'machine-window-strip';
   const stripText = el('span', 'flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap');
-  const restoreBtn = btn('file-tool-btn', t('Restore it'), () => restore()); restoreBtn.style.cssText = 'width:auto;padding:0 10px;flex:0 0 auto'; restoreBtn.hidden = true;
-  strip.append(stripText, restoreBtn);
+  const chip = el('span', 'flex:0 0 auto;white-space:nowrap;font-variant-numeric:tabular-nums'); chip.className = 'machine-window-chip';
+  const stopBtn = btn('file-tool-btn machine-window-stop', t('Stop streaming'), () => stopStream()); stopBtn.style.cssText = 'width:auto;padding:0 10px;flex:0 0 auto;white-space:nowrap';
+  strip.append(stripText, chip, stopBtn);
+  // THE STATS ROW (src/lib/stream-stats.js — the same as the whole screen's): the firewall notice (the hub relay), the numbers
+  const stats = createStreamStats({ machine });
+  const statsRow = el('div', NOTE + ';display:none;align-items:center;gap:8px;overflow-x:auto;white-space:nowrap'); statsRow.className = 'machine-window-stats';
+  statsRow.append(stats.firewall, stats.numbers);
+  // THE HELD DOOR: the minimized row — its sentence + 「还原它」 — shown by `display` (never the `hidden` attribute: viewers.css's
+  // `.file-tool-btn { display: flex }` out-ranks it — the button that sat top-right at all times)
+  const heldRow = el('div', NOTE + ';display:none;align-items:center;gap:8px;color:var(--text)'); heldRow.className = 'machine-window-held';
+  const heldText = el('span', 'flex:1 1 auto;min-width:0');
+  const restoreBtn = btn('file-tool-btn machine-window-restore', t('Restore it'), () => restore()); restoreBtn.style.cssText = 'width:auto;padding:0 10px;flex:0 0 auto';
+  heldRow.append(heldText, restoreBtn);
   const host = el('div', 'position:relative;flex:1 1 auto;min-height:0'); host.className = 'machine-window-pane';
   const say = el('div', 'position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:16px;text-align:center;background:var(--bg-window);color:var(--text)');
   say.className = 'machine-app-say';
   const sayText = el('div', 'max-width:420px;font-size:13px'), sayActs = el('div'); sayActs.className = 'desktop-install-actions';
   say.append(sayText, sayActs);
-  c.append(strip, host);
-  let held = null, closed = false, sized = '';
+  c.append(strip, statsRow, heldRow, host);
+  let view = null, held = null, ended = false, closed = false, sized = '';
+  const ms = (v) => (v == null ? '—' : v);
   const drawStrip = () => {
-    stripText.textContent = held ? windowStreamText(held, { title, machine }) : t('“{title}” — only this window of {machine} shows here, its own title bar included; what you type here goes to it', { title, machine });
-    stripText.title = [stripText.textContent, t('Pointer: yours — the machine draws none into the picture')].join('\n'); // lane stream-cursor
-    restoreBtn.hidden = held !== 'window_minimized';
+    const door = windowHeldDoor(held);
+    stripText.textContent = door.row === 'covered' ? windowStreamText(held, { title, machine }) : t('“{title}” — only this window of {machine} shows here, its own title bar included; what you type here goes to it', { title, machine });
+    stripText.title = [stripText.textContent, t('Pointer: yours — the machine draws none into the picture')].join('\n'); // lane stream-cursor (the .306 merge keeps it)
+    heldText.textContent = door.row === 'minimized' ? t('The window is minimized on {machine} — the stream is paused', { machine }) : '';
+    heldRow.style.display = door.row === 'minimized' ? 'flex' : 'none';
+    restoreBtn.style.display = door.restore ? '' : 'none';
+    stopBtn.style.display = ended ? 'none' : '';
+  };
+  const drawStats = () => {
+    const { playing, page: p, agent: a } = stats.draw(view);
+    statsRow.style.display = playing ? 'flex' : 'none';
+    chip.textContent = ended ? '' : playing ? t('Stream · {ms} ms · {fps} fps', { ms: ms(p && p.rttMs), fps: ms(p && p.fps) }) : t('Stream · connecting…');
+    const sc = a && a.screen;
+    chip.title = p ? [t('WebRTC from the machine’s agent: {w}×{h}, sent {sent} fps at {kbps} kbps', { w: ms(p.width), h: ms(p.height), sent: ms(a && a.fps), kbps: ms(a && a.kbps) }),
+      ...(sc && sc.floor != null && sc.kbps != null ? [t('The machine encodes it at {kbps} kbps — never under {floor} kbps for a window this size', { kbps: sc.kbps, floor: sc.floor })] : [])].join('\n') : '';
   };
   /** THE SIZE RULE: the picture at the window's own size on its machine (physical ÷ dpi/96), inside the workspace, aspect kept. */
   const fit = () => {
@@ -258,13 +291,14 @@ export function openWindowStream(app, m, row, { fp16 = false, openDesktop = null
     sized = key;
     app.wm.resizeWindowTo(winInfo.id, { w: (size.w + chrome.w) / s, h: (size.h + chrome.h) / s });
   };
-  function showSay(text) {
+  function showSay(text, { again = false } = {}) {
     say.style.display = text ? 'flex' : 'none';
     sayText.textContent = text || '';
     sayActs.replaceChildren();
     if (!text) return;
+    if (again) sayActs.append(btn('btn-create', t('Stream again'), () => connect()));
     if (openDesktop) sayActs.append(btn('file-tool-btn', t('Open its whole desktop'), () => openDesktop()));
-    sayActs.append(btn('btn-create', t('Pick a window…'), () => { app.wm.closeWindow(winInfo.id); openWindowPicker(app, m, { fp16, openDesktop }); }));
+    sayActs.append(btn(again ? 'file-tool-btn' : 'btn-create', t('Pick a window…'), () => { app.wm.closeWindow(winInfo.id); openWindowPicker(app, m, { fp16, openDesktop }); }));
     for (const b of sayActs.children) b.style.cssText = 'width:auto;height:auto;min-height:28px;padding:4px 12px;white-space:nowrap'; // words, not the 24 px icon box
   }
   async function restore() {
@@ -273,24 +307,43 @@ export function openWindowStream(app, m, row, { fp16 = false, openDesktop = null
     restoreBtn.disabled = false;
     if (!r || r.error || r.ok === false) showToast(windowStreamText((r && r.code) || 'restore_failed', { title, machine, why: (r && (r.error || r.code)) || '' }), { type: 'error' });
   }
-  const view = createStreamView(host, {
-    hostId: m.hostId, hostPlatform: m.setup || null, source: { kind: 'window', id: String(row.id) }, fp16: !!fp16,
-    onSource: (src) => { const w = src && src.window; if (w && w.title) { title = w.title; app.wm.setTitle(winInfo.id, t('{app} on {machine}', { app: title, machine })); } drawStrip(); },
-    onStats: (page, agent) => { const sc = agent && agent.screen; const h = (sc && sc.held) || null; if (h !== held) { held = h; drawStrip(); } fit(); },
-    // a Mac's stream of a window that got minimized ENDS (SCK sends no picture — lane stream-p3m-build; Windows holds it): its own words
-    onFallback: (code, why) => { held = null; restoreBtn.hidden = true; host.append(say); showSay(code === 'window_minimized' ? t('the window is minimized — restore it to stream') : windowStreamText(code, { title, machine, why })); },
-  });
-  host.append(say);
-  view.video.addEventListener('resize', fit);
-  winInfo._streamView = view;
-  winInfo.onClose = () => { closed = true; view.dispose(); };
-  drawStrip();
-  view.connect();
+  /** 停止串流: the stream ends on the machine (the hub's stop → its helper releases the window); the window stays, says so. */
+  function stopStream() {
+    if (!view || ended) return;
+    const v = view; view = null; ended = true; held = null;
+    v.dispose('stopped');
+    drawStrip(); drawStats();
+    showSay(t('Streaming of “{title}” stopped', { title }), { again: true });
+  }
+  function connect() {
+    if (closed) return;
+    ended = false; held = null; sized = ''; showSay(null);
+    view = createStreamView(host, {
+      hostId: m.hostId, hostPlatform: m.setup || null, source: { kind: 'window', id: String(row.id) }, fp16: !!fp16,
+      onStatus: () => drawStats(),
+      onSource: (src) => { const w = src && src.window; if (w && w.title) { title = w.title; app.wm.setTitle(winInfo.id, t('{app} on {machine}', { app: title, machine })); } drawStrip(); },
+      onStats: (page, agent) => { const sc = agent && agent.screen; const h = (sc && sc.held) || null; if (h !== held) { held = h; drawStrip(); } drawStats(); fit(); },
+      // ended by the machine, the hub, the picker's 停止 or another window — a Mac's minimized window ENDS (SCK sends no
+      // picture — lane stream-p3m-build; Windows holds it): its own words
+      onFallback: (code, why) => {
+        view = null; ended = true; held = null; drawStrip(); drawStats(); host.append(say);
+        showSay(code === 'window_minimized' ? t('the window is minimized — restore it to stream') : windowStreamText(code, { title, machine, why }), { again: code !== 'window_gone' });
+      },
+    });
+    host.append(say);
+    view.video.addEventListener('resize', fit);
+    winInfo._streamView = view;
+    drawStrip(); drawStats();
+    view.connect();
+  }
+  winInfo.onClose = () => { closed = true; if (view) view.dispose('closed'); view = null; };
+  connect();
   return winInfo;
 }
 
 /** THE PICKER: the machine's application windows (its agent lists them — visible, its own, top-level), one row each; a row's
- *  「串流这个窗口」 opens it as its own window here. `onOpen()` = the opener (the machine's dialog) steps aside. */
+ *  「串流这个窗口」 opens it as its own window here. A window a stream shows now (the hub's sessions — whichever browser opened
+ *  it; lane stream-window-fixes) says so, with 「停止」. `onOpen()` = the opener (the machine's dialog) steps aside. */
 export async function openWindowPicker(app, m, { fp16 = false, openDesktop = null, onOpen = null } = {}) {
   const machine = nameOf(m);
   const shell = createModalShell({ title: t('Stream one window of {machine}', { machine }), dialogClass: 'machine-window-picker', escapeToClose: true });
@@ -303,15 +356,31 @@ export async function openWindowPicker(app, m, { fp16 = false, openDesktop = nul
   const rows = Array.isArray(r.windows) ? r.windows : [];
   note.textContent = rows.length ? t('Only the window you pick is sent — the rest of {machine}’s screen is not', { machine }) : t('No application window is open on {machine}', { machine });
   list.hidden = !rows.length;
-  for (const w of rows) {
+  const pickRow = (w) => {
     const b = btn('machine-apps-row machine-window-row', '', () => { shell.close(); onOpen?.(); openWindowStream(app, m, w, { fp16, openDesktop }); });
     const name = el('span', 'flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap', w.title);
     const meta = el('span', 'flex:0 0 auto;font-size:12px;color:var(--text-secondary)', [w.app, w.minimized ? t('minimized') : w.bounds ? `${w.bounds.w}×${w.bounds.h}` : ''].filter(Boolean).join(' · '));
     const act = el('span', 'flex:0 0 auto;font-size:12px;color:var(--accent)', t('Stream this window'));
     b.replaceChildren(name, meta, act);
     b.title = w.title;
-    list.append(b);
-  }
+    return b;
+  };
+  const streamingRow = (w) => {
+    const d = el('div', 'display:flex;align-items:center;gap:8px'); d.className = 'machine-apps-row machine-window-row is-streaming';
+    const name = el('span', 'flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap', w.title);
+    const meta = el('span', 'flex:0 0 auto;font-size:12px;color:var(--accent)', [w.app, t('streaming now')].filter(Boolean).join(' · '));
+    const stop = btn('file-tool-btn machine-window-row-stop', t('Stop'), async () => {
+      stop.disabled = true;
+      const s = await post(`${STREAM_BASE}/stop`, { host: m.hostId, window: String(w.id), why: 'stopped_in_list' }).catch(() => null);
+      if (!s || s.error || s.ok === false) { stop.disabled = false; showToast(windowStreamText((s && s.code) || 'stop_failed', { title: w.title, machine, why: (s && (s.error || s.code)) || t('no answer') }), { type: 'error' }); return; }
+      d.replaceWith(pickRow({ ...w, streaming: false }));
+    });
+    stop.style.cssText = 'width:auto;padding:0 10px;flex:0 0 auto;white-space:nowrap';
+    d.replaceChildren(name, meta, stop);
+    d.title = w.title;
+    return d;
+  };
+  for (const w of rows) list.append(w.streaming ? streamingRow(w) : pickRow(w));
 }
 
 // ── WINDOW-TYPE REGISTRATION ── not persisted: a reload never re-opens a machine's screen (it asks the sign-in)

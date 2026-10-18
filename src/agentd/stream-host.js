@@ -12,7 +12,9 @@
  *                 out at once; its ICE candidates follow as `stream-ice` pushes ({candidate: null} = the last)
  *                 {sid, iceRestart: true}                         → a restart offer for the same session (new ICE credentials)
  *   stream-answer {sid, answer?, candidate?}                      → { ok } — the browser's SDP answer / a trickled candidate
- *   stream-stop   {sid}                                           → { stopped }
+ *   stream-stop   {sid, why?}                                     → { stopped } — `why` names the end (the page's × =
+ *                 closed, 停止串流 = stopped, the picker's 停止, the viewer gone — lane stream-window-fixes); the source's stop
+ *                 gets it (a window's logs it with its children's exits)
  *   stream-stats  {sid, watch?}                                   → the session's numbers now; `watch` = THIS link owns the
  *                 session's pushes from now on (the hub's re-arm after a reconnect)
  *   pushes        stream-ice {sid, candidate} · stream-stats {sid, stats, state, ended?} once a second and at every change
@@ -236,7 +238,7 @@ function createStreamHost({ injector = null, log = () => { }, now = Date.now, lo
     if (!s) return false;
     sessions.delete(sid);
     clearInterval(s.statsTimer); clearTimeout(s.orphanTimer); clearTimeout(s.failTimer);
-    try { s.source && s.source.stop(); } catch { /* gone */ }
+    try { s.source && s.source.stop(why); } catch { /* gone */ }
     if (s.leg) s.leg.close();
     if (s.relay) s.relay.close();
     pushTo(s, { op: 'stream-stats', sid, stats: statsOf(s), state: 'closed', ended: why });

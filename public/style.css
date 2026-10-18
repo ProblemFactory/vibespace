@@ -7382,7 +7382,7 @@ button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: u
 .desktop-strip-note { flex: 0 0 auto; padding: 1px 7px; border-radius: 9px; background: var(--bg-input); color: var(--text); border: 1px solid var(--warning, #d9822b); white-space: nowrap; }
 .desktop-strip-firewall { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; padding: 1px 2px 1px 7px; border-radius: 9px; background: var(--bg-input); color: var(--text); border: 1px solid var(--warning, #d9822b); white-space: nowrap; } /* lane stream-relay-udp */
 .desktop-strip-firewall[hidden], .desktop-strip-fw-copy[hidden] { display: none; }
-.desktop-strip .file-tool-btn.desktop-strip-fw-copy { width: auto; height: auto; min-height: 20px; padding: 0 8px; border-radius: 8px; white-space: nowrap; }
+.file-tool-btn.desktop-strip-fw-copy { width: auto; height: auto; min-height: 20px; padding: 0 8px; border-radius: 8px; white-space: nowrap; } /* own classes (0,2,0): src/lib/stream-stats.js makes it for the whole screen's strip AND a window's stream (lane stream-window-fixes) */
 .desktop-strip-tcc { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; padding: 1px 2px 1px 7px; border-radius: 9px; background: var(--bg-input); color: var(--text); border: 1px solid var(--warning, #d9822b); white-space: nowrap; } /* lane stream-p3m-build: a Mac's permission switch */
 .desktop-strip-tcc[hidden] { display: none; }
 .desktop-strip .file-tool-btn.desktop-strip-tcc-open { width: auto; height: auto; min-height: 20px; padding: 0 8px; border-radius: 8px; white-space: nowrap; }

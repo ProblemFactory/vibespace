@@ -19,6 +19,12 @@
 //      name; the picker list and restore through the same helper
 //   §8 THE THREE TOUCHES: the hello-ack word, the op's handler + `op` on its reply, the client's routing set + gated method;
 //      the stream host shifts a relative source's pointer events by its live bounds; the helper's text module IS the .cs
+// lane stream-window-fixes (the owner's first real use — five field defects): §1 the held door (「还原它」 only with the
+// minimized row); §4b THE RATE (the floor table, the owner's session replayed, the intra-refresh wave); §4c THE STATS ROW's
+// facts (one component for both stream windows); §7 ⑥ a CJK + emoji title intact, ⑦ the stop BY NAME (stdin first, the
+// helper's exit + release logged; a deaf helper killed after the grace), ⑧ the floor and the key-frame ask on the real
+// source; §8 the end's name through client → agent → host → source, the helper's ASCII JSON, the routes; §9 THE HUB (the
+// viewer gone ⇒ stopped in seconds; the picker's 停止; a stop's name reaches the machine)
 import fs from 'node:fs';
 import path from 'node:path';
 import cp from 'node:child_process';
@@ -56,6 +62,9 @@ console.log('§1 the shape, the verdict, the picker');
   const pick = SW.windowPickRows(rows);
   ok(same(pick.map((r) => r.title), ['wgc pad', 'mini', 'Edge']), 'the picker keeps an application\'s own windows (cloaked / tool / owned / tiny / refused / untitled / hidden dropped; minimized kept), in z-order', pick.map((r) => r.title));
   ok(pick[1].minimized === true && pick[2].elevated === true && pick[2].cls === 'Chrome_WidgetWin_1' && pick[0].pid === 4242, 'a row says minimized / elevated / its class / its pid');
+  ok(same(SW.windowHeldDoor('window_minimized'), { row: 'minimized', restore: true }) && same(SW.windowHeldDoor('window_covered_idle'), { row: 'covered', restore: false }) && same(SW.windowHeldDoor(null), { row: null, restore: false }) && same(SW.windowHeldDoor('window_gone'), { row: null, restore: false }), 'THE HELD DOOR (lane stream-window-fixes): 「还原它」 ONLY with the minimized row and its sentence; covered says why with no door; live = nothing');
+  const ma = fs.readFileSync(path.join(REPO, 'src/lib/machine-app.js'), 'utf8'), vcss = fs.readFileSync(path.join(REPO, 'public/viewers.css'), 'utf8');
+  ok(/\.file-tool-btn \{[^}]*display: flex;/.test(vcss) && /heldRow\.style\.display = door\.row === 'minimized' \? 'flex' : 'none';/.test(ma) && /restoreBtn\.style\.display = door\.restore \? '' : 'none';/.test(ma) && !/restoreBtn\.hidden/.test(ma), 'the cause, measured: viewers.css\'s `.file-tool-btn { display: flex }` out-ranks `hidden` (the old button showed at all times) — the window shows the row by `display`, never the attribute');
 }
 
 console.log('§2 THE COORDINATE RULE (view → window → desktop) and the size rule');
@@ -124,6 +133,48 @@ console.log('§4 the plan, the helper\'s recipe, head and lines');
   const bad = Buffer.from(hd); bad[0] = 0x58; const huge = Buffer.from(hd); huge.writeUInt32LE(99999, 4); const bpp = Buffer.from(hd); bpp[14] = 3;
   ok(SP.wgcHead(bad).bad && SP.wgcHead(huge).bad && SP.wgcHead(bpp).bad, 'a head that is not ours / out of bounds ⇒ bad (the stream is lost)');
   ok(SP.wgcLine('{"ev":"size","w":2,"h":2}').ev === 'size' && SP.wgcLine('csc noise') === null && SP.wgcLine('{"x":1}') === null && SP.wgcLine('{bad') === null, 'a helper line → its event; anything else ⇒ null');
+}
+
+console.log('§4b THE WINDOW ROAD\'S RATE (lane stream-window-fixes): the floor table, the owner\'s session replayed, the intra-refresh wave');
+{
+  const F = (w, h, fps = 30, cap = 8000) => SP.windowKbpsFloor({ w, h, fps, cap });
+  ok(same([F(640, 480), F(1280, 800), F(1920, 1200), F(2560, 1600), F(2698, 2078)], [1000, 2500, 4000, 6000, 8000]), 'THE TABLE at 30 fps: ≤ 0.3 MP 1000 · ≤ 1 MP 2500 · ≤ 2.3 MP 4000 · ≤ 4.1 MP 6000 · larger (the owner\'s 2698×2078 Lightroom window) 8000 kbps');
+  ok(F(1920, 1080, 60, 50000) === 6000 && F(1920, 1080, 45, 50000) === 5000 && F(2698, 2078, 60, 50000) === 12000, '60 fps ⇒ the 60 column; between, interpolated');
+  ok(F(2698, 2078, 30, 5000) === 5000 && F(10, 10, 30, 8000) === 1000 && F(0, 0) >= SP.SCREEN_DEFAULTS.minKbps, 'never over the session\'s cap; a tiny window has the first row');
+  const old = SP.kbpsDecision({ current: 8000, target: 280, cap: 8000, lastAt: 0, now: 5000 });
+  const owner = SP.kbpsDecision({ current: 8000, target: 280, cap: 8000, lastAt: 0, now: 5000, floor: F(2698, 2078) });
+  const pad = SP.kbpsDecision({ current: 8000, target: 280, cap: 8000, lastAt: 0, now: 5000, floor: F(2100, 1400) });
+  ok(old.change && old.kbps === 300 && !owner.change && pad.change && pad.kbps === 6000, 'the owner\'s session replayed (8000 kbps; 5 s in, werift echoes a still window\'s trickle — 280): no floor ⇒ 300 kbps (what his agent logged); his window\'s floor ⇒ no change; a 2100×1400 window ⇒ 6000', { old, owner, pad });
+  ok(SP.kbpsDecision({ current: 6000, target: 9000, cap: 8000, lastAt: 0, now: 6000, floor: 6000 }).kbps === 8000, 'kbpsDecision: an estimate above still climbs, to the cap');
+  // THE RATE RULE: werift's samples judged against what the source SENT (the median of the last 2 s)
+  const R = (o) => SP.windowRateDecision({ current: 8000, cap: 8000, floor: 6000, samples: [9800, 6200, 14000, 976, 10100, 8900, 12500], sentKbps: 7400, lastAt: 0, shortAt: 0, shortSince: 7000, now: 10000, ...o });
+  ok(!R().change && R().why === 'echo' && R().median === 9800, 'lossless noise (the replayed samples of a real 7.4 Mbps stream: 976 … 14000, median 9800) ⇒ an echo: nothing changes — the old rule took the 976', R());
+  const sf = R({ samples: [3000, 3400, 2900, 3100, 3300], sentKbps: 7400 });
+  ok(sf.change && sf.kbps === 6000 && sf.why === 'shortfall' && R({ floor: 1000, samples: [3000, 3400, 2900, 3100, 3300] }).kbps === 3100, 'the median clearly under what was sent, for 2 s (a bottleneck: the link receives less — it drops or queues) ⇒ down to it, never under the floor', sf);
+  const hd = R({ samples: [3000, 3400, 2900, 3100, 3300], shortSince: 0 });
+  ok(!hd.change && hd.why === 'hold' && hd.shortSince === 10000 && !R({ samples: [3000, 3400, 2900, 3100, 3300], shortSince: 8500 }).change && R({ samples: [6000, 6100, 5900, 6050, 5950] }).why === 'echo', 'a shortfall must HOLD 2 s before it acts (a sampling dip — NVENC\'s refresh cycle swings the sent rate — does not); 0.8 × sent is still an echo (the line: 0.75)', hd);
+  ok(!R({ current: 6000, samples: [7000, 7100, 7200, 6900, 7050], sentKbps: 9500 }).change, 'a shortfall never raises the rate (its median above the current rate)');
+  ok(R({ samples: [3000, 3000, 3000, 3000] }).why === 'wait' && R({ sentKbps: 0 }).why === 'wait' && R({ lastAt: 9000 }).why === 'wait', 'fewer than 5 samples, nothing sent (a minimized window), or within 2 s of the last change ⇒ wait');
+  ok(R().shortSince === 0, 'an echo ends a shortfall streak');
+  const up = R({ current: 6000, lastAt: 0, shortAt: 0, now: 25000 });
+  ok(up.change && up.kbps === 7500 && up.why === 'recover' && !R({ current: 6000, shortAt: 10000, now: 25000 }).change && !R({ current: 8000, now: 60000 }).change, '20 s with no shortfall below the cap ⇒ one 25 % step back up (7500); a recent shortfall holds it; at the cap nothing', up);
+  const facts = { platform: 'win32', helper: { ok: true, exe: 'h.exe' }, ffmpeg: { path: 'f.exe', encoders: ['h264_nvenc'] }, displays: [] };
+  const win = SW.windowSourceOf({ ...ROW, frame: [0, 0, 2698, 2078] });
+  const pn = SP.planWindow(facts, { window: win });
+  const argvOf = (encoders) => SP.windowEncodeArgv(SP.planWindow({ ...facts, ffmpeg: { path: 'f.exe', encoders } }, { window: win })).join(' ');
+  ok(pn.refresh && pn.floor === 8000 && pn.kbps === 8000 && /-c:v h264_nvenc -preset p1 -tune ull -rc cbr -zerolatency 1 -delay 0 -rc-lookahead 0 -intra-refresh 1 -profile:v baseline -bf 0 -g 60 /.test(argvOf(['h264_nvenc'])), 'NVENC: the intra-refresh wave (-intra-refresh 1; -g 60 = its period), -rc-lookahead 0, -bf 0; the floor rides the plan', argvOf(['h264_nvenc']));
+  ok(/-intra-refresh 1/.test(argvOf(['libx264'])) && !/-intra-refresh/.test(argvOf(['h264_amf'])) && !/-intra-refresh/.test(argvOf(['h264_qsv'])) && !SP.planWindow({ ...facts, ffmpeg: { path: 'f', encoders: ['h264_amf'] } }, { window: win }).refresh, 'x264 too (measured on the lane\'s box: one key frame in 180); AMF / Quick Sync keep the 2 s GOP (no machine of ours has one)');
+  ok(!/-intra-refresh/.test(SP.directArgv({ display: { output: 0 }, fps: 30, kbps: 8000, gop: 60, encoder: SP.ENCODER_LADDER[0] }).join(' ')), 'the whole screen\'s road is unchanged');
+}
+
+console.log('§4c THE STATS ROW\'s facts (lane stream-window-fixes: one row for both stream windows)');
+{
+  const page = { rttMs: 4, jitterMs: 2, fps: 29, decodeMs: 1.5, kbps: 5400, path: 'relay' };
+  const n = SM.streamNumbersOf(page, { screen: { encoder: 'NVENC', encodeMs: 9, kbps: 6000, floor: 6000 } }, 'udp');
+  ok(same(n, { rtt: 4, jitter: 2, fps: 29, decode: 1.5, kbps: 5400, via: 'udp', encoder: 'NVENC', encodeMs: 9, rate: { kbps: 6000, floor: 6000 } }), 'the page\'s numbers + the relay path + the machine\'s encoder + a window\'s rate over its floor', n);
+  ok(SM.streamNumbersOf(null) === null && SM.streamNumbersOf({ rttMs: NaN }, null, 'direct').rtt === null && SM.streamNumbersOf({}, null, 'direct').via === null && SM.streamNumbersOf({}, { screen: { encoder: 'x264' } }).rate === null, 'no numbers yet ⇒ null; a non-number ⇒ null (shown —); direct names no path; a screen source has no rate');
+  const lib = fs.readFileSync(path.join(REPO, 'src/lib/stream-stats.js'), 'utf8'), md = fs.readFileSync(path.join(REPO, 'src/lib/machine-desktop.js'), 'utf8'), ma = fs.readFileSync(path.join(REPO, 'src/lib/machine-app.js'), 'utf8');
+  ok(/import \{ createStreamStats \} from '\.\/stream-stats\.js'/.test(md) && /import \{ createStreamStats \} from '\.\/stream-stats\.js'/.test(ma) && /const stats = createStreamStats\(\{ machine \}\);\n  const streamEl = stats\.numbers, fwEl = stats\.firewall;/.test(md) && /statsRow\.append\(stats\.firewall, stats\.numbers\)/.test(ma) && /streamNumbersOf\(page, agent, via\)/.test(lib), 'ONE component: the whole screen\'s strip and a window\'s stream both mount src/lib/stream-stats.js (its numbers ride streamNumbersOf)');
 }
 
 console.log('§5 the rung\'s window branch; the client never asks an old daemon');
@@ -234,6 +285,72 @@ console.log('§7 THE REAL SOURCE, end to end (a fake helper, a fake ffmpeg)');
   ok(await until(() => dEnds.length > 0) && dEnds[0] === 'helper_exited' && logs.some((l) => /helper exit 1: 0x887A0005/.test(l)), 'the helper died ⇒ ended helper_exited, its last error in the log', { dEnds, logs });
   const m = WS.createWindowSource({ platform: 'win32', spawn: cp.spawn, execFile: cp.execFile, helperPath: path.join(root, 'no-such-helper.exe'), screenFacts: async () => ({ ok: true, ffmpeg: { path: ff.exe, encoders: ['h264_nvenc'] }, displays: [] }) });
   ok((await m.source({ sourceId: '657982' })).code === 'facts_failed' && (await m.windows()).code === 'facts_failed', 'a helper that cannot run ⇒ refused by name (facts_failed), never a hang');
+
+  // ⑥ lane stream-window-fixes: a CJK + emoji title intact (the helper's JSON is ASCII — \uXXXX, surrogate pairs too — read as UTF-8)
+  const CJK = '中文窗口 🎨 测试';
+  wgc.set({ windows: [{ ...ROW, title: CJK, frame: W0.frame, dpi: 96 }], capture: { ...W0, script: [] } });
+  const lc = await mkSrc().windows();
+  const sc = await mkSrc().source({ sourceId: '657982' });
+  ok(lc.ok && lc.windows[0].title === CJK && sc.ok && sc.window.title === CJK, '⑥ a CJK + emoji title comes through the picker\'s list and the offer\'s window facts intact', { list: lc.windows && lc.windows[0] && lc.windows[0].title, offer: sc.window && sc.window.title });
+  sc.stop('closed');
+
+  // ⑦ the stop BY NAME: stdin first (the helper releases the window — its `end` line — and exits 0, the encoder flushes), one
+  //    log line with each exit; a helper that never notices is killed after the grace
+  const pidFile = path.join(root, 'wgc.pid');
+  const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  wgc.set({ windows: [{ ...ROW, frame: W0.frame, dpi: 96 }], capture: { ...W0, pidFile, script: [] } });
+  logs.length = 0;
+  const s7 = await mkSrc().source({ sourceId: '657982' }); const a7 = [], e7 = [];
+  s7.start((au) => a7.push(au), (code) => e7.push(code));
+  await until(() => a7.length >= 2);
+  const pid7 = Number(fs.readFileSync(pidFile, 'utf8'));
+  s7.stop('closed');
+  ok(await until(() => !alive(pid7), 3000), '⑦ stop: the helper is gone (its exit code below says it left on its own — it saw its stdin close — before the grace kill)');
+  ok(await until(() => logs.some((l) => /window source ended: closed — helper exit 0, encoder exit 0 in \d+ ms \(the helper released the window: stdin\)/.test(l))), '⑦ ONE log line names the end (closed = the window\'s ×) with the helper\'s and the encoder\'s exits and the helper\'s release', logs.filter((l) => /ended/.test(l)));
+  ok(e7.length === 0, '⑦ a stop by the host ends nothing by a name of its own (the host named it)', e7);
+  wgc.set({ capture: { ...W0, pidFile, ignoreStdin: true, script: [] } });
+  logs.length = 0;
+  const s8 = await mkSrc().source({ sourceId: '657982' }); const a8 = [];
+  s8.start((au) => a8.push(au), () => { });
+  await until(() => a8.length >= 2);
+  const pid8 = Number(fs.readFileSync(pidFile, 'utf8'));
+  s8.stop('viewer_gone');
+  ok(await until(() => !alive(pid8), 4000), '⑦ a helper that never notices its stdin is killed by the grace (STOP_GRACE_MS) — never an orphan');
+  ok(await until(() => logs.some((l) => /window source ended: viewer_gone — helper exit SIGTERM, encoder exit 0 in \d+ ms/.test(l))), '⑦ …and the line says it had to be killed', logs.filter((l) => /ended/.test(l)));
+
+  // ⑧ THE RATE on the real source: the intra-refresh wave on the encoder's argv; werift's low estimate never under the window's
+  //    floor; a viewer's key-frame ask restarts the encoder (no periodic key frame), at most every 2 s
+  let skew = 0;
+  wgc.set({ capture: { ...W0, script: [] } });
+  const s9 = await WS.createWindowSource({ platform: 'win32', spawn: cp.spawn, execFile: cp.execFile, env: process.env, log: (l) => logs.push(l), helperPath: wgc.exe, now: () => Date.now() + skew,
+    screenFacts: async () => ({ ok: true, ffmpeg: { path: ff.exe, encoders: ['h264_nvenc'] }, displays: [{ id: '\\\\.\\DISPLAY1', hdr: false }] }) }).source({ sourceId: '657982' });
+  fs.writeFileSync(ffLog, '');
+  const a9 = [];
+  s9.start((au) => a9.push(au), () => { });
+  await until(() => a9.length >= 2);
+  const encArgv = () => fs.readFileSync(ffLog, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((x) => x.includes('pipe:0'));
+  ok(encArgv()[0].join(' ').includes('-c:v h264_nvenc') && encArgv()[0].includes('-intra-refresh') && s9.stats().refresh === 'intra', '⑧ the window road\'s NVENC refreshes by an intra-refresh wave (no periodic key frame)', encArgv()[0]);
+  ok(s9.stats().floor === 1000 && s9.stats().kbps === 8000, '⑧ a 320×240 window\'s floor (1000 at 30 fps); the start at the session\'s cap', s9.stats());
+  const feed = async (kbps) => { const n0 = a9.length; await until(() => a9.length > n0 + 40, 4000); for (let i = 0; i < 6; i++) s9.setTargetKbps(kbps); }; // ~1.3 s of units at the moved clock (the fixture sends ~166 kbps), then six samples
+  skew += 6000; await feed(1e6);
+  ok(s9.stats().restarts === 0 && s9.stats().rate.why === 'echo', '⑧ samples at or above what was sent = werift\'s echo ⇒ nothing changes', s9.stats().rate);
+  skew += 6000; await feed(50);
+  ok(s9.stats().restarts === 0 && s9.stats().rate.why === 'hold', '⑧ a shortfall seen once holds (not yet 2 s)', s9.stats().rate);
+  skew += 2100; await feed(50);
+  ok(s9.stats().kbps === 1000 && s9.stats().restarts === 1 && logs.some((l) => /encoder restarted at 1000 kbps \(shortfall: the estimate's median 50 kbps, floor 1000\)/.test(l)), '⑧ samples far under what was sent (a real shortfall: 50 vs ~166 kbps) ⇒ the encoder restarts at the window\'s floor, 1000 — the old rule\'s minimum was 300', s9.stats());
+  await until(() => encArgv().length >= 2);
+  ok(encArgv().slice(-1)[0].join(' ').includes('-b:v 1000k'), '⑧ the restarted encoder runs at 1000k', encArgv().slice(-1)[0].join(' '));
+  skew += 6000; await feed(20);
+  ok(s9.stats().restarts === 1, '⑧ lower again: already at the floor — no restart');
+  const n9 = a9.length; await until(() => a9.length > n9 + 1);
+  skew += 3000; s9.requestKeyframe();
+  const k9 = a9.length;
+  ok(s9.stats().keyRestarts === 1, '⑧ a viewer\'s key-frame ask (PLI) restarts the encoder — its first picture is the key frame', s9.stats());
+  await until(() => a9.length > k9);
+  ok(a9[k9] && a9[k9].key, '⑧ the next access unit IS a key frame');
+  s9.requestKeyframe();
+  ok(s9.stats().keyRestarts === 1, '⑧ a second ask within 2 s restarts nothing');
+  s9.stop('closed');
 }
 
 console.log('§8 THE THREE TOUCHES (the op) and the host\'s input shift');
@@ -246,6 +363,36 @@ console.log('§8 THE THREE TOUCHES (the op) and the host\'s input shift');
   const WSRC = require(path.join(REPO, 'src/agentd/wgc-helper-source.js')), csText = fs.readFileSync(path.join(REPO, 'tools/vibespace-wgc/vibespace-wgc.cs'), 'utf8');
   ok(WSRC.SOURCE === csText && WSRC.SHA256 === require('crypto').createHash('sha256').update(csText).digest('hex') && WS.wgcSourceText() === csText && !/loader:\.cs=/.test(fs.readFileSync(path.join(REPO, 'package.json'), 'utf8')), 'src/agentd/wgc-helper-source.js IS tools/vibespace-wgc/vibespace-wgc.cs — a plain module in the agent bundle, no esbuild loader (int304: the Mac helper\'s way; run node scripts/wgc-helper-embed.mjs after editing the C#)');
   ok(/if \(s\.source && s\.source\.relative && typeof s\.source\.bounds === 'function'\) ev = SW\.windowInputOf\(ev, s\.source\.bounds\(\)\)/.test(host), 'a relative source\'s pointer events get its LIVE bounds (windowInputOf) before the injector');
+  ok(/try \{ s\.source && s\.source\.stop\(why\); \}/.test(host) && /streamHost\.stop\(String\(msg\.sid \|\| ''\), \/\^\[a-z_\]\{1,40\}\$\/\.test\(String\(msg\.why \|\| ''\)\) \? msg\.why : 'stopped'\)/.test(ag) && /op: 'stream-stop', sid, \.\.\.\(why \? \{ why \} : \{\}\)/.test(cl), 'lane stream-window-fixes: the end\'s name rides the stop — the client\'s op carries `why`, the agent checks its shape, the host hands it to the source');
+  ok(/c < 0x20 \|\| c > 0x7e\) b\.Append\("\\\\u"\)/.test(csText) && /new StreamWriter\(mode == "capture" \? Console\.OpenStandardError\(\) : Console\.OpenStandardOutput\(\), new UTF8Encoding\(false\)\)/.test(csText) && !/Log = Console\.(Out|Error)/.test(csText) && /S\("ev", "end"\)/.test(csText), 'the helper\'s JSON is ASCII (every character past 0x7E as \\uXXXX — no code page can garble it) through a UTF-8 writer without a BOM; capture says `end` as it releases the window');
+  const routes = fs.readFileSync(path.join(REPO, 'src/routes/desktop-apps.js'), 'utf8');
+  ok(/res\.on\('close', \(\) => \{ if \(!res\.writableFinished\) wr\.pollGone\(key\); \}\)/.test(routes) && /res\.json\(await wr\.stopWindow\(host, id, why\)\)/.test(routes) && /streaming: on\.has\(String\(w\.id\)\)/.test(routes), 'the routes: a long poll closed before its answer tells the hub (pollGone); stop by {host, window}; the list marks the windows a stream shows');
+}
+
+console.log('§9 THE HUB (lane stream-window-fixes): a stop names its end; the viewer gone ⇒ stopped in seconds; the picker\'s 停止');
+{
+  const DW = require(path.join(REPO, 'src/server/desktop-webrtc.js'));
+  const calls = [];
+  let n = 0;
+  const dm = { streamOffer: async (p) => ({ ok: true, sid: 'sid-' + (++n), offer: { type: 'offer', sdp: 'v=0\r\n' }, source: { kind: 'window', origin: { x: 0, y: 0 }, window: { id: String(p.sourceId) } } }), streamStop: async (sid, o) => { calls.push([sid, o && o.why]); return { stopped: true }; } };
+  const access = { streamRung: async (h, o) => ({ take: true, source: o && o.want === 'window' ? 'window' : 'screen', sourceId: null, dm, platform: 'win32' }) };
+  const wr = DW.create({ access, log: { log() { }, warn() { } }, relay: false, goneMs: 150, ips: () => [] });
+  const a = await wr.start('win-a', { source: { kind: 'window', id: '657982' } }), b = await wr.start('win-a', { source: { kind: 'window', id: '77' } }), c = await wr.start('win-a', { source: { kind: 'window', id: '657982' } });
+  ok(a.take && b.take && c.take && same(wr.facts('win-a').map((s) => s.windowId), ['657982', '77', '657982']), 'each session records the window it shows (the start body\'s id — a Mac\'s too)');
+  wr.pollGone(b.key);
+  await sleep(60); await wr.poll(b.key, 0, 99, 0);
+  await sleep(200);
+  ok(wr.facts('win-a').some((s) => s.key === b.key), 'a poll closed unanswered, then a NEW poll inside goneMs (a reload, a proxy\'s cut) ⇒ it lives on');
+  wr.pollGone(b.key);
+  await until(() => !wr.facts('win-a').some((s) => s.key === b.key), 2000);
+  ok(!wr.facts('win-a').some((s) => s.key === b.key) && calls.some(([sid, why]) => sid === b.sid && why === 'viewer_gone'), 'no new poll within goneMs (the tab closed, the browser quit) ⇒ stopped viewer_gone — the machine is told why', calls);
+  const r = await wr.stopWindow('win-a', '657982');
+  ok(r.sessions === 2 && r.stopped === 2 && wr.facts('win-a').length === 0 && calls.filter(([, why]) => why === 'stopped_in_list').length === 2, 'the picker\'s 停止 = every session of that window (whichever browser opened it), named stopped_in_list', { r, calls });
+  const d = await wr.start('win-a', { source: { kind: 'window', id: '5' } });
+  await wr.stop(d.key, 'stopped');
+  ok(calls.some(([sid, why]) => sid === d.sid && why === 'stopped') && (await wr.stopWindow('win-a', '5')).sessions === 0, 'a page\'s stop names its end for the machine (停止串流 = stopped; the window\'s × = closed); a window nobody streams stops nothing');
+  ok(SM.STREAM_LIMITS.goneMs === 3000, 'goneMs = 3 s: with the agent\'s stop (≤ 1 s grace) the machine ends the capture inside 5 s of the viewer going');
+  wr.shutdown();
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

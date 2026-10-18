@@ -9169,7 +9169,6 @@ export default {
   "On a phone, back first closes what is open (a menu, a dialog, the window on show, which takes you back to the session list). At the list it asks you to press back once more within 2 seconds to leave VibeSpace. Off: back leaves the page at once, like any web page.": "スマートフォンでは、戻るとまず開いているもの（メニュー、ダイアログ、表示中のウィンドウ——セッション一覧に戻ります）を閉じます。一覧では、2 秒以内にもう一度戻ると VibeSpace を離れます。オフ：普通のウェブページと同じく、戻るとすぐにページを離れます。",
   "Press back again to exit": "もう一度戻ると終了",
   // lane stream-p2w-build: one window of a paired Windows machine as a stream
-  "“{title}” is minimized on {machine} — its picture stops until it is restored": "{machine} で「{title}」が最小化されています — 元に戻すまで画面は止まります",
   "“{title}” is covered on {machine} and stopped drawing (a browser does not paint a covered window)": "{machine} で「{title}」が隠れて描画が止まりました（ブラウザーは隠れたウィンドウを描画しません）",
   "{machine}’s VibeSpace agent is too old to stream one window — update the agent there": "{machine} の VibeSpace エージェントが古く、ウィンドウ単体をストリームできません — そのマシンでエージェントを更新してください",
   "{machine} could not prepare its window capture: {why}": "{machine} でウィンドウキャプチャーを準備できませんでした：{why}",
@@ -9187,4 +9186,10 @@ export default {
   "Stream this window": "このウィンドウをストリーム",
   "Stream one window…": "ウィンドウを 1 つストリーム…",
   "Show one application window of {machine} as its own window — only that window is sent": "{machine} のアプリのウィンドウを 1 つ、ここの 1 つのウィンドウとして表示 — そのウィンドウだけが送られます",
+  "Stop streaming": "ストリーミングを停止", // lane stream-window-fixes
+  "The window is minimized on {machine} — the stream is paused": "ウィンドウが {machine} で最小化されています — ストリームは一時停止中です", // lane stream-window-fixes
+  "Streaming of “{title}” stopped": "「{title}」のストリーミングを停止しました", // lane stream-window-fixes
+  "Stream again": "もう一度ストリーミング", // lane stream-window-fixes
+  "streaming now": "ストリーミング中", // lane stream-window-fixes
+  "The machine encodes it at {kbps} kbps — never under {floor} kbps for a window this size": "マシンは {kbps} kbps でエンコードしています — このサイズのウィンドウでは {floor} kbps を下回りません", // lane stream-window-fixes
 };

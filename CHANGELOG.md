@@ -2,6 +2,16 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.306 — 2026-10-18
+
+### Added
+- A streamed app window shows the same connection details as a streamed screen and has Stop streaming; the window list marks and stops streamed windows.
+
+### Fixed
+- Window titles in Chinese and other scripts from a Windows machine now read correctly in the window list and in the window's title bar.
+- Restore it shows only while the streamed window is minimized on its machine, next to a line saying the stream is paused.
+- A streamed window no longer pulses between blurry and sharp, and closing it or its browser tab stops the capture on the machine within seconds.
+
 ## 2.369.305 — 2026-10-18
 
 ### Fixed

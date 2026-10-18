@@ -23,6 +23,9 @@
  *                                    refused by name, never guessed) · wheelUnitsOf(deltaY, deltaMode)
  *   statsOf(prev, reports, now)      the stats strip's numbers from RTCPeerConnection.getStats(): RTT, jitter, fps, decode ms,
  *                                    kbps, lost, the path (direct | relay)
+ *   streamNumbersOf(page, agent, via)   THE STATS ROW's facts (lane stream-window-fixes — ONE row for the whole screen's window
+ *                                    and a window's stream, src/lib/stream-stats.js): the page's numbers + the relay path + the
+ *                                    machine's encoder (its encode ms) and, for a window, its rate (kbps over its floor)
  *   relayFrame / relayUnframe        a datagram + its peer address over the device link's byte stream (the hub's UDP relay)
  *   relayCandidates(ips, port)       the hub relay's ICE candidate lines (typ relay — the lowest priority: a direct pair wins)
  *   LEG / legControl / legData / legParse / legPingVerdict   THE UDP LEG (lane stream-relay-udp): the daemon's OWN datagrams to
@@ -51,6 +54,7 @@ const STREAM_LIMITS = Object.freeze({
   sessionsPerAgent: 2,        // a daemon serves at most two live streams (a desk window and a phone beside it)
   orphanMs: 20000,            // a session whose device link died waits this long for the hub's re-arm, then stops
   idleMs: 30000,              // the hub stops a session no page polled for this long (the page closed without a word)
+  goneMs: 3000,               // a page whose long poll closed unanswered (its tab closed, the browser quit) and that asked no new one within this ⇒ stopped (lane stream-window-fixes)
   pollMaxMs: 25000,           // one long poll's longest wait
   statsMs: 1000,              // the daemon's stats push, and the page's getStats read
   connectMs: 15000,           // offer → connected, else the page falls back
@@ -369,6 +373,18 @@ function relayPathOf(page, relay) {
   return via === 'udp' || via === 'link' ? via : 'relay';
 }
 
+/** THE STATS ROW (lane stream-window-fixes): the facts both stream windows show — `page` = statsOf's answer, `agent` = the
+ *  agent's numbers (its `screen` = the source's stats: encoder, encode ms; a window's kbps + floor), `via` = relayPathOf's.
+ *  → null (no numbers yet) | { rtt, jitter, fps, decode, kbps, via, encoder, encodeMs, rate: { kbps, floor } | null } */
+function streamNumbersOf(page, agent = null, via = null) {
+  if (!page) return null;
+  const n = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+  const sc = agent && agent.screen;
+  const rate = sc && n(sc.floor) != null && n(sc.kbps) != null ? { kbps: sc.kbps, floor: sc.floor } : null;
+  return { rtt: n(page.rttMs), jitter: n(page.jitterMs), fps: n(page.fps), decode: n(page.decodeMs), kbps: n(page.kbps), via: via === 'udp' || via === 'link' || via === 'relay' ? via : null,
+    encoder: sc && sc.encoder ? String(sc.encoder).slice(0, 40) : null, encodeMs: sc ? n(sc.encodeMs) : null, rate };
+}
+
 // ── THE FIREWALL FACT (lane stream-relay-udp) ───────────────────────────────────────────────────────────────────────────
 /** The daemon's self-probe (a datagram from a second socket of its own to each of its host addresses; Windows' firewall
  *  filters that the way it filters a browser's) → { verdict: 'open' (one arrived) | 'blocked' (none did) | 'none' (no host
@@ -390,5 +406,5 @@ function firewallRuleCommand(program) {
 module.exports = {
   STREAM_CODEC, STREAM_SOURCES, MAC_CAPABILITY, WINDOW_CAPABILITY, STREAM_LIMITS, RUNG_ID, streamRungVerdict, streamSourceOf, STREAM_STATES, STREAM_EVENTS, streamStep, fallbackVerdict,
   videoToSource, INPUT_KINDS, inputEventOf, wheelUnitsOf, statsOf, relayFrame, relayUnframe, relayCandidates,
-  LEG, isLegPacket, legControl, legData, legParse, legPingVerdict, relayPathOf, directInboundOf, firewallRuleCommand,
+  LEG, isLegPacket, legControl, legData, legParse, legPingVerdict, relayPathOf, streamNumbersOf, directInboundOf, firewallRuleCommand,
 };

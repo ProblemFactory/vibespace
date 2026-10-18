@@ -9170,7 +9170,6 @@ export default {
   "On a phone, back first closes what is open (a menu, a dialog, the window on show, which takes you back to the session list). At the list it asks you to press back once more within 2 seconds to leave VibeSpace. Off: back leaves the page at once, like any web page.": "手机上，返回先关闭打开的东西（菜单、对话框、正在显示的窗口——回到会话列表）。在列表处会提示 2 秒内再返回一次才离开 VibeSpace。关闭后：返回立即离开页面，和普通网页一样。",
   "Press back again to exit": "再返回一次退出",
   // lane stream-p2w-build: one window of a paired Windows machine as a stream
-  "“{title}” is minimized on {machine} — its picture stops until it is restored": "“{title}”在{machine}上已最小化——还原之前画面不会动",
   "“{title}” is covered on {machine} and stopped drawing (a browser does not paint a covered window)": "“{title}”在{machine}上被盖住，停止了绘制（浏览器不绘制被盖住的窗口）",
   "{machine}’s VibeSpace agent is too old to stream one window — update the agent there": "{machine}上的 VibeSpace agent 版本太旧，不能串流单个窗口——请在那台机器上更新 agent",
   "{machine} could not prepare its window capture: {why}": "{machine}没能准备好窗口采集：{why}",
@@ -9188,4 +9187,10 @@ export default {
   "Stream this window": "串流这个窗口",
   "Stream one window…": "串流一个窗口…",
   "Show one application window of {machine} as its own window — only that window is sent": "把{machine}的一个应用窗口显示成这里的一个窗口——只发送那个窗口",
+  "Stop streaming": "停止串流", // lane stream-window-fixes
+  "The window is minimized on {machine} — the stream is paused": "窗口在{machine}上被最小化了——串流暂停", // lane stream-window-fixes
+  "Streaming of “{title}” stopped": "已停止串流“{title}”", // lane stream-window-fixes
+  "Stream again": "重新串流", // lane stream-window-fixes
+  "streaming now": "正在串流", // lane stream-window-fixes
+  "The machine encodes it at {kbps} kbps — never under {floor} kbps for a window this size": "机器以 {kbps} kbps 编码——这个大小的窗口不会低于 {floor} kbps", // lane stream-window-fixes
 };
