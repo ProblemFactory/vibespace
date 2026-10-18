@@ -20,6 +20,8 @@
  *   cursorPlan(image, scale)             lane win-desktop-cursor-hdr (owner 2026-10-13 "鼠标如此巨大"): the machine's pointer image
  *                                        at the picture's scale → 'native' | 'scaled' (16–64 css px, the hotspot scaled too) |
  *                                        'server' (wider than 128 px: the machine paints it into the picture); scaleRgba draws it
+ *   pointerShown(image)                  lane stream-cursor: the machine's pointer image has a pixel to see (none sent yet, or
+ *                                        a fully transparent one ⇒ false: the viewer's own arrow is the pointer, never none)
  *   hdrShown({screens, map, key})        the shown display (or, showing all, any display) is in Windows HDR — TightVNC captures
  *                                        it without tone mapping, so the bar says so (true only on a measured `hdr: true`)
  *   carryPick(prev, next, key)           lane heavy3-flake-races: the display a pick named, across a remap — the RFB rects and
@@ -244,6 +246,13 @@ function cursorPlan(image, scale) {
   if (W === w && H === h) return keep('native');
   return { path: 'scaled', w: W, h: H, hotx: Math.min(W - 1, Math.round(hx * factor)), hoty: Math.min(H - 1, Math.round(hy * factor)), factor };
 }
+/** image = {w, h, rgbaPixels} → true when one pixel of it is not fully transparent (no image ⇒ false). */
+function pointerShown(image) {
+  const px = image && image.rgbaPixels;
+  if (!(num(image && image.w) > 0 && num(image && image.h) > 0) || !px || !px.length) return false;
+  for (let i = 3; i < px.length; i += 4) if (px[i]) return true;
+  return false;
+}
 /** RGBA w×h → RGBA W×H: each target pixel averages the source pixels whose centres fall in its box (alpha-weighted, so a
  *  transparent edge never darkens the outline); upscaling takes the nearest. → Uint8ClampedArray(W·H·4). */
 function scaleRgba(src, w, h, W, H) {
@@ -287,4 +296,4 @@ function hdrShown({ screens = null, map = null, key = null } = {}) {
   return osScreens(screens).some((s) => s.hdr === true);
 }
 
-module.exports = { FIT_TOL, MAX_SCREENS, IDLE_TRIP_MS, RATE_MIN_BYTES, STATES, ROW_STATES, CURSOR_MIN, CURSOR_MAX, CURSOR_SERVER_OVER, rfbScreens, osScreens, screenMap, rowState, pickerRows, recentChoice, clientMessages, clientCuts, updateTimer, cursorPlan, scaleRgba, hdrShown, carryPick };
+module.exports = { FIT_TOL, MAX_SCREENS, IDLE_TRIP_MS, RATE_MIN_BYTES, STATES, ROW_STATES, CURSOR_MIN, CURSOR_MAX, CURSOR_SERVER_OVER, rfbScreens, osScreens, screenMap, rowState, pickerRows, recentChoice, clientMessages, clientCuts, updateTimer, cursorPlan, pointerShown, scaleRgba, hdrShown, carryPick };

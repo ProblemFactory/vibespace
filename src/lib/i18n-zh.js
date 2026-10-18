@@ -8839,6 +8839,9 @@ export default {
   "Pointer: painted by the machine into the picture — its {px} px pointer is too big to draw here": "指针：由机器画进画面 —— 它的 {px} px 指针太大，这里画不了",
   "Pointer: drawn here at {pct} % of its {px} px, with the picture": "指针：在这里随画面缩放绘制，为原 {px} px 的 {pct}%",
   "Pointer: drawn here at its own {px} px": "指针：在这里按原尺寸 {px} px 绘制",
+  // lane stream-cursor: the viewer's own pointer IS the pointer
+  "Pointer: yours — the machine sent none of its own": "指针是你的 —— 机器没有发来它自己的指针",
+  "Pointer: yours — the machine draws none into the picture": "指针是你的 —— 机器不把它的指针画进画面",
   "Now: browser ⇄ hub {a} ms · hub ⇄ machine {b} ms · update round trip {c} ms · {fps} fps · {kbps} kbps": "本次：浏览器 ⇄ hub {a} ms · hub ⇄ 机器 {b} ms · 更新往返 {c} ms · {fps} fps · {kbps} kbps",
   "Recorded reference: a key press through the same hops took {before} ms before the no-delay fix and {after} ms after (median)": "记录的参考：同样的各跳上，一次按键在 no-delay 修复前 {before} ms，修复后 {after} ms（中位数）",
   "Add attachment": "添加附件",

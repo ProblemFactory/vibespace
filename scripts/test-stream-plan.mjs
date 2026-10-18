@@ -10,7 +10,8 @@
 //   §4 FFMPEG FACTS: version / filters / encoders texts → the verdict; no_ffmpeg names where it looked
 //   §5 THE FACTS SCRIPT + PARSER: the three DisplayConfig types + the DXGI walk; the line → displays (PS 5's lone row too)
 //   §6 THE PLAN: the road by HDR state, the refusals by name, the argvs — the capture never converts a float format
-//      (RED CONTROL: the P0's first, clamping chain is caught by the same check)
+//      (RED CONTROL: the P0's first, clamping chain is caught by the same check); no road paints the machine's pointer
+//      (draw_mouse=0 — lane stream-cursor: the viewer's own pointer IS the pointer)
 //   §7 THE BITRATE: hysteresis (5 s, 25 %), rounding, floor and cap
 //   §8 THE FLV READER: THE fixture as an encoder writes it, fed in odd chunks → its access units, SPS/PPS before each key
 import fs from 'node:fs';
@@ -137,12 +138,16 @@ console.log('§6 the plan');
   ok(R(facts({ displays: [{ ...D1, adapter: 1 }] })) === 'display_other_gpu' && R(facts({ displays: [{ ...D1, white: null }] })) === 'no_white_level' && R(facts({ platform: 'linux' })) === 'not_windows' && R(facts({ platform: 'darwin' })) === 'no_helper' && R(facts({ ffmpeg: null })) === 'no_ffmpeg' && R(facts({ ffmpeg: { ...ff, encoders: [] } })) === 'no_encoder', 'refused by name: another GPU\'s display, an HDR display whose white is unknown (never guessed), not Windows (Linux — a Mac takes its own road: lane stream-p3m-build, no helper ⇒ no_helper), no ffmpeg, no encoder');
   const cap = SP.captureArgv(m), enc = SP.encodeArgv(m), dir = SP.directArgv(d);
   const floatSafe = (argv) => { const vf = argv[argv.indexOf('-vf') + 1] || ''; return !/gbrpf32|grayf32|zscale|tonemap|libplacebo|rgba64/.test(argv.join(' ')) && (vf.match(/format=/g) || []).length === 1 && /^hwdownload,format=rgbaf16le$/.test(vf) && argv[argv.indexOf('-pix_fmt') + 1] === 'rgbaf16le'; };
-  ok(cap.includes('ddagrab=output_idx=0:output_fmt=16bit:framerate=30') && floatSafe(cap) && same(cap.slice(-5), ['-f', 'rawvideo', '-pix_fmt', 'rgbaf16le', 'pipe:1']), 'the mapped capture: FP16 DDA, hwdownload, its raw bits on stdout — no float format is ever converted (swscale clamps them to [0, 1])', cap.join(' '));
+  ok(cap.includes('ddagrab=output_idx=0:draw_mouse=0:output_fmt=16bit:framerate=30') && floatSafe(cap) && same(cap.slice(-5), ['-f', 'rawvideo', '-pix_fmt', 'rgbaf16le', 'pipe:1']), 'the mapped capture: FP16 DDA, hwdownload, its raw bits on stdout — no float format is ever converted (swscale clamps them to [0, 1])', cap.join(' '));
   const wrong = cap.map((a) => (a === 'hwdownload,format=rgbaf16le' ? 'hwdownload,format=gbrpf32le' : a));
   ok(!floatSafe(wrong), 'RED CONTROL: the P0\'s first chain (`format=gbrpf32le` — it clamped every value above SDR white) fails the same check');
   const tail = ['-color_primaries', 'bt709', '-color_trc', 'iec61966-2-1', '-colorspace', 'bt709', '-color_range', 'tv', '-fps_mode', 'passthrough', '-f', 'flv', '-flvflags', 'no_duration_filesize', '-flush_packets', '1', 'pipe:1'];
   ok(same(enc.slice(enc.indexOf('-f'), enc.indexOf('-i') + 2), ['-f', 'rawvideo', '-pix_fmt', 'nv12', '-video_size', '3840x2160', '-framerate', '30', '-i', 'pipe:0']) && enc.join(' ').includes('-c:v h264_nvenc -preset p1 -tune ull -rc cbr') && enc.join(' ').includes('-profile:v baseline -bf 0 -g 60 -b:v 8000k -maxrate 8000k') && same(enc.slice(-tail.length), tail), 'the encoder: the agent\'s NV12 on stdin, NVENC p1/ull/cbr, baseline, no B-frames, GOP 60, the rate; the VUI says BT.709 + the sRGB curve (what the mapping made); FLV flushed per picture', enc.join(' '));
-  ok(dir.includes('ddagrab=output_idx=1:framerate=30') && dir.includes('hwdownload,format=bgra,scale=out_color_matrix=bt709:out_range=tv,format=nv12') && same(dir.slice(-tail.length), tail) && !/16bit/.test(dir.join(' ')), 'the direct road: 8-bit DDA → NV12 with the same BT.709 matrix → the encoder, one ffmpeg', dir.join(' '));
+  ok(dir.includes('ddagrab=output_idx=1:draw_mouse=0:framerate=30') && dir.includes('hwdownload,format=bgra,scale=out_color_matrix=bt709:out_range=tv,format=nv12') && same(dir.slice(-tail.length), tail) && !/16bit/.test(dir.join(' ')), 'the direct road: 8-bit DDA → NV12 with the same BT.709 matrix → the encoder, one ffmpeg', dir.join(' '));
+  // lane stream-cursor: ddagrab's draw_mouse defaults to TRUE (measured: `-h filter=ddagrab` on the owner's ffmpeg N-127564) —
+  // the machine's arrow in every frame, under the viewer's own; both roads say 0
+  const grabOf = (argv) => argv.find((a) => /^ddagrab=/.test(a)) || '';
+  ok([cap, dir].every((a) => /(^|:)draw_mouse=0(:|$)/.test(grabOf(a).slice('ddagrab='.length))) && !/draw_mouse=1/.test(cap.join(' ') + dir.join(' ')), 'no pointer in the frames: both DDA roads ask draw_mouse=0 (the viewer\'s own pointer IS the pointer)', [grabOf(cap), grabOf(dir)]);
   ok(SP.encodeArgv(m, 3000).join(' ').includes('-b:v 3000k -maxrate 3000k -bufsize 200k'), 'a new rate = the encoder\'s argv at that rate (a VBV of two frames)');
 }
 

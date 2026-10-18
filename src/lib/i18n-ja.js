@@ -8838,6 +8838,9 @@ export default {
   "Pointer: painted by the machine into the picture — its {px} px pointer is too big to draw here": "ポインター：マシンが画面に描き込みます — {px} px のポインターは大きすぎてここでは描けません",
   "Pointer: drawn here at {pct} % of its {px} px, with the picture": "ポインター：画面に合わせてここで描画、元の {px} px の {pct}%",
   "Pointer: drawn here at its own {px} px": "ポインター：ここで元のサイズ {px} px で描画",
+  // lane stream-cursor: the viewer's own pointer IS the pointer
+  "Pointer: yours — the machine sent none of its own": "ポインターはあなたのもの — マシンは自分のポインターを送ってきません",
+  "Pointer: yours — the machine draws none into the picture": "ポインターはあなたのもの — マシンは自分のポインターを画面に描きません",
   "Now: browser ⇄ hub {a} ms · hub ⇄ machine {b} ms · update round trip {c} ms · {fps} fps · {kbps} kbps": "現在：ブラウザー ⇄ hub {a} ms · hub ⇄ マシン {b} ms · 更新の往復 {c} ms · {fps} fps · {kbps} kbps",
   "Recorded reference: a key press through the same hops took {before} ms before the no-delay fix and {after} ms after (median)": "記録済みの参考値：同じ経路でのキー入力 1 回は no-delay 修正前 {before} ms、修正後 {after} ms（中央値）",
   "Add attachment": "添付を追加",

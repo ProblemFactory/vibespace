@@ -106,6 +106,10 @@ console.log(`[${((Date.now() - T0) / 1000).toFixed(1)} s] ` + '§1 PURE — the 
 console.log(`[${((Date.now() - T0) / 1000).toFixed(1)} s] ` + '§2 the helper\'s source rides the bundle verbatim and carries the probe\'s laws');
 {
   const swift = fs.readFileSync(path.join(REPO, 'tools/vibespace-screen/vibespace-screen.swift'), 'utf8');
+  // lane stream-cursor: SCK composites the Mac's pointer (measured with the .304 helper: an arrow at the moved pointer) — only
+  // with --cursor, which no plan passes (§1's argvs): the viewer's own pointer IS the pointer. A changed source = a new VERSION
+  // (= a new TCC client: the owner turns Screen Recording on once more — helper_changed_regrant)
+  ok((swift.match(/c\.showsCursor = /g) || []).length === 1 && /c\.showsCursor = A\.contains\("--cursor"\)/.test(swift) && !SP.planScreen(facts()).args.includes('--cursor'), 'no pointer in the picture: showsCursor only with --cursor, never in the plan\'s argv');
   const sha = crypto.createHash('sha256').update(swift).digest('hex');
   ok(SRC.SOURCE === swift && SRC.SHA256 === sha && SRC.VERSION === 'vs-' + sha.slice(0, 12), `src/agentd/mac-helper-source.js IS tools/vibespace-screen/vibespace-screen.swift (VERSION ${SRC.VERSION} = its sha — run node scripts/mac-helper-embed.mjs after editing the Swift)`);
   const bundle = path.join(REPO, 'data/bin/vibespace-agentd.js');

@@ -239,7 +239,7 @@ export function openWindowStream(app, m, row, { fp16 = false, openDesktop = null
   let held = null, closed = false, sized = '';
   const drawStrip = () => {
     stripText.textContent = held ? windowStreamText(held, { title, machine }) : t('“{title}” — only this window of {machine} shows here, its own title bar included; what you type here goes to it', { title, machine });
-    stripText.title = stripText.textContent;
+    stripText.title = [stripText.textContent, t('Pointer: yours — the machine draws none into the picture')].join('\n'); // lane stream-cursor
     restoreBtn.hidden = held !== 'window_minimized';
   };
   /** THE SIZE RULE: the picture at the window's own size on its machine (physical ÷ dpi/96), inside the workspace, aspect kept. */

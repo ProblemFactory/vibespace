@@ -318,7 +318,8 @@ console.log('① – ⑥ desk 1280 px (127.0.0.1 — a secure context)');
   await p.ev(`document.querySelector('${WIN} .desktop-strip-status').click()`);
   await sleep(1200);
   const cmp = await p.ev(`[...document.querySelectorAll('${WIN} .desktop-strip-compare > div')].map((d) => d.textContent)`);
-  ok(cmp.length === 2 && /^本次：浏览器 ⇄ hub \d+ ms · hub ⇄ 机器 \d+ ms · 更新往返 (\d+|—) ms · \d+ fps · \d+ kbps$/.test(cmp[0]) && /42\.0 ms.*0\.70 ms/.test(cmp[1]), '④ the status chip opens the comparison row: today\'s numbers · the recorded reference 42.0 → 0.70 ms', cmp);
+  // the .305 integration: lane stream-cursor added the pointer line (指针是你的) to the comparison row when the machine paints none
+  ok((cmp.length === 2 || (cmp.length === 3 && /指针是你的|Pointer: yours/.test(cmp[2]))) && /^本次：浏览器 ⇄ hub \d+ ms · hub ⇄ 机器 \d+ ms · 更新往返 (\d+|—) ms · \d+ fps · \d+ kbps$/.test(cmp[0]) && /42\.0 ms.*0\.70 ms/.test(cmp[1]), '④ the status chip opens the comparison row: today\'s numbers · the recorded reference 42.0 → 0.70 ms', cmp);
   await p.shot('ladder.png', WIN);
   vnc.st.kbps = 0;
   await p.ev(`document.querySelector('${WIN} .desktop-strip-status').click()`);

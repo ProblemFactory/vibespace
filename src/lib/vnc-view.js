@@ -28,7 +28,7 @@ import { t } from './i18n.js';
 import { showToast, COUNTER_ZOOM } from './utils.js';
 import { createPictureShell, RECONNECT_LADDER, streamUrl, pageIsSecure, closeWordsKey } from './picture-shell.js';
 import { installSubtleFallback } from './aes-fallback.js';
-import { clientCuts, updateTimer, rfbScreens, cursorPlan, scaleRgba } from '../desktop-screens.js'; // lane desktop-v2-entry: the stats' timing table + the -308 skimmer
+import { clientCuts, updateTimer, rfbScreens, cursorPlan, pointerShown, scaleRgba } from '../desktop-screens.js'; // lane desktop-v2-entry: the stats' timing table + the -308 skimmer
 import { qualityPlan, pictureChanging, sentInput, refreshRequest, pasteChord, pasteText, STILL_MS } from '../desktop-quality.js'; // lane desktop-v2-latency
 
 // noVNC uses top-level await, which can't live inside our IIFE bundle — it's
@@ -36,6 +36,8 @@ import { qualityPlan, pictureChanging, sentInput, refreshRequest, pasteChord, pa
 // dynamic-imported on first use, so non-desktop users never download it.
 // The URL is computed (not a literal) so esbuild leaves the import at runtime.
 let _rfbClass = null;
+/** lane stream-cursor: the empty pointer image vsCursor answers for one with nothing to see (the patch then shows vsOwnPointer). */
+const NO_POINTER = Object.freeze({ rgbaPixels: new Uint8Array(0), w: 0, h: 0, hotx: 0, hoty: 0 });
 export async function loadRFB() {
   if (!_rfbClass) {
     const mod = await import(new URL('/novnc.js', location.origin).href);
@@ -177,11 +179,14 @@ export function createVncView(host, { url, before = null, labels = {}, autoRecon
     // noVNC asks vsCursor for each image and again when the scale changes); one past 128 px → the machine paints it (a
     // second SetEncodings without the pointer pseudo-encodings, sent after the message being read) and a dot marks ours
     rfb.vsServerCursor = serverCursor;
+    // lane stream-cursor: no pointer to see from the machine (none sent, or a fully transparent one) ⇒ the page's arrow, never
+    // noVNC's `cursor: none` (a Mac's Screen Sharing sent none and painted none: the picture had no pointer at all)
+    rfb.vsOwnPointer = 'default';
     rfb.vsCursor = (img, scale) => {
       const dot = mine.constructor.cursors && mine.constructor.cursors.dot;
       if (serverCursor) return dot || null;
+      if (!pointerShown(img)) { cursorNow = { path: 'own', factor: 1, side: 0 }; return NO_POINTER; }
       const p = cursorPlan(img, scale);
-      if (!(img && img.w > 0 && img.h > 0)) return null;
       cursorNow = { path: p.path, factor: p.factor, side: Math.max(img.w, img.h) };
       if (p.path === 'server') {
         serverCursor = true; mine.vsServerCursor = true;

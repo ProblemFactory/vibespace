@@ -10,7 +10,7 @@
 //
 //   vibespace-screen [--disclaim] version
 //   vibespace-screen [--disclaim] facts                      one JSON line: displays, windows, TCC state, lock, its version
-//   vibespace-screen [--disclaim] capture (--display <id> | --window <id>) [--fps 60] [--size WxH] [--kbps 8000] [--register-row]
+//   vibespace-screen [--disclaim] capture (--display <id> | --window <id>) [--fps 60] [--size WxH] [--kbps 8000] [--register-row] [--cursor]
 //        ScreenCaptureKit → VideoToolbox H.264 (constrained baseline, low-latency rate control) → FLV on stdout (one tag per
 //        picture, AVCC as VideoToolbox writes it — the agent's flvReader takes it as the Windows encoders' FLV); control on
 //        stdin: `key` (the NEXT picture is an IDR — kVTEncodeFrameOptionKey_ForceKeyFrame), `bps <n>` (AverageBitRate, set
@@ -28,7 +28,8 @@
 // exact, no tone-map, so the Mac needs no mapping stage · NSApplication.shared before a window filter (CGS_REQUIRE_INIT) ·
 // a window's frame includes its 32 pt title bar · encode OFF the capture queue, newest picture wins · a minimized window is
 // `suspended` (no picture) — the helper ends `window_minimized` · a static screen sends `idle`: the last picture is repeated
-// every 500 ms and on a key request.
+// every 500 ms and on a key request · NO pointer in the picture (lane stream-cursor: the viewer's own pointer IS the pointer;
+// SCK's showsCursor composites the Mac's — measured: an arrow at the moved pointer — only with `--cursor`).
 // Build: ONE file = the line `let HELPER_VERSION = "<v>"` + this source (the builder writes it: src/agentd/stream-mac.js on the
 // Mac, scripts/build-mac-helper.sh for the release), then swiftc -O -target arm64-apple-macos15.0 (and x86_64, lipo, codesign -s -).
 import Foundation
@@ -288,7 +289,7 @@ func capture() -> Never {
   c.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange // 420v
   c.colorSpaceName = CGColorSpace.sRGB // exact SDR (nil = the display's ICC values under a BT.709 tag — measured)
   c.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
-  c.queueDepth = 6; c.showsCursor = true; c.ignoreShadowsSingleWindow = true
+  c.queueDepth = 6; c.showsCursor = A.contains("--cursor"); c.ignoreShadowsSingleWindow = true
   let cap = Capture(w: W, h: H, fps: fps, kbps: kbps, window: window != nil)
   cap.makeEncoder()
   let s = SCStream(filter: filter, configuration: c, delegate: cap)

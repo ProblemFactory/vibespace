@@ -12,7 +12,8 @@
 //   §5 lane win-desktop-cursor-hdr (owner 2026-10-13 "鼠标如此巨大，而且 HDR 特别白"): cursorPlan (a 96 px pointer at scale 0.5 ⇒
 //      48 px, the hotspot halved; scale 1 untouched; the 16 px floor and the 64 px cap; past 128 px ⇒ the machine paints it),
 //      scaleRgba (2×2 averages, alpha-weighted), the display-facts hdr field (script + parser), hdrShown (true only on a
-//      measured hdr: true — false / unknown say nothing) and the three cursor anchors in the built bundle
+//      measured hdr: true — false / unknown say nothing) and the three cursor anchors in the built bundle; lane stream-cursor:
+//      pointerShown (a pointer image with nothing to see ⇒ the viewer's own arrow) + the own-pointer anchor (vsOwnPointer)
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -103,7 +104,7 @@ ok(/router\.get\('\/api\/desktop\/machine-desktop\/displays', async \(req, res\)
 console.log('§4 the noVNC patch');
 const rfbSrc = read('node_modules/@novnc/novnc/core/rfb.js');
 const pr = P.patchRfb(rfbSrc);
-ok(pr.ok && pr.applied.join() === 'crop,screens,cursor,cursor-scale,server-cursor' && P.ADDED_LINES <= 20, `every anchor applies exactly once on the bundled noVNC; ${P.ADDED_LINES} added lines (≤ 20)`, pr.missing);
+ok(pr.ok && pr.applied.join() === 'crop,screens,cursor,cursor-scale,own-pointer,server-cursor' && P.ADDED_LINES <= 20, `every anchor applies exactly once on the bundled noVNC; ${P.ADDED_LINES} added lines (≤ 20)`, pr.missing);
 ok(/Disable viewport clipping if we are scaling/.test(rfbSrc) && /if \(i === 0\) \{\n\s+this\._screenID = this\._sock\.rQshift32\(\);/.test(rfbSrc) && /typeof urlOrChannel === "string"/.test(rfbSrc), 'the measured 1.7 facts the patch answers: clip is dropped while scaling; ExtendedDesktopSize keeps only screen 0; RFB takes a channel object');
 const drift = P.patchRfb(rfbSrc.replace('const firstUpdate = !this._supportsSetDesktopSize;', 'const firstUpdate = !this._supportsSetDesktopSize ;'));
 ok(!drift.ok && drift.missing.join() === 'screens', 'a drifted anchor is MISSING by name (scripts/build-novnc.mjs then fails the build)', drift);
@@ -120,6 +121,11 @@ ok(cp(32, 32, 4, 4, 0.25) === 'scaled 16x16@2,2' && cp(12, 12, 1, 1, 0.5) === 'n
 ok(cp(96, 96, 95, 95, 0.9) === 'scaled 64x64@63,63' && cp(48, 48, 0, 0, 2) === 'scaled 64x64@0,0', 'the cap: never over 64 css px (the hotspot stays inside the image)', [cp(96, 96, 95, 95, 0.9), cp(48, 48, 0, 0, 2)]);
 ok(cp(256, 256, 10, 10, 0.5) === 'server 256x256@10,10' && cp(129, 20, 0, 0, 1) === 'server 129x20@0,0' && cp(128, 128, 0, 0, 0.5) === 'scaled 64x64@0,0', 'past 128 px ⇒ the machine paints it (Chrome refuses a custom cursor that big); 128 still drawn here', [cp(256, 256, 10, 10, 0.5), cp(129, 20, 0, 0, 1)]);
 ok(cp(0, 0, 0, 0, 0.5) === 'native 0x0@0,0' && cp(64, 32, 0, 0, NaN) === 'native 64x32@0,0', 'no image / no scale ⇒ native (nothing invented)');
+// lane stream-cursor: a pointer image with nothing to see ⇒ the viewer's own arrow (vnc-view answers the empty image, the patch
+// sets vsOwnPointer) — never noVNC's `cursor: none` (a Mac's Screen Sharing sent none and painted none)
+const img = (w, h, alphas) => ({ w, h, rgbaPixels: Uint8ClampedArray.from(alphas.flatMap((a) => [0, 0, 0, a])) });
+ok(S.pointerShown(img(2, 1, [0, 1])) === true && S.pointerShown(img(1, 1, [255])) === true, 'pointerShown: one pixel with any alpha ⇒ shown');
+ok(S.pointerShown(img(2, 2, [0, 0, 0, 0])) === false && S.pointerShown({ w: 0, h: 0, rgbaPixels: new Uint8Array(0) }) === false && S.pointerShown(null) === false && S.pointerShown({ w: 4, h: 4 }) === false, 'pointerShown: fully transparent, empty (noVNC\'s none), no image, no pixels ⇒ not shown');
 const px4 = Uint8ClampedArray.from([255, 0, 0, 255, 0, 0, 255, 255, 0, 255, 0, 0, 0, 0, 0, 0]); // red, blue / transparent-green, transparent
 const sc1 = S.scaleRgba(px4, 2, 2, 1, 1);
 ok(sc1.length === 4 && sc1[0] === 128 && sc1[1] === 0 && sc1[2] === 128 && sc1[3] === 128, 'scaleRgba: a 2×2 block averages to one pixel, alpha-weighted (the transparent green adds no colour)', [...sc1]);
@@ -136,8 +142,9 @@ const keys = map3.displays.map((d) => d.key);
 ok(S.hdrShown({ screens: wf.displays, map: map3, key: keys[1] }) === true && S.hdrShown({ screens: wf.displays, map: map3, key: keys[0] }) === false && S.hdrShown({ screens: wf.displays, map: map3, key: keys[2] }) === false && S.hdrShown({ screens: wf.displays, map: map3, key: null }) === true,
   'hdrShown: the HDR display ⇒ the chip; the SDR one and the unknown one ⇒ nothing; 全部 with an HDR screen in it ⇒ the chip', keys);
 ok(S.hdrShown({ screens: wf.displays.map((d) => ({ ...d, hdr: d.hdr === true ? null : d.hdr })), map: null, key: null }) === false && S.hdrShown({}) === false, 'no measured hdr: true anywhere (an old agent, a Mac) ⇒ nothing');
-ok(/vsCursor/.test(built) && /vsServerCursor/.test(built) && /_vsCursorAt/.test(built), 'the built public/novnc.js carries the pointer patch (vsCursor, the redraw on a new scale, vsServerCursor)');
+ok(/vsCursor/.test(built) && /vsServerCursor/.test(built) && /_vsCursorAt/.test(built) && /this\._canvas\.style\.cursor ?= ?this\.vsOwnPointer/.test(built), 'the built public/novnc.js carries the pointer patch (vsCursor, the redraw on a new scale, vsServerCursor, vsOwnPointer)');
 const vv = read('src/lib/vnc-view.js');
+ok(/rfb\.vsOwnPointer = 'default';/.test(vv) && /if \(!pointerShown\(img\)\) \{ cursorNow = \{ path: 'own'/.test(vv), 'vnc-view: no pointer to see from the machine ⇒ the page\'s arrow (vsOwnPointer default) and the stats say own (lane stream-cursor)');
 ok(/rfb\.vsServerCursor = serverCursor;/.test(vv) && /cursorPlan\(img, scale\)/.test(vv) && /mine\._sendEncodings\(\)/.test(vv) && /get cursor\(\) \{ return cursorNow; \}/.test(vv), 'vnc-view answers vsCursor with the plan, re-sends SetEncodings once the machine must paint it, and keeps that choice for every reconnect');
 
 console.log(`\n${pass} passed, ${fail} failed`);

@@ -200,6 +200,7 @@ export function openMachineDesktop(app, m, { display } = {}) {
   const cursorWords = () => {
     const c = view && view.cursor;
     if (!c) return '';
+    if (c.path === 'own') return t('Pointer: yours — the machine sent none of its own'); // lane stream-cursor (a Mac's Screen Sharing)
     if (c.path === 'server') return t('Pointer: painted by the machine into the picture — its {px} px pointer is too big to draw here', { px: c.side });
     if (c.path === 'scaled') return t('Pointer: drawn here at {pct} % of its {px} px, with the picture', { pct: Math.round(c.factor * 100), px: c.side });
     return t('Pointer: drawn here at its own {px} px', { px: c.side });
@@ -315,7 +316,8 @@ export function openMachineDesktop(app, m, { display } = {}) {
       + (sc && sc.encoder ? ' · ' + (sc.encodeMs != null ? t('{encoder} · encode {ms} ms', { encoder: sc.encoder, ms: sc.encodeMs }) : sc.encoder) : '');
     streamEl.dataset.path = p.path || ''; streamEl.dataset.via = via || '';
     chip.title = [scope, t('WebRTC from the machine’s agent: {w}×{h}, sent {sent} fps at {kbps} kbps', { w: ms(p.width), h: ms(p.height), sent: ms(a && a.fps), kbps: ms(a && a.kbps) }),
-      ...(sc && sc.white ? [t('HDR mapped on the machine (SDR white {nits} nits)', { nits: Math.round(sc.white * 0.08) })] : []), ...(sc && sc.note === 'no_hw_encoder' ? [t('software encoding (no hardware encoder found)')] : [])].join('\n');
+      ...(sc && sc.white ? [t('HDR mapped on the machine (SDR white {nits} nits)', { nits: Math.round(sc.white * 0.08) })] : []), ...(sc && sc.note === 'no_hw_encoder' ? [t('software encoding (no hardware encoder found)')] : []),
+      t('Pointer: yours — the machine draws none into the picture')].join('\n'); // lane stream-cursor: no source paints the machine's
   };
   const inputWords = (ref) => {
     const code = ref && ref.code;

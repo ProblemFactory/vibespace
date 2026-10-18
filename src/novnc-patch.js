@@ -13,6 +13,10 @@
  *     half. The patch hands each pointer image and the view's scale to `vsCursor(image, scale)` (the page answers a scaled
  *     image, src/desktop-screens.js cursorPlan), redraws it when the scale changes, and `vsServerCursor` (true) leaves both
  *     pointer pseudo-encodings out of SetEncodings — the machine then paints its pointer INTO the picture.
+ *   ④ lane stream-cursor (owner 2026-10-18 「mac那个远程桌面模式没有鼠标指针显示，有画面」): with no pointer image to draw (none
+ *     sent yet, or the page's vsCursor answered the empty one for a fully transparent image) 1.7's Cursor.clear() sets the
+ *     canvas to `cursor: none` — a Mac's Screen Sharing sent none and painted none, so the picture had no pointer at all.
+ *     `vsOwnPointer` (a CSS cursor) then shows the viewer's own: the viewer's pointer IS the pointer.
  * The added code calls rfb.js's own methods _updateClip(), _updateScale(), _setClippingViewport(), _refreshCursor(),
  * _shouldShowDotCursor() and _fixScrollbars() (defined there, not here; the last two are the anchors' own text).
  * Each anchor must match exactly once, else the build FAILS (an upstream change is read, never silently unpatched).
@@ -55,6 +59,11 @@ const PATCHES = Object.freeze([
     name: 'cursor-scale',
     anchor: '            this._display.autoscale(size.w, size.h);\n        }\n        this._fixScrollbars();',
     text: '            this._display.autoscale(size.w, size.h);\n        }\n        this._fixScrollbars();\n        if (this.vsCursor && this._vsCursorAt !== this._display.scale) { this._vsCursorAt = this._display.scale; this._refreshCursor(); }',
+  },
+  {
+    name: 'own-pointer',
+    anchor: '        this._cursor.change(image.rgbaPixels,\n                            image.hotx, image.hoty,\n                            image.w, image.h\n        );\n',
+    text: '        this._cursor.change(image.rgbaPixels,\n                            image.hotx, image.hoty,\n                            image.w, image.h\n        );\n        if (this.vsOwnPointer && !(image.w > 0 && image.h > 0)) this._canvas.style.cursor = this.vsOwnPointer;\n',
   },
   {
     name: 'server-cursor',

@@ -105,6 +105,10 @@ console.log('§4 the plan, the helper\'s recipe, head and lines');
     && SP.planWindow(facts({ ffmpeg: null }), { window: win }).code === 'no_ffmpeg' && SP.planWindow(facts(), { window: null }).code === 'window_gone'
     && SP.planWindow(facts({ ffmpeg: { path: 'f', encoders: [] } }), { window: win }).code === 'no_encoder', 'refused by name: not_windows, helper_missing (its sentence), no_ffmpeg, window_gone, no_encoder');
   ok(same(SP.wgcCaptureArgv(p), ['capture', '--hwnd', '657982', '--fmt', 'bgra', '--fps', '30', '--interval', '33']), 'the helper\'s argv: capture, the window, the format, the rate, MinUpdateInterval');
+  // lane stream-cursor: WGC's IsCursorCaptureEnabled defaults to true; the helper sets it from `--cursor` (default "0") and the
+  // agent never passes it ⇒ no pointer in the frames (the viewer's own pointer IS the pointer)
+  const wgcCs = fs.readFileSync(path.join(REPO, 'tools/vibespace-wgc/vibespace-wgc.cs'), 'utf8');
+  ok(/Sess\.IsCursorCaptureEnabled = Arg\("--cursor", "0"\) == "1";/.test(wgcCs) && !SP.wgcCaptureArgv(p).includes('--cursor') && !SP.wgcCaptureArgv(f16).includes('--cursor'), 'no pointer in the frames: the helper turns WGC\'s cursor capture off unless --cursor 1, which the agent never passes');
   const ea = SP.windowEncodeArgv(p, { w: 640, h: 480 }).join(' ');
   ok(/-f rawvideo -pix_fmt bgra -video_size 640x480 -framerate 30 -i pipe:0 -vf scale=out_color_matrix=bt709:out_range=tv,format=nv12 -c:v h264_nvenc/.test(ea) && /-f flv/.test(ea) && !/ddagrab/.test(ea), 'BGRA → the direct road\'s own conversion (BT.709 limited, NV12) → the encoder → FLV, at the CURRENT size', ea);
   ok(/-pix_fmt nv12 -video_size 640x480/.test(SP.windowEncodeArgv(f16, { w: 640, h: 480 }).join(' ')) && !SP.windowEncodeArgv(f16).includes('-vf'), 'the FP16 road hands the agent\'s mapped NV12 (no float conversion in ffmpeg)');

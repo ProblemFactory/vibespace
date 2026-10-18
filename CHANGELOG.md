@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.305 — 2026-10-18
+
+### Fixed
+- Over a machine's desktop your pointer is the pointer: a Mac's picture no longer hides it, Windows streams add no second one; a Mac needs Screen Recording again.
+
 ## 2.369.304 — 2026-10-18
 
 ### Added

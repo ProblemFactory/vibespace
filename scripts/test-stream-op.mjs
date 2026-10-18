@@ -334,7 +334,7 @@ const endedOf = (arr) => { const m = arr.find((x) => x.op === 'stream-stats' && 
   const up = await until(() => pictures(b.got.rtp).length >= 20, 10000);
   const st = await dms.streamStats(off.sid);
   const runs = ffRuns().slice(n0).filter((a) => a.some((x) => /^ddagrab=/.test(x) || x === 'pipe:0'));
-  ok(off.ok && off.source.mode === 'direct' && up && st.stats.screen.mode === 'direct' && st.stats.screen.timing === 'in-ffmpeg' && st.stats.screen.encodeMs === null && runs.length === 1 && runs[0].includes('ddagrab=output_idx=1:framerate=30') && !runs[0].join(' ').includes('16bit'), 'an SDR primary: the direct road — ONE ffmpeg (8-bit DDA of output 1 → NVENC), the pictures play, encodeMs null (timed inside ffmpeg)', { src: off.source, runs: runs.map((r) => r.join(' ')) });
+  ok(off.ok && off.source.mode === 'direct' && up && st.stats.screen.mode === 'direct' && st.stats.screen.timing === 'in-ffmpeg' && st.stats.screen.encodeMs === null && runs.length === 1 && runs[0].includes('ddagrab=output_idx=1:draw_mouse=0:framerate=30') && !runs[0].join(' ').includes('16bit'), 'an SDR primary: the direct road — ONE ffmpeg (8-bit DDA of output 1, no pointer painted — lane stream-cursor → NVENC), the pictures play, encodeMs null (timed inside ffmpeg)', { src: off.source, runs: runs.map((r) => r.join(' ')) });
   await dms.streamStop(off.sid);
   b.pc.close();
 }

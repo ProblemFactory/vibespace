@@ -7,12 +7,17 @@
 // routes (src/server/desktop-webrtc.js made by them) + the ONE picture bridge for the VNC fallback, whose machine side is a
 // stub RFB server. The page: the real src/lib/machine-desktop.js + stream-view.js + vnc-view.js in headless Chrome (zh):
 //   ① the window opens STREAMING: a <video> where the canvas was, the strip reads 串流 · N ms · N fps + 往返 · 抖动 · fps · 解码 · kbps
+//      ⓟ lane stream-cursor — THE POINTER IS YOURS: over the playing <video> (the topmost element at its centre) the computed
+//      cursor is the page's arrow (default), even under a pane that says none — RED CONTROL: the video without the rule
+//      inherits that none; the chip's title says 指针是你的
 //   ② the picture PLAYS: the band read off the <video> twice advances (a screenshot pair)       stream-1.png, stream-2.png
 //   ③ the stats strip: fps > 0, decode ms, kbps — and the agent's own numbers in the chip's title
 //   ④ input over the data channel into THE resident script: a click at the picture's centre = M 640 360 · D 0 · U 0; a key = its
 //      scan code; a Mac viewer's ⌘ = the machine's Ctrl (K 29 0 0) — RED CONTROL: the door without THE table sends K 91 1 0
 //   ⑤ UIPI: an elevated window in front ⇒ the strip names it (the press never reached it)
 //   ⑥ THE FALLBACK: the machine ends the stream ⇒ the <video> goes, the strip says why, the VNC picture signs in and draws  fallback.png
+//      ⓟ this stub sends no pointer of its own (a Mac's Screen Sharing showed none — lane stream-cursor): the canvas shows YOUR
+//      arrow (default), never noVNC's none; the chip's title says 指针是你的
 //   ⑦ relay-only — lane stream-relay-udp: the daemon's own UDP leg carries it, the strip says 经 hub 中转 · UDP; the copy's
 //      firewall drops its self-probe ⇒ the strip says 机器防火墙挡住直连，经 hub 中转 with the owner's admin line to copy (the
 //      netsh rule for its node.exe; the toast says where to paste it) — never on the direct path (①); the notice sits AHEAD of
@@ -254,6 +259,14 @@ console.log('① – ⑥ desk 1280 px');
   await p.until(`/解码 [\\d.]+ ms · \\d+ kbps$/.test((document.querySelector('${WIN} .desktop-strip-stream') || {}).textContent || '')`, 8000); // decode ms and kbps need a second getStats read
   const s1 = await stripText(p);
   ok(up && !canvas && /^串流 · \d+ ms · \d+ fps$/.test(s1.chip || '') && /^往返 \d+ ms · 抖动 \d+ ms · \d+ fps · 解码 [\d.]+ ms · \d+ kbps$/.test(s1.stream || '') && !s1.note && vnc.seen.sessions === 0, '① the window opens STREAMING: a <video> where the canvas was (no VNC session), the strip [串流 · N ms · N fps] [往返 · 抖动 · fps · 解码 · kbps]', s1);
+  // lane stream-cursor: the page's own arrow over the playing picture — and the RED CONTROL: a <video> without the class (no
+  // rule) in the same pane inherits the pane's none
+  const look = await p.ev(`(() => { const v = document.querySelector('${WIN} .stream-video'), b = v.getBoundingClientRect(), top = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2), pane = v.parentElement;
+    const own = getComputedStyle(v).cursor; pane.style.cursor = 'none'; const under = getComputedStyle(v).cursor;
+    const bare = document.createElement('video'); pane.append(bare); const bareUnder = getComputedStyle(bare).cursor; bare.remove(); pane.style.cursor = '';
+    return { own, under, bareUnder, top: top === v ? 'video' : top ? top.tagName.toLowerCase() + '.' + top.className : null }; })()`);
+  ok(look.own === 'default' && look.under === 'default' && look.top === 'video', `① ⓟ the pointer is yours: over the playing <video> (the topmost element at its centre: ${look.top}) the computed cursor is the page's arrow (${look.own}), and still ${look.under} under a pane that says none`, look);
+  ok(look.bareUnder === 'none', `① ⓟ RED CONTROL: a <video> without the rule under that pane inherits ${look.bareUnder} — the rule is what keeps the arrow`, look);
   const di1 = ((await sessions())[0]?.stats || {}).directInbound || {};
   ok(di1.verdict === 'blocked' && di1.program === NODE_EXE && !s1.fw, '① the machine\'s self-probe says blocked (its node.exe named) — yet a DIRECT pair plays here, so the strip says nothing about the firewall (only the hub relay\'s path carries that sentence)', { di1, fw: s1.fw });
   const b1 = await p.ev('window.__band()');
@@ -266,7 +279,7 @@ console.log('① – ⑥ desk 1280 px');
   await sleep(1200);
   const s2 = await stripText(p);
   const fps = Number((/· (\d+) fps ·/.exec(s2.stream || '') || [])[1]);
-  ok(fps >= 15 && /解码 [\d.]+ ms/.test(s2.stream) && /\d+ kbps$/.test(s2.stream) && /发出 \d+ fps、\d+ kbps/.test(s2.title), `③ the stats strip: ${fps} fps, decode ms, kbps; the agent's own numbers (sent fps, kbps) in the chip's title`, s2);
+  ok(fps >= 15 && /解码 [\d.]+ ms/.test(s2.stream) && /\d+ kbps$/.test(s2.stream) && /发出 \d+ fps、\d+ kbps/.test(s2.title) && /指针是你的/.test(s2.title), `③ the stats strip: ${fps} fps, decode ms, kbps; the agent's own numbers (sent fps, kbps) and 指针是你的 in the chip's title`, s2);
   const [cx, cy] = await centre(p);
   const n0 = psLines().length;
   await p.click(cx, cy);
@@ -289,6 +302,9 @@ console.log('① – ⑥ desk 1280 px');
   const drawn = await p.until(`(() => { const cv = document.querySelector('${WIN} canvas'); if (!cv || cv.width !== 1280) return false; const d = cv.getContext('2d').getImageData(640, 360, 1, 1).data; return Math.abs(d[0] - 40) < 8 && Math.abs(d[1] - 150) < 8 && Math.abs(d[2] - 70) < 8; })()`, 15000);
   const s3 = await stripText(p);
   ok(raw && raw.stopped && fell && asked && drawn && vnc.seen.authed === 1 && /机器那边结束了它（stopped）/.test(s3.note || ''), '⑥ the machine ends the stream ⇒ the <video> goes, the strip says why (串流停了（机器那边结束了它（stopped））——改为显示 VNC 画面), the VNC picture signs in and draws', { raw, fell, asked, drawn, s3, vnc: vnc.seen });
+  const vc = await p.ev(`(() => { const cv = document.querySelector('${WIN} canvas'), b = cv.getBoundingClientRect(), top = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2); return { computed: getComputedStyle(cv).cursor, inline: cv.style.cursor, top: top === cv ? 'canvas' : top ? top.tagName.toLowerCase() : null }; })()`);
+  const s6 = await stripText(p);
+  ok(vc.computed === 'default' && vc.top === 'canvas' && /指针是你的/.test(s6.title || ''), `⑥ ⓟ the VNC picture with no pointer from the machine: the canvas shows YOUR arrow (${vc.computed}, inline ${vc.inline || '—'}), never noVNC's none; the chip's title says 指针是你的`, { vc, title: s6.title });
   await p.shot('fallback.png', WIN);
   await p.close();
 }

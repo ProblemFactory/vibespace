@@ -257,8 +257,10 @@ function encodeTail(enc, { kbps, fps, gop }) {
     '-color_primaries', 'bt709', '-color_trc', 'iec61966-2-1', '-colorspace', 'bt709', '-color_range', 'tv',
     '-fps_mode', 'passthrough', '-f', 'flv', '-flvflags', 'no_duration_filesize', '-flush_packets', '1', 'pipe:1'];
 }
-/** DDA, one output of adapter 0 (ddagrab opens the default adapter's outputs). */
-const grab = (output, fps, bits16) => `ddagrab=output_idx=${output}${bits16 ? ':output_fmt=16bit' : ''}:framerate=${fps}`;
+/** DDA, one output of adapter 0 (ddagrab opens the default adapter's outputs). draw_mouse=0 (lane stream-cursor): ddagrab's
+ *  default (true — measured on the owner's ffmpeg N-127564) paints the machine's pointer into every frame, under the viewer's
+ *  own arrow; the viewer's pointer IS the pointer, so no source draws the machine's. */
+const grab = (output, fps, bits16) => `ddagrab=output_idx=${output}:draw_mouse=0${bits16 ? ':output_fmt=16bit' : ''}:framerate=${fps}`;
 /** The capture ffmpeg of the MAPPED road: FP16 frames as their raw bits on stdout — NO `format=` conversion of a float
  *  format (swscale clamps them to [0, 1]: measured, ffmpeg 8.0.1) — hwdownload hands rgbaf16le, `format=` only pins it. */
 function captureArgv(plan) { return [...QUIET, '-nostdin', '-f', 'lavfi', '-i', grab(plan.display.output, plan.fps, true), '-vf', 'hwdownload,format=rgbaf16le', '-f', 'rawvideo', '-pix_fmt', 'rgbaf16le', 'pipe:1']; }
