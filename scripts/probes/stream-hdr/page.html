@@ -1,0 +1,569 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VibeSpace HDR probe</title>
+<!-- THE HDR PROBE PAGE (lane stream-hdr-probe, design q-041 r3 §3 P4). The OWNER opens it on an HDR screen; their eye is the
+     oracle: is the 1000-nit square of (b) / (c) / (d) brighter than the SDR white square (a)? The page also prints this
+     browser's HDR API answers (hdrFacts — the same function the hub harness facts-hub.mjs calls headless) and saves both as one
+     JSON file (Save facts → the Downloads folder). Clips: window.HDR_CLIPS (make-clips.mjs inlines them into hdr-probe.html)
+     or fetched from ?clips=<base url> (default clips/). ?tiles=0 / ?facts=0 skip either half. -->
+<style>
+  html, body { margin: 0; background: #1a1a1a; color: #ddd; font: 14px/1.4 system-ui, sans-serif; }
+  main { padding: 12px 16px; }
+  h1 { font-size: 18px; margin: 0 0 6px; }
+  .ask { margin: 0 0 10px; max-width: 1200px; }
+  .ask b { color: #fff; }
+  #tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+  figure { margin: 0; background: #000; padding: 8px; border: 1px solid #333; }
+  figure .pic { width: 100%; aspect-ratio: 16 / 9; display: block; background: #000; }
+  figure .pic.sdr { display: flex; align-items: center; justify-content: center; }
+  .sdr i { width: 23.4%; aspect-ratio: 1; background: #fff; display: block; }
+  figcaption { margin-top: 6px; font-size: 12px; }
+  figcaption .st { color: #9cf; display: block; min-height: 2.6em; }
+  .ans { margin-top: 4px; font-size: 12px; }
+  .ans label { margin-right: 8px; white-space: nowrap; }
+  .bar { margin: 10px 0; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  button, select, input { font: inherit; }
+  #facts table { border-collapse: collapse; margin: 6px 0 14px; font-size: 12px; }
+  #facts td, #facts th { border: 1px solid #444; padding: 2px 6px; text-align: left; vertical-align: top; }
+  #facts th { background: #262626; }
+  .yes { color: #7d7; } .no { color: #e77; }
+</style>
+<!--HDR_CLIPS-->
+</head><body><main>
+<h1>VibeSpace HDR probe — 这些方块比白色更亮吗？ / Is it brighter than white?</h1>
+<p class="ask">Each tile shows the same PQ picture (10-bit; tile (e)'s h264 choice is 8-bit): squares at <b>100</b>, <b>203</b> and <b>1000 nits</b>, a moving 1000-nit
+marker and a 0 → 1000-nit ramp. Tile (a) is plain SDR white. On a real HDR screen the <b>right square (1000 nits)</b> of a tile
+that shows true HDR is <b>clearly brighter than (a)</b>, and its 203-nit square looks about like (a). A tile that clips to SDR
+shows the right square no brighter than (a).
+每个格子右边的方块是 1000 尼特：真 HDR 时它明显比 (a) 的白更亮。请在每个格子下选一个答案，然后点 Save facts。</p>
+<div class="bar">
+  <label>SDR white (nits) for (d) <input id="white" type="number" value="200" min="40" max="1000" step="10" style="width:5em"></label>
+  <label>(c)/(d) decode <select id="dcodec"></select></label>
+  <label>(b) file <select id="vfile"></select></label>
+  <label>(e) WebRTC <select id="rcodec"></select></label>
+  <button id="save">Save facts</button> <button id="copy">Copy facts</button> <span id="saved"></span>
+</div>
+<div id="tiles">
+  <figure id="tA"><div class="pic sdr"><i></i></div><figcaption>(a) SDR white — CSS #fff<span class="st">the reference: SDR white as this screen shows it</span></figcaption></figure>
+  <figure id="tB"><video id="vB" class="pic" muted loop autoplay playsinline></video><figcaption>(b) &lt;video&gt; plays the PQ file<span class="st" id="sB"></span></figcaption></figure>
+  <figure id="tC"><canvas id="cC" class="pic" width="1280" height="720"></canvas><figcaption>(c) WebCodecs → 2D canvas rec2100-pq<span class="st" id="sC"></span></figcaption></figure>
+  <figure id="tD"><canvas id="cD" class="pic" width="1280" height="720"></canvas><figcaption>(d) WebCodecs → WebGPU float16, extended<span class="st" id="sD"></span></figcaption></figure>
+  <figure id="tE"><video id="vE" class="pic" muted autoplay playsinline></video><figcaption>(e) WebRTC → &lt;video&gt; (this browser to itself, its own decoder)<span class="st" id="sE"></span></figcaption></figure>
+</div>
+<div id="facts"></div>
+</main>
+<script>
+'use strict';
+const $ = (id) => document.getElementById(id);
+const Q = new URLSearchParams(location.search);
+const PQ = Object.freeze({ primaries: 'bt2020', transfer: 'pq', matrix: 'bt2020-ncl', fullRange: false });
+const HLG = Object.freeze({ primaries: 'bt2020', transfer: 'hlg', matrix: 'bt2020-ncl', fullRange: false });
+// The picture's geometry (make-clips.mjs): sample points for read-backs.
+const AT = Object.freeze({ p1000: [1060, 230], p203: [640, 230], p100: [220, 230], bg: [640, 495] });
+const LUMA = Object.freeze({ bg: 281, p100: 509, p203: 573, p1000: 723 }); // make-clips.mjs prints the same codes
+
+// ── the clips: inlined (hdr-probe.html) or fetched ───────────────────────────────────────────────────────────────────
+const b64 = (s) => { const t = atob(s), u = new Uint8Array(t.length); for (let i = 0; i < t.length; i++) u[i] = t.charCodeAt(i); return u; };
+async function clipBytes(name) {
+  if (window.HDR_CLIPS && window.HDR_CLIPS[name]) return b64(window.HDR_CLIPS[name]);
+  const r = await fetch((Q.get('clips') || 'clips/') + name);
+  if (!r.ok) throw new Error(`${name}: HTTP ${r.status}`);
+  return new Uint8Array(await r.arrayBuffer());
+}
+// IVF (AV1 / VP9): 32-byte header, then [size u32][pts u64] frames. Key = AV1: a sequence header OBU in the TU; VP9: frame_type 0.
+function obuTypes(u8) {
+  const t = []; let o = 0;
+  while (o < u8.length) {
+    const h = u8[o], type = (h >> 3) & 15, ext = (h >> 2) & 1, hasSize = (h >> 1) & 1; o += 1 + ext;
+    if (!hasSize) { t.push(type); break; }
+    let size = 0, shift = 0, b; do { b = u8[o++]; size += (b & 127) * 2 ** shift; shift += 7; } while (b & 128);
+    t.push(type); o += size;
+  }
+  return t;
+}
+function vp9Key(u8) { const b = u8[0], profile = ((b >> 5) & 1) | (((b >> 4) & 1) << 1), s = profile === 3 ? 1 : 0; return ((b >> (3 - s)) & 1) === 0 && ((b >> (2 - s)) & 1) === 0; }
+function parseIvf(u8) {
+  const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+  if (String.fromCharCode(u8[0], u8[1], u8[2], u8[3]) !== 'DKIF') throw new Error('not an IVF file');
+  const fourcc = String.fromCharCode(u8[8], u8[9], u8[10], u8[11]), den = dv.getUint32(16, true), num = dv.getUint32(20, true);
+  const out = []; let o = dv.getUint16(6, true);
+  while (o + 12 <= u8.length) {
+    const size = dv.getUint32(o, true), pts = Number(dv.getBigUint64(o + 4, true)); o += 12;
+    const data = u8.subarray(o, o + size); o += size;
+    out.push({ data, ts: Math.round((pts * num / den) * 1e6), key: fourcc === 'AV01' ? obuTypes(data).includes(1) : vp9Key(data) });
+  }
+  return out;
+}
+// Annex-B with an AUD opening each picture — HEVC: AUD 35, key = an IRAP NAL (16..23); H.264 (h264 = true): AUD 9, key = IDR 5.
+function parseAnnexB(u8, fps = 30, h264 = false) {
+  const pos = [];
+  for (let k = 0; k + 2 < u8.length; k++) if (u8[k] === 0 && u8[k + 1] === 0 && u8[k + 2] === 1) { pos.push(k + 3); k += 2; }
+  const aus = []; let cur = null;
+  pos.forEach((p, j) => {
+    let end = j + 1 < pos.length ? pos[j + 1] - 3 : u8.length; while (end > p && u8[end - 1] === 0) end--;
+    const nal = u8.subarray(p, end), type = h264 ? nal[0] & 31 : (nal[0] >> 1) & 63;
+    if (type === (h264 ? 9 : 35) || !cur) { cur = { nals: [], key: false }; aus.push(cur); }
+    cur.nals.push(nal); if (h264 ? type === 5 : type >= 16 && type <= 23) cur.key = true;
+  });
+  return aus.map((a, i) => {
+    const d = new Uint8Array(a.nals.reduce((s, n) => s + 4 + n.length, 0)); let o = 0;
+    for (const n of a.nals) { d.set([0, 0, 0, 1], o); d.set(n, o + 4); o += 4 + n.length; }
+    return { data: d, ts: Math.round((i * 1e6) / fps), key: a.key };
+  });
+}
+const DECODE = Object.freeze({
+  av1: { file: 'clip-av1.ivf', parse: parseIvf, codec: 'av01.0.05M.10' },
+  vp9: { file: 'clip-vp9.ivf', parse: parseIvf, codec: 'vp09.02.31.10' },
+  hevc: { file: 'clip-hevc.hevc', parse: parseAnnexB, codec: 'hev1.2.4.L93.B0' },
+});
+const FILES = Object.freeze({
+  hevc: { file: 'clip-hevc.mp4', type: 'video/mp4; codecs="hvc1.2.4.L93.B0"' },
+  av1: { file: 'clip-av1.mp4', type: 'video/mp4; codecs="av01.0.05M.10.0.110.09.16.09.0"' },
+  vp9: { file: 'clip-vp9.webm', type: 'video/webm; codecs="vp09.02.31.10.01.09.16.09.01"' },
+});
+
+// ── leg 1: this browser's HDR API answers ────────────────────────────────────────────────────────────────────────────
+const settle = (p, ms = 5000) => Promise.race([Promise.resolve(p).then((v) => ({ v }), (e) => ({ e: String(e && e.message || e) })), new Promise((r) => setTimeout(() => r({ e: `timeout ${ms} ms` }), ms))]);
+const csOf = (x) => { try { return x && x.toJSON ? x.toJSON() : x || null; } catch { return null; } };
+async function readBack(ctx, x, y) {
+  for (const s of [{ pixelFormat: 'rgba-float32' }, { pixelFormat: 'rgba-float16' }, { storageFormat: 'float32' }, undefined]) {
+    try { const d = ctx.getImageData(x, y, 1, 1, s); return { as: s ? JSON.stringify(s) : 'default', kind: d.data.constructor.name, px: Array.from(d.data).slice(0, 3).map((v) => Math.round(v * 1000) / 1000) }; } catch { /* next */ }
+  }
+  return { error: 'getImageData refused' };
+}
+const CANVAS_TRIES = [
+  { colorSpace: 'srgb' }, { colorSpace: 'display-p3' }, { colorSpace: 'srgb', colorType: 'float16' },
+  { colorSpace: 'rec2100-pq' }, { colorSpace: 'rec2100-pq', colorType: 'float16' }, { colorSpace: 'rec2100-hlg' }, { colorSpace: 'srgb-linear', colorType: 'float16' },
+  { colorSpace: 'srgb', pixelFormat: 'float16' },
+];
+function synthFrame(luma) { // a 64×64 I420P10 frame, grey at `luma`, tagged PQ
+  const w = 64, h = 64, y = new Uint16Array(w * h).fill(luma), c = new Uint16Array((w / 2) * (h / 2)).fill(512);
+  const buf = new Uint8Array(y.byteLength + 2 * c.byteLength); buf.set(new Uint8Array(y.buffer), 0); buf.set(new Uint8Array(c.buffer), y.byteLength); buf.set(new Uint8Array(c.buffer), y.byteLength + c.byteLength);
+  return new VideoFrame(buf, { format: 'I420P10', codedWidth: w, codedHeight: h, timestamp: 0, colorSpace: PQ });
+}
+async function hdrFacts({ decode = true } = {}) {
+  const f = { when: new Date().toISOString(), ua: navigator.userAgent, secure: window.isSecureContext, page: location.protocol };
+  try { f.uaData = navigator.userAgentData ? await navigator.userAgentData.getHighEntropyValues(['platform', 'platformVersion', 'fullVersionList']) : null; } catch { f.uaData = null; }
+  f.screen = { w: screen.width, h: screen.height, colorDepth: screen.colorDepth, dpr: devicePixelRatio };
+  f.media = {};
+  for (const q of ['(dynamic-range: high)', '(video-dynamic-range: high)', '(color-gamut: p3)', '(color-gamut: rec2020)']) f.media[q] = matchMedia(q).matches;
+  // VideoDecoder.isConfigSupported — the brief's codec strings, PQ and HLG, each acceleration preference; 8-bit SDR controls.
+  f.videoDecoder = [];
+  if (typeof VideoDecoder === 'function') {
+    const rows = [];
+    for (const codec of ['hev1.2.4.L153.B0', 'hvc1.2.4.L153.B0', 'av01.0.08M.10', 'vp09.02.10.10']) for (const cs of [PQ, HLG]) for (const hw of ['no-preference', 'prefer-hardware', 'prefer-software']) rows.push({ codec, cs, hw });
+    for (const codec of ['avc1.42e01f', 'hev1.1.6.L93.B0', 'av01.0.08M.08', 'vp09.00.10.08']) rows.push({ codec, cs: null, hw: 'no-preference' });
+    for (const r of rows) {
+      const cfg = { codec: r.codec, codedWidth: 3840, codedHeight: 2160, hardwareAcceleration: r.hw, ...(r.cs ? { colorSpace: r.cs } : {}) };
+      const a = await settle(VideoDecoder.isConfigSupported(cfg));
+      f.videoDecoder.push({ codec: r.codec, transfer: r.cs ? r.cs.transfer : 'sdr', hw: r.hw, supported: a.v ? a.v.supported : null, error: a.e || null, echoCs: a.v && a.v.config ? csOf(a.v.config.colorSpace) : null });
+    }
+  } else f.videoDecoder = 'no VideoDecoder';
+  // MediaSource / canPlayType / MediaCapabilities for the same, with the colour-carrying codec strings.
+  const TYPES = ['video/mp4; codecs="hev1.2.4.L153.B0"', 'video/mp4; codecs="hvc1.2.4.L153.B0"', 'video/mp4; codecs="av01.0.08M.10"',
+    'video/mp4; codecs="av01.0.08M.10.0.110.09.16.09.0"', 'video/mp4; codecs="av01.0.08M.10.0.110.09.18.09.0"', 'video/mp4; codecs="vp09.02.10.10"',
+    'video/webm; codecs="vp09.02.10.10.01.09.16.09.01"', 'video/webm; codecs="vp09.02.10.10.01.09.18.09.01"', 'video/mp4; codecs="avc1.42e01f"'];
+  const v = document.createElement('video');
+  f.mediaSource = TYPES.map((t) => ({ type: t, mse: typeof MediaSource === 'function' ? MediaSource.isTypeSupported(t) : null, managed: typeof ManagedMediaSource === 'function' ? ManagedMediaSource.isTypeSupported(t) : null, canPlay: v.canPlayType(t) }));
+  f.mediaCapabilities = [];
+  if (navigator.mediaCapabilities) {
+    for (const [type, ct] of [['media-source', 'video/mp4; codecs="hvc1.2.4.L153.B0"'], ['media-source', 'video/mp4; codecs="av01.0.08M.10"'], ['media-source', 'video/webm; codecs="vp09.02.10.10"'], ['file', 'video/mp4; codecs="hvc1.2.4.L153.B0"'],
+      ['webrtc', 'video/AV1'], ['webrtc', 'video/VP9; profile-id=2'], ['webrtc', 'video/H265']]) {
+      for (const tf of ['pq', 'hlg']) {
+        const cfg = { type, video: { contentType: ct, width: 3840, height: 2160, bitrate: 20e6, framerate: 60, colorGamut: 'rec2020', transferFunction: tf, ...(tf === 'pq' ? { hdrMetadataType: 'smpteSt2086' } : {}) } };
+        const a = await settle(navigator.mediaCapabilities.decodingInfo(cfg));
+        f.mediaCapabilities.push({ type, contentType: ct, transfer: tf, ...(a.v ? { supported: a.v.supported, smooth: a.v.smooth, powerEfficient: a.v.powerEfficient } : { error: a.e }) });
+      }
+    }
+  }
+  // WebRTC: what the browser would negotiate, and the two ways to read encoded frames (bypassing its decoder).
+  f.webrtc = { encodedTransform: typeof RTCRtpScriptTransform === 'function', createEncodedStreams: typeof RTCRtpReceiver === 'function' && 'createEncodedStreams' in RTCRtpReceiver.prototype };
+  for (const side of ['RTCRtpReceiver', 'RTCRtpSender']) {
+    try { const c = window[side].getCapabilities('video'); f.webrtc[side] = { codecs: c.codecs.filter((x) => !/rtx|red|ulpfec|flexfec/i.test(x.mimeType)).map((x) => `${x.mimeType}${x.sdpFmtpLine ? ' ' + x.sdpFmtpLine : ''}`), headerExtensions: (c.headerExtensions || []).map((h) => h.uri) }; } catch (e) { f.webrtc[side] = String(e.message || e); }
+  }
+  // Canvas: which 2D colour spaces / storage it accepts, what a 1000-nit and a 203-nit PQ VideoFrame read back as.
+  f.canvas = { configureHighDynamicRange: typeof HTMLCanvasElement.prototype.configureHighDynamicRange === 'function', webglDrawingBufferStorage: typeof WebGL2RenderingContext === 'function' && 'drawingBufferStorage' in WebGL2RenderingContext.prototype, tries: [] };
+  let f1000 = null, f203 = null;
+  try { f1000 = synthFrame(LUMA.p1000); f203 = synthFrame(LUMA.p203); f.canvas.videoFrameCs = csOf(f1000.colorSpace); f.canvas.videoFrameFormat = f1000.format; } catch (e) { f.canvas.videoFrame = String(e.message || e); }
+  for (const attrs of CANVAS_TRIES) {
+    const row = { asked: JSON.stringify(attrs) };
+    try {
+      const c = document.createElement('canvas'); c.width = 64; c.height = 64;
+      const ctx = c.getContext('2d', attrs);
+      if (!ctx) row.error = 'null context';
+      else {
+        const got = ctx.getContextAttributes ? ctx.getContextAttributes() : {};
+        row.got = JSON.stringify({ colorSpace: got.colorSpace, colorType: got.colorType, pixelFormat: got.pixelFormat, storageFormat: got.storageFormat });
+        if (f1000) { ctx.drawImage(f1000, 0, 0); row.pq1000 = await readBack(ctx, 32, 32); ctx.drawImage(f203, 0, 0); row.pq203 = await readBack(ctx, 32, 32); }
+      }
+    } catch (e) { row.error = `${e.name}: ${e.message}`; }
+    f.canvas.tries.push(row);
+  }
+  if (f1000) { f1000.close(); f203.close(); }
+  // WebGPU: an adapter, and does a float16 canvas keep toneMapping 'extended'?
+  f.webgpu = { api: !!navigator.gpu };
+  if (navigator.gpu) {
+    const a = await settle(navigator.gpu.requestAdapter(), 4000);
+    if (!a.v) f.webgpu.adapter = a.e || null;
+    else {
+      try { const i = a.v.info || {}; f.webgpu.adapter = { vendor: i.vendor, architecture: i.architecture, description: i.description }; } catch { f.webgpu.adapter = 'present'; }
+      const d = await settle(a.v.requestDevice(), 4000);
+      if (d.v) {
+        for (const cs of ['srgb', 'display-p3']) {
+          try {
+            const ctx = document.createElement('canvas').getContext('webgpu');
+            ctx.configure({ device: d.v, format: 'rgba16float', colorSpace: cs, toneMapping: { mode: 'extended' }, alphaMode: 'opaque' });
+            const g = ctx.getConfiguration ? ctx.getConfiguration() : null;
+            f.webgpu[`rgba16float+${cs}`] = g ? { toneMapping: g.toneMapping ? g.toneMapping.mode : '(absent)', colorSpace: g.colorSpace } : 'configured (no getConfiguration)';
+          } catch (e) { f.webgpu[`rgba16float+${cs}`] = `${e.name}: ${e.message}`; }
+        }
+        d.v.destroy();
+      } else f.webgpu.device = d.e;
+    }
+  }
+  if (decode) { f.decode = await decodeFacts(); f.video = await videoFacts(); }
+  return f;
+}
+// The real clips through WebCodecs: the first frame's format + colour space, the 10-bit codes read back, a float canvas draw.
+async function decodeFacts() {
+  const out = [];
+  for (const [kind, d] of Object.entries(DECODE)) for (const hw of ['no-preference', 'prefer-software']) {
+    const row = { kind, codec: d.codec, hw };
+    try {
+      const cfg = { codec: d.codec, hardwareAcceleration: hw, colorSpace: kind === 'vp9' ? PQ : undefined };
+      if (!cfg.colorSpace) delete cfg.colorSpace;
+      const sup = await settle(VideoDecoder.isConfigSupported(cfg));
+      if (!sup.v || !sup.v.supported) { row.supported = false; out.push(row); continue; }
+      const chunks = d.parse(await clipBytes(d.file));
+      const frames = []; let err = null;
+      const dec = new VideoDecoder({ output: (fr) => frames.push(fr), error: (e) => { err = String(e.message || e); } });
+      dec.configure(cfg);
+      for (const k of chunks.slice(0, 3)) dec.decode(new EncodedVideoChunk({ type: k.key ? 'key' : 'delta', timestamp: k.ts, data: k.data }));
+      const fl = await settle(dec.flush(), 8000);
+      if (err || fl.e) row.error = err || fl.e;
+      const fr = frames[0];
+      if (fr) {
+        Object.assign(row, { supported: true, chunks: chunks.length, keys: chunks.filter((c) => c.key).length, format: fr.format, coded: `${fr.codedWidth}x${fr.codedHeight}`, cs: csOf(fr.colorSpace) });
+        if (fr.format && /P10|P12/.test(fr.format)) {
+          const buf = new Uint8Array(fr.allocationSize()); const lay = await fr.copyTo(buf); const y = new DataView(buf.buffer);
+          const at = ([x, yy]) => y.getUint16(lay[0].offset + yy * lay[0].stride + x * 2, true);
+          row.yCodes = { p1000: at(AT.p1000), p203: at(AT.p203), p100: at(AT.p100), bg: at(AT.bg), expect: LUMA };
+        }
+        const c = document.createElement('canvas'); c.width = fr.displayWidth; c.height = fr.displayHeight;
+        try { const ctx = c.getContext('2d', { colorSpace: 'srgb', colorType: 'float16' }); ctx.drawImage(fr, 0, 0); row.float16Canvas = { p1000: await readBack(ctx, ...AT.p1000), p203: await readBack(ctx, ...AT.p203) }; } catch (e) { row.float16Canvas = String(e.message || e); }
+      } else if (!row.error) row.error = 'no frame out';
+      frames.forEach((x) => x.close()); try { dec.close(); } catch { /* closed */ }
+    } catch (e) { row.error = String(e.message || e); }
+    out.push(row);
+  }
+  return out;
+}
+// The files through <video>: plays? the presented frame's format + colour space as a VideoFrame sees it.
+async function videoFacts() {
+  const out = [];
+  for (const [kind, x] of Object.entries(FILES)) {
+    const v = document.createElement('video'); v.muted = true; v.playsInline = true;
+    const row = { kind, type: x.type, canPlay: v.canPlayType(x.type) };
+    if (!row.canPlay) { out.push(row); continue; }
+    const url = URL.createObjectURL(new Blob([await clipBytes(x.file)], { type: x.type.split(';')[0] }));
+    v.src = url; document.body.append(v); v.style.cssText = 'position:fixed;left:0;top:0;width:64px;height:36px;opacity:0.01';
+    const shown = await settle(new Promise((res, rej) => { v.onerror = () => rej(new Error(`media error ${v.error && v.error.code}`)); if (v.requestVideoFrameCallback) v.requestVideoFrameCallback(() => res('frame')); else v.addEventListener('loadeddata', () => res('loadeddata')); v.play().catch(() => { }); }), 6000);
+    if (shown.e) row.error = shown.e;
+    else {
+      try { const fr = new VideoFrame(v, { timestamp: 0 }); Object.assign(row, { played: true, format: fr.format, coded: `${fr.codedWidth}x${fr.codedHeight}`, cs: csOf(fr.colorSpace) }); fr.close(); } catch (e) { row.videoFrame = String(e.message || e); }
+      try { const c = document.createElement('canvas'); c.width = 1280; c.height = 720; const ctx = c.getContext('2d', { colorSpace: 'srgb', colorType: 'float16' }); ctx.drawImage(v, 0, 0, 1280, 720); row.float16Canvas = { p1000: await readBack(ctx, ...AT.p1000), p203: await readBack(ctx, ...AT.p203) }; } catch (e) { row.float16Canvas = String(e.message || e); }
+    }
+    v.pause(); v.remove(); URL.revokeObjectURL(url); out.push(row);
+  }
+  return out;
+}
+
+// ── the facts as tables ─────────────────────────────────────────────────────────────────────────────────────────────
+const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
+const cell = (v) => (v === true ? '<td class="yes">yes</td>' : v === false ? '<td class="no">no</td>' : `<td>${esc(v == null ? '' : typeof v === 'object' ? JSON.stringify(v) : v)}</td>`);
+function table(title, rows, cols) {
+  if (!Array.isArray(rows)) return `<h3>${esc(title)}</h3><p>${esc(rows)}</p>`;
+  return `<h3>${esc(title)}</h3><table><tr>${cols.map((c) => `<th>${esc(c)}</th>`).join('')}</tr>${rows.map((r) => `<tr>${cols.map((c) => cell(r[c])).join('')}</tr>`).join('')}</table>`;
+}
+function renderFacts(f) {
+  const kv = (o) => Object.entries(o).map(([k, v]) => ({ k, v }));
+  $('facts').innerHTML = `<h2>This browser's HDR API answers</h2><p>${esc(f.ua)}</p>`
+    + table('matchMedia', kv(f.media), ['k', 'v']) + table('screen', kv(f.screen), ['k', 'v'])
+    + table('VideoDecoder.isConfigSupported (3840×2160)', f.videoDecoder, ['codec', 'transfer', 'hw', 'supported', 'error'])
+    + table('MediaSource.isTypeSupported / canPlayType', f.mediaSource, ['type', 'mse', 'managed', 'canPlay'])
+    + table('mediaCapabilities.decodingInfo (rec2020, 4K60, 20 Mb/s)', f.mediaCapabilities, ['type', 'contentType', 'transfer', 'supported', 'smooth', 'powerEfficient', 'error'])
+    + table('WebRTC', kv(f.webrtc), ['k', 'v'])
+    + table('2D canvas: asked → got; a PQ VideoFrame drawn and read back (1000 / 203 nits)', f.canvas.tries, ['asked', 'got', 'error', 'pq1000', 'pq203'])
+    + table('canvas extras', kv({ configureHighDynamicRange: f.canvas.configureHighDynamicRange, webglDrawingBufferStorage: f.canvas.webglDrawingBufferStorage, videoFrameFormat: f.canvas.videoFrameFormat, videoFrameCs: f.canvas.videoFrameCs }), ['k', 'v'])
+    + table('WebGPU', kv(f.webgpu), ['k', 'v'])
+    + (f.decode ? table('WebCodecs decode of the clips', f.decode, ['kind', 'codec', 'hw', 'supported', 'format', 'cs', 'yCodes', 'float16Canvas', 'error']) : '')
+    + (f.video ? table('<video> of the files → VideoFrame', f.video, ['kind', 'canPlay', 'played', 'format', 'cs', 'float16Canvas', 'error']) : '');
+}
+
+// ── the tiles ───────────────────────────────────────────────────────────────────────────────────────────────────────
+const TILE_STATE = {};
+function status(id, text) { $(id).textContent = text; TILE_STATE[id] = text; }
+// (b) <video>: every file this browser says it can play, the first one shown.
+async function startVideo() {
+  const sel = $('vfile'); sel.innerHTML = '';
+  for (const [k, x] of Object.entries(FILES)) { const o = document.createElement('option'); o.value = k; o.textContent = `${k} (${$('vB').canPlayType(x.type) || 'no'})`; sel.append(o); }
+  const first = Object.keys(FILES).find((k) => $('vB').canPlayType(FILES[k].type)); if (first) sel.value = first;
+  const play = async () => {
+    const x = FILES[sel.value], v = $('vB');
+    if (!v.canPlayType(x.type)) { status('sB', `${sel.value}: canPlayType says no`); }
+    v.src = URL.createObjectURL(new Blob([await clipBytes(x.file)], { type: x.type.split(';')[0] }));
+    v.onerror = () => status('sB', `${sel.value}: media error ${v.error && v.error.code}`);
+    v.onplaying = () => status('sB', `${sel.value} playing — ${x.type.replace(/^video\//, '')}`);
+    v.play().catch((e) => status('sB', `${sel.value}: ${e.message}`));
+  };
+  sel.onchange = play; await play();
+}
+// (c)/(d): a paced WebCodecs loop; draw(frame) may be async, the frame is closed after it.
+function decodeLoop(kind, hw, draw, sid) {
+  let stop = false;
+  (async () => {
+    const d = DECODE[kind], cfg = { codec: d.codec, hardwareAcceleration: hw, colorSpace: PQ, optimizeForLatency: true };
+    const sup = await VideoDecoder.isConfigSupported(cfg);
+    if (!sup.supported) { status(sid, `${d.codec} (${hw}) — this browser cannot decode it`); return; }
+    const chunks = d.parse(await clipBytes(d.file)), span = chunks[chunks.length - 1].ts + 33333;
+    const frames = []; let n = 0, lap = 0, last = 0, busy = false, told = false;
+    const dec = new VideoDecoder({ output: (f) => frames.push(f), error: (e) => status(sid, `decode error: ${e.message}`) });
+    dec.configure(cfg);
+    const tick = async (now) => {
+      if (stop) { frames.splice(0).forEach((f) => f.close()); try { dec.close(); } catch { /* closed */ } return; }
+      while (dec.state === 'configured' && dec.decodeQueueSize < 3 && frames.length < 4) {
+        if (n >= chunks.length) { n = 0; lap++; }
+        const k = chunks[n++]; dec.decode(new EncodedVideoChunk({ type: k.key ? 'key' : 'delta', timestamp: k.ts + lap * span, data: k.data }));
+      }
+      if (!busy && frames.length && now - last >= 31) {
+        const f = frames.shift(); busy = true; last = now;
+        try { const note = await draw(f); if (!told) { told = true; status(sid, `${kind} ${f.format || '(opaque)'} ${f.colorSpace.transfer || '?'} — ${note}`); } } catch (e) { status(sid, `draw: ${e.message}`); stop = true; }
+        f.close(); busy = false;
+      }
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  })().catch((e) => status(sid, `error: ${e.message}`));
+  return () => { stop = true; };
+}
+// (c) the 2D canvas: rec2100-pq if the browser takes it, else the nearest it takes — said in the caption.
+function canvas2d() {
+  for (const attrs of [{ colorSpace: 'rec2100-pq', colorType: 'float16' }, { colorSpace: 'rec2100-pq' }, { colorSpace: 'srgb', colorType: 'float16' }]) {
+    try {
+      const c = document.createElement('canvas'); c.width = 1280; c.height = 720; c.className = 'pic';
+      const ctx = c.getContext('2d', attrs); const got = ctx && ctx.getContextAttributes ? ctx.getContextAttributes() : {};
+      if (ctx && (got.colorSpace === attrs.colorSpace) && (!attrs.colorType || got.colorType === attrs.colorType)) {
+        if (typeof c.configureHighDynamicRange === 'function') { try { c.configureHighDynamicRange({ mode: 'extended' }); } catch { /* refused */ } }
+        $('cC').replaceWith(c); c.id = 'cC'; return { ctx, note: `canvas ${JSON.stringify(attrs)} accepted${attrs.colorSpace !== 'rec2100-pq' ? ' (rec2100-pq REFUSED — expect SDR)' : ''}` };
+      }
+    } catch { /* next */ }
+  }
+  return { ctx: $('cC').getContext('2d'), note: 'plain sRGB 8-bit canvas (rec2100-pq and float16 REFUSED — expect SDR)' };
+}
+// (d) WebGPU: the 10-bit planes uploaded as r16uint textures, PQ → nits → BT.709 linear ÷ SDR white → extended sRGB, into an
+// rgba16float canvas with toneMapping 'extended' (values above 1 = brighter than SDR white). An opaque (GPU) frame falls back to
+// importExternalTexture — the browser's own conversion.
+const WGSL = `
+struct U { white: f32, p0: f32, p1: f32, p2: f32 };
+@group(0) @binding(0) var tY: texture_2d<u32>;
+@group(0) @binding(1) var tU: texture_2d<u32>;
+@group(0) @binding(2) var tV: texture_2d<u32>;
+@group(0) @binding(3) var<uniform> u: U;
+struct VO { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
+@vertex fn vs(@builtin(vertex_index) i: u32) -> VO {
+  var p = array<vec2f, 3>(vec2f(-1.0, -1.0), vec2f(3.0, -1.0), vec2f(-1.0, 3.0));
+  var o: VO; o.pos = vec4f(p[i], 0.0, 1.0); o.uv = vec2f((p[i].x + 1.0) * 0.5, (1.0 - p[i].y) * 0.5); return o;
+}
+fn pqNits(e: vec3f) -> vec3f {
+  let ep = pow(clamp(e, vec3f(0.0), vec3f(1.0)), vec3f(1.0 / 78.84375));
+  return 10000.0 * pow(max(ep - vec3f(0.8359375), vec3f(0.0)) / (vec3f(18.8515625) - 18.6875 * ep), vec3f(1.0 / 0.1593017578125));
+}
+fn srgbEnc(x: vec3f) -> vec3f {
+  let a = abs(x);
+  return sign(x) * select(1.055 * pow(a, vec3f(1.0 / 2.4)) - vec3f(0.055), 12.92 * a, a <= vec3f(0.0031308));
+}
+@fragment fn fs(@location(0) uv: vec2f) -> @location(0) vec4f {
+  let d = vec2f(textureDimensions(tY));
+  let p = vec2u(min(uv * d, d - vec2f(1.0)));
+  let y = (f32(textureLoad(tY, p, 0).r) - 64.0) / 876.0;
+  let cb = (f32(textureLoad(tU, p / 2u, 0).r) - 512.0) / 896.0;
+  let cr = (f32(textureLoad(tV, p / 2u, 0).r) - 512.0) / 896.0;
+  let e = vec3f(y + 1.4746 * cr, y - 0.16455 * cb - 0.57135 * cr, y + 1.8814 * cb);
+  let m = mat3x3f(vec3f(1.6605, -0.1246, -0.0182), vec3f(-0.5876, 1.1329, -0.1006), vec3f(-0.0728, -0.0083, 1.1187));
+  return vec4f(srgbEnc((m * pqNits(e)) / u.white), 1.0);
+}`;
+const WGSL_EXT = `
+@group(0) @binding(0) var s: sampler;
+@group(0) @binding(1) var t: texture_external;
+struct VO { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
+@vertex fn vs(@builtin(vertex_index) i: u32) -> VO {
+  var p = array<vec2f, 3>(vec2f(-1.0, -1.0), vec2f(3.0, -1.0), vec2f(-1.0, 3.0));
+  var o: VO; o.pos = vec4f(p[i], 0.0, 1.0); o.uv = vec2f((p[i].x + 1.0) * 0.5, (1.0 - p[i].y) * 0.5); return o;
+}
+@fragment fn fs(@location(0) uv: vec2f) -> @location(0) vec4f { return textureSampleBaseClampToEdge(t, s, uv); }`;
+async function webgpuTile() {
+  if (!navigator.gpu) return { error: 'no WebGPU (navigator.gpu absent)' };
+  const adapter = await navigator.gpu.requestAdapter(); if (!adapter) return { error: 'WebGPU: no adapter' };
+  const device = await adapter.requestDevice(), ctx = $('cD').getContext('webgpu');
+  window.HDR_GPU = { adapter, device };
+  // MEASURED on the hub (headless, SwiftShader): no RGBA_F16 shared-image backing for a WebGPU swap chain ⇒ the first present
+  // loses the device ("A valid external Instance reference no longer exists") — a real GPU (D3D11 / Metal) has one.
+  device.lost.then((i) => { status('sD', `WebGPU device lost (${i.reason}): ${i.message}`); });
+  ctx.configure({ device, format: 'rgba16float', colorSpace: 'srgb', toneMapping: { mode: 'extended' }, alphaMode: 'opaque' });
+  const g = ctx.getConfiguration ? ctx.getConfiguration() : null;
+  const tm = g && g.toneMapping ? g.toneMapping.mode : '(not echoed)';
+  const mk = (code) => { const module = device.createShaderModule({ code }); return device.createRenderPipeline({ layout: 'auto', vertex: { module, entryPoint: 'vs' }, fragment: { module, entryPoint: 'fs', targets: [{ format: 'rgba16float' }] } }); };
+  const own = mk(WGSL), ext = mk(WGSL_EXT), sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
+  const ubuf = device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+  let tex = null, bind = null, key = '', checked = false, check = '';
+  // Self-check (first frame): the same pass rendered OFFSCREEN and copied back (copyTextureToBuffer) at the 1000- and 203-nit
+  // squares vs the maths — the decode → upload → shader chain proven in THIS browser; only the screen's own output is left to the eye.
+  const selfCheck = async (group, w, h) => {
+    try {
+      const rt = device.createTexture({ size: [w, h], format: 'rgba16float', usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC });
+      const rb = device.createBuffer({ size: 512, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+      const enc = device.createCommandEncoder(), rp = enc.beginRenderPass({ colorAttachments: [{ view: rt.createView(), loadOp: 'clear', storeOp: 'store', clearValue: { r: 0, g: 0, b: 0, a: 1 } }] });
+      rp.setPipeline(own); rp.setBindGroup(0, group); rp.draw(3); rp.end();
+      [AT.p1000, AT.p203].forEach(([x, y], i) => enc.copyTextureToBuffer({ texture: rt, origin: [Math.round(x * w / 1280), Math.round(y * h / 720)] }, { buffer: rb, offset: i * 256, bytesPerRow: 256 }, [1, 1]));
+      device.queue.submit([enc.finish()]); await rb.mapAsync(GPUMapMode.READ);
+      const u = new Uint16Array(rb.getMappedRange().slice(0)), f16 = (b) => { const e = (b >> 10) & 31, m = b & 1023; return (b >> 15 ? -1 : 1) * (e ? (1 + m / 1024) * 2 ** (e - 15) : (m / 1024) * 2 ** -14); };
+      const got = [f16(u[1]), f16(u[129])].map((v) => Math.round(v * 1000) / 1000); rb.unmap(); rt.destroy();
+      const white = Number($('white').value) || 200, enc2 = (v) => Math.round((v <= 0.0031308 ? 12.92 * v : 1.055 * Math.pow(v, 1 / 2.4) - 0.055) * 1000) / 1000;
+      return `; offscreen read-back 1000-nit ${got[0]} (maths ${enc2(1000 / white)}), 203-nit ${got[1]} (maths ${enc2(203 / white)})`;
+    } catch (e) { return `; read-back failed (${e.message})`; }
+  };
+  const pass = (pipeline, group) => {
+    const enc = device.createCommandEncoder();
+    const rp = enc.beginRenderPass({ colorAttachments: [{ view: ctx.getCurrentTexture().createView(), loadOp: 'clear', storeOp: 'store', clearValue: { r: 0, g: 0, b: 0, a: 1 } }] });
+    rp.setPipeline(pipeline); rp.setBindGroup(0, group); rp.draw(3); rp.end(); device.queue.submit([enc.finish()]);
+  };
+  return {
+    tm,
+    async draw(frame) {
+      if (frame.format && /^I420P10$/.test(frame.format)) {
+        const w = frame.visibleRect.width, h = frame.visibleRect.height;
+        if (key !== `${w}x${h}`) {
+          key = `${w}x${h}`;
+          const t = (tw, th) => device.createTexture({ size: [tw, th], format: 'r16uint', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
+          tex = [t(w, h), t(w / 2, h / 2), t(w / 2, h / 2)];
+          bind = device.createBindGroup({ layout: own.getBindGroupLayout(0), entries: [...tex.map((x, i) => ({ binding: i, resource: x.createView() })), { binding: 3, resource: { buffer: ubuf } }] });
+        }
+        const buf = new ArrayBuffer(frame.allocationSize()), lay = await frame.copyTo(buf);
+        tex.forEach((x, i) => device.queue.writeTexture({ texture: x }, buf, { offset: lay[i].offset, bytesPerRow: lay[i].stride }, { width: i ? w / 2 : w, height: i ? h / 2 : h }));
+        device.queue.writeBuffer(ubuf, 0, new Float32Array([Number($('white').value) || 200, 0, 0, 0]));
+        pass(own, bind);
+        if (!checked) { checked = true; check = await selfCheck(bind, w, h); }
+        return `own PQ maths, toneMapping ${tm}, SDR white ${$('white').value} nits${check}`;
+      }
+      const group = device.createBindGroup({ layout: ext.getBindGroupLayout(0), entries: [{ binding: 0, resource: sampler }, { binding: 1, resource: device.importExternalTexture({ source: frame }) }] });
+      pass(ext, group);
+      return `external texture (the browser's own conversion), toneMapping ${tm}`;
+    },
+  };
+}
+// (e) WebRTC loopback: a canvas track sent to THIS page by the browser's own encoder, but a sender-side RTCRtpScriptTransform
+// swaps every encoded frame for the clip's (a key frame from the encoder ⇒ the clip's key frame), so the receiver's OWN
+// WebRTC decoder → <video> gets our PQ bitstream: H.264 8-bit (PQ in the VUI — today's codec), AV1 / VP9.2 / HEVC 10-bit.
+// The color-space RTP header extension is struck from both SDPs (the sender's would describe the canvas, not the clip).
+const RTC = Object.freeze({
+  h264: { file: 'clip-h264-pq8.h264', parse: (u) => parseAnnexB(u, 30, true), want: (c) => /H264/i.test(c.mimeType) && /packetization-mode=1/.test(c.sdpFmtpLine || '') && /42e01f/i.test(c.sdpFmtpLine || '') },
+  av1: { file: 'clip-av1-rt.ivf', parse: parseIvf, want: (c) => /AV1/i.test(c.mimeType) },
+  vp9: { file: 'clip-vp9-rt.ivf', parse: parseIvf, want: (c) => /VP9/i.test(c.mimeType) && /profile-id=2/.test(c.sdpFmtpLine || '') },
+  hevc: { file: 'clip-hevc.hevc', parse: (u) => parseAnnexB(u), want: (c) => /H265/i.test(c.mimeType) },
+});
+const SENDER_WORKER = `onrtctransform = (ev) => {
+  const t = ev.transformer, frames = t.options.frames; let i = 0;
+  const rd = t.readable.getReader(), wr = t.writable.getWriter();
+  (async () => { for (;;) { const { value: f, done } = await rd.read(); if (done) return;
+    if (f.type === 'key' || i >= frames.length) i = 0;
+    f.data = frames[i].slice(0); i++; await wr.write(f); } })();
+};`;
+let rtcStop = null;
+async function startRtc() {
+  if (rtcStop) rtcStop();
+  const kind = $('rcodec').value, r = RTC[kind];
+  if (typeof RTCRtpScriptTransform !== 'function') { status('sE', 'no RTCRtpScriptTransform — the loopback cannot substitute frames'); return; }
+  const send = RTCRtpSender.getCapabilities('video').codecs.filter(r.want), recv = RTCRtpReceiver.getCapabilities('video').codecs.filter(r.want);
+  if (!send.length || !recv.length) { status('sE', `${kind}: this browser cannot ${send.length ? '' : 'send'}${!send.length && !recv.length ? ' or ' : ''}${recv.length ? '' : 'receive'} it over WebRTC`); return; }
+  const frames = r.parse(await clipBytes(r.file)).map((f) => f.data.slice().buffer);
+  const src = document.createElement('canvas'); src.width = 1280; src.height = 720; const sx = src.getContext('2d');
+  let n = 0; const paint = setInterval(() => { sx.fillStyle = `rgb(${n % 256},${(n * 3) % 256},90)`; sx.fillRect(0, 0, 1280, 720); n++; }, 33);
+  const track = src.captureStream(30).getVideoTracks()[0];
+  const a = new RTCPeerConnection(), b = new RTCPeerConnection();
+  a.onicecandidate = (e) => { if (e.candidate) b.addIceCandidate(e.candidate).catch(() => { }); };
+  b.onicecandidate = (e) => { if (e.candidate) a.addIceCandidate(e.candidate).catch(() => { }); };
+  const tr = a.addTransceiver(track, { direction: 'sendonly', sendEncodings: [{ maxBitrate: 6e6 }] });
+  tr.setCodecPreferences(send);
+  const wk = new Worker(URL.createObjectURL(new Blob([SENDER_WORKER], { type: 'text/javascript' })));
+  tr.sender.transform = new RTCRtpScriptTransform(wk, { frames }, frames);
+  const v = $('vE'); let shown = 0, timer = null, live = true;
+  b.ontrack = (e) => {
+    v.srcObject = new MediaStream([e.track]); v.play().catch(() => { });
+    timer = setInterval(async () => {
+      let st = {}, so = {}; (await b.getStats()).forEach((x) => { if (x.type === 'inbound-rtp' && x.kind === 'video') st = x; });
+      (await a.getStats()).forEach((x) => { if (x.type === 'outbound-rtp' && x.kind === 'video') so = x; });
+      if (!live) return; // a codec switch stopped this loopback while its stats were read
+      let cs = '';
+      try { const fr = new VideoFrame(v, { timestamp: 0 }); cs = `${fr.format || '(opaque)'} ${fr.colorSpace.primaries}/${fr.colorSpace.transfer}`; fr.close(); } catch (err) { cs = `(no frame: ${err.message})`; }
+      const link = st.framesDecoded ? '' : ` [${b.connectionState}; ${so.framesEncoded || 0} encoded${so.encoderImplementation ? ` by ${so.encoderImplementation}` : ''}, ${st.packetsReceived || 0} packets in]`;
+      status('sE', `${kind}: ${st.framesDecoded || 0} decoded${st.decoderImplementation ? ` by ${st.decoderImplementation}` : ''}${st.powerEfficientDecoder ? ' (hw)' : ''} — ${cs}${link}`);
+      shown++;
+    }, 1000);
+  };
+  const strip = (d) => ({ type: d.type, sdp: d.sdp.split('\r\n').filter((l) => !/rtp-hdrext\/color-space/.test(l)).join('\r\n') });
+  const offer = strip(await a.createOffer()); await a.setLocalDescription(offer); await b.setRemoteDescription(offer);
+  const ans = strip(await b.createAnswer()); await b.setLocalDescription(ans); await a.setRemoteDescription(ans);
+  status('sE', `${kind}: negotiating…`);
+  rtcStop = () => { live = false; clearInterval(paint); clearInterval(timer); a.close(); b.close(); wk.terminate(); track.stop(); };
+}
+let stops = [];
+async function startDecoded() {
+  stops.splice(0).forEach((s) => s());
+  const kind = $('dcodec').value;
+  const c2 = canvas2d();
+  stops.push(decodeLoop(kind, 'no-preference', (f) => { c2.ctx.drawImage(f, 0, 0, 1280, 720); return c2.note; }, 'sC'));
+  try {
+    const g = await webgpuTile();
+    if (g.error) status('sD', g.error);
+    else stops.push(decodeLoop(kind, kind === 'hevc' ? 'no-preference' : 'prefer-software', (f) => g.draw(f), 'sD'));
+  } catch (e) { status('sD', `WebGPU: ${e.message}`); }
+}
+async function startTiles() {
+  if (typeof VideoDecoder !== 'function') { status('sC', 'no WebCodecs VideoDecoder'); status('sD', 'no WebCodecs VideoDecoder'); }
+  else {
+    const sel = $('dcodec');
+    for (const k of Object.keys(DECODE)) { const o = document.createElement('option'); o.value = k; o.textContent = k; sel.append(o); }
+    for (const k of Object.keys(DECODE)) { const s = await VideoDecoder.isConfigSupported({ codec: DECODE[k].codec, colorSpace: PQ }).catch(() => ({})); if (s.supported) { sel.value = k; break; } }
+    sel.onchange = startDecoded; startDecoded();
+  }
+  startVideo().catch((e) => status('sB', `error: ${e.message}`));
+  if (typeof RTCPeerConnection === 'function') {
+    const sel = $('rcodec');
+    for (const k of Object.keys(RTC)) { const o = document.createElement('option'); o.value = k; o.textContent = k === 'h264' ? 'h264 8-bit PQ' : `${k} 10-bit PQ`; sel.append(o); }
+    sel.onchange = () => startRtc().catch((e) => status('sE', `error: ${e.message}`));
+    startRtc().catch((e) => status('sE', `error: ${e.message}`));
+  } else status('sE', 'no RTCPeerConnection');
+}
+
+// ── the owner's answers + Save facts ────────────────────────────────────────────────────────────────────────────────
+for (const t of ['tB', 'tC', 'tD', 'tE']) {
+  const d = document.createElement('div'); d.className = 'ans';
+  d.innerHTML = ['brighter than (a)', 'same as (a)', 'dimmer', 'no picture'].map((a) => `<label><input type="radio" name="ans-${t}" value="${a}"> ${a}</label>`).join('');
+  $(t).querySelector('figcaption').append(d);
+}
+let FACTS = null;
+const answers = () => Object.fromEntries(['tB', 'tC', 'tD', 'tE'].map((t) => [t, (document.querySelector(`input[name=ans-${t}]:checked`) || {}).value || null]));
+const payload = () => JSON.stringify({ answers: answers(), tiles: TILE_STATE, sdrWhiteNits: Number($('white').value), decodeCodec: $('dcodec').value, videoFile: $('vfile').value, rtcCodec: $('rcodec').value, facts: FACTS }, null, 1);
+$('save').onclick = () => {
+  const a = document.createElement('a'), b = /Edg\//.test(navigator.userAgent) ? 'edge' : /Chrome\//.test(navigator.userAgent) ? 'chrome' : /Safari\//.test(navigator.userAgent) ? 'safari' : 'browser';
+  a.href = URL.createObjectURL(new Blob([payload()], { type: 'application/json' })); a.download = `hdr-facts-${b}.json`; a.click();
+  $('saved').textContent = `saved ${a.download} (Downloads)`;
+};
+$('copy').onclick = () => navigator.clipboard.writeText(payload()).then(() => { $('saved').textContent = 'copied'; }, (e) => { $('saved').textContent = `copy: ${e.message}`; });
+window.hdrFacts = hdrFacts;
+if (Q.get('tiles') !== '0') startTiles();
+// ?dump=1: the facts JSON lands in <pre id="dump"> — for `--headless=new --dump-dom` on a machine with no CDP client (Windows / Mac)
+const dump = (o) => { if (Q.get('dump') !== '1') return; const p = document.createElement('pre'); p.id = 'dump'; p.textContent = `HDRDUMP${JSON.stringify(o)}HDRDUMP`; document.body.append(p); };
+if (Q.get('facts') !== '0') hdrFacts().then((f) => { FACTS = f; renderFacts(f); dump(f); }, (e) => { $('facts').textContent = `facts: ${e.message}`; dump({ error: String(e.message || e) }); });
+</script>
+</body></html>
