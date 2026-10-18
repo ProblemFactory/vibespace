@@ -12,7 +12,7 @@
 //     shown frame is acknowledged (≤ 4 a second) so the agent can time the picture's way
 //   • phone: pointer events cover touch (touch-action: none on the picture); a tap is a click where it lands
 import { fetchJson } from './utils.js';
-import { STREAM_LIMITS, streamStep, fallbackVerdict, statsOf } from '../stream-model.js';
+import { STREAM_LIMITS, streamStep, fallbackVerdict, statsOf, relayPathOf, firewallRuleCommand } from '../stream-model.js';
 import { viewerPlatform, keyMapFor, keyMessage, pointerMessage, wheelMessage } from './stream-input.js';
 
 const post = (url, body) => fetchJson(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -32,6 +32,7 @@ export function createStreamView(host, opts = {}) {
   let st = { state: 'idle', restarts: 0 };
   let pc = null, dc = null, key = null, n = 0, seq = -1, origin = { x: 0, y: 0 }, taken = false, why = null, disposed = false;
   let polling = false, statsTimer = null, connectTimer = null, prev = null, page = null, agent = null, pathSent = null, pcSince = 0;
+  let hubRelay = null; // lane stream-relay-udp: the hub relay's facts (the long poll's `relay` — which way it forwards: udp | link)
   let map = keyMapFor(viewerPlatform(), opts.hostPlatform || null);
   let refusedSeen = null;
 
@@ -103,6 +104,7 @@ export function createStreamView(host, opts = {}) {
       for (const c of r.cands || []) if (c && pc) pc.addIceCandidate(c).catch(() => { /* a candidate of an older ICE generation */ });
       n = r.n || n; seq = r.seq;
       if (r.stats) { agent = r.stats; inputWords(); }
+      if (r.relay !== undefined) hubRelay = r.relay;
       if (r.ended) { why = null; step('ended', r.ended === 'not_found' ? 'stream_ended' : r.ended); break; }
     }
     polling = false;
@@ -202,6 +204,10 @@ export function createStreamView(host, opts = {}) {
     focus() { video.focus({ preventScroll: true }); },
     stats: () => page,
     agent: () => agent,
+    // lane stream-relay-udp: which way the picture comes (direct | udp — the hub relay over the daemon's UDP leg | link — over
+    // the device link | relay) and the machine's firewall fact ({command} = the owner's admin line, null where none is safe)
+    path: () => relayPathOf(page, hubRelay || (agent && agent.relay)),
+    firewall: () => (agent && agent.directInbound && agent.directInbound.verdict === 'blocked' ? { command: firewallRuleCommand(agent.directInbound.program) } : null),
     dispose() { disposed = true; step('close'); teardown('closed'); },
   };
 }

@@ -13,7 +13,10 @@
 //      scan code; a Mac viewer's ⌘ = the machine's Ctrl (K 29 0 0) — RED CONTROL: the door without THE table sends K 91 1 0
 //   ⑤ UIPI: an elevated window in front ⇒ the strip names it (the press never reached it)
 //   ⑥ THE FALLBACK: the machine ends the stream ⇒ the <video> goes, the strip says why, the VNC picture signs in and draws  fallback.png
-//   ⑦ relay-only (the hub's UDP relay over the device link): it plays, the strip says 经 hub 中转                            relay.png
+//   ⑦ relay-only — lane stream-relay-udp: the daemon's own UDP leg carries it, the strip says 经 hub 中转 · UDP; the copy's
+//      firewall drops its self-probe ⇒ the strip says 机器防火墙挡住直连，经 hub 中转 with the owner's admin line to copy (the
+//      netsh rule for its node.exe; the toast says where to paste it) — never on the direct path (①); a hub that offers no leg
+//      ⇒ 经设备链路 (the relay over the device link)                                                          relay.png, relay-link.png
 //   ⑧ a hub with no fake source and a machine with no ffmpeg: its screen source is refused (no_ffmpeg) ⇒ the VNC picture at
 //      once, NO note (the chip's title says why: 需要 ffmpeg ≥ 7（含 ddagrab 与 NVENC）…)
 //   ⑨ phone 375×667: it plays in the same shell, the strip is ONE row (scrolled to its numbers), a TAP is a click on the machine   phone.png, phone-stats.png
@@ -76,7 +79,12 @@ const INJ = /(createInjector\(\{\s*)platform: process\.platform,/;
 const SCR = /(createScreen\(\{\s*)platform: process\.platform,/;
 ok(HELLO.test(bundleText) && INJ.test(bundleText) && SCR.test(bundleText) && /"stream-offer"/.test(bundleText) && /"stream-screen"/.test(bundleText), 'the bundle carries the hello-ack platform, THE injector\'s, THE screen source\'s and the stream-offer / stream-screen capabilities (the copy patches exactly those)');
 fs.mkdirSync(path.join(root, 'bundle'), { recursive: true });
-fs.writeFileSync(path.join(root, 'bundle', 'vibespace-agentd.js'), bundleText.replace(HELLO, '$1platform: "win32",').replace(INJ, '$1platform: "win32",').replace(SCR, '$1platform: "win32",'));
+// lane stream-relay-udp: the copy's firewall drops its self-probe (no probe datagram is heard ⇒ directInbound blocked) and it names
+// a Windows node.exe (the page builds the owner's admin line from it)
+const PROBE = 'const i = tokens.findIndex((tk) => tk.equals(m));', PROGRAM = 'program: process.platform === "win32" ? process.execPath : null';
+const NODE_EXE = 'C:\\Users\\owner\\AppData\\Local\\vibespace\\node\\node.exe';
+ok(bundleText.split(PROBE).length === 2 && bundleText.split(PROGRAM).length === 2, 'the bundle carries the self-probe\'s receive line and the stream host\'s program (the copy patches exactly those)');
+fs.writeFileSync(path.join(root, 'bundle', 'vibespace-agentd.js'), bundleText.replace(HELLO, '$1platform: "win32",').replace(INJ, '$1platform: "win32",').replace(SCR, '$1platform: "win32",').replace(PROBE, 'const i = -1;').replace(PROGRAM, `program: ${JSON.stringify(NODE_EXE)}`));
 const { DeviceManager } = require(path.join(REPO, 'src/agentd/client.js'));
 process.env.HOME = home; process.env.VIBESPACE_AGENTD_ROOT = rootOf(home);
 const dataDir = path.join(home, 'hub-data'); fs.mkdirSync(dataDir, { recursive: true });
@@ -210,7 +218,7 @@ const M = { hostId: 'win-a', label: 'WIN-DESK1', setup: 'win32', code: 'desktop_
 const DESK = 'position:fixed;left:30px;top:30px;width:1100px;height:700px;display:flex;flex-direction:column;background:var(--bg-window);border:1px solid var(--border);box-shadow:0 6px 24px rgba(0,0,0,.25);border-radius:8px;overflow:hidden;z-index:5';
 const PHONE = 'position:fixed;left:0;top:0;width:375px;height:667px;display:flex;flex-direction:column;background:var(--bg-window);overflow:hidden;z-index:5';
 const playing = (p) => p.until(`(() => { const v = document.querySelector('${WIN} .stream-video'); return !!v && v.videoWidth === 1280 && v.currentTime > 0.2 && window.__band() !== null; })()`, 20000);
-const stripText = (p) => p.ev(`(() => { const q = (s) => { const e = document.querySelector('${WIN} ' + s); return e && !e.hidden ? e.textContent : null; }; return { chip: q('.desktop-strip-status'), stream: q('.desktop-strip-stream'), note: q('.desktop-strip-note'), title: (document.querySelector('${WIN} .desktop-strip-status') || {}).title || '' }; })()`);
+const stripText = (p) => p.ev(`(() => { const q = (s) => { const e = document.querySelector('${WIN} ' + s); return e && !e.hidden ? e.textContent : null; }; return { chip: q('.desktop-strip-status'), stream: q('.desktop-strip-stream'), note: q('.desktop-strip-note'), fw: q('.desktop-strip-firewall'), fwCopy: q('.desktop-strip-fw-copy'), fwTitle: (document.querySelector('${WIN} .desktop-strip-firewall') || {}).title || '', title: (document.querySelector('${WIN} .desktop-strip-status') || {}).title || '' }; })()`);
 const centre = (p) => p.ev(`(() => { const b = document.querySelector('${WIN} .stream-video').getBoundingClientRect(); return [Math.round(b.left + b.width / 2), Math.round(b.top + b.height / 2)]; })()`);
 const sessions = async () => (await (await fetch(`http://127.0.0.1:${PORT}/api/desktop/machine-desktop/stream/facts?host=win-a`)).json()).sessions || [];
 const linesSince = (n) => psLines().slice(n);
@@ -224,6 +232,8 @@ console.log('① – ⑥ desk 1280 px');
   await p.until(`/解码 [\\d.]+ ms · \\d+ kbps$/.test((document.querySelector('${WIN} .desktop-strip-stream') || {}).textContent || '')`, 8000); // decode ms and kbps need a second getStats read
   const s1 = await stripText(p);
   ok(up && !canvas && /^串流 · \d+ ms · \d+ fps$/.test(s1.chip || '') && /^往返 \d+ ms · 抖动 \d+ ms · \d+ fps · 解码 [\d.]+ ms · \d+ kbps$/.test(s1.stream || '') && !s1.note && vnc.seen.sessions === 0, '① the window opens STREAMING: a <video> where the canvas was (no VNC session), the strip [串流 · N ms · N fps] [往返 · 抖动 · fps · 解码 · kbps]', s1);
+  const di1 = ((await sessions())[0]?.stats || {}).directInbound || {};
+  ok(di1.verdict === 'blocked' && di1.program === NODE_EXE && !s1.fw, '① the machine\'s self-probe says blocked (its node.exe named) — yet a DIRECT pair plays here, so the strip says nothing about the firewall (only the hub relay\'s path carries that sentence)', { di1, fw: s1.fw });
   const b1 = await p.ev('window.__band()');
   await p.shot('stream-1.png', WIN);
   await sleep(700);
@@ -284,12 +294,32 @@ console.log('⑦ relay-only ⑧ no source');
   const p = await page(1280, 800, DESK);
   await p.ev(`window.__open(${JSON.stringify(M)})`);
   const up = await playing(p);
-  const via = await p.until(`/经 hub 中转$/.test((document.querySelector('${WIN} .desktop-strip-stream') || {}).textContent || '')`, 10000);
+  const via = await p.until(`/经 hub 中转 · UDP$/.test((document.querySelector('${WIN} .desktop-strip-stream') || {}).textContent || '')`, 10000);
   const f = relayOnly.facts('win-a')[0] || {};
-  ok(up && via && f.path === 'relay', '⑦ relay-only (the hub\'s UDP port ⇄ the device link): it plays, the strip says 经 hub 中转, the record says path relay', { up, via, path: f.path });
+  ok(up && via && f.path === 'relay' && f.relay && f.relay.via === 'udp' && f.relay.leg.down > 0, '⑦ relay-only: the daemon\'s own UDP leg carries it — the strip says 经 hub 中转 · UDP, the record says path relay, via udp', { up, via, path: f.path, relay: f.relay });
+  const fwUp = await p.until(`(() => { const e = document.querySelector('${WIN} .desktop-strip-firewall'); return !!e && !e.hidden; })()`, 8000);
+  const sf = await stripText(p);
+  const want = `netsh advfirewall firewall add rule name="VibeSpace agent" dir=in action=allow program="${NODE_EXE}" protocol=UDP`;
+  await p.ev(`Object.defineProperty(navigator, 'clipboard', { value: { writeText: (t) => { window.__copied = t; return Promise.resolve(); } }, configurable: true })`);
+  const [bx, by] = await p.ev(`(() => { const b = document.querySelector('${WIN} .desktop-strip-fw-copy').getBoundingClientRect(); return [Math.round(b.left + b.width / 2), Math.round(b.top + b.height / 2)]; })()`);
+  await p.click(bx, by);
+  const copied = await p.until(`window.__copied !== undefined`, 3000) ? await p.ev('window.__copied') : null;
+  const toast = await p.ev(`(document.getElementById('global-toasts') || {}).textContent || ''`);
+  ok(fwUp && /^机器防火墙挡住直连，经 hub 中转/.test(sf.fw || '') && sf.fwCopy === '复制管理员命令' && sf.fwTitle === want && copied === want && /已复制，请粘贴到 WIN-DESK1 上以管理员身份打开的 PowerShell/.test(toast), '⑦ the machine\'s firewall blocks the direct path: the strip says 机器防火墙挡住直连，经 hub 中转, and 复制管理员命令 copies the netsh rule for its node.exe (the toast says where to paste it — VibeSpace never runs it)', { sf, copied, toast });
   await p.shot('relay.png', WIN);
   await p.close();
   relayOnly.shutdown();
+  const linkOnly = DW.create({ access, direct: false, udpLeg: false, log: quiet });
+  R.setup({ ...BASE, webrtc: linkOnly });
+  const pl = await page(1280, 800, DESK);
+  await pl.ev(`window.__open(${JSON.stringify(M)})`);
+  const upL = await playing(pl);
+  const viaL = await pl.until(`/经设备链路$/.test((document.querySelector('${WIN} .desktop-strip-stream') || {}).textContent || '')`, 10000);
+  const fl = linkOnly.facts('win-a')[0] || {};
+  ok(upL && viaL && fl.path === 'relay' && fl.relay && fl.relay.via === 'link' && fl.relay.leg === null, '⑦ a hub that offers no leg: the relay over the device link — the strip says 经设备链路, the record via link', { upL, viaL, relay: fl.relay });
+  await pl.shot('relay-link.png', WIN);
+  await pl.close();
+  linkOnly.shutdown();
   const noSource = DW.create({ access: ACC.create({ hosts, install: false, log: quiet, vncPort: vnc.port, probeMs: 3000, env: () => ({}) }), log: quiet });
   R.setup({ ...BASE, webrtc: noSource });
   const q = await page(1280, 800, DESK);

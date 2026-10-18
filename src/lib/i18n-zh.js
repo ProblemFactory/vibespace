@@ -9105,6 +9105,9 @@ export default {
   "Stream · connecting…": "串流 · 连接中…",
   "RTT {rtt} ms · jitter {jitter} ms · {fps} fps · decode {decode} ms · {kbps} kbps": "往返 {rtt} ms · 抖动 {jitter} ms · {fps} fps · 解码 {decode} ms · {kbps} kbps",
   "via the hub": "经 hub 中转",
+  "via the hub · UDP": "经 hub 中转 · UDP", // lane stream-relay-udp
+  "via the device link": "经设备链路", // lane stream-relay-udp
+  "The machine’s firewall blocks the direct path; going through the hub": "机器防火墙挡住直连，经 hub 中转", // lane stream-relay-udp
   "WebRTC from the machine’s agent: {w}×{h}, sent {sent} fps at {kbps} kbps": "来自机器 agent 的 WebRTC：{w}×{h}，发出 {sent} fps、{kbps} kbps",
   "Windows keeps input away from an administrator window — click another window on the machine first": "Windows 不让输入进管理员窗口——先点一下机器上的别的窗口",
   "This machine cannot take input over the stream yet": "这台机器还不能经串流接收输入",

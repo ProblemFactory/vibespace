@@ -1267,7 +1267,10 @@ const injectorOf = () => inputInjector || (inputInjector = require('./../input-i
 // ffmpeg pipelines (src/agentd/stream-screen.js); the HDR road's mapper is a worker of THIS bundle (the `stream-map` branch)
 const streamMapWorker = () => new (require('worker_threads').Worker)(__filename, { workerData: { role: 'stream-map' } });
 const streamScreenOf = () => streamScreen || (streamScreen = require('./stream-screen.js').createScreen({ platform: process.platform, spawn: require('child_process').spawn, execFile: require('child_process').execFile, env: spawnEnv(), fs, log, makeWorker: streamMapWorker }));
-const streamHostOf = () => streamHost || (streamHost = require('./stream-host.js').createStreamHost({ injector: injectorOf(), log, screen: (msg, o) => streamScreenOf().source(msg, o) }));
+// lane stream-relay-udp: the UDP leg also tries the host this daemon DIALS (dial.json — the hub's own addresses come in the
+// offer), and on Windows the firewall fact names this node.exe (the page builds the owner's admin line from it)
+const dialHostOf = () => { try { return [new URL(JSON.parse(fs.readFileSync(DIAL_FILE, 'utf8')).url).hostname]; } catch { return []; } };
+const streamHostOf = () => streamHost || (streamHost = require('./stream-host.js').createStreamHost({ injector: injectorOf(), log, screen: (msg, o) => streamScreenOf().source(msg, o), legHosts: dialHostOf, program: process.platform === 'win32' ? process.execPath : null }));
 function unpinWindow(rec) {
   rec.pinned = false;
   const a = rec.last;

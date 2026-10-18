@@ -20,6 +20,13 @@
  *                                    kbps, lost, the path (direct | relay)
  *   relayFrame / relayUnframe        a datagram + its peer address over the device link's byte stream (the hub's UDP relay)
  *   relayCandidates(ips, port)       the hub relay's ICE candidate lines (typ relay — the lowest priority: a direct pair wins)
+ *   LEG / legControl / legData / legParse / legPingVerdict   THE UDP LEG (lane stream-relay-udp): the daemon's OWN datagrams to
+ *                                    the hub relay's port (TURN-shaped — a firewall that blocks every inbound UDP to the agent
+ *                                    lets in the answers to what it sent): an authenticated PING / PONG (HMAC over a counter +
+ *                                    a nonce, the mac handed in — this file imports no crypto) and DATA (the browser's address +
+ *                                    its datagram); relayPathOf(page, relay) = direct | udp | link (the strip's words)
+ *   firewallRuleCommand(program)     the admin line that opens the DIRECT path on a Windows machine (copied by its owner, never
+ *                                    run by VibeSpace) · directInboundOf(probe) — the daemon's self-probe → open | blocked | none
  */
 const B = require('./desktop-backends.js');
 
@@ -42,6 +49,11 @@ const STREAM_LIMITS = Object.freeze({
   restartBudget: 2,           // ICE restarts the page asks for before it falls back to the VNC picture
   disconnectedGraceMs: 4000,  // `disconnected` this long counts as sick (a Wi-Fi blip recovers inside it)
   relayMaxDatagram: 1500, relayMaxPeers: 4, relayQueueBytes: 262144,
+  // THE UDP LEG (lane stream-relay-udp): a PING every legKeepaliveMs keeps the machine's NAT / firewall state; every
+  // legLiveMs while the leg carries the picture; an unanswered PING for legEchoMs = the leg is down (the device link carries
+  // it, re-asked every legReprobeMs; legProbeMs between the first PINGs); the hub forwards on a leg it heard within legStaleMs
+  legKeepaliveMs: 15000, legLiveMs: 2000, legEchoMs: 2000, legProbeMs: 500, legReprobeMs: 5000, legStaleMs: 35000, legTargets: 6,
+  probeWaitMs: 300, probeMemoMs: 60000,
   inputMaxBytes: 70000, clipMaxChars: 65536, fakeMaxBytes: 8 * 1024 * 1024,
 });
 const RUNG_ID = 'webrtc';
@@ -254,7 +266,99 @@ function relayCandidates(ips, port) {
   return out;
 }
 
+// ── THE UDP LEG (lane stream-relay-udp): the daemon dials the hub relay's UDP port ITSELF — TURN-shaped ───────────────────
+// A Windows firewall that blocks every inbound UDP to the agent (measured on the owner's machine: no direct ICE pair, the
+// device-link relay delivered 5 fps) still lets in the answers to datagrams the agent sent. The hub hands the daemon its
+// relay port, a per-session key (over the device link, never on UDP) and its addresses in `stream-offer`; the daemon PINGs;
+// an authenticated PING teaches the hub the daemon's (ip, port) and is answered by a PONG; from then on the browser's
+// datagrams and the agent's answers ride plain UDP as DATA. Every packet starts with the magic 'VSR1' — never a STUN (0–3),
+// DTLS (20–63) or RTP / RTCP (128–191) first byte (RFC 7983), so ONE hub socket tells the daemon from the browsers.
+const LEG = Object.freeze({ magic: Object.freeze([0x56, 0x53, 0x52, 0x31]), PING: 1, PONG: 2, DATA: 3, UP: 1, headBytes: 18, macBytes: 16, nonceBytes: 8, keyBytes: 32, dataHead: 11 });
+const isLegPacket = (b) => b instanceof Uint8Array && b.length >= 5 && b[0] === LEG.magic[0] && b[1] === LEG.magic[1] && b[2] === LEG.magic[2] && b[3] === LEG.magic[3];
+/** A PING (daemon → hub) or a PONG (hub → daemon): 'VSR1' · type · flags (UP = the daemon sends its datagrams on the leg) ·
+ *  counter (u32, strictly rising per session — the hub's replay bound) · nonce (8 random bytes; the PONG echoes both) · mac
+ *  = `mac(the first 18 bytes)` cut to 16 (HMAC-SHA256 under the session's key — handed in). → Uint8Array(34) | null */
+function legControl(type, { flags = 0, counter, nonce, mac } = {}) {
+  if ((type !== LEG.PING && type !== LEG.PONG) || !Number.isInteger(counter) || counter < 0 || counter > 0xffffffff || !(nonce instanceof Uint8Array) || nonce.length !== LEG.nonceBytes || typeof mac !== 'function') return null;
+  const out = new Uint8Array(LEG.headBytes + LEG.macBytes);
+  out.set(LEG.magic, 0); out[4] = type; out[5] = flags & 0xff;
+  new DataView(out.buffer).setUint32(6, counter >>> 0);
+  out.set(nonce, 10);
+  const m = mac(out.subarray(0, LEG.headBytes));
+  if (!(m instanceof Uint8Array) || m.length < LEG.macBytes) return null;
+  out.set(m.subarray(0, LEG.macBytes), LEG.headBytes);
+  return out;
+}
+/** DATA: 'VSR1' · 3 · the browser's IPv4 (4) · its port (u16) · the datagram. No mac — like TURN's ChannelData the 5-tuple is
+ *  the proof (the hub takes DATA only from the address an authenticated PING came from, the daemon only from the hub address
+ *  that answered its PING), and the payload is DTLS / SRTP, sealed end to end. → Uint8Array | null (relayFrame's bounds) */
+function legData(ip, port, payload) {
+  const fr = relayFrame(ip, port, payload);
+  if (!fr) return null;
+  const out = new Uint8Array(LEG.dataHead + fr.length - 8);
+  out.set(LEG.magic, 0); out[4] = LEG.DATA;
+  out.set(fr.subarray(2), 5);
+  return out;
+}
+/** Constant time over the mac's bytes. */
+function sameBytes(a, b) {
+  if (!(a instanceof Uint8Array) || !(b instanceof Uint8Array) || a.length !== b.length) return false;
+  let d = 0;
+  for (let i = 0; i < a.length; i++) d |= a[i] ^ b[i];
+  return d === 0;
+}
+/** A leg packet → { type: 'ping' | 'pong', flags, counter, nonce, ok } (ok = its mac holds under `mac`) | { type: 'data', ip,
+ *  port, payload } | null (not a leg packet, or malformed). */
+function legParse(b, mac) {
+  if (!isLegPacket(b)) return null;
+  const t = b[4];
+  if (t === LEG.DATA) {
+    if (b.length < LEG.dataHead + 1 || b.length > LEG.dataHead + STREAM_LIMITS.relayMaxDatagram) return null;
+    return { type: 'data', ip: `${b[5]}.${b[6]}.${b[7]}.${b[8]}`, port: (b[9] << 8) | b[10], payload: b.subarray(LEG.dataHead) };
+  }
+  if ((t !== LEG.PING && t !== LEG.PONG) || b.length !== LEG.headBytes + LEG.macBytes) return null;
+  const want = typeof mac === 'function' ? mac(b.subarray(0, LEG.headBytes)) : null;
+  return {
+    type: t === LEG.PING ? 'ping' : 'pong', flags: b[5], counter: new DataView(b.buffer, b.byteOffset, b.length).getUint32(6), nonce: b.subarray(10, 18),
+    ok: want instanceof Uint8Array && want.length >= LEG.macBytes && sameBytes(want.subarray(0, LEG.macBytes), b.subarray(LEG.headBytes)),
+  };
+}
+/** May the hub take this PING? `lastCounter` = the highest it took for the session. → { take, code: forged | replayed } */
+function legPingVerdict({ lastCounter = 0 } = {}, p) {
+  if (!p || p.type !== 'ping' || !p.ok) return { take: false, code: 'forged' };
+  if (!(p.counter > lastCounter)) return { take: false, code: 'replayed' };
+  return { take: true, code: null };
+}
+/** Which way the picture comes, for the strip: 'direct' (a host pair), 'udp' (the hub relay over the daemon's UDP leg), 'link'
+ *  (the hub relay over the device link), 'relay' (the relay, the leg's state not heard yet) or null. `page` = statsOf's answer;
+ *  `relay` = the hub's relay facts (the long poll's `relay`) or the agent's numbers' `relay`. */
+function relayPathOf(page, relay) {
+  if (!page || !page.path) return null;
+  if (page.path !== 'relay') return 'direct';
+  const via = relay && relay.via;
+  return via === 'udp' || via === 'link' ? via : 'relay';
+}
+
+// ── THE FIREWALL FACT (lane stream-relay-udp) ───────────────────────────────────────────────────────────────────────────
+/** The daemon's self-probe (a datagram from a second socket of its own to each of its host addresses; Windows' firewall
+ *  filters that the way it filters a browser's) → { verdict: 'open' (one arrived) | 'blocked' (none did) | 'none' (no host
+ *  address to try), addrs, reached } */
+function directInboundOf({ addrs = [], reached = [] } = {}) {
+  const a = Array.isArray(addrs) ? addrs.length : 0, r = Array.isArray(reached) ? reached.length : 0;
+  return { verdict: !a ? 'none' : r ? 'open' : 'blocked', addrs: a, reached: r };
+}
+/** The admin line that opens the DIRECT path on a Windows machine whose firewall blocks inbound UDP to its agent (`program` =
+ *  the agent's node.exe). The machine's OWNER copies it into an administrator prompt — VibeSpace never runs it (the agent runs
+ *  unelevated). The page builds it HERE from the path alone: a path that is not a plain absolute Windows .exe path, or holds a
+ *  character a shell could act on (a quote, $, %, `, ;, &, |, <, >, ^), gets no line at all (null). */
+function firewallRuleCommand(program) {
+  const p = String(program || '');
+  if (p.length > 260 || !/^[A-Za-z]:\\[^\x00-\x1f"$%`;&|<>^]*\.exe$/i.test(p)) return null;
+  return `netsh advfirewall firewall add rule name="VibeSpace agent" dir=in action=allow program="${p}" protocol=UDP`;
+}
+
 module.exports = {
   STREAM_CODEC, STREAM_SOURCES, STREAM_LIMITS, RUNG_ID, streamRungVerdict, STREAM_STATES, STREAM_EVENTS, streamStep, fallbackVerdict,
   videoToSource, INPUT_KINDS, inputEventOf, wheelUnitsOf, statsOf, relayFrame, relayUnframe, relayCandidates,
+  LEG, isLegPacket, legControl, legData, legParse, legPingVerdict, relayPathOf, directInboundOf, firewallRuleCommand,
 };

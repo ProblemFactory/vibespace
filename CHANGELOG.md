@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.296 — 2026-10-17
+
+### Fixed
+- A paired machine's desktop stream now runs at full frame rate even when the machine's firewall blocks a direct connection (relayed through the hub).
+
 ## 2.369.295 — 2026-10-16
 
 ### Added

@@ -966,7 +966,9 @@ class DeviceManager {
   }
   /** lane stream-p1a-transport (design q-041 r2 §2): a WebRTC STREAM session on this device — the daemon's werift offers ONE
    *  H.264 track + ONE `input` data channel (src/agentd/stream-host.js). `params` = { sid?, sourceKind, sourceId?, maxKbps?,
-   *  relay?, iceRestart? }; the session id is made HERE (before the request), so the pushes that follow the reply —
+   *  relay?, relayLeg?, iceRestart? } (`relayLeg` = the hub relay's {port, key, hosts} for the daemon's own UDP leg — lane
+   *  stream-relay-udp; an agent that predates it ignores it and the device link carries the relay); the session id is made
+   *  HERE (before the request), so the pushes that follow the reply —
    *  `stream-ice` (the offer's candidates, `null` = the last) and `stream-stats` (once a second; `ended` = it is over) — always
    *  find `onPush`; after a reconnect the session is re-armed (this link owns its pushes again). Capability-gated: an agent
    *  that predates the op is never asked (it would not answer — the 2.300.0 rule): `host_needs_daemon` + its version.
@@ -980,7 +982,7 @@ class DeviceManager {
     if (onPush) this._streamWatches.set(sid, onPush);
     const forget = () => { if (fresh) this._streamWatches.delete(sid); };
     let r;
-    try { r = await this._request({ op: 'stream-offer', sid, sourceKind: params.sourceKind, sourceId: params.sourceId, maxKbps: params.maxKbps, relay: !!params.relay, iceRestart: !fresh, timeoutMs }); } catch (e) { forget(); throw e; }
+    try { r = await this._request({ op: 'stream-offer', sid, sourceKind: params.sourceKind, sourceId: params.sourceId, maxKbps: params.maxKbps, relay: !!params.relay, ...(params.relayLeg ? { relayLeg: params.relayLeg } : {}), iceRestart: !fresh, timeoutMs }); } catch (e) { forget(); throw e; }
     if (r.error) { forget(); throw new Error(r.error); }
     const res = r.result || { ok: false, code: 'offer_failed', error: 'no answer' };
     if (!res.ok) forget();

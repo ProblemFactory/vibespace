@@ -20,12 +20,19 @@
 //       the relay framed (and only back to a peer that wrote first), the long poll wakes on a push, ended / stop / facts
 //   §13 the three touches by source: handlers reply with `op`, the capabilities, the routing set, the push branch BEFORE
 //       prevControl, the re-arm on reconnect
+//   §14 THE UDP LEG (lane stream-relay-udp): the codec (PING / PONG under the session's HMAC, DATA, the 'VSR1' magic never a
+//       STUN / DTLS / RTP first byte); the hub's half over a stand-in daemon socket — a forged PING and a replayed counter
+//       dropped and counted, an authenticated one answered (PONG) and its address learned, the browser's datagrams go to it as
+//       DATA once it says UP, its DATA reach only a browser that wrote first, a stray address is dropped, device-link frames
+//       turn the hub back to the link, a muted hub never answers; the daemon's half on an injected clock — UP at the first
+//       PONG, a PING every 15 s idle / 2 s while it carries the picture, DOWN 2 s after an unanswered PING, back UP on a PONG;
+//       the firewall line (only a plain .exe path, no shell character), the direct-inbound verdict, the self-probe on this box
 import fs from 'node:fs';
 import path from 'node:path';
 import dgram from 'node:dgram';
 import { EventEmitter } from 'node:events';
 import { createRequire } from 'node:module';
-import { scratch } from './scratch.mjs';
+import { scratch, deadPort } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -227,7 +234,8 @@ console.log('§12 the hub\'s half');
   const s = await wr.start('win');
   const relayLine = (s.offer.sdp.match(/a=candidate:vsrelay0 [^\r\n]*/) || [''])[0];
   const relayPort = Number(relayLine.split(' ')[5]);
-  ok(s.take && s.sid === 'sid-1' && same(win.calls[0], ['offer', { sourceKind: 'fake', sourceId: FIXTURE, maxKbps: null, relay: true }]) && / 127\.0\.0\.1 \d+ typ relay /.test(relayLine) && / typ host /.test(s.offer.sdp) && win.fwd[0].port === 4242, 'taken: stream-offer asked with the fake source + relay; the offer keeps its host candidates AND gains the relay\'s (its UDP port, forwarded to the agent\'s relay port 4242)', { call: win.calls[0], relayLine });
+  const { relayLeg: leg0, ...ask0 } = win.calls[0][1] || {};
+  ok(s.take && s.sid === 'sid-1' && same(ask0, { sourceKind: 'fake', sourceId: FIXTURE, maxKbps: null, relay: true }) && leg0 && leg0.port === relayPort && Buffer.from(leg0.key, 'base64').length === 32 && same(leg0.hosts, ['127.0.0.1']) && / 127\.0\.0\.1 \d+ typ relay /.test(relayLine) && / typ host /.test(s.offer.sdp) && win.fwd[0].port === 4242, 'taken: stream-offer asked with the fake source + relay + the UDP leg\'s spec (the relay\'s own port, a 32-byte key, the hub\'s addresses); the offer keeps its host candidates AND gains the relay\'s (its UDP port, forwarded to the agent\'s relay port 4242)', { call: win.calls[0], relayLine });
   // a datagram crosses the relay
   const peer = dgram.createSocket('udp4'); await new Promise((r) => peer.bind(0, '127.0.0.1', r));
   const got = []; peer.on('message', (m) => got.push(m));
@@ -298,6 +306,138 @@ console.log('§13 the three touches, by source');
   ok(/for \(const sid of \[\.\.\.\(this\._streamWatches\?\.keys\(\) \|\| \[\]\)\]\) this\._rearmStream\(sid\);/.test(cl) && /op: 'stream-stats', sid, watch: true/.test(cl), '③ a reconnect re-arms every stream session (stream-stats with watch: this link owns its pushes again)');
   ok(/if \(streamHost\) streamHost\.linkDead\(mux\);/.test(ad), 'the daemon makes a dead link\'s sessions orphans (their media keeps flowing) until the re-arm');
   for (const m of ['streamOffer', 'streamAnswer', 'streamStats', 'inputEvents']) ok(new RegExp(`async ${m}\\([^)]*\\) \\{\\n    const conn = await this\\.connect\\(\\);\\n    if \\(!conn\\.info\\?\\.capabilities\\?\\.includes\\?\\.\\('(stream-offer|input-events)'\\)\\)`).test(cl), `② ${m} refuses an agent without the capability BEFORE asking`);
+}
+
+console.log('§14 THE UDP LEG (lane stream-relay-udp)');
+{
+  const crypto = require('node:crypto');
+  const SH = require(path.join(REPO, 'src/agentd/stream-host.js'));
+  const macOf = (key) => (b) => crypto.createHmac('sha256', key).update(b).digest().subarray(0, 16);
+  const key = crypto.randomBytes(32), mac = macOf(key), nonce = crypto.randomBytes(8);
+  // the codec
+  const ping = SM.legControl(SM.LEG.PING, { flags: SM.LEG.UP, counter: 5, nonce, mac });
+  const pp = SM.legParse(ping, mac), forged = SM.legParse(ping, macOf(crypto.randomBytes(32)));
+  ok(ping.length === 34 && pp.type === 'ping' && pp.flags === SM.LEG.UP && pp.counter === 5 && pp.ok && Buffer.from(pp.nonce).equals(nonce) && forged.ok === false, 'a PING: 34 bytes (magic · type · flags · counter · nonce · 16-byte HMAC); it parses back and its mac holds only under the session\'s key');
+  ok(same(SM.legPingVerdict({ lastCounter: 0 }, forged), { take: false, code: 'forged' }) && same(SM.legPingVerdict({ lastCounter: 5 }, pp), { take: false, code: 'replayed' }) && same(SM.legPingVerdict({ lastCounter: 4 }, pp), { take: true, code: null }), 'the hub\'s verdict: a wrong mac = forged, a counter not above the last = replayed, else taken');
+  const dd = SM.legParse(SM.legData('10.1.2.3', 50000, new Uint8Array([1, 2, 3])));
+  ok(dd.type === 'data' && dd.ip === '10.1.2.3' && dd.port === 50000 && same([...dd.payload], [1, 2, 3]) && SM.legData('::1', 1, new Uint8Array([1])) === null && SM.legData('1.2.3.4', 1, new Uint8Array(1501)) === null, 'DATA carries the browser\'s address + its datagram (relayFrame\'s bounds: IPv4, ≤ 1500 bytes)');
+  ok([[0x00, 0x01], [0x01, 0x01], [0x16, 0xfe], [0x80, 0x60], [0x90, 0xc8]].every((h) => !SM.isLegPacket(new Uint8Array([...h, 0, 0, 0, 0]))) && SM.isLegPacket(ping), 'a STUN / DTLS / RTP / RTCP first byte is never the leg\'s magic (ONE hub socket tells them apart)');
+  // the hub's half over a stand-in daemon socket
+  const legAgent = () => {
+    const calls = []; let push = null; const fwd = [];
+    return { calls, fwd, _conn: null, status: () => ({ connected: true, info: { platform: 'win32', capabilities: ['display-facts', 'stream-offer', 'input-events'] } }), desktopServe: async () => ({}),
+      streamOffer: async (p, o) => { calls.push(['offer', p]); push = o.onPush; return { ok: true, sid: 'sid-L', offer: { type: 'offer', sdp: 'v=0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\n' }, source: { kind: 'fake', origin: { x: 0, y: 0 } }, relayPort: 4243, codec: { mimeType: 'video/H264' } }; },
+      streamAnswer: async () => ({ ok: true }), streamStop: async () => ({ stopped: true }),
+      tcpForward: async (port) => { const h = { port, written: [], write(b) { h.written.push(Buffer.from(b)); return true; }, close() { h.closed = true; } }; fwd.push(h); return h; } };
+  };
+  let muted = false;
+  const la = legAgent();
+  const wrL = DW.create({ access: ACC.create({ hosts: { get: (h) => ({ id: h, name: 'PC' }), isLocal: () => false, deviceBounded: async () => la, connectedDevice: () => la }, install: false, env: () => ({ VIBESPACE_STREAM_FAKE_SOURCE: FIXTURE }), log: { log() { }, warn() { } } }), log: { log() { }, warn() { } }, ips: () => ['127.0.0.1'], pollMaxMs: 120000, legMute: () => muted });
+  const sL = await wrL.start('pcL');
+  const spec = la.calls[0][1].relayLeg, lkey = Buffer.from(spec.key, 'base64'), lmac = macOf(lkey);
+  const dmn = dgram.createSocket('udp4'); await new Promise((r) => dmn.bind(0, '127.0.0.1', r));
+  const fromHub = []; dmn.on('message', (m, ri) => fromHub.push({ m, port: ri.port }));
+  const br = dgram.createSocket('udp4'); await new Promise((r) => br.bind(0, '127.0.0.1', r));
+  const toBr = []; br.on('message', (m) => toBr.push(m));
+  const waitFor = async (f) => { for (let i = 0; i < 60 && !f(); i++) await sleep(10); return f(); };
+  const rf = async () => (await wrL.poll(sL.key, 0, -1, 0)).relay;
+  dmn.send(Buffer.from(SM.legControl(SM.LEG.PING, { counter: 1, nonce, mac: macOf(crypto.randomBytes(32)) })), spec.port, '127.0.0.1');
+  await sleep(60);
+  ok(fromHub.length === 0 && (await rf()).leg.forged === 1 && (await rf()).leg.addr === null, 'a PING under another key: dropped, counted (forged 1), NO answer, no address learned');
+  dmn.send(Buffer.from(SM.legControl(SM.LEG.PING, { counter: 1, nonce, mac: lmac })), spec.port, '127.0.0.1');
+  await waitFor(() => fromHub.length);
+  const pong = fromHub.length ? SM.legParse(new Uint8Array(fromHub[0].m), lmac) : null;
+  const r1 = await rf();
+  ok(pong && pong.type === 'pong' && pong.ok && pong.counter === 1 && Buffer.from(pong.nonce).equals(nonce) && fromHub[0].port === spec.port && r1.leg.addr === `127.0.0.1:${dmn.address().port}` && r1.via === 'link', 'an authenticated PING: answered by a PONG under the same key (its counter + nonce echoed, from the relay\'s port); the daemon\'s address learned — still the device link until it says UP', { pong, r1 });
+  dmn.send(Buffer.from(SM.legControl(SM.LEG.PING, { counter: 1, nonce, mac: lmac })), spec.port, '127.0.0.1');
+  await sleep(60);
+  ok(fromHub.length === 1 && (await rf()).leg.replayed === 1, 'the same PING again (its counter not above the last): dropped as replayed, unanswered');
+  dmn.send(Buffer.from(SM.legControl(SM.LEG.PING, { flags: SM.LEG.UP, counter: 2, nonce, mac: lmac })), spec.port, '127.0.0.1');
+  await waitFor(() => fromHub.length === 2);
+  const r2 = await rf();
+  br.send(Buffer.from([0x00, 0x01, 0x00, 0x00]), spec.port, '127.0.0.1'); // a browser's STUN-shaped datagram
+  await waitFor(() => fromHub.length === 3);
+  const asData = fromHub[2] ? SM.legParse(new Uint8Array(fromHub[2].m)) : null;
+  ok(r2.via === 'udp' && asData && asData.type === 'data' && asData.ip === '127.0.0.1' && asData.port === br.address().port && same([...asData.payload], [0, 1, 0, 0]) && la.fwd[0].written.length === 0, 'a PING flagged UP ⇒ via udp: the browser\'s datagram reaches the daemon\'s socket as leg DATA with the browser\'s address — nothing went over the device link', { via: r2.via, asData });
+  dmn.send(Buffer.from(SM.legData('127.0.0.1', br.address().port, new Uint8Array([7, 7]))), spec.port, '127.0.0.1');
+  dmn.send(Buffer.from(SM.legData('127.0.0.1', 9, new Uint8Array([8, 8]))), spec.port, '127.0.0.1');
+  await waitFor(() => toBr.length);
+  const stray = dgram.createSocket('udp4'); await new Promise((r) => stray.bind(0, '127.0.0.1', r));
+  stray.send(Buffer.from(SM.legData('127.0.0.1', br.address().port, new Uint8Array([6, 6]))), spec.port, '127.0.0.1');
+  await sleep(60);
+  ok(toBr.length === 1 && same([...toBr[0]], [7, 7]) && (await rf()).leg.stray === 1, 'the daemon\'s DATA reach the browser that wrote first (not port 9, which never wrote); DATA from any other address is dropped as stray', { toBr: toBr.map((b) => [...b]) });
+  la.fwd[0].onData(Buffer.from(SM.relayFrame('127.0.0.1', br.address().port, new Uint8Array([5]))));
+  await waitFor(() => toBr.length === 2);
+  br.send(Buffer.from([0x00, 0x01, 0x00, 0x02]), spec.port, '127.0.0.1');
+  await waitFor(() => la.fwd[0].written.length);
+  const r3 = await rf();
+  ok(r3.via === 'link' && la.fwd[0].written.length === 1 && fromHub.length === 3 && r3.leg.changes.map((c) => c.via).join(',') === 'udp,link', 'the daemon spoke on the device link ⇒ the hub answers on the device link (the path it last spoke on); both changes on the record', r3);
+  muted = true;
+  dmn.send(Buffer.from(SM.legControl(SM.LEG.PING, { flags: SM.LEG.UP, counter: 3, nonce, mac: lmac })), spec.port, '127.0.0.1');
+  await sleep(60);
+  ok(fromHub.length === 3 && (await rf()).via === 'link', 'a muted hub (the suites\' unreachable hub) leaves an authenticated PING unanswered');
+  muted = false;
+  await wrL.stop(sL.key); wrL.shutdown(); dmn.close(); br.close(); stray.close();
+  const wrN = DW.create({ access: ACC.create({ hosts: { get: (h) => ({ id: h, name: 'PC' }), isLocal: () => false, deviceBounded: async () => la, connectedDevice: () => la }, install: false, env: () => ({ VIBESPACE_STREAM_FAKE_SOURCE: FIXTURE }), log: { log() { }, warn() { } } }), log: { log() { }, warn() { } }, ips: () => ['127.0.0.1'], udpLeg: false });
+  const sN = await wrN.start('pcN');
+  ok(sN.take && !('relayLeg' in la.calls[la.calls.length - 1][1]) && (await wrN.poll(sN.key, 0, -1, 0)).relay.leg === null, 'udpLeg: false (the device-link control) asks the daemon for no leg');
+  await wrN.stop(sN.key); wrN.shutdown();
+  // the daemon's half on an injected clock (a stand-in socket: nothing is bound; the hub's port is one nothing answers)
+  const HP = await deadPort();
+  let clock = 1e6;
+  const sent = [], handlers = {};
+  const fakeSock = { on: (ev, f) => { handlers[ev] = f; }, send: (b, port, ip) => sent.push({ b: new Uint8Array(b), port, ip }), close() { }, address: () => ({ port: 1 }) };
+  const hubKey = crypto.randomBytes(32), hmac = macOf(hubKey);
+  const answer = (pkt, from = { address: '10.0.0.9', port: HP }) => { const q = SM.legParse(pkt, hmac); handlers.message(Buffer.from(SM.legControl(SM.LEG.PONG, { counter: q.counter, nonce: q.nonce, mac: hmac })), from); };
+  const changes = [], fromLeg = [];
+  ok(SH.createLeg({ port: HP, key: 'short', hosts: ['10.0.0.9'] }, { socket: fakeSock, timer: false }) === null && SH.createLeg({ port: 0, key: hubKey.toString('base64'), hosts: ['10.0.0.9'] }, { socket: fakeSock, timer: false }) === null, 'a spec without a 32-byte key or a port opens no leg');
+  const g = SH.createLeg({ port: HP, key: hubKey.toString('base64'), hosts: ['10.0.0.9', '127.0.0.1', 'bad host!'] }, { extra: ['hub.example'], socket: fakeSock, timer: false, now: () => clock, onChange: (x) => changes.push(x.state), onData: (ip, port, payload) => fromLeg.push([ip, port, [...payload]]) });
+  ok(g.state === 'probing' && same(sent.map((x) => `${x.ip}:${x.port}`), [`hub.example:${HP}`, `10.0.0.9:${HP}`, `127.0.0.1:${HP}`]) && SM.legParse(sent[0].b, hmac).ok && SM.legParse(sent[0].b, hmac).flags === 0, 'the first PING goes at once to the dialled host + each hub address (a malformed host skipped), authenticated, not flagged UP');
+  clock += 120; answer(sent[1].b);
+  const confirm = sent[sent.length - 1];
+  ok(g.state === 'up' && g.facts().target === `10.0.0.9:${HP}` && g.facts().rttMs === 120 && same(changes, ['up']) && confirm.ip === '10.0.0.9' && SM.legParse(confirm.b, hmac).flags === SM.LEG.UP, 'the first authenticated PONG: UP — the hub\'s address locked (10.0.0.9), its rtt 120 ms, and a PING flagged UP goes at once (the hub switches without waiting 15 s)', g.facts());
+  answer(confirm.b);
+  handlers.message(Buffer.from(SM.legData('192.168.1.5', 50000, new Uint8Array([4, 2]))), { address: '10.0.0.66', port: HP });
+  handlers.message(Buffer.from(SM.legData('192.168.1.5', 50000, new Uint8Array([4, 2]))), { address: '10.0.0.9', port: HP });
+  ok(same(fromLeg, [['192.168.1.5', 50000, [4, 2]]]) && g.facts().stray === 1, 'the hub\'s DATA reach the shims; DATA from another address is stray (dropped)');
+  const n0 = sent.length;
+  clock += 14000; g.tick();
+  const idleQuiet = sent.length === n0;
+  clock += 1100; g.tick();
+  ok(idleQuiet && sent.length === n0 + 1, 'idle (nothing sent on the leg): the next PING 15 s after the last — the keepalive that keeps the NAT / firewall state');
+  answer(sent[sent.length - 1].b);
+  ok(g.send('192.168.1.5', 50000, new Uint8Array([1])) === true && SM.legParse(sent[sent.length - 1].b).type === 'data', 'up: werift\'s datagram leaves as leg DATA to the hub');
+  const n1 = sent.length;
+  clock += 2100; g.tick();
+  ok(sent.length === n1 + 1 && SM.legParse(sent[sent.length - 1].b, hmac).type === 'ping', 'while it carries the picture: a PING every 2 s (a dead leg is found within 2 s + 2 s)');
+  clock += 1000; g.tick();
+  const stillUp = g.state === 'up';
+  clock += 1100; g.tick();
+  ok(stillUp && g.state === 'down' && g.why === 'no_echo' && same(changes, ['up', 'down']) && g.send('1.2.3.4', 1, new Uint8Array([1])) === false, 'that PING unanswered for 2 s: DOWN (no_echo) — send() refuses, the device link carries the datagrams', g.facts());
+  const n2 = sent.length;
+  clock += 2000; g.tick(); // 4.1 s after the unanswered PING
+  const waitReprobe = sent.length === n2;
+  clock += 1000; g.tick(); // 5.1 s
+  answer(sent[sent.length - 1].b);
+  ok(waitReprobe && sent.length >= n2 + 1 && g.state === 'up' && same(changes, ['up', 'down', 'up']), 'down: re-asked 5 s after the last PING; a PONG brings the leg back UP (fail-back without a new session)');
+  g.close();
+  // a fresh leg that never hears a PONG: DOWN 2 s after its first PING (the device link from the start)
+  let c2 = 5e6; const s2 = [];
+  const g2 = SH.createLeg({ port: HP, key: hubKey.toString('base64'), hosts: ['10.0.0.9'] }, { socket: { on() { }, send: (b) => s2.push(b), close() { } }, timer: false, now: () => c2 });
+  for (let i = 0; i < 3; i++) { c2 += 500; g2.tick(); }
+  const probing = g2.state;
+  c2 += 600; g2.tick();
+  ok(probing === 'probing' && s2.length === 4 && g2.state === 'down' && g2.why === 'no_echo', 'a leg that never hears a PONG: PINGs every 500 ms while probing, DOWN (no_echo) 2 s after the first — the device link carried it all along', { n: s2.length, state: g2.state });
+  g2.close();
+  // the firewall line + the verdicts
+  ok(SM.firewallRuleCommand('C:\\Users\\me\\AppData\\Local\\vibespace\\node\\node.exe') === 'netsh advfirewall firewall add rule name="VibeSpace agent" dir=in action=allow program="C:\\Users\\me\\AppData\\Local\\vibespace\\node\\node.exe" protocol=UDP' && SM.firewallRuleCommand('C:\\Users\\张三\\node.exe') !== null, 'the admin line: netsh … program="<the agent\'s node.exe>" protocol=UDP (a non-ASCII user folder kept)');
+  ok(['C:\\x"\\node.exe', 'C:\\a$b\\node.exe', 'C:\\%TEMP%\\node.exe', 'C:\\a;calc\\node.exe', 'C:\\a&b\\node.exe', '/usr/bin/node', 'C:\\node.cmd', '', null].every((x) => SM.firewallRuleCommand(x) === null), 'no line for a path a shell could act on (quote, $, %, ;, &), a non-Windows path or a non-.exe program');
+  ok(same(SM.directInboundOf({ addrs: ['a', 'b'], reached: [] }), { verdict: 'blocked', addrs: 2, reached: 0 }) && SM.directInboundOf({ addrs: ['a'], reached: ['a'] }).verdict === 'open' && SM.directInboundOf({}).verdict === 'none', 'the direct-inbound verdict: blocked (none arrived) · open · none (no host address)');
+  ok(SM.relayPathOf({ path: 'direct' }, { via: 'udp' }) === 'direct' && SM.relayPathOf({ path: 'relay' }, { via: 'udp' }) === 'udp' && SM.relayPathOf({ path: 'relay' }, { via: 'link' }) === 'link' && SM.relayPathOf({ path: 'relay' }, null) === 'relay' && SM.relayPathOf(null, { via: 'udp' }) === null, 'the strip\'s path: direct · udp · link · relay (the leg not heard yet)');
+  const os = require('node:os');
+  const mine = Object.values(os.networkInterfaces()).flat().filter((a) => a && (a.family === 'IPv4' || a.family === 4) && !a.internal).map((a) => a.address);
+  const pr = await SH.selfProbe([...mine, '127.0.0.1']);
+  ok(mine.length ? pr.verdict === 'open' && pr.addrs === mine.length && pr.reached === mine.length : pr.verdict === 'none', `the self-probe on this box (no firewall in the way): ${pr.verdict} — ${pr.reached} of ${pr.addrs} host addresses reached in ${pr.ms} ms (loopback never counts)`, pr);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

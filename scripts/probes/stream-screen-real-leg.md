@@ -56,6 +56,20 @@ The agent's log line is `[stream] screen source: mapped, \\.\DISPLAY1 3840×2160
 - `mapMs` ≤ 25: the lane measured 20.7 ms per 4K frame on one thread of a Ryzen AI MAX+ 395 (Zen 5). The owner's CPU decides the real number; write it down.
 - `dropped` grows slowly or not at all.
 
+## 3b. The relay paths — the daemon's UDP leg and the firewall fact (lane stream-relay-udp, 2.369.296)
+
+Before: the hub and the machine's agent run 2.369.296 or later (read the running agent's version from its process: `vibespace-exit run <m> -- powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | Select-Object CommandLine"` — the path names `…\device@<hub>\<version>\vibespace-device.js`).
+
+1. The owner opens the machine's desktop window as in step 3 (the browser on that machine, as on 2026-10-18, or any other).
+   **Pass:** it plays at ≥ 25 fps (the 2026-10-18 run: 5 fps); the strip ends `… · 经 hub 中转 · UDP` (not `经设备链路`) and shows `机器防火墙挡住直连，经 hub 中转` with the button `复制管理员命令`.
+2. In the owner's signed-in tab: `GET /api/desktop/machine-desktop/stream/facts?host=<id>`. **Pass:**
+   - `sessions[0].relay.via` = `udp`; `relay.leg.addr` = the machine's address as the hub sees it; `relay.leg.forged`, `replayed`, `stray` = 0; `relay.leg.changes` starts with `{via:'udp', why:'leg up'}`;
+   - `sessions[0].stats.relay.leg`: `state: up`, `target` = a hub address + the relay port, `rttMs` (write it down), `pongs` ≈ `pings`;
+   - `sessions[0].stats.directInbound`: `verdict: blocked`, `reached: 0`, `program` = the agent's node.exe.
+   The hub journal says `[stream] <id>: session … relay via the daemon's udp leg <ip>:<port> (leg up)`. The agent log (`%USERPROFILE%\.vibespace\device@<hub>\state\agentd.log`) says `[stream] s… relay leg up: udp to <hub ip>:<port> (rtt N ms)` and `direct inbound UDP: blocked — none of N host addresses reached from this machine itself (its firewall)`.
+3. **If `via` stays `link`:** the agent log says `relay leg down (no_echo)` — no PONG reached the machine. Note `relayLeg`'s hosts (the hub's journal names the relay port; the hosts are the hub's IPv4s, the same the browser's relay candidates use), and check the hub's own firewall for inbound UDP to an ephemeral port. Bring back the agent log's `[stream]` lines.
+4. **Direct (optional, the owner's choice — VibeSpace never runs it):** `复制管理员命令` copies `netsh advfirewall firewall add rule name="VibeSpace agent" dir=in action=allow program="<the agent's node.exe>" protocol=UDP`; the owner pastes it into an ADMINISTRATOR PowerShell on the machine. After a minute (the probe's memo), a new window: **Pass:** the strip has no `经 hub` words (a direct pair), `stats.directInbound.verdict` = `open`. To undo: `netsh advfirewall firewall delete rule name="VibeSpace agent"` (admin).
+
 ## 4. Colour acceptance — the calibration window through the stream (±2)
 
 1. Run `calib.ps1` again (step 2's first line). While it shows, paste the snippet from `node scripts/probes/stream-screen-calib.mjs snippet /tmp/p1b-calib.json` into the console of the VibeSpace tab that plays the stream.
@@ -85,4 +99,4 @@ Record median / p95 for 30 s, beside the strip's `encodeMs`.
 
 ## 7. Bring back
 
-The facts line, the probe table (step 2), and the snippet's table (step 4). Also `stats.screen` and the glass-to-glass numbers, plus a screenshot of the window streaming with its strip. Put them in the integration report.
+The facts line, the probe table (step 2), and the snippet's table (step 4). Also `stats.screen` and the glass-to-glass numbers, plus a screenshot of the window streaming with its strip. Step 3b: the strip's words, `relay` + `stats.relay.leg` + `stats.directInbound`, the fps on the leg. Put them in the integration report.

@@ -120,6 +120,7 @@ const RANDOM32 = new Map([
   ['src/secret-box.js', [1, 'mintKeyFile: THE mint']],
   ['src/server/dropline-oauth.js', [2, 'a PKCE verifier + this boot\'s state key (memory only)']],
   ['src/server/channels-engine.js', [1, 'consentKey: this boot\'s HMAC key for consent state (memory only)']],
+  ['src/server/desktop-webrtc.js', [1, 'a stream session\'s UDP-leg HMAC key (lane stream-relay-udp — memory only; handed to the daemon in stream-offer over the device link, never on UDP)']],
 ]);
 const KEYNAME_RE = /^(\.[a-z0-9][a-z0-9._-]*[-.]key|[a-z0-9][a-z0-9._-]*\.key)$/; // a dotfile ending -key / .key, or any *.key (key-file-law-fix: dots too — '.vault.key')
 const KEYVAR_RE = /^(_?keyFile|KEY_FILE|\w*KeyFile|\w*_KEY_FILE)$/;

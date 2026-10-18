@@ -9104,6 +9104,9 @@ export default {
   "Stream · connecting…": "ストリーム · 接続中…",
   "RTT {rtt} ms · jitter {jitter} ms · {fps} fps · decode {decode} ms · {kbps} kbps": "往復 {rtt} ms · ジッタ {jitter} ms · {fps} fps · デコード {decode} ms · {kbps} kbps",
   "via the hub": "hub 経由",
+  "via the hub · UDP": "hub 経由 · UDP", // lane stream-relay-udp
+  "via the device link": "デバイスリンク経由", // lane stream-relay-udp
+  "The machine’s firewall blocks the direct path; going through the hub": "マシンのファイアウォールが直接接続を遮断しているため、hub 経由で中継します", // lane stream-relay-udp
   "WebRTC from the machine’s agent: {w}×{h}, sent {sent} fps at {kbps} kbps": "マシンのエージェントからの WebRTC：{w}×{h}、送信 {sent} fps・{kbps} kbps",
   "Windows keeps input away from an administrator window — click another window on the machine first": "Windows は管理者ウィンドウへの入力を通しません — 先にマシン上の別のウィンドウをクリックしてください",
   "This machine cannot take input over the stream yet": "このマシンはまだストリーム経由の入力を受け付けられません",

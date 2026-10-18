@@ -26,6 +26,13 @@
 //      no ffmpeg = no_ffmpeg naming where it looked
 //   §9 the bitrate: werift's estimate restarts ONLY the encoder, at most once per 5 s and only on a ≥ 25 % move (the same
 //      module in-process, an injected clock, the fake ffmpeg)
+//   §10 THE UDP LEG (lane stream-relay-udp): a daemon that DIALS this hub (Transport B) through a link stand-in that carries
+//      2 Mbps (the owner's link delivered 1.3); a padded fixture at 30 fps / 8 Mbps; relay-only. The daemon's own UDP leg
+//      carries every picture for 10 s with 0 RTP gaps and no growing lag; a forged PING and a stray DATA mid-run are dropped
+//      and counted, the leg's address unchanged; its PINGs are answered (the keepalive) — RED CONTROL: the device-link path
+//      alone (udpLeg: false) through the same link drops below 10 fps (the ratio pinned). A hub that never answers the leg ⇒
+//      the device link from the first picture, the leg DOWN (no_echo) ≤ 2 s after the offer; answered again ⇒ the leg comes
+//      back UP and carries it; silenced mid-run ⇒ the device link takes over within 2 s + 2 s and the pictures keep coming
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -194,7 +201,7 @@ console.log('§6 the relay: the hub\'s UDP port ⇄ the device link ⇄ the daem
 {
   const hosts = { get: (h) => (h === 'win-a' ? { id: h, name: 'WIN' } : null), isLocal: (h) => !h || h === 'local', deviceBounded: async (h) => (h === 'win-a' ? dmw : null), connectedDevice: (h) => (h === 'win-a' ? dmw : null) };
   const access = ACC.create({ hosts, install: false, env: () => ({ VIBESPACE_STREAM_FAKE_SOURCE: FIXTURE }), log: { log() { }, warn() { } } });
-  const wr = DW.create({ access, direct: false, ips: () => ['127.0.0.1'], log: { log() { }, warn() { } } });
+  const wr = DW.create({ access, direct: false, udpLeg: false, ips: () => ['127.0.0.1'], log: { log() { }, warn() { } } }); // the device link's half (§10 is the UDP leg)
   const s = await wr.start('win-a');
   const b3 = standIn();
   b3.pc.onIceCandidate.subscribe((c) => { if (c) wr.candidate(s.key, c.toJSON()).catch(() => { }); });
@@ -373,6 +380,129 @@ console.log('§9 the bitrate follows the estimate: an encoder restart, with hyst
   ok(early === 1 && encRuns.length === 2 && encRuns[1][encRuns[1].indexOf('-b:v') + 1] === '3000k' && src.stats().restarts === 1 && src.stats().kbps === 3000 && src.stats().mapper === 'inline' && afterKey === 0, 'the estimate inside 5 s changes nothing; after 5 s a 62 % drop restarts ONLY the encoder at 3000k (its first picture a key frame); 1 s later another drop waits', { early, encs: encRuns.length, stats: src.stats(), afterKey });
   src.stop();
   await sleep(200);
+}
+
+console.log('§10 THE UDP LEG: the daemon\'s own datagrams to the hub relay — the picture past a slow device link');
+{
+  const http = await import('node:http'); const net = await import('node:net'); const crypto = await import('node:crypto'); const dgram = await import('node:dgram');
+  const { spawn } = await import('node:child_process');
+  const { WebSocketServer } = require(path.join(REPO, 'node_modules/ws'));
+  const homeLeg = scratchHome('sop-leg', fs, ['.vibespace']); homes.push(homeLeg);
+  const rootL = rootOf(homeLeg);
+  // the padded fixture: THE fixture's first 200 access units, each grown to 8 Mbps / 30 fps by one filler NAL (type 12 — a decoder skips it)
+  const PER = Math.round((8000 * 1000) / 8 / 30), SC = Buffer.from([0, 0, 0, 1]), parts = [];
+  for (const au of AUS.slice(0, 200)) {
+    const have = au.nalus.reduce((a, n) => a + n.length + 4, 0);
+    parts.push(Buffer.from([0, 0, 0, 1, 0x09, 0xf0])); for (const n of au.nalus) parts.push(SC, n);
+    const f = Buffer.alloc(Math.max(2, PER - have - 10), 0xff); f[0] = 0x0c; f[f.length - 1] = 0x80; parts.push(SC, f);
+  }
+  const padded = path.join(homeLeg, 'padded-8mbps.h264'); fs.writeFileSync(padded, Buffer.concat(parts));
+  // the daemon DIALS this hub (the server.js Transport B adapter) through a link stand-in carrying CAP kbps daemon → hub
+  // (a token bucket; TCP backpressure past 128 KB queued — the link a real network gives the device link)
+  const CAP = 2000;
+  const version = JSON.parse(fs.readFileSync(path.join(REPO, 'package.json'), 'utf8')).version;
+  const inst = path.join(rootL, version); fs.mkdirSync(inst, { recursive: true });
+  fs.writeFileSync(path.join(inst, 'agentd.js'), bundleText.replace(HELLO, '$1platform: "win32",'));
+  fs.symlinkSync(inst, path.join(rootL, 'current'));
+  const stateL = path.join(rootL, 'state'); fs.mkdirSync(stateL, { recursive: true, mode: 0o700 });
+  const HT = 'vsht_leg' + crypto.randomBytes(6).toString('hex'), DT = 'vsdt_' + crypto.randomBytes(8).toString('hex');
+  fs.writeFileSync(path.join(stateL, 'token'), HT, { mode: 0o600 });
+  const wss = new WebSocketServer({ noServer: true }); let linkStream = null;
+  const hubHttp = http.createServer((q, r) => { r.writeHead(404); r.end(); });
+  hubHttp.on('upgrade', (req, socket, head) => { if (req.headers['x-vibespace-dial-token'] !== DT) { socket.destroy(); return; } wss.handleUpgrade(req, socket, head, (ws) => {
+    const Lst = { data: [], close: [], error: [] };
+    ws.on('message', (d) => Lst.data.forEach((f) => f(Buffer.isBuffer(d) ? d : Buffer.from(d)))); ws.on('close', () => Lst.close.forEach((f) => f())); ws.on('error', () => Lst.error.forEach((f) => f()));
+    linkStream = { write: (d) => { try { ws.send(d); return true; } catch { return false; } }, on: (ev, fn) => { Lst[ev]?.push(fn); }, destroy: () => { try { ws.close(); } catch { } } };
+  }); });
+  await new Promise((r) => hubHttp.listen(0, '127.0.0.1', r));
+  const wsPort = hubHttp.address().port;
+  const capped = net.createServer((c) => {
+    const u = net.connect(wsPort, '127.0.0.1'); c.setNoDelay(true); u.setNoDelay(true);
+    const q = []; let qb = 0, tokens = 0, last = Date.now();
+    const t = setInterval(() => {
+      const t1 = Date.now(); tokens = Math.min(tokens + ((t1 - last) * CAP) / 8, 16384); last = t1;
+      while (q.length && tokens > 0) { let d = q[0]; if (d.length > tokens) { const n = Math.max(1, Math.floor(tokens)); q[0] = d.subarray(n); d = d.subarray(0, n); } else q.shift(); tokens -= d.length; qb -= d.length; u.write(d); }
+      if (qb < 32768 && c.isPaused()) c.resume();
+    }, 2);
+    c.on('data', (d) => { q.push(d); qb += d.length; if (qb > 131072) c.pause(); });
+    u.on('data', (d) => c.write(d)); c.on('close', () => { clearInterval(t); u.destroy(); }); u.on('close', () => c.destroy()); c.on('error', () => { }); u.on('error', () => { });
+  });
+  await new Promise((r) => capped.listen(0, '127.0.0.1', r));
+  const daemonL = spawn(process.execPath, [path.join(rootL, 'current', 'agentd.js'), '--dial', `ws://127.0.0.1:${capped.address().port}/api/agentd-dial?device=leg`, '--dial-token', DT], { detached: true, stdio: 'ignore', env: { ...process.env, HOME: homeLeg, VIBESPACE_AGENTD_ROOT: rootL } });
+  daemonL.unref();
+  await until(() => linkStream, 10000);
+  const dmL = new DeviceManager({ dataDir: path.join(homeLeg, 'hub-data'), bundlePath: BUNDLE, version, nodeModules: path.join(REPO, 'node_modules'), log: () => { }, transport: { kind: 'stream', hostToken: HT, getStream: () => linkStream } });
+  devices.push(dmL);
+  const cl = await dmL.connect();
+  ok(cl.info.platform === 'win32' && cl.info.capabilities.includes('stream-offer'), `a real daemon DIALED this hub through a ${CAP} kbps link stand-in (Windows-shaped hello)`);
+  const hostsL = { get: (h) => ({ id: h, name: 'WIN' }), isLocal: () => false, deviceBounded: async () => dmL, connectedDevice: () => dmL };
+  const accessOf = (src) => ACC.create({ hosts: hostsL, install: false, env: () => ({ VIBESPACE_STREAM_FAKE_SOURCE: src }), log: { log() { }, warn() { } } });
+  /** One relayed session: relay-only hub, a stand-in browser; the pictures, RTP gaps and the picture's lag over `secs`. */
+  async function relayedRun(opts, { src = padded, secs = 10, mid = null } = {}) {
+    const wr = DW.create({ access: accessOf(src), direct: false, ips: () => ['127.0.0.1'], log: { log() { }, warn() { } }, ...opts });
+    const t0 = Date.now();
+    const s = await wr.start('win-l', { maxKbps: 20000 });
+    const b = standIn();
+    const seqs = [], marks = [];
+    b.pc.onTrack.subscribe((tr) => tr.onReceiveRtp.subscribe((r) => { const at = Date.now(); seqs.push([at, r.header.sequenceNumber]); if (r.header.marker) marks.push([at, r.header.timestamp]); }));
+    b.pc.onIceCandidate.subscribe((c) => { if (c) wr.candidate(s.key, c.toJSON()).catch(() => { }); });
+    await b.pc.setRemoteDescription(s.offer); await b.pc.setLocalDescription(await b.pc.createAnswer());
+    const tAns = Date.now();
+    await wr.answer(s.key, b.pc.localDescription.sdp);
+    await until(() => marks.length >= 10, 15000);
+    const firstMs = marks.length ? marks[0][0] - tAns : null;
+    if (!secs) return { wr, s, b, t0, seqs, marks, firstMs };
+    await sleep(1500);
+    const a = Date.now();
+    if (mid) setTimeout(() => mid(wr, s).catch(() => { }), (secs * 1000) / 2);
+    await sleep(secs * 1000);
+    const z = Date.now();
+    const win = seqs.filter(([at]) => at >= a && at <= z), mw = marks.filter(([at]) => at >= a && at <= z);
+    let gaps = 0; for (let i = 1; i < win.length; i++) { const d = (win[i][1] - win[i - 1][1] + 65536) % 65536; if (d !== 1) gaps += d - 1; }
+    const lag = mw.length > 1 ? Math.round((mw[mw.length - 1][0] - mw[0][0]) - ((mw[mw.length - 1][1] - mw[0][1] + 4294967296) % 4294967296) / 90) : null;
+    const relay = (await wr.poll(s.key, 0, -1, 0)).relay;
+    const agent = (await dmL.streamStats(s.sid)).stats;
+    await wr.stop(s.key); wr.shutdown(); b.pc.close();
+    return { fps: Math.round((mw.length * 10000) / (z - a)) / 10, gaps, lag, relay, agent, firstMs };
+  }
+  // RUN A: THE UDP LEG, past the 2 Mbps link — a forged PING and a stray DATA land mid-run
+  let addrBefore = null;
+  const A = await relayedRun({}, { mid: async (wr, s) => {
+    const r0 = (await wr.poll(s.key, 0, -1, 0)).relay; addrBefore = r0.leg.addr;
+    const x = dgram.createSocket('udp4'); await new Promise((r) => x.bind(0, '127.0.0.1', r));
+    const fmac = (bb) => crypto.createHmac('sha256', crypto.randomBytes(32)).update(bb).digest().subarray(0, 16);
+    x.send(Buffer.from(SM.legControl(SM.LEG.PING, { flags: SM.LEG.UP, counter: 99999, nonce: crypto.randomBytes(8), mac: fmac })), r0.port, '127.0.0.1');
+    x.send(Buffer.from(SM.legData('127.0.0.1', 9, new Uint8Array([1, 2, 3]))), r0.port, '127.0.0.1');
+    await sleep(100); x.close();
+  } });
+  ok(A.fps >= 29 && A.gaps === 0 && A.lag !== null && A.lag < 300, `THE UDP LEG: 30 fps of the 8 Mbps fixture for 10 s past a ${CAP} kbps device link — ${A.fps} fps, ${A.gaps} RTP gaps, the picture's lag moved ${A.lag} ms`, { fps: A.fps, gaps: A.gaps, lag: A.lag });
+  ok(A.relay.via === 'udp' && A.relay.leg.down >= 0.99 * A.relay.down && A.agent.relay.via === 'udp' && A.agent.relay.leg.state === 'up', `the record: the hub forwards via the daemon's udp leg (${A.relay.leg.down} of ${A.relay.down} datagrams to the browser came over it), the daemon says via udp, its leg up`, { relay: A.relay, agentRelay: A.agent.relay });
+  ok(A.relay.leg.forged >= 1 && A.relay.leg.stray >= 1 && addrBefore && A.relay.leg.addr === addrBefore && A.gaps === 0, 'a forged PING (another key) and a stray DATA mid-run: dropped and counted; the leg\'s address unchanged, not one RTP gap', A.relay.leg);
+  ok(A.agent.relay.leg.pings >= 5 && A.agent.relay.leg.pongs >= A.agent.relay.leg.pings - 1, `the keepalive: the daemon PINGed ${A.agent.relay.leg.pings}× in the session (every 2 s while it carries the picture), ${A.agent.relay.leg.pongs} answered`, A.agent.relay.leg);
+  // RUN B: RED CONTROL — the device-link path alone through the same link
+  const Bc = await relayedRun({ udpLeg: false });
+  ok(Bc.fps < 10 && Bc.relay.via === 'link' && Bc.relay.leg === null && A.fps / Math.max(0.1, Bc.fps) >= 3, `RED CONTROL: the device-link path alone through the same ${CAP} kbps link — ${Bc.fps} fps (lag +${Bc.lag} ms in 10 s); the leg carries ${(A.fps / Math.max(0.1, Bc.fps)).toFixed(1)}× the pictures`, { fps: Bc.fps, lag: Bc.lag, via: Bc.relay.via });
+  // RUN C: a hub that never answers the leg ⇒ the device link from the first picture; answered ⇒ UP; silenced mid-run ⇒ the link again
+  let mute = true;
+  const C = await relayedRun({ legMute: () => mute }, { src: FIXTURE, secs: 0 });
+  await sleep(2600);
+  const stC = (await dmL.streamStats(C.s.sid)).stats;
+  const pC = (await C.wr.poll(C.s.key, 0, -1, 0)).relay;
+  ok(C.firstMs !== null && C.firstMs < 1500 && stC.relay.leg.state === 'down' && stC.relay.leg.why === 'no_echo' && stC.relay.leg.since - C.t0 <= 2600 && stC.relay.via === 'link' && pC.via === 'link' && pC.leg.addr === null && pC.leg.pings === 0, `a hub that never answers the leg: the first picture ${C.firstMs} ms after the answer (the device link carried it from the start); the leg DOWN (no_echo) ${stC.relay.leg.since - C.t0} ms after the offer`, { leg: stC.relay.leg, hub: pC });
+  mute = false;
+  const back = await until(async () => (await C.wr.poll(C.s.key, 0, -1, 0)).relay.via === 'udp', 7000);
+  const nBack = C.marks.length; await sleep(1000);
+  const stUp = (await dmL.streamStats(C.s.sid)).stats;
+  ok(back && stUp.relay.leg.state === 'up' && C.marks.length - nBack >= 25, `answered again: the next re-ask (≤ 5 s) brings the leg UP and it carries the picture (${C.marks.length - nBack} pictures in the next second)`, stUp.relay.leg);
+  mute = true;
+  const tMute = Date.now();
+  const fell = await until(async () => (await dmL.streamStats(C.s.sid)).stats.relay.via === 'link', 6000);
+  const fellMs = Date.now() - tMute;
+  await until(async () => (await C.wr.poll(C.s.key, 0, -1, 0)).relay.via === 'link', 2000);
+  const nFell = C.marks.length; await sleep(1500);
+  ok(fell && fellMs <= 4600 && C.marks.length - nFell >= 40, `silenced mid-run: the daemon's next PING goes unanswered — the device link within ${fellMs} ms (≤ 2 s + 2 s) and the pictures keep coming (${C.marks.length - nFell} in 1.5 s)`);
+  await C.wr.stop(C.s.key); C.wr.shutdown(); C.b.pc.close();
+  dmL.stop(); endDaemonsOf(rootL); capped.close(); hubHttp.close();
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
