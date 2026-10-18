@@ -164,8 +164,8 @@ const noTable = { name: 'no-table', setup(b) { b.onLoad({ filter: /stream-input\
 await esbuild.build({ stdin: { contents: entry, resolveDir: REPO, loader: 'js' }, bundle: true, format: 'iife', platform: 'browser', target: 'es2020', outfile: path.join(root, 'page.js'), loader: { '.css': 'empty' }, logLevel: 'error' });
 await esbuild.build({ stdin: { contents: entry, resolveDir: REPO, loader: 'js' }, bundle: true, format: 'iife', platform: 'browser', target: 'es2020', outfile: path.join(root, 'page-notable.js'), loader: { '.css': 'empty' }, logLevel: 'error', plugins: [noTable] });
 // ⑦'s RED control (lane stream-relay-udp-ci): the strip's OLD order — the firewall notice after the numbers
-const FW_ORDER = '  strip.append(fwEl, streamEl, noteEl);\n';
-const fwLast = { name: 'fw-last', setup(b) { b.onLoad({ filter: /machine-desktop\.js$/ }, (a) => { const src = fs.readFileSync(a.path, 'utf8'); if (!src.includes(FW_ORDER)) throw new Error('the strip\'s order line moved'); return { contents: src.replace(FW_ORDER, '  strip.append(streamEl, fwEl, noteEl);\n'), loader: 'js' }; }); } };
+const FW_ORDER = '  strip.append(fwEl, tccEl, streamEl, noteEl);\n'; // + lane stream-p3m-build's Mac permission notice (tccEl, hidden off a Mac — int304)
+const fwLast = { name: 'fw-last', setup(b) { b.onLoad({ filter: /machine-desktop\.js$/ }, (a) => { const src = fs.readFileSync(a.path, 'utf8'); if (!src.includes(FW_ORDER)) throw new Error('the strip\'s order line moved'); return { contents: src.replace(FW_ORDER, '  strip.append(tccEl, streamEl, fwEl, noteEl);\n'), loader: 'js' }; }); } };
 await esbuild.build({ stdin: { contents: entry, resolveDir: REPO, loader: 'js' }, bundle: true, format: 'iife', platform: 'browser', target: 'es2020', outfile: path.join(root, 'page-fwlast.js'), loader: { '.css': 'empty' }, logLevel: 'error', plugins: [fwLast] });
 const app = express(); app.use(express.json());
 app.use(R.router);

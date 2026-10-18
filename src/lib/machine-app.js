@@ -11,12 +11,25 @@
 //   • the rectangle follows the window live (moves / resizes); `gone` ⇒ the pane says so with "Open its whole desktop" and
 //     "Run again"; several app windows of one machine share ONE screen — the pinned one wins and each pane says which
 //   • not persisted (a reload never re-opens a machine's screen); closing the window ends the watch, which undoes the pin
+// ONE WINDOW AS A STREAM (lane stream-p2w-build, design q-041 r3 §3 P2w — what "share a window" does in a meeting app): a
+// Windows machine's application window, captured by ITSELF (Windows.Graphics.Capture through its agent — covered is still
+// live; nothing of the rest of the screen is ever sent), as the same `machine-app` window type — and a Mac's (lane
+// stream-p3m-build's ScreenCaptureKit window source; int304: one picker, one start body `source: {kind: 'window', id}`):
+//   • the picker (openWindowPicker) lists the machine's application windows (its agent's `stream-windows` op); a row's
+//     「串流这个窗口」 opens openWindowStream — a WebRTC <video> (src/lib/stream-view.js `window`) in this shell
+//   • the window FOLLOWS THE SOURCE's size: each new picture size → the window's own size on its machine (physical ÷ its dpi,
+//     src/stream-window.js windowViewSize) inside the workspace, aspect kept; the title is the app's
+//   • input = the stream's own road (the <video>'s pointer + keys; the agent adds the window's live place — src/stream-window.js
+//     windowInputOf); it lands where the window is visible on its machine, like a person's own click
+//   • held, by name (the stream lives on): minimized (「还原它」 brings it back without the focus) · covered and not drawing
 import { t } from './i18n.js';
-import { fetchJson } from './utils.js';
+import { fetchJson, createModalShell, showToast, uiScale } from './utils.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { createVncView, streamUrl } from './vnc-view.js';
+import { createStreamView } from './stream-view.js';
 import { machineDesktopId } from '../machine-desktop-model.js';
 import { cropLayout, paneToMachine, clampToBox } from '../machine-window.js';
+import { windowViewSize } from '../stream-window.js';
 
 const nameOf = (m) => String((m && (m.label || m.hostId)) || ''); // peer-controlled text: textContent only
 const el = (tag, css, text) => { const e = document.createElement(tag); if (css) e.style.cssText = css; if (text != null) e.textContent = text; return e; };
@@ -180,6 +193,125 @@ export function openMachineApp(app, m, { cmd = '', track = {}, view: viewOpts = 
   };
   start();
   return winInfo;
+}
+
+// ── ONE WINDOW AS A STREAM (lane stream-p2w-build) ──
+const STREAM_BASE = '/api/desktop/machine-desktop/stream';
+/** The words of a one-window stream's held state or its end (PURE over the code; titles are peer text: textContent only). */
+export function windowStreamText(code, { title = '', machine = '', why = '' } = {}) {
+  if (code === 'window_minimized') return t('“{title}” is minimized on {machine} — its picture stops until it is restored', { title, machine });
+  if (code === 'window_covered_idle') return t('“{title}” is covered on {machine} and stopped drawing (a browser does not paint a covered window)', { title, machine });
+  if (code === 'window_gone' || code === 'stream_ended') return t('“{title}” closed on {machine}', { title, machine });
+  if (code === 'agent_too_old') return t('{machine}’s VibeSpace agent is too old to stream one window — update the agent there', { machine });
+  if (code === 'helper_missing') return t('{machine} could not prepare its window capture: {why}', { machine, why: why || code });
+  if (code === 'no_ffmpeg' || code === 'no_encoder') return t('{machine} needs ffmpeg with an H.264 encoder — on its PATH or in {dir}', { machine, dir: '%LOCALAPPDATA%\\vibespace\\ffmpeg\\bin' });
+  // a Mac's (lane stream-p3m-build — its screen helper; the words of its desktop strip, src/lib/machine-desktop.js)
+  if (code === 'no_helper') return t('the Mac has no screen helper yet — install the Command Line Tools there (xcode-select --install) or update VibeSpace');
+  if (code === 'screen_permission') return t('Screen Recording is off for vibespace-screen on the Mac');
+  if (code === 'helper_changed_regrant') return t('the Mac’s screen helper was updated and needs its Screen Recording switch again');
+  return t('The stream of “{title}” stopped: {why}', { title, why: why || code || '?' });
+}
+
+/**
+ * THE WINDOW: one application window of `m` (a picker row: {id, title, app, bounds, dpi}) streamed by its agent; `fp16` = the
+ * start route's FP16 flag (an HDR window's FP16 road, off by default). `openDesktop()` = the way on when the stream cannot be had.
+ */
+export function openWindowStream(app, m, row, { fp16 = false, openDesktop = null } = {}) {
+  if (!machineDesktopId(m && m.hostId) || !row || !row.id) return null;
+  app._hideWelcome?.();
+  const machine = nameOf(m);
+  let title = String(row.title || '') || t('A window');
+  const winInfo = app.wm.createWindow({ title: t('{app} on {machine}', { app: title, machine }), type: 'machine-app' });
+  winInfo._machineApp = m.hostId; winInfo._windowStream = String(row.id);
+  const c = winInfo.content;
+  c.style.display = 'flex'; c.style.flexDirection = 'column';
+  c.classList.add('machine-app', 'machine-window-stream');
+  const strip = el('div', NOTE + ';display:flex;align-items:center;gap:8px'); strip.className = 'machine-window-strip';
+  const stripText = el('span', 'flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap');
+  const restoreBtn = btn('file-tool-btn', t('Restore it'), () => restore()); restoreBtn.style.cssText = 'width:auto;padding:0 10px;flex:0 0 auto'; restoreBtn.hidden = true;
+  strip.append(stripText, restoreBtn);
+  const host = el('div', 'position:relative;flex:1 1 auto;min-height:0'); host.className = 'machine-window-pane';
+  const say = el('div', 'position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:16px;text-align:center;background:var(--bg-window);color:var(--text)');
+  say.className = 'machine-app-say';
+  const sayText = el('div', 'max-width:420px;font-size:13px'), sayActs = el('div'); sayActs.className = 'desktop-install-actions';
+  say.append(sayText, sayActs);
+  c.append(strip, host);
+  let held = null, closed = false, sized = '';
+  const drawStrip = () => {
+    stripText.textContent = held ? windowStreamText(held, { title, machine }) : t('“{title}” — only this window of {machine} shows here, its own title bar included; what you type here goes to it', { title, machine });
+    stripText.title = stripText.textContent;
+    restoreBtn.hidden = held !== 'window_minimized';
+  };
+  /** THE SIZE RULE: the picture at the window's own size on its machine (physical ÷ dpi/96), inside the workspace, aspect kept. */
+  const fit = () => {
+    const v = view && view.video, src = view && view.source();
+    if (closed || !v || !(v.videoWidth > 0)) return;
+    const dpi = (src && src.window && src.window.dpi) || row.dpi || 96;
+    const key = `${v.videoWidth}x${v.videoHeight}@${dpi}`;
+    if (key === sized) return;
+    const er = winInfo.element.getBoundingClientRect(), hr = host.getBoundingClientRect(), s = uiScale() || 1;
+    if (!(er.width > 0) || !(hr.width > 0)) return;
+    const chrome = { w: Math.max(0, er.width - hr.width), h: Math.max(0, er.height - hr.height) };
+    const ws = app.wm.workspace ? { w: app.wm.workspace.offsetWidth * s - chrome.w, h: app.wm.workspace.offsetHeight * s - chrome.h } : {};
+    const size = windowViewSize({ w: v.videoWidth, h: v.videoHeight, dpi }, ws);
+    if (!size) return;
+    sized = key;
+    app.wm.resizeWindowTo(winInfo.id, { w: (size.w + chrome.w) / s, h: (size.h + chrome.h) / s });
+  };
+  function showSay(text) {
+    say.style.display = text ? 'flex' : 'none';
+    sayText.textContent = text || '';
+    sayActs.replaceChildren();
+    if (!text) return;
+    if (openDesktop) sayActs.append(btn('file-tool-btn', t('Open its whole desktop'), () => openDesktop()));
+    sayActs.append(btn('btn-create', t('Pick a window…'), () => { app.wm.closeWindow(winInfo.id); openWindowPicker(app, m, { fp16, openDesktop }); }));
+    for (const b of sayActs.children) b.style.cssText = 'width:auto;height:auto;min-height:28px;padding:4px 12px;white-space:nowrap'; // words, not the 24 px icon box
+  }
+  async function restore() {
+    restoreBtn.disabled = true;
+    const r = await fetchJson(`${STREAM_BASE}/restore`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ host: m.hostId, window: String(row.id) }) }).catch(() => null);
+    restoreBtn.disabled = false;
+    if (!r || r.error || r.ok === false) showToast(windowStreamText((r && r.code) || 'restore_failed', { title, machine, why: (r && (r.error || r.code)) || '' }), { type: 'error' });
+  }
+  const view = createStreamView(host, {
+    hostId: m.hostId, hostPlatform: m.setup || null, source: { kind: 'window', id: String(row.id) }, fp16: !!fp16,
+    onSource: (src) => { const w = src && src.window; if (w && w.title) { title = w.title; app.wm.setTitle(winInfo.id, t('{app} on {machine}', { app: title, machine })); } drawStrip(); },
+    onStats: (page, agent) => { const sc = agent && agent.screen; const h = (sc && sc.held) || null; if (h !== held) { held = h; drawStrip(); } fit(); },
+    // a Mac's stream of a window that got minimized ENDS (SCK sends no picture — lane stream-p3m-build; Windows holds it): its own words
+    onFallback: (code, why) => { held = null; restoreBtn.hidden = true; host.append(say); showSay(code === 'window_minimized' ? t('the window is minimized — restore it to stream') : windowStreamText(code, { title, machine, why })); },
+  });
+  host.append(say);
+  view.video.addEventListener('resize', fit);
+  winInfo._streamView = view;
+  winInfo.onClose = () => { closed = true; view.dispose(); };
+  drawStrip();
+  view.connect();
+  return winInfo;
+}
+
+/** THE PICKER: the machine's application windows (its agent lists them — visible, its own, top-level), one row each; a row's
+ *  「串流这个窗口」 opens it as its own window here. `onOpen()` = the opener (the machine's dialog) steps aside. */
+export async function openWindowPicker(app, m, { fp16 = false, openDesktop = null, onOpen = null } = {}) {
+  const machine = nameOf(m);
+  const shell = createModalShell({ title: t('Stream one window of {machine}', { machine }), dialogClass: 'machine-window-picker', escapeToClose: true });
+  const note = el('p', null, t('Listing the windows open on {machine}…', { machine })); note.className = 'machine-apps-note';
+  const list = el('div'); list.className = 'machine-apps-list'; list.hidden = true;
+  shell.body.append(note, list);
+  const r = await fetchJson(`${STREAM_BASE}/windows?host=${encodeURIComponent(m.hostId)}`).catch(() => null);
+  if (!shell.overlay.isConnected) return;
+  if (!r || r.error || r.ok === false) { note.classList.add('is-bad'); note.textContent = windowStreamText((r && r.code) || 'list_failed', { machine, why: (r && (r.error || r.code)) || t('no answer') }); return; }
+  const rows = Array.isArray(r.windows) ? r.windows : [];
+  note.textContent = rows.length ? t('Only the window you pick is sent — the rest of {machine}’s screen is not', { machine }) : t('No application window is open on {machine}', { machine });
+  list.hidden = !rows.length;
+  for (const w of rows) {
+    const b = btn('machine-apps-row machine-window-row', '', () => { shell.close(); onOpen?.(); openWindowStream(app, m, w, { fp16, openDesktop }); });
+    const name = el('span', 'flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap', w.title);
+    const meta = el('span', 'flex:0 0 auto;font-size:12px;color:var(--text-secondary)', [w.app, w.minimized ? t('minimized') : w.bounds ? `${w.bounds.w}×${w.bounds.h}` : ''].filter(Boolean).join(' · '));
+    const act = el('span', 'flex:0 0 auto;font-size:12px;color:var(--accent)', t('Stream this window'));
+    b.replaceChildren(name, meta, act);
+    b.title = w.title;
+    list.append(b);
+  }
 }
 
 // ── WINDOW-TYPE REGISTRATION ── not persisted: a reload never re-opens a machine's screen (it asks the sign-in)

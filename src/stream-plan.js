@@ -1,6 +1,6 @@
 'use strict';
 /**
- * THE SCREEN SOURCE'S PLAN — PURE (imports nothing; design q-041 r2 §2 采集/映射+编码 + §3 P1, lane stream-p1b-screen; the P0
+ * THE SCREEN SOURCE'S PLAN — PURE (imports only src/stream-window.js — the one window shape, int304; design q-041 r2 §2 采集/映射+编码 + §3 P1, lane stream-p1b-screen; the P0
  * calibration /var/tmp/vibespace-lanes/desktop-design/q034-probe/report.md §2). The daemon's screen source
  * (src/agentd/stream-screen.js) runs what THIS file decides, so the mapping the suites prove is the mapping that runs:
  *
@@ -27,6 +27,10 @@
  *                        no_white_level, no_encoder)
  *   kbpsDecision         the bandwidth estimate → an encoder restart, with hysteresis (ffmpeg's CLI cannot change a
  *                        bitrate live): at most once per 5 s, only on a ≥ 25 % move
+ *   planWindow           ONE WINDOW (lane stream-p2w-build): the vibespace-wgc helper's build recipe (wgcBuildPlan — csc on the
+ *                        machine), its frame head (wgcHead) and lines (wgcLine), the window's road (BGRA exact SDR by default,
+ *                        FP16 → THE table on an HDR display when asked), the capture + encoder argvs (wgcCaptureArgv,
+ *                        windowEncodeArgv) — or a refusal by name (helper_missing, no_ffmpeg, window_gone, no_encoder)
  *   flvReader            the encoder's output: FLV (length-framed — an Annex-B pipe only shows a picture's end when the NEXT
  *                        one starts, a frame of latency) → access units { nalus, key, tsMs }, SPS/PPS put in front of every
  *                        key frame (a browser that joins at a key frame needs them; FLV carries them once)
@@ -37,6 +41,7 @@
  *                        (MAC_LADDER: 1440p60 / 4K30 — measured); no mapping road (SCK hands sRGB exact); the input's
  *                        target from where the picture sits (macInputTarget → macPoint, global points)
  */
+const SW = require('./stream-window.js');
 
 // ── THE COLOUR MAPPING ───────────────────────────────────────────────────────────────────────────────────────────────
 /** IEEE half bits → number (Infinity for ±inf, NaN for NaN; sign kept). */
@@ -412,14 +417,25 @@ function parseMacFacts(stdout) {
   return { ok: true, version: str(o.version, 40), disclaimed: typeof o.disclaimed === 'boolean' ? o.disclaimed : null, tcc: { screen: GRANT(t.screen), accessibility: GRANT(t.accessibility) },
     locked: !!o.locked, front: Number.isInteger(o.front) ? o.front : null, os: str(o.os, 20), arch: str(o.arch, 10), displays, windows };
 }
-/** A window of the facts (+ the display it sits on) → THE single-window source shape, the one lane stream-p2w-build lands
- *  for Windows (src/stream-window.js there): bounds = the captured rect on the machine's desktop in PHYSICAL pixels (a Mac's
- *  points × its scale; the frame includes the 32 pt title bar), dpi 96 = 100 % (a 2× Mac = 192), id = the CGWindowID. */
+/** A window of the facts (+ the display it sits on) → THE single-window source shape — src/stream-window.js windowSourceOf
+ *  (int304: the one shape of both platforms; this is only the Mac's row for it): bounds = the captured rect on the machine's
+ *  desktop in PHYSICAL pixels (a Mac's points × its scale; the frame includes the 32 pt title bar), dpi 96 = 100 % (a 2× Mac =
+ *  192), id = the CGWindowID. */
 function windowSourceOf(w, display = null) {
   if (!w) return null;
   const s = (display && display.scale) || 1, px = (v) => Math.round(v * s);
-  return { kind: 'window', id: String(w.id), title: w.title == null ? null : String(w.title), app: w.app == null ? null : String(w.app),
-    bounds: { x: px(w.x), y: px(w.y), w: px(w.w), h: px(w.h) }, display: display ? display.id : null, dpi: Math.round(96 * s), minimized: w.minimized === true };
+  return SW.windowSourceOf({ id: w.id, title: w.title, app: w.app, bounds: { x: px(w.x), y: px(w.y), w: px(w.w), h: px(w.h) }, display: display ? display.id : null, dpi: Math.round(96 * s), minimized: w.minimized === true });
+}
+/** The display a Mac window sits on: the one under its centre, else the main one. */
+function macDisplayOf(w, ds) {
+  const cx = w.x + w.w / 2, cy = w.y + w.h / 2;
+  return ds.find((x) => cx >= x.x && cx < x.x + x.w && cy >= x.y && cy < x.y + x.h) || ds.find((x) => x.main) || ds[0] || null;
+}
+/** The Mac's rows of the one-window picker (the agent's `stream-windows` op — int304: ONE picker for both platforms): its
+ *  facts' windows in THE shape (+ pid), filtered as Windows' are (src/stream-window.js windowPickRows). */
+function macWindowRows(facts) {
+  const f = facts || {}, ds = Array.isArray(f.displays) ? f.displays : [];
+  return SW.windowPickRows((Array.isArray(f.windows) ? f.windows : []).map((w) => { const r = windowSourceOf(w, macDisplayOf(w, ds)); return r && { ...r, pid: w.pid }; }).filter(Boolean));
 }
 /** Fit pixels into a box, aspect kept, even sizes. */
 function fitEven(pw, ph, maxW, maxH) { const s = Math.min(1, maxW / pw, maxH / ph); return { w: Math.max(2, Math.round(pw * s) & ~1), h: Math.max(2, Math.round(ph * s) & ~1) }; }
@@ -455,8 +471,7 @@ function planMacScreen(facts, { display = null, window = null, fps = null, kbps 
     w = ws.find((x) => x.id === String(window)) || null;
     if (!w) return { ok: false, code: 'window_gone', error: `the window ${window} is not on the Mac any more` };
     if (w.minimized === true) return { ok: false, code: 'window_minimized', error: 'the window is minimized — restore it to stream (a minimized window sends no picture)' };
-    const cx = w.x + w.w / 2, cy = w.y + w.h / 2;
-    d = ds.find((x) => cx >= x.x && cx < x.x + x.w && cy >= x.y && cy < x.y + x.h) || ds.find((x) => x.main) || ds[0] || null;
+    d = macDisplayOf(w, ds);
     const s = d ? d.scale : 2;
     pw = w.w * s; ph = w.h * s;
   } else {
@@ -491,10 +506,99 @@ function macPoint(target, x, y) {
 const MAC_KBPS_RULE = Object.freeze({ minGapMs: 1000, band: 0.1, stepKbps: 100 });
 const macKbpsDecision = (o) => kbpsDecision(o, MAC_KBPS_RULE);
 
+// ── ONE WINDOW (lane stream-p2w-build, design q-041 r3 §3 P2w — the probe: lane stream-p2w-capture-probe) ─────────────
+// THE HELPER: tools/vibespace-wgc/vibespace-wgc.cs (Windows.Graphics.Capture by HWND) is BUILT ON THE MACHINE by its agent
+// with the in-box C# 5 compiler of .NET Framework 4.8 — no SDK, no binary in the repo (measured 1.1 s): every split
+// System32\WinMetadata\*.winmd (a client Windows has no union Windows.winmd) + three facades of the same framework folder.
+// The defines step down: MINUPDATE (MinUpdateInterval, Windows 11 24H2+) + BORDER (borderless capture, Windows 10 2004+) →
+// BORDER → none. Its frames: a 16-byte head ("VSWF", u32 w, u32 h, u16 flags — 1 = a new picture, u8 bytes per pixel, u8 0)
+// + w × h tight rows; its events: one JSON line each on stderr (wgcLine).
+const WGC_HELPER = Object.freeze({
+  name: 'vibespace-wgc', defines: Object.freeze([Object.freeze(['MINUPDATE', 'BORDER']), Object.freeze(['BORDER']), Object.freeze([])]),
+  facades: Object.freeze(['System.Runtime.dll', 'System.Runtime.WindowsRuntime.dll', 'System.Runtime.InteropServices.WindowsRuntime.dll']),
+  buildMs: 60000, headBytes: 16, magic: 'VSWF',
+});
+const WGC_RECIPE = '%WINDIR%\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe /target:exe /platform:x64 /optimize+ /out:%LOCALAPPDATA%\\vibespace\\helpers\\vibespace-wgc.exe /r:<every %WINDIR%\\System32\\WinMetadata\\*.winmd> /r:<System.Runtime.dll, System.Runtime.WindowsRuntime.dll, System.Runtime.InteropServices.WindowsRuntime.dll of that framework folder> /define:MINUPDATE;BORDER vibespace-wgc.cs';
+/** Where the helper is built and how. `winmd` = the file names in System32\WinMetadata; `hash` = the source's digest (the
+ *  stamp: a changed source rebuilds). → { ok, csc, dir, src, exe, stampFile, stamp, tries: [{ define, argv }] } |
+ *  { ok: false, code: 'helper_missing', error } (no folder to build into, no metadata to build against) */
+function wgcBuildPlan({ windir = '', localAppData = '', winmd = [], hash = '' } = {}) {
+  const missing = (why) => ({ ok: false, code: 'helper_missing', error: `the window helper cannot be built on this machine (${why}); the recipe: ${WGC_RECIPE}` });
+  if (!windir || !localAppData) return missing('no %WINDIR% / %LOCALAPPDATA%');
+  const md = (Array.isArray(winmd) ? winmd : []).filter((f) => /^[\w.-]+\.winmd$/i.test(String(f)));
+  if (!md.length) return missing('no Windows metadata in System32\\WinMetadata');
+  const union = md.find((f) => /^windows\.winmd$/i.test(f));
+  const fw = `${windir}\\Microsoft.NET\\Framework64\\v4.0.30319`, wm = `${windir}\\System32\\WinMetadata`, dir = `${localAppData}\\vibespace\\helpers`;
+  const src = `${dir}\\${WGC_HELPER.name}.cs`, exe = `${dir}\\${WGC_HELPER.name}.exe`;
+  const refs = [...(union ? [union] : md).map((f) => `/r:${wm}\\${f}`), ...WGC_HELPER.facades.map((f) => `/r:${fw}\\${f}`)];
+  const tries = WGC_HELPER.defines.map((d) => ({ define: d.join(';'), argv: ['/nologo', '/target:exe', '/platform:x64', '/optimize+', `/out:${exe}`, ...refs, ...(d.length ? [`/define:${d.join(';')}`] : []), src] }));
+  return { ok: true, csc: `${fw}\\csc.exe`, dir, src, exe, stampFile: `${dir}\\${WGC_HELPER.name}.stamp`, stamp: `${WGC_HELPER.name} ${String(hash).slice(0, 16)}`, tries };
+}
+/** One helper frame head at `off` → { w, h, bpp, fresh, bytes } | { bad } (not ours: the stream is lost). */
+function wgcHead(b, off = 0) {
+  const m = WGC_HELPER.magic;
+  if (b[off] !== m.charCodeAt(0) || b[off + 1] !== m.charCodeAt(1) || b[off + 2] !== m.charCodeAt(2) || b[off + 3] !== m.charCodeAt(3)) return { bad: 'the window helper did not write a frame head' };
+  const u32 = (i) => (b[off + i] | (b[off + i + 1] << 8) | (b[off + i + 2] << 16)) + b[off + i + 3] * 16777216;
+  const w = u32(4), h = u32(8), bpp = b[off + 14], fresh = (b[off + 12] & 1) === 1;
+  if (!(w >= 2 && h >= 2 && w <= 16384 && h <= 16384 && (bpp === 4 || bpp === 8))) return { bad: `a frame head out of bounds (${w}×${h}, ${bpp} bytes a pixel)` };
+  return { w, h, bpp, fresh, bytes: w * h * bpp };
+}
+/** One stderr line of the helper → its event object, or null (not one of its JSON lines). */
+function wgcLine(line) {
+  const l = String(line || '').trim();
+  if (!l.startsWith('{')) return null;
+  try { const v = JSON.parse(l); return v && typeof v.ev === 'string' ? v : null; } catch { return null; }
+}
+
+const WINDOW_DEFAULTS = Object.freeze({ fps: 30 });
+/** MinUpdateInterval for a rate: 30 fps → 33 ms, 60 → 16 (the probe: 33 ms paces the source at ~27–30 and halves the readback). */
+const windowIntervalMs = (fps) => Math.max(1, Math.floor(1000 / Math.max(1, fps)));
+/**
+ * ONE WINDOW's plan. `facts` = { platform, ffmpeg, displays (the stream facts), helper: { ok, exe, error } }; `window` = the
+ * window (src/stream-window.js windowSourceOf). THE BGRA ROAD by default — WGC's 8-bit frame of an SDR window is the exact
+ * picture on an HDR display too (the probe: 99.974 % identical to the mapped FP16), so no mapper: the helper's BGRA → ffmpeg
+ * (BT.709 limited, NV12) → the encoder ladder → FLV. `fp16` (the start route's flag, off by default) = the FP16 road: scRGB like DDA →
+ * THE table (white of the window's display) → NV12 → the encoder — only on an HDR display (an SDR display: BGRA, `note`).
+ * The source sends WINDOW pixels (origin 0,0, `relative`): the daemon adds the window's live place to every pointer event.
+ * → { ok, mode: 'window-bgra' | 'window-f16', fmt, window, origin, relative, w, h, fps, interval, kbps, gop, white, tone,
+ *   encoder, note, ffmpeg, helper } | { ok: false, code, error }
+ */
+function planWindow(facts, { window = null, fps = WINDOW_DEFAULTS.fps, kbps = 8000, fp16 = false, tone = TONE_DEFAULT } = {}) {
+  const f = facts || {};
+  if (f.platform !== 'win32') return { ok: false, code: 'not_windows', error: `the window source captures a Windows window (this machine runs ${f.platform || 'an unknown system'})` };
+  if (!f.helper || !f.helper.ok || !f.helper.exe) return { ok: false, code: 'helper_missing', error: (f.helper && f.helper.error) || `the window helper is not built on this machine; the recipe: ${WGC_RECIPE}` };
+  if (!f.ffmpeg || !f.ffmpeg.path) return { ok: false, code: 'no_ffmpeg', error: `this machine needs ffmpeg with an H.264 encoder (looked in ${LOOKED})` };
+  const w = window && window.bounds ? window : null;
+  if (!w) return { ok: false, code: 'window_gone', error: 'that window is not on the machine any more' };
+  const pe = pickEncoder(f.ffmpeg.encoders);
+  if (!pe.ok) return pe;
+  const d = (Array.isArray(f.displays) ? f.displays : []).find((x) => x.id === w.display) || null;
+  const f16 = !!fp16 && !!d && d.hdr === true && d.white > 0;
+  const r = Math.max(1, Math.min(120, Math.round(Number(fps) || WINDOW_DEFAULTS.fps)));
+  return {
+    ok: true, mode: f16 ? 'window-f16' : 'window-bgra', fmt: f16 ? 'f16' : 'bgra',
+    window: { id: w.id, title: w.title, app: w.app, display: w.display, dpi: w.dpi, bounds: { ...w.bounds }, minimized: !!w.minimized },
+    origin: { x: 0, y: 0 }, relative: true, w: w.bounds.w & ~1, h: w.bounds.h & ~1, fps: r, interval: windowIntervalMs(r),
+    kbps: Math.max(SCREEN_DEFAULTS.minKbps, Math.round(Number(kbps) || 8000)), gop: r * SCREEN_DEFAULTS.gopSeconds,
+    white: f16 ? d.white : null, tone: { knee: tone.knee, peak: tone.peak }, encoder: pe.encoder,
+    note: pe.note || (fp16 && !f16 ? 'fp16_sdr_display' : null), ffmpeg: f.ffmpeg.path, helper: f.helper.exe,
+  };
+}
+/** The helper's capture argv for a plan. */
+function wgcCaptureArgv(plan) { return ['capture', '--hwnd', String(plan.window.id), '--fmt', plan.fmt, '--fps', String(plan.fps), '--interval', String(plan.interval)]; }
+/** The encoder ffmpeg of a window at its CURRENT size (`w` × `h`, even — the helper's frame head): BGRA through the direct
+ *  road's own conversion (BT.709 limited → NV12), or the agent's mapped NV12 (the FP16 road). */
+function windowEncodeArgv(plan, { w = plan.w, h = plan.h, kbps = plan.kbps } = {}) {
+  const input = plan.fmt === 'f16' ? ['-pix_fmt', 'nv12'] : ['-pix_fmt', 'bgra'];
+  const vf = plan.fmt === 'f16' ? [] : ['-vf', 'scale=out_color_matrix=bt709:out_range=tv,format=nv12'];
+  return [...QUIET, '-f', 'rawvideo', ...input, '-video_size', `${w}x${h}`, '-framerate', String(plan.fps), '-i', 'pipe:0', ...vf, ...encodeTail(plan.encoder, { kbps, fps: plan.fps, gop: plan.gop })];
+}
+
 module.exports = {
   halfToFloat, srgbOetf, TONE_DEFAULT, toneCurve, mapLinear, srgb8OfHalf, buildLut, nv12FromHalf, nv12Bytes, CALIBRATION,
   ENCODER_LADDER, pickEncoder, FFMPEG_MIN_MAJOR, ffmpegCandidates, parseFfmpegFacts, ffmpegVerdict, STREAM_FACTS_PS, parseStreamFacts,
   SCREEN_DEFAULTS, planScreen, captureArgv, encodeArgv, directArgv, KBPS_RULE, kbpsDecision, flvReader,
-  MAC_HELPER, MAC_SETTINGS, MAC_LADDER, MAC_WHY, macHelperPaths, macHelperSourceFile, macBuildPlan, macHelperSpawn, parseMacFacts, windowSourceOf,
+  MAC_HELPER, MAC_SETTINGS, MAC_LADDER, MAC_WHY, macHelperPaths, macHelperSourceFile, macBuildPlan, macHelperSpawn, parseMacFacts, windowSourceOf, macDisplayOf, macWindowRows,
   macRungOf, planMacScreen, macInputTarget, macPoint, MAC_KBPS_RULE, macKbpsDecision,
+  WGC_HELPER, WGC_RECIPE, wgcBuildPlan, wgcHead, wgcLine, WINDOW_DEFAULTS, windowIntervalMs, planWindow, wgcCaptureArgv, windowEncodeArgv,
 };

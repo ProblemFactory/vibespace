@@ -171,6 +171,7 @@
   "/api/desktop/machine-desktop/remoteapp/setup",
   "/api/desktop/machine-desktop/stream/facts",
   "/api/desktop/machine-desktop/stream/watch",
+  "/api/desktop/machine-desktop/stream/windows",
   "/api/desktop/machines",
   "/api/desktop/open-with",
   "/api/device/dial-addresses",

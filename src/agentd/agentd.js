@@ -1261,7 +1261,7 @@ const windowWatches = new Map();
 // SendInput through a resident PowerShell on Windows; the Linux stub writes a file only when VIBESPACE_INPUT_STUB_FILE names
 // one) and the WebRTC stream sessions that feed it (src/agentd/stream-host.js) — both made at their first use, so werift
 // is never loaded by an agent that never streams
-let inputInjector = null, streamHost = null, streamScreen = null;
+let inputInjector = null, streamHost = null, streamScreen = null, streamWindow = null;
 const injectorOf = () => inputInjector || (inputInjector = require('./../input-inject.js').createInjector({ platform: process.platform, spawn: require('child_process').spawn, env: spawnEnv(), stubFile: process.env.VIBESPACE_INPUT_STUB_FILE || null, fs, log, mac: () => macHelperOf() }));
 // lane stream-p1b-screen (design q-041 r2 §2 采集/映射+编码): THE screen source — this machine's facts (`stream-facts`) and its
 // ffmpeg pipelines (src/agentd/stream-screen.js); the HDR road's mapper is a worker of THIS bundle (the `stream-map` branch)
@@ -1275,7 +1275,15 @@ if (process.platform === 'darwin') { const t = setTimeout(() => { try { const h 
 // lane stream-relay-udp: the UDP leg also tries the host this daemon DIALS (dial.json — the hub's own addresses come in the
 // offer), and on Windows the firewall fact names this node.exe (the page builds the owner's admin line from it)
 const dialHostOf = () => { try { return [new URL(JSON.parse(fs.readFileSync(DIAL_FILE, 'utf8')).url).hostname]; } catch { return []; } };
-const streamHostOf = () => streamHost || (streamHost = require('./stream-host.js').createStreamHost({ injector: injectorOf(), log, screen: (msg, o) => streamScreenOf().source(msg, o), legHosts: dialHostOf, program: process.platform === 'win32' ? process.execPath : null }));
+// lane stream-p2w-build (design q-041 r3 §3 P2w): ONE application window as the stream (src/agentd/stream-window-source.js —
+// the vibespace-wgc helper, built HERE by the machine's own C# compiler: at the first boot of a version (a changed helper
+// source rebuilds; a child process, never the loop) and at first use); its ffmpeg + displays come from the screen's facts.
+// int304 — ONE window door of both platforms: a Mac's screen source carries its windows too (its helper, ScreenCaptureKit —
+// lane stream-p3m-build: `windows()` + a window id as `sourceId`); every other machine's come from the WGC source above
+const streamWindowOf = () => streamWindow || (streamWindow = require('./stream-window-source.js').createWindowSource({ platform: process.platform, spawn: require('child_process').spawn, execFile: require('child_process').execFile, env: spawnEnv(), fs, log, screenFacts: () => streamScreenOf().facts(), makeWorker: streamMapWorker }));
+if (process.platform === 'win32') { const t = setTimeout(() => { try { streamWindowOf().helper().catch(() => { }); } catch { /* the first use builds it */ } }, 20000); t.unref?.(); }
+const windowsOf = () => { const sc = streamScreenOf(); return typeof sc.windows === 'function' ? sc : streamWindowOf(); };
+const streamHostOf = () => streamHost || (streamHost = require('./stream-host.js').createStreamHost({ injector: injectorOf(), log, screen: (msg, o) => streamScreenOf().source(msg, o), window: (msg, o) => windowsOf().source(msg, o), legHosts: dialHostOf, program: process.platform === 'win32' ? process.execPath : null }));
 function unpinWindow(rec) {
   rec.pinned = false;
   const a = rec.last;
@@ -1544,7 +1552,7 @@ function serveConnection(sock) {
           // per-op capability gating (three-tier design): consumers check the
           // capability, NEVER parse daemonVersion — unknown ops on an old
           // daemon get no reply and hang the request until its timeout
-          capabilities: ['probe', 'transcript-op', 'usage-scan', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events', 'pool-orders', 'sysinfo', 'design-fs', 'session-events', 'proc-list', 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'browser-end-daemon', 'desktop-serve', 'window-track', 'window-pin', 'dial-status', 'run-shell', 'app-install', 'fs-portable', 'fs-write-stream', 'desktop-apps-list', 'display-facts', 'remoteapp-facts', 'stream-offer', 'input-events', 'stream-facts', 'stream-screen', 'stream-mac', 'stream-window'],
+          capabilities: ['probe', 'transcript-op', 'usage-scan', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events', 'pool-orders', 'sysinfo', 'design-fs', 'session-events', 'proc-list', 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'browser-end-daemon', 'desktop-serve', 'window-track', 'window-pin', 'dial-status', 'run-shell', 'app-install', 'fs-portable', 'fs-write-stream', 'desktop-apps-list', 'display-facts', 'remoteapp-facts', 'stream-offer', 'input-events', 'stream-facts', 'stream-screen', 'stream-mac', 'stream-window', 'stream-windows'],
         }));
         return;
       }
@@ -2155,6 +2163,16 @@ function serveConnection(sock) {
       // found and what it can do, the primary display's plan — one bounded look (memo 30 s; `force` re-reads)
       if (msg.op === 'stream-facts') {
         streamScreenOf().facts({ force: !!msg.force }).then((r) => mux.control({ op: 'stream-facts-result', id: msg.id, result: r }), (e) => mux.control({ op: 'stream-facts-result', id: msg.id, error: String((e && e.message) || e) }));
+        return;
+      }
+      // lane stream-p2w-build (THREE-TOUCH: this handler, `stream-windows` in the hello-ack, the client's gated streamWindows —
+      // int304: its own word, since a .301–.303 agent already says `stream-window` without this op): THIS machine's application
+      // windows for the picker (the vibespace-wgc helper's facts, filtered by src/stream-window.js windowPickRows), or `restore` =
+      // 「还原它」 (ShowWindow SW_SHOWNOACTIVATE — a minimized window back, never the focus). A Mac's: its screen helper's facts
+      // (src/agentd/stream-mac.js windows — the same rows; the ONE picker door of both platforms, int304)
+      if (msg.op === 'stream-windows') {
+        const sw = windowsOf();
+        (msg.restore != null ? sw.restore(String(msg.restore)) : sw.windows()).then((r) => mux.control({ op: 'stream-windows-result', id: msg.id, result: r }), (e) => mux.control({ op: 'stream-windows-result', id: msg.id, error: String((e && e.message) || e) }));
         return;
       }
       if (msg.op === 'input-events') {

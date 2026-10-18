@@ -20,7 +20,8 @@
 //      (screen_permission + its Settings link + ONE row-adding run, helper_changed_regrant, no_helper with what the hub needs)
 //   §5 THE INJECTOR on a Mac: `P <pid>` once per target, keys as virtual key codes, the pointer in global points, no
 //      Accessibility ⇒ accessibility_permission, no helper ⇒ no_helper
-//   §6 A REAL Mac-shaped daemon: the hello-ack names stream-mac + stream-window; stream-facts answers the Mac's facts; a screen
+//   §6 A REAL Mac-shaped daemon: the hello-ack names stream-mac + stream-window (+ stream-windows); stream-facts answers the Mac's facts;
+//      stream-windows answers its picker rows (int304: the one picker of both platforms); a screen
 //      offer plays THE fixture to a werift stand-in; the data channel's key + click reach the helper's input in points; an
 //      older Mac agent (no stream-mac) is never asked (agent_too_old); a Mac with no helper and no compiler gets the HUB's
 //      prebuilt over the device link (src/server/desktop-webrtc.js) and the offer is asked once more
@@ -41,6 +42,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (f, ms = 5000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await f()) return true; await sleep(25); } return false; };
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const SP = require(path.join(REPO, 'src/stream-plan.js'));
+const SW = require(path.join(REPO, 'src/stream-window.js')); // int304: THE window shape (lane stream-p2w-build's PURE file)
 const SM = require(path.join(REPO, 'src/stream-model.js'));
 const H = require(path.join(REPO, 'src/stream-h264.js'));
 const I = require(path.join(REPO, 'src/input-inject.js'));
@@ -88,7 +90,9 @@ console.log(`[${((Date.now() - T0) / 1000).toFixed(1)} s] ` + '§1 PURE — the 
   ok(kd({ target: 4000, now: 1500 }).kbps === 4000 && !kd({ target: 4000, now: 500 }).change && !kd({ target: 7400, now: 5000 }).change && kd({ target: 7000, now: 5000 }).kbps === 7000 && kd({ target: 99000, now: 5000, current: 4000 }).kbps === 8000, 'the bitrate follows LIVE: once a second at most, a ≥ 10 % move, never over the cap');
   const c = ['stream-offer', 'input-events', 'stream-facts', 'stream-screen'], V = (o) => SM.streamRungVerdict({ desktop: true, ...o });
   ok(V({ capabilities: c, platform: 'darwin' }).code === 'agent_too_old' && V({ capabilities: [...c, 'stream-mac'], platform: 'darwin' }).source === 'screen' && V({ capabilities: [...c, 'stream-mac'], platform: 'darwin', want: 'window' }).code === 'agent_too_old' && V({ capabilities: [...c, 'stream-mac', 'stream-window'], platform: 'darwin', want: 'window' }).source === 'window', 'the rung: an older Mac agent (it already says stream-screen) ⇒ agent_too_old; stream-mac ⇒ the screen; ONE window needs stream-window too');
-  ok(V({ capabilities: c, platform: 'win32' }).source === 'screen' && V({ capabilities: c, platform: 'win32', want: 'window' }).code === 'no_window_source' && V({ capabilities: c.slice(0, 2), platform: 'win32' }).code === 'no_screen_source' && V({ capabilities: [...c, 'stream-mac'], platform: 'darwin', fakeSource: '/f.h264' }).source === 'fake' && SM.STREAM_SOURCES.includes('window'), 'Windows unchanged (screen; no window source here); a fake source still wins; STREAM_SOURCES takes window');
+  ok(V({ capabilities: c, platform: 'win32' }).source === 'screen' && V({ capabilities: c, platform: 'win32', want: 'window' }).code === 'agent_too_old' && V({ capabilities: [...c, 'stream-window'], platform: 'win32', want: 'window' }).source === 'window' && V({ capabilities: [...c, 'stream-window'], platform: 'linux', want: 'window' }).code === 'no_window_source' && V({ capabilities: c.slice(0, 2), platform: 'win32' }).code === 'no_screen_source' && V({ capabilities: [...c, 'stream-mac'], platform: 'darwin', fakeSource: '/f.h264' }).source === 'fake' && SM.STREAM_SOURCES.includes('window'), 'Windows: the screen, and ONE window with stream-window (int304: lane stream-p2w-build\'s source behind the same want — an older agent ⇒ agent_too_old; no window source ⇒ no_window_source); a fake source still wins for a screen; STREAM_SOURCES takes window');
+  const rows = SP.macWindowRows(facts());
+  ok(rows.length === 2 && same(rows[0], { kind: 'window', id: '4242', title: 'notes.txt', app: 'TextEdit', bounds: { x: -3356, y: 212, w: 1312, h: 844 }, display: '2', dpi: 192, minimized: false, cls: null, pid: 777, elevated: false }) && rows[1].id === '4343' && rows[1].minimized === true && rows[1].display === '3' && same(SP.windowSourceOf(SP.parseMacFacts(JSON.stringify({ t: 'facts', ...MAC_FACTS })).windows[0], { id: '2', scale: 2 }), SW.windowSourceOf({ id: '4242', title: 'notes.txt', app: 'TextEdit', bounds: { x: -3356, y: 212, w: 1312, h: 844 }, display: '2', dpi: 192 })), 'int304: the Mac\'s picker rows = THE window shape (src/stream-window.js windowSourceOf + windowPickRows over the facts), each on the display under its centre (a minimized one kept, marked)', rows);
   ok(same(SM.streamSourceOf({ kind: 'window', id: 4242 }), { kind: 'window', id: '4242' }) && same(SM.streamSourceOf({ kind: 'display', id: '\\\\.\\DISPLAY2' }), { kind: 'display', id: '\\\\.\\DISPLAY2' }) && SM.streamSourceOf({ kind: 'window', id: 'a b' }) === null && SM.streamSourceOf({ kind: 'tab', id: '1' }) === null && SM.streamSourceOf(null) === null, 'the page\'s choice of source: a window or a display by id; anything else is no choice');
   const MM = require(path.join(REPO, 'src/lib/modifier-map.js'));
   ok(MM.primaryModifierMap({ viewer: 'windows', host: 'darwin' }).control === 'meta' && MM.primaryModifierMap({ viewer: 'linux', host: 'darwin' }).control === 'meta' && MM.primaryModifierMap({ viewer: 'mac', host: 'darwin' }).meta === 'meta' && MM.primaryModifierMap({ viewer: 'mac', host: 'darwin' }).control === 'control', 'a Mac host (the start answer\'s platform `darwin`): a Windows / Linux viewer\'s Ctrl reaches it as ⌘; a Mac viewer\'s keys as pressed (THE modifier table, src/lib/modifier-map.js)');
@@ -307,7 +311,7 @@ const darwins = (t) => (t.match(/platform: "darwin",/g) || []).length;
 ok(darwins(macText) - darwins(bundleText) === 3 && /function createMacScreen\(/.test(macText) && /"stream-mac", "stream-window"/.test(macText), 'the copy says darwin three times (the hello-ack, THE injector, THE screen source — found by content); the bundle carries the Mac source and both capabilities');
 const copyDir = scratch('smac-bundle'); fs.mkdirSync(copyDir, { recursive: true }); homes.push(copyDir);
 const macBundle = path.join(copyDir, 'mac', 'vibespace-agentd.js'); fs.mkdirSync(path.dirname(macBundle), { recursive: true }); fs.writeFileSync(macBundle, macText);
-const oldBundle = path.join(copyDir, 'old', 'vibespace-agentd.js'); fs.mkdirSync(path.dirname(oldBundle), { recursive: true }); fs.writeFileSync(oldBundle, macText.replace(', "stream-mac", "stream-window"', ''));
+const oldBundle = path.join(copyDir, 'old', 'vibespace-agentd.js'); fs.mkdirSync(path.dirname(oldBundle), { recursive: true }); fs.writeFileSync(oldBundle, macText.replace(', "stream-mac", "stream-window", "stream-windows"', ''));
 const devices = [], peers = [], daemonHomes = [];
 const rootOf = (h) => path.join(h, 'agentd-root');
 cleanups.push(() => { for (const p of peers) { try { p.close(); } catch { } } for (const d of devices) { try { d.stop(); } catch { } } for (const h of daemonHomes) endDaemonsOf(rootOf(h)); });
@@ -332,10 +336,12 @@ const pictures = (rtp) => { const out = []; let cur = []; for (const p of rtp) {
   writeFakeMacHelper(hD, { version: SRC.VERSION, facts: MAC_FACTS, tcc: { screen: 'granted', accessibility: 'granted' }, log: logD, flv: flvFile(hD), displayFrame: { x: 0, y: 0, w: 1920, h: 1080 } });
   const dm = deviceOn(hD, macBundle);
   const conn = await dm.connect();
-  ok(conn.info.platform === 'darwin' && same(conn.info.capabilities.slice(-6), ['stream-offer', 'input-events', 'stream-facts', 'stream-screen', 'stream-mac', 'stream-window']), 'the hello-ack names stream-mac + stream-window (after stream-screen)', conn.info.capabilities.slice(-6));
+  ok(conn.info.platform === 'darwin' && same(conn.info.capabilities.slice(-7), ['stream-offer', 'input-events', 'stream-facts', 'stream-screen', 'stream-mac', 'stream-window', 'stream-windows']), 'the hello-ack names stream-mac + stream-window (after stream-screen), then the picker op\'s stream-windows (int304)', conn.info.capabilities.slice(-7));
   const v = SM.streamRungVerdict({ capabilities: conn.info.capabilities, desktop: true, platform: conn.info.platform });
   const f = await dm.streamFacts();
   ok(v.take && v.source === 'screen' && f.ok && f.platform === 'darwin' && f.helper.state === 'ready' && f.primary.rung === '1440p60' && f.windows.length === 2, 'the rung takes the Mac\'s screen; the stream-facts op answers the Mac\'s facts through its helper', f.primary);
+  const pw = await dm.streamWindows();
+  ok(pw.ok && pw.platform === 'darwin' && pw.windows.length === 2 && pw.windows[0].id === '4242' && pw.windows[0].dpi === 192 && pw.windows[0].bounds.w === 1312 && pw.windows[1].minimized === true, 'int304: THE ONE PICKER door on a Mac — the daemon\'s stream-windows op answers its helper\'s windows in the window shape (the same rows as a Windows machine\'s)', pw);
   const pushes = [];
   const b = standIn();
   const off = await dm.streamOffer({ sourceKind: 'screen' }, { onPush: (m) => { pushes.push(m); if (m.op === 'stream-ice' && m.candidate) b.pc.addIceCandidate(m.candidate).catch(() => { }); } });

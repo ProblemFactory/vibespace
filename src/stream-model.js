@@ -1,7 +1,8 @@
 'use strict';
 /**
  * THE WEBRTC STREAM RUNG — PURE decisions (design q-041 r2 §2 传输 / 客户端 / 输入 + §3 P1/P1b, lane stream-p1a-transport;
- * owner 2026-10-16 「一起做」: the picture AND the input ride the same WebRTC session). Imports only the PURE ladder table;
+ * owner 2026-10-16 「一起做」: the picture AND the input ride the same WebRTC session). Imports only the PURE ladder table
+ * and the PURE window source's shape (src/stream-window.js — its capability word and platforms);
  * the daemon (src/agentd/stream-host.js), the hub (src/server/desktop-webrtc.js) and the page (src/lib/stream-view.js) all
  * ask THIS file, so the three cannot disagree:
  *
@@ -11,7 +12,8 @@
  *                                    `webrtc` row of DISPLAY_BACKENDS (its `needs` = the AGENT's capabilities) → { take, source,
  *                                    code, why }; every "no" is named and the window shows the VNC picture. A Mac (lane
  *                                    stream-p3m-build): its agent's `stream-mac` (the screen helper) — the whole display, or ONE
- *                                    window (`want: 'window'` + `stream-window`); an older Mac agent ⇒ agent_too_old
+ *                                    window (`want: 'window'` + `stream-window`); an older Mac agent ⇒ agent_too_old. A Windows
+ *                                    machine's ONE window (lane stream-p2w-build): the same `want: 'window'` + `stream-window`
  *   streamSourceOf(raw)              the page's choice of source (the stream/start body) → { kind: 'display' | 'window', id } | null
  *   streamStep(st, event)            THE SIGNALING STATE MACHINE the page runs (idle → starting → offered → connecting → playing
  *                                    ⇄ restarting → fallback | stopped) → { state, restarts, action, code }
@@ -32,6 +34,7 @@
  *                                    run by VibeSpace) · directInboundOf(probe) — the daemon's self-probe → open | blocked | none
  */
 const B = require('./desktop-backends.js');
+const SW = require('./stream-window.js');
 
 const STREAM_CODEC = Object.freeze({
   mimeType: 'video/H264',
@@ -42,7 +45,7 @@ const STREAM_CODEC = Object.freeze({
 });
 const STREAM_SOURCES = Object.freeze(['screen', 'fake', 'window']); // 'window' = ONE window of the machine (lane stream-p3m-build on a Mac; stream-p2w-build on Windows)
 const MAC_CAPABILITY = 'stream-mac';       // the agent captures a Mac's screen through its helper (an older Mac agent already says stream-screen)
-const WINDOW_CAPABILITY = 'stream-window'; // the agent captures ONE window (the shared seam with lane stream-p2w-build)
+const WINDOW_CAPABILITY = SW.WINDOW_CAPABILITY; // 'stream-window': the agent captures ONE window — the one word of both platforms (src/stream-window.js; int304)
 const STREAM_LIMITS = Object.freeze({
   maxKbpsDefault: 8000, maxKbpsMin: 300, maxKbpsMax: 50000,
   sessionsPerAgent: 2,        // a daemon serves at most two live streams (a desk window and a phone beside it)
@@ -69,8 +72,11 @@ const RUNG_ID = 'webrtc';
  * source file (tests, demos — its path, handed back as `sourceId`). The source: 'fake' when the instance names one (an
  * explicit override wins — lane stream-p1b-screen), else 'screen' when the agent captures its screen (the `stream-screen`
  * capability — a Windows agent), a Mac's when its agent has `stream-mac` (lane stream-p3m-build — an older Mac agent says
- * stream-screen but cannot: agent_too_old), else no_screen_source. `want: 'window'` = ONE window: a Mac agent with
- * `stream-window` → source 'window'; any other machine ⇒ no_window_source (its sourceId comes from the page, not here).
+ * stream-screen but cannot: agent_too_old), else no_screen_source. `want: 'window'` = ONE window (int304: the Mac's `want`
+ * and lane stream-p2w-build's window source — one branch, judged before an instance's fake screen): a platform with a
+ * window source (src/stream-window.js WINDOW_PLATFORMS — Windows, a Mac) whose agent says `stream-window` (a Mac's also
+ * `stream-mac`) → source 'window'; an older agent ⇒ agent_too_old; any other machine ⇒ no_window_source. Its sourceId comes
+ * from the page (streamSourceOf), not here.
  * → { take, source, sourceId, code, why }
  */
 function streamRungVerdict({ capabilities = [], desktop = false, platform = null, fakeSource = null, want = null, table = B.DISPLAY_BACKENDS } = {}) {
@@ -80,12 +86,16 @@ function streamRungVerdict({ capabilities = [], desktop = false, platform = null
   if (!desktop) return { take: false, source: null, code: 'not_desktop_machine', why: 'a stream shows a Windows or macOS machine\'s desktop' };
   const met = row.needs.find((group) => group.every((c) => /^agent:/.test(c) && caps.includes(c.slice(6))));
   if (!met) return { take: false, source: null, code: 'agent_too_old', why: 'the machine\'s agent cannot stream yet — update it' };
+  if (want === 'window') { // ONE window (int304: both platforms' window sources — one branch; a window asked wins over the instance's fake screen)
+    if (!SW.WINDOW_PLATFORMS.includes(platform)) return { take: false, source: null, code: 'no_window_source', why: 'the machine\'s agent cannot stream one window yet' };
+    if (!caps.includes(WINDOW_CAPABILITY) || (platform === 'darwin' && !caps.includes(MAC_CAPABILITY))) return { take: false, source: null, code: 'agent_too_old', why: 'the machine\'s agent cannot stream one window yet — update it' };
+    return { take: true, source: 'window', sourceId: null, code: null, why: null };
+  }
   if (fakeSource) return { take: true, source: 'fake', sourceId: String(fakeSource), code: null, why: null };
   if (platform === 'darwin') {
-    if (!caps.includes(MAC_CAPABILITY) || (want === 'window' && !caps.includes(WINDOW_CAPABILITY))) return { take: false, source: null, code: 'agent_too_old', why: 'the Mac\'s agent cannot stream its screen yet — update it' };
-    return { take: true, source: want === 'window' ? 'window' : 'screen', sourceId: null, code: null, why: null };
+    if (!caps.includes(MAC_CAPABILITY)) return { take: false, source: null, code: 'agent_too_old', why: 'the Mac\'s agent cannot stream its screen yet — update it' };
+    return { take: true, source: 'screen', sourceId: null, code: null, why: null };
   }
-  if (want === 'window') return { take: false, source: null, code: 'no_window_source', why: 'the machine\'s agent cannot stream one window yet' };
   if (caps.includes('stream-screen') && platform === 'win32') return { take: true, source: 'screen', sourceId: null, code: null, why: null };
   return { take: false, source: null, code: 'no_screen_source', why: 'the machine\'s agent cannot capture its screen yet' };
 }

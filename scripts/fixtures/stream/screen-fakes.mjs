@@ -3,7 +3,7 @@
 //   writeFakeFfmpeg(dir, cfg)   `ffmpeg.exe` (a Node script — `#!<this node>`, never `env node`): `-version` / `-filters` /
 //                               `-encoders` answer cfg's version, ddagrab and encoders; `ddagrab=…:output_fmt=16bit` (the
 //                               HDR road's capture) writes cfg.raw (an rgbaf16le frame) every 1/fps; `-i pipe:0` (the
-//                               encoder) reads NV12 frames, keeps the FIRST in cfg.nv12, and answers each with THE fixture's
+//                               encoder) reads NV12 (or a window's BGRA) frames, keeps the FIRST in cfg.nv12, and answers each with THE fixture's
 //                               next access unit as FLV; plain `ddagrab=…` (the SDR road) writes the fixture as FLV at fps.
 //                               Every argv → cfg.log (one JSON line). A die file (cfg.dieCapture / cfg.dieEncoder) ends that
 //                               process with a DDA-shaped error. cfg is re-read at every start (a leg edits it).
@@ -58,7 +58,7 @@ if (grab && /output_fmt=16bit/.test(grab)) {
   out(flvHead());
   setInterval(() => { die(cfg.dieCapture, '[Parsed_ddagrab_0] DuplicateOutput failed: DXGI_ERROR_UNSUPPORTED'); out(auTag()); }, 1000 / fps);
 } else if (argv.includes('pipe:0')) {
-  const [w, h] = argv[argv.indexOf('-video_size') + 1].split('x').map(Number), size = (w * h * 3) / 2;
+  const [w, h] = argv[argv.indexOf('-video_size') + 1].split('x').map(Number), size = argv[argv.indexOf('-pix_fmt') + 1] === 'bgra' ? w * h * 4 : (w * h * 3) / 2; // lane stream-p2w-build: a window's BGRA frames
   out(flvHead());
   let have = [], len = 0, kept = false;
   process.stdin.on('data', (d) => {

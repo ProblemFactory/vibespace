@@ -331,7 +331,7 @@ class DeviceManager {
             mux.onWritable = (chan) => { sessions.get(chan)?.onWritable?.(); };
             const prevControl = mux.onControl;
             mux.onControl = (m) => {
-              if (m.op === 'fs-result' || m.op === 'discovery-result' || m.op === 'discovery-watching' || m.op === 'usage-events-watching' || m.op === 'session-events-watching' || m.op === 'cmd-result' || m.op === 'probe-result' || m.op === 'secret-result' || m.op === 'quota-result' || m.op === 'sysinfo-result' || m.op === 'desktop-apps-list-result' || m.op === 'design-fs-result' || m.op === 'dial-status-result' || m.op === 'proc-list-result' || m.op === 'opencode-serve-result' || m.op === 'browser-serve-result' || m.op === 'desktop-serve-result' || m.op === 'window-track-result' || m.op === 'window-untrack-result' || m.op === 'window-pin-result' || m.op === 'display-facts-result' || m.op === 'remoteapp-facts-result' || m.op === 'stream-offer-result' || m.op === 'stream-answer-result' || m.op === 'stream-stop-result' || m.op === 'stream-stats-result' || m.op === 'input-events-result' || m.op === 'stream-facts-result' || m.op === 'peer-post-result' || m.op === 'pool-orders-ok' || m.op === 'tcp-open' || m.op === 'listen-open' || m.op === 'serve-folder-result' || m.op === 'serve-socks-result') {
+              if (m.op === 'fs-result' || m.op === 'discovery-result' || m.op === 'discovery-watching' || m.op === 'usage-events-watching' || m.op === 'session-events-watching' || m.op === 'cmd-result' || m.op === 'probe-result' || m.op === 'secret-result' || m.op === 'quota-result' || m.op === 'sysinfo-result' || m.op === 'desktop-apps-list-result' || m.op === 'design-fs-result' || m.op === 'dial-status-result' || m.op === 'proc-list-result' || m.op === 'opencode-serve-result' || m.op === 'browser-serve-result' || m.op === 'desktop-serve-result' || m.op === 'window-track-result' || m.op === 'window-untrack-result' || m.op === 'window-pin-result' || m.op === 'display-facts-result' || m.op === 'remoteapp-facts-result' || m.op === 'stream-offer-result' || m.op === 'stream-answer-result' || m.op === 'stream-stop-result' || m.op === 'stream-stats-result' || m.op === 'input-events-result' || m.op === 'stream-facts-result' || m.op === 'stream-windows-result' || m.op === 'peer-post-result' || m.op === 'pool-orders-ok' || m.op === 'tcp-open' || m.op === 'listen-open' || m.op === 'serve-folder-result' || m.op === 'serve-socks-result') {
                 const r = pending.get(m.id); if (r) { pending.delete(m.id); r(m); }
                 if (m.op === 'tcp-open' && !m.error) return; // channel stays live
                 return;
@@ -982,7 +982,7 @@ class DeviceManager {
     if (onPush) this._streamWatches.set(sid, onPush);
     const forget = () => { if (fresh) this._streamWatches.delete(sid); };
     let r;
-    try { r = await this._request({ op: 'stream-offer', sid, sourceKind: params.sourceKind, sourceId: params.sourceId, maxKbps: params.maxKbps, relay: !!params.relay, ...(params.relayLeg ? { relayLeg: params.relayLeg } : {}), iceRestart: !fresh, timeoutMs }); } catch (e) { forget(); throw e; }
+    try { r = await this._request({ op: 'stream-offer', sid, sourceKind: params.sourceKind, sourceId: params.sourceId, maxKbps: params.maxKbps, relay: !!params.relay, ...(params.relayLeg ? { relayLeg: params.relayLeg } : {}), ...(params.fp16 ? { fp16: true } : {}), iceRestart: !fresh, timeoutMs }); } catch (e) { forget(); throw e; }
     if (r.error) { forget(); throw new Error(r.error); }
     const res = r.result || { ok: false, code: 'offer_failed', error: 'no answer' };
     if (!res.ok) forget();
@@ -1041,6 +1041,18 @@ class DeviceManager {
     const conn = await this.connect();
     if (!conn.info?.capabilities?.includes?.('stream-facts')) { const e = new Error('daemon lacks stream-facts (capabilities gate) -- upgrade the agent on this machine'); e.code = 'host_needs_daemon'; e.daemonVersion = conn.info?.daemonVersion || null; throw e; }
     const r = await this._request({ op: 'stream-facts', force: !!force, timeoutMs });
+    if (r.error) throw new Error(r.error);
+    return r.result || { ok: false, code: 'facts_failed', error: 'no answer' };
+  }
+  /** lane stream-p2w-build (design q-041 r3 §3 P2w): the machine's APPLICATION WINDOWS for the one-window stream's picker
+   *  (its vibespace-wgc helper's facts — visible top-level windows, filtered), or with `restore` = that window brought back
+   *  from minimized without the focus. Capability-gated (`stream-windows` — the op's own word: a .301–.303 agent already says
+   *  `stream-window` without this op, int304): an agent that predates it is never asked —
+   *  `host_needs_daemon` + its version. → { ok, platform, helper, windows } | { ok, window } | { ok: false, code, error } */
+  async streamWindows({ restore = null, timeoutMs = 90000 } = {}) {
+    const conn = await this.connect();
+    if (!conn.info?.capabilities?.includes?.('stream-windows')) { const e = new Error('daemon lacks stream-windows (capabilities gate) -- upgrade the agent on this machine'); e.code = 'host_needs_daemon'; e.daemonVersion = conn.info?.daemonVersion || null; throw e; }
+    const r = await this._request({ op: 'stream-windows', ...(restore != null ? { restore: String(restore) } : {}), timeoutMs });
     if (r.error) throw new Error(r.error);
     return r.result || { ok: false, code: 'facts_failed', error: 'no answer' };
   }

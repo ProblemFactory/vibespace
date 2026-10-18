@@ -1950,6 +1950,7 @@ const I_RECV = {
   'src/server/usage-index.js|m': ['index worker', 'the usage index worker\'s own state message (a reason NAME, a SQLite error text)'], 'src/server/usage-index.js|a': ['index worker', 'the owner\'s own available() verdict (a reason NAME)'],
   // lane stream-p1b-screen: the screen source's journal line names its encoder — a fixed ladder label, never a record's words
   'src/agentd/stream-screen.js|plan.encoder': ['harness', 'the encoder ladder rung\'s fixed label (NVENC / AMF / Quick Sync / x264 — src/stream-plan.js ENCODER_LADDER)'],
+  'src/agentd/stream-window-source.js|plan.encoder': ['harness', 'the encoder ladder rung\'s fixed label (NVENC / AMF / Quick Sync / x264 — src/stream-plan.js ENCODER_LADDER), the window source\'s start line (lane stream-p2w-build)'],
 };
 // the per-site class of every record / carrier read: `file|sink|read` → [class, why]
 const I_SITES = {

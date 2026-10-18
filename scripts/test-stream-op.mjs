@@ -259,7 +259,7 @@ const FF = writeFakeFfmpeg(binS, { log: ffLog, fixture: FIXTURE, raw: rawFile, n
 const ffRuns = () => (fs.existsSync(ffLog) ? fs.readFileSync(ffLog, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
 const dms = deviceOn(homeScr, scrBundle);
 const cs = await dms.connect();
-ok(cs.info.platform === 'win32' && JSON.stringify(cs.info.capabilities.slice(-6)) === JSON.stringify(['stream-offer', 'input-events', 'stream-facts', 'stream-screen', 'stream-mac', 'stream-window']), 'the hello-ack names stream-facts and stream-screen (after stream-offer / input-events; then lane stream-p3m-build\'s stream-mac / stream-window)');
+ok(cs.info.platform === 'win32' && JSON.stringify(cs.info.capabilities.slice(-7)) === JSON.stringify(['stream-offer', 'input-events', 'stream-facts', 'stream-screen', 'stream-mac', 'stream-window', 'stream-windows']), 'the hello-ack names stream-facts and stream-screen (after stream-offer / input-events; then lane stream-p3m-build\'s stream-mac / stream-window, then lane stream-p2w-build\'s stream-windows — the picker op\'s own word, int304)');
 /** One screen session with a fresh stand-in: offer → answer. */
 async function screenSession(pushArr) {
   const b = standIn();

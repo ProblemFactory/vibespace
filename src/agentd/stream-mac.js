@@ -19,6 +19,8 @@
  *   plan then refuses `helper_changed_regrant`, never a bare screen_permission.
  * FACTS (`stream-facts` on a Mac): the helper's own (run disclaimed, so its TCC answer is ITS grant) — displays, windows, TCC,
  *   the lock, its version — and the helper's state; kept FACTS_MS (a window source re-reads once when its window is not in them).
+ * THE PICKER (`stream-windows` on a Mac — int304: the one picker of both platforms): the facts' windows in src/stream-window.js's
+ *   shape (SP.macWindowRows); `restore` is Windows' only (a Mac's stream of a minimized window ends): restore_unsupported.
  * THE SOURCE: `vibespace-screen --disclaim capture …` → FLV on stdout (SP.flvReader — no new parser), `key` / `bps <n>` on
  *   stdin (a key on the SAME frame; the bitrate LIVE — SP.macKbpsDecision, no encoder restart), JSON lines on stderr (started
  *   → the input's target, frame → a window that moved, stats once a second, end {code}). ENDINGS BY NAME: the helper's end code
@@ -146,6 +148,18 @@ function createMacScreen({ spawn, execFile, env = process.env, fs = require('fs'
     }
     return macSource(plan, maxKbps);
   }
+  /** THE PICKER's list (the agent's `stream-windows` op — int304: the one picker of both platforms): the helper's fresh facts'
+   *  windows in THE shape (SP.macWindowRows), or the refusal that keeps them (no helper, Screen Recording off — titles need it). */
+  async function windows() {
+    const f = await facts({ force: true });
+    if (!f.ok) return f;
+    const h = f.helper || {};
+    if (h.state !== 'ready') return named(h.code || 'no_helper', h.error || SP.MAC_WHY.no_helper);
+    if (!f.tcc || f.tcc.screen !== 'granted') return named(h.regrant ? 'helper_changed_regrant' : 'screen_permission', h.regrant ? SP.MAC_WHY.helper_changed_regrant : SP.MAC_WHY.screen_permission, { settings: SP.MAC_SETTINGS.screen });
+    return { ok: true, platform: 'darwin', helper: { bin: h.bin, version: h.version }, windows: SP.macWindowRows(f) };
+  }
+  /** 「还原它」 is Windows' (a Mac's stream of a minimized window ENDS window_minimized — SCK sends no picture): refused by name. */
+  async function restore() { return named('restore_unsupported', 'a minimized Mac window is restored on the Mac itself (its stream ends while it is minimized)'); }
   /** ONE capture that only adds the helper's (off) Screen Recording row — the owner then toggles it; it ends at once. */
   function registerRow(f) {
     const d = (f.displays || []).find((x) => x.main) || (f.displays || [])[0];
@@ -225,7 +239,7 @@ function createMacScreen({ spawn, execFile, env = process.env, fs = require('fs'
     };
   }
 
-  return { facts, source, helper: H };
+  return { facts, source, windows, restore, helper: H };
 }
 
 module.exports = { createMacScreen, createMacHelper, FACTS_MS, RECIPE };

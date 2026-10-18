@@ -11,6 +11,10 @@
 //     modifier moved by THE table; physical keys); Ctrl/⌘+V sends this computer's clipboard text first, then the V; a
 //     shown frame is acknowledged (≤ 4 a second) so the agent can time the picture's way
 //   • phone: pointer events cover touch (touch-action: none on the picture); a tap is a click where it lands
+//   • ONE WINDOW (lane stream-p2w-build; lane stream-p3m-build on a Mac — int304's one door): `source: {kind: 'window', id}` =
+//     the machine's window id — the agent streams that application window (src/agentd/stream-window-source.js on Windows,
+//     src/agentd/stream-mac.js on a Mac); the picture's pixels are the WINDOW's (origin 0,0) and the agent adds its live place;
+//     `onSource(source)` hands the shell the window's facts (title, size, dpi) from the offer
 import { fetchJson } from './utils.js';
 import { STREAM_LIMITS, streamStep, fallbackVerdict, statsOf, relayPathOf, firewallRuleCommand } from '../stream-model.js';
 import { viewerPlatform, keyMapFor, keyMessage, pointerMessage, wheelMessage } from './stream-input.js';
@@ -19,8 +23,8 @@ const post = (url, body) => fetchJson(url, { method: 'POST', headers: { 'Content
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const BASE = '/api/desktop/machine-desktop/stream';
 
-/** `opts` = { hostId, hostPlatform?, onStatus(state, code), onStats(page, agent), onFallback(code, why, taken), onInput(refused) }
- *  → { connect(), dispose(), focus(), get state, stats(), agent(), video } */
+/** `opts` = { hostId, hostPlatform?, source?, fp16?, onStatus(state, code), onStats(page, agent), onFallback(code, why, taken),
+ *  onInput(refused), onSource(source) } → { connect(), dispose(), focus(), get state, stats(), agent(), source(), video } */
 export function createStreamView(host, opts = {}) {
   const { hostId } = opts;
   const video = document.createElement('video');
@@ -32,6 +36,7 @@ export function createStreamView(host, opts = {}) {
   let st = { state: 'idle', restarts: 0 };
   let pc = null, dc = null, key = null, n = 0, seq = -1, origin = { x: 0, y: 0 }, taken = false, why = null, disposed = false;
   let polling = false, statsTimer = null, connectTimer = null, prev = null, page = null, agent = null, pathSent = null, pcSince = 0;
+  let source = null; // the offer's source facts (a window's: {kind: 'window', window: {id, title, app, w, h, dpi, display}})
   let hubRelay = null; // lane stream-relay-udp: the hub relay's facts (the long poll's `relay` — which way it forwards: udp | link)
   let map = keyMapFor(viewerPlatform(), opts.hostPlatform || null);
   let refusedSeen = null;
@@ -58,11 +63,13 @@ export function createStreamView(host, opts = {}) {
     if (!a || a.error) throw Object.assign(new Error((a && a.error) || 'the answer did not reach the machine'), { code: (a && a.code) || 'answer_failed' });
   }
   async function start() {
-    const r = await post(`${BASE}/start`, { host: hostId, ...(opts.source ? { source: opts.source } : {}) }).catch(() => null); // opts.source: a display / ONE window (lane stream-p3m-build)
+    const r = await post(`${BASE}/start`, { host: hostId, ...(opts.source ? { source: opts.source, ...(opts.fp16 ? { fp16: true } : {}) } : {}) }).catch(() => null); // opts.source: a display / ONE window (a Mac's or a Windows machine's — int304's one door)
     if (disposed) { if (r && r.key) post(`${BASE}/stop`, { key: r.key, why: 'closed' }); return; }
     if (!r || r.error || !r.take) { why = (r && (r.why || r.error)) || null; step('refused', (r && r.code) || 'start_failed'); return; }
     taken = true; key = r.key;
     origin = (r.source && r.source.origin) || { x: 0, y: 0 };
+    source = r.source || null;
+    try { opts.onSource?.(source); } catch { /* the shell's */ }
     if (r.platform) map = keyMapFor(viewerPlatform(), r.platform);
     try {
       pc = new RTCPeerConnection({ iceServers: [] }); // no STUN/TURN service: host candidates + the hub relay's (in the offer)
@@ -204,6 +211,7 @@ export function createStreamView(host, opts = {}) {
     focus() { video.focus({ preventScroll: true }); },
     stats: () => page,
     agent: () => agent,
+    source: () => source,
     // lane stream-relay-udp: which way the picture comes (direct | udp — the hub relay over the daemon's UDP leg | link — over
     // the device link | relay) and the machine's firewall fact ({command} = the owner's admin line, null where none is safe)
     path: () => relayPathOf(page, hubRelay || (agent && agent.relay)),

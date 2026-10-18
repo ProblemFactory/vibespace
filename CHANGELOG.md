@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.304 — 2026-10-18
+
+### Added
+- A paired Windows machine can stream just one app window: it opens here as a window of its own, in exact colours, and keeps playing when covered.
+
 ## 2.369.303 — 2026-10-18
 
 ### Fixed

@@ -278,6 +278,7 @@ console.log('① – ⑤ desk 1100 px');
   let got = await pointerAfter(n);
   ok(near(got.find((e) => e.mask & 1), 700, 450), `② a click at the pane's centre arrives at the app's centre on the machine (700, 450) — got ${JSON.stringify(got.find((e) => e.mask & 1))}`, got);
   if (g.box[0] - g.pane[0] > 6) {
+    await sleep(300); // int304: pointerAfter answers at the centre click's PRESS; its release (mask 0) can land a ms later — count after it, or it reads as a letterbox event (red 1 in 3 on the p2w head)
     n = vnc.seen.pointers.length;
     await p.click(g.pane[0] + 3, g.pane[1] + g.pane[3] / 2);
     await sleep(400);

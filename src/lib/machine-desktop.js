@@ -29,7 +29,7 @@ import { desktopRunPlan, desktopRunPresets, rememberRun, machineDesktopId } from
 import { namesGuiApp } from '../machine-window.js';
 import { remoteappProgramOf } from '../remoteapp.js'; // lane remoteapp-r1a: the typed line → the program a RemoteApp starts
 import { openRemoteappSettings } from './remoteapp-card.js'; // lane remoteapp-r1b: the machine's RemoteApp settings card
-import { openMachineApp } from './machine-app.js'; // lane machine-app-crop: one app of the machine as its own window
+import { openMachineApp, openWindowPicker } from './machine-app.js'; // lane machine-app-crop: one app of the machine as its own window; lane stream-p2w-build: one of its windows as a stream
 import { screenMap, hdrShown, carryPick } from '../desktop-screens.js'; // lane desktop-v2-entry: the OS table + the RFB table → the displays in fb pixels
 import { openDesktopPicker, rememberDesktop, rememberDisplays, readRecent } from './desktop-picker.js';
 import { enterSubmits } from './chat-enter-keys.js';
@@ -505,6 +505,8 @@ export function showMachineDesktopDialog(app, m0, { install = null, recheck = nu
     // launching apps, and its link says where the desktop lives; a press still shows the window at once (inc-mv51w0ow-crw3)
     // and makes it the Desktop picker's recent choice
     if (m.code === 'desktop_ready') acts.append(btn('desktop-open-link', t('Open its desktop → Desktop'), () => { toWindow(); openMachineDesktop(app, m); }));
+    // lane stream-p2w-build: ONE application window of a Windows machine as its own window (its agent captures that window only) — beside the desktop: the two ways to look at the machine; a Mac's too (lane stream-p3m-build's window source — int304's one door)
+    if ((m.setup === 'win32' || m.setup === 'darwin') && m.code !== 'offline') { const ws = btn('file-tool-btn machine-window-stream-open', t('Stream one window…'), () => openWindowPicker(app, m, { openDesktop: () => openMachineDesktop(app, m), onOpen: toWindow })); ws.title = t('Show one application window of {machine} as its own window — only that window is sent', { machine }); acts.append(ws); }
     if (m.code === 'no_vnc' && m.setup === 'win32' && install) acts.append(btn('btn-create', t('Install TightVNC Server…'), () => install(m, { what: 'tightvnc', onDone: () => check() })));
     if (m.code !== 'offline' && recheck) acts.append(btn('file-tool-btn', t('Check again'), () => check()));
     if (m.setup === 'win32') { const rs = btn('file-tool-btn machine-remoteapp-settings', t('RemoteApp settings…'), () => openRemoteappSettings(app, m)); rs.title = t('Set up RemoteApp once for this Windows machine: its sign-in and its certificate'); acts.append(rs); } // lane remoteapp-r1b: never greyed — offline, the card says so

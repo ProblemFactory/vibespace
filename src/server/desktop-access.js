@@ -649,15 +649,30 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
    *  low-latency stream from its agent (src/stream-model.js streamRungVerdict over the agent's hello-ack: the `stream-offer`
    *  capability and a source — this instance's fake source when it names one (VIBESPACE_STREAM_FAKE_SOURCE, for the suites
    *  and demos), else a Windows agent's own screen (`stream-screen`, lane stream-p1b-screen). Asks NOTHING of the machine (its hello is in hand); every "no"
-   *  is named and the window shows the VNC picture. → { take, source, code, why, dm, platform, sourceId } */
+   *  is named and the window shows the VNC picture. `want: 'window'` = ONE window of the machine instead of its screen —
+   *  a Mac's (lane stream-p3m-build) or a Windows machine's application window (lane stream-p2w-build): the agent's
+   *  `stream-window` capability, one verdict (int304). → { take, source, code, why, dm, platform, sourceId } */
   async function streamRung(hostId, { want = null } = {}) {
     if (isLocal(hostId)) return { take: false, source: null, code: 'not_desktop_machine', why: 'this machine\'s own desktop is the Desktop window', dm: null, platform: null, sourceId: null };
     const dm = await deviceOf(hostId);
     let info = {};
     try { const st = dm && dm.status ? dm.status() : null; info = (st && st.connected && st.info) || {}; } catch { info = {}; }
     const fake = String((env() || {}).VIBESPACE_STREAM_FAKE_SOURCE || '') || null;
-    const v = SMOD.streamRungVerdict({ capabilities: info.capabilities || [], desktop: M.DESKTOP_PLATFORMS.includes(info.platform), platform: info.platform || null, fakeSource: fake, want }); // want: 'window' = ONE window (lane stream-p3m-build)
+    const v = SMOD.streamRungVerdict({ capabilities: info.capabilities || [], desktop: M.DESKTOP_PLATFORMS.includes(info.platform), platform: info.platform || null, fakeSource: fake, want }); // want: 'window' = ONE window (a Mac's or a Windows machine's — int304)
     return { ...v, dm, platform: info.platform || null };
+  }
+  /** lane stream-p2w-build: the machine's APPLICATION WINDOWS for the one-window stream's picker — or, with `restore`, that
+   *  window brought back from minimized without the focus — through its agent (the `stream-windows` op). An agent that
+   *  predates it answers `agent_too_old` naming the version it has. → the agent's answer */
+  async function streamWindows(hostId, { restore = null } = {}) {
+    if (isLocal(hostId)) throw named('not_desktop_machine', 'this machine\'s own windows are VibeSpace\'s own');
+    const dm = await deviceOf(hostId);
+    const platform = platformOfHandle(dm);
+    if (!M.DESKTOP_PLATFORMS.includes(platform)) throw notDesktop(hostId, platform);
+    const tooOld = (have) => ({ ok: false, code: 'agent_too_old', platform, have: have || null, need: AGENT_VERSION, error: `${hostName(hostId)}'s agent ${have ? `(${have}) ` : ''}cannot stream one window — it needs version ${AGENT_VERSION} or later` });
+    if (typeof dm.streamWindows !== 'function') return tooOld(null);
+    try { return await dm.streamWindows({ restore }); }
+    catch (e) { if (e && e.code === 'host_needs_daemon') return tooOld(e.daemonVersion); throw named('host_unavailable', `${hostId}: ${e && e.message}`); }
   }
   // ── design q-024 r1 §1.3–§1.4 (lane remoteapp-r1b): THE REMOTEAPP SETTINGS CARD'S DOORS — the owner's (the routes refuse an agent token) ──
   /** The machine's Remote Desktop facts through its agent (the `remoteapp-facts` op, read-only) → `{ ok, platform, facts, rows,
@@ -739,7 +754,7 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
     try { return !!(hosts && typeof hosts.connectedDevice === 'function' && hosts.connectedDevice(hostId)); } catch { return false; }
   }
 
-  const layer = { call, forwardPort, closeForward, forwards: listForwards, hostKnown, isLocal, shutdown, machines, installPlan, installXpra, installPackage, installBusy, runArgv, readFile, connectedNow, setAppPlanner, planDigest, probeDesktop, openMachineDesktop, streamRung, machineDesktopTarget, machineDesktopGone, runOnDesktop, installedApps, installedNow, deviceOf, displayFacts, streamFacts, linkPing, remoteappSetup, remoteappForward, setRdpSetup, launchRemoteApp, remoteappSignin, remoteappFacts, remoteappSetupView, saveRemoteappSetup, trustRemoteApp };
+  const layer = { call, forwardPort, closeForward, forwards: listForwards, hostKnown, isLocal, shutdown, machines, installPlan, installXpra, installPackage, installBusy, runArgv, readFile, connectedNow, setAppPlanner, planDigest, probeDesktop, openMachineDesktop, streamRung, machineDesktopTarget, machineDesktopGone, runOnDesktop, installedApps, installedNow, deviceOf, displayFacts, streamFacts, streamWindows, linkPing, remoteappSetup, remoteappForward, setRdpSetup, launchRemoteApp, remoteappSignin, remoteappFacts, remoteappSetupView, saveRemoteappSetup, trustRemoteApp };
   if (install) installed = layer;
   return layer;
 }

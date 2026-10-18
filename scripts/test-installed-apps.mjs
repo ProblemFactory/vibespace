@@ -236,7 +236,7 @@ console.log('§8 the dialog: installed list + filter + keyed rows + Examples / R
   const esbuild = require(REPO + '/node_modules/esbuild');
   const STUBS = {
     './i18n.js': 'export const t = (s, p) => String(s).replace(/\\{(\\w+)\\}/g, (m, k) => (p && k in p ? String(p[k]) : m)); export const tc = (c, s, p) => t(s, p);',
-    './utils.js': 'export const createModalShell = (o) => globalThis.__shell(o); export const fetchJson = (u, o) => globalThis.__fetch(u, o); export const showToast = (m, o) => globalThis.__toasts.push(m); export const copyText = () => Promise.resolve();', // + copyText: lane remoteapp-r1b's settings card (imported by the dialog)
+    './utils.js': 'export const createModalShell = (o) => globalThis.__shell(o); export const fetchJson = (u, o) => globalThis.__fetch(u, o); export const showToast = (m, o) => globalThis.__toasts.push(m); export const copyText = () => Promise.resolve(); export const uiScale = () => 1;', // + copyText: lane remoteapp-r1b's settings card (imported by the dialog); + uiScale: lane stream-p2w-build's one-window stream (machine-app.js sizes it)
     './window-types.js': 'export const registerWindowType = () => {}; export const svgIcon16 = () => "";',
     './vnc-view.js': 'export const createVncView = () => ({ connect() {}, dispose() {} }); export const streamUrl = (u) => u;',
     './picture-shell.js': 'export const pageIsSecure = () => false;', // lane desktop-v2-latency: the strip's keyboard-lock gate (the real one imports utils.js)
@@ -308,7 +308,7 @@ console.log('§8 the dialog: installed list + filter + keyed rows + Examples / R
   answer = { hostId: 'win-a', platform: 'win32', rows: [{ name: 'Blender', launch: 'start "" "C:\\B\\blender.exe"', source: 'start-menu', seenAt: 2 }, ZR, JR], total: 3, truncated: false, listedAt: 2 };
   const checkBtn = body.find('file-tool-btn').find((b) => b.textContent === 'Check again');
   const acts = body.find('desktop-install-actions')[0];
-  ok(acts && J(acts.children.map((b) => b.textContent)) === J(['Install TightVNC Server…', 'Check again', 'RemoteApp settings…']), 'the action row: Install…, Check again and (a Windows machine, lane remoteapp-r1b) RemoteApp settings… — the CSS rule below keeps each whole');
+  ok(acts && J(acts.children.map((b) => b.textContent)) === J(['Stream one window…', 'Install TightVNC Server…', 'Check again', 'RemoteApp settings…']), 'the action row: (a Windows machine, lane stream-p2w-build) Stream one window…, Install…, Check again and (lane remoteapp-r1b) RemoteApp settings… — the CSS rule below keeps each whole');
   await checkBtn.onclick(); await tick();
   ok(asked[asked.length - 1] === '/api/desktop/machine-desktop/apps?host=win-a&fresh=1' && rechecks === 1, 'Check again re-reads the machine row AND lists its apps again (fresh)');
   ok(J(rowsNow().map((b) => b.firstChild.textContent)) === J(['Blender', '7-Zip', 'JASP']) && rowsNow()[2] === jaspNode, 'a re-list moves the existing row nodes (keyed by the launch line), never rebuilds them');

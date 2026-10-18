@@ -25,9 +25,13 @@
  * source — a pre-encoded Annex-B file looped at its frame rate (scripts/fixtures/stream/); 'screen' = the agent's `screen`
  * factory (lane stream-p1b-screen: src/agentd/stream-screen.js — the machine's own desktop, ffmpeg + the HDR mapping),
  * refused by name where none is given. stats() lands in the session's numbers as `screen` (+ its `encodeMs`). 'window' = ONE
- * window of the machine through the same factory (lane stream-p3m-build: a Mac's — src/agentd/stream-mac.js; `sourceId` = the
- * window's id). A source with `inputTarget()` (the Mac's: where the picture sits, its scale) hands it to the injector with
- * every event — the page sends the picture's pixels, the machine adds the live origin.
+ * window of the machine: the agent's `window` factory (lane stream-p2w-build: src/agentd/stream-window-source.js — ONE
+ * application window of a Windows machine, Windows.Graphics.Capture), else the screen factory (lane stream-p3m-build: a
+ * Mac's — src/agentd/stream-mac.js takes the window's id as `sourceId`; int304). A source with `inputTarget()` (the Mac's:
+ * where the picture sits, its scale) hands it to the injector with every event — the page sends the picture's pixels, the
+ * machine adds the live origin. A `relative` source (a Windows window) takes WINDOW pixels from the page: every pointer
+ * event gets the window's LIVE place added here (src/stream-window.js windowInputOf — held inside the window), so a window
+ * that moves while streamed still gets its clicks.
  *
  * ICE: werift is an ICE-LITE agent with host candidates only and NO STUN/TURN server (its default asks Google's public STUN
  * server — never here); the page is the controlling full agent.
@@ -55,6 +59,7 @@ const net = require('net');
 const dgram = require('dgram');
 const crypto = require('crypto');
 const SM = require('../stream-model.js');
+const SW = require('../stream-window.js');
 const H = require('../stream-h264.js');
 
 const L = SM.STREAM_LIMITS;
@@ -192,11 +197,15 @@ function selfProbe(addrs, { now = Date.now, waitMs = L.probeWaitMs } = {}) {
 /** A host made without a screen factory (the suites' bare hosts) refuses the screen by name. */
 function screenSource() { return named('no_screen_source', 'this agent cannot capture its screen'); }
 
-/** The sources by kind (src/stream-model.js STREAM_SOURCES names them); `screen` = the agent's factory (async). */
-const SOURCES = Object.freeze({ fake: (msg) => fakeSource(msg.sourceId), screen: (msg, o, screen) => (screen ? screen(msg, o) : screenSource(msg)),
-  window: (msg, o, screen) => (screen ? screen(msg, o) : named('no_window_source', 'this agent cannot stream one window')) });
+/** The sources by kind (src/stream-model.js STREAM_SOURCES names them); `screen` / `window` = the agent's factories (async) —
+ *  a 'window' with no window factory rides the screen factory (a Mac's helper takes a window id too — int304). */
+const SOURCES = Object.freeze({
+  fake: (msg) => fakeSource(msg.sourceId),
+  screen: (msg, o, f) => (f.screen ? f.screen(msg, o) : screenSource(msg)),
+  window: (msg, o, f) => (f.window ? f.window(msg, o) : f.screen ? f.screen(msg, o) : named('no_window_source', 'this agent cannot stream one window')),
+});
 
-function createStreamHost({ injector = null, log = () => { }, now = Date.now, loadWerift = () => require('werift'), screen = null, legHosts = () => [], program = process.platform === 'win32' ? process.execPath : null } = {}) {
+function createStreamHost({ injector = null, log = () => { }, now = Date.now, loadWerift = () => require('werift'), screen = null, window = null, legHosts = () => [], program = process.platform === 'win32' ? process.execPath : null } = {}) {
   const sessions = new Map();
   let probeMemo = null; // the self-probe's answer, kept probeMemoMs (a second session within it asks nothing)
   let W = null;
@@ -238,8 +247,9 @@ function createStreamHost({ injector = null, log = () => { }, now = Date.now, lo
 
   // ── the input channel: in order, one injector, moves coalesced while the injector is behind ──
   function onInput(s, raw) {
-    const ev = SM.inputEventOf(typeof raw === 'string' ? raw : Buffer.isBuffer(raw) ? raw.toString('utf8') : raw);
+    let ev = SM.inputEventOf(typeof raw === 'string' ? raw : Buffer.isBuffer(raw) ? raw.toString('utf8') : raw);
     if (ev.refused) { s.inputRefused = { code: ev.refused, at: now() }; return; }
+    if (s.source && s.source.relative && typeof s.source.bounds === 'function') ev = SW.windowInputOf(ev, s.source.bounds()); // window pixels → the desktop (the window's live place)
     if (ev.t === 'ack') { const sent = s.sentAt.get(ev.f); if (sent) { s.acks.push(now() - sent); if (s.acks.length > 30) s.acks.shift(); s.ackMs = [...s.acks].sort((a, b) => a - b)[s.acks.length >> 1]; } return; }
     if (!injector) { s.inputRefused = { code: 'input_unsupported', at: now() }; return; }
     if (ev.t === 'mv' && s.inputPending > 8) { s.inputDropped++; return; }
@@ -326,7 +336,7 @@ function createStreamHost({ injector = null, log = () => { }, now = Date.now, lo
     if (!SM.STREAM_SOURCES.includes(kind)) return named('bad_source', `unknown source kind ${JSON.stringify(kind.slice(0, 20))}`);
     const maxKbps = Math.min(L.maxKbpsMax, Math.max(L.maxKbpsMin, Number(msg.maxKbps) || L.maxKbpsDefault));
     let source;
-    try { source = await SOURCES[kind](msg, { maxKbps }, screen); } catch (e) { return named('capture_failed', `the screen source could not start (${(e && e.message) || e})`); }
+    try { source = await SOURCES[kind](msg, { maxKbps }, { screen, window }); } catch (e) { return named('capture_failed', `the ${kind} source could not start (${(e && e.message) || e})`); }
     if (!source.ok) return source;
     if (sessions.has(sid)) { try { source.stop(); } catch { } return named('busy', 'that stream session already exists'); } // asked twice while the facts were read
     let w;

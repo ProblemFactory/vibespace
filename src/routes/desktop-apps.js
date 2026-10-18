@@ -84,8 +84,13 @@
  *   POST /api/desktop/machine-desktop/remoteapp/trust {host}    which fields are SET, the pinned certFp — never a password}; `trust` =
  *   GET  /api/desktop/machine-desktop/remoteapp/facts?host=   the first connection (pins the certificate); `facts` = the machine's
  *                                     Remote Desktop facts ({ok, facts, rows, ready} | agent_too_old {have, need})
- *   POST /api/desktop/machine-desktop/stream/start {host, source?}   lane stream-p1a-transport (design q-041 r2): the machine's desktop
- *                                     (or, lane stream-p3m-build, `source: {kind:'window', id}` = ONE window of a Mac)
+ *   GET  /api/desktop/machine-desktop/stream/windows?host=  lane stream-p2w-build: the machine's application windows (the
+ *                                     one-window picker — {ok, windows: [{id, title, app, bounds, dpi, minimized…}]} |
+ *                                     agent_too_old; a Mac's too — int304) · POST …/stream/restore {host, window} (a minimized
+ *                                     Windows window back, no focus)
+ *   POST /api/desktop/machine-desktop/stream/start {host, source?, fp16?}   lane stream-p1a-transport (design q-041 r2): the machine's desktop
+ *                                     (or `source: {kind:'window', id}` = ONE window — lane stream-p3m-build on a Mac,
+ *                                     stream-p2w-build on Windows; `fp16` = a Windows window's FP16 road, off)
  *                                     as a WebRTC stream from its agent — {take: false, code, why} (the window shows the VNC
  *                                     picture) | {take: true, key, sid, offer, source, codec, seq}; then, by `key`:
  *   POST …/stream/answer {key, sdp} · …/stream/candidate {key, candidate} · …/stream/restart {key} (an ICE-restart offer) ·
@@ -512,7 +517,24 @@ router.post('/api/desktop/machine-desktop/stream/start', async (req, res) => {
   const host = hostParam(req, res); if (!host) return;
   const wr = webrtcOf(res); if (!wr) return;
   const b = req.body || {};
-  try { res.json(await wr.start(host, { maxKbps: Number(b.maxKbps) || null, source: b.source == null ? null : b.source })); } catch (e) { streamFail(res, e); } // source: a display / ONE window (lane stream-p3m-build)
+  try { res.json(await wr.start(host, { maxKbps: Number(b.maxKbps) || null, source: b.source == null ? null : b.source, fp16: b.fp16 === true })); } catch (e) { streamFail(res, e); } // source: a display / ONE window (a Mac's — lane stream-p3m-build; a Windows machine's — stream-p2w-build)
+});
+// lane stream-p2w-build (design q-041 r3 §3 P2w): ONE application window of the machine as the stream — the picker's list (the
+// machine's application windows through its agent's `stream-windows` op) and 「还原它」 (a minimized one back, never the focus)
+const WINDOW_ID_RE = /^[1-9]\d{0,19}$/;
+router.get('/api/desktop/machine-desktop/stream/windows', async (req, res) => {
+  if (humanOnly(req, res)) return;
+  const host = hostParam(req, res); if (!host) return;
+  if (!ctx.access || typeof ctx.access.streamWindows !== 'function') return noAccess(res);
+  try { res.json(await ctx.access.streamWindows(host)); } catch (e) { fail(res, e); }
+});
+router.post('/api/desktop/machine-desktop/stream/restore', async (req, res) => {
+  if (humanOnly(req, res)) return;
+  const host = hostParam(req, res); if (!host) return;
+  if (!ctx.access || typeof ctx.access.streamWindows !== 'function') return noAccess(res);
+  const id = String((req.body && req.body.window) || '');
+  if (!WINDOW_ID_RE.test(id)) { res.status(400).json({ error: 'window is the machine\'s window id (a whole number)', code: 'bad-request' }); return; }
+  try { res.json(await ctx.access.streamWindows(host, { restore: id })); } catch (e) { fail(res, e); }
 });
 router.post('/api/desktop/machine-desktop/stream/answer', async (req, res) => {
   if (humanOnly(req, res)) return;

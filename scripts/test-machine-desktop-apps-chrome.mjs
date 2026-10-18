@@ -156,7 +156,7 @@ for (const [label, w, h, file] of [['desk 900 px', 900, 760, 'desk.png'], ['phon
   const title = await p.ev(`document.querySelector('.machine-apps-title').textContent`);
   ok(title === `WIN-DESK1上已安装（${got.length}）`, `${label}: the head says "{machine}上已安装（n）" (zh)`, title);
   const m1 = await p.ev(MEASURE);
-  ok(m1.length === 3 && m1[2].text === 'RemoteApp 设置…' && m1.every((b) => b.lines === 1 && b.fits && b.h <= 40), `${label}: ① every action-row button holds its words on ONE line, uncut (${m1.map((b) => `${b.text} ${b.w}×${b.h}`).join(' · ')})`, m1); // + lane remoteapp-r1b's «RemoteApp settings…» on a Windows machine
+  ok(m1.length === 4 && m1[0].text === '串流一个窗口…' && m1[3].text === 'RemoteApp 设置…' && m1.every((b) => b.lines === 1 && b.fits && b.h <= 40), `${label}: ① every action-row button holds its words on ONE line, uncut (${m1.map((b) => `${b.text} ${b.w}×${b.h}`).join(' · ')})`, m1); // + lane remoteapp-r1b's «RemoteApp settings…» on a Windows machine; + lane stream-p2w-build's «Stream one window…» first (int304)
   if (w === 900) {
     await p.ev(`(() => { const s = document.createElement('style'); s.id = 'base-rule'; s.textContent = '.desktop-install-actions{flex-wrap:nowrap!important}.desktop-install-actions>button{flex:0 1 auto!important;white-space:normal!important}.desktop-install-actions>.file-tool-btn{width:24px!important;height:24px!important;min-height:0!important;padding:0!important}'; document.head.append(s); })()`);
     const m0 = await p.ev(MEASURE);
