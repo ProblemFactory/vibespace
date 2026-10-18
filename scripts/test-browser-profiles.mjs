@@ -774,7 +774,7 @@ console.log('\n⑦ wiring (a pure function nobody calls is a feature nobody has)
   ok(leaked.PATH === '/usr/bin', '…and drops nothing else (the control: the sanitizer still passes the rest through)');
   // the tools intro + the manual are the agent's only two pointers at this
   const ar = read('src/agent-routes.js');
-  ok(/browser: 'browser-manual\.md'/.test(ar), '`vibespace-docs browser` resolves to a manual');
+  ok(require(path.join(REPO, 'src/agent-routes.js')).AGENT_DOC_TOPICS.browser === 'browser-manual.md', '`vibespace-docs browser` resolves to a manual');   // lane cli-registry: the topics are the registry's rows
   ok(fs.existsSync(path.join(REPO, 'docs/agent/browser-manual.md')), '…and that manual exists in this checkout (the route serves it off disk)');
   ok(/Browsing: `vibespace-browser <verb>`/.test(ar) && /vibespace-docs browser/.test(ar),
     'the budgeted tools intro carries ONE line about it — the one tool (takeover C2) — pointing at the manual');

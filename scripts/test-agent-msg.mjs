@@ -95,7 +95,7 @@ const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
   const ar = read('src/agent-routes.js');
   ok(ar.includes("app.get('/api/agent/msg/peers'") && ar.includes("app.post('/api/agent/msg/send'"), 'agent-routes exposes msg peers/send');
   ok(ar.split('INDEPENDENT of the jobs engine').length >= 3, 'msg stash drains at BOTH injection sites OUTSIDE the jobs-ready gate (review-caught coupling)');
-  ok(/msg: 'msg-manual\.md'/.test(ar), 'vibespace-docs serves the msg manual');
+  ok(require(path.join(REPO, 'src/agent-routes.js')).AGENT_DOC_TOPICS.msg === 'msg-manual.md', 'vibespace-docs serves the msg manual');   // lane cli-registry: the topics are the registry's rows
   ok(ar.includes('vibespace-msg list') && ar.includes('billed turn'), 'tools intro teaches vibespace-msg incl. the cost semantics');
   const jw = read('src/server/jobs-wiring.js');
   ok(jw.includes('deliver.deliverToConversation') && !jw.includes('peerMsg.findPeer'), 'jobs-wiring consumes the SHARED ladder (no inline twin left)');

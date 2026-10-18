@@ -493,9 +493,10 @@ console.log('§5 THE FOR-YOU TRAY — named where it is');
   ok('the new-item toast says where the tray is, measured off this device\'s own button, once per item (the knownIds rule)', /const where = trayWhere\(trayRect\(\), window\.innerWidth, window\.innerHeight\);/.test(panel) && /t\('Added to For you \(\{where\}\)', \{ where: t\(where\) \}\)/.test(panel) && /if \(prevKnown\.has\(i\.id\)\) continue;/.test(panel));
   const intro2 = AR.sessionToolsIntro({ status: true, ask: true }, {});
   ok('the session-start intro tells the assistant to say "the For you tray at the bottom right", never "your inbox"', /"the For you tray at the bottom right"/.test(intro2) && /never "your inbox"/.test(intro2), intro2.slice(0, 300));
-  const ar = read('src/agent-routes.js');
-  ok('…the per-turn reminder too', /MIRROR every chat question into their For you tray \(bottom right of their screen — name it that way, never "your inbox"/.test(ar));
-  ok('…and a Task Group\'s context', /file it in their For you tray \(bottom right of their screen: say that, never "your inbox"\)/.test(read('src/task-groups.js')));
+  // lane cli-registry: both lines are rows of src/agent-cli-registry.js now — judged on what the session receives
+  const TGH = require(path.join(REPO, 'src/task-groups.js'));
+  ok('…the per-turn reminder too', /MIRROR every chat question into their For you tray \(bottom right of their screen — name it that way, never "your inbox"/.test(AR.perTurnToolsLine({ status: true, ask: true, task: true, jobs: true })));
+  ok('…and a Task Group\'s context', /file it in their For you tray \(bottom right of their screen: say that, never "your inbox"\)/.test(TGH.TaskGroupManager.prototype._toolsSectionParts.call({}, '', false).join('\n')));
   const ask = read('data/bin/vibespace-ask');
   ok('vibespace-ask\'s own output names the tray where the user sees it (agents repeat what the CLI printed)', /added to the user\\'s For you tray \(bottom right of their screen\)/.test(ask) && /say "the For you tray at the bottom right" — never "your inbox"/.test(ask));
   ok('the ask manual says the same', /say "I added it to the For you tray at the bottom right" — never\s+"your inbox"/.test(read('docs/agent/ask-manual.md')));

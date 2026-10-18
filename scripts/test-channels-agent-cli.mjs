@@ -29,7 +29,7 @@ const LARK_CAPS = require(path.join(REPO, 'src/channels/lark.js')).caps;
 const CLI = path.join(REPO, 'data/bin/vibespace-channels');
 ok(fs.existsSync(CLI) && (fs.statSync(CLI).mode & 0o111) !== 0, 'data/bin/vibespace-channels exists and is executable');
 ok(require(path.join(REPO, 'src/hosts.js')).HostManager.AGENT_TOOLS.includes('vibespace-channels'), 'it is in HostManager.AGENT_TOOLS (ships to remote hosts with the other tools)');
-ok(fs.existsSync(path.join(REPO, 'docs/agent/channels-manual.md')) && /vibespace-docs channels|channels: 'channels-manual.md'/.test(fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf-8')), 'the manual exists and the docs route knows the topic');
+ok(fs.existsSync(path.join(REPO, 'docs/agent/channels-manual.md')) && require(path.join(REPO, 'src/agent-routes.js')).AGENT_DOC_TOPICS.channels === 'channels-manual.md', 'the manual exists and the docs route knows the topic');
 
 // ── the stub ──────────────────────────────────────────────────────────────
 const calls = [];

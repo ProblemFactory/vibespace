@@ -153,11 +153,10 @@ console.log('— ④ the topic serves both texts through the real route');
   ok(pages.code === 200 && pages.out.text === read('docs/agent/pages-manual.md'), 'a one-file topic is served exactly as before (pages)');
   ok(get('nope').code === 404 && get('constructor').code === 404 && get('__proto__').code === 404, 'an unknown topic — or a name every object inherits — is a 404 naming the topics, never a read of something else');
   ok(get('design', 'vsst_other').code === 401, 'an unknown session token reads nothing');
-  // the ci-gate derives its gate inputs from AGENT_DOC_TOPICS with this exact parse (test-ci-gate §4) — both files must stay visible to it
-  const src = read('src/agent-routes.js');
-  const topics = /const AGENT_DOC_TOPICS = \{([^}]*)\}/.exec(src);
-  const manuals = topics ? [...topics[1].matchAll(/'([^']+\.md)'/g)].map((m) => m[1]) : [];
-  ok(manuals.includes('design-manual.md') && manuals.includes('design-skill.md'), 'the ci-gate\'s AGENT_DOC_TOPICS parse sees both design files (a docs-only push that edits them runs the gate)', manuals);
+  // the ci-gate derives its gate inputs from the registry's rows with this exact read (test-ci-gate §4, lane cli-registry) — both files must stay visible to it
+  const REGISTRY = require(path.join(REPO, 'src/agent-cli-registry.js'));
+  const manuals = [...new Set(REGISTRY.ROWS.flatMap((r) => [].concat(r.manual)))];
+  ok(manuals.includes('design-manual.md') && manuals.includes('design-skill.md'), 'the ci-gate\'s AGENT_DOC_TOPICS read sees both design files (a docs-only push that edits them runs the gate)', manuals);
   // every file a topic names exists (a missing one is a 500 for every agent)
   const all = manuals;
   ok(all.length >= 12 && all.every((f) => fs.existsSync(path.join(REPO, 'docs/agent', f))), `every file AGENT_DOC_TOPICS names exists (${all.length})`, all.filter((f) => !fs.existsSync(path.join(REPO, 'docs/agent', f))));

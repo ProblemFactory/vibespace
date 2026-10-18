@@ -33,6 +33,7 @@ const { BACKLOG_CAPS } = require('./task-groups.js');
 const cliText = require('./agent-cli-text.js'); // lane cli-one-text-arg (PURE): chars = how many characters a free-text route KEPT, echoed by the CLIs as sent: N characters
 const { stopNudgeVerdict, turnStartOf } = require('./stop-nudge.js'); // B-a8f0: a turn that bookkept itself stops free (PURE)
 const { artifactsIntroLine } = require('./harnesses/artifacts-of.js'); // PURE: the one Artifacts sentence (lane artifacts-prompt-hint)
+const { renderReminderLine, AGENT_DOC_TOPICS, CHANNELS_REMINDER_SEG } = require('./agent-cli-registry.js'); // PURE: THE agent CLI registry — the reminder's segments, the docs topics (lane cli-registry)
 const { liveForkPending, addressableId } = require('./claude-lock-capture.js'); // verify r3 (lane channel-withdraw): a pending fork carries its PARENT's conversation id — never an owner of a channel draft
 const stashSummary = require('./stash-summary.js'); // the stash's kinds, spelled once (a reaction digest is not a channel message)
 const { VIBESPACE_NOTICE_HEAD, stashKindOf, withoutNoticeHead } = require('./notification-senders.js'); // lane S3: a stashed VibeSpace notification drains under the head that names VibeSpace as its speaker — decided by the entry's PATH (`kind`), never its sender's name (S3 verify F3)
@@ -2592,8 +2593,7 @@ app.post('/api/agent/jobs/:ref/:act', (req, res) => {
 // lane artifacts-prompt-hint: the session's harness declares the file tools whose writes become Artifacts (descriptor
 // `artifactTools`; a descriptor without an `artifactsOf` reader ⇒ null = no line). A session with no known backend gets the
 // unnamed sentence (undefined) — never a guessed harness.
-// the manuals `vibespace-docs <topic>` serves (module scope since lane prompt-budget: the intro's pointer census reads it)
-const AGENT_DOC_TOPICS = { index: 'index-manual.md', jobs: 'background-work-manual.md', task: 'task-manual.md', status: 'status-manual.md', ask: 'ask-manual.md', msg: 'msg-manual.md', pages: 'pages-manual.md', design: ['design-manual.md', 'design-skill.md'], channels: 'channels-manual.md', browser: 'browser-manual.md', window: 'window-manual.md', exit: 'exit-manual.md', apps: 'apps-manual.md', app: 'apps-manual.md' };
+// the manuals `vibespace-docs <topic>` serves: AGENT_DOC_TOPICS = the registry's rows (topic → manual, aliases too — lane cli-registry), imported at the top
 function fileToolsOf(s) {
   const H = require('./harnesses');
   const id = s && s.backend;
@@ -2633,27 +2633,12 @@ function sessionToolsIntro(T, facts = {}) {
   return L.join('\n');
 }
 
-/** THE PER-TURN TOOLS REMINDER's standard line (2.78.0): the ENABLED tools only (2.211.0) — and, since lane
- *  channels-teach (a fleet user's incident 2026-10-18: four accounts granted to everyone, the agent read
- *  data/channels/ with python and never ran the tool), `vibespace-channels` when the session's REACH says so:
- *  `T.channels` = 'read' | 'request' | false, the flag the SessionStart tools section reads (agent-routes toolsFor). */
+/** THE PER-TURN TOOLS REMINDER's standard line (2.78.0): the ENABLED tools only (2.211.0), `vibespace-channels` when the
+ *  session's REACH says so (lane channels-teach: `T.channels` = 'read' | 'request' | false, agent-routes toolsFor), the
+ *  docs pointer, the manager clause. Since lane cli-registry the segments are the rows of src/agent-cli-registry.js. */
 function perTurnToolsLine(T, { multi = false, manager = false } = {}) {
-  const segs = [];
-  if (T.status) segs.push('vibespace-status <state> — keep your board state honest');
-  if (T.ask) segs.push('vibespace-ask "q" [--artifact <path|/p/id>…] — MIRROR every chat question into their For you tray (bottom right of their screen — name it that way, never "your inbox"; the FULL content still goes in your chat reply — the tray is only the notification), and resolve <id|text> the moment they answer');
-  if (T.task) segs.push(`vibespace-task ${multi ? '--group <id> ' : ''}progress "summary" — log finished work`);
-  if (T.jobs) segs.push('vibespace-job run "cmd" --name x --context "brief" — background work that must OUTLIVE this conversation (auto-notifies you on completion; poll/show/subscribe/announce; full manual: vibespace-job docs)');
-  if (T.channels === 'read') segs.push(CHANNELS_REMINDER_SEG.read);
-  else if (T.channels === 'request') segs.push(CHANNELS_REMINDER_SEG.request);
-  segs.push(`vibespace-docs [status|ask|task|jobs|msg|pages|browser${T.channels ? '|channels' : ''}] — the full manual for any of these tools`);
-  const mgrClause = manager ? ' · you are a Group MANAGER: `vibespace-task group-list` + group-create/-update/-bind organize ALL groups (any verb takes --group <id>)' : '';
-  return `Tools on PATH: ${segs.join(' · ')}${mgrClause}. Run any with no args for usage.`;
+  return renderReminderLine(T, { multi, manager });
 }
-/** lane channels-teach: the reminder's channels segment by reach (each ≤ 120 B — test-channels-teach) */
-const CHANNELS_REMINDER_SEG = Object.freeze({
-  read: 'vibespace-channels list|search "words"|read <conv> — the mail and chats the user connected; look there first',
-  request: 'vibespace-channels list --all|request <conv> "why" — the mail and chats the user connected, yours to ask for',
-});
 
 /**
  * The ONE Browsing line, chosen by the session's recorded rung (P0 r5). The

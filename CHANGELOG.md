@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.300 — 2026-10-18
+
+### Changed
+- The agent tools are now one list, so every hint an agent gets names the same tools; vibespace-docs with no argument prints that list.
+
 ## 2.369.299 — 2026-10-18
 
 ### Fixed

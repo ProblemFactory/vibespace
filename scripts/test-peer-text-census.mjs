@@ -329,6 +329,9 @@ const CLASSIFIED = {
   renderResult: 'a web-search result card for the USER\'s chat (src/search-card.js) — the agent already holds the result',
   renderSearchOutput: 'the same card',
   renderOf: 'a desktop-app registry row\'s render field (src/desktop-apps.js) — not text',
+  renderSessionStartTools: 'src/agent-cli-registry.js (lane cli-registry): the SessionStart tools section — VibeSpace\'s own fixed teaching per registry row + the `--group <id>` prefix; no stored or peer words',
+  renderReminderLine: 'src/agent-cli-registry.js (lane cli-registry): the per-turn reminder\'s tools line — the rows\' own segments + their topic names; no stored or peer words',
+  renderIndex: 'src/agent-cli-registry.js (lane cli-registry): the table `vibespace-docs` prints — the rows\' own summaries; no stored or peer words',
 };
 const SCOPE_EXCLUDED = (f) => f.startsWith('src/lib/') || /i18n-(zh|ja)\.js$|agentd\/bundle|\.(css|html|svg|md|json|txt|py|sh)$/.test(f);
 const tracked = () => execFileSync('git', ['ls-files', '-z', '--', 'server.js', 'src', 'data/bin'], { cwd: REPO, encoding: 'utf8' }).split('\0').filter(Boolean).filter((f) => !SCOPE_EXCLUDED(f));

@@ -872,13 +872,13 @@ process.exit(fs.existsSync(path.join(repo, 'FAST_RED')) ? 1 : 0);
       }
     }
     // …plus the agent manuals, which are RUNTIME PRODUCT DATA: src/agent-routes.js
-    // serves them from the running checkout (`GET /api/agent/docs/:topic`).
-    const routes = fs.readFileSync(path.join(REPO, 'src', 'agent-routes.js'), 'utf-8');
-    const topics = /const AGENT_DOC_TOPICS = \{([^}]*)\}/.exec(routes);
-    const manuals = topics ? [...topics[1].matchAll(/'([^']+\.md)'/g)].map((m) => 'docs/agent/' + m[1]) : [];
-    for (const p of manuals) if (fs.existsSync(path.join(REPO, p))) noteInput(p, 'src/agent-routes.js AGENT_DOC_TOPICS');
+    // serves them from the running checkout (`GET /api/agent/docs/:topic`) — the
+    // topics are the rows of src/agent-cli-registry.js (PURE) since lane cli-registry.
+    const REGISTRY = createRequire(import.meta.url)(path.join(REPO, 'src', 'agent-cli-registry.js'));
+    const manuals = [...new Set(REGISTRY.ROWS.flatMap((r) => [].concat(r.manual)))].map((f) => 'docs/agent/' + f);
+    for (const p of manuals) if (fs.existsSync(path.join(REPO, p))) noteInput(p, 'src/agent-cli-registry.js AGENT_DOC_TOPICS');
     ok(manuals.length >= 5 && manuals.includes('docs/agent/msg-manual.md'),
-      `AGENT_DOC_TOPICS parsed out of src/agent-routes.js (${manuals.length} manuals — the parse is non-vacuous)`);
+      `AGENT_DOC_TOPICS read off src/agent-cli-registry.js (${manuals.length} manuals — the read is non-vacuous)`);
 
     const derived = [...gateInputs.keys()].sort();
     console.log(`     derived gate inputs (${derived.length}): ${derived.join(' ')}`);

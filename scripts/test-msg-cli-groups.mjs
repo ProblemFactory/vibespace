@@ -830,8 +830,9 @@ console.log('§3 the words');
   for (const [re, what] of musts) ok(re.test(sec), `…Groups section says: ${what}`);
   ok(/job-token/.test(man) && /candidates/.test(man), 'the manual names the job fence and the ambiguity candidates');
   const idx = fs.readFileSync(path.join(REPO, 'docs/agent/index-manual.md'), 'utf-8');
-  ok(/\*\*vibespace-msg\*\*[^\n]*GROUPS[^\n]*vibespace-docs msg/.test(idx), 'the vibespace-docs index line names groups and points at `vibespace-docs msg`');
-  ok(/msg: 'msg-manual\.md'/.test(fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf-8')), 'the docs route serves the msg topic');
+  // lane cli-registry: the index table is the registry's render — the msg row names groups and points at its manual
+  ok(/\| `vibespace-msg` \|[^\n]*\bgroups\b[^\n]*`vibespace-docs msg`/.test(idx), 'the vibespace-docs index line names groups and points at `vibespace-docs msg`');
+  ok(require(path.join(REPO, 'src/agent-routes.js')).AGENT_DOC_TOPICS.msg === 'msg-manual.md', 'the docs route serves the msg topic');
 
   // the ONE pointer line in the budgeted Reporting-back teaching
   const TG = require(path.join(REPO, 'src/task-groups.js'));
@@ -845,12 +846,16 @@ console.log('§3 the words');
   ok(hits.length === 1 && /no cost/.test(hits[0]) && /billed/.test(hits[0]), '…and it says the default is free and a wake is billed');
   const allOff = proto._toolsSectionParts.call({}, '', false, { status: false, ask: false, task: false, jobs: false });
   ok(allOff.length === 0, 'every tool toggled off ⇒ no block at all (the pointer rides the block, never alone)');
-  // NEGATIVE CONTROL: a patched copy of the teaching without the line
-  const src = fs.readFileSync(path.join(REPO, 'src/task-groups.js'), 'utf-8');
-  const patched = src.replace(/\n\s*'Other agents: `vibespace-msg send[^\n]*\n\s*'',/, '');
+  // NEGATIVE CONTROL: a patched copy of the teaching without the line (lane cli-registry: the line is the msg row's, in
+  // src/agent-cli-registry.js; a task-groups copy requires the patched registry)
+  const src = fs.readFileSync(path.join(REPO, 'src/agent-cli-registry.js'), 'utf-8');
+  const patched = src.replace(/(\n\s*)sessionStart: \(\) => 'Other agents: `vibespace-msg send[^\n]*/, '$1sessionStart: null,');
   ok(patched !== src, 'CONTROL setup: the patch removed the line from a copy');
+  const tmpReg = path.join(ROOT, 'agent-cli-registry.patched.cjs');
+  fs.writeFileSync(tmpReg, patched);
+  const tgSrc = fs.readFileSync(path.join(REPO, 'src/task-groups.js'), 'utf-8');
   const tmp = path.join(ROOT, 'task-groups.patched.cjs');
-  fs.writeFileSync(tmp, patched.replace(/require\((['"])\.\//g, `require($1${path.join(REPO, 'src')}/`));
+  fs.writeFileSync(tmp, tgSrc.replace("require('./agent-cli-registry.js')", `require(${JSON.stringify(tmpReg)})`).replace(/require\((['"])\.\//g, `require($1${path.join(REPO, 'src')}/`));
   const P = require(tmp);
   ok(judge((P.TaskGroupManager || P).prototype._toolsSectionParts.call({}, '', false)).length === 0, 'NEGATIVE CONTROL: the same judge finds NO pointer in the patched copy');
   // the whole baseline intro (no-task sessions) still under the inline cap

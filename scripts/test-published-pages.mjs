@@ -239,7 +239,7 @@ ok('a fresh instance reloads the persisted store', pages2.list().length === 1 &&
   okc(ar.includes("(q.public === undefined || q.public === '') ? undefined"), 'republish without an explicit public flag keeps the user\'s visibility choice (review-caught)');
   const cli = read2('data/bin/vibespace-page');
   okc(!cli.includes('host: os.hostname()') && cli.includes("if (has('--public')) q.set('public', '1')"), 'CLI sends public only when asked and no host param (the session\'s host is authoritative)');
-  okc(ar.includes("pages: 'pages-manual.md'") && fs.existsSync(path.join(REPO, 'docs/agent/pages-manual.md')), 'vibespace-docs pages manual registered');
+  okc(require(path.join(REPO, 'src/agent-routes.js')).AGENT_DOC_TOPICS.pages === 'pages-manual.md' && fs.existsSync(path.join(REPO, 'docs/agent/pages-manual.md')), 'vibespace-docs pages manual registered');
   okc(ar.includes('Other self-contained HTML: `vibespace-page publish` (vibespace-docs pages)') && ar.includes('`vibespace-design new <slug>`') && !ar.includes('vibespace-page kit') && !ar.includes('/api/agent/design-kit'), 'tools intro teaches vibespace-design for designs and vibespace-page for any other HTML; no kit verb, no kit route (lane design-docs)');
   const sb = read2('src/lib/chat-status-bar.js');
   okc(sb.includes('chat-status-design') && sb.includes('_renderDesignPopover') && sb.includes('onDesignRequest'), 'status bar: design chip + popover');

@@ -59,14 +59,9 @@ const { artifactsIntroLine } = require('./harnesses/artifacts-of.js'); // PURE: 
 const agentLine = (s, max = 0) => toAgentText(s == null ? '' : s, { kind: 'line', ...(max > 0 ? { max } : {}) });
 const agentBlock = (s) => toAgentText(s == null ? '' : s, { kind: 'block' });
 
-// lane channels-teach: THE CHANNELS PARAGRAPH of the SessionStart tools section, by the session's REACH ('read': it may
-// read at least one conversation the user connected; 'request': it may only ask for some). Copy-ready, like the other
-// lines; the manual (docs/agent/channels-manual.md "When to look here") carries the rest.
-const CHANNELS_SECTION_LINES = Object.freeze({
-  read: 'What the user connected — mail, chats, threads — you may read here: `vibespace-channels list` (what you may read), `vibespace-channels search "<words>"` (across everything you can see), `vibespace-channels read <conv>`; `reply` only PROPOSES (the user approves). A question about people, mail, deals or chats: look here BEFORE any other connector or file. Manual: `vibespace-docs channels`.',
-  request: 'The user connected mail, chats and threads you may ASK to read: `vibespace-channels list --all` names them, `vibespace-channels request <conv> "why"` files the ask (the user approves). A question about people, mail, deals or chats: ask here BEFORE any other connector or file. Manual: `vibespace-docs channels`.',
-});
-const channelsSectionLine = (reach) => CHANNELS_SECTION_LINES[reach === 'request' ? 'request' : 'read'];
+// lane cli-registry: the SessionStart tools section renders from THE agent CLI registry (one row per CLI on PATH — its
+// paragraph, its gate); CHANNELS_SECTION_LINES (lane channels-teach: the paragraph by reach) lives in its row, re-exported
+const { renderSessionStartTools, CHANNELS_SECTION_LINES } = require('./agent-cli-registry.js');
 
 // Task Groups (岗位) have NO status — they are persistent roles; only an
 // `archived` flag. Task STATUS lives on the session (session-status.js STATES,
@@ -551,49 +546,17 @@ class TaskGroupManager {
   // prefix agents must use ('' single-group; '--group <id> ' generic in the
   // shared multi-group section).
   _toolsSectionParts(gid, multi, tools = null, fileTools = undefined) {
-    // DISCOVERY layer (2.111.22) with COPY-READY samples (2.111.25, user
-    // directive): every line shows the COMPLETE correct invocation — waiting
-    // states carry both --reason and --detail (enforced server-side), ask
-    // carries --detail — so the first call an agent copies is already valid.
-    // Syntax edge cases still live in each CLI's own no-args output.
-    // Per-feature toggles (2.211.0): a disabled tool is OMITTED — teaching a
-    // command whose endpoint refuses would train agents into dead ends.
-    const T = tools || { status: true, ask: true, task: true, jobs: true };
-    const n = [T.task, T.status, T.ask, T.jobs, T.channels].filter(Boolean).length;   // lane channels-teach: + vibespace-channels when the session's reach says so
-    if (!n) return [];
-    const g = gid || '';
-    const out = ['', `### Reporting back — ${n > 1 ? n + ' CLIs' : 'one CLI'} on your PATH (run ${n > 1 ? 'any' : 'it'} with no args for full usage; \`vibespace-docs <topic>\` = the full manual)`, '',
-      multi
-        ? (T.task
-          ? `You belong to MORE THAN ONE Task Group; pass \`--group <id>\` to \`vibespace-task\` (each block below names its id).${(T.status || T.ask) ? ` \`${[T.status && 'vibespace-status', T.ask && 'vibespace-ask'].filter(Boolean).join('`/`')}\` always mean${T.status && T.ask ? '' : 's'} THIS session.` : ''}`
-          : `These are bound to THIS session.`)
-        : `They're bound to THIS session — you never pass a group id.`];
-    // lane prompt-budget (B-2aad, 2.369.227): ONE copy-ready line per CLI (the waiting state with BOTH flags, ask with
-    // --detail — the 2.111.25 rule) and its manual's name; the teaching the code blocks and parentheses carried lives in
-    // docs/agent/{task,status,ask,background-work}-manual.md (test-prompt-budget finds every dropped line there)
-    if (T.task) out.push(
-      '',
-      `After each meaningful piece of work, log it for the group: \`vibespace-task ${g}progress "one-line summary" --detail "specifics other agents may need"\`. The user DEFERS something ('later') → park it: \`vibespace-task ${g}backlog-add "item" --detail "context"\` (non-immediate items only, never started unasked; \`backlog\` lists, \`backlog-claim <id>\` takes one). Manual: \`vibespace-docs task\`.`);
-    if (T.status) out.push(
-      '',
-      'Your live state on the board, the MOMENT it changes: `vibespace-status working|review|done`; a waiting state needs both flags — `vibespace-status blocked --reason "what you\'re waiting on" --detail "options + your recommendation" --urgency high` (or needs-input). Manual: `vibespace-docs status`.');
-    if (T.ask) out.push(
-      '',
-      'Asking the user anything / ending a turn waiting on them: ALSO file it in their For you tray (bottom right of their screen: say that, never "your inbox") — `vibespace-ask "the question" --detail "options + your recommendation"` — AND write the full question in your CHAT REPLY; `vibespace-ask resolve <id>` the moment they answer. Manual: `vibespace-docs ask`.');
-    if (T.jobs) out.push(
-      '',
-      'Work that must OUTLIVE this conversation (a server, a monitor, a batch, a schedule) — never nohup/systemd/harness-cron: `vibespace-job run "<cmd>" --name <name> --context "<what your future self needs>"`, later `vibespace-job poll <id>`. Manual: `vibespace-docs jobs`.');
-    // lane channels-teach (a fleet user's incident 2026-10-18: a session whose four accounts were granted to everyone read
-    // data/channels/ with python — never the tool, never named here): `T.channels` = the session's REACH (agent-routes
-    // toolsFor) — 'read' | 'request' | absent; ONE copy-ready paragraph, the rest in docs/agent/channels-manual.md
-    if (T.channels) out.push('', channelsSectionLine(T.channels));
-    // lane artifacts-prompt-hint: which writes become Artifacts — the session's harness names its file tools (agent-routes
-    // fileToolsOf). It rides the paths line, whose half is tightened then (141 → 69 B): the 9600 B fixtures had ~100 B of room
+    // DISCOVERY layer (2.111.22) with COPY-READY samples (2.111.25, user directive): every line shows the COMPLETE correct
+    // invocation. Per-feature toggles (2.211.0): a disabled tool is OMITTED. Since lane cli-registry the header and the
+    // paragraphs (task / status / ask / jobs / channels by reach / msg) are the rows of src/agent-cli-registry.js — the
+    // header's count = the paragraphs that rendered; every toggle and the reach closed ⇒ no section at all.
+    const out = renderSessionStartTools(tools, { gid, multi });
+    if (!out.length) return [];
+    // the section's TRAILER (it teaches no CLI): absolute paths + lane artifacts-prompt-hint's sentence — which writes become
+    // Artifacts, the session's harness names its file tools (agent-routes fileToolsOf). It rides the paths line, whose half
+    // is tightened then (141 → 69 B): the 9600 B fixtures had ~100 B of room
     const artifactsLine = artifactsIntroLine(fileTools);
-    // AGENT GROUPS (design §22): ONE pointer line — the manual carries the rest
     out.push(
-      '',
-      'Other agents: `vibespace-msg send <agent|group> "…"` reaches them on THEIR next turn at no cost (`--wake` or an @name = a billed turn now); `vibespace-msg group create <name> <member…>` makes a group; group news arrives here on your next turn. Manual: `vibespace-docs msg`.',
       '',
       artifactsLine
         ? `In chat replies use ABSOLUTE file paths (the UI makes them clickable). ${artifactsLine}`

@@ -73,6 +73,28 @@ export function census({ intro = null, repo = REPO, channels = false } = {}) {
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 }
 
+/** lane cli-registry: THE TEACHING SHAPES — every surface that teaches the agent CLIs, rendered by the tree's OWN renderers
+ *  (the Task-Group section via _toolsSectionParts, the per-turn reminder via perTurnToolsLine as the route wraps it, the
+ *  no-group intro) in the shapes a session meets. `repo` may be another tree (a
+ *  base copy: its renders are the "before" numbers). test-cli-registry pins each shape's bytes + sha256
+ *  (scripts/fixtures/cli-registry-renders.json). */
+export function teachingShapes({ repo = REPO } = {}) {
+  const AR = require(path.join(repo, 'src/agent-routes.js'));
+  const { TaskGroupManager } = require(path.join(repo, 'src/task-groups.js'));
+  const fileTools = AR.fileToolsOf({ backend: 'claude' });
+  const T4 = { status: true, ask: true, task: true, jobs: true };
+  const OFF = { status: false, ask: false, task: false, jobs: false };
+  const sec = (T, multi) => TaskGroupManager.prototype._toolsSectionParts.call({}, multi ? '--group <id> ' : '', multi, T, fileTools).join('\n');
+  const rem = (T, o) => `<vibespace-reminder>${AR.perTurnToolsLine(T, o)}</vibespace-reminder>`;
+  const out = [];
+  for (const [label, multi] of [['one group', false], ['three groups', true]]) for (const reach of [false, 'read', 'request']) out.push([`section · ${label}${reach ? ' · ' + reach : ''}`, sec(reach ? { ...T4, channels: reach } : T4, multi)]);
+  out.push(['section · status only', sec({ ...OFF, status: true }, false)], ['section · every toggle off', sec(OFF, false)]);
+  for (const [label, multi] of [['one group / none', false], ['several groups', true]]) for (const reach of [false, 'read', 'request']) out.push([`reminder · ${label}${reach ? ' · ' + reach : ''}`, rem(reach ? { ...T4, channels: reach } : T4, { multi })]);
+  out.push(['reminder · manager · several groups · read', rem({ ...T4, channels: 'read' }, { multi: true, manager: true })], ['reminder · status only', rem({ ...OFF, status: true }, {})], ['reminder · every toggle off', rem({ ...OFF, jobs: false }, {})]);
+  out.push(['no-group intro', AR.sessionToolsIntro(T4, { browserVariant: 'D', fileTools })]);
+  return out.map(([name, text]) => ({ name, text, bytes: B(text) }));
+}
+
 export function print(c, out = console.log) {
   out(`first prompt context census${c.channels ? ` — channels reach: ${c.channels}` : ''} (INLINE_CAP ${c.cap} B; intro ≤ ${INTRO_MAX} B; three groups ≤ ${FIRST_PROMPT_MAX} B with ≥ ${ROOM_MIN} B room)`);
   for (const s of c.shapes) out(`  ${s.name.padEnd(14)} ${String(s.total).padStart(5)} B  room ${String(s.room).padStart(5)} B  — ${s.blocks.map(([l, b]) => `${l} ${b}`).join(' · ')}`);

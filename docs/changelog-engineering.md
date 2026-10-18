@@ -4,6 +4,25 @@ This file is the engineers' record of every release: the lanes, the verification
 
 `CHANGELOG.md` (with `CHANGELOG.zh.md` and `CHANGELOG.ja.md`) is the user's: what changed for the person using VibeSpace, one plain line per change, in the interface's language — the rules are in docs/changelog-style.md. From 2.369.199 on, every release also writes its section here, under the same `## <version> — <date>` heading as its user entry and in the same commit, newest first above the verbatim record.
 
+## 2.369.300 — 2026-10-18
+
+### lane cli-registry — ONE registry of the agent CLIs renders every surface that lists them (the owner 2026-10-18: a top-level list of the CLIs and their one-liners, its total length limited and tested, one source of truth); base 4a14bcc2 (.298)
+- WHY: four hand-kept copies of "which tools exist" drifted apart. They were the SessionStart section (`_toolsSectionParts`), the reminder (`perTurnToolsLine`, whose literal `vibespace-docs [status|ask|task|jobs|msg|pages|browser]` never listed window / exit / apps / design), AGENT_DOC_TOPICS, and index-manual.md's hand table (10 tools, no msg / channels). .298 added vibespace-channels to two of them by hand.
+- THE REGISTRY (PURE src/agent-cli-registry.js) holds 13 ROWS, one per CLI on PATH. Each row has a name, a topic (+ aliases), a summary ≤ 140 B, its manual file(s), a gate (the status / ask / task / jobs toggles, `channels` = the reach word, `always`), and `teach { sessionStart, reminder }` or null. The null rows are index-only: page / design / exit / window / browser / app. The renderers are renderSessionStartTools (task-groups `_toolsSectionParts` adds only its absolute-paths + Artifacts trailer), renderReminderLine (agent-routes `perTurnToolsLine`), renderIndex and AGENT_DOC_TOPICS.
+- ONE GATE RULE: a closed gate omits its row from every surface, the docs pointer included. Before, status / ask / task / jobs stayed in the pointer when toggled off.
+- BYTES (scripts/measure-prompt-context.mjs `teachingShapes`, a git archive of the base vs the lane):
+  - The SessionStart section is the same size in every shape: 2 026 / 2 422 / 2 339 B for one group, 2 165 / 2 561 / 2 478 B for three. Its header counts every paragraph that rendered, msg's too (4 → 5 CLIs, 5 → 6 with reach). The paragraphs follow the one row order, so task moved from first to third.
+  - The reminder grows 24 B (823 → 847, read 946 → 970, manager 1 094 → 1 118). The pointer now names every open topic in row order: `[status|ask|task|jobs|channels|msg|pages|design|exit|window|browser|apps]`.
+  - The no-group intro is byte-identical at 3 426 B. It is not a registry surface: it keeps its own 4 096 B budget and the browser facts. The census holds every name it uses to a row.
+- CAPS (RED in test-cli-registry):
+  - SessionStart ≤ 2 725 B: the measured 2 561 + the 164 B that test-prompt-budget ③ leaves.
+  - The reminder line ≤ 1 200 B: the measured 1 077 + one channels-size segment.
+  - A summary ≤ 140 B.
+- INDEX: `vibespace-docs` with no argument prints docs/agent/index-manual.md. Its table is now the generated block: 13 rows + the usage line, rewritten by `node scripts/test-cli-registry.mjs --write-index`. The msg / channels bullets became rows. No new bin: vibespace-docs is the list.
+- SUITES:
+  - test-cli-registry (new, fast, 25). The census covers the generators' writes, tracked data/bin, AGENT_TOOLS and the build outputs: 13 rows and 22 EXCLUDED, each with a reason. A mutant bin is RED, and so is any vibespace-<x> a surface names without a row. Mutants of the rows (a 2 KB summary) and the caps (a 2 KB paragraph / segment) are RED. 18 shapes are pinned in scripts/fixtures/cli-registry-renders.json, each to its base render or a reasoned change. The suite also checks the index block and the gates.
+  - Moved onto the registry: test-channels-teach (the count 5 → 6, the pointer, the no-paragraph control on a registry copy), test-msg-cli-groups (the index row, the topic, the negative control), test-chat-hygiene (the renders, not the source), test-ci-gate §4 + test-design-docs (the manuals read off the rows).
+
 ## 2.369.299 — 2026-10-18
 
 ### lane dropline-connect-door — the Dropline sign-in had no visible door (a fleet user's report 2026-10-18: 「plugin页面没地方进行登录，integrations（一般人发现不了）里也只能setup key」); base c170b08f
