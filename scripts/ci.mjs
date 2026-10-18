@@ -729,6 +729,7 @@ export const SUITES = [
   // home only, and prints the rule it applied.
   { name: 'test-fixture-isolation', tier: 'fast', why: 'in-process · 246 ms' },
   { name: 'test-prompt-budget', tier: 'fast', why: 'in-process · 103 ms' }, // the first prompt context's byte census (scripts/measure-prompt-context.mjs, printed): the tools intro ≤ 4 096 B, 4 notices + a 1 KB stash fit with ≥ 1 KB room, every dropped line in its manual
+  { name: 'test-channels-teach', tier: 'fast', why: 'in-process · 0.4 s' }, // lane channels-teach (a fleet user's incident 2026-10-18): the SessionStart tools section + the per-turn reminder teach vibespace-channels on the session's REACH (the engine's reachCountFor over 2 000 conversations, parity with listFor); no reach / integration off / no engine ⇒ byte-identical; 3 RED controls
   { name: 'test-claude-md-retire', tier: 'fast', why: 'in-process + 7 runs of the retire CLI on scratch copies · 850 ms' }, // RETIRING A MOVED CLAUDE.md LINE (lane claude-md-retire, B-00be): the fixture regenerates from f835b0e58 byte-identical, the shared §82 census = the diet's, the retire verb + §82's verdict on scratch copies
 
   // ── HEAVY TIER — MEASURED cheap→expensive. Two origins, both stated per

@@ -2618,6 +2618,16 @@ the failure this design argues against.
   (every hit, never re-clipped to 400 chars); what does not fit one drain
   rides the next, never dropped (2026-09-16).
 
+### Agents are TAUGHT vibespace-channels on their reach (lane channels-teach, 2026-10-18)
+
+- The SessionStart tools section and the per-turn reminder name `vibespace-channels` when the session may READ at
+  least one conversation the user connected (`list` / `search "<words>"` / `read <conv>`, a reply is a proposal, look
+  here BEFORE any other connector or file, `vibespace-docs channels`), or only REQUEST some (`list --all` + `request`).
+  The reach is the engine's `reachCountFor` (listFor's walk, counted; the built-in Agents adapter never counts), read
+  through a 60 s per-session memo on prompts, fresh at SessionStart. No reach / integration off / no engine ⇒ the
+  injection is byte-identical. A shell read of data/channels/ as files gets the bypass card line. Gate:
+  test-channels-teach; bytes in scripts/measure-prompt-context.mjs (test-prompt-budget).
+
 ### Communication panel — P3: outbox, approval, receipts (2026-09-16; design §8, §9, §11, §12.3; decisions 7/8/9/11/16/17)
 
 - **A reply is a PROPOSAL.** An agent (`vibespace-channels reply`) or the user

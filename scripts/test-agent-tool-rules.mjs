@@ -484,7 +484,7 @@ console.log('⑭ r6 — what you approve is what runs (F4 inert tails · F5 ever
 {
   console.log('\n⑮ vendorBypassOf — a direct IM vendor read is named on its card');
   const T = R.VENDOR_BYPASS;
-  ok(Array.isArray(T) && T.length === 9 && eq([...new Set(T.map((r) => r.vendor))].sort(), ['gmail', 'lark', 'microsoft', 'slack']), 'the census: 9 rows over lark / slack / gmail / microsoft (a new row moves this pin)', T && T.map((r) => r.vendor + ':' + r.why));
+  ok(Array.isArray(T) && T.length === 10 && eq([...new Set(T.map((r) => r.vendor))].sort(), ['gmail', 'lark', 'microsoft', 'slack', 'vibespace']), 'the census: 10 rows over lark / slack / gmail / microsoft + VibeSpace\'s own channel store (a new row moves this pin)', T && T.map((r) => r.vendor + ':' + r.why));
   for (const r of T) {
     const got = R.vendorBypassOf(r.sample);
     ok(!!got && got.vendor === r.vendor && got.why === r.why && got.word === r.word && /^[A-Z]/.test(r.word), `${r.vendor}/${r.why}: its sample is named (${r.word})`, got);
@@ -498,6 +498,9 @@ console.log('⑭ r6 — what you approve is what runs (F4 inert tails · F5 ever
     ok(R.vendorBypassOf(neg) === null, `NEGATIVE: ${JSON.stringify(neg.slice(0, 50))} ⇒ null (our door / an unrelated host / a word in prose)`);
   }
   ok(R.vendorBypassOf(null) === null && R.vendorBypassOf(undefined) === null && R.vendorBypassOf(42) === null, 'NEGATIVE: a non-string ⇒ null');
+  // lane channels-teach: the fleet user's agent read the STORE itself (python over index.json, then the msgs/ logs)
+  const storeRead = "python3 -c \"import json; ix = json.load(open('/home/u/vibespace/data/channels/index.json')); print(len(ix['conversations']))\" && ls /home/u/vibespace/data/channels/msgs/ | head";
+  ok(eq(R.vendorBypassOf(storeRead), { vendor: 'vibespace', word: 'VibeSpace data/channels', why: 'store' }) && eq(R.vendorBypassOf('tail -n 5 data/channels/msgs/lark-1/oc_1.ndjson'), { vendor: 'vibespace', word: 'VibeSpace data/channels', why: 'store' }) && R.vendorBypassOf('ls src/channels/ data/channels-old') === null, 'the raw channel store read as files (index.json, msgs/) is named — the incident\'s shape; src/channels/ is not');
   // WIRING PINS: the hint takes the witness holder's EMPTY branch (a vibespace-channels call keeps the box), once
   const rend = fs.readFileSync(path.join(REPO, 'src/lib/chat-renderers.js'), 'utf-8');
   ok(/commandTouchesChannels\(cmd\) \? '<div class="chat-channel-touches" hidden><\/div>' : vendorBypassHintHtml\(cmd\);/.test(rend) && (rend.match(/vendorBypassOf\(/g) || []).length === 1, 'the renderer draws the hint ONLY where no witness box is drawn (channelTouchHolderHtml\'s else-branch), from the ONE classifier');

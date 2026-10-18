@@ -5,7 +5,9 @@
 // prints the bytes per block. The blocks are joined in the routes' payload order ('\n\n' between parts:
 // intro / group context → notices → the stash drain), so the total is what the route would hand the hook before
 // capInline. test-prompt-budget imports `census` (its control hands the old intro back in through `intro`).
-// Run: node scripts/measure-prompt-context.mjs
+// lane channels-teach: `channels` ('read' | 'request') renders every block for a session whose REACH teaches
+// `vibespace-channels` (the tools section's paragraph), and `reminder` = the per-turn reminder block's bytes (single group /
+// multi) — the prompt that carries nothing bigger. Run: node scripts/measure-prompt-context.mjs
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -30,14 +32,14 @@ function fourNotices(BP) {
   ];
 }
 
-/** census({ intro }) → { shapes: [{ name, blocks: [[label, bytes]], total, room }], intro, cap }. `intro(T, facts)`
+/** census({ intro, channels }) → { shapes: [{ name, blocks: [[label, bytes]], total, room }], intro, cap, reminder }. `intro(T, facts)`
  *  replaces sessionToolsIntro (the suite's control); every other block is the production renderer's. */
-export function census({ intro = null, repo = REPO } = {}) {
+export function census({ intro = null, repo = REPO, channels = false } = {}) {
   const AR = require(path.join(repo, 'src/agent-routes.js'));
   const { TaskGroupManager } = require(path.join(repo, 'src/task-groups.js'));
   const { SessionStatusManager } = require(path.join(repo, 'src/session-status.js'));
   const BP = require(path.join(repo, 'src/browser-profiles.js'));
-  const T = { status: true, ask: true, task: true, jobs: true };
+  const T = { status: true, ask: true, task: true, jobs: true, ...(channels ? { channels } : {}) };
   const fileTools = AR.fileToolsOf({ backend: 'claude' });
   const introOf = intro || AR.sessionToolsIntro;
   const toolsIntro = introOf(T, { browserVariant: 'D', fileTools });
@@ -65,13 +67,16 @@ export function census({ intro = null, repo = REPO } = {}) {
       shape('one group', groupCtx(1), 'tools section', B(toolsSection(1))),
       shape('three groups', groupCtx(3), 'tools section', B(toolsSection(3))),
     ];
-    return { shapes, intro: toolsIntro, introBytes: B(toolsIntro), cap: AR.INLINE_CAP };
+    // the per-turn reminder as the route wraps it (a tree before lane channels-teach has no module-scope line: null)
+    const rem = (multi) => (typeof AR.perTurnToolsLine === 'function' ? B(`<vibespace-reminder>${AR.perTurnToolsLine(T, { multi })}</vibespace-reminder>`) : null);
+    return { shapes, intro: toolsIntro, introBytes: B(toolsIntro), cap: AR.INLINE_CAP, channels, reminder: { one: rem(false), multi: rem(true) } };
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 }
 
 export function print(c, out = console.log) {
-  out(`first prompt context census (INLINE_CAP ${c.cap} B; intro ≤ ${INTRO_MAX} B; three groups ≤ ${FIRST_PROMPT_MAX} B with ≥ ${ROOM_MIN} B room)`);
+  out(`first prompt context census${c.channels ? ` — channels reach: ${c.channels}` : ''} (INLINE_CAP ${c.cap} B; intro ≤ ${INTRO_MAX} B; three groups ≤ ${FIRST_PROMPT_MAX} B with ≥ ${ROOM_MIN} B room)`);
   for (const s of c.shapes) out(`  ${s.name.padEnd(14)} ${String(s.total).padStart(5)} B  room ${String(s.room).padStart(5)} B  — ${s.blocks.map(([l, b]) => `${l} ${b}`).join(' · ')}`);
+  if (c.reminder && c.reminder.one !== null) out(`  per-turn reminder ${c.reminder.one} B (one group / none) · ${c.reminder.multi} B (several groups)`);
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) print(census());
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) { print(census()); print(census({ channels: 'read' })); print(census({ channels: 'request' })); }

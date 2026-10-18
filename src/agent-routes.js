@@ -554,7 +554,7 @@ app.get('/api/agent/task-context', (req, res) => {
     const fitsHere = (text) => B(context) + (context ? 2 : 0) + B(text) + pendingPreambleBytes(s) <= INLINE_CAP - INLINE_TAIL_MARGIN;
     if (injectGroups.length) {
       // Remote sessions read the auto-synced copy — translate file paths
-      context = tasks.renderMultiContext(injectGroups.map((g) => g.id), { ctxBaseFor: remoteCtxBaseFor(s), sessionKey: key, tools: enabledTools(), isLiveClaim: liveClaimPredicate(), fileTools: fileToolsOf(s) });
+      context = tasks.renderMultiContext(injectGroups.map((g) => g.id), { ctxBaseFor: remoteCtxBaseFor(s), sessionKey: key, tools: toolsFor(s, id, { fresh: true }), isLiveClaim: liveClaimPredicate(), fileTools: fileToolsOf(s) });   // lane channels-teach: + the session's channel reach (asked fresh)
       // Only Claude injects the SessionStart output; codex runs the command but
       // ignores it, so don't mark groups "seen" for codex (that would starve its
       // UserPromptSubmit delivery).
@@ -680,7 +680,7 @@ app.get('/api/agent/prompt-context', (req, res) => {
       s._cwdRecreated = false;
       parts.push(`<vibespace-cwd-notice>\nYour working directory (${s.cwd || ''}) did NOT exist when this session was resumed — the user chose to recreate it as an EMPTY directory. Files from earlier in this conversation are GONE from disk. Re-verify every assumption about existing files/state before acting, and tell the user what is missing if it affects the task.\n</vibespace-cwd-notice>`);
     }
-    const toolFlags = enabledTools();
+    const toolFlags = toolsFor(s, id);   // lane channels-teach: + `channels` (the session's reach), asked once per call
     const groups = tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, initialGroupId: s._initialGroupId });
     // agents.contextInjection off ⇒ no group payloads/diffs (see task-context)
     const injectGroups = ctxInjectionOn() ? groups.filter((g) => g.injectContext !== false) : []; // P6: per-group context toggle
@@ -1000,17 +1000,8 @@ app.get('/api/agent/prompt-context', (req, res) => {
     if (outParts.length && nudgeBlock) outParts.push(nudgeBlock);
     if (!outParts.length) {
       const multi = injectGroups.length > 1;
-      const mgrClause = isManagerSession(key) ? ' · you are a Group MANAGER: `vibespace-task group-list` + group-create/-update/-bind organize ALL groups (any verb takes --group <id>)' : '';
-      // Per-feature toggles: the reminder lists only ENABLED tools (2.211.0).
-      const segs = [];
-      if (toolFlags.status) segs.push('vibespace-status <state> — keep your board state honest');
-      if (toolFlags.ask) segs.push('vibespace-ask "q" [--artifact <path|/p/id>…] — MIRROR every chat question into their For you tray (bottom right of their screen — name it that way, never "your inbox"; the FULL content still goes in your chat reply — the tray is only the notification), and resolve <id|text> the moment they answer');
-      if (toolFlags.task) segs.push(`vibespace-task ${multi ? '--group <id> ' : ''}progress "summary" — log finished work`);
-      if (toolFlags.jobs) segs.push('vibespace-job run "cmd" --name x --context "brief" — background work that must OUTLIVE this conversation (auto-notifies you on completion; poll/show/subscribe/announce; full manual: vibespace-job docs)');
-      segs.push('vibespace-docs [status|ask|task|jobs|msg|pages|browser] — the full manual for any of these tools');
-      const std = perTurnReminderEnabled() && segs.length
-        ? `Tools on PATH: ${segs.join(' · ')}${mgrClause}. Run any with no args for usage.`
-        : '';
+      // the line itself: perTurnToolsLine (module scope since lane channels-teach — the prompt census renders it)
+      const std = perTurnReminderEnabled() ? perTurnToolsLine(toolFlags, { multi, manager: isManagerSession(key) }) : '';
       // User extra rides at the TOP of the reminder block (per-hook custom,
       // 2.88.0); it delivers even with the standard reminder toggled off.
       const body = [extra, std, backlogNudge].filter(Boolean).join('\n');
@@ -1881,6 +1872,30 @@ function channelPrincipal(s, id) {
   };
 }
 const channelsEngine = () => { try { const c = getChannels(); return c && typeof c.listFor === 'function' ? c : null; } catch { return null; } };
+// lane channels-teach (a fleet user's incident 2026-10-18 — the owner: "他的agent默认都不会用vibespace channels必须直接提醒才会用"):
+// THE CHANNELS DOOR IS TAUGHT ON REACH. The SessionStart tools section and the per-turn reminder name `vibespace-channels`
+// when the integration is on, the engine is here and the session may READ (or only REQUEST) at least one conversation
+// the user connected — the engine's reachCountFor (listFor's walk, counted: one row when an account is granted to
+// everyone). Never on a message arriving (renderMsgStash's channel hint was the only teaching: a session nobody wrote to
+// never learned the tool). No channels / integration off / no engine ⇒ `channels: false` ⇒ the injection is byte-identical.
+// The count walks the index when the session can read nothing (measured: 0.4 ms over 2 000 conversations, 5–13 ms over
+// 20 000), so a prompt reads it from a per-session memo of CHANNELS_REACH_TTL_MS; SessionStart asks fresh. A grant the
+// owner gives or takes reaches the reminder within that minute.
+const CHANNELS_REACH_TTL_MS = 60e3;
+const channelsReachMemo = new WeakMap();   // session object → { at, v } (a verdict word, never a row)
+const channelsTaughtFor = (s, id, { fresh = false } = {}) => {
+  if (!integrationOnMaster()) return false;
+  const eng = channelsEngine();
+  if (!eng || typeof eng.reachCountFor !== 'function') return false;
+  const t = Date.now();
+  const m = channelsReachMemo.get(s);
+  if (!fresh && m && t - m.at < CHANNELS_REACH_TTL_MS) return m.v;
+  let v = false;
+  try { v = eng.reachCountFor(channelPrincipal(s, id)) || false; } catch { v = false; }
+  channelsReachMemo.set(s, { at: t, v });
+  return v;
+};
+const toolsFor = (s, id, o) => ({ ...enabledTools(), channels: channelsTaughtFor(s, id, o) });
 // lane stash-pending-live: a member's OWN TURN carries what its channel watchers parked while none of the group ran (the
 // free road only: the engine queues each carry on the conversation's chain, into this session's stash — it rides this
 // member's next injection; at SessionStart that is its first prompt). Asked at the stash drain; never a timer.
@@ -2618,6 +2633,28 @@ function sessionToolsIntro(T, facts = {}) {
   return L.join('\n');
 }
 
+/** THE PER-TURN TOOLS REMINDER's standard line (2.78.0): the ENABLED tools only (2.211.0) — and, since lane
+ *  channels-teach (a fleet user's incident 2026-10-18: four accounts granted to everyone, the agent read
+ *  data/channels/ with python and never ran the tool), `vibespace-channels` when the session's REACH says so:
+ *  `T.channels` = 'read' | 'request' | false, the flag the SessionStart tools section reads (agent-routes toolsFor). */
+function perTurnToolsLine(T, { multi = false, manager = false } = {}) {
+  const segs = [];
+  if (T.status) segs.push('vibespace-status <state> — keep your board state honest');
+  if (T.ask) segs.push('vibespace-ask "q" [--artifact <path|/p/id>…] — MIRROR every chat question into their For you tray (bottom right of their screen — name it that way, never "your inbox"; the FULL content still goes in your chat reply — the tray is only the notification), and resolve <id|text> the moment they answer');
+  if (T.task) segs.push(`vibespace-task ${multi ? '--group <id> ' : ''}progress "summary" — log finished work`);
+  if (T.jobs) segs.push('vibespace-job run "cmd" --name x --context "brief" — background work that must OUTLIVE this conversation (auto-notifies you on completion; poll/show/subscribe/announce; full manual: vibespace-job docs)');
+  if (T.channels === 'read') segs.push(CHANNELS_REMINDER_SEG.read);
+  else if (T.channels === 'request') segs.push(CHANNELS_REMINDER_SEG.request);
+  segs.push(`vibespace-docs [status|ask|task|jobs|msg|pages|browser${T.channels ? '|channels' : ''}] — the full manual for any of these tools`);
+  const mgrClause = manager ? ' · you are a Group MANAGER: `vibespace-task group-list` + group-create/-update/-bind organize ALL groups (any verb takes --group <id>)' : '';
+  return `Tools on PATH: ${segs.join(' · ')}${mgrClause}. Run any with no args for usage.`;
+}
+/** lane channels-teach: the reminder's channels segment by reach (each ≤ 120 B — test-channels-teach) */
+const CHANNELS_REMINDER_SEG = Object.freeze({
+  read: 'vibespace-channels list|search "words"|read <conv> — the mail and chats the user connected; look there first',
+  request: 'vibespace-channels list --all|request <conv> "why" — the mail and chats the user connected, yours to ask for',
+});
+
 /**
  * The ONE Browsing line, chosen by the session's recorded rung (P0 r5). The
  * isolated sentence only for a rung that really gave this session its own
@@ -2678,6 +2715,6 @@ function browserSetLine(set) {
 
 
 module.exports = {
-  turnIsUserInitiated, GROUP_REPORT_BUDGET, setupAgentRoutes, renderMsgStash, drainStashUnderCap, drainNotifsUnderCap, roomUnderCap, INLINE_CAP, INLINE_TAIL_MARGIN, JOBS_DIGEST_BUDGET, MSG_STASH_LINE_MAX, MSG_STASH_MAX_ENTRIES, MSG_STASH_MAX_BYTES, sessionToolsIntro, fileToolsOf, browserIntroLine, AGENT_DOC_TOPICS, browserSetLine, stopNudgeReason, STOP_NUDGE_CLOSE, BROWSER_DIALOG_LINE,
+  turnIsUserInitiated, GROUP_REPORT_BUDGET, setupAgentRoutes, renderMsgStash, drainStashUnderCap, drainNotifsUnderCap, roomUnderCap, INLINE_CAP, INLINE_TAIL_MARGIN, JOBS_DIGEST_BUDGET, MSG_STASH_LINE_MAX, MSG_STASH_MAX_ENTRIES, MSG_STASH_MAX_BYTES, sessionToolsIntro, perTurnToolsLine, CHANNELS_REMINDER_SEG, fileToolsOf, browserIntroLine, AGENT_DOC_TOPICS, browserSetLine, stopNudgeReason, STOP_NUDGE_CLOSE, BROWSER_DIALOG_LINE,
   msgPeerRow, msgGroupsAnswer, msgReadAnswer, msgSendAnswer, msgGroupOpAnswer, msgRefusalAnswer, dispatchAnswer,   // lane peer-census verify r1 / r2: the msg answers' doors, the refusal's too (test-peer-text-census drives them)
   taskShowAnswer, taskItemAnswer, taskEntryAnswer, taskGroupBrief, contextIndexAnswer };   // verify r4 F1: the task answers' doors

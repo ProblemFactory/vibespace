@@ -6,7 +6,8 @@
 // block; ② the intro ≤ 4 096 B in every variant; ③ every shape with 4 notices + a 1 KB stash entry fits whole with
 // ≥ 1 KB room, the three-group shape ≤ 7 KB; ④ every pointer names a topic vibespace-docs serves, every surface has
 // one; ⑤ every line the cut dropped is in its manual and not in the intro; ⑥ CONTROL: the dropped lines put back ⇒
-// the same judge is red. Run: node scripts/test-prompt-budget.mjs
+// the same judge is red. lane channels-teach: ③ and ④ also judge a session whose channel REACH teaches `vibespace-channels`
+// (the tools section's paragraph, the reminder's segment). Run: node scripts/test-prompt-budget.mjs
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -47,14 +48,21 @@ ok(Math.max(...sizes) <= INTRO_MAX, `the widest intro is ${Math.max(...sizes)} B
 console.log('— ③ room beside 4 notices + a 1 KB stash entry');
 const bad = judge(c);
 ok(bad.length === 0, `every shape fits whole with ≥ ${ROOM_MIN} B room, three groups ≤ ${FIRST_PROMPT_MAX} B${bad.length ? ' — ' + bad.join('; ') : ''}`);
+for (const reach of ['read', 'request']) {
+  const cr = census({ channels: reach });
+  print(cr, (l) => console.log('    ' + l));
+  const crBad = judge(cr);
+  ok(crBad.length === 0 && cr.shapes.every((s, i) => s.total > c.shapes[i].total || s.name === 'no Task Group') && cr.reminder.one > 0 && cr.reminder.multi < cr.cap, `channels reach '${reach}': every shape still fits whole with ≥ ${ROOM_MIN} B room (the paragraph rides the group shapes), the reminder ${cr.reminder.one} B${crBad.length ? ' — ' + crBad.join('; ') : ''}`);
+}
 
 console.log('— ④ every pointer names a served manual; every surface has one');
 const intro = AR.sessionToolsIntro(T, { browserVariant: 'D' });
 const section = TaskGroupManager.prototype._toolsSectionParts.call({}, '', false, T).join('\n');
-const pointers = [...(intro + '\n' + section).matchAll(/vibespace-docs ([a-z]+)/g)].map((m) => m[1]);
+const chSection = ['read', 'request'].map((reach) => TaskGroupManager.prototype._toolsSectionParts.call({}, '', false, { ...T, channels: reach }).join('\n')).join('\n');
+const pointers = [...(intro + '\n' + section + '\n' + chSection + '\n' + AR.perTurnToolsLine({ ...T, channels: 'read' })).matchAll(/vibespace-docs ([a-z]+)/g)].map((m) => m[1]);
 const topics = Object.keys(AR.AGENT_DOC_TOPICS || {});
 ok(topics.length >= 10 && pointers.length >= 10 && pointers.every((t) => topics.includes(t)), `${pointers.length} pointers, each a topic vibespace-docs serves (${[...new Set(pointers)].join(' ')})`);
-const surfaces = ['status', 'ask', 'jobs', 'msg', 'browser', 'window', 'design', 'pages', 'exit', 'task'];
+const surfaces = ['status', 'ask', 'jobs', 'msg', 'browser', 'window', 'design', 'pages', 'exit', 'task', 'channels'];
 ok(surfaces.every((t) => pointers.includes(t)), `every surface has its pointer (${surfaces.filter((t) => !pointers.includes(t)).join(' ') || 'none missing'})`);
 ok(['status', 'ask', 'jobs', 'msg', 'task'].every((t) => new RegExp('vibespace-docs ' + t).test(section)), 'the group Reporting-back section points at task / status / ask / jobs / msg');
 
@@ -63,7 +71,7 @@ const FX = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/prompt-b
 const manual = (t) => [].concat(AR.AGENT_DOC_TOPICS[t]).map((f) => fs.readFileSync(path.join(REPO, 'docs/agent', f), 'utf-8')).join('\n');
 const lost = FX.moved.filter((m) => !norm(manual(m.topic)).includes(m.text));
 ok(FX.moved.length >= 30 && lost.length === 0, `${FX.moved.length} dropped lines, each found in its manual${lost.length ? ' — missing: ' + lost.map((m) => `${m.topic}: ${m.text.slice(0, 60)}`).join(' | ') : ''}`);
-const allIntros = norm(variants.map((f) => AR.sessionToolsIntro(T, f)).join('\n') + '\n' + section);
+const allIntros = norm(variants.map((f) => AR.sessionToolsIntro(T, f)).join('\n') + '\n' + section + '\n' + chSection);
 ok(FX.moved.every((m) => !allIntros.includes(m.text)), 'none of them rides the intro or the section any more');
 
 console.log('— ⑥ CONTROL: the intro\'s dropped lines put back ⇒ the judge is red');

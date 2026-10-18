@@ -978,6 +978,35 @@ function create(engineCtx) {
     if (blind.length) return { ok: true, conversations: out, more, moreRequestable, max: LIST_FOR_MAX, ...namesNoteOf(blind) };
     return { ok: true, conversations: out, more, moreRequestable, max: LIST_FOR_MAX };
   }
+  /** THE REACH THE HOOK TEACHES ON (lane channels-teach, a fleet user's incident 2026-10-18: a session whose four
+   *  accounts were all granted to everyone never learned `vibespace-channels` and read data/channels/ with python).
+   *  listFor's own walk and filters, COUNTED — nothing is built: `read` = some conversation `list` would show that the
+   *  principal may READ; `request` = only rows it may ASK for (its `requestable` reach, or a title `list --all` shows
+   *  from an account directory). Stops at the first readable row: an account granted to everyone is one reachFor; no
+   *  reach at all is one reachFor per conversation (2 000 rows: the cost is in the report). An adapter whose module
+   *  answers reach with msg-acl (the built-in Agents adapter — other sessions, `vibespace-msg`'s door) is not a channel
+   *  the user connected: it never counts. → 'read' | 'request' | null. */
+  function reachCountFor(ctx) {
+    const recs = new Map();
+    for (const r of adapterRecords().adapters) {
+      if (!r || r.enabled === false) continue;
+      let mod = null; try { mod = registry.get(r.kind); } catch {}
+      if (mod && mod.reach === 'msg-acl') continue;
+      recs.set(r.id, r);
+    }
+    if (!recs.size) return null;
+    let request = false;
+    const live = store.index.live();   // B-f32b: read-only, as listFor; walked by key — the first readable row ends it
+    for (const k in live) {
+      const en = live[k];
+      const rec = en && recs.get(en.adapterId);
+      if (!rec) continue;
+      const lv = reachFor(ctx, rec, en).level;
+      if (ACL.canSee(lv)) return 'read';
+      if (!request && (ACL.canRequest(lv) || directoryLists(rec, en))) request = true;
+    }
+    return request ? 'request' : null;
+  }
   function readFor(ctx, adapterId, convId, { limit = 50, since = null } = {}) {
     const { en, rec } = convFor(adapterId, convId);
     if (!en || !rec || rec.enabled === false) return ACL.notFound();
@@ -1650,7 +1679,7 @@ function create(engineCtx) {
     statsView, wakeLatencyFor, accountGrainOf, patternsOf, patternById, pkOf, legacyConvAssignment, convGrainOf, convFacts, effectiveFor, fanTargets,
     wakeEffOf, storedWatcherFor, itemIs, scopeKeyOf, watcherRef, accessRowView, watcherView, eligibleAboveView, grainView, reachFor, groupsOfSession,
     convFor, stillSees, effectiveForAccount, accountScopeGrants, searchFor, readAroundFor, setPolicy, setReach, reachView, request, decideRequest,
-    directoryLists, setAgentDirectory, agentWatch, agentUnwatch, agentWatchesFor, listFor, readFor, readThreadFor, statusFor, setGrain, setAccess, setWatchers,
+    directoryLists, setAgentDirectory, agentWatch, agentUnwatch, agentWatchesFor, listFor, reachCountFor, readFor, readThreadFor, statusFor, setGrain, setAccess, setWatchers,
     removePattern, setAssignment, setScopeAssignment, accessFor, estimateScope, migrateAggregated, migrateGrants, setFilter, estimateFilter,
     previewRule, membersNow,
   };

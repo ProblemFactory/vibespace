@@ -59,6 +59,15 @@ const { artifactsIntroLine } = require('./harnesses/artifacts-of.js'); // PURE: 
 const agentLine = (s, max = 0) => toAgentText(s == null ? '' : s, { kind: 'line', ...(max > 0 ? { max } : {}) });
 const agentBlock = (s) => toAgentText(s == null ? '' : s, { kind: 'block' });
 
+// lane channels-teach: THE CHANNELS PARAGRAPH of the SessionStart tools section, by the session's REACH ('read': it may
+// read at least one conversation the user connected; 'request': it may only ask for some). Copy-ready, like the other
+// lines; the manual (docs/agent/channels-manual.md "When to look here") carries the rest.
+const CHANNELS_SECTION_LINES = Object.freeze({
+  read: 'What the user connected — mail, chats, threads — you may read here: `vibespace-channels list` (what you may read), `vibespace-channels search "<words>"` (across everything you can see), `vibespace-channels read <conv>`; `reply` only PROPOSES (the user approves). A question about people, mail, deals or chats: look here BEFORE any other connector or file. Manual: `vibespace-docs channels`.',
+  request: 'The user connected mail, chats and threads you may ASK to read: `vibespace-channels list --all` names them, `vibespace-channels request <conv> "why"` files the ask (the user approves). A question about people, mail, deals or chats: ask here BEFORE any other connector or file. Manual: `vibespace-docs channels`.',
+});
+const channelsSectionLine = (reach) => CHANNELS_SECTION_LINES[reach === 'request' ? 'request' : 'read'];
+
 // Task Groups (岗位) have NO status — they are persistent roles; only an
 // `archived` flag. Task STATUS lives on the session (session-status.js STATES,
 // which now includes `done`).
@@ -550,7 +559,7 @@ class TaskGroupManager {
     // Per-feature toggles (2.211.0): a disabled tool is OMITTED — teaching a
     // command whose endpoint refuses would train agents into dead ends.
     const T = tools || { status: true, ask: true, task: true, jobs: true };
-    const n = [T.task, T.status, T.ask, T.jobs].filter(Boolean).length;
+    const n = [T.task, T.status, T.ask, T.jobs, T.channels].filter(Boolean).length;   // lane channels-teach: + vibespace-channels when the session's reach says so
     if (!n) return [];
     const g = gid || '';
     const out = ['', `### Reporting back — ${n > 1 ? n + ' CLIs' : 'one CLI'} on your PATH (run ${n > 1 ? 'any' : 'it'} with no args for full usage; \`vibespace-docs <topic>\` = the full manual)`, '',
@@ -574,6 +583,10 @@ class TaskGroupManager {
     if (T.jobs) out.push(
       '',
       'Work that must OUTLIVE this conversation (a server, a monitor, a batch, a schedule) — never nohup/systemd/harness-cron: `vibespace-job run "<cmd>" --name <name> --context "<what your future self needs>"`, later `vibespace-job poll <id>`. Manual: `vibespace-docs jobs`.');
+    // lane channels-teach (a fleet user's incident 2026-10-18: a session whose four accounts were granted to everyone read
+    // data/channels/ with python — never the tool, never named here): `T.channels` = the session's REACH (agent-routes
+    // toolsFor) — 'read' | 'request' | absent; ONE copy-ready paragraph, the rest in docs/agent/channels-manual.md
+    if (T.channels) out.push('', channelsSectionLine(T.channels));
     // lane artifacts-prompt-hint: which writes become Artifacts — the session's harness names its file tools (agent-routes
     // fileToolsOf). It rides the paths line, whose half is tightened then (141 → 69 B): the 9600 B fixtures had ~100 B of room
     const artifactsLine = artifactsIntroLine(fileTools);
@@ -1803,4 +1816,4 @@ class TaskGroupManager {
 }
 
 // B-31d7: the item's line + detail caps, for the route that REFUSES past them before a write (never a silent clip)
-module.exports = { TaskGroupManager, BACKLOG_PRIORITIES, BACKLOG_CAPS: Object.freeze({ text: CAPS.backlogItem, detail: CAPS.detail }) };
+module.exports = { TaskGroupManager, BACKLOG_PRIORITIES, BACKLOG_CAPS: Object.freeze({ text: CAPS.backlogItem, detail: CAPS.detail }), CHANNELS_SECTION_LINES };

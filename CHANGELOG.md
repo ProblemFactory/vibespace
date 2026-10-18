@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.298 — 2026-10-18
+
+### Fixed
+- Agent sessions that can read your connected channels now learn vibespace-channels when they start, so nobody has to remind them to look there.
+
 ## 2.369.297 — 2026-10-17
 
 ### Fixed

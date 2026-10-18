@@ -728,6 +728,9 @@ const VENDOR_BYPASS = [
   { vendor: 'gmail', word: 'Gmail', why: 'host', re: /\bgmail\.googleapis\.com\b/i, sample: 'curl -s https://gmail.googleapis.com/gmail/v1/users/me/messages' },
   { vendor: 'gmail', word: 'Gmail', why: 'sdk', re: /\bgoogleapiclient\b[\s\S]{0,2000}?\bbuild\(\s*['"]gmail['"]/, sample: "python3 - <<'EOF'\nfrom googleapiclient.discovery import build\nsvc = build('gmail', 'v1', credentials=c)\nEOF" },
   { vendor: 'microsoft', word: 'Microsoft 365', why: 'host', re: /\bgraph\.microsoft\.com\b/i, sample: 'curl https://graph.microsoft.com/v1.0/me/messages' },
+  // lane channels-teach (a fleet user's incident 2026-10-18: python over data/channels/index.json and msgs/): VibeSpace's
+  // OWN channel store read as files is the same bypass — no card, no read marker, no reach asked
+  { vendor: 'vibespace', word: 'VibeSpace data/channels', why: 'store', re: /\bdata\/channels\/(?:index\.json|msgs\/)/, sample: "python3 - <<'EOF'\nimport json\nidx = json.load(open('/home/u/vibespace/data/channels/index.json'))\nEOF" },
 ];
 /** A shell line → null | {vendor, word, why}: the first table row whose signature the text carries. */
 function vendorBypassOf(command) {
