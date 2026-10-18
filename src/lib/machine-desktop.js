@@ -252,14 +252,16 @@ export function openMachineDesktop(app, m, { display } = {}) {
   const streamEl = el('span'); streamEl.className = 'desktop-strip-stream'; streamEl.hidden = true;
   const noteEl = el('span'); noteEl.className = 'desktop-strip-note'; noteEl.hidden = true;
   // lane stream-relay-udp: the machine's firewall blocks the direct path (its agent's self-probe) — said while the hub relay
-  // carries the picture, with the owner's admin line to copy (run once there; VibeSpace never runs it)
+  // carries the picture, with the owner's admin line to copy (run once there; VibeSpace never runs it). It sits right after the
+  // status chip, AHEAD of the numbers (lane stream-relay-udp-ci): the numbers run long on the relay (the path, NVENC · encode)
+  // and the strip scrolls sideways, so after them the copy button sat past a desk-sized window's edge (DejaVu: the .296 mirror)
   const fwEl = el('span'); fwEl.className = 'desktop-strip-firewall'; fwEl.hidden = true;
   const fwText = el('span', null, t('The machine’s firewall blocks the direct path; going through the hub'));
   const fwCopy = el('button', null, t('Copy the admin command')); fwCopy.type = 'button'; fwCopy.className = 'file-tool-btn desktop-strip-fw-copy';
   let fwCommand = null;
   fwCopy.onclick = () => { if (fwCommand) copyText(fwCommand).then(() => showToast(t('Copied — paste it into an administrator PowerShell on {machine}', { machine }))); };
   fwEl.append(fwText, fwCopy);
-  strip.append(streamEl, fwEl, noteEl);
+  strip.append(fwEl, streamEl, noteEl);
   let noteTimer = null, refusedWhy = '';
   const note = (text, title, ms = 0) => { clearTimeout(noteTimer); noteEl.textContent = text; noteEl.title = title || text; noteEl.hidden = !text; if (ms) noteTimer = setTimeout(() => { noteEl.hidden = true; }, ms); };
   const STREAM_WHY = {

@@ -15,7 +15,10 @@
 //   ⑥ THE FALLBACK: the machine ends the stream ⇒ the <video> goes, the strip says why, the VNC picture signs in and draws  fallback.png
 //   ⑦ relay-only — lane stream-relay-udp: the daemon's own UDP leg carries it, the strip says 经 hub 中转 · UDP; the copy's
 //      firewall drops its self-probe ⇒ the strip says 机器防火墙挡住直连，经 hub 中转 with the owner's admin line to copy (the
-//      netsh rule for its node.exe; the toast says where to paste it) — never on the direct path (①); a hub that offers no leg
+//      netsh rule for its node.exe; the toast says where to paste it) — never on the direct path (①); the notice sits AHEAD of
+//      the numbers, its copy button wholly in the strip's view (the topmost element at its centre) — RED CONTROL (lane
+//      stream-relay-udp-ci): the old order (after the numbers) in a 900 px window puts the button past the strip's edge and a
+//      click at its centre copies nothing, THE order in the same window copies; a hub that offers no leg
 //      ⇒ 经设备链路 (the relay over the device link)                                                          relay.png, relay-link.png
 //   ⑧ a hub with no fake source and a machine with no ffmpeg: its screen source is refused (no_ffmpeg) ⇒ the VNC picture at
 //      once, NO note (the chip's title says why: 需要 ffmpeg ≥ 7（含 ddagrab 与 NVENC）…)
@@ -160,16 +163,22 @@ const MOVE = '  const moved = modifierKeyOf({ key: e && e.key, code: e && e.code
 const noTable = { name: 'no-table', setup(b) { b.onLoad({ filter: /stream-input\.js$/ }, (a) => { const src = fs.readFileSync(a.path, 'utf8'); if (!src.includes(MOVE)) throw new Error('the door\'s table line moved'); return { contents: src.replace(MOVE, '  const moved = null;\n'), loader: 'js' }; }); } };
 await esbuild.build({ stdin: { contents: entry, resolveDir: REPO, loader: 'js' }, bundle: true, format: 'iife', platform: 'browser', target: 'es2020', outfile: path.join(root, 'page.js'), loader: { '.css': 'empty' }, logLevel: 'error' });
 await esbuild.build({ stdin: { contents: entry, resolveDir: REPO, loader: 'js' }, bundle: true, format: 'iife', platform: 'browser', target: 'es2020', outfile: path.join(root, 'page-notable.js'), loader: { '.css': 'empty' }, logLevel: 'error', plugins: [noTable] });
+// ⑦'s RED control (lane stream-relay-udp-ci): the strip's OLD order — the firewall notice after the numbers
+const FW_ORDER = '  strip.append(fwEl, streamEl, noteEl);\n';
+const fwLast = { name: 'fw-last', setup(b) { b.onLoad({ filter: /machine-desktop\.js$/ }, (a) => { const src = fs.readFileSync(a.path, 'utf8'); if (!src.includes(FW_ORDER)) throw new Error('the strip\'s order line moved'); return { contents: src.replace(FW_ORDER, '  strip.append(streamEl, fwEl, noteEl);\n'), loader: 'js' }; }); } };
+await esbuild.build({ stdin: { contents: entry, resolveDir: REPO, loader: 'js' }, bundle: true, format: 'iife', platform: 'browser', target: 'es2020', outfile: path.join(root, 'page-fwlast.js'), loader: { '.css': 'empty' }, logLevel: 'error', plugins: [fwLast] });
 const app = express(); app.use(express.json());
 app.use(R.router);
 const CSS = ['style', 'viewers', 'chat', 'fonts'].filter((n) => fs.existsSync(path.join(REPO, `public/${n}.css`)));
 for (const n of CSS) app.get(`/${n}.css`, (q, s) => s.type('text/css').send(fs.readFileSync(path.join(REPO, `public/${n}.css`))));
 app.get('/page.js', (q, s) => s.type('text/javascript').send(fs.readFileSync(path.join(root, 'page.js'))));
 app.get('/page-notable.js', (q, s) => s.type('text/javascript').send(fs.readFileSync(path.join(root, 'page-notable.js'))));
+app.get('/page-fwlast.js', (q, s) => s.type('text/javascript').send(fs.readFileSync(path.join(root, 'page-fwlast.js'))));
 app.get('/novnc.js', (q, s) => s.type('text/javascript').send(fs.readFileSync(NOVNC)));
 const HTML = `<!doctype html><html data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">${CSS.map((n) => `<link rel="stylesheet" href="/${n}.css">`).join('')}<style>body{margin:0;background:var(--bg-root);height:100vh;overflow:hidden}</style></head><body><script src="/page.js"></script></body></html>`;
 app.get('/', (q, s) => s.type('text/html').send(HTML));
 app.get('/notable', (q, s) => s.type('text/html').send(HTML.replace('/page.js', '/page-notable.js')));
+app.get('/fwlast', (q, s) => s.type('text/html').send(HTML.replace('/page.js', '/page-fwlast.js')));
 const PORT = await freePort();
 srv = http.createServer(app);
 srv.on('upgrade', (req, socket, head) => bridge.handleUpgrade(req, socket, head, bridge.upgradeId(new URL(req.url, 'http://x').pathname)));
@@ -222,6 +231,19 @@ const stripText = (p) => p.ev(`(() => { const q = (s) => { const e = document.qu
 const centre = (p) => p.ev(`(() => { const b = document.querySelector('${WIN} .stream-video').getBoundingClientRect(); return [Math.round(b.left + b.width / 2), Math.round(b.top + b.height / 2)]; })()`);
 const sessions = async () => (await (await fetch(`http://127.0.0.1:${PORT}/api/desktop/machine-desktop/stream/facts?host=win-a`)).json()).sessions || [];
 const linesSince = (n) => psLines().slice(n);
+// ⑦: the firewall notice's copy button — where it is (ahead of the numbers? wholly inside the strip's visible box? the topmost
+// element at its centre?), then a click at its centre with the page's clipboard stubbed
+const FW_RULE = `netsh advfirewall firewall add rule name="VibeSpace agent" dir=in action=allow program="${NODE_EXE}" protocol=UDP`;
+async function fwCopyAt(p) {
+  const up = await p.until(`(() => { const e = document.querySelector('${WIN} .desktop-strip-firewall'); return !!e && !e.hidden; })()`, 8000);
+  const sf = await stripText(p);
+  await p.ev(`Object.defineProperty(navigator, 'clipboard', { value: { writeText: (t) => { window.__copied = t; return Promise.resolve(); } }, configurable: true })`);
+  const reach = await p.ev(`(() => { const r = (s) => document.querySelector('${WIN} ' + s).getBoundingClientRect(); const s = r('.desktop-strip'), b = r('.desktop-strip-fw-copy'), n = r('.desktop-strip-firewall'), st = r('.desktop-strip-stream'); const x = Math.round(b.left + b.width / 2), y = Math.round(b.top + b.height / 2), hit = document.elementFromPoint(x, y); return { x, y, before: n.right <= st.left, inView: b.left >= s.left && b.right <= s.right, hit: !!(hit && hit.closest('.desktop-strip-fw-copy')), strip: [s.left, s.right].map(Math.round), button: [b.left, b.right].map(Math.round), numbers: [st.left, st.right].map(Math.round) }; })()`);
+  await p.click(reach.x, reach.y);
+  const copied = await p.until('window.__copied !== undefined', 3000) ? await p.ev('window.__copied') : null;
+  const toast = await p.ev(`(document.getElementById('global-toasts') || {}).textContent || ''`);
+  return { up, reach, copied, toast, sf };
+}
 
 console.log('① – ⑥ desk 1280 px');
 {
@@ -297,17 +319,22 @@ console.log('⑦ relay-only ⑧ no source');
   const via = await p.until(`/经 hub 中转 · UDP$/.test((document.querySelector('${WIN} .desktop-strip-stream') || {}).textContent || '')`, 10000);
   const f = relayOnly.facts('win-a')[0] || {};
   ok(up && via && f.path === 'relay' && f.relay && f.relay.via === 'udp' && f.relay.leg.down > 0, '⑦ relay-only: the daemon\'s own UDP leg carries it — the strip says 经 hub 中转 · UDP, the record says path relay, via udp', { up, via, path: f.path, relay: f.relay });
-  const fwUp = await p.until(`(() => { const e = document.querySelector('${WIN} .desktop-strip-firewall'); return !!e && !e.hidden; })()`, 8000);
-  const sf = await stripText(p);
-  const want = `netsh advfirewall firewall add rule name="VibeSpace agent" dir=in action=allow program="${NODE_EXE}" protocol=UDP`;
-  await p.ev(`Object.defineProperty(navigator, 'clipboard', { value: { writeText: (t) => { window.__copied = t; return Promise.resolve(); } }, configurable: true })`);
-  const [bx, by] = await p.ev(`(() => { const b = document.querySelector('${WIN} .desktop-strip-fw-copy').getBoundingClientRect(); return [Math.round(b.left + b.width / 2), Math.round(b.top + b.height / 2)]; })()`);
-  await p.click(bx, by);
-  const copied = await p.until(`window.__copied !== undefined`, 3000) ? await p.ev('window.__copied') : null;
-  const toast = await p.ev(`(document.getElementById('global-toasts') || {}).textContent || ''`);
-  ok(fwUp && /^机器防火墙挡住直连，经 hub 中转/.test(sf.fw || '') && sf.fwCopy === '复制管理员命令' && sf.fwTitle === want && copied === want && /已复制，请粘贴到 WIN-DESK1 上以管理员身份打开的 PowerShell/.test(toast), '⑦ the machine\'s firewall blocks the direct path: the strip says 机器防火墙挡住直连，经 hub 中转, and 复制管理员命令 copies the netsh rule for its node.exe (the toast says where to paste it — VibeSpace never runs it)', { sf, copied, toast });
+  const fw = await fwCopyAt(p);
+  ok(fw.up && /^机器防火墙挡住直连，经 hub 中转/.test(fw.sf.fw || '') && fw.sf.fwCopy === '复制管理员命令' && fw.sf.fwTitle === FW_RULE && fw.reach.before && fw.reach.inView && fw.reach.hit && fw.copied === FW_RULE && /已复制，请粘贴到 WIN-DESK1 上以管理员身份打开的 PowerShell/.test(fw.toast), '⑦ the machine\'s firewall blocks the direct path: the strip says 机器防火墙挡住直连，经 hub 中转 AHEAD of the numbers, its 复制管理员命令 in view (no sideways scroll), and it copies the netsh rule for its node.exe (the toast says where to paste it — VibeSpace never runs it)', fw);
   await p.shot('relay.png', WIN);
   await p.close();
+  // RED CONTROL — the strip's OLD order (the notice after the numbers) in a 900 px window: the copy button is past the strip's
+  // edge and a click at its centre copies nothing; THE order in the same window copies (in DejaVu — the hosted runner's sans —
+  // the old order missed even in the desk's 1100 px window: the .296 mirror red)
+  const narrow = DESK.replace('width:1100px', 'width:900px'), pair = {};
+  for (const [name, at] of [['order', '/'], ['old', '/fwlast']]) {
+    const pc = await page(1280, 800, narrow, { at });
+    await pc.ev(`window.__open(${JSON.stringify(M)})`);
+    await playing(pc);
+    pair[name] = await fwCopyAt(pc);
+    await pc.close();
+  }
+  ok(narrow !== DESK && pair.order.reach.inView && pair.order.copied === FW_RULE && pair.old.up && !pair.old.reach.before && !pair.old.reach.inView && !pair.old.reach.hit && pair.old.copied === null, '⑦ RED CONTROL: the old order (the notice after the numbers) in a 900 px window — the copy button past the strip\'s edge, a click at its centre copies nothing; THE order in the same window copies', { order: pair.order.reach, old: pair.old.reach, oldCopied: pair.old.copied });
   relayOnly.shutdown();
   const linkOnly = DW.create({ access, direct: false, udpLeg: false, log: quiet });
   R.setup({ ...BASE, webrtc: linkOnly });

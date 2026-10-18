@@ -4,6 +4,15 @@ This file is the engineers' record of every release: the lanes, the verification
 
 `CHANGELOG.md` (with `CHANGELOG.zh.md` and `CHANGELOG.ja.md`) is the user's: what changed for the person using VibeSpace, one plain line per change, in the interface's language — the rules are in docs/changelog-style.md. From 2.369.199 on, every release also writes its section here, under the same `## <version> — <date>` heading as its user entry and in the same commit, newest first above the verbatim record.
 
+## 2.369.297 — 2026-10-17
+
+### lane stream-relay-udp-ci — the .296 master mirror's red in test-desktop-webrtc-chrome ⑦ (run 39095973196 heavy 4/6, twice; pre-run 39095971229 the same): the firewall notice's copy button past the strip's edge in DejaVu — a product fix (the strip's order) + the suite's reach legs; base 015b2f9f
+- CAUSE (the failed leg's own evidence, then a local repro): `copied: null, toast: ""` while `fw` read 机器防火墙挡住直连，经 hub 中转复制管理员命令 — the sentence WAS there (no direct pair suppressed it) and the clipboard was not it (the suite stubs `navigator.clipboard`); the click never reached the button. The strip is one sideways-scrolling row (`overflow-x: auto`, nowrap) and .296 appended the notice AFTER the stream numbers, which run long on the relay path (`… · 经 hub 中转 · UDP`; on the owner's own screen also `· NVENC · 编码 N ms`). Measured (page x; the 1100 px window's strip shows up to 1129): DejaVu — the hosted runner's sans — put the button at 1080–1189, its centre 1135 past the edge ⇒ the CDP click hit the page backdrop; this box's sans 1033–1142 — the centre inside, 13 px of the button already cut (the clipped 令 in .296's relay.png).
+- REPRO: the suite with a FONTCONFIG_FILE of dejavu + liberation + opentype/noto only and `taskset -c 0-1` ⇒ 21/1 with the runner's exact ✗ and evidence (the box's own fonts: 22/0).
+- FIX (src/lib/machine-desktop.js, the append order): the notice right after the status chip, AHEAD of the numbers — the button at 623–732 (box) / 642–751 (DejaVu): ~380 px to spare in the 1100 px window, ~180 px at 900 px. The numbers come last and scroll sideways as on the phone (⑨ unchanged).
+- SUITE (test-desktop-webrtc-chrome 22 → 23): ⑦ now asserts, before it clicks, the notice ahead of the numbers, the button wholly inside the strip's visible box and the topmost element at its centre (the click's own point). RED CONTROL: a second page bundle whose esbuild onLoad puts the old order back (throws if the line moved) in a 900 px window — the button at 1033–1142 / 1080–1189, past the strip's 929, a click at its centre copies nothing — and THE order in the same window copies. Green with both font sets.
+- NOT DONE: on the phone (375 px) the notice still starts past the edge (the picker, buttons and chip fill the row); the strip there is a sideways scroller by design (⑨), the notice is the first thing a scroll reveals.
+
 ## 2.369.296 — 2026-10-17
 
 ### lane stream-relay-udp — the stream's hub relay over a daemon-initiated plain-UDP leg (TURN-shaped), the firewall fact, the fallback ladder (streaming P1 follow-up; the owner's real leg 2026-10-18 02:57Z)

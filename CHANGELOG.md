@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.297 — 2026-10-17
+
+### Fixed
+- On a paired machine's desktop, the firewall notice and its "Copy the admin command" button now come before the stream numbers, so they stay in view.
+
 ## 2.369.296 — 2026-10-17
 
 ### Fixed
