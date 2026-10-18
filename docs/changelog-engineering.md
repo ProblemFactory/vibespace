@@ -57,6 +57,46 @@ This file is the engineers' record of every release: the lanes, the verification
 
 ## 2.369.300 — 2026-10-18
 
+### lane stream-p3m-probe — P3m-0: the Mac screen + single-window capture, encode, input and TCC probe on the owner's Macbook (design q-041 r3 §3; probe sources only: scripts/probes/stream-p3m/, no src/ change, no bump); base 5342d803
+- **THE MACHINE:**
+  - MacBook Pro M4 Pro, macOS 26.5.2, lid shut, with two PG27UCDM 4K displays at 2× (EDR potential 10.15, now 1.0).
+  - Command Line Tools 26.6, ffmpeg 8.0.1 with VideoToolbox.
+  - The agent is a LaunchAgent running Homebrew's node; the detached daemon has ppid 1.
+  - The session was LOCKED with the displays asleep until the owner came. The owner granted Screen Recording + Accessibility to the probe's launcher only.
+- **TCC: TODAY'S SHAPE IS WRONG.** tccd's own log (`log show --predicate 'subsystem == "com.apple.TCC"'`, no root needed) shows the attribution.
+  - It attributes every plain child of agentd to `/opt/homebrew/Cellar/node/25.8.2/bin/node`, BY PATH. A `brew upgrade node` orphans the grant, and granting node grants every node that LaunchAgent runs.
+  - A background request gets NO prompt (`Service kTCCServiceScreenCapture does not allow prompting; returning denied`). It gets only a universalAccessAuthWarn alert and a disabled Settings row. Accessibility behaves the same ("returning Unknown").
+  - The fix, measured: `posix_spawn` with `responsibility_spawnattrs_setdisclaim(attr, 1)` makes the helper its own client.
+  - An ad-hoc client is keyed to path + cdhash. Measured: the same bytes at another path ⇒ refused; rebuilt in place ⇒ refused; the original restored ⇒ allowed.
+- **CAPTURE (ScreenCaptureKit from a CLI helper):**
+  - Display 4K native: 57 fps; capture latency displayTime → callback p50 −0.9 ms. CPU: helper 1.8 %, WindowServer +7 % and replayd +4 % of a core.
+  - The default config is 1920×1080 POINTS 420v. Native size needs `contentRect × pointPixelScale`.
+  - Every format runs at 4K: BGRA, 420v/f, x420, xf20, l10r, xf44, RGhA. The HDR stream presets give xf44 + DisplayP3_PQ; in that capture SDR white = 100 nits. The `captureHDRScreenshot*` presets segfault in `init(preset:)`.
+  - **SDR greys are exact in every format: SCK does no tone-mapping, so the Mac needs no LUT stage.** But `colorSpaceName` nil hands the DISPLAY profile under a BT.709 tag (sRGB red → 208,74,34). `colorSpaceName = sRGB` makes it exact: BGRA 18/19 exact, 420v 19/19 within ±2.
+  - A window filter in a CLI asserts `CGS_REQUIRE_INIT` unless `NSApplication.shared` comes first. The window frame includes the title bar (32 pt). Greys 19/19 exact at 57 fps.
+- **BACKGROUND:** a covered window gives full frames. On a non-current Space (the probe's own full-screen window took the display's Space) the window has onScreen=false but still gives full frames at ~23 fps. **A minimized window gives `suspended` and no picture** — r3 §2's "never minimize" rule holds.
+- **ENCODE (VTCompressionSession, H.264 Constrained Baseline, low-latency RC):**
+  - `ForceKeyFrame` = an IDR on THAT frame (NAL 5 + SPS/PPS each time).
+  - A live `AverageBitRate` change is followed without a restart. Never call `VTSessionSetProperty` from the output callback: that deadlocks.
+  - Real frames:
+    - 4K tops out at 37 fps (serial 29 ms per frame on the SCK queue, capture backed up to 130 ms).
+    - **4K30 at 18.7 ms.**
+    - **1440p60 (SCK-scaled) at 57 fps / 11.9 ms.**
+  - The plain realtime session pipelines 80–150 ms and starves SCK at 4K. `MaxFrameDelayCount` is unsupported.
+  - ffmpeg h264_videotoolbox over a pipe: NV12 or BGRA at 4K sustains 67 fps synthetic and 52 fps from SCK.
+- **INPUT:**
+  - `CGEventPostToPid` delivers into an app that is NOT frontmost, without activating it: TextEdit while Chrome was in front, a Chrome `data:` page while TextEdit was in front, and the probe's own window (keys + a click).
+  - `CGEventPost(.cghidEventTap)` lands in the frontmost app.
+  - Both need Accessibility. Without it, WindowServer's `kTCCServicePostEvent` check drops the events silently: the keyDown counter does not move and there is no prompt.
+  - Read-back works through AX under the same grant, so Automation is never needed.
+- **DISTRIBUTION:**
+  - Building on the box requires the CLT: `/usr/bin/swiftc` is only xcrun's trampoline.
+  - The on-box default target is minos 26.0. The helper needs `-target …-macos15.0`.
+  - Universal build: arm64 + x86_64 → lipo → `codesign -s -`, 538 KB. The ad-hoc signature survives cp/ditto/tar/zip and a Linux round trip.
+  - A file the agent lands has no quarantine and mode 0644: chmod +x and it runs (`spctl` says rejected, which does not matter).
+  - The same file with a browser's quarantine BLOCKS in exec on a Gatekeeper prompt.
+- REPORT: /var/tmp/vibespace-lanes/stream-p3m-probe/report.md (a verdict and the build lines per r3 row, the greys table, the TCC map, PNGs).
+
 ### lane cli-registry — ONE registry of the agent CLIs renders every surface that lists them (the owner 2026-10-18: a top-level list of the CLIs and their one-liners, its total length limited and tested, one source of truth); base 4a14bcc2 (.298)
 - WHY: four hand-kept copies of "which tools exist" drifted apart. They were the SessionStart section (`_toolsSectionParts`), the reminder (`perTurnToolsLine`, whose literal `vibespace-docs [status|ask|task|jobs|msg|pages|browser]` never listed window / exit / apps / design), AGENT_DOC_TOPICS, and index-manual.md's hand table (10 tools, no msg / channels). .298 added vibespace-channels to two of them by hand.
 - THE REGISTRY (PURE src/agent-cli-registry.js) holds 13 ROWS, one per CLI on PATH. Each row has a name, a topic (+ aliases), a summary ≤ 140 B, its manual file(s), a gate (the status / ask / task / jobs toggles, `channels` = the reach word, `always`), and `teach { sessionStart, reminder }` or null. The null rows are index-only: page / design / exit / window / browser / app. The renderers are renderSessionStartTools (task-groups `_toolsSectionParts` adds only its absolute-paths + Artifacts trailer), renderReminderLine (agent-routes `perTurnToolsLine`), renderIndex and AGENT_DOC_TOPICS.
