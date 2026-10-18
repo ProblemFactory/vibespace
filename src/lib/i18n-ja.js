@@ -7481,10 +7481,13 @@ export default {
   "Jump to this message": "このメッセージへ移動",
   "Handled proposals ({n})": "処理済みの提案（{n}）",
   "The sent message has not reached this window yet": "送信したメッセージはまだこのウィンドウに届いていません",
-  // lane exit-see-whole (2026-10-03): the whole command on the card and in the Commands list
-  "Show the whole command ({n} lines)": "コマンド全体を表示（{n} 行）",
-  "Show the whole command ({n} characters)": "コマンド全体を表示（{n} 文字）",
-  "Fold the command": "コマンドを折りたたむ",
+  // lane exit-card-margin (2026-10-18): a machine run card says who did what to what; the command under 技術的な詳細
+  "Ran a command on {machine} — exit {code} · {secs}": "{machine} でコマンドを実行しました — 終了コード {code} · {secs}",
+  "Ran a command on {machine} — timed out after {secs}": "{machine} でコマンドを実行しました — {secs} でタイムアウト",
+  "Could not start a command on {machine} — {why}": "{machine} でコマンドを開始できませんでした — {why}",
+  "(access was removed while it ran)": "（実行中にアクセス権が削除されました）",
+  "Command · {n} characters": "コマンド · {n} 文字",
+  "Command · {n} lines": "コマンド · {n} 行",
   "Archived channels": "アーカイブ済みチャンネル",
   "Skip archived channels": "アーカイブ済みチャンネルを除外",
   "Also list archived channels (read once, never polled)": "アーカイブ済みチャンネルも一覧に入れる（一度だけ読み、ポーリングしない）",

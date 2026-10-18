@@ -9,16 +9,16 @@
 //      the node, its open state, one summary and one command (patched in place)
 //   §1b (lane exit-runs-dialog-fit, 2.369.209) the duration words: a run that rounds to nothing reads "<0.1 s" (never
 //      "0.0 s"), tenths otherwise; a 0 ms transfer row's size and duration share ONE outcome line
-//   §2 the chat card's command block (src/lib/chat-renderers.js exitRunBlock): a 4 096-byte one-token command whole,
-//      folded behind "Show the whole command (4096 characters)"; a 200-line script folded behind "(200 lines)"; the
-//      toggle opens / folds and re-words the expander; four short lines unfolded; a card without `cmd` (an older
-//      card) draws no block; the block comes BEFORE the output
+//   §2 the chat card's command block (src/lib/chat-renderers.js exitRunBlock) — lane exit-card-margin (2026-10-18, the
+//      owner: 「No raw strings in cards」): the command sits in ONE closed 技术细节 fold (data-fold="tech") AFTER the output,
+//      naming its length ("Command · 4096 characters" / "· 200 lines") and holding it whole (a 4 096-byte token, a
+//      200-line script, four short lines — no clamp, no second fold); a card without `cmd` (an older card) draws none
 //   §3 the Remote panel's machine row (source census of src/lib/sidebar-mounts.js): the Commands icon and the
 //      last-run line both open openExitRunsDialog, no hover title on the last-run line; the CSS: both command pres
-//      wrap anywhere, the card's fold clamps four lines
+//      wrap anywhere; inside 技术细节 the whole command scrolls past 60vh (no four-line clamp left)
 //   §4 CONTROLS (patched copies of the source, bundled in memory — src/ never touched): the painter's hover title back;
-//      the body's command cut to the head; the card without its command block; the fold never folding; a row
-//      without the icon; the 2.369.207 duration words (f) — each goes red
+//      the body's command cut to the head; the card without its command block; the command on the card again
+//      outside its fold (d); a row without the icon; the 2.369.207 duration words (f) — each goes red
 // Run: node scripts/test-exit-runs-dialog.mjs
 import fs from 'node:fs';
 import os from 'node:os';
@@ -107,23 +107,21 @@ const DUR = (f) => { const got = [0, 12, 49, 50, 100, 1234, -5, NaN, undefined, 
 { const n = D.paintRow(document.createElement('details'), { at: 1, name: 'n', cmd: 'pull /a → /b', ms: 0, outcome: 'ok', transfer: { verb: 'pull', bytes: 2048, verified: 'sha256', local: '/b', remote: '/a' } }); const o = n.querySelector('.exit-runs-outcome'); const ms = o && o.querySelector('.exit-runs-ms'), v = o && o.querySelector('.exit-runs-verdict');
   ok(!!(ms && v && ms.textContent === '<0.1 s' && /2/.test(v.textContent)), `§1b a 0 ms transfer row: its size and "<0.1 s" in ONE outcome line (${v && v.textContent} · ${ms && ms.textContent})`); }
 
-console.log('§2 the chat card: the whole command above its output, folded at four lines, the expander naming its count');
+console.log('§2 the chat card: the output, then ONE closed 技术细节 fold — the command\'s length, the command whole (lane exit-card-margin)');
 const R = await bundle('src/lib/chat-renderers.js');
 const ONE = 'echo ' + 'Q'.repeat(4091), L200 = Array.from({ length: 200 }, (_, i) => `l${i}`).join('\n');
-const cardOf = (Rm, x) => { const b = Rm.exitRunBlock(x); const box = b.querySelector('.chat-exit-cmd-box'); const pre = b.querySelector('.chat-exit-cmd'); const det = b.querySelector('.chat-exit-cmd-fold'); const sum = det && det.querySelector('summary'); return { b, box, pre, det, sum, text: pre && pre.textContent, label: sum && sum.textContent, folded: !!box && box.classList.contains('chat-exit-cmd-folded'), first: b.children[0] === box, wrapped: !!pre && pre.classList.contains('chat-pre-wrapped') }; };
+const cardOf = (Rm, x) => { const b = Rm.exitRunBlock(x); const det = b.querySelector(':scope > .chat-exit-tech'); const sum = det && det.querySelector(':scope > summary'); const len = det && det.querySelector('.chat-exit-cmd-len'); const box = b.querySelector('.chat-exit-cmd-box'); const pre = b.querySelector('.chat-exit-cmd');
+  return { b, det, sum, box, pre, text: pre && pre.textContent, label: sum && sum.textContent, len: len && len.textContent, inFold: !!(det && pre && det.all.includes(pre)), last: !!det && b.children[b.children.length - 1] === det, closed: !!det && det.open === false, fold: det ? det.dataset.fold : null,
+    folds: b.all.filter((n) => n.tagName === 'DETAILS' && n.dataset.fold === 'tech').length, clamp: !!b.querySelector('.chat-exit-cmd-fold') || !!(box && box.classList.contains('chat-exit-cmd-folded')), wrapped: !!pre && pre.classList.contains('chat-pre-wrapped') }; };
 const c1 = cardOf(R, { cmd: ONE, code: 0, stdout: 'ok\n', stderr: '', cut: {} });
-ok(c1.text === ONE && c1.text.length === 4096 && c1.first && c1.wrapped && c1.pre.tagName === 'PRE', 'a 4 096-byte one-token command is WHOLE in the card\'s pre (wrapped), above the output', { len: c1.text && c1.text.length, first: c1.first });
-ok(c1.folded && c1.label === 'Show the whole command (4096 characters)', 'folded behind an expander naming its length (one line)', c1.label);
-c1.det.open = true; c1.det.fire('toggle');
-const opened = c1.box.classList.contains('chat-exit-cmd-open') && c1.sum.textContent === 'Fold the command';
-c1.det.open = false; c1.det.fire('toggle');
-ok(opened && !c1.box.classList.contains('chat-exit-cmd-open') && c1.sum.textContent === 'Show the whole command (4096 characters)', 'the toggle opens it (the expander reads "Fold the command") and folds it back');
+ok(c1.text === ONE && c1.text.length === 4096 && c1.wrapped && c1.pre.tagName === 'PRE' && c1.inFold, 'a 4 096-byte one-token command is WHOLE in a wrapped pre — inside the fold', { len: c1.text && c1.text.length, inFold: c1.inFold });
+ok(c1.fold === 'tech' && c1.label === 'Technical details' && c1.closed && c1.last && c1.folds === 1 && c1.len === 'Command · 4096 characters' && !c1.clamp, 'ONE closed 技术细节 fold (data-fold="tech") AFTER the output, naming the length of a one-liner in characters; no clamp, no second fold inside', { label: c1.label, len: c1.len, last: c1.last, folds: c1.folds, clamp: c1.clamp });
 const c2 = cardOf(R, { cmd: L200, code: 0, stdout: '', stderr: '', cut: {} });
-ok(c2.text === L200 && c2.folded && c2.label === 'Show the whole command (200 lines)' && c2.first, 'a 200-line script keeps its lines, folded behind "(200 lines)" — even with no output (the block precedes the no-output line)', c2.label);
+ok(c2.text === L200 && c2.inFold && c2.len === 'Command · 200 lines' && c2.last && !!c2.b.querySelector('.chat-exit-none'), 'a 200-line script keeps its lines, its length in lines — with no output, the fold follows the no-output line', c2.len);
 const c3 = cardOf(R, { cmd: 'a\nb\nc\nd', code: 0, stdout: 'x', stderr: '', cut: {} });
-ok(c3.text === 'a\nb\nc\nd' && !c3.folded && !c3.det, 'four short lines are shown whole, no expander');
+ok(c3.text === 'a\nb\nc\nd' && c3.inFold && c3.len === 'Command · 4 lines' && !c3.clamp, 'four short lines: whole, in the fold too (a command on the card is technical detail)', c3.len);
 const c4 = cardOf(R, { code: 0, stdout: 'x', stderr: '', cut: {} });
-ok(!c4.box && !!c4.b.querySelector('.chat-exit-out'), 'a card without `cmd` (an older card) draws no command block, its output as before');
+ok(!c4.det && !c4.box && !!c4.b.querySelector('.chat-exit-out'), 'a card without `cmd` (an older card) draws no fold, its output as before');
 
 // ── §3 the machine row + the CSS (source census) ──
 console.log('§3 the Remote panel\'s machine row and the CSS');
@@ -140,22 +138,23 @@ const CSS = fs.readFileSync(path.join(REPO, 'public/chat.css'), 'utf8'), STY = f
 const rule = (css, sel) => { const m = new RegExp('^' + sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ' \\{([^}]*)\\}', 'm').exec(css); return m ? m[1] : ''; };
 const wraps = (r) => /white-space: pre-wrap/.test(r) && /overflow-wrap: anywhere/.test(r);
 ok(wraps(rule(CSS, '.chat-exit-cmd')) && wraps(rule(CSS, '.chat-exit-out, .chat-exit-out-all')) && wraps(rule(STY, '.exit-runs-cmd-all')), 'both command pres and the card\'s output wrap anywhere (a 1 365-byte token breaks on a phone)');
-ok(/max-height: calc\(4 \* 1\.45em \+ 10px\); overflow: hidden/.test(rule(CSS, '.chat-exit-cmd-folded:not(.chat-exit-cmd-open) .chat-exit-cmd')) && /line-height: 1\.45/.test(rule(CSS, '.chat-exit-cmd')), 'the fold clamps four lines of the command\'s own line height');
+ok(/max-height: 60vh; overflow: auto/.test(rule(CSS, '.chat-exit-tech .chat-exit-cmd')) && !/chat-exit-cmd-folded|chat-exit-cmd-fold\b/.test(CSS), 'inside 技术细节 the whole command scrolls past 60vh; no four-line clamp is left in chat.css');
 
 // ── §4 controls ──
 console.log('§4 controls (patched copies, bundled in memory)');
 const pa = patched('src/lib/exit-runs-dialog.js', "  main.append(el('code', 'exit-runs-cmd',", "  sum.title = cmd; // CONTROL: the hover title back\n  main.append(el('code', 'exit-runs-cmd',");
 const pb = patched('src/lib/exit-runs-dialog.js', "const w = wrapPre('exit-runs-cmd-all', cmd);", "const w = wrapPre('exit-runs-cmd-all', flat.slice(0, CMD_HEAD)); // CONTROL: the head again");
 const pf = patched('src/lib/exit-runs-dialog.js', "return Number(s) === 0 ? '<0.1 s' : `${s} s`;", "return `${s} s`; // CONTROL: the 2.369.207 words");
-const pc = patched('src/lib/chat-renderers.js', "  if (typeof x.cmd === 'string' && x.cmd) wrap.appendChild(exitCmdBlock(x.cmd));", '');
-const pd = patched('src/exit-reach.js', 'folded: lines > CMD_FOLD_LINES || c.length > CMD_FOLD_CHARS', 'folded: false');
+const TECH = "  const tech = typeof x.cmd === 'string' && x.cmd ? exitTechFold(x.cmd) : null;";
+const pc = patched('src/lib/chat-renderers.js', TECH, '  const tech = null; // CONTROL: no command block');
+const pd = patched('src/lib/chat-renderers.js', TECH, TECH + "\n  if (tech) wrap.appendChild(exitCmdBlock(x.cmd)); // CONTROL: the command on the card again, outside its fold");
 ok(pa.applies && pb.applies && pc.applies && pd.applies && pf.applies, 'every patch applies');
 ok(!DUR((await bundle('src/lib/exit-runs-dialog.js', pf)).durationText).ok, 'CONTROL (f): the old duration words ("0.0 s" for a 0 ms transfer) — §1b goes red');
 ok((await painterCase(await bundle('src/lib/exit-runs-dialog.js', pa))).titles > 0, 'CONTROL (a): the hover title back on the row — §1\'s title census goes red');
 const pbr = await painterCase(await bundle('src/lib/exit-runs-dialog.js', pb));
 ok(pbr.whole !== MULTI, 'CONTROL (b): the body\'s command cut to the head — §1\'s whole-command row goes red');
 ok(!cardOf(await bundle('src/lib/chat-renderers.js', pc), { cmd: ONE, code: 0, stdout: 'x', stderr: '', cut: {} }).pre, 'CONTROL (c): a card without its command block — §2 goes red');
-ok(!cardOf(await bundle('src/lib/chat-renderers.js', pd), { cmd: L200, code: 0, stdout: 'x', stderr: '', cut: {} }).folded, 'CONTROL (d): a fold that never folds (exit-reach.js patched) — the 200-line card shows no expander (red)');
+ok(!cardOf(await bundle('src/lib/chat-renderers.js', pd), { cmd: L200, code: 0, stdout: 'x', stderr: '', cut: {} }).inFold, 'CONTROL (d): the command on the card again, outside its 技术细节 fold (the pre-lane shape) — §2 goes red');
 const noIcon = SM.replace(/\n {8}ibtn\(MI\.list,[^\n]*\n/, '\n');
 ok(noIcon !== SM && !rowCensus(noIcon).icon, 'CONTROL (e): a row without the Commands icon — §3\'s census goes red');
 

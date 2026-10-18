@@ -2,6 +2,15 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.308 — 2026-10-18
+
+### Changed
+- A command run on a paired machine reads as one sentence naming the machine and the exit code; the command itself sits under Technical details.
+
+### Fixed
+- VibeSpace notices and messages from other agents have their inner margin and coloured left line again, lined up with the other messages.
+- A folded message from another agent opens and closes from the arrow on its title line; open, it leaves no empty row and has no Show/Hide button.
+
 ## 2.369.307 — 2026-10-18
 
 ### Fixed

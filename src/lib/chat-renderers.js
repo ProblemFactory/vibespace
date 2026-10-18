@@ -28,7 +28,7 @@ import { wakeFacts as channelWakeFacts, refOf as channelRefOf, splitLead as chan
 import { handoverFacts } from '../stash-summary.js'; // 2026-09-28: the hand-over card's title + the notices behind its expander, read back by the module that wrote the words
 import { encodedCommandOf } from '../encoded-command.js'; // lane machine-card-fold: a PowerShell -EncodedCommand drawn as the script it runs (PURE, bundled)
 import { revealParts as hiddenPartsOf } from '../hidden-chars.js'; // …its hidden characters as visible U+XXXX marks (THE one set)
-import { machineLineOf } from './chat-run-summary.js'; // lane machine-card-compact: a Machines card's ONE line inside its machine's group (PURE)
+import { machineLineOf, machineCardOf } from './chat-run-summary.js'; // lane machine-card-compact: a Machines card's ONE line inside its machine's group (PURE); lane exit-card-margin: a run card's words
 import { exitCallCardOf } from './chat-run-summary.js'; // lane exit-calls-in-history: a vibespace-exit Bash call drawn as its machine card (PURE)
 import { outputPreview, cmdFold } from '../exit-reach.js'; // lane-exit-run-output E3: the command card's first lines of output (stderr first) + "Show output" (PURE, bundled)
 const noticeFacts = (body) => handbackFacts(body) || handoverFacts(body) || channelWakeFacts(body);   // ONE facts hook per producer, tried in order; null = the generic rules
@@ -437,10 +437,10 @@ function parseUnifiedDiffLines(text) {
 
 /** lane exit-see-whole (design 013 piece 1a; the owner: 「这些指令输入展示不全，也没地方看到完整版」): the command card's
  *  COMMAND BLOCK — the whole command as the run sent it (≤ 4 KiB, its lines kept, hidden characters refused upstream),
- *  wrapped (a 4 KiB token breaks anywhere), folded at four lines behind an expander that names what it opens. Text only. */
+ *  wrapped (a 4 KiB token breaks anywhere). lane exit-card-margin: it lives in the card's ONE 技术细节 fold (exitTechFold),
+ *  whole there — no fold of its own. A shell command is a string, never prose: text only, no path is a link. */
 function exitCmdBlock(cmd, { raw = false, marks = false } = {}) {
   if (!raw) { const enc = encodedCommandOf(cmd); if (enc) return encodedCmdBlock(cmd, enc); }   // lane machine-card-fold
-  const f = cmdFold(cmd);
   const box = document.createElement('div');
   box.className = 'chat-exit-cmd-box';
   const pre = document.createElement('pre');
@@ -448,15 +448,39 @@ function exitCmdBlock(cmd, { raw = false, marks = false } = {}) {
   if (marks) for (const p of hiddenPartsOf(cmd)) { if (p.code) { const m = document.createElement('span'); m.className = 'chat-exit-cmd-mark'; m.textContent = p.code; pre.appendChild(m); } else pre.append(p.text); }
   else pre.textContent = cmd;
   box.appendChild(pre);
-  if (!f.folded) return box;
-  box.classList.add('chat-exit-cmd-folded');
-  const label = f.lines > 1 ? t('Show the whole command ({n} lines)', { n: f.lines }) : t('Show the whole command ({n} characters)', { n: f.chars });
-  const det = document.createElement('details');
-  det.className = 'chat-exit-cmd-fold';
-  const sum = document.createElement('summary'); sum.textContent = label; det.appendChild(sum);
-  det.addEventListener('toggle', () => { box.classList.toggle('chat-exit-cmd-open', det.open); sum.textContent = det.open ? t('Fold the command') : label; });
-  box.appendChild(det);
   return box;
+}
+
+/** lane exit-card-margin (the owner 2026-10-18: 「No raw strings in cards」): the card's ONE 技术细节 fold, closed, after the
+ *  output — the command's length (a line count, or the characters of one line) and the command itself, whole. */
+function exitTechFold(cmd) {
+  const f = cmdFold(cmd);
+  const det = document.createElement('details');
+  det.className = 'chat-exit-tech';
+  det.dataset.fold = 'tech';
+  const sum = document.createElement('summary'); sum.textContent = t('Technical details');
+  const len = document.createElement('div'); len.className = 'chat-exit-cmd-len';
+  len.textContent = f.lines > 1 ? t('Command · {n} lines', { n: f.lines }) : t('Command · {n} characters', { n: f.chars });
+  det.append(sum, len, exitCmdBlock(cmd));
+  return det;
+}
+
+/** lane exit-card-margin: a Machines RUN card's words — actor + verb + named object ("Ran a command on Macbook — exit 0 ·
+ *  0.2 s"), read off the card's own record (its exitRun + the hub's words); the command is in the 技术细节 fold. null = not
+ *  a run card that holds its command (an older card without `cmd`, a copy, a refusal): its words stay as the hub wrote them. */
+function machineRunWords(msg) {
+  const x = msg && msg.exitRun;
+  if (!x || typeof x !== 'object' || typeof x.cmd !== 'string' || !x.cmd) return null;
+  const mc = machineCardOf(msg);
+  if (!mc || mc.verb !== 'run' || !mc.machine) return null;
+  const b0 = Array.isArray(msg.content) ? msg.content.find((b) => b && b.type === 'text') : null;
+  const said = String((b0 && b0.text) || '').trim(), machine = mc.machine;
+  const secs = `${(Math.max(0, Number(x.ms) || 0) / 1000).toFixed(1)} s`;   // the hub's own spelling (exit-reach cardText)
+  const revoked = said.endsWith(' (access was removed while it ran)') ? ' ' + t('(access was removed while it ran)') : '';
+  if (said.startsWith('ran ')) return (mc.outcome === 'timed_out' ? t('Ran a command on {machine} — timed out after {secs}', { machine, secs })
+    : t('Ran a command on {machine} — exit {code} · {secs}', { machine, code: mc.code == null ? '?' : mc.code, secs })) + revoked;
+  const nostart = /^could not start `[^`]*` on .*? — ([\s\S]+)$/.exec(said);   // the reason stays the hub's (spawnFailureText)
+  return nostart ? t('Could not start a command on {machine} — {why}', { machine, why: nostart[1] }) : null;
 }
 
 /** lane machine-card-fold (the owner's phone: 700 characters of `-EncodedCommand WwBDAG8A…` nobody can read): a PowerShell
@@ -494,7 +518,8 @@ function encodedCmdBlock(cmd, enc) {
 export function exitRunBlock(x) {
   const wrap = document.createElement('div');
   wrap.className = 'chat-exit-run';
-  if (typeof x.cmd === 'string' && x.cmd) wrap.appendChild(exitCmdBlock(x.cmd));   // lane exit-see-whole: the command AS ITSELF above its output
+  // lane exit-see-whole: the command AS ITSELF on the card — lane exit-card-margin: in its 技术细节 fold, after the output
+  const tech = typeof x.cmd === 'string' && x.cmd ? exitTechFold(x.cmd) : null;
   const heads = { stdout: String(x.stdout || ''), stderr: String(x.stderr || ''), cut: { stdout: !!(x.cut && x.cut.stdout), stderr: !!(x.cut && x.cut.stderr) } };
   const pv = outputPreview(heads, 3);
   if (!pv.stream) {
@@ -502,6 +527,7 @@ export function exitRunBlock(x) {
     // 100 KB stream of newlines read "no output" with the cut unsaid)
     const blank = !!(heads.stdout || heads.stderr), anyCut = heads.cut.stdout || heads.cut.stderr;
     if (!x.spawnError || blank) { const none = document.createElement('div'); none.className = 'chat-exit-none'; none.textContent = (blank ? t('no visible output') : t('no output')) + (anyCut ? ` · ${t('cut at 4 KiB')}` : ''); wrap.appendChild(none); }
+    if (tech) wrap.appendChild(tech);
     return wrap;
   }
   const pre = document.createElement('pre');
@@ -521,6 +547,7 @@ export function exitRunBlock(x) {
     }
     wrap.appendChild(det);
   }
+  if (tech) wrap.appendChild(tech);
   return wrap;
 }
 
@@ -931,8 +958,11 @@ class ChatRenderers {
         : null;
     // lane peer-card-fold: a notice shown whole (a job's report) folds like any peer card — head + preview + Show; a CHANNEL
     // card's words stay TEXT (B-c127 verify r1 F4), so it never takes the markdown fold (composed at the 2.369.202 integration)
-    const whole = view.body && !view.folded && !ref ? this._peerBodyHtml(msg, view.body, 'VibeSpace') : null;
-    el.innerHTML = `<div class="chat-vs-notice-head">${UI_ICONS.info || ''}<span class="chat-vs-notice-title">${escHtml(head)}</span></div>${ref ? '<div class="chat-vs-notice-conv-line"></div>' : ''}${whole ? whole.html : body || ''}`;
+    // lane exit-card-margin (the owner: 「No raw strings in cards」): a Machines RUN card says who did what to what — the
+    // command (its length, its paths) is in the run block's 技术细节 fold, never in the words (a command is not prose)
+    const runWords = machineRunWords(msg);
+    const whole = !runWords && view.body && !view.folded && !ref ? this._peerBodyHtml(msg, view.body, 'VibeSpace') : null;
+    el.innerHTML = `<div class="chat-vs-notice-head">${UI_ICONS.info || ''}<span class="chat-vs-notice-title">${escHtml(head)}</span></div>${ref ? '<div class="chat-vs-notice-conv-line"></div>' : ''}${runWords ? `<div class="chat-text">${escHtml(runWords)}</div>` : whole ? whole.html : body || ''}`;
     if (whole) this._wirePeerFold(el, msg, whole.who);
     if (ref) this._channelRefLine(el.querySelector('.chat-vs-notice-conv-line'), ref, lead ? lead.rest : '');
     this._appendResetCreditBtn(el, msg); // VibeSpace's usage-limit card offers a stored reset credit (design-reset-credits §5)
@@ -973,25 +1003,40 @@ class ChatRenderers {
     line.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(e); } };
   }
 
-  /** lane peer-card-fold: a peer card's body — whole, or folded to ONE preview line behind the house expander
-   *  (`details.chat-diff`, the tool cards' widget); headings demoted either way. `who` = the sender for the label. */
+  /** lane peer-card-fold: a peer card's body — whole, or folded to ONE preview line (the summary, shown only while
+   *  closed: open leaves no row of its own behind — lane exit-card-margin); headings demoted either way. The switch is
+   *  the card's head (`_wirePeerFold`). `who` = the sender for the label. */
   _peerBodyHtml(msg, text, who) {
     const fold = peerCardFold(msg, { setting: this.app?.settings?.get?.(PEER_FOLD_SETTING) !== false, text });
     const name = who ?? fold.headLine;
     const md = `<div class="chat-text">${demoteHeadings(this.renderMarkdown(String(text || '').trim()))}</div>`;
     if (!fold.collapsed) return { html: md, who: name, folded: false };
     const open = !!(msg?.id && this._peerFold?.isOpen?.(msg.id));
-    return { who: name, folded: true, html: `<details class="chat-diff chat-peer-fold"${open ? ' open' : ''}><summary class="chat-diff-summary chat-peer-fold-summary" aria-label="${escHtml(peerFoldLabel(open, name))}"><span class="chat-peer-preview">${escHtml(fold.previewText)}</span><span class="chat-peer-fold-btn"><span class="chat-peer-fold-show">${escHtml(t('Show'))}</span><span class="chat-peer-fold-hide">${escHtml(t('Hide'))}</span></span></summary>${md}</details>` };
+    return { who: name, folded: true, html: `<details class="chat-peer-fold"${open ? ' open' : ''}><summary class="chat-peer-fold-summary" tabindex="-1"><span class="chat-peer-preview">${escHtml(fold.previewText)}</span></summary>${md}</details>` };
   }
 
-  /** The fold's toggle reports to the view (the state lives there); the label follows the state. */
+  /** lane exit-card-margin (主开发 2026-10-18, the owner's group card: an empty ▾ row once open, a Show/Hide pill no other
+   *  card has): ONE switch, as on every foldable card — the HEAD's ▸/▾ (a button, its label naming the sender); a press
+   *  anywhere on the head but a link toggles too, and so does the preview line. The toggle reports to the view (the
+   *  state lives there); the ▸/▾ and the label follow the state. */
   _wirePeerFold(el, msg, who) {
     const det = el.querySelector(':scope > details.chat-peer-fold');
     if (!det) return;
     el.classList.add('chat-peer-folded');
-    const sum = det.querySelector(':scope > summary');
+    const head = el.firstElementChild !== det ? el.firstElementChild : null;   // the card's head: its first child (a peer's, a notice's)
+    const arrow = document.createElement('button');
+    arrow.type = 'button';
+    arrow.className = 'chat-peer-fold-arrow';
+    const said = () => { arrow.textContent = det.open ? '▾' : '▸'; arrow.setAttribute('aria-expanded', String(det.open)); arrow.setAttribute('aria-label', peerFoldLabel(det.open, who)); };
+    said();
+    if (head) {
+      head.prepend(arrow);
+      head.classList.add('chat-peer-fold-head');
+      // a link in the head is its own door; a drag that selected words is not a press
+      head.addEventListener('click', (e) => { if (e.target.closest?.('a, [role="link"]') || String(window.getSelection?.() || '')) return; det.open = !det.open; });
+    } else { arrow.onclick = () => { det.open = !det.open; }; det.before(arrow); }
     det.addEventListener('toggle', () => {
-      sum?.setAttribute('aria-label', peerFoldLabel(det.open, who));
+      said();
       if (msg?.id) this._peerFold?.set?.(msg.id, det.open, el);
     });
   }

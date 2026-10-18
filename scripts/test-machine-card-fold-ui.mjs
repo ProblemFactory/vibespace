@@ -165,13 +165,14 @@ const MCENSUS = `(() => { const v = ${VIEW}; const list = v._messageList;
     return { id: el._rawMsg.id, shown: el.offsetParent !== null, compact: el.classList.contains('chat-machine-compact'), lineShown: vis(line), what: w ? w.textContent : '', out: line?.querySelector('.chat-mline-out')?.textContent || '',
       alert: !!line && line.classList.contains('chat-mline-alert'), expanded: line ? line.getAttribute('aria-expanded') : null, oneLine: !!w && w.getClientRects().length === 1 && w.getBoundingClientRect().height < parseFloat(getComputedStyle(w).fontSize) * 2, lineH: line ? Math.round(line.getBoundingClientRect().height) : 0,
       h: Math.round(el.getBoundingClientRect().height), top: el.getBoundingClientRect().top, bottom: el.getBoundingClientRect().bottom, bt: parseFloat(getComputedStyle(el).borderTopWidth), bb: parseFloat(getComputedStyle(el).borderBottomWidth), btc: getComputedStyle(el).borderTopColor, brc: getComputedStyle(el).borderRightColor, headShown: vis(el.querySelector(':scope > .chat-vs-notice-head')), wordsShown: vis(el.querySelector(':scope > .chat-text, :scope > details.chat-peer-fold')),
-      detailShown: vis(el.querySelector(':scope > .chat-exit-run')), scriptShown: vis(el.querySelector(':scope > .chat-exit-run .chat-exit-cmd-enc')), rawShown: vis(el.querySelector(':scope > .chat-exit-run .chat-exit-cmd-raw > summary')), outShown: vis(el.querySelector(':scope > .chat-exit-run .chat-exit-out')),
+      detailShown: vis(el.querySelector(':scope > .chat-exit-run')), scriptShown: vis(el.querySelector(':scope > .chat-exit-run .chat-exit-cmd-enc')), techShown: vis(el.querySelector(':scope > .chat-exit-run > details[data-fold="tech"] > summary')), rawShown: vis(el.querySelector(':scope > .chat-exit-run .chat-exit-cmd-raw > summary')), outShown: vis(el.querySelector(':scope > .chat-exit-run .chat-exit-out')),
       errShown: vis(err), err: err ? err.textContent : '', titled: !!el.querySelector('.chat-mline[title], .chat-mline [title]'), seen: el.innerText }; });
   return { hs, cards }; })()`;
 const feed = (msgs) => evalJs(`(async () => { const v = ${VIEW}; for (const m of ${JSON.stringify(msgs)}) v._onCreateMessage(m); await new Promise((r) => setTimeout(r, 500)); return true; })()`);
 const clickHead = () => evalJs(`(async () => { const v = ${VIEW}; const h = v._messageList.querySelector(':scope > .chat-run-header'); h.scrollIntoView({ block: 'center' }); h.click(); await new Promise((r) => setTimeout(r, 400)); return true; })()`);
 const lineOf = (id) => `[...(${VIEW})._messageList.querySelectorAll(':scope > .chat-msg')].find((e) => e._rawMsg?.id === ${JSON.stringify(id)})?.querySelector(':scope > .chat-mline')`;
 const clickLine = (id) => evalJs(`(async () => { const l = ${lineOf(id)}; l.scrollIntoView({ block: 'center' }); l.click(); await new Promise((r) => setTimeout(r, 300)); return true; })()`);
+const openTech = (id) => evalJs(`(async () => { const el = [...(${VIEW})._messageList.querySelectorAll(':scope > .chat-msg')].find((e) => e._rawMsg?.id === ${JSON.stringify(id)}); const d = el && el.querySelector(':scope > .chat-exit-run > details[data-fold="tech"]'); if (!d) return false; d.querySelector(':scope > summary').click(); await new Promise((r) => setTimeout(r, 300)); return d.open; })()`);
 const keyLine = (id) => evalJs(`(async () => { const l = ${lineOf(id)}; l.focus(); l.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); await new Promise((r) => setTimeout(r, 300)); return true; })()`);
 if (!CHROME) { console.log('SKIP: no chrome'); process.exit(0); }
 try {
@@ -216,10 +217,13 @@ try {
   await shot('390-zh-compact');
   await clickLine('mcf-1');
   c = await evalJs(MCENSUS);
-  check('② a click on the encoded call\'s line opens ITS detail in place (the script, 显示完整命令, the output) — the other five stay one line', c.cards[0].detailShown && c.cards[0].scriptShown && c.cards[0].rawShown && c.cards[0].outShown && c.cards[0].lineShown && !c.cards[0].headShown && c.cards[0].expanded === 'true' && c.cards.slice(1).every((x) => x.lineShown && !x.detailShown), c.cards);
+  check('② a click on the encoded call\'s line opens ITS detail in place (the output + a closed 技术细节 — lane exit-card-margin: the script under it) — the other five stay one line', c.cards[0].detailShown && c.cards[0].outShown && c.cards[0].techShown && !c.cards[0].scriptShown && !c.cards[0].rawShown && c.cards[0].lineShown && !c.cards[0].headShown && c.cards[0].expanded === 'true' && c.cards.slice(1).every((x) => x.lineShown && !x.detailShown), c.cards);
+  const techOpened = await openTech('mcf-1');
+  c = await evalJs(MCENSUS);
+  check('② 技术细节 opened: the decoded script and 显示完整命令 inside it', techOpened && c.cards[0].scriptShown && c.cards[0].rawShown, c.cards[0]);
   const encCard = await evalJs(`(() => { const v = ${VIEW}; const el = [...v._messageList.querySelectorAll(':scope > .chat-msg')].find((e) => e._rawMsg?.id === 'mcf-1'); if (!el) return null;
-    const raw = el.querySelector('.chat-exit-cmd-raw'); return { head: el.querySelector('.chat-vs-notice-title')?.textContent + ' | ' + (el.querySelector('.chat-text, p')?.textContent || el.innerText.slice(0, 200)), what: el.querySelector('.chat-exit-cmd-what')?.textContent || '', script: el.querySelector('.chat-exit-cmd-enc .chat-exit-cmd')?.textContent || '', raw: raw ? raw.querySelector('summary').textContent : null, rawShown: raw ? raw.open : null }; })()`);
-  check('② the encoded card reads "PowerShell: $ErrorActionPreference = …" and shows the decoded script (zh label), the line behind 显示完整命令', encCard && /PowerShell: \$ErrorActionPreference = "Stop"/.test(encCard.head) && /PowerShell 脚本（由 -EncodedCommand 解码）/.test(encCard.what) && encCard.script.startsWith('$ErrorActionPreference = "Stop"\nGet-ChildItem') && encCard.raw === '显示完整命令' && encCard.rawShown === false, encCard);
+    const raw = el.querySelector('.chat-exit-cmd-raw'); return { head: el.querySelector('.chat-vs-notice-title')?.textContent + ' | ' + (el.querySelector(':scope > .chat-text')?.textContent || el.innerText.slice(0, 200)), what: el.querySelector('.chat-exit-cmd-what')?.textContent || '', script: el.querySelector('.chat-exit-cmd-enc .chat-exit-cmd')?.textContent || '', raw: raw ? raw.querySelector('summary').textContent : null, rawShown: raw ? raw.open : null }; })()`);
+  check('② the encoded card\'s words say actor + verb + object (在 WIN-DESK1 上运行了一条命令 — 退出 0 · 1.4 s; its compact line keeps "PowerShell: …"), the decoded script (zh label), the line behind 显示完整命令', encCard && encCard.head === 'VibeSpace · Machines · WIN-DESK1 | 在 WIN-DESK1 上运行了一条命令 — 退出 0 · 1.4 s' && /PowerShell 脚本（由 -EncodedCommand 解码）/.test(encCard.what) && encCard.script.startsWith('$ErrorActionPreference = "Stop"\nGet-ChildItem') && encCard.raw === '显示完整命令' && encCard.rawShown === false, encCard);
   await evalJs(`(() => { const v = ${VIEW}; const el = [...v._messageList.querySelectorAll(':scope > .chat-msg')].find((e) => e._rawMsg?.id === 'mcf-1'); el.scrollIntoView({ block: 'start' }); return true; })()`);
   await shot('390-zh-compact-one-open');
   await clickLine('mcf-1');
@@ -325,6 +329,63 @@ try {
   await evalJs(`(async () => { const v = ${VIEW}; v._onEditMessage('xc-live', { status: 'complete', content: [{ type: 'tool_result', toolCallId: 'toolu_live', toolName: 'Bash', input: { command: ${JSON.stringify(LC)} }, output: ${JSON.stringify(' 10:41:02 up 3 days\n' + E.cliLine({ outcome: 'ran', code: 0, ms: 300 }, { machine: XM }))}, status: 'success' }] }); await new Promise((r) => setTimeout(r, 300)); return true; })()`);
   const lc2 = await evalJs(liveCount);
   check('⑤ live: running = a Bash card; the server\'s upgrade = the SAME message drawn as the machine card; its result = still ONE card, the same words', lc0.calls === 5 && lc0.bash === 1 && lc1.calls === 6 && lc1.bash === 0 && lc1.cards === 0 && lc2.calls === 6 && lc2.bash === 0 && lc2.cards === 0 && lc2.text.includes('uptime') && lc2.text.includes('exit 0'), { lc0, lc1, lc2 });
+  // ── ⑥ lane exit-card-margin (the owner 2026-10-18: 「这个卡片的 margin 有点问题」 + the standing 「No raw strings in cards」):
+  //    a LONE run card — the owner's Macbook card, in the default compact chat — every row starts on the card's own padding;
+  //    the words say actor + verb + object; the command (its length, its paths) only inside ONE closed 技术细节 fold, as text ──
+  console.log('⑥ a lone run card: one left edge, the words, the command under 技术细节 (zh)');
+  const KM = 'Macbook', K_SID = '5c3a0000-0000-4000-8000-0000000000ed', K_CWD = path.join(fakeHome, 'kc');
+  fs.mkdirSync(K_CWD, { recursive: true });
+  const kdir = path.join(fakeHome, '.claude', 'projects', K_CWD.replace(/[/._]/g, '-'));
+  fs.mkdirSync(kdir, { recursive: true });
+  const kts = (s) => new Date(T0 + 7200000 + s * 1000).toISOString();
+  fs.writeFileSync(path.join(kdir, K_SID + '.jsonl'), [
+    { type: 'user', uuid: 'kc-u1', sessionId: K_SID, cwd: K_CWD, timestamp: kts(0), message: { role: 'user', content: '看看 Macbook 上的录屏权限' } },
+    { type: 'assistant', uuid: 'kc-a1', sessionId: K_SID, cwd: K_CWD, timestamp: kts(4), message: { id: 'msg_kc1', type: 'message', role: 'assistant', model: 'claude-opus-5-5', content: [{ type: 'text', text: '我在那台机器上读一下。' }], stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 } } },
+  ].map((r) => JSON.stringify(r)).join('\n') + '\n');
+  const KCMD = `~/.vibespace/helpers/vibespace-screen --disclaim facts 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); t=d['tcc']; h=d['helper']; print(t['screen'], t['accessibility'], h['path'], h['cdhash'], h['version'], d['displays'], sep=' | ')"`;   // 252 characters, two paths
+  const KCARD = mcard(KM, E.cardText({ outcome: 'ran', cmd: KCMD, code: 0, ms: 200 }, { machine: KM }), { exitRun: E.cardOutput({ cmd: KCMD, code: 0, ms: 200, heads: E.outputHeads({ stdout: 'granted denied /Users/me/.vibespace/helpers/vibespace-screen 4b7bcb1e31e9 2.369.305 [2, 3]\n', stderr: '' }) }) });
+  await cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
+  await evalJs(`(async () => { window.__sid = ${JSON.stringify(K_SID)}; window.app.viewSession(${JSON.stringify(K_SID)}, ${JSON.stringify(K_CWD)}, 'lone card'); return true; })()`);
+  check('⑥ the conversation opens', await waitFor(`!!(${VIEW}) && (${VIEW})._messageList.querySelectorAll(':scope > .chat-msg').length >= 2`, 20000));
+  await feed([KCARD]);
+  // every visible row of the card (its own children, then the run block's) as its left edge AND its first text's left edge,
+  // both from the card's content box (border + padding-left) — the owner saw the words line start ON the border
+  const KCEN = `(() => { const v = ${VIEW}; const el = [...v._messageList.querySelectorAll(':scope > .chat-msg')].find((e) => e._rawMsg?.id === ${JSON.stringify(KCARD.id)}); if (!el) return null;
+    const cs = getComputedStyle(el), left = el.getBoundingClientRect().left + parseFloat(cs.borderLeftWidth) + parseFloat(cs.paddingLeft), vis = (x) => !!x && x.checkVisibility(), r1 = (x) => Math.round(x * 10) / 10;
+    const textLeft = (x) => { const w = document.createTreeWalker(x, NodeFilter.SHOW_TEXT, { acceptNode: (n) => (n.textContent.trim() && n.parentElement.checkVisibility() ? 1 : 3) }); const n = w.nextNode(); if (!n) return null; const g = document.createRange(); g.selectNodeContents(n); const q = g.getClientRects()[0]; return q ? q.left : null; };
+    const run = el.querySelector(':scope > .chat-exit-run');
+    const flow = (x) => vis(x) && !/^(absolute|fixed)$/.test(getComputedStyle(x).position);   // the hover ✎ button is not a row
+    const rows = [...[...el.children].filter((x) => x !== run && flow(x)), ...(run ? [...run.children].filter(flow) : [])].map((x) => { const tl = textLeft(x); return { row: String(x.className || x.tagName).split(' ')[0], left: r1(x.getBoundingClientRect().left - left), text: tl == null ? null : r1(tl - left) }; });
+    const tech = run && run.querySelector(':scope > details[data-fold="tech"]'), sum = tech && tech.querySelector(':scope > summary'), pre = tech && tech.querySelector('.chat-exit-cmd');
+    return { pad: parseFloat(cs.paddingLeft), padR: parseFloat(cs.paddingRight), bl: [parseFloat(cs.borderLeftWidth), cs.borderLeftColor], bar: (() => { const u = v._messageList.querySelector(':scope > .chat-msg-assistant'); return u ? [Math.round(u.getBoundingClientRect().left), Math.round(el.getBoundingClientRect().left), parseFloat(getComputedStyle(u).borderLeftWidth)] : null; })(), rows, title: el.querySelector('.chat-vs-notice-title')?.textContent || '', words: el.querySelector(':scope > .chat-text')?.innerText.trim() || '',
+      seen: el.innerText, techs: el.querySelectorAll('details[data-fold="tech"]').length, open: !!(tech && tech.open), summary: sum ? sum.textContent : null, caption: tech?.querySelector('.chat-exit-cmd-len')?.textContent || '',
+      cmd: pre ? pre.textContent : null, cmdShown: vis(pre), cmdOutside: [...el.querySelectorAll('*')].filter((x) => !x.children.length && x.checkVisibility() && x.textContent.includes('--disclaim facts') && !(tech && tech.contains(x))).length,   // on screen (the group's compact line is drawn only in a group)
+      links: [...el.querySelectorAll('a, [role="link"]')].map((a) => a.textContent), outShown: vis(el.querySelector('.chat-exit-out')), out: el.querySelector('.chat-exit-out')?.textContent || '' }; })()`;
+  const kOpen = (open) => evalJs(`(async () => { const v = ${VIEW}; const el = [...v._messageList.querySelectorAll(':scope > .chat-msg')].find((e) => e._rawMsg?.id === ${JSON.stringify(KCARD.id)}); const d = el.querySelector('.chat-exit-run > details[data-fold="tech"]'); el.scrollIntoView({ block: 'start' }); if (d && d.open !== open) d.querySelector(':scope > summary').click(); await new Promise((r) => setTimeout(r, 300)); return true; })()`);
+  const aligned = (k) => !!k && k.pad >= 8 && k.pad === k.padR && k.rows.length >= 4 && k.rows.every((x) => Math.abs(x.left) <= 0.5) && k.rows.filter((x) => /^chat-(vs-notice-head|text)$/.test(x.row)).every((x) => x.text != null && x.text >= -0.5 && x.text <= 20);
+  await evalJs(`(() => { const v = ${VIEW}; const el = [...v._messageList.querySelectorAll(':scope > .chat-msg')].find((e) => e._rawMsg?.id === ${JSON.stringify(KCARD.id)}); el?.scrollIntoView({ block: 'center' }); return true; })()`);
+  let k = await evalJs(KCEN);
+  console.log('    rows @1280 closed: ' + JSON.stringify(k && { pad: k.pad, rows: k.rows }));
+  await shot('1280-zh-lone');
+  check('⑥ 1280 px, compact chat: the card keeps its own padding (≥ 8 px, both sides) and EVERY row — head, words, output, fold — starts on it (pre-fix the padding was 0: the words sat on the border)', aligned(k), k && { pad: k.pad, padR: k.padR, rows: k.rows });
+  check('⑥ …its left line is its own accent (not the role indicator\'s transparent 3 px) at the role bar\'s width, on the assistant bar\'s x', k && k.bl[0] >= 2 && !/rgba\(0, 0, 0, 0\)|transparent/.test(k.bl[1]) && k.bar && k.bar[0] === k.bar[1] && k.bar[2] === k.bl[0], k && { bl: k.bl, bar: k.bar });
+  check('⑥ the words: actor + verb + object — 「在 Macbook 上运行了一条命令 — 退出 0 · 0.2 s」 under 「VibeSpace · Machines · Macbook」', k && k.title === 'VibeSpace · Machines · Macbook' && k.words === '在 Macbook 上运行了一条命令 — 退出 0 · 0.2 s', k && [k.title, k.words]);
+  check('⑥ closed: the command (its length, its paths) is nowhere on screen; ONE 技术细节 fold, closed; no link on the card; the output (the result) shown', k && k.techs === 1 && !k.open && k.summary === '技术细节' && !k.cmdShown && !/vibespace-screen --disclaim|2>\/dev\/null|个字符/.test(k.seen) && k.cmdOutside === 0 && !k.links.length && k.outShown && k.out.startsWith('granted denied'), k && { techs: k.techs, open: k.open, summary: k.summary, seen: k.seen, cmdOutside: k.cmdOutside, links: k.links });
+  await kOpen(true);
+  k = await evalJs(KCEN);
+  await shot('1280-zh-lone-tech');
+  check('⑥ open 技术细节: the WHOLE command, its length (命令 · 252 个字符), as TEXT — no link inside; every row still on the padding', k && k.open && k.cmdShown && k.cmd === KCMD && k.caption === `命令 · ${KCMD.length} 个字符` && !k.links.length && k.cmdOutside === 0 && aligned(k), k && { open: k.open, cmd: k.cmd, caption: k.caption, links: k.links, rows: k.rows });
+  await kOpen(false);
+  await cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 780, deviceScaleFactor: 2, mobile: true });
+  await sleep(500);
+  await evalJs(`(() => { const v = ${VIEW}; const el = [...v._messageList.querySelectorAll(':scope > .chat-msg')].find((e) => e._rawMsg?.id === ${JSON.stringify(KCARD.id)}); el?.scrollIntoView({ block: 'center' }); return true; })()`);
+  k = await evalJs(KCEN);
+  console.log('    rows @390 closed: ' + JSON.stringify(k && { pad: k.pad, rows: k.rows }));
+  await shot('390-zh-lone');
+  check('⑥ 390 px: the same — one left edge on the padding, the same words, the command folded away', aligned(k) && k.words === '在 Macbook 上运行了一条命令 — 退出 0 · 0.2 s' && !k.open && !/vibespace-screen --disclaim/.test(k.seen), k && { pad: k.pad, rows: k.rows, words: k.words });
+  await feed([{ id: 'kc-peer', role: 'user', status: 'complete', content: [{ type: 'text', text: 'PONG from desk 7.' }], ts: T0 + 7300000, turnIndex: 300, originKind: 'peer-message', peerFrom: 'desk-7', peerVia: 'peer' }]);
+  const pk = await evalJs(`(() => { const el = [...(${VIEW})._messageList.querySelectorAll(':scope > .chat-peer-message')].pop(); if (!el) return null; const cs = getComputedStyle(el); return { pad: [cs.paddingTop, cs.paddingRight, cs.paddingBottom, cs.paddingLeft].map(parseFloat), compact: !!el.closest('.chat-compact') }; })()`);
+  check('⑥ the same rule no longer flattens a PEER card in the compact chat either: its own 8px 12px (pre-fix 1px 0)', pk && pk.compact && pk.pad.join() === '8,12,8,12', pk);
   check('no page exception', pageErrors.length === 0, pageErrors.slice(0, 3));
 } catch (e) {
   failed++;

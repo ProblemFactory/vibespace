@@ -7482,10 +7482,13 @@ export default {
   "Jump to this message": "跳到这条消息",
   "Handled proposals ({n})": "已处理的提案（{n}）",
   "The sent message has not reached this window yet": "发出的消息还没出现在这个窗口里",
-  // lane exit-see-whole (2026-10-03): the whole command on the card and in the Commands list
-  "Show the whole command ({n} lines)": "显示完整命令（{n} 行）",
-  "Show the whole command ({n} characters)": "显示完整命令（{n} 个字符）",
-  "Fold the command": "收起命令",
+  // lane exit-card-margin (2026-10-18): a machine run card says who did what to what; the command under 技术细节
+  "Ran a command on {machine} — exit {code} · {secs}": "在 {machine} 上运行了一条命令 — 退出 {code} · {secs}",
+  "Ran a command on {machine} — timed out after {secs}": "在 {machine} 上运行了一条命令 — {secs} 后超时",
+  "Could not start a command on {machine} — {why}": "无法在 {machine} 上启动命令 — {why}",
+  "(access was removed while it ran)": "（运行期间访问权限被移除）",
+  "Command · {n} characters": "命令 · {n} 个字符",
+  "Command · {n} lines": "命令 · {n} 行",
   "Archived channels": "已归档频道",
   "Skip archived channels": "跳过已归档频道",
   "Also list archived channels (read once, never polled)": "也列出已归档频道（只读一次，不轮询）",

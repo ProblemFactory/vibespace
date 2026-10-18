@@ -6,10 +6,10 @@
 // A THROWAWAY server in a git worktree (own data/, a scratch HOME) + headless chrome over raw CDP (the
 // test-chat-hygiene-ui skeleton). A stub `claude` behind the REAL chat-wrapper plays, on its first user turn,
 // three 12-line worker reports (each under an H1, the CLI's own peer frame around them) and one one-line peer reply.
-//   ① at 1280 px and at 375 px (phone): each report is ONE head + ONE preview line + Show — the preview is the
-//      heading as plain words, the body is not displayed, the card is ≤ 3 text lines tall (+ the 44 px phone
-//      target); the one-liner is whole; the control's aria-label names the sender
-//   ② a real mouse press on Show expands that card IN PLACE: the same node, the other cards' nodes identical by
+//   ① at 1280 px and at 375 px (phone): each report is ONE head (its ▸ the switch — lane exit-card-margin: no Show
+//      pill) + ONE preview line — the preview is the heading as plain words, the body is not displayed, the card is
+//      ≤ 3 text lines tall (+ the 44 px phone target: the head); the one-liner is whole; the ▸'s aria-label names the sender
+//   ② a real mouse press on the head's ▸ expands that card IN PLACE: the same node, the other cards' nodes identical by
 //      reference; the headings inside are bold text (.chat-peer-h), never h1–h6
 //   ③ a live patch (the ONE swap path, _swapMessageEl via _rerenderVisible) builds a NEW node for the card and it
 //      is STILL open; the label says Hide
@@ -20,6 +20,10 @@
 //      names the author and the group ("<author> → <group>"; a report of four senders "A, B, C and 1 more → <group>",
 //      each name its own link), the preview is the author's first line — never "Message from another session", never
 //      the CLI's framing lines
+//   ⑥ lane exit-card-margin (主开发 2026-10-18, the owner's group card 「lane stream-window-fixes → VibeSpace 车道群」): the
+//      head's ▸/▾ is the switch (a real press on ▸ opens, on the head's empty end closes); open leaves no empty row and
+//      no Show/Hide pill; every row on the card's padding; the card's left line its own colour at the role bar's width,
+//      on the same x as the assistant's bar (pre-fix: a 3 px TRANSPARENT left border, 0 px padding). PCF_SHOTS=<dir> (+ PCF_TAG)
 // Requires google-chrome (SKIP without). Scratch: /tmp/vs-pcf-* only. Run: node scripts/test-peer-card-fold-ui.mjs
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -137,15 +141,15 @@ const VIEW = `([...(window.app.sessions?.values?.() || [])].find((v) => v && v._
 const CENSUS = `(() => { const v = ${VIEW}; const list = v._messageList;
   return [...list.querySelectorAll(':scope > .chat-peer-message')].map((el) => {
     const cs = getComputedStyle(el);
-    const det = el.querySelector(':scope > details.chat-peer-fold'); const sum = det && det.querySelector(':scope > summary');
+    const det = el.querySelector(':scope > details.chat-peer-fold'); const head = el.querySelector(':scope > .chat-peer-head'); const arrow = head && head.querySelector(':scope > .chat-peer-fold-arrow');
     const body = det ? det.querySelector(':scope > .chat-text') : el.querySelector(':scope > .chat-text');
     const pv = el.querySelector('.chat-peer-preview');
     const lh = parseFloat(getComputedStyle(body || el).lineHeight) || 18;
     return { title: el.querySelector('.chat-peer-title')?.textContent || '', h: el.getBoundingClientRect().height, lh,
       pad: parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom) + parseFloat(cs.borderTopWidth) + parseFloat(cs.borderBottomWidth),
       folded: !!det, open: !!(det && det.open), preview: pv ? pv.textContent : null, pvRects: pv ? pv.getClientRects().length : 0,
-      pvH: pv ? pv.getBoundingClientRect().height : 0, sumH: sum ? sum.getBoundingClientRect().height : 0,
-      bodyShown: !!(body && body.checkVisibility()), aria: sum ? sum.getAttribute('aria-label') : null,
+      pvH: pv ? pv.getBoundingClientRect().height : 0, headH: head ? head.getBoundingClientRect().height : 0, pills: el.querySelectorAll('.chat-peer-fold-btn').length,
+      bodyShown: !!(body && body.checkVisibility()), aria: arrow ? arrow.getAttribute('aria-label') : null, arrow: arrow ? arrow.textContent : null,
       hTags: el.querySelectorAll('h1,h2,h3,h4,h5,h6').length, peerH: [...el.querySelectorAll('.chat-peer-h')].map((x) => getComputedStyle(x).fontWeight),
       text: el.innerText };
   }); })()`;
@@ -185,10 +189,10 @@ try {
     const rows = await evalJs(CENSUS);
     const reps = reports(rows);
     console.log(`① ${width} px: ` + reps.map((c) => `${Math.round(c.h)}/${Math.round(c.pad + 3 * c.lh + (phone ? Math.max(0, 44 - c.lh) : 0) + 6)} px`).join(' · '));
-    check(`${width} px: each report is folded — head + ONE preview line (the H1 as plain words) + Show, the body not displayed`,
-      reps.length === 3 && reps.every((c, i) => c.folded && !c.open && c.preview === `lane-w${i + 1} verify r1 — report` && c.pvRects === 1 && c.pvH <= c.lh * 1.6 && !c.bodyShown), reps.map(({ text, ...c }) => c));
+    check(`${width} px: each report is folded — head (▸, no Show pill) + ONE preview line (the H1 as plain words), the body not displayed`,
+      reps.length === 3 && reps.every((c, i) => c.folded && !c.open && c.arrow === '▸' && !c.pills && c.preview === `lane-w${i + 1} verify r1 — report` && c.pvRects === 1 && c.pvH <= c.lh * 1.6 && !c.bodyShown), reps.map(({ text, ...c }) => c));
     check(`${width} px: each report card is ≤ 3 text lines tall${phone ? ' (+ the 44 px target)' : ''}`, reps.every((c) => fits(c, phone)), reps.map((c) => [c.h, c.lh, c.pad]));
-    if (phone) check('375 px: the Show control is a ≥ 44 px target', reps.every((c) => c.sumH >= 44), reps.map((c) => c.sumH));
+    if (phone) check('375 px: the switch (the head row) is a ≥ 44 px target', reps.every((c) => c.headH >= 44), reps.map((c) => c.headH));
   }
   await cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
   await sleep(700);
@@ -199,11 +203,11 @@ try {
     check('the fold control\'s accessible name says whose message it opens', reports(rows).every((c, i) => c.aria === `Show the message from ${NAMES[i]}`), reports(rows).map((c) => c.aria));
   }
 
-  // ── ② a real press on Show: in place ──
-  console.log('② Show expands in place');
-  await evalJs(`(() => { const v = ${VIEW}; window.__refs = [...v._messageList.querySelectorAll(':scope > .chat-peer-message')]; const s = window.__refs[1].querySelector('.chat-peer-fold-summary'); s.scrollIntoView({ block: 'center' }); return true; })()`);
+  // ── ② a real press on the head's ▸: in place ──
+  console.log('② the head\'s ▸ expands in place');
+  await evalJs(`(() => { const v = ${VIEW}; window.__refs = [...v._messageList.querySelectorAll(':scope > .chat-peer-message')]; const s = window.__refs[1].querySelector('.chat-peer-head'); s.scrollIntoView({ block: 'center' }); return true; })()`);
   await sleep(300);
-  const pt = await evalJs(`(() => { const r = window.__refs[1].querySelector('.chat-peer-fold-btn').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+  const pt = await evalJs(`(() => { const r = window.__refs[1].querySelector('.chat-peer-head > .chat-peer-fold-arrow').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
   for (const type of ['mousePressed', 'mouseReleased']) await cdp('Input.dispatchMouseEvent', { type, x: pt.x, y: pt.y, button: 'left', clickCount: 1 });
   await sleep(400);
   const s2 = await evalJs(`(() => { const v = ${VIEW}; const now = [...v._messageList.querySelectorAll(':scope > .chat-peer-message')];
@@ -220,7 +224,7 @@ try {
   console.log('③ a live patch (the swap path) keeps the card open');
   const s3 = await evalJs(`(() => { const v = ${VIEW}; v._rerenderVisible(); const now = [...v._messageList.querySelectorAll(':scope > .chat-peer-message')];
     return { replaced: now[1] !== window.__refs[1], open: !!now[1].querySelector('details.chat-peer-fold[open]'), othersClosed: [0, 2].every((i) => !now[i].querySelector('details.chat-peer-fold[open]')),
-      aria: now[1].querySelector('.chat-peer-fold-summary')?.getAttribute('aria-label') }; })()`);
+      aria: now[1].querySelector('.chat-peer-head > .chat-peer-fold-arrow')?.getAttribute('aria-label') }; })()`);
   check('the patched card is a NEW node and still open; the others still folded; the label says Hide', s3.replaced && s3.open && s3.othersClosed && s3.aria === 'Hide the message from worker two', s3);
 
   // ── ④ the setting ──
@@ -263,6 +267,7 @@ try {
         await sleep(200);
       }
       if (!list) return { cards: [] };
+      window.__glist = list;   // ⑥ measures its group card
       await sleep(600);
       return { cards: [...list.querySelectorAll(':scope > .chat-peer-message')].map((el) => ({
         title: el.querySelector('.chat-peer-title')?.textContent || '', links: [...el.querySelectorAll('.chat-peer-title .chat-peer-name')].map((x) => x.textContent),
@@ -277,6 +282,44 @@ try {
     check('⑤ …its preview is the first sender\'s first line', c2 && c2.preview === 'lane-alpha 建设 (Opus): first, the API is down', c2 && c2.preview);
     const framing = /Another Claude session|You were @mentioned|#### Group|vibespace-msg group notify|This came from another/;
     check('⑤ no head reads "another session" / "unknown"; no preview and no body is the CLI\'s framing', got.cards.every((c) => !/another session|another agent|unknown/i.test(c.title) && !framing.test(c.preview || '') && !framing.test(c.text)), got.cards.map((c) => [c.title, c.preview]));
+  }
+  // ── ⑥ lane exit-card-margin: the group card — the head's ▸/▾ is the switch, no empty row, one left edge ──
+  console.log('⑥ a group card: the head\'s ▸/▾ is the switch, no empty row, no pill, one left edge');
+  {
+    const SHOTS = process.env.PCF_SHOTS || '', TAG = process.env.PCF_TAG || 'after';
+    const shot = async (name) => { if (!SHOTS) return; fs.mkdirSync(SHOTS, { recursive: true }); const r = await cdp('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(SHOTS, `${TAG}-${name}.png`), Buffer.from(r.data, 'base64')); };
+    await cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
+    await sleep(500);
+    const GCEN = `(() => { const list = window.__glist; const el = list && list.querySelector(':scope > .chat-peer-message.chat-group-message'); if (!el) return null; el.scrollIntoView({ block: 'center' });
+      const cs = getComputedStyle(el), r = el.getBoundingClientRect(), left = r.left + parseFloat(cs.borderLeftWidth) + parseFloat(cs.paddingLeft), vis = (x) => !!x && x.checkVisibility(), r1 = (x) => Math.round(x * 10) / 10;
+      const flow = (x) => vis(x) && !/^(absolute|fixed)$/.test(getComputedStyle(x).position);   // the hover ✎ button is not a row
+      const det = el.querySelector(':scope > details.chat-peer-fold'), head = el.querySelector(':scope > .chat-peer-head'), arrow = head && head.querySelector(':scope > .chat-peer-fold-arrow');
+      const rows = [...el.children].filter(flow).flatMap((x) => (x === det ? [...det.children].filter(flow) : [x])).map((x) => ({ row: String(x.className || x.tagName).split(' ')[0], left: r1(x.getBoundingClientRect().left - left), h: Math.round(x.getBoundingClientRect().height), text: x.innerText.trim().slice(0, 30) }));
+      const bar = [...list.querySelectorAll(':scope > .chat-msg-assistant')][0], bcs = bar && getComputedStyle(bar);
+      const pt = (x) => { if (!x) return null; const q = x.getBoundingClientRect(); return { x: q.left + q.width / 2, y: q.top + q.height / 2 }; };
+      return { rows, open: !!(det && det.open), arrow: arrow ? { text: arrow.textContent, expanded: arrow.getAttribute('aria-expanded'), label: arrow.getAttribute('aria-label'), first: head.firstElementChild === arrow } : null,
+        pills: el.querySelectorAll('.chat-peer-fold-btn').length, words: [...el.querySelectorAll('*')].filter((x) => flow(x) && !x.children.length && /^(Show|Hide|显示|隐藏)$/.test(x.textContent.trim())).length,
+        pad: [parseFloat(cs.paddingLeft), parseFloat(cs.paddingRight)], bl: [parseFloat(cs.borderLeftWidth), cs.borderLeftColor], bar: bar ? [Math.round(bar.getBoundingClientRect().left), Math.round(r.left), parseFloat(bcs.borderLeftWidth)] : null,
+        arrowAt: pt(arrow), headEnd: (() => { if (!head) return null; const h = head.getBoundingClientRect(), tt = head.querySelector('.chat-peer-title').getBoundingClientRect(), ed = el.querySelector(':scope > .chat-open-editor-btn')?.getBoundingClientRect();   // the empty stretch between the title and the hover ✎ (which sits over the head's end)
+        const p = { x: Math.round((tt.right + (ed && ed.width ? ed.left : h.right)) / 2), y: Math.round(h.top + h.height / 2) }; return { ...p, isHead: document.elementFromPoint(p.x, p.y) === head }; })() }; })()`;
+    const press = async (p) => { for (const type of ['mousePressed', 'mouseReleased']) await cdp('Input.dispatchMouseEvent', { type, x: p.x, y: p.y, button: 'left', clickCount: 1 }); await sleep(400); };
+    const solidLine = (g) => g.bl[0] >= 2 && !/rgba\(0, 0, 0, 0\)|transparent/.test(g.bl[1]);
+    const aligned = (g) => g.rows.length >= 2 && g.rows.every((x) => Math.abs(x.left) <= 0.5) && g.pad[0] >= 8 && g.pad[0] === g.pad[1];
+    let g = await evalJs(GCEN);
+    console.log('    closed: ' + JSON.stringify(g && { rows: g.rows, pad: g.pad, bl: g.bl, bar: g.bar, arrow: g.arrow, pills: g.pills }));
+    await shot('group-1280-closed');
+    check('⑥ closed: the head starts with its ▸ (aria-expanded false, the label names the sender); no Show pill; the preview the one row under it', g && g.arrow && g.arrow.first && g.arrow.text === '▸' && g.arrow.expanded === 'false' && g.arrow.label === 'Show the message from lane-alpha 建设 (Opus)' && !g.pills && !g.words && g.rows.length === 2 && g.rows[1].row === 'chat-peer-fold-summary', g);
+    check('⑥ the left edge: the card\'s padding (≥ 8 px both sides) holds every row, its left line is its own colour (not transparent) at the role bar\'s width, on the assistant bar\'s x', g && aligned(g) && solidLine(g) && g.bar && g.bar[0] === g.bar[1] && g.bar[2] === g.bl[0], g && { pad: g.pad, bl: g.bl, bar: g.bar, rows: g.rows });
+    if (g && g.arrowAt) await press(g.arrowAt);
+    g = await evalJs(GCEN);
+    console.log('    open: ' + JSON.stringify(g && { rows: g.rows, arrow: g.arrow }));
+    await shot('group-1280-open');
+    check('⑥ a real press on ▸ opens it: ▾, aria-expanded true, the label says Hide; NO empty row (every row under the head carries words — the preview row is gone) and no Show/Hide pill', g && g.open && g.arrow && g.arrow.text === '▾' && g.arrow.expanded === 'true' && g.arrow.label === 'Hide the message from lane-alpha 建设 (Opus)' && g.rows.length === 2 && g.rows[1].row === 'chat-text' && g.rows.every((x) => x.text.length > 0) && !g.pills && !g.words && aligned(g), g);
+    const endAt = g && g.headEnd;
+    if (endAt) await press(endAt);
+    g = await evalJs(GCEN);
+    const wasHead = !!(endAt && endAt.isHead);
+    check('⑥ a real press on the head\'s empty stretch closes it again (the whole head row is the switch)', wasHead && g && !g.open && g.arrow && g.arrow.text === '▸' && g.rows.length === 2 && g.rows[1].row === 'chat-peer-fold-summary', g && { open: g.open, rows: g.rows });
   }
   check('no page exception', pageErrors.length === 0, pageErrors.slice(0, 3));
   liveWs.close();

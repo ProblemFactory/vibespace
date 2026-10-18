@@ -194,7 +194,7 @@ try {
   ok(await P.realClick(`#user-todos-popup .ut-item .ut-exit-allow`), 'a real click on 允许');
   const ran = await pRun;
   ok(ran.status === 200 && ran.j.code === 0 && /pong/.test(ran.j.stdout) && ran.j.asked === true, 'Allow ⇒ the DEVICE ran it (exit 0, stdout pong)', ran);
-  ok(await P.waitFor(`[...document.querySelectorAll('.chat-vs-notice')].some((c) => /Machines · exmac/.test(c.textContent) && /ran \`?echo pong\`? on exmac — exit 0/.test(c.textContent))`, 8000), 'the chat window shows the "VibeSpace · Machines · exmac" card: ran `echo pong` on exmac — exit 0 · …', await P.evalJs(`[...document.querySelectorAll('.chat-vs-notice')].map((c) => c.textContent).join(' | ')`));
+  ok(await P.waitFor(`[...document.querySelectorAll('.chat-vs-notice')].some((c) => /Machines · exmac/.test(c.textContent) && /^在 exmac 上运行了一条命令 — 退出 0 · /.test(c.querySelector(':scope > .chat-text')?.textContent || '') && c.querySelector('details.chat-exit-tech .chat-exit-cmd')?.textContent === 'echo pong')`, 8000), 'the chat window shows the "VibeSpace · Machines · exmac" card: 在 exmac 上运行了一条命令 — 退出 0 · … (lane exit-card-margin), `echo pong` under its 技术细节', await P.evalJs(`[...document.querySelectorAll('.chat-vs-notice')].map((c) => c.textContent).join(' | ')`));
   ok(/已允许/.test(await P.evalJs(`document.getElementById('user-todos-popup').textContent`)) || (await W.api('GET', '/api/user-todos')).j.todos.resolved?.some?.((i) => i.resolvedBy === 'allowed'), 'the item is resolved allowed');
   ok(await P.waitFor(`/^最近一次运行：echo pong — .*，退出码 0$/.test(${rowOf}?.querySelector('.mounts-exit-last')?.textContent || '')`, 8000), 'the machine row shows the last run (最近一次运行：echo pong — <who>, <when>, 退出码 0)', await P.evalJs(`${rowOf}?.querySelector('.mounts-exit-last')?.textContent`));
   // naive-user N-row: at the DEFAULT sidebar width (this page: 1280 px) the machine row showed no name (0 px — eight
@@ -307,7 +307,7 @@ try {
     ok(await P.waitFor(`!!${cardSel}`, 8000), 'the chat card carries the output block');
     const nCards = await P.evalJs(`document.querySelectorAll('.chat-vs-notice').length`);
     const c5 = await P.evalJs(`(() => { const c = ${cardSel}; const pre = c.querySelector('.chat-exit-out'); const det = c.querySelector('.chat-exit-out-full'); return { head: c.querySelector('.chat-text')?.textContent || '', preview: pre.textContent, stream: pre.dataset.stream, mono: getComputedStyle(pre).fontFamily, summary: det && det.querySelector('summary').textContent, open: det && det.open, full: det ? [...det.querySelectorAll('.chat-exit-out-all')].map((p) => p.textContent) : [] }; })()`);
-    ok(/exit 3 · \d+\.\d s/.test(c5.head) && c5.preview === 'ERR-LINE-1\nERR-LINE-2' && c5.stream === 'stderr' && /mono/i.test(c5.mono) && c5.summary === '显示输出' && c5.open === false && c5.full.join('|') === 'out-line\n|ERR-LINE-1\nERR-LINE-2\n', 'E3: the exit line, stderr\'s lines in mono under it, 显示输出 (closed) holding both stored heads whole', c5);
+    ok(/^在 exmac 上运行了一条命令 — 退出 3 · \d+\.\d s$/.test(c5.head) && c5.preview === 'ERR-LINE-1\nERR-LINE-2' && c5.stream === 'stderr' && /mono/i.test(c5.mono) && c5.summary === '显示输出' && c5.open === false && c5.full.join('|') === 'out-line\n|ERR-LINE-1\nERR-LINE-2\n', 'E3: the exit line, stderr\'s lines in mono under it, 显示输出 (closed) holding both stored heads whole', c5);
     ok(await P.realClick(`(() => { const c = ${cardSel}; return c.querySelector('.chat-exit-out-full > summary'); })()`), 'a real click on 显示输出');
     const t5 = await P.evalJs(`(() => { const c = ${cardSel}; return { open: c.querySelector('.chat-exit-out-full').open, n: document.querySelectorAll('.chat-vs-notice').length, stdoutShown: !!c.querySelector('.chat-exit-out-all')?.getClientRects().length }; })()`);
     ok(t5.open === true && t5.n === nCards && t5.stdoutShown, 'the expander opens IN PLACE: the same card (no second card, none re-created), the stored stdout visible', t5);
@@ -367,23 +367,26 @@ try {
     ok(pre9 && pre9.maxH === '320px' && pre9.ov === 'auto' && pre9.h <= 330 && pre9.sh > pre9.h, 'a row\'s output block is bounded at 320 px and scrolls', pre9);
     await P.evalJs(`document.querySelector('#exit-runs-dialog .dialog-close')?.click(); document.querySelector('#exit-access-dialog .dialog-close')?.click(); true`);
     // ── lane exit-see-whole (design 013 piece 1, the owner: 「这些指令输入展示不全，也没地方看到完整版。remote界面也没法audit…」):
-    //    at 390 px the card shows the command AS ITSELF (wrapped, folded at four lines, the expander naming its count), and the
-    //    Remote panel's machine row opens the command list in ONE click — its icon and its last-run line ──
+    //    at 390 px the card shows the command AS ITSELF (wrapped) — lane exit-card-margin (2026-10-18, 「No raw strings in cards」):
+    //    its words say who did what, the command (its length named) sits whole under ONE closed 技术细节 fold after the output —
+    //    and the Remote panel's machine row opens the command list in ONE click — its icon and its last-run line ──
     await P.cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 820, deviceScaleFactor: 1, mobile: false });
     await P.evalJs(`app.sidebar.toggle?.(false); true`);   // the sidebar out of the way of the real click (the harness's chat column measures ~100 px here: a stricter wrap than a phone's)
     const tok = 'Q'.repeat(1365), multi = Array.from({ length: 12 }, (_, i) => `echo line-${i}`).join('\n');
     const r10 = await runApi(S[1].token, `echo ${tok}`), r11 = await runApi(S[1].token, multi);
     ok(r10.status === 200 && r11.status === 200 && /line-11/.test(r11.j.stdout), 'two runs: a 1 370-character one-token command and a 12-line script', [r10.status, r11.status]);
     const cmdOf = (start) => `([...document.querySelectorAll('.chat-vs-notice .chat-exit-cmd')].find((x) => x.textContent.startsWith(${JSON.stringify(start)})) || null)`;
-    const geo = (start) => P.evalJs(`(() => { const p = ${cmdOf(start)}; if (!p) return null; p.scrollIntoView({ block: 'nearest' }); const box = p.closest('.chat-exit-cmd-box'), sum = box.querySelector('.chat-exit-cmd-fold > summary'), out = p.closest('.chat-exit-run').querySelector('.chat-exit-out'); return { vw: innerWidth, text: p.textContent, w: p.clientWidth, sw: p.scrollWidth, h: p.offsetHeight, sh: p.scrollHeight, summary: sum ? sum.textContent : null, open: box.classList.contains('chat-exit-cmd-open'), titled: !!(p.title || box.title || (sum && sum.title)), outW: out ? out.clientWidth : -1, outSW: out ? out.scrollWidth : -1 }; })()`);
+    const geo = (start) => P.evalJs(`(() => { const p = ${cmdOf(start)}; if (!p) return null; const det = p.closest('details.chat-exit-tech'), sum = det && det.querySelector(':scope > summary'), out = p.closest('.chat-exit-run').querySelector('.chat-exit-out'); (det && det.open ? p : sum || p).scrollIntoView({ block: 'nearest' });
+      return { vw: innerWidth, text: p.textContent, shown: p.checkVisibility(), w: p.clientWidth, sw: p.scrollWidth, summary: sum ? sum.textContent : null, len: det?.querySelector('.chat-exit-cmd-len')?.textContent || '', open: !!(det && det.open), last: !!det && det.parentElement.lastElementChild === det,
+        titled: !!(p.title || (det && det.title) || (sum && sum.title)), outW: out ? out.clientWidth : -1, outSW: out ? out.scrollWidth : -1, words: p.closest('.chat-vs-notice')?.querySelector(':scope > .chat-text')?.textContent || '' }; })()`);
     ok(await P.waitFor(`!!${cmdOf('echo QQQ')} && !!${cmdOf('echo line-0')}`, 8000), 'both cards carry the command block');
     const a10 = await geo('echo QQQ');
-    ok(a10 && a10.vw === 390 && a10.w > 50 && a10.text === 'echo ' + tok && a10.sw <= a10.w + 1 && a10.outSW <= a10.outW + 1 && a10.h < 90 && a10.sh > a10.h && a10.summary === '显示完整命令（1370 个字符）' && !a10.titled, 'at 390 px the one-token command is whole in the card, wrapped (no sideways overflow), folded at four lines behind 显示完整命令（1370 个字符）; its 1 365-byte output line wraps too; no hover title', a10);
-    ok(await P.realClick(`(${cmdOf('echo QQQ')}?.closest('.chat-exit-cmd-box').querySelector('.chat-exit-cmd-fold > summary') || null)`), 'a real click on the expander');
+    ok(a10 && a10.vw === 390 && /^在 \S+ 上运行了一条命令 — 退出 0 · \d+\.\d s$/.test(a10.words) && !a10.shown && !a10.open && a10.summary === '技术细节' && a10.last && a10.outSW <= a10.outW + 1 && !a10.titled, 'at 390 px the card says 在 <machine> 上运行了一条命令 — 退出 0 · …; the 1 370-character command is folded away under ONE closed 技术细节 after the output; its 1 365-byte output line wraps; no hover title', a10);
+    ok(await P.realClick(`(${cmdOf('echo QQQ')}?.closest('details.chat-exit-tech')?.querySelector(':scope > summary') || null)`), 'a real click on 技术细节');
     const b10 = await geo('echo QQQ');
-    ok(b10 && b10.open && b10.h > a10.h * 3 && b10.sw <= b10.w + 1 && b10.summary === '收起命令', 'open: the whole command shows, still wrapped; the expander now reads 收起命令', b10);
+    ok(b10 && b10.open && b10.shown && b10.text === 'echo ' + tok && b10.w > 50 && b10.sw <= b10.w + 1 && b10.len === '命令 · 1370 个字符', 'open: the whole command shows, wrapped (no sideways overflow), its length named 命令 · 1370 个字符', b10);
     const a11 = await geo('echo line-0');
-    ok(a11 && a11.text === multi && a11.summary === '显示完整命令（12 行）', 'the 12-line script keeps its lines, folded behind 显示完整命令（12 行）', a11);
+    ok(a11 && a11.text === multi && !a11.open && a11.len === '命令 · 12 行', 'the 12-line script keeps its lines, folded away under 技术细节 (命令 · 12 行 inside)', a11);
     await P.cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 820, deviceScaleFactor: 1, mobile: false });
     await openRemote(P);
     const listIcon = `(${rowOf}?.querySelector('.mounts-row-actions button[title^="在 exmac 上运行过的命令"]') || null)`;

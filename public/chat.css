@@ -330,21 +330,22 @@
 /* the head's sentence is ONE flex item (lane S3): as three items the 6 px gap
    rendered `Message from “ VibeSpace browser ”` */
 .chat-peer-message .chat-peer-title { min-width: 0; }
-/* lane peer-card-fold: a folded peer card = its head + ONE preview line + Show — the house expander
-   (details.chat-diff, as on tool cards); the preview never wraps, the whole text sits behind Show */
-.chat-peer-fold.chat-diff { margin: 0; font-size: inherit; }
+/* lane peer-card-fold: a folded peer card = its head + ONE preview line; the preview never wraps. lane exit-card-margin
+   (主开发 2026-10-18): ONE switch, as on every foldable card — the head's ▸/▾ (the whole head row presses); no Show/Hide
+   pill; open hides the preview row (no empty ▾ row is left) and the whole text follows the head */
+.chat-peer-fold { margin: 0; }
 .chat-peer-fold > .chat-peer-fold-summary { display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none; font-size: 12px; color: var(--text); padding: 0; min-width: 0; }
 .chat-peer-fold > .chat-peer-fold-summary::-webkit-details-marker { display: none; }
 .chat-peer-fold > .chat-peer-fold-summary::marker { content: ''; }
 .chat-peer-preview { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.chat-peer-fold-btn { flex: none; margin-left: auto; color: var(--accent); font-size: 11px; font-weight: 600; padding: 1px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
-.chat-peer-fold-summary:hover .chat-peer-fold-btn, .chat-peer-fold-summary:focus-visible .chat-peer-fold-btn { background: color-mix(in srgb, var(--accent) 12%, transparent); }
-.chat-peer-fold[open] > summary .chat-peer-preview, .chat-peer-fold[open] > summary .chat-peer-fold-show, .chat-peer-fold:not([open]) > summary .chat-peer-fold-hide { display: none; }
-.chat-peer-fold[open] > .chat-text { margin-top: 4px; }
+.chat-peer-fold[open] > .chat-peer-fold-summary { display: none; }
+.chat-peer-fold-head { cursor: pointer; }
+.chat-peer-fold-arrow { flex: none; padding: 0; margin: 0; border: 0; background: none; font: inherit; font-size: 9px; line-height: 1; color: var(--text-dim); cursor: pointer; transition: var(--transition); }
+.chat-peer-fold-head:hover > .chat-peer-fold-arrow, .chat-peer-fold-arrow:focus-visible { color: var(--text); }
 /* a peer's "# Report" is bold text in a card, never a page-level heading (peer-card-model demoteHeadings) */
 .chat-msg .chat-peer-h { font-weight: 700; font-size: inherit; line-height: inherit; margin: 8px 0 2px; }
 .chat-msg .chat-peer-h:first-child { margin-top: 0; }
-@media (max-width: 768px) { .chat-peer-fold > .chat-peer-fold-summary { min-height: 44px; } .chat-peer-fold-btn { min-height: 44px; min-width: 44px; display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; } }
+@media (max-width: 768px) { .chat-peer-fold-head { min-height: 44px; } } /* a phone: the switch (the head row) is a 44 px target */
 /* A GROUP MESSAGE (lane group-report-card): "<sender> → <group>" — the group a link to its window; a dim line under
    the text when the agent was shown it cut short, or "… and N more" on a report's oldest card */
 .chat-peer-group { text-decoration: underline dotted; cursor: pointer; overflow-wrap: anywhere; }
@@ -373,9 +374,11 @@
 .chat-exit-cut, .chat-exit-none { font-size: 10px; color: var(--text-dim); }
 /* lane exit-see-whole (design 013 piece 1a): the command AS ITSELF above its output — wrapped (a 4 KiB token breaks anywhere), folded at four lines; open = the whole command, scrolling past 60vh. Descendant selectors: the transcript wraps every pre in .chat-pre-wrap (its Copy / Wrap toolbar) */
 .chat-exit-cmd { margin: 0; padding: 5px 8px; font-family: monospace; font-size: 11px; line-height: 1.45; color: var(--text); background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm); white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-all; user-select: text; }
-.chat-exit-cmd-folded:not(.chat-exit-cmd-open) .chat-exit-cmd { max-height: calc(4 * 1.45em + 10px); overflow: hidden; }
-.chat-exit-cmd-open .chat-exit-cmd { max-height: 60vh; overflow: auto; }
-.chat-exit-cmd-fold > summary { cursor: pointer; font-size: 11px; color: var(--text-secondary); }
+/* lane exit-card-margin (the owner: 「No raw strings in cards」): the command, its length, its paths — under the card's ONE 技术细节 fold, after the output; open = the whole command, scrolling past 60vh */
+.chat-exit-tech > summary { cursor: pointer; font-size: 11px; color: var(--text-secondary); }
+.chat-exit-tech[open] > summary { margin-bottom: 4px; }
+.chat-exit-cmd-len { font-size: 10px; color: var(--text-dim); margin: 0 0 2px; }
+.chat-exit-tech .chat-exit-cmd { max-height: 60vh; overflow: auto; }
 /* lane machine-card-fold: a PowerShell -EncodedCommand drawn as its decoded script; the line itself one click away; a hidden character a visible mark */
 .chat-exit-cmd-what { font-size: 10px; color: var(--text-dim); margin: 0 0 2px; }
 .chat-exit-cmd-hidden { font-size: 11px; color: var(--red); margin: 0 0 2px; }
@@ -494,6 +497,11 @@
    classes), regardless of where the role-indicator block sits. */
 [data-role-indicator] .chat-msg.chat-msg-collab { border-left-color: transparent; }
 [data-role-indicator] .chat-msg.chat-agent-report { border-left-color: var(--magenta, var(--accent)); }
+/* lane exit-card-margin (the owner: 「左边界也不对齐」): the border indicator's `.chat-msg { border-left: 3px solid transparent }`
+   tied these cards' own accent line and won (later) — their left side was a 3 px gap where the other sides are lines. Each
+   keeps its own colour, at the indicator's width: one left edge with the user / assistant bars */
+[data-role-indicator] .chat-msg.chat-vs-notice { border-left-color: var(--accent); }
+[data-role-indicator] .chat-msg.chat-peer-message { border-left-color: var(--magenta, var(--accent)); }
 .chat-system-notification > summary { cursor: pointer; list-style: none; }
 .chat-system-notification > summary::-webkit-details-marker { display: none; }
 .chat-system-notification > summary::before { content: '\25B8  '; content: '\25B8  ' / ""; }
@@ -1333,7 +1341,10 @@ pre.chat-pre-wrapped { white-space: pre-wrap; word-break: break-all; }
 .chat-compact-content .chat-tool-use { margin: 2px 0; padding: 4px 8px; }
 .chat-compact-content .chat-tool-result { margin: 2px 0; padding: 4px 8px; }
 .chat-compact-content .chat-thinking { margin: 2px 0; padding: 4px 6px; }
-.chat-compact .chat-msg-system { padding: 1px 0; }
+/* :where() — lane exit-card-margin (the owner: 「这个卡片的 margin 有点问题」): at two classes this rule tied the bordered cards'
+   own (.chat-msg.chat-vs-notice / .chat-msg.chat-peer-message: 8px 12px) and, later in the file, won — in the default compact
+   chat every such card lost its padding and its words sat ON the border. A plain system row keeps the 1px. */
+.chat-compact :where(.chat-msg-system) { padding: 1px 0; }
 .chat-compact .chat-system { font-size: 10px; padding: 2px 8px; }
 
 /* Role indicator: border (default) — colored left bar on outer .chat-msg, hide text labels */
