@@ -42,6 +42,48 @@ This file is the engineers' record of every release: the lanes, the verification
 - NOT MEASURED: a full agentd on the Mac (the owner's production agent was not touched); the release asset upload (主开发 wires the publish).
 - SUITES: test-stream-mac (new, fast, 61, 6.6 s). Moved pins: test-stream-plan (darwin ⇒ no_helper; linux keeps not_windows), test-desktop-webrtc (P3 rows), test-stream-op (the hello-ack tail), test-architecture (DEVICE set, §51 the generated module exception, §86 one own-tree row via scripts/mount-reader-census.mjs).
 
+### lane stream-p2w-capture-probe — the Windows per-window capture facts (design q-041 r3 §3 P2w-0, the capture half): Windows.Graphics.Capture on windows the lane opened itself, on the owner's workstation; base 5342d803 (no src/ change, no bump)
+- WHY: P2w makes one application window the stream's picture. Before a build lane, it needs the facts of a window's `GraphicsCaptureItem`: the colour model, the size, the border, the rate, what occlusion / minimize / a second display do, and whether the pipe can feed the mapped road. Two earlier workers stopped before any leg ran; this lane measures capture only (no input, no virtual display).
+- THE HELPER: scripts/probes/stream-p2w/wgc-probe.cs, 300 lines of C# 5.
+  - The in-box .NET Framework 4.8 csc builds it in 1.1 s. It references the 20 split WinMetadata `*.winmd` plus three Framework64 facades (System.Runtime, System.Runtime.WindowsRuntime, System.Runtime.InteropServices.WindowsRuntime). No SDK, no NuGet.
+  - The chain: `IGraphicsCaptureItemInterop.CreateForWindow` → `Direct3D11CaptureFramePool.CreateFreeThreaded` → a staging copy → tight rows.
+- COLOUR (the calibration window, 19 patches): exact in BOTH formats.
+  - R16G16B16A16Float is scRGB exactly like DDA. Each patch has the P0 DDA capture's own bits (grey10 9884 … white 16640 = 2.5 at SDR white 200 nits). ÷ white/80 → sRGB OETF (`srgb8OfHalf`) reproduces all 19. The unmapped RED control gives DDA's 45 / 81 / 119 ….
+  - B8G8R8A8 is the window's SDR picture, EXACT on an HDR display (all 19). DDA's 8-bit is clipped scRGB. Pixel by pixel, the mapped FP16 frame equals the BGRA frame on 99.974 % of channels; the rest are ±1, on scaled patch edges.
+- SIZE: the frame is the DWM extended frame bounds, title bar included. It is neither GetWindowRect (which holds the invisible resize borders) nor the client.
+  - A DPI-unaware window comes at its physical (scaled) size.
+  - Windows 11's rounded corners and 1-px border carry alpha < 255.
+- BORDER: an unpackaged exe gets `GraphicsCaptureAccess.RequestAccessAsync(Borderless)` = Allowed, and `IsBorderRequired = false` takes effect: no yellow border on screen.
+  - Without it, the border is 3 px + a 1-px blend drawn INSIDE the window's edge on screen.
+  - It is never in the frames: they are byte-identical either way.
+  - `IsCursorCaptureEnabled` sets. Whether a pointer over the window gets drawn was not observable: the probe never moves the pointer.
+- RATE (a 3480×1915 Edge window on a 120 Hz display):
+  - The default MinUpdateInterval holds a window to ~52 fps (gaps 16.7 / 25 ms). At the source, `MinUpdateInterval` 1 ms gives 97.7 fps and 33 ms gives 26.8 fps.
+  - Readback (staging copy + Map + rows) costs 8.4–8.9 ms per FP16 frame (~50 % of one core at 53 fps) and 4.3 ms per BGRA frame (~28 %). Without readback, 1–2 % of one core.
+- OCCLUSION / MINIMIZE / ANOTHER DISPLAY:
+  - Covered by a TopMost lane window: the live picture of the covered window (a GDI window kept ticking at its own 24 fps).
+  - A covered CHROMIUM window stops painting (0 fps, Chromium's native occlusion tracking). With `--disable-features=CalculateNativeWinOcclusion --disable-backgrounding-occluded-windows` it paints at 49.8 fps.
+  - Minimized: frames STOP. No black frame, no error, no size change; the session lives and resumes with the live picture on restore.
+  - A session opened on a minimized window: the item is the minimized caption (459×67) and no frames come. On restore, the first frame lands in the small pool (clipped), then Recreate, then full frames.
+  - Another display (both 4K at 175 %): a move during a session is seamless, with no gap and no resize. FP16 white is 2.5 there too.
+- PIPE: the helper's `pipe` has the mapped road's ffmpeg #1 shape (W×H×8 tight rows on stdout).
+  - Spawned by the agent's own node (a libuv pipe) with 64 KiB writes: near-4K FP16 holds 30 fps (1.6 GB/s; one 53 MB write gives 26 fps), near-4K BGRA 60 fps, 1920×1080 FP16 60 fps.
+  - The same node reader takes 2.07 GB/s from ffmpeg (a synthetic source). So near-4K FP16 at 60 fps needs a smaller frame on the pipe (part C's NV12).
+  - Into ffmpeg's h264_nvenc: BGRA holds 30 fps (NVENC 3 %); rgbaf16le reaches only 25 fps at ~4 cores (ffmpeg's float conversion, which also clamps).
+- REFUSALS: `CreateForWindow` answers 0x80070057 "Could not capture the given window" for:
+  - child windows (Chrome_RenderWidgetHostHWND, the UWP title bar);
+  - invisible / IME windows, a never-shown window, a message-only window;
+  - a bad handle.
+- ACCEPTED: `CreateForWindow` gives an item for:
+  - a UWP app by its ApplicationFrameWindow (frame bounds; its CoreWindow child gives a 0×0 item the pool refuses);
+  - the taskbar;
+  - Progman (both displays, 7680×2160);
+  - GetDesktopWindow (0×0).
+  - Elevated windows were not tried: the only one was the owner's.
+- TRAPS:
+  - Windows 11 Notepad restores the owner's previous tabs when it starts, so it is not a lane window. pad.ps1 stands in for it.
+  - A process in the background cannot change another window's z-order: HWND_TOP, HWND_BOTTOM and minimize + restore were all ignored. Cover with a TopMost window.
+
 ## 2.369.301 — 2026-10-18
 
 ### lane agent-feedback — `vibespace-feedback`: any agent reports a CLI / flow / UI that felt wrong, the owner reads the reports in ⚙ System ▸ Agent feedback… (the owner 2026-10-18: agents report through a command, the maintainers check the reports regularly, the owner sees them in the interface); base 5342d803 (.300)
