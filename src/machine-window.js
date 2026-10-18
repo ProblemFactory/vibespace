@@ -11,10 +11,15 @@
  *           + GetWindowRect, and DwmGetWindowAttribute(DWMWA_EXTENDED_FRAME_BOUNDS) for the real rectangle (no invisible
  *           resize border); DPI-aware, so both are the framebuffer's physical pixels; the process table (Win32_Process:
  *           parent + start time) only while finding
- *   darwin  ONE osascript JXA loop over CGWindowListCopyWindowInfo (kCGWindowOwnerPID, kCGWindowBounds — points, the
- *           main display's top-left origin; on-screen layer-0 windows while finding, the one window by id after) and
- *           NSRunningApplication's launchDate; macOS has no "topmost": the pin ACTIVATES the app instead
- * The script prints one dump per round (`screen`, `win` rows, `p` process rows, `end`); everything that DECIDES is here:
+ *   darwin  NOTHING under node reads the screen (lane mac-window-list-helper — the owner's macOS 26 asked whether "node" may
+ *           bypass the system private window picker when the osascript JXA this file ran read it): a look is ONE run of the
+ *           Mac's screen helper's facts (`mac.facts()`, handed in by the daemon — src/agentd/stream-mac.js: the helper
+ *           spawned disclaimed, under ITS Screen Recording grant, refused BY NAME without it), read again every poll (its
+ *           windows' bounds in points from the main display's top-left; layer 0); the owners' starts from `mac.starts(pids)`
+ *           (`ps -o lstart=` — a process read) while finding; macOS has no "topmost": the pin ACTIVATES the app by its bundle
+ *           id through LaunchServices (`/usr/bin/open -b` — measured: no window-server client, no TCC request under node)
+ * The Windows script prints one dump per round (`screen`, `win` rows, `p` process rows, `end`), a Mac's facts become the same
+ * dump (`macDumpOf`); everything that DECIDES is here:
  * which window is the launched app's (`pickTrackedWindow`), its rectangle (`rectOf`), the answer (`windowAnswer`).
  */
 const MD = require('./machine-desktop-model.js');
@@ -117,53 +122,25 @@ function winPinScript(hwnd, on) {
     `if (-not [VsWin]::SetWindowPos($h, [IntPtr](${on ? -1 : -2}), 0, 0, 0, 0, 0x0013)) { [Console]::Error.WriteLine('SetWindowPos refused (error ' + [Runtime.InteropServices.Marshal]::GetLastWin32Error() + ')'); exit 4 }`,
     "[Console]::Out.WriteLine('ok')"].filter(Boolean).join('\n');
 }
-/** THE MAC LOOK (osascript JXA; argv = target window id, poll ms, deadline ms). */
-const MAC_TRACK_JXA = [
-  "ObjC.import('Cocoa'); ObjC.import('CoreGraphics');",
-  'function run(argv) {',
-  '  const target = Number(argv[0]) || 0, poll = Number(argv[1]) || 250, deadline = Number(argv[2]) || 0, t0 = Date.now();',
-  '  const out = $.NSFileHandle.fileHandleWithStandardOutput;',
-  "  const say = (s) => out.writeData($(s + '\\n').dataUsingEncoding($.NSUTF8StringEncoding));",
-  '  for (;;) {',
-  '    const scr = $.NSScreen.mainScreen, fr = scr.frame;',
-  "    say(JSON.stringify({ t: 'screen', x: 0, y: 0, w: fr.size.width, h: fr.size.height, scale: scr.backingScaleFactor }));",
-  '    const opt = target ? $.kCGWindowListOptionIncludingWindow : ($.kCGWindowListOptionOnScreenOnly | $.kCGWindowListExcludeDesktopElements);',
-  '    const rows = ObjC.deepUnwrap(ObjC.castRefToObject($.CGWindowListCopyWindowInfo(opt, target || $.kCGNullWindowID))) || [];',
-  "    if (target && !rows.some((w) => w.kCGWindowNumber === target)) say(JSON.stringify({ t: 'win', id: target, gone: 1 }));",
-  '    const pids = new Set();',
-  '    for (const w of rows) {',
-  '      if (!target && w.kCGWindowLayer !== 0) continue;',
-  '      const b = w.kCGWindowBounds || {};',
-  "      say(JSON.stringify({ t: 'win', id: w.kCGWindowNumber, pid: w.kCGWindowOwnerPID, title: w.kCGWindowName || '', owner: w.kCGWindowOwnerName || '', vis: w.kCGWindowIsOnscreen ? 1 : 0, b: [b.X, b.Y, b.Width, b.Height] }));",
-  '      pids.add(w.kCGWindowOwnerPID);',
-  '    }',
-  "    if (!target) for (const p of pids) { const a = $.NSRunningApplication.runningApplicationWithProcessIdentifier(p); const d = a && !a.isNil() ? a.launchDate : null; say('p ' + p + ' 0 ' + (d && !d.isNil() ? Math.round(d.timeIntervalSince1970 * 1000) : 0)); }",
-  "    say('end ' + Date.now());",
-  '    if (deadline && Date.now() - t0 > deadline) return;',
-  '    delay(poll / 1000);',
-  '  }',
-  '}'].join('\n');
-/** THE MAC "PIN": activate the app (it comes to the front, unhidden) — macOS keeps no window above the others for us. */
-const MAC_PIN_JXA = [
-  "ObjC.import('Cocoa');",
-  'function run(argv) {',
-  '  const a = $.NSRunningApplication.runningApplicationWithProcessIdentifier(Number(argv[0]));',
-  "  if (!a || a.isNil()) return 'gone';",
-  '  a.unhide; a.activateWithOptions($.NSApplicationActivateIgnoringOtherApps);',
-  "  return 'ok';",
-  '}'].join('\n');
-const OSA = '/usr/bin/osascript';
+/** A Mac FOLLOWS its window with one helper facts run, then this long (a run costs ~45 ms of CPU — measured on the owner's
+ *  Mac: 10 runs = 0.45 s user+sys in 1.26 s; the stream's own window frame is re-read every 1 s). */
+const MAC_WATCH_POLL_MS = 500;
+/** A Mac app is brought forward by LaunchServices (`open -b <bundle id>`); a pin first asks `ps` whether its process still
+ *  runs — `open` would LAUNCH an app that quit. */
+const OPEN = '/usr/bin/open', PS = '/bin/ps';
+const BUNDLE_RE = /^[A-Za-z0-9][A-Za-z0-9.-]{0,199}$/;
 
 /** The look's argv for this platform. → { ok, argv } | { ok:false, code } */
 function trackArgv(platform, { target = 0, pollMs = TRACK_POLL_MS, deadlineMs = 0 } = {}) {
   if (platform === 'win32') return { ok: true, argv: [...MD.PS_ARGV, MD.psEncoded(winTrackScript({ target, pollMs, deadlineMs }))] };
-  if (platform === 'darwin') return { ok: true, argv: [OSA, '-l', 'JavaScript', '-e', MAC_TRACK_JXA, String(int(target) || 0), String(int(pollMs) || TRACK_POLL_MS), String(int(deadlineMs) || 0)] };
+  if (platform === 'darwin') return { ok: true, argv: null }; // a Mac's look is its screen helper's facts (runWindowTrack's `mac`): no child under node
   return { ok: false, code: 'not_desktop_machine', error: `one app's own window is for Windows and macOS machines (this one runs ${platform || 'an unknown system'})` };
 }
-/** The pin's argv: Windows by the window, macOS by the app's process. → { ok, argv } | { ok:false, code } */
-function pinArgv(platform, { hwnd = 0, pid = 0, on = true } = {}) {
+/** The pin's argv: Windows by the window, macOS by the app (its process must run; LaunchServices activates its bundle id).
+ *  → { ok, argv } | { ok:false, code } */
+function pinArgv(platform, { hwnd = 0, pid = 0, bundle = null, on = true } = {}) {
   if (platform === 'win32') return int(hwnd) > 0 ? { ok: true, argv: [...MD.PS_ARGV, MD.psEncoded(winPinScript(hwnd, !!on))] } : { ok: false, code: 'bad-request', error: 'no window to pin' };
-  if (platform === 'darwin') return !on ? { ok: true, argv: null } : int(pid) > 0 ? { ok: true, argv: [OSA, '-l', 'JavaScript', '-e', MAC_PIN_JXA, String(int(pid))] } : { ok: false, code: 'bad-request', error: 'no app to bring forward' };
+  if (platform === 'darwin') return !on ? { ok: true, argv: null } : !(int(pid) > 0) ? { ok: false, code: 'bad-request', error: 'no app to bring forward' } : BUNDLE_RE.test(String(bundle || '')) ? { ok: true, argv: [OPEN, '-b', String(bundle)] } : { ok: false, code: 'no_bundle', error: 'this app has no bundle id, so the Mac cannot bring it forward' };
   return { ok: false, code: 'not_desktop_machine', error: 'a pin is for Windows and macOS machines' };
 }
 
@@ -197,6 +174,36 @@ function dumpReader() {
 }
 /** Parse whole text (fixtures) → dumps. */
 function parseDumps(text) { return dumpReader().feed(String(text || '').endsWith('\n') ? text : text + '\n'); }
+/** A Mac's screen-helper facts (src/stream-plan.js parseMacFacts' shape — displays + windows in points) → THE dump the
+ *  Windows look prints: the main display as the screen (the windows' bounds start at its top-left), each window a `win` row
+ *  (`vis` = on screen, `min` = Accessibility's minimized), `starts` (pid → epoch ms) as `p` rows — no lineage on a Mac
+ *  (launchd starts an `open -a` app). PURE. */
+function macDumpOf(facts, { starts = null } = {}) {
+  const f = facts && typeof facts === 'object' ? facts : {};
+  const ds = Array.isArray(f.displays) ? f.displays : [];
+  const m = ds.find((d) => d && d.main) || ds[0] || null;
+  const screen = m ? { t: 'screen', x: Number(m.x) || 0, y: Number(m.y) || 0, w: Number(m.w), h: Number(m.h), scale: Number(m.scale) || 1 } : null;
+  const wins = [];
+  for (const w of (Array.isArray(f.windows) ? f.windows : []).slice(0, 200)) {
+    const id = int(w && w.id);
+    if (!(id > 0)) continue;
+    wins.push({ t: 'win', id, pid: int(w.pid) || 0, title: w.title || '', owner: w.app || '', bundle: w.bundle || null, vis: w.onScreen ? 1 : 0, min: w.minimized === true ? 1 : 0, b: [Number(w.x), Number(w.y), Number(w.w), Number(w.h)] });
+  }
+  const procs = new Map();
+  if (starts) for (const [p, ms] of starts) if (int(p) > 0) procs.set(int(p), { ppid: 0, start: int(ms) || 0 });
+  return { screen, wins, procs, at: int(f.at) || null };
+}
+/** `ps -o pid= -o lstart=` in the C locale → Map pid → its start (epoch ms, second precision — the machine's own clock and
+ *  zone, the launch report's too). A pid that does not run prints no line. PURE. */
+function psStarts(stdout) {
+  const out = new Map();
+  for (const line of String(stdout || '').split('\n')) {
+    const m = /^\s*(\d{1,10})\s+([A-Z][a-z]{2} [A-Z][a-z]{2} +\d{1,2} \d{2}:\d{2}:\d{2} \d{4})\s*$/.exec(line);
+    const ms = m ? Date.parse(m[2]) : NaN;
+    if (Number.isFinite(ms)) out.set(Number(m[1]), ms);
+  }
+  return out;
+}
 
 /** The screen in the units the rectangles use: Windows = physical pixels of the virtual screen (scale = dpi / 96; a look
  *  that is not DPI-aware read logical metrics, scaled up here); macOS = points of the main display (scale = its backing
@@ -267,7 +274,7 @@ function windowAnswer(platform, dump, row, { state = null, by = null } = {}) {
   if (!row) return { state: state || 'none', screen: screen ? { w: screen.w, h: screen.h, scale: screen.scale } : null };
   const base = { [key]: idOf(platform, row), screen: screen ? { w: screen.w, h: screen.h, scale: screen.scale } : null };
   if (row.gone) return { state: 'gone', ...base };
-  return { state: state || 'found', ...base, pid: int(row.pid), title: clean(row.title) || clean(row.owner), rect: rectOf(platform, row, screen), minimized: !!row.min || row.vis === 0, ...(by ? { by } : {}) };
+  return { state: state || 'found', ...base, pid: int(row.pid), title: clean(row.title) || clean(row.owner), rect: rectOf(platform, row, screen), minimized: !!row.min || row.vis === 0, ...(row.bundle ? { bundle: clean(row.bundle) } : {}), ...(by ? { by } : {}) };
 }
 /** The window an answer names (hwnd on Windows, window id on macOS). */
 const targetOf = (a) => (a ? int(a.hwnd != null ? a.hwnd : a.windowId) : null);
@@ -328,7 +335,7 @@ function clampToBox(L, px, py) {
  * ONE child at a time: the finding look is bounded by `waitMs`; the following look reads the one window until stopped
  * (its parent's pipe closing ends it too). → { stop(), get target() }
  */
-function runWindowTrack({ platform, params, spawn, env, onAnswer = () => { }, onEnd = () => { }, now = Date.now, setTimer = setTimeout, clearTimer = clearTimeout }) {
+function runWindowTrack({ platform, params, spawn, env, mac = null, onAnswer = () => { }, onEnd = () => { }, now = Date.now, setTimer = setTimeout, clearTimer = clearTimeout }) {
   const req = trackRequest(params);
   let child = null, stopped = false, first = true, last = null, lastAt = 0, pending = null, flushT = null, deadT = null, target = req.ok ? req.target : null;
   const end = () => { if (stopped) return; stopped = true; clearTimer(flushT); clearTimer(deadT); kill(); try { onEnd(); } catch { /* the caller's */ } };
@@ -346,6 +353,7 @@ function runWindowTrack({ platform, params, spawn, env, onAnswer = () => { }, on
   const look = (mode) => {
     const how = trackArgv(platform, mode === 'find' ? { pollMs: TRACK_POLL_MS, deadlineMs: req.waitMs } : { target, pollMs: WATCH_POLL_MS });
     if (!how.ok) { emit({ state: 'error', code: how.code, error: how.error }); return; }
+    if (!how.argv) { macLook(mode); return; }
     const reader = dumpReader();
     let err = '', firstIds = null;
     let c;
@@ -381,43 +389,72 @@ function runWindowTrack({ platform, params, spawn, env, onAnswer = () => { }, on
       end();
     });
   };
+  // THE MAC'S LOOK (lane mac-window-list-helper): ONE helper facts run at a time (`mac.facts()` — under the helper's grant,
+  // refused by name without it), the poll after the last; while finding, each NEW owner's start (`mac.starts`, kept); while
+  // following, a window missing from the facts is OFF SCREEN while its app runs and Accessibility cannot see it (the helper
+  // names a minimized / hidden window only through AX), GONE when its app ended or Accessibility does not list it
+  function macLook(mode) {
+    if (!mac || typeof mac.facts !== 'function') { emit({ state: 'error', code: 'no_helper', error: 'this agent has no screen helper for a Mac\'s window look' }); end(); return; }
+    const me = { t: null, kill: () => clearTimer(me.t) };
+    child = me;
+    const t0 = now(), starts = new Map();
+    let firstIds = null, seen = null;
+    const live = () => child === me && !stopped;
+    const again = () => { if (live()) me.t = setTimer(round, mode === 'find' ? TRACK_POLL_MS : MAC_WATCH_POLL_MS); };
+    const startsOf = async (pids) => { try { return typeof mac.starts === 'function' ? await mac.starts(pids) : null; } catch { return null; } };
+    async function round() {
+      if (!live()) return;
+      let f = null;
+      try { f = await mac.facts(); } catch (e) { f = { ok: false, code: 'look_failed', error: String((e && e.message) || e) }; }
+      if (!live()) return;
+      if (!f || f.ok === false) { child = null; emit({ state: 'error', code: (f && f.code) || 'look_failed', error: String((f && f.error) || 'the window look failed').slice(0, 300), ...(f && f.settings ? { settings: f.settings } : {}) }); end(); return; }
+      if (mode === 'find') {
+        const fresh = [...new Set((Array.isArray(f.windows) ? f.windows : []).map((w) => int(w && w.pid)).filter((p) => p > 0 && !starts.has(p)))];
+        if (fresh.length && req.since) { const m = await startsOf(fresh); if (!live()) return; for (const p of fresh) starts.set(p, (m && m.get(p)) || 0); }
+        const dump = macDumpOf(f, { starts });
+        if (!firstIds) firstIds = new Set(dump.wins.map((w) => idOf(platform, w)));
+        const row = pickTrackedWindow(platform, dump, { pid: req.pid, since: req.since, firstIds });
+        if (row) { target = idOf(platform, row); child = null; clearTimer(deadT); emit(windowAnswer(platform, dump, row)); if (req.watch && !stopped) look('watch'); return; }
+        if (now() - t0 >= req.waitMs) { child = null; clearTimer(deadT); emit({ state: 'none' }); end(); return; }
+        again(); return;
+      }
+      const dump = macDumpOf(f);
+      let row = dump.wins.find((w) => idOf(platform, w) === target) || null;
+      if (!row && seen && !(f.tcc && f.tcc.accessibility === 'granted')) { const m = await startsOf([seen.pid]); if (!live()) return; if (m && m.has(int(seen.pid))) row = { ...seen, vis: 0 }; }
+      if (row) seen = row;
+      emit(windowAnswer(platform, dump, row || { id: target, gone: 1 }));
+      again();
+    }
+    round();
+  }
   if (target) look('watch');
   else { look('find'); deadT = setTimer(() => { if (!stopped && first) { kill(); emit({ state: 'none' }); } }, req.waitMs + 5000); }
   return { stop: end, get target() { return target; }, get stopped() { return stopped; } };
 }
-/** PIN / UNPIN one window (bounded 10 s). → { ok, pinned, state?, note? } | { ok:false, code, error } */
-function pinWindow({ platform, hwnd, pid, on, execFile, env }) {
-  const how = pinArgv(platform, { hwnd, pid, on });
+/** PIN / UNPIN one window (bounded 10 s). A Mac: its app's process must still run (`ps`), then LaunchServices activates it.
+ *  → { ok, pinned, state?, note? } | { ok:false, code, error } */
+function pinWindow({ platform, hwnd, pid, bundle = null, on, execFile, env }) {
+  const how = pinArgv(platform, { hwnd, pid, bundle, on });
   if (!how.ok) return Promise.resolve({ ok: false, code: how.code, error: how.error });
   if (!how.argv) return Promise.resolve({ ok: true, pinned: false, note: 'mac-no-topmost' });
-  return new Promise((resolve) => {
-    execFile(how.argv[0], how.argv.slice(1), { env, windowsHide: true, timeout: 10000, maxBuffer: 64 * 1024, encoding: 'utf8' }, (err, stdout, stderr) => {
-      const out = String(stdout || '').trim();
-      if (out === 'gone' || (err && err.code === 3)) return resolve({ ok: true, pinned: false, state: 'gone' });
-      if (err) return resolve({ ok: false, code: 'pin_failed', error: (String(stderr || '').trim().split('\n')[0] || err.message || 'the pin failed').slice(0, 200) });
-      resolve({ ok: true, pinned: !!on && platform === 'win32', ...(platform === 'darwin' ? { note: 'mac-activated' } : {}) });
-    });
+  const run = (argv) => new Promise((resolve) => {
+    execFile(argv[0], argv.slice(1), { env, windowsHide: true, timeout: 10000, maxBuffer: 64 * 1024, encoding: 'utf8' }, (err, stdout, stderr) => resolve({ err, out: String(stdout || '').trim(), stderr: String(stderr || '') }));
   });
+  const runs = platform === 'darwin' ? run([PS, '-o', 'pid=', '-p', String(int(pid))]).then((r) => r.out !== '') : Promise.resolve(true);
+  return runs.then((up) => (!up ? { ok: true, pinned: false, state: 'gone' } : run(how.argv).then(({ err, out, stderr }) => {
+    if (out === 'gone' || (err && err.code === 3)) return { ok: true, pinned: false, state: 'gone' };
+    if (err) return { ok: false, code: 'pin_failed', error: (stderr.trim().split('\n')[0] || err.message || 'the pin failed').slice(0, 200) };
+    return { ok: true, pinned: !!on && platform === 'win32', ...(platform === 'darwin' ? { note: 'mac-activated' } : {}) };
+  })));
 }
 
 // ── lane desktop-v2-entry (design q-030 §3): THE MACHINE'S OWN SCREEN TABLE — the `display-facts` device op ─────────────
-// The same two shells as the look above: a Mac's JXA over NSScreen.screens (frames in POINTS, the primary's bottom-left
-// origin, y up; backingScaleFactor), Windows' PowerShell over Screen.AllScreens (Bounds in physical pixels once the
+// A Mac's screen helper (its facts' displays: CGDisplayBounds in POINTS from the main display's top-left, the mode's pixels
+// over points = the scale — read IN the helper, never under node: lane mac-window-list-helper), Windows' PowerShell over
+// Screen.AllScreens (Bounds in physical pixels once the
 // process is DPI-aware; the primary at 0,0, a secondary left of it negative). One answer, bounded; the page maps it onto the
 // framebuffer (src/desktop-screens.js screenMap — never a guess when the union is not the framebuffer).
 const DISPLAYS_MS = 10000;
-const MAC_DISPLAYS_JXA = [
-  "ObjC.import('Cocoa');",
-  'function run() {',
-  '  const ss = $.NSScreen.screens, rows = [];',
-  '  for (let i = 0; i < ss.count; i++) {',
-  '    const s = ss.objectAtIndex(i), f = s.frame;',
-  "    let name = ''; try { const n = s.localizedName; name = n && !n.isNil() ? ObjC.unwrap(n) : ''; } catch (e) { name = ''; }",
-  "    let id = i + 1; try { const d = s.deviceDescription.objectForKey('NSScreenNumber'); if (d && !d.isNil()) id = d.intValue; } catch (e) { }",
-  '    rows.push({ id, name, x: f.origin.x, y: f.origin.y, w: f.size.width, h: f.size.height, scale: s.backingScaleFactor, primary: i === 0 ? 1 : 0 });',
-  '  }',
-  "  return JSON.stringify({ t: 'displays', origin: 'bottom-left', rows });",
-  '}'].join('\n');
 // lane win-desktop-cursor-hdr (owner 2026-10-13 "HDR 特别白"): each screen's Windows HDR state — WMI has none, so the
 // DisplayConfig API: QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS) → per active path the source's GDI name (DisplayConfigGetDeviceInfo
 // type 1, \\.\DISPLAYn = Screen.DeviceName) and the target's advanced-colour info (type 9: bit 1 advancedColorEnabled, bit 2
@@ -465,7 +502,7 @@ function winDisplaysScript() {
 /** The op's argv for this platform. → { ok, argv } | { ok:false, code } */
 function displaysArgv(platform) {
   if (platform === 'win32') return { ok: true, argv: [...MD.PS_ARGV, MD.psEncoded(winDisplaysScript())] };
-  if (platform === 'darwin') return { ok: true, argv: [OSA, '-l', 'JavaScript', '-e', MAC_DISPLAYS_JXA] };
+  if (platform === 'darwin') return { ok: true, argv: null }; // a Mac's table is its screen helper's facts (readDisplayFacts' mac): no child under node
   return { ok: false, code: 'not_desktop_machine', error: `the display table is for Windows and macOS machines (this one runs ${platform || 'an unknown system'})` };
 }
 /** The script's one line → { ok, displays: [{id, name, x, y, w, h, scale, primary, hdr}] } in a TOP-LEFT origin (a Mac's y flipped
@@ -487,8 +524,21 @@ function parseDisplayFacts(platform, stdout) {
   }
   return out.length ? { ok: true, platform, displays: out } : { ok: false, code: 'bad_output', error: 'the machine printed no usable screen' };
 }
-/** RUN the op where the screens are (the daemon hands its execFile). → { ok, platform, displays } | { ok:false, code, error } */
-function readDisplayFacts({ platform, execFile, env }) {
+/** A Mac's screen-helper facts → the op's answer (the main display first; top-left origin already; hdr unknown — the HDR words
+ *  are Windows'). PURE. */
+function macDisplaysOf(facts) {
+  const ds = (facts && Array.isArray(facts.displays) ? facts.displays : []).filter((d) => d && Number(d.w) > 0 && Number(d.h) > 0).slice(0, 16);
+  const rows = [...ds.filter((d) => d.main), ...ds.filter((d) => !d.main)].map((d, i) => ({ id: clean(d.id).slice(0, 60) || String(i + 1), name: clean(d.name).slice(0, 80), x: Number(d.x) || 0, y: Number(d.y) || 0, w: Number(d.w), h: Number(d.h), scale: Number(d.scale) > 0 ? Number(d.scale) : 1, primary: !!d.main, hdr: null }));
+  return rows.length ? { ok: true, platform: 'darwin', displays: rows } : { ok: false, code: 'bad_output', error: 'the screen helper listed no display' };
+}
+/** RUN the op where the screens are (the daemon hands its execFile; a Mac's its screen helper's facts as `mac.displays()` —
+ *  no grant needed for the table). → { ok, platform, displays } | { ok:false, code, error } */
+function readDisplayFacts({ platform, execFile, env, mac = null }) {
+  if (platform === 'darwin') {
+    if (!mac || typeof mac.displays !== 'function') return Promise.resolve({ ok: false, code: 'no_helper', error: 'this agent has no screen helper to list a Mac\'s displays' });
+    return Promise.resolve().then(() => mac.displays()).then((f) => (f && f.ok !== false ? macDisplaysOf(f) : { ok: false, code: (f && f.code) || 'displays_failed', error: String((f && f.error) || 'the screen helper did not answer').slice(0, 200) }),
+      (e) => ({ ok: false, code: 'displays_failed', error: String((e && e.message) || e).slice(0, 200) }));
+  }
   const how = displaysArgv(platform);
   if (!how.ok) return Promise.resolve({ ok: false, code: how.code, error: how.error });
   return new Promise((resolve) => {
@@ -500,4 +550,4 @@ function readDisplayFacts({ platform, execFile, env }) {
   });
 }
 
-module.exports = { namesGuiApp, TRACK_WAIT_MS, TRACK_POLL_MS, WATCH_POLL_MS, PUSH_MIN_MS, MIN_SIDE, LAUNCH_TAG, STATES, parseLaunchReport, trackRequest, winTrackScript, winPinScript, MAC_TRACK_JXA, MAC_PIN_JXA, trackArgv, pinArgv, dumpReader, parseDumps, screenOf, rectOf, pickTrackedWindow, windowAnswer, targetOf, sameAnswer, cropLayout, paneToMachine, clampToBox, runWindowTrack, pinWindow, DISPLAYS_MS, MAC_DISPLAYS_JXA, winDisplaysScript, displaysArgv, parseDisplayFacts, readDisplayFacts };
+module.exports = { namesGuiApp, TRACK_WAIT_MS, TRACK_POLL_MS, WATCH_POLL_MS, PUSH_MIN_MS, MIN_SIDE, LAUNCH_TAG, STATES, parseLaunchReport, trackRequest, winTrackScript, winPinScript, MAC_WATCH_POLL_MS, trackArgv, pinArgv, dumpReader, parseDumps, macDumpOf, psStarts, screenOf, rectOf, pickTrackedWindow, windowAnswer, targetOf, sameAnswer, cropLayout, paneToMachine, clampToBox, runWindowTrack, pinWindow, DISPLAYS_MS, winDisplaysScript, displaysArgv, parseDisplayFacts, macDisplaysOf, readDisplayFacts };

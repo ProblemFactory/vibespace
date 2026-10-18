@@ -3,13 +3,17 @@
 // own window. FAST, in-process:
 //   §1 the Windows look's dump (EnumWindows rows + DWM extended frame bounds + the process table) → the rectangle: DWM wins
 //      over GetWindowRect, the virtual screen's origin (a left monitor at x < 0), a look that is not DPI-aware (logical
-//      metrics × dpi/96)        §2 the Mac look's dump (CGWindowList rows: points, an owner name when the title is hidden)
+//      metrics × dpi/96)        §2 a Mac's look = its SCREEN HELPER's facts (lane mac-window-list-helper) → the same dump: the
+//      MAIN display's points, the owner's name when the title is hidden, the bundle id; `ps -o lstart=` → the starts
 //   §3 which window is the launched app's: its lineage (start "" blender: cmd.exe → blender.exe), its start time (macOS
 //      open -a: launchd's child), a window new since the first look, the largest of equals; none ⇒ null
 //   §4 the answers: found / gone / none; the watcher's sameAnswer        §5 the crop + the pointer: pane → machine at the
 //      fit scale (Retina points → pixels), outside ⇒ dropped, a drag held at the edge (+ RED controls)
 //   §6 the device runner over a fake spawn: finds on the 2nd look, follows two moves (≥ 100 ms apart, the last never
 //      dropped), gone ends it; none at the wait; the pin's scripts (topmost / not; a Mac activates, never "unpins")
+//   §6b a Mac's look over a FAKE helper (`mac`): ONE facts run at a time, nothing spawned under node; found by its owner's
+//      start; followed every 500 ms; off screen (app alive, no Accessibility) vs gone; refused BY NAME (vibespace-screen);
+//      the pin = ps (the app runs) + LaunchServices `open -b <bundle>` (+ RED controls)
 //   §7 the capability gate: an old agent is never asked (host_needs_daemon, no request) + RED control (a gate-less copy sends it)
 //   §8 the hub: one pinned window per machine, closing / an idle page ends the watch (the device undoes the pin), a pin the
 //      hub could not undo is REPORTED; the window type is not persisted        §9 the run's launch report (the plain run
@@ -56,18 +60,30 @@ console.log('§1 the Windows look → the rectangle (DWM bounds, the virtual scr
   ok(MW.rectOf('win32', { wr: [5, 5, 5, 9] }, scr) === null && MW.rectOf('win32', { wr: 'x' }, scr) === null, 'an empty / malformed rectangle is no rectangle');
 }
 
-const MAC_SCREEN = { t: 'screen', x: 0, y: 0, w: 1512, h: 982, scale: 2 };
-const macRow = (id, pid, owner, b, title = '') => J({ t: 'win', id, pid, title, owner, vis: 1, b });
-const FINDER = macRow(4120, 512, 'Finder', [0, 25, 800, 500]);
-const MBLENDER = macRow(4188, 8801, 'Blender', [120, 60, 1200, 800]);
-const macLook = (rows, procs) => [J(MAC_SCREEN), ...rows, ...procs, 'end 1791700002000'].join('\n') + '\n';
-console.log('§2 the Mac look → points of the main display; the owner\'s name when the title is hidden');
+// a Mac's screen-helper facts as src/agentd/stream-mac.js hands them (src/stream-plan.js parseMacFacts' shape; names invented)
+const MAC_BASE = { ok: true, platform: 'darwin', tcc: { screen: 'granted', accessibility: 'denied' },
+  displays: [{ id: '2', x: -1512, y: 0, w: 1512, h: 982, pw: 3024, ph: 1964, scale: 2, main: false, name: 'Side' }, { id: '1', x: 0, y: 0, w: 1512, h: 982, pw: 3024, ph: 1964, scale: 2, main: true, name: 'Built-in' }], windows: [] };
+const macWin = (id, pid, app, [x, y, w, h], title = null) => ({ id: String(id), pid, app, bundle: `com.example.${app.toLowerCase()}`, title, x, y, w, h, onScreen: true, minimized: null });
+const FINDER = macWin(4120, 512, 'Finder', [0, 25, 800, 500]);
+const MBLENDER = macWin(4188, 8801, 'Blender', [120, 60, 1200, 800]);
+const macFacts = (windows, more = {}) => ({ ...MAC_BASE, windows, ...more });
+const STARTS = new Map([[512, 1791600000000], [8801, 1791700001000]]);
+console.log('§2 a Mac\'s look = its screen helper\'s facts → points of the MAIN display; the owner\'s name when the title is hidden');
 {
-  const [d] = MW.parseDumps(macLook([FINDER, MBLENDER], ['p 512 0 1791600000000', 'p 8801 0 1791700001000']));
+  const d = MW.macDumpOf(macFacts([FINDER, MBLENDER]), { starts: STARTS });
   const scr = MW.screenOf('darwin', d.screen);
-  ok(scr.w === 1512 && scr.scale === 2 && J(MW.rectOf('darwin', JSON.parse(MBLENDER), scr)) === J({ x: 120, y: 60, w: 1200, h: 800 }), 'kCGWindowBounds is the rectangle (points), the backing factor the scale');
-  const a = MW.windowAnswer('darwin', d, JSON.parse(MBLENDER));
-  ok(a.state === 'found' && a.windowId === 4188 && a.title === 'Blender' && a.pid === 8801 && J(a.screen) === J({ w: 1512, h: 982, scale: 2 }), 'no Screen Recording permission ⇒ no title: the answer names the app (its owner)', a);
+  const row = d.wins.find((w) => w.id === 4188);
+  ok(scr.x === 0 && scr.w === 1512 && scr.scale === 2 && J(MW.rectOf('darwin', row, scr)) === J({ x: 120, y: 60, w: 1200, h: 800 }), 'the window\'s bounds (points) are the rectangle, from the MAIN display\'s top-left (where CGWindowBounds start), its scale the scale', { scr, row });
+  const side = MUT.load('src/machine-window.js', cut(mwSrc, 'const m = ds.find((d) => d && d.main) || ds[0] || null;', 'const m = ds[0] || null;'), 'firstdisplay');
+  const ds = side.macDumpOf(macFacts([MBLENDER]));
+  ok(J(side.rectOf('darwin', ds.wins[0], side.screenOf('darwin', ds.screen))) === J({ x: 1632, y: 60, w: 1200, h: 800 }), 'RED CONTROL: the first listed display (a side one at x = -1512) as the screen would put the crop 1512 points off');
+  const a = MW.windowAnswer('darwin', d, row);
+  ok(a.state === 'found' && a.windowId === 4188 && a.title === 'Blender' && a.pid === 8801 && a.bundle === 'com.example.blender' && J(a.screen) === J({ w: 1512, h: 982, scale: 2 }), 'no title in the facts ⇒ the answer names the app; it carries the bundle id (the pin\'s)', a);
+  ok(d.procs.get(8801).start === 1791700001000 && d.procs.get(8801).ppid === 0 && d.wins.every((w) => w.vis === 1), 'the starts become the process rows (no lineage on a Mac); on-screen windows are visible rows');
+  const off = MW.macDumpOf(macFacts([{ ...MBLENDER, onScreen: false, minimized: true }]));
+  ok(off.wins[0].vis === 0 && off.wins[0].min === 1 && MW.windowAnswer('darwin', off, off.wins[0]).minimized === true, 'a minimized window the helper names (Accessibility) is a minimized answer');
+  const st = MW.psStarts('  512 Sun Oct 18 15:28:32 2026\n 8801 Sun Oct  5 09:08:07 2026\nPID STARTED\n 77 garbage\n');
+  ok(st.size === 2 && st.get(512) === Date.parse('Sun Oct 18 15:28:32 2026') && st.get(8801) === Date.parse('Sun Oct 5 09:08:07 2026'), '`ps -o pid= -o lstart=` (C locale) → each pid\'s start; a header or a stray line is no start', [...st]);
 }
 
 console.log('§3 which window is the launched app\'s');
@@ -77,11 +93,11 @@ console.log('§3 which window is the launched app\'s');
   ok(MW.pickTrackedWindow('win32', d1, { pid: 9000, since: 1791700000000 }) === null, 'the app has no window yet ⇒ null (the look goes on)');
   ok(MW.pickTrackedWindow('win32', d2, { pid: 9000 })?.hwnd === 131330, 'start "" blender: cmd.exe (the launched pid) → blender.exe — its window, by lineage (the splash fragment is too small)');
   ok(MW.pickTrackedWindow('win32', d2, { pid: 4 })?.hwnd == null, 'another process\'s lineage ⇒ nothing (Explorer\'s window is never "the app")');
-  const [m1] = MW.parseDumps(macLook([FINDER, MBLENDER], ['p 512 0 1791600000000', 'p 8801 0 1791700001000']));
+  const m1 = MW.macDumpOf(macFacts([FINDER, MBLENDER]), { starts: STARTS });
   ok(MW.pickTrackedWindow('darwin', m1, { pid: 30001, since: 1791700000000 })?.id === 4188, 'macOS open -a: launchd starts the app (no lineage) — the process STARTED after the run is its owner');
   ok(MW.pickTrackedWindow('darwin', m1, { pid: 30001, since: 1791700005000 }) === null, 'an app started before the run (minus 2 s slack) is not taken');
-  const NEW = macRow(4200, 512, 'Finder', [200, 100, 900, 600], 'Report');
-  const [m2] = MW.parseDumps(macLook([FINDER, MBLENDER, NEW], ['p 512 0 1791600000000', 'p 8801 0 1791600000000']));
+  const NEW = macWin(4200, 512, 'Finder', [200, 100, 900, 600], 'Report');
+  const m2 = MW.macDumpOf(macFacts([FINDER, MBLENDER, NEW]), { starts: new Map([[512, 1791600000000], [8801, 1791600000000]]) });
   ok(MW.pickTrackedWindow('darwin', m2, { since: 1791700000000, firstIds: new Set([4120, 4188]) })?.id === 4200, 'an app that was already running opened a NEW window (not in the first look) ⇒ that window');
   const BIG = winRow(131400, 9012, 'Blender Preferences', [0, 0, 400, 300], [0, 0, 400, 300]);
   const [d3] = MW.parseDumps(winLook([BIG, BLENDER]));
@@ -154,8 +170,8 @@ console.log('§6 the device runner (a fake spawn) and the pin');
   advance(200); W.stdout.emit('data', winLook([J({ t: 'win', hwnd: 131330, gone: 1 })], []));
   ok(got.length === 4 && got[3].a.state === 'gone' && ended === 1 && W.killed && h.stopped, 'the window closed ⇒ gone, the watch ends (its look stopped)');
   const none = []; spawned.length = 0;
-  MW.runWindowTrack({ platform: 'darwin', params: { since: 1791700000000, findMs: 3000 }, spawn, env: {}, onAnswer: (a) => none.push(a), now: () => clock, setTimer, clearTimer });
-  ok(spawned[0].cmd === '/usr/bin/osascript' && spawned[0].args[3] === MW.MAC_TRACK_JXA && spawned[0].args.slice(4).join() === '0,250,3000', 'a Mac looks through ONE osascript JXA (CGWindowListCopyWindowInfo), its bound as an argument');
+  MW.runWindowTrack({ platform: 'win32', params: { since: 1791700000000, findMs: 3000 }, spawn, env: {}, onAnswer: (a) => none.push(a), now: () => clock, setTimer, clearTimer });
+  ok(/-gt 3000\) \{ exit 0 \}/.test(decode(spawned[0])), 'the finding look carries its bound (findMs) into the script');
   spawned[0].emit('close', 0);
   ok(none.length === 1 && none[0].state === 'none', 'the look ended at its wait without a window ⇒ none');
   const bad = []; MW.runWindowTrack({ platform: 'linux', params: { pid: 1 }, spawn, env: {}, onAnswer: (a) => bad.push(a) });
@@ -168,12 +184,82 @@ console.log('§6 the device runner (a fake spawn) and the pin');
   await MW.pinWindow({ platform: 'win32', hwnd: 131330, on: false, execFile, env: {} });
   const ps2 = Buffer.from(ran[1][1][ran[1][1].length - 1], 'base64').toString('utf16le');
   ok(/\[IntPtr\]\(-2\)/.test(ps2) && !/ShowWindow\(\$h/.test(ps2), 'unpin: HWND_NOTOPMOST (no restore)');
-  const mac = await MW.pinWindow({ platform: 'darwin', pid: 8801, on: true, execFile, env: {} });
-  ok(mac.ok && !mac.pinned && ran[2][0] === '/usr/bin/osascript' && ran[2][1].includes(MW.MAC_PIN_JXA) && ran[2][1].at(-1) === '8801', 'a Mac: the app is ACTIVATED (macOS keeps no window on top for us)');
   const n0 = ran.length; const off = await MW.pinWindow({ platform: 'darwin', pid: 8801, on: false, execFile, env: {} });
   ok(off.ok && ran.length === n0, 'a Mac has nothing to undo: no script runs');
   const gone = await MW.pinWindow({ platform: 'win32', hwnd: 5, on: true, execFile: (c, a, o, cb) => cb(Object.assign(new Error('x'), { code: 3 }), 'gone\n', ''), env: {} });
   ok(gone.ok && gone.state === 'gone', 'pinning a window that closed says gone (nothing to keep on top)');
+}
+
+console.log('§6b a Mac: the look is ITS SCREEN HELPER\'s facts (lane mac-window-list-helper — nothing under node reads the screen)');
+{
+  let clock = 5000;
+  const timers = [];
+  const setTimer = (f, ms) => { const t = { at: clock + ms, f }; timers.push(t); return t; };
+  const clearTimer = (t) => { const i = timers.indexOf(t); if (i >= 0) timers.splice(i, 1); };
+  const settle = async () => { for (let i = 0; i < 8; i++) await new Promise((r) => setImmediate(r)); };
+  const advance = async (ms) => { clock += ms; for (const t of timers.filter((x) => x.at <= clock)) { clearTimer(t); t.f(); } await settle(); };
+  const spawned = [];
+  const spawn = (...a) => { spawned.push(a); throw new Error('a Mac look spawns nothing under node'); };
+  const fake = (start) => {
+    const s = { facts: start, alive: new Set([512, 8801]), runs: 0, starts: [] };
+    s.mac = { facts: async () => { s.runs++; return s.facts; }, starts: async (pids) => { s.starts.push(pids); return new Map(pids.filter((p) => s.alive.has(p)).map((p) => [p, STARTS.get(p)])); } };
+    return s;
+  };
+  const S = fake(macFacts([FINDER, MBLENDER]));
+  const got = []; let ended = 0;
+  const h = MW.runWindowTrack({ platform: 'darwin', params: { pid: 30001, since: 1791700000000, watch: true }, spawn, env: {}, mac: S.mac, onAnswer: (a, first) => got.push({ a, first }), onEnd: () => { ended++; }, now: () => clock, setTimer, clearTimer });
+  await settle();
+  ok(got.length === 1 && got[0].first && got[0].a.state === 'found' && got[0].a.windowId === 4188 && got[0].a.bundle === 'com.example.blender' && J(S.starts) === J([[512, 8801]]) && spawned.length === 0, 'the FIRST look (one helper facts run, nothing spawned under node) finds the app by its owner\'s start — though its window was there at that look', { got, starts: S.starts });
+  ok(S.runs === 2, 'then the follow begins with one more facts run (the same answer is not pushed again)', S.runs);
+  S.facts = macFacts([FINDER, { ...MBLENDER, x: 300 }]);
+  await advance(MW.MAC_WATCH_POLL_MS - 1);
+  ok(S.runs === 2 && got.length === 1, 'one run at a time: the next facts run waits its 500 ms');
+  await advance(1);
+  ok(S.runs === 3 && got.length === 2 && got[1].a.rect.x === 300 && J(S.starts) === J([[512, 8801]]), 'following: one facts run every 500 ms, a move arrives; no start is asked while following', got[1]);
+  S.facts = macFacts([FINDER]);
+  await advance(MW.MAC_WATCH_POLL_MS);
+  ok(got.length === 3 && got[2].a.state === 'found' && got[2].a.minimized === true && got[2].a.rect.x === 300 && J(S.starts.at(-1)) === J([8801]), 'off the list while its app runs and Accessibility is off ⇒ OFF SCREEN (minimized, its last rectangle): the app\'s process asked, never assumed gone', got[2]);
+  S.alive.delete(8801);
+  await advance(MW.MAC_WATCH_POLL_MS);
+  ok(got.length === 4 && got[3].a.state === 'gone' && ended === 1 && h.stopped, 'its app ended ⇒ gone, the watch ends');
+  const n = S.runs; await advance(5000);
+  ok(S.runs === n && timers.length === 0, 'an ended watch runs the helper no more (no timer left)');
+
+  const A = fake(macFacts([FINDER, MBLENDER], { tcc: { screen: 'granted', accessibility: 'granted' } }));
+  const ga = [];
+  MW.runWindowTrack({ platform: 'darwin', params: { target: 4188, watch: true }, spawn, env: {}, mac: A.mac, onAnswer: (a) => ga.push(a), now: () => clock, setTimer, clearTimer });
+  await settle(); A.facts = macFacts([FINDER], { tcc: { screen: 'granted', accessibility: 'granted' } });
+  await advance(MW.MAC_WATCH_POLL_MS);
+  ok(ga.length === 2 && ga[0].state === 'found' && ga[1].state === 'gone' && A.starts.length === 0, 'Accessibility on: the helper lists a minimized window itself, so a window missing from the facts is gone (no process asked)', ga);
+
+  const R = MUT.load('src/machine-window.js', cut(mwSrc, 'if (fresh.length && req.since) {', 'if (false) {'), 'nostarts');
+  const N = fake(macFacts([FINDER, MBLENDER]));
+  const gn = [];
+  R.runWindowTrack({ platform: 'darwin', params: { pid: 30001, since: 1791700000000, findMs: 1000 }, spawn, env: {}, mac: N.mac, onAnswer: (a) => gn.push(a), now: () => clock, setTimer, clearTimer });
+  await settle(); for (let i = 0; i < 4; i++) await advance(MW.TRACK_POLL_MS);
+  ok(gn.length === 1 && gn[0].state === 'none' && N.runs === 5, 'RED CONTROL: without the starts the app whose window was already there at the first look is never found (none at the wait, 5 runs in 1 s)', { gn, runs: N.runs });
+
+  const refused = [];
+  const off = { ok: false, code: 'screen_permission', error: 'Screen Recording is off for vibespace-screen — on the Mac: System Settings → …', settings: 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture' };
+  MW.runWindowTrack({ platform: 'darwin', params: { since: 1791700000000, watch: true }, spawn, env: {}, mac: { facts: async () => off }, onAnswer: (a) => refused.push(a), now: () => clock, setTimer, clearTimer });
+  await settle();
+  ok(refused.length === 1 && refused[0].state === 'error' && refused[0].code === 'screen_permission' && /vibespace-screen/.test(refused[0].error) && refused[0].settings === off.settings && spawned.length === 0, 'the helper without Screen Recording ⇒ refused BY NAME (vibespace-screen + its Settings pane) — never a look under node instead', refused);
+  const noMac = [];
+  MW.runWindowTrack({ platform: 'darwin', params: { since: 1791700000000 }, spawn, env: {}, onAnswer: (a) => noMac.push(a), now: () => clock, setTimer, clearTimer });
+  ok(noMac.length === 1 && noMac[0].code === 'no_helper' && spawned.length === 0, 'no helper handed in ⇒ no_helper (nothing spawned)', noMac);
+  ok(J(MW.trackArgv('darwin', {})) === J({ ok: true, argv: null }) && J(MW.displaysArgv('darwin')) === J({ ok: true, argv: null }), 'a Mac\'s look and screen table have NO argv: no child under node');
+
+  const ran = [];
+  const exM = (up) => (cmd, args, o, cb) => { ran.push([cmd, args]); cb(null, cmd === '/bin/ps' ? (up ? ' 8801\n' : '') : '', ''); };
+  const pin = await MW.pinWindow({ platform: 'darwin', pid: 8801, bundle: 'com.example.blender', on: true, execFile: exM(true), env: {} });
+  ok(pin.ok && !pin.pinned && pin.note === 'mac-activated' && J(ran) === J([['/bin/ps', ['-o', 'pid=', '-p', '8801']], ['/usr/bin/open', ['-b', 'com.example.blender']]]), 'a Mac pin: its app still runs (ps), then LaunchServices ACTIVATES it by bundle id (`open -b` — no osascript under node)', ran);
+  ran.length = 0;
+  const quit = await MW.pinWindow({ platform: 'darwin', pid: 8801, bundle: 'com.example.blender', on: true, execFile: exM(false), env: {} });
+  ok(quit.ok && quit.state === 'gone' && ran.length === 1 && ran[0][0] === '/bin/ps', 'its app quit ⇒ gone, and `open` never runs (it would LAUNCH the app again)', ran);
+  ran.length = 0;
+  const nob = await MW.pinWindow({ platform: 'darwin', pid: 8801, bundle: null, on: true, execFile: exM(true), env: {} });
+  const inj = await MW.pinWindow({ platform: 'darwin', pid: 8801, bundle: '-a /Applications/Other.app', on: true, execFile: exM(true), env: {} });
+  ok(nob.code === 'no_bundle' && inj.code === 'no_bundle' && ran.length === 0, 'no bundle id (or a string that is not one) ⇒ refused by name, nothing runs');
 }
 
 console.log('§7 the capability gate: an old agent is never asked');

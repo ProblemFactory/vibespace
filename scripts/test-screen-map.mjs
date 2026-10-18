@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 // lane desktop-v2-entry (design q-030 §6 P0 seed TESTS): the PURE screen map + the -308 skimmer + the stats' timing table +
-// the `display-facts` op over JXA / PowerShell FIXTURE outputs (never the owner's machines) + the build-time noVNC patch.
+// the `display-facts` op over PowerShell / Mac screen-helper FIXTURE outputs (never the owner's machines) + the build-time noVNC patch.
 //   §1 screenMap truth table: Mac points ×2 · Mac sending points · Windows negative-coordinate secondary · union ≠ fb ⇒
 //      unknown · single screen · -308 contradicting the OS table ⇒ the framebuffer's own wins · agreeing ⇒ the OS names ·
 //      mixed Mac scales ⇒ unknown · no framebuffer
 //   §2 rfbScreens (the payload bytes) · clientMessages (one send cut into types) · updateTimer (round trip + fps, idle trips out)
-//   §3 the op: argv per platform, the scripts' shape, parseDisplayFacts over a Mac (bottom-left, flipped) and a Windows
-//      (PowerShell 5's lone row as an object) fixture, readDisplayFacts with a fixture execFile, the agent / client / route wiring
+//   §3 the op: argv per platform (a Mac has none — lane mac-window-list-helper: its screen helper's facts), the script's shape,
+//      parseDisplayFacts over a bottom-left (flipped) and a Windows (PowerShell 5's lone row as an object) fixture, a Mac's
+//      helper displays (macDisplaysOf), readDisplayFacts with a fixture execFile / a fake helper, the agent / client / route wiring
 //   §4 the noVNC patch: both anchors apply once on the bundled 1.7 rfb.js, ≤ 20 added lines, a drifted anchor is MISSING (the
 //      build fails — never silently unpatched), the built public/novnc.js carries it
 //   §5 lane win-desktop-cursor-hdr (owner 2026-10-13 "鼠标如此巨大，而且 HDR 特别白"): cursorPlan (a 96 px pointer at scale 0.5 ⇒
@@ -81,11 +82,17 @@ const st = tm.stats(5100);
 ok(st.roundTripMs === 50 && st.samples === 4 && st.fps === 2, 'updateTimer: request → next request is the update round trip (an idle 4.8 s gap is not latency); fps = requests in the last second', st);
 
 console.log('§3 the display-facts op');
-ok(MW.displaysArgv('linux').code === 'not_desktop_machine' && MW.displaysArgv('darwin').argv[0] === '/usr/bin/osascript' && MW.displaysArgv('win32').argv[0] === 'powershell.exe', 'argv per platform (JXA on a Mac, encoded PowerShell on Windows, none elsewhere)');
-ok(/NSScreen\.screens/.test(MW.MAC_DISPLAYS_JXA) && /backingScaleFactor/.test(MW.MAC_DISPLAYS_JXA) && /Screen\]::AllScreens/.test(MW.winDisplaysScript()) && /SetProcessDPIAware/.test(MW.winDisplaysScript()), 'the scripts read NSScreen.screens + backingScaleFactor / AllScreens after SetProcessDPIAware (physical pixels)');
+ok(MW.displaysArgv('linux').code === 'not_desktop_machine' && MW.displaysArgv('darwin').argv === null && MW.displaysArgv('win32').argv[0] === 'powershell.exe', 'argv per platform (encoded PowerShell on Windows; a Mac has NONE — its screen helper\'s facts, nothing under node; none elsewhere)');
+ok(/Screen\]::AllScreens/.test(MW.winDisplaysScript()) && /SetProcessDPIAware/.test(MW.winDisplaysScript()), 'the Windows script reads AllScreens after SetProcessDPIAware (physical pixels)');
 const macOut = JSON.stringify({ t: 'displays', origin: 'bottom-left', rows: [{ id: 69733632, name: 'Built-in Retina Display', x: 0, y: 0, w: 1512, h: 982, scale: 2, primary: 1 }, { id: 2, name: 'DELL U2720Q', x: 1512, y: -98, w: 1920, h: 1080, scale: 1, primary: 0 }] }) + '\n';
 const mac = MW.parseDisplayFacts('darwin', macOut);
-ok(mac.ok && mac.displays.map((d) => `${d.name}@${d.x},${d.y}`).join('|') === 'Built-in Retina Display@0,0|DELL U2720Q@1512,0' && mac.displays[0].primary, 'a Mac fixture: bottom-left frames flipped against the primary (a taller monitor below the menu bar line lands at y 0)', mac);
+ok(mac.ok && mac.displays.map((d) => `${d.name}@${d.x},${d.y}`).join('|') === 'Built-in Retina Display@0,0|DELL U2720Q@1512,0' && mac.displays[0].primary, 'a bottom-left table (NSScreen\'s frames) is flipped against the primary (a taller monitor below the menu bar line lands at y 0)', mac);
+const MAC_HELPER = { ok: true, platform: 'darwin', tcc: { screen: 'denied', accessibility: 'denied' }, windows: [], displays: [
+  { id: '2', x: 1512, y: 0, w: 1920, h: 1080, pw: 1920, ph: 1080, scale: 1, main: false, hdr: true, asleep: false, name: 'DELL U2720Q' },
+  { id: '69733632', x: 0, y: 0, w: 1512, h: 982, pw: 3024, ph: 1964, scale: 2, main: true, hdr: false, asleep: false, name: 'Built-in Retina Display' }] };
+const mh = MW.macDisplaysOf(MAC_HELPER);
+ok(mh.ok && mh.displays.map((d) => `${d.id}:${d.name}@${d.x},${d.y}x${d.scale}`).join('|') === '69733632:Built-in Retina Display@0,0x2|2:DELL U2720Q@1512,0x1' && mh.displays[0].primary && !mh.displays[1].primary && mh.displays.every((d) => d.hdr === null), 'a Mac: its screen helper\'s displays (CGDisplayBounds, top-left already; the MAIN one first; hdr unknown — the HDR words are Windows\'), whatever its Screen Recording', mh);
+ok(MW.macDisplaysOf({ displays: [{ id: '1', w: 0, h: 0 }] }).code === 'bad_output' && MW.macDisplaysOf(null).code === 'bad_output', 'a helper that listed no usable display ⇒ bad_output, by name');
 const winOut = '#< CLIXML\r\n' + JSON.stringify({ t: 'displays', origin: 'top-left', aware: 1, rows: { id: '\\\\.\\DISPLAY1', name: '\\\\.\\DISPLAY1', x: 0, y: 0, w: 2560, h: 1440, scale: 1.5, primary: 1 } }) + '\r\n';
 const w1 = MW.parseDisplayFacts('win32', winOut);
 ok(w1.ok && w1.displays.length === 1 && w1.displays[0].name === 'DISPLAY1' && w1.displays[0].scale === 1.5, 'a Windows fixture: PowerShell 5\'s lone row as an object, the \\\\.\\ prefix dropped', w1);
@@ -93,9 +100,15 @@ ok(MW.parseDisplayFacts('win32', 'garbage\n{"t":"other"}').code === 'bad_output'
 const ran = [];
 const fx = (out, err = null) => (file, argv, opts, cb) => { ran.push([file, opts.timeout]); setImmediate(() => cb(err, out, err ? 'denied' : '')); };
 const r1 = await MW.readDisplayFacts({ platform: 'win32', execFile: fx(winOut), env: {} });
-const r2 = await MW.readDisplayFacts({ platform: 'darwin', execFile: fx('', Object.assign(new Error('x'), { code: 1 })), env: {} });
+const r2 = await MW.readDisplayFacts({ platform: 'win32', execFile: fx('', Object.assign(new Error('x'), { code: 1 })), env: {} });
 const r3 = await MW.readDisplayFacts({ platform: 'linux', execFile: fx(''), env: {} });
 ok(r1.ok && r2.code === 'displays_failed' && r2.error === 'denied' && r3.code === 'not_desktop_machine' && ran.length === 2 && ran[0][1] === MW.DISPLAYS_MS, 'readDisplayFacts: bounded (10 s), a failure named with its first stderr line, Linux never spawns', { r1, r2, r3, ran });
+const asked = [];
+const m1 = await MW.readDisplayFacts({ platform: 'darwin', execFile: fx(''), env: {}, mac: { displays: async () => { asked.push('displays'); return MAC_HELPER; } } });
+const m2 = await MW.readDisplayFacts({ platform: 'darwin', execFile: fx(''), env: {}, mac: { displays: async () => ({ ok: false, code: 'no_helper', error: 'the Mac has no screen helper yet' }) } });
+const m3 = await MW.readDisplayFacts({ platform: 'darwin', execFile: fx(''), env: {} });
+const m4 = await MW.readDisplayFacts({ platform: 'darwin', execFile: fx(''), env: {}, mac: { displays: async () => { throw new Error('helper hung'); } } });
+ok(m1.ok && m1.displays.length === 2 && asked.join() === 'displays' && m2.code === 'no_helper' && m3.code === 'no_helper' && m4.code === 'displays_failed' && /helper hung/.test(m4.error) && ran.length === 2, 'a Mac asks its SCREEN HELPER (one facts read) and spawns nothing under node; no helper ⇒ no_helper by name, a failed read ⇒ displays_failed', { m1, m2, m3, m4, ran });
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const ad = read('src/agentd/agentd.js'), cl = read('src/agentd/client.js'), rt = read('src/routes/desktop-apps.js');
 ok(/capabilities: \[[^\]]*'display-facts'[^\]]*\]/.test(ad) /* by CONTENT, never the list's tail (lane remoteapp-r1b appended one after it) */ && /if \(msg\.op === 'display-facts'\)/.test(ad) && /m\.op === 'display-facts-result'/.test(cl) && /includes\?\.\('display-facts'\)\) \{ const e = new Error\('daemon lacks display-facts/.test(cl), 'the agent answers the op and says the capability; the client gates on it (an old agent is never asked) and routes the answer');

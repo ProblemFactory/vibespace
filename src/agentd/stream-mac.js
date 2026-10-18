@@ -21,6 +21,10 @@
  *   the lock, its version — and the helper's state; kept FACTS_MS (a window source re-reads once when its window is not in them).
  * THE PICKER (`stream-windows` on a Mac — int304: the one picker of both platforms): the facts' windows in src/stream-window.js's
  *   shape (SP.macWindowRows); `restore` is Windows' only (a Mac's stream of a minimized window ends): restore_unsupported.
+ * THE WINDOW LOOK + THE SCREEN TABLE of src/machine-window.js (`window-track`, `display-facts` — lane mac-window-list-helper:
+ *   on a Mac NOTHING under node reads the screen): `look()` = fresh facts, refused BY NAME without the helper's Screen Recording
+ *   (the window list needs it — never a node-attributed read instead); `look({ windows: false })` = the table (no grant needed,
+ *   the facts kept FACTS_MS); `starts(pids)` = each process's start (`ps -o lstart=` — a process read).
  * THE SOURCE: `vibespace-screen --disclaim capture …` → FLV on stdout (SP.flvReader — no new parser), `key` / `bps <n>` on
  *   stdin (a key on the SAME frame; the bitrate LIVE — SP.macKbpsDecision, no encoder restart), JSON lines on stderr (started
  *   → the input's target, frame → a window that moved, stats once a second, end {code}). ENDINGS BY NAME: the helper's end code
@@ -29,6 +33,7 @@
  */
 const SP = require('../stream-plan.js');
 const SRC = require('./mac-helper-source.js');
+const MW = require('../machine-window.js');
 
 const FACTS_MS = 30000;
 const RUN_MS = 20000;          // one facts run
@@ -41,8 +46,8 @@ const RECIPE = 'on the Mac: `xcode-select --install` (the Command Line Tools —
 function createMacHelper({ execFile, fs, home, log = () => { }, now = Date.now, version = SRC.VERSION, source = SRC.SOURCE, env = process.env } = {}) {
   const P = SP.macHelperPaths(home);
   let building = null;
-  const run = (file, args, timeout = RUN_MS) => new Promise((resolve) => {
-    try { execFile(file, args, { env, timeout, maxBuffer: 4 << 20, encoding: 'utf8' }, (err, stdout, stderr) => resolve({ err, stdout: String(stdout || ''), stderr: String(stderr || '') })); } catch (e) { resolve({ err: e, stdout: '', stderr: '' }); }
+  const run = (file, args, timeout = RUN_MS, more = null) => new Promise((resolve) => {
+    try { execFile(file, args, { env: more ? { ...env, ...more } : env, timeout, maxBuffer: 4 << 20, encoding: 'utf8' }, (err, stdout, stderr) => resolve({ err, stdout: String(stdout || ''), stderr: String(stderr || '') })); } catch (e) { resolve({ err: e, stdout: '', stderr: '' }); }
   });
   const isFile = (f) => { try { return fs.statSync(f).isFile(); } catch { return false; } };
   const installed = () => { try { return fs.readFileSync(P.version, 'utf8').trim() || null; } catch { return null; } };
@@ -158,6 +163,25 @@ function createMacScreen({ spawn, execFile, env = process.env, fs = require('fs'
     if (!f.tcc || f.tcc.screen !== 'granted') return named(h.regrant ? 'helper_changed_regrant' : 'screen_permission', h.regrant ? SP.MAC_WHY.helper_changed_regrant : SP.MAC_WHY.screen_permission, { settings: SP.MAC_SETTINGS.screen });
     return { ok: true, platform: 'darwin', helper: { bin: h.bin, version: h.version }, windows: SP.macWindowRows(f) };
   }
+  /** THE WINDOW LOOK of src/machine-window.js (window-track: `look()`, fresh) and the screen table (display-facts: `look({ force:
+   *  false, windows: false })` — displays need no grant): the helper's facts, or the refusal BY NAME that keeps them — no helper,
+   *  or Screen Recording off for vibespace-screen (other apps' windows and titles need it). Never a read under node instead. */
+  async function look({ force = true, windows = true } = {}) {
+    const f = await facts({ force });
+    if (!f.ok) return f;
+    const h = f.helper || {};
+    if (h.state !== 'ready') return named(h.code || 'no_helper', h.error || SP.MAC_WHY.no_helper);
+    if (windows && (!f.tcc || f.tcc.screen !== 'granted')) return named(h.regrant ? 'helper_changed_regrant' : 'screen_permission', h.regrant ? SP.MAC_WHY.helper_changed_regrant : SP.MAC_WHY.screen_permission, { settings: SP.MAC_SETTINGS.screen });
+    return f;
+  }
+  /** Each process's start (epoch ms; a pid that does not run is absent) — `ps -o pid= -o lstart=` in the C locale: a PROCESS read
+   *  (macOS `open -a` hands the launch to launchd, so the look finds the launched app by its start). */
+  async function starts(pids) {
+    const list = [...new Set((pids || []).map(Number).filter((p) => Number.isInteger(p) && p > 0))].slice(0, 200);
+    if (!list.length) return new Map();
+    const r = await H.run('/bin/ps', ['-o', 'pid=', '-o', 'lstart=', '-p', list.join(',')], 5000, { LC_ALL: 'C', LANG: 'C' });
+    return MW.psStarts(r.stdout); // ps exits 1 when one pid is gone and still prints the others
+  }
   /** 「还原它」 is Windows' (a Mac's stream of a minimized window ENDS window_minimized — SCK sends no picture): refused by name. */
   async function restore() { return named('restore_unsupported', 'a minimized Mac window is restored on the Mac itself (its stream ends while it is minimized)'); }
   /** ONE capture that only adds the helper's (off) Screen Recording row — the owner then toggles it; it ends at once. */
@@ -239,7 +263,7 @@ function createMacScreen({ spawn, execFile, env = process.env, fs = require('fs'
     };
   }
 
-  return { facts, source, windows, restore, helper: H };
+  return { facts, source, windows, restore, look, starts, helper: H };
 }
 
 module.exports = { createMacScreen, createMacHelper, FACTS_MS, RECIPE };

@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.307 — 2026-10-18
+
+### Fixed
+- On a Mac, following an app's window or listing its screens no longer makes macOS ask about "node": the screen helper you allowed reads them.
+
 ## 2.369.306 — 2026-10-18
 
 ### Added

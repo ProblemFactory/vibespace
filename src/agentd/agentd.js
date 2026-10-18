@@ -1283,6 +1283,9 @@ const dialHostOf = () => { try { return [new URL(JSON.parse(fs.readFileSync(DIAL
 const streamWindowOf = () => streamWindow || (streamWindow = require('./stream-window-source.js').createWindowSource({ platform: process.platform, spawn: require('child_process').spawn, execFile: require('child_process').execFile, env: spawnEnv(), fs, log, screenFacts: () => streamScreenOf().facts(), makeWorker: streamMapWorker }));
 if (process.platform === 'win32') { const t = setTimeout(() => { try { streamWindowOf().helper().catch(() => { }); } catch { /* the first use builds it */ } }, 20000); t.unref?.(); }
 const windowsOf = () => { const sc = streamScreenOf(); return typeof sc.windows === 'function' ? sc : streamWindowOf(); };
+// lane mac-window-list-helper: a Mac's window look (window-track) and screen table (display-facts) are its SCREEN HELPER's facts
+// (src/agentd/stream-mac.js look / starts) — on a Mac nothing under this node reads the screen; asked only on darwin
+const macWindowLook = { facts: () => streamScreenOf().look(), displays: () => streamScreenOf().look({ force: false, windows: false }), starts: (pids) => streamScreenOf().starts(pids) };
 const streamHostOf = () => streamHost || (streamHost = require('./stream-host.js').createStreamHost({ injector: injectorOf(), log, screen: (msg, o) => streamScreenOf().source(msg, o), window: (msg, o) => windowsOf().source(msg, o), legHosts: dialHostOf, program: process.platform === 'win32' ? process.execPath : null }));
 function unpinWindow(rec) {
   rec.pinned = false;
@@ -2127,15 +2130,15 @@ function serveConnection(sock) {
         const wid = msg.watch ? String(msg.wid || '').slice(0, 80) : '';
         if (wid && windowWatches.has(wid)) windowWatches.get(wid).h.stop();
         const rec = { owner: mux, h: null, last: null, pinned: false };
-        rec.h = MW.runWindowTrack({ platform: process.platform, params: msg, spawn: require('child_process').spawn, env: spawnEnv(),
+        rec.h = MW.runWindowTrack({ platform: process.platform, params: msg, spawn: require('child_process').spawn, env: spawnEnv(), mac: macWindowLook,
           onAnswer: (a, first) => { rec.last = a; try { mux.control(first ? { op: 'window-track-result', id: msg.id, result: a } : { op: 'window-rect', wid, result: a }); } catch { } },
           onEnd: () => { if (wid && windowWatches.get(wid) === rec) windowWatches.delete(wid); if (rec.pinned) unpinWindow(rec); } });
         if (wid && !rec.h.stopped) windowWatches.set(wid, rec);
         return;
       }
-      // lane desktop-v2-entry: THIS machine's screen table (NSScreen / Screen.AllScreens) for the display picker — one bounded look
+      // lane desktop-v2-entry: THIS machine's screen table (a Mac's screen helper / Screen.AllScreens) for the display picker — one bounded look
       if (msg.op === 'display-facts') {
-        require('./../machine-window.js').readDisplayFacts({ platform: process.platform, execFile: require('child_process').execFile, env: spawnEnv() })
+        require('./../machine-window.js').readDisplayFacts({ platform: process.platform, execFile: require('child_process').execFile, env: spawnEnv(), mac: macWindowLook })
           .then((r) => mux.control({ op: 'display-facts-result', id: msg.id, result: r }), (e) => mux.control({ op: 'display-facts-result', id: msg.id, error: String((e && e.message) || e) }));
         return;
       }
@@ -2190,7 +2193,7 @@ function serveConnection(sock) {
         const rec = windowWatches.get(String(msg.wid || ''));
         if (!rec || !rec.last || rec.last.state !== 'found') { mux.control({ op: 'window-pin-result', id: msg.id, result: { ok: false, code: 'not_tracked', error: 'that window is not followed here (it closed, or its watch ended)' } }); return; }
         const on = !!msg.on;
-        require('./../machine-window.js').pinWindow({ platform: process.platform, hwnd: rec.last.hwnd, pid: rec.last.pid, on, execFile: require('child_process').execFile, env: spawnEnv() })
+        require('./../machine-window.js').pinWindow({ platform: process.platform, hwnd: rec.last.hwnd, pid: rec.last.pid, bundle: rec.last.bundle, on, execFile: require('child_process').execFile, env: spawnEnv() })
           .then((r) => { if (r && r.ok) rec.pinned = !!r.pinned; mux.control({ op: 'window-pin-result', id: msg.id, result: r }); }, (e) => mux.control({ op: 'window-pin-result', id: msg.id, error: String((e && e.message) || e) }));
         return;
       }

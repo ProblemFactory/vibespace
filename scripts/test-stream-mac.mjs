@@ -25,6 +25,12 @@
 //      offer plays THE fixture to a werift stand-in; the data channel's key + click reach the helper's input in points; an
 //      older Mac agent (no stream-mac) is never asked (agent_too_old); a Mac with no helper and no compiler gets the HUB's
 //      prebuilt over the device link (src/server/desktop-webrtc.js) and the offer is asked once more
+//   §4b (lane mac-window-list-helper — on a Mac NOTHING under node reads the screen) the window look + the screen table through
+//      the helper: look() refused BY NAME without Screen Recording (the table needs none), every run DISCLAIMED `facts`, the table
+//      reuses the kept facts; starts() = REAL `ps -o lstart=` (an ended pid absent); no helper ⇒ no_helper
+//   §7 a REAL Mac-shaped daemon: window-track finds the app by its process's start (REAL ps) through the helper's facts, follows
+//      a move, says off screen while the app runs, gone when it ends; display-facts = the helper's displays; refused by name;
+//      the agent bundle carries no osascript
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -277,6 +283,30 @@ const run = async (msg, { want = 40, kbps = 8000 } = {}) => {
   ok(n.ok === false && n.code === 'no_helper' && n.helper && n.helper.version === SRC.VERSION && n.helper.dir === SP.macHelperPaths(hN).dir, 'no helper and no compiler ⇒ no_helper carrying the dir + version a hub needs to push its prebuilt', n);
 }
 
+console.log(`[${((Date.now() - T0) / 1000).toFixed(1)} s] ` + '§4b THE WINDOW LOOK + THE SCREEN TABLE through the helper (lane mac-window-list-helper)');
+{
+  const hL = home('smac-look'), logL = path.join(hL, 'h.log');
+  const FL = writeFakeMacHelper(hL, { version: SRC.VERSION, facts: MAC_FACTS, tcc: { screen: 'denied', accessibility: 'denied' }, log: logL, flv: flvFile(hL), displayFrame: { x: 0, y: 0, w: 1920, h: 1080 } });
+  const sL = MAC.createMacScreen({ spawn, execFile, env: { HOME: hL, PATH: process.env.PATH }, fs });
+  const off = await sL.look();
+  const table = await sL.look({ force: false, windows: false });
+  ok(off.ok === false && off.code === 'screen_permission' && /vibespace-screen/.test(off.error) && off.settings === SP.MAC_SETTINGS.screen && table.ok && table.displays.length === 2, 'the window look without Screen Recording ⇒ screen_permission BY NAME (vibespace-screen + the pane); the screen table needs no grant', { off, n: table.displays && table.displays.length });
+  FL.set({ tcc: { screen: 'granted', accessibility: 'denied' } });
+  const on = await sL.look();
+  const argvs = () => helperLog(logL).map((l) => l.argv).filter(Boolean);
+  ok(on.ok && on.windows.length === 2 && on.windows[0].bundle === 'com.apple.TextEdit' && argvs().length >= 2 && argvs().every((a) => a[0] === '--disclaim' && a[1] === 'facts'), 'granted ⇒ the helper\'s fresh facts; every run DISCLAIMED `facts` (a look never adds the Settings row)', argvs());
+  const runs0 = argvs().length; await sL.look({ force: false, windows: false });
+  ok(argvs().length === runs0, 'the screen table reuses the kept facts (30 s): no extra run');
+  const before = Date.now();
+  const kid = spawn('sleep', ['30']); cleanups.push(() => { try { kid.kill(); } catch { } });
+  const dead = spawn('true'); await new Promise((r) => dead.on('exit', r));
+  const st = await sL.starts([kid.pid, dead.pid, process.pid, kid.pid]);
+  ok(st.size === 2 && st.has(process.pid) && !st.has(dead.pid) && st.get(kid.pid) >= before - 2000 && st.get(kid.pid) <= before + 1000, 'starts(): REAL `ps -o pid= -o lstart=` (C locale) — a running pid\'s start (second precision), an ended one absent', { st: [...st], before });
+  try { kid.kill(); } catch { }
+  const nh = await MAC.createMacScreen({ spawn, execFile: fakeExec({}).ef, env: { HOME: home('smac-look-none'), PATH: process.env.PATH }, fs }).look();
+  ok(nh.ok === false && nh.code === 'no_helper', 'no helper (and no compiler) ⇒ no_helper by name', nh);
+}
+
 console.log(`[${((Date.now() - T0) / 1000).toFixed(1)} s] ` + '§5 THE INJECTOR on a Mac');
 {
   const hI = home('smac-inj'), logI = path.join(hI, 'i.log');
@@ -391,6 +421,38 @@ const pictures = (rtp) => { const out = []; let cur = []; for (const p of rtp) {
   ok(r.ok === false && r.code === 'no_helper' && /vs-other/.test(r.error), 'a hub whose prebuilt is another version pushes nothing (an agent would never take it)', r);
   if (sp.key) await hub2.stop(sp.key, 'stopped').catch(() => { });
   hub2.shutdown?.();
+}
+
+console.log(`[${((Date.now() - T0) / 1000).toFixed(1)} s] ` + '§7 a REAL Mac-shaped daemon: window-track + display-facts through ITS helper (lane mac-window-list-helper)');
+{
+  const RWT = /(runWindowTrack\(\{\s*)platform: process\.platform,/, RDF = /(readDisplayFacts\(\{\s*)platform: process\.platform,/;
+  const winText = macText.replace(RWT, '$1platform: "darwin",').replace(RDF, '$1platform: "darwin",');
+  ok(darwins(winText) - darwins(macText) === 2 && (winText.match(/mac: macWindowLook/g) || []).length === 2 && !/osascript/.test(bundleText), 'the copy also runs the window look and the screen table as darwin (found by content), both handed THE helper; the agent bundle carries no osascript');
+  const winBundle = path.join(copyDir, 'mac-win', 'vibespace-agentd.js'); fs.mkdirSync(path.dirname(winBundle), { recursive: true }); fs.writeFileSync(winBundle, winText);
+  const hW = home('smac-win'), logW = path.join(hW, 'h.log');
+  const since = Date.now() - 300; // the run's launch report, just before the app started
+  const kid = spawn('sleep', ['60']); cleanups.push(() => { try { kid.kill(); } catch { } });
+  const APPW = { id: 5151, pid: kid.pid, app: 'Calc', bundle: 'com.example.calc', title: 'Calc', x: 200, y: 150, w: 400, h: 300, onScreen: true, minimized: null };
+  const facts0 = { ...MAC_FACTS, windows: [MAC_FACTS.windows[0], APPW] };
+  const FW = writeFakeMacHelper(hW, { version: SRC.VERSION, facts: facts0, tcc: { screen: 'granted', accessibility: 'denied' }, log: logW, flv: flvFile(hW), displayFrame: { x: 0, y: 0, w: 1920, h: 1080 } });
+  const dm = deviceOn(hW, winBundle);
+  await dm.connect();
+  const pushes = [];
+  const t = await dm.windowTrack({ since }, { onPush: (a) => pushes.push(a) });
+  ok(t.result.state === 'found' && t.result.windowId === 5151 && t.result.bundle === 'com.example.calc' && t.result.rect && t.result.rect.x === 200 && t.wid, 'window-track through a REAL daemon on a Mac: the helper\'s facts find the app by its process\'s start (REAL ps) — its window was there at the first look', t);
+  FW.set({ facts: { ...facts0, windows: [MAC_FACTS.windows[0], { ...APPW, x: 260 }] } });
+  ok(await until(() => pushes.some((a) => a.state === 'found' && a.rect && a.rect.x === 260), 5000), 'a move reaches the hub as a push (the helper read every 500 ms)', pushes);
+  FW.set({ facts: { ...facts0, windows: [MAC_FACTS.windows[0]] } });
+  ok(await until(() => pushes.some((a) => a.state === 'found' && a.minimized === true && a.rect && a.rect.x === 260), 5000), 'off the helper\'s list while the app runs (Accessibility off) ⇒ minimized, its last rectangle', pushes.slice(-2));
+  kid.kill();
+  ok(await until(() => pushes.some((a) => a.state === 'gone'), 5000), 'its app ended ⇒ gone: the watch ends', pushes.slice(-2));
+  const d = await dm.displayFacts();
+  ok(d.ok && d.platform === 'darwin' && d.displays.map((x) => x.id).join() === '3,2' && d.displays[0].primary && d.displays[1].x === -1920 && d.displays[0].scale === 2, 'display-facts through the daemon: the helper\'s displays (the main one first, top-left points, its scale)', d);
+  FW.set({ tcc: { screen: 'denied', accessibility: 'denied' } });
+  const r = await dm.windowTrack({ since: Date.now() });
+  ok(r.result.state === 'error' && r.result.code === 'screen_permission' && /vibespace-screen/.test(r.result.error), 'Screen Recording off for the helper ⇒ the look is refused BY NAME through the daemon', r.result);
+  const argvs = helperLog(logW).map((l) => l.argv).filter(Boolean);
+  ok(argvs.length >= 5 && argvs.every((a) => a[0] === '--disclaim' && a[1] === 'facts'), 'every helper run the daemon made for these was a DISCLAIMED `facts` — the window look ran nowhere else', { n: argvs.length, odd: argvs.filter((a) => a[1] !== 'facts') });
 }
 
 console.log(`\n${fail ? '✗' : '✓'} test-stream-mac: ${pass} passed, ${fail} failed`);
