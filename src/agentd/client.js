@@ -331,7 +331,7 @@ class DeviceManager {
             mux.onWritable = (chan) => { sessions.get(chan)?.onWritable?.(); };
             const prevControl = mux.onControl;
             mux.onControl = (m) => {
-              if (m.op === 'fs-result' || m.op === 'discovery-result' || m.op === 'discovery-watching' || m.op === 'usage-events-watching' || m.op === 'session-events-watching' || m.op === 'cmd-result' || m.op === 'probe-result' || m.op === 'secret-result' || m.op === 'quota-result' || m.op === 'sysinfo-result' || m.op === 'desktop-apps-list-result' || m.op === 'design-fs-result' || m.op === 'dial-status-result' || m.op === 'proc-list-result' || m.op === 'opencode-serve-result' || m.op === 'browser-serve-result' || m.op === 'desktop-serve-result' || m.op === 'window-track-result' || m.op === 'window-untrack-result' || m.op === 'window-pin-result' || m.op === 'display-facts-result' || m.op === 'remoteapp-facts-result' || m.op === 'stream-offer-result' || m.op === 'stream-answer-result' || m.op === 'stream-stop-result' || m.op === 'stream-stats-result' || m.op === 'input-events-result' || m.op === 'stream-facts-result' || m.op === 'stream-windows-result' || m.op === 'peer-post-result' || m.op === 'pool-orders-ok' || m.op === 'tcp-open' || m.op === 'listen-open' || m.op === 'serve-folder-result' || m.op === 'serve-socks-result') {
+              if (m.op === 'fs-result' || m.op === 'discovery-result' || m.op === 'discovery-watching' || m.op === 'usage-events-watching' || m.op === 'session-events-watching' || m.op === 'cmd-result' || m.op === 'probe-result' || m.op === 'secret-result' || m.op === 'quota-result' || m.op === 'sysinfo-result' || m.op === 'desktop-apps-list-result' || m.op === 'design-fs-result' || m.op === 'dial-status-result' || m.op === 'proc-list-result' || m.op === 'opencode-serve-result' || m.op === 'browser-serve-result' || m.op === 'desktop-serve-result' || m.op === 'window-track-result' || m.op === 'window-untrack-result' || m.op === 'window-pin-result' || m.op === 'display-facts-result' || m.op === 'remoteapp-facts-result' || m.op === 'stream-offer-result' || m.op === 'stream-answer-result' || m.op === 'stream-stop-result' || m.op === 'stream-stats-result' || m.op === 'input-events-result' || m.op === 'stream-facts-result' || m.op === 'stream-windows-result' || m.op === 'settings-open-result' || m.op === 'peer-post-result' || m.op === 'pool-orders-ok' || m.op === 'tcp-open' || m.op === 'listen-open' || m.op === 'serve-folder-result' || m.op === 'serve-socks-result') {
                 const r = pending.get(m.id); if (r) { pending.delete(m.id); r(m); }
                 if (m.op === 'tcp-open' && !m.error) return; // channel stays live
                 return;
@@ -1055,6 +1055,16 @@ class DeviceManager {
     const r = await this._request({ op: 'stream-windows', ...(restore != null ? { restore: String(restore) } : {}), timeoutMs });
     if (r.error) throw new Error(r.error);
     return r.result || { ok: false, code: 'facts_failed', error: 'no answer' };
+  }
+  /** lane stream-mac-stall: 「打开系统设置」 — the Mac shows that Settings pane itself (`screen` | `accessibility`; its agent runs
+   *  `open` on the pane's deep link). Capability-gated (`settings-open`): an agent that predates it is never asked —
+   *  `host_needs_daemon` + its version (the page then copies the link, as before). → { ok, pane } | { ok: false, code, error } */
+  async settingsOpen(pane, { timeoutMs = 15000 } = {}) {
+    const conn = await this.connect();
+    if (!conn.info?.capabilities?.includes?.('settings-open')) { const e = new Error('daemon lacks settings-open (capabilities gate) -- upgrade the agent on this machine'); e.code = 'host_needs_daemon'; e.daemonVersion = conn.info?.daemonVersion || null; throw e; }
+    const r = await this._request({ op: 'settings-open', pane: String(pane || ''), timeoutMs });
+    if (r.error) throw new Error(r.error);
+    return r.result || { ok: false, code: 'open_failed', error: 'no answer' };
   }
   /** lane desktop-v2-entry: the machine's own screen table (the display picker). Capability-gated (an old agent never hears
    *  an op it would not answer). → { ok, platform, displays } | { ok:false, code, error } */

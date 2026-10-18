@@ -225,12 +225,17 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate {
     lock.lock(); if ended { lock.unlock(); return }; ended = true; lock.unlock()
     say(["t": "end", "code": code, "error": error]); fflush(stdout); exit(3)
   }
-  // the encode thread: control applied HERE (the submitting thread), at most two pictures in flight
+  // the encode thread: control applied HERE (the submitting thread, never under `lock`), at most two pictures in flight
   func encodeLoop() {
     while true {
       let timedOut = wake.wait(timeout: .now() + 0.5) == .timedOut
       lock.lock()
-      if let b = wantBps, let s = session { wantBps = nil; bps = b; VTSessionSetProperty(s, key: kVTCompressionPropertyKey_AverageBitRate, value: b as CFNumber); VTSessionSetProperty(s, key: kVTCompressionPropertyKey_DataRateLimits, value: [b / 8 * 2, 1] as CFArray) }
+      let rate = wantBps; wantBps = nil; if let b = rate { bps = b }
+      lock.unlock()
+      // the rate OUTSIDE the lock (lane stream-mac-stall, measured): VTSessionSetProperty waits for the pictures in flight, and
+      // their callbacks take this lock — set under it, the first `bps` parked the encoder, SCK's queue and the stats timer for good
+      if let b = rate, let s = session { VTSessionSetProperty(s, key: kVTCompressionPropertyKey_AverageBitRate, value: b as CFNumber); VTSessionSetProperty(s, key: kVTCompressionPropertyKey_DataRateLimits, value: [b / 8 * 2, 1] as CFArray) }
+      lock.lock()
       var pick = latest; latest = nil
       if pick == nil, let l = last, timedOut || wantKey, CACurrentMediaTime() - lastFrameAt >= (wantKey ? 0 : 0.5) { pick = (l, CACurrentMediaTime()); repeats += 1 } // a static screen: repeat the last picture (and a key asked for one)
       guard let p = pick, inFlight < 2, let s = session else { if pick != nil && inFlight >= 2 { dropped += 1 }; lock.unlock(); continue }

@@ -171,6 +171,17 @@ export function openMachineDesktop(app, m, { display } = {}) {
     seg.replaceChildren(...map.displays.map((d) => segBtn(String(d.n), d.key, d.name ? `${d.n} · ${d.name}` : t('Display {n}', { n: d.n }))), segBtn(t('All'), null, t('All')));
     seg.hidden = false;
   };
+  // lane stream-mac-stall: THE STREAM's switcher — the machine's displays from the stream's own offer (a Mac's: its screen helper's
+  // facts), left to right; a pick restarts the stream on that display (one display a stream: no 「All」). Before, the strip drew
+  // the switcher only over the VNC picture — a stream showed the main display and nothing to switch to
+  let streamDisplays = null, streamDisplay = null;
+  const drawStreamSeg = () => {
+    const list = streamDisplays && streamDisplays.length > 1 ? streamDisplays : null;
+    if (!list) { seg.hidden = true; seg.replaceChildren(); return; }
+    seg.replaceChildren(...list.map((d, i) => { const b = btn('desktop-strip-seg', String(i + 1), () => pickStream(d.id)); b.title = d.name ? `${i + 1} · ${d.name}` : t('Display {n}', { n: i + 1 }); b.dataset.key = d.id; b.setAttribute('aria-pressed', String(d.id === streamDisplay)); return b; }));
+    seg.hidden = false;
+  };
+  const pickStream = (id) => { if (!stream || id === streamDisplay) return; streamDisplay = id; drawStreamSeg(); stream.dispose(); startStream({ kind: 'display', id }); };
   const apply = () => { if (!view) return; const d = shown(); view.setCrop(d ? d.rect : null); drawSeg(); hdrEl.hidden = !hdrShown({ screens: facts && facts.ok ? facts.displays : null, map, key: d ? d.key : null }); };
   const pick = (key) => { want = key; rememberDesktop(m.hostId, key); apply(); };
   const remap = () => {
@@ -266,13 +277,20 @@ export function openMachineDesktop(app, m, { display } = {}) {
   const tccEl = el('span'); tccEl.className = 'desktop-strip-tcc'; tccEl.hidden = true;
   const tccText = el('span');
   const tccCopy = el('button', null, t('Open System Settings')); tccCopy.type = 'button'; tccCopy.className = 'file-tool-btn desktop-strip-tcc-open';
-  let tccLink = null;
-  tccCopy.onclick = () => { if (tccLink) copyText(tccLink).then(() => showToast(t('Copied — on {machine}, paste it into Safari’s address bar: it opens that Settings pane', { machine }))); };
+  let tccLink = null, tccPane = null;
+  // lane stream-mac-stall: the Mac shows that pane ITSELF (its agent's `settings-open` op runs `open` on the deep link — no
+  // grant needed); copying the link stays only the fallback (an agent that predates the op, or any refusal)
+  const PANE_WORDS = { screen: () => t('Screen & System Audio Recording'), accessibility: () => t('Accessibility') };
+  tccCopy.onclick = async () => {
+    const r = tccPane ? await post('/api/desktop/machine-desktop/settings-open', { host: m.hostId, pane: tccPane }).catch(() => null) : null;
+    if (r && r.ok) { showToast(t('Opened System Settings › {pane} on {machine}', { pane: PANE_WORDS[tccPane](), machine })); return; }
+    if (tccLink) copyText(tccLink).then(() => showToast(t('Copied — on {machine}, paste it into Safari’s address bar: it opens that Settings pane', { machine })));
+  };
   tccEl.append(tccText, tccCopy);
   const MAC_PANES = { screen: 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture', accessibility: 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility' };
   const showTcc = (code) => {
     const pane = code === 'accessibility_permission' ? 'accessibility' : 'screen';
-    tccLink = MAC_PANES[pane];
+    tccLink = MAC_PANES[pane]; tccPane = pane;
     tccText.textContent = code === 'helper_changed_regrant' ? t('The Mac’s screen helper was updated: turn vibespace-screen off and on again under Screen & System Audio Recording')
       : pane === 'accessibility' ? t('The Mac takes no keys or clicks until Accessibility is on for vibespace-screen')
         : t('The Mac shows no picture until Screen Recording is on for vibespace-screen');
@@ -316,15 +334,18 @@ export function openMachineDesktop(app, m, { display } = {}) {
       : code === 'input_unsupported' ? t('This machine cannot take input over the stream yet')
         : t('The machine did not take that input ({code})', { code }), null, 8000);
   };
-  const startStream = () => {
+  const startStream = (source = null) => {
     stream = createStreamView(pane, {
       hostId: m.hostId,
       hostPlatform: m.setup || null,
+      source, // lane stream-mac-stall: a display the switcher picked (else the machine's main one)
+      onSource: (src) => { streamDisplays = src && Array.isArray(src.displays) ? src.displays.slice().sort((a, b) => a.x - b.x || a.y - b.y) : null; streamDisplay = src && src.display != null ? String(src.display) : null; drawStreamSeg(); },
       onStatus: () => { drawChip(); if (!tick) tick = setInterval(() => { drawChip(); }, 1000); },
       onStats: () => drawChip(),
       onInput: inputWords,
       onFallback: (code, why, taken) => {
         stream = null; streamEl.hidden = true; clearInterval(tick); tick = null;
+        streamDisplays = null; drawStreamSeg(); // the VNC picture draws its own switcher (remap)
         refusedWhy = STREAM_WHY[code] ? streamWords(code) : why || streamWords(code); // the page words a known code in its own language; else the machine's sentence
         if (code === 'screen_permission' || code === 'helper_changed_regrant') showTcc(code); // lane stream-p3m-build: which switch on the Mac
         if (taken) note(t('Stream stopped ({why}) — showing the VNC picture', { why: streamWords(code) }), why || code);

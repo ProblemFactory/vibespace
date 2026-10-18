@@ -1555,7 +1555,7 @@ function serveConnection(sock) {
           // per-op capability gating (three-tier design): consumers check the
           // capability, NEVER parse daemonVersion — unknown ops on an old
           // daemon get no reply and hang the request until its timeout
-          capabilities: ['probe', 'transcript-op', 'usage-scan', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events', 'pool-orders', 'sysinfo', 'design-fs', 'session-events', 'proc-list', 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'browser-end-daemon', 'desktop-serve', 'window-track', 'window-pin', 'dial-status', 'run-shell', 'app-install', 'fs-portable', 'fs-write-stream', 'desktop-apps-list', 'display-facts', 'remoteapp-facts', 'stream-offer', 'input-events', 'stream-facts', 'stream-screen', 'stream-mac', 'stream-window', 'stream-windows'],
+          capabilities: ['probe', 'transcript-op', 'usage-scan', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events', 'pool-orders', 'sysinfo', 'design-fs', 'session-events', 'proc-list', 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'browser-end-daemon', 'desktop-serve', 'window-track', 'window-pin', 'dial-status', 'run-shell', 'app-install', 'fs-portable', 'fs-write-stream', 'desktop-apps-list', 'display-facts', 'remoteapp-facts', 'stream-offer', 'input-events', 'stream-facts', 'stream-screen', 'stream-mac', 'stream-window', 'stream-windows', 'settings-open'],
         }));
         return;
       }
@@ -2176,6 +2176,15 @@ function serveConnection(sock) {
       if (msg.op === 'stream-windows') {
         const sw = windowsOf();
         (msg.restore != null ? sw.restore(String(msg.restore)) : sw.windows()).then((r) => mux.control({ op: 'stream-windows-result', id: msg.id, result: r }), (e) => mux.control({ op: 'stream-windows-result', id: msg.id, error: String((e && e.message) || e) }));
+        return;
+      }
+      // lane stream-mac-stall (THREE-TOUCH: this handler, `settings-open` in the hello-ack, the client's gated settingsOpen): the
+      // strip's 「打开系统设置」 shows that pane ON the Mac (src/agentd/stream-mac.js openSettings — `open` its deep link, no grant);
+      // a machine that is no Mac has no such source: not_mac
+      if (msg.op === 'settings-open') {
+        const sc = streamScreenOf();
+        if (!sc || typeof sc.openSettings !== 'function') { mux.control({ op: 'settings-open-result', id: msg.id, result: { ok: false, code: 'not_mac', error: 'System Settings is a Mac\'s' } }); return; }
+        sc.openSettings(String(msg.pane || '')).then((r) => mux.control({ op: 'settings-open-result', id: msg.id, result: r }), (e) => mux.control({ op: 'settings-open-result', id: msg.id, error: String((e && e.message) || e) }));
         return;
       }
       if (msg.op === 'input-events') {

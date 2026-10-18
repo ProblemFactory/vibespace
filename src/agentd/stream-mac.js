@@ -151,7 +151,7 @@ function createMacScreen({ spawn, execFile, env = process.env, fs = require('fs'
       if ((plan.code === 'screen_permission' || plan.code === 'helper_changed_regrant') && !H.rowAsked()) registerRow(f);
       return plan;
     }
-    return macSource(plan, maxKbps);
+    return macSource(plan, maxKbps, f);
   }
   /** THE PICKER's list (the agent's `stream-windows` op — int304: the one picker of both platforms): the helper's fresh facts'
    *  windows in THE shape (SP.macWindowRows), or the refusal that keeps them (no helper, Screen Recording off — titles need it). */
@@ -182,6 +182,16 @@ function createMacScreen({ spawn, execFile, env = process.env, fs = require('fs'
     const r = await H.run('/bin/ps', ['-o', 'pid=', '-o', 'lstart=', '-p', list.join(',')], 5000, { LC_ALL: 'C', LANG: 'C' });
     return MW.psStarts(r.stdout); // ps exits 1 when one pid is gone and still prints the others
   }
+  /** 「打开系统设置」 ON the Mac (lane stream-mac-stall — the agent's `settings-open` op): `/usr/bin/open <the pane's deep link>`,
+   *  LaunchServices shows System Settings at that pane in the owner's session (measured on the owner's Mac: exit 0 in 77 ms, no
+   *  TCC request — `open` needs no grant). The pane BY NAME from SP.MAC_SETTINGS — no text from the hub reaches argv. → { ok, pane } */
+  function openSettings(pane) {
+    const url = Object.prototype.hasOwnProperty.call(SP.MAC_SETTINGS, pane) ? SP.MAC_SETTINGS[pane] : null;
+    if (!url) return Promise.resolve(named('bad_pane', `no Settings pane named ${JSON.stringify(String(pane).slice(0, 20))}`));
+    return new Promise((resolve) => {
+      try { execFile('/usr/bin/open', [url], { env, timeout: 10000 }, (err) => resolve(err ? named('open_failed', `open did not show it (${err.code || err.message})`) : { ok: true, pane })); } catch (e) { resolve(named('open_failed', `open did not show it (${(e && e.code) || e})`)); }
+    });
+  }
   /** 「还原它」 is Windows' (a Mac's stream of a minimized window ENDS window_minimized — SCK sends no picture): refused by name. */
   async function restore() { return named('restore_unsupported', 'a minimized Mac window is restored on the Mac itself (its stream ends while it is minimized)'); }
   /** ONE capture that only adds the helper's (off) Screen Recording row — the owner then toggles it; it ends at once. */
@@ -191,7 +201,7 @@ function createMacScreen({ spawn, execFile, env = process.env, fs = require('fs'
     try { const c = spawn(sp.file, sp.args, { env, stdio: ['ignore', 'ignore', 'ignore'] }); c.on('error', () => { }); } catch { /* the next refusal asks again */ }
   }
 
-  function macSource(plan, maxKbps) {
+  function macSource(plan, maxKbps, f = {}) {
     const st = { aus: 0, keyWaitMs: null, keysAnswered: 0, rateChanges: 0, helper: null };
     let child = null, onAu = null, onEnd = null, stopped = false, kbps = plan.kbps, rateAt = 0, keyAskedAt = null, t0 = 0, lastTs = -1, started = null, target = null, ended = null;
     const tail = [];
@@ -236,6 +246,9 @@ function createMacScreen({ spawn, execFile, env = process.env, fs = require('fs'
     }
     return {
       ok: true, kind: 'screen', origin: plan.origin, fps: plan.fps, mode: plan.mode, encoder: plan.encoder.label, window: plan.window,
+      // lane stream-mac-stall: THE SWITCHER's rows — the display streamed + the Mac's displays (the helper's facts this plan read; a
+      // pick restarts the stream with `source: {kind: 'display', id}`): the strip showed none, so one display was all there was
+      ...(plan.kind === 'display' && plan.display ? { display: plan.display.id, displays: (f.displays || []).map((d) => ({ id: d.id, main: !!d.main, x: d.x, y: d.y, w: d.w, h: d.h, name: d.name || null })) } : {}),
       start(onAccessUnit, onEnded) {
         if (onAu || stopped) return;
         onAu = onAccessUnit; onEnd = onEnded || null; t0 = now(); rateAt = t0;
@@ -263,7 +276,7 @@ function createMacScreen({ spawn, execFile, env = process.env, fs = require('fs'
     };
   }
 
-  return { facts, source, windows, restore, look, starts, helper: H };
+  return { facts, source, windows, restore, look, starts, openSettings, helper: H };
 }
 
 module.exports = { createMacScreen, createMacHelper, FACTS_MS, RECIPE };

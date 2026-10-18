@@ -410,7 +410,7 @@ function createStreamHost({ injector = null, log = () => { }, now = Date.now, lo
       if (r.verdict === 'blocked') log(`[stream] ${sid} direct inbound UDP: blocked — none of ${r.addrs} host address${r.addrs === 1 ? '' : 'es'} reached from this machine itself (its firewall); the hub relay carries the stream`);
       pushStats(s);
     }, () => { });
-    return { ok: true, sid, offer: { type: 'offer', sdp: pc.localDescription.sdp }, source: { kind: source.kind, origin: source.origin, fps: source.fps || null, encoder: source.encoder || null, mode: source.mode || null, ...(source.window ? { window: source.window } : {}) }, relayPort: s.relay ? s.relay.port : null, codec: { mimeType: SM.STREAM_CODEC.mimeType, fmtp: SM.STREAM_CODEC.fmtp }, maxKbps };
+    return { ok: true, sid, offer: { type: 'offer', sdp: pc.localDescription.sdp }, source: { kind: source.kind, origin: source.origin, fps: source.fps || null, encoder: source.encoder || null, mode: source.mode || null, ...(source.window ? { window: source.window } : {}), ...(source.displays ? { display: source.display, displays: source.displays } : {}) }, relayPort: s.relay ? s.relay.port : null, codec: { mimeType: SM.STREAM_CODEC.mimeType, fmtp: SM.STREAM_CODEC.fmtp }, maxKbps };
   }
   /** After the offer's reply went out: the candidates gathered while it was made follow as pushes, in order. */
   function replied(sid) {

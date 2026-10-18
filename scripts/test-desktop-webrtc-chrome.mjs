@@ -40,6 +40,9 @@
 //      the hub AND the machine's helper (by name, in the agent's log); a viewer that vanishes (its tab gone, no word) ends it
 //      within 5 s — RED CONTROL: a hub that never acts on the closed poll still streams at 6 s       window-*.png
 // PNGs when `--shots <dir>`.
+//   ⑫ a Mac's strip (lane stream-mac-stall): over a STREAM the switcher lists the Mac's displays (its offer's rows, left to right,
+//      the streamed one pressed, no 全部); a pick restarts the stream ON that display; 「打开系统设置」 opens the pane ON the Mac
+//      (POST settings-open — the toast says so), the link copied only when the agent predates it      mac-switcher.png, mac-tcc-door.png
 import fs from 'node:fs';
 import net from 'node:net';
 import http from 'node:http';
@@ -425,6 +428,48 @@ console.log('⑨ phone 375×667');
   ok(scrolled, '⑨ the strip scrolls sideways to its stream numbers (往返 · 抖动 · fps · 解码 · kbps in view)');
   await p.shot('phone-stats.png');
   await p.close();
+}
+console.log('⑫ a Mac\'s strip (lane stream-mac-stall): the stream\'s display switcher — 「打开系统设置」 on the Mac itself');
+{
+  // the page's fetch wrapped: the stream's start answer carries a Mac's displays (src/agentd/stream-mac.js — its helper's facts),
+  // or a Screen Recording refusal; the hub's settings-open answer by mode (ok · an agent that predates the op)
+  const WRAP = `(() => { window.__asked = []; const real = window.fetch.bind(window); const J = (o) => new Response(JSON.stringify(o), { headers: { 'Content-Type': 'application/json' } });
+    window.fetch = async (u, o) => { const url = String(u); const body = o && typeof o.body === 'string' ? JSON.parse(o.body) : null;
+      if (/\\/stream\\/start$/.test(url)) { window.__asked.push(body); if (window.__macMode !== 'displays') return J({ take: false, code: 'screen_permission', why: 'Screen Recording is off for vibespace-screen' });
+        const j = await (await real(u, o)).json(); if (j.take) j.source = { ...j.source, display: body && body.source ? body.source.id : '3', displays: [{ id: '3', main: true, x: 0, y: 0, w: 1920, h: 1080, name: 'Studio 27 (2)' }, { id: '2', main: false, x: -1920, y: 0, w: 1920, h: 1080, name: 'Studio 27 (1)' }] }; return J(j); }
+      if (/\\/settings-open$/.test(url)) { window.__asked.push(body); return J(window.__macMode === 'tcc-ok' ? { ok: true, pane: body.pane } : { ok: false, code: 'agent_too_old', error: 'the agent predates it' }); }
+      return real(u, o); };
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText: (t) => { window.__copied = t; return Promise.resolve(); } }, configurable: true }); return true; })()`;
+  const MM = { ...M, label: 'Macbook', setup: 'darwin' };
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  let p = await page(1280, 800, DESK);
+  await p.ev(WRAP); await p.ev(`window.__macMode = 'displays'`);
+  await p.ev(`window.__open(${JSON.stringify(MM)})`);
+  const up = await playing(p);
+  const segOf = () => p.ev(`[...document.querySelectorAll('${WIN} .desktop-strip-displays:not([hidden]) .desktop-strip-seg')].map((b) => [b.textContent, b.dataset.key, b.getAttribute('aria-pressed'), b.title])`);
+  const seg1 = await segOf();
+  ok(up && same(seg1, [['1', '2', 'false', '1 · Studio 27 (1)'], ['2', '3', 'true', '2 · Studio 27 (2)']]), '⑫ the STREAM draws the switcher: the Mac\'s two displays left to right (its offer\'s rows), the streamed one pressed — no 全部 (a stream is one display)', seg1);
+  await p.shot('mac-switcher.png', WIN);
+  await p.ev(`document.querySelector('${WIN} .desktop-strip-seg[data-key="2"]').click()`);
+  const again = (await p.until(`window.__asked.length === 2`, 5000)) && (await playing(p));
+  const asked = await p.ev('window.__asked');
+  const seg2 = await segOf();
+  ok(again && same(asked[1].source, { kind: 'display', id: '2' }) && !asked[0].source && seg2.length === 2 && seg2[0][2] === 'true' && seg2[1][2] === 'false', '⑫ a pick restarts the stream ON that display (start {source: {kind: display, id: 2}}) and it plays; the pick is pressed', { asked, seg2 });
+  await p.close();
+  for (const mode of ['tcc-ok', 'tcc-old']) {
+    p = await page(1280, 800, DESK);
+    await p.ev(WRAP); await p.ev(`window.__macMode = ${JSON.stringify(mode)}`);
+    await p.ev(`window.__open(${JSON.stringify(MM)})`);
+    const door = await p.until(`(() => { const e = document.querySelector('${WIN} .desktop-strip-tcc'); return !!e && !e.hidden; })()`, 10000);
+    if (door) await p.ev(`document.querySelector('${WIN} .desktop-strip-tcc-open').click()`);
+    await p.until(`/打开系统设置 ›|已复制/.test((document.getElementById('global-toasts') || {}).textContent || '')`, 5000);
+    const r = await p.ev(`({ asked: window.__asked, copied: window.__copied || null, toast: (document.getElementById('global-toasts') || {}).textContent || '', words: document.querySelector('${WIN} .desktop-strip-tcc').textContent })`);
+    if (mode === 'tcc-ok') {
+      ok(door && same(r.asked[1], { host: 'win-a', pane: 'screen' }) && /已在 Macbook 上打开系统设置 › 录屏与系统录音/.test(r.toast) && r.copied === null, '⑫ 「打开系统设置」 opens the pane ON the Mac (POST settings-open {pane: screen}): 已在 Macbook 上打开系统设置 › 录屏与系统录音 — nothing copied', r);
+      await p.shot('mac-tcc-door.png', WIN);
+    } else ok(door && r.asked[1] && r.asked[1].pane === 'screen' && r.copied === 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture' && /已复制/.test(r.toast), '⑫ an agent that predates it (agent_too_old): the pane\'s link is copied, as before — the fallback only', r);
+    await p.close();
+  }
 }
 console.log('⑩ the machine\'s own screen: the HDR road, NVENC on the strip — and its capture dying');
 {

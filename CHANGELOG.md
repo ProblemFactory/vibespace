@@ -2,6 +2,13 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.309 — 2026-10-18
+
+### Fixed
+- A Mac's desktop stream no longer freezes after its first picture; the Mac's screen helper is new, so turn Screen Recording on for it once more.
+- A Mac's stream lists all its displays on the window's bar again: pick one to watch it.
+- "Open System Settings" opens that Settings pane on the Mac itself instead of copying a link.
+
 ## 2.369.308 — 2026-10-18
 
 ### Changed

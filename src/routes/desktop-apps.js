@@ -88,6 +88,8 @@
  *                                     one-window picker — {ok, windows: [{id, title, app, bounds, dpi, minimized…, streaming}]} |
  *                                     agent_too_old; a Mac's too — int304) · POST …/stream/restore {host, window} (a minimized
  *                                     Windows window back, no focus)
+ *   POST /api/desktop/machine-desktop/settings-open {host, pane}   lane stream-mac-stall: 「打开系统设置」 — the Mac shows that
+ *                                     Settings pane itself (pane: screen | accessibility) — {ok, pane} | not_mac | agent_too_old
  *   POST /api/desktop/machine-desktop/stream/start {host, source?, fp16?}   lane stream-p1a-transport (design q-041 r2): the machine's desktop
  *                                     (or `source: {kind:'window', id}` = ONE window — lane stream-p3m-build on a Mac,
  *                                     stream-p2w-build on Windows; `fp16` = a Windows window's FP16 road, off)
@@ -541,6 +543,15 @@ router.post('/api/desktop/machine-desktop/stream/restore', async (req, res) => {
   const id = String((req.body && req.body.window) || '');
   if (!WINDOW_ID_RE.test(id)) { res.status(400).json({ error: 'window is the machine\'s window id (a whole number)', code: 'bad-request' }); return; }
   try { res.json(await ctx.access.streamWindows(host, { restore: id })); } catch (e) { fail(res, e); }
+});
+// lane stream-mac-stall: 「打开系统设置」 on the Mac itself (its agent's `settings-open` op) — the pane by name only
+router.post('/api/desktop/machine-desktop/settings-open', async (req, res) => {
+  if (humanOnly(req, res)) return;
+  const host = hostParam(req, res); if (!host) return;
+  if (!ctx.access || typeof ctx.access.settingsOpen !== 'function') return noAccess(res);
+  const pane = String((req.body && req.body.pane) || '');
+  if (pane !== 'screen' && pane !== 'accessibility') { res.status(400).json({ error: 'pane is screen or accessibility', code: 'bad-request' }); return; }
+  try { res.json(await ctx.access.settingsOpen(host, pane)); } catch (e) { fail(res, e); }
 });
 router.post('/api/desktop/machine-desktop/stream/answer', async (req, res) => {
   if (humanOnly(req, res)) return;

@@ -674,6 +674,19 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
     try { return await dm.streamWindows({ restore }); }
     catch (e) { if (e && e.code === 'host_needs_daemon') return tooOld(e.daemonVersion); throw named('host_unavailable', `${hostId}: ${e && e.message}`); }
   }
+  /** lane stream-mac-stall: the strip's 「打开系统设置」 — the Mac shows the Settings pane itself (`screen` | `accessibility`)
+   *  through its agent (the `settings-open` op). No Mac: not_mac; an agent that predates the op is never asked: `agent_too_old`
+   *  naming the version it has (the page then copies the link, as before). → the agent's answer */
+  async function settingsOpen(hostId, pane) {
+    if (isLocal(hostId)) throw named('not_desktop_machine', 'this machine\'s own Settings are its own');
+    const dm = await deviceOf(hostId);
+    const platform = platformOfHandle(dm);
+    if (platform !== 'darwin') return { ok: false, code: 'not_mac', platform, error: `${hostName(hostId)} is not a Mac` };
+    const tooOld = (have) => ({ ok: false, code: 'agent_too_old', platform, have: have || null, need: AGENT_VERSION, error: `${hostName(hostId)}'s agent ${have ? `(${have}) ` : ''}cannot open its Settings — it needs version ${AGENT_VERSION} or later` });
+    if (typeof dm.settingsOpen !== 'function') return tooOld(null);
+    try { return await dm.settingsOpen(pane); }
+    catch (e) { if (e && e.code === 'host_needs_daemon') return tooOld(e.daemonVersion); throw named('host_unavailable', `${hostId}: ${e && e.message}`); }
+  }
   // ── design q-024 r1 §1.3–§1.4 (lane remoteapp-r1b): THE REMOTEAPP SETTINGS CARD'S DOORS — the owner's (the routes refuse an agent token) ──
   /** The machine's Remote Desktop facts through its agent (the `remoteapp-facts` op, read-only) → `{ ok, platform, facts, rows,
    *  ready }`. An agent that predates the op is never asked: `agent_too_old` naming the version it has and the one it needs
@@ -754,7 +767,7 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
     try { return !!(hosts && typeof hosts.connectedDevice === 'function' && hosts.connectedDevice(hostId)); } catch { return false; }
   }
 
-  const layer = { call, forwardPort, closeForward, forwards: listForwards, hostKnown, isLocal, shutdown, machines, installPlan, installXpra, installPackage, installBusy, runArgv, readFile, connectedNow, setAppPlanner, planDigest, probeDesktop, openMachineDesktop, streamRung, machineDesktopTarget, machineDesktopGone, runOnDesktop, installedApps, installedNow, deviceOf, displayFacts, streamFacts, streamWindows, linkPing, remoteappSetup, remoteappForward, setRdpSetup, launchRemoteApp, remoteappSignin, remoteappFacts, remoteappSetupView, saveRemoteappSetup, trustRemoteApp };
+  const layer = { call, forwardPort, closeForward, forwards: listForwards, hostKnown, isLocal, shutdown, machines, installPlan, installXpra, installPackage, installBusy, runArgv, readFile, connectedNow, setAppPlanner, planDigest, probeDesktop, openMachineDesktop, streamRung, machineDesktopTarget, machineDesktopGone, runOnDesktop, installedApps, installedNow, deviceOf, displayFacts, streamFacts, streamWindows, settingsOpen, linkPing, remoteappSetup, remoteappForward, setRdpSetup, launchRemoteApp, remoteappSignin, remoteappFacts, remoteappSetupView, saveRemoteappSetup, trustRemoteApp };
   if (install) installed = layer;
   return layer;
 }

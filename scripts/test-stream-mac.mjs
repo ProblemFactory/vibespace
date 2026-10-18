@@ -10,12 +10,13 @@
 //      live bitrate rule, the rung verdicts (an older Mac agent ⇒ agent_too_old; Windows unchanged)
 //   §2 the helper's source rides the bundle verbatim (src/agentd/mac-helper-source.js = tools/…swift; VERSION = its sha) and
 //      carries the probe's laws (disclaim, sRGB, NSApplication before a window filter, the key / bitrate never set from the
-//      output callback)
+//      output callback — nor from the encode thread while it holds its lock: lane stream-mac-stall's deadlock, + a RED control)
 //   §3 THE HELPER'S PLACE: ready at the shipped version (nothing run); none + no compiler ⇒ no_helper (the trampoline is never
 //      run); the hub's pushed prebuilt is put in place; a compiler ⇒ built (both slices at once, then lipo, codesign); a
 //      REPLACED helper that held its grant ⇒ regrant until the facts see the grant again; never rebuilt at the same version
 //   §4 THE SOURCE end to end over the fake: facts; the display's pictures = THE fixture byte for byte; the argv it ran; a key
-//      on the SAME request (`key` on stdin); the bitrate LIVE (`bps`, once a second at most); the numbers; the input target;
+//      on the SAME request (`key` on stdin); the bitrate LIVE (`bps`, once a second at most) and the pictures still coming after
+//      it (lane stream-mac-stall); 「打开系统设置」 = `open` on the pane's deep link, by name only; the numbers; the input target;
 //      a window (its id, its pid, a move); endings BY NAME (window_minimized, display_gone, capture_exited); refusals BY NAME
 //      (screen_permission + its Settings link + ONE row-adding run, helper_changed_regrant, no_helper with what the hub needs)
 //   §5 THE INJECTOR on a Mac: `P <pid>` once per target, keys as virtual key codes, the pointer in global points, no
@@ -31,6 +32,10 @@
 //   §7 a REAL Mac-shaped daemon: window-track finds the app by its process's start (REAL ps) through the helper's facts, follows
 //      a move, says off screen while the app runs, gone when it ends; display-facts = the helper's displays; refused by name;
 //      the agent bundle carries no osascript
+//      prebuilt over the device link (src/server/desktop-webrtc.js) and the offer is asked once more; lane stream-mac-stall: the
+//      offer names the display streamed + the Mac's displays (the strip's switcher), a display picked = that display's offer;
+//      `settings-open` in the hello-ack, its op answered by the Mac's source (bad_pane by name — no `open` runs here: Linux's
+//      /usr/bin/open is xdg-open), an agent without it is never asked (host_needs_daemon)
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -189,12 +194,44 @@ const fakeExec = (cfg) => {
 }
 
 console.log(`[${((Date.now() - T0) / 1000).toFixed(1)} s] ` + '§4 THE SOURCE end to end over the fake helper');
+{
+  // lane stream-mac-stall (measured on the owner's Mac — `sample` of the wedged .305 helper vs-4b7bcb1e31e9): the encode thread
+  // set the bitrate HOLDING `lock`; VTSessionSetProperty waits for the pictures in flight, whose callbacks take that lock — the
+  // first `bps` parked the encoder, SCK's queue and the stats timer for good (one picture on the owner's screen, then none).
+  // THE LAW: the encode loop never calls VTSessionSetProperty while it holds its lock (its statements scanned in order)
+  const swift = fs.readFileSync(path.join(REPO, 'tools/vibespace-screen/vibespace-screen.swift'), 'utf8');
+  const heldSetters = (text) => {
+    const body = (/func encodeLoop\(\) \{([\s\S]*?)\n {2}func stats\(\)/.exec(text) || [])[1];
+    if (!body) return null;
+    let held = false, bad = 0, all = 0;
+    for (const m of body.replace(/\/\/[^\n]*/g, '').matchAll(/\block\.lock\(\)|\block\.unlock\(\)|VTSessionSetProperty\(/g)) {
+      if (m[0] === 'lock.lock()') held = true; else if (m[0] === 'lock.unlock()') held = false; else { all++; if (held) bad++; }
+    }
+    return { bad, all };
+  };
+  const now = heldSetters(swift);
+  // RED CONTROL: the .305 line back in place (the setter inside the locked block)
+  const was = swift.replace(/let rate = wantBps;[\s\S]*?\n {6}lock\.lock\(\)\n/, 'if let b = wantBps, let s = session { wantBps = nil; bps = b; VTSessionSetProperty(s, key: kVTCompressionPropertyKey_AverageBitRate, value: b as CFNumber); VTSessionSetProperty(s, key: kVTCompressionPropertyKey_DataRateLimits, value: [b / 8 * 2, 1] as CFArray) }\n');
+  const red = heldSetters(was);
+  ok(now && now.all === 2 && now.bad === 0 && was !== swift && red && red.bad === 2, 'the bitrate is set OUTSIDE the encode loop\'s lock (the .305 deadlock: one picture, then none) — RED CONTROL: the .305 shape is caught', { now, red });
+}
+
 const hS = home('smac-src'), logS = path.join(hS, 'helper.log');
 const FK = writeFakeMacHelper(hS, { version: SRC.VERSION, facts: MAC_FACTS, tcc: { screen: 'granted', accessibility: 'granted' }, log: logS, flv: flvFile(hS), displayFrame: { x: 0, y: 0, w: 1920, h: 1080 }, windowFrame: { x: -1678, y: 106, w: 656, h: 422 }, windowPid: 777, movedFrame: { x: -1600, y: 120, w: 656, h: 422 } });
 const envS = { HOME: hS, PATH: process.env.PATH };
 const logs = () => helperLog(logS);
 let skew = 0; // the bitrate leg moves this clock a second on instead of waiting one out
 const scr = MAC.createMacScreen({ spawn, execFile, env: envS, fs, log: () => { }, now: () => Date.now() + skew });
+{
+  const calls = [];
+  let openErr = null;
+  const exe = (file, args, o, cb) => { calls.push([file, args]); setImmediate(() => cb(openErr, '', '')); };
+  const so = MAC.createMacScreen({ spawn, execFile: exe, env: envS, fs, log: () => { } });
+  const a = await so.openSettings('accessibility'), s = await so.openSettings('screen'), bad = await so.openSettings('../screen');
+  openErr = Object.assign(new Error('spawn /usr/bin/open ENOENT'), { code: 'ENOENT' });
+  const gone = await so.openSettings('screen');
+  ok(a.ok && a.pane === 'accessibility' && s.ok && same(calls.slice(0, 2), [['/usr/bin/open', [SP.MAC_SETTINGS.accessibility]], ['/usr/bin/open', [SP.MAC_SETTINGS.screen]]]) && bad.code === 'bad_pane' && calls.length === 3 && gone.code === 'open_failed' && /ENOENT/.test(gone.error), 'lane stream-mac-stall: 「打开系统设置」 on the Mac = /usr/bin/open on THE pane\'s deep link (SP.MAC_SETTINGS, by name — anything else bad_pane, nothing run); a failed open by name', { calls, bad, gone });
+}
 const run = async (msg, { want = 40, kbps = 8000 } = {}) => {
   const src = await scr.source(msg, { maxKbps: kbps });
   if (!src.ok) return { src, aus: [], ended: null };
@@ -226,6 +263,8 @@ const run = async (msg, { want = 40, kbps = 8000 } = {}) => {
   await sleep(50);
   const ctl = logs().filter((l) => l.ctl && l.ctl.startsWith('bps')).map((l) => l.ctl);
   ok(same(ctl, ['bps 4000000']) && r.src.stats().kbps === 4000 && r.src.stats().rateChanges === 1, 'the bitrate LIVE: one `bps` line (no restart) — and nothing again within a second', ctl);
+  const atBps = r.aus.length;
+  ok(await until(() => r.aus.length >= atBps + 10, 3000), 'lane stream-mac-stall: the pictures keep coming after the `bps` (the agent\'s half; the helper\'s: §2\'s lock law + the report\'s real Mac leg)', { atBps, now: r.aus.length });
   await until(() => r.src.stats().encodeMs != null, 2000);
   const st2 = r.src.stats();
   ok(st2.mode === 'videotoolbox' && st2.encoder === 'VideoToolbox' && st2.encodeMs === 9.5 && st2.captureMs === 1.2 && st2.captured >= 10 && st2.timing === 'helper' && st2.kind === 'display' && st2.display === '3' && st2.white === null && st2.rung === '1440p60', 'the numbers: the helper\'s encode / capture ms and counts (the strip shows VideoToolbox · encode ms)', st2);
@@ -370,7 +409,7 @@ const pictures = (rtp) => { const out = []; let cur = []; for (const p of rtp) {
   writeFakeMacHelper(hD, { version: SRC.VERSION, facts: MAC_FACTS, tcc: { screen: 'granted', accessibility: 'granted' }, log: logD, flv: flvFile(hD), displayFrame: { x: 0, y: 0, w: 1920, h: 1080 } });
   const dm = deviceOn(hD, macBundle);
   const conn = await dm.connect();
-  ok(conn.info.platform === 'darwin' && same(conn.info.capabilities.slice(-7), ['stream-offer', 'input-events', 'stream-facts', 'stream-screen', 'stream-mac', 'stream-window', 'stream-windows']), 'the hello-ack names stream-mac + stream-window (after stream-screen), then the picker op\'s stream-windows (int304)', conn.info.capabilities.slice(-7));
+  ok(conn.info.platform === 'darwin' && same(conn.info.capabilities.slice(-8), ['stream-offer', 'input-events', 'stream-facts', 'stream-screen', 'stream-mac', 'stream-window', 'stream-windows', 'settings-open']), 'the hello-ack names stream-mac + stream-window (after stream-screen), then the picker op\'s stream-windows (int304), then 「打开系统设置」\'s settings-open (lane stream-mac-stall)', conn.info.capabilities.slice(-7));
   const v = SM.streamRungVerdict({ capabilities: conn.info.capabilities, desktop: true, platform: conn.info.platform });
   const f = await dm.streamFacts();
   ok(v.take && v.source === 'screen' && f.ok && f.platform === 'darwin' && f.helper.state === 'ready' && f.primary.rung === '1440p60' && f.windows.length === 2, 'the rung takes the Mac\'s screen; the stream-facts op answers the Mac\'s facts through its helper', f.primary);
@@ -389,10 +428,16 @@ const pictures = (rtp) => { const out = []; let cur = []; for (const p of rtp) {
   const inputs = () => helperLog(logD).filter((l) => l.input).map((l) => l.input);
   await until(() => inputs().length >= 7, 4000);
   ok(same(inputs().slice(0, 7), ['P 0', 'K 1 0', 'K 1 1', 'M 960 540', 'D 0', 'M 960 540', 'U 0']), 'the data channel\'s key + click reached the helper\'s input: the frontmost app, the virtual key code, the picture\'s centre in global points (×0.75)', inputs());
+  ok(off.ok && off.source.display === '3' && same(off.source.displays.map((d) => [d.id, d.main, d.x, d.name]), [['3', true, 0, 'Studio 27 (2)'], ['2', false, -1920, 'Studio 27 (1)']]), 'lane stream-mac-stall: the offer names the display streamed (the main one) and the Mac\'s displays — the strip\'s switcher (it drew none over a stream: one display was all there was)', off.source);
   const st = await dm.streamStats(off.sid);
   ok(st.ok && st.stats.screen && st.stats.screen.encoder === 'VideoToolbox' && st.stats.input.n >= 4, 'the session\'s numbers carry the Mac source\'s and the input count', st.stats && st.stats.screen);
   await dm.streamStop(off.sid);
   b.pc.close();
+  const off2 = await dm.streamOffer({ sourceKind: 'screen', sourceId: '2' }, { onPush: () => { } });
+  ok(off2.ok && off2.source.display === '2' && off2.source.displays.length === 2, 'a display picked on the switcher = THAT display\'s offer (source {kind: display, id} → the plan\'s --display)', off2.source || off2);
+  if (off2.ok) await dm.streamStop(off2.sid);
+  const sb = await dm.settingsOpen('bogus');
+  ok(conn.info.capabilities.includes('settings-open') && sb.ok === false && sb.code === 'bad_pane', 'lane stream-mac-stall: `settings-open` in the hello-ack; the op reaches the Mac\'s source through the real daemon and answers by name (bad_pane — no `open` runs on this box)', sb);
 
   const hO = home('smac-old');
   writeFakeMacHelper(hO, { version: SRC.VERSION, facts: MAC_FACTS, tcc: { screen: 'granted' } });
@@ -405,6 +450,17 @@ const pictures = (rtp) => { const out = []; let cur = []; for (const p of rtp) {
   const so = await hub.start('host-old');
   ok(!co.info.capabilities.includes('stream-mac') && co.info.capabilities.includes('stream-screen') && so.take === false && so.code === 'agent_too_old' && asked === 0, 'THE CAPABILITY GATE: an older Mac agent (stream-screen, no stream-mac) ⇒ agent_too_old and it is NEVER asked', { so, asked });
   hub.shutdown?.(); dmo.stop(); endDaemonsOf(rootOf(hO));
+  // an agent that predates 「打开系统设置」 on the Mac (no settings-open) is never asked: host_needs_daemon (the page copies the link)
+  const preOpen = path.join(copyDir, 'pre-open', 'vibespace-agentd.js'); fs.mkdirSync(path.dirname(preOpen), { recursive: true }); fs.writeFileSync(preOpen, macText.replace(', "settings-open"', ''));
+  const hQ = home('smac-pre-open');
+  writeFakeMacHelper(hQ, { version: SRC.VERSION, facts: MAC_FACTS, tcc: { screen: 'granted' } });
+  const dmq = deviceOn(hQ, preOpen);
+  const cq = await dmq.connect();
+  let qAsked = 0;
+  const realReq = dmq._request.bind(dmq); dmq._request = (m, ...rest) => { if (m && m.op === 'settings-open') qAsked++; return realReq(m, ...rest); };
+  const eq = await dmq.settingsOpen('screen').then(() => null, (e) => e);
+  ok(!cq.info.capabilities.includes('settings-open') && cq.info.capabilities.includes('stream-windows') && eq && eq.code === 'host_needs_daemon' && qAsked === 0, 'THE CAPABILITY GATE: an agent without settings-open is NEVER asked (host_needs_daemon — the hub answers agent_too_old, the page copies the link)', { code: eq && eq.code, qAsked });
+  dmq.stop(); endDaemonsOf(rootOf(hQ));
 
   const hP = home('smac-push'), logP = path.join(hP, 'p.log'), PP = SP.macHelperPaths(hP), hubBin = path.join(hP, 'hub-helpers');
   const FP = writeFakeMacHelper(hP, { version: SRC.VERSION, facts: MAC_FACTS, tcc: { screen: 'granted' }, log: logP, flv: flvFile(hP), displayFrame: { x: 0, y: 0, w: 1920, h: 1080 } });
