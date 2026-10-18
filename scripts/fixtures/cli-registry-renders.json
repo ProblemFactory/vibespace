@@ -7,10 +7,10 @@
     "sha256": "512eb60f553133611609f4b69b7943720989d52b0302e67da1d6300ff0431568"
    },
    "now": {
-    "bytes": 2026,
-    "sha256": "52b862b477095d9ed81f34074fa84a0538bc3abb536d93d3493902a90566f7fd"
+    "bytes": 2180,
+    "sha256": "74f4e873705455d5a484b3904ff978dac35a7478031bec27598db0d26251b741"
    },
-   "change": "the header counts every paragraph that rendered, vibespace-msg's too (4 → 5 CLIs, 5 → 6 with reach), and the paragraphs follow the registry's one row order (status, ask, task, jobs, channels, msg — task's moved from first to third); same bytes"
+   "change": "the header counts every paragraph that rendered, vibespace-msg's too (4 → 5 CLIs, 5 → 6 with reach), and the paragraphs follow the registry's one row order (status, ask, task, jobs, channels, msg — task's moved from first to third); same bytes · lane agent-feedback (.301): + the vibespace-feedback paragraph (152 B + its blank line; the header counts one CLI more)"
   },
   "section · one group · read": {
    "base": {
@@ -18,10 +18,10 @@
     "sha256": "5890537608128f90a0c677925d58e4ebfe0d72242c57b7f3e296097b4887d522"
    },
    "now": {
-    "bytes": 2422,
-    "sha256": "f914556e68158233009053ff9e808425d493788b1ac95dc59c9da3fd45141ea1"
+    "bytes": 2576,
+    "sha256": "332ab16195bbbd29522eae4a6b0ae3b8906efc628ca640e601c32a72f80aa776"
    },
-   "change": "the header counts every paragraph that rendered, vibespace-msg's too (4 → 5 CLIs, 5 → 6 with reach), and the paragraphs follow the registry's one row order (status, ask, task, jobs, channels, msg — task's moved from first to third); same bytes"
+   "change": "the header counts every paragraph that rendered, vibespace-msg's too (4 → 5 CLIs, 5 → 6 with reach), and the paragraphs follow the registry's one row order (status, ask, task, jobs, channels, msg — task's moved from first to third); same bytes · lane agent-feedback (.301): + the vibespace-feedback paragraph (152 B + its blank line; the header counts one CLI more)"
   },
   "section · one group · request": {
    "base": {
@@ -29,10 +29,10 @@
     "sha256": "427bd4b717306a57cf7baec9f4852dbe8e2aa01d59a184e713d7a1a6abeb9760"
    },
    "now": {
-    "bytes": 2339,
-    "sha256": "b7639ef5757824203c7bafd2ec840130071c0629cca1e1bf12f0dc03eefb723b"
+    "bytes": 2493,
+    "sha256": "b993345acb6ceb3c8e09ef902131fca05e5abbc10ed8ccb7b96a77bb31908fda"
    },
-   "change": "the header counts every paragraph that rendered, vibespace-msg's too (4 → 5 CLIs, 5 → 6 with reach), and the paragraphs follow the registry's one row order (status, ask, task, jobs, channels, msg — task's moved from first to third); same bytes"
+   "change": "the header counts every paragraph that rendered, vibespace-msg's too (4 → 5 CLIs, 5 → 6 with reach), and the paragraphs follow the registry's one row order (status, ask, task, jobs, channels, msg — task's moved from first to third); same bytes · lane agent-feedback (.301): + the vibespace-feedback paragraph (152 B + its blank line; the header counts one CLI more)"
   },
   "section · three groups": {
    "base": {
@@ -40,10 +40,10 @@
     "sha256": "cce70941274cbdf792c6cfb7789f91d06fd9f2b9174b9f944b2e3c1db4b13c52"
    },
    "now": {
-    "bytes": 2165,
-    "sha256": "b677c43ce00c0a1a56df61dc3e5f9c997424558d3732c370dbef62d43481095d"
+    "bytes": 2319,
+    "sha256": "914d78c42159c805cde376c3107faf03c0ef23adedce81b71de3c7a11dee35d0"
    },
-   "change": "the header counts every paragraph that rendered, vibespace-msg's too (4 → 5 CLIs, 5 → 6 with reach), and the paragraphs follow the registry's one row order (status, ask, task, jobs, channels, msg — task's moved from first to third); same bytes"
+   "change": "the header counts every paragraph that rendered, vibespace-msg's too (4 → 5 CLIs, 5 → 6 with reach), and the paragraphs follow the registry's one row order (status, ask, task, jobs, channels, msg — task's moved from first to third); same bytes · lane agent-feedback (.301): + the vibespace-feedback paragraph (152 B + its blank line; the header counts one CLI more)"
   },
   "section · three groups · read": {
    "base": {
@@ -51,10 +51,10 @@
     "sha256": "c722ab16dc8f1c4f227598f9d92494fe30bde5193f74ef875535eb8033e64cab"
    },
    "now": {
-    "bytes": 2561,
-    "sha256": "087ae2f2bf77e081d32174f4f6894165d6f957034928f1afbffc73972ebb36ac"
+    "bytes": 2715,
+    "sha256": "4ec6fa96a939abb023d4173348aff0ecf5a7e892c271ea321c8c9bf25e0c8e9d"
    },
-   "change": "the header counts every paragraph that rendered, vibespace-msg's too (4 → 5 CLIs, 5 → 6 with reach), and the paragraphs follow the registry's one row order (status, ask, task, jobs, channels, msg — task's moved from first to third); same bytes"
+   "change": "the header counts every paragraph that rendered, vibespace-msg's too (4 → 5 CLIs, 5 → 6 with reach), and the paragraphs follow the registry's one row order (status, ask, task, jobs, channels, msg — task's moved from first to third); same bytes · lane agent-feedback (.301): + the vibespace-feedback paragraph (152 B + its blank line; the header counts one CLI more)"
   },
   "section · three groups · request": {
    "base": {
@@ -62,10 +62,10 @@
     "sha256": "b43b890f7bada2baff628d3b279afedc38aa33dee4fc5666536468e1af20379f"
    },
    "now": {
-    "bytes": 2478,
-    "sha256": "26cada5f53e669b676900737928f2a8d733694bb6f65a9e280930013530893c9"
+    "bytes": 2632,
+    "sha256": "869677e82a8bad4fd10e695590d97a8d340b96ca55677b8f35192a66bda45bf2"
    },
-   "change": "the header counts every paragraph that rendered, vibespace-msg's too (4 → 5 CLIs, 5 → 6 with reach), and the paragraphs follow the registry's one row order (status, ask, task, jobs, channels, msg — task's moved from first to third); same bytes"
+   "change": "the header counts every paragraph that rendered, vibespace-msg's too (4 → 5 CLIs, 5 → 6 with reach), and the paragraphs follow the registry's one row order (status, ask, task, jobs, channels, msg — task's moved from first to third); same bytes · lane agent-feedback (.301): + the vibespace-feedback paragraph (152 B + its blank line; the header counts one CLI more)"
   },
   "section · status only": {
    "base": {
@@ -73,10 +73,10 @@
     "sha256": "3e597ddfa6b75dd327319d7dfa1c2883250bf938f088f9f847b97b9727cba9f2"
    },
    "now": {
-    "bytes": 1004,
-    "sha256": "c20f3995318eb952ab6a6027c1ff7a4e3f9e27215dfe62db5da7dabb97e4961b"
+    "bytes": 1158,
+    "sha256": "06b7c802097a3d541f079fb5b1ac51fa2a994269715692e7c824fdcbe92b50d2"
    },
-   "change": "the header counts every paragraph that rendered, vibespace-msg's too ('one CLI' → '2 CLIs'); same bytes"
+   "change": "the header counts every paragraph that rendered, vibespace-msg's too ('one CLI' → '2 CLIs'); same bytes · lane agent-feedback (.301): + the vibespace-feedback paragraph (152 B + its blank line; the header counts one CLI more)"
   },
   "section · every toggle off": {
    "base": {
@@ -90,10 +90,10 @@
     "sha256": "0ff706ba83f729d77e3b25ca38f8b0f502be3b1a71f7e90d27eb0e643e4e4323"
    },
    "now": {
-    "bytes": 847,
-    "sha256": "7cdff97e12fc48b5c1b916c0119d17f987d2a09f6caddfe9cff86197a2632ed3"
+    "bytes": 948,
+    "sha256": "e8c7a6af683f3541bd2d3abe1b80767a1a0efcb6735b1b0dd781885c21649f2b"
    },
-   "change": "the docs pointer names every OPEN row's topic in row order: + design|exit|window|apps (+24 B)"
+   "change": "the docs pointer names every OPEN row's topic in row order: + design|exit|window|apps (+24 B) · lane agent-feedback (.301): + the vibespace-feedback segment (88 B) and `feedback` in the docs pointer"
   },
   "reminder · one group / none · read": {
    "base": {
@@ -101,10 +101,10 @@
     "sha256": "92bfd3f34db652460290b1a1b0fb1755acc2f3862af9f9f57dfbc837d2675507"
    },
    "now": {
-    "bytes": 970,
-    "sha256": "a0709be8659b91378bfd92a02a6857566c8a53ca827114a49a24f84374999250"
+    "bytes": 1071,
+    "sha256": "f6020b11830e3d9beba1ba06f6d6e5ada4f20cf691c1f5eb3c46edf7053c570d"
    },
-   "change": "the docs pointer names every OPEN row's topic in row order: + design|exit|window|apps, channels after jobs (+24 B)"
+   "change": "the docs pointer names every OPEN row's topic in row order: + design|exit|window|apps, channels after jobs (+24 B) · lane agent-feedback (.301): + the vibespace-feedback segment (88 B) and `feedback` in the docs pointer"
   },
   "reminder · one group / none · request": {
    "base": {
@@ -112,10 +112,10 @@
     "sha256": "e677cf377fb3fbcdf41764c715c4514132be35d0a4df86ab7e2e5d8d12a049da"
    },
    "now": {
-    "bytes": 970,
-    "sha256": "dc4f292e9342dbc95676d665ed435fead0a647e14a8d8ad7053a40bb68941499"
+    "bytes": 1071,
+    "sha256": "cc83c736882bf8ec42a0ee64f0b061d5c297dd11a8409573fbab426922011659"
    },
-   "change": "the docs pointer names every OPEN row's topic in row order: + design|exit|window|apps, channels after jobs (+24 B)"
+   "change": "the docs pointer names every OPEN row's topic in row order: + design|exit|window|apps, channels after jobs (+24 B) · lane agent-feedback (.301): + the vibespace-feedback segment (88 B) and `feedback` in the docs pointer"
   },
   "reminder · several groups": {
    "base": {
@@ -123,10 +123,10 @@
     "sha256": "078423795f344cefd0af209b4b56439a9cfbfdc8f9ee6b0d0d0c50fc7c0b5e7f"
    },
    "now": {
-    "bytes": 860,
-    "sha256": "5941ee38f9c6e76affd5d1a19e009fc0c84ead4762190f07501d2da5d65f8abb"
+    "bytes": 961,
+    "sha256": "c062818b3d2b6afe6eefa98733f8fb93f8eaadf680c069d18817472ef7ec9dca"
    },
-   "change": "the docs pointer names every OPEN row's topic in row order: + design|exit|window|apps (+24 B)"
+   "change": "the docs pointer names every OPEN row's topic in row order: + design|exit|window|apps (+24 B) · lane agent-feedback (.301): + the vibespace-feedback segment (88 B) and `feedback` in the docs pointer"
   },
   "reminder · several groups · read": {
    "base": {
@@ -134,10 +134,10 @@
     "sha256": "6670eb40ca5a4fac4b66c8efafa34d887eb3677fc6e3189740ebf80d4e06ce76"
    },
    "now": {
-    "bytes": 983,
-    "sha256": "1f84e677e8327500ac892ec90317f4dea356599e2c47371a9078783b1f8f6eac"
+    "bytes": 1084,
+    "sha256": "71e3b46d19d2aad9863bdcab5f7e9f8645377ab49c108c289a3458fc75c5d74b"
    },
-   "change": "the docs pointer names every OPEN row's topic in row order: + design|exit|window|apps, channels after jobs (+24 B)"
+   "change": "the docs pointer names every OPEN row's topic in row order: + design|exit|window|apps, channels after jobs (+24 B) · lane agent-feedback (.301): + the vibespace-feedback segment (88 B) and `feedback` in the docs pointer"
   },
   "reminder · several groups · request": {
    "base": {
@@ -145,10 +145,10 @@
     "sha256": "cdb15dd9a30ae4a435255ee0d91200922845d8265c457ab051c23aebd742fe17"
    },
    "now": {
-    "bytes": 983,
-    "sha256": "5ce3292355f142af3067d05fe6f378d85e71e62384fc332775bd96e8b38380da"
+    "bytes": 1084,
+    "sha256": "c435f531891cff5c95ebfd3080a8d1c00697295606e871544dfc3955f78d1459"
    },
-   "change": "the docs pointer names every OPEN row's topic in row order: + design|exit|window|apps, channels after jobs (+24 B)"
+   "change": "the docs pointer names every OPEN row's topic in row order: + design|exit|window|apps, channels after jobs (+24 B) · lane agent-feedback (.301): + the vibespace-feedback segment (88 B) and `feedback` in the docs pointer"
   },
   "reminder · manager · several groups · read": {
    "base": {
@@ -156,10 +156,10 @@
     "sha256": "f82a9423735c2723d6d0a4014b29eb750c68db390ae33d1f8aa44ec33b64056e"
    },
    "now": {
-    "bytes": 1118,
-    "sha256": "0aea8fce292ee1d1d41f528eaf08fe7368d30867fe819cf69058e7e725e38c5e"
+    "bytes": 1219,
+    "sha256": "0a60e1a74df9d01cd6534f20b839bab2004c2f705f3bb1786c0f6fc2d2618ba5"
    },
-   "change": "the docs pointer names every OPEN row's topic in row order: + design|exit|window|apps, channels after jobs (+24 B)"
+   "change": "the docs pointer names every OPEN row's topic in row order: + design|exit|window|apps, channels after jobs (+24 B) · lane agent-feedback (.301): + the vibespace-feedback segment (88 B) and `feedback` in the docs pointer"
   },
   "reminder · status only": {
    "base": {
@@ -167,10 +167,10 @@
     "sha256": "e5c0f6df7dafe8009d46880e4dbf1701fec8c8e786802f57716f1fc4bb380abd"
    },
    "now": {
-    "bytes": 258,
-    "sha256": "c52b3fdb0ed517c0dacd801f67655e31508ec681ddc333c07a98d20942313bb2"
+    "bytes": 359,
+    "sha256": "3466eb234d9f10bd5b6f8829254687eb4eabe4db990be8befd5fab1d4e5d8c29"
    },
-   "change": "the docs pointer names every OPEN row's topic in row order: + design|exit|window|apps, − ask|task|jobs (a closed toggle's manual is no longer pointed at — 2.211.0) (+10 B)"
+   "change": "the docs pointer names every OPEN row's topic in row order: + design|exit|window|apps, − ask|task|jobs (a closed toggle's manual is no longer pointed at — 2.211.0) (+10 B) · lane agent-feedback (.301): + the vibespace-feedback segment (88 B) and `feedback` in the docs pointer"
   },
   "reminder · every toggle off": {
    "base": {
@@ -178,10 +178,10 @@
     "sha256": "dd48164665ff89d500b71946d6ded11459f62994415f41052882936048bc7497"
    },
    "now": {
-    "bytes": 190,
-    "sha256": "5cd19a9eb98c0c9b3e2e042cc4749d4231ac27295787d516416809c01651b980"
+    "bytes": 291,
+    "sha256": "15f997fcfd3dc69ba90b530f014dfaadbdfb419a39752e4e33c84aad7e5f2588"
    },
-   "change": "the docs pointer names every OPEN row's topic in row order: + design|exit|window|apps, − status|ask|task|jobs (a closed toggle's manual is no longer pointed at — 2.211.0) (+3 B)"
+   "change": "the docs pointer names every OPEN row's topic in row order: + design|exit|window|apps, − status|ask|task|jobs (a closed toggle's manual is no longer pointed at — 2.211.0) (+3 B) · lane agent-feedback (.301): + the vibespace-feedback segment (88 B) and `feedback` in the docs pointer"
   },
   "no-group intro": {
    "base": {

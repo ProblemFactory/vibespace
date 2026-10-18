@@ -33,12 +33,29 @@ function create({ app, server, rootDir, HOST, PORT, BUFFERS_DIR, PERMISSION_MODE
   adapterRegistry = null,
   // agent browser P4 second half (§7.5): the integration store (src/server/integrations-wiring.js, created BEFORE this
   // wiring in server.js) the key consumer resolves through — never process.env
-  integrations = null }) {
+  integrations = null,
+  // lane agent-feedback: server.js's SyncStore table — the `feedback` mirror registers here (live to every client)
+  syncStores = null }) {
   const portForwards = mk(getPortForwards);
 // ── Mounts (rclone S3 mounts + share minting — collaboration P1) ──
 // ── Plugins (2.140.0, B-2d44): host-level capabilities with persistent state ──
 const { PluginManager } = require('../plugins');
 let voicePlugin = { peek: () => ({}), update: () => {}, settings: () => ({}), writeSettings: () => {} }; // Dropline voice input (q-029 P0): the plugin hands its record reader back here
+// AGENT FEEDBACK (lane agent-feedback — the owner 2026-10-18: agents report what felt wrong; ⚙ System ▸ Agent feedback… shows
+// it): data/feedback.json + the server-owned `feedback` StateSync mirror (src/server/feedback-store.js) and the routes
+// (src/routes/feedback.js). The caller's Task Group and the instance are facts the ROUTE fills, never the body.
+const feedback = require('./feedback-store.js').create({ dataDir: path.join(rootDir, 'data'), wss, log: (...a) => console.warn(...a) });
+if (syncStores) syncStores.feedback = feedback.sync;
+require('../routes/feedback.js').registerFeedbackRoutes(app, {
+  store: feedback, activeSessions, getJobs,
+  groupOf: (s, id) => {
+    const tasks = getTasks && getTasks();
+    const gs = tasks && sessionStatusKey ? tasks.groupsForSession({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, initialGroupId: s._initialGroupId }) : [];
+    const g = gs.find((x) => x.id === s._initialGroupId) || gs[0];
+    return g ? { id: g.id, name: g.title || null } : null;
+  },
+  instance: () => ({ name: process.env.VIBESPACE_INSTANCE_NAME || os.hostname(), version: require('../../package.json').version }),
+});
 // THE DECISION ENGINE (lane decision-core): the ONE decisions-API caller — the plugin row attaches its switches, the
 // registry row `llm` gives the key, its Test runner is the engine's own one-question judgment
 const decisionEngine = require('./decision-engine.js').create({ dataDir: path.join(rootDir, 'data'), integrations, serverNotice });
@@ -1198,6 +1215,6 @@ function createSessionMessages(session, sessionId) {
     } catch (e) { console.warn('[browser-trace] boot failed:', e && e.message); }
   };
 
-  return { decisionEngine, mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages, pluginLoader, browserKeeper, bootBrowserKeeper: () => { bootBrowserKeeper(bootBrowserTrace); }, browserStream, browserHandback, browserTrace, browserKeys, browserDialogs };
+  return { decisionEngine, feedback, mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages, pluginLoader, browserKeeper, bootBrowserKeeper: () => { bootBrowserKeeper(bootBrowserTrace); }, browserStream, browserHandback, browserTrace, browserKeys, browserDialogs };
 }
 module.exports = { create };

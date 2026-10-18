@@ -19,8 +19,10 @@ class SyncStore {
    * @param {object} [opts]
    * @param {number} [opts.saveDelay=2000] - Debounce delay for disk persistence
    * @param {number} [opts.maxOps=500] - Max ops in ring buffer
+   * @param {boolean} [opts.clientWrites=true] - false: a SERVER-OWNED mirror — a client's `state-set` is refused
+   *   (src/ws-handler.js); with filePath null the owner module persists (lane agent-feedback: src/server/feedback-store.js)
    */
-  constructor(name, filePath, wss, { saveDelay = 2000, maxOps = 500 } = {}) {
+  constructor(name, filePath, wss, { saveDelay = 2000, maxOps = 500, clientWrites = true } = {}) {
     this.name = name;
     this.filePath = filePath;
     this.wss = wss;
@@ -30,7 +32,8 @@ class SyncStore {
     this.ops = []; // ring buffer: [{version, op:'set'|'delete', key, value?}]
     this.data = {};
     this._saveTimer = null;
-    this._load();
+    this.clientWrites = clientWrites !== false;
+    if (this.filePath) this._load();
   }
 
   _load() {
@@ -43,6 +46,7 @@ class SyncStore {
   }
 
   _scheduleSave() {
+    if (!this.filePath) return; // a mirror: its owner persists
     clearTimeout(this._saveTimer);
     this._saveTimer = setTimeout(() => { this._saveTimer = null; this.flush(); }, this.saveDelay);
   }
@@ -52,6 +56,7 @@ class SyncStore {
    *  saveDelay of a restart were lost). Atomic via tmp+rename. */
   flush() {
     if (this._saveTimer) { clearTimeout(this._saveTimer); this._saveTimer = null; }
+    if (!this.filePath) return;
     try {
       const tmp = `${this.filePath}.tmp`;
       fs.writeFileSync(tmp, JSON.stringify({ version: this.version, data: this.data }, null, 2));

@@ -102,6 +102,7 @@ const AGENT_TOOL_RULES = Object.freeze([
   Object.freeze({ tool: 'vibespace-task', verbs: null, why: 'reports progress / backlog on this session\'s own task' }),
   Object.freeze({ tool: 'vibespace-ask', verbs: null, why: 'files an item in the user\'s For you inbox' }),
   Object.freeze({ tool: 'vibespace-docs', verbs: null, why: 'reads a VibeSpace manual' }),
+  Object.freeze({ tool: 'vibespace-feedback', verbs: null, why: 'tells the maintainers what felt wrong — one text row on this instance (the user reads it in ⚙), nothing runs' }), // lane agent-feedback
   Object.freeze({ tool: 'vibespace-msg', verbs: null, why: 'messages other agents — a wake is a billed turn under the spend ceiling' }),
   Object.freeze({ tool: 'vibespace-window', verbs: null, why: 'drives a desktop-app window under a lease the user can take over' }),
   Object.freeze({ tool: 'vibespace-channels', verbs: null, why: 'reads channels; a reply is a PROPOSAL the outbox policy decides; withdraw only takes back the agent\'s own undecided proposal (never a send)' }),
@@ -622,6 +623,7 @@ function toolStep(tool, args) {
     case 'vibespace-task': return S(i18nKey('Report progress on its task'));
     case 'vibespace-ask': return S(i18nKey('Add an item to your For you inbox'));
     case 'vibespace-docs': return S(i18nKey('Read the VibeSpace manual'));
+    case 'vibespace-feedback': return verb === 'list' ? S(i18nKey('Read the feedback it sent')) : S(i18nKey('Send feedback on VibeSpace to the maintainers'));
     case 'vibespace-msg': return verb === 'send' ? S(i18nKey('Message another agent')) : S(i18nKey('Read or manage agent messages'));
     case 'vibespace-window': return S(i18nKey('Use a desktop app window'));
     case 'vibespace-channels': return verb === 'withdraw' ? S(i18nKey('Take back one of its proposed replies')) : S(i18nKey('Read a channel or propose a reply'));

@@ -1,0 +1,87 @@
+#!/usr/bin/env node
+// vibespace-feedback — tell the maintainers what felt wrong: a command, a flow, a screen, a manual that was confusing,
+// missing or surprising (lane agent-feedback, the owner 2026-10-18). ONE report per thing; the user reads every report
+// in ⚙ System ▸ Agent feedback… and the maintainers read data/feedback.json to improve the system. Scoped by the
+// per-session token in the env — WHO reported is the server's fact, never an argument. Run with NO arguments to see the
+// usage and your own reports. The text is TEXT for its readers (drawn as text in the user's sheet); nothing is sent
+// anywhere but this VibeSpace.
+const API = process.env.VIBESPACE_API;
+const TOKEN = process.env.VIBESPACE_SESSION_TOKEN || process.env.VIBESPACE_JOB_TOKEN;
+if (!API || !TOKEN) { console.error('vibespace-feedback: not running inside a VibeSpace session (missing env)'); process.exit(2); }
+
+// THE ONE-TEXT RULE (lane cli-one-text-arg — src/agent-cli-text.js in a checkout, its boot-time copy beside this file on a
+// host): the report is ONE argument; a stray word after it is refused by name (exit 2, nothing sent); --text-file <path> /
+// --text - (stdin) carry a long or quoted report; the route's `chars` is echoed as `sent: N characters`.
+const TX = (() => {   // the module by its literal name (test-peer-text-census walks it beside the CLIs)
+  try { return require('node:fs').existsSync(require('node:path').join(__dirname, '..', '..', 'server.js')) ? require('../../src/agent-cli-text.js') : require('./agent-cli-text.js'); } catch { }
+  try { return require('./agent-cli-text.js'); } catch { return null; }
+})();
+const TX_IO = { readFile: (p) => require('node:fs').readFileSync(p, 'utf8'), readStdin: () => require('node:fs').readFileSync(0, 'utf8'), stdinIsTTY: (() => { try { return require('node:fs').fstatSync(0).isCharacterDevice(); } catch { return false; } })() };
+const DOORS = TX ? TX.takeDoors(process.argv.slice(2), ['text']) : { argv: process.argv.slice(2), doors: {}, error: null };
+const rawArgs = DOORS.argv;
+const opt = (name) => {
+  const i = rawArgs.indexOf('--' + name);
+  if (i >= 0 && rawArgs[i + 1] !== undefined) { const v = rawArgs[i + 1]; rawArgs.splice(i, 2); return v; }
+  const pref = '--' + name + '=';
+  const j = rawArgs.findIndex((a) => a.startsWith(pref));
+  if (j >= 0) { const v = rawArgs[j].slice(pref.length); rawArgs.splice(j, 1); return v; }
+  return undefined;
+};
+const about = opt('about');
+const kind = opt('kind');
+const USAGE = [
+  'usage — tell the maintainers what felt wrong (a command, a flow, a screen, a manual: confusing, missing or surprising):',
+  '  vibespace-feedback "what felt wrong, and where" [--about <tool|flow>] [--kind cli|flow|ui|docs|other]',
+  '      one report per thing, up to 2000 characters: what you tried, what happened, what you expected',
+  '      --about = the tool (vibespace-task) or a word for the flow (up to 60 characters); --kind defaults to other',
+  '      the user reads every report in ⚙ System ▸ Agent feedback…; the same report within 24 h is counted, not repeated;',
+  '      one report per 10 s from a session',
+  '      long or quoted text: --text-file <path> or --text - (stdin, a heredoc) — the report is ONE argument',
+  '      (a word after it ⇒ exit 2, nothing sent); it answers sent: N characters',
+  '  vibespace-feedback list         your own reports (open / handled, × how often reported) — check before you repeat one',
+].join('\n');
+
+async function call(method, route, body) {
+  const res = await fetch(API + route, {
+    method, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + TOKEN },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) { console.error('vibespace-feedback: ' + (data.error || 'HTTP ' + res.status)); process.exit(res.status === 400 ? 2 : 1); }
+  return data;
+}
+const when = (at) => { try { return new Date(at).toISOString().slice(0, 16).replace('T', ' '); } catch { return '?'; } };
+function printReports(list) {
+  if (!list.length) { console.log('  (no reports from this conversation yet)'); return; }
+  for (const r of list) {
+    console.log(`  ${r.id}  ${when(r.lastAt || r.at)}  [${r.kind}${r.about ? ' · ' + r.about : ''}] ${r.status}${r.count > 1 ? ' ×' + r.count : ''}`);
+    console.log('      ' + String(r.text).split('\n').join('\n      '));
+  }
+}
+
+async function main() {
+  const [cmd] = rawArgs;
+  if (cmd === 'help' || cmd === '-h' || cmd === '--help' || (cmd && cmd.startsWith('-'))) {
+    console.log(USAGE);
+    if (cmd.startsWith('-') && cmd !== '-h' && cmd !== '--help') process.exit(1);
+    return;
+  }
+  if (!cmd && !DOORS.doors.text && about === undefined && kind === undefined) {
+    console.log(USAGE + '\n\nyour reports:');
+    printReports((await call('GET', '/api/agent/feedback/mine')).reports || []);
+    return;
+  }
+  if (cmd === 'list' && rawArgs.length === 1 && !DOORS.doors.text) { printReports((await call('GET', '/api/agent/feedback/mine')).reports || []); return; }
+  if (!TX) { console.error('vibespace-feedback: refused — this CLI\'s text rule (agent-cli-text.js) is missing beside it, so stray words cannot be told apart; nothing was sent — ask the user to reinstall the agent tools (Manage agents → the machine → Install)'); process.exit(2); }
+  const one = TX.oneText({ tool: 'vibespace-feedback', what: 'the report', positional: rawArgs[0], strays: rawArgs.slice(1), doors: DOORS, io: TX_IO });
+  if (one.error) { console.error(one.error); process.exit(TX.STRAY_EXIT); }
+  const text = String(one.text == null ? '' : one.text).trim();
+  if (!text) { console.error(USAGE); process.exit(1); }
+  const answer = await call('POST', '/api/agent/feedback', { text, about, kind });
+  const r = answer.report || {};
+  console.log(answer.duplicate
+    ? `already reported (${r.id}) — counted again: ×${r.count}; the user sees one row`
+    : `sent to the maintainers (${r.id}) — the user reads it in ⚙ System ▸ Agent feedback…`);
+  console.log('  ' + TX.sentLine(answer, text));
+}
+main().catch((e) => { console.error('vibespace-feedback:', e.message); process.exit(1); });

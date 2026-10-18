@@ -127,9 +127,9 @@ console.log('§3 init() is one load');
 
 console.log('§5 control');
 {
-  const from = "if (store && data.key && typeof data.key === 'string') {";
+  const from = "if (store && store.clientWrites !== false && data.key && typeof data.key === 'string') {"; // lane agent-feedback: the guard reads clientWrites (a server-owned mirror takes no client write)
   ok(CASES.includes(from), 'control target present: the state-set key check');
-  const w = world(CASES.replace(from, "if (store && data.key && typeof data.key === 'string' && data.key.startsWith('chat:')) {"));
+  const w = world(CASES.replace(from, "if (store && store.clientWrites !== false && data.key && typeof data.key === 'string' && data.key.startsWith('chat:')) {"));
   const { seenB, held } = await roundTrip(w);
   ok(held === undefined && seenB.length === 0, 'CONTROL: a state-set that keeps only chat: keys ⇒ the store holds nothing and B hears nothing (① would be red)', { held, seenB });
   w.done();

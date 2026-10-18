@@ -1503,7 +1503,7 @@ function registerWsHandler(wss, ctx) {
 
         case 'state-set': {
           const store = getSyncStore(data.store);
-          if (store && data.key && typeof data.key === 'string') {
+          if (store && store.clientWrites !== false && data.key && typeof data.key === 'string') { // lane agent-feedback: a server-owned mirror (`feedback`) takes no client write
             if (data.value == null || data.value === '') store.delete(data.key, ws);
             else store.set(data.key, data.value, ws);
             // lane worker-dispatch verify r2 ①: a non-empty chat draft is a PERSON composing a reply (not yet sent, so

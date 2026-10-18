@@ -49,6 +49,7 @@ import { openChannelWindow } from './channel-window.js';
 import { focusChannelsPanel, openSearchResults } from './channels-panel.js';
 import { openChannelOutbox as openChannelOutboxFn } from './channel-outbox.js';
 import { openIntegrationsWindow } from './integrations-window.js';
+import './feedback-sheet.js'; // lane agent-feedback: ⚙ System ▸ Agent feedback… (the module registers its gear row)
 import { openSessionProps as openSessionPropsFn } from './session-props.js';
 import { openWorkflowDetail as openWorkflowDetailFn } from './workflow-detail.js';
 import { openDesign as openDesignFn, openDesignPublishDialog, installDesignWindow } from './design-window.js'; // lane design-window: the Design window (window type `design`) + its publish dialog + the hub's open push

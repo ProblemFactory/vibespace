@@ -13,6 +13,7 @@ server. `vibespace-docs <topic>` prints it.
 | `jobs` | `vibespace-job` | background work that OUTLIVES this conversation (a service, a long run, a schedule); you are notified when it ends | `vibespace-docs jobs` |
 | `channels` | `vibespace-channels` | the mail, chats and threads the user connected and lets you see: list, search, read; a reply is a proposal the user approves | `vibespace-docs channels` |
 | `msg` | `vibespace-msg` | message other agent sessions in explicit groups (a direct message = a two-member group); next turn is free, a wake is billed | `vibespace-docs msg` |
+| `feedback` | `vibespace-feedback` | tell the maintainers what felt wrong (a command, a flow, a screen, a manual); the user reads every report in the ⚙ menu | `vibespace-docs feedback` |
 | `pages` | `vibespace-page` | host a self-contained HTML page on this VibeSpace behind a share link (a design the user asked for: vibespace-design) | `vibespace-docs pages` |
 | `design` | `vibespace-design` | designs, mockups, screens: HTML artboards the user watches live in the Design window; its manual carries the craft rules | `vibespace-docs design` |
 | `exit` | `vibespace-exit` | borrow a paired machine's network for one command, or run a command ON it: only machines the user opened to you | `vibespace-docs exit` |

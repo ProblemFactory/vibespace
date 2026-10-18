@@ -32,9 +32,11 @@ const channelsByReach = (map, reach) => map[reach === 'request' ? 'request' : 'r
 const GATES = Object.freeze(['status', 'ask', 'task', 'jobs', 'channels', 'always']);
 /** the byte caps test-cli-registry holds the rendered teaching to (every gate open, the widest shape; RED past them):
  *  · sessionStart — the section with its trailer, measured 2 561 B (three groups, read reach) + the 164 B test-prompt-budget
- *    ③ leaves that shape under its 7 168 B: a paragraph past it is the budget's red too, named here first;
+ *    ③ leaves that shape under its 7 168 B: a paragraph past it is the budget's red too, named here first; lane
+ *    agent-feedback's paragraph took 154 B of that room (2 715 B — 10 B left: the next paragraph cuts another);
  *  · reminder — the bare line, measured 1 077 B (a manager, several groups, read reach) + room for ONE more segment the size
- *    of the channels one (113 B): the next taught row pays for itself or cuts another;
+ *    of the channels one (113 B): the next taught row pays for itself or cuts another — lane agent-feedback's segment and
+ *    its `feedback` pointer topic took 101 B (1 178 B — 22 B left);
  *  · summary — one index cell. */
 const CAPS = Object.freeze({ summary: 140, sessionStart: 2725, reminder: 1200 });
 
@@ -87,6 +89,16 @@ const ROWS = Object.freeze([
       // AGENT GROUPS (design §22): ONE pointer line — the manual carries the rest
       sessionStart: () => 'Other agents: `vibespace-msg send <agent|group> "…"` reaches them on THEIR next turn at no cost (`--wake` or an @name = a billed turn now); `vibespace-msg group create <name> <member…>` makes a group; group news arrives here on your next turn. Manual: `vibespace-docs msg`.',
       reminder: null,
+    },
+  },
+  {
+    // lane agent-feedback (the owner 2026-10-18: "能不能让他们通过某个指令直接给你 feedback…"): ONE line each surface; the manual
+    // carries the rest. The paragraph is paid from the section's room (2 561 → 2 715 B of 2 725), the segment from the reminder's.
+    name: 'vibespace-feedback', topic: 'feedback', manual: 'feedback-manual.md', gate: 'always',
+    summary: 'tell the maintainers what felt wrong (a command, a flow, a screen, a manual); the user reads every report in the ⚙ menu',
+    teach: {
+      sessionStart: () => 'A tool or flow felt wrong, missing or surprising → `vibespace-feedback "what, and where" --about <tool>` — one line; the maintainers read every one.',
+      reminder: () => 'vibespace-feedback "what, and where" — a tool or flow felt wrong? tell the maintainers',
     },
   },
   {

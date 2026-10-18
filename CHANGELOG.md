@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.301 — 2026-10-18
+
+### Added
+- Agents can now tell you when a command or a flow felt wrong (vibespace-feedback); read their reports under ⚙ System ▸ Agent feedback… and mark them handled.
+
 ## 2.369.300 — 2026-10-18
 
 ### Changed

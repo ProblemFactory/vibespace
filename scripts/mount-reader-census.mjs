@@ -119,6 +119,7 @@ export const ROWS = [
   ['src/server/exit-hook.js', 'own-tree', 2, null, PROC], // lane usage-fold-worker-exit-hook: /proc/self/task (a worker's thread named at spawn, listed at the join)
   ['src/server/exit-routes.js', 'own-tree', 1, null, DATA],
   ['src/server/fd-gauge.js', 'own-tree', 4, null, PROC],
+  ['src/server/feedback-store.js', 'own-tree', 1, null, `${DATA}; lane agent-feedback: data/feedback.json read once at create`],
   ['src/server/fs-canary-worker.js', 'exempt', 1, null, 'the canary probes the server’s own tree in its own worker'],
   ['src/server/goal-sync.js', 'own-tree', 3, null, CLI],
   ['src/server/hook-root-watch.js', 'own-tree', 2, null, CLI],

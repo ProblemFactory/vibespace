@@ -44,7 +44,8 @@ console.log('① PURE: the paragraph, the header count, the reminder segment');
   const read = section(TG, { ...T4, channels: 'read' }), req = section(TG, { ...T4, channels: 'request' });
   ok(none === off && section(TG, T4, true) === section(TG, { ...T4, channels: false }, true), 'no reach (channels: false) ⇒ the tools section is byte-identical to one rendered without the flag (single and multi)');
   // lane cli-registry: the header counts every paragraph that rendered (vibespace-msg's too since the registry: 5 → 6)
-  ok(/— 5 CLIs on your PATH/.test(none) && /— 6 CLIs on your PATH/.test(read) && /— 6 CLIs on your PATH/.test(req), 'the header\'s CLI count includes vibespace-channels only with reach (5 → 6)');
+  // lane agent-feedback: + vibespace-feedback's paragraph (gate always): 6 → 7
+  ok(/— 6 CLIs on your PATH/.test(none) && /— 7 CLIs on your PATH/.test(read) && /— 7 CLIs on your PATH/.test(req), 'the header\'s CLI count includes vibespace-channels only with reach (6 → 7)');
   const P = TG.CHANNELS_SECTION_LINES;
   ok(read.includes(P.read) && !read.includes(P.request) && req.includes(P.request) && !req.includes(P.read), 'read reach ⇒ the read paragraph, request-only ⇒ the request paragraph (one, never both)');
   ok(['`vibespace-channels list`', '`vibespace-channels search "<words>"`', '`vibespace-channels read <conv>`', '`reply` only PROPOSES', 'BEFORE any other connector or file', '`vibespace-docs channels`'].every((w) => P.read.includes(w)), 'the read paragraph is copy-ready: list, search "<words>", read <conv>, reply = a proposal, look here BEFORE any other connector, the manual', P.read);
@@ -57,8 +58,8 @@ console.log('① PURE: the paragraph, the header count, the reminder segment');
   const r0 = AR.perTurnToolsLine(T4), rOff = AR.perTurnToolsLine({ ...T4, channels: false });
   const rRead = AR.perTurnToolsLine({ ...T4, channels: 'read' }), rReq = AR.perTurnToolsLine({ ...T4, channels: 'request' });
   // lane cli-registry: the docs pointer names every OPEN row's topic in the registry's order (channels after jobs)
-  ok(r0 === rOff && !/channels/.test(r0) && r0.includes('vibespace-docs [status|ask|task|jobs|msg|pages|design|exit|window|browser|apps] —'), 'no reach ⇒ the reminder line is the one without the flag, no `channels` anywhere in it');
-  ok(rRead.includes(S.read) && rRead.includes('vibespace-docs [status|ask|task|jobs|channels|msg|pages|design|exit|window|browser|apps] —') && rReq.includes(S.request) && !rReq.includes(S.read), 'read reach ⇒ the read segment + `channels` in the vibespace-docs list; request-only ⇒ the request segment');
+  ok(r0 === rOff && !/channels/.test(r0) && r0.includes('vibespace-docs [status|ask|task|jobs|msg|feedback|pages|design|exit|window|browser|apps] —'), 'no reach ⇒ the reminder line is the one without the flag, no `channels` anywhere in it');
+  ok(rRead.includes(S.read) && rRead.includes('vibespace-docs [status|ask|task|jobs|channels|msg|feedback|pages|design|exit|window|browser|apps] —') && rReq.includes(S.request) && !rReq.includes(S.read), 'read reach ⇒ the read segment + `channels` in the vibespace-docs list; request-only ⇒ the request segment');
   ok(B(rRead) - B(r0) === B(S.read) + B(' · ') + B('|channels'), `the reminder grows by the segment + its separator + "|channels" only (${B(r0)} → ${B(rRead)} B)`);
   ok(AR.perTurnToolsLine({ ...T4, channels: 'read' }, { multi: true, manager: true }).includes('vibespace-task --group <id> progress') && AR.perTurnToolsLine(T4, { manager: true }).includes('you are a Group MANAGER'), 'the moved line keeps its multi-group and manager clauses');
 }
@@ -180,9 +181,9 @@ console.log('③ the routes: SessionStart + the per-turn reminder, on reach');
 const real = await legsOf();
 {
   const { out } = real;
-  ok(out.read.start.includes('<vibespace-task-context>') && out.read.start.includes(TG.CHANNELS_SECTION_LINES.read) && /— 6 CLIs on your PATH/.test(out.read.start), 'READ REACH: the SessionStart block carries the read paragraph (and counts 5 CLIs)', out.read.start.slice(0, 300));
+  ok(out.read.start.includes('<vibespace-task-context>') && out.read.start.includes(TG.CHANNELS_SECTION_LINES.read) && /— 7 CLIs on your PATH/.test(out.read.start), 'READ REACH: the SessionStart block carries the read paragraph (and counts 7 CLIs)', out.read.start.slice(0, 300));
   ok(out.read.p1.includes('<vibespace-reminder>') && out.read.p1.includes(AR.CHANNELS_REMINDER_SEG.read) && out.read.p1.includes('|channels|msg|'), 'READ REACH: the first quiet prompt\'s reminder carries `vibespace-channels list|search|read` and `channels` in the manual list', out.read.p1);
-  ok(!taught(out.none.start) && !taught(out.none.p1) && /— 5 CLIs on your PATH/.test(out.none.start), 'NO REACH (nothing granted, no directory): neither block names vibespace-channels', [out.none.start.slice(0, 200), out.none.p1]);
+  ok(!taught(out.none.start) && !taught(out.none.p1) && /— 6 CLIs on your PATH/.test(out.none.start) /* lane agent-feedback: + vibespace-feedback */, 'NO REACH (nothing granted, no directory): neither block names vibespace-channels', [out.none.start.slice(0, 200), out.none.p1]);
   ok(out.off.start === '' && out.off.p1 === '', 'INTEGRATION OFF: nothing is injected at all (neither block)');
   ok(out.request.start.includes(TG.CHANNELS_SECTION_LINES.request) && out.request.p1.includes(AR.CHANNELS_REMINDER_SEG.request) && !out.request.p1.includes(AR.CHANNELS_REMINDER_SEG.read), 'REQUESTABLE ONLY (the directory\'s titles): the request words in both blocks', out.request.p1);
   ok(!taught(out.peer.start) && !taught(out.peer.p1), 'a peer session it may message (the built-in Agents adapter) does not teach vibespace-channels');

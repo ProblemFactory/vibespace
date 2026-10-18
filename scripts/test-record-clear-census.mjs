@@ -409,6 +409,9 @@ const ROUTES = {
   'POST /api/agent/design/ask': 'meta',
   'POST /api/agent/design/preview': 'meta',
   'GET /api/agent/design/preview': 'meta',
+  // lane agent-feedback: agentCaller = jobByToken (a jbt_ caller's identity, as the design routes do); the answer = the
+  // caller's OWN report / reports from data/feedback.json (src/server/feedback-store.js) — no record of the five kinds
+  'POST /api/agent/feedback': 'meta', 'GET /api/agent/feedback/mine': 'meta',
   'GET /api/agent/design/systems': 'meta', 'GET /api/agent/design/system': 'meta', // lane design-systems-home: the design systems' names (belted) + ONE system's tokens.css — registry rows and a folder's file, no record
   // ── the 2.369.202 integration: lane jobs-browser's job principal — agentFacts → jobAgentFacts / refuseAgentBearer ask the
   //    jobs store jobByToken (a jbt_ caller's identity, as the other agent routes do), never a record's text ──
@@ -1919,6 +1922,8 @@ const I_RECV = {
   'src/server/apps-engine.js|p.by': ['session', 'a proposal\'s proposer — the session\'s name on the journal line'],
   'src/server/apps-engine.js|by': ['session', 'the proposer\'s session name on the For-you item it files'],
   'src/design-model.js|ref': ['design file', 'an image name an artboard references (a file of the design folder) in a verdict sentence — lane design-core, no record of the five kinds'],
+  'src/routes/feedback.js|b': ['feedback', 'the agent\'s OWN report (text / about / kind) handed to the feedback store, validated there — lane agent-feedback, no record of the five kinds'],
+  'src/routes/feedback.js|c': ['caller', 'the caller\'s facts the token resolved (session id + name, Task Group, harness, instance) handed to the feedback store — lane agent-feedback'],
   'src/routes/design.js|b': ['design comment', 'the USER\'s own comment text handed to the engine (it becomes the user\'s message) — lane design-core, no record of the five kinds'],
   // ── lane device-upgrade-stuck ──
   'src/server/device-upgrade-watch.js|w': ['host', 'the stuck-upgrade item\'s words — a machine name and two agent versions (itemOf), the machine\'s own record'],

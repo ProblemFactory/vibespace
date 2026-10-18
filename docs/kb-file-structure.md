@@ -7,6 +7,13 @@ Moved VERBATIM out of CLAUDE.md (tier-2 pass). Each `### path` section is that f
 **Long entries are truncated here; the ⇒ marker means the full essay (invariants, incidents) is in kb-file-structure.md under that filename. READ IT before editing the file.**
 
 ```
+src/feedback-model.js — PURE the agent feedback record (lane agent-feedback): validate (refusals by name), makeRecord (the route's caller facts), fold = the 24 h dedup across sessions + the 500-record ring by recency (dropped ids), setStatus, publicRow, paceVerdict
+src/server/feedback-store.js — ORCH data/feedback.json (tmp + rename, written before the answer) + the SERVER-OWNED `feedback` SyncStore mirror (clientWrites false, no file, version persisted); report / setStatus / list / mine / flush; 1 report per 10 s per session
+src/routes/feedback.js — POST /api/agent/feedback + GET /api/agent/feedback/mine (vsst_ / jbt_: the caller is the token's, never the body's), GET /api/feedback + PATCH /api/feedback/:id (the owner's cookie; an agent bearer 403) — wired in mounts-plugins-wiring
+src/lib/feedback-sheet.js — ⚙ System ▸ Agent feedback… (the open count) + its sheet: keyed rows newest first, Open / Handled / All, Mark handled (the answer applied at once), every agent string textContent; loads the `feedback` StateSync store on the first ⚙ open
+data/bin/vibespace-feedback — the agent CLI (tracked): a report (ONE text — agent-cli-text), --about / --kind, `list`; usage + its own reports with no argument; manual docs/agent/feedback-manual.md
+src/sync-store.js — `clientWrites: false` = a server-owned mirror (ws-handler refuses a client's state-set into it); filePath null = no file (its owner persists) — lane agent-feedback
+scripts/test-feedback-model.mjs / test-feedback-routes.mjs (fast) + test-feedback-ui.mjs (heavy chrome: two clients, an XSS plant, a real session's CLI report landing live) — lane agent-feedback
 src/agent-cli-registry.js — PURE THE agent CLI registry (lane cli-registry): ONE row per CLI on PATH (name, topic, summary ≤ 140 B, manual, gate, teach) → renderSessionStartTools / renderReminderLine / renderIndex / AGENT_DOC_TOPICS + CAPS; a new CLI = a row (test-cli-registry)
 scripts/test-cli-registry.mjs — lane cli-registry gate (fast, 0.3 s): every data/bin name a row or an EXCLUDED reason, the rows, the byte caps + mutants, 18 teaching shapes pinned (fixtures/cli-registry-renders.json), index-manual's block; --write-index rewrites it
 docs/agent/index-manual.md — what `vibespace-docs` prints with no argument: the generated table (renderIndex, between the cli-registry:index marks — never edit it by hand) + Which tool when + Shared rules
