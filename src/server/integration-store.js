@@ -527,6 +527,8 @@ function create(deps = {}) {
       fields: R.fieldDecls(row),
       setup: row.setup ? { callbackUrl: row.setup.callbackUrl || null, callbackNote: row.setup.callbackNote || null, prerequisites: (row.setup.prerequisites || []).slice(), title: row.setup.title || null, ordered: row.setup.ordered === true } : null,
       choiceWords: row.choiceWords ? { cluster: row.choiceWords.cluster, own: row.choiceWords.own } : null,
+      // lane dropline-connect-door: the OAuth tier's card block (declared routes + word keys; the card reads `status` itself)
+      connect: row.connect ? { ...row.connect, words: { ...row.connect.words }, whys: { ...row.connect.whys } } : null,
       source: res.source, why: res.why, whyCode: res.whyCode || null, whyParams: res.whyParams || null, clusterKey: res.clusterKey, savedClusterKey: res.savedClusterKey, clusterLabel: res.clusterLabel,
       clusterAvailable: !!cluster.def, clusterWhy: cluster.def ? null : cluster.why, clusterWhyCode: cluster.def ? null : (cluster.whyCode || null), clusterWhyParams: cluster.def ? null : (cluster.whyParams || null),
       clusterOptions: cluster.options,           // key + label ONLY

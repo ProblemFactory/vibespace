@@ -73,7 +73,9 @@ const droplineTokens = droplineOAuthMod.tokenFile(path.join(rootDir, 'data', 'dr
 let droplineTeach = null;
 var dropline = require('./dropline-client.js').create({ integrations: () => integrations, pluginOn: () => !!voicePlugin.peek().enabled, tokens: droplineTokens, teachCap: (k) => !!droplineTeach && droplineTeach.capOk(k) });
 try { integrations?.registerTest('dropline', dropline.testRunner); } catch (e) { console.warn('[voice] the dropline Test runner was not registered:', e.message); }
-const droplineOAuth = droplineOAuthMod.create({ client: dropline, flows: require('../oauth-loopback.js').createOAuthLoopback({}), integrations: () => integrations, instanceUrl: () => { try { return instanceUrl?.url?.() || ''; } catch { return ''; } }, tokens: droplineTokens });
+const droplineOAuth = droplineOAuthMod.create({ client: dropline, flows: require('../oauth-loopback.js').createOAuthLoopback({}), integrations: () => integrations, instanceUrl: () => { try { return instanceUrl?.url?.() || ''; } catch { return ''; } }, tokens: droplineTokens,
+  // lane dropline-connect-door: WHO can give this instance an https address — the status answer's connectWhy
+  instanceSource: () => instanceUrl?.effective?.().source || null, clusterDeploy: () => !!process.env.VIBESPACE_INSTANCE_NAME || !!require('./cluster-presets.js').sharedPresets().dir });
 require('./oauth-doors.js').register('dropline', { landing: droplineOAuth.landing, page: droplineOAuth.page });
 droplineTeach = require('./voice-teach-engine.js').create({ client: dropline, plugin: { peek: () => voicePlugin.peek(), update: (fn) => voicePlugin.update(fn), settings: () => voicePlugin.settings(), writeSettings: (p) => voicePlugin.writeSettings(p) }, userTodos });
 app.use(require('../routes/voice.js').create({ client: dropline, prefs: () => ({ ...voicePlugin.peek(), config: voicePlugin.settings() }), oauth: droplineOAuth, teach: droplineTeach }));

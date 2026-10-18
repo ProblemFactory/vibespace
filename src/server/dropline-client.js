@@ -159,12 +159,13 @@ function create({ integrations = null, pluginOn = () => true, base = DROPLINE_BA
     }
   }
 
-  /** the registry row's Test (credential-exchange): ONE GET /v1/me with the key being tested. */
+  /** the registry row's Test (credential-exchange): ONE GET /v1/me with the key being tested — with no key saved, with the
+   *  OAuth sign-in (lane dropline-connect-door: the card's Test on a signed-in row with an empty key was a red "no key"). */
   async function testRunner({ resolved, signal } = {}) {
     const key = resolved && resolved.values && resolved.values.apiKey;
-    if (!key) return { ok: false, detail: 'no key' };
+    if (!key && !livePair()) return { ok: false, error: 'no Dropline key and no Fish Audio sign-in — sign in above, or paste a key' };
     // the card says "Connected: <name> · <team>"
-    try { const m = await me(key, { signal }); return { ok: true, detail: `${m.name}${m.team ? ' · ' + m.team : ''}` }; } catch (e) { return { ok: false, error: e.message, code: e.code }; }
+    try { const m = await me(key || null, { signal }); return { ok: true, detail: `${m.name}${m.team ? ' · ' + m.team : ''}${key ? '' : ' (Fish Audio sign-in)'}` }; } catch (e) { return { ok: false, error: e.message, code: e.code }; }
   }
 
   // ── the OAuth tier (design D4): one client per deployment; the browser only ever sees the authorize URL ──

@@ -171,6 +171,22 @@ console.log('⑤ the registry Test = GET /v1/me');
   script = [{ status: 401 }];
   const t2 = await H.client.testRunner({ resolved: { values: { apiKey: 'dl_revoked_000000' } } });
   ok('Test of a revoked key ⇒ not ok, says reconnect', t2.ok === false && t2.code === 'reconnect', t2);
+  // lane dropline-connect-door (a fleet user's card: Test pressed on an empty key, a red "no key" while the sign-in existed):
+  // with NO key saved the Test sends the OAuth sign-in's token; a key present still outranks; neither ⇒ a named refusal, no call
+  const pair = { access: 'at_signed_in_0001', accessExp: clock + 3600e3, refresh: null, state: 'connected' };
+  const noKey = { resolveIntegration: () => ({ source: 'none', values: {}, why: 'nothing configured' }) };
+  const mk = (p, st) => require(path.join(REPO, 'src/server/dropline-client.js')).create({ integrations: () => st, tokens: { read: () => p, write() { }, clear() { } }, base: BASE, now: () => clock, log: capture });
+  const kept = seen.slice();   // ⑥ reads the dictations' calls (the key went as the Bearer) — given back after these legs
+  seen.length = 0; script = [];
+  const t3 = await mk(pair, noKey).testRunner({ resolved: { values: {} } });
+  ok('Test with no key and a live sign-in ⇒ ONE GET /v1/me with the sign-in\'s token ⇒ "<name> · <team> (Fish Audio sign-in)"', t3.ok === true && t3.detail === 'Anika Reyes · Personal (Fish Audio sign-in)' && seen.length === 1 && seen[0].url === '/v1/me' && seen[0].auth === 'Bearer at_signed_in_0001', { t3, seen });
+  seen.length = 0;
+  const t4 = await mk(pair, store).testRunner({ resolved: { values: { apiKey: KEY } } });
+  ok('a key saved beside the sign-in still outranks it: the Test sends the key', t4.ok === true && t4.detail === 'Anika Reyes · Personal' && seen.length === 1 && seen[0].auth === `Bearer ${KEY}`, { t4, seen });
+  seen.length = 0;
+  const t5 = await mk(null, noKey).testRunner({ resolved: { values: {} } });
+  ok('no key and no sign-in ⇒ a named refusal (sign in above, or paste a key); Dropline never called', t5.ok === false && /no Dropline key and no Fish Audio sign-in/.test(t5.error) && seen.length === 0, { t5, seen });
+  seen.length = 0; seen.push(...kept);
 }
 console.log('⑥ AUDIO + KEY NEVER IN A LOG, AUDIO NEVER ON DISK (and their RED controls — voice-verify F3)');
 {

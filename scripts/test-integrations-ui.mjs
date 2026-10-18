@@ -304,6 +304,17 @@ ok(await p1.load(), 'page 1 loaded the app at 375×667');
   ok(sameSet(cards, WINDOW_ROWS), `the window draws exactly the census's cards — no Lark / Gmail / fake card (${cards.join(', ')})`);
   ok(!sameSet([...cards, 'lark'], WINDOW_ROWS) && !sameSet([...cards, 'remoteapp'], WINDOW_ROWS) && !sameSet(cards.slice(0, -1), WINDOW_ROWS), 'CONTROL: the card check is not vacuous — a leaked account-bound card (lark), a leaked per-machine card (remoteapp) and one registry row missing each fail it');
   ok(await p1.evaljs(`!document.querySelector('.integ-card[data-integ="lark"], .integ-card[data-integ="gmail"], .integ-card[data-integ="fake"]')`), 'no retired OAuth-client card anywhere on the page');
+  // lane dropline-connect-door: the cards drawing a CONNECT BLOCK (a row's OAuth tier) = exactly the rows declaring `connect`
+  // (by shape, never by id); on this plain-http server the block is never dead — it says the sentence the hub picked
+  const CONNECT_ROWS = WINDOW_ROWS.filter((id) => R.rowById(id).connect);
+  const blocks = await p1.evaljs(`(async () => { for (let i = 0; i < 60 && document.querySelectorAll('.integ-card .integ-connect .oauth-connect-btn').length < ${CONNECT_ROWS.length}; i++) await new Promise((r) => setTimeout(r, 100)); return [...document.querySelectorAll('.integ-card')].filter((c) => c.querySelector('.integ-connect .oauth-connect-btn')).map((c) => c.dataset.integ).sort(); })()`);
+  ok(CONNECT_ROWS.length > 0 && sameSet(blocks, CONNECT_ROWS), `the window draws a Connect block on exactly the rows declaring connect (${blocks.join(', ')} vs ${CONNECT_ROWS.join(', ')})`);
+  ok(!sameSet(blocks.slice(1), CONNECT_ROWS) && !sameSet([...blocks, BB], CONNECT_ROWS), 'CONTROL: the block census is not vacuous — a lost block and a block on a key-only row each fail it');
+  for (const id of CONNECT_ROWS) {
+    const st = (await api('GET', R.rowById(id).connect.status)).json || {};
+    const why = await p1.evaljs(`(document.querySelector('.integ-card[data-integ="${id}"] .oauth-connect-words') || {}).textContent || ''`);
+    ok(st.connectVia === null && !!st.connectWhy && why === R.rowById(id).connect.whys[st.connectWhy], `${id}: no https here (connectVia null) ⇒ the block says the hub's sentence for connectWhy=${st.connectWhy} (${why})`);
+  }
 }
 
 // ── ① none (fresh instance) ──

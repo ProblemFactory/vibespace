@@ -116,8 +116,11 @@ export function installPluginsUI(App) {
         } else if (isDictation) {
           let waiting = 0;
           if (p.configured) { const v = await fetchJson('/api/voice/teach'); waiting = (v && Array.isArray(v.proposals)) ? v.proposals.length : 0; }
-          chip = !p.configured ? t('no Dropline key yet') : waiting ? t('{n} waiting', { n: waiting }) : p.enabled ? t('on') : t('turned off');
-          tone = waiting ? 'warn' : p.running ? 'ok' : '';
+          // lane dropline-connect-door (a fleet user's report 2026-10-18): with no key and no sign-in the chip is THE DOOR — the
+          // verb, like Tailscale's 「Log in…」, never a status sentence nobody guesses opens a sign-in; the sheet it opens is the same
+          chip = !p.configured ? t('Connect with Fish Audio') : waiting ? t('{n} waiting', { n: waiting }) : p.enabled ? t('on') : t('turned off');
+          tone = !p.configured ? 'primary' : waiting ? 'warn' : p.running ? 'ok' : '';
+          if (!p.configured) chipTitle = t('or paste a Dropline key in Services › Integrations');
           onChip = () => this._voiceSheet(p, render);
           swDisabled = !p.configured;
           onSwitch = (on) => act(() => api('enabled', { body: JSON.stringify({ enabled: on }) }));
@@ -271,10 +274,12 @@ export function installPluginsUI(App) {
     const category = pluginCategoryOf(id);
     if (category) this._settingsUI?.open({ category });
   },
-  /** the Voice row's chip: Connect with Fish Audio + the proposal cards (an action surface, not settings) */
+  /** the Voice row's chip: Connect with Fish Audio + the proposal cards (an action surface, not settings); `pasteKey` (lane
+   *  dropline-connect-door) = the other door — the integration card the plugin row NAMES (`p.integration`), focused */
   _voiceSheet(p, rerender) {
     const { body, close } = createModalShell({ id: 'voice-sheet', title: p.label, bodyClass: 'mounts-dialog-body', escapeToClose: true });
-    renderVoiceSheet(body, () => { close(); rerender(); this._voiceSheet(p, rerender); });
+    const pasteKey = p.integration ? () => { close(); this.openIntegration?.(p.integration); } : null;
+    renderVoiceSheet(body, () => { close(); rerender(); this._voiceSheet(p, rerender); }, { pasteKey });
   },
   /** the Tailscale row's 「Log in…」 chip: the guided sign-in (the server captures the auth URL; we poll until Running) */
   async _tailscaleLogin(p, api, rerender) {

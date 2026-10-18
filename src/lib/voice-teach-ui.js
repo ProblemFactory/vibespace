@@ -5,57 +5,26 @@
 // PREVIEW dialog the microphone opens after the first dictation of a conversation (发送 / 不发).
 import { fetchJson, showToast } from './utils.js';
 import { t } from './i18n.js';
+import { renderConnectRow } from './oauth-connect-row.js'; // lane dropline-connect-door: one Connect block, two doors
+import { rowById } from '../integration-registry.js';
 
 const MEMORY_URL = 'https://dropline.fish.audio/app';
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 const voiceApi = (url, body) => fetchJson(url, body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
   .then((x) => { if (!x) throw new Error(t('Server unreachable — nothing was changed')); if (x.error) throw Object.assign(new Error(x.message || x.error), { code: x.error }); return x; });
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const DROPLINE_CONNECT = rowById('dropline').connect; // the row's declared OAuth tier (label, routes, words, connectWhy sentences)
 
-/** the account row: who is connected by OAuth, or the Connect button (never dead: without https it says why) */
-export function renderAccountRow(box, st, rerender) {
-  const a = (st && st.account) || {};
-  const row = el('div', 'plugin-cfg-row voice-account');
-  const words = el('div', 'plugin-detail voice-account-words');
-  if (a.tier === 'oauth' && a.state === 'connected') {
-    words.classList.add('voice-ok');
-    words.textContent = t('Connected: {account}', { account: `${a.name || ''}${a.team ? ' · ' + a.team : ''}` });
-    const off = el('button', 'mounts-btn voice-disconnect', t('Disconnect'));
-    off.onclick = async () => {
-      off.disabled = true;
-      try { await voiceApi('/api/voice/oauth/disconnect', {}); showToast(t('Disconnected here — Fish Audio keeps the permission until you remove it at fish.audio')); rerender(); } catch (e) { showToast(e.message, { type: 'error' }); off.disabled = false; }
-    };
-    row.append(words, off);
-    box.appendChild(row);
-    return;
-  }
-  if (a.tier === 'key') return; // the person's own key outranks the OAuth tier — the key row says it
-  const go = el('button', 'mounts-btn mounts-btn-primary voice-connect', t('Connect with Fish Audio'));
-  if (a.state === 'reconnect') { words.classList.add('plugin-cfg-warn'); words.textContent = t('Your Dropline sign-in has expired — connect again'); }
-  const needs = t('Connecting needs an https address: turn on Tailscale HTTPS, or paste a Dropline key');
-  if (!st.connectVia) { words.classList.add('plugin-cfg-warn'); words.textContent = needs; }
-  go.onclick = async () => {
-    const tab = window.open('about:blank', '_blank');  // opened in the press itself (a later open is a blocked pop-up)
-    go.disabled = true;
-    try {
-      const r = await voiceApi('/api/voice/oauth/start', { origin: location.origin });
-      if (tab) tab.location.href = r.url; else window.open(r.url, '_blank');
-      words.className = 'plugin-detail voice-account-words'; words.textContent = t('Finish the sign-in in the new tab (Fish Audio mails you a code)…');
-      for (let i = 0; i < 400; i++) {
-        await sleep(1500);
-        const f = await voiceApi(`/api/voice/oauth/flow/${encodeURIComponent(r.flowId)}`);
-        if (f.done) { if (!f.ok) throw new Error(f.error || t('Failed')); showToast(t('Dropline connected')); break; }
-      }
-      rerender();
-    } catch (e) {
-      try { if (tab) tab.close(); } catch { }
-      words.className = 'plugin-detail plugin-cfg-warn voice-account-words';
-      words.textContent = e.code === 'needs-https' ? needs : e.message;
-      go.disabled = false;
-    }
-  };
-  row.append(go);
-  box.append(row, words);
+/** the account row (lane dropline-connect-door: THE Connect block of the `dropline` row — the same block the Integrations
+ *  card draws, src/lib/oauth-connect-row.js) + while nobody is signed in, the ONE line to the other door: the key, pasted
+ *  on the row's Integrations card (`pasteKey` = the caller's way to open it focused; the sheet gets it from plugins-ui) */
+export function renderAccountRow(box, st, rerender, { pasteKey = null } = {}) {
+  if (renderConnectRow(box, DROPLINE_CONNECT, st, rerender) !== 'connect' || typeof pasteKey !== 'function') return;
+  const line = el('div', 'plugin-detail oauth-connect-key-line');
+  const a = el('a', 'oauth-connect-key', t('Have a key instead? Paste it in Services › Integrations › Dropline'));
+  a.href = '#';
+  a.onclick = (ev) => { ev.preventDefault(); pasteKey(); };
+  line.appendChild(a);
+  box.appendChild(line);
 }
 
 const fmtTime = (at) => { const d = new Date(at); return `${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`; };

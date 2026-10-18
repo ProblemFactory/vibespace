@@ -1068,11 +1068,40 @@ for (const r of copiesCensus(MUTI.files, MUTI.dir, REPO, { minCopies: 3 })) ok(r
 {
   const dl = R.rowById('dropline');
   const shape = dl.fields.map((f) => `${f.key}:${f.secret ? 's' : 'p'}${f.required ? 'R' : 'o'}`).join();
-  ok(shape === 'apiKey:sR,clientId:po,relayUrl:po' && !R.checkRow(dl).length, `dropline fields = the key (secret, required) + clientId + relayUrl (public, optional); no token field (${shape})`);
+  // lane dropline-connect-door: the key is OPTIONAL now — the sign-in (the row's `connect`) serves the row as well
+  ok(shape === 'apiKey:so,clientId:po,relayUrl:po' && !R.checkRow(dl).length, `dropline fields = the key (secret, optional: the sign-in serves too) + clientId + relayUrl (public, optional); no token field (${shape})`);
   ok(dl.fields.map((f) => storeMod.envFieldName('dropline', f.key)).join() === 'VIBESPACE_INTEGRATION_DROPLINE_APIKEY,VIBESPACE_INTEGRATION_DROPLINE_CLIENTID,VIBESPACE_INTEGRATION_DROPLINE_RELAYURL' && dl.clusterEnv.prefix === 'VIBESPACE_INTEGRATION_DROPLINE_', 'dropline cluster env names: _APIKEY, _CLIENTID, _RELAYURL under the declared prefix');
   const v = R.validateValues(dl, { clientId: 'cid_abc12345', relayUrl: 'https://admin.example.test/relay/' });
   const b = R.validateValues(dl, { relayUrl: 'http://x.lan/relay', clientId: 'a b' });
   ok(v.ok && !b.ok && b.errors.relayUrl && b.errors.clientId, 'clientId / relayUrl validate (an http relay page or a spaced id is refused by name)', JSON.stringify(b.errors));
+}
+
+// lane dropline-connect-door (a fleet user's report 2026-10-18: "plugin页面没地方进行登录，integrations里也只能setup key"):
+// a row's OAuth tier is a DECLARED card block (`connect`) — the window draws it by shape. The grammar, the census of the rows
+// declaring it (each names four owner routes a route file really serves), the view's copy, and RED controls.
+{
+  const dl = R.rowById('dropline');
+  const withConnect = R.ROWS.filter((r) => r.connect !== undefined).map((r) => r.id);
+  ok(withConnect.join() === 'dropline' && withConnect.every((id) => !R.bindsPerAccount(id) && !R.bindsPerMachine(id) && !R.checkRow(R.rowById(id)).length), `the rows declaring connect (${withConnect.join(', ')}) are card rows that pass the grammar`);
+  ok(dl.connect.label === 'Connect with Fish Audio' && Object.keys(dl.connect.words).sort().join() === [...R.CONNECT_WORDS].sort().join() && Object.keys(dl.connect.whys).sort().join() === [...R.CONNECT_WHYS].sort().join(), 'dropline connect: the button label + exactly the closed word set + one sentence per connectWhy code');
+  // each declared route is SERVED: the route file's router.<verb>('<path>' (flow = the declared prefix + :id)
+  const servedBy = (src, verb, p) => new RegExp(`router\\.${verb}\\('${p.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}(:id)?'`).test(src);
+  const voiceSrc = readRepo('src/routes/voice.js');
+  const routes = [['get', dl.connect.status], ['post', dl.connect.start], ['get', dl.connect.flow], ['post', dl.connect.disconnect]];
+  ok(routes.every(([verb, p]) => servedBy(voiceSrc, verb, p)), `the four declared routes are served by src/routes/voice.js (${routes.map((x) => x.join(' ')).join(' · ')})`);
+  ok(!servedBy(voiceSrc, 'post', '/api/voice/oauth/begin'), 'CONTROL: a route the file does not serve is not found by the same check');
+  // the view carries a COPY (a caller mutating it never reaches the registry); a row without it says null
+  const view = store.publicView('dropline');
+  view.connect.whys.operator = 'x';
+  ok(JSON.stringify(Object.keys(view.connect)) === JSON.stringify(Object.keys(dl.connect)) && dl.connect.whys.operator !== 'x' && store.publicView('cloak').connect === null, 'publicView carries the connect block as a copy; a row without one says null');
+  // RED controls — each plant is refused BY NAME
+  const plant = (patch) => R.checkRow({ ...dl, ...patch(dl) });
+  const has = (errs, re) => errs.some((e) => re.test(e));
+  ok(has(plant((r) => ({ fields: r.fields.map((f) => (f.key === 'apiKey' ? { ...f, required: true } : f)) })), /requires no field/), 'CONTROL: a connect row with a REQUIRED key is refused (the sign-in alone must serve it)');
+  ok(has(plant(() => ({ bindsPerAccount: true, clientHint: 'h' })), /card row/), 'CONTROL: connect on an account-bound row is refused');
+  ok(has(plant((r) => ({ connect: { ...r.connect, start: 'https://fish.audio/oauth' } })), /^connect = /), 'CONTROL: a non-/api route is refused');
+  ok(has(plant((r) => ({ connect: { ...r.connect, whys: { 'self-hosted': r.connect.whys['self-hosted'] } } })), /^connect = /), 'CONTROL: a missing connectWhy sentence is refused');
+  ok(has(plant((r) => ({ connect: { ...r.connect, words: { ...r.connect.words, extra: 'x' } } })), /^connect = /), 'CONTROL: a word outside the closed set is refused');
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

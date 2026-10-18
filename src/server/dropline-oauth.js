@@ -12,6 +12,7 @@ const fs = require('fs');
 const path = require('path');
 
 const KIND = 'dropline';
+const CONNECT_WHYS = require('../integration-registry.js').rowById(KIND).connect.whys; // lane dropline-connect-door: a refusal's words (PURE)
 const CALLBACK_PATH = `/api/channels/oauth/cb/${KIND}`;
 const STATE_TTL_MS = 30 * 60e3;
 const STATE_MAX = 1200;
@@ -80,8 +81,19 @@ function landingHtml(r) {
   return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>VibeSpace · Dropline</title><body style="font:16px/1.5 system-ui,sans-serif;margin:3em auto;max-width:34em;padding:0 1em">${w.map((l) => `<p id="${r && r.ok ? 'connected' : 'not-connected'}">${esc(l)}</p>`).join('')}</body>`;
 }
 
-/** the Connect machine: `start({origin})` → {ok, url, flowId, via} | {ok:false, why:'needs-https'}; `landing()` = the door */
-function create({ client, flows, integrations = () => null, instanceUrl = () => '', tokens, now = Date.now, log = console }) {
+/** WHY there is no Connect here (lane dropline-connect-door, a fleet user's report 2026-10-18) — the status answer's
+ *  `connectWhy`, by WHO can give this instance an https address: null = Connect runs; `operator` = the address is the
+ *  operator's (VIBESPACE_PUBLIC_URL set, not https) or a cluster deploy has none (its person cannot run Tailscale on a
+ *  pod) ⇒ ask the person who runs it; `self-hosted` = the person runs the hub ⇒ Tailscale HTTPS. The words: the
+ *  registry row's `connect.whys`. */
+function connectWhyOf({ via = null, source = null, cluster = false } = {}) {
+  if (via) return null;
+  return source === 'env' || cluster ? 'operator' : 'self-hosted';
+}
+
+/** the Connect machine: `start({origin})` → {ok, url, flowId, via} | {ok:false, why:'needs-https', connectWhy}; `landing()` = the door.
+ *  `instanceSource()` = instance-url's effective().source; `clusterDeploy()` = a fleet pod (VIBESPACE_INSTANCE_NAME / presets dir). */
+function create({ client, flows, integrations = () => null, instanceUrl = () => '', instanceSource = () => null, clusterDeploy = () => false, tokens, now = Date.now, log = console }) {
   const key = crypto.randomBytes(32);   // this boot's state key: a state from another boot (or another kind) is refused
   const sign = (clear) => crypto.createHmac('sha256', key).update(clear).digest('base64url');
   const store = () => { try { return integrations() || null; } catch { return null; } };
@@ -105,9 +117,11 @@ function create({ client, flows, integrations = () => null, instanceUrl = () => 
     if (/^https:\/\//.test(c.relayUrl)) return { redirectUri: c.relayUrl, via: 'relay', ...c };
     return { redirectUri: null, via: null, ...c };
   }
+  const safe = (fn, dflt) => { try { return fn(); } catch { return dflt; } };
+  const connectWhy = () => connectWhyOf({ via: callbackPlan().via, source: safe(instanceSource, null), cluster: !!safe(clusterDeploy, false) });
   async function start({ origin = '' } = {}) {
     const plan = callbackPlan();
-    if (!plan.redirectUri) return { ok: false, why: 'needs-https' };
+    if (!plan.redirectUri) { const cw = connectWhy(); return { ok: false, why: 'needs-https', connectWhy: cw, message: CONNECT_WHYS[cw] }; }
     let clientId = plan.clientId;
     const reg = (tokens.read() || {}).registeredFor || null;
     if (!clientId || (!plan.preset && reg && reg !== plan.redirectUri)) {
@@ -133,7 +147,7 @@ function create({ client, flows, integrations = () => null, instanceUrl = () => 
     const r = await flows.finishByState(state, code, { error });
     return { ok: !!r.ok, why: r.ok ? null : (r.why || 'failed'), user: r.ok && r.result ? r.result.user || null : null, error: r.ok ? null : (r.error || null) };
   }
-  return { start, landing, page: landingHtml, callbackPlan, sign, flowStatus: (id) => flows.status(id) };
+  return { start, landing, page: landingHtml, callbackPlan, connectWhy, sign, flowStatus: (id) => flows.status(id) };
 }
 
-module.exports = { create, pkcePair, stateOf, stateVerdict, tokenFile, landingHtml, CALLBACK_PATH, KIND, STATE_TTL_MS };
+module.exports = { create, connectWhyOf, pkcePair, stateOf, stateVerdict, tokenFile, landingHtml, CALLBACK_PATH, KIND, STATE_TTL_MS };

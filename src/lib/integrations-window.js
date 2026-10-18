@@ -11,6 +11,10 @@
 //      monospace text WITH a copy button, the note saying which console page
 //      it goes to, and the prerequisites checklist. Above, because a user who
 //      has filled two inputs and seen a green tick does not scroll back up;
+//   2b. the CONNECT BLOCK of a row declaring `connect` (lane dropline-connect-door):
+//      its OAuth tier — Connect / who is signed in / why it cannot run here —
+//      above the key field, read from the row's own status route; the same
+//      block the plugin's sheet draws (src/lib/oauth-connect-row.js);
 //   3. who serves this row — a pair of radios (cluster default, greyed WITH
 //      THE REASON when there is none / my own key), or for a delegating row a
 //      dropdown of the cluster's presets plus "my own key";
@@ -53,6 +57,7 @@ import * as PL from '../preset-layers.js';
 // a3 i18n: a route failure is worded by its CODE, never by the store's sentence.
 import { routeErrorText } from './channel-words.js';
 import { enterSubmits } from './chat-enter-keys.js';
+import { renderConnectRow } from './oauth-connect-row.js'; // lane dropline-connect-door: a row's declared OAuth tier, drawn by shape
 
 const ICON = svgIcon16('<circle cx="5" cy="11" r="3"/><path d="M7.5 8.5L13 3M11 5l2 2M9 7l1.5 1.5"/>');
 const FOCUS_MS = 2500;
@@ -128,7 +133,8 @@ function renderCard(app, v, { refresh, focus }) {
   card.appendChild(head);
   // the undecryptable row says ONE sentence under its state chip (a1 I3: the
   // `why` said the same fact a second time above a chip that contradicted both)
-  if (v.why && v.source === 'none' && !undecryptable(v)) card.appendChild(el('div', 'plugin-detail plugin-cfg-warn integ-why', whyWords(v)));
+  // (a row with a sign-in tier is not broken without a key: its line is plain, not a warning — lane dropline-connect-door)
+  if (v.why && v.source === 'none' && !undecryptable(v)) card.appendChild(el('div', 'plugin-detail' + (v.connect ? '' : ' plugin-cfg-warn') + ' integ-why', whyWords(v)));
   // A `cluster` answer carries a `why` only when the saved default was re-keyed
   // to the instance's only one — said on the card, not only in the chip's title.
   if (v.why && v.source === 'cluster') card.appendChild(el('div', 'plugin-detail integ-why', whyWords(v)));
@@ -162,6 +168,17 @@ function renderCard(app, v, { refresh, focus }) {
       setup.appendChild(ul);
     }
     card.appendChild(setup);
+  }
+
+  // ── 2b. THE CONNECT BLOCK, ABOVE THE FIELDS: the row's OAuth tier (its own status route says who is signed in, or why
+  //        Connect cannot run here); a sign-in or a Disconnect re-renders this card ──
+  if (v.connect) {
+    const box = el('div', 'integ-connect');
+    card.appendChild(box);
+    fetchJson(v.connect.status).then((st) => {
+      if (!st || st.error) { box.appendChild(el('div', 'plugin-detail plugin-cfg-warn', (st && st.error) || t('Server unreachable — nothing was changed'))); return; }
+      renderConnectRow(box, v.connect, st, () => refresh(v.id));
+    });
   }
 
   // ── 3. who serves this row ──

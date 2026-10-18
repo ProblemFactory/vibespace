@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.299 — 2026-10-18
+
+### Fixed
+- Voice input: the Plugins list and the Dropline card in Integrations now both offer Connect with Fish Audio, not only a key to paste.
+
 ## 2.369.298 — 2026-10-18
 
 ### Fixed

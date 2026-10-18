@@ -11,7 +11,19 @@
  * value). A ROW carries no value, ever.
  *
  * A ROW = { id, label, fields[], clusterEnv | delegate, setup?, test, consumers,
- *           wiredIn?, docs, bindsPerAccount?, clientHint?, signinName?, bindsPerMachine? }
+ *           wiredIn?, docs, bindsPerAccount?, clientHint?, signinName?, bindsPerMachine?, connect? }
+ *
+ *  · `connect` (lane dropline-connect-door, a fleet user's report 2026-10-18:
+ *    the OAuth sign-in existed and no surface showed it) — the row's OAuth
+ *    tier as a CARD BLOCK the Integrations window draws ABOVE the fields, by
+ *    shape (never by id): `label` (the button), the owner routes `status`
+ *    (GET → `{account: {tier, state, name, team}, connectVia, connectWhy}`),
+ *    `start` (POST {origin} → {url, flowId}), `flow` (GET <flow><flowId> →
+ *    {done, ok, error}), `disconnect`; `words` (expired / finish / done /
+ *    disconnected) and `whys` — one sentence per `connectWhy` code the
+ *    status answer names when Connect cannot run (`self-hosted` /
+ *    `operator`); the client never guesses which. Either tier serves the
+ *    row, so a `connect` row requires no field; a card row only.
  *
  *  · `bindsPerMachine` (lane remoteapp-r1b, design q-024 r1 §1.3): ONE
  *    credential per PAIRED MACHINE, kept under `<id>/<hostId>` and set on that
@@ -74,6 +86,9 @@
  */
 
 const TEST_KINDS = Object.freeze(['credential-exchange', 'shape-only', 'reachability']);
+/** lane dropline-connect-door: a `connect` block's words and its `connectWhy` codes — closed sets (checkRow) */
+const CONNECT_WORDS = Object.freeze(['expired', 'finish', 'done', 'disconnected']);
+const CONNECT_WHYS = Object.freeze(['self-hosted', 'operator']);
 /** design 012: how an account of a bindsPerAccount row signs in when it is not the row's OAuth client. */
 const SIGNIN_KINDS = Object.freeze(['paste']);
 
@@ -335,8 +350,9 @@ const ROWS = Object.freeze([
     id: 'dropline',
     label: i18nKey('Dropline (voice input)'),
     fields: [
-      { key: 'apiKey', label: i18nKey('Dropline key'), secret: true, required: true, placeholder: 'dl_…',
-        help: i18nKey('Create one at dropline.fish.audio/app → API keys (it is shown once). It stays on this hub; the browser never sees it.'),
+      // lane dropline-connect-door: optional — the sign-in above serves the row as well (a key, when saved, still outranks it)
+      { key: 'apiKey', label: i18nKey('Dropline key'), secret: true, required: false, placeholder: 'dl_…',
+        help: i18nKey('Either sign in above, or paste a key: create one at dropline.fish.audio/app → API keys (it is shown once). It stays on this hub; the browser never sees it.'),
         validate: (v) => (/^dl_[A-Za-z0-9_-]{8,}$/.test(String(v)) ? { ok: true } : { ok: false, why: i18nKey('A Dropline key starts with dl_') }) },
       // P1 (lane voice-p1-oauth-teach) THE OAUTH TIER (design D4): ONE client per deployment — a cluster preset's
       // client_id + relay page (VIBESPACE_INTEGRATION_DROPLINE_CLIENTID / _RELAYURL), else the hub's own registration
@@ -350,9 +366,27 @@ const ROWS = Object.freeze([
     ],
     clusterEnv: { json: 'VIBESPACE_INTEGRATIONS', prefix: 'VIBESPACE_INTEGRATION_DROPLINE_' },
     setup: null,
+    // lane dropline-connect-door: THE OAUTH TIER AS A CARD BLOCK (src/routes/voice.js serves the four routes)
+    connect: {
+      label: i18nKey('Connect with Fish Audio'),
+      status: '/api/voice/status',
+      start: '/api/voice/oauth/start',
+      flow: '/api/voice/oauth/flow/',
+      disconnect: '/api/voice/oauth/disconnect',
+      words: {
+        expired: i18nKey('Your Dropline sign-in has expired — connect again'),
+        finish: i18nKey('Finish the sign-in in the new tab (Fish Audio mails you a code)…'),
+        done: i18nKey('Dropline connected'),
+        disconnected: i18nKey('Disconnected here — Fish Audio keeps the permission until you remove it at fish.audio'),
+      },
+      whys: {
+        'self-hosted': i18nKey('Connecting needs an https address: turn on Tailscale HTTPS, or paste a Dropline key'),
+        operator: i18nKey('This instance has no https address — ask the person who runs it to set VIBESPACE_PUBLIC_URL (an https address), or paste a Dropline key'),
+      },
+    },
     test: {
       kind: 'credential-exchange',
-      describe: i18nKey('One read-only request to api.dropline.fish.audio (/v1/me) with this key; dictates nothing.'),
+      describe: i18nKey('One read-only request to api.dropline.fish.audio (/v1/me) with this key — or, with no key saved, with the Fish Audio sign-in; dictates nothing.'),
       caveat: i18nKey('Proves Dropline accepts the key and names its account — not that this page may use a microphone.'),
     },
     consumers: ['src/server/dropline-client.js'],
@@ -647,6 +681,15 @@ function checkRow(row) {
     if (!pasteOnly && !(row.fields || []).some((f) => !f.secret)) errs.push('a bindsPerAccount row declares a non-secret field: the custom client\'s id');
   } else if (row.clientHint !== undefined) errs.push('clientHint belongs to a bindsPerAccount row only (a card has no account dialog)');
   if (row.signinName !== undefined && (row.bindsPerAccount !== true || typeof row.signinName !== 'string' || !row.signinName.trim())) errs.push('signinName is a non-empty brand on a bindsPerAccount row only');
+  // lane dropline-connect-door: `connect` = the OAuth tier drawn as a card block — its four owner routes, its closed word
+  // sets; a CARD row only, and since the sign-in OR a key serves the row, no field of it is required
+  if (row.connect !== undefined) {
+    const c = row.connect, str = (x) => typeof x === 'string' && !!x.trim(), api = (x) => typeof x === 'string' && /^\/api\/[a-z0-9/_-]+$/.test(x);
+    const set = (o, keys) => !!o && typeof o === 'object' && keys.every((k) => str(o[k])) && Object.keys(o).every((k) => keys.includes(k));
+    if (!c || typeof c !== 'object' || !str(c.label) || !api(c.status) || !api(c.start) || !api(c.flow) || !api(c.disconnect) || !set(c.words, CONNECT_WORDS) || !set(c.whys, CONNECT_WHYS)) errs.push(`connect = {label, status, start, flow, disconnect (each /api/…), words {${CONNECT_WORDS.join(', ')}}, whys {${CONNECT_WHYS.join(', ')}}}`);
+    if (row.bindsPerAccount === true || perMachine) errs.push('connect belongs to a card row (never account-bound, never per machine)');
+    if ((row.fields || []).some((f) => f.required)) errs.push('a row with connect requires no field: the sign-in or a key serves it');
+  }
   if (!row.id || !/^[a-z][a-z0-9:-]*$/.test(row.id)) errs.push('id must be lowercase [a-z0-9:-]');
   if (!row.label) errs.push('label required');
   if (!Array.isArray(row.fields) || (!row.fields.length && !paste)) errs.push('fields required');
@@ -667,7 +710,7 @@ function checkRow(row) {
 }
 
 module.exports = {
-  ROWS, TEST_KINDS, SIGNIN_KINDS, TEST_BUTTON_LABEL, MASK, MASK_TAIL_MIN,
+  ROWS, TEST_KINDS, SIGNIN_KINDS, TEST_BUTTON_LABEL, MASK, MASK_TAIL_MIN, CONNECT_WORDS, CONNECT_WHYS,
   rowById, rowIds, maskValue, validateValues, missingFields, resolvePrecedence, pickPreset,
   fieldDecls, checkRow, TRIM_NOTE, credentialWhyText, clientFieldsOf, bindsPerAccount, bindsPerMachine, oauthClientVendorOf,
   GROUPS, GROUP_WORDS, groupOf,

@@ -8,7 +8,7 @@ const VM = require('../voice-model.js');
 module.exports = {
   id: 'voice-input',
   label: 'Voice input · Dropline',
-  description: 'Dictate into the chat box with your own Dropline: click the microphone, speak, click again — the text lands at your cursor, written with your Dropline dictionary. Paste a Dropline key (dropline.fish.audio/app → API keys) to turn it on.',
+  description: 'Dictate into the chat box with your own Dropline: click the microphone, speak, click again — the text lands at your cursor, written with your Dropline dictionary. Connect your Fish Audio account (or paste a Dropline key) to turn it on.',
   provides: ['dictation'],
   create(h) {
     const keyed = () => {

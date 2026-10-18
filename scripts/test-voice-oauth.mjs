@@ -86,13 +86,13 @@ const FAKE = `http://127.0.0.1:${srv.address().port}`;
 
 // ── the hub under test: real client + real Connect machine + the real landing route ──
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-voice-oauth-'));
-function hub({ instance = 'https://hub.example.ts.net', rowValues = {}, presets = [], tokens = null, fileName = 'dropline-oauth.json', clientPath = null, sink = null } = {}) {
+function hub({ instance = 'https://hub.example.ts.net', rowValues = {}, presets = [], tokens = null, fileName = 'dropline-oauth.json', clientPath = null, sink = null, source = null, cluster = false, pluginOn = () => true } = {}) {
   const writes = [];
   const row = { ...rowValues };
   const store = { resolveIntegration: () => ({ values: { ...row }, source: Object.keys(row).length ? 'user' : 'none' }), presetsFor: () => presets, setIntegration: (id, v) => { writes.push([id, v]); Object.assign(row, v); } };
   const tk = tokens || DO.tokenFile(path.join(dir, fileName));
-  const client = (clientPath ? require(clientPath) : DC).create({ integrations: () => store, tokens: tk, base: FAKE, oauthBase: FAKE, authorizeUrl: `${FAKE}/oauth/authorize`, log: sink || { log() { }, warn() { } } });
-  const oauth = DO.create({ client, flows: OL.createOAuthLoopback({ log: sink || { warn() { }, log() { } } }), integrations: () => store, instanceUrl: () => instance, tokens: tk, log: sink || { log() { }, warn() { } } });
+  const client = (clientPath ? require(clientPath) : DC).create({ integrations: () => store, pluginOn, tokens: tk, base: FAKE, oauthBase: FAKE, authorizeUrl: `${FAKE}/oauth/authorize`, log: sink || { log() { }, warn() { } } });
+  const oauth = DO.create({ client, flows: OL.createOAuthLoopback({ log: sink || { warn() { }, log() { } } }), integrations: () => store, instanceUrl: () => instance, instanceSource: () => source, clusterDeploy: () => cluster, tokens: tk, log: sink || { log() { }, warn() { } } });
   doors.register('dropline', { landing: oauth.landing, page: oauth.page });   // what the wiring does (the newest hub's door)
   return { client, oauth, writes, row, tk };
 }
@@ -221,6 +221,38 @@ try {
     const st = new URL(r.url).searchParams.get('state');
     const clear = JSON.parse(Buffer.from(st.split('.')[1], 'base64url').toString());
     ok('the preset\'s clientId + relay page: no registration; the state carries u = the hub origin and k = dropline for the relay', r.ok && r.via === 'relay' && new URL(r.url).searchParams.get('client_id') === 'cid_cluster_000001' && new URL(r.url).searchParams.get('redirect_uri') === 'https://admin.example.test/relay/' && log.filter((x) => x.p === '/oauth/register').length === nReg && clear.u === 'http://10.0.0.5:3456' && clear.k === 'dropline', { r, clear });
+  }
+  // lane dropline-connect-door (a fleet user's report 2026-10-18): the refusal names the REAL door — WHO can give this instance
+  // an https address — through the status answer (connectWhy), and Connect never waits for the plugin's switch
+  console.log('⑤ connectWhy (who can give this instance https) + Connect with the plugin OFF');
+  {
+    const WHYS = require(path.join(REPO, 'src/integration-registry.js')).rowById('dropline').connect.whys;
+    const P = DO.connectWhyOf;
+    ok('connectWhyOf: a way to sign in ⇒ null; a self-hosted hub (no address, its own setting, its relay) ⇒ self-hosted; an operator-declared http address ⇒ operator; a cluster deploy without one ⇒ operator',
+      P({ via: 'own-https', source: 'env', cluster: true }) === null && P({ via: 'relay' }) === null && P({}) === 'self-hosted' && P({ source: 'setting' }) === 'self-hosted' && P({ source: 'frp' }) === 'self-hosted' && P({ source: 'env' }) === 'operator' && P({ source: null, cluster: true }) === 'operator' && P({ source: 'setting', cluster: true }) === 'operator');
+    const routes = require(path.join(REPO, 'src/routes/voice.js'));
+    const SHAPES = [
+      ['an https address of its own', { instance: 'https://hub.example.ts.net', source: 'env' }, 'own-https', null],
+      ['a self-hosted hub with no https address', { instance: '', source: null }, null, 'self-hosted'],
+      ['an operator-declared http address (VIBESPACE_PUBLIC_URL)', { instance: 'http://box.corp.example:3456', source: 'env' }, null, 'operator'],
+      ['a cluster deploy with no address', { instance: '', source: null, cluster: true }, null, 'operator'],
+    ];
+    for (const [i, [name, o, via, why]] of SHAPES.entries()) {
+      const hs = hub({ ...o, pluginOn: () => false, fileName: `cw${i}.json` });
+      const a2 = express(); a2.use(express.json());
+      a2.use(routes.create({ client: hs.client, prefs: () => ({ enabled: false, config: {} }), oauth: hs.oauth, log: { log() { }, warn() { } } }));
+      const s2 = a2.listen(0, '127.0.0.1'); await new Promise((r) => s2.on('listening', r));
+      const base = `http://127.0.0.1:${s2.address().port}`;
+      try {
+        const st = await (await fetch(`${base}/api/voice/status`)).json();
+        const nReg = log.filter((x) => x.p === '/oauth/register').length;
+        const r = await fetch(`${base}/api/voice/oauth/start`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ origin: o.instance || 'http://box.lan:3456' }) });
+        const b = await r.json();
+        if (why) ok(`${name}: status connectVia null + connectWhy ${why}; start ⇒ 409 needs-https with ITS sentence; nothing sent to Fish Audio`, st.connectVia === null && st.connectWhy === why && r.status === 409 && b.error === 'needs-https' && b.message === WHYS[why] && log.filter((x) => x.p === '/oauth/register').length === nReg, { st, b });
+        else ok(`${name}: connectVia ${via}, connectWhy null — and start with the plugin OFF answers the consent URL (a person connects first, switches on after)`, st.connectVia === via && st.connectWhy === null && st.enabled === false && r.status === 200 && b.ok === true && /\/oauth\/authorize\?/.test(b.url), { st, b });
+      } finally { s2.close(); }
+    }
+    ok('CONTROL: the two refusal sentences differ, and only the operator one names VIBESPACE_PUBLIC_URL', WHYS['self-hosted'] !== WHYS.operator && /VIBESPACE_PUBLIC_URL/.test(WHYS.operator) && !/VIBESPACE_PUBLIC_URL/.test(WHYS['self-hosted']) && /Tailscale/.test(WHYS['self-hosted']));
   }
   ok('the door registry: dropline\'s door is what the route consulted (and a bad kind is refused at registration)', (() => { try { doors.register('../x', { landing() { }, page() { } }); return false; } catch { return true; } })());
 } finally {

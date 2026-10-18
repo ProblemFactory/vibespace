@@ -4,8 +4,15 @@
 // card (src/lib/voice-plugin-card.js + voice-teach-ui.js) and the REAL ChatInput microphone over the REAL hub routes
 // (src/routes/voice.js, the landing route of src/routes/channels.js through oauth-doors), the real vendor module, Connect
 // machine and teach engine — against a FAKE authorization server + FAKE Dropline (no real call to fish.audio ever).
+//   ⓪ THE DOORS (lane dropline-connect-door, a fleet user's report 2026-10-18 — the sign-in existed, nobody could see it):
+//     with no key and no sign-in the REAL Plugins list's Voice row chip reads 用 Fish Audio 连接 (a primary verb, its
+//     title names the key's place) and opens the sheet; the sheet's ONE line opens the REAL Integrations window on the
+//     dropline card; that card draws Connect ABOVE an optional key field and signs in end to end (consent tab ⇒ 已连接),
+//     its Test with no key tests the sign-in, Disconnect clears it; two MUTANT bundles (the base's status chip; the card
+//     without its block) turn the door probes RED
 //   ① Connect with Fish Audio ⇒ the consent page in a NEW TAB (Allow + the mailed 6-digit code) ⇒ the hub's own
-//     https callback ⇒ the card says 已连接：Ana · Fish Lab
+//     https callback ⇒ the card says 已连接：Ana · Fish Lab — with the plugin OFF; ①b the Plugins row's switch turns it on
+//     after (a person connects first)
 //   ② teach OFF (the default) ⇒ a full dictation writes NOTHING (only /v1/dictate)
 //   ③ teach ON ⇒ a proposal card of word chips (+ a For-you item); select two, 加入所选 ⇒ ONE POST /v1/terms with exactly those two
 //   ④ 忽略 ⇒ no write
@@ -13,7 +20,8 @@
 //   ⑥ the per-project tier ⇒ a later identifier goes without a card and lands in the journal
 //   ⑦ phone 390
 //   ⑧ RETIRED (int263 seam c3): the polished card body it judged was deleted by plugin-settings-p0 (the Plugins list row)
-// PNGs: VIBESPACE_VOICE_PNG_DIR (default: the scratch dir) → connect, proposal, preview, journal, phone
+// PNGs: VIBESPACE_VOICE_PNG_DIR (default: the scratch dir) → door-row, door-sheet, door-card, door-card-connected,
+//   connect, proposal, preview, journal, phone
 //   (card-fold / card-key / card-phone retired with ⑧)
 import fs from 'node:fs';
 import http from 'node:http';
@@ -100,23 +108,39 @@ const FAKE = `http://127.0.0.1:${vendor.address().port}`;
 const express = require(path.join(REPO, 'node_modules/express'));
 const PORT = await freePort();
 const HUB = `https://hub.test:${PORT}`;
-const row = {};
-const store = { resolveIntegration: () => ({ source: Object.keys(row).length ? 'user' : 'none', values: { ...row } }), presetsFor: () => [], setIntegration: (id, v) => Object.assign(row, v) };
-const rec = { enabled: true, config: { language: 'auto' } };
+// lane dropline-connect-door: the person connects FIRST and switches the plugin on after — it starts OFF
+const rec = { enabled: false, config: { language: 'auto' } };
 const items = [];
 const userTodos = { add: (k, it) => { const x = { id: 'ut' + items.length, sessionKey: k, status: 'open', ...it }; items.push(x); return x; }, get: (id) => items.find((x) => x.id === id), setStatus: (id, s) => { const x = items.find((i) => i.id === id); if (x) x.status = s; }, onStatus() { } };
-const quiet = { log() { }, warn() { } };
+const quiet = { log() { }, warn() { }, error() { } };
+// lane dropline-connect-door: the REAL integration store (a scratch data dir) behind the REAL integrations routes — the card,
+// its Connect block, its Test (the row's runner, registered as the wiring does) and the client_id the first Connect writes
+fs.mkdirSync(path.join(root, 'data'), { recursive: true });
+const store = require(path.join(REPO, 'src/server/integration-store.js')).create({ dataDir: path.join(root, 'data'), env: {}, log: quiet });
+const rowValues = () => store.resolveIntegration('dropline').values;
 const DO = require(path.join(REPO, 'src/server/dropline-oauth.js'));
 const tokens = DO.tokenFile(path.join(root, 'data', 'dropline-oauth.json'));
 let teach = null;
 const client = require(path.join(REPO, 'src/server/dropline-client.js')).create({ integrations: () => store, pluginOn: () => rec.enabled, tokens, base: FAKE, oauthBase: FAKE, authorizeUrl: `${FAKE}/oauth/authorize`, teachCap: (k) => teach.capOk(k), log: quiet });
 const oauth = DO.create({ client, flows: require(path.join(REPO, 'src/oauth-loopback.js')).createOAuthLoopback({ log: quiet }), integrations: () => store, instanceUrl: () => HUB, tokens, log: quiet });
 require(path.join(REPO, 'src/server/oauth-doors.js')).register('dropline', { landing: oauth.landing, page: oauth.page });
+store.registerTest('dropline', client.testRunner);
 // lane plugin-settings-p0: the teach / context switches are SETTINGS rows — this harness's settings store is rec.config
 teach = require(path.join(REPO, 'src/server/voice-teach-engine.js')).create({ client, plugin: { peek: () => rec, update: (fn) => fn(rec), settings: () => rec.config || {}, writeSettings: (p) => { rec.config = { ...(rec.config || {}), ...p }; } }, userTodos, log: quiet });
 const esbuild = require(path.join(REPO, 'node_modules/esbuild'));
 const entry = `import { ChatInput } from ${JSON.stringify(path.join(REPO, 'src/lib/chat-input.js'))};
 import { renderVoiceSheet } from ${JSON.stringify(path.join(REPO, 'src/lib/voice-plugin-card.js'))};
+import { installPluginsUI } from ${JSON.stringify(path.join(REPO, 'src/lib/plugins-ui.js'))};
+import { openIntegrationsWindow } from ${JSON.stringify(path.join(REPO, 'src/lib/integrations-window.js'))};
+// lane dropline-connect-door: the REAL Plugins list + Integrations window on a fake App (a one-window manager, a silent ws)
+function App() { }
+installPluginsUI(App);
+App.prototype.openIntegration = function (id, opts) { return openIntegrationsWindow(this, { focus: id || null, ...(opts || {}) }); }; // = app.js
+const app = new App();
+app.wm = { windows: new Map(), revealWindow() { }, createWindow(o) { const content = document.createElement('div'); document.getElementById('win').replaceChildren(content); const w = { id: 'w' + (this.windows.size + 1), type: o.type, content }; this.windows.set(w.id, w); return w; } };
+app.ws = { onGlobal: () => () => { } };
+window.__app = app;
+window.__plugins = () => app.openPluginsDialog({ container: document.getElementById('plugins') });
 const ws = { send() {}, on() {}, off() {}, onMessage() {}, isConnected: () => true };
 window.__cwd = '/home/u/projects/vibespace';
 window.__facts = { conv: 'conv-0', title: 'Doc comments', messages: [
@@ -137,21 +161,44 @@ window.__mount = () => {
   document.getElementById('frame').appendChild(ci.element);
   return window.__render();
 };`;
-await esbuild.build({ stdin: { contents: entry, resolveDir: REPO, loader: 'js' }, bundle: true, format: 'iife', platform: 'browser', target: 'es2020', outfile: path.join(root, 'page.js'), loader: { '.css': 'empty' }, logLevel: 'error' });
+// MUTANTS (lane dropline-connect-door): the same bundle with ONE door hidden, patched at bundle time — each anchor must
+// occur exactly once (else the control proves nothing); the door probes below must go RED on each
+const MUTANTS = {
+  m1: ['src/lib/plugins-ui.js', "chip = !p.configured ? t('Connect with Fish Audio') :", "chip = !p.configured ? t('no Dropline key yet') :"],   // the base's status chip
+  m2: ['src/lib/integrations-window.js', '  if (v.connect) {\n    const box = el(', '  if (false) {\n    const box = el('],                    // the card without its block
+};
+const mutantOnce = {};
+async function bundle(out, mut = null) {
+  const plugins = mut ? [{ name: 'mutant', setup(b) {
+    const file = path.join(REPO, mut[0]);
+    b.onLoad({ filter: /\.js$/ }, (a) => {
+      if (a.path !== file) return undefined;
+      const src = fs.readFileSync(a.path, 'utf8');
+      mutantOnce[mut[0]] = src.split(mut[1]).length === 2;
+      return { contents: src.replace(mut[1], mut[2]), loader: 'js', resolveDir: path.dirname(a.path) };
+    });
+  } }] : [];
+  await esbuild.build({ stdin: { contents: entry, resolveDir: REPO, loader: 'js' }, bundle: true, format: 'iife', platform: 'browser', target: 'es2020', outfile: path.join(root, out), loader: { '.css': 'empty' }, logLevel: 'error', plugins });
+}
+await bundle('page.js');
+for (const [k, m] of Object.entries(MUTANTS)) await bundle(`page-${k}.js`, m);
 const app = express();
 app.use(express.json({ limit: '1mb' }));
 app.use(require(path.join(REPO, 'src/routes/voice.js')).create({ client, prefs: () => rec, oauth, teach, log: quiet }));
 const chan = require(path.join(REPO, 'src/routes/channels.js')); chan.setup({}); app.use(chan.router);
-// the key tier's two doors (the integrations routes in the product): Save writes the store row, Test = ONE GET /v1/me
-app.put('/api/integrations/dropline', (q, s) => { store.setIntegration('dropline', q.body.values); fake.access.add(q.body.values.apiKey); s.json({ ok: true }); }); // the fake knows the key
-app.post('/api/integrations/dropline/test', async (q, s) => {
-  const me = await fetch(`${FAKE}/v1/me`, { headers: { Authorization: `Bearer ${row.apiKey}` } }).then((r) => r.json()).catch(() => null);
-  s.json(me && me.user ? { ok: true, detail: `${me.user.name} · ${me.team.name}` } : { ok: false, error: 'no answer' });
-});
+// lane dropline-connect-door: the REAL integrations routes over the real store (the window's list, the card, its Test)
+const IR = require(path.join(REPO, 'src/routes/integrations.js')); IR.setup({ getStore: () => store }); app.use(IR.router);
+// the Plugins list's one row this suite needs: the voice plugin as src/plugins/voice-input.js states it (configured = a key OR
+// the sign-in; enabled only once configured) + its switch, refused until configured like the plugin's own start verb
+const VP = require(path.join(REPO, 'src/plugins/voice-input.js'));
+const voiceRow = () => { const configured = client.connected(); return { id: VP.id, label: VP.label, description: VP.description, provides: VP.provides, installed: true, configured, enabled: !!rec.enabled && configured, running: !!rec.enabled && configured, integration: 'dropline' }; };
+app.get('/api/plugins', (q, s) => s.json({ plugins: [voiceRow()] }));
+app.get('/api/plugins/manifests', (q, s) => s.json({ plugins: [] }));
+app.post(`/api/plugins/${VP.id}/enabled`, (q, s) => { if (q.body.enabled && !client.connected()) return s.status(400).json({ error: 'connect your Fish Audio account or paste your Dropline key first' }); rec.enabled = !!q.body.enabled; s.json({ ok: true }); });
 const CSS = ['style', 'chat', 'fonts'].filter((n) => fs.existsSync(path.join(REPO, `public/${n}.css`)));
 for (const n of CSS) app.get(`/${n}.css`, (q, s) => s.type('text/css').send(fs.readFileSync(path.join(REPO, `public/${n}.css`))));
-app.get('/page.js', (q, s) => s.type('text/javascript').send(fs.readFileSync(path.join(root, 'page.js'))));
-app.get('/', (q, s) => s.type('text/html').send(`<!doctype html><html data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">${CSS.map((n) => `<link rel="stylesheet" href="/${n}.css">`).join('')}<style>body{margin:0;background:var(--bg-root,#fff);font-family:system-ui} #card{padding:12px;max-width:640px;position:relative;z-index:5;background:var(--bg-root,#fff)} #frame{position:relative;margin-top:12px;min-height:120px}</style></head><body><div id="card" class="plugin-card"></div><div id="frame" class="chat-view"></div><script src="/page.js"></script></body></html>`));
+app.get(/^\/page(-m\d)?\.js$/, (q, s) => s.type('text/javascript').send(fs.readFileSync(path.join(root, path.basename(q.path)))));
+app.get('/', (q, s) => s.type('text/html').send(`<!doctype html><html data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">${CSS.map((n) => `<link rel="stylesheet" href="/${n}.css">`).join('')}<style>body{margin:0;background:var(--bg-root,#fff);font-family:system-ui} #card{padding:12px;max-width:640px;position:relative;z-index:5;background:var(--bg-root,#fff)} #frame{position:relative;margin-top:12px;min-height:120px}</style></head><body><div id="card" class="plugin-card"></div><div id="frame" class="chat-view"></div><div id="side" style="position:absolute;left:660px;top:0;width:600px;height:850px;overflow:auto;background:var(--bg-root,#fff)"><div id="plugins" style="padding:8px"></div><div id="win"></div></div><script src="/page${/^m\d$/.test(String(q.query.b || '')) ? '-' + q.query.b : ''}.js"></script></body></html>`));
 hubSrv = https.createServer({ key: fs.readFileSync(path.join(root, 'key.pem')), cert: fs.readFileSync(path.join(root, 'cert.pem')) }, app);
 await new Promise((r) => hubSrv.listen(PORT, '127.0.0.1', r));
 
@@ -200,14 +247,15 @@ async function attach(wsUrl, w = 1280, h = 860) {
   };
   return { cdp, ev, until, clickSel, shot, close: () => { CDP_PENDS.delete(pend); ws.close(); } };
 }
-async function page(w, h) {
+async function page(w, h, b = '') {
   const tg = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/new?about:blank`, { method: 'PUT' })).json();
   const p = await attach(tg.webSocketDebuggerUrl, w, h);
+  p.targetId = tg.id;
   await p.cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });
   await p.cdp('Page.addScriptToEvaluateOnNewDocument', { source: `try { localStorage.setItem('vibespace.lang', 'zh'); } catch {} window.__errs = []; addEventListener('error', (e) => window.__errs.push(String(e.message))); addEventListener('unhandledrejection', (e) => window.__errs.push(String(e.reason && e.reason.stack || e.reason))); ${FAKE_MIC}` });
   await p.cdp('Emulation.setFocusEmulationEnabled', { enabled: true });
   await p.cdp('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 1, mobile: w < 600 });
-  await p.cdp('Page.navigate', { url: `${HUB}/` });
+  await p.cdp('Page.navigate', { url: `${HUB}/${b ? '?b=' + b : ''}` });
   for (let i = 0; i < 100 && !(await p.ev('typeof window.__mount === "function"').catch(() => false)); i++) await sleep(100);
   await p.ev('window.__mount()');
   return p;
@@ -228,29 +276,111 @@ async function dictate(p, conv, messages = null) {
   return inserted && calls.filter((c) => c.p === '/v1/dictate').length === n + 1;
 }
 const rerender = async (p, sel) => { await p.ev('window.__render()'); return sel ? p.until(`!!document.querySelector(${JSON.stringify(sel)})`) : true; };
-
-try {
-  console.log('① Connect with Fish Audio — a new tab, Allow + the mailed code, the hub\'s own https callback');
-  const p = await page(1280, 860);
-  ok('the page is a secure, non-loopback origin (https://hub.test) and the card offers Connect (no key yet)', await p.ev('window.isSecureContext && location.hostname === "hub.test"') && await p.until('!!document.querySelector(".voice-connect")'));
-  await p.clickSel('.voice-connect');
+// the consent the person does in the NEW TAB a Connect opened (Allow + the mailed code) ⇒ the hub's own https callback
+async function consent(back) {
   let tab = null;
   for (let i = 0; i < 80 && !tab; i++) { await sleep(150); tab = (await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json()).find((t) => t.type === 'page' && t.url.includes('/oauth/authorize')); }
-  ok('Connect opened the consent page in a NEW TAB (S256 + scope + resource accepted by the fake)', !!tab && /code_challenge_method=S256/.test(tab.url) && /scope=dropline%3Aapi/.test(tab.url), tab ? tab.url : { errs: await p.ev('window.__errs'), words: await p.ev('(document.querySelector(".voice-account-words")||{}).textContent'), btn: await p.ev('(() => { const b = document.querySelector(".voice-connect").getBoundingClientRect(); return [b.left, b.top, b.width, b.height, document.elementFromPoint(b.left + b.width/2, b.top + b.height/2).className]; })()'), targets: (await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json()).map((x) => x.type + ' ' + x.url.slice(0, 120)) });
-  if (!tab) throw new Error('no consent tab');
+  if (!tab) return { tab: null, landed: false };
   const t = await attach(tab.webSocketDebuggerUrl);
   await t.until('!!document.getElementById("allow")');
   await t.clickSel('#allow');
   await t.ev('document.getElementById("code").value = "314159"');
   await t.clickSel('#continue');
   const landed = await t.until('location.pathname === "/api/channels/oauth/cb/dropline" && !!document.getElementById("connected")', 10000);
-  ok('the person finished consent + the 6-digit code in that tab ⇒ landed on https://hub.test/api/channels/oauth/cb/dropline: connected', landed, await t.ev('location.href').catch(() => null));
+  const href = await t.ev('location.href').catch(() => null);
   t.close();
-  const connected = await p.until('(document.querySelector(".voice-account-words")||{}).textContent === "已连接：Ana · Fish Lab"', 12000);
-  ok('the card says 已连接：Ana · Fish Lab with 断开 (GET /v1/me with the OAuth token)', connected && await p.ev('!!document.querySelector(".voice-disconnect")') && calls.some((c) => c.p === '/v1/me' && /^at_chrome_/.test(c.auth)), await p.ev('document.querySelector("#card").innerText.slice(0, 300)'));
-  ok('the client_id was registered once and written to the row; the pair is on the hub only', /^cid_chrome_/.test(row.clientId || '') && !!tokens.read().access && !(await p.ev('document.documentElement.outerHTML')).includes(tokens.read().access));
+  await fetch(`http://127.0.0.1:${CDP_PORT}/json/close/${tab.id}`).catch(() => null);
+  await back.cdp('Page.bringToFront');   // a background tab paints no frames: its screenshots waited minutes (measured)
+  return { tab: tab.url, landed, href };
+}
+// lane dropline-connect-door: THE DOOR PROBES — the same two run on the real bundle (GREEN) and on each mutant (RED)
+const ROW = '#plugins .plugin-row[data-plugin="voice-input"]';
+const CARD = '.integ-card[data-integ="dropline"]';
+async function rowDoor(pg) {
+  await pg.ev('window.__plugins()');
+  await pg.until(`!!document.querySelector('${ROW} .plugin-chip')`, 6000);
+  return pg.ev(`(() => { const r = document.querySelector('${ROW}'); const c = r && r.querySelector('.plugin-chip'); const sw = r && r.querySelector('.plugin-sw input'); return c ? { tag: c.tagName, text: c.textContent, cls: c.className, title: c.title, swOff: !!sw && sw.disabled && !sw.checked } : null; })()`);
+}
+const isRowDoor = (c) => !!c && c.tag === 'BUTTON' && c.text === '用 Fish Audio 连接' && /plugin-chip-primary/.test(c.cls);
+async function cardDoor(pg) {
+  await pg.ev(`(window.__app.openIntegration('dropline'), true)`);
+  await pg.until(`!!document.querySelector('${CARD} .integ-fields .integ-field')`, 6000);
+  await pg.until(`!!document.querySelector('${CARD} .integ-connect .oauth-connect-btn')`, 3000);
+  return pg.ev(`(() => { const c = document.querySelector('${CARD}'); if (!c) return null; const b = c.querySelector('.integ-connect .oauth-connect-btn'), f = c.querySelector('.integ-fields'), box = c.querySelector('.integ-connect'); return { btn: b ? b.textContent : null, above: !!box && !!f && !!(box.compareDocumentPosition(f) & Node.DOCUMENT_POSITION_FOLLOWING), why: (c.querySelector('.integ-connect .oauth-connect-words') || {}).textContent || '' }; })()`);
+}
+const isCardDoor = (d) => !!d && d.btn === '用 Fish Audio 连接' && d.above;
+
+try {
+  console.log('⓪ the doors (no key, no sign-in): the Plugins row\'s chip, the sheet\'s line to the key card, the card\'s own Connect');
+  const p = await page(1280, 860);
+  ok('the page is a secure, non-loopback origin (https://hub.test); the plugin is OFF and nothing is connected', await p.ev('window.isSecureContext && location.hostname === "hub.test"') && rec.enabled === false && !client.connected());
+  const chip0 = await rowDoor(p);
+  ok('the Plugins row: the chip is THE DOOR — a button reading 用 Fish Audio 连接 (primary tone), its title names the key\'s place; the switch waits (off, disabled)', isRowDoor(chip0) && chip0.title.includes('或在「服务 › 集成」里粘贴 Dropline key') && chip0.swOff, chip0);
+  await p.shot('door-row.png', '#plugins');
+  await p.clickSel(`${ROW} .plugin-chip`);
+  const sheet = await p.until('!!document.querySelector("#voice-sheet .oauth-connect-btn") && !!document.querySelector("#voice-sheet .oauth-connect-key")', 6000);
+  const sf = sheet ? await p.ev('(() => { const s = document.getElementById("voice-sheet"); const b = s.querySelector(".oauth-connect-btn"), k = s.querySelector(".oauth-connect-key"); return { btn: b.textContent, key: k.textContent, after: !!(b.compareDocumentPosition(k) & Node.DOCUMENT_POSITION_FOLLOWING) }; })()') : null;
+  ok('a press on the chip opens the Voice sheet: Connect first, then ONE line to the key — 已经有 key？粘贴到「服务 › 集成 › Dropline」', !!sf && sf.btn === '用 Fish Audio 连接' && sf.key === '已经有 key？粘贴到「服务 › 集成 › Dropline」' && sf.after, sf || await p.ev('document.body.innerText.slice(0, 400)'));
+  await p.shot('door-sheet.png', '#voice-sheet .dialog');
+  await p.clickSel('#voice-sheet .oauth-connect-key');
+  const onCard = await p.until(`!document.getElementById('voice-sheet') && !!document.querySelector('${CARD}.integ-focus')`, 6000);
+  ok('the sheet\'s line closes the sheet and opens the Integrations window ON the dropline card (focused)', onCard, await p.ev(`({ sheet: !!document.getElementById('voice-sheet'), cards: [...document.querySelectorAll('.integ-card')].map((c) => c.dataset.integ + (c.classList.contains('integ-focus') ? '*' : '')) })`));
+  const card0 = await cardDoor(p);
+  const key0 = await p.ev(`(() => { const r = document.querySelector('${CARD} .integ-field[data-field="apiKey"]'); return r ? { missing: !!r.querySelector('.integ-missing'), help: (r.querySelector('.integ-help') || {}).textContent || '' } : null; })()`);
+  ok('the Integrations card signs in too: 用 Fish Audio 连接 ABOVE the key field; the key optional (never marked required), its help says either one', isCardDoor(card0) && !!key0 && !key0.missing && key0.help.startsWith('可以在上面登录，或者粘贴一个 key'), { card0, key0 });
+  ok('… https here (hub.test): no refusal sentence under the button', card0 && card0.why === '', card0);
+  await sleep(900); await p.ev(`(document.querySelector('${CARD}').scrollIntoView({ block: 'start' }), true)`);   // the focus scroll is smooth: settle it
+  await p.shot('door-card.png', CARD);
+  // RED CONTROLS: the same probes on the mutant bundles (fresh tabs, nothing connected yet) — each hides ONE door
+  for (const [k, which] of [['m1', 'row'], ['m2', 'card']]) {
+    const pm = await page(1280, 860, k);
+    const row = isRowDoor(await rowDoor(pm)), crd = isCardDoor(await cardDoor(pm));
+    ok(`CONTROL ${k}: ${which === 'row' ? 'the base\'s status chip (no Dropline key yet)' : 'the card without its Connect block'} ⇒ that door probe is RED (the other stays green)`, mutantOnce[MUTANTS[k][0]] === true && (which === 'row' ? !row && crd : row && !crd), { k, row, crd, once: mutantOnce });
+    pm.close();
+    await fetch(`http://127.0.0.1:${CDP_PORT}/json/close/${pm.targetId}`).catch(() => null);
+  }
+  await p.cdp('Page.bringToFront');
+
+  console.log('⓪b the card\'s Connect end to end (the plugin OFF), its Test on the sign-in, 断开');
+  await p.clickSel(`${CARD} .oauth-connect-btn`);
+  const cs0 = await consent(p);
+  ok('the card\'s Connect opened the consent tab; consent + the code ⇒ the hub\'s own https callback: connected — the plugin still OFF (Connect never waits for the switch)', !!cs0.tab && cs0.landed && rec.enabled === false, cs0);
+  const cardOn = await p.until(`(document.querySelector('${CARD} .oauth-connect-words') || {}).textContent === '已连接：Ana · Fish Lab'`, 12000);
+  ok('the card re-renders itself: 已连接：Ana · Fish Lab with 断开', cardOn && await p.ev(`!!document.querySelector('${CARD} .oauth-disconnect')`), await p.ev(`document.querySelector('${CARD}').innerText.slice(0, 300)`));
+  ok('the first Connect registered ONE client and wrote its id to the real row; no key was ever needed', fake.clients.size === 1 && /^cid_chrome_/.test(rowValues().clientId || '') && !rowValues().apiKey, rowValues());
+  const nMe = calls.filter((c) => c.p === '/v1/me').length;
+  await p.clickSel(`${CARD} .integ-test`);
+  const passed = await p.until(`!!document.querySelector('${CARD} .integ-test-result .integ-ok')`, 8000);
+  const lastMe = calls.filter((c) => c.p === '/v1/me').slice(nMe);
+  ok('the card\'s Test with NO key tests the sign-in: ONE GET /v1/me with the OAuth token ⇒ 通过', passed && lastMe.length === 1 && /^at_chrome_/.test(lastMe[0].auth) && store.publicView('dropline').lastOk === true, { passed, lastMe, text: await p.ev(`(document.querySelector('${CARD} .integ-test-result') || {}).textContent`) });
+  await p.ev(`(document.querySelector('${CARD}').scrollIntoView({ block: 'start' }), true)`);
+  await p.shot('door-card-connected.png', CARD);
+  await p.clickSel(`${CARD} .oauth-disconnect`);
+  const offAgain = await p.until(`!!document.querySelector('${CARD} .oauth-connect-btn')`, 6000);
+  ok('断开 on the card forgets the sign-in here; the card offers Connect again', offAgain && !client.connected() && !(tokens.read() && tokens.read().access));
+
+  console.log('① Connect with Fish Audio — a new tab, Allow + the mailed code, the hub\'s own https callback');
+  await p.ev('(document.querySelector("#card").innerHTML = "", window.__render())');
+  ok('the Voice sheet offers Connect (nothing connected)', await p.until('!!document.querySelector("#card .oauth-connect-btn")'));
+  await p.clickSel('#card .oauth-connect-btn');
+  const cs1 = await consent(p);
+  ok('Connect opened the consent page in a NEW TAB (S256 + scope + resource accepted by the fake)', !!cs1.tab && /code_challenge_method=S256/.test(cs1.tab) && /scope=dropline%3Aapi/.test(cs1.tab), cs1.tab || { errs: await p.ev('window.__errs'), words: await p.ev('(document.querySelector("#card .oauth-connect-words")||{}).textContent'), targets: (await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json()).map((x) => x.type + ' ' + x.url.slice(0, 120)) });
+  if (!cs1.tab) throw new Error('no consent tab');
+  ok('the person finished consent + the 6-digit code in that tab ⇒ landed on https://hub.test/api/channels/oauth/cb/dropline: connected', cs1.landed, cs1.href);
+  const connected = await p.until('(document.querySelector("#card .oauth-connect-words")||{}).textContent === "已连接：Ana · Fish Lab"', 12000);
+  ok('the card says 已连接：Ana · Fish Lab with 断开 (GET /v1/me with the OAuth token)', connected && await p.ev('!!document.querySelector("#card .oauth-disconnect")') && calls.some((c) => c.p === '/v1/me' && /^at_chrome_/.test(c.auth)), await p.ev('document.querySelector("#card").innerText.slice(0, 300)'));
+  ok('the client_id was registered once (the card\'s Connect and this one share it) and sits on the row; the pair is on the hub only', fake.clients.size === 1 && /^cid_chrome_/.test(rowValues().clientId || '') && !!tokens.read().access && !(await p.ev('document.documentElement.outerHTML')).includes(tokens.read().access));
   await p.until('!!document.querySelector(".voice-teach")');
   await p.shot('connect.png');
+
+  console.log('①b connected first, switched on after: the Plugins row\'s switch');
+  const chip1 = await rowDoor(p);
+  ok('connected ⇒ the row\'s chip is a status again (已关闭), the switch is free', !!chip1 && !isRowDoor(chip1) && chip1.text === '已关闭' && !(await p.ev(`document.querySelector('${ROW} .plugin-sw input').disabled`)), chip1);
+  await p.clickSel(`${ROW} .plugin-sw input`);
+  const onNow = await p.until(`(document.querySelector('${ROW} .plugin-chip') || {}).textContent === '开'`, 6000);
+  ok('the switch turns the plugin on ⇒ the row says 开', onNow && rec.enabled === true, { chip: await p.ev(`(document.querySelector('${ROW} .plugin-chip') || {}).textContent`), rec: rec.enabled });
+  await p.ev('window.__render()');   // the sheet's status read tells the microphone (noteVoiceStatus): on now
+  await p.until('!!document.querySelector(".voice-teach-off")');
 
   console.log('② teach OFF (default) ⇒ a full dictation writes nothing');
   const before = calls.length;

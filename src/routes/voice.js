@@ -3,12 +3,15 @@
 // PURE context (`ctx`, re-cut here by contextFromClient); the hub adds the token and talks to Dropline through the
 // ONE vendor module (src/server/dropline-client.js). The audio stays in memory (multer memoryStorage, 8 MB cap) for
 // the one request — never on disk, never in a log line.
-//   GET  /api/voice/status   → {on, connected, language}  (the microphone asks before it records)
+//   GET  /api/voice/status   → {on, connected, language, account, connectVia, connectWhy}  (the microphone asks before it
+//                            records; the Connect block — the sheet AND the Integrations card — reads account / connectVia /
+//                            connectWhy: why Connect cannot run here, a code of the registry row's `connect.whys`)
 //   POST /api/voice/dictate  multipart {audio, ctx?, uiLang?} → {text, rewrite, language, request_id}
 //                            | {error:<voiceWords code>, retryAfter?} with the vendor's status (429 keeps Retry-After)
 // P1 (lane voice-p1-oauth-teach) — every route below is the OWNER's (an agent's vsst_/jbt_ bearer is refused 403: a
 // sign-in and a press on 加入词库 / 发送 are the person's own acts):
-//   POST /api/voice/oauth/start {origin}   → {ok, url, flowId, via} | 409 {error:'needs-https'}   (the card opens url in a NEW TAB)
+//   POST /api/voice/oauth/start {origin}   → {ok, url, flowId, via} | 409 {error:'needs-https'}   (the card opens url in a NEW TAB;
+//                                            never gated on the plugin's switch: a person connects first, switches on after)
 //   GET  /api/voice/oauth/flow/:id         → {done, ok, error}                                     (the card's wait for the landing)
 //   POST /api/voice/oauth/disconnect       → {ok}   (forgotten here; Fish Audio keeps the grant until removed at fish.audio)
 //   GET  /api/voice/teach                  → {settings, proposals, journal, caps}
@@ -28,7 +31,7 @@ function create({ client, prefs = () => ({}), oauth = null, teach = null, log = 
   const status = () => {
     const p = prefs() || {};
     const c = (p.config) || {};
-    return { on: !!p.enabled && client.connected(), enabled: !!p.enabled, connected: client.connected(), language: VM.languageOf(c.language), account: client.account ? client.account() : null, teach: c.teach === true, context: c.context === true, connectVia: oauth ? oauth.callbackPlan().via : null };
+    return { on: !!p.enabled && client.connected(), enabled: !!p.enabled, connected: client.connected(), language: VM.languageOf(c.language), account: client.account ? client.account() : null, teach: c.teach === true, context: c.context === true, connectVia: oauth ? oauth.callbackPlan().via : null, connectWhy: oauth ? oauth.connectWhy() : 'self-hosted' };
   };
   const owner = (fn) => async (req, res) => {
     if (isAgentBearer(req)) return res.status(403).json({ error: 'human-triggered only', code: 'agent_forbidden' });
@@ -37,7 +40,7 @@ function create({ client, prefs = () => ({}), oauth = null, teach = null, log = 
   if (oauth) {
     router.post('/api/voice/oauth/start', owner(async (b) => {
       const r = await oauth.start({ origin: typeof b.origin === 'string' ? b.origin.slice(0, 300) : '' });
-      if (!r.ok) throw Object.assign(new Error('Connecting needs an https address: turn on Tailscale HTTPS, or paste a Dropline key'), { status: 409, code: r.why });
+      if (!r.ok) throw Object.assign(new Error(r.message || r.why), { status: 409, code: r.why });   // the words of the row's connect.whys
       return r;
     }));
     router.get('/api/voice/oauth/flow/:id', owner(async (b, req) => {

@@ -4406,6 +4406,9 @@ button.plugin-chip:hover { background: color-mix(in srgb, var(--text-secondary) 
 .plugin-chip-ok { color: var(--green, #3fb950); background: color-mix(in srgb, var(--green, #3fb950) 14%, transparent); }
 .plugin-chip-warn { color: var(--warn-text, #e5c07b); background: color-mix(in srgb, var(--yellow, #e5c07b) 16%, transparent); }
 .plugin-chip-err { color: var(--red, #e55); background: color-mix(in srgb, var(--red, #e55) 14%, transparent); }
+/* a chip that is a VERB (lane dropline-connect-door: the Voice row's 「Connect with Fish Audio」 door) */
+.plugin-chip-primary { color: var(--accent); font-weight: 600; background: color-mix(in srgb, var(--accent) 14%, transparent); }
+button.plugin-chip-primary:hover { background: color-mix(in srgb, var(--accent) 24%, transparent); }
 .plugin-sw { position: relative; display: inline-flex; flex-shrink: 0; width: 36px; height: 24px; align-items: center; cursor: pointer; }
 .plugin-sw input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; }
 .plugin-sw-track { width: 30px; height: 16px; margin: 0 auto; border-radius: 999px; background: color-mix(in srgb, var(--text-secondary) 35%, transparent); position: relative; transition: background .15s; pointer-events: none; }
