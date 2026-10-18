@@ -24,6 +24,7 @@ import { trayWhere } from './user-todos-layout.js'; // lane S3: the new-item toa
 import { renderRow, patchRow, applyLive, replyBoxEl, reconcileKeyed, agoText as agoTextOf } from './user-todos-row.js'; // THE row renderer (one spelling of a row; keyed patching keeps a reply box alive)
 import { anchorFixedPopup, copyText, createPopover, escHtml, fetchJson, getToastHistory, onOutsidePress, showContextMenu, showToast, stripLegacyRecordToasts } from './utils.js';
 import { UI_ICONS } from './icons.js';
+import { BACK_DISMISS_EVENT } from './back-guard.js'; // lane mobile-back-guard: the phone's back closes this sheet through hidePopup
 import { pressVerdict, armAfterLayout } from './press-arm.js'; // verify-r6 V1: an Allow counts only once it sat still where it was read
 
 const URG_RANK = { low: 0, normal: 1, high: 2, urgent: 3 };
@@ -79,6 +80,7 @@ export function installUserTodos(app) {
   // row is the outside press that closed it — otherwise stayed in the hidden rows (the item's text, its session's status
   // chip) until the next open rebuilt them; an open popup is patched live, and every open builds a fresh skeleton.
   const hidePopup = () => { popup.classList.add('hidden'); layout = null; dropRows(); };
+  popup.addEventListener(BACK_DISMISS_EVENT, (e) => { e.preventDefault(); hidePopup(); }); // the phone's back gesture: drafts stashed, rows dropped — the one closer
   const dropRows = () => { if (!popup.firstChild) return; stashDrafts(popup); popup.replaceChildren(); };
   const jump = (key, item) => model.jump(key, item, { close: hidePopup });
   /** lane foryou-attachments: a press on an ask's chip (THE one artifact door) or a link in its words (resolved against the

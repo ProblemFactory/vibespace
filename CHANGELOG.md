@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.303 — 2026-10-18
+
+### Fixed
+- On a phone, a stray back swipe no longer leaves VibeSpace: back first closes the open panel, and at the session list it asks you to press back once more.
+
 ## 2.369.302 — 2026-10-18
 
 ### Added

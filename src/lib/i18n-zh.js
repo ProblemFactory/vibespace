@@ -9161,4 +9161,9 @@ export default {
   "No reports here.": "这里没有报告。",
   "Read the feedback it sent": "查看它发过的反馈",
   "Send feedback on VibeSpace to the maintainers": "把对 VibeSpace 的反馈发给维护者",
+  // lane mobile-back-guard: the phone's back gesture
+  "Mobile": "手机",
+  "Back closes the open panel first; press again to exit": "返回手势先关闭面板，再按一次才退出",
+  "On a phone, back first closes what is open (a menu, a dialog, the window on show, which takes you back to the session list). At the list it asks you to press back once more within 2 seconds to leave VibeSpace. Off: back leaves the page at once, like any web page.": "手机上，返回先关闭打开的东西（菜单、对话框、正在显示的窗口——回到会话列表）。在列表处会提示 2 秒内再返回一次才离开 VibeSpace。关闭后：返回立即离开页面，和普通网页一样。",
+  "Press back again to exit": "再返回一次退出",
 };

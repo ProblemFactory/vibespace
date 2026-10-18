@@ -9160,4 +9160,9 @@ export default {
   "No reports here.": "ここには報告がありません。",
   "Read the feedback it sent": "送ったフィードバックを読む",
   "Send feedback on VibeSpace to the maintainers": "VibeSpace へのフィードバックを開発者に送る",
+  // lane mobile-back-guard: the phone's back gesture
+  "Mobile": "モバイル",
+  "Back closes the open panel first; press again to exit": "戻るジェスチャーはまずパネルを閉じ、もう一度で終了",
+  "On a phone, back first closes what is open (a menu, a dialog, the window on show, which takes you back to the session list). At the list it asks you to press back once more within 2 seconds to leave VibeSpace. Off: back leaves the page at once, like any web page.": "スマートフォンでは、戻るとまず開いているもの（メニュー、ダイアログ、表示中のウィンドウ——セッション一覧に戻ります）を閉じます。一覧では、2 秒以内にもう一度戻ると VibeSpace を離れます。オフ：普通のウェブページと同じく、戻るとすぐにページを離れます。",
+  "Press back again to exit": "もう一度戻ると終了",
 };

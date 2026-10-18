@@ -190,6 +190,9 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
   window.addEventListener('pointerdown', () => { _gestureAt = Date.now(); }, true);
   window.addEventListener('keydown', (e) => { if (isGestureKey(e, _editable(e.target))) _gestureAt = Date.now(); }, true);
 }
+/** A gesture neither listener above sees — the phone's back swipe (lane mobile-back-guard) — is the person's own act too:
+ *  a toast it shows next is not an unread notification. */
+export function noteOwnGesture() { _gestureAt = Date.now(); }
 function _seenAtShow(ref) {
   try { return toastSeenAtShow({ now: Date.now(), gestureAt: _gestureAt, visible: document.visibilityState === 'visible', focused: document.hasFocus(), ref }); } catch { return false; }
 }

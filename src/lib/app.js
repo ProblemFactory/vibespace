@@ -25,6 +25,7 @@ import { installUsageMeter } from './usage-meter.js';
 import { installSessionLifecycle } from './session-lifecycle.js';
 import { installSetupFlows } from './setup-flows.js';
 import { MobileNav } from './mobile-nav.js';
+import { installMobileBack } from './mobile-back.js'; // lane mobile-back-guard: the phone's back gesture closes the open panel first
 import { setupDirAutocomplete } from './autocomplete.js';
 import { getAvailableFonts } from './terminal.js';
 import { SettingsManager } from './settings.js';
@@ -594,6 +595,9 @@ class App {
 
     // Mobile nav bar + gestures (only on mobile)
     this._mobileNav = this.isMobile ? new MobileNav(this) : null;
+    // The phone's back gesture (lane mobile-back-guard): one sentinel history entry — a back closes the topmost panel like Esc,
+    // at the sidebar home it arms 「再返回一次退出」. Phone only: a desktop browser's back stays the browser's.
+    this._mobileBack = this.isMobile ? installMobileBack(this) : null;
   }
 
   /** The reconnect queue's order key for a (suspended) ChatView: [desktop rank, window rank].

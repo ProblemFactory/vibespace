@@ -484,6 +484,14 @@ now fails the build if a category ever goes unlisted again.
 | `plugin.tailscale.upFlags` | string | `''` | **tailscale up flags** — Extra `tailscale up` flags — applied on the next Log in / mode change. Reachability flags we manage (--socket/--tun/--accept-routes/proxy) are ignored. |
 <!-- /settings-table -->
 
+### Mobile
+
+<!-- settings-table: Mobile -->
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `mobile.backGuard` | boolean | `true` | **Back closes the open panel first; press again to exit** — On a phone, back first closes what is open (a menu, a dialog, the window on show, which takes you back to the session list). At the list it asks you to press back once more within 2 seconds to leave VibeSpace. Off: back leaves the page at once, like any web page. |
+<!-- /settings-table -->
+
 <!-- settings-reference:end -->
 
 ## Storage Details

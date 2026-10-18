@@ -478,6 +478,14 @@ const SETTINGS_SCHEMA = {
     description: t('On phones and tablets the keyboard\u2019s enter key inserts a newline by default (soft keyboards have no Shift+Enter, so this is the only way to type one) and messages are sent with the send button. Turn on to make enter send instead.'),
     category: t('Chat'), liveApply: true,
   },
+  // lane mobile-back-guard (the owner 2026-10-18: 「在手机版上能不能 block 一下那个返回手势啊？」) — read by src/lib/mobile-back.js;
+  // phone only (app.isMobile): a desktop browser's back is never touched
+  'mobile.backGuard': {
+    type: 'boolean', default: true,
+    label: t('Back closes the open panel first; press again to exit'),
+    description: t('On a phone, back first closes what is open (a menu, a dialog, the window on show, which takes you back to the session list). At the list it asks you to press back once more within 2 seconds to leave VibeSpace. Off: back leaves the page at once, like any web page.'),
+    category: t('Mobile'), liveApply: true,
+  },
   'chat.hideEmptyThinking': {
     type: 'boolean', default: true,
     label: t('Hide empty thinking blocks'),
@@ -1709,6 +1717,7 @@ const SETTINGS_CATEGORIES = [
   t('OpenCode'),
   t('Sidebar'),
   t('Session Card'),
+  t('Mobile'),
 ];
 
 // ── PLUGIN-CONTRIBUTED SETTINGS (Plugin Ph4, 2.369.30 — docs/plugins.md) ──
@@ -1778,7 +1787,7 @@ export function unregisterPluginSettings(pluginId) {
 // no group names falls into the trailing groups by rule — a plugin's
 // "Plugin: <label>" under Plugins, anything else under Other — never dropped.
 const SETTINGS_GROUPS = [
-  { id: 'appearance', label: t('Appearance & layout'), categories: [t('Toolbar & Layout'), t('Window'), t('Sidebar'), t('Session Card')] },
+  { id: 'appearance', label: t('Appearance & layout'), categories: [t('Toolbar & Layout'), t('Window'), t('Sidebar'), t('Session Card'), t('Mobile')] },
   { id: 'sessions', label: t('Sessions & chat'), categories: [t('Session'), t('Chat'), t('Terminal')] },
   { id: 'harness', label: t('Harnesses'), categories: [t('Claude'), t('Codex'), t('OpenCode')] },
   { id: 'services', label: t('Services'), categories: [t('Integration'), t('Channels'), t('Background Work'), t('Agent browser'), t('Desktop apps')] }, // Agent browser (agent browser v2, 2.369.134; the category was 'Browser' before the direction-B rename) is a service the instance runs — profiles, keeper, proxy

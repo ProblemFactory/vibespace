@@ -804,7 +804,14 @@ console.log('§H the client (verify r5): storage · titles · the belt · caches
   ok(rows.length >= 60 && unknown.length === 0, `H1 every browser storage write is classified (${rows.length} keys over ${LIB_FILES.length} client files)`, unknown);
   ok(dead.length === 0, 'H1 no dead row (every classified key is still written)', dead);
   ok(Object.values(STORAGE).every(([c, why]) => STORAGE_CLASSES.has(c) && why.length >= 6), 'H1 every row names its class (pref / ids / owner / ref / plugin / telemetry / marker) and what it holds');
-  ok(other.length === 0, 'H1 the client writes NO IndexedDB database, CacheStorage cache, service worker, cookie, window.name, URL or indexed storage slot', other);
+  // lane mobile-back-guard: the phone's back sentinel is the ONE history write — the constant state {vs: 1} with the URL untouched
+  // (no third argument), so the entry holds no record, no words, no id; any other pushState / replaceState stays red
+  const historyCalls = (text) => text.match(/\bhistory\s*\.\s*(pushState|replaceState)\b[^;]*/g) || [];
+  const sentinelOnly = (rel, text) => rel === 'src/lib/mobile-back.js' && historyCalls(text).length === 1 && historyCalls(text)[0] === "history.pushState({ vs: 1 }, '')";
+  const otherWrites = other.filter((o) => !(o === 'src/lib/mobile-back.js: history.pushState' && sentinelOnly('src/lib/mobile-back.js', read('src/lib/mobile-back.js'))));
+  ok(otherWrites.length === 0, 'H1 the client writes NO IndexedDB database, CacheStorage cache, service worker, cookie, window.name, URL or indexed storage slot (the phone\'s back sentinel {vs: 1} aside)', otherWrites);
+  ok(!sentinelOnly('src/lib/mobile-back.js', "const push = () => history.pushState({ vs: 1, id: rec.id }, '');") && !sentinelOnly('src/lib/mobile-back.js', "history.pushState({ vs: 1 }, '');\nhistory.replaceState({ vs: 1 }, '', '/s/' + id);")
+    && !sentinelOnly('src/lib/other.js', "history.pushState({ vs: 1 }, '')"), 'H1 CONTROL: a sentinel carrying an id, a second history write (a URL), the same call in another file — each is red');
   ok(Object.entries(STORAGE).filter(([, [c]]) => c === 'ref').map(([k]) => k).join() === "src/lib/utils.js|localStorage|'vibespace.toastHistory'", 'H1 exactly ONE key can name a record: the toast history');
   const utils = read('src/lib/utils.js');
   // B-3f5d ① (lane for-you-jobs): the entry may carry `seen: true` (shown while the user acted) — a flag, no words

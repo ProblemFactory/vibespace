@@ -93,6 +93,11 @@ html, body {
   height: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   font-size: 13px; color: var(--text); background: var(--bg-root); overflow: hidden; user-select: none;
 }
+/* THE PHONE'S BACK GESTURE (lane mobile-back-guard): on a touch screen the page never overscrolls into the browser's own
+   gestures — Chrome for Android's swipe-past-the-edge history navigation and its pull-to-refresh. Android's system back
+   gesture and iOS Safari's edge swipe ignore this rule: they arrive as a history back, which the sentinel in
+   src/lib/mobile-back.js catches (the first back closes the open panel, at home it asks for a second). */
+@media (pointer: coarse) { html, body { overscroll-behavior: none; } }
 /* CHROME TEXT IS NEVER SELECTABLE (lane mobile-select M2). The page default above is none and content opts in
    (the chat list, viewers, For-you texts — scripts/test-press-select.mjs §4 is the census of every opt-in); a menu,
    popover, toast, chooser or tab chip says none ITSELF, so one built inside a selectable region (a popover given a
