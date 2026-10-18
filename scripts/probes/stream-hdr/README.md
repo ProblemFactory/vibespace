@@ -12,5 +12,5 @@ Measures, builds nothing. The findings are in docs/changelog-engineering.md (2.3
 
 ## The owner's eye test (the oracle: no headless browser has an HDR screen)
 
-Windows (HDR on, Edge): `C:\Users\marti\vs-probe\hdr\hdr-probe.html` · Mac (the PG27UCDMs, Safari and Chrome): `~/vs-probe/hdr/hdr-probe.html`.
+Windows (HDR on, Edge): `%USERPROFILE%\vs-probe\hdr\hdr-probe.html` · Mac (the PG27UCDMs, Safari and Chrome): `~/vs-probe/hdr/hdr-probe.html`.
 Per tile: is its RIGHT square (1000 nits) clearly brighter than (a)'s white? (b) is the control — not brighter ⇒ this screen / browser is not showing HDR at all. (e): answer with `av1 10-bit PQ` selected, Save facts, then `h264 8-bit PQ`, answer, Save again (and: are there bands in its ramp?). Pull the files back with `vibespace-exit pull`, render with summarize.mjs.
