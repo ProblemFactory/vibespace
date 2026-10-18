@@ -68,9 +68,16 @@ const INPUT_HOSTS = '.xterm, .picture-shell';
 function inputHostOf(el) { try { return (el && typeof el.closest === 'function' && el.closest(INPUT_HOSTS)) || el; } catch { return el; } }
 /** verify r2 (N1): a focus target that TAKES KEYS without being a text box — noVNC's canvas (its keyboard handler listens
  *  on it) inside a picture shell. A press on it yields like a press on a text box; a script's focus on it is reclaimed. */
-export function isKeyboardSurface(el) {
+function isPictureCanvas(el) {
   try { return !!el && el.nodeType === 1 && el.tagName === 'CANVAS' && typeof el.closest === 'function' && !!el.closest('.picture-shell'); } catch { return false; }
 }
+/** the .299 integration (the takeover census's base red): the paired machine's WebRTC STREAM — src/lib/stream-view.js's
+ *  <video class="stream-video"> (tabIndex 0; its own keydown goes to the machine over the data channel) takes keys like
+ *  noVNC's canvas: a press on it yields, a script's focus on it is reclaimed */
+export function isStreamVideo(el) {
+  try { return !!el && el.nodeType === 1 && el.tagName === 'VIDEO' && String(el.className || '').split(/\s+/).includes('stream-video'); } catch { return false; }
+}
+export function isKeyboardSurface(el) { return isPictureCanvas(el) || isStreamVideo(el); }
 const takesKeys = (el) => isEditable(el) || isKeyboardSurface(el);
 /** verify r3 (F4): an app DIALOG — src/lib/utils.js createModalShell's overlay (every dialog of the app: its own focus for
  *  Escape, a confirm's default button, an input dialog's box); lane dialog-keys: the static #dialog-overlay too */

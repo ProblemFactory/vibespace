@@ -147,7 +147,9 @@ async function scenarios(KY) {
     const vShell = new El('div', { cls: 'picture-shell' }); const vMount = new El('div', { cls: 'vnc-mount' }); const vCanvas = new El('canvas', { tabindex: -1 });
     vShell.append(vMount.append(vCanvas));
     vCanvas.addEventListener('mousedown', () => { doc.focus(vCanvas); });
-    body.append(chatArea, xterm, sidebar, xShell, vShell);
+    // the .299 integration: src/lib/stream-view.js's <video> (tabIndex 0 — a focusable element, the browser focuses it on the press)
+    const sVideo = new El('video', { cls: 'stream-video', tabindex: 0 }); sVideo.addEventListener('mousedown', () => { doc.focus(sVideo); });
+    body.append(chatArea, xterm, sidebar, xShell, vShell, sVideo);
     // the live views, wired as browser-live-window.js wires them
     const V = [];
     for (let i = 0; i < views; i++) {
@@ -262,7 +264,7 @@ async function scenarios(KY) {
      *  the text box gets the character. A key while a dialog holds is the user's act on the app (the view's onDocKey stamps it). */
     const KEYS = { '\n': 'Enter', '\x1b': 'Escape', '\t': 'Tab' };
     const type = (text) => { for (const ch of text) { for (const w of V) if (w.ky.dialogHolds) w.ky.onAppKey({ isTrusted: true }); const o = KO.keyboardOwner(); const v = o && V.find((x) => x.id === o.id); if (v) { if (typeof v.ky.caretOutside === 'function' && v.ky.caretOutside(doc.activeElement)) { v.st.strayKeys++; doc.focus(v.kbd); KO.keyboardChanged(); continue; } v.st.page += ch; if (doc.activeElement !== v.kbd) doc.focus(v.kbd); } else { const a = doc.activeElement; const ev = D.dispatch(a || body, 'keydown', { isTrusted: true, key: KEYS[ch] || ch }); if (!ev.defaultPrevented && doc.activeElement === a && KY.isEditable(a) && ch !== '\x1b') a.value += ch; } } }; // verify r2 (H1): the view's BELT — the owner's key while a text box outside holds the caret goes nowhere, the caret moves; verify r4: onDocKey ends with focusSink() — after a key the sink holds the caret (a <select> that kept the focus of a press loses it at the first key: measured, the closing key's keyup)
-    const at = () => { const a = doc.activeElement; if (a === ta) return 'composer'; if (a === helper) return 'terminal'; for (const v of V) if (a === v.kbd) return 'sink' + (V.length > 1 ? v.id.slice(-1) : ''); if (a === xIme) return 'xpra-ime'; if (a === vCanvas) return 'vnc-canvas'; return a === body ? 'body' : String(a && (a.className || a.tagName)); };
+    const at = () => { const a = doc.activeElement; if (a === ta) return 'composer'; if (a === helper) return 'terminal'; for (const v of V) if (a === v.kbd) return 'sink' + (V.length > 1 ? v.id.slice(-1) : ''); if (a === xIme) return 'xpra-ime'; if (a === vCanvas) return 'vnc-canvas'; if (a === sVideo) return 'stream-video'; return a === body ? 'body' : String(a && (a.className || a.tagName)); };
     /** lane dialog-keys: THE APP'S MODAL, built as src/lib/utils.js builds it — createModalShell (an overlay appended to <body>,
      *  then ANNOUNCED in the same task: announceModal), showConfirmDialog (Enter ⇒ true, Escape ⇒ false on the overlay, OK
      *  focused a tick later) and showInputDialog (its box focused a tick later; Enter ⇒ the value, Escape ⇒ null on the box);
@@ -287,7 +289,7 @@ async function scenarios(KY) {
       }
       return m;
     };
-    const ctx = { D, doc, ta, helper, cvs, sidebar, sendBtn, line, chatFocus, V, clock, type, at, xCanvas, xIme, vCanvas, modal, press: (el, o = {}) => D.press(el, { clock, ...o }) };
+    const ctx = { D, doc, ta, helper, cvs, sidebar, sendBtn, line, chatFocus, V, clock, type, at, xCanvas, xIme, vCanvas, sVideo, modal, press: (el, o = {}) => D.press(el, { clock, ...o }) };
     try { return await fn(ctx); } finally { for (const v of V) v.dispose(); offLine(); }
   }
 
@@ -577,6 +579,14 @@ async function scenarios(KY) {
     await press(vCanvas); const focus = at(); type('vn');
     const r = { focus, page: A.st.page, yielded: A.ky.yielded, owned: KO.keyboardOwned(), reclaims: A.st.reclaims };
     r.ok = r.focus === 'vnc-canvas' && r.page === '' && r.yielded && !r.owned && r.reclaims === 0;
+    return r;
+  });
+  // the .299 integration (the census's base red on .298): the paired machine's WebRTC stream — its <video> takes the keys itself
+  out.n1Stream = await world(async ({ V: [A], sVideo, press, type, at }) => {
+    A.takeover(); await flush();
+    await press(sVideo); const focus = at(); type('st');
+    const r = { focus, page: A.st.page, yielded: A.ky.yielded, owned: KO.keyboardOwned(), reclaims: A.st.reclaims };
+    r.ok = r.focus === 'stream-video' && r.page === '' && r.yielded && !r.owned && r.reclaims === 0;
     return r;
   });
   // …and the password guard holds on both: the app's own focus() (a connect, a lease applied) is a script's — reclaimed
@@ -1163,7 +1173,7 @@ console.log('§2 patched-copy controls: each rule removed turns exactly its scen
 const M = mutantCopies('tkbd', REPO);
 const KYSRC = fs.readFileSync(path.join(REPO, 'src/lib/keyboard-yield.js'), 'utf8');
 const CONTROLS = [
-  { tag: 'no-press', why: 'the yield ignores the press (every focus reclaimed — userW\'s bug)', from: 'const u = userPressFocus({ press: p, sameInput: !!p && sameInput(p.target, el), focusAt: now() }), byUserPress = u.byUserPress;', to: 'const u = userPressFocus({ press: p, sameInput: !!p && sameInput(p.target, el), focusAt: now() }), byUserPress = false;', red: ['userW', 'picture', 'bar', 'terminal', 'touch', 'twoViews', 'handback', 'follow', 'ownTab', 'hiddenTab', 'h1PressHidden', 'h1Reconnect', 'n1Xpra', 'n1Vnc', 'q1Cue', 'homeGone', 'widgetYielded', 'textSearch', 'textCm', 'labelPress', 'focusStorm', 'twoViewsEnd', 'socketWhileYielded', 'streamWhileYielded', 'dialogYielded', 'dialogConfirmOverYieldHidden'] }, // (verify r4: every scenario that needs the yield; lane dialog-keys: a dialog opened FROM a yield)
+  { tag: 'no-press', why: 'the yield ignores the press (every focus reclaimed — userW\'s bug)', from: 'const u = userPressFocus({ press: p, sameInput: !!p && sameInput(p.target, el), focusAt: now() }), byUserPress = u.byUserPress;', to: 'const u = userPressFocus({ press: p, sameInput: !!p && sameInput(p.target, el), focusAt: now() }), byUserPress = false;', red: ['userW', 'picture', 'bar', 'terminal', 'touch', 'twoViews', 'handback', 'follow', 'ownTab', 'hiddenTab', 'h1PressHidden', 'h1Reconnect', 'n1Xpra', 'n1Vnc', 'n1Stream', 'q1Cue', 'homeGone', 'widgetYielded', 'textSearch', 'textCm', 'labelPress', 'focusStorm', 'twoViewsEnd', 'socketWhileYielded', 'streamWhileYielded', 'dialogYielded', 'dialogConfirmOverYieldHidden'] }, // (verify r4: every scenario that needs the yield; lane dialog-keys: a dialog opened FROM a yield)
   { tag: 'any-input', why: 'a same-input check that matches anything (the password guard gone)', from: 'export function sameInput(pressed, focused) {\n  if (!pressed || !focused) return false;', to: 'export function sameInput(pressed, focused) {\n  return true;', red: ['elsewhereThenScript', 'alreadyFocusedGuard', 'q1Cue', 'helperCopy', 'cueRecreated'] }, // (verify r3: the copy fallback's scratch box would take the keys too; lane dialog-keys: a dialog is judged at its OPEN by the opener, never by the same-input rule — no dialog leg here) (a press INSIDE the view is never remembered — pictureThenScript stays green by that rule, not this one)
   { tag: 'no-restamp', why: 'the touch tap\'s release does not re-stamp the press', from: '      if (s.press && e.target === s.press.target && e.isTrusted === true) s.press.at = now();\n', to: '', red: ['touch'] },
   { tag: 'trust-any', why: 'a synthetic press counts as the user\'s', from: 's.press = { target: e.target, at: now(), trusted: e.isTrusted === true };', to: 's.press = { target: e.target, at: now(), trusted: true };', red: ['synthetic', 'alreadyFocusedGuard'] },
@@ -1192,6 +1202,7 @@ const CONTROLS = [
   { tag: 'no-choice', why: 'verify r3 F1 pre-fix: a <select> is taken back like any other focus (its list closes)', from: "export function isChoiceControl(el) { try { return !!el && el.nodeType === 1 && el.tagName === 'SELECT' && !el.disabled; } catch { return false; } }", to: 'export function isChoiceControl(el) { return false; }', red: ['choiceSelect'] }, // (lane dialog-keys: a <select> in a dialog he opened is the dialog's — no choice rule there)
   { tag: 'blur-frame-blind', why: 'verify r3: a frame is taken back like any other focus (never said)', from: "  try { if (isFrame(a) && !(root && root.contains(a))) return 'frame'; } catch { /* detached */ }", to: '', red: ['frameSink'] },
   { tag: 'blur-keeps-all', why: 'verify r3: the sink never takes a focus back (a press on a control / list / frame keeps it)', from: "  if (isEditable(a) || isChoiceControl(a)) return 'keep';", to: "  return 'keep';", red: ['frameSink', 'controlCheckbox', 'widgetList', 'textCm', 'controlSummary', 'dialogScript', 'dialogSynthetic', 'dialogPicture', 'dialogStale', 'dialogAppKey'] }, // (textCm: the gutter's scroller would keep the focus; lane dialog-keys: a dialog that opened BY ITSELF keeps its OK button's focus — its Enter would answer it)
+  { tag: 'n1-no-video', why: 'the .299 integration pre-fix: the stream\'s <video> is not a place keys go', from: 'export function isKeyboardSurface(el) { return isPictureCanvas(el) || isStreamVideo(el); }', to: 'export function isKeyboardSurface(el) { return isPictureCanvas(el); }', red: ['n1Stream'] },
   { tag: 'n1-no-surface', why: 'verify r2 N1 pre-fix: noVNC\'s canvas is not a place keys go', from: "  try { return !!el && el.nodeType === 1 && el.tagName === 'CANVAS' && typeof el.closest === 'function' && !!el.closest('.picture-shell'); } catch { return false; }", to: '  return false;', red: ['n1Vnc', 'n1Script'] },
   // lane dialog-keys: a dialog the user's own act opened takes the keys; one that opens by itself never does
   { tag: 'dialog-no-rule', why: 'lane dialog-keys pre-fix: every modal judged as opening by itself (taken back, said) — Enter reaches the page', from: 'const v = dialogVerdict({ owns: driving(), yielded: s.yielded, held, byUserPress: o.byUserPress, opener: \'app\' });', to: 'const v = dialogVerdict({ owns: driving(), yielded: s.yielded, held, byUserPress: false, opener: \'app\' });', red: ['dialogUserPress', 'dialogYielded', 'dialogNested', 'dialogScriptClose', 'dialogTwoViews', 'dialogAppKey', 'dialogChain', 'dialogFocusless', 'dialogSelect', 'dialogStatic', 'dialogBackGone', 'dialogSelfOverHeld', 'dialogThreeMiddleGone', 'dialogTouchHeld', 'dialogConfirmOverYieldHidden', 'dialogOneActOneDialog'] },
@@ -1225,6 +1236,7 @@ ok(R.h3Stream.ok, 'verify r2 (H3): a key held when the stream goes down — let 
 ok(R.h3Handback.ok, 'verify r2 (H3): a key held when the user presses Hand back — let go BEFORE the handback (after it this viewer\'s input is refused)', J(R.h3Handback));
 ok(R.n1Xpra.ok, 'verify r2 (N1): a real press on a DESKTOP APP\'s picture (the xpra pane focuses its IME textarea) yields — "ls" reaches the app, nothing the page', J(R.n1Xpra));
 ok(R.n1Vnc.ok, 'verify r2 (N1): a real press on the DESKTOP\'s picture (noVNC focuses its canvas) yields — nothing reaches the page', J(R.n1Vnc));
+ok(R.n1Stream.ok, 'the .299 integration (N1 for the stream): a real press on the paired machine\'s STREAM (<video class="stream-video">) yields — nothing reaches the page', J(R.n1Stream));
 ok(R.n1Script.ok, 'verify r2 (N1): the password guard on both — a script\'s focus on the noVNC canvas or the xpra IME is reclaimed, "pw" reaches the page', J(R.n1Script));
 ok(R.q1Cue.ok, 'verify r2 (Q1): a BUTTON of the user\'s that focuses the composer (the expand button) is still reclaimed — and SAID, once per RECLAIM_CUE_MS; a script\'s focus and a stale press never; the advice works (a press on the box itself yields, "ok" lands there)', J(R.q1Cue));
 ok(R.homeGone.ok, 'verify r2 (H1b\'): pressed on ANOTHER desktop while the view was off screen, back on the view\'s desktop the chat box is hidden and the caret fell to <body> — the yield ENDS (its home is gone): the caret to the sink, "k2" to the page, the chat box keeps "k1"', J(R.homeGone));
@@ -1263,7 +1275,7 @@ ok(R.dialogFocusless.ok, 'lane dialog-keys: a dialog he opened that focuses noth
 ok(R.dialogSelect.ok, 'lane dialog-keys: a <select> in a dialog he opened keeps the focus of his press (nothing takes it back while the dialog holds), its key never reaches the page; a press on OK answers it and the keys go back to the page', J(R.dialogSelect));
 ok(R.dialogStatic.ok, 'lane dialog-keys: the STATIC overlay (#dialog-overlay: shown by its class and announced, closed by the class) — its box takes "/w", hidden it gives the keys back to the page ("z")', J(R.dialogStatic));
 ok(R.dialogPageBar.ok, 'lane dialog-keys: the agent\'s PAGE dialog on the live view\'s own bar is no app modal — announced or not, never taken; the view keeps the keys', J(R.dialogPageBar));
-ok(Object.values(R).every((r) => r.ok) && Object.keys(R).length === 69, `…and the real module passes all ${Object.keys(R).length} scenarios under the same harness`);
+ok(Object.values(R).every((r) => r.ok) && Object.keys(R).length === 70, `…and the real module passes all ${Object.keys(R).length} scenarios under the same harness`);
 for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: CONTROLS.length, label: '§2 ' })) ok(r.pass, r.name, r.detail);
 
 // ═══ §3 WIRING PINS ═══════════════════════════════════════════════════════════
@@ -1408,7 +1420,7 @@ console.log('§4 the input-surface census: every element that takes keys, grep-d
 const SURFACE_CLASSES = {
   text:    { press: 'YIELDS', focus: 'the box itself (CodeMirror: its .cm-content); its <label> is the box (verify r4)', script: 'taken back (said once when the user\'s own press elsewhere caused it — Q1)', legs: ['userW', 'textSearch', 'textCm', 'script', 'q1Cue', 'labelPress'], controls: ['no-press', 'no-contenteditable', 'no-search-type', 'no-label'] },
   host:    { press: 'YIELDS', focus: 'xterm\'s helper textarea (its screen and the textarea are one input)', script: 'taken back', legs: ['terminal'], controls: ['no-xterm-host'] },
-  picture: { press: 'YIELDS', focus: 'xpra: the pane\'s IME textarea · noVNC: its canvas', script: 'taken back', legs: ['n1Xpra', 'n1Vnc', 'n1Script'], controls: ['n1-no-host', 'n1-no-surface'] },
+  picture: { press: 'YIELDS', focus: 'xpra: the pane\'s IME textarea · noVNC: its canvas', script: 'taken back', legs: ['n1Xpra', 'n1Vnc', 'n1Stream', 'n1Script'], controls: ['n1-no-host', 'n1-no-surface', 'n1-no-video'] },
   frame:   { press: 'DECLARED — taken back, said', focus: 'the sink (a press inside a frame is the frame document\'s: nothing tells it from the frame\'s own script — verify r2 H5)', script: 'taken back', legs: ['frameSink', 'h1Frame'], controls: ['blur-frame-blind', 'h1-frame-blind'] },
   choice:  { press: 'DECLARED — the pointer picks', focus: 'the <select> keeps it (its list open); its keys stay the page\'s (F1)', script: 'kept (a script cannot open a list)', legs: ['choiceSelect'], controls: ['no-choice'] },
   control: { press: 'DECLARED — the pointer works', focus: 'the sink takes it back (a checkbox / radio / range / colour / file / read-only field, a role=button chip, a <details> fold\'s summary: its Space / Enter / arrows stay the page\'s; verify r4 measured: the colour picker stays open, a summary toggles)', script: 'taken back', legs: ['controlCheckbox', 'controlSummary'], controls: ['blur-keeps-all'] },
@@ -1545,6 +1557,8 @@ const CENSUS = [
   ['reaction-picker.js', 'input', 'text', 'the reaction picker\'s search box (type=search, lane channel-threads)'],
   ['record-clear-ui.js', 'tabindex', 'dialog', 'the "Clear content…" confirm\'s overlay (-1, lane redact)'],
   ['refresh-live.js', 'textarea', 'text', 'Refresh all live sessions…: the confirm\'s note (editable, pre-filled; lane refresh-live-sessions — composed at the 2.369.279 integration)'],
+  ['remoteapp-card.js', 'details', 'control', 'the RemoteApp card\'s Technical details fold (the pinned certificate\'s fingerprint, the facts — lane remoteapp-r1b, the .292 integration; classified at the .299 integration)'],
+  ['remoteapp-card.js', 'input', 'text', 'the RemoteApp card\'s per-machine sign-in fields (user / domain / password — lane remoteapp-r1b, the .292 integration; classified at the .299 integration)'],
   ['resume-account-bar.js', 'select', 'choice', 'the resume bar\'s Use another account picker (pre-filled with the first account that can serve; lane resume-account-door — composed at the 2.369.276 integration)'],
   ['search-window.js', 'input', 'text', 'the Search everything box (type=search, lane global-search — composed at the 2.369.221 integration)'],
   ['search-window.js', 'combobox', 'widget', 'the Search everything results (role=listbox; Enter / a click opens a hit)'],
@@ -1569,6 +1583,7 @@ const CENSUS = [
   ['sidebar-tasks.js', 'select', 'choice', 'the bind picker'],
   ['sidebar-workbench.js', 'select', 'choice', 'the host select'],
   ['sidebar.js', 'input', 'control', 'the filter checkboxes'],
+  ['stream-view.js', 'tabindex', 'picture', 'the paired machine\'s WebRTC stream <video> (0; its keydown goes to the machine over the data channel — stream P1-A, the .294 integration; a keyboard surface since the .299 integration)'],
   ['task-detail.js', 'input', 'text+control', 'title / backlog / progress / folders / context; checkboxes; the colour'],
   ['task-detail.js', 'textarea', 'text', 'the objective'],
   ['task-detail.js', 'select', 'choice', 'browser / events / caps'],

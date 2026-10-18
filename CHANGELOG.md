@@ -6,6 +6,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 
 ### Fixed
 - Voice input: the Plugins list and the Dropline card in Integrations now both offer Connect with Fish Audio, not only a key to paste.
+- Typing into a paired machine's streamed desktop while an agent's browser takeover is running now reaches the machine, not the agent's page.
 
 ## 2.369.298 — 2026-10-18
 

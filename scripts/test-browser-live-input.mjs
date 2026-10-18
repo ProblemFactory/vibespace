@@ -1268,7 +1268,7 @@ if (want('controls')) {
   const P = (name, file, from, to) => ({ name, file, from, to });
   const patches = [
     P('the pre-fix record: a paste in ONE char', 'src/server/browser-stream.js', '    const r = S.textRecords(text);', '    const r = S.textRecords(text, { units: 400 });'),
-    P('no ⌘ table', 'src/browser-takeover.js', '  if (!viewerMac || remoteMac) return f;', '  return f;'),
+    P('no ⌘ table', 'src/browser-takeover.js', '  if (map.meta !== \'control\') return f;', '  return f;'),   // the .299 integration: the seam moved into modifier-map.js at .287 (macChord asks the table) — the mutant = the table never moves ⌘
     P('every keyup forwarded', 'src/lib/browser-live-window.js', "      const was = st.pressed.get(e.code || e.key);\n      if (was) {", "      const was = st.pressed.get(e.code || e.key) || { key: e.key, code: e.code, keyCode: e.keyCode };\n      if (was) {"),
     P('a drag without its button', 'src/lib/browser-live-window.js', "modifiers: modifiersOf(e), held: st.buttonsDown ? st.heldButton : null });", "modifiers: modifiersOf(e) });"),
     P('no copy-out door', 'src/server/browser-stream.js', '    const g = T.copyDeliverVerdict(relay.copyArm, t);', "    const g = { deliver: true, gesture: 'chord', arm: null };"),
