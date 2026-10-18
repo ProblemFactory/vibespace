@@ -24,7 +24,10 @@
  * (src/stream-h264.js splits Annex-B) and `onEnd(code)` = the source died — the session ends by that name. Here: the FAKE
  * source — a pre-encoded Annex-B file looped at its frame rate (scripts/fixtures/stream/); 'screen' = the agent's `screen`
  * factory (lane stream-p1b-screen: src/agentd/stream-screen.js — the machine's own desktop, ffmpeg + the HDR mapping),
- * refused by name where none is given. stats() lands in the session's numbers as `screen` (+ its `encodeMs`).
+ * refused by name where none is given. stats() lands in the session's numbers as `screen` (+ its `encodeMs`). 'window' = ONE
+ * window of the machine through the same factory (lane stream-p3m-build: a Mac's — src/agentd/stream-mac.js; `sourceId` = the
+ * window's id). A source with `inputTarget()` (the Mac's: where the picture sits, its scale) hands it to the injector with
+ * every event — the page sends the picture's pixels, the machine adds the live origin.
  *
  * ICE: werift is an ICE-LITE agent with host candidates only and NO STUN/TURN server (its default asks Google's public STUN
  * server — never here); the page is the controlling full agent.
@@ -190,7 +193,8 @@ function selfProbe(addrs, { now = Date.now, waitMs = L.probeWaitMs } = {}) {
 function screenSource() { return named('no_screen_source', 'this agent cannot capture its screen'); }
 
 /** The sources by kind (src/stream-model.js STREAM_SOURCES names them); `screen` = the agent's factory (async). */
-const SOURCES = Object.freeze({ fake: (msg) => fakeSource(msg.sourceId), screen: (msg, o, screen) => (screen ? screen(msg, o) : screenSource(msg)) });
+const SOURCES = Object.freeze({ fake: (msg) => fakeSource(msg.sourceId), screen: (msg, o, screen) => (screen ? screen(msg, o) : screenSource(msg)),
+  window: (msg, o, screen) => (screen ? screen(msg, o) : named('no_window_source', 'this agent cannot stream one window')) });
 
 function createStreamHost({ injector = null, log = () => { }, now = Date.now, loadWerift = () => require('werift'), screen = null, legHosts = () => [], program = process.platform === 'win32' ? process.execPath : null } = {}) {
   const sessions = new Map();
@@ -240,7 +244,8 @@ function createStreamHost({ injector = null, log = () => { }, now = Date.now, lo
     if (!injector) { s.inputRefused = { code: 'input_unsupported', at: now() }; return; }
     if (ev.t === 'mv' && s.inputPending > 8) { s.inputDropped++; return; }
     s.inputPending++;
-    s.inputChain = s.inputChain.then(() => injector.inject([ev])).then((r) => {
+    const target = s.source && typeof s.source.inputTarget === 'function' ? s.source.inputTarget() : undefined; // a Mac's picture → its global points
+    s.inputChain = s.inputChain.then(() => (target === undefined ? injector.inject([ev]) : injector.inject([ev], target))).then((r) => {
       s.inputPending--;
       if (r && r.n) s.inputN += r.n;
       if (r && r.refused && r.refused.length) { const was = s.inputRefused && s.inputRefused.code; s.inputRefused = { code: r.refused[0].code, at: now() }; if (was !== s.inputRefused.code) pushStats(s); }
@@ -393,7 +398,7 @@ function createStreamHost({ injector = null, log = () => { }, now = Date.now, lo
       if (r.verdict === 'blocked') log(`[stream] ${sid} direct inbound UDP: blocked — none of ${r.addrs} host address${r.addrs === 1 ? '' : 'es'} reached from this machine itself (its firewall); the hub relay carries the stream`);
       pushStats(s);
     }, () => { });
-    return { ok: true, sid, offer: { type: 'offer', sdp: pc.localDescription.sdp }, source: { kind: source.kind, origin: source.origin, fps: source.fps || null, encoder: source.encoder || null, mode: source.mode || null }, relayPort: s.relay ? s.relay.port : null, codec: { mimeType: SM.STREAM_CODEC.mimeType, fmtp: SM.STREAM_CODEC.fmtp }, maxKbps };
+    return { ok: true, sid, offer: { type: 'offer', sdp: pc.localDescription.sdp }, source: { kind: source.kind, origin: source.origin, fps: source.fps || null, encoder: source.encoder || null, mode: source.mode || null, ...(source.window ? { window: source.window } : {}) }, relayPort: s.relay ? s.relay.port : null, codec: { mimeType: SM.STREAM_CODEC.mimeType, fmtp: SM.STREAM_CODEC.fmtp }, maxKbps };
   }
   /** After the offer's reply went out: the candidates gathered while it was made follow as pushes, in order. */
   function replied(sid) {

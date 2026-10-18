@@ -84,7 +84,8 @@
  *   POST /api/desktop/machine-desktop/remoteapp/trust {host}    which fields are SET, the pinned certFp — never a password}; `trust` =
  *   GET  /api/desktop/machine-desktop/remoteapp/facts?host=   the first connection (pins the certificate); `facts` = the machine's
  *                                     Remote Desktop facts ({ok, facts, rows, ready} | agent_too_old {have, need})
- *   POST /api/desktop/machine-desktop/stream/start {host}   lane stream-p1a-transport (design q-041 r2): the machine's desktop
+ *   POST /api/desktop/machine-desktop/stream/start {host, source?}   lane stream-p1a-transport (design q-041 r2): the machine's desktop
+ *                                     (or, lane stream-p3m-build, `source: {kind:'window', id}` = ONE window of a Mac)
  *                                     as a WebRTC stream from its agent — {take: false, code, why} (the window shows the VNC
  *                                     picture) | {take: true, key, sid, offer, source, codec, seq}; then, by `key`:
  *   POST …/stream/answer {key, sdp} · …/stream/candidate {key, candidate} · …/stream/restart {key} (an ICE-restart offer) ·
@@ -511,7 +512,7 @@ router.post('/api/desktop/machine-desktop/stream/start', async (req, res) => {
   const host = hostParam(req, res); if (!host) return;
   const wr = webrtcOf(res); if (!wr) return;
   const b = req.body || {};
-  try { res.json(await wr.start(host, { maxKbps: Number(b.maxKbps) || null })); } catch (e) { streamFail(res, e); }
+  try { res.json(await wr.start(host, { maxKbps: Number(b.maxKbps) || null, source: b.source == null ? null : b.source })); } catch (e) { streamFail(res, e); } // source: a display / ONE window (lane stream-p3m-build)
 });
 router.post('/api/desktop/machine-desktop/stream/answer', async (req, res) => {
   if (humanOnly(req, res)) return;

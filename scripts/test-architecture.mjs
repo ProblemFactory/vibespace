@@ -379,7 +379,7 @@ const SHARED = new Set(['src/input-inject.js' /* lane stream-p1a-transport (desi
   // lane webhook-l1-server: THE SHARED EGRESS FENCE — addressVerdict (lifted from app-manifest) + the resolve-once,
   // pinned-address, no-redirect fetch every owner-configured address goes through; node dns / http / https only
   'src/egress-fence.js', 'src/write-origin.js' /* lane owner-write-origin (B-6b2b): THE same-origin rule for cookie writes (crossSiteVerdict) + the request's own origin behind the proxies (ownOriginOf) — auth.js, the dial-address list, published pages share it; imports nothing */]);
-const DEVICE = new Set(['src/agentd/agentd.js', 'src/agentd/stream-host.js', 'src/agentd/stream-screen.js', 'src/agentd/mux.js', 'src/agentd/reexec.js', 'src/agentd/version.js', 'src/agentd/worker-pool.js', 'src/agentd/ws-min.js']);
+const DEVICE = new Set(['src/agentd/agentd.js', 'src/agentd/stream-host.js', 'src/agentd/stream-screen.js', 'src/agentd/stream-mac.js', 'src/agentd/mac-helper-source.js', 'src/agentd/mux.js', 'src/agentd/reexec.js', 'src/agentd/version.js', 'src/agentd/worker-pool.js', 'src/agentd/ws-min.js']);
 const ORCH_FILES = ['server.js', 'src/hosts.js', 'src/ws-handler.js', 'src/ws-create.js', 'src/agentd/client.js'];
 const isOrch = (p) => p === 'server.js' || p === 'src/ws-handler.js' || p === 'src/ws-create.js' || p === 'src/hosts.js' || p === 'src/agentd/client.js'
   || p.startsWith('src/routes/') || p.startsWith('src/server/') || p.startsWith('src/channels/') || ['src/mounts.js', 'src/accounts.js', 'src/task-groups.js', 'src/usage-history.js',
@@ -1957,7 +1957,9 @@ for (const [edge] of EXCEPTIONS) {
 // artifacts a bare run stands in for (src/lib/build-version.js,
 // src/agentd/version.js) and the committed generated words table
 // (src/api-call-words.generated.js ⇐ scripts/gen-api-call-words.mjs, whose
-// --check is test-api-call-words) are the declared exceptions. And .gitignore carries
+// --check is test-api-call-words) and the Mac screen helper's source as text
+// (src/agentd/mac-helper-source.js ⇐ scripts/mac-helper-embed.mjs, held to
+// tools/vibespace-screen/ by test-stream-mac) are the declared exceptions. And .gitignore carries
 // no wildcard `.js` pattern that could apply under src/ — a stray copy must be
 // VISIBLE, never hidden.
 console.log('§51 no suite writes a patched copy into the tree');
@@ -2000,7 +2002,7 @@ console.log('§51 no suite writes a patched copy into the tree');
       const direct = new RegExp('^' + inTree.source).test(call) || (/^path\.join\(\s*(\w+)\s*,/.test(a) && vars.has(/^path\.join\(\s*(\w+)/.exec(a)[1]));
       if (!(direct || vars.has(a))) continue;
       const line = src.slice(0, m.index).split('\n').length;
-      if (/build-version\.js|agentd\/version\.js|api-call-words\.generated\.js/.test(a + ' ' + (vars.get(a) || ''))) continue;   // the generated build artifacts (declared exceptions)
+      if (/build-version\.js|agentd\/version\.js|api-call-words\.generated\.js|mac-helper-source\.js/.test(a + ' ' + (vars.get(a) || ''))) continue;   // the generated build artifacts (declared exceptions)
       hits.push(`${line}: ${a.slice(0, 70)}`);
     }
     return hits;

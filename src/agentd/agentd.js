@@ -1262,11 +1262,16 @@ const windowWatches = new Map();
 // one) and the WebRTC stream sessions that feed it (src/agentd/stream-host.js) — both made at their first use, so werift
 // is never loaded by an agent that never streams
 let inputInjector = null, streamHost = null, streamScreen = null;
-const injectorOf = () => inputInjector || (inputInjector = require('./../input-inject.js').createInjector({ platform: process.platform, spawn: require('child_process').spawn, env: spawnEnv(), stubFile: process.env.VIBESPACE_INPUT_STUB_FILE || null, fs, log }));
+const injectorOf = () => inputInjector || (inputInjector = require('./../input-inject.js').createInjector({ platform: process.platform, spawn: require('child_process').spawn, env: spawnEnv(), stubFile: process.env.VIBESPACE_INPUT_STUB_FILE || null, fs, log, mac: () => macHelperOf() }));
 // lane stream-p1b-screen (design q-041 r2 §2 采集/映射+编码): THE screen source — this machine's facts (`stream-facts`) and its
 // ffmpeg pipelines (src/agentd/stream-screen.js); the HDR road's mapper is a worker of THIS bundle (the `stream-map` branch)
 const streamMapWorker = () => new (require('worker_threads').Worker)(__filename, { workerData: { role: 'stream-map' } });
 const streamScreenOf = () => streamScreen || (streamScreen = require('./stream-screen.js').createScreen({ platform: process.platform, spawn: require('child_process').spawn, execFile: require('child_process').execFile, env: spawnEnv(), fs, log, makeWorker: streamMapWorker }));
+// lane stream-p3m-build: a Mac's screen source carries THE screen helper (src/agentd/stream-mac.js — its fixed path, version,
+// build or the hub's prebuilt); the injector's input goes through the same helper. A Mac whose helper is INSTALLED gets the
+// shipped version at boot (an agent upgrade that changed the helper rebuilds it then — never one that did not)
+const macHelperOf = () => { const s = streamScreenOf(); return s && s.helper ? s.helper : null; };
+if (process.platform === 'darwin') { const t = setTimeout(() => { try { const h = macHelperOf(); if (h && h.installed()) h.ensure().catch(() => { }); } catch { /* the next stream builds it */ } }, 20000); if (t.unref) t.unref(); }
 // lane stream-relay-udp: the UDP leg also tries the host this daemon DIALS (dial.json — the hub's own addresses come in the
 // offer), and on Windows the firewall fact names this node.exe (the page builds the owner's admin line from it)
 const dialHostOf = () => { try { return [new URL(JSON.parse(fs.readFileSync(DIAL_FILE, 'utf8')).url).hostname]; } catch { return []; } };
@@ -1539,7 +1544,7 @@ function serveConnection(sock) {
           // per-op capability gating (three-tier design): consumers check the
           // capability, NEVER parse daemonVersion — unknown ops on an old
           // daemon get no reply and hang the request until its timeout
-          capabilities: ['probe', 'transcript-op', 'usage-scan', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events', 'pool-orders', 'sysinfo', 'design-fs', 'session-events', 'proc-list', 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'browser-end-daemon', 'desktop-serve', 'window-track', 'window-pin', 'dial-status', 'run-shell', 'app-install', 'fs-portable', 'fs-write-stream', 'desktop-apps-list', 'display-facts', 'remoteapp-facts', 'stream-offer', 'input-events', 'stream-facts', 'stream-screen'],
+          capabilities: ['probe', 'transcript-op', 'usage-scan', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events', 'pool-orders', 'sysinfo', 'design-fs', 'session-events', 'proc-list', 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'browser-end-daemon', 'desktop-serve', 'window-track', 'window-pin', 'dial-status', 'run-shell', 'app-install', 'fs-portable', 'fs-write-stream', 'desktop-apps-list', 'display-facts', 'remoteapp-facts', 'stream-offer', 'input-events', 'stream-facts', 'stream-screen', 'stream-mac', 'stream-window'],
         }));
         return;
       }

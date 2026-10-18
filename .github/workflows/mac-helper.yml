@@ -1,0 +1,37 @@
+# lane stream-p3m-build: THE PREBUILT MAC SCREEN HELPER. A macOS runner builds it (scripts/build-mac-helper.sh — universal
+# arm64 + x86_64, ad-hoc signed) whenever its source changes on master and keeps it as an artifact; a published release gets
+# it as two assets (vibespace-screen + vibespace-screen.version). A hub serves them from data/bin/helpers/ to a paired Mac
+# whose agent has no compiler (src/server/desktop-webrtc.js pushMacHelper) — getting the release's assets into a hub's
+# data/bin/helpers/ is the publish step's.
+name: mac-helper
+on:
+  push:
+    branches: [master]
+    paths: ['tools/vibespace-screen/**', 'src/agentd/mac-helper-source.js', 'src/stream-plan.js', 'scripts/build-mac-helper.sh', 'scripts/mac-helper-embed.mjs', '.github/workflows/mac-helper.yml']
+  release:
+    types: [published]
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build the universal helper
+        run: bash scripts/build-mac-helper.sh
+      - name: Keep it as a build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vibespace-screen-${{ github.sha }}
+          path: data/bin/helpers/
+          retention-days: 30
+      - name: Upload it to the release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" data/bin/helpers/vibespace-screen data/bin/helpers/vibespace-screen.version --clobber

@@ -34,7 +34,13 @@ const TAIL = 3;              // stderr lines kept per ffmpeg
 const named = (code, error) => ({ ok: false, code, error });
 const median = (a) => (a.length ? [...a].sort((x, y) => x - y)[a.length >> 1] : null);
 
-function createScreen({ platform = process.platform, spawn, execFile, env = process.env, lookupEnv = process.env, fs = require('fs'), log = () => { }, makeWorker = null, now = Date.now } = {}) {
+/** THE screen source of this machine — a Mac's is src/agentd/stream-mac.js (lane stream-p3m-build: its helper, the same
+ *  `{ facts, source }` and source interface); every other platform's is the one below (Windows; elsewhere not_windows). */
+function createScreen(opts = {}) {
+  if ((opts.platform || process.platform) === 'darwin') return require('./stream-mac.js').createMacScreen(opts);
+  return createWindowsScreen(opts);
+}
+function createWindowsScreen({ platform = process.platform, spawn, execFile, env = process.env, lookupEnv = process.env, fs = require('fs'), log = () => { }, makeWorker = null, now = Date.now } = {}) {
   let memo = null, inflight = null;
   const run = (file, args, maxBuffer = 1 << 20) => new Promise((resolve) => {
     try {
@@ -78,6 +84,7 @@ function createScreen({ platform = process.platform, spawn, execFile, env = proc
 
   /** A session's source: the plan from fresh-enough facts, or its refusal by name. */
   async function source(msg = {}, { maxKbps = 8000 } = {}) {
+    if (msg.sourceKind === 'window') return named('no_window_source', 'this agent cannot stream one window of a Windows desktop yet');
     let f = await facts();
     let plan = f.ok ? SP.planScreen(f, { display: msg.sourceId || null, kbps: maxKbps }) : f;
     if (!plan.ok && f.ok && plan.code !== 'not_windows') { f = await facts({ force: true }); plan = f.ok ? SP.planScreen(f, { display: msg.sourceId || null, kbps: maxKbps }) : f; } // a refusal re-reads once (ffmpeg installed a minute ago, a display plugged in)

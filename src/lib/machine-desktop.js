@@ -261,7 +261,26 @@ export function openMachineDesktop(app, m, { display } = {}) {
   let fwCommand = null;
   fwCopy.onclick = () => { if (fwCommand) copyText(fwCommand).then(() => showToast(t('Copied — paste it into an administrator PowerShell on {machine}', { machine }))); };
   fwEl.append(fwText, fwCopy);
-  strip.append(fwEl, streamEl, noteEl);
+  // lane stream-p3m-build: A MAC'S PERMISSION — macOS keeps the screen (Screen Recording) or the input (Accessibility) from the
+  // agent's screen helper until its owner turns it on; a background agent cannot even ask (tccd: "does not allow prompting"),
+  // so the strip says which switch, with the Settings pane's link to copy (it opens that pane on the Mac). The next stream
+  // start reads the Mac's facts again — the switch flipped, the picture comes
+  const tccEl = el('span'); tccEl.className = 'desktop-strip-tcc'; tccEl.hidden = true;
+  const tccText = el('span');
+  const tccCopy = el('button', null, t('Open System Settings')); tccCopy.type = 'button'; tccCopy.className = 'file-tool-btn desktop-strip-tcc-open';
+  let tccLink = null;
+  tccCopy.onclick = () => { if (tccLink) copyText(tccLink).then(() => showToast(t('Copied — on {machine}, paste it into Safari’s address bar: it opens that Settings pane', { machine }))); };
+  tccEl.append(tccText, tccCopy);
+  const MAC_PANES = { screen: 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture', accessibility: 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility' };
+  const showTcc = (code) => {
+    const pane = code === 'accessibility_permission' ? 'accessibility' : 'screen';
+    tccLink = MAC_PANES[pane];
+    tccText.textContent = code === 'helper_changed_regrant' ? t('The Mac’s screen helper was updated: turn vibespace-screen off and on again under Screen & System Audio Recording')
+      : pane === 'accessibility' ? t('The Mac takes no keys or clicks until Accessibility is on for vibespace-screen')
+        : t('The Mac shows no picture until Screen Recording is on for vibespace-screen');
+    tccEl.title = tccLink; tccEl.hidden = false;
+  };
+  strip.append(fwEl, tccEl, streamEl, noteEl);
   let noteTimer = null, refusedWhy = '';
   const note = (text, title, ms = 0) => { clearTimeout(noteTimer); noteEl.textContent = text; noteEl.title = title || text; noteEl.hidden = !text; if (ms) noteTimer = setTimeout(() => { noteEl.hidden = true; }, ms); };
   const STREAM_WHY = {
@@ -274,6 +293,11 @@ export function openMachineDesktop(app, m, { display } = {}) {
     no_encoder: () => t('the machine’s ffmpeg has no H.264 encoder'), no_white_level: () => t('the machine’s HDR white level could not be read'),
     display_gone: () => t('the display it showed is gone'), display_other_gpu: () => t('that display is on another graphics card'),
     capture_failed: () => t('the machine’s screen capture could not start'), capture_exited: () => t('the machine’s screen capture stopped'), encoder_exited: () => t('the machine’s video encoder stopped'),
+    // lane stream-p3m-build: a Mac's (its screen helper — src/agentd/stream-mac.js)
+    no_helper: () => t('the Mac has no screen helper yet — install the Command Line Tools there (xcode-select --install) or update VibeSpace'),
+    screen_permission: () => t('Screen Recording is off for vibespace-screen on the Mac'), helper_changed_regrant: () => t('the Mac’s screen helper was updated and needs its Screen Recording switch again'),
+    window_minimized: () => t('the window is minimized — restore it to stream'), window_gone: () => t('the window it showed is gone'),
+    encoder_failed: () => t('the machine’s video encoder stopped'), no_window_source: () => t('the machine’s agent cannot stream one window yet'),
   };
   const streamWords = (code) => (STREAM_WHY[code] ? STREAM_WHY[code]() : t('the machine ended it ({code})', { code: code || '?' }));
   const ms = (v) => (v == null ? '—' : v);
@@ -296,6 +320,7 @@ export function openMachineDesktop(app, m, { display } = {}) {
   const inputWords = (ref) => {
     const code = ref && ref.code;
     if (!code) return;
+    if (code === 'accessibility_permission') { showTcc(code); return; } // lane stream-p3m-build: the Mac's Accessibility switch
     note(code === 'uipi_blocked' ? t('Windows keeps input away from an administrator window — click another window on the machine first')
       : code === 'input_unsupported' ? t('This machine cannot take input over the stream yet')
         : t('The machine did not take that input ({code})', { code }), null, 8000);
@@ -310,6 +335,7 @@ export function openMachineDesktop(app, m, { display } = {}) {
       onFallback: (code, why, taken) => {
         stream = null; streamEl.hidden = true; clearInterval(tick); tick = null;
         refusedWhy = STREAM_WHY[code] ? streamWords(code) : why || streamWords(code); // the page words a known code in its own language; else the machine's sentence
+        if (code === 'screen_permission' || code === 'helper_changed_regrant') showTcc(code); // lane stream-p3m-build: which switch on the Mac
         if (taken) note(t('Stream stopped ({why}) — showing the VNC picture', { why: streamWords(code) }), why || code);
         chip.title = [scope, t('Not streamed: {why}', { why: refusedWhy })].join('\n');
         startVnc();

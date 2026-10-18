@@ -13,15 +13,26 @@
  *             elevated and answers `uipi` instead of sending (the stats strip names it: "an administrator window has focus").
  *   Linux     a recording STUB (a paired Linux machine's apps open as their own windows — "Its desktop" is Windows / macOS):
  *             every command is appended to `stubFile` as a JSON line — the suites read what would have been sent
- *   macOS     refused by name (`input_unsupported`) — the Mac's injector arrives with the macOS stream (P3)
+ *   macOS     THE SCREEN HELPER's `input` (lane stream-p3m-build — tools/vibespace-screen, spawned DISCLAIMED so the
+ *             Accessibility grant is ITS own, never node's): a resident child, one line per command, one answer each (the
+ *             Windows script's protocol). Keys = the Mac's virtual key codes (MAC_KEYCODES — physical positions, like the
+ *             scan codes); the pointer = global POINTS, from the picture's pixels through the session's target (the stream
+ *             source's inputTarget: where the display / window sits, its scale) — `P <pid> [<window>]` names the target app:
+ *             the frontmost one is posted at the HID tap, any other by CGEventPostToPid (not activated), and its streamed
+ *             window is made its key window before a press (an app's keys land in its key window). No Accessibility ⇒
+ *             macOS drops the events silently, so the helper says `ax_denied` and the strip names the Settings pane
+ *             (accessibility_permission).
  *
  *   SCAN_CODES            DOM `code` → [set-1 scan code, extended] (a code the table lacks is refused `unmapped_key`)
  *   commandsOf(ev)        a validated stream-model input event → its command lines (`M x y` · `D b` · `U b` · `W dx dy` ·
  *                         `K scan ext up` · `C <base64 utf-16le>`) — PURE
+ *   MAC_KEYCODES / macCommandsOf(ev, target)   the Mac's: `M x y` in global points · `D b` · `U b` · `W dx dy` · `K vk up` ·
+ *                         `C <base64 utf-8>` — PURE
  *   INPUT_PS              the resident script (its C# compiles once)
- *   createInjector(opts)  → { kind, inject(events) → { ok, n, refused: [{ i, t, code }] }, close() }
+ *   createInjector(opts)  → { kind, inject(events, target?) → { ok, n, refused: [{ i, t, code }] }, close() }
  */
 const MD = require('./machine-desktop-model.js');
+const SP = require('./stream-plan.js');
 
 // DOM `code` → [PC/AT set-1 scan code, extended (E0)]. Physical keys only; Pause (an E1 sequence) is not here on purpose.
 const k = (scan, ext = 0) => Object.freeze([scan, ext]);
@@ -59,6 +70,38 @@ function commandsOf(ev) {
       return s ? { lines: [`K ${s[0]} ${s[1]} ${ev.t === 'ku' ? 1 : 0}`] } : { refused: 'unmapped_key' };
     }
     case 'clip': return { lines: [`C ${Buffer.from(String(ev.text), 'utf16le').toString('base64')}`] };
+    case 'ack': return { lines: [] };
+    default: return { refused: 'unknown_kind' };
+  }
+}
+
+// DOM `code` → the Mac's virtual key code (kVK_*, HIToolbox Events.h — a key's PHYSICAL position, ANSI layout names; a code the
+// table lacks is refused `unmapped_key`). PC keys with no Mac twin: Insert = Help, NumLock = the keypad's Clear.
+const MAC_KEYCODES = Object.freeze({
+  KeyA: 0x00, KeyS: 0x01, KeyD: 0x02, KeyF: 0x03, KeyH: 0x04, KeyG: 0x05, KeyZ: 0x06, KeyX: 0x07, KeyC: 0x08, KeyV: 0x09, IntlBackslash: 0x0a, KeyB: 0x0b,
+  KeyQ: 0x0c, KeyW: 0x0d, KeyE: 0x0e, KeyR: 0x0f, KeyY: 0x10, KeyT: 0x11, Digit1: 0x12, Digit2: 0x13, Digit3: 0x14, Digit4: 0x15, Digit6: 0x16, Digit5: 0x17,
+  Equal: 0x18, Digit9: 0x19, Digit7: 0x1a, Minus: 0x1b, Digit8: 0x1c, Digit0: 0x1d, BracketRight: 0x1e, KeyO: 0x1f, KeyU: 0x20, BracketLeft: 0x21, KeyI: 0x22, KeyP: 0x23,
+  Enter: 0x24, KeyL: 0x25, KeyJ: 0x26, Quote: 0x27, KeyK: 0x28, Semicolon: 0x29, Backslash: 0x2a, Comma: 0x2b, Slash: 0x2c, KeyN: 0x2d, KeyM: 0x2e, Period: 0x2f,
+  Tab: 0x30, Space: 0x31, Backquote: 0x32, Backspace: 0x33, Escape: 0x35, MetaRight: 0x36, MetaLeft: 0x37, ShiftLeft: 0x38, CapsLock: 0x39, AltLeft: 0x3a,
+  ControlLeft: 0x3b, ShiftRight: 0x3c, AltRight: 0x3d, ControlRight: 0x3e, Fn: 0x3f, F17: 0x40, NumpadDecimal: 0x41, NumpadMultiply: 0x43, NumpadAdd: 0x45,
+  NumLock: 0x47, NumpadDivide: 0x4b, NumpadEnter: 0x4c, NumpadSubtract: 0x4e, F18: 0x4f, F19: 0x50, NumpadEqual: 0x51,
+  Numpad0: 0x52, Numpad1: 0x53, Numpad2: 0x54, Numpad3: 0x55, Numpad4: 0x56, Numpad5: 0x57, Numpad6: 0x58, Numpad7: 0x59, F20: 0x5a, Numpad8: 0x5b, Numpad9: 0x5c,
+  IntlYen: 0x5d, IntlRo: 0x5e, NumpadComma: 0x5f, F5: 0x60, F6: 0x61, F7: 0x62, F3: 0x63, F8: 0x64, F9: 0x65, Lang2: 0x66, F11: 0x67, Lang1: 0x68, F13: 0x69,
+  F16: 0x6a, F14: 0x6b, F10: 0x6d, ContextMenu: 0x6e, F12: 0x6f, F15: 0x71, Help: 0x72, Insert: 0x72, Home: 0x73, PageUp: 0x74, Delete: 0x75, F4: 0x76, End: 0x77,
+  F2: 0x78, PageDown: 0x79, F1: 0x7a, ArrowLeft: 0x7b, ArrowRight: 0x7c, ArrowDown: 0x7d, ArrowUp: 0x7e,
+});
+/** The Mac's command lines for a validated event. `target` = the stream source's inputTarget (null = the coordinates already
+ *  are global points — the `input-events` op). → { lines } | { refused: code } */
+function macCommandsOf(ev, target = null) {
+  if (!ev || typeof ev.t !== 'string') return { refused: 'not_an_event' };
+  const at = (e) => { const p = SP.macPoint(target, e.x, e.y); return `M ${p.x} ${p.y}`; };
+  switch (ev.t) {
+    case 'mv': return { lines: [at(ev)] };
+    case 'md': return { lines: [at(ev), `D ${ev.b}`] };
+    case 'mu': return { lines: [at(ev), `U ${ev.b}`] };
+    case 'wh': return { lines: [at(ev), `W ${ev.dx} ${ev.dy}`] };
+    case 'kd': case 'ku': return Object.prototype.hasOwnProperty.call(MAC_KEYCODES, ev.c) ? { lines: [`K ${MAC_KEYCODES[ev.c]} ${ev.t === 'ku' ? 1 : 0}`] } : { refused: 'unmapped_key' };
+    case 'clip': return { lines: [`C ${Buffer.from(String(ev.text), 'utf8').toString('base64')}`] };
     case 'ack': return { lines: [] };
     default: return { refused: 'unknown_kind' };
   }
@@ -128,10 +171,11 @@ const READY_MS = 20000;
 const RESPAWNS_PER_MIN = 3;
 const STUB_MAX_BYTES = 256 * 1024;
 
-/** ONE injector. `spawn` / `env` = the daemon's; `stubFile` = where the Linux stub writes; `fs` = node:fs (the stub's). */
-function createInjector({ platform = process.platform, spawn = null, env = process.env, stubFile = null, fs = null, log = () => { }, lineMs = LINE_MS, readyMs = READY_MS } = {}) {
-  const kind = platform === 'win32' ? 'sendinput' : platform === 'linux' ? 'stub' : null;
-  let child = null, ready = false, buf = '', closed = false;
+/** ONE injector. `spawn` / `env` = the daemon's; `stubFile` = where the Linux stub writes; `fs` = node:fs (the stub's); `mac`
+ *  = () => the Mac's screen helper (src/agentd/stream-mac.js createMacHelper: ensure, spawnPlan) — asked only on a Mac. */
+function createInjector({ platform = process.platform, spawn = null, env = process.env, stubFile = null, fs = null, log = () => { }, lineMs = LINE_MS, readyMs = READY_MS, mac = null } = {}) {
+  const kind = platform === 'win32' ? 'sendinput' : platform === 'linux' ? 'stub' : platform === 'darwin' ? 'cgevent' : null;
+  let child = null, ready = false, buf = '', closed = false, helper = null, lastTarget = null;
   const queue = []; // { resolve, timer } in line order
   const spawns = [];
   const settleAll = (answer) => { for (const q of queue.splice(0)) { clearTimeout(q.timer); q.resolve(answer); } };
@@ -140,9 +184,10 @@ function createInjector({ platform = process.platform, spawn = null, env = proce
     while (spawns.length && now - spawns[0] > 60000) spawns.shift();
     if (spawns.length >= RESPAWNS_PER_MIN) return false;
     spawns.push(now);
-    const argv = [...MD.PS_ARGV, MD.psEncoded(INPUT_PS)];
+    const argv = kind === 'cgevent' ? (helper ? [helper.file, ...helper.args] : null) : [...MD.PS_ARGV, MD.psEncoded(INPUT_PS)];
+    if (!argv) return false;
     try { child = spawn(argv[0], argv.slice(1), { env, windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'] }); } catch (e) { log(`[input] the injector did not start: ${e && e.message}`); child = null; return false; }
-    ready = false; buf = '';
+    ready = false; buf = ''; lastTarget = null;
     const me = child;
     me.on('error', () => { if (child === me) { child = null; settleAll('err spawn 0'); } });
     me.on('exit', () => { if (child === me) { child = null; settleAll('err exited 0'); } });
@@ -178,15 +223,30 @@ function createInjector({ platform = process.platform, spawn = null, env = proce
       return 'ok';
     } catch (e) { return `err stub ${(e && e.code) || 0}`; }
   }
-  const codeOf = (answer) => (answer === 'ok' ? null : answer === 'uipi' ? 'uipi_blocked' : /^err (timeout|injector_down|exited|spawn|closed)\b/.test(answer) ? 'injector_' + answer.split(' ')[1].replace('injector_', '') : 'sendinput_failed');
+  const codeOf = (answer) => (answer === 'ok' ? null : answer === 'uipi' ? 'uipi_blocked' : answer === 'ax_denied' ? 'accessibility_permission' : /^err (timeout|injector_down|exited|spawn|closed)\b/.test(answer) ? 'injector_' + answer.split(' ')[1].replace('injector_', '') : kind === 'cgevent' ? 'cgevent_failed' : 'sendinput_failed');
+  /** The Mac: its screen helper in place (built / prebuilt) before the first line; a target change = one `P <pid>` line. */
+  async function macReady() {
+    if (helper) return null;
+    const h = typeof mac === 'function' ? mac() : null;
+    const st = h ? await h.ensure() : null;
+    if (!st || st.state !== 'ready') return { code: (st && st.code) || 'no_helper', error: (st && st.error) || 'this Mac has no screen helper for its input' };
+    helper = h.spawnPlan('input');
+    return null;
+  }
   /** Inject validated events in order. → { ok, n (events fully sent), refused: [{ i, t, code, detail? }] } */
-  async function inject(events) {
+  async function inject(events, target = null) {
     const list = Array.isArray(events) ? events : [];
     const refused = [];
     let n = 0;
-    if (!kind) return { ok: false, n: 0, refused: list.map((e, i) => ({ i, t: e && e.t, code: 'input_unsupported' })), code: 'input_unsupported', error: 'this machine has no input injector here yet (the Mac\'s arrives with its stream)' };
+    if (!kind) return { ok: false, n: 0, refused: list.map((e, i) => ({ i, t: e && e.t, code: 'input_unsupported' })), code: 'input_unsupported', error: 'this machine has no input injector here yet' };
+    if (kind === 'cgevent') {
+      const no = await macReady();
+      if (no) return { ok: false, n: 0, refused: list.map((e, i) => ({ i, t: e && e.t, code: no.code })), code: no.code, error: no.error };
+      const tl = target && target.pid && target.wid ? `P ${target.pid} ${target.wid}` : `P ${(target && target.pid) || 0}`; // the app (+ the window its keys must reach)
+      if (tl !== lastTarget && list.length) { const code = codeOf(await sendLine(tl)); if (!code) lastTarget = tl; else return { ok: false, n: 0, refused: list.map((e, i) => ({ i, t: e && e.t, code })) }; }
+    }
     for (let i = 0; i < list.length; i++) {
-      const c = commandsOf(list[i]);
+      const c = kind === 'cgevent' ? macCommandsOf(list[i], target) : commandsOf(list[i]);
       if (c.refused) { refused.push({ i, t: list[i] && list[i].t, code: c.refused }); continue; }
       let bad = null;
       for (const line of c.lines) {
@@ -202,4 +262,4 @@ function createInjector({ platform = process.platform, spawn = null, env = proce
   return { kind, inject, close };
 }
 
-module.exports = { SCAN_CODES, commandsOf, INPUT_PS, createInjector };
+module.exports = { SCAN_CODES, commandsOf, MAC_KEYCODES, macCommandsOf, INPUT_PS, createInjector };

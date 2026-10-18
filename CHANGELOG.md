@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.302 — 2026-10-18
+
+### Added
+- A paired Mac now streams too: its whole screen or one window, via macOS screen sharing, in true colour, with your keys and clicks sent straight to it.
+
 ## 2.369.301 — 2026-10-18
 
 ### Added

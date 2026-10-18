@@ -113,6 +113,7 @@ export const ROWS = [
   ['src/server/doc-engine.js', 'own-tree', 1, null, DATA], // lane doc-comments-stopped-owner: data/doc-owners.json (the owner memo)
   ['src/server/design-engine.js', 'user-path', 6, 'DOOR\\.blocked\\(', 'the design watch relist: refused by name, never read'],
   ['src/server/desktop-app-keeper.js', 'own-tree', 1, null, DATA],
+  ['src/server/desktop-webrtc.js', 'own-tree', 3, null, 'lane stream-p3m-build: the prebuilt Mac screen helper the hub pushes to a Mac with no compiler — data/bin/helpers/vibespace-screen (+ .version) in the checkout: its version, its size, its bytes'],
   ['src/server/device-upgrade-watch.js', 'own-tree', 1, null, DATA],
   ['src/server/dial-health-watch.js', 'own-tree', 1, null, DATA], // lane host-stale-dialer: data/dial-health.json (the For-you ledger)
   ['src/server/dial-pairing.js', 'own-tree', 1, null, DATA],

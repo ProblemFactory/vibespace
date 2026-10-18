@@ -4,9 +4,15 @@
  * desktop window whose machine passes the rung (src/server/desktop-access.js streamRung — the agent's `stream-offer`
  * capability and a source) plays the machine's picture as WebRTC: the agent's werift offers, the PAGE's RTCPeerConnection
  * answers, and this module is only the SIGNALING relay between the page's requests and the agent's ops, plus the record:
- *   • start(hostId)          the rung's verdict; when taken, `stream-offer` on the agent → the offer (+ the relay's candidates)
+ *   • start(hostId, {source}) the rung's verdict; when taken, `stream-offer` on the agent → the offer (+ the relay's candidates)
  *                            and a session KEY the page names from now on — `{ take: false, code, why }` otherwise (the window
- *                            shows the VNC picture and says why)
+ *                            shows the VNC picture and says why). `source` = the page's choice (src/stream-model.js
+ *                            streamSourceOf: a display, or ONE window — lane stream-p3m-build); none = the main display.
+ *                            THE MAC'S HELPER (lane stream-p3m-build): an offer refused `no_helper` (a Mac with no screen
+ *                            helper and no compiler) is answered by pushing THIS hub's prebuilt (`helpersDir`: data/bin/helpers/
+ *                            vibespace-screen + .version, put there by the release — scripts/build-mac-helper.sh) beside the
+ *                            agent's helper over the device link (fs-write-stream, `vibespace-screen-<version>`) when its version
+ *                            is the one the agent asks for, then the offer is asked once more
  *   • poll(key, n, seq)      THE LONG POLL (src/server/machine-app.js's shape): the agent's trickled candidates the page has not
  *                            seen (from index n), the session's state and the agent's last numbers; it answers at once when
  *                            anything is newer than `seq`, else after ≤ STREAM_LIMITS.pollMaxMs
@@ -35,7 +41,9 @@
  */
 const crypto = require('crypto');
 const dgram = require('dgram');
+const fs = require('fs');
 const os = require('os');
+const path = require('path');
 const SM = require('../stream-model.js');
 
 const L = SM.STREAM_LIMITS;
@@ -64,7 +72,21 @@ function withRelay(sdp, lines) {
   return rows.join('\r\n') + (rows[rows.length - 1] === '' ? '' : '\r\n');
 }
 
-function create({ access, log = console, now = Date.now, idleMs = L.idleMs, sweepMs = 5000, ips = hubIps, pollMaxMs = L.pollMaxMs, relay = true, direct = true, udpLeg = true, legMute = () => false } = {}) {
+const HELPERS_DIR = path.join(__dirname, '..', '..', 'data', 'bin', 'helpers');
+/** Push this hub's prebuilt Mac screen helper to an agent that asked for `need` = { dir, version } (its no_helper refusal).
+ *  → { ok, size } | { ok: false, code: 'no_helper', error } */
+async function pushMacHelper(dm, need, helpersDir = HELPERS_DIR) {
+  const bin = path.join(helpersDir, 'vibespace-screen');
+  let have = null, st = null;
+  try { have = fs.readFileSync(bin + '.version', 'utf8').trim(); st = fs.statSync(bin); } catch { return { ok: false, code: 'no_helper', error: 'this hub has no prebuilt Mac screen helper (data/bin/helpers/vibespace-screen)' }; }
+  if (!need || !/^[A-Za-z0-9._-]{1,40}$/.test(String(need.version || '')) || !/^\/[^\0]{1,400}$/.test(String(need.dir || ''))) return { ok: false, code: 'no_helper', error: 'the agent did not say where its helper goes' };
+  if (have !== need.version) return { ok: false, code: 'no_helper', error: `this hub's prebuilt Mac screen helper is ${have}; the Mac's agent needs ${need.version}` };
+  if (!dm || typeof dm.fsWriteStream !== 'function') return { ok: false, code: 'no_helper', error: 'the Mac\'s agent cannot take a pushed file' };
+  try { await dm.fsWriteStream(`${need.dir}/vibespace-screen-${need.version}`, { source: fs.createReadStream(bin), size: st.size, overwrite: true }); } catch (e) { return { ok: false, code: 'no_helper', error: `the prebuilt helper did not reach the Mac (${(e && e.message) || e})` }; }
+  return { ok: true, size: st.size };
+}
+
+function create({ access, log = console, now = Date.now, idleMs = L.idleMs, sweepMs = 5000, ips = hubIps, pollMaxMs = L.pollMaxMs, relay = true, direct = true, udpLeg = true, legMute = () => false, helpersDir = HELPERS_DIR } = {}) {
   const sessions = new Map(); // key → session
   const keyOf = () => 'st' + now().toString(36) + Math.random().toString(36).slice(2, 10);
   const wake = (s) => { s.seq++; for (const f of s.waiters.splice(0)) { try { f(); } catch { /* gone */ } } };
@@ -182,10 +204,12 @@ function create({ access, log = console, now = Date.now, idleMs = L.idleMs, swee
   }
 
   /** The rung, then the offer. → { take: false, code, why } | { take: true, key, sid, offer, source, codec, seq } */
-  async function start(hostId, { maxKbps = null } = {}) {
+  async function start(hostId, { maxKbps = null, source = null } = {}) {
     if (!access || typeof access.streamRung !== 'function') throw named('host_unavailable', 'the desktop access layer is not wired on this instance');
+    const src = SM.streamSourceOf(source);
+    if (source != null && !src) return { take: false, code: 'bad_source', why: 'the stream names a display or a window by its id' };
     let v;
-    try { v = await access.streamRung(hostId); } catch (e) { return { take: false, code: (e && e.code) || 'host_unavailable', why: String((e && e.message) || e) }; }
+    try { v = src ? await access.streamRung(hostId, { want: src.kind }) : await access.streamRung(hostId); } catch (e) { return { take: false, code: (e && e.code) || 'host_unavailable', why: String((e && e.message) || e) }; }
     if (!v.take) return { take: false, code: v.code, why: v.why };
     const key = keyOf();
     const s = { key, hostId, dm: v.dm, sid: null, source: null, codec: null, startedAt: now(), state: 'new', stats: null, path: null, ended: null, cands: [], seq: 0, waiters: [], lastPoll: now(), relay: null, direct, relayLines: [] };
@@ -194,8 +218,15 @@ function create({ access, log = console, now = Date.now, idleMs = L.idleMs, swee
     // the leg's spec rides the offer: the relay's port, the session's key (over the device link only) and this hub's addresses
     const relayLeg = s.relay && s.relay.leg ? { port: s.relay.port, key: s.relay.leg.key.toString('base64'), hosts: ips().filter((ip) => /^\d{1,3}(\.\d{1,3}){3}$/.test(String(ip))).slice(0, L.legTargets) } : null;
     let r;
+    const sourceId = v.sourceId != null ? v.sourceId : src ? src.id : null; // the verdict's own (a fake source's file), else the page's choice
+    const offer = () => v.dm.streamOffer({ sourceKind: v.source, sourceId, maxKbps, relay, ...(relayLeg ? { relayLeg } : {}) }, { onPush: (m) => onPush(s, m) });
     try {
-      r = await v.dm.streamOffer({ sourceKind: v.source, sourceId: v.sourceId, maxKbps, relay, ...(relayLeg ? { relayLeg } : {}) }, { onPush: (m) => onPush(s, m) });
+      r = await offer();
+      if (r && !r.ok && r.code === 'no_helper' && r.helper) { // a Mac without its screen helper: this hub's prebuilt, then once more
+        const p = await pushMacHelper(v.dm, r.helper, helpersDir);
+        log.log?.(`[stream] ${hostId}: the Mac has no screen helper ${r.helper.version} — ${p.ok ? `pushed this hub's prebuilt (${p.size} bytes)` : p.error}`);
+        if (p.ok) r = await offer(); else r = { ...r, error: `${r.error} — ${p.error}` };
+      }
     } catch (e) {
       closeRelay(s); sessions.delete(key);
       return { take: false, code: (e && e.code) === 'host_needs_daemon' ? 'agent_too_old' : 'offer_failed', why: String((e && e.message) || e) };
@@ -264,4 +295,4 @@ function create({ access, log = console, now = Date.now, idleMs = L.idleMs, swee
   return { start, answer, candidate, restart, poll, notePath, stop, facts, shutdown };
 }
 
-module.exports = { create, hubIps, stripHosts, withRelay };
+module.exports = { create, hubIps, stripHosts, withRelay, pushMacHelper, HELPERS_DIR };

@@ -32,6 +32,9 @@ data/bin/agent-cli-text.js
 # file is the dirty-tree-blocks-git-pull class). Boot reinstalls it when missing.
 data/bin/rclone
 data/bin/rclone-dl.zip
+# lane stream-p3m-build: the prebuilt Mac screen helper (scripts/build-mac-helper.sh / the mac-helper workflow's release
+# asset) the hub pushes to a Mac with no compiler — a binary, placed by the publish step, never history
+data/bin/helpers/
 # heavy-tier release-gate results (scripts/ci.mjs --heavy): <sha>.{green,red,pid,log}
 # — local run records, never history. Already covered by data/* above; spelled
 # out because a reader looking for "where does the push-blocking marker live"

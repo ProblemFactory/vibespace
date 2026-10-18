@@ -650,13 +650,13 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
    *  capability and a source — this instance's fake source when it names one (VIBESPACE_STREAM_FAKE_SOURCE, for the suites
    *  and demos), else a Windows agent's own screen (`stream-screen`, lane stream-p1b-screen). Asks NOTHING of the machine (its hello is in hand); every "no"
    *  is named and the window shows the VNC picture. → { take, source, code, why, dm, platform, sourceId } */
-  async function streamRung(hostId) {
+  async function streamRung(hostId, { want = null } = {}) {
     if (isLocal(hostId)) return { take: false, source: null, code: 'not_desktop_machine', why: 'this machine\'s own desktop is the Desktop window', dm: null, platform: null, sourceId: null };
     const dm = await deviceOf(hostId);
     let info = {};
     try { const st = dm && dm.status ? dm.status() : null; info = (st && st.connected && st.info) || {}; } catch { info = {}; }
     const fake = String((env() || {}).VIBESPACE_STREAM_FAKE_SOURCE || '') || null;
-    const v = SMOD.streamRungVerdict({ capabilities: info.capabilities || [], desktop: M.DESKTOP_PLATFORMS.includes(info.platform), platform: info.platform || null, fakeSource: fake });
+    const v = SMOD.streamRungVerdict({ capabilities: info.capabilities || [], desktop: M.DESKTOP_PLATFORMS.includes(info.platform), platform: info.platform || null, fakeSource: fake, want }); // want: 'window' = ONE window (lane stream-p3m-build)
     return { ...v, dm, platform: info.platform || null };
   }
   // ── design q-024 r1 §1.3–§1.4 (lane remoteapp-r1b): THE REMOTEAPP SETTINGS CARD'S DOORS — the owner's (the routes refuse an agent token) ──

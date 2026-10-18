@@ -30,6 +30,12 @@
  *   flvReader            the encoder's output: FLV (length-framed — an Annex-B pipe only shows a picture's end when the NEXT
  *                        one starts, a frame of latency) → access units { nalus, key, tsMs }, SPS/PPS put in front of every
  *                        key frame (a browser that joins at a key frame needs them; FLV carries them once)
+ *   THE MAC (lane stream-p3m-build) planScreen's darwin branch = planMacScreen: ONE helper (tools/vibespace-screen —
+ *                        ScreenCaptureKit + VideoToolbox + CGEvent) at a FIXED path (macHelperPaths), spawned DISCLAIMED
+ *                        (macHelperSpawn), built on the Mac (macBuildPlan) or pushed prebuilt; its facts (parseMacFacts);
+ *                        the whole display or ONE window (windowSourceOf — the `source: 'window'` shape) on the size ladder
+ *                        (MAC_LADDER: 1440p60 / 4K30 — measured); no mapping road (SCK hands sRGB exact); the input's
+ *                        target from where the picture sits (macInputTarget → macPoint, global points)
  */
 
 // ── THE COLOUR MAPPING ───────────────────────────────────────────────────────────────────────────────────────────────
@@ -264,8 +270,10 @@ function directArgv(plan, kbps = plan.kbps) {
  * op's answer); `display` = a display id (`\\.\DISPLAY2`) or null = the primary. → { ok, mode, display, origin, w, h, fps,
  * kbps, gop, white, tone, encoder, note } | { ok: false, code, error }
  */
-function planScreen(facts, { display = null, fps = SCREEN_DEFAULTS.fps, kbps = 8000, tone = TONE_DEFAULT } = {}) {
+function planScreen(facts, opts = {}) {
   const f = facts || {};
+  if (f.platform === 'darwin') return planMacScreen(f, opts); // lane stream-p3m-build: the Mac's helper road
+  const { display = null, fps = SCREEN_DEFAULTS.fps, kbps = 8000, tone = TONE_DEFAULT } = opts || {};
   if (f.platform !== 'win32') return { ok: false, code: 'not_windows', error: `the screen source captures a Windows desktop (this machine runs ${f.platform || 'an unknown system'})` };
   if (f.displaysError) return { ok: false, code: 'facts_failed', error: `the machine's screen facts could not be read (${f.displaysError})` };
   const fv = ffmpegVerdict(f.ffmpeg);
@@ -344,8 +352,149 @@ function flvReader() {
   return { push };
 }
 
+// ── THE MAC (lane stream-p3m-build — design q-041 r3 §1/§3 P3m; every number: lane stream-p3m-probe's report) ──────────
+// The picture comes from ONE helper, tools/vibespace-screen/vibespace-screen.swift: ScreenCaptureKit hands the SDR picture
+// EXACT when asked for sRGB (no tone-map — the Mac has no mapping road), VideoToolbox forces a key on the SAME frame and
+// follows a bitrate LIVE (no encoder restart), the pictures ride FLV on stdout (flvReader above — no new parser), and CGEvent
+// posts the viewer's input. THE TCC LAW: macOS keys Screen Recording / Accessibility on the RESPONSIBLE process — a plain
+// child of the agent is the agent's node BY PATH — so the helper is spawned DISCLAIMED (its own `--disclaim` re-spawn), lives
+// at a FIXED path with its own version and is replaced only when the shipped version differs (an ad-hoc grant is keyed to
+// path + cdhash: a new binary must be granted again — helper_changed_regrant). It never asks for a grant and never prompts
+// (a background agent cannot: tccd "does not allow prompting"); a refusal names the Settings pane (MAC_SETTINGS).
+const MAC_HELPER = Object.freeze({ name: 'vibespace-screen', dir: Object.freeze(['.vibespace', 'helpers']), target: 'macos15.0', archs: Object.freeze(['arm64', 'x86_64']) });
+const MAC_SETTINGS = Object.freeze({
+  screen: 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture',
+  accessibility: 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility',
+});
+// the size ladder (measured on an M4 Pro, low-latency rate control, real frames): 4K60 is out of reach (37 fps real, serial
+// 17–29 ms a frame); 1440p (SCK scales on the GPU) holds 57 fps at 11.9 ms, 4K at 30 fps 18.7 ms. A display or window that
+// fits 2560×1600 streams native at 60; a larger one is scaled to 2560×1440 at 60, or (`quality: 'full'`) native at 30.
+const MAC_LADDER = Object.freeze([
+  Object.freeze({ id: '1440p60', maxW: 2560, maxH: 1600, fitW: 2560, fitH: 1440, fps: 60 }),
+  Object.freeze({ id: '4k30', maxW: 3840, maxH: 2400, fitW: 3840, fitH: 2400, fps: 30 }),
+]);
+/** The helper's place on the Mac (home = the agent user's): the binary, its version file, its state, a pushed prebuilt. */
+function macHelperPaths(home) {
+  const dir = [String(home || '').replace(/\/+$/, ''), ...MAC_HELPER.dir].join('/'), bin = `${dir}/${MAC_HELPER.name}`;
+  return { dir, bin, version: `${bin}.version`, state: `${bin}.state.json`, incoming: (v) => `${bin}-${v}` };
+}
+/** The ONE file swiftc compiles: the version line, then the source (the binary says its own version). */
+const macHelperSourceFile = (version, source) => `let HELPER_VERSION = ${JSON.stringify(String(version))}\n${String(source)}`;
+/** The on-box build (the Command Line Tools' swiftc): both slices at once, lipo, ONE ad-hoc signature. → { slices, after } */
+function macBuildPlan({ swiftc, src, dir, out }) {
+  const slice = (a) => `${dir}/vibespace-screen-${a}`;
+  return {
+    slices: MAC_HELPER.archs.map((a) => ({ file: swiftc, args: ['-O', '-target', `${a}-apple-${MAC_HELPER.target}`, '-o', slice(a), src] })),
+    after: [{ file: '/usr/bin/lipo', args: ['-create', '-output', out, ...MAC_HELPER.archs.map(slice)] }, { file: '/usr/bin/codesign', args: ['-s', '-', '-f', out] }],
+  };
+}
+/** How the agent spawns the helper: DISCLAIMED — Node's spawn cannot set the responsibility attribute, so the helper's first
+ *  argument makes it re-spawn ITSELF with responsibility_spawnattrs_setdisclaim (the child is its own TCC client). */
+function macHelperSpawn(bin, cmd, args = []) { return { file: bin, args: ['--disclaim', cmd, ...args.map(String)], disclaim: true }; }
+
+const GRANT = (v) => (v === 'granted' || v === 'denied' ? v : 'unknown');
+const fin = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+/** The helper's `facts` line → { ok, version, disclaimed, tcc: { screen, accessibility }, locked, front, os, arch, displays:
+ *  [{ id, x, y, w, h (points), pw, ph (pixels), scale, main, hdr, asleep, name }], windows: [{ id, pid, app, bundle, title,
+ *  x, y, w, h, onScreen, minimized (true | false | null — only Accessibility can tell) }] } | { ok: false, code, error } */
+function parseMacFacts(stdout) {
+  let o = null;
+  for (const line of String(stdout || '').split(/\r?\n/)) { const l = line.trim(); if (!l.startsWith('{')) continue; try { const v = JSON.parse(l); if (v && v.t === 'facts') { o = v; break; } } catch { /* not ours */ } }
+  if (!o) return { ok: false, code: 'bad_output', error: 'the screen helper did not print its facts' };
+  const str = (v, n = 200) => (typeof v === 'string' ? v.slice(0, n) : null);
+  const displays = (Array.isArray(o.displays) ? o.displays : []).slice(0, 16).filter((d) => d && Number.isInteger(d.id) && fin(d.w) > 0 && fin(d.h) > 0).map((d) => ({
+    id: String(d.id), x: fin(d.x) || 0, y: fin(d.y) || 0, w: d.w, h: d.h, pw: fin(d.pw) || d.w, ph: fin(d.ph) || d.h, scale: fin(d.scale) || 1,
+    main: !!d.main, hdr: !!d.hdr, asleep: !!d.asleep, name: str(d.name, 80) }));
+  const windows = (Array.isArray(o.windows) ? o.windows : []).slice(0, 200).filter((w) => w && Number.isInteger(w.id) && fin(w.w) > 0 && fin(w.h) > 0).map((w) => ({
+    id: String(w.id), pid: Number.isInteger(w.pid) ? w.pid : 0, app: str(w.app, 80), bundle: str(w.bundle, 120), title: str(w.title), x: fin(w.x) || 0, y: fin(w.y) || 0, w: w.w, h: w.h,
+    onScreen: !!w.onScreen, minimized: typeof w.minimized === 'boolean' ? w.minimized : null }));
+  const t = o.tcc && typeof o.tcc === 'object' ? o.tcc : {};
+  return { ok: true, version: str(o.version, 40), disclaimed: typeof o.disclaimed === 'boolean' ? o.disclaimed : null, tcc: { screen: GRANT(t.screen), accessibility: GRANT(t.accessibility) },
+    locked: !!o.locked, front: Number.isInteger(o.front) ? o.front : null, os: str(o.os, 20), arch: str(o.arch, 10), displays, windows };
+}
+/** A window of the facts (+ the display it sits on) → THE single-window source shape, the one lane stream-p2w-build lands
+ *  for Windows (src/stream-window.js there): bounds = the captured rect on the machine's desktop in PHYSICAL pixels (a Mac's
+ *  points × its scale; the frame includes the 32 pt title bar), dpi 96 = 100 % (a 2× Mac = 192), id = the CGWindowID. */
+function windowSourceOf(w, display = null) {
+  if (!w) return null;
+  const s = (display && display.scale) || 1, px = (v) => Math.round(v * s);
+  return { kind: 'window', id: String(w.id), title: w.title == null ? null : String(w.title), app: w.app == null ? null : String(w.app),
+    bounds: { x: px(w.x), y: px(w.y), w: px(w.w), h: px(w.h) }, display: display ? display.id : null, dpi: Math.round(96 * s), minimized: w.minimized === true };
+}
+/** Fit pixels into a box, aspect kept, even sizes. */
+function fitEven(pw, ph, maxW, maxH) { const s = Math.min(1, maxW / pw, maxH / ph); return { w: Math.max(2, Math.round(pw * s) & ~1), h: Math.max(2, Math.round(ph * s) & ~1) }; }
+/** The size + rate for a picture of pw × ph pixels (the ladder above). */
+function macRungOf(pw, ph, { quality = null } = {}) {
+  const [hd, full] = MAC_LADDER;
+  if (pw <= hd.maxW && ph <= hd.maxH) return { rung: 'native60', ...fitEven(pw, ph, pw, ph), fps: hd.fps };
+  if (quality === 'full') return { rung: full.id, ...fitEven(pw, ph, full.fitW, full.fitH), fps: full.fps };
+  return { rung: hd.id, ...fitEven(pw, ph, hd.fitW, hd.fitH), fps: hd.fps };
+}
+const MAC_WHY = Object.freeze({
+  no_helper: 'the Mac has no screen helper yet and cannot build one (no Command Line Tools: run `xcode-select --install` on the Mac, or let the hub push its prebuilt helper)',
+  screen_permission: 'Screen Recording is off for vibespace-screen — on the Mac: System Settings → Privacy & Security → Screen & System Audio Recording → turn on vibespace-screen',
+  helper_changed_regrant: 'the screen helper was updated, so macOS asks for its permission again — on the Mac: System Settings → Privacy & Security → Screen & System Audio Recording → turn vibespace-screen off and on',
+  accessibility_permission: 'Accessibility is off for vibespace-screen (macOS drops its keys and clicks) — on the Mac: System Settings → Privacy & Security → Accessibility → turn on vibespace-screen',
+});
+/**
+ * The Mac's plan (planScreen's darwin branch). `facts` = the agent's darwin stream-facts { platform: 'darwin', helper: {
+ * state: 'ready' | …, code?, regrant, bin }, tcc, displays, windows }; `display` = a display id (null = the main one) or
+ * `window` = a window id (the single-window source). → { ok, mode: 'videotoolbox', kind: 'display' | 'window', display,
+ * window, origin, w, h, fps, kbps, rung, encoder, note, white: null, bin, args } | { ok: false, code, error, settings? }
+ */
+function planMacScreen(facts, { display = null, window = null, fps = null, kbps = 8000, quality = null } = {}) {
+  const f = facts || {};
+  const h = f.helper || {};
+  if (h.state !== 'ready' || !h.bin) return { ok: false, code: h.code || 'no_helper', error: h.error || MAC_WHY.no_helper };
+  const tcc = (f.tcc && f.tcc.screen) || 'unknown';
+  if (tcc !== 'granted') return { ok: false, code: h.regrant ? 'helper_changed_regrant' : 'screen_permission', error: h.regrant ? MAC_WHY.helper_changed_regrant : MAC_WHY.screen_permission, settings: MAC_SETTINGS.screen };
+  const ds = Array.isArray(f.displays) ? f.displays : [], ws = Array.isArray(f.windows) ? f.windows : [];
+  let kind = 'display', d = null, w = null, pw, ph;
+  if (window != null) {
+    kind = 'window';
+    w = ws.find((x) => x.id === String(window)) || null;
+    if (!w) return { ok: false, code: 'window_gone', error: `the window ${window} is not on the Mac any more` };
+    if (w.minimized === true) return { ok: false, code: 'window_minimized', error: 'the window is minimized — restore it to stream (a minimized window sends no picture)' };
+    const cx = w.x + w.w / 2, cy = w.y + w.h / 2;
+    d = ds.find((x) => cx >= x.x && cx < x.x + x.w && cy >= x.y && cy < x.y + x.h) || ds.find((x) => x.main) || ds[0] || null;
+    const s = d ? d.scale : 2;
+    pw = w.w * s; ph = w.h * s;
+  } else {
+    d = display != null ? ds.find((x) => x.id === String(display)) || null : ds.find((x) => x.main) || ds[0] || null;
+    if (!d) return { ok: false, code: 'display_gone', error: display != null ? `the display ${display} is not connected to the Mac any more` : 'the Mac shows no display' };
+    pw = d.pw; ph = d.ph;
+  }
+  const r = macRungOf(pw, ph, { quality });
+  const rate = Math.max(SCREEN_DEFAULTS.minKbps, Math.round(Number(kbps) || 8000));
+  const fr = fps != null ? Math.max(1, Math.min(r.fps, Math.round(Number(fps) || r.fps))) : r.fps;
+  const args = ['capture', kind === 'window' ? '--window' : '--display', kind === 'window' ? w.id : d.id, '--fps', String(fr), '--size', `${r.w}x${r.h}`, '--kbps', String(rate)];
+  return { ok: true, mode: 'videotoolbox', kind, display: d ? { id: d.id } : null, window: windowSourceOf(w, d), origin: { x: 0, y: 0 }, w: r.w, h: r.h, fps: fr, kbps: rate, rung: r.rung,
+    encoder: { id: 'videotoolbox', label: 'VideoToolbox', hw: true }, note: null, white: null, bin: h.bin, args };
+}
+/** Where the picture sits on the Mac (the helper's `started` / `frame` line: its frame in global points, the picture's
+ *  pixels, a window's app + id) → the input's target { pid (0 = the frontmost app — a display), wid (the window the keys
+ *  must reach: an app's keys land in ITS key window — measured), ox, oy, sx, sy } (points per picture pixel). */
+function macInputTarget(info) {
+  const fr = info && info.frame, w = Number(info && info.w), h = Number(info && info.h);
+  if (!fr || !(w > 0) || !(h > 0) || !(fr.w > 0) || !(fr.h > 0)) return null;
+  const pid = Number.isInteger(info.pid) && info.pid > 0 ? info.pid : 0;
+  return { pid, wid: pid && Number.isInteger(info.window) && info.window > 0 ? info.window : 0, ox: Number(fr.x) || 0, oy: Number(fr.y) || 0, sx: fr.w / w, sy: fr.h / h };
+}
+/** A picture pixel → the Mac's global point (2 decimals). No target = the pixel already is a point. */
+function macPoint(target, x, y) {
+  const r2 = (v) => Math.round(v * 100) / 100;
+  if (!target) return { x: r2(x), y: r2(y) };
+  return { x: r2(target.ox + x * target.sx), y: r2(target.oy + y * target.sy) };
+}
+/** VideoToolbox follows a bitrate LIVE (no restart, unlike ffmpeg's CLI): follow the estimate, at most once a second and only
+ *  on a ≥ 10 % move, rounded to 100 kbps, never under the floor or over the session's cap. → { change, kbps } */
+const MAC_KBPS_RULE = Object.freeze({ minGapMs: 1000, band: 0.1, stepKbps: 100 });
+const macKbpsDecision = (o) => kbpsDecision(o, MAC_KBPS_RULE);
+
 module.exports = {
   halfToFloat, srgbOetf, TONE_DEFAULT, toneCurve, mapLinear, srgb8OfHalf, buildLut, nv12FromHalf, nv12Bytes, CALIBRATION,
   ENCODER_LADDER, pickEncoder, FFMPEG_MIN_MAJOR, ffmpegCandidates, parseFfmpegFacts, ffmpegVerdict, STREAM_FACTS_PS, parseStreamFacts,
   SCREEN_DEFAULTS, planScreen, captureArgv, encodeArgv, directArgv, KBPS_RULE, kbpsDecision, flvReader,
+  MAC_HELPER, MAC_SETTINGS, MAC_LADDER, MAC_WHY, macHelperPaths, macHelperSourceFile, macBuildPlan, macHelperSpawn, parseMacFacts, windowSourceOf,
+  macRungOf, planMacScreen, macInputTarget, macPoint, MAC_KBPS_RULE, macKbpsDecision,
 };

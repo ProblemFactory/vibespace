@@ -9,7 +9,10 @@
  *                                    transport-cc) and every bound (sessions per agent, poll, orphan grace, restart budget …)
  *   streamRungVerdict(facts)         may THIS machine's desktop open as a stream, and from which source — judged against the
  *                                    `webrtc` row of DISPLAY_BACKENDS (its `needs` = the AGENT's capabilities) → { take, source,
- *                                    code, why }; every "no" is named and the window shows the VNC picture
+ *                                    code, why }; every "no" is named and the window shows the VNC picture. A Mac (lane
+ *                                    stream-p3m-build): its agent's `stream-mac` (the screen helper) — the whole display, or ONE
+ *                                    window (`want: 'window'` + `stream-window`); an older Mac agent ⇒ agent_too_old
+ *   streamSourceOf(raw)              the page's choice of source (the stream/start body) → { kind: 'display' | 'window', id } | null
  *   streamStep(st, event)            THE SIGNALING STATE MACHINE the page runs (idle → starting → offered → connecting → playing
  *                                    ⇄ restarting → fallback | stopped) → { state, restarts, action, code }
  *   fallbackVerdict(facts)           when a sick connection becomes a fallback to the VNC picture (after the restart budget)
@@ -37,7 +40,9 @@ const STREAM_CODEC = Object.freeze({
   fmtp: 'level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f',
   rtcpFeedback: Object.freeze([Object.freeze({ type: 'nack' }), Object.freeze({ type: 'nack', parameter: 'pli' }), Object.freeze({ type: 'transport-cc' })]),
 });
-const STREAM_SOURCES = Object.freeze(['screen', 'fake']);
+const STREAM_SOURCES = Object.freeze(['screen', 'fake', 'window']); // 'window' = ONE window of the machine (lane stream-p3m-build on a Mac; stream-p2w-build on Windows)
+const MAC_CAPABILITY = 'stream-mac';       // the agent captures a Mac's screen through its helper (an older Mac agent already says stream-screen)
+const WINDOW_CAPABILITY = 'stream-window'; // the agent captures ONE window (the shared seam with lane stream-p2w-build)
 const STREAM_LIMITS = Object.freeze({
   maxKbpsDefault: 8000, maxKbpsMin: 300, maxKbpsMax: 50000,
   sessionsPerAgent: 2,        // a daemon serves at most two live streams (a desk window and a phone beside it)
@@ -63,10 +68,12 @@ const RUNG_ID = 'webrtc';
  * Windows / macOS machine (the access layer's verdict); `platform` = the agent's; `fakeSource` = the instance names a fake
  * source file (tests, demos — its path, handed back as `sourceId`). The source: 'fake' when the instance names one (an
  * explicit override wins — lane stream-p1b-screen), else 'screen' when the agent captures its screen (the `stream-screen`
- * capability — a Windows agent; a Mac's capture is P3), else no_screen_source.
+ * capability — a Windows agent), a Mac's when its agent has `stream-mac` (lane stream-p3m-build — an older Mac agent says
+ * stream-screen but cannot: agent_too_old), else no_screen_source. `want: 'window'` = ONE window: a Mac agent with
+ * `stream-window` → source 'window'; any other machine ⇒ no_window_source (its sourceId comes from the page, not here).
  * → { take, source, sourceId, code, why }
  */
-function streamRungVerdict({ capabilities = [], desktop = false, platform = null, fakeSource = null, table = B.DISPLAY_BACKENDS } = {}) {
+function streamRungVerdict({ capabilities = [], desktop = false, platform = null, fakeSource = null, want = null, table = B.DISPLAY_BACKENDS } = {}) {
   const row = B.backendById(RUNG_ID, table);
   const caps = Array.isArray(capabilities) ? capabilities : [];
   if (!row || row.wired === false) return { take: false, source: null, code: 'not_wired', why: 'the WebRTC stream rung is not wired on this instance' };
@@ -74,8 +81,21 @@ function streamRungVerdict({ capabilities = [], desktop = false, platform = null
   const met = row.needs.find((group) => group.every((c) => /^agent:/.test(c) && caps.includes(c.slice(6))));
   if (!met) return { take: false, source: null, code: 'agent_too_old', why: 'the machine\'s agent cannot stream yet — update it' };
   if (fakeSource) return { take: true, source: 'fake', sourceId: String(fakeSource), code: null, why: null };
+  if (platform === 'darwin') {
+    if (!caps.includes(MAC_CAPABILITY) || (want === 'window' && !caps.includes(WINDOW_CAPABILITY))) return { take: false, source: null, code: 'agent_too_old', why: 'the Mac\'s agent cannot stream its screen yet — update it' };
+    return { take: true, source: want === 'window' ? 'window' : 'screen', sourceId: null, code: null, why: null };
+  }
+  if (want === 'window') return { take: false, source: null, code: 'no_window_source', why: 'the machine\'s agent cannot stream one window yet' };
   if (caps.includes('stream-screen') && platform === 'win32') return { take: true, source: 'screen', sourceId: null, code: null, why: null };
   return { take: false, source: null, code: 'no_screen_source', why: 'the machine\'s agent cannot capture its screen yet' };
+}
+
+/** The page's choice of source (the stream/start body) → { kind: 'display' | 'window', id } | null (= the main display). An id
+ *  is a display's (a Mac's CGDirectDisplayID, Windows' \\.\DISPLAY2) or a window's (CGWindowID / HWND, decimal). */
+function streamSourceOf(raw) {
+  if (!raw || typeof raw !== 'object' || (raw.kind !== 'window' && raw.kind !== 'display')) return null;
+  const id = Number.isInteger(raw.id) && raw.id >= 0 ? String(raw.id) : typeof raw.id === 'string' ? raw.id.trim() : '';
+  return /^[A-Za-z0-9\\.:_-]{1,40}$/.test(id) ? { kind: raw.kind, id } : null;
 }
 
 // ── THE SIGNALING STATE MACHINE (the page's) ────────────────────────────────────────────────────────────────────────
@@ -358,7 +378,7 @@ function firewallRuleCommand(program) {
 }
 
 module.exports = {
-  STREAM_CODEC, STREAM_SOURCES, STREAM_LIMITS, RUNG_ID, streamRungVerdict, STREAM_STATES, STREAM_EVENTS, streamStep, fallbackVerdict,
+  STREAM_CODEC, STREAM_SOURCES, MAC_CAPABILITY, WINDOW_CAPABILITY, STREAM_LIMITS, RUNG_ID, streamRungVerdict, streamSourceOf, STREAM_STATES, STREAM_EVENTS, streamStep, fallbackVerdict,
   videoToSource, INPUT_KINDS, inputEventOf, wheelUnitsOf, statsOf, relayFrame, relayUnframe, relayCandidates,
   LEG, isLegPacket, legControl, legData, legParse, legPingVerdict, relayPathOf, directInboundOf, firewallRuleCommand,
 };

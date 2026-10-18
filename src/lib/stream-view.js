@@ -58,7 +58,7 @@ export function createStreamView(host, opts = {}) {
     if (!a || a.error) throw Object.assign(new Error((a && a.error) || 'the answer did not reach the machine'), { code: (a && a.code) || 'answer_failed' });
   }
   async function start() {
-    const r = await post(`${BASE}/start`, { host: hostId }).catch(() => null);
+    const r = await post(`${BASE}/start`, { host: hostId, ...(opts.source ? { source: opts.source } : {}) }).catch(() => null); // opts.source: a display / ONE window (lane stream-p3m-build)
     if (disposed) { if (r && r.key) post(`${BASE}/stop`, { key: r.key, why: 'closed' }); return; }
     if (!r || r.error || !r.take) { why = (r && (r.why || r.error)) || null; step('refused', (r && r.code) || 'start_failed'); return; }
     taken = true; key = r.key;

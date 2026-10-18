@@ -1,0 +1,231 @@
+'use strict';
+/**
+ * THE MAC SCREEN SOURCE — a paired Mac's whole display or ONE of its windows as the stream's picture (DEVICE: inside agentd;
+ * design q-041 r3 §1/§3 P3m, lane stream-p3m-build; every number: lane stream-p3m-probe's report). createScreen's darwin
+ * branch (src/agentd/stream-screen.js) IS this file — the same `{ facts, source }` and the same source interface:
+ *   { kind: 'screen', origin, fps, start(onAccessUnit, onEnd), stop(), requestKeyframe(), setTargetKbps(kbps), stats(), inputTarget() }
+ * What runs is decided by src/stream-plan.js planMacScreen (PURE); this file keeps THE HELPER and spawns it.
+ *
+ * THE HELPER (tools/vibespace-screen/vibespace-screen.swift; its text rides this bundle — src/agentd/mac-helper-source.js):
+ *   one binary at a FIXED path, ~/.vibespace/helpers/vibespace-screen (+ .version, .state.json — SP.macHelperPaths). It is
+ *   spawned DISCLAIMED (SP.macHelperSpawn: its own `--disclaim` re-spawn) so macOS keys Screen Recording / Accessibility on
+ *   IT — never on this agent's node (a plain child of the agent is node BY PATH: measured). ensure(): the version file says the
+ *   shipped VERSION ⇒ ready. Else, in order: the hub's prebuilt pushed beside it (`vibespace-screen-<VERSION>` — src/server/
+ *   desktop-webrtc.js pushes it over the device link when a stream finds no helper) · built HERE when a compiler exists (both
+ *   slices at once, lipo, one ad-hoc signature — SP.macBuildPlan; the compiler is found by FILE under `xcode-select -p`, never
+ *   by running the /usr/bin trampoline first, which opens the "install the developer tools" dialog on the owner's screen) ·
+ *   else `no_helper` naming both recipes. A REPLACED helper whose old version held its Screen Recording grant is a NEW TCC
+ *   client (an ad-hoc grant = path + cdhash: measured), so its state says `regrant` until the facts see the grant again — the
+ *   plan then refuses `helper_changed_regrant`, never a bare screen_permission.
+ * FACTS (`stream-facts` on a Mac): the helper's own (run disclaimed, so its TCC answer is ITS grant) — displays, windows, TCC,
+ *   the lock, its version — and the helper's state; kept FACTS_MS (a window source re-reads once when its window is not in them).
+ * THE SOURCE: `vibespace-screen --disclaim capture …` → FLV on stdout (SP.flvReader — no new parser), `key` / `bps <n>` on
+ *   stdin (a key on the SAME frame; the bitrate LIVE — SP.macKbpsDecision, no encoder restart), JSON lines on stderr (started
+ *   → the input's target, frame → a window that moved, stats once a second, end {code}). ENDINGS BY NAME: the helper's end code
+ *   (window_minimized, window_gone, display_gone, screen_permission, encoder_failed, capture_failed); an exit without one =
+ *   capture_exited (its last stderr line logged).
+ */
+const SP = require('../stream-plan.js');
+const SRC = require('./mac-helper-source.js');
+
+const FACTS_MS = 30000;
+const RUN_MS = 20000;          // one facts run
+const BUILD_MS = 120000;       // one swiftc slice at most (measured ≈ 4–6 s a slice on an M4 Pro)
+const TAIL = 3;
+const named = (code, error, extra) => ({ ok: false, code, error, ...(extra || {}) });
+const RECIPE = 'on the Mac: `xcode-select --install` (the Command Line Tools — the agent then builds its screen helper itself), or put the release\'s prebuilt helper in the hub\'s data/bin/helpers/';
+
+/** THE HELPER of this Mac: its fixed place, version, build / prebuilt, TCC memory. */
+function createMacHelper({ execFile, fs, home, log = () => { }, now = Date.now, version = SRC.VERSION, source = SRC.SOURCE, env = process.env } = {}) {
+  const P = SP.macHelperPaths(home);
+  let building = null;
+  const run = (file, args, timeout = RUN_MS) => new Promise((resolve) => {
+    try { execFile(file, args, { env, timeout, maxBuffer: 4 << 20, encoding: 'utf8' }, (err, stdout, stderr) => resolve({ err, stdout: String(stdout || ''), stderr: String(stderr || '') })); } catch (e) { resolve({ err: e, stdout: '', stderr: '' }); }
+  });
+  const isFile = (f) => { try { return fs.statSync(f).isFile(); } catch { return false; } };
+  const installed = () => { try { return fs.readFileSync(P.version, 'utf8').trim() || null; } catch { return null; } };
+  const readState = () => { try { const o = JSON.parse(fs.readFileSync(P.state, 'utf8')); return o && typeof o === 'object' ? o : {}; } catch { return {}; } };
+  const writeState = (o) => { try { fs.mkdirSync(P.dir, { recursive: true }); fs.writeFileSync(P.state + '.tmp', JSON.stringify(o)); fs.renameSync(P.state + '.tmp', P.state); } catch (e) { log(`[stream] mac helper state not written (${e && e.code})`); } };
+  /** A compiler on this Mac — by FILE (the Command Line Tools or Xcode under `xcode-select -p`). → '/usr/bin/swiftc' | null */
+  async function compiler() {
+    const r = await run('/usr/bin/xcode-select', ['-p'], 5000);
+    const dirs = [...new Set([r.err ? '' : r.stdout.trim(), '/Library/Developer/CommandLineTools'].filter(Boolean))];
+    for (const d of dirs) for (const f of [`${d}/usr/bin/swiftc`, `${d}/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc`]) if (isFile(f)) return '/usr/bin/swiftc'; // statSync follows the CLT's swiftc → swift-frontend link
+    return null;
+  }
+  async function build(swiftc) {
+    const dir = `${P.dir}/.build-${process.pid}`, src = `${dir}/vibespace-screen.swift`, out = `${dir}/vibespace-screen`;
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(src, SP.macHelperSourceFile(version, source));
+      const plan = SP.macBuildPlan({ swiftc, src, dir, out });
+      const t0 = now();
+      const slices = await Promise.all(plan.slices.map((s) => run(s.file, s.args, BUILD_MS)));
+      const bad = slices.find((r) => r.err);
+      if (bad) return named('no_helper', `the screen helper did not build here (${(bad.stderr.trim().split('\n').find((l) => /error/.test(l)) || (bad.err && bad.err.message) || '').slice(0, 200)}) — ${RECIPE}`);
+      for (const s of plan.after) { const r = await run(s.file, s.args, 30000); if (r.err) return named('no_helper', `the screen helper did not build here (${s.file}: ${(r.stderr.trim() || r.err.message).slice(0, 160)})`); }
+      fs.chmodSync(out, 0o755);
+      fs.renameSync(out, P.bin);
+      return { ok: true, ms: now() - t0 };
+    } catch (e) { return named('no_helper', `the screen helper did not build here (${(e && (e.code || e.message)) || e})`); }
+    finally { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ } }
+  }
+  function view(extra = {}) {
+    const st = readState();
+    return { state: 'ready', bin: P.bin, dir: P.dir, version, have: installed(), how: st.how || null, buildMs: st.buildMs == null ? null : st.buildMs, regrant: !!st.regrant, granted: !!st.granted, ...extra };
+  }
+  /** → { state: 'ready', bin, … } | { state: 'missing', code: 'no_helper', error, dir, version, have, canBuild } */
+  function ensure() {
+    const have = installed();
+    if (have === version && isFile(P.bin)) return Promise.resolve(view());
+    if (building) return building;
+    building = (async () => {
+      const st = readState();
+      const wasGranted = !!(have && st.version === have && (st.granted || st.regrant));
+      let how = null, ms = null, why = null;
+      try { fs.mkdirSync(P.dir, { recursive: true }); } catch { /* the build says it */ }
+      const pushed = P.incoming(version);
+      if (isFile(pushed)) {
+        try { fs.chmodSync(pushed, 0o755); fs.renameSync(pushed, P.bin); how = 'prebuilt'; } catch (e) { why = `the pushed helper could not be put in place (${e && e.code})`; }
+      }
+      const swiftc = how ? null : await compiler();
+      if (!how && swiftc) { const b = await build(swiftc); if (b.ok) { how = 'built'; ms = b.ms; } else why = b.error; }
+      if (!how) return { state: 'missing', code: 'no_helper', error: why || `the Mac has no screen helper ${version} and no compiler to build it — ${RECIPE}`, dir: P.dir, version, have, canBuild: !!swiftc, archs: SP.MAC_HELPER.archs };
+      try { fs.writeFileSync(P.version + '.tmp', version); fs.renameSync(P.version + '.tmp', P.version); } catch (e) { return { state: 'missing', code: 'no_helper', error: `the helper's version could not be written (${e && e.code})`, dir: P.dir, version, have, canBuild: !!swiftc }; }
+      writeState({ version, how, buildMs: ms, at: now(), granted: false, regrant: wasGranted, rowAsked: null });
+      log(`[stream] mac screen helper ${version} ${how}${ms != null ? ` in ${ms} ms` : ''}${have ? ` (replaces ${have}${wasGranted ? ' — its Screen Recording grant does not carry over: helper_changed_regrant' : ''})` : ''}`);
+      return view();
+    })().finally(() => { building = null; });
+    return building;
+  }
+  /** What the facts saw: the grant under THIS version (a grant seen clears regrant). */
+  // the state is about the INSTALLED helper: a state file that names no version (a helper put there by hand) is that one's
+  const current = () => { const st = readState(); return st.version === version || (!st.version && installed() === version) ? { ...st, version } : null; };
+  function sawTcc(screen) {
+    const st = current();
+    if (st && screen === 'granted' && (!st.granted || st.regrant)) writeState({ ...st, granted: true, regrant: false });
+  }
+  /** Ask the helper once per version to add its (off) row in Settings — the owner then only toggles it. */
+  function rowAsked() { const st = current(); if (!st || st.rowAsked === version) return true; writeState({ ...st, rowAsked: version }); return false; }
+  const spawnPlan = (cmd, args = []) => SP.macHelperSpawn(P.bin, cmd, args);
+  return { paths: P, version, ensure, sawTcc, rowAsked, spawnPlan, installed, run };
+}
+
+function createMacScreen({ spawn, execFile, env = process.env, fs = require('fs'), log = () => { }, now = Date.now, home = null, helper = null } = {}) {
+  const H = helper || createMacHelper({ execFile, fs, home: home || (env && env.HOME) || require('os').homedir(), log, now, env });
+  let memo = null, inflight = null;
+  async function readFacts() {
+    const h = await H.ensure();
+    const base = { ok: true, platform: 'darwin', at: now(), helper: h };
+    if (h.state !== 'ready') return { ...base, tcc: { screen: 'unknown', accessibility: 'unknown' }, displays: [], windows: [], primary: { code: h.code, error: h.error } };
+    const sp = H.spawnPlan('facts');
+    const r = await H.run(sp.file, sp.args, RUN_MS);
+    const d = SP.parseMacFacts(r.stdout);
+    if (!d.ok) return { ...base, tcc: { screen: 'unknown', accessibility: 'unknown' }, displays: [], windows: [], displaysError: (r.stderr.trim().split('\n').pop() || (r.err && r.err.message) || d.error).slice(0, 200), primary: { code: 'facts_failed', error: d.error } };
+    H.sawTcc(d.tcc.screen);
+    const facts = { ...base, helper: { ...h, ...(d.tcc.screen === 'granted' ? { regrant: false, granted: true } : {}), reports: d.version, disclaimed: d.disclaimed }, tcc: d.tcc, locked: d.locked, front: d.front, os: d.os, arch: d.arch, displays: d.displays, windows: d.windows };
+    const p = SP.planScreen(facts);
+    facts.primary = p.ok ? { mode: p.mode, encoder: p.encoder.label, display: p.display.id, w: p.w, h: p.h, fps: p.fps, rung: p.rung } : { code: p.code, error: p.error };
+    return facts;
+  }
+  function facts({ force = false } = {}) {
+    if (!force && memo && now() - memo.at < FACTS_MS) return Promise.resolve(memo);
+    if (!inflight) inflight = readFacts().then((f) => { memo = f.ok && f.helper && f.helper.state === 'ready' ? f : null; inflight = null; return f; }, (e) => { inflight = null; return named('facts_failed', String((e && e.message) || e)); });
+    return inflight;
+  }
+  /** A session's source: the plan from fresh-enough facts, or its refusal by name (no_helper carries what the hub needs to push one). */
+  async function source(msg = {}, { maxKbps = 8000 } = {}) {
+    const want = msg.sourceKind === 'window' ? { window: msg.sourceId == null ? '' : String(msg.sourceId) } : { display: msg.sourceId || null };
+    let f = await facts();
+    let plan = f.ok ? SP.planScreen(f, { ...want, kbps: maxKbps }) : f;
+    if (!plan.ok && f.ok) { f = await facts({ force: true }); plan = f.ok ? SP.planScreen(f, { ...want, kbps: maxKbps }) : f; } // a refusal re-reads once (a window opened a second ago, a grant just given)
+    if (!plan.ok) {
+      if (plan.code === 'no_helper' && f.helper) return { ...plan, helper: { dir: f.helper.dir, version: f.helper.version, archs: SP.MAC_HELPER.archs } };
+      if ((plan.code === 'screen_permission' || plan.code === 'helper_changed_regrant') && !H.rowAsked()) registerRow(f);
+      return plan;
+    }
+    return macSource(plan, maxKbps);
+  }
+  /** ONE capture that only adds the helper's (off) Screen Recording row — the owner then toggles it; it ends at once. */
+  function registerRow(f) {
+    const d = (f.displays || []).find((x) => x.main) || (f.displays || [])[0];
+    const sp = H.spawnPlan('capture', ['--display', d ? d.id : '1', '--register-row']);
+    try { const c = spawn(sp.file, sp.args, { env, stdio: ['ignore', 'ignore', 'ignore'] }); c.on('error', () => { }); } catch { /* the next refusal asks again */ }
+  }
+
+  function macSource(plan, maxKbps) {
+    const st = { aus: 0, keyWaitMs: null, keysAnswered: 0, rateChanges: 0, helper: null };
+    let child = null, onAu = null, onEnd = null, stopped = false, kbps = plan.kbps, rateAt = 0, keyAskedAt = null, t0 = 0, lastTs = -1, started = null, target = null, ended = null;
+    const tail = [];
+    const say = (line) => { if (child && child.stdin && !child.stdin.destroyed) { try { child.stdin.write(line + '\n'); } catch { /* its exit says it */ } } };
+    function finish(code, why) {
+      if (stopped) return;
+      stopped = true;
+      if (child && child.exitCode == null) { try { child.kill(); } catch { /* gone */ } }
+      log(`[stream] mac screen source ended: ${code}${why ? ` (${why})` : ''}`);
+      try { onEnd && onEnd(code); } catch { /* the host's */ }
+    }
+    function onLine(l) {
+      let o = null;
+      try { o = JSON.parse(l); } catch { tail.push(l.slice(0, 200)); if (tail.length > TAIL) tail.shift(); return; }
+      if (!o || typeof o !== 'object') return;
+      if (o.t === 'started') { started = o; target = SP.macInputTarget(o); }
+      else if (o.t === 'frame' && started) { started = { ...started, frame: o.frame }; target = SP.macInputTarget(started); }
+      else if (o.t === 'stats') st.helper = o;
+      else if (o.t === 'end') ended = { code: String(o.code || 'capture_failed').slice(0, 40), error: String(o.error || '').slice(0, 200) };
+    }
+    function startHelper() {
+      const sp = H.spawnPlan(plan.args[0], plan.args.slice(1));
+      const c = child = spawn(sp.file, sp.args, { env, stdio: ['pipe', 'pipe', 'pipe'] });
+      c.on('error', (e) => finish('capture_failed', `the screen helper: ${e && (e.code || e.message)}`));
+      c.on('exit', (code, sig) => { if (stopped) return; finish(ended ? ended.code : 'capture_exited', ended ? ended.error : `the screen helper exit ${code == null ? sig : code}${tail.length ? ': ' + tail[tail.length - 1] : ''}`); });
+      if (c.stdin) c.stdin.on('error', () => { /* its exit says it */ });
+      let buf = '';
+      c.stderr.setEncoding('utf8');
+      c.stderr.on('data', (d) => { buf += d; let i; while ((i = buf.indexOf('\n')) >= 0) { const l = buf.slice(0, i).trim(); buf = buf.slice(i + 1); if (l) onLine(l); } if (buf.length > 65536) buf = ''; });
+      const r = SP.flvReader();
+      c.stdout.on('data', (d) => {
+        if (stopped) return;
+        for (const ev of r.push(d)) {
+          if (ev.type === 'bad') { finish('encoder_failed', ev.error); return; }
+          const ts = Math.max(lastTs + 1, Math.round((Math.max(now(), t0) - t0) * 90));
+          lastTs = ts;
+          st.aus++;
+          if (ev.key && keyAskedAt != null) { st.keyWaitMs = now() - keyAskedAt; st.keysAnswered++; keyAskedAt = null; }
+          try { onAu({ nalus: ev.nalus.filter((n) => (n[0] & 0x1f) !== 9).map((n) => Buffer.from(n.buffer, n.byteOffset, n.length)), key: ev.key, ts90k: ts >>> 0 }); } catch { /* the host's */ }
+        }
+      });
+    }
+    return {
+      ok: true, kind: 'screen', origin: plan.origin, fps: plan.fps, mode: plan.mode, encoder: plan.encoder.label, window: plan.window,
+      start(onAccessUnit, onEnded) {
+        if (onAu || stopped) return;
+        onAu = onAccessUnit; onEnd = onEnded || null; t0 = now(); rateAt = t0;
+        if (keyAskedAt == null) keyAskedAt = t0; // the helper's first picture is a key frame
+        try { startHelper(); } catch (e) { finish('capture_failed', String((e && e.message) || e)); }
+        log(`[stream] mac screen source: ${plan.kind} ${plan.kind === 'window' ? plan.window.id : plan.display.id} ${plan.w}×${plan.h} @ ${plan.fps} fps (${plan.rung}), VideoToolbox ${kbps} kbps`);
+      },
+      stop() { if (stopped) return; stopped = true; say('quit'); const c = child; if (c) setTimeout(() => { if (c.exitCode == null) { try { c.kill(); } catch { /* gone */ } } }, 1000).unref?.(); },
+      requestKeyframe() { if (keyAskedAt == null) keyAskedAt = now(); say('key'); },
+      setTargetKbps(want) {
+        if (!onAu || stopped) return;
+        const d = SP.macKbpsDecision({ current: kbps, target: want, cap: maxKbps, lastAt: rateAt, now: now() });
+        if (!d.change) return;
+        kbps = d.kbps; rateAt = now(); st.rateChanges++;
+        say(`bps ${kbps * 1000}`);
+      },
+      stats() {
+        const h = st.helper || {};
+        return { mode: plan.mode, encoder: plan.encoder.label, encoderId: plan.encoder.id, note: plan.note, kind: plan.kind, display: plan.display ? plan.display.id : null, window: plan.window, w: plan.w, h: plan.h, rung: plan.rung, white: null, kbps,
+          encodeMs: h.encMs == null ? null : h.encMs, captureMs: h.capMs == null ? null : h.capMs, timing: 'helper', lowLatency: h.lowLatency == null ? null : h.lowLatency,
+          captured: h.captured || 0, idle: h.idle || 0, repeats: h.repeats || 0, aus: st.aus, dropped: h.dropped || 0, restarts: 0, rateChanges: st.rateChanges, keyWaitMs: st.keyWaitMs, keysAnswered: st.keysAnswered };
+      },
+      /** Where the picture sits on the Mac (the helper's started / frame lines) — the injector maps picture pixels with it. */
+      inputTarget() { return target; },
+    };
+  }
+
+  return { facts, source, helper: H };
+}
+
+module.exports = { createMacScreen, createMacHelper, FACTS_MS, RECIPE };
