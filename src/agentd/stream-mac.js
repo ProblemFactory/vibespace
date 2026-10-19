@@ -270,7 +270,9 @@ function createMacScreen({ spawn, execFile, env = process.env, fs = require('fs'
       ok: true, kind: 'screen', origin: plan.origin, fps: plan.fps, mode: plan.mode, encoder: plan.encoder.label, window: plan.window,
       // lane stream-mac-stall: THE SWITCHER's rows — the display streamed + the Mac's displays (the helper's facts this plan read; a
       // pick restarts the stream with `source: {kind: 'display', id}`): the strip showed none, so one display was all there was
-      ...(plan.kind === 'display' && plan.display ? { display: plan.display.id, displays: (f.displays || []).map((d) => ({ id: d.id, main: !!d.main, x: d.x, y: d.y, w: d.w, h: d.h, name: d.name || null })) } : {}),
+      // (lane desktop-display-modes: + primary, HDR and the real pixels pw × ph — the Windows rows' shape; x/y/w/h stay points)
+      ...(f.tcc ? { tcc: { accessibility: f.tcc.accessibility } } : {}), // lane desktop-display-modes commit 2: the page's Accessibility banner goes when a start's facts say granted
+      ...(plan.kind === 'display' && plan.display ? { display: plan.display.id, displays: (f.displays || []).map((d) => ({ id: d.id, main: !!d.main, primary: !!d.main, x: d.x, y: d.y, w: d.w, h: d.h, pw: d.pw, ph: d.ph, hdr: !!d.hdr, name: d.name || null })) } : {}),
       start(onAccessUnit, onEnded) {
         if (onAu || stopped) return;
         onAu = onAccessUnit; onEnd = onEnded || null; t0 = now(); rate.begin(t0);

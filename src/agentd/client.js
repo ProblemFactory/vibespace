@@ -982,7 +982,7 @@ class DeviceManager {
     if (onPush) this._streamWatches.set(sid, onPush);
     const forget = () => { if (fresh) this._streamWatches.delete(sid); };
     let r;
-    try { r = await this._request({ op: 'stream-offer', sid, sourceKind: params.sourceKind, sourceId: params.sourceId, maxKbps: params.maxKbps, relay: !!params.relay, ...(params.relayLeg ? { relayLeg: params.relayLeg } : {}), ...(params.fp16 ? { fp16: true } : {}), iceRestart: !fresh, timeoutMs }); } catch (e) { forget(); throw e; }
+    try { r = await this._request({ op: 'stream-offer', sid, sourceKind: params.sourceKind, sourceId: params.sourceId, maxKbps: params.maxKbps, relay: !!params.relay, ...(params.relayLeg ? { relayLeg: params.relayLeg } : {}), ...(params.fp16 ? { fp16: true } : {}), ...(params.share ? { share: params.share } : {}), iceRestart: !fresh, timeoutMs }); } catch (e) { forget(); throw e; }
     if (r.error) { forget(); throw new Error(r.error); }
     const res = r.result || { ok: false, code: 'offer_failed', error: 'no answer' };
     if (!res.ok) forget();

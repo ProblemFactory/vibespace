@@ -7,14 +7,18 @@
  * ask THIS file, so the three cannot disagree:
  *
  *   STREAM_CODEC / STREAM_LIMITS     the one codec offered (H.264 constrained baseline, packetization-mode 1, NACK + PLI +
- *                                    transport-cc) and every bound (sessions per agent, poll, orphan grace, restart budget …)
+ *                                    transport-cc) and every bound (the sessions cap, poll, orphan grace, restart budget …)
+ *   streamCapOf(displays)            THE PER-MACHINE CAP (lane desktop-display-modes): a picture per display (a window per
+ *                                    display, or all of them in one window) + one more (a phone beside them), at most
+ *                                    STREAM_LIMITS.sessionsCap — the daemon refuses past it (`too_many_streams`, the count named)
  *   streamRungVerdict(facts)         may THIS machine's desktop open as a stream, and from which source — judged against the
  *                                    `webrtc` row of DISPLAY_BACKENDS (its `needs` = the AGENT's capabilities) → { take, source,
  *                                    code, why }; every "no" is named and the window shows the VNC picture. A Mac (lane
  *                                    stream-p3m-build): its agent's `stream-mac` (the screen helper) — the whole display, or ONE
  *                                    window (`want: 'window'` + `stream-window`); an older Mac agent ⇒ agent_too_old. A Windows
  *                                    machine's ONE window (lane stream-p2w-build): the same `want: 'window'` + `stream-window`
- *   streamSourceOf(raw)              the page's choice of source (the stream/start body) → { kind: 'display' | 'window', id } | null
+ *   streamSourceOf(raw)              the page's choice of source (the stream/start body) → { kind: 'display' | 'window', id, share? } | null
+ *                                    (share 2–4: ② — that many displays in one window; the HDR road maps a smaller picture)
  *   streamStep(st, event)            THE SIGNALING STATE MACHINE the page runs (idle → starting → offered → connecting → playing
  *                                    ⇄ restarting → fallback | stopped) → { state, restarts, action, code }
  *   fallbackVerdict(facts)           when a sick connection becomes a fallback to the VNC picture (after the restart budget)
@@ -52,7 +56,7 @@ const MAC_CAPABILITY = 'stream-mac';       // the agent captures a Mac's screen 
 const WINDOW_CAPABILITY = SW.WINDOW_CAPABILITY; // 'stream-window': the agent captures ONE window — the one word of both platforms (src/stream-window.js; int304)
 const STREAM_LIMITS = Object.freeze({
   maxKbpsDefault: 8000, maxKbpsMin: 300, maxKbpsMax: 50000,
-  sessionsPerAgent: 2,        // a daemon serves at most two live streams (a desk window and a phone beside it)
+  sessionsCap: 4,             // a daemon serves at most a stream per display + one (a phone beside them), never more than this — streamCapOf
   orphanMs: 20000,            // a session whose device link died waits this long for the hub's re-arm, then stops
   idleMs: 30000,              // the hub stops a session no page polled for this long (the page closed without a word)
   goneMs: 3000,               // a page whose long poll closed unanswered (its tab closed, the browser quit) and that asked no new one within this ⇒ stopped (lane stream-window-fixes)
@@ -74,6 +78,13 @@ const STREAM_LIMITS = Object.freeze({
   // machine's own clipboard comes back (Windows — the app has read the paste by then)
   handoverEventsMax: 200, stillMaxBytes: 32 * 1024 * 1024, pasteBackMs: 2000,
 });
+/** THE PER-MACHINE CAP (lane desktop-display-modes): `displays` = how many the machine has (unknown ⇒ 1) → how many live streams
+ *  its daemon serves: one per display (① a window per display, ② all in one window) + 1 (a phone beside them), ≤ sessionsCap. */
+function streamCapOf(displays) {
+  const n = Number.isInteger(displays) && displays > 0 ? displays : 1;
+  return Math.min(STREAM_LIMITS.sessionsCap, n + 1);
+}
+
 const RUNG_ID = 'webrtc';
 
 /**
@@ -115,7 +126,9 @@ function streamRungVerdict({ capabilities = [], desktop = false, platform = null
 function streamSourceOf(raw) {
   if (!raw || typeof raw !== 'object' || (raw.kind !== 'window' && raw.kind !== 'display')) return null;
   const id = Number.isInteger(raw.id) && raw.id >= 0 ? String(raw.id) : typeof raw.id === 'string' ? raw.id.trim() : '';
-  return /^[A-Za-z0-9\\.:_-]{1,40}$/.test(id) ? { kind: raw.kind, id } : null;
+  if (!/^[A-Za-z0-9\\.:_-]{1,40}$/.test(id)) return null;
+  const share = raw.kind === 'display' && Number.isInteger(raw.share) && raw.share >= 2 && raw.share <= STREAM_LIMITS.sessionsCap ? raw.share : null; // lane desktop-display-modes ②: how many displays share the window
+  return share ? { kind: raw.kind, id, share } : { kind: raw.kind, id };
 }
 
 // ── THE SIGNALING STATE MACHINE (the page's) ────────────────────────────────────────────────────────────────────────
@@ -416,7 +429,7 @@ function firewallRuleCommand(program) {
 }
 
 module.exports = {
-  STREAM_CODEC, STREAM_SOURCES, MAC_CAPABILITY, WINDOW_CAPABILITY, STREAM_LIMITS, RUNG_ID, streamRungVerdict, streamSourceOf, STREAM_STATES, STREAM_EVENTS, streamStep, fallbackVerdict,
+  STREAM_CODEC, STREAM_SOURCES, MAC_CAPABILITY, WINDOW_CAPABILITY, STREAM_LIMITS, streamCapOf, RUNG_ID, streamRungVerdict, streamSourceOf, STREAM_STATES, STREAM_EVENTS, streamStep, fallbackVerdict,
   videoToSource, INPUT_KINDS, inputEventOf, wheelUnitsOf, statsOf, relayFrame, relayUnframe, relayCandidates,
   LEG, isLegPacket, legControl, legData, legParse, legPingVerdict, relayPathOf, streamNumbersOf, directInboundOf, firewallRuleCommand,
 };

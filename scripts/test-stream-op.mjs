@@ -23,7 +23,11 @@
 //      byte; THE COLOUR GATE through the real daemon (the owner's FP16 calibration frame → the worker's mapping → the NV12
 //      the encoder got: every patch ±1); the ffmpegs ran the plan's argvs; a PLI answered by the next key; capture /
 //      encoder death and an unplugged display end the session BY NAME; an SDR primary = the direct road; x264 only = said;
-//      no ffmpeg = no_ffmpeg naming where it looked
+//      no ffmpeg = no_ffmpeg naming where it looked; lane desktop-display-modes: the offer names the display streamed + the
+//      machine's displays (their own names — the switcher's rows on Windows too), a display picked = that display's offer, and
+//      THE PER-MACHINE CAP: two displays ⇒ three live streams (one per display + one), the fourth refused too_many_streams with
+//      its count (live 3, cap 3, displays 2); a capture that dies at START (8007000e) is asked again twice before the session ends;
+//      commit 2: an HDR display offered with `share: 2` (②) is mapped at every 2nd pixel (the encoder gets half the size, `scaled`)
 //   §9 THE RATE on the screen road (lane stream-mac-rate — every road's rule, src/stream-plan.js rateFollower): an echo restarts
 //      nothing; a shortfall that HOLDS 2 s restarts ONLY the encoder, once, at the display's floor (never under it; its first
 //      picture a key frame); a quiet 20 s climbs +25 % (the same module in-process, an injected clock, the fake ffmpeg)
@@ -376,6 +380,65 @@ const endedOf = (arr) => { const m = arr.find((x) => x.op === 'stream-stats' && 
   const r = await dms.streamOffer({ sourceKind: 'screen' });
   fs.renameSync(FF.exe + '.away', FF.exe);
   ok(r.ok === false && r.code === 'no_ffmpeg' && /PATH/.test(r.error) && /LOCALAPPDATA/.test(r.error) && /vs-probe/.test(r.error), 'no ffmpeg on the machine ⇒ the offer is refused as no_ffmpeg, naming where it looked (the page shows the VNC picture)', r);
+}
+{
+  // lane desktop-display-modes: THE SWITCHER's rows on Windows + THE PER-MACHINE CAP (two displays ⇒ a stream each + one = 3)
+  FF.set({ encoders: ['h264_nvenc', 'libx264'] });
+  setDisplays([{ ...D1, name: 'Desk 27' }, { ...D2, name: 'Side 32' }]);
+  await dms.streamFacts({ force: true });
+  const a = await dms.streamOffer({ sourceKind: 'screen' }), b2 = await dms.streamOffer({ sourceKind: 'screen', sourceId: D2.id });
+  const rowsOf = (o) => (o.source && o.source.displays ? o.source.displays.map((d) => [d.id, d.name, d.primary, d.hdr, d.x, d.w, d.capturable]) : null);
+  const want = [[D1.id, 'Desk 27', true, true, 0, 1280, true], [D2.id, 'Side 32', false, false, 1280, 1280, true]];
+  ok(a.ok && a.source.display === D1.id && JSON.stringify(rowsOf(a)) === JSON.stringify(want), 'a Windows screen offer names the display streamed (the primary) and the machine\'s displays — their own names, primary, HDR, geometry, capturable (the strip\'s switcher on Windows too)', a.source || a);
+  ok(b2.ok && b2.source.display === D2.id && b2.source.mode === 'direct' && JSON.stringify(rowsOf(b2)) === JSON.stringify(want), 'a display picked = THAT display\'s offer (the SDR one: the direct road), the same rows', b2.source || b2);
+  const c3 = await dms.streamOffer({ sourceKind: 'screen' }), d4 = await dms.streamOffer({ sourceKind: 'screen', sourceId: D2.id });
+  ok(c3.ok && d4.ok === false && d4.code === 'too_many_streams' && d4.live === 3 && d4.cap === 3 && d4.displays === 2 && /at most 3 — a stream per display \+ one, for its 2 displays/.test(d4.error), 'THE PER-MACHINE CAP: two displays ⇒ three live streams (a window per display + a phone); the fourth is refused too_many_streams, its count named (live 3 · cap 3 · 2 displays)', { c3: c3.ok, d4 });
+  for (const o of [a, b2, c3]) if (o.ok) await dms.streamStop(o.sid);
+  const again = await dms.streamOffer({ sourceKind: 'screen' });
+  ok(again.ok, 'a stream stopped frees its place: the next start is taken', again.code || again.ok);
+  if (again.ok) await dms.streamStop(again.sid);
+}
+{
+  // lane desktop-display-modes: a capture that dies at START — the owner box's second display: ddagrab «Failed to create Direct3D
+  // device (8007000e)» while the first streamed — is asked again (400 ms, 1.5 s) before the session ends by name
+  const FAIL = path.join(homeScr, 'fail-capture');
+  FF.set({ failCapture: FAIL });
+  fs.writeFileSync(FAIL, '1');
+  const pushA = [];
+  const a = await screenSession(pushA);
+  const plays = await until(() => pictures(a.b.got.rtp).length >= 10, 15000);
+  const sa = a.off.ok ? await dms.streamStats(a.off.sid) : {};
+  ok(a.off.ok && plays && sa.stats && sa.stats.screen.captureRetries === 1 && fs.readFileSync(FAIL, 'utf8') === '0' && !endedOf(pushA), 'a capture that could not start (8007000e) is asked again once and the stream plays (captureRetries 1)', sa.stats && sa.stats.screen);
+  if (a.off.ok) await dms.streamStop(a.off.sid);
+  a.b.pc.close();
+  fs.writeFileSync(FAIL, '3');
+  const pushB = [];
+  const r = await screenSession(pushB);
+  const ended = await until(() => endedOf(pushB), 12000);
+  ok(r.off.ok && ended && endedOf(pushB) === 'capture_exited' && fs.readFileSync(FAIL, 'utf8') === '0', 'one that never starts: asked again twice, then the session ends capture_exited by name (the page shows why)', { ended: endedOf(pushB), left: fs.readFileSync(FAIL, 'utf8') });
+  r.b.pc.close();
+  FF.set({ failCapture: null });
+}
+{
+  // lane desktop-display-modes commit 2 — ② ON THE HDR ROAD: a 2560×1440 HDR display offered with `share: 2` (two displays in one
+  // window) is captured whole and mapped at every 2nd pixel: the encoder gets 1280×720, the offer says `scaled`; alone it is whole
+  const D3 = { id: '\\\\.\\DISPLAY3', x: 0, y: 0, w: 2560, h: 1440, primary: true, hdr: true, white: SP.CALIBRATION.white, adapter: 0, output: 0, name: 'Wide 27' };
+  const RAW2 = path.join(homeScr, 'wide.f16'); fs.writeFileSync(RAW2, Buffer.alloc(D3.w * D3.h * 8, 0x3c)); // FP16 frames of the wide display
+  FF.set({ raw: RAW2 }); setDisplays([D3]); await dms.streamFacts({ force: true });
+  const n0 = ffRuns().length;
+  const b = standIn();
+  const off = await dms.streamOffer({ sourceKind: 'screen', share: 2 }, { onPush: (m) => { if (m.op === 'stream-ice' && m.candidate) b.pc.addIceCandidate(m.candidate).catch(() => { }); } });
+  if (off.ok) { await b.pc.setRemoteDescription(off.offer); await b.pc.setLocalDescription(await b.pc.createAnswer()); await dms.streamAnswer(off.sid, { answer: { type: 'answer', sdp: b.pc.localDescription.sdp } }); }
+  const flows = await until(() => pictures(b.got.rtp).length >= 10, 15000);
+  const st = off.ok ? await dms.streamStats(off.sid) : {};
+  const runs = ffRuns().slice(n0), enc = runs.find((a) => a.includes('pipe:0')) || [], cap = runs.find((a) => a.some((x) => /^ddagrab=/.test(x))) || [];
+  ok(off.ok && JSON.stringify(off.source.scaled) === JSON.stringify({ share: 2, step: 2, w: 1280, h: 720, from: { w: 2560, h: 1440 } }) && flows && enc[enc.indexOf('-video_size') + 1] === '1280x720' && cap.includes('hwdownload,format=rgbaf16le') && st.stats && st.stats.screen.step === 2 && st.stats.screen.w === 1280, 'shared by 2: the whole FP16 frame captured, mapped at every 2nd pixel — the encoder gets 1280×720, the offer says scaled {share 2, step 2, 1280×720 of 2560×1440}, the pictures flow', { scaled: off.source && off.source.scaled, video: enc[enc.indexOf('-video_size') + 1], step: st.stats && st.stats.screen.step });
+  if (off.ok) await dms.streamStop(off.sid);
+  b.pc.close();
+  const whole = await dms.streamOffer({ sourceKind: 'screen' });
+  ok(whole.ok && !whole.source.scaled, 'alone (no share): the whole picture, no `scaled`', whole.source || whole);
+  if (whole.ok) await dms.streamStop(whole.sid);
+  FF.set({ raw: rawFile }); setDisplays([D1, D2]); // the later sections read the same facts file
 }
 dms.stop(); endDaemonsOf(rootOf(homeScr));
 

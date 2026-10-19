@@ -252,6 +252,7 @@ const SOURCES = Object.freeze({
 function createStreamHost({ injector = null, log = () => { }, now = Date.now, loadWerift = () => require('werift'), screen = null, window = null, legHosts = () => [], program = process.platform === 'win32' ? process.execPath : null, pasteBackMs = L.pasteBackMs } = {}) {
   const sessions = new Map();
   let probeMemo = null; // the self-probe's answer, kept probeMemoMs (a second session within it asks nothing)
+  let displaysKnown = 0; // lane desktop-display-modes: how many displays the machine's screen source last named (THE CAP's input)
   let W = null;
   const werift = () => W || (W = loadWerift());
   const pushTo = (s, msg) => { if (!s.owner) return; try { s.owner.control(msg); } catch { /* the link died: the onDead path makes it an orphan */ } };
@@ -300,6 +301,7 @@ function createStreamHost({ injector = null, log = () => { }, now = Date.now, lo
     let ev = SM.inputEventOf(typeof raw === 'string' ? raw : Buffer.isBuffer(raw) ? raw.toString('utf8') : raw);
     if (ev.refused) { s.inputRefused = { code: ev.refused, at: now() }; return { refused: ev.refused }; }
     if (s.source && s.source.relative && typeof s.source.bounds === 'function') ev = SW.windowInputOf(ev, s.source.bounds()); // window pixels → the desktop (the window's live place)
+    if (lane === 'owner' && s.source && s.source.inputScale) ev = SP.scaledInputOf(ev, s.source.inputScale); // lane desktop-display-modes ②: the page's points on a smaller picture → the display's (an agent's come from the full-size still)
     if (ev.t === 'ack') { const sent = s.sentAt.get(ev.f); if (sent) { s.acks.push(now() - sent); if (s.acks.length > 30) s.acks.shift(); s.ackMs = [...s.acks].sort((a, b) => a - b)[s.acks.length >> 1]; } return { ack: true }; }
     if (!injector) { s.inputRefused = { code: 'input_unsupported', at: now() }; return { refused: 'input_unsupported' }; }
     if (lane === 'owner') {
@@ -463,11 +465,16 @@ function createStreamHost({ injector = null, log = () => { }, now = Date.now, lo
     const sdp = (s.pc && s.pc.localDescription && s.pc.localDescription.sdp) || '';
     return [...sdp.matchAll(/a=candidate:\S+ 1 udp \d+ (\d+\.\d+\.\d+\.\d+) \d+ typ host/g)].map((m) => m[1]);
   }
-  /** werift's own UDP host candidate the shims talk to: loopback when it gathered one, else its first IPv4 host. */
+  /** werift's own UDP host socket the shims talk to — over LOOPBACK, at its first IPv4 host candidate's port (lane
+   *  desktop-display-modes, measured on the owner's Windows box): werift binds its host sockets to the wildcard address, so
+   *  127.0.0.1:<port> reaches the same socket, and a loopback datagram is never filtered — while a datagram from the shim to the
+   *  machine's own LAN address IS (Windows' firewall filters it like any inbound datagram to an agent with no rule: the
+   *  self-probe's very rule) ⇒ before, no relayed check ever reached werift on a firewalled Windows machine. */
   function hostTarget(s) {
     const sdp = (s.pc && s.pc.localDescription && s.pc.localDescription.sdp) || '';
     const hosts = [...sdp.matchAll(/a=candidate:\S+ 1 udp \d+ (\d+\.\d+\.\d+\.\d+) (\d+) typ host/g)].map((m) => ({ ip: m[1], port: Number(m[2]) }));
-    return hosts.find((h) => h.ip === '127.0.0.1') || hosts[0] || null;
+    const h = hosts.find((x) => x.ip === '127.0.0.1') || hosts[0] || null;
+    return h ? { ip: '127.0.0.1', port: h.port } : null;
   }
 
   async function offer(msg, owner) {
@@ -481,7 +488,10 @@ function createStreamHost({ injector = null, log = () => { }, now = Date.now, lo
       return { ok: true, sid, offer: { type: 'offer', sdp: have.pc.localDescription.sdp }, restart: true };
     }
     if (have) return named('busy', 'that stream session already exists');
-    if (sessions.size >= L.sessionsPerAgent) return named('too_many_streams', `this machine already streams ${sessions.size} pictures (at most ${L.sessionsPerAgent})`);
+    // THE PER-MACHINE CAP (lane desktop-display-modes — src/stream-model.js streamCapOf): a stream per display + one; judged
+    // against the displays this machine's screen source names (the new source's own, once made), never past sessionsCap
+    const full = (n) => ({ ...named('too_many_streams', `this machine already streams ${sessions.size} pictures (at most ${SM.streamCapOf(n)} — a stream per display + one, for its ${Math.max(1, n)} display${n > 1 ? 's' : ''})`), live: sessions.size, cap: SM.streamCapOf(n), displays: Math.max(1, n) });
+    if (sessions.size >= SM.streamCapOf(displaysKnown)) return full(displaysKnown);
     const kind = String(msg.sourceKind || '');
     if (!SM.STREAM_SOURCES.includes(kind)) return named('bad_source', `unknown source kind ${JSON.stringify(kind.slice(0, 20))}`);
     const maxKbps = Math.min(L.maxKbpsMax, Math.max(L.maxKbpsMin, Number(msg.maxKbps) || L.maxKbpsDefault));
@@ -489,6 +499,8 @@ function createStreamHost({ injector = null, log = () => { }, now = Date.now, lo
     try { source = await SOURCES[kind](msg, { maxKbps }, { screen, window }); } catch (e) { return named('capture_failed', `the ${kind} source could not start (${(e && e.message) || e})`); }
     if (!source.ok) return source;
     if (sessions.has(sid)) { try { source.stop(); } catch { } return named('busy', 'that stream session already exists'); } // asked twice while the facts were read
+    if (Array.isArray(source.displays) && source.displays.length) displaysKnown = source.displays.length;
+    if (sessions.size >= SM.streamCapOf(displaysKnown)) { try { source.stop(); } catch { } return full(displaysKnown); } // a start that raced another while the facts were read
     let w;
     try { w = werift(); } catch (e) { try { source.stop(); } catch { } return named('stream_unsupported', `this agent cannot stream here (${(e && e.message) || e}; Node ${process.version})`); }
     const C = SM.STREAM_CODEC;
@@ -558,7 +570,7 @@ function createStreamHost({ injector = null, log = () => { }, now = Date.now, lo
       if (r.verdict === 'blocked') log(`[stream] ${sid} direct inbound UDP: blocked — none of ${r.addrs} host address${r.addrs === 1 ? '' : 'es'} reached from this machine itself (its firewall); the hub relay carries the stream`);
       pushStats(s);
     }, () => { });
-    return { ok: true, sid, offer: { type: 'offer', sdp: pc.localDescription.sdp }, source: { kind: source.kind, origin: source.origin, fps: source.fps || null, encoder: source.encoder || null, mode: source.mode || null, ...(source.window ? { window: source.window } : {}), ...(source.displays ? { display: source.display, displays: source.displays } : {}) }, relayPort: s.relay ? s.relay.port : null, codec: { mimeType: SM.STREAM_CODEC.mimeType, fmtp: SM.STREAM_CODEC.fmtp }, maxKbps };
+    return { ok: true, sid, offer: { type: 'offer', sdp: pc.localDescription.sdp }, source: { kind: source.kind, origin: source.origin, fps: source.fps || null, encoder: source.encoder || null, mode: source.mode || null, ...(source.window ? { window: source.window } : {}), ...(source.displays ? { display: source.display, displays: source.displays } : {}), ...(source.scaled ? { scaled: source.scaled } : {}), ...(source.tcc ? { tcc: source.tcc } : {}) }, relayPort: s.relay ? s.relay.port : null, codec: { mimeType: SM.STREAM_CODEC.mimeType, fmtp: SM.STREAM_CODEC.fmtp }, maxKbps };
   }
   /** After the offer's reply went out: the candidates gathered while it was made follow as pushes, in order. */
   function replied(sid) {

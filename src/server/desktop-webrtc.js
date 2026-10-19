@@ -5,7 +5,8 @@
  * capability and a source) plays the machine's picture as WebRTC: the agent's werift offers, the PAGE's RTCPeerConnection
  * answers, and this module is only the SIGNALING relay between the page's requests and the agent's ops, plus the record:
  *   • start(hostId, {source, fp16}) the rung's verdict; when taken, `stream-offer` on the agent → the offer (+ the relay's candidates)
- *                            and a session KEY the page names from now on — `{ take: false, code, why }` otherwise (the window
+ *                            and a session KEY the page names from now on — `{ take: false, code, why }` otherwise (`too_many_streams`
+ *                            adds the machine's `live` / `cap` / `displays` — lane desktop-display-modes' per-machine cap; the window
  *                            shows the VNC picture and says why). `source` = the page's choice (src/stream-model.js
  *                            streamSourceOf: a display, or ONE window — lane stream-p3m-build on a Mac, stream-p2w-build on
  *                            Windows: int304's one door); none = the main display. `fp16` = a Windows window's FP16 road (off).
@@ -231,7 +232,7 @@ function create({ access, log = console, now = Date.now, idleMs = L.idleMs, gone
     const relayLeg = s.relay && s.relay.leg ? { port: s.relay.port, key: s.relay.leg.key.toString('base64'), hosts: ips().filter((ip) => /^\d{1,3}(\.\d{1,3}){3}$/.test(String(ip))).slice(0, L.legTargets) } : null;
     let r;
     const sourceId = v.sourceId != null ? v.sourceId : src ? src.id : null; // the verdict's own (a fake source's file), else the page's choice
-    const offer = () => v.dm.streamOffer({ sourceKind: v.source, sourceId, maxKbps, relay, ...(relayLeg ? { relayLeg } : {}), ...(v.source === 'window' && fp16 ? { fp16: true } : {}) }, { onPush: (m) => onPush(s, m) }); // fp16: a Windows window's FP16 road (lane stream-p2w-build)
+    const offer = () => v.dm.streamOffer({ sourceKind: v.source, sourceId, maxKbps, relay, ...(src && src.share ? { share: src.share } : {}), ...(relayLeg ? { relayLeg } : {}), ...(v.source === 'window' && fp16 ? { fp16: true } : {}) }, { onPush: (m) => onPush(s, m) }); // fp16: a Windows window's FP16 road (lane stream-p2w-build)
     try {
       r = await offer();
       if (r && !r.ok && r.code === 'no_helper' && r.helper) { // a Mac without its screen helper: this hub's prebuilt, then once more
@@ -243,7 +244,7 @@ function create({ access, log = console, now = Date.now, idleMs = L.idleMs, gone
       closeRelay(s); sessions.delete(key);
       return { take: false, code: (e && e.code) === 'host_needs_daemon' ? 'agent_too_old' : 'offer_failed', why: String((e && e.message) || e) };
     }
-    if (!r || !r.ok) { closeRelay(s); sessions.delete(key); return { take: false, code: (r && r.code) || 'offer_failed', why: (r && r.error) || 'the machine did not offer a stream' }; }
+    if (!r || !r.ok) { closeRelay(s); sessions.delete(key); return { take: false, code: (r && r.code) || 'offer_failed', why: (r && r.error) || 'the machine did not offer a stream', ...(r && Number.isInteger(r.cap) ? { live: r.live, cap: r.cap, displays: r.displays } : {}) }; } // lane desktop-display-modes: a full machine names its count
     s.sid = r.sid; s.source = r.source || null; s.codec = r.codec || null;
     if (s.relay && r.relayPort) {
       try { await attachLink(s, s.relay, r.relayPort); } catch (e) { log.warn?.(`[stream] ${hostId}: the relay's device-link half did not open (${e && e.message})${s.relay.leg ? ' — the udp leg only' : ' — direct only'}`); if (!s.relay.leg) closeRelay(s); }

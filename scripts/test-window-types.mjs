@@ -57,9 +57,9 @@ const CORE_TYPES = ['artifacts', 'browser', 'browser-live', 'browser-profiles', 
   'machine-app', 'machine-desktop', 'ports', 'search', 'settings', 'stage-placeholder', 'system', 'task', 'terminal', 'usage', 'viewer', 'workflow']; // + search (lane global-search)
 const CORE_ACTIONS = ['attachSession', 'openFileExplorer', 'openFile', 'openEditor', 'openBrowser', 'openBrowserLive', 'openBrowserProfiles', 'openDesktop', 'openDesktopApp',
   'openTaskDetail', 'openTaskLog', 'openJobs', 'openJobInteract', 'openUsage', 'openSettings', 'openSessionProps',
-  'openWorkflowDetail', 'attachTmuxSession', 'viewSession', 'viewSubagent', 'openChannel', 'openChannelOutbox', 'openIntegrations', 'openChannels', 'openSystem', 'openPorts', 'openInbox', 'openBrowserReplay', 'openDesign', 'openDoc', 'openSearch', 'openArtifacts'];
+  'openWorkflowDetail', 'attachTmuxSession', 'viewSession', 'viewSubagent', 'openChannel', 'openChannelOutbox', 'openIntegrations', 'openChannels', 'openSystem', 'openPorts', 'openInbox', 'openBrowserReplay', 'openDesign', 'openDoc', 'openSearch', 'openArtifacts', 'openMachineDesktop']; // + lane desktop-display-modes: a machine's desktop window is restored by its openSpec (mode + display)
 // layout.js's former `TRANSIENT_WINDOW_TYPES = new Set(['chat', 'terminal', 'stage-placeholder'])`
-const CORE_TRANSIENT = ['chat', 'terminal', 'stage-placeholder', 'machine-desktop', 'machine-app']; // + design 014 D1: a machine's whole desktop is never re-opened by a reload (it asks the sign-in); + lane machine-app-crop: one app of it, likewise
+const CORE_TRANSIENT = ['chat', 'terminal', 'stage-placeholder', 'machine-app']; // + lane machine-app-crop: one app of a machine is never re-opened by a reload (it asks the sign-in); lane desktop-display-modes: a machine's whole desktop now IS (its openSpec — the mode + display are the window's): a replay streams, never asks the sign-in by itself
 // kinds whose opener focuses an existing window of the kind instead of opening a second
 const CORE_SINGLETONS = ['browser-profiles', 'channel-outbox', 'channels', 'desktop', 'inbox', 'integrations', 'jobs', 'ports', 'search', 'settings', 'system', 'usage'];
 
@@ -201,7 +201,7 @@ ok(same(regActions, CORE_ACTIONS), `core registers exactly the declared openSpec
   'missing: ' + CORE_ACTIONS.filter((a) => !regActions.includes(a)).join(',') + ' extra: ' + regActions.filter((a) => !CORE_ACTIONS.includes(a)).join(','));
 ok(new Set(regActions).size === regActions.length, 'each action is registered exactly once');
 ok(regs.every((r) => r.type && regTypes.includes(r.type)), 'every action registration names a registered kind (registerOpenAction type ∈ kinds)');
-ok(same(typeRegs.filter((r) => r.persistFalse).map((r) => r.type), CORE_TRANSIENT), "persist:false set == layout.js's former TRANSIENT_WINDOW_TYPES {chat, terminal, stage-placeholder} + machine-desktop (design 014 D1) + machine-app (lane machine-app-crop)");
+ok(same(typeRegs.filter((r) => r.persistFalse).map((r) => r.type), CORE_TRANSIENT), "persist:false set == layout.js's former TRANSIENT_WINDOW_TYPES {chat, terminal, stage-placeholder} + machine-app (lane machine-app-crop) — machine-desktop restored by its openSpec since lane desktop-display-modes");
 ok(same(typeRegs.filter((r) => r.singleton).map((r) => r.type), CORE_SINGLETONS), 'singleton set == the kinds whose opener focuses an existing window {desktop, integrations, jobs, settings, usage}');
 
 // A REPLAY MUST PRODUCE THE WINDOW IT NAMES (2.369.125 r2, verifier finding on

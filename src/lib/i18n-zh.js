@@ -9264,4 +9264,23 @@ export default {
   "{ms} ms · {fps} fps · {kbps} kbps": "{ms} ms · {fps} fps · {kbps} kbps", // lane stream-stats-popup
   "Drag to another corner": "拖到另一个角", // lane stream-stats-popup
   "Exit full screen": "退出全屏", // lane stream-stats-popup
+  "One display · switch": "单屏 · 切换", // lane desktop-display-modes
+  "A window per display": "每显示器一窗", // lane desktop-display-modes
+  "All in one window": "全部一窗", // lane desktop-display-modes
+  "How this machine’s displays are shown": "这台机器的显示器怎么显示", // lane desktop-display-modes
+  "{machine} — {display}": "{machine} — {display}", // lane desktop-display-modes
+  "All displays": "全部显示器", // lane desktop-display-modes
+  "The machine’s displays": "这台机器的显示器", // lane desktop-display-modes
+  "Open in a new window": "在新窗口打开", // lane desktop-display-modes
+  "the machine already streams {live} pictures — at most {cap} for its {n} displays (one per display + one)": "这台机器已在串流 {live} 个画面——它有 {n} 个显示器，最多 {cap} 个（每个显示器一个，再加一个）", // lane desktop-display-modes
+  "{n} displays · {fps} fps · {kbps} kbps": "{n} 个显示器 · {fps} fps · {kbps} kbps", // lane desktop-display-modes
+  "slowest: {display} at {fps} fps": "最慢：{display}，{fps} fps", // lane desktop-display-modes
+  "Stream · {n} displays · {fps} fps": "串流 · {n} 个显示器 · {fps} fps", // lane desktop-display-modes
+  "{fps} fps · {kbps} kbps": "{fps} fps · {kbps} kbps", // lane desktop-display-modes
+  "Show the VNC picture": "显示 VNC 画面", // lane desktop-display-modes
+  "{machine}’s desktop": "{machine} 的桌面", // lane desktop-display-modes
+  "{machine}’s desktop was open on another device": "{machine} 的桌面在另一台设备上打开过", // lane desktop-display-modes
+  "Show it here": "在这里显示", // lane desktop-display-modes
+  "Lower resolution for {n} displays": "已按 {n} 屏降分辨率", // lane desktop-display-modes commit 2
+  "Each HDR display streams at {w}×{h} instead of {fw}×{fh} so {n} of them keep their frame rate": "每个 HDR 显示器以 {w}×{h}（原 {fw}×{fh}）串流，{n} 个一起也能保住帧率", // lane desktop-display-modes commit 2
 };

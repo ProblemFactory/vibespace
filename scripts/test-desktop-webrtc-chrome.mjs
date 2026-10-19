@@ -484,13 +484,14 @@ console.log('⑫ a Mac\'s strip (lane stream-mac-stall): the stream\'s display s
   const up = await playing(p);
   const segOf = () => p.ev(`[...document.querySelectorAll('${WIN} .desktop-strip-displays:not([hidden]) .desktop-strip-seg')].map((b) => [b.textContent, b.dataset.key, b.getAttribute('aria-pressed'), b.title])`);
   const seg1 = await segOf();
-  ok(up && same(seg1, [['1', '2', 'false', '1 · Studio 27 (1)'], ['2', '3', 'true', '2 · Studio 27 (2)']]), '⑫ the STREAM draws the switcher: the Mac\'s two displays left to right (its offer\'s rows), the streamed one pressed — no 全部 (a stream is one display)', seg1);
+  ok(up && same(seg1, [['1', '2', 'false', '1 · Studio 27 (1) · 1920×1080'], ['2', '3', 'true', '2 · Studio 27 (2) · 1920×1080'], ['全部显示器', '*', 'false', '全部一窗']]), '⑫ the STREAM draws the switcher: the Mac\'s two displays left to right (its offer\'s rows, each titled with its name and size), the streamed one pressed — lane desktop-display-modes: + 全部显示器 (all of them in this window, a stream each)', seg1);
   await p.shot('mac-switcher.png', WIN);
   await p.ev(`document.querySelector('${WIN} .desktop-strip-seg[data-key="2"]').click()`);
   const again = (await p.until(`window.__asked.length === 2`, 5000)) && (await playing(p));
   const asked = await p.ev('window.__asked');
   const seg2 = await segOf();
-  ok(again && same(asked[1].source, { kind: 'display', id: '2' }) && !asked[0].source && seg2.length === 2 && seg2[0][2] === 'true' && seg2[1][2] === 'false', '⑫ a pick restarts the stream ON that display (start {source: {kind: display, id: 2}}) and it plays; the pick is pressed', { asked, seg2 });
+  ok(again && same(asked[1].source, { kind: 'display', id: '2' }) && !asked[0].source && seg2.length === 3 && seg2[0][2] === 'true' && seg2[1][2] === 'false', '⑫ a pick restarts the stream ON that display (start {source: {kind: display, id: 2}}) and it plays; the pick is pressed', { asked, seg2 });
+  await p.ev("localStorage.removeItem('vibespace.desktopModes')"); // lane desktop-display-modes: the pick is remembered per machine — the later legs open the main display
   await p.close();
   for (const mode of ['tcc-ok', 'tcc-old']) {
     p = await page(1280, 800, DESK);

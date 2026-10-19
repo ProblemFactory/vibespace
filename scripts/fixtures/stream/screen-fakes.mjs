@@ -7,6 +7,9 @@
 //                               next access unit as FLV; plain `ddagrab=…` (the SDR road) writes the fixture as FLV at fps.
 //                               Every argv → cfg.log (one JSON line). A die file (cfg.dieCapture / cfg.dieEncoder) ends that
 //                               process with a DDA-shaped error. cfg is re-read at every start (a leg edits it).
+//                               cfg.failCapture = a file holding N: the next N captures die at START (before a picture) with
+//                               ddagrab's «Failed to create Direct3D device (8007000e)» — the owner box's second display (lane
+//                               desktop-display-modes); each such start counts N down
 //   factsLine(cfg)              the one JSON line STREAM_FACTS_PS prints (displays with their DisplayConfig + DXGI cells)
 //   calibrationFrame(w, h)      rgbaf16le bits: THE owner's 17 calibration patches (src/stream-plan.js CALIBRATION) + one
 //                               HDR patch (10 × SDR white) on a grey50 ground → { buf, patches: [{label, srgb, x, y}] }
@@ -51,6 +54,7 @@ function auTag() {
 const die = (f, msg) => { if (f && fs.existsSync(f)) { process.stderr.write(msg + '\\n'); process.exit(1); } };
 process.stdout.on('error', () => process.exit(0));
 const grab = argv.find((a) => /^ddagrab=/.test(a));
+if (grab && cfg.failCapture && fs.existsSync(cfg.failCapture)) { const left = Number(fs.readFileSync(cfg.failCapture, 'utf8')) || 0; if (left > 0) { fs.writeFileSync(cfg.failCapture, String(left - 1)); process.stderr.write('[D3D11VA @ 0000020000000000] Failed to create Direct3D device (8007000e)\\nError opening input files: Unknown error occurred\\n'); process.exit(2981409195 | 0); } }
 if (grab && /output_fmt=16bit/.test(grab)) {
   const frame = fs.readFileSync(cfg.raw);
   setInterval(() => { die(cfg.dieCapture, '[Parsed_ddagrab_0] AcquireNextFrame failed: DXGI_ERROR_ACCESS_LOST'); if (!process.stdout.writableNeedDrain) out(frame); }, 1000 / fps); // a full pipe = no frame this tick (ddagrab blocks, never queues)
@@ -77,9 +81,10 @@ if (grab && /output_fmt=16bit/.test(grab)) {
   return { exe, cfgFile, set: (patch) => fs.writeFileSync(cfgFile, JSON.stringify(Object.assign(JSON.parse(fs.readFileSync(cfgFile, 'utf8')), patch))) };
 }
 
-/** The line STREAM_FACTS_PS prints: displays = [{ id, x, y, w, h, primary, hdr, white, adapter, output }]. */
+/** The line STREAM_FACTS_PS prints: displays = [{ id, x, y, w, h, primary, hdr, white, adapter, output, name? }] (name = the
+ *  monitor's own — lane desktop-display-modes: the dc cell's third field). */
 export function factsLine(displays) {
-  const rows = displays.map((d) => ({ id: d.id, x: d.x, y: d.y, w: d.w, h: d.h, primary: d.primary ? 1 : 0, dc: d.hdr == null ? '' : `${d.hdr ? 2 : 0},${d.white == null ? -1 : d.white}`, dxgi: d.adapter == null ? '' : `${d.adapter},${d.output}` }));
+  const rows = displays.map((d) => ({ id: d.id, x: d.x, y: d.y, w: d.w, h: d.h, primary: d.primary ? 1 : 0, dc: d.hdr == null && !d.name ? '' : `${d.hdr == null ? -1 : d.hdr ? 2 : 0},${d.white == null ? -1 : d.white}${d.name ? ',' + d.name : ''}`, dxgi: d.adapter == null ? '' : `${d.adapter},${d.output}` }));
   return JSON.stringify({ t: 'stream-facts', aware: 1, dxgi: rows.filter((r) => r.dxgi).length, rows: rows.length === 1 ? rows[0] : rows });
 }
 

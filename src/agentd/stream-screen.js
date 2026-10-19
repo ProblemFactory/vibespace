@@ -34,6 +34,10 @@ const path = require('path');
 const SP = require('../stream-plan.js');
 
 const FACTS_MS = 30000;      // a facts answer is reused this long (a refused offer re-reads them: `force`)
+// lane desktop-display-modes (measured on the owner's box): with one 4K HDR display streaming, the SECOND display's capture died
+// at once — ddagrab «Failed to create Direct3D device (8007000e)» — in every leg, never when the same capture was asked again by
+// hand ⇒ a capture that ends before its first picture is asked again, after these waits, before the session ends by name
+const CAPTURE_RETRY_MS = Object.freeze([400, 1500]);
 const RUN_MS = 15000;        // one facts child (PowerShell, an ffmpeg -version) at most
 const TAIL = 3;              // stderr lines kept per ffmpeg
 const named = (code, error) => ({ ok: false, code, error });
@@ -93,10 +97,11 @@ function createWindowsScreen({ platform = process.platform, spawn, execFile, env
   async function source(msg = {}, { maxKbps = 8000 } = {}) {
     if (msg.sourceKind === 'window') return named('no_window_source', 'this agent cannot stream one window of a Windows desktop yet');
     let f = await facts();
-    let plan = f.ok ? SP.planScreen(f, { display: msg.sourceId || null, kbps: maxKbps }) : f;
-    if (!plan.ok && f.ok && plan.code !== 'not_windows') { f = await facts({ force: true }); plan = f.ok ? SP.planScreen(f, { display: msg.sourceId || null, kbps: maxKbps }) : f; } // a refusal re-reads once (ffmpeg installed a minute ago, a display plugged in)
+    const want = { display: msg.sourceId || null, kbps: maxKbps, share: Number(msg.share) || 1 }; // share: ② (lane desktop-display-modes)
+    let plan = f.ok ? SP.planScreen(f, want) : f;
+    if (!plan.ok && f.ok && plan.code !== 'not_windows') { f = await facts({ force: true }); plan = f.ok ? SP.planScreen(f, want) : f; } // a refusal re-reads once (ffmpeg installed a minute ago, a display plugged in)
     if (!plan.ok) return plan;
-    return screenSource(plan, maxKbps);
+    return screenSource(plan, maxKbps, f);
   }
 
   /** ONE STILL of the plan's display (the header): → { ok, png, w, h, display, origin, road } | { ok: false, code, error } */
@@ -130,10 +135,10 @@ function createWindowsScreen({ platform = process.platform, spawn, execFile, env
     });
   }
 
-  function screenSource(plan, maxKbps) {
+  function screenSource(plan, maxKbps, f = {}) {
     const st = { frames: 0, aus: 0, dropped: 0, restarts: 0, keyWaitMs: null, keysAnswered: 0, encode: [], map: [], mapper: null, startedAt: null, rate: null };
     const rate = SP.rateFollower({ kbps: plan.kbps, cap: maxKbps, floor: plan.floor || 0, rule: SP.RATE_RULE }); // THE RATE (src/stream-plan.js)
-    let onAu = null, onEnd = null, stopped = false, keyAskedAt = null, t0 = 0, lastTs = -1;
+    let onAu = null, onEnd = null, stopped = false, keyAskedAt = null, t0 = 0, lastTs = -1, capRetries = 0;
     const procs = new Set();
     const end = (c) => { if (c && c.exitCode == null && !c.killed) { try { c.kill(); } catch { /* gone */ } } };
     function finish(code, why) {
@@ -157,6 +162,13 @@ function createWindowsScreen({ platform = process.platform, spawn, execFile, env
         if (c.asked || stopped) return;
         const why = `${role} exit ${code == null ? sig : code}${tail.length ? ': ' + tail[tail.length - 1] : ''}`;
         if (role === 'encoder') { finish('encoder_exited', why); return; }
+        if (capRetries < CAPTURE_RETRY_MS.length && !(plan.mode === 'mapped' ? st.frames : st.aus)) { // it never gave a picture: asked again
+          const wait = CAPTURE_RETRY_MS[capRetries++];
+          st.captureRetries = capRetries;
+          log(`[stream] screen source: the capture did not start (${why}) — asking again in ${wait} ms`);
+          setTimeout(() => { if (!stopped) { if (plan.mode === 'mapped') startCapture(); else startDirect(); } }, wait).unref?.();
+          return;
+        }
         facts({ force: true }).then((f) => finish(f.ok && !f.displays.some((x) => x.id === plan.display.id) ? 'display_gone' : 'capture_exited', why), () => finish('capture_exited', why));
       });
       if (c.stdin) c.stdin.on('error', () => { /* the encoder died: its exit says so */ });
@@ -188,7 +200,7 @@ function createWindowsScreen({ platform = process.platform, spawn, execFile, env
     }
 
     // ── the MAPPED road: capture → this agent's mapping → encoder ──
-    const FB = plan.srcW * plan.srcH * 8, NB = SP.nv12Bytes(plan.srcW, plan.srcH);
+    const FB = plan.srcW * plan.srcH * 8, NB = SP.nv12Bytes(plan.w, plan.h), STEP = plan.step || 1; // the capture's whole frame → the (maybe k-times smaller) picture
     const lut = plan.white ? SP.buildLut({ white: plan.white, knee: plan.tone.knee, peak: plan.tone.peak }) : null;
     let cap = null, enc = null, encClock = [], worker = null, busy = false, waiting = null, fill = null, fillU8 = null, filled = 0, fillAt = 0, carry = null, paused = false;
     const inFree = [], outFree = [];
@@ -231,9 +243,9 @@ function createWindowsScreen({ platform = process.platform, spawn, execFile, env
       busy = true;
       const out = outFree.pop();
       mapping = f;
-      if (worker) { worker.postMessage({ op: 'map', input: f.buf, output: out, w: plan.srcW, h: plan.srcH }, [f.buf, out]); return; }
+      if (worker) { worker.postMessage({ op: 'map', input: f.buf, output: out, w: plan.srcW, h: plan.srcH, step: STEP }, [f.buf, out]); return; }
       const t = now();
-      SP.nv12FromHalf(new Uint16Array(f.buf), plan.srcW, plan.srcH, lut, new Uint8Array(out));
+      SP.nv12FromHalf(new Uint16Array(f.buf), plan.srcW, plan.srcH, lut, new Uint8Array(out), STEP);
       const ms = now() - t;
       setImmediate(() => mapped(f.buf, out, ms));
     }
@@ -263,12 +275,23 @@ function createWindowsScreen({ platform = process.platform, spawn, execFile, env
     function startMapped() {
       setupMapper();
       startEncoder();
-      cap = ffmpeg(SP.captureArgv(plan), 'capture');
-      cap.stdout.on('data', (d) => { carry = carry ? Buffer.concat([carry, d]) : d; pump(); });
+      startCapture();
+    }
+    function startCapture() {
+      carry = null; paused = false;
+      if (fill) { inFree.push(fill); fill = null; filled = 0; } // a dead capture's partial frame is dropped
+      const c = cap = ffmpeg(SP.captureArgv(plan), 'capture');
+      c.stdout.on('data', (d) => { if (c !== cap) return; carry = carry ? Buffer.concat([carry, d]) : d; pump(); });
     }
 
     return {
       ok: true, kind: 'screen', origin: plan.origin, fps: plan.fps, mode: plan.mode, encoder: plan.encoder.label,
+      // lane desktop-display-modes: THE SWITCHER's rows on Windows too — the display streamed + the machine's displays (the facts this
+      // plan read: their own names, sizes, HDR); a pick restarts the stream with `source: {kind: 'display', id}`
+      display: plan.display.id, displays: SP.screenDisplayRows(f),
+      // lane desktop-display-modes ②: a k-times smaller picture (the HDR road beside other displays) — the offer says so, and the
+      // page's points (its picture's pixels + the origin) are scaled back to the display's before the injector
+      ...(plan.scaled ? { scaled: plan.scaled, inputScale: { ox: plan.origin.x, oy: plan.origin.y, sx: plan.step, sy: plan.step } } : {}),
       start(onAccessUnit, onEnded) {
         if (onAu || stopped) return;
         onAu = onAccessUnit; onEnd = onEnded || null; t0 = now(); rate.begin(t0); st.startedAt = t0;
@@ -289,9 +312,9 @@ function createWindowsScreen({ platform = process.platform, spawn, execFile, env
         log(`[stream] screen source: encoder restarted at ${rate.kbps} kbps (${d.why}: the estimate's median ${Math.round(d.median)} kbps, floor ${rate.floor})`);
       },
       stats() {
-        return { mode: plan.mode, encoder: plan.encoder.label, encoderId: plan.encoder.id, note: plan.note, display: plan.display.id, w: plan.w, h: plan.h, white: plan.white, kbps: rate.kbps, floor: rate.floor, rate: st.rate,
+        return { mode: plan.mode, encoder: plan.encoder.label, encoderId: plan.encoder.id, note: plan.note, display: plan.display.id, w: plan.w, h: plan.h, step: plan.step || 1, white: plan.white, kbps: rate.kbps, floor: rate.floor, rate: st.rate,
           encodeMs: plan.mode === 'mapped' ? median(st.encode) : null, timing: plan.mode === 'mapped' ? 'agent' : 'in-ffmpeg', mapMs: median(st.map), mapper: st.mapper,
-          captured: st.frames, aus: st.aus, dropped: st.dropped, restarts: st.restarts, keyWaitMs: st.keyWaitMs, keysAnswered: st.keysAnswered };
+          captured: st.frames, aus: st.aus, dropped: st.dropped, restarts: st.restarts, captureRetries: st.captureRetries || 0, keyWaitMs: st.keyWaitMs, keysAnswered: st.keysAnswered };
       },
     };
   }
@@ -307,7 +330,7 @@ function mapperServant(port) {
       if (m.op === 'lut') { lut = new Uint8Array(m.lut); return; }
       if (m.op !== 'map' || !lut) return;
       const t = Date.now();
-      SP.nv12FromHalf(new Uint16Array(m.input), m.w, m.h, lut, new Uint8Array(m.output));
+      SP.nv12FromHalf(new Uint16Array(m.input), m.w, m.h, lut, new Uint8Array(m.output), m.step || 1);
       port.postMessage({ op: 'mapped', input: m.input, output: m.output, ms: Date.now() - t }, [m.input, m.output]);
     } catch (e) { try { port.postMessage({ op: 'error', error: String((e && e.message) || e) }); } catch { /* gone */ } }
   });

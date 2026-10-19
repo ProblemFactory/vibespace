@@ -247,6 +247,9 @@ const PURE = new Set(['src/agent-cli-registry.js' /* lane cli-registry: THE agen
   // lane machine-app-crop: ONE app of a Windows / macOS machine as its own window — the look's scripts + parse, which window is
   // the app's, the crop + pointer math; the daemon runs it with its own spawn handed in (imports only the model above)
   'src/machine-window.js',
+  // lane desktop-display-modes: a multi-display machine's three modes — the mode, the offer's display rows, ②'s layout + pointer →
+  // display, the summed stats, the per-machine memory; imports nothing
+  'src/desktop-displays-layout.js',
   // lane e2b (design-agent-browser-v2 §E2.2): the PINNED PIXEL SIZE — parse + bounds, who may pin, the picture's fit (upscale
   // allowed), the chip's words, E2c's default — imports nothing; the door, the keeper, the engine and the window share it
   'src/desktop-pin.js',
@@ -2833,7 +2836,7 @@ console.log('§62 every path where the user names a window goes through wm.revea
     'src/lib/doc-window.js': [1, 'the Doc window\'s one-per-(host, path) re-open (a replay passes { replay })'],
     'src/lib/artifacts-window.js': [1, 'the Artifacts window\'s one-per-conversation re-open (lane artifacts-list-scale; a replay passes { replay })'],
     'src/lib/design-home.js': [1, 'the Design window home\'s one-per-client re-open (a replay passes { replay }) — lane design-systems-home'],
-    'src/lib/machine-desktop.js': [1, 'a machine\'s whole-desktop window: one per machine per page, a second open reveals it — design 014 D1'],
+    'src/lib/machine-desktop.js': [3, 'a machine\'s whole-desktop window: a second open reveals it — design 014 D1; lane desktop-display-modes: the machine\'s ONE window (③ / ②), a display\'s own window (①), a replayed window\'s own id'],
     'src/lib/desktop-app-window.js': [3, 'the singleton re-open (a replay passes { replay }) + a satellite the app just opened, in front — design 016 S2 + the person\'s click on an app notification\'s toast raises its window (lane app-display-notify-sink)'],
     ...Object.fromEntries(['settings-ui', 'usage-window', 'task-log', 'task-detail', 'session-props', 'channel-window', 'channel-outbox', 'channels-panel', 'jobs-panel', 'integrations-window', 'sidebar-rail', 'browser-trace-view', 'desktop-window', 'browser-live-window', 'inbox-window']
       .map((n) => ['src/lib/' + n + '.js', [1, n === 'browser-live-window' ? 'the fold-back (D3)' : 'the singleton re-open (a replay passes { replay })']])),

@@ -9263,4 +9263,23 @@ export default {
   "{ms} ms · {fps} fps · {kbps} kbps": "{ms} ms · {fps} fps · {kbps} kbps", // lane stream-stats-popup
   "Drag to another corner": "別の隅へドラッグ", // lane stream-stats-popup
   "Exit full screen": "全画面を終了", // lane stream-stats-popup
+  "One display · switch": "1画面 · 切り替え", // lane desktop-display-modes
+  "A window per display": "ディスプレイごとに1ウィンドウ", // lane desktop-display-modes
+  "All in one window": "すべてを1ウィンドウに", // lane desktop-display-modes
+  "How this machine’s displays are shown": "このマシンのディスプレイの表示方法", // lane desktop-display-modes
+  "{machine} — {display}": "{machine} — {display}", // lane desktop-display-modes
+  "All displays": "すべてのディスプレイ", // lane desktop-display-modes
+  "The machine’s displays": "このマシンのディスプレイ", // lane desktop-display-modes
+  "Open in a new window": "新しいウィンドウで開く", // lane desktop-display-modes
+  "the machine already streams {live} pictures — at most {cap} for its {n} displays (one per display + one)": "このマシンはすでに {live} 画面をストリーミング中です——ディスプレイ {n} 台で最大 {cap}（ディスプレイごとに1つ＋1つ）", // lane desktop-display-modes
+  "{n} displays · {fps} fps · {kbps} kbps": "ディスプレイ {n} 台 · {fps} fps · {kbps} kbps", // lane desktop-display-modes
+  "slowest: {display} at {fps} fps": "最も遅い：{display}（{fps} fps）", // lane desktop-display-modes
+  "Stream · {n} displays · {fps} fps": "ストリーム · ディスプレイ {n} 台 · {fps} fps", // lane desktop-display-modes
+  "{fps} fps · {kbps} kbps": "{fps} fps · {kbps} kbps", // lane desktop-display-modes
+  "Show the VNC picture": "VNC の画面を表示", // lane desktop-display-modes
+  "{machine}’s desktop": "{machine} のデスクトップ", // lane desktop-display-modes
+  "{machine}’s desktop was open on another device": "{machine} のデスクトップは別のデバイスで開かれていました", // lane desktop-display-modes
+  "Show it here": "ここに表示", // lane desktop-display-modes
+  "Lower resolution for {n} displays": "{n} 画面のため解像度を下げています", // lane desktop-display-modes commit 2
+  "Each HDR display streams at {w}×{h} instead of {fw}×{fh} so {n} of them keep their frame rate": "各 HDR ディスプレイを {fw}×{fh} ではなく {w}×{h} で送り、{n} 台でもフレームレートを保ちます", // lane desktop-display-modes commit 2
 };

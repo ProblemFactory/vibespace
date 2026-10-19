@@ -126,6 +126,16 @@ console.log('§5 the facts script and its parser');
   const acm = SP.parseStreamFacts(JSON.stringify({ t: 'stream-facts', rows: { id: 'D1', x: 0, y: 0, w: 10, h: 10, primary: 1, dc: '6,1000', dxgi: '' } }));
   ok(lone.ok && lone.displays.length === 1 && lone.displays[0].hdr === null && lone.displays[0].white === null && lone.displays[0].adapter === null && acm.displays[0].hdr === false && acm.displays[0].wideColor === true, 'PowerShell 5\'s lone row (an object) parses; an unreadable DisplayConfig = unknown (null); advanced colour in the SDR wide-colour mode is NOT HDR');
   ok(SP.parseStreamFacts('nothing').code === 'bad_output' && SP.parseStreamFacts('{"t":"stream-facts","rows":[]}').code === 'bad_output', 'no line / no row ⇒ bad_output');
+  // lane desktop-display-modes: THE SWITCHER's words on Windows — each monitor's own name (DisplayConfig's target name, type 2:
+  // monitorFriendlyDeviceName at byte 36 of the 420-byte packet), carried as the dc cell's third field; an older script's two
+  // cells still parse (name null)
+  ok(/Head\(B, 2, 420, p, 20\)/.test(ps) && /new IntPtr\(B\.ToInt64\(\) \+ 36\)/.test(ps) && /AllocHGlobal\(424\)/.test(ps) && /Replace\(';', ' '\)\.Replace\('=', ' '\)\.Replace\(',', ' '\)/.test(ps), 'the script asks each display\'s target name (type 2, 420 bytes; the friendly name at 36) into a 424-byte buffer, its ; = , made spaces (the cell\'s own separators)');
+  const named = SP.parseStreamFacts(factsLine([{ ...two[0], name: 'Desk 27' }, { ...two[1], name: 'Side 32' }, { id: 'D3', x: 7680, y: 0, w: 1920, h: 1080, primary: false, hdr: null, white: null, adapter: 1, output: 0, name: 'Dell U2720Q' }]));
+  const legacy = SP.parseStreamFacts(JSON.stringify({ t: 'stream-facts', rows: { id: 'D1', x: 0, y: 0, w: 10, h: 10, primary: 1, dc: '2,2500', dxgi: '0,0' } }));
+  const odd = SP.parseStreamFacts(JSON.stringify({ t: 'stream-facts', rows: { id: 'D1', x: 0, y: 0, w: 10, h: 10, primary: 1, dc: '0,-1,Odd,Name', dxgi: '0,0' } }));
+  ok(same(named.displays.map((d) => [d.name, d.hdr, d.white]), [['Desk 27', true, 2500], ['Side 32', false, 1000], ['Dell U2720Q', null, null]]) && legacy.displays[0].name === null && legacy.displays[0].white === 2500 && odd.displays[0].name === 'Odd Name', 'each display\'s own name parses (with HDR unknown too); an older script\'s row has none; a stray comma in a name stays in it', named.displays);
+  const rowsW = SP.screenDisplayRows({ displays: [...named.displays, { id: 'D4', x: -10, y: 0, w: 10, h: 10, primary: false, hdr: false, adapter: null, output: null, name: null }] });
+  ok(same(rowsW.map((d) => [d.id, d.name, d.primary, d.hdr, d.capturable]), [['\\\\.\\DISPLAY1', 'Desk 27', true, true, true], ['\\\\.\\DISPLAY2', 'Side 32', false, false, true], ['D3', 'Dell U2720Q', false, false, false], ['D4', null, false, false, false]]) && same(Object.keys(rowsW[0]), ['id', 'x', 'y', 'w', 'h', 'primary', 'hdr', 'name', 'capturable']), 'the offer\'s rows (screenDisplayRows): id, geometry, primary, HDR, the name — capturable only on the first adapter (an adapter-1 display and an unmapped one are not)', rowsW);
 }
 
 console.log('§6 the plan');
@@ -223,6 +233,26 @@ console.log('§9 THE ESTIMATE (lane stream-mac-rate): our transport-cc reading v
   U.milliTime = () => T0 + 200;
   try { for (let f = 0; f < 4; f++) { const raw = new T.TransportWideCC({ baseSequenceNumber: f * 50, packetStatusCount: 50, referenceTime: 0, packetChunks: [new T.RunLengthChunk({ packetStatus: 1, runLength: 49 })], recvDeltas: Array.from({ length: 50 }, (_, i) => new T.RecvDelta({ type: 1, delta: i ? 1000 : 0 })) }); wk = null; bwe.receiveTWCC(raw); if (wk != null) ests.push(wk); } } finally { U.milliTime = realNow; }
   ok(ests.length >= 1 && ests.every((k) => k < 2500), `RED CONTROL: werift's own estimator, fed the way its sender feeds it (each packet noted after the await under the burst's last number), reads ${ests.join(', ')} kbps of the same 9.6 Mbps — ~one packet a picture (the owner's 300 at 30–60 fps)`, ests);
+}
+
+console.log('§10 ② ON THE HDR ROAD (lane desktop-display-modes commit 2): N displays in one window ⇒ every k-th pixel mapped');
+{
+  const lut = SP.buildLut({ white: 2500, knee: 1, peak: 4 });
+  const w = 12, h = 8, src = new Uint16Array(w * h * 4);
+  for (let i = 0; i < src.length; i++) src[i] = (i * 7919 + 13) % 30000;
+  const one = new Uint8Array(SP.nv12Bytes(w, h)), same1 = new Uint8Array(SP.nv12Bytes(w, h));
+  SP.nv12FromHalf(src, w, h, lut, one); SP.nv12FromHalf(src, w, h, lut, same1, 1);
+  const pick = (k) => { const W2 = Math.floor(w / k), H2 = Math.floor(h / k), d = new Uint16Array(W2 * H2 * 4); for (let y = 0; y < H2; y++) for (let x = 0; x < W2; x++) for (let c = 0; c < 4; c++) d[(y * W2 + x) * 4 + c] = src[((y * k) * w + x * k) * 4 + c]; return { d, W2, H2 }; };
+  const eq = (k) => { const { d, W2, H2 } = pick(k); const a = new Uint8Array(SP.nv12Bytes(Math.floor(w / k), Math.floor(h / k))), b = new Uint8Array(a.length); const n = SP.nv12FromHalf(src, w, h, lut, a, k); SP.nv12FromHalf(d, W2, H2, lut, b, 1); return n === a.length && Buffer.compare(Buffer.from(a), Buffer.from(b)) === 0; };
+  ok(Buffer.compare(Buffer.from(one), Buffer.from(same1)) === 0 && eq(2) && eq(3), 'step 1 is byte for byte the old mapping; step k = the old mapping of every k-th pixel of every k-th row (k = 2, 3)');
+  ok(same([[3840, 1], [3840, 2], [3840, 3], [3840, 4], [3840, 6], [2560, 2], [2560, 3], [1920, 2], [0, 2]].map(([x, n]) => SP.mappedStepOf(x, n)), [1, 2, 3, 3, 3, 2, 2, 1, 1]) && SP.MAPPED_MIN_W === 1280, 'the step = the number of displays sharing the window, never under 1280 px wide, at most 4 (4K: 2 ⇒ 2, 3 ⇒ 3, 4 ⇒ 3; 1080p never)');
+  const ff = { path: 'x', major: 7, ddagrab: true, encoders: ['h264_nvenc'] };
+  const HDR = { id: 'H', x: -3840, y: 0, w: 3840, h: 2160, primary: true, hdr: true, white: 2500, adapter: 0, output: 0 }, SDR = { ...HDR, id: 'S', hdr: false };
+  const p2 = SP.planScreen({ platform: 'win32', ffmpeg: ff, displays: [HDR] }, { share: 2 }), p1 = SP.planScreen({ platform: 'win32', ffmpeg: ff, displays: [HDR] }), ps = SP.planScreen({ platform: 'win32', ffmpeg: ff, displays: [SDR] }, { share: 2 });
+  ok(p2.ok && p2.step === 2 && p2.w === 1920 && p2.h === 1080 && p2.srcW === 3840 && same(p2.scaled, { share: 2, step: 2, w: 1920, h: 1080, from: { w: 3840, h: 2160 } }) && SP.encodeArgv(p2).join(' ').includes('-video_size 1920x1080') && same(SP.captureArgv(p2), SP.captureArgv(p1)) && p2.floor < p1.floor, 'an HDR display shared by 2: the capture unchanged (the whole FP16 frame), mapped to 1920×1080, the encoder told so, the floor of the smaller picture; the plan says `scaled`', { step: p2.step, w: p2.w, scaled: p2.scaled, floor: [p1.floor, p2.floor] });
+  ok(p1.step === 1 && p1.scaled === null && p1.w === 3840 && ps.step === 1 && ps.scaled === null && ps.w === 3840, 'alone (③ / ①) or on the SDR road: the whole picture');
+  const sc = { ox: -3840, oy: 0, sx: 2, sy: 2 };
+  ok(same(SP.scaledInputOf({ t: 'md', x: -3840 + 960, y: 540, b: 0 }, sc), { t: 'md', x: -1920, y: 1080, b: 0 }) && same(SP.scaledInputOf({ t: 'kd', c: 'KeyA' }, sc), { t: 'kd', c: 'KeyA' }) && same(SP.scaledInputOf({ t: 'mv', x: 5, y: 5 }, null), { t: 'mv', x: 5, y: 5 }), 'the pointer: the page\'s point (its picture\'s pixel + the origin) → the display\'s (×2 from the origin); keys and an unscaled picture untouched');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

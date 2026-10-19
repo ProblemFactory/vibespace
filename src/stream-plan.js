@@ -19,14 +19,16 @@
  *                        constrained baseline, no B-frames, CBR, a GOP of two seconds (pickEncoder)
  *   parseFfmpegFacts     `ffmpeg -version` / `-filters` / `-encoders` → { version, major, ddagrab, encoders } and
  *                        ffmpegVerdict (≥ 7 with ddagrab, else `no_ffmpeg` naming where it was looked for — ffmpegCandidates)
- *   STREAM_FACTS_PS      the machine's screen facts script (DisplayConfig: each display's HDR state + SDR white level; DXGI:
- *                        which adapter/output ddagrab must open; Screen: bounds) → parseStreamFacts
+ *   STREAM_FACTS_PS      the machine's screen facts script (DisplayConfig: each display's HDR state + SDR white level + the
+ *                        monitor's own name; DXGI: which adapter/output ddagrab must open; Screen: bounds) → parseStreamFacts;
+ *                        screenDisplayRows(facts) = the offer's display rows (lane desktop-display-modes: the switcher's)
  *   ONE STILL            (lane desktop-handover) stillArgv / stillHalfArgv — one frame of the stream's capture as a PNG (SDR) or as
  *                        its FP16 bits → rgbFromHalf (THE table) → pngOf; pngSize reads a PNG's IHDR
  *   planScreen           facts + the asked display → { mode: 'direct' (an SDR display: DDA's 8-bit picture is the screen
  *                        already) | 'mapped' (an HDR display: FP16 → the agent's mapping → NV12 → the encoder), the two
  *                        argvs, origin, encoder } or a refusal by name (no_ffmpeg, display_gone, display_other_gpu,
- *                        no_white_level, no_encoder)
+ *                        no_white_level, no_encoder); `share` N (lane desktop-display-modes: ② — N displays in one window)
+ *                        maps an HDR display at every k-th pixel (mappedStepOf; `step`, `scaled`; scaledInputOf for the pointer)
  *   kbpsDecision         one rate step with hysteresis (ffmpeg's CLI cannot change a bitrate live): at most once per 5 s, only on
  *                        a ≥ 25 % move, never under the source's `floor` (MAC_KBPS_RULE: VideoToolbox's live step — 1 s, 10 %)
  *   THE RATE             EVERY road (lane stream-window-fixes: a Windows window; lane stream-mac-rate: the Mac, a Windows screen): a floor
@@ -96,18 +98,20 @@ const VC = Object.freeze([FIX((224 / 255) * 0.5), FIX((-224 / 255) * KG / (2 * (
 const Y_ADD = (16 << 16) + 32768, C_ADD = (128 << 18) + (1 << 17); // chroma sums 2×2 pixels: four times the weight ⇒ >> 18
 /** THE FRAME LOOP: rgbaf16le (a Uint16Array of its bits, `w` pixels a row) → NV12 of the even part (`out` = ⌊w⌋₂·⌊h⌋₂·3/2
  *  bytes), the mapping as three table lookups per pixel, chroma from each 2×2 block's mean. → the bytes written */
-function nv12FromHalf(src, w, h, lut, out) {
-  const W = w & ~1, H = h & ~1, uv = W * H, [yr, yg, yb] = YC, [ur, ug, ub] = UC, [vr, vg, vb] = VC;
+function nv12FromHalf(src, w, h, lut, out, step = 1) {
+  // lane desktop-display-modes: `step` k > 1 = every k-th pixel of every k-th row (a k-times smaller picture: ② on the HDR road)
+  const k = Math.max(1, step | 0), W = Math.floor(w / k) & ~1, H = Math.floor(h / k) & ~1, uv = W * H, [yr, yg, yb] = YC, [ur, ug, ub] = UC, [vr, vg, vb] = VC;
+  const px = 4 * k;
   for (let y = 0; y < H; y += 2) {
-    let i0 = y * w * 4, i1 = i0 + w * 4, o0 = y * W, o1 = o0 + W, c = uv + (y >> 1) * W;
+    let i0 = y * k * w * 4, i1 = (y + 1) * k * w * 4, o0 = y * W, o1 = o0 + W, c = uv + (y >> 1) * W;
     for (let x = 0; x < W; x += 2) {
-      const r0 = lut[src[i0]], g0 = lut[src[i0 + 1]], b0 = lut[src[i0 + 2]], r1 = lut[src[i0 + 4]], g1 = lut[src[i0 + 5]], b1 = lut[src[i0 + 6]];
-      const r2 = lut[src[i1]], g2 = lut[src[i1 + 1]], b2 = lut[src[i1 + 2]], r3 = lut[src[i1 + 4]], g3 = lut[src[i1 + 5]], b3 = lut[src[i1 + 6]];
+      const r0 = lut[src[i0]], g0 = lut[src[i0 + 1]], b0 = lut[src[i0 + 2]], r1 = lut[src[i0 + px]], g1 = lut[src[i0 + px + 1]], b1 = lut[src[i0 + px + 2]];
+      const r2 = lut[src[i1]], g2 = lut[src[i1 + 1]], b2 = lut[src[i1 + 2]], r3 = lut[src[i1 + px]], g3 = lut[src[i1 + px + 1]], b3 = lut[src[i1 + px + 2]];
       out[o0] = (yr * r0 + yg * g0 + yb * b0 + Y_ADD) >> 16; out[o0 + 1] = (yr * r1 + yg * g1 + yb * b1 + Y_ADD) >> 16;
       out[o1] = (yr * r2 + yg * g2 + yb * b2 + Y_ADD) >> 16; out[o1 + 1] = (yr * r3 + yg * g3 + yb * b3 + Y_ADD) >> 16;
       const R = r0 + r1 + r2 + r3, G = g0 + g1 + g2 + g3, B = b0 + b1 + b2 + b3;
       out[c] = (ur * R + ug * G + ub * B + C_ADD) >> 18; out[c + 1] = (vr * R + vg * G + vb * B + C_ADD) >> 18;
-      i0 += 8; i1 += 8; o0 += 2; o1 += 2; c += 2;
+      i0 += 2 * px; i1 += 2 * px; o0 += 2; o1 += 2; c += 2;
     }
   }
   return uv + uv / 2;
@@ -197,7 +201,7 @@ const STREAM_FACTS_PS = ["$ErrorActionPreference = 'Stop'",
   '  public static string Read() {',
   '    uint np, nm; var sb = new StringBuilder();',
   '    if (GetDisplayConfigBufferSizes(2, out np, out nm) != 0) return "";',
-  '    IntPtr P = Marshal.AllocHGlobal((int)np * 72), M = Marshal.AllocHGlobal((int)nm * 64), B = Marshal.AllocHGlobal(96);',
+  '    IntPtr P = Marshal.AllocHGlobal((int)np * 72), M = Marshal.AllocHGlobal((int)nm * 64), B = Marshal.AllocHGlobal(424);',
   '    try {',
   '      if (QueryDisplayConfig(2, ref np, P, ref nm, M, IntPtr.Zero) != 0) return "";',
   '      for (int i = 0; i < (int)np; i++) {',
@@ -207,7 +211,9 @@ const STREAM_FACTS_PS = ["$ErrorActionPreference = 'Stop'",
   '        int ac = -1, white = -1;',
   '        Head(B, 9, 32, p, 20); if (DisplayConfigGetDeviceInfo(B) == 0) ac = Marshal.ReadInt32(B, 20);',
   '        Head(B, 11, 24, p, 20); if (DisplayConfigGetDeviceInfo(B) == 0) white = Marshal.ReadInt32(B, 20);',
-  "        sb.Append(name).Append('=').Append(ac).Append(',').Append(white).Append(';');",
+  '        string fn = ""; Head(B, 2, 420, p, 20); if (DisplayConfigGetDeviceInfo(B) == 0) fn = Marshal.PtrToStringUni(new IntPtr(B.ToInt64() + 36));',
+  "        fn = (fn ?? \"\").Replace(';', ' ').Replace('=', ' ').Replace(',', ' ').Trim();",
+  "        sb.Append(name).Append('=').Append(ac).Append(',').Append(white).Append(',').Append(fn).Append(';');",
   '      }',
   '    } finally { Marshal.FreeHGlobal(P); Marshal.FreeHGlobal(M); Marshal.FreeHGlobal(B); }',
   '    return sb.ToString();',
@@ -236,8 +242,9 @@ const STREAM_FACTS_PS = ["$ErrorActionPreference = 'Stop'",
   'foreach ($s in [System.Windows.Forms.Screen]::AllScreens) { $b = $s.Bounds; $c = \'\'; if ($dc.ContainsKey($s.DeviceName)) { $c = $dc[$s.DeviceName] }; $o = \'\'; if ($dx.ContainsKey($s.DeviceName)) { $o = $dx[$s.DeviceName] }; $rows += @{ id = $s.DeviceName; x = $b.X; y = $b.Y; w = $b.Width; h = $b.Height; primary = [int]$s.Primary; dc = $c; dxgi = $o } }',
   "[Console]::Out.WriteLine((ConvertTo-Json -InputObject @{ t = 'stream-facts'; aware = $aware; dxgi = $dx.Count; rows = $rows } -Compress -Depth 4))"].join('\n');
 
-/** The script's one line → { ok, displays: [{ id, x, y, w, h, primary, hdr, wideColor, white, adapter, output }], dxgi }.
- *  hdr: advanced colour on and not the SDR wide-colour mode (true | false | null unknown); white: SDRWhiteLevel | null. */
+/** The script's one line → { ok, displays: [{ id, x, y, w, h, primary, hdr, wideColor, white, adapter, output, name }], dxgi }.
+ *  hdr: advanced colour on and not the SDR wide-colour mode (true | false | null unknown); white: SDRWhiteLevel | null; name:
+ *  the monitor's own (its EDID friendly name — lane desktop-display-modes: the switcher's words) | null. */
 function parseStreamFacts(stdout) {
   let o = null;
   for (const line of String(stdout || '').split(/\r?\n/)) { const l = line.trim(); if (!l.startsWith('{')) continue; try { const v = JSON.parse(l); if (v && v.t === 'stream-facts') { o = v; break; } } catch { /* not ours */ } }
@@ -248,11 +255,11 @@ function parseStreamFacts(stdout) {
   for (const r of rows.slice(0, 16)) {
     const x = num(r && r.x), y = num(r && r.y), w = num(r && r.w), h = num(r && r.h);
     if (x == null || y == null || !(w > 0) || !(h > 0)) continue;
-    const [ac, white] = String(r.dc || '').split(',').map(num);
+    const dc = String(r.dc || '').split(','), [ac, white] = dc.slice(0, 2).map(num), name = dc.slice(2).join(' ').trim().slice(0, 80) || null;
     const [adapter, output] = String(r.dxgi || '').split(',').map(num);
     displays.push({ id: String(r.id || '').slice(0, 60) || `#${displays.length + 1}`, x, y, w, h, primary: !!Number(r.primary),
       hdr: ac == null || ac < 0 ? null : (ac & 2) !== 0 && (ac & 4) === 0, wideColor: ac != null && ac >= 0 && (ac & 4) !== 0,
-      white: white > 0 ? white : null, adapter: adapter == null ? null : adapter, output: output == null ? null : output });
+      white: white > 0 ? white : null, adapter: adapter == null ? null : adapter, output: output == null ? null : output, name });
   }
   return displays.length ? { ok: true, displays, dxgi: num(o.dxgi) || 0 } : { ok: false, code: 'bad_output', error: 'the machine printed no usable screen' };
 }
@@ -332,7 +339,7 @@ function pngSize(b) {
 function planScreen(facts, opts = {}) {
   const f = facts || {};
   if (f.platform === 'darwin') return planMacScreen(f, opts); // lane stream-p3m-build: the Mac's helper road
-  const { display = null, fps = SCREEN_DEFAULTS.fps, kbps = 8000, tone = TONE_DEFAULT } = opts || {};
+  const { display = null, fps = SCREEN_DEFAULTS.fps, kbps = 8000, tone = TONE_DEFAULT, share = 1 } = opts || {};
   if (f.platform !== 'win32') return { ok: false, code: 'not_windows', error: `the screen source captures a Windows desktop (this machine runs ${f.platform || 'an unknown system'})` };
   if (f.displaysError) return { ok: false, code: 'facts_failed', error: `the machine's screen facts could not be read (${f.displaysError})` };
   const fv = ffmpegVerdict(f.ffmpeg);
@@ -349,8 +356,34 @@ function planScreen(facts, opts = {}) {
   if (!pe.ok) return pe;
   const rate = Math.max(SCREEN_DEFAULTS.minKbps, Math.round(Number(kbps) || 8000));
   const r = Math.max(1, Math.min(120, Math.round(Number(fps) || SCREEN_DEFAULTS.fps)));
-  return { ok: true, mode: hdr ? 'mapped' : 'direct', display: { id: d.id, output: mapped.output }, origin: { x: d.x, y: d.y }, w: d.w & ~1, h: d.h & ~1, srcW: d.w, srcH: d.h,
-    fps: r, kbps: rate, floor: kbpsFloor({ w: d.w & ~1, h: d.h & ~1, fps: r, cap: rate }), gop: r * SCREEN_DEFAULTS.gopSeconds, white: hdr ? d.white : null, tone: { knee: tone.knee, peak: tone.peak }, encoder: pe.encoder, note: pe.note, ffmpeg: f.ffmpeg.path };
+  const step = hdr ? mappedStepOf(d.w, share) : 1; // lane desktop-display-modes: ② on the HDR road — a smaller picture per display
+  const w = Math.floor(d.w / step) & ~1, h = Math.floor(d.h / step) & ~1;
+  return { ok: true, mode: hdr ? 'mapped' : 'direct', display: { id: d.id, output: mapped.output }, origin: { x: d.x, y: d.y }, w, h, srcW: d.w, srcH: d.h, step,
+    scaled: step > 1 ? { share: Math.round(Number(share)), step, w, h, from: { w: d.w, h: d.h } } : null,
+    fps: r, kbps: rate, floor: kbpsFloor({ w, h, fps: r, cap: rate }), gop: r * SCREEN_DEFAULTS.gopSeconds, white: hdr ? d.white : null, tone: { knee: tone.knee, peak: tone.peak }, encoder: pe.encoder, note: pe.note, ffmpeg: f.ffmpeg.path };
+}
+
+/** THE SWITCHER's rows of a Windows machine (lane desktop-display-modes — the Mac's offer carried them since .309): the facts'
+ *  displays as the offer names them — { id, x, y, w, h, primary, hdr, name, capturable } (capturable: the capture can open it —
+ *  the first graphics adapter's output, or the primary when DXGI said nothing; a pick of another is refused by name). */
+function screenDisplayRows(facts) {
+  return (Array.isArray(facts && facts.displays) ? facts.displays : []).map((d) => ({ id: d.id, x: d.x, y: d.y, w: d.w, h: d.h, primary: !!d.primary, hdr: d.hdr === true, name: d.name || null,
+    capturable: d.adapter == null ? !!d.primary : d.adapter === 0 && d.output != null }));
+}
+
+/** lane desktop-display-modes — ② ON THE HDR ROAD (measured on the owner's box: one 4K HDR display 7–12 fps, two 3–5 fps each —
+ *  the agent maps every FP16 pixel; ffmpeg alone captures 4K FP16 at ~40 fps): a display streamed beside `share − 1` others in
+ *  ONE window is mapped at every k-th pixel, k = the share, never under MAPPED_MIN_W wide (k ≤ 4). The SDR road, ① and ③ never. */
+const MAPPED_MIN_W = 1280;
+function mappedStepOf(w, share) {
+  const n = Math.floor(Number(share) || 1);
+  if (!(n >= 2) || !(w > 0)) return 1;
+  return Math.max(1, Math.min(n, 4, Math.floor(w / MAPPED_MIN_W)));
+}
+/** A picture `step` times smaller than its display: the page's point (its picture's pixel + the display's origin) → the display's. */
+function scaledInputOf(ev, scale) {
+  if (!ev || !scale || !(scale.sx > 0) || typeof ev.x !== 'number' || typeof ev.y !== 'number') return ev;
+  return { ...ev, x: Math.round(scale.ox + (ev.x - scale.ox) * scale.sx), y: Math.round(scale.oy + (ev.y - scale.oy) * scale.sy) };
 }
 
 // ── THE BITRATE ──────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -792,7 +825,7 @@ function windowEncodeArgv(plan, { w = plan.w, h = plan.h, kbps = plan.kbps } = {
 
 module.exports = {
   halfToFloat, srgbOetf, TONE_DEFAULT, toneCurve, mapLinear, srgb8OfHalf, buildLut, nv12FromHalf, nv12Bytes, CALIBRATION,
-  ENCODER_LADDER, pickEncoder, FFMPEG_MIN_MAJOR, ffmpegCandidates, parseFfmpegFacts, ffmpegVerdict, STREAM_FACTS_PS, parseStreamFacts,
+  ENCODER_LADDER, pickEncoder, FFMPEG_MIN_MAJOR, ffmpegCandidates, parseFfmpegFacts, ffmpegVerdict, STREAM_FACTS_PS, parseStreamFacts, screenDisplayRows, MAPPED_MIN_W, mappedStepOf, scaledInputOf,
   SCREEN_DEFAULTS, planScreen, captureArgv, encodeArgv, directArgv, stillArgv, stillHalfArgv, rgbFromHalf, pngOf, pngSize, KBPS_RULE, kbpsDecision, MAC_KBPS_RULE, flvReader,
   KBPS_FLOOR, kbpsFloor, RATE_RULE, MAC_RATE_RULE, rateDecision, rateFollower, twccPackets, sendEstimator,
   MAC_HELPER, MAC_SETTINGS, MAC_LADDER, MAC_WHY, macHelperPaths, macHelperSourceFile, macBuildPlan, macHelperSpawn, parseMacFacts, windowSourceOf, macDisplayOf, macWindowRows,

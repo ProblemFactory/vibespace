@@ -19,7 +19,7 @@
 //     press fills the command box with the row's launch line. The presets stay as "Examples", the owner's lines as
 //     "Recent". The action row wraps and no button is ever narrower than its words
 import { t } from './i18n.js';
-import { createModalShell, fetchJson, showToast, copyText } from './utils.js';
+import { createModalShell, fetchJson, showToast, copyText, showContextMenu } from './utils.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { createVncView, streamUrl } from './vnc-view.js';
 import { createStreamView } from './stream-view.js'; // lane stream-p1a-transport: the WebRTC rung's <video>, in this same shell
@@ -34,6 +34,7 @@ import { openRemoteappSettings } from './remoteapp-card.js'; // lane remoteapp-r
 import { openMachineApp, openWindowPicker } from './machine-app.js'; // lane machine-app-crop: one app of the machine as its own window; lane stream-p2w-build: one of its windows as a stream
 import { screenMap, hdrShown, carryPick } from '../desktop-screens.js'; // lane desktop-v2-entry: the OS table + the RFB table → the displays in fb pixels
 import { openDesktopPicker, rememberDesktop, rememberDisplays, readRecent } from './desktop-picker.js';
+import { createDisplayPanes, rememberedMode, rememberMode, deviceTag, isPhone, modeOf, displayRows, displayName, displayLabel, sumStats, stillOf, MODE_WORDS, MODE_ICONS, modeRowHtml } from './machine-displays.js'; // lane desktop-display-modes: a machine's several displays — the three modes
 import { enterSubmits } from './chat-enter-keys.js';
 import { createHandover } from './machine-desktop-handover.js'; // lane desktop-handover: 「交给 agent」 — the stream to ONE agent conversation
 
@@ -95,16 +96,45 @@ function askCredentials(m, types, auth) {
   });
 }
 
-/** THE WINDOW: one per machine in this page (a second open reveals it); the picture through the ONE bridge. `display` = the
- *  display key to show (lane desktop-v2-entry; undefined = the one this browser chose last for the machine, null = all). */
-export function openMachineDesktop(app, m, { display } = {}) {
+/** THE WINDOW: the picture through the ONE bridge (VNC) or the machine's agent (the stream). `display` = the VNC picture's
+ *  display key to show (lane desktop-v2-entry; undefined = the one this browser chose last for the machine, null = all).
+ *  lane desktop-display-modes — a machine with several displays streams in THREE modes (src/desktop-displays-layout.js), the
+ *  window's and remembered per machine in this browser: `mode` 'switch' ③ (ONE window, the switcher restarts the stream on
+ *  another display — a phone's only mode) | 'windows' ① (a window PER display; `streamDisplay` = its display's id) | 'all' ②
+ *  (every display in ONE window, laid out as on the machine); undefined = the remembered one. ③ / ② = the machine's one window
+ *  (a second open reveals it), ① = a display's own window (revealed; a door naming no display re-opens every remembered one).
+ *  `syncId` = a REPLAYED window (its openSpec: a reload, another client) — always its own window; it streams at once only for
+ *  the device that opened it (`restored` = another one's: one press shows it here), and never asks a sign-in by itself. */
+export function openMachineDesktop(app, m, { display, mode: askedMode, streamDisplay: askedDisplay, syncId = null, restored = false } = {}) {
   const id = machineDesktopId(m && m.hostId);
   if (!id) return null;
-  for (const [wid, win] of app.wm.windows) if (win._machineDesktop === m.hostId) { app.wm.revealWindow(wid); if (display !== undefined) win._pickDisplay?.(display); return win; }
+  const phone = isPhone(app);
+  const mem = rememberedMode(m.hostId);
+  let mode = modeOf(askedMode !== undefined ? askedMode : mem.mode, { phone });
+  if (syncId && app.wm.windows.has(syncId)) { app.wm.revealWindow(syncId, { replay: true }); return app.wm.windows.get(syncId); }
+  if (!syncId) {
+    const mine = [...app.wm.windows.values()].filter((w) => w._machineDesktop === m.hostId);
+    if (mode === 'windows') {
+      if (askedDisplay === undefined && mem.displays.length > 1) { // the door that names no display: every display ① had a window for
+        let first = null;
+        for (const d of mem.displays) { const w = openMachineDesktop(app, m, { display, mode, streamDisplay: d }); first = first || w; }
+        return first;
+      }
+      const key = askedDisplay === undefined ? mem.display : askedDisplay == null ? null : String(askedDisplay);
+      const have = mine.find((w) => w._desktopMode === 'windows' && (key == null || w._desktopDisplay === key));
+      if (have) { app.wm.revealWindow(have.id); return have; }
+      askedDisplay = key;
+    } else {
+      const have = mine.find((w) => w._desktopMode !== 'windows');
+      if (have) { app.wm.revealWindow(have.id); if (display !== undefined) have._pickDisplay?.(display); if (askedDisplay != null) have._pickStream?.(String(askedDisplay)); return have; }
+    }
+  }
   app._hideWelcome?.();
   const machine = nameOf(m);
-  const winInfo = app.wm.createWindow({ title: t('{machine} — its desktop', { machine }), type: 'machine-desktop' });
+  const winInfo = app.wm.createWindow({ title: t('{machine} — its desktop', { machine }), type: 'machine-desktop', ...(syncId ? { syncId } : {}) });
   winInfo._machineDesktop = m.hostId;
+  winInfo._desktopMode = mode;
+  winInfo._desktopDisplay = mode === 'windows' && askedDisplay != null ? String(askedDisplay) : null;
   const c = winInfo.content;
   c.style.display = 'flex'; c.style.flexDirection = 'column';
   // lane desktop-v2-entry (design q-030 §3): THE SWITCH STRIP replaces the line that said what the window is (its words are the
@@ -114,6 +144,12 @@ export function openMachineDesktop(app, m, { display } = {}) {
   const hostBtn = btn('desktop-strip-btn desktop-strip-host', `${machine} ▾`, () => openDesktopPicker(app, { anchor: hostBtn, focusHost: m.hostId }));
   hostBtn.title = t('Switch machine');
   const seg = el('div'); seg.className = 'desktop-strip-displays'; seg.setAttribute('role', 'group'); seg.hidden = true;
+  // lane desktop-display-modes: THE MODE CONTROL — the current mode (its icon + words), a press lists the three; shown only for a
+  // stream of a machine with two or more displays, never on a phone (③ only)
+  const modeBtn = btn('desktop-strip-btn desktop-strip-mode', '', () => { const r = modeBtn.getBoundingClientRect(); showContextMenu(r.left, r.bottom + 2, ['switch', 'windows', 'all'].map((k) => ({ labelHtml: modeRowHtml(k, k === mode), action: () => setMode(k) })), 'context-menu'); });
+  modeBtn.hidden = true; modeBtn.title = t('How this machine’s displays are shown');
+  // ② on the HDR road (commit 2): each display streams a smaller picture so they keep their frame rate — the strip says so
+  const scaledEl = el('span'); scaledEl.className = 'desktop-strip-scaled'; scaledEl.hidden = true;
   // lane desktop-v2-latency (design q-030 §4): full screen = the window's CONTENT (the strip + the picture); there, on a secure
   // page, navigator.keyboard.lock() hands Esc / Alt+Tab / the Windows key / ⌘ … to the machine while the ⌨ toggle is on
   c.classList.add('desktop-machine-content');
@@ -140,7 +176,7 @@ export function openMachineDesktop(app, m, { display } = {}) {
     else if (!g.lock && locked) { locked = false; try { navigator.keyboard.unlock(); } catch { /* gone with the page */ } }
     drawKeys();
   };
-  const onFull = () => { lockKeys(); pill.sync(); stats.close(); if (document.fullscreenElement === c) (stream || view)?.focus(); }; // lane stream-stats-popup: the pill; a popup of the page behind would not show in full screen
+  const onFull = () => { lockKeys(); pill.sync(); stats.close(); if (document.fullscreenElement === c) (stream || many.get(panes.lastPointer()) || [...many.values()][0] || view)?.focus(); }; // lane stream-stats-popup: the pill; a popup of the page behind would not show in full screen; lane desktop-display-modes: ②'s pane under the pointer
   document.addEventListener('fullscreenchange', onFull);
   drawKeys();
   const chip = el('span'); chip.className = 'desktop-strip-status';
@@ -157,7 +193,7 @@ export function openMachineDesktop(app, m, { display } = {}) {
   const cmp = el('div'); cmp.className = 'desktop-strip-compare'; cmp.hidden = true;
   chip.onclick = () => { if (stream) { stats.toggle(chip); return; } cmp.hidden = !cmp.hidden; drawChip(); }; // lane stream-stats-popup: a stream's summary opens its details
   chip.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); chip.onclick(); } };
-  strip.append(hostBtn, seg, fullBtn, keysBtn, chip, rungEl, slowEl, hdrEl);
+  strip.append(hostBtn, seg, modeBtn, scaledEl, fullBtn, keysBtn, chip, rungEl, slowEl, hdrEl);
   c.append(strip, cmp);
   const pane = el('div', 'position:relative;flex:1 1 auto;min-height:0'); c.append(pane);
   // the displays: the machine's own table (display-facts, once per window) + the server's -308 rects → the PURE screenMap
@@ -174,16 +210,124 @@ export function openMachineDesktop(app, m, { display } = {}) {
     seg.hidden = false;
   };
   // lane stream-mac-stall: THE STREAM's switcher — the machine's displays from the stream's own offer (a Mac's: its screen helper's
-  // facts), left to right; a pick restarts the stream on that display (one display a stream: no 「All」). Before, the strip drew
-  // the switcher only over the VNC picture — a stream showed the main display and nothing to switch to
-  let streamDisplays = null, streamDisplay = null;
+  // facts; lane desktop-display-modes: a Windows machine's too — its screen source's facts), left to right; a pick restarts the
+  // stream on that display. Before, the strip drew the switcher only over the VNC picture — a stream showed the main display
+  // lane desktop-display-modes: + 「全部显示器」 (②) and the ▾ menu — each display named (its own name, real pixels, HDR), with
+  // 「在新窗口打开」 (①) under ③; the mode control beside it. ② = a pane per display (`many`), ③ / ① = ONE view (`stream`)
+  const panes = createDisplayPanes(pane, { onFold: (did, f) => fold(did, f) });
+  let streamDisplays = null; // the offer's displays (PURE displayRows), null before it / when the agent names none
+  let streamDisplay = askedDisplay != null ? String(askedDisplay) : mode === 'switch' && mem.display ? mem.display : null; // the display ③ / ① shows
+  let pickedFromMemory = streamDisplay != null; // a display named before this window streamed (remembered, its openSpec's, a door's) may be gone ⇒ the main one, once
+  const folded = new Set(mode === 'all' ? mem.folded : []);
+  const many = new Map(); // ② display id → its stream view
+  const rowOf = (did) => (streamDisplays || []).find((d) => d.id === did) || null;
+  const firstShown = () => { const r = (streamDisplays || []).find((d) => !folded.has(d.id)); return r ? r.id : null; };
+  const remember = (patch = {}) => {
+    const ones = [...app.wm.windows.values()].filter((w) => w._machineDesktop === m.hostId && w._desktopMode === 'windows' && w._desktopDisplay).map((w) => w._desktopDisplay);
+    rememberMode(m.hostId, { mode, ...(mode === 'windows' ? { displays: ones } : {}), ...(mode === 'all' ? { folded: [...folded] } : {}), ...(mode !== 'all' && streamDisplay != null ? { display: streamDisplay } : {}), ...patch });
+  };
+  // the window's recipe (layout restore + the other clients): the machine, the mode, its display, ②'s folded panes, who opened it
+  const setSpec = () => {
+    winInfo._openSpec = { action: 'openMachineDesktop', hostId: m.hostId, label: m.label || null, setup: m.setup || null, mode, ...(streamDisplay != null && mode !== 'all' ? { display: streamDisplay } : {}), ...(folded.size && mode === 'all' ? { folded: [...folded] } : {}), by: deviceTag() };
+    try { app.wm._notify?.(); } catch { /* the layout's */ }
+  };
+  const drawTitle = () => { const r = mode === 'windows' ? rowOf(streamDisplay) : null; app.wm.setTitle?.(winInfo.id, r ? t('{machine} — {display}', { machine, display: displayName(r) }) : t('{machine} — its desktop', { machine })); };
   const drawStreamSeg = () => {
     const list = streamDisplays && streamDisplays.length > 1 ? streamDisplays : null;
+    modeBtn.hidden = !list || phone;
     if (!list) { seg.hidden = true; seg.replaceChildren(); return; }
-    seg.replaceChildren(...list.map((d, i) => { const b = btn('desktop-strip-seg', String(i + 1), () => pickStream(d.id)); b.title = d.name ? `${i + 1} · ${d.name}` : t('Display {n}', { n: i + 1 }); b.dataset.key = d.id; b.setAttribute('aria-pressed', String(d.id === streamDisplay)); return b; }));
+    const segBtn = (label, key, title, pressed, onclick) => { const b = btn('desktop-strip-seg', label, onclick); b.title = title; b.dataset.key = key; b.setAttribute('aria-pressed', String(pressed)); return b; };
+    const kids = list.map((d) => segBtn(String(d.n), d.id, displayLabel(d), mode === 'all' ? !folded.has(d.id) : d.id === streamDisplay, () => pickStream(d.id)));
+    if (!phone) kids.push(segBtn(t('All displays'), '*', MODE_WORDS.all(), mode === 'all', () => setMode('all')));
+    const more = btn('desktop-strip-more', '▾', () => { const r = more.getBoundingClientRect(); showContextMenu(r.left, r.bottom + 2, displayMenu(), 'context-menu'); });
+    more.title = t('The machine’s displays'); more.setAttribute('aria-label', more.title);
+    seg.replaceChildren(...kids, more);
     seg.hidden = false;
+    modeBtn.innerHTML = `${MODE_ICONS[mode]} <span></span>`; modeBtn.lastChild.textContent = MODE_WORDS[mode]();
   };
-  const pickStream = (id) => { if (!stream || id === streamDisplay) return; streamDisplay = id; drawStreamSeg(); const after = stream.key; stream.dispose('switched'); startStream({ kind: 'display', id }, after); }; // lane desktop-handover: `switched` + `after` carry a hand-over to the next stream
+  // the ▾ menu: ③ a row shows that display here, 「在新窗口打开」 gives it a window of its own (①); ① a row = that display's
+  // window; ② a row folds / unfolds its pane
+  const displayMenu = () => (streamDisplays || []).flatMap((d) => {
+    const on = mode === 'all' ? !folded.has(d.id) : d.id === streamDisplay;
+    const row = { label: `${on ? '✓ ' : '\u2003'}${displayLabel(d)}`, action: () => (mode === 'all' ? fold(d.id, on) : pickStream(d.id)), ...(d.capturable === false ? { disabled: true, title: t('that display is on another graphics card') } : {}) };
+    return mode === 'switch' && !phone ? [row, { label: `\u2003\u2003${t('Open in a new window')}`, action: () => openApart(d.id), disabled: d.capturable === false }] : [row];
+  });
+  const pickStream = (did) => {
+    if (mode === 'windows') { if (did !== streamDisplay) openMachineDesktop(app, m, { mode: 'windows', streamDisplay: did }); return; } // ① that display's own window
+    if (mode === 'all') { setMode('switch', did); return; } // ② a number alone = that display, here (③)
+    if (!stream || did === streamDisplay) return;
+    streamDisplay = did; pickedFromMemory = false; remember(); setSpec(); drawStreamSeg();
+    const still = stillOf(stream, panes.pane('')); // THE STILL: the last picture stays until the other display's first
+    const old = stream; stream = null; const after = old.key; old.dispose('switched'); // lane desktop-handover: `switched` + `after` — a hand-over rides the switch
+    startStream({ kind: 'display', id: did }, { still, after });
+  };
+  /** ③ 「在新窗口打开」: this window keeps its display as ①, the asked one opens in a window of its own (the same display = this one). */
+  const openApart = (did) => { setMode('windows', streamDisplay); if (did !== streamDisplay) openMachineDesktop(app, m, { mode: 'windows', streamDisplay: did }); };
+  /** ② one view per shown display, ③ / ① the one view — moving between them keeps every stream that stays. */
+  const collapseTo = (keep) => {
+    for (const [did, v] of [...many]) if (did !== keep) { many.delete(did); v.dispose(); panes.remove(did); }
+    const v = many.get(keep); many.clear();
+    streamDisplay = keep;
+    if (v) {
+      panes.rename(keep, ''); stream = v;
+      if ((v._share || 1) > 1 && (v.source() || {}).mode === 'mapped') { const still = stillOf(v, panes.pane('')); stream = null; v.dispose(); startStream({ kind: 'display', id: keep }, { still }); } // ③ / ①: the whole picture again
+    } else if (!stream && keep != null) startStream({ kind: 'display', id: keep });
+    panes.place({ all: false });
+    drawScaled();
+  };
+  const spreadAll = () => {
+    if (!streamDisplays || streamDisplays.length < 2) return;
+    if (stream) { // the one view becomes its display's pane — unless that display is folded (then it stops)
+      const did = streamDisplay || firstShown(), old = stream; stream = null;
+      if (folded.has(did)) { old.dispose(); panes.remove(''); } else { panes.rename('', did); many.set(did, old); }
+    }
+    for (const d of streamDisplays) if (!many.has(d.id) && !folded.has(d.id) && d.capturable !== false) startMany(d.id);
+    placeAll(); reshare();
+  };
+  // ② ON THE HDR ROAD (commit 2 — measured on the owner's box: one 4K HDR display 7–12 fps, two 3–5 fps each): every view asks
+  // its stream for `share` = how many displays this window streams (src/stream-plan.js mappedStepOf: the agent maps every k-th
+  // pixel); a mapped view started under another count is restarted (THE STILL covers it); the SDR road and ③ / ① never share
+  const shareNow = () => { const n = (streamDisplays || []).filter((d) => !folded.has(d.id) && d.capturable !== false).length; return mode === 'all' && n >= 2 ? n : 1; };
+  const restartMany = (did) => { const v = many.get(did); if (!v) return; const still = stillOf(v, panes.pane(did)); many.delete(did); v.dispose(); startMany(did, { still }); };
+  const reshare = () => { const n = shareNow(); for (const [did, v] of [...many]) if ((v.source() || {}).mode === 'mapped' && (v._share || 1) !== n) restartMany(did); drawScaled(); };
+  const drawScaled = () => {
+    const sc = mode === 'all' ? [...many.values()].map((v) => (v.source() || {}).scaled).find(Boolean) : null;
+    scaledEl.hidden = !sc;
+    if (!sc) return;
+    scaledEl.textContent = t('Lower resolution for {n} displays', { n: sc.share });
+    scaledEl.title = t('Each HDR display streams at {w}×{h} instead of {fw}×{fh} so {n} of them keep their frame rate', { w: sc.w, h: sc.h, fw: sc.from.w, fh: sc.from.h, n: sc.share });
+  };
+  const placeAll = () => panes.place({ rows: streamDisplays || [], all: mode === 'all', folded: [...folded] });
+  const setMode = (next, chosen = null) => {
+    next = modeOf(next, { phone });
+    if (next === mode) { if (chosen != null && next === 'switch') pickStream(chosen); return; }
+    const prev = mode;
+    if (next === 'windows') { // ① this window keeps one display (③'s shown one; ②'s under the pointer last, else the first), every other display opens a window of its own
+      const keep = chosen || (prev === 'all' ? panes.lastPointer() || streamDisplay || firstShown() : streamDisplay) || firstShown();
+      if (prev === 'all') collapseTo(keep);
+      mode = 'windows'; winInfo._desktopMode = mode; winInfo._desktopDisplay = keep; streamDisplay = keep; folded.clear();
+      remember(); setSpec(); drawTitle(); drawStreamSeg(); drawChip();
+      if (chosen == null) for (const d of streamDisplays || []) if (d.id !== keep && d.capturable !== false) openMachineDesktop(app, m, { mode: 'windows', streamDisplay: d.id });
+      remember();
+      return;
+    }
+    // ③ / ② — this window becomes the machine's ONE window: its other windows (①'s) close, their streams with them
+    for (const [wid, w] of [...app.wm.windows]) if (w !== winInfo && w._machineDesktop === m.hostId) app.wm.closeWindow(wid);
+    mode = next; winInfo._desktopMode = mode; winInfo._desktopDisplay = null;
+    if (next === 'all') spreadAll(); else collapseTo(chosen || panes.lastPointer() || streamDisplay || firstShown());
+    remember(); setSpec(); drawTitle(); drawStreamSeg(); drawChip();
+  };
+  /** ② a pane folds to its stub (its stream stops) / unfolds (a stream again). */
+  const fold = (did, f) => {
+    if (mode !== 'all') return;
+    if (f) { folded.add(did); const v = many.get(did); many.delete(did); if (v) v.dispose(); panes.remove(did); }
+    else if (folded.delete(did)) startMany(did);
+    remember(); setSpec(); placeAll(); reshare(); drawStreamSeg(); drawChip();
+  };
+  winInfo._pickStream = (did) => pickStream(did);
+  winInfo._setDisplayMode = (k, did) => setMode(k, did);
+  const fit = typeof ResizeObserver === 'function' ? new ResizeObserver(() => { if (mode === 'all') placeAll(); }) : null;
+  fit?.observe(pane);
   const apply = () => { if (!view) return; const d = shown(); view.setCrop(d ? d.rect : null); drawSeg(); hdrEl.hidden = !hdrShown({ screens: facts && facts.ok ? facts.displays : null, map, key: d ? d.key : null }); };
   const pick = (key) => { want = key; rememberDesktop(m.hostId, key); apply(); };
   const remap = () => {
@@ -220,8 +364,8 @@ export function openMachineDesktop(app, m, { display } = {}) {
     return t('Pointer: drawn here at its own {px} px', { px: c.side });
   };
   const drawChip = () => {
-    drawRung();
-    if (stream) { drawStream(); return; }
+    drawRung(); tccCheck();
+    if (stream || many.size) { drawStream(); return; }
     if (!view || view.state !== 'connected') { chip.textContent = ''; chip.title = scope; cmp.hidden = true; return; }
     const st = view.stats();
     const ms = link && link.hub != null ? link.hub + (link.device || 0) : null;
@@ -292,7 +436,17 @@ export function openMachineDesktop(app, m, { display } = {}) {
   };
   tccEl.append(tccText, tccCopy);
   const MAC_PANES = { screen: 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture', accessibility: 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility' };
-  const showTcc = (code) => {
+  // commit 2 — the Accessibility banner goes when the machine takes input again (a view's injected count passes the count at
+  // the refusal, no newer refusal) or a start's facts say granted; a new refusal shows it again (inputWords)
+  let tccAt = 0; const tccBase = new Map();
+  const tccViews = () => (stream ? [stream] : [...many.values()]);
+  const tccGranted = () => { if (!tccEl.hidden && tccPane === 'accessibility') tccEl.hidden = true; };
+  const tccCheck = () => {
+    if (tccEl.hidden || tccPane !== 'accessibility') return;
+    for (const v of tccViews()) { const inp = (v.agent() || {}).input; if (inp && inp.n > (tccBase.has(v) ? tccBase.get(v) : 0) && !(inp.refused && inp.refused.code === 'accessibility_permission' && inp.refused.at > tccAt)) { tccGranted(); return; } }
+  };
+  const showTcc = (code, at = 0) => {
+    if (code === 'accessibility_permission') { tccAt = at || 0; tccBase.clear(); for (const v of tccViews()) tccBase.set(v, ((v.agent() || {}).input || {}).n || 0); }
     const pane = code === 'accessibility_permission' ? 'accessibility' : 'screen';
     tccLink = MAC_PANES[pane]; tccPane = pane;
     tccText.textContent = code === 'helper_changed_regrant' ? t('The Mac’s screen helper was updated: turn vibespace-screen off and on again under Screen & System Audio Recording')
@@ -315,7 +469,8 @@ export function openMachineDesktop(app, m, { display } = {}) {
     ice_failed: () => t('the connection failed'), ice_disconnected: () => t('the connection dropped'), connect_timeout: () => t('it did not connect in time'),
     answer_failed: () => t('the browser and the machine could not agree'), restart_failed: () => t('it could not reconnect'), link_lost: () => t('the machine’s link dropped'),
     agent_too_old: () => t('the machine’s agent cannot stream yet — update it'), no_screen_source: () => t('the machine’s agent cannot capture its screen yet'),
-    too_many_streams: () => t('the machine already streams to two windows'), offer_failed: () => t('the machine could not start it'),
+    too_many_streams: (i) => (i && Number.isInteger(i.cap) ? t('the machine already streams {live} pictures — at most {cap} for its {n} displays (one per display + one)', { live: i.live, cap: i.cap, n: i.displays }) : t('the machine already streams to two windows')), // lane desktop-display-modes: THE PER-MACHINE CAP names its count (an older agent: two)
+    offer_failed: () => t('the machine could not start it'),
     // lane stream-p1b-screen: the screen source's own names (src/agentd/stream-screen.js — refused before it starts, or ended)
     no_ffmpeg: () => t('the machine needs ffmpeg 7 or newer (with ddagrab and NVENC) — on its PATH or in {dir}', { dir: '%LOCALAPPDATA%\\vibespace\\ffmpeg\\bin' }),
     no_encoder: () => t('the machine’s ffmpeg has no H.264 encoder'), no_white_level: () => t('the machine’s HDR white level could not be read'),
@@ -327,9 +482,10 @@ export function openMachineDesktop(app, m, { display } = {}) {
     window_minimized: () => t('the window is minimized — restore it to stream'), window_gone: () => t('the window it showed is gone'),
     encoder_failed: () => t('the machine’s video encoder stopped'), no_window_source: () => t('the machine’s agent cannot stream one window yet'),
   };
-  const streamWords = (code) => (STREAM_WHY[code] ? STREAM_WHY[code]() : t('the machine ended it ({code})', { code: code || '?' }));
+  const streamWords = (code, info) => (STREAM_WHY[code] ? STREAM_WHY[code](info) : t('the machine ended it ({code})', { code: code || '?' }));
   const ms = (v) => (v == null ? '—' : v);
   const drawStream = () => {
+    if (!stream && many.size) { drawMany(); return; }
     const { playing, page: p, agent: a, words } = stats.draw(stream); // the firewall notice + the details' series (src/lib/stream-stats.js)
     chip.textContent = playing ? t('Stream · {ms} ms · {fps} fps', { ms: ms(p && p.rttMs), fps: ms(p && p.fps) }) : t('Stream · connecting…');
     if (!p) return;
@@ -339,10 +495,22 @@ export function openMachineDesktop(app, m, { display } = {}) {
       ...(sc && sc.white ? [t('HDR mapped on the machine (SDR white {nits} nits)', { nits: Math.round(sc.white * 0.08) })] : []), ...(sc && sc.note === 'no_hw_encoder' ? [t('software encoding (no hardware encoder found)')] : []),
       t('Pointer: yours — the machine draws none into the picture')].join('\n'); // lane stream-cursor: no source paints the machine's
   };
+  // lane desktop-display-modes ② THE STATS of N streams (PURE sumStats): fps and kbps summed over the playing displays, the slowest
+  // named — the chip says how many play; its title has the sum's sentence (the numbers' place since lane stream-stats-popup) and
+  // each display's own numbers
+  const drawMany = () => {
+    const rows = [...many].map(([did, v]) => { const p = v.stats(), r = rowOf(did); return { id: did, n: r ? r.n : 0, playing: v.state === 'playing', fps: p && p.fps, kbps: p && p.kbps }; });
+    const sum = sumStats(rows), vs = [...many.values()];
+    stats.draw(vs.find((v) => v.state === 'playing') || vs[0]); // the firewall notice + the details: any playing display's (one machine, one path)
+    const slow = sum.slowest ? rowOf(sum.slowest.id) : null;
+    const words = sum.playing ? t('{n} displays · {fps} fps · {kbps} kbps', { n: sum.playing, fps: sum.fps, kbps: sum.kbps }) + (slow ? ' · ' + t('slowest: {display} at {fps} fps', { display: `${slow.n} · ${displayName(slow)}`, fps: sum.slowest.fps }) : '') : '';
+    chip.textContent = sum.playing ? t('Stream · {n} displays · {fps} fps', { n: sum.playing, fps: sum.fps }) : t('Stream · connecting…');
+    chip.title = [scope, ...(words ? [words] : []), ...rows.map((r) => { const d = rowOf(r.id); return `${d ? displayLabel(d) : r.id}: ${r.playing ? t('{fps} fps · {kbps} kbps', { fps: ms(r.fps), kbps: ms(r.kbps) }) : t('Stream · connecting…')}`; }), t('Pointer: yours — the machine draws none into the picture')].join('\n');
+  };
   const inputWords = (ref) => {
     const code = ref && ref.code;
     if (!code) return;
-    if (code === 'accessibility_permission') { showTcc(code); return; } // lane stream-p3m-build: the Mac's Accessibility switch
+    if (code === 'accessibility_permission') { showTcc(code, ref.at); return; } // lane stream-p3m-build: the Mac's Accessibility switch (commit 2: until it takes input again)
     note(code === 'uipi_blocked' ? t('Windows keeps input away from an administrator window — click another window on the machine first')
       : code === 'switching' ? t('Switching display — that input did not reach the machine') // fix r2: the view's own word (stream-view send)
       : code === 'input_unsupported' ? t('This machine cannot take input over the stream yet')
@@ -351,34 +519,87 @@ export function openMachineDesktop(app, m, { display } = {}) {
   // lane desktop-handover (src/lib/machine-desktop-handover.js): 「交给 agent」 while the stream plays; the person's own input pauses it
   const handover = createHandover({ app, hostId: m.hostId, machine, strip, before: chip, pane, streamOf: () => stream });
   winInfo._handover = handover;
-  const startStream = (source = null, after = null) => {
-    stream = createStreamView(pane, {
+  // lane desktop-display-modes: a remembered display the machine no longer shows (or cannot capture) ⇒ its main display, once
+  const DISPLAY_GONE = ['display_gone', 'display_other_gpu', 'display_unmapped', 'bad_source'];
+  /** ② one display's end — said in its pane with 「重试」, the other displays keep streaming. → true when `v` was one of them. */
+  const paneEnd = (v, code, why, info) => {
+    const hit = [...many].find(([, x]) => x === v);
+    if (!hit) return false;
+    many.delete(hit[0]);
+    panes.say(hit[0], t('Not streamed: {why}', { why: STREAM_WHY[code] ? streamWords(code, info) : why || streamWords(code) }), { label: t('Try again'), run: () => { panes.say(hit[0], ''); startMany(hit[0]); } });
+    drawChip();
+    return true;
+  };
+  /** ② a display's own stream, in its pane. */
+  const startMany = (did, { still = null } = {}) => {
+    let v = null;
+    const share = shareNow();
+    v = createStreamView(panes.pane(did), { hostId: m.hostId, hostPlatform: m.setup || null, source: { kind: 'display', id: did, ...(share > 1 ? { share } : {}) },
+      onSource: (src) => { if (src && src.tcc && src.tcc.accessibility === 'granted') tccGranted(); drawScaled(); },
+      onStatus: (state) => { if (state === 'playing' && still) { still.remove(); still = null; } drawChip(); }, onStats: () => drawChip(), onInput: inputWords,
+      onFallback: (code, why, taken, info) => { if (still) { still.remove(); still = null; } paneEnd(v, code, why, info); } });
+    v._share = share;
+    many.set(did, v);
+    v.connect();
+    if (!tick) tick = setInterval(() => { drawChip(); }, 1000);
+  };
+  /** A replayed window never asks the sign-in by itself (design 014 D1): the VNC picture waits for a press. */
+  const askVnc = (words) => {
+    const box = el('div'); box.className = 'desktop-display-say desktop-display-ask';
+    box.append(el('span', null, words), btn('btn-create desktop-display-say-act', t('Show the VNC picture'), () => { box.remove(); startVnc(); }));
+    pane.append(box);
+  };
+  const startStream = (source = null, { still = null, after = null } = {}) => {
+    let v = null;
+    v = createStreamView(panes.pane(''), {
       hostId: m.hostId,
       hostPlatform: m.setup || null,
       after,
       onOwnerInput: () => handover.ownerInput(),
       onHandover: (f) => handover.facts(f),
       source, // lane stream-mac-stall: a display the switcher picked (else the machine's main one)
-      onSource: (src) => { streamDisplays = src && Array.isArray(src.displays) ? src.displays.slice().sort((a, b) => a.x - b.x || a.y - b.y) : null; streamDisplay = src && src.display != null ? String(src.display) : null; drawStreamSeg(); },
-      onStatus: (state) => { drawChip(); handover.playing(state === 'playing'); if (!tick) tick = setInterval(() => { drawChip(); }, 1000); },
+      onSource: (src) => {
+        if (v !== stream) return;
+        if (src && src.tcc && src.tcc.accessibility === 'granted') tccGranted(); // commit 2: the Mac's facts at this start say granted
+        streamDisplays = src && Array.isArray(src.displays) && src.displays.length ? displayRows(src.displays) : null; // left to right, numbered, named (PURE)
+        if (src && src.display != null) streamDisplay = String(src.display);
+        if (mode === 'windows') winInfo._desktopDisplay = streamDisplay;
+        if (mode === 'all') spreadAll();
+        remember(); setSpec(); drawTitle(); drawStreamSeg();
+      },
+      onStatus: (state) => { if (state === 'playing' && still) { still.remove(); still = null; } drawChip(); handover.playing(state === 'playing'); if (!tick) tick = setInterval(() => { drawChip(); }, 1000); },
       onStats: () => drawChip(),
       onInput: inputWords,
-      onFallback: (code, why, taken) => {
-        stream = null; stats.ended(); clearInterval(tick); tick = null; handover.playing(false); handover.facts(null);
+      onFallback: (code, why, taken, info) => {
+        if (still) { still.remove(); still = null; }
+        if (paneEnd(v, code, why, info)) return; // ② one display's
+        if (v !== stream) return; // replaced by a switch
+        stream = null;
+        if (!taken && pickedFromMemory && source && DISPLAY_GONE.includes(code)) { pickedFromMemory = false; streamDisplay = null; remember({ display: null }); startStream(null); return; }
+        stats.ended(); clearInterval(tick); tick = null; handover.playing(false); handover.facts(null);
         streamDisplays = null; drawStreamSeg(); // the VNC picture draws its own switcher (remap)
-        refusedWhy = STREAM_WHY[code] ? streamWords(code) : why || streamWords(code); // the page words a known code in its own language; else the machine's sentence
+        for (const [did, x] of [...many]) { many.delete(did); x.dispose(); }
+        panes.dispose();
+        refusedWhy = STREAM_WHY[code] ? streamWords(code, info) : why || streamWords(code); // the page words a known code in its own language; else the machine's sentence
         if (code === 'screen_permission' || code === 'helper_changed_regrant') showTcc(code); // lane stream-p3m-build: which switch on the Mac
-        if (taken) note(t('Stream stopped ({why}) — showing the VNC picture', { why: streamWords(code) }), why || code);
+        if (taken) note(t('Stream stopped ({why}) — showing the VNC picture', { why: streamWords(code, info) }), why || code);
         chip.title = [scope, t('Not streamed: {why}', { why: refusedWhy })].join('\n');
+        if (syncId && !taken) { askVnc(t('Not streamed: {why}', { why: refusedWhy })); return; }
         startVnc();
       },
     });
+    stream = v;
     winInfo._streamView = stream;
     stream.connect();
   };
   winInfo._pickDisplay = (key) => pick(key);
-  winInfo.onClose = () => { handover.dispose(); pill.dispose(); stats.dispose(); clearInterval(tick); clearTimeout(noteTimer); document.removeEventListener('fullscreenchange', onFull); if (locked) { locked = false; try { navigator.keyboard.unlock(); } catch { /* gone */ } } if (stream) stream.dispose(); if (view) view.dispose(); };
-  if (typeof RTCPeerConnection === 'function') startStream(); else startVnc();
+  winInfo.onClose = () => { handover.dispose(); pill.dispose(); stats.dispose(); clearInterval(tick); clearTimeout(noteTimer); fit?.disconnect(); document.removeEventListener('fullscreenchange', onFull); if (locked) { locked = false; try { navigator.keyboard.unlock(); } catch { /* gone */ } } if (stream) stream.dispose(); for (const v of many.values()) v.dispose(); many.clear(); if (view) view.dispose(); };
+  // lane desktop-display-modes: the window's recipe from its first moment; a window another device opened (a replay) waits for a
+  // press here — every client replaying it must not start a stream nobody watches (each takes one of the machine's streams)
+  setSpec(); remember();
+  const begin = () => (typeof RTCPeerConnection === 'function' ? startStream(streamDisplay != null && mode !== 'all' ? { kind: 'display', id: streamDisplay } : null) : syncId ? askVnc(t('{machine}’s desktop', { machine })) : startVnc());
+  if (restored) { panes.pane(''); panes.say('', t('{machine}’s desktop was open on another device', { machine }), { label: t('Show it here'), run: () => { panes.say('', ''); begin(); } }); }
+  else begin();
   return winInfo;
 }
 
@@ -591,5 +812,17 @@ export function showMachineDesktopDialog(app, m0, { install = null, recheck = nu
   }) : null;
 }
 
-// ── WINDOW-TYPE REGISTRATION ── not persisted: a reload never re-opens a machine's whole screen (it asks the sign-in)
-registerWindowType({ type: 'machine-desktop', label: 'Machine desktop', persist: false, icon: svgIcon16('<rect x="1.5" y="2.5" width="13" height="9" rx="1"/><path d="M8 11.5V14M5 14h6M4 5.5h8"/>') });
+/** lane desktop-display-modes: a machine desktop window from its openSpec (a reload, another client): the machine, its mode and
+ *  display, ②'s folded panes — it streams at once for the device that opened it, another device's waits for a press. */
+export function replayMachineDesktop(app, spec, { syncId } = {}) {
+  const hostId = spec && typeof spec.hostId === 'string' ? spec.hostId : '';
+  if (!machineDesktopId(hostId)) return null;
+  const m = { hostId, label: typeof spec.label === 'string' ? spec.label.slice(0, 120) : null, setup: spec.setup === 'darwin' || spec.setup === 'win32' ? spec.setup : null, code: 'desktop_ready' };
+  if (spec.mode === 'all' && Array.isArray(spec.folded)) rememberMode(hostId, { folded: spec.folded });
+  return openMachineDesktop(app, m, { mode: modeOf(spec.mode), streamDisplay: spec.display == null ? null : String(spec.display), syncId: syncId || null, restored: !spec.by || spec.by !== deviceTag() });
+}
+
+// ── WINDOW-TYPE REGISTRATION ── lane desktop-display-modes: restored by its openSpec (the mode + display are the window's); a
+// replayed window never asks the sign-in by itself (design 014 D1 — the VNC picture waits for a press), another device's waits
+registerWindowType({ type: 'machine-desktop', label: 'Machine desktop', icon: svgIcon16('<rect x="1.5" y="2.5" width="13" height="9" rx="1"/><path d="M8 11.5V14M5 14h6M4 5.5h8"/>'),
+  action: 'openMachineDesktop', replay: (app, spec, { syncId } = {}) => replayMachineDesktop(app, spec, { syncId }) });

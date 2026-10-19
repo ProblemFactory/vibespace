@@ -591,7 +591,7 @@ const pictures = (rtp) => { const out = []; let cur = []; for (const p of rtp) {
   const inputs = () => helperLog(logD).filter((l) => l.input).map((l) => l.input);
   await until(() => inputs().length >= 7, 4000);
   ok(same(inputs().slice(0, 7), ['P 0', 'K 1 0', 'K 1 1', 'M 960 540', 'D 0', 'M 960 540', 'U 0']), 'the data channel\'s key + click reached the helper\'s input: the frontmost app, the virtual key code, the picture\'s centre in global points (×0.75)', inputs());
-  ok(off.ok && off.source.display === '3' && same(off.source.displays.map((d) => [d.id, d.main, d.x, d.name]), [['3', true, 0, 'Studio 27 (2)'], ['2', false, -1920, 'Studio 27 (1)']]), 'lane stream-mac-stall: the offer names the display streamed (the main one) and the Mac\'s displays — the strip\'s switcher (it drew none over a stream: one display was all there was)', off.source);
+  ok(off.ok && off.source.display === '3' && same(off.source.displays.map((d) => [d.id, d.main, d.primary, d.x, d.w, d.pw, d.ph, d.hdr, d.name]), [['3', true, true, 0, 1920, 3840, 2160, true, 'Studio 27 (2)'], ['2', false, false, -1920, 1920, 3840, 2160, true, 'Studio 27 (1)']]), 'lane stream-mac-stall: the offer names the display streamed (the main one) and the Mac\'s displays — the strip\'s switcher (it drew none over a stream: one display was all there was); lane desktop-display-modes: + primary, HDR and the real pixels (the Windows rows\' shape; x / w stay points)', off.source);
   const st = await dm.streamStats(off.sid);
   ok(st.ok && st.stats.screen && st.stats.screen.encoder === 'VideoToolbox' && st.stats.input.n >= 4, 'the session\'s numbers carry the Mac source\'s and the input count', st.stats && st.stats.screen);
   await dm.streamStop(off.sid);

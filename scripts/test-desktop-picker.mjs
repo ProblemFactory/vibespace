@@ -2,7 +2,8 @@
 // lane desktop-v2-entry (design q-030 D1 / §6): the Desktop picker's rows — PURE pickerRows over the machine rows, the state
 // words, the recent row first (what it names must still exist; its state is today's), the stored choice's shape, the zh / ja
 // words, and the wiring (the toolbar's Desktop command and the phone's row open the picker; the local desktop window stays
-// the persisted singleton; a machine's window stays NOT persisted with its sign-in asked each time). The first row after a
+// the persisted singleton; a machine's window is restored by its openSpec since lane desktop-display-modes, its sign-in still
+// asked each time and never by itself on a replay). The first row after a
 // reload, a press, Enter and the phone's sheet run in Chrome: scripts/test-desktop-v2-chrome.mjs ①⑦⑩.
 // lane desktop-picker-instant: §I the rows' last known state (PURE src/desktop-machines-cache.js), §II the real access layer +
 // route over fake machines — the route answers before any probe lands (CONTROL: the pre-fix route waits), each landed probe
@@ -40,7 +41,7 @@ ok(Object.entries(KEYS).every(([k, v]) => zh.includes(`${JSON.stringify(k)}: ${J
 const tf = read('src/lib/toolbar-fold.js'), mn = read('src/lib/mobile-nav.js'), dw = read('src/lib/desktop-window.js'), md = read('src/lib/machine-desktop.js');
 ok(/id: 'desktop\.open', title: 'Desktop', run: \(c\) => openDesktopPicker\(c\.app, \{ anchor: c\.anchor \}\)/.test(tf) && /t\('Desktop'\), \(\) => openDesktopPicker\(app\)\)/.test(mn), 'the toolbar\'s Desktop command and the phone\'s Desktop row open the picker (not the local desktop directly)');
 ok(/type: 'desktop', label: 'Desktop', singleton: true,/.test(dw) && /openSpec: \{ action: 'openDesktop' \}/.test(dw), 'the local desktop window stays the persisted singleton (its replay reopens it directly)');
-ok(/registerWindowType\(\{ type: 'machine-desktop', label: 'Machine desktop', persist: false,/.test(md) && /credentials: \(types\) => askCredentials\(m, types, auth\)/.test(md) && /\.\.\.machineViewOpts\(m\),\n\s+\}\);\n\s+winInfo\._desktopView = view;\n\s+view\.connect\(\);/.test(md) /* lane stream-p1a-transport: the VNC view is made in startVnc() (first, or after the stream's fallback) */, 'a machine\'s window stays NOT persisted and its view still asks the sign-in each time (design 014 D1 unchanged)');
+ok(/registerWindowType\(\{ type: 'machine-desktop', label: 'Machine desktop', icon: /.test(md) && /action: 'openMachineDesktop', replay: \(app, spec, \{ syncId \} = \{\}\) => replayMachineDesktop\(app, spec, \{ syncId \}\)/.test(md) && /credentials: \(types\) => askCredentials\(m, types, auth\)/.test(md) && /\.\.\.machineViewOpts\(m\),\n\s+\}\);\n\s+winInfo\._desktopView = view;\n\s+view\.connect\(\);/.test(md) /* lane stream-p1a-transport: the VNC view is made in startVnc() (first, or after the stream's fallback) */ && /if \(syncId && !taken\) \{ askVnc\(/.test(md), 'a machine\'s window is restored by its openSpec (lane desktop-display-modes: its display mode + display are the window\'s) and its VNC view still asks the sign-in each time — never by itself on a replay (design 014 D1: the VNC picture waits for a press)');
 ok(!/t\('Open its desktop'\)/.test(md) && /t\('Open its desktop → Desktop'\), \(\) => \{ toWindow\(\); openMachineDesktop\(app, m\); \}/.test(md) && /rememberDesktop\(m\.hostId, want\); \/\/ the Desktop picker's first row/.test(md), 'the Apps dialog\'s link says the desktop lives under Desktop, still opens the window at once (inc-mv51w0ow-crw3) and makes it the picker\'s recent choice');
 
 // ── lane desktop-picker-instant (owner 2026-10-19 「这个界面的加载时间怎么越来越长了」): THE ROWS AT ONCE ─────────────────────────

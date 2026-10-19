@@ -7391,6 +7391,26 @@ button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: u
 .machine-desktop-handover-note { color: var(--text-secondary); font-size: 12px; margin: 6px 0; }
 .machine-desktop-handover-why { color: var(--red, #e55); font-size: 12px; margin: 6px 0; }
 .desktop-strip .file-tool-btn.desktop-strip-tcc-open { width: auto; height: auto; min-height: 20px; padding: 0 8px; border-radius: 8px; white-space: nowrap; }
+/* lane desktop-display-modes: the mode control (icon + words), the switcher's ▾ menu, ② a pane per display laid out as on the machine
+   (its fold button on hover, a folded pane's stub along the top), a pane's sentence + its one act, THE STILL (a switch's last picture) */
+.desktop-strip-mode { display: inline-flex; align-items: center; gap: 5px; }
+.desktop-strip-mode[hidden] { display: none; }
+.desktop-strip-scaled { flex: 0 0 auto; padding: 1px 7px; border-radius: 9px; background: var(--bg-input); color: var(--text-secondary); }
+.desktop-strip-scaled[hidden] { display: none; }
+.desktop-mode-icon { width: 14px; height: 14px; flex: 0 0 auto; vertical-align: -2px; }
+.desktop-strip-more { flex: 0 0 auto; height: 24px; min-width: 24px; padding: 0 6px; margin-left: -1px; border: 1px solid var(--border); border-radius: 0 6px 6px 0; background: none; color: var(--text); font: inherit; font-size: 12px; cursor: pointer; }
+.desktop-display-pane { position: absolute; inset: 0; overflow: hidden; }
+.desktop-display-pane[hidden] { display: none; }
+.desktop-display-fold { position: absolute; top: 6px; right: 6px; z-index: 2; width: 22px; height: 22px; padding: 3px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-window); color: var(--text); opacity: 0; cursor: pointer; transition: opacity .15s; }
+.desktop-display-fold svg { width: 14px; height: 14px; display: block; }
+.desktop-display-pane:hover .desktop-display-fold, .desktop-display-fold:focus-visible { opacity: .9; }
+.desktop-display-fold[hidden] { display: none; }
+.desktop-display-stubs { position: absolute; left: 0; top: 0; right: 0; z-index: 2; pointer-events: none; }
+.desktop-display-stubs[hidden] { display: none; }
+.desktop-display-stub { position: absolute; pointer-events: auto; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text); font: inherit; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.desktop-display-say { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 2; display: flex; flex-direction: column; align-items: center; gap: 8px; max-width: 80%; padding: 10px 14px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-window); color: var(--text); font-size: 12px; text-align: center; }
+.desktop-display-say .desktop-display-say-act { white-space: nowrap; }
+.desktop-display-still { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; z-index: 1; pointer-events: none; }
 .desktop-machine-content:fullscreen { background: var(--bg-window, #1e1e1e); }
 /* lane stream-stats-popup: a stream's ONE summary (the strip's chip; a window stream's chip) says it opens the details — a chart
    glyph after its words (a mask: the words' own colour; the chip's text stays its words) */

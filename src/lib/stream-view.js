@@ -27,10 +27,11 @@ const post = (url, body) => fetchJson(url, { method: 'POST', headers: { 'Content
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const BASE = '/api/desktop/machine-desktop/stream';
 
-/** `opts` = { hostId, hostPlatform?, source?, fp16?, onStatus(state, code), onStats(page, agent), onFallback(code, why, taken),
+/** `opts` = { hostId, hostPlatform?, source?, fp16?, onStatus(state, code), onStats(page, agent), onFallback(code, why, taken, info),
  *  onInput(refused), onSource(source) } → { connect(), dispose(why?), focus(), get state, stats(), agent(), source(), video } —
  *  dispose(why) names the end for the hub and the machine's log ('closed' = the window's ×; 'stopped' = the person's 停止串流 —
- *  lane stream-window-fixes) */
+ *  lane stream-window-fixes); `info` = a refusal's numbers (`too_many_streams`: the machine's live / cap / displays — lane
+ *  desktop-display-modes) | null */
 export function createStreamView(host, opts = {}) {
   const { hostId } = opts;
   const video = document.createElement('video');
@@ -46,6 +47,7 @@ export function createStreamView(host, opts = {}) {
   let hubRelay = null; // lane stream-relay-udp: the hub relay's facts (the long poll's `relay` — which way it forwards: udp | link)
   let map = keyMapFor(viewerPlatform(), opts.hostPlatform || null);
   let refusedSeen = null, switchSaid = 0;
+  let refusal = null; // lane desktop-display-modes: a refused start's numbers (the per-machine cap's count)
 
   const send = (msg) => {
     const open = !!(msg && dc && dc.readyState === 'open');
@@ -78,7 +80,7 @@ export function createStreamView(host, opts = {}) {
   async function start() {
     const r = await post(`${BASE}/start`, { host: hostId, ...(opts.source ? { source: opts.source, ...(opts.fp16 ? { fp16: true } : {}) } : {}), ...(opts.after ? { after: opts.after } : {}) }).catch(() => null); // opts.source: a display / ONE window (a Mac's or a Windows machine's — int304's one door)
     if (disposed) { if (r && r.key) post(`${BASE}/stop`, { key: r.key, why: closeWhy }); return; }
-    if (!r || r.error || !r.take) { why = (r && (r.why || r.error)) || null; step('refused', (r && r.code) || 'start_failed'); return; }
+    if (!r || r.error || !r.take) { why = (r && (r.why || r.error)) || null; refusal = r && Number.isInteger(r.cap) ? { live: r.live, cap: r.cap, displays: r.displays } : null; step('refused', (r && r.code) || 'start_failed'); return; }
     taken = true; key = r.key;
     origin = (r.source && r.source.origin) || { x: 0, y: 0 };
     source = r.source || null;
@@ -216,7 +218,7 @@ export function createStreamView(host, opts = {}) {
   function fallback(code) {
     const w = why;
     teardown(code);
-    try { opts.onFallback?.(code, w, taken); } catch { /* the shell's */ }
+    try { opts.onFallback?.(code, w, taken, refusal); } catch { /* the shell's */ }
   }
   return {
     video,

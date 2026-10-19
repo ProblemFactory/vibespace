@@ -6,16 +6,20 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 
 ### Added
 - You can hand a paired machine's desktop to an agent to operate, and take it back any time.
-
-### Fixed
-- On a Mac, keys and clicks over the stream work as soon as Accessibility is turned on for vibespace-screen — no restart needed.
-- The list of machines to run on shows at once; each machine’s state refreshes in the background.
+- A machine with several displays can show each display in its own window, all of them in one window, or one window that switches between them.
 
 ### Changed
 - A plugin's reminders, like Dropline's dictionary suggestions, now stay at the top of For you, right under urgent items.
 - Clicking a plugin's reminder takes you straight to where it's handled: a Dropline suggestion opens with its words chosen, and ✓ adds them.
 - A stream window's bar now shows one short summary; click it for the details with latency, packet loss and bandwidth charts, and pin them to a corner.
 - Full screen is truly full screen: no fixed bar on top, just a small bar you can drag to any corner; it hides while the pointer rests.
+- With several HDR displays in one window, each display streams at a lower resolution to keep its frame rate, and the bar says so.
+
+### Fixed
+- On a Mac, keys and clicks over the stream work as soon as Accessibility is turned on for vibespace-screen — no restart needed.
+- The list of machines to run on shows at once; each machine’s state refreshes in the background.
+- A Windows machine's desktop stream now connects when it has to go through the hub, instead of hanging on "connecting".
+- The Mac's "turn on Accessibility" notice now goes away once the Mac takes your keys and clicks again.
 
 ## 2.369.312 — 2026-10-19
 
