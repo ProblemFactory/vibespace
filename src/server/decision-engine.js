@@ -43,6 +43,11 @@
  * call); then the items the rules do not place already (a blocked fact, the 48 h decay) are judged with their facts line
  * (`judged {group, why, p, at, v, facts, sig}`). A pass a refusal stopped is SAID: a log line when the reason changes and
  * `status().inbox` {at, judged, placed, stopped} (the plugin's status carries it).
+ * lane foryou-folds (design q-044 decision 3): THE JUDGE IS A TIE-BREAKER. The facts half runs on every pass whatever the
+ * switch (free — the attention list's bands 2–3 read them: a blocked board, a named date), and the judge scores ONLY the
+ * rows src/attention-model.js `tieCandidates` names (band-5 asks that share their minute with another) — every other row
+ * is placed by facts, so the For-you judge went from 25–100 calls a day to about none. `status().inbox` adds `untied`
+ * (eligible rows the rule left alone).
  *
  * THE LEDGER (lane rule-learning, design q-037 P0): the ONE other paid caller on this pool — src/server/text-model-client.js
  * (the chat completions that DRAFT the person's 「我关心什么」 block, use `learn`) — is created HERE (`textModel`) over
@@ -53,6 +58,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const M = require('../decision-model.js');
+const A = require('../attention-model.js'); // PURE: THE attention list (lane foryou-folds) — the judge scores only a band-5 tie
 
 const ROW_ID = 'llm';   // lane llm-plugin-rename: the Language model row (the key) — its data files keep their decision-* names
 const FEATURE_OF = Object.freeze({ attention: 'attention', rule: 'rules', routing: 'routing', inbox: 'inbox', webhook: 'rules', test: null });
@@ -351,28 +357,35 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
     inboxOnWas = on;
     try { if (inbox && typeof inbox.notify === 'function') inbox.notify(); } catch { }
   }
-  /** ONE pass: the facts of every sortable item (free), then ≤ `max` eligible items, one call each (refused ⇒ the pass
-   *  stops, says why, and the next one retries). */
+  /** ONE pass: the facts of every open action item (free, whatever the switch), then ≤ `max` eligible band-5 TIES, one
+   *  call each (refused ⇒ the pass stops, says why, and the next one retries). */
   async function inboxPass({ max = M.inputPlan('inbox').perPass } = {}) {
-    if (!inbox || inboxBusy || !inboxOn()) return { ran: false, judged: 0 };
+    if (!inbox || inboxBusy) return { ran: false, judged: 0 };
+    const on = inboxOn();   // lane foryou-folds: the switch gates the JUDGE; the facts are free and the bands read them
     inboxBusy = true; inboxLastPass = now();
-    let judged = 0, placed = 0, stopped = null;
+    let judged = 0, placed = 0, stopped = null, untied = 0;
     try {
       const t = now(), tz = tzOffset(t);
       let of = null;
       try { of = inboxBoard ? inboxBoard() : null; } catch (e) { log.warn?.(`[decision] For-you pass: the board was not read (${e.message}) — facts without it`); }
-      const facts = [], due = [];
-      for (const it of inbox.openItems()) {
-        if (M.inboxSorts(it) !== true) continue;
+      const facts = [], eligible = [], open = inbox.openItems();
+      for (const it of open) {
+        if (it.kind === 'notice') continue;   // lane foryou-folds: every action row's facts (the bands read them), not only the judge's rows
         let b = null;
         try { b = of ? of(it.sessionKey) : null; } catch { b = null; }
         const f = M.inboxFacts(it, { now: t, board: b, tzOffsetMin: tz });
         facts.push([it.id, f]);
         const e = M.inboxEligible(it, t, f);
         if (e === 'placed') placed++;
-        if (e === true) due.push([it, f]);
+        if (e === true) eligible.push([it, f]);
       }
       if (facts.length && typeof inbox.setFacts === 'function') inbox.setFacts(facts);
+      if (!on) return { ran: false, judged: 0, facts: facts.length };
+      // decision 3: only a band-5 TIE is the judge's — the rows read with the facts just written
+      const fresh = new Map(facts);
+      const tied = A.tieCandidates(open.map((it) => A.rowOf(fresh.has(it.id) ? { ...it, judged: { ...(it.judged || {}), facts: fresh.get(it.id) } } : it, t)), t);
+      const due = eligible.filter(([it]) => tied.has(it.id));
+      untied = eligible.length - due.length;
       for (const [it, f] of due.slice(0, max)) {
         const r = await judge('inbox', M.inboxScoreInput(it, f, t), { questions: [M.INBOX_QUESTION], memo: M.inboxMemoOf(it, sha, f) });
         if (!r.ok) { stopped = r.why || 'refused'; break; }
@@ -380,9 +393,9 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
         if (inbox.setJudged(it.id, { group: v ? v.group : null, why: v ? v.why : null, p: v ? v.p : null, at: now(), v: M.INBOX.version, facts: f, sig: M.inboxFactsSig(f) })) judged++;
       }
     } finally { inboxBusy = false; }
-    inboxLast = { at: inboxLastPass, judged, placed, stopped };
+    inboxLast = { at: inboxLastPass, judged, placed, stopped, untied };
     if (stopped !== inboxStopSaid) { inboxStopSaid = stopped; if (stopped) log.warn?.(`[decision] For-you pass stopped after ${judged} judged: ${stopped} (the next pass retries in ${Math.round(M.INBOX.passMs / 60000)} min)`); }
-    return { ran: true, judged, placed, stopped };
+    return { ran: true, judged, placed, stopped, untied };
   }
   function attachInbox(store, { tickMs = 60 * 1000, board = null } = {}) {
     inbox = store && typeof store.setJudged === 'function' && typeof store.openItems === 'function' ? store : null;

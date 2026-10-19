@@ -39,6 +39,7 @@
  */
 const P = require('./peer-text.js');
 const S = require('./secret-shapes.js');
+const A = require('./attention-model.js'); // PURE: THE attention list (lane foryou-folds, design q-044) — inboxPlace / inboxRank read its band first
 
 const QUESTION_TYPES = Object.freeze(['predicate', 'choice', 'score']);
 const PROVIDERS = Object.freeze(['openai', 'openrouter']);
@@ -883,36 +884,30 @@ function inboxStale(facts, now = 0) {
   if (!(Number(now) - (Number(f.askedAt) || 0) > INBOX.decayMs)) return false;
   return !(typeof f.due === 'number' && Number.isFinite(f.due) && Number(now) <= f.due + INBOX.decayMs);
 }
-/** ONE item's place in the tray (PURE; reads the item's declaration + `judged {group, why, p, facts}`, never its words):
- *  {section: 'now' | 'pending' | 'later', why: 'blocked' | 'dated' | 'whenever' | 'stale' | null, tier, due, p, askedAt}.
- *  The agent's declaration first (urgent / high and an item carrying its answers ⇒ now; low / answered ⇒ later), then the
- *  RULES THAT OVERRULE THE JUDGE — (a) the decay, (b) a blocked fact from the board — then the judge's choice (a v1 verdict
- *  keeps its group until v2 scores it again); no verdict ⇒ pending. */
+/** ONE item's place in the tray (PURE; reads the item's declaration + `judged {group, why, p, facts}`, never its words).
+ *  lane foryou-folds (design q-044 decision 3): THE BAND FIRST — src/attention-model.js places the item by facts alone
+ *  (1 urgent · 2 someone waits: a plugin's reminder, a blocked board, a held permission ask · 3 a date inside 48 h · 4 a
+ *  decision: options / a producer's button · 5 the other asks · 6 搁置: 7 days unasked); the judge's verdict never moves
+ *  it. → {band, code, why: the fact that placed it ('urgent' | 'plugin' | 'blocked' | 'permission' | 'person' | 'dated'
+ *  | 'decide' | 'parked' | null), tier: the band, due, p (the judge's, a band-5 tie-breaker only), askedAt}. */
 function inboxPlace(item, now = 0) {
-  const i = item || {}, u = i.urgency || 'normal';
+  const i = item || {};
   const j = i.judged && typeof i.judged === 'object' ? i.judged : {};
-  const f = j.facts && typeof j.facts === 'object' ? j.facts : null;
-  const base = { section: 'later', why: null, tier: 9, due: f && typeof f.due === 'number' && Number.isFinite(f.due) ? f.due : null, p: prob(j.p), askedAt: Math.max(Number(i.createdAt) || 0, f ? Number(f.askedAt) || 0 : 0) };
-  if (u === 'urgent' || u === 'high') return { ...base, section: 'now', tier: u === 'urgent' ? 0 : 1 };
-  if ((Array.isArray(i.options) && i.options.length) || i.action) return { ...base, section: 'now', tier: 3 };
-  if (u !== 'normal' || i.reply) return base;
-  if (f && inboxStale(f, now)) return { ...base, why: 'stale' };
-  if (f && f.state === 'blocked') return { ...base, section: 'now', why: 'blocked', tier: 2 };
-  const c = INBOX.choices.find((x) => x.value === j.why);
-  if (c) return { ...base, section: c.group, why: c.value, tier: c.value === 'blocked' ? 2 : c.value === 'dated' ? 4 : 5 };
-  if (j.group === 'now' || j.group === 'later') return { ...base, section: j.group, tier: 5 };
-  return { ...base, section: 'pending' };
+  const r = A.rowOf({ ...i, id: i.id || '-' }, now);
+  const band = r ? A.placeOf(r, now) : 0;
+  const why = !r || !band ? null : band === A.PARKED ? 'parked' : band === 1 ? 'urgent'
+    : band === 2 ? (r.plugin ? 'plugin' : r.blocked ? 'blocked' : r.waitedBy ? 'person' : 'permission')
+    : band === 3 ? 'dated' : band === 4 ? 'decide' : null;
+  const info = A.bandInfo(band);
+  return { band, code: info ? info.code : 'notice', why, tier: band, due: r ? r.due : null, p: prob(j.p), askedAt: r ? r.at : 0 };
 }
-/** THE ORDER (PURE, `now` handed in): the items → [{id, section, why, …place}] sorted — 「现在要你」 first: urgent ›
- *  high › blocked (the oldest ask first) › decisions (options / buttons, newest first) › dated (the nearest date first, an
- *  unknown one after) › the rest by the judge's p (desc, then newest); then 「待判断」 and 「可以等」, newest first. */
-const SECTION_ORDER = Object.freeze({ now: 0, pending: 1, later: 2 });
+/** THE ORDER (PURE, `now` handed in) = THE attention list's (src/attention-model.js needsMe): bands 1–5 in order, each in
+ *  its own order (urgent / decisions newest first, someone waiting longest first, a date nearest first, the other asks
+ *  NEWEST first — the judge's score breaks only a same-minute tie), then 搁置; notices are not in it. → [{id, …place}] */
 function inboxRank(items, now = 0) {
-  const rows = (Array.isArray(items) ? items : []).filter((i) => i && i.id).map((i) => ({ id: i.id, ...inboxPlace(i, now) }));
-  const newest = (a, b) => b.askedAt - a.askedAt;
-  const due = (a, b) => (a.due === null) - (b.due === null) || (a.due !== null && b.due !== null ? a.due - b.due : 0);
-  const inNow = (a, b) => (a.tier - b.tier) || (a.tier === 2 ? a.askedAt - b.askedAt : a.tier === 4 ? due(a, b) || (a.askedAt - b.askedAt) : a.tier === 5 ? ((b.p ?? -1) - (a.p ?? -1)) || newest(a, b) : newest(a, b));
-  return rows.sort((a, b) => (SECTION_ORDER[a.section] - SECTION_ORDER[b.section]) || (a.section === 'now' ? inNow(a, b) : newest(a, b)));
+  const list = (Array.isArray(items) ? items : []).filter((i) => i && i.id);
+  const byId = new Map(list.map((i) => [i.id, i]));
+  return A.needsMe(list.map((i) => A.rowOf(i, now)), now).list.map((r) => ({ id: r.id, ...inboxPlace(byId.get(r.id), now) }));
 }
 
 // ── lane decision-spend-readout (owner 2026-10-13: 「看不到 decision api 花了多少钱了」) ─────────────────────────

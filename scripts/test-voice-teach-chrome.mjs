@@ -509,8 +509,14 @@ try {
     return pg.until('!!document.querySelector("#user-todos-popup:not(.hidden) .ut-item")', 6000);
   };
   ok('the tray opens on the REAL store\'s snapshot', await trayOpen(t9));
-  const keys = await t9.ev('[...document.querySelectorAll("#user-todos-popup .ut-groups > .ut-group")].map((g) => g.dataset.key)');
-  ok('THE PIN: the urgent ask first, the voice plugin\'s reminders RIGHT UNDER it — above the high ask and the plain one', keys[0] === 'claude:u9' && keys[1] === VPD.id && keys.indexOf('claude:h9') === 2 && keys.indexOf('claude:n9') === 3, keys);
+  // lane foryou-folds: the tray is the attention list — flat rows in bands; THE PIN = a plugin's reminders head band 2
+  const order = await t9.ev('[...document.querySelectorAll("#user-todos-popup .ut-bands .ut-item")].map((r) => [r.dataset.id, r.closest(".ut-band").dataset.band])');
+  const keyOf = new Map(userTodos.openItems().map((i) => [i.id, i.sessionKey]));
+  const keys = order.map(([id, b]) => `${b}:${keyOf.get(id)}`).filter((k, i, a) => k !== a[i - 1]);
+  const fold5 = await t9.ev('(() => { const f = document.querySelector("#user-todos-popup .ut-band[data-band=\\"5\\"] .ut-fold"); return f ? f.textContent : ""; })()');
+  // the first screen is 6 rows: a band-5 ask past it waits in band 5's fold (its head counts it) — still BELOW the reminders
+  const below = (k) => keys.indexOf(k) > 1 || (keys.indexOf(k) < 0 && /\d+/.test(fold5));
+  ok('THE PIN: the urgent ask first (band 1), the voice plugin\'s reminders RIGHT UNDER it (heading band 2) — above the high ask and the plain one (band 5, drawn below or folded)', keys[0] === '1:claude:u9' && keys[1] === `2:${VPD.id}` && below('5:claude:h9') && below('5:claude:n9') && keys.every((k, i) => !k.startsWith('5:') || i > 1), { keys, fold5 });
   const row0 = `#user-todos-popup .ut-item[data-id="${vIds[0]}"]`;
   const tickTitle = await t9.ev(`(document.querySelector('${row0} .ut-done') || {}).title`);
   ok('the reminder\'s ✓ says what it does (the door\'s `done` through t()): 把这些词加入 Dropline 词库', tickTitle === '把这些词加入 Dropline 词库', tickTitle);

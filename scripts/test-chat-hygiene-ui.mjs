@@ -326,16 +326,19 @@ try {
   // ── ⑤ the toast names the tray ──
   console.log('⑤ a new For-you item is announced where the tray is');
   await evalJs(`document.querySelectorAll('#global-toasts > .global-toast').forEach((e) => e.remove()); true`);
-  const r1 = await fileItem(token, { text: 'Pick the plan to buy', urgency: 'normal' });
+  const r1 = await fileItem(token, { text: 'Pick the plan to buy', urgency: 'urgent' }); // lane foryou-folds: only a band 1–2 arrival toasts — urgent is band 1
   check('the agent files an item through the REAL route', r1?.success && r1.item?.id, r1);
   const id = r1?.item?.id;
   const got = await waitFor(`[...document.querySelectorAll('#global-toasts .global-toast')].some((t) => t.dataset.todoId === ${JSON.stringify(id)})`, 8000);
   const t1 = await evalJs(`(() => { const b = document.getElementById('taskbar-user-todos').getBoundingClientRect(); const t = [...document.querySelectorAll('#global-toasts .global-toast')].find((x) => x.dataset.todoId === ${JSON.stringify(id)}); return { text: t ? t.innerText : null, btn: { x: Math.round(b.left), y: Math.round(b.top) } }; })()`);
   check(`the toast says where the tray is: "${(t1.text || '').split('\n')[0]}"`, got && /^Added to For you \(bottom right\) · /.test(t1.text || ''), t1);
-  const r2 = await fileItem(token, { text: 'A second question', urgency: 'low' });
+  const r2 = await fileItem(token, { text: 'A second question', urgency: 'urgent' });
   await waitFor(`[...document.querySelectorAll('#global-toasts .global-toast')].some((t) => t.dataset.todoId === ${JSON.stringify(r2?.item?.id)})`, 8000);
   const count = await evalJs(`[...document.querySelectorAll('#global-toasts .global-toast')].filter((t) => t.dataset.todoId === ${JSON.stringify(id)}).length`);
   check('once per item: the next broadcast (a second item) toasts only the new one', count === 1, count);
+  const r3 = await fileItem(token, { text: 'A plain third question', urgency: 'normal' });
+  await sleep(1500);
+  check('lane foryou-folds: a plain ask (band 5) files SILENTLY — no toast (only urgent and someone-waiting arrivals raise one)', !!r3?.success && !(await evalJs(`[...document.querySelectorAll('#global-toasts .global-toast')].some((t) => t.dataset.todoId === ${JSON.stringify(r3?.item?.id)})`)), r3);
 
   // ── ⑥ impersonation: a peer is never VibeSpace, whatever it is called or says ──
   console.log('⑥ a peer named "VibeSpace", or whose words open with VibeSpace\'s head, is a PEER card');

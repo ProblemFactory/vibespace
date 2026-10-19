@@ -119,7 +119,7 @@ fs.writeFileSync(path.join(DATA, 'task-groups.json'), J({ version: 1, tasks: { [
 const OPEN_ID = 'ut-c1ea000001', RES_ID = 'ut-c1ea000002';
 const todo = (id, x) => ({ id, sessionKey: K, text: 'x', detail: null, urgency: 'normal', kind: 'action', status: 'open', by: 'agent', sessionName: null, jobId: null, i18n: null, action: null, expiresAt: null, options: null, reply: null, origin: 'agent', createdAt: NOW - 2 * H, resolvedAt: null, resolvedBy: null, ...x });
 fs.writeFileSync(path.join(DATA, 'user-todos.json'), J({ items: [
-  todo(OPEN_ID, { text: `Forward the ${MARK} thread to finance?`, detail: `the whole ${MARK} mail …`, options: ['Yes', 'No'] }),
+  todo(OPEN_ID, { text: `Forward the ${MARK} thread to finance?`, detail: `the whole ${MARK} mail …`, options: ['Yes', 'No'], urgency: 'urgent' }), // lane foryou-folds: an arrival toasts only in bands 1–2 — urgent keeps the toast surface under test
   todo(RES_ID, { text: `Old question about ${MARK}`, detail: `${MARK} ` + 'y'.repeat(700), status: 'done', resolvedAt: NOW - H, resolvedBy: 'user' }),
 ] }, null, 2));
 fs.writeFileSync(path.join(DATA, 'session-status.json'), J({

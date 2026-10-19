@@ -5,7 +5,7 @@
  * What a stolen hub does to the paired machines starts with one of three things, and before this lane none of them said a
  * word anywhere but a journal line: a pairing command was MINTED (whoever runs it joins a machine to this hub), a device
  * DIALED IN FROM AN ADDRESS it never used (the token is somewhere else now), and the hub PUSHED NEW CODE to a device (a
- * hub that ships code owns the machine — src/agentd/client.js `_upgrade`). Each is now ONE URGENT For-you item:
+ * hub that ships code owns the machine — src/agentd/client.js `_upgrade`). Each is ONE For-you item, urgent (a signed forward upgrade: a notice, decision 8 below):
  *   pairing-minted  {hostKey, machine, deviceId, by, from, generation} — who minted it (`by`: the owner's sign-in handle,
  *                   or `system:graduate`) and from which browser address; the one minter is src/server/dial-pairing.js
  *   new-address     {hostKey, machine, address, addressKey} — hosts.noteDial's known set (src/hosts.js `knownFrom`, keyed
@@ -13,6 +13,9 @@
  *   upgrade-pushed  {hostKey, machine, from, to, by, code} — device-upgrade-watch's `begun` (every transport's door);
  *                   `code: 'bad-signature'` (lane device-bundle-signing) = the SAME kind, the refusal's words — that lane
  *                   only sets the code. This machine's own daemon (`local`) is the hub itself: never an item.
+ * DECISION 8 (design q-044, lane foryou-folds): an upgrade whose signature PASSED (`code` empty) to a NEWER version is a
+ * NOTICE (kind notice, normal — the grey count; a fleet roll of 18 machines filed 18 urgent rows) — a bad signature, a
+ * DOWNGRADE (`to` older than `from`) or a version we cannot compare stays URGENT (`upgradeIsNotice`).
  * FILED ONCE PER EVENT: a dedup key per event (the pairing's generation, the address, from → to + code) in a bounded ledger
  * (data/device-alerts.json, atomic tmp + rename) — a hub restart, a retried upgrade, a re-dial never file it again.
  * RESOLVED BY THE OWNER'S CLICK: never retracted by the system (an urgent item that heals itself is one nobody read).
@@ -32,7 +35,18 @@ const addrOf = (a) => String(a == null ? '' : a).replace(/[^0-9A-Za-z.:%\[\]-]/g
 const whoOf = (by) => (DA.validBy(by) ? by : 'nobody named');
 const fill = (k, p) => k.replace(/\{(\w+)\}/g, (_, n) => (p[n] == null ? '' : String(p[n])));
 
-/** The item's words for one event → {key, text, detail, i18n} | null (an event that is not news). */
+/** Decision 8: a pushed upgrade is a NOTICE only when its signature passed (no `code`) and it goes FORWARD — every
+ *  dotted number of `to` compared with `from`; a downgrade, an equal or an unreadable version stays urgent. */
+const verParts = (v) => (/^\d+(\.\d+)*$/.test(String(v)) ? String(v).split('.').map(Number) : null);
+function upgradeIsNotice(f = {}) {
+  if (f.code) return false;
+  const a = verParts(f.from), b = verParts(f.to);
+  if (!a || !b) return false;
+  for (let k = 0; k < Math.max(a.length, b.length); k++) { const x = a[k] || 0, y = b[k] || 0; if (y !== x) return y > x; }
+  return false;
+}
+
+/** The item's words for one event → {key, text, detail, i18n, notice?} | null (an event that is not news). */
 function itemOf(kind, f = {}) {
   const machine = nameOf(f.machine);
   if (kind === 'pairing-minted') {
@@ -60,7 +74,7 @@ function itemOf(kind, f = {}) {
     const D2 = bad
       ? i18nKey("Someone may control this hub: read the machine card's Activity…, and rotate this hub's secrets before anything else.")
       : i18nKey("Expected after this VibeSpace was updated. An update you did not expect means someone else may control this hub — read the machine card's Activity….");
-    return { key: `upg:${String(f.hostKey || '').slice(0, 64)}:${p.from}:${p.to}:${bad ? 'bad-signature' : 'ok'}`, ...words(T, [D1, D2], p) };
+    return { key: `upg:${String(f.hostKey || '').slice(0, 64)}:${p.from}:${p.to}:${bad ? 'bad-signature' : 'ok'}`, ...words(T, [D1, D2], p), ...(upgradeIsNotice({ ...f, from: p.from, to: p.to }) ? { notice: true } : {}) };
   }
   return null;
 }
@@ -79,7 +93,7 @@ function create({ userTodos = null, dataDir = null, log = () => {}, now = () => 
     try { const tmp = ledgerFile + '.' + process.pid + '.tmp'; fs.writeFileSync(tmp, JSON.stringify({ version: 1, seen }, null, 2), { mode: 0o600 }); fs.renameSync(tmp, ledgerFile); }
     catch (e) { log(`[device-alerts] ledger not written: ${e.message}`); }
   };
-  /** File ONE urgent item for an event (once per its key). → {filed, key, id} | null */
+  /** File ONE item for an event (once per its key) — urgent, or a notice for a signed forward upgrade. → {filed, key, id} | null */
   function file(kind, facts = {}) {
     if (!KINDS.includes(kind)) return null;
     const w = itemOf(kind, facts);
@@ -89,15 +103,15 @@ function create({ userTodos = null, dataDir = null, log = () => {}, now = () => 
     let id = null;
     if (userTodos) {
       try {
-        const it = userTodos.add(INBOX_KEY, { origin: 'machines', text: w.text, detail: w.detail, i18n: w.i18n, urgency: 'urgent', by: 'agent', sessionName: 'Machines' });
+        const it = userTodos.add(INBOX_KEY, { origin: 'machines', text: w.text, detail: w.detail, i18n: w.i18n, urgency: w.notice ? 'normal' : 'urgent', ...(w.notice ? { kind: 'notice' } : {}), by: 'agent', sessionName: 'Machines' });
         id = it && it.id ? it.id : null;
       } catch (e) { log(`[device-alerts] ${kind} not filed: ${e.message}`); }
     }
     save();
-    log(`[device-alerts] ${kind}: ${w.text} — told the owner (For you, urgent)`);
+    log(`[device-alerts] ${kind}: ${w.text} — told the owner (For you, ${w.notice ? 'a notice' : 'urgent'})`);
     return { filed: !!id, key: w.key, id };
   }
   return { file, seen: () => ({ ...seen }), INBOX_KEY };
 }
 
-module.exports = { create, itemOf, KINDS, INBOX_KEY };
+module.exports = { create, itemOf, upgradeIsNotice, KINDS, INBOX_KEY };

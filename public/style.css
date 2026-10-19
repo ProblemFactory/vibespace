@@ -1366,22 +1366,35 @@ body.wm-dragging .window iframe, body.wm-dragging .window canvas, body.wm-draggi
 /* 2.369.118: the grey NOTICE count — for-your-information items never colour the badge */
 .ut-count.ut-seg-notice { background: var(--bg-secondary); color: var(--text-dim); border: 1px solid var(--border); }
 .ut-notice-head { font-size: 10px; color: var(--text-dim); margin: 10px 0 2px; text-transform: uppercase; letter-spacing: .03em; display: flex; align-items: baseline; gap: 6px; }
+/* lane foryou-folds: the notices are a grey count — the head is ONE button that opens the strip and the groups in place */
+button.ut-notice-head { width: 100%; background: none; border: none; padding: 2px 0; cursor: pointer; font-family: inherit; text-align: left; }
+button.ut-notice-head::after { content: '▸'; content: '▸' / ""; margin-left: auto; }
+.ut-notices-open > button.ut-notice-head::after { content: '▾'; content: '▾' / ""; }
+button.ut-notice-head:hover { color: var(--accent); }
+.ut-notices:not(.ut-notices-open) > .ut-chips, .ut-notices:not(.ut-notices-open) > .ut-notice-groups { display: none !important; }
 .ut-item-notice .ut-text { color: var(--text-secondary); }
 .ut-item-notice .ut-dot { background: var(--text-dim); }
 .taskbar-user-todos.ut-blink { animation: ut-blink 0.9s ease 2; }
 @keyframes ut-blink { 50% { background: color-mix(in srgb, var(--accent) 35%, transparent); color: var(--text); } }
 .ut-popup { min-width: 320px; max-width: 400px; max-height: 480px; }
 .ut-head-sub { font-weight: 400; color: var(--text-dim); margin-left: 8px; font-size: 10px; }
-.ut-group { border-top: 1px solid var(--border); padding: 4px 0; }
-.ut-group-head {
-  display: flex; align-items: center; gap: 6px; width: 100%; text-align: left;
-  background: none; border: none; cursor: pointer; padding: 3px 2px;
-  color: var(--text); font-size: 11px; font-weight: 600;
-}
-.ut-group-head:hover { color: var(--accent); }
+/* lane foryou-folds: THE ATTENTION LIST (design q-044) — five bands + 搁置, flat rows; a band's bar = its name + its open count
+   (+ 「全部标为已看」, never on 紧急); its fold 「还有 N 条 — 展开」 opens the band in place — a band whose every row is folded
+   carries the fold in its bar (one line) */
+.ut-band { border-top: 1px solid var(--border); padding: 2px 0 3px; }
+.ut-band-bar { display: flex; align-items: center; gap: 6px; min-height: 20px; color: var(--text); font-size: 11px; font-weight: 600; }
+.ut-band-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ut-band-n { color: var(--text-dim); font-weight: 400; }
+.ut-band-bar > .ut-seen-all { margin-left: auto; }
+.ut-band-bar > .ut-fold { width: auto; margin-left: auto; padding: 1px 6px; font-weight: 400; }
+.ut-band-bar > .ut-seen-all + .ut-fold { margin-left: 0; }
+.ut-band[data-band="1"] > .ut-band-bar > .ut-band-name { color: var(--red, #e55); }
+.ut-band-parked > .ut-band-bar { color: var(--text-dim); }
+/* lane foryou-folds, measured (tools/tray-measure.mjs: production-length asks ran ~120 px a row — 4 fit the 1280×800 popup):
+   a band row's words are a TWO-LINE preview, so the first screen holds its 6 rows + the fold heads; the row's 「▸ 详情」
+   (or a reply box being typed) shows the whole words in place — the For-you window (⤢) always does */
+#user-todos-popup .ut-bands .ut-item:not(:has(.ut-detail-exp[open], .ut-reply)) > .ut-body > .ut-text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
 .ut-group-n { color: var(--text-dim); font-weight: 400; }
-.ut-group-go { margin-left: auto; color: var(--text-dim); }
-.ut-group-head:hover .ut-group-go { color: var(--accent); }
 .ut-item { display: flex; gap: 7px; padding: 4px 2px 5px 8px; cursor: pointer; border-radius: var(--radius-sm); }
 .ut-item:hover { background: var(--hover-overlay, rgba(255,255,255,0.05)); }
 .ut-dot { width: 7px; height: 7px; border-radius: 50%; margin-top: 4px; flex: 0 0 auto; background: var(--text-dim); }
@@ -1412,11 +1425,6 @@ body.wm-dragging .window iframe, body.wm-dragging .window canvas, body.wm-draggi
 .ut-meta { font-size: 9px; color: var(--text-dim); margin-top: 2px; }
 /* lane inbox-decision-group: the LLM plugin's tray sections (+ 待判断, inbox-verify F4) + a judged row's chip (+ the switch's example line) */
 .plugin-cfg-example { flex-basis: 100%; font-size: 11px; color: var(--text-dim); margin: 2px 0 0 22px; }
-.ut-sec-head { font-size: 11px; font-weight: 600; color: var(--text); margin: 8px 0 2px; display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px; }
-.ut-sec-pending, .ut-sec-later { color: var(--text-dim); border-top: 1px solid var(--border); padding-top: 6px; }
-.ut-judged { display: inline-block; padding: 0 5px; border: 1px solid var(--border); border-radius: 8px; font-size: 9px; line-height: 13px; }
-.ut-judged[data-group="now"] { border-color: var(--accent); color: var(--accent); }
-.ut-judged[data-why="stale"] { border-style: dashed; color: var(--text-dim); } /* lane decision-inbox-rank: the decay moved it, not a judge */
 .ut-actions { float: right; margin: 0 0 2px 8px; display: flex; gap: 2px; align-items: flex-start; opacity: 0.35; } /* floated inside .ut-body: the words wrap beside the buttons, then use the full width (2.369.175) */
 .ut-item:hover .ut-actions { opacity: 1; }
 .ut-act {
@@ -1435,6 +1443,7 @@ body.wm-dragging .window iframe, body.wm-dragging .window canvas, body.wm-draggi
 .ut-item-resolved:hover { opacity: 0.85; }
 .ut-item-resolved .ut-text { text-decoration: line-through; }
 .ut-sess { color: var(--text-secondary); }
+.ut-sess > .ut-live-dot { display: inline-block; width: 6px; height: 6px; margin-right: 4px; vertical-align: 0; } /* lane foryou-folds: a band row's running dot before its conversation's name */
 .ut-item:hover .ut-sess { color: var(--accent); }
 /* design-user-inbox-reply (chunk 2): the reply controls, option chips and the running dot */
 .ut-reply-btn { display: inline-flex; align-items: center; justify-content: center; padding: 0; }
@@ -1503,9 +1512,7 @@ html:not(.voice-absent) .voice-field-grip > textarea { padding-right: 44px; }
 .ut-live-dot[data-state="waiting"] { border-color: var(--yellow, #e5c07b); background: transparent; }
 .ut-live-dot[data-state="unreachable"] { border-style: dashed; background: transparent; }
 .ut-group-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* design-user-inbox-reply chunk 4: the group bar (head + "Mark all seen"), the board chip, the flood fold's expander */
-.ut-group-bar { display: flex; align-items: center; gap: 4px; }
-.ut-group-bar > .ut-group-head { flex: 1 1 auto; min-width: 0; width: auto; }
+/* design-user-inbox-reply chunk 4: "Mark all seen", the board chip (the For-you window), the fold's expander (lane foryou-folds: a band's) */
 .ut-seen-all {
   flex: 0 0 auto; background: none; border: 1px solid var(--border); border-radius: var(--radius-sm);
   color: var(--text-secondary); font-size: 10px; line-height: 14px; padding: 1px 6px; cursor: pointer; white-space: nowrap;
@@ -2355,7 +2362,8 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
   #user-todos-popup .ut-tab { min-height: 36px; padding: 6px 14px; font-size: 12px; }
   #user-todos-popup .ut-act { min-width: 36px; min-height: 36px; width: auto; height: auto; font-size: 13px; display: inline-flex; align-items: center; justify-content: center; }
   #user-todos-popup .ut-actions { opacity: 1; gap: 4px; }
-  #user-todos-popup .ut-group-head { min-height: 36px; }
+  #user-todos-popup .ut-band-bar { min-height: 36px; font-size: 12px; } /* lane foryou-folds: the band bar is a touch row on the phone */
+  #user-todos-popup .ut-notice-head { min-height: 36px; font-size: 11px; }
   /* the reply controls are touch targets too (design-user-inbox-reply chunk 2) */
   #user-todos-popup .ut-opt { min-height: 36px; padding: 6px 14px; font-size: 12px; line-height: 22px; }
   #user-todos-popup .ut-art, .iw-arts .ut-art { min-height: 36px; padding: 6px 12px 6px 10px; font-size: 12px; } /* lane foryou-attachments: touch targets */
@@ -2368,7 +2376,6 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
   /* chunk 4: "Mark all seen" and the fold's expander are touch targets too */
   #user-todos-popup .ut-seen-all { min-height: 36px; padding: 6px 12px; font-size: 12px; }
   #user-todos-popup .ut-fold { min-height: 36px; font-size: 12px; }
-  #user-todos-popup .ut-board { font-size: 11px; line-height: 16px; }
   /* B-328d: the notice filter chips are touch targets too */
   #user-todos-popup .ut-chip { min-height: 36px; padding: 6px 12px; font-size: 12px; }
   #user-todos-popup .ut-notice-group-head { font-size: 12px; min-height: 28px; }

@@ -2,6 +2,15 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.318 — 2026-10-19
+
+### Changed
+- For you opens on one screen of at most six rows, in five groups: Urgent, Someone is waiting, A deadline or money, Needs your decision, Other questions.
+- The rest fold under their group's "N more — expand"; nothing is deleted, and a question unanswered for 7 days waits under On hold until it is asked again.
+- Only urgent items and an agent waiting on your answer pop up a notification now; the For you badge counts what needs you, not every open question.
+- Notices are one grey line in For you; click it to see them.
+- A signed agent update pushed to a machine is a notice now, not an urgent item; a bad signature or an older version stays urgent.
+
 ## 2.369.317 — 2026-10-19
 
 ### Added

@@ -131,8 +131,8 @@ const todo = (id, x) => ({ id, sessionKey: K, text: 'x', detail: null, urgency: 
 // label nameFor() falls back to — and so the head of its arrival toast; verify r5)
 const JTODO = { A: 'ut-cc000000ja', B: 'ut-cc000000jb' };
 fs.writeFileSync(path.join(DATA, 'user-todos.json'), J({ items: ['A', 'B'].flatMap((r) => [
-  todo(TODO[r], { text: `question ${S[r]}`, detail: `item detail ${S[r]}`, options: [`yes ${S[r]}`, 'No'] }),
-  todo(JTODO[r], { sessionKey: 'jobs', text: `digest ${S[r]} needs your input`, detail: `Background job ${JOB[r]}`, origin: 'jobs', by: 'agent', jobId: JOB[r], sessionName: `digest ${S[r]}` }),
+  todo(TODO[r], { text: `question ${S[r]}`, detail: `item detail ${S[r]}`, options: [`yes ${S[r]}`, 'No'], urgency: 'urgent' }), // lane foryou-folds: only a band 1–2 arrival toasts — urgent keeps the toast surface under test
+  todo(JTODO[r], { sessionKey: 'jobs', text: `digest ${S[r]} needs your input`, detail: `Background job ${JOB[r]}`, origin: 'jobs', by: 'agent', jobId: JOB[r], sessionName: `digest ${S[r]}`, urgency: 'urgent' }),
 ]) }, null, 2));
 // the history entries are NOT the current status: a clear of one leaves the statuses map as it was
 fs.writeFileSync(path.join(DATA, 'session-status.json'), J({

@@ -334,8 +334,10 @@ const copiesFailures = (ui) => {
   const acts = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-actions.js'), 'utf8');
   const panel = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-panel.js'), 'utf8');
   const win = fs.readFileSync(path.join(ROOT, 'src/lib/inbox-window.js'), 'utf8');
-  ok(/why: typeof rec\.reason === 'string' \? \(isCleared\(rec\) \? clearedText\(\) : rec\.reason\) : ''/.test(acts) && /const why = b\.why \|\| '';/.test(panel) && /c\.board\.title = b\.why \|\| '';/.test(win) && !/rec\.reason/.test(panel) && !/b\.rec\.reason/.test(win),
-    'the board chip\'s tooltip is the model\'s `why` — a cleared reason in this device\'s words — in the popup and the window (verify r4)');
+  // lane foryou-folds: the popup's board chip left with its group heads (a blocked board PLACES the row now) — the popup must
+  // not grow a reader of the record's reason back; the window keeps its chip, worded by the model
+  ok(/why: typeof rec\.reason === 'string' \? \(isCleared\(rec\) \? clearedText\(\) : rec\.reason\) : ''/.test(acts) && !/'ut-board'/.test(panel) && /c\.board\.title = b\.why \|\| '';/.test(win) && !/rec\.reason/.test(panel) && !/b\.rec\.reason/.test(win),
+    'the board chip\'s tooltip is the model\'s `why` — a cleared reason in this device\'s words — in the window; the popup draws no board chip (lane foryou-folds) and reads no reason (verify r4)');
 }
 // verify r4 (reproduced in chrome on the pre-fix modules — test-record-clear-ui ③ went red on all three legs): a For-you item's
 // ARRIVAL toast carried its words and every toast is kept in the device's localStorage for the Notifications tab — a copy on

@@ -118,7 +118,8 @@ fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
 fs.mkdirSync(path.join(wt, 'data'), { recursive: true });
 const TODO_TEXT = 'Approve the migration plan before I continue';
 fs.writeFileSync(path.join(wt, 'data', 'user-todos.json'), JSON.stringify({ items: [{
-  id: 'ut-mobilegap01', sessionKey: 'claude:' + SID, text: TODO_TEXT, detail: null, urgency: 'high', kind: 'action',
+  // lane foryou-folds: the badge counts bands 1–4 — a high ask WITH its answers (option chips) is a decision, band 4
+  id: 'ut-mobilegap01', sessionKey: 'claude:' + SID, text: TODO_TEXT, detail: null, urgency: 'high', kind: 'action', options: ['Approve', 'Wait'],
   status: 'open', by: 'agent', sessionName: 'mobile gaps', jobId: null, createdAt: Date.now() - 60e3, resolvedAt: null, resolvedBy: null,
 }] }, null, 2));
 
@@ -293,8 +294,8 @@ try {
   const sheet = await evalJs(`(() => { const p = document.getElementById('user-todos-popup'); const r = p.getBoundingClientRect(); return { hidden: p.classList.contains('hidden'), l: Math.round(r.left), r: Math.round(r.right), w: Math.round(r.width), t: Math.round(r.top), text: p.textContent.includes(${JSON.stringify(TODO_TEXT)}) }; })()`);
   check(`tapping it opens #user-todos-popup as a full-width sheet under the nav (left ${sheet.l}, right ${sheet.r}, top ${sheet.t}) listing the item`, !sheet.hidden && sheet.l >= 0 && sheet.r <= VW && sheet.w >= VW - 40 && sheet.t >= 40 && sheet.text, sheet);
   // r2: the sheet's OWN controls (tabs 17 px, ✓/✕/⤢ 20 px, the session header 18 px before)
-  const sheetCtl = await evalJs(rectsOf('#user-todos-popup .ut-tab, #user-todos-popup .ut-act, #user-todos-popup .ut-group-head'));
-  check(`the sheet's tabs / ✓ ✕ ⤢ / session header are ≥ 36 px tall, the buttons ≥ 36 wide (${sheetCtl.map((r) => r.w + '×' + r.h).join(', ')})`, sheetCtl.length >= 6 && sheetCtl.every((r) => r.h >= 36) && sheetCtl.filter((r) => r.txt.length <= 1).every((r) => r.w >= 36), sheetCtl);
+  const sheetCtl = await evalJs(rectsOf('#user-todos-popup .ut-tab, #user-todos-popup .ut-act, #user-todos-popup .ut-band-bar'));
+  check(`the sheet's tabs / ✓ ✕ ⤢ / band head (lane foryou-folds: the band bar replaced the session header) are ≥ 36 px tall, the buttons ≥ 36 wide (${sheetCtl.map((r) => r.w + '×' + r.h).join(', ')})`, sheetCtl.length >= 6 && sheetCtl.every((r) => r.h >= 36) && sheetCtl.filter((r) => r.txt.length <= 1).every((r) => r.w >= 36), sheetCtl);
   // r2: Escape closes it (a persistent element cannot carry [data-popover] — its own keydown handler)
   await escape();
   check('Escape closes the sheet (its own handler; the popup cannot carry the [data-popover] protocol)', await evalJs(`document.getElementById('user-todos-popup').classList.contains('hidden')`));

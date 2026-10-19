@@ -22,6 +22,12 @@
 //     name), the three-way choice, THE DECAY on a fake clock, a blocked fact placing an item with no call, THE ORDER, the
 //     five owner-measured item SHAPES end to end (judge stub → group / why / order), a facts change judged again, the
 //     version bump re-scoring a v1 verdict, a stopped pass said (log + status), the re-ask count in the store.
+//   ⑧ THE TIE-BREAKER (lane foryou-folds, design q-044 decision 3): the judge scores ONLY a band-5 tie (two asks in the
+//     same minute — src/attention-model.js tieCandidates); every other row is placed by facts (a lone ask, a decision, a
+//     date, a blocked board: 0 calls); a verdict orders the tie and nothing else. ⑤–⑦ pair each judged item with a
+//     TWIN filed in the same minute so the judge's memo / version / clock mechanics stay exercised.
+// lane foryou-folds also runs the FACTS half on every pass whatever the switch (free — the attention list's bands read
+// them) and for every open action item, not only the judge's.
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -33,10 +39,12 @@ const require = createRequire(import.meta.url);
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DE = require(path.join(REPO, 'src/server/decision-engine.js'));
 const M = require(path.join(REPO, 'src/decision-model.js'));
+const A = require(path.join(REPO, 'src/attention-model.js'));
 const { UserTodoManager } = require(path.join(REPO, 'src/user-todos.js'));
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 700) : '')); } };
 const quiet = { log() { }, warn() { }, error() { } };
+const eq = (a, b, n) => ok(JSON.stringify(a) === JSON.stringify(b), n, { got: a, want: b });
 const ROOT = scratch('decision-inbox');
 process.on('exit', () => { try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { } });
 
@@ -134,15 +142,19 @@ console.log('② THE PASS — the REAL engine + the REAL For-you store, a fake v
   const before = JSON.stringify(bare.snapshot());
   off.eng.attachInbox(off.store, { tickMs: 0 });
   const r0 = await off.eng.inboxPass();
-  ok(!r0.ran && off.fetches === 0, 'the switch OFF ⇒ the pass does not run: 0 calls');
-  ok(JSON.stringify(off.store.snapshot()) === before && !('grouping' in off.store.snapshot()), 'the switch OFF ⇒ the snapshot is byte-identical to a store the engine never attached (no `grouping` key)');
+  ok(!r0.ran && off.fetches === 0, 'the switch OFF ⇒ the JUDGE does not run: 0 calls');
+  const offSnap = off.store.snapshot(), bareOpen = JSON.parse(before).open;
+  const standIns = offSnap.open.filter((i) => i.judged && i.judged.facts && i.judged.v === 0 && i.judged.group === null && i.judged.p === null);
+  ok(!('grouping' in offSnap) && standIns.length === 19 && !offSnap.open.some((i) => i.kind === 'notice' && i.judged)
+    && JSON.stringify(offSnap.open.map((i) => [i.id, i.urgency, i.text])) === JSON.stringify(bareOpen.map((i) => [i.id, i.urgency, i.text])),
+    'lane foryou-folds: the switch OFF ⇒ no `grouping` key and no verdict — but the FACTS are written beside every open action item (19 stand-ins {group: null, v: 0}; the notice none): they are free and the attention list\'s bands 2–3 read them', { standIns: standIns.length });
   bare.stop(); off.store.stop();
 
   const w = world('on');
   const urg0 = seed(w);
   w.eng.attachInbox(w.store, { tickMs: 0 });
   const r1 = await w.eng.inboxPass();
-  ok(r1.ran && w.fetches === 10 && r1.judged === 10, `pass 1: 13 eligible ⇒ ${w.fetches} calls (≤ 10 a pass), ONE item a call`, r1);
+  ok(r1.ran && w.fetches === 10 && r1.judged === 10 && r1.untied === 0, `pass 1: 13 eligible — all asked in ONE minute, a band-5 tie (lane foryou-folds) ⇒ ${w.fetches} calls (≤ 10 a pass), ONE item a call`, r1);
   ok(w.bodies.every((b) => (b.match(/\[record\]/g) || []).length === 1), 'every call carries exactly one item');
   ok(!w.bodies.some((b) => [SECRET.reply, SECRET.art].some((s) => b.includes(s))), 'no call carried a reply or an artifact path (the never-list on the wire)');
   const r2 = await w.eng.inboxPass(); const r3 = await w.eng.inboxPass();
@@ -152,7 +164,7 @@ console.log('② THE PASS — the REAL engine + the REAL For-you store, a fake v
   ok(judged.length === 13 && judged.every((i) => ['now', 'later'].includes(i.judged.group) && i.judged.v === M.INBOX.version && typeof i.judged.p === 'number' && ['blocked', 'whenever'].includes(i.judged.why)
     && i.judged.facts && i.judged.facts.state === 'unknown' && i.judged.sig === M.inboxFactsSig(i.judged.facts)), 'each verdict lives BESIDE its item: judged {group, why, p, at, v, facts, sig}', judged[0] && judged[0].judged);
   const young = items.find((i) => i.text === 'Filed just now');
-  ok(young.judged && young.judged.v === 0 && young.judged.group === null && young.judged.facts && items.filter((i) => i.judged && i.judged.facts).length === 14, 'the FACTS are free: every sortable item carries them (13 judged + the young one\'s stand-in {group: null, v: 0}), the 6 others none');
+  ok(young.judged && young.judged.v === 0 && young.judged.group === null && young.judged.facts && items.filter((i) => i.judged && i.judged.facts).length === 19 && !items.find((i) => i.kind === 'notice').judged, 'the FACTS are free: every open ACTION item carries them (13 judged + 6 stand-ins {group: null, v: 0} — lane foryou-folds: not only the judge\'s rows), the notice none');
   ok(judged.filter((i) => i.judged.group === 'now').length === 5, 'the money / deadline asks went to `now` (5), the finished reports to `later` (8)');
   ok(JSON.stringify(items.map((i) => [i.id, i.urgency])) === JSON.stringify(urg0), 'NO urgency moved — the judge sorts, it never re-urgences (every item\'s stored urgency byte-equal)');
   const inel = items.filter((i) => !(i.judged && i.judged.v)).map((i) => i.text).sort();
@@ -233,12 +245,15 @@ console.log('④ RED CONTROLS — scratch copies with ONE named edit');
 
 console.log('⑤ A VERDICT IS KEYED BY THE TEXT IT JUDGED (inbox-verify F2) — re-file / reopen ⇒ judged again');
 /** One item judged `later`, re-filed with an urgent detail, then resolved + re-filed with the same words, then
- *  reopened from the panel → what each step left. */
+ *  reopened from the panel → what each step left. lane foryou-folds: the judge only breaks a band-5 TIE, so each filing
+ *  of the item has a TWIN (another conversation's ask, filed in the same minute) — the twin's calls count too. */
 async function refileRun(name, opts = {}) {
   const w = world(name, opts);
   const sk = 'claude:rf', text = 'Task 9 finished — the report is in the folder.';
   const add = (o = {}) => w.store.add(sk, { by: 'agent', origin: 'agent', sessionName: 'Ops agent', text, urgency: 'normal', ...o });
-  const id = add().id;
+  let twins = 0;
+  const twin = () => w.store.add('claude:tw', { by: 'agent', origin: 'agent', sessionName: 'Twin agent', text: `Twin note ${++twins}: the nightly job ran.`, urgency: 'normal' });
+  const id = add().id; twin();
   w.T += 5 * 60e3; // the first pass comes 5 min after the filing (the store stamped it on this clock)
   w.eng.attachInbox(w.store, { tickMs: 0 });
   await w.eng.inboxPass();
@@ -247,7 +262,7 @@ async function refileRun(name, opts = {}) {
   o.cleared = !w.store.get(id).judged;
   await w.eng.inboxPass(); await w.eng.inboxPass();
   o.second = w.store.get(id).judged && w.store.get(id).judged.group; o.calls2 = w.fetches;
-  w.store.setStatus(id, 'done'); add({ detail: 'the CFO waits on this invoice today' });
+  w.store.setStatus(id, 'done'); add({ detail: 'the CFO waits on this invoice today' }); twin();
   o.clearedRefile = !w.store.get(id).judged;
   w.T += 2 * 60e3; await w.eng.inboxPass();
   o.third = w.store.get(id).judged && w.store.get(id).judged.group; o.calls3 = w.fetches;
@@ -258,10 +273,10 @@ async function refileRun(name, opts = {}) {
 }
 {
   const o = await refileRun('refile');
-  ok(o.first === 'later' && o.calls1 === 1, 'the first filing: ONE call, judged later', o);
+  ok(o.first === 'later' && o.calls1 === 2, 'the first filing: ONE call for it (and one for its twin — a band-5 tie), judged later', o);
   ok(o.cleared, 'a re-file with new words (a new detail) clears `judged`', o);
-  ok(o.second === 'now' && o.calls2 === 2, 'the next pass judges it again: ONE new call with the new words ⇒ now (and the pass after it: 0)', o);
-  ok(o.clearedRefile && o.third === 'now' && o.calls3 === 2, 'a resolved item re-filed with the SAME words: judged cleared, the memo answers by the digest (0 calls)', o);
+  ok(o.second === 'now' && o.calls2 === 3, 'the next pass judges it again: ONE new call with the new words ⇒ now (and the pass after it: 0)', o);
+  ok(o.clearedRefile && o.third === 'now' && o.calls3 === 4, 'a resolved item re-filed with the SAME words: judged cleared, the memo answers by the digest (0 calls for it — the one new call is its new twin\'s)', o);
   ok(o.clearedReopen, 'a reopen from the panel (setStatus open) clears `judged`', o);
   const MUT = mutantCopies('decision-refile', REPO);
   const sSrc = fs.readFileSync(path.join(REPO, 'src/user-todos.js'), 'utf8');
@@ -269,13 +284,13 @@ async function refileRun(name, opts = {}) {
   ok(sSrc.split(a1).length === 2, 'ANCHOR: the re-file clears the verdict');
   const { UserTodoManager: Keeps } = MUT.load('src/user-todos.js', sSrc.replace(a1, '{ existing.detail = detail; changed = true; }'), 'keeps-judged');
   const k = await refileRun('ctl-refile-store', { Store: Keeps });
-  ok(!k.cleared && k.second === 'later' && k.calls2 === 1, 'CONTROL: the base store (a re-file keeps `judged`) ⇒ the old verdict stays, 0 new calls — the legs above are RED on it', k);
+  ok(!k.cleared && k.second === 'later' && k.calls2 === 2, 'CONTROL: the base store (a re-file keeps `judged`) ⇒ the old verdict stays, 0 new calls — the legs above are RED on it', k);
   const eSrc = fs.readFileSync(path.join(REPO, 'src/server/decision-engine.js'), 'utf8');
   const a2 = 'memo: M.inboxMemoOf(it, sha, f) });';
   ok(eSrc.split(a2).length === 2, 'ANCHOR: the pass keys the memo by the digest');
   const IdOnly = MUT.load('src/server/decision-engine.js', eSrc.replace(a2, 'memo: { id: it.id } });'), 'memo-id-only');
   const m = await refileRun('ctl-refile-memo', { Engine: IdOnly });
-  ok(m.cleared && m.second === 'later' && m.calls2 === 1, 'CONTROL: the base memo key (item id only) ⇒ judged cleared but the memo answers the OLD verdict — RED', m);
+  ok(m.cleared && m.second === 'later' && m.calls2 === 2, 'CONTROL: the base memo key (item id only) ⇒ judged cleared but the memo answers the OLD verdict — RED', m);
 }
 
 console.log('⑥ INBOX v2 (lane decision-inbox-rank) — facts, the date table, the decay, a blocked fact, the order, the five shapes');
@@ -345,9 +360,12 @@ console.log('⑥ INBOX v2 (lane decision-inbox-rank) — facts, the date table, 
     I('b1', { createdAt: T - 5 * H, judged: { group: null, v: 0, facts: F({ askedAt: T - 5 * H, state: 'blocked' }) } }), I('d1', J('dated', { facts: F({ askedAt: T - H, dated: '今晚 22:00', due: T + 2 * H }) })), I('u', { urgency: 'urgent' }),
   ];
   const order = M.inboxRank(pile, T);
-  ok(order.map((r) => r.id).join() === 'u,h,b1,b2,o,d1,d2,dn,r1,r2,pend,l1,l2,s', 'THE ORDER: 现在要你 = urgent › high › blocked (the oldest ask first) › decisions › dated (the nearest date first, an unknown one after) › the judge\'s p; then 待判断, then 可以等 newest first (the stale one last)', order.map((r) => `${r.id}:${r.section}/${r.why}`));
-  ok(order.find((r) => r.id === 'b1').why === 'blocked' && order.find((r) => r.id === 'b1').section === 'now' && order.find((r) => r.id === 's').why === 'stale' && order.find((r) => r.id === 's').section === 'later',
-    'a blocked FACT stands in 现在要你 with no verdict at all; the decay moves a judged-blocked item asked 49 h ago to 可以等 (why: stale)');
+  // lane foryou-folds: THE BAND FIRST — 1 urgent · 2 a blocked FACT · 3 a date inside 48 h (nearest first) · 4 a decision
+  // · 5 the rest NEWEST first, the judge's verdict ordering only the asks of ONE minute (r1 0.9 › dn 0.8 › r2 0.6 › the
+  // unjudged › l1 `later`); a judge's `blocked` / `dated` WITHOUT the fact lifts nothing (b2, dn, s stay in band 5)
+  ok(order.map((r) => r.id).join() === 'u,b1,d1,d2,o,r1,dn,r2,h,pend,l1,b2,l2,s', 'THE ORDER (the attention list): urgent › someone waits (a blocked fact) › a date inside 48 h (the nearest first) › a decision › the other asks newest first — the judge\'s p breaks only a same-minute tie', order.map((r) => `${r.id}:${r.band}/${r.why}`));
+  ok(order.find((r) => r.id === 'b1').why === 'blocked' && order.find((r) => r.id === 'b1').band === 2 && order.find((r) => r.id === 'b2').band === 5 && order.find((r) => r.id === 's').band === 5 && order.find((r) => r.id === 'd1').band === 3 && order.find((r) => r.id === 'dn').band === 5,
+    'a blocked FACT stands in band 2 with no verdict at all; the judge\'s `blocked` (b2, s) or a date with no time (dn) lifts nothing — band 5');
 
   // THE FIVE SHAPES (findings §二, by SHAPE only — the words are invented): the REAL engine + store, the board stubbed
   const w = world('v2-shapes');
@@ -362,21 +380,26 @@ console.log('⑥ INBOX v2 (lane decision-inbox-rank) — facts, the date table, 
   const ids = {};
   for (const [k, text] of shapes) ids[k] = w.store.add('claude:' + k, { by: 'agent', origin: 'agent', sessionName: 'Agent ' + k, text, urgency: 'normal' }).id;
   w.store.reshapeItems((it) => { const sh = shapes.find(([k]) => ids[k] === it.id); if (!sh) return false; it.createdAt = T - sh[2]; return true; });
-  const boardOf = new Map(shapes.map(([k, , , b]) => ['claude:' + k, b]));
+  const boardOf = new Map(shapes.map(([k, , , b]) => ['claude:' + k, b])), boardOf0 = new Map(boardOf);
   w.eng.attachInbox(w.store, { tickMs: 0, board: () => (key) => boardOf.get(key) || null });
   const r1 = await w.eng.inboxPass();
-  const sentKinds = w.bodies.map((b) => (shapes.find(([, text]) => b.includes(text.slice(0, 30))) || ['?'])[0]).sort();
-  ok(r1.judged === 3 && r1.placed === 2 && sentKinds.join() === 'dated,default,notice', 'the pass: the blocked fact and the 14-day-old stale ask are PLACED with no call (2); the other three are judged with their facts line (3 calls)', { r1, sentKinds });
-  const placeOf = (k) => { const r = M.inboxRank(w.store.openItems(), T).find((x) => x.id === ids[k]); return `${r.section}/${r.why}`; };
+  ok(r1.judged === 0 && w.fetches === 0 && r1.placed === 2 && r1.untied === 3, 'lane foryou-folds (decision 3): the five shapes need NO call — the blocked fact and the 14-day ask are placed (2), the other three are no band-5 tie (3 untied)', r1);
+  const placeOf = (k) => { const r = M.inboxRank(w.store.openItems(), T).find((x) => x.id === ids[k]); return `${r.band}/${r.why}`; };
   const got = Object.fromEntries(shapes.map(([k]) => [k, placeOf(k)]));
-  ok(JSON.stringify(got) === JSON.stringify({ meeting: 'later/stale', default: 'later/whenever', dated: 'now/dated', blocked: 'now/blocked', notice: 'later/whenever' }), 'the five shapes: meeting-room (14 days, blocked status never refreshed) ⇒ 可以等 · stale; went-on-a-default ⇒ 可以等 · whenever; 22:00 PT ⇒ 现在要你 · dated; blocked ⇒ 现在要你 · blocked; a notice ⇒ 可以等', got);
+  ok(JSON.stringify(got) === JSON.stringify({ meeting: '6/parked', default: '5/null', dated: '3/dated', blocked: '2/blocked', notice: '5/null' }), 'the five shapes: meeting-room (14 days, its blocked status never refreshed) ⇒ 搁置; went-on-a-default ⇒ band 5; 22:00 PT ⇒ band 3 (dated); blocked ⇒ band 2; a finished report ⇒ band 5', got);
   const rank = M.inboxRank(w.store.openItems(), T).map((r) => Object.keys(ids).find((k) => ids[k] === r.id));
-  ok(rank.join() === 'blocked,dated,notice,default,meeting', 'their ORDER: blocked › dated in 现在要你; the notice (1 h), the default (5 h), then the stale ask in 可以等', rank);
+  ok(rank.join() === 'blocked,dated,notice,default,meeting', 'their ORDER: blocked › dated › the report (1 h) › the default (5 h) — newest first in band 5 — then 搁置', rank);
+  // a TWIN of the default, asked in its minute ⇒ a band-5 tie: the next pass judges exactly those two, with their facts line
+  const twinId = w.store.add('claude:twin', { by: 'agent', origin: 'agent', sessionName: 'Agent twin', text: 'The nightly sync ran; nothing for you to do.', urgency: 'normal' }).id;
+  w.store.reshapeItems((it) => { if (it.id !== twinId) return false; it.createdAt = T - 5 * H; return true; });
+  const r1b = await w.eng.inboxPass();
+  const sentKinds = w.bodies.map((b) => (shapes.find(([, text]) => b.includes(text.slice(0, 30))) || ['twin'])[0]).sort();
+  ok(r1b.judged === 2 && sentKinds.join() === 'default,twin', 'a twin asked in the default\'s minute ⇒ a band-5 tie: exactly those two are judged (2 calls)', { r1b, sentKinds });
   const factsLines = w.bodies.map((b) => (b.match(/^facts: (.*)$/m) || [, ''])[1]);
-  ok(factsLines.length === 3 && factsLines.every((l) => /^asked \d+ (min|h|days) ago/.test(l) && !/Agent |claude:|ut-/.test(l)) && factsLines.some((l) => l.includes('a date or time is named: "22:00 PT tonight"')) && factsLines.some((l) => l.includes('the agent continued on a default')) && factsLines.some((l) => l.includes('the agent finished')),
-    'what the vendor read: each call\'s facts line (the date phrase, continued, finished) — never the conversation\'s name or key', factsLines);
+  ok(factsLines.length === 2 && factsLines.every((l) => /^asked \d+ (min|h|days) ago/.test(l) && !/Agent |claude:|ut-/.test(l)) && factsLines.some((l) => l.includes('the agent continued on a default')),
+    'what the vendor read: each call\'s facts line (continued on a default) — never the conversation\'s name or key', factsLines);
   const r2 = await w.eng.inboxPass();
-  ok(r2.judged === 0 && w.fetches === 3 && w.changes > 0, 'the next pass: 0 calls, and no facts rewrite (they did not change)');
+  ok(r2.judged === 0 && w.fetches === 2 && w.changes > 0, 'the next pass: 0 calls, and no facts rewrite (they did not change)');
   const c0 = w.changes;
   await w.eng.inboxPass();
   ok(w.changes === c0, 'an idle pass writes nothing (no broadcast when no fact moved)', { c0, now: w.changes });
@@ -385,18 +408,19 @@ console.log('⑥ INBOX v2 (lane decision-inbox-rank) — facts, the date table, 
   boardOf.set('claude:default', B(rec('blocked', T, { reason: 'waiting on: I started on the recommended defaults' })));
   boardOf.set('claude:notice', B(rec('working', T - 0.2 * H), [rec('done', T - 0.5 * H), rec('working', T - 0.2 * H)]));
   const r3 = await w.eng.inboxPass();
-  ok(r3.judged === 1 && w.fetches === 4 && placeOf('default') === 'now/blocked', 'a facts change: the default\'s agent now blocked on THIS ask ⇒ 现在要你 with no call; the notice\'s finished → continued ⇒ judged again (ONE call)', { r3, fetches: w.fetches, d: placeOf('default') });
+  ok(r3.judged === 0 && w.fetches === 2 && placeOf('default') === '2/blocked', 'a facts change places with no call: the default\'s agent now blocked on THIS ask ⇒ band 2; the report\'s finished → continued buys no call (it ties with nothing)', { r3, fetches: w.fetches, d: placeOf('default') });
   w.store.stop();
 
   // THE VERSION BUMP: a verdict scored under v1 is scored once more under v2 (≈ one call per open item)
   const w1 = world('v2-bump');
   const id1 = w1.store.add('claude:v1', { by: 'agent', origin: 'agent', sessionName: 'Ops agent', text: 'Which expense process for the Tokyo trip?', urgency: 'normal' }).id;
-  w1.store.reshapeItems((it) => { if (it.id !== id1) return false; it.createdAt = T0 - 5 * 60e3; it.judged = { group: 'now', p: 1, at: T0 - 60e3, v: 1 }; return true; });
+  const tw1 = w1.store.add('claude:v1-twin', { by: 'agent', origin: 'agent', sessionName: 'Twin agent', text: 'The weekly report is in the folder.', urgency: 'normal' }).id; // its minute's twin: a band-5 tie (lane foryou-folds)
+  w1.store.reshapeItems((it) => { if (it.id !== id1 && it.id !== tw1) return false; it.createdAt = T0 - 5 * 60e3; if (it.id === id1) it.judged = { group: 'now', p: 1, at: T0 - 60e3, v: 1 }; return true; });
   w1.eng.attachInbox(w1.store, { tickMs: 0 });
   ok(M.inboxEligible(w1.store.get(id1), T0) === true, 'a v1 verdict is not `scored` under v2');
   await w1.eng.inboxPass();
   const j1 = w1.store.get(id1).judged;
-  ok(w1.fetches === 1 && j1.v === 2 && j1.why === 'blocked' && j1.group === 'now', 'the bump: ONE call re-scores the v1 item under v2 (why: blocked)', j1);
+  ok(w1.fetches === 2 && j1.v === 2 && j1.why === 'blocked' && j1.group === 'now', 'the bump: ONE call re-scores the v1 item under v2 (why: blocked; the other call is its twin\'s first)', j1);
   w1.store.stop();
 
   // RE-ASKS in the store: the same agent filing the same words again (an OPEN item) is counted; new words are an edit;
@@ -415,17 +439,21 @@ console.log('⑥ INBOX v2 (lane decision-inbox-rank) — facts, the date table, 
   ok(!ws.store.get(a.id).reasks && !ws.store.get(a.id).reaskedAt, 'a resolved item filed again is a NEW filing: no re-asks carried');
   ws.store.stop();
 
-  // RED CONTROLS (scratch copies, ONE named edit each): the model without the decay / without the blocked fact
+  // RED CONTROL (scratch copy, ONE named edit; lane foryou-folds): the pass without the tie rule judges what the facts placed
   const MUT6 = mutantCopies('decision-inbox-v2', REPO);
-  const mSrc = fs.readFileSync(path.join(REPO, 'src/decision-model.js'), 'utf8');
-  const aDecay = "  if (f && inboxStale(f, now)) return { ...base, why: 'stale' };\n", aFact = "  if (f && f.state === 'blocked') return { ...base, section: 'now', why: 'blocked', tier: 2 };\n";
-  ok(mSrc.split(aDecay).length === 2 && mSrc.split(aFact).length === 2, 'ANCHORS: the two rules that overrule the judge');
-  const meeting = { id: 'ut-m', status: 'open', urgency: 'normal', createdAt: T - 14 * 24 * H, judged: { group: 'now', why: 'blocked', p: 1, v: 2, facts: { state: 'blocked', dated: null, due: null, reasks: 0, askedAt: T - 14 * 24 * H } } };
-  const NoDecay = MUT6.load('src/decision-model.js', mSrc.replace(aDecay, ''), 'no-decay');
-  ok(M.inboxPlace(meeting, T).section === 'later' && NoDecay.inboxPlace(meeting, T).section === 'now', 'CONTROL: without the decay the 14-day-old meeting-room ask stands in 现在要你 again (the owner\'s complaint) — the shapes leg goes red on it');
-  const fresh = { id: 'ut-b', status: 'open', urgency: 'normal', createdAt: T - H, judged: { group: null, v: 0, facts: { state: 'blocked', dated: null, due: null, reasks: 0, askedAt: T - H } } };
-  const NoFact = MUT6.load('src/decision-model.js', mSrc.replace(aFact, ''), 'no-fact');
-  ok(M.inboxPlace(fresh, T).section === 'now' && NoFact.inboxPlace(fresh, T).section === 'pending', 'CONTROL: without the blocked fact a blocked agent\'s ask waits for a judge in 待判断 — the order leg goes red on it');
+  const eSrc6 = fs.readFileSync(path.join(REPO, 'src/server/decision-engine.js'), 'utf8');
+  const aTie = 'const due = eligible.filter(([it]) => tied.has(it.id));';
+  ok(eSrc6.split(aTie).length === 2, 'ANCHOR: the pass keeps only the band-5 ties');
+  const NoTie = MUT6.load('src/server/decision-engine.js', eSrc6.replace(aTie, 'const due = eligible;'), 'no-tie');
+  const wn = world('v2-no-tie', { Engine: NoTie });
+  wn.T = T;
+  const nIds = {};
+  for (const [k, text] of shapes) nIds[k] = wn.store.add('claude:' + k, { by: 'agent', origin: 'agent', sessionName: 'Agent ' + k, text, urgency: 'normal' }).id;
+  wn.store.reshapeItems((it) => { const sh = shapes.find(([k]) => nIds[k] === it.id); if (!sh) return false; it.createdAt = T - sh[2]; return true; });
+  wn.eng.attachInbox(wn.store, { tickMs: 0, board: () => (key) => boardOf0.get(key) || null });
+  await wn.eng.inboxPass();
+  ok(wn.fetches === 3, `CONTROL: the pass without the tie rule ⇒ ${wn.fetches} calls on the five shapes (the default, the dated ask, the report) — the 0-call leg goes red on it`);
+  wn.store.stop();
 }
 
 console.log('⑦ ONE CLOCK (lane decision-inbox-clock) — the store reads only its injected clock, so ⑤ holds at any wall-clock time');
@@ -451,12 +479,39 @@ console.log('⑦ ONE CLOCK (lane decision-inbox-clock) — the store reads only 
   const ref = await refileRun('clock-ref');
   for (const [tag, skew] of [['T0 − 1 year', -365 * 864e5], ['T0 + 1 year', 365 * 864e5]]) {
     const r = await skewed('clock-' + (skew < 0 ? 'behind' : 'ahead'), skew);
-    ok(r.third === 'now' && r.calls3 === 2 && JSON.stringify(r) === JSON.stringify(ref), `the process clock at ${tag}: ⑤ unchanged (the re-filed item judged by the digest, 0 calls)`, { r, ref });
+    ok(r.third === 'now' && r.calls3 === 4 && JSON.stringify(r) === JSON.stringify(ref), `the process clock at ${tag}: ⑤ unchanged (the re-filed item judged by the digest, 0 calls)`, { r, ref });
   }
   const MUT = mutantCopies('decision-clock', REPO);
   const { UserTodoManager: WallClock } = MUT.load('src/user-todos.js', planted, 'wall-clock-refile');
   const wc = await skewed('ctl-clock-ahead', 365 * 864e5, { Store: WallClock });
-  ok(wc.clearedRefile && !wc.third && wc.calls3 === 2, 'CONTROL: the base re-file stamp (Date.now) with the clock a year ahead ⇒ the re-filed item is young for ever, never judged — ⑤ RED', wc);
+  ok(wc.clearedRefile && !wc.third && wc.calls3 === 3, 'CONTROL: the base re-file stamp (Date.now) with the clock a year ahead ⇒ the re-filed item is young for ever, never judged (nor tied to its twin) — ⑤ RED', wc);
+}
+
+console.log('⑧ THE TIE-BREAKER (lane foryou-folds, design q-044 decision 3) — the judge scores only a band-5 tie');
+{
+  const H = 3600e3, T = Date.UTC(2026, 9, 19, 12, 0);
+  const R = (id, o = {}) => A.rowOf({ id, sessionKey: 'claude:' + id, status: 'open', urgency: 'normal', kind: 'action', origin: 'agent', createdAt: T - H, ...o }, T);
+  const pile = [R('a'), R('b', { createdAt: T - H + 30e3 }), R('c', { createdAt: T - 2 * H }), R('d', { options: ['A', 'B'] }), R('e', { urgency: 'urgent' }), R('f', { reply: { text: 'done', at: T } }),
+    R('g', { createdAt: T - 8 * 24 * H }), R('h', { createdAt: T - 8 * 24 * H + 1000 }), R('n', { kind: 'notice' }), R('x', { judged: { group: null, v: 0, facts: { state: 'blocked', dated: null, due: null, reasks: 0, askedAt: T - H } } })];
+  eq([...A.tieCandidates(pile, T)].sort(), ['a', 'b'], 'tieCandidates: the band-5 asks of ONE minute (a, b) — never a lone ask (c), a decision (d), urgent (e), an answered one (f), two in 搁置 (g, h), a notice (n) or a blocked fact (x, band 2)');
+  // the real engine: a lone ask buys nothing; its minute's twin makes it a tie
+  const w = world('tie');
+  const one = w.store.add('claude:t1', { by: 'agent', origin: 'agent', sessionName: 'Agent one', text: 'Which subnet for the lab?', urgency: 'normal' }).id;
+  w.T += 5 * 60e3;
+  w.eng.attachInbox(w.store, { tickMs: 0 });
+  const r1 = await w.eng.inboxPass();
+  ok(r1.ran && r1.judged === 0 && r1.untied === 1 && w.fetches === 0, 'a LONE band-5 ask: eligible, but no tie ⇒ 0 calls (status says 1 untied)', r1);
+  const two = w.store.add('claude:t2', { by: 'agent', origin: 'agent', sessionName: 'Agent two', text: 'The nightly backup finished.', urgency: 'normal' }).id;
+  w.store.reshapeItems((it) => { if (it.id !== two) return false; it.createdAt = w.store.get(one).createdAt + 20e3; return true; });
+  const r2 = await w.eng.inboxPass();
+  ok(r2.judged === 2 && w.fetches === 2 && w.eng.status().inbox.untied === 0, 'a second ask in the SAME minute ⇒ a tie: both judged (2 calls), 0 untied', { r2, st: w.eng.status().inbox });
+  // the verdict orders the tie and nothing else: the `now` one (the subnet question) above the backup notice, which is NEWER
+  const rank = M.inboxRank(w.store.openItems(), w.T).map((r) => r.id);
+  ok(rank.join() === [one, two].join() && w.store.get(one).judged.group === 'now' && w.store.get(two).judged.group === 'later', 'the verdict orders the tie: `now` (the older subnet question) above `later` (the newer backup note) — inside ONE minute', rank);
+  const newer = w.store.add('claude:t3', { by: 'agent', origin: 'agent', sessionName: 'Agent three', text: 'A newer question with no verdict', urgency: 'normal' }).id;
+  const rank2 = M.inboxRank(w.store.openItems(), w.T).map((r) => r.id);
+  ok(rank2[0] === newer, 'a NEWER unjudged ask in another minute stands above both — a verdict never lifts a row over a newer minute', rank2);
+  w.store.stop();
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

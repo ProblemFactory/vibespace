@@ -423,6 +423,10 @@ try {
   check('the live chat window attaches', await waitFor(`!!document.querySelector('.chat-view .chat-input')`, 20000));
   const liveWin = await evalJs(`[...app.sessions.entries()].find(([w, v]) => v.sessionId === ${JSON.stringify(sid)})?.[0] || null`);
   await evalJs(`app.wm.focusWindow(${JSON.stringify(liveWin)}); true`);
+  // lane foryou-folds: a title-bar badge counts that conversation's rows in bands 1–4 — its asks so far are band 5, so the
+  // agent files a DECISION (option chips, band 4) for the badge to count
+  const dec7 = await fileItem(token, { text: 'A decision for the title bar', urgency: 'normal', options: ['Yes', 'No'] });
+  check('(a band-4 decision is filed for the live session)', !!dec7?.success, dec7);
   await waitFor(`!!app.wm.windows.get(${JSON.stringify(liveWin)})?.titleBar.querySelector(':scope > .win-inbox-badge')`, 8000);
   const badgeAt = await evalJs(`(() => { const b = app.wm.windows.get(${JSON.stringify(liveWin)}).titleBar.querySelector(':scope > .win-inbox-badge'); const q = b.getBoundingClientRect(); return { x: q.left + q.width / 2, y: q.top + q.height / 2 }; })()`);
   for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await cdp('Input.dispatchMouseEvent', { type, x: badgeAt.x, y: badgeAt.y, button: 'left', buttons: type === 'mousePressed' ? 1 : 0, clickCount: 1 });

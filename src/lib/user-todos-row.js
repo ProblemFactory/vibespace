@@ -25,14 +25,13 @@
 // reply) is a peer/user-controlled string synced to EVERY client — each one
 // goes through escHtml here, and nothing else in this file builds markup.
 //
-// entry = {item, resolved, notice?, tail?}
+// entry = {item, resolved, notice?, tail?, band?}   (band: a tray attention-list row — lane foryou-folds)
 // ctx   = {t, nameFor(key, items), wordsOf(item), detailOf(item),
 //          replyState(item) → {show, enabled, why}, mini?}
 import { escHtml } from './utils.js';
 import { UI_ICONS } from './icons.js';
 import { getFileIcon } from './file-types.js';
 import { linkedHtml, segmentText } from './foryou-links.js'; // PURE (lane foryou-attachments): THE links in an item's words — one grammar with the chat
-import { inboxChip } from './user-todos-layout.js'; // PURE (lane inbox-decision-group): a judged item's chip
 import { cardWords, progressWords } from './app-card-model.js'; // design 009: THE words of an app install's one card (PURE)
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
 
@@ -211,8 +210,11 @@ function partsOf(entry, ctx) {
       + (tail ? ' · ' + escHtml(agoText(i.resolvedAt || i.createdAt, t)) : '');
   } else {
     const exp = notice ? expiresText(i.expiresAt, t) : '';
-    meta = (notice ? `<span class="ut-sess">${escHtml(ctx.nameFor(i.sessionKey, [i]))}</span> · ` : '')
-      + escHtml(agoText(i.createdAt, t)) + (exp ? ' · ' + escHtml(exp) : '') + judgedChipHtml(i, t, ctx);
+    // lane foryou-folds: a row of the tray's attention list (`entry.band`) names its conversation — the bands are flat, no
+    // group head — with THE running dot of a real session in front (D1.7: the panel patches it live, never the row)
+    const dot = entry.band && typeof i.sessionKey === 'string' && i.sessionKey.includes(':') ? `<span class="ut-live-dot" data-key="${escHtml(i.sessionKey)}" role="img"></span>` : '';
+    meta = (notice || entry.band ? `<span class="ut-sess">${dot}${escHtml(ctx.nameFor(i.sessionKey, [i]))}</span> · ` : '')
+      + escHtml(agoText(i.createdAt, t)) + (exp ? ' · ' + escHtml(exp) : '');
   }
   const body = `<div class="ut-text">${card ? escHtml(words) : linkedHtml(words, { escape: escHtml })}</div>${askChipsHtml(i, t)}${card ? appCardHtml(i, t, { lang, resolved }) : !resolved ? exitAskHtml(i, t) + hubAskHtml(i, t, detail) + proposalAskHtml(i, t, detail) + appAskHtml(i, t) : ''}${card ? '' : detailFold}${opts}<div class="ut-meta">${meta}</div>`;
   // ⤢ = THE For-you window ON this item (design-user-inbox-reply §9: long text at full width, reply / done there)
@@ -230,26 +232,6 @@ function partsOf(entry, ctx) {
 
 /** The reply box (design-user-inbox-reply D3b): Enter sends, Shift+Enter is a
  *  newline, Esc folds — the panel owns those keys; this only builds it. */
-/** lane inbox-decision-group: a placed item's chip while the tray draws the LLM plugin's sections. v2 (lane
- *  decision-inbox-rank): THE REASON in OUR words, never the vendor's — 卡住等你 / 有期限 · <the item's own date phrase> /
- *  随时 / 48 小时无人再问; the title says who placed it (the agent's status, the clock, or the judge with its p). A v1
- *  verdict keeps 现在 / 可等 until v2 scores it again. Nothing when off. */
-export function judgedChipHtml(i, t, ctx) {
-  const c = ctx && ctx.grouping ? inboxChip(i, Date.now()) : null;
-  if (!c) return '';
-  const p = c.p !== null ? ` (p ${c.p.toFixed(2)})` : '';
-  let word, title;
-  if (c.why === 'stale') { word = t('Nobody asked again in 48 h'); title = t('Asked over 48 hours ago, and nobody asked again since'); }
-  else if (c.why === 'blocked') { word = t('Agent waits on you'); title = c.fact ? t('Its agent set its status to blocked for this question') : t('The LLM plugin chose this reason') + p; }
-  else if (c.why === 'dated') { word = c.dated ? t('Due {when}', { when: c.dated }) : t('Has a deadline'); title = t('The LLM plugin chose this reason') + p; }
-  else if (c.why === 'whenever') { word = t('Any time'); title = t('The LLM plugin chose this reason') + p; }
-  else {
-    word = c.group === 'now' ? t('now') : t('can wait');
-    title = t('Sorted by the LLM plugin — {why}', { why: c.group === 'now' ? t('needs you now: an agent waits on your decision, a deadline, money or someone waiting on your reply') : t('can wait: a notice, a finished report, nothing to do') }) + p;
-  }
-  return ` · <span class="ut-judged" data-group="${c.group}" data-why="${c.why || ''}" title="${escHtml(title)}">${escHtml(word)}</span>`;
-}
-
 /** lane foryou-attachments: an ask's --artifact CHIPS under the question — an SVG kind icon + the name (+ the host when it
  *  is not this box). Addressed by INDEX (data-ai): a click reads the item's own row, never a path back off an attribute. */
 const askArts = (i) => (i && !i.clearedAt && Array.isArray(i.artifacts) ? i.artifacts : []); // a CLEARED item shows none (SHAPES todo drops them)

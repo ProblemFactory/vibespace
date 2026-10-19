@@ -20,6 +20,7 @@ import { execFile } from 'node:child_process';
 import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { endDaemonsAndWait } from './scratch.mjs';
+import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-device-acts-'));
@@ -312,8 +313,27 @@ console.log('— ⑦ the three URGENT For-you items');
   uw.begun({ hostKey: 'local', machine: 'hub', from: '2.369.311', to: '2.369.312' });
   const ups = filed.filter((f) => /update/.test(f.text));
   ok(ups.length === 1 && /Agent update pushed to Box: 2\.369\.311 → 2\.369\.312/.test(ups[0].text) && /system:device-upgrade/.test(ups[0].detail), 'an update pushed: ONE item per (device, from → to) — three attempts are one; the hub\'s own daemon never', ups.map((u) => u.text));
+  // DECISION 8 (design q-044, lane foryou-folds): the signature passed and the version goes FORWARD ⇒ a NOTICE (the grey
+  // count — a fleet roll of 18 machines filed 18 urgent rows); a bad signature, a downgrade or an unreadable version stays urgent
+  ok(ups[0].kind === 'notice' && ups[0].urgency === 'normal', 'decision 8: a SIGNED forward update is a notice (kind notice, normal) — not urgent', { kind: ups[0].kind, urgency: ups[0].urgency });
   const bad = al.file('upgrade-pushed', { hostKey: 'h1', machine: 'Box', from: '2.369.311', to: '2.369.312', code: 'bad-signature' });
-  ok(bad.filed && /refused an agent update with a bad signature/.test(filed[filed.length - 1].text), 'a bad-signature refusal = the same kind, its own words and key (lane device-bundle-signing only sets the code)');
+  ok(bad.filed && /refused an agent update with a bad signature/.test(filed[filed.length - 1].text) && filed[filed.length - 1].urgency === 'urgent' && !filed[filed.length - 1].kind, 'a bad-signature refusal = the same kind, its own words and key (lane device-bundle-signing only sets the code) — and it stays URGENT');
+  const down = al.file('upgrade-pushed', { hostKey: 'h1', machine: 'Box', from: '2.369.312', to: '2.369.300' });
+  const unk = al.file('upgrade-pushed', { hostKey: 'h1', machine: 'Box', from: 'unknown build', to: '2.369.312' });
+  ok(down.filed && unk.filed && filed.slice(-2).every((f) => f.urgency === 'urgent' && !f.kind), 'decision 8: a DOWNGRADE (2.369.312 → 2.369.300) and an unreadable version stay urgent');
+  const NOTICE = [[{}, false], [{ from: '2.369.316', to: '2.369.317' }, true], [{ from: '2.9', to: '2.10' }, true], [{ from: '2.369', to: '2.369.1' }, true], [{ from: '2.369.317', to: '2.369.317' }, false], [{ from: '2.369.317', to: '2.369.316' }, false], [{ from: '2.369.316', to: '2.369.317', code: 'bad-signature' }, false], [{ from: '?', to: '2.369.317' }, false]];
+  const badN = NOTICE.filter(([f, want]) => ALERTS.upgradeIsNotice(f) !== want);
+  ok(!badN.length, `upgradeIsNotice (${NOTICE.length} rows): signed AND forward, by every dotted number — equal, older, unreadable or coded ⇒ urgent`, badN);
+  {
+    const MUT = mutantCopies('device-alerts-d8', REPO);
+    const src = read('src/server/device-alerts.js');
+    const aCode = '  if (f.code) return false;\n', aFwd = 'if (y !== x) return y > x;';
+    ok(src.split(aCode).length === 2 && src.split(aFwd).length === 2, 'ANCHORS: the signature check and the forward check');
+    const NoCode = MUT.load('src/server/device-alerts.js', src.replace(aCode, ''), 'no-code');
+    const NoFwd = MUT.load('src/server/device-alerts.js', src.replace(aFwd, 'if (y !== x) return true;'), 'no-forward');
+    ok(NoCode.upgradeIsNotice({ from: '2.369.316', to: '2.369.317', code: 'bad-signature' }) === true && NoFwd.upgradeIsNotice({ from: '2.369.317', to: '2.369.316' }) === true,
+      'MUTANTS RED: without the signature check a bad signature files as a notice; without the forward check a downgrade does — the table above fails on each');
+  }
   ok(filed.every((f) => f.i18n && f.i18n.text && f.i18n.text.key && Array.isArray(f.i18n.detail)), 'the words ride as structure (the tray words them in the device\'s language)');
   // the first dial from a new address (hosts.noteDial's known set)
   const { HostManager } = require('../src/hosts.js');

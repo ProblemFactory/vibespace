@@ -4,9 +4,9 @@
 // session (each session's own list is just its group here) and jumps to that
 // session to handle them. Items arrive via `vibespace-ask` (agent CLI) and are
 // resolved/dismissed here (or by the agent once the user answers in chat).
-// Chunk 4 of docs/design-user-inbox-reply.md: a flooded group folds to its 5
-// newest rows (PURE foldGroup), "Mark all seen" dismisses a group's open asks
-// in ONE request, and a chip beside the name shows the agent's board state.
+// Chunk 4 of docs/design-user-inbox-reply.md: "Mark all seen" dismisses many
+// asks in ONE request (lane foryou-folds: a band's, where it was a group's; the
+// per-group flood fold and the board chip left with the group heads).
 // B-328d (2026-09-24): the Notices area groups by the PRODUCER that filed each
 // notice (origin — src/inbox-origin.js) behind filter chips kept per device,
 // and the two tab labels carry counts patched in place (Inbox: the open asks +
@@ -16,9 +16,15 @@
 // second surface over them); ⤢ on a row, on the popup's tab strip and on the
 // mini inbox's head opens THE window (src/lib/inbox-window.js, app.openInbox) —
 // the read-only viewer modal is retired.
+// lane foryou-folds (design q-044, the owner's decisions 1 2 3 6 of 2026-10-19): THE INBOX PAGE IS THE ATTENTION LIST —
+// src/attention-model.js `needsMe` drawn as five bands + 搁置 (flat rows, each naming its conversation), the first 6
+// rows on the first screen and everything after them folded BY BAND behind 「还有 N 条 — 展开」 (expanded in place,
+// keyed rows patched); 「全部标为已看」 acts on one band (never 紧急); notices are a grey count that opens in one
+// click; the badge counts bands 1–4; an arrival toasts only in bands 1–2. The LLM plugin's three sections and the
+// per-conversation flood fold are retired (the judge only breaks a band-5 tie).
 import { t, tc } from './i18n.js';
-import { inboxSections } from './user-todos-layout.js'; // lane inbox-decision-group: the LLM plugin's two tray sections (PURE)
-import { sortGroups, openLayout, nextLayout, entriesFor, splitNotices, badgeCounts, inboxBadgeFor, miniInboxEntries, foldGroup, FOLD_MAX, noticeGroups, noticeChips, noticeFilterFor, tabCounts, NOTICE_FILTER_KEY, HISTORY_SEEN_KEY } from './user-todos-layout.js'; // PURE: the group order + append-only row order while the popup is open (inc-mtw02kbq-kj96); notices split (2.369.118); the flood fold (chunk 4); notices by origin + the tab counts (B-328d)
+import { rowOf as attentionRow, toastWorthy, PARKED, FOLD_HEAD } from '../attention-model.js'; // PURE: THE attention list (lane foryou-folds) — an arrival's band (the toast rule), the 搁置 band, the fold's words
+import { sortGroups, openLayout, nextLayout, entriesFor, splitNotices, badgeOf, bandLayout, bandEntries, inboxBadgeFor, miniInboxEntries, noticeGroups, noticeChips, noticeFilterFor, tabCounts, NOTICE_FILTER_KEY, HISTORY_SEEN_KEY } from './user-todos-layout.js'; // PURE: the append-only order while the popup is open (inc-mtw02kbq-kj96) — the notices' groups and the bands' slots (lane foryou-folds); notices split (2.369.118); notices by origin + the tab counts (B-328d)
 import { inboxModel, tierCounts, actionWords } from './user-todos-actions.js'; // THE client model (§9): the store, the live facts (the running dot + the reply verdict, D1.5/D1.7), the words, every verb — shared with the For-you window
 import { trayWhere } from './user-todos-layout.js'; // lane S3: the new-item toast names the corner the tray sits in on this device
 import { renderRow, patchRow, applyLive, replyBoxEl, reconcileKeyed, agoText as agoTextOf } from './user-todos-row.js'; // THE row renderer (one spelling of a row; keyed patching keeps a reply box alive)
@@ -44,12 +50,12 @@ export function installUserTodos(app) {
   let knownIds = null; // null until the first load — no toast storm at boot
   let layout = null;   // the popup's row order while OPEN (inc-mtw02kbq-kj96: a ✓ must not slide the next row under the pointer)
   let tab = 'inbox'; // 'inbox' (default) | 'history' — resets to inbox on open
-  // THE FLOOD FOLD (design-user-inbox-reply §4 d, chunk 4): group key →
-  // {expanded, shown:Set<id>, hidden:Set<id>} of the last paint. Lives only
-  // while the popup is open, like the layout (cleared on close and on open).
-  const folds = new Map();
-  const groupOpen = new Map(); // group key → the open ACTION ids the last paint listed (hidden rows included) — what "Mark all seen" resolves
-  const secHeld = new Map(); // lane inbox-decision-group: item id → its tray section + rank slot ({sec, ix} — lane decision-inbox-rank) for this open (the slot law)
+  // THE BANDS (lane foryou-folds): their slots while the popup is open (PURE bandLayout — the first screen, the folds, a
+  // row resolved in place, an arrival appended; null on every open, like the layout) and, per band, the open ids the last
+  // paint listed (folded rows included) — what that band's 「全部标为已看」 resolves
+  let bands = null;
+  const bandOpen = new Map();
+  let noticesOpen = false; // the notices are a grey count until one click opens them (per open, like the folds)
   // NOTICES BY ORIGIN (B-328d): the filter is per DEVICE (like the language) and
   // survives a close; the group ORDER is append-only while the popup is open
   // (the origins the last paint listed — null on every open, like the layout).
@@ -117,7 +123,8 @@ export function installUserTodos(app) {
   const renderBtn = () => {
     // NOTICES (2.369.118, owner: spend notices are DISTRACTING beside real asks):
     // only ACTION items colour the badge; notices are a grey count of their own.
-    const { action, notices } = badgeCounts(todos.open);
+    // lane foryou-folds: the badge counts the attention list's bands 1–4 (a band-5 ask or a row in 搁置 moves only the list)
+    const { action, notices } = badgeOf(todos.open, Date.now());
     const n = action.length;
     const worst = action.reduce((w, i) => Math.max(w, URG_RANK[i.urgency || 'normal'] || 1), 0);
     btn.classList.toggle('ut-has-items', n > 0);
@@ -170,8 +177,9 @@ export function installUserTodos(app) {
   const patchTabs = () => {
     const d = popup.querySelector(':scope > .ut-tabs');
     if (!d) return;
-    const c = tabCounts(todos.open, getToastHistory(), histSeen());
-    const { action } = badgeCounts(todos.open);
+    const now = Date.now();
+    const c = tabCounts(todos.open, getToastHistory(), histSeen(), now); // lane foryou-folds: the Inbox tab = the badge's own number (bands 1–4)
+    const { action } = badgeOf(todos.open, now);
     for (const b of d.querySelectorAll(':scope > .ut-tab')) {
       const on = b.dataset.tab === tab;
       if (b.classList.contains('on') !== on) b.classList.toggle('on', on);
@@ -255,7 +263,10 @@ export function installUserTodos(app) {
     const title = mk('div', 'usage-section-title ut-title', t('For you'));
     title.append(mk('span', 'ut-head-sub'));
     const notices = mk('div', 'ut-notices');
-    const nh = mk('div', 'ut-notice-head', t('Notices'));
+    // lane foryou-folds: the notices' head is ONE button — the grey count, a click opens the strip and the groups in place
+    const nh = mk('button', 'ut-notice-head', t('Notices'));
+    nh.type = 'button';
+    nh.title = t('Show the notices');
     nh.append(mk('span', 'ut-head-sub'));
     // B-328d: the filter strip, then one group per ORIGIN (the producer that filed it)
     const chips = mk('div', 'ut-chips');
@@ -264,7 +275,7 @@ export function installUserTodos(app) {
     notices.append(nh, chips, mk('div', 'ut-notice-groups'));
     const recent = mk('div', 'ut-recent');
     recent.append(mk('div', 'ut-resolved-head', t('Recently resolved')), mk('div', 'ut-recent-rows'));
-    root.append(title, mk('div', 'ut-groups'), mk('div', 'empty-hint ut-empty', t('Nothing needs you right now. Agents file items here with vibespace-ask when they need a decision or input.')), notices, recent);
+    root.append(title, mk('div', 'ut-groups ut-bands'), mk('div', 'empty-hint ut-empty', t('Nothing needs you right now. Agents file items here with vibespace-ask when they need a decision or input.')), notices, recent);
     showPage(root);
     return root;
   };
@@ -276,6 +287,7 @@ export function installUserTodos(app) {
       head, isRow: (c) => c.classList.contains('ut-item'), create: (e) => renderRow(e, ctx), patch: (row, e) => patchRow(row, e, ctx),
     });
     armExitButtons();
+    container.querySelectorAll(':scope > .ut-item .ut-live-dot').forEach((d) => patchDot(d)); // lane foryou-folds: a band row's running dot (a new / re-drawn row starts unpainted)
   };
   // verify-r6 V1: every "Allow … to run a command?" button in the page, re-stamped after each row pass — one that
   // appeared or MOVED (a resolved row above it shrank, an expiry) starts its ARM_MS again (PURE src/lib/press-arm.js)
@@ -288,57 +300,56 @@ export function installUserTodos(app) {
     }
   };
   const patchDot = (dot) => model.patchDot(dot); // THE running dot (D1.7: liveDotState over the model's live fact)
-  // A group = its BAR (the head — a button that jumps — and, beside it, the
-  // "Mark all seen" button: a button never nests in a button), its rows, and
-  // the fold's expander last.
+  // A BAND (lane foryou-folds) = its BAR — the band's name, its open count and, on every band but 紧急, 「全部标为已看」
+  // (a button never nests in a button) — its SHOWN rows (keyed, patched in place), and its FOLD last: 「还有 N 条 — 展开」
+  // opens the band where it stands. A band whose every row is folded (搁置 on every open) carries its fold IN the bar.
   const seenAllEl = () => {
     const b = mk('button', 'ut-seen-all', t('Mark all seen'));
     b.type = 'button';
-    b.title = t('Dismiss every open ask of this agent (↺ reopens)');
+    b.title = t('Dismiss every open row of this band (↺ reopens)');
     return b;
   };
-  const groupEl = (key) => {
-    const g = mk('div', 'ut-group' + (key === 'jobs' ? ' ut-group-jobs' : ''));
-    g.dataset.key = key;
-    const bar = mk('div', 'ut-group-bar');
-    if (key === 'jobs') {
-      const head = mk('div', 'ut-group-head ut-group-head-jobs');
-      head.dataset.key = 'jobs'; // a click opens the Background Work panel (it used to fall into "Session not found")
-      head.innerHTML = '<svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4.5" width="12" height="8" rx="1.5"/><path d="M5.5 4.5v-1a1 1 0 011-1h3a1 1 0 011 1v1"/></svg>';
-      head.append(mk('span', 'ut-group-name', t('Background Work')), mk('span', 'ut-group-n'));
-      bar.append(head, seenAllEl());
-      g.append(bar);
-      return g;
-    }
-    const head = mk('button', 'ut-group-head');
-    head.dataset.key = key;
-    head.title = t('Go to this session');
-    // THE RUNNING DOT (D1.7): only a real session key has one (not 'accounts')
-    if (key.includes(':')) { const dot = mk('span', 'ut-live-dot'); dot.dataset.key = key; dot.setAttribute('role', 'img'); head.append(dot); }
-    head.append(mk('span', 'ut-group-name'), mk('span', 'ut-group-n'), mk('span', 'ut-group-go', '→'));
-    bar.append(head, seenAllEl());
+  const bandEl = (band) => {
+    const g = mk('div', 'ut-band' + (band === PARKED ? ' ut-band-parked' : ''));
+    g.dataset.band = String(band);
+    const bar = mk('div', 'ut-band-bar');
+    bar.append(mk('span', 'ut-band-name'), mk('span', 'ut-band-n'));
+    if (band !== 1) bar.append(seenAllEl()); // 紧急 has no 「全部标为已看」
     g.append(bar);
     return g;
   };
-  // THE BOARD CHIP (design-user-inbox-reply §4 h, chunk 4): the session's own
-  // board state (vibespace-status) beside its name — the model reads the
-  // sidebar-tasks mixin's `_sessionStatuses` (boardOf: the record + its word);
-  // the panel only paints it.
-  const patchBoard = (head) => {
-    const key = head.dataset.key;
-    const b = key && key.includes(':') ? model.boardOf(key) : null;
-    const rec = b && b.rec, word = b ? b.word : '';
-    let chip = head.querySelector(':scope > .ut-board');
-    if (!word) { if (chip) chip.remove(); return; }
-    if (!chip) { chip = mk('span', 'ut-board'); head.insertBefore(chip, head.querySelector(':scope > .ut-group-n')); }
-    if (chip.dataset.state !== rec.state) chip.dataset.state = rec.state;
-    if (chip.textContent !== word) chip.textContent = word;
-    const why = b.why || ''; // an agent's words (or the cleared sentence, worded here) — a title PROPERTY, never markup
-    if (chip.title !== why) chip.title = why;
-  };
-  const patchBoards = () => {
-    if (popup.classList.contains('hidden') || tab !== 'inbox') return;
-    popup.querySelectorAll('.ut-group-bar > button.ut-group-head[data-key]').forEach(patchBoard);
+  /** The bands, keyed by data-band, in the list's order (PURE bandEntries over the held slots). */
+  const drawBands = (box, drawn) => {
+    const existing = new Map([...box.children].map((c) => [c.dataset.band, c]));
+    let prev = null;
+    for (const b of drawn) {
+      let g = existing.get(String(b.band));
+      if (g) existing.delete(String(b.band)); else g = bandEl(b.band);
+      const slot = prev ? prev.nextElementSibling : box.firstElementChild;
+      if (g !== slot) box.insertBefore(g, slot);
+      prev = g;
+      const bar = g.firstElementChild;
+      const nm = bar.querySelector(':scope > .ut-band-name');
+      const word = t(b.name); // a PURE table's English key — never item text
+      if (nm.textContent !== word) nm.textContent = word;
+      const n = bar.querySelector(':scope > .ut-band-n');
+      if (n.textContent !== String(b.openCount)) n.textContent = String(b.openCount);
+      bandOpen.set(String(b.band), b.openIds);
+      const sa = bar.querySelector(':scope > .ut-seen-all');
+      if (sa) { const show = b.openIds.length >= 2 ? '' : 'none'; if (sa.style.display !== show) sa.style.display = show; }
+      reconcileRows(g, b.entries.map((e) => ({ ...e, band: b.band })), bar);
+      // THE FOLD (decision 1): the band's folded open rows behind ONE head — after the shown rows, or in the bar when none show
+      let fe = g.querySelector('.ut-fold');
+      if (b.hidden) {
+        if (!fe) { fe = mk('button', 'ut-fold'); fe.type = 'button'; }
+        fe.dataset.band = String(b.band);
+        const words = t(FOLD_HEAD, { n: b.hidden });
+        if (fe.textContent !== words) fe.textContent = words;
+        const host = b.entries.length ? g : bar;
+        if (fe.parentNode !== host || host.lastElementChild !== fe) host.append(fe);
+      } else if (fe) fe.remove();
+    }
+    for (const g of existing.values()) { bandOpen.delete(g.dataset.band); g.remove(); }
   };
   // ── NOTICES BY ORIGIN (B-328d) ── the strip and the groups, keyed in place
   /** The filter strip, keyed by `data-origin`: `all` first, then one chip per
@@ -418,107 +429,36 @@ export function installUserTodos(app) {
     noticeFilter = origin || 'all';
     try { localStorage.setItem(NOTICE_FILTER_KEY, noticeFilter); } catch { }
   };
-  /** lane inbox-decision-group: the LLM plugin's section heads — 「现在要你」 above .ut-groups, 「待判断」 + its own
-   *  .ut-groups-pending after it (inbox-verify F4: the normal items no verdict sorted yet), then 「可以等」 + its own
-   *  .ut-groups-later; `sections` null (the switch off) ⇒ none of them exist (today's popup, node for node). */
-  const patchSections = (root, sections) => {
-    const gBox = root.querySelector(':scope > .ut-groups');
-    let nowHead = root.querySelector(':scope > .ut-sec-now'), laterHead = root.querySelector(':scope > .ut-sec-later'), later = root.querySelector(':scope > .ut-groups-later');
-    let pendHead = root.querySelector(':scope > .ut-sec-pending'), pending = root.querySelector(':scope > .ut-groups-pending');
-    if (!sections) { for (const el of [nowHead, pendHead, pending, laterHead, later]) if (el) el.remove(); return null; }
-    if (!nowHead) {
-      nowHead = mk('div', 'ut-sec-head ut-sec-now', t('Needs you now'));
-      nowHead.append(mk('span', 'ut-head-sub'));
-      pendHead = mk('div', 'ut-sec-head ut-sec-pending', t('Not judged yet'));
-      pending = mk('div', 'ut-groups ut-groups-pending');
-      laterHead = mk('div', 'ut-sec-head ut-sec-later', t('Can wait'));
-      later = mk('div', 'ut-groups ut-groups-later');
-      gBox.before(nowHead);
-      gBox.after(pendHead, pending, laterHead, later);
-    }
-    const sub = t('Sorted by the LLM plugin · {n} judged today', { n: todos.grouping.today || 0 });
-    const subEl = nowHead.querySelector(':scope > .ut-head-sub');
-    if (subEl.textContent !== sub) subEl.textContent = sub;
-    nowHead.style.display = sections.now.length || sections.pending.length || sections.later.length ? '' : 'none';
-    pendHead.style.display = sections.pending.length ? '' : 'none';
-    laterHead.style.display = sections.later.length ? '' : 'none';
-    return { pending, later };
-  };
   const renderPanel = () => {
-    if (popup.classList.contains('hidden')) { folds.clear(); noticeOrder = null; }
-    if (popup.classList.contains('hidden')) secHeld.clear();
+    if (popup.classList.contains('hidden')) { noticeOrder = null; bands = null; noticesOpen = false; }
     if (popup.classList.contains('hidden')) { layout = null; dropRows(); return; } // a closed popup holds no rows (hidePopup, verify r7)
     if (tab === 'history') { renderHistory(); return; }
     const root = ensureInbox();
-    // the groups in THE order (PURE sortGroups — Background Work last, worst
-    // urgency, newest; the For-you window orders by the same function)
+    const now = Date.now();
+    // THE NOTICES keep their append-only slots by the session-group layout (PURE sortGroups — the For-you window orders
+    // by the same function); STABLE ORDER WHILE OPEN (inc-mtw02kbq-kj96): a resolved row stays in its slot, dimmed with
+    // ↺, until the popup closes (the next open rebuilds it sorted).
     const gs = sortGroups(todos.open);
-    // STABLE ORDER WHILE OPEN (inc-mtw02kbq-kj96): while the popup is visible
-    // the layout is append-only — a resolved row stays in its slot, dimmed
-    // with ↺, until the popup closes (the next open rebuilds it sorted).
     layout = layout ? nextLayout(layout, todos) : openLayout(gs);
-    const inPlace = new Set(layout.groups.flatMap((g) => g.ids));
+    // THE ATTENTION LIST (lane foryou-folds): the bands' slots — the first 6 rows shown, the rest folded by band,
+    // append-only while open (PURE bandLayout / bandEntries over src/attention-model.js needsMe)
+    bands = bandLayout(todos, { now, prev: bands });
+    const drawn = bandEntries(bands, todos);
+    const inPlace = new Set([...layout.groups.flatMap((g) => g.ids), ...bands.bands.flatMap((b) => b.ids)]);
     const allRows = entriesFor(layout, todos).map((g) => [g.key, g.entries, g.openCount]);
-    // NOTICES (2.369.118): for-your-information rows leave their group for a
-    // section of their own under the asks — same append-only slots while open.
-    const { action: rows, notices } = splitNotices(allRows);
-    const openActions = badgeCounts(todos.open).action.length;
+    // NOTICES (2.369.118): for-your-information rows leave the list for a section of their own under the bands
+    const { notices } = splitNotices(allRows);
+    const openActions = badgeOf(todos.open, now).open.length;
     root.querySelector(':scope > .ut-title > .ut-head-sub').textContent = openActions ? t('{n} open', { n: openActions }) : t('all clear');
-    // groups, keyed by data-key — lane inbox-decision-group: with the LLM plugin's tray switch on (the snapshot's
-    // `grouping`) the same groups are drawn into three sections, 「现在要你」 (.ut-groups), 「待判断」 (.ut-groups-pending)
-    // and 「可以等」 (.ut-groups-later); a group's "Mark all seen" / fold there are keyed `pending|<key>` / `later|<key>` (data-fk)
-    const sections = todos.grouping ? inboxSections(rows, { prev: secHeld, now: Date.now() }) : null;
-    const boxes = patchSections(root, sections);
-    const drawGroups = (gBox, rows, pre) => {
-      const gExisting = new Map([...gBox.children].map((c) => [c.dataset.key, c]));
-      let gPrev = null;
-      for (const [key, entries, openCount] of rows) {
-        let g = gExisting.get(key);
-        if (g) gExisting.delete(key); else { g = groupEl(key); if (pre) g.dataset.fk = pre + key; }
-        const slot = gPrev ? gPrev.nextElementSibling : gBox.firstElementChild;
-        if (g !== slot) gBox.insertBefore(g, slot);
-        gPrev = g;
-        const bar = g.firstElementChild;
-        const head = bar.querySelector(':scope > .ut-group-head');
-        const n = head.querySelector(':scope > .ut-group-n');
-        if (n.textContent !== String(openCount)) n.textContent = String(openCount);
-        if (key !== 'jobs') {
-          const nm = head.querySelector(':scope > .ut-group-name');
-          const name = nameFor(key, entries.map((e) => e.item));
-          if (nm.textContent !== name) nm.textContent = name;
-          const dot = head.querySelector(':scope > .ut-live-dot');
-          if (dot) patchDot(dot);
-          patchBoard(head);
-        }
-        // "Mark all seen" (chunk 4): shown while the group holds ≥ 2 open asks
-        const openIds = entries.filter((e) => !e.resolved).map((e) => e.item.id);
-        groupOpen.set(pre + key, openIds);
-        const sa = bar.querySelector(':scope > .ut-seen-all');
-        const saShow = openIds.length >= 2 ? '' : 'none';
-        if (sa.style.display !== saShow) sa.style.display = saShow;
-        // THE FLOOD FOLD: > FOLD_MAX open rows ⇒ the newest show, the rest wait
-        // behind "{n} more…"; the last paint's shown/hidden sets keep every slot
-        const f = folds.get(pre + key) || { expanded: false, shown: null, hidden: null };
-        const fold = foldGroup(entries, { max: FOLD_MAX, expanded: f.expanded, prev: f.shown ? f : null });
-        folds.set(pre + key, { expanded: f.expanded, shown: new Set(fold.visible.map((e) => e.item.id)), hidden: new Set(fold.hidden.map((e) => e.item.id)) });
-        reconcileRows(g, fold.visible, bar);
-        let fe = g.querySelector(':scope > .ut-fold');
-        if (fold.hidden.length) {
-          if (!fe) { fe = mk('button', 'ut-fold'); fe.type = 'button'; }
-          const words = t('{n} more…', { n: fold.hidden.length });
-          if (fe.textContent !== words) fe.textContent = words;
-          if (g.lastElementChild !== fe) g.append(fe);
-        } else if (fe) fe.remove();
-      }
-      for (const g of gExisting.values()) g.remove();
-    };
-    if (sections) { drawGroups(root.querySelector(':scope > .ut-groups'), sections.now, ''); drawGroups(boxes.pending, sections.pending, 'pending|'); drawGroups(boxes.later, sections.later, 'later|'); }
-    else drawGroups(root.querySelector(':scope > .ut-groups'), rows, '');
-    root.querySelector(':scope > .ut-empty').style.display = rows.length ? 'none' : '';
-    // notices — grouped by ORIGIN behind the filter strip (B-328d)
+    drawBands(root.querySelector(':scope > .ut-bands'), drawn);
+    root.querySelector(':scope > .ut-empty').style.display = drawn.length ? 'none' : '';
+    // notices — a GREY COUNT that opens in one click (lane foryou-folds); open: grouped by ORIGIN behind the filter strip (B-328d)
     const nBox = root.querySelector(':scope > .ut-notices');
     nBox.style.display = notices.length ? '' : 'none';
-    nBox.querySelector(':scope > .ut-notice-head > .ut-head-sub').textContent = t('{n} for your information', { n: notices.filter((e) => !e.resolved).length });
+    const nHead = nBox.querySelector(':scope > .ut-notice-head');
+    nHead.querySelector(':scope > .ut-head-sub').textContent = t('{n} for your information', { n: notices.filter((e) => !e.resolved).length });
+    if (nHead.getAttribute('aria-expanded') !== String(noticesOpen)) nHead.setAttribute('aria-expanded', String(noticesOpen));
+    if (nBox.classList.contains('ut-notices-open') !== noticesOpen) nBox.classList.toggle('ut-notices-open', noticesOpen); // closed: the strip and the groups are not drawn (style.css)
     renderNotices(nBox, notices.map((e) => ({ item: e.item, resolved: e.resolved, notice: true })));
     // the recently-resolved tail (a row still holding its slot above is not listed twice)
     const recent = todos.resolved.filter((i) => !inPlace.has(i.id)).slice(0, 6);
@@ -615,9 +555,10 @@ export function installUserTodos(app) {
   const syncBadges = () => {
     badgeQueued = false;
     if (!app.wm?.windows || typeof app.wm.setInboxBadge !== 'function') return;
+    const now = Date.now();
     for (const winId of [...app.wm.windows.keys()]) {
       const keys = keysForWin(winId);
-      const b = keys ? inboxBadgeFor(todos.open, keys) : { count: 0, urgency: '' };
+      const b = keys ? inboxBadgeFor(todos.open, keys, now) : { count: 0, urgency: '' }; // lane foryou-folds: that conversation's rows in bands 1–4
       app.wm.setInboxBadge(winId, b.count ? b : null);
     }
   };
@@ -685,12 +626,12 @@ export function installUserTodos(app) {
   const togglePopup = (anchor) => {
     popup.classList.toggle('hidden');
     tab = 'inbox'; // default page on every open (user spec)
-    folds.clear(); // the fold state is per open, like the layout
+    bands = null; noticesOpen = false; // lane foryou-folds: the bands' slots and folds are per open, like the layout
     noticeOrder = null; // …and so is the notice groups' order (the FILTER is per device and stays)
     noticeFilter = readFilter(); // …read afresh from the device on every open (another tab may have chosen), then HELD (renderNotices)
     // a fresh open re-sorts (the layout is append-only only WHILE open) and
     // builds a fresh skeleton; a closed popup keeps nothing but the drafts
-    if (!popup.classList.contains('hidden')) { layout = null; popup.replaceChildren(); }
+    if (!popup.classList.contains('hidden')) { layout = null; popup.replaceChildren(); popup.scrollTop = 0; } // lane foryou-folds: an open starts at the FIRST screen (the persistent element kept the last open's scroll)
     renderPanel();
     // Anchor to the button's CURRENT position — customize mode can move it to
     // any bar, so the old fixed bottom-right CSS pointed nowhere.
@@ -769,13 +710,12 @@ export function installUserTodos(app) {
     showContextMenu(e.clientX, e.clientY, items);
   }
   popup.addEventListener('contextmenu', rowMenu);
-  // "Mark all seen" (chunk 4): ONE POST for the group's open asks (hidden rows
-  // included) ⇒ the store's setStatusMany ⇒ ONE broadcast ⇒ every row strikes
-  // IN PLACE (the slot law) and the badges recount; a failure is a toast.
+  // "Mark all seen" (chunk 4; lane foryou-folds: ONE BAND's): ONE POST for the band's open rows (folded ones included)
+  // ⇒ the store's setStatusMany ⇒ ONE broadcast ⇒ every row strikes IN PLACE (the slot law) and the badges recount; a
+  // failure is a toast.
   const markAllSeen = async (btnEl) => {
-    const gEl = btnEl.closest('.ut-group');
-    const key = gEl && (gEl.dataset.fk || gEl.dataset.key); // lane inbox-decision-group: a 「可以等」 group is `later|<key>`
-    const ids = (key && groupOpen.get(key)) || [];
+    const bEl = btnEl.closest('.ut-band');
+    const ids = (bEl && bandOpen.get(bEl.dataset.band)) || [];
     if (!ids.length || btnEl.dataset.busy === '1') return;
     btnEl.dataset.busy = '1'; btnEl.disabled = true;
     const r = await fetchJson('/api/user-todos/resolve-many', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids, status: 'dismissed' }) });
@@ -797,19 +737,17 @@ export function installUserTodos(app) {
       renderPanel();
       return;
     }
+    // THE FOLD (lane foryou-folds): 「还有 N 条 — 展开」 opens its band IN PLACE (the held slots gain the band's rows)
     const fb = e.target.closest('.ut-fold');
     if (fb) {
-      const gEl = fb.closest('.ut-group');
-      const k = gEl && (gEl.dataset.fk || gEl.dataset.key); // lane inbox-decision-group: 「可以等」 folds apart
-      const f = folds.get(k);
-      if (f) f.expanded = !f.expanded; else if (k) folds.set(k, { expanded: true, shown: null, hidden: null });
+      if (bands) bands = bandLayout(todos, { now: Date.now(), prev: bands, expand: Number(fb.dataset.band) });
       renderPanel();
       return;
     }
+    // the notices' grey count opens (and closes) the notices in place
+    if (e.target.closest('.ut-notice-head')) { noticesOpen = !noticesOpen; renderPanel(); return; }
     const sa = e.target.closest('.ut-seen-all');
     if (sa) { markAllSeen(sa); return; }
-    const head = e.target.closest('.ut-group-head');
-    if (head) { if (head.dataset.key) jump(head.dataset.key); return; }
     // A click on the detail expander is a toggle, not a jump — without this
     // guard opening the detail would bubble into the row's jump-and-close.
     if (e.target.closest('.ut-detail-exp')) return;
@@ -942,15 +880,18 @@ export function installUserTodos(app) {
   const apply = (next) => {
     const prevKnown = knownIds;
     todos = next || { open: [], resolved: [] };
-    rowCtx.grouping = !!todos.grouping; // lane inbox-decision-group: a judged row's chip shows only while the sections are drawn
     // Toast genuinely NEW items — click one to jump. Known ids include the
     // resolved tail, so a user reopening an item doesn't get toasted for their
     // own action. The knownIds closure survives reconnects, so a resync after
     // an offline gap toasts exactly the items that arrived meanwhile (the
     // toast stack self-caps at 4).
     if (prevKnown) {
+      const now = Date.now();
       for (const i of todos.open) {
         if (prevKnown.has(i.id)) continue;
+        // lane foryou-folds (design q-044 §2): only an arrival in band 1 or 2 (urgent, someone waiting) raises a toast and
+        // blinks the button — every other one moves a number (39 toasts a day ⇒ about 3)
+        if (!toastWorthy(attentionRow(i, now))) continue; // (the panel's own `rowOf` is a DOM helper — the attention row is imported under its own name)
         // lane S3: the toast says WHERE the tray is ("Added to For you (bottom
         // right)") — measured off this device's own button, once per item
         const where = trayWhere(trayRect(), window.innerWidth, window.innerHeight);
@@ -984,11 +925,10 @@ export function installUserTodos(app) {
   // the first fetch live in src/lib/user-todos-actions.js; this surface paints):
   // every snapshot ⇒ apply; the live facts (D1.7: the session list's own
   // broadcast) ⇒ the running dot and the reply controls patched in place, rows
-  // never re-rendered for it; the board statuses (chunk 4, told a microtask after
-  // the sidebar-tasks mixin stored them) ⇒ chips only, never a row
+  // never re-rendered for it (lane foryou-folds: the board chips left with the group heads — a blocked board now PLACES
+  // the row, in band 2)
   model.on('todos', (next) => apply(next));
   model.on('live', () => { patchLive(); scheduleBadges(); });
-  model.on('status', () => patchBoards());
   if (model.loaded) apply(model.todos); // a model built before this surface (the window opened first) already holds a snapshot
   // A toast fired while the history page is open → live-refresh it
   // (and on the inbox page the Notifications tab's unread count ticks up in place)

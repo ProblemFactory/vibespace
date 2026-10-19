@@ -3,6 +3,9 @@
 // it is open (inc-mtw02kbq-kj96: a ✓ re-rendered the list, the resolved row left
 // its group, the rows below slid up under the pointer, and the next rapid click
 // hit the wrong item). PURE src/lib/user-todos-layout.js + a wiring pin.
+// ⑨ ⑩ ㉑ ⑬ (lane foryou-folds, design q-044): the tray is THE ATTENTION LIST — five bands + 搁置, the first 6 rows,
+// folds BY BAND (PURE bandLayout / bandEntries over src/attention-model.js), 「全部标为已看」 per band, the LLM sections
+// and the per-group flood fold retired, a plugin's reminder heading band 2.
 // ⑪ (B-328d): notices by ORIGIN — the closed producer set (src/inbox-origin.js),
 // the legacy read-time rung, groups / chips / tab counts, the HELD filter (r2),
 // the store's origin field (REQUIRED since r2 — a filing naming none throws),
@@ -56,7 +59,7 @@ console.log('④ WIRING PIN: the panel uses the layout while the popup is visibl
 const panel = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-panel.js'), 'utf8');
 ok(/from '\.\/user-todos-layout\.js'/.test(panel), 'the panel imports the PURE layout');
 ok(/if \(popup\.classList\.contains\('hidden'\)\) \{ layout = null; dropRows\(\); return; \}/.test(panel) && /\n\s*layout = layout \? nextLayout\(layout, todos\) : openLayout\(gs\);/.test(panel), 'visible ⇒ nextLayout/openLayout; hidden ⇒ the layout is dropped so the next open re-sorts (and, lane-redact verify r7, the rows with it — a closed popup holds none)');
-ok(/if \(!popup\.classList\.contains\('hidden'\)\) \{ layout = null; popup\.replaceChildren\(\); \}/.test(panel), '…and every OPEN starts from a fresh sorted layout (a close by Esc / outside tap never ran renderPanel, so the old layout used to survive into the next open)');
+ok(/if \(!popup\.classList\.contains\('hidden'\)\) \{ layout = null; popup\.replaceChildren\(\); popup\.scrollTop = 0; \}/.test(panel), '…and every OPEN starts from a fresh sorted layout — at the top (lane foryou-folds: the first screen) (a close by Esc / outside tap never ran renderPanel, so the old layout used to survive into the next open)');
 ok(/entriesFor\(layout, todos\)/.test(panel) && /ut-item-inplace/.test(fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-row.js'), 'utf8')), 'rows are rendered from the layout, a resolved one in place with the ut-item-inplace class (THE row renderer)');
 ok(/todos\.resolved\.filter\(\(i\) => !inPlace\.has\(i\.id\)\)/.test(panel), 'the "Recently resolved" tail skips rows still holding their slot above');
 
@@ -78,7 +81,7 @@ console.log('⑤ NOTICES (2.369.118, owner: spend notices are DISTRACTING beside
   const store = fs.readFileSync(path.join(ROOT, 'src/user-todos.js'), 'utf8');
   ok(/const KINDS = \['action', 'notice'\]/.test(store) && /kind must be one of/.test(store) && /kind: kind \|\| 'action'/.test(store), 'the store validates kind and defaults it to action');
   const panel = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-panel.js'), 'utf8');
-  ok(/import \{[^}]*splitNotices, badgeCounts[^}]*\} from '\.\/user-todos-layout\.js'/.test(panel) && /badgeCounts\(todos\.open\)/.test(panel) && /splitNotices\(allRows\)/.test(panel) && /ut-seg-notice/.test(panel) && /ut-notice-head/.test(panel), 'the panel counts the badge with badgeCounts and renders the notice section from splitNotices');
+  ok(/import \{[^}]*splitNotices, badgeOf[^}]*\} from '\.\/user-todos-layout\.js'/.test(panel) && /const \{ action, notices \} = badgeOf\(todos\.open, Date\.now\(\)\);/.test(panel) && /splitNotices\(allRows\)/.test(panel) && /ut-seg-notice/.test(panel) && /ut-notice-head/.test(panel), 'the panel counts the badge with badgeOf (lane foryou-folds: the attention list\'s bands 1–4 + the grey notices) and renders the notice section from splitNotices');
   const guard = fs.readFileSync(path.join(ROOT, 'src/server/spend-guard.js'), 'utf8');
   ok(/sessionName: 'Spending', kind: 'notice'/.test(guard), "spend-guard's inbox item is declared a notice at the producer");
   const ask = fs.readFileSync(path.join(ROOT, 'data/bin/vibespace-ask'), 'utf8');
@@ -177,7 +180,7 @@ console.log('⑧ THE MINI INBOX (design-user-inbox-reply §3, chunk 3) — one s
   const win = fs.readFileSync(path.join(ROOT, 'src/lib/window.js'), 'utf8');
   const tg = fs.readFileSync(path.join(ROOT, 'src/lib/tab-group.js'), 'utf8');
   const appSrc = fs.readFileSync(path.join(ROOT, 'src/lib/app.js'), 'utf8');
-  ok(/inboxBadgeFor\(todos\.open, keys\)/.test(panel) && /app\.wm\.setInboxBadge\(/.test(panel), 'wiring: the panel counts through inboxBadgeFor and hands the result to wm.setInboxBadge');
+  ok(/inboxBadgeFor\(todos\.open, keys, now\)/.test(panel) && /app\.wm\.setInboxBadge\(/.test(panel), 'wiring: the panel counts through inboxBadgeFor (lane foryou-folds: with `now` — that conversation\'s rows in bands 1–4) and hands the result to wm.setInboxBadge');
   ok(/miniInboxEntries\(mini\.layout, todos, mini\.keys\)/.test(panel) && /reconcileRows\(mini\.rows, entries, null, miniCtx\)/.test(panel), 'wiring: the popover lays out through miniInboxEntries and reconciles through THE row renderer');
   ok(/createPopover\(anchor, 'ut-mini-popover'\)/.test(panel), 'wiring: the popover is a createPopover (data-popover ⇒ the layered Escape)');
   ok(/if \(mini\) return; \/\/ the mini inbox lives in this session's own window/.test(panel), 'wiring: a row click in the popover never jumps');
@@ -188,65 +191,83 @@ console.log('⑧ THE MINI INBOX (design-user-inbox-reply §3, chunk 3) — one s
   ok(/this\._syncInboxBadges\?\.\(\)/.test(appSrc), 'app.js recounts on every window change (a window opened / closed / re-tabbed gets its badge)');
 }
 
-console.log('⑨ FLOOD FOLDING (design-user-inbox-reply §4 d, chunk 4) — PURE foldGroup: only the newest 5 open rows show; folding HIDES, never moves');
+console.log('⑨ THE BAND FOLD (lane foryou-folds, design q-044 decisions 1 + 6) — PURE bandLayout / bandEntries: the first 6 rows show, the rest fold BY BAND; folding HIDES, never moves');
 {
   const L = await import(path.join(ROOT, 'src/lib/user-todos-layout.js'));
-  ok(typeof L.foldGroup === 'function' && L.FOLD_MAX === 5, 'the layout exports foldGroup + FOLD_MAX = 5');
-  const fg = L.foldGroup || (() => ({ visible: [], hidden: [] }));
-  // a group's entries in LAYOUT order (the store sorts newest first within a tier)
-  const E = (n, resolvedAt = []) => Array.from({ length: n }, (_, k) => ({ item: it('r' + k, 'S', { createdAt: 1000 - k }), resolved: resolvedAt.includes(k) }));
-  const ids = (xs) => xs.map((e) => e.item.id + (e.resolved ? '✓' : ''));
-  const vh = (r) => [ids(r.visible), ids(r.hidden)];
-  eq(vh(fg(E(5), { max: 5 })), [['r0', 'r1', 'r2', 'r3', 'r4'], []], '5 open ⇒ nothing hidden');
-  eq(vh(fg(E(6), { max: 5 })), [['r0', 'r1', 'r2', 'r3', 'r4'], ['r5']], '6 open ⇒ the oldest (r5) hidden, the newest 5 visible in layout order');
-  {
-    const r = fg(E(53, [1, 3, 5]), { max: 5 });
-    eq(ids(r.visible), ['r0', 'r1✓', 'r2', 'r3✓', 'r4', 'r5✓', 'r6', 'r7'], '50 open + 3 resolved-in-place among the newest ⇒ the resolved rows keep their slots between the 5 newest open rows');
-    eq([r.hidden.length, r.hidden.filter((e) => !e.resolved).length], [45, 45], '…hidden = the 45 older open rows');
-  }
-  {
-    const r = fg(E(53, [1, 3, 50]), { max: 5 });
-    eq([r.visible.length, r.hidden.filter((e) => e.resolved).map((e) => e.item.id)], [7, ['r50']], 'a resolved row among the OLDER rows is hidden with them');
-  }
-  eq(vh(fg(E(8), { max: 5, expanded: true })), [['r0', 'r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7'], []], 'expanded ⇒ everything, in layout order');
-  eq(vh(fg(E(9, [0, 1, 2, 3, 4, 5, 6, 7, 8]), { max: 5 })), [['r0✓', 'r1✓', 'r2✓', 'r3✓', 'r4✓', 'r5✓', 'r6✓', 'r7✓', 'r8✓'], []], 'a resolved-only group ⇒ nothing folded');
-  eq(vh(fg([], { max: 5 })), [[], []], 'an empty group ⇒ nothing');
-  eq(vh(fg(E(7))), [['r0', 'r1', 'r2', 'r3', 'r4'], ['r5', 'r6']], 'max defaults to FOLD_MAX (5)');
-  console.log('   the slot law while the popup is open (`prev` = what the last paint showed / hid)');
-  {
-    const first = fg(E(30), { max: 5 });
-    const prev = { shown: new Set(first.visible.map((e) => e.item.id)), hidden: new Set(first.hidden.map((e) => e.item.id)) };
-    // ✓ on r1 (visible): r1 stays in its slot, the next open row (r5) is revealed BELOW
-    const r1 = fg(E(30, [1]), { max: 5, prev });
-    eq(ids(r1.visible), ['r0', 'r1✓', 'r2', 'r3', 'r4', 'r5'], 'a ✓ on a visible row keeps it in its slot; the next older open row appears below it (nothing above moves)');
-    // Mark all seen: every row resolved ⇒ the shown rows stay, the hidden (now resolved) rows stay hidden
-    const all = fg(E(30, Array.from({ length: 30 }, (_, k) => k)), { max: 5, prev });
-    eq([ids(all.visible), all.hidden.length], [['r0✓', 'r1✓', 'r2✓', 'r3✓', 'r4✓'], 25], "'Mark all seen' on a folded group: the 5 shown rows strike in place, the 25 resolved-while-hidden rows stay folded (they do not flood out below)");
-    // a reopen above the cut must not push a shown row out from under the pointer
-    const re = fg(E(30, [1]), { max: 5, prev: { shown: new Set(['r0', 'r1', 'r2', 'r3', 'r4', 'r5']), hidden: new Set() } });
-    eq(ids(re.visible), ['r0', 'r1✓', 'r2', 'r3', 'r4', 'r5'], 'a row the last paint showed is never hidden again while the popup is open');
-    const back = fg(E(30), { max: 5, prev: { shown: new Set(['r0', 'r1', 'r2', 'r3', 'r4', 'r5']), hidden: new Set() } });
-    eq(ids(back.visible), ['r0', 'r1', 'r2', 'r3', 'r4', 'r5'], '…even when a ↺ makes it the 6th open row');
-    // an arrival while open appends at the end of the group (nextLayout) ⇒ it joins the fold, it never displaces a shown row
-    const arr = [...E(30), { item: it('new', 'S', { createdAt: 5000 }), resolved: false }];
-    const a = fg(arr, { max: 5, prev });
-    eq([ids(a.visible), a.hidden.length, (a.hidden[a.hidden.length - 1] || { item: {} }).item.id], [['r0', 'r1', 'r2', 'r3', 'r4'], 26, 'new'], 'an arrival while open joins the fold count ("26 more…") instead of pushing a shown row out');
-  }
+  const NOW = Date.UTC(2026, 9, 19, 12), H = 3600e3, D = 24 * H;
+  // 30 band-5 asks of 11 conversations (the production shape's open set, by SHAPE), newest first r0…r29, one an hour
+  const asks = Array.from({ length: 30 }, (_, k) => it('r' + k, 'claude:s' + (k % 11), { createdAt: NOW - (k + 1) * H }));
+  const todos = (open, resolved = []) => ({ open, resolved });
+  const view = (lay, td) => L.bandEntries(lay, td).map((b) => [b.band, b.entries.map((e) => e.item.id + (e.resolved ? '✓' : '')), b.hidden]);
+  const shown6 = ['r0', 'r1', 'r2', 'r3', 'r4', 'r5'];
+  let td = todos(asks);
+  let lay = L.bandLayout(td, { now: NOW });
+  eq(view(lay, td), [[5, shown6, 24]], 'a fresh open: the first 6 rows show (newest first), the other 24 fold behind ONE band head — never 11 group folds');
+  // a ✓ on a visible row: it keeps its slot (dimmed), nothing slides in from the fold
+  td = todos(asks.filter((i) => i.id !== 'r2'), [{ ...asks[2], status: 'done' }]);
+  lay = L.bandLayout(td, { now: NOW, prev: lay });
+  eq(view(lay, td), [[5, ['r0', 'r1', 'r2✓', 'r3', 'r4', 'r5'], 24]], 'a ✓ on a shown row keeps it in its slot (struck); the fold still holds 24 — nothing moves under the pointer');
+  // ↺ brings it back in place
+  td = todos(asks);
+  lay = L.bandLayout(td, { now: NOW, prev: lay });
+  eq(view(lay, td), [[5, shown6, 24]], '↺ reopens it in the same slot');
+  // an arrival while open joins the fold that exists ("25 more") instead of pushing a shown row out
+  const fresh = it('new', 'claude:s3', { createdAt: NOW });
+  td = todos([fresh, ...asks]);
+  lay = L.bandLayout(td, { now: NOW, prev: lay });
+  eq(view(lay, td), [[5, shown6, 25]], 'an arrival while open joins its band\'s fold (25 more) — a shown row is never displaced');
+  // an URGENT arrival shows at once (band 1 never folds), a band of its own above
+  const urg = it('u', 'claude:s4', { urgency: 'urgent', createdAt: NOW });
+  td = todos([urg, fresh, ...asks]);
+  lay = L.bandLayout(td, { now: NOW, prev: lay });
+  eq(view(lay, td).map(([b, e, h]) => [b, e.length, h]), [[1, 1, 0], [5, 6, 25]], 'an URGENT arrival shows at once in band 1 (band 1 never folds)');
+  // "Mark all seen" on band 5: the 6 shown rows strike in place; the 25 resolved-while-folded stay folded (no flood below)
+  const all = [fresh, ...asks];
+  td = todos([urg], all.map((i) => ({ ...i, status: 'dismissed' })));
+  lay = L.bandLayout(td, { now: NOW, prev: lay });
+  eq(view(lay, td), [[1, ['u'], 0], [5, shown6.map((x) => x + '✓'), 0]], '「全部标为已看」 on a folded band: the shown rows strike in place, the folded ones stay folded (the fold head goes: 0 open left behind it)');
+  // EXPAND: the band's folded rows show IN PLACE, in the list's order, and the fold is gone
+  td = todos([fresh, ...asks]);
+  lay = L.bandLayout(td, { now: NOW });
+  lay = L.bandLayout(td, { now: NOW, prev: lay, expand: 5 });
+  const ex = L.bandEntries(lay, td)[0];
+  ok(ex.hidden === 0 && ex.entries.length === 31 && ex.entries.slice(0, 6).map((e) => e.item.id).join() === ['new', ...shown6.slice(0, 5)].join(), 'expand ⇒ every row of the band in its order, the first screen\'s rows where they were — the fold head is gone', ex.entries.slice(0, 7).map((e) => e.item.id));
+  // 搁置: an ask nobody answered in 7 days folds into the tail, its count always shown; a re-ask brings it back to band 5
+  const old = it('old', 'claude:s9', { createdAt: NOW - 8 * D });
+  td = todos([old, ...asks.slice(0, 3)]);
+  lay = L.bandLayout(td, { now: NOW });
+  eq(view(lay, td), [[5, ['r0', 'r1', 'r2'], 0], [6, [], 1]], '7 days unanswered ⇒ 搁置 at the tail: never on the first screen, its count shown (folded whole) — never deleted');
+  td = todos([{ ...old, reasks: 1, reaskedAt: NOW - 60e3 }, ...asks.slice(0, 3)]);
+  lay = L.bandLayout(td, { now: NOW });
+  eq(view(lay, td), [[5, ['old', 'r0', 'r1', 'r2'], 0]], 'a re-ask ⇒ back in band 5, at its top (the newest ask)');
+  // the badge counts bands 1–4 only (+ the grey notices); the mini inbox badge with `now` likewise
+  const opt = it('o', 'claude:s1', { options: ['A', 'B'], createdAt: NOW - 3 * H });
+  const notice = it('nt', 'claude:s1', { kind: 'notice', createdAt: NOW - H });
+  const bo = L.badgeOf([urg, opt, notice, ...asks], NOW);
+  ok(bo.action.map((i) => i.id).join() === 'u,o' && bo.notices === 1 && bo.open.length === 32, 'badgeOf: bands 1–4 (the urgent + the decision) colour the badge, the grey count is the notice; the 30 band-5 asks only grow the list', { action: bo.action.map((i) => i.id), notices: bo.notices, open: bo.open.length });
+  eq(L.inboxBadgeFor([opt, notice, ...asks], ['claude:s1'], NOW), { count: 1, urgency: 'normal' }, 'inboxBadgeFor with `now`: that conversation\'s rows in bands 1–4 (its decision), not its 3 band-5 asks');
+  eq(L.inboxBadgeFor([opt, notice, ...asks], ['claude:s1']), { count: 4, urgency: 'normal' }, '…and without `now` (an older caller) every open action row, as before');
   const panel = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-panel.js'), 'utf8');
-  ok(/import \{[^}]*\bfoldGroup\b[^}]*\} from '\.\/user-todos-layout\.js'/.test(panel) && /foldGroup\(entries, \{ max: FOLD_MAX, expanded: /.test(panel), 'wiring: the panel folds every group through foldGroup');
-  ok(/'ut-fold'/.test(panel) && /t\('\{n\} more…', \{ n: fold\.hidden\.length \}\)/.test(panel), "wiring: the expander row is .ut-fold worded '{n} more…' with the hidden count");
-  ok(/reconcileRows\(g, fold\.visible, bar\)/.test(panel), 'wiring: only the visible rows are reconciled into the group');
-  ok(/folds = new Map\(\)/.test(panel) && (panel.match(/folds\.clear\(\)/g) || []).length >= 2, 'wiring: the fold state lives in the panel only while open (cleared on close and on every open)');
+  ok(/import \{[^}]*\bbandLayout, bandEntries\b[^}]*\} from '\.\/user-todos-layout\.js'/.test(panel) && /bands = bandLayout\(todos, \{ now, prev: bands \}\);/.test(panel) && /const drawn = bandEntries\(bands, todos\);/.test(panel), 'wiring: the panel holds the bands\' slots through bandLayout (prev while open) and draws bandEntries');
+  ok(/'ut-fold'/.test(panel) && /const words = t\(FOLD_HEAD, \{ n: b\.hidden \}\);/.test(panel) && /bands = bandLayout\(todos, \{ now: Date\.now\(\), prev: bands, expand: Number\(fb\.dataset\.band\) \}\);/.test(panel), "wiring: the fold is .ut-fold worded FOLD_HEAD ('{n} more — expand') with the band's folded count; a click expands THAT band in place");
+  ok(/reconcileRows\(g, b\.entries\.map\(\(e\) => \(\{ \.\.\.e, band: b\.band \}\)\), bar\);/.test(panel), 'wiring: only the shown rows are reconciled into the band (keyed, patched in place), each marked a band row');
+  ok((panel.match(/bands = null/g) || []).length >= 2, 'wiring: the bands\' slots live only while the popup is open (dropped on close and on every open)');
+  // the toast rule reads the ATTENTION row — the panel's own `rowOf` is a DOM helper (`el.closest('.ut-item')`), and an
+  // import under that name was shadowed inside installUserTodos: every arrival read as no row ⇒ no toast at all (the
+  // chrome suite caught it); the import carries its own name
+  ok(/import \{ rowOf as attentionRow, toastWorthy[^}]*\} from '\.\.\/attention-model\.js'/.test(panel) && /if \(!toastWorthy\(attentionRow\(i, now\)\)\) continue;/.test(panel) && /const rowOf = \(el\) => el && el\.closest/.test(panel),
+    'wiring: an arrival toasts only in bands 1–2 — toastWorthy(attentionRow(item)), the attention row imported under its own name (the panel\'s rowOf is a DOM helper)');
 }
 
-console.log('⑩ MARK ALL SEEN + THE BOARD CHIP (chunk 4) — wiring');
+console.log('⑩ MARK ALL SEEN (chunk 4; lane foryou-folds: one band) — wiring');
 {
   const panel = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-panel.js'), 'utf8');
   ok(/'ut-seen-all'/.test(panel) && /'\/api\/user-todos\/resolve-many'/.test(panel) && /status: 'dismissed'/.test(panel), "the group head's 'Mark all seen' POSTs /api/user-todos/resolve-many with status dismissed");
   ok(/Could not update \{n\} items: \{why\}/.test(panel), 'a failed mark-all reaches the user as a toast naming the reason');
   const acts = fs.existsSync(path.join(ROOT, 'src/lib/user-todos-actions.js')) ? fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-actions.js'), 'utf8') : '';
-  ok(/'ut-board'/.test(panel) && /_sessionStatuses/.test(acts) && /model\.boardOf\(key\)/.test(panel) && /msg\.type === 'session-status-updated' && msg\.statuses\) queueMicrotask\(\(\) => emit\('status'\)\)/.test(acts) && /model\.on\('status', \(\) => patchBoards\(\)\);/.test(panel),
-    'the board chip reads app.sidebar._sessionStatuses (the model\'s boardOf) and is patched on session-status-updated (the model\'s `status` event, a microtask after the broadcast)');
+  ok(/_sessionStatuses/.test(acts) && /msg\.type === 'session-status-updated' && msg\.statuses\) queueMicrotask\(\(\) => emit\('status'\)\)/.test(acts) && !/'ut-board'/.test(panel) && !/model\.on\('status'/.test(panel),
+    'the board chip left the tray with the group heads (lane foryou-folds — a blocked board now PLACES the row, in band 2); the model still reads app.sidebar._sessionStatuses for the For-you window');
+  ok(/const ids = \(bEl && bandOpen\.get\(bEl\.dataset\.band\)\) \|\| \[\];/.test(panel) && /if \(band !== 1\) bar\.append\(seenAllEl\(\)\);/.test(panel), "lane foryou-folds: 'Mark all seen' acts on ONE band (its open rows, folded ones included) — and 紧急 has none");
   ok(L_BOARD_OK(acts), "the chip's words are t()'d board states (needs input / blocked / review / working)");
 }
 function L_BOARD_OK(src) { return ["t('needs input')", "t('blocked')", "t('review')", "t('working')"].every((k) => src.includes(k)); }
@@ -625,7 +646,7 @@ console.log('⑪ NOTICES BY ORIGIN (B-328d) — the closed producer set, the leg
   ok(/patchChips\(nBox\.querySelector\(':scope > \.ut-chips'\), noticeChips\(entries, \{ prev: noticeOrder \}\), noticeFilter\);/.test(panel) && (panel.match(/noticeFilterFor\(/g) || []).length === 1, '…the strip marks the HELD filter (the one call of noticeFilterFor is the hold — no second derivation that could disagree)');
   ok(/noticeFilter = readFilter\(\); \/\/ …read afresh from the device on every open/.test(panel), '…read afresh from the device on every open (then held)');
   ok(/if \(tb\) \{ if \(tb\.dataset\.tab !== tab\) \{ tab = tb\.dataset\.tab; renderPanel\(\); \} return; \}/.test(panel) && !/popup\.replaceChildren\(tabsEl\(\)/.test(panel), 'a tab click switches the PAGE; the tabs are never rebuilt (no replaceChildren(tabsEl(), …))');
-  ok(/const c = tabCounts\(todos\.open, getToastHistory\(\), histSeen\(\)\);/.test(panel) && /ut-tab-n\[data-n="\$\{k\}"\]/.test(panel), 'the tab counts come from tabCounts and patch keyed `.ut-tab-n[data-n]` spans');
+  ok(/const c = tabCounts\(todos\.open, getToastHistory\(\), histSeen\(\), now\);/.test(panel) && /ut-tab-n\[data-n="\$\{k\}"\]/.test(panel), 'the tab counts come from tabCounts (lane foryou-folds: with `now` — the Inbox tab = the badge\'s bands 1–4) and patch keyed `.ut-tab-n[data-n]` spans');
   ok(/window\.addEventListener\('vs-toast', \(\) => \{ if \(popup\.classList\.contains\('hidden'\)\) return; if \(tab === 'history'\) renderPanel\(\); else patchTabs\(\); \}\);/.test(panel), 'a toast patches the Notifications count in place (or refreshes the page being read)');
   ok(/markHistorySeen\(\); \/\/ the page is being LOOKED AT/.test(panel) && /if \(histSeen\(\) == null\) markHistorySeen\(\);/.test(panel), 'showing the Notifications page stamps the last look; a device that never looked is stamped at install');
   ok(/btn\.title = actionWords\(action\)/.test(panel) && /const words = actionWords\(action\); \/\/ the taskbar badge's own sentence/.test(panel), 'the Inbox tab\'s count and the taskbar badge share ONE sentence (actionWords)');
@@ -820,98 +841,33 @@ console.log('lane-pairing naive-user N-ask: an exit ask\'s Allow / Deny are thei
   finally { for (const [k, v] of Object.entries(had)) { if (v === undefined) delete globalThis[k]; else globalThis[k] = v; } }
 }
 
-console.log("㉑ THE DECISION API'S TRAY SECTIONS (lane inbox-decision-group) — PURE sections + chip, the panel's wiring, off = today's DOM");
+console.log("㉑ THE LLM PLUGIN'S TRAY SECTIONS ARE RETIRED (lane foryou-folds, design q-044 decision 3) — the judge breaks a band-5 tie, the tray draws the bands");
 {
   const L = await import(path.join(ROOT, 'src/lib/user-todos-layout.js'));
-  const it = (id, o = {}) => ({ id, sessionKey: o.sk || 'claude:a', urgency: 'normal', status: 'open', createdAt: 1, ...o });
-  const J = (group, p = 0.8) => ({ judged: { group, p, at: 1, v: 1 } });
-  // inbox-verify F3/F4: an item that asks for a decision (options / buttons) is never 'can wait', and a normal item the
-  // judge has not scored yet stands in 「待判断」 — not judged is not 'can wait'
-  const table = [[it('a'), 'pending'], [it('b', { urgency: 'high' }), 'now'], [it('c', { urgency: 'urgent' }), 'now'], [it('d', J('now')), 'now'], [it('e', J('later')), 'later'],
-    [it('f', { urgency: 'low', ...J('now') }), 'later'], [it('g', { options: ['A', 'B'], ...J('now') }), 'now'], [it('h', { action: { type: 'x' }, ...J('now') }), 'now'], [it('i', { judged: { group: null, v: 1 } }), 'pending'],
-    [it('g2', { options: ['Allow', 'Deny'] }), 'now'], [it('h2', { action: { type: 'x' }, ...J('later') }), 'now'], [it('l'), 'pending'], [it('m', { urgency: 'low' }), 'later'], [it('r', { reply: { text: 'ok' } }), 'later']];
-  const bad = table.filter(([i, want]) => L.inboxSectionOf(i) !== want);
-  ok(!bad.length, 'inboxSectionOf: urgent / high and every item with options / buttons in 「现在要你」; a NORMAL option-less item by its verdict, 「待判断」 until one exists; low / answered wait', bad.map(([i, w]) => [i.id, w, L.inboxSectionOf(i)]));
-  {   // RED CONTROL (F3/F4): the base rule (5a9119e99) drew an Allow item and an unscored item in 「可以等」 — this table reads it red
-    const src = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-layout.js'), 'utf8');
-    const fixed = "export function inboxSectionOf(item, now = 0) { return inboxPlace(item, now).section; }";
-    const pre = src.replace(fixed, "export function inboxSectionOf(item, now = 0) { const c = inboxChip(item, now); return c && c.group === 'now' ? 'now' : 'later'; }");
-    ok(pre !== src, 'CONTROL (F3/F4): the base rule patches in');
-    const { pathToFileURL } = await import('node:url');
-    const { mutantCopies } = await import(path.join(ROOT, 'scripts/mutant-copy.mjs'));
-    const MB = mutantCopies('ut-sec', ROOT);
-    const Lb = await import(pathToFileURL(MB.write('src/lib/user-todos-layout.js', pre, 'basef3')).href);
-    const badB = table.filter(([i, want]) => Lb.inboxSectionOf(i) !== want).map(([i]) => i.id);
-    ok(['a', 'g', 'g2', 'h2', 'l'].every((x) => badB.includes(x)), 'CONTROL (F3/F4): the base rule puts an Allow / option item and an unscored item in 「可以等」 — the legs above go red on it', badB);
-  }
-  ok(L.inboxChip(it('d', J('now', 0.91))).group === 'now' && L.inboxChip(it('b', { urgency: 'high', ...J('now') })) === null && L.inboxChip(it('a')) === null, 'inboxChip: only a judged normal option-less item carries one');
-  const rows = [['claude:a', [{ item: it('a1'), resolved: false }, { item: it('a2', J('now')), resolved: false }, { item: it('a3', { urgency: 'high' }), resolved: true }]], ['claude:b', [{ item: it('b1', { sk: 'claude:b' }), resolved: false }]]];
-  const held = new Map();
-  const s1 = L.inboxSections(rows, { prev: held });
-  eq(s1.now.map(([k, e, n]) => [k, e.map((x) => x.item.id), n]), [['claude:a', ['a3', 'a2'], 1]], 'inboxSections: 「现在要你」 in THE PURE RANK\'s order (a high item before a judged ask — lane decision-inbox-rank), openCount recounted');
-  eq(s1.pending.map(([k, e, n]) => [k, e.map((x) => x.item.id), n]), [['claude:a', ['a1'], 1], ['claude:b', ['b1'], 1]], 'inboxSections: 「待判断」 (not scored yet) — a session group may stand in more than one section');
-  eq(s1.later, [], 'inboxSections: 「可以等」 holds only what a verdict (or low / answered) put there');
-  const rows2 = [['claude:a', [{ item: it('a1', J('now')), resolved: false }, ...rows[0][1].slice(1)]], rows[1]];
-  const s2 = L.inboxSections(rows2, { prev: held });
-  ok(s2.pending.some(([, e]) => e.some((x) => x.item.id === 'a1')), 'THE SLOT LAW: a row judged while the popup is open stays in the section it was first drawn in (held per open)');
-  ok(L.inboxSections(rows2).now.some(([, e]) => e.some((x) => x.item.id === 'a1')), '…and the next open (a fresh hold) draws it in 「现在要你」');
+  const gone = ['inboxSections', 'inboxSectionOf', 'inboxChip', 'INBOX_SECTIONS', 'trayRank', 'traySectionOf', 'foldGroup', 'FOLD_MAX'].filter((k) => k in L);
+  ok(!gone.length, 'the layout exports none of the retired verdicts (the three sections, their chip, the old pin\'s rank, the per-group flood fold)', gone);
   const panel = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-panel.js'), 'utf8');
-  ok(/const sections = todos\.grouping \? inboxSections\(rows, \{ prev: secHeld, now: Date\.now\(\) \}\) : null;/.test(panel) && /else drawGroups\(root\.querySelector\(':scope > \.ut-groups'\), rows, ''\);/.test(panel), 'wiring: the panel draws sections ONLY while the snapshot carries `grouping`; off ⇒ the one .ut-groups pass of today');
-  ok(/if \(!sections\) \{ for \(const el of \[nowHead, pendHead, pending, laterHead, later\]\) if \(el\) el\.remove\(\); return null; \}/.test(panel), 'wiring: the switch going off removes every section node (today\'s DOM, node for node)');
-  ok((panel.match(/gEl\.dataset\.fk \|\| gEl\.dataset\.key/g) || []).length === 2 && /groupOpen\.set\(pre \+ key, openIds\)/.test(panel), 'wiring: a 「可以等」 group\'s Mark all seen / fold are keyed apart (later|<key>) — never the 「现在要你」 twin\'s ids');
   const row = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-row.js'), 'utf8');
-  ok(/const c = ctx && ctx\.grouping \? inboxChip\(i, Date\.now\(\)\) : null;/.test(row) && /rowCtx\.grouping = !!todos\.grouping;/.test(panel), 'the chip is drawn only while the sections are (ctx.grouping from the snapshot)');
-  // the RED control: a panel that sections without asking the switch fails the wiring pin above
-  const mut = panel.replace('const sections = todos.grouping ? inboxSections(rows, { prev: secHeld, now: Date.now() }) : null;', 'const sections = inboxSections(rows, { prev: secHeld, now: Date.now() });');
-  ok(mut !== panel && !/const sections = todos\.grouping \? inboxSections/.test(mut), 'CONTROL: a panel that always sections is caught by the wiring pin (off would not be today\'s layout)');
-
-  // lane decision-inbox-rank (INBOX v2): THE ORDER inside each section is the PURE rank's, held per open; THE CHIP says why
-  const H = 3600e3, T = Date.UTC(2026, 9, 13, 18, 0);
-  const F = (o = {}) => ({ state: 'unknown', dated: null, due: null, reasks: 0, askedAt: T - H, ...o });
-  const V = (why, ageH, o = {}) => ({ createdAt: T - ageH * H, judged: { group: why === 'whenever' ? 'later' : 'now', why, p: 0.8, v: 2, facts: F({ askedAt: T - ageH * H, ...o }) } });
-  const E = (id, sk, o) => ({ item: it(id, { sk, ...o }), resolved: false });
-  const rowsV2 = [['claude:a', [E('aL', 'claude:a', V('whenever', 3)), E('aB', 'claude:a', V('blocked', 2))]], ['claude:b', [E('bD', 'claude:b', V('dated', 1, { dated: '今晚 22:00', due: T + 2 * H })), E('bL', 'claude:b', V('whenever', 1))]],
-    ['claude:c', [E('cS', 'claude:c', V('blocked', 49))]]];
-  const hv = new Map();
-  const sv = L.inboxSections(rowsV2, { prev: hv, now: T });
-  const ids = (sec) => sec.map(([k, e]) => [k, e.map((x) => x.item.id)]);
-  eq(ids(sv.now), [['claude:a', ['aB']], ['claude:b', ['bD']]], 'v2 order: 「现在要你」 — the blocked ask\'s group before the dated one\'s');
-  eq(ids(sv.later), [['claude:b', ['bL']], ['claude:a', ['aL']], ['claude:c', ['cS']]], 'v2 order: 「可以等」 newest first — and the 49-hour-old judged-blocked ask is there (the decay), last');
-  const rowsV2b = [[rowsV2[0][0], [E('aL', 'claude:a', V('blocked', 3)), rowsV2[0][1][1]]], rowsV2[1], [rowsV2[2][0], [...rowsV2[2][1], E('cN', 'claude:c', V('blocked', 0.1))]]];
-  const sv2 = L.inboxSections(rowsV2b, { prev: hv, now: T });
-  eq(ids(sv2.now), [['claude:a', ['aB']], ['claude:b', ['bD']], ['claude:c', ['cN']]], 'THE SLOT LAW (v2): a row re-judged while open keeps its section; a row first seen while open goes LAST in its section');
-  eq(ids(sv2.later), ids(sv.later), '…and no row of 「可以等」 moved');
-  // the chip: the reason in OUR words (the row renderer, under the same minimal DOM as the N-ask leg)
+  const css = fs.readFileSync(path.join(ROOT, 'public/style.css'), 'utf8');
+  ok(!/todos\.grouping/.test(panel) && !/ut-sec-|patchSections|secHeld|inboxSections/.test(panel), 'the panel draws no LLM section and never reads the snapshot\'s `grouping` — the bands are the same with the plugin on or off');
+  ok(!/judgedChipHtml|inboxChip|ut-judged/.test(row) && !/\.ut-sec-|\.ut-judged/.test(css), 'no judge chip on a row (the band says why) — and style.css keeps no section head / chip rule');
+  // a band row names its conversation (the bands are flat — no group head above it); a plain row does not
   const noop = () => {};
-  const mkEl = () => ({ dataset: {}, className: '', innerHTML: '', querySelector: () => null, querySelectorAll: () => [], appendChild: noop, addEventListener: noop, setAttribute: noop, classList: { add: noop, remove: noop, toggle: noop }, style: {} });
+  const mkEl = () => ({ dataset: {}, className: '', innerHTML: '', querySelector: () => null, querySelectorAll: () => [], appendChild: noop, addEventListener: noop, classList: { add: noop, remove: noop, toggle: noop, contains: () => false }, style: {}, setAttribute: noop, removeAttribute: noop });
   const had = { window: globalThis.window, document: globalThis.document, localStorage: globalThis.localStorage };
   globalThis.window = globalThis; globalThis.addEventListener = globalThis.addEventListener || noop; globalThis.removeEventListener = globalThis.removeEventListener || noop;
   globalThis.localStorage = { getItem: () => null, setItem: noop, removeItem: noop };
-  globalThis.document = { createElement: mkEl, querySelector: () => null, querySelectorAll: () => [], getElementById: () => null, addEventListener: noop, removeEventListener: noop, documentElement: { style: {}, lang: 'en' }, body: mkEl(), head: mkEl() };
+  globalThis.document = { createElement: mkEl, querySelector: () => null, querySelectorAll: () => [], getElementById: () => null, addEventListener: noop, removeEventListener: noop, documentElement: mkEl(), body: mkEl() };
   try {
     const { pathToFileURL } = await import('node:url');
     const R = await import(pathToFileURL(path.join(ROOT, 'src/lib/user-todos-row.js')).href);
-    const zhSrc = fs.readFileSync(path.join(ROOT, 'src/lib/i18n-zh.js'), 'utf8');
-    const zhOf = (k) => { const m = zhSrc.match(new RegExp('^  ' + JSON.stringify(k).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ': (".*"),$', 'm')); return m ? JSON.parse(m[1]) : null; };
-    const tZh = (k, p) => { const z = zhOf(k) || k; return p ? z.replace(/\{(\w+)\}/g, (m, x) => (p[x] !== undefined ? String(p[x]) : m)) : z; };
-    const now = Date.now();
-    const Fz = (o = {}) => ({ state: 'unknown', dated: null, due: null, reasks: 0, askedAt: now - H, ...o });
-    const C = (judged, o = {}) => R.judgedChipHtml(it('x', { createdAt: now - H, judged, ...o }), tZh, { grouping: true });
-    const word = (html) => (html.match(/>([^<]*)<\/span>$/) || [, ''])[1];
-    const cases = [
-      ['a blocked fact', C({ group: null, v: 0, facts: Fz({ state: 'blocked' }) }), '卡住等你', /它的 agent 为这个问题把状态设成了「卡住」/],
-      ['the judge: dated', C({ group: 'now', why: 'dated', p: 0.81, v: 2, facts: Fz({ dated: '今晚 22:00', due: now + H }) }), '有期限 · 今晚 22:00', /LLM 插件选的理由 \(p 0\.81\)/],
-      ['the judge: whenever', C({ group: 'later', why: 'whenever', p: 0.9, v: 2, facts: Fz() }), '随时', /LLM 插件选的理由 \(p 0\.90\)/],
-      ['the decay', C({ group: 'now', why: 'blocked', p: 1, v: 2, facts: Fz({ askedAt: now - 49 * H }) }, { createdAt: now - 49 * H }), '48 小时无人再问', /48 小时前问的，之后没人再问/],
-      ['a v1 verdict (until v2 scores it)', C({ group: 'now', p: 0.7, v: 1 }), '现在', /由 LLM 插件分组/],
-    ];
-    const badC = cases.filter(([, html, w, title]) => word(html) !== w || !title.test(html));
-    ok(!badC.length, 'THE CHIP (zh): 卡住等你 / 有期限 · <the item\'s date phrase> / 随时 / 48 小时无人再问 — OUR words through t(); the title says who placed it (its agent, the judge with its p, the clock)', badC.map(([n, h]) => [n, h]));
-    ok(/data-why="stale"/.test(cases[3][1]) && /data-group="later"/.test(cases[3][1]) && /data-group="now"/.test(cases[0][1]), 'the chip carries its section + reason (data-group / data-why — the stale one is drawn dashed)');
-    ok(R.judgedChipHtml(it('x', { judged: { group: 'now', why: 'blocked', p: 1, v: 2 } }), tZh, { grouping: false }) === '' && R.judgedChipHtml(it('x', { urgency: 'high', judged: { group: null, v: 0, facts: Fz({ state: 'blocked' }) } }), tZh, { grouping: true }) === '', 'no chip while the sections are off, and none on an item that stands by its own urgency');
-    const newKeys = ['Agent waits on you', 'Due {when}', 'Has a deadline', 'Any time', 'Nobody asked again in 48 h', 'Asked over 48 hours ago, and nobody asked again since', 'Its agent set its status to blocked for this question', 'The LLM plugin chose this reason'];
-    ok(newKeys.every((k) => !/—/.test(k) && !/—/.test(zhOf(k) || '—')), 'the card grammar: no em-dash sentence in the new chip words (en / zh)', newKeys.filter((k) => /—/.test(k) || /—/.test(zhOf(k) || '—')));
-  } catch (e) { ok(false, 'v2 chip: the row renderer runs under the minimal DOM', e.stack); }
+    const ctx = { t: (k, p) => (p ? k.replace(/\{(\w+)\}/g, (m, x) => (p[x] !== undefined ? String(p[x]) : m)) : k), nameFor: () => 'Ops <agent>', wordsOf: (i) => i.text, detailOf: () => '', replyState: () => ({ show: false }) };
+    const item = it('b1', 'claude:ops', { text: 'Which subnet?', createdAt: Date.now() - 60e3 });
+    const banded = R.renderRow({ item, resolved: false, band: 5 }, ctx).innerHTML, plain = R.renderRow({ item, resolved: false }, ctx).innerHTML;
+    ok(/<div class="ut-meta"><span class="ut-sess"><span class="ut-live-dot" data-key="claude:ops" role="img"><\/span>Ops &lt;agent&gt;<\/span> · /.test(banded) && !/ut-sess|ut-live-dot/.test(plain), 'a band row\'s meta names its conversation first, THE running dot in front (escaped — a name is peer-controlled); a mini-inbox row (no band) does not', { banded: (banded.match(/<div class="ut-meta">.*?<\/div>/) || [''])[0] });
+    const job = R.renderRow({ item: { ...item, sessionKey: 'jobs' }, resolved: false, band: 5 }, ctx).innerHTML;
+    ok(/<span class="ut-sess">Ops &lt;agent&gt;<\/span>/.test(job) && !/ut-live-dot/.test(job), '…a key that is no session (Background Work) gets no dot');
+  } catch (e) { ok(false, 'the band row renders under the minimal DOM', e.stack); }
   finally { for (const [k, v] of Object.entries(had)) { if (v === undefined) delete globalThis[k]; else globalThis[k] = v; } }
 }
 
@@ -940,65 +896,50 @@ console.log('⑬ THE PIN (lane foryou-plugin-notices, owner 2026-10-19: 「这�
     P('p1', 'zz-older', { createdAt: 30 }), P('p2', 'zz-older', { createdAt: 50 }),
     P('q1', 'aa-newer', { urgency: 'low', createdAt: 60 }),
   ];
-  /** THE VERDICT as the tray uses it: off = sortGroups' keys; on = inboxSections' three sections over the same rows */
-  const verdict = (Lx, items = open) => {
+  /** THE VERDICT: the For-you WINDOW's session order (sortGroups) and the TRAY's attention list (lane foryou-folds — the
+   *  bands in order, each band's ids in its order; `now` 1000 ms: nothing is old enough to park) */
+  const A = req(path.join(ROOT, 'src/attention-model.js'));
+  const verdict = (Lx, items = open, Ax = A) => {
     const gs = Lx.sortGroups(items);
-    const rows = gs.map(([k, v]) => [k, v.map((item) => ({ item, resolved: false })), v.length]);
-    const sec = Lx.inboxSections(rows, { now: 1000 });
-    const flat = (list) => list.map(([k, es]) => `${k}:${es.map((e) => e.item.id).join('+')}`);
-    return { off: gs.map(([k, v]) => `${k}:${v.map((i) => i.id).join('+')}`), now: flat(sec.now), pending: flat(sec.pending), later: flat(sec.later), held: sec.held };
+    const r = Ax.needsMe(items.map((i) => Ax.rowOf(i, 1000)), 1000);
+    return { off: gs.map(([k, v]) => `${k}:${v.map((i) => i.id).join('+')}`), bands: r.bands.map((b) => `${b.band}:${b.rows.map((x) => x.id).join('+')}`) };
   };
   const want = {
     off: ['claude:u:u1', 'aa-newer:q1', 'zz-older:p1+p2', 'claude:h:h1', 'claude:n:n1', 'claude:l:l1', 'claude:d:d1', 'jobs:j1'], // a LOW ask ranks as normal in sortGroups (the panel's `|| 1`, kept) — by newest
-    now: ['jobs:j1', 'claude:u:u1', 'aa-newer:q1', 'zz-older:p2+p1', 'claude:h:h1', 'claude:d:d1'],
-    pending: ['claude:n:n1'], later: ['claude:l:l1'],
+    bands: ['1:j1+u1', '2:q1+p2+p1', '4:d1', '5:n1+l1+h1'],
   };
   const v = verdict(L);
-  eq(v.off, want.off, 'switch OFF (sortGroups): urgent first · the plugins next (the one with the NEWEST item first, a LOW one too) · then the rest exactly as before (high · normal/low by newest) · Background Work last');
-  eq([v.now, v.pending, v.later], [want.now, want.pending, want.later], 'switch ON (inboxSections): 「现在要你」 = the urgent rows · the plugins\' reminders (newest first — not judged, a LOW one and an option-less one included) · then the LLM order (high, decisions); the plain ask waits in 「待判断」, the low one in 「可以等」');
+  eq(v.off, want.off, 'the WINDOW (sortGroups): urgent first · the plugins next (the one with the NEWEST item first, a LOW one too) · then the rest exactly as before (high · normal/low by newest) · Background Work last');
+  eq(v.bands, want.bands, 'the TRAY (the attention list): band 1 = the urgent rows · band 2 HEADED by the plugins\' reminders (newest first — a LOW one and an option-less one included; the judge never moves them) · band 4 the decision · band 5 the rest newest first');
+  const lay = L.bandLayout({ open, resolved: [] }, { now: 1000 });
+  eq(lay.bands.map((b) => `${b.band}:${b.ids.join('+')}`), want.bands, '…and the tray\'s held layout opens in exactly that order (bandLayout = needsMe)');
   ok(L.pluginOf({ origin: 'plugin', plugin: 'x' }) === 'x' && L.pluginOf({ origin: 'server', plugin: 'x', sessionKey: 'x' }) === null && L.pluginOf({ sessionKey: 'voice-input', sessionName: 'Voice input · Dropline' }) === null && L.pluginOf(null) === null,
     'pluginOf reads the DECLARED origin + plugin id only — never a key, a name or the words (an older Dropline item with origin server is not a plugin\'s)');
   ok(L.trayBand([it('x', 'k', { origin: 'plugin', plugin: 'k', urgency: 'urgent' })]) === 0 && L.trayBand([P('y', 'k')]) === 1 && L.trayBand([it('z', 'k', { urgency: 'high' })]) === 2,
-    'trayBand: urgent wins whoever filed it (0) · a plugin\'s reminders (1) · the rest (2)');
-  // an URGENT reminder keeps its urgent rank; an arrival while the popup is open APPENDS (the slot law) — a plugin's in 「现在要你」
+    'trayBand (the window\'s session order): urgent wins whoever filed it (0) · a plugin\'s reminders (1) · the rest (2)');
+  // an URGENT reminder keeps its urgent rank; an arrival while the popup is open APPENDS at its band's end (the slot law)
   {
     const vu = verdict(L, [...open, P('p3', 'zz-older', { urgency: 'urgent', createdAt: 5 })]);
-    eq(vu.off.slice(0, 2), ['zz-older:p1+p2+p3', 'claude:u:u1'], 'an URGENT reminder: its plugin group joins the urgent band (urgent stays first, whoever filed it)');
-    const rows0 = L.sortGroups(open).map(([k, vv]) => [k, vv.map((item) => ({ item, resolved: false })), vv.length]);
-    const held = new Map();
-    L.inboxSections(rows0, { prev: held, now: 1000 });
+    eq([vu.off.slice(0, 2), vu.bands[0]], [['zz-older:p1+p2+p3', 'claude:u:u1'], '1:j1+u1+p3'], 'an URGENT reminder: band 1 (urgent stays first, whoever filed it) — and its plugin group joins the urgent groups in the window');
     const late = P('p9', 'zz-older', { createdAt: 2000 });
-    const rows1 = rows0.map(([k, es, n]) => (k === 'zz-older' ? [k, [...es, { item: late, resolved: false }], n + 1] : [k, es, n]));
-    const s1 = L.inboxSections(rows1, { prev: held, now: 1000 });
-    const zz = s1.now.find(([k]) => k === 'zz-older');
-    ok(!!zz && zz[1].map((e) => e.item.id).join() === 'p2,p1,p9' && held.get('p9').sec === 'now' && held.get('p9').ix >= 1e9, 'a reminder ARRIVING while the popup is open: 「现在要你」 (pinned), appended at its group\'s end (the slot law — nothing moves under the pointer)', zz && zz[1].map((e) => e.item.id));
+    const lay1 = L.bandLayout({ open: [...open, late], resolved: [] }, { now: 2100, prev: lay });
+    eq(lay1.bands.find((b) => b.band === 2).ids, ['q1', 'p2', 'p1', 'p9'], 'a reminder ARRIVING while the popup is open: band 2, appended at its end (the slot law — nothing moves under the pointer)');
   }
-  // the PRE-FIX order with no plugin item: byte for byte today's (the band only ever separates plugin groups)
+  // the 3-day fold: a reminder nobody clicked in PLUGIN_FOLD_DAYS folds into 搁置 (an ask waits 7)
   {
-    const noPlug = open.filter((i) => !L.pluginOf(i));
-    const old = (o) => { const g = new Map(); for (const i of o) (g.get(i.sessionKey) || g.set(i.sessionKey, []).get(i.sessionKey)).push(i); const R = { low: 0, normal: 1, high: 2, urgent: 3 }; return [...g.entries()].sort((a, b) => { if ((a[0] === 'jobs') !== (b[0] === 'jobs')) return a[0] === 'jobs' ? 1 : -1; const w = (x) => Math.max(...x.map((i) => R[i.urgency || 'normal'] || 1)); return (w(b[1]) - w(a[1])) || (Math.max(...b[1].map((i) => i.createdAt)) - Math.max(...a[1].map((i) => i.createdAt))); }); };
-    eq(L.sortGroups(noPlug).map(([k]) => k), old(noPlug).map(([k]) => k), 'no plugin item ⇒ sortGroups is exactly the old rule (worst urgency, newest, jobs last)');
-    const { inboxRank } = req(path.join(ROOT, 'src/decision-model.js'));
-    eq(L.trayRank(noPlug, 1000).map((r) => r.id), inboxRank(noPlug, 1000).map((r) => r.id), 'no plugin item ⇒ trayRank is exactly inboxRank (the LLM order untouched)');
+    const D = 24 * 3600e3;
+    const rows = [P('pp', 'zz', { createdAt: 0 }), it('aa', 'claude:a', { createdAt: 0 })].map((i) => A.rowOf(i, 3 * D + 1));
+    ok(A.PLUGIN_FOLD_DAYS === 3 && A.PARK_DAYS === 7 && A.placeOf(rows[0], 3 * D + 1) === A.PARKED && A.placeOf(rows[1], 3 * D + 1) === 5 && A.placeOf(rows[1], 7 * D + 1) === A.PARKED, 'a plugin\'s reminder unclicked 3 days ⇒ 搁置; a plain ask the same age stays in band 5 until 7 days');
   }
-  // THE MUTANT (the brief's control): plugin reminders sorted by time into the general list ⇒ the verdict goes RED
+  // THE MUTANT (the brief's control): the plugin rule dropped from band 2 ⇒ the reminders sort by time into band 5 ⇒ RED
   {
-    const src = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-layout.js'), 'utf8');
-    const edits = [
-      ['  return list.some((i) => pluginOf(i)) ? 1 : 2;', '  return 2;'],
-      ['  const pinned = list.filter((i) => pluginOf(i) && ', '  const pinned = list.filter((i) => false && pluginOf(i) && '],
-      ["export function traySectionOf(item, now = 0) { return pluginOf(item) ? 'now' : inboxSectionOf(item, now); }", 'export function traySectionOf(item, now = 0) { return inboxSectionOf(item, now); }'],
-    ];
-    let m = src;
-    const missing = edits.filter(([a]) => m.split(a).length !== 2).map(([a]) => a.slice(0, 60));
-    ok(!missing.length, 'the mutant\'s needles each occur exactly once (else the control proves nothing)', missing);
-    for (const [a, b] of edits) m = m.split(a).join(b);
-    const Mut = await import(pathToFileURL(M.write('src/lib/user-todos-layout.js', m, 'pin', { esm: true })).href);
-    const vm = verdict(Mut);
-    ok(JSON.stringify(vm.off) !== JSON.stringify(want.off) && vm.off.indexOf('aa-newer:q1') > vm.off.indexOf('claude:h:h1'), 'MUTANT RED (switch off): the plugins sorted by time into the general list fall under the high ask (and the low one to the bottom)', vm.off);
-    ok(JSON.stringify(vm.pending) !== JSON.stringify(want.pending) || JSON.stringify(vm.later) !== JSON.stringify(want.later), 'MUTANT RED (switch on): the LOW reminder lands in 「可以等」 — no longer pinned', [vm.now, vm.later]);
+    const src = fs.readFileSync(path.join(ROOT, 'src/attention-model.js'), 'utf8');
+    const needle = '  if (r.plugin || r.blocked || ';
+    ok(src.split(needle).length === 2, 'the mutant\'s needle occurs exactly once (else the control proves nothing)');
+    const Mut = M.load('src/attention-model.js', src.replace(needle, '  if (r.blocked || '), 'pin');
+    const vm = verdict(L, open, Mut);
+    ok(JSON.stringify(vm.bands) !== JSON.stringify(want.bands) && vm.bands[vm.bands.length - 1].endsWith('h1+q1+p2+p1'), 'MUTANT RED: without the rule the reminders sort by time into band 5, under the high ask', vm.bands);
   }
-
   console.log('   the store: a plugin\'s reminder names its plugin + files under its id; the door\'s shape is validated at filing; the gate');
   const UT = req(path.join(ROOT, 'src/user-todos.js'));
   const mk = () => new UT.UserTodoManager({ dataDir: tmpdir(), expirySweepMs: 0 });

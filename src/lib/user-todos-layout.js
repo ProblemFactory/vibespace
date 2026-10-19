@@ -28,8 +28,8 @@
  * and chunk 3 the per-window MINI INBOX (the title-bar badge + its popover):
  *   inboxBadgeFor(open, keys)     — {count, urgency} of one session's open asks
  *   miniInboxEntries(layout, todos, keys) — that session's rows, append-only
- * and chunk 4 the FLOOD FOLD of one group (owner: "agent经常大量发inbox"):
- *   foldGroup(entries, {max, expanded, prev}) — {visible, hidden}
+ * and chunk 4 the FLOOD FOLD of one group (owner: "agent经常大量发inbox") — RETIRED by lane foryou-folds: the
+ * tray folds BY BAND (bandLayout below; 11 conversations folding 5 each still drew 30 rows)
  * `fact` = the panel's projection of ONE active-sessions payload row
  * `{live, mode, remoteState, turn}` (null = the session is not in the list).
  *
@@ -42,28 +42,30 @@
  *                                    (the panel HOLDS this value — r2: never re-derives a stored choice)
  *   tabCounts(open, history, seenTs) — {inbox:{action, notice, urgency}, history:{unread}}
  *
- * lane inbox-decision-group (the LLM plugin's use ④, its tray switch on — the snapshot carries `grouping`):
- *   inboxChip(item, now)           — {group, why, p, dated} of a normal option-less item the judge, a board fact or the
- *                                    decay placed (its chip), else null
- *   inboxSectionOf(item, now)      — 'now' (urgent / high, an item carrying options / buttons, a blocked fact, judged
- *                                    blocked / dated) | 'pending' (a normal item no verdict sorted yet) | 'later'
- *   inboxSections(rows, {prev, now}) — the action rows split into {now, pending, later}, each IN THE PURE RANK'S ORDER;
- *                                    `prev` (id → {sec, ix}, held while the popup is open) keeps a row in the section and
- *                                    the slot it was first drawn in
- * lane decision-inbox-rank (INBOX v2): the place and the order are src/decision-model.js `inboxPlace` / `inboxRank` —
- * ONE truth with the engine's facts (the decay, a blocked fact, the judge's three-way choice).
+ * lane inbox-decision-group / decision-inbox-rank drew the LLM plugin's three sections here (inboxSections, inboxChip,
+ * inboxSectionOf) — RETIRED by lane foryou-folds: the judge only breaks a band-5 tie now (src/decision-model.js
+ * inboxPlace / inboxRank read the attention list's band first).
  *
  * lane foryou-plugin-notices (owner 2026-10-19: 「这种插件的提醒最好 pin 在最头部，相当于 urgent 之下的优先级」) — THE PIN:
  *   pluginOf(item)                 — the plugin a reminder belongs to (its declared origin 'plugin' + `plugin`), else null
  *   trayBand(items)                — a group's band: 0 urgent (whoever filed it) · 1 a plugin's reminders · 2 the rest
- *   trayRank(items, now)           — `inboxRank` with every non-urgent plugin reminder lifted into 「现在要你」 right under
- *                                    the urgent rows, newest first (the judge never moves it)
- *   traySectionOf(item, now)       — 'now' for a plugin reminder, else `inboxSectionOf`
- * sortGroups orders by the band first (urgent groups · plugin groups by their newest item · the rest as before), and
- * inboxSections numbers by trayRank — the same pin with the LLM plugin's sections on or off.
+ * (lane foryou-folds: in the tray the pin is the attention list's — a plugin's reminder heads band 2, right under band 1)
+ * sortGroups orders by the band first (urgent groups · plugin groups by their newest item · the rest as before) — the
+ * For-you WINDOW's session order.
+ *
+ * lane foryou-folds (design q-044 decisions 1 2 3 6 — the owner accepted them 2026-10-19): THE TRAY IS THE ATTENTION LIST.
+ * The LLM plugin's three sections and the per-session flood fold are gone; the popup draws src/attention-model.js
+ * `needsMe` — five bands + 搁置, the first CAP (6) rows on the first screen, the rest folded BY BAND behind
+ * 「还有 N 条 — 展开」 (expanded in place), notices out of the list:
+ *   rowsOf(open, now)              — the open ACTION items as attention rows (rowOf)
+ *   badgeOf(open, now)             — {action: the items in bands 1–4 (the badges count these), notices, open: every action item}
+ *   bandLayout(todos, {now, prev, expand}) — the bands' slots while the popup is open (the slot law: a row keeps its band and
+ *                                    place, resolved in place; an arrival appends at its band's end and joins a fold that
+ *                                    exists; `expand` shows a band's folded rows in place)
+ *   bandEntries(layout, todos)     — [{band, code, name, entries, hidden, openIds, openCount}] — what the panel draws
  */
 import { replyVerdict, REPLY_HIDDEN_CODES } from '../inbox-reply.js';
-import { inboxPlace, inboxRank } from '../decision-model.js'; // PURE: the For-you tray's place + order (lane decision-inbox-rank)
+import { rowOf, needsMe, placeOf, badgeRows, bandInfo } from '../attention-model.js'; // PURE: THE attention list (lane foryou-folds, design q-044) — the tray's bands, cap and folds
 import { INBOX_ORIGINS, ORIGIN_LABELS } from '../inbox-origin.js';
 
 /**
@@ -114,28 +116,13 @@ export function sortGroups(open) {
  *  plugin item that names none, and a plugin that does not declare 'reminders'), else null — never read off a name, a
  *  key or the words. */
 export function pluginOf(item) { return item && item.origin === 'plugin' && typeof item.plugin === 'string' && item.plugin ? item.plugin : null; }
-/** A group's BAND in the tray: 0 = it holds an URGENT item (urgent stays first, whoever filed it), 1 = a plugin's reminders
+/** A group's BAND in the For-you window's session order: 0 = it holds an URGENT item (urgent stays first, whoever filed it), 1 = a plugin's reminders
  *  (one group per plugin — a plugin files under its own id), 2 = everything else. */
 export function trayBand(items) {
   const list = (items || []).filter(Boolean);
   if (list.some((i) => (i.urgency || 'normal') === 'urgent')) return 0;
   return list.some((i) => pluginOf(i)) ? 1 : 2;
 }
-/** THE PIN in the LLM plugin's sections: `inboxRank`'s order with every NON-URGENT plugin reminder lifted into 「现在要你」
- *  right under the urgent rows, newest first (an urgent one keeps its urgent rank). → [{id, section, …, pin?}] */
-export function trayRank(items, now = 0) {
-  const list = (Array.isArray(items) ? items : []).filter((i) => i && i.id);
-  const pinned = list.filter((i) => pluginOf(i) && (i.urgency || 'normal') !== 'urgent').sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-  const ids = new Set(pinned.map((i) => i.id));
-  const ranked = inboxRank(list.filter((i) => !ids.has(i.id)), now);
-  let k = 0;
-  while (k < ranked.length && ranked[k].section === 'now' && ranked[k].tier === 0) k++;
-  return [...ranked.slice(0, k), ...pinned.map((i) => ({ id: i.id, section: 'now', why: null, tier: null, pin: 'plugin' })), ...ranked.slice(k)];
-}
-/** A row first seen while the popup is open: a plugin reminder joins 「现在要你」 (it is pinned), anything else goes where
- *  `inboxPlace` says. */
-export function traySectionOf(item, now = 0) { return pluginOf(item) ? 'now' : inboxSectionOf(item, now); }
-
 /** THE WHOLE DETAIL THIS CLIENT ALREADY SAW (2026-09-27, the For-you window's
  *  verify round). A snapshot carries a RESOLVED item's detail as a 300-char
  *  preview (`detailTruncated: true` — the store's previewOf), so the item the
@@ -165,45 +152,6 @@ export function restoreDetails(next, fullById) {
   const ids = new Set([...todos.open, ...todos.resolved].map((i) => i && i.id));
   for (const id of [...out.keys()]) if (!ids.has(id)) out.delete(id);
   return { todos, fullById: out };
-}
-
-/** THE TRAY'S SECTIONS (lane inbox-decision-group). The judge only SORTS: an item's urgency is the agent's
- *  declaration and is never rewritten — urgent / high stand in 「现在要你」 by it alone, and so does every item that
- *  asks for a decision (option chips / producer buttons — inbox-verify F3: never 'can wait'; the judge never scores
- *  it); a NORMAL item joins them when the judge chose blocked / dated (or a v1 verdict said now), waits in 「可以等」
- *  when it chose whenever, and stands in 「待判断」 until a verdict exists (F4: not judged is not 'can wait'); low /
- *  answered items wait. v2 (lane decision-inbox-rank): two rules overrule the judge — a blocked fact from the board ⇒
- *  「现在要你」, and THE DECAY (48 h since the last ask, no progress after it, no live date) ⇒ 「可以等」. */
-export const INBOX_SECTIONS = Object.freeze(['now', 'pending', 'later']);
-export function inboxChip(item, now = 0) {
-  if (!item || (item.urgency || 'normal') !== 'normal' || (Array.isArray(item.options) && item.options.length) || item.action) return null;
-  const j = item.judged || {}, pl = inboxPlace(item, now);
-  if (pl.section === 'pending' || (!pl.why && j.group !== 'now' && j.group !== 'later')) return null;
-  return { group: pl.section, why: pl.why, p: typeof j.p === 'number' && Number.isFinite(j.p) ? j.p : null, dated: (j.facts && j.facts.dated) || null, fact: !!(j.facts && j.facts.state === 'blocked') };
-}
-export function inboxSectionOf(item, now = 0) { return inboxPlace(item, now).section; }
-/** rows = renderPanel's action rows [[key, entries, openCount]] in layout order → {now, pending, later, held}: each session
- *  group appears in the section(s) its rows belong to, openCount recounted per section. THE ORDER (lane
- *  decision-inbox-rank): the first draw of an open numbers every row by the PURE `inboxRank` (blocked › decisions ›
- *  dated › the judge's p in 「现在要你」, newest first elsewhere); inside a section the rows of a group, and the groups, go
- *  by those numbers. `prev` is the panel's Map (mutated: a row's section and slot are decided once per open — the slot
- *  law of this module; a row first seen while open goes last). */
-export function inboxSections(rows, { prev = null, now = 0 } = {}) {
-  const held = prev instanceof Map ? prev : new Map();
-  if (!held.size) trayRank((rows || []).flatMap(([, entries]) => (entries || []).map((e) => e && e.item).filter(Boolean)), now).forEach((r, k) => held.set(r.id, { sec: r.section, ix: k })); // THE PIN (lane foryou-plugin-notices)
-  const ixOf = (e) => { const h = held.get(e && e.item && e.item.id); return h ? h.ix : Infinity; };
-  const out = { now: [], pending: [], later: [] };
-  for (const [key, entries] of rows || []) {
-    const by = { now: [], pending: [], later: [] };
-    for (const e of entries || []) {
-      const id = e && e.item && e.item.id;
-      if (!held.has(id)) held.set(id, { sec: traySectionOf(e && e.item, now), ix: 1e9 + held.size });
-      by[held.get(id).sec].push(e);
-    }
-    for (const s of INBOX_SECTIONS) if (by[s].length) { by[s].sort((a, b) => ixOf(a) - ixOf(b)); out[s].push([key, by[s], by[s].filter((e) => !e.resolved).length]); }
-  }
-  for (const s of INBOX_SECTIONS) out[s].sort((a, b) => Math.min(...a[1].map(ixOf)) - Math.min(...b[1].map(ixOf)));
-  return { now: out.now, pending: out.pending, later: out.later, held };
 }
 
 /** @param {Array<[string, Array<{id:string}>]>} sortedGroups */
@@ -257,6 +205,60 @@ export function splitNotices(rows) {
 export function badgeCounts(open) {
   const action = (open || []).filter((i) => !isNotice(i));
   return { action, notices: (open || []).length - action.length };
+}
+
+// ── THE ATTENTION LIST IN THE TRAY (lane foryou-folds, design q-044) ─────────────────────────────────────────────────
+/** The open ACTION items as attention rows (src/attention-model.js rowOf; notices stay out of the list). */
+export function rowsOf(open, now = 0) { return (open || []).filter((i) => i && !isNotice(i)).map((i) => rowOf(i, now)).filter(Boolean); }
+/** THE BADGE (design §2: the For-you badge = bands 1–4, colours unchanged, + the grey notice count): `action` = the open
+ *  items in bands 1–4 (never 搁置, never band 5), `notices` = the grey count, `open` = every open action item. */
+export function badgeOf(open, now = 0) {
+  const list = (open || []).filter(Boolean);
+  const all = list.filter((i) => !isNotice(i));
+  const ids = new Set(badgeRows(rowsOf(all, now), now).map((r) => r.id));
+  return { action: all.filter((i) => ids.has(i.id)), notices: list.length - all.length, open: all };
+}
+/** THE BANDS' SLOTS while the popup is open — the slot law (inc-mtw02kbq-kj96) on the attention list. `prev` null = a
+ *  fresh open: needsMe's order, the first screen shown, everything after it folded by band (搁置 whole). Afterwards
+ *  every id keeps its band and its place (a resolved row stays, dimmed with ↺, while the store still lists it); an
+ *  arrival appends at the END of the band its facts place it in, shown when that band folds nothing (band 1 always),
+ *  else it joins the fold; `expand` (a band number) shows that band's folded rows IN PLACE. → {bands: [{band, ids}],
+ *  shown: Set<id>} — the panel holds it until the popup closes. */
+export function bandLayout(todos, { now = 0, prev = null, expand = null, policy = null } = {}) {
+  const open = ((todos && todos.open) || []).filter((i) => i && i.id && !isNotice(i));
+  if (!prev || !Array.isArray(prev.bands)) {
+    const r = needsMe(rowsOf(open, now), now, policy);
+    return { bands: r.bands.map((b) => ({ band: b.band, ids: b.rows.map((x) => x.id) })), shown: new Set(r.bands.flatMap((b) => b.shown)) };
+  }
+  const known = new Set([...open.map((i) => i.id), ...((todos && todos.resolved) || []).map((i) => i && i.id)]);
+  const bands = prev.bands.map((b) => ({ band: b.band, ids: b.ids.filter((id) => known.has(id)) }));
+  const shown = new Set([...(prev.shown || [])].filter((id) => known.has(id)));
+  const seen = new Set(bands.flatMap((b) => b.ids));
+  for (const i of open) {
+    if (seen.has(i.id)) continue;
+    const band = placeOf(rowOf(i, now), now, policy) || 5;
+    let b = bands.find((x) => x.band === band);
+    if (!b) { b = { band, ids: [] }; const k = bands.findIndex((x) => x.band > band); if (k < 0) bands.push(b); else bands.splice(k, 0, b); }
+    const folding = b.ids.some((id) => !shown.has(id));
+    b.ids.push(i.id); seen.add(i.id);
+    if (band === 1 || !folding) shown.add(i.id); // band 1 never folds; an arrival joins a fold that exists, never opens one
+  }
+  if (expand !== null && expand !== undefined) { const b = bands.find((x) => x.band === Number(expand)); if (b) for (const id of b.ids) shown.add(id); }
+  return { bands: bands.filter((b) => b.ids.length), shown };
+}
+/** What the panel draws, band by band in order: `entries` = the shown rows ({item, resolved}, layout order), `hidden` =
+ *  how many OPEN rows the band's fold holds back (the head's N), `openIds` = every open row of the band, folded ones
+ *  included (「全部标为已看」 acts on the band), `openCount` = their number. */
+export function bandEntries(layout, todos) {
+  const open = new Map(((todos && todos.open) || []).map((i) => [i.id, i]));
+  const resolved = new Map(((todos && todos.resolved) || []).map((i) => [i.id, i]));
+  const shown = (layout && layout.shown) || new Set();
+  return ((layout && layout.bands) || []).map((b) => {
+    const info = bandInfo(b.band) || { code: 'ask', name: '' };
+    const all = b.ids.map((id) => (open.has(id) ? { item: open.get(id), resolved: false } : resolved.has(id) ? { item: resolved.get(id), resolved: true } : null)).filter(Boolean);
+    const openIds = all.filter((e) => !e.resolved).map((e) => e.item.id);
+    return { band: b.band, code: info.code, name: info.name, entries: all.filter((e) => shown.has(e.item.id)), hidden: all.filter((e) => !e.resolved && !shown.has(e.item.id)).length, openIds, openCount: openIds.length };
+  });
 }
 
 /** Rows to render, in layout order, each marked resolved when it left `open`. */
@@ -316,11 +318,14 @@ const URGENCY_ORDER = ['low', 'normal', 'high', 'urgent'];
  *  sessionKey is one of `keys` (a window answers for its `<backend>:<id>` key
  *  AND the `webui:<id>` key an early item was filed under), and the worst
  *  urgency among them. `{count: 0, urgency: ''}` = no badge. */
-export function inboxBadgeFor(open, keys) {
+export function inboxBadgeFor(open, keys, now = null) {
   const ks = new Set(keys || []);
+  // lane foryou-folds: given `now`, the badge counts that session's rows in bands 1–4 (the attention list's badge rule)
+  const mine = (open || []).filter((i) => i && !isNotice(i) && ks.has(i.sessionKey));
+  const counted = now === null ? null : new Set(badgeOf(mine, now).action.map((i) => i.id));
   let count = 0, worst = -1;
-  for (const i of open || []) {
-    if (!i || isNotice(i) || !ks.has(i.sessionKey)) continue;
+  for (const i of mine) {
+    if (counted && !counted.has(i.id)) continue;
     count++;
     worst = Math.max(worst, URGENCY_ORDER.indexOf(i.urgency || 'normal'));
   }
@@ -341,42 +346,6 @@ export function miniInboxEntries(layout, todos, keys) {
   const next = layout ? nextLayout(layout, sub) : openLayout([['mini', sub.open]]);
   const entries = entriesFor(next, sub).flatMap((g) => g.entries).map((e) => ({ ...e, notice: isNotice(e.item) }));
   return { layout: next, entries };
-}
-
-/** design-user-inbox-reply §4 d (chunk 4): how many OPEN rows a group shows
- *  before the rest fold behind a "{n} more…" expander. */
-export const FOLD_MAX = 5;
-
-/** THE FLOOD FOLD of one group's entries (layout order — the store sorts newest
- *  first within an urgency tier, so the first open rows ARE the newest).
- *  More than `max` OPEN rows and not `expanded` ⇒ `visible` = every row up to
- *  and including the max-th open row (a row resolved in place among them keeps
- *  its slot), `hidden` = the rest; otherwise everything is visible. Folding only
- *  HIDES — `visible` keeps layout order, so nothing moves.
- *  `prev` = `{shown:Set<id>, hidden:Set<id>}` of the last paint while the popup
- *  is open (null on the first): the slot law (inc-mtw02kbq-kj96) applied to the
- *  fold — a row the user could see is never hidden again (a ↺ above it must not
- *  pull it from under the pointer), and a row resolved while hidden stays hidden
- *  (“Mark all seen” on a folded group must not flood 25 struck rows out below).
- *  An arrival appends at the group's end (nextLayout) and so joins the fold. */
-export function foldGroup(entries, { max = FOLD_MAX, expanded = false, prev = null } = {}) {
-  const list = entries || [];
-  if (expanded) return { visible: list.slice(), hidden: [] };
-  let cut = list.length; // rows [0, cut) are inside the base fold
-  let open = 0;
-  for (let k = 0; k < list.length; k++) {
-    if (list[k].resolved) continue;
-    if (++open === max) cut = k + 1;
-  }
-  if (open <= max) cut = list.length;
-  const visible = [], hidden = [];
-  list.forEach((e, k) => {
-    const id = e.item && e.item.id;
-    const show = (prev && prev.shown && prev.shown.has(id))
-      || (k < cut && !(prev && prev.hidden && prev.hidden.has(id) && e.resolved));
-    (show ? visible : hidden).push(e);
-  });
-  return { visible, hidden };
 }
 
 // ── NOTICES BY ORIGIN (B-328d) ──────────────────────────────────────────────
@@ -479,8 +448,10 @@ export function noticeChips(notices, { prev = null } = {}) {
  *  `lastSeenTs` that were not `seen` at show time (B-3f5d ①: the user's own feedback) — the last time the Notifications tab was shown on this device
  *  (null/garbage = never: everything counts; the panel stamps the key at
  *  install so an upgrade does not open on a hundred). */
-export function tabCounts(open, toastHistory, lastSeenTs) {
-  const { action, notices } = badgeCounts(open);
+export function tabCounts(open, toastHistory, lastSeenTs, now = null) {
+  // lane foryou-folds: given `now` (the popup), `inbox.action` = the badge's own number — the rows in bands 1–4; the
+  // For-you window (no `now`) still counts every open action item in its scope
+  const { action, notices } = now === null ? badgeCounts(open) : badgeOf(open, now);
   let worst = -1;
   for (const i of action) worst = Math.max(worst, URGENCY_ORDER.indexOf(i.urgency || 'normal'));
   const seen = Number(lastSeenTs);
