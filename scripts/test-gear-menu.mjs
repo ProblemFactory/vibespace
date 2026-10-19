@@ -23,6 +23,9 @@
 //   System holds it between Backup & migrate… and the password; a click opens THE window with its cards grouped
 //   by what uses the key (the registry's groupOf, read off the registry); the phone reaches it under System; a zh
 //   pass takes the owner's PNGs (⚙ → 系统 ▸ 集成与密钥…, the 浏览器 / 插件 heads, the phone).
+//   THE VAULT'S ONE ROW (lane vault-one-door, owner 2026-10-19 「这个没必要分成两个按钮吧」): the System rows read off the
+//   SOURCE hold ONE vault row, 「Vault…」 (a MUTANT tree with the old second row Vault contents… is RED — runs before the
+//   chrome, so no SKIP hides it); in the page System ▸ shows that one row (zh 「保险库…」) and a click opens the Vault WINDOW.
 // Throwaway server in a git worktree (scripts/scratch.mjs paths + ports —
 // never a fixed name, never the repo's data/) + headless chrome over raw CDP.
 // Run: node scripts/test-gear-menu.mjs   (SKIPs without chrome)
@@ -36,9 +39,56 @@ const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for 
 const require = createRequire(import.meta.url);
 const REG = require('../src/integration-registry.js'); // the window's expected groups (lane integrations-menu-home) — read off the registry, not typed
 
+// ── THE VAULT'S ONE ROW, read off the source (lane vault-one-door) ──
+/** Every `registerMenuItem({ … })` STATEMENT's text in `src` (a call that starts its line — a comment that names the call is
+ *  never one; balanced parens, strings and line comments skipped). */
+function menuCalls(src) {
+  const out = []; let at = 0; const re = /^[ \t]*registerMenuItem\(/gm;
+  for (;;) {
+    re.lastIndex = at; const hit = re.exec(src); if (!hit) return out;
+    const i = src.indexOf('registerMenuItem(', hit.index);
+    let j = i + 'registerMenuItem('.length, depth = 1, q = null;
+    for (; j < src.length && depth; j++) {
+      const c = src[j];
+      if (q) { if (c === '\\') j++; else if (c === q) q = null; continue; }
+      if (c === "'" || c === '"' || c === '`') q = c;
+      else if (c === '/' && src[j + 1] === '/') j = src.indexOf('\n', j);
+      else if (c === '(') depth++; else if (c === ')') depth--;
+    }
+    out.push(src.slice(i, j)); at = j;
+  }
+}
+/** The ⚙ System rows of a tree: [{file, label}] — the English key of each labelled row. */
+function systemRows(files) {
+  const rows = [];
+  for (const { file, src } of files) for (const call of menuCalls(src)) {
+    if (!/parent:\s*'system'/.test(call) || /separator:\s*true/.test(call)) continue;
+    const m = call.match(/label:\s*\([^)]*\)\s*=>\s*(?:t|tr)\('([^']+)'\)/);
+    rows.push({ file, label: m ? m[1] : '?' });
+  }
+  return rows;
+}
+/** null = ONE vault row, 「Vault…」; else the reason (the rows found). */
+let censusFailed = 0;   // the source census's reds (the chrome legs count theirs in `failed`)
+const vaultRowVerdict = (rows) => { const v = rows.filter((r) => /^Vault/.test(r.label)); return v.length === 1 && v[0].label === 'Vault…' ? null : `the vault rows: ${JSON.stringify(v)}`; };
+{
+  const SRC = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src');
+  const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : /\.js$/.test(e.name) && !/^i18n-/.test(e.name) ? [path.join(d, e.name)] : []));
+  const files = walk(SRC).map((f) => ({ file: path.relative(SRC, f), src: fs.readFileSync(f, 'utf8') })).filter((x) => x.src.includes('registerMenuItem('));
+  const rows = systemRows(files);
+  const nOk = (c, n) => { if (c) console.log(`  ✓ ${n}`); else { console.error(`  ✗ ${n}`); censusFailed++; } };
+  console.log('gear-menu — the vault\'s one row (source census, lane vault-one-door)');
+  nOk(rows.length >= 8 && rows.some((r) => r.label === 'Integrations…') && rows.some((r) => r.label === 'Report a problem…'), `the census reads the System rows (${rows.length}: ${rows.map((r) => r.label).join(' / ')})`);
+  const v = vaultRowVerdict(rows);
+  nOk(!v && rows.find((r) => r.label === 'Vault…').file === 'lib/vault-window.js', `ONE vault row, 「Vault…」, registered by the Vault window's module${v ? ' — ' + v : ''}`);
+  const OLD_ROW = "\nregisterMenuItem({\n  menu: 'gear', parent: 'system', order: 63, icon: UI_ICONS.lock,\n  label: () => t('Vault contents…'),\n  run: (c) => openVaultWindow(c.app),\n});\n";
+  const mutant = files.map((x) => (x.file === 'lib/vault-window.js' ? { ...x, src: x.src + OLD_ROW } : x));
+  nOk(!!vaultRowVerdict(systemRows(mutant)), `MUTANT (the old second row, Vault contents…, back beside Vault…) ⇒ RED: ${vaultRowVerdict(systemRows(mutant))}`);
+}
+
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => fs.existsSync(p));
-if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
+if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(censusFailed ? 1 : 0); }
 
 const [PORT, CDP_PORT] = await freePorts(2);
 const wt = scratch('gear-menu-smoke');
@@ -295,6 +345,19 @@ try {
   await shot('desktop-integrations-window.png');
   await evalJs(`for (const w of [...app.wm.windows.values()]) if (w.type === 'integrations') app.wm.closeWindow(w.id); true`);
 
+  // ── lane vault-one-door: System ▸ holds ONE vault row, 「Vault…」, and it opens the Vault WINDOW (no dialog) ──
+  await openGear();
+  await hover(`${POP} .gs-menu > .gs-menu-item[data-id="system"]`);
+  check('(setup) the System flyout opens on hover again', !!(await until(isOpen('system'))));
+  const vRows = (await evalJs(`[...document.querySelectorAll('${POP} [data-id="system"] .gs-flyout .gs-menu-item')].map((x) => x.textContent.trim())`)).filter((r) => /^Vault/.test(r));
+  check(`System ▸ holds ONE vault row, 「Vault…」 (${vRows.join(' / ')})`, vRows.length === 1 && vRows[0] === 'Vault…');
+  await shot('desktop-system-vault.png');
+  await evalJs(`[...document.querySelectorAll('${POP} [data-id="system"] .gs-flyout .gs-menu-item')].find((x) => x.textContent.trim() === 'Vault…').id = 'gs-smoke-vault'; true`);
+  await click('#gs-smoke-vault');
+  check('a click on System ▸ Vault… closes the popover', !(await evalJs(`!!document.querySelector('${POP}')`)));
+  check('…and opens the Vault WINDOW with its header (the state + its doors), not a dialog', !!(await until(`[...app.wm.windows.values()].some((w) => w.type === 'vault') && !!document.querySelector('.vw .vw-head .vault-state-line') && !document.getElementById('vault-dialog')`, { timeout: 8000, step: 100 })));
+  await evalJs(`for (const w of [...app.wm.windows.values()]) if (w.type === 'vault') app.wm.closeWindow(w.id); true`);
+
   // ══ PHONE ══
   console.log('gear-menu — phone 390×844, touch + hover:none (accordion mode)');
   await cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
@@ -394,6 +457,8 @@ await evalJs(`localStorage.removeItem('vibespace.settingsNavFolds'); localStorag
     const zHead = await evalJs(`document.querySelector('${POP} .gs-menu > .gs-menu-item[data-id="system"]').textContent.trim()`);
     const zComm = await evalJs(`(() => { const h = document.querySelector('${POP} .gs-menu > .gs-menu-item[data-id="comm"]'); return h ? h.textContent.trim() : ''; })()`);
     check(`zh: 系统 holds 集成与密钥… after 备份与迁移… (${zHead} ▸ ${zSys.join(' / ')}; 通讯 = ${zComm})`, /系统/.test(zHead) && zSys.indexOf('集成与密钥…') > 0 && zSys[zSys.indexOf('集成与密钥…') - 1] === '备份与迁移…');
+    const zVault = zSys.filter((r) => /^保险库/.test(r));
+    check(`zh: 系统 holds ONE vault row, 「保险库…」 (${zVault.join(' / ')})`, zVault.length === 1 && zVault[0] === '保险库…');
     await shot('zh-desktop-system-integrations.png');
     await evalJs(`[...document.querySelectorAll('${POP} [data-id="system"] .gs-flyout .gs-menu-item')].find((x) => x.textContent.trim() === '集成与密钥…').id = 'gs-smoke-integ-zh'; true`);
     await click('#gs-smoke-integ-zh');
@@ -428,5 +493,6 @@ await evalJs(`localStorage.removeItem('vibespace.settingsNavFolds'); localStorag
   }
 }
 console.log(`screenshots: ${SHOTS}`);
+failed += censusFailed;
 console.log(failed ? `FAILED (${failed})` : 'ALL PASS');
 process.exit(failed ? 1 : 0);

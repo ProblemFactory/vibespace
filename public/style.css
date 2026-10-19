@@ -7524,7 +7524,7 @@ button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: u
 .fb-meta:empty { display: none; }
 @media (max-width: 768px) { .fb-act { min-height: 32px; } .fb-tab { min-height: 32px; } }
 
-/* THE VAULT (lane vault-e2e-password): the unlock / setup / change modals, ⚙ System ▸ Vault…, the taskbar lock chip */
+/* THE VAULT (lane vault-e2e-password): the unlock / setup / change modals, the Vault window's header (lane vault-one-door), the taskbar lock chip */
 .vault-dialog-box .dialog-body { display: flex; flex-direction: column; gap: 10px; }
 .vault-text { margin: 0; color: var(--text-secondary); line-height: 1.5; }
 .vault-warn { margin: 0; color: var(--warn-text); line-height: 1.5; }
@@ -7547,6 +7547,13 @@ button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: u
 /* THE VAULT WINDOW (lane vault-contents-window): every sealed value, masked; 「显示」 behind the second password for 5 minutes */
 .vw { height: 100%; display: flex; flex-direction: column; font-size: 12px; min-height: 0; }
 .vw-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+/* lane vault-one-door: the header = the old ⚙ System ▸ Vault… dialog (state line, doors by state, the idle lock) */
+.vw-head { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: 13px; }
+.vw-head:empty { display: none; }
+.vault-state-icon { display: inline-flex; }
+.vault-state-icon svg { width: 16px; height: 16px; }
+.vault-idle-select { padding: 3px 6px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text); font: inherit; }
+.vw.vw-nobar .vw-bar { display: none; }   /* no greyed controls: search / sort / show all appear once the vault is unlocked */
 .vw-state { font-weight: 600; color: var(--text); }
 .vw-state[data-state="locked"] { color: var(--warn-text); }
 .vw-timer { padding: 1px 8px; border-radius: 10px; background: var(--hover-overlay); color: var(--warn-text); font-variant-numeric: tabular-nums; }

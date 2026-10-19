@@ -66,10 +66,12 @@ function secretRowOf(s, { machineName = (k) => k } = {}) {
   return null;
 }
 
-/** The kinds a row says (English keys — the page words them). */
-const KINDS = Object.freeze(['api-key', 'oauth-token', 'client-secret', 'password', 'token', 'secret-key', 'session-token', 'private-key', 'parameter', 'login', 'secret']);
+/** The kinds a row says (English keys — the page words them). `long-lived-oauth-token` = an account's `claude setup-token`
+ *  (sk-ant-oat01-…, a year, no refresh) — its OWN words so nobody reads it as the CLI's browser login (the owner 2026-10-19,
+ *  lane vault-one-door); `oauth-token` stays for a mount's or a channel's OAuth sign-in. */
+const KINDS = Object.freeze(['api-key', 'long-lived-oauth-token', 'oauth-token', 'client-secret', 'password', 'token', 'secret-key', 'session-token', 'private-key', 'parameter', 'login', 'secret']);
 const KIND_WORDS = Object.freeze({
-  'api-key': 'API key', 'oauth-token': 'OAuth token', 'client-secret': 'Client secret', password: 'Password', token: 'Token',
+  'api-key': 'API key', 'long-lived-oauth-token': 'Long-lived OAuth token', 'oauth-token': 'OAuth token', 'client-secret': 'Client secret', password: 'Password', token: 'Token',
   'secret-key': 'Secret key', 'session-token': 'Session token', 'private-key': 'Private key', parameter: 'Parameter', login: 'Login', secret: 'Secret',
 });
 /** A field NAME → its kind (a store may say the kind itself; this is the fallback for declared-field stores). */

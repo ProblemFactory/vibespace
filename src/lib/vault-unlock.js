@@ -6,20 +6,22 @@
 //     「保险库已锁定——先解锁」 (key-file-words.js);
 //   · NOT SET UP ⇒ the setup modal at every load once the welcome tour is done (`maybeNagVault`, from the tour's end and
 //     from app.js's onboarding check) — 「稍后」 snoozes it for THIS tab only;
-//   · ⚙ System ▸ Vault… — the state, Lock now, change the second password, the idle lock (default never).
+//   · the Vault WINDOW's header (src/lib/vault-window.js; ⚙ System ▸ Vault…, the ONE row — lane vault-one-door) draws the
+//     state and its doors: set up / unlock / lock now / change the second password / the idle lock (default never). This
+//     module keeps the modals those doors open and the requests behind them (`lockNow`, `setIdleHours`, `onVaultFacts`).
 // The `vault-state` broadcast keeps every open page on one state (the multi-client law). Passwords live in the inputs and
 // one request body each — never stored, never logged, never in an error line.
 import { t } from './i18n.js';
 import { createModalShell, fetchJson, showToast } from './utils.js';
 import { UI_ICONS } from './icons.js';
-import { registerMenuItem } from './contributions.js';
 import { enterSubmits } from './chat-enter-keys.js';
-import { replayOpenSpec } from './window-types.js'; // lane vault-contents-window: 「查看内容…」 opens the Vault window (src/lib/vault-window.js registers it)
+import { replayOpenSpec } from './window-types.js'; // the door (vs-vault-door) opens the Vault window while unlocked (src/lib/vault-window.js registers it)
 
 const MIN = 8;
 let facts = null;
 let appRef = null;
 let activityAt = 0;
+const factsListeners = new Set();   // the Vault window's header (onVaultFacts)
 
 const post = (url, body = {}) => fetchJson(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 
@@ -77,12 +79,33 @@ function applyVaultFacts(f) {
   drawChip();
   if (f.state !== 'locked') document.getElementById('vault-unlock-dialog')?.remove();
   if (f.state !== 'not_set_up') document.getElementById('vault-setup-dialog')?.remove();
-  document.getElementById('vault-dialog')?.dispatchEvent(new CustomEvent('vault-facts'));
+  for (const fn of [...factsListeners]) { try { fn(f); } catch { /* one header's error never stops another */ } }
 }
+
+/** The vault's facts as this page knows them (null before the first read). */
+export const vaultFacts = () => facts;
+/** Follow the facts — every door's answer and the `vault-state` broadcast → `off()`. The Vault window's header. */
+export function onVaultFacts(fn) { factsListeners.add(fn); return () => factsListeners.delete(fn); }
+/** Read the state now (the Vault window's header, when the window opens). */
+export async function refreshVaultFacts() { const f = await fetchJson('/api/vault/state'); if (f && f.state) applyVaultFacts(f); return facts; }
+/** 立即锁定 (the Vault window's header). A lock signs every login out (vault-e2e-password-fix-r2): the page may land on the sign-in. */
+export async function lockNow() {
+  const r = await post('/api/vault/lock');
+  if (r && r.ok) { applyVaultFacts(r); showToast(t('Vault locked')); } else showToast(vaultWords(r), { type: 'error' });
+  return r;
+}
+/** 闲置后锁定 (the Vault window's header): hours, 0 = never. The door answers `{ok, idleLockHours}` — merged into the facts. */
+export async function setIdleHours(hours) {
+  const r = await post('/api/vault/idle', { hours: Number(hours) });
+  if (r && r.ok) { if (facts) applyVaultFacts({ ...facts, idleLockHours: r.idleLockHours }); } else showToast(vaultWords(r), { type: 'error' });
+  return r;
+}
+/** The state's icon as an element — the Vault window's header (that module names no HTML sink: test-vault-inventory ①b). */
+export function stateIconEl(state) { const s = el('span', 'vault-state-icon'); s.innerHTML = (state === 'unlocked' ? UI_ICONS.unlock : UI_ICONS.lock) || ''; return s; }
 
 /** THE DOOR (lane vault-e2e-password-fix-r2): every card that cannot read its secret while the vault is LOCKED (a channel, the
  *  voice sign-in, the relay, a machine's session) says 「保险库已锁定——先解锁」 and offers this — the unlock modal (or, once
- *  unlocked meanwhile, the Vault dialog). One event (`window.dispatchEvent(new CustomEvent('vs-vault-door'))`), so a card
+ *  unlocked meanwhile, the Vault window; not set up, the setup modal). One event (`window.dispatchEvent(new CustomEvent('vs-vault-door'))`), so a card
  *  needs no import of this module. */
 const VAULT_DOOR_EVENT = 'vs-vault-door';
 
@@ -142,7 +165,8 @@ export function showSetup({ nag = false } = {}) {
   setTimeout(() => a.focus(), 0);
 }
 
-function showChange() {
+/** 修改第二密码… (the Vault window's header, locked or unlocked — the change rewraps under the old password either way). */
+export function showChange() {
   const { dialog, body, close } = createModalShell({ id: 'vault-change-dialog', title: t('Change the second password'), dialogClass: 'vault-dialog-box', minWidth: 'min(440px, 92vw)', escapeToClose: true });
   const o = pwInput('vault-old-pw', t('Current second password'));
   const a = pwInput('vault-new-pw', t('New second password'), 'new-password');
@@ -164,48 +188,6 @@ function showChange() {
   };
   footerOf(dialog, [cancel, go]);
   setTimeout(() => o.focus(), 0);
-}
-
-const STATE_WORD = { unlocked: () => t('Unlocked'), locked: () => t('Locked'), not_set_up: () => t('Not set up') };
-const IDLE_HOURS = [0, 1, 4, 8, 24];
-
-/** ⚙ System ▸ Vault… — the state, the doors, the idle lock. */
-export async function openVaultDialog() {
-  const f = await fetchJson('/api/vault/state');
-  if (f && f.state) applyVaultFacts(f);
-  const { overlay, body } = createModalShell({ id: 'vault-dialog', title: t('Vault'), dialogClass: 'vault-dialog-box', minWidth: 'min(440px, 92vw)', escapeToClose: true });
-  const draw = () => {
-    body.textContent = '';
-    const st = (facts && facts.state) || 'not_set_up';
-    const line = el('div', 'vault-state-line');
-    line.dataset.state = st;
-    line.innerHTML = (st === 'unlocked' ? UI_ICONS.unlock : UI_ICONS.lock) || '';
-    line.appendChild(el('span', 'vault-state-word', (STATE_WORD[st] || STATE_WORD.locked)()));
-    if (facts && facts.setUpAt) line.appendChild(el('span', 'vault-state-when', t('Set up {when}', { when: new Date(facts.setUpAt).toLocaleString() })));
-    body.appendChild(line);
-    const row = el('div', 'vault-actions');
-    const btn = (label, cls, fn) => { const b = el('button', cls, label); b.onclick = fn; row.appendChild(b); return b; };
-    if (st === 'not_set_up') btn(t('Set a second password'), 'btn-create vault-do-setup', () => showSetup());
-    if (st === 'locked') btn(t('Unlock'), 'btn-create vault-do-unlock', () => showUnlock());
-    if (st === 'unlocked') btn(t('Lock now'), 'btn-cancel vault-do-lock', async () => { const r = await post('/api/vault/lock'); if (r && r.ok) { applyVaultFacts(r); showToast(t('Vault locked')); } else showToast(vaultWords(r), { type: 'error' }); });
-    if (st !== 'not_set_up') btn(t('Change the second password'), 'btn-cancel vault-do-change', () => showChange());
-    btn(t('View contents…'), 'btn-cancel vault-do-contents', () => replayOpenSpec(appRef, { action: 'openVault' }));   // lane vault-contents-window
-    body.appendChild(row);
-    if (st !== 'not_set_up') {
-      const idle = el('label', 'vault-idle');
-      idle.appendChild(el('span', null, t('Lock after idle')));
-      const sel = document.createElement('select');
-      sel.className = 'vault-idle-select';
-      for (const h of IDLE_HOURS) { const o = document.createElement('option'); o.value = String(h); o.textContent = h ? t('{n} h', { n: h }) : t('Never'); sel.appendChild(o); }
-      sel.value = String((facts && facts.idleLockHours) || 0);
-      sel.title = t('Lock the vault after this long with no keyboard or mouse on any VibeSpace page');
-      sel.onchange = async () => { const r = await post('/api/vault/idle', { hours: Number(sel.value) }); if (r && r.ok) applyVaultFacts(r); else showToast(vaultWords(r), { type: 'error' }); };
-      idle.appendChild(sel);
-      body.appendChild(idle);
-    }
-  };
-  overlay.addEventListener('vault-facts', draw);
-  draw();
 }
 
 /** The load-time ask while NOT SET UP — after the welcome tour (setup-flows.js) or straight away when there is none
@@ -231,15 +213,9 @@ export async function initVault(app) {
   };
   document.addEventListener('pointerdown', ping, { capture: true, passive: true });
   document.addEventListener('keydown', ping, { capture: true, passive: true });
-  window.addEventListener(VAULT_DOOR_EVENT, () => { if (facts && facts.state === 'unlocked') openVaultDialog(); else showUnlock(); });
+  window.addEventListener(VAULT_DOOR_EVENT, () => { if (facts && facts.state === 'unlocked') replayOpenSpec(appRef, { action: 'openVault' }); else if (facts && facts.state === 'not_set_up') showSetup(); else showUnlock(); });   // lane vault-one-door: the window, not the old ⚙ dialog
   const f = await fetchJson('/api/vault/state');
   if (!f || !f.state) return;
   applyVaultFacts(f);
   if (f.state === 'locked') showUnlock();
 }
-
-registerMenuItem({
-  menu: 'gear', parent: 'system', order: 62, icon: UI_ICONS.lock, // gear-menu.js head 'system'; Integrations… 55 · Change password… 60 · this 62 (test-gear-menu: Integrations sits right before the password row)
-  label: () => t('Vault…'),
-  run: () => openVaultDialog(),
-});

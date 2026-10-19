@@ -7,13 +7,16 @@
 // (hiding it forgets it; the window closing ends the reveal window), and never rides StateSync / WS. 「复制」 clears the
 // clipboard after 30 s when the page can. The doors per row are the store's own: 「删除」 through its own route with its
 // card's confirm, 「换新…」 opens the re-authorize door where the store has one (integrations, channels).
-// Entry points: ⚙ System ▸ Vault… ▸ 「查看内容…」, ⚙ System ▸ Vault contents…, the sidebar's System panel line.
+// THE ONE DOOR (lane vault-one-door — the owner 2026-10-19, 「这个没必要分成两个按钮吧」): ⚙ System ▸ Vault… is the only gear row
+// and opens THIS window; its HEADER is what the old ⚙ dialog held — the state (since when, set up when), the doors by state
+// (设置第二密码… · 解锁… · 立即锁定 · 修改第二密码…) and 闲置后锁定 — over vault-unlock.js's facts and modals.
+// Entry points: ⚙ System ▸ Vault…, the sidebar's System panel line, the vault's door (`vs-vault-door`) while unlocked.
 import { t } from './i18n.js';
 import { fetchJson, showToast, showConfirmDialog, copyText } from './utils.js';
 import { UI_ICONS } from './icons.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { registerMenuItem } from './contributions.js';
-import { showUnlock } from './vault-unlock.js';
+import { showUnlock, showSetup, showChange, vaultFacts, onVaultFacts, refreshVaultFacts, lockNow, setIdleHours, stateIconEl } from './vault-unlock.js';
 import { revealLeftMs, revealHeaders, onRevealChange, noteRevealLeft, forgetReveal, endReveal, revealValue, revealWords } from './vault-reveal.js'; // r2: THE PAGE's window (its secret in page memory)
 import { removeAccount, showReauthAccountDialog } from './channel-account-dialogs.js';
 import { passkeyDeleteWords } from './browser-panel-model.js';
@@ -41,6 +44,47 @@ function confirmWords(key, row) {
   return { title: t('Delete'), message: row.label, confirm: t('Delete') };
 }
 
+const STATE_WORD = { unlocked: () => t('Unlocked'), locked: () => t('Locked'), not_set_up: () => t('Not set up') };
+const IDLE_HOURS = [0, 1, 4, 8, 24];
+
+/** THE HEADER (lane vault-one-door): the old ⚙ System ▸ Vault… dialog, whole — the state line, the doors by state (修改第二密码…
+ *  while locked too, as the dialog had it: the change rewraps under the old password), the idle lock. Redrawn from the facts
+ *  at every door's answer and every `vault-state` broadcast (vault-unlock.js onVaultFacts). → { head, draw } */
+function vaultHead() {
+  const head = vwEl('div', 'vw-head');
+  const draw = () => {
+    const f = vaultFacts(), state = (f && f.state) || '';
+    head.textContent = '';
+    head.dataset.state = state;
+    if (!state) return;
+    const line = vwEl('div', 'vault-state-line');
+    line.dataset.state = state;
+    const word = vwEl('span', 'vw-state', (STATE_WORD[state] || STATE_WORD.locked)());
+    word.dataset.state = state;
+    line.append(stateIconEl(state), word);
+    const since = state === 'unlocked' ? f.unlockedSince : state === 'locked' ? f.lockedSince : null;
+    if (since) line.append(vwEl('span', 'vault-state-when', t('since {when}', { when: whenText(since) })));
+    if (f.setUpAt) line.append(vwEl('span', 'vault-state-when', t('Set up {when}', { when: whenText(f.setUpAt) })));
+    const acts = vwEl('div', 'vault-actions');
+    const btn = (label, cls, fn) => { const b = vwEl('button', cls, label); b.type = 'button'; b.onclick = fn; acts.append(b); };
+    if (state === 'not_set_up') btn(t('Set a second password…'), 'btn-create vault-do-setup', () => showSetup());
+    if (state === 'locked') btn(t('Unlock…'), 'btn-create vault-do-unlock', () => showUnlock());
+    if (state === 'unlocked') btn(t('Lock now'), 'btn-cancel vault-do-lock', () => lockNow());
+    if (state !== 'not_set_up') btn(t('Change the second password…'), 'btn-cancel vault-do-change', () => showChange());
+    head.append(line, acts);
+    if (state === 'not_set_up') return;
+    const idle = vwEl('label', 'vault-idle');
+    const sel = vwEl('select', 'vault-idle-select');
+    const cur = String(Number(f.idleLockHours) || 0);
+    for (const k of IDLE_HOURS.map(String)) { const o = vwEl('option', null, k !== '0' ? t('{n} h', { n: Number(k) }) : t('Never')); o.value = k; o.selected = k === cur; sel.append(o); }
+    sel.title = t('Lock the vault after this long with no keyboard or mouse on any VibeSpace page');
+    sel.onchange = () => setIdleHours(sel.value);
+    idle.append(vwEl('span', null, t('Lock after idle')), sel);
+    head.append(idle);
+  };
+  return { head, draw };
+}
+
 async function channelAccount(id) {
   const d = await fetchJson('/api/channels?scope=accounts');
   return { a: (d && Array.isArray(d.adapters) ? d.adapters.find((x) => x && x.id === id) : null) || null, kinds: (d && d.kinds) || [] };
@@ -60,7 +104,7 @@ export function openVaultWindow(app, { syncId } = {}) {
 
   const root = vwEl('div', 'vw');
   const bar = vwEl('div', 'vw-bar');
-  const stateChip = vwEl('span', 'vw-state');
+  const hd = vaultHead();   // lane vault-one-door: the old ⚙ dialog, as this window's header
   const timer = vwEl('span', 'vw-timer');
   timer.hidden = true;
   const search = vwEl('input', 'vw-search');
@@ -71,10 +115,10 @@ export function openVaultWindow(app, { syncId } = {}) {
   const showAllB = vwEl('button', 'vw-btn vw-show-all', t('Show all'));
   const hideAllB = vwEl('button', 'vw-btn vw-hide-all', t('Hide all'));
   showAllB.type = hideAllB.type = 'button';
-  bar.append(stateChip, timer, search, sortSel, showAllB, hideAllB);
+  bar.append(timer, search, sortSel, showAllB, hideAllB);
   const note = vwEl('div', 'vw-note');
   const list = vwEl('div', 'vw-list');
-  root.append(bar, note, list);
+  root.append(hd.head, bar, note, list);
   winInfo.content.appendChild(root);
 
   // ── the reveal window: its countdown, its end ──
@@ -228,16 +272,11 @@ export function openVaultWindow(app, { syncId } = {}) {
   }
   function drawHead() {
     const d = st.data, state = d ? d.state : null;
-    stateChip.textContent = state === 'unlocked' ? t('Unlocked') : state === 'locked' ? t('Locked') : state === 'not_set_up' ? t('Not set up') : '';
-    stateChip.dataset.state = state || '';
     note.textContent = '';
     const locked = state === 'locked';
-    for (const b of [search, sortSel, showAllB, hideAllB]) b.disabled = locked || !d;
-    if (locked) {
-      note.append(vwEl('span', null, t('The vault is locked — unlock it to see what it holds.')));
-      const u = vwEl('button', 'btn-create vw-unlock', t('Unlock')); u.type = 'button'; u.onclick = () => showUnlock();
-      note.append(u);
-    } else if (state === 'not_set_up') note.append(vwEl('span', null, t('Set a second password first — stored values are shown only behind it')));
+    root.classList.toggle('vw-nobar', !d || state !== 'unlocked');   // lane vault-one-door: no greyed controls — the bar shows once there is something to search
+    if (locked) note.append(vwEl('span', null, t('The vault is locked — unlock it to see what it holds.')));   // the header's 解锁… is the one door
+    else if (state === 'not_set_up') note.append(vwEl('span', null, t('Set a second password first — stored values are shown only behind it')));
     else if (d) note.append(vwEl('span', null, t('{n} stored values, sealed in the vault. Showing one asks for the second password again; they stay visible for 5 minutes.', { n: (d.rows || []).length })));
   }
   function lockedNow() { forgetReveal(); hideAll(); drawTimer(); refresh(); }
@@ -264,8 +303,10 @@ export function openVaultWindow(app, { syncId } = {}) {
     if (msg.state !== 'unlocked') { if (st.data && st.data.state !== msg.state) lockedNow(); else { forgetReveal(); hideAll(); drawTimer(); } }
     else if (st.data && st.data.state !== 'unlocked') refresh();
   });
+  const offFacts = onVaultFacts(() => { if (!st.closed) hd.draw(); });
   sig?.addEventListener('abort', () => {
     st.closed = true;
+    offFacts();
     hideAll();
     clearInterval(tick);
     offReveal();
@@ -273,6 +314,7 @@ export function openVaultWindow(app, { syncId } = {}) {
     document.getElementById('vault-reveal-dialog')?.remove();
     endReveal();   // the window closed: this page's reveal window ends with it
   });
+  hd.draw(); refreshVaultFacts();
   refresh();
   return winInfo;
 }
@@ -298,9 +340,9 @@ registerWindowType({
   action: 'openVault',
   replay: (app, spec, { syncId } = {}) => openVaultWindow(app, { syncId }),
 });
-/** ⚙ System ▸ Vault contents… (right under Vault…). */
+/** ⚙ System ▸ Vault… — THE ONE ROW (lane vault-one-door: the old dialog's row and Vault contents… became this one). */
 registerMenuItem({
-  menu: 'gear', parent: 'system', order: 63, icon: UI_ICONS.lock, // gear-menu.js head 'system'; Vault… 62 (vault-unlock.js) · this 63
-  label: () => t('Vault contents…'),
+  menu: 'gear', parent: 'system', order: 62, icon: UI_ICONS.lock, // gear-menu.js head 'system'; Integrations… 55 · Change password… 60 · this 62 (test-gear-menu: Integrations sits right before the password row; ONE vault row)
+  label: () => t('Vault…'),
   run: (c) => openVaultWindow(c.app),
 });

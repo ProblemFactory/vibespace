@@ -9357,7 +9357,6 @@ export default {
   "Token": "トークン", // lane vault-contents-window
   "Too many values shown — try again in {n} s": "表示が多すぎます — {n} 秒後にもう一度お試しください", // lane vault-contents-window
   "Values hidden again — the 5 minutes are over": "5 分が過ぎたので、値を再び隠しました", // lane vault-contents-window
-  "Vault contents…": "保管庫の中身…", // lane vault-contents-window
   "Verify it’s you": "本人確認", // lane vault-contents-window
   "View contents…": "中身を見る…", // lane vault-contents-window
   "Visible for {time}": "表示可能 {time}", // lane vault-contents-window
@@ -9377,6 +9376,11 @@ export default {
   "Lock after idle": "アイドル後にロック", // lane vault-e2e-password
   "Lock the vault after this long with no keyboard or mouse on any VibeSpace page": "どの VibeSpace ページでもキーボードやマウスの操作がこの時間なければ保管庫をロックします", // lane vault-e2e-password
   "Vault…": "保管庫…", // lane vault-e2e-password
+  "Set a second password…": "第二パスワードを設定…", // lane vault-one-door
+  "Unlock…": "ロック解除…", // lane vault-one-door
+  "Change the second password…": "第二パスワードを変更…", // lane vault-one-door
+  "since {when}": "{when} から", // lane vault-one-door
+  "Long-lived OAuth token": "長期 OAuth トークン", // lane vault-one-door (the Vault window's kind word for an account's setup-token; the shared "OAuth token" stays)
   "The vault is locked — unlock it first": "保管庫はロック中です — 先にロックを解除してください", // lane vault-e2e-password
   "Lock the vault": "保管庫をロック", // lane vault-e2e-password
   "Check whether the vault is locked": "保管庫がロック中か確認", // lane vault-e2e-password

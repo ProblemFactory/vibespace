@@ -14,6 +14,12 @@
 //   ⑥b Manage Agents' Show key… (r2): a fresh page ⇒ 验证是你 first, then the key; a second Show key… inside the window asks nothing
 //   ⑦ a phone viewport: the rows fit, 「显示」 is reachable (on top, ≥ 36 px)
 //   ⑧ the words in Chinese: 「验证是你」, 「显示」; no value or password in the server log; the audit has the reveals
+//   THE HEADER (lane vault-one-door — the old ⚙ System ▸ Vault… dialog is the window's header now): ⓪ not set up ⇒ only
+//   设置第二密码…, which sets it from the header; unlocked ⇒ 立即锁定 + 修改第二密码… (opens the change dialog) + the idle row
+//   (writes the same setting); ⑥ locked ⇒ 解锁… + 修改第二密码…, the list says locked, 解锁… from the header unlocks and the
+//   rows come back; the vault's door (`vs-vault-door`) opens the UNLOCK modal while locked and the window once unlocked;
+//   ⑨ 立即锁定 from the header locks (the page lands on the sign-in) and the window lists nothing. --shots keeps a 1280×800
+//   PNG of the header in each state (vw-head-*.png).
 // Run: node scripts/test-vault-window-chrome.mjs [--shots <dir>]   (SKIPs without chrome)
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -92,6 +98,13 @@ const plainOf = (sel) => evalJs(`(() => { const i = document.querySelector(${JSO
 /** every value-bearing surface of the page: its markup + every input's value */
 const pageText = () => evalJs(`document.documentElement.outerHTML + '\\n' + [...document.querySelectorAll('input, textarea')].map((i) => i.value).join('\\n')`);
 const openWindow = async () => { await evalJs(`app.replayOpenSpec({ action: 'openVault' })`); return until(visible('.vw-list .vw-row'), { timeout: 15000 }); };
+// lane vault-one-door: the window's HEADER — its state word and its doors (the `vault-do-*` class of each button, in order)
+const headState = () => evalJs(`document.querySelector('.vw-head')?.dataset.state || ''`);
+const headDoors = () => evalJs(`[...document.querySelectorAll('.vw-head .vault-actions button')].map((b) => (b.className.match(/vault-do-[a-z]+/) || ['?'])[0]).join(',')`);
+const headIdle = () => evalJs(`!!document.querySelector('.vw-head .vault-idle-select')`);
+/** a 1280×800 PNG of the page with the window's header (the brief's size; the headless window's own viewport is shorter) */
+const headShot = async (name) => { await cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false }); await sleep(400); await shot(name); await cdp('Emulation.clearDeviceMetricsOverride'); await sleep(200); };
+const closeVaultWindow = () => evalJs(`for (const w of [...app.wm.windows.values()]) if (w.type === 'vault') app.wm.closeWindow(w.id); true`);
 
 startServer();
 check('the hub boots (sign-in password on, the clock shim loaded)', await ready());
@@ -104,12 +117,39 @@ check('signed in', login === 200, login);
 await cdp('Page.navigate', { url: URL });
 check('the app loads', !!(await until(`!!(window.app && app.wm && document.getElementById('taskbar-tray'))`, { timeout: 30000 })));
 await splashGone();
-const su = await api('POST', '/api/vault/setup', { password: SECOND });
+console.log('⓪ the header (lane vault-one-door): not set up ⇒ 设置第二密码…, the second password set from it');
+await evalJs(`app.replayOpenSpec({ action: 'openVault' })`);
+check('the window\'s header says not set up', (await until(`document.querySelector('.vw-head')?.dataset.state === 'not_set_up'`, { timeout: 15000 })) === true);
+check('… and offers ONLY 设置第二密码… (no lock, no change, no idle row)', (await headDoors()) === 'vault-do-setup' && !(await headIdle()), await headDoors());
+await headShot('vw-head-0-not-set-up.png');
+await click('.vw-head .vault-do-setup');
+check('设置第二密码… opens the setup modal', !!(await until(visible('#vault-setup-dialog'), { timeout: 5000 })));
+await typeInto('#vault-setup-pw', SECOND); await typeInto('#vault-setup-pw2', SECOND); await click('.vault-setup-go');
+check('set ⇒ the modal closes', !!(await until(`!document.getElementById('vault-setup-dialog')`, { timeout: 20000 })));
+const su = await api('GET', '/api/vault/state');
 check('the second password is set (unlocked)', su.status === 200 && su.json.state === 'unlocked', su);
+check('the header follows: unlocked ⇒ 立即锁定 + 修改第二密码… + the idle row, and since when', (await until(`document.querySelector('.vw-head')?.dataset.state === 'unlocked'`, { timeout: 5000 })) === true && (await headDoors()) === 'vault-do-lock,vault-do-change' && (await headIdle()) && (await evalJs(`document.querySelectorAll('.vw-head .vault-state-when').length`)) === 2, await headDoors());
+await evalJs(`(() => { const s = document.querySelector('.vw-head .vault-idle-select'); s.value = '4'; s.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+check('the idle row writes the same setting (4 h)', !!(await until(`fetch('/api/vault/state').then((r) => r.json()).then((j) => j.idleLockHours === 4)`, { timeout: 5000, step: 200 })));
+check('… and the header keeps showing it (redrawn from the facts)', (await until(`document.querySelector('.vw-head .vault-idle-select')?.value === '4'`, { timeout: 3000 })) === true);
+await evalJs(`(() => { const s = document.querySelector('.vw-head .vault-idle-select'); s.value = '0'; s.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+check('… back to never', !!(await until(`fetch('/api/vault/state').then((r) => r.json()).then((j) => j.idleLockHours === 0)`, { timeout: 5000, step: 200 })));
+await headShot('vw-head-1-unlocked.png');
+await click('.vw-head .vault-do-change');
+check('修改第二密码… opens the change dialog', !!(await until(visible('#vault-change-dialog'), { timeout: 5000 })));
+await click('#vault-change-dialog .btn-cancel');
+check('… which closes on Cancel', !!(await until(`!document.getElementById('vault-change-dialog')`, { timeout: 3000 })));
+await closeVaultWindow();
 const put = await api('PUT', '/api/integrations/cloud:browserless', { values: { apiKey: PLANT_INT, apiUrl: 'https://chrome.example.net' } });
 const acc = await api('POST', '/api/accounts', { name: 'Window leg key', key: PLANT_KEY });
 const accId = acc.json && acc.json.account && acc.json.account.id;
 check('an integration key (an HTML payload) and an API key are stored', put.status === 200 && !!accId, { put: put.status, acc });
+// lane vault-one-door: an account's long-lived setup-token (the owner: the row must say it is LONG-LIVED)
+const subAcc = await api('POST', '/api/accounts/subscription', { name: 'Window leg subscription' });
+const subId = subAcc.json && (subAcc.json.id || (subAcc.json.account && subAcc.json.account.id));
+const oatSave = subId ? await api('POST', `/api/accounts/${subId}/oat`, { token: 'sk-ant-oat01-' + crypto.randomBytes(24).toString('hex') }) : null;
+check('a subscription account holds a long-lived setup-token', !!subId && oatSave && oatSave.status === 200, { subAcc, oat: oatSave && oatSave.status });
+const ROW_OAT = `.vw-row[data-id="accounts:${subId}#oat"]`;
 
 console.log('② the window lists them, masked');
 check('the Vault window opens with its rows', !!(await openWindow()));
@@ -117,6 +157,7 @@ check('the integration row and the API-key row are listed', !!(await until(`!!do
 check('their value fields are masked (no field open)', (await evalJs(`document.querySelectorAll('.vw-plain').length`)) === 0 && (await evalJs(`document.querySelector(${JSON.stringify(ROW_INT + ' .vw-mask')}).textContent`)) === '••••••••');
 const t0 = await pageText();
 check('NO VALUE IN THE PAGE: neither planted value (nor its random part) in the markup or any input', ![PLANT_INT, PLANT_KEY, RAND].some((v) => t0.includes(v)));
+check('the setup-token row says 「Long-lived OAuth token」 (its own kind word) and setup-token', /Long-lived OAuth token/.test(await until(`document.querySelector(${JSON.stringify(ROW_OAT + ' .vw-meta')})?.textContent`, { timeout: 5000 }) || '') && /setup-token/.test(await evalJs(`document.querySelector(${JSON.stringify(ROW_OAT + ' .vw-meta')})?.textContent || ''`)));
 await shot('vw-1-list.png');
 
 console.log('③ 显示 ⇒ 验证是你 ⇒ the value');
@@ -173,8 +214,29 @@ const tLock = await pageText();
 check('… and no value is left in the page', ![PLANT_INT, PLANT_KEY, RAND].some((v) => tLock.includes(v)));
 await shot('vw-5-locked.png');
 const relogin = await evalJs(`fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: ${JSON.stringify(SIGN_IN)} }) }).then((r) => r.status)`);
-const reUnlock = await api('POST', '/api/vault/unlock', { password: SECOND });
-check('signed in again, the vault unlocked again', relogin === 200 && reUnlock.status === 200 && reUnlock.json.state === 'unlocked', { relogin, s: reUnlock.status });
+check('signed in again', relogin === 200, relogin);
+console.log('⑥a the header while LOCKED (lane vault-one-door): 解锁… is the one door; the vault\'s door event');
+await cdp('Page.navigate', { url: URL });
+check('the load opens the unlock modal (locked)', !!(await until(visible('#vault-unlock-dialog'), { timeout: 30000 })));
+await splashGone();
+await click('#vault-unlock-dialog .vault-later');
+check('「稍后」 closes it', !!(await until(`!document.getElementById('vault-unlock-dialog')`, { timeout: 3000 })));
+await evalJs(`window.dispatchEvent(new CustomEvent('vs-vault-door')); true`);
+check('a locked card\'s door (vs-vault-door) opens the UNLOCK modal — not merely the window', !!(await until(visible('#vault-unlock-dialog'), { timeout: 5000 })) && !(await evalJs(`[...app.wm.windows.values()].some((w) => w.type === 'vault')`)));
+await click('#vault-unlock-dialog .vault-later');
+await until(`!document.getElementById('vault-unlock-dialog')`, { timeout: 3000 });
+await evalJs(`app.replayOpenSpec({ action: 'openVault' })`);
+check('the header says locked and offers 解锁… + 修改第二密码… (the change works locked too) + the idle row', (await until(`document.querySelector('.vw-head')?.dataset.state === 'locked'`, { timeout: 15000 })) === true && (await headDoors()) === 'vault-do-unlock,vault-do-change' && (await headIdle()), await headDoors());
+check('the list says it is locked and holds no row (the header\'s 解锁… is the one door: no second Unlock in the list; no greyed search — the bar is away)', /locked/.test(await until(`document.querySelector('.vw-note')?.textContent`, { timeout: 8000 }) || '') && (await evalJs(`document.querySelectorAll('.vw-row').length`)) === 0 && !(await evalJs(`!!document.querySelector('.vw-note button')`)) && (await evalJs(`getComputedStyle(document.querySelector('.vw-bar')).display`)) === 'none');
+await headShot('vw-head-2-locked.png');
+await click('.vw-head .vault-do-unlock');
+check('解锁… from the header opens the unlock modal', !!(await until(visible('#vault-unlock-dialog'), { timeout: 5000 })));
+await typeInto('#vault-unlock-pw', SECOND); await click('.vault-unlock-go');
+check('the right password ⇒ unlocked, the rows appear in the window', !!(await until(`!document.getElementById('vault-unlock-dialog') && !!document.querySelector(${JSON.stringify(ROW_INT)})`, { timeout: 20000 })));
+check('… and the header follows (立即锁定 + 修改第二密码…)', (await until(`document.querySelector('.vw-head')?.dataset.state === 'unlocked'`, { timeout: 5000 })) === true && (await headDoors()) === 'vault-do-lock,vault-do-change', await headDoors());
+await evalJs(`window.dispatchEvent(new CustomEvent('vs-vault-door')); true`);
+check('unlocked, the door opens the Vault window (still ONE window, no dialog)', !!(await until(`[...app.wm.windows.values()].filter((w) => w.type === 'vault').length === 1 && !document.getElementById('vault-dialog') && !document.getElementById('vault-unlock-dialog')`, { timeout: 3000 })));
+await closeVaultWindow();
 
 console.log('⑥b Manage Agents\' Show key… through the page\'s window');
 await cdp('Page.navigate', { url: URL });
@@ -216,6 +278,7 @@ await until(`!!(window.app && app.wm)`, { timeout: 30000 });
 await splashGone();
 await openWindow();
 check('「显示」', (await evalJs(`document.querySelector(${JSON.stringify(ROW_INT + ' .vw-show')})?.textContent`)) === '显示');
+check('the setup-token row says 「长期 OAuth 令牌」', /长期 OAuth 令牌/.test(await evalJs(`document.querySelector(${JSON.stringify(ROW_OAT + ' .vw-meta')})?.textContent || ''`)));
 await click(ROW_INT + ' .vw-show');
 check('「验证是你」', (await until(`document.querySelector('#vault-reveal-dialog h3')?.textContent`, { timeout: 5000 })) === '验证是你');
 await shot('vw-7-zh.png');
@@ -223,6 +286,20 @@ const log = fs.readFileSync(path.join(SHOTS, 'server.log'), 'utf8');
 const audit = fs.readFileSync(path.join(DATA, 'vault-audit.jsonl'), 'utf8');
 check('no value and no password in the server log or the audit', ![PLANT_INT, PLANT_KEY, RAND, SECOND, 'not the second password'].some((v) => log.includes(v) || audit.includes(v)));
 check('the audit holds the reveals (vault-reveal: who / ip / entry)', audit.split('\n').filter((l) => l.includes('"event":"vault-reveal"')).length >= 3 && /"entry":"cloud:browserless"/.test(audit));
+
+console.log('⑨ 立即锁定 from the header (lane vault-one-door; zh)');
+await evalJs(`document.querySelectorAll('.dialog-overlay').forEach((o) => o.remove()); true`);
+check('the header\'s words in Chinese: 「已解锁」, 「立即锁定」, 「修改第二密码…」', (await until(`document.querySelector('.vw-head .vw-state')?.textContent === '已解锁'`, { timeout: 5000 })) === true && (await evalJs(`[...document.querySelectorAll('.vw-head .vault-actions button')].map((b) => b.textContent).join('|')`)) === '立即锁定|修改第二密码…');
+await headShot('vw-head-3-unlocked-zh.png');
+await click('.vw-head .vault-do-lock');
+check('立即锁定 locks the vault — a lock signs every login out: the page lands on the sign-in', !!(await until(`location.pathname === '/login'`, { timeout: 20000 })));
+const relogin9 = await evalJs(`fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: ${JSON.stringify(SIGN_IN)} }) }).then((r) => r.status)`);
+await cdp('Page.navigate', { url: URL });
+await until(`!!(window.app && app.wm)`, { timeout: 30000 });
+await splashGone();
+await evalJs(`document.querySelectorAll('.dialog-overlay').forEach((o) => o.remove()); app.replayOpenSpec({ action: 'openVault' }); true`);
+check('signed in again: the hub says locked; the window lists nothing and says so (「解锁…」 in its header)', relogin9 === 200 && (await api('GET', '/api/vault/state')).json?.state === 'locked' && (await until(`document.querySelector('.vw-head')?.dataset.state === 'locked'`, { timeout: 15000 })) === true && (await evalJs(`document.querySelectorAll('.vw-row').length`)) === 0 && (await evalJs(`document.querySelector('.vw-head .vault-do-unlock')?.textContent`)) === '解锁…');
+await headShot('vw-head-4-locked-zh.png');
 
 await stopServer();
 console.log(failed ? `\nFAILED (${passed} passed, ${failed} failed)` : `\nALL PASS (${passed})`);

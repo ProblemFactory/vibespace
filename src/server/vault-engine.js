@@ -90,6 +90,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
   const keys = new Map();     // name → unwrapped store key (zeroed by lock())
   let epoch = 0;              // bumped at every unlock / lock — a cache of a key (the passkey cipher) is good for one epoch
   let lockedSince = now();
+  let unlockedSince = null;   // lane vault-one-door: the Vault window's header says since when
   let failedTries = 0, pacedUntil = 0, busy = false, lastActivity = now(), inFlight = 0;   // inFlight: derives running now count toward the pace BEFORE they land (verify r1 A1: 40 concurrent wrong passwords landed 40 derives)
   const unlockHooks = [];   // what a locked start left undone and the unlock must retry (the wiring: mounts' restore)
   const uses = new Map();   // lane vault-contents-window: entry name → { at, by } — the store key's last use (memory only; the Vault window's «last used»)
@@ -123,6 +124,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
       setUpAt: record ? record.createdAt || null : null,
       rotatedAt: record ? record.rotatedAt || null : null,
       lockedSince: st === 'locked' ? lockedSince : null,
+      unlockedSince: st === 'unlocked' ? unlockedSince : null,
       failedTries,
       pacedForMs: pacedUntil > t ? pacedUntil - t : 0,
       idleLockHours: record ? Number(record.idleLockHours) || 0 : 0,
@@ -363,7 +365,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
       }
       const { sealing, ...done } = back;
       try { writeRecord(done); record = done; } catch { record = back; /* the sealing list is resumed at the next unlock */ }
-      dek = made.dek; made = null; epoch++; failedTries = 0; pacedUntil = 0; lastActivity = now();
+      dek = made.dek; made = null; epoch++; failedTries = 0; pacedUntil = 0; lastActivity = now(); unlockedSince = now();
       for (const it of items) keys.set(it.name, it.key);
       items = [];
       audit('vault-set-up', { ip, why: `${Object.keys(record.entries).length} key(s) sealed` });
@@ -398,7 +400,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
       return { ok: false, code: r.code, failedTries, ...(pacedUntil > now() ? { retryInMs: pacedUntil - now() } : {}) };
     }
     if (dek) { V.zero(r.dek); return { ok: true, already: true }; }   // a racing unlock landed first
-    dek = r.dek; epoch++; failedTries = 0; pacedUntil = 0; lastActivity = now();
+    dek = r.dek; epoch++; failedTries = 0; pacedUntil = 0; lastActivity = now(); unlockedSince = now();
     resumeSeal();
     audit('vault-unlocked', { ip });
     announce();

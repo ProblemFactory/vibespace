@@ -402,7 +402,7 @@ console.log('⑤ THE CARDS — a secret the LOCKED vault keeps closed reads 「�
     const s = fs.readFileSync(path.join(REPO, f), 'utf8');
     ok(re.test(s) && /vs-vault-door/.test(s), `${f}: the locked state is drawn with the vault's door`);
   }
-  ok(/window\.addEventListener\(VAULT_DOOR_EVENT/.test(fs.readFileSync(path.join(REPO, 'src/lib/vault-unlock.js'), 'utf8')), 'the door is ONE listener (src/lib/vault-unlock.js): the unlock modal, or the Vault dialog once unlocked');
+  ok(/window\.addEventListener\(VAULT_DOOR_EVENT/.test(fs.readFileSync(path.join(REPO, 'src/lib/vault-unlock.js'), 'utf8')), 'the door is ONE listener (src/lib/vault-unlock.js): the unlock modal, or the Vault window once unlocked (lane vault-one-door)');
   // THE REAL ENGINE + THE REAL LARK ADAPTER over a LOCKED vault (the verifier's r1 finding: "The login expired — re-authorize")
   const IS = R('src/server/integration-store.js');
   const ENG = R('src/server/channels-engine.js');

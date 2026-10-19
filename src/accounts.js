@@ -721,7 +721,7 @@ class AccountManager {
       if (!a || !a.id) continue;
       let detail = ''; try { detail = (harnessOf(this._acctBackend(a)) || {}).label || ''; } catch { /* an unknown harness: no detail */ }   // the harness's own name (the kind word says the rest)
       if (a.keyEnc) out.push({ entry: a.id, field: 'key', kind: 'api-key', label: a.name || a.id, detail, createdAt: a.createdAt || null, cipher: a.keyEnc });
-      if (a.oatEnc) out.push({ entry: a.id, field: 'oat', kind: 'oauth-token', label: a.name || a.id, detail, createdAt: a.oatMintedAt || null, cipher: a.oatEnc });
+      if (a.oatEnc) out.push({ entry: a.id, field: 'oat', kind: 'long-lived-oauth-token', label: a.name || a.id, detail: [detail, 'setup-token'].filter(Boolean).join(' · '), createdAt: a.oatMintedAt || null, cipher: a.oatEnc });   // lane vault-one-door: 「长期 OAuth 令牌」 · setup-token
     }
     return out;
   }

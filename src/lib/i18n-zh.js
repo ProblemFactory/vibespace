@@ -9358,7 +9358,6 @@ export default {
   "Token": "令牌", // lane vault-contents-window
   "Too many values shown — try again in {n} s": "查看次数过多——请 {n} 秒后再试", // lane vault-contents-window
   "Values hidden again — the 5 minutes are over": "5 分钟已到，值已重新隐藏", // lane vault-contents-window
-  "Vault contents…": "保险库内容…", // lane vault-contents-window
   "Verify it’s you": "验证是你", // lane vault-contents-window
   "View contents…": "查看内容…", // lane vault-contents-window
   "Visible for {time}": "可查看 {time}", // lane vault-contents-window
@@ -9374,10 +9373,15 @@ export default {
   "very long": "很长", // lane vault-contents-window
   "{n} stored values, sealed in the vault. Showing one asks for the second password again; they stay visible for 5 minutes.": "保险库中封存了 {n} 个值。显示时需要再次输入第二密码，之后 5 分钟内可见。", // lane vault-contents-window
   "Set up {when}": "设置于 {when}", // lane vault-e2e-password
-  "Lock now": "锁定", // lane vault-e2e-password
+  "Lock now": "立即锁定", // lane vault-e2e-password (lane vault-one-door: 立即锁定, the owner's word for the header's button)
   "Lock after idle": "闲置后锁定", // lane vault-e2e-password
   "Lock the vault after this long with no keyboard or mouse on any VibeSpace page": "在任何 VibeSpace 页面上都没有键盘或鼠标操作这么久之后锁定保险库", // lane vault-e2e-password
   "Vault…": "保险库…", // lane vault-e2e-password
+  "Set a second password…": "设置第二密码…", // lane vault-one-door
+  "Unlock…": "解锁…", // lane vault-one-door
+  "Change the second password…": "修改第二密码…", // lane vault-one-door
+  "since {when}": "自 {when} 起", // lane vault-one-door
+  "Long-lived OAuth token": "长期 OAuth 令牌", // lane vault-one-door (the Vault window's kind word for an account's setup-token; the shared "OAuth token" stays)
   "The vault is locked — unlock it first": "保险库已锁定——先解锁", // lane vault-e2e-password
   "Lock the vault": "锁定保险库", // lane vault-e2e-password
   "Check whether the vault is locked": "查看保险库是否锁定", // lane vault-e2e-password

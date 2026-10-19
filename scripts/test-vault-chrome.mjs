@@ -9,6 +9,7 @@
 //   ④ the RIGHT password ⇒ the modal and the chip go, the integration's key opens again (the feature works)
 //   ⑤ RESTART again ⇒ locked again (no auto-unlock of any kind), and a phone viewport gets the same modal, inside the screen
 //   ⑥ the words in Chinese: 「解锁保险库」 / 「第二密码不对」
+//   ③b (lane vault-one-door) 「稍后」 leaves the chip; a locked card's door (`vs-vault-door`) opens the UNLOCK modal again
 //   ⑦ lane vault-e2e-password-fix-r2: auth.json holds the login's sha256, never the cookie's token; a LOCK from the page
 //      signs every login out — the page lands on the sign-in, and after it the unlock modal (the owner's decision ④)
 // Run: node scripts/test-vault-chrome.mjs [--shots <dir>]   (SKIPs without chrome)
@@ -124,6 +125,10 @@ await typeInto('#vault-unlock-pw', 'not the second password'); await click('.vau
 check('a wrong password says so', (await until(`document.querySelector('#vault-unlock-dialog .vault-err')?.textContent`, { timeout: 8000 })) === 'That is not the second password');
 check('… and the vault stays locked', (await api('GET', '/api/vault/state')).json?.state === 'locked');
 await shot('vault-3-wrong.png');
+await click('#vault-unlock-dialog .vault-later');
+check('③b 「稍后」 closes the modal; the lock chip stays (the door back)', !!(await until(`!document.getElementById('vault-unlock-dialog') && !!document.getElementById('taskbar-vault')`, { timeout: 3000 })));
+await evalJs(`window.dispatchEvent(new CustomEvent('vs-vault-door')); true`);
+check('③b a locked card\'s door (vs-vault-door) opens the UNLOCK modal again (lane vault-one-door: the old ⚙ dialog is gone; the door is unchanged)', !!(await until(visible('#vault-unlock-dialog'), { timeout: 5000 })));
 
 console.log('④ the right password');
 await typeInto('#vault-unlock-pw', SECOND); await click('.vault-unlock-go');

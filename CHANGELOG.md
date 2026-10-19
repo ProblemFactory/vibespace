@@ -11,6 +11,8 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - The Channels badge counts what needs you — a person waiting for you, a draft to approve — not unread messages.
 - Channels opens on Needs me, in the same groups as For you; chats handed to an agent, read by one or replied to fold under Related.
 - The sidebar puts urgent and blocked conversations first, then the ones asking you something.
+- The settings menu has one Vault… entry: its state, unlock, lock, the second password and what it holds are in the same window.
+- In the Vault window, an account's setup-token now says Long-lived OAuth token, so it is not mistaken for the browser sign-in.
 
 ## 2.369.318 — 2026-10-19
 
